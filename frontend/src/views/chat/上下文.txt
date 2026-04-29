@@ -1,0 +1,98 @@
+﻿
+## 2026-04-19 最新工作记录
+
+### 已完成的功能：
+
+#### 1. PWA（渐进式Web应用）
+- 安装 vite-plugin-pwa
+- 配置 vite.config.ts：自动更新Service Worker、PWA清单（名称、图标、主题色）、Workbox缓存策略（Google Fonts永久缓存、API请求NetworkFirst）
+- 创建PWA图标：public/pwa-192x192.svg、public/pwa-512x512.svg
+- 在main.ts中注册Service Worker类型
+- 构建产物：dist/sw.js、dist/manifest.webmanifest、precache 64 entries
+
+#### 2. 虚拟滚动（Virtual Scrolling）
+- 安装 vue-virtual-scroller
+- 在main.ts中注册 RecycleScroller、DynamicScroller、DynamicScrollerItem 组件
+- 修改 chat/index.vue：将消息列表的 v-for 替换为 DynamicScroller
+- min-item-size=120，只渲染可视区域消息，解决长对话卡顿
+
+#### 3. SSE替代WebSocket
+- 后端：chat.py 新增 POST /api/v1/chat/stream 端点
+  - 使用 StreamingResponse 返回 SSE 事件流
+  - 支持 chunk、message、error 事件类型
+  - 复制了WebSocket逻辑（语义缓存、RAG检索、Agent模式、PII脱敏）
+- 前端：新建 utils/sseService.ts
+  - 使用 fetch + ReadableStream 实现
+  - 支持连接状态管理、事件处理
+- 前端UI：聊天框旁新增琥珀色"SSE模式"开关
+
+#### 4. GraphRAG（知识图谱）
+- 新建 app/services/graph_rag_service.py
+  - GraphRAGService 类：内存图谱存储
+  - extract_entities_with_llm()：使用LLM抽取实体
+  - _rule_based_extraction()：规则抽取备用
+  - build_graph_from_entities()：构建图谱
+  - search_graph()：图谱检索
+  - get_subgraph_context()：获取子图上下文
+- 修改 rag_service.py：
+  - 添加 ENABLE_GRAPH_RAG 配置
+  - 在 chat_stream() 中注入图谱上下文到Prompt
+
+#### 5. SSE服务增强429限流处理
+- sseService.ts 增强错误处理
+- 检测HTTP 429状态码
+- 提取 Retry-After 头
+- 向UI层传递限流信息
+
+#### 6. 前端构建修复
+- 修复 chat/index.vue：修复模板中多余的闭合标签
+- 修复 monitoring/index.vue：添加类型注解 (row: any)
+- 修复 chat.ts API：updateMessageFeedback 支持 string | number
+- 所有前端构建错误已清除
+
+### 构建状态（截至2026-04-19）：
+- 前端：npm run build 成功，precache 64 entries
+- 后端：Python编译通过
+
+### 还可以做的优化：
+1. SSE连接状态UI - 目前SSE模式没有像WebSocket一样的连接状态指示
+2. 前端请求重试机制 - 失败时自动重试
+3. GraphRAG统计API - 查看知识图谱实体数量
+4. 前端性能优化 - 减少bundle size
+
+## 2026-04-19 下午续（第二轮优化）
+
+### 7. SSE连接状态UI
+- 在chat/index.vue中添加effectiveConnectionStatus计算属性
+- 当useSSE开启时显示SSE模式，否则显示WebSocket状态
+- 修改连接状态指示器，显示"SSE"前缀区分模式
+- handleSSESend中更新sseStatus状态
+
+### 8. 前端请求重试机制
+- 新建 utils/retry.ts：withRetry通用重试函数
+- 增强 sseService.ts：
+  - 添加重试选项（maxRetries=3, retryDelay=1000）
+  - 429/503错误自动重试，指数退避
+  - 新增retry事件通知UI层
+
+### 9. GraphRAG统计API
+- 在knowledge.py新增端点：
+  - GET /api/v1/knowledge/graph/stats - 获取知识图谱统计
+    - total_entities：实体总数
+    - type_distribution：类型分布
+    - entity_types：实体类型中文名
+  - DELETE /api/v1/knowledge/graph/clear - 清空知识图谱
+
+### 10. 前端性能优化（Bundle Size）
+- 安装terser压缩器，移除console和debugger
+- vite.config.ts增强manualChunks分割：
+  - naive-ui: 1169KB（UI组件库，无法再分）
+  - markdown: 1126KB（marked/highlight/markdown-it）
+  - charts: 1021KB（echarts/zrender）
+  - vendor: 294KB（从1534KB优化）
+  - vue: 188KB
+  - 其他小chunk按功能分割
+
+### 构建结果对比：
+- 优化前：vendor 1534KB, naive-ui 1173KB
+- 优化后：vendor 294KB, naive-ui 1169KB（naive-ui本身无法分割）

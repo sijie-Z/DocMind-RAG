@@ -1,0 +1,16 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.env
+logs/
+temp_uploads/
+*.egg-info/
+.eggs/
+dist/
+build/
+.idea/
+.vscode/
+*.md
+start_worker.py.py

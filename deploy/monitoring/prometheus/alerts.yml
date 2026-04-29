@@ -1,0 +1,38 @@
+groups:
+  - name: rag_system_alerts
+    rules:
+      - alert: HighErrorRate
+        expr: (sum(rate(app_http_status_total{status=~"5.."}[5m])) / sum(rate(app_http_requests_total[5m]))) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP 5xx error rate"
+          description: "Error rate is > 5% for 2 minutes."
+
+      - alert: HighLatency
+        expr: app_http_p95_ms > 2000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High P95 latency"
+          description: "P95 latency is > 2000ms for 2 minutes."
+
+      - alert: AITimeoutSpike
+        expr: rate(app_http_slow_requests_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High number of slow/timeout requests"
+          description: "More than 10 slow requests detected per second over 5m."
+
+      - alert: WebSocketDisconnects
+        expr: rate(app_ws_disconnect_total[5m]) > 20
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High WebSocket disconnect rate"
+          description: "More than 20 WS disconnects per second detected."

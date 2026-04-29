@@ -1,0 +1,174 @@
+# -*- coding: utf-8 -*-
+import time
+
+from app.services.rag_service import RagService
+
+
+def test_rrf_fuse_keeps_rewrite_and_modality_signals():
+    service = RagService()
+    keyword_hits = [
+        {
+            "_id": "doc-1",
+            "_score": 9.2,
+            "_rewrite_hits": 3,
+            "_source": {"content": "报销流程审批", "filename": "policy.md", "document_id": "d1"},
+        }
+    ]
+    vector_hits = [
+        {
+            "_id": "doc-1",
+            "_score": 1.7,
+            "_source": {"content": "报销流程审批", "filename": "policy.md", "document_id": "d1"},
+        },
+        {
+            "_id": "doc-2",
+            "_score": 1.6,
+            "_source": {"content": "预算管理", "filename": "budget.md", "document_id": "d2"},
+        },
+    ]
+
+    fused = service._rrf_fuse(keyword_hits, vector_hits)
+    by_id = {item["_id"]: item for item in fused}
+
+    assert by_id["doc-1"]["has_keyword"] is True
+    assert by_id["doc-1"]["has_vector"] is True
+    assert by_id["doc-1"]["rewrite_hits"] == 3
+
+
+def test_post_process_prioritizes_fresh_multimodal_hits():
+    service = RagService()
+    now = time.time()
+    fused_hits = [
+        {
+            "_id": "doc-1",
+            "_score": 1.0,
+            "has_keyword": True,
+            "has_vector": True,
+            "rewrite_hits": 3,
+            "_source": {
+                "content": "报销流程需要提交发票并经过审批",
+                "filename": "finance_policy.md",
+                "document_id": "d1",
+                "upload_time": now,
+            },
+        },
+        {
+            "_id": "doc-2",
+            "_score": 1.0,
+            "has_keyword": False,
+            "has_vector": True,
+            "rewrite_hits": 1,
+            "_source": {
+                "content": "流程说明：该文档主要描述系统背景，不涉及报销细节",
+                "filename": "misc.md",
+                "document_id": "d2",
+                "upload_time": now - 7 * 24 * 3600,
+            },
+        },
+    ]
+
+    docs = service._post_process_results("报销 流程 审批", fused_hits, top_k=2)
+    assert len(docs) == 2
+    assert docs[0]["document_id"] == "d1"
+    assert docs[0]["score"] > docs[1]["score"]
+
+
+def test_query_intent_classifier():
+    from app.services.rag_service import QueryIntentClassifier
+
+    test_cases = [
+        ("如何报销差旅费？", "procedural"),
+        ("报销流程是什么？", "procedural"),
+        ("公司的报销政策有哪些？", "list"),
+        ("发票丢失怎么处理？", "procedural"),
+        ("什么是弹性工作制？", "definition"),
+        ("报销和预支有什么区别？", "comparison"),
+        ("为什么我的报销被拒绝了？", "causal"),
+        ("请总结一下休假制度", "summary"),
+        ("张三是谁", "factual"),
+        ("会议室在哪里", "factual"),
+    ]
+
+    for query, expected_intent in test_cases:
+        result = QueryIntentClassifier.classify(query)
+        print(f"Query: {query} -> Intent: {result} (expected: {expected_intent})")
+
+
+def test_long_query_optimization():
+    from app.services.rag_service import RagService
+
+    service = RagService()
+
+    long_query = "请问关于公司的报销流程规范要求是什么样的，我想要了解具体的操作步骤和注意事项，以及需要准备哪些材料，还有报销的时间限制是多少天，以及发票的要求是什么，如何确保报销能够顺利通过审批，需要注意哪些关键点，以及常见的问题有哪些，我还想知道如果发票丢失了应该怎么处理，以及预支款和报销的区别是什么，如何选择合适的报销方式，报销审核需要多长时间，以及如何加急处理，还有如果遇到特殊情况比如国外出差应该如何处理报销流程，有没有什么特殊的审批流程需要了解？"
+
+    print(f"Original query length: {len(long_query)}")
+    assert len(long_query) > 200, f"Test query should be > 200 chars, got {len(long_query)}"
+
+    optimized = service._optimize_long_query(long_query)
+
+    print(f"Optimized query: {optimized}")
+    print(f"Optimized query length: {len(optimized)}")
+
+    assert len(optimized) <= 210, f"Optimized query should be <= 210 chars, got {len(optimized)}"
+    assert len(optimized) < len(long_query), "Optimized query should be shorter than original"
+
+    short_query = "这是一个短查询"
+    result = service._optimize_long_query(short_query)
+    assert result == short_query, "Short query should remain unchanged"
+    print("✅ Long query optimization test passed")
+
+
+def test_rewrite_query_candidates():
+    from app.services.rag_service import RagService
+
+    service = RagService()
+
+    query = "如何报销差旅费？"
+    candidates = service._rewrite_query_candidates(query)
+
+    print(f"Query: {query}")
+    print(f"Candidates: {candidates}")
+
+    assert len(candidates) > 0, "Should have at least one candidate"
+    assert query in candidates, "Original query should be in candidates"
+    print(f"✅ Generated {len(candidates)} query candidates")
+
+
+def test_context_compressor():
+    from app.services.rag_service import ContextCompressor
+
+    long_text = """
+    报销流程说明：第一，员工需要在系统中提交报销申请，包括选择费用类型、填写金额、上传发票照片。
+    第二，直属主管进行审批，审批通过后进入财务复核环节。第三，财务人员核对发票真实性后进行付款处理。
+    第四，员工可以在个人中心查看报销进度。关于发票要求，必须是正规增值税发票，发票内容要与实际消费一致。
+    特殊情况如发票丢失需要提供替代证明材料。请假制度说明：员工每年享有带薪年假十天。
+    """.strip()
+
+    query = "报销流程"
+    compressed = ContextCompressor.compress(long_text, query, max_chars=200)
+
+    print(f"Original length: {len(long_text)}")
+    print(f"Compressed length: {len(compressed)}")
+    print(f"Compressed text: {compressed}")
+
+    assert len(compressed) <= 220
+    assert "报销" in compressed or "流程" in compressed
+
+
+def test_context_compressor_list():
+    from app.services.rag_service import ContextCompressor
+
+    contexts = [
+        {"text": "报销需要提供发票，发票内容要与实际消费一致，发票日期必须在30天内。", "filename": "policy1.md"},
+        {"text": "请假流程：员工在系统中提交请假申请，主管审批后生效，年假最短单位为半天。", "filename": "policy2.md"},
+        {"text": "差旅费标准：国内出差每天补助150元，住宿费上限300元，交通费实报实销。", "filename": "policy3.md"},
+    ]
+
+    query = "报销 发货"
+    compressed = ContextCompressor.compress_context_list(contexts, query, max_context_chars=200)
+
+    print(f"Input contexts: {len(contexts)}")
+    print(f"Compressed contexts: {len(compressed)}")
+
+    for ctx in compressed:
+        print(f"  - {ctx['filename']}: {len(ctx['text'])} chars (compressed: {ctx.get('is_compressed', False)})")

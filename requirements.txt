@@ -1,0 +1,26 @@
+# 企业级AI知识库系统 - 依赖列表
+# 核心框架
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# 认证和安全
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# 数据处理
+numpy>=1.24.0
+pandas>=2.0.0
+
+# 系统监控
+psutil>=5.9.0
+
+# 网络通信
+websockets>=11.0.0
+aiofiles>=23.0.0
+
+# 可选的高级AI依赖（如果可用）
+# torch>=2.0.0
+# transformers>=4.30.0
+# sentence-transformers>=2.2.0
+# faiss-cpu>=1.7.0

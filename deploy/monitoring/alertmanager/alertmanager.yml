@@ -1,0 +1,16 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default-receiver
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 2h
+
+receivers:
+  - name: default-receiver
+    webhook_configs:
+      # token 需与后端 ALERT_WEBHOOK_TOKEN 保持一致
+      - url: "http://host.docker.internal:8000/api/v1/monitoring/alerts/webhook?token=dev-alert-token"
+        send_resolved: true

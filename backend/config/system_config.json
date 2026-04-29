@@ -1,0 +1,14 @@
+{
+  "ai_model_name": "enterprise-rag-v3",
+  "embedding_dim": 768,
+  "max_sequence_length": 512,
+  "similarity_threshold": 0.7,
+  "upload_path": "./uploads",
+  "max_file_size": 104857600,
+  "api_host": "0.0.0.0",
+  "api_port": 8000,
+  "monitoring": {
+    "system_collection_interval": 5,
+    "enable_alerts": true
+  }
+}

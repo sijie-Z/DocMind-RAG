@@ -1,0 +1,43 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+
+# --- 前端 (Node) ---
+node_modules/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- IDE 配置 ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- 日志 ---
+*.log
+logs/
+
+# --- 上传 & 临时文件 ---
+uploads/
+temp_uploads/
+backend/uploads/
+backend/temp_uploads/
+
+# --- 运行时数据 ---
+backend/data/
+backend/vector_store/
+backend/backup/
+
+# --- Docker 数据 (非常重要，防止把数据库传上去) ---
+backend/mysql-data/
+backend/es-data/
+backend/minio-data/
+backend/redis-data/

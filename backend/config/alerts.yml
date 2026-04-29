@@ -1,0 +1,38 @@
+groups:
+  - name: paicongming-backend-alerts
+    rules:
+      - alert: HighHttpErrorRate
+        expr: (rate(app_http_errors_total[5m]) / clamp_min(rate(app_http_requests_total[5m]), 0.001)) * 100 > 5
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP error rate is high"
+          description: "Backend HTTP error rate is above 5% for more than 3 minutes."
+
+      - alert: HighP95Latency
+        expr: app_http_p95_ms > 1200
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP p95 latency is high"
+          description: "Backend p95 latency is above 1200ms for more than 5 minutes."
+
+      - alert: TooManyActiveRequests
+        expr: app_http_active_requests > 200
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Too many active HTTP requests"
+          description: "In-flight HTTP request count is above 200."
+
+      - alert: WsSendFailures
+        expr: increase(app_ws_send_fail_total[10m]) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "WebSocket send failures detected"
+          description: "More than 5 websocket send failures in the past 10 minutes."

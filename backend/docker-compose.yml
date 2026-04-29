@@ -1,0 +1,254 @@
+# 派聪明AI知识库系统 - Docker Compose配置
+# 终极修正版：锁定 MySQL 5.7，强制 UTF8，强制监听所有 IP
+
+services:
+  # FastAPI后端服务
+  backend:
+    build: .
+    container_name: paicongming-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # 👇 使用内部容器名连接，最稳定
+      - DATABASE_URL=mysql+aiomysql://paicongming:paicongming123@paicongming-mysql:3306/paicongming
+      - REDIS_HOST=paicongming-redis
+      - ELASTICSEARCH_HOSTS=["http://paicongming-elasticsearch:9200"]
+      - MINIO_ENDPOINT=paicongming-minio:9000
+      - KAFKA_BOOTSTRAP_SERVERS=paicongming-kafka:9092
+      - ENABLE_DEMO_ACCOUNT=true
+      - ENABLE_ENSURE_DEMO_ENDPOINT=true
+      - EXPOSE_EXCEPTION_DETAIL=true
+      # AI API Keys
+      - DEEPSEEK_API_KEY=64eb8b3c7de94665a552ea5e2b5fe837.mJKBqnlx2swDXhvO
+      - DEEPSEEK_API_URL=https://open.bigmodel.cn/api/paas/v4/
+      - DEEPSEEK_MODEL=glm-4-flash
+      - AI_MAX_TOKENS=10000
+      - AI_STREAM_TIMEOUT=120
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=300
+      - DATABASE_POOL_SIZE=20
+      - DATABASE_MAX_OVERFLOW=30
+      - EMBEDDING_API_KEY=64eb8b3c7de94665a552ea5e2b5fe837.mJKBqnlx2swDXhvO
+      - EMBEDDING_API_URL=https://open.bigmodel.cn/api/paas/v4/
+      - EMBEDDING_MODEL=embedding-3
+      - VECTOR_DIMENSION=2048
+      - RERANK_API_KEY=64eb8b3c7de94665a552ea5e2b5fe837.mJKBqnlx2swDXhvO
+      - RERANK_API_URL=https://open.bigmodel.cn/api/paas/v4/
+      - RERANK_MODEL=rerank
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    volumes:
+      - ./logs:/app/logs
+      - ./temp_uploads:/app/temp_uploads
+    networks:
+      - paicongming-network
+    restart: unless-stopped
+
+  # RAG Worker - 处理文档解析和索引
+  worker:
+    build: .
+    container_name: paicongming-worker
+    command: python start_worker.py
+    environment:
+      - DATABASE_URL=mysql+aiomysql://paicongming:paicongming123@paicongming-mysql:3306/paicongming
+      - REDIS_HOST=paicongming-redis
+      - ELASTICSEARCH_HOSTS=["http://paicongming-elasticsearch:9200"]
+      - MINIO_ENDPOINT=paicongming-minio:9000
+      - KAFKA_BOOTSTRAP_SERVERS=paicongming-kafka:9092
+      - ENABLE_DEMO_ACCOUNT=true
+      # AI API Keys
+      - DEEPSEEK_API_KEY=64eb8b3c7de94665a552ea5e2b5fe837.mJKBqnlx2swDXhvO
+      - DEEPSEEK_API_URL=https://open.bigmodel.cn/api/paas/v4/
+      - DEEPSEEK_MODEL=glm-4-flash
+      - EMBEDDING_API_KEY=64eb8b3c7de94665a552ea5e2b5fe837.mJKBqnlx2swDXhvO
+      - EMBEDDING_API_URL=https://open.bigmodel.cn/api/paas/v4/
+      - EMBEDDING_MODEL=embedding-3
+      - VECTOR_DIMENSION=2048
+      - RERANK_API_KEY=64eb8b3c7de94665a552ea5e2b5fe837.mJKBqnlx2swDXhvO
+      - RERANK_API_URL=https://open.bigmodel.cn/api/paas/v4/
+      - RERANK_MODEL=rerank
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - paicongming-network
+    restart: unless-stopped
+
+  # MySQL数据库 (5.7 + UTF8 + Bind Address)
+  mysql:
+    image: mysql:5.7
+    container_name: paicongming-mysql
+    # 👇 关键：强制字符集和监听地址
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --bind-address=0.0.0.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=password
+      - MYSQL_DATABASE=paicongming
+      - MYSQL_USER=paicongming
+      - MYSQL_PASSWORD=paicongming123
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - paicongming-network
+    healthcheck:
+      test: "mysqladmin ping -h localhost -u root -ppassword"
+      timeout: 20s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    container_name: paicongming-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - paicongming-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 20s
+      retries: 10
+    restart: unless-stopped
+
+  # Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: paicongming-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - paicongming-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      timeout: 20s
+      retries: 10
+    restart: unless-stopped
+
+  # MinIO
+  minio:
+    image: minio/minio:latest
+    container_name: paicongming-minio
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - paicongming-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      timeout: 20s
+      retries: 10
+    restart: unless-stopped
+
+  # Kafka + Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: paicongming-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - paicongming-network
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: paicongming-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: paicongming-zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://paicongming-kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - paicongming-network
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: paicongming-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - backend
+    networks:
+      - paicongming-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: paicongming-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - paicongming-network
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  redis-data:
+  elasticsearch-data:
+  minio-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  paicongming-network:
+    driver: bridge
+    
