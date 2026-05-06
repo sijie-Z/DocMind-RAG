@@ -283,10 +283,10 @@ DocMind/
 
 ## 许可证
 
-本项目基于 [MIT License](LICENSE) 开源。
+## 维护者
+
+- **sijieZ** — [GitHub](https://github.com/sijie-Z/DocMind-RAG) · [Email](mailto:1683039482@qq.com)
 
 ---
 
-## Star History
-
-如果这个项目对你有帮助，请给一颗 ⭐ Star 支持一下！
+本项目基于 [MIT License](LICENSE) 开源。如果对你有帮助，欢迎 ⭐ Star！
