@@ -1,6 +1,6 @@
-# 派聪明AI知识库系统 - 后端
+# DocMind 后端
 
-基于FastAPI的AI知识库系统后端，集成DeepSeek API，支持文档管理、知识检索和智能问答。
+基于 FastAPI 的企业级 RAG 知识库系统后端，支持文档管理、混合检索与流式智能问答。
 
 ## 🚀 功能特性
 
@@ -143,14 +143,23 @@ docker-compose up -d
 
 ### 运行测试（需在 backend 目录下执行）
 ```bash
-cd 1_demo/backend
-pytest tests/ -v
-```
-或使用 Python 模块方式：
-```bash
 python -m pytest tests/ -v
 ```
-当前包含：`tests/test_health.py`（健康检查接口）。可按需在 `tests/` 下新增用例。
+
+### 测试用例（132 个）
+
+| 文件 | 覆盖范围 | 用例数 |
+|------|----------|--------|
+| `test_auth_service.py` | JWT 创建/验证、密码哈希、Token 黑名单、RBAC | 22 |
+| `test_masking_service.py` | PII 脱敏（手机/邮箱/身份证/IP）、还原 | 11 |
+| `test_circuit_breaker.py` | 熔断器状态机、降级返回值、异步支持 | 10 |
+| `test_semantic_cache.py` | 余弦相似度边界情况 | 7 |
+| `test_rag_service.py` | RRF 融合、查询意图、上下文压缩、长查询优化 | 7 |
+| `test_config.py` | 弱密钥拒绝、连接池、限流配置 | 5 |
+| `test_document_parser.py` | TXT/DOCX 解析、元数据 | 5 |
+| `test_auth_api.py` | 注册密码校验、缺少字段、无效邮箱 | 7 |
+| `test_memory_service.py` | 记忆系统（短期/长期/工作/反思） | 52 |
+| `test_health.py` | 健康检查端点 | 2 |
 
 ### 测试覆盖率（可选）
 ```bash

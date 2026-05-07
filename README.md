@@ -234,32 +234,69 @@ JWT_SECRET_KEY=your-jwt-secret-key
 
 ```
 DocMind/
+├── .github/                         # CI/CD 配置
+│   ├── workflows/ci.yml             # GitHub Actions（后端 + 前端 + Lint）
+│   ├── dependabot.yml               # 自动依赖更新
+│   └── pull_request_template.md     # PR 模板
 ├── backend/                         # FastAPI 后端
 │   ├── app/
 │   │   ├── api/v1/endpoints/        # 15 个 API 模块（auth, chat, knowledge, workflow...）
-│   │   ├── core/                    # 基础设施层（DB, ES, Kafka, MinIO, Redis, 安全）
+│   │   ├── core/                    # 基础设施层（DB, ES, Kafka, MinIO, Redis, 安全, 熔断器）
 │   │   ├── models/                  # SQLAlchemy 数据模型（11 张表）
 │   │   ├── schemas/                 # Pydantic 请求/响应模型
-│   │   └── services/                # 业务服务层（RAG, Chat, Auth, Workflow...）
+│   │   └── services/                # 业务服务层（RAG, Chat, Auth, Workflow, Memory, Masking...）
+│   ├── tests/                       # pytest 测试（132 个用例）
+│   │   ├── test_auth_service.py     # JWT / 密码哈希 / Token 黑名单 / RBAC
+│   │   ├── test_masking_service.py  # PII 脱敏（手机/邮箱/身份证/IP）
+│   │   ├── test_circuit_breaker.py  # 熔断器状态机
+│   │   ├── test_semantic_cache.py   # 语义缓存余弦相似度
+│   │   ├── test_rag_service.py      # RRF 融合 / 查询意图 / 上下文压缩
+│   │   ├── test_config.py           # 配置校验（弱密钥拒绝）
+│   │   ├── test_document_parser.py  # 文档解析
+│   │   └── test_auth_api.py         # API 端点集成测试
 │   ├── lib/rag/                     # RAG 工具库（chunk, vectorizer, retriever, hybrid, BM25）
 │   ├── worker/                      # 独立 Kafka 消费者（文档处理 Worker）
 │   ├── config/                      # Prometheus + Grafana 监控配置
+│   ├── pytest.ini                   # pytest 配置
 │   ├── docker-compose.yml           # 基础设施容器编排
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/                        # Vue 3 前端
 │   ├── src/
-│   │   ├── views/                   # 25+ 页面（chat, knowledge, workflow, admin...）
+│   │   ├── views/
+│   │   │   └── chat/                # 聊天页面（已重构为组件化架构）
+│   │   │       ├── index.vue        # 主入口（230 行，原 1574 行）
+│   │   │       ├── components/      # 5 个子组件
+│   │   │       │   ├── ChatSidebar.vue
+│   │   │       │   ├── ChatMessages.vue
+│   │   │       │   ├── ChatInput.vue
+│   │   │       │   ├── ChatHeader.vue
+│   │   │       │   └── DocumentPreviewModal.vue
+│   │   │       └── composables/     # 5 个组合式函数
+│   │   │           ├── useChatAttachments.ts
+│   │   │           ├── useChatMessages.ts
+│   │   │           ├── useChatSessions.ts
+│   │   │           ├── useChatConnection.ts
+│   │   │           └── useChatSend.ts
 │   │   ├── api/                     # 15 个 API 模块封装
 │   │   ├── stores/                  # Pinia 状态管理
-│   │   ├── composables/             # 组合式函数（debounce, prefetch, errorHandler）
-│   │   ├── utils/                   # 工具函数（WebSocket, SSE, auth）
+│   │   ├── utils/
+│   │   │   ├── __tests__/           # Vitest 测试（49 个用例）
+│   │   │   │   ├── auth.test.ts
+│   │   │   │   ├── format.test.ts
+│   │   │   │   ├── retry.test.ts
+│   │   │   │   └── websocket.test.ts
+│   │   │   ├── websocket.ts         # WebSocket 单例服务
+│   │   │   ├── auth.ts              # Token 管理（Cookie + localStorage）
+│   │   │   ├── retry.ts             # 指数退避重试
+│   │   │   └── format.ts            # 日期/文件大小格式化
 │   │   └── locales/                 # 国际化（zh / en / ja / fr）
+│   ├── vitest.config.ts             # Vitest 配置
 │   └── package.json
 ├── deploy/monitoring/               # 生产监控部署（Prometheus + Grafana + AlertManager）
 ├── docs/                            # 项目文档
-├── start_windows.bat                # Windows 一键启动
-└── start.sh                         # Linux/Mac 一键启动
+├── start.sh                         # Linux/Mac 一键启动
+└── README.md
 ```
 
 ---
@@ -281,7 +318,163 @@ DocMind/
 
 ---
 
-## 许可证
+## 测试
+
+### 后端测试（132 个用例）
+
+```bash
+cd backend
+python -m pytest tests/ -v
+```
+
+覆盖范围：
+- **AuthService**：JWT 创建/验证、密码哈希、Token 黑名单、RBAC 角色检查
+- **MaskingService**：PII 脱敏（手机号/邮箱/身份证/IP/银行卡）、还原
+- **CircuitBreaker**：熔断器状态机（CLOSED→OPEN→HALF_OPEN→CLOSED）、降级返回值
+- **SemanticCache**：余弦相似度边界情况
+- **RagService**：RRF 融合、查询意图分类、上下文压缩、长查询优化、查询重写
+- **Config**：弱密钥拒绝、连接池上限、限流路径排除
+- **DocumentParser**：TXT/DOCX 解析、元数据提取
+- **Auth API**：注册密码校验、缺少字段、无效邮箱
+
+### 前端测试（49 个用例）
+
+```bash
+cd frontend
+npm test
+```
+
+覆盖范围：
+- **auth.ts**：Token 存取/删除/过期检查、Legacy Key 兼容
+- **format.ts**：日期相对格式化、文件大小格式化、时长格式化、文本截断
+- **retry.ts**：指数退避、可重试条件判断、retry-after 头、最大重试次数
+- **websocket.ts**：连接生命周期、发送守卫、状态管理
+
+### CI/CD
+
+Push 或 PR 到 `main` / `develop` 分支时，GitHub Actions 自动运行：
+- 后端测试（Python 3.11 + 3.12）
+- 前端测试（Node 18 + 20）
+- Lint 检查
+
+---
+
+## 安全加固
+
+本项目经过全面安全审计，修复了以下关键问题：
+
+| 级别 | 问题 | 状态 |
+|------|------|------|
+| **CRITICAL** | 生产代码泄露明文密码到日志 | 已修复 |
+| **CRITICAL** | `.env.example` 包含真实 API Key | 已修复 |
+| **CRITICAL** | 默认弱密钥允许 JWT 伪造 | 已修复（启动时强制校验） |
+| **CRITICAL** | 登出后 Token 仍有效 | 已修复（Redis 黑名单） |
+| **HIGH** | 裸 `except:` 吞掉所有异常 | 已修复（6 处） |
+| **HIGH** | 重复 AuthService 实例化 | 已修复（4 处） |
+| **HIGH** | CORS `allow_methods=["*"]` | 已修复（限定方法） |
+| **HIGH** | 认证路径被排除在限流外 | 已修复 |
+| **MEDIUM** | `datetime.utcnow()` 已弃用 | 已修复（→ `datetime.now(timezone.utc)`） |
+| **MEDIUM** | Pydantic 验证异常 JSON 序列化崩溃 | 已修复 |
+
+---
+
+## 架构优化
+
+### 前端组件化重构
+
+聊天页面从 **1574 行单文件** 重构为 **5 个子组件 + 5 个组合式函数**：
+
+```
+chat/index.vue (230 行)
+├── ChatSidebar.vue      — 会话列表侧边栏
+├── ChatMessages.vue     — 消息展示区（DynamicScroller）
+├── ChatInput.vue        — 输入区（文件附件/模式切换/连接状态）
+├── ChatHeader.vue       — 顶部导航（标题/绑定模式/清空）
+├── DocumentPreviewModal.vue — 文档预览弹窗
+└── composables/
+    ├── useChatAttachments.ts  — 文件上传与轮询
+    ├── useChatMessages.ts     — 消息展示/滚动/反馈
+    ├── useChatSessions.ts     — 会话列表管理
+    ├── useChatConnection.ts   — WebSocket/SSE 连接
+    └── useChatSend.ts         — 消息发送
+```
+
+### RAG 检索管线
+
+系统实现了一套生产级 RAG 检索管线：
+
+```
+用户提问
+  │
+  ├─ 查询理解：意图分类 + 长查询优化 + LLM 查询重写（多候选）
+  │
+  ├─ 并行召回：BM25 关键词 + KNN 向量（asyncio.gather）
+  │
+  ├─ RRF 融合：倒数排名融合 + 重写命中加权
+  │
+  ├─ MMR 去冗余：最大边际相关性（λ=0.65）
+  │
+  ├─ Cross-Encoder 重排序
+  │
+  ├─ 后处理：文档去重 + 相关性过滤 + 新鲜度加权
+  │
+  └─ 缓存：精确缓存 + 语义缓存（余弦相似度 ≥ 0.92）
+```
+
+---
+
+## 更新日志
+
+### 2026-05-07
+
+**测试**
+- 新增 132 个后端 pytest 用例（auth, masking, circuit breaker, RAG, config, parser, API）
+- 新增 49 个前端 Vitest 用例（auth, format, retry, websocket）
+- 配置 `pytest.ini` 和 `vitest.config.ts`
+
+**CI/CD**
+- 新增 GitHub Actions 工作流（后端 Python 3.11/3.12 + 前端 Node 18/20 + Lint）
+- 新增 Dependabot 自动依赖更新配置
+- 新增 PR 模板
+
+**前端架构**
+- 重构 `chat/index.vue`：1574 行 → 230 行，拆分为 5 组件 + 5 组合式函数
+- 新增 `useChatConnection` 和 `useChatSend` 组合式函数
+
+**安全**
+- 修复 Pydantic 验证异常 JSON 序列化崩溃（`main.py`）
+
+**文档**
+- 清理 5 个过时文档（DEVELOPMENT_GUIDE, technical_documentation, 企业级详细文档, 派聪明开发文档, RAG_SYSTEM_SUMMARY）
+- 更新 README 项目结构、测试、安全加固、架构优化章节
+
+### 2026-05-06
+
+**安全加固**
+- 移除生产代码中的明文密码日志
+- 移除 `.env.example` 中的真实 API Key
+- 添加 SECRET_KEY / JWT_SECRET_KEY 启动时强制校验
+- 添加 JWT Token 黑名单（Redis）实现登出即失效
+- 修复 6 处裸 `except:` → 精确异常类型
+- 修复 4 处重复 AuthService 实例化
+- 修复 CORS 配置（限定方法和头）
+- 修复认证路径被排除在限流外
+- 修复 `datetime.utcnow()` → `datetime.now(timezone.utc)`
+- 添加密码长度校验（8-128 位）
+
+**前端修复**
+- 修复 WebSocket `stopGeneration` 双重 JSON 编码
+- 移除 `request.ts` 中重复的路由守卫
+- 移除 `api/chat.ts` 中重复的函数定义
+- 修复 `stores/user.ts` 中 getUserInfo 错误处理
+- 添加 `stores/app.ts` 中主题同步防抖
+
+**文档**
+- 重写 README（专业架构图、数据流程、API 概览）
+- 清理根目录多余文件（bat, sh, txt, package.json）
+- 更新 `.env.example`（完整配置说明）
+
+---
 
 ## 维护者
 
