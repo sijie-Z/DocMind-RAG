@@ -54,7 +54,7 @@ python-docx>=0.8.11
 
 # --- 工具 ---
 requests>=2.31.0
-tenacity>=8.2.0
+tenacity>=9.1.4
 bcrypt>=4.0.1
 PyJWT>=2.8.0
 email-validator>=2.1.0
