@@ -167,24 +167,35 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """请求参数验证异常处理"""
     request_id = getattr(getattr(request, "state", None), "request_id", None)
-    
+
     # 提取错误信息中友好的提示
     errors = exc.errors()
     error_messages = []
+    safe_errors = []
     for error in errors:
         field = ".".join(str(loc) for loc in error.get("loc", []))
         msg = error.get("msg", "")
         error_messages.append(f"字段 '{field}' 错误: {msg}")
-        
+        # 确保所有值都是 JSON 可序列化的
+        safe_error = {}
+        for k, v in error.items():
+            if isinstance(v, Exception):
+                safe_error[k] = str(v)
+            elif isinstance(v, dict):
+                safe_error[k] = {kk: str(vv) if isinstance(vv, Exception) else vv for kk, vv in v.items()}
+            else:
+                safe_error[k] = v
+        safe_errors.append(safe_error)
+
     error_msg = "; ".join(error_messages)
-    
+
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
             "success": False,
             "code": status.HTTP_422_UNPROCESSABLE_ENTITY,
             "message": f"参数校验失败: {error_msg}",
-            "detail": errors,
+            "detail": safe_errors,
             "request_id": request_id,
             "data": None
         }
