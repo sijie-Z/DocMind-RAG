@@ -201,7 +201,21 @@ body {
 .header-badges {
   display: flex;
   gap: 8px;
+  align-items: center;
 }
+
+.lang-toggle { display: flex; gap: 3px; background: var(--bg-card); border-radius: 8px; padding: 3px; border: 1px solid var(--border); margin-right: 12px; }
+.lang-btn { padding: 5px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: 600; background: transparent; color: var(--text-dim); transition: all 0.2s; }
+.lang-btn.active { background: var(--accent); color: white; }
+.lang-btn:hover:not(.active) { color: var(--text); }
+[data-lang="en"] { display: none; }
+body.lang-en [data-lang="zh"] { display: none; }
+body.lang-en [data-lang="en"] { display: block; }
+a[data-lang="en"], span[data-lang="en"] { display: none; }
+body.lang-en a[data-lang="zh"], body.lang-en span[data-lang="zh"] { display: none; }
+body.lang-en a[data-lang="en"], body.lang-en span[data-lang="en"] { display: inline; }
+body.lang-en div[data-lang="en"] { display: block; }
+div[data-lang="en"] { display: none; }
 
 .badge {
   display: inline-flex;
@@ -1161,48 +1175,48 @@ body {
 <nav class="sidebar">
   <div class="sidebar-logo">
     <h1>DocMind</h1>
-    <div class="subtitle">Enterprise RAG Knowledge Base</div>
+    <div class="subtitle"><span data-lang="zh">企业级 RAG 知识库</span><span data-lang="en">Enterprise RAG Knowledge Base</span></div>
   </div>
 
   <div class="nav-section">
-    <div class="nav-section-title">Overview</div>
+    <div class="nav-section-title"><span data-lang="zh">概览</span><span data-lang="en">Overview</span></div>
     <ul class="nav-links">
-      <li><a href="#overview" class="active"><span class="nav-dot" style="background:var(--accent)"></span>Project Overview</a></li>
-      <li><a href="#tech-stack"><span class="nav-dot" style="background:var(--cyan)"></span>Tech Stack</a></li>
+      <li><a href="#overview" class="active"><span class="nav-dot" style="background:var(--accent)"></span><span data-lang="zh">项目概览</span><span data-lang="en">Project Overview</span></a></li>
+      <li><a href="#tech-stack"><span class="nav-dot" style="background:var(--cyan)"></span><span data-lang="zh">技术栈</span><span data-lang="en">Tech Stack</span></a></li>
     </ul>
   </div>
 
   <div class="nav-section">
-    <div class="nav-section-title">Architecture</div>
+    <div class="nav-section-title"><span data-lang="zh">架构</span><span data-lang="en">Architecture</span></div>
     <ul class="nav-links">
-      <li><a href="#architecture"><span class="nav-dot" style="background:var(--purple)"></span>System Architecture</a></li>
-      <li><a href="#backend"><span class="nav-dot" style="background:var(--green)"></span>Backend Modules</a></li>
-      <li><a href="#frontend"><span class="nav-dot" style="background:var(--blue)"></span>Frontend Modules</a></li>
+      <li><a href="#architecture"><span class="nav-dot" style="background:var(--purple)"></span><span data-lang="zh">系统架构</span><span data-lang="en">System Architecture</span></a></li>
+      <li><a href="#backend"><span class="nav-dot" style="background:var(--green)"></span><span data-lang="zh">后端模块</span><span data-lang="en">Backend Modules</span></a></li>
+      <li><a href="#frontend"><span class="nav-dot" style="background:var(--blue)"></span><span data-lang="zh">前端模块</span><span data-lang="en">Frontend Modules</span></a></li>
     </ul>
   </div>
 
   <div class="nav-section">
-    <div class="nav-section-title">Core Systems</div>
+    <div class="nav-section-title"><span data-lang="zh">核心系统</span><span data-lang="en">Core Systems</span></div>
     <ul class="nav-links">
-      <li><a href="#rag-pipeline"><span class="nav-dot" style="background:var(--purple)"></span>RAG Pipeline</a></li>
-      <li><a href="#agent-system"><span class="nav-dot" style="background:var(--cyan)"></span>Agent System</a></li>
-      <li><a href="#dataflow"><span class="nav-dot" style="background:var(--orange)"></span>Data Flow</a></li>
+      <li><a href="#rag-pipeline"><span class="nav-dot" style="background:var(--purple)"></span><span data-lang="zh">RAG 管线</span><span data-lang="en">RAG Pipeline</span></a></li>
+      <li><a href="#agent-system"><span class="nav-dot" style="background:var(--cyan)"></span><span data-lang="zh">Agent 系统</span><span data-lang="en">Agent System</span></a></li>
+      <li><a href="#dataflow"><span class="nav-dot" style="background:var(--orange)"></span><span data-lang="zh">数据流程</span><span data-lang="en">Data Flow</span></a></li>
     </ul>
   </div>
 
   <div class="nav-section">
-    <div class="nav-section-title">Infrastructure</div>
+    <div class="nav-section-title"><span data-lang="zh">基础设施</span><span data-lang="en">Infrastructure</span></div>
     <ul class="nav-links">
-      <li><a href="#infrastructure"><span class="nav-dot" style="background:var(--orange)"></span>Infrastructure</a></li>
-      <li><a href="#security"><span class="nav-dot" style="background:var(--red)"></span>Security Layers</a></li>
-      <li><a href="#testing"><span class="nav-dot" style="background:var(--green)"></span>Testing & Quality</a></li>
+      <li><a href="#infrastructure"><span class="nav-dot" style="background:var(--orange)"></span><span data-lang="zh">基础设施</span><span data-lang="en">Infrastructure</span></a></li>
+      <li><a href="#security"><span class="nav-dot" style="background:var(--red)"></span><span data-lang="zh">安全体系</span><span data-lang="en">Security Layers</span></a></li>
+      <li><a href="#testing"><span class="nav-dot" style="background:var(--green)"></span><span data-lang="zh">测试与质量</span><span data-lang="en">Testing & Quality</span></a></li>
     </ul>
   </div>
 
   <div style="flex:1"></div>
   <div style="padding:16px 20px; border-top:1px solid var(--border); font-size:0.68rem; color:var(--text-dim);">
-    <div style="margin-bottom:4px;">Last updated: 2026-05-10</div>
-    <div>Version 1.0.0</div>
+    <div style="margin-bottom:4px;"><span data-lang="zh">更新于 2026-05-10</span><span data-lang="en">Last updated: 2026-05-10</span></div>
+    <div><span data-lang="zh">版本 1.0.0</span><span data-lang="en">Version 1.0.0</span></div>
   </div>
 </nav>
 
@@ -1217,6 +1231,10 @@ body {
       <span>DocMind</span> Architecture Visualization
     </div>
     <div class="header-badges">
+      <div class="lang-toggle">
+        <button class="lang-btn active" onclick="setLang('zh')">中文</button>
+        <button class="lang-btn" onclick="setLang('en')">EN</button>
+      </div>
       <span class="badge badge-python">Python 3.11+</span>
       <span class="badge badge-ts">TypeScript 5.x</span>
       <span class="badge badge-infra">Docker + K8s</span>
@@ -1231,12 +1249,11 @@ body {
     <section id="overview" class="section hero">
       <div class="hero-title animate-in">
         <span class="gradient">DocMind</span>
-        <br>Enterprise RAG Knowledge Base System
+        <br><span data-lang="zh">企业级 RAG 智能知识库系统</span><span data-lang="en">Enterprise RAG Knowledge Base System</span>
       </div>
       <p class="hero-subtitle animate-in delay-1">
-        Full-stack AI knowledge base system with RAG (Retrieval-Augmented Generation),
-        document management, hybrid search, streaming Q&A, and an autonomous Agent with tool calling.
-        <br>全栈 AI 知识库系统，支持 RAG 检索增强生成、文档管理、混合搜索、流式问答、自主 Agent 工具调用。
+        <span data-lang="zh">全栈 AI 知识库系统，支持 RAG 检索增强生成、文档管理、混合搜索、流式问答、自主 Agent 工具调用。</span>
+        <span data-lang="en">Full-stack AI knowledge base system with RAG (Retrieval-Augmented Generation), document management, hybrid search, streaming Q&A, and an autonomous Agent with tool calling.</span>
       </p>
 
       <!-- Stats -->
@@ -2270,6 +2287,17 @@ body {
   // Initial call
   updateActiveLink();
 })();
+
+// Language toggle
+function setLang(lang) {
+  document.body.classList.toggle('lang-en', lang === 'en');
+  document.querySelectorAll('.lang-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent.trim() === (lang === 'zh' ? '中文' : 'EN'));
+  });
+  localStorage.setItem('docmind-lang', lang);
+}
+const savedLang = localStorage.getItem('docmind-lang');
+if (savedLang === 'en') setLang('en');
 </script>
 </body>
 </html>

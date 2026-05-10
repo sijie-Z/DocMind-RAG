@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DocMind - Enterprise RAG Knowledge Base</title>
+  <title>DocMind - AI 知识库系统</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-    .container { text-align: center; max-width: 600px; padding: 2rem; }
-    h1 { font-size: 3rem; background: linear-gradient(135deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 1rem; }
-    p { color: #94a3b8; font-size: 1.1rem; line-height: 1.6; margin-bottom: 2rem; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .container { text-align: center; max-width: 650px; padding: 2rem; }
+    h1 { font-size: 3rem; background: linear-gradient(135deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.15rem; line-height: 1.6; margin-bottom: 2rem; }
     .links { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
-    a { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; border-radius: 0.75rem; text-decoration: none; font-weight: 600; transition: all 0.2s; }
+    a.btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; border-radius: 0.75rem; text-decoration: none; font-weight: 600; transition: all 0.2s; }
     .primary { background: #3b82f6; color: white; }
     .primary:hover { background: #2563eb; transform: translateY(-2px); box-shadow: 0 8px 25px rgba(59,130,246,0.3); }
     .secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
@@ -20,22 +20,93 @@
     .stat { text-align: center; }
     .stat-value { font-size: 1.5rem; font-weight: 700; color: #3b82f6; }
     .stat-label { font-size: 0.8rem; color: #64748b; margin-top: 0.25rem; }
+    .lang-toggle { position: fixed; top: 1rem; right: 1rem; display: flex; gap: 4px; background: #1e293b; border-radius: 8px; padding: 4px; border: 1px solid #334155; }
+    .lang-btn { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 500; background: transparent; color: #94a3b8; transition: all 0.2s; }
+    .lang-btn.active { background: #3b82f6; color: white; }
+    .lang-btn:hover:not(.active) { color: #e2e8f0; }
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin: 2rem 0; text-align: left; }
+    .feature { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 1.2rem; }
+    .feature-title { font-weight: 600; color: #e2e8f0; margin-bottom: 0.3rem; font-size: 0.95rem; }
+    .feature-desc { color: #64748b; font-size: 0.8rem; line-height: 1.5; }
+    [data-lang="en"] { display: none; }
+    body.lang-en [data-lang="zh"] { display: none; }
+    body.lang-en [data-lang="en"] { display: block; }
+    body.lang-en [data-lang-inline="zh"] { display: none; }
+    body.lang-en [data-lang-inline="en"] { display: inline; }
+    [data-lang-inline="en"] { display: none; }
   </style>
 </head>
 <body>
+  <div class="lang-toggle">
+    <button class="lang-btn active" onclick="setLang('zh')">中文</button>
+    <button class="lang-btn" onclick="setLang('en')">EN</button>
+  </div>
+
   <div class="container">
     <h1>DocMind</h1>
-    <p>Enterprise RAG Knowledge Base System<br>Full-stack AI knowledge base with RAG, document management, hybrid search, and autonomous Agent.</p>
+
+    <p class="subtitle" data-lang="zh">
+      企业级 RAG 智能知识库系统<br>上传文档，自然语言搜索，获得带引用的 AI 回答
+    </p>
+    <p class="subtitle" data-lang="en">
+      Enterprise RAG Knowledge Base System<br>Upload documents, search with natural language, get AI answers with citations
+    </p>
+
     <div class="stats">
-      <div class="stat"><div class="stat-value">216</div><div class="stat-label">Backend Tests</div></div>
-      <div class="stat"><div class="stat-value">95</div><div class="stat-label">Frontend Tests</div></div>
-      <div class="stat"><div class="stat-value">11</div><div class="stat-label">Built-in Tools</div></div>
-      <div class="stat"><div class="stat-value">8</div><div class="stat-label">Prompt Templates</div></div>
+      <div class="stat"><div class="stat-value">311</div><div class="stat-label" data-lang="zh">自动化测试</div><div class="stat-label" data-lang="en">Tests</div></div>
+      <div class="stat"><div class="stat-value">11</div><div class="stat-label" data-lang="zh">内置工具</div><div class="stat-label" data-lang="en">Built-in Tools</div></div>
+      <div class="stat"><div class="stat-value">15</div><div class="stat-label" data-lang="zh">API 模块</div><div class="stat-label" data-lang="en">API Modules</div></div>
+      <div class="stat"><div class="stat-value">4</div><div class="stat-label" data-lang="zh">语言支持</div><div class="stat-label" data-lang="en">Languages</div></div>
     </div>
+
+    <div class="features">
+      <div class="feature">
+        <div class="feature-title" data-lang="zh">混合检索</div>
+        <div class="feature-title" data-lang="en">Hybrid Search</div>
+        <div class="feature-desc" data-lang="zh">BM25 关键词 + 向量语义双路召回，RRF 融合 + Rerank 重排序</div>
+        <div class="feature-desc" data-lang="en">BM25 keyword + vector semantic dual-channel, RRF fusion + reranking</div>
+      </div>
+      <div class="feature">
+        <div class="feature-title" data-lang="zh">智能 Agent</div>
+        <div class="feature-title" data-lang="en">AI Agent</div>
+        <div class="feature-desc" data-lang="zh">ReAct 自主推理，11 个工具，任务拆解，技能学习</div>
+        <div class="feature-desc" data-lang="en">ReAct reasoning, 11 tools, task decomposition, skill learning</div>
+      </div>
+      <div class="feature">
+        <div class="feature-title" data-lang="zh">知识图谱</div>
+        <div class="feature-title" data-lang="en">Knowledge Graph</div>
+        <div class="feature-desc" data-lang="zh">Canvas 力导向图可视化，实体关系展示，交互式探索</div>
+        <div class="feature-desc" data-lang="en">Canvas force-directed graph, entity relations, interactive exploration</div>
+      </div>
+      <div class="feature">
+        <div class="feature-title" data-lang="zh">企业级安全</div>
+        <div class="feature-title" data-lang="en">Enterprise Security</div>
+        <div class="feature-desc" data-lang="zh">RBAC 权限体系，JWT 认证，多租户隔离，审计日志</div>
+        <div class="feature-desc" data-lang="en">RBAC permissions, JWT auth, multi-tenancy isolation, audit logs</div>
+      </div>
+    </div>
+
     <div class="links">
-      <a href="architecture.html" class="primary">View Architecture</a>
-      <a href="https://github.com/sijie-Z/DocMind-RAG" class="secondary">GitHub Repo</a>
+      <a href="architecture.html" class="btn primary">
+        <span data-lang="zh">查看架构</span><span data-lang="en">Architecture</span>
+      </a>
+      <a href="https://github.com/sijie-Z/DocMind-RAG" class="btn secondary">
+        <span data-lang="zh">GitHub 仓库</span><span data-lang="en">GitHub Repo</span>
+      </a>
     </div>
   </div>
+
+  <script>
+    function setLang(lang) {
+      document.body.classList.toggle('lang-en', lang === 'en');
+      document.querySelectorAll('.lang-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.trim() === (lang === 'zh' ? '中文' : 'EN'));
+      });
+      localStorage.setItem('docmind-lang', lang);
+    }
+    // Restore saved language
+    const saved = localStorage.getItem('docmind-lang');
+    if (saved === 'en') setLang('en');
+  </script>
 </body>
 </html>
