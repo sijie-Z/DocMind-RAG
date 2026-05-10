@@ -42,7 +42,7 @@
   },
   "devDependencies": {
     "@types/dompurify": "^3.0.5",
-    "@types/highlight.js": "^9.12.4",
+    "@types/highlight.js": "^10.1.0",
     "@types/js-cookie": "^3.0.6",
     "@types/katex": "^0.16.8",
     "@types/lodash-es": "^4.17.12",
