@@ -8,7 +8,7 @@ aiomysql>=0.2.0
 alembic>=1.13.1
 redis>=5.0.1
 elasticsearch==8.11.0
-minio>=7.2.0
+minio>=7.2.20
 aiokafka>=0.10.0
 kafka-python>=2.0.2  #
 httpx>=0.25.2
