@@ -202,6 +202,12 @@ metrics_collector = MetricsCollector()
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Rate limiting middleware using sliding window.
+
+    Primary store: Redis sorted sets for accurate sliding window.
+    Fallback: in-memory fixed-window counter (when Redis is unavailable).
+    """
+
     def __init__(self, app):
         super().__init__(app)
         self.window_seconds = max(1, int(settings.RATE_LIMIT_WINDOW_SECONDS))
@@ -221,15 +227,37 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return request.client.host
         return "unknown"
 
-    async def _check_and_incr_memory(self, key: str, now: int) -> int:
+    async def _check_and_incr_memory(self, key: str, now: int) -> Tuple[int, int]:
+        """In-memory fallback: fixed-window counter. Returns (count, reset_at)."""
         window_start = now - (now % self.window_seconds)
+        reset_at = window_start + self.window_seconds
         async with self._memory_lock:
             current = self._memory_counter.get(key)
             if current is None or current[0] != window_start:
                 self._memory_counter[key] = (window_start, 1)
-                return 1
+                return (1, reset_at)
             self._memory_counter[key] = (window_start, current[1] + 1)
-            return self._memory_counter[key][1]
+            return (self._memory_counter[key][1], reset_at)
+
+    async def _check_and_incr_redis(self, identifier: str, now: int) -> Tuple[int, int]:
+        """Sliding window using Redis sorted set. Returns (count, reset_at)."""
+        if not redis_client:
+            raise RuntimeError("Redis not available")
+
+        key = f"rl:sliding:{identifier}"
+        window_start = now - self.window_seconds
+        reset_at = now + self.window_seconds
+
+        # Use a Redis pipeline for atomicity: remove old entries, count current, add new entry
+        pipeline = redis_client.pipeline()
+        pipeline.zremrangebyscore(key, 0, window_start)
+        pipeline.zcard(key)
+        pipeline.zadd(key, {str(now): now})
+        pipeline.expire(key, self.window_seconds + 5)
+        results = await pipeline.execute()
+
+        count = int(results[1]) + 1  # +1 for the entry we just added
+        return (count, reset_at)
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -238,24 +266,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         identifier = self._get_identifier(request)
         now = int(time.time())
-        window_slot = now // self.window_seconds
-        key = f"rl:{identifier}:{window_slot}"
         current_count = 0
+        reset_at = now + self.window_seconds
 
         try:
             if redis_client:
-                current_count = int(await redis_client.incr(key))
-                if current_count == 1:
-                    await redis_client.expire(key, self.window_seconds + 1)
+                current_count, reset_at = await self._check_and_incr_redis(identifier, now)
             else:
-                current_count = await self._check_and_incr_memory(key, now)
+                current_count, reset_at = await self._check_and_incr_memory(f"rl:{identifier}", now)
         except Exception:
-            current_count = await self._check_and_incr_memory(key, now)
+            current_count, reset_at = await self._check_and_incr_memory(f"rl:{identifier}", now)
 
         remaining = max(0, self.requests_per_window - current_count)
         if current_count > self.requests_per_window:
-            retry_after = self.window_seconds - (now % self.window_seconds)
-            reset_at = now + retry_after
+            retry_after = max(1, reset_at - now)
             request_id = getattr(getattr(request, "state", None), "request_id", None)
             return JSONResponse(
                 status_code=429,
@@ -278,7 +302,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers["X-RateLimit-Limit"] = str(self.requests_per_window)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
-        response.headers["X-RateLimit-Reset"] = str(now + (self.window_seconds - (now % self.window_seconds)))
+        response.headers["X-RateLimit-Reset"] = str(reset_at)
         return response
 
 
@@ -286,9 +310,7 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         start_time = time.time()
         await metrics_collector.inc_active_connections()
-        header_name = getattr(settings, "REQUEST_ID_HEADER", "X-Request-ID")
-        request_id = request.headers.get(header_name) or str(uuid.uuid4())
-        request.state.request_id = request_id
+        request_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())
         route_path = request.url.path
         method = request.method
         token = request_id_var.set(request_id)
@@ -321,7 +343,6 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
             
             # 添加处理时间头（方便前端/运维调试）
             response.headers["X-Process-Time"] = str(round(duration * 1000, 2)) + "ms"
-            response.headers[header_name] = request_id
 
             # 缓存头优化：对静态资源和特定API响应添加缓存控制
             if route_path.startswith("/assets/") or route_path.endswith(".js") or route_path.endswith(".css"):

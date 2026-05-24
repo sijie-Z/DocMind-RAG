@@ -9,6 +9,7 @@ export interface ChatMessage {
   feedback?: number
   feedbackNote?: string
   isCached?: boolean
+  thinking?: string
 }
 
 export interface AttachedFile {

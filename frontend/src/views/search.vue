@@ -4,7 +4,7 @@
     <div class="flex items-center justify-between">
       <div>
         <h1
-          class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-blue-600 dark:from-blue-400 dark:to-blue-400">
+          class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-blue-700 dark:from-blue-400 dark:to-blue-600">
           {{ t('search.title') }}
         </h1>
         <p class="text-gray-500 dark:text-gray-400 mt-1">
@@ -32,12 +32,12 @@
           <n-icon size="24"><search-outline /></n-icon>
         </div>
         <input v-model="searchQuery" type="text" :placeholder="t('search.placeholder')"
-          class="flex-1 bg-transparent border-none focus:ring-0 text-lg py-3 px-2 text-gray-700 dark:text-gray-200"
+          class="flex-1 bg-transparent border-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 rounded-lg text-lg py-3 px-2 text-gray-700 dark:text-gray-200 outline-none"
           @keyup.enter="handleSearch" @input="handleInputChange">
 
         <!-- 搜索按钮 -->
         <button
-          class="ml-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-blue-600 hover:from-blue-700 hover:to-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+          class="ml-2 px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
           :disabled="!searchQuery.trim() || loading" @click="handleSearch">
           <n-spin v-if="loading" size="small" stroke="white" />
           <span>{{ t('search.button') }}</span>
@@ -47,7 +47,7 @@
         <div v-if="suggestions.length > 0"
           class="absolute top-full left-0 right-0 mt-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-2xl border border-white/20 dark:border-gray-800/50 shadow-2xl z-50 overflow-hidden">
           <div v-for="suggestion in suggestions" :key="suggestion"
-            class="px-6 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 cursor-pointer transition-colors text-gray-600 dark:text-gray-300 flex items-center space-x-3"
+            class="px-6 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/30 cursor-pointer transition-colors text-gray-600 dark:text-gray-300 flex items-center space-x-3"
             @click="selectSuggestion(suggestion)">
             <n-icon class="text-gray-400"><time-outline /></n-icon>
             <span>{{ suggestion }}</span>
@@ -116,8 +116,10 @@
               <div class="flex justify-between items-start mb-3">
                 <div class="flex items-center space-x-3">
                   <div
-                    class="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-xl">
-                    {{ getFileTypeIcon(result.file_type) }}
+                    class="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-900/30 flex items-center justify-center">
+                    <n-icon size="22" class="text-slate-500 dark:text-slate-400">
+                      <component :is="getFileTypeIcon(result.file_type)" />
+                    </n-icon>
                   </div>
                   <div>
                     <h3
@@ -146,14 +148,12 @@
               <div class="flex items-center justify-between mt-4 pt-4 border-t border-gray-100 dark:border-gray-800/50">
                 <div class="flex items-center space-x-2">
                   <n-button size="tiny" secondary round type="primary" @click.stop="askAI(result)">
-                    <template #icon><n-icon />
-                        <ChatbubblesOutline /></template>
+                    <template #icon><n-icon><ChatbubblesOutline /></n-icon></template>
                     {{ t('search.askAI', '问问 AI') }}
                   </n-button>
                 </div>
                 <n-button size="tiny" quaternary circle @click.stop="copyResultContent(result)">
-                  <template #icon><n-icon />
-                      <CopyOutline /></template>
+                  <template #icon><n-icon><CopyOutline /></n-icon></template>
                 </n-button>
               </div>
             </div>
@@ -163,8 +163,8 @@
           <div v-else-if="hasSearched && !loading"
             class="h-full flex flex-col items-center justify-center text-center p-12">
             <div
-              class="w-24 h-24 bg-gray-100 dark:bg-gray-800 rounded-[2.5rem] flex items-center justify-center text-4xl mb-6 grayscale opacity-50">
-              🔍
+              class="w-24 h-24 bg-gray-100 dark:bg-gray-800 rounded-[2.5rem] flex items-center justify-center mb-6 grayscale opacity-50">
+              <n-icon size="48" class="text-gray-400"><SearchOutline /></n-icon>
             </div>
             <h3 class="text-xl font-bold text-gray-700 dark:text-gray-200 mb-2">{{ t('search.noResults') }}</h3>
             <p class="text-gray-500 max-w-xs">{{ t('search.noResultsDesc') }}</p>
@@ -172,7 +172,9 @@
 
           <div v-else-if="!hasSearched && !loading"
             class="h-full flex flex-col items-center justify-center text-center p-12 opacity-30">
-            <div class="text-8xl mb-6">✨</div>
+            <div class="mb-6">
+              <n-icon size="64" class="text-gray-300 dark:text-gray-600"><SparklesOutline /></n-icon>
+            </div>
             <p class="text-xl font-medium text-gray-400">开始探索您的知识库</p>
           </div>
         </div>
@@ -180,7 +182,7 @@
     </div>
 
     <!-- 结果详情模态框 (现代风格) -->
-    <n-modal v-model:show="showDetailModal" preset="card" style="width: 800px; border-radius: 2rem;"
+    <n-modal v-model:show="showDetailModal" preset="card" style="width: min(800px, 90vw); border-radius: 2rem;"
       class="backdrop-blur-2xl bg-white/80 dark:bg-gray-900/80" :title="selectedResult?.filename">
       <div v-if="selectedResult" class="space-y-6 p-2">
         <div class="grid grid-cols-4 gap-4">
@@ -214,13 +216,11 @@
 
         <div class="flex justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-800/50">
           <n-button round secondary @click="copyResultContent(selectedResult)">
-            <template #icon><n-icon  />
-                <CopyOutline /></template>
+            <template #icon><n-icon><CopyOutline /></n-icon></template>
             {{ t('common.copy', '复制内容') }}
           </n-button>
           <n-button type="primary" round class="px-8 shadow-lg shadow-blue-500/20" @click="askAI(selectedResult)">
-            <template #icon><n-icon />
-                <ChatbubblesOutline /></template>
+            <template #icon><n-icon><ChatbubblesOutline /></n-icon></template>
             {{ t('search.askAI', '问问 AI') }}
           </n-button>
         </div>
@@ -234,7 +234,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDedupedMessage } from '@/utils/message'
 import { NIcon, NSpin, NRadioGroup, NRadio, NSpace, NCheckboxGroup, NCheckbox, NSelect, NTag, NButton, NModal } from 'naive-ui'
-import { SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline } from '@vicons/ionicons5'
+import { SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline, SparklesOutline, DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline } from '@vicons/ionicons5'
 import { searchKnowledge, getSearchSuggestions, getSearchStats } from '@/api/search'
 import type { SearchResult, SearchStats } from '@/api/search'
 import { debounce } from 'lodash-es'
@@ -286,8 +286,8 @@ const sortedResults = computed(() => {
 })
 
 const getFileTypeIcon = (type: string) => {
-  const map: Record<string, string> = { pdf: '📄', docx: '📝', xlsx: '📊', txt: '📃', md: '📝' }
-  return map[type.toLowerCase()] || '📄'
+  const map: Record<string, unknown> = { pdf: DocumentOutline, docx: DocumentTextOutline, xlsx: GridOutline, txt: DocumentTextOutline, md: NewspaperOutline }
+  return map[type.toLowerCase()] || DocumentOutline
 }
 
 const formatFileSize = (bytes: number) => {

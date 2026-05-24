@@ -10,6 +10,7 @@ from app.models.manual import SystemManual
 from app.models.rbac import Permission, Role, role_permission_association, user_organization_role_association
 from app.models.user_audit import UserLoginSession, UserActivityLog
 from app.models.knowledge_job import KnowledgeProcessingJob, KnowledgeJobStatus
+from app.models.user_settings import UserSettings
 from app.models.workflow import Workflow, WorkflowExecution, NodeDefinition
 
 __all__ = [
@@ -31,6 +32,7 @@ __all__ = [
     "UserActivityLog",
     "KnowledgeProcessingJob",
     "KnowledgeJobStatus",
+    "UserSettings",
     "Workflow",
     "WorkflowExecution",
     "NodeDefinition"

@@ -1,2305 +1,393 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=1200">
-<title>DocMind Architecture | Enterprise RAG Knowledge Base System</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DocMind Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-/* ============================================================
-   CSS Variables & Reset
-   ============================================================ */
-:root {
-  --bg: #0B0D17;
-  --bg-card: #111827;
-  --bg-card-hover: #1a2236;
-  --bg-sidebar: #0f1220;
-  --border: #1e293b;
-  --text: #e2e8f0;
-  --text-muted: #94a3b8;
-  --text-dim: #64748b;
-  --accent: #3b82f6;
-  --accent-glow: rgba(59, 130, 246, 0.3);
-  --green: #22c55e;
-  --green-dim: rgba(34, 197, 94, 0.15);
-  --green-glow: rgba(34, 197, 94, 0.3);
-  --blue: #3b82f6;
-  --blue-dim: rgba(59, 130, 246, 0.15);
-  --orange: #f59e0b;
-  --orange-dim: rgba(245, 158, 11, 0.15);
-  --purple: #a855f7;
-  --purple-dim: rgba(168, 85, 247, 0.15);
-  --red: #ef4444;
-  --red-dim: rgba(239, 68, 68, 0.15);
-  --cyan: #06b6d4;
-  --cyan-dim: rgba(6, 182, 212, 0.15);
-  --pink: #ec4899;
-  --pink-dim: rgba(236, 72, 153, 0.15);
-  --yellow: #eab308;
-  --sidebar-w: 260px;
-  --header-h: 64px;
-  --radius: 12px;
-  --radius-sm: 8px;
-}
-
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-html {
-  scroll-behavior: smooth;
-  font-size: 15px;
-}
-
+* { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Noto Sans SC', sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.6;
-  overflow-x: hidden;
-  min-width: 1200px;
-}
-
-/* ============================================================
-   Scrollbar
-   ============================================================ */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
-
-/* ============================================================
-   Sidebar Navigation
-   ============================================================ */
-.sidebar {
-  position: fixed;
-  left: 0; top: 0;
-  width: var(--sidebar-w);
-  height: 100vh;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
-.sidebar-logo {
-  padding: 20px 20px 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.sidebar-logo h1 {
-  font-size: 1.4rem;
-  font-weight: 700;
-  background: linear-gradient(135deg, var(--accent), var(--cyan));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  letter-spacing: -0.02em;
-}
-
-.sidebar-logo .subtitle {
-  font-size: 0.73rem;
-  color: var(--text-dim);
-  margin-top: 2px;
-  letter-spacing: 0.05em;
-}
-
-.nav-section {
-  padding: 12px 0 4px;
-}
-
-.nav-section-title {
-  padding: 4px 20px 8px;
-  font-size: 0.68rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text-dim);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  user-select: none;
-}
-
-.nav-section-title::after {
-  content: '';
-  width: 0; height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid var(--text-dim);
-  transition: transform 0.2s;
-}
-
-.nav-section.collapsed .nav-section-title::after {
-  transform: rotate(-90deg);
-}
-
-.nav-section.collapsed .nav-links { display: none; }
-
-.nav-links { list-style: none; }
-
-.nav-links a {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 20px;
-  color: var(--text-muted);
-  text-decoration: none;
-  font-size: 0.82rem;
-  transition: all 0.15s;
-  border-left: 2px solid transparent;
-}
-
-.nav-links a:hover {
-  color: var(--text);
-  background: rgba(255,255,255,0.03);
-  border-left-color: var(--accent);
-}
-
-.nav-links a.active {
-  color: var(--accent);
-  background: var(--blue-dim);
-  border-left-color: var(--accent);
-}
-
-.nav-dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-/* ============================================================
-   Main Content
-   ============================================================ */
-.main {
-  margin-left: var(--sidebar-w);
-  min-height: 100vh;
-}
-
-/* Header */
-.header {
-  position: sticky;
-  top: 0;
-  height: var(--header-h);
-  background: rgba(11, 13, 23, 0.85);
-  backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 40px;
-  z-index: 90;
-}
-
-.header-title {
-  font-size: 0.95rem;
-  font-weight: 500;
-  color: var(--text-muted);
-}
-
-.header-title span { color: var(--accent); font-weight: 600; }
-
-.header-badges {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.lang-toggle { display: flex; gap: 3px; background: var(--bg-card); border-radius: 8px; padding: 3px; border: 1px solid var(--border); margin-right: 12px; }
-.lang-btn { padding: 5px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: 600; background: transparent; color: var(--text-dim); transition: all 0.2s; }
-.lang-btn.active { background: var(--accent); color: white; }
-.lang-btn:hover:not(.active) { color: var(--text); }
-[data-lang="en"] { display: none; }
-body.lang-en [data-lang="zh"] { display: none; }
-body.lang-en [data-lang="en"] { display: block; }
-a[data-lang="en"], span[data-lang="en"] { display: none; }
-body.lang-en a[data-lang="zh"], body.lang-en span[data-lang="zh"] { display: none; }
-body.lang-en a[data-lang="en"], body.lang-en span[data-lang="en"] { display: inline; }
-body.lang-en div[data-lang="en"] { display: block; }
-div[data-lang="en"] { display: none; }
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  border: 1px solid;
-}
-
-.badge-python { color: var(--green); border-color: rgba(34,197,94,0.3); background: var(--green-dim); }
-.badge-ts { color: var(--blue); border-color: rgba(59,130,246,0.3); background: var(--blue-dim); }
-.badge-infra { color: var(--orange); border-color: rgba(245,158,11,0.3); background: var(--orange-dim); }
-
-/* Content area */
-.content {
-  padding: 40px;
-  max-width: 1400px;
-}
-
-/* ============================================================
-   Section Styles
-   ============================================================ */
-.section {
-  margin-bottom: 64px;
-  scroll-margin-top: calc(var(--header-h) + 20px);
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 28px;
-}
-
-.section-icon {
-  width: 40px; height: 40px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.2rem;
-  flex-shrink: 0;
-}
-
-.section-header h2 {
-  font-size: 1.5rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.section-header .en {
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  font-weight: 400;
-  margin-left: 8px;
-}
-body.lang-en .section-header .en { display: none; }
-body.lang-en .section-header .zh-inline { display: none; }
-.section-header .zh-inline { font-size: 0.8rem; color: var(--text-dim); font-weight: 400; margin-left: 8px; }
-
-.section-desc {
-  color: var(--text-muted);
-  font-size: 0.9rem;
-  margin-bottom: 24px;
-  max-width: 800px;
-}
-
-/* ============================================================
-   Hero / Overview Section
-   ============================================================ */
-.hero {
-  position: relative;
-  padding: 48px 0 40px;
-  margin-bottom: 48px;
-}
-
-.hero-title {
-  font-size: 2.6rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  line-height: 1.2;
-  margin-bottom: 12px;
-}
-
-.hero-title .gradient {
-  background: linear-gradient(135deg, var(--accent), var(--cyan), var(--purple));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.hero-subtitle {
-  font-size: 1.1rem;
-  color: var(--text-muted);
-  margin-bottom: 32px;
-  max-width: 700px;
-}
-
-.hero-stats {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 16px;
-  margin-bottom: 36px;
-}
-
-.stat-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-  text-align: center;
-  transition: all 0.3s;
-  position: relative;
-  overflow: hidden;
-}
-
-.stat-card::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 2px;
-}
-
-.stat-card:hover {
-  border-color: var(--accent);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-}
-
-.stat-card .number {
-  font-size: 1.8rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  line-height: 1.2;
-}
-
-.stat-card .label {
-  font-size: 0.72rem;
-  color: var(--text-dim);
-  margin-top: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.stat-card:nth-child(1)::before { background: var(--green); }
-.stat-card:nth-child(1) .number { color: var(--green); }
-.stat-card:nth-child(2)::before { background: var(--blue); }
-.stat-card:nth-child(2) .number { color: var(--blue); }
-.stat-card:nth-child(3)::before { background: var(--orange); }
-.stat-card:nth-child(3) .number { color: var(--orange); }
-.stat-card:nth-child(4)::before { background: var(--purple); }
-.stat-card:nth-child(4) .number { color: var(--purple); }
-.stat-card:nth-child(5)::before { background: var(--cyan); }
-.stat-card:nth-child(5) .number { color: var(--cyan); }
-.stat-card:nth-child(6)::before { background: var(--pink); }
-.stat-card:nth-child(6) .number { color: var(--pink); }
-
-/* Tech stack pills */
-.tech-stack {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.tech-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: 20px;
-  font-size: 0.78rem;
-  font-weight: 500;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  transition: all 0.2s;
-}
-
-.tech-pill:hover {
-  border-color: var(--accent);
-  background: var(--blue-dim);
-}
-
-.tech-pill .dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-}
-
-/* ============================================================
-   Architecture Diagram
-   ============================================================ */
-.arch-diagram {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 32px;
-  position: relative;
-  overflow: hidden;
-}
-
-.arch-diagram::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(ellipse 600px 300px at 20% 50%, rgba(59,130,246,0.04), transparent),
-    radial-gradient(ellipse 600px 300px at 80% 50%, rgba(34,197,94,0.04), transparent);
-  pointer-events: none;
-}
-
-.arch-layers {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  position: relative;
-}
-
-.arch-layer {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 20px;
-  position: relative;
-  background: rgba(255,255,255,0.01);
-}
-
-.arch-layer-label {
-  position: absolute;
-  top: -10px;
-  left: 20px;
-  background: var(--bg-card);
-  padding: 0 10px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.arch-layer-items {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.arch-item {
-  padding: 10px 16px;
-  border-radius: var(--radius-sm);
-  font-size: 0.78rem;
-  font-weight: 500;
-  border: 1px solid;
-  transition: all 0.2s;
-  cursor: default;
-  position: relative;
-}
-
-.arch-item:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-}
-
-.arch-item.python { color: var(--green); border-color: rgba(34,197,94,0.3); background: var(--green-dim); }
-.arch-item.ts { color: var(--blue); border-color: rgba(59,130,246,0.3); background: var(--blue-dim); }
-.arch-item.infra { color: var(--orange); border-color: rgba(245,158,11,0.3); background: var(--orange-dim); }
-.arch-item.purple { color: var(--purple); border-color: rgba(168,85,247,0.3); background: var(--purple-dim); }
-.arch-item.cyan { color: var(--cyan); border-color: rgba(6,182,212,0.3); background: var(--cyan-dim); }
-.arch-item.red { color: var(--red); border-color: rgba(239,68,68,0.3); background: var(--red-dim); }
-
-.arch-arrow {
-  display: flex;
-  justify-content: center;
-  padding: 4px 0;
-  color: var(--text-dim);
-  font-size: 1.2rem;
-  position: relative;
-}
-
-.arch-arrow::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 10%;
-  right: 10%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--border), var(--accent), var(--border), transparent);
-}
-
-.arch-arrow span {
-  background: var(--bg-card);
-  padding: 0 12px;
-  position: relative;
-  z-index: 1;
-  font-size: 0.7rem;
-  color: var(--text-dim);
-}
-
-/* ============================================================
-   Module Cards Grid
-   ============================================================ */
-.module-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 16px;
-}
-
-.module-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 24px;
-  transition: all 0.3s;
-  position: relative;
-  overflow: hidden;
-}
-
-.module-card::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0;
-  width: 3px;
-  height: 100%;
-}
-
-.module-card:hover {
-  border-color: var(--accent);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-}
-
-.module-card.python::before { background: var(--green); }
-.module-card.ts::before { background: var(--blue); }
-.module-card.infra::before { background: var(--orange); }
-
-.module-card-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.module-card-icon {
-  width: 36px; height: 36px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1rem;
-  flex-shrink: 0;
-}
-
-.module-card.python .module-card-icon { background: var(--green-dim); color: var(--green); }
-.module-card.ts .module-card-icon { background: var(--blue-dim); color: var(--blue); }
-.module-card.infra .module-card-icon { background: var(--orange-dim); color: var(--orange); }
-
-.module-card h3 {
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.module-card .path {
-  font-size: 0.7rem;
-  color: var(--text-dim);
-  font-family: 'Consolas', 'Monaco', monospace;
-}
-
-.module-card .desc {
-  font-size: 0.82rem;
-  color: var(--text-muted);
-  margin-bottom: 14px;
-  line-height: 1.5;
-}
-
-.file-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.file-tag {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 0.68rem;
-  font-family: 'Consolas', 'Monaco', monospace;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.06);
-  color: var(--text-muted);
-  transition: all 0.15s;
-}
-
-.file-tag:hover {
-  background: rgba(255,255,255,0.08);
-  color: var(--text);
-}
-
-/* ============================================================
-   Flow Diagrams (CSS-based)
-   ============================================================ */
-.flow-container {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 32px;
-  position: relative;
-  overflow: hidden;
-}
-
-.flow-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 24px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.flow-row {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  margin-bottom: 16px;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-
-.flow-node {
-  padding: 10px 18px;
-  border-radius: var(--radius-sm);
-  font-size: 0.78rem;
-  font-weight: 500;
-  border: 1px solid;
-  white-space: nowrap;
-  flex-shrink: 0;
-  transition: all 0.2s;
-  position: relative;
-}
-
-.flow-node:hover {
-  transform: scale(1.03);
-  z-index: 2;
-}
-
-.flow-node.green { color: var(--green); border-color: rgba(34,197,94,0.3); background: var(--green-dim); }
-.flow-node.blue { color: var(--blue); border-color: rgba(59,130,246,0.3); background: var(--blue-dim); }
-.flow-node.orange { color: var(--orange); border-color: rgba(245,158,11,0.3); background: var(--orange-dim); }
-.flow-node.purple { color: var(--purple); border-color: rgba(168,85,247,0.3); background: var(--purple-dim); }
-.flow-node.cyan { color: var(--cyan); border-color: rgba(6,182,212,0.3); background: var(--cyan-dim); }
-.flow-node.red { color: var(--red); border-color: rgba(239,68,68,0.3); background: var(--red-dim); }
-.flow-node.pink { color: var(--pink); border-color: rgba(236,72,153,0.3); background: var(--pink-dim); }
-
-.flow-arrow {
-  display: flex;
-  align-items: center;
-  padding: 0 6px;
-  color: var(--text-dim);
-  font-size: 1rem;
-  flex-shrink: 0;
-  position: relative;
-}
-
-.flow-arrow svg {
-  width: 32px;
-  height: 16px;
-}
-
-.flow-arrow-line {
-  stroke: var(--text-dim);
-  stroke-width: 1.5;
-  fill: none;
-  stroke-dasharray: 6 3;
-  animation: flowDash 1.5s linear infinite;
-}
-
-@keyframes flowDash {
-  to { stroke-dashoffset: -18; }
-}
-
-/* Animated data flow particles */
-.flow-particle {
-  position: absolute;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent);
-  animation: particleMove 3s linear infinite;
-}
-
-@keyframes particleMove {
-  0% { left: 0%; opacity: 0; }
-  10% { opacity: 1; }
-  90% { opacity: 1; }
-  100% { left: 100%; opacity: 0; }
-}
-
-/* ============================================================
-   RAG Pipeline
-   ============================================================ */
-.rag-pipeline {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.rag-stage {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 16px 20px;
-  background: rgba(255,255,255,0.02);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  transition: all 0.2s;
-}
-
-.rag-stage:hover {
-  background: rgba(255,255,255,0.04);
-  border-color: var(--accent);
-}
-
-.rag-stage-num {
-  width: 32px; height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.8rem;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.rag-stage-content h4 {
-  font-size: 0.9rem;
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-
-.rag-stage-content p {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-}
-
-.rag-stage-detail {
-  margin-left: auto;
-  font-size: 0.7rem;
-  color: var(--text-dim);
-  font-family: 'Consolas', 'Monaco', monospace;
-  text-align: right;
-  flex-shrink: 0;
-}
-
-.rag-connector {
-  display: flex;
-  justify-content: center;
-  color: var(--text-dim);
-  font-size: 0.8rem;
-  padding: 2px 0;
-}
-
-/* ============================================================
-   Agent System
-   ============================================================ */
-.agent-diagram {
-  display: grid;
-  grid-template-columns: 1fr 2fr 1fr;
-  gap: 20px;
-  align-items: start;
-}
-
-.agent-box {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-}
-
-.agent-box h4 {
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.agent-center {
-  position: relative;
-}
-
-.agent-core {
-  text-align: center;
-  padding: 24px;
-  background: linear-gradient(135deg, var(--purple-dim), var(--blue-dim));
-  border: 1px solid rgba(168,85,247,0.3);
-  border-radius: var(--radius);
-  margin-bottom: 16px;
-}
-
-.agent-core h3 {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--purple);
-  margin-bottom: 4px;
-}
-
-.agent-core p {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-}
-
-.tool-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 8px;
-}
-
-.tool-item {
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 0.72rem;
-  font-weight: 500;
-  border: 1px solid rgba(255,255,255,0.06);
-  background: rgba(255,255,255,0.02);
-  color: var(--text-muted);
-  transition: all 0.2s;
-  text-align: center;
-}
-
-.tool-item:hover {
-  background: rgba(255,255,255,0.05);
-  color: var(--text);
-  border-color: var(--accent);
-}
-
-/* ============================================================
-   Security Layers
-   ============================================================ */
-.security-layers {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.security-layer {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 16px 24px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.01);
-  transition: all 0.2s;
-}
-
-.security-layer:hover {
-  background: rgba(255,255,255,0.03);
-  border-color: var(--red);
-}
-
-.security-layer-icon {
-  width: 40px; height: 40px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.1rem;
-  flex-shrink: 0;
-  background: var(--red-dim);
-}
-
-.security-layer-content {
-  flex: 1;
-}
-
-.security-layer-content h4 {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--red);
-  margin-bottom: 2px;
-}
-
-.security-layer-content p {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-}
-
-.security-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  flex-shrink: 0;
-  max-width: 400px;
-  justify-content: flex-end;
-}
-
-.security-tag {
-  padding: 3px 10px;
-  border-radius: 4px;
-  font-size: 0.68rem;
-  font-weight: 500;
-  background: var(--red-dim);
-  color: var(--red);
-  border: 1px solid rgba(239,68,68,0.2);
-}
-
-/* ============================================================
-   Data Flow Animation
-   ============================================================ */
-.dataflow-track {
-  position: relative;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 32px;
-  overflow: hidden;
-}
-
-.dataflow-line {
-  position: relative;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-}
-
-.dataflow-line::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 40px;
-  right: 40px;
-  height: 2px;
-  background: linear-gradient(90deg,
-    var(--green) 0%, var(--blue) 20%, var(--orange) 40%,
-    var(--purple) 60%, var(--cyan) 80%, var(--accent) 100%);
-  opacity: 0.4;
-}
-
-.dataflow-node {
-  position: relative;
-  z-index: 2;
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
-  font-size: 0.75rem;
-  font-weight: 600;
-  border: 1px solid;
-  background: var(--bg-card);
-  white-space: nowrap;
-}
-
-/* Animated pulse along the data flow */
-@keyframes dataPulse {
-  0% { left: 0%; opacity: 0; transform: scale(0.5); }
-  5% { opacity: 1; transform: scale(1); }
-  95% { opacity: 1; transform: scale(1); }
-  100% { left: calc(100% - 8px); opacity: 0; transform: scale(0.5); }
-}
-
-.dataflow-particle {
-  position: absolute;
-  top: 50%;
-  width: 8px;
-  height: 8px;
-  margin-top: -4px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 12px var(--accent), 0 0 24px rgba(59,130,246,0.3);
-  animation: dataPulse 4s linear infinite;
-  z-index: 3;
-}
-
-.dataflow-particle:nth-child(2) { animation-delay: -1s; background: var(--green); box-shadow: 0 0 12px var(--green); }
-.dataflow-particle:nth-child(3) { animation-delay: -2s; background: var(--purple); box-shadow: 0 0 12px var(--purple); }
-.dataflow-particle:nth-child(4) { animation-delay: -3s; background: var(--orange); box-shadow: 0 0 12px var(--orange); }
-
-/* ============================================================
-   Test Coverage
-   ============================================================ */
-.test-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-}
-
-.test-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 24px;
-  text-align: center;
-  transition: all 0.3s;
-}
-
-.test-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-}
-
-.test-card .test-number {
-  font-size: 2.2rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  line-height: 1;
-  margin-bottom: 4px;
-}
-
-.test-card .test-label {
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.test-card .test-bar {
-  margin-top: 12px;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255,255,255,0.06);
-  overflow: hidden;
-}
-
-.test-card .test-bar-fill {
-  height: 100%;
-  border-radius: 2px;
-  transition: width 1.5s ease-out;
-}
-
-/* ============================================================
-   Infra Section
-   ============================================================ */
-.infra-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-}
-
-.infra-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  transition: all 0.3s;
-}
-
-.infra-card:hover {
-  border-color: var(--orange);
-  transform: translateY(-2px);
-}
-
-.infra-icon {
-  width: 44px; height: 44px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.2rem;
-  flex-shrink: 0;
-  background: var(--orange-dim);
-}
-
-.infra-info h4 {
-  font-size: 0.9rem;
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-
-.infra-info p {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  line-height: 1.5;
-}
-
-/* ============================================================
-   SVG Architecture Diagram
-   ============================================================ */
-.svg-arch {
-  width: 100%;
-  overflow-x: auto;
-}
-
-.svg-arch svg {
-  display: block;
-  margin: 0 auto;
-}
-
-/* ============================================================
-   Footer
-   ============================================================ */
-.footer {
-  border-top: 1px solid var(--border);
-  padding: 24px 40px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  color: var(--text-dim);
-  font-size: 0.75rem;
-}
-
-.footer a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.footer a:hover { text-decoration: underline; }
-
-/* ============================================================
-   Animations
-   ============================================================ */
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.animate-in {
-  animation: fadeInUp 0.5s ease-out forwards;
-  opacity: 0;
-}
-
-.delay-1 { animation-delay: 0.1s; }
-.delay-2 { animation-delay: 0.2s; }
-.delay-3 { animation-delay: 0.3s; }
-.delay-4 { animation-delay: 0.4s; }
-.delay-5 { animation-delay: 0.5s; }
-
-/* Glow effect on section icons */
-.glow-green { box-shadow: 0 0 20px rgba(34,197,94,0.2); }
-.glow-blue { box-shadow: 0 0 20px rgba(59,130,246,0.2); }
-.glow-orange { box-shadow: 0 0 20px rgba(245,158,11,0.2); }
-.glow-purple { box-shadow: 0 0 20px rgba(168,85,247,0.2); }
-.glow-red { box-shadow: 0 0 20px rgba(239,68,68,0.2); }
-.glow-cyan { box-shadow: 0 0 20px rgba(6,182,212,0.2); }
-
-/* Grid pattern background */
-.grid-bg {
-  background-image:
-    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
-  background-size: 40px 40px;
-}
-
-/* Responsive adjustments */
-@media (max-width: 1400px) {
-  .hero-stats { grid-template-columns: repeat(3, 1fr); }
-  .module-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
-  .agent-diagram { grid-template-columns: 1fr; }
-  .infra-grid { grid-template-columns: repeat(2, 1fr); }
-  .test-grid { grid-template-columns: repeat(2, 1fr); }
-}
+  background: #020617;
+  font-family: 'JetBrains Mono', monospace;
+  color: #e2e8f0;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 40px 20px;
+}
+.container { max-width: 1200px; width: 100%; }
+.header { text-align: center; margin-bottom: 40px; }
+.header h1 { font-size: 28px; font-weight: 700; color: #f1f5f9; }
+.header h1 span { color: #22d3ee; }
+.header .subtitle { font-size: 12px; color: #64748b; margin-top: 8px; }
+.pulse-dot {
+  display: inline-block; width: 10px; height: 10px;
+  background: #22d3ee; border-radius: 50%; margin-right: 10px;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,211,238,0.4); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 8px rgba(34,211,238,0); }
+}
+.diagram-card {
+  background: #0f172a; border: 1px solid #1e293b; border-radius: 16px;
+  padding: 30px; margin-bottom: 40px; overflow-x: auto;
+}
+.diagram-card svg { display: block; margin: 0 auto; }
+.info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 40px; }
+.card {
+  background: #0f172a; border: 1px solid #1e293b; border-radius: 12px;
+  padding: 24px; transition: border-color 0.2s;
+}
+.card:hover { border-color: #334155; }
+.card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.card-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.card-dot.cyan { background: #22d3ee; }
+.card-dot.emerald { background: #34d399; }
+.card-dot.violet { background: #a78bfa; }
+.card h3 { font-size: 13px; font-weight: 600; color: #f1f5f9; }
+.card ul { list-style: none; }
+.card li { font-size: 11px; color: #94a3b8; line-height: 1.8; }
+.card li::before { content: "→ "; color: #475569; }
+.footer { text-align: center; font-size: 10px; color: #475569; padding-top: 20px; border-top: 1px solid #1e293b; }
+@media (max-width: 768px) { .info-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
-
-<!-- ============================================================
-     Sidebar Navigation
-     ============================================================ -->
-<nav class="sidebar">
-  <div class="sidebar-logo">
-    <h1>DocMind</h1>
-    <div class="subtitle"><span data-lang="zh">企业级 RAG 知识库</span><span data-lang="en">Enterprise RAG Knowledge Base</span></div>
-  </div>
-
-  <div class="nav-section">
-    <div class="nav-section-title"><span data-lang="zh">概览</span><span data-lang="en">Overview</span></div>
-    <ul class="nav-links">
-      <li><a href="#overview" class="active"><span class="nav-dot" style="background:var(--accent)"></span><span data-lang="zh">项目概览</span><span data-lang="en">Project Overview</span></a></li>
-      <li><a href="#tech-stack"><span class="nav-dot" style="background:var(--cyan)"></span><span data-lang="zh">技术栈</span><span data-lang="en">Tech Stack</span></a></li>
-    </ul>
-  </div>
-
-  <div class="nav-section">
-    <div class="nav-section-title"><span data-lang="zh">架构</span><span data-lang="en">Architecture</span></div>
-    <ul class="nav-links">
-      <li><a href="#architecture"><span class="nav-dot" style="background:var(--purple)"></span><span data-lang="zh">系统架构</span><span data-lang="en">System Architecture</span></a></li>
-      <li><a href="#backend"><span class="nav-dot" style="background:var(--green)"></span><span data-lang="zh">后端模块</span><span data-lang="en">Backend Modules</span></a></li>
-      <li><a href="#frontend"><span class="nav-dot" style="background:var(--blue)"></span><span data-lang="zh">前端模块</span><span data-lang="en">Frontend Modules</span></a></li>
-    </ul>
-  </div>
-
-  <div class="nav-section">
-    <div class="nav-section-title"><span data-lang="zh">核心系统</span><span data-lang="en">Core Systems</span></div>
-    <ul class="nav-links">
-      <li><a href="#rag-pipeline"><span class="nav-dot" style="background:var(--purple)"></span><span data-lang="zh">RAG 管线</span><span data-lang="en">RAG Pipeline</span></a></li>
-      <li><a href="#agent-system"><span class="nav-dot" style="background:var(--cyan)"></span><span data-lang="zh">Agent 系统</span><span data-lang="en">Agent System</span></a></li>
-      <li><a href="#dataflow"><span class="nav-dot" style="background:var(--orange)"></span><span data-lang="zh">数据流程</span><span data-lang="en">Data Flow</span></a></li>
-    </ul>
-  </div>
-
-  <div class="nav-section">
-    <div class="nav-section-title"><span data-lang="zh">基础设施</span><span data-lang="en">Infrastructure</span></div>
-    <ul class="nav-links">
-      <li><a href="#infrastructure"><span class="nav-dot" style="background:var(--orange)"></span><span data-lang="zh">基础设施</span><span data-lang="en">Infrastructure</span></a></li>
-      <li><a href="#security"><span class="nav-dot" style="background:var(--red)"></span><span data-lang="zh">安全体系</span><span data-lang="en">Security Layers</span></a></li>
-      <li><a href="#testing"><span class="nav-dot" style="background:var(--green)"></span><span data-lang="zh">测试与质量</span><span data-lang="en">Testing & Quality</span></a></li>
-    </ul>
-  </div>
-
-  <div style="flex:1"></div>
-  <div style="padding:16px 20px; border-top:1px solid var(--border); font-size:0.68rem; color:var(--text-dim);">
-    <div style="margin-bottom:4px;"><span data-lang="zh">更新于 2026-05-10</span><span data-lang="en">Last updated: 2026-05-10</span></div>
-    <div><span data-lang="zh">版本 1.0.0</span><span data-lang="en">Version 1.0.0</span></div>
-  </div>
-</nav>
-
-<!-- ============================================================
-     Main Content
-     ============================================================ -->
-<div class="main">
-
-  <!-- Header -->
-  <header class="header">
-    <div class="header-title">
-      <span>DocMind</span> Architecture Visualization
-    </div>
-    <div class="header-badges">
-      <div class="lang-toggle">
-        <button class="lang-btn active" onclick="setLang('zh')">中文</button>
-        <button class="lang-btn" onclick="setLang('en')">EN</button>
-      </div>
-      <span class="badge badge-python">Python 3.11+</span>
-      <span class="badge badge-ts">TypeScript 5.x</span>
-      <span class="badge badge-infra">Docker + K8s</span>
-    </div>
-  </header>
-
-  <div class="content">
-
-    <!-- ============================================================
-         Section 1: Project Overview (Hero)
-         ============================================================ -->
-    <section id="overview" class="section hero">
-      <div class="hero-title animate-in">
-        <span class="gradient">DocMind</span>
-        <br><span data-lang="zh">企业级 RAG 智能知识库系统</span><span data-lang="en">Enterprise RAG Knowledge Base System</span>
-      </div>
-      <p class="hero-subtitle animate-in delay-1">
-        <span data-lang="zh">全栈 AI 知识库系统，支持 RAG 检索增强生成、文档管理、混合搜索、流式问答、自主 Agent 工具调用。</span>
-        <span data-lang="en">Full-stack AI knowledge base system with RAG (Retrieval-Augmented Generation), document management, hybrid search, streaming Q&A, and an autonomous Agent with tool calling.</span>
-      </p>
-
-      <!-- Stats -->
-      <div class="hero-stats animate-in delay-2">
-        <div class="stat-card">
-          <div class="number">25K+</div>
-          <div class="label"><span data-lang="zh">代码行数</span><span data-lang="en">Lines of Code</span></div>
-        </div>
-        <div class="stat-card">
-          <div class="number">15</div>
-          <div class="label"><span data-lang="zh">API 模块</span><span data-lang="en">API Modules</span></div>
-        </div>
-        <div class="stat-card">
-          <div class="number">12</div>
-          <div class="label"><span data-lang="zh">数据模型</span><span data-lang="en">Data Models</span></div>
-        </div>
-        <div class="stat-card">
-          <div class="number">11</div>
-          <div class="label"><span data-lang="zh">Agent 工具</span><span data-lang="en">Agent Tools</span></div>
-        </div>
-        <div class="stat-card">
-          <div class="number">311</div>
-          <div class="label"><span data-lang="zh">自动化测试</span><span data-lang="en">Total Tests</span></div>
-        </div>
-        <div class="stat-card">
-          <div class="number">12</div>
-          <div class="label"><span data-lang="zh">优化轮次</span><span data-lang="en">Optimization Rounds</span></div>
-        </div>
-      </div>
-
-      <!-- Tech Stack -->
-      <div class="tech-stack animate-in delay-3">
-        <span class="tech-pill"><span class="dot" style="background:var(--green)"></span>FastAPI</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--green)"></span>SQLAlchemy 2.0</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--blue)"></span>Vue 3</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--blue)"></span>TypeScript</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--blue)"></span>Naive UI</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--orange)"></span>MySQL 8</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--orange)"></span>Redis</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--orange)"></span>Elasticsearch 8</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--orange)"></span>Kafka</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--orange)"></span>MinIO</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--purple)"></span>DeepSeek API</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--purple)"></span>LangChain</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--cyan)"></span>Pinia</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--cyan)"></span>Vue Router</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--pink)"></span>Prometheus</span>
-        <span class="tech-pill"><span class="dot" style="background:var(--pink)"></span>Grafana</span>
-      </div>
-    </section>
-
-    <!-- ============================================================
-         Section 2: System Architecture
-         ============================================================ -->
-    <section id="architecture" class="section">
-      <div class="section-header">
-        <div class="section-icon glow-purple" style="background:var(--purple-dim); color:var(--purple);">A</div>
-        <h2><span data-lang="zh">系统架构</span><span data-lang="en">System Architecture</span></h2>
-      </div>
-      <p class="section-desc">
-        <span data-lang="zh">多层架构，关注点分离：表现层（Vue 3）→ API 层（FastAPI）→ 业务层（Services）→ 数据层（Models + Infrastructure）。</span>
-        <span data-lang="en">Multi-layered architecture with clear separation of concerns: Presentation Layer (Vue 3) -> API Layer (FastAPI) -> Business Layer (Services) -> Data Layer (Models + Infrastructure).</span>
-      </p>
-
-      <div class="arch-diagram">
-        <div class="arch-layers">
-
-          <!-- Client Layer -->
-          <div class="arch-layer">
-            <div class="arch-layer-label" style="color:var(--blue);">CLIENT LAYER / 客户端层</div>
-            <div class="arch-layer-items">
-              <div class="arch-item ts">Vue 3 SPA</div>
-              <div class="arch-item ts">Naive UI Components</div>
-              <div class="arch-item ts">Pinia State Management</div>
-              <div class="arch-item ts">Vue Router</div>
-              <div class="arch-item ts">SSE / WebSocket Client</div>
-              <div class="arch-item ts">Axios HTTP Client</div>
-            </div>
-          </div>
-
-          <div class="arch-arrow"><span>HTTP / WebSocket / SSE</span></div>
-
-          <!-- API Layer -->
-          <div class="arch-layer">
-            <div class="arch-layer-label" style="color:var(--green);">API LAYER / API 网关层</div>
-            <div class="arch-layer-items">
-              <div class="arch-item python">Auth Router</div>
-              <div class="arch-item python">Chat Router</div>
-              <div class="arch-item python">Documents Router</div>
-              <div class="arch-item python">Knowledge Router</div>
-              <div class="arch-item python">Agent Router</div>
-              <div class="arch-item python">Monitoring Router</div>
-              <div class="arch-item python">Workflow Router</div>
-              <div class="arch-item python">+ 7 more routers</div>
-            </div>
-          </div>
-
-          <div class="arch-arrow"><span>Dependency Injection / Service Layer</span></div>
-
-          <!-- Business Layer -->
-          <div class="arch-layer">
-            <div class="arch-layer-label" style="color:var(--purple);">BUSINESS LAYER / 业务逻辑层</div>
-            <div class="arch-layer-items">
-              <div class="arch-item purple">RAG Pipeline</div>
-              <div class="arch-item purple">Agent Engine</div>
-              <div class="arch-item purple">Document Parser</div>
-              <div class="arch-item purple">Embedding Service</div>
-              <div class="arch-item purple">Knowledge Service</div>
-              <div class="arch-item purple">Workflow Engine</div>
-              <div class="arch-item purple">Graph RAG Service</div>
-              <div class="arch-item purple">Memory Service</div>
-              <div class="arch-item purple">Semantic Chunker</div>
-            </div>
-          </div>
-
-          <div class="arch-arrow"><span>ORM / SDK / Client Libraries</span></div>
-
-          <!-- Data Layer -->
-          <div class="arch-layer">
-            <div class="arch-layer-label" style="color:var(--orange);">DATA LAYER / 数据存储层</div>
-            <div class="arch-layer-items">
-              <div class="arch-item infra">MySQL 8</div>
-              <div class="arch-item infra">Redis</div>
-              <div class="arch-item infra">Elasticsearch 8</div>
-              <div class="arch-item infra">Kafka</div>
-              <div class="arch-item infra">MinIO</div>
-              <div class="arch-item infra">Prometheus</div>
-            </div>
-          </div>
-
-          <div class="arch-arrow"><span>Container Network / Docker Compose</span></div>
-
-          <!-- Infrastructure Layer -->
-          <div class="arch-layer">
-            <div class="arch-layer-label" style="color:var(--cyan);">INFRASTRUCTURE / 基础设施层</div>
-            <div class="arch-layer-items">
-              <div class="arch-item cyan">Circuit Breaker</div>
-              <div class="arch-item cyan">Rate Limiter</div>
-              <div class="arch-item cyan">Distributed Tracing</div>
-              <div class="arch-item cyan">Structured Logging</div>
-              <div class="arch-item cyan">Health Checks</div>
-              <div class="arch-item cyan">Cache Layer</div>
-              <div class="arch-item cyan">Kafka Worker</div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-    </section>
-
-    <!-- ============================================================
-         Section 3: Backend Modules
-         ============================================================ -->
-    <section id="backend" class="section">
-      <div class="section-header">
-        <div class="section-icon glow-green" style="background:var(--green-dim); color:var(--green);">P</div>
-        <h2><span data-lang="zh">后端模块</span><span data-lang="en">Backend Modules</span></h2>
-      </div>
-      <p class="section-desc">
-        <span data-lang="zh">Python（FastAPI）后端遵循 Router → Service → Model 模式，15 个 API 端点、17 个业务服务、12 个数据模型。</span>
-        <span data-lang="en">Python (FastAPI) backend following the Router -> Service -> Model pattern. 15 API endpoints, 17 business services, 12 SQLAlchemy models.</span>
-      </p>
-
-      <div class="module-grid">
-
-        <!-- API Endpoints -->
-        <div class="module-card python animate-in">
-          <div class="module-card-header">
-            <div class="module-card-icon">E</div>
-            <div>
-              <h3>API Endpoints</h3>
-              <div class="path">backend/app/api/v1/endpoints/</div>
-            </div>
-          </div>
-          <div class="desc">14 FastAPI routers handling REST API, WebSocket, and SSE streaming endpoints.</div>
-          <div class="file-list">
-            <span class="file-tag">auth.py</span>
-            <span class="file-tag">chat.py</span>
-            <span class="file-tag">documents.py</span>
-            <span class="file-tag">knowledge.py</span>
-            <span class="file-tag">agent.py</span>
-            <span class="file-tag">monitoring.py</span>
-            <span class="file-tag">workflow.py</span>
-            <span class="file-tag">users.py</span>
-            <span class="file-tag">organizations.py</span>
-            <span class="file-tag">prompts.py</span>
-            <span class="file-tag">manuals.py</span>
-            <span class="file-tag">memory.py</span>
-            <span class="file-tag">files.py</span>
-            <span class="file-tag">notifications.py</span>
-          </div>
-        </div>
-
-        <!-- Services -->
-        <div class="module-card python animate-in delay-1">
-          <div class="module-card-header">
-            <div class="module-card-icon">S</div>
-            <div>
-              <h3>Business Services</h3>
-              <div class="path">backend/app/services/</div>
-            </div>
-          </div>
-          <div class="desc">Core business logic: authentication, document processing, embeddings, RAG, workflows, and graph-based retrieval.</div>
-          <div class="file-list">
-            <span class="file-tag">auth_service.py</span>
-            <span class="file-tag">embedding_service.py</span>
-            <span class="file-tag">document_parser.py</span>
-            <span class="file-tag">knowledge_service.py</span>
-            <span class="file-tag">rag_service.py</span>
-            <span class="file-tag">graph_rag_service.py</span>
-            <span class="file-tag">workflow_engine.py</span>
-            <span class="file-tag">memory_service.py</span>
-            <span class="file-tag">semantic_chunker.py</span>
-            <span class="file-tag">file_service.py</span>
-            <span class="file-tag">masking_service.py</span>
-            <span class="file-tag">permission_service.py</span>
-            <span class="file-tag">audit_service.py</span>
-            <span class="file-tag">organization_service.py</span>
-          </div>
-        </div>
-
-        <!-- RAG Pipeline -->
-        <div class="module-card python animate-in delay-2">
-          <div class="module-card-header">
-            <div class="module-card-icon">R</div>
-            <div>
-              <h3>RAG Pipeline</h3>
-              <div class="path">backend/app/rag/</div>
-            </div>
-          </div>
-          <div class="desc">Retrieval-Augmented Generation pipeline with hybrid search, reranking, context compression, and evaluation.</div>
-          <div class="file-list">
-            <span class="file-tag">pipeline.py</span>
-            <span class="file-tag">retriever.py</span>
-            <span class="file-tag">reranker.py</span>
-            <span class="file-tag">context_window.py</span>
-            <span class="file-tag">context_compressor.py</span>
-            <span class="file-tag">query_processor.py</span>
-            <span class="file-tag">evaluator.py</span>
-            <span class="file-tag">cache.py</span>
-            <span class="file-tag">metrics.py</span>
-          </div>
-        </div>
-
-        <!-- Agent System -->
-        <div class="module-card python animate-in delay-3">
-          <div class="module-card-header">
-            <div class="module-card-icon">A</div>
-            <div>
-              <h3>Agent System</h3>
-              <div class="path">backend/app/agent/</div>
-            </div>
-          </div>
-          <div class="desc">ReAct-style autonomous agent with self-registering tools, skill learning, and subagent delegation.</div>
-          <div class="file-list">
-            <span class="file-tag">registry.py</span>
-            <span class="file-tag">loop.py</span>
-            <span class="file-tag">context.py</span>
-            <span class="file-tag">skills.py</span>
-            <span class="file-tag">subagent.py</span>
-            <span class="file-tag">tools.py</span>
-            <span class="file-tag">service.py</span>
-          </div>
-        </div>
-
-        <!-- Models -->
-        <div class="module-card python animate-in delay-4">
-          <div class="module-card-header">
-            <div class="module-card-icon">M</div>
-            <div>
-              <h3>Data Models</h3>
-              <div class="path">backend/app/models/</div>
-            </div>
-          </div>
-          <div class="desc">SQLAlchemy 2.0 models using modern Mapped + mapped_column syntax. 12 domain models with relationships.</div>
-          <div class="file-list">
-            <span class="file-tag">user.py</span>
-            <span class="file-tag">chat.py</span>
-            <span class="file-tag">document.py</span>
-            <span class="file-tag">knowledge_job.py</span>
-            <span class="file-tag">organization.py</span>
-            <span class="file-tag">rbac.py</span>
-            <span class="file-tag">prompt.py</span>
-            <span class="file-tag">manual.py</span>
-            <span class="file-tag">workflow.py</span>
-            <span class="file-tag">notification.py</span>
-            <span class="file-tag">user_audit.py</span>
-          </div>
-        </div>
-
-        <!-- Core Infrastructure -->
-        <div class="module-card python animate-in delay-5">
-          <div class="module-card-header">
-            <div class="module-card-icon">C</div>
-            <div>
-              <h3>Core Infrastructure</h3>
-              <div class="path">backend/app/core/</div>
-            </div>
-          </div>
-          <div class="desc">Infrastructure layer: database, cache, search, messaging, security, observability, and configuration.</div>
-          <div class="file-list">
-            <span class="file-tag">database.py</span>
-            <span class="file-tag">redis.py</span>
-            <span class="file-tag">elasticsearch.py</span>
-            <span class="file-tag">kafka_client.py</span>
-            <span class="file-tag">minio_client.py</span>
-            <span class="file-tag">security.py</span>
-            <span class="file-tag">circuit_breaker.py</span>
-            <span class="file-tag">prometheus.py</span>
-            <span class="file-tag">tracing.py</span>
-            <span class="file-tag">logging.py</span>
-            <span class="file-tag">middleware.py</span>
-            <span class="file-tag">config/</span>
-          </div>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ============================================================
-         Section 4: Frontend Modules
-         ============================================================ -->
-    <section id="frontend" class="section">
-      <div class="section-header">
-        <div class="section-icon glow-blue" style="background:var(--blue-dim); color:var(--blue);">V</div>
-        <h2><span data-lang="zh">前端模块</span><span data-lang="en">Frontend Modules</span></h2>
-      </div>
-      <p class="section-desc">
-        <span data-lang="zh">Vue 3 + TypeScript + Naive UI 前端，20+ 页面组件，Pinia 状态管理，组合式函数，实时流式传输支持。</span>
-        <span data-lang="en">Vue 3 + TypeScript + Naive UI frontend with 20+ views, Pinia state management, composables, and real-time streaming support.</span>
-      </p>
-
-      <div class="module-grid">
-
-        <!-- Views -->
-        <div class="module-card ts">
-          <div class="module-card-header">
-            <div class="module-card-icon">V</div>
-            <div>
-              <h3>Page Views</h3>
-              <div class="path">frontend/src/views/</div>
-            </div>
-          </div>
-          <div class="desc">20+ page components covering chat, knowledge management, agent, dashboard, monitoring, workflow, and admin features.</div>
-          <div class="file-list">
-            <span class="file-tag">chat/</span>
-            <span class="file-tag">knowledge/</span>
-            <span class="file-tag">agent/</span>
-            <span class="file-tag">dashboard/</span>
-            <span class="file-tag">monitoring/</span>
-            <span class="file-tag">workflow/</span>
-            <span class="file-tag">documents/</span>
-            <span class="file-tag">search/</span>
-            <span class="file-tag">conversations/</span>
-            <span class="file-tag">upload/</span>
-            <span class="file-tag">login/</span>
-            <span class="file-tag">users/</span>
-            <span class="file-tag">organizations/</span>
-            <span class="file-tag">prompts/</span>
-            <span class="file-tag">manual/</span>
-            <span class="file-tag">notifications/</span>
-            <span class="file-tag">profile/</span>
-            <span class="file-tag">admin/</span>
-            <span class="file-tag">firsthome/</span>
-            <span class="file-tag">system-about/</span>
-          </div>
-        </div>
-
-        <!-- Stores -->
-        <div class="module-card ts">
-          <div class="module-card-header">
-            <div class="module-card-icon">P</div>
-            <div>
-              <h3>State Management</h3>
-              <div class="path">frontend/src/stores/</div>
-            </div>
-          </div>
-          <div class="desc">Pinia stores for global state management: application state, chat sessions, user auth, workflow, and notifications.</div>
-          <div class="file-list">
-            <span class="file-tag">app.ts</span>
-            <span class="file-tag">chat.ts</span>
-            <span class="file-tag">user.ts</span>
-            <span class="file-tag">workflow.ts</span>
-            <span class="file-tag">notification.ts</span>
-          </div>
-        </div>
-
-        <!-- Composables -->
-        <div class="module-card ts">
-          <div class="module-card-header">
-            <div class="module-card-icon">C</div>
-            <div>
-              <h3>Composables</h3>
-              <div class="path">frontend/src/composables/</div>
-            </div>
-          </div>
-          <div class="desc">Reusable composition functions for chat connections, message handling, error management, and data prefetching.</div>
-          <div class="file-list">
-            <span class="file-tag">useDebounce.ts</span>
-            <span class="file-tag">useErrorHandler.ts</span>
-            <span class="file-tag">usePrefetch.ts</span>
-          </div>
-        </div>
-
-        <!-- API Client -->
-        <div class="module-card ts">
-          <div class="module-card-header">
-            <div class="module-card-icon">A</div>
-            <div>
-              <h3>API Client</h3>
-              <div class="path">frontend/src/api/</div>
-            </div>
-          </div>
-          <div class="desc">TypeScript API client modules with typed request/response interfaces for all backend endpoints.</div>
-          <div class="file-list">
-            <span class="file-tag">auth.ts</span>
-            <span class="file-tag">chat.ts</span>
-            <span class="file-tag">conversation.ts</span>
-            <span class="file-tag">knowledge.ts</span>
-            <span class="file-tag">agent.ts</span>
-            <span class="file-tag">rag.ts</span>
-            <span class="file-tag">search.ts</span>
-            <span class="file-tag">workflow.ts</span>
-            <span class="file-tag">monitoring.ts</span>
-            <span class="file-tag">user.ts</span>
-            <span class="file-tag">organization.ts</span>
-            <span class="file-tag">prompt.ts</span>
-            <span class="file-tag">manual.ts</span>
-            <span class="file-tag">memory.ts</span>
-            <span class="file-tag">notification.ts</span>
-            <span class="file-tag">audit.ts</span>
-          </div>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ============================================================
-         Section 5: RAG Pipeline
-         ============================================================ -->
-    <section id="rag-pipeline" class="section">
-      <div class="section-header">
-        <div class="section-icon glow-purple" style="background:var(--purple-dim); color:var(--purple);">R</div>
-        <h2><span data-lang="zh">RAG 检索增强生成流水线</span><span data-lang="en">RAG Pipeline</span></h2>
-      </div>
-      <p class="section-desc">
-        <span data-lang="zh">智能查询处理：复杂度分类、自适应策略选择、混合搜索（BM25 + 向量）、RRF 融合、重排序、上下文压缩。</span>
-        <span data-lang="en">Intelligent query processing with complexity classification, adaptive strategy selection, hybrid search (BM25 + Vector), RRF fusion, reranking, and context compression.</span>
-      </p>
-
-      <div class="flow-container">
-        <div class="flow-title">
-          <span style="color:var(--purple);">1</span> Query Processing Flow / 查询处理流程
-        </div>
-        <div class="flow-row">
-          <div class="flow-node purple">User Query<br><span style="font-size:0.65rem;opacity:0.7;">用户查询</span></div>
-          <div class="flow-arrow"><svg viewBox="0 0 32 16"><line x1="0" y1="8" x2="28" y2="8" class="flow-arrow-line"/><polygon points="28,4 32,8 28,12" fill="var(--text-dim)"/></svg></div>
-          <div class="flow-node cyan">Complexity Classifier<br><span style="font-size:0.65rem;opacity:0.7;">复杂度分类器</span></div>
-          <div class="flow-arrow"><svg viewBox="0 0 32 16"><line x1="0" y1="8" x2="28" y2="8" class="flow-arrow-line"/><polygon points="28,4 32,8 28,12" fill="var(--text-dim)"/></svg></div>
-          <div class="flow-node blue">Strategy Selection<br><span style="font-size:0.65rem;opacity:0.7;">策略选择</span></div>
-          <div class="flow-arrow"><svg viewBox="0 0 32 16"><line x1="0" y1="8" x2="28" y2="8" class="flow-arrow-line"/><polygon points="28,4 32,8 28,12" fill="var(--text-dim)"/></svg></div>
-          <div class="flow-node green">Query Expansion<br><span style="font-size:0.65rem;opacity:0.7;">查询扩展</span></div>
-        </div>
-
-        <div style="text-align:center; color:var(--text-dim); font-size:0.75rem; margin: 12px 0;">
-          Strategy: keyword_only | hybrid | hybrid_hyde
-        </div>
-
-        <div class="flow-title" style="margin-top:20px;">
-          <span style="color:var(--purple);">2</span> Hybrid Search / 混合检索
-        </div>
-        <div class="flow-row">
-          <div class="flow-node orange">BM25 Keyword Search<br><span style="font-size:0.65rem;opacity:0.7;">关键词搜索</span></div>
-          <div class="flow-arrow"><svg viewBox="0 0 32 16"><line x1="0" y1="8" x2="28" y2="8" class="flow-arrow-line"/><polygon points="28,4 32,8 28,12" fill="var(--text-dim)"/></svg></div>
-          <div class="flow-node green">Vector Similarity Search<br><span style="font-size:0.65rem;opacity:0.7;">向量相似度搜索</span></div>
-          <div class="flow-arrow"><svg viewBox="0 0 32 16"><line x1="0" y1="8" x2="28" y2="8" class="flow-arrow-line"/><polygon points="28,4 32,8 28,12" fill="var(--text-dim)"/></svg></div>
-          <div class="flow-node purple">RRF Fusion<br><span style="font-size:0.65rem;opacity:0.7;">倒数排名融合</span></div>
-          <div class="flow-arrow"><svg viewBox="0 0 32 16"><line x1="0" y1="8" x2="28" y2="8" class="flow-arrow-line"/><polygon points="28,4 32,8 28,12" fill="var(--text-dim)"/></svg></div>
-          <div class="flow-node cyan">Reranker<br><span style="font-size:0.65rem;opacity:0.7;">重排序</span></div>
-          <div class="flow-arrow"><svg viewBox="0 0 32 16"><line x1="0" y1="8" x2="28" y2="8" class="flow-arrow-line"/><polygon points="28,4 32,8 28,12" fill="var(--text-dim)"/></svg></div>
-          <div class="flow-node pink">Context Window<br><span style="font-size:0.65rem;opacity:0.7;">上下文窗口</span></div>
-        </div>
-
-        <div class="flow-title" style="margin-top:20px;">
-          <span style="color:var(--purple);">3</span> Generation / 生成阶段
-        </div>
-        <div class="flow-row">
-          <div class="flow-node pink">Context Compression<br><span style="font-size:0.65rem;opacity:0.7;">上下文压缩</span></div>
-          <div class="flow-arrow"><svg viewBox="0 0 32 16"><line x1="0" y1="8" x2="28" y2="8" class="flow-arrow-line"/><polygon points="28,4 32,8 28,12" fill="var(--text-dim)"/></svg></div>
-          <div class="flow-node blue">Citation Tracking<br><span style="font-size:0.65rem;opacity:0.7;">引用追踪</span></div>
-          <div class="flow-arrow"><svg viewBox="0 0 32 16"><line x1="0" y1="8" x2="28" y2="8" class="flow-arrow-line"/><polygon points="28,4 32,8 28,12" fill="var(--text-dim)"/></svg></div>
-          <div class="flow-node purple">LLM Generation<br><span style="font-size:0.65rem;opacity:0.7;">大模型生成</span></div>
-          <div class="flow-arrow"><svg viewBox="0 0 32 16"><line x1="0" y1="8" x2="28" y2="8" class="flow-arrow-line"/><polygon points="28,4 32,8 28,12" fill="var(--text-dim)"/></svg></div>
-          <div class="flow-node green">SSE Stream Response<br><span style="font-size:0.65rem;opacity:0.7;">流式响应</span></div>
-        </div>
-      </div>
-
-      <!-- RAG detailed stages -->
-      <div class="rag-pipeline" style="margin-top: 24px;">
-        <div class="rag-stage">
-          <div class="rag-stage-num" style="background:var(--purple-dim); color:var(--purple);">1</div>
-          <div class="rag-stage-content">
-            <h4>Query Complexity Classification / 查询复杂度分类</h4>
-            <p>Classifies queries as simple, moderate, or complex to select optimal retrieval strategy.</p>
-          </div>
-          <div class="rag-stage-detail">query_processor.py</div>
-        </div>
-        <div class="rag-connector">|</div>
-        <div class="rag-stage">
-          <div class="rag-stage-num" style="background:var(--cyan-dim); color:var(--cyan);">2</div>
-          <div class="rag-stage-content">
-            <h4>Adaptive Strategy Selection / 自适应策略选择</h4>
-            <p>keyword_only for simple factual, hybrid for moderate, hybrid_hyde for complex reasoning queries.</p>
-          </div>
-          <div class="rag-stage-detail">pipeline.py</div>
-        </div>
-        <div class="rag-connector">|</div>
-        <div class="rag-stage">
-          <div class="rag-stage-num" style="background:var(--green-dim); color:var(--green);">3</div>
-          <div class="rag-stage-content">
-            <h4>Hybrid Search + RRF Fusion / 混合检索 + RRF 融合</h4>
-            <p>BM25 keyword search + dense vector search, merged via Reciprocal Rank Fusion for optimal recall.</p>
-          </div>
-          <div class="rag-stage-detail">retriever.py</div>
-        </div>
-        <div class="rag-connector">|</div>
-        <div class="rag-stage">
-          <div class="rag-stage-num" style="background:var(--orange-dim); color:var(--orange);">4</div>
-          <div class="rag-stage-content">
-            <h4>Cross-Encoder Reranking / 交叉编码器重排序</h4>
-            <p>Neural reranker scores query-document pairs for precise relevance ranking.</p>
-          </div>
-          <div class="rag-stage-detail">reranker.py</div>
-        </div>
-        <div class="rag-connector">|</div>
-        <div class="rag-stage">
-          <div class="rag-stage-num" style="background:var(--pink-dim); color:var(--pink);">5</div>
-          <div class="rag-stage-content">
-            <h4>Context Window + Compression / 上下文窗口 + 压缩</h4>
-            <p>Smart context assembly with token budget management and redundancy removal.</p>
-          </div>
-          <div class="rag-stage-detail">context_window.py / context_compressor.py</div>
-        </div>
-        <div class="rag-connector">|</div>
-        <div class="rag-stage">
-          <div class="rag-stage-num" style="background:var(--blue-dim); color:var(--blue);">6</div>
-          <div class="rag-stage-content">
-            <h4>Citation Tracking + LLM Generation / 引用追踪 + 大模型生成</h4>
-            <p>Sources tracked and cited in responses, streamed via SSE for real-time user experience.</p>
-          </div>
-          <div class="rag-stage-detail">evaluator.py / metrics.py</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============================================================
-         Section 6: Agent System
-         ============================================================ -->
-    <section id="agent-system" class="section">
-      <div class="section-header">
-        <div class="section-icon glow-cyan" style="background:var(--cyan-dim); color:var(--cyan);">G</div>
-        <h2><span data-lang="zh">Agent 智能体系统</span><span data-lang="en">Agent System</span></h2>
-      </div>
-      <p class="section-desc">
-        <span data-lang="zh">ReAct 风格自主智能体，自注册工具注册表、并行执行、上下文压缩、技能学习、子智能体委托。</span>
-        <span data-lang="en">ReAct-style autonomous agent with self-registering tool registry, parallel execution, context compression, skill learning, and subagent delegation.</span>
-      </p>
-
-      <div class="agent-diagram">
-        <!-- Left: Input/Output -->
-        <div>
-          <div class="agent-box">
-            <h4><span style="color:var(--cyan);">I</span> Input / 输入</h4>
-            <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.6;">
-              <div style="margin-bottom:8px;">User Query<br><span style="color:var(--text-dim); font-size:0.72rem;">Natural language question</span></div>
-              <div style="margin-bottom:8px;">Context<br><span style="color:var(--text-dim); font-size:0.72rem;">Conversation history</span></div>
-              <div>Metadata<br><span style="color:var(--text-dim); font-size:0.72rem;">User, org, permissions</span></div>
-            </div>
-          </div>
-          <div style="text-align:center; padding:12px 0; color:var(--text-dim);">|</div>
-          <div class="agent-box">
-            <h4><span style="color:var(--green);">O</span> Output / 输出</h4>
-            <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.6;">
-              <div style="margin-bottom:8px;">Final Answer<br><span style="color:var(--text-dim); font-size:0.72rem;">SSE streaming response</span></div>
-              <div style="margin-bottom:8px;">Tool Results<br><span style="color:var(--text-dim); font-size:0.72rem;">Intermediate outputs</span></div>
-              <div>Reasoning Trace<br><span style="color:var(--text-dim); font-size:0.72rem;">Step-by-step log</span></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Center: Agent Core -->
-        <div class="agent-center">
-          <div class="agent-core">
-            <h3>ReAct Agent Loop</h3>
-            <p>Thought -> Action -> Observation -> Repeat</p>
-            <p style="font-size:0.72rem; color:var(--text-dim); margin-top:4px;">思考 -> 行动 -> 观察 -> 循环</p>
-          </div>
-
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
-            <div class="agent-box">
-              <h4><span style="color:var(--purple);">L</span> Loop Engine / 循环引擎</h4>
-              <div style="font-size:0.75rem; color:var(--text-muted); line-height:1.6;">
-                <div>Max iterations control</div>
-                <div>Early stopping detection</div>
-                <div>Error recovery & retry</div>
-                <div>Token budget management</div>
-              </div>
-            </div>
-            <div class="agent-box">
-              <h4><span style="color:var(--cyan);">C</span> Context Engine / 上下文引擎</h4>
-              <div style="font-size:0.75rem; color:var(--text-muted); line-height:1.6;">
-                <div>Context compression</div>
-                <div>Memory management</div>
-                <div>Conversation window</div>
-                <div>Token counting</div>
-              </div>
-            </div>
-          </div>
-
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-            <div class="agent-box">
-              <h4><span style="color:var(--green);">S</span> Skill Learning / 技能学习</h4>
-              <div style="font-size:0.75rem; color:var(--text-muted); line-height:1.6;">
-                <div>Pattern recognition</div>
-                <div>Success/failure tracking</div>
-                <div>Skill composition</div>
-                <div>Auto-optimization</div>
-              </div>
-            </div>
-            <div class="agent-box">
-              <h4><span style="color:var(--orange);">D</span> SubAgent / 子智能体</h4>
-              <div style="font-size:0.75rem; color:var(--text-muted); line-height:1.6;">
-                <div>Task delegation</div>
-                <div>Specialized agents</div>
-                <div>Result aggregation</div>
-                <div>Hierarchical planning</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: Tools -->
-        <div>
-          <div class="agent-box">
-            <h4><span style="color:var(--orange);">T</span> Tool Registry (11 tools) / 工具注册表</h4>
-            <div class="tool-grid" style="margin-top:8px;">
-              <div class="tool-item">Document Search</div>
-              <div class="tool-item">Knowledge Query</div>
-              <div class="tool-item">Web Search</div>
-              <div class="tool-item">Code Analysis</div>
-              <div class="tool-item">Data Analysis</div>
-              <div class="tool-item">Summarize</div>
-              <div class="tool-item">Translate</div>
-              <div class="tool-item">Conversation</div>
-              <div class="tool-item">Memory Store</div>
-              <div class="tool-item">Prompt Template</div>
-              <div class="tool-item">File Operations</div>
-            </div>
-          </div>
-
-          <div style="margin-top:16px;" class="agent-box">
-            <h4><span style="color:var(--pink);">R</span> Tool Execution / 工具执行</h4>
-            <div style="font-size:0.75rem; color:var(--text-muted); line-height:1.6;">
-              <div>Parallel execution support</div>
-              <div>Timeout & retry policies</div>
-              <div>Result validation</div>
-              <div>SSE real-time visualization</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============================================================
-         Section 7: Data Flow Animation
-         ============================================================ -->
-    <section id="dataflow" class="section">
-      <div class="section-header">
-        <div class="section-icon glow-orange" style="background:var(--orange-dim); color:var(--orange);">D</div>
-        <h2><span data-lang="zh">数据流转</span><span data-lang="en">Data Flow</span></h2>
-      </div>
-      <p class="section-desc">
-        <span data-lang="zh">端到端数据流转：从文档上传到处理流水线再到智能查询响应。</span>
-        <span data-lang="en">End-to-end data flow from document upload through processing pipeline to intelligent query response.</span>
-      </p>
-
-      <!-- Upload Flow -->
-      <div class="dataflow-track" style="margin-bottom:24px;">
-        <div class="flow-title"><span style="color:var(--orange);">1</span> Document Ingestion Flow / 文档摄入流程</div>
-        <div style="position:relative; height:60px;">
-          <div class="dataflow-particle"></div>
-          <div class="dataflow-particle"></div>
-          <div class="dataflow-particle"></div>
-          <div class="dataflow-particle"></div>
-          <div class="dataflow-line">
-            <div class="dataflow-node" style="color:var(--blue); border-color:rgba(59,130,246,0.3); background:var(--blue-dim);">File Upload<br><span style="font-size:0.6rem;">文件上传</span></div>
-            <div class="dataflow-node" style="color:var(--orange); border-color:rgba(245,158,11,0.3); background:var(--orange-dim);">MinIO Storage<br><span style="font-size:0.6rem;">对象存储</span></div>
-            <div class="dataflow-node" style="color:var(--green); border-color:rgba(34,197,94,0.3); background:var(--green-dim);">DB Record<br><span style="font-size:0.6rem;">数据库记录</span></div>
-            <div class="dataflow-node" style="color:var(--orange); border-color:rgba(245,158,11,0.3); background:var(--orange-dim);">Kafka Message<br><span style="font-size:0.6rem;">消息队列</span></div>
-            <div class="dataflow-node" style="color:var(--green); border-color:rgba(34,197,94,0.3); background:var(--green-dim);">Worker Process<br><span style="font-size:0.6rem;">异步处理</span></div>
-            <div class="dataflow-node" style="color:var(--purple); border-color:rgba(168,85,247,0.3); background:var(--purple-dim);">Parse & Chunk<br><span style="font-size:0.6rem;">解析分块</span></div>
-            <div class="dataflow-node" style="color:var(--cyan); border-color:rgba(6,182,212,0.3); background:var(--cyan-dim);">Embedding<br><span style="font-size:0.6rem;">向量化</span></div>
-            <div class="dataflow-node" style="color:var(--orange); border-color:rgba(245,158,11,0.3); background:var(--orange-dim);">Elasticsearch<br><span style="font-size:0.6rem;">索引存储</span></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Query Flow -->
-      <div class="dataflow-track">
-        <div class="flow-title"><span style="color:var(--cyan);">2</span> Query Response Flow / 查询响应流程</div>
-        <div style="position:relative; height:60px;">
-          <div class="dataflow-particle" style="animation-duration:3.5s;"></div>
-          <div class="dataflow-particle" style="animation-delay:-0.8s;"></div>
-          <div class="dataflow-particle" style="animation-delay:-1.6s;"></div>
-          <div class="dataflow-particle" style="animation-delay:-2.4s;"></div>
-          <div class="dataflow-line">
-            <div class="dataflow-node" style="color:var(--blue); border-color:rgba(59,130,246,0.3); background:var(--blue-dim);">User Query<br><span style="font-size:0.6rem;">用户查询</span></div>
-            <div class="dataflow-node" style="color:var(--cyan); border-color:rgba(6,182,212,0.3); background:var(--cyan-dim);">WebSocket/SSE<br><span style="font-size:0.6rem;">实时连接</span></div>
-            <div class="dataflow-node" style="color:var(--green); border-color:rgba(34,197,94,0.3); background:var(--green-dim);">RAG Pipeline<br><span style="font-size:0.6rem;">检索增强</span></div>
-            <div class="dataflow-node" style="color:var(--purple); border-color:rgba(168,85,247,0.3); background:var(--purple-dim);">Hybrid Search<br><span style="font-size:0.6rem;">混合搜索</span></div>
-            <div class="dataflow-node" style="color:var(--orange); border-color:rgba(245,158,11,0.3); background:var(--orange-dim);">Rerank<br><span style="font-size:0.6rem;">重排序</span></div>
-            <div class="dataflow-node" style="color:var(--pink); border-color:rgba(236,72,153,0.3); background:var(--pink-dim);">Context Assembly<br><span style="font-size:0.6rem;">上下文组装</span></div>
-            <div class="dataflow-node" style="color:var(--purple); border-color:rgba(168,85,247,0.3); background:var(--purple-dim);">DeepSeek LLM<br><span style="font-size:0.6rem;">大模型推理</span></div>
-            <div class="dataflow-node" style="color:var(--green); border-color:rgba(34,197,94,0.3); background:var(--green-dim);">Stream Response<br><span style="font-size:0.6rem;">流式响应</span></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============================================================
-         Section 8: Infrastructure
-         ============================================================ -->
-    <section id="infrastructure" class="section">
-      <div class="section-header">
-        <div class="section-icon glow-orange" style="background:var(--orange-dim); color:var(--orange);">I</div>
-        <h2><span data-lang="zh">基础设施</span><span data-lang="en">Infrastructure</span></h2>
-      </div>
-      <p class="section-desc">
-        <span data-lang="zh">生产级基础设施：缓存、消息队列、搜索引擎、对象存储、可观测性。</span>
-        <span data-lang="en">Production-grade infrastructure with caching, messaging, search, storage, and observability.</span>
-      </p>
-
-      <div class="infra-grid">
-        <div class="infra-card">
-          <div class="infra-icon" style="color:var(--orange);">D</div>
-          <div class="infra-info">
-            <h4>MySQL 8</h4>
-            <p>Primary relational database. 12 SQLAlchemy 2.0 models with async support, connection pooling, and migration management.</p>
-          </div>
-        </div>
-        <div class="infra-card">
-          <div class="infra-icon" style="color:var(--red);">R</div>
-          <div class="infra-info">
-            <h4>Redis</h4>
-            <p>In-memory cache for sessions, rate limiting, token blacklists, and distributed locks. Pub/Sub for real-time notifications.</p>
-          </div>
-        </div>
-        <div class="infra-card">
-          <div class="infra-icon" style="color:var(--yellow);">E</div>
-          <div class="infra-info">
-            <h4>Elasticsearch 8</h4>
-            <p>Hybrid search engine supporting BM25 keyword search and dense vector similarity search with RRF fusion.</p>
-          </div>
-        </div>
-        <div class="infra-card">
-          <div class="infra-icon" style="color:var(--green);">K</div>
-          <div class="infra-info">
-            <h4>Kafka</h4>
-            <p>Async message queue for document processing pipeline. Decouples upload from heavy parsing and embedding operations.</p>
-          </div>
-        </div>
-        <div class="infra-card">
-          <div class="infra-icon" style="color:var(--cyan);">M</div>
-          <div class="infra-info">
-            <h4>MinIO</h4>
-            <p>S3-compatible object storage for document files. Supports multiple file formats: PDF, DOCX, TXT, MD, HTML.</p>
-          </div>
-        </div>
-        <div class="infra-card">
-          <div class="infra-icon" style="color:var(--pink);">P</div>
-          <div class="infra-info">
-            <h4>Prometheus + Grafana</h4>
-            <p>17+ RAG metrics, 18 Grafana dashboard panels. Custom metrics for latency, throughput, cache hits, and quality scores.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============================================================
-         Section 9: Security Layers
-         ============================================================ -->
-    <section id="security" class="section">
-      <div class="section-header">
-        <div class="section-icon glow-red" style="background:var(--red-dim); color:var(--red);">S</div>
-        <h2><span data-lang="zh">安全防护层</span><span data-lang="en">Security Layers</span></h2>
-      </div>
-      <p class="section-desc">
-        <span data-lang="zh">纵深防御安全架构：认证、授权、输入验证、基础设施加固。</span>
-        <span data-lang="en">Defense-in-depth security architecture with authentication, authorization, input validation, and infrastructure hardening.</span>
-      </p>
-
-      <div class="security-layers">
-        <div class="security-layer">
-          <div class="security-layer-icon" style="color:var(--red);">1</div>
-          <div class="security-layer-content">
-            <h4>Authentication / 身份认证</h4>
-            <p>JWT token-based authentication with access/refresh token rotation and token blacklisting on logout.</p>
-          </div>
-          <div class="security-tags">
-            <span class="security-tag">JWT</span>
-            <span class="security-tag">Token Blacklist</span>
-            <span class="security-tag">bcrypt</span>
-            <span class="security-tag">Refresh Rotation</span>
-          </div>
-        </div>
-
-        <div class="security-layer">
-          <div class="security-layer-icon" style="color:var(--orange);">2</div>
-          <div class="security-layer-content">
-            <h4>Authorization / 权限控制</h4>
-            <p>Role-Based Access Control (RBAC) with organization-level multi-tenancy and granular permission management.</p>
-          </div>
-          <div class="security-tags">
-            <span class="security-tag">RBAC</span>
-            <span class="security-tag">Multi-Tenancy</span>
-            <span class="security-tag">Permission Check</span>
-          </div>
-        </div>
-
-        <div class="security-layer">
-          <div class="security-layer-icon" style="color:var(--yellow);">3</div>
-          <div class="security-layer-content">
-            <h4>Input Validation / 输入验证</h4>
-            <p>Pydantic schema validation, SSRF prevention, path traversal protection, and AST-based code sandboxing.</p>
-          </div>
-          <div class="security-tags">
-            <span class="security-tag">Pydantic</span>
-            <span class="security-tag">SSRF Prevention</span>
-            <span class="security-tag">Path Traversal</span>
-            <span class="security-tag">AST Sandbox</span>
-          </div>
-        </div>
-
-        <div class="security-layer">
-          <div class="security-layer-icon" style="color:var(--green);">4</div>
-          <div class="security-layer-content">
-            <h4>Rate Limiting & Protection / 限流防护</h4>
-            <p>Redis-based rate limiting, brute force protection, CORS policy, and request throttling per user/IP.</p>
-          </div>
-          <div class="security-tags">
-            <span class="security-tag">Rate Limiting</span>
-            <span class="security-tag">Brute Force</span>
-            <span class="security-tag">CORS</span>
-            <span class="security-tag">Throttling</span>
-          </div>
-        </div>
-
-        <div class="security-layer">
-          <div class="security-layer-icon" style="color:var(--cyan);">5</div>
-          <div class="security-layer-content">
-            <h4>Data Protection / 数据保护</h4>
-            <p>Sensitive data masking, encrypted storage, audit logging, and secure file handling with content type validation.</p>
-          </div>
-          <div class="security-tags">
-            <span class="security-tag">Data Masking</span>
-            <span class="security-tag">Audit Log</span>
-            <span class="security-tag">Content Validation</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============================================================
-         Section 10: Testing & Quality
-         ============================================================ -->
-    <section id="testing" class="section">
-      <div class="section-header">
-        <div class="section-icon glow-green" style="background:var(--green-dim); color:var(--green);">T</div>
-        <h2><span data-lang="zh">测试与质量</span><span data-lang="en">Testing & Quality</span></h2>
-      </div>
-      <p class="section-desc">
-        <span data-lang="zh">全面测试覆盖，311 个测试用例，12 轮优化迭代，生产级监控。</span>
-        <span data-lang="en">Comprehensive test coverage with 311 total tests, 12 optimization rounds, and production-grade monitoring.</span>
-      </p>
-
-      <div class="test-grid">
-        <div class="test-card">
-          <div class="test-number" style="color:var(--green);">216</div>
-          <div class="test-label"><span data-lang="zh">后端测试</span><span data-lang="en">Backend Tests</span></div>
-          <div class="test-bar">
-            <div class="test-bar-fill" style="width:69%; background:var(--green);"></div>
-          </div>
-        </div>
-        <div class="test-card">
-          <div class="test-number" style="color:var(--blue);">95</div>
-          <div class="test-label"><span data-lang="zh">前端测试</span><span data-lang="en">Frontend Tests</span></div>
-          <div class="test-bar">
-            <div class="test-bar-fill" style="width:31%; background:var(--blue);"></div>
-          </div>
-        </div>
-        <div class="test-card">
-          <div class="test-number" style="color:var(--purple);">12</div>
-          <div class="test-label"><span data-lang="zh">优化轮次</span><span data-lang="en">Optimization Rounds</span></div>
-          <div class="test-bar">
-            <div class="test-bar-fill" style="width:90%; background:var(--purple);"></div>
-          </div>
-        </div>
-        <div class="test-card">
-          <div class="test-number" style="color:var(--orange);">100%</div>
-          <div class="test-label"><span data-lang="zh">重构完成</span><span data-lang="en">Refactor Complete</span></div>
-          <div class="test-bar">
-            <div class="test-bar-fill" style="width:100%; background:var(--orange);"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Additional metrics -->
-      <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-top:24px;">
-        <div class="infra-card">
-          <div class="infra-icon" style="color:var(--pink); background:var(--pink-dim);">M</div>
-          <div class="infra-info">
-            <h4><span data-lang="zh">17+ RAG 指标</span><span data-lang="en">17+ RAG Metrics</span></h4>
-            <p><span data-lang="zh">Prometheus 指标覆盖延迟、吞吐量、缓存命中率、检索质量、重排序分数和生成指标。</span><span data-lang="en">Prometheus metrics covering latency, throughput, cache hit rate, retrieval quality, reranker scores, and generation metrics.</span></p>
-          </div>
-        </div>
-        <div class="infra-card">
-          <div class="infra-icon" style="color:var(--cyan); background:var(--cyan-dim);">G</div>
-          <div class="infra-info">
-            <h4><span data-lang="zh">18 个 Grafana 面板</span><span data-lang="en">18 Grafana Panels</span></h4>
-            <p><span data-lang="zh">全面的仪表盘：系统健康、RAG 管线性能、API 延迟分布和错误率追踪。</span><span data-lang="en">Comprehensive dashboards for system health, RAG pipeline performance, API latency distribution, and error rate tracking.</span></p>
-          </div>
-        </div>
-        <div class="infra-card">
-          <div class="infra-icon" style="color:var(--green); background:var(--green-dim);">R</div>
-          <div class="infra-info">
-            <h4><span data-lang="zh">52/53 重构任务</span><span data-lang="en">52/53 Refactor Tasks</span></h4>
-            <p><span data-lang="zh">系统化代码质量改进：服务提取、异常处理、类型安全、性能优化和文档完善。</span><span data-lang="en">Systematic code quality improvements: service extraction, error handling, type safety, performance optimization, and documentation.</span></p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-  </div>
-
-  <!-- Footer -->
-  <footer class="footer">
-    <div><span data-lang="zh">DocMind 架构可视化</span><span data-lang="en">DocMind Architecture Visualization</span> &copy; 2026</div>
-    <div>
-      <span data-lang="zh">用心构建</span><span data-lang="en">Built with care</span> |
-      <a href="https://github.com/sijie-Z/DocMind-RAG">GitHub</a>
-    </div>
-  </footer>
-
+<div class="container">
+<div class="header">
+  <h1><span class="pulse-dot"></span>DocMind Architecture</h1>
+  <div class="subtitle">Enterprise RAG Knowledge Base System · v1.0.0</div>
 </div>
 
-<!-- ============================================================
-     JavaScript: Navigation & Scroll Effects
-     ============================================================ -->
-<script>
-(function() {
-  'use strict';
+<div class="diagram-card">
+<svg width="1100" height="860" viewBox="0 0 1100 860">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#475569"/>
+    </marker>
+    <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#22d3ee"/>
+    </marker>
+    <marker id="arrow-emerald" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#34d399"/>
+    </marker>
+    <marker id="arrow-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#a78bfa"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#fb923c"/>
+    </marker>
+    <marker id="arrow-rose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#fb7185"/>
+    </marker>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
 
-  // Smooth scroll for nav links
-  document.querySelectorAll('.nav-links a').forEach(link => {
-    link.addEventListener('click', function(e) {
-      e.preventDefault();
-      const target = document.querySelector(this.getAttribute('href'));
-      if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    });
-  });
+  <!-- Background -->
+  <rect width="1100" height="860" fill="url(#grid)"/>
 
-  // Collapsible nav sections
-  document.querySelectorAll('.nav-section-title').forEach(title => {
-    title.addEventListener('click', function() {
-      this.parentElement.classList.toggle('collapsed');
-    });
-  });
+  <!-- ===== CONNECTION ARROWS (drawn early for z-order) ===== -->
 
-  // Active link on scroll
-  const sections = document.querySelectorAll('.section[id]');
-  const navLinks = document.querySelectorAll('.nav-links a');
+  <!-- User → Frontend -->
+  <path d="M 550 50 L 550 95" fill="none" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
 
-  function updateActiveLink() {
-    const scrollPos = window.scrollY + 100;
+  <!-- Frontend → Backend (API) -->
+  <path d="M 550 175 L 550 215" fill="none" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
 
-    sections.forEach(section => {
-      const top = section.offsetTop;
-      const height = section.offsetHeight;
-      const id = section.getAttribute('id');
+  <!-- Backend → RAG Pipeline -->
+  <path d="M 550 340 L 550 420" fill="none" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
 
-      if (scrollPos >= top && scrollPos < top + height) {
-        navLinks.forEach(link => {
-          link.classList.remove('active');
-          if (link.getAttribute('href') === '#' + id) {
-            link.classList.add('active');
-          }
-        });
-      }
-    });
-  }
+  <!-- RAG → Vector DB -->
+  <path d="M 375 600 L 230 600" fill="none" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow-violet)"/>
 
-  // Intersection Observer for animations
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        entry.target.style.animationPlayState = 'running';
-      }
-    });
-  }, { threshold: 0.1 });
+  <!-- RAG → ES -->
+  <path d="M 375 630 L 230 630" fill="none" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow-violet)"/>
 
-  document.querySelectorAll('.animate-in').forEach(el => {
-    el.style.animationPlayState = 'paused';
-    observer.observe(el);
-  });
+  <!-- Backend → MinIO -->
+  <path d="M 670 280 Q 780 280 780 340" fill="none" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
 
-  // Throttled scroll handler
-  let ticking = false;
-  window.addEventListener('scroll', () => {
-    if (!ticking) {
-      requestAnimationFrame(() => {
-        updateActiveLink();
-        ticking = false;
-      });
-      ticking = true;
-    }
-  });
+  <!-- Backend → Kafka -->
+  <path d="M 670 340 Q 780 400 700 500" fill="none" stroke="#fb923c" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-orange)"/>
 
-  // Initial call
-  updateActiveLink();
-})();
+  <!-- Kafka → Worker -->
+  <path d="M 810 540 L 900 540" fill="none" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
 
-// Language toggle
-function setLang(lang) {
-  document.body.classList.toggle('lang-en', lang === 'en');
-  document.querySelectorAll('.lang-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.textContent.trim() === (lang === 'zh' ? '中文' : 'EN'));
-  });
-  localStorage.setItem('docmind-lang', lang);
-}
-const savedLang = localStorage.getItem('docmind-lang');
-if (savedLang === 'en') setLang('en');
-</script>
+  <!-- Worker → ES -->
+  <path d="M 900 570 L 370 630" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-violet)"/>
+
+  <!-- Backend → Agent System -->
+  <path d="M 430 340 L 200 340" fill="none" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arrow-rose)"/>
+
+  <!-- Agent → Tools -->
+  <path d="M 200 370 L 200 430" fill="none" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arrow-rose)"/>
+
+  <!-- RAG → Reranker -->
+  <path d="M 550 660 L 550 695" fill="none" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+
+  <!-- ===== USER LAYER ===== -->
+  <text x="550" y="30" text-anchor="middle" font-size="10" fill="#64748b">USERS</text>
+
+  <!-- User component -->
+  <rect x="470" y="55" width="160" height="40" rx="6" fill="#0f172a"/>
+  <rect x="470" y="55" width="160" height="40" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="550" y="80" text-anchor="middle" font-size="12" fill="#e2e8f0" font-weight="500">Browser / Mobile</text>
+
+  <!-- ===== FRONTEND LAYER ===== -->
+  <rect x="400" y="100" width="300" height="75" rx="8" fill="none" stroke="#22d3ee" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
+  <text x="410" y="115" font-size="8" fill="#22d3ee" opacity="0.7">FRONTEND</text>
+
+  <!-- Vue + Components -->
+  <rect x="420" y="125" width="110" height="35" rx="6" fill="#0f172a"/>
+  <rect x="420" y="125" width="110" height="35" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="475" y="147" text-anchor="middle" font-size="10" fill="#e2e8f0">Vue 3 + TypeScript</text>
+
+  <!-- CSS / UI -->
+  <rect x="550" y="125" width="65" height="35" rx="6" fill="#0f172a"/>
+  <rect x="550" y="125" width="65" height="35" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="582" y="147" text-anchor="middle" font-size="9" fill="#e2e8f0">Naive UI</text>
+
+  <!-- State / Router -->
+  <rect x="630" y="125" width="55" height="35" rx="6" fill="#0f172a"/>
+  <rect x="630" y="125" width="55" height="35" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="657" y="147" text-anchor="middle" font-size="9" fill="#e2e8f0">Pinia</text>
+
+  <!-- ===== BACKEND LAYER ===== -->
+  <rect x="250" y="220" width="600" height="125" rx="8" fill="none" stroke="#34d399" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
+  <text x="260" y="237" font-size="8" fill="#34d399" opacity="0.7">BACKEND · FastAPI (Async)</text>
+
+  <!-- API Layer -->
+  <rect x="270" y="248" width="120" height="35" rx="6" fill="#0f172a"/>
+  <rect x="270" y="248" width="120" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="330" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">REST API v1</text>
+
+  <!-- Auth -->
+  <rect x="410" y="248" width="90" height="35" rx="6" fill="#0f172a"/>
+  <rect x="410" y="248" width="90" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="455" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">JWT Auth</text>
+
+  <!-- Services -->
+  <rect x="520" y="248" width="90" height="35" rx="6" fill="#0f172a"/>
+  <rect x="520" y="248" width="90" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="565" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">Services</text>
+
+  <!-- RBAC -->
+  <rect x="630" y="248" width="90" height="35" rx="6" fill="#0f172a"/>
+  <rect x="630" y="248" width="90" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="675" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">RBAC</text>
+
+  <!-- Middleware -->
+  <rect x="740" y="248" width="95" height="35" rx="6" fill="#0f172a"/>
+  <rect x="740" y="248" width="95" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="787" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">Middleware</text>
+
+  <!-- WebSocket / SSE -->
+  <rect x="270" y="295" width="130" height="35" rx="6" fill="#0f172a"/>
+  <rect x="270" y="295" width="130" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="335" y="317" text-anchor="middle" font-size="10" fill="#e2e8f0">WebSocket / SSE</text>
+
+  <!-- Document Parser -->
+  <rect x="420" y="295" width="120" height="35" rx="6" fill="#0f172a"/>
+  <rect x="420" y="295" width="120" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="480" y="317" text-anchor="middle" font-size="10" fill="#e2e8f0">Doc Parser</text>
+
+  <!-- Embedding -->
+  <rect x="560" y="295" width="105" height="35" rx="6" fill="#0f172a"/>
+  <rect x="560" y="295" width="105" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="612" y="317" text-anchor="middle" font-size="10" fill="#e2e8f0">Embeddings</text>
+
+  <!-- Monitoring -->
+  <rect x="685" y="295" width="100" height="35" rx="6" fill="#0f172a"/>
+  <rect x="685" y="295" width="100" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="735" y="317" text-anchor="middle" font-size="10" fill="#e2e8f0">Monitoring</text>
+
+  <!-- MinIO badge -->
+  <rect x="760" y="345" width="70" height="25" rx="4" fill="#0f172a"/>
+  <rect x="760" y="345" width="70" height="25" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.2"/>
+  <text x="795" y="362" text-anchor="middle" font-size="9" fill="#fb923c">MinIO</text>
+
+  <!-- Kafka badge -->
+  <rect x="755" y="505" width="70" height="25" rx="4" fill="#0f172a"/>
+  <rect x="755" y="505" width="70" height="25" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.2"/>
+  <text x="790" y="522" text-anchor="middle" font-size="9" fill="#fb923c">Kafka</text>
+
+  <!-- ===== AGENT SYSTEM (left side) ===== -->
+  <rect x="70" y="220" width="180" height="155" rx="8" fill="none" stroke="#fb7185" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
+  <text x="80" y="237" font-size="8" fill="#fb7185" opacity="0.7">AGENT SYSTEM</text>
+
+  <rect x="85" y="248" width="150" height="30" rx="6" fill="#0f172a"/>
+  <rect x="85" y="248" width="150" height="30" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+  <text x="160" y="267" text-anchor="middle" font-size="10" fill="#e2e8f0">ReAct Loop</text>
+
+  <rect x="85" y="288" width="150" height="30" rx="6" fill="#0f172a"/>
+  <rect x="85" y="288" width="150" height="30" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+  <text x="160" y="307" text-anchor="middle" font-size="10" fill="#e2e8f0">Tool Registry</text>
+
+  <rect x="85" y="328" width="150" height="30" rx="6" fill="#0f172a"/>
+  <rect x="85" y="328" width="150" height="30" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+  <text x="160" y="347" text-anchor="middle" font-size="10" fill="#e2e8f0">Skill Learning</text>
+
+  <!-- Agent Tools (below agent system) -->
+  <rect x="70" y="430" width="180" height="90" rx="8" fill="none" stroke="#fb7185" stroke-width="1" stroke-dasharray="6,3" opacity="0.4"/>
+  <text x="80" y="447" font-size="8" fill="#fb7185" opacity="0.6">AGENT TOOLS</text>
+
+  <rect x="85" y="455" width="150" height="25" rx="4" fill="#0f172a"/>
+  <rect x="85" y="455" width="150" height="25" rx="4" fill="rgba(136, 19, 55, 0.3)" stroke="#fb7185" stroke-width="1"/>
+  <text x="160" y="472" text-anchor="middle" font-size="9" fill="#e2e8f0">Web Search · Code Exec</text>
+
+  <rect x="85" y="488" width="150" height="25" rx="4" fill="#0f172a"/>
+  <rect x="85" y="488" width="150" height="25" rx="4" fill="rgba(136, 19, 55, 0.3)" stroke="#fb7185" stroke-width="1"/>
+  <text x="160" y="505" text-anchor="middle" font-size="9" fill="#e2e8f0">Translation · Data Analysis</text>
+
+  <!-- ===== RAG PIPELINE ===== -->
+  <rect x="350" y="420" width="400" height="200" rx="8" fill="none" stroke="#34d399" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
+  <text x="360" y="437" font-size="8" fill="#34d399" opacity="0.7">RAG PIPELINE</text>
+
+  <!-- Query Processor -->
+  <rect x="370" y="450" width="130" height="35" rx="6" fill="#0f172a"/>
+  <rect x="370" y="450" width="130" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="435" y="472" text-anchor="middle" font-size="10" fill="#e2e8f0">Query Processor</text>
+
+  <!-- Retriever -->
+  <rect x="520" y="450" width="110" height="35" rx="6" fill="#0f172a"/>
+  <rect x="520" y="450" width="110" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="575" y="472" text-anchor="middle" font-size="10" fill="#e2e8f0">Hybrid Retriever</text>
+
+  <!-- Context Compressor -->
+  <rect x="650" y="450" width="85" height="35" rx="6" fill="#0f172a"/>
+  <rect x="650" y="450" width="85" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="692" y="472" text-anchor="middle" font-size="9" fill="#e2e8f0">Compressor</text>
+
+  <!-- Semantic Cache -->
+  <rect x="370" y="500" width="110" height="35" rx="6" fill="#0f172a"/>
+  <rect x="370" y="500" width="110" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="425" y="522" text-anchor="middle" font-size="10" fill="#e2e8f0">Semantic Cache</text>
+
+  <!-- Reranker -->
+  <rect x="500" y="500" width="100" height="35" rx="6" fill="#0f172a"/>
+  <rect x="500" y="500" width="100" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="550" y="522" text-anchor="middle" font-size="10" fill="#e2e8f0">Reranker</text>
+
+  <!-- LLM -->
+  <rect x="620" y="500" width="110" height="35" rx="6" fill="#0f172a"/>
+  <rect x="620" y="500" width="110" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="675" y="522" text-anchor="middle" font-size="10" fill="#e2e8f0">DeepSeek LLM</text>
+
+  <!-- Workflow Engine -->
+  <rect x="370" y="555" width="200" height="35" rx="6" fill="#0f172a"/>
+  <rect x="370" y="555" width="200" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="470" y="577" text-anchor="middle" font-size="10" fill="#e2e8f0">Workflow Engine (DAG)</text>
+
+  <!-- Evaluator -->
+  <rect x="590" y="555" width="145" height="35" rx="6" fill="#0f172a"/>
+  <rect x="590" y="555" width="145" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="662" y="577" text-anchor="middle" font-size="10" fill="#e2e8f0">RAG Evaluator</text>
+
+  <!-- ===== WORKER ===== -->
+  <rect x="860" y="510" width="160" height="50" rx="6" fill="#0f172a"/>
+  <rect x="860" y="510" width="160" height="50" rx="6" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.5"/>
+  <text x="940" y="538" text-anchor="middle" font-size="10" fill="#e2e8f0">Doc Processor Worker</text>
+
+  <!-- ===== DATA STORES ===== -->
+  <rect x="60" y="585" width="330" height="195" rx="8" fill="none" stroke="#a78bfa" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
+  <text x="70" y="602" font-size="8" fill="#a78bfa" opacity="0.7">DATA LAYER</text>
+
+  <!-- MySQL -->
+  <rect x="80" y="615" width="140" height="40" rx="6" fill="#0f172a"/>
+  <rect x="80" y="615" width="140" height="40" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="150" y="635" text-anchor="middle" font-size="10" fill="#e2e8f0">MySQL 8</text>
+  <text x="150" y="648" text-anchor="middle" font-size="8" fill="#a78bfa">SQLAlchemy Async</text>
+
+  <!-- Redis -->
+  <rect x="235" y="615" width="140" height="40" rx="6" fill="#0f172a"/>
+  <rect x="235" y="615" width="140" height="40" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="305" y="635" text-anchor="middle" font-size="10" fill="#e2e8f0">Redis 7</text>
+  <text x="305" y="648" text-anchor="middle" font-size="8" fill="#a78bfa">Cache / Sessions</text>
+
+  <!-- Elasticsearch -->
+  <rect x="80" y="665" width="140" height="40" rx="6" fill="#0f172a"/>
+  <rect x="80" y="665" width="140" height="40" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="150" y="685" text-anchor="middle" font-size="10" fill="#e2e8f0">Elasticsearch 8</text>
+  <text x="150" y="698" text-anchor="middle" font-size="8" fill="#a78bfa">BM25 + KNN</text>
+
+  <!-- Vector DB -->
+  <rect x="235" y="665" width="140" height="40" rx="6" fill="#0f172a"/>
+  <rect x="235" y="665" width="140" height="40" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="305" y="685" text-anchor="middle" font-size="10" fill="#e2e8f0">Vector Index</text>
+  <text x="305" y="698" text-anchor="middle" font-size="8" fill="#a78bfa">ES KNN</text>
+
+  <!-- ===== MONITORING ===== -->
+  <rect x="710" y="690" width="310" height="90" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="6,3" opacity="0.4"/>
+  <text x="720" y="707" font-size="8" fill="#94a3b8" opacity="0.6">OBSERVABILITY</text>
+
+  <rect x="725" y="718" width="90" height="40" rx="6" fill="#0f172a"/>
+  <rect x="725" y="718" width="90" height="40" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.2"/>
+  <text x="770" y="738" text-anchor="middle" font-size="10" fill="#e2e8f0">Prometheus</text>
+  <text x="770" y="751" text-anchor="middle" font-size="8" fill="#94a3b8">Metrics</text>
+
+  <rect x="825" y="718" width="90" height="40" rx="6" fill="#0f172a"/>
+  <rect x="825" y="718" width="90" height="40" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.2"/>
+  <text x="870" y="738" text-anchor="middle" font-size="10" fill="#e2e8f0">Grafana</text>
+  <text x="870" y="751" text-anchor="middle" font-size="8" fill="#94a3b8">Dashboards</text>
+
+  <rect x="925" y="718" width="80" height="40" rx="6" fill="#0f172a"/>
+  <rect x="925" y="718" width="80" height="40" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.2"/>
+  <text x="965" y="738" text-anchor="middle" font-size="10" fill="#e2e8f0">OpenTelemetry</text>
+  <text x="965" y="751" text-anchor="middle" font-size="8" fill="#94a3b8">Tracing</text>
+
+  <!-- ===== LEGEND (placed below all boundaries) ===== -->
+  <rect x="440" y="810" width="220" height="40" rx="8" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+  <rect x="455" y="820" width="12" height="12" rx="3" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
+  <text x="472" y="830" font-size="8" fill="#94a3b8">Frontend</text>
+  <rect x="525" y="820" width="12" height="12" rx="3" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
+  <text x="542" y="830" font-size="8" fill="#94a3b8">Backend</text>
+  <rect x="590" y="820" width="12" height="12" rx="3" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
+  <text x="607" y="830" font-size="8" fill="#94a3b8">Data</text>
+  <rect x="640" y="820" width="12" height="12" rx="3" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1"/>
+  <text x="657" y="830" font-size="8" fill="#94a3b8">Agent</text>
+</svg>
+</div>
+
+<div class="info-grid">
+<div class="card">
+  <div class="card-header"><div class="card-dot cyan"></div><h3>Tech Stack</h3></div>
+  <ul>
+    <li>Vue 3 + TypeScript + Naive UI</li>
+    <li>FastAPI + SQLAlchemy 2.0 (Async)</li>
+    <li>DeepSeek LLM + Embedding Models</li>
+    <li>Elasticsearch 8 (BM25 + KNN)</li>
+    <li>Redis + Kafka + MinIO</li>
+  </ul>
+</div>
+<div class="card">
+  <div class="card-header"><div class="card-dot emerald"></div><h3>Key Features</h3></div>
+  <ul>
+    <li>ReAct Agent with 11 built-in tools</li>
+    <li>Hybrid Search + RRF Fusion</li>
+    <li>DAG Workflow Engine</li>
+    <li>RBAC Multi-tenancy</li>
+    <li>PWA + i18n (4 languages)</li>
+  </ul>
+</div>
+<div class="card">
+  <div class="card-header"><div class="card-dot violet"></div><h3>Data Flow</h3></div>
+  <ul>
+    <li>Upload → MinIO + Kafka → Worker</li>
+    <li>Parse → Chunk → Embed → ES Index</li>
+    <li>Query → Hybrid Search → Rerank</li>
+    <li>LLM → Stream Response with Citations</li>
+  </ul>
+</div>
+</div>
+
+<div class="footer">
+  DocMind v1.0.0 · Enterprise RAG Knowledge Base · Built with FastAPI + Vue 3
+</div>
+</div>
 </body>
 </html>

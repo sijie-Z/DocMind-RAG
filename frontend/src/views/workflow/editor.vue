@@ -10,7 +10,8 @@
       </div>
       <div class="flex-1 overflow-y-auto p-3">
         <n-collapse :default-expanded-names="['llm', 'tool', 'io', 'logic', 'data']">
-          <n-collapse-item title="🤖 大模型节点" name="llm">
+          <n-collapse-item name="llm">
+            <template #header><n-icon class="mr-1"><HardwareChipOutline /></n-icon> 大模型节点</template>
             <div class="space-y-2">
               <div
                 v-for="node in llmNodes"
@@ -20,7 +21,7 @@
                 @dragstart="onDragStart($event, node)"
               >
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">{{ node.icon }}</span>
+                  <n-icon size="20"><component :is="getNodeIconComponent(node.type)" /></n-icon>
                   <div>
                     <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.label }}</div>
                     <div class="text-xs text-gray-500">{{ node.description }}</div>
@@ -30,7 +31,8 @@
             </div>
           </n-collapse-item>
 
-          <n-collapse-item title="🔧 工具节点" name="tool">
+          <n-collapse-item name="tool">
+            <template #header><n-icon class="mr-1"><SettingsOutline /></n-icon> 工具节点</template>
             <div class="space-y-2">
               <div
                 v-for="node in toolNodes"
@@ -40,7 +42,7 @@
                 @dragstart="onDragStart($event, node)"
               >
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">{{ node.icon }}</span>
+                  <n-icon size="20"><component :is="getNodeIconComponent(node.type)" /></n-icon>
                   <div>
                     <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.label }}</div>
                     <div class="text-xs text-gray-500">{{ node.description }}</div>
@@ -50,7 +52,8 @@
             </div>
           </n-collapse-item>
 
-          <n-collapse-item title="📡 输入输出" name="io">
+          <n-collapse-item name="io">
+            <template #header><n-icon class="mr-1"><EnterOutline /></n-icon> 输入输出</template>
             <div class="space-y-2">
               <div
                 v-for="node in ioNodes"
@@ -60,7 +63,7 @@
                 @dragstart="onDragStart($event, node)"
               >
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">{{ node.icon }}</span>
+                  <n-icon size="20"><component :is="getNodeIconComponent(node.type)" /></n-icon>
                   <div>
                     <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.label }}</div>
                     <div class="text-xs text-gray-500">{{ node.description }}</div>
@@ -70,7 +73,8 @@
             </div>
           </n-collapse-item>
 
-          <n-collapse-item title="🔀 逻辑控制" name="logic">
+          <n-collapse-item name="logic">
+            <template #header><n-icon class="mr-1"><GitBranchOutline /></n-icon> 逻辑控制</template>
             <div class="space-y-2">
               <div
                 v-for="node in logicNodes"
@@ -80,7 +84,7 @@
                 @dragstart="onDragStart($event, node)"
               >
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">{{ node.icon }}</span>
+                  <n-icon size="20"><component :is="getNodeIconComponent(node.type)" /></n-icon>
                   <div>
                     <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.label }}</div>
                     <div class="text-xs text-gray-500">{{ node.description }}</div>
@@ -90,7 +94,8 @@
             </div>
           </n-collapse-item>
 
-          <n-collapse-item title="💾 数据处理" name="data">
+          <n-collapse-item name="data">
+            <template #header><n-icon class="mr-1"><ServerOutline /></n-icon> 数据处理</template>
             <div class="space-y-2">
               <div
                 v-for="node in dataNodes"
@@ -100,7 +105,7 @@
                 @dragstart="onDragStart($event, node)"
               >
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">{{ node.icon }}</span>
+                  <n-icon size="20"><component :is="getNodeIconComponent(node.type)" /></n-icon>
                   <div>
                     <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.label }}</div>
                     <div class="text-xs text-gray-500">{{ node.description }}</div>
@@ -117,16 +122,20 @@
         <div class="text-xs text-gray-500 mb-2">快速模板</div>
         <div class="space-y-2">
           <n-button size="small" block quaternary @click="loadTemplate('rag')">
-            🔍 RAG 问答流程
+            <template #icon><n-icon><SearchOutline /></n-icon></template>
+            RAG 问答流程
           </n-button>
           <n-button size="small" block quaternary @click="loadTemplate('chat')">
-            💬 多轮对话流程
+            <template #icon><n-icon><ChatbubbleEllipsesOutline /></n-icon></template>
+            多轮对话流程
           </n-button>
           <n-button size="small" block quaternary @click="loadTemplate('agent')">
-            🤖 Agent 记忆流程
+            <template #icon><n-icon><HardwareChipOutline /></n-icon></template>
+            Agent 记忆流程
           </n-button>
           <n-button size="small" block quaternary @click="loadTemplate('report')">
-            📝 报告生成流程
+            <template #icon><n-icon><FlashOutline /></n-icon></template>
+            报告生成流程
           </n-button>
         </div>
       </div>
@@ -260,7 +269,7 @@
         <div v-else class="space-y-4">
           <!-- 节点基本信息 -->
           <div class="flex items-center gap-2 pb-3 border-b border-gray-200 dark:border-gray-700">
-            <span class="text-xl">{{ getNodeIcon(selectedNode.type) }}</span>
+            <n-icon size="24"><component :is="getNodeIconComponent(selectedNode.type)" /></n-icon>
             <div>
               <div class="font-medium text-gray-800 dark:text-white">{{ getNodeLabel(selectedNode.type) }}</div>
               <div class="text-xs text-gray-500">ID: {{ selectedNode.id }}</div>
@@ -414,7 +423,13 @@
 
     <!-- 调试面板抽屉 -->
     <n-drawer v-model:show="showDebugPanel" :width="520" placement="right">
-      <n-drawer-content title="🚀 调试面板" closable>
+      <n-drawer-content closable>
+        <template #header>
+          <div class="flex items-center gap-2">
+            <n-icon><RocketOutline /></n-icon>
+            <span>调试面板</span>
+          </div>
+        </template>
         <div class="space-y-4">
           <!-- 输入测试 -->
           <n-card title="测试输入" size="small" class="shadow-sm">
@@ -515,7 +530,7 @@
                 <n-timeline-item
                   v-for="(log, index) in executionLogs"
                   :key="index"
-                  :type="log.includes('❌') ? 'error' : log.includes('✅') ? 'success' : 'info'"
+                  :type="log.includes('✗') ? 'error' : log.includes('✓') ? 'success' : 'info'"
                 >
                   <span class="text-xs font-mono">{{ log }}</span>
                 </n-timeline-item>
@@ -590,8 +605,30 @@ import {
 } from 'naive-ui'
 import {
   SaveOutline, PlayOutline, TrashOutline, ExpandOutline, SettingsOutline,
-  AppsOutline, LocateOutline, CheckmarkCircleOutline, CloseCircleOutline
+  AppsOutline, LocateOutline, CheckmarkCircleOutline, CloseCircleOutline,
+  HardwareChipOutline, ChatbubbleEllipsesOutline, SearchOutline, VolumeHighOutline,
+  EnterOutline, ExitOutline, GitBranchOutline, CompassOutline, ServerOutline,
+  CodeSlashOutline, GlobeOutline, SyncOutline, RocketOutline, FlashOutline
 } from '@vicons/ionicons5'
+
+// Icon mapping for node types
+const NODE_ICON_MAP: Record<string, unknown> = {
+  llm_openai: HardwareChipOutline,
+  llm_deepseek: HardwareChipOutline,
+  llm_qwen: ChatbubbleEllipsesOutline,
+  tool_search: SearchOutline,
+  tool_tts: VolumeHighOutline,
+  input: EnterOutline,
+  output: ExitOutline,
+  condition: GitBranchOutline,
+  router: CompassOutline,
+  memory: ServerOutline,
+  code: CodeSlashOutline,
+  api_call: GlobeOutline,
+  transform: SyncOutline,
+}
+
+const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutline
 
 import { useWorkflowStore } from '@/stores/workflow'
 import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflow as execWorkflow, type WorkflowNode, type WorkflowEdge, type WorkflowConfig } from '@/api/workflow'
@@ -629,31 +666,31 @@ const defaultEdgeOptions = {
 
 // 节点定义
 const llmNodes = [
-  { type: 'llm_openai', label: 'OpenAI GPT', description: 'GPT-4o 等模型', icon: '🤖' },
-  { type: 'llm_deepseek', label: 'DeepSeek', description: '国产推理模型', icon: '🧠' },
-  { type: 'llm_qwen', label: '通义千问', description: '阿里云大模型', icon: '💬' }
+  { type: 'llm_openai', label: 'OpenAI GPT', description: 'GPT-4o 等模型' },
+  { type: 'llm_deepseek', label: 'DeepSeek', description: '国产推理模型' },
+  { type: 'llm_qwen', label: '通义千问', description: '阿里云大模型' }
 ]
 
 const toolNodes = [
-  { type: 'tool_search', label: '知识库检索', description: 'RAG检索增强', icon: '🔍' },
-  { type: 'tool_tts', label: '语音合成', description: '文本转语音', icon: '🔊' }
+  { type: 'tool_search', label: '知识库检索', description: 'RAG检索增强' },
+  { type: 'tool_tts', label: '语音合成', description: '文本转语音' }
 ]
 
 const ioNodes = [
-  { type: 'input', label: '输入节点', description: '工作流入口', icon: '📥' },
-  { type: 'output', label: '输出节点', description: '工作流出口', icon: '📤' }
+  { type: 'input', label: '输入节点', description: '工作流入口' },
+  { type: 'output', label: '输出节点', description: '工作流出口' }
 ]
 
 const logicNodes = [
-  { type: 'condition', label: '条件分支', description: '根据条件路由', icon: '🔀' },
-  { type: 'router', label: '智能路由', description: 'LLM智能路由', icon: '🧭' }
+  { type: 'condition', label: '条件分支', description: '根据条件路由' },
+  { type: 'router', label: '智能路由', description: 'LLM智能路由' }
 ]
 
 const dataNodes = [
-  { type: 'memory', label: '记忆节点', description: '存储/检索记忆', icon: '💾' },
-  { type: 'code', label: '代码执行', description: '执行Python代码', icon: '🐍' },
-  { type: 'api_call', label: 'API调用', description: 'HTTP请求', icon: '🌐' },
-  { type: 'transform', label: '数据转换', description: 'JSON/文本处理', icon: '🔄' }
+  { type: 'memory', label: '记忆节点', description: '存储/检索记忆' },
+  { type: 'code', label: '代码执行', description: '执行Python代码' },
+  { type: 'api_call', label: 'API调用', description: 'HTTP请求' },
+  { type: 'transform', label: '数据转换', description: 'JSON/文本处理' }
 ]
 
 // 配置选项
@@ -664,8 +701,8 @@ const openaiModels = [
 ]
 
 const deepseekModels = [
-  { label: 'DeepSeek Chat', value: 'deepseek-chat' },
-  { label: 'DeepSeek Coder', value: 'deepseek-coder' }
+  { label: 'DeepSeek V4 Flash', value: 'deepseek-v4-flash' },
+  { label: 'DeepSeek V4 Pro', value: 'deepseek-v4-pro' }
 ]
 
 const qwenModels = [
@@ -713,7 +750,7 @@ const vueFlowRef = ref()
 // LLM 配置
 const llmConfig = ref({
   openai: { apiKey: '', baseUrl: '', model: 'gpt-4o-mini', temperature: 0.7 },
-  deepseek: { apiKey: '', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', temperature: 0.7 },
+  deepseek: { apiKey: '', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash', temperature: 0.7 },
   qwen: { apiKey: '', model: 'qwen-plus', temperature: 0.7 }
 })
 
@@ -769,7 +806,7 @@ const nodeColor = (node: { type?: string }) => {
     llm_qwen: '#f97316',
     tool_search: '#f59e0b',
     condition: '#06b6d4',
-    memory: '#8b5cf6',
+    memory: '#3b82f6',
     code: '#f43f5e',
     api_call: '#0ea5e9',
     transform: '#14b8a6'
@@ -852,17 +889,6 @@ const loadTemplate = (type: string) => {
 }
 
 // 工具函数
-const getNodeIcon = (type: string) => {
-  const iconMap: Record<string, string> = {
-    input: '📥', output: '📤',
-    llm_openai: '🤖', llm_deepseek: '🧠', llm_qwen: '💬',
-    tool_search: '🔍', tool_tts: '🔊',
-    condition: '🔀', router: '🧭',
-    memory: '💾', code: '🐍', api_call: '🌐', transform: '🔄'
-  }
-  return iconMap[type] || '📦'
-}
-
 const getNodeLabel = (type: string) => {
   const labelMap: Record<string, string> = {
     input: '输入', output: '输出',
@@ -1005,7 +1031,7 @@ const executeWorkflow = async () => {
 
   executing.value = true
   workflowStore.startExecution()
-  workflowStore.addExecutionLog('🚀 开始执行工作流...')
+  workflowStore.addExecutionLog('▸ 开始执行工作流...')
 
   try {
     const res = await execWorkflow(workflowStore.currentWorkflowId, { text: testInput.value })
@@ -1021,21 +1047,21 @@ const executeWorkflow = async () => {
           output: nodeResult.output,
           duration: nodeResult.duration
         })
-        workflowStore.addExecutionLog(`✅ [${getNodeLabel(nodeResult.node_type)}] 完成 (${nodeResult.duration || 0}ms)`)
+        workflowStore.addExecutionLog(`✓ [${getNodeLabel(nodeResult.node_type)}] 完成 (${nodeResult.duration || 0}ms)`)
       }
     }
 
     if (result?.output) {
       workflowStore.setExecutionComplete(result.output)
-      workflowStore.addExecutionLog('✅ 工作流执行成功!')
+      workflowStore.addExecutionLog('✓ 工作流执行成功!')
     } else {
       workflowStore.setExecutionComplete(result)
-      workflowStore.addExecutionLog('✅ 工作流执行完成')
+      workflowStore.addExecutionLog('✓ 工作流执行完成')
     }
 
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : '未知错误'
-    workflowStore.addExecutionLog(`❌ 执行失败: ${errMsg}`)
+    workflowStore.addExecutionLog(`✗ 执行失败: ${errMsg}`)
     message.error('执行失败')
   } finally {
     executing.value = false

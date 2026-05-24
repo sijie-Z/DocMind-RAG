@@ -118,6 +118,7 @@ class PermissionService:
                     "permissions": [
                         PermissionType.DOCUMENT_READ.value,
                         PermissionType.DOCUMENT_UPLOAD.value,
+                        PermissionType.DOCUMENT_DELETE.value,
                         PermissionType.VIEW_KNOWLEDGE_BASE.value,
                         PermissionType.SEARCH_KNOWLEDGE_BASE.value,
                         PermissionType.VIEW_PROMPT.value

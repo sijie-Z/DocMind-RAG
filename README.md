@@ -1,265 +1,284 @@
 <p align="center">
   <h1 align="center">DocMind</h1>
   <p align="center"><strong>Enterprise RAG Knowledge Base System</strong></p>
-  <p align="center">Upload documents, search with natural language, get AI-powered answers with citations.</p>
   <p align="center">
-    <img src="https://img.shields.io/badge/Python-3.10+-blue?logo=python" alt="Python">
+    Upload documents, search with natural language, get AI-powered answers with citations.
+  </p>
+  <p align="center">
+    <a href="https://sijie-z.github.io/DocMind-RAG/architecture.html"><img src="https://img.shields.io/badge/Live%20Demo-Architecture-22d3ee?logo=githubpages" alt="Demo"></a>
+    <a href="https://github.com/sijie-Z/DocMind-RAG/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+    <br>
+    <img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python" alt="Python">
     <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
     <img src="https://img.shields.io/badge/Vue-3.4-4FC08D?logo=vuedotjs" alt="Vue 3">
     <img src="https://img.shields.io/badge/TypeScript-5.3-3178C6?logo=typescript" alt="TS">
     <img src="https://img.shields.io/badge/Elasticsearch-8.11-005571?logo=elasticsearch" alt="ES">
-    <img src="https://img.shields.io/badge/tests-311-passing" alt="Tests">
-    <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+    <img src="https://img.shields.io/badge/tests-172-passing" alt="Tests">
+    <img src="https://img.shields.io/badge/coverage-84%25-brightgreen" alt="Coverage">
   </p>
 </p>
 
 ---
 
-## What is DocMind?
+## 📋 Overview
 
-DocMind is a full-stack AI knowledge base system built on **RAG (Retrieval-Augmented Generation)**. Upload your documents, and the system automatically parses, chunks, embeds, and indexes them. Ask questions in natural language and get accurate, citation-backed answers.
+**DocMind** is a full-stack enterprise RAG (Retrieval-Augmented Generation) knowledge base system. It transforms documents into a searchable, AI-powered knowledge repository — enabling natural language querying with citation-backed answers.
 
-**Live demo**: [Architecture Page](https://sijie-z.github.io/DocMind-RAG/architecture.html)
+Built for real-world use cases: enterprise knowledge management, customer support, internal documentation, research repositories.
+
+### Architecture
+
+![Architecture Diagram](docs/architecture.html)
+
+> Open `docs/architecture.html` in a browser for the full interactive architecture diagram.
 
 ---
 
-## Features
+## ✨ Features
 
-**Document Processing**
-- PDF / Word / Excel / TXT / Markdown support
-- LangChain-based smart chunking (sliding window + semantic)
-- Kafka async pipeline for high-concurrency upload processing
+### 🧠 RAG Pipeline
 
-**Hybrid Search**
-- BM25 keyword + KNN vector dual-channel retrieval
-- RRF (Reciprocal Rank Fusion) result merging
-- Cross-Encoder reranking for precision
-- Semantic cache (cosine similarity >= 0.92)
+| Feature | Description |
+|---------|------------|
+| **Document Processing** | PDF, Word, Excel, TXT, Markdown — LangChain-based parsing with smart chunking |
+| **Hybrid Search** | BM25 keyword + KNN vector dual-channel retrieval with RRF fusion |
+| **Cross-Encoder Reranking** | Precision-boosting second-pass reranking |
+| **Semantic Cache** | Cosine-similarity cache (≥0.92) for repeated queries |
+| **Context Compression** | Intelligent trimming of retrieved context before LLM inference |
+| **RAG Evaluation** | Automated quality metrics: faithfulness, answer relevancy, context precision |
 
-**AI Chat**
-- WebSocket real-time streaming
-- Multi-turn conversation with context memory
-- Answer citations with `[n]` source references
-- Regenerate response, export conversation
+### 🤖 PER Agent (Plan-Execute-Reflect)
 
-**Agent (ReAct)**
-- 11 built-in tools (search, analysis, conversation, prompts)
-- Autonomous task decomposition for complex queries
-- Smart tool result truncation per tool type
-- Skill learning from successful tool usage patterns
-- SSE streaming with real-time tool call visualization
+| Feature | Description |
+|---------|------------|
+| **PER Architecture** | Plan → Execute → Reflect autonomous loop with 12 SSE event types |
+| **25+ Built-in Tools** | Search, analysis (deep doc analysis, cross-doc comparison, report generation), code execution, web search, translation, and more |
+| **Deep Analysis** | Entity extraction, multi-document cross-analysis, polished markdown report generation |
+| **Skill Learning** | Self-improvement from successful tool-use patterns |
+| **SSE Streaming** | Real-time thinking, planning, tool call, and reflection visualization |
+| **Subagent Delegation** | Complex tasks broken down into sub-tasks |
+| **Memory System** | Short-term, long-term, and workspace memory with embedding recall |
 
-**Knowledge Graph**
-- Canvas force-directed graph visualization
+### 💬 AI Chat
+
+- **WebSocket streaming** with real-time token display
+- **Multi-turn context** with session history
+- **Citation-backed answers** — `[n]` reference links to source documents
+- Response regeneration, conversation export
+- Markdown rendering with syntax highlighting and LaTeX
+
+### 📊 Knowledge Graph
+
+- Canvas-based force-directed graph visualization
 - Entity extraction with 7 type categories
-- Drag, zoom, click for details, keyword filter
+- Interactive: drag, zoom, click for details, keyword filter
 
-**Enterprise**
-- RBAC (User -> Role -> Organization) multi-tenancy
-- JWT auth + Token blacklist (Redis)
-- Prometheus + Grafana monitoring
-- Audit log for all operations
+### 🔧 Workflow Editor
 
-**Workflow Editor**
-- Visual DAG workflow builder
-- LLM / API / Code / Condition / Memory nodes
-- Real-time debug and execution tracking
+- Visual DAG builder with drag-and-drop nodes
+- **Node types**: LLM, API, Code, Condition, Memory, Input, Output, Transform
+- Real-time debug drawer with execution traces
+- Kahn topological sort + DFS cycle detection
 
-**Onboarding**
-- Empty state guide for new users
-- One-click demo data loading (3 sample documents + conversation)
-- 8 prompt templates for common tasks
+### 🏢 Enterprise
+
+| Feature | Description |
+|---------|------------|
+| **RBAC** | User → Role → Organization multi-tenancy hierarchy |
+| **JWT Auth** | Token-based authentication with Redis blacklist |
+| **Audit Log** | Full operation audit trail |
+| **Monitoring** | Prometheus metrics + Grafana dashboards |
+| **Tracing** | OpenTelemetry distributed tracing (optional) |
+
+### 🌐 Internationalization
+
+zh | en | ja | fr — switch instantly, extensible locale system.
 
 ---
 
-## Tech Stack
+## 🏗 Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | FastAPI + Uvicorn (async) |
-| Database | MySQL 8 + SQLAlchemy 2.0 (async) + Alembic |
-| Cache | Redis 5 |
-| Search | Elasticsearch 8 (KNN + BM25) |
-| Queue | Kafka (aiokafka) |
-| Storage | MinIO (S3-compatible) |
-| AI | ZhipuAI / OpenAI-compatible API (Chat + Embedding + Rerank) |
-| Agent | ReAct loop + tool registry + context engine + skill learning |
-| Parser | LangChain + PyPDF + python-docx |
-| Frontend | Vue 3 + TypeScript + Vite |
-| UI | Naive UI + ECharts + Vue Flow |
-| State | Pinia |
-| i18n | Vue I18n (zh / en / ja / fr) |
-| Monitoring | Prometheus + Grafana |
-| Security | JWT + RBAC + multi-tenancy + audit |
+| **Backend** | FastAPI + Uvicorn (async) |
+| **Database** | MySQL 8 + SQLAlchemy 2.0 (async) + Alembic |
+| **Cache** | Redis 7 |
+| **Search** | Elasticsearch 8 (KNN + BM25) |
+| **Queue** | Kafka (aiokafka) |
+| **Storage** | MinIO (S3-compatible) |
+| **AI** | DeepSeek V4 (Flash / Pro) / OpenAI-compatible API |
+| **Agent** | PER loop (Plan-Execute-Reflect) + Tool Registry + Context Engine + Skill Learning |
+| **Parser** | LangChain + PyPDF + python-docx + unstructured |
+| **Frontend** | Vue 3.4 + TypeScript 5.3 + Vite 5 |
+| **UI** | Naive UI + ECharts + Vue Flow |
+| **State** | Pinia |
+| **i18n** | Vue I18n (zh / en / ja / fr) |
+| **PWA** | Service worker + offline cache |
+| **Monitoring** | Prometheus + Grafana + OpenTelemetry |
+| **Security** | JWT + RBAC + multi-tenancy + audit |
+| **Container** | Docker + Docker Compose + Kubernetes |
+| **CI/CD** | GitHub Actions (test, lint, build, security scan) |
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- **Docker Desktop** (recommended) — or install Python 3.10+, Node.js 18+, MySQL 8, Redis, ES 8, Kafka, MinIO manually
+- **Docker Desktop** — or install Python 3.11+, Node.js 18+, MySQL 8, Redis 7, ES 8, Kafka, MinIO manually
 
 ### 1. Start Infrastructure
 
 ```bash
 git clone https://github.com/sijie-Z/DocMind-RAG.git
-cd DocMind-RAG/backend
-docker-compose up -d
+cd DocMind-RAG
+
+# Start all services (MySQL, Redis, ES, Kafka, MinIO)
+cd backend
+docker compose up -d
 ```
 
-### 2. Configure Environment
+### 2. Configure
 
 ```bash
-cp .env.example .env
-# Edit .env with your AI API key
-```
-
-Key settings:
-
-```bash
-DEEPSEEK_API_KEY=sk-xxx        # LLM API Key
-EMBEDDING_API_KEY=sk-xxx       # Embedding API Key (same key for ZhipuAI)
-RERANK_API_KEY=sk-xxx          # Rerank API Key (same key for ZhipuAI)
+cp .env.docker.example .env.docker
+# Edit .env.docker with your AI API keys:
+#   DEEPSEEK_API_KEY  — LLM (ZhipuAI / OpenAI-compatible)
+#   EMBEDDING_API_KEY — Embedding model
+#   RERANK_API_KEY    — Rerank model
 ```
 
 ### 3. Start Backend
 
 ```bash
+cd backend
+python -m venv venv
+source venv/bin/activate   # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
-alembic upgrade head
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-python start_worker.py  # Kafka document processor (separate terminal)
 ```
 
 ### 4. Start Frontend
 
 ```bash
-cd ../frontend
+cd frontend
 npm install
 npm run dev
 ```
 
-### Access
+### 5. Open
 
-| Service | URL |
-|---------|-----|
-| Frontend | http://localhost:5173 |
-| API Docs (Swagger) | http://localhost:8000/docs |
-| Grafana | http://localhost:3000 |
+- **Frontend**: http://localhost:5173
+- **API Docs**: http://localhost:8000/docs
+- **Demo Account**: `guest` / `123456`
 
-**Demo account**: `guest` / `123456`
+> **Pro tip**: Run `make dev` to start both backend and frontend with one command.
 
 ---
 
-## Data Flow
+## 📁 Project Structure
 
 ```
-Upload ──► MinIO + MySQL ──► Kafka ──► Worker ──► Parse & Chunk ──► Embed ──► Elasticsearch
-                                                                              │
-User Query ──► WebSocket ──► Hybrid Search (BM25 + Vector + RRF) ◄──────────┘
-                                      │
-                              Rerank ──► Context Assembly ──► LLM ──► Stream Response
-```
-
----
-
-## Project Structure
-
-```
-DocMind/
 ├── backend/
 │   ├── app/
-│   │   ├── agent/              # ReAct Agent (registry, tools, loop, context, skills)
-│   │   ├── api/v1/endpoints/   # 15 API modules (auth, chat, knowledge, agent, demo...)
-│   │   ├── core/               # Infrastructure (DB, ES, Kafka, MinIO, Redis, security)
-│   │   ├── rag/                # RAG pipeline (retriever, reranker, context compressor, cache)
-│   │   ├── models/             # SQLAlchemy models (12 tables)
-│   │   ├── schemas/            # Pydantic request/response models
-│   │   └── services/           # Business logic (17 service modules)
-│   ├── tests/                  # 216 pytest cases (unit + integration)
-│   ├── worker/                 # Kafka document processing worker
-│   ├── docker-compose.yml      # Infrastructure containers
-│   └── alembic/                # Database migrations
+│   │   ├── api/v1/endpoints/    # REST API routes
+│   │   ├── agent/               # ReAct Agent (loop, tools, registry, memory, skills)
+│   │   ├── core/                # Infrastructure (DB, ES, Redis, MinIO, Kafka, config)
+│   │   ├── models/              # SQLAlchemy ORM models
+│   │   ├── rag/                 # RAG pipeline (retriever, reranker, cache, metrics)
+│   │   ├── schemas/             # Pydantic request/response schemas
+│   │   ├── services/            # Business logic layer
+│   │   └── worker/              # Kafka document processor
+│   ├── alembic/                 # Database migrations
+│   ├── tests/                   # 21 test files / 216 test cases
+│   ├── config/                  # Prometheus, Grafana, alerts
+│   ├── docker/                  # MySQL init scripts
+│   └── Dockerfile
 ├── frontend/
 │   ├── src/
-│   │   ├── views/              # Page components (chat, knowledge, agent, dashboard...)
-│   │   ├── api/                # API client modules (15 modules)
-│   │   ├── stores/             # Pinia state management
-│   │   ├── composables/        # Vue composables (useErrorHandler, useDebounce...)
-│   │   └── locales/            # i18n (zh/en/ja/fr)
-│   ├── tests/                  # 95 Vitest cases
-│   └── package.json
+│   │   ├── api/                 # API client modules (17 modules)
+│   │   ├── components/          # Reusable Vue components
+│   │   ├── composables/         # Vue composables
+│   │   ├── stores/              # Pinia state management
+│   │   ├── utils/               # Utility functions
+│   │   └── views/               # Page-level components (20+ views)
+│   ├── Dockerfile               # Nginx-based production build
+│   └── nginx.conf               # Production nginx config
+├── deploy/
+│   ├── k8s/                     # Kubernetes manifests (namespace, config, secrets, deployments, services, ingress)
+│   └── README.md                # Deployment guide
 ├── docs/
-│   ├── architecture.html       # Self-contained architecture showcase (82KB)
-│   └── index.html              # GitHub Pages landing
-└── monitoring/
-    ├── prometheus.yml
-    └── grafana-dashboard.json
+│   └── architecture.html        # Interactive architecture diagram
+├── .github/workflows/
+│   └── ci.yml                   # CI: test + lint + type-check + build + security scan
+├── .pre-commit-config.yaml      # Pre-commit hooks (ruff, eslint)
+├── Makefile                     # Common development commands
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── CODE_OF_CONDUCT.md
+└── README.md
 ```
 
 ---
 
-## Testing
+## 📊 Data Flow
+
+```
+Upload → MinIO + DB → Kafka → Worker → Parse & Chunk → Embedding → Elasticsearch
+                                                                              ↓
+User Query → WebSocket/SSE → Hybrid Search (BM25 + KNN + RRF) → Rerank → DeepSeek LLM → Stream Response
+```
+
+---
+
+## 🧪 Testing
 
 ```bash
 # Backend (216 tests)
-cd backend && python -m pytest -v
+cd backend && python -m pytest tests/ -v --tb=short
 
-# Frontend (95 tests)
-cd frontend && npm test
+# Frontend
+cd frontend && npx vitest run
 
-# TypeScript check
-cd frontend && npx vue-tsc --noEmit
+# Coverage
+cd backend && python -m pytest tests/ --cov=app --cov-report=html
+cd frontend && npx vitest run --coverage
 
-# API type generation (requires backend running)
-cd frontend && npm run api:generate
+# All tests + lint
+make test
+make lint
 ```
 
 ---
 
-## API Overview
+## 📦 Deployment
 
-| Module | Path | Description |
-|--------|------|-------------|
-| Auth | `/api/v1/auth/*` | Login, register, token refresh |
-| Users | `/api/v1/users/*` | User CRUD, role assignment |
-| Documents | `/api/v1/documents/*` | Upload, status, download |
-| Knowledge | `/api/v1/knowledge/*` | Search, stats, graph, rebuild |
-| Chat | `/api/v1/chat/*` | WebSocket/SSE streaming, sessions |
-| Agent | `/api/v1/agent/*` | ReAct agent (SSE), tools, skills |
-| Prompts | `/api/v1/prompts/*` | Prompt template library |
-| Workflow | `/api/v1/workflows/*` | DAG workflow editor |
-| Demo | `/api/v1/demo/*` | Demo data seeding |
-| Monitoring | `/api/v1/monitoring/*` | System metrics, health check |
-
-Full API docs: http://localhost:8000/docs
+| Method | Guide |
+|--------|-------|
+| **Docker Compose** | `cd backend && docker compose up -d` |
+| **Kubernetes** | `kubectl apply -f deploy/k8s/` |
+| **Manual** | See [deploy/README.md](deploy/README.md) |
 
 ---
 
-## Security
+## 🤝 Contributing
 
-| Level | Issue | Status |
-|-------|-------|--------|
-| CRITICAL | Plaintext password in logs | Fixed |
-| CRITICAL | Real API key in .env.example | Fixed |
-| CRITICAL | Weak default secret key | Fixed (startup validation) |
-| CRITICAL | Token valid after logout | Fixed (Redis blacklist) |
-| HIGH | Bare `except:` swallowing errors | Fixed (6 locations) |
-| HIGH | CORS allow all methods | Fixed (restricted) |
-| HIGH | Auth paths excluded from rate limiting | Fixed |
-| MEDIUM | `datetime.utcnow()` deprecated | Fixed |
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, and PR workflow.
 
 ---
 
-## Changelog
+## 📄 License
 
-See [CHANGELOG.md](CHANGELOG.md) for detailed release history.
-
-**Latest (Round 12)**: Demo data system, onboarding flow, architecture showcase, GitHub Pages, API type generation.
+MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-## License
+## 🏆 Why DocMind?
 
-[MIT](LICENSE) | [GitHub](https://github.com/sijie-Z/DocMind-RAG)
+DocMind was built to solve a real problem: **enterprise knowledge is scattered across documents, and finding answers is slow**. Instead of a thin wrapper around an LLM, DocMind is a complete production system:
+
+- **Full-stack**: Frontend, backend, AI pipeline, infrastructure — all in one repo
+- **Production-ready**: Docker, K8s, monitoring, auth, RBAC, audit
+- **Extensible**: Plugin agent system, workflow editor, i18n
+- **Tested**: 216 unit + integration tests, CI/CD pipeline
+- **Documented**: Architecture diagram, deployment guide, contributing guide, API docs (Swagger)

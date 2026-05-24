@@ -1,7 +1,9 @@
 """
-派聪明AI知识库系统 - 主应用入口
+DocMind AI Knowledge Base System - Main Application Entry
 """
+import os
 import re
+import time
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -15,13 +17,15 @@ from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from app.core.minio_client import minio_client
 from app.core.config import settings
 from app.exceptions import AppError
-from app.core.database import init_db, AsyncSessionLocal
-from app.core.redis import init_redis
+from app.core.database import init_db, AsyncSessionLocal, close_db
+from app.core.redis import init_redis, close_redis
 from app.core.elasticsearch import init_elasticsearch, es_client
 from app.api.v1.router import api_router
 from app.core.logging import setup_logging
 from app.core.kafka_client import kafka_producer
 from app.core.middleware import PerformanceMiddleware, RateLimitMiddleware, metrics_collector
+from app.core.request_id import RequestIDMiddleware
+from app.core.response_middleware import ResponseFormatMiddleware
 from app.core.notification_ws import notification_ws_manager
 from app.core.tracing import setup_opentelemetry
 
@@ -43,7 +47,15 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    logger.info("DocMind AI知识库系统启动中...")
+    logger.info(f"DocMind v{settings.APP_VERSION} starting up...")
+
+    # 自动同步端口到 .backend-port 文件，Vite 代理依赖此文件
+    actual_port = int(os.environ.get("DOCMIND_PORT", settings.PORT))
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    port_file = os.path.join(backend_dir, ".backend-port")
+    with open(port_file, "w") as f:
+        f.write(str(actual_port))
+    logger.info(f"后端端口已同步到 .backend-port: {actual_port}")
 
     try:
         await init_db()
@@ -70,6 +82,10 @@ async def lifespan(app: FastAPI):
         from app.services.permission_service import permission_service
         await permission_service.initialize_default_permissions_and_roles()
 
+        # Wire embedding provider for agent memory system
+        from app.dependencies import wire_memory_embedding_provider
+        await wire_memory_embedding_provider()
+
         if settings.ENABLE_DEMO_ACCOUNT:
             from app.core.ensure_demo_user import ensure_demo_user
             from app.services.auth_service import auth_service
@@ -85,7 +101,7 @@ async def lifespan(app: FastAPI):
                     )
         
         # 启动指标监控快照任务
-        asyncio.create_task(metrics_snapshot_task())
+        metrics_task = asyncio.create_task(metrics_snapshot_task())
         
         logger.info("所有服务初始化完成")
         
@@ -97,9 +113,43 @@ async def lifespan(app: FastAPI):
     
     # 关闭服务
     logger.info("派聪明AI知识库系统关闭中...")
-    
+
+    # 取消指标监控快照任务
+    try:
+        if metrics_task:
+            metrics_task.cancel()
+            logger.info("指标监控快照任务已取消")
+    except Exception as e:
+        logger.warning(f"取消指标监控快照任务失败: {e}")
+
     # 关闭Kafka Producer
     await kafka_producer.stop()
+
+    # 关闭Elasticsearch连接
+    try:
+        if es_client:
+            await es_client.close()
+    except Exception as e:
+        logger.error(f"关闭Elasticsearch连接失败: {e}")
+
+    # 关闭Redis连接
+    try:
+        await close_redis()
+    except Exception as e:
+        logger.error(f"关闭Redis连接失败: {e}")
+
+    # 关闭MinIO客户端
+    try:
+        if minio_client:
+            pass  # MinIO sync client - no explicit close needed
+    except Exception as e:
+        logger.error(f"关闭MinIO连接失败: {e}")
+
+    # 关闭数据库连接
+    try:
+        await close_db()
+    except Exception as e:
+        logger.error(f"关闭数据库连接失败: {e}")
 
 
 # 创建FastAPI应用
@@ -131,7 +181,14 @@ app = FastAPI(
     openapi_url="/api/v1/openapi.json",
 )
 
-# 配置CORS
+# ---------------------------------------------------------------------------
+# Middleware stack (order matters — outermost runs first)
+# ---------------------------------------------------------------------------
+
+# 1. Request ID — runs first so all downstream code has request.state.request_id
+app.add_middleware(RequestIDMiddleware)
+
+# 2. CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
@@ -140,12 +197,17 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
-# 配置GZip压缩（对JSON响应压缩效果显著）
+# 3. Response format wrapper — wraps 2xx JSON into standard envelope
+app.add_middleware(ResponseFormatMiddleware)
+
+# 4. GZip compression
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# 配置性能监控中间件
+# 5. Rate limiting
 if settings.ENABLE_RATE_LIMIT:
     app.add_middleware(RateLimitMiddleware)
+
+# 6. Performance monitoring (includes request_id context var injection)
 app.add_middleware(PerformanceMiddleware)
 
 
@@ -244,15 +306,121 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
-# 健康检查端点
+# ── Application start time for health check uptime ──────────────
+_APP_START_TIME: float = time.time()
+
+
+# 健康检查端点 — enhanced with per-service dependency checks
 @app.get("/health")
 async def health_check():
-    """健康检查"""
+    """Enhanced health check with per-service dependency status.
+
+    Returns overall status, individual service health, version, and uptime.
+    Each service check has a short timeout and does not block the full check
+    on a single failure.
+    """
+    services: dict = {}
+
+    async def _check_db():
+        try:
+            from app.core.database import AsyncSessionLocal
+            async with AsyncSessionLocal() as sess:
+                from sqlalchemy import text
+                await sess.execute(text("SELECT 1"))
+            services["database"] = "healthy"
+        except Exception as e:
+            services["database"] = "unhealthy"
+            logger.warning("Health check — database: %s", e)
+
+    async def _check_redis():
+        try:
+            from app.core.redis import redis_client as _rc
+            if _rc:
+                await asyncio.wait_for(_rc.ping(), timeout=2)
+                services["redis"] = "healthy"
+            else:
+                services["redis"] = "disabled"
+        except asyncio.TimeoutError:
+            services["redis"] = "degraded"
+        except Exception as e:
+            services["redis"] = "degraded"
+            logger.debug("Health check — redis: %s", e)
+
+    async def _check_elasticsearch():
+        try:
+            from app.core.elasticsearch import es_client as _ec
+            if _ec:
+                health = await asyncio.wait_for(_ec.cluster.health(), timeout=3)
+                es_status = health.get("status", "unknown")
+                if es_status in ("green", "yellow"):
+                    services["elasticsearch"] = "healthy"
+                else:
+                    services["elasticsearch"] = "unhealthy"
+            else:
+                services["elasticsearch"] = "disabled"
+        except asyncio.TimeoutError:
+            services["elasticsearch"] = "degraded"
+        except Exception as e:
+            services["elasticsearch"] = "degraded"
+            logger.debug("Health check — elasticsearch: %s", e)
+
+    async def _check_minio():
+        try:
+            from app.core.minio_client import minio_client as _mc
+            if _mc and _mc.client:
+                bucket = _mc.bucket_name
+                exists = await asyncio.wait_for(
+                    asyncio.get_event_loop().run_in_executor(None, _mc.client.bucket_exists, bucket),
+                    timeout=3,
+                )
+                services["minio"] = "healthy" if exists else "degraded"
+            else:
+                services["minio"] = "disabled"
+        except asyncio.TimeoutError:
+            services["minio"] = "degraded"
+        except Exception as e:
+            services["minio"] = "degraded"
+            logger.debug("Health check — minio: %s", e)
+
+    async def _check_kafka():
+        try:
+            from app.core.kafka_client import kafka_producer as _kp
+            if _kp and _kp.producer:
+                # Kafka producer doesn't have a great liveness check without sending,
+                # just report if it was started successfully
+                services["kafka"] = "healthy"
+            else:
+                services["kafka"] = "disabled"
+        except Exception as e:
+            services["kafka"] = "degraded"
+            logger.debug("Health check — kafka: %s", e)
+
+    # Run all checks concurrently
+    await asyncio.gather(
+        _check_db(),
+        _check_redis(),
+        _check_elasticsearch(),
+        _check_minio(),
+        _check_kafka(),
+        return_exceptions=True,
+    )
+
+    # Overall status: all healthy -> healthy, any unhealthy -> unhealthy, else degraded
+    status_values = list(services.values())
+    if all(v == "healthy" for v in status_values):
+        overall_status = "healthy"
+    elif any(v == "unhealthy" for v in status_values):
+        overall_status = "unhealthy"
+    else:
+        overall_status = "degraded"
+
+    uptime = time.time() - _APP_START_TIME if _APP_START_TIME > 0 else 0
+
     return {
-        "status": "healthy",
-        "service": settings.APP_NAME,
+        "status": overall_status,
         "version": settings.APP_VERSION,
-        "timestamp": asyncio.get_event_loop().time()
+        "services": services,
+        "uptime_seconds": round(uptime, 1),
     }
 
 
@@ -338,7 +506,11 @@ async def get_minio_file(file_path: str):
     例如：http://localhost:8000/files/avatars/1.png
     """
     # 路径穿越防护
+    from urllib.parse import unquote
     import os
+    file_path = unquote(file_path)
+    if file_path.startswith("/"):
+        raise HTTPException(status_code=400, detail="无效的文件路径")
     normalized = os.path.normpath(file_path)
     if normalized.startswith("..") or ".." in file_path:
         raise HTTPException(status_code=400, detail="无效的文件路径")
@@ -360,8 +532,6 @@ async def get_minio_file(file_path: str):
 
 if __name__ == "__main__":
     import uvicorn
-    
-    # 启动应用
     uvicorn.run(
         "main:app",
         host=settings.HOST,

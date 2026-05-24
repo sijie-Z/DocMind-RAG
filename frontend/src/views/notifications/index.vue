@@ -41,17 +41,41 @@
           <n-button type="primary" @click="handleSearch">筛选</n-button>
         </div>
 
-        <n-data-table
-          :columns="columns"
-          :data="items"
-          :row-key="rowKey"
-          :pagination="pagination"
-          :loading="loading"
-          :row-class-name="rowClassName"
-          :checked-row-keys="selectedIds"
-          @update:checked-row-keys="handleCheckedRowKeys"
-          @update:page="handlePageChange"
-        />
+        <n-spin :show="loading">
+          <template #description>
+            <span>加载中...</span>
+          </template>
+
+          <!-- Error state -->
+          <div v-if="loadError" class="py-16 text-center">
+            <n-result status="error" title="加载失败" :description="loadErrorMsg">
+              <template #footer>
+                <n-button type="primary" @click="handleRefresh">重试</n-button>
+              </template>
+            </n-result>
+          </div>
+
+          <!-- Empty state -->
+          <div v-else-if="!loadError && items.length === 0 && !loading" class="py-16 text-center">
+            <n-empty description="暂无通知">
+              <template #extra>
+                <n-button type="primary" ghost @click="handleRefresh">刷新</n-button>
+              </template>
+            </n-empty>
+          </div>
+
+          <n-data-table v-else
+            :columns="columns"
+            :data="items"
+            :row-key="rowKey"
+            :pagination="pagination"
+            :loading="false"
+            :row-class-name="rowClassName"
+            :checked-row-keys="selectedIds"
+            @update:checked-row-keys="handleCheckedRowKeys"
+            @update:page="handlePageChange"
+          />
+        </n-spin>
       </n-card>
     </div>
   </div>
@@ -77,6 +101,8 @@ const summary = reactive<NotificationSummaryResponse>({
 const items = ref<Notification[]>([])
 const selectedIds = ref<number[]>([])
 const loading = ref(false)
+const loadError = ref(false)
+const loadErrorMsg = ref('')
 const recentlyReadIds = ref<number[]>([])
 
 const filters = reactive({
@@ -92,11 +118,11 @@ const pagination = reactive({
 })
 
 const typeOptions = [
-  { label: 'system', value: 'system' },
-  { label: 'security', value: 'security' },
-  { label: 'account', value: 'account' },
-  { label: 'document', value: 'document' },
-  { label: 'chat', value: 'chat' }
+  { label: '系统', value: 'system' },
+  { label: '安全', value: 'security' },
+  { label: '账户', value: 'account' },
+  { label: '文档', value: 'document' },
+  { label: '对话', value: 'chat' }
 ]
 
 const readOptions = [
@@ -188,7 +214,11 @@ const fetchList = async () => {
     if (res.data) {
       items.value = res.data.items
       pagination.itemCount = res.data.total
+      loadError.value = false
     }
+  } catch (error: unknown) {
+    loadError.value = true
+    loadErrorMsg.value = error instanceof Error ? error.message : '加载通知列表失败'
   } finally {
     loading.value = false
   }

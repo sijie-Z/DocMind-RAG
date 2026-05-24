@@ -416,7 +416,7 @@ async def get_node_definitions(
                 name="DeepSeek",
                 category="llm",
                 description="使用 DeepSeek 模型进行文本生成",
-                default_config={"model": "deepseek-chat", "temperature": 0.7, "systemPrompt": ""},
+                default_config={"model": "deepseek-v4-flash", "temperature": 0.7, "systemPrompt": ""},
                 input_schema={"text": "string"},
                 output_schema={"content": "string"},
                 icon="RobotOutlined"

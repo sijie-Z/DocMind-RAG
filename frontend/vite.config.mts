@@ -3,19 +3,43 @@ import vue from '@vitejs/plugin-vue'
 import UnoCSS from 'unocss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { resolve, dirname } from 'path'
+import { readFileSync, existsSync } from 'fs'
 import { fileURLToPath } from 'url'
-import Components from 'unplugin-vue-components/vite'
-import { NaiveUiResolver } from 'unplugin-vue-components/resolvers'
+import type { Plugin } from 'vite'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+const BACKEND_PORT_FILE = resolve(__dirname, '..', 'backend', '.backend-port')
+const DEFAULT_BACKEND_PORT = 8010
+
+function getBackendPort(): number {
+  try {
+    if (existsSync(BACKEND_PORT_FILE)) {
+      return parseInt(readFileSync(BACKEND_PORT_FILE, 'utf-8').trim(), 10)
+    }
+  } catch {}
+  return DEFAULT_BACKEND_PORT
+}
+
+/** Small plugin that exposes the backend port at runtime for tooling */
+function backendPortPlugin(): Plugin {
+  return {
+    name: 'backend-port',
+    configureServer(server) {
+      // Make the backend port available via a virtual endpoint
+      server.middlewares.use('/__backend_port', (_req, res) => {
+        res.setHeader('Content-Type', 'text/plain')
+        res.end(String(getBackendPort()))
+      })
+    },
+  }
+}
 
 export default defineConfig({
   plugins: [
     vue(),
     UnoCSS(),
-    Components({
-      resolvers: [NaiveUiResolver()],
-    }),
+    backendPortPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
@@ -102,24 +126,15 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
     proxy: {
-      '/api': {
-        target: 'http://127.0.0.1:8000',
-        changeOrigin: true,
-        ws: true
-      },
-      '/static': {
-        target: 'http://127.0.0.1:8000',
-        changeOrigin: true
-      },
+      '/api': `http://127.0.0.1:${getBackendPort()}`,
       '/ws': {
-        target: 'ws://127.0.0.1:8000',
+        target: `ws://127.0.0.1:${getBackendPort()}`,
         ws: true,
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/ws/, '/api/v1/chat/ws')
-      }
-    }
+        rewrite: (path) => path.replace(/^\/ws/, '/api/v1/chat/ws'),
+      },
+      '/static': `http://127.0.0.1:${getBackendPort()}`,
+    },
   },
   build: {
     outDir: 'dist',
@@ -143,9 +158,6 @@ export default defineConfig({
                 if (id.includes('naive-ui')) {
                     return 'naive-ui'
                 }
-                if (id.includes('naive-ui')) {
-                    return 'naive-ui'
-                }
                 if (id.includes('vue')) {
                     return 'vue'
                 }
@@ -157,9 +169,6 @@ export default defineConfig({
                 }
                 if (id.includes('echarts') || id.includes('zrender')) {
                     return 'charts'
-                }
-                if (id.includes('recharts')) {
-                    return 'recharts'
                 }
                 if (id.includes('vue-virtual-scroller')) {
                     return 'virtual-scroller'

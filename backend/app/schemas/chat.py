@@ -93,6 +93,7 @@ class ChatStreamRequest(BaseModel):
     conversationId: Optional[str] = Field(None, description="会话 ID")
     fileIds: Optional[list[str]] = Field(None, description="关联文件 ID 列表")
     payload: Optional[dict] = Field(None, description="额外参数（strict/privacy/sse/stream 等布尔开关）")
+    useAgent: bool = Field(False, description="使用 PER Agent 模式（替代默认 RAG 管线）")
 
 
 class FeedbackRequest(BaseModel):

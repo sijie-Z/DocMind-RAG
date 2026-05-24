@@ -21,11 +21,16 @@ class JsonFormatter(logging.Formatter):
     自动注入 request_id / trace_id / user_id（如果中间件已设置）。
     """
 
+    def __init__(self, service_name: str = "docmind"):
+        super().__init__()
+        self.service_name = service_name
+
     def format(self, record: logging.LogRecord) -> str:
         payload = {
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(record.created)),
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(record.created)),
             "level": record.levelname,
-            "logger": record.name,
+            "service": self.service_name,
+            "module": record.name,
             "message": record.getMessage(),
         }
 
@@ -43,6 +48,21 @@ class JsonFormatter(logging.Formatter):
 
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)
+        if record.exc_text:
+            payload["exc_text"] = record.exc_text
+
+        # Include extra fields passed via extra={} in log calls
+        for key, value in record.__dict__.items():
+            if key not in (
+                "args", "asctime", "created", "exc_info", "exc_text",
+                "filename", "funcName", "levelname", "levelno", "lineno",
+                "message", "module", "msecs", "msg", "name", "pathname",
+                "process", "processName", "relativeCreated", "stack_info",
+                "thread", "threadName", "service", "request_id", "trace_id",
+                "user_id",
+            ):
+                if isinstance(value, (str, int, float, bool, list, dict)) or value is None:
+                    payload[key] = value
 
         return json.dumps(payload, ensure_ascii=False)
 
@@ -68,8 +88,8 @@ def setup_logging():
         encoding="utf-8",
     )
 
-    if getattr(settings, "LOG_JSON", False):
-        formatter: logging.Formatter = JsonFormatter()
+    if getattr(settings, "LOG_JSON", True):
+        formatter: logging.Formatter = JsonFormatter(service_name=settings.APP_NAME)
     else:
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 

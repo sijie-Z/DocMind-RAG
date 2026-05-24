@@ -5,18 +5,18 @@
       <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIj48Y2lyY2xlIGN4PSIzMCIgY3k9IjMwIiByPSIyIi8+PC9nPjwvZz48L3N2Zz4=')] opacity-50"></div>
       <div class="relative z-10">
         <h1 class="text-2xl md:text-3xl font-bold">{{ t('dashboard.welcome') }}, {{ userInfo?.nickname || userInfo?.username }}!</h1>
-        <p class="text-indigo-100 mt-1 text-sm md:text-base">{{ t('dashboard.welcomeDesc') }}</p>
+        <p class="text-slate-100 mt-1 text-sm md:text-base">{{ t('dashboard.welcomeDesc') }}</p>
       </div>
     </div>
 
     <!-- 统计卡片 - 4列 -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <div class="group bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-indigo-200 dark:hover:border-blue-700 transition-all duration-200 cursor-pointer">
+      <div class="group bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-slate-200 dark:hover:border-blue-700 transition-all duration-200 cursor-pointer">
         <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+          <div class="w-10 h-10 bg-slate-100 dark:bg-slate-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
             <n-icon size="22" class="text-blue-600 dark:text-blue-400"><ChatbubbleEllipsesOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400 group-hover:text-blue-500 transition-colors">conversations</span>
+          <span class="text-xs text-gray-400 group-hover:text-blue-500 transition-colors">对话</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.conversation_count.toLocaleString() }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.conversations') }}</p>
@@ -27,7 +27,7 @@
           <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
             <n-icon size="22" class="text-emerald-600 dark:text-emerald-400"><TextOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400 group-hover:text-emerald-500 transition-colors">messages</span>
+          <span class="text-xs text-gray-400 group-hover:text-emerald-500 transition-colors">消息</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.message_count.toLocaleString() }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.messages') }}</p>
@@ -38,7 +38,7 @@
           <div class="w-10 h-10 bg-orange-100 dark:bg-orange-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
             <n-icon size="22" class="text-orange-600 dark:text-orange-400"><DocumentOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400 group-hover:text-orange-500 transition-colors">documents</span>
+          <span class="text-xs text-gray-400 group-hover:text-orange-500 transition-colors">文档</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.file_count.toLocaleString() }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.files') }}</p>
@@ -49,7 +49,7 @@
           <div class="w-10 h-10 bg-rose-100 dark:bg-rose-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
             <n-icon size="22" class="text-rose-600 dark:text-rose-400"><ServerOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400 group-hover:text-rose-500 transition-colors">storage</span>
+          <span class="text-xs text-gray-400 group-hover:text-rose-500 transition-colors">存储</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ formatSize(stats.storage_used) }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.storage') }}</p>
@@ -65,12 +65,12 @@
           </div>
           <div>
             <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.ragStats') }}</h3>
-            <p class="text-xs text-gray-500 dark:text-gray-400">Knowledge retrieval quality (7d)</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">近 7 天知识检索质量</p>
           </div>
         </div>
         <div class="flex items-center gap-2">
           <n-tag :type="ragStats.hitRate > 60 ? 'success' : ragStats.hitRate > 30 ? 'warning' : 'error'" size="small" round>
-            {{ ragStats.hitRate > 60 ? 'Good' : ragStats.hitRate > 30 ? 'Fair' : 'Needs Attention' }}
+            {{ ragStats.hitRate > 60 ? '良好' : ragStats.hitRate > 30 ? '一般' : '需关注' }}
           </n-tag>
         </div>
       </div>
@@ -116,12 +116,12 @@
       <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
         <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <div class="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center">
+            <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
               <n-icon class="text-blue-600 dark:text-blue-400"><TimeOutline /></n-icon>
             </div>
             <div>
               <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.recentConversations') }}</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">Last {{ recentConversations.length }} conversations</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">最近 {{ recentConversations.length }} 个会话</p>
             </div>
           </div>
           <n-button text type="primary" size="small" @click="$router.push('/conversations')">
@@ -147,7 +147,7 @@
               @click="$router.push(`/chat?conversation=${conv.id}`)"
             >
               <div class="flex-1 min-w-0 flex items-center gap-3">
-                <div class="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-indigo-200 dark:group-hover:bg-indigo-800 transition-colors">
+                <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-slate-200 dark:group-hover:bg-slate-800 transition-colors">
                   <n-icon size="16" class="text-blue-600 dark:text-blue-400"><ChatbubbleEllipsesOutline /></n-icon>
                 </div>
                 <div class="min-w-0">
@@ -165,12 +165,12 @@
       <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
         <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
           <div class="flex items-center gap-2">
-            <div class="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center">
+            <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
               <n-icon class="text-blue-600 dark:text-blue-400"><TrendingUpOutline /></n-icon>
             </div>
             <div>
               <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.activityTrend') }}</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">7-day activity chart</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">7天活动趋势图</p>
             </div>
           </div>
         </div>
@@ -181,7 +181,7 @@
     </div>
 
     <!-- 新手引导 (空状态时显示) -->
-    <div v-if="stats.file_count === 0" class="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-2xl border border-blue-200 dark:border-blue-800/50 p-6 relative overflow-hidden">
+    <div v-if="stats.file_count === 0" class="bg-gradient-to-br from-blue-50 to-slate-50 dark:from-blue-900/20 dark:to-slate-900/20 rounded-2xl border border-blue-200 dark:border-blue-800/50 p-6 relative overflow-hidden">
       <div class="absolute top-0 right-0 w-32 h-32 bg-blue-200/30 dark:bg-blue-700/10 rounded-full -translate-y-1/2 translate-x-1/2"></div>
       <div class="relative z-10">
         <h3 class="text-lg font-bold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-2">
@@ -246,7 +246,7 @@
         </n-button>
         <n-button type="warning" size="large" class="shadow-md hover:shadow-lg transition-shadow" @click="$router.push('/agent')">
           <template #icon><n-icon><HardwareChipOutline /></n-icon></template>
-          Agent Mode
+          Agent 模式
         </n-button>
       </div>
     </div>
@@ -340,7 +340,7 @@ const updateChart = () => {
     grid: { left: '2%', right: '3%', bottom: '3%', top: '10%', containLabel: true },
     xAxis: {
       type: 'category',
-      data: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      data: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
       axisLine: { lineStyle: { color: '#e5e7eb' } },
       axisLabel: { color: '#6b7280', fontSize: 10 },
       splitLine: { show: false }
@@ -358,7 +358,7 @@ const updateChart = () => {
       itemStyle: {
         color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
           { offset: 0, color: CHART_COLORS.primary },
-          { offset: 1, color: CHART_COLORS.purple }
+          { offset: 1, color: CHART_COLORS.sky }
         ]),
         borderRadius: [4, 4, 0, 0]
       },
@@ -366,7 +366,7 @@ const updateChart = () => {
         itemStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
             { offset: 0, color: CHART_COLORS.primary },
-            { offset: 1, color: CHART_COLORS.purple }
+            { offset: 1, color: CHART_COLORS.sky }
           ])
         }
       }

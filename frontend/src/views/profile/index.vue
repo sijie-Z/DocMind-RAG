@@ -1,12 +1,26 @@
 <template>
   <div class="min-h-screen bg-gray-50 dark:bg-gray-900 pb-12 transition-colors duration-300">
     <!-- 顶部背景图 -->
-    <div class="h-64 bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 relative overflow-hidden">
+    <div class="h-64 bg-gradient-to-r from-blue-500 via-blue-600 to-blue-700 relative overflow-hidden">
       <div class="absolute inset-0 bg-[url('@/assets/pattern.svg')] opacity-10"></div>
       <div class="absolute inset-0 bg-black/10"></div>
     </div>
 
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-24 relative z-10">
+    <n-spin :show="loading" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-24 relative z-10">
+      <template #description>
+        <span>加载中...</span>
+      </template>
+
+      <!-- Error state -->
+      <div v-if="loadError" class="flex items-center justify-center min-h-[400px]">
+        <n-result status="error" title="加载失败" :description="loadErrorMsg">
+          <template #footer>
+            <n-button type="primary" round @click="loadAllData">重试</n-button>
+          </template>
+        </n-result>
+      </div>
+
+      <template v-if="!loadError">
       <div class="flex flex-col lg:flex-row gap-8">
         <!-- 左侧个人信息卡片 -->
         <div class="w-full lg:w-1/3 xl:w-1/4">
@@ -141,7 +155,7 @@
                             />
                           </div>
                           <div class="grid grid-cols-2 gap-4">
-                            <div class="p-3 bg-indigo-50/50 dark:bg-indigo-900/10 rounded-lg">
+                            <div class="p-3 bg-slate-50/50 dark:bg-slate-900/10 rounded-lg">
                               <div class="text-xs text-blue-500 font-semibold mb-1">{{ t('profile.used') || '已用' }}</div>
                               <div class="text-lg font-bold text-gray-800 dark:text-gray-200">{{ formatBytes(storageUsedBytes) }}</div>
                             </div>
@@ -200,11 +214,11 @@
                           v-for="action in quickActions"
                           :key="action.label"
                           @click="goToRoute(action.route)"
-                          class="w-full text-left p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-indigo-300 dark:hover:border-blue-500 transition-colors"
+                          class="w-full text-left p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-slate-300 dark:hover:border-blue-500 transition-colors"
                         >
                           <div class="flex items-center justify-between">
                             <div class="flex items-center gap-3">
-                              <div class="w-9 h-9 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center">
+                              <div class="w-9 h-9 rounded-lg bg-slate-50 dark:bg-slate-900/30 flex items-center justify-center">
                                 <n-icon :component="action.icon" class="text-blue-600 dark:text-blue-400" />
                               </div>
                               <div>
@@ -362,33 +376,40 @@
                     <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
                       <div>
                         <div class="font-medium text-gray-800 dark:text-white">{{ t('profile.theme') }}</div>
-                        <n-select
-                          v-model:value="appStore.themeMode"
-                          :options="themeOptions"
-                          size="small"
-                          style="width: 140px"
-                          @update:value="(val: string) => appStore.setTheme(val as 'light' | 'dark')"
-                        />
+                        <div class="text-sm text-gray-500 mt-1">{{ t('profile.themeSettingDesc') || '选择界面主题风格' }}</div>
                       </div>
+                      <n-select
+                        v-model:value="settingsForm.theme"
+                        :options="themeOptions"
+                        size="small"
+                        style="width: 140px"
+                      />
                     </div>
 
                     <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
                       <div>
                         <div class="font-medium text-gray-800 dark:text-white">{{ t('profile.language') }}</div>
-                        <div class="text-sm text-gray-500">
-                          {{ 
-                            locale === 'zh' ? '简体中文' : 
-                            locale === 'en' ? 'English' : 
-                            locale === 'ja' ? '日本語' : 'Français' 
-                          }}
-                        </div>
+                        <div class="text-sm text-gray-500 mt-1">{{ t('profile.languageSettingDesc') || '选择界面显示语言' }}</div>
                       </div>
                       <n-select 
-                        v-model:value="locale" 
+                        v-model:value="settingsForm.language" 
                         :options="languageOptions" 
                         class="w-40" 
-                        @update:value="handleLanguageChange"
                       />
+                    </div>
+
+                    <div class="pt-4">
+                      <n-button
+                        type="primary"
+                        @click="handleSaveSettings"
+                        :loading="savingSettings"
+                        :disabled="!settingsChanged"
+                      >
+                        {{ t('common.save') }}
+                      </n-button>
+                      <n-text v-if="settingsSaveMessage" :type="settingsSaveSuccess ? 'success' : 'error'" class="ml-4 text-sm">
+                        {{ settingsSaveMessage }}
+                      </n-text>
                     </div>
                  </div>
               </n-tab-pane>
@@ -418,12 +439,13 @@
           </n-card>
         </div>
       </div>
-    </div>
+    </template> <!-- end !loadError -->
+    </n-spin>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch, h } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch, h, resolveComponent } from 'vue'
 import { useDialog, NButton } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
@@ -447,7 +469,10 @@ import {
   CheckmarkCircle,
   GlobeOutline,
   NotificationsOutline,
-  StatsChartOutline
+  StatsChartOutline,
+  LaptopOutline,
+  PhonePortraitOutline,
+  TabletPortraitOutline
 } from '@vicons/ionicons5'
 import { getUserProfile, getUserStats, updateUserProfile, updatePassword, uploadAvatar, getUserActivities, generateApiKey as apiGenerateKey, revokeApiKey as apiRevokeKey, getMySessions, revokeMySession, getMyActivityLogs } from '@/api/user'
 import type { Activity, UserSession, UserAuditLog } from '@/api/user'
@@ -496,6 +521,11 @@ const router = useRouter()
 const userStore = useUserStore()
 const appStore = useAppStore()
 
+// 页面加载状态
+const loading = ref(true)
+const loadError = ref(false)
+const loadErrorMsg = ref('')
+
 // 状态定义
 const userInfo = ref<UserInfo>({
   id: 0,
@@ -535,18 +565,20 @@ const sessionColumns = [
     key: 'device_name',
     render: (row: UserSession) => {
       const ua = row.user_agent || ''
-      let deviceIcon = '💻'
+      let DeviceIcon = LaptopOutline
       let deviceType = '桌面设备'
       if (ua.includes('Mobile') || ua.includes('Android') || ua.includes('iPhone')) {
-        deviceIcon = '📱'
+        DeviceIcon = PhonePortraitOutline
         deviceType = '移动设备'
       } else if (ua.includes('Tablet') || ua.includes('iPad')) {
-        deviceIcon = '📲'
+        DeviceIcon = TabletPortraitOutline
         deviceType = '平板设备'
       }
       const isTrusted = trustedDevices.value.has(row.id)
       return h('div', { class: 'flex items-center gap-3' }, [
-        h('div', { class: 'w-10 h-10 rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-900/30 dark:to-indigo-900/30 flex items-center justify-center text-xl' }, deviceIcon),
+        h('div', { class: 'w-10 h-10 rounded-xl bg-gradient-to-br from-blue-100 to-slate-100 dark:from-blue-900/30 dark:to-slate-900/30 flex items-center justify-center' }, [
+          h(resolveComponent('n-icon'), { size: '22', class: 'text-blue-600 dark:text-blue-400' }, { default: () => h(DeviceIcon) })
+        ]),
         h('div', {}, [
           h('div', { class: 'flex items-center gap-2' }, [
             h('span', { class: 'font-medium text-gray-800 dark:text-gray-200' }, row.device_name || deviceType),
@@ -673,7 +705,7 @@ const showSessionDetail = (session: UserSession) => {
     title: '设备详情',
     content: () => h('div', { class: 'space-y-4' }, [
       // 设备概览卡片
-      h('div', { class: 'flex items-center gap-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl' }, [
+      h('div', { class: 'flex items-center gap-4 p-4 bg-gradient-to-r from-blue-50 to-slate-50 dark:from-blue-900/20 dark:to-slate-900/20 rounded-xl' }, [
         h('div', { class: 'w-14 h-14 rounded-xl bg-white dark:bg-gray-800 flex items-center justify-center text-3xl shadow-sm' }, deviceIcon),
         h('div', {}, [
           h('div', { class: 'font-semibold text-gray-800 dark:text-white text-lg' }, session.device_name || deviceType),
@@ -690,7 +722,7 @@ const showSessionDetail = (session: UserSession) => {
         h('div', { class: 'p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg' }, [
           h('div', { class: 'text-xs text-gray-400 mb-1' }, '状态'),
           h('div', { class: 'font-medium' }, [
-            session.is_active ? h('span', { class: 'text-emerald-600 dark:text-emerald-400' }, '🟢 在线') : h('span', { class: 'text-gray-400' }, '⚪ 已下线')
+            session.is_active ? h('span', { class: 'inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400' }, [h('span', { class: 'w-2 h-2 rounded-full bg-emerald-500' }), '在线']) : h('span', { class: 'inline-flex items-center gap-1.5 text-gray-400' }, [h('span', { class: 'w-2 h-2 rounded-full bg-gray-400' }), '已下线'])
           ])
         ]),
         h('div', { class: 'p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg' }, [
@@ -778,7 +810,7 @@ const statItems = computed(() => [
     label: t('profile.stats.knowledge'), 
     value: stats.knowledgeBaseCount, 
     icon: BookOutline, 
-    bgClass: 'bg-indigo-100 dark:bg-indigo-900/30',
+    bgClass: 'bg-slate-100 dark:bg-slate-900/30',
     textClass: 'text-blue-600 dark:text-blue-400' 
   }
 ])
@@ -839,6 +871,51 @@ const handleLanguageChange = (val: string) => {
   locale.value = val
 }
 
+// Settings form
+const settingsForm = reactive({
+  language: userStore.settings.language,
+  theme: userStore.settings.theme === 'auto' ? 'auto' : userStore.settings.theme,
+})
+const savingSettings = ref(false)
+const settingsSaveMessage = ref('')
+const settingsSaveSuccess = ref(false)
+
+const settingsChanged = computed(() => {
+  return settingsForm.language !== userStore.settings.language
+    || settingsForm.theme !== userStore.settings.theme
+})
+
+const handleSaveSettings = async () => {
+  savingSettings.value = true
+  settingsSaveMessage.value = ''
+  settingsSaveSuccess.value = false
+  try {
+    // Apply theme immediately
+    appStore.setTheme(settingsForm.theme as 'light' | 'dark' | 'auto')
+    // Apply language immediately
+    locale.value = settingsForm.language
+    localStorage.setItem('language', settingsForm.language)
+    // Save to backend
+    const result = await userStore.updateSettings({
+      language: settingsForm.language,
+      theme: settingsForm.theme,
+    })
+    if (result.success) {
+      settingsSaveMessage.value = t('common.saveSuccess')
+      settingsSaveSuccess.value = true
+    } else {
+      settingsSaveMessage.value = t('common.error')
+      settingsSaveSuccess.value = false
+    }
+  } catch {
+    settingsSaveMessage.value = t('common.error')
+    settingsSaveSuccess.value = false
+  } finally {
+    savingSettings.value = false
+    setTimeout(() => { settingsSaveMessage.value = '' }, 3000)
+  }
+}
+
 // 加载状态
 const updatingProfile = ref(false)
 const updatingPassword = ref(false)
@@ -879,7 +956,7 @@ const initCharts = () => {
         label: { show: false },
         data: [
           { value: storageUsedBytes.value, name: '已用文档', itemStyle: { color: '#3b82f6' } },
-          { value: Math.max(0, storageLimitBytes.value - storageUsedBytes.value), name: '可用空间', itemStyle: { color: isDark ? '#374151' : '#e0e7ff' } }
+          { value: Math.max(0, storageLimitBytes.value - storageUsedBytes.value), name: '可用空间', itemStyle: { color: isDark ? '#374151' : '#e2e8f0' } }
         ]
       }]
     })
@@ -1239,7 +1316,7 @@ const revokeApiKey = async () => {
     apiKey.value = ''
     message.success(t('profile.apiKeyRevoked'))
   } catch (error: unknown) {
-    const errMsg = getResponseDetail(error) || t('profile.apiKeyRevokeFailed') || 'Failed to revoke API Key'
+    const errMsg = getResponseDetail(error) || t('profile.apiKeyRevokeFailed') || '撤销 API Key 失败'
     message.error(errMsg)
   } finally {
     revokingApiKey.value = false
@@ -1252,29 +1329,42 @@ const copyApiKey = () => {
   message.success(t('common.copySuccess'))
 }
 
-onMounted(async () => {
-  // 加载已信任的设备
+const loadAllData = async () => {
+  loadError.value = false
+  loading.value = true
   try {
-    const savedTrusted = localStorage.getItem('trustedDevices')
-    if (savedTrusted) {
-      trustedDevices.value = new Set(JSON.parse(savedTrusted))
+    // 加载已信任的设备
+    try {
+      const savedTrusted = localStorage.getItem('trustedDevices')
+      if (savedTrusted) {
+        trustedDevices.value = new Set(JSON.parse(savedTrusted))
+      }
+    } catch (e) {
+      // Failed to load trusted devices
     }
-  } catch (e) {
-    // Failed to load trusted devices
-  }
 
-  await loadUserProfile()
-  await loadUserStats()
-  await loadActivities()
-  await loadSessions()
-  await loadAuditLogs()
+    await loadUserProfile()
+    await loadUserStats()
+    await loadActivities()
+    await loadSessions()
+    await loadAuditLogs()
+
+    loadError.value = false
+  } catch (error) {
+    loadError.value = true
+    loadErrorMsg.value = t('profile.loadFailed', '加载个人资料失败')
+  } finally {
+    loading.value = false
+  }
 
   // Wait for next tick to ensure DOM is ready for ECharts
   setTimeout(() => {
     initCharts()
     window.addEventListener('resize', handleResize)
   }, 100)
-})
+}
+
+onMounted(loadAllData)
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)

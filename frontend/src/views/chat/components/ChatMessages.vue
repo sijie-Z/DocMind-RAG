@@ -8,12 +8,12 @@
       <!-- Welcome screen -->
       <div v-if="messages.length === 0" class="flex flex-col items-center justify-center mt-16 md:mt-24 text-center animate-fade-in">
         <div class="relative mb-10">
-          <div class="w-28 h-28 bg-gradient-to-br from-blue-500 via-blue-600 to-blue-700 rounded-3xl shadow-2xl shadow-blue-500/30 flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
+          <div class="w-28 h-28 bg-gradient-to-br from-slate-500 via-blue-500 to-blue-600 rounded-3xl shadow-2xl shadow-slate-500/30 flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
             <n-icon size="52" class="text-white drop-shadow">
               <SparklesOutline />
             </n-icon>
           </div>
-          <div class="absolute -inset-2 bg-blue-400/20 rounded-[1.5rem] blur-xl -z-10"></div>
+          <div class="absolute -inset-2 bg-slate-400/20 rounded-[1.5rem] blur-xl -z-10"></div>
         </div>
         <h2 class="text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-3">
           {{ t('chat.welcome') }}
@@ -25,13 +25,13 @@
           <button
             v-for="(suggestion, index) in suggestions"
             :key="index"
-            class="p-4 md:p-5 bg-white/80 dark:bg-gray-800/80 backdrop-blur border border-slate-200/60 dark:border-gray-700/60 rounded-2xl text-left hover:border-blue-400/60 hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300 group relative overflow-hidden"
+            class="p-4 md:p-5 bg-white/80 dark:bg-gray-800/80 backdrop-blur border border-slate-200/60 dark:border-gray-700/60 rounded-2xl text-left hover:border-slate-400/60 hover:shadow-lg hover:shadow-slate-500/10 transition-all duration-300 group relative overflow-hidden"
             @click="$emit('useSuggestion', suggestion)"
           >
             <div class="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
-              <n-icon class="text-blue-500" size="18"><ArrowForwardOutline /></n-icon>
+              <n-icon class="text-slate-500" size="18"><ArrowForwardOutline /></n-icon>
             </div>
-            <h3 class="font-semibold text-sm md:text-base text-slate-800 dark:text-slate-200 group-hover:text-blue-600 dark:group-hover:text-blue-400 mb-1.5 tracking-wide">
+            <h3 class="font-semibold text-sm md:text-base text-slate-800 dark:text-slate-200 group-hover:text-slate-600 dark:group-hover:text-slate-400 mb-1.5 tracking-wide">
               {{ suggestion.title }}
             </h3>
             <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed font-light">
@@ -70,25 +70,25 @@
                 size="small"
                 class="bg-transparent"
               />
-              <n-icon v-else size="20" class="text-blue-600 dark:text-blue-400"><SparklesOutline /></n-icon>
+              <n-icon v-else size="20" class="text-slate-600 dark:text-slate-400"><SparklesOutline /></n-icon>
             </div>
 
             <div class="max-w-[85%] relative group/bubble">
               <div
                 class="px-6 py-4 rounded-[1.5rem] shadow-sm text-[15px] leading-relaxed tracking-wide transition-all duration-300"
                 :class="message.messageType === 'user'
-                  ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-tr-md'
+                  ? 'bg-gradient-to-br from-slate-600 to-blue-600 text-white rounded-tr-md'
                   : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-tl-md border border-gray-100 dark:border-gray-700'"
               >
                 <Markdown v-if="message.messageType === 'assistant'" :content="message.content" />
                 <span
                   v-if="message.messageType === 'assistant' && isLoading && index === messages.length - 1"
-                  class="inline-block w-0.5 h-4 bg-blue-500 dark:bg-blue-400 ml-0.5 align-middle animate-blink"
+                  class="inline-block w-0.5 h-4 bg-slate-500 dark:bg-slate-400 ml-0.5 align-middle animate-blink"
                 />
                 <div v-else class="whitespace-pre-wrap">{{ message.content }}</div>
 
                 <div v-if="message.sources && message.sources.length > 0" class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-                  <div class="text-xs text-gray-500 dark:text-gray-400 mb-1.5 font-medium">来源引用：</div>
+                  <div class="text-xs text-gray-500 dark:text-gray-400 mb-1.5 font-medium">{{ t('chat.sourcesLabel') }}</div>
                   <div class="flex flex-wrap gap-1.5">
                     <n-popover
                       v-for="(source, idx) in message.sources"
@@ -108,18 +108,18 @@
                           <template #icon>
                             <n-icon size="10" class="mr-0.5"><DocumentTextOutline /></n-icon>
                           </template>
-                          [{{ idx + 1 }}] {{ source.filename || source.title || '文档' }}
+                          [{{ idx + 1 }}] {{ source.filename || source.title || t('chat.sourceDoc') }}
                         </n-tag>
                       </template>
                       <div class="max-w-sm p-2">
                         <div class="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          {{ source.filename || '未知文档' }}
+                          {{ source.filename || t('chat.unknownDoc') }}
                         </div>
                         <div class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed line-clamp-6">
-                          {{ source.snippet || source.text || '无预览' }}
+                          {{ source.snippet || source.text || t('chat.noPreview') }}
                         </div>
                         <div v-if="source.score" class="mt-1.5 text-[10px] text-gray-400">
-                          相关度: {{ (source.score * 100).toFixed(0) }}%
+                          {{ t('chat.relevanceScore', { score: (source.score * 100).toFixed(0) }) }}
                         </div>
                       </div>
                     </n-popover>
@@ -137,7 +137,7 @@
                       <template #icon><n-icon><ThumbsUpOutline /></n-icon></template>
                     </n-button>
                   </template>
-                  有用
+                  {{ t('chat.useful') }}
                 </n-tooltip>
                 <n-tooltip trigger="hover">
                   <template #trigger>
@@ -148,7 +148,7 @@
                       <template #icon><n-icon><ThumbsDownOutline /></n-icon></template>
                     </n-button>
                   </template>
-                  没用
+                  {{ t('chat.notUseful') }}
                 </n-tooltip>
                 <n-button size="tiny" quaternary circle class="text-gray-400" @click="$emit('copy', message.content)">
                   <template #icon><n-icon><CopyOutline /></n-icon></template>
@@ -160,7 +160,7 @@
                       <template #icon><n-icon><RefreshOutline /></n-icon></template>
                     </n-button>
                   </template>
-                  重新生成
+                  {{ t('chat.regenerate') }}
                 </n-tooltip>
               </div>
             </div>
@@ -175,9 +175,9 @@
         </div>
         <div class="flex items-center h-10">
           <div class="flex space-x-1.5">
-            <div class="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style="animation-delay: 0ms"></div>
-            <div class="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style="animation-delay: 150ms"></div>
-            <div class="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style="animation-delay: 300ms"></div>
+            <div class="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style="animation-delay: 0ms"></div>
+            <div class="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style="animation-delay: 150ms"></div>
+            <div class="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style="animation-delay: 300ms"></div>
           </div>
         </div>
       </div>
@@ -193,7 +193,7 @@
           @click="$emit('scrollToBottom', 'smooth', true)"
         >
           <template #icon><n-icon><ArrowDownOutline /></n-icon></template>
-          {{ t('chat.backToBottom') || '回到最新消息' }}
+          {{ t('chat.backToBottom') }}
         </n-button>
       </div>
     </transition>

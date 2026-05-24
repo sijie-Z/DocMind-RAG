@@ -16,8 +16,8 @@ class AISettings(BaseSettings):
 
     # DeepSeek / LLM
     DEEPSEEK_API_KEY: str = ""
-    DEEPSEEK_API_URL: str = "https://open.bigmodel.cn/api/paas/v4/"
-    DEEPSEEK_MODEL: str = "glm-4-flash"
+    DEEPSEEK_API_URL: str = "https://api.deepseek.com"
+    DEEPSEEK_MODEL: str = "deepseek-v4-flash"
     AI_MAX_TOKENS: int = 10000
     AI_STREAM_TIMEOUT: int = 120
 

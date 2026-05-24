@@ -10,7 +10,7 @@
           @click="$emit('stopGeneration')"
         >
           <template #icon><n-icon><StopCircleOutline /></n-icon></template>
-          {{ t('chat.stopGenerating') || '停止生成' }}
+          {{ t('chat.stopGenerating') }}
         </n-button>
       </div>
 
@@ -33,23 +33,23 @@
 
             <span v-if="file.status === 'uploading'" class="ml-1 text-[10px] text-gray-400 flex items-center gap-1">
               <n-icon size="10"><CloudUploadOutline /></n-icon>
-              上传中...
+              {{ t('chat.fileUploading') }}
             </span>
             <span v-else-if="file.status === 'parsing'" class="ml-1 text-[10px] text-amber-500 flex items-center gap-1">
               <n-spin :size="10" stroke="currentColor" />
-              {{ file.statusDetail || '解析中...' }}
+              {{ file.statusDetail || t('chat.fileParsing') }}
             </span>
             <span v-else-if="file.status === 'indexing'" class="ml-1 text-[10px] text-blue-500 flex items-center gap-1">
               <n-spin :size="10" stroke="currentColor" />
-              {{ file.statusDetail || '索引中...' }}
+              {{ file.statusDetail || t('chat.fileIndexing') }}
             </span>
             <span v-else-if="file.status === 'done'" class="ml-1 text-[10px] text-green-500 flex items-center gap-1">
               <n-icon size="10"><CheckmarkCircleOutline /></n-icon>
-              {{ file.statusDetail || '已完成' }}
+              {{ file.statusDetail || t('chat.fileCompleted') }}
             </span>
             <span v-else-if="file.status === 'error'" class="ml-1 text-[10px] flex items-center gap-1">
               <n-icon size="12" class="flex-shrink-0"><CloseCircleOutline /></n-icon>
-              <span class="truncate max-w-[80px]" :title="file.errorMsg">{{ file.errorMsg || '解析失败' }}</span>
+              <span class="truncate max-w-[80px]" :title="file.errorMsg">{{ file.errorMsg || t('chat.fileFailed') }}</span>
             </span>
 
             <button @click.stop="$emit('removeAttachment', index)" class="ml-1 hover:text-red-500 transition-colors p-0.5 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20">
@@ -62,13 +62,13 @@
               <template #trigger>
                 <div class="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-lg border border-amber-200 dark:border-amber-800/50 hover:border-amber-400 dark:hover:border-amber-600 transition-colors">
                   <n-icon size="14" class="text-amber-600 dark:text-amber-400"><ShieldOutline /></n-icon>
-                  <span class="text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">仅附件模式</span>
+                  <span class="text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">{{ t('chat.attachmentModeOnly') }}</span>
                   <n-switch v-model:value="strictMode" size="small" :round="false" />
                 </div>
               </template>
               <div class="text-xs leading-relaxed">
-                <div class="font-bold mb-1">强约束模式</div>
-                <div>开启后，AI 将 <span class="text-red-500 font-bold">完全基于</span> 你上传的文档内容回答，<span class="text-red-500 font-bold">不会</span> 使用全局知识库或其他外部知识。</div>
+                <div class="font-bold mb-1">{{ t('chat.strictModeTitle') }}</div>
+                <div v-html="t('chat.strictModeDesc')"></div>
               </div>
             </n-tooltip>
           </div>
@@ -132,7 +132,7 @@
               </template>
               <div class="flex items-center gap-2">
                 <n-switch v-model:value="privacyMode" size="small" />
-                <span class="text-xs">隐私模式 (自动脱敏敏感信息)</span>
+                <span class="text-xs">{{ t('chat.privacyMode') }}</span>
               </div>
             </n-popover>
 
@@ -144,9 +144,25 @@
               </template>
               <div class="flex items-center gap-2">
                 <n-switch v-model:value="useSSE" size="small" />
-                <span class="text-xs">SSE模式 (企业防火墙兼容)</span>
+                <span class="text-xs">{{ t('chat.sseMode') }}</span>
               </div>
             </n-popover>
+
+            <!-- Agent mode toggle -->
+            <n-tooltip trigger="hover">
+              <template #trigger>
+                <n-button
+                  size="tiny"
+                  quaternary
+                  circle
+                  :class="useAgent ? 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20' : 'text-gray-400'"
+                  @click="toggleAgent"
+                >
+                  <template #icon><n-icon size="18"><RocketOutline /></n-icon></template>
+                </n-button>
+              </template>
+              <span>{{ useAgent ? 'Agent 模式已开启 (PER)' : '点击开启 Agent 模式' }}</span>
+            </n-tooltip>
           </div>
 
           <div class="flex items-center gap-3">
@@ -180,7 +196,8 @@ import { useI18n } from 'vue-i18n'
 import {
   SendOutline, AttachOutline, FlashOutline, ShieldCheckmarkOutline, RadioButtonOnOutline,
   StopCircleOutline, DocumentTextOutline, DocumentOutline, CloseOutline,
-  CloudUploadOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldOutline
+  CloudUploadOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldOutline,
+  RocketOutline
 } from '@vicons/ionicons5'
 import type { AttachedFile } from '@/types/chat'
 
@@ -191,6 +208,13 @@ const strictMode = defineModel<boolean>('strictMode', { default: false })
 const privacyMode = defineModel<boolean>('privacyMode', { default: true })
 const useSSE = defineModel<boolean>('useSSE', { default: false })
 const useStream = defineModel<boolean>('useStream', { default: true })
+const useAgent = defineModel<boolean>('useAgent', { default: false })
+
+const toggleAgent = () => {
+  useAgent.value = !useAgent.value
+  // Agent mode requires SSE
+  if (useAgent.value) useSSE.value = true
+}
 
 defineProps<{
   isLoading: boolean

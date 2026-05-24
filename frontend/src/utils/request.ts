@@ -136,7 +136,7 @@ request.interceptors.request.use(
     ;(config as ExtendedAxiosConfig)[REQUEST_START_TIME_KEY] = Date.now()
     const isAuthRequest = /\/auth\/(login|register|refresh)/.test(config.url ?? '')
     if (!isAuthRequest) showLoading()
-    const rawToken = localStorage.getItem('docmind_token') || localStorage.getItem('paicongming_token') || getToken()
+    const rawToken = localStorage.getItem('docmind_token') || getToken()
     if (rawToken) {
       const cleanToken = rawToken.trim().replace(/^["'](.*)["']$/, '$1')
       setHeaderValue(headers, 'Authorization', `Bearer ${cleanToken}`)
@@ -232,7 +232,12 @@ request.interceptors.response.use(
     const requestId = getErrorRequestId(error)
 
     if (!silentError) {
-      // Axios Error
+      console.warn('[request] HTTP error', {
+        status: error.response?.status,
+        url: error.config?.url,
+        method: error.config?.method,
+        responseData: error.response?.data,
+      })
     }
     if (error.response) {
       const { status, data } = error.response
@@ -299,6 +304,15 @@ request.interceptors.response.use(
         }
         case 403:
           errorMsg = '无权限访问'
+          try {
+            const userStore = useUserStore()
+            if (userStore.isLoggedIn) {
+              dedupMessage('error', '权限不足，请联系管理员', 5000)
+            }
+          } catch (_) { /* store 未就绪 */ }
+          break
+        case 429:
+          errorMsg = '请求过于频繁，请稍后再试'
           break
         case 500:
           errorMsg = errorMsg === '请求失败' ? `服务器内部错误: ${data?.detail ?? data?.message ?? '未知'}` : `服务器内部错误: ${errorMsg}`

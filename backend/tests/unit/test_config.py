@@ -91,16 +91,10 @@ class TestSettingsValidation:
             assert s.MONITORING_INTERVAL >= 5
 
     def test_expose_exception_detail_default_false(self):
-        """生产环境不应暴露异常详情。"""
-        env = {
-            "SECRET_KEY": "a" * 32,
-            "JWT_SECRET_KEY": "b" * 32,
-            "DATABASE_URL": "mysql+aiomysql://root:root@localhost:3306/test",
-        }
-        with patch.dict(os.environ, env, clear=False):
-            from app.core.config import Settings
-            s = Settings()
-            assert s.EXPOSE_EXCEPTION_DETAIL is False
+        """生产环境不应暴露异常详情（默认值应为 False）。"""
+        from app.core.config.base import BaseAppSettings
+        default_val = BaseAppSettings.model_fields["EXPOSE_EXCEPTION_DETAIL"].default
+        assert default_val is False, "EXPOSE_EXCEPTION_DETAIL 默认值应为 False"
 
     def test_rate_limit_default_is_true(self):
         """限流默认值应为 True（测试环境覆盖为 false 除外）。"""

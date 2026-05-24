@@ -132,6 +132,46 @@ RAG_EVAL_CONTEXT_PRECISION = Histogram(
     buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
 )
 
+# ── Agent ────────────────────────────────────────────────────
+AGENT_PLANNING_TOTAL = Counter(
+    "agent_planning_total",
+    "Total planning attempts",
+)
+AGENT_PLANNING_LATENCY = Histogram(
+    "agent_planning_latency_seconds",
+    "Planning latency",
+    buckets=[0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0],
+)
+AGENT_EXECUTION_STEPS = Counter(
+    "agent_execution_steps_total",
+    "Total execution steps performed",
+)
+AGENT_TOOL_CALLS = Counter(
+    "agent_tool_calls_total",
+    "Tool calls by tool and result",
+    ["tool", "result"],  # result: "success" | "error"
+)
+AGENT_TOOL_LATENCY = Histogram(
+    "agent_tool_latency_seconds",
+    "Per-tool execution latency",
+    buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
+)
+AGENT_REFLECTION_DECISIONS = Counter(
+    "agent_reflection_decisions_total",
+    "Reflection decisions",
+    ["decision"],  # "pass" | "retry" | "replan"
+)
+AGENT_MEMORY_RECALLS = Counter(
+    "agent_memory_recalls_total",
+    "Memory recall attempts",
+    ["result"],  # "hit" | "miss"
+)
+AGENT_FEEDBACK_TOTAL = Counter(
+    "agent_feedback_total",
+    "User feedback on agent responses",
+    ["feedback_type"],  # "thumbs_up" | "thumbs_down"
+)
+
 
 def get_prometheus_metrics() -> bytes:
     """Generate latest metrics in Prometheus exposition format."""

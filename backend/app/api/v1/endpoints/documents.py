@@ -115,14 +115,29 @@ async def upload_document(
         current_user = await db.merge(current_user)
 
         # 2. 确定组织 ID
-        org_id = 1
+        org_id = current_user.organization_id
+        if not org_id:
+            from app.models.organization import Organization
+            result = await db.execute(
+                select(Organization).order_by(Organization.id).limit(1)
+            )
+            default_org = result.scalar_one_or_none()
+            if default_org:
+                org_id = default_org.id
+            else:
+                org = Organization(
+                    name="Default", description="默认组织", color="#64748b",
+                    is_private=False, parent_id=None, level=0, sort_order=0,
+                    owner_id=current_user.id,
+                )
+                db.add(org)
+                await db.flush()
+                org_id = org.id
         if organization_id and organization_id.strip() and organization_id != 'undefined':
             try:
                 org_id = int(organization_id)
             except (ValueError, TypeError):
-                org_id = current_user.organization_id or 1
-        else:
-            org_id = current_user.organization_id or 1
+                pass
         
         # 3. 解析标签为列表
         keywords_list = []
@@ -204,6 +219,8 @@ async def upload_document(
             setattr(job, "status", KnowledgeJobStatus.FAILED)
             setattr(job, "error_message", f"Kafka send failed: {str(kafka_err)}")
             setattr(job, "finished_at", datetime.now())
+
+        await db.commit()
         
         # 8. 返回，防止 refresh 导致的懒加载报错，使用 to_dict
         return {
@@ -312,7 +329,7 @@ async def get_document_full_content(
         
         full_text = ""
         if hits:
-            full_text = "\n".join([h.get("_source", {}).get("content", "") for h in hits])
+            full_text = "\n".join([h.get("_source", {}).get("chunk_text", "") for h in hits])
         
         # 如果 ES 没找到，尝试从数据库 chunks 表找 (备用)
         if not full_text:

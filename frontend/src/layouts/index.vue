@@ -17,12 +17,12 @@
       ]"
     >
       <!-- Logo：DocMind 图标 + 名称 -->
-      <div class="h-16 flex items-center px-4 border-b border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm overflow-hidden whitespace-nowrap">
+      <div class="h-16 flex items-center px-4 border-b border-gray-100 dark:border-gray-800/50 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm overflow-hidden whitespace-nowrap">
         <div class="flex items-center space-x-3 min-w-0">
-          <div class="flex-shrink-0 w-9 h-9 bg-slate-800 dark:bg-slate-700 rounded-xl flex items-center justify-center text-white font-bold text-sm tracking-tight shadow-md">
+          <div class="flex-shrink-0 w-9 h-9 bg-gradient-to-br from-slate-600 to-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-sm tracking-tight shadow-lg shadow-slate-500/20">
             DM
           </div>
-          <span v-if="!appStore.sidebarCollapsed" class="text-lg font-bold tracking-tight text-slate-800 dark:text-slate-100">
+          <span v-if="!appStore.sidebarCollapsed" class="text-lg font-extrabold tracking-tight bg-gradient-to-r from-slate-700 to-blue-700 dark:from-slate-400 dark:to-blue-400 bg-clip-text text-transparent">
             DocMind
           </span>
         </div>
@@ -50,6 +50,49 @@
             </n-icon>
           </template>
         </n-button>
+      </div>
+
+      <!-- 语言和主题切换 -->
+      <div class="px-4 py-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-center gap-2">
+        <n-tooltip :trigger="'hover'">
+          <template #trigger>
+            <n-button quaternary circle size="small" @click="toggleTheme">
+              <template #icon>
+                <n-icon size="18">
+                  <MoonOutline v-if="!isDark" />
+                  <SunnyOutline v-else />
+                </n-icon>
+              </template>
+            </n-button>
+          </template>
+          <span>{{ t('profile.theme') }}</span>
+        </n-tooltip>
+        <n-tooltip :trigger="'hover'">
+          <template #trigger>
+            <n-popover trigger="click" placement="right">
+              <template #trigger>
+                <n-button quaternary circle size="small">
+                  <template #icon>
+                    <n-icon size="18"><GlobeOutline /></n-icon>
+                  </template>
+                </n-button>
+              </template>
+              <div class="flex flex-col gap-1">
+                <n-button
+                  v-for="lang in languageOptions"
+                  :key="lang.value"
+                  text
+                  size="small"
+                  :type="currentLang === lang.value ? 'primary' : 'default'"
+                  @click="switchLanguage(lang.value)"
+                >
+                  {{ lang.label }}
+                </n-button>
+              </div>
+            </n-popover>
+          </template>
+          <span>{{ t('profile.language') }}</span>
+        </n-tooltip>
       </div>
 
       <!-- 用户信息 -->
@@ -116,7 +159,7 @@
               <n-icon class="text-slate-400"><SearchOutline /></n-icon>
             </template>
             <template #suffix>
-              <span class="text-[10px] text-slate-400 pointer-events-none">⌘K</span>
+              <span class="text-[10px] text-slate-400 pointer-events-none">Ctrl+K</span>
             </template>
           </n-input>
           
@@ -239,16 +282,33 @@ import {
   HelpCircleOutline,
   HardwareChipOutline,
   MenuOutline,
+  GlobeOutline,
 } from '@vicons/ionicons5'
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const appStore = useAppStore()
 const userStore = useUserStore()
 
 const searchValue = ref('')
 const mobileMenuOpen = ref(false)
+
+// Language options
+const languageOptions = [
+  { label: '简体中文', value: 'zh' },
+  { label: 'English', value: 'en' },
+  { label: '日本語', value: 'ja' },
+  { label: 'Français', value: 'fr' },
+]
+
+const currentLang = computed(() => locale.value)
+
+const switchLanguage = (lang: string) => {
+  locale.value = lang
+  localStorage.setItem('language', lang)
+  userStore.updateSettings({ language: lang })
+}
 
 const userInfo = computed(() => userStore.userInfo)
 const currentOrgId = computed(() => userStore.currentOrgId)
@@ -338,6 +398,20 @@ onMounted(async () => {
   if (userStore.token) {
     await notificationStore.bootstrap()
     notificationSocket.connect()
+    // Load user settings from backend
+    userStore.fetchSettings().then(() => {
+      // Apply theme from settings
+      const theme = userStore.settings.theme
+      if (theme && ['light', 'dark', 'auto'].includes(theme)) {
+        appStore.setTheme(theme as 'light' | 'dark' | 'auto')
+      }
+      // Apply language from settings
+      const lang = userStore.settings.language
+      if (lang) {
+        locale.value = lang
+        localStorage.setItem('language', lang)
+      }
+    })
   }
 
   notificationSocket.onNotification(handleRealtimeNotification)
@@ -425,7 +499,7 @@ const menuOptions = computed<MenuOption[]>(() => {
       icon: () => h(NIcon, null, { default: () => h(GitNetworkOutline) })
     },
     {
-      label: 'Agent',
+      label: t('menu.agent'),
       key: 'Agent',
       icon: () => h(NIcon, null, { default: () => h(HardwareChipOutline) })
     }
@@ -492,5 +566,12 @@ const toggleTheme = () => {
 </script>
 
 <style scoped>
-/* 自定义样式 */
+/* Mobile sidebar: fixed overlay on small screens */
+@media (max-width: 767px) {
+  .sidebar-fixed {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+  }
+}
 </style>

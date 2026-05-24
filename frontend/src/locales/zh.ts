@@ -8,6 +8,7 @@ export default {
     copy: '复制',
     copySuccess: '复制成功',
     copyFailed: '复制失败',
+    close: '关闭',
     edit: '编辑',
     add: '添加',
     search: '搜索',
@@ -64,6 +65,8 @@ export default {
     themeLight: '浅色',
     themeDark: '深色',
     themeAuto: '跟随系统',
+    themeSettingDesc: '选择界面主题风格',
+    languageSettingDesc: '选择界面显示语言',
     notifications: '通知设置',
     notificationDesc: '接收系统通知和消息提醒',
     apiKey: 'API Key 管理',
@@ -131,7 +134,8 @@ export default {
     organizations: '组织标签',
     roleUser: '普通用户',
     roleAdmin: '管理员',
-    deleteConfirm: '确认删除该用户吗？'
+    deleteConfirm: '确认删除该用户吗？',
+    deleteConfirmWithName: '确定要删除用户 {username} 吗？此操作不可撤销。'
   },
   org: {
     title: '组织架构',
@@ -247,7 +251,74 @@ export default {
     chatCleared: '对话记录已清空',
     clearFailed: '清空失败',
     unbindSuccess: '已解除文档绑定，现在是全库问答模式',
-    unbindFailed: '解除绑定失败'
+    unbindFailed: '解除绑定失败',
+    // File upload status labels (shown in ChatInput)
+    fileUploading: '上传中...',
+    fileParsing: '解析中...',
+    fileIndexing: '索引中...',
+    fileCompleted: '已完成',
+    fileFailed: '解析失败',
+    filePending: '等待处理',
+    fileUploaded: '已上传',
+    fileParsed: '解析完成',
+    fileIndexed: '已完成',
+    fileProcessing: '处理中',
+    fileReady: '✅ 已就绪',
+    fileTimeout: '处理超时，请稍后在知识库中查看状态',
+    fileFromChat: '来自聊天上传',
+    fileUploadFailed: '上传失败',
+    // Document preview modal
+    documentPreview: '文档预览',
+    chatUpload: '聊天上传',
+    knowledgeUpload: '知识库上传',
+    uploadedAt: '上传于',
+    description: '简介',
+    contentSummary: '内容摘要',
+    noContent: '暂无内容',
+    downloadDocument: '下载文档',
+    // Feedback
+    liked: '已点赞',
+    disliked: '已点踩',
+    feedbackFailed: '反馈失败',
+    // File analysis
+    analyzeFiles: '请分析上传的 {n} 个文件',
+    newConversation: '新对话',
+    // Attachment mode tooltip
+    attachmentModeOnly: '仅附件模式',
+    documentModeOnly: '仅当前文档模式',
+    unbindBtn: '解除',
+    strictModeTitle: '强约束模式',
+    strictModeDesc: '开启后，AI 将 <span class="text-red-500 font-bold">完全基于</span> 你上传的文档内容回答，<span class="text-red-500 font-bold">不会</span> 使用全局知识库或其他外部知识。',
+    // Mode labels
+    privacyMode: '隐私模式 (自动脱敏敏感信息)',
+    sseMode: 'SSE模式 (企业防火墙兼容)',
+    // Message sources
+    sourcesLabel: '来源引用：',
+    unknownDoc: '未知文档',
+    noPreview: '无预览',
+    relevanceScore: '相关度: {score}%',
+    // Feedback & action tooltips
+    useful: '有用',
+    notUseful: '没用',
+    regenerate: '重新生成',
+    // Sidebar
+    loadFailed: '加载失败',
+    loadFailedDesc: '无法加载对话列表',
+    retry: '重试',
+    version: 'DocMind v1.0',
+    // Drag-and-drop
+    dropFiles: '拖拽文件到此处上传',
+    // Export
+    exportTitle: '对话导出',
+    roleUser: '用户',
+    roleAssistant: '助手',
+    sourceDoc: '文档',
+    relevanceMatch: '匹配度: {score}%',
+    // Error banner
+    msgLoadFailed: '加载历史消息失败',
+    // Prompt applied notification
+    promptApplied: '已应用提示词模板"{name}"，请开始对话',
+    promptDefaultName: '未命名'
   },
   validation: {
     required: '此项必填',
@@ -329,7 +400,9 @@ export default {
     noFallbackDocs: '当前没有降级索引文档',
     batchRetrySubmitted: '已提交 {success}/{total} 个文档重试任务',
     batchRetryFailed: '批量重试提交失败，请稍后再试',
-    deleteFailed: '删除失败'
+    deleteFailed: '删除失败',
+    deleteConfirm: '确定要删除此文档吗？文档将从知识库中移除，不可恢复。',
+    batchDeleteConfirm: '确定要删除选中的 {count} 个文档吗？此操作不可恢复。'
   },
   prompts: {
     title: '提示词管理',
@@ -426,6 +499,7 @@ export default {
     monitoring: '系统监控',
     auditLogs: '操作日志',
     workflow: 'Agent 工作流',
+    agent: '智能 Agent',
     systemHelp: '系统帮助',
     systemAbout: '系统关于',
     systemTitle: 'DocMind 知识库'

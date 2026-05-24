@@ -20,8 +20,8 @@ class _ESHolder:
 
     def __init__(self):
         self._client: Optional[AsyncElasticsearch] = None
-        self.es_analyzer: str = "standard"
-        self.es_search_analyzer: str = "standard"
+        self.es_analyzer: str = "cjk"
+        self.es_search_analyzer: str = "cjk"
 
     @property
     def client(self) -> Optional[AsyncElasticsearch]:
@@ -48,7 +48,7 @@ class _ESHolder:
                 self.es_analyzer = "ik_smart"
                 self.es_search_analyzer = "ik_max_word"
             except Exception:
-                logger.warning("IK analyzer not found — falling back to standard (poor CJK support)")
+                logger.info(f"IK analyzer not found — using built-in '{self.es_analyzer}' analyzer")
 
             await _create_index_if_not_exists(self._client)
         except Exception as e:
@@ -130,10 +130,19 @@ def _knowledge_index_mapping() -> dict:
                     "analyzer": analyzer,
                     "search_analyzer": search_analyzer,
                 },
+                "chunk_text": {
+                    "type": "text",
+                    "analyzer": analyzer,
+                    "search_analyzer": search_analyzer,
+                },
+                "chunk_id": {"type": "keyword"},
+                "chunk_index": {"type": "integer"},
+                "section_title": {"type": "text"},
                 "document_id": {"type": "keyword"},
                 "filename": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
                 "file_type": {"type": "keyword"},
                 "file_size": {"type": "long"},
+                "content_length": {"type": "integer"},
                 "upload_time": {"type": "date"},
                 "user_id": {"type": "keyword"},
                 "organization_id": {"type": "keyword"},
@@ -280,7 +289,7 @@ class ElasticsearchTools:
     @staticmethod
     async def keyword_search(keywords: str, fields: Optional[list[str]] = None, size: int = 10):
         if fields is None:
-            fields = ["content", "filename"]
+            fields = ["chunk_text", "content", "filename"]
         query = {
             "size": size,
             "query": {
@@ -291,7 +300,7 @@ class ElasticsearchTools:
                     "fuzziness": "AUTO",
                 }
             },
-            "highlight": {"fields": {"content": {}, "filename": {}}},
+            "highlight": {"fields": {"chunk_text": {}, "content": {}, "filename": {}}},
         }
         return await ElasticsearchTools.search_documents(query)
 
@@ -305,7 +314,7 @@ class ElasticsearchTools:
                         {
                             "multi_match": {
                                 "query": keywords,
-                                "fields": ["content^2", "filename"],
+                                "fields": ["chunk_text^2", "content^2", "filename"],
                                 "type": "best_fields",
                                 "boost": 1.0,
                             }

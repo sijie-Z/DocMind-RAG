@@ -261,14 +261,9 @@
                              </template>
                              重试向量化
                            </n-tooltip>
-                           <n-popconfirm @positive-click="deleteKnowledge(item)">
-                              <template #trigger>
-                                <n-button size="tiny" quaternary circle type="error">
-                                   <template #icon><n-icon><TrashOutline /></n-icon></template>
-                                </n-button>
-                              </template>
-                              确认删除？
-                           </n-popconfirm>
+                           <n-button size="tiny" quaternary circle type="error" @click.stop="deleteKnowledge(item)">
+                              <template #icon><n-icon><TrashOutline /></n-icon></template>
+                           </n-button>
                         </div>
                         </div>
                         <div 
@@ -291,8 +286,8 @@
             </div>
             
             <!-- 列表模式 -->
-            <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-               <table class="w-full text-left text-sm">
+            <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-x-auto">
+               <table class="w-full text-left text-sm min-w-[600px]">
                   <thead class="bg-gray-50 dark:bg-gray-900/50 text-gray-500 border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th class="p-4 w-12"><n-checkbox :checked="isAllSelected" @update:checked="toggleSelectAll" /></th>
@@ -352,12 +347,7 @@
                              <n-button size="tiny" secondary circle @click="viewKnowledge(item)"><template #icon><n-icon><EyeOutline /></n-icon></template></n-button>
                              <n-button v-if="item.status === 'failed'" size="tiny" secondary circle type="primary" @click="handleRebuild(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
                              <n-button v-if="isFallbackIndexed(item)" size="tiny" secondary circle type="warning" @click="handleRetryVector(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
-                             <n-popconfirm @positive-click="deleteKnowledge(item)">
-                                <template #trigger>
-                                  <n-button size="tiny" secondary circle type="error"><template #icon><n-icon><TrashOutline /></n-icon></template></n-button>
-                                </template>
-                                确认删除？
-                             </n-popconfirm>
+                             <n-button size="tiny" secondary circle type="error" @click="deleteKnowledge(item)"><template #icon><n-icon><TrashOutline /></n-icon></template></n-button>
                           </div>
                        </td>
                     </tr>
@@ -380,7 +370,7 @@
           </div>
 
           <div v-else-if="!loading" class="flex flex-col items-center justify-center py-24 px-6 bg-white/80 dark:bg-gray-800/50 backdrop-blur-md rounded-3xl border border-dashed border-slate-200 dark:border-gray-600/50 shadow-inner">
-            <div class="w-24 h-24 rounded-2xl bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-900/30 dark:to-indigo-900/30 flex items-center justify-center mb-6 ring-4 ring-blue-100/50 dark:ring-blue-900/30">
+            <div class="w-24 h-24 rounded-2xl bg-gradient-to-br from-blue-100 to-slate-100 dark:from-blue-900/30 dark:to-slate-900/30 flex items-center justify-center mb-6 ring-4 ring-blue-100/50 dark:ring-blue-900/30">
               <n-icon size="48" class="text-blue-500 dark:text-blue-400"><CloudUploadOutline /></n-icon>
             </div>
             <h3 class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">{{ t('knowledge.empty') }}</h3>
@@ -543,7 +533,7 @@
           </n-drawer>
 
           <!-- Floating Task Button -->
-          <div v-if="activeTasks.length > 0" class="fixed bottom-8 right-8 z-50">
+          <div v-if="activeTasks.length > 0" class="fixed bottom-4 right-4 md:bottom-8 md:right-8 z-50">
             <n-badge :value="activeTasks.filter(t => t.status === 'uploading' || t.status === 'processing').length" :show="activeTasks.filter(t => t.status === 'uploading' || t.status === 'processing').length > 0">
               <n-button 
                 circle 
@@ -641,6 +631,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { NIcon, NButton, NTag, NUploadDragger, NDescriptions, NDescriptionsItem, NModal } from 'naive-ui'
+import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
 import {
@@ -687,6 +678,7 @@ interface UploadForm {
 }
 
 const message = useDedupedMessage()
+const dialog = useDialog()
 const { t } = useI18n()
 const loading = ref(false)
 const loadError = ref(false)
@@ -831,17 +823,24 @@ const toggleSelectAll = (checked: boolean) => {
   }
 }
 
-const handleBatchDelete = async () => {
+const handleBatchDelete = () => {
   if (selectedIds.value.length === 0) return
-  
-  try {
-    await batchDeleteKnowledgeBases(selectedIds.value)
-    message.success(t('common.deleteSuccess'))
-    selectedIds.value = []
-    await loadKnowledgeBases()
-  } catch (error: unknown) {
-    message.error(t('common.deleteFailed') + '：' + getErrorMessage(error))
-  }
+  dialog.warning({
+    title: t('common.confirm') || '确认删除',
+    content: t('knowledge.batchDeleteConfirm', { count: selectedIds.value.length }),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      try {
+        await batchDeleteKnowledgeBases(selectedIds.value)
+        message.success(t('common.deleteSuccess'))
+        selectedIds.value = []
+        await loadKnowledgeBases()
+      } catch (error: unknown) {
+        message.error(t('common.deleteFailed') + '：' + getErrorMessage(error))
+      }
+    }
+  })
 }
 
 const canUpload = computed(() => {
@@ -1082,14 +1081,22 @@ const handleRetryAllFallbackDocs = async () => {
   await loadKnowledgeBases()
 }
 
-const deleteKnowledge = async (item: KnowledgeBase) => {
-  try {
-    await deleteKnowledgeBase(item.id)
-    message.success(t('common.deleteSuccess'))
-    await loadKnowledgeBases()
-  } catch (error: unknown) {
-    message.error(t('knowledge.deleteFailed') + '：' + getErrorMessage(error))
-  }
+const deleteKnowledge = (item: KnowledgeBase) => {
+  dialog.warning({
+    title: t('common.confirm') || '确认删除',
+    content: t('knowledge.deleteConfirm'),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      try {
+        await deleteKnowledgeBase(item.id)
+        message.success(t('common.deleteSuccess'))
+        await loadKnowledgeBases()
+      } catch (error: unknown) {
+        message.error(t('knowledge.deleteFailed') + '：' + getErrorMessage(error))
+      }
+    }
+  })
 }
 
 const formatFileSize = (bytes: number | null | undefined): string => {
@@ -1166,3 +1173,17 @@ onUnmounted(() => {
   }
 })
 </script>
+
+<style scoped>
+/* Responsive: stat cards stack vertically on mobile (already grid-cols-2 md:grid-cols-4) */
+/* Responsive: table horizontal scroll on mobile */
+@media (max-width: 767px) {
+  .knowledge-page .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Action buttons: always visible on touch devices */
+  .knowledge-page [class*="opacity-0 group-hover:opacity-100"] {
+    opacity: 1 !important;
+  }
+}
+</style>

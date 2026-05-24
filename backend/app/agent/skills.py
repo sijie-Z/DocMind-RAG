@@ -176,6 +176,47 @@ class SkillManager:
         """List all active skills."""
         return [s for s in self._skills.values() if not s.is_stale]
 
+    def get_tool_hints_for_query(self, query: str) -> List[Dict[str, Any]]:
+        """Get tool sequence hints from a matching skill for the Planner.
+
+        Returns the tool_sequence from the best matching skill,
+        which can be used to suggest tool hints for plan steps.
+        """
+        skill = self.match(query)
+        if skill and skill.tool_sequence:
+            return skill.tool_sequence
+        return []
+
+    async def learn_from_plan_success(
+        self,
+        query: str,
+        plan_steps: List[Dict[str, Any]],
+    ) -> Optional[Skill]:
+        """Learn a new skill from a successfully executed plan.
+
+        Automatically extracts trigger patterns from the query
+        and tool sequence from the plan steps.
+        """
+        # Only learn if we have multiple tool calls
+        tool_steps = [s for s in plan_steps if s.get("tool_hint")]
+        if len(tool_steps) < 2:
+            return None
+
+        # Extract keywords as trigger patterns
+        import re
+        keywords = re.findall(r'[一-鿿]{2,}', query)  # Chinese bigrams
+        keywords += [w.lower() for w in query.split() if len(w) > 3 and w.isalpha()]
+
+        return await self.create_skill(
+            name=f"Auto: {query[:50]}",
+            description=f"Learned from: {query[:80]}",
+            trigger_patterns=keywords[:5],
+            tool_sequence=[{
+                "tool_name": s.get("tool_hint", ""),
+                "description": s.get("description", ""),
+            } for s in tool_steps],
+        )
+
 
 # Global singleton
 skill_manager = SkillManager()

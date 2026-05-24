@@ -115,7 +115,7 @@
             </button>
           </div>
 
-          <div v-if="!isRegister" class="pt-6 border-t border-slate-200 dark:border-slate-800">
+          <div v-if="!isRegister && demoMode === 'true'" class="pt-6 border-t border-slate-200 dark:border-slate-800">
             <div class="rounded-xl bg-slate-100 dark:bg-slate-800/50 p-4 text-sm text-slate-600 dark:text-slate-400">
               <p class="font-medium text-slate-700 dark:text-slate-300 mb-1">演示账号</p>
               <p>{{ t('login.demoDesc', { user: 'guest', pass: '123456' }) }}</p>
@@ -144,6 +144,7 @@ const route = useRoute()
 const message = useDedupedMessage()
 const userStore = useUserStore()
 const { t } = useI18n()
+const demoMode = import.meta.env.VITE_DEMO_MODE
 
 const formRef = ref()
 const loading = ref(false)

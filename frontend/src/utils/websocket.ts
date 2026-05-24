@@ -30,12 +30,22 @@ class WebSocketService {
   private manualDisconnect = false
 
   private getWsBaseUrl(): string {
+    if (import.meta.env.DEV) {
+      // Route through Vite proxy (port 5173) so the proxy forwards to backend
+      return `ws://${window.location.hostname}:5173`
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${protocol}//${window.location.host}`
   }
 
+  private getWsPath(): string {
+    // In dev, use /ws which Vite rewrites to /api/v1/chat/ws
+    // In prod, use the full path
+    return import.meta.env.DEV ? '/ws' : '/api/v1/chat/ws'
+  }
+
   constructor() {
-    this.url = `${this.getWsBaseUrl()}/api/v1/chat/ws`
+    this.url = `${this.getWsBaseUrl()}${this.getWsPath()}`
   }
 
   connect(userId: number, conversationId?: number | string) {
@@ -64,11 +74,11 @@ class WebSocketService {
 
     const cleanToken = rawToken.replace(/"/g, '')
 
-    const wsUrl = `${this.getWsBaseUrl()}/api/v1/chat/ws?user_id=${userId}${conversationId ? `&conversation_id=${conversationId}` : ''}`
+    // token 同时走 subprotocol（安全）和 query param（兼容 Vite 代理转发）
+    const wsUrl = `${this.getWsBaseUrl()}${this.getWsPath()}?user_id=${userId}&token=${encodeURIComponent(cleanToken)}${conversationId ? `&conversation_id=${conversationId}` : ''}`
 
     try {
       this.manualDisconnect = false
-      // Pass token via WebSocket subprotocol (not query param) for security
       this.ws = new WebSocket(wsUrl, [`auth.${cleanToken}`])
       this.setupEventListeners()
     } catch {

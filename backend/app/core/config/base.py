@@ -27,7 +27,7 @@ class BaseAppSettings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/docmind.log"
-    LOG_JSON: bool = False
+    LOG_JSON: bool = True
     REQUEST_ID_HEADER: str = "X-Request-ID"
 
     # Monitoring

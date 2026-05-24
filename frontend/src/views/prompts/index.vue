@@ -54,18 +54,56 @@
 
       <!-- 内容区域 -->
       <n-spin :show="loading">
-        <div v-if="filteredPrompts.length === 0" class="py-20">
-          <div class="text-center">
-            <div class="w-20 h-20 mx-auto mb-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-              <n-icon size="40" class="text-blue-500"><DocumentTextOutline /></n-icon>
+        <template #description>
+          <span>加载中...</span>
+        </template>
+
+        <!-- Skeleton loading state -->
+        <div v-if="loading" class="space-y-4">
+          <div v-for="n in 4" :key="n" class="bg-white dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/50 overflow-hidden">
+            <div class="p-5">
+              <div class="flex items-start justify-between">
+                <div class="flex-1 space-y-3">
+                  <div class="flex gap-2">
+                    <n-skeleton width="48px" height="22px" />
+                    <n-skeleton width="60px" height="22px" />
+                  </div>
+                  <n-skeleton text width="70%" />
+                  <n-skeleton text :repeat="2" />
+                  <n-skeleton text width="40%" />
+                </div>
+                <div class="flex flex-col gap-2 ml-4">
+                  <n-skeleton width="100px" height="28px" />
+                  <div class="flex gap-1 justify-end">
+                    <n-skeleton width="24px" height="24px" circle />
+                    <n-skeleton width="24px" height="24px" circle />
+                    <n-skeleton width="24px" height="24px" circle />
+                  </div>
+                </div>
+              </div>
             </div>
-            <h3 class="text-lg font-medium text-gray-700 dark:text-gray-200 mb-2">暂无提示词模板</h3>
-            <p class="text-gray-400 mb-6">创建模板来定制AI的回答风格</p>
-            <n-button type="primary" round @click="handleAdd">
-              <template #icon><n-icon><AddOutline /></n-icon></template>
-              创建模板
-            </n-button>
           </div>
+        </div>
+
+        <!-- Error state -->
+        <div v-if="!loading && loadError" class="py-20">
+          <n-result status="error" title="加载失败" :description="loadErrorMsg">
+            <template #footer>
+              <n-button type="primary" round @click="loadPrompts">重试</n-button>
+            </template>
+          </n-result>
+        </div>
+
+        <!-- Empty state -->
+        <div v-else-if="!loadError && filteredPrompts.length === 0 && !loading" class="py-20">
+          <n-empty :description="t('prompts.empty', '暂无提示词模板')">
+            <template #extra>
+              <n-button type="primary" round @click="handleAdd">
+                <template #icon><n-icon><AddOutline /></n-icon></template>
+                {{ t('prompts.create', '创建模板') }}
+              </n-button>
+            </template>
+          </n-empty>
         </div>
 
         <!-- 列表 -->
@@ -103,14 +141,9 @@
                     <n-button size="tiny" quaternary @click="handleCopy(item)">
                       <template #icon><n-icon><CopyOutline /></n-icon></template>
                     </n-button>
-                    <n-popconfirm v-if="!item.is_system" @positive-click="handleDelete(item.id)">
-                      <template #trigger>
-                        <n-button size="tiny" quaternary type="error">
-                          <template #icon><n-icon><TrashOutline /></n-icon></template>
-                        </n-button>
-                      </template>
-                      确定删除？
-                    </n-popconfirm>
+                    <n-button v-if="!item.is_system" size="tiny" quaternary type="error" @click="handleDelete(item.id)">
+                      <template #icon><n-icon><TrashOutline /></n-icon></template>
+                    </n-button>
                   </div>
                 </div>
               </div>
@@ -164,6 +197,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
 import { AddOutline, TrashOutline, CreateOutline, CopyOutline, SparklesOutline, SearchOutline, DocumentTextOutline, PlayOutline } from '@vicons/ionicons5'
@@ -171,9 +205,12 @@ import { getPrompts, createPrompt, updatePrompt, deletePrompt, seedDefaultPrompt
 
 const router = useRouter()
 const message = useDedupedMessage()
+const dialog = useDialog()
 const { t } = useI18n()
 
 const loading = ref(false)
+const loadError = ref(false)
+const loadErrorMsg = ref('')
 const submitting = ref(false)
 const seeding = ref(false)
 const prompts = ref<PromptTemplate[]>([])
@@ -240,8 +277,11 @@ const loadPrompts = async () => {
   try {
     const res = await getPrompts()
     prompts.value = res.data || []
+    loadError.value = false
   } catch (error) {
     message.error('加载失败')
+    loadError.value = true
+    loadErrorMsg.value = '加载失败'
   } finally {
     loading.value = false
   }
@@ -291,14 +331,22 @@ const handleSubmit = async () => {
   }
 }
 
-const handleDelete = async (id: number) => {
-  try {
-    await deletePrompt(id)
-    message.success('删除成功')
-    loadPrompts()
-  } catch (error) {
-    message.error('删除失败')
-  }
+const handleDelete = (id: number) => {
+  dialog.warning({
+    title: t('common.confirm') || '确认删除',
+    content: t('prompts.confirmDelete'),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      try {
+        await deletePrompt(id)
+        message.success(t('prompts.toast.deleteSuccess'))
+        loadPrompts()
+      } catch (error) {
+        message.error(t('prompts.toast.deleteFailed'))
+      }
+    }
+  })
 }
 
 const handleSeed = async () => {

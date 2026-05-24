@@ -4,13 +4,13 @@
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
       <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg shadow-blue-500/20">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-medium text-indigo-100">{{ t('dashboard.totalUsers') }}</span>
+          <span class="text-xs font-medium text-slate-100">{{ t('dashboard.totalUsers') }}</span>
           <div class="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
             <n-icon size="18" class="text-white"><PeopleOutline /></n-icon>
           </div>
         </div>
         <p class="text-2xl font-bold">{{ adminStats.totalUsers.toLocaleString() }}</p>
-        <div class="flex items-center gap-1 mt-1 text-xs text-indigo-200">
+        <div class="flex items-center gap-1 mt-1 text-xs text-slate-200">
           <TrendingUpOutline class="text-xs" />
           <span>{{ t('dashboard.activeUsers') }}: {{ adminStats.activeUsers }}</span>
         </div>
@@ -26,19 +26,19 @@
         <p class="text-2xl font-bold">{{ adminStats.totalSessions.toLocaleString() }}</p>
         <div class="flex items-center gap-1 mt-1 text-xs text-emerald-200">
           <span>↑ {{ adminStats.totalSessions > 0 ? '+12%' : '0%' }}</span>
-          <span>vs last week</span>
+          <span>对比上周</span>
         </div>
       </div>
 
       <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg shadow-blue-500/20">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-medium text-indigo-100">{{ t('dashboard.totalDocs') }}</span>
+          <span class="text-xs font-medium text-slate-100">{{ t('dashboard.totalDocs') }}</span>
           <div class="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
             <n-icon size="18" class="text-white"><DocumentTextOutline /></n-icon>
           </div>
         </div>
         <p class="text-2xl font-bold">{{ adminStats.totalDocs.toLocaleString() }}</p>
-        <div class="flex items-center gap-1 mt-1 text-xs text-indigo-200">
+        <div class="flex items-center gap-1 mt-1 text-xs text-slate-200">
           <span>{{ t('dashboard.totalOrgs') }}: {{ adminStats.totalOrgs }}</span>
         </div>
       </div>
@@ -52,7 +52,7 @@
         </div>
         <p class="text-2xl font-bold text-emerald-100">{{ adminStats.activeUsers }}</p>
         <div class="flex items-center gap-1 mt-1 text-xs text-orange-200">
-          <span>24h active</span>
+          <span>24小时活跃</span>
         </div>
       </div>
 
@@ -65,7 +65,7 @@
         </div>
         <p class="text-2xl font-bold">{{ adminStats.totalRequests.toLocaleString() }}</p>
         <div class="flex items-center gap-1 mt-1 text-xs text-cyan-200">
-          <span>avg {{ llmStats.avgLatency || 0 }}ms</span>
+          <span>平均 {{ llmStats.avgLatency || 0 }}ms</span>
         </div>
       </div>
 
@@ -91,14 +91,14 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
       <!-- AI 资源监控 -->
       <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-        <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-indigo-50 to-transparent dark:from-indigo-900/10">
+        <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-slate-50 to-transparent dark:from-slate-900/10">
           <div class="flex items-center gap-2">
-            <div class="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center">
+            <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
               <n-icon class="text-blue-600 dark:text-blue-400"><PulseOutline /></n-icon>
             </div>
             <div>
               <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.aiMonitor') }}</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">LLM Resource & Cost</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">LLM 资源与成本</p>
             </div>
           </div>
           <div class="flex items-center gap-2">
@@ -118,7 +118,7 @@
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.tokensToday') }}</span>
               </div>
               <p class="text-xl font-bold text-gray-900 dark:text-white">{{ llmStats.tokensToday.toLocaleString() }}</p>
-              <p class="text-xs text-gray-400 mt-1">input + output</p>
+              <p class="text-xs text-gray-400 mt-1">输入 + 输出</p>
             </div>
             <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
               <div class="flex items-center gap-2 mb-1">
@@ -126,7 +126,7 @@
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.costToday') }}</span>
               </div>
               <p class="text-xl font-bold text-blue-600 dark:text-blue-400">${{ llmStats.costToday.toFixed(3) }}</p>
-              <p class="text-xs text-gray-400 mt-1">gpt-4o-mini rate</p>
+              <p class="text-xs text-gray-400 mt-1">GPT-4o-mini 费率</p>
             </div>
             <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
               <div class="flex items-center gap-2 mb-1">
@@ -134,7 +134,7 @@
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.avgLatency') }}</span>
               </div>
               <p class="text-xl font-bold text-gray-900 dark:text-white">{{ llmStats.avgLatency }}<span class="text-sm font-normal text-gray-400">ms</span></p>
-              <p class="text-xs text-gray-400 mt-1">p50 response time</p>
+              <p class="text-xs text-gray-400 mt-1">p50 响应时间</p>
             </div>
             <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
               <div class="flex items-center gap-2 mb-1">
@@ -142,7 +142,7 @@
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.p95Latency') }}</span>
               </div>
               <p class="text-xl font-bold text-gray-900 dark:text-white">{{ llmStats.p95Latency }}<span class="text-sm font-normal text-gray-400">ms</span></p>
-              <p class="text-xs text-gray-400 mt-1">p95 response time</p>
+              <p class="text-xs text-gray-400 mt-1">p95 响应时间</p>
             </div>
           </div>
           <!-- 趋势图 -->
@@ -161,12 +161,12 @@
             </div>
             <div>
               <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.ragStats') }}</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">Document Retrieval Performance (7d)</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">近 7 天文档检索效果</p>
             </div>
           </div>
           <div class="flex items-center gap-2">
             <n-tag :type="ragStats.hitRate > 60 ? 'success' : ragStats.hitRate > 30 ? 'warning' : 'error'" size="small" round>
-              {{ ragStats.hitRate > 60 ? 'Good' : ragStats.hitRate > 30 ? 'Fair' : 'Poor' }}
+              {{ ragStats.hitRate > 60 ? '良好' : ragStats.hitRate > 30 ? '一般' : '较差' }}
             </n-tag>
           </div>
         </div>
@@ -215,9 +215,9 @@
 
     <!-- 组织概览 -->
     <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-indigo-50 to-transparent dark:from-indigo-900/10">
+      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-slate-50 to-transparent dark:from-slate-900/10">
         <div class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center">
+          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
             <n-icon class="text-blue-600 dark:text-blue-400"><BusinessOutline /></n-icon>
           </div>
           <div>
@@ -235,7 +235,7 @@
           <div
             v-for="(org, idx) in orgList"
             :key="org.org_id"
-            class="group p-4 rounded-xl border-2 border-transparent hover:border-indigo-200 dark:hover:border-blue-700 bg-gray-50 dark:bg-gray-700/30 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10 transition-all duration-200 cursor-pointer"
+            class="group p-4 rounded-xl border-2 border-transparent hover:border-slate-200 dark:hover:border-blue-700 bg-gray-50 dark:bg-gray-700/30 hover:bg-slate-50/50 dark:hover:bg-slate-900/10 transition-all duration-200 cursor-pointer"
             :style="{ animationDelay: `${idx * 50}ms` }"
           >
             <div class="flex items-center gap-3">
@@ -274,7 +274,7 @@
           </div>
           <div>
             <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.recentAuditLogs') }}</h3>
-            <p class="text-xs text-gray-500 dark:text-gray-400">Sensitive operations highlighted in red</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">敏感操作以红色标注</p>
           </div>
         </div>
         <n-button type="primary" size="small" @click="$router.push('/audit-logs')">
@@ -417,7 +417,7 @@ function highlightSensitiveRow(row: AuditLogEntry) {
 }
 
 const initCharts = () => {
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
   const trendData = llmStats.value.trend.length ? llmStats.value.trend : [1200, 1800, 1500, 2200, 1900, 2500, 2100]
 
   if (llmChartRef.value) {
@@ -431,10 +431,10 @@ const initCharts = () => {
         data: trendData,
         type: 'line',
         smooth: 0.4,
-        lineStyle: { width: 2, color: CHART_COLORS.purple },
-        itemStyle: { color: CHART_COLORS.purple },
+        lineStyle: { width: 2, color: CHART_COLORS.sky },
+        itemStyle: { color: CHART_COLORS.sky },
         areaStyle: { opacity: 0.15, color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: CHART_COLORS.purple },
+          { offset: 0, color: CHART_COLORS.sky },
           { offset: 1, color: 'rgba(168,85,247,0.0)' }
         ]) },
         symbol: 'circle',

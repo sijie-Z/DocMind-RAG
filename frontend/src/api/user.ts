@@ -215,3 +215,27 @@ export const generateApiKey = async (): Promise<AxiosResponse<{ api_key: string 
 export const revokeApiKey = async (): Promise<AxiosResponse<{ message: string }>> => {
   return request.delete('/users/api-key')
 }
+
+// --- User Settings ---
+
+export interface UserSettings {
+  id?: number
+  user_id?: number
+  language: string
+  theme: string
+  preferences?: Record<string, unknown>
+  created_at?: string
+  updated_at?: string
+}
+
+export const getUserSettings = async (): Promise<AxiosResponse<ApiResponse<UserSettings>>> => {
+  return request.get('/user/settings')
+}
+
+export const updateUserSettings = async (data: {
+  language?: string
+  theme?: string
+  preferences?: Record<string, unknown>
+}): Promise<AxiosResponse<ApiResponse<UserSettings>>> => {
+  return request.put('/user/settings', data)
+}

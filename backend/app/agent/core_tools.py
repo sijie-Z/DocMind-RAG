@@ -121,7 +121,7 @@ async def vector_search(
                 },
             }
         },
-        "_source": ["content", "filename", "document_id"],
+        "_source": ["chunk_text", "filename", "document_id"],
     }
     res = await ElasticsearchTools.search_documents(es_query)
     hits = res.get("hits", {}).get("hits", [])
@@ -167,15 +167,15 @@ async def summarize_document(
     es_query = {
         "size": 50,
         "query": {"term": {"document_id": document_id}},
-        "sort": [{"metadata.chunk_index": {"order": "asc"}}],
-        "_source": ["content", "filename"],
+        "sort": [{"chunk_index": {"order": "asc"}}],
+        "_source": ["chunk_text", "filename"],
     }
     res = await ElasticsearchTools.search_documents(es_query)
     hits = res.get("hits", {}).get("hits", [])
     if not hits:
         return f"Document {document_id} not found in index."
 
-    full_text = "\n".join(h.get("_source", {}).get("content", "") for h in hits)
+    full_text = "\n".join(h.get("_source", {}).get("chunk_text", "") for h in hits)
     filename = hits[0].get("_source", {}).get("filename", "Unknown")
 
     # Use LLM to summarize
@@ -227,6 +227,390 @@ async def extract_keywords(text: str, max_keywords: int = 10, **_: Any) -> str:
     from app.rag.query_processor import extract_query_terms
     terms = extract_query_terms(text)
     return json.dumps(terms[:max_keywords], ensure_ascii=False)
+
+
+@register_tool(
+    name="extract_insights",
+    description=(
+        "Deep analysis of a single document to extract structured insights: "
+        "key entities (people, organizations, dates, locations), metrics and statistics, "
+        "main claims and findings, and document section structure. "
+        "Use this for in-depth document understanding beyond simple summarization."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "document_id": {
+                "type": "string",
+                "description": "The document ID to analyze",
+            },
+            "aspects": {
+                "type": "string",
+                "description": "Comma-separated aspects: entities,metrics,claims,structure,all",
+                "default": "all",
+            },
+        },
+        "required": ["document_id"],
+    },
+    tags=["analysis", "deep"],
+)
+async def extract_insights(
+    document_id: str,
+    aspects: str = "all",
+    organization_id: int = 1,
+    **_: Any,
+) -> str:
+    from app.core.elasticsearch import ElasticsearchTools
+    from app.dependencies import get_rag_pipeline
+    from app.core.config import settings
+
+    es_query = {
+        "size": 50,
+        "query": {"term": {"document_id": document_id}},
+        "sort": [{"chunk_index": {"order": "asc"}}],
+        "_source": ["chunk_text", "filename", "section_title"],
+    }
+    res = await ElasticsearchTools.search_documents(es_query)
+    hits = res.get("hits", {}).get("hits", [])
+    if not hits:
+        return json.dumps({"error": f"Document {document_id} not found in index."}, ensure_ascii=False)
+
+    filename = hits[0].get("_source", {}).get("filename", "Unknown")
+    full_text = "\n".join(
+        h.get("_source", {}).get("chunk_text", "") for h in hits
+    )
+    text_sample = full_text[:8000]
+
+    pipeline = get_rag_pipeline()
+    if not pipeline.openai_client:
+        return json.dumps({
+            "filename": filename,
+            "document_id": document_id,
+            "insights": {"error": "LLM unavailable"},
+            "raw_preview": text_sample[:2000],
+        }, ensure_ascii=False)
+
+    aspect_instructions = {
+        "entities": "提取文档中的关键实体：人物、组织、地点、日期、专有名词。",
+        "metrics": "提取文档中的所有数据指标、统计数字、量化结果。",
+        "claims": "提取文档的核心观点、关键结论、主要论据。",
+        "structure": "分析文档的章节结构、层次关系、段落组织方式。",
+    }
+
+    selected = [a.strip() for a in aspects.split(",")]
+    if "all" in selected:
+        instructions = "\n".join(aspect_instructions.values())
+    else:
+        instructions = "\n".join(
+            v for k, v in aspect_instructions.items() if k in selected
+        )
+
+    try:
+        resp = await pipeline.openai_client.chat.completions.create(
+            model=settings.DEEPSEEK_MODEL,
+            messages=[
+                {"role": "system", "content": "你是文档分析专家。分析文档内容，提取结构化信息。只返回 JSON，不要包含任何解释。"},
+                {"role": "user", "content": (
+                    f"分析以下文档，{instructions}\n\n"
+                    f"文档：{filename}\n\n"
+                    f"内容：{text_sample}\n\n"
+                    "返回 JSON 格式：\n"
+                    '{"entities": {"people": [], "organizations": [], "locations": [], "dates": []}, '
+                    '"metrics": [{"name": "...", "value": "..."}], '
+                    '"claims": [{"claim": "...", "confidence": "high/medium/low"}], '
+                    '"structure": [{"level": 1, "heading": "..."}]}'
+                )},
+            ],
+            temperature=0.1,
+            max_tokens=1500,
+            timeout=30,
+        )
+        insights_raw = resp.choices[0].message.content or "{}"
+        # Try to parse as JSON; fallback to raw string
+        try:
+            insights = json.loads(insights_raw)
+        except json.JSONDecodeError:
+            insights = {"raw": insights_raw}
+
+        return json.dumps({
+            "filename": filename,
+            "document_id": document_id,
+            "chunk_count": len(hits),
+            "content_length": len(full_text),
+            "insights": insights,
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({
+            "filename": filename,
+            "document_id": document_id,
+            "error": f"Analysis failed: {e}",
+            "raw_preview": text_sample[:2000],
+        }, ensure_ascii=False, indent=2)
+
+
+@register_tool(
+    name="cross_document_analysis",
+    description=(
+        "Analyze patterns, themes, and relationships across multiple documents. "
+        "Finds common themes, unique aspects, contradictions, and complementary information. "
+        "Use this for multi-document research, literature review, and comparative analysis."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "document_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of document IDs to analyze (2-10 documents)",
+            },
+            "analysis_type": {
+                "type": "string",
+                "description": "Analysis focus: common_themes, differences, trends, comprehensive",
+                "default": "comprehensive",
+            },
+        },
+        "required": ["document_ids"],
+    },
+    tags=["analysis", "deep"],
+)
+async def cross_document_analysis(
+    document_ids: List[str],
+    analysis_type: str = "comprehensive",
+    organization_id: int = 1,
+    **_: Any,
+) -> str:
+    if not document_ids or len(document_ids) < 2:
+        return json.dumps({"error": "Please provide at least 2 document IDs."}, ensure_ascii=False)
+    if len(document_ids) > 10:
+        return json.dumps({"error": "Maximum 10 documents allowed."}, ensure_ascii=False)
+
+    from app.core.elasticsearch import ElasticsearchTools
+    from app.dependencies import get_rag_pipeline
+    from app.core.config import settings
+
+    docs_data = []
+    for doc_id in document_ids:
+        es_query = {
+            "size": 20,
+            "query": {"term": {"document_id": doc_id}},
+            "_source": ["chunk_text", "filename", "upload_time", "document_id"],
+        }
+        try:
+            res = await ElasticsearchTools.search_documents(es_query)
+            hits = res.get("hits", {}).get("hits", [])
+            # Fallback: try filename match if ID lookup returned nothing
+            if not hits:
+                fallback_query = {
+                    "size": 20,
+                    "query": {"term": {"filename": doc_id}},
+                    "_source": ["chunk_text", "filename", "upload_time", "document_id"],
+                }
+                res = await ElasticsearchTools.search_documents(fallback_query)
+                hits = res.get("hits", {}).get("hits", [])
+            if hits:
+                text = " ".join(
+                    h.get("_source", {}).get("chunk_text", "")[:500]
+                    for h in hits[:10]
+                )
+                real_id = hits[0].get("_source", {}).get("document_id", doc_id)
+                docs_data.append({
+                    "id": real_id,
+                    "filename": hits[0].get("_source", {}).get("filename", doc_id),
+                    "text": text[:3000],
+                    "chunks": len(hits),
+                })
+            else:
+                docs_data.append({"id": doc_id, "filename": "Not found", "text": "", "chunks": 0})
+        except Exception as e:
+            docs_data.append({"id": doc_id, "filename": f"Error: {e}", "text": "", "chunks": 0})
+
+    pipeline = get_rag_pipeline()
+    if not pipeline.openai_client:
+        return json.dumps({"documents": docs_data, "analysis": "LLM unavailable"}, ensure_ascii=False)
+
+    doc_list_text = "\n\n".join(
+        f"--- 文档 {i+1}: {d['filename']} ---\n{d['text']}"
+        for i, d in enumerate(docs_data) if d['text']
+    )
+
+    analysis_prompts = {
+        "common_themes": "找出所有文档共同的主题、重复出现的关键词和共享的观点。",
+        "differences": "找出文档之间的主要差异、独特观点和矛盾之处。",
+        "trends": "分析文档之间的时间趋势、演进关系和变化模式。",
+        "comprehensive": "全面分析：共同主题、差异、趋势、互补关系和整体知识图谱。",
+    }
+
+    try:
+        resp = await pipeline.openai_client.chat.completions.create(
+            model=settings.DEEPSEEK_MODEL,
+            messages=[
+                {"role": "system", "content": "你是跨文档分析专家。分析多个文档之间的关系和模式。只返回 JSON。"},
+                {"role": "user", "content": (
+                    f"{analysis_prompts.get(analysis_type, analysis_prompts['comprehensive'])}\n\n"
+                    f"文档列表：\n{doc_list_text[:10000]}\n\n"
+                    "返回 JSON 格式：\n"
+                    '{"summary": "整体分析总结", '
+                    '"common_themes": [{"theme": "...", "evidence": ["...", "..."], "documents": [0, 1]}], '
+                    '"unique_findings": [{"document_index": 0, "finding": "..."}], '
+                    '"contradictions": [{"description": "...", "between": [0, 2]}], '
+                    '"complementary_info": [{"description": "..."}], '
+                    '"conclusion": "综合分析结论"}'
+                )},
+            ],
+            temperature=0.1,
+            max_tokens=2000,
+            timeout=60,
+        )
+        analysis_raw = resp.choices[0].message.content or "{}"
+        try:
+            analysis = json.loads(analysis_raw)
+        except json.JSONDecodeError:
+            analysis = {"raw": analysis_raw}
+
+        return json.dumps({
+            "document_count": len(docs_data),
+            "analysis_type": analysis_type,
+            "documents": [{"id": d["id"], "filename": d["filename"], "chunks": d["chunks"]} for d in docs_data],
+            "analysis": analysis,
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({
+            "document_count": len(docs_data),
+            "error": f"Analysis failed: {e}",
+            "documents": [{"filename": d["filename"]} for d in docs_data],
+        }, ensure_ascii=False, indent=2)
+
+
+@register_tool(
+    name="generate_report",
+    description=(
+        "Generate a structured analysis report in markdown format. "
+        "Takes analysis findings and produces a professional report with "
+        "executive summary, detailed findings, tables, and conclusions. "
+        "Use this to produce polished, shareable analysis output."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "Report title",
+            },
+            "sections": {
+                "type": "string",
+                "description": (
+                    "JSON array of section objects. Each section: "
+                    '{"heading": "...", "content": "...", "type": "text|table|list"}'
+                ),
+            },
+            "format": {
+                "type": "string",
+                "description": "Output format (markdown, json)",
+                "default": "markdown",
+            },
+        },
+        "required": ["title", "sections"],
+    },
+    tags=["analysis", "report"],
+)
+async def generate_report(
+    title: str,
+    sections: str,
+    format: str = "markdown",
+    **_: Any,
+) -> str:
+    from app.dependencies import get_rag_pipeline
+    from app.core.config import settings
+
+    # Parse sections
+    try:
+        parsed_sections = json.loads(sections)
+        if not isinstance(parsed_sections, list):
+            return json.dumps({"error": "sections must be a JSON array"}, ensure_ascii=False)
+    except json.JSONDecodeError as e:
+        return json.dumps({"error": f"Invalid sections JSON: {e}"}, ensure_ascii=False)
+
+    if format == "json":
+        return json.dumps({
+            "title": title,
+            "sections": parsed_sections,
+            "generated_at": __import__("datetime").datetime.now().isoformat(),
+        }, ensure_ascii=False, indent=2)
+
+    # Use LLM to generate a polished markdown report
+    pipeline = get_rag_pipeline()
+    if not pipeline.openai_client:
+        return _generate_markdown_fallback(title, parsed_sections)
+
+    sections_text = "\n\n".join(
+        f"## {s.get('heading', 'Section ' + str(i+1))}\n"
+        f"{s.get('content', '')}"
+        for i, s in enumerate(parsed_sections)
+    )
+
+    try:
+        resp = await pipeline.openai_client.chat.completions.create(
+            model=settings.DEEPSEEK_MODEL,
+            messages=[
+                {"role": "system", "content": "你是报告生成专家。根据提供的内容生成结构清晰、专业的 Markdown 报告。"},
+                {"role": "user", "content": (
+                    f"请根据以下内容生成一份专业的分析报告。使用 Markdown 格式，包含：\n"
+                    f"1. 标题和元数据\n"
+                    f"2. 执行摘要\n"
+                    f"3. 详细分析（用表格、列表、引用等丰富格式）\n"
+                    f"4. 结论与建议\n\n"
+                    f"报告标题：{title}\n\n"
+                    f"内容：\n{sections_text[:8000]}"
+                )},
+            ],
+            temperature=0.2,
+            max_tokens=3000,
+            timeout=60,
+        )
+        report = resp.choices[0].message.content or ""
+        if not report.strip():
+            return _generate_markdown_fallback(title, parsed_sections)
+        return report
+    except Exception as e:
+        logger.warning(f"Report generation LLM call failed: {e}")
+        return _generate_markdown_fallback(title, parsed_sections)
+
+
+def _generate_markdown_fallback(title: str, sections: list) -> str:
+    """Fallback: generate a clean markdown report without LLM."""
+    from datetime import datetime
+    lines = [
+        f"# {title}",
+        f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
+        "",
+    ]
+    for section in sections:
+        heading = section.get("heading", "")
+        content = section.get("chunk_text", "")
+        stype = section.get("type", "text")
+        if heading:
+            lines.append(f"## {heading}")
+        if stype == "table" and content:
+            try:
+                rows = json.loads(content) if isinstance(content, str) else content
+                if rows:
+                    header = "| " + " | ".join(rows[0]) + " |"
+                    sep = "| " + " | ".join(["---"] * len(rows[0])) + " |"
+                    lines.extend([header, sep])
+                    for row in rows[1:]:
+                        lines.append("| " + " | ".join(row) + " |")
+            except (json.JSONDecodeError, IndexError, KeyError):
+                lines.append(content)
+        elif stype == "list" and isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    lines.append(f"- **{item.get('label', '')}**: {item.get('value', '')}")
+                else:
+                    lines.append(f"- {item}")
+        else:
+            lines.append(str(content))
+        lines.append("")
+    return "\n".join(lines)
 
 
 # ─── Document Management Tools ───────────────────────────────────────────────
@@ -281,7 +665,9 @@ async def list_documents(
     output = []
     for doc in docs:
         status_val = doc.status.value if hasattr(doc.status, "value") else str(doc.status)
-        output.append(f"- {doc.id[:8]}... | {doc.filename} | {status_val} | {doc.created_at.strftime('%Y-%m-%d') if doc.created_at else '?'}")
+        created = doc.created_at.strftime('%Y-%m-%d') if doc.created_at else '?'
+        title = doc.title or doc.filename
+        output.append(f"- ID: {doc.id} | 文件名: {doc.filename} | 标题: {title} | 状态: {status_val} | 创建: {created}")
     return "\n".join(output)
 
 
@@ -554,3 +940,10 @@ async def get_prompt_template(name: str, **_: Any) -> str:
 async def get_current_time(**_: Any) -> str:
     from datetime import datetime
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ── Import extended tools to trigger registration ──
+try:
+    import app.agent.tools  # noqa: F401
+except ImportError:
+    pass

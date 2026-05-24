@@ -93,7 +93,7 @@ class NodeExecutor:
 
             if model_type == "deepseek":
                 base_url = base_url or "https://api.deepseek.com/v1"
-                model = node_data.get("model") or llm_settings.get("model", "deepseek-chat")
+                model = node_data.get("model") or llm_settings.get("model", "deepseek-v4-flash")
             elif model_type == "aiping":
                 base_url = base_url or getattr(settings, 'AIPING_BASE_URL', '')
                 model = node_data.get("model") or llm_settings.get("model", "gpt-4")

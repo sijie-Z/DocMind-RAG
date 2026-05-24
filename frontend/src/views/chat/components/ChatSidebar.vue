@@ -10,7 +10,7 @@
       <n-button
         block
         round
-        class="flex-1 mr-2 bg-blue-600 hover:bg-blue-700 text-white border-none shadow-lg shadow-blue-500/20 transition-all duration-300"
+        class="flex-1 mr-2 bg-slate-600 hover:bg-slate-700 text-white border-none shadow-lg shadow-slate-500/20 transition-all duration-300"
         @click="$emit('newConversation')"
       >
         <template #icon><n-icon><AddOutline /></n-icon></template>
@@ -28,7 +28,8 @@
 
     <!-- Conversation list -->
     <div class="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-thin">
-      <div v-if="isListLoading" class="space-y-3 px-2">
+      <!-- Loading skeleton -->
+      <div v-if="isListLoading && !convLoadError" class="space-y-3 px-2">
         <div v-for="i in 5" :key="i" class="flex items-center gap-3 p-3 rounded-xl bg-gray-50/50 dark:bg-gray-800/30">
           <n-skeleton circle size="small" />
           <div class="flex-1 space-y-2">
@@ -38,6 +39,16 @@
         </div>
       </div>
 
+      <!-- Error state -->
+      <div v-else-if="convLoadError" class="text-center py-8 flex flex-col items-center gap-4">
+        <n-result status="error" :title="t('chat.loadFailed')" :description="t('chat.loadFailedDesc')" size="small">
+          <template #footer>
+            <n-button size="small" type="primary" @click="$emit('refresh')">{{ t('chat.retry') }}</n-button>
+          </template>
+        </n-result>
+      </div>
+
+      <!-- Empty state -->
       <div v-else-if="conversations.length === 0" class="text-center text-gray-400 dark:text-gray-500 text-sm py-8 flex flex-col items-center">
         <n-icon size="48" class="mb-2 opacity-20"><ChatboxOutline /></n-icon>
         {{ t('chat.noHistory') }}
@@ -49,19 +60,19 @@
         class="group relative flex items-center p-3 rounded-xl cursor-pointer transition-all duration-300 border border-transparent"
         :class="[
           currentConversationId === conv.id
-            ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-100/50 dark:border-blue-800/30 text-blue-900 dark:text-blue-100 shadow-sm'
+            ? 'bg-slate-50 dark:bg-slate-900/20 border-slate-100/50 dark:border-slate-800/30 text-slate-900 dark:text-slate-100 shadow-sm'
             : 'hover:bg-gray-50/80 dark:hover:bg-gray-800/40 text-gray-700 dark:text-gray-300 hover:scale-[1.02]'
         ]"
         @click="$emit('selectConversation', conv)"
       >
         <div
           v-if="currentConversationId === conv.id"
-          class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-blue-500 rounded-r-full animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+          class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-slate-500 rounded-r-full animate-pulse shadow-[0_0_10px_rgba(99,102,241,0.5)]"
         ></div>
 
         <div class="flex-shrink-0 mr-3 text-lg opacity-80 transition-transform duration-300 group-hover:scale-110">
-          <n-icon v-if="currentConversationId === conv.id" class="text-blue-600 dark:text-blue-400"><ChatboxEllipsesOutline /></n-icon>
-          <n-icon v-else class="text-gray-400 group-hover:text-blue-500"><ChatboxOutline /></n-icon>
+          <n-icon v-if="currentConversationId === conv.id" class="text-slate-600 dark:text-slate-400"><ChatboxEllipsesOutline /></n-icon>
+          <n-icon v-else class="text-gray-400 group-hover:text-slate-500"><ChatboxOutline /></n-icon>
         </div>
 
         <div class="flex-1 min-w-0">
@@ -90,7 +101,7 @@
     </div>
 
     <div class="p-4 border-t border-gray-100 dark:border-gray-800 text-xs text-center text-gray-400 dark:text-gray-600">
-      DocMind v1.0
+      {{ t('chat.version') }}
     </div>
   </aside>
 </template>
@@ -109,6 +120,7 @@ defineProps<{
   sidebarOpen: boolean
   conversations: Conversation[]
   isListLoading: boolean
+  convLoadError: boolean
   currentConversationId: string | number | undefined
 }>()
 

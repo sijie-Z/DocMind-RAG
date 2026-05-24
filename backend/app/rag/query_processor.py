@@ -87,16 +87,16 @@ class QueryIntentClassifier:
     @classmethod
     def get_boost_fields(cls, intent: QueryIntent) -> List[str]:
         field_boosts = {
-            "factual": ["content^2", "title^1.5"],
-            "procedural": ["content^2", "section_title^1.8"],
-            "list": ["content^1.5", "list_content^2"],
-            "definition": ["content^2", "title^1.5", "definition^2.5"],
-            "comparison": ["content^2", "comparison^2", "pros_cons^2"],
-            "causal": ["content^2", "reason^2", "result^2"],
-            "summary": ["content^1.5", "summary^2", "conclusion^2"],
-            "other": ["content^2", "filename^1.2"],
+            "factual": ["chunk_text^2", "content^2", "title^1.5"],
+            "procedural": ["chunk_text^2", "content^2", "section_title^1.8"],
+            "list": ["chunk_text^1.5", "content^1.5", "list_content^2"],
+            "definition": ["chunk_text^2", "content^2", "title^1.5", "definition^2.5"],
+            "comparison": ["chunk_text^2", "content^2", "comparison^2", "pros_cons^2"],
+            "causal": ["chunk_text^2", "content^2", "reason^2", "result^2"],
+            "summary": ["chunk_text^1.5", "content^1.5", "summary^2", "conclusion^2"],
+            "other": ["chunk_text^2", "content^2", "filename^1.2"],
         }
-        return field_boosts.get(intent, ["content^2", "filename^1.2"])
+        return field_boosts.get(intent, ["chunk_text^2", "content^2", "filename^1.2"])
 
 
 def extract_query_terms(query: str) -> List[str]:

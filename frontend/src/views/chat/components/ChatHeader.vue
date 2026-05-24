@@ -11,7 +11,7 @@
       </n-button>
 
       <div class="flex items-center space-x-2">
-        <div class="bg-blue-100 dark:bg-blue-900/30 p-1.5 rounded-lg text-blue-600 dark:text-blue-400">
+        <div class="bg-slate-100 dark:bg-slate-900/30 p-1.5 rounded-lg text-slate-600 dark:text-slate-400">
           <n-icon size="18"><SparklesOutline /></n-icon>
         </div>
         <div class="hidden sm:block">
@@ -23,8 +23,8 @@
               <template #icon>
                 <n-icon :component="AttachOutline" />
               </template>
-              仅当前文档模式
-              <n-button text size="tiny" @click="$emit('unbind')" class="ml-2 hover:text-white">解除</n-button>
+              {{ t('chat.documentModeOnly') }}
+              <n-button text size="tiny" @click="$emit('unbind')" class="ml-2 hover:text-white">{{ t('chat.unbindBtn') }}</n-button>
             </n-tag>
           </div>
         </div>
@@ -38,7 +38,7 @@
             <template #icon><n-icon><DownloadOutline /></n-icon></template>
           </n-button>
         </template>
-        {{ t('chat.exportChat') || '导出对话' }}
+        {{ t('chat.exportChat') }}
       </n-tooltip>
       <n-tooltip trigger="hover">
         <template #trigger>

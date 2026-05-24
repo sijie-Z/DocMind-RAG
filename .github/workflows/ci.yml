@@ -35,12 +35,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install ruff pytest-cov bandit
+
+      - name: Lint with ruff
+        working-directory: backend
+        run: ruff check app/ tests/
+
+      - name: Security scan with bandit
+        working-directory: backend
+        run: bandit -r app/ --quiet || true
 
       - name: Set test environment
         run: |
-          echo "SECRET_KEY=test-secret-key-for-ci-32chars-long!" >> $GITHUB_ENV
-          echo "JWT_SECRET_KEY=test-jwt-secret-key-for-ci-32chars!" >> $GITHUB_ENV
-          echo "DATABASE_URL=mysql+aiomysql://root:root@localhost:3306/test_db" >> $GITHUB_ENV
+          echo "SECRET_KEY=test-secret-key-for-pytest-only-32chars!" >> $GITHUB_ENV
+          echo "JWT_SECRET_KEY=test-jwt-secret-key-for-pytest-only!" >> $GITHUB_ENV
+          echo "DATABASE_URL=mysql+aiomysql://root:***@localhost:3306/test_db" >> $GITHUB_ENV
           echo "REDIS_HOST=localhost" >> $GITHUB_ENV
           echo "REDIS_PORT=6379" >> $GITHUB_ENV
           echo "ELASTICSEARCH_HOSTS=[\"http://localhost:9200\"]" >> $GITHUB_ENV
@@ -51,10 +60,17 @@ jobs:
           echo "ENABLE_RATE_LIMIT=false" >> $GITHUB_ENV
           echo "ENABLE_MONITORING=false" >> $GITHUB_ENV
 
-      - name: Run tests
+      - name: Run tests with coverage
         working-directory: backend
         run: |
-          python -m pytest tests/ -v --tb=short
+          python -m pytest tests/ -v --tb=short --cov=app --cov-report=xml --cov-report=term
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: backend/coverage.xml
+          flags: backend
+          fail_ci_if_error: false
 
   frontend-tests:
     name: Frontend Tests
@@ -77,38 +93,28 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Run tests
+      - name: Lint
         working-directory: frontend
-        run: npx vitest run
+        run: npx eslint . --ext .vue,.ts,.tsx
 
       - name: Type check
         working-directory: frontend
         run: npx vue-tsc --noEmit
 
+      - name: Run tests with coverage
+        working-directory: frontend
+        run: npx vitest run --coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          directory: frontend/coverage/
+          flags: frontend
+          fail_ci_if_error: false
+
       - name: Build
         working-directory: frontend
         run: npm run build
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Lint
-        working-directory: frontend
-        run: npx eslint . --ext .vue,.ts,.tsx
 
   docker-build:
     name: Docker Build
@@ -139,3 +145,19 @@ jobs:
           tags: docmind-frontend:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run npm audit
+        working-directory: frontend
+        run: npm audit --audit-level=high || true
+
+      - name: Check for known vulnerabilities (backend)
+        working-directory: backend
+        run: |
+          pip install safety
+          safety check -r requirements.txt || true

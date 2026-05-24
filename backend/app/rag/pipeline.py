@@ -113,7 +113,7 @@ class RAGPipeline:
                             await self.cache.set(query, organization_id, top_k, sem_cached)
                         return sem_cached
 
-            # Retrieve with retry
+                # Retrieve with retry
             retries = max(0, int(settings.RAG_RETRIEVAL_MAX_RETRIES or 2))
             result = []
             for attempt in range(retries + 1):
@@ -129,6 +129,11 @@ class RAGPipeline:
                     logger.warning(f"Retrieval attempt {attempt + 1}/{retries + 1} failed: {e}")
                     if attempt < retries:
                         await asyncio.sleep(min(1.5, 0.3 * (2 ** attempt)))
+
+            # Rerank: cross-encoder / LLM reorder, then trim to top_k
+            if result:
+                result = await rerank(query, result, self.rerank_client)
+                result = result[:top_k]
 
             if not document_ids:
                 await self.cache.set(query, organization_id, top_k, result)
@@ -267,9 +272,10 @@ class RAGPipeline:
             # Unmask
             if masking_mapping:
                 from app.services.masking_service import masking_service
-                masking_service.unmask_text(full_response, masking_mapping)
+                full_response = masking_service.unmask_text(full_response, masking_mapping)
                 logger.info("PII masking: response unmasked")
 
         except Exception as e:
             LLM_REQUEST_ERRORS.inc()
-            yield f"LLM Error: {e}"
+            logger.error(f"LLM streaming failed: {e}", exc_info=True)
+            yield "系统处理异常，请重试"

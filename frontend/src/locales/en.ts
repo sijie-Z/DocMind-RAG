@@ -19,6 +19,7 @@ export default {
     logoutConfirm: 'Are you sure you want to logout?',
     backToHome: 'Back to Home',
     back: 'Back',
+    close: 'Close',
     contactSupport: 'Contact Support'
   },
   profile: {
@@ -53,6 +54,8 @@ export default {
     themeLight: 'Light',
     themeDark: 'Dark',
     themeAuto: 'System',
+    themeSettingDesc: 'Choose interface theme',
+    languageSettingDesc: 'Choose display language',
     notifications: 'Notification Settings',
     notificationDesc: 'Receive system notifications and message alerts',
     apiKey: 'API Key Management',
@@ -120,7 +123,8 @@ export default {
     organizations: 'Organizations',
     roleUser: 'User',
     roleAdmin: 'Administrator',
-    deleteConfirm: 'Confirm delete this user?'
+    deleteConfirm: 'Confirm delete this user?',
+    deleteConfirmWithName: 'Are you sure you want to delete user {username}? This action cannot be undone.'
   },
   org: {
     title: 'Organization Structure',
@@ -233,7 +237,74 @@ export default {
     chatCleared: 'Chat history cleared',
     clearFailed: 'Clear failed',
     unbindSuccess: 'Document binding removed, now in full knowledge base Q&A mode',
-    unbindFailed: 'Failed to remove binding'
+    unbindFailed: 'Failed to remove binding',
+    // File upload status labels (shown in ChatInput)
+    fileUploading: 'Uploading...',
+    fileParsing: 'Parsing...',
+    fileIndexing: 'Indexing...',
+    fileCompleted: 'Completed',
+    fileFailed: 'Parse failed',
+    filePending: 'Pending',
+    fileUploaded: 'Uploaded',
+    fileParsed: 'Parse complete',
+    fileIndexed: 'Completed',
+    fileProcessing: 'Processing',
+    fileReady: '✅ Ready',
+    fileTimeout: 'Processing timeout, please check status in knowledge base',
+    fileFromChat: 'From chat upload',
+    fileUploadFailed: 'Upload failed',
+    // Document preview modal
+    documentPreview: 'Document Preview',
+    chatUpload: 'Chat Upload',
+    knowledgeUpload: 'Knowledge Base',
+    uploadedAt: 'Uploaded at',
+    description: 'Description',
+    contentSummary: 'Content Summary',
+    noContent: 'No Content',
+    downloadDocument: 'Download Document',
+    // Feedback
+    liked: 'Liked',
+    disliked: 'Disliked',
+    feedbackFailed: 'Feedback failed',
+    // File analysis
+    analyzeFiles: 'Please analyze the uploaded {n} file(s)',
+    newConversation: 'New Conversation',
+    // Attachment mode tooltip
+    attachmentModeOnly: 'Attachment Mode Only',
+    documentModeOnly: 'Current Document Only',
+    unbindBtn: 'Unbind',
+    strictModeTitle: 'Strict Mode',
+    strictModeDesc: 'When enabled, AI will answer based <span class="text-red-500 font-bold">solely</span> on your uploaded documents, <span class="text-red-500 font-bold">without</span> using the global knowledge base or other external knowledge.',
+    // Mode labels
+    privacyMode: 'Privacy Mode (auto-mask sensitive info)',
+    sseMode: 'SSE Mode (enterprise firewall compatible)',
+    // Message sources
+    sourcesLabel: 'Sources:',
+    unknownDoc: 'Unknown Document',
+    noPreview: 'No Preview Available',
+    relevanceScore: 'Relevance: {score}%',
+    // Feedback & action tooltips
+    useful: 'Helpful',
+    notUseful: 'Not Helpful',
+    regenerate: 'Regenerate',
+    // Sidebar
+    loadFailed: 'Load Failed',
+    loadFailedDesc: 'Unable to load conversation list',
+    retry: 'Retry',
+    version: 'DocMind v1.0',
+    // Drag-and-drop
+    dropFiles: 'Drop files here to upload',
+    // Export
+    exportTitle: 'Chat Export',
+    roleUser: 'User',
+    roleAssistant: 'Assistant',
+    sourceDoc: 'Document',
+    relevanceMatch: 'Relevance: {score}%',
+    // Error banner
+    msgLoadFailed: 'Failed to load message history',
+    // Prompt applied notification
+    promptApplied: 'Prompt template "{name}" applied, feel free to start the conversation',
+    promptDefaultName: 'Unnamed'
   },
   validation: {
     required: 'This field is required',
@@ -307,7 +378,9 @@ export default {
     noFallbackDocs: 'No fallback indexed documents',
     batchRetrySubmitted: 'Submitted retry tasks for {success}/{total} documents',
     batchRetryFailed: 'Batch retry submission failed, please try again later',
-    deleteFailed: 'Delete failed'
+    deleteFailed: 'Delete failed',
+    deleteConfirm: 'Are you sure you want to delete this document? It will be removed from the knowledge base and cannot be recovered.',
+    batchDeleteConfirm: 'Are you sure you want to delete the selected {count} documents? This action cannot be undone.'
   },
   prompts: {
     title: 'Prompt Management',

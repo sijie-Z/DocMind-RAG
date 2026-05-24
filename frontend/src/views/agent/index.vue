@@ -1,293 +1,964 @@
 <template>
-  <div class="flex h-full w-full bg-gray-50 dark:bg-gray-950 overflow-hidden">
-    <div class="flex-1 flex flex-col h-full max-w-4xl mx-auto">
-      <!-- Header -->
-      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800">
-        <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-            <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <div>
-            <h1 class="text-base font-semibold text-gray-900 dark:text-white">Agent Mode</h1>
-            <p class="text-xs text-gray-500 dark:text-gray-400">ReAct reasoning with tool calling</p>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <n-tag v-if="toolCount > 0" size="small" type="success">{{ toolCount }} tools</n-tag>
-          <n-button size="small" @click="clearMessages">Clear</n-button>
-        </div>
+  <div class="agent-page">
+    <!-- Header -->
+    <div class="agent-header">
+      <div class="header-left">
+        <h1 class="header-title">🤖 DocMind Agent</h1>
+        <span class="header-badge">PER 架构</span>
       </div>
-
-      <!-- Messages -->
-      <div ref="messagesContainer" class="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-        <div v-if="messages.length === 0" class="flex flex-col items-center justify-center h-full text-center">
-          <div class="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center mb-4">
-            <svg class="w-8 h-8 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">DocMind Agent</h2>
-          <p class="text-sm text-gray-500 dark:text-gray-400 max-w-md">
-            I can search your knowledge base, analyze documents, and use tools to answer complex questions. Ask me anything.
-          </p>
-          <div class="mt-6 grid grid-cols-2 gap-2 max-w-md">
-            <button
-              v-for="suggestion in suggestions"
-              :key="suggestion"
-              @click="sendMessage(suggestion)"
-              class="text-left px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-            >
-              {{ suggestion }}
-            </button>
-          </div>
-        </div>
-
-        <template v-for="(msg, idx) in messages" :key="idx">
-          <!-- User message -->
-          <div v-if="msg.role === 'user'" class="flex justify-end">
-            <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-br-md bg-emerald-500 text-white text-sm">
-              {{ msg.content }}
-            </div>
-          </div>
-
-          <!-- Agent events -->
-          <div v-else class="space-y-2">
-            <!-- Tool calls -->
-            <template v-for="(event, eIdx) in msg.events" :key="eIdx">
-              <div v-if="event.type === 'tool_call'" class="flex items-start gap-2">
-                <div class="flex-shrink-0 w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center mt-0.5">
-                  <svg class="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </div>
-                <div class="flex-1">
-                  <div class="flex items-center gap-2 mb-1">
-                    <span class="text-xs font-medium text-blue-600 dark:text-blue-400">{{ event.tool_name }}</span>
-                    <n-tag size="tiny" :bordered="false" type="info">iteration {{ event.iteration }}</n-tag>
-                  </div>
-                  <div class="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 rounded-lg px-3 py-2 font-mono">
-                    {{ formatToolArgs(event.tool_args) }}
-                  </div>
-                </div>
-              </div>
-
-              <div v-else-if="event.type === 'tool_result'" class="flex items-start gap-2 ml-4">
-                <div class="flex-shrink-0 w-5 h-5 rounded bg-green-500/10 flex items-center justify-center mt-0.5">
-                  <svg class="w-3 h-3 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <div class="flex-1">
-                  <div class="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/50 rounded-lg px-3 py-2 whitespace-pre-wrap"
-                    :class="{ 'max-h-40 overflow-y-auto': !expandedEvents[eIdx] }">
-                    {{ expandedEvents[eIdx] ? event.content : truncateResult(event.content) }}
-                  </div>
-                  <button
-                    v-if="isResultLong(event.content)"
-                    @click="toggleExpand(eIdx)"
-                    class="mt-1 text-xs text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
-                  >
-                    {{ expandedEvents[eIdx] ? '收起' : '展开' }}
-                  </button>
-                </div>
-              </div>
-
-              <div v-else-if="event.type === 'error'" class="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-xs text-red-600 dark:text-red-400">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                {{ event.content }}
-              </div>
-            </template>
-
-            <!-- Final answer -->
-            <div v-if="msg.content" class="flex items-start gap-2">
-              <div class="flex-shrink-0 w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                <svg class="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-              </div>
-              <div class="flex-1 prose prose-sm dark:prose-invert max-w-none">
-                <Markdown :content="msg.content" />
-              </div>
-            </div>
-
-            <!-- Loading indicator -->
-            <div v-if="msg.loading" class="flex items-center gap-2 text-xs text-gray-400">
-              <div class="flex gap-1">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce" style="animation-delay: 0ms"></span>
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce" style="animation-delay: 150ms"></span>
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce" style="animation-delay: 300ms"></span>
-              </div>
-              <span v-if="msg.currentTool">Calling {{ msg.currentTool }}...</span>
-              <span v-else>Thinking...</span>
-            </div>
-          </div>
-        </template>
+      <div class="header-center">
+        <SessionSelector
+          :sessions="agentStore.sessions"
+          :modelValue="agentStore.currentSessionId"
+          @update:modelValue="handleSessionChange"
+          @delete="handleSessionDelete"
+        />
       </div>
-
-      <!-- Input -->
-      <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-800">
-        <div class="flex gap-2">
-          <input
-            v-model="inputMessage"
-            @keydown.enter.exact.prevent="sendMessage()"
-            placeholder="Ask the agent anything..."
-            class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 transition-all"
-          />
-          <button
-            @click="sendMessage()"
-            :disabled="!inputMessage.trim() || isLoading"
-            class="px-4 py-2.5 rounded-xl bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-            </svg>
-          </button>
-        </div>
+      <div class="header-right">
+        <button class="header-btn" @click="showConfig = !showConfig" :class="{ active: showConfig }">
+          ⚙ 配置
+        </button>
+        <button class="header-btn" @click="handleNewSession">+ 新建</button>
+        <button class="header-btn" @click="agentStore.clearMessages()">清空</button>
       </div>
     </div>
+
+    <!-- Body: Three-column layout -->
+    <div class="agent-body">
+      <!-- Loading state -->
+      <div v-if="initLoading" class="loading-overlay">
+        <n-spin size="large" />
+        <p class="loading-text">加载 Agent 数据...</p>
+      </div>
+      <!-- Error state -->
+      <div v-else-if="initError" class="error-overlay">
+        <p class="error-icon">⚠️</p>
+        <p class="error-text">加载失败，请检查后端服务是否运行</p>
+        <n-button type="primary" size="small" @click="reloadInit">重试</n-button>
+      </div>
+      <template v-else>
+      <!-- Left: Plan Tree -->
+      <div class="left-panel" :class="{ collapsed: !showPlan }">
+        <div class="panel-toggle" @click="showPlan = !showPlan">
+          {{ showPlan ? '◀' : '▶' }}
+        </div>
+        <PlanTree
+          v-if="showPlan && currentPlanSteps.length > 0"
+          :steps="currentPlanSteps"
+          :progress="agentStore.overallProgress"
+        />
+        <div v-else-if="showPlan" class="empty-panel">
+          <p class="empty-text">发送复杂任务后，执行计划将显示在这里</p>
+        </div>
+      </div>
+
+      <!-- Center: Chat / Execution -->
+      <div class="center-panel" ref="centerPanel">
+        <!-- Empty state -->
+        <div v-if="agentStore.messages.length === 0" class="empty-state">
+          <h2>DocMind 智能助手</h2>
+          <p class="empty-subtitle">Planning → Execution → Reflection</p>
+          <div class="suggestion-grid">
+            <button
+              v-for="s in suggestions"
+              :key="s"
+              class="suggestion-btn"
+              @click="handleSend(s)"
+            >
+              {{ s }}
+            </button>
+          </div>
+          <div class="feature-list">
+            <div class="feature-item">📋 自动规划：复杂任务自动拆分</div>
+            <div class="feature-item">🔧 25+ 工具：搜索、分析、代码、翻译</div>
+            <div class="feature-item">🧠 记忆系统：记住你的偏好和历史</div>
+            <div class="feature-item">🔍 自我反思：执行后自动评估纠正</div>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <div
+          v-for="(msg, idx) in agentStore.messages"
+          :key="idx"
+          class="message-group"
+        >
+          <!-- User message -->
+          <div v-if="msg.role === 'user'" class="user-msg">
+            <div class="user-bubble">{{ msg.content }}</div>
+          </div>
+
+          <!-- Agent message -->
+          <div v-else class="agent-msg">
+            <!-- Thinking Stream -->
+            <ThinkingStream
+              :text="msg.thinkingText"
+              :thinkingType="getLastThinkingType(msg)"
+              :active="msg.loading && msg.content.length === 0"
+            />
+
+            <!-- Tool calls -->
+            <div v-if="msg.events.length > 0" class="tool-events">
+              <template v-for="(evt, eIdx) in msg.events" :key="eIdx">
+                <!-- Tool call + result paired -->
+                <template v-if="evt.type === 'tool_call'">
+                  <ToolCallCard
+                    :tool-name="evt.tool_name || 'unknown'"
+                    :tool-args="evt.tool_args"
+                    :result-text="getToolResult(msg.events, eIdx)"
+                    :duration="getToolDuration(msg.events, eIdx)"
+                    :status="getToolStatus(msg.events, eIdx)"
+                    :retry-attempt="evt.retry_attempt"
+                  />
+                </template>
+                <!-- Standalone error -->
+                <div
+                  v-else-if="evt.type === 'tool_error'"
+                  class="tool-error-standalone"
+                >
+                  ❌ {{ evt.content }}
+                </div>
+              </template>
+            </div>
+
+            <!-- Reflection -->
+            <ReflectionBanner
+              v-for="evt in msg.events.filter((e) => e.type === 'reflection')"
+              :key="'refl-' + evt.timestamp"
+              :result="evt.reflection_result || 'pass'"
+              :text="evt.content"
+            />
+
+            <!-- Final answer -->
+            <div v-if="msg.content" class="final-answer">
+              <Markdown :content="msg.content" />
+            </div>
+
+            <!-- Feedback buttons (only after completion, only for messages with a messageId) -->
+            <div v-if="!msg.loading && msg.messageId && msg.content" class="feedback-bar">
+              <n-tooltip trigger="hover">
+                <template #trigger>
+                  <n-button size="tiny" quaternary circle
+                    :class="msg.feedback === 1 ? 'feedback-active-up' : 'feedback-inactive'"
+                    @click="handleFeedback(msg, 1)"
+                  >
+                    <template #icon><n-icon><ThumbsUpOutline /></n-icon></template>
+                  </n-button>
+                </template>
+                有帮助
+              </n-tooltip>
+              <n-tooltip trigger="hover">
+                <template #trigger>
+                  <n-button size="tiny" quaternary circle
+                    :class="msg.feedback === -1 ? 'feedback-active-down' : 'feedback-inactive'"
+                    @click="handleFeedback(msg, -1)"
+                  >
+                    <template #icon><n-icon><ThumbsDownOutline /></n-icon></template>
+                  </n-button>
+                </template>
+                没有帮助
+              </n-tooltip>
+            </div>
+
+            <!-- Loading -->
+            <div v-if="msg.loading && msg.content.length === 0 && msg.thinkingText.length === 0" class="loading-indicator">
+              <span class="loading-dot"></span>
+              <span class="loading-dot" style="animation-delay: 150ms"></span>
+              <span class="loading-dot" style="animation-delay: 300ms"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Config Panel -->
+      <div class="right-panel" v-if="showConfig">
+        <AgentConfigPanel
+          :config="agentStore.config"
+          @apply="handleConfigApply"
+        />
+      </div>
+      </template>
+    </div>
+
+    <!-- Status bar -->
+    <div class="status-bar">
+      <span>工具: {{ agentStore.enabledToolCount }}/{{ agentStore.toolCount }}</span>
+      <span v-if="agentStore.currentSessionId">
+        会话: {{ agentStore.currentSession?.title || agentStore.currentSessionId?.slice(0, 8) }}
+      </span>
+      <span v-if="agentStore.overallProgress > 0">
+        进度: {{ Math.round(agentStore.overallProgress * 100) }}%
+      </span>
+    </div>
+
+    <!-- Input -->
+    <AgentInput
+      :placeholder="'输入复杂任务，Agent 自动规划执行...'"
+      :disabled="false"
+      :loading="agentStore.isLoading"
+      @send="handleSend"
+      @stop="handleStop"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, computed } from 'vue'
-import { NTag, NButton } from 'naive-ui'
-import Markdown from '@/components/common/Markdown.vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
+import { useAgentStore } from '@/stores/agent'
 import { agentApi } from '@/api/agent'
+import { useDedupedMessage } from '@/utils/message'
+import type { AgentEvent, AgentChatMessage, PlanStep, ThinkingType } from '@/types/agent'
+import { ThumbsUpOutline, ThumbsDownOutline } from '@vicons/ionicons5'
 
-interface AgentEvent {
-  type: 'tool_call' | 'tool_result' | 'chunk' | 'error' | 'done'
-  content: string
-  tool_name: string
-  tool_args: Record<string, any>
-  iteration: number
-}
+import PlanTree from '@/components/agent/PlanTree.vue'
+import ThinkingStream from '@/components/agent/ThinkingStream.vue'
+import ToolCallCard from '@/components/agent/ToolCallCard.vue'
+import ReflectionBanner from '@/components/agent/ReflectionBanner.vue'
+import AgentConfigPanel from '@/components/agent/AgentConfigPanel.vue'
+import SessionSelector from '@/components/agent/SessionSelector.vue'
+import AgentInput from '@/components/agent/AgentInput.vue'
+import Markdown from '@/components/common/Markdown.vue'
 
-interface Message {
-  role: 'user' | 'assistant'
-  content: string
-  events: AgentEvent[]
-  loading: boolean
-  currentTool: string
-}
+const agentStore = useAgentStore()
+const message = useDedupedMessage()
 
-const messages = ref<Message[]>([])
-const inputMessage = ref('')
-const isLoading = ref(false)
-const toolCount = ref(0)
-const messagesContainer = ref<HTMLElement>()
-const expandedEvents = ref<Record<number, boolean>>({})
+const showConfig = ref(false)
+const showPlan = ref(true)
+const centerPanel = ref<HTMLElement>()
+const initLoading = ref(true)
+const initError = ref(false)
 
 const suggestions = [
-  'Search for company policies',
-  'What documents are in the knowledge base?',
-  'Summarize all uploaded files',
-  'Extract key topics from recent docs',
+  '知识库中有哪些文档？请帮我总结关键主题',
+  '搜索公司相关的所有政策文档，提取合规要求',
+  '分析最近上传的文档，找出共同点和差异',
+  '帮我翻译这段中文到英文，并检测语言',
 ]
 
-const formatToolArgs = (args: Record<string, any>) => {
-  if (!args || Object.keys(args).length === 0) return '(no args)'
-  return Object.entries(args)
-    .map(([k, v]) => `${k}=${typeof v === 'string' ? `"${v.slice(0, 50)}"` : v}`)
-    .join(', ')
+const currentPlanSteps = computed<PlanStep[]>(() => {
+  // Get plan steps from the last assistant message
+  const last = [...agentStore.messages].reverse().find((m) => m.role === 'assistant')
+  return last?.planSteps || agentStore.planSteps
+})
+
+function getLastThinkingType(msg: AgentChatMessage): ThinkingType {
+  const thinkEvents = msg.events.filter((e) => e.type === 'thinking')
+  if (thinkEvents.length === 0) return 'reasoning'
+  return thinkEvents[thinkEvents.length - 1].thinking_type || 'reasoning'
 }
 
-const truncateResult = (text: string) => {
-  if (!text) return ''
-  return text.length > 300 ? text.slice(0, 300) + '...' : text
+function getToolResult(events: AgentEvent[], callIdx: number): string | undefined {
+  // Look ahead for matching tool_result
+  const callId = events[callIdx]?.tool_call_id
+  if (!callId) return undefined
+  for (let i = callIdx + 1; i < events.length; i++) {
+    if (events[i].type === 'tool_result' && events[i].tool_call_id === callId) {
+      return events[i].content
+    }
+    if (events[i].type === 'tool_error' && events[i].tool_call_id === callId) {
+      return events[i].content
+    }
+  }
+  return undefined
 }
 
-const isResultLong = (text: string) => !!text && text.length > 300
-
-const toggleExpand = (eventKey: number) => {
-  expandedEvents.value[eventKey] = !expandedEvents.value[eventKey]
+function getToolDuration(events: AgentEvent[], callIdx: number): number | undefined {
+  const callId = events[callIdx]?.tool_call_id
+  if (!callId) return undefined
+  for (let i = callIdx + 1; i < events.length; i++) {
+    if (events[i].tool_call_id === callId && events[i].tool_duration_ms) {
+      return events[i].tool_duration_ms
+    }
+  }
+  return undefined
 }
 
-const scrollToBottom = () => {
+async function handleFeedback(msg: AgentChatMessage, value: number) {
+  if (!msg.messageId) return
+  // Toggle: if already selected, deselect
+  const fb = msg.feedback === value ? 0 : value
+  msg.feedback = fb
+  try {
+    await agentApi.submitFeedback(msg.messageId, fb)
+  } catch {
+    msg.feedback = 0
+    message.error('反馈提交失败')
+  }
+}
+
+function getToolStatus(
+  events: AgentEvent[],
+  callIdx: number,
+): 'loading' | 'success' | 'error' {
+  const callId = events[callIdx]?.tool_call_id
+  if (!callId) return 'loading'
+  for (let i = callIdx + 1; i < events.length; i++) {
+    if (events[i].tool_call_id === callId) {
+      if (events[i].type === 'tool_result') return 'success'
+      if (events[i].type === 'tool_error') return 'error'
+    }
+  }
+  return 'loading'
+}
+
+function scrollToBottom() {
   nextTick(() => {
-    if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+    if (centerPanel.value) {
+      centerPanel.value.scrollTop = centerPanel.value.scrollHeight
     }
   })
 }
 
-const clearMessages = () => {
-  messages.value = []
-  toolCount.value = 0
-  expandedEvents.value = {}
-}
+async function handleSend(query: string) {
+  if (agentStore.isLoading || !query.trim()) return
 
-const sendMessage = async (text?: string) => {
-  const query = text || inputMessage.value.trim()
-  if (!query || isLoading.value) return
-
-  inputMessage.value = ''
+  agentStore.clearMessages()
 
   // Add user message
-  messages.value.push({
+  agentStore.addMessage({
     role: 'user',
     content: query,
     events: [],
     loading: false,
     currentTool: '',
+    thinkingText: '',
+    planSteps: [],
+    planId: '',
+    progress: 0,
   })
 
   // Add assistant placeholder
-  const assistantIdx = messages.value.length
-  messages.value.push({
+  agentStore.addMessage({
     role: 'assistant',
     content: '',
     events: [],
     loading: true,
     currentTool: '',
+    thinkingText: '',
+    planSteps: [],
+    planId: '',
+    progress: 0,
   })
 
-  isLoading.value = true
+  agentStore.setLoading(true)
   scrollToBottom()
 
   try {
-    await agentApi.chat(query, (event: AgentEvent) => {
-      const msg = messages.value[assistantIdx]
-      if (!msg) return
-
-      if (event.type === 'tool_call') {
-        msg.events.push(event)
-        msg.currentTool = event.tool_name
-        toolCount.value++
-      } else if (event.type === 'tool_result') {
-        msg.events.push(event)
-        msg.currentTool = ''
-      } else if (event.type === 'chunk') {
-        msg.content += event.content
-      } else if (event.type === 'error') {
-        msg.events.push(event)
-        msg.loading = false
-      } else if (event.type === 'done') {
-        msg.loading = false
-      }
-      scrollToBottom()
-    })
+    await agentApi.chat(
+      query,
+      (event: AgentEvent) => {
+        agentStore.processEvent(event)
+        scrollToBottom()
+      },
+      {
+        sessionId: agentStore.currentSessionId || undefined,
+        enableTools: agentStore.config.enable_tools,
+        enablePlanning: agentStore.config.enable_planning,
+        enableReflection: agentStore.config.enable_reflection,
+        enableMemory: agentStore.config.enable_memory,
+        enableThinking: agentStore.config.enable_thinking,
+        model: agentStore.config.model,
+        temperature: agentStore.config.temperature,
+        disabledTools: agentStore.config.disabled_tools,
+        systemPromptOverride: agentStore.config.system_prompt_override,
+      },
+    )
   } catch (e: unknown) {
-    const errorMsg = e instanceof Error ? e.message : String(e)
-    const msg = messages.value[assistantIdx]
-    if (msg) {
-      msg.content = `Error: ${errorMsg || 'Failed to connect to agent'}`
-      msg.loading = false
+    // AbortError is expected when user clicks stop
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      agentStore.updateLastAssistant((msg) => {
+        if (!msg.content) msg.content = '(已停止)'
+        msg.loading = false
+      })
+    } else {
+      const errMsg = e instanceof Error ? e.message : String(e)
+      agentStore.updateLastAssistant((msg) => {
+        msg.content = `❌ 错误: ${errMsg || 'Agent 连接失败'}`
+        msg.loading = false
+      })
     }
   } finally {
-    isLoading.value = false
+    agentStore.setLoading(false)
     scrollToBottom()
   }
 }
 
-onMounted(() => {
-  // Check for available tools
-  agentApi.listTools().then(res => {
-    if (res.data) toolCount.value = res.data.length
-  }).catch(() => {})
+function handleStop() {
+  agentApi.abortStream()
+  agentStore.setLoading(false)
+  agentStore.updateLastAssistant((msg) => {
+    msg.loading = false
+  })
+}
+
+async function handleSessionChange(sessionId: string | null) {
+  agentStore.setCurrentSession(sessionId)
+  if (sessionId) {
+    try {
+      const res = await agentApi.getSession(sessionId)
+      if (res.data?.config) {
+        agentStore.updateConfig(res.data.config)
+      }
+    } catch (e) {
+      message.error('加载会话失败')
+    }
+  }
+}
+
+async function handleSessionDelete(sessionId: string) {
+  try {
+    await agentApi.deleteSession(sessionId)
+    agentStore.setSessions(agentStore.sessions.filter((s) => s.id !== sessionId))
+    if (agentStore.currentSessionId === sessionId) {
+      agentStore.setCurrentSession(null)
+    }
+    message.success('会话已删除')
+  } catch (e) {
+    message.error('删除会话失败')
+  }
+}
+
+async function handleNewSession() {
+  try {
+    const res = await agentApi.createSession('New Agent Session')
+    if (res.data) {
+      agentStore.setSessions([res.data, ...agentStore.sessions])
+      agentStore.setCurrentSession(res.data.id)
+      message.success('已创建新会话')
+    }
+  } catch (e) {
+    message.error('创建会话失败')
+  }
+}
+
+function handleConfigApply(config: typeof agentStore.config) {
+  agentStore.updateConfig(config)
+  // Persist to server
+  agentApi.updateConfig(config).catch(() => {})
+}
+
+// Load initial data
+onMounted(async () => {
+  await loadInit()
 })
+
+async function reloadInit() {
+  initError.value = false
+  await loadInit()
+}
+
+async function loadInit() {
+  initLoading.value = true
+  initError.value = false
+  try {
+    const [toolsRes, sessionsRes, configRes] = await Promise.all([
+      agentApi.listTools(),
+      agentApi.listSessions(),
+      agentApi.getConfig(),
+    ])
+    if (toolsRes.data) agentStore.tools = toolsRes.data
+    if (sessionsRes.data?.sessions) agentStore.setSessions(sessionsRes.data.sessions)
+    if (configRes.data) agentStore.updateConfig(configRes.data)
+  } catch (e) {
+    initError.value = true
+    message.error('Agent 初始化失败')
+  } finally {
+    initLoading.value = false
+  }
+}
 </script>
+
+<style scoped>
+.agent-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary, #fff);
+}
+
+.dark .agent-page {
+  background: var(--bg-primary-dark, #0f172a);
+}
+
+/* Header */
+.agent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.dark .agent-header {
+  border-color: var(--border-color-dark, #1e293b);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+  margin: 0;
+}
+
+.dark .header-title { color: var(--text-primary-dark, #f9fafb); }
+
+.loading-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  gap: 16px;
+}
+
+.loading-text {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.error-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  gap: 12px;
+}
+
+.error-icon {
+  font-size: 32px;
+}
+
+.error-text {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.header-badge {
+  font-size: 10px;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+.header-center { flex: 1; display: flex; justify-content: center; }
+
+.header-right { display: flex; gap: 6px; }
+
+.header-btn {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #d1d5db);
+  background: var(--bg-primary, #fff);
+  color: var(--text-secondary, #4b5563);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dark .header-btn {
+  background: var(--bg-secondary-dark, #1f2937);
+  border-color: var(--border-color-dark, #374151);
+  color: var(--text-secondary-dark, #9ca3af);
+}
+
+.header-btn:hover {
+  background: var(--bg-secondary, #f3f4f6);
+}
+
+.header-btn.active {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+
+/* Body */
+.agent-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Left panel */
+.left-panel {
+  width: 260px;
+  border-right: 1px solid var(--border-color, #e5e7eb);
+  overflow-y: auto;
+  flex-shrink: 0;
+  padding: 12px;
+  position: relative;
+  transition: width 0.3s;
+}
+
+.dark .left-panel {
+  border-color: var(--border-color-dark, #1e293b);
+}
+
+.left-panel.collapsed {
+  width: 28px;
+  padding: 12px 4px;
+}
+
+.panel-toggle {
+  position: absolute;
+  top: 8px;
+  right: -14px;
+  z-index: 10;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg-secondary, #f3f4f6);
+  border: 1px solid var(--border-color, #d1d5db);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--text-tertiary, #9ca3af);
+}
+
+.dark .panel-toggle {
+  background: var(--bg-secondary-dark, #1f2937);
+  border-color: var(--border-color-dark, #374151);
+}
+
+/* Center panel */
+.center-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+/* Right panel */
+.right-panel {
+  width: 280px;
+  border-left: 1px solid var(--border-color, #e5e7eb);
+  overflow-y: auto;
+  flex-shrink: 0;
+  padding: 12px;
+}
+
+.dark .right-panel {
+  border-color: var(--border-color-dark, #1e293b);
+}
+
+/* Empty state */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+}
+
+.empty-state h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+  margin-bottom: 4px;
+}
+
+.dark .empty-state h2 { color: var(--text-primary-dark, #f9fafb); }
+
+.empty-subtitle {
+  font-size: 13px;
+  color: var(--text-tertiary, #9ca3af);
+  margin-bottom: 24px;
+  font-family: monospace;
+}
+
+.suggestion-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  max-width: 520px;
+  margin-bottom: 24px;
+}
+
+.suggestion-btn {
+  text-align: left;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  background: var(--bg-secondary, #f9fafb);
+  color: var(--text-secondary, #4b5563);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dark .suggestion-btn {
+  border-color: var(--border-color-dark, #374151);
+  background: var(--bg-secondary-dark, #1f2937);
+  color: var(--text-secondary-dark, #9ca3af);
+}
+
+.suggestion-btn:hover {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.05);
+  color: #3b82f6;
+}
+
+.feature-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  max-width: 520px;
+}
+
+.feature-item {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--bg-tertiary, #f3f4f6);
+  color: var(--text-secondary, #6b7280);
+}
+
+.dark .feature-item {
+  background: var(--bg-tertiary-dark, #374151);
+  color: var(--text-secondary-dark, #9ca3af);
+}
+
+.empty-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.empty-text {
+  font-size: 11px;
+  color: var(--text-tertiary, #9ca3af);
+  text-align: center;
+  line-height: 1.6;
+}
+
+/* Messages */
+.message-group {
+  margin-bottom: 16px;
+}
+
+.user-msg {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.user-bubble {
+  max-width: 75%;
+  padding: 10px 16px;
+  border-radius: 16px 16px 4px 16px;
+  background: #3b82f6;
+  color: white;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.agent-msg {
+  margin-bottom: 16px;
+}
+
+.final-answer {
+  padding: 12px 16px;
+  background: var(--bg-secondary, #f9fafb);
+  border-radius: 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+}
+
+.dark .final-answer {
+  background: var(--bg-secondary-dark, #1f2937);
+  border-color: var(--border-color-dark, #374151);
+}
+
+/* Feedback bar */
+.feedback-bar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 0 2px 4px;
+}
+
+.feedback-inactive {
+  color: var(--text-tertiary, #9ca3af) !important;
+  transition: color 0.15s;
+}
+
+.feedback-inactive:hover {
+  color: var(--text-secondary, #6b7280) !important;
+}
+
+.feedback-active-up {
+  color: #16a34a !important;
+}
+
+.feedback-active-down {
+  color: #dc2626 !important;
+}
+
+.tool-error-standalone {
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #dc2626;
+  margin: 4px 0;
+}
+
+.loading-indicator {
+  display: flex;
+  gap: 4px;
+  padding: 12px 0;
+}
+
+.loading-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3b82f6;
+  animation: bounce 1s ease-in-out infinite;
+}
+
+@keyframes bounce {
+  0%, 100% { opacity: 0.3; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-4px); }
+}
+
+/* Status bar */
+.status-bar {
+  display: flex;
+  gap: 16px;
+  padding: 4px 16px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+  font-size: 10px;
+  color: var(--text-tertiary, #9ca3af);
+  background: var(--bg-secondary, #f9fafb);
+  flex-shrink: 0;
+}
+
+.dark .status-bar {
+  background: var(--bg-secondary-dark, #111827);
+  border-color: var(--border-color-dark, #1e293b);
+}
+
+/* === Responsive: collapse 3-column to single column === */
+@media (max-width: 767px) {
+  .agent-body {
+    flex-direction: column;
+  }
+
+  .left-panel {
+    width: 100% !important;
+    max-height: 0;
+    overflow: hidden;
+    padding: 0 12px;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+    transition: max-height 0.3s ease, padding 0.3s ease;
+  }
+  .dark .left-panel {
+    border-bottom-color: var(--border-color-dark, #1e293b);
+  }
+  .left-panel.collapsed {
+    max-height: 0;
+    padding: 0 12px;
+    width: 100% !important;
+  }
+  .left-panel:not(.collapsed) {
+    max-height: 200px;
+    padding: 12px;
+    overflow-y: auto;
+  }
+
+  .left-panel .panel-toggle {
+    display: none;
+  }
+
+  .right-panel {
+    width: 100% !important;
+    max-height: 0;
+    overflow: hidden;
+    padding: 0 12px;
+    border-left: none;
+    border-top: 1px solid var(--border-color, #e5e7eb);
+    transition: max-height 0.3s ease, padding 0.3s ease;
+  }
+  .dark .right-panel {
+    border-top-color: var(--border-color-dark, #1e293b);
+  }
+  .right-panel:not([style*="display: none"]) {
+    max-height: 300px;
+    padding: 12px;
+    overflow-y: auto;
+  }
+
+  .center-panel {
+    flex: 1;
+    min-height: 0;
+    padding: 12px;
+  }
+
+  .agent-header {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+
+  .header-center {
+    order: 3;
+    flex: 0 0 100%;
+    justify-content: flex-start;
+  }
+
+  .header-right {
+    gap: 4px;
+  }
+
+  .header-btn {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .suggestion-grid {
+    grid-template-columns: 1fr;
+    max-width: 100%;
+  }
+
+  .feature-list {
+    max-width: 100%;
+  }
+
+  .status-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 9px;
+  }
+
+  .empty-state h2 {
+    font-size: 16px;
+  }
+}
+
+/* Tablet: some adjustments */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .left-panel {
+    width: 200px;
+  }
+  .right-panel {
+    width: 240px;
+  }
+  .center-panel {
+    padding: 12px 16px;
+  }
+}
+</style>

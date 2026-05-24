@@ -1,5 +1,6 @@
 import { ref, computed, onUnmounted } from 'vue'
 import { useDedupedMessage } from '@/utils/message'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { wsService } from '@/utils/websocket'
@@ -12,12 +13,13 @@ export function useChatConnection(
   fetchConversations: () => Promise<void>
 ) {
   const message = useDedupedMessage()
+  const { t } = useI18n()
   const chatStore = useChatStore()
   const userStore = useUserStore()
 
   const connectionStatus = ref<'connected' | 'disconnected' | 'connecting' | 'error'>('disconnected')
   const sseStatus = ref<'connected' | 'disconnected' | 'connecting' | 'error'>('disconnected')
-  const useSSE = ref(false)
+  const useSSE = ref(true)
   const useStream = ref(true)
   const isLoading = ref(false)
   const isRetrieving = ref(false)
@@ -27,10 +29,9 @@ export function useChatConnection(
     return connectionStatus.value
   })
 
-  let statusTimer: ReturnType<typeof setInterval> | null = null
-
   const connectWebSocket = async () => {
     if (useSSE.value) return
+    if (!userStore.isLoggedIn) return
 
     let userId = userStore.userInfo?.id
     if (!userId || userId <= 0) {
@@ -59,7 +60,7 @@ export function useChatConnection(
       if (data.conversationId && (!chatStore.currentConversation || chatStore.currentConversation.id !== data.conversationId)) {
         chatStore.setCurrentConversation({
           id: data.conversationId,
-          title: data.title || (messages.value.find(m => m.messageType === 'user')?.content.slice(0, 20) || 'New Chat'),
+          title: data.title || (messages.value.find(m => m.messageType === 'user')?.content.slice(0, 20) || t('chat.newConversation')),
           userId: userId!,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
@@ -108,23 +109,6 @@ export function useChatConnection(
     connectionStatus.value = 'disconnected'
   }
 
-  const startStatusPolling = () => {
-    statusTimer = setInterval(() => {
-      if (wsService.isConnected()) {
-        connectionStatus.value = 'connected'
-      } else if (wsService.getConnectionStatus() === 'connecting') {
-        connectionStatus.value = 'connecting'
-      }
-    }, 1000)
-  }
-
-  const stopStatusPolling = () => {
-    if (statusTimer) {
-      clearInterval(statusTimer)
-      statusTimer = null
-    }
-  }
-
   const stopGeneration = () => {
     wsService.sendStop()
     isLoading.value = false
@@ -133,7 +117,6 @@ export function useChatConnection(
 
   onUnmounted(() => {
     disconnectWebSocket()
-    stopStatusPolling()
   })
 
   return {
@@ -146,7 +129,6 @@ export function useChatConnection(
     effectiveConnectionStatus,
     connectWebSocket,
     disconnectWebSocket,
-    startStatusPolling,
     stopGeneration
   }
 }

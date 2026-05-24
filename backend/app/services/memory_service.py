@@ -24,16 +24,32 @@ class MemoryItem:
         importance: float = 0.5,
         metadata: Dict[str, Any] = None,
         embedding: Optional[List[float]] = None,
+        created_at: Optional[str] = None,
+        last_accessed: Optional[str] = None,
+        access_count: int = 0,
+        item_id: Optional[str] = None,
     ):
         self.content = content
         self.memory_type = memory_type
         self.importance = importance
         self.metadata = metadata or {}
         self.embedding = embedding
-        self.created_at = datetime.now()
-        self.last_accessed = datetime.now()
-        self.access_count = 0
-        self.id = self._generate_id()
+        if created_at:
+            try:
+                self.created_at = datetime.fromisoformat(created_at)
+            except (ValueError, TypeError):
+                self.created_at = datetime.now()
+        else:
+            self.created_at = datetime.now()
+        if last_accessed:
+            try:
+                self.last_accessed = datetime.fromisoformat(last_accessed)
+            except (ValueError, TypeError):
+                self.last_accessed = datetime.now()
+        else:
+            self.last_accessed = datetime.now()
+        self.access_count = access_count
+        self.id = item_id or self._generate_id()
 
     def _generate_id(self) -> str:
         """生成唯一ID"""
@@ -695,6 +711,10 @@ class AgentMemorySystem:
                 importance=item_data.get("importance", 0.5),
                 metadata=item_data.get("metadata"),
                 embedding=item_data.get("embedding"),
+                created_at=item_data.get("created_at"),
+                last_accessed=item_data.get("last_accessed"),
+                access_count=item_data.get("access_count", 0),
+                item_id=item_data.get("id"),
             )
             self.short_term.add(item)
 
@@ -707,6 +727,10 @@ class AgentMemorySystem:
                     importance=item_data.get("importance", 0.5),
                     metadata=item_data.get("metadata"),
                     embedding=item_data.get("embedding"),
+                    created_at=item_data.get("created_at"),
+                    last_accessed=item_data.get("last_accessed"),
+                    access_count=item_data.get("access_count", 0),
+                    item_id=item_data.get("id"),
                 )
                 self.long_term.add(item)
 

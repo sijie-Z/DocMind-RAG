@@ -3,6 +3,7 @@
 
 from typing import List, Optional, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 
 
 class DatabaseSettings(BaseSettings):
@@ -15,9 +16,16 @@ class DatabaseSettings(BaseSettings):
     )
 
     # MySQL
-    DATABASE_URL: str = "mysql+aiomysql://root:root@localhost:3306/docmind_db"
+    DATABASE_URL: str = ""
     DATABASE_POOL_SIZE: int = 20
     DATABASE_MAX_OVERFLOW: int = 10
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def validate_database_url(cls, v: str) -> str:
+        if not v:
+            raise ValueError("DATABASE_URL must be set in production")
+        return v
 
     # Redis
     REDIS_HOST: str = "localhost"
@@ -27,7 +35,7 @@ class DatabaseSettings(BaseSettings):
 
     # Elasticsearch
     ELASTICSEARCH_HOSTS: List[str] = ["http://localhost:9200"]
-    ELASTICSEARCH_INDEX_NAME: str = "docmind_knowledge"
+    ELASTICSEARCH_INDEX_NAME: str = "paicongming_knowledge"
     ES_ANALYZER: str = "standard"
     ES_SEARCH_ANALYZER: str = "standard"
 

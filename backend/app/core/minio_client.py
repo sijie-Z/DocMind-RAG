@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 class MinioClient:
     def __init__(self):
         self._client = None
-        self._bucket_checked = False
 
     @property
     def client(self):
@@ -23,7 +22,6 @@ class MinioClient:
                 secure=settings.MINIO_SECURE,
                 region=settings.MINIO_REGION,
             )
-            self._ensure_bucket_exists()
         return self._client
 
     @property
@@ -33,13 +31,13 @@ class MinioClient:
     def _ensure_bucket_exists(self):
         if self._bucket_checked:
             return
+        self._bucket_checked = True
         try:
             if not self._client.bucket_exists(self.bucket_name):
                 self._client.make_bucket(self.bucket_name)
                 logger.info(f"Created bucket {self.bucket_name}")
-            self._bucket_checked = True
         except Exception as e:
-            logger.warning(f"Error ensuring bucket exists: {e}")
+            logger.warning(f"MinIO bucket check failed (non-blocking): {e}")
 
     def put_object(self, object_name: str, data: BinaryIO, length: int, content_type: str = "application/octet-stream", **kwargs):
         try:

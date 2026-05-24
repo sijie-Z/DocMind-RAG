@@ -47,6 +47,18 @@ backend/es-data/
 backend/minio-data/
 backend/redis-data/
 
+# --- Build artifacts ---
+*.egg-info/
+*.whl
+.coverage
+htmlcov/
+coverage/
+.coverage.*
+
+# --- Backend generated ---
+backend/.backend-port
+backend/static/
+
 # --- OS 文件 ---
 .DS_Store
 Thumbs.db

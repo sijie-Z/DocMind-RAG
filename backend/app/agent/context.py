@@ -1,23 +1,25 @@
 """Context engine — manages conversation context window and compression.
 
 When the conversation approaches the model's token limit, the context engine
-compresses older messages by summarizing them, preserving key information
-while freeing up space for new interactions.
+compresses older messages by summarizing them with the LLM, preserving key
+information while freeing up space for new interactions.
 
 Inspired by hermes-agent's ContextEngine / ContextCompressor pattern.
 """
 import logging
 from typing import Any, Dict, List, Optional
 
+import tiktoken
+
 logger = logging.getLogger(__name__)
 
-# tiktoken-based token counting (cl100k_base is a good approximation for most LLMs)
+CHARS_PER_TOKEN = 2.5  # rough approximation: 1 token ≈ 2.5 chars for CJK+EN mixed
+
 try:
-    import tiktoken
     _ENCODER = tiktoken.get_encoding("cl100k_base")
-except ImportError:
+except Exception:
     _ENCODER = None
-    logger.warning("tiktoken not installed, falling back to heuristic token counting")
+    logger.warning("tiktoken encoding unavailable, falling back to heuristic token counting")
 
 
 def estimate_tokens(text: str) -> int:
@@ -42,7 +44,7 @@ class ContextEngine:
     Strategy:
     1. System prompt is always preserved (pinned).
     2. Recent N messages are always preserved (tail window).
-    3. Older messages are compressed: summarized into a single message.
+    3. Older messages are compressed: summarized via LLM (preferred) or truncated.
     """
 
     def __init__(
@@ -54,15 +56,20 @@ class ContextEngine:
         self.max_context_tokens = max_context_tokens
         self.tail_window = tail_window
         self.compression_ratio = compression_ratio
+        self._llm_client = None  # set via set_llm_client() for intelligent summarization
+
+    def set_llm_client(self, client) -> None:
+        """Set the LLM client for intelligent message summarization."""
+        self._llm_client = client
 
     def fit(
         self,
         messages: List[Dict[str, str]],
         system_prompt: Optional[str] = None,
     ) -> List[Dict[str, str]]:
-        """Trim/compress messages to fit within the token budget.
+        """Trim/compress messages to fit within the token budget (sync fallback).
 
-        Returns a new message list that fits within max_context_tokens.
+        Prefer fit_async() when an event loop is available.
         """
         if not messages:
             return messages
@@ -71,63 +78,150 @@ class ContextEngine:
         if system_prompt:
             total_tokens += estimate_tokens(system_prompt) + 4
 
-        # If within budget, return as-is
         if total_tokens <= self.max_context_tokens:
             return messages
 
-        # Split into: [old messages] + [tail window]
         if len(messages) <= self.tail_window:
-            # All messages are "recent" — just truncate content
             return self._truncate_messages(messages, self.max_context_tokens)
 
         old_messages = messages[:-self.tail_window]
         recent_messages = messages[-self.tail_window:]
 
-        # Compress old messages into a summary
         budget_for_old = max(
             200,
             self.max_context_tokens
             - estimate_messages_tokens(recent_messages)
             - (estimate_tokens(system_prompt) + 4 if system_prompt else 0)
-            - 50,  # buffer
+            - 50,
         )
 
-        compressed = self._compress_messages(old_messages, budget_for_old)
+        compressed = self._compress_messages_fast(old_messages, budget_for_old)
         result = compressed + recent_messages
 
-        # Final safety check
         final_tokens = estimate_messages_tokens(result)
         if final_tokens > self.max_context_tokens:
             result = self._truncate_messages(result, self.max_context_tokens)
 
         return result
 
-    def _compress_messages(
+    async def fit_async(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str] = None,
+    ) -> List[Dict[str, str]]:
+        """Async version: trim/compress messages with LLM summarization."""
+        if not messages:
+            return messages
+
+        total_tokens = estimate_messages_tokens(messages)
+        if system_prompt:
+            total_tokens += estimate_tokens(system_prompt) + 4
+
+        if total_tokens <= self.max_context_tokens:
+            return messages
+
+        if len(messages) <= self.tail_window:
+            return self._truncate_messages(messages, self.max_context_tokens)
+
+        old_messages = messages[:-self.tail_window]
+        recent_messages = messages[-self.tail_window:]
+
+        budget_for_old = max(
+            200,
+            self.max_context_tokens
+            - estimate_messages_tokens(recent_messages)
+            - (estimate_tokens(system_prompt) + 4 if system_prompt else 0)
+            - 50,
+        )
+
+        compressed = await self._compress_messages_async(old_messages, budget_for_old)
+        result = compressed + recent_messages
+
+        final_tokens = estimate_messages_tokens(result)
+        if final_tokens > self.max_context_tokens:
+            result = self._truncate_messages(result, self.max_context_tokens)
+
+        return result
+
+    async def _compress_messages_async(
         self, messages: List[Dict[str, str]], token_budget: int
     ) -> List[Dict[str, str]]:
-        """Compress a list of messages into a single summary message."""
+        """Compress messages using LLM summarization when available."""
         if not messages:
             return []
 
-        # Build a condensed representation
+        # Try LLM summarization for 4+ messages
+        if self._llm_client and len(messages) >= 4:
+            try:
+                summary = await self._summarize_with_llm(messages, token_budget)
+                if summary:
+                    return [{"role": "system", "content": "[Conversation summary]\n" + summary}]
+            except Exception:
+                logger.debug("LLM summarization failed, falling back to truncation", exc_info=True)
+
+        # Fallback: truncated concatenation
+        return self._compress_messages_fast(messages, token_budget)
+
+    def _compress_messages(
+        self, messages: List[Dict[str, str]], token_budget: int
+    ) -> List[Dict[str, str]]:
+        """Synchronous fallback: compress a list of messages into a single summary message."""
+        return self._compress_messages_fast(messages, token_budget)
+
+    def _compress_messages_fast(
+        self, messages: List[Dict[str, str]], token_budget: int
+    ) -> List[Dict[str, str]]:
+        """Truncation-based compression (fast, no LLM call)."""
         parts = []
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if not content:
                 continue
-            # Keep first 200 chars of each message
             truncated = content[:200] + ("..." if len(content) > 200 else "")
             parts.append(f"[{role}]: {truncated}")
 
-        summary_text = "[Earlier conversation summary]\n" + "\n".join(parts)
-
-        # Truncate to budget
+        summary_text = "[Earlier conversation]\n" + "\n".join(parts)
         max_chars = int(token_budget * CHARS_PER_TOKEN)
         if len(summary_text) > max_chars:
             summary_text = summary_text[:max_chars - 20] + "...[truncated]"
 
         return [{"role": "system", "content": summary_text}]
+
+    async def _summarize_with_llm(
+        self, messages: List[Dict[str, str]], token_budget: int
+    ) -> str:
+        """Use the LLM to produce a concise summary of older messages."""
+        if not self._llm_client:
+            return ""
+
+        conversation_text = "\n".join(
+            f"[{m.get('role', '?')}]: {m.get('content', '')[:300]}"
+            for m in messages[-20:]  # last 20 messages at most
+        )
+        max_chars = int(token_budget * CHARS_PER_TOKEN)
+
+        try:
+            from app.core.config import settings
+            resp = await self._llm_client.chat.completions.create(
+                model=settings.DEEPSEEK_MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Summarize the following conversation into a concise paragraph "
+                            "(under 300 words). Preserve key facts, decisions, and action items. "
+                            "Use the same language as the conversation."
+                        ),
+                    },
+                    {"role": "user", "content": conversation_text[:4000]},
+                ],
+                temperature=0.0,
+                max_tokens=min(300, max_chars // 2),
+            )
+            return resp.choices[0].message.content or ""
+        except Exception:
+            return ""
 
     def _truncate_messages(
         self, messages: List[Dict[str, str]], token_budget: int

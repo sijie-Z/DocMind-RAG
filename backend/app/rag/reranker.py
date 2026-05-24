@@ -27,7 +27,7 @@ async def rerank(query: str, hits: List[Dict], rerank_client=None) -> List[Dict]
         if model_name == "rerank" and hasattr(settings, "RERANK_API_KEY") and settings.RERANK_API_KEY:
             import httpx
             async with httpx.AsyncClient() as client:
-                documents = [h.get("_source", {}).get("content", "")[:1000] for h in candidates]
+                documents = [h.get("_source", {}).get("chunk_text", "")[:1000] for h in candidates]
                 url = f"{settings.RERANK_API_URL.rstrip('/')}/rerank"
                 resp = await client.post(
                     url,

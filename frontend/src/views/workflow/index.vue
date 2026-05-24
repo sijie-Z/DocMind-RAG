@@ -35,10 +35,45 @@
 
       <!-- 工作流列表 -->
       <n-spin :show="loading">
-        <div v-if="filteredWorkflows.length === 0" class="py-16 text-center">
-          <n-icon size="48" class="text-gray-300 mb-4"><GitBranchOutline /></n-icon>
-          <p class="text-gray-500 mb-4">{{ searchKeyword ? '未找到匹配的工作流' : '暂无工作流' }}</p>
-          <n-button v-if="!searchKeyword" type="primary" @click="createNewWorkflow">创建第一个工作流</n-button>
+        <template #description>
+          <span>加载中...</span>
+        </template>
+
+        <!-- Skeleton loading state -->
+        <div v-if="loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div v-for="n in 6" :key="n" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <n-skeleton height="96px" class="bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800" />
+            <div class="p-4 space-y-3">
+              <n-skeleton text width="60%" />
+              <n-skeleton text :repeat="2" />
+              <div class="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-700">
+                <n-skeleton text width="40%" />
+                <n-skeleton text width="20%" />
+              </div>
+              <div class="flex gap-2">
+                <n-skeleton text width="70%" height="32px" />
+                <n-skeleton text width="30%" height="32px" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Error state -->
+        <div v-if="!loading && loadError" class="py-16 text-center">
+          <n-result status="error" title="加载失败" :description="loadErrorMsg">
+            <template #footer>
+              <n-button type="primary" @click="loadWorkflows">重试</n-button>
+            </template>
+          </n-result>
+        </div>
+
+        <!-- Empty state -->
+        <div v-else-if="!loadError && filteredWorkflows.length === 0 && !loading" class="py-16 text-center">
+          <n-empty description="暂无工作流">
+            <template #extra>
+              <n-button v-if="!searchKeyword" type="primary" @click="createNewWorkflow">创建第一个工作流</n-button>
+            </template>
+          </n-empty>
         </div>
 
         <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -56,7 +91,7 @@
                   class="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
                   :class="getNodePreviewClass(node.type)"
                 >
-                  {{ getNodeIcon(node.type) }}
+                  <n-icon size="18"><component :is="getNodeIcon(node.type)" /></n-icon>
                 </div>
                 <div v-if="item.flow_data.nodes.length > 5" class="text-gray-400 text-sm">
                   +{{ item.flow_data.nodes.length - 5 }}
@@ -122,7 +157,9 @@ import { useRouter } from 'vue-router'
 import { NIcon, NButton, NSpin, NTag, NInput, NDropdown, useDialog, useMessage } from 'naive-ui'
 import {
   AddOutline, CreateOutline, TrashOutline, GitBranchOutline, SearchOutline,
-  TimeOutline, GitNetworkOutline, CheckmarkCircleOutline, EllipsisVertical, CopyOutline, ServerOutline
+  TimeOutline, GitNetworkOutline, CheckmarkCircleOutline, EllipsisVertical, CopyOutline, ServerOutline,
+  HardwareChipOutline, ChatbubbleEllipsesOutline, VolumeHighOutline, EnterOutline, ExitOutline,
+  CompassOutline, AppsOutline
 } from '@vicons/ionicons5'
 import { getWorkflows, deleteWorkflow as deleteWorkflowApi, createWorkflow, type WorkflowConfig } from '@/api/workflow'
 import dayjs from 'dayjs'
@@ -141,6 +178,8 @@ const dialog = useDialog()
 const message = useMessage()
 
 const loading = ref(false)
+const loadError = ref(false)
+const loadErrorMsg = ref('')
 const searchKeyword = ref('')
 const workflows = ref<WorkflowItem[]>([])
 
@@ -158,8 +197,10 @@ const loadWorkflows = async () => {
   try {
     const res = await getWorkflows()
     workflows.value = res.data?.data?.items || []
+    loadError.value = false
   } catch (error) {
-    message.error('加载失败')
+    loadError.value = true
+    loadErrorMsg.value = '加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -245,13 +286,14 @@ const getActionOptions = (id: number) => [
 ]
 
 const getNodeIcon = (type: string) => {
-  const iconMap: Record<string, string> = {
-    input: '📥', output: '📤',
-    llm_openai: '🤖', llm_deepseek: '🧠', llm_qwen: '💬',
-    tool_search: '🔍', tool_tts: '🔊',
-    condition: '🔀'
+  const iconMap: Record<string, unknown> = {
+    input: EnterOutline, output: ExitOutline,
+    llm_openai: HardwareChipOutline, llm_deepseek: HardwareChipOutline, llm_qwen: ChatbubbleEllipsesOutline,
+    tool_search: SearchOutline, tool_tts: VolumeHighOutline,
+    condition: GitBranchOutline, router: CompassOutline,
+    memory: ServerOutline
   }
-  return iconMap[type] || '📦'
+  return iconMap[type] || AppsOutline
 }
 
 const getNodePreviewClass = (type: string) => {

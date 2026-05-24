@@ -137,7 +137,7 @@ class RAGEvaluator:
 
         try:
             response = await self.client.chat.completions.create(
-                model=self.model or "deepseek-chat",
+                model=self.model or "deepseek-v4-flash",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
                 max_tokens=200,

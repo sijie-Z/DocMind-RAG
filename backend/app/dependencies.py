@@ -87,3 +87,20 @@ def get_rag_pipeline() -> RAGPipeline:
         embedding_client=_build_embedding_client(),
         rerank_client=_build_rerank_client(),
     )
+
+
+async def wire_memory_embedding_provider() -> None:
+    """Wire the RAG pipeline's embedding provider into the agent memory system.
+
+    Called at startup so that semantic memory search works.
+    """
+    try:
+        pipeline = get_rag_pipeline()
+        # Import here to avoid circular import at module level
+        from app.services.memory_service import memory_systems
+        for agent_id, ms in memory_systems.items():
+            if ms._embedding_provider is None:
+                ms.set_embedding_provider(pipeline.get_embedding)
+        logger.info("Memory embedding provider wired")
+    except Exception as e:
+        logger.warning(f"Failed to wire memory embedding provider: {e}")

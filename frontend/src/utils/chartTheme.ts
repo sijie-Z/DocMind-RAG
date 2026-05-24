@@ -1,18 +1,18 @@
 import * as echarts from 'echarts'
 
 export const CHART_COLORS = {
-  primary: '#6366f1',
+  primary: '#64748b',
   secondary: '#10b981',
   warning: '#f59e0b',
   danger: '#ef4444',
   info: '#3b82f6',
-  purple: '#a855f7',
+  sky: '#0ea5e9',
   cyan: '#06b6d4',
   pink: '#ec4899',
 }
 
 export const CHART_THEME = {
-  color: [CHART_COLORS.primary, CHART_COLORS.secondary, CHART_COLORS.purple, CHART_COLORS.cyan, CHART_COLORS.warning],
+  color: [CHART_COLORS.primary, CHART_COLORS.secondary, CHART_COLORS.sky, CHART_COLORS.cyan, CHART_COLORS.warning],
   backgroundColor: 'transparent',
   textStyle: {
     color: '#6b7280',
@@ -114,7 +114,7 @@ export const CHART_THEME = {
 }
 
 export const DARK_CHART_THEME = {
-  color: [CHART_COLORS.primary, CHART_COLORS.secondary, CHART_COLORS.purple, CHART_COLORS.cyan, CHART_COLORS.warning],
+  color: [CHART_COLORS.primary, CHART_COLORS.secondary, CHART_COLORS.sky, CHART_COLORS.cyan, CHART_COLORS.warning],
   backgroundColor: 'transparent',
   textStyle: {
     color: '#9ca3af',

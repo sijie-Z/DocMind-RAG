@@ -5,6 +5,7 @@ import { setToken, setRefreshToken, removeToken, getToken } from '@/utils/auth'
 import type { UserInfo, LoginForm, RegisterForm } from '@/types/user'
 import type { AxiosError } from 'axios'
 import { useAppStore } from './app'
+import { getUserSettings, updateUserSettings, type UserSettings } from '@/api/user'
 
 function _extractErrorMessage(error: unknown, fallback: string): string {
   const axiosErr = error as AxiosError<{ message?: string; detail?: string }>
@@ -18,41 +19,41 @@ function _extractErrorMessage(error: unknown, fallback: string): string {
 
 export const useUserStore = defineStore('user', () => {
   // 状态
-  const userInfo = ref<UserInfo | null>(null)
+  const userInfo = ref<UserInfo | null>(() => {
+    try {
+      const raw = localStorage.getItem('user_info')
+      return raw ? JSON.parse(raw) : null
+    } catch { return null }
+  })
   const token = ref<string>(getToken() || '')
   const currentOrganizationId = ref<number | null>(null)
 
-  // 初始化：尝试从 localStorage 恢复用户信息
-  const initUserInfo = () => {
-    try {
-      const stored = localStorage.getItem('user_info')
-      if (stored) {
-        userInfo.value = JSON.parse(stored)
-        currentOrganizationId.value = userInfo.value?.organization_id || null
-        
-        // 恢复主题设置
-        if (userInfo.value?.preferences) {
-          try {
-            const prefs = typeof userInfo.value.preferences === 'string' 
-              ? JSON.parse(userInfo.value.preferences) 
-              : userInfo.value.preferences
-            
-            if (prefs.theme) {
-              const appStore = useAppStore()
-              appStore.setTheme(prefs.theme)
-            }
-          } catch {
-            // Failed to parse preferences during init
+  // User settings state
+  const settings = ref<UserSettings>({
+    language: localStorage.getItem('language') || 'zh',
+    theme: localStorage.getItem('theme') || 'light',
+  })
+
+  // 仅在 getUserInfo 验证成功后由 _applyValidatedAuth 统一设置
+  const _applyValidatedAuth = (accessToken: string | undefined, info: UserInfo | undefined) => {
+    if (accessToken) {
+      token.value = accessToken
+    }
+    if (info) {
+      userInfo.value = info
+      currentOrganizationId.value = info.organization_id || null
+      if (info.preferences) {
+        try {
+          const prefs = typeof info.preferences === 'string'
+            ? JSON.parse(info.preferences)
+            : info.preferences
+          if (prefs?.theme) {
+            useAppStore().setTheme(prefs.theme)
           }
-        }
+        } catch { /* non-critical */ }
       }
-    } catch {
-      // Failed to restore user info
-      localStorage.removeItem('user_info')
     }
   }
-  // 立即执行初始化
-  initUserInfo()
   
   // 监听 userInfo 变化并持久化
   watch(userInfo, (newVal) => {
@@ -76,7 +77,6 @@ export const useUserStore = defineStore('user', () => {
   const login = async (form: LoginForm) => {
     try {
       const response = await loginWithJson(form)
-      // 兼容 { data: { access_token, user_info, ... } } 与 直接 { access_token, ... }
       const raw = response.data as unknown as Record<string, unknown>
       const payload = (raw?.data as Record<string, unknown>) ?? raw
       if (!payload || !payload.access_token) {
@@ -87,26 +87,19 @@ export const useUserStore = defineStore('user', () => {
       const refresh_token = payload.refresh_token as string | undefined
       const expires_in = payload.expires_in as number | undefined
       const loginUserInfo = payload.user_info as UserInfo | undefined
-      token.value = access_token
+
       setToken(access_token, expires_in ?? 86400)
       if (refresh_token) setRefreshToken(refresh_token)
 
       if (loginUserInfo) {
-        userInfo.value = loginUserInfo
-        currentOrganizationId.value = loginUserInfo.organization_id || null
-        if (loginUserInfo.preferences) {
-          try {
-            const prefs = typeof loginUserInfo.preferences === 'string'
-              ? JSON.parse(loginUserInfo.preferences)
-              : loginUserInfo.preferences
-            if (prefs?.theme) {
-              useAppStore().setTheme(prefs.theme)
-            }
-          } catch { /* preference parse failure is non-critical */ }
-        }
+        _applyValidatedAuth(access_token, loginUserInfo)
       } else {
+        token.value = access_token
         await getUserInfo()
       }
+
+      // Auto-fetch user settings after login
+      fetchSettings()
 
       return { success: true }
     } catch (error: unknown) {
@@ -123,10 +116,9 @@ export const useUserStore = defineStore('user', () => {
       const raw = response.data as unknown as Record<string, unknown>
       const payload = (raw?.data as Record<string, unknown>) ?? raw
       if (payload?.access_token) {
-        token.value = payload.access_token as string
         setToken(payload.access_token as string, (payload.expires_in as number) ?? 86400)
         if (payload.refresh_token) setRefreshToken(payload.refresh_token as string)
-        if (payload.user_info) userInfo.value = payload.user_info as UserInfo
+        _applyValidatedAuth(payload.access_token as string, payload.user_info as UserInfo | undefined)
       }
       return { success: true }
     } catch (error: unknown) {
@@ -136,49 +128,28 @@ export const useUserStore = defineStore('user', () => {
       }
     }
   }
-  
+
   const getUserInfo = async () => {
-    // 如果没有 Token，直接抛出错误或返回，避免无效请求导致 401
-    if (!token.value) {
-        return Promise.reject(new Error('No token found'))
+    // 从 localStorage 直接读 token，不依赖 token.value（避免初始化时为空导致死锁）
+    const storedToken = getToken()
+    if (!storedToken) {
+      return Promise.reject(new Error('No token found'))
     }
 
     try {
       const response = await getUserProfile()
-      // 兼容两种格式：
-      // 1. 标准响应格式 { code: 200, data: { ... }, message: "..." }
-      // 2. 直接返回对象 { id: ..., username: ... }
       const resData = response.data as unknown as Record<string, unknown>
-      if (resData.data && typeof resData.data === 'object' && !resData.username) {
-          userInfo.value = resData.data as UserInfo
-      } else {
-          userInfo.value = resData as unknown as UserInfo
-      }
-      currentOrganizationId.value = userInfo.value?.organization_id || null
-      
-      // 同步用户偏好设置 (主题)
-      if (userInfo.value?.preferences) {
-        try {
-          const prefs = typeof userInfo.value.preferences === 'string' 
-            ? JSON.parse(userInfo.value.preferences) 
-            : userInfo.value.preferences
-            
-          if (prefs.theme) {
-            const appStore = useAppStore()
-            appStore.setTheme(prefs.theme)
-          }
-        } catch {
-          // Failed to parse user preferences
-        }
-      }
-
+      const info = (resData.data && typeof resData.data === 'object' && !resData.username)
+        ? resData.data as UserInfo
+        : resData as unknown as UserInfo
+      _applyValidatedAuth(storedToken, info)
       return response.data
     } catch (error) {
       logout()
       throw error
     }
   }
-  
+
   const logout = () => {
     userInfo.value = null
     token.value = ''
@@ -192,12 +163,59 @@ export const useUserStore = defineStore('user', () => {
       userInfo.value = { ...userInfo.value, ...info }
     }
   }
+
+  // --- User Settings Actions ---
+
+  const fetchSettings = async () => {
+    try {
+      const response = await getUserSettings()
+      const resData = response.data as unknown as Record<string, unknown>
+      const data = (resData.data && typeof resData.data === 'object')
+        ? resData.data as UserSettings
+        : resData as unknown as UserSettings
+      if (data.language) {
+        settings.value.language = data.language
+        localStorage.setItem('language', data.language)
+      }
+      if (data.theme) {
+        settings.value.theme = data.theme
+        localStorage.setItem('theme', data.theme)
+      }
+      if (data.preferences) {
+        settings.value.preferences = data.preferences
+      }
+    } catch {
+      // Non-critical — use local settings
+    }
+  }
+
+  const updateSettings = async (data: { language?: string; theme?: string }) => {
+    try {
+      const response = await updateUserSettings(data)
+      const resData = response.data as unknown as Record<string, unknown>
+      const result = (resData.data && typeof resData.data === 'object')
+        ? resData.data as UserSettings
+        : resData as unknown as UserSettings
+      if (result.language) {
+        settings.value.language = result.language
+        localStorage.setItem('language', result.language)
+      }
+      if (result.theme) {
+        settings.value.theme = result.theme
+        localStorage.setItem('theme', result.theme)
+      }
+      return { success: true as const }
+    } catch {
+      return { success: false as const }
+    }
+  }
   
   return {
     // 状态
     userInfo,
     token,
     currentOrganizationId,
+    settings,
 
     // 计算属性
     isLoggedIn,
@@ -210,6 +228,8 @@ export const useUserStore = defineStore('user', () => {
     getUserInfo,
     logout,
     updateUserInfo,
-    setCurrentOrganization
+    setCurrentOrganization,
+    fetchSettings,
+    updateSettings,
   }
 })

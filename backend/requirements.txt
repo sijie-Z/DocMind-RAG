@@ -1,34 +1,23 @@
-# --- Web 框架核心 ---
 fastapi>=0.104.1
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
-
-# --- 数据库与缓存 ---
 sqlalchemy>=2.0.23
 aiomysql>=0.2.0
 alembic>=1.13.1
 redis>=5.0.1
-
-# --- 搜索引擎与存储 ---
 elasticsearch==8.11.0
 minio>=7.2.0
-
-# --- 消息队列与异步 ---
 aiokafka>=0.10.0
-kafka-python>=2.0.2  # 用户明确要求
+kafka-python>=2.0.2  #
 httpx>=0.25.2
 aiofiles>=23.2.1
-
-# --- AI 与 RAG ---
 openai>=1.10.0
 langchain>=0.1.0
 langchain-community>=0.0.10
 langchain-openai>=0.0.5
 tiktoken>=0.5.2
-
-# --- 文档解析 ---
 pypdf>=3.17.0
 pdfplumber>=0.10.3
 docx2txt>=0.8
@@ -36,35 +25,25 @@ openpyxl>=3.1.2
 unstructured>=0.11.0
 python-magic>=0.4.27; sys_platform != 'win32'
 python-magic-bin>=0.4.14; sys_platform == 'win32'
-
-# --- 安全与工具 ---
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 python-dotenv>=1.0.0
-
-# --- 测试 ---
 pytest>=7.4.3
 pytest-asyncio>=0.21.1
-
-# --- 数据处理 ---
+pytest-cov>=4.1.0
+pytest-html>=4.1.0
 pandas>=2.0.0
 numpy>=1.24.0
 Pillow>=10.0.0
 python-docx>=0.8.11
-
-# --- 工具 ---
 requests>=2.31.0
 tenacity>=8.2.0
 bcrypt>=4.0.1
 PyJWT>=2.8.0
 email-validator>=2.1.0
 psutil>=5.9.0
-
-# --- 可观测性 ---
 prometheus-client>=0.19.0
 filetype>=1.2.0
-
-# --- OpenTelemetry（可选，通过 ENABLE_TRACING 启用）---
 opentelemetry-api>=1.22.0
 opentelemetry-sdk>=1.22.0
 opentelemetry-exporter-otlp-proto-grpc>=1.22.0

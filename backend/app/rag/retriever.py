@@ -68,7 +68,7 @@ class HybridRetriever:
         async def _es_search(q_text: str):
             es_query = {
                 "size": candidate_size,
-                "min_score": 3.0,
+                "min_score": 0.5,
                 "query": {
                     "bool": {
                         "must": [{"multi_match": {
@@ -79,8 +79,8 @@ class HybridRetriever:
                         "filter": filters,
                     }
                 },
-                "highlight": {"fields": {"content": {"fragment_size": 120, "number_of_fragments": 2}}},
-                "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
+                "highlight": {"fields": {"chunk_text": {"fragment_size": 120, "number_of_fragments": 2}}},
+                "_source": ["chunk_text", "filename", "organization_id", "document_id", "embedding", "upload_time", "section_title"],
             }
             res = await ElasticsearchTools.search_documents(es_query)
             return res.get("hits", {}).get("hits", [])
@@ -148,7 +148,7 @@ class HybridRetriever:
                     },
                 }
             },
-            "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
+            "_source": ["chunk_text", "filename", "organization_id", "document_id", "embedding", "upload_time", "section_title"],
         }
         res = await ElasticsearchTools.search_documents(es_query)
         return res.get("hits", {}).get("hits", []), query_vector
@@ -290,7 +290,7 @@ class HybridRetriever:
 
         for hit in fused_hits:
             source = hit.get("_source", {})
-            text = (source.get("content", "") or "").strip()
+            text = (source.get("chunk_text") or source.get("content", "") or "").strip()
             if not text:
                 continue
 
@@ -306,12 +306,12 @@ class HybridRetriever:
             rewrite_hits = max(1, int(hit.get("rewrite_hits", 1)))
             kw_match = sum(1 for t in query_terms if t in (text[:1600]).lower())
 
-            # Filter irrelevant results
-            if not has_kw and not has_vec and overlap < 0.01:
+            # Filter irrelevant results - relaxed when no vector search is available
+            if not has_kw and not has_vec and overlap < 0.005:
                 continue
-            if not has_kw and has_vec and overlap < 0.1 and kw_match < 2:
+            if not has_kw and has_vec and overlap < 0.1 and kw_match < 1:
                 continue
-            if has_kw and overlap < 0.03:
+            if has_kw and overlap < 0.02:
                 continue
 
             score_range = max(1e-9, score_max - score_min)
@@ -366,9 +366,9 @@ class HybridRetriever:
     async def _fallback(self, query: str, filters: List[Dict], top_k: int) -> List[Dict]:
         try:
             broad = {
-                "size": top_k * 2, "min_score": 2.5,
-                "query": {"bool": {"must": [{"match": {"content": {"query": query, "operator": "or", "minimum_should_match": "30%"}}}], "filter": filters}},
-                "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
+                "size": top_k * 2, "min_score": 0.5,
+                "query": {"bool": {"must": [{"match": {"chunk_text": {"query": query, "operator": "or", "minimum_should_match": "30%"}}}], "filter": filters}},
+                "_source": ["chunk_text", "filename", "organization_id", "document_id", "embedding", "upload_time", "section_title"],
             }
             res = await ElasticsearchTools.search_documents(broad)
             hits = res.get("hits", {}).get("hits", [])
@@ -381,7 +381,7 @@ class HybridRetriever:
             vec_q = {
                 "size": top_k, "min_score": 1.15,
                 "query": {"script_score": {"query": {"bool": {"filter": filters}}, "script": {"source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0", "params": {"query_vector": qv}}}},
-                "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
+                "_source": ["chunk_text", "filename", "organization_id", "document_id", "embedding", "upload_time", "section_title"],
             }
             res = await ElasticsearchTools.search_documents(vec_q)
             return res.get("hits", {}).get("hits", [])

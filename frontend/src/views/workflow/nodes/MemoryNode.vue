@@ -1,11 +1,11 @@
 <template>
   <div
-    class="vue-flow__node-memory bg-white dark:bg-gray-800 rounded-lg border-2 border-violet-400 dark:border-violet-500 p-3 min-w-[150px] transition-all"
-    :class="{ 'ring-2 ring-violet-400 ring-opacity-50 animate-pulse': executing, 'ring-2 ring-violet-300': selected }"
+    class="vue-flow__node-memory bg-white dark:bg-gray-800 rounded-lg border-2 border-blue-400 dark:border-blue-500 p-3 min-w-[150px] transition-all"
+    :class="{ 'ring-2 ring-blue-400 ring-opacity-50 animate-pulse': executing, 'ring-2 ring-blue-300': selected }"
   >
     <div class="flex items-center gap-2 mb-2">
-      <div class="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-        <n-icon size="16" class="text-violet-500"><BookOutline /></n-icon>
+      <div class="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+        <n-icon size="16" class="text-blue-500"><BookOutline /></n-icon>
       </div>
       <span class="font-medium text-gray-800 dark:text-gray-100">记忆节点</span>
       <n-spin v-if="executing" size="small" class="ml-auto" />

@@ -3,12 +3,12 @@
     <!-- Header -->
     <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
       <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-xl bg-purple-500/10 flex items-center justify-center">
-          <n-icon size="20" class="text-purple-500"><GitNetworkOutline /></n-icon>
+        <div class="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center">
+          <n-icon size="20" class="text-blue-500"><GitNetworkOutline /></n-icon>
         </div>
         <div>
           <h1 class="text-base font-semibold text-gray-900 dark:text-white">知识图谱</h1>
-          <p class="text-xs text-gray-500 dark:text-gray-400">Knowledge Graph Visualization</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">知识图谱可视化</p>
         </div>
       </div>
       <div class="flex items-center gap-3">
@@ -55,7 +55,7 @@
         <!-- Stats -->
         <div class="absolute top-4 right-4 bg-white/90 dark:bg-gray-800/90 backdrop-blur rounded-xl border border-gray-200 dark:border-gray-700 p-3 text-xs">
           <div class="flex gap-4">
-            <div><span class="text-gray-500">节点:</span> <span class="font-bold text-purple-600">{{ graphNodes.length }}</span></div>
+            <div><span class="text-gray-500">节点:</span> <span class="font-bold text-blue-600">{{ graphNodes.length }}</span></div>
             <div><span class="text-gray-500">关系:</span> <span class="font-bold text-blue-600">{{ graphEdges.length }}</span></div>
           </div>
         </div>

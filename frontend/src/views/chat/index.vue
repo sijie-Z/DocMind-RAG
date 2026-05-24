@@ -8,6 +8,13 @@
   />
 
   <div class="flex h-full w-full bg-gray-50 dark:bg-gray-950 overflow-hidden transition-colors duration-300">
+    <!-- Mobile overlay for sidebar -->
+    <div
+      v-if="sidebarOpen && windowWidth < 768"
+      class="fixed inset-0 z-10 bg-black/40 md:hidden"
+      @click="toggleSidebar"
+    />
+
     <input
       type="file"
       id="global-chat-file-input"
@@ -20,6 +27,7 @@
       :sidebarOpen="sidebarOpen"
       :conversations="conversations"
       :isListLoading="isListLoading"
+      :convLoadError="convLoadError"
       :currentConversationId="currentConversationId"
       @newConversation="newConversation"
       @refresh="fetchConversations"
@@ -45,6 +53,17 @@
         @exportChat="handleExportChat"
       />
 
+      <!-- Mobile back-to-conversations button -->
+      <div
+        v-if="sidebarOpen && windowWidth < 768"
+        class="fixed left-72 top-20 z-20 md:hidden"
+      >
+        <n-button size="tiny" quaternary @click="toggleSidebar" class="bg-white/90 dark:bg-gray-800/90 shadow-sm rounded-lg">
+          <template #icon><n-icon><ArrowBackOutline /></n-icon></template>
+          {{ t('chat.backToConversations') || '返回对话列表' }}
+        </n-button>
+      </div>
+
       <ChatMessages
         ref="chatMessagesRef"
         :messages="messages"
@@ -60,6 +79,13 @@
         @regenerate="handleRegenerate"
       />
 
+      <!-- Error recovery banner for message loading -->
+      <div v-if="msgLoadError" class="flex items-center justify-center gap-3 py-3 px-4 mx-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg">
+        <n-icon size="18" class="text-red-500"><AlertCircleOutline /></n-icon>
+        <span class="text-sm text-red-600 dark:text-red-400">{{ t('chat.msgLoadFailed') }}</span>
+        <n-button size="tiny" type="error" ghost @click="msgLoadError = false; loadConversation(currentConversationId!)">{{ t('chat.retry') }}</n-button>
+      </div>
+
       <!-- Drag-and-drop overlay -->
       <transition name="fade">
         <div
@@ -70,7 +96,7 @@
             <n-icon size="48" class="text-blue-500 dark:text-blue-400">
               <CloudUploadOutline />
             </n-icon>
-            <span class="text-lg font-semibold text-blue-600 dark:text-blue-400">{{ t('chat.dropFiles') || '拖拽文件到此处上传' }}</span>
+            <span class="text-lg font-semibold text-blue-600 dark:text-blue-400">{{ t('chat.dropFiles') }}</span>
           </div>
         </div>
       </transition>
@@ -81,6 +107,7 @@
         v-model:privacyMode="privacyMode"
         v-model:useSSE="useSSE"
         v-model:useStream="useStream"
+        v-model:useAgent="useAgent"
         :isLoading="isLoading"
         :attachedFiles="attachedFiles"
         :attachedFileIds="attachedFileIds"
@@ -103,7 +130,7 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 import { useDedupedMessage } from '@/utils/message'
-import { CloudUploadOutline } from '@vicons/ionicons5'
+import { CloudUploadOutline, AlertCircleOutline, ArrowBackOutline } from '@vicons/ionicons5'
 import { getConversationMessages, clearConversationMessages } from '@/api/chat'
 import type { Conversation } from '@/api/conversation'
 import type { ChatMessage } from '@/types/chat'
@@ -121,6 +148,8 @@ const userStore = useUserStore()
 const appStore = useAppStore()
 
 const chatMessagesRef = ref()
+const msgLoadError = ref(false)
+const windowWidth = ref(window.innerWidth)
 
 const {
   messages, showBackToBottom,
@@ -135,20 +164,22 @@ const {
 
 const {
   conversations, isListLoading, sidebarOpen, currentConversationId,
-  fetchConversations, handleDeleteConversation
+  fetchConversations, handleDeleteConversation, convLoadError
 } = useChatSessions()
 
 const {
   sseStatus, useSSE, useStream, isLoading, isRetrieving,
-  effectiveConnectionStatus, connectWebSocket, startStatusPolling, stopGeneration
+  effectiveConnectionStatus, connectWebSocket, stopGeneration
 } = useChatConnection(messages, baseScrollToBottom, fetchConversations)
+
+const useAgent = ref(false)
 
 const {
   inputMessage, strictMode, privacyMode, handleSend: baseHandleSend, regenerateMessage
 } = useChatSend(
   messages, attachedFiles, attachedFileIds,
   baseScrollToBottom, fetchConversations,
-  isLoading, isRetrieving, sseStatus, useSSE
+  isLoading, isRetrieving, sseStatus, useSSE, useAgent
 )
 
 const handleScroll = baseHandleScroll
@@ -228,15 +259,15 @@ const onDrop = async (e: DragEvent) => {
 // Feature 4: Export chat as markdown
 const handleExportChat = () => {
   if (messages.value.length === 0) return
-  let md = `# ${chatStore.currentConversation?.title || 'Chat Export'}\n\n`
-  md += `> Exported on ${new Date().toLocaleString()}\n\n---\n\n`
+  let md = `# ${chatStore.currentConversation?.title || t('chat.exportTitle')}\n\n`
+  md += `> ${t('chat.exportTitle')} ${new Date().toLocaleString()}\n\n---\n\n`
   for (const msg of messages.value) {
-    const role = msg.messageType === 'user' ? 'User' : 'Assistant'
+    const role = msg.messageType === 'user' ? t('chat.roleUser') : t('chat.roleAssistant')
     md += `### ${role}\n\n${msg.content}\n\n`
     if (msg.sources && msg.sources.length > 0) {
-      md += '**Sources:**\n\n'
+      md += '**来源：**\n\n'
       msg.sources.forEach((s, i) => {
-        md += `- [${i + 1}] ${s.filename || 'Document'}${s.relevanceScore ? ` (score: ${(s.relevanceScore * 100).toFixed(0)}%)` : ''}\n`
+        md += `- [${i + 1}] ${s.filename || t('chat.sourceDoc')}${s.relevanceScore ? ` (${t('chat.relevanceMatch', { score: (s.relevanceScore * 100).toFixed(0) })})` : ''}\n`
       })
       md += '\n'
     }
@@ -246,7 +277,7 @@ const handleExportChat = () => {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `${chatStore.currentConversation?.title || 'chat-export'}-${Date.now()}.md`
+  a.download = `${chatStore.currentConversation?.title || t('chat.exportTitle')}-${Date.now()}.md`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
@@ -317,6 +348,7 @@ const loadConversation = async (id: string) => {
     }
   } catch {
     message.error(t('chat.historyFailed'))
+    msgLoadError.value = true
   } finally {
     isLoading.value = false
     scrollToBottom('auto', true)
@@ -375,6 +407,8 @@ onMounted(async () => {
   if (!token) { router.push({ name: 'Login' }); return }
   checkScreenSize()
   window.addEventListener('resize', checkScreenSize)
+  const handleResize = () => { windowWidth.value = window.innerWidth }
+  window.addEventListener('resize', handleResize)
   await fetchConversations()
   const conversationId = route.query.conversation_id as string
   if (conversationId) await loadConversation(conversationId)
@@ -384,13 +418,18 @@ onMounted(async () => {
   if (promptContent) {
     router.replace({ query: { ...route.query, prompt: undefined, promptName: undefined } })
     inputMessage.value = ''
-    message.info(`已应用提示词模板"${promptName || '未命名'}"，请开始对话`)
+    message.info(t('chat.promptApplied', { name: promptName || t('chat.promptDefaultName') }))
     localStorage.setItem('activeSystemPrompt', promptContent)
     localStorage.setItem('activeSystemPromptName', promptName || '')
   }
 
-  startStatusPolling()
-  watch(() => userStore.userInfo?.id, () => { connectWebSocket() }, { immediate: true })
+  // 确保连接 WebSocket（不依赖 watcher 的时序问题）
+  if (!userStore.userInfo?.id) {
+    try { await userStore.getUserInfo() } catch { /* 已登录但获取失败，仍尝试连接 */ }
+  }
+  if (userStore.token || getToken()) {
+    connectWebSocket()
+  }
 })
 </script>
 
@@ -400,6 +439,31 @@ onMounted(async () => {
 .scrollbar-thin::-webkit-scrollbar-thumb { background-color: rgba(156, 163, 175, 0.3); border-radius: 20px; }
 .dark .scrollbar-thin::-webkit-scrollbar-thumb { background-color: rgba(156, 163, 175, 0.1); }
 .scrollbar-thin:hover::-webkit-scrollbar-thumb { background-color: rgba(156, 163, 175, 0.5); }
+
+/* Mobile: sidebar as fixed overlay */
+@media (max-width: 767px) {
+  aside[class*="flex-shrink-0"] {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 50 !important;
+    height: 100vh !important;
+    width: 100vw !important;
+    max-width: 320px !important;
+    border-radius: 0 16px 16px 0;
+  }
+  main {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  /* Chat input footer: fixed at bottom on mobile */
+  footer[class*="absolute bottom-0"] {
+    position: fixed !important;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
+  }
+  /* Messages area: adjust bottom padding for fixed input */
+  div[class*="pt-20 pb-40"] {
+    padding-bottom: 160px !important;
+  }
+}
 </style>
 
 <style>

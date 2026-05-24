@@ -16,6 +16,13 @@ from app.core.prometheus import (
     LLM_LATENCY,
     RAG_PIPELINE_IN_FLIGHT,
     RAG_QUERY_INTENT,
+    AGENT_PLANNING_TOTAL,
+    AGENT_PLANNING_LATENCY,
+    AGENT_EXECUTION_STEPS,
+    AGENT_TOOL_CALLS,
+    AGENT_TOOL_LATENCY,
+    AGENT_REFLECTION_DECISIONS,
+    AGENT_MEMORY_RECALLS,
     get_prometheus_metrics,
     get_content_type,
 )
@@ -91,3 +98,48 @@ class TestPrometheusMetrics:
         ct = get_content_type()
         assert "text/plain" in ct
         assert "charset=utf-8" in ct
+
+
+class TestAgentPrometheusMetrics:
+    """Agent-specific Prometheus metrics tests."""
+
+    def test_planning_total_inc(self):
+        before = AGENT_PLANNING_TOTAL._value.get()
+        AGENT_PLANNING_TOTAL.inc()
+        assert AGENT_PLANNING_TOTAL._value.get() == before + 1
+
+    def test_planning_latency_observe(self):
+        AGENT_PLANNING_LATENCY.observe(0.5)
+        assert AGENT_PLANNING_LATENCY._sum.get() > 0
+
+    def test_execution_steps_inc(self):
+        AGENT_EXECUTION_STEPS.inc(3)
+        assert AGENT_EXECUTION_STEPS._value.get() >= 3
+
+    def test_tool_calls_labels(self):
+        AGENT_TOOL_CALLS.labels(tool="search_knowledge_base", result="success").inc()
+        AGENT_TOOL_CALLS.labels(tool="search_knowledge_base", result="error").inc()
+        assert AGENT_TOOL_CALLS.labels(tool="search_knowledge_base", result="success")._value.get() >= 1
+        assert AGENT_TOOL_CALLS.labels(tool="search_knowledge_base", result="error")._value.get() >= 1
+
+    def test_tool_latency_observe(self):
+        AGENT_TOOL_LATENCY.observe(0.1)
+        assert AGENT_TOOL_LATENCY._sum.get() > 0
+
+    def test_reflection_decisions_labels(self):
+        AGENT_REFLECTION_DECISIONS.labels(decision="pass").inc()
+        AGENT_REFLECTION_DECISIONS.labels(decision="retry").inc()
+        assert AGENT_REFLECTION_DECISIONS.labels(decision="pass")._value.get() >= 1
+
+    def test_memory_recalls_labels(self):
+        AGENT_MEMORY_RECALLS.labels(result="hit").inc()
+        AGENT_MEMORY_RECALLS.labels(result="miss").inc()
+        assert AGENT_MEMORY_RECALLS.labels(result="hit")._value.get() >= 1
+
+    def test_agent_metrics_in_export(self):
+        """Agent metrics should appear in the exported Prometheus output."""
+        AGENT_PLANNING_TOTAL.inc()
+        data = get_prometheus_metrics().decode("utf-8")
+        assert "agent_planning_total" in data
+        assert "agent_execution_steps_total" in data
+        assert "agent_tool_calls_total" in data

@@ -2,7 +2,7 @@
   <n-modal
     v-model:show="show"
     preset="card"
-    :title="doc?.filename || '文档预览'"
+    :title="doc?.filename || t('chat.documentPreview')"
     class="max-w-4xl w-[90vw]"
     style="height: 80vh"
     :segmented="{ content: true, footer: true }"
@@ -12,22 +12,22 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <n-tag size="small" :type="doc?.source === '聊天上传' ? 'info' : 'success'" round>
-              {{ doc?.source || '知识库上传' }}
+              {{ doc?.source || t('chat.knowledgeUpload') }}
             </n-tag>
             <n-tag v-if="doc?.file_size" size="small" quaternary round>
               {{ ((doc.file_size as number) / 1024).toFixed(2) }} KB
             </n-tag>
           </div>
-          <div class="text-xs text-gray-400">上传于: {{ doc?.created_at ? new Date(doc.created_at).toLocaleString() : '-' }}</div>
+          <div class="text-xs text-gray-400">{{ t('chat.uploadedAt') }}: {{ doc?.created_at ? new Date(doc.created_at).toLocaleString() : '-' }}</div>
         </div>
 
         <div v-if="doc?.description" class="text-xs text-gray-600 dark:text-gray-400 italic">
-          <span class="font-bold not-italic text-gray-800 dark:text-gray-200">简介：</span>
+          <span class="font-bold not-italic text-gray-800 dark:text-gray-200">{{ t('chat.description') }}：</span>
           {{ doc.description }}
         </div>
 
         <div v-if="doc?.summary" class="text-xs text-gray-600 dark:text-gray-400">
-          <span class="font-bold text-gray-800 dark:text-gray-200">内容摘要：</span>
+          <span class="font-bold text-gray-800 dark:text-gray-200">{{ t('chat.contentSummary') }}：</span>
           {{ doc.summary }}
         </div>
 
@@ -44,14 +44,14 @@
         <div v-else-if="content" class="markdown-body text-sm leading-relaxed p-2 whitespace-pre-wrap">
           {{ content }}
         </div>
-        <n-empty v-else description="暂无内容" />
+        <n-empty v-else :description="t('chat.noContent')" />
       </div>
     </div>
 
     <template #footer>
       <div class="flex justify-end gap-3">
-        <n-button @click="show = false">关闭</n-button>
-        <n-button type="primary" secondary @click="$emit('download', doc?.id as string)">下载文档</n-button>
+        <n-button @click="show = false">{{ t('common.close') }}</n-button>
+        <n-button type="primary" secondary @click="$emit('download', doc?.id as string)">{{ t('chat.downloadDocument') }}</n-button>
       </div>
     </template>
   </n-modal>
@@ -59,6 +59,9 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   show: boolean

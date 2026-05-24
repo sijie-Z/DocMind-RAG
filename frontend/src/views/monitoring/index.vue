@@ -26,6 +26,17 @@
       </div>
     </div>
 
+    <!-- Error state -->
+    <div v-if="loadError" class="py-16">
+      <n-result status="error" title="加载失败" :description="loadErrorMsg">
+        <template #footer>
+          <n-button type="primary" round @click="refreshData">重试</n-button>
+        </template>
+      </n-result>
+    </div>
+
+    <!-- Content (only show when no error) -->
+    <template v-if="!loadError">
     <!-- 统计卡片 -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
       <!-- 系统状态 -->
@@ -176,6 +187,7 @@
         size="small"
       />
     </div>
+    </template> <!-- end !loadError -->
   </div>
 </template>
 
@@ -232,6 +244,8 @@ interface Alert {
 const message = useDedupedMessage()
 const { t } = useI18n()
 const loading = ref(false)
+const loadError = ref(false)
+const loadErrorMsg = ref('')
 const timeRange = ref('1h')
 const refreshInterval = ref<NodeJS.Timeout | null>(null)
 
@@ -596,12 +610,15 @@ const loadData = async () => {
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error)
     message.error('加载监控数据失败：' + msg)
+    loadError.value = true
+    loadErrorMsg.value = '加载监控数据失败：' + msg
   } finally {
     loading.value = false
   }
 }
 
 const refreshData = () => {
+  loadError.value = false
   loadData()
   fetchAuditLogs()
 }

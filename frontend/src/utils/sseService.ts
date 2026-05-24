@@ -14,7 +14,7 @@ interface SSESource {
 }
 
 interface SSEMessage {
-  type: 'chunk' | 'message' | 'error' | 'retry'
+  type: string
   content?: string
   conversationId?: number | string
   messageId?: string
@@ -24,7 +24,20 @@ interface SSEMessage {
   maxRetries?: number
   waitTime?: number
   rateLimit?: { limit?: number; remaining?: number; reset?: number }
+  toolName?: string
+  toolArgs?: Record<string, unknown>
+  toolCallId?: string
+  toolDurationMs?: number
+  planId?: string
+  planStepId?: string
+  planProgress?: number
+  toolHint?: string
+  dependencies?: string[]
+  thinkingType?: string
+  result?: string
 }
+
+type SSEEventType = 'chunk' | 'message' | 'error' | 'retry' | 'thinking' | 'tool_call' | 'tool_result' | 'tool_error' | 'plan_start' | 'plan_step' | 'plan_complete' | 'reflection' | 'done'
 
 type SSEEventHandler = (_data: SSEMessage) => void
 type SSEStatusHandler = (_status: 'connecting' | 'connected' | 'disconnected' | 'error') => void
@@ -54,7 +67,7 @@ class SSEService {
     return this.connectionStatus
   }
 
-  on(event: 'chunk' | 'message' | 'error' | 'connect' | 'disconnect' | 'retry', handler: SSEEventHandler | SSEStatusHandler) {
+  on(event: SSEEventType | 'connect' | 'disconnect', handler: SSEEventHandler | SSEStatusHandler) {
     if (event === 'connect' || event === 'disconnect') {
       this.statusHandlers.push(handler as SSEStatusHandler)
     } else {
@@ -62,7 +75,7 @@ class SSEService {
     }
   }
 
-  off(event: 'chunk' | 'message' | 'error' | 'connect' | 'disconnect' | 'retry', handler?: SSEEventHandler | SSEStatusHandler) {
+  off(event: SSEEventType | 'connect' | 'disconnect', handler?: SSEEventHandler | SSEStatusHandler) {
     if (event === 'connect' || event === 'disconnect') {
       if (handler) {
         const idx = this.statusHandlers.indexOf(handler as SSEStatusHandler)
@@ -80,7 +93,7 @@ class SSEService {
   }
 
   private emit(event: string, data?: unknown) {
-    if (['chunk', 'message', 'error', 'retry'].includes(event)) {
+    if (['chunk', 'message', 'error', 'retry', 'thinking', 'tool_call', 'tool_result', 'tool_error', 'plan_start', 'plan_step', 'plan_complete', 'reflection', 'done'].includes(event)) {
       const handler = this.messageHandlers.get(event)
       if (handler) handler(data as SSEMessage)
     } else if (event === 'connect' || event === 'disconnect') {
@@ -177,14 +190,13 @@ class SSEService {
               try {
                 const parsed = JSON.parse(jsonStr) as SSEMessage
                 const data = { ...parsed, type: parsed.type || currentEventType } as SSEMessage
-                if (data.type === 'chunk') {
-                  this.emit('chunk', data)
+                if (data.type === 'chunk' || data.type === 'thinking' || data.type === 'tool_call' || data.type === 'tool_result' || data.type === 'tool_error' || data.type === 'plan_start' || data.type === 'plan_step' || data.type === 'plan_complete' || data.type === 'reflection' || data.type === 'done' || data.type === 'retry') {
+                  const handler = this.messageHandlers.get(data.type)
+                  if (handler) handler(data as SSEMessage)
                 } else if (data.type === 'message') {
                   this.emit('message', data)
                 } else if (data.type === 'error') {
                   this.emit('error', data)
-                } else if (data.type === 'retry') {
-                  this.emit('retry', data)
                 }
               } catch {
                 // SSE Parse error

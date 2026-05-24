@@ -27,10 +27,43 @@
 
       <!-- 列表 -->
       <n-spin :show="loading">
-        <div v-if="conversations.length === 0" class="py-16 text-center">
-          <n-icon size="48" class="text-gray-300 mb-4"><ChatbubblesOutline /></n-icon>
-          <p class="text-gray-500 mb-4">暂无对话记录</p>
-          <n-button type="primary" @click="startNewChat">开始新对话</n-button>
+        <template #description>
+          <span>加载中...</span>
+        </template>
+
+        <!-- Skeleton loading state -->
+        <div v-if="loading" class="space-y-2">
+          <div v-for="n in 5" :key="n" class="flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+            <div class="flex items-center gap-4 flex-1 min-w-0">
+              <n-skeleton width="40px" height="40px" circle />
+              <div class="flex-1 space-y-2">
+                <n-skeleton text width="50%" />
+                <n-skeleton text width="30%" />
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <n-skeleton width="60px" height="28px" />
+              <n-skeleton width="28px" height="28px" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Error state -->
+        <div v-if="!loading && loadError" class="py-16 text-center">
+          <n-result status="error" title="加载失败" :description="loadErrorMsg">
+            <template #footer>
+              <n-button type="primary" @click="loadConversations">重试</n-button>
+            </template>
+          </n-result>
+        </div>
+
+        <!-- Empty state -->
+        <div v-else-if="!loadError && conversations.length === 0 && !loading" class="py-16 text-center">
+          <n-empty description="暂无对话记录">
+            <template #extra>
+              <n-button type="primary" @click="startNewChat">开始新对话</n-button>
+            </template>
+          </n-empty>
         </div>
 
         <div v-else class="space-y-2">
@@ -55,14 +88,9 @@
 
             <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
               <n-button size="small" quaternary @click.stop="viewConversation(item)">继续</n-button>
-              <n-popconfirm @positive-click="deleteItem(item)">
-                <template #trigger>
-                  <n-button size="small" quaternary type="error" @click.stop>
-                    <template #icon><n-icon><TrashOutline /></n-icon></template>
-                  </n-button>
-                </template>
-                确定删除？
-              </n-popconfirm>
+              <n-button size="small" quaternary type="error" @click.stop="deleteItem(item)">
+                <template #icon><n-icon><TrashOutline /></n-icon></template>
+              </n-button>
             </div>
           </div>
         </div>
@@ -90,6 +118,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { SearchOutline, RefreshOutline, ChatbubblesOutline, TrashOutline, AddOutline } from '@vicons/ionicons5'
 import { getConversations, deleteConversation } from '@/api/conversation'
+import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import dayjs from 'dayjs'
 
@@ -104,8 +133,11 @@ interface Conversation {
 
 const { t } = useI18n()
 const message = useDedupedMessage()
+const dialog = useDialog()
 const router = useRouter()
 const loading = ref(false)
+const loadError = ref(false)
+const loadErrorMsg = ref('')
 const searchText = ref('')
 const conversations = ref<Conversation[]>([])
 
@@ -124,8 +156,11 @@ const loadConversations = async () => {
       conversations.value = Array.isArray(response.data.data.data) ? response.data.data.data : []
       pagination.itemCount = response.data.data.total || 0
     }
+    loadError.value = false
   } catch (error) {
     message.error('加载失败')
+    loadError.value = true
+    loadErrorMsg.value = '加载失败'
   } finally {
     loading.value = false
   }
@@ -150,14 +185,22 @@ const startNewChat = () => {
   router.push('/chat')
 }
 
-const deleteItem = async (item: Conversation) => {
-  try {
-    await deleteConversation(item.id)
-    message.success('删除成功')
-    loadConversations()
-  } catch (error) {
-    message.error('删除失败')
-  }
+const deleteItem = (item: Conversation) => {
+  dialog.warning({
+    title: t('common.confirm') || '确认删除',
+    content: t('chat.confirmDelete') || '确定要删除此对话吗？删除后无法恢复。',
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      try {
+        await deleteConversation(item.id)
+        message.success('删除成功')
+        loadConversations()
+      } catch (error) {
+        message.error('删除失败')
+      }
+    }
+  })
 }
 
 const formatDate = (date: string) => {

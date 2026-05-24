@@ -4,6 +4,8 @@ import Layout from '@/layouts/index.vue'
 import { useUserStore } from '@/stores/user'
 import { getToken } from '@/utils/auth'
 
+let sessionValidated = false
+
 export const routes: RouteRecordRaw[] = [
   {
     path: '/firsthome', // 添加 firsthome 路由
@@ -35,7 +37,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: Layout,
-    redirect: '/dashboard',
+    redirect: '/firsthome',
     meta: {
       requiresAuth: true
     },
@@ -174,7 +176,7 @@ export const routes: RouteRecordRaw[] = [
         name: 'Agent',
         component: () => import('@/views/agent/index.vue'),
         meta: {
-          title: 'Agent',
+          title: 'menu.agent',
           icon: 'hardware-chip'
         }
       },
@@ -234,41 +236,40 @@ router.beforeEach(async (to, from, next) => {
   const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
   const requiresAdmin = to.matched.some((record) => record.meta.requiresAdmin)
 
+  // 已登录用户访问登录/注册页时，重定向到首页
+  if (token && (to.name === 'Login' || to.name === 'Register')) {
+    next({ name: 'Dashboard' })
+    return
+  }
+
   if (requiresAuth) {
     if (!token) {
       next({ name: 'Login', query: { redirect: to.fullPath } })
     } else {
-      if (!userStore.userInfo?.id) {
+      // 首次进入需鉴权页面时，验证 token 是否仍然有效
+      if (!sessionValidated || !userStore.userInfo?.id) {
         try {
           await userStore.getUserInfo()
-          if (userStore.userInfo?.id) {
-            if (requiresAdmin && !userStore.isAdmin) {
-              next({ name: 'Dashboard' })
-            } else {
-              next()
-            }
-          } else {
-            userStore.logout()
-            next({ name: 'Login', query: { redirect: to.fullPath } })
-          }
-        } catch (error) {
+          sessionValidated = true
+        } catch {
           userStore.logout()
           next({ name: 'Login', query: { redirect: to.fullPath } })
+          return
         }
+      }
+      if (!userStore.userInfo?.id) {
+        userStore.logout()
+        next({ name: 'Login', query: { redirect: to.fullPath } })
+        return
+      }
+      if (requiresAdmin && !userStore.isAdmin) {
+        next({ name: 'Dashboard' })
       } else {
-        if (requiresAdmin && !userStore.isAdmin) {
-          next({ name: 'Dashboard' })
-        } else {
-          next()
-        }
+        next()
       }
     }
   } else {
-    if (token && (to.name === 'Login' || to.name === 'Register')) {
-      next({ name: 'Dashboard' })
-    } else {
-      next()
-    }
+    next()
   }
 })
 

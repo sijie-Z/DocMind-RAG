@@ -3,13 +3,7 @@
 </template>
 
 <script setup lang="ts">
-/**
- * Markdown 渲染组件
- * 支持：Markdown 语法、代码高亮、数学公式 (KaTeX)、代码块一键复制
- * 小白说明：这个组件就像是一个“翻译官”，把 AI 返回的带有特殊标记的文字（比如 **加粗**、```代码块```）
- * 转换成我们在网页上看到的漂亮样式。
- */
-import { computed, onMounted, nextTick } from 'vue'
+import { computed, onMounted, nextTick, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import DOMPurify from 'dompurify'
@@ -39,17 +33,28 @@ const md: MarkdownIt = new MarkdownIt({
   }
 })
 
-// 使用 KaTeX 插件支持数学公式
 md.use(mdKatex)
 
-// 渲染内容
+const contentCache = new Map<string, string>()
+const MAX_CACHE_SIZE = 200
+
 const renderedContent = computed(() => {
   if (!props.content) return ''
+  const cached = contentCache.get(props.content)
+  if (cached) return cached
+
   const raw = md.render(props.content)
-  return DOMPurify.sanitize(raw, {
+  const sanitized = DOMPurify.sanitize(raw, {
     ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'mfrac'],
     ADD_ATTR: ['xmlns', 'mathvariant'],
   })
+
+  if (contentCache.size >= MAX_CACHE_SIZE) {
+    const firstKey = contentCache.keys().next().value
+    if (firstKey !== undefined) contentCache.delete(firstKey)
+  }
+  contentCache.set(props.content, sanitized)
+  return sanitized
 })
 
 // 为代码块添加复制按钮的逻辑
@@ -62,15 +67,15 @@ const addCopyButtons = () => {
     const button = document.createElement('button')
     button.className = 'copy-btn'
     button.setAttribute('data-state', 'idle')
-    button.textContent = 'Copy'
+    button.textContent = '复制'
     button.onclick = () => {
       const code = block.querySelector('code')?.innerText || ''
       navigator.clipboard.writeText(code).then(() => {
         button.setAttribute('data-state', 'copied')
-        button.textContent = 'Copied!'
+        button.textContent = '已复制！'
         setTimeout(() => {
           button.setAttribute('data-state', 'idle')
-          button.textContent = 'Copy'
+          button.textContent = '复制'
         }, 2000)
       })
     }
@@ -85,7 +90,6 @@ onMounted(() => {
 })
 
 // 当内容更新时，重新添加复制按钮
-import { watch } from 'vue'
 watch(() => props.content, () => {
   nextTick(() => {
     addCopyButtons()

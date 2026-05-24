@@ -13,7 +13,7 @@ export {
 
 // 发送消息
 export function sendMessage(data: { message: string; conversationId?: number }) {
-  const orgId = useUserStore().currentOrgId || 1
+  const orgId = useUserStore().currentOrgId
   return request.post<ApiResponse<{
     response: string
     sources: KnowledgeSource[]

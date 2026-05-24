@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docmind-worker
+  namespace: docmind
+  labels:
+    app: docmind-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: docmind-worker
+  template:
+    metadata:
+      labels:
+        app: docmind-worker
+    spec:
+      containers:
+        - name: worker
+          image: docmind-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "start_worker.py"]
+          envFrom:
+            - configMapRef:
+                name: docmind-config
+            - secretRef:
+                name: docmind-secrets
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"

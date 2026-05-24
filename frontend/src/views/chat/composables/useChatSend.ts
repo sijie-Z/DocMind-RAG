@@ -17,7 +17,8 @@ export function useChatSend(
   isLoading: { value: boolean },
   isRetrieving: { value: boolean },
   sseStatus: { value: string },
-  useSSE: { value: boolean }
+  useSSE: { value: boolean },
+  useAgent: { value: boolean }
 ) {
   const message = useDedupedMessage()
   const { t } = useI18n()
@@ -31,7 +32,7 @@ export function useChatSend(
   const handleSSESend = async () => {
     let userMessage = inputMessage.value.trim()
     if (!userMessage && attachedFileIds.value.length > 0) {
-      userMessage = `请分析上传的 ${attachedFiles.value.length} 个文件`
+      userMessage = t('chat.analyzeFiles', { n: attachedFiles.value.length })
     }
     if (!userMessage) return
 
@@ -64,6 +65,10 @@ export function useChatSend(
     sseService.off('message')
     sseService.off('error')
     sseService.off('retry')
+    sseService.off('thinking')
+    sseService.off('tool_call')
+    sseService.off('tool_result')
+    sseService.off('tool_error')
 
     const onChunk = (data: SSEMessage) => {
       sseStatus.value = 'connected'
@@ -101,6 +106,43 @@ export function useChatSend(
       scrollToBottom()
     }
 
+    const onThinking = (data: SSEMessage) => {
+      if (['reasoning', 'planning', 'correction'].includes(data.thinkingType || '')) {
+        const lastMsg = messages.value[messages.value.length - 1]
+        if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
+          lastMsg.thinking = (lastMsg.thinking || '') + data.content
+        }
+      }
+    }
+
+    const onToolCall = (data: SSEMessage) => {
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
+        const stamp = `\n\n> 🔧 正在调用: **${data.toolName || 'tool'}**...\n`
+        fullContent += stamp
+        lastMsg.content = fullContent
+      }
+      scrollToBottom()
+    }
+
+    const onToolResult = (data: SSEMessage) => {
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
+        const stamp = `\n> ✅ 工具完成` + (data.toolDurationMs ? ` (${Math.round(data.toolDurationMs)}ms)` : '') + `\n`
+        fullContent += stamp
+        lastMsg.content = fullContent
+      }
+    }
+
+    const onToolError = (data: SSEMessage) => {
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
+        const stamp = `\n> ⚠️ 工具调用异常: ${data.content || '未知错误'}\n`
+        fullContent += stamp
+        lastMsg.content = fullContent
+      }
+    }
+
     const onError = (data: SSEMessage) => {
       isLoading.value = false
       isRetrieving.value = false
@@ -111,6 +153,10 @@ export function useChatSend(
     sseService.on('chunk', onChunk)
     sseService.on('message', onMessage)
     sseService.on('error', onError)
+    sseService.on('thinking', onThinking)
+    sseService.on('tool_call', onToolCall)
+    sseService.on('tool_result', onToolResult)
+    sseService.on('tool_error', onToolError)
 
     const systemPrompt = localStorage.getItem('activeSystemPrompt')
 
@@ -119,6 +165,7 @@ export function useChatSend(
         content: userMessage,
         conversationId: chatStore.currentConversation?.id,
         fileIds: currentFiles.filter(f => f.status === 'done' && f.id).map(f => f.id!),
+        useAgent: useAgent.value,
         payload: {
           strictMode: strictMode.value,
           privacyMode: privacyMode.value,
@@ -157,7 +204,7 @@ export function useChatSend(
 
     let userMessage = inputMessage.value.trim()
     if (!userMessage && attachedFileIds.value.length > 0) {
-      userMessage = `请分析上传的 ${attachedFiles.value.length} 个文件`
+      userMessage = t('chat.analyzeFiles', { n: attachedFiles.value.length })
     } else if (!userMessage && attachedFiles.value.length > 0 && attachedFileIds.value.length === 0) {
       message.warning(t('chat.attachmentsNotReady'))
       return

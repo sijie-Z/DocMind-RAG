@@ -38,7 +38,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
   // LLM 配置
   const llmConfig = ref({
     openai: { apiKey: '', baseUrl: '', model: 'gpt-4o-mini', temperature: 0.7 },
-    deepseek: { apiKey: '', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', temperature: 0.7 },
+    deepseek: { apiKey: '', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash', temperature: 0.7 },
     qwen: { apiKey: '', model: 'qwen-plus', temperature: 0.7 }
   })
 

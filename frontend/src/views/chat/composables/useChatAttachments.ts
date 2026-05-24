@@ -27,16 +27,16 @@ export function useChatAttachments() {
         const rawStatus = data.raw_status || status
 
         const statusDetailMap: Record<string, string> = {
-          pending: '等待处理',
-          uploaded: '已上传',
-          parsing: '解析中',
-          parsed: '解析完成',
-          indexing: '索引中',
-          indexed: '已完成',
-          completed: '已完成',
-          failed: '解析失败'
+          pending: t('chat.filePending'),
+          uploaded: t('chat.fileUploaded'),
+          parsing: t('chat.fileParsing'),
+          parsed: t('chat.fileParsed'),
+          indexing: t('chat.fileIndexing'),
+          indexed: t('chat.fileIndexed'),
+          completed: t('chat.fileCompleted'),
+          failed: t('chat.fileFailed')
         }
-        tempFile.statusDetail = statusDetailMap[rawStatus] || statusDetailMap[status] || '处理中'
+        tempFile.statusDetail = statusDetailMap[rawStatus] || statusDetailMap[status] || t('chat.fileProcessing')
 
         if (rawStatus === 'pending' || rawStatus === 'uploaded') {
           tempFile.status = 'uploading'
@@ -50,11 +50,11 @@ export function useChatAttachments() {
         } else if (rawStatus === 'indexed' || status === 'completed') {
           tempFile.status = 'done'
           tempFile.progress = 100
-          tempFile.statusDetail = '✅ 已就绪'
+          tempFile.statusDetail = t('chat.fileReady')
           return
         } else if (status === 'failed') {
           tempFile.status = 'error'
-          tempFile.errorMsg = data.parse_error || '解析失败'
+          tempFile.errorMsg = data.parse_error || t('chat.fileFailed')
           return
         }
       } catch { /* ignore */ }
@@ -63,7 +63,7 @@ export function useChatAttachments() {
     }
     if (tempFile.status === 'parsing' || tempFile.status === 'indexing' || tempFile.status === 'uploading') {
       tempFile.status = 'error'
-      tempFile.errorMsg = '处理超时，请稍后在知识库中查看状态'
+      tempFile.errorMsg = t('chat.fileTimeout')
     }
   }
 
@@ -73,7 +73,7 @@ export function useChatAttachments() {
     if (!file) return
 
     if (file.size > 10 * 1024 * 1024) {
-      message.error(t('chat.fileSizeLimit') || '文件大小不能超过 10MB')
+      message.error(t('chat.fileSizeLimit'))
       target.value = ''
       return
     }
@@ -89,7 +89,7 @@ export function useChatAttachments() {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('title', file.name)
-      formData.append('description', '来自聊天上传')
+      formData.append('description', t('chat.fileFromChat'))
       
       const res = await uploadKnowledgeBase(formData)
       const docId = res.data?.data?.id || (res.data as Record<string, unknown>).id
@@ -100,7 +100,7 @@ export function useChatAttachments() {
       }
     } catch (error: any) {
       tempFile.status = 'error'
-      tempFile.errorMsg = error.message || '上传失败'
+      tempFile.errorMsg = error.message || t('chat.fileUploadFailed')
     } finally {
       target.value = ''
     }

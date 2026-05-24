@@ -4,7 +4,7 @@
     <div class="bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl rounded-3xl border border-white/20 dark:border-gray-800/30 shadow-2xl shadow-blue-500/10 h-full flex flex-col overflow-hidden">
       
       <!-- 页面头部：现代化搜索与操作栏 -->
-      <div class="p-6 border-b border-gray-200/50 dark:border-gray-800/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gradient-to-r from-indigo-50/30 to-indigo-50/30 dark:from-indigo-950/10 dark:to-indigo-950/10">
+      <div class="p-6 border-b border-gray-200/50 dark:border-gray-800/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gradient-to-r from-slate-50/30 to-slate-50/30 dark:from-slate-950/10 dark:to-slate-950/10">
         <div>
           <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-blue-600 dark:from-blue-400 dark:to-blue-400">
             {{ t('users.title') }}
@@ -57,7 +57,29 @@
       <!-- 表格内容区域 -->
       <div class="flex-1 p-6 overflow-hidden">
         <n-spin :show="loading" class="h-full">
-          <n-data-table
+          <template #description>
+            <span>加载中...</span>
+          </template>
+
+          <!-- Error state -->
+          <div v-if="loadError" class="flex items-center justify-center h-full">
+            <n-result status="error" title="加载失败" :description="loadErrorMsg">
+              <template #footer>
+                <n-button type="primary" round @click="loadUsers">重试</n-button>
+              </template>
+            </n-result>
+          </div>
+
+          <!-- Empty state -->
+          <div v-else-if="!loadError && filteredUsers.length === 0 && !loading" class="flex items-center justify-center h-full">
+            <n-empty :description="t('users.noData', '暂无用户数据')">
+              <template #extra>
+                <n-button type="primary" round @click="showCreateModal = true">{{ t('users.create') }}</n-button>
+              </template>
+            </n-empty>
+          </div>
+
+          <n-data-table v-else
             :columns="columns"
             :data="filteredUsers"
             :pagination="pagination"
@@ -163,11 +185,12 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, h } from 'vue'
+import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import {
   NSpace, NInput, NIcon, NButton, NSpin, NDataTable,
   NTag, NModal, NForm, NFormItem, NSelect,
-  NRadioGroup, NPopconfirm
+  NRadioGroup
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
@@ -203,7 +226,10 @@ interface User {
 // 状态管理
 const message = useDedupedMessage()
 const { t } = useI18n()
+const dialog = useDialog()
 const loading = ref(false)
+const loadError = ref(false)
+const loadErrorMsg = ref('')
 const saving = ref(false)
 const resettingPassword = ref(false)
 const searchText = ref('')
@@ -336,18 +362,9 @@ const columns: DataTableColumns<User> = [
             { default: () => t('users.resetPassword') }
           ),
           h(
-            NPopconfirm,
-            {
-              onPositiveClick: () => handleDelete(row.id)
-            },
-            {
-              trigger: () => h(
-                NButton,
-                { size: 'small', type: 'error', secondary: true },
-                { default: () => t('common.delete') }
-              ),
-              default: () => t('users.deleteConfirm')
-            }
+            NButton,
+            { size: 'small', type: 'error', secondary: true, onClick: () => handleDelete(row) },
+            { default: () => t('common.delete') }
           )
         ]
       })
@@ -377,8 +394,11 @@ const loadUsers = async () => {
         users.value = []
         pagination.itemCount = 0
     }
+    loadError.value = false
   } catch (err: unknown) {
     message.error('加载失败: ' + getErrorMessage(err))
+    loadError.value = true
+    loadErrorMsg.value = '加载失败: ' + getErrorMessage(err)
   } finally {
     loading.value = false
   }
@@ -448,14 +468,22 @@ const resetPassword = async () => {
   }
 }
 
-const handleDelete = async (id: number) => {
-  try {
-    await deleteUser(id)
-    message.success(t('common.success'))
-    loadUsers()
-  } catch (err: unknown) {
-    message.error(getErrorMessage(err) || t('common.failed'))
-  }
+const handleDelete = (row: User) => {
+  dialog.warning({
+    title: t('common.confirm') || '确认删除',
+    content: t('users.deleteConfirmWithName', { username: row.username || row.nickname }),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      try {
+        await deleteUser(row.id)
+        message.success(t('common.success'))
+        loadUsers()
+      } catch (err: unknown) {
+        message.error(getErrorMessage(err) || t('common.failed'))
+      }
+    }
+  })
 }
 
 const handleSelectionChange = (keys: (string | number)[]) => {

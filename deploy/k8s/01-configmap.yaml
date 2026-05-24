@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: docmind-config
+  namespace: docmind
+data:
+  DATABASE_URL: "mysql+aiomysql://docmind:docmind123@docmind-mysql:3306/docmind"
+  REDIS_HOST: "docmind-redis"
+  ELASTICSEARCH_HOSTS: '["http://docmind-elasticsearch:9200"]'
+  MINIO_ENDPOINT: "docmind-minio:9000"
+  KAFKA_BOOTSTRAP_SERVERS: "docmind-kafka:9092"
+  DEBUG: "false"
+  LOG_LEVEL: "INFO"
+  ENABLE_DEMO_ACCOUNT: "true"

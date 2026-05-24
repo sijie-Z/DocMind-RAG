@@ -65,7 +65,29 @@
           />
         </div>
         <n-spin :show="loading" class="h-full">
-          <div v-if="!permissionDenied" class="flex h-full gap-6">
+          <template #description>
+            <span>加载中...</span>
+          </template>
+
+          <!-- Error state -->
+          <div v-if="loadError && !permissionDenied" class="h-full flex items-center justify-center">
+            <n-result status="error" title="加载失败" :description="loadErrorMsg">
+              <template #footer>
+                <n-button type="primary" round @click="loadOrganizations">重试</n-button>
+              </template>
+            </n-result>
+          </div>
+
+          <!-- Empty state -->
+          <div v-else-if="!loadError && !permissionDenied && filteredOrganizations.length === 0 && !loading" class="h-full flex items-center justify-center">
+            <n-empty :description="t('org.noData', '暂无组织数据')">
+              <template #extra>
+                <n-button v-if="!permissionDenied" type="primary" round @click="showCreateModal = true">{{ t('org.create') }}</n-button>
+              </template>
+            </n-empty>
+          </div>
+
+          <div v-else-if="!permissionDenied && !loadError" class="flex h-full gap-6">
             <!-- 左侧：树形结构 -->
             <div class="w-1/3 min-w-[300px] flex flex-col bg-white/50 dark:bg-gray-800/30 rounded-2xl border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
               <div class="p-4 border-b border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-900/50">
@@ -371,6 +393,8 @@ interface Organization {
 const message = useDedupedMessage()
 const { t } = useI18n()
 const loading = ref(false)
+const loadError = ref(false)
+const loadErrorMsg = ref('')
 const saving = ref(false)
 const searchText = ref('')
 const treeSearchText = ref('')
@@ -633,15 +657,19 @@ const loadOrganizations = async () => {
     if (treeRes.data && treeRes.data.data) {
       fullTree.value = treeRes.data.data
     }
+    loadError.value = false
   } catch (err: unknown) {
     if (getResponseStatus(err) === 403) {
       permissionDenied.value = true
+      loadError.value = false
       organizations.value = []
       fullTree.value = []
       pagination.itemCount = 0
       return
     }
     message.error(t('org.loadFailed') + ': ' + getErrorMessage(err))
+    loadError.value = true
+    loadErrorMsg.value = t('org.loadFailed') + ': ' + getErrorMessage(err)
   } finally {
     loading.value = false
   }

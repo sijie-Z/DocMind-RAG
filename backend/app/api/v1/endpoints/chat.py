@@ -23,7 +23,7 @@ from app.rag.cache import SemanticCache
 from app.services.memory_service import get_memory_system
 from app.core.security import get_current_user
 from app.exceptions import NotFoundError, AuthorizationError, ValidationError
-from app.schemas.chat import ChatStreamRequest, FeedbackRequest
+from app.schemas.chat import ChatSessionCreate, ChatStreamRequest, FeedbackRequest
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -63,6 +63,22 @@ def build_sources_list(context_results: list[dict]) -> list[dict]:
         }
         for r in context_results
     ]
+
+
+def _extract_agent_sources(tool_result: str, sources: list[dict]) -> None:
+    """Parse search tool output and append document references to sources list."""
+    import re
+    for match in re.finditer(r"^\[(\d+)\]\s+\(([\d.]+)\)\s+(.+?)$", tool_result, re.MULTILINE):
+        score = float(match.group(2))
+        filename = match.group(3).strip()
+        # Deduplicate by filename
+        if not any(s.get("filename") == filename for s in sources):
+            sources.append({
+                "filename": filename,
+                "relevanceScore": score,
+                "content": "",
+                "documentId": "",
+            })
 
 
 async def get_or_create_session(
@@ -472,6 +488,71 @@ async def get_conversations(
         raise ValidationError(f"获取失败: {str(e)}")
 
 
+@router.post("/conversations", response_model=dict, dependencies=[Depends(get_current_user)])
+async def create_conversation(
+    data: ChatSessionCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        title = (data.title or "新的对话")[:80]
+        conv_id = str(uuid.uuid4())
+        new_session = ChatSession(
+            id=conv_id,
+            user_id=current_user.id,
+            title=title,
+            status=ChatSessionStatus.ACTIVE,
+            organization_id=current_user.organization_id,
+        )
+        db.add(new_session)
+        await db.commit()
+        await db.refresh(new_session)
+
+        return {
+            "success": True,
+            "message": "创建成功",
+            "data": {
+                "id": new_session.id,
+                "title": new_session.title,
+                "created_at": new_session.created_at.isoformat() if new_session.created_at else None,
+                "updated_at": new_session.updated_at.isoformat() if new_session.updated_at else None,
+                "message_count": 0,
+            },
+        }
+    except Exception as e:
+        logger.error(f"Create conversation error: {e}")
+        raise ValidationError(f"创建失败: {str(e)}")
+
+
+@router.put("/conversations/{conversation_id}", response_model=dict, dependencies=[Depends(get_current_user)])
+async def update_conversation(
+    conversation_id: str,
+    data: ChatSessionCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        stmt = select(ChatSession).where(
+            ChatSession.id == conversation_id,
+            ChatSession.user_id == current_user.id,
+        )
+        result = await db.execute(stmt)
+        session = result.scalar_one_or_none()
+        if not session:
+            raise NotFoundError("对话不存在")
+
+        if data.title:
+            session.title = data.title[:80]
+        await db.commit()
+
+        return {"success": True, "message": "更新成功", "data": {"id": session.id, "title": session.title}}
+    except NotFoundError:
+        raise
+    except Exception as e:
+        logger.error(f"Update conversation error: {e}")
+        raise ValidationError(f"更新失败: {str(e)}")
+
+
 @router.delete("/conversations/{conversation_id}", response_model=dict, dependencies=[Depends(get_current_user)])
 async def delete_conversation(
     conversation_id: str,
@@ -641,7 +722,6 @@ async def get_rag_metrics(
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    user_id: int = Query(None),
     conversation_id: Optional[str] = Query(None),
 ):
     # Extract token from Sec-WebSocket-Protocol header (auth.<token>)
@@ -664,7 +744,7 @@ async def websocket_endpoint(
         if not payload:
             await websocket.close(code=4001, reason="Invalid token")
             return
-        user_id = payload.get("user_id") or user_id
+        user_id = payload.get("user_id")
     except Exception as e:
         await websocket.close(code=4002, reason=str(e))
         return
@@ -770,7 +850,10 @@ async def websocket_endpoint(
                     await pipeline_task
 
             except json.JSONDecodeError:
-                pass
+                await manager.send_personal_message(
+                    json.dumps({"type": "error", "content": "无效的JSON格式"}),
+                    websocket,
+                )
             except Exception as e:
                 logger.error(f"Error processing message: {e}", exc_info=True)
                 await manager.send_personal_message(
@@ -809,6 +892,107 @@ async def chat_stream_endpoint(
                 yield await sse_event("error", {"content": "消息内容不能为空"})
                 return
 
+            # ── Agent mode: delegate to PER agent ──────────────────────────
+            if body.useAgent:
+                from app.agent.service import agent_service
+                from app.agent.config import AgentConfig
+
+                config = AgentConfig(
+                    enable_tools=True,
+                    enable_planning=True,
+                    enable_reflection=True,
+                    enable_memory=True,
+                    enable_thinking=payload_data.get("enableThinking", True),
+                )
+                full_response = ""
+                agent_sources: list[dict] = []
+                async for agent_event in agent_service.chat(
+                    query=user_content,
+                    history=[],
+                    organization_id=getattr(current_user, "organization_id", None) or 1,
+                    user_id=current_user.id,
+                    session_id=body.conversationId or None,
+                    config=config,
+                ):
+                    if agent_event.type == "chunk":
+                        full_response += agent_event.content
+                        yield await sse_event("chunk", {
+                            "content": agent_event.content,
+                            "conversationId": body.conversationId,
+                            "messageId": f"agent-{body.conversationId or 'new'}",
+                        })
+                    elif agent_event.type == "thinking":
+                        yield await sse_event("thinking", {
+                            "content": agent_event.content,
+                            "thinkingType": agent_event.thinking_type,
+                            "planId": agent_event.plan_id,
+                            "planStepId": agent_event.plan_step_id,
+                            "planProgress": agent_event.plan_progress if agent_event.plan_progress >= 0 else None,
+                        })
+                    elif agent_event.type == "tool_call":
+                        yield await sse_event("tool_call", {
+                            "toolName": agent_event.tool_name,
+                            "toolArgs": agent_event.tool_args,
+                            "toolCallId": agent_event.tool_call_id,
+                            "planId": agent_event.plan_id,
+                            "planStepId": agent_event.plan_step_id,
+                        })
+                    elif agent_event.type == "tool_result":
+                        yield await sse_event("tool_result", {
+                            "toolName": agent_event.tool_name,
+                            "toolCallId": agent_event.tool_call_id,
+                            "content": agent_event.content[:500],
+                            "toolDurationMs": agent_event.tool_duration_ms,
+                            "planStepId": agent_event.plan_step_id,
+                            "planProgress": agent_event.plan_progress if agent_event.plan_progress >= 0 else None,
+                        })
+                        if agent_event.tool_name in ("search_knowledge_base", "vector_search"):
+                            _extract_agent_sources(agent_event.content, agent_sources)
+                    elif agent_event.type == "tool_error":
+                        yield await sse_event("tool_error", {
+                            "toolName": agent_event.tool_name,
+                            "content": agent_event.content[:300],
+                            "toolCallId": agent_event.tool_call_id,
+                        })
+                    elif agent_event.type == "plan_start":
+                        yield await sse_event("plan_start", {
+                            "planId": agent_event.plan_id,
+                            "content": agent_event.content,
+                        })
+                    elif agent_event.type == "plan_step":
+                        yield await sse_event("plan_step", {
+                            "planId": agent_event.plan_id,
+                            "planStepId": agent_event.plan_step_id,
+                            "content": agent_event.content,
+                            "toolHint": agent_event.tool_hint,
+                            "dependencies": agent_event.dependencies,
+                        })
+                    elif agent_event.type == "plan_complete":
+                        yield await sse_event("plan_complete", {
+                            "planId": agent_event.plan_id,
+                            "content": agent_event.content,
+                        })
+                    elif agent_event.type == "reflection":
+                        yield await sse_event("reflection", {
+                            "content": agent_event.content,
+                            "result": agent_event.reflection_result,
+                        })
+                    elif agent_event.type == "done":
+                        pass
+                    elif agent_event.type == "error":
+                        yield await sse_event("error", {"content": agent_event.content})
+                        return
+
+                yield await sse_event("message", {
+                    "content": full_response,
+                    "conversationId": body.conversationId,
+                    "messageId": f"agent-{body.conversationId or 'new'}",
+                    "sources": agent_sources if agent_sources else None,
+                    "is_cached": False,
+                })
+                return
+
+            # ── RAG mode (original) ────────────────────────────────────────
             async with AsyncSessionLocal() as session:
                 db_user = await session.get(User, current_user.id)
                 search_org_id = (

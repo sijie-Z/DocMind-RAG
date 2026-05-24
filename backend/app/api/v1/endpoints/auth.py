@@ -35,9 +35,8 @@ router = APIRouter()
 # OAuth2配置
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
-# --- Brute force protection ---
-LOGIN_MAX_ATTEMPTS = 5
-LOGIN_LOCKOUT_SECONDS = 300  # 5 minutes
+# --- Brute force protection (imported from auth_service) ---
+from app.services.auth_service import _MAX_LOGIN_FAILURES as LOGIN_MAX_ATTEMPTS, _LOCKOUT_DURATION_SECONDS as LOGIN_LOCKOUT_SECONDS
 
 async def _check_login_lockout(request: Request) -> None:
     """Check if the IP is locked out due to too many failed login attempts."""
@@ -56,8 +55,8 @@ async def _check_login_lockout(request: Request) -> None:
                 raise RateLimitError(f"登录尝试次数过多，请 {ttl} 秒后重试")
     except RateLimitError:
         raise
-    except Exception:
-        pass  # Redis down, allow login
+    except Exception as e:
+        logger.warning("Redis check login lockout failed: %s", e)
 
 async def _record_login_failure(request: Request) -> None:
     """Record a failed login attempt for the given IP."""
@@ -74,8 +73,8 @@ async def _record_login_failure(request: Request) -> None:
             pipe.incr(key)
             pipe.expire(key, LOGIN_LOCKOUT_SECONDS)
             await pipe.execute()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Redis record login failure failed: %s", e)
 
 async def _clear_login_failures(request: Request) -> None:
     """Clear failed login attempts on successful login."""
@@ -88,8 +87,8 @@ async def _clear_login_failures(request: Request) -> None:
         from app.core.redis import redis_client
         if redis_client:
             await redis_client.delete(f"login_fail:{client_ip}")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Redis clear login failures failed: %s", e)
 
 # 请求模型
 class LoginRequest(BaseModel):
@@ -136,7 +135,7 @@ async def ensure_demo():
         raise NotFoundError()
     from app.core.ensure_demo_user import ensure_demo_user
     await ensure_demo_user()
-    return {"success": True, "message": "演示账号已就绪", "data": {"username": "admin", "password": "123456"}}
+    return {"success": True, "message": "演示账号已就绪"}
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -356,8 +355,9 @@ async def register(
         if existing_email:
             raise ConflictError("邮箱已被使用")
         
-        # 创建新用户 + 欢迎通知（原子事务）
-        async with db.begin():
+        # 创建新用户 + 欢迎通知
+        # 使用 savepoint 是因为前面的查询已开启隐式事务
+        async with db.begin_nested():
             user = await auth_service.create_user(
                 db,
                 username=register_data.username,
@@ -374,6 +374,8 @@ async def register(
                 is_read=False
             )
             db.add(welcome_notification)
+
+        await db.commit()
         
         # 生成访问令牌 - 包含完整的用户信息和组织标签
         access_token = auth_service.create_access_token(
@@ -419,6 +421,7 @@ async def register(
     except ConflictError:
         raise
     except Exception as e:
+        logger.error(f"注册失败: {e}", exc_info=True)
         raise AppError("注册失败", detail=str(e) if settings.EXPOSE_EXCEPTION_DETAIL else None)
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -511,18 +514,19 @@ async def update_current_user(
 ):
     """更新当前用户信息"""
     try:
-        async with db.begin():
-            updated_user = await auth_service.update_user(
-                db,
-                current_user.id,
-                full_name=body.full_name,
-                email=body.email
-            )
+        updated_user = await auth_service.update_user(
+            db,
+            current_user.id,
+            full_name=body.full_name,
+            email=body.email
+        )
+        await db.commit()
 
         user_info = UserInfoResponse.model_validate(updated_user)
         return UserInfoWrapper(data=user_info)
 
     except Exception as e:
+        logger.error(f"更新用户信息失败: {e}", exc_info=True)
         raise AppError("更新用户信息失败", detail=str(e) if settings.EXPOSE_EXCEPTION_DETAIL else None)
 
 @router.post("/change-password", response_model=dict)
@@ -538,17 +542,18 @@ async def change_password(
             raise ValidationError("旧密码错误")
 
         # 更新密码
-        async with db.begin():
-            await auth_service.update_user_password(
-                db,
-                current_user.id,
-                body.new_password
-            )
+        await auth_service.update_user_password(
+            db,
+            current_user.id,
+            body.new_password
+        )
+        await db.commit()
 
         return {"message": "密码修改成功"}
 
     except ValidationError:
         raise
     except Exception as e:
+        logger.error(f"修改密码失败: {e}", exc_info=True)
         raise AppError("修改密码失败", detail=str(e) if settings.EXPOSE_EXCEPTION_DETAIL else None)
         

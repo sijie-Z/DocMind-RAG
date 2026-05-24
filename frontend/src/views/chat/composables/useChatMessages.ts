@@ -44,11 +44,11 @@ export function useChatMessages() {
       if (res.data?.success) {
         msg.feedback = newFeedback
         if (newFeedback !== 0) {
-          message.success(newFeedback === 1 ? t('chat.feedback.likeSuccess') || '已点赞' : t('chat.feedback.dislikeSuccess') || '已点踩')
+          message.success(newFeedback === 1 ? t('chat.feedback.likeSuccess') || t('chat.liked') : t('chat.feedback.dislikeSuccess') || t('chat.disliked'))
         }
       }
     } catch (err) {
-      message.error(t('chat.feedback.failed') || '反馈失败')
+      message.error(t('chat.feedback.failed') || t('chat.feedbackFailed'))
     }
   }
 
