@@ -94,52 +94,128 @@ class Executor:
                         s.status = "skipped"
                 break
 
-            # Execute ready steps (sequentially for simplicity;
-            # could be parallelized when no shared state dependencies exist)
-            for step in ready_steps:
-                step.status = "running"
-                step_result = ""
-
-                yield AgentEvent(
-                    type="thinking",
-                    content=f"执行步骤: {step.description}",
-                    thinking_type="reasoning",
-                    plan_id=plan.id,
-                    plan_step_id=step.id,
-                    plan_progress=plan.progress,
-                )
-
-                await asyncio.sleep(0.01)
-
-                AGENT_EXECUTION_STEPS.inc()
-
-                # Execute with retry
-                async for event in self._execute_step_with_retry(
-                    step=step,
-                    plan=plan,
-                    history=history,
-                    organization_id=organization_id,
-                    user_id=user_id,
-                    enable_thinking=enable_thinking,
+            # Execute ready steps — parallel when multiple independent steps exist
+            if len(ready_steps) > 1:
+                async for event in self._execute_steps_parallel(
+                    ready_steps, plan, history, organization_id, user_id, enable_thinking,
                 ):
-                    if event.type == "chunk":
-                        step_result += event.content
+                    yield event
+            else:
+                async for event in self._execute_single_step(
+                    ready_steps[0], plan, history, organization_id, user_id, enable_thinking,
+                ):
                     yield event
 
-                # Store result
+        return
+
+    async def _execute_single_step(
+        self, step, plan, history, organization_id, user_id, enable_thinking,
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """Execute a single step (sequential path)."""
+        step.status = "running"
+        step_result = ""
+
+        yield AgentEvent(
+            type="thinking",
+            content=f"执行步骤: {step.description}",
+            thinking_type="reasoning",
+            plan_id=plan.id,
+            plan_step_id=step.id,
+            plan_progress=plan.progress,
+        )
+        await asyncio.sleep(0.01)
+        AGENT_EXECUTION_STEPS.inc()
+
+        async for event in self._execute_step_with_retry(
+            step=step, plan=plan, history=history,
+            organization_id=organization_id, user_id=user_id,
+            enable_thinking=enable_thinking,
+        ):
+            if event.type == "chunk":
+                step_result += event.content
+            yield event
+
+        step.result = step_result[:2000] if step_result else None
+        if step.status != "failed":
+            step.status = "completed"
+            plan.completed_steps += 1
+            self.memory.store_step_result(step.id, {
+                "description": step.description, "status": step.status, "result": step.result,
+            })
+        else:
+            plan.failed_steps += 1
+
+        await self.memory.record_experience(
+            success=(step.status == "completed"),
+            action=f"{step.tool_hint or 'llm'}: {step.description[:100]}",
+            result=step_result[:200] if step_result else str(step.error_context or "")[:200],
+        )
+
+        yield AgentEvent(
+            type="thinking",
+            content=f"{'✅' if step.status == 'completed' else '❌'} 步骤完成: {step.description}",
+            thinking_type="evaluation",
+            plan_id=plan.id, plan_step_id=step.id,
+            plan_progress=plan.progress, plan_step_status=step.status,
+        )
+
+    async def _execute_steps_parallel(
+        self, steps, plan, history, organization_id, user_id, enable_thinking,
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """Execute multiple independent steps concurrently."""
+        # Mark all as running
+        for step in steps:
+            step.status = "running"
+
+        # Announce all steps
+        for step in steps:
+            yield AgentEvent(
+                type="thinking",
+                content=f"执行步骤: {step.description}",
+                thinking_type="reasoning",
+                plan_id=plan.id, plan_step_id=step.id, plan_progress=plan.progress,
+            )
+        AGENT_EXECUTION_STEPS.inc()
+
+        # Run all steps concurrently
+        event_queues: dict[str, list] = {s.id: [] for s in steps}
+        done_flags: dict[str, bool] = {s.id: False for s in steps}
+
+        async def run_step(step):
+            step_result = ""
+            async for event in self._execute_step_with_retry(
+                step=step, plan=plan, history=history,
+                organization_id=organization_id, user_id=user_id,
+                enable_thinking=enable_thinking,
+            ):
+                if event.type == "chunk":
+                    step_result += event.content
+                event_queues[step.id].append(event)
+            return step, step_result
+
+        tasks = [asyncio.create_task(run_step(s)) for s in steps]
+
+        # Drain events as they arrive
+        pending = set(tasks)
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                step, step_result = task.result()
+                # Flush this step's events
+                for evt in event_queues[step.id]:
+                    yield evt
+                event_queues[step.id].clear()
+
                 step.result = step_result[:2000] if step_result else None
                 if step.status != "failed":
                     step.status = "completed"
                     plan.completed_steps += 1
                     self.memory.store_step_result(step.id, {
-                        "description": step.description,
-                        "status": step.status,
-                        "result": step.result,
+                        "description": step.description, "status": step.status, "result": step.result,
                     })
                 else:
                     plan.failed_steps += 1
 
-                # Record experience
                 await self.memory.record_experience(
                     success=(step.status == "completed"),
                     action=f"{step.tool_hint or 'llm'}: {step.description[:100]}",
@@ -150,13 +226,9 @@ class Executor:
                     type="thinking",
                     content=f"{'✅' if step.status == 'completed' else '❌'} 步骤完成: {step.description}",
                     thinking_type="evaluation",
-                    plan_id=plan.id,
-                    plan_step_id=step.id,
-                    plan_progress=plan.progress,
-                    plan_step_status=step.status,
+                    plan_id=plan.id, plan_step_id=step.id,
+                    plan_progress=plan.progress, plan_step_status=step.status,
                 )
-
-        return
 
     async def _execute_step_with_retry(
         self,

@@ -5,6 +5,22 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-05-24
+
+### Fixed
+- **Agent page crash**: Fixed `tools.value.filter is not a function` — API response nested `data` field was not properly extracted
+- **Auth bypass**: Route guard now checks token expiry via `isTokenExpired()`, expired tokens are cleared and user is redirected to login
+- **Error propagation**: Agent `onMounted` wrapped in double try/catch to prevent errors from bubbling through Suspense to ErrorBoundary
+- **CSS `@apply` broken**: Converted all UnoCSS `@apply` directives in `Markdown.vue` to standard CSS (transformerDirectives was not configured)
+- **API response parsing**: Fixed `response.data` vs `response.data.data` mismatch in agent view and config panel
+
+### Changed
+- **Agent parallel execution**: Independent plan steps now execute concurrently via `asyncio.gather` instead of sequential `for` loop
+- **Page transitions**: Layout router-view wrapped in `<Transition name="page-slide">` with slide-up + fade animation (0.35s)
+- **Login page animation**: Brand panel fades in from bottom (0.6s), form panel slides in with 0.15s delay, submit button has bounce hover effect
+- **ErrorBoundary**: Now shows actual error details in collapsible `<details>` section; captures `window.onerror` and `unhandledrejection` events
+- **Route guard**: Added `isTokenExpired()` check, `removeToken()` on validation failure, `sessionValidated` reset on logout
+
 ## [1.2.0] - 2026-05-24
 
 ### Added

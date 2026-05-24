@@ -104,53 +104,142 @@ watch(() => props.content, () => {
 }
 
 .markdown-body pre.hljs {
-  @apply rounded-xl my-4 p-4 bg-gray-900 overflow-x-auto relative group;
+  border-radius: 12px;
+  margin: 1rem 0;
+  padding: 1rem;
+  background: #1a1b26;
+  overflow-x: auto;
+  position: relative;
+}
+
+.markdown-body pre.hljs:hover .copy-btn {
+  opacity: 1;
 }
 
 .markdown-body code {
-  @apply font-mono text-xs;
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
 }
 
 /* 复制按钮样式 */
 .copy-btn {
-  @apply absolute top-2 right-2 px-2 py-1 text-[10px] bg-white/10 hover:bg-white/20 
-         text-gray-400 rounded border border-white/10 opacity-0 group-hover:opacity-100 
-         transition-all duration-200 cursor-pointer;
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #9ca3af;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  opacity: 0;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.copy-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.copy-btn[data-state="copied"] {
+  color: #10b981;
 }
 
 /* KaTeX 修正 */
 .katex-display {
-  @apply my-4 overflow-x-auto overflow-y-hidden;
+  margin: 1rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 /* 列表样式 */
 .markdown-body ul {
-  @apply list-disc pl-5 my-2;
+  list-style: disc;
+  padding-left: 1.25rem;
+  margin: 0.5rem 0;
 }
 
 .markdown-body ol {
-  @apply list-decimal pl-5 my-2;
+  list-style: decimal;
+  padding-left: 1.25rem;
+  margin: 0.5rem 0;
 }
 
 .markdown-body li {
-  @apply my-1;
+  margin: 0.25rem 0;
 }
 
 /* 引用样式 */
 .markdown-body blockquote {
-  @apply border-l-4 border-gray-300 dark:border-gray-600 pl-4 my-4 italic text-gray-600 dark:text-gray-400;
+  border-left: 4px solid #d1d5db;
+  padding-left: 1rem;
+  margin: 1rem 0;
+  font-style: italic;
+  color: #6b7280;
+}
+
+.dark .markdown-body blockquote {
+  border-left-color: #4b5563;
+  color: #9ca3af;
 }
 
 /* 表格样式 */
 .markdown-body table {
-  @apply w-full border-collapse my-4;
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
 }
 
-.markdown-body th, .markdown-body td {
-  @apply border border-gray-200 dark:border-gray-700 px-3 py-2 text-left;
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #e5e7eb;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.dark .markdown-body th,
+.dark .markdown-body td {
+  border-color: #374151;
 }
 
 .markdown-body th {
-  @apply bg-gray-50 dark:bg-gray-800/50 font-bold;
+  background: #f9fafb;
+  font-weight: 700;
+}
+
+.dark .markdown-body th {
+  background: rgba(31, 41, 55, 0.5);
+}
+
+/* 链接样式 */
+.markdown-body a {
+  color: #3b82f6;
+  text-decoration: none;
+}
+
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+/* 标题样式 */
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.markdown-body h1 { font-size: 1.5rem; }
+.markdown-body h2 { font-size: 1.25rem; }
+.markdown-body h3 { font-size: 1.125rem; }
+
+/* 分割线 */
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 1.5rem 0;
+}
+
+.dark .markdown-body hr {
+  border-top-color: #374151;
 }
 </style>

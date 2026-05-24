@@ -20,6 +20,12 @@
       <!-- 描述 -->
       <p class="error-desc">组件加载时出现了意外错误。这通常是临时性问题，刷新即可恢复。</p>
 
+      <!-- 错误详情 -->
+      <details v-if="errorMessage" class="error-details">
+        <summary>错误详情</summary>
+        <pre class="error-pre">{{ errorMessage }}</pre>
+      </details>
+
       <!-- 操作按钮 -->
       <div class="error-actions">
         <button class="btn btn--primary" @click="handleReload">
@@ -44,11 +50,37 @@ import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const hasError = ref(false)
+const errorMessage = ref('')
 
-onErrorCaptured((err) => {
-  console.error('[ErrorBoundary] 捕获到渲染错误:', err)
+function formatError(err: unknown): string {
+  if (!err) return '(empty error)'
+  if (err instanceof Error) return err.message + (err.stack ? '\n' + err.stack : '')
+  if (typeof err === 'string') return err
+  try { return JSON.stringify(err, null, 2) } catch { return String(err) }
+}
+
+function triggerError(msg: string) {
+  if (hasError.value) return
+  errorMessage.value = msg
   hasError.value = true
+}
+
+// Vue 组件渲染错误
+onErrorCaptured((err, instance, info) => {
+  console.error('[ErrorBoundary] 渲染错误:', err, info)
+  triggerError(formatError(err) + (info ? `\n(lifecycle: ${info})` : ''))
   return false
+})
+
+// 全局 JS 错误（在 setup 阶段立即注册，不等 onMounted）
+window.addEventListener('error', (event: ErrorEvent) => {
+  console.error('[ErrorBoundary] 全局错误:', event)
+  triggerError(`GlobalError: ${event.message}\n  at ${event.filename}:${event.lineno}:${event.colno}`)
+})
+
+window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
+  console.error('[ErrorBoundary] 未处理的 Promise 拒绝:', event.reason)
+  triggerError(`UnhandledRejection: ${formatError(event.reason)}`)
 })
 
 const handleReload = () => {
@@ -163,6 +195,34 @@ const handleGoHome = () => {
   flex-shrink: 0;
 }
 
+.error-details {
+  margin: 0 auto 24px;
+  max-width: 360px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.error-details summary {
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.error-pre {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 11px;
+  color: #64748b;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
 /* 暗色模式 */
 @media (prefers-color-scheme: dark) {
   .error-page {
@@ -206,6 +266,12 @@ const handleGoHome = () => {
   .btn--ghost:hover {
     background: #1e293b;
     border-color: #475569;
+  }
+
+  .error-pre {
+    background: #0f172a;
+    border-color: #334155;
+    color: #94a3b8;
   }
 }
 </style>

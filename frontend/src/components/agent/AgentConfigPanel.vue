@@ -148,7 +148,8 @@ function toggleTool(name: string) {
 onMounted(async () => {
   try {
     const res = await agentApi.listTools()
-    if (res.data) availableTools.value = res.data
+    const tools = res.data?.data ?? res.data
+    if (Array.isArray(tools)) availableTools.value = tools
   } catch {
     // ignore
   }

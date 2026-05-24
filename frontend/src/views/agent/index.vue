@@ -436,9 +436,16 @@ function handleConfigApply(config: typeof agentStore.config) {
   agentApi.updateConfig(config).catch(() => {})
 }
 
-// Load initial data
+// Load initial data — wrap in try/catch to prevent errors from
+// propagating through Suspense and triggering the ErrorBoundary.
 onMounted(async () => {
-  await loadInit()
+  try {
+    await loadInit()
+  } catch (e) {
+    console.error('[Agent] onMounted error:', e)
+    initError.value = true
+    initLoading.value = false
+  }
 })
 
 async function reloadInit() {
@@ -455,12 +462,16 @@ async function loadInit() {
       agentApi.listSessions(),
       agentApi.getConfig(),
     ])
-    if (toolsRes.data) agentStore.tools = toolsRes.data
-    if (sessionsRes.data?.sessions) agentStore.setSessions(sessionsRes.data.sessions)
-    if (configRes.data) agentStore.updateConfig(configRes.data)
+    // 后端返回格式: { success, data, ... }，axios 响应的 .data 是整个响应体
+    const toolsData = toolsRes.data?.data ?? toolsRes.data
+    const sessionsData = sessionsRes.data?.data ?? sessionsRes.data
+    const configData = configRes.data?.data ?? configRes.data
+    if (Array.isArray(toolsData)) agentStore.tools = toolsData
+    if (sessionsData?.sessions) agentStore.setSessions(sessionsData.sessions)
+    if (configData && typeof configData === 'object') agentStore.updateConfig(configData)
   } catch (e) {
     initError.value = true
-    message.error('Agent 初始化失败')
+    try { message.error('Agent 初始化失败') } catch { /* provider not ready */ }
   } finally {
     initLoading.value = false
   }

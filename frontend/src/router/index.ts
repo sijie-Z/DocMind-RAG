@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import Layout from '@/layouts/index.vue'
 import { useUserStore } from '@/stores/user'
-import { getToken } from '@/utils/auth'
+import { getToken, isTokenExpired, removeToken } from '@/utils/auth'
 
 let sessionValidated = false
 
@@ -232,9 +232,17 @@ const router = createRouter({
 
 router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()
-  const token = getToken()
+  let token = getToken()
   const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
   const requiresAdmin = to.matched.some((record) => record.meta.requiresAdmin)
+
+  // token 过期 → 直接清除，当无 token 处理
+  if (token && isTokenExpired()) {
+    removeToken()
+    userStore.logout()
+    token = undefined
+    sessionValidated = false
+  }
 
   // 已登录用户访问登录/注册页时，重定向到首页
   if (token && (to.name === 'Login' || to.name === 'Register')) {
@@ -252,13 +260,17 @@ router.beforeEach(async (to, from, next) => {
           await userStore.getUserInfo()
           sessionValidated = true
         } catch {
+          removeToken()
           userStore.logout()
+          sessionValidated = false
           next({ name: 'Login', query: { redirect: to.fullPath } })
           return
         }
       }
       if (!userStore.userInfo?.id) {
+        removeToken()
         userStore.logout()
+        sessionValidated = false
         next({ name: 'Login', query: { redirect: to.fullPath } })
         return
       }

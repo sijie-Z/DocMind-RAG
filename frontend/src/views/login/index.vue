@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-[#fafafa] dark:bg-[#0a0a0a] flex flex-col md:flex-row overflow-hidden transition-colors duration-300">
-    <!-- 左侧：品牌区（无刺眼色） -->
-    <div class="hidden md:flex md:w-[44%] bg-slate-900 dark:bg-slate-950 p-12 flex-col justify-between relative overflow-hidden">
+    <!-- 左侧：品牌区 -->
+    <div class="hidden md:flex md:w-[44%] bg-slate-900 dark:bg-slate-950 p-12 flex-col justify-between relative overflow-hidden login-animate-in">
       <div class="relative z-10 flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl bg-slate-700 flex items-center justify-center text-white font-bold text-sm">
           DM
@@ -19,11 +19,14 @@
       <div class="relative z-10 text-slate-500 text-sm">
         &copy; DocMind · 隐私 · 服务条款
       </div>
+      <!-- 装饰光晕 -->
+      <div class="absolute -bottom-20 -right-20 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
+      <div class="absolute top-1/3 -left-10 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl"></div>
     </div>
 
     <!-- 右侧：表单 -->
     <div class="flex-1 flex items-center justify-center p-6 md:p-12 bg-[#fafafa] dark:bg-[#0a0a0a]">
-      <div class="max-w-md w-full">
+      <div class="max-w-md w-full login-card-animate">
         <div class="md:hidden text-center mb-8">
           <div class="w-14 h-14 rounded-2xl bg-slate-800 dark:bg-slate-700 text-white font-bold text-lg flex items-center justify-center mx-auto mb-4">
             DM
@@ -98,7 +101,7 @@
                 :disabled="loading"
                 block
                 attr-type="submit"
-                class="!rounded-xl !h-12 !font-semibold bg-slate-800 hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                class="!rounded-xl !h-12 !font-semibold bg-slate-800 hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white btn-bounce"
               >
                 {{ isRegister ? t('login.register') : t('login.login') }}
               </n-button>

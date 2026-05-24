@@ -230,14 +230,18 @@
       <!-- 页面内容 -->
       <main class="flex-1 overflow-auto bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
         <router-view v-slot="{ Component, route }">
-          <Suspense>
-            <component :is="Component" :key="route.fullPath" />
-            <template #fallback>
-              <div class="flex items-center justify-center h-full">
-                <n-spin size="large" />
-              </div>
-            </template>
-          </Suspense>
+          <Transition name="page-slide" mode="out-in">
+            <div :key="route.fullPath" class="page-wrapper">
+              <Suspense>
+                <component :is="Component" />
+                <template #fallback>
+                  <div class="flex items-center justify-center h-full">
+                    <n-spin size="large" />
+                  </div>
+                </template>
+              </Suspense>
+            </div>
+          </Transition>
         </router-view>
       </main>
     </div>
@@ -573,5 +577,11 @@ const toggleTheme = () => {
     inset: 0;
     z-index: 50;
   }
+}
+
+/* 页面过渡容器 */
+.page-wrapper {
+  height: 100%;
+  min-height: 0;
 }
 </style>
