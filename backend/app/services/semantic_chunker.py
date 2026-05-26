@@ -1,20 +1,20 @@
-# -*- coding: utf-8 -*-
 import logging
 import re
-from typing import List, Dict, Any
+
 import numpy as np
+
 from app.services.embedding_service import embedding_service
 
 logger = logging.getLogger(__name__)
 
 class SemanticChunker:
     """语义分块器：使用 Embedding 相似度在语义断点处切分文本。"""
-    
+
     def __init__(self, buffer_size: int = 1, threshold_percentile: float = 0.9):
         self.buffer_size = buffer_size
         self.threshold_percentile = threshold_percentile
 
-    async def split_text(self, text: str) -> List[str]:
+    async def split_text(self, text: str) -> list[str]:
         if not text or len(text) < 500:
             return [text]
 
@@ -22,7 +22,7 @@ class SemanticChunker:
         # 匹配 中文句号、英文句号、感叹号、问号、换行符
         sentences = re.split(r'(?<=[。！？；\?！\n])', text)
         sentences = [s.strip() for s in sentences if s.strip()]
-        
+
         if len(sentences) < 5:
             return [text]
 
@@ -47,7 +47,7 @@ class SemanticChunker:
         for i in range(len(embeddings) - 1):
             emb1 = embeddings[i]
             emb2 = embeddings[i+1]
-            
+
             # 余弦相似度
             sim = np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2))
             distances.append(1 - sim)
@@ -55,7 +55,7 @@ class SemanticChunker:
         # 5. 寻找切分点 (距离突变的地方)
         if not distances:
             return [text]
-            
+
         threshold = np.percentile(distances, self.threshold_percentile * 100)
         indices_above_thresh = [i for i, x in enumerate(distances) if x > threshold]
 
@@ -67,7 +67,7 @@ class SemanticChunker:
             if len(chunk) > 100: # 避免太小的块
                 chunks.append(chunk)
                 start_index = index + 1
-        
+
         # 添加最后一块
         last_chunk = "".join(sentences[start_index:])
         if last_chunk:

@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
 """AuthService 单元测试 — 不依赖外部服务。"""
-import pytest
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, patch
+
 import jwt
-from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, AsyncMock
+import pytest
 
 from app.services.auth_service import AuthService
 
@@ -75,8 +75,8 @@ class TestTokenCreation:
         delta = timedelta(minutes=5)
         token = auth_service.create_access_token({"user_id": 1}, expires_delta=delta)
         payload = jwt.decode(token, auth_service.secret_key, algorithms=[auth_service.algorithm])
-        exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
-        now = datetime.now(timezone.utc)
+        exp = datetime.fromtimestamp(payload["exp"], tz=UTC)
+        now = datetime.now(UTC)
         # Should expire ~5 minutes from now (allow 10s tolerance)
         assert abs((exp - now).total_seconds() - 300) < 10
 
@@ -111,9 +111,9 @@ class TestTokenVerification:
         token = auth_service.create_access_token({"user_id": 1})
         # Try to verify with a different secret
         try:
-            payload = jwt.decode(token, "wrong-secret", algorithms=[auth_service.algorithm])
+            jwt.decode(token, "wrong-secret", algorithms=[auth_service.algorithm])
             # If it doesn't raise, the token was somehow valid with wrong key (shouldn't happen)
-            assert False, "Should have raised an error"
+            raise AssertionError("Should have raised an error")
         except jwt.PyJWTError:
             pass  # expected
 

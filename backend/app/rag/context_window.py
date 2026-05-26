@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Multi-turn context window management for RAG chat.
 
 Manages the token budget across system prompt, retrieved context, and
@@ -6,7 +5,6 @@ conversation history. When the budget is exceeded, older messages are
 compressed or dropped to make room for new interactions.
 """
 import logging
-from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +24,7 @@ def estimate_tokens(text: str) -> int:
     return max(1, int(len(text) / 2.5))
 
 
-def estimate_message_tokens(msg: Dict[str, str]) -> int:
+def estimate_message_tokens(msg: dict[str, str]) -> int:
     content = msg.get("content", "")
     return estimate_tokens(content) + 4  # role/formatting overhead
 
@@ -56,9 +54,9 @@ class ChatContextWindow:
         self,
         system_prompt: str,
         context_docs: str,
-        history: List[Dict[str, str]],
+        history: list[dict[str, str]],
         user_query: str,
-    ) -> List[Dict[str, str]]:
+    ) -> list[dict[str, str]]:
         """Build a message list that fits within the token budget.
 
         Returns: [system, ...history_tail, user_message]
@@ -99,8 +97,8 @@ class ChatContextWindow:
         return fitted
 
     def _fit_tail(
-        self, messages: List[Dict[str, str]], budget: int
-    ) -> List[Dict[str, str]]:
+        self, messages: list[dict[str, str]], budget: int
+    ) -> list[dict[str, str]]:
         """Fit as many recent messages as possible within budget (newest first)."""
         result = []
         used = 0
@@ -113,7 +111,7 @@ class ChatContextWindow:
         result.reverse()
         return result
 
-    def _compress_old(self, messages: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    def _compress_old(self, messages: list[dict[str, str]]) -> dict[str, str] | None:
         """Compress old messages using multi-layer cascade strategy.
 
         L1: Extract topic snippets (fast, no LLM needed)
@@ -178,16 +176,16 @@ class ChatContextWindow:
 def build_rag_messages(
     system_prompt: str,
     context_docs: str,
-    history: List[Dict[str, str]],
+    history: list[dict[str, str]],
     user_query: str,
     max_tokens: int = 8000,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Convenience function: build a token-budget-aware message list for RAG chat."""
     window = ChatContextWindow(max_tokens=max_tokens)
     fitted_history = window.fit_messages(system_prompt, context_docs, history, user_query)
 
     # Build final message list
-    messages: List[Dict[str, str]] = [
+    messages: list[dict[str, str]] = [
         {"role": "system", "content": system_prompt},
     ]
     messages.extend(fitted_history)

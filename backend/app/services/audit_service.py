@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
 import logging
-from typing import Optional, Any
+
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user_audit import UserActivityLog
 from app.core.database import AsyncSessionLocal
+from app.models.user_audit import UserActivityLog
 
 logger = logging.getLogger(__name__)
 
@@ -14,11 +13,11 @@ class AuditService:
     async def log_activity(
         user_id: int,
         action: str,
-        target_type: Optional[str] = None,
-        target_id: Optional[str] = None,
-        detail: Optional[str] = None,
-        request: Optional[Request] = None,
-        db: Optional[AsyncSession] = None
+        target_type: str | None = None,
+        target_id: str | None = None,
+        detail: str | None = None,
+        request: Request | None = None,
+        db: AsyncSession | None = None
     ) -> None:
         """记录用户活动日志 — 始终使用独立 session，不干扰调用方事务"""
         try:

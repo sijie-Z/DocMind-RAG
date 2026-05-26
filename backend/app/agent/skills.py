@@ -13,7 +13,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,8 @@ class Skill:
     id: str
     name: str
     description: str
-    trigger_patterns: List[str]  # Keywords/patterns that activate this skill
-    tool_sequence: List[Dict[str, Any]]  # Ordered list of tool calls
+    trigger_patterns: list[str]  # Keywords/patterns that activate this skill
+    tool_sequence: list[dict[str, Any]]  # Ordered list of tool calls
     success_count: int = 0
     failure_count: int = 0
     created_at: float = field(default_factory=time.time)
@@ -41,7 +41,7 @@ class Skill:
         """Skills unused for 7 days are considered stale."""
         return time.time() - self.last_used_at > 7 * 24 * 3600
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -55,7 +55,7 @@ class Skill:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Skill":
+    def from_dict(cls, data: dict[str, Any]) -> "Skill":
         return cls(**data)
 
 
@@ -63,7 +63,7 @@ class SkillManager:
     """Manages agent skills — creation, matching, and lifecycle."""
 
     def __init__(self):
-        self._skills: Dict[str, Skill] = {}
+        self._skills: dict[str, Skill] = {}
         self._loaded = False
 
     async def load(self) -> None:
@@ -101,7 +101,7 @@ class SkillManager:
         except Exception as e:
             logger.warning(f"Failed to save skills: {e}")
 
-    def match(self, query: str) -> Optional[Skill]:
+    def match(self, query: str) -> Skill | None:
         """Find the best matching skill for a query."""
         if not self._skills:
             return None
@@ -129,8 +129,8 @@ class SkillManager:
         self,
         name: str,
         description: str,
-        trigger_patterns: List[str],
-        tool_sequence: List[Dict[str, Any]],
+        trigger_patterns: list[str],
+        tool_sequence: list[dict[str, Any]],
     ) -> Skill:
         """Create a new skill from a successful tool sequence."""
         skill_id = hashlib.md5(f"{name}:{time.time()}".encode()).hexdigest()[:12]
@@ -172,11 +172,11 @@ class SkillManager:
             await self.save()
         return len(stale_ids)
 
-    def list_skills(self) -> List[Skill]:
+    def list_skills(self) -> list[Skill]:
         """List all active skills."""
         return [s for s in self._skills.values() if not s.is_stale]
 
-    def get_tool_hints_for_query(self, query: str) -> List[Dict[str, Any]]:
+    def get_tool_hints_for_query(self, query: str) -> list[dict[str, Any]]:
         """Get tool sequence hints from a matching skill for the Planner.
 
         Returns the tool_sequence from the best matching skill,
@@ -190,8 +190,8 @@ class SkillManager:
     async def learn_from_plan_success(
         self,
         query: str,
-        plan_steps: List[Dict[str, Any]],
-    ) -> Optional[Skill]:
+        plan_steps: list[dict[str, Any]],
+    ) -> Skill | None:
         """Learn a new skill from a successfully executed plan.
 
         Automatically extracts trigger patterns from the query

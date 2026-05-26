@@ -9,7 +9,7 @@ import logging
 import math
 import time
 from collections import OrderedDict
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 from app.core.config import settings
 
@@ -64,7 +64,7 @@ class RetrievalCache:
     def _key(self, query: str, organization_id: int, top_k: int) -> str:
         return f"org={organization_id}|topk={top_k}|q={query.strip().lower()}"
 
-    async def get(self, query: str, organization_id: int, top_k: int) -> Optional[List[Dict[str, Any]]]:
+    async def get(self, query: str, organization_id: int, top_k: int) -> list[dict[str, Any]] | None:
         if not settings.RAG_ENABLE_CACHE:
             return None
         key = self._key(query, organization_id, top_k)
@@ -87,7 +87,7 @@ class RetrievalCache:
             return None
         return row["value"]
 
-    async def set(self, query: str, organization_id: int, top_k: int, value: List[Dict[str, Any]]) -> None:
+    async def set(self, query: str, organization_id: int, top_k: int, value: list[dict[str, Any]]) -> None:
         if not settings.RAG_ENABLE_CACHE:
             return
         key = self._key(query, organization_id, top_k)
@@ -119,7 +119,7 @@ class SemanticCache:
         self.prefix = "rag:sem:"
         self._quantize_bits = 64
 
-    def _quantize(self, embedding: List[float]) -> int:
+    def _quantize(self, embedding: list[float]) -> int:
         """Quantize embedding to a compact integer for sorted set scoring."""
         if not embedding:
             return 0
@@ -130,21 +130,21 @@ class SemanticCache:
                 bits |= 1 << (i // step)
         return bits
 
-    def _cosine_similarity(self, v1: List[float], v2: List[float]) -> float:
+    def _cosine_similarity(self, v1: list[float], v2: list[float]) -> float:
         if not v1 or not v2 or len(v1) != len(v2):
             return 0.0
-        dot = sum(a * b for a, b in zip(v1, v2))
+        dot = sum(a * b for a, b in zip(v1, v2, strict=False))
         na = math.sqrt(sum(a * a for a in v1))
         nb = math.sqrt(sum(b * b for b in v2))
         if na == 0 or nb == 0:
             return 0.0
         return dot / (na * nb)
 
-    def _hash_key(self, embedding: List[float]) -> str:
+    def _hash_key(self, embedding: list[float]) -> str:
         vec_str = ",".join(f"{v:.4f}" for v in embedding[:20])
         return hashlib.md5(vec_str.encode()).hexdigest()[:16]
 
-    async def get(self, query_embedding: List[float]) -> Optional[Dict[str, Any]]:
+    async def get(self, query_embedding: list[float]) -> dict[str, Any] | None:
         """Find the most similar cached answer using sorted set candidates."""
         if not query_embedding:
             return None
@@ -187,7 +187,7 @@ class SemanticCache:
             logger.error(f"Semantic cache lookup failed: {e}")
             return None
 
-    async def set(self, query: str, embedding: List[float], answer: str, sources: List[Dict] = None) -> None:
+    async def set(self, query: str, embedding: list[float], answer: str, sources: list[dict] = None) -> None:
         """Store a Q&A pair in the semantic cache."""
         if not embedding:
             return

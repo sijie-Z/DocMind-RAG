@@ -3,9 +3,11 @@
 """
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import Integer, String, Boolean, DateTime, ForeignKey, Text
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+
 from app.core.database import Base
 
 
@@ -19,8 +21,8 @@ class Notification(Base):
     content: Mapped[str] = mapped_column(Text)
     type: Mapped[str] = mapped_column(String(50), default="system")  # system, document, chat
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
-    target_route: Mapped[Optional[str]] = mapped_column(String(100))
-    target_id: Mapped[Optional[str]] = mapped_column(String(100))
+    target_route: Mapped[str | None] = mapped_column(String(100))
+    target_id: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
 
     user: Mapped[Optional["User"]] = relationship("User", backref="notifications")

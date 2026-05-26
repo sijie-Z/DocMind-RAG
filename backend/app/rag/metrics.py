@@ -1,15 +1,15 @@
 """RAG performance metrics — standalone, no business logic coupling."""
 import time
-from typing import Dict, Any, List, Optional
 from collections import defaultdict
+from typing import Any
 
 
 class RAGMetrics:
     """Collects and reports RAG pipeline performance metrics."""
 
     def __init__(self):
-        self._counters: Dict[str, int] = defaultdict(int)
-        self._events: Dict[str, List[tuple]] = defaultdict(list)
+        self._counters: dict[str, int] = defaultdict(int)
+        self._events: dict[str, list[tuple]] = defaultdict(list)
 
     def inc(self, key: str, value: int = 1) -> None:
         self._counters[key] += value
@@ -33,7 +33,7 @@ class RAGMetrics:
         cutoff = now - window_seconds if window_seconds > 0 else 0
         return sum(1 for ts, _ in self._events.get(key, []) if ts >= cutoff)
 
-    def percentile(self, key: str, pct: float, window_seconds: int) -> Optional[float]:
+    def percentile(self, key: str, pct: float, window_seconds: int) -> float | None:
         now = time.time()
         cutoff = now - window_seconds if window_seconds > 0 else 0
         arr = sorted(v for ts, v in self._events.get(key, []) if ts >= cutoff)
@@ -42,7 +42,7 @@ class RAGMetrics:
         idx = int(len(arr) * pct)
         return arr[min(idx, len(arr) - 1)]
 
-    def get_snapshot(self, window_seconds: int = 0) -> Dict[str, Any]:
+    def get_snapshot(self, window_seconds: int = 0) -> dict[str, Any]:
         if window_seconds > 0:
             rt = max(1, self.window_sum("retrieval", window_seconds))
             rh = self.window_sum("retrieval_hit", window_seconds)

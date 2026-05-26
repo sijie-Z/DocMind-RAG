@@ -1,6 +1,4 @@
-# -*- coding: utf-8 -*-
 """Tests for RAG metrics."""
-import time
 from app.rag.metrics import RAGMetrics
 
 

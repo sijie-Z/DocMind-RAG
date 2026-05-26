@@ -1,6 +1,6 @@
-# -*- coding: utf-8 -*-
 """Tests for RAG cache modules (RetrievalCache, SemanticCache)."""
 import pytest
+
 from app.rag.cache import RetrievalCache, SemanticCache
 
 

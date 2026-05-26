@@ -1,8 +1,10 @@
 import logging
-from typing import BinaryIO
 from datetime import timedelta
+from typing import BinaryIO
+
 from minio import Minio
 from minio.error import S3Error
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)

@@ -1,15 +1,15 @@
-import logging
-import json
-import re
-from typing import List, Dict, Any, Optional, Tuple
-from collections import defaultdict
 import hashlib
+import json
+import logging
+import re
+from collections import defaultdict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 class GraphRAGService:
     def __init__(self):
-        self.graph: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+        self.graph: dict[str, dict[str, Any]] = defaultdict(lambda: {
             "entity_type": "UNKNOWN",
             "description": "",
             "relationships": [],
@@ -25,7 +25,7 @@ class GraphRAGService:
             "TECHNOLOGY": "技术"
         }
 
-    def extract_entities_with_llm(self, text: str, llm_client: Any = None) -> List[Dict[str, Any]]:
+    def extract_entities_with_llm(self, text: str, llm_client: Any = None) -> list[dict[str, Any]]:
         if not text or len(text) < 50:
             return []
 
@@ -51,14 +51,13 @@ JSON返回："""
                 )
                 content = response.choices[0].message.content
                 content = content.strip().strip('```json').strip('```').strip()
-                entities = json.loads(content)
-                return entities
+                return json.loads(content)
         except Exception as e:
             logger.warning(f"LLM entity extraction failed: {e}")
 
         return self._rule_based_extraction(text)
 
-    def _rule_based_extraction(self, text: str) -> List[Dict[str, Any]]:
+    def _rule_based_extraction(self, text: str) -> list[dict[str, Any]]:
         entities = []
 
         person_pattern = r'([A-Z\u4e00-\u9fa5][a-z\u4e00-\u9fa5]{1,20}(?:\s+[A-Z\u4e00-\u9fa5][a-z\u4e00-\u9fa5]{1,20})*(?:\s+(?:先生|女士|博士|教授|总监|经理|CEO|CTO|CFO|董事长|总裁|总经理))?)'
@@ -97,7 +96,7 @@ JSON返回："""
 
         return entities[:20]
 
-    def build_graph_from_entities(self, entities: List[Dict[str, Any]]) -> None:
+    def build_graph_from_entities(self, entities: list[dict[str, Any]]) -> None:
         for ent in entities:
             entity_name = ent.get("entity", "")
             if not entity_name:
@@ -125,7 +124,7 @@ JSON返回："""
     def _normalize_entity(self, entity: str) -> str:
         return hashlib.md5(entity.lower().encode()).hexdigest()[:16]
 
-    def search_graph(self, query: str, max_hops: int = 2) -> List[Dict[str, Any]]:
+    def search_graph(self, query: str, max_hops: int = 2) -> list[dict[str, Any]]:
         query_entities = self.extract_entities_with_llm(query)
         if not query_entities:
             return []
@@ -147,7 +146,7 @@ JSON返回："""
 
         return results
 
-    def get_subgraph_context(self, entities: List[str], max_hops: int = 1) -> str:
+    def get_subgraph_context(self, entities: list[str], max_hops: int = 1) -> str:
         context_parts = []
 
         for ent in entities:
@@ -161,7 +160,7 @@ JSON返回："""
             rels = []
             for rel in node.get("relationships", [])[:5]:
                 target_key = rel.get("target", "")
-                for name, data in self.graph.items():
+                for name, _data in self.graph.items():
                     if name == target_key:
                         rels.append(f"{name[:8]}...({rel.get('relation', 'RELATED')})")
                         break
@@ -175,7 +174,7 @@ JSON返回："""
 
         return "\n---\n".join(context_parts[:10])
 
-    def get_analytics(self) -> Dict[str, Any]:
+    def get_analytics(self) -> dict[str, Any]:
         type_counts = defaultdict(int)
         for node in self.graph.values():
             type_counts[node.get("entity_type", "UNKNOWN")] += 1

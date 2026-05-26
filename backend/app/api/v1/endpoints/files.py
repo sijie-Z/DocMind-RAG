@@ -1,26 +1,23 @@
 """
 文件上传API端点 - 已修复头像上传500错误
 """
-from typing import List, Optional
-from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from fastapi import Request
 
 from app.core.database import get_db
 from app.core.security import get_current_user, permission_required
-from app.models.user import User
+from app.exceptions import AppError
 from app.models.notification import Notification
-from app.services.file_service import file_service
-from app.services.audit_service import audit_service
-from app.schemas.file import (
-    FileUploadResponse, 
-    FileChunkUploadResponse,
-    FileListResponse,
-    FileDeleteResponse
-)
 from app.models.rbac import PermissionType
-from app.exceptions import NotFoundError, ValidationError, AuthorizationError, ConflictError, AppError
+from app.models.user import User
+from app.schemas.file import (
+    FileChunkUploadResponse,
+    FileDeleteResponse,
+    FileListResponse,
+    FileUploadResponse,
+)
+from app.services.audit_service import audit_service
+from app.services.file_service import file_service
 
 router = APIRouter()
 
@@ -28,8 +25,8 @@ router = APIRouter()
 async def upload_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    description: Optional[str] = Form(None),
-    tags: Optional[str] = Form(None),
+    description: str | None = Form(None),
+    tags: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -42,7 +39,7 @@ async def upload_file(
             file=file, organization_id=organization_id,
             user_id=current_user.id, description=description, tags=tag_list
         )
-        
+
         notification = Notification(
             user_id=current_user.id,
             title="文件上传成功",
@@ -67,13 +64,13 @@ async def upload_avatar(
     try:
         # 1. 确保用户对象绑定到当前异步 Session
         current_user = await db.merge(current_user)
-        
+
         # 2. 调用 service 处理文件上传
         avatar_url = await file_service.upload_avatar(file, current_user.id)
-        
+
         # 3. 更新数据库字段（避免类型检查将 ORM 列描述符误判为 Column[str]）
-        setattr(current_user, "avatar_url", avatar_url)
-        
+        current_user.avatar_url = avatar_url
+
         # 4. 创建成功通知
         notification = Notification(
             user_id=current_user.id,
@@ -82,12 +79,12 @@ async def upload_avatar(
             type="account"
         )
         db.add(notification)
-        
+
         await db.commit()
         await db.refresh(current_user)
-        
+
         return {"url": avatar_url, "success": True}
-        
+
     except Exception as e:
         await db.rollback()
         raise AppError(f"头像上传失败: {str(e)}")
@@ -114,8 +111,8 @@ async def upload_file_chunk(
 
 @router.get("/list", response_model=FileListResponse)
 async def get_document_list(
-    user_id: Optional[str] = None,
-    status: Optional[str] = None,
+    user_id: str | None = None,
+    status: str | None = None,
     skip: int = 0,
     limit: int = 20,
     current_user: User = Depends(get_current_user),
@@ -154,5 +151,4 @@ async def delete_document(
         return FileDeleteResponse(success=success, message="删除成功" if success else "删除失败")
     except Exception as e:
         raise AppError(str(e))
-         
-         
+

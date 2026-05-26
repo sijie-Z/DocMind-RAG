@@ -16,8 +16,7 @@ Event types:
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional
-
+from typing import Any, Literal
 
 EventType = Literal[
     "thinking",
@@ -50,7 +49,7 @@ class AgentEvent:
 
     # Tool context
     tool_name: str = ""
-    tool_args: Dict[str, Any] = field(default_factory=dict)
+    tool_args: dict[str, Any] = field(default_factory=dict)
     tool_call_id: str = ""
     tool_duration_ms: float = 0.0
 
@@ -58,7 +57,7 @@ class AgentEvent:
     plan_id: str = ""
     plan_step_id: str = ""
     plan_progress: float = -1.0  # -1 = not set; >= 0 = explicit progress value
-    dependencies: List[str] = field(default_factory=list)
+    dependencies: list[str] = field(default_factory=list)
     tool_hint: str = ""
     plan_step_status: str = ""
 
@@ -74,12 +73,12 @@ class AgentEvent:
     iteration: int = 0
     timestamp: float = field(default_factory=time.time)
 
-    def to_sse_dict(self) -> Dict[str, Any]:
+    def to_sse_dict(self) -> dict[str, Any]:
         """Serialize to a dict for SSE JSON output.
 
         Only includes non-empty/non-default fields to keep payloads small.
         """
-        d: Dict[str, Any] = {"type": self.type, "content": self.content}
+        d: dict[str, Any] = {"type": self.type, "content": self.content}
 
         if self.tool_name:
             d["tool_name"] = self.tool_name

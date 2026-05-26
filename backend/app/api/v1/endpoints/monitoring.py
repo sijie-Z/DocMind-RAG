@@ -1,51 +1,51 @@
-# -*- coding: utf-8 -*-
 """
 派聪明AI知识库系统 - 系统监控端点
 """
 
-from typing import Dict, Any, List
-from fastapi import APIRouter, Depends, status, Query, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
-import time
-import logging
 import hashlib
 import json
-from collections import deque
-from datetime import datetime, timedelta, timezone
+import logging
 import os
+import time
+from collections import deque
+from datetime import UTC, datetime
+from typing import Any
+
+from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-from app.core.database import get_db
-from app.models.user import User
-from app.models.document import Document
-from app.models.chat import ChatSession
-from app.models.organization import Organization
-from app.core.security import get_current_user, permission_required
-from app.models.rbac import PermissionType
-from app.core.middleware import metrics_collector
-from app.core.elasticsearch import get_elasticsearch
-from app.core.redis import redis_client
 from app.core.config import settings
+from app.core.database import get_db
+from app.core.elasticsearch import get_elasticsearch
+from app.core.middleware import metrics_collector
+from app.core.redis import redis_client
+from app.core.security import get_current_user, permission_required
 from app.exceptions import AuthenticationError
+from app.models.chat import ChatSession
+from app.models.document import Document
+from app.models.organization import Organization
+from app.models.rbac import PermissionType
+from app.models.user import User
 
 router = APIRouter()
 _recent_external_alerts: deque = deque(maxlen=max(50, int(settings.ALERT_RECENT_BUFFER_SIZE)))
-_in_memory_alert_dedup: Dict[str, float] = {}
+_in_memory_alert_dedup: dict[str, float] = {}
 
 @router.get("/stats", response_model=dict, summary="获取系统统计信息", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
 async def get_system_stats(
     db: AsyncSession = Depends(get_db)
 ):
     """获取系统统计信息（需要 VIEW_SYSTEM_HEALTH 权限）"""
-    
+
     # 获取真实统计数据
     user_count = await db.execute(select(func.count(User.id)))
     doc_count = await db.execute(select(func.count(Document.id)))
     org_count = await db.execute(select(func.count(Organization.id)))
     chat_count = await db.execute(select(func.count(ChatSession.id)))
-    
+
     return {
         "total_users": user_count.scalar() or 0,
         "total_files": doc_count.scalar() or 0,
@@ -59,7 +59,7 @@ async def get_monitoring_dashboard(
     db: AsyncSession = Depends(get_db)
 ):
     """获取监控仪表盘数据（需要 VIEW_SYSTEM_HEALTH 权限）"""
-    
+
     # 模拟系统指标（实际应从 psutil 或 Prometheus 获取）
     import psutil
     cpu_percent = psutil.cpu_percent()
@@ -72,10 +72,10 @@ async def get_monitoring_dashboard(
             load_average = [round(v, 2) for v in psutil.getloadavg()]
         except Exception:
             load_average = []
-    
+
     # 获取性能指标
     app_stats = await metrics_collector.get_stats()
-    
+
     # 获取 ES 健康状态
     es_health = "unknown"
     index_size_mb = 0.0
@@ -98,11 +98,11 @@ async def get_monitoring_dashboard(
             index_size_mb = 0.0
     except Exception:
         pass
-    
+
     # 统计知识库数据
     doc_count_res = await db.execute(select(func.count(Document.id)))
     chunk_count_res = await db.execute(select(func.sum(Document.chunk_count)))
-    
+
     return {
         "current": {
             "system": {
@@ -147,10 +147,10 @@ async def get_metrics(
     db: AsyncSession = Depends(get_db)
 ):
     """获取指标趋势数据（需要 VIEW_SYSTEM_HEALTH 权限）"""
-    
+
     # 获取性能指标历史
     history = await metrics_collector.get_history()
-    
+
     # 如果历史记录不足，返回当前值的模拟波动（用于演示）
     if len(history) < 2:
         now = int(time.time())
@@ -181,7 +181,7 @@ async def get_metrics(
                     "memory_percent": psutil.virtual_memory().percent,
                 })
         return {"data": data}
-        
+
     return {"data": history}
 
 @router.get("/alerts", response_model=dict, summary="获取系统告警", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
@@ -190,7 +190,7 @@ async def get_alerts(
     db: AsyncSession = Depends(get_db),
 ):
     """获取系统告警（需要 VIEW_SYSTEM_HEALTH 权限）"""
-    alerts: List[Dict[str, Any]] = []
+    alerts: list[dict[str, Any]] = []
     now = int(time.time())
     app_stats = await metrics_collector.get_stats()
 
@@ -308,7 +308,7 @@ async def receive_alertmanager_webhook(request: Request):
     now = int(time.time())
     received = 0
     deduplicated = 0
-    accepted_items: List[Dict[str, Any]] = []
+    accepted_items: list[dict[str, Any]] = []
     dedup_ttl = max(30, int(settings.ALERT_WEBHOOK_DEDUP_TTL_SECONDS))
 
     for item in alerts:
@@ -435,33 +435,34 @@ async def get_storage_analysis(
     获取存储分析数据
     """
     try:
-        from app.models.document import Document
         from sqlalchemy import func
-        
+
+        from app.models.document import Document
+
         # 1. 计算总使用空间
         size_stmt = select(func.sum(Document.file_size)).where(Document.organization_id == current_user.organization_id)
         total_size = (await db.execute(size_stmt)).scalar() or 0
-        
+
         # 2. 计算各类型占比
         type_stmt = select(Document.file_type, func.sum(Document.file_size)).where(
             Document.organization_id == current_user.organization_id
         ).group_by(Document.file_type)
         type_res = (await db.execute(type_stmt)).all()
-        
+
         type_stats = []
         for t, s in type_res:
             type_stats.append({
                 "type": t.value if hasattr(t, 'value') else str(t),
                 "size": s or 0
             })
-            
+
         # 3. 计算文档总数
         count_stmt = select(func.count(Document.id)).where(Document.organization_id == current_user.organization_id)
         total_count = (await db.execute(count_stmt)).scalar() or 0
-        
+
         # 设定一个默认上限 10GB
-        quota = 10 * 1024 * 1024 * 1024 
-        
+        quota = 10 * 1024 * 1024 * 1024
+
         return {
             "success": True,
             "data": {
@@ -517,7 +518,7 @@ async def health_check(
 
     return {
         "status": overall_status,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "services": services,
     }
 
@@ -529,7 +530,7 @@ async def get_system_logs(
     db: AsyncSession = Depends(get_db)
 ):
     """获取系统日志（需要 VIEW_SYSTEM_HEALTH 权限）"""
-    
+
     # 这里应该实现获取系统日志的逻辑
     return {
         "logs": [],
@@ -721,20 +722,26 @@ from pydantic import BaseModel, Field
 class EvalItem(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
     answer: str = Field(..., min_length=1, max_length=10000)
-    context: List[Dict[str, Any]] = Field(default_factory=list)
+    context: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class BatchEvalRequest(BaseModel):
-    items: List[EvalItem] = Field(..., min_length=1, max_length=20)
+    items: list[EvalItem] = Field(..., min_length=1, max_length=20)
 
 
 @router.post("/rag-eval", summary="RAG 质量评估（单条）", dependencies=[Depends(get_current_user)])
 async def rag_eval_single(item: EvalItem):
     """评估单条 RAG 回答的 Faithfulness / Relevancy / Context Precision。"""
     try:
-        from app.rag.evaluator import RAGEvaluator
-        from app.core.prometheus import RAG_EVAL_TOTAL, RAG_EVAL_FAITHFULNESS, RAG_EVAL_RELEVANCY, RAG_EVAL_CONTEXT_PRECISION
         from openai import AsyncOpenAI
+
+        from app.core.prometheus import (
+            RAG_EVAL_CONTEXT_PRECISION,
+            RAG_EVAL_FAITHFULNESS,
+            RAG_EVAL_RELEVANCY,
+            RAG_EVAL_TOTAL,
+        )
+        from app.rag.evaluator import RAGEvaluator
 
         client = AsyncOpenAI(
             api_key=settings.DEEPSEEK_API_KEY,
@@ -770,8 +777,9 @@ async def rag_eval_single(item: EvalItem):
 async def rag_eval_batch(body: BatchEvalRequest):
     """批量评估多条 RAG 回答，返回聚合指标。"""
     try:
-        from app.rag.evaluator import RAGEvaluator
         from openai import AsyncOpenAI
+
+        from app.rag.evaluator import RAGEvaluator
 
         client = AsyncOpenAI(
             api_key=settings.DEEPSEEK_API_KEY,

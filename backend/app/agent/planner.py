@@ -25,15 +25,16 @@ import logging
 import re
 import time
 import uuid
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any
 
 from openai import AsyncOpenAI
 
-from app.agent.events import AgentEvent
 from app.agent.config import AgentConfig
+from app.agent.events import AgentEvent
 from app.agent.registry import tool_registry
-from app.core.prometheus import AGENT_PLANNING_TOTAL, AGENT_PLANNING_LATENCY
+from app.core.prometheus import AGENT_PLANNING_LATENCY, AGENT_PLANNING_TOTAL
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +74,11 @@ class PlanStep:
     """A single step in an execution plan."""
     id: str
     description: str
-    dependencies: List[str] = field(default_factory=list)
-    tool_hint: Optional[str] = None
+    dependencies: list[str] = field(default_factory=list)
+    tool_hint: str | None = None
     status: str = "pending"  # pending, ready, running, completed, failed, skipped
-    result: Optional[str] = None
-    error_context: Optional[str] = None
+    result: str | None = None
+    error_context: str | None = None
     retry_count: int = 0
 
 
@@ -87,7 +88,7 @@ class Plan:
     id: str
     goal: str
     reasoning: str = ""
-    steps: List[PlanStep] = field(default_factory=list)
+    steps: list[PlanStep] = field(default_factory=list)
     completed_steps: int = 0
     failed_steps: int = 0
     created_at: float = field(default_factory=time.time)
@@ -106,7 +107,7 @@ class Plan:
     def is_complete(self) -> bool:
         return all(s.status in ("completed", "skipped", "failed") for s in self.steps)
 
-    def get_ready_steps(self) -> List[PlanStep]:
+    def get_ready_steps(self) -> list[PlanStep]:
         """Return steps whose dependencies are all satisfied."""
         completed_ids = {s.id for s in self.steps if s.status == "completed"}
         ready = []
@@ -128,9 +129,9 @@ class Planner:
     async def plan(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
         memory_context: str = "",
-    ) -> AsyncGenerator[AgentEvent, Optional[Plan]]:
+    ) -> AsyncGenerator[AgentEvent, Plan | None]:
         """Generate a plan, yielding thinking events as reasoning streams.
 
         Yields: thinking events during plan generation
@@ -150,7 +151,7 @@ class Planner:
         if memory_context:
             system_prompt += f"\n\n{memory_context}"
 
-        messages: List[Dict[str, Any]] = [
+        messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
         ]
         if history:
@@ -288,7 +289,7 @@ class Planner:
             lines.append(f"- **{t.name}**: {desc}")
         return "\n".join(lines) if lines else "(无可用工具)"
 
-    def _extract_json(self, text: str) -> Dict[str, Any]:
+    def _extract_json(self, text: str) -> dict[str, Any]:
         """Extract JSON from LLM response, handling markdown code fences."""
         # Try to find JSON inside ```json ... ``` blocks
         json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
@@ -314,7 +315,7 @@ class Planner:
 
         return {}
 
-    def _parse_plan(self, plan_id: str, data: Dict[str, Any]) -> Optional[Plan]:
+    def _parse_plan(self, plan_id: str, data: dict[str, Any]) -> Plan | None:
         """Parse plan JSON into a Plan object."""
         goal = data.get("goal", "")
         reasoning = data.get("reasoning", "")
@@ -409,7 +410,7 @@ class Planner:
             logger.debug("Failed to save plan to Redis", exc_info=True)
 
     @staticmethod
-    async def load_plan(plan_id: str) -> Optional[Plan]:
+    async def load_plan(plan_id: str) -> Plan | None:
         """Load a plan from Redis."""
         try:
             from app.core.redis import redis_client

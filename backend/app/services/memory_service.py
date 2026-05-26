@@ -1,16 +1,14 @@
-# -*- coding: utf-8 -*-
 """
 Agent 记忆系统服务
 支持短期记忆、长期记忆、工作记忆和反思记忆
 """
-import asyncio
 import json
-import math
-import hashlib
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Callable, Awaitable
-from collections import defaultdict
 import logging
+import math
+from collections import defaultdict
+from collections.abc import Awaitable, Callable
+from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +20,12 @@ class MemoryItem:
         content: str,
         memory_type: str = "short_term",
         importance: float = 0.5,
-        metadata: Dict[str, Any] = None,
-        embedding: Optional[List[float]] = None,
-        created_at: Optional[str] = None,
-        last_accessed: Optional[str] = None,
+        metadata: dict[str, Any] = None,
+        embedding: list[float] | None = None,
+        created_at: str | None = None,
+        last_accessed: str | None = None,
         access_count: int = 0,
-        item_id: Optional[str] = None,
+        item_id: str | None = None,
     ):
         self.content = content
         self.memory_type = memory_type
@@ -67,7 +65,7 @@ class MemoryItem:
         decay = 0.5 ** (age_hours / half_life_hours)
         return decay * self.importance
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         d = {
             "id": self.id,
@@ -89,7 +87,7 @@ class ShortTermMemory:
 
     def __init__(self, max_size: int = 20):
         self.max_size = max_size
-        self.buffer: List[MemoryItem] = []
+        self.buffer: list[MemoryItem] = []
 
     def add(self, item: MemoryItem) -> None:
         """添加记忆"""
@@ -97,11 +95,11 @@ class ShortTermMemory:
         if len(self.buffer) > self.max_size:
             self.buffer.pop(0)
 
-    def get_recent(self, n: int = 10) -> List[MemoryItem]:
+    def get_recent(self, n: int = 10) -> list[MemoryItem]:
         """获取最近的记忆"""
         return self.buffer[-n:]
 
-    def search(self, query: str, top_k: int = 5) -> List[MemoryItem]:
+    def search(self, query: str, top_k: int = 5) -> list[MemoryItem]:
         """简单关键词搜索"""
         results = []
         query_lower = query.lower()
@@ -117,7 +115,7 @@ class ShortTermMemory:
         """清空记忆"""
         self.buffer.clear()
 
-    def to_list(self) -> List[Dict]:
+    def to_list(self) -> list[dict]:
         """转换为列表"""
         return [item.to_dict() for item in self.buffer]
 
@@ -127,8 +125,8 @@ class LongTermMemory:
 
     def __init__(self, storage_backend: str = "memory"):
         self.storage_backend = storage_backend
-        self.memories: Dict[str, List[MemoryItem]] = defaultdict(list)
-        self.index: Dict[str, List[str]] = defaultdict(list)  # 简单倒排索引
+        self.memories: dict[str, list[MemoryItem]] = defaultdict(list)
+        self.index: dict[str, list[str]] = defaultdict(list)  # 简单倒排索引
 
     @staticmethod
     def _tokenize(text: str) -> set:
@@ -170,7 +168,7 @@ class LongTermMemory:
         top_k: int = 10,
         min_importance: float = 0.0,
         use_decay: bool = True
-    ) -> List[MemoryItem]:
+    ) -> list[MemoryItem]:
         """搜索记忆"""
         candidates = []
 
@@ -217,7 +215,7 @@ class LongTermMemory:
         start_time: datetime,
         end_time: datetime,
         memory_type: str = None
-    ) -> List[MemoryItem]:
+    ) -> list[MemoryItem]:
         """按时间范围获取记忆"""
         results = []
         candidates = []
@@ -234,7 +232,7 @@ class LongTermMemory:
 
         return sorted(results, key=lambda x: x.created_at, reverse=True)
 
-    def get_important_memories(self, top_k: int = 10) -> List[MemoryItem]:
+    def get_important_memories(self, top_k: int = 10) -> list[MemoryItem]:
         """获取重要记忆"""
         all_memories = []
         for mem_list in self.memories.values():
@@ -244,10 +242,10 @@ class LongTermMemory:
         return all_memories[:top_k]
 
     @staticmethod
-    def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    def _cosine_similarity(a: list[float], b: list[float]) -> float:
         if not a or not b or len(a) != len(b):
             return 0.0
-        dot = sum(x * y for x, y in zip(a, b))
+        dot = sum(x * y for x, y in zip(a, b, strict=False))
         na = math.sqrt(sum(x * x for x in a))
         nb = math.sqrt(sum(y * y for y in b))
         if na == 0.0 or nb == 0.0:
@@ -256,11 +254,11 @@ class LongTermMemory:
 
     def search_semantic(
         self,
-        query_embedding: List[float],
+        query_embedding: list[float],
         memory_type: str = None,
         top_k: int = 10,
         min_importance: float = 0.0,
-    ) -> List[MemoryItem]:
+    ) -> list[MemoryItem]:
         """基于向量相似度的语义搜索"""
         candidates = []
         if memory_type:
@@ -291,7 +289,7 @@ class LongTermMemory:
 
     def forget(self, memory_id: str) -> bool:
         """遗忘记忆"""
-        for memory_type, mem_list in self.memories.items():
+        for _memory_type, mem_list in self.memories.items():
             for i, item in enumerate(mem_list):
                 if item.id == memory_id:
                     mem_list.pop(i)
@@ -302,7 +300,7 @@ class LongTermMemory:
                     return True
         return False
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """转换为字典"""
         return {
             mem_type: [item.to_dict() for item in items]
@@ -314,10 +312,10 @@ class WorkingMemory:
     """工作记忆 - 当前任务状态"""
 
     def __init__(self):
-        self.state: Dict[str, Any] = {}
-        self.task_stack: List[Dict[str, Any]] = []
-        self.intermediate_results: Dict[str, Any] = {}
-        self.variables: Dict[str, Any] = {}
+        self.state: dict[str, Any] = {}
+        self.task_stack: list[dict[str, Any]] = []
+        self.intermediate_results: dict[str, Any] = {}
+        self.variables: dict[str, Any] = {}
 
     def set_state(self, key: str, value: Any) -> None:
         """设置状态"""
@@ -327,14 +325,14 @@ class WorkingMemory:
         """获取状态"""
         return self.state.get(key, default)
 
-    def push_task(self, task: Dict[str, Any]) -> None:
+    def push_task(self, task: dict[str, Any]) -> None:
         """推入任务"""
         self.task_stack.append({
             "task": task,
             "started_at": datetime.now().isoformat()
         })
 
-    def pop_task(self) -> Optional[Dict[str, Any]]:
+    def pop_task(self) -> dict[str, Any] | None:
         """弹出任务"""
         if self.task_stack:
             return self.task_stack.pop()
@@ -370,7 +368,7 @@ class WorkingMemory:
         self.intermediate_results.clear()
         self.variables.clear()
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """转换为字典"""
         return {
             "state": self.state,
@@ -384,11 +382,11 @@ class ReflectiveMemory:
     """反思记忆 - 高层洞察和经验"""
 
     def __init__(self):
-        self.insights: List[Dict[str, Any]] = []
-        self.patterns: List[Dict[str, Any]] = []
-        self.lessons: List[Dict[str, Any]] = []
+        self.insights: list[dict[str, Any]] = []
+        self.patterns: list[dict[str, Any]] = []
+        self.lessons: list[dict[str, Any]] = []
 
-    def add_insight(self, insight: str, context: Optional[Dict[str, Any]] = None) -> None:
+    def add_insight(self, insight: str, context: dict[str, Any] | None = None) -> None:
         """添加洞察"""
         self.insights.append({
             "content": insight,
@@ -396,7 +394,7 @@ class ReflectiveMemory:
             "created_at": datetime.now().isoformat()
         })
 
-    def add_pattern(self, pattern: str, examples: Optional[List[str]] = None) -> None:
+    def add_pattern(self, pattern: str, examples: list[str] | None = None) -> None:
         """添加模式"""
         self.patterns.append({
             "pattern": pattern,
@@ -404,7 +402,7 @@ class ReflectiveMemory:
             "created_at": datetime.now().isoformat()
         })
 
-    def add_lesson(self, lesson: str, trigger: Optional[str] = None, solution: Optional[str] = None) -> None:
+    def add_lesson(self, lesson: str, trigger: str | None = None, solution: str | None = None) -> None:
         """添加经验教训"""
         self.lessons.append({
             "lesson": lesson,
@@ -413,14 +411,14 @@ class ReflectiveMemory:
             "created_at": datetime.now().isoformat()
         })
 
-    def get_relevant_insights(self, context: str, top_k: int = 5) -> List[str]:
+    def get_relevant_insights(self, context: str, top_k: int = 5) -> list[str]:
         """获取相关洞察"""
         results = []
         context_lower = context.lower()
 
         for insight in self.insights:
             insight_content = insight["content"].lower()
-            context_data = insight.get("context", {})
+            insight.get("context", {})
 
             # 简单匹配
             if any(word in insight_content for word in context_lower.split()):
@@ -431,7 +429,7 @@ class ReflectiveMemory:
 
         return results
 
-    def get_lessons_for_situation(self, situation: str) -> List[Dict[str, Any]]:
+    def get_lessons_for_situation(self, situation: str) -> list[dict[str, Any]]:
         """获取相关的经验教训"""
         results = []
         situation_lower = situation.lower()
@@ -443,7 +441,7 @@ class ReflectiveMemory:
 
         return results
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """转换为字典"""
         return {
             "insights": self.insights,
@@ -479,9 +477,9 @@ class AgentMemorySystem:
 
         self.interaction_count = 0
         self._loaded = False
-        self._embedding_provider: Optional[Callable[[str], Awaitable[List[float]]]] = None
+        self._embedding_provider: Callable[[str], Awaitable[list[float]]] | None = None
 
-    def set_embedding_provider(self, provider: Callable[[str], Awaitable[List[float]]]) -> None:
+    def set_embedding_provider(self, provider: Callable[[str], Awaitable[list[float]]]) -> None:
         """设置 embedding 提供者，启用语义搜索"""
         self._embedding_provider = provider
 
@@ -540,7 +538,7 @@ class AgentMemorySystem:
         content: str,
         memory_type: str = "short_term",
         importance: float = 0.5,
-        metadata: Dict[str, Any] = None
+        metadata: dict[str, Any] = None
     ) -> MemoryItem:
         """存储记忆"""
         if not self._loaded:
@@ -578,9 +576,9 @@ class AgentMemorySystem:
     async def recall(
         self,
         query: str,
-        memory_types: List[str] = None,
+        memory_types: list[str] = None,
         top_k: int = 10
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """检索记忆。如果配置了 embedding provider，优先使用语义搜索。"""
         if not self._loaded:
             await self._load_from_redis()
@@ -652,7 +650,7 @@ class AgentMemorySystem:
         patterns = [(w, c) for w, c in word_freq.items() if c >= 2]
         patterns.sort(key=lambda x: x[1], reverse=True)
 
-        for word, count in patterns[:3]:
+        for word, _count in patterns[:3]:
             self.reflective.add_pattern(f"频繁提及: {word}")
 
         if patterns:
@@ -687,7 +685,7 @@ class AgentMemorySystem:
                 trigger=action
             )
 
-    def export(self) -> Dict[str, Any]:
+    def export(self) -> dict[str, Any]:
         """导出所有记忆"""
         return {
             "agent_id": self.agent_id,
@@ -698,7 +696,7 @@ class AgentMemorySystem:
             "interaction_count": self.interaction_count
         }
 
-    def import_data(self, data: Dict[str, Any]) -> None:
+    def import_data(self, data: dict[str, Any]) -> None:
         """导入记忆数据"""
         self.agent_id = data.get("agent_id", self.agent_id)
         self.interaction_count = data.get("interaction_count", 0)
@@ -736,7 +734,7 @@ class AgentMemorySystem:
 
 
 # 全局记忆系统实例
-memory_systems: Dict[str, AgentMemorySystem] = {}
+memory_systems: dict[str, AgentMemorySystem] = {}
 
 
 def get_memory_system(agent_id: str = "default") -> AgentMemorySystem:

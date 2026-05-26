@@ -2,19 +2,21 @@
 import asyncio
 import logging
 import math
-import re
 import time
-from typing import List, Dict, Any, Optional, Tuple
+from datetime import datetime
 
 from app.core.config import settings
 from app.core.elasticsearch import ElasticsearchTools
+from app.core.prometheus import RAG_ADAPTIVE_STRATEGY
 from app.rag.query_processor import (
-    QueryIntentClassifier, QueryIntent, extract_query_terms,
-    rewrite_query_candidates, rewrite_query_llm,
-    generate_hyde_doc, generate_multi_hyde_docs,
-    QueryComplexityClassifier, RetrievalStrategy,
+    QueryComplexityClassifier,
+    QueryIntentClassifier,
+    extract_query_terms,
+    generate_hyde_doc,
+    generate_multi_hyde_docs,
+    rewrite_query_candidates,
+    rewrite_query_llm,
 )
-from app.core.prometheus import RAG_QUERY_INTENT, RAG_ADAPTIVE_STRATEGY
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ class HybridRetriever:
         self.openai_client = openai_client
         self.embedding_client = embedding_client
 
-    async def get_embedding(self, text: str) -> List[float]:
+    async def get_embedding(self, text: str) -> list[float]:
         if not self.embedding_client:
             return []
         try:
@@ -41,7 +43,7 @@ class HybridRetriever:
 
     # ---- Keyword search ----
 
-    async def _keyword_hits(self, query: str, filters: List[Dict], candidate_size: int) -> List[Dict]:
+    async def _keyword_hits(self, query: str, filters: list[dict], candidate_size: int) -> list[dict]:
         enable_qr = bool(getattr(settings, "RAG_ENABLE_QUERY_REWRITE", True))
         rewrite_queries = rewrite_query_candidates(query)
         if enable_qr:
@@ -88,7 +90,7 @@ class HybridRetriever:
         tasks = [_es_search(rq) for rq in rewrite_queries]
         results = await asyncio.gather(*tasks)
 
-        merged: Dict[str, Dict] = {}
+        merged: dict[str, dict] = {}
         for res in results:
             for hit in res:
                 doc_id = str(hit.get("_id") or "")
@@ -113,8 +115,8 @@ class HybridRetriever:
     # ---- Vector search ----
 
     async def _vector_hits(
-        self, query: str, filters: List[Dict], candidate_size: int, enable_hyde: bool = True
-    ) -> Tuple[List[Dict], List[float]]:
+        self, query: str, filters: list[dict], candidate_size: int, enable_hyde: bool = True
+    ) -> tuple[list[dict], list[float]]:
         intent = QueryIntentClassifier.classify(query)
         query_vector = await self.get_embedding(query)
 
@@ -130,7 +132,7 @@ class HybridRetriever:
                 hyde_vectors = await asyncio.gather(*[self.get_embedding(d) for d in all_hyde if d])
                 if hyde_vectors:
                     avg_hyde = [sum(v[i] for v in hyde_vectors) / len(hyde_vectors) for i in range(len(query_vector))]
-                    embedding_to_search = [v1 * 0.6 + v2 * 0.4 for v1, v2 in zip(query_vector, avg_hyde)]
+                    embedding_to_search = [v1 * 0.6 + v2 * 0.4 for v1, v2 in zip(query_vector, avg_hyde, strict=False)]
                     logger.info(f"Multi-HyDE fusion: {len(hyde_vectors)} docs, 60/40 weight")
 
         if not embedding_to_search:
@@ -156,9 +158,9 @@ class HybridRetriever:
     # ---- RRF Fusion ----
 
     @staticmethod
-    def _rrf_fuse(keyword_hits: List[Dict], vector_hits: List[Dict]) -> List[Dict]:
+    def _rrf_fuse(keyword_hits: list[dict], vector_hits: list[dict]) -> list[dict]:
         k = 60.0
-        fused: Dict[str, Dict] = {}
+        fused: dict[str, dict] = {}
 
         for rank, hit in enumerate(keyword_hits, 1):
             doc_id = hit.get("_id")
@@ -196,10 +198,10 @@ class HybridRetriever:
     # ---- Post-processing ----
 
     @staticmethod
-    def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    def _cosine_similarity(a: list[float], b: list[float]) -> float:
         if not a or not b or len(a) != len(b):
             return 0.0
-        dot = sum(x * y for x, y in zip(a, b))
+        dot = sum(x * y for x, y in zip(a, b, strict=False))
         na = math.sqrt(sum(x * x for x in a))
         nb = math.sqrt(sum(y * y for y in b))
         if na == 0 or nb == 0:
@@ -207,7 +209,7 @@ class HybridRetriever:
         return dot / (na * nb)
 
     @staticmethod
-    def _mmr_select(candidates: List[Dict], query_vector: List[float], top_k: int, lambda_mult: float) -> List[Dict]:
+    def _mmr_select(candidates: list[dict], query_vector: list[float], top_k: int, lambda_mult: float) -> list[dict]:
         if not candidates:
             return []
         selected, remaining = [], candidates[:]
@@ -242,7 +244,7 @@ class HybridRetriever:
         return text[start: min(len(text), start + max_len)]
 
     @staticmethod
-    def _compute_overlap(text: str, terms: List[str]) -> float:
+    def _compute_overlap(text: str, terms: list[str]) -> float:
         if not terms:
             return 0.0
         lower = text.lower()
@@ -259,7 +261,7 @@ class HybridRetriever:
         return base
 
     @staticmethod
-    def _parse_timestamp(val) -> Optional[float]:
+    def _parse_timestamp(val) -> float | None:
         if isinstance(val, (int, float)):
             return float(val) if val > 0 else None
         if isinstance(val, str):
@@ -269,12 +271,11 @@ class HybridRetriever:
                 return None
         return None
 
-    def _post_process(self, query: str, fused_hits: List[Dict], top_k: int) -> List[Dict]:
+    def _post_process(self, query: str, fused_hits: list[dict], top_k: int) -> list[dict]:
         """Normalize, deduplicate, and filter retrieval results."""
-        from datetime import datetime
 
         documents = []
-        seen_docs: Dict[str, int] = {}
+        seen_docs: dict[str, int] = {}
         query_terms = extract_query_terms(query)
         raw_scores = [float(h.get("_score", 0)) for h in fused_hits]
         score_min, score_max = (min(raw_scores), max(raw_scores)) if raw_scores else (0, 0)
@@ -363,7 +364,7 @@ class HybridRetriever:
 
     # ---- Fallback ----
 
-    async def _fallback(self, query: str, filters: List[Dict], top_k: int) -> List[Dict]:
+    async def _fallback(self, query: str, filters: list[dict], top_k: int) -> list[dict]:
         try:
             broad = {
                 "size": top_k * 2, "min_score": 0.5,
@@ -396,8 +397,8 @@ class HybridRetriever:
         query: str,
         organization_id: int,
         top_k: int = 5,
-        document_ids: Optional[List[str]] = None,
-    ) -> Tuple[List[Dict], List[float]]:
+        document_ids: list[str] | None = None,
+    ) -> tuple[list[dict], list[float]]:
         """Execute adaptive retrieval and return (results, query_vector).
 
         Strategy is selected automatically based on query complexity:

@@ -4,18 +4,19 @@
 import logging
 import uuid
 from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 
 from app.core.database import get_db
+from app.core.elasticsearch import ElasticsearchTools
 from app.core.security import get_current_user
-from app.core.elasticsearch import ElasticsearchTools, get_elasticsearch
-from app.models.user import User
-from app.models.document import Document, DocumentStatus, DocumentType, DocumentChunk
-from app.models.chat import ChatSession, ChatMessage, MessageType, ChatSessionStatus
-from app.services.embedding_service import embedding_service
 from app.exceptions import AppError
+from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
+from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
+from app.models.user import User
+from app.services.embedding_service import embedding_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -167,7 +168,7 @@ async def seed_demo_data(
                 logger.warning(f"Embedding failed for {doc_data['title']}: {e}, using zero vectors")
                 embeddings = [[0.0] * 2048 for _ in doc_data["chunks"]]
 
-            for i, (chunk_text, embedding) in enumerate(zip(doc_data["chunks"], embeddings)):
+            for i, (chunk_text, embedding) in enumerate(zip(doc_data["chunks"], embeddings, strict=False)):
                 # 保存 chunk 到数据库
                 chunk = DocumentChunk(
                     id=str(uuid.uuid4()),

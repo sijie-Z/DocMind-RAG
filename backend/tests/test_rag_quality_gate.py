@@ -7,7 +7,6 @@ contain sufficient keyword overlap with expected answers.
 import json
 import os
 from collections import defaultdict
-from typing import Dict, List, Tuple
 
 import pytest
 
@@ -25,10 +24,10 @@ _RECALL_THRESHOLD = 0.6
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _load_dataset(path: str) -> List[Dict]:
+def _load_dataset(path: str) -> list[dict]:
     """Load JSONL eval dataset, one JSON object per line."""
-    entries: List[Dict] = []
-    with open(path, "r", encoding="utf-8") as f:
+    entries: list[dict] = []
+    with open(path, encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -43,7 +42,7 @@ def _load_dataset(path: str) -> List[Dict]:
     return entries
 
 
-def _extract_keywords(text: str) -> List[str]:
+def _extract_keywords(text: str) -> list[str]:
     """Split a keyword string into individual tokens.
 
     Keywords in expected_answer are space-separated (Chinese and English mixed).
@@ -52,7 +51,7 @@ def _extract_keywords(text: str) -> List[str]:
     return [kw.strip() for kw in text.split() if kw.strip()]
 
 
-def _compute_recall(keywords: List[str], context: str) -> Tuple[float, int, int]:
+def _compute_recall(keywords: list[str], context: str) -> tuple[float, int, int]:
     """Compute keyword recall: how many keywords appear in the context.
 
     Returns (recall, hits, total).
@@ -72,19 +71,19 @@ class TestRAGQualityGate:
     """Quality gate for the RAG evaluation dataset."""
 
     @pytest.fixture(scope="class")
-    def dataset(self) -> List[Dict]:
+    def dataset(self) -> list[dict]:
         if not os.path.exists(_DATASET_PATH):
             pytest.skip(f"Eval dataset not found: {_DATASET_PATH}")
         return _load_dataset(_DATASET_PATH)
 
     # -- Schema validation --------------------------------------------------
 
-    def test_dataset_not_empty(self, dataset: List[Dict]):
+    def test_dataset_not_empty(self, dataset: list[dict]):
         assert len(dataset) >= 20, (
             f"Expected at least 20 eval entries, got {len(dataset)}"
         )
 
-    def test_required_fields_present(self, dataset: List[Dict]):
+    def test_required_fields_present(self, dataset: list[dict]):
         required = {"question", "expected_answer", "context", "category"}
         for i, entry in enumerate(dataset):
             missing = required - set(entry.keys())
@@ -92,7 +91,7 @@ class TestRAGQualityGate:
                 f"Entry {i} missing fields: {missing}"
             )
 
-    def test_fields_are_non_empty_strings(self, dataset: List[Dict]):
+    def test_fields_are_non_empty_strings(self, dataset: list[dict]):
         for i, entry in enumerate(dataset):
             for field in ("question", "expected_answer", "context", "category"):
                 val = entry[field]
@@ -100,7 +99,7 @@ class TestRAGQualityGate:
                     f"Entry {i}, field '{field}' must be a non-empty string"
                 )
 
-    def test_context_length_in_range(self, dataset: List[Dict]):
+    def test_context_length_in_range(self, dataset: list[dict]):
         """Context snippets should be 100-300 chars (allow some slack)."""
         for i, entry in enumerate(dataset):
             ctx_len = len(entry["context"])
@@ -108,7 +107,7 @@ class TestRAGQualityGate:
                 f"Entry {i}: context length {ctx_len} outside acceptable range [50, 500]"
             )
 
-    def test_valid_categories(self, dataset: List[Dict]):
+    def test_valid_categories(self, dataset: list[dict]):
         valid_categories = {"事实检索", "技术概念", "配置参数", "操作流程", "故障排查"}
         for i, entry in enumerate(dataset):
             assert entry["category"] in valid_categories, (
@@ -117,14 +116,14 @@ class TestRAGQualityGate:
 
     # -- Category coverage --------------------------------------------------
 
-    def test_all_categories_covered(self, dataset: List[Dict]):
+    def test_all_categories_covered(self, dataset: list[dict]):
         expected_cats = {"事实检索", "技术概念", "配置参数", "操作流程", "故障排查"}
         present = {e["category"] for e in dataset}
         missing = expected_cats - present
         assert not missing, f"Missing categories: {missing}"
 
-    def test_minimum_per_category(self, dataset: List[Dict]):
-        counts: Dict[str, int] = defaultdict(int)
+    def test_minimum_per_category(self, dataset: list[dict]):
+        counts: dict[str, int] = defaultdict(int)
         for e in dataset:
             counts[e["category"]] += 1
         for cat, count in counts.items():
@@ -134,7 +133,7 @@ class TestRAGQualityGate:
 
     # -- Keyword recall (core quality metric) -------------------------------
 
-    def test_overall_keyword_recall(self, dataset: List[Dict]):
+    def test_overall_keyword_recall(self, dataset: list[dict]):
         """Assert that overall keyword recall across all entries exceeds threshold."""
         total_hits = 0
         total_keywords = 0
@@ -152,9 +151,9 @@ class TestRAGQualityGate:
             f"({total_hits}/{total_keywords} keywords found in context)"
         )
 
-    def test_per_category_keyword_recall(self, dataset: List[Dict]):
+    def test_per_category_keyword_recall(self, dataset: list[dict]):
         """Report per-category recall; no entry category should have zero recall."""
-        category_stats: Dict[str, Tuple[int, int]] = defaultdict(lambda: (0, 0))
+        category_stats: dict[str, tuple[int, int]] = defaultdict(lambda: (0, 0))
 
         for entry in dataset:
             cat = entry["category"]
@@ -182,7 +181,7 @@ class TestRAGQualityGate:
             + "\n".join(failures)
         )
 
-    def test_no_entry_has_zero_keyword_recall(self, dataset: List[Dict]):
+    def test_no_entry_has_zero_keyword_recall(self, dataset: list[dict]):
         """Every entry should have at least one keyword present in context."""
         zero_recall_entries = []
         for i, entry in enumerate(dataset):

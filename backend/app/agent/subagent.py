@@ -8,7 +8,7 @@ Uses PERAgentLoop with planning and reflection disabled for efficiency.
 """
 
 import logging
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
 
 from openai import AsyncOpenAI
 
@@ -72,19 +72,17 @@ async def delegate_task(
 
 async def run_parallel_subtasks(
     client: AsyncOpenAI,
-    tasks: List[str],
+    tasks: list[str],
     model: str = "deepseek-v4-flash",
     organization_id: int = 1,
-) -> List[str]:
+) -> list[str]:
     """Execute multiple subtasks in parallel and collect results.
 
     Returns a list of final answers from each subtask.
     """
-    import asyncio
-    results: List[str] = []
 
     async def _run_one(task: str) -> str:
-        answer_parts: List[str] = []
+        answer_parts: list[str] = []
         async for event in delegate_task(
             client=client,
             task=task,
@@ -97,11 +95,10 @@ async def run_parallel_subtasks(
                 answer_parts.append(f"[Error: {event.content}]")
         return "".join(answer_parts) or "No result."
 
-    results = await _gather_with_concurrency(
+    return await _gather_with_concurrency(
         [_run_one(task) for task in tasks],
         max_concurrency=3,
     )
-    return results
 
 
 async def _gather_with_concurrency(coros, max_concurrency: int = 3):

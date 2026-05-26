@@ -1,8 +1,8 @@
-# -*- coding: utf-8 -*-
 """Settings 配置验证测试。"""
-import pytest
 import os
 from unittest.mock import patch
+
+import pytest
 
 
 class TestSettingsValidation:

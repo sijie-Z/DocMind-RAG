@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Request ID middleware — assigns a unique request_id to every request.
 
 This middleware MUST be registered first (outermost) so that all downstream
@@ -6,6 +5,7 @@ middleware and handlers can access ``request.state.request_id``.
 """
 
 import uuid
+
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 

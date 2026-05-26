@@ -1,18 +1,17 @@
-# -*- coding: utf-8 -*-
-from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.security import get_current_user, permission_required
+from app.exceptions import NotFoundError
 from app.models.manual import SystemManual
+from app.models.rbac import PermissionType
 from app.models.user import User
 from app.services.auth_service import AuthService
-from app.core.security import get_current_user, permission_required
-from app.models.rbac import PermissionType
-from app.exceptions import NotFoundError
 
 router = APIRouter()
 auth_service = AuthService()
@@ -29,11 +28,11 @@ class ManualCreate(ManualBase):
     pass
 
 class ManualUpdate(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
-    category: Optional[str] = None
-    sort_order: Optional[int] = None
-    is_published: Optional[bool] = None
+    title: str | None = None
+    content: str | None = None
+    category: str | None = None
+    sort_order: int | None = None
+    is_published: bool | None = None
 
 class ManualResponse(ManualBase):
     id: int
@@ -43,24 +42,24 @@ class ManualResponse(ManualBase):
 
 # --- Endpoints ---
 
-@router.get("/", response_model=List[ManualResponse], summary="获取手册列表")
+@router.get("/", response_model=list[ManualResponse], summary="获取手册列表")
 async def get_manuals(
-    category: Optional[str] = None,
+    category: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """获取系统操作手册列表 (所有已登录用户可见)"""
     query = select(SystemManual)
-    
+
     # 如果不是管理员，只能看发布的
     if current_user.role != "admin":
-        query = query.where(SystemManual.is_published == True)
-        
+        query = query.where(SystemManual.is_published)
+
     if category:
         query = query.where(SystemManual.category == category)
-        
+
     query = query.order_by(SystemManual.sort_order.desc(), SystemManual.id.desc())
-    
+
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -73,14 +72,14 @@ async def get_manual(
     """获取单个手册详情"""
     query = select(SystemManual).where(SystemManual.id == manual_id)
     if current_user.role != "admin":
-        query = query.where(SystemManual.is_published == True)
-        
+        query = query.where(SystemManual.is_published)
+
     result = await db.execute(query)
     manual = result.scalar_one_or_none()
-    
+
     if not manual:
         raise NotFoundError(detail="手册不存在")
-        
+
     return manual
 
 @router.post("/", response_model=ManualResponse, summary="创建手册", dependencies=[Depends(permission_required([PermissionType.MANAGE_SYSTEM_PROMPTS]))])

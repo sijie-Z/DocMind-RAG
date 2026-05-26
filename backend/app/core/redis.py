@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Redis connection module with lazy-initialized holder pattern.
 
 Uses a proxy object for `redis_client` so that module-level imports
@@ -7,8 +6,8 @@ live client, even when the import happens before `init_redis()`.
 """
 
 import logging
+
 import redis.asyncio as redis
-from typing import Optional
 
 from app.core.config import settings
 
@@ -19,10 +18,10 @@ class _RedisHolder:
     """Lifecycle-managed Redis client holder."""
 
     def __init__(self):
-        self._client: Optional[redis.Redis] = None
+        self._client: redis.Redis | None = None
 
     @property
-    def client(self) -> Optional[redis.Redis]:
+    def client(self) -> redis.Redis | None:
         return self._client
 
     async def initialize(self):
@@ -130,7 +129,7 @@ class RedisTools:
             logger.warning(f"Redis cache set failed: {e}")
 
     @staticmethod
-    async def get_cache(key: str) -> Optional[str]:
+    async def get_cache(key: str) -> str | None:
         try:
             client = await get_redis()
             return await client.get(key)

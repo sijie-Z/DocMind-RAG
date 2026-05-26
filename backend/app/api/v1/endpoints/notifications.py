@@ -1,19 +1,18 @@
-# -*- coding: utf-8 -*-
-from typing import List, Optional
-from fastapi import APIRouter, Depends, Query, Body, WebSocket, WebSocketDisconnect
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, desc, func
-from pydantic import BaseModel, ConfigDict
-from datetime import datetime, timedelta, timezone
 import json
+from datetime import UTC, datetime, timedelta
+
+from fastapi import APIRouter, Body, Depends, Query, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import delete, desc, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models.user import User
-from app.models.notification import Notification
-from app.core.security import get_current_user
-from app.services.auth_service import auth_service
 from app.core.notification_ws import notification_ws_manager
+from app.core.security import get_current_user
 from app.exceptions import NotFoundError
+from app.models.notification import Notification
+from app.models.user import User
+from app.services.auth_service import auth_service
 
 router = APIRouter()
 
@@ -24,13 +23,13 @@ class NotificationResponse(BaseModel):
     content: str
     type: str
     is_read: bool
-    target_route: Optional[str] = None
-    target_id: Optional[str] = None
+    target_route: str | None = None
+    target_id: str | None = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
 class NotificationListResponse(BaseModel):
-    items: List[NotificationResponse]
+    items: list[NotificationResponse]
     total: int
     unread_count: int
     skip: int
@@ -42,7 +41,7 @@ class NotificationSummaryResponse(BaseModel):
     by_type: dict
 
 class NotificationBatchDeleteRequest(BaseModel):
-    ids: List[int]
+    ids: list[int]
 
 class NotificationCreate(BaseModel):
     title: str
@@ -84,8 +83,8 @@ async def get_notifications(
     skip: int = 0,
     limit: int = Query(20, ge=1, le=100),
     unread_only: bool = False,
-    type: Optional[str] = None,
-    q: Optional[str] = None,
+    type: str | None = None,
+    q: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -94,7 +93,7 @@ async def get_notifications(
         base_query = select(Notification).where(Notification.user_id == current_user.id)
 
         if unread_only:
-            base_query = base_query.where(Notification.is_read == False)
+            base_query = base_query.where(not Notification.is_read)
         if type:
             base_query = base_query.where(Notification.type == type)
         if q:
@@ -107,7 +106,7 @@ async def get_notifications(
         unread_result = await db.execute(
             select(func.count(Notification.id)).where(
                 Notification.user_id == current_user.id,
-                Notification.is_read == False
+                not Notification.is_read
             )
         )
         unread_count = int(unread_result.scalar() or 0)
@@ -128,7 +127,7 @@ async def get_notifications(
                             Notification.type, Notification.is_read, Notification.created_at
                             ).where(Notification.user_id == current_user.id)
         if unread_only:
-            base_query = base_query.where(Notification.is_read == False)
+            base_query = base_query.where(not Notification.is_read)
         if type:
             base_query = base_query.where(Notification.type == type)
         if q:
@@ -140,7 +139,7 @@ async def get_notifications(
         total = int((await db.execute(count_query)).scalar() or 0)
         unread_count = int((await db.execute(
             select(func.count(Notification.id)).where(
-                Notification.user_id == current_user.id, Notification.is_read == False
+                Notification.user_id == current_user.id, not Notification.is_read
             )
         )).scalar() or 0)
         rows = (await db.execute(
@@ -164,7 +163,7 @@ async def get_unread_count(
     """获取未读通知数量"""
     query = select(func.count(Notification.id)).where(
         Notification.user_id == current_user.id,
-        Notification.is_read == False
+        not Notification.is_read
     )
     result = await db.execute(query)
     count = result.scalar() or 0
@@ -181,7 +180,7 @@ async def get_notification_summary(
     unread_result = await db.execute(
         select(func.count(Notification.id)).where(
             Notification.user_id == current_user.id,
-            Notification.is_read == False
+            not Notification.is_read
         )
     )
     type_result = await db.execute(
@@ -213,10 +212,10 @@ async def mark_as_read(
         )
     )
     notification = result.scalar_one_or_none()
-    
+
     if not notification:
         raise NotFoundError(detail="通知不存在")
-        
+
     await db.execute(
         update(Notification)
         .where(
@@ -238,7 +237,7 @@ async def mark_all_as_read(
         update(Notification)
         .where(
             Notification.user_id == current_user.id,
-            Notification.is_read == False
+            not Notification.is_read
         )
         .values(is_read=True)
     )
@@ -288,13 +287,13 @@ async def create_notification(
     title: str,
     content: str,
     type: str = "system",
-    target_route: Optional[str] = None,
-    target_id: Optional[str] = None,
+    target_route: str | None = None,
+    target_id: str | None = None,
 ):
     """创建通知（内部使用）并推送实时消息，同一 title+user 1 分钟内去重"""
-    from sqlalchemy import select, and_
+    from sqlalchemy import and_, select
 
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=1)
+    cutoff = datetime.now(UTC) - timedelta(minutes=1)
     existing = (
         await db.execute(
             select(Notification).where(

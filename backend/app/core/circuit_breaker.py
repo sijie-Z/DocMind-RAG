@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 企业级熔断器 - 防止系统雪崩，提供优雅降级方案
 小白解释：就像家里的保险丝，如果某个外部服务（比如 AI 接口）一直报错，
@@ -9,8 +8,9 @@ import asyncio
 import functools
 import logging
 import time
+from collections.abc import Callable  # 补全了 List 导入
 from enum import Enum
-from typing import Callable, Any, Dict, Optional, Type, List  # 补全了 List 导入
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +28,13 @@ class CircuitBreaker:
         name: str,
         failure_threshold: int = 5,      # 连续失败多少次开启熔断
         recovery_timeout: int = 30,      # 熔断后等待多久尝试恢复（秒）
-        expected_exception: Type[Exception] = Exception
+        expected_exception: type[Exception] = Exception
     ):
         self.name = name
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.expected_exception = expected_exception
-        
+
         self.state = CircuitState.CLOSED
         self.failure_count = 0
         self.last_failure_time = 0.0
@@ -64,34 +64,32 @@ class CircuitBreaker:
                     self._handle_failure(e)
                     return self._get_fallback_value(func)
             return async_wrapper
-        else:
-            @functools.wraps(func)
-            def sync_wrapper(*args, **kwargs):
-                if self.state == CircuitState.OPEN:
-                    if time.time() - self.last_failure_time > self.recovery_timeout:
-                        self.state = CircuitState.HALF_OPEN
-                    else:
-                        return self._get_fallback_value(func)
-                try:
-                    result = func(*args, **kwargs)
-                    if self.state == CircuitState.HALF_OPEN:
-                        self._reset()
-                    return result
-                except self.expected_exception as e:
-                    self._handle_failure(e)
+        @functools.wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            if self.state == CircuitState.OPEN:
+                if time.time() - self.last_failure_time > self.recovery_timeout:
+                    self.state = CircuitState.HALF_OPEN
+                else:
                     return self._get_fallback_value(func)
-            return sync_wrapper
+            try:
+                result = func(*args, **kwargs)
+                if self.state == CircuitState.HALF_OPEN:
+                    self._reset()
+                return result
+            except self.expected_exception as e:
+                self._handle_failure(e)
+                return self._get_fallback_value(func)
+        return sync_wrapper
 
     def _handle_failure(self, error: Exception):
         self.failure_count += 1
         self.last_failure_time = time.time()
-        
+
         logger.error(f"❌ 熔断器 [{self.name}] 发生故障 ({self.failure_count}/{self.failure_threshold}): {str(error)}")
-        
-        if self.failure_count >= self.failure_threshold:
-            if self.state != CircuitState.OPEN:
-                logger.critical(f"🚨 熔断器 [{self.name}] 达到阈值，正式开启熔断！")
-                self.state = CircuitState.OPEN
+
+        if self.failure_count >= self.failure_threshold and self.state != CircuitState.OPEN:
+            logger.critical(f"🚨 熔断器 [{self.name}] 达到阈值，正式开启熔断！")
+            self.state = CircuitState.OPEN
 
     def _reset(self):
         self.state = CircuitState.CLOSED
@@ -102,18 +100,18 @@ class CircuitBreaker:
         """根据函数返回类型提供降级后的默认值"""
         # 这里可以根据实际需要扩展更复杂的降级逻辑
         logger.info(f"💡 熔断器 [{self.name}] 触发降级逻辑")
-        
+
         # 获取函数的返回注解（如果有的话）
         # 注意：在 Python 3.9+ 中，typing.List 和 list 有时表现不一，这里同时检查
         return_type = getattr(func, '__annotations__', {}).get('return')
-        
-        if return_type in (list, List):
+
+        if return_type in (list, list):
             return []
-        if return_type in (dict, Dict):
+        if return_type in (dict, dict):
             return {"error": "service temporarily unavailable", "fallback": True}
         if return_type == str:
             return "服务暂时繁忙，请稍后再试。"
-            
+
         return None
 
 # 定义常用的熔断器实例

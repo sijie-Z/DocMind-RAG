@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
 """AI and RAG settings — LLM, embedding, reranker, vector search, caching."""
 
-from typing import Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,9 +30,9 @@ class AISettings(BaseSettings):
     LOCAL_EMBEDDING_MODEL: str = "nomic-embed-text"
 
     # Embedding
-    EMBEDDING_API_KEY: Optional[str] = None
+    EMBEDDING_API_KEY: str | None = None
     EMBEDDING_API_URL: str = "https://open.bigmodel.cn/api/paas/v4/"
-    EMBEDDING_BASE_URL: Optional[str] = None
+    EMBEDDING_BASE_URL: str | None = None
     EMBEDDING_MODEL: str = "embedding-3"
 
     # Vector search
@@ -56,14 +55,14 @@ class AISettings(BaseSettings):
     RAG_RERANK_TIMEOUT_SECONDS: float = 8.0
 
     # Reranker API (supports alternate env var names)
-    RERANK_API_KEY: Optional[str] = None
-    RERANK_API_URL: Optional[str] = "https://open.bigmodel.cn/api/paas/v4/"
+    RERANK_API_KEY: str | None = None
+    RERANK_API_URL: str | None = "https://open.bigmodel.cn/api/paas/v4/"
     RERANK_MODEL: str = "rerank"
 
     # Legacy reranker env var aliases
-    RAG_RERANK_MODEL: Optional[str] = None
-    RAG_RERANK_API_KEY: Optional[str] = None
-    RAG_RERANK_API_URL: Optional[str] = None
+    RAG_RERANK_MODEL: str | None = None
+    RAG_RERANK_API_KEY: str | None = None
+    RAG_RERANK_API_URL: str | None = None
 
     # Retrieval cache + retry
     RAG_ENABLE_CACHE: bool = True

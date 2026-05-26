@@ -8,13 +8,13 @@ page reloads and server restarts.
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional
+from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
 
 Personality = Literal["precise", "creative", "balanced"]
 
-DEFAULT_DISABLED_TOOLS: List[str] = ["execute_python", "execute_sql"]
+DEFAULT_DISABLED_TOOLS: list[str] = ["execute_python", "execute_sql"]
 
 
 @dataclass
@@ -40,11 +40,11 @@ class AgentConfig:
     enable_thinking: bool = True
 
     # ── Tool filtering ──
-    tool_tags: Optional[List[str]] = None
-    disabled_tools: List[str] = field(default_factory=lambda: list(DEFAULT_DISABLED_TOOLS))
+    tool_tags: list[str] | None = None
+    disabled_tools: list[str] = field(default_factory=lambda: list(DEFAULT_DISABLED_TOOLS))
 
     # ── System prompt ──
-    system_prompt_override: Optional[str] = None
+    system_prompt_override: str | None = None
 
     # ── Personality ──
     personality: Personality = "balanced"

@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
 """Knowledge Base API 集成测试 — 知识库查询与统计。"""
-import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
+
 from app.core.database import get_db
 from app.core.security import get_current_user
 
@@ -12,6 +12,18 @@ from app.core.security import get_current_user
 def client():
     from app.main import app
     return TestClient(app)
+
+
+class _AsyncCtxMgr:
+    """支持 async with 的 mock 上下文管理器。"""
+    def __init__(self, db):
+        self._db = db
+
+    async def __aenter__(self):
+        return self._db
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return False
 
 
 def _make_mock_user():
@@ -68,8 +80,8 @@ def _override_get_db(mock_db=None):
         mock_db.execute = AsyncMock(return_value=MagicMock())
         mock_db.merge = MagicMock(return_value=_make_mock_user())
         mock_db.get = AsyncMock(return_value=_make_mock_db_user())
-        mock_db.delete = MagicMock()
-        mock_db.begin_nested = AsyncMock()
+        mock_db.delete = AsyncMock()
+        mock_db.begin_nested = MagicMock(return_value=_AsyncCtxMgr(mock_db))
 
     async def _override():
         yield mock_db

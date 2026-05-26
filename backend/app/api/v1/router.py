@@ -1,11 +1,27 @@
-# -*- coding: utf-8 -*-
 """
 派聪明AI知识库系统 - API路由模块
 """
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, users, files, chat, knowledge, organizations, monitoring, documents, notifications, prompts, manuals, workflow, memory, agent, demo, user_settings
+from app.api.v1.endpoints import (
+    agent,
+    auth,
+    chat,
+    demo,
+    documents,
+    files,
+    knowledge,
+    manuals,
+    memory,
+    monitoring,
+    notifications,
+    organizations,
+    prompts,
+    user_settings,
+    users,
+    workflow,
+)
 
 # 创建API路由
 api_router = APIRouter()

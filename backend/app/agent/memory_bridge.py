@@ -11,14 +11,14 @@ This bridge provides the agent with:
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
+from app.core.prometheus import AGENT_MEMORY_RECALLS
 from app.services.memory_service import (
     AgentMemorySystem,
-    get_memory_system,
     MemoryItem,
+    get_memory_system,
 )
-from app.core.prometheus import AGENT_MEMORY_RECALLS
 
 logger = logging.getLogger(__name__)
 
@@ -106,11 +106,11 @@ class AgentMemoryBridge:
 
     # ── Working memory (Phase 2: Execution) ──
 
-    def store_step_result(self, step_id: str, result: Dict[str, Any]) -> None:
+    def store_step_result(self, step_id: str, result: dict[str, Any]) -> None:
         """Store a completed plan step result in WorkingMemory."""
         self.system.working.set_result(step_id, result)
 
-    def get_step_result(self, step_id: str) -> Optional[Dict[str, Any]]:
+    def get_step_result(self, step_id: str) -> dict[str, Any] | None:
         """Retrieve a previous step result for dependent steps."""
         return self.system.working.get_result(step_id)
 
@@ -118,7 +118,7 @@ class AgentMemoryBridge:
         """Push a plan step onto the task stack."""
         self.system.working.push_task({"step_id": step_id, "description": description})
 
-    def pop_task(self) -> Optional[Dict[str, Any]]:
+    def pop_task(self) -> dict[str, Any] | None:
         """Pop the completed task from the stack."""
         return self.system.working.pop_task()
 
@@ -126,7 +126,7 @@ class AgentMemoryBridge:
         """Set a variable in WorkingMemory for template resolution."""
         self.system.working.set_variable(key, value)
 
-    def get_all_results(self) -> Dict[str, Any]:
+    def get_all_results(self) -> dict[str, Any]:
         """Get all intermediate results for reflection."""
         return dict(self.system.working.intermediate_results)
 
@@ -145,7 +145,7 @@ class AgentMemoryBridge:
         except Exception as e:
             logger.warning(f"Failed to record experience: {e}")
 
-    async def record_insight(self, insight: str, context: Optional[Dict] = None) -> None:
+    async def record_insight(self, insight: str, context: dict | None = None) -> None:
         """Record a high-level insight from reflection."""
         try:
             self.system.reflective.add_insight(insight, context)
@@ -154,7 +154,7 @@ class AgentMemoryBridge:
             logger.warning(f"Failed to record insight: {e}")
 
     async def record_lesson(
-        self, lesson: str, trigger: Optional[str] = None, solution: Optional[str] = None
+        self, lesson: str, trigger: str | None = None, solution: str | None = None
     ) -> None:
         """Record a lesson learned from a failure."""
         try:
@@ -174,7 +174,7 @@ class AgentMemoryBridge:
 
     # ── Memory export/import ──
 
-    def export_state(self) -> Dict[str, Any]:
+    def export_state(self) -> dict[str, Any]:
         """Export working + short-term state for session persistence."""
         return {
             "working": self.system.working.to_dict(),
@@ -182,7 +182,7 @@ class AgentMemoryBridge:
             "interaction_count": self.system.interaction_count,
         }
 
-    def load_state(self, state: Dict[str, Any]) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         """Restore working + short-term state from a saved session."""
         if "working" in state:
             w = state["working"]

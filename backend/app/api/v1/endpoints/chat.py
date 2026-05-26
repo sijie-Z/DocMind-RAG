@@ -3,27 +3,25 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Optional, List, AsyncGenerator
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends, Body
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
+from sqlalchemy import delete, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, func, delete, or_
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.core.database import get_db, AsyncSessionLocal
-from app.core.config import settings
-from app.models.user import User
-from app.models.chat import ChatSession, ChatMessage, ChatSessionStatus, MessageType
+from app.core.database import AsyncSessionLocal, get_db
+from app.core.security import get_current_user
+from app.exceptions import AuthorizationError, NotFoundError, ValidationError
+from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.document import Document
 from app.models.prompt import PromptTemplate
-from app.services.auth_service import auth_service
-from app.services.rag_service import rag_service
+from app.models.user import User
 from app.rag.cache import SemanticCache
-from app.services.memory_service import get_memory_system
-from app.core.security import get_current_user
-from app.exceptions import NotFoundError, AuthorizationError, ValidationError
 from app.schemas.chat import ChatSessionCreate, ChatStreamRequest, FeedbackRequest
+from app.services.auth_service import auth_service
+from app.services.memory_service import get_memory_system
+from app.services.rag_service import rag_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -148,7 +146,7 @@ async def get_system_prompt(
 
     result = await session.execute(
         select(PromptTemplate)
-        .where(PromptTemplate.category == "rag", PromptTemplate.is_active == True)
+        .where(PromptTemplate.category == "rag", PromptTemplate.is_active)
         .order_by(desc(PromptTemplate.updated_at), desc(PromptTemplate.id))
         .limit(1)
     )
@@ -406,10 +404,10 @@ async def get_conversations(
         if current_user.organization_id:
             org_filter = or_(
                 ChatSession.organization_id == current_user.organization_id,
-                ChatSession.organization_id == None,
+                ChatSession.organization_id is None,
             )
         else:
-            org_filter = ChatSession.organization_id == None
+            org_filter = ChatSession.organization_id is None
 
         total_query = select(func.count(ChatSession.id)).where(
             ChatSession.user_id == current_user.id,
@@ -691,7 +689,7 @@ async def get_conversation(
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -722,7 +720,7 @@ async def get_rag_metrics(
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    conversation_id: Optional[str] = Query(None),
+    conversation_id: str | None = Query(None),
 ):
     # Extract token from Sec-WebSocket-Protocol header (auth.<token>)
     # Falls back to query param for backward compatibility
@@ -829,7 +827,7 @@ async def websocket_endpoint(
                                     "sources": event.sources,
                                     "is_cached": event.is_cached,
                                 }), websocket)
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             if pipeline_task.done():
                                 # Drain remaining events
                                 while not queue.empty():
@@ -894,8 +892,8 @@ async def chat_stream_endpoint(
 
             # ── Agent mode: delegate to PER agent ──────────────────────────
             if body.useAgent:
-                from app.agent.service import agent_service
                 from app.agent.config import AgentConfig
+                from app.agent.service import agent_service
 
                 config = AgentConfig(
                     enable_tools=True,
@@ -1042,7 +1040,7 @@ async def chat_stream_endpoint(
                                 "sources": event.sources,
                                 "is_cached": event.is_cached,
                             })
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         if pipeline_task.done():
                             # Drain remaining events
                             while not queue.empty():

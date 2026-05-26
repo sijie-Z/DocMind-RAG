@@ -1,31 +1,31 @@
-# -*- coding: utf-8 -*-
 """
 Agent 工作流 API 端点
 """
 import asyncio
 import json
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.exceptions import AppError, NotFoundError, ValidationError
 from app.models.user import User
-from app.models.workflow import Workflow, WorkflowExecution, NodeDefinition
+from app.models.workflow import NodeDefinition, Workflow, WorkflowExecution
 from app.schemas.workflow import (
-    WorkflowCreate, WorkflowUpdate, WorkflowResponse,
-    WorkflowExecuteRequest, ExecutionResponse, NodeDefinitionResponse
+    WorkflowCreate,
+    WorkflowUpdate,
 )
-from app.services.workflow_engine import WorkflowEngine, WorkflowConfig
-from app.exceptions import NotFoundError, ValidationError, AppError
+from app.services.workflow_engine import WorkflowEngine
 
 router = APIRouter()
 
 
-@router.get("/", response_model=Dict[str, Any])
+@router.get("/", response_model=dict[str, Any])
 async def list_workflows(
     skip: int = 0,
     limit: int = 20,
@@ -34,11 +34,11 @@ async def list_workflows(
 ):
     """获取工作流列表"""
     # 统计总数
-    count_stmt = select(func.count(Workflow.id)).where(Workflow.is_active == True)
+    count_stmt = select(func.count(Workflow.id)).where(Workflow.is_active)
     total = (await db.execute(count_stmt)).scalar() or 0
 
     # 查询列表
-    stmt = select(Workflow).where(Workflow.is_active == True).order_by(desc(Workflow.updated_at)).offset(skip).limit(limit)
+    stmt = select(Workflow).where(Workflow.is_active).order_by(desc(Workflow.updated_at)).offset(skip).limit(limit)
     result = await db.execute(stmt)
     workflows = result.scalars().all()
 
@@ -60,7 +60,7 @@ async def list_workflows(
     }
 
 
-@router.post("/", response_model=Dict[str, Any])
+@router.post("/", response_model=dict[str, Any])
 async def create_workflow(
     workflow_in: WorkflowCreate,
     request: Request,
@@ -90,7 +90,7 @@ async def create_workflow(
     }
 
 
-@router.get("/{workflow_id}", response_model=Dict[str, Any])
+@router.get("/{workflow_id}", response_model=dict[str, Any])
 async def get_workflow(
     workflow_id: int,
     current_user: User = Depends(get_current_user),
@@ -117,7 +117,7 @@ async def get_workflow(
     }
 
 
-@router.put("/{workflow_id}", response_model=Dict[str, Any])
+@router.put("/{workflow_id}", response_model=dict[str, Any])
 async def update_workflow(
     workflow_id: int,
     workflow_in: WorkflowUpdate,
@@ -177,13 +177,13 @@ async def delete_workflow(
 async def execute_workflow(
     workflow_id: int,
     request: Request,
-    body: Optional[Dict[str, Any]] = None,
+    body: dict[str, Any] | None = None,
     stream: bool = True,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """执行工作流 - 支持流式和非流式两种模式"""
-    result = await db.execute(select(Workflow).where(Workflow.id == workflow_id, Workflow.is_active == True))
+    result = await db.execute(select(Workflow).where(Workflow.id == workflow_id, Workflow.is_active))
     workflow = result.scalar_one_or_none()
 
     if not workflow:
@@ -217,7 +217,7 @@ async def execute_workflow(
                 # 收集所有事件
                 events_queue = asyncio.Queue()
 
-                async def callback(event_type: str, data: Dict[str, Any]):
+                async def callback(event_type: str, data: dict[str, Any]):
                     await events_queue.put({"event": event_type, "data": data})
 
                 engine.set_event_callback(callback)
@@ -273,7 +273,7 @@ async def execute_workflow(
                             break
                         else:
                             yield f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         # 发送心跳保持连接
                         yield f"event: heartbeat\ndata: {json.dumps({'timestamp': datetime.now().isoformat()})}\n\n"
                     except Exception as e:
@@ -300,46 +300,45 @@ async def execute_workflow(
                 "X-Accel-Buffering": "no"
             }
         )
-    else:
-        # 非流式执行
-        try:
-            from app.schemas.workflow import WorkflowConfig as WConfig
-            config = WConfig(**workflow.flow_data)
+    # 非流式执行
+    try:
+        from app.schemas.workflow import WorkflowConfig as WConfig
+        config = WConfig(**workflow.flow_data)
 
-            engine = WorkflowEngine(config)
+        engine = WorkflowEngine(config)
 
-            execution.status = "running"
-            execution.started_at = datetime.now()
-            await db.commit()
+        execution.status = "running"
+        execution.started_at = datetime.now()
+        await db.commit()
 
-            result = await engine.execute(input_data)
+        result = await engine.execute(input_data)
 
-            execution.status = "completed"
-            execution.completed_at = datetime.now()
-            execution.output_data = result
-            execution.node_results = [r.model_dump() for r in engine.get_node_results()]
-            await db.commit()
+        execution.status = "completed"
+        execution.completed_at = datetime.now()
+        execution.output_data = result
+        execution.node_results = [r.model_dump() for r in engine.get_node_results()]
+        await db.commit()
 
-            return {
-                "success": True,
-                "data": {
-                    "execution_id": execution.id,
-                    "status": execution.status,
-                    "output": result,
-                    "node_results": execution.node_results
-                }
+        return {
+            "success": True,
+            "data": {
+                "execution_id": execution.id,
+                "status": execution.status,
+                "output": result,
+                "node_results": execution.node_results
             }
+        }
 
-        except Exception as e:
-            execution.status = "failed"
-            execution.error_message = str(e)
-            execution.completed_at = datetime.now()
-            await db.commit()
+    except Exception as e:
+        execution.status = "failed"
+        execution.error_message = str(e)
+        execution.completed_at = datetime.now()
+        await db.commit()
 
-            raise AppError(detail=str(e))
+        raise AppError(detail=str(e))
 
 
-@router.get("/executions/{execution_id}", response_model=Dict[str, Any])
+@router.get("/executions/{execution_id}", response_model=dict[str, Any])
 async def get_execution(
     execution_id: int,
     current_user: User = Depends(get_current_user),
@@ -369,13 +368,13 @@ async def get_execution(
     }
 
 
-@router.get("/nodes/definitions", response_model=Dict[str, Any])
+@router.get("/nodes/definitions", response_model=dict[str, Any])
 async def get_node_definitions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """获取节点定义列表"""
-    result = await db.execute(select(NodeDefinition).where(NodeDefinition.is_active == True))
+    result = await db.execute(select(NodeDefinition).where(NodeDefinition.is_active))
     definitions = result.scalars().all()
 
     # 如果没有定义，初始化默认节点
@@ -517,7 +516,7 @@ async def get_node_definitions(
             db.add(node)
         await db.commit()
 
-        result = await db.execute(select(NodeDefinition).where(NodeDefinition.is_active == True))
+        result = await db.execute(select(NodeDefinition).where(NodeDefinition.is_active))
         definitions = result.scalars().all()
 
     return {

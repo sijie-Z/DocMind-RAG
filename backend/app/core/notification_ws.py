@@ -3,16 +3,16 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import defaultdict
-from typing import Dict, Set, Any
+from typing import Any
 
 from fastapi import WebSocket
 
 
 class NotificationConnectionManager:
     def __init__(self) -> None:
-        self._connections: Dict[int, Set[WebSocket]] = defaultdict(set)
+        self._connections: dict[int, set[WebSocket]] = defaultdict(set)
         self._lock = asyncio.Lock()
-        self._stats: Dict[str, int] = {
+        self._stats: dict[str, int] = {
             "connect_total": 0,
             "disconnect_total": 0,
             "push_total": 0,
@@ -42,7 +42,7 @@ class NotificationConnectionManager:
             self._stats["send_fail_total"] += 1
             return False
 
-    async def push(self, user_id: int, payload: Dict[str, Any]) -> None:
+    async def push(self, user_id: int, payload: dict[str, Any]) -> None:
         conns = list(self._connections.get(user_id, set()))
         if not conns:
             return
@@ -56,7 +56,7 @@ class NotificationConnectionManager:
             results = await asyncio.gather(*tasks)
             self._stats["deliver_total"] += sum(1 for ok in results if ok)
 
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> dict[str, int]:
         active_connections = sum(len(conns) for conns in self._connections.values())
         return {
             **self._stats,

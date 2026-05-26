@@ -1,10 +1,9 @@
-# -*- coding: utf-8 -*-
 """
 派聪明AI知识库系统 - 用户设置模型
 """
 from datetime import datetime
-from typing import Optional
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, JSON
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.sql import func
 
 from app.core.database import Base

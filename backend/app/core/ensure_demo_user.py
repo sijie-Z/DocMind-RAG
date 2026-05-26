@@ -1,12 +1,13 @@
-# -*- coding: utf-8 -*-
 """应用启动时确保演示账号和默认组织存在。"""
-import os
 import logging
-from app.core.database import AsyncSessionLocal
-from app.services.auth_service import auth_service
-from app.models.user import User
-from app.models.organization import Organization
+import os
+
 from sqlalchemy import select
+
+from app.core.database import AsyncSessionLocal
+from app.models.organization import Organization
+from app.models.user import User
+from app.services.auth_service import auth_service
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +52,11 @@ async def ensure_demo_user():
             user = result.scalar_one_or_none()
             if user:
                 hashed = auth_service.hash_password(DEMO_PASSWORD)
-                setattr(user, "hashed_password", hashed)
-                setattr(user, "is_active", True)
-                setattr(user, "role", "user")
+                user.hashed_password = hashed
+                user.is_active = True
+                user.role = "user"
                 if not user.organization_id:
-                    setattr(user, "organization_id", org_id)
+                    user.organization_id = org_id
                 await db.commit()
                 logger.info(f"演示账号已更新: {DEMO_USERNAME} / {DEMO_PASSWORD}")
             else:
@@ -72,4 +73,3 @@ async def ensure_demo_user():
                 logger.info(f"演示账号已创建: {DEMO_USERNAME} / {DEMO_PASSWORD}")
     except Exception as e:
         logger.exception(f"确保演示账号失败（不影响启动）: {e}")
-        

@@ -1,18 +1,17 @@
-# -*- coding: utf-8 -*-
 """
 派聪明AI知识库系统 - 安全工具
 """
 
 # backend/app/core/security.py
-from typing import List, Optional, Set
-from fastapi import Depends, Request, HTTPException, status 
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.models.rbac import PermissionType
 from app.models.user import User
 from app.services.auth_service import auth_service
 from app.services.permission_service import permission_service
-from app.models.rbac import PermissionType
+
 
 async def get_current_user(
     current_user: User = Depends(auth_service.get_current_user),
@@ -20,13 +19,13 @@ async def get_current_user(
 ) -> User:
     return current_user
 
-def permission_required(required_permissions: List[PermissionType], organization_id_param: str = None):
+def permission_required(required_permissions: list[PermissionType], organization_id_param: str = None):
     async def check_permissions(
         request: Request,
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db)
     ):
-        # 1. 核心修复：上帝模式（优先判断超管） 
+        # 1. 核心修复：上帝模式（优先判断超管）
         # 必须先从数据库 reload 一下，确保 is_superuser 状态是最新的
         user = await db.get(User, current_user.id)
         if user and user.is_superuser:
@@ -64,6 +63,6 @@ def permission_required(required_permissions: List[PermissionType], organization
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"用户无此权限: {perm.value}"
                 )
-        return True 
+        return True
     return check_permissions
-    
+

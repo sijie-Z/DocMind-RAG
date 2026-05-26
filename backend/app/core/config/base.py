@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
 """Core application settings — app metadata, logging, monitoring, rate limiting."""
 
-from typing import List
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,7 +48,7 @@ class BaseAppSettings(BaseSettings):
     ENABLE_RATE_LIMIT: bool = True
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = 10000
     RATE_LIMIT_WINDOW_SECONDS: int = 60
-    RATE_LIMIT_EXCLUDE_PATHS: List[str] = [
+    RATE_LIMIT_EXCLUDE_PATHS: list[str] = [
         "/health",
         "/metrics",
         "/docs",

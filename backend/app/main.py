@@ -1,33 +1,34 @@
 """
 DocMind AI Knowledge Base System - Main Application Entry
 """
-import os
-import re
-import time
 import asyncio
 import logging
+import os
+import time
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
-from app.core.minio_client import minio_client
-from app.core.config import settings
-from app.exceptions import AppError
-from app.core.database import init_db, AsyncSessionLocal, close_db
-from app.core.redis import init_redis, close_redis
-from app.core.elasticsearch import init_elasticsearch, es_client
 from app.api.v1.router import api_router
-from app.core.logging import setup_logging
+from app.core.config import settings
+from app.core.database import AsyncSessionLocal, close_db, init_db
+from app.core.elasticsearch import es_client, init_elasticsearch
 from app.core.kafka_client import kafka_producer
+from app.core.logging import setup_logging
 from app.core.middleware import PerformanceMiddleware, RateLimitMiddleware, metrics_collector
+from app.core.minio_client import minio_client
+from app.core.notification_ws import notification_ws_manager
+from app.core.redis import close_redis, init_redis
 from app.core.request_id import RequestIDMiddleware
 from app.core.response_middleware import ResponseFormatMiddleware
-from app.core.notification_ws import notification_ws_manager
 from app.core.tracing import setup_opentelemetry
+from app.exceptions import AppError
+
 
 async def metrics_snapshot_task():
     """定期记录性能指标快照"""
@@ -99,18 +100,18 @@ async def lifespan(app: FastAPI):
                     logger.error(
                         "演示账号验证失败: guest/123456 无法通过认证，请检查数据库或运行 python reset_admin.py"
                     )
-        
+
         # 启动指标监控快照任务
         metrics_task = asyncio.create_task(metrics_snapshot_task())
-        
+
         logger.info("所有服务初始化完成")
-        
+
     except Exception as e:
         logger.error(f"服务初始化失败: {str(e)}")
         raise
-    
+
     yield
-    
+
     # 关闭服务
     logger.info("派聪明AI知识库系统关闭中...")
 
@@ -340,7 +341,7 @@ async def health_check():
                 services["redis"] = "healthy"
             else:
                 services["redis"] = "disabled"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             services["redis"] = "degraded"
         except Exception as e:
             services["redis"] = "degraded"
@@ -358,7 +359,7 @@ async def health_check():
                     services["elasticsearch"] = "unhealthy"
             else:
                 services["elasticsearch"] = "disabled"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             services["elasticsearch"] = "degraded"
         except Exception as e:
             services["elasticsearch"] = "degraded"
@@ -376,7 +377,7 @@ async def health_check():
                 services["minio"] = "healthy" if exists else "degraded"
             else:
                 services["minio"] = "disabled"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             services["minio"] = "degraded"
         except Exception as e:
             services["minio"] = "degraded"
@@ -489,7 +490,6 @@ setup_opentelemetry(app)
 app.include_router(api_router, prefix="/api/v1")
 
 # 静态文件服务
-import os
 static_dir = "static"
 if not os.path.exists(static_dir):
     os.makedirs(static_dir)
@@ -506,8 +506,8 @@ async def get_minio_file(file_path: str):
     例如：http://localhost:8000/files/avatars/1.png
     """
     # 路径穿越防护
-    from urllib.parse import unquote
     import os
+    from urllib.parse import unquote
     file_path = unquote(file_path)
     if file_path.startswith("/"):
         raise HTTPException(status_code=400, detail="无效的文件路径")

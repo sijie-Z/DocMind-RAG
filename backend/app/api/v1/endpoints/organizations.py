@@ -1,23 +1,29 @@
-# -*- coding: utf-8 -*-
 """
 派聪明AI知识库系统 - 组织管理端点
 """
 
-from typing import List, Optional, Any
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, update, delete
+from typing import Any
 
-from app.core.database import get_db
-from app.models.user import User
-from app.models.organization import Organization
-from app.services.organization_service import organization_service
-from app.schemas.organization import OrganizationCreate, OrganizationUpdate, OrganizationOut
-from app.core.security import get_current_user, permission_required
-from app.models.rbac import PermissionType
+from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.v1.endpoints.notifications import create_notification
+from app.core.database import get_db
+from app.core.security import get_current_user, permission_required
+from app.exceptions import (
+    AppError,
+    AuthorizationError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
+from app.models.organization import Organization
+from app.models.rbac import PermissionType
+from app.models.user import User
+from app.schemas.organization import OrganizationCreate, OrganizationUpdate
 from app.services.audit_service import audit_service
-from app.exceptions import NotFoundError, ValidationError, AuthorizationError, ConflictError, AppError
+from app.services.organization_service import organization_service
 
 router = APIRouter()
 
@@ -50,11 +56,11 @@ async def create_organization(
         existing = await organization_service.get_organization_by_name(db, org_in.name)
         if existing:
             raise ValidationError("组织名称已存在")
-            
+
         new_org = await organization_service.create_organization(
             db, org_in.model_dump(), current_user.id
         )
-        
+
         return {
             "success": True,
             "message": "创建成功",
@@ -85,7 +91,7 @@ async def get_organization_stats(
 async def get_organizations(
     page: int = 1,
     page_size: int = 10,
-    search: Optional[str] = None,
+    search: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -93,21 +99,21 @@ async def get_organizations(
     try:
         skip = (page - 1) * page_size
         limit = page_size
-        
+
         conditions = []
         if search:
             conditions.append(Organization.name.contains(search))
-            
+
         # 查询总数
         total_query = select(func.count(Organization.id)).where(*conditions)
         total_result = await db.execute(total_query)
         total = total_result.scalar() or 0
-        
+
         # 查询分页数据
         query = select(Organization).where(*conditions).order_by(Organization.sort_order.asc()).offset(skip).limit(limit)
         result = await db.execute(query)
         organizations = result.scalars().all()
-        
+
         org_list = []
         for org in organizations:
             org_list.append({
@@ -122,7 +128,7 @@ async def get_organizations(
                 "owner_id": org.owner_id,
                 "created_at": org.created_at.isoformat() if org.created_at else None
             })
-            
+
         return {
             "success": True,
             "message": "获取成功",
@@ -164,7 +170,7 @@ async def update_organization(
         )
         if not updated_org:
             raise NotFoundError("组织不存在")
-            
+
         return {"success": True, "message": "更新成功"}
     except ValueError as e:
         raise ValidationError(str(e))
@@ -181,7 +187,7 @@ async def batch_delete_organizations(
     ids = data.get("ids", [])
     if not ids:
         return {"success": True, "message": "无选中项"}
-        
+
     success = await organization_service.batch_delete_organizations(db, ids)
     if success:
         await audit_service.log_activity(
@@ -193,8 +199,7 @@ async def batch_delete_organizations(
             db=db
         )
         return {"success": True, "message": f"成功删除 {len(ids)} 个组织"}
-    else:
-        raise AppError("批量删除失败")
+    raise AppError("批量删除失败")
 
 @router.delete("/{org_id}", response_model=dict, summary="删除组织", dependencies=[Depends(permission_required([PermissionType.DELETE_ORGANIZATION], organization_id_param='org_id'))])
 async def delete_organization(
@@ -214,8 +219,7 @@ async def delete_organization(
             db=db
         )
         return {"success": True, "message": "删除成功"}
-    else:
-        raise AppError("删除组织失败")
+    raise AppError("删除组织失败")
 
 @router.get("/{org_id}/members", response_model=dict, summary="获取组织成员列表", dependencies=[Depends(permission_required([PermissionType.VIEW_ORGANIZATION], organization_id_param='org_id'))])
 async def get_organization_members(
@@ -230,12 +234,12 @@ async def get_organization_members(
         org_result = await db.execute(org_query)
         if not org_result.scalar_one_or_none():
             raise NotFoundError("组织不存在")
-            
+
         # 查询属于该组织的用户
         user_query = select(User).where(User.organization_id == org_id)
         user_result = await db.execute(user_query)
         users = user_result.scalars().all()
-        
+
         member_list = []
         for user in users:
             member_list.append({
@@ -247,7 +251,7 @@ async def get_organization_members(
                 "is_active": user.is_active,
                 "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None
             })
-            
+
         return {"success": True, "data": member_list}
     except Exception as e:
         raise AppError(f"获取成员列表失败: {str(e)}")
@@ -365,7 +369,7 @@ async def get_organization_documents(
         query = select(Document).where(Document.organization_id == org_id)
         result = await db.execute(query)
         documents = result.scalars().all()
-        
+
         doc_list = []
         for doc in documents:
             doc_list.append({
@@ -375,7 +379,7 @@ async def get_organization_documents(
                 "status": doc.status,
                 "created_at": doc.created_at.isoformat() if doc.created_at else None
             })
-            
+
         return {"success": True, "data": doc_list}
     except Exception as e:
         raise AppError(f"获取关联文档失败: {str(e)}")

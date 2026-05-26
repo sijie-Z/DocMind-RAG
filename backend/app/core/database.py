@@ -1,14 +1,13 @@
-# -*- coding: utf-8 -*-
 """
 派聪明AI知识库系统 - 数据库连接模块
 """
 
-import asyncio
 import logging
+from collections.abc import AsyncGenerator
+
 from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
-from typing import AsyncGenerator
 
 from app.core.config import settings
 

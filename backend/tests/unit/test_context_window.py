@@ -1,11 +1,9 @@
-# -*- coding: utf-8 -*-
 """Context window management tests."""
-import pytest
 from app.rag.context_window import (
-    estimate_tokens,
-    estimate_message_tokens,
     ChatContextWindow,
     build_rag_messages,
+    estimate_message_tokens,
+    estimate_tokens,
 )
 
 

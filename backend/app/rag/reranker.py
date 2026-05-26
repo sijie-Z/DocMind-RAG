@@ -2,14 +2,13 @@
 import logging
 import re
 import time
-from typing import List, Dict
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-async def rerank(query: str, hits: List[Dict], rerank_client=None) -> List[Dict]:
+async def rerank(query: str, hits: list[dict], rerank_client=None) -> list[dict]:
     """Rerank hits using available reranker (Zhipu rerank API or LLM fallback)."""
     if not hits or not settings.RAG_ENABLE_RERANKER:
         return hits
@@ -48,8 +47,7 @@ async def rerank(query: str, hits: List[Dict], rerank_client=None) -> List[Dict]
                         if i not in used:
                             ordered.append(h)
                     return ordered + hits[top_n:]
-                else:
-                    logger.warning(f"Zhipu rerank failed ({resp.status_code})")
+                logger.warning(f"Zhipu rerank failed ({resp.status_code})")
 
         # LLM fallback
         if not rerank_client:

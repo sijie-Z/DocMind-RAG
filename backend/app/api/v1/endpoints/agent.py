@@ -12,28 +12,28 @@ Endpoints:
     PUT  /api/v1/agent/config         — Update user agent config
 """
 
+import contextlib
 import json
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, func
 
-from app.core.database import get_db, AsyncSessionLocal
-from app.core.security import get_current_user
-from app.models.user import User
-from app.models.chat import ChatSession, ChatMessage, ChatSessionStatus, MessageType
-from app.agent.service import agent_service
-from app.agent.config import AgentConfig, DEFAULT_DISABLED_TOOLS
+from app.agent.config import DEFAULT_DISABLED_TOOLS, AgentConfig
 from app.agent.registry import tool_registry
+from app.agent.service import agent_service
 from app.agent.skills import skill_manager
-from app.agent.events import AgentEvent
+from app.core.database import AsyncSessionLocal, get_db
 from app.core.prometheus import AGENT_FEEDBACK_TOTAL
+from app.core.security import get_current_user
 from app.exceptions import NotFoundError, ValidationError
+from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -43,8 +43,8 @@ router = APIRouter()
 
 class AgentChatRequest(BaseModel):
     query: str = Field(..., min_length=1, description="User query")
-    session_id: Optional[str] = Field(None, description="Agent session ID for persistence")
-    history: Optional[List[Dict[str, str]]] = Field(None, description="Previous messages")
+    session_id: str | None = Field(None, description="Agent session ID for persistence")
+    history: list[dict[str, str]] | None = Field(None, description="Previous messages")
     enable_tools: bool = Field(True, description="Enable tool calling")
     enable_planning: bool = Field(True, description="Enable planning phase")
     enable_reflection: bool = Field(True, description="Enable reflection phase")
@@ -52,21 +52,21 @@ class AgentChatRequest(BaseModel):
     enable_thinking: bool = Field(True, description="Stream thinking tokens")
     model: str = Field("deepseek-v4-flash", description="Model to use")
     temperature: float = Field(0.1, ge=0.0, le=2.0, description="LLM temperature")
-    disabled_tools: List[str] = Field(default_factory=list, description="Tools to disable")
-    system_prompt_override: Optional[str] = Field(None, description="Custom system prompt")
+    disabled_tools: list[str] = Field(default_factory=list, description="Tools to disable")
+    system_prompt_override: str | None = Field(None, description="Custom system prompt")
 
 
 class AgentConfigUpdate(BaseModel):
-    model: Optional[str] = None
-    temperature: Optional[float] = None
-    enable_planning: Optional[bool] = None
-    enable_reflection: Optional[bool] = None
-    enable_tools: Optional[bool] = None
-    enable_memory: Optional[bool] = None
-    enable_thinking: Optional[bool] = None
-    personality: Optional[str] = None
-    system_prompt_override: Optional[str] = None
-    disabled_tools: Optional[List[str]] = None
+    model: str | None = None
+    temperature: float | None = None
+    enable_planning: bool | None = None
+    enable_reflection: bool | None = None
+    enable_tools: bool | None = None
+    enable_memory: bool | None = None
+    enable_thinking: bool | None = None
+    personality: str | None = None
+    system_prompt_override: str | None = None
+    disabled_tools: list[str] | None = None
 
 
 class SessionCreate(BaseModel):
@@ -138,7 +138,7 @@ async def agent_chat(
             error_data = {"type": "error", "content": f"Agent 执行出错: {str(e)}"}
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
-        done_data: Dict[str, Any] = {"type": "done", "content": ""}
+        done_data: dict[str, Any] = {"type": "done", "content": ""}
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         yield f"data: {json.dumps(done_data)}\n\n"
@@ -159,7 +159,7 @@ async def agent_chat(
 class AgentFeedbackRequest(BaseModel):
     message_id: str = Field(..., description="Assistant message ID to rate")
     feedback: int = Field(..., ge=-1, le=1, description="反馈: 1=点赞, 0=取消, -1=点踩")
-    note: Optional[str] = Field(None, max_length=500, description="反馈备注")
+    note: str | None = Field(None, max_length=500, description="反馈备注")
 
 
 @router.post("/feedback")
@@ -401,10 +401,8 @@ async def get_session(
                 "created_at": msg.created_at.isoformat() if msg.created_at else "",
             }
             if msg.meta_data:
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     msg_dict["meta"] = json.loads(msg.meta_data)
-                except json.JSONDecodeError:
-                    pass
             formatted.append(msg_dict)
 
         # Try to load agent config
@@ -529,7 +527,7 @@ async def update_config(
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-async def _load_session_messages(session_id: str, user_id: int) -> List[Dict[str, str]]:
+async def _load_session_messages(session_id: str, user_id: int) -> list[dict[str, str]]:
     """Load session messages as history for the agent."""
     try:
         async with AsyncSessionLocal() as session:
@@ -565,9 +563,9 @@ async def _save_session_interaction(
     session_id: str,
     user_id: int,
     query: str,
-    organization_id: Optional[int],
+    organization_id: int | None,
     assistant_response: str = "",
-) -> Optional[str]:
+) -> str | None:
     """Save the user query and assistant response as messages in the session.
 
     Returns: the assistant message ID (or None if no response / on error).

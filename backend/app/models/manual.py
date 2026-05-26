@@ -2,10 +2,11 @@
 系统操作手册模型
 """
 from datetime import datetime
-from typing import Optional
-from sqlalchemy import Integer, String, Text, DateTime, Boolean
+
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
+
 from app.core.database import Base
 
 

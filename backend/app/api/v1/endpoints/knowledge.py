@@ -3,44 +3,50 @@
 """
 import logging
 from datetime import datetime
-from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, func, and_
+from typing import Any
 
-from app.core.database import get_db
-from app.core.security import get_current_user, permission_required
-from app.core.kafka_client import kafka_producer
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.v1.endpoints.notifications import create_notification
 from app.core.config import settings
-from app.models.user import User
-from app.models.document import Document, DocumentStatus
-from app.models.knowledge_job import KnowledgeProcessingJob, KnowledgeJobStatus
-from app.services.knowledge_service import knowledge_service
-from app.models.rbac import PermissionType
-from app.services.embedding_service import embedding_service
+from app.core.database import get_db
 from app.core.elasticsearch import get_elasticsearch
+from app.core.kafka_client import kafka_producer
+from app.core.security import get_current_user, permission_required
+from app.exceptions import (
+    AppError,
+    AuthorizationError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
+from app.models.document import Document, DocumentStatus
+from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
+from app.models.rbac import PermissionType
+from app.models.user import User
 from app.schemas.knowledge import (
+    BatchDeleteRequest,
+    KnowledgeBuildResponse,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
-    KnowledgeStatsResponse,
-    KnowledgeBuildResponse,
     SearchSuggestionResponse,
     SimilarityResponse,
-    BatchDeleteRequest
 )
-from app.api.v1.endpoints.notifications import create_notification
 from app.services.audit_service import audit_service
-from app.exceptions import NotFoundError, ValidationError, AuthorizationError, ConflictError, AppError
+from app.services.embedding_service import embedding_service
+from app.services.knowledge_service import knowledge_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.get("/", response_model=Dict[str, Any], dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))])
+@router.get("/", response_model=dict[str, Any], dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))])
 async def list_knowledge_bases(
     page: int = 1,
     page_size: int = 10,
-    search: Optional[str] = None,
+    search: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -54,26 +60,26 @@ async def list_knowledge_bases(
              conditions = [Document.organization_id == current_user.organization_id]
         else:
              conditions = [Document.uploaded_by == current_user.id]
-             
+
         if search:
             conditions.append(Document.title.contains(search))
-            
+
         # 2. 查询总数
         total_query = select(func.count(Document.id)).where(*conditions)
         total_result = await db.execute(total_query)
         total = total_result.scalar() or 0
-        
+
         # 3. 查询分页数据
         skip = (page - 1) * page_size
         query = select(Document).where(*conditions).order_by(desc(Document.created_at)).offset(skip).limit(page_size)
         result = await db.execute(query)
         documents = result.scalars().all()
-        
+
         # 4. 转换数据
         data = []
         for doc in documents:
             # 映射状态
-            status_map: Dict[Any, str] = {
+            status_map: dict[Any, str] = {
                 DocumentStatus.PENDING: "pending",
                 DocumentStatus.UPLOADED: "uploaded",
                 DocumentStatus.PARSING: "parsing",
@@ -81,7 +87,7 @@ async def list_knowledge_bases(
                 DocumentStatus.INDEXED: "completed",
                 DocumentStatus.FAILED: "failed"
             }
-            
+
             # 声明 doc_status 为 Any 类型，以避免 pyright 中 status_map.get 方法对于 SQLAlchemy Column 参数的匹配报错
             doc_status: Any = doc.status
 
@@ -125,7 +131,7 @@ async def search_knowledge(
     try:
         # 允许 search_type 或 search_mode
         mode = request.search_mode or getattr(request, 'search_type', 'hybrid')
-        
+
         # 执行搜索
         results = await knowledge_service.search_knowledge(
             query=request.query,
@@ -133,7 +139,7 @@ async def search_knowledge(
             top_k=request.top_k or 10,
             search_mode=mode
         )
-        
+
         # 转换为前端期待的格式
         formatted_results =[]
         for r in results:
@@ -155,14 +161,14 @@ async def search_knowledge(
                 "rewrite_hits": r.get("rewrite_hits", 1),
                 "fresh_factor": r.get("fresh_factor", 1.0),
             })
-        
+
         return {
             "query": request.query,
             "results": formatted_results,
             "total_count": len(formatted_results),
             "search_mode": mode
         }
-        
+
     except Exception as e:
         logger.error(f"搜索失败: {str(e)}")
         raise AppError(f"搜索知识库失败: {str(e)}")
@@ -184,12 +190,12 @@ async def get_search_suggestions(
             organization_id=organization_id,
             limit=limit
         )
-        
+
         return {
             "success": True,
             "suggestions": suggestions
         }
-        
+
     except Exception as e:
         raise AppError(f"获取搜索建议失败: {str(e)}")
 
@@ -204,7 +210,7 @@ async def get_knowledge_stats(
     """
     try:
         stats = await knowledge_service.get_knowledge_stats(organization_id)
-        
+
         return {
             "success": True,
             "stats": {
@@ -213,7 +219,7 @@ async def get_knowledge_stats(
                 "recent_searches":[]
             }
         }
-        
+
     except Exception as e:
         raise AppError(f"获取知识库统计失败: {str(e)}")
 
@@ -306,9 +312,9 @@ async def rebuild_document_knowledge(
             await kafka_producer.send_message(settings.KAFKA_FILE_PROCESSING_TOPIC, message)
         except Exception as e:
             logger.error(f"发送 Kafka 重建任务失败: {e}")
-            setattr(job, "status", KnowledgeJobStatus.FAILED)
-            setattr(job, "error_message", f"发送处理任务失败: {str(e)}")
-            setattr(job, "finished_at", datetime.now())
+            job.status = KnowledgeJobStatus.FAILED
+            job.error_message = f"发送处理任务失败: {str(e)}"
+            job.finished_at = datetime.now()
             await db.commit()
 
             await create_notification(
@@ -355,7 +361,7 @@ async def rebuild_document_knowledge(
 
 @router.get("/jobs", response_model=dict, dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))])
 async def list_knowledge_jobs(
-    status: Optional[str] = None,
+    status: str | None = None,
     page: int = 1,
     page_size: int = 20,
     current_user: User = Depends(get_current_user),
@@ -456,10 +462,10 @@ async def delete_knowledge_document(
         # 1. 验证文档是否存在
         result = await db.execute(select(Document).where(Document.id == document_id))
         doc = result.scalar_one_or_none()
-        
+
         if not doc:
             raise NotFoundError("文档不存在")
-            
+
         # 3. 调用 service 彻底删除
         success = await knowledge_service.delete_knowledge(document_id, doc.organization_id)
 
@@ -476,7 +482,7 @@ async def delete_knowledge_document(
         )
 
         return {"success": True, "message": "删除成功"}
-        
+
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
         raise
     except Exception as e:
@@ -508,7 +514,7 @@ async def batch_delete_documents(
         )
 
         return results
-        
+
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
         raise
     except Exception as e:
@@ -531,26 +537,26 @@ async def calculate_text_similarity(
     try:
         # 创建两个文本的向量嵌入
         embeddings = await embedding_service.get_embeddings([text1, text2])
-        
+
         if len(embeddings) < 2:
             raise AppError("创建向量嵌入失败")
-        
+
         # 计算余弦相似度
         import numpy as np
-        
+
         vec1 = np.array(embeddings[0])
         vec2 = np.array(embeddings[1])
-        
+
         # 余弦相似度计算
         cosine_similarity = np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
-        
+
         return {
             "text1": text1,
             "text2": text2,
             "similarity": float(cosine_similarity),
             "similarity_percentage": float(cosine_similarity * 100)
         }
-        
+
     except Exception as e:
         raise AppError(f"计算文本相似度失败: {str(e)}")
 
@@ -593,9 +599,8 @@ async def get_rag_stats(
 ):
     """获取 RAG 命中率等检索效果统计 - 基于真实指标"""
     try:
+
         from app.services.rag_service import rag_service
-        from app.models.chat import ChatMessage
-        from datetime import timedelta
 
         # 从 rag_service 获取真实指标
         metrics = rag_service.get_metrics(window_seconds=7 * 24 * 3600)  # 7天窗口
@@ -616,7 +621,7 @@ async def get_rag_stats(
 
         # 7天趋势（基于窗口内的事件分布）
         trend = []
-        for i in range(7):
+        for _i in range(7):
             day_metrics = rag_service.get_metrics(window_seconds=24 * 3600)
             day_total = day_metrics.get("retrieval_total", 0)
             day_hit = day_metrics.get("retrieval_hit", 0)
@@ -649,7 +654,7 @@ async def get_rag_stats(
 
 @router.get("/graph", response_model=dict, dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))])
 async def get_knowledge_graph(
-    query: Optional[str] = None,
+    query: str | None = None,
     max_nodes: int = Query(default=50, ge=5, le=200),
     organization_id: int = 1,
     current_user: User = Depends(get_current_user),
@@ -723,4 +728,3 @@ async def get_knowledge_graph(
     except Exception as e:
         logger.error(f"Failed to get knowledge graph: {e}")
         return {"nodes": [], "edges": [], "analytics": {}}
-        

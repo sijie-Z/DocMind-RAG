@@ -1,9 +1,12 @@
-# -*- coding: utf-8 -*-
 import time
 
-from app.rag.retriever import HybridRetriever
-from app.rag.query_processor import QueryIntentClassifier, rewrite_query_candidates, QueryComplexityClassifier
 from app.rag.context_compressor import compress, compress_context_list
+from app.rag.query_processor import (
+    QueryComplexityClassifier,
+    QueryIntentClassifier,
+    rewrite_query_candidates,
+)
+from app.rag.retriever import HybridRetriever
 
 
 def test_rrf_fuse_keeps_rewrite_and_modality_signals():

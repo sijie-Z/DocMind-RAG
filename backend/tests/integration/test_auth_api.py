@@ -1,7 +1,7 @@
-# -*- coding: utf-8 -*-
 """Auth API 端点集成测试 — 使用 TestClient + mock。"""
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
 

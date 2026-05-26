@@ -1,8 +1,8 @@
-# -*- coding: utf-8 -*-
 """CircuitBreaker 纯逻辑测试。"""
-import pytest
 import time
-import asyncio
+
+import pytest
+
 from app.core.circuit_breaker import CircuitBreaker, CircuitState
 
 

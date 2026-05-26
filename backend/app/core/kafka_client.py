@@ -1,12 +1,13 @@
 import json
 import logging
-import asyncio
 from typing import Any
+
 from aiokafka import AIOKafkaProducer
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-        
+
 class KafkaProducerClient:
     def __init__(self):
         self.producer = None
@@ -34,7 +35,7 @@ class KafkaProducerClient:
         if not self.producer:
             logger.warning("Kafka producer is not initialized, skipping message send")
             return
-        
+
         try:
             await self.producer.send_and_wait(topic, value)
             logger.info(f"Sent message to topic {topic}: {value}")

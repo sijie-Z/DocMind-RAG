@@ -1,8 +1,9 @@
-# -*- coding: utf-8 -*-
 """DocumentParser 纯函数测试（不依赖外部服务）。"""
-import pytest
 import os
 import tempfile
+
+import pytest
+
 from app.services.document_parser import DocumentParser
 
 

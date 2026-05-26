@@ -12,8 +12,10 @@ Tool categories:
 """
 
 # Import triggers @register_tool for each tool function
-from app.agent.tools import web_search  # noqa: F401
-from app.agent.tools import code_execution  # noqa: F401
-from app.agent.tools import data_analysis  # noqa: F401
-from app.agent.tools import translation  # noqa: F401
-from app.agent.tools import utility  # noqa: F401
+from app.agent.tools import (
+    code_execution,  # noqa: F401
+    data_analysis,  # noqa: F401
+    translation,  # noqa: F401
+    utility,  # noqa: F401
+    web_search,  # noqa: F401
+)

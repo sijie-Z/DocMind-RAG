@@ -1,11 +1,18 @@
-# -*- coding: utf-8 -*-
 """Tests for the unified exception hierarchy."""
-import pytest
 from app.exceptions import (
-    AppError, ValidationError, AuthenticationError, TokenExpiredError,
-    TokenBlacklistedError, AccountLockedError, AuthorizationError,
-    NotFoundError, ConflictError, RateLimitError, ExternalServiceError,
-    PipelineError, StorageError,
+    AccountLockedError,
+    AppError,
+    AuthenticationError,
+    AuthorizationError,
+    ConflictError,
+    ExternalServiceError,
+    NotFoundError,
+    PipelineError,
+    RateLimitError,
+    StorageError,
+    TokenBlacklistedError,
+    TokenExpiredError,
+    ValidationError,
 )
 
 

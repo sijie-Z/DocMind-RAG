@@ -11,13 +11,14 @@ the task was truly completed. It can decide to:
 import json
 import logging
 import re
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any
 
 from openai import AsyncOpenAI
 
-from app.agent.events import AgentEvent
 from app.agent.config import AgentConfig
+from app.agent.events import AgentEvent
 from app.agent.planner import Plan
 from app.core.prometheus import AGENT_REFLECTION_DECISIONS
 
@@ -63,10 +64,10 @@ REFLECTION_SYSTEM_PROMPT = """你是一个质量评估专家。你需要评估 A
 class ReflectionResult:
     """The result of a reflection pass."""
     achievement: int = 0  # 0-100
-    gaps: List[str] = field(default_factory=list)
-    quality_issues: List[str] = field(default_factory=list)
+    gaps: list[str] = field(default_factory=list)
+    quality_issues: list[str] = field(default_factory=list)
     decision: str = "pass"  # pass, retry, replan
-    retry_step_id: Optional[str] = None
+    retry_step_id: str | None = None
     reasoning: str = ""
 
 
@@ -86,7 +87,7 @@ class Reflector:
     async def reflect(
         self,
         plan: Plan,
-        results: Dict[str, Any],
+        results: dict[str, Any],
     ) -> AsyncGenerator[AgentEvent, ReflectionResult]:
         """Evaluate execution results and decide next action.
 
@@ -103,7 +104,7 @@ class Reflector:
                 plan_progress=1.0,
             )
             await self._record_reflection(plan, "pass", "All steps completed successfully")
-            result = ReflectionResult(achievement=100, decision="pass", reasoning="All steps completed")
+            ReflectionResult(achievement=100, decision="pass", reasoning="All steps completed")
             return
 
         # Build reflection prompt
@@ -141,7 +142,7 @@ class Reflector:
                 plan_id=plan.id,
                 plan_progress=plan.progress,
             )
-            result = ReflectionResult(achievement=80, decision="pass", reasoning="Reflection skipped due to error")
+            ReflectionResult(achievement=80, decision="pass", reasoning="Reflection skipped due to error")
             return
 
         decision = reflection_data.get("decision", "pass")
@@ -160,7 +161,7 @@ class Reflector:
         # Record insight
         await self._record_reflection(plan, decision, reasoning)
 
-        result = ReflectionResult(
+        ReflectionResult(
             achievement=reflection_data.get("achievement", 85),
             gaps=reflection_data.get("gaps", []),
             quality_issues=reflection_data.get("quality_issues", []),
@@ -170,7 +171,7 @@ class Reflector:
         )
         return
 
-    def _quick_pass_check(self, plan: Plan, results: Dict[str, Any]) -> bool:
+    def _quick_pass_check(self, plan: Plan, results: dict[str, Any]) -> bool:
         """Check if we can fast-pass without an LLM call."""
         all_completed = all(s.status in ("completed", "skipped") for s in plan.steps)
         has_results = any(v.get("result") for v in results.values() if isinstance(v, dict))
@@ -185,7 +186,7 @@ class Reflector:
             lines.append(f"{icon_str} {step.id}: {step.description}")
         return "\n".join(lines)
 
-    def _build_results_summary(self, results: Dict[str, Any]) -> str:
+    def _build_results_summary(self, results: dict[str, Any]) -> str:
         if not results:
             return "(无执行结果)"
         lines = []
@@ -198,7 +199,7 @@ class Reflector:
                 lines.append(f"- [{step_id}]: {str(data)[:300]}")
         return "\n".join(lines) if lines else "(无执行结果)"
 
-    def _extract_json(self, text: str) -> Dict[str, Any]:
+    def _extract_json(self, text: str) -> dict[str, Any]:
         """Extract JSON from LLM response."""
         json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
         if json_match:

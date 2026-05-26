@@ -16,16 +16,16 @@ import json
 import logging
 import time
 import uuid
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletionMessageParam
 
-from app.agent.events import AgentEvent
 from app.agent.config import AgentConfig
+from app.agent.events import AgentEvent
+from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, PlanStep
 from app.agent.registry import tool_registry
-from app.agent.memory_bridge import AgentMemoryBridge
 from app.core.prometheus import (
     AGENT_EXECUTION_STEPS,
     AGENT_TOOL_CALLS,
@@ -71,7 +71,7 @@ class Executor:
     async def execute(
         self,
         plan: Plan,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
         organization_id: int = 1,
         user_id: int = 0,
         enable_thinking: bool = True,
@@ -179,7 +179,7 @@ class Executor:
 
         # Run all steps concurrently
         event_queues: dict[str, list] = {s.id: [] for s in steps}
-        done_flags: dict[str, bool] = {s.id: False for s in steps}
+        {s.id: False for s in steps}
 
         async def run_step(step):
             step_result = ""
@@ -234,7 +234,7 @@ class Executor:
         self,
         step: PlanStep,
         plan: Plan,
-        history: Optional[List[Dict[str, str]]],
+        history: list[dict[str, str]] | None,
         organization_id: int,
         user_id: int,
         enable_thinking: bool,
@@ -268,10 +268,7 @@ class Executor:
                 enable_thinking=enable_thinking,
                 error_context=last_error if attempt > 0 else "",
             ):
-                if event.type == "tool_error":
-                    had_error = True
-                    last_error = event.content
-                elif event.type == "error":
+                if event.type == "tool_error" or event.type == "error":
                     had_error = True
                     last_error = event.content
                 elif event.type == "chunk":
@@ -303,7 +300,7 @@ class Executor:
         self,
         step: PlanStep,
         plan: Plan,
-        history: Optional[List[Dict[str, str]]],
+        history: list[dict[str, str]] | None,
         organization_id: int,
         user_id: int,
         enable_thinking: bool,
@@ -324,7 +321,7 @@ class Executor:
         if error_context:
             system_prompt += f"\n\n⚠️ 上次执行失败，请调整策略：{error_context}"
 
-        messages: List[Dict[str, Any]] = [
+        messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
         ]
         if history:
@@ -379,7 +376,7 @@ class Executor:
             return
 
         # Process tool calls
-        tool_results: List[Dict[str, str]] = []
+        tool_results: list[dict[str, str]] = []
         for tc in message.tool_calls[:self.config.max_tool_calls_per_turn]:
             func = tc.function
             tool_call_id = tc.id or uuid.uuid4().hex[:16]
@@ -474,7 +471,7 @@ class Executor:
     async def _synthesize_tool_results(
         self,
         step_description: str,
-        tool_results: List[Dict[str, str]],
+        tool_results: list[dict[str, str]],
         original_instruction: str,
     ) -> str:
         """Synthesize tool results into a natural language answer."""
@@ -506,7 +503,7 @@ class Executor:
             first = tool_results[0]
             return f"找到以下信息：\n{first['result'][:500]}"
 
-    def _get_step_tools(self, step: PlanStep) -> Optional[List[Dict[str, Any]]]:
+    def _get_step_tools(self, step: PlanStep) -> list[dict[str, Any]] | None:
         """Get available tools for a step, filtered by config."""
         if not self.config.enable_tools:
             return None
@@ -531,7 +528,7 @@ class Executor:
 
         return tools if tools else None
 
-    def _get_previous_results(self, dependency_ids: List[str]) -> str:
+    def _get_previous_results(self, dependency_ids: list[str]) -> str:
         """Build a summary of previous step results that this step depends on."""
         if not dependency_ids:
             return ""

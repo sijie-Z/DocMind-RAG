@@ -13,17 +13,18 @@ the old AgentLoop plus new event types (thinking, plan_*, reflection).
 
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from openai import AsyncOpenAI
 
-from app.agent.events import AgentEvent
 from app.agent.config import AgentConfig
-from app.agent.planner import Planner, Plan, PlanStep
-from app.agent.executor import Executor
-from app.agent.reflector import Reflector, ReflectionResult
 from app.agent.context import ContextEngine
+from app.agent.events import AgentEvent
+from app.agent.executor import Executor
 from app.agent.memory_bridge import AgentMemoryBridge
+from app.agent.planner import Plan, Planner, PlanStep
+from app.agent.reflector import Reflector
 from app.agent.registry import tool_registry
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,7 @@ class PERAgentLoop:
     def __init__(
         self,
         openai_client: AsyncOpenAI,
-        config: Optional[AgentConfig] = None,
+        config: AgentConfig | None = None,
         organization_id: int = 1,
         user_id: int = 0,
     ):
@@ -128,9 +129,9 @@ class PERAgentLoop:
         )
 
         # PER components (created on demand)
-        self._planner: Optional[Planner] = None
-        self._executor: Optional[Executor] = None
-        self._reflector: Optional[Reflector] = None
+        self._planner: Planner | None = None
+        self._executor: Executor | None = None
+        self._reflector: Reflector | None = None
 
     @property
     def planner(self) -> Planner:
@@ -153,8 +154,8 @@ class PERAgentLoop:
     async def run(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
-        context_docs: Optional[List[Dict[str, Any]]] = None,
+        history: list[dict[str, str]] | None = None,
+        context_docs: list[dict[str, Any]] | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Execute the PER agent loop, yielding events as they happen.
 
@@ -176,7 +177,7 @@ class PERAgentLoop:
                 if memory_context:
                     yield AgentEvent(
                         type="thinking",
-                        content=f"回忆相关上下文...",
+                        content="回忆相关上下文...",
                         thinking_type="reasoning",
                     )
                     await _yield_control()
@@ -184,7 +185,7 @@ class PERAgentLoop:
                 logger.warning(f"Memory recall failed: {e}")
 
         # ── Phase 1: Planning ────────────────────────────────────────────
-        plan: Optional[Plan] = None
+        plan: Plan | None = None
         import uuid as _uuid_mod
 
         if self.config.enable_planning:
@@ -192,7 +193,7 @@ class PERAgentLoop:
             plan_id = ""
             plan_goal = query[:80]
             plan_reasoning = ""
-            plan_steps: List[PlanStep] = []
+            plan_steps: list[PlanStep] = []
 
             async for event in self.planner.plan(
                 query=query,
@@ -324,12 +325,12 @@ class PERAgentLoop:
     def _build_messages(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]],
-        context_docs: Optional[List[Dict[str, Any]]],
+        history: list[dict[str, str]] | None,
+        context_docs: list[dict[str, Any]] | None,
         memory_context: str = "",
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM."""
-        messages: List[Dict[str, Any]] = []
+        messages: list[dict[str, Any]] = []
 
         # System prompt
         system_prompt = self.config.system_prompt_override or DEFAULT_SYSTEM_PROMPT
@@ -367,7 +368,7 @@ class PERAgentLoop:
 
         return messages
 
-    def _get_tools(self) -> Optional[List[Dict[str, Any]]]:
+    def _get_tools(self) -> list[dict[str, Any]] | None:
         """Get tool definitions for the LLM, filtered by config."""
         if not self.config.enable_tools:
             return None

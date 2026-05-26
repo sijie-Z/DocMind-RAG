@@ -1,28 +1,27 @@
-# -*- coding: utf-8 -*-
 """
 派聪明AI知识库系统 - 认证服务
 """
 
 import json
-import uuid
-import jwt
-import bcrypt
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, Optional
+import uuid
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
+import bcrypt
+import jwt
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.encoders import jsonable_encoder # 确保有这个
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.encoders import jsonable_encoder  # 确保有这个
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import RedisTools
-from app.models.user import User
-from app.services.organization_service import organization_service
 from app.exceptions import AccountLockedError
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -36,48 +35,47 @@ _FAILURE_KEY_PREFIX = "login_failures:"
 
 class AuthService:
     """认证服务类"""
-    
+
     def __init__(self):
         self.secret_key = settings.JWT_SECRET_KEY
         self.algorithm = settings.JWT_ALGORITHM
         self.access_token_expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
         self.refresh_token_expire_minutes = settings.REFRESH_TOKEN_EXPIRE_MINUTES
-    
-    def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
+
+    def create_access_token(self, data: dict, expires_delta: timedelta | None = None) -> str:
         """Create access token with jti for precise revocation."""
         to_encode = data.copy()
         if expires_delta:
-            expire = datetime.now(timezone.utc) + expires_delta
+            expire = datetime.now(UTC) + expires_delta
         else:
-            expire = datetime.now(timezone.utc) + timedelta(minutes=self.access_token_expire_minutes)
+            expire = datetime.now(UTC) + timedelta(minutes=self.access_token_expire_minutes)
         to_encode.update({
             "exp": expire,
             "type": "access",
-            "iat": datetime.now(timezone.utc),
+            "iat": datetime.now(UTC),
             "jti": uuid.uuid4().hex,
         })
         return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
 
-    def create_refresh_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    def create_refresh_token(self, data: dict, expires_delta: timedelta | None = None) -> str:
         """Create refresh token with jti for precise revocation."""
         to_encode = data.copy()
         if expires_delta:
-            expire = datetime.now(timezone.utc) + expires_delta
+            expire = datetime.now(UTC) + expires_delta
         else:
-            expire = datetime.now(timezone.utc) + timedelta(minutes=self.refresh_token_expire_minutes)
+            expire = datetime.now(UTC) + timedelta(minutes=self.refresh_token_expire_minutes)
         to_encode.update({
             "exp": expire,
             "type": "refresh",
-            "iat": datetime.now(timezone.utc),
+            "iat": datetime.now(UTC),
             "jti": uuid.uuid4().hex,
         })
         return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
-    
-    def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
+
+    def verify_token(self, token: str) -> dict[str, Any] | None:
         """验证令牌"""
         try:
-            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
-            return payload
+            return jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
         except jwt.ExpiredSignatureError:
             logger.warning("令牌已过期")
             return None
@@ -87,7 +85,7 @@ class AuthService:
         except Exception as e:
             logger.error(f"令牌验证异常: {str(e)}")
             return None
-    
+
     async def get_current_user(
         self,
         credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -95,7 +93,7 @@ class AuthService:
     ) -> User:
         """获取当前用户"""
         token = credentials.credentials
-        
+
         # 验证令牌
         payload = self.verify_token(token)
 
@@ -121,7 +119,7 @@ class AuthService:
                 detail="无效的令牌类型",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         # 获取用户ID
         user_id = payload.get("user_id")
         if user_id is None:
@@ -130,26 +128,26 @@ class AuthService:
                 detail="令牌中缺少用户ID",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         # 从缓存获取用户信息
         cache_key = f"user:{user_id}"
         cached_user = await RedisTools.get_cache(cache_key)
-        
+
         if cached_user:
             try:
                 # 解析缓存的用户数据
                 user_data = json.loads(cached_user)
-                
+
                 # 处理日期字段，将字符串转换回 datetime 对象
                 for date_field in ['created_at', 'updated_at', 'last_login_at']:
                     if user_data.get(date_field):
                         user_data[date_field] = datetime.fromisoformat(user_data[date_field])
-                
+
                 # 过滤掉 User 模型中不存在的字段
                 # 获取 User 模型的所有列名
                 user_columns = {c.name for c in User.__table__.columns}
                 filtered_data = {k: v for k, v in user_data.items() if k in user_columns}
-                
+
                 user = User(**filtered_data)
                 # 将JWT中的权限信息添加到用户对象
                 user.token_role = payload.get("role")
@@ -159,35 +157,35 @@ class AuthService:
                 logger.warning(f"从缓存恢复用户对象失败: {e}，将回退到数据库查询")
                 # 如果缓存解析失败，删除该缓存
                 await RedisTools.delete_cache(cache_key)
-        
+
         # 从数据库获取用户信息
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
-        
+
         if user is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="用户不存在"
             )
-        
+
         # 将JWT中的权限信息添加到用户对象
         user.token_role = payload.get("role")
         user.token_organization_id = payload.get("organization_id")
-        
+
         # 缓存用户信息
         from app.schemas.user import UserInfoResponse
         user_dict = jsonable_encoder(UserInfoResponse.model_validate(user).model_dump())
         user_json_str = json.dumps(user_dict)
-        
+
         # 2. 存入 Redis (Redis 只吃字符串)
         await RedisTools.set_cache(
             f"user:{user.id}",
-            user_json_str, 
+            user_json_str,
             expire=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )
-        
+
         return user
-    
+
     async def _check_account_lockout(self, username: str) -> None:
         """Check if account is locked due to too many failed login attempts."""
         key = f"{_FAILURE_KEY_PREFIX}{username}"
@@ -217,7 +215,7 @@ class AuthService:
         key = f"{_FAILURE_KEY_PREFIX}{username}"
         await RedisTools.delete_cache(key)
 
-    async def authenticate_user(self, db: AsyncSession, username: str, password: str) -> Optional[User]:
+    async def authenticate_user(self, db: AsyncSession, username: str, password: str) -> User | None:
         """验证用户凭据（含暴力破解防护）"""
         try:
             # Check lockout before anything else
@@ -257,7 +255,7 @@ class AuthService:
         except Exception as e:
             logger.exception(f"用户认证失败: {e}")
             raise
-    
+
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """验证密码"""
         if not plain_password or not hashed_password:
@@ -273,7 +271,7 @@ class AuthService:
         except Exception as e:
             logger.error(f"密码验证失败: {str(e)}")
             return False
-    
+
     def require_role(self, required_role: str) -> Callable[..., Any]:
         """
         RBAC角色权限检查装饰器
@@ -291,9 +289,9 @@ class AuthService:
                     detail=f"需要{required_role}权限"
                 )
             return current_user
-        
+
         return role_checker
-    
+
     def require_admin(self) -> Callable[..., Any]:
         """需要管理员权限"""
         return self.require_role("admin")
@@ -301,7 +299,7 @@ class AuthService:
     def require_user(self) -> Callable[..., Any]:
         """需要普通用户权限"""
         return self.require_role("user")
-    
+
     def hash_password(self, password: str) -> str:
         """哈希密码"""
         try:
@@ -311,14 +309,14 @@ class AuthService:
         except Exception as e:
             logger.error(f"密码哈希失败: {str(e)}")
             raise
-    
+
     async def blacklist_token(self, token: str) -> None:
         """Blacklist a token using its jti (JWT ID) for precise revocation."""
         try:
             payload = self.verify_token(token)
             if payload and "exp" in payload:
                 exp_timestamp = payload["exp"]
-                current_timestamp = datetime.now(timezone.utc).timestamp()
+                current_timestamp = datetime.now(UTC).timestamp()
                 if exp_timestamp > current_timestamp:
                     ttl = int(exp_timestamp - current_timestamp)
                     jti = payload.get("jti")
@@ -342,8 +340,8 @@ class AuthService:
             return False
         except Exception:
             return False
-    
-    async def get_user_by_username(self, db: AsyncSession, username: str) -> Optional[User]:
+
+    async def get_user_by_username(self, db: AsyncSession, username: str) -> User | None:
         """根据用户名获取用户"""
         try:
             result = await db.execute(select(User).where(User.username == username))
@@ -351,8 +349,8 @@ class AuthService:
         except Exception as e:
             logger.error(f"根据用户名获取用户失败: {str(e)}")
             return None
-    
-    async def get_user_by_email(self, db: AsyncSession, email: str) -> Optional[User]:
+
+    async def get_user_by_email(self, db: AsyncSession, email: str) -> User | None:
         """根据邮箱获取用户"""
         try:
             result = await db.execute(select(User).where(User.email == email))
@@ -360,8 +358,8 @@ class AuthService:
         except Exception as e:
             logger.error(f"根据邮箱获取用户失败: {str(e)}")
             return None
-    
-    async def get_user_by_id(self, db: AsyncSession, user_id: int) -> Optional[User]:
+
+    async def get_user_by_id(self, db: AsyncSession, user_id: int) -> User | None:
         """根据ID获取用户"""
         try:
             result = await db.execute(select(User).where(User.id == user_id))
@@ -369,15 +367,15 @@ class AuthService:
         except Exception as e:
             logger.error(f"根据ID获取用户失败: {str(e)}")
             return None
-    
+
     async def create_user(
         self,
         db: AsyncSession,
         username: str,
         email: str,
         password: str,
-        full_name: Optional[str] = None,
-        organization_id: Optional[int] = None,
+        full_name: str | None = None,
+        organization_id: int | None = None,
         role: str = "user"
     ) -> User:
         """创建用户 — 不负责 commit，由调用方管理事务"""
@@ -399,15 +397,15 @@ class AuthService:
 
         logger.info(f"用户创建成功: {username}")
         return user
-    
+
     async def update_user(
         self,
         db: AsyncSession,
         user_id: int,
-        username: Optional[str] = None,
-        email: Optional[str] = None,
-        full_name: Optional[str] = None,
-        organization_id: Optional[int] = None
+        username: str | None = None,
+        email: str | None = None,
+        full_name: str | None = None,
+        organization_id: int | None = None
     ) -> User:
         """更新用户信息 — 不负责 commit，由调用方管理事务"""
         result = await db.execute(select(User).where(User.id == user_id))
@@ -425,14 +423,14 @@ class AuthService:
         if organization_id is not None:
             user.organization_id = organization_id
 
-        user.updated_at = datetime.now(timezone.utc)
+        user.updated_at = datetime.now(UTC)
 
         await db.flush()
         await db.refresh(user)
 
         logger.info(f"用户信息更新成功: {user.username}")
         return user
-    
+
     async def update_user_password(self, db: AsyncSession, user_id: int, new_password: str) -> User:
         """更新用户密码 — 不负责 commit，由调用方管理事务"""
         result = await db.execute(select(User).where(User.id == user_id))
@@ -443,7 +441,7 @@ class AuthService:
 
         hashed_password = self.hash_password(new_password)
         user.hashed_password = hashed_password
-        user.updated_at = datetime.now(timezone.utc)
+        user.updated_at = datetime.now(UTC)
 
         await db.flush()
         await db.refresh(user)

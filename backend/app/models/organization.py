@@ -2,9 +2,10 @@
 派聪明AI知识库系统 - 组织模型
 """
 from datetime import datetime
-from typing import Optional, List
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Table, Integer, Column
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+from typing import Optional
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Table
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -24,11 +25,11 @@ class Organization(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
-    description: Mapped[Optional[str]] = mapped_column(String(500))
+    description: Mapped[str | None] = mapped_column(String(500))
     color: Mapped[str] = mapped_column(String(20), default="#18a058")
     is_private: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"))
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"))
     level: Mapped[int] = mapped_column(Integer, default=1)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
@@ -39,7 +40,7 @@ class Organization(Base):
 
     # 关联
     parent: Mapped[Optional["Organization"]] = relationship("Organization", remote_side=[id], back_populates="children")
-    children: Mapped[List["Organization"]] = relationship("Organization", back_populates="parent", cascade="all, delete-orphan")
+    children: Mapped[list["Organization"]] = relationship("Organization", back_populates="parent", cascade="all, delete-orphan")
 
     owner: Mapped[Optional["User"]] = relationship(
         "User",
@@ -48,23 +49,23 @@ class Organization(Base):
         overlaps="owned_organizations"
     )
 
-    users: Mapped[List["User"]] = relationship(
+    users: Mapped[list["User"]] = relationship(
         "User",
         back_populates="organization",
         foreign_keys="User.organization_id"
     )
 
-    members: Mapped[List["User"]] = relationship(
+    members: Mapped[list["User"]] = relationship(
         "User",
         secondary=user_organization,
         back_populates="organizations",
         lazy="selectin"
     )
 
-    documents: Mapped[List["Document"]] = relationship("Document", back_populates="organization", lazy="selectin")
-    chat_sessions: Mapped[List["ChatSession"]] = relationship("ChatSession", back_populates="organization", lazy="selectin")
+    documents: Mapped[list["Document"]] = relationship("Document", back_populates="organization", lazy="selectin")
+    chat_sessions: Mapped[list["ChatSession"]] = relationship("ChatSession", back_populates="organization", lazy="selectin")
 
-    user_organization_roles: Mapped[List["Role"]] = relationship(
+    user_organization_roles: Mapped[list["Role"]] = relationship(
         "Role",
         secondary="user_organization_role_association",
         overlaps="roles_in_organizations",

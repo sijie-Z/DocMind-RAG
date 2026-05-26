@@ -1,10 +1,7 @@
-# -*- coding: utf-8 -*-
 """Agent 模块测试 —— Tool Registry / Config / Planner / Executor / Reflector / MemoryBridge."""
-import json
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from typing import Any, Dict, List
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 
 # ── Tool Registry ──────────────────────────────────────────────────────────
 
@@ -252,8 +249,8 @@ class TestPlanner:
     """Planner: JSON 提取、DAG 校验、Plan 结构."""
 
     def test_extract_json_from_code_fence(self):
-        from app.agent.planner import Planner
         from app.agent.config import AgentConfig
+        from app.agent.planner import Planner
         planner = Planner(None, AgentConfig())
 
         text = """一些推理过程
@@ -282,13 +279,13 @@ class TestPlanner:
         assert result == {}
 
     def _make_planner(self):
-        from app.agent.planner import Planner
         from app.agent.config import AgentConfig
+        from app.agent.planner import Planner
         return Planner(None, AgentConfig())
 
     def test_parse_plan_valid(self):
-        from app.agent.planner import Planner
         from app.agent.config import AgentConfig
+        from app.agent.planner import Planner
         planner = Planner(None, AgentConfig())
 
         data = {
@@ -311,9 +308,8 @@ class TestPlanner:
         assert planner._parse_plan("p1", {"goal": "x", "steps": []}) is None
 
     def test_validate_dag_no_cycles(self):
-        from app.agent.planner import Plan, PlanStep
         from app.agent.config import AgentConfig
-        from app.agent.planner import Planner
+        from app.agent.planner import Plan, Planner, PlanStep
         planner = Planner(None, AgentConfig())
 
         plan = Plan(
@@ -330,9 +326,8 @@ class TestPlanner:
         assert plan.steps[0].dependencies == []
 
     def test_validate_dag_with_cycle_removes_deps(self):
-        from app.agent.planner import Plan, PlanStep
         from app.agent.config import AgentConfig
-        from app.agent.planner import Planner
+        from app.agent.planner import Plan, Planner, PlanStep
         planner = Planner(None, AgentConfig())
 
         plan = Plan(
@@ -349,9 +344,8 @@ class TestPlanner:
         assert all(s.dependencies == [] for s in plan.steps)
 
     def test_validate_dag_removes_invalid_refs(self):
-        from app.agent.planner import Plan, PlanStep
         from app.agent.config import AgentConfig
-        from app.agent.planner import Planner
+        from app.agent.planner import Plan, Planner, PlanStep
         planner = Planner(None, AgentConfig())
 
         plan = Plan(
@@ -408,11 +402,10 @@ class TestExecutor:
     @pytest.mark.asyncio
     async def test_execute_step_once_llm_error_returns_tool_error(self):
         """LLM 调用失败时返回 tool_error."""
-        from app.agent.executor import Executor
         from app.agent.config import AgentConfig
-        from app.agent.planner import Plan, PlanStep
+        from app.agent.executor import Executor
         from app.agent.memory_bridge import AgentMemoryBridge
-        from app.agent.events import AgentEvent
+        from app.agent.planner import Plan, PlanStep
 
         mock_client = MagicMock()
         mock_client.chat.completions.create = AsyncMock(side_effect=Exception("API timeout"))
@@ -433,8 +426,8 @@ class TestExecutor:
         assert any(e.type == "tool_error" for e in events)
 
     def test_get_previous_results_empty(self):
-        from app.agent.executor import Executor
         from app.agent.config import AgentConfig
+        from app.agent.executor import Executor
         from app.agent.memory_bridge import AgentMemoryBridge
         mock_client = MagicMock()
         memory = AgentMemoryBridge(agent_id="test", organization_id=1, user_id=0)
@@ -442,8 +435,8 @@ class TestExecutor:
         assert executor._get_previous_results([]) == ""
 
     def test_get_step_tools_filters_disabled(self):
-        from app.agent.executor import Executor
         from app.agent.config import AgentConfig
+        from app.agent.executor import Executor
         from app.agent.memory_bridge import AgentMemoryBridge
         from app.agent.planner import PlanStep
         mock_client = MagicMock()
@@ -458,8 +451,8 @@ class TestExecutor:
             assert "execute_sql" not in names
 
     def test_get_step_tools_prioritizes_hint(self):
-        from app.agent.executor import Executor
         from app.agent.config import AgentConfig
+        from app.agent.executor import Executor
         from app.agent.memory_bridge import AgentMemoryBridge
         from app.agent.planner import PlanStep
         mock_client = MagicMock()
@@ -479,9 +472,9 @@ class TestReflector:
     """Reflector: 快速通过检查、评估."""
 
     def test_quick_pass_all_completed(self):
-        from app.agent.reflector import Reflector
         from app.agent.config import AgentConfig
         from app.agent.planner import Plan, PlanStep
+        from app.agent.reflector import Reflector
         mock_client = MagicMock()
         reflector = Reflector(mock_client, AgentConfig())
 
@@ -492,9 +485,9 @@ class TestReflector:
         assert reflector._quick_pass_check(plan, results) is True
 
     def test_quick_pass_with_failure(self):
-        from app.agent.reflector import Reflector
         from app.agent.config import AgentConfig
         from app.agent.planner import Plan, PlanStep
+        from app.agent.reflector import Reflector
         reflector = Reflector(MagicMock(), AgentConfig())
 
         plan = Plan(id="p1", goal="failing", steps=[
@@ -504,9 +497,9 @@ class TestReflector:
         assert reflector._quick_pass_check(plan, results) is False
 
     def test_quick_pass_too_many_steps(self):
-        from app.agent.reflector import Reflector
         from app.agent.config import AgentConfig
         from app.agent.planner import Plan, PlanStep
+        from app.agent.reflector import Reflector
         reflector = Reflector(MagicMock(), AgentConfig())
 
         plan = Plan(id="p1", goal="many", steps=[
@@ -517,9 +510,9 @@ class TestReflector:
         assert reflector._quick_pass_check(plan, results) is False
 
     def test_build_plan_summary(self):
-        from app.agent.reflector import Reflector
         from app.agent.config import AgentConfig
         from app.agent.planner import Plan, PlanStep
+        from app.agent.reflector import Reflector
         reflector = Reflector(MagicMock(), AgentConfig())
 
         plan = Plan(id="p1", goal="test", steps=[
@@ -532,8 +525,8 @@ class TestReflector:
         assert "step one" in summary
 
     def test_extract_json_from_code_fence(self):
-        from app.agent.reflector import Reflector
         from app.agent.config import AgentConfig
+        from app.agent.reflector import Reflector
         reflector = Reflector(MagicMock(), AgentConfig())
 
         text = '```json\n{"decision": "pass", "achievement": 90}\n```'
@@ -550,6 +543,7 @@ class TestMemoryBridge:
     def bridge(self):
         """Helper: create a bridge with a unique namespace to avoid test pollution."""
         import uuid
+
         from app.agent.memory_bridge import AgentMemoryBridge
         return AgentMemoryBridge(agent_id=f"test-{uuid.uuid4().hex[:8]}", organization_id=1, user_id=0)
 

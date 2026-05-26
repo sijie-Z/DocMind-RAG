@@ -1,12 +1,13 @@
 """
 知识库处理任务模型
 """
+import enum
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import Integer, String, DateTime, Text, ForeignKey, Enum
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
-import enum
 
 from app.core.database import Base
 
@@ -27,10 +28,10 @@ class KnowledgeProcessingJob(Base):
     trigger_type: Mapped[str] = mapped_column(String(32), default="upload")  # upload/reprocess
     status: Mapped[KnowledgeJobStatus] = mapped_column(Enum(KnowledgeJobStatus), default=KnowledgeJobStatus.QUEUED)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
-    error_message: Mapped[Optional[str]] = mapped_column(Text)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now())
 
     document: Mapped[Optional["Document"]] = relationship("Document", lazy="selectin")

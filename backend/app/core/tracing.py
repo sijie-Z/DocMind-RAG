@@ -1,13 +1,7 @@
 import logging
 import os
-from fastapi import FastAPI
 
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +14,17 @@ def setup_opentelemetry(app: FastAPI, service_name: str = "rag_backend"):
         logger.info("OpenTelemetry tracing is disabled.")
         return
 
+    try:
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError:
+        logger.warning("OpenTelemetry packages not installed; tracing disabled.")
+        return
+
     otlp_endpoint = os.getenv("OTLP_ENDPOINT", "http://localhost:4317")
     logger.info(f"Initializing OpenTelemetry tracing (endpoint: {otlp_endpoint})...")
 
@@ -28,7 +33,7 @@ def setup_opentelemetry(app: FastAPI, service_name: str = "rag_backend"):
 
     # 配置 Provider
     provider = TracerProvider(resource=resource)
-    
+
     # 配置 Exporter
     exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
     processor = BatchSpanProcessor(exporter)

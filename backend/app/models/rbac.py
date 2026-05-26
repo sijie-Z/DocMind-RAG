@@ -2,10 +2,19 @@
 派聪明AI知识库系统 - RBAC (Role-Based Access Control) 模型
 """
 from datetime import datetime
-from typing import Optional, List
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Table, UniqueConstraint, Boolean
-from sqlalchemy.orm import relationship, Mapped, mapped_column
 from enum import Enum
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -73,11 +82,11 @@ class Permission(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, index=True, comment="权限名称，例如 document:create")
-    description: Mapped[Optional[str]] = mapped_column(String(255), comment="权限描述")
+    description: Mapped[str | None] = mapped_column(String(255), comment="权限描述")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
-    roles: Mapped[List["Role"]] = relationship("Role", secondary=role_permission_association, back_populates="permissions")
+    roles: Mapped[list["Role"]] = relationship("Role", secondary=role_permission_association, back_populates="permissions")
 
     def __repr__(self):
         return f"<Permission(name='{self.name}')>"
@@ -89,19 +98,19 @@ class Role(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, index=True, comment="角色名称，例如 OrgAdmin")
-    description: Mapped[Optional[str]] = mapped_column(String(255), comment="角色描述")
+    description: Mapped[str | None] = mapped_column(String(255), comment="角色描述")
     is_system_role: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否为系统级别角色")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
-    permissions: Mapped[List["Permission"]] = relationship(
+    permissions: Mapped[list["Permission"]] = relationship(
         "Permission",
         secondary=role_permission_association,
         back_populates="roles",
         lazy="selectin"
     )
 
-    user_organization_roles: Mapped[List["User"]] = relationship("User", secondary=user_organization_role_association, back_populates="roles_in_organizations")
+    user_organization_roles: Mapped[list["User"]] = relationship("User", secondary=user_organization_role_association, back_populates="roles_in_organizations")
 
     def __repr__(self):
         return f"<Role(name='{self.name}')>"

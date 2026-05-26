@@ -1,9 +1,8 @@
-# -*- coding: utf-8 -*-
 """Security settings — JWT, CORS, secret keys."""
 
-from typing import List
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from pydantic import model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class SecuritySettings(BaseSettings):
@@ -27,7 +26,7 @@ class SecuritySettings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
     # CORS
-    ALLOWED_ORIGINS: List[str] = [
+    ALLOWED_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:5174",

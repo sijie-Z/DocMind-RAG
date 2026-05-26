@@ -24,8 +24,9 @@ Usage:
 """
 import inspect
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +36,12 @@ class ToolEntry:
     """A registered tool with its metadata and handler."""
     name: str
     description: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     handler: Callable[..., Coroutine[Any, Any, str]]
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
     requires_auth: bool = False
 
-    def to_openai_schema(self) -> Dict[str, Any]:
+    def to_openai_schema(self) -> dict[str, Any]:
         """Convert to OpenAI function-calling schema."""
         return {
             "type": "function",
@@ -56,15 +57,15 @@ class ToolRegistry:
     """Central registry of all available tools."""
 
     def __init__(self):
-        self._tools: Dict[str, ToolEntry] = {}
+        self._tools: dict[str, ToolEntry] = {}
 
     def register(
         self,
         name: str,
         description: str,
-        parameters: Dict[str, Any],
+        parameters: dict[str, Any],
         handler: Callable[..., Coroutine[Any, Any, str]],
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
         requires_auth: bool = False,
     ) -> ToolEntry:
         entry = ToolEntry(
@@ -79,19 +80,19 @@ class ToolRegistry:
         logger.debug(f"Registered tool: {name}")
         return entry
 
-    def get(self, name: str) -> Optional[ToolEntry]:
+    def get(self, name: str) -> ToolEntry | None:
         return self._tools.get(name)
 
-    def list_tools(self, tags: Optional[List[str]] = None) -> List[ToolEntry]:
+    def list_tools(self, tags: list[str] | None = None) -> list[ToolEntry]:
         if not tags:
             return list(self._tools.values())
         return [t for t in self._tools.values() if any(tag in t.tags for tag in tags)]
 
-    def to_openai_tools(self, tags: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    def to_openai_tools(self, tags: list[str] | None = None) -> list[dict[str, Any]]:
         """Export tools as OpenAI function-calling definitions."""
         return [t.to_openai_schema() for t in self.list_tools(tags)]
 
-    async def execute(self, name: str, arguments: Dict[str, Any], **context) -> str:
+    async def execute(self, name: str, arguments: dict[str, Any], **context) -> str:
         """Execute a tool by name with the given arguments."""
         entry = self._tools.get(name)
         if not entry:
@@ -115,8 +116,8 @@ tool_registry = ToolRegistry()
 def register_tool(
     name: str,
     description: str,
-    parameters: Dict[str, Any],
-    tags: Optional[List[str]] = None,
+    parameters: dict[str, Any],
+    tags: list[str] | None = None,
     requires_auth: bool = False,
 ):
     """Decorator to register a function as a tool."""

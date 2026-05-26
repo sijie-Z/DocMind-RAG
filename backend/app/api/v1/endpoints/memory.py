@@ -1,23 +1,23 @@
-# -*- coding: utf-8 -*-
 """Agent 记忆系统 API 端点"""
-from typing import Dict, Any, Optional
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends
+
 from app.core.security import get_current_user
 from app.models.user import User
-from app.services.memory_service import get_memory_system
 from app.schemas.memory import (
-    RememberRequest, RecallRequest, InteractionRequest,
-    ExperienceRequest, ImportMemoriesRequest,
+    ExperienceRequest,
+    ImportMemoriesRequest,
+    InteractionRequest,
+    RecallRequest,
+    RememberRequest,
 )
-from app.exceptions import NotFoundError, ValidationError
+from app.services.memory_service import get_memory_system
 
 router = APIRouter()
 
 
-@router.get("/{agent_id}", response_model=Dict[str, Any])
+@router.get("/{agent_id}", response_model=dict[str, Any])
 async def get_agent_memory(
     agent_id: str = "default",
     current_user: User = Depends(get_current_user)
@@ -27,7 +27,7 @@ async def get_agent_memory(
     return {"success": True, "data": memory_system.export()}
 
 
-@router.post("/{agent_id}/remember", response_model=Dict[str, Any])
+@router.post("/{agent_id}/remember", response_model=dict[str, Any])
 async def store_memory(
     agent_id: str,
     body: RememberRequest,
@@ -52,7 +52,7 @@ async def store_memory(
     }
 
 
-@router.post("/{agent_id}/recall", response_model=Dict[str, Any])
+@router.post("/{agent_id}/recall", response_model=dict[str, Any])
 async def recall_memory(
     agent_id: str,
     body: RecallRequest,
@@ -71,7 +71,7 @@ async def recall_memory(
     }
 
 
-@router.post("/{agent_id}/interaction", response_model=Dict[str, Any])
+@router.post("/{agent_id}/interaction", response_model=dict[str, Any])
 async def store_interaction(
     agent_id: str,
     body: InteractionRequest,
@@ -83,7 +83,7 @@ async def store_interaction(
     return {"success": True, "message": "交互已存储"}
 
 
-@router.post("/{agent_id}/experience", response_model=Dict[str, Any])
+@router.post("/{agent_id}/experience", response_model=dict[str, Any])
 async def store_experience(
     agent_id: str,
     body: ExperienceRequest,
@@ -100,7 +100,7 @@ async def store_experience(
     return {"success": True, "message": "经验已存储"}
 
 
-@router.get("/{agent_id}/context", response_model=Dict[str, Any])
+@router.get("/{agent_id}/context", response_model=dict[str, Any])
 async def get_memory_context(
     agent_id: str,
     query: str,
@@ -112,10 +112,10 @@ async def get_memory_context(
     return {"success": True, "data": {"context": context}}
 
 
-@router.delete("/{agent_id}", response_model=Dict[str, Any])
+@router.delete("/{agent_id}", response_model=dict[str, Any])
 async def clear_memory(
     agent_id: str,
-    memory_type: Optional[str] = None,
+    memory_type: str | None = None,
     current_user: User = Depends(get_current_user)
 ):
     """清空记忆"""
@@ -142,7 +142,7 @@ async def clear_memory(
     return {"success": True, "message": f"记忆已清空: {memory_type or '全部'}"}
 
 
-@router.post("/{agent_id}/import", response_model=Dict[str, Any])
+@router.post("/{agent_id}/import", response_model=dict[str, Any])
 async def import_memory(
     agent_id: str,
     body: ImportMemoriesRequest,
@@ -154,10 +154,10 @@ async def import_memory(
     return {"success": True, "message": "记忆导入成功"}
 
 
-@router.get("/{agent_id}/insights", response_model=Dict[str, Any])
+@router.get("/{agent_id}/insights", response_model=dict[str, Any])
 async def get_insights(
     agent_id: str,
-    context: Optional[str] = None,
+    context: str | None = None,
     top_k: int = 10,
     current_user: User = Depends(get_current_user)
 ):
@@ -170,10 +170,10 @@ async def get_insights(
     return {"success": True, "data": {"insights": insights}}
 
 
-@router.get("/{agent_id}/lessons", response_model=Dict[str, Any])
+@router.get("/{agent_id}/lessons", response_model=dict[str, Any])
 async def get_lessons(
     agent_id: str,
-    situation: Optional[str] = None,
+    situation: str | None = None,
     current_user: User = Depends(get_current_user)
 ):
     """获取经验教训"""

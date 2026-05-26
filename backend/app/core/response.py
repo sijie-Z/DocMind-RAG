@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Consistent API response format helpers.
 
 All API responses (success and error) follow the same schema:
@@ -12,7 +11,7 @@ All API responses (success and error) follow the same schema:
     }
 """
 
-from typing import Any, Optional
+from typing import Any
 
 
 def success_response(data: Any = None, message: str = "success", code: int = 200) -> dict:
@@ -30,7 +29,7 @@ def error_response(
     code: int = 400,
     message: str = "error",
     detail: Any = None,
-    request_id: Optional[str] = None,
+    request_id: str | None = None,
     data: Any = None,
 ) -> dict:
     """Standard error response body."""

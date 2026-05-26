@@ -2,7 +2,7 @@
 import json
 import logging
 import re
-from typing import List, Dict, Optional, Literal
+from typing import Literal
 
 from app.core.config import settings
 
@@ -62,7 +62,7 @@ class QueryComplexityClassifier:
 class QueryIntentClassifier:
     """Classifies query intent to optimize retrieval strategy."""
 
-    INTENT_PATTERNS: Dict[QueryIntent, List[str]] = {
+    INTENT_PATTERNS: dict[QueryIntent, list[str]] = {
         "factual": ["是谁", "是什么", "在哪", "什么时候", "第几", "多少时间", "长度", "面积", "人口"],
         "procedural": ["如何", "怎么", "怎样", "步骤", "流程", "操作", "方法", "过程", "操作步骤"],
         "list": ["有哪些", "有什么", "列出", "哪些", "名单", "列表", "罗列"],
@@ -75,7 +75,7 @@ class QueryIntentClassifier:
     @classmethod
     def classify(cls, query: str) -> QueryIntent:
         q = query.lower().strip()
-        scores: Dict[str, float] = {intent: 0.0 for intent in cls.INTENT_PATTERNS}
+        scores: dict[str, float] = {intent: 0.0 for intent in cls.INTENT_PATTERNS}
         for intent, patterns in cls.INTENT_PATTERNS.items():
             for pattern in patterns:
                 if pattern in q:
@@ -85,7 +85,7 @@ class QueryIntentClassifier:
         return max(scores, key=scores.get)
 
     @classmethod
-    def get_boost_fields(cls, intent: QueryIntent) -> List[str]:
+    def get_boost_fields(cls, intent: QueryIntent) -> list[str]:
         field_boosts = {
             "factual": ["chunk_text^2", "content^2", "title^1.5"],
             "procedural": ["chunk_text^2", "content^2", "section_title^1.8"],
@@ -99,7 +99,7 @@ class QueryIntentClassifier:
         return field_boosts.get(intent, ["chunk_text^2", "content^2", "filename^1.2"])
 
 
-def extract_query_terms(query: str) -> List[str]:
+def extract_query_terms(query: str) -> list[str]:
     """Extract meaningful terms from query (bigrams for CJK, words for Latin)."""
     q = (query or "").strip().lower()
     if not q:
@@ -124,9 +124,9 @@ def extract_query_terms(query: str) -> List[str]:
     return [t for t in raw_terms if t.strip() and len(t) >= 2 and t not in stop_words][:12]
 
 
-def rewrite_query_candidates(query: str) -> List[str]:
+def rewrite_query_candidates(query: str) -> list[str]:
     """Lightweight local query rewrite (no LLM call)."""
-    candidates: List[str] = []
+    candidates: list[str] = []
     q = (query or "").strip()
     if not q:
         return candidates
@@ -159,7 +159,7 @@ def rewrite_query_candidates(query: str) -> List[str]:
     return dedup[:rewrite_count]
 
 
-async def rewrite_query_llm(query: str, openai_client, model: str) -> List[str]:
+async def rewrite_query_llm(query: str, openai_client, model: str) -> list[str]:
     """Use LLM to generate query expansion variants."""
     if not openai_client or not getattr(settings, "RAG_ENABLE_QUERY_REWRITE", True):
         return [query]
@@ -225,7 +225,7 @@ async def generate_hyde_doc(query: str, intent: QueryIntent, openai_client, mode
 
 async def generate_multi_hyde_docs(
     query: str, intent: QueryIntent, openai_client, model: str, num_docs: int = 2
-) -> List[str]:
+) -> list[str]:
     """Generate multiple HyDE documents from different perspectives."""
     if not openai_client:
         return []

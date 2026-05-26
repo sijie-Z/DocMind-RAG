@@ -1,7 +1,7 @@
-# -*- coding: utf-8 -*-
 """User response schemas — single source of truth for User serialization."""
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -10,22 +10,22 @@ class UserInfoResponse(BaseModel):
     id: int
     username: str
     email: str
-    full_name: Optional[str] = None
-    nickname: Optional[str] = None
-    phone: Optional[str] = None
-    avatar_url: Optional[str] = None
-    bio: Optional[str] = None
-    organization_id: Optional[int] = None
+    full_name: str | None = None
+    nickname: str | None = None
+    phone: str | None = None
+    avatar_url: str | None = None
+    bio: str | None = None
+    organization_id: int | None = None
     role: str = "user"
     is_active: bool = True
     is_superuser: bool = False
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    last_login_at: Optional[datetime] = None
-    preferences: Optional[str] = None
-    api_key: Optional[str] = None
-    department: Optional[str] = None
-    position: Optional[str] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_login_at: datetime | None = None
+    preferences: str | None = None
+    api_key: str | None = None
+    department: str | None = None
+    position: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -37,16 +37,16 @@ class UserStatsResponse(BaseModel):
     knowledge_count: int
     storage_used: int = 0
     storage_limit: int = 0
-    activity_trend: List[int] = []
+    activity_trend: list[int] = []
 
 
 class UserUpdateProfile(BaseModel):
-    full_name: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    avatar_url: Optional[str] = None
-    bio: Optional[str] = None
-    preferences: Optional[Dict[str, Any]] = None
+    full_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    avatar_url: str | None = None
+    bio: str | None = None
+    preferences: dict[str, Any] | None = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -57,19 +57,19 @@ class UserUpdatePassword(BaseModel):
 
 class UserSessionResponse(BaseModel):
     id: int
-    device_name: Optional[str] = None
-    ip_address: Optional[str] = None
-    user_agent: Optional[str] = None
+    device_name: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
     is_active: bool
-    last_seen_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
+    last_seen_at: datetime | None = None
+    created_at: datetime | None = None
 
 
 class UserAuditLogResponse(BaseModel):
     id: int
     action: str
-    target_type: Optional[str] = None
-    target_id: Optional[str] = None
-    details: Optional[str] = None
-    ip_address: Optional[str] = None
-    created_at: Optional[datetime] = None
+    target_type: str | None = None
+    target_id: str | None = None
+    details: str | None = None
+    ip_address: str | None = None
+    created_at: datetime | None = None

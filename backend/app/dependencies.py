@@ -3,8 +3,8 @@
 All infrastructure clients are constructed once at startup with validated URLs.
 Services receive their collaborators via constructor injection.
 """
-from functools import lru_cache
 import logging
+from functools import lru_cache
 from urllib.parse import urlparse
 
 from openai import AsyncOpenAI
@@ -98,7 +98,7 @@ async def wire_memory_embedding_provider() -> None:
         pipeline = get_rag_pipeline()
         # Import here to avoid circular import at module level
         from app.services.memory_service import memory_systems
-        for agent_id, ms in memory_systems.items():
+        for _agent_id, ms in memory_systems.items():
             if ms._embedding_provider is None:
                 ms.set_embedding_provider(pipeline.get_embedding)
         logger.info("Memory embedding provider wired")

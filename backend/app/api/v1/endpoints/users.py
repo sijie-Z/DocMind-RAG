@@ -1,39 +1,48 @@
-# -*- coding: utf-8 -*-
 """
 派聪明AI知识库系统 - 用户管理端点
 """
 
-import logging
-from typing import List, Optional, Any, Dict
-import json
-import secrets
 import csv
 import io
+import json
+import logging
+import secrets
 from datetime import datetime, timedelta
+from typing import Any
+
 from fastapi import APIRouter, Depends, Request
 
 logger = logging.getLogger(__name__)
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from sqlalchemy import Date, cast, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, cast, Date, text, or_
-from pydantic import BaseModel, ConfigDict
 
-from app.core.database import get_db
-from app.models.user import User
-from app.models.chat import ChatSession, ChatMessage
-from app.models.document import Document, DocumentStatus
-from app.models.notification import Notification
-from app.models.user_audit import UserLoginSession, UserActivityLog
-from app.services.auth_service import auth_service
 from app.api.v1.endpoints.notifications import create_notification
-from app.core.security import get_current_user, permission_required
-from app.models.rbac import PermissionType
 from app.core.config import settings
-from app.exceptions import NotFoundError, ValidationError, AuthorizationError, ConflictError, AppError
-from app.schemas.user import (
-    UserInfoResponse, UserStatsResponse, UserUpdateProfile,
-    UserUpdatePassword, UserSessionResponse, UserAuditLogResponse,
+from app.core.database import get_db
+from app.core.security import get_current_user, permission_required
+from app.exceptions import (
+    AppError,
+    AuthorizationError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
 )
+from app.models.chat import ChatMessage, ChatSession
+from app.models.document import Document, DocumentStatus
+from app.models.rbac import PermissionType
+from app.models.user import User
+from app.models.user_audit import UserActivityLog, UserLoginSession
+from app.schemas.user import (
+    UserAuditLogResponse,
+    UserInfoResponse,
+    UserSessionResponse,
+    UserStatsResponse,
+    UserUpdatePassword,
+    UserUpdateProfile,
+)
+from app.services.auth_service import auth_service
 
 router = APIRouter()
 
@@ -45,7 +54,7 @@ class ActivityResponse(BaseModel):
     time: str
 
 
-def _client_ip(request: Request) -> Optional[str]:
+def _client_ip(request: Request) -> str | None:
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -58,10 +67,10 @@ async def _log_user_activity(
     db: AsyncSession,
     user_id: int,
     action: str,
-    request: Optional[Request] = None,
-    target_type: Optional[str] = None,
-    target_id: Optional[str] = None,
-    detail: Optional[str] = None,
+    request: Request | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    detail: str | None = None,
 ):
     log = UserActivityLog(
         user_id=user_id,
@@ -77,15 +86,15 @@ async def _log_user_activity(
 
 # --- Endpoints ---
 
-@router.get("/audit-logs", response_model=Dict[str, Any], dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+@router.get("/audit-logs", response_model=dict[str, Any], dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
 async def get_audit_logs(
     skip: int = 0,
     limit: int = 50,
-    user_id: Optional[int] = None,
-    action: Optional[str] = None,
-    search: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    user_id: int | None = None,
+    action: str | None = None,
+    search: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -114,16 +123,16 @@ async def get_audit_logs(
             stmt = stmt.where(UserActivityLog.created_at >= datetime.fromisoformat(start_date))
         if end_date:
             stmt = stmt.where(UserActivityLog.created_at <= datetime.fromisoformat(end_date))
-            
+
         # 统计总数
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = (await db.execute(count_stmt)).scalar() or 0
-        
+
         # 排序和分页
         stmt = stmt.order_by(UserActivityLog.created_at.desc()).offset(skip).limit(limit)
         result = await db.execute(stmt)
         logs = result.scalars().all()
-        
+
         return {
             "success": True,
             "data": {
@@ -149,10 +158,10 @@ async def get_audit_logs(
 
 @router.get("/audit-logs/export", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
 async def export_audit_logs(
-    user_id: Optional[int] = None,
-    action: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    user_id: int | None = None,
+    action: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -200,7 +209,7 @@ async def export_audit_logs(
     except Exception as e:
         raise AppError(f"Export failed: {str(e)}")
 
-@router.get("/me", response_model=Dict[str, Any], summary="获取当前用户信息")
+@router.get("/me", response_model=dict[str, Any], summary="获取当前用户信息")
 async def get_user_profile(
     current_user: User = Depends(auth_service.get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -209,7 +218,7 @@ async def get_user_profile(
     try:
         # 1. 重新绑定用户到当前 Session
         current_user = await db.get(User, current_user.id)
-        
+
         if not current_user:
             raise NotFoundError("User not found")
 
@@ -249,8 +258,8 @@ async def get_user_profile(
         logger.exception(f"Error in GET /me: {str(e)}")
         raise AppError(f"Get user profile failed: {str(e)}")
 
-        
-@router.get("/me/sessions", response_model=List[UserSessionResponse], summary="获取当前用户登录设备")
+
+@router.get("/me/sessions", response_model=list[UserSessionResponse], summary="获取当前用户登录设备")
 async def get_my_sessions(
     request: Request,
     current_user: User = Depends(auth_service.get_current_user),
@@ -326,7 +335,7 @@ async def revoke_my_session(
     return {"message": "设备已下线"}
 
 
-@router.get("/me/activity-logs", response_model=List[UserAuditLogResponse], summary="获取用户操作审计日志")
+@router.get("/me/activity-logs", response_model=list[UserAuditLogResponse], summary="获取用户操作审计日志")
 async def get_my_activity_logs(
     current_user: User = Depends(auth_service.get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -352,14 +361,14 @@ async def get_my_activity_logs(
     ]
 
 
-@router.get("/activities", response_model=List[ActivityResponse], summary="获取用户最近动态")
+@router.get("/activities", response_model=list[ActivityResponse], summary="获取用户最近动态")
 async def get_user_activities(
     current_user: User = Depends(auth_service.get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """获取用户最近动态（聚合）"""
     activities =[]
-    
+
     # 1. 登录活动
     if current_user.last_login_at:
         activities.append({
@@ -369,14 +378,14 @@ async def get_user_activities(
             "time": current_user.last_login_at,
             "timestamp": current_user.last_login_at.timestamp()
         })
-        
+
     # 2. 文档上传活动
     doc_query = select(Document).where(
         Document.uploaded_by == current_user.id
     ).order_by(Document.created_at.desc()).limit(5)
     doc_result = await db.execute(doc_query)
     docs = doc_result.scalars().all()
-    
+
     for doc in docs:
         activities.append({
             "id": f"doc_{doc.id}",
@@ -385,14 +394,14 @@ async def get_user_activities(
             "time": doc.created_at,
             "timestamp": doc.created_at.timestamp()
         })
-        
+
     # 3. 聊天活动
     chat_query = select(ChatSession).where(
         ChatSession.user_id == current_user.id
     ).order_by(ChatSession.created_at.desc()).limit(5)
     chat_result = await db.execute(chat_query)
     chats = chat_result.scalars().all()
-    
+
     for chat in chats:
         activities.append({
             "id": f"chat_{chat.id}",
@@ -401,11 +410,11 @@ async def get_user_activities(
             "time": chat.created_at,
             "timestamp": chat.created_at.timestamp()
         })
-        
+
     # 排序并取前10
     activities.sort(key=lambda x: x["timestamp"], reverse=True)
     activities = activities[:10]
-    
+
     return[
         {
             "id": item["id"],
@@ -471,17 +480,17 @@ async def get_user_stats(
         conv_query = select(func.count(ChatSession.id)).where(ChatSession.user_id == current_user.id)
         conv_result = await db.execute(conv_query)
         conversation_count = conv_result.scalar() or 0
-        
+
         # 2. 消息总数 (✅ 修复：通过关联 ChatMessage 直接统计真实消息数)
         msg_query = select(func.count(ChatMessage.id)).join(ChatSession).where(ChatSession.user_id == current_user.id)
         msg_result = await db.execute(msg_query)
         message_count = msg_result.scalar() or 0
-        
+
         # 3. 文件数量
         file_query = select(func.count(Document.id)).where(Document.uploaded_by == current_user.id)
         file_result = await db.execute(file_query)
         file_count = file_result.scalar() or 0
-        
+
         # 4. 知识库数量 (✅ 修复：状态由 COMPLETED 改为 INDEXED)
         kb_query = select(func.count(Document.id)).where(
             Document.uploaded_by == current_user.id,
@@ -489,15 +498,15 @@ async def get_user_stats(
         )
         kb_result = await db.execute(kb_query)
         knowledge_count = kb_result.scalar() or 0
-        
+
         # 5. 存储使用量 (Bytes)
         storage_query = select(func.sum(Document.file_size)).where(Document.uploaded_by == current_user.id)
         storage_result = await db.execute(storage_query)
         storage_used = storage_result.scalar() or 0
-        
+
         # 6. 获取最近7天的活动趋势 (保持不变)
         seven_days_ago = datetime.now() - timedelta(days=7)
-        
+
         doc_trend_query = select(
             cast(Document.created_at, Date).label('date'),
             func.count(Document.id).label('total')
@@ -507,7 +516,7 @@ async def get_user_stats(
         ).group_by(cast(Document.created_at, Date))
         doc_trend_result = await db.execute(doc_trend_query)
         doc_counts = {row.date: int(row.total) for row in doc_trend_result}
-        
+
         chat_trend_query = select(
             cast(ChatSession.created_at, Date).label('date'),
             func.count(ChatSession.id).label('total')
@@ -517,13 +526,13 @@ async def get_user_stats(
         ).group_by(cast(ChatSession.created_at, Date))
         chat_trend_result = await db.execute(chat_trend_query)
         chat_counts = {row.date: int(row.total) for row in chat_trend_result}
-        
+
         activity_trend =[]
         for i in range(6, -1, -1):
             day = (datetime.now() - timedelta(days=i)).date()
             count = doc_counts.get(day, 0) + chat_counts.get(day, 0)
             activity_trend.append(count)
-            
+
         return {
             "conversation_count": conversation_count,
             "message_count": int(message_count),
@@ -567,7 +576,7 @@ async def get_users(
             .order_by(User.created_at.desc())
         )
         users = result.scalars().all()
-        
+
         user_list =[]
         for user in users:
             user_list.append({
@@ -577,11 +586,11 @@ async def get_users(
                 "created_at": user.created_at.isoformat() if user.created_at else None,
                 "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None
             })
-        
+
         return {
             "total": total, "skip": skip, "limit": limit, "users": user_list
         }
-        
+
     except Exception as e:
         raise AppError(f"获取用户列表失败: {str(e)}")
 
@@ -603,7 +612,7 @@ async def get_user(
     if not current_user.is_superuser and current_user.organization_id:
         if user.organization_id != current_user.organization_id:
             raise AuthorizationError("无权查看该用户信息")
-        
+
     # 安全解析 bio
     bio_val = ""
     if user.preferences:
@@ -612,7 +621,7 @@ async def get_user(
             bio_val = pref.get('bio', '') if isinstance(pref, dict) else ""
         except (json.JSONDecodeError, TypeError):
             bio_val = ""
-    
+
     return {
         "id": user.id,
         "username": user.username,
@@ -642,16 +651,16 @@ async def update_user_role(
     try:
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
-        
+
         if not user:
             raise NotFoundError("用户不存在")
-        
+
         if role not in ["user", "admin"]:
             raise ValidationError("无效的角色")
-        
+
         if user.id == current_user.id:
             raise ValidationError("不能修改自己的角色")
-        
+
         user_obj: Any = user
         user_obj.role = role
         await _log_user_activity(
@@ -680,14 +689,14 @@ async def delete_user(
     try:
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
-        
+
         if not user:
             raise NotFoundError("用户不存在")
         if user.id == current_user.id:
             raise ValidationError("不能删除自己的账户")
         if user.is_superuser:
             raise AuthorizationError("不能删除超级管理员账户")
-        
+
         user_to_deactivate: Any = user
         user_to_deactivate.is_active = False
         await _log_user_activity(
@@ -714,7 +723,7 @@ async def update_user_profile(
 ):
     """更新当前登录用户信息 (✅ 修复了页面刷新导致无限发送通知的Bug)"""
     try:
-        current_user = await db.merge(current_user) 
+        current_user = await db.merge(current_user)
         has_changed = False # 标志位：是否真正发生了数据变更
 
         # 对比字段变化
@@ -723,7 +732,7 @@ async def update_user_profile(
         if user_in.full_name is not None and current_user_obj.full_name != user_in.full_name:
             current_user_obj.full_name = user_in.full_name
             has_changed = True
-            
+
         # 邮箱不允许修改，避免重复问题
         # if user_in.email is not None and current_user.email != user_in.email:
         #     result = await db.execute(select(User).where(User.email == user_in.email))
@@ -731,15 +740,15 @@ async def update_user_profile(
         #          raise ValidationError("Email already registered")
         #     current_user_obj.email = user_in.email
         #     has_changed = True
-            
+
         if user_in.phone is not None and current_user.phone != user_in.phone:
             current_user_obj.phone = user_in.phone
             has_changed = True
-            
+
         if user_in.avatar_url is not None and current_user.avatar_url != user_in.avatar_url:
             current_user_obj.avatar_url = user_in.avatar_url
             has_changed = True
-            
+
         # 处理 preferences (包含 bio)
         current_pref_str = current_user.preferences
         pref_dict = {}
@@ -757,7 +766,7 @@ async def update_user_profile(
         if user_in.bio is not None and pref_dict.get("bio") != user_in.bio:
             pref_dict["bio"] = user_in.bio
             has_changed = True
-            
+
         if user_in.preferences is not None:
             # 简单校验是否有新键值对（排除主题变更，主题变更不触发通知）
             for k, v in user_in.preferences.items():
@@ -767,7 +776,7 @@ async def update_user_profile(
                 elif pref_dict.get(k) != v:
                     pref_dict[k] = v
                     has_changed = True
-            
+
         if has_changed:
             current_user_obj.preferences = json.dumps(pref_dict, ensure_ascii=False)
             await create_notification(
@@ -788,12 +797,12 @@ async def update_user_profile(
                 target_id=str(current_user.id),
                 detail="更新个人资料",
             )
-        
+
         await db.commit()
         await db.refresh(current_user)
-        
+
         bio_response = pref_dict.get('bio', '')
-        
+
         return {
             "id": current_user.id, "username": current_user.username, "email": current_user.email,
             "full_name": current_user.full_name, "phone": current_user.phone, "avatar_url": current_user.avatar_url,
@@ -818,10 +827,10 @@ async def update_password(
     try:
         if not auth_service.verify_password(password_in.old_password, current_user.hashed_password):
             raise ValidationError("旧密码错误")
-        
+
         current_user_obj: Any = current_user
         current_user_obj.hashed_password = auth_service.hash_password(password_in.new_password)
-        
+
         await create_notification(
             db,
             user_id=current_user.id,
@@ -859,7 +868,7 @@ async def generate_api_key(
         new_key = f"sk-{secrets.token_urlsafe(32)}"
         current_user_obj: Any = current_user
         current_user_obj.api_key = new_key
-        
+
         await create_notification(
             db,
             user_id=current_user.id,
@@ -909,4 +918,4 @@ async def revoke_api_key(
     except Exception as e:
         await db.rollback()
         raise AppError(f"撤销 API Key 失败: {str(e)}")
-        
+

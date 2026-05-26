@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
 """结构化日志配置模块"""
+import contextvars
+import json
 import logging
 import logging.handlers
 import os
-import json
 import time
-import contextvars
 
 from app.core.config import settings
 
@@ -60,9 +59,8 @@ class JsonFormatter(logging.Formatter):
                 "process", "processName", "relativeCreated", "stack_info",
                 "thread", "threadName", "service", "request_id", "trace_id",
                 "user_id",
-            ):
-                if isinstance(value, (str, int, float, bool, list, dict)) or value is None:
-                    payload[key] = value
+            ) and (isinstance(value, (str, int, float, bool, list, dict)) or value is None):
+                payload[key] = value
 
         return json.dumps(payload, ensure_ascii=False)
 

@@ -1,20 +1,16 @@
-import os
-import tempfile
-import logging
 import asyncio
+import logging
 import uuid
 from datetime import datetime
-from typing import List, Any
 
 from sqlalchemy import select
-from app.services.document_parser import document_service
-from app.services.embedding_service import embedding_service
+
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.elasticsearch import ElasticsearchTools, create_index_if_not_exists
-from app.core.config import settings
-from app.core.minio_client import minio_client
-from app.models.document import Document, DocumentStatus, DocumentChunk
-from langchain_core.documents import Document as LangchainDocument
+from app.models.document import Document, DocumentChunk, DocumentStatus
+from app.services.document_parser import document_service
+from app.services.embedding_service import embedding_service
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +30,13 @@ class DocumentProcessor:
         6. 更新状态为索引完成
         """
         logger.info(f"[DOC_PROC] 任务开始：处理文档 {document_id}")
-        
+
         async with AsyncSessionLocal() as session:
             try:
                 # 1. 获取文档信息并更新状态
                 stmt = select(Document).where(Document.id == document_id)
                 doc = (await session.execute(stmt)).scalar_one_or_none()
-                
+
                 if not doc:
                     logger.error(f"[DOC_PROC] ❌ 文档未找到: {document_id}")
                     return
@@ -50,20 +46,20 @@ class DocumentProcessor:
                 logger.info(f"[DOC_PROC] 1/5 - 状态更新为 PARSING: {doc.filename}")
 
                 # 2. 解析与切块 (现在统一使用 document_service，它内部处理了下载)
-                logger.info(f"[DOC_PROC] 2/5 - 开始解析与切块...")
+                logger.info("[DOC_PROC] 2/5 - 开始解析与切块...")
                 start_parse_time = asyncio.get_event_loop().time()
-                
+
                 # document_service.parse_document 会自动处理 MinIO URL 并返回 chunks
                 parse_result = await self.parser.parse_document(doc.file_path, str(doc.organization_id))
                 chunks_data = parse_result.get("chunks", [])
-                
+
                 parse_duration = (asyncio.get_event_loop().time() - start_parse_time) * 1000
                 if not chunks_data:
                     raise ValueError("文件解析后无内容，可能为空文件或解析失败。")
                 logger.info(f"[DOC_PROC] 2/5 - ✅ 解析成功，获得 {len(chunks_data)} 个块，耗时 {parse_duration:.2f} ms")
 
                 # 3. 保存分块到数据库
-                logger.info(f"[DOC_PROC] 3/5 - 保存分块到数据库...")
+                logger.info("[DOC_PROC] 3/5 - 保存分块到数据库...")
                 for chunk_data in chunks_data:
                     chunk = DocumentChunk(
                         id=str(uuid.uuid4()),
@@ -111,7 +107,7 @@ class DocumentProcessor:
                             }
                         }
                     })
-                
+
                 start_index_time = asyncio.get_event_loop().time()
                 await ElasticsearchTools.bulk_index_documents(es_docs)
                 index_duration = (asyncio.get_event_loop().time() - start_index_time) * 1000
@@ -125,7 +121,7 @@ class DocumentProcessor:
                 doc.content_length = sum(len(c["chunk_text"]) for c in chunks_data)
                 await session.commit()
                 logger.info(f"[DOC_PROC] 🎉 任务完成: 文档 {document_id} 已成功处理并索引。")
-                
+
             except Exception as e:
                 logger.error(f"[DOC_PROC] ❌ 处理文档 {document_id} 时发生致命错误: {e}", exc_info=True)
                 await session.rollback()
@@ -137,7 +133,7 @@ class DocumentProcessor:
                         doc_err.parse_error = str(e)
                         await error_session.commit()
 
-    async def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    async def _get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """统一走 embedding_service，避免模型/API 配置错位。"""
         cleaned = [t.replace("\n", " ") for t in texts if t and t.strip()]
         return await embedding_service.get_embeddings(cleaned)

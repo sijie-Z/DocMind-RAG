@@ -4,8 +4,9 @@ SAFETY: These tools are tagged "code" and DISABLED BY DEFAULT.
 Users must explicitly enable them in AgentConfig.
 """
 
+import contextlib
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.agent.registry import register_tool
 
@@ -19,8 +20,6 @@ SAFE_BUILTINS = {
     "max", "min", "oct", "ord", "pow", "range", "repr", "reversed",
     "round", "set", "slice", "sorted", "str", "sum", "tuple", "type",
     "zip", "True", "False", "None", "print",
-    # Math
-    "abs", "round",
 }
 
 SAFE_MODULES = [
@@ -73,16 +72,13 @@ async def execute_python(code: str, **_: Any) -> str:
     safe_globals["__builtins__"]["print"] = print
 
     for mod_name in SAFE_MODULES:
-        try:
+        with contextlib.suppress(ImportError):
             safe_globals[mod_name] = __import__(mod_name)
-        except ImportError:
-            pass
 
     try:
         import asyncio
         import io
-        import sys
-        from contextlib import redirect_stdout, redirect_stderr
+        from contextlib import redirect_stderr, redirect_stdout
 
         f_out = io.StringIO()
         f_err = io.StringIO()
@@ -107,7 +103,7 @@ async def execute_python(code: str, **_: Any) -> str:
             return output.strip()
         return "(Code executed successfully with no output)"
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return "Error: Code execution timed out (10 second limit)."
     except Exception as e:
         return f"Error: {type(e).__name__}: {e}"
@@ -146,9 +142,11 @@ async def execute_sql(query: str, **_: Any) -> str:
         query = query.rstrip().rstrip(";") + " LIMIT 100"
 
     try:
-        from app.core.database import AsyncSessionLocal
-        from sqlalchemy import text
         import asyncio
+
+        from sqlalchemy import text
+
+        from app.core.database import AsyncSessionLocal
 
         async with AsyncSessionLocal() as session:
             result = await asyncio.wait_for(
@@ -160,14 +158,14 @@ async def execute_sql(query: str, **_: Any) -> str:
 
             data = []
             for row in rows[:100]:
-                data.append(dict(zip(columns, [str(v) if v is not None else None for v in row])))
+                data.append(dict(zip(columns, [str(v) if v is not None else None for v in row], strict=False)))
 
             return json.dumps({
                 "columns": columns,
                 "rows": len(data),
                 "data": data,
             }, ensure_ascii=False, indent=2)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return "Error: SQL query timed out (5 second limit)."
     except Exception as e:
         return f"SQL Error: {type(e).__name__}: {e}"

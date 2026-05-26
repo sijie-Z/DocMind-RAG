@@ -4,7 +4,7 @@ Rate limited to 10 requests/minute per user via Redis counter.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.agent.registry import register_tool
 

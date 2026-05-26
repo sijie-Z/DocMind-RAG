@@ -1,27 +1,28 @@
 # backend/app/api/v1/endpoints/documents.py
 
+import asyncio
+import contextlib
 import hashlib
-import uuid
 import json
 import logging
-import asyncio
+import uuid
 from datetime import datetime
-from typing import List, Optional
-from fastapi import APIRouter, Depends, UploadFile, File, status, Form
-from fastapi.responses import RedirectResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
-from app.core.database import get_db
-from app.models.user import User
-from app.models.document import Document, DocumentStatus, DocumentType
-from app.models.knowledge_job import KnowledgeProcessingJob, KnowledgeJobStatus
-from app.core.security import get_current_user, permission_required
-from app.core.minio_client import minio_client
-from app.core.kafka_client import kafka_producer
+from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi.responses import RedirectResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
+from app.core.database import get_db
+from app.core.kafka_client import kafka_producer
+from app.core.minio_client import minio_client
+from app.core.security import get_current_user, permission_required
 from app.exceptions import AppError, AuthorizationError, NotFoundError
+from app.models.document import Document, DocumentStatus, DocumentType
+from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.models.rbac import PermissionType
+from app.models.user import User
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -30,16 +31,15 @@ def get_document_type(filename: str) -> DocumentType:
     ext = filename.split('.')[-1].lower() if '.' in filename else ''
     if ext == 'pdf':
         return DocumentType.PDF
-    elif ext in ['doc', 'docx']:
+    if ext in ['doc', 'docx']:
         return DocumentType.WORD
-    elif ext in ['xls', 'xlsx']:
+    if ext in ['xls', 'xlsx']:
         return DocumentType.EXCEL
-    elif ext in ['ppt', 'pptx']:
+    if ext in ['ppt', 'pptx']:
         return DocumentType.PPT
-    elif ext == 'txt':
+    if ext == 'txt':
         return DocumentType.TXT
-    else:
-        return DocumentType.OTHER
+    return DocumentType.OTHER
 
 async def calculate_md5(file: UploadFile) -> str:
     md5_hash = hashlib.md5()
@@ -80,7 +80,7 @@ def build_brief_summary(content: str) -> str:
     return summary[:420]
 
 
-def build_suggested_tags(content: str) -> List[str]:
+def build_suggested_tags(content: str) -> list[str]:
     text = (content or "").strip()
     if not text:
         return []
@@ -91,7 +91,7 @@ def build_suggested_tags(content: str) -> List[str]:
         ("竞赛相关", ["比赛", "竞赛", "算法赛", "赛程"]),
         ("执行清单", ["任务", "清单", "待办", "目标"]),
     ]
-    tags: List[str] = []
+    tags: list[str] = []
     for tag, words in tag_rules:
         if any(w in text for w in words):
             tags.append(tag)
@@ -100,10 +100,10 @@ def build_suggested_tags(content: str) -> List[str]:
 @router.post("/upload", response_model=dict, status_code=status.HTTP_201_CREATED, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_UPLOAD], organization_id_param='organization_id'))])
 async def upload_document(
     file: UploadFile = File(...),
-    organization_id: Optional[str] = Form(None),
-    title: Optional[str] = Form(None),
-    description: Optional[str] = Form(None),
-    tags: Optional[str] = Form(None),
+    organization_id: str | None = Form(None),
+    title: str | None = Form(None),
+    description: str | None = Form(None),
+    tags: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -134,11 +134,9 @@ async def upload_document(
                 await db.flush()
                 org_id = org.id
         if organization_id and organization_id.strip() and organization_id != 'undefined':
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 org_id = int(organization_id)
-            except (ValueError, TypeError):
-                pass
-        
+
         # 3. 解析标签为列表
         keywords_list = []
         if tags:
@@ -154,11 +152,11 @@ async def upload_document(
         file.file.seek(0, 2)
         file_size = file.file.tell()
         await file.seek(0)
-        
+
         filename = file.filename or "upload.bin"
         file_ext = filename.rsplit(".", 1)[-1] if "." in filename else "bin"
         object_name = f"{org_id}/{md5}.{file_ext}"
-        
+
         # 5. 上传到 MinIO
         try:
             # 异步线程执行同步的 minio 客户端方法
@@ -172,7 +170,7 @@ async def upload_document(
                 length=file_size,
                 content_type=file.content_type or "application/octet-stream"
             )
-        
+
         # 6. 写入数据库 (核心修复点：tags -> keywords)
         doc_id = str(uuid.uuid4())
         new_doc = Document(
@@ -189,11 +187,11 @@ async def upload_document(
             description=description,
             keywords=keywords_list  # ✅ 已修正字段名！
         )
-        
+
         db.add(new_doc)
         await db.commit()
         await db.refresh(new_doc)
-        
+
         # 7. 创建任务并发送 Kafka 消息
         job = KnowledgeProcessingJob(
             document_id=doc_id,
@@ -216,12 +214,12 @@ async def upload_document(
             await kafka_producer.send_message(settings.KAFKA_FILE_PROCESSING_TOPIC, message)
         except Exception as kafka_err:
             logger.error(f"Kafka send failed: {kafka_err}")
-            setattr(job, "status", KnowledgeJobStatus.FAILED)
-            setattr(job, "error_message", f"Kafka send failed: {str(kafka_err)}")
-            setattr(job, "finished_at", datetime.now())
+            job.status = KnowledgeJobStatus.FAILED
+            job.error_message = f"Kafka send failed: {str(kafka_err)}"
+            job.finished_at = datetime.now()
 
         await db.commit()
-        
+
         # 8. 返回，防止 refresh 导致的懒加载报错，使用 to_dict
         return {
             "success": True,
@@ -233,7 +231,7 @@ async def upload_document(
                 "status": new_doc.status.value if hasattr(new_doc.status, 'value') else str(new_doc.status)
             }
         }
-        
+
     except AppError:
         raise
     except Exception as e:
@@ -314,7 +312,7 @@ async def get_document_full_content(
         # 鉴权
         if doc.organization_id != current_user.organization_id and doc.uploaded_by != current_user.id:
             raise AuthorizationError("无权查看该文档内容")
-            
+
         # 从 ES 中获取该文档的所有分块并按 index 排序
         from app.core.elasticsearch import ElasticsearchTools
         query = {
@@ -326,11 +324,11 @@ async def get_document_full_content(
         }
         res = await ElasticsearchTools.search_documents(query)
         hits = res.get("hits", {}).get("hits", [])
-        
+
         full_text = ""
         if hits:
             full_text = "\n".join([h.get("_source", {}).get("chunk_text", "") for h in hits])
-        
+
         # 如果 ES 没找到，尝试从数据库 chunks 表找 (备用)
         if not full_text:
             from app.models.document import DocumentChunk

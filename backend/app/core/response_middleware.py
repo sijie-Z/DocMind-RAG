@@ -1,15 +1,13 @@
-# -*- coding: utf-8 -*-
 """Middleware that wraps 200-series JSON responses into the standard API format.
 
 Skips endpoints that already return the standard format (dict with "success" key),
 streaming responses, and excluded paths like /health, /metrics, /docs.
 """
 
+
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.background import BackgroundTask
-from typing import Set
 
 
 class ResponseFormatMiddleware(BaseHTTPMiddleware):
@@ -19,7 +17,7 @@ class ResponseFormatMiddleware(BaseHTTPMiddleware):
         {"success": True, "code": 200, "message": "success", "data": <body>, "detail": None}
     """
 
-    def __init__(self, app, exclude_paths: Set[str] | None = None):
+    def __init__(self, app, exclude_paths: set[str] | None = None):
         super().__init__(app)
         self.exclude_paths = exclude_paths or {
             "/health", "/metrics", "/info", "/openapi.json",
@@ -74,7 +72,7 @@ class ResponseFormatMiddleware(BaseHTTPMiddleware):
                 "detail": None,
             }
 
-            new_body = json_lib.dumps(wrapped, ensure_ascii=False).encode("utf-8")
+            json_lib.dumps(wrapped, ensure_ascii=False).encode("utf-8")
 
             return JSONResponse(
                 status_code=response.status_code,

@@ -1,25 +1,25 @@
-# -*- coding: utf-8 -*-
 """
 Agent 工作流引擎
 基于 LangGraph 实现的状态图工作流引擎
 支持：多LLM、工具调用、条件分支、循环、记忆系统、错误重试
 """
 import asyncio
-import json
-import re
-from datetime import datetime
-from typing import Dict, Any, List, Optional, Callable, TypedDict, Annotated
-from enum import Enum
+import ipaddress
 import logging
+import re
+import socket
 import traceback
+from collections.abc import Callable
+from datetime import datetime
+from enum import Enum
+from typing import Any, TypedDict
 
-from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from langgraph.graph import END, StateGraph
 
 from app.core.config import settings
-from app.schemas.workflow import WorkflowConfig, WorkflowNode, WorkflowEdge, NodeResult
+from app.schemas.workflow import NodeResult, WorkflowConfig, WorkflowNode
 
 logger = logging.getLogger(__name__)
 
@@ -33,23 +33,23 @@ class ExecutionStatus(str, Enum):
 
 class WorkflowState(TypedDict):
     """工作流状态 - 完整版"""
-    input: Dict[str, Any]           # 用户输入
-    messages: List[Any]             # 对话消息历史
-    current_node: Optional[str]     # 当前执行节点
-    node_outputs: Dict[str, Any]    # 各节点输出结果
-    context: Dict[str, Any]         # 共享上下文（用于节点间传递数据）
-    errors: List[str]               # 错误列表
-    memory: Dict[str, Any]          # Agent 短期记忆
+    input: dict[str, Any]           # 用户输入
+    messages: list[Any]             # 对话消息历史
+    current_node: str | None     # 当前执行节点
+    node_outputs: dict[str, Any]    # 各节点输出结果
+    context: dict[str, Any]         # 共享上下文（用于节点间传递数据）
+    errors: list[str]               # 错误列表
+    memory: dict[str, Any]          # Agent 短期记忆
     iteration_count: int            # 迭代计数（用于循环控制）
-    tool_results: List[Dict]        # 工具调用结果历史
+    tool_results: list[dict]        # 工具调用结果历史
 
 
-def merge_dicts(left: Dict, right: Dict) -> Dict:
+def merge_dicts(left: dict, right: dict) -> dict:
     """合并字典的 reducer 函数"""
     return {**left, **right}
 
 
-def merge_lists(left: List, right: List) -> List:
+def merge_lists(left: list, right: list) -> list:
     """合并列表的 reducer 函数"""
     return left + right
 
@@ -57,18 +57,18 @@ def merge_lists(left: List, right: List) -> List:
 class NodeExecutor:
     """节点执行器基类"""
 
-    def __init__(self, node: WorkflowNode, config: Dict[str, Any] = None):
+    def __init__(self, node: WorkflowNode, config: dict[str, Any] = None):
         self.node = node
         self.config = config or {}
         self.llm_config = config.get("llm", {})
         self.max_retries = config.get("max_retries", 3)
         self.retry_delay = config.get("retry_delay", 1.0)
 
-    async def execute(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute(self, state: WorkflowState) -> dict[str, Any]:
         """执行节点逻辑"""
         raise NotImplementedError
 
-    async def execute_with_retry(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute_with_retry(self, state: WorkflowState) -> dict[str, Any]:
         """带重试的执行"""
         last_error = None
         for attempt in range(self.max_retries):
@@ -110,7 +110,7 @@ class NodeExecutor:
                 api_key=api_key,
                 base_url=base_url
             )
-        elif model_type == "qwen":
+        if model_type == "qwen":
             # 通义千问
             from langchain_community.chat_models import ChatTongyi
             return ChatTongyi(
@@ -124,7 +124,7 @@ class NodeExecutor:
 class InputNodeExecutor(NodeExecutor):
     """输入节点执行器"""
 
-    async def execute(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute(self, state: WorkflowState) -> dict[str, Any]:
         prompt_template = self.node.data.get("prompt", "")
         user_input = state.get("input", {}).get("text", "")
 
@@ -143,7 +143,7 @@ class InputNodeExecutor(NodeExecutor):
 class LLMNodeExecutor(NodeExecutor):
     """LLM 节点执行器 - 支持流式输出"""
 
-    async def execute(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute(self, state: WorkflowState) -> dict[str, Any]:
         node_type = self.node.type
         model_type = node_type.replace("llm_", "")
 
@@ -181,7 +181,7 @@ class LLMNodeExecutor(NodeExecutor):
 class KnowledgeSearchNodeExecutor(NodeExecutor):
     """知识库搜索节点执行器"""
 
-    async def execute(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute(self, state: WorkflowState) -> dict[str, Any]:
         from app.services.rag_service import rag_service
 
         # 获取查询
@@ -219,7 +219,7 @@ class KnowledgeSearchNodeExecutor(NodeExecutor):
 class ConditionNodeExecutor(NodeExecutor):
     """条件分支节点执行器"""
 
-    async def execute(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute(self, state: WorkflowState) -> dict[str, Any]:
         condition = self.node.data.get("condition", "")
         context = state.get("context", {})
         messages = state.get("messages", [])
@@ -244,7 +244,7 @@ class ConditionNodeExecutor(NodeExecutor):
             "node_outputs": {self.node.id: {"condition_result": result}}
         }
 
-    def _evaluate_condition(self, condition: str, variables: Dict[str, Any]) -> str:
+    def _evaluate_condition(self, condition: str, variables: dict[str, Any]) -> str:
         """评估条件表达式"""
         if not condition:
             return "default"
@@ -254,24 +254,23 @@ class ConditionNodeExecutor(NodeExecutor):
         combined_text = f"{text} {last_message}".lower()
 
         # 支持的条件函数
-        condition_lower = condition.lower()
+        condition.lower()
 
         if "翻译" in combined_text or "translate" in combined_text:
             return "translate"
-        elif "总结" in combined_text or "摘要" in combined_text or "summarize" in combined_text:
+        if "总结" in combined_text or "摘要" in combined_text or "summarize" in combined_text:
             return "summarize"
-        elif "代码" in combined_text or "编程" in combined_text or "code" in combined_text:
+        if "代码" in combined_text or "编程" in combined_text or "code" in combined_text:
             return "code"
-        elif "分析" in combined_text or "analyze" in combined_text:
+        if "分析" in combined_text or "analyze" in combined_text:
             return "analyze"
-        else:
-            return "default"
+        return "default"
 
 
 class OutputNodeExecutor(NodeExecutor):
     """输出节点执行器"""
 
-    async def execute(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute(self, state: WorkflowState) -> dict[str, Any]:
         messages = state.get("messages", [])
         context = state.get("context", {})
         output = ""
@@ -295,7 +294,7 @@ class OutputNodeExecutor(NodeExecutor):
 class TTSNodeExecutor(NodeExecutor):
     """TTS 语音合成节点执行器"""
 
-    async def execute(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute(self, state: WorkflowState) -> dict[str, Any]:
         messages = state.get("messages", [])
         text = ""
 
@@ -318,7 +317,7 @@ class TTSNodeExecutor(NodeExecutor):
 class MemoryNodeExecutor(NodeExecutor):
     """记忆节点执行器 - 集成 Agent 记忆系统"""
 
-    async def execute(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute(self, state: WorkflowState) -> dict[str, Any]:
         from app.services.memory_service import get_memory_system
 
         memory_type = self.node.data.get("memoryType", "short_term")
@@ -442,7 +441,7 @@ class CodeExecuteNodeExecutor(NodeExecutor):
         )
     }
 
-    async def execute(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute(self, state: WorkflowState) -> dict[str, Any]:
         code = self.node.data.get("code", "")
         language = self.node.data.get("language", "python")
 
@@ -510,7 +509,6 @@ class APICallNodeExecutor(NodeExecutor):
     @classmethod
     def _validate_url(cls, url: str) -> str:
         from urllib.parse import urlparse
-        import socket
 
         parsed = urlparse(url)
         if parsed.scheme not in ("https", "http"):
@@ -531,7 +529,7 @@ class APICallNodeExecutor(NodeExecutor):
 
         return url
 
-    async def execute(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute(self, state: WorkflowState) -> dict[str, Any]:
         import httpx
 
         url = self.node.data.get("url", "")
@@ -583,7 +581,7 @@ class APICallNodeExecutor(NodeExecutor):
 class TransformNodeExecutor(NodeExecutor):
     """数据转换节点执行器"""
 
-    async def execute(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute(self, state: WorkflowState) -> dict[str, Any]:
         transform_type = self.node.data.get("transformType", "json_extract")
 
         context = state.get("context", {})
@@ -639,7 +637,7 @@ class TransformNodeExecutor(NodeExecutor):
 class RouterNodeExecutor(NodeExecutor):
     """路由节点执行器 - 根据内容智能路由"""
 
-    async def execute(self, state: WorkflowState) -> Dict[str, Any]:
+    async def execute(self, state: WorkflowState) -> dict[str, Any]:
         routes = self.node.data.get("routes", [])
         input_text = state.get("input", {}).get("text", "").lower()
 
@@ -659,19 +657,19 @@ class RouterNodeExecutor(NodeExecutor):
 class WorkflowEngine:
     """工作流引擎 - 基于 LangGraph"""
 
-    def __init__(self, workflow_config: WorkflowConfig, llm_config: Dict[str, Any] = None):
+    def __init__(self, workflow_config: WorkflowConfig, llm_config: dict[str, Any] = None):
         self.config = workflow_config
         self.llm_config = llm_config or {}
         self.nodes = {node.id: node for node in workflow_config.nodes}
         self.edges = workflow_config.edges
-        self.node_results: Dict[str, NodeResult] = {}
-        self.event_callback: Optional[Callable] = None
+        self.node_results: dict[str, NodeResult] = {}
+        self.event_callback: Callable | None = None
 
     def set_event_callback(self, callback: Callable) -> None:
         """设置事件回调函数（用于 SSE 推送）"""
         self.event_callback = callback
 
-    async def emit_event(self, event_type: str, data: Dict[str, Any]) -> None:
+    async def emit_event(self, event_type: str, data: dict[str, Any]) -> None:
         """发送事件"""
         if self.event_callback:
             await self.event_callback(event_type, data)
@@ -707,7 +705,7 @@ class WorkflowEngine:
 
         # 添加节点
         for node_id, node in self.nodes.items():
-            async def node_func(state: WorkflowState, _node=node) -> Dict[str, Any]:
+            async def node_func(state: WorkflowState, _node=node) -> dict[str, Any]:
                 executor = self.get_executor(_node)
 
                 # 记录开始
@@ -779,7 +777,7 @@ class WorkflowEngine:
             workflow.add_node(node_id, node_func)
 
         # 构建边映射
-        edge_map: Dict[str, List[Dict]] = {}
+        edge_map: dict[str, list[dict]] = {}
         for edge in self.edges:
             if edge.source not in edge_map:
                 edge_map[edge.source] = []
@@ -809,7 +807,7 @@ class WorkflowEngine:
                 workflow.add_edge(source, targets[0]["target"])
             elif len(targets) > 1:
                 # 多目标：条件分支
-                def make_router(src: str, tgts: List[Dict]):
+                def make_router(src: str, tgts: list[dict]):
                     async def router(state: WorkflowState) -> str:
                         condition_result = state.get("context", {}).get("condition_result", "default")
                         route_result = state.get("context", {}).get("route_result", "default")
@@ -839,7 +837,7 @@ class WorkflowEngine:
 
         return workflow
 
-    async def execute(self, input_data: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def execute(self, input_data: dict[str, Any] = None) -> dict[str, Any]:
         """执行工作流"""
         # 初始化状态
         initial_state: WorkflowState = {
@@ -899,6 +897,6 @@ class WorkflowEngine:
                 "node_outputs": {}
             }
 
-    def get_node_results(self) -> List[NodeResult]:
+    def get_node_results(self) -> list[NodeResult]:
         """获取所有节点执行结果"""
         return list(self.node_results.values())

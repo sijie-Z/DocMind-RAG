@@ -1,8 +1,8 @@
-# -*- coding: utf-8 -*-
 """
 派聪明AI知识库系统 - 用户设置端点
 """
 import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

@@ -1,12 +1,12 @@
 """认证相关的 Pydantic 模型"""
-from typing import Optional
+
 from pydantic import BaseModel, EmailStr, Field
 
 
 class UpdateProfileRequest(BaseModel):
     """更新用户资料"""
-    full_name: Optional[str] = Field(None, max_length=100, description="姓名")
-    email: Optional[EmailStr] = Field(None, description="邮箱")
+    full_name: str | None = Field(None, max_length=100, description="姓名")
+    email: EmailStr | None = Field(None, description="邮箱")
 
 
 class ChangePasswordRequest(BaseModel):

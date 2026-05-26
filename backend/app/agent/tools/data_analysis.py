@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.agent.registry import register_tool
 
@@ -40,7 +40,7 @@ async def analyze_data(data: str, **_: Any) -> str:
 
     # Handle [label, value] pairs
     if isinstance(values[0], list) and len(values[0]) == 2:
-        labels = [v[0] for v in values]
+        [v[0] for v in values]
         numbers = []
         for v in values:
             try:
@@ -48,7 +48,6 @@ async def analyze_data(data: str, **_: Any) -> str:
             except (TypeError, ValueError):
                 return f"Error: '{v[1]}' is not a valid number."
     else:
-        labels = None
         try:
             numbers = [float(v) for v in values]
         except (TypeError, ValueError):
@@ -124,7 +123,7 @@ async def analyze_data(data: str, **_: Any) -> str:
     tags=["analysis", "documents"],
 )
 async def compare_documents(
-    document_ids: List[str],
+    document_ids: list[str],
     aspect: str = "general",
     **_: Any,
 ) -> str:

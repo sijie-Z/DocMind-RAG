@@ -3,6 +3,7 @@
 target-version = "py311"
 line-length = 100
 
+[tool.ruff.lint]
 # Enable rules
 select = [
     "E",    # pycodestyle errors
@@ -28,6 +29,19 @@ ignore = [
     "SIM108",  # ternary if
     "SIM117",  # multiple with
     "SIM115",  # open with
+    "B008",    # function-call-in-default-argument — FastAPI Depends() is designed for this
+    "E402",    # module-import-not-at-top — intentional for circular import avoidance
+    "B904",    # raise-without-from-inside-except
+    "W293",    # blank-line-with-whitespace
+    "SLF001",  # private-member-access
+    "UP042",   # replace-str-enum
+    "A002",    # builtin-argument-shadowing — intentional (format, id, type)
+    "A003",    # builtin-attribute-shadowing
+    "E741",    # ambiguous-variable-name — math conventions (l, O)
+    "B005",    # strip-with-multi-characters
+    "SIM102",  # collapsible-if — readability preference
+    "SIM105",  # suppressible-exception
+    "E721",    # type-comparison — isinstance not always equivalent
 ]
 
 [tool.ruff.format]
@@ -37,6 +51,7 @@ line-ending = "lf"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["A", "SLF"]
+"app/models/*" = ["F821"]  # SQLAlchemy string-based relationship() references
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

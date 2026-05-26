@@ -1,19 +1,18 @@
-# -*- coding: utf-8 -*-
 """Agent memory system unit tests."""
 import asyncio
-import pytest
 from datetime import datetime, timedelta
 
+import pytest
+
 from app.services.memory_service import (
-    MemoryItem,
-    ShortTermMemory,
-    LongTermMemory,
-    WorkingMemory,
-    ReflectiveMemory,
     AgentMemorySystem,
+    LongTermMemory,
+    MemoryItem,
+    ReflectiveMemory,
+    ShortTermMemory,
+    WorkingMemory,
     get_memory_system,
 )
-
 
 # ---------------------------------------------------------------------------
 # MemoryItem

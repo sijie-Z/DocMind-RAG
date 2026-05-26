@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
 """SemanticCache 纯函数测试（不依赖 Redis）。"""
 import pytest
-import numpy as np
+
 from app.rag.cache import SemanticCache
 
 

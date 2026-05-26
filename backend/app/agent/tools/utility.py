@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from app.agent.registry import register_tool
 
@@ -57,32 +57,31 @@ async def calculate(expression: str, **_: Any) -> str:
     def _eval(node):
         if isinstance(node, ast.Expression):
             return _eval(node.body)
-        elif isinstance(node, ast.Constant):
+        if isinstance(node, ast.Constant):
             return node.value
-        elif isinstance(node, ast.BinOp):
+        if isinstance(node, ast.BinOp):
             left = _eval(node.left)
             right = _eval(node.right)
             op_type = type(node.op)
             if op_type not in bin_ops:
                 raise ValueError(f"Unsupported operator: {op_type.__name__}")
             return bin_ops[op_type](left, right)
-        elif isinstance(node, ast.UnaryOp):
+        if isinstance(node, ast.UnaryOp):
             operand = _eval(node.operand)
             if isinstance(node.op, ast.USub):
                 return -operand
             raise ValueError("Unsupported unary operator")
-        elif isinstance(node, ast.Call):
+        if isinstance(node, ast.Call):
             func_name = node.func.id if isinstance(node.func, ast.Name) else None
             if not func_name or func_name not in safe_dict:
                 raise ValueError(f"Unsupported function: {func_name}")
             args = [_eval(a) for a in node.args]
             return safe_dict[func_name](*args)
-        elif isinstance(node, ast.Name):
+        if isinstance(node, ast.Name):
             if node.id in safe_dict:
                 return safe_dict[node.id]
             raise ValueError(f"Unknown variable: {node.id}")
-        else:
-            raise ValueError(f"Unsupported expression type: {type(node).__name__}")
+        raise ValueError(f"Unsupported expression type: {type(node).__name__}")
 
     try:
         tree = ast.parse(expression.strip(), mode="eval")
@@ -150,7 +149,7 @@ async def format_converter(
     try:
         if output_fmt == "json":
             return json.dumps(parsed, ensure_ascii=False, indent=2)
-        elif output_fmt == "yaml":
+        if output_fmt == "yaml":
             try:
                 import yaml
                 return yaml.dump(parsed, allow_unicode=True, default_flow_style=False)
@@ -184,12 +183,13 @@ def _auto_parse(data: str):
         pass
     # CSV
     try:
-        import csv, io
+        import csv
+        import io
         reader = csv.reader(io.StringIO(data))
         rows = list(reader)
         if len(rows) > 1:
             headers = rows[0]
-            result = [dict(zip(headers, row)) for row in rows[1:]]
+            result = [dict(zip(headers, row, strict=False)) for row in rows[1:]]
             return result, "csv"
     except Exception:
         pass
@@ -198,7 +198,8 @@ def _auto_parse(data: str):
 
 def _to_csv(data) -> str:
     """Convert structured data to CSV string."""
-    import csv, io
+    import csv
+    import io
 
     output = io.StringIO()
     if isinstance(data, list) and data and isinstance(data[0], dict):
@@ -233,7 +234,7 @@ def _to_markdown_table(data) -> str:
             lines.append("| " + " | ".join(str(row.get(h, "")) for h in headers) + " |")
         return "\n".join(lines)
 
-    elif isinstance(data[0], list):
+    if isinstance(data[0], list):
         lines = []
         lines.append("| " + " | ".join(f"Col {i + 1}" for i in range(len(data[0]))) + " |")
         lines.append("| " + " | ".join(["---"] * len(data[0])) + " |")
@@ -292,10 +293,11 @@ async def get_system_status(**_: Any) -> str:
 
     # DB status
     try:
+        from sqlalchemy import func, select
+
         from app.core.database import AsyncSessionLocal
         from app.models.document import Document
         from app.models.user import User
-        from sqlalchemy import select, func
 
         async with AsyncSessionLocal() as session:
             doc_count = (await session.execute(select(func.count(Document.id)))).scalar() or 0

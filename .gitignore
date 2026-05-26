@@ -63,3 +63,4 @@ backend/static/
 .DS_Store
 Thumbs.db
 *.tmp
+*.db

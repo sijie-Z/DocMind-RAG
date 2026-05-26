@@ -2,35 +2,35 @@
 import asyncio
 import logging
 import time
-from typing import List, Dict, Any, Optional, AsyncGenerator, cast
+from collections.abc import AsyncGenerator
+from typing import Any, cast
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from app.core.config import settings
-from app.rag.retriever import HybridRetriever
-from app.rag.reranker import rerank
-from app.rag.context_compressor import compress_context_list
-from app.rag.cache import RetrievalCache, SemanticCache
-from app.rag.metrics import RAGMetrics
-from app.rag.query_processor import QueryIntentClassifier
 from app.core.prometheus import (
-    RAG_RETRIEVAL_TOTAL,
-    RAG_RETRIEVAL_HITS,
-    RAG_RETRIEVAL_ERRORS,
-    RAG_RETRIEVAL_LATENCY,
+    LLM_LATENCY,
+    LLM_REQUEST_ERRORS,
+    LLM_REQUEST_TOTAL,
+    LLM_TOKENS,
     RAG_CACHE_HITS,
     RAG_CACHE_MISSES,
-    RAG_GROUNDED_TOTAL,
     RAG_GROUNDED_HITS,
-    LLM_REQUEST_TOTAL,
-    LLM_REQUEST_ERRORS,
-    LLM_TOKENS,
-    LLM_LATENCY,
+    RAG_GROUNDED_TOTAL,
     RAG_PIPELINE_IN_FLIGHT,
     RAG_QUERY_INTENT,
+    RAG_RETRIEVAL_ERRORS,
+    RAG_RETRIEVAL_HITS,
+    RAG_RETRIEVAL_LATENCY,
+    RAG_RETRIEVAL_TOTAL,
 )
-from app.core.circuit_breaker import ai_service_breaker, es_service_breaker
+from app.rag.cache import RetrievalCache, SemanticCache
+from app.rag.context_compressor import compress_context_list
+from app.rag.metrics import RAGMetrics
+from app.rag.query_processor import QueryIntentClassifier
+from app.rag.reranker import rerank
+from app.rag.retriever import HybridRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +40,9 @@ class RAGPipeline:
 
     def __init__(
         self,
-        openai_client: Optional[AsyncOpenAI] = None,
-        embedding_client: Optional[AsyncOpenAI] = None,
-        rerank_client: Optional[AsyncOpenAI] = None,
+        openai_client: AsyncOpenAI | None = None,
+        embedding_client: AsyncOpenAI | None = None,
+        rerank_client: AsyncOpenAI | None = None,
     ):
         self.openai_client = openai_client
         self.rerank_client = rerank_client
@@ -51,7 +51,7 @@ class RAGPipeline:
         self.semantic_cache = SemanticCache()
         self.metrics = RAGMetrics()
 
-    async def get_embedding(self, text: str) -> List[float]:
+    async def get_embedding(self, text: str) -> list[float]:
         return await self.retriever.get_embedding(text)
 
     # ---- Retrieval with caching ----
@@ -61,8 +61,8 @@ class RAGPipeline:
         query: str,
         organization_id: int,
         top_k: int = 5,
-        document_ids: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        document_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Retrieve relevant documents with caching and retry."""
         start = time.perf_counter()
         RAG_RETRIEVAL_TOTAL.inc()
@@ -89,8 +89,7 @@ class RAGPipeline:
                     self.metrics.inc("latency_count")
                     self.metrics.record_event("latency", elapsed)
                     return cached
-                else:
-                    RAG_CACHE_MISSES.inc()
+                RAG_CACHE_MISSES.inc()
 
             # Semantic cache
             query_vector = None
@@ -171,7 +170,7 @@ class RAGPipeline:
         self.metrics.inc("total_output_tokens", output_tokens)
         self.metrics.inc("llm_request_count")
 
-    def get_metrics(self, window_seconds: int = 0) -> Dict[str, Any]:
+    def get_metrics(self, window_seconds: int = 0) -> dict[str, Any]:
         return self.metrics.get_snapshot(window_seconds)
 
     # ---- LLM streaming ----
@@ -179,9 +178,9 @@ class RAGPipeline:
     async def chat_stream(
         self,
         query: str,
-        context: List[Dict[str, Any]],
-        history: List[Dict[str, str]] = None,
-        system_prompt_override: Optional[str] = None,
+        context: list[dict[str, Any]],
+        history: list[dict[str, str]] = None,
+        system_prompt_override: str | None = None,
         enable_compression: bool = True,
         enable_masking: bool = True,
     ) -> AsyncGenerator[str, None]:
@@ -191,7 +190,6 @@ class RAGPipeline:
             return
 
         # PII masking
-        original_query = query
         masking_mapping = {}
         if enable_masking and getattr(settings, "ENABLE_PII_MASKING", False):
             from app.services.masking_service import masking_service
@@ -257,8 +255,8 @@ class RAGPipeline:
             user_query=query,
             max_tokens=settings.AI_MAX_TOKENS,
         )
-        messages: List[ChatCompletionMessageParam] = cast(
-            List[ChatCompletionMessageParam], raw_messages
+        messages: list[ChatCompletionMessageParam] = cast(
+            list[ChatCompletionMessageParam], raw_messages
         )
 
         llm_start = time.perf_counter()

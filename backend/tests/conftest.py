@@ -1,8 +1,7 @@
-# -*- coding: utf-8 -*-
 """Pytest 配置与公共 fixture。"""
 import os
+
 import pytest
-from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 # 在导入 app 之前设置测试环境变量，避免 Settings validator 报错

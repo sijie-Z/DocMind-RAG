@@ -1,6 +1,6 @@
 """Context compression — truncate and compress retrieved context for LLM input."""
 import re
-from typing import List, Dict, Any
+from typing import Any
 
 from app.rag.query_processor import extract_query_terms
 
@@ -37,8 +37,8 @@ def compress(text: str, query: str, max_chars: int = 800) -> str:
 
 
 def compress_context_list(
-    contexts: List[Dict[str, Any]], query: str, max_context_chars: int = 2000
-) -> List[Dict[str, Any]]:
+    contexts: list[dict[str, Any]], query: str, max_context_chars: int = 2000
+) -> list[dict[str, Any]]:
     """Compress a list of context items, keeping query-relevant parts."""
     compressed = []
     total_chars = 0

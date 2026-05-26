@@ -1,28 +1,28 @@
-# -*- coding: utf-8 -*-
 """
 企业级中间件 - 性能监控与请求追踪
 小白解释：就像在系统的门口装了一个计数器和秒表，记录每一个进来的请求
 花了多少时间，有没有报错，方便管理员查看系统的运行健康状态。
 """
 
-import time
-import logging
 import asyncio
+import logging
+import time
+import uuid
+from collections import defaultdict, deque
+from typing import Any
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from typing import Dict, Any, List, Tuple
-from collections import defaultdict, deque
-import uuid
 
 from app.core.config import settings
+from app.core.logging import request_id_var, trace_id_var
 from app.core.redis import redis_client
-from app.core.logging import request_id_var, trace_id_var, user_id_var
 
 logger = logging.getLogger(__name__)
 
 
-def _calc_percentile(values: List[float], percentile: float) -> float:
+def _calc_percentile(values: list[float], percentile: float) -> float:
     if not values:
         return 0.0
     ordered = sorted(values)
@@ -45,22 +45,22 @@ class MetricsCollector:
         self.slow_request_count = 0
         self.total_response_time = 0.0
         self.active_connections = 0
-        self.status_counts: Dict[str, int] = defaultdict(int)
-        self.route_stats: Dict[str, Dict[str, float]] = defaultdict(
+        self.status_counts: dict[str, int] = defaultdict(int)
+        self.route_stats: dict[str, dict[str, float]] = defaultdict(
             lambda: {"count": 0, "error_count": 0, "duration_sum": 0.0}
         )
         self.duration_samples = deque(maxlen=max(100, int(settings.METRICS_DURATION_SAMPLE_SIZE)))
         route_sample_size = max(50, int(settings.METRICS_ROUTE_SAMPLE_SIZE))
-        self.route_duration_samples: Dict[str, deque] = defaultdict(
+        self.route_duration_samples: dict[str, deque] = defaultdict(
             lambda: deque(maxlen=route_sample_size)
         )
         self.last_update = time.time()
         self.lock = asyncio.Lock()
-        
+
         # 历史快照，用于生成趋势图
         # 小白讲解：就像一个笔记本，每隔一段时间就把当前的计数器数字抄下来，这样就能画出曲线图了。
         self.history = deque(maxlen=history_size)
-        
+
     async def inc_active_connections(self):
         async with self.lock:
             self.active_connections += 1
@@ -97,7 +97,7 @@ class MetricsCollector:
                     route_data["error_count"] += 1
             self.duration_samples.append(duration * 1000)
             self.last_update = time.time()
-            
+
     async def take_snapshot(self):
         """记录当前时刻的快照"""
         async with self.lock:
@@ -105,7 +105,7 @@ class MetricsCollector:
             stats["timestamp"] = int(time.time())
             self.history.append(stats)
 
-    async def _get_stats_internal(self) -> Dict[str, Any]:
+    async def _get_stats_internal(self) -> dict[str, Any]:
         avg_time = (self.total_response_time / self.request_count * 1000) if self.request_count > 0 else 0
         return {
             "request_count": self.request_count,
@@ -118,20 +118,20 @@ class MetricsCollector:
             "p99_response_time_ms": round(_calc_percentile(list(self.duration_samples), 99), 2),
         }
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         async with self.lock:
             stats = await self._get_stats_internal()
             stats["last_update"] = self.last_update
             return stats
-            
-    async def get_history(self) -> List[Dict[str, Any]]:
+
+    async def get_history(self) -> list[dict[str, Any]]:
         """获取历史趋势数据"""
         async with self.lock:
             return list(self.history)
 
-    async def get_route_stats(self) -> Dict[str, Dict[str, float]]:
+    async def get_route_stats(self) -> dict[str, dict[str, float]]:
         async with self.lock:
-            route_output: Dict[str, Dict[str, float]] = {}
+            route_output: dict[str, dict[str, float]] = {}
             for route, stats in self.route_stats.items():
                 count = int(stats.get("count", 0))
                 avg_ms = (stats.get("duration_sum", 0.0) / count * 1000) if count > 0 else 0.0
@@ -213,7 +213,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.window_seconds = max(1, int(settings.RATE_LIMIT_WINDOW_SECONDS))
         self.requests_per_window = max(1, int(settings.RATE_LIMIT_REQUESTS_PER_MINUTE))
         self.exclude_paths = tuple(settings.RATE_LIMIT_EXCLUDE_PATHS or [])
-        self._memory_counter: Dict[str, Tuple[int, int]] = {}
+        self._memory_counter: dict[str, tuple[int, int]] = {}
         self._memory_lock = asyncio.Lock()
 
     def _is_excluded_path(self, path: str) -> bool:
@@ -227,7 +227,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return request.client.host
         return "unknown"
 
-    async def _check_and_incr_memory(self, key: str, now: int) -> Tuple[int, int]:
+    async def _check_and_incr_memory(self, key: str, now: int) -> tuple[int, int]:
         """In-memory fallback: fixed-window counter. Returns (count, reset_at)."""
         window_start = now - (now % self.window_seconds)
         reset_at = window_start + self.window_seconds
@@ -239,7 +239,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             self._memory_counter[key] = (window_start, current[1] + 1)
             return (self._memory_counter[key][1], reset_at)
 
-    async def _check_and_incr_redis(self, identifier: str, now: int) -> Tuple[int, int]:
+    async def _check_and_incr_redis(self, identifier: str, now: int) -> tuple[int, int]:
         """Sliding window using Redis sorted set. Returns (count, reset_at)."""
         if not redis_client:
             raise RuntimeError("Redis not available")
@@ -315,10 +315,10 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
         method = request.method
         token = request_id_var.set(request_id)
         trace_token = trace_id_var.set(request.headers.get("X-Trace-ID") or request_id)
-        
+
         try:
             response = await call_next(request)
-            
+
             # 记录成功请求
             duration = time.time() - start_time
             is_error = response.status_code >= 400
@@ -340,7 +340,7 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
                     request_id,
                     response.status_code,
                 )
-            
+
             # 添加处理时间头（方便前端/运维调试）
             response.headers["X-Process-Time"] = str(round(duration * 1000, 2)) + "ms"
 
@@ -353,8 +353,8 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
                 response.headers["Cache-Control"] = "private, no-cache"
 
             return response
-            
-        except Exception as e:
+
+        except Exception:
             # 记录异常请求
             duration = time.time() - start_time
             await metrics_collector.record_request(

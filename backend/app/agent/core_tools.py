@@ -6,9 +6,10 @@ Tools are organized by capability:
 - manage:  Session management (create session, bind documents)
 - sql:     Text-to-SQL for structured data queries
 """
+import contextlib
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.agent.registry import register_tool
 
@@ -49,7 +50,7 @@ logger = logging.getLogger(__name__)
 async def search_knowledge_base(
     query: str,
     top_k: int = 5,
-    document_ids: Optional[List[str]] = None,
+    document_ids: list[str] | None = None,
     organization_id: int = 1,
     **_: Any,
 ) -> str:
@@ -161,8 +162,8 @@ async def summarize_document(
     organization_id: int = 1,
     **_: Any,
 ) -> str:
-    from app.dependencies import get_rag_pipeline
     from app.core.elasticsearch import ElasticsearchTools
+    from app.dependencies import get_rag_pipeline
 
     es_query = {
         "size": 50,
@@ -260,9 +261,9 @@ async def extract_insights(
     organization_id: int = 1,
     **_: Any,
 ) -> str:
+    from app.core.config import settings
     from app.core.elasticsearch import ElasticsearchTools
     from app.dependencies import get_rag_pipeline
-    from app.core.config import settings
 
     es_query = {
         "size": 50,
@@ -374,7 +375,7 @@ async def extract_insights(
     tags=["analysis", "deep"],
 )
 async def cross_document_analysis(
-    document_ids: List[str],
+    document_ids: list[str],
     analysis_type: str = "comprehensive",
     organization_id: int = 1,
     **_: Any,
@@ -384,9 +385,9 @@ async def cross_document_analysis(
     if len(document_ids) > 10:
         return json.dumps({"error": "Maximum 10 documents allowed."}, ensure_ascii=False)
 
+    from app.core.config import settings
     from app.core.elasticsearch import ElasticsearchTools
     from app.dependencies import get_rag_pipeline
-    from app.core.config import settings
 
     docs_data = []
     for doc_id in document_ids:
@@ -519,8 +520,8 @@ async def generate_report(
     format: str = "markdown",
     **_: Any,
 ) -> str:
-    from app.dependencies import get_rag_pipeline
     from app.core.config import settings
+    from app.dependencies import get_rag_pipeline
 
     # Parse sections
     try:
@@ -640,21 +641,20 @@ def _generate_markdown_fallback(title: str, sections: list) -> str:
 )
 async def list_documents(
     limit: int = 20,
-    status: Optional[str] = None,
+    status: str | None = None,
     organization_id: int = 1,
     **_: Any,
 ) -> str:
+    from sqlalchemy import select
+
     from app.core.database import AsyncSessionLocal
     from app.models.document import Document, DocumentStatus
-    from sqlalchemy import select
 
     async with AsyncSessionLocal() as session:
         stmt = select(Document).where(Document.organization_id == organization_id)
         if status:
-            try:
+            with contextlib.suppress(ValueError):
                 stmt = stmt.where(Document.status == DocumentStatus(status))
-            except ValueError:
-                pass
         stmt = stmt.order_by(Document.created_at.desc()).limit(limit)
         result = await session.execute(stmt)
         docs = result.scalars().all()
@@ -690,9 +690,10 @@ async def list_documents(
     tags=["management"],
 )
 async def get_document_info(document_id: str, **_: Any) -> str:
+    from sqlalchemy import select
+
     from app.core.database import AsyncSessionLocal
     from app.models.document import Document
-    from sqlalchemy import select
 
     async with AsyncSessionLocal() as session:
         stmt = select(Document).where(Document.id == document_id)
@@ -745,9 +746,10 @@ async def list_conversations(
     organization_id: int = 1,
     **_: Any,
 ) -> str:
+    from sqlalchemy import select
+
     from app.core.database import AsyncSessionLocal
     from app.models.chat import ChatSession
-    from sqlalchemy import select
 
     async with AsyncSessionLocal() as session:
         stmt = (
@@ -802,9 +804,10 @@ async def get_conversation_history(
     user_id: int = 0,
     **_: Any,
 ) -> str:
-    from app.core.database import AsyncSessionLocal
-    from app.models.chat import ChatSession, ChatMessage
     from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.chat import ChatMessage, ChatSession
 
     async with AsyncSessionLocal() as session:
         # Verify ownership
@@ -863,16 +866,17 @@ async def get_conversation_history(
     tags=["prompts"],
 )
 async def list_prompt_templates(
-    category: Optional[str] = None,
+    category: str | None = None,
     limit: int = 20,
     **_: Any,
 ) -> str:
-    from app.core.database import AsyncSessionLocal
-    from app.models.prompt import PromptTemplate
     from sqlalchemy import select
 
+    from app.core.database import AsyncSessionLocal
+    from app.models.prompt import PromptTemplate
+
     async with AsyncSessionLocal() as session:
-        stmt = select(PromptTemplate).where(PromptTemplate.is_active == True)
+        stmt = select(PromptTemplate).where(PromptTemplate.is_active)
         if category:
             stmt = stmt.where(PromptTemplate.category == category)
         stmt = stmt.order_by(PromptTemplate.created_at.desc()).limit(limit)
@@ -908,9 +912,10 @@ async def list_prompt_templates(
     tags=["prompts"],
 )
 async def get_prompt_template(name: str, **_: Any) -> str:
+    from sqlalchemy import select
+
     from app.core.database import AsyncSessionLocal
     from app.models.prompt import PromptTemplate
-    from sqlalchemy import select
 
     async with AsyncSessionLocal() as session:
         stmt = select(PromptTemplate).where(PromptTemplate.name == name)

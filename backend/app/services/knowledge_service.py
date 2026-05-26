@@ -1,33 +1,31 @@
 """
 知识库服务 - 管理知识库的构建、检索和问答
 """
-import asyncio
 import logging
-from typing import List, Dict, Any, Optional
 from datetime import datetime
-import uuid
+from typing import Any
 
+from sqlalchemy import and_, delete, func, select
+from sqlalchemy.orm import selectinload
+
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.elasticsearch import ElasticsearchTools, get_elasticsearch
 from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.services.document_parser import document_service  # type: ignore
 from app.services.embedding_service import embedding_service
-from app.core.elasticsearch import get_elasticsearch, ElasticsearchTools
-from app.services.organization_service import organization_service
 from app.services.file_service import FileUploadService
-from sqlalchemy import select, and_, func, delete
-from sqlalchemy.orm import selectinload
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class KnowledgeService:
     """知识库服务 - 企业级RAG核心实现"""
-    
+
     def __init__(self):
         self.index_name = settings.ELASTICSEARCH_INDEX_NAME
         self.file_upload_service = FileUploadService()
-    
+
     async def build_knowledge_base(self, document_id: str) -> bool:
         """Build knowledge base — parse, vectorize, index to ES, then mark INDEXED."""
         try:
@@ -88,14 +86,14 @@ class KnowledgeService:
         except Exception as e:
             logger.error(f"Knowledge base build failed: {e}")
             return False
-    
+
     async def search_knowledge(
-        self, 
-        query: str, 
-        organization_id: Optional[str] = None,
+        self,
+        query: str,
+        organization_id: str | None = None,
         top_k: int = 5,
         search_mode: str = "hybrid"
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         搜索知识库 - 统一使用 RagService 以获得更强能力
         """
@@ -103,14 +101,14 @@ class KnowledgeService:
         try:
             # 转换 organization_id 为 int
             org_id = int(organization_id) if organization_id else 0
-            
+
             # 使用 RagService 进行高级检索
             results = await rag_service.search_knowledge_base(
                 query=query,
                 organization_id=org_id,
                 top_k=top_k
             )
-            
+
             # 格式化为 KnowledgeService 期望的输出格式以保持兼容性
             formatted_results = []
             for res in results:
@@ -134,13 +132,13 @@ class KnowledgeService:
             logger.error(f"Knowledge search failed: {e}")
             return []
 
-    async def get_search_suggestions(self, query: str, organization_id: str, limit: int = 5) -> List[str]:
+    async def get_search_suggestions(self, query: str, organization_id: str, limit: int = 5) -> list[str]:
         """获取搜索建议"""
         # 简单实现：使用关键词搜索的前几个标题
         results = await self.search_knowledge(query, organization_id, top_k=limit, search_mode="keyword")
         return [r["text"][:50] + "..." for r in results]
 
-    async def get_knowledge_stats(self, organization_id: str) -> Dict[str, Any]:
+    async def get_knowledge_stats(self, organization_id: str) -> dict[str, Any]:
         """获取知识库统计信息"""
         async with AsyncSessionLocal() as session:
             # 文档总数
@@ -148,14 +146,14 @@ class KnowledgeService:
                 select(func.count(Document.id)).where(Document.organization_id == organization_id)
             )
             doc_count = doc_count_result.scalar() or 0
-            
+
             # 已索引文档数
             indexed_count_result = await session.execute(
                 select(func.count(Document.id))
                 .where(and_(Document.organization_id == organization_id, Document.status == DocumentStatus.INDEXED))
             )
             indexed_count = indexed_count_result.scalar() or 0
-            
+
             return {
                 "total_documents": doc_count,
                 "indexed_documents": indexed_count,
@@ -163,7 +161,7 @@ class KnowledgeService:
                 "last_updated": datetime.now().isoformat()
             }
 
-    async def delete_knowledge(self, document_id: str, organization_id: Optional[int] = None) -> bool:
+    async def delete_knowledge(self, document_id: str, organization_id: int | None = None) -> bool:
         """兼容旧接口的删除方法"""
         return await self.delete_knowledge_thoroughly(document_id)
 
@@ -190,13 +188,13 @@ class KnowledgeService:
                 doc = result.scalar_one_or_none()
                 if not doc:
                     return True
-                
+
                 if doc.file_path:
                     try:
                         await self.file_upload_service.delete_file(doc.file_path)
                     except Exception as e:
                         logger.warning(f"从MinIO删除文件失败: {str(e)}")
-                
+
                 client = await get_elasticsearch()
                 try:
                     await client.delete_by_query(
@@ -205,7 +203,7 @@ class KnowledgeService:
                     )
                 except Exception as e:
                     logger.warning(f"从ES删除索引失败: {str(e)}")
-                
+
                 await session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document_id))
                 await session.execute(delete(Document).where(Document.id == document_id))
                 await session.commit()
@@ -214,7 +212,7 @@ class KnowledgeService:
             logger.error(f"彻底删除文档失败: {str(e)}")
             return False
 
-    async def batch_delete_knowledge(self, document_ids: List[str], organization_id: Optional[int] = None) -> Dict[str, Any]:
+    async def batch_delete_knowledge(self, document_ids: list[str], organization_id: int | None = None) -> dict[str, Any]:
         """批量删除文档"""
         success_count = 0
         fail_count = 0

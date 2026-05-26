@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Elasticsearch connection module with lazy-initialized holder pattern.
 
 Uses a proxy object for `es_client` so that module-level imports
@@ -6,9 +5,9 @@ always resolve to the live client after `init_elasticsearch()`.
 """
 
 import logging
+
 from elasticsearch import AsyncElasticsearch, NotFoundError
 from elasticsearch.helpers import async_bulk
-from typing import Optional
 
 from app.core.config import settings
 
@@ -19,12 +18,12 @@ class _ESHolder:
     """Lifecycle-managed Elasticsearch client holder."""
 
     def __init__(self):
-        self._client: Optional[AsyncElasticsearch] = None
+        self._client: AsyncElasticsearch | None = None
         self.es_analyzer: str = "cjk"
         self.es_search_analyzer: str = "cjk"
 
     @property
-    def client(self) -> Optional[AsyncElasticsearch]:
+    def client(self) -> AsyncElasticsearch | None:
         return self._client
 
     async def initialize(self):
@@ -287,7 +286,7 @@ class ElasticsearchTools:
         return await ElasticsearchTools.search_documents(query)
 
     @staticmethod
-    async def keyword_search(keywords: str, fields: Optional[list[str]] = None, size: int = 10):
+    async def keyword_search(keywords: str, fields: list[str] | None = None, size: int = 10):
         if fields is None:
             fields = ["chunk_text", "content", "filename"]
         query = {

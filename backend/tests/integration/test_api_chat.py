@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
 """Chat API 集成测试 — 会话与消息流程。"""
-import json
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
+
 from app.core.database import get_db
 from app.core.security import get_current_user
 
@@ -12,6 +12,18 @@ from app.core.security import get_current_user
 def client():
     from app.main import app
     return TestClient(app)
+
+
+class _AsyncCtxMgr:
+    """支持 async with 的 mock 上下文管理器。"""
+    def __init__(self, db):
+        self._db = db
+
+    async def __aenter__(self):
+        return self._db
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return False
 
 
 def _make_mock_user():
@@ -62,8 +74,8 @@ def _override_get_db(mock_db=None):
         mock_db.execute = AsyncMock(return_value=MagicMock())
         mock_db.merge = MagicMock(return_value=_make_mock_user())
         mock_db.get = AsyncMock(return_value=_make_mock_db_user())
-        mock_db.delete = MagicMock()
-        mock_db.begin_nested = AsyncMock()
+        mock_db.delete = AsyncMock()
+        mock_db.begin_nested = MagicMock(return_value=_AsyncCtxMgr(mock_db))
 
     async def _override():
         yield mock_db
@@ -185,7 +197,7 @@ class TestConversations:
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_session
         mock_db.execute = AsyncMock(return_value=mock_result)
-        mock_db.delete = MagicMock()
+        mock_db.delete = AsyncMock()
         mock_db.commit = AsyncMock()
 
         async def _override_user():
@@ -309,7 +321,7 @@ class TestMessageFeedback:
         try:
             r = client.post(
                 "/api/v1/chat/messages/msg-1/feedback",
-                json={"feedback": "like", "note": "Great answer!"},
+                json={"feedback": 1, "note": "Great answer!"},
                 headers={"Authorization": "Bearer test_token"}
             )
             assert r.status_code == 200
@@ -337,7 +349,7 @@ class TestMessageFeedback:
         try:
             r = client.post(
                 "/api/v1/chat/messages/nonexistent/feedback",
-                json={"feedback": "like"},
+                json={"feedback": 1},
                 headers={"Authorization": "Bearer test_token"}
             )
             assert r.status_code == 404

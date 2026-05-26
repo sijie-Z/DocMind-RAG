@@ -7,7 +7,6 @@ information while freeing up space for new interactions.
 Inspired by hermes-agent's ContextEngine / ContextCompressor pattern.
 """
 import logging
-from typing import Any, Dict, List, Optional
 
 import tiktoken
 
@@ -29,7 +28,7 @@ def estimate_tokens(text: str) -> int:
     return max(1, int(len(text) / 2.5))
 
 
-def estimate_messages_tokens(messages: List[Dict[str, str]]) -> int:
+def estimate_messages_tokens(messages: list[dict[str, str]]) -> int:
     """Estimate total tokens in a message list."""
     total = 0
     for msg in messages:
@@ -64,9 +63,9 @@ class ContextEngine:
 
     def fit(
         self,
-        messages: List[Dict[str, str]],
-        system_prompt: Optional[str] = None,
-    ) -> List[Dict[str, str]]:
+        messages: list[dict[str, str]],
+        system_prompt: str | None = None,
+    ) -> list[dict[str, str]]:
         """Trim/compress messages to fit within the token budget (sync fallback).
 
         Prefer fit_async() when an event loop is available.
@@ -106,9 +105,9 @@ class ContextEngine:
 
     async def fit_async(
         self,
-        messages: List[Dict[str, str]],
-        system_prompt: Optional[str] = None,
-    ) -> List[Dict[str, str]]:
+        messages: list[dict[str, str]],
+        system_prompt: str | None = None,
+    ) -> list[dict[str, str]]:
         """Async version: trim/compress messages with LLM summarization."""
         if not messages:
             return messages
@@ -144,8 +143,8 @@ class ContextEngine:
         return result
 
     async def _compress_messages_async(
-        self, messages: List[Dict[str, str]], token_budget: int
-    ) -> List[Dict[str, str]]:
+        self, messages: list[dict[str, str]], token_budget: int
+    ) -> list[dict[str, str]]:
         """Compress messages using LLM summarization when available."""
         if not messages:
             return []
@@ -163,14 +162,14 @@ class ContextEngine:
         return self._compress_messages_fast(messages, token_budget)
 
     def _compress_messages(
-        self, messages: List[Dict[str, str]], token_budget: int
-    ) -> List[Dict[str, str]]:
+        self, messages: list[dict[str, str]], token_budget: int
+    ) -> list[dict[str, str]]:
         """Synchronous fallback: compress a list of messages into a single summary message."""
         return self._compress_messages_fast(messages, token_budget)
 
     def _compress_messages_fast(
-        self, messages: List[Dict[str, str]], token_budget: int
-    ) -> List[Dict[str, str]]:
+        self, messages: list[dict[str, str]], token_budget: int
+    ) -> list[dict[str, str]]:
         """Truncation-based compression (fast, no LLM call)."""
         parts = []
         for msg in messages:
@@ -189,7 +188,7 @@ class ContextEngine:
         return [{"role": "system", "content": summary_text}]
 
     async def _summarize_with_llm(
-        self, messages: List[Dict[str, str]], token_budget: int
+        self, messages: list[dict[str, str]], token_budget: int
     ) -> str:
         """Use the LLM to produce a concise summary of older messages."""
         if not self._llm_client:
@@ -224,8 +223,8 @@ class ContextEngine:
             return ""
 
     def _truncate_messages(
-        self, messages: List[Dict[str, str]], token_budget: int
-    ) -> List[Dict[str, str]]:
+        self, messages: list[dict[str, str]], token_budget: int
+    ) -> list[dict[str, str]]:
         """Last resort: truncate individual messages to fit budget."""
         max_chars = int(token_budget * CHARS_PER_TOKEN)
         result = []
@@ -243,9 +242,9 @@ class ContextEngine:
 
     def inject_tool_results(
         self,
-        messages: List[Dict[str, str]],
-        tool_results: List[Dict[str, str]],
-    ) -> List[Dict[str, str]]:
+        messages: list[dict[str, str]],
+        tool_results: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
         """Append tool results to messages, respecting token budget."""
         combined = messages + tool_results
         return self.fit(combined)

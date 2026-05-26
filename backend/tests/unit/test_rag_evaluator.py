@@ -1,7 +1,7 @@
-# -*- coding: utf-8 -*-
 """RAG evaluator unit tests — score extraction and dataclass logic."""
 import pytest
-from app.rag.evaluator import _extract_score, EvalResult, BatchEvalResult
+
+from app.rag.evaluator import BatchEvalResult, EvalResult, _extract_score
 
 
 class TestExtractScore:

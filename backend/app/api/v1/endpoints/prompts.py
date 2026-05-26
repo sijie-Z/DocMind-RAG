@@ -1,18 +1,17 @@
-# -*- coding: utf-8 -*-
-from typing import List, Any
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
-from app.models.prompt import PromptTemplate
-from app.schemas.prompt import PromptTemplateCreate, PromptTemplateUpdate, PromptTemplateResponse
 from app.core.security import get_current_user
+from app.exceptions import AuthorizationError, ConflictError, NotFoundError
+from app.models.prompt import PromptTemplate
 from app.models.user import User
-from app.exceptions import NotFoundError, ValidationError, AuthorizationError, ConflictError
+from app.schemas.prompt import PromptTemplateCreate, PromptTemplateResponse, PromptTemplateUpdate
 
 router = APIRouter()
 
-@router.get("/", response_model=List[PromptTemplateResponse])
+@router.get("/", response_model=list[PromptTemplateResponse])
 async def list_prompts(
     db: AsyncSession = Depends(get_db),
     skip: int = 0,

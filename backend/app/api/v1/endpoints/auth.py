@@ -2,31 +2,32 @@
 派聪明AI知识库系统 - 认证端点
 """
 
-import json
 import hashlib
+import json
 import logging
-from datetime import datetime, timedelta
-from typing import Optional
 
-from fastapi import APIRouter, Depends, status, Request
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, Request
 from fastapi.encoders import jsonable_encoder
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.redis import RedisTools
+from app.core.security import get_current_user
 from app.exceptions import (
-    AccountLockedError, AppError, AuthenticationError, ConflictError,
-    NotFoundError, RateLimitError, ValidationError,
+    AppError,
+    AuthenticationError,
+    ConflictError,
+    NotFoundError,
+    RateLimitError,
+    ValidationError,
 )
 from app.models.user import User
-from app.models.user_audit import UserLoginSession, UserActivityLog
-from app.services.auth_service import auth_service
+from app.models.user_audit import UserLoginSession
+from app.schemas.auth import ChangePasswordRequest, UpdateProfileRequest
 from app.services.audit_service import audit_service
-from app.schemas.auth import UpdateProfileRequest, ChangePasswordRequest
-from app.core.security import get_current_user
+from app.services.auth_service import auth_service
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,9 @@ router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 # --- Brute force protection (imported from auth_service) ---
-from app.services.auth_service import _MAX_LOGIN_FAILURES as LOGIN_MAX_ATTEMPTS, _LOCKOUT_DURATION_SECONDS as LOGIN_LOCKOUT_SECONDS
+from app.services.auth_service import _LOCKOUT_DURATION_SECONDS as LOGIN_LOCKOUT_SECONDS
+from app.services.auth_service import _MAX_LOGIN_FAILURES as LOGIN_MAX_ATTEMPTS
+
 
 async def _check_login_lockout(request: Request) -> None:
     """Check if the IP is locked out due to too many failed login attempts."""
@@ -99,8 +102,8 @@ class RegisterRequest(BaseModel):
     username: str
     email: EmailStr
     password: str
-    full_name: Optional[str] = None
-    organization_id: Optional[int] = None
+    full_name: str | None = None
+    organization_id: int | None = None
 
     @field_validator('password')
     @classmethod
@@ -118,7 +121,7 @@ class TokenData(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
-    refresh_token: Optional[str] = None
+    refresh_token: str | None = None
     user_info: dict
 
 class TokenResponse(BaseModel):
@@ -127,6 +130,7 @@ class TokenResponse(BaseModel):
     data: TokenData
 
 from app.schemas.user import UserInfoResponse
+
 
 @router.get("/ensure-demo", response_model=dict)
 async def ensure_demo():
@@ -157,7 +161,7 @@ async def login(
             raise AuthenticationError("用户名或密码错误")
 
         await _clear_login_failures(request)
-        
+
         logger.info("Authentication successful. Proceeding to token generation.")
         # 2. 生成访问令牌
         access_token = auth_service.create_access_token(
@@ -169,13 +173,13 @@ async def login(
             }
         )
         logger.info("Access token generated.")
-        
+
         # 3. 生成刷新令牌
         refresh_token = auth_service.create_refresh_token(
             data={"sub": user.username, "user_id": user.id}
         )
         logger.info("Refresh token generated.")
-        
+
         # 5. 构建返回用的 user_info（避免 None 或不可序列化类型导致 500）
         logger.info("Constructing user_info.")
         user_info = {
@@ -253,7 +257,7 @@ async def login(
                 "user_info": user_info
             }
         }
-        
+
     except (AuthenticationError, RateLimitError):
         raise
     except Exception as e:
@@ -343,18 +347,18 @@ async def register(
         existing_user = await auth_service.get_user_by_username(
             db, register_data.username
         )
-        
+
         if existing_user:
             raise ConflictError("用户名已存在")
-        
+
         # 检查邮箱是否已存在
         existing_email = await auth_service.get_user_by_email(
             db, register_data.email
         )
-        
+
         if existing_email:
             raise ConflictError("邮箱已被使用")
-        
+
         # 创建新用户 + 欢迎通知
         # 使用 savepoint 是因为前面的查询已开启隐式事务
         async with db.begin_nested():
@@ -376,11 +380,11 @@ async def register(
             db.add(welcome_notification)
 
         await db.commit()
-        
+
         # 生成访问令牌 - 包含完整的用户信息和组织标签
         access_token = auth_service.create_access_token(
             data={
-                "sub": user.username, 
+                "sub": user.username,
                 "user_id": user.id,
                 "role": user.role,
                 "organization_id": user.organization_id,
@@ -388,17 +392,17 @@ async def register(
                 "email": user.email
             }
         )
-        
+
         # 生成刷新令牌
         refresh_token = auth_service.create_refresh_token(
             data={
-                "sub": user.username, 
+                "sub": user.username,
                 "user_id": user.id,
                 "role": user.role,
                 "organization_id": user.organization_id
             }
         )
-        
+
         return {
             "success": True,
             "message": "注册成功",
@@ -417,7 +421,7 @@ async def register(
                 }
             }
         }
-        
+
     except ConflictError:
         raise
     except Exception as e:
@@ -433,24 +437,24 @@ async def refresh_token(
     try:
         # 验证刷新令牌
         payload = auth_service.verify_token(body.refresh_token)
-        
+
         if not payload or payload.get("type") != "refresh":
             raise AuthenticationError("无效的刷新令牌")
-        
+
         username = payload.get("sub")
         user_id = int(payload.get("user_id", 0))
 
         # 获取用户信息
         user = await auth_service.get_user_by_id(db, user_id)
-        
+
         if not user or user.username != username:
             raise AuthenticationError("用户不存在")
-        
+
         # 生成新的访问令牌
         new_access_token = auth_service.create_access_token(
             data={"sub": username, "user_id": user_id}
         )
-        
+
         return {
             "success": True,
             "message": "刷新成功",
@@ -556,4 +560,4 @@ async def change_password(
     except Exception as e:
         logger.error(f"修改密码失败: {e}", exc_info=True)
         raise AppError("修改密码失败", detail=str(e) if settings.EXPOSE_EXCEPTION_DETAIL else None)
-        
+

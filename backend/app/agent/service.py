@@ -11,31 +11,31 @@ Supports:
 
 import json
 import logging
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from openai import AsyncOpenAI
 
-from app.agent.events import AgentEvent
 from app.agent.config import AgentConfig
+from app.agent.events import AgentEvent
 from app.agent.loop import PERAgentLoop
 from app.agent.memory_bridge import AgentMemoryBridge
-from app.agent.registry import tool_registry
 
 logger = logging.getLogger(__name__)
 
 # Force import of all tool modules to trigger registration
 import app.agent.core_tools  # noqa: F401 — original 11 tools
-import app.agent.tools       # noqa: F401 — 14 new tools package
+import app.agent.tools  # noqa: F401 — 14 new tools package
 
 
 class AgentService:
     """High-level agent interface with session management."""
 
-    def __init__(self, openai_client: Optional[AsyncOpenAI] = None):
+    def __init__(self, openai_client: AsyncOpenAI | None = None):
         self._client = openai_client
 
     @property
-    def client(self) -> Optional[AsyncOpenAI]:
+    def client(self) -> AsyncOpenAI | None:
         if self._client is None:
             from app.dependencies import get_rag_pipeline
             pipeline = get_rag_pipeline()
@@ -45,11 +45,11 @@ class AgentService:
     async def chat(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
         organization_id: int = 1,
         user_id: int = 0,
-        session_id: Optional[str] = None,
-        config: Optional[AgentConfig] = None,
+        session_id: str | None = None,
+        config: AgentConfig | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Run the PER agent loop and yield events.
 
@@ -108,11 +108,11 @@ class AgentService:
     async def search_and_chat(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
         organization_id: int = 1,
         user_id: int = 0,
         top_k: int = 5,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Hybrid mode: retrieve context first, then run PER agent.
 
         Combines traditional RAG retrieval with the full PER agent.
@@ -200,7 +200,7 @@ class AgentService:
         session_id: str,
         organization_id: int,
         user_id: int,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Load agent session state from Redis."""
         try:
             from app.core.redis import redis_client

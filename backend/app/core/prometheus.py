@@ -1,14 +1,13 @@
-# -*- coding: utf-8 -*-
 """Prometheus metrics registry — RAG pipeline + cache + LLM metrics."""
 import logging
+
 from prometheus_client import (
-    Counter,
-    Histogram,
-    Gauge,
-    CollectorRegistry,
-    generate_latest,
     CONTENT_TYPE_LATEST,
     REGISTRY,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
 )
 
 logger = logging.getLogger(__name__)

@@ -61,8 +61,8 @@ async def translate_text(
     source_lang = _normalize_lang(source_language) if source_language != "auto" else "auto"
 
     try:
-        from app.dependencies import get_rag_pipeline
         from app.core.config import settings
+        from app.dependencies import get_rag_pipeline
 
         pipeline = get_rag_pipeline()
         if not pipeline.openai_client:
@@ -87,8 +87,7 @@ async def translate_text(
             temperature=0.1,
             max_tokens=2000,
         )
-        translation = resp.choices[0].message.content or "Translation failed."
-        return translation
+        return resp.choices[0].message.content or "Translation failed."
     except Exception as e:
         return f"Translation error: {type(e).__name__}: {e}"
 
@@ -118,7 +117,7 @@ async def detect_language(text: str, **_: Any) -> str:
     try:
         # Try using langdetect library
         try:
-            from langdetect import detect_langs, DetectorFactory
+            from langdetect import DetectorFactory, detect_langs
             DetectorFactory.seed = 0
             results = detect_langs(text[:500])
             langs = []
@@ -126,7 +125,7 @@ async def detect_language(text: str, **_: Any) -> str:
                 code = r.lang
                 name = LANG_NAMES.get(code, code)
                 langs.append(f"{name} ({code}): {r.prob:.0%}")
-            return f"Language detection:\n" + "\n".join(f"- {l}" for l in langs)
+            return "Language detection:\n" + "\n".join(f"- {l}" for l in langs)
         except ImportError:
             pass
 

@@ -1,6 +1,4 @@
-# -*- coding: utf-8 -*-
 """健康检查与根路径 API 的简单测试。"""
-import pytest
 from fastapi.testclient import TestClient
 
 

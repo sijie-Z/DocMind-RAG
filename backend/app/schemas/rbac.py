@@ -1,7 +1,7 @@
-# -*- coding: utf-8 -*-
 from enum import Enum
-from typing import List, Optional
+
 from pydantic import BaseModel, ConfigDict
+
 
 class PermissionType(str, Enum):
     """
@@ -27,7 +27,7 @@ class PermissionType(str, Enum):
 
     # === 聊天权限 (Chat) ===
     CHAT = "chat"
-    
+
     # === 用户与系统管理 ===
     MANAGE_USERS = "manage_users"
     MANAGE_ROLES = "manage_roles"
@@ -35,8 +35,8 @@ class PermissionType(str, Enum):
 
 class RoleBase(BaseModel):
     name: str
-    description: Optional[str] = None
-    permissions: List[PermissionType] = []
+    description: str | None = None
+    permissions: list[PermissionType] = []
 
 class RoleCreate(RoleBase):
     pass
@@ -47,4 +47,4 @@ class RoleUpdate(RoleBase):
 class RoleResponse(RoleBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
-        
+

@@ -1,13 +1,12 @@
-# -*- coding: utf-8 -*-
 """RAG quality evaluation — Faithfulness, Relevancy, Context Precision.
 
 Uses LLM-as-judge for scoring. Each metric returns a float in [0, 1].
 """
-import logging
 import json
+import logging
 import re
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 from openai import AsyncOpenAI
 
@@ -20,7 +19,7 @@ class EvalResult:
     faithfulness: float = 0.0
     relevancy: float = 0.0
     context_precision: float = 0.0
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -30,7 +29,7 @@ class BatchEvalResult:
     avg_faithfulness: float = 0.0
     avg_relevancy: float = 0.0
     avg_context_precision: float = 0.0
-    results: List[EvalResult] = field(default_factory=list)
+    results: list[EvalResult] = field(default_factory=list)
 
 
 def _extract_score(text: str) -> float:
@@ -126,7 +125,7 @@ CONTEXT_PRECISION_PROMPT = """你是一个 RAG 系统质量评估专家。请评
 class RAGEvaluator:
     """Evaluates RAG quality using LLM-as-judge."""
 
-    def __init__(self, client: Optional[AsyncOpenAI] = None, model: Optional[str] = None):
+    def __init__(self, client: AsyncOpenAI | None = None, model: str | None = None):
         self.client = client
         self.model = model
 
@@ -149,7 +148,7 @@ class RAGEvaluator:
             return 0.0, str(e)
 
     async def evaluate_faithfulness(
-        self, question: str, answer: str, context: List[Dict[str, Any]]
+        self, question: str, answer: str, context: list[dict[str, Any]]
     ) -> tuple[float, str]:
         """Score whether the answer is faithful to the retrieved context."""
         context_str = "\n\n".join(
@@ -167,7 +166,7 @@ class RAGEvaluator:
         return await self._score(prompt)
 
     async def evaluate_context_precision(
-        self, question: str, context: List[Dict[str, Any]]
+        self, question: str, context: list[dict[str, Any]]
     ) -> tuple[float, str]:
         """Score whether retrieved documents are relevant to the question."""
         context_str = "\n\n".join(
@@ -183,7 +182,7 @@ class RAGEvaluator:
         self,
         question: str,
         answer: str,
-        context: List[Dict[str, Any]],
+        context: list[dict[str, Any]],
     ) -> EvalResult:
         """Run all three evaluations for a single query."""
         faith, faith_detail = await self.evaluate_faithfulness(question, answer, context)
@@ -203,7 +202,7 @@ class RAGEvaluator:
 
     async def evaluate_batch(
         self,
-        items: List[Dict[str, Any]],
+        items: list[dict[str, Any]],
     ) -> BatchEvalResult:
         """Evaluate multiple queries and return aggregated results.
 

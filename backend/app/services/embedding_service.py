@@ -1,9 +1,10 @@
 # backend/app/services/embedding_service.py
 
-import logging
 import asyncio
-from typing import List
+import logging
+
 from openai import AsyncOpenAI
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -35,12 +36,12 @@ class EmbeddingService:
             )
             self.model = settings.EMBEDDING_MODEL
             logger.info(f"EmbeddingService 已初始化，使用在线模型: {self.model}")
-            
+
         # 保守批次，降低 RPM/TPM 风险
         self.batch_size = 8
         self.max_retries = 5
 
-    async def _embed_batch_with_retry(self, batch: List[str]) -> List[List[float]]:
+    async def _embed_batch_with_retry(self, batch: list[str]) -> list[list[float]]:
         last_err: Exception | None = None
         for attempt in range(1, self.max_retries + 1):
             try:
@@ -69,14 +70,14 @@ class EmbeddingService:
 
         raise RuntimeError(f"Embedding batch failed after retries: {last_err}")
 
-    async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    async def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """获取文本向量，带限流重试与退避。"""
         try:
             valid_texts = [t for t in texts if t and t.strip()]
             if not valid_texts:
                 return []
 
-            all_embeddings: List[List[float]] = []
+            all_embeddings: list[list[float]] = []
             total = len(valid_texts)
 
             for i in range(0, total, self.batch_size):

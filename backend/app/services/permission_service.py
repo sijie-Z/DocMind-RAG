@@ -1,18 +1,16 @@
-# -*- coding: utf-8 -*-
 """
 派聪明AI知识库系统 - 权限服务
 """
 
 import logging
-from typing import List, Optional, Set
 
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 
-from app.models.rbac import Permission, Role, PermissionType, user_organization_role_association
-from app.models.user import User
 from app.core.database import AsyncSessionLocal
+from app.models.rbac import Permission, PermissionType, Role, user_organization_role_association
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -20,7 +18,7 @@ logger.setLevel(logging.DEBUG)
 class PermissionService:
     """权限服务类 - 提供RBAC核心逻辑"""
 
-    async def get_user_permissions(self, db: AsyncSession, user: User, organization_id: Optional[int] = None) -> Set[str]:
+    async def get_user_permissions(self, db: AsyncSession, user: User, organization_id: int | None = None) -> set[str]:
         """获取用户拥有的所有权限名称集合"""
         # 确保传入的是对象而不是ID
         if isinstance(user, int):
@@ -32,12 +30,12 @@ class PermissionService:
         if user.is_superuser:
             result = await db.execute(select(Permission.name))
             return set(result.scalars().all())
-        
+
         # 2. 获取当前用户对应的系统级角色权限
         system_role_names = ["SysAdmin"] if (getattr(user, "role", "") or "").lower() == "admin" else ["User"]
         system_roles_query = select(Role).where(
             and_(
-                Role.is_system_role == True,
+                Role.is_system_role,
                 Role.name.in_(system_role_names)
             )
         ).options(selectinload(Role.permissions))
@@ -56,7 +54,7 @@ class PermissionService:
                     user_organization_role_association.c.organization_id == organization_id
                 )
             ).options(selectinload(Role.permissions))
-            
+
             user_org_roles_result = await db.execute(user_org_roles_query)
             for role in user_org_roles_result.scalars().all():
                 for perm in role.permissions:
@@ -136,15 +134,15 @@ class PermissionService:
                     role = Role(name=r_data["name"], description=r_data["description"], is_system_role=r_data["is_system_role"])
                     db.add(role)
                     await db.flush()
-                
+
                 await db.refresh(role, ["permissions"])
-                
+
                 # 同步权限关联
                 current_perms = {p.name for p in role.permissions}
                 for p_name in r_data["permissions"]:
                     if p_name in all_perms_map and p_name not in current_perms:
                         role.permissions.append(all_perms_map[p_name])
-            
+
             await db.commit()
             logger.info("默认权限和角色初始化完成。")
 

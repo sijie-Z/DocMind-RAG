@@ -5,7 +5,7 @@ Usage:
     raise AuthenticationError("令牌已过期")
     raise ValidationError("文件大小超出限制", field="file", max_mb=50)
 """
-from typing import Any, Optional
+from typing import Any
 
 
 class AppError(Exception):
@@ -17,9 +17,9 @@ class AppError(Exception):
 
     def __init__(
         self,
-        message: Optional[str] = None,
+        message: str | None = None,
         *,
-        error_code: Optional[str] = None,
+        error_code: str | None = None,
         detail: Any = None,
         **kwargs: Any,
     ):

@@ -1,9 +1,8 @@
-# -*- coding: utf-8 -*-
 """Infrastructure settings — database, Redis, Elasticsearch, Kafka, MinIO, file upload."""
 
-from typing import List, Optional, Union
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DatabaseSettings(BaseSettings):
@@ -31,16 +30,16 @@ class DatabaseSettings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
-    REDIS_PASSWORD: Optional[str] = None
+    REDIS_PASSWORD: str | None = None
 
     # Elasticsearch
-    ELASTICSEARCH_HOSTS: List[str] = ["http://localhost:9200"]
+    ELASTICSEARCH_HOSTS: list[str] = ["http://localhost:9200"]
     ELASTICSEARCH_INDEX_NAME: str = "paicongming_knowledge"
     ES_ANALYZER: str = "standard"
     ES_SEARCH_ANALYZER: str = "standard"
 
     # Kafka
-    KAFKA_BOOTSTRAP_SERVERS: Union[List[str], str] = "localhost:9092"
+    KAFKA_BOOTSTRAP_SERVERS: list[str] | str = "localhost:9092"
     KAFKA_FILE_PROCESSING_TOPIC: str = "file-processing"
     KAFKA_CHAT_PROCESSING_TOPIC: str = "chat-processing"
 
@@ -61,7 +60,7 @@ class DatabaseSettings(BaseSettings):
 
     # Document parsing
     OCR_LANGUAGE: str = "chi_sim+eng"
-    SUPPORTED_FILE_TYPES: List[str] = [
+    SUPPORTED_FILE_TYPES: list[str] = [
         "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt",
         "txt", "md", "csv", "json", "xml", "html",
         "jpg", "jpeg", "png", "bmp", "tiff", "tif",

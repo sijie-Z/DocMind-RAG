@@ -4,7 +4,8 @@ This module exists for backward compatibility. New code should import
 from `app.rag.pipeline` or use `app.dependencies.get_rag_pipeline()`.
 """
 import logging
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from app.dependencies import get_rag_pipeline
 
@@ -20,7 +21,7 @@ class RagServiceFacade:
 
     # ---- Delegated methods ----
 
-    async def get_embedding(self, text: str) -> List[float]:
+    async def get_embedding(self, text: str) -> list[float]:
         return await self._pipeline.get_embedding(text)
 
     async def search_knowledge_base(
@@ -28,8 +29,8 @@ class RagServiceFacade:
         query: str,
         organization_id: int,
         top_k: int = 5,
-        document_ids: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        document_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         return await self._pipeline.search_knowledge_base(query, organization_id, top_k, document_ids)
 
     def report_grounded(self, has_sources: bool) -> None:
@@ -38,15 +39,15 @@ class RagServiceFacade:
     def report_tokens(self, input_tokens: int, output_tokens: int) -> None:
         self._pipeline.report_tokens(input_tokens, output_tokens)
 
-    def get_metrics(self, window_seconds: int = 0) -> Dict[str, Any]:
+    def get_metrics(self, window_seconds: int = 0) -> dict[str, Any]:
         return self._pipeline.get_metrics(window_seconds)
 
     async def chat_stream(
         self,
         query: str,
-        context: List[Dict[str, Any]],
-        history: List[Dict[str, str]] = None,
-        system_prompt_override: Optional[str] = None,
+        context: list[dict[str, Any]],
+        history: list[dict[str, str]] = None,
+        system_prompt_override: str | None = None,
         enable_compression: bool = True,
         enable_masking: bool = True,
     ) -> AsyncGenerator[str, None]:
