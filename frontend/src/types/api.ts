@@ -133,7 +133,7 @@ export interface UploadProgressEvent {
 // ── SSE ────────────────────────────────────────────────
 
 export interface SSEMessage {
-  type: 'chunk' | 'message' | 'error' | 'retry' | 'done' | 'sources' | 'status'
+  type: string
   content?: string
   conversationId?: string | number
   messageId?: string
@@ -142,6 +142,9 @@ export interface SSEMessage {
   fileIds?: string[]
   rateLimit?: RateLimitInfo
   request_id?: string
+  thinkingType?: string
+  toolName?: string
+  toolDurationMs?: number
 }
 
 export interface KnowledgeSourceRef {

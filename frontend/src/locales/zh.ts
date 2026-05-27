@@ -279,7 +279,6 @@ export default {
     // Feedback
     liked: '已点赞',
     disliked: '已点踩',
-    feedbackFailed: '反馈失败',
     // File analysis
     analyzeFiles: '请分析上传的 {n} 个文件',
     newConversation: '新对话',

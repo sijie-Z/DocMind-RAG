@@ -83,7 +83,7 @@
       <div v-if="msgLoadError" class="flex items-center justify-center gap-3 py-3 px-4 mx-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg">
         <n-icon size="18" class="text-red-500"><AlertCircleOutline /></n-icon>
         <span class="text-sm text-red-600 dark:text-red-400">{{ t('chat.msgLoadFailed') }}</span>
-        <n-button size="tiny" type="error" ghost @click="msgLoadError = false; loadConversation(currentConversationId!)">{{ t('chat.retry') }}</n-button>
+        <n-button size="tiny" type="error" ghost @click="msgLoadError = false; loadConversation(String(currentConversationId!))">{{ t('chat.retry') }}</n-button>
       </div>
 
       <!-- Drag-and-drop overlay -->

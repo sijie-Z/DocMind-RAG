@@ -265,7 +265,6 @@ export default {
     // Feedback
     liked: 'Liked',
     disliked: 'Disliked',
-    feedbackFailed: 'Feedback failed',
     // File analysis
     analyzeFiles: 'Please analyze the uploaded {n} file(s)',
     newConversation: 'New Conversation',
@@ -366,7 +365,6 @@ export default {
       download: 'Download'
     },
     actions: 'Actions',
-    deleteConfirm: 'Are you sure you want to delete this file?',
     view: 'Viewing "{title}"',
     previewLoadFailed: 'Document details displayed, preview content failed to load',
     retryVectorSuccess: 'Vectorization retry task submitted, please refresh later',

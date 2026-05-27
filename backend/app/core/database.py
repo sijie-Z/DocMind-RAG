@@ -17,12 +17,16 @@ logger = logging.getLogger(__name__)
 Base = declarative_base()
 
 # 数据库引擎
+_is_sqlite = "sqlite" in settings.DATABASE_URL.lower()
+
 engine = create_async_engine(
     settings.DATABASE_URL,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_pre_ping=True,
-    pool_recycle=3600,
+    **({} if _is_sqlite else {
+        "pool_size": settings.DATABASE_POOL_SIZE,
+        "max_overflow": settings.DATABASE_MAX_OVERFLOW,
+        "pool_pre_ping": True,
+        "pool_recycle": 3600,
+    }),
     echo=settings.DEBUG
 )
 
@@ -82,11 +86,13 @@ async def close_db():
 
 # 同步数据库引擎（用于某些需要同步操作的场景）
 sync_engine = create_engine(
-    settings.DATABASE_URL.replace("+aiomysql", "+pymysql"),
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_pre_ping=True,
-    pool_recycle=3600
+    settings.DATABASE_URL.replace("+aiomysql", "+pymysql").replace("+aiosqlite", ""),
+    **({} if _is_sqlite else {
+        "pool_size": settings.DATABASE_POOL_SIZE,
+        "max_overflow": settings.DATABASE_MAX_OVERFLOW,
+        "pool_pre_ping": True,
+        "pool_recycle": 3600,
+    })
 )
 
 SyncSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)

@@ -19,12 +19,13 @@ function _extractErrorMessage(error: unknown, fallback: string): string {
 
 export const useUserStore = defineStore('user', () => {
   // 状态
-  const userInfo = ref<UserInfo | null>(() => {
+  function _loadUserInfo(): UserInfo | null {
     try {
       const raw = localStorage.getItem('user_info')
       return raw ? JSON.parse(raw) : null
     } catch { return null }
-  })
+  }
+  const userInfo = ref<UserInfo | null>(_loadUserInfo())
   const token = ref<string>(getToken() || '')
   const currentOrganizationId = ref<number | null>(null)
 

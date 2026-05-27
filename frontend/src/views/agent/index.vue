@@ -462,10 +462,9 @@ async function loadInit() {
       agentApi.listSessions(),
       agentApi.getConfig(),
     ])
-    // 后端返回格式: { success, data, ... }，axios 响应的 .data 是整个响应体
-    const toolsData = toolsRes.data?.data ?? toolsRes.data
-    const sessionsData = sessionsRes.data?.data ?? sessionsRes.data
-    const configData = configRes.data?.data ?? configRes.data
+    const toolsData = toolsRes.data
+    const sessionsData = sessionsRes.data
+    const configData = configRes.data
     if (Array.isArray(toolsData)) agentStore.tools = toolsData
     if (sessionsData?.sessions) agentStore.setSessions(sessionsData.sessions)
     if (configData && typeof configData === 'object') agentStore.updateConfig(configData)
