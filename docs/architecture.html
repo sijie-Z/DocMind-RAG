@@ -1,62 +1,45 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DocMind Architecture</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>DocMind Architecture — 企业级 AI Agent 平台</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  background: #020617;
-  font-family: 'JetBrains Mono', monospace;
-  color: #e2e8f0;
-  display: flex; flex-direction: column; align-items: center;
-  padding: 40px 20px;
-}
-.container { max-width: 1200px; width: 100%; }
-.header { text-align: center; margin-bottom: 40px; }
-.header h1 { font-size: 28px; font-weight: 700; color: #f1f5f9; }
-.header h1 span { color: #22d3ee; }
-.header .subtitle { font-size: 12px; color: #64748b; margin-top: 8px; }
-.pulse-dot {
-  display: inline-block; width: 10px; height: 10px;
-  background: #22d3ee; border-radius: 50%; margin-right: 10px;
-  animation: pulse 2s infinite;
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,211,238,0.4); }
-  50% { opacity: 0.7; box-shadow: 0 0 0 8px rgba(34,211,238,0); }
-}
-.diagram-card {
-  background: #0f172a; border: 1px solid #1e293b; border-radius: 16px;
-  padding: 30px; margin-bottom: 40px; overflow-x: auto;
-}
-.diagram-card svg { display: block; margin: 0 auto; }
-.info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 40px; }
-.card {
-  background: #0f172a; border: 1px solid #1e293b; border-radius: 12px;
-  padding: 24px; transition: border-color 0.2s;
-}
-.card:hover { border-color: #334155; }
-.card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
-.card-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.card-dot.cyan { background: #22d3ee; }
-.card-dot.emerald { background: #34d399; }
-.card-dot.violet { background: #a78bfa; }
-.card h3 { font-size: 13px; font-weight: 600; color: #f1f5f9; }
-.card ul { list-style: none; }
-.card li { font-size: 11px; color: #94a3b8; line-height: 1.8; }
-.card li::before { content: "→ "; color: #475569; }
-.footer { text-align: center; font-size: 10px; color: #475569; padding-top: 20px; border-top: 1px solid #1e293b; }
-@media (max-width: 768px) { .info-grid { grid-template-columns: 1fr; } }
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0B0D17;--bg2:#0F1221;--bg3:#151829;--border:#252840;--border2:#353860;--text:#E8EAF6;--text2:#9FA4C4;--text3:#6B70A0;--green:#10B981}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;display:flex;flex-direction:column;align-items:center;padding:32px 20px;-webkit-font-smoothing:antialiased}
+.container{max-width:1200px;width:100%}
+.header{text-align:center;margin-bottom:36px}
+.header h1{font-size:1.75rem;font-weight:700;color:var(--text)}
+.header h1 span{color:var(--green)}
+.pulse-dot{display:inline-block;width:9px;height:9px;background:var(--green);border-radius:50%;margin-right:10px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(16,185,129,0.4)}50%{opacity:.7;box-shadow:0 0 0 8px rgba(16,185,129,0)}}
+.sub{font-size:.8rem;color:var(--text3);margin-top:8px}
+.sub a{color:var(--green);text-decoration:none}
+.sub a:hover{text-decoration:underline}
+.diagram-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:36px;overflow-x:auto}
+.diagram-card svg{display:block;margin:0 auto}
+.info-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:36px}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:11px;padding:20px;transition:border-color .2s}
+.card:hover{border-color:rgba(16,185,129,0.2)}
+.card-header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.card-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.card-dot.green{background:var(--green)}
+.card-dot.blue{background:#3B82F6}
+.card-dot.amber{background:#F59E0B}
+.card h3{font-size:.82rem;font-weight:600;color:var(--text)}
+.card ul{list-style:none}
+.card li{font-size:.75rem;color:var(--text2);line-height:1.9}
+.card li::before{content:"→ ";color:var(--text3)}
+.footer{text-align:center;font-size:.7rem;color:var(--text3);padding-top:18px;border-top:1px solid var(--border)}
+@media(max-width:768px){.info-grid{grid-template-columns:1fr}}</style>
 </style>
 </head>
 <body>
 <div class="container">
 <div class="header">
   <h1><span class="pulse-dot"></span>DocMind Architecture</h1>
-  <div class="subtitle"><a href="index.html" style="color:#22d3ee;text-decoration:none;">← Back</a> · Enterprise AI Agent Platform · v1.2.1</div>
+  <div class="subtitle"><a href="index.html" style="color:var(--green);text-decoration:none;">← Back</a> · Enterprise AI Agent Platform · v1.2.1</div>
 </div>
 
 <div class="diagram-card">
@@ -68,20 +51,17 @@ body {
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
       <path d="M 0 0 L 10 5 L 0 10 Z" fill="#475569"/>
     </marker>
-    <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#22d3ee"/>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#10B981"/>
     </marker>
-    <marker id="arrow-emerald" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#34d399"/>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#3B82F6"/>
     </marker>
-    <marker id="arrow-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#a78bfa"/>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#F59E0B"/>
     </marker>
-    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#fb923c"/>
-    </marker>
-    <marker id="arrow-rose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#fb7185"/>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#6B70A0"/>
     </marker>
     <filter id="glow">
       <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
@@ -95,231 +75,231 @@ body {
   <!-- ===== CONNECTION ARROWS (drawn early for z-order) ===== -->
 
   <!-- User → Frontend -->
-  <path d="M 550 50 L 550 95" fill="none" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+  <path d="M 550 50 L 550 95" fill="none" stroke="#10B981" stroke-width="1.5" marker-end="url(#arrow-green)"/>
 
   <!-- Frontend → Backend (API) -->
-  <path d="M 550 175 L 550 215" fill="none" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+  <path d="M 550 175 L 550 215" fill="none" stroke="#3B82F6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
 
   <!-- Backend → RAG Pipeline -->
-  <path d="M 550 340 L 550 420" fill="none" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+  <path d="M 550 340 L 550 420" fill="none" stroke="#3B82F6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
 
   <!-- RAG → Vector DB -->
-  <path d="M 375 600 L 230 600" fill="none" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow-violet)"/>
+  <path d="M 375 600 L 230 600" fill="none" stroke="#6B70A0" stroke-width="1.5" marker-end="url(#arrow-gray)"/>
 
   <!-- RAG → ES -->
-  <path d="M 375 630 L 230 630" fill="none" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow-violet)"/>
+  <path d="M 375 630 L 230 630" fill="none" stroke="#6B70A0" stroke-width="1.5" marker-end="url(#arrow-gray)"/>
 
   <!-- Backend → MinIO -->
-  <path d="M 670 280 Q 780 280 780 340" fill="none" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+  <path d="M 670 280 Q 780 280 780 340" fill="none" stroke="#F59E0B" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
 
   <!-- Backend → Kafka -->
-  <path d="M 670 340 Q 780 400 700 500" fill="none" stroke="#fb923c" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-orange)"/>
+  <path d="M 670 340 Q 780 400 700 500" fill="none" stroke="#F59E0B" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-amber)"/>
 
   <!-- Kafka → Worker -->
-  <path d="M 810 540 L 900 540" fill="none" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+  <path d="M 810 540 L 900 540" fill="none" stroke="#F59E0B" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
 
   <!-- Worker → ES -->
-  <path d="M 900 570 L 370 630" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-violet)"/>
+  <path d="M 900 570 L 370 630" fill="none" stroke="#6B70A0" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-gray)"/>
 
   <!-- Backend → Agent System -->
-  <path d="M 430 340 L 200 340" fill="none" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arrow-rose)"/>
+  <path d="M 430 340 L 200 340" fill="none" stroke="#3B82F6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
 
   <!-- Agent → Tools -->
-  <path d="M 200 370 L 200 430" fill="none" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arrow-rose)"/>
+  <path d="M 200 370 L 200 430" fill="none" stroke="#3B82F6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
 
   <!-- RAG → Reranker -->
-  <path d="M 550 660 L 550 695" fill="none" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+  <path d="M 550 660 L 550 695" fill="none" stroke="#3B82F6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
 
   <!-- ===== USER LAYER ===== -->
   <text x="550" y="30" text-anchor="middle" font-size="10" fill="#64748b">USERS</text>
 
   <!-- User component -->
   <rect x="470" y="55" width="160" height="40" rx="6" fill="#0f172a"/>
-  <rect x="470" y="55" width="160" height="40" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <rect x="470" y="55" width="160" height="40" rx="6" fill="rgba(16,185,129,0.4)" stroke="#10B981" stroke-width="1.5"/>
   <text x="550" y="80" text-anchor="middle" font-size="12" fill="#e2e8f0" font-weight="500">Browser / Mobile</text>
 
   <!-- ===== FRONTEND LAYER ===== -->
-  <rect x="400" y="100" width="300" height="75" rx="8" fill="none" stroke="#22d3ee" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
-  <text x="410" y="115" font-size="8" fill="#22d3ee" opacity="0.7">FRONTEND</text>
+  <rect x="400" y="100" width="300" height="75" rx="8" fill="none" stroke="#10B981" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
+  <text x="410" y="115" font-size="8" fill="#10B981" opacity="0.7">FRONTEND</text>
 
   <!-- Vue + Components -->
   <rect x="420" y="125" width="110" height="35" rx="6" fill="#0f172a"/>
-  <rect x="420" y="125" width="110" height="35" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <rect x="420" y="125" width="110" height="35" rx="6" fill="rgba(16,185,129,0.4)" stroke="#10B981" stroke-width="1.5"/>
   <text x="475" y="147" text-anchor="middle" font-size="10" fill="#e2e8f0">Vue 3 + TypeScript</text>
 
   <!-- CSS / UI -->
   <rect x="550" y="125" width="65" height="35" rx="6" fill="#0f172a"/>
-  <rect x="550" y="125" width="65" height="35" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <rect x="550" y="125" width="65" height="35" rx="6" fill="rgba(16,185,129,0.4)" stroke="#10B981" stroke-width="1.5"/>
   <text x="582" y="147" text-anchor="middle" font-size="9" fill="#e2e8f0">Naive UI</text>
 
   <!-- State / Router -->
   <rect x="630" y="125" width="55" height="35" rx="6" fill="#0f172a"/>
-  <rect x="630" y="125" width="55" height="35" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <rect x="630" y="125" width="55" height="35" rx="6" fill="rgba(16,185,129,0.4)" stroke="#10B981" stroke-width="1.5"/>
   <text x="657" y="147" text-anchor="middle" font-size="9" fill="#e2e8f0">Pinia</text>
 
   <!-- ===== BACKEND LAYER ===== -->
-  <rect x="250" y="220" width="600" height="125" rx="8" fill="none" stroke="#34d399" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
-  <text x="260" y="237" font-size="8" fill="#34d399" opacity="0.7">BACKEND · FastAPI (Async)</text>
+  <rect x="250" y="220" width="600" height="125" rx="8" fill="none" stroke="#3B82F6" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
+  <text x="260" y="237" font-size="8" fill="#3B82F6" opacity="0.7">BACKEND · FastAPI (Async)</text>
 
   <!-- API Layer -->
   <rect x="270" y="248" width="120" height="35" rx="6" fill="#0f172a"/>
-  <rect x="270" y="248" width="120" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="270" y="248" width="120" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="330" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">REST API v1</text>
 
   <!-- Auth -->
   <rect x="410" y="248" width="90" height="35" rx="6" fill="#0f172a"/>
-  <rect x="410" y="248" width="90" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="410" y="248" width="90" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="455" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">JWT Auth</text>
 
   <!-- Services -->
   <rect x="520" y="248" width="90" height="35" rx="6" fill="#0f172a"/>
-  <rect x="520" y="248" width="90" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="520" y="248" width="90" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="565" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">Services</text>
 
   <!-- RBAC -->
   <rect x="630" y="248" width="90" height="35" rx="6" fill="#0f172a"/>
-  <rect x="630" y="248" width="90" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="630" y="248" width="90" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="675" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">RBAC</text>
 
   <!-- Middleware -->
   <rect x="740" y="248" width="95" height="35" rx="6" fill="#0f172a"/>
-  <rect x="740" y="248" width="95" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="740" y="248" width="95" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="787" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">Middleware</text>
 
   <!-- WebSocket / SSE -->
   <rect x="270" y="295" width="130" height="35" rx="6" fill="#0f172a"/>
-  <rect x="270" y="295" width="130" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="270" y="295" width="130" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="335" y="317" text-anchor="middle" font-size="10" fill="#e2e8f0">WebSocket / SSE</text>
 
   <!-- Document Parser -->
   <rect x="420" y="295" width="120" height="35" rx="6" fill="#0f172a"/>
-  <rect x="420" y="295" width="120" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="420" y="295" width="120" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="480" y="317" text-anchor="middle" font-size="10" fill="#e2e8f0">Doc Parser</text>
 
   <!-- Embedding -->
   <rect x="560" y="295" width="105" height="35" rx="6" fill="#0f172a"/>
-  <rect x="560" y="295" width="105" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="560" y="295" width="105" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="612" y="317" text-anchor="middle" font-size="10" fill="#e2e8f0">Embeddings</text>
 
   <!-- Monitoring -->
   <rect x="685" y="295" width="100" height="35" rx="6" fill="#0f172a"/>
-  <rect x="685" y="295" width="100" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="685" y="295" width="100" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="735" y="317" text-anchor="middle" font-size="10" fill="#e2e8f0">Monitoring</text>
 
   <!-- MinIO badge -->
   <rect x="760" y="345" width="70" height="25" rx="4" fill="#0f172a"/>
-  <rect x="760" y="345" width="70" height="25" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.2"/>
-  <text x="795" y="362" text-anchor="middle" font-size="9" fill="#fb923c">MinIO</text>
+  <rect x="760" y="345" width="70" height="25" rx="4" fill="rgba(245,158,11,0.3)" stroke="#F59E0B" stroke-width="1.2"/>
+  <text x="795" y="362" text-anchor="middle" font-size="9" fill="#F59E0B">MinIO</text>
 
   <!-- Kafka badge -->
   <rect x="755" y="505" width="70" height="25" rx="4" fill="#0f172a"/>
-  <rect x="755" y="505" width="70" height="25" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.2"/>
-  <text x="790" y="522" text-anchor="middle" font-size="9" fill="#fb923c">Kafka</text>
+  <rect x="755" y="505" width="70" height="25" rx="4" fill="rgba(245,158,11,0.3)" stroke="#F59E0B" stroke-width="1.2"/>
+  <text x="790" y="522" text-anchor="middle" font-size="9" fill="#F59E0B">Kafka</text>
 
   <!-- ===== AGENT SYSTEM (left side) ===== -->
-  <rect x="70" y="220" width="180" height="155" rx="8" fill="none" stroke="#fb7185" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
-  <text x="80" y="237" font-size="8" fill="#fb7185" opacity="0.7">AGENT SYSTEM</text>
+  <rect x="70" y="220" width="180" height="155" rx="8" fill="none" stroke="#3B82F6" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
+  <text x="80" y="237" font-size="8" fill="#3B82F6" opacity="0.7">AGENT SYSTEM</text>
 
   <rect x="85" y="248" width="150" height="30" rx="6" fill="#0f172a"/>
-  <rect x="85" y="248" width="150" height="30" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+  <rect x="85" y="248" width="150" height="30" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="160" y="267" text-anchor="middle" font-size="10" fill="#e2e8f0">ReAct Loop</text>
 
   <rect x="85" y="288" width="150" height="30" rx="6" fill="#0f172a"/>
-  <rect x="85" y="288" width="150" height="30" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+  <rect x="85" y="288" width="150" height="30" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="160" y="307" text-anchor="middle" font-size="10" fill="#e2e8f0">Tool Registry</text>
 
   <rect x="85" y="328" width="150" height="30" rx="6" fill="#0f172a"/>
-  <rect x="85" y="328" width="150" height="30" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+  <rect x="85" y="328" width="150" height="30" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="160" y="347" text-anchor="middle" font-size="10" fill="#e2e8f0">Skill Learning</text>
 
   <!-- Agent Tools (below agent system) -->
-  <rect x="70" y="430" width="180" height="90" rx="8" fill="none" stroke="#fb7185" stroke-width="1" stroke-dasharray="6,3" opacity="0.4"/>
-  <text x="80" y="447" font-size="8" fill="#fb7185" opacity="0.6">AGENT TOOLS</text>
+  <rect x="70" y="430" width="180" height="90" rx="8" fill="none" stroke="#3B82F6" stroke-width="1" stroke-dasharray="6,3" opacity="0.4"/>
+  <text x="80" y="447" font-size="8" fill="#3B82F6" opacity="0.6">AGENT TOOLS</text>
 
   <rect x="85" y="455" width="150" height="25" rx="4" fill="#0f172a"/>
-  <rect x="85" y="455" width="150" height="25" rx="4" fill="rgba(136, 19, 55, 0.3)" stroke="#fb7185" stroke-width="1"/>
+  <rect x="85" y="455" width="150" height="25" rx="4" fill="rgba(59,130,246,0.3)" stroke="#3B82F6" stroke-width="1"/>
   <text x="160" y="472" text-anchor="middle" font-size="9" fill="#e2e8f0">Web Search · Code Exec</text>
 
   <rect x="85" y="488" width="150" height="25" rx="4" fill="#0f172a"/>
-  <rect x="85" y="488" width="150" height="25" rx="4" fill="rgba(136, 19, 55, 0.3)" stroke="#fb7185" stroke-width="1"/>
+  <rect x="85" y="488" width="150" height="25" rx="4" fill="rgba(59,130,246,0.3)" stroke="#3B82F6" stroke-width="1"/>
   <text x="160" y="505" text-anchor="middle" font-size="9" fill="#e2e8f0">Translation · Data Analysis</text>
 
   <!-- ===== RAG PIPELINE ===== -->
-  <rect x="350" y="420" width="400" height="200" rx="8" fill="none" stroke="#34d399" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
-  <text x="360" y="437" font-size="8" fill="#34d399" opacity="0.7">RAG PIPELINE</text>
+  <rect x="350" y="420" width="400" height="200" rx="8" fill="none" stroke="#3B82F6" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
+  <text x="360" y="437" font-size="8" fill="#3B82F6" opacity="0.7">RAG PIPELINE</text>
 
   <!-- Query Processor -->
   <rect x="370" y="450" width="130" height="35" rx="6" fill="#0f172a"/>
-  <rect x="370" y="450" width="130" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="370" y="450" width="130" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="435" y="472" text-anchor="middle" font-size="10" fill="#e2e8f0">Query Processor</text>
 
   <!-- Retriever -->
   <rect x="520" y="450" width="110" height="35" rx="6" fill="#0f172a"/>
-  <rect x="520" y="450" width="110" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="520" y="450" width="110" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="575" y="472" text-anchor="middle" font-size="10" fill="#e2e8f0">Hybrid Retriever</text>
 
   <!-- Context Compressor -->
   <rect x="650" y="450" width="85" height="35" rx="6" fill="#0f172a"/>
-  <rect x="650" y="450" width="85" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="650" y="450" width="85" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="692" y="472" text-anchor="middle" font-size="9" fill="#e2e8f0">Compressor</text>
 
   <!-- Semantic Cache -->
   <rect x="370" y="500" width="110" height="35" rx="6" fill="#0f172a"/>
-  <rect x="370" y="500" width="110" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="370" y="500" width="110" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="425" y="522" text-anchor="middle" font-size="10" fill="#e2e8f0">Semantic Cache</text>
 
   <!-- Reranker -->
   <rect x="500" y="500" width="100" height="35" rx="6" fill="#0f172a"/>
-  <rect x="500" y="500" width="100" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="500" y="500" width="100" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="550" y="522" text-anchor="middle" font-size="10" fill="#e2e8f0">Reranker</text>
 
   <!-- LLM -->
   <rect x="620" y="500" width="110" height="35" rx="6" fill="#0f172a"/>
-  <rect x="620" y="500" width="110" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="620" y="500" width="110" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="675" y="522" text-anchor="middle" font-size="10" fill="#e2e8f0">DeepSeek LLM</text>
 
   <!-- Workflow Engine -->
   <rect x="370" y="555" width="200" height="35" rx="6" fill="#0f172a"/>
-  <rect x="370" y="555" width="200" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="370" y="555" width="200" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="470" y="577" text-anchor="middle" font-size="10" fill="#e2e8f0">Workflow Engine (DAG)</text>
 
   <!-- Evaluator -->
   <rect x="590" y="555" width="145" height="35" rx="6" fill="#0f172a"/>
-  <rect x="590" y="555" width="145" height="35" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="590" y="555" width="145" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="662" y="577" text-anchor="middle" font-size="10" fill="#e2e8f0">RAG Evaluator</text>
 
   <!-- ===== WORKER ===== -->
   <rect x="860" y="510" width="160" height="50" rx="6" fill="#0f172a"/>
-  <rect x="860" y="510" width="160" height="50" rx="6" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.5"/>
+  <rect x="860" y="510" width="160" height="50" rx="6" fill="rgba(245,158,11,0.3)" stroke="#F59E0B" stroke-width="1.5"/>
   <text x="940" y="538" text-anchor="middle" font-size="10" fill="#e2e8f0">Doc Processor Worker</text>
 
   <!-- ===== DATA STORES ===== -->
-  <rect x="60" y="585" width="330" height="195" rx="8" fill="none" stroke="#a78bfa" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
-  <text x="70" y="602" font-size="8" fill="#a78bfa" opacity="0.7">DATA LAYER</text>
+  <rect x="60" y="585" width="330" height="195" rx="8" fill="none" stroke="#6B70A0" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
+  <text x="70" y="602" font-size="8" fill="#6B70A0" opacity="0.7">DATA LAYER</text>
 
   <!-- MySQL -->
   <rect x="80" y="615" width="140" height="40" rx="6" fill="#0f172a"/>
-  <rect x="80" y="615" width="140" height="40" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <rect x="80" y="615" width="140" height="40" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="150" y="635" text-anchor="middle" font-size="10" fill="#e2e8f0">MySQL 8</text>
-  <text x="150" y="648" text-anchor="middle" font-size="8" fill="#a78bfa">SQLAlchemy Async</text>
+  <text x="150" y="648" text-anchor="middle" font-size="8" fill="#3B82F6">SQLAlchemy Async</text>
 
   <!-- Redis -->
   <rect x="235" y="615" width="140" height="40" rx="6" fill="#0f172a"/>
-  <rect x="235" y="615" width="140" height="40" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <rect x="235" y="615" width="140" height="40" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="305" y="635" text-anchor="middle" font-size="10" fill="#e2e8f0">Redis 7</text>
-  <text x="305" y="648" text-anchor="middle" font-size="8" fill="#a78bfa">Cache / Sessions</text>
+  <text x="305" y="648" text-anchor="middle" font-size="8" fill="#3B82F6">Cache / Sessions</text>
 
   <!-- Elasticsearch -->
   <rect x="80" y="665" width="140" height="40" rx="6" fill="#0f172a"/>
-  <rect x="80" y="665" width="140" height="40" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <rect x="80" y="665" width="140" height="40" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="150" y="685" text-anchor="middle" font-size="10" fill="#e2e8f0">Elasticsearch 8</text>
-  <text x="150" y="698" text-anchor="middle" font-size="8" fill="#a78bfa">BM25 + KNN</text>
+  <text x="150" y="698" text-anchor="middle" font-size="8" fill="#3B82F6">BM25 + KNN</text>
 
   <!-- Vector DB -->
   <rect x="235" y="665" width="140" height="40" rx="6" fill="#0f172a"/>
-  <rect x="235" y="665" width="140" height="40" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <rect x="235" y="665" width="140" height="40" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
   <text x="305" y="685" text-anchor="middle" font-size="10" fill="#e2e8f0">Vector Index</text>
-  <text x="305" y="698" text-anchor="middle" font-size="8" fill="#a78bfa">ES KNN</text>
+  <text x="305" y="698" text-anchor="middle" font-size="8" fill="#3B82F6">ES KNN</text>
 
   <!-- ===== MONITORING ===== -->
   <rect x="710" y="690" width="310" height="90" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="6,3" opacity="0.4"/>
@@ -340,22 +320,13 @@ body {
   <text x="965" y="738" text-anchor="middle" font-size="10" fill="#e2e8f0">OpenTelemetry</text>
   <text x="965" y="751" text-anchor="middle" font-size="8" fill="#94a3b8">Tracing</text>
 
-  <!-- ===== LEGEND (placed below all boundaries) ===== -->
-  <rect x="440" y="810" width="220" height="40" rx="8" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
-  <rect x="455" y="820" width="12" height="12" rx="3" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
-  <text x="472" y="830" font-size="8" fill="#94a3b8">Frontend</text>
-  <rect x="525" y="820" width="12" height="12" rx="3" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
-  <text x="542" y="830" font-size="8" fill="#94a3b8">Backend</text>
-  <rect x="590" y="820" width="12" height="12" rx="3" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
-  <text x="607" y="830" font-size="8" fill="#94a3b8">Data</text>
-  <rect x="640" y="820" width="12" height="12" rx="3" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1"/>
-  <text x="657" y="830" font-size="8" fill="#94a3b8">Agent</text>
+  <!-- ===== LEGEND ===== -->
 </svg>
 </div>
 
 <div class="info-grid">
 <div class="card">
-  <div class="card-header"><div class="card-dot cyan"></div><h3>Tech Stack</h3></div>
+  <div class="card-header"><div class="card-dot blue"></div><h3>Tech Stack</h3></div>
   <ul>
     <li>Vue 3 + TypeScript + Naive UI</li>
     <li>FastAPI + SQLAlchemy 2.0 (Async)</li>
@@ -365,7 +336,7 @@ body {
   </ul>
 </div>
 <div class="card">
-  <div class="card-header"><div class="card-dot emerald"></div><h3>Key Features</h3></div>
+  <div class="card-header"><div class="card-dot green"></div><h3>Key Features</h3></div>
   <ul>
     <li>ReAct Agent with 11 built-in tools</li>
     <li>Hybrid Search + RRF Fusion</li>
@@ -375,7 +346,7 @@ body {
   </ul>
 </div>
 <div class="card">
-  <div class="card-header"><div class="card-dot violet"></div><h3>Data Flow</h3></div>
+  <div class="card-header"><div class="card-dot amber"></div><h3>Data Flow</h3></div>
   <ul>
     <li>Upload → MinIO + Kafka → Worker</li>
     <li>Parse → Chunk → Embed → ES Index</li>

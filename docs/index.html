@@ -1,178 +1,128 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DocMind - 企业级 AI Agent 平台</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-      background: #0b1120;
-      color: #e2e8f0;
-      overflow-x: hidden;
-    }
-    ::selection { background: #3b82f6; color: #fff; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DocMind — 企业级 AI Agent 平台</title>
+<meta name="description" content="DocMind - Enterprise AI Agent Platform with RAG, ReAct Agent, Knowledge Graph. 400+ tests, 11 agent tools, full-stack architecture.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0B0D17;--bg2:#0F1221;--bg3:#151829;--bg4:#1C1F34;--border:#252840;--border2:#353860;--text:#E8EAF6;--text2:#9FA4C4;--text3:#6B70A0;--green:#10B981;--green2:#059669;--green-glow:rgba(16,185,129,0.12)}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei','Helvetica Neue',sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
+::selection{background:var(--green);color:#fff}
 
-    /* ── Navigation ── */
-    nav {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);
-      border-bottom: 1px solid rgba(59,130,246,0.1);
-      padding: 0 2rem; height: 64px;
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    nav .logo { font-size: 1.3rem; font-weight: 700; background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    nav .links { display: flex; gap: 1.5rem; align-items: center; }
-    nav .links a { color: #94a3b8; text-decoration: none; font-size: 0.9rem; font-weight: 500; transition: color 0.2s; }
-    nav .links a:hover { color: #e2e8f0; }
-    nav .links .gh-btn { display: flex; align-items: center; gap: 6px; padding: 6px 14px; background: #1e293b; border-radius: 8px; border: 1px solid #334155; color: #e2e8f0; text-decoration: none; font-size: 0.85rem; transition: all 0.2s; }
-    nav .links .gh-btn:hover { background: #334155; border-color: #3b82f6; }
+/* ── Navigation ── */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(11,13,23,0.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 2.5rem;height:60px;display:flex;align-items:center;justify-content:space-between}
+nav .logo{font-size:1.15rem;font-weight:800;color:var(--green);letter-spacing:-.02em}
+nav .links{display:flex;gap:1.75rem;align-items:center}
+nav .links a{color:var(--text2);text-decoration:none;font-size:.82rem;font-weight:500;transition:color .2s}
+nav .links a:hover{color:var(--text)}
+.lang-toggle{display:flex;gap:3px;background:var(--bg2);border-radius:6px;padding:3px;border:1px solid var(--border)}
+.lang-btn{padding:4px 12px;border:none;border-radius:5px;cursor:pointer;font-size:.78rem;font-weight:500;background:transparent;color:var(--text3);transition:all .2s}
+.lang-btn.active{background:var(--green);color:#fff}
+.lang-btn:hover:not(.active){color:var(--text)}
 
-    /* ── Lang Toggle ── */
-    .lang-toggle { display: flex; gap: 4px; background: #1e293b; border-radius: 8px; padding: 4px; border: 1px solid #334155; }
-    .lang-btn { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 500; background: transparent; color: #94a3b8; transition: all 0.2s; }
-    .lang-btn.active { background: #3b82f6; color: white; }
-    .lang-btn:hover:not(.active) { color: #e2e8f0; }
+/* ── Hero ── */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:7rem 2rem 4rem;position:relative}
+.hero::before{content:'';position:absolute;top:-40%;left:-30%;width:160%;height:120%;background:radial-gradient(ellipse at 50% 40%,rgba(16,185,129,0.07) 0%,transparent 60%);pointer-events:none}
+.hero-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 16px;border-radius:999px;background:var(--green-glow);border:1px solid rgba(16,185,129,0.2);font-size:.82rem;color:var(--green);margin-bottom:1.5rem}
+.hero h1{font-size:clamp(2.8rem,7vw,5rem);font-weight:800;line-height:1.08;margin-bottom:.75rem;letter-spacing:-.03em;background:linear-gradient(135deg,var(--text),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero p{font-size:clamp(1rem,1.8vw,1.2rem);color:var(--text2);max-width:620px;line-height:1.7;margin-bottom:2rem}
+.hero-actions{display:flex;gap:1rem;flex-wrap:wrap;justify-content:center}
+.hero-actions a{display:inline-flex;align-items:center;gap:8px;padding:.8rem 2rem;border-radius:10px;text-decoration:none;font-weight:600;font-size:.95rem;transition:all .25s}
+.btn-primary{background:var(--green);color:#fff}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(16,185,129,0.3)}
+.btn-secondary{background:var(--bg2);color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{background:var(--bg3);border-color:var(--border2);transform:translateY(-2px)}
 
-    /* ── Hero ── */
-    .hero {
-      min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
-      text-align: center; padding: 6rem 2rem 4rem; position: relative;
-    }
-    .hero::before {
-      content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
-      background: radial-gradient(ellipse at 50% 50%, rgba(59,130,246,0.06) 0%, transparent 50%);
-      pointer-events: none;
-    }
-    .hero-badge {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 16px; border-radius: 999px; background: rgba(59,130,246,0.1);
-      border: 1px solid rgba(59,130,246,0.2); font-size: 0.85rem; color: #93c5fd; margin-bottom: 1.5rem;
-    }
-    .hero h1 {
-      font-size: clamp(2.5rem, 6vw, 4.5rem); font-weight: 800; line-height: 1.1; margin-bottom: 0.75rem;
-      background: linear-gradient(135deg, #60a5fa, #a78bfa, #f472b6);
-      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    }
-    .hero p {
-      font-size: clamp(1rem, 2vw, 1.25rem); color: #94a3b8; max-width: 600px; line-height: 1.6; margin-bottom: 2rem;
-    }
-    .hero .actions { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
-    .hero .actions a {
-      display: inline-flex; align-items: center; gap: 8px; padding: 0.85rem 2rem; border-radius: 12px;
-      text-decoration: none; font-weight: 600; font-size: 1rem; transition: all 0.25s;
-    }
-    .btn-primary { background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; }
-    .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 12px 30px rgba(59,130,246,0.3); }
-    .btn-secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
-    .btn-secondary:hover { background: #334155; transform: translateY(-3px); }
+/* ── Stats Bar ── */
+.stats-bar{display:flex;gap:0;justify-content:center;flex-wrap:wrap;margin:3rem 0 0;border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--bg2)}
+.stat-item{padding:1.25rem 2.2rem;text-align:center;position:relative;min-width:120px}
+.stat-item+.stat-item{border-left:1px solid var(--border)}
+.stat-num{font-size:1.8rem;font-weight:800;font-family:'SF Mono','JetBrains Mono',monospace;color:var(--green)}
+.stat-lbl{font-size:.75rem;color:var(--text3);margin-top:2px}
 
-    /* ── Section ── */
-    section { padding: 5rem 2rem; max-width: 1200px; margin: 0 auto; }
-    .section-title { font-size: 2rem; font-weight: 700; text-align: center; margin-bottom: 0.75rem; }
-    .section-subtitle { text-align: center; color: #64748b; font-size: 1.05rem; margin-bottom: 3rem; }
+/* ── Section ── */
+section{padding:5.5rem 2rem;max-width:1200px;margin:0 auto}
+.section-title{font-size:1.8rem;font-weight:700;text-align:center;margin-bottom:.5rem;color:var(--text)}
+.section-sub{text-align:center;color:var(--text3);font-size:.95rem;margin-bottom:3rem}
 
-    /* ── Stats ── */
-    .stats { display: flex; gap: 1.5rem; justify-content: center; flex-wrap: wrap; margin: 3rem 0; }
-    .stat-card {
-      background: #131c31; border: 1px solid #1e293b; border-radius: 16px; padding: 1.5rem 2rem;
-      text-align: center; min-width: 130px; transition: all 0.3s;
-    }
-    .stat-card:hover { border-color: #3b82f6; transform: translateY(-4px); }
-    .stat-value { font-size: 2rem; font-weight: 800; background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .stat-label { font-size: 0.85rem; color: #64748b; margin-top: 0.25rem; }
+/* ── Section Tabs ── */
+.section-tabs{display:flex;justify-content:center;gap:6px;margin-bottom:2.5rem}
+.section-tab{padding:6px 18px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text2);font-size:.82rem;cursor:pointer;transition:all .2s;font-weight:500}
+.section-tab.active{background:var(--green-glow);border-color:rgba(16,185,129,0.3);color:var(--green)}
+.section-tab:hover:not(.active){color:var(--text);border-color:var(--border2)}
 
-    /* ── Features Grid ── */
-    .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; }
-    .feature-card {
-      background: #131c31; border: 1px solid #1e293b; border-radius: 16px; padding: 1.5rem;
-      transition: all 0.3s; position: relative; overflow: hidden;
-    }
-    .feature-card::before {
-      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-      background: linear-gradient(90deg, #3b82f6, #8b5cf6); opacity: 0; transition: opacity 0.3s;
-    }
-    .feature-card:hover::before { opacity: 1; }
-    .feature-card:hover { border-color: #3b82f6; transform: translateY(-4px); }
-    .feature-icon { font-size: 2rem; margin-bottom: 0.75rem; }
-    .feature-card h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; }
-    .feature-card p { color: #94a3b8; font-size: 0.9rem; line-height: 1.6; }
+/* ── Features ── */
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.15rem}
+.feature-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:1.65rem;transition:all .3s;position:relative}
+.feature-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--green),transparent);opacity:0;transition:opacity .3s}
+.feature-card:hover::before{opacity:1}
+.feature-card:hover{border-color:rgba(16,185,129,0.25);transform:translateY(-3px)}
+.feature-icon{font-size:1.8rem;margin-bottom:.6rem}
+.feature-card h3{font-size:1.05rem;font-weight:600;margin-bottom:.4rem}
+.feature-card p{color:var(--text2);font-size:.85rem;line-height:1.65}
 
-    /* ── Tools Showcase ── */
-    .tools-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
-    .tool-item {
-      background: #131c31; border: 1px solid #1e293b; border-radius: 12px; padding: 1.25rem;
-      display: flex; align-items: flex-start; gap: 1rem; transition: all 0.25s;
-    }
-    .tool-item:hover { border-color: #a78bfa; }
-    .tool-icon { font-size: 1.5rem; flex-shrink: 0; }
-    .tool-info h4 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.2rem; }
-    .tool-info p { color: #64748b; font-size: 0.8rem; line-height: 1.5; }
+/* ── Tools ── */
+.tools-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.9rem}
+.tool-item{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:1.1rem 1.25rem;display:flex;align-items:flex-start;gap:.9rem;transition:all .25s}
+.tool-item:hover{border-color:var(--green);background:var(--bg3)}
+.tool-icon{font-size:1.3rem;flex-shrink:0;margin-top:1px}
+.tool-info h4{font-size:.9rem;font-weight:600;margin-bottom:.15rem}
+.tool-info p{color:var(--text3);font-size:.78rem;line-height:1.5}
 
-    /* ── Tech Stack ── */
-    .tech-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; }
-    .tech-item {
-      background: #131c31; border: 1px solid #1e293b; border-radius: 12px; padding: 1.25rem;
-      text-align: center; transition: all 0.25s;
-    }
-    .tech-item:hover { border-color: #3b82f6; }
-    .tech-item .tech-name { font-weight: 600; font-size: 0.95rem; }
-    .tech-item .tech-cat { color: #64748b; font-size: 0.75rem; margin-top: 0.2rem; }
+/* ── Tech Stack ── */
+.tech-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.85rem}
+.tech-item{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:1.15rem;text-align:center;transition:all .25s}
+.tech-item:hover{border-color:rgba(16,185,129,0.3)}
+.tech-cat{font-size:.72rem;color:var(--green);margin-bottom:.3rem;font-weight:600;letter-spacing:.03em;text-transform:uppercase}
+.tech-name{font-weight:600;font-size:.9rem}
 
-    /* ── Screenshots ── */
-    .screenshots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem; }
-    .screenshot-card {
-      background: #131c31; border: 1px solid #1e293b; border-radius: 16px; overflow: hidden;
-      transition: all 0.3s;
-    }
-    .screenshot-card:hover { transform: translateY(-4px); border-color: #3b82f6; }
-    .screenshot-card .preview {
-      height: 180px; display: flex; align-items: center; justify-content: center;
-      font-size: 3rem; background: linear-gradient(135deg, rgba(59,130,246,0.05), rgba(139,92,246,0.05));
-    }
-    .screenshot-card .info { padding: 1rem 1.25rem; }
-    .screenshot-card .info h4 { font-size: 0.95rem; font-weight: 600; }
-    .screenshot-card .info p { color: #64748b; font-size: 0.8rem; margin-top: 0.2rem; }
+/* ── Screenshots ── */
+.ss-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem}
+.ss-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;overflow:hidden;transition:all .3s}
+.ss-card:hover{transform:translateY(-3px);border-color:rgba(16,185,129,0.2)}
+.ss-preview{height:170px;display:flex;align-items:center;justify-content:center;font-size:2.8rem;background:linear-gradient(180deg,var(--bg3),var(--bg2))}
+.ss-info{padding:.9rem 1.2rem 1.1rem}
+.ss-info h4{font-size:.9rem;font-weight:600}
+.ss-info p{color:var(--text3);font-size:.78rem;margin-top:.2rem;line-height:1.5}
 
-    /* ── Footer ── */
-    footer {
-      text-align: center; padding: 3rem 2rem; border-top: 1px solid #1e293b;
-      color: #475569; font-size: 0.85rem;
-    }
-    footer a { color: #60a5fa; text-decoration: none; }
+/* ── Footer ── */
+footer{text-align:center;padding:3rem 2rem;border-top:1px solid var(--border);color:var(--text3);font-size:.82rem}
+footer a{color:var(--green);text-decoration:none}
 
-    /* ── Lang Toggle Content ── */
-    [data-lang="en"] { display: none; }
-    body.lang-en [data-lang="zh"] { display: none; }
-    body.lang-en [data-lang="en"] { display: block; }
-    body.lang-en [data-lang-inline="zh"] { display: none; }
-    body.lang-en [data-lang-inline="en"] { display: inline; }
-    [data-lang-inline="en"] { display: none; }
+/* ── Lang toggles ── */
+[data-lang="en"]{display:none}
+body.lang-en [data-lang="zh"]{display:none}
+body.lang-en [data-lang="en"]{display:block}
+[lang-en]{display:none}
+body.lang-en [lang-zh]{display:none}
+body.lang-en [lang-en]{display:inline}
 
-    /* ── Animations ── */
-    .fade-in { opacity: 0; transform: translateY(20px); transition: opacity 0.6s ease, transform 0.6s ease; }
-    .fade-in.visible { opacity: 1; transform: translateY(0); }
+/* ── Animations ── */
+.fade-in{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease}
+.fade-in.show{opacity:1;transform:translateY(0)}
 
-    @media (max-width: 768px) {
-      nav .links a:not(.gh-btn) { display: none; }
-      .hero h1 { font-size: 2rem; }
-      section { padding: 3rem 1rem; }
-    }
-  </style>
+@media(max-width:768px){
+  nav .links a:not(.lang-toggle){display:none}
+  .hero h1{font-size:2rem}
+  section{padding:3rem 1rem}
+  .stats-bar{flex-direction:column}
+  .stat-item+.stat-item{border-left:none;border-top:1px solid var(--border)}
+}
+</style>
 </head>
 <body>
 
-<!-- ─── Navigation ─── -->
 <nav>
   <div class="logo">DocMind</div>
   <div class="links">
     <a href="#features" data-lang="zh">功能</a><a href="#features" data-lang="en">Features</a>
-    <a href="#tools" data-lang="zh">Agent 工具</a><a href="#tools" data-lang="en">Agent Tools</a>
-    <a href="#tech" data-lang="zh">技术栈</a><a href="#tech" data-lang="en">Tech Stack</a>
-    <a href="#screenshots" data-lang="zh">界面</a><a href="#screenshots" data-lang="en">Screenshots</a>
-    <a href="architecture.html" data-lang="zh">架构图</a><a href="architecture.html" data-lang="en">Architecture</a>
+    <a href="#tools" data-lang="zh">工具</a><a href="#tools" data-lang="en">Tools</a>
+    <a href="#stack" data-lang="zh">技术栈</a><a href="#stack" data-lang="en">Stack</a>
+    <a href="#screenshots" data-lang="zh">界面</a><a href="#screenshots" data-lang="en">UI</a>
+    <a href="architecture.html" data-lang="zh">架构</a><a href="architecture.html" data-lang="en">Architecture</a>
     <div class="lang-toggle">
       <button class="lang-btn active" onclick="setLang('zh')">中文</button>
       <button class="lang-btn" onclick="setLang('en')">EN</button>
@@ -180,205 +130,194 @@
   </div>
 </nav>
 
-<!-- ─── Hero ─── -->
 <header class="hero">
   <div class="hero-badge">
-    <span data-lang="zh">🚀 v1.2 · 企业级 AI Agent 平台</span>
-    <span data-lang="en">🚀 v1.2 · Enterprise AI Agent Platform</span>
+    <span data-lang="zh">v1.2 · 企业级 AI Agent 平台</span>
+    <span data-lang="en">v1.2 · Enterprise AI Agent Platform</span>
   </div>
   <h1>DocMind</h1>
   <p data-lang="zh">
-    融合 RAG、ReAct Agent、知识图谱的企业级 AI 平台<br>
-    让 AI 自主推理、使用工具、处理复杂任务
+    ReAct Agent · 混合检索 RAG · 知识图谱 · 工作流引擎<br>
+    11 个内置工具 · 400+ 自动化测试 · 全栈工程化
   </p>
   <p data-lang="en">
-    Enterprise AI platform integrating RAG, ReAct Agent, and Knowledge Graph<br>
-    AI autonomously reasons, uses tools, and handles complex tasks
+    ReAct Agent · Hybrid RAG · Knowledge Graph · Workflow Engine<br>
+    11 built-in tools · 400+ automated tests · Full-stack engineering
   </p>
-  <div class="actions">
+  <div class="hero-actions">
     <a href="#features" class="btn-primary">
       <span data-lang="zh">探索功能</span><span data-lang="en">Explore</span> ↓
     </a>
     <a href="https://github.com/sijie-Z/DocMind-RAG" class="btn-secondary">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
       GitHub
     </a>
   </div>
 
-  <div class="stats">
-    <div class="stat-card fade-in"><div class="stat-value">400+</div><div class="stat-label" data-lang="zh">自动化测试</div><div class="stat-label" data-lang="en">Tests</div></div>
-    <div class="stat-card fade-in"><div class="stat-value">11</div><div class="stat-label" data-lang="zh">Agent 工具</div><div class="stat-label" data-lang="en">Agent Tools</div></div>
-    <div class="stat-card fade-in"><div class="stat-value">20+</div><div class="stat-label" data-lang="zh">前端视图</div><div class="stat-label" data-lang="en">UI Views</div></div>
-    <div class="stat-card fade-in"><div class="stat-value">17</div><div class="stat-label" data-lang="zh">API 模块</div><div class="stat-label" data-lang="en">API Modules</div></div>
-    <div class="stat-card fade-in"><div class="stat-value">4</div><div class="stat-label" data-lang="zh">语言支持</div><div class="stat-label" data-lang="en">Languages</div></div>
+  <div class="stats-bar">
+    <div class="stat-item"><div class="stat-num">400+</div><div class="stat-lbl" data-lang="zh">自动化测试</div><div class="stat-lbl" data-lang="en">Tests</div></div>
+    <div class="stat-item"><div class="stat-num">11</div><div class="stat-lbl" data-lang="zh">Agent 工具</div><div class="stat-lbl" data-lang="en">Agent Tools</div></div>
+    <div class="stat-item"><div class="stat-num">20+</div><div class="stat-lbl" data-lang="zh">前端视图</div><div class="stat-lbl" data-lang="en">UI Views</div></div>
+    <div class="stat-item"><div class="stat-num">17</div><div class="stat-lbl" data-lang="zh">API 模块</div><div class="stat-lbl" data-lang="en">API Modules</div></div>
+    <div class="stat-item"><div class="stat-num">4</div><div class="stat-lbl" data-lang="zh">语言支持</div><div class="stat-lbl" data-lang="en">Languages</div></div>
+    <div class="stat-item"><div class="stat-num">2</div><div class="stat-lbl" data-lang="zh">部署方案</div><div class="stat-lbl" data-lang="en">Deploy Options</div></div>
   </div>
 </header>
 
-<!-- ─── Features ─── -->
 <section id="features">
   <h2 class="section-title" data-lang="zh">核心能力</h2>
   <h2 class="section-title" data-lang="en">Core Capabilities</h2>
-  <p class="section-subtitle" data-lang="zh">从文档理解到自主推理，覆盖企业 AI 全场景</p>
-  <p class="section-subtitle" data-lang="en">From document understanding to autonomous reasoning, covering enterprise AI scenarios</p>
+  <p class="section-sub" data-lang="zh">从文档理解到自主推理，覆盖企业 AI 全场景</p>
+  <p class="section-sub" data-lang="en">From document understanding to autonomous reasoning across enterprise AI scenarios</p>
   <div class="features-grid">
     <div class="feature-card fade-in">
       <div class="feature-icon">🤖</div>
       <h3 data-lang="zh">ReAct Agent</h3><h3 data-lang="en">ReAct Agent</h3>
-      <p data-lang="zh">自主推理循环（思考→行动→观察），动态调用工具，任务拆解与技能学习</p>
-      <p data-lang="en">Autonomous reasoning loop (Think → Act → Observe), dynamic tool calling, task decomposition, skill learning</p>
+      <p data-lang="zh">自主推理循环 思考→行动→观察，动态调用工具，任务拆解，技能学习</p>
+      <p data-lang="en">Autonomous reasoning loop Think→Act→Observe, dynamic tool calling, task decomposition, skill learning</p>
     </div>
     <div class="feature-card fade-in">
       <div class="feature-icon">🔍</div>
       <h3 data-lang="zh">混合检索 RAG</h3><h3 data-lang="en">Hybrid Search RAG</h3>
-      <p data-lang="zh">BM25 关键词 + 向量语义双路召回，RRF 融合 + Rerank 重排序，带来源引用的精准回答</p>
-      <p data-lang="en">BM25 keyword + vector semantic dual-channel, RRF fusion + reranking, precise answers with citations</p>
+      <p data-lang="zh">BM25 关键词 + 向量语义双路召回，RRF 融合，Rerank 重排序，带来源引用</p>
+      <p data-lang="en">BM25 keyword + vector semantic dual-channel, RRF fusion, reranking, answers with citations</p>
     </div>
     <div class="feature-card fade-in">
-      <div class="feature-icon">📊</div>
+      <div class="feature-icon">🔗</div>
       <h3 data-lang="zh">知识图谱</h3><h3 data-lang="en">Knowledge Graph</h3>
-      <p data-lang="zh">Canvas 力导向图可视化，实体关系展示，交互式探索文档之间的隐藏关联</p>
-      <p data-lang="en">Force-directed graph visualization, entity relations, interactive exploration of document connections</p>
+      <p data-lang="zh">力导向图可视化，实体关系展示，交互式探索文档间隐藏关联</p>
+      <p data-lang="en">Force-directed graph visualization, entity relations, interactive document exploration</p>
     </div>
     <div class="feature-card fade-in">
-      <div class="feature-icon">🔬</div>
-      <h3 data-lang="zh">深度分析</h3><h3 data-lang="en">Deep Analysis</h3>
-      <p data-lang="zh">多文档对比、观点提炼、趋势分析、情感分析，支持大数据量分批处理</p>
-      <p data-lang="en">Multi-document comparison, insight extraction, trend analysis, sentiment analysis, batch processing</p>
+      <div class="feature-icon">⚙️</div>
+      <h3 data-lang="zh">工作流引擎</h3><h3 data-lang="en">Workflow Engine</h3>
+      <p data-lang="zh">DAG 有向无环图编排，拖拽式可视化节点，条件路由与并行执行</p>
+      <p data-lang="en">DAG orchestration, drag-and-drop visual nodes, conditional routing, parallel execution</p>
     </div>
     <div class="feature-card fade-in">
       <div class="feature-icon">🛡️</div>
       <h3 data-lang="zh">企业级安全</h3><h3 data-lang="en">Enterprise Security</h3>
-      <p data-lang="zh">JWT 认证 + RBAC 权限体系，多租户组织隔离，审计日志，接口限流</p>
-      <p data-lang="en">JWT auth + RBAC permissions, multi-tenant organization isolation, audit logs, rate limiting</p>
+      <p data-lang="zh">JWT 认证 + RBAC 权限，多租户组织隔离，审计日志，接口限流</p>
+      <p data-lang="en">JWT auth + RBAC permissions, multi-tenant isolation, audit logs, rate limiting</p>
     </div>
     <div class="feature-card fade-in">
       <div class="feature-icon">⚡</div>
       <h3 data-lang="zh">流式交互</h3><h3 data-lang="en">Streaming Interaction</h3>
-      <p data-lang="zh">SSE 事件管道，Agent 思考过程实时可见，支持中断与重试，工具调用可视化</p>
-      <p data-lang="en">SSE event pipeline, real-time Agent reasoning visibility, interruption and retry, tool call visualization</p>
+      <p data-lang="zh">SSE 事件管道，Agent 思考过程实时可见，支持中断重试，工具卡片展示</p>
+      <p data-lang="en">SSE event pipeline, real-time Agent reasoning, retry support, tool call cards</p>
     </div>
   </div>
 </section>
 
-<!-- ─── Agent Tools ─── -->
-<section id="tools" style="background: linear-gradient(180deg, #0b1120 0%, #0f172a 100%); border-radius: 0; padding: 5rem 2rem;">
-  <div style="max-width: 1200px; margin: 0 auto;">
+<section id="tools" style="background:var(--bg);max-width:none;padding:5.5rem 2rem;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+  <div style="max-width:1200px;margin:0 auto">
     <h2 class="section-title" data-lang="zh">Agent 工具箱</h2>
     <h2 class="section-title" data-lang="en">Agent Toolbox</h2>
-    <p class="section-subtitle" data-lang="zh">ReAct Agent 内置 11 个专业工具，自主选择、动态调用</p>
-    <p class="section-subtitle" data-lang="en">ReAct Agent comes with 11 built-in tools, autonomously selects and dynamically invokes</p>
+    <p class="section-sub" data-lang="zh">ReAct Agent 内置 11 个专业工具，自主选择、动态调用、协同完成复杂任务</p>
+    <p class="section-sub" data-lang="en">11 built-in tools, autonomously selected and dynamically invoked to complete complex tasks</p>
     <div class="tools-grid">
-      <div class="tool-item fade-in"><div class="tool-icon">🔎</div><div class="tool-info"><h4 data-lang="zh">知识库检索</h4><h4 data-lang="en">Knowledge Retrieval</h4><p data-lang="zh">混合搜索企业知识文档，返回带相关度评分的结果片段</p><p data-lang="en">Hybrid search across enterprise knowledge documents, returns scored result snippets</p></div></div>
-      <div class="tool-item fade-in"><div class="tool-icon">🌐</div><div class="tool-info"><h4>Web Search</h4><p data-lang="zh">实时联网搜索，获取最新信息补充知识库覆盖盲区</p><p data-lang="en">Real-time web search to supplement knowledge base blind spots</p></div></div>
-      <div class="tool-item fade-in"><div class="tool-icon">📄</div><div class="tool-info"><h4 data-lang="zh">文档解析</h4><h4 data-lang="en">Document Parsing</h4><p data-lang="zh">读取并理解上传的 PDF、Word、TXT、Markdown 文件内容</p><p data-lang="en">Read and understand uploaded PDF, Word, TXT, Markdown files</p></div></div>
-      <div class="tool-item fade-in"><div class="tool-icon">📝</div><div class="tool-info"><h4 data-lang="zh">智能摘要</h4><h4 data-lang="en">Smart Summarization</h4><p data-lang="zh">长文档自动摘要、多文档对比摘要、分块逐层归纳</p><p data-lang="en">Auto-summarization of long docs, multi-document comparison, chunk-level induction</p></div></div>
-      <div class="tool-item fade-in"><div class="tool-icon">📊</div><div class="tool-info"><h4 data-lang="zh">深度分析</h4><h4 data-lang="en">Deep Analysis</h4><p data-lang="zh">观点提炼、趋势分析、情感分析、多文档观点对比</p><p data-lang="en">Insight extraction, trend analysis, sentiment analysis, multi-document comparison</p></div></div>
-      <div class="tool-item fade-in"><div class="tool-icon">🗂️</div><div class="tool-info"><h4 data-lang="zh">文件管理</h4><h4 data-lang="en">File Management</h4><p data-lang="zh">组织文件、批量标注、文档归档、重命名及目录管理</p><p data-lang="en">File organization, batch tagging, archiving, rename, directory management</p></div></div>
-      <div class="tool-item fade-in"><div class="tool-icon">🔢</div><div class="tool-info"><h4 data-lang="zh">代码执行</h4><h4 data-lang="en">Code Execution</h4><p data-lang="zh">沙箱化 Python 代码执行，数据分析与计算自动化</p><p data-lang="en">Sandboxed Python execution for automated data analysis and computation</p></div></div>
-      <div class="tool-item fade-in"><div class="tool-icon">🔗</div><div class="tool-info"><h4 data-lang="zh">内容爬取</h4><h4 data-lang="en">Content Crawler</h4><p data-lang="zh">获取网页内容，自动转换为可分析的文本格式</p><p data-lang="en">Fetch web page content, auto-convert to analyzable text format</p></div></div>
-      <div class="tool-item fade-in"><div class="tool-icon">🔄</div><div class="tool-info"><h4 data-lang="zh">批量处理</h4><h4 data-lang="en">Batch Processing</h4><p data-lang="zh">大数据量分批处理，支持进度跟踪与结果合并</p><p data-lang="en">Batch processing for large datasets with progress tracking and result merging</p></div></div>
-      <div class="tool-item fade-in"><div class="tool-icon">🌍</div><div class="tool-info"><h4 data-lang="zh">翻译</h4><h4 data-lang="en">Translation</h4><p data-lang="zh">中英日法多语言翻译，支持文档级与片段级</p><p data-lang="en">Multi-language translation (zh/en/ja/fr), document-level and snippet-level</p></div></div>
-      <div class="tool-item fade-in"><div class="tool-icon">🧭</div><div class="tool-info"><h4 data-lang="zh">知识图谱</h4><h4 data-lang="en">Knowledge Graph</h4><p data-lang="zh">实体关系探索、图谱查询、可视化交互式浏览</p><p data-lang="en">Entity-relation exploration, graph queries, interactive visual browsing</p></div></div>
+      <div class="tool-item fade-in"><div class="tool-icon">🔎</div><div class="tool-info"><h4 data-lang="zh">知识库检索</h4><h4 data-lang="en">Knowledge Retrieval</h4><p data-lang="zh">混合搜索企业知识文档，返回带相关度评分的结果片段</p><p data-lang="en">Hybrid search across enterprise knowledge documents with scored snippets</p></div></div>
+      <div class="tool-item fade-in"><div class="tool-icon">🌐</div><div class="tool-info"><h4>Web Search</h4><p data-lang="zh">实时联网搜索，获取最新信息补充知识库盲区</p><p data-lang="en">Real-time web search to supplement knowledge base gaps</p></div></div>
+      <div class="tool-item fade-in"><div class="tool-icon">📄</div><div class="tool-info"><h4 data-lang="zh">文档解析</h4><h4 data-lang="en">Document Parsing</h4><p data-lang="zh">读取 PDF、Word、TXT、Markdown，提取结构化内容</p><p data-lang="en">Parse PDF, Word, TXT, Markdown files into structured content</p></div></div>
+      <div class="tool-item fade-in"><div class="tool-icon">📝</div><div class="tool-info"><h4 data-lang="zh">智能摘要</h4><h4 data-lang="en">Smart Summarization</h4><p data-lang="zh">长文档自动摘要、多文档对比、分块逐层归纳</p><p data-lang="en">Auto-summarization, multi-document comparison, chunk-level induction</p></div></div>
+      <div class="tool-item fade-in"><div class="tool-icon">📊</div><div class="tool-info"><h4 data-lang="zh">深度分析</h4><h4 data-lang="en">Deep Analysis</h4><p data-lang="zh">观点提炼、趋势分析、情感分析、多文档观点对比</p><p data-lang="en">Insight extraction, trend analysis, sentiment analysis, document comparison</p></div></div>
+      <div class="tool-item fade-in"><div class="tool-icon">🗂️</div><div class="tool-info"><h4 data-lang="zh">文件管理</h4><h4 data-lang="en">File Management</h4><p data-lang="zh">文件组织、批量标注、归档、重命名与目录管理</p><p data-lang="en">File organization, batch tagging, archiving, and directory management</p></div></div>
+      <div class="tool-item fade-in"><div class="tool-icon">⌨️</div><div class="tool-info"><h4 data-lang="zh">代码执行</h4><h4 data-lang="en">Code Execution</h4><p data-lang="zh">沙箱化 Python 执行，数据分析与计算自动化</p><p data-lang="en">Sandboxed Python execution for automated analysis and computation</p></div></div>
+      <div class="tool-item fade-in"><div class="tool-icon">🔗</div><div class="tool-info"><h4 data-lang="zh">内容爬取</h4><h4 data-lang="en">Content Crawler</h4><p data-lang="zh">获取网页内容，自动清洗转换为可分析文本</p><p data-lang="en">Fetch and clean web page content for analysis</p></div></div>
+      <div class="tool-item fade-in"><div class="tool-icon">🔄</div><div class="tool-info"><h4 data-lang="zh">批量处理</h4><h4 data-lang="en">Batch Processing</h4><p data-lang="zh">大数据量分批处理，进度跟踪与结果合并</p><p data-lang="en">Batch processing for large datasets with progress tracking</p></div></div>
+      <div class="tool-item fade-in"><div class="tool-icon">🌍</div><div class="tool-info"><h4 data-lang="zh">翻译</h4><h4 data-lang="en">Translation</h4><p data-lang="zh">中英日法多语言翻译，文档级与片段级</p><p data-lang="en">Multi-language translation (zh/en/ja/fr), document and snippet level</p></div></div>
+      <div class="tool-item fade-in"><div class="tool-icon">🧭</div><div class="tool-info"><h4 data-lang="zh">知识图谱</h4><h4 data-lang="en">Knowledge Graph</h4><p data-lang="zh">实体关系探索、图谱查询、可视化交互式浏览</p><p data-lang="en">Entity-relation exploration, graph queries, visual browsing</p></div></div>
     </div>
   </div>
 </section>
 
-<!-- ─── Tech Stack ─── -->
-<section id="tech">
+<section id="stack">
   <h2 class="section-title" data-lang="zh">技术栈</h2>
   <h2 class="section-title" data-lang="en">Tech Stack</h2>
-  <p class="section-subtitle" data-lang="zh">现代化全栈架构，从底层基础设施到 AI 模型层的完整工程化方案</p>
-  <p class="section-subtitle" data-lang="en">Modern full-stack architecture, from infrastructure to AI model layer</p>
+  <p class="section-sub" data-lang="zh">现代化全栈架构，从底层基础设施到 AI 模型层</p>
+  <p class="section-sub" data-lang="en">Modern full-stack architecture from infrastructure to AI model layer</p>
   <div class="tech-grid">
-    <div class="tech-item fade-in"><div class="tech-name">FastAPI</div><div class="tech-cat" data-lang="zh">后端框架</div><div class="tech-cat" data-lang="en">Backend</div></div>
-    <div class="tech-item fade-in"><div class="tech-name">Vue 3 + TS</div><div class="tech-cat" data-lang="zh">前端框架</div><div class="tech-cat" data-lang="en">Frontend</div></div>
-    <div class="tech-item fade-in"><div class="tech-name">MySQL 8</div><div class="tech-cat">Database</div></div>
-    <div class="tech-item fade-in"><div class="tech-name">Redis 7</div><div class="tech-cat">Cache</div></div>
-    <div class="tech-item fade-in"><div class="tech-name">Elasticsearch</div><div class="tech-cat" data-lang="zh">检索引擎</div><div class="tech-cat" data-lang="en">Search Engine</div></div>
-    <div class="tech-item fade-in"><div class="tech-name">Kafka</div><div class="tech-cat">Message Queue</div></div>
-    <div class="tech-item fade-in"><div class="tech-name">MinIO</div><div class="tech-cat" data-lang="zh">对象存储</div><div class="tech-cat" data-lang="en">Object Storage</div></div>
-    <div class="tech-item fade-in"><div class="tech-name">DeepSeek</div><div class="tech-cat">LLM</div></div>
-    <div class="tech-item fade-in"><div class="tech-name">LangChain</div><div class="tech-cat" data-lang="zh">文档解析</div><div class="tech-cat" data-lang="en">Document Pipeline</div></div>
-    <div class="tech-item fade-in"><div class="tech-name">Docker</div><div class="tech-cat">Container</div></div>
-    <div class="tech-item fade-in"><div class="tech-name">Kubernetes</div><div class="tech-cat">Orchestration</div></div>
-    <div class="tech-item fade-in"><div class="tech-name">Prometheus</div><div class="tech-cat">Monitoring</div></div>
+    <div class="tech-item fade-in"><div class="tech-cat">Backend</div><div class="tech-name">FastAPI</div></div>
+    <div class="tech-item fade-in"><div class="tech-cat">Frontend</div><div class="tech-name">Vue 3 + TS</div></div>
+    <div class="tech-item fade-in"><div class="tech-cat">Database</div><div class="tech-name">MySQL 8</div></div>
+    <div class="tech-item fade-in"><div class="tech-cat">Cache</div><div class="tech-name">Redis 7</div></div>
+    <div class="tech-item fade-in"><div class="tech-cat">Search</div><div class="tech-name">Elasticsearch</div></div>
+    <div class="tech-item fade-in"><div class="tech-cat">Queue</div><div class="tech-name">Kafka</div></div>
+    <div class="tech-item fade-in"><div class="tech-cat">Storage</div><div class="tech-name">MinIO</div></div>
+    <div class="tech-item fade-in"><div class="tech-cat">LLM</div><div class="tech-name">DeepSeek</div></div>
+    <div class="tech-item fade-in"><div class="tech-cat">Pipeline</div><div class="tech-name">LangChain</div></div>
+    <div class="tech-item fade-in"><div class="tech-cat">Container</div><div class="tech-name">Docker</div></div>
+    <div class="tech-item fade-in"><div class="tech-cat">Orchestration</div><div class="tech-name">Kubernetes</div></div>
+    <div class="tech-item fade-in"><div class="tech-cat">Monitoring</div><div class="tech-name">Prometheus</div></div>
   </div>
 </section>
 
-<!-- ─── Screenshots ─── -->
-<section id="screenshots">
-  <h2 class="section-title" data-lang="zh">界面预览</h2>
-  <h2 class="section-title" data-lang="en">Screenshots</h2>
-  <p class="section-subtitle" data-lang="zh">20+ 前端视图，完整的现代 Web 应用体验</p>
-  <p class="section-subtitle" data-lang="en">20+ UI views, complete modern web application experience</p>
-  <div class="screenshots">
-    <div class="screenshot-card fade-in">
-      <div class="preview">💬</div>
-      <div class="info"><h4 data-lang="zh">智能对话</h4><h4 data-lang="en">AI Chat</h4><p data-lang="zh">流式 SSE 实时输出，Agent 思考过程可视化，工具调用卡片展示</p><p data-lang="en">SSE streaming output, Agent reasoning visibility, tool call cards</p></div>
-    </div>
-    <div class="screenshot-card fade-in">
-      <div class="preview">📚</div>
-      <div class="info"><h4 data-lang="zh">知识库管理</h4><h4 data-lang="en">Knowledge Base</h4><p data-lang="zh">文件上传、批量处理、向量化状态跟踪、全文预览</p><p data-lang="en">File upload, batch processing, vectorization tracking, full-text preview</p></div>
-    </div>
-    <div class="screenshot-card fade-in">
-      <div class="preview">🧩</div>
-      <div class="info"><h4 data-lang="zh">Agent 配置</h4><h4 data-lang="en">Agent Config</h4><p data-lang="zh">可视化工具启停、技能管理、提示词模板配置</p><p data-lang="en">Visual tool toggle, skill management, prompt template config</p></div>
-    </div>
-    <div class="screenshot-card fade-in">
-      <div class="preview">🌐</div>
-      <div class="info"><h4 data-lang="zh">知识图谱</h4><h4 data-lang="en">Knowledge Graph</h4><p data-lang="zh">力导向图交互式探索，实体关系可视化，缩放与搜索</p><p data-lang="en">Force-directed graph, entity relation visualization, zoom & search</p></div>
-    </div>
-    <div class="screenshot-card fade-in">
-      <div class="preview">👥</div>
-      <div class="info"><h4 data-lang="zh">组织管理</h4><h4 data-lang="en">Organization</h4><p data-lang="zh">多租户层级管理、成员权限分配、操作审计</p><p data-lang="en">Multi-tenant hierarchy, member permissions, audit logs</p></div>
-    </div>
-    <div class="screenshot-card fade-in">
-      <div class="preview">📊</div>
-      <div class="info"><h4 data-lang="zh">监控仪表盘</h4><h4 data-lang="en">Monitoring</h4><p data-lang="zh">系统指标实时展示，服务健康度检查，告警管理</p><p data-lang="en">Real-time metrics dashboard, health checks, alert management</p></div>
+<section id="screenshots" style="background:var(--bg);max-width:none;padding:5.5rem 2rem;border-top:1px solid var(--border)">
+  <div style="max-width:1200px;margin:0 auto">
+    <h2 class="section-title" data-lang="zh">界面预览</h2>
+    <h2 class="section-title" data-lang="en">Screenshots</h2>
+    <p class="section-sub" data-lang="zh">20+ 前端视图，完整的现代 Web 应用体验</p>
+    <p class="section-sub" data-lang="en">20+ UI views, complete modern web application experience</p>
+    <div class="ss-grid">
+      <div class="ss-card fade-in">
+        <div class="ss-preview">💬</div>
+        <div class="ss-info"><h4 data-lang="zh">智能对话</h4><h4 data-lang="en">AI Chat</h4><p data-lang="zh">流式 SSE 实时输出，Agent 推理过程可视化，工具调用卡片展示，来源引用</p><p data-lang="en">SSE streaming output, Agent reasoning visibility, tool call cards, source citations</p></div>
+      </div>
+      <div class="ss-card fade-in">
+        <div class="ss-preview">📚</div>
+        <div class="ss-info"><h4 data-lang="zh">知识库管理</h4><h4 data-lang="en">Knowledge Base</h4><p data-lang="zh">文件上传、批量处理、向量化状态跟踪、全文预览与下载</p><p data-lang="en">File upload, batch processing, vectorization tracking, full-text preview</p></div>
+      </div>
+      <div class="ss-card fade-in">
+        <div class="ss-preview">🧩</div>
+        <div class="ss-info"><h4 data-lang="zh">Agent 配置</h4><h4 data-lang="en">Agent Config</h4><p data-lang="zh">可视化工具启停、技能管理、提示词模板配置与历史会话</p><p data-lang="en">Visual tool toggle, skill management, prompt template config</p></div>
+      </div>
+      <div class="ss-card fade-in">
+        <div class="ss-preview">🕸️</div>
+        <div class="ss-info"><h4 data-lang="zh">知识图谱</h4><h4 data-lang="en">Knowledge Graph</h4><p data-lang="zh">力导向图交互式探索，实体关系可视化，缩放搜索与联动</p><p data-lang="en">Force-directed graph, entity relation visualization, zoom and search</p></div>
+      </div>
+      <div class="ss-card fade-in">
+        <div class="ss-preview">👥</div>
+        <div class="ss-info"><h4 data-lang="zh">组织管理</h4><h4 data-lang="en">Organization</h4><p data-lang="zh">多租户层级管理、成员权限分配、组织架构树与操作审计</p><p data-lang="en">Multi-tenant hierarchy, member permissions, org tree, audit logs</p></div>
+      </div>
+      <div class="ss-card fade-in">
+        <div class="ss-preview">📈</div>
+        <div class="ss-info"><h4 data-lang="zh">监控仪表盘</h4><h4 data-lang="en">Monitoring</h4><p data-lang="zh">系统指标实时展示、服务健康度检查、告警管理与通知</p><p data-lang="en">Real-time metrics dashboard, health checks, alert management</p></div>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- ─── CTA ─── -->
-<div style="text-align: center; padding: 4rem 2rem;">
-  <h2 class="section-title" data-lang="zh">开始使用</h2>
-  <h2 class="section-title" data-lang="en">Get Started</h2>
-  <p class="section-subtitle" style="margin-bottom: 2rem;" data-lang="zh">查看完整架构设计或直接访问 GitHub 仓库</p>
-  <p class="section-subtitle" style="margin-bottom: 2rem;" data-lang="en">View the architecture diagram or visit the GitHub repository</p>
-  <div class="actions" style="justify-content: center;">
+<div style="text-align:center;padding:4rem 2rem">
+  <h2 class="section-title" data-lang="zh">了解更多</h2>
+  <h2 class="section-title" data-lang="en">Learn More</h2>
+  <p class="section-sub" style="margin-bottom:2rem" data-lang="zh">查看完整架构设计或直接访问 GitHub 仓库</p>
+  <p class="section-sub" style="margin-bottom:2rem" data-lang="en">View the full architecture diagram or visit the GitHub repository</p>
+  <div class="hero-actions" style="justify-content:center">
     <a href="architecture.html" class="btn-primary">
-      <span data-lang="zh">📐 查看架构</span><span data-lang="en">📐 Architecture</span>
+      <span data-lang="zh">架构设计</span><span data-lang="en">Architecture</span>
     </a>
     <a href="https://github.com/sijie-Z/DocMind-RAG" class="btn-secondary">
-      <span data-lang="zh">GitHub 仓库 →</span><span data-lang="en">GitHub Repo →</span>
+      GitHub →
     </a>
   </div>
 </div>
 
-<!-- ─── Footer ─── -->
 <footer>
-  <p>DocMind · <span data-lang-inline="zh">企业级 AI Agent 平台</span><span data-lang-inline="en">Enterprise AI Agent Platform</span></p>
-  <p style="margin-top: 0.5rem;">Built with FastAPI + Vue 3 + DeepSeek</p>
+  <p>DocMind · <span lang-zh>企业级 AI Agent 平台</span><span lang-en>Enterprise AI Agent Platform</span></p>
+  <p style="margin-top:.4rem;font-size:.75rem">Built with FastAPI + Vue 3 + DeepSeek · Open Source</p>
 </footer>
 
 <script>
-  function setLang(lang) {
-    document.body.classList.toggle('lang-en', lang === 'en');
-    document.querySelectorAll('.lang-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.textContent.trim() === (lang === 'zh' ? '中文' : 'EN'));
-    });
-    localStorage.setItem('docmind-lang', lang);
-  }
-  const saved = localStorage.getItem('docmind-lang');
-  if (saved === 'en') setLang('en');
+function setLang(l){
+  document.body.classList.toggle('lang-en',l==='en')
+  document.querySelectorAll('.lang-btn').forEach(b=>b.classList.toggle('active',b.textContent.trim()===(l==='zh'?'中文':'EN')))
+  localStorage.setItem('docmind-lang',l)
+}
+const s=localStorage.getItem('docmind-lang')
+if(s==='en')setLang('en')
 
-  // Intersection Observer for fade-in
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) entry.target.classList.add('visible');
-    });
-  }, { threshold: 0.1 });
-  document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+const obs=new IntersectionObserver(e=>e.forEach(i=>{if(i.isIntersecting)i.target.classList.add('show')}),{threshold:.08})
+document.querySelectorAll('.fade-in').forEach(el=>obs.observe(el))
 </script>
 
 </body>
