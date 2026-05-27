@@ -1,364 +1,742 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DocMind Architecture — 企业级 AI Agent 平台</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DocMind — 完整系统架构</title>
+<meta name="description" content="DocMind 企业级 AI Agent 平台完整架构文档 — Agent Loop、RAG 管道、权限体系、三端架构">
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0B0D17;--bg2:#0F1221;--bg3:#151829;--border:#252840;--border2:#353860;--text:#E8EAF6;--text2:#9FA4C4;--text3:#6B70A0;--green:#10B981}
-body{background:var(--bg);color:var(--text);font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;display:flex;flex-direction:column;align-items:center;padding:32px 20px;-webkit-font-smoothing:antialiased}
-.container{max-width:1200px;width:100%}
-.header{text-align:center;margin-bottom:36px}
-.header h1{font-size:1.75rem;font-weight:700;color:var(--text)}
-.header h1 span{color:var(--green)}
-.pulse-dot{display:inline-block;width:9px;height:9px;background:var(--green);border-radius:50%;margin-right:10px;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(16,185,129,0.4)}50%{opacity:.7;box-shadow:0 0 0 8px rgba(16,185,129,0)}}
-.sub{font-size:.8rem;color:var(--text3);margin-top:8px}
-.sub a{color:var(--green);text-decoration:none}
-.sub a:hover{text-decoration:underline}
-.diagram-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:36px;overflow-x:auto}
-.diagram-card svg{display:block;margin:0 auto}
-.info-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:36px}
-.card{background:var(--bg2);border:1px solid var(--border);border-radius:11px;padding:20px;transition:border-color .2s}
-.card:hover{border-color:rgba(16,185,129,0.2)}
-.card-header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
-.card-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.card-dot.green{background:var(--green)}
-.card-dot.blue{background:#3B82F6}
-.card-dot.amber{background:#F59E0B}
-.card h3{font-size:.82rem;font-weight:600;color:var(--text)}
-.card ul{list-style:none}
-.card li{font-size:.75rem;color:var(--text2);line-height:1.9}
-.card li::before{content:"→ ";color:var(--text3)}
-.footer{text-align:center;font-size:.7rem;color:var(--text3);padding-top:18px;border-top:1px solid var(--border)}
-@media(max-width:768px){.info-grid{grid-template-columns:1fr}}</style>
+:root{--bg:#0B0D17;--bg2:#0F1221;--bg3:#151829;--bg4:#1C1F34;--border:#252840;--border2:#353860;--text:#E8EAF6;--text2:#9FA4C4;--text3:#6B70A0;--green:#10B981;--green2:#059669;--green-bg:rgba(16,185,129,0.12);--blue:#3B82F6;--amber:#F59E0B;--red:#EF4444;--card-radius:12px}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;line-height:1.6;min-width:1000px;-webkit-font-smoothing:antialiased}
+code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',monospace}
+
+/* === SIDEBAR === */
+.nav{position:fixed;left:0;top:0;width:240px;height:100vh;background:var(--bg2);border-right:1px solid var(--border);z-index:100;display:flex;flex-direction:column;overflow:hidden}
+.nav-brand{padding:18px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0}
+.nav-brand svg{flex-shrink:0}
+.nav-brand span{font-weight:700;font-size:.9rem;color:var(--green)}
+.nav-items{flex:1;overflow-y:auto;padding:8px 0}
+.nav-items::-webkit-scrollbar{width:4px}
+.nav-items::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+.nav-label{font-size:.62rem;color:var(--text3);text-transform:uppercase;letter-spacing:1.2px;padding:14px 16px 4px;font-weight:600}
+.nav-item{display:flex;align-items:center;gap:8px;padding:7px 16px;color:var(--text2);text-decoration:none;font-size:.78rem;transition:all .2s;border-left:3px solid transparent;cursor:pointer}
+.nav-item:hover,.nav-item.active{color:var(--text);background:var(--green-bg);border-left-color:var(--green)}
+.nav-item .badge{width:20px;height:20px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:700;flex-shrink:0;background:var(--bg3);color:var(--text3)}
+.nav-item.active .badge{background:var(--green);color:#fff}
+
+/* === MAIN === */
+.main{margin-left:240px;padding:28px 36px 60px;max-width:1300px}
+
+/* === HEADER === */
+.header{text-align:center;padding:36px 0 40px;position:relative}
+.header::after{content:'';position:absolute;bottom:0;left:10%;right:10%;height:1px;background:linear-gradient(90deg,transparent,var(--border2),transparent)}
+.header h1{font-size:2.2rem;font-weight:800;background:linear-gradient(135deg,var(--text),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-.02em}
+.header .sub{color:var(--text2);font-size:.85rem;margin-top:4px}
+.header .badge-row{display:flex;justify-content:center;gap:10px;margin-top:16px;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:20px;font-size:.75rem;border:1px solid var(--border);background:var(--bg2);color:var(--text2)}
+.badge .dot{width:7px;height:7px;border-radius:50%}
+.badge .dot.g{background:var(--green)}
+.badge .dot.b{background:var(--blue)}
+.badge .dot.a{background:var(--amber)}
+
+/* === SECTION === */
+.sec{margin-top:40px;scroll-margin-top:16px}
+.sec-head{display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+.sec-num{font-size:.65rem;font-weight:700;padding:2px 10px;border-radius:8px;letter-spacing:.04em;background:var(--green-bg);color:var(--green);flex-shrink:0}
+.sec-head h2{font-size:1.2rem;font-weight:700;color:var(--text)}
+.sec-head .meta{margin-left:auto;font-size:.7rem;color:var(--text3);font-family:'SF Mono',monospace}
+
+/* === CARDS === */
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--card-radius);padding:18px;margin-bottom:14px;transition:border-color .3s}
+.card:hover{border-color:rgba(16,185,129,0.15)}
+.card.green-ac{border-left:3px solid var(--green)}
+.card.blue-ac{border-left:3px solid var(--blue)}
+.card.amber-ac{border-left:3px solid var(--amber)}
+.card-title{font-size:.88rem;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+.card-title .arrow{font-size:.65rem;color:var(--text3);transition:transform .3s}
+.card-title .arrow.open{transform:rotate(90deg)}
+.card-body{display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.card-body.show{display:block}
+
+/* === GRIDS === */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+
+/* === STATS === */
+.big{font-size:1.7rem;font-weight:800;font-family:'SF Mono',monospace;color:var(--green)}
+.big.b{color:var(--blue)}
+.big.a{color:var(--amber)}
+.sl{font-size:.7rem;color:var(--text3);margin-top:1px}
+
+/* === TABLES === */
+.data-table{width:100%;border-collapse:collapse;font-size:.78rem}
+.data-table th{text-align:left;padding:8px 10px;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border);font-size:.7rem;text-transform:uppercase;letter-spacing:.05em}
+.data-table td{padding:7px 10px;border-bottom:1px solid var(--border);color:var(--text2)}
+.data-table tr:hover td{background:var(--bg3)}
+
+/* === TAGS === */
+.tag{display:inline-block;padding:2px 8px;border-radius:5px;font-size:.65rem;font-weight:500}
+.tag.g{background:var(--green-bg);color:var(--green)}
+.tag.b{background:rgba(59,130,246,0.12);color:var(--blue)}
+.tag.a{background:rgba(245,158,11,0.12);color:var(--amber)}
+.tag.r{background:rgba(239,68,68,0.12);color:var(--red)}
+
+/* === FLOW BOX === */
+.flow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:10px 0}
+.flow-box{padding:6px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;font-size:.72rem;color:var(--text2)}
+.flow-box.g{border-color:rgba(16,185,129,0.3);color:var(--green)}
+.flow-box.b{border-color:rgba(59,130,246,0.3);color:var(--blue)}
+.flow-arrow{color:var(--text3);font-size:.7rem}
+
+@media(max-width:768px){
+  .nav{width:52px}
+  .nav-brand span,.nav-label,.nav-item span{display:none}
+  .main{margin-left:52px;padding:16px}
+  .g2,.g3{grid-template-columns:1fr}
+}
+
+[data-lang="en"]{display:none}
+body.en [data-lang="zh"]{display:none}
+body.en [data-lang="en"]{display:block}
 </style>
 </head>
 <body>
-<div class="container">
+
+<!-- ═══ SIDEBAR ═══ -->
+<nav class="nav" id="nav">
+  <div class="nav-brand">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+    <span>DocMind</span>
+  </div>
+  <div class="nav-items">
+    <div class="nav-label">概览</div>
+    <a class="nav-item active" href="#overview" data-lang="zh"><span class="badge">01</span><span>系统总览</span></a>
+    <a class="nav-item" href="#overview" data-lang="en"><span class="badge">01</span><span>Overview</span></a>
+
+    <div class="nav-label" data-lang="zh">三端架构</div>
+    <div class="nav-label" data-lang="en">Architecture</div>
+    <a class="nav-item" href="#arch"><span class="badge">02</span><span data-lang="zh">系统架构</span><span data-lang="en">System Architecture</span></a>
+    <a class="nav-item" href="#stack"><span class="badge">02b</span><span data-lang="zh">技术栈全景</span><span data-lang="en">Tech Stack</span></a>
+    <a class="nav-item" href="#frontend"><span class="badge">02c</span><span data-lang="zh">前端架构</span><span data-lang="en">Frontend</span></a>
+
+    <div class="nav-label" data-lang="zh">后端核心</div>
+    <div class="nav-label" data-lang="en">Backend Core</div>
+    <a class="nav-item" href="#backend"><span class="badge">03</span><span data-lang="zh">后端架构</span><span data-lang="en">Backend Structure</span></a>
+    <a class="nav-item" href="#agent"><span class="badge">04</span><span data-lang="zh">Agent 系统</span><span data-lang="en">Agent System</span></a>
+    <a class="nav-item" href="#tools"><span class="badge">04b</span><span data-lang="zh">工具系统</span><span data-lang="en">Tool System</span></a>
+    <a class="nav-item" href="#rag"><span class="badge">05</span><span data-lang="zh">RAG 管道</span><span data-lang="en">RAG Pipeline</span></a>
+
+    <div class="nav-label" data-lang="zh">数据与安全</div>
+    <div class="nav-label" data-lang="en">Data & Security</div>
+    <a class="nav-item" href="#data"><span class="badge">06</span><span data-lang="zh">数据模型</span><span data-lang="en">Data Models</span></a>
+    <a class="nav-item" href="#auth"><span class="badge">07</span><span data-lang="zh">权限体系</span><span data-lang="en">Auth & RBAC</span></a>
+    <a class="nav-item" href="#api"><span class="badge">08</span><span data-lang="zh">API 设计</span><span data-lang="en">API Design</span></a>
+
+    <div class="nav-label" data-lang="zh">部署与运维</div>
+    <div class="nav-label" data-lang="en">Deployment</div>
+    <a class="nav-item" href="#deploy"><span class="badge">09</span><span data-lang="zh">部署架构</span><span data-lang="en">Deployment</span></a>
+    <a class="nav-item" href="#monitor"><span class="badge">10</span><span data-lang="zh">监控运维</span><span data-lang="en">Monitoring</span></a>
+
+    <div class="nav-label" data-lang="zh">测试</div>
+    <div class="nav-label" data-lang="en">Testing</div>
+    <a class="nav-item" href="#testing"><span class="badge">11</span><span data-lang="zh">测试体系</span><span data-lang="en">Testing</span></a>
+  </div>
+</nav>
+
+<!-- ═══ MAIN ═══ -->
+<div class="main">
+
+<!-- ─── HEADER ─── -->
 <div class="header">
-  <h1><span class="pulse-dot"></span>DocMind Architecture</h1>
-  <div class="subtitle"><a href="index.html" style="color:var(--green);text-decoration:none;">← Back</a> · Enterprise AI Agent Platform · v1.2.1</div>
+  <h1>DocMind Architecture</h1>
+  <div class="sub">企业级 AI Agent 平台 · Enterprise AI Agent Platform · v1.2.1</div>
+  <div class="badge-row">
+    <span class="badge"><span class="dot g"></span><a href="index.html" style="color:var(--text2);text-decoration:none;">← 返回首页</a></span>
+    <span class="badge"><span class="dot g"></span>400+ Tests</span>
+    <span class="badge"><span class="dot b"></span>17 API Modules</span>
+    <span class="badge"><span class="dot a"></span>11 Agent Tools</span>
+    <span class="badge">108,000+ LOC</span>
+  </div>
 </div>
 
-<div class="diagram-card">
-<svg width="1100" height="860" viewBox="0 0 1100 860">
-  <defs>
-    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
-    </pattern>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#475569"/>
-    </marker>
-    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#10B981"/>
-    </marker>
-    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#3B82F6"/>
-    </marker>
-    <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#F59E0B"/>
-    </marker>
-    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#6B70A0"/>
-    </marker>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
-      <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
+<!-- ═══ 01. 系统总览 ═══ -->
+<div class="sec" id="overview">
+  <div class="sec-head"><span class="sec-num">01</span><h2 data-lang="zh">系统总览</h2><h2 data-lang="en">System Overview</h2><span class="meta">2026.05</span></div>
 
-  <!-- Background -->
-  <rect width="1100" height="860" fill="url(#grid)"/>
+  <div class="g3" style="margin-bottom:14px">
+    <div class="card" style="text-align:center;padding:24px"><div class="big">17</div><div class="sl" data-lang="zh">Python 后端模块</div><div class="sl" data-lang="en">Backend Modules</div></div>
+    <div class="card" style="text-align:center;padding:24px"><div class="big">20+</div><div class="sl" data-lang="zh">前端视图</div><div class="sl" data-lang="en">UI Views</div></div>
+    <div class="card" style="text-align:center;padding:24px"><div class="big">4</div><div class="sl" data-lang="zh">语言支持</div><div class="sl" data-lang="en">Languages</div></div>
+    <div class="card" style="text-align:center;padding:24px"><div class="big">11</div><div class="sl" data-lang="zh">Agent 工具</div><div class="sl" data-lang="en">Agent Tools</div></div>
+    <div class="card" style="text-align:center;padding:24px"><div class="big">400+</div><div class="sl" data-lang="zh">自动化测试</div><div class="sl" data-lang="en">Tests</div></div>
+    <div class="card" style="text-align:center;padding:24px"><div class="big">2</div><div class="sl" data-lang="zh">部署方案</div><div class="sl" data-lang="en">Deploy Options</div></div>
+  </div>
 
-  <!-- ===== CONNECTION ARROWS (drawn early for z-order) ===== -->
-
-  <!-- User → Frontend -->
-  <path d="M 550 50 L 550 95" fill="none" stroke="#10B981" stroke-width="1.5" marker-end="url(#arrow-green)"/>
-
-  <!-- Frontend → Backend (API) -->
-  <path d="M 550 175 L 550 215" fill="none" stroke="#3B82F6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
-
-  <!-- Backend → RAG Pipeline -->
-  <path d="M 550 340 L 550 420" fill="none" stroke="#3B82F6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
-
-  <!-- RAG → Vector DB -->
-  <path d="M 375 600 L 230 600" fill="none" stroke="#6B70A0" stroke-width="1.5" marker-end="url(#arrow-gray)"/>
-
-  <!-- RAG → ES -->
-  <path d="M 375 630 L 230 630" fill="none" stroke="#6B70A0" stroke-width="1.5" marker-end="url(#arrow-gray)"/>
-
-  <!-- Backend → MinIO -->
-  <path d="M 670 280 Q 780 280 780 340" fill="none" stroke="#F59E0B" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
-
-  <!-- Backend → Kafka -->
-  <path d="M 670 340 Q 780 400 700 500" fill="none" stroke="#F59E0B" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-amber)"/>
-
-  <!-- Kafka → Worker -->
-  <path d="M 810 540 L 900 540" fill="none" stroke="#F59E0B" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
-
-  <!-- Worker → ES -->
-  <path d="M 900 570 L 370 630" fill="none" stroke="#6B70A0" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow-gray)"/>
-
-  <!-- Backend → Agent System -->
-  <path d="M 430 340 L 200 340" fill="none" stroke="#3B82F6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
-
-  <!-- Agent → Tools -->
-  <path d="M 200 370 L 200 430" fill="none" stroke="#3B82F6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
-
-  <!-- RAG → Reranker -->
-  <path d="M 550 660 L 550 695" fill="none" stroke="#3B82F6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
-
-  <!-- ===== USER LAYER ===== -->
-  <text x="550" y="30" text-anchor="middle" font-size="10" fill="#64748b">USERS</text>
-
-  <!-- User component -->
-  <rect x="470" y="55" width="160" height="40" rx="6" fill="#0f172a"/>
-  <rect x="470" y="55" width="160" height="40" rx="6" fill="rgba(16,185,129,0.4)" stroke="#10B981" stroke-width="1.5"/>
-  <text x="550" y="80" text-anchor="middle" font-size="12" fill="#e2e8f0" font-weight="500">Browser / Mobile</text>
-
-  <!-- ===== FRONTEND LAYER ===== -->
-  <rect x="400" y="100" width="300" height="75" rx="8" fill="none" stroke="#10B981" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
-  <text x="410" y="115" font-size="8" fill="#10B981" opacity="0.7">FRONTEND</text>
-
-  <!-- Vue + Components -->
-  <rect x="420" y="125" width="110" height="35" rx="6" fill="#0f172a"/>
-  <rect x="420" y="125" width="110" height="35" rx="6" fill="rgba(16,185,129,0.4)" stroke="#10B981" stroke-width="1.5"/>
-  <text x="475" y="147" text-anchor="middle" font-size="10" fill="#e2e8f0">Vue 3 + TypeScript</text>
-
-  <!-- CSS / UI -->
-  <rect x="550" y="125" width="65" height="35" rx="6" fill="#0f172a"/>
-  <rect x="550" y="125" width="65" height="35" rx="6" fill="rgba(16,185,129,0.4)" stroke="#10B981" stroke-width="1.5"/>
-  <text x="582" y="147" text-anchor="middle" font-size="9" fill="#e2e8f0">Naive UI</text>
-
-  <!-- State / Router -->
-  <rect x="630" y="125" width="55" height="35" rx="6" fill="#0f172a"/>
-  <rect x="630" y="125" width="55" height="35" rx="6" fill="rgba(16,185,129,0.4)" stroke="#10B981" stroke-width="1.5"/>
-  <text x="657" y="147" text-anchor="middle" font-size="9" fill="#e2e8f0">Pinia</text>
-
-  <!-- ===== BACKEND LAYER ===== -->
-  <rect x="250" y="220" width="600" height="125" rx="8" fill="none" stroke="#3B82F6" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
-  <text x="260" y="237" font-size="8" fill="#3B82F6" opacity="0.7">BACKEND · FastAPI (Async)</text>
-
-  <!-- API Layer -->
-  <rect x="270" y="248" width="120" height="35" rx="6" fill="#0f172a"/>
-  <rect x="270" y="248" width="120" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="330" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">REST API v1</text>
-
-  <!-- Auth -->
-  <rect x="410" y="248" width="90" height="35" rx="6" fill="#0f172a"/>
-  <rect x="410" y="248" width="90" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="455" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">JWT Auth</text>
-
-  <!-- Services -->
-  <rect x="520" y="248" width="90" height="35" rx="6" fill="#0f172a"/>
-  <rect x="520" y="248" width="90" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="565" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">Services</text>
-
-  <!-- RBAC -->
-  <rect x="630" y="248" width="90" height="35" rx="6" fill="#0f172a"/>
-  <rect x="630" y="248" width="90" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="675" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">RBAC</text>
-
-  <!-- Middleware -->
-  <rect x="740" y="248" width="95" height="35" rx="6" fill="#0f172a"/>
-  <rect x="740" y="248" width="95" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="787" y="270" text-anchor="middle" font-size="10" fill="#e2e8f0">Middleware</text>
-
-  <!-- WebSocket / SSE -->
-  <rect x="270" y="295" width="130" height="35" rx="6" fill="#0f172a"/>
-  <rect x="270" y="295" width="130" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="335" y="317" text-anchor="middle" font-size="10" fill="#e2e8f0">WebSocket / SSE</text>
-
-  <!-- Document Parser -->
-  <rect x="420" y="295" width="120" height="35" rx="6" fill="#0f172a"/>
-  <rect x="420" y="295" width="120" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="480" y="317" text-anchor="middle" font-size="10" fill="#e2e8f0">Doc Parser</text>
-
-  <!-- Embedding -->
-  <rect x="560" y="295" width="105" height="35" rx="6" fill="#0f172a"/>
-  <rect x="560" y="295" width="105" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="612" y="317" text-anchor="middle" font-size="10" fill="#e2e8f0">Embeddings</text>
-
-  <!-- Monitoring -->
-  <rect x="685" y="295" width="100" height="35" rx="6" fill="#0f172a"/>
-  <rect x="685" y="295" width="100" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="735" y="317" text-anchor="middle" font-size="10" fill="#e2e8f0">Monitoring</text>
-
-  <!-- MinIO badge -->
-  <rect x="760" y="345" width="70" height="25" rx="4" fill="#0f172a"/>
-  <rect x="760" y="345" width="70" height="25" rx="4" fill="rgba(245,158,11,0.3)" stroke="#F59E0B" stroke-width="1.2"/>
-  <text x="795" y="362" text-anchor="middle" font-size="9" fill="#F59E0B">MinIO</text>
-
-  <!-- Kafka badge -->
-  <rect x="755" y="505" width="70" height="25" rx="4" fill="#0f172a"/>
-  <rect x="755" y="505" width="70" height="25" rx="4" fill="rgba(245,158,11,0.3)" stroke="#F59E0B" stroke-width="1.2"/>
-  <text x="790" y="522" text-anchor="middle" font-size="9" fill="#F59E0B">Kafka</text>
-
-  <!-- ===== AGENT SYSTEM (left side) ===== -->
-  <rect x="70" y="220" width="180" height="155" rx="8" fill="none" stroke="#3B82F6" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
-  <text x="80" y="237" font-size="8" fill="#3B82F6" opacity="0.7">AGENT SYSTEM</text>
-
-  <rect x="85" y="248" width="150" height="30" rx="6" fill="#0f172a"/>
-  <rect x="85" y="248" width="150" height="30" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="160" y="267" text-anchor="middle" font-size="10" fill="#e2e8f0">ReAct Loop</text>
-
-  <rect x="85" y="288" width="150" height="30" rx="6" fill="#0f172a"/>
-  <rect x="85" y="288" width="150" height="30" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="160" y="307" text-anchor="middle" font-size="10" fill="#e2e8f0">Tool Registry</text>
-
-  <rect x="85" y="328" width="150" height="30" rx="6" fill="#0f172a"/>
-  <rect x="85" y="328" width="150" height="30" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="160" y="347" text-anchor="middle" font-size="10" fill="#e2e8f0">Skill Learning</text>
-
-  <!-- Agent Tools (below agent system) -->
-  <rect x="70" y="430" width="180" height="90" rx="8" fill="none" stroke="#3B82F6" stroke-width="1" stroke-dasharray="6,3" opacity="0.4"/>
-  <text x="80" y="447" font-size="8" fill="#3B82F6" opacity="0.6">AGENT TOOLS</text>
-
-  <rect x="85" y="455" width="150" height="25" rx="4" fill="#0f172a"/>
-  <rect x="85" y="455" width="150" height="25" rx="4" fill="rgba(59,130,246,0.3)" stroke="#3B82F6" stroke-width="1"/>
-  <text x="160" y="472" text-anchor="middle" font-size="9" fill="#e2e8f0">Web Search · Code Exec</text>
-
-  <rect x="85" y="488" width="150" height="25" rx="4" fill="#0f172a"/>
-  <rect x="85" y="488" width="150" height="25" rx="4" fill="rgba(59,130,246,0.3)" stroke="#3B82F6" stroke-width="1"/>
-  <text x="160" y="505" text-anchor="middle" font-size="9" fill="#e2e8f0">Translation · Data Analysis</text>
-
-  <!-- ===== RAG PIPELINE ===== -->
-  <rect x="350" y="420" width="400" height="200" rx="8" fill="none" stroke="#3B82F6" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
-  <text x="360" y="437" font-size="8" fill="#3B82F6" opacity="0.7">RAG PIPELINE</text>
-
-  <!-- Query Processor -->
-  <rect x="370" y="450" width="130" height="35" rx="6" fill="#0f172a"/>
-  <rect x="370" y="450" width="130" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="435" y="472" text-anchor="middle" font-size="10" fill="#e2e8f0">Query Processor</text>
-
-  <!-- Retriever -->
-  <rect x="520" y="450" width="110" height="35" rx="6" fill="#0f172a"/>
-  <rect x="520" y="450" width="110" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="575" y="472" text-anchor="middle" font-size="10" fill="#e2e8f0">Hybrid Retriever</text>
-
-  <!-- Context Compressor -->
-  <rect x="650" y="450" width="85" height="35" rx="6" fill="#0f172a"/>
-  <rect x="650" y="450" width="85" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="692" y="472" text-anchor="middle" font-size="9" fill="#e2e8f0">Compressor</text>
-
-  <!-- Semantic Cache -->
-  <rect x="370" y="500" width="110" height="35" rx="6" fill="#0f172a"/>
-  <rect x="370" y="500" width="110" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="425" y="522" text-anchor="middle" font-size="10" fill="#e2e8f0">Semantic Cache</text>
-
-  <!-- Reranker -->
-  <rect x="500" y="500" width="100" height="35" rx="6" fill="#0f172a"/>
-  <rect x="500" y="500" width="100" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="550" y="522" text-anchor="middle" font-size="10" fill="#e2e8f0">Reranker</text>
-
-  <!-- LLM -->
-  <rect x="620" y="500" width="110" height="35" rx="6" fill="#0f172a"/>
-  <rect x="620" y="500" width="110" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="675" y="522" text-anchor="middle" font-size="10" fill="#e2e8f0">DeepSeek LLM</text>
-
-  <!-- Workflow Engine -->
-  <rect x="370" y="555" width="200" height="35" rx="6" fill="#0f172a"/>
-  <rect x="370" y="555" width="200" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="470" y="577" text-anchor="middle" font-size="10" fill="#e2e8f0">Workflow Engine (DAG)</text>
-
-  <!-- Evaluator -->
-  <rect x="590" y="555" width="145" height="35" rx="6" fill="#0f172a"/>
-  <rect x="590" y="555" width="145" height="35" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="662" y="577" text-anchor="middle" font-size="10" fill="#e2e8f0">RAG Evaluator</text>
-
-  <!-- ===== WORKER ===== -->
-  <rect x="860" y="510" width="160" height="50" rx="6" fill="#0f172a"/>
-  <rect x="860" y="510" width="160" height="50" rx="6" fill="rgba(245,158,11,0.3)" stroke="#F59E0B" stroke-width="1.5"/>
-  <text x="940" y="538" text-anchor="middle" font-size="10" fill="#e2e8f0">Doc Processor Worker</text>
-
-  <!-- ===== DATA STORES ===== -->
-  <rect x="60" y="585" width="330" height="195" rx="8" fill="none" stroke="#6B70A0" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
-  <text x="70" y="602" font-size="8" fill="#6B70A0" opacity="0.7">DATA LAYER</text>
-
-  <!-- MySQL -->
-  <rect x="80" y="615" width="140" height="40" rx="6" fill="#0f172a"/>
-  <rect x="80" y="615" width="140" height="40" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="150" y="635" text-anchor="middle" font-size="10" fill="#e2e8f0">MySQL 8</text>
-  <text x="150" y="648" text-anchor="middle" font-size="8" fill="#3B82F6">SQLAlchemy Async</text>
-
-  <!-- Redis -->
-  <rect x="235" y="615" width="140" height="40" rx="6" fill="#0f172a"/>
-  <rect x="235" y="615" width="140" height="40" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="305" y="635" text-anchor="middle" font-size="10" fill="#e2e8f0">Redis 7</text>
-  <text x="305" y="648" text-anchor="middle" font-size="8" fill="#3B82F6">Cache / Sessions</text>
-
-  <!-- Elasticsearch -->
-  <rect x="80" y="665" width="140" height="40" rx="6" fill="#0f172a"/>
-  <rect x="80" y="665" width="140" height="40" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="150" y="685" text-anchor="middle" font-size="10" fill="#e2e8f0">Elasticsearch 8</text>
-  <text x="150" y="698" text-anchor="middle" font-size="8" fill="#3B82F6">BM25 + KNN</text>
-
-  <!-- Vector DB -->
-  <rect x="235" y="665" width="140" height="40" rx="6" fill="#0f172a"/>
-  <rect x="235" y="665" width="140" height="40" rx="6" fill="rgba(59,130,246,0.4)" stroke="#3B82F6" stroke-width="1.5"/>
-  <text x="305" y="685" text-anchor="middle" font-size="10" fill="#e2e8f0">Vector Index</text>
-  <text x="305" y="698" text-anchor="middle" font-size="8" fill="#3B82F6">ES KNN</text>
-
-  <!-- ===== MONITORING ===== -->
-  <rect x="710" y="690" width="310" height="90" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="6,3" opacity="0.4"/>
-  <text x="720" y="707" font-size="8" fill="#94a3b8" opacity="0.6">OBSERVABILITY</text>
-
-  <rect x="725" y="718" width="90" height="40" rx="6" fill="#0f172a"/>
-  <rect x="725" y="718" width="90" height="40" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.2"/>
-  <text x="770" y="738" text-anchor="middle" font-size="10" fill="#e2e8f0">Prometheus</text>
-  <text x="770" y="751" text-anchor="middle" font-size="8" fill="#94a3b8">Metrics</text>
-
-  <rect x="825" y="718" width="90" height="40" rx="6" fill="#0f172a"/>
-  <rect x="825" y="718" width="90" height="40" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.2"/>
-  <text x="870" y="738" text-anchor="middle" font-size="10" fill="#e2e8f0">Grafana</text>
-  <text x="870" y="751" text-anchor="middle" font-size="8" fill="#94a3b8">Dashboards</text>
-
-  <rect x="925" y="718" width="80" height="40" rx="6" fill="#0f172a"/>
-  <rect x="925" y="718" width="80" height="40" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.2"/>
-  <text x="965" y="738" text-anchor="middle" font-size="10" fill="#e2e8f0">OpenTelemetry</text>
-  <text x="965" y="751" text-anchor="middle" font-size="8" fill="#94a3b8">Tracing</text>
-
-  <!-- ===== LEGEND ===== -->
-</svg>
+  <div class="g2">
+    <div class="card green-ac">
+      <div class="card-title">🎯 <span data-lang="zh">项目定位</span><span data-lang="en">Positioning</span></div>
+      <p style="font-size:.8rem;color:var(--text2);line-height:1.7" data-lang="zh">
+        DocMind 是一个企业级 AI Agent 平台，以 ReAct Agent 为核心，融合混合检索 RAG、知识图谱、工作流引擎。
+        支持多租户组织隔离、RBAC 权限体系、SSE 流式交互，覆盖文档管理、智能问答、深度分析、自动化工作流等场景。
+      </p>
+      <p style="font-size:.8rem;color:var(--text2);line-height:1.7" data-lang="en">
+        DocMind is an enterprise AI Agent platform powered by a ReAct Agent core, integrating hybrid RAG, knowledge graphs, and a workflow engine.
+        Supports multi-tenant isolation, RBAC, SSE streaming interaction, covering document management, Q&A, deep analysis, and automated workflows.
+      </p>
+    </div>
+    <div class="card blue-ac">
+      <div class="card-title">📐 <span data-lang="zh">设计原则</span><span data-lang="en">Design Principles</span></div>
+      <ul style="font-size:.8rem;color:var(--text2);line-height:2;list-style:none;padding-left:0">
+        <li>→ <span data-lang="zh">模块化：解耦 Agent / RAG / 工作流，独立演进</span><span data-lang="en">Modular: decoupled Agent / RAG / Workflow</span></li>
+        <li>→ <span data-lang="zh">异步优先：FastAPI async + SQLAlchemy 2.0 async</span><span data-lang="en">Async-first: FastAPI + SQLAlchemy 2.0 async</span></li>
+        <li>→ <span data-lang="zh">可观测：OpenTelemetry 全链路追踪 + Prometheus 指标</span><span data-lang="en">Observable: OpenTelemetry tracing + Prometheus metrics</span></li>
+        <li>→ <span data-lang="zh">安全纵深：JWT + RBAC + 多租户 + 审计日志</span><span data-lang="en">Defense in depth: JWT + RBAC + multi-tenancy + audit</span></li>
+      </ul>
+    </div>
+  </div>
 </div>
 
-<div class="info-grid">
-<div class="card">
-  <div class="card-header"><div class="card-dot blue"></div><h3>Tech Stack</h3></div>
-  <ul>
-    <li>Vue 3 + TypeScript + Naive UI</li>
-    <li>FastAPI + SQLAlchemy 2.0 (Async)</li>
-    <li>DeepSeek LLM + Embedding Models</li>
-    <li>Elasticsearch 8 (BM25 + KNN)</li>
-    <li>Redis + Kafka + MinIO</li>
-  </ul>
-</div>
-<div class="card">
-  <div class="card-header"><div class="card-dot green"></div><h3>Key Features</h3></div>
-  <ul>
-    <li>ReAct Agent with 11 built-in tools</li>
-    <li>Hybrid Search + RRF Fusion</li>
-    <li>DAG Workflow Engine</li>
-    <li>RBAC Multi-tenancy</li>
-    <li>PWA + i18n (4 languages)</li>
-  </ul>
-</div>
-<div class="card">
-  <div class="card-header"><div class="card-dot amber"></div><h3>Data Flow</h3></div>
-  <ul>
-    <li>Upload → MinIO + Kafka → Worker</li>
-    <li>Parse → Chunk → Embed → ES Index</li>
-    <li>Query → Hybrid Search → Rerank</li>
-    <li>LLM → Stream Response with Citations</li>
-  </ul>
-</div>
+<!-- ═══ 02. 系统架构 ═══ -->
+<div class="sec" id="arch">
+  <div class="sec-head"><span class="sec-num">02</span><h2 data-lang="zh">系统架构</h2><h2 data-lang="en">System Architecture</h2><span class="meta">前端 · 后端 · AI · 数据</span></div>
+
+  <div class="card" style="padding:20px;text-align:center">
+    <svg width="100%" height="auto" viewBox="0 0 1060 740" style="max-width:1060px">
+      <defs>
+        <pattern id="g" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M30 0L0 0 0 30" fill="none" stroke="#252840" stroke-width=".4"/></pattern>
+        <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#10B981"/></marker>
+        <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#3B82F6"/></marker>
+        <marker id="aa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#F59E0B"/></marker>
+      </defs>
+      <rect width="1060" height="740" fill="url(#g)"/>
+
+      <!-- User -->
+      <text x="530" y="28" text-anchor="middle" font-size="9" fill="#6B70A0" font-weight="600">USER</text>
+      <rect x="470" y="38" width="120" height="32" rx="6" fill="#0F1221" stroke="#10B981" stroke-width="1.5"/>
+      <text x="530" y="58" text-anchor="middle" font-size="10" fill="#E8EAF6">浏览器 / 移动端</text>
+
+      <!-- Frontend -->
+      <rect x="400" y="82" width="260" height="52" rx="7" fill="none" stroke="#10B981" stroke-width="1" stroke-dasharray="5,3" opacity=".5"/>
+      <text x="410" y="95" font-size="7" fill="#10B981" opacity=".7">FRONTEND</text>
+      <rect x="415" y="100" width="72" height="26" rx="5" fill="#0F1221" stroke="#10B981" stroke-width="1.2"/>
+      <text x="451" y="117" text-anchor="middle" font-size="8" fill="#E8EAF6">Vue 3 + TS</text>
+      <rect x="497" y="100" width="60" height="26" rx="5" fill="#0F1221" stroke="#10B981" stroke-width="1.2"/>
+      <text x="527" y="117" text-anchor="middle" font-size="8" fill="#E8EAF6">Naive UI</text>
+      <rect x="567" y="100" width="78" height="26" rx="5" fill="#0F1221" stroke="#10B981" stroke-width="1.2"/>
+      <text x="606" y="117" text-anchor="middle" font-size="8" fill="#E8EAF6">Pinia + Router</text>
+
+      <!-- Backend -->
+      <rect x="250" y="155" width="560" height="100" rx="7" fill="none" stroke="#3B82F6" stroke-width="1" stroke-dasharray="5,3" opacity=".5"/>
+      <text x="260" y="170" font-size="7" fill="#3B82F6" opacity=".7">BACKEND · FastAPI (Async)</text>
+      <rect x="265" y="178" width="85" height="28" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="307" y="196" text-anchor="middle" font-size="8" fill="#E8EAF6">REST API v1</text>
+      <rect x="360" y="178" width="70" height="28" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="395" y="196" text-anchor="middle" font-size="8" fill="#E8EAF6">JWT Auth</text>
+      <rect x="440" y="178" width="75" height="28" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="477" y="196" text-anchor="middle" font-size="8" fill="#E8EAF6">Services</text>
+      <rect x="525" y="178" width="70" height="28" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="560" y="196" text-anchor="middle" font-size="8" fill="#E8EAF6">RBAC</text>
+      <rect x="605" y="178" width="85" height="28" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="647" y="196" text-anchor="middle" font-size="8" fill="#E8EAF6">Middleware</text>
+      <rect x="700" y="178" width="95" height="28" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="747" y="196" text-anchor="middle" font-size="8" fill="#E8EAF6">WebSocket/SSE</text>
+
+      <rect x="265" y="215" width="95" height="28" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="312" y="233" text-anchor="middle" font-size="8" fill="#E8EAF6">Doc Parser</text>
+      <rect x="370" y="215" width="85" height="28" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="412" y="233" text-anchor="middle" font-size="8" fill="#E8EAF6">Embeddings</text>
+      <rect x="465" y="215" width="95" height="28" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="512" y="233" text-anchor="middle" font-size="8" fill="#E8EAF6">Monitoring</text>
+      <rect x="570" y="215" width="105" height="28" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="622" y="233" text-anchor="middle" font-size="8" fill="#E8EAF6">Rate Limiter</text>
+
+      <!-- Agent -->
+      <rect x="70" y="270" width="160" height="140" rx="7" fill="none" stroke="#F59E0B" stroke-width="1" stroke-dasharray="5,3" opacity=".5"/>
+      <text x="80" y="287" font-size="7" fill="#F59E0B" opacity=".7">AGENT SYSTEM</text>
+      <rect x="85" y="295" width="130" height="26" rx="5" fill="#0F1221" stroke="#F59E0B" stroke-width="1.2"/>
+      <text x="150" y="312" text-anchor="middle" font-size="8" fill="#E8EAF6">ReAct Loop</text>
+      <rect x="85" y="328" width="130" height="26" rx="5" fill="#0F1221" stroke="#F59E0B" stroke-width="1.2"/>
+      <text x="150" y="345" text-anchor="middle" font-size="8" fill="#E8EAF6">Tool Registry</text>
+      <rect x="85" y="361" width="130" height="26" rx="5" fill="#0F1221" stroke="#F59E0B" stroke-width="1.2"/>
+      <text x="150" y="378" text-anchor="middle" font-size="8" fill="#E8EAF6">Context Engine</text>
+      <rect x="85" y="394" width="130" height="26" rx="5" fill="#0F1221" stroke="#F59E0B" stroke-width="1.2"/>
+      <text x="150" y="411" text-anchor="middle" font-size="8" fill="#E8EAF6">Skill Learning</text>
+
+      <!-- RAG Pipeline -->
+      <rect x="270" y="270" width="360" height="170" rx="7" fill="none" stroke="#3B82F6" stroke-width="1" stroke-dasharray="5,3" opacity=".5"/>
+      <text x="280" y="287" font-size="7" fill="#3B82F6" opacity=".7">RAG PIPELINE</text>
+      <rect x="285" y="296" width="100" height="26" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="335" y="313" text-anchor="middle" font-size="8" fill="#E8EAF6">Query Processor</text>
+      <rect x="400" y="296" width="100" height="26" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="450" y="313" text-anchor="middle" font-size="8" fill="#E8EAF6">Hybrid Retriever</text>
+      <rect x="515" y="296" width="100" height="26" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="565" y="313" text-anchor="middle" font-size="8" fill="#E8EAF6">Compressor</text>
+      <rect x="285" y="335" width="100" height="26" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="335" y="352" text-anchor="middle" font-size="8" fill="#E8EAF6">Semantic Cache</text>
+      <rect x="400" y="335" width="100" height="26" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="450" y="352" text-anchor="middle" font-size="8" fill="#E8EAF6">Reranker</text>
+      <rect x="515" y="335" width="100" height="26" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="565" y="352" text-anchor="middle" font-size="8" fill="#E8EAF6">DeepSeek LLM</text>
+      <rect x="285" y="395" width="200" height="28" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="385" y="413" text-anchor="middle" font-size="8" fill="#E8EAF6">Workflow Engine (DAG)</text>
+      <rect x="510" y="395" width="105" height="28" rx="5" fill="#0F1221" stroke="#3B82F6" stroke-width="1.2"/>
+      <text x="562" y="413" text-anchor="middle" font-size="8" fill="#E8EAF6">RAG Evaluator</text>
+
+      <!-- Worker -->
+      <rect x="670" y="310" width="160" height="45" rx="6" fill="#0F1221" stroke="#F59E0B" stroke-width="1.2"/>
+      <text x="750" y="333" text-anchor="middle" font-size="8" fill="#E8EAF6">Doc Processor Worker</text>
+      <text x="750" y="346" text-anchor="middle" font-size="7" fill="#F59E0B">Kafka Consumer</text>
+
+      <!-- Data -->
+      <rect x="60" y="470" width="300" height="170" rx="7" fill="none" stroke="#6B70A0" stroke-width="1" stroke-dasharray="5,3" opacity=".5"/>
+      <text x="70" y="487" font-size="7" fill="#6B70A0" opacity=".7">DATA LAYER</text>
+      <rect x="75" y="497" width="130" height="34" rx="5" fill="#0F1221" stroke="#6B70A0" stroke-width="1.2"/>
+      <text x="140" y="513" text-anchor="middle" font-size="9" fill="#E8EAF6">MySQL 8</text>
+      <text x="140" y="525" text-anchor="middle" font-size="7" fill="#6B70A0">SQLAlchemy Async</text>
+      <rect x="215" y="497" width="130" height="34" rx="5" fill="#0F1221" stroke="#6B70A0" stroke-width="1.2"/>
+      <text x="280" y="513" text-anchor="middle" font-size="9" fill="#E8EAF6">Redis 7</text>
+      <text x="280" y="525" text-anchor="middle" font-size="7" fill="#6B70A0">Cache / Sessions</text>
+      <rect x="75" y="540" width="130" height="34" rx="5" fill="#0F1221" stroke="#6B70A0" stroke-width="1.2"/>
+      <text x="140" y="556" text-anchor="middle" font-size="9" fill="#E8EAF6">Elasticsearch 8</text>
+      <text x="140" y="568" text-anchor="middle" font-size="7" fill="#6B70A0">BM25 + KNN Vector</text>
+      <rect x="215" y="540" width="130" height="34" rx="5" fill="#0F1221" stroke="#6B70A0" stroke-width="1.2"/>
+      <text x="280" y="556" text-anchor="middle" font-size="9" fill="#E8EAF6">MinIO</text>
+      <text x="280" y="568" text-anchor="middle" font-size="7" fill="#6B70A0">Object Storage</text>
+
+      <!-- Observability -->
+      <rect x="680" y="550" width="300" height="70" rx="7" fill="none" stroke="#6B70A0" stroke-width="1" stroke-dasharray="5,3" opacity=".4"/>
+      <text x="690" y="567" font-size="7" fill="#6B70A0" opacity=".6">OBSERVABILITY</text>
+      <rect x="695" y="575" width="80" height="30" rx="5" fill="#0F1221" stroke="#6B70A0" stroke-width="1"/>
+      <text x="735" y="594" text-anchor="middle" font-size="8" fill="#E8EAF6">Prometheus</text>
+      <rect x="785" y="575" width="80" height="30" rx="5" fill="#0F1221" stroke="#6B70A0" stroke-width="1"/>
+      <text x="825" y="594" text-anchor="middle" font-size="8" fill="#E8EAF6">Grafana</text>
+      <rect x="875" y="575" width="90" height="30" rx="5" fill="#0F1221" stroke="#6B70A0" stroke-width="1"/>
+      <text x="920" y="594" text-anchor="middle" font-size="8" fill="#E8EAF6">OpenTelemetry</text>
+
+      <!-- Arrows -->
+      <path d="M530 70L530 80" stroke="#10B981" stroke-width="1.2" marker-end="url(#ag)"/>
+      <path d="M530 134L530 150" stroke="#3B82F6" stroke-width="1.2" marker-end="url(#ab)"/>
+      <path d="M530 255L530 268" stroke="#3B82F6" stroke-width="1.2" marker-end="url(#ab)"/>
+      <path d="M410 350L240 350" stroke="#F59E0B" stroke-width="1.2" marker-end="url(#aa)" stroke-dasharray="3,2"/>
+      <path d="M630 350L680 350" stroke="#F59E0B" stroke-width="1.2" marker-end="url(#aa)" stroke-dasharray="3,2"/>
+      <path d="M360 440L360 462" stroke="#3B82F6" stroke-width="1.2" marker-end="url(#ab)"/>
+
+      <!-- Legend -->
+      <rect x="400" y="660" width="260" height="32" rx="6" fill="#0F1221" stroke="#252840" stroke-width="1"/>
+      <rect x="412" y="670" width="10" height="10" rx="2" fill="rgba(16,185,129,.4)" stroke="#10B981" stroke-width="1"/>
+      <text x="426" y="679" font-size="7" fill="#9FA4C4">Frontend</text>
+      <rect x="480" y="670" width="10" height="10" rx="2" fill="rgba(59,130,246,.4)" stroke="#3B82F6" stroke-width="1"/>
+      <text x="494" y="679" font-size="7" fill="#9FA4C4">Backend/RAG</text>
+      <rect x="550" y="670" width="10" height="10" rx="2" fill="rgba(245,158,11,.4)" stroke="#F59E0B" stroke-width="1"/>
+      <text x="564" y="679" font-size="7" fill="#9FA4C4">Agent/Worker</text>
+      <rect x="618" y="670" width="10" height="10" rx="2" fill="rgba(107,112,160,.4)" stroke="#6B70A0" stroke-width="1"/>
+      <text x="632" y="679" font-size="7" fill="#9FA4C4">Data</text>
+    </svg>
+  </div>
 </div>
 
-<div class="footer">
-  DocMind v1.2.1 · Enterprise AI Agent Platform · Built with FastAPI + Vue 3 + DeepSeek
+<!-- ═══ 03. 后端架构 ═══ -->
+<div class="sec" id="backend">
+  <div class="sec-head"><span class="sec-num">03</span><h2 data-lang="zh">后端架构</h2><h2 data-lang="en">Backend Architecture</h2><span class="meta">FastAPI · 17 模块</span></div>
+
+  <div class="card">
+    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 📦 <span data-lang="zh">模块结构</span><span data-lang="en">Module Structure</span></div>
+    <div class="card-body show">
+      <pre style="font-size:.72rem;color:var(--text2);line-height:1.8;background:var(--bg3);padding:14px;border-radius:8px;overflow-x:auto"><code>backend/app/
+├── api/v1/          # REST 端点 (auth, chat, documents, agent, knowledge...)
+│   └── endpoints/   # 17 个路由模块
+├── agent/           # ReAct Agent 系统
+│   ├── core/        # Agent Loop, Tool Registry, Context Engine
+│   ├── tools/       # 11 个工具实现
+│   └── skills/      # 技能学习模块
+├── core/            # 基础设施 (config, database, redis, security, tracing)
+├── models/          # SQLAlchemy ORM 模型
+├── rag/             # RAG 管道 (retriever, reranker, chunker, evaluator)
+├── schemas/         # Pydantic 请求/响应模型
+├── services/        # 业务服务层
+└── worker/          # Kafka 异步任务消费者</code></pre>
+    </div>
+  </div>
+
+  <div class="g2">
+    <div class="card blue-ac">
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> ⚙️ <span data-lang="zh">核心依赖</span><span data-lang="en">Core Dependencies</span></div>
+      <div class="card-body show">
+        <table class="data-table">
+          <tr><th data-lang="zh">组件</th><th data-lang="en">Component</th><th>版本</th><th data-lang="zh">用途</th><th data-lang="en">Purpose</th></tr>
+          <tr><td>FastAPI</td><td>0.115+</td><td>Web 框架</td></tr>
+          <tr><td>SQLAlchemy</td><td>2.0</td><td>ORM (async)</td></tr>
+          <tr><td>LangChain</td><td>0.3+</td><td>文档解析管道</td></tr>
+          <tr><td>DeepSeek</td><td>API</td><td>LLM 对话</td></tr>
+          <tr><td>Celery</td><td>—</td><td>异步任务队列</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="card amber-ac">
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔗 <span data-lang="zh">数据流</span><span data-lang="en">Data Flow</span></div>
+      <div class="card-body show">
+        <div class="flow">
+          <span class="flow-box g">用户请求</span><span class="flow-arrow">→</span>
+          <span class="flow-box b">API 网关</span><span class="flow-arrow">→</span>
+          <span class="flow-box b">JWT 验证</span><span class="flow-arrow">→</span>
+          <span class="flow-box b">RBAC 鉴权</span><span class="flow-arrow">→</span>
+          <span class="flow-box g">业务处理</span><span class="flow-arrow">→</span>
+          <span class="flow-box">响应</span>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
+
+<!-- ═══ 04. Agent 系统 ═══ -->
+<div class="sec" id="agent">
+  <div class="sec-head"><span class="sec-num">04</span><h2 data-lang="zh">Agent 系统</h2><h2 data-lang="en">Agent System</h2><span class="meta">ReAct · Tool Registry · Context</span></div>
+
+  <div class="g2">
+    <div class="card green-ac">
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔄 ReAct Loop</div>
+      <div class="card-body show">
+        <p style="font-size:.8rem;color:var(--text2);margin-bottom:8px" data-lang="zh">自主推理循环，每轮迭代执行 思考 → 行动 → 观察 三个步骤：</p>
+        <p style="font-size:.8rem;color:var(--text2);margin-bottom:8px" data-lang="en">Autonomous reasoning loop executing Think → Act → Observe each iteration:</p>
+        <div class="flow">
+          <span class="flow-box g">思考<br><span style="font-size:.65rem;color:var(--text3)">分析任务</span></span><span class="flow-arrow">→</span>
+          <span class="flow-box b">选择工具<br><span style="font-size:.65rem;color:var(--text3)">Tool Registry</span></span><span class="flow-arrow">→</span>
+          <span class="flow-box a">执行调用<br><span style="font-size:.65rem;color:var(--text3)">沙箱隔离</span></span><span class="flow-arrow">→</span>
+          <span class="flow-box g">观察结果<br><span style="font-size:.65rem;color:var(--text3)">上下文记忆</span></span><span class="flow-arrow">→</span>
+          <span class="flow-box b">继续 / 结束</span>
+        </div>
+        <table class="data-table" style="margin-top:8px">
+          <tr><th>参数</th><th>值</th></tr>
+          <tr><td>最大迭代</td><td>15</td></tr>
+          <tr><td>LLM 温度</td><td>0.7</td></tr>
+          <tr><td>流式输出</td><td>SSE 事件流</td></tr>
+          <tr><td>重试策略</td><td>指数退避, 最多 3 次</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="card blue-ac">
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🧠 Context Engine</div>
+      <div class="card-body show">
+        <p style="font-size:.8rem;color:var(--text2);margin-bottom:8px" data-lang="zh">对话上下文管理，支持多轮记忆、工具结果注入与 Token 预算控制：</p>
+        <p style="font-size:.8rem;color:var(--text2);margin-bottom:8px" data-lang="en">Conversation context management with multi-turn memory, tool result injection, and token budget control:</p>
+        <table class="data-table">
+          <tr><th data-lang="zh">区域</th><th data-lang="en">Zone</th><th data-lang="zh">内容</th><th data-lang="en">Content</th><th>Tokens</th></tr>
+          <tr><td><span class="tag g">系统</span></td><td data-lang="zh">系统提示词</td><td data-lang="en">System prompt</td><td>2K</td></tr>
+          <tr><td><span class="tag b">对话</span></td><td data-lang="zh">用户消息 + AI 回复</td><td data-lang="en">User + AI messages</td><td>8K</td></tr>
+          <tr><td><span class="tag a">工具</span></td><td data-lang="zh">工具调用结果</td><td data-lang="en">Tool results</td><td>4K</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
+
+<!-- ═══ 05. 工具系统 ═══ -->
+<div class="sec" id="tools">
+  <div class="sec-head"><span class="sec-num">04b</span><h2 data-lang="zh">工具系统</h2><h2 data-lang="en">Tool System</h2><span class="meta">11 Tools</span></div>
+
+  <div class="card">
+    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔧 <span data-lang="zh">内置工具</span><span data-lang="en">Built-in Tools</span></div>
+    <div class="card-body show">
+      <table class="data-table">
+        <tr><th>#</th><th data-lang="zh">工具</th><th data-lang="en">Tool</th><th data-lang="zh">用途</th><th data-lang="en">Purpose</th><th data-lang="zh">安全级别</th><th data-lang="en">Safety</th></tr>
+        <tr><td>1</td><td>🔎 知识库检索</td><td>Knowledge Retrieval</td><td data-lang="zh">混合搜索企业知识文档</td><td data-lang="en">Hybrid search enterprise docs</td><td><span class="tag g">安全</span></td></tr>
+        <tr><td>2</td><td>🌐 Web Search</td><td>Web Search</td><td data-lang="zh">联网实时搜索</td><td data-lang="en">Real-time web search</td><td><span class="tag g">安全</span></td></tr>
+        <tr><td>3</td><td>📄 文档解析</td><td>Doc Parsing</td><td data-lang="zh">PDF/Word/TXT/MD 解析</td><td data-lang="en">Parse uploaded documents</td><td><span class="tag g">安全</span></td></tr>
+        <tr><td>4</td><td>📝 智能摘要</td><td>Summarization</td><td data-lang="zh">长文档自动摘要</td><td data-lang="en">Auto-summarization</td><td><span class="tag g">安全</span></td></tr>
+        <tr><td>5</td><td>📊 深度分析</td><td>Deep Analysis</td><td data-lang="zh">趋势/情感/观点提炼</td><td data-lang="en">Trend/sentiment/insight</td><td><span class="tag g">安全</span></td></tr>
+        <tr><td>6</td><td>🗂️ 文件管理</td><td>File Management</td><td data-lang="zh">组织/标注/归档</td><td data-lang="en">Organize/tag/archive</td><td><span class="tag g">安全</span></td></tr>
+        <tr><td>7</td><td>⌨️ 代码执行</td><td>Code Execution</td><td data-lang="zh">沙箱 Python 执行</td><td data-lang="en">Sandboxed Python</td><td><span class="tag a">沙箱</span></td></tr>
+        <tr><td>8</td><td>🔗 内容爬取</td><td>Content Crawler</td><td data-lang="zh">网页获取与清洗</td><td data-lang="en">Web page fetching</td><td><span class="tag b">限制</span></td></tr>
+        <tr><td>9</td><td>🔄 批量处理</td><td>Batch Processing</td><td data-lang="zh">大数据分批处理</td><td data-lang="en">Large dataset batching</td><td><span class="tag g">安全</span></td></tr>
+        <tr><td>10</td><td>🌍 翻译</td><td>Translation</td><td data-lang="zh">中英日法互译</td><td data-lang="en">zh/en/ja/fr</td><td><span class="tag g">安全</span></td></tr>
+        <tr><td>11</td><td>🧭 知识图谱</td><td>Knowledge Graph</td><td data-lang="zh">实体关系探索</td><td data-lang="en">Entity-relation exploration</td><td><span class="tag g">安全</span></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="card amber-ac">
+    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🛡️ <span data-lang="zh">安全机制</span><span data-lang="en">Security</span></div>
+    <div class="card-body show">
+      <ul style="font-size:.8rem;color:var(--text2);line-height:2;list-style:none">
+        <li>→ <span data-lang="zh">代码执行在受限沙箱中运行，禁用 import/exec/eval</span><span data-lang="en">Code execution runs in a restricted sandbox, import/exec/eval disabled</span></li>
+        <li>→ <span data-lang="zh">Web 爬取限制同域访问，超时 10s</span><span data-lang="en">Web crawler restricted to same-origin, 10s timeout</span></li>
+        <li>→ <span data-lang="zh">工具调用注入上下文隔离，不泄露系统提示词</span><span data-lang="en">Tool call context isolated from system prompts</span></li>
+        <li>→ <span data-lang="zh">所有工具执行可审计、可回滚</span><span data-lang="en">All tool executions auditable and revertible</span></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 06. RAG 管道 ═══ -->
+<div class="sec" id="rag">
+  <div class="sec-head"><span class="sec-num">05</span><h2 data-lang="zh">RAG 管道</h2><h2 data-lang="en">RAG Pipeline</h2><span class="meta">Hybrid Search · Rerank · Citation</span></div>
+
+  <div class="g2">
+    <div class="card green-ac">
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 📥 <span data-lang="zh">文档处理流程</span><span data-lang="en">Document Pipeline</span></div>
+      <div class="card-body show">
+        <div class="flow">
+          <span class="flow-box g">上传</span><span class="flow-arrow">→</span>
+          <span class="flow-box b">MIME 校验</span><span class="flow-arrow">→</span>
+          <span class="flow-box b">SHA-256 去重</span><span class="flow-arrow">→</span>
+          <span class="flow-box a">MinIO 存储</span><span class="flow-arrow">→</span>
+          <span class="flow-box b">Kafka 通知</span><span class="flow-arrow">→</span>
+          <span class="flow-box g">Worker 消费</span>
+        </div>
+        <div class="flow" style="padding-top:4px">
+          <span class="flow-box g">LangChain 解析</span><span class="flow-arrow">→</span>
+          <span class="flow-box b">智能分块</span><span class="flow-arrow">→</span>
+          <span class="flow-box b">向量化</span><span class="flow-arrow">→</span>
+          <span class="flow-box">ES 索引</span>
+        </div>
+      </div>
+    </div>
+    <div class="card blue-ac">
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔎 <span data-lang="zh">检索策略</span><span data-lang="en">Retrieval Strategy</span></div>
+      <div class="card-body show">
+        <table class="data-table">
+          <tr><th data-lang="zh">策略</th><th data-lang="en">Strategy</th><th data-lang="zh">召回方式</th><th data-lang="en">Method</th><th>权重</th></tr>
+          <tr><td>BM25</td><td data-lang="zh">关键词精确匹配</td><td data-lang="en">Keyword exact match</td><td>0.4</td></tr>
+          <tr><td>KNN 向量</td><td data-lang="zh">语义相似度</td><td data-lang="en">Semantic similarity</td><td>0.6</td></tr>
+          <tr><td>RRF 融合</td><td data-lang="zh">倒数排序融合</td><td data-lang="en">Reciprocal rank fusion</td><td>—</td></tr>
+          <tr><td>Rerank</td><td data-lang="zh">智谱 rerank 重排序</td><td data-lang="en">Cross-encoder reranking</td><td>—</td></tr>
+        </table>
+        <p style="font-size:.72rem;color:var(--text3);margin-top:6px" data-lang="zh">默认取 Top-10 检索结果，Rerank 后取 Top-5 送入 LLM</p>
+        <p style="font-size:.72rem;color:var(--text3);margin-top:6px" data-lang="en">Top-10 retrieved, Top-5 after rerank sent to LLM</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card amber-ac">
+    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> ⚡ <span data-lang="zh">语义缓存</span><span data-lang="en">Semantic Cache</span></div>
+    <div class="card-body show">
+      <p style="font-size:.8rem;color:var(--text2);margin-bottom:8px" data-lang="zh">基于向量相似度的查询缓存，相同语义问题秒级响应（< 50ms），缓存命中率约 30%。</p>
+      <p style="font-size:.8rem;color:var(--text2);margin-bottom:8px" data-lang="en">Vector-similarity-based query cache enables sub-50ms responses for semantically identical questions, with ~30% cache hit rate.</p>
+      <table class="data-table">
+        <tr><th data-lang="zh">参数</th><th data-lang="en">Parameter</th><th>值</th></tr>
+        <tr><td data-lang="zh">相似度阈值</td><td data-lang="en">Similarity threshold</td><td>0.92</td></tr>
+        <tr><td>TTL</td><td>TTL</td><td>3600s</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 07. 数据模型 ═══ -->
+<div class="sec" id="data">
+  <div class="sec-head"><span class="sec-num">06</span><h2 data-lang="zh">数据模型</h2><h2 data-lang="en">Data Models</h2><span class="meta">MySQL · Redis · ES · MinIO</span></div>
+
+  <div class="g3">
+    <div class="card green-ac">
+      <div class="card-title">🗄️ MySQL</div>
+      <ul style="font-size:.75rem;color:var(--text2);line-height:2;list-style:none;margin-top:6px">
+        <li>→ users (JWT 认证、RBAC 角色)</li>
+        <li>→ organizations (多租户层级)</li>
+        <li>→ documents (文件元数据、状态)</li>
+        <li>→ chat_sessions / messages</li>
+        <li>→ knowledge_base (知识库条目)</li>
+        <li>→ agent_config / tool_registry</li>
+      </ul>
+    </div>
+    <div class="card blue-ac">
+      <div class="card-title">⚡ Redis</div>
+      <ul style="font-size:.75rem;color:var(--text2);line-height:2;list-style:none;margin-top:6px">
+        <li>→ 会话缓存 (Token/Session)</li>
+        <li>→ 语义缓存 (向量查询)</li>
+        <li>→ Celery 任务队列</li>
+        <li>→ 限流计数器</li>
+      </ul>
+    </div>
+    <div class="card amber-ac">
+      <div class="card-title">🔎 Elasticsearch</div>
+      <ul style="font-size:.75rem;color:var(--text2);line-height:2;list-style:none;margin-top:6px">
+        <li>→ BM25 全文索引</li>
+        <li>→ KNN 向量索引 (2048维)</li>
+        <li>→ 混合检索查询</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 08. 权限体系 ═══ -->
+<div class="sec" id="auth">
+  <div class="sec-head"><span class="sec-num">07</span><h2 data-lang="zh">权限体系</h2><h2 data-lang="en">Auth & RBAC</h2><span class="meta">JWT · 多租户 · 审计</span></div>
+
+  <div class="g2">
+    <div class="card green-ac">
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔐 <span data-lang="zh">认证流程</span><span data-lang="en">Auth Flow</span></div>
+      <div class="card-body show">
+        <div class="flow">
+          <span class="flow-box g">登录请求</span><span class="flow-arrow">→</span>
+          <span class="flow-box b">验证密码</span><span class="flow-arrow">→</span>
+          <span class="flow-box a">JWT 签发</span><span class="flow-arrow">→</span>
+          <span class="flow-box b">Access + Refresh</span><span class="flow-arrow">→</span>
+          <span class="flow-box g">返回 Token</span>
+        </div>
+        <table class="data-table" style="margin-top:8px">
+          <tr><th data-lang="zh">参数</th><th data-lang="en">Parameter</th><th>值</th></tr>
+          <tr><td>Access Token TTL</td><td>24h</td></tr>
+          <tr><td>Refresh Token TTL</td><td>7d</td></tr>
+          <tr><td>算法</td><td>HS256</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="card blue-ac">
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 👥 <span data-lang="zh">RBAC 层级</span><span data-lang="en">RBAC Hierarchy</span></div>
+      <div class="card-body show">
+        <table class="data-table">
+          <tr><th data-lang="zh">角色</th><th data-lang="en">Role</th><th data-lang="zh">权限范围</th><th data-lang="en">Scope</th></tr>
+          <tr><td><span class="tag r">admin</span></td><td data-lang="zh">平台管理员</td><td data-lang="en">Platform-wide access</td></tr>
+          <tr><td><span class="tag a">org_admin</span></td><td data-lang="zh">组织管理员</td><td data-lang="en">Organization-level admin</td></tr>
+          <tr><td><span class="tag b">user</span></td><td data-lang="zh">普通用户</td><td data-lang="en">Basic user</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 09. API 设计 ═══ -->
+<div class="sec" id="api">
+  <div class="sec-head"><span class="sec-num">08</span><h2 data-lang="zh">API 设计</h2><h2 data-lang="en">API Design</h2><span class="meta">REST · SSE · WebSocket</span></div>
+
+  <div class="card">
+    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 📡 <span data-lang="zh">API 模块一览</span><span data-lang="en">API Modules</span></div>
+    <div class="card-body show">
+      <table class="data-table">
+        <tr><th>Prefix</th><th data-lang="zh">模块</th><th data-lang="en">Module</th><th data-lang="zh">端点数量</th><th data-lang="en">Endpoints</th></tr>
+        <tr><td><code>/api/v1/auth</code></td><td data-lang="zh">认证</td><td data-lang="en">Authentication</td><td>5</td></tr>
+        <tr><td><code>/api/v1/users</code></td><td data-lang="zh">用户管理</td><td data-lang="en">User Management</td><td>7</td></tr>
+        <tr><td><code>/api/v1/organizations</code></td><td data-lang="zh">组织管理</td><td data-lang="en">Organizations</td><td>8</td></tr>
+        <tr><td><code>/api/v1/documents</code></td><td data-lang="zh">文档管理</td><td data-lang="en">Documents</td><td>6</td></tr>
+        <tr><td><code>/api/v1/chat</code></td><td data-lang="zh">对话</td><td data-lang="en">Chat</td><td>5</td></tr>
+        <tr><td><code>/api/v1/agent</code></td><td data-lang="zh">Agent 配置</td><td data-lang="en">Agent</td><td>6</td></tr>
+        <tr><td><code>/api/v1/knowledge</code></td><td data-lang="zh">知识库</td><td data-lang="en">Knowledge Base</td><td>6</td></tr>
+        <tr><td><code>/api/v1/monitoring</code></td><td data-lang="zh">监控</td><td data-lang="en">Monitoring</td><td>4</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="g2">
+    <div class="card blue-ac">
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔌 SSE 事件流</div>
+      <div class="card-body show">
+        <p style="font-size:.8rem;color:var(--text2);margin-bottom:6px" data-lang="zh">Agent 对话采用 SSE (Server-Sent Events) 实时推送：</p>
+        <p style="font-size:.8rem;color:var(--text2);margin-bottom:6px" data-lang="en">Agent chat uses SSE for real-time streaming:</p>
+        <table class="data-table">
+          <tr><th>event</th><th data-lang="zh">用途</th><th data-lang="en">Purpose</th></tr>
+          <tr><td><code>chunk</code></td><td data-lang="zh">LLM 流式 Token</td><td data-lang="en">LLM streaming token</td></tr>
+          <tr><td><code>tool_call</code></td><td data-lang="zh">Agent 调用工具</td><td data-lang="en">Agent invoking tool</td></tr>
+          <tr><td><code>tool_result</code></td><td data-lang="zh">工具返回结果</td><td data-lang="en">Tool result</td></tr>
+          <tr><td><code>message</code></td><td data-lang="zh">完整消息</td><td data-lang="en">Complete message</td></tr>
+          <tr><td><code>error</code></td><td data-lang="zh">错误信息</td><td data-lang="en">Error info</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="card amber-ac">
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 📤 <span data-lang="zh">文件上传</span><span data-lang="en">File Upload</span></div>
+      <div class="card-body show">
+        <table class="data-table">
+          <tr><th data-lang="zh">参数</th><th data-lang="en">Parameter</th><th>值</th></tr>
+          <tr><td data-lang="zh">最大文件</td><td data-lang="en">Max file size</td><td>100MB</td></tr>
+          <tr><td data-lang="zh">支持格式</td><td data-lang="en">Formats</td><td>PDF, DOCX, TXT, MD</td></tr>
+          <tr><td data-lang="zh">存储方式</td><td data-lang="en">Storage</td><td>MinIO + 分块上传</td></tr>
+          <tr><td data-lang="zh">去重</td><td data-lang="en">Dedup</td><td>SHA-256 哈希</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 10. 部署架构 ═══ -->
+<div class="sec" id="deploy">
+  <div class="sec-head"><span class="sec-num">09</span><h2 data-lang="zh">部署架构</h2><h2 data-lang="en">Deployment</h2><span class="meta">Docker · K8s</span></div>
+
+  <div class="g2">
+    <div class="card green-ac">
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🐳 <span data-lang="zh">Docker Compose</span><span data-lang="en">Docker Compose</span></div>
+      <div class="card-body show">
+        <p style="font-size:.8rem;color:var(--text2);margin-bottom:6px" data-lang="zh">一键启动所有依赖：MySQL / Redis / ES / Kafka / MinIO + 后端 + 前端</p>
+        <p style="font-size:.8rem;color:var(--text2);margin-bottom:6px" data-lang="en">One-command startup for all dependencies including backend and frontend</p>
+        <pre style="font-size:.72rem;color:var(--text2);background:var(--bg3);padding:10px;border-radius:6px"><code># 基础设施
+cd backend && docker compose up -d
+
+# 后端
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 前端
+cd frontend && npm run dev</code></pre>
+      </div>
+    </div>
+    <div class="card blue-ac">
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> ☸️ Kubernetes</div>
+      <div class="card-body show">
+        <p style="font-size:.8rem;color:var(--text2);margin-bottom:6px" data-lang="zh">生产级 K8s 部署，Deployment + Service + ConfigMap + HPA：</p>
+        <p style="font-size:.8rem;color:var(--text2);margin-bottom:6px" data-lang="en">Production K8s deployment with Deployment + Service + ConfigMap + HPA:</p>
+        <pre style="font-size:.72rem;color:var(--text2);background:var(--bg3);padding:10px;border-radius:6px"><code>kubectl apply -f deploy/k8s/
+
+# 包含
+# - backend-deployment.yaml
+# - frontend-deployment.yaml
+# - configmap.yaml
+# - hpa.yaml</code></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 11. 监控运维 ═══ -->
+<div class="sec" id="monitor">
+  <div class="sec-head"><span class="sec-num">10</span><h2 data-lang="zh">监控运维</h2><h2 data-lang="en">Monitoring</h2><span class="meta">Prometheus · Grafana · OpenTelemetry</span></div>
+
+  <div class="g3">
+    <div class="card green-ac" style="text-align:center;padding:20px"><div class="big">15+</div><div class="sl" data-lang="zh">Prometheus 指标</div><div class="sl" data-lang="en">Prometheus Metrics</div></div>
+    <div class="card blue-ac" style="text-align:center;padding:20px"><div class="big b">4</div><div class="sl" data-lang="zh">Grafana 仪表盘</div><div class="sl" data-lang="en">Grafana Dashboards</div></div>
+    <div class="card amber-ac" style="text-align:center;padding:20px"><div class="big a">全链路</div><div class="sl">OpenTelemetry Tracing</div></div>
+  </div>
+</div>
+
+<!-- ═══ 12. 测试体系 ═══ -->
+<div class="sec" id="testing">
+  <div class="sec-head"><span class="sec-num">11</span><h2 data-lang="zh">测试体系</h2><h2 data-lang="en">Testing</h2><span class="meta">400+ Tests</span></div>
+
+  <div class="g2">
+    <div class="card green-ac" style="text-align:center;padding:20px"><div class="big">400+</div><div class="sl" data-lang="zh">测试总数</div><div class="sl" data-lang="en">Total Tests</div></div>
+    <div class="card blue-ac" style="text-align:center;padding:20px"><div class="big b">21</div><div class="sl" data-lang="zh">测试文件</div><div class="sl" data-lang="en">Test Files</div></div>
+  </div>
+  <div class="card">
+    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🧪 <span data-lang="zh">测试分类</span><span data-lang="en">Test Categories</span></div>
+    <div class="card-body show">
+      <table class="data-table">
+        <tr><th data-lang="zh">层级</th><th data-lang="en">Layer</th><th data-lang="zh">覆盖范围</th><th data-lang="en">Scope</th><th data-lang="zh">工具</th><th data-lang="en">Tool</th></tr>
+        <tr><td>Unit</td><td data-lang="zh">服务层、工具函数</td><td data-lang="en">Services, utilities</td><td>pytest</td></tr>
+        <tr><td>API</td><td data-lang="zh">REST 端点</td><td data-lang="en">REST endpoints</td><td>pytest + httpx</td></tr>
+        <tr><td>Frontend</td><td data-lang="zh">组件、Store</td><td data-lang="en">Components, Stores</td><td>vitest</td></tr>
+        <tr><td>TypeScript</td><td data-lang="zh">类型安全</td><td data-lang="en">Type safety</td><td>vue-tsc</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div style="text-align:center;padding:2rem 0;color:var(--text3);font-size:.8rem;border-top:1px solid var(--border);margin-top:2rem">
+  DocMind Architecture · v1.2.1 · <a href="index.html" style="color:var(--green);text-decoration:none;">返回首页</a> · <a href="https://github.com/sijie-Z/DocMind-RAG" style="color:var(--green);text-decoration:none;">GitHub</a>
+</div>
+
+</div><!-- /main -->
+
+<script>
+function toggle(el){
+  el.classList.toggle('open')
+  el.closest('.card-title').nextElementSibling.classList.toggle('show')
+}
+// Nav highlight on scroll
+document.querySelectorAll('.nav-item').forEach(item=>{
+  item.addEventListener('click',function(e){
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'))
+    this.classList.add('active')
+  })
+})
+</script>
+
 </body>
 </html>
