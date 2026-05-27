@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import RedisTools
-from app.exceptions import AccountLockedError
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -28,10 +27,6 @@ logger = logging.getLogger(__name__)
 # JWT认证方案
 security = HTTPBearer()
 
-# Brute force protection constants
-_MAX_LOGIN_FAILURES = 5
-_LOCKOUT_DURATION_SECONDS = 900  # 15 minutes
-_FAILURE_KEY_PREFIX = "login_failures:"
 
 class AuthService:
     """认证服务类"""
@@ -186,41 +181,9 @@ class AuthService:
 
         return user
 
-    async def _check_account_lockout(self, username: str) -> None:
-        """Check if account is locked due to too many failed login attempts."""
-        key = f"{_FAILURE_KEY_PREFIX}{username}"
-        failures = await RedisTools.get_cache(key)
-        if failures and int(failures) >= _MAX_LOGIN_FAILURES:
-            logger.warning(f"Account locked: {username} has {failures} failed attempts")
-            raise AccountLockedError(
-                message=f"Account temporarily locked due to too many failed attempts. Try again in {_LOCKOUT_DURATION_SECONDS // 60} minutes."
-            )
-
-    async def _record_login_failure(self, username: str) -> None:
-        """Increment login failure count in Redis with TTL."""
-        key = f"{_FAILURE_KEY_PREFIX}{username}"
-        count = await RedisTools.increment(key)
-        if count == 1:
-            # First failure — set TTL so the counter auto-expires
-            from app.core.redis import get_redis
-            try:
-                client = await get_redis()
-                await client.expire(key, _LOCKOUT_DURATION_SECONDS)
-            except Exception:
-                pass
-        logger.info(f"Login failure recorded for {username}: {count}/{_MAX_LOGIN_FAILURES}")
-
-    async def _clear_login_failures(self, username: str) -> None:
-        """Clear login failure count on successful authentication."""
-        key = f"{_FAILURE_KEY_PREFIX}{username}"
-        await RedisTools.delete_cache(key)
-
     async def authenticate_user(self, db: AsyncSession, username: str, password: str) -> User | None:
-        """验证用户凭据（含暴力破解防护）"""
+        """验证用户凭据"""
         try:
-            # Check lockout before anything else
-            await self._check_account_lockout(username)
-
             logger.info(f"Attempting login for user: {username}")
 
             # 查询用户
@@ -228,7 +191,6 @@ class AuthService:
             user = result.scalar_one_or_none()
 
             if user is None:
-                await self._record_login_failure(username)
                 logger.warning(f"Login failed: User {username} not found")
                 return None
 
@@ -236,7 +198,6 @@ class AuthService:
             is_valid = self.verify_password(password, user.hashed_password)
 
             if not is_valid:
-                await self._record_login_failure(username)
                 logger.warning(f"Login failed: Invalid password for user {username}")
                 return None
 
@@ -245,13 +206,9 @@ class AuthService:
                 logger.warning(f"Login failed: User {username} is inactive")
                 return None
 
-            # Success — clear failure count
-            await self._clear_login_failures(username)
             logger.info(f"Login success for user: {username}")
             return user
 
-        except AccountLockedError:
-            raise
         except Exception as e:
             logger.exception(f"用户认证失败: {e}")
             raise

@@ -36,62 +36,6 @@ router = APIRouter()
 # OAuth2配置
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
-# --- Brute force protection (imported from auth_service) ---
-from app.services.auth_service import _LOCKOUT_DURATION_SECONDS as LOGIN_LOCKOUT_SECONDS
-from app.services.auth_service import _MAX_LOGIN_FAILURES as LOGIN_MAX_ATTEMPTS
-
-
-async def _check_login_lockout(request: Request) -> None:
-    """Check if the IP is locked out due to too many failed login attempts."""
-    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-    if not client_ip and request.client:
-        client_ip = request.client.host
-    if not client_ip:
-        return
-    try:
-        from app.core.redis import redis_client
-        if redis_client:
-            key = f"login_fail:{client_ip}"
-            attempts = await redis_client.get(key)
-            if attempts and int(attempts) >= LOGIN_MAX_ATTEMPTS:
-                ttl = await redis_client.ttl(key)
-                raise RateLimitError(f"登录尝试次数过多，请 {ttl} 秒后重试")
-    except RateLimitError:
-        raise
-    except Exception as e:
-        logger.warning("Redis check login lockout failed: %s", e)
-
-async def _record_login_failure(request: Request) -> None:
-    """Record a failed login attempt for the given IP."""
-    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-    if not client_ip and request.client:
-        client_ip = request.client.host
-    if not client_ip:
-        return
-    try:
-        from app.core.redis import redis_client
-        if redis_client:
-            key = f"login_fail:{client_ip}"
-            pipe = redis_client.pipeline()
-            pipe.incr(key)
-            pipe.expire(key, LOGIN_LOCKOUT_SECONDS)
-            await pipe.execute()
-    except Exception as e:
-        logger.warning("Redis record login failure failed: %s", e)
-
-async def _clear_login_failures(request: Request) -> None:
-    """Clear failed login attempts on successful login."""
-    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-    if not client_ip and request.client:
-        client_ip = request.client.host
-    if not client_ip:
-        return
-    try:
-        from app.core.redis import redis_client
-        if redis_client:
-            await redis_client.delete(f"login_fail:{client_ip}")
-    except Exception as e:
-        logger.warning("Redis clear login failures failed: %s", e)
 
 # 请求模型
 class LoginRequest(BaseModel):
@@ -149,7 +93,6 @@ async def login(
     db: AsyncSession = Depends(get_db)
 ):
     """用户登录 (form-data)"""
-    await _check_login_lockout(request)
     try:
         logger.info(f"Login attempt - username: {form_data.username!r}, ip: {request.client.host if request.client else 'unknown'}")
         user = await auth_service.authenticate_user(
@@ -157,10 +100,7 @@ async def login(
         )
 
         if not user:
-            await _record_login_failure(request)
             raise AuthenticationError("用户名或密码错误")
-
-        await _clear_login_failures(request)
 
         logger.info("Authentication successful. Proceeding to token generation.")
         # 2. 生成访问令牌
@@ -274,15 +214,11 @@ async def login_json(
     db: AsyncSession = Depends(get_db),
 ):
     """Login with JSON body."""
-    await _check_login_lockout(request)
     try:
         logger.info(f"Login (JSON) attempt - username: {body.username!r}")
         user = await auth_service.authenticate_user(db, body.username, body.password)
         if not user:
-            await _record_login_failure(request)
             raise AuthenticationError("用户名或密码错误")
-
-        await _clear_login_failures(request)
         access_token = auth_service.create_access_token(
             data={
                 "sub": user.username,
