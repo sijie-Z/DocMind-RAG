@@ -20,6 +20,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -340,33 +342,33 @@ async def list_sessions(
 async def create_session(
     body: SessionCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
 ):
     """Create a new agent session."""
-    try:
-        session_id = str(uuid.uuid4())
-        new_session = ChatSession(
-            id=session_id,
-            user_id=current_user.id,
-            title=body.title[:80],
-            status=ChatSessionStatus.ACTIVE,
-            organization_id=current_user.organization_id,
-        )
-        db.add(new_session)
-        await db.commit()
+    from app.core.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        try:
+            session_id = str(uuid.uuid4())
+            new_session = ChatSession(
+                id=session_id,
+                user_id=current_user.id,
+                title=body.title[:80],
+                status=ChatSessionStatus.ACTIVE,
+                organization_id=current_user.organization_id,
+            )
+            db.add(new_session)
+            await db.commit()
 
-        return {
-            "success": True,
-            "data": {
-                "id": session_id,
-                "title": new_session.title,
-                "created_at": new_session.created_at.isoformat() if new_session.created_at else "",
-            },
-        }
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Create session error: {e}")
-        raise ValidationError(f"创建会话失败: {str(e)}")
+            return {
+                "success": True,
+                "data": {
+                    "id": session_id,
+                    "title": new_session.title,
+                },
+            }
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Create session error: {e}")
+            raise ValidationError(f"创建会话失败: {str(e)}")
 
 
 @router.get("/sessions/{session_id}")

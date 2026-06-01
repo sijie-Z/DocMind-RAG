@@ -160,34 +160,82 @@ def rewrite_query_candidates(query: str) -> list[str]:
 
 
 async def rewrite_query_llm(query: str, openai_client, model: str) -> list[str]:
-    """Use LLM to generate query expansion variants."""
+    """Use LLM to generate query expansion variants (via json_object mode)."""
     if not openai_client or not getattr(settings, "RAG_ENABLE_QUERY_REWRITE", True):
         return [query]
     try:
         prompt = (
             "作为搜索专家，请为用户的原始问题生成 3 个相关的搜索查询变体（中文）。"
-            "只返回 JSON 字符串数组，不要有任何解释。\n\n"
-            f"原始问题: {query}\n\n输出示例: [\"查询1\", \"查询2\", \"查询3\"]"
+            "返回 JSON 对象，queries 字段为字符串数组。"
+            f"\n\n原始问题: {query}"
         )
         resp = await openai_client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=200,
+            response_format={"type": "json_object"},
         )
         content = resp.choices[0].message.content or ""
-        match = re.search(r"\[.*\]", content, re.DOTALL)
-        if match:
-            rewritten = json.loads(match.group(0))
-            if isinstance(rewritten, list):
-                results = [query]
-                for r in rewritten:
-                    if r.strip() and r.strip() not in results:
-                        results.append(r.strip())
-                return results[:4]
+        parsed = json.loads(content)
+        queries = parsed.get("queries") or parsed.get("variants") or parsed.get("results") or []
+        if isinstance(queries, list) and len(queries) >= 1:
+            results = [query]
+            for q in queries:
+                key = str(q).strip()
+                if key and key not in results:
+                    results.append(key)
+            return results[:4]
         return [query]
     except Exception as e:
         logger.warning(f"LLM query rewrite failed: {e}")
+        return [query]
+
+
+async def decompose_query(query: str, openai_client, model: str, max_subqueries: int = 4) -> list[str]:
+    """Decompose a complex query into focused sub-questions for multi-perspective RAG.
+
+    Uses json_object response mode to avoid regex fragility.
+    Each sub-question targets a distinct dimension of the original query.
+    """
+    if not openai_client:
+        return [query]
+    try:
+        prompt = (
+            "你是一个查询分解专家。请将用户的复杂问题拆解为多个聚焦的子问题，"
+            "每个子问题关注原问题的一个独立维度（如：定义、原因、影响、方案、数据等）。\n"
+            f"要求：拆分为 2 到 {max_subqueries} 个子问题，每个子问题独立可检索，"
+            "彼此覆盖不同方面。\n"
+            "返回 JSON 对象，sub_questions 字段为字符串数组。"
+            f"\n\n用户问题: {query}"
+        )
+        resp = await openai_client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=300,
+            response_format={"type": "json_object"},
+        )
+        content = resp.choices[0].message.content or ""
+        parsed = json.loads(content)
+        subqueries = (
+            parsed.get("sub_questions")
+            or parsed.get("subquestions")
+            or parsed.get("queries")
+            or []
+        )
+        if isinstance(subqueries, list) and len(subqueries) >= 1:
+            seen = {query.lower().strip()}
+            result = [query]
+            for sq in subqueries:
+                key = str(sq).strip().lower()
+                if key and key not in seen:
+                    result.append(str(sq).strip())
+                    seen.add(key)
+            return result[:max_subqueries]
+        return [query]
+    except Exception as e:
+        logger.warning(f"Query decomposition failed: {e}")
         return [query]
 
 

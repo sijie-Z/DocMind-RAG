@@ -119,7 +119,7 @@ class Reflector:
 
         try:
             response = await self.client.chat.completions.create(
-                model=self.config.model,
+                model=self.config.get_deep_model(),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": "请评估以上执行结果。"},

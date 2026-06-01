@@ -26,6 +26,7 @@ from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, Planner, PlanStep
 from app.agent.reflector import Reflector
 from app.agent.registry import tool_registry
+from app.agent.reviewer import Reviewer
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +133,7 @@ class PERAgentLoop:
         self._planner: Planner | None = None
         self._executor: Executor | None = None
         self._reflector: Reflector | None = None
+        self._reviewer: Reviewer | None = None
 
     @property
     def planner(self) -> Planner:
@@ -150,6 +152,45 @@ class PERAgentLoop:
         if self._reflector is None:
             self._reflector = Reflector(self.client, self.config, self.memory)
         return self._reflector
+
+    @property
+    def reviewer(self) -> Reviewer:
+        if self._reviewer is None:
+            self._reviewer = Reviewer(self.client, self.config)
+        return self._reviewer
+
+    def _should_continue_execution(self, final_output: str, plan, remaining_steps: list) -> bool:
+        """Conditional edge: decide if execution should continue or proceed to reflection.
+
+        Checks whether the accumulated answer already contains sufficient information
+        to address the user's query. If yes, remaining steps are auto-skipped to
+        avoid unnecessary tool calls (inspired by TradingAgents' conditional routing).
+
+        Returns True to continue executing, False to skip remaining steps.
+        """
+        if not remaining_steps:
+            return False
+
+        # If no output yet, definitely continue
+        if len(final_output.strip()) < 50:
+            return True
+
+        # If the output contains SQL results or search results with clear answers,
+        # and remaining steps don't add new tools, we can skip
+        has_data = any(marker in final_output for marker in [
+            '"rows":', '"data":', "找到", "根据",
+            "综上所述", "结论", "建议",
+        ])
+
+        # If we have substantial output AND the next steps are just more of the same
+        # (no new tool types), skip to avoid redundancy
+        if has_data and len(final_output) > 300:
+            remaining_tools = {s.tool_hint for s in remaining_steps if s.tool_hint}
+            # If remaining steps have no new tool types compared to what we've already done,
+            # they're unlikely to add new information
+            return False
+
+        return True
 
     async def run(
         self,
@@ -256,12 +297,28 @@ class PERAgentLoop:
                 yield event
                 if event.type == "chunk":
                     final_output += event.content
+
+            # Conditional routing: if remaining steps are unlikely to add value, skip them
+            remaining_steps = [s for s in plan.steps if s.status == "pending"]
+            if remaining_steps and not self._should_continue_execution(final_output, plan, remaining_steps):
+                skipped = [s for s in remaining_steps if s.status == "pending"]
+                for s in skipped:
+                    s.status = "skipped"
+                if skipped:
+                    yield AgentEvent(
+                        type="thinking",
+                        content=f"已有充分信息，跳过 {len(skipped)} 个剩余步骤",
+                        thinking_type="evaluation",
+                        plan_id=plan.id,
+                        plan_progress=plan.progress,
+                    )
+                    logger.info("Conditional routing: %d steps skipped (sufficient info)", len(skipped))
         else:
             # Tool-less mode: single LLM call
             messages = self._build_messages(query, history, context_docs, memory_context)
             try:
                 response = await self.client.chat.completions.create(
-                    model=self.config.model,
+                    model=self.config.get_deep_model(),
                     messages=messages,
                     temperature=self.config.temperature,
                     max_tokens=self.config.max_tokens,
@@ -273,6 +330,32 @@ class PERAgentLoop:
                     final_output = content
             except Exception as e:
                 yield AgentEvent(type="error", content=f"LLM Error: {e}")
+
+        # ── Phase 2b: Quality Gate ────────────────────────────────────────
+        if plan.steps:
+            from app.agent.quality_gate import quality_gate_check
+            step_results = self.memory.get_all_results()
+            qg_result = quality_gate_check(step_results)
+            if not qg_result["passed"]:
+                fatal = qg_result.get("fatal_issues", [])
+                warnings = qg_result["summary"]
+                if fatal:
+                    yield AgentEvent(
+                        type="thinking",
+                        content=f"质量门控发现 {len(fatal)} 个问题:\n" + "\n".join(fatal),
+                        thinking_type="evaluation",
+                    )
+                if self.config.enable_thinking:
+                    yield AgentEvent(
+                        type="thinking",
+                        content=warnings[:500],
+                        thinking_type="evaluation",
+                    )
+                logger.info("Quality gate: %d passed, %d concerns, %d failed",
+                    sum(1 for g, _ in qg_result["grades"].values() if g == "A"),
+                    sum(1 for g, _ in qg_result["grades"].values() if g == "C"),
+                    sum(1 for g, _ in qg_result["grades"].values() if g == "F"),
+                )
 
         # ── Phase 3: Reflection ──────────────────────────────────────────
         if self.config.enable_reflection and plan.steps:
@@ -309,6 +392,39 @@ class PERAgentLoop:
                                         final_output += "\n\n[重试结果]\n" + retry_event.content
                                     yield retry_event
                                 break
+
+            # ── Phase 3b: Adversarial Review ────────────────────────────────
+            if self.config.enable_reflection and plan.steps:
+                results = self.memory.get_all_results()
+                yield AgentEvent(
+                    type="thinking",
+                    content="进行对抗性质检，审查结果中可能存在的问题...",
+                    thinking_type="evaluation",
+                )
+                await _yield_control()
+                review = await self.reviewer.review(plan, results)
+                issues = review.get("issues_found", [])
+                if issues:
+                    high_issues = [i for i in issues if i.get("severity") == "high"]
+                    if high_issues:
+                        logger.info("Adversarial review found %d high-severity issues", len(high_issues))
+                        for issue in high_issues:
+                            final_output += (
+                                f"\n\n⚠️ **审查发现**: {issue.get('description', '')}\n"
+                                f"  建议: {issue.get('suggestion', '')}"
+                            )
+                            yield AgentEvent(
+                                type="thinking",
+                                content=f"审查发现高风险问题: {issue.get('description', '')}",
+                                thinking_type="evaluation",
+                            )
+                    # Log all issues
+                    for issue in issues:
+                        logger.info(
+                            "Review issue [%s]: %s",
+                            issue.get("severity", "unknown"),
+                            issue.get("description", "")[:100],
+                        )
 
         # ── Phase 4: Store + Finalize ─────────────────────────────────────
         await self.memory.record_interaction(query, final_output)

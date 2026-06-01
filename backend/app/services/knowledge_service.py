@@ -106,7 +106,7 @@ class KnowledgeService:
             results = await rag_service.search_knowledge_base(
                 query=query,
                 organization_id=org_id,
-                top_k=top_k
+                top_k=top_k,
             )
 
             # 格式化为 KnowledgeService 期望的输出格式以保持兼容性

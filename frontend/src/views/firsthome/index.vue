@@ -176,7 +176,7 @@ const steps = [
 
 const features = [
   { icon: LayersIcon, title: '混合检索', desc: '关键词 BM25 + 向量语义搜索 + RRF 融合算法，最大化召回精度。' },
-  { icon: BrainIcon, title: 'Agent 推理', desc: 'ReAct 自主推理循环，多步工具调用，拆解复杂问题逐步求解。' },
+  { icon: BrainIcon, title: 'Agent 推理', desc: 'PER 三阶段推理（Plan-Execute-Reflect），多步工具调用，拆解复杂问题逐步求解。' },
   { icon: ZapIcon, title: '流式响应', desc: 'SSE 实时流式输出，边思考边回答，无需等待完整结果。' },
   { icon: CodeIcon, title: '开放 API', desc: 'RESTful API + WebSocket 双通道，轻松集成到你的业务系统。' },
   { icon: ShieldIcon, title: '企业安全', desc: 'JWT 认证、RBAC 权限、组织隔离、完整审计日志。' },

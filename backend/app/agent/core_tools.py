@@ -122,7 +122,7 @@ async def vector_search(
                 },
             }
         },
-        "_source": ["chunk_text", "filename", "document_id"],
+        "_source": ["content", "filename", "document_id"],
     }
     res = await ElasticsearchTools.search_documents(es_query)
     hits = res.get("hits", {}).get("hits", [])
@@ -169,14 +169,14 @@ async def summarize_document(
         "size": 50,
         "query": {"term": {"document_id": document_id}},
         "sort": [{"chunk_index": {"order": "asc"}}],
-        "_source": ["chunk_text", "filename"],
+        "_source": ["content", "filename"],
     }
     res = await ElasticsearchTools.search_documents(es_query)
     hits = res.get("hits", {}).get("hits", [])
     if not hits:
         return f"Document {document_id} not found in index."
 
-    full_text = "\n".join(h.get("_source", {}).get("chunk_text", "") for h in hits)
+    full_text = "\n".join(h.get("_source", {}).get("content", "") for h in hits)
     filename = hits[0].get("_source", {}).get("filename", "Unknown")
 
     # Use LLM to summarize
@@ -198,7 +198,10 @@ async def summarize_document(
         summary = resp.choices[0].message.content or "Summary generation failed."
         return f"Document: {filename}\n\n{summary}"
     except Exception as e:
-        return f"Document: {filename}\nSummary failed: {e}"
+        logger.warning(f"LLM summarization failed for {document_id}: {e}")
+        # Fallback: return raw content truncated
+        raw_preview = full_text[:2000]
+        return f"Document: {filename}\n(LLM summarization unavailable, showing raw content)\n\n{raw_preview}"
 
 
 @register_tool(
@@ -230,13 +233,75 @@ async def extract_keywords(text: str, max_keywords: int = 10, **_: Any) -> str:
     return json.dumps(terms[:max_keywords], ensure_ascii=False)
 
 
+# ── Domain analytical frameworks ─────────────────────────────────
+
+ANALYSIS_FRAMEWORKS: dict[str, str] = {
+    "dupont": (
+        "请使用杜邦分析法对财务数据进行分析，按以下框架拆解：\n"
+        "1. 净资产收益率(ROE) = 销售净利率 × 总资产周转率 × 权益乘数\n"
+        "2. 销售净利率: 净利润/营业收入 → 判断盈利能力变化\n"
+        "3. 总资产周转率: 营业收入/总资产 → 判断运营效率变化\n"
+        "4. 权益乘数: 总资产/股东权益 → 判断财务杠杆变化\n"
+        "5. 综合判断: ROE 变化的根本驱动因素是哪个？\n"
+        "输出 JSON，包含: overall_roe, profit_margin, asset_turnover, "
+        "equity_multiplier, primary_driver, trend_assessment"
+    ),
+    "swot": (
+        "请使用 SWOT 框架进行分析：\n"
+        "1. 优势(Strengths): 内部有利因素、核心能力、资源优势\n"
+        "2. 劣势(Weaknesses): 内部不足、能力短板、资源约束\n"
+        "3. 机会(Opportunities): 外部有利条件、市场趋势、政策利好\n"
+        "4. 威胁(Threats): 外部风险、竞争压力、政策变化\n"
+        "输出 JSON，包含: strengths, weaknesses, opportunities, threats, overall_strategy"
+    ),
+    "pest": (
+        "请使用 PEST 宏观环境分析框架：\n"
+        "1. 政治(Political): 政策法规、政府干预、贸易政策\n"
+        "2. 经济(Economic): 经济增长、利率、通胀、就业\n"
+        "3. 社会(Social): 人口结构、消费趋势、文化因素\n"
+        "4. 技术(Technological): 技术创新、研发投入、数字化\n"
+        "输出 JSON，包含: political, economic, social, technological, key_risks"
+    ),
+    "risk_assessment": (
+        "请进行结构化风险评估：\n"
+        "1. 识别风险: 列出文档中提到的所有风险因素\n"
+        "2. 分类: 按类型分类（市场/运营/合规/财务/战略）\n"
+        "3. 影响程度: 每项风险的可能影响（高/中/低）\n"
+        "4. 发生概率: 每项风险的发生概率（高/中/低）\n"
+        "5. 综合风险评分: 影响 × 概率 的加权汇总\n"
+        "输出 JSON，包含: risk_matrix, overall_score, top_risks, mitigation_suggestions"
+    ),
+    "financial_health": (
+        "请进行财务健康度分析，按以下维度：\n"
+        "1. 盈利能力: 净利润率、毛利率、ROE 趋势\n"
+        "2. 偿债能力: 资产负债率、流动比率、利息保障倍数\n"
+        "3. 运营能力: 存货周转率、应收账款周转率、总资产周转率\n"
+        "4. 现金流: 经营活动现金流、自由现金流趋势\n"
+        "5. 成长性: 收入增长率、利润增长率、市场份额变化\n"
+        "输出 JSON，包含: profitability, solvency, efficiency, cash_flow, growth, overall_health"
+    ),
+    "contract_risk": (
+        "请进行合同风险分析，按以下框架：\n"
+        "1. 条款模糊度: 是否存在模糊不清的表述\n"
+        "2. 赔偿条款: 违约赔偿是否合理、是否有上限\n"
+        "3. 履约条件: 履约条件是否明确、是否存在不平等条款\n"
+        "4. 终止条款: 合同终止条件和通知期是否合理\n"
+        "5. 争议解决: 管辖法院、仲裁条款是否有利\n"
+        "输出 JSON，包含: clause_ambiguity, indemnification, performance_conditions, "
+        "termination, dispute_resolution, overall_risk_level"
+    ),
+}
+
+
 @register_tool(
     name="extract_insights",
     description=(
         "Deep analysis of a single document to extract structured insights: "
         "key entities (people, organizations, dates, locations), metrics and statistics, "
         "main claims and findings, and document section structure. "
-        "Use this for in-depth document understanding beyond simple summarization."
+        "Supports optional domain analysis frameworks (dupont, swot, pest, "
+        "risk_assessment, financial_health, contract_risk). "
+        "Use this for in-depth document understanding."
     ),
     parameters={
         "type": "object",
@@ -250,6 +315,12 @@ async def extract_keywords(text: str, max_keywords: int = 10, **_: Any) -> str:
                 "description": "Comma-separated aspects: entities,metrics,claims,structure,all",
                 "default": "all",
             },
+            "framework": {
+                "type": "string",
+                "description": "Optional domain analysis framework: "
+                               "dupont, swot, pest, risk_assessment, financial_health, contract_risk",
+                "default": "",
+            },
         },
         "required": ["document_id"],
     },
@@ -258,6 +329,7 @@ async def extract_keywords(text: str, max_keywords: int = 10, **_: Any) -> str:
 async def extract_insights(
     document_id: str,
     aspects: str = "all",
+    framework: str = "",
     organization_id: int = 1,
     **_: Any,
 ) -> str:
@@ -269,7 +341,7 @@ async def extract_insights(
         "size": 50,
         "query": {"term": {"document_id": document_id}},
         "sort": [{"chunk_index": {"order": "asc"}}],
-        "_source": ["chunk_text", "filename", "section_title"],
+        "_source": ["content", "filename", "section_title"],
     }
     res = await ElasticsearchTools.search_documents(es_query)
     hits = res.get("hits", {}).get("hits", [])
@@ -278,7 +350,7 @@ async def extract_insights(
 
     filename = hits[0].get("_source", {}).get("filename", "Unknown")
     full_text = "\n".join(
-        h.get("_source", {}).get("chunk_text", "") for h in hits
+        h.get("_source", {}).get("content", "") for h in hits
     )
     text_sample = full_text[:8000]
 
@@ -298,19 +370,30 @@ async def extract_insights(
         "structure": "分析文档的章节结构、层次关系、段落组织方式。",
     }
 
-    selected = [a.strip() for a in aspects.split(",")]
-    if "all" in selected:
-        instructions = "\n".join(aspect_instructions.values())
-    else:
-        instructions = "\n".join(
-            v for k, v in aspect_instructions.items() if k in selected
+    # Use domain framework if specified
+    framework_key = framework.strip().lower() if framework else ""
+    if framework_key in ANALYSIS_FRAMEWORKS:
+        instructions = ANALYSIS_FRAMEWORKS[framework_key]
+        system_prompt = (
+            f"你是{framework_key}分析专家。严格按照提供的框架进行分析，"
+            "输出结构化 JSON 格式。"
         )
+        logger.info("Using domain framework '%s' for document analysis", framework_key)
+    else:
+        selected = [a.strip() for a in aspects.split(",")]
+        if "all" in selected:
+            instructions = "\n".join(aspect_instructions.values())
+        else:
+            instructions = "\n".join(
+                v for k, v in aspect_instructions.items() if k in selected
+            )
+        system_prompt = "你是文档分析专家。分析文档内容，提取结构化信息。只返回 JSON，不要包含任何解释。"
 
     try:
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
-                {"role": "system", "content": "你是文档分析专家。分析文档内容，提取结构化信息。只返回 JSON，不要包含任何解释。"},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": (
                     f"分析以下文档，{instructions}\n\n"
                     f"文档：{filename}\n\n"
@@ -394,7 +477,7 @@ async def cross_document_analysis(
         es_query = {
             "size": 20,
             "query": {"term": {"document_id": doc_id}},
-            "_source": ["chunk_text", "filename", "upload_time", "document_id"],
+            "_source": ["content", "filename", "upload_time", "document_id"],
         }
         try:
             res = await ElasticsearchTools.search_documents(es_query)
@@ -404,13 +487,13 @@ async def cross_document_analysis(
                 fallback_query = {
                     "size": 20,
                     "query": {"term": {"filename": doc_id}},
-                    "_source": ["chunk_text", "filename", "upload_time", "document_id"],
+                    "_source": ["content", "filename", "upload_time", "document_id"],
                 }
                 res = await ElasticsearchTools.search_documents(fallback_query)
                 hits = res.get("hits", {}).get("hits", [])
             if hits:
                 text = " ".join(
-                    h.get("_source", {}).get("chunk_text", "")[:500]
+                    h.get("_source", {}).get("content", "")[:500]
                     for h in hits[:10]
                 )
                 real_id = hits[0].get("_source", {}).get("document_id", doc_id)
@@ -587,7 +670,7 @@ def _generate_markdown_fallback(title: str, sections: list) -> str:
     ]
     for section in sections:
         heading = section.get("heading", "")
-        content = section.get("chunk_text", "")
+        content = section.get("content", "")
         stype = section.get("type", "text")
         if heading:
             lines.append(f"## {heading}")

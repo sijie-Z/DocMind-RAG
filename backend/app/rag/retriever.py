@@ -13,7 +13,6 @@ from app.rag.query_processor import (
     QueryIntentClassifier,
     extract_query_terms,
     generate_hyde_doc,
-    generate_multi_hyde_docs,
     rewrite_query_candidates,
     rewrite_query_llm,
 )
@@ -68,21 +67,34 @@ class HybridRetriever:
         logger.info(f"Query intent: {intent}, fields: {boost_fields}")
 
         async def _es_search(q_text: str):
+            # Build query - try exact match first, fall back to wildcard for substrings
+            wildcard_terms = [f"*{t}*" for t in q_text.split() if len(t) < 20]
+            should_clauses = [
+                {"multi_match": {
+                    "query": q_text, "fields": boost_fields,
+                    "type": "best_fields", "fuzziness": "AUTO",
+                    "minimum_should_match": "30%",
+                }},
+            ]
+            if wildcard_terms:
+                should_clauses.append({
+                    "query_string": {
+                        "query": " AND ".join(wildcard_terms),
+                        "fields": ["content^2", "filename^1.2"],
+                        "analyze_wildcard": True,
+                        "default_operator": "AND",
+                    }
+                })
             es_query = {
                 "size": candidate_size,
-                "min_score": 0.5,
                 "query": {
                     "bool": {
-                        "must": [{"multi_match": {
-                            "query": q_text, "fields": boost_fields,
-                            "type": "best_fields", "fuzziness": "AUTO",
-                            "minimum_should_match": "30%",
-                        }}],
+                        "must": [{"bool": {"should": should_clauses, "minimum_should_match": 1}}],
                         "filter": filters,
                     }
                 },
-                "highlight": {"fields": {"chunk_text": {"fragment_size": 120, "number_of_fragments": 2}}},
-                "_source": ["chunk_text", "filename", "organization_id", "document_id", "embedding", "upload_time", "section_title"],
+                "highlight": {"fields": {"content": {"fragment_size": 120, "number_of_fragments": 2}}},
+                "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
             }
             res = await ElasticsearchTools.search_documents(es_query)
             return res.get("hits", {}).get("hits", [])
@@ -123,17 +135,27 @@ class HybridRetriever:
         embedding_to_search = query_vector
 
         if enable_hyde and query_vector:
-            hyde_task = generate_hyde_doc(query, intent, self.openai_client, settings.DEEPSEEK_MODEL)
-            multi_hyde_task = generate_multi_hyde_docs(query, intent, self.openai_client, settings.DEEPSEEK_MODEL, 2)
-            hyde_doc, multi_hyde_docs = await asyncio.gather(hyde_task, multi_hyde_task)
-            all_hyde = [hyde_doc] + multi_hyde_docs if hyde_doc else multi_hyde_docs
+            # HyDE with timeout — if LLM is slow, skip gracefully
+            hyde_doc = ""
+            try:
+                hyde_doc = await asyncio.wait_for(
+                    generate_hyde_doc(query, intent, self.openai_client, settings.DEEPSEEK_MODEL),
+                    timeout=1.5,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("HyDE generation timed out, skipping")
+            except Exception as e:
+                logger.warning(f"HyDE generation failed: {e}")
 
-            if all_hyde:
-                hyde_vectors = await asyncio.gather(*[self.get_embedding(d) for d in all_hyde if d])
-                if hyde_vectors:
-                    avg_hyde = [sum(v[i] for v in hyde_vectors) / len(hyde_vectors) for i in range(len(query_vector))]
-                    embedding_to_search = [v1 * 0.6 + v2 * 0.4 for v1, v2 in zip(query_vector, avg_hyde, strict=False)]
-                    logger.info(f"Multi-HyDE fusion: {len(hyde_vectors)} docs, 60/40 weight")
+            if hyde_doc:
+                hyde_vector = await self.get_embedding(hyde_doc)
+                if hyde_vector:
+                    weight = getattr(settings, "RAG_HYDE_WEIGHT", 0.3)
+                    embedding_to_search = [
+                        v1 * (1 - weight) + v2 * weight
+                        for v1, v2 in zip(query_vector, hyde_vector, strict=False)
+                    ]
+                    logger.info(f"HyDE fusion with weight={weight}")
 
         if not embedding_to_search:
             return [], query_vector
@@ -150,7 +172,7 @@ class HybridRetriever:
                     },
                 }
             },
-            "_source": ["chunk_text", "filename", "organization_id", "document_id", "embedding", "upload_time", "section_title"],
+            "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
         }
         res = await ElasticsearchTools.search_documents(es_query)
         return res.get("hits", {}).get("hits", []), query_vector
@@ -291,7 +313,7 @@ class HybridRetriever:
 
         for hit in fused_hits:
             source = hit.get("_source", {})
-            text = (source.get("chunk_text") or source.get("content", "") or "").strip()
+            text = (source.get("content") or "").strip()
             if not text:
                 continue
 
@@ -368,8 +390,8 @@ class HybridRetriever:
         try:
             broad = {
                 "size": top_k * 2, "min_score": 0.5,
-                "query": {"bool": {"must": [{"match": {"chunk_text": {"query": query, "operator": "or", "minimum_should_match": "30%"}}}], "filter": filters}},
-                "_source": ["chunk_text", "filename", "organization_id", "document_id", "embedding", "upload_time", "section_title"],
+                "query": {"bool": {"must": [{"match": {"content": {"query": query, "operator": "or", "minimum_should_match": "30%"}}}], "filter": filters}},
+                "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
             }
             res = await ElasticsearchTools.search_documents(broad)
             hits = res.get("hits", {}).get("hits", [])
@@ -382,7 +404,7 @@ class HybridRetriever:
             vec_q = {
                 "size": top_k, "min_score": 1.15,
                 "query": {"script_score": {"query": {"bool": {"filter": filters}}, "script": {"source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0", "params": {"query_vector": qv}}}},
-                "_source": ["chunk_text", "filename", "organization_id", "document_id", "embedding", "upload_time", "section_title"],
+                "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
             }
             res = await ElasticsearchTools.search_documents(vec_q)
             return res.get("hits", {}).get("hits", [])

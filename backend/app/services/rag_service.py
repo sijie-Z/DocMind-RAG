@@ -30,6 +30,7 @@ class RagServiceFacade:
         organization_id: int,
         top_k: int = 5,
         document_ids: list[str] | None = None,
+        search_mode: str | None = None,
     ) -> list[dict[str, Any]]:
         return await self._pipeline.search_knowledge_base(query, organization_id, top_k, document_ids)
 

@@ -172,7 +172,7 @@ class Planner:
         try:
             # Real streaming: tokens flow to frontend as they arrive from the LLM
             stream = await self.client.chat.completions.create(
-                model=self.config.model,
+                model=self.config.get_deep_model(),
                 messages=messages,
                 temperature=0.1,
                 max_tokens=self.config.plan_max_tokens,

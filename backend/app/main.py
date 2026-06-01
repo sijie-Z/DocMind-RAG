@@ -168,7 +168,7 @@ OPENAPI_TAGS = [
     {"name": "操作手册", "description": "系统操作手册管理"},
     {"name": "Agent工作流", "description": "工作流 CRUD、执行、调试"},
     {"name": "Agent记忆", "description": "短期/长期/工作记忆管理"},
-    {"name": "智能Agent", "description": "ReAct Agent 对话、工具调用、技能学习"},
+    {"name": "智能Agent", "description": "PER Agent 对话、工具调用、技能学习"},
 ]
 
 app = FastAPI(
@@ -198,18 +198,18 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
-# 3. Response format wrapper — wraps 2xx JSON into standard envelope
-app.add_middleware(ResponseFormatMiddleware)
-
 # 4. GZip compression
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+# ⚠️ 注意: BaseHTTPMiddleware 子类与 SQLAlchemy async session 存在兼容问题
+#    （触发 greenlet_spawn 错误）。以下中间件暂时禁用。
+# 3. Response format wrapper
+# app.add_middleware(ResponseFormatMiddleware)
 # 5. Rate limiting
-if settings.ENABLE_RATE_LIMIT:
-    app.add_middleware(RateLimitMiddleware)
-
-# 6. Performance monitoring (includes request_id context var injection)
-app.add_middleware(PerformanceMiddleware)
+# if settings.ENABLE_RATE_LIMIT:
+#     app.add_middleware(RateLimitMiddleware)
+# 6. Performance monitoring
+# app.add_middleware(PerformanceMiddleware)
 
 
 # 异常处理

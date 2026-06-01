@@ -127,12 +127,16 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': `http://127.0.0.1:${getBackendPort()}`,
+      '/api/v1/notifications/ws': {
+        target: `ws://127.0.0.1:${getBackendPort()}`,
+        ws: true,
+      },
       '/ws': {
         target: `ws://127.0.0.1:${getBackendPort()}`,
         ws: true,
         rewrite: (path) => path.replace(/^\/ws/, '/api/v1/chat/ws'),
       },
+      '/api': `http://127.0.0.1:${getBackendPort()}`,
       '/static': `http://127.0.0.1:${getBackendPort()}`,
     },
   },

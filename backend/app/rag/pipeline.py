@@ -28,7 +28,7 @@ from app.core.prometheus import (
 from app.rag.cache import RetrievalCache, SemanticCache
 from app.rag.context_compressor import compress_context_list
 from app.rag.metrics import RAGMetrics
-from app.rag.query_processor import QueryIntentClassifier
+from app.rag.query_processor import QueryComplexityClassifier, QueryIntentClassifier, decompose_query
 from app.rag.reranker import rerank
 from app.rag.retriever import HybridRetriever
 
@@ -112,22 +112,66 @@ class RAGPipeline:
                             await self.cache.set(query, organization_id, top_k, sem_cached)
                         return sem_cached
 
-                # Retrieve with retry
+                # Query decomposition for complex queries
+            sub_queries = [query]
+            complexity = QueryComplexityClassifier.classify(query)
+            if (
+                not document_ids
+                and self.openai_client
+                and getattr(settings, "RAG_ENABLE_QUERY_DECOMPOSITION", True)
+                and complexity == "complex"
+            ):
+                max_sq = max(1, int(getattr(settings, "RAG_DECOMPOSITION_MAX_SUBQUERIES", 4) or 4))
+                model = settings.LOCAL_LLM_MODEL if settings.ENABLE_LOCAL_LLM else settings.DEEPSEEK_MODEL
+                decomposed = await decompose_query(query, self.openai_client, model, max_sq)
+                if len(decomposed) > 1:
+                    sub_queries = decomposed
+                    logger.info(
+                        "Query decomposition: %s → %s",
+                        query, sub_queries,
+                    )
+
+            # Retrieve (single or parallel per sub-query)
             retries = max(0, int(settings.RAG_RETRIEVAL_MAX_RETRIES or 2))
+            all_results: list[list[dict]] = []
+            for sq in sub_queries:
+                sq_result = []
+                for attempt in range(retries + 1):
+                    try:
+                        if attempt > 0:
+                            self.metrics.inc("retry_total")
+                        sq_result, qv = await self.retriever.retrieve(
+                            sq, organization_id,
+                            max(top_k, int(settings.RAG_RERANK_TOP_N or 20)),
+                            document_ids,
+                        )
+                        if not query_vector and qv:
+                            query_vector = qv
+                        break
+                    except Exception as e:
+                        RAG_RETRIEVAL_ERRORS.inc()
+                        logger.warning(
+                            "Retrieval attempt %d/%d for sub-query %r failed: %s",
+                            attempt + 1, retries + 1, sq, e,
+                        )
+                        if attempt < retries:
+                            await asyncio.sleep(min(1.5, 0.3 * (2 ** attempt)))
+                if sq_result:
+                    all_results.append(sq_result)
+
+            # Merge results from multiple sub-queries (dedup by chunk_id / doc_id)
             result = []
-            for attempt in range(retries + 1):
-                try:
-                    if attempt > 0:
-                        self.metrics.inc("retry_total")
-                    result, qv = await self.retriever.retrieve(query, organization_id, top_k, document_ids)
-                    if not query_vector and qv:
-                        query_vector = qv
-                    break
-                except Exception as e:
-                    RAG_RETRIEVAL_ERRORS.inc()
-                    logger.warning(f"Retrieval attempt {attempt + 1}/{retries + 1} failed: {e}")
-                    if attempt < retries:
-                        await asyncio.sleep(min(1.5, 0.3 * (2 ** attempt)))
+            seen_ids: set[str] = set()
+            for sq_results in all_results:
+                for hit in sq_results:
+                    chunk_id = hit.get("_id") or hit.get("chunk_id", "")
+                    doc_id = (hit.get("_source") or {}).get("doc_id", "")
+                    dedup_key = chunk_id or doc_id
+                    if dedup_key and dedup_key in seen_ids:
+                        continue
+                    if dedup_key:
+                        seen_ids.add(dedup_key)
+                    result.append(hit)
 
             # Rerank: cross-encoder / LLM reorder, then trim to top_k
             if result:

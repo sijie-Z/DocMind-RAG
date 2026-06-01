@@ -1,33 +1,54 @@
 """Request ID middleware — assigns a unique request_id to every request.
 
-This middleware MUST be registered first (outermost) so that all downstream
-middleware and handlers can access ``request.state.request_id``.
+Implemented as pure ASGI middleware to avoid BaseHTTPMiddleware's
+incompatibility with SQLAlchemy async sessions (greenlet_spawn error).
 """
 
 import uuid
 
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 
-class RequestIDMiddleware(BaseHTTPMiddleware):
+class RequestIDMiddleware:
     """Assigns a unique UUID to every request.
 
     - Reads existing X-Request-ID header if present (for distributed tracing).
     - Falls back to uuid4.
-    - Stores on ``request.state.request_id``.
+    - Stores scope state for downstream access.
     - Sets ``X-Request-ID`` response header.
     """
 
-    def __init__(self, app, header_name: str = "X-Request-ID"):
-        super().__init__(app)
+    def __init__(self, app: ASGIApp, header_name: str = "X-Request-ID"):
+        self.app = app
         self.header_name = header_name
 
-    async def dispatch(self, request: Request, call_next):
-        request_id = request.headers.get(self.header_name) or str(uuid.uuid4())
-        request.state.request_id = request_id
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        response = await call_next(request)
+        request_id = str(uuid.uuid4())
 
-        response.headers[self.header_name] = request_id
-        return response
+        # Store request_id in scope for downstream handlers
+        state = scope.get("state", {})
+        state["request_id"] = request_id
+        scope["state"] = state
+
+        original_send = send
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                # Only add if not already present
+                has_header = any(
+                    h[0].lower() == self.header_name.lower().encode()
+                    for h in headers
+                )
+                if not has_header:
+                    headers.append(
+                        (self.header_name.lower().encode(), request_id.encode())
+                    )
+                message["headers"] = headers
+            await original_send(message)
+
+        await self.app(scope, receive, send_wrapper)

@@ -44,6 +44,7 @@ class AISettings(BaseSettings):
     RAG_ENABLE_MMR: bool = True
     RAG_MMR_LAMBDA: float = 0.65
     RAG_MMR_CANDIDATE_MULTIPLIER: int = 4
+    RAG_HYDE_WEIGHT: float = 0.3
 
     # Query rewrite (multi-query expansion)
     RAG_ENABLE_QUERY_REWRITE: bool = True
@@ -54,7 +55,11 @@ class AISettings(BaseSettings):
     RAG_RERANK_TOP_N: int = 20
     RAG_RERANK_TIMEOUT_SECONDS: float = 8.0
 
-    # Reranker API (supports alternate env var names)
+    # Local cross-encoder reranker (free, no API cost)
+    RERANK_USE_LOCAL: bool = True
+    RERANK_LOCAL_MODEL: str = "BAAI/bge-reranker-base"
+
+    # Reranker API (supports alternate env var names) — fallback when local not available
     RERANK_API_KEY: str | None = None
     RERANK_API_URL: str | None = "https://open.bigmodel.cn/api/paas/v4/"
     RERANK_MODEL: str = "rerank"
@@ -69,6 +74,10 @@ class AISettings(BaseSettings):
     RAG_CACHE_TTL_SECONDS: int = 600
     RAG_CACHE_MAX_SIZE: int = 1000
     RAG_RETRIEVAL_MAX_RETRIES: int = 2
+
+    # Query decomposition (multi-perspective RAG)
+    RAG_ENABLE_QUERY_DECOMPOSITION: bool = True
+    RAG_DECOMPOSITION_MAX_SUBQUERIES: int = 4
 
     # Privacy & security
     ENABLE_PII_MASKING: bool = True

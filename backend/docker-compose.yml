@@ -50,7 +50,7 @@ services:
       - REDIS_HOST=docmind-redis
       - ELASTICSEARCH_HOSTS=["http://docmind-elasticsearch:9200"]
       - MINIO_ENDPOINT=docmind-minio:9000
-      - KAFKA_BOOTSTRAP_SERVERS=docmind-kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=docmind-kafka:29092
     depends_on:
       mysql:
         condition: service_healthy
@@ -93,9 +93,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: docmind-redis
-    command: redis-server --requirepass ${REDIS_PASSWORD:-}
+    command: redis-server --requirepass ${REDIS_PASSWORD:-docmind123}
     ports:
-      - "6379:6379"
+      - "6390:6379"
     volumes:
       - redis-data:/data
     networks:
@@ -164,11 +164,16 @@ services:
     depends_on:
       - zookeeper
     ports:
-      - "9092:9092"
+      - "9092:9092"       # 宿主机 → Kafka（API 在宿主机上跑，用 localhost:9092）
+      - "29092:29092"     # Docker 内网 → Kafka（Worker 用 docmind-kafka:29092）
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: docmind-zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      # 双监听器：内部用 Docker 网络名，外部用 localhost
+      KAFKA_LISTENERS: PLAINTEXT_INTERNAL://0.0.0.0:29092,PLAINTEXT_EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_INTERNAL://docmind-kafka:29092,PLAINTEXT_EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT_INTERNAL:PLAINTEXT,PLAINTEXT_EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     networks:
       - docmind-network

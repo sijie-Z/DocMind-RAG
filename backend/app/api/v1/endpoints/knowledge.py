@@ -119,7 +119,7 @@ async def list_knowledge_bases(
         raise AppError(f"获取知识库列表失败: {str(e)}")
 
 
-@router.post("/search", response_model=KnowledgeSearchResponse, dependencies=[Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE], organization_id_param='organization_id'))])
+@router.post("/search", response_model=KnowledgeSearchResponse, dependencies=[Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE]))])
 async def search_knowledge(
     request: KnowledgeSearchRequest,
     current_user: User = Depends(get_current_user),

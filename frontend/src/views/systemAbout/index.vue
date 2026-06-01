@@ -25,7 +25,7 @@
             <n-descriptions-item label="后端">FastAPI + SQLAlchemy(异步) + MySQL 8 + Redis + Elasticsearch 8 + Kafka + MinIO</n-descriptions-item>
             <n-descriptions-item label="前端">Vue 3 + TypeScript + Vite + Naive UI + Pinia</n-descriptions-item>
             <n-descriptions-item label="AI 引擎">DeepSeek API + OpenAI 兼容 Embedding + LangChain</n-descriptions-item>
-            <n-descriptions-item label="Agent 系统">ReAct 循环 + 工具注册 + 上下文引擎 + 技能学习</n-descriptions-item>
+            <n-descriptions-item label="Agent 系统">PER 三阶段（规划→执行→反思）+ 工具注册 + 上下文引擎 + 技能学习</n-descriptions-item>
             <n-descriptions-item label="安全机制">JWT + RBAC + 组织级多租户隔离</n-descriptions-item>
           </n-descriptions>
         </div>
@@ -74,7 +74,7 @@ import { NDescriptions, NDescriptionsItem, NTag } from 'naive-ui'
 
 const highlights = [
   { title: '混合检索', desc: '结合 BM25 关键词搜索与向量语义搜索，使用倒数排名融合 (RRF) 最大化召回率。' },
-  { title: 'Agent 架构', desc: '受 hermes-agent 启发的 ReAct 自主循环。工具自注册、上下文压缩、技能学习。' },
+  { title: 'Agent 架构', desc: '自研 PER 三阶段架构（Plan-Execute-Reflect）。Planner 拆解 DAG、Executor 调度工具、Reflector 检查纠错。' },
   { title: '语义缓存', desc: '基于 Embedding 的答案缓存，消除相似问题的重复 LLM 调用，降低延迟和成本。' },
   { title: '熔断机制', desc: '外部服务（LLM、ES、DB）的容错保护，自动降级防止级联故障。' },
   { title: '多租户 RBAC', desc: '组织级数据隔离 + 基于角色的访问控制，支持细粒度权限管理。' },

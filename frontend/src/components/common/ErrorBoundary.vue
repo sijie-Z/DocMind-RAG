@@ -74,6 +74,11 @@ onErrorCaptured((err, instance, info) => {
 
 // 全局 JS 错误（在 setup 阶段立即注册，不等 onMounted）
 window.addEventListener('error', (event: ErrorEvent) => {
+  // 过滤浏览器良性 ResizeObserver 警告，不影响功能
+  if (event.message?.includes('ResizeObserver loop completed with undelivered notifications')) {
+    console.warn('[ErrorBoundary] 忽略 ResizeObserver 良性警告')
+    return
+  }
   console.error('[ErrorBoundary] 全局错误:', event)
   triggerError(`GlobalError: ${event.message}\n  at ${event.filename}:${event.lineno}:${event.colno}`)
 })

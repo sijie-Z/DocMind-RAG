@@ -56,7 +56,16 @@ EXECUTION_SYSTEM_PROMPT = """你是 DocMind 智能助手。你的任务是执行
 
 
 class Executor:
-    """Executes a Plan step by step with tool orchestration."""
+    """Executes a Plan step by step with tool orchestration.
+
+    Includes information gain tracking: if consecutive steps produce
+    minimal new information, remaining pending steps are auto-skipped
+    to avoid wasted LLM calls (inspired by AlphaInsight's debate
+    convergence via information entropy threshold).
+    """
+
+    # Number of consecutive low-gain steps before prompting early termination
+    MAX_LOW_GAIN_STEPS: int = 2
 
     def __init__(
         self,
@@ -67,6 +76,9 @@ class Executor:
         self.client = openai_client
         self.config = config
         self.memory = memory_bridge
+        # Information gain tracking: hashes of seen result content
+        self._seen_fingerprints: set[int] = set()
+        self._consecutive_low_gain: int = 0
 
     async def execute(
         self,
@@ -93,6 +105,18 @@ class Executor:
                     for s in pending:
                         s.status = "skipped"
                 break
+
+            # Information gain: auto-skip if too many consecutive low-gain steps
+            if self._consecutive_low_gain >= self.MAX_LOW_GAIN_STEPS:
+                remaining = [s for s in plan.steps if s.status == "pending"]
+                if remaining:
+                    logger.info(
+                        "Early termination: %d consecutive low-gain steps, skipping %d remaining step(s)",
+                        self._consecutive_low_gain, len(remaining),
+                    )
+                    for s in remaining:
+                        s.status = "skipped"
+                    break
 
             # Execute ready steps — parallel when multiple independent steps exist
             if len(ready_steps) > 1:
@@ -142,6 +166,8 @@ class Executor:
             self.memory.store_step_result(step.id, {
                 "description": step.description, "status": step.status, "result": step.result,
             })
+            # Track information gain
+            self._update_info_gain(step_result or "")
         else:
             plan.failed_steps += 1
 
@@ -210,6 +236,7 @@ class Executor:
                 if step.status != "failed":
                     step.status = "completed"
                     plan.completed_steps += 1
+                    self._update_info_gain(step_result or "")
                     self.memory.store_step_result(step.id, {
                         "description": step.description, "status": step.status, "result": step.result,
                     })
@@ -341,7 +368,7 @@ class Executor:
 
         try:
             response = await self.client.chat.completions.create(
-                model=self.config.model,
+                model=self.config.get_quick_model(),
                 messages=messages,
                 tools=tools if tools else None,
                 tool_choice="auto" if tools else None,
@@ -490,7 +517,7 @@ class Executor:
 
         try:
             response = await self.client.chat.completions.create(
-                model=self.config.model,
+                model=self.config.get_quick_model(),
                 messages=messages,
                 temperature=0.3,
                 max_tokens=1024,
@@ -502,6 +529,35 @@ class Executor:
             # Fallback: return the first tool result summary
             first = tool_results[0]
             return f"找到以下信息：\n{first['result'][:500]}"
+
+    def _update_info_gain(self, step_result: str) -> None:
+        """Track information gain from completed step.
+
+        Compares the step result against previously seen results using
+        content fingerprint hashing. If the result overlaps significantly
+        with earlier steps, it's considered low-gain and increments the
+        consecutive counter. Resets the counter when new information appears.
+
+        This prevents wasted LLM calls when the agent is going in circles.
+        """
+        if not step_result:
+            self._consecutive_low_gain += 1
+            return
+
+        # Compute fingerprint: hash of normalized first 300 chars + any numbers found
+        import hashlib, re
+
+        normalized = step_result.strip().lower()[:300]
+        numbers = re.findall(r"\b\d+(?:\.\d+)?%?", step_result)
+        fingerprint_source = normalized + "|" + "|".join(sorted(numbers))
+        fp = hashlib.md5(fingerprint_source.encode()).digest()
+
+        if fp in self._seen_fingerprints:
+            self._consecutive_low_gain += 1
+            logger.debug("Low-gain step detected (%d consecutive)", self._consecutive_low_gain)
+        else:
+            self._seen_fingerprints.add(fp)
+            self._consecutive_low_gain = 0
 
     def _get_step_tools(self, step: PlanStep) -> list[dict[str, Any]] | None:
         """Get available tools for a step, filtered by config."""
@@ -529,15 +585,21 @@ class Executor:
         return tools if tools else None
 
     def _get_previous_results(self, dependency_ids: list[str]) -> str:
-        """Build a summary of previous step results that this step depends on."""
+        """Build a summary of previous step results that this step depends on.
+
+        Each result is truncated to 200 chars and at most 5 deps are included
+        to keep context window under control (message cleanup pattern).
+        """
         if not dependency_ids:
             return ""
 
         parts = ["## 前置步骤结果"]
-        for dep_id in dependency_ids:
+        # Limit to most recent 5 deps to avoid context bloat
+        for dep_id in dependency_ids[-5:]:
             result = self.memory.get_step_result(dep_id)
             if result:
                 desc = result.get("description", dep_id)
                 res_text = result.get("result", "(无结果)")
-                parts.append(f"- [{dep_id}] {desc}: {res_text[:300]}")
+                # Truncate each result to keep total context manageable
+                parts.append(f"- [{dep_id}] {desc}: {res_text[:200]}")
         return "\n".join(parts) if len(parts) > 1 else ""

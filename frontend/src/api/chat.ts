@@ -25,3 +25,18 @@ export function sendMessage(data: { message: string; conversationId?: number }) 
     stream: true
   })
 }
+
+// 即时上传并解析文件（不走完整 RAG 链路，直接返回文本）
+export async function parseUpload(file: File): Promise<{
+  filename: string
+  content: string
+  chunk_count: number
+  file_size: number
+}> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await request.post('/chat/parse-upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return res.data?.data || res.data
+}

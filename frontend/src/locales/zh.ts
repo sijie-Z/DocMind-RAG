@@ -406,6 +406,7 @@ export default {
   prompts: {
     title: '提示词管理',
     subtitle: '管理 AI 助手的系统提示词与回复风格',
+    create: '创建模板',
     addTemplate: '新增模板',
     editTemplate: '编辑模板',
     empty: '暂无提示词模板',

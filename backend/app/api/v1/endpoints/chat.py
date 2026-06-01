@@ -4,7 +4,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, File, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +12,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.security import get_current_user
-from app.exceptions import AuthorizationError, NotFoundError, ValidationError
+from app.exceptions import AppError, AuthorizationError, NotFoundError, ValidationError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.document import Document
 from app.models.prompt import PromptTemplate
@@ -866,6 +866,58 @@ async def websocket_endpoint(
 # ============================================================
 # SSE endpoint
 # ============================================================
+
+
+@router.post("/parse-upload")
+async def chat_parse_upload(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    上传文件并立即解析文本内容，用于聊天上下文。
+    不经过完整的 RAG 链路（不向量化、不索引 ES），直接返回纯文本。
+    """
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from app.services.document_parser import document_service
+
+    if not file.filename:
+        raise ValidationError("文件名不能为空")
+
+    ext = Path(file.filename).suffix.lower() or ".tmp"
+    fd, temp_path = tempfile.mkstemp(suffix=ext)
+    os.close(fd)
+
+    try:
+        raw = await file.read()
+        with open(temp_path, "wb") as f:
+            f.write(raw)
+
+        result = await document_service.parse_local_file(
+            temp_path,
+            organization_id=str(current_user.organization_id or 1),
+        )
+
+        chunks = result.get("chunks", [])
+        full_text = "\n".join(c["chunk_text"] for c in chunks) if chunks else result.get("content", "")
+
+        return {
+            "success": True,
+            "data": {
+                "filename": file.filename,
+                "content": full_text,
+                "chunk_count": len(chunks),
+                "file_size": result.get("file_size", 0),
+            }
+        }
+    except Exception as e:
+        logger.error(f"[parse-upload] 解析失败: {e}", exc_info=True)
+        raise AppError(f"文件解析失败: {str(e)}")
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 
 async def sse_event(event_type: str, data: dict) -> str:

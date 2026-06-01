@@ -29,15 +29,35 @@ export function useChatSend(
   const strictMode = ref(false)
   const privacyMode = ref(true)
 
-  const handleSSESend = async () => {
-    let userMessage = inputMessage.value.trim()
-    if (!userMessage && attachedFileIds.value.length > 0) {
-      userMessage = t('chat.analyzeFiles', { n: attachedFiles.value.length })
+  const buildFileContext = (files: AttachedFile[]): string | null => {
+    const withContent = files.filter(f => f.parsedContent)
+    if (!withContent.length) return null
+    const parts = withContent.map(f =>
+      `以下是从文件「${f.name}」中提取的内容：\n${f.parsedContent}`
+    )
+    return parts.join('\n\n---\n\n')
+  }
+
+  const handleSSESend = async (preprocessedMessage?: string) => {
+    let userMessage = preprocessedMessage ?? inputMessage.value.trim()
+    const currentFiles = [...attachedFiles.value]
+    const hasParsedContent = currentFiles.some(f => f.parsedContent)
+
+    // 如果有即时解析的文件但用户没打字，自动生成提示
+    if (!userMessage && (attachedFileIds.value.length > 0 || hasParsedContent)) {
+      userMessage = t('chat.analyzeFiles', { n: currentFiles.length })
     }
     if (!userMessage) return
 
+    // 只有没经过 handleSend 预处理的消息才在这里注入文件内容
+    if (!preprocessedMessage) {
+      const fileContext = buildFileContext(currentFiles)
+      if (fileContext) {
+        userMessage = `${fileContext}\n\n---\n\n基于以上文件内容，${userMessage}`
+      }
+    }
+
     inputMessage.value = ''
-    const currentFiles = [...attachedFiles.value]
     attachedFiles.value = []
 
     const userMsgId = Date.now()
@@ -202,18 +222,28 @@ export function useChatSend(
       return
     }
 
+    const currentFiles = [...attachedFiles.value]
+    const hasParsedContent = currentFiles.some(f => f.parsedContent)
+    const hasFileIds = currentFiles.some(f => f.status === 'done' && f.id)
+
     let userMessage = inputMessage.value.trim()
-    if (!userMessage && attachedFileIds.value.length > 0) {
-      userMessage = t('chat.analyzeFiles', { n: attachedFiles.value.length })
-    } else if (!userMessage && attachedFiles.value.length > 0 && attachedFileIds.value.length === 0) {
+    if (!userMessage && (hasFileIds || hasParsedContent)) {
+      userMessage = t('chat.analyzeFiles', { n: currentFiles.length })
+    } else if (!userMessage && currentFiles.length > 0 && !hasFileIds && !hasParsedContent) {
       message.warning(t('chat.attachmentsNotReady'))
       return
     }
     if (!userMessage) return
     if (isLoading.value) return
 
+    // 注入即时解析的文件内容
+    const fileContext = buildFileContext(currentFiles)
+    if (fileContext) {
+      userMessage = `${fileContext}\n\n---\n\n基于以上文件内容，${userMessage}`
+    }
+
     if (useSSE.value) {
-      await handleSSESend()
+      await handleSSESend(userMessage)
       return
     }
 
@@ -223,7 +253,6 @@ export function useChatSend(
     }
 
     inputMessage.value = ''
-    const currentFiles = [...attachedFiles.value]
     attachedFiles.value = []
 
     messages.value.push({

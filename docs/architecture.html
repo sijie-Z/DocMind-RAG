@@ -168,7 +168,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
     <div class="card green-ac">
       <div class="card-title">🎯 项目定位</div>
       <p style="font-size:.8rem;color:var(--text2);line-height:1.7">
-        DocMind 是一个企业级 AI Agent 平台，以 ReAct Agent 为核心，融合混合检索 RAG、知识图谱、工作流引擎。支持多租户组织隔离、RBAC 权限体系、SSE 流式交互，覆盖文档管理、智能问答、深度分析、自动化工作流等场景。
+        DocMind 是一个企业级 AI Agent 平台，以自研 PER Agent（Plan-Execute-Reflect）为核心，融合混合检索 RAG、知识图谱、工作流引擎。支持多租户组织隔离、RBAC 权限体系、SSE 流式交互，覆盖文档管理、智能问答、深度分析、自动化工作流等场景。
       </p>
     </div>
     <div class="card blue-ac">
@@ -241,7 +241,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
       <rect x="70" y="270" width="160" height="140" rx="7" fill="none" stroke="#F59E0B" stroke-width="1" stroke-dasharray="5,3" opacity=".5"/>
       <text x="80" y="287" font-size="7" fill="#F59E0B" opacity=".7">Agent 系统</text>
       <rect x="85" y="295" width="130" height="26" rx="5" fill="#0F1221" stroke="#F59E0B" stroke-width="1.2"/>
-      <text x="150" y="312" text-anchor="middle" font-size="8" fill="#E8EAF6">ReAct 循环</text>
+      <text x="150" y="312" text-anchor="middle" font-size="8" fill="#E8EAF6">PER 循环</text>
       <rect x="85" y="328" width="130" height="26" rx="5" fill="#0F1221" stroke="#F59E0B" stroke-width="1.2"/>
       <text x="150" y="345" text-anchor="middle" font-size="8" fill="#E8EAF6">工具注册中心</text>
       <rect x="85" y="361" width="130" height="26" rx="5" fill="#0F1221" stroke="#F59E0B" stroke-width="1.2"/>
@@ -333,7 +333,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
         <tr><th>组件</th><th>方案</th><th>用途</th></tr>
         <tr><td>LLM</td><td>DeepSeek V4 (Flash/Pro)</td><td>对话推理、深度分析</td></tr>
         <tr><td>Embedding</td><td>OpenAI 兼容 API</td><td>向量嵌入 (2048 维)</td></tr>
-        <tr><td>Agent 架构</td><td>ReAct 循环</td><td>思考→行动→观察</td></tr>
+        <tr><td>Agent 架构</td><td>PER 三阶段</td><td>规划→执行→反思</td></tr>
         <tr><td>文档解析</td><td>LangChain + PyPDF</td><td>PDF/Word/MD 分块</td></tr>
       </table>
     </div>
@@ -420,7 +420,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
       <pre style="font-size:.72rem;color:var(--text2);line-height:1.8;background:var(--bg3);padding:14px;border-radius:8px;overflow-x:auto"><code>backend/app/
 ├── api/v1/          # REST 端点 (auth, chat, documents, agent, knowledge...)
 │   └── endpoints/   # 17 个路由模块
-├── agent/           # ReAct Agent 系统
+├── agent/           # PER Agent 系统
 │   ├── loop.py      # Agent 主循环
 │   ├── registry.py  # 工具注册中心
 │   ├── context.py   # 上下文引擎
@@ -468,19 +468,18 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 
 <!-- ═══ 04. Agent 系统 ═══ -->
 <div class="sec" id="agent">
-  <div class="sec-head"><span class="sec-num">04</span><h2>Agent 系统</h2><span class="meta">ReAct · 工具注册中心 · 上下文引擎</span></div>
+  <div class="sec-head"><span class="sec-num">04</span><h2>Agent 系统</h2><span class="meta">PER 三阶段 · 工具注册中心 · 上下文引擎</span></div>
 
   <div class="g2">
     <div class="card green-ac">
-      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔄 ReAct 循环</div>
+      <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔄 PER 三阶段</div>
       <div class="card-body show">
-        <p style="font-size:.8rem;color:var(--text2);margin-bottom:8px">自主推理循环，每轮迭代执行 思考 → 行动 → 观察 三个步骤：</p>
+        <p style="font-size:.8rem;color:var(--text2);margin-bottom:8px">自研 PER（Plan-Execute-Reflect）三阶段，先规划再执行，执行完毕自动检查质量：</p>
         <div class="flow">
-          <span class="flow-box g">思考<br><span style="font-size:.65rem;color:var(--text3)">分析任务</span></span><span class="flow-arrow">→</span>
-          <span class="flow-box b">选择工具<br><span style="font-size:.65rem;color:var(--text3)">工具注册中心</span></span><span class="flow-arrow">→</span>
-          <span class="flow-box a">执行调用<br><span style="font-size:.65rem;color:var(--text3)">沙箱隔离</span></span><span class="flow-arrow">→</span>
-          <span class="flow-box g">观察结果<br><span style="font-size:.65rem;color:var(--text3)">上下文记忆</span></span><span class="flow-arrow">→</span>
-          <span class="flow-box b">继续 / 结束</span>
+          <span class="flow-box g">Planner<br><span style="font-size:.65rem;color:var(--text3)">DAG 任务分解</span></span><span class="flow-arrow">→</span>
+          <span class="flow-box b">Executor<br><span style="font-size:.65rem;color:var(--text3)">按序/并行调度</span></span><span class="flow-arrow">→</span>
+          <span class="flow-box a">Reflector<br><span style="font-size:.65rem;color:var(--text3)">质量检查纠错</span></span><span class="flow-arrow">→</span>
+          <span class="flow-box g">完成 / 重试</span>
         </div>
         <table class="data-table" style="margin-top:8px">
           <tr><th>参数</th><th>值</th></tr>

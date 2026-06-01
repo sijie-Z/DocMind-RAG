@@ -23,6 +23,8 @@ class AgentConfig:
 
     # ── Model settings ──
     model: str = "deepseek-v4-flash"
+    deep_think_model: str = ""  # 强模型（综合推理），为空则回退到 model
+    quick_think_model: str = ""  # 快模型（信息收集），为空则回退到 model
     temperature: float = 0.1
     max_tokens: int = 4096
 
@@ -56,6 +58,15 @@ class AgentConfig:
     timeout: float = 120.0
     max_context_tokens: int = 8000
 
+    # ── Model selection ──
+    def get_deep_model(self) -> str:
+        """模型用于综合推理/决策（Reflector, Reviewer, 综合回答）"""
+        return self.deep_think_model or self.model
+
+    def get_quick_model(self) -> str:
+        """模型用于信息收集/工具调用（Executor step, synthesis）"""
+        return self.quick_think_model or self.model
+
     # ── Advanced ──
     thinking_max_tokens: int = 500
     plan_max_tokens: int = 800
@@ -64,6 +75,8 @@ class AgentConfig:
     def to_dict(self) -> dict:
         return {
             "model": self.model,
+            "deep_think_model": self.deep_think_model,
+            "quick_think_model": self.quick_think_model,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "max_plan_steps": self.max_plan_steps,

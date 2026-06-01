@@ -22,6 +22,8 @@ export interface AttachedFile {
   // 进度信息
   progress?: number // 0-100
   statusDetail?: string // 详细状态文本
+  // 即时解析内容（不走完整RAG链路）
+  parsedContent?: string // 文件解析后的纯文本，直接作为上下文
 }
 
 export interface Conversation {

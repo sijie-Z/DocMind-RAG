@@ -3,6 +3,7 @@ import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
 import type { AttachedFile } from '@/types/chat'
 import { uploadKnowledgeBase, getKnowledgeBase } from '@/api/knowledge'
+import { parseUpload } from '@/api/chat'
 
 export function useChatAttachments() {
   const message = useDedupedMessage()
@@ -81,16 +82,34 @@ export function useChatAttachments() {
     const tempFile: AttachedFile = {
       name: file.name,
       status: 'uploading',
-      _originalFile: file
+      _originalFile: file,
+      progress: 5,
+      statusDetail: t('chat.fileParsing'),
     }
     attachedFiles.value.push(tempFile)
 
+    // 策略：先尝试即时解析（parse-upload），快速获取文本作为上下文
+    // 如果即时解析失败，回退到传统的知识库上传 + 轮询
+    try {
+      const result = await parseUpload(file)
+      if (result && result.content) {
+        tempFile.status = 'done'
+        tempFile.progress = 100
+        tempFile.statusDetail = t('chat.fileReady')
+        tempFile.parsedContent = result.content
+        return
+      }
+    } catch {
+      // parse-upload 解析失败（如不支持的文件格式），回退到知识库上传
+    }
+
+    // Fallback: 走传统知识库上传 + 轮询等待索引
     try {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('title', file.name)
       formData.append('description', t('chat.fileFromChat'))
-      
+
       const res = await uploadKnowledgeBase(formData)
       const docId = res.data?.data?.id || (res.data as Record<string, unknown>).id
       if (docId) {

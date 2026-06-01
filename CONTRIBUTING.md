@@ -123,7 +123,7 @@ cd frontend && npm run lint
 backend/
 ├── app/
 │   ├── api/v1/endpoints/    # API route handlers
-│   ├── agent/               # ReAct Agent system
+│   ├── agent/               # PER Agent system
 │   ├── core/                # Infrastructure (DB, ES, Redis, MinIO, Kafka)
 │   ├── models/              # SQLAlchemy models
 │   ├── rag/                 # RAG pipeline components

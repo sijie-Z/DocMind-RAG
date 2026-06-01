@@ -118,6 +118,25 @@ class DocumentParser:
                 with contextlib.suppress(OSError):
                     os.remove(temp_file_path)
 
+    async def parse_local_file(self, file_path: str, organization_id: str = "0") -> dict[str, Any]:
+        """解析本地文件，不经过 MinIO 下载逻辑（用于聊天即时解析）"""
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"文件不存在: {file_path}")
+
+        extension = path.suffix.lower()
+        if extension not in self.supported_extensions:
+            raise ValueError(f"不支持的文件格式: {extension}")
+
+        parse_method = self.supported_extensions[extension]
+        result = await parse_method(str(path))
+        result["file_name"] = path.name
+        result["file_size"] = path.stat().st_size
+        result["file_extension"] = extension
+        result["organization_id"] = organization_id
+
+        return result
+
     async def _parse_pdf(self, file_path: str) -> dict[str, Any]:
         """
         高级 PDF 解析 - 支持文本提取、表格识别与 OCR 兜底
@@ -394,29 +413,35 @@ class DocumentParser:
             return ""
 
     async def _create_contextual_chunks(self, text_content: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
-        """实现上下文增强分块 (Contextual Retrieval)。"""
+        """实现上下文增强分块 (Contextual Retrieval)，融合条款感知切分。"""
         # 1. 生成文档级摘要
         summary = await self._generate_summary(text_content)
 
-        # 2. 执行语义分块
+        # 2. 执行语义分块（返回 list[dict]，每个含 text + metadata.section_title）
         from app.services.semantic_chunker import semantic_chunker
         semantic_chunks = await semantic_chunker.split_text(text_content)
 
         chunks = []
-        for i, chunk_text in enumerate(semantic_chunks):
+        for i, ch in enumerate(semantic_chunks):
+            chunk_text = ch["text"]
+            chunk_meta = ch.get("metadata", {})
+            section_title = chunk_meta.get("section_title")
+
             # 3. 增强文本：[背景摘要] + 原文本
-            enhanced_text = chunk_text
             if summary:
                 enhanced_text = f"【文档背景：{summary}】\n\n{chunk_text}"
+            else:
+                enhanced_text = chunk_text
 
             chunks.append({
                 "chunk_index": i,
                 "chunk_text": enhanced_text,
-                "original_text": chunk_text, # 保留原文本以便 LLM 回答时更干净
+                "original_text": chunk_text,
                 "chunk_length": len(enhanced_text),
                 "metadata": {
                     "type": "contextual_semantic_split",
-                    "has_summary": bool(summary)
+                    "has_summary": bool(summary),
+                    "section_title": section_title or chunk_meta.get("section_title"),
                 }
             })
         return chunks

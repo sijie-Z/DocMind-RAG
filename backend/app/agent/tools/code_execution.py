@@ -6,6 +6,7 @@ Users must explicitly enable them in AgentConfig.
 
 import contextlib
 import logging
+import re
 from typing import Any
 
 from app.agent.registry import register_tool
@@ -27,6 +28,176 @@ SAFE_MODULES = [
     "datetime", "json", "re", "string", "textwrap", "decimal",
     "fractions", "random",
 ]
+
+# ── SQL safety: whitelist-based validation ──────────────────────
+
+# Tables that the agent SQL tool is allowed to query (read-only business tables)
+ALLOWED_SQL_TABLES: set[str] = {
+    "documents", "document_chunks", "document_tags", "tags",
+    "chat_sessions", "chat_messages",
+    "knowledge_processing_jobs",
+    "notifications",
+    "organizations",
+    "prompt_templates",
+    "permissions", "roles",
+    "users", "user_settings",
+    "workflows", "workflow_executions", "node_definitions",
+    "system_manuals",
+    "user_login_sessions", "user_activity_logs",
+}
+
+# Column whitelist per table — only these columns can be SELECTed
+ALLOWED_SQL_COLUMNS: dict[str, set[str]] = {
+    "documents": {"id", "filename", "title", "status", "content_length",
+                   "chunk_count", "organization_id", "uploader_id",
+                   "created_at", "updated_at", "file_path", "file_type",
+                   "parsed_at", "parse_error", "is_public"},
+    "document_chunks": {"id", "document_id", "chunk_index", "chunk_text",
+                         "chunk_length", "start_pos", "end_pos",
+                         "page_number", "section_title", "meta_data"},
+    "document_tags": {"document_id", "tag_id"},
+    "tags": {"id", "name", "color"},
+    "chat_sessions": {"id", "user_id", "title", "status", "organization_id",
+                       "created_at", "updated_at", "settings"},
+    "chat_messages": {"id", "session_id", "user_id", "role", "content",
+                       "message_type", "sources", "feedback_score",
+                       "is_cached", "created_at",
+                       "tokens_input", "tokens_output",
+                       "evaluation"},
+    "knowledge_processing_jobs": {"id", "document_id", "status", "job_type",
+                                   "progress", "error_message",
+                                   "started_at", "completed_at"},
+    "notifications": {"id", "user_id", "type", "title", "content",
+                       "is_read", "created_at"},
+    "organizations": {"id", "name", "code", "is_active", "max_users",
+                       "max_storage_mb", "created_at"},
+    "prompt_templates": {"id", "name", "content", "description",
+                          "is_active", "version", "updated_at"},
+    "users": {"id", "username", "email", "display_name", "is_active",
+               "role", "organization_id", "last_login", "created_at"},
+    "user_settings": {"user_id", "theme", "language", "notification_prefs"},
+    "system_manuals": {"id", "title", "content", "version", "is_active",
+                        "updated_at"},
+    "workflows": {"id", "name", "description", "definition", "status",
+                   "created_by", "organization_id", "created_at", "updated_at"},
+    "workflow_executions": {"id", "workflow_id", "status", "started_at",
+                             "completed_at", "result", "error_message"},
+    "node_definitions": {"id", "workflow_id", "node_type", "config",
+                          "position_x", "position_y"},
+}
+
+# Columns allowed in any table (common identifiers)
+_ALLOWED_COMMON = {"id", "created_at", "updated_at", "status", "name"}
+
+
+def _is_safe_select_sql(sql: str) -> tuple[bool, str]:
+    """Validate SQL is a restricted SELECT over whitelist tables/columns.
+
+    Returns (True, "") or (False, "reason").
+    """
+    if not sql or not isinstance(sql, str):
+        return False, "Empty SQL query"
+
+    stripped = sql.strip()
+
+    # 1. Must be SELECT
+    if not re.match(r"^select\b", stripped, flags=re.IGNORECASE):
+        return False, "Only SELECT queries are allowed"
+
+    # 2. No dangerous keywords (INSERT, UPDATE, DELETE, DROP, etc.)
+    illegal = re.compile(
+        r"\b(insert|update|delete|drop|alter|create|truncate|replace|grant|"
+        r"revoke|attach|detach|pragma|exec|execute|call|load|import|export)\b",
+        flags=re.IGNORECASE,
+    )
+    if illegal.search(stripped):
+        return False, "Dangerous SQL keyword detected"
+
+    # 3. No multi-statement or comments
+    if ";" in stripped.rstrip(";"):
+        return False, "Multiple statements are not allowed"
+    if "--" in stripped or "/*" in stripped or "*/" in stripped:
+        return False, "SQL comments are not allowed"
+
+    # 4. Extract table names and validate against whitelist
+    tables = re.findall(
+        r"\b(?:from|join)\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    if not tables:
+        return False, "No table found in query"
+
+    for t in tables:
+        if t.lower() not in ALLOWED_SQL_TABLES:
+            return False, f"Table '{t}' is not in the allowed whitelist"
+
+    # 5. Extract selected columns and validate
+    select_match = re.search(
+        r"^select\s+(.*?)\s+from\b",
+        stripped,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not select_match:
+        return False, "Cannot parse SELECT columns"
+
+    raw_columns = [seg.strip() for seg in select_match.group(1).split(",")]
+
+    # Build known columns from matched tables
+    matched_tables = [t.lower() for t in tables if t.lower() in ALLOWED_SQL_COLUMNS]
+    known_columns: set[str] = set(_ALLOWED_COMMON)
+    for t in matched_tables:
+        known_columns.update(ALLOWED_SQL_COLUMNS.get(t, set()))
+
+    for col in raw_columns:
+        col_clean = col.strip()
+        if col_clean == "*":
+            return False, "SELECT * is not allowed — specify columns explicitly"
+
+        # Handle aggregate functions: extract inner column reference
+        agg_match = re.match(
+            r"(count|sum|avg|min|max|coalesce|nullif|cast|round|abs|year|month|day|strftime|json_extract)\s*\((.*?)\)",
+            col_clean,
+            flags=re.IGNORECASE,
+        )
+        if agg_match:
+            inner = agg_match.group(2).strip()
+            if inner == "*" or inner == "1" or not inner:
+                # COUNT(*), COUNT(1), or empty — safe, no column reference
+                continue
+            # Check the inner column reference
+            inner_clean = re.sub(r"\s+as\s+.*", "", inner, flags=re.IGNORECASE).strip()
+            for part in inner_clean.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                tokens = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", part)
+                tokens = [
+                    tok for tok in tokens
+                    if tok.lower()
+                    not in {"as", "distinct", "upper", "lower", "trim", "round"}
+                ]
+                if tokens and not any(tok.lower() in known_columns for tok in tokens):
+                    return False, f"Column '{col_clean}' is not in the allowed whitelist"
+            continue
+
+        # Extract identifier tokens (strip SQL functions/aliases)
+        tokens = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", col_clean)
+        tokens = [
+            tok for tok in tokens
+            if tok.lower()
+            not in {"as", "sum", "avg", "min", "max", "count", "distinct",
+                    "coalesce", "nullif", "cast", "upper", "lower", "trim",
+                    "round", "abs", "year", "month", "day", "date", "strftime",
+                    "json_extract", "json"}
+        ]
+        if not tokens:
+            continue
+        # At least one token must be a known column
+        if not any(tok.lower() in known_columns for tok in tokens):
+            return False, f"Column '{col_clean}' is not in the allowed whitelist"
+
+    return True, ""
 
 
 @register_tool(
@@ -132,12 +303,13 @@ async def execute_python(code: str, **_: Any) -> str:
 async def execute_sql(query: str, **_: Any) -> str:
     import json
 
-    query_stripped = query.strip().lower()
-    if not query_stripped.startswith("select"):
-        return "Error: Only SELECT queries are allowed."
-    if ";" in query.rstrip(";"):
-        return "Error: Multiple statements are not allowed."
+    # Four-layer safety validation
+    safe, reason = _is_safe_select_sql(query)
+    if not safe:
+        return f"Error: {reason}."
+
     # Force limit
+    query_stripped = query.strip().lower()
     if "limit" not in query_stripped:
         query = query.rstrip().rstrip(";") + " LIMIT 100"
 
