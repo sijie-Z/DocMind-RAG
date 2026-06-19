@@ -1,36 +1,87 @@
 <p align="center">
-  <h1 align="center">🤖 DocMind</h1>
-  <p align="center"><strong>PER-based Agentic RAG System</strong></p>
-  <p align="center">
-    <code>69% Keyword Coverage</code>
-    <code>+10% Success Rate vs Baseline</code>
-    <code>Langfuse Observability</code>
-    <code>MCP Compatible</code>
-  </p>
-  <p align="center">
-    <a href="https://sijie-z.github.io/DocMind-RAG/architecture.html"><img src="https://img.shields.io/badge/在线演示-架构图-22d3ee?logo=githubpages" alt="Architecture"></a>
-    <a href="https://github.com/sijie-Z/DocMind-RAG"><img src="https://img.shields.io/badge/版本-v1.2.0-blue" alt="Version"></a>
-    <a href="https://github.com/sijie-Z/DocMind-RAG/blob/main/LICENSE"><img src="https://img.shields.io/badge/开源协议-MIT-green" alt="License"></a>
-    <a href="#-benchmark-results"><img src="https://img.shields.io/badge/Benchmark-v1-8A2BE2" alt="Benchmark"></a>
-    <br>
-    <img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python" alt="Python">
-    <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi" alt="FastAPI">
-    <img src="https://img.shields.io/badge/Vue-3.4-4FC08D?logo=vuedotjs" alt="Vue 3">
-    <img src="https://img.shields.io/badge/测试-422%20通过-brightgreen" alt="Tests">
-    <img src="https://img.shields.io/badge/覆盖率-84%25-brightgreen" alt="Coverage">
-    <img src="https://img.shields.io/badge/工具-25%2B%20个-orange" alt="Tools">
-    <img src="https://img.shields.io/badge/Langfuse-已集成-yellow" alt="Langfuse">
-    <img src="https://img.shields.io/badge/Experience-18%20条-8A2BE2" alt="Experience">
-    <img src="https://img.shields.io/badge/Replay-49%20条-blue" alt="Replay">
-    <img src="https://img.shields.io/badge/Skill%20Discovery-2%20候选-FF6B35" alt="Pattern Mining">
-  </p>
+  <img src="https://img.shields.io/badge/版本-v1.2.1-blue?logo=semver" alt="Version">
+  <img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python" alt="Python">
+  <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi" alt="FastAPI">
+  <img src="https://img.shields.io/badge/Vue_3-3.4-4FC08D?logo=vuedotjs" alt="Vue 3">
+  <img src="https://img.shields.io/badge/DeepSeek-V4-8A2BE2" alt="DeepSeek">
+  <img src="https://img.shields.io/badge/开源协议-MIT-green" alt="License">
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs Welcome">
 </p>
+
+<div align="center">
+  <h1>🤖 DocMind</h1>
+  <p><strong>PER-based Agentic RAG System</strong></p>
+  <p>基于 PER（Plan-Execute-Reflect）架构的企业级 AI Agent 系统 · 25+ 工具 · 自我进化</p>
+  <p>
+    <a href="https://sijie-z.github.io/DocMind-RAG/architecture.html">📊 交互式架构图</a> ·
+    <a href="#-benchmark">📈 评测数据</a> ·
+    <a href="#-quick-start">🚀 快速开始</a> ·
+    <a href="https://github.com/sijie-Z/DocMind-RAG">GitHub</a>
+  </p>
+  <br>
+</div>
 
 ---
 
-## 📊 Benchmark Results
+## 📖 Overview · 概览
+
+**DocMind** is an enterprise AI Agent system built on the **PER (Plan-Execute-Reflect)** architecture — an autonomous Agent with 25+ tools including RAG-based knowledge retrieval, web search, code execution, data analysis, multi-language translation, and more. The PER loop enables complex multi-step reasoning with self-correction and memory.
+
+**DocMind** 是一个基于 **PER（规划-执行-反思）** 架构的企业级 AI Agent 系统。拥有 25+ 个内置工具，涵盖 RAG 知识检索、联网搜索、代码执行、数据分析、多语言翻译等能力。PER 循环使其具备复杂多步推理、自我纠错和经验积累的能力。
+
+### Key Metrics · 核心指标
+
+| Metric | Value |
+|--------|-------|
+| 🧠 **Agent Architecture** | PER (Plan → Execute → Reflect → Learn) |
+| 🔧 **Built-in Tools** | 25+ (knowledge, web, code, analysis, translation, MCP...) |
+| 📚 **Test Cases** | 422+ tests across 25 files |
+| 🌐 **Languages** | 中文 / English / 日本語 / Français |
+| 📊 **Benchmark** | 30 questions, 69% keyword coverage, 60% success rate |
+| 🚀 **Deploy** | Docker Compose + Kubernetes |
+| 📈 **Observability** | Langfuse full-trace |
+| 🧬 **Self-Improving** | Experience Memory, Execution Replay, Pattern Mining |
+
+### Product Positioning · 产品定位
+
+> **"文档太多，找不到、看不完、分析不过来。"**
+>
+> DocMind 解决的核心问题：上传文档，既能**问答找答案**，也能**自动分析出结论**。
+
+| 能力 | 一句话 | 解决谁的什么问题 |
+|------|--------|----------------|
+| **A - 知识问答** | 问什么答什么，带来源 | 普通员工：文档太多找不到信息 |
+| **B - 智能分析** | 说需求，自动读文档出结论 | 分析师：多份报告看不完、对比不过来 |
+
+---
+
+## 🧠 Why PER Agent instead of RAG? · 为什么用 Agent 而非纯 RAG？
+
+Most "RAG systems" stop at retrieval. DocMind's PER Agent goes further — RAG is **one tool** in a 25+ tool arsenal, invoked only when the Agent decides it's needed.
+
+大多数 "RAG 系统"止步于检索。DocMind 的 PER Agent 走得更远——RAG 只是 **一个工具**，Agent 在需要时才调用它。
+
+| 任务场景 | RAG Only | PER Agent |
+|----------|:--------:|:---------:|
+| "Find the revenue in this annual report" | ✅ 直接检索 | ✅ Agent 使用知识工具 |
+| "Compare gross margins across 3 competitors" | ❌ 无法跨文档推理 | ✅ Agent 多步检索 + 合成 |
+| "SWOT analysis of Company A" | ❌ 无法应用框架 | ✅ Agent 选择 SWOT → 提取 → 结构化 |
+| "What changed in 2024 data regulation vs 2023?" | ❌ 无法对比差异 | ✅ Agent 分别检索 → 对比 → 总结 |
+| "Search the web for latest AI funding, then assess" | ❌ 无网络访问 | ✅ Agent 联网搜索 → 阅读 → 分析 |
+| "Document ID not found — what else do you have?" | ❌ 无法恢复 | ✅ Agent 列出可用文档，推荐替代 |
+| "Analyze apples." (ambiguous) | ❌ 无法澄清 | ⚠️ 两者均遇歧义极限 |
+
+**RAG finds information. The Agent plans, selects tools, cross-references, and verifies results.**
+
+**RAG 负责"找得准"，Agent 负责"想得透"。**
+
+---
+
+## 📊 Benchmark · 评测结果
 
 30-question evaluation comparing **PER Agent** against a **RAG-only Baseline** on enterprise knowledge tasks. [Benchmark v1] — frozen, reproducible.
+
+30 道企业知识任务的评测，对比 **PER Agent** 和 **纯 RAG 基线**。[Benchmark v1] — 结果固定，可复现。
 
 | Metric | Baseline (RAG only) | PER Agent | Change |
 |--------|:-------------------:|:---------:|:------:|
@@ -39,43 +90,22 @@
 | **Avg Duration** | 20s | 36s | +16s (more tools) |
 | **Tool Failures** | 0.0 | **0.0** | ✅ Reliable |
 
-### Per-Scenario Breakdown
+### Per-Scenario Breakdown · 分场景分析
 
 | Scenario | Baseline | PER Agent | Gain | Why Agent Wins |
 |----------|:--------:|:---------:|:----:|----------------|
-| Single Document Retrieval | 94% | **100%** | +6% | Agent finds docs more precisely |
-| **Cross-Document Analysis** | 65% | **77%** | **+12%** | Multi-step retrieval covers more docs |
-| **Framework Analysis** (SWOT/PEST/DuPont) | 56% | **80%** | **+24%** | Agent selects the right tool + framework |
-| Multi-Step Reasoning | 85% | **90%** | +5% | Baseline already strong; Agent more stable |
-| Web Search Integration | 75% | **88%** | **+12%** | Real DuckDuckGo calls vs. LLM knowledge |
-| Tool Recovery | 72% | 67% | -6% | Agent can over-complicate on retry tasks |
-| Edge Cases | 50% | 38% | -12% | Agent over-processes boundary queries |
-| Ambiguity (L2) | 0% | 0% | — | Both hit system limits |
+| Single Document Retrieval | 94% | **100%** | +6% | 更精准的文档定位 |
+| **Cross-Document Analysis** | 65% | **77%** | **+12%** | 多步检索覆盖更多文档 |
+| **Framework Analysis** (SWOT/PEST/DuPont) | 56% | **80%** | **+24%** | 正确选择工具 + 框架 |
+| Multi-Step Reasoning | 85% | **90%** | +5% | 基线已强；Agent 更稳定 |
+| Web Search Integration | 75% | **88%** | **+12%** | 真实 DuckDuckGo 调用 |
+| Tool Recovery | 72% | 67% | -6% | Agent 可能在重试时过度复杂化 |
+| Edge Cases | 50% | 38% | -12% | Agent 对边界查询过度处理 |
+| Ambiguity (L2) | 0% | 0% | — | 系统极限 |
 
 > **Key insight**: Agent's biggest gains are in **cross-document analysis** (+12%), **framework reasoning** (+24%), and **web search** (+12%) — precisely the tasks where RAG alone falls short. The 7 failures are all L2 ambiguity/boundary questions (0% infrastructure noise).
 
-### Distribution
-
-```
-┌──────────────────┬──────┬──────────────────────────────┐
-│ Single Doc       │  4   │ L1-DOC-01 ~ 04               │
-│ Cross Doc        │  5   │ L1-CROSS-01 ~ 05             │
-│ Framework        │  5   │ L1-FRAME-01 ~ 05             │
-│ Multi-Step       │  4   │ L1-MULTI-01 ~ 04             │
-│ Web Search       │  2   │ L1-WEB-01 ~ 02               │
-│ Tool Recovery    │  3   │ L2-RECOV-01 ~ 03             │
-│ Edge Case        │  4   │ L2-EDGE-01 ~ 04              │
-│ Ambiguity        │  3   │ L2-AMBIG-01 ~ 03             │
-├──────────────────┼──────┤                              │
-│ **Total**        │ **30**│ (tag: benchmark-v1)          │
-└──────────────────┴──────┴──────────────────────────────┘
-```
-
----
-
-## 🔁 Failure-Driven Optimization
-
-The most valuable result isn't the final score — it's the **engineering loop** that took us there.
+### Optimization Journey · 优化历程
 
 ```
   Agent v1                     Agent v2
@@ -86,80 +116,59 @@ The most valuable result isn't the final score — it's the **engineering loop**
   1.0 tool fail  ──→  0.0 tool fail   (zeroed ✅)
 ```
 
-### How It Happened
+**How It Happened · 过程：**
 
 ```
 ① Agent v1 Benchmark (46%)
-    │
-    ▼
-② Failure Collection — classified every failure
-    │  ├─ APIConnectionError
-    │  ├─ Timeout (no backoff)
-    │  ├─ Redis not initialized on cold start
-    │  └─ Tool call failures
-    │
-    ▼
-③ Langfuse Trace — traced each failure to root cause
-    │  └─ Identified: missing retry logic, uninitialized clients,
-    │     improper error propagation in tool registry
-    │
-    ▼
+    ↓
+② Failure Collection — 分类每个失败原因
+    ├─ APIConnectionError
+    ├─ Timeout (无退避)
+    ├─ Redis 冷启动未初始化
+    └─ 工具调用失败
+    ↓
+③ Langfuse Trace — 追踪每个失败到根因
+    ↓
 ④ Runtime Fixes
-    │  ├─ Exponential backoff retry
-    │  ├─ Lazy initialization for Redis/ES clients
-    │  ├─ Tool error propagation → graceful degradation
-    │  └─ Timeout configuration per tool type
-    │
-    ▼
+    ├─ 指数退避重试
+    ├─ Redis/ES 客户端懒初始化
+    ├─ 工具错误传播 → 优雅降级
+    └─ 按工具类型配置超时
+    ↓
 ⑤ Re-benchmark → Agent v2 (69%)
-      46% ──────────────────────────────→ 69%
 ```
 
-This is not a model improvement — it's an **engineering improvement**. The 23pp gain came entirely from reliability fixes, not from changing the LLM or prompt. That's what the Benchmark → Langfuse → Fix → Re-benchmark loop enables.
+This is not a model improvement — it's an **engineering improvement**. The 23pp gain came entirely from reliability fixes, not from changing the LLM or prompt.
 
-> **Our principle**: before chasing model capability, eliminate infrastructure noise. Only then can you compare agents fairly.
-
----
-
-## 🤔 Why Agent instead of RAG?
-
-Most "RAG systems" stop at retrieval. DocMind's PER Agent goes further — RAG is **one tool** in a 25+ tool arsenal, invoked only when the agent decides it's needed.
-
-| Task | RAG Only | PER Agent |
-|------|:--------:|:---------:|
-| "Find the revenue in this annual report" | ✅ Direct retrieval | ✅ Agent uses knowledge tool |
-| "Compare gross margins across 3 competitors" | ❌ No cross-doc reasoning | ✅ Agent calls retrieval → reads → synthesises |
-| "SWOT analysis of Company A" | ❌ Can't apply frameworks | ✅ Agent selects SWOT framework → extracts → structures |
-| "What changed in the 2024 data regulation vs 2023?" | ❌ No diff capability | ✅ Agent retrieves both documents → compares → summarises |
-| "Search the web for latest AI funding news, then assess" | ❌ No web access | ✅ Agent calls DuckDuckGo → reads → analyses |
-| "Document ID not found — what else do you have?" | ❌ No error recovery | ✅ Agent lists available documents, suggests alternatives |
-| "Analyze apples." (ambiguous) | ❌ Can't clarify | ⚠️ Both hit ambiguity limits |
-
-**RAG finds information. The Agent plans, selects tools, cross-references, and verifies results.**
+这不是模型改进——这是**工程改进**。23 个百分点的提升完全来自可靠性修复，而非更换模型或修改提示词。
 
 ---
 
-## 🧠 Self-Improving Agent
+## 🧬 Self-Improving Agent · 自我进化
 
 DocMind's most advanced capability: the Agent learns from its own execution history, remembers mistakes, replays past runs for analysis, and discovers recurring patterns that become new skills.
 
-### Three-Stage Learning Pipeline
+DocMind 最先进的能力：Agent 从自身执行历史中学习，记住错误，回放过去的运行进行分析，并发现可成为新技能的重复模式。
+
+### Three-Stage Learning Pipeline · 三阶段学习流水线
 
 ```
 Execution History
     ↓
-① Experience Memory — learn from failures
+① Experience Memory — 从失败中学习
     ↓
-② Execution Replay — analyse what happened
+② Execution Replay — 分析发生了什么
     ↓
-③ Pattern Mining — discover recurring workflows
+③ Pattern Mining — 发现重复工作流
     ↓
     Skill Recommendations
 ```
 
-### ① Experience Memory: Learn from Failures
+### ① Experience Memory · 经验记忆
 
 When a benchmark question fails, the system automatically extracts a structured "experience" — what scenario failed, what symptom it showed, and what lesson the Planner should follow.
+
+当评测问题失败时，系统自动提取结构化的"经验"——什么场景失败、什么症状、规划器应遵循什么教训。
 
 ```
 Benchmark Failure (L1-FRAME-01: SWOT analysis missing)
@@ -177,22 +186,23 @@ Structured Experience generated:
 Stored in Redis + local JSON → retrieved at next planning session
 ```
 
-Current state: **18 experiences** extracted from benchmark failures, with Negative Transfer protection (metadata ensures experiences are only injected into appropriate scenarios).
+- **18 experiences** extracted from benchmark failures
+- Negative Transfer protection (metadata ensures experiences are only injected into appropriate scenarios)
+- **Verified impact**: Coverage improved from 68.4% → 70.1% with Experience Memory enabled (+1.7%)
 
-**Verified impact**: Benchmark coverage improved from 68.4% → 70.1% with Experience Memory enabled (+1.7%). More importantly, edge-case negative transfer was eliminated when metadata protection was added.
-
-### ② Execution Replay: Flight Recorder
+### ② Execution Replay · 执行回放
 
 Every agent execution is automatically saved as a structured snapshot — a "flight recorder" that captures each plan step, tool call, intermediate result, and decision.
 
-```
+每次 Agent 执行自动保存为结构化快照——捕获每个规划步骤、工具调用、中间结果和决策。
+
+```bash
 python -m benchmark.replay <task_id>          # replay a single execution
 python -m benchmark.replay --diff <a> <b>     # compare two versions
 python -m benchmark.replay --list              # browse all saved runs
 ```
 
-**Replay output example:**
-
+**Replay output example · 回放输出示例：**
 ```
 Execution Replay: 15cae5c15e5e
   Query:  从知识库中找一份企业年报，提取营收数据
@@ -204,47 +214,36 @@ Execution Replay: 15cae5c15e5e
      → Retrieved: 星辰科技 2024 年度报告
 ```
 
-**Diff output** compares two agent versions side-by-side:
+- **49 execution snapshots** saved, replayable at any time
 
-```
-Step 1: search_knowledge_base (2.1s) ✅  |  search_knowledge_base (2.3s) ✅
-Step 2: extract_insights (4.0s) ✅      |  extract_insights (3.5s) ✅
-                                         |  Step 3: compare_docs (5.1s) ✅ ← NEW
-Coverage: 60%                            |  Coverage: 80% ← +20%
-```
-
-Current state: **49 execution snapshots** saved, replayable at any time.
-
-### ③ Pattern Mining & Skill Discovery
+### ③ Pattern Mining & Skill Discovery · 模式挖掘与技能发现
 
 The Pattern Miner scans all saved Replay snapshots and identifies recurring tool-use sequences. High-frequency, high-success patterns become Skill Recommendations.
 
-```
+模式挖掘器扫描所有保存的回放快照，识别重复的工具使用序列。高频、高成功率的模式成为技能推荐。
+
+```bash
 python -m app.agent.mining.report           # view recommendations
 python -m app.agent.mining.report --save    # persist as report
 ```
 
-**Mining results from 47 executions:**
-
+**发现结果（来自 47 次执行）：**
 ```
 Top patterns found:
   list_documents                             14 times
   search_knowledge_base                      14 times
   search_knowledge_base → list_documents      5 times  ⭐
   get_current_time → web_search               3 times  ⭐
-  ...
 ```
 
-**Skill Recommendations generated:**
+**Skill Recommendations · 技能推荐：**
 
 | Skill | Pattern | Confidence | Observations |
 |-------|---------|:----------:|:-----------:|
 | `document_discovery` | `search → list_documents` | 70% | 5 |
 | `get_web_workflow` | `get_current_time → web_search` | 63% | 3 |
 
-Each recommendation is presented with supporting evidence (frequency, success rate, trigger keywords) as a **suggestion** — not auto-registered. This respects the principle that pattern ≠ skill; human validation bridges the gap.
-
-### The Evolution Path
+### The Evolution Path · 进化路径
 
 ```
 v1 → v2:   Manual fix (human analyses → human fixes → re-benchmark)
@@ -253,13 +252,11 @@ v3 → v4:   Replay + Pattern Mining (observe → analyse → recommend)
 Future:    Skill Auto-Registration (autonomous skill evolution)
 ```
 
-What started as a manual engineering process has evolved into a **self-improving agent platform** — the agent can observe itself, learn from mistakes, replay past executions, and discover new capabilities from its own experience.
-
 ---
 
-## 🏗 System Architecture
+## 🏗 System Architecture · 系统架构
 
-### 5-Layer Architecture
+### 5-Layer Architecture · 五层架构
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -269,25 +266,35 @@ What started as a manual engineering process has evolved into a **self-improving
 │                   API 网关层 (API Gateway)                   │
 │          FastAPI + JWT + CORS + Rate Limit + SSE            │
 ├─────────────────────────────────────────────────────────────┤
-│                   AI Agent 核心层                            │
-│   PER Loop │ Tool Registry │ Context Engine │ Skill       │
+│                   AI Agent 核心层 (Agent Core)               │
+│   PER Loop │ Tool Registry │ Context Engine │ Skill Library │
 │       │              ↑                        │             │
 │       ↓              │                        ↓             │
-│   RAG 管道 │ 知识图谱 │ 工作流引擎 │ 文档管理                │
+│   RAG Pipeline │ Knowledge Graph │ Workflow Engine │ Doc Mgt │
 ├─────────────────────────────────────────────────────────────┤
 │                    AI / LLM 层 (Intelligence)               │
-│   DeepSeek V4 │ Embedding │ Reranker │ Tool Registry       │
+│   DeepSeek V4 │ Embedding │ Reranker │ Langfuse SDK         │
 ├─────────────────────────────────────────────────────────────┤
 │                   数据存储层 (Data Storage)                   │
 │  MySQL 8 │ Elasticsearch 8 │ Redis 7 │ Kafka │ MinIO       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-> Open `docs/architecture.html` for the interactive diagram.
+> Open `docs/architecture.html` for the interactive diagram. 打开 `docs/architecture.html` 查看交互式架构图。
 
 ### PER Agent: Plan → Execute → Reflect
 
 DocMind's core differentiator — a three-phase architecture that surpasses traditional ReAct:
+
+DocMind 的核心差异化——超越传统 ReAct 的三阶段架构：
+
+| | ReAct | PER (本项目) |
+|---|---|---|
+| 规划 (Planning) | 无，边想边做 | **先规划，再执行** — 生成完整 DAG |
+| 执行 (Execution) | 单步串行 | **多步并行**，按依赖图执行 |
+| 反思 (Reflection) | 无 | **执行完整体评估**，可触发重试/重规划 |
+| 记忆 (Memory) | 无 | 持久化记忆 + 经验积累 |
+| 子任务 (Sub-task) | 无 | 支持子 Agent 委派 |
 
 ```
 用户提问
@@ -300,40 +307,93 @@ DocMind's core differentiator — a three-phase architecture that surpasses trad
 ├──────────────────────────────────────────────┤
 │  Phase 2: 执行 (Executor)                    │
 │  • 按计划顺序调用工具（25+ 内置工具）          │
+│  • 独立步骤并行执行 (asyncio.gather)          │
 │  • 每步结果经 LLM 自然语言合成                │
-│  • 支持失败重试和工具降级                      │
+│  • 失败自动重试（指数退避，最多 3 次）          │
 ├──────────────────────────────────────────────┤
 │  Phase 3: 反思 (Reflector)                   │
 │  • 审查执行结果是否满足原始需求               │
-│  • 检测错误或不一致（幻觉/缺漏/矛盾）          │
+│  • 检测错误/幻觉/缺漏/矛盾                   │
 │  • 必要时触发重新规划或局部修复                │
 └──────────────────────────────────────────────┘
    ↓
 SSE 流式返回最终答案（含规划推理 + 执行过程 + 引用溯源）
 ```
 
-**Key parameters**: max steps 15 | LLM temperature 0.1 | SSE streaming | exponential backoff retry
+### RAG Pipeline (Agent's Core Tool)
 
-**Why this matters**: Plan generates a full DAG upfront (vs. ReAct's serial step-by-step), and Reflect verifies output quality, auto-correcting errors.
+```
+用户提问
+   |
+   v
+┌─ 查询分析 ──────────────────────────────┐
+│  QueryComplexityClassifier 判断复杂度     │
+│  ├─ simple     → 仅关键词检索            │
+│  ├─ medium     → 混合检索（默认）         │
+│  └─ complex    → 混合 + HyDE + 查询改写  │
+└──────────────────────────────────────────┘
+   |
+   v
+┌─ 双路检索 ───────────────────────────────┐
+│  关键词检索（ES multi_match + BM25）      │
+│  向量检索（ES dense_vector + cosine)      │
+│  复杂模式：HyDE 伪文档 + 多查询改写       │
+└──────────────────────────────────────────┘
+   |
+   v
+┌─ 结果融合 ───────────────────────────────┐
+│  RRF（Reciprocal Rank Fusion, k=60）      │
+│  MMR 多样性选择（λ=0.65）                 │
+│  同文档去重（每文档最多 2 个块）           │
+└──────────────────────────────────────────┘
+   |
+   v
+┌─ 重排序 ────────────────────────────────┐
+│  Cross-Encoder Rerank（优先智谱 rerank） │
+│  兜底：LLM 重排                          │
+└──────────────────────────────────────────┘
+   |
+   v
+┌─ 生成回答 ──────────────────────────────┐
+│  LLM + 检索上下文 → 带引用的回答          │
+└──────────────────────────────────────────┘
+```
+
+**Quality Assurance · 质量保障：**
+
+| 机制 | 作用 |
+|------|------|
+| 语义分块 (Semantic Chunking) | 分块边界落在语义转折处 |
+| Contextual Retrieval | 块携带文档级上下文，避免"断章取义" |
+| 查询复杂度自适应 | 简单问题不走复杂检索，节省 LLM 成本 |
+| HyDE + Multi-Query | 查询改写解决"问法和文档写法不一致" |
+| RRF 融合 | 关键词 + 向量双路结果排序融合 |
+| MMR 多样性 | 避免返回结果同质化 |
+| Cross-Encoder Rerank | 对 Top-K 结果精确重排，+30% 检索精度 |
+| 语义缓存 (Semantic Cache) | 相似查询直接命中缓存，相似度 ≥0.92 |
+| 上下文压缩 (Context Compression) | 控制输入 LLM 的 token 量 |
 
 ---
 
-## 🔭 Observability (Langfuse)
+## 🔭 Observability · 可观测性 (Langfuse)
 
 Every agent execution is traced through Langfuse:
+
+每次 Agent 执行都通过 Langfuse 全链路追踪：
 
 - **Full trace visibility**: plan steps, tool calls, LLM completions, timings
 - **Failure classification**: API errors, timeouts, tool failures categorised automatically
 - **Cost tracking**: per-conversation token usage and latency
-- **Benchmark integration**: each of the 30 benchmark questions generates a trace
-
-> Screenshot: [Langfuse Dashboard](https://cloud.langfuse.com) (available when running)
+- **Benchmark integration**: each benchmark question generates a trace
+- **5 observation points**: registry, memory, planner, executor, reflector
 
 ---
 
 ## 🔌 MCP Bridge
 
 DocMind can connect to external MCP (Model Context Protocol) servers, extending its toolset beyond built-in capabilities:
+
+DocMind 可连接外部 MCP 服务器，扩展内置工具集之外的生态：
 
 - **GitHub MCP Server** — repository operations, code search, PR management
 - **Filesystem MCP Server** — file read/write access
@@ -343,48 +403,47 @@ MCP tools are registered into the same Tool Registry as native tools, with the s
 
 ---
 
-## ✨ Features
+## ✨ Features · 功能特性
 
-### 🤖 PER Agent (Core Differentiator)
+### 🤖 PER Agent (Core Differentiator · 核心差异)
 
 | Feature | Description |
 |---------|-------------|
 | **PER 3-Phase Architecture** | Plan → Execute → Reflect, DAG decomposition + parallel tools + self-correction |
 | **25+ Built-in Tools** | Knowledge retrieval, web search, document parsing, summarisation, deep analysis, code execution, translation, and more |
+| **Feishu Integration** | Feishu bitable document sync and query (飞书文档接入) |
 | **Tool Registry** | Unified registration, auth, sandbox isolation, audit trail |
-| **Context Engine** | Multi-turn memory management, automatic token budget allocation (system 2K / dialog 8K / tools 4K) |
+| **Context Engine** | Multi-turn memory management, automatic token budget (system 2K / dialog 8K / tools 4K) |
 | **Thinking Stream** | Real-time frontend visualisation of every Agent reasoning step |
 | **Task Decomposition** | Complex tasks automatically broken into multi-step execution plans |
-| **Skill Learning** | Self-improvement from successful tool-use patterns |
+| **Self-Improvement** | Experience Memory, Execution Replay, Pattern Mining → Skill Discovery |
+| **SSE Streaming** | 12 event types: thinking, plan, tool_call, reflection, chunk, done... |
 
-#### Built-in Tools
+#### Built-in Tools · 内置工具
 
 | Tool | Description |
 |------|-------------|
-| `🔎 Knowledge Retrieval` | Hybrid search over enterprise knowledge base with relevance scoring |
-| `🌐 Web Search` | Real-time DuckDuckGo search to supplement knowledge gaps |
-| `📄 Document Parsing` | Extract structured content from PDF, Word, TXT, Markdown |
-| `📝 Smart Summarisation` | Long document summarisation, multi-document comparison |
-| `📊 Deep Analysis` | Insight extraction, trend analysis, sentiment, cross-doc comparison |
-| `🗂️ File Management` | Organisation, batch tagging, archiving |
-| `⌨️ Code Execution` | Sandboxed Python execution for data analysis |
-| `🔗 Content Crawling` | Web page fetching with automatic cleanup |
-| `🔄 Batch Processing` | Large dataset chunking with progress tracking |
-| `🌍 Translation` | Chinese/English/Japanese/French, document and segment levels |
-| `🧭 Knowledge Graph` | Entity-relationship exploration, graph querying, interactive browsing |
+| `🔎 search_knowledge_base` | Hybrid search over enterprise knowledge base with relevance scoring |
+| `🔎 vector_search` | Semantic vector search for related paragraphs |
+| `📄 extract_insights` | Entity, metrics, claims, structure extraction from documents |
+| `📊 cross_document_analysis` | Multi-document pattern analysis (common themes, differences, trends) |
+| `📝 generate_report` | Polished markdown report generation from analysis data |
+| `📝 summarize_document` | Long document summarisation |
+| `🔑 extract_keywords` | Keyword extraction for tagging |
+| `🗂️ list_documents` | List all accessible documents |
+| `ℹ️ get_document_info` | Document metadata details |
+| `🌐 web_search` | Real-time DuckDuckGo search to supplement knowledge gaps |
+| `⌨️ code_execution` | Sandboxed Python execution for data analysis |
+| `📊 data_analysis` | Data analysis toolkit |
+| `🔗 content_crawling` | Web page fetching with automatic cleanup |
+| `🌍 translation` | Chinese/English/Japanese/French, document and segment levels |
+| `🧭 knowledge_graph` | Entity-relationship exploration, interactive browsing |
+| `🔌 mcp_call` | External MCP server tool invocation |
+| `📋 list_conversations` | Conversation history |
+| `🔄 batch_processing` | Large dataset chunking with progress tracking |
+| ... and more! |
 
-### 📚 RAG Pipeline (Agent's Core Tool)
-
-| Feature | Description |
-|---------|-------------|
-| **Document Parsing** | PDF, Word, TXT, Markdown via LangChain smart chunking |
-| **Hybrid Retrieval** | BM25 keyword + KNN vector dual-channel, RRF fusion |
-| **Cross-Encoder Reranking** | Two-stage re-ranking, +30% retrieval precision |
-| **Semantic Cache** | Cosine similarity ≥0.92 returns cached results, saving LLM costs |
-| **Context Compression** | Smart trimming of retrieval results to control token usage |
-| **Citation Tracking** | Every answer annotated with `[n]` references linking to source |
-
-### 💬 Smart Chat
+### 💬 Smart Chat · 智能对话
 
 - **SSE Streaming**: Token-level real-time display, typewriter effect
 - **Multi-turn**: Conversation history awareness with session management
@@ -393,20 +452,20 @@ MCP tools are registered into the same Tool Registry as native tools, with the s
 - **Markdown Rendering**: Code highlighting, LaTeX, tables, flowcharts
 - **Export**: Conversations exportable as Markdown
 
-### 🔗 Knowledge Graph
+### 🔗 Knowledge Graph · 知识图谱
 
 - Canvas force-directed graph visualisation
 - 7 entity types extracted automatically (Person, Organisation, Location, Technology, Concept, Event, Product)
 - Interactive: drag, zoom, click for details, keyword filter
 
-### ⚙️ Visual Workflow Editor
+### ⚙️ Visual Workflow Editor · 可视化工作流编辑器
 
 - Drag-and-drop DAG builder (Vue Flow based)
 - **Node types**: LLM, API call, code execution, condition, smart routing, memory, data transform
 - **Real-time debug**: execution trace drawer, node status colour coding
 - **DAG Engine**: Kahn topological sort + DFS cycle detection, auto-optimised execution order
 
-### 🏢 Enterprise Features
+### 🏢 Enterprise Features · 企业级特性
 
 | Feature | Description |
 |---------|-------------|
@@ -420,7 +479,7 @@ MCP tools are registered into the same Tool Registry as native tools, with the s
 
 ---
 
-## 🛠 Tech Stack
+## 🛠 Tech Stack · 技术栈
 
 | Layer | Technology | Notes |
 |-------|-----------|-------|
@@ -447,21 +506,21 @@ MCP tools are registered into the same Tool Registry as native tools, with the s
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start · 快速开始
 
-### Requirements
+### Prerequisites · 前置要求
 
 - **Docker Desktop** (recommended) — one-click infrastructure
 - Or manual: Python 3.11+, Node.js 18+, MySQL 8, Redis 7, Elasticsearch 8, Kafka, MinIO
 
-### 1. Clone
+### 1. Clone · 克隆
 
 ```bash
 git clone https://github.com/sijie-Z/DocMind-RAG.git
 cd DocMind-RAG
 ```
 
-### 2. Start Infrastructure
+### 2. Start Infrastructure · 启动基础设施
 
 ```bash
 cd backend
@@ -470,7 +529,7 @@ docker compose up -d
 
 > Starts MySQL, Redis, Elasticsearch, Kafka, MinIO (~30s).
 
-### 3. Configure
+### 3. Configure · 配置
 
 ```bash
 cp .env.docker.example .env.docker
@@ -493,7 +552,7 @@ LANGFUSE_PUBLIC_KEY=pk-...
 LANGFUSE_SECRET_KEY=sk-...
 ```
 
-### 4. Start Backend
+### 4. Start Backend · 启动后端
 
 ```bash
 cd backend
@@ -503,7 +562,7 @@ pip install -r requirements.txt
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 5. Start Frontend
+### 5. Start Frontend · 启动前端
 
 ```bash
 cd frontend
@@ -511,31 +570,31 @@ npm install
 npm run dev                      # Port 5173
 ```
 
-### 6. Open App
+### 6. Open App · 访问应用
 
 | URL | Description |
 |-----|-------------|
-| http://localhost:5173 | Frontend UI |
-| http://localhost:8000/docs | API Docs (Swagger) |
-| http://localhost:8000/health | Health check |
+| http://localhost:5173 | Frontend UI · 前端界面 |
+| http://localhost:8000/docs | Swagger API Docs · API 文档 |
+| http://localhost:8000/health | Health check · 健康检查 |
 
-### Demo Accounts
+### Demo Accounts · 演示账号
 
 | Username | Password | Role |
 |----------|----------|------|
 | `guest` | `123456` | User |
 | `admin` | `admin123` | Admin |
 
-### 7. Seed Sample Data (Optional)
+### 7. Seed Sample Data · 导入示例数据 (Optional)
 
 ```bash
 cd backend
 python seed_docs/seed.py
 ```
 
-> Imports 2 sample documents to test Agent analysis immediately.
+> Imports 2 sample documents to test Agent analysis immediately. 导入 2 份示例文档，立即测试 Agent 分析。
 
-### Run Benchmark
+### Run Benchmark · 运行评测
 
 ```bash
 # Baseline (RAG only)
@@ -553,7 +612,7 @@ python -m benchmark.run --mode agent --experience --output results/agent_with_ex
 python -m benchmark.run --compare results/agent_no_exp.json results/agent_with_exp.json
 ```
 
-### Replay & Analyse
+### Replay & Analyse · 回放与分析
 
 ```bash
 # List all saved replays
@@ -571,48 +630,42 @@ python -m app.agent.mining.report --save
 
 ---
 
-## 📁 Project Structure
+## 📁 Project Structure · 项目结构
 
 ```
 DocMind/
-├── backend/                          # Backend
+├── backend/                          # Backend · 后端
 │   ├── app/
 │   │   ├── api/v1/endpoints/         # REST API (17 modules)
 │   │   ├── agent/                    # PER Agent core
-│   │   │   ├── loop.py               #   Main loop (Plan→Execute→Reflect)
+│   │   │   ├── loop.py               #   Main PER loop
+│   │   │   ├── planner.py            #   Planner - task decomposition
+│   │   │   ├── executor.py           #   Executor - tool orchestration
+│   │   │   ├── reflector.py          #   Reflector - quality check
 │   │   │   ├── registry.py           #   Tool registry
 │   │   │   ├── context.py            #   Context engine
 │   │   │   ├── events.py             #   SSE event model
 │   │   │   ├── observability.py      #   Langfuse integration
 │   │   │   ├── exec_context.py       #   Execution context (flight recorder)
 │   │   │   ├── experience/           #   Self-improving: learn from failures
-│   │   │   │   ├── models.py         #     Experience data model
-│   │   │   │   ├── store.py          #     Persistence (Redis + local JSON)
-│   │   │   │   ├── extractor.py      #     Auto-extract from benchmark failures
-│   │   │   │   └── run_extract.py    #     Bootstrap CLI
 │   │   │   ├── replay/               #   Execution replay engine
-│   │   │   │   └── engine.py         #     Load, format, diff
 │   │   │   ├── mining/               #   Pattern mining & skill discovery
-│   │   │   │   ├── models.py         #     Pattern data models
-│   │   │   │   ├── miner.py          #     Sequence extraction & frequency stats
-│   │   │   │   ├── analyzer.py       #     Pattern → Skill recommendation
-│   │   │   │   └── report.py         #     Report generator (JSON + Markdown)
-│   │   │   └── tools/               #   Tool implementations
+│   │   │   └── tools/               #   Tool implementations (10+ modules)
 │   │   ├── core/                    # Infrastructure (config, DB, ES, Redis)
 │   │   ├── models/                  # SQLAlchemy ORM
 │   │   ├── rag/                     # RAG pipeline
 │   │   ├── schemas/                 # Pydantic schemas
 │   │   ├── services/                # Business logic
 │   │   └── worker/                  # Kafka async document processor
-│   ├── tests/                       # 422 test cases (25 files)
+│   ├── tests/                       # 422+ test cases (25 files)
 │   ├── benchmark/                   # Benchmark framework
-│   │   ├── questions/               #   30 benchmark question sets (v1, v2)
+│   │   ├── questions/               #   30 benchmark question sets
 │   │   ├── results/                 #   Baseline & Agent result reports
 │   │   ├── cases/                   #   Per-question case files
 │   │   ├── run.py                   #   Benchmark runner
 │   │   └── scorer.py                #   Scorer & classification
 │   └── seed_docs/                   # Sample documents
-├── frontend/                        # Vue 3 frontend
+├── frontend/                        # Vue 3 frontend · 前端
 │   └── src/
 │       ├── api/                     # API clients
 │       ├── components/agent/        # Agent components (PlanTree, ThinkingStream, etc.)
@@ -620,55 +673,60 @@ DocMind/
 │       └── views/                   # Pages (chat, agent, knowledge, workflow, dashboard)
 ├── deploy/k8s/                      # Kubernetes manifests
 ├── docs/
-│   └── architecture.html            # Interactive architecture diagram
+│   ├── architecture.html            # Interactive architecture diagram · 交互式架构图
+│   ├── product-definition.md        # Product definition · 产品定义
+│   └── roadmap.md                   # Development roadmap · 开发路线图
 └── .github/workflows/ci.yml         # CI/CD
 ```
 
 ---
 
-## 🧪 Testing
+## 🧪 Testing · 测试
 
 ```bash
-# Backend (422 test cases, 25 files)
+# Backend · 后端 (422+ test cases, 25 files)
 cd backend
 python -m pytest tests/ -v --tb=short
 
-# Coverage
+# Coverage · 覆盖率
 cd backend
 python -m pytest tests/ --cov=app --cov-report=html
 
-# One-shot check
+# One-shot check · 一键检查
 make test
 make lint
 ```
 
 ---
 
-## 🚢 Deployment
+## 🚢 Deployment · 部署
 
 | Method | Description | Command |
 |--------|-------------|---------|
-| **Docker Compose** | Single machine | `cd backend && docker compose up -d` |
-| **Kubernetes** | Cluster | `kubectl apply -f deploy/k8s/` |
-| **Manual** | Custom env | See `deploy/README.md` |
+| **Docker Compose** | Single machine · 单机部署 | `cd backend && docker compose up -d` |
+| **Kubernetes** | Cluster · 集群部署 | `kubectl apply -f deploy/k8s/` |
+| **Manual** | Custom env · 自定义环境 | See `deploy/README.md` |
 
 ---
 
-## 📝 Version History
+## 📝 Version History · 版本历史
 
-See [CHANGELOG.md](CHANGELOG.md)
+See [CHANGELOG.md](CHANGELOG.md) for full details.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
-| **v1.2.0** | 2026-05-24 | PER Agent architecture, 25+ tools, deep analysis, full SSE pipeline |
+| **v1.2.1** | 2026-05-24 | Agent crash fix, parallel execution, page transitions, ErrorBoundary |
+| **v1.2.0** | 2026-05-24 | PER Agent architecture, 25+ tools, deep analysis, SSE pipeline |
 | **v1.1.0** | 2026-05-17 | Agent mode toggle, sample docs, CJK tokenisation fix |
-| **v1.0.0** | 2026-05-17 | First release: RAG pipeline, PER Agent, workflow editor, knowledge graph |
+| **v1.0.0** | 2026-05-17 | First release: RAG pipeline, workflow editor, knowledge graph |
 
 ---
 
-## 🤝 Contributing
+## 🤝 Contributing · 贡献指南
 
 Issues and PRs welcome! See [CONTRIBUTING.md](CONTRIBUTING.md)
+
+欢迎提交 Issue 和 PR！详见 [CONTRIBUTING.md](CONTRIBUTING.md)
 
 Conventions:
 - Backend: Python 3.11+, ruff code style
@@ -677,13 +735,13 @@ Conventions:
 
 ---
 
-## 📄 License
+## 📄 License · 开源协议
 
 MIT License — see [LICENSE](LICENSE)
 
 ---
 
-## 🔗 Links
+## 🔗 Links · 链接
 
 - **Architecture Diagram**: [GitHub Pages](https://sijie-z.github.io/DocMind-RAG/architecture.html)
 - **GitHub**: [sijie-Z/DocMind-RAG](https://github.com/sijie-Z/DocMind-RAG)
@@ -697,4 +755,6 @@ MIT License — see [LICENSE](LICENSE)
   <strong>DocMind</strong> — PER-based Agentic RAG System
   <br>
   <sub>Built with ❤️ by the DocMind Team</sub>
+  <br>
+  <sub>基于 PER 架构的企业级 AI Agent 系统</sub>
 </p>
