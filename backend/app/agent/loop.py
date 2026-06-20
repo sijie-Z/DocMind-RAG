@@ -109,11 +109,13 @@ class PERAgentLoop:
         config: AgentConfig | None = None,
         organization_id: int = 1,
         user_id: int = 0,
+        execution_mode: str = "dag",
     ):
         self.client = openai_client
         self.config = config or AgentConfig()
         self.organization_id = organization_id
         self.user_id = user_id
+        self._execution_mode = execution_mode
 
         # Context engine with LLM-based summarization
         self.context_engine = ContextEngine(
@@ -145,7 +147,7 @@ class PERAgentLoop:
     @property
     def executor(self) -> Executor:
         if self._executor is None:
-            self._executor = Executor(self.client, self.config, self.memory)
+            self._executor = Executor(self.client, self.config, self.memory, execution_mode=self._execution_mode)
         return self._executor
 
     @property

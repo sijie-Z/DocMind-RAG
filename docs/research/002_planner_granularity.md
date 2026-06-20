@@ -86,6 +86,18 @@ Success Rate
 
 如果 `coarse ≈ normal ≈ fine`（三组的 avg_steps 无显著差异），则实验操纵失败，不进入结果分析。需要先改进 Planner 的步数控制能力。
 
+### 4.1 Planner Compliance 表
+
+这是最重要的操纵检查。实验前必须验证：
+
+| Mode | 预期 avg_steps | 预期 avg_dependencies | 预期 avg_parallel_groups | 通过条件 |
+|:----:|:--------------:|:---------------------:|:------------------------:|:--------:|
+| coarse | ~1.5 | ~0 | ~0 | avg_steps < 2.5 |
+| normal | ~4 | ~2 | ~1-2 | avg_steps 2.5-6 |
+| fine | ~10 | ~6 | ~3-5 | avg_steps > 7 |
+
+如果任何一档落在预期范围之外，实验操纵失败，先修 Planner 再重跑。
+
 ---
 
 ## 5. Experiment Design
@@ -93,7 +105,21 @@ Success Rate
 ### 5.1 变量
 
 - **自变量**: `planning_mode`（coarse / normal / fine）
-- **因变量**: keyword_coverage, duration, step_count, tool_failures
+- **因变量**:
+
+| Metric | 意义 | 预期趋势 |
+|--------|------|---------|
+| step_count | 规划粒度 | 操纵变量，应随 coarse→fine 递增 |
+| success_rate | 效果 | 倒 U 型（核心假设） |
+| keyword_coverage | 质量 | 倒 U 型 |
+| duration | 时间成本 | 单调上升（更多步骤 → 更多工具调用） |
+| tool_calls | 工具成本 | 单调上升 |
+| token_usage | LLM 成本 | 单调上升 |
+
+**核心分析框架: Pareto Frontier**
+
+如果 success_rate 呈倒 U 型而 duration 呈单调上升，则存在帕累托前沿——normal 模式在"效果 vs 成本"平面上占优，coarse 和 fine 分别在其中一个指标上落后。
+
 - **控制变量**: 同 30 题（v3.json），同一套 Executor + Reflector，同一模型（DeepSeek V4 Flash）
 - **执行模式**: 统一使用 DAG（既然 Serial 已被证明等价）
 

@@ -8,7 +8,7 @@
     "不存在",
     "未找到"
   ],
-  "actual_answer": "您查询的文档（ID: fake_404_doc）在系统中未找到，可能是文档ID有误或该文档已被删除。请检查文档编号是否正确。",
+  "actual_answer": "您要查询的文档（ID：fake_404_doc）未找到，请检查文档ID是否正确。",
   "keyword_coverage": 0.5,
   "keywords_found": [
     "未找到"
@@ -18,9 +18,9 @@
   ],
   "step_count": 1,
   "tool_failures": 0,
-  "duration": 14.522974199993769,
+  "duration": 12.731813999998849,
   "trace_id": "",
   "trace_url": "",
-  "timestamp": "2026-06-13T17:46:02",
+  "timestamp": "2026-06-20T01:13:37",
   "failure_cause": ""
 }

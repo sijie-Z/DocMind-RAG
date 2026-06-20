@@ -8,7 +8,7 @@
     "不存在",
     "未找到"
   ],
-  "actual_answer": "非常抱歉，我目前无法获取该文档的信息，因为系统内部出现了一个技术问题（数据库映射初始化失败）。请稍后重试，或联系技术支持查看系统配置。",
+  "actual_answer": "抱歉，我未能找到你提到的文档。请检查文档ID是否正确，或者提供更多信息，我将尽力帮助你。",
   "keyword_coverage": 0.0,
   "keywords_found": [],
   "keywords_missed": [
@@ -17,9 +17,9 @@
   ],
   "step_count": 1,
   "tool_failures": 0,
-  "duration": 15.097603599991999,
+  "duration": 14.057605899986811,
   "trace_id": "",
   "trace_url": "",
-  "timestamp": "2026-06-13T17:50:37",
+  "timestamp": "2026-06-20T10:46:20",
   "failure_cause": "UNKNOWN"
 }

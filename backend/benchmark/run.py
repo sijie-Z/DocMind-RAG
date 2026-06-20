@@ -154,7 +154,8 @@ async def _run_baseline(question: dict, org_id: int = 3, lf=None) -> QuestionRes
 
 # ── Agent mode (PER) ────────────────────────────────────────────────
 
-async def _run_agent(question: dict, org_id: int = 3, lf=None, enable_experience: bool = True) -> QuestionResult:
+async def _run_agent(question: dict, org_id: int = 3, lf=None, enable_experience: bool = True,
+                      execution_mode: str = "dag", planning_mode: str = "normal") -> QuestionResult:
     """Run a single question with the full PER agent."""
     from app.agent.config import AgentConfig
     from app.agent.loop import PERAgentLoop
@@ -163,7 +164,7 @@ async def _run_agent(question: dict, org_id: int = 3, lf=None, enable_experience
     qid = question["id"]
     query = question["question"]
 
-    trace_id, trace_url = _create_question_trace(lf, qid, "agent")
+    trace_id, trace_url = _create_question_trace(lf, qid, f"agent_{execution_mode}")
 
     client = agent_service.client
     if not client:
@@ -180,6 +181,7 @@ async def _run_agent(question: dict, org_id: int = 3, lf=None, enable_experience
         enable_memory=False,
         enable_thinking=False,
         enable_experience=enable_experience,
+        planning_mode=planning_mode,
         max_plan_steps=5,
         max_iterations=8,
         max_retries_per_step=3,
@@ -191,6 +193,7 @@ async def _run_agent(question: dict, org_id: int = 3, lf=None, enable_experience
         config=config,
         organization_id=org_id,
         user_id=0,
+        execution_mode=execution_mode,
     )
 
     start = time.perf_counter()
@@ -258,14 +261,18 @@ async def _get_org_id() -> int:
 
 
 async def run_benchmark(questions_path: str, mode: str, output: str | None = None,
-                        enable_experience: bool = True) -> BenchmarkReport:
+                        enable_experience: bool = True,
+                        execution_mode: str = "dag",
+                        planning_mode: str = "normal") -> BenchmarkReport:
     """Load questions, run all, produce report, save cases.
 
     Args:
         questions_path: Path to questions JSON file.
         mode: 'baseline' or 'agent'.
         output: Path to save result JSON.
-        enable_experience: Enable Experience Memory (A/B toggle)."""
+        enable_experience: Enable Experience Memory (A/B toggle).
+        execution_mode: 'dag' (parallel groups) or 'serial' (step-by-step).
+        planning_mode: 'coarse', 'normal', or 'fine' (planner granularity)."""
     org_id = await _get_org_id()
     logger.info(f"Using organization_id={org_id}")
     with open(questions_path, encoding="utf-8") as f:
@@ -295,7 +302,7 @@ async def run_benchmark(questions_path: str, mode: str, output: str | None = Non
 
         t0 = time.perf_counter()
         if mode == "agent":
-            result = await _run_agent(q, org_id=org_id, lf=lf, enable_experience=enable_experience)
+            result = await _run_agent(q, org_id=org_id, lf=lf, enable_experience=enable_experience, execution_mode=execution_mode, planning_mode=planning_mode)
         else:
             result = await _run_baseline(q, org_id=org_id, lf=lf)
         elapsed = time.perf_counter() - t0
@@ -354,6 +361,10 @@ def main():
                         help="题目 JSON 文件路径")
     parser.add_argument("--mode", choices=["baseline", "agent"], default="agent",
                         help="运行模式")
+    parser.add_argument("--execution-mode", choices=["dag", "serial"], default="dag",
+                        help="执行器模式: dag (依赖感知+并行) / serial (顺序执行)")
+    parser.add_argument("--planning-mode", choices=["coarse", "normal", "fine"], default="normal",
+                        help="规划粒度: coarse (一步) / normal (适中) / fine (细粒度)")
     parser.add_argument("--output", default=None,
                         help="输出 JSON 路径 (默认: benchmark/results/{mode}_v1.json)")
     parser.add_argument("--compare", nargs=2, metavar=("BASELINE", "AGENT"),
@@ -369,10 +380,15 @@ def main():
         return
 
     exp_label = "with_experience" if args.experience else "no_experience"
-    output = args.output or f"benchmark/results/{args.mode}_{exp_label}.json"
-    print(f"\n  Experience Memory: {'✅ 启用' if args.experience else '❌ 禁用'}")
+    mode_label = f"{args.mode}_{args.execution_mode}_{args.planning_mode}" if args.mode == "agent" else args.mode
+    output = args.output or f"benchmark/results/{mode_label}_{exp_label}.json"
+    print(f"\n  Execution Mode: {args.execution_mode}")
+    print(f"  Planning Mode: {args.planning_mode}")
+    print(f"  Experience Memory: {'启用' if args.experience else '禁用'}")
     asyncio.run(run_benchmark(args.questions, args.mode, output,
-                              enable_experience=args.experience))
+                              enable_experience=args.experience,
+                              execution_mode=args.execution_mode,
+                              planning_mode=args.planning_mode))
 
 
 if __name__ == "__main__":

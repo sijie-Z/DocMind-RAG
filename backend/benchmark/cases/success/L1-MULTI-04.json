@@ -11,22 +11,21 @@
     "建议",
     "综合"
   ],
-  "actual_answer": "您好，我尝试搜索市场报告和年报，但知识库中没有找到相关文档，因此无法进行 PEST 和 SWOT 分析，也无法给出投资建议。建议您提供具体的公司或行业名称，或者调整关键词，我来帮您重新搜索。",
-  "keyword_coverage": 0.8,
+  "actual_answer": "我从知识库中找到了以下相关的市场报告和年报，供您选择：\n\n**市场报告：**\n- 2024年第四季度人工智能行业研究报告\n- 2023年半导体行业市场回顾与2024年展望\n\n**年报：**\n- 星辰科技 2024 年度财务报告\n- 远航制造 2024 年度财务报告\n\n请您指定希望分析哪一份市场报告和哪一份年报，我将分别用PEST和SWOT框架进行分析，并综合给出投资建议。",
+  "keyword_coverage": 1.0,
   "keywords_found": [
     "PEST",
     "SWOT",
     "分析",
-    "建议"
-  ],
-  "keywords_missed": [
+    "建议",
     "综合"
   ],
+  "keywords_missed": [],
   "step_count": 1,
   "tool_failures": 0,
-  "duration": 26.3017039999977,
+  "duration": 29.124038900015876,
   "trace_id": "",
   "trace_url": "",
-  "timestamp": "2026-06-13T17:49:34",
+  "timestamp": "2026-06-20T10:45:11",
   "failure_cause": ""
 }

@@ -188,10 +188,27 @@ class Planner:
         AGENT_PLANNING_TOTAL.inc()
         planning_start = time.time()
 
+        # Determine planning granularity
+        mode = getattr(self.config, "planning_mode", "normal")
+        if mode == "coarse":
+            max_steps = 1
+            granularity_instruction = "\n\n**重要**: 请一步完成，不要拆分步骤。直接将用户需求作为一个步骤输出。"
+        elif mode == "fine":
+            max_steps = 12
+            granularity_instruction = (
+                "\n\n**重要**: 请尽可能细粒度地拆分任务。每个独立子目标作为一个步骤，"
+                "宁可多步也不要合并。如果多个步骤可以并行执行，请设置相同的 parallel_group。"
+            )
+        else:
+            max_steps = self.config.max_plan_steps
+            granularity_instruction = ""
+
         system_prompt = PLANNING_SYSTEM_PROMPT.format(
             tools_description=tools_desc,
-            max_steps=self.config.max_plan_steps,
+            max_steps=max_steps,
         )
+        if granularity_instruction:
+            system_prompt += granularity_instruction
 
         if memory_context:
             system_prompt += f"\n\n{memory_context}"

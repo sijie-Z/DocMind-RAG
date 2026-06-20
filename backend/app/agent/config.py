@@ -13,6 +13,7 @@ from typing import Literal, Optional
 logger = logging.getLogger(__name__)
 
 Personality = Literal["precise", "creative", "balanced"]
+PlanningMode = Literal["coarse", "normal", "fine"]
 
 DEFAULT_DISABLED_TOOLS: list[str] = ["execute_python", "execute_sql"]
 
@@ -41,6 +42,10 @@ class AgentConfig:
     enable_memory: bool = True
     enable_thinking: bool = True
     enable_experience: bool = True  # Self-Improving: learn from past failures
+
+    # ── Planning granularity (experimental) ──
+    planning_mode: PlanningMode = "normal"
+    # "coarse" → single-step, "normal" → balanced, "fine" → maximum decomposition
 
     # ── Tool filtering ──
     tool_tags: list[str] | None = None

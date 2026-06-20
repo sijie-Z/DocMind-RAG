@@ -1,0 +1,272 @@
+2026-06-19 17:01:32,044 - paicongming - INFO - 日志系统初始化完成
+2026-06-19 17:01:32,043 - paicongming - INFO - 日志系统初始化完成
+2026-06-19 17:01:32,102 - paicongming - INFO - 日志系统初始化完成
+2026-06-19 17:01:32,104 - paicongming - INFO - 日志系统初始化完成
+2026-06-19 17:01:32,104 - paicongming - INFO - 日志系统初始化完成
+2026-06-19 17:01:32,104 - paicongming - INFO - 日志系统初始化完成
+2026-06-19 17:01:32,564 - app.main - INFO - 派聪明AI知识库系统启动中...
+2026-06-19 17:01:32,574 - app.core.database - INFO - 正在初始化数据库...
+2026-06-19 17:01:32,571 - app.main - INFO - 派聪明AI知识库系统启动中...
+2026-06-19 17:01:32,577 - app.core.database - INFO - 正在初始化数据库...
+2026-06-19 17:01:32,657 - app.main - INFO - 派聪明AI知识库系统启动中...
+2026-06-19 17:01:32,658 - app.core.database - INFO - 正在初始化数据库...
+2026-06-19 17:01:32,674 - app.main - INFO - 派聪明AI知识库系统启动中...
+2026-06-19 17:01:32,677 - app.core.database - INFO - 正在初始化数据库...
+2026-06-19 17:01:32,697 - app.main - INFO - 派聪明AI知识库系统启动中...
+2026-06-19 17:01:32,703 - app.core.database - INFO - 正在初始化数据库...
+2026-06-19 17:01:32,740 - app.main - INFO - 派聪明AI知识库系统启动中...
+2026-06-19 17:01:32,742 - app.core.database - INFO - 正在初始化数据库...
+2026-06-19 17:01:33,385 - app.core.database - INFO - 数据库初始化完成
+2026-06-19 17:01:33,386 - app.main - INFO - 数据库连接成功
+2026-06-19 17:01:33,386 - app.core.database - INFO - 数据库初始化完成
+2026-06-19 17:01:33,386 - app.core.database - INFO - 数据库初始化完成
+2026-06-19 17:01:33,386 - app.core.database - INFO - 数据库初始化完成
+2026-06-19 17:01:33,387 - app.core.redis - INFO - 正在连接Redis...
+2026-06-19 17:01:33,387 - app.main - INFO - 数据库连接成功
+2026-06-19 17:01:33,387 - app.main - INFO - 数据库连接成功
+2026-06-19 17:01:33,387 - app.main - INFO - 数据库连接成功
+2026-06-19 17:01:33,388 - app.core.redis - INFO - 正在连接Redis...
+2026-06-19 17:01:33,388 - app.core.redis - INFO - 正在连接Redis...
+2026-06-19 17:01:33,389 - app.core.redis - INFO - 正在连接Redis...
+2026-06-19 17:01:33,390 - app.core.database - INFO - 数据库初始化完成
+2026-06-19 17:01:33,391 - app.main - INFO - 数据库连接成功
+2026-06-19 17:01:33,392 - app.core.redis - INFO - 正在连接Redis...
+2026-06-19 17:01:33,399 - app.core.database - INFO - 数据库初始化完成
+2026-06-19 17:01:33,400 - app.main - INFO - 数据库连接成功
+2026-06-19 17:01:33,401 - app.core.redis - INFO - 正在连接Redis...
+2026-06-19 17:01:36,920 - paicongming - INFO - 日志系统初始化完成
+2026-06-19 17:01:37,223 - app.main - INFO - 派聪明AI知识库系统启动中...
+2026-06-19 17:01:37,223 - app.core.database - INFO - 正在初始化数据库...
+2026-06-19 17:01:37,292 - app.core.database - INFO - 数据库初始化完成
+2026-06-19 17:01:37,294 - app.main - INFO - 数据库连接成功
+2026-06-19 17:01:37,295 - app.core.redis - INFO - 正在连接Redis...
+2026-06-19 17:01:37,385 - app.core.redis - WARNING - Redis连接失败: Authentication required.。应用将以无Redis模式启动。
+2026-06-19 17:01:37,386 - app.core.elasticsearch - INFO - 正在连接Elasticsearch: ['http://docmind-elasticsearch:9200'] ...
+2026-06-19 17:01:37,888 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/ [status:200 duration:0.497s]
+2026-06-19 17:01:37,890 - app.core.elasticsearch - INFO - Elasticsearch连接成功，版本: 8.11.0
+2026-06-19 17:01:38,339 - elastic_transport.transport - INFO - POST http://docmind-elasticsearch:9200/_analyze [status:400 duration:0.448s]
+2026-06-19 17:01:38,340 - app.core.elasticsearch - WARNING - 未检测到 IK 分词器，将回退到 standard 分词器 (对中文搜索效果较差)
+2026-06-19 17:01:38,566 - elastic_transport.transport - INFO - HEAD http://docmind-elasticsearch:9200/paicongming_knowledge [status:200 duration:0.225s]
+2026-06-19 17:01:38,670 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/paicongming_knowledge/_mapping [status:200 duration:0.103s]
+2026-06-19 17:01:38,671 - app.core.elasticsearch - INFO - 索引已存在且维度匹配: paicongming_knowledge (dims=2048)
+2026-06-19 17:01:38,671 - app.main - INFO - Elasticsearch连接成功
+2026-06-19 17:01:38,710 - app.core.kafka_client - INFO - Kafka producer started
+2026-06-19 17:01:38,711 - app.main - INFO - Kafka连接成功
+2026-06-19 17:01:38,718 - app.services.permission_service - DEBUG - 开始初始化默认权限和角色...
+2026-06-19 17:01:39,108 - app.services.permission_service - INFO - 默认权限和角色初始化完成。
+2026-06-19 17:01:39,676 - app.core.ensure_demo_user - INFO - 演示账号已更新: guest / 123456
+2026-06-19 17:01:39,678 - app.services.auth_service - INFO - Attempting login for user: guest
+2026-06-19 17:01:39,708 - app.services.auth_service - INFO - User found: guest, verifying password...
+2026-06-19 17:01:40,121 - app.services.auth_service - INFO - Login success for user: guest
+2026-06-19 17:01:40,122 - app.main - INFO - 演示账号验证通过: guest/123456
+2026-06-19 17:01:40,125 - app.main - INFO - 所有服务初始化完成
+2026-06-19 17:01:40,174 - paicongming - INFO - 日志系统初始化完成
+2026-06-19 17:01:40,600 - app.main - INFO - 派聪明AI知识库系统启动中...
+2026-06-19 17:01:40,601 - app.core.database - INFO - 正在初始化数据库...
+2026-06-19 17:01:40,692 - app.core.database - INFO - 数据库初始化完成
+2026-06-19 17:01:40,692 - app.main - INFO - 数据库连接成功
+2026-06-19 17:01:40,693 - app.core.redis - INFO - 正在连接Redis...
+2026-06-19 17:01:41,099 - app.core.redis - WARNING - Redis连接失败: Authentication required.。应用将以无Redis模式启动。
+2026-06-19 17:01:41,100 - app.core.elasticsearch - INFO - 正在连接Elasticsearch: ['http://docmind-elasticsearch:9200'] ...
+2026-06-19 17:01:41,153 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/ [status:200 duration:0.048s]
+2026-06-19 17:01:41,155 - app.core.elasticsearch - INFO - Elasticsearch连接成功，版本: 8.11.0
+2026-06-19 17:01:41,170 - elastic_transport.transport - INFO - POST http://docmind-elasticsearch:9200/_analyze [status:400 duration:0.014s]
+2026-06-19 17:01:41,171 - app.core.elasticsearch - WARNING - 未检测到 IK 分词器，将回退到 standard 分词器 (对中文搜索效果较差)
+2026-06-19 17:01:41,189 - elastic_transport.transport - INFO - HEAD http://docmind-elasticsearch:9200/paicongming_knowledge [status:200 duration:0.016s]
+2026-06-19 17:01:41,203 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/paicongming_knowledge/_mapping [status:200 duration:0.013s]
+2026-06-19 17:01:41,204 - app.core.elasticsearch - INFO - 索引已存在且维度匹配: paicongming_knowledge (dims=2048)
+2026-06-19 17:01:41,205 - app.main - INFO - Elasticsearch连接成功
+2026-06-19 17:01:41,221 - app.core.kafka_client - INFO - Kafka producer started
+2026-06-19 17:01:41,221 - app.main - INFO - Kafka连接成功
+2026-06-19 17:01:41,224 - app.services.permission_service - DEBUG - 开始初始化默认权限和角色...
+2026-06-19 17:01:41,288 - app.core.redis - WARNING - Redis连接失败: Authentication required.。应用将以无Redis模式启动。
+2026-06-19 17:01:41,291 - app.core.elasticsearch - INFO - 正在连接Elasticsearch: ['http://docmind-elasticsearch:9200'] ...
+2026-06-19 17:01:41,333 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/ [status:200 duration:0.031s]
+2026-06-19 17:01:41,335 - app.core.elasticsearch - INFO - Elasticsearch连接成功，版本: 8.11.0
+2026-06-19 17:01:41,351 - elastic_transport.transport - INFO - POST http://docmind-elasticsearch:9200/_analyze [status:400 duration:0.015s]
+2026-06-19 17:01:41,352 - app.core.elasticsearch - WARNING - 未检测到 IK 分词器，将回退到 standard 分词器 (对中文搜索效果较差)
+2026-06-19 17:01:41,362 - elastic_transport.transport - INFO - HEAD http://docmind-elasticsearch:9200/paicongming_knowledge [status:200 duration:0.009s]
+2026-06-19 17:01:41,382 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/paicongming_knowledge/_mapping [status:200 duration:0.019s]
+2026-06-19 17:01:41,383 - app.core.elasticsearch - INFO - 索引已存在且维度匹配: paicongming_knowledge (dims=2048)
+2026-06-19 17:01:41,383 - app.main - INFO - Elasticsearch连接成功
+2026-06-19 17:01:41,397 - app.core.kafka_client - INFO - Kafka producer started
+2026-06-19 17:01:41,398 - app.main - INFO - Kafka连接成功
+2026-06-19 17:01:41,402 - app.services.permission_service - DEBUG - 开始初始化默认权限和角色...
+2026-06-19 17:01:41,552 - app.services.permission_service - INFO - 默认权限和角色初始化完成。
+2026-06-19 17:01:41,736 - app.services.permission_service - INFO - 默认权限和角色初始化完成。
+2026-06-19 17:01:42,078 - app.core.ensure_demo_user - INFO - 演示账号已更新: guest / 123456
+2026-06-19 17:01:42,080 - app.services.auth_service - INFO - Attempting login for user: guest
+2026-06-19 17:01:42,114 - app.services.auth_service - INFO - User found: guest, verifying password...
+2026-06-19 17:01:42,248 - app.core.ensure_demo_user - INFO - 演示账号已更新: guest / 123456
+2026-06-19 17:01:42,250 - app.services.auth_service - INFO - Attempting login for user: guest
+2026-06-19 17:01:42,284 - app.services.auth_service - INFO - User found: guest, verifying password...
+2026-06-19 17:01:42,523 - app.services.auth_service - INFO - Login success for user: guest
+2026-06-19 17:01:42,524 - app.main - INFO - 演示账号验证通过: guest/123456
+2026-06-19 17:01:42,527 - app.main - INFO - 所有服务初始化完成
+2026-06-19 17:01:42,664 - app.services.auth_service - INFO - Login success for user: guest
+2026-06-19 17:01:42,665 - app.main - INFO - 演示账号验证通过: guest/123456
+2026-06-19 17:01:42,668 - app.main - INFO - 所有服务初始化完成
+2026-06-19 17:01:43,299 - app.core.redis - WARNING - Redis连接失败: Authentication required.。应用将以无Redis模式启动。
+2026-06-19 17:01:43,301 - app.core.elasticsearch - INFO - 正在连接Elasticsearch: ['http://docmind-elasticsearch:9200'] ...
+2026-06-19 17:01:43,329 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/ [status:200 duration:0.021s]
+2026-06-19 17:01:43,330 - app.core.elasticsearch - INFO - Elasticsearch连接成功，版本: 8.11.0
+2026-06-19 17:01:43,336 - app.core.redis - WARNING - Redis连接失败: Authentication required.。应用将以无Redis模式启动。
+2026-06-19 17:01:43,340 - app.core.elasticsearch - INFO - 正在连接Elasticsearch: ['http://docmind-elasticsearch:9200'] ...
+2026-06-19 17:01:43,343 - elastic_transport.transport - INFO - POST http://docmind-elasticsearch:9200/_analyze [status:400 duration:0.012s]
+2026-06-19 17:01:43,344 - app.core.elasticsearch - WARNING - 未检测到 IK 分词器，将回退到 standard 分词器 (对中文搜索效果较差)
+2026-06-19 17:01:43,353 - elastic_transport.transport - INFO - HEAD http://docmind-elasticsearch:9200/paicongming_knowledge [status:200 duration:0.008s]
+2026-06-19 17:01:43,369 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/paicongming_knowledge/_mapping [status:200 duration:0.014s]
+2026-06-19 17:01:43,370 - app.core.elasticsearch - INFO - 索引已存在且维度匹配: paicongming_knowledge (dims=2048)
+2026-06-19 17:01:43,371 - app.main - INFO - Elasticsearch连接成功
+2026-06-19 17:01:43,373 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/ [status:200 duration:0.021s]
+2026-06-19 17:01:43,374 - app.core.elasticsearch - INFO - Elasticsearch连接成功，版本: 8.11.0
+2026-06-19 17:01:43,381 - app.core.kafka_client - INFO - Kafka producer started
+2026-06-19 17:01:43,382 - app.main - INFO - Kafka连接成功
+2026-06-19 17:01:43,384 - elastic_transport.transport - INFO - POST http://docmind-elasticsearch:9200/_analyze [status:400 duration:0.008s]
+2026-06-19 17:01:43,385 - app.core.elasticsearch - WARNING - 未检测到 IK 分词器，将回退到 standard 分词器 (对中文搜索效果较差)
+2026-06-19 17:01:43,387 - app.services.permission_service - DEBUG - 开始初始化默认权限和角色...
+2026-06-19 17:01:43,392 - elastic_transport.transport - INFO - HEAD http://docmind-elasticsearch:9200/paicongming_knowledge [status:200 duration:0.005s]
+2026-06-19 17:01:43,400 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/paicongming_knowledge/_mapping [status:200 duration:0.006s]
+2026-06-19 17:01:43,401 - app.core.elasticsearch - INFO - 索引已存在且维度匹配: paicongming_knowledge (dims=2048)
+2026-06-19 17:01:43,401 - app.main - INFO - Elasticsearch连接成功
+2026-06-19 17:01:43,409 - app.core.kafka_client - INFO - Kafka producer started
+2026-06-19 17:01:43,409 - app.main - INFO - Kafka连接成功
+2026-06-19 17:01:43,412 - app.services.permission_service - DEBUG - 开始初始化默认权限和角色...
+2026-06-19 17:01:43,543 - app.services.permission_service - INFO - 默认权限和角色初始化完成。
+2026-06-19 17:01:43,571 - app.services.permission_service - INFO - 默认权限和角色初始化完成。
+2026-06-19 17:01:43,882 - app.core.redis - WARNING - Redis连接失败: Authentication required.。应用将以无Redis模式启动。
+2026-06-19 17:01:43,884 - app.core.elasticsearch - INFO - 正在连接Elasticsearch: ['http://docmind-elasticsearch:9200'] ...
+2026-06-19 17:01:43,906 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/ [status:200 duration:0.016s]
+2026-06-19 17:01:43,908 - app.core.elasticsearch - INFO - Elasticsearch连接成功，版本: 8.11.0
+2026-06-19 17:01:43,917 - elastic_transport.transport - INFO - POST http://docmind-elasticsearch:9200/_analyze [status:400 duration:0.008s]
+2026-06-19 17:01:43,918 - app.core.elasticsearch - WARNING - 未检测到 IK 分词器，将回退到 standard 分词器 (对中文搜索效果较差)
+2026-06-19 17:01:43,923 - elastic_transport.transport - INFO - HEAD http://docmind-elasticsearch:9200/paicongming_knowledge [status:200 duration:0.004s]
+2026-06-19 17:01:43,930 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/paicongming_knowledge/_mapping [status:200 duration:0.006s]
+2026-06-19 17:01:43,931 - app.core.elasticsearch - INFO - 索引已存在且维度匹配: paicongming_knowledge (dims=2048)
+2026-06-19 17:01:43,932 - app.main - INFO - Elasticsearch连接成功
+2026-06-19 17:01:43,939 - app.core.kafka_client - INFO - Kafka producer started
+2026-06-19 17:01:43,939 - app.main - INFO - Kafka连接成功
+2026-06-19 17:01:43,943 - app.services.permission_service - DEBUG - 开始初始化默认权限和角色...
+2026-06-19 17:01:43,965 - app.core.ensure_demo_user - INFO - 演示账号已更新: guest / 123456
+2026-06-19 17:01:43,966 - app.services.auth_service - INFO - Attempting login for user: guest
+2026-06-19 17:01:43,988 - app.core.ensure_demo_user - INFO - 演示账号已更新: guest / 123456
+2026-06-19 17:01:43,988 - app.services.auth_service - INFO - User found: guest, verifying password...
+2026-06-19 17:01:43,989 - app.services.auth_service - INFO - Attempting login for user: guest
+2026-06-19 17:01:44,013 - app.services.auth_service - INFO - User found: guest, verifying password...
+2026-06-19 17:01:44,099 - app.services.permission_service - INFO - 默认权限和角色初始化完成。
+2026-06-19 17:01:44,317 - app.services.auth_service - INFO - Login success for user: guest
+2026-06-19 17:01:44,318 - app.main - INFO - 演示账号验证通过: guest/123456
+2026-06-19 17:01:44,323 - app.main - INFO - 所有服务初始化完成
+2026-06-19 17:01:44,339 - app.services.auth_service - INFO - Login success for user: guest
+2026-06-19 17:01:44,340 - app.main - INFO - 演示账号验证通过: guest/123456
+2026-06-19 17:01:44,344 - app.main - INFO - 所有服务初始化完成
+2026-06-19 17:01:44,496 - app.core.ensure_demo_user - INFO - 演示账号已更新: guest / 123456
+2026-06-19 17:01:44,498 - app.services.auth_service - INFO - Attempting login for user: guest
+2026-06-19 17:01:44,533 - app.services.auth_service - INFO - User found: guest, verifying password...
+2026-06-19 17:01:44,855 - app.services.auth_service - INFO - Login success for user: guest
+2026-06-19 17:01:44,857 - app.main - INFO - 演示账号验证通过: guest/123456
+2026-06-19 17:01:44,858 - app.main - INFO - 所有服务初始化完成
+2026-06-19 17:01:46,201 - app.core.redis - WARNING - Redis连接失败: Authentication required.。应用将以无Redis模式启动。
+2026-06-19 17:01:46,203 - app.core.elasticsearch - INFO - 正在连接Elasticsearch: ['http://docmind-elasticsearch:9200'] ...
+2026-06-19 17:01:46,226 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/ [status:200 duration:0.017s]
+2026-06-19 17:01:46,227 - app.core.elasticsearch - INFO - Elasticsearch连接成功，版本: 8.11.0
+2026-06-19 17:01:46,236 - elastic_transport.transport - INFO - POST http://docmind-elasticsearch:9200/_analyze [status:400 duration:0.008s]
+2026-06-19 17:01:46,236 - app.core.elasticsearch - WARNING - 未检测到 IK 分词器，将回退到 standard 分词器 (对中文搜索效果较差)
+2026-06-19 17:01:46,483 - elastic_transport.transport - INFO - HEAD http://docmind-elasticsearch:9200/paicongming_knowledge [status:200 duration:0.246s]
+2026-06-19 17:01:46,491 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/paicongming_knowledge/_mapping [status:200 duration:0.007s]
+2026-06-19 17:01:46,491 - app.core.elasticsearch - INFO - 索引已存在且维度匹配: paicongming_knowledge (dims=2048)
+2026-06-19 17:01:46,492 - app.main - INFO - Elasticsearch连接成功
+2026-06-19 17:01:46,499 - app.core.kafka_client - INFO - Kafka producer started
+2026-06-19 17:01:46,500 - app.main - INFO - Kafka连接成功
+2026-06-19 17:01:46,503 - app.services.permission_service - DEBUG - 开始初始化默认权限和角色...
+2026-06-19 17:01:46,665 - app.services.permission_service - INFO - 默认权限和角色初始化完成。
+2026-06-19 17:01:47,086 - app.core.ensure_demo_user - INFO - 演示账号已更新: guest / 123456
+2026-06-19 17:01:47,087 - app.services.auth_service - INFO - Attempting login for user: guest
+2026-06-19 17:01:47,105 - app.services.auth_service - INFO - User found: guest, verifying password...
+2026-06-19 17:01:47,428 - app.services.auth_service - INFO - Login success for user: guest
+2026-06-19 17:01:47,428 - app.main - INFO - 演示账号验证通过: guest/123456
+2026-06-19 17:01:47,430 - app.main - INFO - 所有服务初始化完成
+2026-06-19 17:01:50,528 - app.core.redis - WARNING - Redis连接失败: Authentication required.。应用将以无Redis模式启动。
+2026-06-19 17:01:50,528 - app.core.elasticsearch - INFO - 正在连接Elasticsearch: ['http://docmind-elasticsearch:9200'] ...
+2026-06-19 17:01:50,545 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/ [status:200 duration:0.015s]
+2026-06-19 17:01:50,546 - app.core.elasticsearch - INFO - Elasticsearch连接成功，版本: 8.11.0
+2026-06-19 17:01:50,553 - elastic_transport.transport - INFO - POST http://docmind-elasticsearch:9200/_analyze [status:400 duration:0.006s]
+2026-06-19 17:01:50,554 - app.core.elasticsearch - WARNING - 未检测到 IK 分词器，将回退到 standard 分词器 (对中文搜索效果较差)
+2026-06-19 17:01:50,560 - elastic_transport.transport - INFO - HEAD http://docmind-elasticsearch:9200/paicongming_knowledge [status:200 duration:0.005s]
+2026-06-19 17:01:50,566 - elastic_transport.transport - INFO - GET http://docmind-elasticsearch:9200/paicongming_knowledge/_mapping [status:200 duration:0.006s]
+2026-06-19 17:01:50,567 - app.core.elasticsearch - INFO - 索引已存在且维度匹配: paicongming_knowledge (dims=2048)
+2026-06-19 17:01:50,567 - app.main - INFO - Elasticsearch连接成功
+2026-06-19 17:01:50,574 - app.core.kafka_client - INFO - Kafka producer started
+2026-06-19 17:01:50,574 - app.main - INFO - Kafka连接成功
+2026-06-19 17:01:50,575 - app.services.permission_service - DEBUG - 开始初始化默认权限和角色...
+2026-06-19 17:01:50,697 - app.services.permission_service - INFO - 默认权限和角色初始化完成。
+2026-06-19 17:01:51,068 - app.core.ensure_demo_user - INFO - 演示账号已更新: guest / 123456
+2026-06-19 17:01:51,069 - app.services.auth_service - INFO - Attempting login for user: guest
+2026-06-19 17:01:51,095 - app.services.auth_service - INFO - User found: guest, verifying password...
+2026-06-19 17:01:51,418 - app.services.auth_service - INFO - Login success for user: guest
+2026-06-19 17:01:51,418 - app.main - INFO - 演示账号验证通过: guest/123456
+2026-06-19 17:01:51,420 - app.main - INFO - 所有服务初始化完成
+2026-06-19 17:06:38,741 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:06:38,757 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:06:41,255 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:06:41,275 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:06:41,429 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:06:41,446 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:06:43,398 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:06:43,409 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:06:43,405 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:06:43,426 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:06:43,959 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:06:43,978 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:06:46,486 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:06:46,492 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:06:50,567 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:06:50,575 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:11:38,796 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:11:38,798 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:11:41,315 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:11:41,316 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:11:41,486 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:11:41,488 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:11:43,423 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:11:43,424 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:11:43,461 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:11:43,462 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:11:44,016 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:11:44,017 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:11:46,508 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:11:46,509 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:11:50,602 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:11:50,602 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:16:38,803 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:16:38,813 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:16:41,316 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:16:41,325 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:16:41,487 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:16:41,496 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:16:43,422 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:16:43,429 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:16:43,459 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:16:43,466 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:16:44,011 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:16:44,015 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:16:46,502 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:16:46,505 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 17:16:50,593 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 17:16:50,597 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 22:01:48,600 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 22:01:48,609 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 22:01:51,108 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 22:01:51,118 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 22:01:51,275 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 22:01:51,284 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 22:01:53,207 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 22:01:53,214 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 22:01:53,240 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 22:01:53,247 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 22:01:53,790 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 22:01:53,798 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 22:01:56,275 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 22:01:56,278 - aiokafka - ERROR - Unable to update metadata from [1]
+2026-06-19 22:02:00,367 - aiokafka - ERROR - Unable connect to node with id 1: [Errno 111] Connection refused
+2026-06-19 22:02:00,370 - aiokafka - ERROR - Unable to update metadata from [1]

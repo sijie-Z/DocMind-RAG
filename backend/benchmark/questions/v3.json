@@ -1,0 +1,477 @@
+{
+  "meta": {
+    "version": 2,
+    "description": "DocMind Benchmark — 三层评测结构",
+    "layers": {
+      "L1_capability": {
+        "name": "能力测试",
+        "question_count": 20,
+        "target": "验证 Agent 架构为什么比纯 RAG 强",
+        "metrics": [
+          "keyword_coverage",
+          "completion",
+          "step_efficiency"
+        ]
+      },
+      "L2_system": {
+        "name": "系统测试",
+        "question_count": 10,
+        "target": "验证 Agent 在异常条件下的鲁棒性和恢复能力",
+        "metrics": [
+          "completion",
+          "graceful_degradation",
+          "recovery_attempts"
+        ]
+      },
+      "L3_casestudy": {
+        "name": "案例研究",
+        "question_count": 0,
+        "target": "用真实 Trace 分析失败原因并验证优化效果",
+        "metrics": [
+          "trace_url",
+          "root_cause",
+          "optimization",
+          "delta"
+        ],
+        "note": "运行 Benchmark 后从 failure/partial 中挑选，部署后补充"
+      }
+    }
+  },
+  "questions": [
+    {
+      "id": "L1-DOC-01",
+      "layer": "L1_capability",
+      "subcategory": "single_doc",
+      "question": "从知识库中找一份企业年报，提取营收、净利润、毛利率三个核心指标最近三年的变化趋势。",
+      "expected_keywords": [
+        "营收",
+        "净利润",
+        "毛利率",
+        "趋势"
+      ],
+      "eval_focus": "定位文档→提取多个字段→对比跨年变化",
+      "difficulty": "medium",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L1-DOC-02",
+      "layer": "L1_capability",
+      "subcategory": "single_doc",
+      "question": "找一份合同，列出其中的违约责任条款、赔偿上限、争议解决方式。",
+      "expected_keywords": [
+        "违约",
+        "赔偿",
+        "争议",
+        "条款"
+      ],
+      "eval_focus": "从单一文档中提取多个维度的结构化信息",
+      "difficulty": "easy",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L1-DOC-03",
+      "layer": "L1_capability",
+      "subcategory": "single_doc",
+      "question": "搜索知识库中的政策文件，提取新规的核心变化和对企业的主要影响。",
+      "expected_keywords": [
+        "政策",
+        "变化",
+        "影响",
+        "规定"
+      ],
+      "eval_focus": "因果分析（政策变化→影响推导）",
+      "difficulty": "medium",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L1-DOC-04",
+      "layer": "L1_capability",
+      "subcategory": "single_doc",
+      "question": "找到一份市场调研报告，总结其中的消费者画像、市场规模和竞争格局。",
+      "expected_keywords": [
+        "消费者",
+        "规模",
+        "市场",
+        "竞争"
+      ],
+      "eval_focus": "从文档中结构化提取多维度信息",
+      "difficulty": "medium",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L1-CROSS-01",
+      "layer": "L1_capability",
+      "subcategory": "cross_doc",
+      "question": "搜索两份同行业公司的财报，对比它们的毛利率、净利润率和资产负债率的差异。",
+      "expected_keywords": [
+        "对比",
+        "毛利率",
+        "净利润率",
+        "资产负债率",
+        "高于",
+        "低于"
+      ],
+      "eval_focus": "跨文档的指标级对比",
+      "difficulty": "hard",
+      "dependency_type": "A"
+    },
+    {
+      "id": "L1-CROSS-02",
+      "layer": "L1_capability",
+      "subcategory": "cross_doc",
+      "question": "找到三家供应商的合同，对比它们的付款条款、账期和违约责任。",
+      "expected_keywords": [
+        "付款",
+        "账期",
+        "违约",
+        "对比"
+      ],
+      "eval_focus": "多文档间做条款级对比",
+      "difficulty": "hard",
+      "dependency_type": "A"
+    },
+    {
+      "id": "L1-CROSS-03",
+      "layer": "L1_capability",
+      "subcategory": "cross_doc",
+      "question": "搜索行业政策文件和券商研报，综合判断某个行业未来一年的发展趋势。",
+      "expected_keywords": [
+        "行业",
+        "趋势",
+        "政策",
+        "分析",
+        "综合"
+      ],
+      "eval_focus": "融合多种类型文档得出综合判断",
+      "difficulty": "hard",
+      "dependency_type": "A"
+    },
+    {
+      "id": "L1-CROSS-04",
+      "layer": "L1_capability",
+      "subcategory": "cross_doc",
+      "question": "找一份审计报告和一份管理层讨论，比对两者的结论是否一致，指出矛盾点。",
+      "expected_keywords": [
+        "审计",
+        "管理层",
+        "一致",
+        "矛盾",
+        "对比"
+      ],
+      "eval_focus": "跨文档的一致性和矛盾检测",
+      "difficulty": "hard",
+      "dependency_type": "A"
+    },
+    {
+      "id": "L1-CROSS-05",
+      "layer": "L1_capability",
+      "subcategory": "cross_doc",
+      "question": "搜索近三年的市场分析报告，提取每一年对某个行业的核心判断，对比三年间的观点变化。",
+      "expected_keywords": [
+        "趋势",
+        "变化",
+        "行业",
+        "分析",
+        "预测"
+      ],
+      "eval_focus": "时间序列跨文档的趋势对比",
+      "difficulty": "hard",
+      "dependency_type": "A"
+    },
+    {
+      "id": "L1-FRAME-01",
+      "layer": "L1_capability",
+      "subcategory": "framework",
+      "question": "找一份企业年报，用 SWOT 框架分析该公司。",
+      "expected_keywords": [
+        "SWOT",
+        "优势",
+        "劣势",
+        "机会",
+        "威胁"
+      ],
+      "eval_focus": "调用 extract_insights(framework=swot)",
+      "difficulty": "hard",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L1-FRAME-02",
+      "layer": "L1_capability",
+      "subcategory": "framework",
+      "question": "找一份公司财报，用杜邦分析法拆解 ROE 变化的驱动因素。",
+      "expected_keywords": [
+        "ROE",
+        "杜邦",
+        "净利率",
+        "资产周转率",
+        "权益乘数"
+      ],
+      "eval_focus": "调用 extract_insights(framework=dupont)",
+      "difficulty": "hard",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L1-FRAME-03",
+      "layer": "L1_capability",
+      "subcategory": "framework",
+      "question": "找一份政策解读文档，用 PEST 框架分析宏观环境。",
+      "expected_keywords": [
+        "PEST",
+        "政策",
+        "经济",
+        "社会",
+        "技术"
+      ],
+      "eval_focus": "调用 extract_insights(framework=pest)",
+      "difficulty": "hard",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L1-FRAME-04",
+      "layer": "L1_capability",
+      "subcategory": "framework",
+      "question": "找一份财务审计报告，用财务健康框架评估企业的盈利、偿债和现金流状况。",
+      "expected_keywords": [
+        "盈利",
+        "偿债",
+        "现金流",
+        "财务健康",
+        "比率"
+      ],
+      "eval_focus": "调用 extract_insights(framework=financial_health)",
+      "difficulty": "hard",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L1-FRAME-05",
+      "layer": "L1_capability",
+      "subcategory": "framework",
+      "question": "找一份合同，用合同风险框架评估主要风险点。",
+      "expected_keywords": [
+        "合同",
+        "风险",
+        "条款",
+        "赔偿",
+        "责任"
+      ],
+      "eval_focus": "调用 extract_insights(framework=contract_risk)",
+      "difficulty": "hard",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L1-MULTI-01",
+      "layer": "L1_capability",
+      "subcategory": "multi_step",
+      "question": "搜索知识库中一份涉密合同，用合同风险框架分析，然后生成一份风险评估报告。",
+      "expected_keywords": [
+        "风险",
+        "合同",
+        "评估",
+        "报告"
+      ],
+      "eval_focus": "搜索→框架分析→报告生成的完整编排",
+      "difficulty": "hard",
+      "dependency_type": "B"
+    },
+    {
+      "id": "L1-MULTI-02",
+      "layer": "L1_capability",
+      "subcategory": "multi_step",
+      "question": "搜索同行业三家公司的年报，分别做 SWOT 分析，综合给出行业竞争格局的判断。",
+      "expected_keywords": [
+        "SWOT",
+        "竞争",
+        "行业",
+        "综合",
+        "对比"
+      ],
+      "eval_focus": "多文档搜索→逐一分析→综合判断的编排",
+      "difficulty": "hard",
+      "dependency_type": "B"
+    },
+    {
+      "id": "L1-MULTI-03",
+      "layer": "L1_capability",
+      "subcategory": "multi_step",
+      "question": "找到公司近三年的财务报告，先做杜邦分析，再对比每年的变化，最后给出财务健康度结论。",
+      "expected_keywords": [
+        "杜邦",
+        "趋势",
+        "财务",
+        "对比",
+        "结论"
+      ],
+      "eval_focus": "时序检索→框架分析→趋势对比→结论的编排",
+      "difficulty": "hard",
+      "dependency_type": "B"
+    },
+    {
+      "id": "L1-MULTI-04",
+      "layer": "L1_capability",
+      "subcategory": "multi_step",
+      "question": "搜索一份市场报告和一份年报，用 PEST 和 SWOT 两个框架分别分析，然后综合给出投资建议。",
+      "expected_keywords": [
+        "PEST",
+        "SWOT",
+        "分析",
+        "建议",
+        "综合"
+      ],
+      "eval_focus": "交叉使用多个分析框架并融合结论",
+      "difficulty": "hard",
+      "dependency_type": "B"
+    },
+    {
+      "id": "L1-WEB-01",
+      "layer": "L1_capability",
+      "subcategory": "web_search",
+      "question": "搜索最新的 AI 行业融资新闻，列出最近一个月获得融资的 AI 公司及其金额。",
+      "expected_keywords": [
+        "融资",
+        "AI",
+        "金额",
+        "公司"
+      ],
+      "eval_focus": "调用 web_search 并结构化提取结果",
+      "difficulty": "medium",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L1-WEB-02",
+      "layer": "L1_capability",
+      "subcategory": "web_search",
+      "question": "搜索最新的行业监管政策变动，对比知识库中已有的政策文档，找出新增或变化的内容。",
+      "expected_keywords": [
+        "政策",
+        "变化",
+        "对比",
+        "新增"
+      ],
+      "eval_focus": "融合外部信息和内部知识库做差异分析",
+      "difficulty": "hard",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L2-RECOV-01",
+      "layer": "L2_system",
+      "subcategory": "tool_recovery",
+      "question": "搜索一个完全不存在的文档 ID fake_404_doc，看看有什么结果。",
+      "expected_keywords": [
+        "不存在",
+        "未找到"
+      ],
+      "eval_focus": "search_knowledge_base 返回空结果时是否降级而非报错",
+      "difficulty": "easy",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L2-RECOV-02",
+      "layer": "L2_system",
+      "subcategory": "tool_recovery",
+      "question": "依次搜索公司A年报、公司B年报、公司A最新公告，然后对比A和B的营收规模，再结合公告分析A的最新动向。",
+      "expected_keywords": [
+        "营收",
+        "对比",
+        "分析"
+      ],
+      "eval_focus": "某一步返回空结果时是否能跳过该步骤继续剩余流程",
+      "difficulty": "medium",
+      "dependency_type": "A"
+    },
+    {
+      "id": "L2-RECOV-03",
+      "layer": "L2_system",
+      "subcategory": "tool_recovery",
+      "question": "先搜索行业政策，然后用杜邦框架分析，最后生成报告。但用模糊关键词开始搜索。",
+      "expected_keywords": [
+        "分析"
+      ],
+      "eval_focus": "模糊搜索结果后是否能调整关键词重新搜索",
+      "difficulty": "medium",
+      "dependency_type": "B"
+    },
+    {
+      "id": "L2-AMBIG-01",
+      "layer": "L2_system",
+      "subcategory": "ambiguity",
+      "question": "分析苹果。",
+      "expected_keywords": [],
+      "eval_focus": "是否主动消歧义或明确假设（公司 vs 产业）",
+      "difficulty": "hard",
+      "eval_method": "manual_review",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L2-AMBIG-02",
+      "layer": "L2_system",
+      "subcategory": "ambiguity",
+      "question": "看看最近的市场情况怎么样。",
+      "expected_keywords": [],
+      "eval_focus": "是否主动限定范围",
+      "difficulty": "hard",
+      "eval_method": "manual_review",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L2-AMBIG-03",
+      "layer": "L2_system",
+      "subcategory": "ambiguity",
+      "question": "这几个方案哪个好？",
+      "expected_keywords": [],
+      "eval_focus": "缺乏上下文时是否主动询问或查询知识库",
+      "difficulty": "hard",
+      "eval_method": "manual_review",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L2-EDGE-01",
+      "layer": "L2_system",
+      "subcategory": "edge_case",
+      "question": "知识库里有什么？",
+      "expected_keywords": [
+        "文档",
+        "知识库"
+      ],
+      "eval_focus": "是否能调用 list_documents 而非空泛回答",
+      "difficulty": "easy",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L2-EDGE-02",
+      "layer": "L2_system",
+      "subcategory": "edge_case",
+      "question": "今天天气怎么样？",
+      "expected_keywords": [],
+      "eval_focus": "是否能识别不支持的能力并坦诚说明",
+      "difficulty": "easy",
+      "eval_method": "manual_review",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L2-EDGE-03",
+      "layer": "L2_system",
+      "subcategory": "edge_case",
+      "question": "用 SWOT 框架分析一下。",
+      "expected_keywords": [],
+      "eval_focus": "是否主动询问分析对象",
+      "difficulty": "medium",
+      "eval_method": "manual_review",
+      "dependency_type": "C"
+    },
+    {
+      "id": "L2-EDGE-04",
+      "layer": "L2_system",
+      "subcategory": "edge_case",
+      "question": "同时搜索行业政策、公司年报、市场趋势，然后综合三个结果回答当前行业环境。",
+      "expected_keywords": [
+        "政策",
+        "年报",
+        "趋势",
+        "综合"
+      ],
+      "eval_focus": "是否能并行搜索多个方向",
+      "difficulty": "hard",
+      "dependency_type": "B"
+    }
+  ]
+}

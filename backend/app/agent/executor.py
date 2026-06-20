@@ -76,10 +76,12 @@ class Executor:
         openai_client: AsyncOpenAI,
         config: AgentConfig,
         memory_bridge: AgentMemoryBridge,
+        execution_mode: str = "dag",
     ):
         self.client = openai_client
         self.config = config
         self.memory = memory_bridge
+        self._execution_mode = execution_mode  # "dag" or "serial"
         # Information gain tracking: hashes of seen result content
         self._seen_fingerprints: set[int] = set()
         self._consecutive_low_gain: int = 0
@@ -103,6 +105,20 @@ class Executor:
 
         while not plan.is_complete:
             ready_steps = plan.get_ready_steps()
+
+            # ── SERIAL MODE: ignore dependencies, execute in definition order ──
+            if self._execution_mode == "serial":
+                pending = [s for s in plan.steps if s.status == "pending"]
+                if not pending:
+                    break
+                step = pending[0]
+                async for event in self._execute_single_step(
+                    step, plan, history, organization_id, user_id, enable_thinking, ctx=ctx,
+                ):
+                    yield event
+                continue
+
+            # ── DAG MODE: dependency-aware execution ──
             if not ready_steps:
                 # Check for deadlock (pending steps with unsatisfied deps)
                 pending = [s for s in plan.steps if s.status == "pending"]
