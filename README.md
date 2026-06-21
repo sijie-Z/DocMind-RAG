@@ -292,3 +292,15 @@ make test && make lint
   <br>
   <sub>Built with ❤️</sub>
 </p>
+
+---
+
+## 📌 Repository Status
+
+**Frozen research snapshot.**
+This repository contains the complete experimental trajectory of the DocMind Agent ablation study (7 experiments, layered bottleneck analysis).
+- **Freeze commit:** `5784167`
+- **Status:** No further modifications will be made.
+- **Production implementation:** [sijie-Z/DocMind-RAG](https://github.com/sijie-Z/DocMind-RAG)
+
+All engineering improvements (API service, reliability layer, observability) live in the production repository above.
