@@ -17,3 +17,18 @@ dist/
 
 # Review / temp repos
 backend/_review_temp2/
+
+# Benchmark cache (eval outputs, replays, results)
+backend/benchmark/cases/
+backend/benchmark/replay/
+backend/benchmark/results/
+backend/benchmark/experiment_*.py
+backend/benchmark/run_004*.py
+backend/benchmark/run_005*.py
+backend/benchmark/run_007*.py
+
+# Demo temp files
+backend/demo_scratch/
+
+# Logs
+backend/logs/

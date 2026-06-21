@@ -9,197 +9,94 @@
   <img src="https://img.shields.io/badge/Vue_3-3.4-4FC08D?logo=vuedotjs" alt="Vue 3">
   <img src="https://img.shields.io/badge/DeepSeek-V4-8A2BE2" alt="DeepSeek">
   <img src="https://img.shields.io/badge/开源协议-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs Welcome">
 </p>
 
 <div align="center">
   <h1>🤖 DocMind</h1>
-  <p><strong>基于 PER 架构的企业级 AI Agent 系统</strong></p>
-  <p>25+ 内置工具 · 自我进化 · 可观测 · MCP 兼容</p>
+  <p><strong>企业级 AI Agent 系统 / 实验驱动的 Agent 研究平台</strong></p>
   <p>
     <a href="https://sijie-z.github.io/DocMind-RAG/architecture.html">📊 交互式架构图</a> ·
-    <a href="#-benchmark">📈 评测数据</a> ·
-    <a href="#-quick-start">🚀 快速开始</a>
+    <a href="docs/research/001_dag_vs_serial.md">📋 实验 001</a> ·
+    <a href="docs/research/004_structured_planning.md">📋 实验 004</a>
   </p>
 </div>
 
 ---
 
-## 📌 版本亮点 (v1.2)
+## 📊 研究发现（核心价值）
 
-这是 DocMind 的一次重大升级——从 ReAct 升级为 **PER（Plan-Execute-Reflect）架构**，Agent 能力全面提升。
+DocMind 是一个 **实验驱动的 Agent 系统研究平台**。通过 5 轮控制实验，得到三个反直觉结论：
 
-| 特性 | 之前 (v1.0) | 现在 (v1.2) |
-|------|:----------:|:----------:|
-| Agent 架构 | ReAct（边想边做） | **PER（先规划→再执行→再反思）** |
-| 内置工具 | 11 个 | **25+ 个** |
-| 工具执行 | 串行 | **支持并行 (asyncio.gather)** |
-| SSE 事件 | 4 种 | **12 种（含 thinking/plan/reflection）** |
-| 反馈方式 | 原始工具输出 | **LLM 自然语言合成** |
-| 自我进化 | ❌ 无 | ✅ 经验记忆 + 执行回放 + 模式挖掘 |
-| 深度分析 | ❌ 无 | ✅ 洞察提取 / 跨文档分析 / 报告生成 |
-| 可观测性 | ❌ 无 | ✅ Langfuse 全链路追踪 |
-| MCP 协议 | ❌ 无 | ✅ MCP Bridge |
-| 飞书集成 | ❌ 无 | ✅ 飞书文档接入 |
+### Finding 1: DAG 执行器 ≈ 串行执行器（当 avg_steps ≈ 1）
+
+| 指标 | DAG | Serial | Δ |
+|------|:---:|:------:|:-:|
+| 覆盖率 | 66% | 69% | −3pp |
+| 平均步骤数 | 1.2 | 1.0 | +0.2 |
+
+**结论**：在 Planner 平均只生成 1.2 步的情况下，DAG 的并行能力从未被激活。两种执行架构没有区别。
+
+> 详细报告：[001 — DAG vs Serial Execution](docs/research/001_dag_vs_serial.md)
 
 ---
 
-## 🆕 新增能力一览
+### Finding 2: LLM Planner 无法被 Prompt 诱导拆分
 
-### 1. PER Agent 架构
+在系统提示中明确要求"尽可能细粒度拆分"，Planner 仍然平均只生成 1.0-1.2 步。
 
-从 ReAct 升级为三阶段 PER 循环：
+| Mode | 系统提示指令 | 预期步骤 | 实际步骤 |
+|:----:|-------------|:--------:|:--------:|
+| coarse | "请一步完成" | ~1.5 | **1.0** |
+| normal | 无额外指令 | ~4 | **1.1** |
+| fine | "尽可能细分" | ~10 | **1.2** |
 
-```
-用户提问
-   ↓
-┌─ Phase 1: 规划 (Planner) ─────────────────┐
-│  分析任务 → 拆解为多步 DAG → 每步推荐工具  │
-└────────────────────────────────────────────┘
-   ↓
-┌─ Phase 2: 执行 (Executor) ────────────────┐
-│  依赖图调度 → 独立步骤并行执行              │
-│  工具调用 → LLM 合成 → 失败自动重试        │
-└────────────────────────────────────────────┘
-   ↓
-┌─ Phase 3: 反思 (Reflector) ───────────────┐
-│  审查结果 → 检测幻觉/缺漏/矛盾              │
-│  不满意 → 触发重规划或局部修复              │
-└────────────────────────────────────────────┘
-   ↓
-SSE 流式返回（规划过程 + 执行步骤 + 引用溯源）
-```
+**结论**：现代 LLM 倾向于一步完成任务，因为这对模型来说成本更低。Planner 退化为 Query Rewriter，而不是 Task Decomposer。
 
-相比 ReAct 的"边想边做"，PER 先规划再执行，且执行完整体反思，大幅提升复杂任务的准确性。
-
-### 2. 25+ 内置工具
-
-从 11 个扩展到 25+ 个，按功能分为：
-
-| 类别 | 工具 | 说明 |
-|------|------|------|
-| 🔎 **知识检索** | `search_knowledge_base` | 混合检索（BM25 + 向量） |
-| | `vector_search` | 语义搜索 |
-| 📄 **文档分析** (🆕) | `extract_insights` | 实体/指标/主张/结构提取 |
-| | `cross_document_analysis` | 多文档对比分析 |
-| | `generate_report` | 结构化报告生成 |
-| | `summarize_document` | 文档摘要 |
-| | `extract_keywords` | 关键词提取 |
-| 🌐 **网络** | `web_search` | DuckDuckGo 联网搜索 |
-| | `content_crawling` | 页面抓取与清洗 |
-| ⌨️ **代码** | `code_execution` | 沙箱 Python 执行 |
-| 📊 **数据** | `data_analysis` | 数据分析 |
-| 🌍 **翻译** | `translation` | 中/英/日/法 |
-| 🧭 **知识图谱** | `knowledge_graph` | 实体关系探索 |
-| 🔌 **MCP (🆕)** | `mcp_call` | 外部 MCP Server 调用 |
-| 📋 **飞书 (🆕)** | `feishu/*` | 飞书文档接入 |
-| 🗂️ **管理** | `list_documents` / `get_document_info` | 文档管理 |
-| 💬 **对话** | `list_conversations` / `get_conversation_history` | 对话管理 |
-
-### 3. 自我进化系统
-
-Agent 能从自身执行历史中学习，持续进步：
-
-```
-执行历史 → ① 经验记忆 → ② 执行回放 → ③ 模式挖掘 → 技能推荐
-```
-
-**① 经验记忆**：评测失败时自动提取结构化的"经验教训"，下次类似场景自动注入规划器。
-- 已积累 **18 条经验**，使覆盖率提升 68.4% → 70.1%（+1.7%）
-- 含负迁移保护（经验只在适用场景注入）
-
-**② 执行回放**：每次执行保存为"黑匣子"，支持回放和版本对比。
-- 已保存 **49 条执行记录**
-- `python -m benchmark.replay <task_id>` 回放
-- `python -m benchmark.replay --diff <a> <b>` 对比两版本
-
-**③ 模式挖掘**：扫描执行记录，发现高频工具调用序列，推荐为 Skill。
-- 已发现 2 个候选 Skill（document_discovery, get_web_workflow）
-
-### 4. 深度分析工具
-
-| 工具 | 功能 |
-|------|------|
-| `extract_insights` | 从文档提取实体、指标、主张、结构 |
-| `cross_document_analysis` | 多文档模式分析（共同主题、差异、趋势） |
-| `generate_report` | 从分析数据生成结构化 Markdown 报告 |
-
-### 5. SSE 流式事件
-
-从前端到后端全面升级为 12 种 SSE 事件类型：
-
-`thinking` → `plan_start` → `plan_step` → `plan_complete` → `tool_call` → `tool_result` → `reflection` → `chunk` → `message` → `done`
-
-前端实时展示 Agent 的规划过程、工具调用、反思结果。
-
-### 6. Langfuse 可观测性
-
-全链路追踪通过 Langfuse 实现，5 个埋点位置：
-
-| 位置 | 文件 | 追踪内容 |
-|------|------|---------|
-| Planner | `planner.py` | 规划过程 |
-| Executor | `executor.py` | 每步执行 |
-| Tool Registry | `registry.py` | 工具调用 |
-| Reflector | `reflector.py` | 反思评估 |
-| Memory Bridge | `memory_bridge.py` | 记忆召回 |
-
-### 7. MCP Bridge
-
-兼容 [MCP 协议](https://modelcontextprotocol.io)，可接入外部 MCP Server：
-
-```python
-@register_tool(name="mcp_call")
-async def mcp_call(server_name: str, tool_name: str, arguments: dict) -> str:
-    # 通过 MCP SDK 调用外部 Server
-```
-
-已在 GitHub MCP Server 上验证。
-
-### 8. 飞书集成
-
-支持接入飞书多维表格（Bitable）文档，扩展企业内部知识源。
+> 详细报告：[003 — Planner Compliance](docs/research/003_planner_compliance.md)
 
 ---
 
-## 📊 30 题评测
+### Finding 3: 结构化规划将覆盖率从 69% 提升至 93%
 
-30 道企业知识任务的对比评测，PER Agent vs 纯 RAG 基线：
+用规则化模板替代 LLM Planner，根据任务类型（comparison / analysis / research）生成固定的多步骤计划。
 
-| 指标 | 纯 RAG | PER Agent | 变化 |
-|------|:------:|:---------:|:----:|
-| **关键词覆盖率** | 63% | **69%** | +6% |
-| **完成率** | 50% (15/30) | **60% (18/30)** | +10% |
-| **平均用时** | 20s | 36s | +16s (工具更多) |
-| **工具失败率** | 0.0 | **0.0** | ✅ 稳定 |
+| 指标 | 实验 001（基线） | **结构化规划** | Δ |
+|------|:--------------:|:-------------:|:-:|
+| L1 覆盖率 | ~69% | **93.1%** | **+24pp** |
+| L1 失败数 | 5-6 | **0** | 全部消除 |
+| 平均步骤数 | 1.2 | **3.4** | +2.2 |
+| 平均耗时 | ~30s | 59s | +29s |
 
-**分场景看，Agent 的优势场景：**
+**关键发现**：DAG 在数据层面展示了价值——4-7 步的计划在并行执行中耗时未线性增长（步骤数 +180%，耗时 +95%）。
 
-| 场景 | 提升 | 原因 |
-|------|:----:|------|
-| 单文档检索 | +6% | 找文档更精准 |
-| **跨文档分析** | **+12%** | 多步检索覆盖更多文档 |
-| **框架分析 (SWOT/PEST)** | **+24%** | 正确选工具 + 框架 |
-| 多步推理 | +5% | 基线已强，Agent 更稳定 |
-| **联网搜索** | **+12%** | 真实 DuckDuckGo 调用 |
+> 详细报告：[004 — Structured Planning](docs/research/004_structured_planning.md)
 
-> 最大提升在"纯 RAG 做不到"的任务：跨文档分析、框架推理、联网搜索。
-> 7 个失败案例均为 L2 歧义/边界问题（基础设施噪声为 0）。
+---
 
-### 优化历程
+### 最终结论
+
+> 在 DocMind 的任务分布上，**规划质量远比执行架构重要**。
+>
+> 步骤 1.2 → 3.4 带来的覆盖率提升（+24pp）远大于 DAG vs Serial 的选择（−3pp）。
+> 正确的思路是："别让 LLM 决定拆不拆。你来决定。"
+
+**完整研究闭环：**
 
 ```
-v1: 46% 覆盖率 · 8/30 完成 · 89s 平均 · 1.0 工具失败
-                              ↓
-        23 个百分点的提升全部来自工程修复，
-        不是换模型、不是改提示词
-                              ↓
-v2: 69% 覆盖率 · 18/30 完成 · 36s 平均 · 0.0 工具失败
+001: DAG ≈ Serial  (avg_steps=1.2, 并行未被激活)
+  ↓
+002/003: Planner 无法被诱导拆分  (LLM 倾向一步完成)
+  ↓
+004: 结构化规划  (steps 1.2→3.4, coverage 69%→93%)
+  ↓
+005: DAG ≈ Serial (再测)  (规划质量 > 执行架构)
 ```
 
 ---
 
-## 🏗 系统架构速览
+## 🏗 系统架构
+
+PER（Plan-Execute-Reflect）三阶段 Agent 架构 + 25+ 内置工具：
 
 ```
 ┌─ 表现层 ──────────────────────────────────────┐
@@ -216,62 +113,90 @@ v2: 69% 覆盖率 · 18/30 完成 · 36s 平均 · 0.0 工具失败
 └────────────────────────────────────────────────┘
 ```
 
+### 核心能力
+| 模块 | 说明 |
+|------|------|
+| **PER Agent 循环** | 规划 → 执行（DAG 并行调度）→ 反思 |
+| **25+ 工具** | 知识检索 / 文档分析 / 网络搜索 / 代码执行 / 翻译 / MCP |
+| **自我进化** | 经验记忆（18 条）+ 执行回放 + 模式挖掘 |
+| **结构化规划** | 规则化任务分解（comparison / analysis / research） |
+| **可观测性** | Langfuse 全链路追踪 / Prometheus 指标 |
+| **MCP 兼容** | 支持外部 MCP Server 接入 |
+| **30 题评测框架** | 三层评测（能力 / 系统 / 案例）+ 自动评分 |
+
+---
+
+## 📈 最新评测数据（004 Structured Planner）
+
+30 题企业知识任务，三层评测结构：
+
+### L1 能力层（20 题）
+
+| 指标 | 值 |
+|------|:--:|
+| 平均覆盖率 | **93.1%** |
+| PASS / PART / FAIL | 18 / 2 / **0** |
+| 平均步骤数 | 3.4 |
+| 平均耗时 | 59.0s |
+
+### L2 系统层（10 题）
+
+| 指标 | 值 |
+|------|:--:|
+| 平均覆盖率 | 50% |
+| PASS / PART / FAIL | 5 / 0 / 5 |
+
+> 5 个 FAIL 均为歧义/边界查询（"今天天气"、"分析苹果"），属系统测试层的预期行为。
+
+### 运行评测
+
+```bash
+cd backend
+# 纯 RAG 基线
+python -m benchmark.run --questions benchmark/questions/v3.json --mode baseline
+# PER Agent + 结构化规划
+python -m benchmark.run_004
+```
+
 ---
 
 ## 🚀 快速开始
 
 ### 前置要求
-- Docker Desktop（推荐）或 Python 3.11+ / Node.js 18+ / MySQL 8 / Redis 7 / ES 8 / Kafka / MinIO
+Docker Desktop（推荐）或 Python 3.11+ / Node.js 18+
 
-### 1. 克隆
+### 1. 克隆 & 启动基础设施
 ```bash
 git clone https://github.com/sijie-Z/DocMind-RAG.git
-cd DocMind-RAG
+cd DocMind-RAG/backend && docker compose up -d
 ```
 
-### 2. 启动基础设施
-```bash
-cd backend && docker compose up -d
-```
-
-### 3. 配置
+### 2. 配置 & 启动
 ```bash
 cp .env.docker.example .env.docker
 # 编辑 .env.docker，填入 API Key
-```
 
-### 4. 启动后端
-```bash
+# 后端
 cd backend
-python -m venv venv && source venv/bin/activate  # Windows: venv\Scripts\activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 前端
+cd frontend && npm install && npm run dev
 ```
 
-### 5. 启动前端
-```bash
-cd frontend && npm install && npm run dev  # 端口 5173
-```
-
-### 6. 访问
+### 3. 访问
 | 地址 | 说明 |
 |------|------|
 | http://localhost:5173 | 前端界面 |
 | http://localhost:8000/docs | Swagger API 文档 |
-| http://localhost:8000/health | 健康检查 |
 
 ### 演示账号
 | 用户名 | 密码 | 角色 |
 |--------|------|------|
 | `guest` | `123456` | 普通用户 |
 | `admin` | `admin123` | 管理员 |
-
-### 运行评测
-```bash
-python -m benchmark.run --questions benchmark/questions/v2.json --mode baseline   # 纯 RAG
-python -m benchmark.run --questions benchmark/questions/v2.json --mode agent      # PER Agent
-python -m benchmark.run --compare benchmark/results/baseline_v2.json benchmark/results/agent_v2.json
-```
 
 ---
 
@@ -284,22 +209,27 @@ DocMind/
 │   │   ├── api/v1/endpoints/     # REST API (17 模块)
 │   │   ├── agent/                # PER Agent 核心
 │   │   │   ├── loop.py           #   PER 主循环
-│   │   │   ├── planner.py        #   规划器
-│   │   │   ├── executor.py       #   执行器
+│   │   │   ├── planner.py        #   规划器 (含结构化规划)
+│   │   │   ├── executor.py       #   执行器 (DAG/Serial)
 │   │   │   ├── reflector.py      #   反思器
-│   │   │   ├── registry.py       #   工具注册表
-│   │   │   ├── experience/       #   经验记忆 (🆕)
-│   │   │   ├── replay/           #   执行回放 (🆕)
-│   │   │   ├── mining/           #   模式挖掘 (🆕)
-│   │   │   └── tools/            #   25+ 工具实现
+│   │   │   ├── experience/       #   经验记忆
+│   │   │   ├── replay/           #   执行回放
+│   │   │   ├── mining/           #   模式挖掘
+│   │   │   └── tools/            #   25+ 工具
 │   │   ├── core/                 # 基础设施
 │   │   ├── rag/                  # RAG 管道
 │   │   └── worker/               # Kafka 异步处理
-│   ├── tests/                    # 422+ 测试用例
-│   └── benchmark/                # 30 题评测框架 (🆕)
+│   ├── tests/                    # 422+ 测试
+│   └── benchmark/                # 30 题评测框架 + 5 轮实验结果
 ├── frontend/src/                 # Vue 3 前端
 └── docs/
     ├── architecture.html         # 交互式架构图
+    ├── research/                 # 5 轮实验报告
+    │   ├── 001_dag_vs_serial.md
+    │   ├── 002_planner_granularity.md
+    │   ├── 003_planner_compliance.md
+    │   ├── 004_structured_planning.md
+    │   └── (005 实验数据)
     └── product-definition.md     # 产品定义
 ```
 
@@ -310,7 +240,6 @@ DocMind/
 ```bash
 cd backend
 python -m pytest tests/ -v --tb=short
-python -m pytest tests/ --cov=app --cov-report=html
 make test && make lint
 ```
 
@@ -318,7 +247,24 @@ make test && make lint
 
 - **Docker Compose**：`cd backend && docker compose up -d`
 - **Kubernetes**：`kubectl apply -f deploy/k8s/`
-- **手动**：见 `deploy/README.md`
+- 见 `deploy/README.md`
+
+---
+
+## 🧭 研究路线图
+
+| 实验 | 假设 | 结果 |
+|:----:|------|:----:|
+| 001 | DAG 优于 Serial | ❌ 无差异（avg_steps=1.2） |
+| 002 | 粒度控制可调 | ❌ 实验设计中 |
+| 003 | Prompt 可控制粒度 | ❌ Planner 无法被诱导拆分 |
+| **004** | **结构化规划优于 LLM Planner** | **✅ Coverage 69%→93%** |
+| 005 | 多步后 DAG 优于 Serial | ❌ 仍然等价（规划质量 > 执行架构） |
+
+**下一步方向**：
+- 扩展模板类型（多实体排序、数据流水线）
+- 动态步骤数自适应
+- 探索 Act→Observe→Act 替代 Plan→Execute
 
 ---
 
@@ -326,10 +272,9 @@ make test && make lint
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| **v1.2.1** | 2026-05 | 稳定性修复、并行执行、页面过渡动画 |
-| **v1.2.0** | 2026-05 | PER 架构、25+ 工具、自我进化、深度分析 |
-| **v1.1.0** | 2026-05 | Agent 模式、示例文档、CJK 分词修复 |
-| **v1.0.0** | 2026-05 | 初版：RAG 管道、工作流编辑器、知识图谱 |
+| **v1.2.1** | 2026-06 | 结构化规划、5 轮实验报告 |
+| **v1.2.0** | 2026-05 | PER 架构、25+ 工具、自我进化 |
+| **v1.0.0** | 2026-05 | 初版：RAG 管道、知识图谱 |
 
 ---
 
@@ -337,13 +282,13 @@ make test && make lint
 
 - **架构图**：https://sijie-z.github.io/DocMind-RAG/architecture.html
 - **GitHub**：https://github.com/sijie-Z/DocMind-RAG
+- **实验 004**：`docs/research/004_structured_planning.md`
 - **API 文档**：http://localhost:8000/docs
-- **Issue**：https://github.com/sijie-Z/DocMind-RAG/issues
 
 ---
 
 <p align="center">
-  <strong>DocMind</strong> — 基于 PER 架构的企业级 AI Agent 系统
+  <strong>DocMind</strong> — 实验驱动的 Agent 系统研究平台
   <br>
-  <sub>Built with ❤️ by the DocMind Team</sub>
+  <sub>Built with ❤️</sub>
 </p>

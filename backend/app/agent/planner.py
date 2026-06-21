@@ -384,29 +384,61 @@ class Planner:
     # tasks (avg_steps ≈ 1).  When structured planning is enabled, the
     # system classifies the query and builds a template plan directly.
 
-    _COMPARISON_KEYWORDS = ["对比", "比较", "compare", "vs", "versus", "差异", "区别",
-                            "分别", "哪个", "不同之处"]
-    _FRAMEWORK_KEYWORDS = ["SWOT", "PEST", "杜邦", "框架"]
-    _RESEARCH_KEYWORDS = ["总结", "综述", "概述", "概括", "归纳", "研究", "调研"]
-    _REPORT_KEYWORDS = ["报告", "报表", "趋势", "变化", "增长"]
+    # ── Task classification keywords ──
+    # These are grouped by priority: comparison > analysis > research.
+    # A query is classified into the first matching type.
+
+    # Comparison: must have BOTH a comparison word AND multi-entity indicator
+    _CMP_WORDS = ["对比", "比较", "compare", "vs", "versus", "差异", "区别",
+                   "不同之处", "异同", "孰优"]
+    _CMP_ENTITIES = ["和", "与", "、", "两家", "三家", "多个", "分别",
+                      "双方", "各方"]
+
+    # Analysis: typically uses a named framework
+    _ANALYSIS_WORDS = ["swot", "pest", "杜邦", "框架分析", "财务健康",
+                        "健康评估", "风险评估", "合同风险"]
+
+    # Research: broader — tasks that need gather → extract → synthesize
+    _RESEARCH_WORDS = ["总结", "综述", "概述", "概括", "归纳", "研究", "调研",
+                        "趋势", "发展", "行业", "市场", "报告", "分析报告",
+                        "预测", "前景", "竞争格局", "市场份额",
+                        "政策", "变化", "影响", "融资", "新闻",
+                        "消费者", "规模", "竞争"]
 
     def _classify_task_type(self, query: str) -> str | None:
-        """Classify query into known task types for template-based planning."""
+        """Classify query into known task types for template-based planning.
+
+        Order matters: comparison has highest priority (strictest match),
+        then analysis, then research.  Queries that match none fall through
+        to the LLM-based planner (simple / single-step tasks).
+        """
         q = query.lower().strip()
-        if any(kw in q for kw in self._COMPARISON_KEYWORDS):
-            if any(kw in q for kw in ["和", "与", "vs", "versus", "、"]):
-                return "comparison"
-        if any(kw in q for kw in self._FRAMEWORK_KEYWORDS):
+
+        # 1. Comparison — needs comparison word + multi-entity signal
+        has_cmp = any(kw in q for kw in self._CMP_WORDS)
+        has_multi = any(kw in q for kw in self._CMP_ENTITIES)
+        if has_cmp and has_multi:
+            return "comparison"
+        if has_cmp and any(kw in q for kw in ["对比", "比较"]):
+            # Loose match: "对比..." alone implies multi-entity
+            return "comparison"
+
+        # 2. Analysis — named framework
+        if any(kw in q for kw in self._ANALYSIS_WORDS):
             return "analysis"
-        if any(kw in q for kw in self._RESEARCH_KEYWORDS):
+
+        # 3. Research — gather / summarize / investigate
+        if any(kw in q for kw in self._RESEARCH_WORDS):
             return "research"
-        if any(kw in q for kw in self._REPORT_KEYWORDS):
-            if any(kw in q for kw in ["搜索", "找", "查", "search", "find"]):
-                return "research"
+
         return None
 
     def _try_structured_planning(self, plan_id: str, query: str) -> Plan | None:
-        """Attempt rule-based plan generation for known task types."""
+        """Attempt rule-based plan generation for known task types.
+
+        This is now the PRIMARY planning path.  The LLM-based planner is only
+        reached as fallback for queries that match no known type.
+        """
         task_type = self._classify_task_type(query)
         if task_type == "comparison":
             return self._build_comparison_plan(plan_id, query)
@@ -416,56 +448,164 @@ class Planner:
             return self._build_research_plan(plan_id, query)
         return None
 
+    # ── Template: comparison ──────────────────────────────────────────
+    #  Research Entity A (parallel)    \
+    #  Research Entity B (parallel)     →  Compare & Synthesize
+    #  Research Entity C (parallel)    /
+    #  4-6 steps depending on entity count
+
     def _build_comparison_plan(self, plan_id: str, query: str) -> Plan:
-        """Template: search entities in parallel → compare/synthesize."""
+        """Template: parallel entity research → compare → synthesize."""
         import re as _re
+        # Extract named entities: split by 和/与/、, then strip known prefixes
         parts = _re.split(r'\s*(?:和|与|、|vs\.?|versus)\s*', query)
-        entities = [p.strip() for p in parts
-                    if p.strip() and not any(kw in p.lower()
-                                              for kw in self._COMPARISON_KEYWORDS
-                                              + ["搜索", "找", "查", "search", "find", "分析"])]
+        strip_words = (self._CMP_WORDS + self._CMP_ENTITIES
+                       + ["搜索", "找", "查", "search", "find", "分析",
+                          "两份", "三份", "两家", "三家", "同行业",
+                          "的", "财务表现", "相关信息", "信息"])
+        entities = []
+        for p in parts:
+            p = p.strip()
+            if not p:
+                continue
+            # Strip known keywords from start and end (not whole-segment skip)
+            for kw in strip_words:
+                kw_lower = kw.lower()
+                while p.lower().startswith(kw_lower):
+                    p = p[len(kw):].strip()
+                while p.lower().endswith(kw_lower):
+                    p = p[:-len(kw)].strip()
+            if p and len(p) >= 2 and p not in entities:  # min 2 chars to be a valid entity
+                entities.append(p)
+        # Remove duplicates while preserving order
+        seen = set()
+        entities = [e for e in entities if not (e in seen or seen.add(e))]
         entities = entities[:5]
+
+        # If no specific entities extracted, use generic descriptions
         if len(entities) < 2:
-            entities = ["相关内容"]
+            entity_keywords = ["相关内容"]
+            if "公司" in query or "供应商" in query or "企业" in query:
+                entity_keywords = ["公司A", "公司B"]
+            elif "行业" in query or "市场" in query:
+                entity_keywords = ["行业A", "行业B"]
+            elif "合同" in query:
+                entity_keywords = ["合同A", "合同B"]
+            elif "年报" in query or "财报" in query or "报告" in query:
+                entity_keywords = ["报告A", "报告B"]
+            else:
+                entity_keywords = ["实体A", "实体B"]
+            # Add a third slot for queries that hint at 3+
+            if any(kw in query for kw in ["三家", "三份", "多个"]):
+                entity_keywords.append("实体C")
+            entities = entity_keywords
+
         steps: list[PlanStep] = []
-        for i, entity in enumerate(entities, 1):
+        for i, entity in enumerate(entities):
             steps.append(PlanStep(
-                id=f"s{i}", description=f"搜索「{entity}」相关信息",
-                dependencies=[], tool_hint="search_knowledge_base", parallel_group=1))
-        all_ids = [s.id for s in steps]
+                id=f"s{i + 1}",
+                description=f"研究{entity}的相关信息，提取关键指标",
+                dependencies=[],
+                tool_hint="search_knowledge_base",
+                parallel_group=1,
+                risk_level="low", retry_strategy="auto_retry",
+            ))
+
+        # Compare step
+        all_search = [s.id for s in steps]
         steps.append(PlanStep(
-            id=f"s{len(entities)+1}", description=f"综合分析: {query[:60]}",
-            dependencies=all_ids, tool_hint="extract_insights"))
+            id=f"s{len(entities) + 1}",
+            description=f"对比各实体的关键信息，找出差异和共性: {query[:50]}",
+            dependencies=all_search,
+            tool_hint="cross_document_analysis",
+            risk_level="low", retry_strategy="auto_retry",
+        ))
+
         return Plan(
             id=plan_id, goal=query[:80],
-            reasoning=f"自动识别为对比任务，{len(entities)} 个并行搜索 → 综合对比",
+            reasoning=f"对比任务: {len(entities)} 个实体并行搜索 → 综合对比",
             steps=steps)
 
+    # ── Template: analysis ────────────────────────────────────────────
+    #  Collect Data (parallel) → Apply Framework → Generate Conclusions
+    #  3-4 steps
+
     def _build_analysis_plan(self, plan_id: str, query: str) -> Plan:
-        """Template: search → extract → report."""
+        """Template: collect data → apply framework → conclusions."""
+        q_lower = query.lower()
+        framework_name = "分析"
+        if "swot" in q_lower:
+            framework_name = "SWOT"
+        elif "pest" in q_lower:
+            framework_name = "PEST"
+        elif "杜邦" in q_lower:
+            framework_name = "杜邦"
+
         steps = [
-            PlanStep(id="s1", description=f"搜索相关信息: {query[:60]}",
-                     tool_hint="search_knowledge_base", parallel_group=1),
-            PlanStep(id="s2", description=f"提取关键信息: {query[:60]}",
-                     dependencies=["s1"], tool_hint="extract_insights"),
-            PlanStep(id="s3", description=f"生成分析报告: {query[:60]}",
-                     dependencies=["s2"], tool_hint="generate_report"),
+            PlanStep(id="s1",
+                     description=f"搜索相关信息: {query[:50]}",
+                     dependencies=[],
+                     tool_hint="search_knowledge_base",
+                     parallel_group=1,
+                     risk_level="low", retry_strategy="auto_retry"),
+            PlanStep(id="s2",
+                     description=f"用{framework_name}框架进行分析: {query[:50]}",
+                     dependencies=["s1"],
+                     tool_hint="extract_insights",
+                     risk_level="low", retry_strategy="auto_retry"),
+            PlanStep(id="s3",
+                     description=f"生成{framework_name}分析结论: {query[:50]}",
+                     dependencies=["s2"],
+                     tool_hint="generate_report",
+                     risk_level="low", retry_strategy="auto_retry"),
         ]
-        return Plan(id=plan_id, goal=query[:80],
-                    reasoning="识别为分析类任务: 搜索 → 提取 → 报告", steps=steps)
+        return Plan(
+            id=plan_id, goal=query[:80],
+            reasoning=f"分析任务: 搜索 → {framework_name}分析 → 生成结论",
+            steps=steps)
+
+    # ── Template: research ────────────────────────────────────────────
+    #  Gather Sources → Extract Facts → Synthesize
+    #  3-4 steps
 
     def _build_research_plan(self, plan_id: str, query: str) -> Plan:
-        """Template: search → extract → summarize."""
+        """Template: gather sources → extract → synthesize."""
         steps = [
-            PlanStep(id="s1", description=f"搜索相关资料: {query[:60]}",
-                     tool_hint="search_knowledge_base", parallel_group=1),
-            PlanStep(id="s2", description=f"提取关键数据: {query[:60]}",
-                     dependencies=["s1"], tool_hint="extract_insights"),
-            PlanStep(id="s3", description=f"归纳总结: {query[:60]}",
-                     dependencies=["s2"], tool_hint="summarize_document"),
+            PlanStep(id="s1",
+                     description=f"搜集相关资料: {query[:50]}",
+                     dependencies=[],
+                     tool_hint="search_knowledge_base",
+                     parallel_group=1,
+                     risk_level="low", retry_strategy="auto_retry"),
+            PlanStep(id="s2",
+                     description=f"提取关键事实和数据: {query[:50]}",
+                     dependencies=["s1"],
+                     tool_hint="extract_insights",
+                     risk_level="low", retry_strategy="auto_retry"),
+            PlanStep(id="s3",
+                     description=f"综合归纳研究结果: {query[:50]}",
+                     dependencies=["s2"],
+                     tool_hint="summarize_document",
+                     risk_level="low", retry_strategy="auto_retry"),
         ]
-        return Plan(id=plan_id, goal=query[:80],
-                    reasoning="识别为研究类任务: 搜索 → 提取 → 总结", steps=steps)
+
+        # For queries that explicitly mention "对比趋势" or "变化",
+        # add a trend-analysis step between extract and synthesize
+        if any(kw in query.lower() for kw in ["趋势", "变化", "对比", "多年", "三年"]):
+            steps.insert(2, PlanStep(
+                id="s2b",
+                description=f"分析跨期趋势和变化: {query[:50]}",
+                dependencies=["s2"],
+                tool_hint="cross_document_analysis",
+                risk_level="low", retry_strategy="auto_retry",
+            ))
+            # Re-wire dependency: trend → synthesize
+            steps[-1].dependencies = ["s2b"]
+
+        return Plan(
+            id=plan_id, goal=query[:80],
+            reasoning=f"研究任务: 搜集 → 提取 → 归纳",
+            steps=steps)
 
     def _build_tools_description(self) -> str:
         """Build a semantic-aware tool list for the planning prompt.
