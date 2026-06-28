@@ -37,6 +37,7 @@ export interface Workflow {
   name: string
   description?: string
   flow_data?: WorkflowConfig
+  engine_type?: string
   is_active: boolean
   created_at: string
   updated_at: string

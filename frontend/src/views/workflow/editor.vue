@@ -9,105 +9,132 @@
         </h3>
       </div>
       <div class="flex-1 overflow-y-auto p-3">
-        <n-collapse :default-expanded-names="['llm', 'tool', 'io', 'logic', 'data']">
+        <!-- 动态加载节点定义 -->
+        <template v-if="hasDynamicDefs">
+          <n-collapse :default-expanded-names="['llm', 'tool', 'io', 'logic', 'data']">
+            <n-collapse-item v-for="cat in Object.keys(nodeDefsByCategory)" :key="cat" :name="cat">
+              <template #header>
+                <n-icon class="mr-1"><component :is="CATEGORY_ICONS[cat] || AppsOutline" /></n-icon>
+                {{ CATEGORY_LABELS[cat] || cat }}
+              </template>
+              <div class="space-y-2">
+                <div
+                  v-for="node in nodeDefsByCategory[cat]"
+                  :key="node.node_type"
+                  class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-grab hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-500 transition-all"
+                  draggable="true"
+                  @dragstart="onDragStart($event, node)"
+                >
+                  <div class="flex items-center gap-2">
+                    <n-icon size="20"><component :is="getNodeIconComponent(node.node_type)" /></n-icon>
+                    <div>
+                      <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.name }}</div>
+                      <div class="text-xs text-gray-500">{{ node.description }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </n-collapse-item>
+          </n-collapse>
+        </template>
+
+        <!-- 回退：API 加载失败时使用硬编码节点列表 -->
+        <template v-else>
+          <n-collapse :default-expanded-names="['llm', 'tool', 'io', 'logic', 'data']">
           <n-collapse-item name="llm">
             <template #header><n-icon class="mr-1"><HardwareChipOutline /></n-icon> 大模型节点</template>
             <div class="space-y-2">
               <div
                 v-for="node in llmNodes"
-                :key="node.type"
+                :key="node.node_type"
                 class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-grab hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-500 transition-all"
                 draggable="true"
                 @dragstart="onDragStart($event, node)"
               >
                 <div class="flex items-center gap-2">
-                  <n-icon size="20"><component :is="getNodeIconComponent(node.type)" /></n-icon>
+                  <n-icon size="20"><component :is="getNodeIconComponent(node.node_type)" /></n-icon>
                   <div>
-                    <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.label }}</div>
+                    <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.name }}</div>
                     <div class="text-xs text-gray-500">{{ node.description }}</div>
                   </div>
                 </div>
               </div>
             </div>
           </n-collapse-item>
-
           <n-collapse-item name="tool">
             <template #header><n-icon class="mr-1"><SettingsOutline /></n-icon> 工具节点</template>
             <div class="space-y-2">
               <div
                 v-for="node in toolNodes"
-                :key="node.type"
+                :key="node.node_type"
                 class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-grab hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-gray-200 dark:border-gray-600 hover:border-amber-300 dark:hover:border-amber-500 transition-all"
                 draggable="true"
                 @dragstart="onDragStart($event, node)"
               >
                 <div class="flex items-center gap-2">
-                  <n-icon size="20"><component :is="getNodeIconComponent(node.type)" /></n-icon>
+                  <n-icon size="20"><component :is="getNodeIconComponent(node.node_type)" /></n-icon>
                   <div>
-                    <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.label }}</div>
+                    <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.name }}</div>
                     <div class="text-xs text-gray-500">{{ node.description }}</div>
                   </div>
                 </div>
               </div>
             </div>
           </n-collapse-item>
-
           <n-collapse-item name="io">
             <template #header><n-icon class="mr-1"><EnterOutline /></n-icon> 输入输出</template>
             <div class="space-y-2">
               <div
                 v-for="node in ioNodes"
-                :key="node.type"
+                :key="node.node_type"
                 class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-grab hover:bg-emerald-50 dark:hover:bg-emerald-900/20 border border-gray-200 dark:border-gray-600 hover:border-emerald-300 dark:hover:border-emerald-500 transition-all"
                 draggable="true"
                 @dragstart="onDragStart($event, node)"
               >
                 <div class="flex items-center gap-2">
-                  <n-icon size="20"><component :is="getNodeIconComponent(node.type)" /></n-icon>
+                  <n-icon size="20"><component :is="getNodeIconComponent(node.node_type)" /></n-icon>
                   <div>
-                    <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.label }}</div>
+                    <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.name }}</div>
                     <div class="text-xs text-gray-500">{{ node.description }}</div>
                   </div>
                 </div>
               </div>
             </div>
           </n-collapse-item>
-
           <n-collapse-item name="logic">
             <template #header><n-icon class="mr-1"><GitBranchOutline /></n-icon> 逻辑控制</template>
             <div class="space-y-2">
               <div
                 v-for="node in logicNodes"
-                :key="node.type"
+                :key="node.node_type"
                 class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-grab hover:bg-cyan-50 dark:hover:bg-cyan-900/20 border border-gray-200 dark:border-gray-600 hover:border-cyan-300 dark:hover:border-cyan-500 transition-all"
                 draggable="true"
                 @dragstart="onDragStart($event, node)"
               >
                 <div class="flex items-center gap-2">
-                  <n-icon size="20"><component :is="getNodeIconComponent(node.type)" /></n-icon>
+                  <n-icon size="20"><component :is="getNodeIconComponent(node.node_type)" /></n-icon>
                   <div>
-                    <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.label }}</div>
+                    <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.name }}</div>
                     <div class="text-xs text-gray-500">{{ node.description }}</div>
                   </div>
                 </div>
               </div>
             </div>
           </n-collapse-item>
-
           <n-collapse-item name="data">
             <template #header><n-icon class="mr-1"><ServerOutline /></n-icon> 数据处理</template>
             <div class="space-y-2">
               <div
                 v-for="node in dataNodes"
-                :key="node.type"
+                :key="node.node_type"
                 class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-grab hover:bg-teal-50 dark:hover:bg-teal-900/20 border border-gray-200 dark:border-gray-600 hover:border-teal-300 dark:hover:border-teal-500 transition-all"
                 draggable="true"
                 @dragstart="onDragStart($event, node)"
               >
                 <div class="flex items-center gap-2">
-                  <n-icon size="20"><component :is="getNodeIconComponent(node.type)" /></n-icon>
+                  <n-icon size="20"><component :is="getNodeIconComponent(node.node_type)" /></n-icon>
                   <div>
-                    <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.label }}</div>
+                    <div class="font-medium text-gray-700 dark:text-gray-200">{{ node.name }}</div>
                     <div class="text-xs text-gray-500">{{ node.description }}</div>
                   </div>
                 </div>
@@ -115,6 +142,7 @@
             </div>
           </n-collapse-item>
         </n-collapse>
+        </template>
       </div>
 
       <!-- 快速模板 -->
@@ -147,9 +175,18 @@
       <div class="h-14 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
         <div class="flex items-center gap-3">
           <n-input v-model:value="workflowStore.workflowName" placeholder="工作流名称" style="width: 200px" />
+          <n-select v-model:value="engineType" :options="engineTypeOptions" style="width: 140px" size="small" />
           <n-button type="primary" @click="saveWorkflow" :loading="saving">
             <template #icon><n-icon><SaveOutline /></n-icon></template>
             保存
+          </n-button>
+          <n-button quaternary @click="handleCreateNew">
+            <template #icon><n-icon><AddOutline /></n-icon></template>
+            新建
+          </n-button>
+          <n-button quaternary @click="openLoadModal">
+            <template #icon><n-icon><FolderOpenOutline /></n-icon></template>
+            加载
           </n-button>
           <n-button type="info" @click="openDebugPanel" :disabled="workflowStore.nodes.length === 0">
             <template #icon><n-icon><PlayOutline /></n-icon></template>
@@ -200,6 +237,9 @@
           </template>
 
           <!-- LLM 节点 -->
+          <template #node-llm="nodeProps">
+            <LLMNode :data="nodeProps.data" :selected="selectedNodeId === nodeProps.id" :executing="executingNodeId === nodeProps.id" :model="(nodeProps.data?.provider as string) || 'LLM'" color="purple" />
+          </template>
           <template #node-llm_openai="nodeProps">
             <LLMNode :data="nodeProps.data" :selected="selectedNodeId === nodeProps.id" :executing="executingNodeId === nodeProps.id" model="OpenAI GPT" color="green" />
           </template>
@@ -277,7 +317,57 @@
           </div>
 
           <!-- LLM 节点配置 -->
-          <template v-if="selectedNode.type?.startsWith('llm_')">
+          <template v-if="selectedNode.type?.startsWith('llm_') || selectedNode.type === 'llm'">
+            <!-- 通用 llm 节点：provider 下拉选择 -->
+            <div v-if="selectedNode.type === 'llm'" class="mb-4">
+              <label class="text-sm font-medium text-gray-600 dark:text-gray-300">选择供应商</label>
+              <n-select
+                v-model:value="nodeData.provider"
+                :options="llmConfigStore.providers.filter(p => p.key !== 'llm').map(p => ({ label: p.label, value: p.key }))"
+                placeholder="选择 LLM 供应商..."
+                class="mt-1"
+              />
+            </div>
+
+            <!-- 全局配置引用 -->
+            <div class="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">使用全局配置</label>
+                <n-switch v-model:value="nodeData.useGlobalConfig" />
+              </div>
+              <template v-if="nodeData.useGlobalConfig">
+                <n-select
+                  v-model:value="nodeData.configProvider"
+                  :options="llmConfigStore.getOptionsForProvider(getLlmNodeProvider(selectedNode))"
+                  placeholder="选择已保存的配置..."
+                  class="mt-1"
+                  clearable
+                />
+                <div v-if="nodeData.configProvider" class="text-xs text-gray-500 mt-1">
+                  API Key/URL/Model 将从所选全局配置自动加载
+                </div>
+              </template>
+              <template v-else>
+                <div class="text-xs text-orange-500">将使用下方手动填写的 API 信息</div>
+              </template>
+            </div>
+
+            <!-- Skill 选择器 -->
+            <div class="mb-4">
+              <label class="text-sm font-medium text-gray-600 dark:text-gray-300">关联 Skill</label>
+              <n-select
+                v-model:value="nodeData.skillName"
+                :options="skills.map(s => ({ label: `${s.name} (成功率 ${Math.round(s.success_rate * 100)}%)`, value: s.name }))"
+                placeholder="选择 Skill（可选）..."
+                class="mt-1"
+                clearable
+                filterable
+              />
+              <div class="text-xs text-gray-400 mt-1">Skill 指南将注入到 LLM 的 system prompt</div>
+            </div>
+
+            <n-divider />
+
             <div>
               <label class="text-sm font-medium text-gray-600 dark:text-gray-300">系统提示词</label>
               <n-input
@@ -298,10 +388,74 @@
                 <n-input-number v-model:value="nodeData.maxTokens" :min="100" :max="8000" :step="100" class="mt-1 w-full" />
               </div>
             </div>
+
+            <!-- 参数引用系统 -->
+            <n-divider />
+            <div class="mb-3">
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">输入参数</label>
+                <n-button size="tiny" quaternary @click="addLlmInputParam">
+                  <template #icon><n-icon><AddOutline /></n-icon></template>
+                </n-button>
+              </div>
+              <div v-if="!nodeData.inputParams || nodeData.inputParams.length === 0" class="text-gray-400 text-xs text-center py-2 border border-dashed rounded">
+                点击 + 添加输入参数
+              </div>
+              <div v-for="(param, idx) in (nodeData.inputParams || [])" :key="idx" class="flex items-center gap-2 mb-2">
+                <n-input v-model:value="param.name" placeholder="参数名" size="small" style="width:80px" />
+                <n-select v-model:value="param.type" size="small" style="width:70px" :options="[{label:'输入',value:'input'},{label:'引用',value:'reference'}]" />
+                <n-input v-if="param.type === 'input'" v-model:value="param.value" placeholder="值" size="small" style="flex:1" />
+                <n-select v-else v-model:value="param.referenceNode" size="small" style="flex:1" :options="getReferenceableParams().map(p => ({label:p.label, value:p.value}))" placeholder="选择引用" />
+                <n-button size="tiny" text type="error" @click="removeLlmInputParam(idx)"><template #icon><n-icon><CloseOutline /></n-icon></template></n-button>
+              </div>
+            </div>
+            <div class="mb-2">
+              <div class="text-xs text-gray-400">
+                💡 Prompt 中可使用 <code v-text="'{{paramName}}'"></code> 引用输入参数
+              </div>
+            </div>
+
+            <!-- LLM 输出参数 -->
+            <n-divider />
+            <div class="mb-3">
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">输出参数</label>
+                <n-button size="tiny" quaternary @click="addLlmOutputParam">
+                  <template #icon><n-icon><AddOutline /></n-icon></template>
+                </n-button>
+              </div>
+              <div v-if="!nodeData.outputParams || nodeData.outputParams.length === 0" class="text-gray-400 text-xs text-center py-2 border border-dashed rounded">
+                点击 + 添加输出参数，如 output / tokens
+              </div>
+              <div v-for="(param, idx) in (nodeData.outputParams || [])" :key="idx" class="flex items-center gap-2 mb-2">
+                <n-input v-model:value="param.name" placeholder="变量名" size="small" style="width:100px" />
+                <n-input v-model:value="'string'" disabled size="small" style="width:70px" />
+                <n-input v-model:value="param.description" placeholder="描述（可选）" size="small" style="flex:1" />
+                <n-button size="tiny" text type="error" @click="removeLlmOutputParam(idx)"><template #icon><n-icon><CloseOutline /></n-icon></template></n-button>
+              </div>
+            </div>
           </template>
 
           <!-- 输入节点配置 -->
           <template v-if="selectedNode.type === 'input'">
+            <!-- 参数定义列表 -->
+            <div class="mb-3">
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">参数定义</label>
+                <n-button size="tiny" quaternary @click="addInputParam">
+                  <template #icon><n-icon><AddOutline /></n-icon></template>
+                </n-button>
+              </div>
+              <div v-if="!nodeData.inputParams || nodeData.inputParams.length === 0" class="text-gray-400 text-xs text-center py-2 border border-dashed rounded">
+                默认为 {'{{'} input {'}}'}，点击 + 添加自定义参数
+              </div>
+              <div v-for="(param, idx) in (nodeData.inputParams || [])" :key="idx" class="flex items-center gap-2 mb-2">
+                <n-input v-model:value="param.name" placeholder="参数名" size="small" style="width:100px" />
+                <n-input v-model:value="param.value" placeholder="默认值" size="small" style="flex:1" />
+                <n-select v-model:value="param.type" size="small" style="width:80px" :options="[{label:'String',value:'string'},{label:'Number',value:'number'}]" />
+                <n-button size="tiny" text type="error" @click="removeInputParam(idx)"><template #icon><n-icon><CloseOutline /></n-icon></template></n-button>
+              </div>
+            </div>
             <div>
               <label class="text-sm font-medium text-gray-600 dark:text-gray-300">提示词模板</label>
               <n-input
@@ -311,7 +465,94 @@
                 :autosize="{ minRows: 4, maxRows: 8 }"
                 class="mt-1"
               />
-              <div class="text-xs text-gray-400 mt-1" v-text="'支持变量: {{input}}'"></div>
+              <div class="text-xs text-gray-400 mt-1" v-text="'支持变量: {{paramName}}'"></div>
+            </div>
+          </template>
+
+          <!-- 输出节点配置 -->
+          <template v-if="selectedNode.type === 'output'">
+            <div class="mb-3">
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">输出参数</label>
+                <n-button size="tiny" quaternary @click="addOutputParam">
+                  <template #icon><n-icon><AddOutline /></n-icon></template>
+                </n-button>
+              </div>
+              <div v-if="!nodeData.outputParams || nodeData.outputParams.length === 0" class="text-gray-400 text-xs text-center py-2 border border-dashed rounded">
+                点击 + 添加输出参数
+              </div>
+              <div v-for="(param, idx) in (nodeData.outputParams || [])" :key="idx" class="flex items-center gap-2 mb-2">
+                <n-input v-model:value="param.name" placeholder="参数名" size="small" style="width:80px" />
+                <n-select v-model:value="param.type" size="small" style="width:70px" :options="[{label:'输入',value:'input'},{label:'引用',value:'reference'}]" />
+                <n-input v-if="param.type === 'input'" v-model:value="param.value" placeholder="值" size="small" style="flex:1" />
+                <n-select v-else v-model:value="param.referenceNode" size="small" style="flex:1" :options="getReferenceableParams().map(p => ({label:p.label, value:p.value}))" placeholder="选择引用" />
+                <n-button size="tiny" text type="error" @click="removeOutputParam(idx)"><template #icon><n-icon><CloseOutline /></n-icon></template></n-button>
+              </div>
+            </div>
+            <div>
+              <label class="text-sm font-medium text-gray-600 dark:text-gray-300">回答模板</label>
+              <n-input
+                v-model:value="nodeData.responseContent"
+                type="textarea"
+                placeholder="使用 {{paramName}} 引用参数..."
+                :autosize="{ minRows: 4, maxRows: 8 }"
+                class="mt-1"
+              />
+              <div class="text-xs text-gray-400 mt-1" v-text="'支持变量: {{paramName}}'"></div>
+            </div>
+          </template>
+
+          <!-- TTS 节点配置 -->
+          <template v-if="selectedNode.type === 'tool_tts'">
+            <div class="mb-3">
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">输入参数</label>
+                <n-button size="tiny" quaternary @click="addTtsInputParam">
+                  <template #icon><n-icon><AddOutline /></n-icon></template>
+                </n-button>
+              </div>
+              <div v-if="!nodeData.inputParams || nodeData.inputParams.length === 0" class="text-gray-400 text-xs text-center py-2 border border-dashed rounded">
+                点击 + 添加，如 text（需要合成的文本）
+              </div>
+              <div v-for="(param, idx) in (nodeData.inputParams || [])" :key="idx" class="flex items-center gap-2 mb-2">
+                <n-input v-model:value="param.name" placeholder="参数名" size="small" style="width:80px" />
+                <n-select v-model:value="param.type" size="small" style="width:70px" :options="[{label:'输入',value:'input'},{label:'引用',value:'reference'}]" />
+                <n-input v-if="param.type === 'input'" v-model:value="param.value" placeholder="值" size="small" style="flex:1" />
+                <n-select v-else v-model:value="param.referenceNode" size="small" style="flex:1" :options="getReferenceableParams().map(p => ({label:p.label, value:p.value}))" placeholder="选择引用" />
+                <n-button size="tiny" text type="error" @click="removeTtsInputParam(idx)"><template #icon><n-icon><CloseOutline /></n-icon></template></n-button>
+              </div>
+            </div>
+            <div class="mb-3">
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">输出参数</label>
+                <n-button size="tiny" quaternary @click="addTtsOutputParam">
+                  <template #icon><n-icon><AddOutline /></n-icon></template>
+                </n-button>
+              </div>
+              <div v-if="!nodeData.outputParams || nodeData.outputParams.length === 0" class="text-gray-400 text-xs text-center py-2 border border-dashed rounded">
+                默认: audioUrl, fileName, output
+              </div>
+              <div v-for="(param, idx) in (nodeData.outputParams || [])" :key="idx" class="flex items-center gap-2 mb-2">
+                <n-input v-model:value="param.name" placeholder="参数名" size="small" style="width:100px" />
+                <n-input v-model:value="param.value" placeholder="引用字段" size="small" style="flex:1" />
+                <n-button size="tiny" text type="error" @click="removeTtsOutputParam(idx)"><template #icon><n-icon><CloseOutline /></n-icon></template></n-button>
+              </div>
+            </div>
+            <div>
+              <label class="text-sm font-medium text-gray-600 dark:text-gray-300">音色</label>
+              <n-select v-model:value="nodeData.voice" :options="ttsVoiceOptions" class="mt-1" placeholder="选择音色" />
+            </div>
+            <div class="mt-3">
+              <label class="text-sm font-medium text-gray-600 dark:text-gray-300">语言</label>
+              <n-select v-model:value="nodeData.languageType" :options="[{ label: 'Auto', value: 'Auto' }]" class="mt-1" />
+            </div>
+            <div class="mt-3">
+              <label class="text-sm font-medium text-gray-600 dark:text-gray-300">API Key</label>
+              <n-input v-model:value="nodeData.ttsApiKey" type="password" placeholder="阿里百炼 API Key" show-password-on="click" class="mt-1" />
+            </div>
+            <div class="mt-3">
+              <label class="text-sm font-medium text-gray-600 dark:text-gray-300">模型</label>
+              <n-input v-model:value="nodeData.ttsModel" placeholder="如 qwen3-tts-flash" class="mt-1" />
             </div>
           </template>
 
@@ -530,7 +771,7 @@
                 <n-timeline-item
                   v-for="(log, index) in executionLogs"
                   :key="index"
-                  :type="log.includes('✗') ? 'error' : log.includes('✓') ? 'success' : 'info'"
+                  :type="log.includes('❌') ? 'error' : log.includes('✅') ? 'success' : 'info'"
                 >
                   <span class="text-xs font-mono">{{ log }}</span>
                 </n-timeline-item>
@@ -544,47 +785,90 @@
       </n-drawer-content>
     </n-drawer>
 
-    <!-- LLM 配置弹窗 -->
-    <n-modal v-model:show="showLLMConfig" preset="card" title="LLM 模型配置" :style="{ width: '650px' }">
-      <n-tabs type="line">
-        <n-tab-pane name="openai" tab="OpenAI">
-          <div class="space-y-4 p-2">
-            <n-form-item label="API Key">
-              <n-input v-model:value="llmConfig.openai.apiKey" type="password" placeholder="sk-..." show-password-on="click" />
-            </n-form-item>
-            <n-form-item label="Base URL">
-              <n-input v-model:value="llmConfig.openai.baseUrl" placeholder="https://api.openai.com/v1" />
-            </n-form-item>
-            <n-form-item label="默认模型">
-              <n-select v-model:value="llmConfig.openai.model" :options="openaiModels" />
-            </n-form-item>
-          </div>
-        </n-tab-pane>
-        <n-tab-pane name="deepseek" tab="DeepSeek">
-          <div class="space-y-4 p-2">
-            <n-form-item label="API Key">
-              <n-input v-model:value="llmConfig.deepseek.apiKey" type="password" placeholder="sk-..." show-password-on="click" />
-            </n-form-item>
-            <n-form-item label="默认模型">
-              <n-select v-model:value="llmConfig.deepseek.model" :options="deepseekModels" />
-            </n-form-item>
-          </div>
-        </n-tab-pane>
-        <n-tab-pane name="qwen" tab="通义千问">
-          <div class="space-y-4 p-2">
-            <n-form-item label="API Key (DashScope)">
-              <n-input v-model:value="llmConfig.qwen.apiKey" type="password" placeholder="sk-..." show-password-on="click" />
-            </n-form-item>
-            <n-form-item label="默认模型">
-              <n-select v-model:value="llmConfig.qwen.model" :options="qwenModels" />
-            </n-form-item>
-          </div>
-        </n-tab-pane>
-      </n-tabs>
+    <!-- 加载工作流弹窗 -->
+    <n-modal v-model:show="showLoadModal" preset="card" title="加载工作流" :style="{ width: '600px' }">
+      <n-list v-if="!loadingWorkflows && workflowList.length > 0" hoverable clickable>
+        <n-list-item v-for="wf in workflowList" :key="wf.id" @click="loadWorkflowById(wf.id)">
+          <template #prefix>
+            <n-tag size="small" :bordered="false" type="info">工作流</n-tag>
+          </template>
+          <div class="font-medium">{{ wf.name }}</div>
+          <template #suffix>
+            <span class="text-xs text-gray-500">{{ wf.created_at ? new Date(wf.created_at).toLocaleString() : '' }}</span>
+          </template>
+        </n-list-item>
+      </n-list>
+      <n-spin v-else-if="loadingWorkflows" class="flex justify-center py-8" />
+      <n-empty v-else description="暂无工作流" />
       <template #footer>
         <div class="flex justify-end gap-2">
-          <n-button @click="showLLMConfig = false">取消</n-button>
-          <n-button type="primary" @click="saveLLMConfig">保存配置</n-button>
+          <n-button @click="showLoadModal = false">取消</n-button>
+          <n-button type="primary" @click="handleCreateNew">新建工作流</n-button>
+        </div>
+      </template>
+    </n-modal>
+
+    <!-- LLM 全局配置弹窗 (表格式管理，多配置 per provider) -->
+    <n-modal v-model:show="showLLMConfig" preset="card" title="LLM 全局配置" :style="{ width: '800px' }" :mask-closable="false">
+      <!-- 已有配置表格 -->
+      <n-data-table
+        v-if="llmConfigStore.configs.length > 0"
+        :columns="llmConfigColumns"
+        :data="llmConfigStore.configs"
+        :bordered="false"
+        :single-line="false"
+        size="small"
+        class="mb-4"
+      />
+      <n-empty v-else description="暂无配置，请新建" class="py-4" />
+
+      <n-divider />
+
+      <!-- 新建/编辑表单 -->
+      <n-form :model="llmConfigForm" label-placement="left" label-width="80" size="small">
+        <n-grid :cols="2" :x-gap="12">
+          <n-form-item label="配置名称" required>
+            <n-input v-model:value="llmConfigForm.config_name" placeholder="如：公司OpenAI账号" />
+          </n-form-item>
+          <n-form-item label="供应商" :required="!editingConfigId">
+            <n-select
+              v-model:value="llmConfigForm.provider"
+              :options="llmConfigStore.providers.map(p => ({ label: p.label, value: p.key }))"
+              :disabled="!!editingConfigId"
+              placeholder="选择供应商"
+            />
+          </n-form-item>
+          <n-form-item label="API Key" required>
+            <n-input v-model:value="llmConfigForm.api_key" type="password" placeholder="sk-..." show-password-on="click" />
+          </n-form-item>
+          <n-form-item label="API URL">
+            <n-input v-model:value="llmConfigForm.api_url" placeholder="如 https://api.openai.com/v1" />
+          </n-form-item>
+          <n-form-item label="模型">
+            <n-input v-model:value="llmConfigForm.model" placeholder="如 gpt-4o-mini" />
+          </n-form-item>
+          <n-form-item label="温度">
+            <n-input-number v-model:value="llmConfigForm.temperature" :min="0" :max="2" :step="0.1" style="width:100%" />
+          </n-form-item>
+        </n-grid>
+        <n-form-item label="设为默认">
+          <n-switch v-model:value="llmConfigForm.is_default" />
+          <span class="text-xs text-gray-400 ml-2">同一供应商只能有一个默认配置</span>
+        </n-form-item>
+      </n-form>
+
+      <template #footer>
+        <div class="flex justify-between">
+          <n-button type="error" size="small" v-if="editingConfigId" @click="handleDeleteConfig">
+            删除当前配置
+          </n-button>
+          <n-button size="small" v-else @click="editingConfigId = null; resetLlmConfigForm()">重置</n-button>
+          <div class="flex gap-2">
+            <n-button @click="showLLMConfig = false">关闭</n-button>
+            <n-button type="primary" @click="handleSaveConfig">
+              {{ editingConfigId ? '更新配置' : '新建配置' }}
+            </n-button>
+          </div>
         </div>
       </template>
     </n-modal>
@@ -592,8 +876,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, onMounted, watch, onUnmounted, h } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { VueFlow, useVueFlow, MarkerType, type Connection } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -601,14 +885,16 @@ import { MiniMap } from '@vue-flow/minimap'
 import {
   NIcon, NInput, NButton, NInputNumber, NCard, NCollapse, NCollapseItem,
   NDivider, NDrawer, NDrawerContent, NTimeline, NTimelineItem, NTag, NSpin, NProgress,
-  NModal, NTabs, NTabPane, NFormItem, NSelect
+  NModal, NForm, NGrid, NFormItem, NSelect, NSwitch, NList, NListItem, NEmpty, NPopconfirm, NDataTable, NPopover,
+  type DataTableColumns
 } from 'naive-ui'
 import {
   SaveOutline, PlayOutline, TrashOutline, ExpandOutline, SettingsOutline,
   AppsOutline, LocateOutline, CheckmarkCircleOutline, CloseCircleOutline,
   HardwareChipOutline, ChatbubbleEllipsesOutline, SearchOutline, VolumeHighOutline,
   EnterOutline, ExitOutline, GitBranchOutline, CompassOutline, ServerOutline,
-  CodeSlashOutline, GlobeOutline, SyncOutline, RocketOutline, FlashOutline
+  CodeSlashOutline, GlobeOutline, SyncOutline, RocketOutline, FlashOutline,
+  FolderOpenOutline, AddOutline, CloseOutline
 } from '@vicons/ionicons5'
 
 // Icon mapping for node types
@@ -631,7 +917,10 @@ const NODE_ICON_MAP: Record<string, unknown> = {
 const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutline
 
 import { useWorkflowStore } from '@/stores/workflow'
-import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflow as execWorkflow, type WorkflowNode, type WorkflowEdge, type WorkflowConfig } from '@/api/workflow'
+import { useLLMConfigStore, type LLMProviderConfig } from '@/stores/llmConfigStore'
+import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflow as execWorkflow, getWorkflows, getNodeDefinitions, type WorkflowNode, type WorkflowEdge, type WorkflowConfig, type NodeDefinition } from '@/api/workflow'
+import { agentApi } from '@/api/agent'
+import type { SkillInfo } from '@/types/agent'
 import { useDedupedMessage } from '@/utils/message'
 
 // 节点组件
@@ -651,8 +940,10 @@ import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
 
 const route = useRoute()
+const router = useRouter()
 const message = useDedupedMessage()
 const workflowStore = useWorkflowStore()
+const llmConfigStore = useLLMConfigStore()
 
 const { fitView: doFitView } = useVueFlow()
 
@@ -664,34 +955,59 @@ const defaultEdgeOptions = {
   type: 'smoothstep'
 }
 
-// 节点定义
-const llmNodes = [
-  { type: 'llm_openai', label: 'OpenAI GPT', description: 'GPT-4o 等模型' },
-  { type: 'llm_deepseek', label: 'DeepSeek', description: '国产推理模型' },
-  { type: 'llm_qwen', label: '通义千问', description: '阿里云大模型' }
+// ── 从 API 动态加载的节点定义 ──
+const nodeDefinitions = ref<NodeDefinition[]>([])
+const nodeDefsLoaded = ref(false)
+const nodeDefsByCategory = computed(() => {
+  const groups: Record<string, NodeDefinition[]> = {}
+  for (const def of nodeDefinitions.value) {
+    const cat = def.category || 'other'
+    if (!groups[cat]) groups[cat] = []
+    groups[cat].push(def)
+  }
+  return groups
+})
+
+const CATEGORY_LABELS: Record<string, string> = {
+  llm: '大模型节点',
+  tool: '工具节点',
+  io: '输入输出',
+  logic: '逻辑控制',
+  data: '数据处理',
+}
+const CATEGORY_ICONS: Record<string, unknown> = {
+  llm: HardwareChipOutline,
+  tool: SettingsOutline,
+  io: EnterOutline,
+  logic: GitBranchOutline,
+  data: ServerOutline,
+}
+
+// ── 硬编码回退（API 加载失败时使用）──
+const FALLBACK_NODES: NodeDefinition[] = [
+  { id: 0, node_type: 'llm', name: '通用LLM', category: 'llm', description: '支持多供应商的通用大模型节点' },
+  { id: 0, node_type: 'llm_openai', name: 'OpenAI GPT', category: 'llm', description: 'GPT-4o 等模型' },
+  { id: 0, node_type: 'llm_deepseek', name: 'DeepSeek', category: 'llm', description: '国产推理模型' },
+  { id: 0, node_type: 'llm_qwen', name: '通义千问', category: 'llm', description: '阿里云大模型' },
+  { id: 0, node_type: 'tool_search', name: '知识库检索', category: 'tool', description: 'RAG检索增强' },
+  { id: 0, node_type: 'tool_tts', name: '语音合成', category: 'tool', description: '文本转语音' },
+  { id: 0, node_type: 'input', name: '输入节点', category: 'io', description: '工作流入口' },
+  { id: 0, node_type: 'output', name: '输出节点', category: 'io', description: '工作流出口' },
+  { id: 0, node_type: 'condition', name: '条件分支', category: 'logic', description: '根据条件路由' },
+  { id: 0, node_type: 'router', name: '智能路由', category: 'logic', description: 'LLM智能路由' },
+  { id: 0, node_type: 'memory', name: '记忆节点', category: 'data', description: '存储/检索记忆' },
+  { id: 0, node_type: 'code', name: '代码执行', category: 'data', description: '执行Python代码' },
+  { id: 0, node_type: 'api_call', name: 'API调用', category: 'data', description: 'HTTP请求' },
+  { id: 0, node_type: 'transform', name: '数据转换', category: 'data', description: 'JSON/文本处理' },
 ]
 
-const toolNodes = [
-  { type: 'tool_search', label: '知识库检索', description: 'RAG检索增强' },
-  { type: 'tool_tts', label: '语音合成', description: '文本转语音' }
-]
-
-const ioNodes = [
-  { type: 'input', label: '输入节点', description: '工作流入口' },
-  { type: 'output', label: '输出节点', description: '工作流出口' }
-]
-
-const logicNodes = [
-  { type: 'condition', label: '条件分支', description: '根据条件路由' },
-  { type: 'router', label: '智能路由', description: 'LLM智能路由' }
-]
-
-const dataNodes = [
-  { type: 'memory', label: '记忆节点', description: '存储/检索记忆' },
-  { type: 'code', label: '代码执行', description: '执行Python代码' },
-  { type: 'api_call', label: 'API调用', description: 'HTTP请求' },
-  { type: 'transform', label: '数据转换', description: 'JSON/文本处理' }
-]
+// 在 template 中使用的动态节点列表（回退到硬编码）
+const llmNodes = computed(() => nodeDefsByCategory.value['llm'] || [])
+const toolNodes = computed(() => nodeDefsByCategory.value['tool'] || [])
+const ioNodes = computed(() => nodeDefsByCategory.value['io'] || [])
+const logicNodes = computed(() => nodeDefsByCategory.value['logic'] || [])
+const dataNodes = computed(() => nodeDefsByCategory.value['data'] || [])
+const hasDynamicDefs = computed(() => nodeDefsLoaded.value && nodeDefinitions.value.length > 0)
 
 // 配置选项
 const openaiModels = [
@@ -738,21 +1054,161 @@ const transformTypes = [
   { label: '正则提取', value: 'regex_extract' }
 ]
 
+// ── Skills 列表 ──
+const skills = ref<SkillInfo[]>([])
+const skillsLoaded = ref(false)
+
+async function loadSkills() {
+  if (skillsLoaded.value) return
+  try {
+    const res = await agentApi.listSkills()
+    skills.value = (res as any).data?.data || (res as any).data || []
+    skillsLoaded.value = true
+  } catch {
+    // 静默失败，skills 是可选功能
+  }
+}
+
+// ── 参数定义接口（Input/LLM/Output 节点共用）──
+interface ParamDef {
+  name: string
+  type: 'input' | 'reference'
+  value: string
+  referenceNode?: string
+}
+
 // 状态
 const saving = ref(false)
 const executing = ref(false)
 const executingNodeId = ref<string | null>(null)
 const showDebugPanel = ref(false)
 const showLLMConfig = ref(false)
+const showLoadModal = ref(false)
+const workflowList = ref<{ id: number; name: string; created_at: string }[]>([])
+const loadingWorkflows = ref(false)
 const testInput = ref('')
 const vueFlowRef = ref()
+const engineType = ref<'dag' | 'langgraph'>('dag')
+const engineTypeOptions = [
+  { label: 'DAG 引擎', value: 'dag' as const },
+  { label: 'LangGraph 引擎', value: 'langgraph' as const },
+]
 
-// LLM 配置
-const llmConfig = ref({
-  openai: { apiKey: '', baseUrl: '', model: 'gpt-4o-mini', temperature: 0.7 },
-  deepseek: { apiKey: '', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash', temperature: 0.7 },
-  qwen: { apiKey: '', model: 'qwen-plus', temperature: 0.7 }
+// LLM 全局配置（表格式管理）
+const editingConfigId = ref<string | null>(null)
+
+const llmConfigForm = ref({
+  provider: 'deepseek' as string,
+  config_name: '',
+  api_key: '',
+  api_url: '',
+  model: '',
+  temperature: 0.7,
+  is_default: false,
 })
+
+function resetLlmConfigForm() {
+  editingConfigId.value = null
+  llmConfigForm.value = {
+    provider: 'deepseek',
+    config_name: '',
+    api_key: '',
+    api_url: '',
+    model: '',
+    temperature: 0.7,
+    is_default: false,
+  }
+}
+
+// 表格列定义
+const llmConfigColumns: DataTableColumns<LLMProviderConfig> = [
+  { title: '供应商', key: 'provider', width: 90, render: (row) => llmConfigStore.getProviderLabel(row.provider) },
+  { title: '配置名', key: 'config_name', ellipsis: { tooltip: true }, width: 130 },
+  { title: 'API URL', key: 'api_url', ellipsis: { tooltip: true }, width: 160 },
+  { title: '模型', key: 'model', width: 120 },
+  { title: '温度', key: 'temperature', width: 60 },
+  {
+    title: '默认', key: 'is_default', width: 60,
+    render: (row) => row.is_default ? h('span', { style: 'color: #10b981' }, '✓') : ''
+  },
+  {
+    title: '操作', key: 'actions', width: 140,
+    render: (row) => {
+      const buttons: any[] = [
+        h(NButton, { size: 'tiny', quaternary: true, onClick: () => editConfig(row) }, { icon: () => h(NIcon, null, h(SearchOutline as any)) }),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => handleDeleteConfigById(row.id) }, { icon: () => h(NIcon, null, h(TrashOutline as any)) }),
+      ]
+      if (!row.is_default) {
+        buttons.splice(1, 0,
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => handleSetDefault(row.id) }, { default: () => '设默认' })
+        )
+      }
+      return h('div', { style: 'display:flex;gap:4px' }, buttons)
+    },
+  },
+]
+
+function editConfig(config: LLMProviderConfig) {
+  editingConfigId.value = config.id
+  llmConfigForm.value = {
+    provider: config.provider,
+    config_name: config.config_name,
+    api_key: config.api_key,
+    api_url: config.api_url,
+    model: config.model,
+    temperature: config.temperature,
+    is_default: config.is_default,
+  }
+}
+
+async function handleSaveConfig() {
+  if (!llmConfigForm.value.config_name.trim()) {
+    message.error('请输入配置名称')
+    return
+  }
+  if (!llmConfigForm.value.api_key.trim()) {
+    message.error('请输入 API Key')
+    return
+  }
+  try {
+    if (editingConfigId.value) {
+      await llmConfigStore.update(editingConfigId.value, llmConfigForm.value as any)
+      message.success('配置已更新')
+    } else {
+      await llmConfigStore.create(llmConfigForm.value as any)
+      message.success('配置已创建')
+    }
+    resetLlmConfigForm()
+  } catch {
+    message.error('保存失败')
+  }
+}
+
+async function handleDeleteConfigById(configId: string) {
+  try {
+    await llmConfigStore.remove(configId)
+    message.success('配置已删除')
+    if (editingConfigId.value === configId) resetLlmConfigForm()
+  } catch {
+    message.error('删除失败')
+  }
+}
+
+async function handleDeleteConfig() {
+  if (editingConfigId.value) await handleDeleteConfigById(editingConfigId.value)
+}
+
+async function handleSetDefault(configId: string) {
+  try {
+    await llmConfigStore.setDefault(configId)
+    message.success('已设为默认')
+  } catch {
+    message.error('设置失败')
+  }
+}
+
+// ── 自动保存定时器 ──
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 // 本地状态
 const nodes = computed({
@@ -767,7 +1223,7 @@ const edges = computed({
 
 const selectedNodeId = computed(() => workflowStore.selectedNode?.id)
 const selectedNode = computed(() => workflowStore.selectedNode)
-const nodeData = computed(() => (selectedNode.value?.data ?? {}) as Record<string, any>) // eslint-disable-line @typescript-eslint/no-explicit-any -- Naive UI v-model bindings require any for index-signature types
+const nodeData = computed(() => (selectedNode.value?.data ?? {}) as Record<string, any>)
 const executionResults = computed(() => workflowStore.executionResults)
 const executionLogs = computed(() => workflowStore.executionLogs)
 const finalOutput = computed(() => workflowStore.finalOutput)
@@ -890,14 +1346,12 @@ const loadTemplate = (type: string) => {
 
 // 工具函数
 const getNodeLabel = (type: string) => {
-  const labelMap: Record<string, string> = {
-    input: '输入', output: '输出',
-    llm_openai: 'OpenAI GPT', llm_deepseek: 'DeepSeek', llm_qwen: '通义千问',
-    tool_search: '知识库检索', tool_tts: '语音合成',
-    condition: '条件分支', router: '智能路由',
-    memory: '记忆', code: '代码执行', api_call: 'API调用', transform: '数据转换'
-  }
-  return labelMap[type] || type
+  // 优先从动态加载的节点定义中查找
+  const def = nodeDefinitions.value.find(d => d.node_type === type)
+  if (def) return def.name
+  const defs = FALLBACK_NODES.find(d => d.node_type === type)
+  if (defs) return defs.name
+  return type
 }
 
 const formatOutput = (output: unknown) => {
@@ -906,10 +1360,69 @@ const formatOutput = (output: unknown) => {
   return JSON.stringify(output, null, 2)
 }
 
-// 拖拽处理
-const onDragStart = (event: DragEvent, node: Record<string, unknown>) => {
+// ── 参数引用：获取可引用的上游节点参数列表 ──
+function getReferenceableParams(): { label: string; value: string }[] {
+  const params: { label: string; value: string }[] = []
+  if (!selectedNode.value) return params
+  for (const n of nodes.value) {
+    if (n.id === selectedNode.value.id) continue
+    const nodeType = n.data?.type as string || ''
+    const nodeLabel = (n.data?.label as string) || n.id
+    const outputFields = getNodeOutputFields(nodeType)
+    for (const field of outputFields) {
+      params.push({
+        label: `${nodeLabel}.${field}`,
+        value: `${n.id}.${field}`,
+      })
+    }
+  }
+  return params
+}
+
+function getLlmNodeProvider(node: any): string {
+  // 通用 llm 节点用 node.data.provider；特定 provider 节点从类型推导
+  if (node?.type === 'llm') return node?.data?.provider || 'deepseek'
+  return (node?.type || '').replace('llm_', '')
+}
+
+function getNodeOutputFields(nodeType: string): string[] {
+  switch (nodeType) {
+    case 'input': return ['user_input']
+    case 'llm': case 'llm_openai': case 'llm_deepseek': case 'llm_qwen':
+      return ['output', 'tokens']
+    case 'tool_search': return ['results', 'count']
+    case 'tool_tts': return ['audioUrl', 'fileName', 'output']
+    case 'memory': return ['result', 'output']
+    case 'code': return ['output']
+    case 'api_call': return ['output', 'status']
+    case 'transform': return ['output']
+    default: return ['output']
+  }
+}
+
+// ── 模板变量校验 ──
+function validateTemplateParams(template: string, definedParams: string[]): string[] {
+  const matches = template.matchAll(/\{\{(\w+)\}\}/g)
+  const missing: string[] = []
+  const defined = new Set(definedParams)
+  for (const m of matches) {
+    if (!defined.has(m[1])) {
+      missing.push(m[1])
+    }
+  }
+  return missing
+}
+
+// 拖拽处理 — 支持动态节点定义
+const onDragStart = (event: DragEvent, node: NodeDefinition | Record<string, unknown>) => {
   if (event.dataTransfer) {
-    event.dataTransfer.setData('application/vueflow', JSON.stringify(node))
+    // 适配 NodeDefinition 的字段名 (node_type->type, name->label)
+    const dragData = {
+      type: (node as any).node_type || (node as any).type,
+      label: (node as any).name || (node as any).label,
+      description: (node as any).description || '',
+    }
+    event.dataTransfer.setData('application/vueflow', JSON.stringify(dragData))
     event.dataTransfer.effectAllowed = 'move'
   }
 }
@@ -930,7 +1443,11 @@ const onDrop = (event: DragEvent) => {
     prompt: '', topK: 5, scoreThreshold: 0.5, condition: '',
     memoryType: 'short_term', action: 'store',
     method: 'GET', url: '', timeout: 30,
-    language: 'python', code: '', transformType: 'json_extract'
+    language: 'python', code: '', transformType: 'json_extract',
+    inputParams: [], outputParams: [],  // 参数引用系统
+    skillName: '', skillId: '',           // Skill 选择器
+    useGlobalConfig: false,               // LLM 全局配置引用
+    configProvider: '',                   // 全局配置的 provider
   }
 
   const newNode: WorkflowNode = {
@@ -959,6 +1476,115 @@ const onConnect = (params: Connection) => {
   }
   workflowStore.addEdge(newEdge)
 }
+
+// ── 参数管理辅助函数 ──
+function addLlmInputParam() {
+  if (!selectedNode.value) return
+  const data = selectedNode.value.data as any
+  const params = [...(data.inputParams || [])]
+  params.push({ name: '', type: 'input', value: '' })
+  workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
+}
+function removeLlmInputParam(idx: number) {
+  if (!selectedNode.value) return
+  const data = selectedNode.value.data as any
+  const params = [...(data.inputParams || [])]
+  params.splice(idx, 1)
+  workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
+}
+function addInputParam() {
+  if (!selectedNode.value) return
+  const data = selectedNode.value.data as any
+  const params = [...(data.inputParams || [])]
+  params.push({ name: '', type: 'string', value: '' })
+  workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
+}
+function removeInputParam(idx: number) {
+  if (!selectedNode.value) return
+  const data = selectedNode.value.data as any
+  const params = [...(data.inputParams || [])]
+  params.splice(idx, 1)
+  workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
+}
+function addOutputParam() {
+  if (!selectedNode.value) return
+  const data = selectedNode.value.data as any
+  const params = [...(data.outputParams || [])]
+  params.push({ name: '', type: 'input', value: '' })
+  workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
+}
+function removeOutputParam(idx: number) {
+  if (!selectedNode.value) return
+  const data = selectedNode.value.data as any
+  const params = [...(data.outputParams || [])]
+  params.splice(idx, 1)
+  workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
+}
+
+// LLM 输出参数管理
+function addLlmOutputParam() {
+  if (!selectedNode.value) return
+  const data = selectedNode.value.data as any
+  const params = [...(data.outputParams || [])]
+  params.push({ name: '', type: 'string', description: '' })
+  workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
+}
+function removeLlmOutputParam(idx: number) {
+  if (!selectedNode.value) return
+  const data = selectedNode.value.data as any
+  const params = [...(data.outputParams || [])]
+  params.splice(idx, 1)
+  workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
+}
+
+// TTS 参数辅助
+function addTtsInputParam() {
+  if (!selectedNode.value) return
+  const data = selectedNode.value.data as any
+  const params = [...(data.inputParams || [])]
+  params.push({ name: '', type: 'input', value: '' })
+  workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
+}
+function removeTtsInputParam(idx: number) {
+  if (!selectedNode.value) return
+  const data = selectedNode.value.data as any
+  const params = [...(data.inputParams || [])]
+  params.splice(idx, 1)
+  workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
+}
+function addTtsOutputParam() {
+  if (!selectedNode.value) return
+  const data = selectedNode.value.data as any
+  const params = [...(data.outputParams || [])]
+  params.push({ name: '', value: '' })
+  workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
+}
+function removeTtsOutputParam(idx: number) {
+  if (!selectedNode.value) return
+  const data = selectedNode.value.data as any
+  const params = [...(data.outputParams || [])]
+  params.splice(idx, 1)
+  workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
+}
+
+// TTS 音色选项
+const ttsVoiceOptions = [
+  { label: 'Cherry (芊悦)', value: 'Cherry' },
+  { label: 'Serena (苏瑶)', value: 'Serena' },
+  { label: 'Ethan (晨煦)', value: 'Ethan' },
+  { label: 'Chelsie (千雪)', value: 'Chelsie' },
+  { label: 'Momo (茉兔)', value: 'Momo' },
+  { label: 'Vivian (十三)', value: 'Vivian' },
+  { label: 'Moon (月白)', value: 'Moon' },
+  { label: 'Maia (四月)', value: 'Maia' },
+  { label: 'Kai (凯)', value: 'Kai' },
+  { label: 'Nofish (不吃鱼)', value: 'Nofish' },
+  { label: 'Bella (萌宝)', value: 'Bella' },
+  { label: 'Jennifer (詹妮弗)', value: 'Jennifer' },
+  { label: 'Ryan (甜茶)', value: 'Ryan' },
+  { label: 'Katerina (卡捷琳娜)', value: 'Katerina' },
+  { label: 'Aiden (艾登)', value: 'Aiden' },
+]
 
 const deleteSelectedNode = () => {
   if (selectedNode.value) {
@@ -989,24 +1615,75 @@ const saveWorkflow = async () => {
     if (workflowStore.currentWorkflowId) {
       await updateWorkflow(workflowStore.currentWorkflowId, {
         name: workflowStore.workflowName,
-        flow_data: flowData
-      })
-      message.success('更新成功')
+        flow_data: flowData,
+        engine_type: engineType.value,
+      } as any)
     } else {
       const res = await createWorkflow({
         name: workflowStore.workflowName,
-        flow_data: flowData
-      })
+        flow_data: flowData,
+        engine_type: engineType.value,
+      } as any)
       workflowStore.currentWorkflowId = res.data?.data?.id
-      message.success('保存成功')
+      // Update URL without navigation
+      if (workflowStore.currentWorkflowId) {
+        router.replace({ query: { id: String(workflowStore.currentWorkflowId) } })
+      }
     }
+    return true
   } catch (error: unknown) {
     const err = error as { response?: { data?: { detail?: string } } }
     message.error(err.response?.data?.detail || '保存失败')
+    return false
   } finally {
     saving.value = false
   }
 }
+
+// 自动保存 — 500ms 防抖
+const autoSave = () => {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  autoSaveTimer = setTimeout(async () => {
+    if (!workflowStore.currentWorkflowId || !workflowStore.workflowName.trim()) return
+    try {
+      const flowData = workflowStore.getFlowData() as unknown as WorkflowConfig
+      await updateWorkflow(workflowStore.currentWorkflowId, {
+        name: workflowStore.workflowName,
+        flow_data: flowData,
+        engine_type: engineType.value,
+      } as any)
+      console.log('[auto-save] 工作流已自动保存')
+    } catch {
+      // Auto-save failures are silent
+    }
+  }, 500)
+}
+
+// 监听画布变化 → 触发自动保存
+watch(
+  () => [workflowStore.nodes, workflowStore.edges, workflowStore.workflowName],
+  () => {
+    if (workflowStore.currentWorkflowId) {
+      autoSave()
+    }
+  },
+  { deep: true }
+)
+
+// 监听选中节点配置变化 → 自动保存到节点 data
+watch(
+  () => selectedNode.value?.data,
+  () => {
+    if (selectedNode.value) {
+      workflowStore.updateNodeData(selectedNode.value.id, { ...selectedNode.value.data })
+      // 同时触发自动保存到后端
+      if (workflowStore.currentWorkflowId) {
+        autoSave()
+      }
+    }
+  },
+  { deep: true }
+)
 
 // 调试执行
 const openDebugPanel = () => {
@@ -1031,7 +1708,7 @@ const executeWorkflow = async () => {
 
   executing.value = true
   workflowStore.startExecution()
-  workflowStore.addExecutionLog('▸ 开始执行工作流...')
+  workflowStore.addExecutionLog('🚀 开始执行工作流...')
 
   try {
     const res = await execWorkflow(workflowStore.currentWorkflowId, { text: testInput.value })
@@ -1040,28 +1717,30 @@ const executeWorkflow = async () => {
     if (result?.node_results) {
       for (const nodeResult of result.node_results) {
         executingNodeId.value = nodeResult.node_id
+        const status = nodeResult.status || 'success'
+        const icon = status === 'success' ? '✅' : status === 'failed' ? '❌' : '📊'
         workflowStore.updateNodeExecution({
           nodeId: nodeResult.node_id,
           nodeType: nodeResult.node_type,
-          status: nodeResult.status || 'success',
+          status,
           output: nodeResult.output,
           duration: nodeResult.duration
         })
-        workflowStore.addExecutionLog(`✓ [${getNodeLabel(nodeResult.node_type)}] 完成 (${nodeResult.duration || 0}ms)`)
+        workflowStore.addExecutionLog(`${icon} [${getNodeLabel(nodeResult.node_type)}] ${status === 'success' ? '完成' : '失败'} (${nodeResult.duration || 0}ms)`)
       }
     }
 
     if (result?.output) {
       workflowStore.setExecutionComplete(result.output)
-      workflowStore.addExecutionLog('✓ 工作流执行成功!')
+      workflowStore.addExecutionLog('✅ 工作流执行成功!')
     } else {
       workflowStore.setExecutionComplete(result)
-      workflowStore.addExecutionLog('✓ 工作流执行完成')
+      workflowStore.addExecutionLog('✅ 工作流执行完成')
     }
 
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : '未知错误'
-    workflowStore.addExecutionLog(`✗ 执行失败: ${errMsg}`)
+    workflowStore.addExecutionLog(`❌ 执行失败: ${errMsg}`)
     message.error('执行失败')
   } finally {
     executing.value = false
@@ -1069,29 +1748,74 @@ const executeWorkflow = async () => {
   }
 }
 
-const saveLLMConfig = () => {
-  workflowStore.llmConfig = { ...llmConfig.value }
-  showLLMConfig.value = false
-  message.success('LLM 配置已保存')
+// ── 工作流加载列表 ──
+async function openLoadModal() {
+  showLoadModal.value = true
+  loadingWorkflows.value = true
+  try {
+    const res = await getWorkflows()
+    workflowList.value = (res.data?.data?.items || res.data?.data || [])
+  } catch {
+    message.error('获取工作流列表失败')
+  } finally {
+    loadingWorkflows.value = false
+  }
 }
 
-const loadWorkflow = async (id: number) => {
+async function loadWorkflowById(id: number) {
+  showLoadModal.value = false
   try {
     const res = await getWorkflow(id)
     const workflow = res.data?.data
     if (workflow) {
       workflowStore.loadWorkflow(workflow)
+      if (workflow.engine_type) engineType.value = workflow.engine_type as 'dag' | 'langgraph'
+      router.replace({ query: { id: String(id) } })
+      message.success('工作流加载成功')
     }
-  } catch (error) {
+  } catch {
     message.error('加载工作流失败')
   }
 }
 
-onMounted(() => {
+function handleCreateNew() {
+  workflowStore.clearWorkflow()
+  router.replace({ query: {} })
+  message.info('已创建新工作流')
+}
+
+// ── 节点定义加载 ──
+async function loadNodeDefinitions() {
+  try {
+    const res = await getNodeDefinitions()
+    const defs = res.data?.data
+    if (defs && Array.isArray(defs) && defs.length > 0) {
+      nodeDefinitions.value = defs
+      nodeDefsLoaded.value = true
+    }
+  } catch {
+    // 使用硬编码回退
+    nodeDefinitions.value = FALLBACK_NODES
+    nodeDefsLoaded.value = true
+  }
+}
+
+onMounted(async () => {
+  // 并行加载所有初始化数据
+  await Promise.all([
+    loadNodeDefinitions(),
+    llmConfigStore.fetchAll(),
+    loadSkills(),
+  ])
+
   const id = route.query.id as string
   if (id) {
-    loadWorkflow(parseInt(id))
+    await loadWorkflowById(parseInt(id))
   }
+})
+
+onUnmounted(() => {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
 })
 </script>
 

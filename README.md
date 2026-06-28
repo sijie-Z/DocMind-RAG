@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v1.2.1-blue?logo=semver" alt="Version">
+  <img src="https://img.shields.io/badge/版本-v1.3.0-blue?logo=semver" alt="Version">
   <img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Vue_3-3.4-4FC08D?logo=vuedotjs" alt="Vue 3">
@@ -272,6 +272,7 @@ make test && make lint
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| **v1.3.0** | 2026-06 | 工作流编辑器升级（LLM多配置/SKILL.md/引擎切换） |
 | **v1.2.1** | 2026-06 | 结构化规划、5 轮实验报告 |
 | **v1.2.0** | 2026-05 | PER 架构、25+ 工具、自我进化 |
 | **v1.0.0** | 2026-05 | 初版：RAG 管道、知识图谱 |

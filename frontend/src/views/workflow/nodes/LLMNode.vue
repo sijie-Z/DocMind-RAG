@@ -24,19 +24,20 @@ import { ChatbubblesOutline } from '@vicons/ionicons5'
 const props = defineProps<{
   data: Record<string, unknown>
   model: string
-  color: 'green' | 'blue' | 'orange'
+  color?: 'green' | 'blue' | 'orange' | 'purple'
   selected?: boolean
   executing?: boolean
 }>()
 
-const colorMap = {
+const colorMap: Record<string, { border: string; bg: string; text: string; ring: string }> = {
   green: { border: 'border-green-400 dark:border-green-500', bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-500', ring: '#4ade80' },
   blue: { border: 'border-blue-400 dark:border-blue-500', bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-500', ring: '#60a5fa' },
-  orange: { border: 'border-orange-400 dark:border-orange-500', bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-500', ring: '#fb923c' }
+  orange: { border: 'border-orange-400 dark:border-orange-500', bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-500', ring: '#fb923c' },
+  purple: { border: 'border-purple-400 dark:border-purple-500', bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-500', ring: '#c084fc' },
 }
 
-const borderColor = computed(() => colorMap[props.color].border)
-const bgColor = computed(() => colorMap[props.color].bg)
-const textColor = computed(() => colorMap[props.color].text)
-const ringColor = computed(() => colorMap[props.color].ring)
+const borderColor = computed(() => colorMap[props.color || 'blue'].border)
+const bgColor = computed(() => colorMap[props.color || 'blue'].bg)
+const textColor = computed(() => colorMap[props.color || 'blue'].text)
+const ringColor = computed(() => colorMap[props.color || 'blue'].ring)
 </script>
