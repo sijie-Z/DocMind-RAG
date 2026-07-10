@@ -31,6 +31,7 @@ EventType = Literal[
     "done",
     "error",
     "execution_step_result",
+    "run_report",
 ]
 
 ThinkingType = Literal["reasoning", "planning", "evaluation", "correction"]

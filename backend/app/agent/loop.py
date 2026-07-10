@@ -28,6 +28,7 @@ from app.agent.planner import Plan, Planner, PlanStep
 from app.agent.reflector import Reflector
 from app.agent.registry import tool_registry
 from app.agent.reviewer import Reviewer
+from app.agent.run_report import build_run_report, render_run_report_text
 
 logger = logging.getLogger(__name__)
 
@@ -441,6 +442,20 @@ class PERAgentLoop:
             await ctx.save()
         except Exception:
             pass
+
+        # ── Run report (observe-only, no behavior change) ───────────────
+        # Pure projection of what the run already recorded into ctx.
+        # Does NOT trigger retry/replan/approval/memory/experience. See ADR-1.
+        run_report = build_run_report(ctx, final_output)
+        try:
+            logger.info("\n%s", render_run_report_text(run_report))
+        except Exception:
+            pass
+        yield AgentEvent(
+            type="run_report",
+            content=render_run_report_text(run_report),
+        )
+
         # Yield execution context as a data event for observability
         yield AgentEvent(
             type="execution_context",
