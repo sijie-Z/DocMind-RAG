@@ -848,6 +848,335 @@ async def test_human_response_unblocks_run():
 
 ---
 
+## 13. 补丁:grok 对比审计后的增量设计
+
+> 本节是设计契约的**补丁**。基于对 `D:\Desktop\duibi\grok\grok-build\` 的快速审计,在不破坏既有 P0 框架下,补齐 7 处我们遗漏的工程模式。
+>
+> 标注 [Yes] = 必须补 / [Maybe] = 视场景决定 / [No] = 不补。
+> 不重写既有内容,只追加。
+
+### 13.1 补丁 #1 — Retry 引擎要带 jitter [Yes]
+
+**问题**:我们设计的 `backoff = lambda n: 0.5 * (2 ** n)` 是**确定性**的。
+
+**后果**:多个 worker 在同一时刻因共享故障(后端 OOM)全部 retry,会形成**同步重试风暴** —— `t=0.5s` 时 100 个 worker 同时打,再次失败,再次同步。
+
+**grok 做法**(`xai-grok-sampler/src/retry.rs:83-99`):
+```rust
+// 伪代码
+delay = base_delay * (2 ^ attempt)
+jitter = random_uniform(-0.2, 0.2) * delay  // ±20%
+final = delay * (1.0 + jitter)
+final = min(final, max_delay)  // 上限
+```
+
+**补到我们设计里**(替换 §2.3 `backoff` 字段):
+
+```python
+@dataclass
+class RetryPolicy:
+    retryable: bool
+    max_retries: int
+    backoff: Callable[[int], float]      # 基线延迟(秒)
+    jitter_ratio: float = 0.2            # ±20% 抖动,防止同步重试
+    max_delay_seconds: float = 30.0      # 上限,防无界等待
+
+def compute_backoff(policy: RetryPolicy, attempt: int) -> float:
+    base = policy.backoff(attempt)
+    base = min(base, policy.max_delay_seconds)
+    jitter = random.uniform(-policy.jitter_ratio, policy.jitter_ratio)
+    return base * (1.0 + jitter)
+```
+
+### 13.2 补丁 #2 — Retry 不只是 repeat [Yes]
+
+**问题**:我们设计的重试就是"再调一次同样的工具"。
+
+**后果**:有些故障**重试同样的请求是 100% 失败的**,必须改请求或换连接才有机会。
+
+**grok 区分的 retry 动作**(`xai-grok-sampler/src/retry.rs:119-126, 162-173`):
+
+| 动作 | 何时用 | 例 |
+|---|---|---|
+| `repeat` | 同请求重试 | 5xx 瞬时错误 |
+| `adapt_request` | 改请求内容 | payload 太大 → 剥离 inline images 后重试 |
+| `reset_transport` | 重建客户端 | HTTP/2 连接池中毒 → 重新建 client |
+| `refresh_auth` | 刷新凭证 | 401 → 重新拿 token 后重试 |
+| `fatal` | 不重试 | 业务逻辑错误 |
+
+**补到我们设计**(`RETRY_POLICIES` 字典):
+
+```python
+@dataclass
+class RetryPolicy:
+    retryable: bool
+    action: Literal["repeat", "adapt_request", "reset_transport", "refresh_auth", "fatal"]
+    max_retries: int
+    backoff: Callable[[int], float]
+    jitter_ratio: float = 0.2
+    max_delay_seconds: float = 30.0
+
+RETRY_POLICIES = {
+    # 重试 + 改请求
+    "payload_too_large":     RetryPolicy(action="adapt_request", retryable=True,  max_retries=2, ...),
+    "image_processing_error":RetryPolicy(action="adapt_request", retryable=True,  max_retries=2, ...),
+    # 重试 + 重建连接
+    "unreachable":           RetryPolicy(action="reset_transport", retryable=True,  max_retries=5, ...),
+    "interrupted":           RetryPolicy(action="reset_transport", retryable=True,  max_retries=3, ...),
+    # 重试 + 刷新凭证
+    "auth_expired_refreshable":RetryPolicy(action="refresh_auth", retryable=True, max_retries=2, ...),
+    "auth_expired":          RetryPolicy(action="fatal",          retryable=False, ...),  # 必须人
+    # 普通重试
+    "timeout":               RetryPolicy(action="repeat",        retryable=True,  max_retries=3, ...),
+    "rate_limited":          RetryPolicy(action="repeat",        retryable=True,  max_retries=2, ...),
+    # 不重试
+    "not_found":             RetryPolicy(action="fatal",         retryable=False, ...),
+    "permission_denied":     RetryPolicy(action="fatal",         retryable=False, ...),
+}
+```
+
+**关键洞见**:`auth_expired` 拆成两个 ——**机器可刷新的 token 走 `refresh_auth`,需要重新登录的才走 fatal**。
+
+### 13.3 补丁 #3 — 错误类型扩到 22 种 [Yes]
+
+**我们当前 10 种** + 12 种 grok 命名的:
+
+```python
+ToolErrorType = Literal[
+    # 已有
+    "timeout",
+    "rate_limited",
+    "api_error",
+    "connection_error",
+    "not_found",
+    "permission_denied",
+    "validation_error",
+    "auth_expired",
+    "budget_exceeded",
+    "ambiguous_input",
+
+    # 新增(来自 grok)
+    "unreachable",                # 连接都建不上
+    "interrupted",                # 流中断,与 timeout 区分
+    "permanent_transport_error",  # 请求构造缺陷,不重试
+    "empty_response",             # 模型返回空(可能 token 用尽)
+    "idle_timeout",               # 流没进度,区别于 timeout
+    "serialization_error",        # 响应反序列化失败
+    "context_length_exceeded",    # 输入超限
+    "max_tokens_truncation",      # 输出截断
+    "payload_too_large",
+    "image_processing_error",
+    "doom_loop_detected",         # 显式的死循环标记
+    "invalid_configuration",      # 配置错误
+]
+```
+
+**保留位置**(未来用,不上 P0):
+- `sandbox_apply_failed` / `filesystem_violation` / `network_violation` / `bypass_granted` / `bypass_denied`
+
+### 13.4 补丁 #4 — Circuit Breaker 是状态机 [Yes]
+
+**问题**:我们 §2 写 `MAX_CONSECUTIVE_FAILURES=3` 当保险丝,**没有"何时恢复"**。
+
+**后果**:一次后端故障 → 永远熔断 → 用户永远跑不了任务。
+
+**grok 做法**(`circuit_breaker_observer.rs:13-79`):
+
+```
+状态机:
+
+Closed ──[连续失败≥N]──► Open
+   ▲                          │
+   │                     [冷却期到]
+   │                          ▼
+   └──[探测成功]────── HalfOpen
+                          │
+                  [探测失败]
+                          ▼
+                       Open(继续冷却)
+```
+
+**补到我们设计**(`executor.py` 改造):
+
+```python
+@dataclass
+class CircuitBreaker:
+    state: Literal["closed", "open", "half_open"] = "closed"
+    failure_threshold: int = 3         # N 次连续失败 → Open
+    cooldown_seconds: float = 30.0     # Open 持续时间
+    probe_attempts: int = 1             # HalfOpen 探测几次
+    
+    def on_failure(self):
+        self.consecutive_failures += 1
+        if self.consecutive_failures >= self.failure_threshold:
+            self.state = "open"
+            self.opened_at = time.time()
+    
+    def should_admit(self) -> bool:
+        if self.state == "closed":
+            return True
+        if self.state == "open":
+            if time.time() - self.opened_at > self.cooldown_seconds:
+                self.state = "half_open"
+                return True  # 允许一次探测
+            return False
+        if self.state == "half_open":
+            return False  # 半开状态只允许探测
+    
+    def on_success(self):
+        if self.state == "half_open":
+            self.state = "closed"
+            self.consecutive_failures = 0
+        elif self.state == "closed":
+            self.consecutive_failures = 0
+```
+
+**关键**:breaker 不是全局一个,而是**每个工具/每个错误类型一个**(避免一个工具挂了熔断所有工具)。
+
+### 13.5 补丁 #5 — 取消不依赖工具锁 [Yes]
+
+**问题**:取消一个 run 时,如果工具调用持有了某个锁(registry lock、连接池、文件句柄),取消信号要等工具自己释放 —— **这就是 CancelToken 死锁**。
+
+**grok 做法**(`xai-grok-tools/src/bridge.rs:53-63`):terminal handle 存在**注册表锁外面**,cancel 不需要获取那个锁就能触发。
+
+**补到我们设计**(runtime 不变量):
+
+```python
+# 在 agent/executor.py 顶部加注释
+
+# ════════════════════════════════════════════════════════════════════════
+# 不变量(invariant):
+#
+# cancel(task_id) 必须能在不获取 tool 执行持有的任何锁的前提下,
+# 终止该 tool 的执行。如果违反此不变量,取消会"卡死"直到工具超时。
+#
+# 实践:
+#   - asyncio.CancelledError 在 ToolRegistry.execute 的所有 await 点
+#     都能传播,不调用任何阻塞 with-lock
+#   - subprocess 调用用 Popen() + .terminate(),不依赖 subprocess.run
+#   - long-running HTTP 请求在 cancel 时立刻关掉 aiohttp session
+# ════════════════════════════════════════════════════════════════════════
+```
+
+### 13.6 补丁 #6 — 取消要 kill 外部子进程 [Yes]
+
+**问题**:coroutine 被取消了,但它派生的 subprocess 还在跑(比如 `execute_python` 启动的 Python 进程)。
+
+**grok 做法**(`xai-grok-tools/src/bridge.rs:458-487`):取消时 kill 所有 session-owned 进程。
+
+**补到我们设计**:
+
+```python
+class TaskProcessRegistry:
+    """每个 task 拥有的外部进程登记表"""
+    
+    def register(self, task_id: str, pid: int, label: str):
+        self._procs[task_id].append((pid, label))
+    
+    async def kill_all(self, task_id: str):
+        """取消时调用,杀掉该 task 的所有子进程"""
+        for pid, label in self._procs.pop(task_id, []):
+            try:
+                os.killpg(os.getpgid(pid), SIGTERM)  # 杀进程组
+                logger.info(f"Killed {label} (pid={pid}) for task={task_id}")
+            except ProcessLookupError:
+                pass  # 已经退出
+    
+    async def cancel_task(self, task_id: str):
+        """取消 task 的完整流程"""
+        # 1. cancel asyncio 任务
+        self._tasks[task_id].cancel()
+        # 2. 杀子进程
+        await self.kill_all(task_id)
+        # 3. 保存 checkpoint
+        await self._checkpoints.save_for_task(task_id, trigger="on_cancel")
+        # 4. 更新状态
+        await self._update_status(task_id, "abandoned")
+```
+
+### 13.7 补丁 #7 — Human Outcome 拆 6 种 [Yes]
+
+**问题**:我们 §4.2 只设计了 4 个选项(retry/skip/modify/abort),把"用户取消"和"工具失败"混在一起。
+
+**grok 做法**(`ask_user_question/types.rs:119-137, 157-171`):用户动作和失败分开,每个用户动作都是**正常完成**而不是错误。
+
+**补到我们设计**:
+
+```python
+HumanOutcome = Literal[
+    # 用户接受 agent 的请求(提供了答案)
+    "accepted",            # 等同我们旧的"提供信息"
+    # 用户拒绝/取消(正常完成)
+    "rejected",            # 拒绝了 agent 的请求(我不要这个)
+    "cancelled",           # 用户主动关掉了对话(不等同于失败)
+    # 用户给了部分信息(可继续)
+    "partial",             # 给了一部分,agent 自己推断剩下的
+    "redirect",            # "你想问的是不是另一个问题?换成 X"
+    "skip",                # 跳过这个等待,agent 用已有信息继续
+    # 超时
+    "timeout",             # 等待超时
+    # 协议错误
+    "malformed_response",  # 用户响应格式不对
+    "transport_error",     # 用户响应传输失败
+]
+
+# 关键不变量:
+# HumanOutcome.cancelled 不计入 retry_count 和 escalation 阈值
+# 只有 tool_error / model_error 才计入
+```
+
+**批准绑定 checkpoint_id**(grok `exit_plan_mode/mod.rs:31-36`):
+
+```python
+@dataclass
+class ApprovalRequest:
+    request_id: str          # 唯一
+    checkpoint_id: str       # 必须指向具体的 checkpoint
+    plan_snapshot_hash: str  # SHA256 校验 — 用户审的是不是 agent 现在要执行的
+    action_payload: dict     # 具体要做什么
+
+# 用户批准后:
+# - 比对 plan_snapshot_hash,不一致就拒绝(防止 plan 已变但 UI 还显示老版本)
+# - 记录 approval_id 到 ExecutionContext.decisions
+```
+
+### 13.8 没补的(grok 也没有更强的)
+
+| grok 模式 | 我们评估 | 决定 |
+|---|---|---|
+| Turn lifecycle 三通道(done/abort/error) | 我们用 AgentEvent 流自然覆盖 | [No] 不补 |
+| Background task 跨 turn | DocMind 工具都是同步调用,不需要 | [No] 不补 |
+| Completion 需调用特定工具 | 没有外部可验证完成条件 | [Maybe] 后续 |
+| 权限模式(AcceptEdits/Auto/Plan) | 完整 permission engine 不在本轮 | [No] 不补 |
+
+### 13.9 补丁对原有 PR 顺序的影响
+
+文档第 7 节"迁移路径"需要追加两步:
+
+```
+PR 1: 数据模型 + 配置(原计划)
+PR 2: 错误分类(原计划,扩展到 22 种)
+PR 2.5 [新] Retry 引擎升级:加 jitter + 5 种 action + Retry-After 解析
+PR 3: Checkpoint(原计划)
+PR 3.5 [新] Circuit Breaker 状态机 + TaskProcessRegistry
+PR 4: 人工兜底(原计划,扩 6 种 human outcome + 批准绑 checkpoint_id)
+PR 5: 测试补全(原计划)
+```
+
+### 13.10 补丁对测试策略的增量要求
+
+| 新增测试 | 必测场景 |
+|---|---|
+| `test_retry_jitter.py` | 1000 次随机延迟,验证方差>0 且都在 [base*0.8, base*1.2] |
+| `test_retry_actions.py` | 验证 payload_too_large 触发 adapt_request,验证 auth_expired_refreshable 触发 refresh_auth,unreachable 触发 reset_transport |
+| `test_circuit_breaker.py` | Closed→Open 转换、冷却期到半开、探测成功恢复、探测失败继续熔断 |
+| `test_cancel_no_lock.py` | 工具持锁时 cancel 仍能在 100ms 内生效 |
+| `test_kill_subprocess.py` | 取消 task 后,所有子进程被 kill(pgrep 验证) |
+| `test_human_outcomes.py` | 6 种 outcome 各一个 case,验证 cancelled 不计入 escalation |
+| `test_approval_checkpoint.py` | 批准时校验 plan_snapshot_hash,不匹配就拒绝 |
+
+---
+
 ## 12. 一句话总结
 
 > **AI 生成的代码缺的不是 feature,是工程运行时设计。**
