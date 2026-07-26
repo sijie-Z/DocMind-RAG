@@ -111,6 +111,10 @@ class SSEService {
   }
 
   async post(endpoint: string, data: Record<string, unknown>): Promise<boolean> {
+    this.currentAbortController?.abort()
+    this.currentAbortController = new AbortController()
+    const signal = this.currentAbortController.signal
+
     const attemptRequest = async (attempt: number): Promise<boolean> => {
       this.setStatus('connecting')
       this.currentRetryCount = attempt
@@ -130,7 +134,8 @@ class SSEService {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify(data)
+          body: JSON.stringify(data),
+          signal,
         })
 
         if (!response.ok) {
@@ -172,6 +177,7 @@ class SSEService {
 
         let currentEventType: SSEMessage['type'] = 'chunk'
         for (;;) {
+          if (signal.aborted) { reader.cancel(); break }
           const { done, value } = await reader.read()
           if (done) break
 
@@ -215,6 +221,11 @@ class SSEService {
     }
 
     return attemptRequest(1)
+  }
+
+  abort() {
+    this.currentAbortController?.abort()
+    this.currentAbortController = null
   }
 
   disconnect() {
