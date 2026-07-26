@@ -602,10 +602,10 @@ class ToolRegistry:
         raw_str = str(raw).lower()
 
         # ── Retryable: timeout-class ──
-        if any(kw in raw_str for kw in ("timeout", "timed out", "deadline", "operation timed out")):
+        if any(kw in raw_str for kw in ("timeout", "timed out", "deadline", "operation timed out",
+                                          "no progress", "idle", "stalled", "stream hung")):
             # Distinguish ordinary timeout from idle (no progress) timeout
-            msg_lower = result.error.message.lower()
-            if any(kw in msg_lower for kw in ("no progress", "idle", "stalled", "stream hung")):
+            if any(kw in raw_str for kw in ("no progress", "idle", "stalled", "stream hung")):
                 result.error.code = "idle_timeout"
             else:
                 result.error.code = "timeout"
@@ -654,6 +654,13 @@ class ToolRegistry:
             result.error.code = "permission_denied"
             return
 
+        # ── Non-retryable: configuration ── (must check before "not found")
+        if any(kw in raw_str for kw in ("invalid config", "misconfigur", "bad model",
+                                          "model not found", "unknown model", "no such model",
+                                          "not supported", "disabled")):
+            result.error.code = "invalid_configuration"
+            return
+
         # ── Non-retryable: not found ──
         if any(kw in raw_str for kw in ("404", "not found", "notfound", "no such file",
                                           "document not found", "resource not found")):
@@ -671,7 +678,8 @@ class ToolRegistry:
                                           "context length", "maximum context length",
                                           "context window exceeded", "max tokens", "token limit",
                                           "reduce the length")):
-            if any(kw in raw_str for kw in ("context length", "context window", "maximum context")):
+            if any(kw in raw_str for kw in ("context length", "context window", "maximum context",
+                                              "reduce the length")):
                 result.error.code = "context_length_exceeded"
             else:
                 result.error.code = "payload_too_large"

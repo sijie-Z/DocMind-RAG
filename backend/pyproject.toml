@@ -42,6 +42,8 @@ ignore = [
     "SIM102",  # collapsible-if — readability preference
     "SIM105",  # suppressible-exception
     "E721",    # type-comparison — isinstance not always equivalent
+    "N818",    # exception-name-should-end-with-Error — test fixtures use FakeException
+    "UP035",   # deprecated-import (typing.Callable) — deferred to later pass
 ]
 
 [tool.ruff.format]
@@ -50,8 +52,8 @@ indent-style = "space"
 line-ending = "lf"
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["A", "SLF"]
-"app/models/*" = ["F821"]  # SQLAlchemy string-based relationship() references
+"tests/*" = ["A", "SLF", "N818"]
+"app/models/*" = ["F821", "F401"]  # SQLAlchemy string-based relationship() references; re-exports
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

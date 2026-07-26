@@ -8,8 +8,9 @@ Design contract (§2 in agent-reliability-design.md):
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Literal
+from typing import Literal
 
 RetryAction = Literal["repeat", "adapt_request", "reset_transport", "refresh_auth", "fatal"]
 
@@ -41,7 +42,7 @@ def compute_backoff(policy: RetryPolicy, attempt: int) -> float:
     if base <= 0:
         return 0.0
     jitter = random.uniform(-policy.jitter_ratio, policy.jitter_ratio)
-    return max(0.0, base * (1.0 + jitter))
+    return max(0.0, min(policy.max_delay_seconds, base * (1.0 + jitter)))
 
 
 # ── Policy registry ────────────────────────────────────────────────────

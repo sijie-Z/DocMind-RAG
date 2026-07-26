@@ -4,7 +4,8 @@ The Executor processes a Plan's steps in dependency order. For each step:
 1. Yield thinking event describing what will be done
 2. Call LLM with step context, instructing it to use the suggested tool
 3. Execute any tool calls, observe results
-4. On failure: retry with exponential backoff (up to max_retries_per_step)
+4. On failure: classify error → lookup retry policy → decide repeat/adapt/reset/refresh/fatal
+   Retry uses jittered exponential backoff (retry_policy.compute_backoff)
 5. Store results in WorkingMemory via MemoryBridge
 6. Update plan progress
 
@@ -22,10 +23,12 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from app.agent.config import AgentConfig
+from app.agent.escalation import EscalationConfig
 from app.agent.events import AgentEvent
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, PlanStep
 from app.agent.registry import tool_registry
+from app.agent.retry_policy import compute_backoff, get_policy
 from app.core.prometheus import (
     AGENT_EXECUTION_STEPS,
     AGENT_TOOL_CALLS,
@@ -87,6 +90,8 @@ class Executor:
         self._consecutive_low_gain: int = 0
         # Circuit breaker: skip steps after N consecutive failures
         self._consecutive_failures: int = 0
+        # Escalation counter: reset per request
+        self._escalation_config = EscalationConfig()
 
     def reset_for_request(self) -> None:
         """Clear per-request state so a reused Executor doesn't leak across calls."""
@@ -118,7 +123,7 @@ class Executor:
                 if not pending:
                     break
                 # Check if any pending step has a failed dependency — skip it
-                completed_ids = {s.id for s in plan.steps if s.status == "completed"}
+                {s.id for s in plan.steps if s.status == "completed"}
                 failed_ids = {s.id for s in plan.steps if s.status == "failed"}
                 for step in list(pending):
                     if any(dep in failed_ids for dep in step.dependencies):
@@ -336,30 +341,45 @@ class Executor:
         enable_thinking: bool,
         ctx=None,
     ) -> AsyncGenerator[AgentEvent, None]:
-        """Execute a single step with retry on failure.
+        """Execute a single step with retry governed by RetryPolicy.
 
-        Semantic-aware behaviour:
-            retry_strategy="auto_retry" (default) → retry with backoff
-            retry_strategy="ask_user"             → skip after 1 attempt
-            retry_strategy="skip"                 → skip immediately on first failure
-            fallback_tool set                     → try alternate tool after retries exhaust
+        Design contract (§2.3, §13.1-13.2 in agent-reliability-design.md):
+            Error → classify → lookup policy → decide repeat/adapt/reset/refresh/fatal
+            Retry uses jittered exponential backoff (compute_backoff).
+            After retry exhaustion, fallback_chain is tried in order.
         """
-        last_error = ""
+        last_error: str = ""
+        last_error_type: str = "unknown"
         max_attempts = 1 if step.retry_strategy in ("ask_user", "skip") else self.config.max_retries_per_step + 1
 
         for attempt in range(max_attempts):
             if attempt > 0:
                 step.retry_count = attempt
+                # ── Classify the last error → lookup policy → jittered backoff ──
+                policy = get_policy(last_error_type)
+                delay = compute_backoff(policy, attempt - 1)
                 yield AgentEvent(
                     type="thinking",
-                    content=f"重试步骤 (第 {attempt}/{self.config.max_retries_per_step} 次): {last_error[:100]}",
+                    content=(
+                        f"重试步骤 (第 {attempt}/{self.config.max_retries_per_step} 次)"
+                        f" — {last_error_type}: {last_error[:100]}"
+                    ),
                     thinking_type="correction",
                     plan_id=plan.id,
                     plan_step_id=step.id,
                     retry_attempt=attempt,
                     retry_hint=last_error[:200],
                 )
-                await asyncio.sleep(min(2.0, 0.5 * (2 ** (attempt - 1))))  # exponential backoff
+                if policy.action in ("reset_transport", "refresh_auth"):
+                    # Signal intent to executor that request/transport must be rebuilt
+                    yield AgentEvent(
+                        type="retry_hint",
+                        content=f"retry_action={policy.action}",
+                        plan_id=plan.id,
+                        plan_step_id=step.id,
+                        retry_attempt=attempt,
+                    )
+                await asyncio.sleep(delay)
 
             result_text = ""
             had_error = False
@@ -377,6 +397,9 @@ class Executor:
                 if event.type == "tool_error" or event.type == "error":
                     had_error = True
                     last_error = event.content
+                    # Capture error_type from the ToolResult when available
+                    if getattr(event, "error_type", None):
+                        last_error_type = event.error_type
                 elif event.type == "chunk":
                     result_text += event.content
                 yield event
@@ -387,7 +410,11 @@ class Executor:
                     step.result = result_text
                 return
 
-            # Skip retry for "skip" strategy — single attempt only
+            # ── Policy-driven early exit ──
+            policy = get_policy(last_error_type)
+            if not policy.retryable:
+                break  # Fatal — skip straight to fallback
+
             if had_error and step.retry_strategy == "skip":
                 break
 
@@ -613,11 +640,11 @@ class Executor:
                 plan_progress=plan.progress,
             )
 
-            # Execute tool (with timeout)
+            # Execute tool (with timeout + error classification)
             start = time.perf_counter()
             try:
-                result = await asyncio.wait_for(
-                    tool_registry.execute(
+                raw_result = await asyncio.wait_for(
+                    tool_registry.execute_detailed(
                         func.name,
                         args,
                         organization_id=organization_id,
@@ -628,7 +655,11 @@ class Executor:
                 elapsed = (time.perf_counter() - start) * 1000
                 AGENT_TOOL_LATENCY.observe(elapsed / 1000)
 
-                if result.startswith("Error:"):
+                # raw_result is ToolResult (execute_detailed always returns ToolResult)
+                result: str = str(raw_result)
+
+                if not raw_result.success:
+                    error_type = raw_result.error.code if raw_result.error else "unknown"
                     AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
                     yield AgentEvent(
                         type="tool_error",
@@ -638,8 +669,10 @@ class Executor:
                         tool_duration_ms=elapsed,
                         plan_id=plan.id,
                         plan_step_id=step.id,
+                        retry_attempt=getattr(step, "retry_count", 0),
+                        reflect_result=error_type,
                     )
-                    tool_results.append({"tool": func.name, "result": f"Error: {result}"})
+                    tool_results.append({"tool": func.name, "result": result, "error_type": error_type})
                 else:
                     AGENT_TOOL_CALLS.labels(tool=func.name, result="success").inc()
                     yield AgentEvent(

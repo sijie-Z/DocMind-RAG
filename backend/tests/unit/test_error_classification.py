@@ -2,8 +2,7 @@
 
 import pytest
 
-
-from app.agent.registry import ToolError, ToolResult
+from app.agent.registry import ToolResult
 
 
 class FakeException(Exception):
@@ -26,8 +25,9 @@ class FakeException(Exception):
 )
 def test_timeout_classification(raw_text, expected_code):
     result = ToolResult.fail("unknown", "call failed", raw=FakeException(raw_text))
-    from app.agent.registry import tool_registry
     import asyncio
+
+    from app.agent.registry import tool_registry
 
     async def apply():
         ctx = type("ctx", (), {"tool_name": "test", "arguments": {}, "entry": type("e", (), {"requires_auth": False})()})()
@@ -56,6 +56,7 @@ def test_timeout_classification(raw_text, expected_code):
 def test_connection_classification(raw_text, expected_code):
     result = ToolResult.fail("unknown", "connection failure", raw=FakeException(raw_text))
     import asyncio
+
     from app.agent.registry import tool_registry
 
     async def apply():
@@ -72,6 +73,7 @@ def test_connection_classification(raw_text, expected_code):
 def test_rate_limit():
     result = ToolResult.fail("unknown", "rate limited", raw=FakeException("429 too many requests"))
     import asyncio
+
     from app.agent.registry import tool_registry
 
     async def apply():
@@ -96,6 +98,7 @@ def test_rate_limit():
 def test_auth_classification(raw_text, expected_code):
     result = ToolResult.fail("unknown", "auth error", raw=FakeException(raw_text))
     import asyncio
+
     from app.agent.registry import tool_registry
 
     async def apply():
@@ -120,6 +123,7 @@ def test_auth_classification(raw_text, expected_code):
 def test_payload_context_classification(raw_text, expected_code):
     result = ToolResult.fail("unknown", "payload error", raw=FakeException(raw_text))
     import asyncio
+
     from app.agent.registry import tool_registry
 
     async def apply():
@@ -145,6 +149,7 @@ def test_payload_context_classification(raw_text, expected_code):
 def test_serialization_empty_classification(raw_text, expected_code):
     result = ToolResult.fail("unknown", "json error", raw=FakeException(raw_text))
     import asyncio
+
     from app.agent.registry import tool_registry
 
     async def apply():
@@ -161,6 +166,7 @@ def test_serialization_empty_classification(raw_text, expected_code):
 def test_doom_loop_detected():
     result = ToolResult.fail("unknown", "stuck", raw=FakeException("repetitive identical response detected"))
     import asyncio
+
     from app.agent.registry import tool_registry
 
     async def apply():
@@ -192,6 +198,7 @@ def test_doom_loop_detected():
 def test_remaining_classification(raw_text, expected_code):
     result = ToolResult.fail("unknown", "some error", raw=FakeException(raw_text))
     import asyncio
+
     from app.agent.registry import tool_registry
 
     async def apply():
@@ -209,6 +216,7 @@ def test_no_raw_leaves_original_code():
     result = ToolResult.fail("timeout", "already classified")
     # No raw attribute — hook should be a no-op
     import asyncio
+
     from app.agent.registry import tool_registry
 
     async def apply():

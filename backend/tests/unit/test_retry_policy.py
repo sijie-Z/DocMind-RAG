@@ -8,11 +8,10 @@ import pytest
 
 from app.agent.retry_policy import (
     RETRY_POLICIES,
+    RetryPolicy,
     compute_backoff,
     get_policy,
-    RetryPolicy,
 )
-
 
 # ── Classification ──────────────────────────────────────────────────────
 
@@ -60,7 +59,7 @@ def test_all_23_policies_covered():
     """Every error_type in ToolErrorType is represented."""
     assert len(RETRY_POLICIES) == 23
     # Verify no policy is missing action / max_retries
-    for k, p in RETRY_POLICIES.items():
+    for _k, p in RETRY_POLICIES.items():
         assert p.action in ("repeat", "adapt_request", "reset_transport", "refresh_auth", "fatal")
         assert isinstance(p.max_retries, int)
         assert p.max_retries >= 0
