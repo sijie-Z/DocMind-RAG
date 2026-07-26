@@ -1,7 +1,6 @@
 # backend/app/api/v1/endpoints/documents.py
 
 import asyncio
-import contextlib
 import hashlib
 import json
 import logging

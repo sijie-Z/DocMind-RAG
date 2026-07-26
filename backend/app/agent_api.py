@@ -42,7 +42,7 @@ if _missing:
     )
     raise SystemExit(1)
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
@@ -472,7 +472,7 @@ async def trace(req: AgentRequest, _: None = Depends(verify_agent_api_key)):
 
 
 @app.post("/plan")
-async def plan(req: AgentRequest):
+async def plan(req: AgentRequest, _: None = Depends(verify_agent_api_key)):
     """Run planner only, return decomposition."""
     result = await run_agent(
         query=req.query,
