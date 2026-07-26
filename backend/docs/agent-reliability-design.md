@@ -904,7 +904,7 @@ def compute_backoff(policy: RetryPolicy, attempt: int) -> float:
 | `refresh_auth` | 刷新凭证 | 401 → 重新拿 token 后重试 |
 | `fatal` | 不重试 | 业务逻辑错误 |
 
-**补到我们设计**(`RETRY_POLICIES` 字典):
+**补到我们设计**(`RETRY_POLICIES` 字典,实际 23 种):
 
 ```python
 @dataclass

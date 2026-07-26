@@ -25,8 +25,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 logging.disable(logging.CRITICAL)
 
-os.environ.setdefault("DEEPSEEK_API_KEY", "056beadf58874c58b9b7f121f4f3e7e6.un6ZXWawRWlfH6c3")
-os.environ.setdefault("DEEPSEEK_API_URL", "https://open.bigmodel.cn/api/paas/v4/")
+# API keys must be supplied via environment at startup.
+# Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+_missing = []
+for _k in ("DEEPSEEK_API_KEY", "DEEPSEEK_API_URL"):
+    if not os.environ.get(_k):
+        _missing.append(_k)
+if _missing:
+    print(
+        f"agent_api: FATAL — missing env vars: {', '.join(_missing)}\n"
+        f"  Set them before starting, e.g.:\n"
+        f"  export DEEPSEEK_API_KEY=sk-...\n"
+        f"  export DEEPSEEK_API_URL=https://api.openai.com/v1\n"
+        f"  (or use a local Ollama: export DEEPSEEK_API_URL=http://localhost:11434/v1)",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,7 +53,7 @@ from app.agent.loop import PERAgentLoop
 from app.core.step_runner import StepRunner
 from app.core.trace_logger import AgentTracer, TraceExporter
 
-LLM_MODEL = "glm-4-flash"
+LLM_MODEL = os.environ.get("AGENT_API_MODEL", "deepseek-v4-flash")
 AGENT_TIMEOUT = 90.0
 
 # Trace persistence
@@ -137,9 +151,18 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175",
+    ],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
 
