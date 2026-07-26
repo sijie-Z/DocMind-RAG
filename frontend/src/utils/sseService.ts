@@ -176,6 +176,7 @@ class SSEService {
         this.setStatus('connected')
 
         let currentEventType: SSEMessage['type'] = 'chunk'
+        let eventTypeSet = false
         for (;;) {
           if (signal.aborted) { reader.cancel(); break }
           const { done, value } = await reader.read()
@@ -188,6 +189,7 @@ class SSEService {
           for (const line of lines) {
             if (line.startsWith('event: ')) {
               currentEventType = line.slice(7).trim() as SSEMessage['type']
+              eventTypeSet = true
               continue
             }
             if (line.startsWith('data: ')) {
@@ -195,7 +197,10 @@ class SSEService {
               if (!jsonStr) continue
               try {
                 const parsed = JSON.parse(jsonStr) as SSEMessage
-                const data = { ...parsed, type: parsed.type || currentEventType } as SSEMessage
+                // event: line (SSE protocol) is authoritative over data.type
+                const resolvedType = (eventTypeSet ? currentEventType : parsed.type || currentEventType) as SSEMessage['type']
+                eventTypeSet = false
+                const data = { ...parsed, type: resolvedType } as SSEMessage
                 if (data.type === 'chunk' || data.type === 'thinking' || data.type === 'tool_call' || data.type === 'tool_result' || data.type === 'tool_error' || data.type === 'plan_start' || data.type === 'plan_step' || data.type === 'plan_complete' || data.type === 'reflection' || data.type === 'done' || data.type === 'retry' || data.type === 'debug') {
                   const handler = this.messageHandlers.get(data.type)
                   if (handler) handler(data as SSEMessage)
