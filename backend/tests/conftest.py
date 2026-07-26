@@ -1,5 +1,17 @@
 """Pytest 配置与公共 fixture。"""
 import os
+import sys
+
+# Fix sys.path: ensure .venv-test packages take priority over leaked hermes venv
+# (hermes venv's pydantic_core is incompatible with this Python version)
+_VENV_TEST = os.path.join(os.path.dirname(__file__), "..", ".venv-test", "Lib", "site-packages")
+_VENV_TEST = os.path.abspath(_VENV_TEST)
+if os.path.isdir(_VENV_TEST):
+    for _p in list(sys.path):
+        if "hermes-agent" in _p:
+            sys.path.remove(_p)
+    if _VENV_TEST not in sys.path:
+        sys.path.insert(0, _VENV_TEST)
 
 import pytest
 from fastapi.testclient import TestClient
