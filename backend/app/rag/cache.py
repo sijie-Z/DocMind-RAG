@@ -144,7 +144,7 @@ class SemanticCache:
         vec_str = ",".join(f"{v:.4f}" for v in embedding[:20])
         return hashlib.md5(vec_str.encode()).hexdigest()[:16]
 
-    async def get(self, query_embedding: list[float]) -> dict[str, Any] | None:
+    async def get(self, query_embedding: list[float], organization_id: int = 0) -> dict[str, Any] | None:
         """Find the most similar cached answer using sorted set candidates."""
         if not query_embedding:
             return None
@@ -153,6 +153,7 @@ class SemanticCache:
             if rc is None:
                 return None
 
+            org_prefix = f"org:{organization_id}:" if organization_id else ""
             query_score = self._quantize(query_embedding)
             candidates = await rc.zrangebyscore(
                 self.index_key,
@@ -168,6 +169,8 @@ class SemanticCache:
             for cache_key in candidates:
                 if isinstance(cache_key, bytes):
                     cache_key = cache_key.decode()
+                if org_prefix and org_prefix not in cache_key:
+                    continue
                 raw = await rc.get(cache_key)
                 if not raw:
                     await rc.zrem(self.index_key, cache_key)
@@ -187,7 +190,7 @@ class SemanticCache:
             logger.error(f"Semantic cache lookup failed: {e}")
             return None
 
-    async def set(self, query: str, embedding: list[float], answer: str, sources: list[dict] = None) -> None:
+    async def set(self, query: str, embedding: list[float], answer: str, sources: list[dict] = None, organization_id: int = 0) -> None:
         """Store a Q&A pair in the semantic cache."""
         if not embedding:
             return
@@ -196,7 +199,8 @@ class SemanticCache:
             if rc is None:
                 return
 
-            cache_key = f"{self.prefix}{self._hash_key(embedding)}"
+            org_prefix = f"org:{organization_id}:" if organization_id else ""
+            cache_key = f"{self.prefix}{org_prefix}{self._hash_key(embedding)}"
             data = {
                 "query": query,
                 "embedding": embedding,

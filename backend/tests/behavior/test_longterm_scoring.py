@@ -9,10 +9,7 @@ These tests verify the actual scoring against the doc.
 
 import math
 
-import pytest
-
 from app.services.memory_service import LongTermMemory, MemoryItem
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -41,12 +38,12 @@ class TestLongTermKeywordScoring:
         """Full-keyword-match item outscores a partial-match item."""
         ltm = LongTermMemory()
         ltm.add(make_item("财务报告 利润 增长", importance=0.5))
-        ltm.add(make_item("天气 不错", importance=0.5))
+        ltm.add(make_item("财务报告 预算", importance=0.5))
 
         results = ltm.search("财务报告 利润", top_k=5)
         assert len(results) == 2
-        # "财务报告 利润 增长" has tokens in common with query, "天气 不错" doesn't
-        assert "财务报告" in results[0].content
+        # Both overlap with "财务报告", but "财务报告 利润 增长" also overlaps with "利润"
+        assert "利润" in results[0].content
         assert results[0].content != results[1].content
 
     def test_zero_overlap_items_excluded(self):
