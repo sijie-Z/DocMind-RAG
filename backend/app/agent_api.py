@@ -166,6 +166,22 @@ app.add_middleware(
 )
 
 
+# ── API Key auth for port 8010 ─────────────────────────────────
+_AGENT_API_KEY = os.environ.get("AGENT_API_KEY", "")
+if _AGENT_API_KEY:
+    from fastapi import Header
+
+    async def verify_agent_api_key(x_api_key: str = Header(default="", alias="X-API-Key")) -> None:
+        import secrets
+
+        if not secrets.compare_digest(x_api_key, _AGENT_API_KEY):
+            raise HTTPException(status_code=403, detail="Invalid or missing X-API-Key header")
+else:
+    # No key configured — allow localhost-only access (CORS already restricts origins)
+    async def verify_agent_api_key() -> None:
+        pass
+
+
 # ── Orchestrator ─────────────────────────────────────────────
 
 async def run_agent(
@@ -332,7 +348,7 @@ async def health():
 
 
 @app.post("/eval")
-async def eval_benchmark(mode: str = "structured", layer: str = "l1"):
+async def eval_benchmark(mode: str = "structured", layer: str = "l1", _: None = Depends(verify_agent_api_key)):
     """Run benchmark evaluation, return aggregated metrics.
 
     Args:
@@ -414,7 +430,7 @@ async def eval_benchmark(mode: str = "structured", layer: str = "l1"):
 
 
 @app.post("/chat")
-async def chat(req: AgentRequest):
+async def chat(req: AgentRequest, _: None = Depends(verify_agent_api_key)):
     """Run agent, return answer + metrics (no full trace)."""
     result = await run_agent(
         query=req.query,
@@ -438,7 +454,7 @@ async def chat(req: AgentRequest):
 
 
 @app.post("/trace", response_model=TraceResponse)
-async def trace(req: AgentRequest):
+async def trace(req: AgentRequest, _: None = Depends(verify_agent_api_key)):
     """Run agent, return full execution trace."""
     result = await run_agent(
         query=req.query,
