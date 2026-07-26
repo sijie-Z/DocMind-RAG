@@ -29,14 +29,14 @@ class AISettings(BaseSettings):
     ENABLE_LOCAL_EMBEDDING: bool = False
     LOCAL_EMBEDDING_MODEL: str = "nomic-embed-text"
 
-    # Embedding
+    # Embedding — default to local Ollama (free); set env vars for paid API
     EMBEDDING_API_KEY: str | None = None
-    EMBEDDING_API_URL: str = "https://open.bigmodel.cn/api/paas/v4/"
+    EMBEDDING_API_URL: str = "http://localhost:11434/v1"
     EMBEDDING_BASE_URL: str | None = None
-    EMBEDDING_MODEL: str = "embedding-3"
+    EMBEDDING_MODEL: str = "nomic-embed-text"
 
     # Vector search
-    VECTOR_DIMENSION: int = 2048
+    VECTOR_DIMENSION: int = 768  # nomic-embed-text
     SIMILARITY_THRESHOLD: float = 0.7
     TOP_K_RESULTS: int = 10
 
@@ -59,9 +59,9 @@ class AISettings(BaseSettings):
     RERANK_USE_LOCAL: bool = True
     RERANK_LOCAL_MODEL: str = "BAAI/bge-reranker-base"
 
-    # Reranker API (supports alternate env var names) — fallback when local not available
+    # Reranker API fallback — None = disabled, only use local BGE
     RERANK_API_KEY: str | None = None
-    RERANK_API_URL: str | None = "https://open.bigmodel.cn/api/paas/v4/"
+    RERANK_API_URL: str | None = None
     RERANK_MODEL: str = "rerank"
 
     # Legacy reranker env var aliases
