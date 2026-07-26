@@ -729,18 +729,26 @@ async def get_conversation(
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: list[WebSocket] = []
+        self.active_connections: dict[int, list[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, user_id: int):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        self.active_connections.setdefault(user_id, []).append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+        for uid, conns in list(self.active_connections.items()):
+            if websocket in conns:
+                conns.remove(websocket)
+                if not conns:
+                    del self.active_connections[uid]
+                break
 
     async def send_personal_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)
+
+    async def broadcast_to_user(self, user_id: int, message: str):
+        for ws in self.active_connections.get(user_id, []):
+            await ws.send_text(message)
 
 
 manager = ConnectionManager()
@@ -788,7 +796,7 @@ async def websocket_endpoint(
         return
 
     # Accept the auth subprotocol so the client knows it was accepted
-    await manager.connect(websocket)
+    await manager.connect(websocket, user_id)
 
     try:
         while True:

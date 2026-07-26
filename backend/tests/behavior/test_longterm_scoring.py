@@ -45,7 +45,7 @@ class TestLongTermKeywordScoring:
 
         results = ltm.search("财务报告 利润", top_k=5)
         assert len(results) == 2
-        # "财务报告 利润 增长" shares more tokens with the query than "天气 不错"
+        # "财务报告 利润 增长" has tokens in common with query, "天气 不错" doesn't
         assert "财务报告" in results[0].content
         assert results[0].content != results[1].content
 
@@ -121,23 +121,22 @@ class TestLongTermSemanticScoring:
         """Semantic search ranks by vectors, not token overlap."""
         ltm = LongTermMemory()
 
-        # Item A: same text as query but random embedding
-        item_a = make_item("报销 流程 审批", embedding=[0.1, 0.0, 0.0], importance=0.5)
-        # Item B: different text but embedding very similar to query
-        item_b = make_item("财务 报告", embedding=[0.95, 0.0, 0.0], importance=0.5)
+        # Item A: low-sim embedding
+        item_a = make_item("报销 流程 审批", embedding=[0.1, 0.8, 0.3], importance=0.5)
+        # Item B: high-sim embedding
+        item_b = make_item("财务 报告", embedding=[0.95, 0.0, 0.3], importance=0.5)
 
         ltm.add(item_a)
         ltm.add(item_b)
 
-        # query embedding very close to item_b's embedding
         q_emb = [1.0, 0.0, 0.0]
         results = ltm.search_semantic(q_emb, top_k=2)
 
         assert len(results) >= 1
-        # Cosine(item_b, query) ≈ 0.95 vs Cosine(item_a, query) ≈ 0.1
+        # Cosine(item_b, query) ≈ 0.95 vs Cosine(item_a, query) ≈ 0.12
         if len(results) >= 2:
             assert results[0].content == item_b.content, (
-                f"语义相近的项应排前面, 但第一项是 {results[0].content}"
+                f"语义相近的项应排前面在, 但第一项是 {results[0].content}"
             )
 
     def test_below_threshold_items_are_excluded(self):
@@ -145,9 +144,9 @@ class TestLongTermSemanticScoring:
         ltm = LongTermMemory()
 
         ltm.add(make_item("北京 天气", embedding=[1.0, 0.0], importance=0.5))
-        ltm.add(make_item("财务 报告", embedding=[0.2, 0.0], importance=0.5))
+        ltm.add(make_item("财务 报告", embedding=[0.1, 0.9], importance=0.5))
 
-        q_emb = [1.0, 0.0]  # cosine with [0.2, 0.0] == 0.2 < 0.3 → excluded
+        q_emb = [1.0, 0.0]  # cosine with [0.1, 0.9] is 0.1 < 0.3 → excluded
         results = ltm.search_semantic(q_emb, top_k=5)
 
         assert len(results) == 1

@@ -133,9 +133,6 @@ async def upload_document(
                 db.add(org)
                 await db.flush()
                 org_id = org.id
-        if organization_id and organization_id.strip() and organization_id != 'undefined':
-            with contextlib.suppress(ValueError, TypeError):
-                org_id = int(organization_id)
 
         # 3. 解析标签为列表
         keywords_list = []
