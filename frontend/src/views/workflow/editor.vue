@@ -429,7 +429,7 @@
               </div>
               <div v-for="(param, idx) in (nodeData.outputParams || [])" :key="idx" class="flex items-center gap-2 mb-2">
                 <n-input v-model:value="param.name" placeholder="变量名" size="small" style="width:100px" />
-                <n-input v-model:value="'string'" disabled size="small" style="width:70px" />
+                <n-input :value="'string'" disabled size="small" style="width:70px" />
                 <n-input v-model:value="param.description" placeholder="描述（可选）" size="small" style="flex:1" />
                 <n-button size="tiny" text type="error" @click="removeLlmOutputParam(idx)"><template #icon><n-icon><CloseOutline /></n-icon></template></n-button>
               </div>
@@ -1485,11 +1485,11 @@ function addLlmInputParam() {
   params.push({ name: '', type: 'input', value: '' })
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
 }
-function removeLlmInputParam(idx: number) {
+function removeLlmInputParam(idx: number | string) {
   if (!selectedNode.value) return
   const data = selectedNode.value.data as any
   const params = [...(data.inputParams || [])]
-  params.splice(idx, 1)
+  params.splice(Number(idx), 1)
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
 }
 function addInputParam() {
@@ -1499,11 +1499,11 @@ function addInputParam() {
   params.push({ name: '', type: 'string', value: '' })
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
 }
-function removeInputParam(idx: number) {
+function removeInputParam(idx: number | string) {
   if (!selectedNode.value) return
   const data = selectedNode.value.data as any
   const params = [...(data.inputParams || [])]
-  params.splice(idx, 1)
+  params.splice(Number(idx), 1)
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
 }
 function addOutputParam() {
@@ -1513,11 +1513,11 @@ function addOutputParam() {
   params.push({ name: '', type: 'input', value: '' })
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
 }
-function removeOutputParam(idx: number) {
+function removeOutputParam(idx: number | string) {
   if (!selectedNode.value) return
   const data = selectedNode.value.data as any
   const params = [...(data.outputParams || [])]
-  params.splice(idx, 1)
+  params.splice(Number(idx), 1)
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
 }
 
@@ -1529,11 +1529,11 @@ function addLlmOutputParam() {
   params.push({ name: '', type: 'string', description: '' })
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
 }
-function removeLlmOutputParam(idx: number) {
+function removeLlmOutputParam(idx: number | string) {
   if (!selectedNode.value) return
   const data = selectedNode.value.data as any
   const params = [...(data.outputParams || [])]
-  params.splice(idx, 1)
+  params.splice(Number(idx), 1)
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
 }
 
@@ -1545,11 +1545,11 @@ function addTtsInputParam() {
   params.push({ name: '', type: 'input', value: '' })
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
 }
-function removeTtsInputParam(idx: number) {
+function removeTtsInputParam(idx: number | string) {
   if (!selectedNode.value) return
   const data = selectedNode.value.data as any
   const params = [...(data.inputParams || [])]
-  params.splice(idx, 1)
+  params.splice(Number(idx), 1)
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
 }
 function addTtsOutputParam() {
@@ -1559,11 +1559,11 @@ function addTtsOutputParam() {
   params.push({ name: '', value: '' })
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
 }
-function removeTtsOutputParam(idx: number) {
+function removeTtsOutputParam(idx: number | string) {
   if (!selectedNode.value) return
   const data = selectedNode.value.data as any
   const params = [...(data.outputParams || [])]
-  params.splice(idx, 1)
+  params.splice(Number(idx), 1)
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
 }
 
