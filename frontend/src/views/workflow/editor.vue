@@ -1485,7 +1485,7 @@ function addLlmInputParam() {
   params.push({ name: '', type: 'input', value: '' })
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
 }
-function removeLlmInputParam(idx: number | string) {
+function removeLlmInputParam(idx: number) {
   if (!selectedNode.value) return
   const data = selectedNode.value.data as any
   const params = [...(data.inputParams || [])]
@@ -1499,7 +1499,7 @@ function addInputParam() {
   params.push({ name: '', type: 'string', value: '' })
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
 }
-function removeInputParam(idx: number | string) {
+function removeInputParam(idx: number) {
   if (!selectedNode.value) return
   const data = selectedNode.value.data as any
   const params = [...(data.inputParams || [])]
@@ -1513,7 +1513,7 @@ function addOutputParam() {
   params.push({ name: '', type: 'input', value: '' })
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
 }
-function removeOutputParam(idx: number | string) {
+function removeOutputParam(idx: number) {
   if (!selectedNode.value) return
   const data = selectedNode.value.data as any
   const params = [...(data.outputParams || [])]
@@ -1529,7 +1529,7 @@ function addLlmOutputParam() {
   params.push({ name: '', type: 'string', description: '' })
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
 }
-function removeLlmOutputParam(idx: number | string) {
+function removeLlmOutputParam(idx: number) {
   if (!selectedNode.value) return
   const data = selectedNode.value.data as any
   const params = [...(data.outputParams || [])]
@@ -1545,7 +1545,7 @@ function addTtsInputParam() {
   params.push({ name: '', type: 'input', value: '' })
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, inputParams: params })
 }
-function removeTtsInputParam(idx: number | string) {
+function removeTtsInputParam(idx: number) {
   if (!selectedNode.value) return
   const data = selectedNode.value.data as any
   const params = [...(data.inputParams || [])]
@@ -1559,7 +1559,7 @@ function addTtsOutputParam() {
   params.push({ name: '', value: '' })
   workflowStore.updateNodeData(selectedNode.value.id, { ...data, outputParams: params })
 }
-function removeTtsOutputParam(idx: number | string) {
+function removeTtsOutputParam(idx: number) {
   if (!selectedNode.value) return
   const data = selectedNode.value.data as any
   const params = [...(data.outputParams || [])]
