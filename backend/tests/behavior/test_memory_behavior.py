@@ -5,19 +5,16 @@ internal methods are called.  The doc in backend/docs/memory_system.md is the
 truth reference for field names, default sizes, and scoring formulas.
 """
 
-import math
 
 import pytest
 
 from app.services.memory_service import (
     AgentMemorySystem,
-    LongTermMemory,
     MemoryItem,
     ReflectiveMemory,
     ShortTermMemory,
     WorkingMemory,
 )
-
 
 # ── ShortTermMemory behavior ────────────────────────────────────────────────
 
