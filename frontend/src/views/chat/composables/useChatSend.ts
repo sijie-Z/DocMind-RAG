@@ -307,6 +307,13 @@ export function useChatSend(
     await handleSend()
   }
 
+  const stopGeneration = () => {
+    sseService.abort()
+    wsService.sendStop()
+    isLoading.value = false
+    isRetrieving.value = false
+  }
+
   return {
     inputMessage,
     strictMode,
@@ -314,6 +321,7 @@ export function useChatSend(
     handleSend,
     handleSSESend,
     handleKeydown,
-    regenerateMessage
+    regenerateMessage,
+    stopGeneration,
   }
 }
