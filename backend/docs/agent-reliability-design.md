@@ -1154,9 +1154,9 @@ class ApprovalRequest:
 文档第 7 节"迁移路径"需要追加两步:
 
 ```
-PR 1: 数据模型 + 配置(原计划)
-PR 2: 错误分类(原计划,扩展到 22 种)
-PR 2.5 [新] Retry 引擎升级:加 jitter + 5 种 action + Retry-After 解析
+PR 1: 数据模型 + 配置 ✓
+PR 2: 错误分类(扩展到 23 种) ✓
+PR 2.5 [新] Retry 引擎升级:加 jitter + 5 种 action ✓
 PR 3: Checkpoint(原计划)
 PR 3.5 [新] Circuit Breaker 状态机 + TaskProcessRegistry
 PR 4: 人工兜底(原计划,扩 6 种 human outcome + 批准绑 checkpoint_id)
