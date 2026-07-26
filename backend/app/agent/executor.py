@@ -88,6 +88,12 @@ class Executor:
         # Circuit breaker: skip steps after N consecutive failures
         self._consecutive_failures: int = 0
 
+    def reset_for_request(self) -> None:
+        """Clear per-request state so a reused Executor doesn't leak across calls."""
+        self._seen_fingerprints.clear()
+        self._consecutive_low_gain = 0
+        self._consecutive_failures = 0
+
     async def execute(
         self,
         plan: Plan,
@@ -111,6 +117,20 @@ class Executor:
                 pending = [s for s in plan.steps if s.status == "pending"]
                 if not pending:
                     break
+                # Check if any pending step has a failed dependency — skip it
+                completed_ids = {s.id for s in plan.steps if s.status == "completed"}
+                failed_ids = {s.id for s in plan.steps if s.status == "failed"}
+                for step in list(pending):
+                    if any(dep in failed_ids for dep in step.dependencies):
+                        step.status = "skipped"
+                        pending.remove(step)
+                        yield AgentEvent(
+                            type="thinking",
+                            content=f"跳过步骤（前置步骤失败）: {step.description}",
+                            thinking_type="evaluation",
+                            plan_id=plan.id,
+                            plan_step_id=step.id,
+                        )
                 step = pending[0]
                 async for event in self._execute_single_step(
                     step, plan, history, organization_id, user_id, enable_thinking, ctx=ctx,
@@ -374,52 +394,61 @@ class Executor:
             if had_error and attempt < max_attempts - 1:
                 continue  # retry
 
-        # ── Retries exhausted — try fallback_tool if available ──
-        if had_error and step.fallback_tool and step.retry_strategy != "skip":
-            logger.info(
-                "Retries exhausted for step %s, trying fallback tool '%s'",
-                step.id, step.fallback_tool,
-            )
-            yield AgentEvent(
-                type="thinking",
-                content=f"主工具失败，尝试备用工具 {step.fallback_tool}...",
-                thinking_type="correction",
-                plan_id=plan.id,
-                plan_step_id=step.id,
-                retry_attempt=step.retry_count + 1,
-                retry_hint=f"fallback: {step.fallback_tool}",
-            )
+        # ── Retries exhausted — apply fallback_chain if configured ──
+        # fallback_chain (v2) takes precedence over legacy fallback_tool.
+        # Design contract §2.4 in agent-reliability-design.md.
 
-            # Temporarily swap the tool hint and re-run once
-            original_hint = step.tool_hint
-            step.tool_hint = step.fallback_tool
-            step.retry_count = 0  # fresh start for fallback
+        fallback_tools: list[str] = []
+        if getattr(step, "fallback_chain", None):
+            fallback_tools = list(step.fallback_chain)
+        elif step.fallback_tool:
+            fallback_tools = [step.fallback_tool]
 
-            fallback_had_error = False
-            async for event in self._execute_step_once(
-                step=step,
-                plan=plan,
-                history=history,
-                organization_id=organization_id,
-                user_id=user_id,
-                enable_thinking=enable_thinking,
-                error_context=f"主工具失败，尝试备用工具: {last_error[:200]}",
-                ctx=ctx,
-            ):
-                if event.type == "tool_error" or event.type == "error":
-                    fallback_had_error = True
-                    last_error = event.content
-                elif event.type == "chunk":
-                    result_text += event.content
-                yield event
+        if had_error and fallback_tools and step.retry_strategy != "skip":
+            for idx, fb_tool in enumerate(fallback_tools):
+                logger.info(
+                    "Retries exhausted for step %s, trying fallback #%d '%s'",
+                    step.id, idx + 1, fb_tool,
+                )
+                yield AgentEvent(
+                    type="thinking",
+                    content=f"主工具失败，尝试备用工具 #{idx+1} {fb_tool}...",
+                    thinking_type="correction",
+                    plan_id=plan.id,
+                    plan_step_id=step.id,
+                    retry_attempt=step.retry_count + idx + 1,
+                    retry_hint=f"fallback: {fb_tool}",
+                )
 
-            if not fallback_had_error and result_text:
-                step.result = result_text
-                step.tool_hint = original_hint  # restore for consistency
-                return
+                original_hint = step.tool_hint
+                step.tool_hint = fb_tool
+                step.retry_count = 0
 
-            # Fallback also failed — restore original hint and fall through
-            step.tool_hint = original_hint
+                fb_had_error = False
+                async for event in self._execute_step_once(
+                    step=step,
+                    plan=plan,
+                    history=history,
+                    organization_id=organization_id,
+                    user_id=user_id,
+                    enable_thinking=enable_thinking,
+                    error_context=f"主工具失败，尝试备用工具 {fb_tool}: {last_error[:200]}",
+                    ctx=ctx,
+                ):
+                    if event.type == "tool_error" or event.type == "error":
+                        fb_had_error = True
+                        last_error = event.content
+                    elif event.type == "chunk":
+                        result_text += event.content
+                    yield event
+
+                step.tool_hint = original_hint
+                if not fb_had_error and result_text:
+                    step.result = result_text
+                    return  # fallback succeeded, done
+
+            # All fallbacks failed — restore and continue to graceful degradation
+            logger.warning("All %d fallback tools exhausted for step %s", len(fallback_tools), step.id)
 
         # All retries exhausted — graceful degradation
         step.status = "failed"

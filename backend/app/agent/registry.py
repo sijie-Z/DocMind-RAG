@@ -40,7 +40,7 @@ import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +52,39 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ToolError:
-    """Structured error information returned by a tool."""
-    code: str          # machine-readable: "token_expired" | "rate_limited" | "timeout" | "api_error" | "permission_denied" | "not_found" | "validation_error" | "unknown"
+    """Structured error information returned by a tool.
+
+    code: one of 23 ToolErrorType literals (§13.3 agent-reliability-design.md)
+    """
+
+    # ── Union of all known error types ──────────────────────────────────
+    ToolErrorType = Literal[
+        "timeout",
+        "rate_limited",
+        "api_error",
+        "connection_error",
+        "not_found",
+        "permission_denied",
+        "validation_error",
+        "auth_expired",
+        "budget_exceeded",
+        "ambiguous_input",
+        "unreachable",
+        "interrupted",
+        "permanent_transport_error",
+        "empty_response",
+        "idle_timeout",
+        "serialization_error",
+        "context_length_exceeded",
+        "max_tokens_truncation",
+        "payload_too_large",
+        "image_processing_error",
+        "doom_loop_detected",
+        "invalid_configuration",
+        "unknown",  # fallback — never test against this, always classify
+    ]
+
+    code: ToolErrorType  # restructured — must be one of above
     message: str       # human-readable (Chinese preferred)
     raw: Any = None    # original exception / API error body for debugging
 
@@ -553,10 +584,13 @@ class ToolRegistry:
             logger.debug("Tool '%s' requires auth via '%s'", ctx.tool_name, ctx.entry.auth_handler)
 
     async def _builtin_error_mapper_hook(self, result: ToolResult, ctx: HookContext) -> None:
-        """Post-hook: map raw exception types to standardised error codes.
+        """Post-hook: map raw exception types to 23 standardised ToolErrorType codes.
 
-        This is a lightweight mapper for common cases. Tools with custom
-        error handling should return their own ToolResult directly.
+        Classifies into retryable (timeout/rate/unreachable/interrupted),
+        non-retryable (not_found/perm/validation/empty/payload...),
+        and unknown fallback.
+
+        Tools with custom error handling should return their own ToolResult directly.
         """
         if result.success or not result.error:
             return
@@ -567,35 +601,129 @@ class ToolRegistry:
 
         raw_str = str(raw).lower()
 
-        # Timeout detection
-        if any(kw in raw_str for kw in ("timeout", "timed out", "deadline")):
-            result.error.code = "timeout"
+        # ── Retryable: timeout-class ──
+        if any(kw in raw_str for kw in ("timeout", "timed out", "deadline", "operation timed out")):
+            # Distinguish ordinary timeout from idle (no progress) timeout
+            msg_lower = result.error.message.lower()
+            if any(kw in msg_lower for kw in ("no progress", "idle", "stalled", "stream hung")):
+                result.error.code = "idle_timeout"
+            else:
+                result.error.code = "timeout"
             if "超时" not in result.error.message:
                 result.error.message = f"API 调用超时: {result.error.message}"
             return
 
-        # Connection / network errors
-        if any(kw in raw_str for kw in ("connection", "connectionrefused", "connectionerror", "econnrefused")):
-            result.error.code = "connection_error"
-            result.error.message = f"网络连接失败: {result.error.message}"
-            return
-
-        # Rate limiting
+        # ── Retryable: rate limit ──
         if any(kw in raw_str for kw in ("rate limit", "rate_limit", "too many requests", "429")):
             result.error.code = "rate_limited"
             result.error.message = f"请求频率超限: {result.error.message}"
             return
 
-        # Token / auth errors
-        if any(kw in raw_str for kw in ("token", "401", "unauthorized", "unauthenticated")):
-            if result.error.code == "unknown":
-                result.error.code = "auth_error"
+        # ── Retryable: connection / network ──
+        if any(kw in raw_str for kw in ("connectionrefused", "econnrefused", "connection refused",
+                                          "cannot assign requested address", "network is unreachable",
+                                          "getaddrinfo failed", "no route to host")):
+            result.error.code = "unreachable"
+            result.error.message = f"无法连接目标服务: {result.error.message}"
             return
 
-        # Not found
-        if any(kw in raw_str for kw in ("404", "not found", "notfound")):
-            if result.error.code == "unknown":
-                result.error.code = "not_found"
+        if any(kw in raw_str for kw in ("connection reset", "connectionreset", "econnreset",
+                                          "broken pipe", "connection aborted", "incomplete read")):
+            result.error.code = "interrupted"
+            result.error.message = f"连接中断: {result.error.message}"
+            return
+
+        # Generic connection — fallback to classification by message
+        if any(kw in raw_str for kw in ("connection", "network", "socket", "transport error")):
+            result.error.code = "connection_error"
+            result.error.message = f"网络连接失败: {result.error.message}"
+            return
+
+        # ── Non-retryable: auth ──
+        if any(kw in raw_str for kw in ("401", "unauthorized", "unauthenticated", "invalid api key",
+                                          "incorrect api key", "token expired", "token revoked")):
+            if any(kw in raw_str for kw in ("refresh", "renew", "grant type", "token expired")):
+                result.error.code = "auth_expired_refreshable"
+            else:
+                result.error.code = "auth_expired"
+            return
+
+        # ── Non-retryable: permission ──
+        if any(kw in raw_str for kw in ("403", "forbidden", "permission", "access denied",
+                                          "not allowed", "insufficient_quota")):
+            result.error.code = "permission_denied"
+            return
+
+        # ── Non-retryable: not found ──
+        if any(kw in raw_str for kw in ("404", "not found", "notfound", "no such file",
+                                          "document not found", "resource not found")):
+            result.error.code = "not_found"
+            return
+
+        # ── Non-retryable: validation / input ──
+        if any(kw in raw_str for kw in ("400", "validation", "invalid parameter", "bad request",
+                                          "missing required", "out of range")):
+            result.error.code = "validation_error"
+            return
+
+        # ── Non-retryable: payload / context length ──
+        if any(kw in raw_str for kw in ("413", "payload too large", "request entity too large",
+                                          "context length", "maximum context length",
+                                          "context window exceeded", "max tokens", "token limit",
+                                          "reduce the length")):
+            if any(kw in raw_str for kw in ("context length", "context window", "maximum context")):
+                result.error.code = "context_length_exceeded"
+            else:
+                result.error.code = "payload_too_large"
+            return
+
+        # ── Non-retryable: empty / malformed ──
+        if any(kw in raw_str for kw in ("jsondecode", "json parse", "malformed", "unexpected token",
+                                          "invalid json", "cannot parse", "deserialization")):
+            result.error.code = "serialization_error"
+            return
+
+        if any(kw in raw_str for kw in ("empty response", "null response", "no content",
+                                          "returned nothing", "no choice", "no completion")):
+            result.error.code = "empty_response"
+            return
+
+        # ── Non-retryable: truncation ──
+        if any(kw in raw_str for kw in ("truncat", "finish_reason", "stop reason", "max_tokens",
+                                          "output limit", "length")):
+            if any(kw in raw_str for kw in ("truncat", "max_tokens", "output limit")):
+                result.error.code = "max_tokens_truncation"
+                return
+
+        # ── Non-retryable: internal / permanent ──
+        if any(kw in raw_str for kw in ("500", "internal server error", "internal error",
+                                          "service unavailable", "503", "server error")):
+            result.error.code = "api_error"
+            return
+
+        # ── Non-retryable: budget ──
+        if any(kw in raw_str for kw in ("billing", "budget", "quota exceeded", "insufficient funds",
+                                          "account balance", "payment required", "402")):
+            result.error.code = "budget_exceeded"
+            return
+
+        # ── Non-retryable: repeated failure (doom loop) ──
+        if any(kw in raw_str for kw in ("repetitive", "doom loop", "stuck in loop",
+                                          "identical response", "no variation")):
+            result.error.code = "doom_loop_detected"
+            return
+
+        # ── Non-retryable: configuration ──
+        if any(kw in raw_str for kw in ("invalid config", "misconfigur", "bad model",
+                                          "model not found", "unknown model", "no such model",
+                                          "not supported", "disabled")):
+            result.error.code = "invalid_configuration"
+            return
+
+        # ── Image / multimodal ──
+        if any(kw in raw_str for kw in ("image", "multipart", "attachment", "media",
+                                          "unsupported format", "resolution")):
+            result.error.code = "image_processing_error"
             return
 
 

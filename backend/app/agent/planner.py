@@ -141,14 +141,18 @@ class Plan:
         return all(s.status in ("completed", "skipped", "failed") for s in self.steps)
 
     def get_ready_steps(self) -> list[PlanStep]:
-        """Return steps whose dependencies are all satisfied."""
+        """Return steps whose dependencies are all satisfied or failed."""
         completed_ids = {s.id for s in self.steps if s.status == "completed"}
+        failed_ids = {s.id for s in self.steps if s.status in ("failed", "skipped")}
         ready = []
         for step in self.steps:
             if step.status != "pending":
                 continue
             if all(dep in completed_ids for dep in step.dependencies):
                 ready.append(step)
+            elif any(dep in failed_ids for dep in step.dependencies):
+                # Dependency failed — skip this step automatically
+                step.status = "skipped"
         return ready
 
 
@@ -199,7 +203,11 @@ class Planner:
             for step in structured_plan.steps:
                 yield AgentEvent(type="plan_step", plan_id=plan_id, plan_step_id=step.id,
                                  content=step.description, dependencies=step.dependencies,
-                                 tool_hint=step.tool_hint or "", plan_progress=0.0)
+                                 tool_hint=step.tool_hint or "", plan_progress=0.0,
+                                 parallel_group=step.parallel_group,
+                                 risk_level=step.risk_level,
+                                 retry_strategy=step.retry_strategy,
+                                 fallback_tool=step.fallback_tool)
                 await asyncio.sleep(0.005)
             yield AgentEvent(type="plan_complete", plan_id=plan_id,
                              content=f"计划已生成: {structured_plan.total_steps} 个步骤", plan_progress=0.0)
@@ -336,6 +344,10 @@ class Planner:
                     dependencies=step.dependencies,
                     tool_hint=step.tool_hint or "",
                     plan_progress=0.0,
+                    parallel_group=step.parallel_group,
+                    risk_level=step.risk_level,
+                    retry_strategy=step.retry_strategy,
+                    fallback_tool=step.fallback_tool,
                 )
                 await asyncio.sleep(0.005)
 

@@ -253,6 +253,10 @@ class PERAgentLoop:
                         description=event.content,
                         dependencies=event.dependencies or [],
                         tool_hint=event.tool_hint or None,
+                        parallel_group=event.parallel_group,
+                        risk_level=event.risk_level or "low",
+                        retry_strategy=event.retry_strategy or "auto_retry",
+                        fallback_tool=event.fallback_tool,
                     ))
                 elif event.type == "plan_complete":
                     plan_goal = event.plan_id
@@ -292,6 +296,7 @@ class PERAgentLoop:
         final_output = ""
 
         if self.config.enable_tools:
+            self.executor.reset_for_request()
             async for event in self.executor.execute(
                 plan=plan,
                 history=history,

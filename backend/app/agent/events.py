@@ -63,6 +63,12 @@ class AgentEvent:
     tool_hint: str = ""
     plan_step_status: str = ""
 
+    # Semantic fields (v1 — must survive event round-trip)
+    parallel_group: int | None = None
+    risk_level: str = "low"
+    retry_strategy: str = "auto_retry"
+    fallback_tool: str | None = None
+
     # Thinking
     thinking_type: ThinkingType = "reasoning"
 
@@ -103,6 +109,15 @@ class AgentEvent:
             d["tool_hint"] = self.tool_hint
         if self.plan_step_status:
             d["plan_step_status"] = self.plan_step_status
+
+        if self.parallel_group is not None:
+            d["parallel_group"] = self.parallel_group
+        if self.risk_level != "low":
+            d["risk_level"] = self.risk_level
+        if self.retry_strategy != "auto_retry":
+            d["retry_strategy"] = self.retry_strategy
+        if self.fallback_tool is not None:
+            d["fallback_tool"] = self.fallback_tool
 
         if self.type == "thinking":
             d["thinking_type"] = self.thinking_type
