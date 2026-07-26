@@ -111,7 +111,7 @@ async def _save_all(configs: dict[str, dict[str, Any]]) -> None:
 
 async def _clear_default_for_provider(provider: str, configs: dict[str, dict[str, Any]]) -> None:
     """Unset is_default on all configs for the given provider."""
-    for cid, data in configs.items():
+    for _cid, data in configs.items():
         if data.get("provider") == provider:
             data["is_default"] = False
 
@@ -128,7 +128,6 @@ async def list_configs(
     Query params:
         provider: filter by provider (optional)
     """
-    from fastapi import Query
 
     all_configs = await _load_all()
     configs = list(all_configs.values())

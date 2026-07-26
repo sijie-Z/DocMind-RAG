@@ -12,13 +12,17 @@ Usage:
       -H "Content-Type: application/json" \
       -d '{"query": "对比星辰科技和远方创新的财务表现", "mode": "structured"}'
 """
-import os, sys, json, asyncio, time, uuid, logging
-from datetime import datetime, timezone
+import json
+import logging
+import os
+import sys
+import time
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 # ── Bootstrap ────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import logging
 logging.disable(logging.CRITICAL)
 
 os.environ.setdefault("DEEPSEEK_API_KEY", "056beadf58874c58b9b7f121f4f3e7e6.un6ZXWawRWlfH6c3")
@@ -26,15 +30,14 @@ os.environ.setdefault("DEEPSEEK_API_URL", "https://open.bigmodel.cn/api/paas/v4/
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 from openai import AsyncOpenAI
-from app.agent.config import AgentConfig
-from app.agent.loop import PERAgentLoop
-from app.agent.planner import Plan, PlanStep
-from app.core.step_runner import StepRunner, safe_run, StepResult, StepError
-from app.core.trace_logger import AgentTracer, TraceExporter
+from pydantic import BaseModel, Field
 
 import app.agent.service  # noqa: F401 — register tools
+from app.agent.config import AgentConfig
+from app.agent.loop import PERAgentLoop
+from app.core.step_runner import StepRunner
+from app.core.trace_logger import AgentTracer, TraceExporter
 
 LLM_MODEL = "glm-4-flash"
 AGENT_TIMEOUT = 90.0
@@ -69,7 +72,7 @@ def _log_request(
         "coverage": round(coverage, 3),
         "steps": steps,
         "tool_calls": tool_calls,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
     try:
         with open(_request_log_path, "a", encoding="utf-8") as f:
@@ -328,7 +331,7 @@ async def eval_benchmark(mode: str = "structured", layer: str = "l1"):
     results: list[dict] = []
     start = time.perf_counter()
 
-    for i, q in enumerate(questions):
+    for _i, q in enumerate(questions):
         try:
             r = await run_agent(
                 query=q["question"],
@@ -411,7 +414,7 @@ async def chat(req: AgentRequest):
     return result
 
 
-@app.post("/trace")
+@app.post("/trace", response_model=TraceResponse)
 async def trace(req: AgentRequest):
     """Run agent, return full execution trace."""
     result = await run_agent(
@@ -427,16 +430,6 @@ async def trace(req: AgentRequest):
         steps=result.get("steps", 0), tool_calls=result.get("tool_calls", 0),
     )
     return result
-
-
-@app.post("/trace", response_model=TraceResponse)
-async def trace(req: AgentRequest):
-    """Run agent, return full execution trace."""
-    return await run_agent(
-        query=req.query,
-        mode=req.mode,
-        expected_keywords=req.expected_keywords,
-    )
 
 
 @app.post("/plan")

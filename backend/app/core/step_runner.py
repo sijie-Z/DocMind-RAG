@@ -5,11 +5,12 @@ agent execution (LLM calls, tool executions, retrieval) should go through
 StepRunner to ensure bounded execution time and predictable failure behavior.
 """
 import asyncio
+import builtins
 import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ class StepError(Exception):
         self.recoverable = recoverable
 
 
-class TimeoutError(StepError):
+class StepTimeoutError(StepError):
     def __init__(self, message: str = "Step timed out"):
         super().__init__(message, error_type="timeout", recoverable=True)
 
@@ -127,8 +128,8 @@ class StepRunner:
                     step_id=self.step_id,
                 )
 
-            except asyncio.TimeoutError:
-                last_error = TimeoutError(
+            except builtins.TimeoutError:
+                last_error = StepTimeoutError(
                     f"Step timed out after {self.timeout}s (attempt {attempt + 1}/{self.max_retries + 1})"
                 )
                 logger.warning("[%s] timeout on attempt %d/%d", self.step_id, attempt + 1, self.max_retries + 1)
@@ -165,7 +166,7 @@ class StepRunner:
                     attempts=attempts,
                     step_id=self.step_id,
                 )
-            except Exception as fb_error:
+            except Exception:
                 pass  # fallback also failed → return original error
 
         latency = time.perf_counter() - start

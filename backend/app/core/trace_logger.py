@@ -29,8 +29,8 @@ Schema:
 import json
 import logging
 import time
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -77,7 +77,7 @@ class AgentTrace:
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         if not d["timestamp"]:
-            d["timestamp"] = datetime.now(timezone.utc).isoformat()
+            d["timestamp"] = datetime.now(UTC).isoformat()
         return d
 
 
@@ -163,7 +163,7 @@ class AgentTracer:
             answer_preview=answer[:300],
             coverage=coverage,
             tool_call_count=self._tool_call_count,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
 
 
