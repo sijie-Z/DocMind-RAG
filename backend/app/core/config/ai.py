@@ -4,6 +4,24 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _auto_tier_defaults() -> dict[str, str]:
+    """Apply hardware-detected defaults for fields not explicitly set via env."""
+    try:
+        from app.core.hardware import detect as _detect
+
+        hw = _detect()
+    except Exception:
+        return {}
+    overrides: dict[str, str] = {}
+    for field, attr, env_var in [
+        ("EMBEDDING_MODEL", "embedding_model", "EMBEDDING_MODEL"),
+        ("VECTOR_DIMENSION", "vector_dim", "VECTOR_DIMENSION"),
+    ]:
+        if env_var not in __import__("os").environ:
+            overrides[field] = str(getattr(hw, attr))
+    return overrides
+
+
 class AISettings(BaseSettings):
     """AI model, embedding, reranker, vector, and RAG pipeline settings."""
 
