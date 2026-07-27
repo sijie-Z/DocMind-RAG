@@ -261,8 +261,8 @@ async def execute_python(code: str, **_: Any) -> str:
         if isinstance(node, _ast.Call) and isinstance(node.func, _ast.Name):
             if node.func.id in _FORBIDDEN_CALLS:
                 return f"Error: calling '{node.func.id}()' is not allowed in sandbox."
-        if isinstance(node, _ast.Attribute):
-            return "Error: attribute access (e.g. obj.attr) is not allowed in sandbox."
+        if isinstance(node, _ast.Attribute) and node.attr.startswith("__"):
+            return "Error: dunder attribute access is not allowed in sandbox."
 
     # Build safe globals — no __builtins__ escape hatch
     safe_globals = {"__builtins__": {}}

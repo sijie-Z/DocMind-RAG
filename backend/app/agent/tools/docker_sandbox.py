@@ -20,16 +20,17 @@ _SANDBOX_IMAGE = os.environ.get("SANDBOX_DOCKER_IMAGE", "python:3.11-slim")
 
 
 def _docker_available() -> bool:
-    """Check if Docker is installed and the daemon is reachable."""
+    """Check if Docker daemon is installed and reachable."""
     if not shutil.which("docker"):
         return False
     try:
         import subprocess
 
-        subprocess.run(
-            ["docker", "info"], capture_output=True, timeout=3, check=True,
+        result = subprocess.run(
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            capture_output=True, timeout=3, text=True,
         )
-        return True
+        return result.returncode == 0 and result.stdout.strip() != ""
     except Exception:
         return False
 

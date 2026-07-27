@@ -46,7 +46,7 @@ jobs:
         run: |
           echo "SECRET_KEY=test-secret-key-for-pytest-only-32chars!" >> $GITHUB_ENV
           echo "JWT_SECRET_KEY=test-jwt-secret-key-for-pytest-only!" >> $GITHUB_ENV
-          echo "DATABASE_URL=mysql+aiomysql://root:***@localhost:3306/test_db" >> $GITHUB_ENV
+          echo "DATABASE_URL=sqlite+aiosqlite:///test.db" >> $GITHUB_ENV
           echo "REDIS_HOST=localhost" >> $GITHUB_ENV
           echo "REDIS_PORT=6379" >> $GITHUB_ENV
           echo "ELASTICSEARCH_HOSTS=[\"http://localhost:9200\"]" >> $GITHUB_ENV

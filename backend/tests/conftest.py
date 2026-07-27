@@ -31,6 +31,7 @@ _TEST_ENV = {
     "ENABLE_RATE_LIMIT": "false",
     "ENABLE_MONITORING": "false",
     "PROMETHEUS_ENABLED": "true",
+    "SANDBOX_MODE": "ast",  # force AST sandbox in tests (no Docker dependency)
 }
 
 # 应用测试环境变量
