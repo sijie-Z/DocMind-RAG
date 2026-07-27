@@ -190,7 +190,7 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  const updateSettings = async (data: { language?: string; theme?: string }) => {
+  const updateSettings = async (data: { language?: string; theme?: string; preferences?: Record<string, unknown> }) => {
     try {
       const response = await updateUserSettings(data)
       const resData = response.data as unknown as Record<string, unknown>

@@ -398,6 +398,27 @@
                       />
                     </div>
 
+                    <!-- AI Provider 设置 -->
+                    <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-4 mt-4">
+                      <div class="font-medium text-gray-800 dark:text-white">AI 模型设置</div>
+                      <div>
+                        <div class="text-sm text-gray-500 mb-2">提供商</div>
+                        <n-select v-model:value="providerForm.provider" :options="providerOptions" @update:value="onProviderChange" size="small" />
+                      </div>
+                      <div>
+                        <div class="text-sm text-gray-500 mb-2">模型</div>
+                        <n-select v-model:value="providerForm.model" :options="currentModelOptions" :allow-input="providerForm.provider === 'custom'" filterable size="small" />
+                      </div>
+                      <div v-if="currentProviderNeedsKey">
+                        <div class="text-sm text-gray-500 mb-2">API Key</div>
+                        <n-input v-model:value="providerForm.api_key" type="password" show-password-on="click" placeholder="sk-..." size="small" />
+                      </div>
+                      <div v-if="providerForm.provider === 'custom'">
+                        <div class="text-sm text-gray-500 mb-2">Base URL</div>
+                        <n-input v-model:value="providerForm.base_url" placeholder="https://api.example.com/v1" size="small" />
+                      </div>
+                    </div>
+
                     <div class="pt-4">
                       <n-button
                         type="primary"
@@ -880,6 +901,40 @@ const savingSettings = ref(false)
 const settingsSaveMessage = ref('')
 const settingsSaveSuccess = ref(false)
 
+// AI Provider form
+const providers = ref<ProviderDef[]>([])
+const providerForm = reactive({ provider: 'deepseek', model: 'deepseek-v4-flash', api_key: '', base_url: '' })
+
+interface ProviderDef { id: string; name: string; base_url: string; models: string[]; requires_key: boolean }
+const providerOptions = computed(() => providers.value.map(p => ({ label: p.name, value: p.id })))
+const currentProvider = computed(() => providers.value.find(p => p.id === providerForm.provider))
+const currentModelOptions = computed(() => (currentProvider.value?.models || []).map(m => ({ label: m, value: m })))
+const currentProviderNeedsKey = computed(() => currentProvider.value?.requires_key ?? true)
+
+const onProviderChange = (pid: string) => {
+  const p = providers.value.find(x => x.id === pid)
+  if (p) {
+    providerForm.model = p.models[0] || ''
+    providerForm.base_url = p.base_url || ''
+  }
+}
+
+const loadProviders = async () => {
+  try {
+    const res = await fetch('/api/v1/settings/providers', { headers: { Authorization: `Bearer ${localStorage.getItem('docmind_token')}` }})
+    if (!res.ok) return
+    const data = await res.json()
+    providers.value = data.providers || []
+    const cur = data.current
+    if (cur) {
+      providerForm.provider = cur.provider
+      providerForm.model = cur.model
+      providerForm.api_key = cur.api_key || ''
+      providerForm.base_url = cur.base_url || ''
+    }
+  } catch {}
+}
+
 const settingsChanged = computed(() => {
   return settingsForm.language !== userStore.settings.language
     || settingsForm.theme !== userStore.settings.theme
@@ -899,6 +954,7 @@ const handleSaveSettings = async () => {
     const result = await userStore.updateSettings({
       language: settingsForm.language,
       theme: settingsForm.theme,
+      preferences: { ai_provider: { ...providerForm } },
     })
     if (result.success) {
       settingsSaveMessage.value = t('common.saveSuccess')
@@ -1356,6 +1412,8 @@ const loadAllData = async () => {
   } finally {
     loading.value = false
   }
+
+  loadProviders()
 
   // Wait for next tick to ensure DOM is ready for ECharts
   setTimeout(() => {

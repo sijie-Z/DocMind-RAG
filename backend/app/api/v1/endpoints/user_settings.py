@@ -71,3 +71,65 @@ async def update_user_settings(
         "message": "更新成功",
         "data": UserSettingsResponse.model_validate(settings).model_dump(),
     }
+
+
+# ── AI Provider settings ────────────────────────────────────────
+
+_AVAILABLE_PROVIDERS = [
+    {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "models": ["deepseek-chat", "deepseek-v4-flash", "deepseek-reasoner"],
+        "requires_key": True,
+    },
+    {
+        "id": "ollama",
+        "name": "Ollama (本地)",
+        "base_url": "http://localhost:11434/v1",
+        "models": ["llama3", "qwen2.5", "deepseek-r1", "bge-m3"],
+        "requires_key": False,
+    },
+    {
+        "id": "openai",
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
+        "requires_key": True,
+    },
+    {
+        "id": "zhipu",
+        "name": "智谱 GLM",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "models": ["glm-4-flash", "glm-4-plus"],
+        "requires_key": True,
+    },
+    {
+        "id": "custom",
+        "name": "自定义 (OpenAI 兼容)",
+        "base_url": "",
+        "models": [],
+        "requires_key": True,
+    },
+]
+
+
+@router.get("/settings/providers", response_model=dict)
+async def get_providers(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """返回可用 AI Provider 列表和当前用户选择。"""
+    settings_obj = await _get_or_create_settings(db, current_user.id)
+    prefs = settings_obj.preferences or {}
+    current = prefs.get("ai_provider", {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "api_key": "",
+        "base_url": "",
+    })
+    return {
+        "success": True,
+        "providers": _AVAILABLE_PROVIDERS,
+        "current": current,
+    }
