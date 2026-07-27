@@ -210,7 +210,10 @@ async def run_agent(
     )
 
     agent = PERAgentLoop(
-        client, config, organization_id=3, user_id=0, execution_mode="dag",
+        client, config,
+        organization_id=int(os.environ.get("AGENT_DEMO_ORG_ID", "0")),
+        user_id=int(os.environ.get("AGENT_DEMO_USER_ID", "0")),
+        execution_mode="dag",
     )
 
     plan_steps: list[dict] = []
