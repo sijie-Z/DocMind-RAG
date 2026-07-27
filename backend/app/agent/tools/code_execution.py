@@ -222,20 +222,49 @@ def _is_safe_select_sql(sql: str) -> tuple[bool, str]:
     requires_auth=True,
 )
 async def execute_python(code: str, **_: Any) -> str:
-    # Check for dangerous patterns
-    dangerous = [
-        "import os", "import subprocess", "import sys", "import shutil",
-        "import socket", "import requests", "import urllib",
-        "open(", "exec(", "eval(", "compile(", "__import__",
-        "globals()", "locals()", "getattr(", "setattr(",
-        ".system(", ".popen(", ".spawn(", ".fork(",
-        "rmdir", "unlink", "remove(", "rmtree",
-    ]
-    for pattern in dangerous:
-        if pattern in code:
-            return f"Error: Dangerous code pattern detected: '{pattern}'. This is not allowed."
+    # ── Resolve sandbox mode ──────────────────────────────────────
+    from app.core.config import settings
 
-    # Build safe globals
+    mode = getattr(settings, "SANDBOX_MODE", "ast")
+    if mode == "auto":
+        from app.agent.tools.docker_sandbox import _docker_available
+        mode = "docker" if _docker_available() else "ast"
+
+    if mode == "docker":
+        try:
+            from app.agent.tools.docker_sandbox import run_in_docker
+
+            return await run_in_docker(
+                code,
+                image=getattr(settings, "SANDBOX_DOCKER_IMAGE", "python:3.11-slim"),
+                memory_mb=getattr(settings, "SANDBOX_DOCKER_MEMORY_MB", 256),
+                network=getattr(settings, "SANDBOX_DOCKER_NETWORK", "none"),
+                timeout=getattr(settings, "SANDBOX_DOCKER_TIMEOUT_SECONDS", 30),
+            )
+        except Exception as e:
+            logger.warning(f"Docker sandbox failed, falling back to AST: {e}")
+
+    # ── AST-level safety check ────────────────────────────────────
+    import ast as _ast
+
+    _FORBIDDEN = (_ast.Import, _ast.ImportFrom)
+    _FORBIDDEN_CALLS = {"eval", "exec", "compile", "__import__", "open",
+                        "globals", "locals", "vars", "getattr", "setattr",
+                        "delattr", "breakpoint", "input"}
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError as e:
+        return f"Error: Syntax error: {e}"
+    for node in _ast.walk(tree):
+        if isinstance(node, _FORBIDDEN):
+            return "Error: import statements are not allowed in sandbox."
+        if isinstance(node, _ast.Call) and isinstance(node.func, _ast.Name):
+            if node.func.id in _FORBIDDEN_CALLS:
+                return f"Error: calling '{node.func.id}()' is not allowed in sandbox."
+        if isinstance(node, _ast.Attribute):
+            return "Error: attribute access (e.g. obj.attr) is not allowed in sandbox."
+
+    # Build safe globals — no __builtins__ escape hatch
     safe_globals = {"__builtins__": {}}
     for name in SAFE_BUILTINS:
         safe_globals["__builtins__"][name] = __builtins__.get(name) if isinstance(__builtins__, dict) else getattr(__builtins__, name, None)

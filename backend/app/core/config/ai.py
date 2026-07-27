@@ -100,6 +100,13 @@ class AISettings(BaseSettings):
     # Privacy & security
     ENABLE_PII_MASKING: bool = True
 
+    # Code execution sandbox — "docker" (container-level isolation) or "ast" (in-process)
+    SANDBOX_MODE: str = "auto"
+    SANDBOX_DOCKER_IMAGE: str = "python:3.11-slim"
+    SANDBOX_DOCKER_MEMORY_MB: int = 256
+    SANDBOX_DOCKER_NETWORK: str = "none"
+    SANDBOX_DOCKER_TIMEOUT_SECONDS: int = 30
+
     # Observability — Langfuse
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
