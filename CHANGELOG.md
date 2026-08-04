@@ -5,6 +5,27 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-08-04
+
+### Security hardening and local usability
+
+### Fixed
+- 语义缓存改为按组织隔离，避免跨租户命中检索结果和回答。
+- 会话写入增加归属校验，禁止向他人会话追加消息。
+- 知识库搜索、建议、统计、重建、删除、任务事件补上组织归属校验。
+- 文件分块上传增加 `file_hash/file_name` 合法性校验，修复路径穿越与 MinIO 对象残留。
+- LLM API Key 在接口响应中掩码；Web 抓取增加 SSRF 防护。
+- Agent 文档摘要/详情工具按组织过滤；`agent_api` 未配置 `AGENT_API_KEY` 时拒绝访问。
+- 工作流接口按创建者隔离；工作流代码节点默认关闭，需设置 `ENABLE_WORKFLOW_CODE_NODES=true`。
+- 上传格式与解析器能力对齐，补充 `.csv` 解析支持。
+- Kafka 不可用时，文档上传与知识库重建自动切换为进程内处理。
+- 修复 Windows 启动脚本对 `.venv` 和 worker 文件名的识别。
+- 将开发数据库、向量存储、benchmark 产物等敏感/生成文件移出 git 跟踪。
+
+### Testing
+- 后端 `tests/unit + tests/behavior`：408 passed / 1 skipped。
+- 前端 `vue-tsc --noEmit` 通过。
+
 ## [1.3.0] - 2026-06-28
 
 ### 重大功能: PaiAgent 工作流编辑器特性全量吸收

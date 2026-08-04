@@ -61,7 +61,5 @@ class DatabaseSettings(BaseSettings):
     # Document parsing
     OCR_LANGUAGE: str = "chi_sim+eng"
     SUPPORTED_FILE_TYPES: list[str] = [
-        "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt",
-        "txt", "md", "csv", "json", "xml", "html",
-        "jpg", "jpeg", "png", "bmp", "tiff", "tif",
+        "pdf", "docx", "xlsx", "xls", "txt", "md", "csv",
     ]

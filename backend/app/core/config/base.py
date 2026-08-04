@@ -56,3 +56,6 @@ class BaseAppSettings(BaseSettings):
         "/redoc",
         "/static",
     ]
+
+    # Workflow safety: code nodes run in-process unless explicitly enabled.
+    ENABLE_WORKFLOW_CODE_NODES: bool = False

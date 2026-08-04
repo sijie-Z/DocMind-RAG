@@ -38,6 +38,7 @@ class DocumentParser:
             '.xls': self._parse_excel,
             '.txt': self._parse_txt,
             '.md': self._parse_txt,
+            '.csv': self._parse_txt,
         }
 
     async def parse_document(self, file_path: str, organization_id: str) -> dict[str, Any]:
@@ -559,4 +560,3 @@ class DocumentParser:
         return []
 
 document_service = DocumentParser()
-

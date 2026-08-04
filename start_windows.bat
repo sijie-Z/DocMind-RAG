@@ -33,14 +33,19 @@ echo.
 echo [2/4] 启动后端服务 (FastAPI :%BACKEND_PORT%)...
 
 cd /d "%~dp0backend"
-if not exist "venv\Scripts\activate.bat" (
+if exist ".venv\Scripts\activate.bat" (
+    set "VENV_DIR=.venv"
+) else (
+    set "VENV_DIR=venv"
+)
+if not exist "%VENV_DIR%\Scripts\activate.bat" (
     echo   [错误] 未找到虚拟环境，请先创建: python -m venv venv
     pause
     exit /b 1
 )
 
-call venv\Scripts\activate.bat
-start "DocMind-Backend" cmd /c "cd /d %~dp0backend && venv\Scripts\activate.bat && python -m uvicorn app.main:app --host 0.0.0.0 --port %BACKEND_PORT% --reload && pause"
+call %VENV_DIR%\Scripts\activate.bat
+start "DocMind-Backend" cmd /c "cd /d %~dp0backend && %VENV_DIR%\Scripts\activate.bat && python -m uvicorn app.main:app --host 0.0.0.0 --port %BACKEND_PORT% --reload && pause"
 
 :: 等待后端启动
 echo   等待后端就绪...

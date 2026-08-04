@@ -143,6 +143,13 @@ async def upload_document(
                 # 也可能传普通逗号分隔字符串 "tag1,tag2"
                 keywords_list = [t.strip() for t in tags.split(",") if t.strip()]
 
+        # 限制上传大小后再读文件，避免超大文件先占满内存
+        file.file.seek(0, 2)
+        declared_size = file.file.tell()
+        await file.seek(0)
+        if declared_size > settings.MAX_FILE_SIZE:
+            raise AppError(f"文件过大，最大支持 {settings.MAX_FILE_SIZE // (1024 * 1024)}MB")
+
         # 4. 计算 MD5 和 文件大小
         md5 = await calculate_md5(file)
         file.file.seek(0, 2)
@@ -198,6 +205,8 @@ async def upload_document(
         )
         db.add(job)
 
+        sent = False
+        schedule_local = False
         try:
             message = {
                 "document_id": doc_id,
@@ -207,14 +216,26 @@ async def upload_document(
                 "file_type": new_doc.file_type.value if hasattr(new_doc.file_type, "value") else str(new_doc.file_type),
                 "action": "process"
             }
-            await kafka_producer.send_message(settings.KAFKA_FILE_PROCESSING_TOPIC, message)
+            sent = await kafka_producer.send_message(settings.KAFKA_FILE_PROCESSING_TOPIC, message)
         except Exception as kafka_err:
-            logger.error(f"Kafka send failed: {kafka_err}")
-            job.status = KnowledgeJobStatus.FAILED
-            job.error_message = f"Kafka send failed: {str(kafka_err)}"
-            job.finished_at = datetime.now()
+            logger.warning(f"Kafka send failed, will process in-process: {kafka_err}")
+
+        if not sent:
+            schedule_local = True
 
         await db.commit()
+
+        if schedule_local:
+            try:
+                from app.worker.doc_processor import processor
+                asyncio.create_task(processor.process(doc_id))
+                logger.info("Kafka unavailable; scheduled in-process document processing")
+            except Exception as proc_err:
+                logger.error(f"In-process processing setup failed: {proc_err}")
+                job.status = KnowledgeJobStatus.FAILED
+                job.error_message = f"本地处理任务启动失败: {str(proc_err)}"
+                job.finished_at = datetime.now()
+                await db.commit()
 
         # 8. 返回，防止 refresh 导致的懒加载报错，使用 to_dict
         return {

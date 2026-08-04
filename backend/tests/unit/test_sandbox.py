@@ -89,8 +89,9 @@ class TestSandboxModeDispatch:
     """Sanity check: the function is importable and accepts code."""
 
     def test_function_imports(self):
-        from app.agent.tools.code_execution import execute_python
         import inspect
+
+        from app.agent.tools.code_execution import execute_python
         assert inspect.iscoroutinefunction(execute_python)
 
     def test_accepts_code_kwarg(self):

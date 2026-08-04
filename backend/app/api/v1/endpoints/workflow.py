@@ -33,12 +33,22 @@ async def list_workflows(
     db: AsyncSession = Depends(get_db)
 ):
     """获取工作流列表"""
+    conditions = [Workflow.is_active]
+    if not current_user.is_superuser and current_user.role != "admin":
+        conditions.append(Workflow.created_by == current_user.id)
+
     # 统计总数
-    count_stmt = select(func.count(Workflow.id)).where(Workflow.is_active)
+    count_stmt = select(func.count(Workflow.id)).where(*conditions)
     total = (await db.execute(count_stmt)).scalar() or 0
 
     # 查询列表
-    stmt = select(Workflow).where(Workflow.is_active).order_by(desc(Workflow.updated_at)).offset(skip).limit(limit)
+    stmt = (
+        select(Workflow)
+        .where(*conditions)
+        .order_by(desc(Workflow.updated_at))
+        .offset(skip)
+        .limit(limit)
+    )
     result = await db.execute(stmt)
     workflows = result.scalars().all()
 
@@ -97,7 +107,10 @@ async def get_workflow(
     db: AsyncSession = Depends(get_db)
 ):
     """获取工作流详情"""
-    result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
+    stmt = select(Workflow).where(Workflow.id == workflow_id)
+    if not current_user.is_superuser and current_user.role != "admin":
+        stmt = stmt.where(Workflow.created_by == current_user.id)
+    result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
     if not workflow:
@@ -125,7 +138,10 @@ async def update_workflow(
     db: AsyncSession = Depends(get_db)
 ):
     """更新工作流"""
-    result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
+    stmt = select(Workflow).where(Workflow.id == workflow_id)
+    if not current_user.is_superuser and current_user.role != "admin":
+        stmt = stmt.where(Workflow.created_by == current_user.id)
+    result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
     if not workflow:
@@ -161,7 +177,10 @@ async def delete_workflow(
     db: AsyncSession = Depends(get_db)
 ):
     """删除工作流（软删除）"""
-    result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
+    stmt = select(Workflow).where(Workflow.id == workflow_id)
+    if not current_user.is_superuser and current_user.role != "admin":
+        stmt = stmt.where(Workflow.created_by == current_user.id)
+    result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
     if not workflow:
@@ -183,7 +202,10 @@ async def execute_workflow(
     db: AsyncSession = Depends(get_db)
 ):
     """执行工作流 - 支持流式和非流式两种模式"""
-    result = await db.execute(select(Workflow).where(Workflow.id == workflow_id, Workflow.is_active))
+    stmt = select(Workflow).where(Workflow.id == workflow_id, Workflow.is_active)
+    if not current_user.is_superuser and current_user.role != "admin":
+        stmt = stmt.where(Workflow.created_by == current_user.id)
+    result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
     if not workflow:

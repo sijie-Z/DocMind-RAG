@@ -3,6 +3,15 @@ Write-Host "Starting RAG System Initialization..." -ForegroundColor Green
 # Configuration
 $PYTHON_EXE = "D:\Programming\Python 3.12.8\python.exe"
 
+# 0. Detect Python (prefer local virtualenvs, fall back to system python)
+if (Test-Path ".\.venv\Scripts\python.exe") {
+    $PYTHON_EXE = ".\.venv\Scripts\python.exe"
+} elseif (Test-Path ".\venv\Scripts\python.exe") {
+    $PYTHON_EXE = ".\venv\Scripts\python.exe"
+} else {
+    $PYTHON_EXE = "python"
+}
+
 # 1. Install Dependencies
 Write-Host "Step 1: Checking/Installing Dependencies..." -ForegroundColor Yellow
 & $PYTHON_EXE -m pip install -r requirements.txt
@@ -21,7 +30,7 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", $apiCmd
 # 3. Start Worker
 Write-Host "Step 3: Starting Worker Service (Consumer)..." -ForegroundColor Yellow
 # Set PYTHONPATH and start worker in new window
-$workerCmd = "$env:PYTHONPATH = '.'; & '$PYTHON_EXE' worker/doc_consumer.py"
+$workerCmd = "$env:PYTHONPATH = '.'; & '$PYTHON_EXE' worker/consumer.py"
 Start-Process powershell -ArgumentList "-NoExit", "-Command", $workerCmd
 
 Write-Host "RAG System Startup Initiated!" -ForegroundColor Green

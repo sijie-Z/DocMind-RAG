@@ -174,7 +174,7 @@ class KnowledgeService:
 
     async def delete_knowledge(self, document_id: str, organization_id: int | None = None) -> bool:
         """兼容旧接口的删除方法"""
-        return await self.delete_knowledge_thoroughly(document_id)
+        return await self.delete_knowledge_thoroughly(document_id, organization_id)
 
     async def delete_es_by_document_id(self, document_id: str) -> bool:
         """仅从 ES 中删除该文档的所有 chunk（用于重建前清理）"""
@@ -190,12 +190,17 @@ class KnowledgeService:
             logger.error(f"从 ES 按 document_id 删除失败: {str(e)}")
             return False
 
-    async def delete_knowledge_thoroughly(self, document_id: str) -> bool:
+    async def delete_knowledge_thoroughly(
+        self, document_id: str, organization_id: int | None = None
+    ) -> bool:
         """彻底删除文档"""
         try:
             logger.info(f"🧹 正在彻底清理文档: {document_id}")
             async with AsyncSessionLocal() as session:
-                result = await session.execute(select(Document).where(Document.id == document_id))
+                conditions = [Document.id == document_id]
+                if organization_id is not None:
+                    conditions.append(Document.organization_id == organization_id)
+                result = await session.execute(select(Document).where(*conditions))
                 doc = result.scalar_one_or_none()
                 if not doc:
                     return True
@@ -228,7 +233,7 @@ class KnowledgeService:
         success_count = 0
         fail_count = 0
         for doc_id in document_ids:
-            if await self.delete_knowledge_thoroughly(doc_id):
+            if await self.delete_knowledge_thoroughly(doc_id, organization_id):
                 success_count += 1
             else:
                 fail_count += 1

@@ -177,9 +177,9 @@ if _AGENT_API_KEY:
         if not secrets.compare_digest(x_api_key, _AGENT_API_KEY):
             raise HTTPException(status_code=403, detail="Invalid or missing X-API-Key header")
 else:
-    # No key configured — allow localhost-only access (CORS already restricts origins)
+    # Public deployments must configure an API key before exposing port 8010.
     async def verify_agent_api_key() -> None:
-        pass
+        raise HTTPException(status_code=503, detail="AGENT_API_KEY 未配置，拒绝访问")
 
 
 # ── Orchestrator ─────────────────────────────────────────────

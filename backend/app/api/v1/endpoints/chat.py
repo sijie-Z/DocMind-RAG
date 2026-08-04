@@ -112,6 +112,8 @@ async def get_or_create_session(
             status=ChatSessionStatus.ACTIVE, organization_id=organization_id,
         ))
     else:
+        if existing.user_id != user_id:
+            raise AuthorizationError("无权访问该会话")
         settings_json = existing.settings or {}
         if isinstance(settings_json, dict):
             bound_doc_ids = settings_json.get("bound_document_ids") or []
@@ -222,7 +224,7 @@ async def run_rag_pipeline(
     if not active_doc_ids and not strict_mode:
         query_vector = await rag_service.get_embedding(user_content)
         if query_vector:
-            cached_res = await _semantic_cache.get(query_vector)
+            cached_res = await _semantic_cache.get(query_vector, search_org_id)
             if cached_res:
                 full_response = cached_res.get("answer", "")
                 sources_list = cached_res.get("sources", [])
@@ -364,6 +366,7 @@ async def run_rag_pipeline(
         await _semantic_cache.set(
             query=user_content, embedding=query_vector,
             answer=full_response, sources=sources_list,
+            organization_id=search_org_id,
         )
 
     # Store interaction in agent memory
@@ -939,6 +942,12 @@ async def chat_parse_upload(
     os.close(fd)
 
     try:
+        file.file.seek(0, 2)
+        declared_size = file.file.tell()
+        await file.seek(0)
+        if declared_size > settings.MAX_FILE_SIZE:
+            raise ValidationError(f"文件过大，最大支持 {settings.MAX_FILE_SIZE // (1024 * 1024)}MB")
+
         raw = await file.read()
         with open(temp_path, "wb") as f:
             f.write(raw)

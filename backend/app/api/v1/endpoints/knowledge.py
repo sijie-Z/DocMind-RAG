@@ -1,6 +1,7 @@
 """
 知识库API端点
 """
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any
@@ -132,10 +133,16 @@ async def search_knowledge(
         # 允许 search_type 或 search_mode
         mode = request.search_mode or getattr(request, 'search_type', 'hybrid')
 
+        # 普通用户只能搜索自己组织的知识库，客户端传入的 organization_id 不能越权
+        if current_user.is_superuser and request.organization_id:
+            effective_org_id = request.organization_id
+        else:
+            effective_org_id = current_user.organization_id or 1
+
         # 执行搜索
         results = await knowledge_service.search_knowledge(
             query=request.query,
-            organization_id=request.organization_id or current_user.organization_id,
+            organization_id=effective_org_id,
             top_k=request.top_k or 10,
             search_mode=mode
         )
@@ -185,9 +192,13 @@ async def get_search_suggestions(
     获取搜索建议
     """
     try:
+        effective_org_id = current_user.organization_id or 1
+        if not current_user.is_superuser and organization_id != effective_org_id:
+            raise AuthorizationError("无权访问该组织的知识库")
+
         suggestions = await knowledge_service.get_search_suggestions(
             query=q,
-            organization_id=organization_id,
+            organization_id=effective_org_id,
             limit=limit
         )
 
@@ -209,7 +220,11 @@ async def get_knowledge_stats(
     获取知识库统计信息
     """
     try:
-        stats = await knowledge_service.get_knowledge_stats(organization_id)
+        effective_org_id = current_user.organization_id or 1
+        if not current_user.is_superuser and organization_id != effective_org_id:
+            raise AuthorizationError("无权访问该组织的知识库")
+
+        stats = await knowledge_service.get_knowledge_stats(effective_org_id)
 
         return {
             "success": True,
@@ -258,6 +273,8 @@ async def clear_graph_rag(
     """
     清空GraphRAG知识图谱
     """
+    if not current_user.is_superuser and current_user.role != "admin":
+        raise AuthorizationError("需要管理员权限")
     try:
         from app.services.graph_rag_service import graph_rag_service
 
@@ -287,6 +304,9 @@ async def rebuild_document_knowledge(
         if not doc:
             raise NotFoundError("文档不存在")
 
+        if not current_user.is_superuser and doc.organization_id != (current_user.organization_id or 1):
+            raise AuthorizationError("无权重建该文档")
+
         # 1. 仅从 ES 删除该文档的索引
         await knowledge_service.delete_es_by_document_id(document_id)
 
@@ -300,6 +320,8 @@ async def rebuild_document_knowledge(
         )
         db.add(job)
 
+        sent = False
+        schedule_local = False
         try:
             message = {
                 "document_id": document_id,
@@ -309,36 +331,50 @@ async def rebuild_document_knowledge(
                 "file_type": doc.file_type.value if hasattr(doc.file_type, "value") else str(doc.file_type),
                 "action": "process",
             }
-            await kafka_producer.send_message(settings.KAFKA_FILE_PROCESSING_TOPIC, message)
+            sent = await kafka_producer.send_message(settings.KAFKA_FILE_PROCESSING_TOPIC, message)
         except Exception as e:
-            logger.error(f"发送 Kafka 重建任务失败: {e}")
-            job.status = KnowledgeJobStatus.FAILED
-            job.error_message = f"发送处理任务失败: {str(e)}"
-            job.finished_at = datetime.now()
-            await db.commit()
+            logger.warning(f"发送 Kafka 重建任务失败，改为进程内处理: {e}")
 
-            await create_notification(
-                db,
-                user_id=current_user.id,
-                title="知识库重建失败",
-                content=f"文档《{doc.title or doc.filename}》重建失败：{str(e)}",
-                type="knowledge",
-                target_route="Knowledge",
-                target_id=str(document_id),
-            )
-
-            raise AppError(f"发送处理任务失败: {str(e)}")
+        if not sent:
+            schedule_local = True
 
         # 3. 将文档状态置为 PENDING，Worker 处理后会更新为 INDEXED/FAILED
         doc.status = DocumentStatus.PENDING
         doc.parse_error = None
         await db.commit()
 
+        if schedule_local:
+            try:
+                from app.worker.doc_processor import processor
+                asyncio.create_task(processor.process(document_id))
+                logger.info("Kafka unavailable; scheduled in-process document rebuild")
+            except Exception as proc_err:
+                logger.error(f"本地重建任务启动失败: {proc_err}")
+                job.status = KnowledgeJobStatus.FAILED
+                job.error_message = f"本地处理任务启动失败: {str(proc_err)}"
+                job.finished_at = datetime.now()
+                await db.commit()
+
+                await create_notification(
+                    db,
+                    user_id=current_user.id,
+                    title="知识库重建失败",
+                    content=f"文档《{doc.title or doc.filename}》重建失败：{str(proc_err)}",
+                    type="knowledge",
+                    target_route="Knowledge",
+                    target_id=str(document_id),
+                )
+
+                raise AppError(f"本地处理任务启动失败: {str(proc_err)}")
+
         await create_notification(
             db,
             user_id=current_user.id,
             title="知识库重建任务已提交",
-            content=f"文档《{doc.title or doc.filename}》正在重建索引。",
+            content=(
+                f"文档《{doc.title or doc.filename}》正在重建索引"
+                + ("（本地处理）。" if schedule_local else "。")
+            ),
             type="knowledge",
             target_route="Knowledge",
             target_id=str(document_id),
@@ -423,9 +459,14 @@ async def get_document_job_events(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    conditions = [KnowledgeProcessingJob.document_id == document_id]
+    if not current_user.is_superuser:
+        conditions.append(
+            KnowledgeProcessingJob.organization_id == (current_user.organization_id or 1)
+        )
     result = await db.execute(
         select(KnowledgeProcessingJob)
-        .where(KnowledgeProcessingJob.document_id == document_id)
+        .where(*conditions)
         .order_by(desc(KnowledgeProcessingJob.created_at))
     )
     jobs = result.scalars().all()
@@ -466,6 +507,9 @@ async def delete_knowledge_document(
         if not doc:
             raise NotFoundError("文档不存在")
 
+        if not current_user.is_superuser and doc.organization_id != (current_user.organization_id or 1):
+            raise AuthorizationError("无权删除该文档")
+
         # 3. 调用 service 彻底删除
         success = await knowledge_service.delete_knowledge(document_id, doc.organization_id)
 
@@ -499,9 +543,13 @@ async def batch_delete_documents(
     批量删除知识库文档
     """
     try:
+        effective_org_id = current_user.organization_id or 1
+        if not current_user.is_superuser and request.organization_id != effective_org_id:
+            raise AuthorizationError("无权删除该组织的文档")
+
         results = await knowledge_service.batch_delete_knowledge(
             request.document_ids,
-            request.organization_id or current_user.organization_id
+            effective_org_id
         )
 
         await audit_service.log_activity(

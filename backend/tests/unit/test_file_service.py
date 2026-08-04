@@ -136,9 +136,33 @@ class TestAllowedMimeTypes:
         assert ".md" in exts
         assert ".csv" in exts
 
-    def test_image_types_present(self):
-        assert "image/jpeg" in _ALLOWED_MIME_TYPES
-        assert "image/png" in _ALLOWED_MIME_TYPES
+    def test_unsupported_image_types_removed(self):
+        # Keep upload acceptance aligned with the document parser's capability set.
+        assert "image/jpeg" not in _ALLOWED_MIME_TYPES
+        assert "image/png" not in _ALLOWED_MIME_TYPES
+        assert "application/msword" not in _ALLOWED_MIME_TYPES
+
+
+# ── upload identity sanitizer ────────────────────────────────────
+
+class TestUploadIdentitySanitizer:
+    def test_rejects_path_traversal_filename(self, svc):
+        with pytest.raises(HTTPException) as exc_info:
+            svc._sanitize_upload_identity("../evil.pdf", "a" * 64)
+        assert exc_info.value.status_code == 400
+
+    def test_rejects_windows_separator_filename(self, svc):
+        with pytest.raises(HTTPException):
+            svc._sanitize_upload_identity("..\\evil.pdf", "a" * 64)
+
+    def test_rejects_invalid_hash(self, svc):
+        with pytest.raises(HTTPException):
+            svc._sanitize_upload_identity("report.pdf", "not-a-hash")
+
+    def test_accepts_valid_identity(self, svc):
+        name, digest = svc._sanitize_upload_identity("report.pdf", "A" * 64)
+        assert name == "report.pdf"
+        assert digest == "a" * 64
 
 
 # ── delete_file ─────────────────────────────────────────────────────

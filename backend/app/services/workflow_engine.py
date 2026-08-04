@@ -424,20 +424,20 @@ class CodeExecuteNodeExecutor(NodeExecutor):
         k: v for k, v in __builtins__.items()
         if k in (
             "abs", "all", "any", "bool", "chr", "dict", "divmod", "enumerate",
-            "filter", "float", "format", "frozenset", "getattr", "hasattr",
+            "filter", "float", "format", "frozenset",
             "hash", "int", "isinstance", "issubclass", "iter", "len", "list",
             "map", "max", "min", "next", "pow", "print", "range", "repr",
             "reversed", "round", "set", "slice", "sorted", "str", "sum",
-            "tuple", "type", "zip",
+            "tuple", "zip",
         )
     } if isinstance(__builtins__, dict) else {
         k: getattr(__builtins__, k) for k in (
             "abs", "all", "any", "bool", "chr", "dict", "divmod", "enumerate",
-            "filter", "float", "format", "frozenset", "getattr", "hasattr",
+            "filter", "float", "format", "frozenset",
             "hash", "int", "isinstance", "issubclass", "iter", "len", "list",
             "map", "max", "min", "next", "pow", "print", "range", "repr",
             "reversed", "round", "set", "slice", "sorted", "str", "sum",
-            "tuple", "type", "zip",
+            "tuple", "zip",
         )
     }
 
@@ -467,6 +467,9 @@ class CodeExecuteNodeExecutor(NodeExecutor):
                 raise ValueError(f"安全限制：不允许调用 {node.func.id}()")
             if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
                 raise ValueError(f"安全限制：不允许访问私有属性 .{node.attr}")
+
+        if not getattr(settings, "ENABLE_WORKFLOW_CODE_NODES", False):
+            raise ValueError("代码执行节点未启用，请设置 ENABLE_WORKFLOW_CODE_NODES=true")
 
         context_vars = {
             "input": state.get("input", {}),

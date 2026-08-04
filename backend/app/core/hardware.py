@@ -6,7 +6,6 @@ import logging
 import os
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)

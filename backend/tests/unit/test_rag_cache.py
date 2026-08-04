@@ -78,3 +78,65 @@ class TestSemanticCacheQuantize:
         cache = SemanticCache()
         assert cache._cosine_similarity([], [1, 2]) == 0.0
         assert cache._cosine_similarity([1, 2], []) == 0.0
+
+
+class _FakeRedis:
+    """Minimal in-memory Redis double for SemanticCache tests."""
+
+    def __init__(self):
+        self.values: dict[str, str] = {}
+        self.members: dict[str, dict[str, int]] = {}
+
+    def pipeline(self):
+        return self
+
+    def setex(self, key: str, _ttl: int, value: str) -> None:
+        self.values[key] = value
+
+    def zadd(self, key: str, mapping: dict[str, int]) -> None:
+        self.members.setdefault(key, {}).update(mapping)
+
+    async def execute(self) -> list:
+        return []
+
+    async def zrangebyscore(self, key: str, min_score: int, max_score: int) -> list[str]:
+        return [
+            member
+            for member, score in self.members.get(key, {}).items()
+            if min_score <= score <= max_score
+        ]
+
+    async def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    async def zrem(self, key: str, member: str) -> None:
+        self.members.get(key, {}).pop(member, None)
+
+
+class TestSemanticCacheOrgIsolation:
+    @pytest.mark.asyncio
+    async def test_org_isolation(self, monkeypatch):
+        cache = SemanticCache()
+        fake = _FakeRedis()
+        monkeypatch.setattr("app.rag.cache._get_redis", lambda: fake)
+        embedding = [0.1, 0.2, 0.3, 0.4] * 8
+
+        await cache.set("query", embedding, "answer", [], organization_id=1)
+
+        hit = await cache.get(embedding, organization_id=1)
+        assert hit is not None
+        assert hit["answer"] == "answer"
+
+        miss = await cache.get(embedding, organization_id=2)
+        assert miss is None
+
+    @pytest.mark.asyncio
+    async def test_org_scoped_keys(self, monkeypatch):
+        cache = SemanticCache()
+        fake = _FakeRedis()
+        monkeypatch.setattr("app.rag.cache._get_redis", lambda: fake)
+        embedding = [0.1] * 32
+
+        await cache.set("query", embedding, "answer", [], organization_id=7)
+
+        assert any(key.startswith("rag:sem:org:7:") for key in fake.values)

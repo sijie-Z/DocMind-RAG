@@ -31,14 +31,15 @@ class KafkaProducerClient:
             await self.producer.stop()
             logger.info("Kafka producer stopped")
 
-    async def send_message(self, topic: str, value: Any):
+    async def send_message(self, topic: str, value: Any) -> bool:
         if not self.producer:
             logger.warning("Kafka producer is not initialized, skipping message send")
-            return
+            return False
 
         try:
             await self.producer.send_and_wait(topic, value)
             logger.info(f"Sent message to topic {topic}: {value}")
+            return True
         except Exception as e:
             logger.error(f"Error sending message to Kafka: {e}")
             raise

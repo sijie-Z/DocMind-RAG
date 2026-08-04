@@ -21,7 +21,7 @@
 DocMind is a full-stack enterprise AI knowledge base system built around the **PER (Plan-Execute-Reflect) Agent architecture**. It provides multi-format document parsing, hybrid retrieval-augmented generation (RAG), visual workflow editing, real-time SSE streaming Q&A, and a comprehensive observability stack.
 
 Core use cases:
-- 📄 **Document KB** — Upload PDFs, Word docs, Excel sheets. Auto-parse, chunk, embed, and semantic search.
+- 📄 **Document KB** — Upload PDF, Word, Excel, TXT, Markdown, and CSV files. Auto-parse, chunk, embed, and semantic search.
 - 💬 **Intelligent Q&A** — RAG pipeline: keyword + vector hybrid search, reranking, LLM generation with SSE streaming.
 - 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 25+ tools for complex multi-step tasks.
 - 🧩 **Workflow Editor** — Visual DAG design & debugging (Vue Flow). Configurable LLM models, prompts, and execution engines.
@@ -29,6 +29,23 @@ Core use cases:
 - 🔐 **Multi-Tenant + RBAC** — Organization isolation, role-based permissions, JWT authentication.
 
 > Design decisions and experimental data belong in the research repo: [DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
+
+---
+
+## Project Status
+
+> Current positioning: **public project / immature product**. Feature completeness is higher than production stability. It is suitable for learning, secondary development, and local demos; harden security and operations before deploying publicly.
+
+Current baseline:
+- Backend `tests/unit + tests/behavior`: 408 passed / 1 skipped. Frontend `vue-tsc --noEmit` passes.
+- Recent fixes: org-scoped semantic cache, conversation ownership checks, org isolation for knowledge search/delete/rebuild, upload path traversal and MinIO deletion fixes, API key masking, web-fetch SSRF protection, workflow ownership isolation, in-process document processing when Kafka is unavailable, local startup scripts, and removal of sensitive artifacts from git tracking.
+
+Known limitations:
+- `/metrics` and the rate-limit middleware are still disabled; the monitoring metrics advertised in this README are not actually collected yet.
+- Agent memory endpoints do not yet isolate `agent_id` per user.
+- The `/files/{path}` resource proxy has no authentication; disable it or use signed URLs before public deployment.
+- Workflow code nodes are disabled by default. Set `ENABLE_WORKFLOW_CODE_NODES=true` to opt in; a Docker sandbox is still recommended.
+- The legacy `ci.yml` still coexists with `ci-fast.yml` / `ci-nightly.yml`.
 
 ---
 
@@ -231,6 +248,8 @@ Vue 3 + TypeScript + Naive UI SPA, 21 routes:
 
 A Kafka consumer worker process (`start_worker.py`) listens on the `file-processing` topic, handling: document parsing → chunking → embedding → ES indexing.
 
+When Kafka is unavailable, `/documents/upload` and knowledge-base rebuild endpoints automatically fall back to in-process processing, so local development does not stay stuck in `pending`.
+
 ---
 
 ## Quick Start
@@ -265,6 +284,8 @@ cp .env.docker.example .env.docker
 ```
 
 ### 4. Start Backend
+
+On Windows you can use `start_windows.bat` at the repo root (it detects `.venv` or `venv`). Manual start:
 
 ```bash
 cd backend
@@ -311,6 +332,7 @@ Environment variables via `.env` file. Key settings:
 | `VECTOR_DIMENSION` | Vector dimension | `1536` |
 | `ENABLE_TRACING` | OpenTelemetry toggle | `false` |
 | `ENABLE_DEMO_ACCOUNT` | Enable demo accounts | `true` |
+| `ENABLE_WORKFLOW_CODE_NODES` | Allow workflow code nodes (security risk; disabled by default) | `false` |
 | `APP_VERSION` | App version | `1.0.0` |
 
 Full configuration reference: `backend/.env.example` and `backend/.env.docker.example`.
@@ -398,7 +420,7 @@ DocMind/
 │   │   ├── models/                  # ORM models (14 entities)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer
-│   ├── tests/                       # 422+ test cases
+│   ├── tests/                       # 400+ test cases
 │   ├── benchmark/                   # Benchmark framework
 │   ├── alembic/                     # DB migrations
 │   ├── scripts/                     # Utility scripts

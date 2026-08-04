@@ -21,7 +21,7 @@
 DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execute-Reflect）Agent 架构**构建。支持多格式文档解析、混合检索增强生成（RAG）、可视化工作流编辑、实时 SSE 流式问答，以及完整的可观测性体系。
 
 核心场景：
-- 📄 **文档知识库** — 上传 PDF/Word/Excel，自动解析、分块、向量化，支持语义搜索
+- 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV，自动解析、分块、向量化，支持语义搜索
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
 - 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 25+ 工具完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
@@ -29,6 +29,23 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 - 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
 
 > 关于架构决策和实验数据，请参见研究仓库：[DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
+
+---
+
+## 项目状态
+
+> 当前定位：**公开项目 / 不成熟产品**。功能完整度高于稳定度，适合学习、二次开发和本地演示；正式生产部署前请自行加固安全与运维配置。
+
+当前基线：
+- 后端 `tests/unit + tests/behavior`：408 通过 / 1 跳过；前端 `vue-tsc --noEmit` 通过。
+- 已修复：语义缓存按组织隔离、会话归属校验、知识库搜索/删除/重建的组织隔离、文件上传路径穿越与 MinIO 删除、API Key 掩码、Web 抓取 SSRF 防护、工作流归属隔离、Kafka 不可用时的进程内文档处理、本地启动脚本、敏感产物移出 git 跟踪。
+
+已知限制：
+- `/metrics` 与限流中间件尚未启用，README 中宣称的监控指标目前不会真正采集。
+- Agent 记忆接口的 `agent_id` 尚未按用户隔离。
+- `/files/{path}` 资源代理尚无鉴权，公开部署建议关闭或改用签名 URL。
+- 工作流代码节点默认关闭，需显式设置 `ENABLE_WORKFLOW_CODE_NODES=true`；开启后仍建议切换 Docker 沙箱。
+- 仍有 legacy `ci.yml` 与 `ci-fast.yml` / `ci-nightly.yml` 并存。
 
 ---
 
@@ -230,6 +247,8 @@ Vue 3 + TypeScript + Naive UI 单页应用，21 条路由：
 
 Kafka 消费者独立进程（`start_worker.py`），监听 `file-processing` 主题，处理文档解析 → 分块 → 嵌入 → ES 索引入库。
 
+如果 Kafka 不可用，`/documents/upload` 与知识库重建接口会自动切换为进程内处理，本地开发不会因为缺少消息队列而停在 pending。
+
 ---
 
 ## 快速开始
@@ -264,6 +283,8 @@ cp .env.docker.example .env.docker
 ```
 
 ### 4. 启动后端
+
+Windows 可直接使用仓库根目录的 `start_windows.bat`（自动识别 `.venv` 或 `venv`）。手动启动：
 
 ```bash
 cd backend
@@ -377,7 +398,7 @@ DocMind/
 │   │   ├── models/                  # ORM 模型（14 个实体）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者
-│   ├── tests/                       # 422+ 测试用例
+│   ├── tests/                       # 400+ 测试用例
 │   ├── benchmark/                   # 评测框架
 │   ├── alembic/                     # 数据库迁移
 │   ├── scripts/                     # 工具脚本
@@ -413,6 +434,7 @@ DocMind/
 | `VECTOR_DIMENSION` | 向量维度 | `1536` |
 | `ENABLE_TRACING` | OpenTelemetry 开关 | `false` |
 | `ENABLE_DEMO_ACCOUNT` | 启用演示账号 | `true` |
+| `ENABLE_WORKFLOW_CODE_NODES` | 允许工作流代码节点（存在安全风险，默认关闭） | `false` |
 | `APP_VERSION` | 应用版本 | `1.0.0` |
 
 完整配置见 `backend/.env.example` 和 `backend/.env.docker.example`。

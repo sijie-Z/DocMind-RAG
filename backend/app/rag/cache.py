@@ -153,10 +153,11 @@ class SemanticCache:
             if rc is None:
                 return None
 
-            org_prefix = f"org:{organization_id}:" if organization_id else ""
+            index_key = f"{self.index_key}:{organization_id}"
+            org_prefix = f"org:{organization_id}:"
             query_score = self._quantize(query_embedding)
             candidates = await rc.zrangebyscore(
-                self.index_key,
+                index_key,
                 max(0, query_score - 2),
                 query_score + 2,
             )
@@ -169,11 +170,11 @@ class SemanticCache:
             for cache_key in candidates:
                 if isinstance(cache_key, bytes):
                     cache_key = cache_key.decode()
-                if org_prefix and org_prefix not in cache_key:
+                if org_prefix not in cache_key:
                     continue
                 raw = await rc.get(cache_key)
                 if not raw:
-                    await rc.zrem(self.index_key, cache_key)
+                    await rc.zrem(index_key, cache_key)
                     continue
                 data = json.loads(raw)
                 cached_emb = data.get("embedding", [])
@@ -199,7 +200,8 @@ class SemanticCache:
             if rc is None:
                 return
 
-            org_prefix = f"org:{organization_id}:" if organization_id else ""
+            index_key = f"{self.index_key}:{organization_id}"
+            org_prefix = f"org:{organization_id}:"
             cache_key = f"{self.prefix}{org_prefix}{self._hash_key(embedding)}"
             data = {
                 "query": query,
@@ -211,7 +213,7 @@ class SemanticCache:
 
             pipe = rc.pipeline()
             pipe.setex(cache_key, self.ttl, json.dumps(data, ensure_ascii=False))
-            pipe.zadd(self.index_key, {cache_key: score})
+            pipe.zadd(index_key, {cache_key: score})
             await pipe.execute()
             logger.info(f"Semantic cache stored: '{query[:30]}...'")
         except Exception as e:

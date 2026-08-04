@@ -9,7 +9,6 @@ venv/
 .env.*
 !.env.example
 !.env.docker.example
-!.env.notification
 .backend-port
 backend.log
 node_modules/
@@ -31,6 +30,18 @@ backend/benchmark/run_007*.py
 
 # Demo temp files
 backend/demo_scratch/
+
+# Local runtime data / generated artifacts
+*.db
+*.sqlite
+backend/data/
+backend/vector_store/
+backend/requirements.txt.bak
+backend/benchmark/experiences.json
+backend/benchmark/patterns.json
+backend/benchmark/suggested_skills.json
+backend/benchmark/reports/
+benchmark/replay/
 
 # Trace exports
 traces/

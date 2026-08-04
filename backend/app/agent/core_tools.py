@@ -167,7 +167,14 @@ async def summarize_document(
 
     es_query = {
         "size": 50,
-        "query": {"term": {"document_id": document_id}},
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"document_id": document_id}},
+                    {"term": {"organization_id": str(organization_id)}},
+                ]
+            }
+        },
         "sort": [{"chunk_index": {"order": "asc"}}],
         "_source": ["content", "filename"],
     }
@@ -339,7 +346,14 @@ async def extract_insights(
 
     es_query = {
         "size": 50,
-        "query": {"term": {"document_id": document_id}},
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"document_id": document_id}},
+                    {"term": {"organization_id": str(organization_id)}},
+                ]
+            }
+        },
         "sort": [{"chunk_index": {"order": "asc"}}],
         "_source": ["content", "filename", "section_title"],
     }
@@ -476,7 +490,14 @@ async def cross_document_analysis(
     for doc_id in document_ids:
         es_query = {
             "size": 20,
-            "query": {"term": {"document_id": doc_id}},
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"document_id": doc_id}},
+                        {"term": {"organization_id": str(organization_id)}},
+                    ]
+                }
+            },
             "_source": ["content", "filename", "upload_time", "document_id"],
         }
         try:
@@ -486,7 +507,14 @@ async def cross_document_analysis(
             if not hits:
                 fallback_query = {
                     "size": 20,
-                    "query": {"term": {"filename": doc_id}},
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {"term": {"filename": doc_id}},
+                                {"term": {"organization_id": str(organization_id)}},
+                            ]
+                        }
+                    },
                     "_source": ["content", "filename", "upload_time", "document_id"],
                 }
                 res = await ElasticsearchTools.search_documents(fallback_query)
@@ -772,14 +800,17 @@ async def list_documents(
     },
     tags=["management"],
 )
-async def get_document_info(document_id: str, **_: Any) -> str:
+async def get_document_info(document_id: str, organization_id: int = 1, **_: Any) -> str:
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal
     from app.models.document import Document
 
     async with AsyncSessionLocal() as session:
-        stmt = select(Document).where(Document.id == document_id)
+        stmt = select(Document).where(
+            Document.id == document_id,
+            Document.organization_id == organization_id,
+        )
         result = await session.execute(stmt)
         doc = result.scalar_one_or_none()
 

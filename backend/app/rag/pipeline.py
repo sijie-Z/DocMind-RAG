@@ -109,7 +109,7 @@ class RAGPipeline:
             if not document_ids:
                 query_vector = await self.get_embedding(query)
                 if query_vector:
-                    sem_cached = await self.semantic_cache.get(query_vector)
+                    sem_cached = await self.semantic_cache.get(query_vector, organization_id)
                     if sem_cached:
                         RAG_CACHE_HITS.labels(cache_type="semantic").inc()
                         self.metrics.inc("semantic_cache_hit")
@@ -215,7 +215,9 @@ class RAGPipeline:
             if not document_ids:
                 await self.cache.set(query, organization_id, top_k, result)
             if query_vector and result:
-                await self.semantic_cache.set(query, query_vector, "", result)
+                await self.semantic_cache.set(
+                    query, query_vector, "", result, organization_id=organization_id
+                )
 
             if result:
                 RAG_RETRIEVAL_HITS.inc()

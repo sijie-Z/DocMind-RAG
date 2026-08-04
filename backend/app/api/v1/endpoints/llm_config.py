@@ -37,6 +37,23 @@ PROVIDER_LABELS: dict[str, str] = {
 }
 
 
+def _mask_secret(value: str) -> str:
+    """Mask a secret while keeping a short prefix/suffix for identification."""
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "********"
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def _public_config(data: dict[str, Any]) -> dict[str, Any]:
+    """Return a config with the API key masked for client responses."""
+    out = dict(data)
+    if out.get("api_key"):
+        out["api_key"] = _mask_secret(str(out["api_key"]))
+    return out
+
+
 # ── Schemas ────────────────────────────────────────────────────────────
 
 
@@ -130,7 +147,7 @@ async def list_configs(
     """
 
     all_configs = await _load_all()
-    configs = list(all_configs.values())
+    configs = [_public_config(v) for v in all_configs.values()]
 
     return {
         "success": True,
@@ -163,8 +180,9 @@ async def get_default_config(
     all_configs = await _load_all()
     for cid, data in all_configs.items():
         if data.get("provider") == provider and data.get("is_default"):
-            data["id"] = cid
-            return {"success": True, "data": data}
+            public = _public_config(data)
+            public["id"] = cid
+            return {"success": True, "data": public}
     raise NotFoundError(f"Provider '{provider}' 没有默认配置")
 
 
@@ -178,8 +196,9 @@ async def get_config_detail(
     if config_id not in all_configs:
         raise NotFoundError(f"配置 '{config_id}' 不存在")
     data = all_configs[config_id]
-    data["id"] = config_id
-    return {"success": True, "data": data}
+    public = _public_config(data)
+    public["id"] = config_id
+    return {"success": True, "data": public}
 
 
 @router.post("")
@@ -205,7 +224,7 @@ async def create_config(
 
     return {
         "success": True,
-        "data": data,
+        "data": _public_config(data),
         "message": f"配置 '{body.config_name}' 已创建",
     }
 
@@ -232,7 +251,7 @@ async def update_config(
 
     return {
         "success": True,
-        "data": data,
+        "data": _public_config(data),
         "message": f"配置 '{body.config_name}' 已更新",
     }
 
@@ -262,7 +281,7 @@ async def patch_config(
     existing["id"] = config_id
     return {
         "success": True,
-        "data": existing,
+        "data": _public_config(existing),
         "message": "配置已更新",
     }
 

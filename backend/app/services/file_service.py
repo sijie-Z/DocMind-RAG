@@ -25,22 +25,11 @@ logger = logging.getLogger(__name__)
 _ALLOWED_MIME_TYPES = {
     "application/pdf": {".pdf"},
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {".docx"},
-    "application/msword": {".doc"},
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {".xlsx"},
     "application/vnd.ms-excel": {".xls"},
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": {".pptx"},
-    "application/vnd.ms-powerpoint": {".ppt"},
     "text/plain": {".txt", ".md", ".csv"},
     "text/markdown": {".md"},
     "text/csv": {".csv"},
-    "application/json": {".json"},
-    "text/html": {".html", ".htm"},
-    "image/jpeg": {".jpg", ".jpeg"},
-    "image/png": {".png"},
-    "image/gif": {".gif"},
-    "image/webp": {".webp"},
-    "image/bmp": {".bmp"},
-    "image/tiff": {".tiff", ".tif"},
 }
 
 
@@ -50,8 +39,7 @@ class FileUploadService:
     def __init__(self):
         self.chunk_size = 5 * 1024 * 1024  # 5MB 分块大小
         self.allowed_extensions = {
-            '.pdf', '.doc', '.docx', '.xls', '.xlsx',
-            '.ppt', '.pptx', '.txt', '.md', '.csv'
+            '.pdf', '.docx', '.xlsx', '.xls', '.txt', '.md', '.csv'
         }
         self.allowed_avatar_extensions = {
             '.jpg', '.jpeg', '.png', '.gif', '.webp'
@@ -139,6 +127,20 @@ class FileUploadService:
             文件哈希值
         """
         return hashlib.sha256(content).hexdigest()
+
+    def _sanitize_upload_identity(
+        self, file_name: str | None, file_hash: str | None
+    ) -> tuple[str, str]:
+        """Validate client-supplied upload identity before using it in paths."""
+        if not file_name or not file_hash:
+            raise HTTPException(status_code=400, detail="文件名和文件哈希不能为空")
+        if len(file_name) > 255:
+            raise HTTPException(status_code=400, detail="文件名过长")
+        if Path(file_name).name != file_name or "/" in file_name or "\\" in file_name:
+            raise HTTPException(status_code=400, detail="文件名不合法")
+        if len(file_hash) != 64 or any(c not in "0123456789abcdefABCDEF" for c in file_hash):
+            raise HTTPException(status_code=400, detail="文件哈希不合法")
+        return file_name, file_hash.lower()
 
     async def _upload_to_minio(self, file_content: bytes, object_name: str, content_type: str) -> str:
         """
@@ -334,6 +336,7 @@ class FileUploadService:
 
             # 验证文件 (is_avatar=True)
             self._validate_file(filename, file_size, is_avatar=True)
+            self._validate_mime_type(content, filename)
 
             # 生成唯一文件名
             file_extension = Path(filename).suffix.lower()
@@ -382,6 +385,8 @@ class FileUploadService:
 
             if chunk_index < 0 or chunk_index >= total_chunks:
                 raise HTTPException(status_code=400, detail="分块序号无效")
+
+            file_name, file_hash = self._sanitize_upload_identity(file_name, file_hash)
 
             # 创建临时目录存储分块
             temp_dir = Path(settings.UPLOAD_TEMP_DIR) / file_hash
@@ -438,6 +443,7 @@ class FileUploadService:
     async def _merge_chunks(self, temp_dir: Path, total_chunks: int, file_name: str) -> Path:
         """合并分块文件"""
         try:
+            file_name, _ = self._sanitize_upload_identity(file_name, "0" * 64)
             # 创建合并后的文件
             merged_file_path = temp_dir / f"merged_{file_name}"
 
@@ -567,6 +573,10 @@ class FileUploadService:
             上传状态信息
         """
         try:
+            if not file_hash or len(file_hash) != 64 or any(
+                c not in "0123456789abcdefABCDEF" for c in file_hash
+            ):
+                raise HTTPException(status_code=400, detail="文件哈希不合法")
             temp_dir = Path(settings.UPLOAD_TEMP_DIR) / file_hash
 
             if not temp_dir.exists():
@@ -701,11 +711,9 @@ class FileUploadService:
                 # 检查权限（只有上传者或管理员可以删除）
                 # 这里简化处理，实际项目中需要更完善的权限检查
 
-                # 从MinIO删除文件
+                # 从 MinIO 删除文件（兼容完整 URL 和裸对象名）
                 try:
-                    # 从文件路径中提取对象名称
-                    object_name = document.file_path.split('/')[-1]
-                    minio_client.remove_object(object_name)
+                    await self.delete_file(document.file_path)
                 except Exception as e:
                     logger.warning(f"从MinIO删除文件失败: {document_id}, 错误: {str(e)}")
 

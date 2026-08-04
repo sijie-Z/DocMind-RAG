@@ -128,6 +128,11 @@ async def get_providers(
         "api_key": "",
         "base_url": "",
     })
+    if current.get("api_key"):
+        raw_key = str(current["api_key"])
+        current["api_key"] = (
+            "********" if len(raw_key) <= 8 else f"{raw_key[:4]}...{raw_key[-4:]}"
+        )
     return {
         "success": True,
         "providers": _AVAILABLE_PROVIDERS,

@@ -59,8 +59,6 @@ async def run_in_docker(
 
     Returns stdout on success, stderr + error context on failure.
     """
-    import subprocess
-
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", encoding="utf-8", delete=False,
     ) as f:

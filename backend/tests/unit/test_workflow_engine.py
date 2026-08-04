@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from app.core.config import settings
 from app.schemas.workflow import WorkflowConfig, WorkflowNode
 from app.services.workflow_engine import (
     CodeExecuteNodeExecutor,
@@ -296,7 +297,15 @@ class TestRouterNodeExecutor:
 
 class TestCodeExecuteNodeExecutor:
     @pytest.mark.asyncio
-    async def test_simple_code(self):
+    async def test_code_node_disabled_by_default(self):
+        node = _make_node(data={"code": "result = 2 + 3", "language": "python"})
+        state = _make_state()
+        with pytest.raises(ValueError, match="代码执行节点未启用"):
+            await CodeExecuteNodeExecutor(node).execute(state)
+
+    @pytest.mark.asyncio
+    async def test_simple_code(self, monkeypatch):
+        monkeypatch.setattr(settings, "ENABLE_WORKFLOW_CODE_NODES", True)
         node = _make_node(data={"code": "result = 2 + 3", "language": "python"})
         state = _make_state()
         result = await CodeExecuteNodeExecutor(node).execute(state)
@@ -338,7 +347,8 @@ class TestCodeExecuteNodeExecutor:
             await CodeExecuteNodeExecutor(node).execute(state)
 
     @pytest.mark.asyncio
-    async def test_access_to_state_context(self):
+    async def test_access_to_state_context(self, monkeypatch):
+        monkeypatch.setattr(settings, "ENABLE_WORKFLOW_CODE_NODES", True)
         node = _make_node(data={
             "code": "result = context.get('x', 0) + 10",
             "language": "python",

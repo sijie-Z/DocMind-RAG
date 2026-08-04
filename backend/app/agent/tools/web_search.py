@@ -3,6 +3,7 @@
 Rate limited to 10 requests/minute per user via Redis counter.
 """
 
+import ipaddress
 import logging
 from typing import Any
 
@@ -11,6 +12,46 @@ from app.agent.registry import register_tool
 logger = logging.getLogger(__name__)
 
 RATE_LIMIT_RPM = 10  # max web requests per minute per user
+
+_PRIVATE_NETWORKS = (
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+)
+
+
+def _validate_public_url(url: str) -> str:
+    """Block SSRF targets: private, loopback, link-local, and cloud metadata ranges."""
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("URL 必须使用 http:// 或 https://")
+    if not parsed.hostname:
+        raise ValueError("URL 缺少主机名")
+
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, None)
+    except socket.gaierror as e:
+        raise ValueError(f"无法解析主机名: {parsed.hostname}") from e
+
+    for _, _, _, _, sockaddr in infos:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or any(ip in net for net in _PRIVATE_NETWORKS)
+        ):
+            raise ValueError(f"不允许访问内网地址: {ip}")
+    return url
 
 
 async def _check_rate_limit(user_id: int, limit: int = RATE_LIMIT_RPM) -> bool:
@@ -114,20 +155,33 @@ async def fetch_webpage(
     if not await _check_rate_limit(user_id):
         return "Rate limit exceeded."
 
-    # Basic URL validation
-    if not url.startswith(("http://", "https://")):
-        return f"Invalid URL: {url}. URL must start with http:// or https://"
-
     try:
+        from urllib.parse import urljoin
+
         import httpx
 
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            response = await client.get(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; DocMind/1.0; +https://docmind.ai)",
-                },
-            )
+        current_url = _validate_public_url(url)
+
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+            response = None
+            for _ in range(5):
+                current_url = _validate_public_url(current_url)
+                response = await client.get(
+                    current_url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (compatible; DocMind/1.0; +https://docmind.ai)",
+                    },
+                )
+                if response.status_code in (301, 302, 303, 307, 308):
+                    location = response.headers.get("location", "")
+                    if not location:
+                        break
+                    current_url = urljoin(str(response.url), location)
+                    continue
+                break
+
+            if response is None:
+                return f"Failed to fetch {url}: no response"
             if response.status_code != 200:
                 return f"Failed to fetch {url}: HTTP {response.status_code}"
 
@@ -141,7 +195,7 @@ async def fetch_webpage(
             if len(text) > 5000:
                 text = text[:5000] + "\n...[truncated]"
 
-            return f"Content from {url}:\n\n{text}"
+            return f"Content from {current_url}:\n\n{text}"
     except ImportError:
         return "Webpage fetch unavailable: httpx package not installed."
     except Exception as e:
