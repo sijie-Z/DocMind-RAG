@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -104,6 +105,7 @@ class MetricsCollector:
             stats = await self._get_stats_internal()
             stats["timestamp"] = int(time.time())
             self.history.append(stats)
+        await self._persist_snapshot(stats)
 
     async def _get_stats_internal(self) -> dict[str, Any]:
         avg_time = (self.total_response_time / self.request_count * 1000) if self.request_count > 0 else 0
@@ -127,7 +129,45 @@ class MetricsCollector:
     async def get_history(self) -> list[dict[str, Any]]:
         """获取历史趋势数据"""
         async with self.lock:
+            if not self.history:
+                await self._load_snapshots()
             return list(self.history)
+
+    async def _persist_snapshot(self, stats: dict[str, Any]) -> None:
+        from app.core.redis import redis_client
+
+        if not redis_client:
+            return
+        try:
+            await redis_client.lpush(
+                "metrics:snapshots", json.dumps(stats, ensure_ascii=False)
+            )
+            await redis_client.ltrim(
+                "metrics:snapshots",
+                0,
+                max(100, int(settings.METRICS_DURATION_SAMPLE_SIZE)),
+            )
+        except Exception as e:
+            logger.warning(f"Metrics snapshot persist failed: {e}")
+
+    async def _load_snapshots(self) -> None:
+        from app.core.redis import redis_client
+
+        if not redis_client:
+            return
+        try:
+            raw_snapshots = await redis_client.lrange("metrics:snapshots", 0, -1)
+            parsed: list[dict[str, Any]] = []
+            for raw in raw_snapshots:
+                try:
+                    parsed.append(json.loads(raw))
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            if parsed:
+                self.history.clear()
+                self.history.extend(reversed(parsed))
+        except Exception as e:
+            logger.warning(f"Metrics snapshot load failed: {e}")
 
     async def get_route_stats(self) -> dict[str, dict[str, float]]:
         async with self.lock:

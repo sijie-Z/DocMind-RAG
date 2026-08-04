@@ -253,7 +253,7 @@ async def get_graph_rag_stats(
     try:
         from app.services.graph_rag_service import graph_rag_service
 
-        analytics = graph_rag_service.get_analytics()
+        analytics = await graph_rag_service.get_analytics()
 
         return {
             "success": True,
@@ -282,7 +282,7 @@ async def clear_graph_rag(
     try:
         from app.services.graph_rag_service import graph_rag_service
 
-        graph_rag_service.graph.clear()
+        await graph_rag_service.clear()
 
         return {
             "success": True,
@@ -702,9 +702,10 @@ async def get_knowledge_graph(
     from app.services.graph_rag_service import graph_rag_service
 
     try:
+        await graph_rag_service.load()
         if query:
             # Search for specific entities
-            results = graph_rag_service.search_graph(query, max_hops=2)
+            results = await graph_rag_service.search_graph(query, max_hops=2)
         else:
             # Return all entities (up to max_nodes)
             results = []
@@ -757,7 +758,7 @@ async def get_knowledge_graph(
                         "relation": rel.get("relation", "RELATED_TO"),
                     })
 
-        analytics = graph_rag_service.get_analytics()
+        analytics = await graph_rag_service.get_analytics()
 
         return {
             "nodes": nodes[:max_nodes],

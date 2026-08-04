@@ -44,7 +44,7 @@ Current baseline:
 
 Known limitations:
 - Workflow code nodes are disabled by default. Set `ENABLE_WORKFLOW_CODE_NODES=true` to opt in; execution now requires the Docker sandbox.
-- GraphRAG, agent memory, and performance metrics still use in-process state; migrate to Redis before multi-instance deployment.
+- GraphRAG graphs and metrics snapshots now persist to Redis; real-time counters are still in-process, so multi-instance tuning is still recommended.
 - The knowledge, profile, and workflow editor pages have all been split into components/composables; no 1000-line SFC pages remain.
 
 ---

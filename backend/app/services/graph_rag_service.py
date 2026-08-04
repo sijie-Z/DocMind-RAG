@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 class GraphRAGService:
     def __init__(self):
+        self._redis_key = "rag:graph"
         self.graph: dict[str, dict[str, Any]] = defaultdict(lambda: {
             "entity_type": "UNKNOWN",
             "description": "",
@@ -24,6 +25,36 @@ class GraphRAGService:
             "PRODUCT": "产品",
             "TECHNOLOGY": "技术"
         }
+
+    async def load(self) -> None:
+        """Load the graph from Redis; keeps in-memory state when Redis is unavailable."""
+        from app.core.redis import redis_client
+
+        if not redis_client:
+            return
+        try:
+            raw = await redis_client.get(self._redis_key)
+            if raw:
+                data = json.loads(raw)
+                self.graph.clear()
+                self.graph.update(data)
+        except Exception as e:
+            logger.warning(f"GraphRAG load from Redis failed: {e}")
+
+    async def save(self) -> None:
+        """Persist the graph to Redis when available."""
+        from app.core.redis import redis_client
+
+        if not redis_client:
+            return
+        try:
+            await redis_client.setex(
+                self._redis_key,
+                86400,
+                json.dumps(dict(self.graph), ensure_ascii=False),
+            )
+        except Exception as e:
+            logger.warning(f"GraphRAG save to Redis failed: {e}")
 
     def extract_entities_with_llm(self, text: str, llm_client: Any = None) -> list[dict[str, Any]]:
         if not text or len(text) < 50:
@@ -96,7 +127,7 @@ JSON返回："""
 
         return entities[:20]
 
-    def build_graph_from_entities(self, entities: list[dict[str, Any]]) -> None:
+    async def build_graph_from_entities(self, entities: list[dict[str, Any]]) -> None:
         for ent in entities:
             entity_name = ent.get("entity", "")
             if not entity_name:
@@ -120,11 +151,17 @@ JSON返回："""
                         "target": entity_key,
                         "relation": rel.get("relation", "RELATED_TO")
                     })
+        await self.save()
+
+    async def clear(self) -> None:
+        self.graph.clear()
+        await self.save()
 
     def _normalize_entity(self, entity: str) -> str:
         return hashlib.md5(entity.lower().encode()).hexdigest()[:16]
 
-    def search_graph(self, query: str, max_hops: int = 2) -> list[dict[str, Any]]:
+    async def search_graph(self, query: str, max_hops: int = 2) -> list[dict[str, Any]]:
+        await self.load()
         query_entities = self.extract_entities_with_llm(query)
         if not query_entities:
             return []
@@ -174,7 +211,8 @@ JSON返回："""
 
         return "\n---\n".join(context_parts[:10])
 
-    def get_analytics(self) -> dict[str, Any]:
+    async def get_analytics(self) -> dict[str, Any]:
+        await self.load()
         type_counts = defaultdict(int)
         for node in self.graph.values():
             type_counts[node.get("entity_type", "UNKNOWN")] += 1

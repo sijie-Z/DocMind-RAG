@@ -5,6 +5,16 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-08-04
+
+### Observability and state
+- GraphRAG 图谱支持 Redis 持久化：`build_graph_from_entities`、`clear` 后自动保存，查询前自动加载。
+- `MetricsCollector` 快照支持 Redis 持久化，服务重启后仍可恢复历史趋势。
+- 新增 GraphRAG 与 Metrics Redis 持久化单元测试。
+
+### Testing
+- 后端 `tests/unit + tests/behavior`：410 passed / 1 skipped。
+
 ## [1.11.0] - 2026-08-04
 
 ### Frontend architecture
