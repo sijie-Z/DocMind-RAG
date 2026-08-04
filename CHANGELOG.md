@@ -5,6 +5,16 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] - 2026-08-04
+
+### Build and deployment
+- 前端 `manualChunks` 改为按包名精确分组，消除 `vendor -> vue -> vendor` 循环 chunk 警告。
+- `.env.example` / `.env.docker.example` 补充 `METRICS_LIVE_PERSIST_SECONDS`、`ENABLE_WORKFLOW_CODE_NODES`、`SANDBOX_MODE`。
+- `docker-compose.yml` 为后端增加 Python 健康检查。
+
+### Testing
+- 前端 `vue-tsc --noEmit` 与 `vite build` 通过。
+
 ## [1.14.0] - 2026-08-04
 
 ### Metrics persistence

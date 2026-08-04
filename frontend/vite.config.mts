@@ -158,36 +158,43 @@ export default defineConfig({
         entryFileNames: 'assets/js/[name]-[hash].js',
         assetFileNames: 'assets/[ext]/[name]-[hash].[ext]',
         manualChunks(id) {
-            if (id.includes('node_modules')) {
-                if (id.includes('naive-ui')) {
-                    return 'naive-ui'
-                }
-                if (id.includes('vue')) {
-                    return 'vue'
-                }
-                if (id.includes('marked') || id.includes('highlight.js') || id.includes('markdown-it')) {
-                    return 'markdown'
-                }
-                if (id.includes('@vueuse')) {
-                    return 'vueuse'
-                }
-                if (id.includes('echarts') || id.includes('zrender')) {
-                    return 'charts'
-                }
-                if (id.includes('vue-virtual-scroller')) {
-                    return 'virtual-scroller'
-                }
-                if (id.includes('dayjs')) {
-                    return 'dayjs'
-                }
-                if (id.includes('lodash')) {
-                    return 'lodash'
-                }
-                if (id.includes('pinia')) {
-                    return 'pinia'
-                }
-                return 'vendor'
+            if (!id.includes('node_modules')) return
+            const segment = id.split('node_modules/')[1] ?? ''
+            const pkg = segment.split('/')[0] ?? ''
+            if (pkg === 'vue' || pkg === 'vue-router' || pkg === 'pinia' || pkg.startsWith('@vue')) {
+                return 'vue'
             }
+            if (pkg === 'naive-ui' || pkg === '@css-render' || pkg === 'vooks' || pkg === 'treemate' || pkg === 'seemly' || pkg === 'vdirs') {
+                return 'naive-ui'
+            }
+            if (pkg === 'echarts' || pkg === 'zrender') {
+                return 'charts'
+            }
+            if (pkg === 'markdown-it' || pkg === 'highlight.js' || pkg === 'katex' || pkg === 'dompurify') {
+                return 'markdown'
+            }
+            if (pkg === '@vueuse' || pkg === '@vueuse/core') {
+                return 'vueuse'
+            }
+            if (pkg === 'dayjs') {
+                return 'dayjs'
+            }
+            if (pkg === 'lodash' || pkg === 'lodash-es') {
+                return 'lodash'
+            }
+            if (pkg === 'vue-virtual-scroller' || pkg === 'vue-observe-visibility' || pkg === 'vue-resize') {
+                return 'virtual-scroller'
+            }
+            if (pkg === '@vue-flow' || pkg.startsWith('@vue-flow/')) {
+                return 'vue-flow'
+            }
+            if (pkg === 'axios') {
+                return 'axios'
+            }
+            if (pkg === 'qrcode') {
+                return 'qrcode'
+            }
+            return undefined
         }
       }
     }

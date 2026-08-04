@@ -34,6 +34,12 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./temp_uploads:/app/temp_uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     networks:
       - docmind-network
     restart: unless-stopped
