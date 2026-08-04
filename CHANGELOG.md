@@ -5,6 +5,16 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-08-05
+
+### Agent SDK learnings
+- 新增类型化 `RunContext`，Executor 在工具调用时构造并传入，工具可显式声明
+  `run_context: RunContext`，对齐 OpenAI Agents SDK / Claude Agent SDK 的上下文传递方式。
+- 新增 `docs/sdk_learnings.md`，记录从两个 SDK 学到的架构点与落地清单。
+
+### Testing
+- 后端 `tests/unit + tests/behavior`：416 passed / 1 skipped。
+
 ## [1.17.0] - 2026-08-04
 
 ### Frontend performance

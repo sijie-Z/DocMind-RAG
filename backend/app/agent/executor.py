@@ -29,6 +29,7 @@ from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, PlanStep
 from app.agent.registry import tool_registry
 from app.agent.retry_policy import compute_backoff, get_policy
+from app.agent.run_context import RunContext
 from app.core.prometheus import (
     AGENT_EXECUTION_STEPS,
     AGENT_TOOL_CALLS,
@@ -643,12 +644,20 @@ class Executor:
             # Execute tool (with timeout + error classification)
             start = time.perf_counter()
             try:
+                run_context = RunContext(
+                    user_id=user_id,
+                    organization_id=organization_id,
+                    session_id=getattr(self.config, "agent_id", None),
+                    agent_id=getattr(self.config, "agent_id", "default"),
+                    config=getattr(self.config, "model_config", {}) or {},
+                )
                 raw_result = await asyncio.wait_for(
                     tool_registry.execute_detailed(
                         func.name,
                         args,
                         organization_id=organization_id,
                         user_id=user_id,
+                        run_context=run_context,
                     ),
                     timeout=self.TOOL_TIMEOUT_SECONDS,
                 )
