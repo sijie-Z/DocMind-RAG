@@ -5,6 +5,15 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-08-04
+
+### Frontend architecture
+- 将个人中心页面的业务逻辑抽取到 `composables/useProfilePage.ts`。
+- `profile/index.vue` 从 1432 行降到 514 行，模板与脚本职责分离。
+
+### Testing
+- 前端 `vue-tsc --noEmit` 与 `vite build` 通过。
+
 ## [1.9.0] - 2026-08-04
 
 ### Frontend architecture

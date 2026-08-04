@@ -45,7 +45,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 已知限制：
 - 工作流代码节点默认关闭，需显式设置 `ENABLE_WORKFLOW_CODE_NODES=true`，且必须通过 Docker 沙箱执行。
 - GraphRAG、Agent 记忆、性能指标等全局状态仍以进程内为主，多实例部署前需要迁移到 Redis。
-- 前端 `knowledge/index.vue` 已完成拆分；`editor.vue` 和 `profile/index.vue` 仍是大文件，下一步继续拆组件。
+- 前端 `knowledge/index.vue` 和 `profile/index.vue` 已完成拆分；`editor.vue` 仍是大文件，下一步继续拆组件。
 
 ---
 
