@@ -47,10 +47,6 @@ export const deleteConversation = async (id: string): Promise<void> => {
   return request.delete(`/chat/conversations/${id}`)
 }
 
-export const batchDeleteConversations = async (ids: string[]): Promise<void> => {
-  return request.delete('/chat/conversations/batch', { data: { ids } })
-}
-
 // 获取对话消息详情（别名，向后兼容）
 export const getConversationMessages = getConversation
 

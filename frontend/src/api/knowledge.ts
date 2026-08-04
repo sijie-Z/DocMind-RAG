@@ -99,14 +99,6 @@ export const uploadKnowledgeBase = async (
   })
 }
 
-export const updateKnowledgeBase = async (id: string, data: {
-  title?: string
-  tags?: string[]
-  description?: string
-}): Promise<AxiosResponse<{ data: KnowledgeBase }>> => {
-  return request.put(`/knowledge/${id}`, data)
-}
-
 export const deleteKnowledgeBase = async (id: string): Promise<void> => {
   return request.delete(`/knowledge/document/${id}`)
 }
@@ -119,10 +111,6 @@ export const rebuildKnowledgeBase = async (id: string): Promise<AxiosResponse<Ap
   return request.post(`/knowledge/rebuild/${id}`)
 }
 
-
-export const searchKnowledgeBases = async (query: string): Promise<AxiosResponse<{ data: KnowledgeBase[] }>> => {
-  return request.get('/knowledge/search', { params: { q: query } })
-}
 
 export interface GraphNode {
   id: string

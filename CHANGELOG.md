@@ -5,6 +5,17 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-08-04
+
+### Features and fixes
+- 补齐用户管理后端接口：管理员创建用户、更新用户信息、重置用户密码。
+- 前端用户管理新增初始密码字段，创建用户不再依赖不存在的 `/users/create`。
+- 移除前端无效/死代码 API：`/chat/completions`、`PUT /knowledge/{id}`、GET `/knowledge/search`、批量删除会话。
+
+### Testing
+- 后端 `tests/unit + tests/behavior`：410 passed / 1 skipped。
+- 前端 `vue-tsc --noEmit` 通过。
+
 ## [1.7.0] - 2026-08-04
 
 ### Security

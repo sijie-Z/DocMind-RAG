@@ -79,6 +79,7 @@ export const getAuditLogs = async (params?: {
 export const createUser = async (data: {
   username: string
   email: string
+  password: string
   nickname: string
   phone?: string
   role: 'admin' | 'user'
@@ -86,7 +87,7 @@ export const createUser = async (data: {
   organization_ids?: number[]
   remark?: string
 }): Promise<AxiosResponse<{ data: User }>> => {
-  return request.post('/users/create', data)
+  return request.post('/users/', data)
 }
 
 export const updateUser = async (id: number, data: {

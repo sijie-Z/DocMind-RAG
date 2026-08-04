@@ -54,6 +54,32 @@ class ActivityResponse(BaseModel):
     time: str
 
 
+class UserCreateAdmin(BaseModel):
+    username: str
+    email: str
+    password: str
+    nickname: str = ""
+    phone: str | None = None
+    role: str = "user"
+    status: str = "active"
+    organization_ids: list[int] = []
+    remark: str | None = None
+
+
+class UserUpdateAdmin(BaseModel):
+    email: str | None = None
+    nickname: str | None = None
+    phone: str | None = None
+    role: str | None = None
+    status: str | None = None
+    organization_ids: list[int] | None = None
+    remark: str | None = None
+
+
+class UserResetPasswordAdmin(BaseModel):
+    new_password: str
+
+
 def _client_ip(request: Request) -> str | None:
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
@@ -82,6 +108,153 @@ async def _log_user_activity(
         user_agent=request.headers.get("user-agent") if request else None,
     )
     db.add(log)
+
+
+@router.post("/", response_model=dict, summary="创建用户", dependencies=[Depends(permission_required([PermissionType.MANAGE_USER_ROLES]))])
+async def create_user_admin(
+    body: UserCreateAdmin,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        existing = await db.execute(
+            select(User).where(or_(User.username == body.username, User.email == body.email))
+        )
+        if existing.scalar_one_or_none():
+            raise ConflictError("用户名或邮箱已存在")
+
+        org_id = body.organization_ids[0] if body.organization_ids else None
+        if org_id is not None and not current_user.is_superuser:
+            if org_id != (current_user.organization_id or 1):
+                raise AuthorizationError("无权在指定组织创建用户")
+
+        user = await auth_service.create_user(
+            db,
+            body.username,
+            body.email,
+            body.password,
+            full_name=body.nickname,
+            organization_id=org_id or current_user.organization_id,
+            role="admin" if body.role == "admin" else "user",
+        )
+        user.is_active = body.status != "inactive"
+        if body.remark:
+            user.preferences = json.dumps({"remark": body.remark}, ensure_ascii=False)
+
+        await _log_user_activity(
+            db,
+            current_user.id,
+            action="create_user",
+            target_type="user",
+            detail=f"创建用户 {body.username}",
+        )
+        await db.commit()
+        return {"message": "用户创建成功", "user_id": user.id}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
+        raise
+    except Exception as e:
+        raise AppError(f"创建用户失败: {str(e)}")
+
+
+@router.put("/{user_id:int}", response_model=dict, summary="更新用户", dependencies=[Depends(permission_required([PermissionType.MANAGE_USER_ROLES]))])
+async def update_user_admin(
+    user_id: int,
+    body: UserUpdateAdmin,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        user = (
+            await db.execute(select(User).where(User.id == user_id))
+        ).scalar_one_or_none()
+        if not user:
+            raise NotFoundError("用户不存在")
+        if (
+            not current_user.is_superuser
+            and current_user.organization_id
+            and user.organization_id != current_user.organization_id
+        ):
+            raise AuthorizationError("无权修改该用户")
+
+        if body.email is not None and body.email != user.email:
+            duplicate = await db.execute(
+                select(User).where(User.email == body.email, User.id != user_id)
+            )
+            if duplicate.scalar_one_or_none():
+                raise ConflictError("邮箱已存在")
+            user.email = body.email
+        if body.nickname is not None:
+            user.full_name = body.nickname
+        if body.phone is not None:
+            user.phone = body.phone
+        if body.role is not None:
+            user.role = "admin" if body.role == "admin" else "user"
+        if body.status is not None:
+            user.is_active = body.status != "inactive"
+        if body.organization_ids:
+            org_id = body.organization_ids[0]
+            if not current_user.is_superuser and org_id != (current_user.organization_id or 1):
+                raise AuthorizationError("无权将用户移动到该组织")
+            user.organization_id = org_id
+        if body.remark is not None:
+            try:
+                pref = json.loads(user.preferences) if user.preferences else {}
+            except (json.JSONDecodeError, TypeError):
+                pref = {}
+            pref["remark"] = body.remark
+            user.preferences = json.dumps(pref, ensure_ascii=False)
+
+        await _log_user_activity(
+            db,
+            current_user.id,
+            action="update_user",
+            target_type="user",
+            target_id=str(user_id),
+            detail=f"更新用户 {user.username}",
+        )
+        await db.commit()
+        return {"message": "用户更新成功", "user_id": user_id}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
+        raise
+    except Exception as e:
+        raise AppError(f"更新用户失败: {str(e)}")
+
+
+@router.put("/{user_id:int}/password", response_model=dict, summary="重置用户密码", dependencies=[Depends(permission_required([PermissionType.MANAGE_USER_ROLES]))])
+async def reset_user_password_admin(
+    user_id: int,
+    body: UserResetPasswordAdmin,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        user = (
+            await db.execute(select(User).where(User.id == user_id))
+        ).scalar_one_or_none()
+        if not user:
+            raise NotFoundError("用户不存在")
+        if (
+            not current_user.is_superuser
+            and current_user.organization_id
+            and user.organization_id != current_user.organization_id
+        ):
+            raise AuthorizationError("无权重置该用户密码")
+
+        user.hashed_password = auth_service.hash_password(body.new_password)
+        await _log_user_activity(
+            db,
+            current_user.id,
+            action="reset_password",
+            target_type="user",
+            target_id=str(user_id),
+            detail=f"重置用户 {user.username} 的密码",
+        )
+        await db.commit()
+        return {"message": "密码重置成功", "user_id": user_id}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
+        raise
+    except Exception as e:
+        raise AppError(f"重置密码失败: {str(e)}")
 
 
 # --- Endpoints ---
@@ -918,4 +1091,3 @@ async def revoke_api_key(
     except Exception as e:
         await db.rollback()
         raise AppError(f"撤销 API Key 失败: {str(e)}")
-

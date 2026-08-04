@@ -115,6 +115,9 @@
             <n-form-item :label="t('profile.nickname')" path="nickname">
               <n-input v-model:value="userForm.nickname" :placeholder="t('profile.placeholder.nickname')" round />
             </n-form-item>
+            <n-form-item v-if="!editingUser" :label="t('users.initialPassword') || '初始密码'" path="password">
+              <n-input v-model:value="userForm.password" type="password" show-password-on="mousedown" round />
+            </n-form-item>
             <n-form-item :label="t('profile.email')" path="email">
               <n-input v-model:value="userForm.email" :placeholder="t('profile.placeholder.email')" round />
             </n-form-item>
@@ -245,6 +248,7 @@ const resetPasswordFormRef = ref<FormInst | null>(null)
 // 表单数据
 const userForm = ref({
   username: '',
+  password: '',
   email: '',
   nickname: '',
   phone: '',
@@ -273,7 +277,10 @@ const organizationOptions = ref([
 const formRules = computed<FormRules>(() => ({
   username: [{ required: true, message: t('validation.required'), trigger: 'blur' }],
   email: [{ required: true, type: 'email', message: t('validation.email'), trigger: 'blur' }],
-  nickname: [{ required: true, message: t('validation.required'), trigger: 'blur' }]
+  nickname: [{ required: true, message: t('validation.required'), trigger: 'blur' }],
+  ...(editingUser.value ? {} : {
+    password: [{ required: true, min: 6, message: t('validation.passwordLength'), trigger: 'blur' }]
+  })
 }))
 
 const resetPasswordRules = computed<FormRules>(() => ({
@@ -409,6 +416,7 @@ const handleEdit = (user: User) => {
   // 使用解构赋值并为可能为 undefined 的字段提供默认空字符串
   userForm.value = {
     username: user.username,
+    password: '',
     email: user.email,
     nickname: user.nickname,
     phone: user.phone || '', // 如果是 undefined，就给个空字符串
@@ -429,7 +437,7 @@ const openResetPwd = (user: User) => {
 const closeCreateModal = () => {
   showCreateModal.value = false
   editingUser.value = null
-  userForm.value = { username: '', email: '', nickname: '', phone: '', role: 'user', status: 'active', organization_ids: [], remark: '' }
+  userForm.value = { username: '', password: '', email: '', nickname: '', phone: '', role: 'user', status: 'active', organization_ids: [], remark: '' }
 }
 
 const saveUser = async () => {
@@ -437,7 +445,7 @@ const saveUser = async () => {
     await formRef.value?.validate()
     saving.value = true
     if (editingUser.value) {
-      const { username: _, ...updateData } = userForm.value
+      const { username: _, password: __, ...updateData } = userForm.value
       await updateUser(editingUser.value.id, updateData)
       message.success(t('common.success'))
     } else {
