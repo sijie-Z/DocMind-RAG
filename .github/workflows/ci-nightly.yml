@@ -73,6 +73,7 @@ jobs:
           echo "EMBEDDING_API_KEY=test-key" >> $GITHUB_ENV
           echo "ENABLE_RATE_LIMIT=false" >> $GITHUB_ENV
           echo "ENABLE_MONITORING=false" >> $GITHUB_ENV
+          echo "RUN_INTEGRATION=1" >> $GITHUB_ENV
 
       - name: Run integration tests
         working-directory: backend

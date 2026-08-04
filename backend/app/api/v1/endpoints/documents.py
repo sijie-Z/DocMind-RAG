@@ -16,7 +16,11 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.kafka_client import kafka_producer
 from app.core.minio_client import minio_client
-from app.core.security import get_current_user, permission_required
+from app.core.security import (
+    get_current_user,
+    get_document_for_user,
+    permission_required,
+)
 from app.exceptions import AppError, AuthorizationError, NotFoundError
 from app.models.document import Document, DocumentStatus, DocumentType
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
@@ -204,6 +208,7 @@ async def upload_document(
             retry_count=0,
         )
         db.add(job)
+        await db.flush()
 
         sent = False
         schedule_local = False
@@ -211,6 +216,7 @@ async def upload_document(
             message = {
                 "document_id": doc_id,
                 "organization_id": org_id,
+                "job_id": job.id,
                 "file_path": object_name,
                 "filename": file.filename,
                 "file_type": new_doc.file_type.value if hasattr(new_doc.file_type, "value") else str(new_doc.file_type),
@@ -228,7 +234,7 @@ async def upload_document(
         if schedule_local:
             try:
                 from app.worker.doc_processor import processor
-                asyncio.create_task(processor.process(doc_id))
+                asyncio.create_task(processor.process(doc_id, job.id))
                 logger.info("Kafka unavailable; scheduled in-process document processing")
             except Exception as proc_err:
                 logger.error(f"In-process processing setup failed: {proc_err}")
@@ -265,13 +271,7 @@ async def get_document_status(
     获取单个文档状态及详情
     """
     try:
-        doc = await db.get(Document, document_id)
-        if not doc:
-            raise NotFoundError("文档不存在")
-
-        # 鉴权：只能查看自己上传的或同组织的
-        if doc.organization_id != current_user.organization_id and doc.uploaded_by != current_user.id:
-            raise AuthorizationError("无权查看该文档")
+        doc = await get_document_for_user(db, current_user, document_id)
 
         # 状态映射：将内部状态转换为前端期望的状态
         status_map = {
@@ -322,13 +322,7 @@ async def get_document_full_content(
     获取文档全文内容（用于预览）
     """
     try:
-        doc = await db.get(Document, document_id)
-        if not doc:
-            raise NotFoundError("文档不存在")
-
-        # 鉴权
-        if doc.organization_id != current_user.organization_id and doc.uploaded_by != current_user.id:
-            raise AuthorizationError("无权查看该文档内容")
+        doc = await get_document_for_user(db, current_user, document_id)
 
         # 从 ES 中获取该文档的所有分块并按 index 排序
         from app.core.elasticsearch import ElasticsearchTools
@@ -376,12 +370,7 @@ async def download_document(
     current_user: User = Depends(get_current_user)
 ):
     try:
-        doc = await db.get(Document, document_id)
-        if not doc:
-            raise NotFoundError("文档不存在")
-
-        if doc.organization_id != current_user.organization_id and doc.uploaded_by != current_user.id:
-            raise AuthorizationError("无权下载该文档")
+        doc = await get_document_for_user(db, current_user, document_id)
 
         url = minio_client.get_presigned_url(doc.file_path)
         return RedirectResponse(url=url)

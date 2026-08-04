@@ -5,6 +5,19 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-08-04
+
+### Architecture
+- 统一文档处理管线：`worker/doc_processor.py` 成为解析、分块、向量化、ES 索引的唯一实现，任务状态同步到 `knowledge_processing_jobs`。
+- 知识库构建接口改为委托统一 Processor，移除三套并行索引逻辑。
+- 聊天核心管线从 `api/v1/endpoints/chat.py` 下沉到 `services/chat_service.py`，路由层只保留协议编排。
+- 新增统一文档授权辅助 `get_document_for_user`，文档查看/内容/下载/删除/重建共用同一组织校验。
+- 增加文档处理端到端集成测试（默认跳过，`RUN_INTEGRATION=1` 时运行）。
+
+### Testing
+- 后端 `tests/unit + tests/behavior`：409 passed / 1 skipped。
+- 前端 `vue-tsc --noEmit` 通过。
+
 ## [1.4.0] - 2026-08-04
 
 ### Security hardening and local usability

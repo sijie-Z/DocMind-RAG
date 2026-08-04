@@ -18,6 +18,7 @@ dist/
 
 # Review / temp repos
 backend/_review_temp2/
+.claude/
 
 # Benchmark cache (eval outputs, replays, results)
 backend/benchmark/cases/

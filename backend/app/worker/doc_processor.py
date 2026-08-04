@@ -1,142 +1,218 @@
-import asyncio
+"""Unified document processor — the single pipeline for parse, chunk, embed, and index.
+
+All document processing entry points (Kafka worker, in-process fallback, ``/files/upload``,
+knowledge-base rebuild) should go through ``processor.process()`` so chunk/ES/job state
+stays consistent.
+"""
+
 import logging
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.elasticsearch import ElasticsearchTools, create_index_if_not_exists
+from app.core.elasticsearch import (
+    ElasticsearchTools,
+    create_index_if_not_exists,
+    get_elasticsearch,
+)
 from app.models.document import Document, DocumentChunk, DocumentStatus
+from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.services.document_parser import document_service
 from app.services.embedding_service import embedding_service
 
 logger = logging.getLogger(__name__)
 
+
 class DocumentProcessor:
+    """Parse, embed, and index one document with idempotent replacement."""
+
     def __init__(self):
-        # 使用统一的文档解析服务
         self.parser = document_service
 
-    async def process(self, document_id: str):
+    async def process(self, document_id: str, job_id: int | None = None) -> bool:
+        """Run the full document pipeline once.
+
+        Old chunks and ES entries are replaced only after a successful parse, so a
+        retry never leaves partial duplicates behind.
         """
-        处理文档的主流程：
-        1. 更新状态为解析中
-        2. 解析文件内容与切片 (统一调用 document_service)
-        3. 保存切片到数据库
-        4. 生成向量 Embedding
-        5. 存入 Elasticsearch
-        6. 更新状态为索引完成
-        """
-        logger.info(f"[DOC_PROC] 任务开始：处理文档 {document_id}")
+        logger.info("[DOC_PROC] start document_id=%s job_id=%s", document_id, job_id)
+        try:
+            doc = await self._load_and_mark_parsing(document_id, job_id)
+            if doc is None:
+                return False
+
+            parse_result = await self.parser.parse_document(
+                doc.file_path, str(doc.organization_id)
+            )
+            chunks_data = parse_result.get("chunks", [])
+            if not chunks_data:
+                raise ValueError("文件解析后无内容，可能为空文件或解析失败。")
+
+            embeddings = await self._get_embeddings(
+                [c["chunk_text"] for c in chunks_data]
+            )
+            if len(embeddings) != len(chunks_data):
+                raise ValueError(
+                    f"向量生成数量与文本块数量不匹配: {len(embeddings)} vs {len(chunks_data)}"
+                )
+
+            await self._replace_document_state(doc, chunks_data, embeddings)
+            await self._mark_success(document_id, chunks_data, job_id)
+            logger.info(
+                "[DOC_PROC] done document_id=%s chunks=%d", document_id, len(chunks_data)
+            )
+            return True
+        except Exception as e:
+            logger.error(
+                "[DOC_PROC] failed document_id=%s: %s", document_id, e, exc_info=True
+            )
+            await self._mark_failed(document_id, str(e), job_id)
+            return False
+
+    async def _load_and_mark_parsing(
+        self, document_id: str, job_id: int | None
+    ) -> Document | None:
+        async with AsyncSessionLocal() as session:
+            doc = (
+                await session.execute(
+                    select(Document).where(Document.id == document_id)
+                )
+            ).scalar_one_or_none()
+            if not doc:
+                logger.error("[DOC_PROC] document not found: %s", document_id)
+                return None
+
+            doc.status = DocumentStatus.PARSING
+            doc.parse_error = None
+            if job_id:
+                job = await session.get(KnowledgeProcessingJob, job_id)
+                if job:
+                    job.status = KnowledgeJobStatus.PROCESSING
+                    job.started_at = datetime.now()
+            await session.commit()
+            return doc
+
+    async def _replace_document_state(
+        self, doc: Document, chunks_data: list[dict], embeddings: list[list[float]]
+    ) -> None:
+        chunk_rows: list[DocumentChunk] = []
+        es_docs: list[dict] = []
+
+        for i, (chunk_data, embedding) in enumerate(
+            zip(chunks_data, embeddings, strict=False)
+        ):
+            chunk_id = str(uuid.uuid4())
+            metadata = chunk_data.get("metadata", {}) or {}
+            chunk_rows.append(
+                DocumentChunk(
+                    id=chunk_id,
+                    document_id=doc.id,
+                    chunk_index=chunk_data["chunk_index"],
+                    chunk_text=chunk_data["chunk_text"],
+                    chunk_length=chunk_data["chunk_length"],
+                    start_pos=chunk_data.get("start_pos"),
+                    end_pos=chunk_data.get("end_pos"),
+                    page_number=metadata.get("page_number"),
+                    section_title=metadata.get("section_title"),
+                    meta_data=metadata,
+                )
+            )
+            es_docs.append(
+                {
+                    "_index": settings.ELASTICSEARCH_INDEX_NAME,
+                    "_id": f"{doc.id}_{chunk_id}",
+                    "_source": {
+                        "content": chunk_data["chunk_text"],
+                        "chunk_text": chunk_data["chunk_text"],
+                        "embedding": embedding,
+                        "organization_id": str(doc.organization_id),
+                        "document_id": doc.id,
+                        "filename": doc.filename,
+                        "file_type": (
+                            doc.file_type.value
+                            if hasattr(doc.file_type, "value")
+                            else str(doc.file_type)
+                        ),
+                        "file_size": doc.file_size or 0,
+                        "upload_time": (
+                            doc.created_at.isoformat() if doc.created_at else None
+                        ),
+                        "user_id": str(doc.uploaded_by),
+                        "metadata": {
+                            "chunk_index": i,
+                            "chunk_id": chunk_id,
+                            "page_number": metadata.get("page_number"),
+                            "section_title": metadata.get("section_title"),
+                        },
+                    },
+                }
+            )
 
         async with AsyncSessionLocal() as session:
-            try:
-                # 1. 获取文档信息并更新状态
-                stmt = select(Document).where(Document.id == document_id)
-                doc = (await session.execute(stmt)).scalar_one_or_none()
+            await session.execute(
+                delete(DocumentChunk).where(DocumentChunk.document_id == doc.id)
+            )
+            session.add_all(chunk_rows)
+            await session.commit()
 
-                if not doc:
-                    logger.error(f"[DOC_PROC] ❌ 文档未找到: {document_id}")
-                    return
+        await create_index_if_not_exists()
+        client = await get_elasticsearch()
+        await client.delete_by_query(
+            index=settings.ELASTICSEARCH_INDEX_NAME,
+            query={"term": {"document_id": doc.id}},
+            refresh=True,
+        )
+        await ElasticsearchTools.bulk_index_documents(es_docs)
 
-                doc.status = DocumentStatus.PARSING
-                await session.commit()
-                logger.info(f"[DOC_PROC] 1/5 - 状态更新为 PARSING: {doc.filename}")
-
-                # 2. 解析与切块 (现在统一使用 document_service，它内部处理了下载)
-                logger.info("[DOC_PROC] 2/5 - 开始解析与切块...")
-                start_parse_time = asyncio.get_event_loop().time()
-
-                # document_service.parse_document 会自动处理 MinIO URL 并返回 chunks
-                parse_result = await self.parser.parse_document(doc.file_path, str(doc.organization_id))
-                chunks_data = parse_result.get("chunks", [])
-
-                parse_duration = (asyncio.get_event_loop().time() - start_parse_time) * 1000
-                if not chunks_data:
-                    raise ValueError("文件解析后无内容，可能为空文件或解析失败。")
-                logger.info(f"[DOC_PROC] 2/5 - ✅ 解析成功，获得 {len(chunks_data)} 个块，耗时 {parse_duration:.2f} ms")
-
-                # 3. 保存分块到数据库
-                logger.info("[DOC_PROC] 3/5 - 保存分块到数据库...")
-                for chunk_data in chunks_data:
-                    chunk = DocumentChunk(
-                        id=str(uuid.uuid4()),
-                        document_id=document_id,
-                        chunk_index=chunk_data["chunk_index"],
-                        chunk_text=chunk_data["chunk_text"],
-                        chunk_length=chunk_data["chunk_length"],
-                        start_pos=chunk_data.get("start_pos"),
-                        end_pos=chunk_data.get("end_pos"),
-                        metadata=chunk_data.get("metadata", {})
-                    )
-                    session.add(chunk)
-                await session.commit()
-
-                # 4. 生成向量
-                texts_to_embed = [chunk["chunk_text"] for chunk in chunks_data]
-                logger.info(f"[DOC_PROC] 4/5 - 开始为 {len(texts_to_embed)} 个块生成向量...")
-                start_embed_time = asyncio.get_event_loop().time()
-                embeddings = await self._get_embeddings(texts_to_embed)
-                embed_duration = (asyncio.get_event_loop().time() - start_embed_time) * 1000
-                if len(embeddings) != len(chunks_data):
-                    raise ValueError(f"向量生成数量与文本块数量不匹配: {len(embeddings)} vs {len(chunks_data)}")
-                logger.info(f"[DOC_PROC] 4/5 - ✅ 向量生成成功，耗时 {embed_duration:.2f} ms")
-
-                # 5. 索引到 Elasticsearch
-                logger.info(f"[DOC_PROC] 5/5 - 开始索引 {len(chunks_data)} 个文档到 Elasticsearch...")
-                await create_index_if_not_exists()
-                es_docs = []
-                for i, chunk in enumerate(chunks_data):
-                    es_docs.append({
-                        "_index": settings.ELASTICSEARCH_INDEX_NAME,
-                        "_id": f"{document_id}_{i}",
-                        "_source": {
-                            "content": chunk["chunk_text"],
-                            "embedding": embeddings[i],
-                            "organization_id": str(doc.organization_id),
-                            "document_id": document_id,
-                            "filename": doc.filename,
-                            "file_type": doc.file_type.value if hasattr(doc.file_type, "value") else str(doc.file_type),
-                            "file_size": doc.file_size or 0,
-                            "upload_time": doc.created_at.isoformat(),
-                            "metadata": {
-                                "chunk_index": i,
-                                "page": chunk.get("metadata", {}).get("page", 0) + 1
-                            }
-                        }
-                    })
-
-                start_index_time = asyncio.get_event_loop().time()
-                await ElasticsearchTools.bulk_index_documents(es_docs)
-                index_duration = (asyncio.get_event_loop().time() - start_index_time) * 1000
-                logger.info(f"[DOC_PROC] 5/5 - ✅ 批量索引成功，耗时 {index_duration:.2f} ms")
-
-                # 更新最终状态
+    async def _mark_success(
+        self, document_id: str, chunks_data: list[dict], job_id: int | None
+    ) -> None:
+        async with AsyncSessionLocal() as session:
+            doc = await session.get(Document, document_id)
+            if doc:
                 doc.status = DocumentStatus.INDEXED
                 doc.chunk_count = len(chunks_data)
                 doc.parsed_at = datetime.now()
                 doc.indexed_at = datetime.now()
                 doc.content_length = sum(len(c["chunk_text"]) for c in chunks_data)
-                await session.commit()
-                logger.info(f"[DOC_PROC] 🎉 任务完成: 文档 {document_id} 已成功处理并索引。")
+                doc.parse_error = None
+            if job_id:
+                job = await session.get(KnowledgeProcessingJob, job_id)
+                if job:
+                    job.status = KnowledgeJobStatus.SUCCESS
+                    job.error_message = None
+                    job.finished_at = datetime.now()
+            await session.commit()
 
-            except Exception as e:
-                logger.error(f"[DOC_PROC] ❌ 处理文档 {document_id} 时发生致命错误: {e}", exc_info=True)
-                await session.rollback()
-                async with AsyncSessionLocal() as error_session:
-                    stmt = select(Document).where(Document.id == document_id)
-                    doc_err = (await error_session.execute(stmt)).scalar_one_or_none()
-                    if doc_err:
-                        doc_err.status = DocumentStatus.FAILED
-                        doc_err.parse_error = str(e)
-                        await error_session.commit()
+    async def _mark_failed(
+        self, document_id: str, error: str, job_id: int | None
+    ) -> None:
+        async with AsyncSessionLocal() as session:
+            doc = await session.get(Document, document_id)
+            if doc:
+                doc.status = DocumentStatus.FAILED
+                doc.parse_error = error
+            await session.commit()
+
+        if job_id:
+            async with AsyncSessionLocal() as session:
+                job = await session.get(KnowledgeProcessingJob, job_id)
+                if job:
+                    job.status = KnowledgeJobStatus.FAILED
+                    job.error_message = error
+                    job.finished_at = datetime.now()
+                    await session.commit()
 
     async def _get_embeddings(self, texts: list[str]) -> list[list[float]]:
-        """统一走 embedding_service，避免模型/API 配置错位。"""
-        cleaned = [t.replace("\n", " ") for t in texts if t and t.strip()]
+        """Batch embedding with stable length; empty text becomes a placeholder."""
+        cleaned = [
+            t.replace("\n", " ") if t and t.strip() else " " for t in texts
+        ]
         return await embedding_service.get_embeddings(cleaned)
 
-# 全局实例
+
+# Global instance used by the worker, API fallback, and rebuild endpoints.
 processor = DocumentProcessor()

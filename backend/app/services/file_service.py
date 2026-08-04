@@ -548,16 +548,33 @@ class FileUploadService:
         """异步处理文档解析"""
         try:
             logger.info(f"开始异步处理文档: {document_id}")
-            success = await self.document_service.process_document(document_id)
+            from app.models.knowledge_job import (
+                KnowledgeJobStatus,
+                KnowledgeProcessingJob,
+            )
 
-            if success:
-                logger.info(f"文档解析成功，开始构建知识库索引: {document_id}")
-                # 局部导入避免循环依赖
-                from app.services.knowledge_service import knowledge_service
-                await knowledge_service.build_knowledge_base(document_id)
-                logger.info(f"文档全流程处理完成: {document_id}")
-            else:
+            async with AsyncSessionLocal() as session:
+                doc = await session.get(Document, document_id)
+                if not doc:
+                    logger.error(f"文档不存在，无法创建处理任务: {document_id}")
+                    return
+                job = KnowledgeProcessingJob(
+                    document_id=document_id,
+                    organization_id=doc.organization_id,
+                    trigger_type="upload",
+                    status=KnowledgeJobStatus.QUEUED,
+                )
+                session.add(job)
+                await session.commit()
+                job_id = job.id
+
+            from app.worker.doc_processor import processor
+
+            success = await processor.process(document_id, job_id)
+            if not success:
                 logger.error(f"文档解析失败: {document_id}")
+            else:
+                logger.info(f"文档全流程处理完成: {document_id}")
 
         except Exception as e:
             logger.error(f"文档异步处理失败: {document_id}, 错误: {str(e)}")

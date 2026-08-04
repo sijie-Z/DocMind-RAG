@@ -15,7 +15,11 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.elasticsearch import get_elasticsearch
 from app.core.kafka_client import kafka_producer
-from app.core.security import get_current_user, permission_required
+from app.core.security import (
+    get_current_user,
+    get_document_for_user,
+    permission_required,
+)
 from app.exceptions import (
     AppError,
     AuthorizationError,
@@ -298,14 +302,7 @@ async def rebuild_document_knowledge(
     重建单个文档的知识库索引：删除 ES 中该文档的索引后，重新发送 Kafka 任务由 Worker 解析并写 ES。
     """
     try:
-        result = await db.execute(select(Document).where(Document.id == document_id))
-        doc = result.scalar_one_or_none()
-
-        if not doc:
-            raise NotFoundError("文档不存在")
-
-        if not current_user.is_superuser and doc.organization_id != (current_user.organization_id or 1):
-            raise AuthorizationError("无权重建该文档")
+        doc = await get_document_for_user(db, current_user, document_id)
 
         # 1. 仅从 ES 删除该文档的索引
         await knowledge_service.delete_es_by_document_id(document_id)
@@ -319,6 +316,7 @@ async def rebuild_document_knowledge(
             retry_count=0,
         )
         db.add(job)
+        await db.flush()
 
         sent = False
         schedule_local = False
@@ -326,6 +324,7 @@ async def rebuild_document_knowledge(
             message = {
                 "document_id": document_id,
                 "organization_id": doc.organization_id,
+                "job_id": job.id,
                 "file_path": doc.file_path,
                 "filename": doc.filename,
                 "file_type": doc.file_type.value if hasattr(doc.file_type, "value") else str(doc.file_type),
@@ -346,7 +345,7 @@ async def rebuild_document_knowledge(
         if schedule_local:
             try:
                 from app.worker.doc_processor import processor
-                asyncio.create_task(processor.process(document_id))
+                asyncio.create_task(processor.process(document_id, job.id))
                 logger.info("Kafka unavailable; scheduled in-process document rebuild")
             except Exception as proc_err:
                 logger.error(f"本地重建任务启动失败: {proc_err}")
@@ -500,15 +499,7 @@ async def delete_knowledge_document(
     删除知识库文档（彻底删除）
     """
     try:
-        # 1. 验证文档是否存在
-        result = await db.execute(select(Document).where(Document.id == document_id))
-        doc = result.scalar_one_or_none()
-
-        if not doc:
-            raise NotFoundError("文档不存在")
-
-        if not current_user.is_superuser and doc.organization_id != (current_user.organization_id or 1):
-            raise AuthorizationError("无权删除该文档")
+        doc = await get_document_for_user(db, current_user, document_id)
 
         # 3. 调用 service 彻底删除
         success = await knowledge_service.delete_knowledge(document_id, doc.organization_id)

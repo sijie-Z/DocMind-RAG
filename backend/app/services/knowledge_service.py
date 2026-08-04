@@ -6,14 +6,11 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import and_, delete, func, select
-from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.elasticsearch import ElasticsearchTools, get_elasticsearch
+from app.core.elasticsearch import get_elasticsearch
 from app.models.document import Document, DocumentChunk, DocumentStatus
-from app.services.document_parser import document_service  # type: ignore
-from app.services.embedding_service import embedding_service
 from app.services.file_service import FileUploadService
 
 logger = logging.getLogger(__name__)
@@ -27,65 +24,10 @@ class KnowledgeService:
         self.file_upload_service = FileUploadService()
 
     async def build_knowledge_base(self, document_id: str) -> bool:
-        """Build knowledge base — parse, vectorize, index to ES, then mark INDEXED."""
-        try:
-            logger.info(f"Building knowledge base for document: {document_id}")
+        """Build knowledge base through the unified document processor."""
+        from app.worker.doc_processor import processor
 
-            # 1. Load document metadata
-            async with AsyncSessionLocal() as session:
-                result = await session.execute(
-                    select(Document)
-                    .options(selectinload(Document.chunks))
-                    .where(Document.id == document_id)
-                )
-                document = result.scalar_one_or_none()
-                if not document:
-                    logger.error(f"Document not found: {document_id}")
-                    return False
-
-            # 2. Parse document into chunks
-            chunks = await document_service.get_document_chunks(document_id)
-            if not chunks:
-                logger.warning(f"Document has no chunks: {document_id}")
-                return False
-
-            # 3. Batch vectorize and index to ES
-            batch_size = 50
-            for i in range(0, len(chunks), batch_size):
-                batch = chunks[i:i + batch_size]
-                texts = [c.chunk_text for c in batch]
-                embeddings = await embedding_service.get_embeddings(texts)
-
-                for j, chunk in enumerate(batch):
-                    es_doc = {
-                        "content": chunk.chunk_text,
-                        "embedding": embeddings[j],
-                        "filename": document.filename,
-                        "document_id": document_id,
-                        "organization_id": str(document.organization_id),
-                        "user_id": str(document.uploaded_by),
-                        "metadata": {
-                            "document_id": document_id,
-                            "chunk_id": chunk.id,
-                            "page_number": chunk.page_number,
-                            "section_title": chunk.section_title,
-                        },
-                    }
-                    await ElasticsearchTools.index_document(f"{document_id}_{chunk.id}", es_doc)
-
-            # 4. Mark as INDEXED only after ES indexing succeeds
-            async with AsyncSessionLocal() as session:
-                doc = await session.get(Document, document_id)
-                if doc:
-                    doc.status = DocumentStatus.INDEXED
-                    doc.indexed_at = datetime.now()
-                    await session.commit()
-
-            logger.info(f"Knowledge base built: {document_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Knowledge base build failed: {e}")
-            return False
+        return await processor.process(document_id)
 
     async def search_knowledge(
         self,

@@ -39,10 +39,11 @@ async def consume():
             logger.info(f"Received task: {msg.value}")
             data = msg.value
             doc_id = data.get("document_id")
+            job_id = data.get("job_id")
 
             if doc_id:
                 try:
-                    await processor.process(doc_id)
+                    await processor.process(doc_id, job_id)
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
             else:

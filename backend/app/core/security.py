@@ -3,6 +3,8 @@
 """
 
 # backend/app/core/security.py
+from typing import TYPE_CHECKING
+
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,12 +14,45 @@ from app.models.user import User
 from app.services.auth_service import auth_service
 from app.services.permission_service import permission_service
 
+if TYPE_CHECKING:
+    from app.models.document import Document
+
 
 async def get_current_user(
     current_user: User = Depends(auth_service.get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> User:
     return current_user
+
+
+def get_user_org_id(current_user: User) -> int | None:
+    """Resolve the effective organization for the current user."""
+    return current_user.organization_id or getattr(
+        current_user, "token_organization_id", None
+    )
+
+
+async def get_document_for_user(
+    db: AsyncSession,
+    current_user: User,
+    document_id: str,
+) -> "Document":
+    """Load a document and enforce org-level access in one place."""
+    from app.models.document import Document
+
+    document = await db.get(Document, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    org_id = get_user_org_id(current_user) or 1
+    if (
+        not current_user.is_superuser
+        and current_user.role != "admin"
+        and document.organization_id != org_id
+    ):
+        raise HTTPException(status_code=403, detail="无权访问该文档")
+    return document
+
 
 def permission_required(required_permissions: list[PermissionType], organization_id_param: str = None):
     async def check_permissions(
@@ -65,4 +100,3 @@ def permission_required(required_permissions: list[PermissionType], organization
                 )
         return True
     return check_permissions
-
