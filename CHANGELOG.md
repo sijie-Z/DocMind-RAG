@@ -5,6 +5,16 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-08-04
+
+### Security
+- 工作流代码节点不再在进程内执行 Python；开启后必须通过 Docker 沙箱运行。
+- 移除了进程内 `exec` 与受限 builtins 实现，代码节点现在只在容器内执行。
+
+### Testing
+- 后端 `tests/unit + tests/behavior`：409 passed / 1 skipped。
+- 前端 `vue-tsc --noEmit` 通过。
+
 ## [1.6.0] - 2026-08-04
 
 ### Security and operations

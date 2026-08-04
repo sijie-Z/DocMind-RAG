@@ -304,12 +304,35 @@ class TestCodeExecuteNodeExecutor:
             await CodeExecuteNodeExecutor(node).execute(state)
 
     @pytest.mark.asyncio
-    async def test_simple_code(self, monkeypatch):
+    async def test_code_node_requires_docker(self, monkeypatch):
         monkeypatch.setattr(settings, "ENABLE_WORKFLOW_CODE_NODES", True)
+        monkeypatch.setattr(
+            "app.services.workflow_engine._docker_available", lambda: False
+        )
+        node = _make_node(data={"code": "result = 2 + 3", "language": "python"})
+        state = _make_state()
+        with pytest.raises(ValueError, match="需要 Docker 沙箱"):
+            await CodeExecuteNodeExecutor(node).execute(state)
+
+    @pytest.mark.asyncio
+    async def test_simple_code_runs_in_docker(self, monkeypatch):
+        monkeypatch.setattr(settings, "ENABLE_WORKFLOW_CODE_NODES", True)
+        monkeypatch.setattr(settings, "SANDBOX_MODE", "auto")
+        monkeypatch.setattr(
+            "app.services.workflow_engine._docker_available", lambda: True
+        )
+
+        async def fake_run_in_docker(code, **_kwargs):
+            return "5"
+
+        monkeypatch.setattr(
+            "app.services.workflow_engine.run_in_docker", fake_run_in_docker
+        )
         node = _make_node(data={"code": "result = 2 + 3", "language": "python"})
         state = _make_state()
         result = await CodeExecuteNodeExecutor(node).execute(state)
         assert result["node_outputs"]["n1"]["result"] == "5"
+        assert result["node_outputs"]["n1"]["sandbox"] == "docker"
 
     @pytest.mark.asyncio
     async def test_empty_code_raises(self):
@@ -347,8 +370,19 @@ class TestCodeExecuteNodeExecutor:
             await CodeExecuteNodeExecutor(node).execute(state)
 
     @pytest.mark.asyncio
-    async def test_access_to_state_context(self, monkeypatch):
+    async def test_access_to_state_context_in_docker(self, monkeypatch):
         monkeypatch.setattr(settings, "ENABLE_WORKFLOW_CODE_NODES", True)
+        monkeypatch.setattr(settings, "SANDBOX_MODE", "auto")
+        monkeypatch.setattr(
+            "app.services.workflow_engine._docker_available", lambda: True
+        )
+
+        async def fake_run_in_docker(code, **_kwargs):
+            return "15"
+
+        monkeypatch.setattr(
+            "app.services.workflow_engine.run_in_docker", fake_run_in_docker
+        )
         node = _make_node(data={
             "code": "result = context.get('x', 0) + 10",
             "language": "python",

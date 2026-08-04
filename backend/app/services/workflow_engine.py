@@ -18,6 +18,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 
+from app.agent.tools.docker_sandbox import _docker_available, run_in_docker
 from app.core.config import settings
 from app.schemas.workflow import NodeResult, WorkflowConfig, WorkflowNode
 
@@ -417,29 +418,7 @@ class MemoryNodeExecutor(NodeExecutor):
 
 
 class CodeExecuteNodeExecutor(NodeExecutor):
-    """代码执行节点执行器 — 使用受限 builtins 防止 RCE"""
-
-    # 只暴露安全的 builtins，移除所有危险函数
-    _SAFE_BUILTINS = {
-        k: v for k, v in __builtins__.items()
-        if k in (
-            "abs", "all", "any", "bool", "chr", "dict", "divmod", "enumerate",
-            "filter", "float", "format", "frozenset",
-            "hash", "int", "isinstance", "issubclass", "iter", "len", "list",
-            "map", "max", "min", "next", "pow", "print", "range", "repr",
-            "reversed", "round", "set", "slice", "sorted", "str", "sum",
-            "tuple", "zip",
-        )
-    } if isinstance(__builtins__, dict) else {
-        k: getattr(__builtins__, k) for k in (
-            "abs", "all", "any", "bool", "chr", "dict", "divmod", "enumerate",
-            "filter", "float", "format", "frozenset",
-            "hash", "int", "isinstance", "issubclass", "iter", "len", "list",
-            "map", "max", "min", "next", "pow", "print", "range", "repr",
-            "reversed", "round", "set", "slice", "sorted", "str", "sum",
-            "tuple", "zip",
-        )
-    }
+    """代码执行节点执行器 — 始终通过 Docker 沙箱运行。"""
 
     async def execute(self, state: WorkflowState) -> dict[str, Any]:
         code = self.node.data.get("code", "")
@@ -471,25 +450,47 @@ class CodeExecuteNodeExecutor(NodeExecutor):
         if not getattr(settings, "ENABLE_WORKFLOW_CODE_NODES", False):
             raise ValueError("代码执行节点未启用，请设置 ENABLE_WORKFLOW_CODE_NODES=true")
 
+        mode = getattr(settings, "SANDBOX_MODE", "auto")
+        use_docker = mode == "docker" or (mode == "auto" and _docker_available())
+        if not use_docker:
+            raise ValueError("代码执行节点需要 Docker 沙箱，当前未启用")
+
+        import json
+
         context_vars = {
             "input": state.get("input", {}),
             "context": state.get("context", {}),
             "result": None,
         }
-
-        try:
-            exec_globals = {"__builtins__": self._SAFE_BUILTINS}
-            exec_locals = context_vars.copy()
-            exec(code, exec_globals, exec_locals)
-            result = exec_locals.get("result", "执行完成，无返回结果")
-        except ValueError:
-            raise
-        except Exception as e:
-            result = f"执行错误: {str(e)}"
+        preamble = (
+            "import json\n"
+            f"_ctx = json.loads({json.dumps(json.dumps(context_vars), ensure_ascii=False)})\n"
+            "input = _ctx['input']\n"
+            "context = _ctx['context']\n"
+            "result = None\n"
+        )
+        docker_code = (
+            preamble
+            + code
+            + '\nprint(result if result is not None else "执行完成，无返回结果")'
+        )
+        output = await run_in_docker(
+            docker_code,
+            image=getattr(settings, "SANDBOX_DOCKER_IMAGE", "python:3.11-slim"),
+            memory_mb=getattr(settings, "SANDBOX_DOCKER_MEMORY_MB", 256),
+            network=getattr(settings, "SANDBOX_DOCKER_NETWORK", "none"),
+            timeout=getattr(settings, "SANDBOX_DOCKER_TIMEOUT_SECONDS", 30),
+        )
 
         return {
-            "node_outputs": {self.node.id: {"result": str(result), "language": language}},
-            "context": {"code_result": result},
+            "node_outputs": {
+                self.node.id: {
+                    "result": output,
+                    "language": language,
+                    "sandbox": "docker",
+                }
+            },
+            "context": {"code_result": output},
         }
 
 

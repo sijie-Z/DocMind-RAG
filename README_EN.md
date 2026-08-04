@@ -43,7 +43,7 @@ Current baseline:
 - Hardening: agent memory endpoints are user-scoped, the `/files` proxy requires auth for non-public objects, pure-ASGI metrics and rate-limit middleware are enabled, and the legacy `ci.yml` was removed.
 
 Known limitations:
-- Workflow code nodes are disabled by default. Set `ENABLE_WORKFLOW_CODE_NODES=true` to opt in; a Docker sandbox is still recommended.
+- Workflow code nodes are disabled by default. Set `ENABLE_WORKFLOW_CODE_NODES=true` to opt in; execution now requires the Docker sandbox.
 - GraphRAG, agent memory, and performance metrics still use in-process state; migrate to Redis before multi-instance deployment.
 - Frontend files such as `editor.vue`, `profile/index.vue`, and `knowledge/index.vue` are still large and need component splitting.
 
