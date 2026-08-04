@@ -7,7 +7,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -20,13 +20,19 @@ from app.core.database import AsyncSessionLocal, close_db, init_db
 from app.core.elasticsearch import es_client, init_elasticsearch
 from app.core.kafka_client import kafka_producer
 from app.core.logging import setup_logging
-from app.core.middleware import metrics_collector
+from app.core.middleware import (
+    PerformanceASGIMiddleware,
+    RateLimitASGIMiddleware,
+    metrics_collector,
+)
 from app.core.minio_client import minio_client
 from app.core.notification_ws import notification_ws_manager
 from app.core.redis import close_redis, init_redis
 from app.core.request_id import RequestIDMiddleware
+from app.core.security import optional_current_user
 from app.core.tracing import setup_opentelemetry
 from app.exceptions import AppError
+from app.models.user import User
 
 
 async def metrics_snapshot_task():
@@ -200,15 +206,12 @@ app.add_middleware(
 # 4. GZip compression
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# ⚠️ 注意: BaseHTTPMiddleware 子类与 SQLAlchemy async session 存在兼容问题
-#    （触发 greenlet_spawn 错误）。以下中间件暂时禁用。
-# 3. Response format wrapper
-# app.add_middleware(ResponseFormatMiddleware)
-# 5. Rate limiting
-# if settings.ENABLE_RATE_LIMIT:
-#     app.add_middleware(RateLimitMiddleware)
-# 6. Performance monitoring
-# app.add_middleware(PerformanceMiddleware)
+# 3. Response format wrapper — disabled: BaseHTTPMiddleware conflicts with
+#    SQLAlchemy async sessions. The ASGI metrics/rate-limit middleware below
+#    does not have that problem.
+if settings.ENABLE_RATE_LIMIT:
+    app.add_middleware(RateLimitASGIMiddleware)
+app.add_middleware(PerformanceASGIMiddleware)
 
 
 # 异常处理
@@ -499,7 +502,10 @@ except Exception as e:
     logger.warning(f"静态文件挂载失败: {e}")
 
 @app.get("/files/{file_path:path}")
-async def get_minio_file(file_path: str):
+async def get_minio_file(
+    file_path: str,
+    current_user: User | None = Depends(optional_current_user),
+):
     """
     资源代理：允许浏览器通过后端访问 MinIO 文件
     例如：http://localhost:8000/files/avatars/1.png
@@ -513,6 +519,10 @@ async def get_minio_file(file_path: str):
     normalized = os.path.normpath(file_path)
     if normalized.startswith("..") or ".." in file_path:
         raise HTTPException(status_code=400, detail="无效的文件路径")
+
+    # 头像和演示文件保持公开；其他对象需要登录后才能通过代理访问。
+    if not normalized.startswith(("avatars/", "demo/")) and current_user is None:
+        raise HTTPException(status_code=401, detail="需要登录")
 
     try:
         response = minio_client.get_object(normalized)

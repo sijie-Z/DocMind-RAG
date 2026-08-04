@@ -6,6 +6,7 @@
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -23,6 +24,22 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db)
 ) -> User:
     return current_user
+
+
+_optional_bearer = HTTPBearer(auto_error=False)
+
+
+async def optional_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Return the current user if a valid bearer token was provided, else None."""
+    if credentials is None:
+        return None
+    try:
+        return await auth_service.get_current_user(credentials=credentials, db=db)
+    except HTTPException:
+        return None
 
 
 def get_user_org_id(current_user: User) -> int | None:

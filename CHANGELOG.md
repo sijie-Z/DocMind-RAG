@@ -5,6 +5,18 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-08-04
+
+### Security and operations
+- Agent 记忆 API 按用户命名空间隔离，`agent_id` 不再全局可读写。
+- `/files/{path}` 资源代理对非公开对象要求登录；`avatars/` 和 `demo/` 保持公开。
+- 移除 legacy `ci.yml`，CI 只保留 `ci-fast.yml` 与 `ci-nightly.yml`。
+- 监控与限流改为纯 ASGI 中间件：`/metrics` 现在真正采集请求指标，限流在 `ENABLE_RATE_LIMIT=true` 时生效。
+
+### Testing
+- 后端 `tests/unit + tests/behavior`：409 passed / 1 skipped。
+- 前端 `vue-tsc --noEmit` 通过。
+
 ## [1.5.0] - 2026-08-04
 
 ### Architecture

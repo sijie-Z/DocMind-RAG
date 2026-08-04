@@ -201,6 +201,123 @@ class MetricsCollector:
 metrics_collector = MetricsCollector()
 
 
+class PerformanceASGIMiddleware:
+    """Pure ASGI metrics middleware (avoids BaseHTTPMiddleware/SQLAlchemy issues)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        start = time.time()
+        status_code = {"value": 500}
+        await metrics_collector.inc_active_connections()
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                status_code["value"] = message.get("status", 500)
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            await metrics_collector.dec_active_connections()
+            duration = time.time() - start
+            await metrics_collector.record_request(
+                duration=duration,
+                is_error=status_code["value"] >= 400,
+                is_slow=duration * 1000 >= settings.SLOW_REQUEST_THRESHOLD_MS,
+                status_code=status_code["value"],
+                method=scope.get("method", ""),
+                path=scope.get("path", ""),
+            )
+
+
+class RateLimitASGIMiddleware:
+    """Pure ASGI sliding-window rate limiter with Redis + in-memory fallback."""
+
+    def __init__(self, app):
+        self.app = app
+        self.window_seconds = max(1, int(settings.RATE_LIMIT_WINDOW_SECONDS))
+        self.requests_per_window = max(1, int(settings.RATE_LIMIT_REQUESTS_PER_MINUTE))
+        self.exclude_paths = tuple(settings.RATE_LIMIT_EXCLUDE_PATHS or [])
+        self._memory: dict[str, tuple[int, int]] = {}
+
+    def _get_identifier(self, scope) -> str:
+        headers = {
+            k.decode("latin-1").lower(): v.decode("latin-1")
+            for k, v in scope.get("headers", [])
+        }
+        forwarded = headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        client = scope.get("client") or ("unknown", 0)
+        return str(client[0])
+
+    async def _redis_incr(self, identifier: str, now: int) -> tuple[int, int]:
+        key = f"rl:sliding:{identifier}"
+        window_start = now - self.window_seconds
+        reset_at = now + self.window_seconds
+        pipeline = redis_client.pipeline()
+        pipeline.zremrangebyscore(key, 0, window_start)
+        pipeline.zcard(key)
+        pipeline.zadd(key, {str(now): now})
+        pipeline.expire(key, self.window_seconds + 5)
+        results = await pipeline.execute()
+        return int(results[1]) + 1, reset_at
+
+    def _memory_incr(self, identifier: str, now: int) -> tuple[int, int]:
+        window_start = now - (now % self.window_seconds)
+        reset_at = window_start + self.window_seconds
+        current = self._memory.get(identifier)
+        if current is None or current[0] != window_start:
+            self._memory[identifier] = (window_start, 1)
+            return 1, reset_at
+        self._memory[identifier] = (window_start, current[1] + 1)
+        return current[1] + 1, reset_at
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if any(path.startswith(prefix) for prefix in self.exclude_paths):
+            await self.app(scope, receive, send)
+            return
+
+        identifier = self._get_identifier(scope)
+        now = int(time.time())
+        count, reset_at = 0, now + self.window_seconds
+        try:
+            if redis_client:
+                count, reset_at = await self._redis_incr(identifier, now)
+            else:
+                count, reset_at = self._memory_incr(identifier, now)
+        except Exception:
+            count, reset_at = self._memory_incr(identifier, now)
+
+        if count > self.requests_per_window:
+            response = JSONResponse(
+                status_code=429,
+                content={
+                    "success": False,
+                    "code": 429,
+                    "message": "请求过于频繁，请稍后再试",
+                    "detail": "rate_limit_exceeded",
+                    "data": None,
+                },
+                headers={"Retry-After": str(max(1, reset_at - now))},
+            )
+            await response(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Rate limiting middleware using sliding window.
 

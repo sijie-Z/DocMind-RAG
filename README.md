@@ -40,13 +40,12 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 - 后端 `tests/unit + tests/behavior`：409 通过 / 1 跳过；前端 `vue-tsc --noEmit` 通过。
 - 已修复：语义缓存按组织隔离、会话归属校验、知识库搜索/删除/重建的组织隔离、文件上传路径穿越与 MinIO 删除、API Key 掩码、Web 抓取 SSRF 防护、工作流归属隔离、Kafka 不可用时的进程内文档处理、本地启动脚本、敏感产物移出 git 跟踪。
 - 架构收敛：文档解析/向量化/ES 索引统一为单一 Processor；聊天核心管线从路由下沉到 `services/chat_service.py`；新增统一文档授权辅助层。
+- 后续加固：Agent 记忆接口按用户隔离、`/files` 代理鉴权、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`。
 
 已知限制：
-- `/metrics` 与限流中间件尚未启用，README 中宣称的监控指标目前不会真正采集。
-- Agent 记忆接口的 `agent_id` 尚未按用户隔离。
-- `/files/{path}` 资源代理尚无鉴权，公开部署建议关闭或改用签名 URL。
 - 工作流代码节点默认关闭，需显式设置 `ENABLE_WORKFLOW_CODE_NODES=true`；开启后仍建议切换 Docker 沙箱。
-- 仍有 legacy `ci.yml` 与 `ci-fast.yml` / `ci-nightly.yml` 并存。
+- GraphRAG、Agent 记忆、性能指标等全局状态仍以进程内为主，多实例部署前需要迁移到 Redis。
+- 前端 `editor.vue`、`profile/index.vue`、`knowledge/index.vue` 仍是大文件，下一步需要拆组件。
 
 ---
 

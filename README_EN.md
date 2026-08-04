@@ -40,13 +40,12 @@ Current baseline:
 - Backend `tests/unit + tests/behavior`: 409 passed / 1 skipped. Frontend `vue-tsc --noEmit` passes.
 - Recent fixes: org-scoped semantic cache, conversation ownership checks, org isolation for knowledge search/delete/rebuild, upload path traversal and MinIO deletion fixes, API key masking, web-fetch SSRF protection, workflow ownership isolation, in-process document processing when Kafka is unavailable, local startup scripts, and removal of sensitive artifacts from git tracking.
 - Architecture: document parsing/embedding/ES indexing is unified in a single processor, the chat pipeline moved into `services/chat_service.py`, and a shared document authorization helper was added.
+- Hardening: agent memory endpoints are user-scoped, the `/files` proxy requires auth for non-public objects, pure-ASGI metrics and rate-limit middleware are enabled, and the legacy `ci.yml` was removed.
 
 Known limitations:
-- `/metrics` and the rate-limit middleware are still disabled; the monitoring metrics advertised in this README are not actually collected yet.
-- Agent memory endpoints do not yet isolate `agent_id` per user.
-- The `/files/{path}` resource proxy has no authentication; disable it or use signed URLs before public deployment.
 - Workflow code nodes are disabled by default. Set `ENABLE_WORKFLOW_CODE_NODES=true` to opt in; a Docker sandbox is still recommended.
-- The legacy `ci.yml` still coexists with `ci-fast.yml` / `ci-nightly.yml`.
+- GraphRAG, agent memory, and performance metrics still use in-process state; migrate to Redis before multi-instance deployment.
+- Frontend files such as `editor.vue`, `profile/index.vue`, and `knowledge/index.vue` are still large and need component splitting.
 
 ---
 
