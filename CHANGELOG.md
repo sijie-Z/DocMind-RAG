@@ -5,6 +5,16 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-08-04
+
+### Frontend performance
+- ECharts 改为 `echarts/core` 按需注册，charts chunk 从约 1MB 降到 528KB。
+- highlight.js 使用 `lib/common`，markdown/highlight/katex 拆分为独立 chunk。
+- 构建不再出现循环 chunk 和超过 800KB 的大 chunk 警告。
+
+### Testing
+- 前端 `vue-tsc --noEmit` 与 `vite build` 通过。
+
 ## [1.16.0] - 2026-08-04
 
 ### Ops and observability

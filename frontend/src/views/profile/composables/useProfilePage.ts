@@ -7,7 +7,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
-import * as echarts from 'echarts'
+import echarts from '@/utils/echarts'
 import {
   PersonOutline,
   MailOutline,

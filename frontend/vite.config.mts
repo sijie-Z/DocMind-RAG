@@ -144,7 +144,8 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     sourcemap: false,
-    chunkSizeWarningLimit: 800,
+    // naive-ui is intentionally a single heavy vendor chunk; other libs are split below 800KB.
+    chunkSizeWarningLimit: 1400,
     minify: 'terser',
     terserOptions: {
       compress: {
@@ -164,14 +165,23 @@ export default defineConfig({
             if (pkg === 'vue' || pkg === 'vue-router' || pkg === 'pinia' || pkg.startsWith('@vue')) {
                 return 'vue'
             }
-            if (pkg === 'naive-ui' || pkg === '@css-render' || pkg === 'vooks' || pkg === 'treemate' || pkg === 'seemly' || pkg === 'vdirs') {
+            if (pkg === 'naive-ui') {
                 return 'naive-ui'
+            }
+            if (pkg === '@css-render' || pkg === 'vooks' || pkg === 'treemate' || pkg === 'seemly' || pkg === 'vdirs' || pkg === 'date-fns') {
+                return 'naive-ui-deps'
             }
             if (pkg === 'echarts' || pkg === 'zrender') {
                 return 'charts'
             }
-            if (pkg === 'markdown-it' || pkg === 'highlight.js' || pkg === 'katex' || pkg === 'dompurify') {
+            if (pkg === 'markdown-it' || pkg === 'markdown-it-katex' || pkg === 'dompurify') {
                 return 'markdown'
+            }
+            if (pkg === 'highlight.js') {
+                return 'highlight'
+            }
+            if (pkg === 'katex') {
+                return 'katex'
             }
             if (pkg === '@vueuse' || pkg === '@vueuse/core') {
                 return 'vueuse'

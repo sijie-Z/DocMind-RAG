@@ -1,4 +1,4 @@
-import * as echarts from 'echarts'
+import echarts from '@/utils/echarts'
 
 export const CHART_COLORS = {
   primary: '#64748b',

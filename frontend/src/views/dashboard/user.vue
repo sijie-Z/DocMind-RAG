@@ -270,8 +270,8 @@ import {
   ChevronForwardOutline, AnalyticsOutline, TrendingUpOutline, FlashOutline,
   HardwareChipOutline, RocketOutline, SparklesOutline
 } from '@vicons/ionicons5'
-import * as echarts from 'echarts'
-import type { ECharts } from 'echarts'
+import echarts from '@/utils/echarts'
+import type { EChartsType } from 'echarts/core'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -297,7 +297,7 @@ const ragStats = ref({
 const recentConversations = ref<Conversation[]>([])
 const chartRef = ref<HTMLElement | null>(null)
 const demoLoading = ref(false)
-let chart: ECharts | null = null
+let chart: EChartsType | null = null
 
 const formatSize = (bytes: number) => formatFileSize(bytes)
 const formatDate = (date: string) => formatDateUtil(date)

@@ -329,8 +329,8 @@ import {
   DocumentTextOutline, ServerOutline, ChatbubbleEllipsesOutline, GitNetworkOutline,
   ChevronForwardOutline, TrendingUpOutline, ShieldCheckmarkOutline, WarningOutline
 } from '@vicons/ionicons5'
-import * as echarts from 'echarts'
-import type { ECharts } from 'echarts'
+import echarts from '@/utils/echarts'
+import type { EChartsType } from 'echarts/core'
 
 const { t } = useI18n()
 
@@ -367,8 +367,8 @@ const recentLogs = ref<AuditLogEntry[]>([])
 
 const llmChartRef = ref<HTMLElement | null>(null)
 const ragChartRef = ref<HTMLElement | null>(null)
-let llmChart: ECharts | null = null
-let ragChart: ECharts | null = null
+let llmChart: EChartsType | null = null
+let ragChart: EChartsType | null = null
 
 const SENSITIVE_ACTIONS = ['delete_user', 'delete_document', 'reset_password', 'update_role', 'delete_organization', 'api_key_revoked']
 

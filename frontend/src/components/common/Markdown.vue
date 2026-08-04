@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { computed, onMounted, nextTick, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js'
+import hljs from 'highlight.js/lib/common'
 import DOMPurify from 'dompurify'
 import mdKatex from 'markdown-it-katex'
 import 'highlight.js/styles/github-dark.css'

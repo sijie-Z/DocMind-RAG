@@ -198,7 +198,7 @@ import { NTag } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { getAuditLogs, type AuditLogEntry } from '@/api/user'
 import { RefreshOutline, PulseOutline, GitNetworkOutline, BookOutline, WarningOutline } from '@vicons/ionicons5'
-import * as echarts from 'echarts'
+import echarts from '@/utils/echarts'
 import { getMonitoringDashboard, getMonitoringAlerts, getMetrics } from '@/api/monitoring'
 import request from '@/utils/request'
 
