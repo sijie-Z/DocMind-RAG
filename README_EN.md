@@ -45,7 +45,7 @@ Current baseline:
 Known limitations:
 - Workflow code nodes are disabled by default. Set `ENABLE_WORKFLOW_CODE_NODES=true` to opt in; execution now requires the Docker sandbox.
 - GraphRAG, agent memory, and performance metrics still use in-process state; migrate to Redis before multi-instance deployment.
-- Frontend files such as `editor.vue`, `profile/index.vue`, and `knowledge/index.vue` are still large and need component splitting.
+- The knowledge page has been split into components; `editor.vue` and `profile/index.vue` are still large and need further splitting.
 
 ---
 

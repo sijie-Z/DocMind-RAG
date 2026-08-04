@@ -381,247 +381,31 @@
           </div>
         </n-spin>
 
-        <!-- Modern Upload Modal -->
-        <n-modal 
-          v-model:show="showUploadModal" 
-          :title="t('knowledge.uploadTitle')" 
-          preset="card" 
-          class="max-w-xl rounded-3xl shadow-2xl border-none"
-        >
-          <n-spin :show="uploading">
-            <div class="space-y-6 mt-4">
-              <div class="p-1 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-500 transition-colors">
-                <n-upload
-                  ref="uploadRef"
-                  :file-list="fileList"
-                  :on-change="handleFileChange"
-                  :on-remove="handleFileRemove"
-                  :max="1"
-                  accept=".pdf,.doc,.docx,.txt,.md"
-                  class="w-full"
-                >
-                  <n-upload-dragger class="!bg-transparent !border-none">
-                    <div class="flex flex-col items-center gap-3 py-6">
-                      <div class="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-500">
-                        <n-icon size="36"><CloudUploadOutline /></n-icon>
-                      </div>
-                      <div class="text-center">
-                        <n-text class="text-lg font-bold block">{{ t('knowledge.dragText') }}</n-text>
-                        <n-p depth="3" class="text-sm mt-1 text-gray-400">{{ t('knowledge.dragHint') }}</n-p>
-                      </div>
-                    </div>
-                  </n-upload-dragger>
-                </n-upload>
-              </div>
-                
-                <div class="grid grid-cols-1 gap-4">
-                  <div class="space-y-2">
-                    <label class="text-sm font-bold text-gray-700 dark:text-gray-300 ml-1">{{ t('knowledge.fileTitle') }}</label>
-                    <n-input v-model:value="uploadForm.title" :placeholder="t('knowledge.fileTitle')" round />
-                  </div>
-                  
-                <n-form-item :label="t('knowledge.addTags')" path="tags">
-                  <n-select
-                    v-model:value="uploadForm.tags"
-                    multiple
-                    filterable
-                    tag
-                    :placeholder="t('knowledge.addTags')"
-                    :options="tagOptions"
-                    round
-                  />
-                </n-form-item>
-                  
-                  <div class="space-y-2">
-                    <label class="text-sm font-bold text-gray-700 dark:text-gray-300 ml-1">{{ t('knowledge.fileDesc') }}</label>
-                    <n-input
-                      v-model:value="uploadForm.description"
-                      type="textarea"
-                      :placeholder="t('knowledge.fileDesc')"
-                      :rows="3"
-                      class="rounded-xl"
-                    />
-                  </div>
-                </div>
-              </div>
-            </n-spin>
-            
-            <template #footer>
-              <div class="flex justify-end gap-3">
-                <n-button round @click="showUploadModal = false">{{ t('common.cancel') }}</n-button>
-                <n-button 
-                  type="primary" 
-                  round 
-                  :disabled="!canUpload" 
-                  :loading="uploading" 
-                  class="px-8 shadow-lg shadow-blue-500/20"
-                  @click="uploadFile"
-                >
-                  {{ t('knowledge.confirmUpload') }}
-                </n-button>
-              </div>
-            </template>
-          </n-modal>
-
-          <!-- Task List Drawer -->
-          <n-drawer v-model:show="showTaskList" :width="400" placement="right" class="rounded-l-3xl">
-            <n-drawer-content closable>
-              <template #header>
-                <div class="flex items-center gap-2">
-                  <n-icon size="20" class="text-blue-500"><ListOutline /></n-icon>
-                  <span class="font-bold">{{ t('knowledge.uploadList') || '上传列表' }}</span>
-                </div>
-              </template>
-              
-              <div class="space-y-4">
-                <div v-if="activeTasks.length === 0" class="flex flex-col items-center justify-center py-12 text-gray-400">
-                  <n-icon size="48" class="opacity-20 mb-2"><DocumentAttachOutline /></n-icon>
-                  <p>{{ t('knowledge.noActiveTasks') || '暂无上传任务' }}</p>
-                </div>
-                
-                <div v-for="task in activeTasks" :key="task.id" class="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-700/50 transition-all">
-                  <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-2 overflow-hidden">
-                      <n-icon :class="task.status === 'error' ? 'text-red-500' : 'text-blue-500'">
-                        <DocumentOutline />
-                      </n-icon>
-                      <span class="font-medium truncate text-sm" :title="task.name">{{ task.name }}</span>
-                    </div>
-                    <n-button quaternary circle size="small" @click="activeTasks = activeTasks.filter(t => t.id !== task.id)">
-                      <template #icon><n-icon><CloseOutline /></n-icon></template>
-                    </n-button>
-                  </div>
-                  
-                  <div class="space-y-1">
-                    <div class="flex justify-between text-xs mb-1">
-                      <span :class="{
-                        'text-blue-500': task.status === 'uploading',
-                        'text-orange-500': task.status === 'processing',
-                        'text-green-500': task.status === 'completed',
-                        'text-red-500': task.status === 'error'
-                      }">
-                        {{ task.status === 'uploading' ? t('knowledge.status.uploading') || '上传中' : 
-                           task.status === 'processing' ? t('knowledge.status.processing') : 
-                           task.status === 'completed' ? t('knowledge.status.completed') : 
-                           t('knowledge.status.failed') }}
-                      </span>
-                      <span class="text-gray-400">{{ task.progress }}%</span>
-                    </div>
-                    <n-progress
-                      type="line"
-                      :percentage="task.progress"
-                      :status="task.status === 'error' ? 'error' : task.status === 'completed' ? 'success' : 'active'"
-                      :show-indicator="false"
-                      processing
-                      border-radius="4px"
-                      :height="6"
-                    />
-                  </div>
-                  
-                  <div v-if="task.error" class="mt-2 text-xs text-red-500 bg-red-50 dark:bg-red-900/20 p-2 rounded-lg">
-                    {{ task.error }}
-                  </div>
-                </div>
-              </div>
-              
-              <template #footer v-if="activeTasks.length > 0">
-                <n-button block quaternary round @click="activeTasks = activeTasks.filter(t => t.status === 'uploading' || t.status === 'processing')">
-                  {{ t('knowledge.clearFinished') || '清除已完成' }}
-                </n-button>
-              </template>
-            </n-drawer-content>
-          </n-drawer>
-
-          <!-- Floating Task Button -->
-          <div v-if="activeTasks.length > 0" class="fixed bottom-4 right-4 md:bottom-8 md:right-8 z-50">
-            <n-badge :value="activeTasks.filter(t => t.status === 'uploading' || t.status === 'processing').length" :show="activeTasks.filter(t => t.status === 'uploading' || t.status === 'processing').length > 0">
-              <n-button 
-                circle 
-                type="primary" 
-                size="large" 
-                class="shadow-2xl h-14 w-14"
-                @click="showTaskList = true"
-              >
-                <template #icon>
-                  <n-icon size="28" :class="{ 'animate-spin': activeTasks.some(t => t.status === 'uploading' || t.status === 'processing') }">
-                    <RefreshOutline v-if="activeTasks.some(t => t.status === 'uploading' || t.status === 'processing')" />
-                    <ListOutline v-else />
-                  </n-icon>
-                </template>
-              </n-button>
-            </n-badge>
-          </div>
-
-          <!-- ✅ 新增：文档详情模态框 -->
-          <n-modal
-            v-model:show="showDetailModal"
-            preset="card"
-            class="max-w-2xl rounded-3xl shadow-2xl"
-            :title="t('knowledge.viewDetail') || '文档详情'"
-          >
-            <div v-if="currentDoc" class="space-y-6">
-              <div class="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl">
-                <div class="p-3 bg-white dark:bg-gray-700 rounded-xl shadow-sm">
-                  <n-icon size="32" :color="getFileIconColor(currentDoc.file_type)">
-                     <DocumentTextOutline v-if="currentDoc.file_type === 'pdf'" />
-                     <DocumentOutline v-else />
-                  </n-icon>
-                </div>
-                <div>
-                  <h3 class="font-bold text-lg">{{ currentDoc.title }}</h3>
-                  <p class="text-sm text-gray-500">{{ currentDoc.file_name || currentDoc.filename || '-' }}</p>
-                </div>
-              </div>
-
-              <n-descriptions label-placement="left" bordered :column="1" class="rounded-xl overflow-hidden">
-                <n-descriptions-item label="文件大小">{{ formatFileSize(currentDoc.file_size) }}</n-descriptions-item>
-                <n-descriptions-item label="上传时间">{{ formatDate(currentDoc.created_at) }}</n-descriptions-item>
-                <n-descriptions-item label="处理状态">
-                  <n-tag :type="getStatusType(currentDoc)" size="small" round>
-                    {{ getStatusLabel(currentDoc) }}
-                  </n-tag>
-                </n-descriptions-item>
-                <n-descriptions-item label="上传来源">{{ currentDoc.upload_source || '知识库上传' }}</n-descriptions-item>
-                <n-descriptions-item label="文件描述">{{ currentDoc.description || '暂无描述' }}</n-descriptions-item>
-                <n-descriptions-item label="标签">
-                   <div class="flex flex-wrap gap-2">
-                     <n-tag v-for="tag in (currentDoc.tags || currentDoc.keywords || [])" :key="tag" size="small" round>{{ tag }}</n-tag>
-                     <span v-if="(currentDoc.tags || currentDoc.keywords || []).length === 0" class="text-gray-400">无</span>
-                   </div>
-                </n-descriptions-item>
-              </n-descriptions>
-              <div class="bg-gray-50 dark:bg-gray-800/40 rounded-xl p-4 border border-gray-100 dark:border-gray-700/60">
-                <div class="text-sm font-semibold mb-2">文档预览</div>
-                <div v-if="detailLoading" class="text-xs text-gray-400">加载预览中...</div>
-                <div v-else-if="currentDoc.summary" class="text-sm leading-6 text-gray-700 dark:text-gray-200 mb-3">
-                  {{ currentDoc.summary }}
-                </div>
-                <div v-if="(currentDoc.suggested_tags || []).length" class="flex flex-wrap gap-2">
-                  <n-tag v-for="tag in currentDoc.suggested_tags" :key="tag" size="small" :bordered="false" type="info" round>{{ tag }}</n-tag>
-                </div>
-                <div v-if="currentDoc.preview_content" class="max-h-56 overflow-y-auto mt-3 text-xs whitespace-pre-wrap text-gray-600 dark:text-gray-300">{{ currentDoc.preview_content }}</div>
-              </div>
-              
-              <div class="flex justify-end gap-3 pt-4">
-                <n-button type="primary" round @click="showDetailModal = false">关闭</n-button>
-              </div>
-            </div>
-          </n-modal>
-
-          <n-modal
-            v-model:show="showErrorModal"
-            preset="card"
-            class="max-w-2xl rounded-3xl shadow-2xl"
-            title="解析错误详情"
-          >
-            <div class="space-y-4">
-              <div class="text-sm text-gray-500">以下为原始解析错误信息：</div>
-              <div class="max-h-72 overflow-y-auto rounded-xl border border-red-200 dark:border-red-800/60 bg-red-50/70 dark:bg-red-900/20 p-3 text-xs leading-5 whitespace-pre-wrap break-all text-red-700 dark:text-red-300">{{ currentErrorDetail }}</div>
-              <div class="flex justify-end">
-                <n-button type="primary" round @click="showErrorModal = false">关闭</n-button>
-              </div>
-            </div>
-          </n-modal>
+        <KnowledgeUploadPanel
+          v-model:show-upload-modal="showUploadModal"
+          v-model:show-task-list="showTaskList"
+          v-model:upload-form="uploadForm"
+          v-model:file-list="fileList"
+          :uploading="uploading"
+          :tag-options="tagOptions"
+          :can-upload="canUpload"
+          :active-tasks="activeTasks"
+          @upload="uploadFile"
+          @remove-task="removeUploadTask"
+          @clear-finished="clearFinishedTasks"
+        />
+        <KnowledgeDetailModals
+          v-model:show-detail="showDetailModal"
+          v-model:show-error="showErrorModal"
+          :current-doc="currentDoc"
+          :current-error-detail="currentErrorDetail"
+          :detail-loading="detailLoading"
+          :get-file-icon-color="getFileIconColor"
+          :get-status-type="getStatusType"
+          :get-status-label="getStatusLabel"
+          :format-file-size="formatFileSize"
+          :format-date="formatDate"
+        />
 
       </div>
     </div>
@@ -630,7 +414,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { NIcon, NButton, NTag, NUploadDragger, NDescriptions, NDescriptionsItem, NModal } from 'naive-ui'
+import { NIcon, NButton, NTag } from 'naive-ui'
 import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
@@ -646,7 +430,6 @@ import {
   CheckmarkCircleOutline,
   AlertCircleOutline,
   CloseCircleOutline,
-  CloseOutline,
   ListOutline,
   GridOutline,
   GitNetworkOutline
@@ -664,6 +447,8 @@ import {
 import type { KnowledgeBase } from '@/api/knowledge'
 import { formatDate } from '@/utils/format'
 import { getRagMetrics, type RagMetrics } from '@/api/rag'
+import KnowledgeUploadPanel from './components/KnowledgeUploadPanel.vue'
+import KnowledgeDetailModals from './components/KnowledgeDetailModals.vue'
 
 /** Safely extract error message from unknown error */
 function getErrorMessage(error: unknown): string {
@@ -697,7 +482,6 @@ const currentDoc = ref<KnowledgeBase | null>(null)
 const detailLoading = ref(false)
 
 const fileList = ref<UploadFileInfo[]>([])
-const uploadRef = ref<HTMLElement | null>(null)
 
 interface UploadTask {
   id: string
@@ -708,6 +492,16 @@ interface UploadTask {
 }
 
 const activeTasks = ref<UploadTask[]>([])
+
+const removeUploadTask = (id: string) => {
+  activeTasks.value = activeTasks.value.filter(t => t.id !== id)
+}
+
+const clearFinishedTasks = () => {
+  activeTasks.value = activeTasks.value.filter(
+    t => t.status === 'uploading' || t.status === 'processing'
+  )
+}
 const ragMetrics = ref<RagMetrics | null>(null)
 const metricWindow = ref<number>(300)
 const metricWindowOptions = [
@@ -844,7 +638,7 @@ const handleBatchDelete = () => {
 }
 
 const canUpload = computed(() => {
-  return uploadForm.value.file
+  return !!uploadForm.value.file
 })
 
 const loadKnowledgeBases = async () => {
@@ -903,20 +697,6 @@ const handlePageSizeChange = (size: number) => {
   pagination.value.pageSize = size
   pagination.value.page = 1
   loadKnowledgeBases()
-}
-
-const handleFileChange = (options: { file: UploadFileInfo }) => {
-  const file = options.file.file
-  if (file) {
-    uploadForm.value.file = file
-    if (!uploadForm.value.title) {
-      uploadForm.value.title = file.name.replace(/\.[^/.]+$/, '')
-    }
-  }
-}
-
-const handleFileRemove = () => {
-  uploadForm.value.file = undefined
 }
 
 const uploadFile = async () => {
