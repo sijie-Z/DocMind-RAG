@@ -35,6 +35,7 @@ class BaseAppSettings(BaseSettings):
     SLOW_REQUEST_THRESHOLD_MS: int = 1200
     METRICS_DURATION_SAMPLE_SIZE: int = 2000
     METRICS_ROUTE_SAMPLE_SIZE: int = 300
+    METRICS_LIVE_PERSIST_SECONDS: int = 5
 
     # Alerting thresholds
     ALERT_ERROR_RATE_PERCENT: float = 5.0

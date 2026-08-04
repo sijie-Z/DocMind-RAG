@@ -5,6 +5,15 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-08-04
+
+### Metrics persistence
+- 指标实时计数支持 Redis 持久化：请求计数、错误数、状态码分布会按 `METRICS_LIVE_PERSIST_SECONDS` 间隔写回 Redis，服务重启后自动恢复。
+- 新增实时计数恢复单元测试。
+
+### Testing
+- 后端 `tests/unit + tests/behavior`：412 passed / 1 skipped。
+
 ## [1.13.0] - 2026-08-04
 
 ### Memory persistence

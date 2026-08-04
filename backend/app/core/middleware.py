@@ -57,6 +57,8 @@ class MetricsCollector:
         )
         self.last_update = time.time()
         self.lock = asyncio.Lock()
+        self._redis_live_key = "metrics:live"
+        self._last_live_persist = 0.0
 
         # 历史快照，用于生成趋势图
         # 小白讲解：就像一个笔记本，每隔一段时间就把当前的计数器数字抄下来，这样就能画出曲线图了。
@@ -99,8 +101,15 @@ class MetricsCollector:
             self.duration_samples.append(duration * 1000)
             self.last_update = time.time()
 
+        now = time.time()
+        persist_seconds = max(0, int(settings.METRICS_LIVE_PERSIST_SECONDS))
+        if self._last_live_persist == 0 or now - self._last_live_persist >= persist_seconds:
+            self._last_live_persist = now
+            await self._persist_live()
+
     async def take_snapshot(self):
         """记录当前时刻的快照"""
+        await self._load_live()
         async with self.lock:
             stats = await self._get_stats_internal()
             stats["timestamp"] = int(time.time())
@@ -121,6 +130,7 @@ class MetricsCollector:
         }
 
     async def get_stats(self) -> dict[str, Any]:
+        await self._load_live()
         async with self.lock:
             stats = await self._get_stats_internal()
             stats["last_update"] = self.last_update
@@ -170,6 +180,7 @@ class MetricsCollector:
             logger.warning(f"Metrics snapshot load failed: {e}")
 
     async def get_route_stats(self) -> dict[str, dict[str, float]]:
+        await self._load_live()
         async with self.lock:
             route_output: dict[str, dict[str, float]] = {}
             for route, stats in self.route_stats.items():
@@ -185,6 +196,7 @@ class MetricsCollector:
             return route_output
 
     async def get_prometheus_text(self) -> str:
+        await self._load_live()
         async with self.lock:
             lines = [
                 "# HELP app_http_requests_total Total HTTP requests",
@@ -236,6 +248,47 @@ class MetricsCollector:
                     f'app_http_route_p99_ms{{method="{method}",path="{safe_path}"}} {_calc_percentile(route_samples, 99):.2f}'
                 )
             return "\n".join(lines) + "\n"
+
+    async def _persist_live(self) -> None:
+        from app.core.redis import redis_client
+
+        if not redis_client:
+            return
+        try:
+            async with self.lock:
+                payload = json.dumps({
+                    "request_count": self.request_count,
+                    "error_count": self.error_count,
+                    "slow_request_count": self.slow_request_count,
+                    "total_response_time": self.total_response_time,
+                    "status_counts": dict(self.status_counts),
+                }, ensure_ascii=False)
+            await redis_client.setex(self._redis_live_key, 3600, payload)
+        except Exception as e:
+            logger.warning(f"Metrics live persist failed: {e}")
+
+    async def _load_live(self) -> None:
+        from app.core.redis import redis_client
+
+        if not redis_client:
+            return
+        try:
+            raw = await redis_client.get(self._redis_live_key)
+            if not raw:
+                return
+            data = json.loads(raw)
+            async with self.lock:
+                if self.request_count == 0 and int(data.get("request_count", 0) or 0) > 0:
+                    self.request_count = int(data["request_count"])
+                    self.error_count = int(data.get("error_count", 0) or 0)
+                    self.slow_request_count = int(data.get("slow_request_count", 0) or 0)
+                    self.total_response_time = float(data.get("total_response_time", 0.0) or 0.0)
+                    self.status_counts.clear()
+                    self.status_counts.update({
+                        str(k): int(v) for k, v in (data.get("status_counts", {}) or {}).items()
+                    })
+        except Exception as e:
+            logger.warning(f"Metrics live load failed: {e}")
 
 # 全局单例
 metrics_collector = MetricsCollector()
