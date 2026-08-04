@@ -31,3 +31,12 @@ repos:
           - '@typescript-eslint/eslint-plugin@6.15.0'
           - '@typescript-eslint/parser@6.15.0'
           - 'vue-eslint-parser@9.3.2'
+
+  - repo: local
+    hooks:
+      - id: frontend-typecheck
+        name: Frontend type check
+        entry: npm run type-check
+        language: system
+        pass_filenames: false
+        files: ^frontend/

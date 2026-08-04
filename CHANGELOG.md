@@ -5,6 +5,15 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-08-04
+
+### Ops and observability
+- 指标实时计数改为按实例写入 Redis 并在读取时聚合，支持多实例部署下的请求数/错误数恢复。
+- pre-commit 新增前端 `vue-tsc` 类型检查钩子。
+
+### Testing
+- 后端 `tests/unit + tests/behavior`：414 passed / 1 skipped。
+
 ## [1.15.0] - 2026-08-04
 
 ### Build and deployment

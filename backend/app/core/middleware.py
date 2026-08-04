@@ -58,6 +58,8 @@ class MetricsCollector:
         self.last_update = time.time()
         self.lock = asyncio.Lock()
         self._redis_live_key = "metrics:live"
+        self._instance_id = uuid.uuid4().hex[:8]
+        self._live_key = f"{self._redis_live_key}:{self._instance_id}"
         self._last_live_persist = 0.0
 
         # 历史快照，用于生成趋势图
@@ -263,7 +265,7 @@ class MetricsCollector:
                     "total_response_time": self.total_response_time,
                     "status_counts": dict(self.status_counts),
                 }, ensure_ascii=False)
-            await redis_client.setex(self._redis_live_key, 3600, payload)
+            await redis_client.setex(self._live_key, 3600, payload)
         except Exception as e:
             logger.warning(f"Metrics live persist failed: {e}")
 
@@ -273,20 +275,37 @@ class MetricsCollector:
         if not redis_client:
             return
         try:
-            raw = await redis_client.get(self._redis_live_key)
-            if not raw:
+            raw_keys = await redis_client.keys("metrics:live:*")
+            if not raw_keys:
                 return
-            data = json.loads(raw)
+            totals: dict[str, float | int] = {
+                "request_count": 0,
+                "error_count": 0,
+                "slow_request_count": 0,
+                "total_response_time": 0.0,
+            }
+            status_totals: dict[str, int] = {}
+            for key in raw_keys:
+                if isinstance(key, bytes):
+                    key = key.decode()
+                raw = await redis_client.get(key)
+                if not raw:
+                    continue
+                data = json.loads(raw)
+                totals["request_count"] += int(data.get("request_count", 0) or 0)
+                totals["error_count"] += int(data.get("error_count", 0) or 0)
+                totals["slow_request_count"] += int(data.get("slow_request_count", 0) or 0)
+                totals["total_response_time"] += float(data.get("total_response_time", 0.0) or 0.0)
+                for code, count in (data.get("status_counts", {}) or {}).items():
+                    status_totals[str(code)] = status_totals.get(str(code), 0) + int(count or 0)
             async with self.lock:
-                if self.request_count == 0 and int(data.get("request_count", 0) or 0) > 0:
-                    self.request_count = int(data["request_count"])
-                    self.error_count = int(data.get("error_count", 0) or 0)
-                    self.slow_request_count = int(data.get("slow_request_count", 0) or 0)
-                    self.total_response_time = float(data.get("total_response_time", 0.0) or 0.0)
+                if self.request_count == 0 and int(totals["request_count"]) > 0:
+                    self.request_count = int(totals["request_count"])
+                    self.error_count = int(totals["error_count"])
+                    self.slow_request_count = int(totals["slow_request_count"])
+                    self.total_response_time = float(totals["total_response_time"])
                     self.status_counts.clear()
-                    self.status_counts.update({
-                        str(k): int(v) for k, v in (data.get("status_counts", {}) or {}).items()
-                    })
+                    self.status_counts.update(status_totals)
         except Exception as e:
             logger.warning(f"Metrics live load failed: {e}")
 

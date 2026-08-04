@@ -31,6 +31,10 @@ class _FakeRedis:
     async def setex(self, key: str, _ttl: int, value: str) -> None:
         self.data[key] = value
 
+    async def keys(self, pattern: str) -> list[str]:
+        prefix = pattern.rstrip("*")
+        return [key for key in self.data if key.startswith(prefix)]
+
 
 @pytest.mark.asyncio
 async def test_snapshot_persists_and_loads_from_redis(monkeypatch):
@@ -67,3 +71,25 @@ async def test_live_counters_restore_from_redis(monkeypatch):
     assert stats["request_count"] == 2
     assert stats["error_count"] == 1
     assert "500" in restored.status_counts
+
+
+@pytest.mark.asyncio
+async def test_live_counters_aggregate_across_instances(monkeypatch):
+    monkeypatch.setattr(settings, "METRICS_LIVE_PERSIST_SECONDS", 0)
+    fake = _FakeRedis()
+    monkeypatch.setattr("app.core.redis.redis_client", fake)
+
+    first = MetricsCollector()
+    await first.record_request(duration=0.1, status_code=200, method="GET", path="/health")
+
+    second = MetricsCollector()
+    await second.record_request(duration=0.2, status_code=200, method="GET", path="/health")
+    await second.record_request(
+        duration=0.3, is_error=True, status_code=500, method="POST", path="/chat"
+    )
+
+    restored = MetricsCollector()
+    stats = await restored.get_stats()
+
+    assert stats["request_count"] == 3
+    assert stats["error_count"] == 1

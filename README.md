@@ -44,7 +44,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 
 已知限制：
 - 工作流代码节点默认关闭，需显式设置 `ENABLE_WORKFLOW_CODE_NODES=true`，且必须通过 Docker 沙箱执行。
-- GraphRAG 图谱、Agent 记忆、指标快照与实时计数均已支持 Redis 持久化，服务重启后可恢复关键指标。
+- GraphRAG 图谱、Agent 记忆、指标快照与实时计数均已支持 Redis 持久化；实时计数按实例写入并在读取时聚合，适合多实例部署。
 - 前端 `knowledge/index.vue`、`profile/index.vue`、`workflow/editor.vue` 均已拆分到组件/组合式函数，不再有千行级单文件页面。
 
 ---
