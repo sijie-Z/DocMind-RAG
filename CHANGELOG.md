@@ -5,6 +5,15 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-08-04
+
+### Frontend architecture
+- 将工作流编辑器的业务逻辑抽取到 `composables/useWorkflowEditor.ts`。
+- `editor.vue` 从 1820 行降到 971 行，三个超大前端页面全部完成拆分。
+
+### Testing
+- 前端 `vue-tsc --noEmit` 与 `vite build` 通过。
+
 ## [1.10.0] - 2026-08-04
 
 ### Frontend architecture
