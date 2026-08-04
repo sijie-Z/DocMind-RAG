@@ -17,10 +17,12 @@ from app.services.memory_service import get_memory_system
 router = APIRouter()
 
 
-def _get_user_memory_system(current_user: User, agent_id: str):
+async def _get_user_memory_system(current_user: User, agent_id: str):
     """Scope agent memory to the current user's org+user namespace."""
     org_id = current_user.organization_id or 1
-    return get_memory_system(f"{org_id}:{current_user.id}:{agent_id}")
+    system = get_memory_system(f"{org_id}:{current_user.id}:{agent_id}")
+    await system._load_from_redis()
+    return system
 
 
 @router.get("/{agent_id}", response_model=dict[str, Any])
@@ -29,7 +31,7 @@ async def get_agent_memory(
     current_user: User = Depends(get_current_user)
 ):
     """获取 Agent 的完整记忆"""
-    memory_system = _get_user_memory_system(current_user, agent_id)
+    memory_system = await _get_user_memory_system(current_user, agent_id)
     return {"success": True, "data": memory_system.export()}
 
 
@@ -40,7 +42,7 @@ async def store_memory(
     current_user: User = Depends(get_current_user)
 ):
     """存储记忆"""
-    memory_system = _get_user_memory_system(current_user, agent_id)
+    memory_system = await _get_user_memory_system(current_user, agent_id)
     item = await memory_system.remember(
         content=body.content,
         memory_type=body.memory_type,
@@ -65,7 +67,7 @@ async def recall_memory(
     current_user: User = Depends(get_current_user)
 ):
     """检索记忆"""
-    memory_system = _get_user_memory_system(current_user, agent_id)
+    memory_system = await _get_user_memory_system(current_user, agent_id)
     results = await memory_system.recall(
         query=body.query,
         memory_types=body.memory_types,
@@ -84,7 +86,7 @@ async def store_interaction(
     current_user: User = Depends(get_current_user)
 ):
     """存储交互记录"""
-    memory_system = _get_user_memory_system(current_user, agent_id)
+    memory_system = await _get_user_memory_system(current_user, agent_id)
     await memory_system.store_interaction(body.user_input, body.assistant_response)
     return {"success": True, "message": "交互已存储"}
 
@@ -96,7 +98,7 @@ async def store_experience(
     current_user: User = Depends(get_current_user)
 ):
     """存储经验"""
-    memory_system = _get_user_memory_system(current_user, agent_id)
+    memory_system = await _get_user_memory_system(current_user, agent_id)
     await memory_system.store_experience(
         success=body.success,
         action=body.action,
@@ -113,7 +115,7 @@ async def get_memory_context(
     current_user: User = Depends(get_current_user)
 ):
     """获取记忆上下文（用于LLM输入）"""
-    memory_system = _get_user_memory_system(current_user, agent_id)
+    memory_system = await _get_user_memory_system(current_user, agent_id)
     context = await memory_system.get_context(query)
     return {"success": True, "data": {"context": context}}
 
@@ -125,7 +127,7 @@ async def clear_memory(
     current_user: User = Depends(get_current_user)
 ):
     """清空记忆"""
-    memory_system = _get_user_memory_system(current_user, agent_id)
+    memory_system = await _get_user_memory_system(current_user, agent_id)
 
     if memory_type:
         if memory_type == "short_term":
@@ -145,6 +147,7 @@ async def clear_memory(
         memory_system.long_term.memories.clear()
         memory_system.long_term.index.clear()
 
+    await memory_system._save_to_redis()
     return {"success": True, "message": f"记忆已清空: {memory_type or '全部'}"}
 
 
@@ -155,8 +158,9 @@ async def import_memory(
     current_user: User = Depends(get_current_user)
 ):
     """导入记忆数据"""
-    memory_system = _get_user_memory_system(current_user, agent_id)
+    memory_system = await _get_user_memory_system(current_user, agent_id)
     memory_system.import_data(body.data)
+    await memory_system._save_to_redis()
     return {"success": True, "message": "记忆导入成功"}
 
 
@@ -168,7 +172,7 @@ async def get_insights(
     current_user: User = Depends(get_current_user)
 ):
     """获取洞察"""
-    memory_system = _get_user_memory_system(current_user, agent_id)
+    memory_system = await _get_user_memory_system(current_user, agent_id)
     if context:
         insights = memory_system.reflective.get_relevant_insights(context, top_k)
     else:

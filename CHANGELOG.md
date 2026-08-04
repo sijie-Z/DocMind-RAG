@@ -5,6 +5,15 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-08-04
+
+### Memory persistence
+- Agent 记忆 API 在读取前从 Redis 加载，避免服务重启后读不到历史记忆。
+- 清空和导入记忆后立即写回 Redis，保持 API 与 Redis 状态一致。
+
+### Testing
+- 后端 `tests/unit + tests/behavior`：412 passed / 1 skipped。
+
 ## [1.12.0] - 2026-08-04
 
 ### Observability and state
