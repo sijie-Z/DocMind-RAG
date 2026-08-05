@@ -31,10 +31,12 @@ Agent 架构经验。
 
 - `backend/app/agent/run_context.py`：新增类型化 RunContext。
 - `backend/app/agent/executor.py`：工具执行时构造并传入 `run_context`。
+- `backend/app/agent/schema_validation.py`：轻量 JSON Schema 校验器。
+- `backend/app/agent/registry.py`：工具成功后按 `output_schema` 校验输出，失败返回 `validation_error`。
 - `backend/tests/unit/test_run_context.py`：RunContext 序列化与摘要测试。
+- `backend/tests/unit/test_schema_validation.py`：schema 校验与 registry 集成测试。
 
 ## 下一步
 
-- 对 `output_schema` 做运行时校验。
 - 将 Guardrails 做成可插拔 hook。
 - 为敏感工具增加用户级审批事件。

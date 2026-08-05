@@ -5,6 +5,15 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-08-05
+
+### Agent SDK learnings
+- 新增轻量 JSON Schema 校验器 `schema_validation.py`。
+- `ToolRegistry` 在工具成功返回后按 `output_schema` 校验输出，不匹配时返回 `validation_error`。
+
+### Testing
+- 后端 `tests/unit + tests/behavior`：422 passed / 1 skipped。
+
 ## [1.18.0] - 2026-08-05
 
 ### Agent SDK learnings

@@ -42,6 +42,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
+from app.agent.schema_validation import validate_against_schema
+
 logger = logging.getLogger(__name__)
 
 
@@ -499,6 +501,18 @@ class ToolRegistry:
 
             result.meta.latency_ms = elapsed
             result.meta.tool_name = name
+
+            if entry.output_schema and result.success:
+                valid, reason = validate_against_schema(
+                    result.data, entry.output_schema
+                )
+                if not valid:
+                    result = ToolResult.fail(
+                        code="validation_error",
+                        message=f"工具输出不符合声明 schema: {reason}",
+                        raw=result.data,
+                        meta=result.meta,
+                    )
 
         except ToolAbortError as e:
             elapsed = (time.perf_counter() - start) * 1000
