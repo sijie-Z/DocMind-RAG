@@ -5,6 +5,9 @@ import { useUserStore } from '@/stores/user'
 import { getToken, isTokenExpired, removeToken } from '@/utils/auth'
 
 let sessionValidated = false
+let lastValidatedAt = 0
+// admin 路由重新校验角色的时间间隔（毫秒）：超过则重新调用 getUserInfo 刷新角色
+const ADMIN_REVALIDATE_INTERVAL = 5 * 60 * 1000
 
 export const routes: RouteRecordRaw[] = [
   {
@@ -242,6 +245,7 @@ router.beforeEach(async (to, from, next) => {
     userStore.logout()
     token = undefined
     sessionValidated = false
+    lastValidatedAt = 0
   }
 
   // 已登录用户访问登录/注册页时，重定向到首页
@@ -255,14 +259,18 @@ router.beforeEach(async (to, from, next) => {
       next({ name: 'Login', query: { redirect: to.fullPath } })
     } else {
       // 首次进入需鉴权页面时，验证 token 是否仍然有效
-      if (!sessionValidated || !userStore.userInfo?.id) {
+      // admin 路由：若上次校验已超过 5 分钟，重新拉取用户信息刷新角色
+      const adminSessionStale = requiresAdmin && sessionValidated && Date.now() - lastValidatedAt > ADMIN_REVALIDATE_INTERVAL
+      if (!sessionValidated || !userStore.userInfo?.id || adminSessionStale) {
         try {
           await userStore.getUserInfo()
           sessionValidated = true
+          lastValidatedAt = Date.now()
         } catch {
           removeToken()
           userStore.logout()
           sessionValidated = false
+          lastValidatedAt = 0
           next({ name: 'Login', query: { redirect: to.fullPath } })
           return
         }
@@ -271,6 +279,7 @@ router.beforeEach(async (to, from, next) => {
         removeToken()
         userStore.logout()
         sessionValidated = false
+        lastValidatedAt = 0
         next({ name: 'Login', query: { redirect: to.fullPath } })
         return
       }

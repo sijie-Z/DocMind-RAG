@@ -329,21 +329,26 @@ async def get_document_full_content(
     try:
         doc = await get_document_for_user(db, current_user, document_id)
 
-        # 从 ES 中获取该文档的所有分块并按 index 排序
+        # 从 ES 中获取该文档的所有分块，并在 Python 侧按 chunk_index 排序。
+        # 修复：metadata 字段在 mapping 中是 enabled:false（不可排序），
+        # 原 sort 语句必然报错导致预览恒 500；chunk_index 从 _source.metadata 读取。
         from app.core.elasticsearch import ElasticsearchTools
         query = {
             "query": {
                 "term": {"document_id": document_id}
             },
             "size": 1000,
-            "sort": [{"metadata.chunk_index": {"order": "asc"}}]
         }
         res = await ElasticsearchTools.search_documents(query)
         hits = res.get("hits", {}).get("hits", [])
 
         full_text = ""
         if hits:
-            full_text = "\n".join([h.get("_source", {}).get("chunk_text", "") for h in hits])
+            ordered = sorted(
+                hits,
+                key=lambda h: (h.get("_source", {}).get("metadata") or {}).get("chunk_index", 0),
+            )
+            full_text = "\n".join([h.get("_source", {}).get("chunk_text", "") for h in ordered])
 
         # 如果 ES 没找到，尝试从数据库 chunks 表找 (备用)
         if not full_text:

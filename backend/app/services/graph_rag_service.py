@@ -69,7 +69,7 @@ class GraphRAGService:
         except Exception as e:
             logger.warning(f"GraphRAG save to Redis failed: {e}")
 
-    def extract_entities_with_llm(self, text: str, llm_client: Any = None) -> list[dict[str, Any]]:
+    async def extract_entities_with_llm(self, text: str, llm_client: Any = None) -> list[dict[str, Any]]:
         if not text or len(text) < 50:
             return []
 
@@ -88,7 +88,8 @@ JSON返回："""
         try:
             if llm_client:
                 from app.core.config import settings
-                response = llm_client.chat.completions.create(
+                # 修复：AsyncOpenAI 的调用必须 await——此前访问 coroutine.choices 必然抛错，实体提取永远静默回退
+                response = await llm_client.chat.completions.create(
                     model=settings.DEEPSEEK_MODEL,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.1
@@ -177,7 +178,7 @@ JSON返回："""
     async def search_graph(self, query: str, organization_id: int = 1, max_hops: int = 2) -> list[dict[str, Any]]:
         await self.load(organization_id)
         graph = self._graph_for(organization_id)
-        query_entities = self.extract_entities_with_llm(query)
+        query_entities = await self.extract_entities_with_llm(query)
         if not query_entities:
             return []
 

@@ -57,6 +57,12 @@ jobs:
           echo "ENABLE_RATE_LIMIT=false" >> $GITHUB_ENV
           echo "ENABLE_MONITORING=false" >> $GITHUB_ENV
 
+      - name: Migration smoke test (alembic upgrade head)
+        working-directory: backend
+        run: |
+          alembic upgrade head
+          python -c "import sqlite3; c=sqlite3.connect('test.db'); t={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}; assert len(t) >= 26, f'expected >=26 tables, got {len(t)}'"
+
       - name: Run fast tests (unit + behavior)
         working-directory: backend
         run: |

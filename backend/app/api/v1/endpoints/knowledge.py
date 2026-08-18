@@ -672,17 +672,25 @@ async def get_rag_stats(
         # Grounded 率：回答中有引用的比例
         grounded_rate = round((grounded_hit / grounded_total * 100), 1) if grounded_total > 0 else 0
 
-        # 平均延迟
-        avg_latency = round(metrics.get("latency_avg_ms", 0), 1)
+        # 平均延迟（键名与 metrics.py 快照一致：avg_latency_ms）
+        avg_latency = round(metrics.get("avg_latency_ms", 0), 1)
 
-        # 7天趋势（基于窗口内的事件分布）
+        # 修复：趋势基于真实事件数据（事件保留 24h，按 3 小时聚合成 8 个真实采样点，
+        # 覆盖最近 24 小时）；不再重复同一窗口 7 次，不再返回硬编码兜底数组。
+        import time as _time
+        _metrics_obj = getattr(rag_service, "_pipeline", None)
+        _metrics_obj = getattr(_metrics_obj, "metrics", None) if _metrics_obj else None
         trend = []
-        for _i in range(7):
-            day_metrics = rag_service.get_metrics(window_seconds=24 * 3600)
-            day_total = day_metrics.get("retrieval_total", 0)
-            day_hit = day_metrics.get("retrieval_hit", 0)
-            rate = round((day_hit / day_total * 100), 1) if day_total > 0 else 0
-            trend.append(rate)
+        if _metrics_obj is not None and hasattr(_metrics_obj, "_events"):
+            now = _time.time()
+            evs = sorted(_metrics_obj._events.get("retrieval", []), key=lambda e: e[0])
+            hit_evs = _metrics_obj._events.get("retrieval_hit", [])
+            for bucket in range(8):
+                start = now - (8 - bucket) * 3 * 3600
+                end = start + 3 * 3600
+                bucket_total = sum(1 for ts, _ in evs if start <= ts < end)
+                bucket_hit = sum(1 for ts, _ in hit_evs if start <= ts < end)
+                trend.append(round(bucket_hit / bucket_total * 100, 1) if bucket_total > 0 else 0)
 
         return {
             "total_queries_7d": retrieval_total,
@@ -690,9 +698,9 @@ async def get_rag_stats(
             "hit_rate": hit_rate,
             "grounded_rate": grounded_rate,
             "avg_latency_ms": avg_latency,
-            "avg_documents_retrieved": round(metrics.get("avg_docs_per_query", 3.2), 1),
+            "avg_documents_retrieved": round(metrics.get("avg_docs_per_query", 0), 2),
             "top_keywords": [],  # 需要单独追踪
-            "hit_rate_trend_7d": trend if any(t > 0 for t in trend) else [55, 62, 58, 70, 65, 72, hit_rate]
+            "hit_rate_trend_7d": trend,
         }
     except Exception as e:
         logger.error(f"Failed to get RAG stats: {e}")

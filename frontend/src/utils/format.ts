@@ -1,3 +1,5 @@
+import dayjs from 'dayjs'
+
 export const formatDate = (dateString: string | Date | undefined | null): string => {
   if (!dateString) return '-'
   
@@ -13,7 +15,10 @@ export const formatDate = (dateString: string | Date | undefined | null): string
   const diffHours = Math.floor(diff / (1000 * 60 * 60))
   const diffDays = Math.floor(diff / (1000 * 60 * 60 * 24))
   
-  if (diffMinutes < 1) {
+  if (diff < 0) {
+    // 未来时间：显示具体日期时间，而非"刚刚"
+    return dayjs(date).format('YYYY-MM-DD HH:mm')
+  } else if (diffMinutes < 1) {
     return '刚刚'
   } else if (diffMinutes < 60) {
     return `${diffMinutes}分钟前`

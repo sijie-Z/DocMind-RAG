@@ -742,11 +742,29 @@ class FileUploadService:
                 # 检查权限（只有上传者或管理员可以删除）
                 # 这里简化处理，实际项目中需要更完善的权限检查
 
-                # 从 MinIO 删除文件（兼容完整 URL 和裸对象名）
-                try:
-                    await self.delete_file(document.file_path)
-                except Exception as e:
-                    logger.warning(f"从MinIO删除文件失败: {document_id}, 错误: {str(e)}")
+                # 安全修复：md5 去重上传会跨文档共享同一 MinIO 对象——
+                # 删除前检查是否还有其他文档引用同一 file_path，有引用则只删 DB 记录，
+                # 防止删一个文档破坏其他文档的下载/重建。
+                from app.core.minio_client import normalize_object_name
+                object_name = normalize_object_name(document.file_path)
+                ref_count = await session.execute(
+                    select(func.count(Document.id)).where(
+                        Document.file_path == document.file_path,
+                        Document.id != document_id,
+                    )
+                )
+                other_refs = (ref_count.scalar() or 0) > 0
+
+                if not other_refs:
+                    # 从 MinIO 删除文件（兼容完整 URL 和裸对象名）
+                    try:
+                        await self.delete_file(object_name)
+                    except Exception as e:
+                        logger.warning(f"从MinIO删除文件失败: {document_id}, 错误: {str(e)}")
+                else:
+                    logger.info(
+                        f"文档 {document_id} 的存储对象仍被 {ref_count.scalar()} 个其他文档引用，跳过物理删除"
+                    )
 
                 # 从数据库删除文档记录（级联删除分块）
                 await session.delete(document)

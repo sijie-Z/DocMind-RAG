@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
 import type { AttachedFile } from '@/types/chat'
@@ -12,6 +12,9 @@ export function useChatAttachments() {
   const fileInputRef = ref<HTMLInputElement | null>(null)
   const attachedFileIds = computed(() => attachedFiles.value.filter(f => f.status === 'done' && f.id).map(f => f.id!))
 
+  // 附件轮询中止标志：组件卸载后置位，轮询循环检测到立即退出
+  let pollAborted = false
+
   const triggerFileUpload = () => {
     const fileInput = document.getElementById('global-chat-file-input') as HTMLInputElement
     if (fileInput) fileInput.click()
@@ -21,6 +24,7 @@ export function useChatAttachments() {
     const maxRetries = 120
     let retries = 0
     while (retries < maxRetries) {
+      if (pollAborted) return
       try {
         const res = await getKnowledgeBase(docId)
         const data = res.data?.data || (res.data as Record<string, unknown>)
@@ -67,6 +71,11 @@ export function useChatAttachments() {
       tempFile.errorMsg = t('chat.fileTimeout')
     }
   }
+
+  onUnmounted(() => {
+    // 离开页面时停止轮询，避免组件卸载后仍每秒请求直至 120 次上限
+    pollAborted = true
+  })
 
   const handleFileUpload = async (event: Event) => {
     const target = event.target as HTMLInputElement

@@ -32,6 +32,11 @@ async def record_token_usage(
     # Simple cost estimation
     cost_usd = _estimate_cost(model, input_tokens, output_tokens)
 
+    # 修复：使用独立 session 提交——调用方（如 chat_service）在共享 session 上
+    # 有自己的事务，此前在此处 commit 会把调用方未提交的变更一起提交，
+    # 破坏事务原子性；独立 session 则互不影响。
+    from app.core.database import AsyncSessionLocal
+
     record = TokenUsageRecord(
         user_id=user_id,
         organization_id=organization_id,
@@ -41,8 +46,9 @@ async def record_token_usage(
         output_tokens=output_tokens,
         cost_usd=cost_usd,
     )
-    db.add(record)
-    await db.commit()
+    async with AsyncSessionLocal() as ts:
+        ts.add(record)
+        await ts.commit()
 
 
 def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
@@ -168,7 +174,7 @@ async def get_token_usage_summary(
         )
         .where(TokenUsageRecord.created_at >= since)
         .group_by(func.date(TokenUsageRecord.created_at))
-        .order_by("day")
+        .order_by(func.date(TokenUsageRecord.created_at))
     )
     by_day_list = [
         {

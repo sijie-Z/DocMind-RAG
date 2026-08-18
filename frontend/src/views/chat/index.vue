@@ -432,11 +432,15 @@ onMounted(async () => {
   const promptContent = route.query.prompt as string
   const promptName = route.query.promptName as string
   if (promptContent) {
+    // 用后即从 URL 清除，避免 query 参数残留
     router.replace({ query: { ...route.query, prompt: undefined, promptName: undefined } })
     inputMessage.value = ''
-    message.info(t('chat.promptApplied', { name: promptName || t('chat.promptDefaultName') }))
-    localStorage.setItem('activeSystemPrompt', promptContent)
-    localStorage.setItem('activeSystemPromptName', promptName || '')
+    // 安全校验：限制 prompt 长度，防止任意 URL 注入超大内容写入 localStorage
+    if (typeof promptContent === 'string' && promptContent.length <= 2000) {
+      message.info(t('chat.promptApplied', { name: promptName || t('chat.promptDefaultName') }))
+      localStorage.setItem('activeSystemPrompt', promptContent)
+      localStorage.setItem('activeSystemPromptName', promptName || '')
+    }
   }
 
   // 确保连接 WebSocket（不依赖 watcher 的时序问题）

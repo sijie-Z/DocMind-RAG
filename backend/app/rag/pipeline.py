@@ -157,6 +157,8 @@ class RAGPipeline:
                     try:
                         if attempt > 0:
                             self.metrics.inc("retry_total")
+                            # 修复：窗口模式读 window_sum("retry")，此前从未记录事件导致重试数恒 0
+                            self.metrics.record_event("retry", 1)
                         sq_result, qv, dbg = await self.retriever.retrieve(
                             sq, organization_id,
                             max(top_k, int(settings.RAG_RERANK_TOP_N or 20)),
@@ -227,6 +229,8 @@ class RAGPipeline:
             elapsed = (time.perf_counter() - start) * 1000
             RAG_RETRIEVAL_LATENCY.observe(time.perf_counter() - start)
             self.metrics.inc("latency_count")
+            # 修复：全局快照读 latency_sum_ms，此前从未 inc 导致 avg_latency_ms 恒 0
+            self.metrics.inc("latency_sum_ms", elapsed)
             self.metrics.record_event("latency", elapsed)
             if debug and debug_info is not None:
                 debug_info["total_results"] = len(result)

@@ -513,7 +513,7 @@ async def get_system_logs(
 
     try:
         # 只读取尾部（最多 20k 行）避免大文件全量加载
-        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+        with open(log_file, encoding="utf-8", errors="replace") as f:
             tail_lines = f.readlines()[-20000:]
     except OSError as e:
         logger.warning(f"读取日志文件失败: {e}")

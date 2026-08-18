@@ -87,6 +87,10 @@ class AISettings(BaseSettings):
     RAG_RERANK_API_KEY: str | None = None
     RAG_RERANK_API_URL: str | None = None
 
+    # Elasticsearch
+    ELASTICSEARCH_VERIFY_CERTS: bool = False
+    ELASTICSEARCH_REPLICAS: int = 0
+
     # Retrieval cache + retry
     RAG_ENABLE_CACHE: bool = True
     RAG_CACHE_TTL_SECONDS: int = 600

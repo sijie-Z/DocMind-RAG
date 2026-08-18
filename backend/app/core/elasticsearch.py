@@ -33,7 +33,8 @@ class _ESHolder:
             logger.info(f"Connecting to Elasticsearch: {settings.ELASTICSEARCH_HOSTS} ...")
             self._client = AsyncElasticsearch(
                 hosts=settings.ELASTICSEARCH_HOSTS,
-                verify_certs=False,
+                # 安全修复：TLS 校验由配置控制（生产 https 下默认不应关闭）
+                verify_certs=getattr(settings, "ELASTICSEARCH_VERIFY_CERTS", False),
                 ssl_show_warn=False,
                 request_timeout=5,
             )
@@ -155,7 +156,11 @@ def _knowledge_index_mapping() -> dict:
                 "metadata": {"type": "object", "enabled": False},
             }
         },
-        "settings": {"number_of_shards": 1, "number_of_replicas": 0},
+        # 安全修复：副本数由配置控制（生产建议 ≥1，避免节点故障丢数据）
+        "settings": {
+            "number_of_shards": 1,
+            "number_of_replicas": int(getattr(settings, "ELASTICSEARCH_REPLICAS", 0)),
+        },
     }
 
 
