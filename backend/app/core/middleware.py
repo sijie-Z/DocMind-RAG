@@ -54,6 +54,8 @@ class MetricsCollector:
         )
         self.last_update = time.time()
         self.lock = asyncio.Lock()
+        # 安全修复：路由统计的路径归一化缓存（避免每个请求都做正则）
+        self._route_normalize_cache: dict[str, str] = {}
         self._redis_live_key = "metrics:live"
         self._instance_id = uuid.uuid4().hex[:8]
         self._live_key = f"{self._redis_live_key}:{self._instance_id}"
@@ -70,6 +72,24 @@ class MetricsCollector:
     async def dec_active_connections(self):
         async with self.lock:
             self.active_connections = max(0, self.active_connections - 1)
+
+    @staticmethod
+    def _normalize_route_path(path: str) -> str:
+        """归一化路由路径：数字段与 UUID 段替换为 {id}。
+
+        修复：原实现以原始 path 为键，/api/v1/users/5 与 /api/v1/users/6
+        各自成键且永不淘汰，运行期间内存持续增长。
+        """
+        parts = path.split("/")
+        out = []
+        for part in parts:
+            if part.isdigit() or len(part) == 36 and part.count("-") == 4 and all(
+                c in "0123456789abcdefABCDEF-" for c in part
+            ):
+                out.append("{id}")
+            else:
+                out.append(part)
+        return "/".join(out)
 
     async def record_request(
         self,
@@ -90,7 +110,7 @@ class MetricsCollector:
             if status_code:
                 self.status_counts[str(status_code)] += 1
             if method and path:
-                route_key = f"{method.upper()} {path}"
+                route_key = f"{method.upper()} {self._normalize_route_path(path)}"
                 route_data = self.route_stats[route_key]
                 route_data["count"] += 1
                 route_data["duration_sum"] += duration

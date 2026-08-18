@@ -35,7 +35,8 @@ class NotificationConnectionManager:
 
     async def _send_to_ws(self, user_id: int, ws: WebSocket, message: str) -> bool:
         try:
-            await ws.send_text(message)
+            # 安全加固：发送加超时，僵死连接不再拖住推送与 HTTP 响应
+            await asyncio.wait_for(ws.send_text(message), timeout=5.0)
             return True
         except Exception:
             self.disconnect(user_id, ws)

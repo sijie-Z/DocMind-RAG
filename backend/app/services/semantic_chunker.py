@@ -185,6 +185,25 @@ class SemanticChunker:
             end = min(len(sentences), i + self.buffer_size + 1)
             combined_sentences.append(" ".join(sentences[start:end]))
 
+        # 性能加固：限制单段 embedding 预算，防止万句级文档产生上千次
+        # embedding 请求拖垮解析链路（超预算时按长度切分回退）。
+        max_windows = 120
+        if len(combined_sentences) > max_windows:
+            logger.warning(
+                f"Semantic split window count {len(combined_sentences)} exceeds "
+                f"budget {max_windows}, falling back to size-based split"
+            )
+            # 按近似字符数均分
+            mid = len(text) // 2
+            left = text[:mid].rstrip()
+            right = text[mid:].lstrip()
+            out = []
+            if left:
+                out.append({"text": left, "metadata": {}})
+            if right:
+                out.append({"text": right, "metadata": {}})
+            return out or [{"text": text, "metadata": {}}]
+
         # 3. 获取 Embedding
         try:
             embeddings = await embedding_service.get_embeddings(combined_sentences)

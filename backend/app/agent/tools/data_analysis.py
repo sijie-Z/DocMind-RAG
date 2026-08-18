@@ -125,6 +125,7 @@ async def analyze_data(data: str, **_: Any) -> str:
 async def compare_documents(
     document_ids: list[str],
     aspect: str = "general",
+    organization_id: int | None = None,
     **_: Any,
 ) -> str:
     if not document_ids or len(document_ids) < 2:
@@ -132,13 +133,25 @@ async def compare_documents(
     if len(document_ids) > 5:
         return "Error: Maximum 5 documents can be compared at once."
 
+    # 安全加固：与 cross_document_analysis 等工具一致，强制按组织过滤，
+    # 防止通过枚举 document_id 跨租户读取其他组织的文档内容。
+    if organization_id is None:
+        return "Error: 无法确定组织范围，禁止执行跨组织文档对比。"
+
     from app.core.elasticsearch import ElasticsearchTools
 
     summaries = []
     for doc_id in document_ids:
         es_query = {
             "size": 30,
-            "query": {"term": {"document_id": doc_id}},
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"document_id": doc_id}},
+                        {"term": {"organization_id": str(organization_id)}},
+                    ]
+                }
+            },
             "_source": ["chunk_text", "filename"],
         }
         try:

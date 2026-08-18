@@ -129,6 +129,11 @@ export function setRouter(routerInstance: Router) {
   router = routerInstance
 }
 
+/** 登出时清除 axios 实例默认的 Authorization 头（防旧 token 残留随请求发出） */
+export function clearDefaultAuth() {
+  delete request.defaults.headers.common['Authorization']
+}
+
 // 创建axios实例
 const request: AxiosInstance = axios.create({
   // 统一基础路径为 /api/v1，避免后续手动拼接

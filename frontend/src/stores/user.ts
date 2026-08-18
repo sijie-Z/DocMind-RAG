@@ -151,7 +151,7 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  const logout = () => {
+  const logout = async () => {
     userInfo.value = null
     token.value = ''
     removeToken()
@@ -160,6 +160,12 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('language')
     localStorage.removeItem('theme')
     localStorage.removeItem('activeSystemPrompt')
+    // 安全加固：清除 axios 默认 Authorization 头，防止登出后旧 token 残留
+    // （动态导入避免与 request.ts 的静态循环依赖）
+    try {
+      const { clearDefaultAuth } = await import('@/utils/request')
+      clearDefaultAuth()
+    } catch { /* request 模块未就绪时忽略 */ }
   }
   
   // --- 找到 stores/user.ts 中的 updateUserInfo 函数，替换为 ---

@@ -140,7 +140,15 @@ class RAGPipeline:
             ):
                 max_sq = max(1, int(getattr(settings, "RAG_DECOMPOSITION_MAX_SUBQUERIES", 4) or 4))
                 model = settings.LOCAL_LLM_MODEL if settings.ENABLE_LOCAL_LLM else settings.DEEPSEEK_MODEL
-                decomposed = await decompose_query(query, self.openai_client, model, max_sq)
+                # 安全修复：分解调用加超时，LLM 慢时降级为原始查询，防止整个检索链路挂起
+                try:
+                    decomposed = await asyncio.wait_for(
+                        decompose_query(query, self.openai_client, model, max_sq),
+                        timeout=max(5.0, float(getattr(settings, "AI_STREAM_TIMEOUT", 120) * 0.25)),
+                    )
+                except (TimeoutError, Exception) as dec_err:
+                    logger.warning(f"Query decomposition timed out/failed, using original query: {dec_err}")
+                    decomposed = [query]
                 if len(decomposed) > 1:
                     sub_queries = decomposed
                     logger.info(
