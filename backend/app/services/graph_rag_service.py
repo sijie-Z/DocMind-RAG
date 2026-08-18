@@ -10,12 +10,11 @@ logger = logging.getLogger(__name__)
 class GraphRAGService:
     def __init__(self):
         self._redis_key = "rag:graph"
-        self.graph: dict[str, dict[str, Any]] = defaultdict(lambda: {
-            "entity_type": "UNKNOWN",
-            "description": "",
-            "relationships": [],
-            "occurrences": 0
-        })
+        # 安全加固：图谱按组织分区（内存 dict 与 Redis key 均带 organization_id），
+        # 防止跨组织读取实体/关系数据。
+        self._graphs: dict[int, dict[str, dict[str, Any]]] = {}
+        # 兼容旧引用：默认组织（org 1）的图谱视图
+        self.graph: dict[str, dict[str, Any]] = self._graph_for(1)
         self.entity_types = {
             "PERSON": "人物",
             "ORGANIZATION": "组织/公司",
@@ -23,35 +22,49 @@ class GraphRAGService:
             "EVENT": "事件",
             "CONCEPT": "概念",
             "PRODUCT": "产品",
-            "TECHNOLOGY": "技术"
+            "TECHNOLOGY": "技术",
         }
 
-    async def load(self) -> None:
-        """Load the graph from Redis; keeps in-memory state when Redis is unavailable."""
+    def _graph_for(self, organization_id: int) -> dict[str, dict[str, Any]]:
+        if organization_id not in self._graphs:
+            self._graphs[organization_id] = defaultdict(lambda: {
+                "entity_type": "UNKNOWN",
+                "description": "",
+                "relationships": [],
+                "occurrences": 0
+            })
+        return self._graphs[organization_id]
+
+    def _redis_key_for(self, organization_id: int) -> str:
+        return f"{self._redis_key}:{organization_id}"
+
+    async def load(self, organization_id: int = 1) -> None:
+        """Load the graph for an organization from Redis; keeps in-memory state when Redis is unavailable."""
         from app.core.redis import redis_client
 
         if not redis_client:
             return
         try:
-            raw = await redis_client.get(self._redis_key)
+            raw = await redis_client.get(self._redis_key_for(organization_id))
             if raw:
                 data = json.loads(raw)
-                self.graph.clear()
-                self.graph.update(data)
+                graph = self._graph_for(organization_id)
+                graph.clear()
+                graph.update(data)
         except Exception as e:
             logger.warning(f"GraphRAG load from Redis failed: {e}")
 
-    async def save(self) -> None:
-        """Persist the graph to Redis when available."""
+    async def save(self, organization_id: int = 1) -> None:
+        """Persist the graph for an organization to Redis when available."""
         from app.core.redis import redis_client
 
         if not redis_client:
             return
         try:
             await redis_client.setex(
-                self._redis_key,
+                self._redis_key_for(organization_id),
                 86400,
-                json.dumps(dict(self.graph), ensure_ascii=False),
+                json.dumps(dict(self._graph_for(organization_id)), ensure_ascii=False),
             )
         except Exception as e:
             logger.warning(f"GraphRAG save to Redis failed: {e}")
@@ -92,7 +105,7 @@ JSON返回："""
         entities = []
 
         person_pattern = r'([A-Z\u4e00-\u9fa5][a-z\u4e00-\u9fa5]{1,20}(?:\s+[A-Z\u4e00-\u9fa5][a-z\u4e00-\u9fa5]{1,20})*(?:\s+(?:先生|女士|博士|教授|总监|经理|CEO|CTO|CFO|董事长|总裁|总经理))?)'
-        org_pattern = r'([A-Z\u4e00-\u9fa5](?:[A-Za-z\u4e00-\u9fa5·]{1,30}(?:公司|集团|大学|医院|医院|研究所|医院|中心|机构|组织|银行|酒店|医院))?)'
+        org_pattern = r'([A-Z\u4e00-\u9fa5](?:[A-Za-z\u4e00-\u9fa5·]{1,30}(?:公司|集团|大学|研究所|中心|机构|组织|银行|酒店))?)'
         location_pattern = r'([A-Z\u4e00-\u9fa5](?:[A-Za-z\u4e00-\u9fa5]{1,20}(?:市|省|区|县|镇|街|路|大厦|中心|楼))?)'
 
         for match in re.finditer(person_pattern, text):
@@ -127,41 +140,43 @@ JSON返回："""
 
         return entities[:20]
 
-    async def build_graph_from_entities(self, entities: list[dict[str, Any]]) -> None:
+    async def build_graph_from_entities(self, entities: list[dict[str, Any]], organization_id: int = 1) -> None:
+        graph = self._graph_for(organization_id)
         for ent in entities:
             entity_name = ent.get("entity", "")
             if not entity_name:
                 continue
 
             entity_key = self._normalize_entity(entity_name)
-            self.graph[entity_key]["entity_name"] = entity_name
-            self.graph[entity_key]["entity_type"] = ent.get("type", "UNKNOWN")
-            self.graph[entity_key]["description"] = ent.get("description", "")
-            self.graph[entity_key]["occurrences"] += 1
+            graph[entity_key]["entity_name"] = entity_name
+            graph[entity_key]["entity_type"] = ent.get("type", "UNKNOWN")
+            graph[entity_key]["description"] = ent.get("description", "")
+            graph[entity_key]["occurrences"] += 1
 
             for rel in ent.get("relations", []):
                 target = rel.get("target", "")
                 if target:
                     target_key = self._normalize_entity(target)
-                    self.graph[entity_key]["relationships"].append({
+                    graph[entity_key]["relationships"].append({
                         "target": target_key,
                         "relation": rel.get("relation", "RELATED_TO")
                     })
-                    self.graph[target_key]["relationships"].append({
+                    graph[target_key]["relationships"].append({
                         "target": entity_key,
                         "relation": rel.get("relation", "RELATED_TO")
                     })
-        await self.save()
+        await self.save(organization_id)
 
-    async def clear(self) -> None:
-        self.graph.clear()
-        await self.save()
+    async def clear(self, organization_id: int = 1) -> None:
+        self._graph_for(organization_id).clear()
+        await self.save(organization_id)
 
     def _normalize_entity(self, entity: str) -> str:
         return hashlib.md5(entity.lower().encode()).hexdigest()[:16]
 
-    async def search_graph(self, query: str, max_hops: int = 2) -> list[dict[str, Any]]:
-        await self.load()
+    async def search_graph(self, query: str, organization_id: int = 1, max_hops: int = 2) -> list[dict[str, Any]]:
+        await self.load(organization_id)
+        graph = self._graph_for(organization_id)
         query_entities = self.extract_entities_with_llm(query)
         if not query_entities:
             return []
@@ -171,8 +186,8 @@ JSON返回："""
             entity_name = ent.get("entity", "")
             entity_key = self._normalize_entity(entity_name)
 
-            if entity_key in self.graph:
-                node_data = self.graph[entity_key]
+            if entity_key in graph:
+                node_data = graph[entity_key]
                 results.append({
                     "entity": entity_name,
                     "type": node_data.get("entity_type", "UNKNOWN"),
@@ -183,21 +198,22 @@ JSON返回："""
 
         return results
 
-    def get_subgraph_context(self, entities: list[str], max_hops: int = 1) -> str:
+    def get_subgraph_context(self, entities: list[str], organization_id: int = 1, max_hops: int = 1) -> str:
         context_parts = []
+        graph = self._graph_for(organization_id)
 
         for ent in entities:
             entity_key = self._normalize_entity(ent)
-            if entity_key not in self.graph:
+            if entity_key not in graph:
                 continue
 
-            node = self.graph[entity_key]
+            node = graph[entity_key]
             type_name = self.entity_types.get(node["entity_type"], node["entity_type"])
 
             rels = []
             for rel in node.get("relationships", [])[:5]:
                 target_key = rel.get("target", "")
-                for name, _data in self.graph.items():
+                for name, _data in graph.items():
                     if name == target_key:
                         rels.append(f"{name[:8]}...({rel.get('relation', 'RELATED')})")
                         break
@@ -211,14 +227,15 @@ JSON返回："""
 
         return "\n---\n".join(context_parts[:10])
 
-    async def get_analytics(self) -> dict[str, Any]:
-        await self.load()
+    async def get_analytics(self, organization_id: int = 1) -> dict[str, Any]:
+        await self.load(organization_id)
+        graph = self._graph_for(organization_id)
         type_counts = defaultdict(int)
-        for node in self.graph.values():
+        for node in graph.values():
             type_counts[node.get("entity_type", "UNKNOWN")] += 1
 
         return {
-            "total_entities": len(self.graph),
+            "total_entities": len(graph),
             "type_distribution": dict(type_counts),
             "entity_types": self.entity_types
         }

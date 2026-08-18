@@ -8,6 +8,16 @@ from app.models.user_audit import UserActivityLog
 
 logger = logging.getLogger(__name__)
 
+def extract_client_ip(request: Request | None) -> str | None:
+    """统一客户端 IP 提取：仅信任直连地址，不信任客户端可伪造的 X-Forwarded-For。
+
+    若部署在受信反向代理后，请在代理层覆写该逻辑或配置代理白名单。
+    """
+    if request is None:
+        return None
+    return request.client.host if request.client else None
+
+
 class AuditService:
     @staticmethod
     async def log_activity(
@@ -25,7 +35,7 @@ class AuditService:
             user_agent = None
 
             if request:
-                ip_address = request.client.host if request.client else None
+                ip_address = extract_client_ip(request)
                 user_agent = request.headers.get("user-agent")
 
             log_entry = UserActivityLog(

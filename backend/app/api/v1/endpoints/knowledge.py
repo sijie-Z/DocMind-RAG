@@ -256,7 +256,9 @@ async def get_graph_rag_stats(
     try:
         from app.services.graph_rag_service import graph_rag_service
 
-        analytics = await graph_rag_service.get_analytics()
+        # 安全加固：图谱按组织隔离，普通用户只能看自己组织的统计
+        effective_org = current_user.organization_id or 1
+        analytics = await graph_rag_service.get_analytics(effective_org)
 
         return {
             "success": True,
@@ -285,7 +287,9 @@ async def clear_graph_rag(
     try:
         from app.services.graph_rag_service import graph_rag_service
 
-        await graph_rag_service.clear()
+        # 安全加固：管理员只清空自己组织的图谱
+        effective_org = current_user.organization_id or 1
+        await graph_rag_service.clear(effective_org)
 
         return {
             "success": True,
@@ -715,14 +719,20 @@ async def get_knowledge_graph(
     from app.services.graph_rag_service import graph_rag_service
 
     try:
-        await graph_rag_service.load()
+        # 安全加固：非超管强制使用自己的组织，忽略客户端传入的 organization_id
+        effective_org = current_user.organization_id or 1
+        if not current_user.is_superuser and organization_id != effective_org:
+            organization_id = effective_org
+
+        await graph_rag_service.load(effective_org)
+        graph = graph_rag_service._graph_for(effective_org)
         if query:
             # Search for specific entities
-            results = await graph_rag_service.search_graph(query, max_hops=2)
+            results = await graph_rag_service.search_graph(query, effective_org, max_hops=2)
         else:
             # Return all entities (up to max_nodes)
             results = []
-            for key, node in list(graph_rag_service.graph.items())[:max_nodes]:
+            for key, node in list(graph.items())[:max_nodes]:
                 results.append({
                     "entity": node.get("entity_name", key),
                     "type": node.get("entity_type", "UNKNOWN"),
@@ -752,7 +762,7 @@ async def get_knowledge_graph(
                 target_key = rel.get("target", "")
                 # Find target entity name
                 target_name = None
-                for k, v in graph_rag_service.graph.items():
+                for k, v in graph.items():
                     if k == target_key:
                         target_name = v.get("entity_name", target_key)
                         break
@@ -771,7 +781,7 @@ async def get_knowledge_graph(
                         "relation": rel.get("relation", "RELATED_TO"),
                     })
 
-        analytics = await graph_rag_service.get_analytics()
+        analytics = await graph_rag_service.get_analytics(effective_org)
 
         return {
             "nodes": nodes[:max_nodes],

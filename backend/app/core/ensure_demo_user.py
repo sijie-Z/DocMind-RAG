@@ -12,11 +12,16 @@ from app.services.auth_service import auth_service
 logger = logging.getLogger(__name__)
 
 DEMO_USERNAME = "guest"
-DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "123456")
 DEMO_EMAIL = "guest@example.com"
 
-if DEMO_PASSWORD == "123456":
-    logger.warning("DEMO_PASSWORD is using default value '123456'. Set DEMO_PASSWORD environment variable for production.")
+
+def _demo_password() -> str:
+    """演示账号初始密码：优先环境变量，否则随机生成（绝不使用已知弱口令）。"""
+    configured = os.environ.get("DEMO_PASSWORD")
+    if configured and configured != "123456":
+        return configured
+    import secrets
+    return secrets.token_urlsafe(12)
 
 
 async def _ensure_default_org(db) -> int:
@@ -59,16 +64,22 @@ async def ensure_demo_user():
                 else:
                     logger.info(f"演示账号已存在: {DEMO_USERNAME}（不重置密码）")
             else:
+                # 安全加固：初始密码随机生成（或由环境变量指定），仅创建时打印一次；
+                # 管理员可从日志获取并修改。
+                initial_password = _demo_password()
                 await auth_service.create_user(
                     db,
                     username=DEMO_USERNAME,
                     email=DEMO_EMAIL,
-                    password=DEMO_PASSWORD,
+                    password=initial_password,
                     full_name="游客",
                     organization_id=org_id,
                     role="user",
                 )
                 await db.commit()
-                logger.info(f"演示账号已创建: {DEMO_USERNAME}（请通过环境变量 DEMO_PASSWORD 配置初始密码）")
+                logger.warning(
+                    f"演示账号已创建: {DEMO_USERNAME}，初始密码为: {initial_password}"
+                    "（仅此一次可见，请立即修改或设置 DEMO_PASSWORD 环境变量）"
+                )
     except Exception as e:
         logger.exception(f"确保演示账号失败（不影响启动）: {e}")

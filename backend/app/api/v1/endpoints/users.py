@@ -90,12 +90,9 @@ class UserResetPasswordAdmin(BaseModel):
 
 
 def _client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return None
+    # 安全加固：与 audit_service 统一，不信任客户端可伪造的 X-Forwarded-For
+    from app.services.audit_service import extract_client_ip
+    return extract_client_ip(request)
 
 
 async def _log_user_activity(

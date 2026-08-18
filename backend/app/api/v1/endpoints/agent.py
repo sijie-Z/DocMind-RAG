@@ -39,6 +39,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _merge_disabled_tools(client_disabled: list[str] | None) -> list[str]:
+    """安全加固：服务端强制合并高危工具禁用列表，客户端无法解除。
+
+    即使客户端传了非空 disabled_tools，execute_python/execute_sql/mcp_call
+    也始终处于禁用状态。
+    """
+    return sorted(set(client_disabled or []) | set(DEFAULT_DISABLED_TOOLS))
+
+
 # ── Request/Response models ──────────────────────────────────────────────────
 
 class AgentChatRequest(BaseModel):
@@ -98,9 +107,7 @@ async def agent_chat(
                 enable_thinking=body.enable_thinking,
                 system_prompt_override=body.system_prompt_override,
                 # 安全加固：高危工具由服务端强制禁用，客户端无法解除
-                disabled_tools=sorted(
-                    set(body.disabled_tools or []) | set(DEFAULT_DISABLED_TOOLS)
-                ),
+                disabled_tools=_merge_disabled_tools(body.disabled_tools),
             )
 
             # Load history from session if provided
@@ -518,9 +525,7 @@ async def update_config(
         config.system_prompt_override = body.system_prompt_override
     if body.disabled_tools is not None:
         # 安全加固：高危工具由服务端强制禁用，客户端无法解除
-        config.disabled_tools = sorted(
-            set(body.disabled_tools) | set(DEFAULT_DISABLED_TOOLS)
-        )
+        config.disabled_tools = _merge_disabled_tools(body.disabled_tools)
 
     await config.save_to_redis(f"user:{current_user.id}")
 

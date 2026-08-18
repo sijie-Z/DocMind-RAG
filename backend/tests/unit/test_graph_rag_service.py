@@ -29,7 +29,8 @@ async def test_graph_persists_and_loads_from_redis(monkeypatch):
         {"entity": "DocMind", "type": "PRODUCT", "description": "RAG system", "relations": []}
     ])
 
-    assert "rag:graph" in fake.data
+    # 组织分区后 key 带 org 后缀（默认 org 1）
+    assert "rag:graph:1" in fake.data
 
     restored = GraphRAGService()
     await restored.load()
@@ -37,3 +38,8 @@ async def test_graph_persists_and_loads_from_redis(monkeypatch):
     entity_key = restored._normalize_entity("DocMind")
     assert restored.graph[entity_key]["entity_name"] == "DocMind"
     assert restored.graph[entity_key]["entity_type"] == "PRODUCT"
+
+    # 组织隔离：org 5 不应看到 org 1 的图谱
+    await restored.load(5)
+    assert restored._graph_for(5) == {}
+    assert entity_key not in restored._graph_for(5)

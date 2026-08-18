@@ -208,6 +208,39 @@ def _is_safe_select_sql(sql: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _ast_safety_check(code: str) -> tuple[bool, str]:
+    """AST-level safety validation for the in-process Python sandbox.
+
+    Returns (ok, reason). Extracted from execute_python so it can be unit-tested.
+    """
+    import ast as _ast
+
+    # 安全加固：限制代码长度，防止超大输入
+    if len(code) > 5000:
+        return False, "Code too long (max 5000 chars)."
+
+    _FORBIDDEN = (_ast.Import, _ast.ImportFrom)
+    _FORBIDDEN_CALLS = {"eval", "exec", "compile", "__import__", "open",
+                        "globals", "locals", "vars", "getattr", "setattr",
+                        "delattr", "breakpoint", "input"}
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError as e:
+        return False, f"Syntax error: {e}"
+    for node in _ast.walk(tree):
+        if isinstance(node, _FORBIDDEN):
+            return False, "import statements are not allowed in sandbox."
+        if isinstance(node, _ast.Call) and isinstance(node.func, _ast.Name):
+            if node.func.id in _FORBIDDEN_CALLS:
+                return False, f"calling '{node.func.id}()' is not allowed in sandbox."
+        # 安全加固：禁止一切以下划线开头的属性访问。
+        # 仅拦截双下划线（__）无法防住沙箱逃逸（如 random._os.system 可执行任意命令），
+        # 因此单下划线私有属性一并禁止。
+        if isinstance(node, _ast.Attribute) and node.attr.startswith("_"):
+            return False, "private/dunder attribute access is not allowed in sandbox."
+    return True, ""
+
+
 @register_tool(
     name="execute_python",
     description=(
@@ -253,31 +286,9 @@ async def execute_python(code: str, **_: Any) -> str:
             logger.warning(f"Docker sandbox failed, falling back to AST: {e}")
 
     # ── AST-level safety check ────────────────────────────────────
-    import ast as _ast
-
-    # 安全加固：限制代码长度，防止超大输入
-    if len(code) > 5000:
-        return "Error: Code too long (max 5000 chars)."
-
-    _FORBIDDEN = (_ast.Import, _ast.ImportFrom)
-    _FORBIDDEN_CALLS = {"eval", "exec", "compile", "__import__", "open",
-                        "globals", "locals", "vars", "getattr", "setattr",
-                        "delattr", "breakpoint", "input"}
-    try:
-        tree = _ast.parse(code)
-    except SyntaxError as e:
-        return f"Error: Syntax error: {e}"
-    for node in _ast.walk(tree):
-        if isinstance(node, _FORBIDDEN):
-            return "Error: import statements are not allowed in sandbox."
-        if isinstance(node, _ast.Call) and isinstance(node.func, _ast.Name):
-            if node.func.id in _FORBIDDEN_CALLS:
-                return f"Error: calling '{node.func.id}()' is not allowed in sandbox."
-        # 安全加固：禁止一切以下划线开头的属性访问。
-        # 仅拦截双下划线（__）无法防住沙箱逃逸（如 random._os.system 可执行任意命令），
-        # 因此单下划线私有属性一并禁止。
-        if isinstance(node, _ast.Attribute) and node.attr.startswith("_"):
-            return "Error: private/dunder attribute access is not allowed in sandbox."
+    ok, reason = _ast_safety_check(code)
+    if not ok:
+        return f"Error: {reason}"
 
     # Build safe globals — no __builtins__ escape hatch
     safe_globals = {"__builtins__": {}}
@@ -330,6 +341,53 @@ async def execute_python(code: str, **_: Any) -> str:
         return f"Error: {type(e).__name__}: {e}"
 
 
+def _inject_org_filter(query: str, org_id: int) -> str:
+    """Append an organization_id filter to a whitelisted SELECT query.
+
+    Extracted from execute_sql so it can be unit-tested. Queries that already
+    reference organization_id are left untouched.
+    """
+    needs_org_filter = False
+    for table in ALLOWED_SQL_COLUMNS:
+        if "organization_id" in ALLOWED_SQL_COLUMNS[table]:
+            if re.search(rf"\b(?:from|join)\s+{re.escape(table)}\b", query, flags=re.IGNORECASE):
+                needs_org_filter = True
+                break
+    if not needs_org_filter or re.search(r"\borganization_id\b", query, flags=re.IGNORECASE):
+        return query
+
+    where_m = re.search(r"\bwhere\b", query, flags=re.IGNORECASE)
+    tail_m = re.search(
+        r"\b(group\s+by|order\s+by|limit|having)\b",
+        query, flags=re.IGNORECASE,
+    )
+    if where_m:
+        # 包裹原 WHERE 条件（防止 OR 破坏组织过滤语义）
+        if tail_m and tail_m.start() > where_m.end():
+            tail_pos = tail_m.start()
+            return (
+                query[:where_m.start()]
+                + f" WHERE (organization_id = {org_id} AND "
+                + query[where_m.end():tail_pos]
+                + ") "
+                + query[tail_pos:]
+            )
+        return (
+            query[:where_m.start()]
+            + f" WHERE (organization_id = {org_id} AND "
+            + query[where_m.end():]
+            + ")"
+        )
+    # 无 WHERE：在 GROUP BY/ORDER BY/LIMIT/HAVING 之前插入
+    if tail_m:
+        return (
+            query[:tail_m.start()]
+            + f" WHERE organization_id = {org_id} "
+            + query[tail_m.start():]
+        )
+    return query.rstrip().rstrip(";") + f" WHERE organization_id = {org_id}"
+
+
 @register_tool(
     name="execute_sql",
     description=(
@@ -365,46 +423,7 @@ async def execute_sql(query: str, organization_id: int | None = None, **_: Any) 
     org_id = int(organization_id)
 
     # 对含 organization_id 列的白名单表自动附加组织过滤条件
-    needs_org_filter = False
-    for table in ALLOWED_SQL_COLUMNS:
-        if "organization_id" in ALLOWED_SQL_COLUMNS[table]:
-            if re.search(rf"\b(?:from|join)\s+{re.escape(table)}\b", query, flags=re.IGNORECASE):
-                needs_org_filter = True
-                break
-    if needs_org_filter and not re.search(r"\borganization_id\b", query, flags=re.IGNORECASE):
-        where_m = re.search(r"\bwhere\b", query, flags=re.IGNORECASE)
-        tail_m = re.search(
-            r"\b(group\s+by|order\s+by|limit|having)\b",
-            query, flags=re.IGNORECASE,
-        )
-        if where_m:
-            # 包裹原 WHERE 条件（防止 OR 破坏组织过滤语义）
-            if tail_m and tail_m.start() > where_m.end():
-                tail_pos = tail_m.start()
-                query = (
-                    query[:where_m.start()]
-                    + f" WHERE (organization_id = {org_id} AND "
-                    + query[where_m.end():tail_pos]
-                    + ") "
-                    + query[tail_pos:]
-                )
-            else:
-                query = (
-                    query[:where_m.start()]
-                    + f" WHERE (organization_id = {org_id} AND "
-                    + query[where_m.end():]
-                    + ")"
-                )
-        else:
-            # 无 WHERE：在 GROUP BY/ORDER BY/LIMIT/HAVING 之前插入
-            if tail_m:
-                query = (
-                    query[:tail_m.start()]
-                    + f" WHERE organization_id = {org_id} "
-                    + query[tail_m.start():]
-                )
-            else:
-                query = query.rstrip().rstrip(";") + f" WHERE organization_id = {org_id}"
+    query = _inject_org_filter(query, org_id)
 
     # Force limit
     query_stripped = query.strip().lower()

@@ -560,7 +560,11 @@ async def get_minio_file(
             media_type = "image/gif"
         elif normalized.endswith(".webp"):
             media_type = "image/webp"
-        return StreamingResponse(response, media_type=media_type)
+        # 安全加固：非图片对象一律作为附件下载，且禁用 MIME 嗅探，防存储型 XSS
+        headers = {"X-Content-Type-Options": "nosniff"}
+        if media_type == "application/octet-stream":
+            headers["Content-Disposition"] = "attachment"
+        return StreamingResponse(response, media_type=media_type, headers=headers)
     except Exception:
         raise HTTPException(status_code=404)
 
