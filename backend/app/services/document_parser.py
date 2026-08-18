@@ -63,12 +63,9 @@ class DocumentParser:
                 # 可能是 URL 或 MinIO 路径，需要先下载到本地临时文件
                 logger.info(f"正在从存储下载文件以供解析: {file_path}")
 
-                # 提取对象名 (如果是 URL)
-                object_name = file_path
-                if "://" in file_path:
-                    # 假设 URL 格式为 http://endpoint/bucket/object_name
-                    parts = file_path.split("/")
-                    object_name = "/".join(parts[4:]) if len(parts) > 4 else parts[-1]
+                # 统一提取对象名（兼容对象名与历史 URL 两种存储格式）
+                from app.core.minio_client import normalize_object_name
+                object_name = normalize_object_name(file_path)
 
                 # 创建临时文件
                 ext = Path(file_path).suffix.lower() or ".tmp"

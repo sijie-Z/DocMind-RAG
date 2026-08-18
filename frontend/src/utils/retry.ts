@@ -43,7 +43,24 @@ export async function withRetry<T>(
         const err = error as Record<string, unknown>
         const resp = err.response as Record<string, unknown> | undefined
         const retryAfter = (err.headers as Record<string, string>)?.['retry-after'] || (resp?.headers as Record<string, string>)?.['retry-after']
-        const actualDelay = retryAfter ? parseInt(retryAfter) * 1000 : delay
+        // Retry-After 可能是 HTTP-date（如 "Fri, 31 Dec 1999 23:59:59 GMT"）或秒数：
+        // 先 Date.parse 解析 HTTP-date（直接得毫秒），再 parseInt 秒数，都失败则回退默认延迟
+        let actualDelay = delay
+        if (retryAfter) {
+          const httpDateMs = Date.parse(retryAfter)
+          const seconds = parseInt(retryAfter, 10)
+          if (!Number.isNaN(httpDateMs)) {
+            actualDelay = httpDateMs
+          } else if (!Number.isNaN(seconds) && seconds >= 0) {
+            actualDelay = seconds * 1000
+          } else {
+            actualDelay = 1000
+          }
+        }
+        // 最终延迟必须是有限非负数字，否则回退默认延迟
+        if (!Number.isFinite(actualDelay) || actualDelay < 0) {
+          actualDelay = 1000
+        }
 
         await new Promise(resolve => setTimeout(resolve, actualDelay))
         continue

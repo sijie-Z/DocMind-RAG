@@ -208,7 +208,14 @@ const handleSubmit = async () => {
       if (result.success) {
         message.success(t('login.loginSuccess'))
         await nextTick()
-        router.push('/dashboard')
+        // 路由守卫传入的 redirect（如 ?redirect=/chat）登录成功后回跳；
+        // 校验以 / 开头、非 // 开头、非 javascript:，避免开放重定向
+        const redirect = route.query.redirect
+        if (typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//') && !/^javascript:/i.test(redirect)) {
+          router.replace(redirect)
+        } else {
+          router.push('/dashboard')
+        }
       } else {
         message.error(result.message || t('login.loginFailed'))
       }

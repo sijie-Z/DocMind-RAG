@@ -156,7 +156,8 @@ class FileUploadService:
             content_type: 内容类型
             
         Returns:
-            文件访问URL
+            对象名称（统一存储规范：file_path 只存对象名，不存浏览器不可达的内网 URL；
+            下载一律走 /files 代理或 presigned URL）
         """
         try:
             # 上传文件
@@ -167,12 +168,7 @@ class FileUploadService:
                 length=len(file_content),
                 content_type=content_type,
             )
-
-            # 生成访问URL
-            url = f"{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET_NAME}/{object_name}"
-            if not url.startswith('http'):
-                url = f"http://{url}"
-            return url
+            return object_name
 
         except Exception as e:
             logger.error(f"上传文件到MinIO失败: {str(e)}")
@@ -191,12 +187,9 @@ class FileUploadService:
         try:
             # 1. 尝试从 MinIO 删除
             try:
-                # 如果是完整的 URL，提取对象名
-                object_name = file_path
-                if "://" in file_path:
-                    # 假设 URL 格式为 http://endpoint/bucket/object_name
-                    parts = file_path.split("/")
-                    object_name = "/".join(parts[4:]) if len(parts) > 4 else parts[-1]
+                # 统一解析：兼容对象名与历史 URL 两种存储格式
+                from app.core.minio_client import normalize_object_name
+                object_name = normalize_object_name(file_path)
 
                 minio_client.remove_object(object_name)
                 logger.info(f"已从 MinIO 删除文件: {object_name}")

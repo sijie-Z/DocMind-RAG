@@ -165,8 +165,23 @@ async def seed_demo_data(
             try:
                 embeddings = await embedding_service.get_embeddings(doc_data["chunks"])
             except Exception as e:
-                logger.warning(f"Embedding failed for {doc_data['title']}: {e}, using zero vectors")
-                embeddings = [[0.0] * 2048 for _ in doc_data["chunks"]]
+                # 安全修复：不再写零向量（会污染向量检索），改为跳过该文档的 ES 索引
+                logger.warning(f"Embedding failed for {doc_data['title']}: {e}, skipping ES indexing")
+                embeddings = None
+
+            if embeddings is None:
+                # embedding 失败：跳过 ES 索引，仅保留 DB 记录
+                for i, chunk_text in enumerate(doc_data["chunks"]):
+                    db.add(DocumentChunk(
+                        id=str(uuid.uuid4()),
+                        document_id=doc_id,
+                        chunk_index=i,
+                        chunk_text=chunk_text,
+                        chunk_length=len(chunk_text),
+                        start_pos=i * 500,
+                        end_pos=(i + 1) * 500,
+                    ))
+                continue
 
             for i, (chunk_text, embedding) in enumerate(zip(doc_data["chunks"], embeddings, strict=False)):
                 # 保存 chunk 到数据库

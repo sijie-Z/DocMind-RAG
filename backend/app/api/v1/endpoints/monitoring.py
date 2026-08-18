@@ -151,36 +151,9 @@ async def get_metrics(
     # 获取性能指标历史
     history = await metrics_collector.get_history()
 
-    # 如果历史记录不足，返回当前值的模拟波动（用于演示）
+    # 安全修复：历史不足时返回空数组，不再伪造模拟数据（误导运维判断）
     if len(history) < 2:
-        now = int(time.time())
-        data = []
-        app_stats = await metrics_collector.get_stats()
-        for i in range(10):
-            timestamp = now - (9-i) * 60
-            if metric_type == "application":
-                data.append({
-                    "timestamp": timestamp,
-                    "request_count": max(0, app_stats["request_count"] - (9-i) * 5),
-                    "error_count": max(0, app_stats["error_count"]),
-                    "response_time": max(20, app_stats["response_time"] + (i-5) * 2)
-                })
-            elif metric_type == "knowledge_base":
-                doc_count_res = await db.execute(select(func.count(Document.id)))
-                total_docs = doc_count_res.scalar() or 0
-                data.append({
-                    "timestamp": timestamp,
-                    "total_documents": total_docs,
-                    "search_requests": 10 + i * 2
-                })
-            else:
-                import psutil
-                data.append({
-                    "timestamp": timestamp,
-                    "cpu_percent": psutil.cpu_percent(),
-                    "memory_percent": psutil.virtual_memory().percent,
-                })
-        return {"data": data}
+        return {"data": []}
 
     return {"data": history}
 
@@ -529,14 +502,51 @@ async def get_system_logs(
     level: str = "INFO",
     db: AsyncSession = Depends(get_db)
 ):
-    """获取系统日志（需要 VIEW_SYSTEM_HEALTH 权限）"""
+    """获取系统日志（需要 VIEW_SYSTEM_HEALTH 权限）— 读取日志文件尾部内容"""
+    import json as _json
+    import os as _os
 
-    # 这里应该实现获取系统日志的逻辑
+    log_file = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__)))),
+                             settings.LOG_FILE) if not _os.path.isabs(settings.LOG_FILE) else settings.LOG_FILE
+    if not _os.path.exists(log_file):
+        return {"logs": [], "total": 0, "skip": skip, "limit": limit}
+
+    try:
+        # 只读取尾部（最多 20k 行）避免大文件全量加载
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            tail_lines = f.readlines()[-20000:]
+    except OSError as e:
+        logger.warning(f"读取日志文件失败: {e}")
+        return {"logs": [], "total": 0, "skip": skip, "limit": limit}
+
+    level_upper = (level or "INFO").upper()
+    logs = []
+    for line in tail_lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = _json.loads(line)
+            entry_level = str(entry.get("level", entry.get("levelname", "INFO"))).upper()
+            if level_upper not in ("ALL", "DEBUG") and entry_level != level_upper:
+                continue
+            logs.append({
+                "timestamp": entry.get("timestamp", entry.get("time", "")),
+                "level": entry_level,
+                "logger": entry.get("logger", entry.get("name", "")),
+                "message": entry.get("message", entry.get("msg", line)),
+            })
+        except (_json.JSONDecodeError, TypeError):
+            # 非 JSON 行：按级别过滤后原样返回
+            if level_upper in ("ALL", "DEBUG", "INFO"):
+                logs.append({"timestamp": "", "level": "INFO", "logger": "", "message": line[:500]})
+
+    total = len(logs)
     return {
-        "logs": [],
-        "total": 0,
+        "logs": logs[skip:skip + limit],
+        "total": total,
         "skip": skip,
-        "limit": limit
+        "limit": limit,
     }
 
 @router.get("/performance", summary="获取系统性能指标", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])

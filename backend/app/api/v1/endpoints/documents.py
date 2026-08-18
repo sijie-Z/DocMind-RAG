@@ -377,7 +377,8 @@ async def download_document(
     try:
         doc = await get_document_for_user(db, current_user, document_id)
 
-        url = minio_client.get_presigned_url(doc.file_path)
+        from app.core.minio_client import normalize_object_name
+        url = minio_client.get_presigned_url(normalize_object_name(doc.file_path))
         return RedirectResponse(url=url)
     except (NotFoundError, AuthorizationError):
         raise

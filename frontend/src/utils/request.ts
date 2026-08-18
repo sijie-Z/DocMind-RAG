@@ -28,10 +28,21 @@ interface ExtendedAxiosConfig extends InternalAxiosRequestConfig {
 // 全局 toast 去重：同一内容 1.5s 内不重复弹出
 const _activeToasts = new Map<string, { timer: ReturnType<typeof setTimeout> }>()
 const DEDUP_MS = 1500
+// 去重表上限：极端情况下大量唯一错误也不会无限增长，超出时淘汰最早条目
+const MAX_ACTIVE_TOASTS = 100
 
 function dedupMessage(type: 'success' | 'error' | 'warning' | 'info', content: string, duration = 5000) {
   const key = `${type}:${content}`
   if (_activeToasts.has(key)) return
+  if (_activeToasts.size >= MAX_ACTIVE_TOASTS) {
+    // Map 迭代顺序即插入顺序，keys().next().value 为最早条目
+    const oldestKey = _activeToasts.keys().next().value
+    if (oldestKey !== undefined) {
+      const oldestEntry = _activeToasts.get(oldestKey)
+      if (oldestEntry) clearTimeout(oldestEntry.timer)
+      _activeToasts.delete(oldestKey)
+    }
+  }
   const msgInst = message[type](content, { duration })
   _activeToasts.set(key, { timer: setTimeout(() => _activeToasts.delete(key), DEDUP_MS) })
   return msgInst
@@ -138,6 +149,7 @@ request.interceptors.request.use(
     if (!isAuthRequest) showLoading()
     const rawToken = localStorage.getItem('docmind_token') || getToken()
     if (rawToken) {
+      // setToken 出口已统一清洗，此处保留剥引号逻辑以兼容历史脏数据
       const cleanToken = rawToken.trim().replace(/^["'](.*)["']$/, '$1')
       setHeaderValue(headers, 'Authorization', `Bearer ${cleanToken}`)
     }

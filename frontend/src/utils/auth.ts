@@ -8,14 +8,18 @@ const REFRESH_TOKEN_KEY = 'docmind_refresh_token'
 const LEGACY_REFRESH_TOKEN_KEY = 'paicongming_refresh_token'
 
 export function getToken(): string | undefined {
-  return Cookies.get(TOKEN_KEY) ?? localStorage.getItem(TOKEN_KEY)
+  const raw = Cookies.get(TOKEN_KEY) ?? localStorage.getItem(TOKEN_KEY)
     ?? Cookies.get(LEGACY_TOKEN_KEY) ?? localStorage.getItem(LEGACY_TOKEN_KEY) ?? undefined
+  // 兼容历史脏数据：读取时同样 trim 并去除首尾引号
+  return raw ? raw.trim().replace(/^["']|["']$/g, '') : undefined
 }
 
 export function setToken(token: string, expiresIn: number): void {
+  // 出口统一清洗：trim 并去除首尾引号，保证下游（axios/ws/sse）拿到干净 token
+  const cleanToken = token.trim().replace(/^["']|["']$/g, '')
   const expires = new Date(Date.now() + expiresIn * 1000)
-  Cookies.set(TOKEN_KEY, token, { expires })
-  localStorage.setItem(TOKEN_KEY, token)
+  Cookies.set(TOKEN_KEY, cleanToken, { expires })
+  localStorage.setItem(TOKEN_KEY, cleanToken)
   localStorage.setItem(EXPIRES_KEY, expires.getTime().toString())
 }
 

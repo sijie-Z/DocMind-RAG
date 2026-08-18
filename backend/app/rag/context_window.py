@@ -61,8 +61,10 @@ class ChatContextWindow:
 
         Returns: [system, ...history_tail, user_message]
         """
-        system_tokens = estimate_tokens(system_prompt) + estimate_tokens(context_docs) + 8
-        query_tokens = estimate_tokens(user_query) + 4
+        # 修复：context_docs 只计入一次（它在最终 user message 里），
+        # 此前在 system_tokens 里重复计入导致历史裁剪预算偏紧。
+        system_tokens = estimate_tokens(system_prompt) + 8
+        query_tokens = estimate_tokens(user_query) + estimate_tokens(context_docs) + 4
         remaining_budget = self.max_tokens - system_tokens - query_tokens
 
         if remaining_budget < 200:
@@ -181,6 +183,22 @@ def build_rag_messages(
     max_tokens: int = 8000,
 ) -> list[dict[str, str]]:
     """Convenience function: build a token-budget-aware message list for RAG chat."""
+    # 修复：context_docs 纳入 token 预算，超限时按比例截断（保留开头），
+    # 防止关闭压缩或检索结果过大时输入超过模型上下文窗口。
+    budget_for_context = max(
+        400,
+        max_tokens - estimate_tokens(system_prompt) - estimate_tokens(user_query) - 600,
+    )
+    context_tokens = estimate_tokens(context_docs)
+    if context_tokens > budget_for_context:
+        ratio = budget_for_context / context_tokens
+        cut = max(1, int(len(context_docs) * ratio))
+        logger.warning(
+            f"Context too large ({context_tokens} tokens > {budget_for_context}), "
+            f"truncating to {cut} chars"
+        )
+        context_docs = context_docs[:cut] + "\n\n[上下文过长，已截断]"
+
     window = ChatContextWindow(max_tokens=max_tokens)
     fitted_history = window.fit_messages(system_prompt, context_docs, history, user_query)
 

@@ -60,7 +60,7 @@ export function useChatConnection(
       if (data.conversationId && (!chatStore.currentConversation || chatStore.currentConversation.id !== data.conversationId)) {
         chatStore.setCurrentConversation({
           id: data.conversationId,
-          title: data.title || (messages.value.find(m => m.messageType === 'user')?.content.slice(0, 20) || t('chat.newConversation')),
+          title: data.title || (messages.value.find(m => m.messageType === 'user')?.content?.slice(0, 20) || t('chat.newConversation')),
           userId: userId!,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()

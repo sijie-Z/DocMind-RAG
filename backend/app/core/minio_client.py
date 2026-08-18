@@ -10,9 +10,32 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def normalize_object_name(file_path: str) -> str:
+    """将存储的 file_path（对象名或完整 URL）统一解析为 MinIO 对象名。
+
+    兼容历史数据两种存储格式：
+    - 对象名：documents/{org}/{uuid}.pdf 或 {org}/{md5}.pdf
+    - 完整 URL：http://{endpoint}/{bucket}/{object...}
+    """
+    if not file_path:
+        return file_path
+    if "://" in file_path:
+        # http(s)://host/bucket/object/... → 取 bucket 之后的部分
+        parts = file_path.split("/")
+        try:
+            bucket_index = parts.index(settings.MINIO_BUCKET_NAME)
+            return "/".join(parts[bucket_index + 1:])
+        except ValueError:
+            # bucket 名不在路径中：退化为取最后一段之后的全部（兼容旧格式）
+            return "/".join(parts[4:]) if len(parts) > 4 else parts[-1]
+    return file_path
+
+
 class MinioClient:
     def __init__(self):
         self._client = None
+        # 修复：初始化桶检查标志，避免 _ensure_bucket_exists 启用即崩
+        self._bucket_checked = False
 
     @property
     def client(self):
