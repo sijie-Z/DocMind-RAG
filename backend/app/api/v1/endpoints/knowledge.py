@@ -46,6 +46,9 @@ from app.services.knowledge_service import knowledge_service
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# 持有后台任务引用，避免 asyncio 在任务完成前将其当作垃圾回收
+_background_tasks: set[asyncio.Task] = set()
+
 
 @router.get("/", response_model=dict[str, Any], dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))])
 async def list_knowledge_bases(
@@ -350,7 +353,9 @@ async def rebuild_document_knowledge(
         if schedule_local:
             try:
                 from app.worker.doc_processor import processor
-                asyncio.create_task(processor.process(document_id, job.id))
+                task = asyncio.create_task(processor.process(document_id, job.id))
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
                 logger.info("Kafka unavailable; scheduled in-process document rebuild")
             except Exception as proc_err:
                 logger.error(f"本地重建任务启动失败: {proc_err}")

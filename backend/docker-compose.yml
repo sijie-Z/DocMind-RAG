@@ -12,8 +12,9 @@ services:
       - .env.docker
     environment:
       # Override connection strings for Docker internal networking
-      - DATABASE_URL=mysql+aiomysql://${MYSQL_USER:-docmind}:${MYSQL_PASSWORD:-docmind123}@docmind-mysql:3306/${MYSQL_DATABASE:-docmind}
+      - DATABASE_URL=mysql+aiomysql://${MYSQL_USER:-docmind}:${MYSQL_PASSWORD:-docmind_db_user_pw_change_me}@docmind-mysql:3306/${MYSQL_DATABASE:-docmind}
       - REDIS_HOST=docmind-redis
+      - REDIS_PORT=6379
       - ELASTICSEARCH_HOSTS=["http://docmind-elasticsearch:9200"]
       - MINIO_ENDPOINT=docmind-minio:9000
       - KAFKA_BOOTSTRAP_SERVERS=docmind-kafka:9092
@@ -52,8 +53,9 @@ services:
     env_file:
       - .env.docker
     environment:
-      - DATABASE_URL=mysql+aiomysql://${MYSQL_USER:-docmind}:${MYSQL_PASSWORD:-docmind123}@docmind-mysql:3306/${MYSQL_DATABASE:-docmind}
+      - DATABASE_URL=mysql+aiomysql://${MYSQL_USER:-docmind}:${MYSQL_PASSWORD:-docmind_db_user_pw_change_me}@docmind-mysql:3306/${MYSQL_DATABASE:-docmind}
       - REDIS_HOST=docmind-redis
+      - REDIS_PORT=6379
       - ELASTICSEARCH_HOSTS=["http://docmind-elasticsearch:9200"]
       - MINIO_ENDPOINT=docmind-minio:9000
       - KAFKA_BOOTSTRAP_SERVERS=docmind-kafka:29092
@@ -78,19 +80,21 @@ services:
     container_name: docmind-mysql
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --bind-address=0.0.0.0
     environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-changeme_root_pw}
+      # 安全：默认值为占位符，部署前务必随机生成并在 .env.docker 中覆盖
+      # 生成命令: python -c "import secrets; print(secrets.token_hex(24))"（详见 deploy/README.md）
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-docmind_db_root_pw_change_me}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-docmind}
       - MYSQL_USER=${MYSQL_USER:-docmind}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-docmind123}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-docmind_db_user_pw_change_me}
     ports:
-      - "3308:3306"
+      - "127.0.0.1:3308:3306"
     volumes:
       - mysql-data:/var/lib/mysql
       - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - docmind-network
     healthcheck:
-      test: "mysqladmin ping -h localhost -u root -p${MYSQL_ROOT_PASSWORD:-changeme_root_pw}"
+      test: "mysqladmin ping -h localhost -u root -p${MYSQL_ROOT_PASSWORD:-docmind_db_root_pw_change_me}"
       timeout: 20s
       retries: 10
       start_period: 60s
@@ -99,9 +103,10 @@ services:
   redis:
     image: redis:7-alpine
     container_name: docmind-redis
-    command: redis-server --requirepass ${REDIS_PASSWORD:-docmind123}
+    # 建议在 .env.docker 中设置 REDIS_PASSWORD；未设置时以无密码模式运行（仅绑定 127.0.0.1）
+    command: redis-server --requirepass ${REDIS_PASSWORD:-}
     ports:
-      - "6390:6379"
+      - "127.0.0.1:6390:6379"
     volumes:
       - redis-data:/data
     networks:
@@ -120,8 +125,8 @@ services:
       - xpack.security.enabled=false
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
-      - "9200:9200"
-      - "9300:9300"
+      - "127.0.0.1:9200:9200"
+      - "127.0.0.1:9300:9300"
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
     networks:
@@ -136,11 +141,12 @@ services:
     image: minio/minio:latest
     container_name: docmind-minio
     environment:
-      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
+      # 必填：生成随机凭据并写入 .env.docker（MINIO_SECRET_KEY 至少 8 位），默认值仅为占位
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-docmind_minio_user}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-docmind_minio_pw_change_me}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio-data:/data
     command: server /data --console-address ":9001"
@@ -170,7 +176,7 @@ services:
     depends_on:
       - zookeeper
     ports:
-      - "9092:9092"       # 宿主机 → Kafka（API 在宿主机上跑，用 localhost:9092）
+      - "127.0.0.1:9092:9092"       # 宿主机 → Kafka（API 在宿主机上跑，用 localhost:9092）
       - "29092:29092"     # Docker 内网 → Kafka（Worker 用 docmind-kafka:29092）
     environment:
       KAFKA_BROKER_ID: 1
@@ -193,7 +199,7 @@ services:
       - "--storage.tsdb.path=/prometheus"
       - "--web.enable-lifecycle"
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./config/alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -208,10 +214,11 @@ services:
     image: grafana/grafana:11.1.0
     container_name: docmind-grafana
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     environment:
+      # 默认管理员密码为占位符，生产环境请通过 .env.docker 的 GRAFANA_PASSWORD 覆盖
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-docmind_grafana_pw_change_me}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - ./config/grafana/provisioning:/etc/grafana/provisioning:ro

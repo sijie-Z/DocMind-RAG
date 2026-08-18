@@ -28,32 +28,46 @@ async def consume():
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
         group_id="doc_processor_group",
         value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-        auto_offset_reset="earliest"
+        auto_offset_reset="earliest",
+        enable_auto_commit=False,  # 手动提交：处理成功后显式 commit，失败的消息可重新消费
     )
 
-    await consumer.start()
-    logger.info("Kafka Consumer started. Waiting for messages...")
-
     try:
+        # start() 也纳入 try/finally：启动失败时同样执行 stop()，避免连接泄漏
+        await consumer.start()
+        logger.info("Kafka Consumer started. Waiting for messages...")
+
         async for msg in consumer:
             logger.info(f"Received task: {msg.value}")
             data = msg.value
+            if not isinstance(data, dict):
+                # 非 dict 消息直接跳过并提交偏移，避免 AttributeError 杀死循环
+                logger.warning(f"Skipping non-dict message: {type(data).__name__}")
+                await consumer.commit()
+                continue
+
             doc_id = data.get("document_id")
             job_id = data.get("job_id")
 
             if doc_id:
                 try:
                     await processor.process(doc_id, job_id)
+                    # 处理成功后显式提交偏移；失败的消息不提交，重启后可重新消费
+                    await consumer.commit()
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
             else:
                 logger.warning("Received message without document_id")
+                await consumer.commit()
 
     except Exception as e:
         logger.error(f"Consumer crashed: {e}")
     finally:
         logger.info("Stopping consumer...")
-        await consumer.stop()
+        try:
+            await consumer.stop()
+        except Exception as e:
+            logger.error(f"Error stopping consumer: {e}")
 
 if __name__ == "__main__":
     try:

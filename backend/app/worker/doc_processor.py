@@ -25,12 +25,47 @@ from app.services.embedding_service import embedding_service
 
 logger = logging.getLogger(__name__)
 
+# 文档处理并发锁：Redis SETNX + TTL 兜底，防止同一文档被并发重复处理
+_LOCK_TTL_SECONDS = 600
+
 
 class DocumentProcessor:
     """Parse, embed, and index one document with idempotent replacement."""
 
     def __init__(self):
         self.parser = document_service
+
+    async def _acquire_processing_lock(self, document_id: str) -> bool | None:
+        """Redis SETNX 并发锁。
+
+        Returns:
+            True  — 成功获取锁（处理完成后需释放）；
+            False — 同一文档已有任务在处理，本次应跳过；
+            None  — Redis 不可用，降级为不加锁直接处理（与现有容错风格一致）。
+        """
+        try:
+            from app.core.redis import get_redis
+            client = await get_redis()
+            acquired = await client.set(
+                f"doc:{document_id}:processing", "1", nx=True, ex=_LOCK_TTL_SECONDS
+            )
+            return bool(acquired)
+        except Exception as e:
+            logger.warning(
+                "[DOC_PROC] Redis unavailable, processing without lock: %s", e
+            )
+            return None
+
+    async def _release_processing_lock(self, document_id: str) -> None:
+        """释放并发锁；释放失败时由 TTL 兜底过期。"""
+        try:
+            from app.core.redis import get_redis
+            client = await get_redis()
+            await client.delete(f"doc:{document_id}:processing")
+        except Exception as e:
+            logger.warning(
+                "[DOC_PROC] Redis lock release failed (TTL will expire): %s", e
+            )
 
     async def process(self, document_id: str, job_id: int | None = None) -> bool:
         """Run the full document pipeline once.
@@ -39,6 +74,14 @@ class DocumentProcessor:
         retry never leaves partial duplicates behind.
         """
         logger.info("[DOC_PROC] start document_id=%s job_id=%s", document_id, job_id)
+        lock_acquired = await self._acquire_processing_lock(document_id)
+        if lock_acquired is False:
+            logger.info(
+                "[DOC_PROC] skip document_id=%s job_id=%s: already being processed",
+                document_id,
+                job_id,
+            )
+            return False
         try:
             doc = await self._load_and_mark_parsing(document_id, job_id)
             if doc is None:
@@ -71,6 +114,9 @@ class DocumentProcessor:
             )
             await self._mark_failed(document_id, str(e), job_id)
             return False
+        finally:
+            if lock_acquired is True:
+                await self._release_processing_lock(document_id)
 
     async def _load_and_mark_parsing(
         self, document_id: str, job_id: int | None

@@ -30,6 +30,9 @@ from app.models.user import User
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# 持有后台任务引用，避免 asyncio 在任务完成前将其当作垃圾回收
+_background_tasks: set[asyncio.Task] = set()
+
 def get_document_type(filename: str) -> DocumentType:
     ext = filename.split('.')[-1].lower() if '.' in filename else ''
     if ext == 'pdf':
@@ -234,7 +237,9 @@ async def upload_document(
         if schedule_local:
             try:
                 from app.worker.doc_processor import processor
-                asyncio.create_task(processor.process(doc_id, job.id))
+                task = asyncio.create_task(processor.process(doc_id, job.id))
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
                 logger.info("Kafka unavailable; scheduled in-process document processing")
             except Exception as proc_err:
                 logger.error(f"In-process processing setup failed: {proc_err}")

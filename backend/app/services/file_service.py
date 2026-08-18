@@ -22,6 +22,9 @@ from app.services.document_parser import DocumentParser
 
 logger = logging.getLogger(__name__)
 
+# 持有后台任务引用，避免 asyncio 在任务完成前将其当作垃圾回收
+_background_tasks: set[asyncio.Task] = set()
+
 # MIME type → allowed extensions mapping (magic-byte validated)
 _ALLOWED_MIME_TYPES = {
     "application/pdf": {".pdf"},
@@ -292,7 +295,9 @@ class FileUploadService:
                 await session.refresh(document)
 
             # 异步处理文档解析
-            asyncio.create_task(self._process_document_async(document.id))
+            task = asyncio.create_task(self._process_document_async(document.id))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
 
             logger.info(f"文件上传成功: {filename}, 文档ID: {document.id}")
 
