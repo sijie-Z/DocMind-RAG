@@ -73,8 +73,9 @@ def upgrade():
         sa.Column('parse_error', sa.Text(), nullable=True),
         sa.Column('content_length', sa.Integer(), nullable=True),
         sa.Column('chunk_count', sa.Integer(), nullable=False),
-        sa.Column('organization_id', sa.String(length=36), nullable=False),
-        sa.Column('uploaded_by', sa.String(length=36), nullable=False),
+        # 修复：与模型一致使用 Integer（String(36) 导致 MySQL FK 类型不匹配 3780 错误）
+        sa.Column('organization_id', sa.Integer(), nullable=False),
+        sa.Column('uploaded_by', sa.Integer(), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('parsed_at', sa.DateTime(timezone=True), nullable=True),
@@ -133,8 +134,9 @@ def upgrade():
     op.create_table(
         'chat_sessions',
         sa.Column('id', sa.String(length=36), nullable=False),
-        sa.Column('user_id', sa.String(length=36), nullable=False),
-        sa.Column('organization_id', sa.String(length=36), nullable=True),
+        # 修复：与模型一致使用 Integer（String(36) 导致 MySQL FK 类型不匹配 3780 错误）
+        sa.Column('user_id', sa.Integer(), nullable=False),
+        sa.Column('organization_id', sa.Integer(), nullable=True),
         sa.Column('title', sa.String(length=200), nullable=True),
         sa.Column('status', sa.Enum('ACTIVE', 'PAUSED', 'ENDED', name='chatsessionstatus'), nullable=False),
         sa.Column('message_count', sa.Integer(), nullable=False),

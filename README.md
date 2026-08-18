@@ -39,6 +39,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 当前基线：
 - 后端 `tests/unit + tests/behavior`：409 通过 / 1 跳过；前端 `vue-tsc --noEmit` 通过。
 - 已修复：语义缓存按组织隔离、会话归属校验、知识库搜索/删除/重建的组织隔离、文件上传路径穿越与 MinIO 删除、API Key 掩码、Web 抓取 SSRF 防护、工作流归属隔离、Kafka 不可用时的进程内文档处理、本地启动脚本、敏感产物移出 git 跟踪。
+- 安全加固（1.20）：Agent 沙箱逃逸封堵（下划线属性拦截 + 长度/输出上限）、execute_sql 租户过滤与 UNION/子查询拦截、disabled_tools 服务端强制合并、mcp 子进程环境变量白名单、注册禁自选组织、角色变更同组织校验、登录失败锁定 + 用户枚举时序防护、refresh token 轮换、WS 仅接受 access token、PII 掩码全链路（上下文+流式）、GraphRAG 组织分区、/files 代理归属校验、RAG 缓存按组织失效、Alembic 001 FK 类型修复 + 005 补齐 15 张表、compose 凭据/端口收紧、24 个安全回归测试（446 单测通过）。
 - 架构收敛：文档解析/向量化/ES 索引统一为单一 Processor；聊天核心管线从路由下沉到 `services/chat_service.py`；新增统一文档授权辅助层。
 - 后续加固：Agent 记忆接口按用户隔离、`/files` 代理鉴权、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`。
 

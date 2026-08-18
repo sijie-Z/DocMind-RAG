@@ -5,6 +5,55 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] - 2026-08-06
+
+### Security hardening
+- **Agent 沙箱**：`execute_python` 的 AST 检查拦截一切下划线前缀属性访问（封堵
+  random._os.system 逃逸链，已实证），增加代码长度/输出上限；`execute_sql`
+  拒绝 UNION/子查询/INTO OUTFILE，移除 users 敏感列，执行时自动注入
+  organization_id 租户过滤（无组织上下文 fail-closed）。
+- **工具授权**：/agent/chat 与 /agent/config 的 disabled_tools 由服务端
+  强制合并黑名单（客户端无法重新启用 execute_python/execute_sql/mcp_call）；
+  mcp_call 默认禁用且子进程环境变量白名单化（不再透传 os.environ）。
+- **认证**：注册禁止自选 organization_id；update_user_role 限同组织；
+  登录失败锁定（5 次/15 分钟）+ dummy bcrypt 消除用户枚举时序侧信道；
+  refresh token 轮换 + 登出双吊销 + 禁用用户拒绝续期；WS 端点仅接受
+  access token 且校验黑名单。
+- **缓存一致性**：get_current_user 双路径校验 is_active；改密/角色/状态
+  变更后主动失效用户 Redis 缓存（修复改密 24h 内必失败）；RAG 精确/语义缓存
+  在文档删除/重建时按组织清理。
+- **数据边界**：/files 代理按对象名前缀校验组织归属 + nosniff/attachment
+  头；GraphRAG 图谱按组织分区（rag:graph:{org}）；workflow executions 增加
+  归属校验；llm_config 写操作仅限管理员；知识库任务列表对无组织用户恒空。
+- **PII 掩码链路重构**：检索上下文与 query 进 prompt 前统一掩码（占位符编号
+  全局唯一），流式 chunk 出服务器前掩码，最终消息仅还原引用型占位符；
+  身份证/银行卡正则修正（按真实身份证结构，避免互相吞并）。
+- **前端凭证面**：WS token 移出 URL（改 subprotocol）；PWA 不再缓存 /api/*；
+  KaTeX 嵌套依赖强制升至 0.16.28（消除 2015 版 XSS 向量）；手册页复用
+  DOMPurify 净化组件；登出清理 user_info 等 PII。
+- **API Key**：不再进入公共响应 schema 与 Redis 缓存，/me 仅返回掩码。
+- /metrics 支持 METRICS_TOKEN Bearer 鉴权。
+
+### Correctness & reliability
+- organizations 四个写端点补 commit（修复静默数据丢失）。
+- SQLAlchemy 恒假条件修复：通知未读 is_(False)、会话列表 is_(None)。
+- 聊天历史取最近 10 条（原取最旧）；SSE agent 模式加载会话历史。
+- SSE/WS 断连时取消孤儿 pipeline 任务（停止烧 LLM 费用）。
+- 限流器 zadd 成员唯一化（修复同秒漏计）；token 计量改 ContextVar 隔离。
+- 分块上传限制（单块 5MB、总块 ≤21）；/rag-eval-batch 上限 20 条。
+- Kafka 消费者手动提交 + 消息类型防护；文档处理加 Redis 处理锁；
+  create_task 全部模块级引用持有。
+- Docker Compose：Redis 端口修正、默认凭据占位化、中间件端口仅本机绑定。
+
+### Migrations
+- 修复 001 外键列类型（String(36) → Integer，MySQL FK 3780 错误）。
+- 新增 005 迁移补齐 15 张缺失表（RBAC/通知/工作流/审计等），
+  alembic upgrade head 冒烟通过（SQLite 全链验证 26 张表齐备）。
+
+### Testing
+- 后端 tests/unit + tests/behavior：446 passed / 1 skipped。
+- 新增 24 个安全回归测试（沙箱逃逸/SQL 租户过滤/PII 掩码/工具禁用合并等）。
+
 ## [1.19.0] - 2026-08-05
 
 ### Agent SDK learnings
