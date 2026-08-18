@@ -299,6 +299,10 @@ class TestRefreshEndpoint:
             }
             mock_auth_service.get_user_by_id = AsyncMock(return_value=mock_user)
             mock_auth_service.create_access_token.return_value = "new_access_token"
+            # 批2 起 refresh 端点校验黑名单、轮换 token 并校验登录会话，mock 需显式放行
+            mock_auth_service.is_token_blacklisted = AsyncMock(return_value=False)
+            mock_auth_service.blacklist_token = AsyncMock()
+            mock_auth_service.create_refresh_token.return_value = "new_refresh_token"
 
             app.dependency_overrides[get_db] = override_func
             try:

@@ -352,7 +352,11 @@ async def export_audit_logs(
 ):
     """导出审计日志为 CSV 文件"""
     try:
-        stmt = select(UserActivityLog)
+        stmt = select(UserActivityLog).join(User)
+
+        # 安全加固：与 get_audit_logs 列表接口一致，非超管只能导出自己组织的日志
+        if not current_user.is_superuser:
+            stmt = stmt.where(User.organization_id == (current_user.organization_id or -1))
 
         if user_id:
             stmt = stmt.where(UserActivityLog.user_id == user_id)

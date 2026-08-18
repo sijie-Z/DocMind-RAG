@@ -5,11 +5,13 @@
 import hashlib
 import json
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -115,10 +117,31 @@ async def login(
         )
         logger.info("Access token generated.")
 
-        # 3. 生成刷新令牌
-        refresh_token = auth_service.create_refresh_token(
-            data={"sub": user.username, "user_id": user.id}
-        )
+        # 安全加固：先创建登录会话，把 session_id 绑定进 refresh token，
+        # 使"下线设备"能真正吊销对应 refresh token（会话置失效后刷新被拒）。
+        session_id = None
+        try:
+            token_hash = hashlib.sha256(access_token.encode("utf-8")).hexdigest()
+            login_session = UserLoginSession(
+                user_id=user.id,
+                token_hash=token_hash,
+                device_name=request.headers.get("sec-ch-ua-platform") or "Web",
+                ip_address=(request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)),
+                user_agent=request.headers.get("user-agent"),
+                is_active=True,
+            )
+            db.add(login_session)
+            await db.flush()
+            session_id = login_session.id
+        except Exception as db_err:
+            logger.warning(f"Failed to record login session (non-critical): {db_err}")
+            await db.rollback()
+
+        # 3. 生成刷新令牌（携带 session_id）
+        refresh_data: dict[str, Any] = {"sub": user.username, "user_id": user.id}
+        if session_id is not None:
+            refresh_data["session_id"] = session_id
+        refresh_token = auth_service.create_refresh_token(data=refresh_data)
         logger.info("Refresh token generated.")
 
         # 5. 构建返回用的 user_info（避免 None 或不可序列化类型导致 500）
@@ -159,17 +182,8 @@ async def login(
         except Exception as redis_err:
             logger.warning(f"Redis cache skip (login still success): {redis_err}")
 
-        # 4. 创建登录会话记录（允许失败，不影响登录）
+        # 4. 审计登录成功（会话记录已在上方随 token 一起创建）
         try:
-            token_hash = hashlib.sha256(access_token.encode("utf-8")).hexdigest()
-            db.add(UserLoginSession(
-                user_id=user.id,
-                token_hash=token_hash,
-                device_name=request.headers.get("sec-ch-ua-platform") or "Web",
-                ip_address=(request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)),
-                user_agent=request.headers.get("user-agent"),
-                is_active=True,
-            ))
             await audit_service.log_activity(
                 user_id=user.id,
                 action="login",
@@ -181,8 +195,8 @@ async def login(
             )
             await db.commit()
         except Exception as db_err:
-            # 登录会话记录失败不影响登录成功，仅记录日志
-            logger.warning(f"Failed to record login session (non-critical): {db_err}")
+            # 审计失败不影响登录成功，仅记录日志
+            logger.warning(f"Failed to record login audit (non-critical): {db_err}")
             await db.rollback()
 
         # 6. 返回带 success 的结构
@@ -228,9 +242,28 @@ async def login_json(
                 "organization_id": getattr(user, "organization_id", None),
             }
         )
-        refresh_token = auth_service.create_refresh_token(
-            data={"sub": user.username, "user_id": user.id}
-        )
+        # 安全加固：与 form login 一致，创建登录会话并绑定 session_id
+        session_id = None
+        try:
+            token_hash = hashlib.sha256(access_token.encode("utf-8")).hexdigest()
+            login_session = UserLoginSession(
+                user_id=user.id,
+                token_hash=token_hash,
+                device_name=request.headers.get("sec-ch-ua-platform") or "Web",
+                ip_address=(request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)),
+                user_agent=request.headers.get("user-agent"),
+                is_active=True,
+            )
+            db.add(login_session)
+            await db.flush()
+            session_id = login_session.id
+        except Exception as db_err:
+            logger.warning(f"Failed to record login session (non-critical): {db_err}")
+            await db.rollback()
+        refresh_data: dict[str, Any] = {"sub": user.username, "user_id": user.id}
+        if session_id is not None:
+            refresh_data["session_id"] = session_id
+        refresh_token = auth_service.create_refresh_token(data=refresh_data)
         user_info = {
             "id": user.id,
             "username": user.username,
@@ -382,6 +415,17 @@ async def refresh_token(
         if await auth_service.is_token_blacklisted(body.refresh_token):
             raise AuthenticationError("刷新令牌已失效，请重新登录")
 
+        # 安全加固：refresh token 绑定登录会话——"下线设备"后该会话被置失效，
+        # 对应 refresh token 的续期必须被拒绝。
+        session_id = payload.get("session_id")
+        if session_id is not None:
+            sess_result = await db.execute(
+                select(UserLoginSession).where(UserLoginSession.id == int(session_id))
+            )
+            login_session = sess_result.scalar_one_or_none()
+            if not login_session or not login_session.is_active:
+                raise AuthenticationError("登录会话已失效，请重新登录")
+
         username = payload.get("sub")
         user_id = int(payload.get("user_id", 0))
 
@@ -404,11 +448,12 @@ async def refresh_token(
                 "organization_id": user.organization_id,
             }
         )
-        # 安全加固：refresh token 轮换——旧 refresh 立即吊销，签发新 refresh
+        # 安全加固：refresh token 轮换——旧 refresh 立即吊销，签发新 refresh（保留 session_id）
         await auth_service.blacklist_token(body.refresh_token)
-        new_refresh_token = auth_service.create_refresh_token(
-            data={"sub": username, "user_id": user_id}
-        )
+        new_refresh_data: dict[str, Any] = {"sub": username, "user_id": user_id}
+        if session_id is not None:
+            new_refresh_data["session_id"] = session_id
+        new_refresh_token = auth_service.create_refresh_token(data=new_refresh_data)
 
         return {
             "success": True,

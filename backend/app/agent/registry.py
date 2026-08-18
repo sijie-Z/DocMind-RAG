@@ -33,6 +33,7 @@ Usage:
         ...
         return ToolResult.success(data={"records": [...], "total": 42})
 """
+import asyncio
 import inspect
 import json
 import logging
@@ -415,6 +416,23 @@ class ToolRegistry:
         result = await self.execute_detailed(name, arguments, **context)
         return str(result)
 
+    async def _check_tool_rate_limit(self, tool_name: str, user_id: Any, limit: int) -> bool:
+        """Enforce per-user per-tool rate limit (QPS) via Redis; fail-open without Redis.
+
+        Returns True when the call is allowed.
+        """
+        try:
+            from app.core.redis import redis_client
+            if not redis_client:
+                return True
+            key = f"agent:tool_rl:{tool_name}:{user_id or 'anon'}"
+            count = await redis_client.incr(key)
+            if count == 1:
+                await redis_client.expire(key, 60)
+            return int(count) <= max(1, int(limit))
+        except Exception:
+            return True
+
     async def execute_detailed(self, name: str, arguments: dict[str, Any], **context) -> ToolResult:
         """Execute a tool by name. Returns a ToolResult with full structured data.
 
@@ -489,7 +507,26 @@ class ToolRegistry:
             # Merge any context that hooks injected (e.g. auth tokens)
             ctx_kwargs.update({k: v for k, v in hook_ctx.extra.items() if k in handler_params and k not in ctx_kwargs})
 
-            raw_result = await entry.handler(**arguments, **ctx_kwargs)
+            # 安全加固：强制执行工具的 rate_limit 与 timeout 元数据
+            # （此前只记录不打钩，工具调用链没有真正的限速/超时兜底）
+            if entry.rate_limit and entry.rate_limit > 0:
+                allowed = await self._check_tool_rate_limit(name, context.get("user_id"), entry.rate_limit)
+                if not allowed:
+                    elapsed = (time.perf_counter() - start) * 1000
+                    result = ToolResult.fail(
+                        code="rate_limited",
+                        message=f"工具 {name} 调用过于频繁，请稍后再试",
+                        meta=ToolMeta(latency_ms=elapsed, tool_name=name),
+                    )
+                    await self._run_post_hooks(result, hook_ctx)
+                    if span:
+                        span.end(output=result.to_dict()["error"], level="WARNING")
+                    return result
+
+            raw_result = await asyncio.wait_for(
+                entry.handler(**arguments, **ctx_kwargs),
+                timeout=max(1.0, float(entry.timeout or 30.0)),
+            )
             elapsed = (time.perf_counter() - start) * 1000
 
             # Normalise to ToolResult
