@@ -63,10 +63,10 @@ jobs:
           alembic upgrade head
           python -c "import sqlite3; c=sqlite3.connect('test.db'); t={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}; assert len(t) >= 26, f'expected >=26 tables, got {len(t)}'"
 
-      - name: Run fast tests (unit + behavior)
+      - name: Run fast tests (unit + behavior + API security regressions)
         working-directory: backend
         run: |
-          python -m pytest tests/unit/ tests/behavior/ -v --tb=short --cov=app --cov-report=xml --cov-report=term
+          python -m pytest tests/unit/ tests/behavior/ tests/integration/test_security_regressions.py tests/integration/test_api_auth.py -v --tb=short --cov=app --cov-report=xml --cov-report=term
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7

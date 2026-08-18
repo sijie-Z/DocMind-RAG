@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 from sqlalchemy import update
 
@@ -8,11 +9,17 @@ from app.services.auth_service import auth_service
 
 
 async def main():
+    # 安全加固：不再硬编码弱口令 123456，密码由 ADMIN_PASSWORD 环境变量指定
+    new_password = os.environ.get("ADMIN_PASSWORD", "").strip()
+    if not new_password or len(new_password) < 8:
+        print("【失败】请先设置环境变量 ADMIN_PASSWORD（至少 8 位），例如：")
+        print('  $env:ADMIN_PASSWORD="your-strong-password" ; python reset_admin.py')
+        raise SystemExit(1)
+
     print("正在连接数据库并修复管理员账号...")
     async with engine.begin() as conn:
         # 1. 检查 admin 是否存在
-        # 这里把密码改回 123456，因为用户一直在试这个
-        hashed = auth_service.hash_password("123456")
+        hashed = auth_service.hash_password(new_password)
         
         # 2. 尝试更新
         result = await conn.execute(
@@ -43,7 +50,7 @@ async def main():
         print("\n" + "="*30)
         print("【成功】管理员账号已重置！")
         print("用户名: admin")
-        print("密  码: 123456")
+        print("密  码: " + new_password)
         print("="*30)
 
 if __name__ == "__main__":

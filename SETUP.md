@@ -115,7 +115,7 @@ npm run dev
 
 | 账号 | 密码 | 说明 |
 |------|------|------|
-| guest | 123456 | 演示账号 |
+| guest | 随机生成（首次创建时打印一次，或 DEMO_PASSWORD 指定） | 演示账号（ENABLE_DEMO_ACCOUNT=true 时） |
 
 ---
 

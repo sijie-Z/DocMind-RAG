@@ -313,8 +313,8 @@ cd frontend && npm install && npm run dev          # http://localhost:5173
 
 | 用户名 | 密码 | 角色 |
 |--------|------|------|
-| `guest` | `123456` | 普通用户 |
-| `admin` | `admin123` | 管理员 |
+| `guest` | 随机生成（首次创建时打印一次，或 `DEMO_PASSWORD` 指定） | 普通用户（`ENABLE_DEMO_ACCOUNT=true` 时） |
+| `admin` | 通过 `reset_admin.py`（`ADMIN_PASSWORD` 环境变量）创建 | 管理员 |
 
 ---
 

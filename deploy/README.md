@@ -26,7 +26,12 @@ curl http://localhost:8000/health
 | Elasticsearch | 9200 | Internal only |
 | MinIO Console | 9001 | Internal only |
 | Kafka | 9092 | Internal only |
-| Grafana | 3000 | admin/admin123 |
+| Grafana | 3000 | Internal only — set GRAFANA_PASSWORD (no default credentials) |
+
+> 安全提示（1.20 起）：compose 中所有中间件端口仅绑定 127.0.0.1，默认凭据
+> 已替换为占位符。部署前必须设置：MYSQL_ROOT_PASSWORD、MYSQL_PASSWORD、
+> REDIS_PASSWORD、MINIO_ACCESS_KEY、MINIO_SECRET_KEY、GRAFANA_PASSWORD
+> （可在 docker-compose.yml 中按注释生成随机值）。
 
 ## Option 2: Kubernetes
 
@@ -75,7 +80,20 @@ Key environment variables (set in `.env.docker`):
 Generate secure keys:
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
+python -c "import secrets; print(secrets.token_urlsafe(24))"   # 数据库/中间件密码
 ```
+
+### Metrics endpoint
+
+设置 METRICS_TOKEN 后，Prometheus 抓取需携带 Bearer 头：
+```bash
+curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8000/metrics
+```
+
+### Demo account
+
+默认禁用（ENABLE_DEMO_ACCOUNT=false）。开启后 guest 账号仅在**首次创建**时
+使用随机生成（或 DEMO_PASSWORD 环境变量指定）的初始密码，不再每次启动重置。
 
 ## Production Checklist
 

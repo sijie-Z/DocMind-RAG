@@ -313,8 +313,8 @@ cd frontend && npm install && npm run dev          # http://localhost:5173
 
 | Username | Password | Role |
 |----------|----------|------|
-| `guest` | `123456` | User |
-| `admin` | `admin123` | Admin |
+| `guest` | Random at first creation (printed once, or via `DEMO_PASSWORD`) | User (when `ENABLE_DEMO_ACCOUNT=true`) |
+| `admin` | Created via `reset_admin.py` (`ADMIN_PASSWORD` env) | Admin |
 
 ---
 

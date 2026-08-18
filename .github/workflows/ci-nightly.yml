@@ -75,6 +75,12 @@ jobs:
           echo "ENABLE_MONITORING=false" >> $GITHUB_ENV
           echo "RUN_INTEGRATION=1" >> $GITHUB_ENV
 
+      - name: Migration smoke test on real MySQL (alembic upgrade head)
+        working-directory: backend
+        run: |
+          alembic upgrade head
+          python -c "import pymysql; c=pymysql.connect(host='localhost',user='root',password='root',database='test_db'); cur=c.cursor(); cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='test_db'"); n=cur.fetchone()[0]; assert n >= 26, f'expected >=26 tables, got {n}'"
+
       - name: Run integration tests
         working-directory: backend
         run: |
