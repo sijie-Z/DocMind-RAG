@@ -541,8 +541,11 @@ async def get_node_definitions(
             ),
         ]
 
+        # 安全修复：幂等播种——只插入不存在的 node_type，防止并发请求重复插入
+        existing_types = {d.node_type for d in definitions}
         for node in default_nodes:
-            db.add(node)
+            if node.node_type not in existing_types:
+                db.add(node)
         await db.commit()
 
         result = await db.execute(select(NodeDefinition).where(NodeDefinition.is_active))

@@ -615,7 +615,8 @@ async def get_user_activities(
         for item in activities
     ]
 
-@router.get("/db-health", response_model=dict, summary="用户相关数据库健康自检")
+@router.get("/db-health", response_model=dict, summary="用户相关数据库健康自检",
+            dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
 async def user_db_health_check(
     current_user: User = Depends(auth_service.get_current_user),
     db: AsyncSession = Depends(get_db)

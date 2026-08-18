@@ -700,6 +700,15 @@ class Planner:
         if not isinstance(steps_data, list) or not steps_data:
             return None
 
+        # 安全加固：LLM 可能忽略 max_steps 指令生成超长计划，
+        # 服务端强制截断，防止长任务成本失控。
+        max_steps = getattr(self.config, "max_plan_steps", 10)
+        if len(steps_data) > max_steps:
+            logger.warning(
+                f"Plan has {len(steps_data)} steps, truncating to max_plan_steps={max_steps}"
+            )
+            steps_data = steps_data[:max_steps]
+
         steps = []
         step_ids = set()
         for i, s in enumerate(steps_data):

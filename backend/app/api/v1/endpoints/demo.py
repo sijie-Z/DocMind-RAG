@@ -3,7 +3,7 @@
 """
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
@@ -156,8 +156,8 @@ async def seed_demo_data(
                 chunk_count=len(doc_data["chunks"]),
                 organization_id=org_id,
                 uploaded_by=current_user.id,
-                parsed_at=datetime.utcnow(),
-                indexed_at=datetime.utcnow(),
+                parsed_at=datetime.now(UTC),
+                indexed_at=datetime.now(UTC),
             )
             db.add(doc)
 
@@ -203,7 +203,7 @@ async def seed_demo_data(
                     "filename": doc_data["filename"],
                     "file_type": doc_data["file_type"].value,
                     "file_size": len(full_content.encode("utf-8")),
-                    "upload_time": datetime.utcnow().isoformat(),
+                    "upload_time": datetime.now(UTC).isoformat(),
                     "user_id": str(current_user.id),
                     "organization_id": str(org_id),
                     "tags": doc_data["keywords"],
@@ -226,7 +226,7 @@ async def seed_demo_data(
 
         # 3. 创建示例对话
         session_id = str(uuid.uuid4())
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         session = ChatSession(
             id=session_id,
