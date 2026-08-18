@@ -5,7 +5,6 @@ Covers: AST sandbox escape blocking, SQL org-filter injection,
 PII masking chain offsets, and the server-side disabled_tools merge.
 """
 
-import pytest
 
 from app.agent.tools.code_execution import (
     _ast_safety_check,
@@ -120,16 +119,16 @@ class TestDisabledToolsMerge:
     """Server-side disabled_tools enforcement must be non-negotiable."""
 
     def test_merge_keeps_defaults(self):
-        from app.api.v1.endpoints.agent import _merge_disabled_tools
         from app.agent.config import DEFAULT_DISABLED_TOOLS
+        from app.api.v1.endpoints.agent import _merge_disabled_tools
         merged = _merge_disabled_tools(["get_current_time"])
         for tool in DEFAULT_DISABLED_TOOLS:
             assert tool in merged
         assert "get_current_time" in merged
 
     def test_empty_client_list_gets_defaults(self):
-        from app.api.v1.endpoints.agent import _merge_disabled_tools
         from app.agent.config import DEFAULT_DISABLED_TOOLS
+        from app.api.v1.endpoints.agent import _merge_disabled_tools
         merged = _merge_disabled_tools([])
         assert set(merged) == set(DEFAULT_DISABLED_TOOLS)
 
