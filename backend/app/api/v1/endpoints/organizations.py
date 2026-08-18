@@ -60,6 +60,7 @@ async def create_organization(
         new_org = await organization_service.create_organization(
             db, org_in.model_dump(), current_user.id
         )
+        await db.commit()
 
         return {
             "success": True,
@@ -171,6 +172,7 @@ async def update_organization(
         if not updated_org:
             raise NotFoundError("组织不存在")
 
+        await db.commit()
         return {"success": True, "message": "更新成功"}
     except ValueError as e:
         raise ValidationError(str(e))
@@ -198,6 +200,7 @@ async def batch_delete_organizations(
             detail=f"批量删除 {len(ids)} 个组织",
             db=db
         )
+        await db.commit()
         return {"success": True, "message": f"成功删除 {len(ids)} 个组织"}
     raise AppError("批量删除失败")
 
@@ -218,6 +221,7 @@ async def delete_organization(
             detail=f"删除组织 ID={org_id}",
             db=db
         )
+        await db.commit()
         return {"success": True, "message": "删除成功"}
     raise AppError("删除组织失败")
 

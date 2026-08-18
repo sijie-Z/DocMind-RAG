@@ -111,10 +111,10 @@ async def get_conversations(
         if current_user.organization_id:
             org_filter = or_(
                 ChatSession.organization_id == current_user.organization_id,
-                ChatSession.organization_id is None,
+                ChatSession.organization_id.is_(None),
             )
         else:
-            org_filter = ChatSession.organization_id is None
+            org_filter = ChatSession.organization_id.is_(None)
 
         total_query = select(func.count(ChatSession.id)).where(
             ChatSession.user_id == current_user.id,
@@ -457,6 +457,14 @@ async def websocket_endpoint(
         if not payload:
             await websocket.close(code=4001, reason="Invalid token")
             return
+        # 安全加固：仅接受 access token（refresh token 不得建立 WS 连接）
+        if payload.get("type") != "access":
+            await websocket.close(code=4001, reason="Invalid token type")
+            return
+        # 安全加固：校验令牌是否已被吊销
+        if await auth_service.is_token_blacklisted(token.strip().replace('"', "").replace("'", "")):
+            await websocket.close(code=4001, reason="Token revoked")
+            return
         user_id = payload.get("user_id")
     except Exception as e:
         await websocket.close(code=4002, reason=str(e))
@@ -464,6 +472,9 @@ async def websocket_endpoint(
 
     # Accept the auth subprotocol so the client knows it was accepted
     await manager.connect(websocket, user_id)
+
+    # 安全加固：跟踪当前 pipeline 任务，客户端断连时取消，防止孤儿任务继续烧 LLM 费用
+    pipeline_task: asyncio.Task | None = None
 
     try:
         while True:
@@ -575,6 +586,13 @@ async def websocket_endpoint(
                 )
 
     except WebSocketDisconnect:
+        # 安全加固：客户端断连时取消正在运行的 pipeline 任务（LLM 流/DB 会话随之释放）
+        if pipeline_task is not None and not pipeline_task.done():
+            pipeline_task.cancel()
+            try:
+                await asyncio.gather(pipeline_task, return_exceptions=True)
+            except Exception:
+                logger.warning("Cancelling orphan pipeline task failed", exc_info=True)
         manager.disconnect(websocket)
 
 
@@ -652,6 +670,8 @@ async def chat_stream_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     async def event_generator():
+        # 安全加固：跟踪 pipeline 任务，客户端断连（GeneratorExit）时取消，防止孤儿任务继续烧 LLM 费用
+        pipeline_task: asyncio.Task | None = None
         try:
             user_content = body.content
             file_ids = body.fileIds or []
@@ -677,9 +697,19 @@ async def chat_stream_endpoint(
                 )
                 full_response = ""
                 agent_sources: list[dict] = []
+                # 修复：agent 模式下加载会话历史，支持多轮对话（原实现恒传空 history）
+                agent_history: list[dict[str, str]] = []
+                if body.conversationId:
+                    try:
+                        from app.api.v1.endpoints.agent import _load_session_messages
+                        agent_history = await _load_session_messages(
+                            body.conversationId, current_user.id
+                        )
+                    except Exception as hist_err:
+                        logger.warning(f"加载 agent 会话历史失败（继续无历史对话）: {hist_err}")
                 async for agent_event in agent_service.chat(
                     query=user_content,
-                    history=[],
+                    history=agent_history,
                     organization_id=getattr(current_user, "organization_id", None) or 1,
                     user_id=current_user.id,
                     session_id=body.conversationId or None,
@@ -839,5 +869,13 @@ async def chat_stream_endpoint(
         except Exception as e:
             logger.error(f"SSE error: {e}", exc_info=True)
             yield await sse_event("error", {"content": f"服务器处理出错: {str(e)}"})
+        finally:
+            # 客户端断连（GeneratorExit/CancelledError 属 BaseException，finally 兜底）
+            if pipeline_task is not None and not pipeline_task.done():
+                pipeline_task.cancel()
+                try:
+                    await asyncio.gather(pipeline_task, return_exceptions=True)
+                except Exception:
+                    logger.warning("Cancelling orphan SSE pipeline task failed", exc_info=True)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

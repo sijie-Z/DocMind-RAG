@@ -167,7 +167,7 @@ async def run_rag_pipeline(
         await session.execute(
             select(ChatMessage)
             .where(ChatMessage.session_id == conversation_id)
-            .order_by(ChatMessage.created_at.asc())
+            .order_by(ChatMessage.created_at.desc())
             .limit(10)
         )
     ).scalars().all()
@@ -176,7 +176,7 @@ async def run_rag_pipeline(
             "role": "user" if h.message_type == MessageType.USER else "assistant",
             "content": h.content,
         }
-        for h in history_msgs
+        for h in reversed(history_msgs)
     ]
 
     user_meta_data = {}

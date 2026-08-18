@@ -167,6 +167,11 @@ class DocumentProcessor:
         )
         await ElasticsearchTools.bulk_index_documents(es_docs)
 
+        # 替换成功后按组织清空 RAG 缓存，避免旧内容仍命中缓存
+        from app.rag.cache import RetrievalCache, SemanticCache
+        await RetrievalCache().clear_for_org(doc.organization_id)
+        await SemanticCache().clear_for_org(doc.organization_id)
+
     async def _mark_success(
         self, document_id: str, chunks_data: list[dict], job_id: int | None
     ) -> None:

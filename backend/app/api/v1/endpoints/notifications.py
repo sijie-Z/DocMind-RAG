@@ -51,10 +51,35 @@ class NotificationCreate(BaseModel):
 # --- Endpoints ---
 
 @router.websocket("/ws")
-async def notification_ws(websocket: WebSocket, token: str = Query(...)):
-    payload = auth_service.verify_token(token.strip().replace('"', '').replace("'", ""))
+async def notification_ws(
+    websocket: WebSocket,
+    token: str | None = Query(None, description="兼容旧客户端：token 走查询参数"),
+):
+    # 安全加固：优先从 Sec-WebSocket-Protocol 提取 auth.<token>（token 不落 URL/日志）
+    protocols = websocket.headers.get("sec-websocket-protocol", "")
+    for proto in protocols.split(","):
+        proto = proto.strip()
+        if proto.startswith("auth."):
+            token = proto[5:]
+            break
+
+    if not token:
+        await websocket.close(code=4003, reason="Token required")
+        return
+
+    clean_token = token.strip().replace('"', '').replace("'", "")
+    payload = auth_service.verify_token(clean_token)
     if not payload:
         await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    # 安全加固：仅接受 access token（refresh token 不得建立 WS 连接）
+    if payload.get("type") != "access":
+        await websocket.close(code=4001, reason="Invalid token type")
+        return
+    # 安全加固：校验令牌是否已被吊销
+    if await auth_service.is_token_blacklisted(clean_token):
+        await websocket.close(code=4001, reason="Token revoked")
         return
 
     user_id = payload.get("user_id")
@@ -93,7 +118,7 @@ async def get_notifications(
         base_query = select(Notification).where(Notification.user_id == current_user.id)
 
         if unread_only:
-            base_query = base_query.where(not Notification.is_read)
+            base_query = base_query.where(Notification.is_read.is_(False))
         if type:
             base_query = base_query.where(Notification.type == type)
         if q:
@@ -106,7 +131,7 @@ async def get_notifications(
         unread_result = await db.execute(
             select(func.count(Notification.id)).where(
                 Notification.user_id == current_user.id,
-                not Notification.is_read
+                Notification.is_read.is_(False)
             )
         )
         unread_count = int(unread_result.scalar() or 0)
@@ -127,7 +152,7 @@ async def get_notifications(
                             Notification.type, Notification.is_read, Notification.created_at
                             ).where(Notification.user_id == current_user.id)
         if unread_only:
-            base_query = base_query.where(not Notification.is_read)
+            base_query = base_query.where(Notification.is_read.is_(False))
         if type:
             base_query = base_query.where(Notification.type == type)
         if q:
@@ -139,7 +164,7 @@ async def get_notifications(
         total = int((await db.execute(count_query)).scalar() or 0)
         unread_count = int((await db.execute(
             select(func.count(Notification.id)).where(
-                Notification.user_id == current_user.id, not Notification.is_read
+                Notification.user_id == current_user.id, Notification.is_read.is_(False)
             )
         )).scalar() or 0)
         rows = (await db.execute(
@@ -163,7 +188,7 @@ async def get_unread_count(
     """获取未读通知数量"""
     query = select(func.count(Notification.id)).where(
         Notification.user_id == current_user.id,
-        not Notification.is_read
+        Notification.is_read.is_(False)
     )
     result = await db.execute(query)
     count = result.scalar() or 0
@@ -180,7 +205,7 @@ async def get_notification_summary(
     unread_result = await db.execute(
         select(func.count(Notification.id)).where(
             Notification.user_id == current_user.id,
-            not Notification.is_read
+            Notification.is_read.is_(False)
         )
     )
     type_result = await db.execute(
@@ -237,7 +262,7 @@ async def mark_all_as_read(
         update(Notification)
         .where(
             Notification.user_id == current_user.id,
-            not Notification.is_read
+            Notification.is_read.is_(False)
         )
         .values(is_read=True)
     )

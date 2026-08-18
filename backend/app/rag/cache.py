@@ -53,6 +53,12 @@ class BoundedLRUCache:
             return next(iter(self._cache))
         return None
 
+    def clear_matching(self, prefix: str) -> None:
+        """Remove all entries whose key starts with prefix (org-scoped invalidation)."""
+        keys = [k for k in list(self._cache.keys()) if k.startswith(prefix)]
+        for k in keys:
+            self._cache.pop(k, None)
+
 
 class RetrievalCache:
     """Exact-match retrieval cache backed by Redis (with bounded LRU memory fallback)."""
@@ -102,6 +108,20 @@ class RetrievalCache:
             pass
         # Fallback to memory (bounded LRU)
         self._memory.set(key, {"ts": time.time(), "value": value})
+
+    async def clear_for_org(self, organization_id: int) -> None:
+        """Invalidate all exact-match cache entries for an organization."""
+        # 内存 LRU 中清理该组织的匹配项
+        self._memory.clear_matching(f"org={organization_id}|")
+        # Redis 中按 SCAN 匹配删除（无 Redis 时静默跳过）
+        try:
+            rc = _get_redis()
+            if rc is not None:
+                pattern = f"rag:cache:org={organization_id}|*"
+                async for key in rc.scan_iter(match=pattern, count=100):
+                    await rc.delete(key)
+        except Exception:
+            pass
 
 
 class SemanticCache:
@@ -218,3 +238,17 @@ class SemanticCache:
             logger.info(f"Semantic cache stored: '{query[:30]}...'")
         except Exception as e:
             logger.error(f"Semantic cache store failed: {e}")
+
+    async def clear_for_org(self, organization_id: int) -> None:
+        """Invalidate all semantic cache entries for an organization."""
+        try:
+            rc = _get_redis()
+            if rc is None:
+                return
+            index_key = f"{self.index_key}:{organization_id}"
+            cache_prefix = f"{self.prefix}org:{organization_id}:"
+            async for key in rc.scan_iter(match=f"{cache_prefix}*", count=100):
+                await rc.delete(key)
+            await rc.delete(index_key)
+        except Exception as e:
+            logger.error(f"Semantic cache clear failed: {e}")

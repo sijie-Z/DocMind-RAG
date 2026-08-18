@@ -342,6 +342,11 @@ async def rebuild_document_knowledge(
         doc.parse_error = None
         await db.commit()
 
+        # 重建时按组织清空 RAG 缓存，避免旧内容仍命中缓存
+        from app.rag.cache import RetrievalCache, SemanticCache
+        await RetrievalCache().clear_for_org(doc.organization_id)
+        await SemanticCache().clear_for_org(doc.organization_id)
+
         if schedule_local:
             try:
                 from app.worker.doc_processor import processor
@@ -405,6 +410,9 @@ async def list_knowledge_jobs(
     conditions = []
     if current_user.organization_id:
         conditions.append(KnowledgeProcessingJob.organization_id == current_user.organization_id)
+    else:
+        # 安全加固：无组织用户只能看到自己的任务（不存在则恒空），防止越权查看全部组织任务
+        conditions.append(KnowledgeProcessingJob.organization_id == -1)
 
     if status:
         try:

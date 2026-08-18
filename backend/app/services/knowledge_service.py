@@ -165,6 +165,11 @@ class KnowledgeService:
                 await session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document_id))
                 await session.execute(delete(Document).where(Document.id == document_id))
                 await session.commit()
+
+                # 删除文档后按组织清空 RAG 缓存，避免旧缓存仍被命中
+                from app.rag.cache import RetrievalCache, SemanticCache
+                await RetrievalCache().clear_for_org(doc.organization_id)
+                await SemanticCache().clear_for_org(doc.organization_id)
                 return True
         except Exception as e:
             logger.error(f"彻底删除文档失败: {str(e)}")

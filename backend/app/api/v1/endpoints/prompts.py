@@ -98,7 +98,7 @@ async def update_prompt(
     # Snapshot current state as a version BEFORE applying changes
     old_version = PromptTemplateVersion(
         prompt_id=db_prompt.id,
-        version=db_prompt.version,
+        version=db_prompt.version + 1,
         name=db_prompt.name,
         content=db_prompt.content,
         description=db_prompt.description,
@@ -160,14 +160,14 @@ async def restore_prompt_version(
             PromptTemplateVersion.version == version,
         )
     )
-    ver = version_result.scalar_one_or_none()
+    ver = version_result.scalars().first()
     if not ver:
         raise NotFoundError(detail="版本不存在")
 
     # Snapshot current state before restoring
     old_version = PromptTemplateVersion(
         prompt_id=db_prompt.id,
-        version=db_prompt.version,
+        version=db_prompt.version + 1,
         name=db_prompt.name,
         content=db_prompt.content,
         description=db_prompt.description,
