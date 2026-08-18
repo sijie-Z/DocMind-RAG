@@ -22,6 +22,8 @@ interface ChatOptions {
   temperature?: number
   disabledTools?: string[]
   systemPromptOverride?: string
+  /** External abort signal (e.g. from the caller's AbortController) */
+  signal?: AbortSignal
 }
 
 export const agentApi = {
@@ -30,13 +32,20 @@ export const agentApi = {
     query: string,
     onEvent: (event: AgentEvent) => void,
     options?: ChatOptions,
-  ): Promise<void> {
+  ): Promise<{ abort: () => void }> {
     const token = getToken()
     const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
-    // Create a new AbortController for this request
+    // Each chat() call gets its own AbortController — no shared module state
     const controller = new AbortController()
-    agentApi.abortController = controller
+    const externalSignal = options?.signal
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort()
+      } else {
+        externalSignal.addEventListener('abort', () => controller.abort(), { once: true })
+      }
+    }
 
     const response = await fetch(`${baseUrl}/agent/chat`, {
       method: 'POST',
@@ -96,24 +105,12 @@ export const agentApi = {
       }
     } catch (e: unknown) {
       // Suppress AbortError from user clicking stop
-      if (e instanceof DOMException && e.name === 'AbortError') return
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return { abort: () => controller.abort() }
+      }
       throw e
     }
-  },
-
-  /** Abort active SSE stream */
-  abortController: null as AbortController | null,
-
-  createAbortController(): AbortController {
-    this.abortController = new AbortController()
-    return this.abortController
-  },
-
-  abortStream(): void {
-    if (this.abortController) {
-      this.abortController.abort()
-      this.abortController = null
-    }
+    return { abort: () => controller.abort() }
   },
 
   /** Submit user feedback on an agent response */

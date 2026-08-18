@@ -38,9 +38,11 @@ export const storeMemory = async (
   importance: number = 0.5,
   metadata?: Record<string, unknown>
 ) => {
-  return request.post(`/memory/${agentId}/remember`, null, {
-    params: { content, memory_type: memoryType, importance },
-    data: { metadata }
+  return request.post(`/memory/${agentId}/remember`, {
+    content,
+    memory_type: memoryType,
+    importance,
+    ...(metadata !== undefined ? { metadata } : {}),
   })
 }
 

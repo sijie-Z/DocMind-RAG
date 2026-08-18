@@ -61,8 +61,8 @@
             <span>更新于: {{ formatDate(currentManual.updated_at) }}</span>
           </div>
 
-          <!-- Markdown 内容渲染 -->
-          <div class="markdown-body prose dark:prose-invert max-w-none" v-html="renderedContent"></div>
+          <!-- Markdown 内容渲染（复用通用 Markdown 组件，含 DOMPurify 净化） -->
+          <Markdown :content="currentManual?.content" />
         </div>
 
         <div v-else class="h-full flex flex-col items-center justify-center text-gray-400">
@@ -112,9 +112,7 @@ import { useDedupedMessage } from '@/utils/message'
 import { useUserStore } from '@/stores/user'
 import { BookOutline, AddOutline, SearchOutline, CreateOutline, TrashOutline, DocumentTextOutline } from '@vicons/ionicons5'
 import { getManuals, createManual, updateManual, deleteManual, type Manual } from '@/api/manual'
-import MarkdownIt from 'markdown-it'
-
-const md = new MarkdownIt({ html: false, linkify: true })
+import Markdown from '@/components/common/Markdown.vue'
 import { formatDate } from '@/utils/format'
 import { NIcon } from 'naive-ui'
 
@@ -148,12 +146,6 @@ const categoryOptions = [
   { label: '常见问题', value: 'faq' },
   { label: 'API文档', value: 'api' }
 ]
-
-// 渲染 Markdown
-const renderedContent = computed(() => {
-  if (!currentManual.value?.content) return ''
-  return md.render(currentManual.value.content)
-})
 
 const currentManual = computed(() => {
   return manuals.value.find(m => m.id === currentManualId.value)

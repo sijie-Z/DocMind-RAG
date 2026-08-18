@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
@@ -313,6 +313,20 @@ export function useChatSend(
     isLoading.value = false
     isRetrieving.value = false
   }
+
+  // 组件卸载时中止进行中的 SSE 流并清理事件处理器，防止请求悬挂与内存泄漏
+  onUnmounted(() => {
+    sseService.abort()
+    sseService.off('chunk')
+    sseService.off('message')
+    sseService.off('error')
+    sseService.off('retry')
+    sseService.off('thinking')
+    sseService.off('tool_call')
+    sseService.off('tool_result')
+    sseService.off('tool_error')
+    sseService.off('debug')
+  })
 
   return {
     inputMessage,

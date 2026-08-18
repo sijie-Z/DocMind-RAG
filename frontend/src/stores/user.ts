@@ -155,6 +155,11 @@ export const useUserStore = defineStore('user', () => {
     userInfo.value = null
     token.value = ''
     removeToken()
+    // 清除用户态 localStorage，避免登出后残留敏感/偏好数据
+    localStorage.removeItem('user_info')
+    localStorage.removeItem('language')
+    localStorage.removeItem('theme')
+    localStorage.removeItem('activeSystemPrompt')
   }
   
   // --- 找到 stores/user.ts 中的 updateUserInfo 函数，替换为 ---

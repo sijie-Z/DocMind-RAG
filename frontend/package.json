@@ -40,6 +40,11 @@
     "vue-i18n": "^9.8.0",
     "vue-router": "^4.2.5"
   },
+  "overrides": {
+    "markdown-it-katex": {
+      "katex": "0.16.28"
+    }
+  },
   "devDependencies": {
     "@types/dompurify": "^3.0.5",
     "@types/highlight.js": "^9.12.4",

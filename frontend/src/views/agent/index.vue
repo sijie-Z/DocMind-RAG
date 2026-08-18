@@ -202,7 +202,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useAgentStore } from '@/stores/agent'
 import { agentApi } from '@/api/agent'
 import { useDedupedMessage } from '@/utils/message'
@@ -220,6 +220,9 @@ import Markdown from '@/components/common/Markdown.vue'
 
 const agentStore = useAgentStore()
 const message = useDedupedMessage()
+
+// 当前进行中的 Agent chat 请求控制器（用于停止/卸载时中止）
+let currentChatController: AbortController | null = null
 
 const showConfig = ref(false)
 const showPlan = ref(true)
@@ -342,6 +345,9 @@ async function handleSend(query: string) {
   agentStore.setLoading(true)
   scrollToBottom()
 
+  const chatController = new AbortController()
+  currentChatController = chatController
+
   try {
     await agentApi.chat(
       query,
@@ -350,6 +356,7 @@ async function handleSend(query: string) {
         scrollToBottom()
       },
       {
+        signal: chatController.signal,
         sessionId: agentStore.currentSessionId || undefined,
         enableTools: agentStore.config.enable_tools,
         enablePlanning: agentStore.config.enable_planning,
@@ -377,18 +384,26 @@ async function handleSend(query: string) {
       })
     }
   } finally {
+    currentChatController = null
     agentStore.setLoading(false)
     scrollToBottom()
   }
 }
 
 function handleStop() {
-  agentApi.abortStream()
+  currentChatController?.abort()
+  currentChatController = null
   agentStore.setLoading(false)
   agentStore.updateLastAssistant((msg) => {
     msg.loading = false
   })
 }
+
+// 组件卸载时中止进行中的 Agent SSE 流，防止请求悬挂
+onUnmounted(() => {
+  currentChatController?.abort()
+  currentChatController = null
+})
 
 async function handleSessionChange(sessionId: string | null) {
   agentStore.setCurrentSession(sessionId)
