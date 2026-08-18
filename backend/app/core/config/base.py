@@ -37,6 +37,10 @@ class BaseAppSettings(BaseSettings):
     METRICS_ROUTE_SAMPLE_SIZE: int = 300
     METRICS_LIVE_PERSIST_SECONDS: int = 5
 
+    # Metrics endpoint protection: when non-empty, /metrics requires
+    # "Authorization: Bearer <METRICS_TOKEN>". Leave empty to keep it open.
+    METRICS_TOKEN: str = ""
+
     # Alerting thresholds
     ALERT_ERROR_RATE_PERCENT: float = 5.0
     ALERT_P95_MS: float = 1200.0

@@ -23,7 +23,7 @@ class UserInfoResponse(BaseModel):
     updated_at: datetime | None = None
     last_login_at: datetime | None = None
     preferences: str | None = None
-    api_key: str | None = None
+    # 安全加固：api_key 不进入公共响应 schema（避免明文入 Redis 缓存/列表接口）
     department: str | None = None
     position: str | None = None
 

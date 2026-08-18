@@ -449,8 +449,14 @@ async def system_info():
 
 
 @app.get("/metrics", response_class=PlainTextResponse)
-async def prometheus_metrics():
+async def prometheus_metrics(request: Request):
     """Prometheus 指标导出 — HTTP + WebSocket + RAG 管线指标"""
+    # 安全加固：配置了 METRICS_TOKEN 时要求 Bearer 认证，防止内部运行数据泄露
+    if settings.METRICS_TOKEN:
+        auth_header = request.headers.get("authorization", "")
+        expected = f"Bearer {settings.METRICS_TOKEN}"
+        if auth_header != expected:
+            raise HTTPException(status_code=401, detail="unauthorized")
     http_metrics = await metrics_collector.get_prometheus_text()
     ws_stats = notification_ws_manager.get_stats()
 

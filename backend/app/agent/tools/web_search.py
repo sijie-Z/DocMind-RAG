@@ -55,18 +55,21 @@ def _validate_public_url(url: str) -> str:
 
 
 async def _check_rate_limit(user_id: int, limit: int = RATE_LIMIT_RPM) -> bool:
-    """Check if the user has exceeded the rate limit. Returns True if allowed."""
+    """Check if the user has exceeded the rate limit. Returns True if allowed.
+
+    安全加固：Redis 不可用/异常时 fail-closed（拒绝），外部网络调用宁可拒绝不可放开。
+    """
     try:
         from app.core.redis import redis_client
         if not redis_client:
-            return True  # no Redis = no rate limit
+            return False  # no Redis = fail closed
         key = f"agent:rate_limit:web:{user_id}"
         count = await redis_client.incr(key)
         if count == 1:
             await redis_client.expire(key, 60)
         return count <= limit
     except Exception:
-        return True
+        return False
 
 
 @register_tool(
@@ -185,7 +188,11 @@ async def fetch_webpage(
             if response.status_code != 200:
                 return f"Failed to fetch {url}: HTTP {response.status_code}"
 
-            html = response.text
+            # 安全加固：限制响应体大小（2MB），防止恶意服务器返回超大响应拖垮内存
+            raw = response.content
+            if len(raw) > 2 * 1024 * 1024:
+                return f"Failed to fetch {url}: response too large (>2MB)"
+            html = raw.decode("utf-8", errors="replace")
 
             # Try readability extraction
             text = _extract_text(html)

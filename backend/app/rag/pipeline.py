@@ -1,5 +1,6 @@
 """RAG pipeline — orchestrates retrieval, reranking, compression, and LLM generation."""
 import asyncio
+import contextvars
 import logging
 import time
 from collections.abc import AsyncGenerator
@@ -245,6 +246,12 @@ class RAGPipeline:
             self.metrics.inc("grounded_hit")
             self.metrics.record_event("grounded_hit", 1)
 
+    # 安全修复：token 用量改为 ContextVar 按请求隔离。
+    # 原实现写实例字段，单例 pipeline 被并发请求共享时计量会错配到其他用户/请求。
+    _token_usage_var: contextvars.ContextVar[tuple[int, int] | None] = contextvars.ContextVar(
+        "rag_last_token_usage", default=None
+    )
+
     def report_tokens(self, input_tokens: int, output_tokens: int) -> None:
         LLM_TOKENS.labels(direction="input").inc(input_tokens)
         LLM_TOKENS.labels(direction="output").inc(output_tokens)
@@ -252,10 +259,10 @@ class RAGPipeline:
         self.metrics.inc("total_input_tokens", input_tokens)
         self.metrics.inc("total_output_tokens", output_tokens)
         self.metrics.inc("llm_request_count")
-        self._last_token_usage = (input_tokens, output_tokens)
+        self._token_usage_var.set((input_tokens, output_tokens))
 
     def get_last_token_usage(self) -> tuple[int, int] | None:
-        return getattr(self, "_last_token_usage", None)
+        return self._token_usage_var.get()
 
     def get_metrics(self, window_seconds: int = 0) -> dict[str, Any]:
         return self.metrics.get_snapshot(window_seconds)
@@ -270,23 +277,51 @@ class RAGPipeline:
         system_prompt_override: str | None = None,
         enable_compression: bool = True,
         enable_masking: bool = True,
+        mask_mapping_sink: dict | None = None,
     ) -> AsyncGenerator[str, None]:
-        """Stream LLM response with context compression and optional PII masking."""
+        """Stream LLM response with context compression and optional PII masking.
+
+        PII 掩码链路（安全加固）：
+        1. 检索上下文与用户 query 在进入 prompt 前统一掩码（编号全局唯一）；
+        2. 流式 chunk 输出前掩码，PII 不离开服务器；
+        3. 结束时把 context/query 的占位符映射写入 mask_mapping_sink（引用传递），
+           调用方可据此还原"引用型"占位符；模型自行新生成的 PII 占位符不还原。
+        """
         if not self.openai_client:
             yield "LLM未配置"
             return
 
-        # PII masking
-        masking_mapping = {}
-        if enable_masking and getattr(settings, "ENABLE_PII_MASKING", False):
-            from app.services.masking_service import masking_service
-            query, masking_mapping = masking_service.mask_text(query)
+        masking_enabled = enable_masking and getattr(settings, "ENABLE_PII_MASKING", False)
+        from app.services.masking_service import masking_service
+        context_mask_mapping: dict[str, str] = {}
+        query_mask_mapping: dict[str, str] = {}
 
         # Compress context
         if enable_compression and context:
             compressed = compress_context_list(context, query, max_context_chars=8000)
         else:
             compressed = context
+
+        # 安全加固：检索上下文中的 PII 在拼入 prompt 前统一掩码
+        if masking_enabled:
+            for item in compressed:
+                raw_snippet = item.get("snippet") or item.get("text", "")
+                if not raw_snippet:
+                    continue
+                masked, m = masking_service.mask_text(
+                    raw_snippet, start_index=len(context_mask_mapping)
+                )
+                context_mask_mapping.update(m)
+                if item.get("snippet") is not None:
+                    item["snippet"] = masked
+                elif item.get("text") is not None:
+                    item["text"] = masked
+
+        # PII masking for query（编号接在 context 之后，避免占位符冲突）
+        if masking_enabled:
+            query, query_mask_mapping = masking_service.mask_text(
+                query, start_index=len(context_mask_mapping)
+            )
 
         context_str = "\n\n".join([
             f"资料[{i + 1}] (文件名: {item.get('filename', '未知文档')}):\n{(item.get('snippet') or item.get('text', ''))[:3000]}"
@@ -356,6 +391,9 @@ class RAGPipeline:
             )
             full_response = ""
             first_token = True
+            # 安全加固：流式输出前对 chunk 掩码（编号继续递增，PII 不离开服务器）；
+            # 模型新生成的 PII 占位符不参与最终还原，仅 context/query 的占位符可还原。
+            response_mask_mapping: dict[str, str] = {}
             async for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
                     content = chunk.choices[0].delta.content
@@ -363,17 +401,34 @@ class RAGPipeline:
                     if first_token:
                         LLM_LATENCY.observe(time.perf_counter() - llm_start)
                         first_token = False
-                    yield content
+                    if masking_enabled:
+                        masked_chunk, cm = masking_service.mask_text(
+                            content,
+                            start_index=(
+                                len(context_mask_mapping)
+                                + len(query_mask_mapping)
+                                + len(response_mask_mapping)
+                            ),
+                        )
+                        response_mask_mapping.update(cm)
+                        yield masked_chunk
+                    else:
+                        yield content
 
             # Token estimation
             input_text = "".join(str(m.get("content", "")) for m in messages if m.get("content"))
             self.report_tokens(max(1, int(len(input_text) / 1.5)), max(1, int(len(full_response) / 1.5)))
 
-            # Unmask
-            if masking_mapping:
-                from app.services.masking_service import masking_service
-                full_response = masking_service.unmask_text(full_response, masking_mapping)
-                logger.info("PII masking: response unmasked")
+            # 将 context/query 占位符映射交给调用方（供最终消息还原"引用型"占位符）
+            if mask_mapping_sink is not None:
+                mask_mapping_sink.clear()
+                mask_mapping_sink.update(context_mask_mapping)
+                mask_mapping_sink.update(query_mask_mapping)
+                if mask_mapping_sink:
+                    logger.info(
+                        f"PII masking: {len(mask_mapping_sink)} placeholders exposed "
+                        "for final unmask"
+                    )
 
         except Exception as e:
             LLM_REQUEST_ERRORS.inc()

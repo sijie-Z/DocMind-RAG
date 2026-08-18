@@ -20,9 +20,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import RedisTools
+from app.exceptions import AccountLockedError
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+
+# ── 登录暴力破解防护 ─────────────────────────────────────────────
+MAX_LOGIN_FAILURES = 5          # 连续失败次数阈值
+LOGIN_LOCKOUT_SECONDS = 900     # 锁定窗口（15 分钟）
+# 预计算一个 dummy bcrypt 哈希：用户不存在时也执行一次真实 bcrypt 校验，
+# 消除"用户不存在 vs 密码错误"的时序差异，防止用户枚举。
+_DUMMY_HASH = bcrypt.hashpw(b"dummy-password-for-timing", bcrypt.gensalt()).decode("utf-8")
 
 # JWT认证方案
 security = HTTPBearer()
@@ -196,9 +204,56 @@ class AuthService:
 
         return user
 
-    async def authenticate_user(self, db: AsyncSession, username: str, password: str) -> User | None:
-        """验证用户凭据"""
+    async def _check_lockout(self, username: str) -> None:
+        """检查登录失败锁定状态；Redis 不可用时跳过（全局限流仍在）。"""
         try:
+            from app.core.redis import redis_client
+            if not redis_client:
+                return
+            key = f"login:fail:{username}"
+            count = await redis_client.get(key)
+            if count and int(count) >= MAX_LOGIN_FAILURES:
+                raise AccountLockedError(
+                    message=f"登录尝试次数过多，请 {LOGIN_LOCKOUT_SECONDS // 60} 分钟后再试"
+                )
+        except AccountLockedError:
+            raise
+        except Exception as e:
+            logger.warning(f"Lockout check failed (skip): {e}")
+
+    async def _record_login_failure(self, username: str) -> None:
+        """记录一次登录失败；达到阈值后抛出 AccountLockedError。"""
+        try:
+            from app.core.redis import redis_client
+            if not redis_client:
+                return
+            key = f"login:fail:{username}"
+            count = await redis_client.incr(key)
+            if count == 1:
+                await redis_client.expire(key, LOGIN_LOCKOUT_SECONDS)
+            if count >= MAX_LOGIN_FAILURES:
+                raise AccountLockedError(
+                    message=f"登录尝试次数过多，请 {LOGIN_LOCKOUT_SECONDS // 60} 分钟后再试"
+                )
+        except AccountLockedError:
+            raise
+        except Exception as e:
+            logger.warning(f"Record login failure failed (skip): {e}")
+
+    async def _clear_login_failures(self, username: str) -> None:
+        """登录成功后清除失败计数。"""
+        try:
+            from app.core.redis import redis_client
+            if redis_client:
+                await redis_client.delete(f"login:fail:{username}")
+        except Exception as e:
+            logger.warning(f"Clear login failures failed (skip): {e}")
+
+    async def authenticate_user(self, db: AsyncSession, username: str, password: str) -> User | None:
+        """验证用户凭据（含失败锁定与时序侧信道防护）"""
+        try:
+            # 安全加固：失败锁定检查
+            await self._check_lockout(username)
             logger.info(f"Attempting login for user: {username}")
 
             # 查询用户
@@ -206,6 +261,9 @@ class AuthService:
             user = result.scalar_one_or_none()
 
             if user is None:
+                # 安全加固：用户不存在时也执行一次 bcrypt 校验，消除时序差异（防用户枚举）
+                self.verify_password(password, _DUMMY_HASH)
+                await self._record_login_failure(username)
                 logger.warning(f"Login failed: User {username} not found")
                 return None
 
@@ -213,6 +271,7 @@ class AuthService:
             is_valid = self.verify_password(password, user.hashed_password)
 
             if not is_valid:
+                await self._record_login_failure(username)
                 logger.warning(f"Login failed: Invalid password for user {username}")
                 return None
 
@@ -221,9 +280,13 @@ class AuthService:
                 logger.warning(f"Login failed: User {username} is inactive")
                 return None
 
+            # 安全加固：登录成功清除失败计数
+            await self._clear_login_failures(username)
             logger.info(f"Login success for user: {username}")
             return user
 
+        except AccountLockedError:
+            raise
         except Exception as e:
             logger.exception(f"用户认证失败: {e}")
             raise

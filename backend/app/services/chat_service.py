@@ -278,16 +278,28 @@ async def run_rag_pipeline(
         sources=sources_list,
     ))
 
+    # 安全加固：接收 PII 掩码的 context/query 占位符映射，流结束后还原"引用型"占位符
+    mask_mapping: dict = {}
     async for chunk in rag_service.chat_stream(
         user_content, context_results, chat_history,
         system_prompt_override=system_prompt_override,
         enable_masking=privacy_mode,
+        mask_mapping_sink=mask_mapping,
     ):
         full_response += chunk
         _emit(RAGEvent(
             type="chunk", content=chunk,
             conversation_id=conversation_id, message_id=ai_msg_id,
         ))
+
+    # 还原引用型占位符（LLM 引用的 [PHONE_3] 等来自检索上下文/用户提问的真实信息）；
+    # 模型自行新生成的 PII 占位符不在映射内，保持掩码状态。
+    if mask_mapping:
+        try:
+            from app.services.masking_service import masking_service
+            full_response = masking_service.unmask_text(full_response, mask_mapping)
+        except Exception as e:
+            logger.warning(f"PII unmask failed (non-fatal): {e}")
 
     cited_indices = set(int(m) for m in re.findall(r"\[(\d+)\]", full_response))
     cited_sources = [

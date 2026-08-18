@@ -1,7 +1,7 @@
 """API endpoints for prompt template management with version history."""
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +25,7 @@ router = APIRouter()
 async def list_prompts(
     db: AsyncSession = Depends(get_db),
     skip: int = 0,
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=500),
     category: str = None,
     current_user: User = Depends(get_current_user),
 ):

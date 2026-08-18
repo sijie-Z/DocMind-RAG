@@ -370,13 +370,17 @@ async def refresh_token(
     body: RefreshRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    """刷新访问令牌"""
+    """刷新访问令牌（含轮换与吊销校验）"""
     try:
         # 验证刷新令牌
         payload = auth_service.verify_token(body.refresh_token)
 
         if not payload or payload.get("type") != "refresh":
             raise AuthenticationError("无效的刷新令牌")
+
+        # 安全加固：已被吊销的 refresh token 不得续期
+        if await auth_service.is_token_blacklisted(body.refresh_token):
+            raise AuthenticationError("刷新令牌已失效，请重新登录")
 
         username = payload.get("sub")
         user_id = int(payload.get("user_id", 0))
@@ -387,8 +391,22 @@ async def refresh_token(
         if not user or user.username != username:
             raise AuthenticationError("用户不存在")
 
-        # 生成新的访问令牌
+        # 安全加固：被禁用用户不得刷新
+        if not user.is_active:
+            raise AuthenticationError("账号已被禁用")
+
+        # 生成新的访问令牌（与登录 token 的 claims 保持一致）
         new_access_token = auth_service.create_access_token(
+            data={
+                "sub": username,
+                "user_id": user_id,
+                "role": user.role,
+                "organization_id": user.organization_id,
+            }
+        )
+        # 安全加固：refresh token 轮换——旧 refresh 立即吊销，签发新 refresh
+        await auth_service.blacklist_token(body.refresh_token)
+        new_refresh_token = auth_service.create_refresh_token(
             data={"sub": username, "user_id": user_id}
         )
 
@@ -399,7 +417,7 @@ async def refresh_token(
                 "access_token": new_access_token,
                 "token_type": "bearer",
                 "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-                "refresh_token": body.refresh_token,
+                "refresh_token": new_refresh_token,
                 "user_info": {
                     "id": user.id,
                     "username": user.username,
@@ -416,12 +434,19 @@ async def refresh_token(
     except Exception as e:
         raise AppError("刷新令牌失败", detail=str(e) if settings.EXPOSE_EXCEPTION_DETAIL else None)
 
+class LogoutRequest(BaseModel):
+    refresh_token: str | None = None
+
+
 @router.post("/logout", response_model=dict)
 async def logout(
-    token: str = Depends(oauth2_scheme)
+    body: LogoutRequest | None = None,
+    token: str = Depends(oauth2_scheme),
 ):
-    """用户登出"""
+    """用户登出：吊销 access token，若携带 refresh_token 一并吊销（防止登出后继续续期）"""
     await auth_service.blacklist_token(token)
+    if body is not None and body.refresh_token:
+        await auth_service.blacklist_token(body.refresh_token)
     return {"message": "登出成功"}
 
 class UserInfoWrapper(BaseModel):

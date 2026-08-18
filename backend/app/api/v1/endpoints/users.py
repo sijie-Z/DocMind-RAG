@@ -47,6 +47,15 @@ from app.services.auth_service import auth_service
 router = APIRouter()
 
 
+def _mask_api_key(api_key: str | None) -> str | None:
+    """安全加固：API Key 只返回掩码（sk-****abcd），完整值仅生成时返回一次。"""
+    if not api_key:
+        return None
+    if len(api_key) <= 8:
+        return "****"
+    return f"{api_key[:3]}****{api_key[-4:]}"
+
+
 class ActivityResponse(BaseModel):
     id: str
     type: str
@@ -431,7 +440,8 @@ async def get_user_profile(
             "created_at": current_user.created_at,
             "last_login_at": current_user.last_login_at,
             "preferences": current_user.preferences,
-            "api_key": current_user.api_key
+            # 安全加固：只返回掩码，不泄露完整 API Key
+            "api_key": _mask_api_key(current_user.api_key)
         }
     except Exception as e:
         logger.exception(f"Error in GET /me: {str(e)}")
@@ -1002,7 +1012,8 @@ async def update_user_profile(
             "bio": bio_response, "organization_id": current_user.organization_id, "role": current_user.role,
             "is_active": current_user.is_active, "created_at": current_user.created_at,
             "last_login_at": current_user.last_login_at, "preferences": current_user.preferences,
-            "api_key": current_user.api_key
+            # 安全加固：只返回掩码，不泄露完整 API Key
+            "api_key": _mask_api_key(current_user.api_key)
         }
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
         raise

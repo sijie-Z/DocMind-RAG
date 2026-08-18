@@ -57,9 +57,11 @@ class RagServiceFacade:
         system_prompt_override: str | None = None,
         enable_compression: bool = True,
         enable_masking: bool = True,
+        mask_mapping_sink: dict | None = None,
     ) -> AsyncGenerator[str, None]:
         async for chunk in self._pipeline.chat_stream(
-            query, context, history, system_prompt_override, enable_compression, enable_masking
+            query, context, history, system_prompt_override,
+            enable_compression, enable_masking, mask_mapping_sink,
         ):
             yield chunk
 
