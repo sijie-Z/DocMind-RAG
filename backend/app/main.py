@@ -522,7 +522,7 @@ async def get_minio_file(
     file_path = unquote(file_path)
     if file_path.startswith("/"):
         raise HTTPException(status_code=400, detail="无效的文件路径")
-    normalized = os.path.normpath(file_path)
+    normalized = os.path.normpath(file_path).replace("\\", "/")
     if normalized.startswith("..") or ".." in file_path:
         raise HTTPException(status_code=400, detail="无效的文件路径")
 
