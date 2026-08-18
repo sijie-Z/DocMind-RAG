@@ -4,6 +4,7 @@
 import asyncio
 import hashlib
 import logging
+import math
 import os
 import uuid
 from pathlib import Path
@@ -382,6 +383,21 @@ class FileUploadService:
             # 验证分块数据
             if not chunk_data or len(chunk_data) == 0:
                 raise HTTPException(status_code=400, detail="分块数据不能为空")
+
+            # 单块大小不得超过 chunk_size（5MB），防止恶意超大分块写入磁盘
+            if len(chunk_data) > self.chunk_size:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"分块数据超过大小限制（最大 {self.chunk_size // (1024 * 1024)}MB）"
+                )
+
+            # 总分块数上限 = ceil(max_file_size / chunk_size) + 1（100MB 对应 21），防止磁盘耗尽
+            max_total_chunks = math.ceil(self.max_file_size / self.chunk_size) + 1
+            if total_chunks > max_total_chunks:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"总分块数超过限制（最大 {max_total_chunks} 个）"
+                )
 
             if chunk_index < 0 or chunk_index >= total_chunks:
                 raise HTTPException(status_code=400, detail="分块序号无效")

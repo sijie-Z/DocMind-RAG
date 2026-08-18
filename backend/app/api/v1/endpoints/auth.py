@@ -47,7 +47,8 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     full_name: str | None = None
-    organization_id: int | None = None
+    # 安全加固：禁止注册时自选组织（防越权加入任意组织读取文档），
+    # 组织归属由管理员分配。
 
     @field_validator('password')
     @classmethod
@@ -304,7 +305,7 @@ async def register(
                 email=register_data.email,
                 password=register_data.password,
                 full_name=register_data.full_name,
-                organization_id=register_data.organization_id
+                organization_id=None  # 安全加固：注册用户不归属任何组织，由管理员分配
             )
 
             welcome_notification = Notification(
@@ -477,8 +478,12 @@ async def change_password(
 ):
     """修改密码"""
     try:
-        # 验证旧密码
-        if not auth_service.verify_password(body.old_password, current_user.hashed_password):
+        # 安全加固：从 DB 重新加载用户校验旧密码（Redis 缓存不含 hashed_password，
+        # 用缓存对象校验必然失败）
+        db_user = await db.get(User, current_user.id)
+        if db_user is None:
+            raise ValidationError("用户不存在")
+        if not auth_service.verify_password(body.old_password, db_user.hashed_password):
             raise ValidationError("旧密码错误")
 
         # 更新密码
@@ -487,6 +492,9 @@ async def change_password(
             current_user.id,
             body.new_password
         )
+        # 安全加固：改密后使用户缓存失效
+        from app.core.redis import RedisTools
+        await RedisTools.delete_cache(f"user:{current_user.id}")
         await db.commit()
 
         return {"message": "密码修改成功"}

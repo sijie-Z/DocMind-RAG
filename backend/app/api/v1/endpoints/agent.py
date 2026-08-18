@@ -97,7 +97,10 @@ async def agent_chat(
                 enable_memory=body.enable_memory,
                 enable_thinking=body.enable_thinking,
                 system_prompt_override=body.system_prompt_override,
-                disabled_tools=body.disabled_tools if body.disabled_tools else list(DEFAULT_DISABLED_TOOLS),
+                # 安全加固：高危工具由服务端强制禁用，客户端无法解除
+                disabled_tools=sorted(
+                    set(body.disabled_tools or []) | set(DEFAULT_DISABLED_TOOLS)
+                ),
             )
 
             # Load history from session if provided
@@ -514,7 +517,10 @@ async def update_config(
     if body.system_prompt_override is not None:
         config.system_prompt_override = body.system_prompt_override
     if body.disabled_tools is not None:
-        config.disabled_tools = body.disabled_tools
+        # 安全加固：高危工具由服务端强制禁用，客户端无法解除
+        config.disabled_tools = sorted(
+            set(body.disabled_tools) | set(DEFAULT_DISABLED_TOOLS)
+        )
 
     await config.save_to_redis(f"user:{current_user.id}")
 

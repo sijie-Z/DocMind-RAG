@@ -73,7 +73,8 @@ ALLOWED_SQL_COLUMNS: dict[str, set[str]] = {
                        "max_storage_mb", "created_at"},
     "prompt_templates": {"id", "name", "content", "description",
                           "is_active", "version", "updated_at"},
-    "users": {"id", "username", "email", "display_name", "is_active",
+    # 安全加固：移除 email 等敏感列，防止跨租户读取用户联系信息
+    "users": {"id", "username", "display_name", "is_active",
                "role", "organization_id", "last_login", "created_at"},
     "user_settings": {"user_id", "theme", "language", "notification_prefs"},
     "system_manuals": {"id", "title", "content", "version", "is_active",
@@ -105,13 +106,20 @@ def _is_safe_select_sql(sql: str) -> tuple[bool, str]:
         return False, "Only SELECT queries are allowed"
 
     # 2. No dangerous keywords (INSERT, UPDATE, DELETE, DROP, etc.)
+    # 安全加固：union/with/into/information_schema 等可绕过列白名单或写出文件，一律禁止
     illegal = re.compile(
         r"\b(insert|update|delete|drop|alter|create|truncate|replace|grant|"
-        r"revoke|attach|detach|pragma|exec|execute|call|load|import|export)\b",
+        r"revoke|attach|detach|pragma|exec|execute|call|load|import|export|"
+        r"union|with|into|outfile|dumpfile|load_file|procedure|information_schema"
+        r"|lock|sleep|benchmark)\b",
         flags=re.IGNORECASE,
     )
     if illegal.search(stripped):
         return False, "Dangerous SQL keyword detected"
+
+    # 3b. 安全加固：禁止子查询（(SELECT ...) 可绕过列白名单读取任意列）
+    if re.search(r"\(\s*select\b", stripped, flags=re.IGNORECASE):
+        return False, "Subqueries are not allowed"
 
     # 3. No multi-statement or comments
     if ";" in stripped.rstrip(";"):
@@ -247,6 +255,10 @@ async def execute_python(code: str, **_: Any) -> str:
     # ── AST-level safety check ────────────────────────────────────
     import ast as _ast
 
+    # 安全加固：限制代码长度，防止超大输入
+    if len(code) > 5000:
+        return "Error: Code too long (max 5000 chars)."
+
     _FORBIDDEN = (_ast.Import, _ast.ImportFrom)
     _FORBIDDEN_CALLS = {"eval", "exec", "compile", "__import__", "open",
                         "globals", "locals", "vars", "getattr", "setattr",
@@ -261,8 +273,11 @@ async def execute_python(code: str, **_: Any) -> str:
         if isinstance(node, _ast.Call) and isinstance(node.func, _ast.Name):
             if node.func.id in _FORBIDDEN_CALLS:
                 return f"Error: calling '{node.func.id}()' is not allowed in sandbox."
-        if isinstance(node, _ast.Attribute) and node.attr.startswith("__"):
-            return "Error: dunder attribute access is not allowed in sandbox."
+        # 安全加固：禁止一切以下划线开头的属性访问。
+        # 仅拦截双下划线（__）无法防住沙箱逃逸（如 random._os.system 可执行任意命令），
+        # 因此单下划线私有属性一并禁止。
+        if isinstance(node, _ast.Attribute) and node.attr.startswith("_"):
+            return "Error: private/dunder attribute access is not allowed in sandbox."
 
     # Build safe globals — no __builtins__ escape hatch
     safe_globals = {"__builtins__": {}}
@@ -297,6 +312,12 @@ async def execute_python(code: str, **_: Any) -> str:
         output = f_out.getvalue()
         errors = f_err.getvalue()
 
+        # 安全加固：限制输出长度，防止内存/响应膨胀
+        if len(output) > 10000:
+            output = output[:10000] + "\n...[output truncated]"
+        if len(errors) > 4000:
+            errors = errors[:4000] + "\n...[error truncated]"
+
         if errors and not output:
             return f"Error:\n{errors.strip()}"
         if output:
@@ -329,13 +350,61 @@ async def execute_python(code: str, **_: Any) -> str:
     tags=["code", "data"],
     requires_auth=True,
 )
-async def execute_sql(query: str, **_: Any) -> str:
+async def execute_sql(query: str, organization_id: int | None = None, **_: Any) -> str:
     import json
 
     # Four-layer safety validation
     safe, reason = _is_safe_select_sql(query)
     if not safe:
         return f"Error: {reason}."
+
+    # 安全加固：强制租户隔离。无法确定组织范围时拒绝执行（fail-closed），
+    # 防止无组织用户/越权上下文查询到其他组织数据。
+    if organization_id is None:
+        return "Error: 无法确定组织范围，禁止执行跨组织查询。"
+    org_id = int(organization_id)
+
+    # 对含 organization_id 列的白名单表自动附加组织过滤条件
+    needs_org_filter = False
+    for table in ALLOWED_SQL_COLUMNS:
+        if "organization_id" in ALLOWED_SQL_COLUMNS[table]:
+            if re.search(rf"\b(?:from|join)\s+{re.escape(table)}\b", query, flags=re.IGNORECASE):
+                needs_org_filter = True
+                break
+    if needs_org_filter and not re.search(r"\borganization_id\b", query, flags=re.IGNORECASE):
+        where_m = re.search(r"\bwhere\b", query, flags=re.IGNORECASE)
+        tail_m = re.search(
+            r"\b(group\s+by|order\s+by|limit|having)\b",
+            query, flags=re.IGNORECASE,
+        )
+        if where_m:
+            # 包裹原 WHERE 条件（防止 OR 破坏组织过滤语义）
+            if tail_m and tail_m.start() > where_m.end():
+                tail_pos = tail_m.start()
+                query = (
+                    query[:where_m.start()]
+                    + f" WHERE (organization_id = {org_id} AND "
+                    + query[where_m.end():tail_pos]
+                    + ") "
+                    + query[tail_pos:]
+                )
+            else:
+                query = (
+                    query[:where_m.start()]
+                    + f" WHERE (organization_id = {org_id} AND "
+                    + query[where_m.end():]
+                    + ")"
+                )
+        else:
+            # 无 WHERE：在 GROUP BY/ORDER BY/LIMIT/HAVING 之前插入
+            if tail_m:
+                query = (
+                    query[:tail_m.start()]
+                    + f" WHERE organization_id = {org_id} "
+                    + query[tail_m.start():]
+                )
+            else:
+                query = query.rstrip().rstrip(";") + f" WHERE organization_id = {org_id}"
 
     # Force limit
     query_stripped = query.strip().lower()

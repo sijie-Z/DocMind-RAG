@@ -37,6 +37,20 @@ MCP_SERVERS: dict[str, dict[str, Any]] = {
 }
 
 
+# 安全加固：npx 子进程只透传白名单环境变量，严禁泄露宿主机全部环境变量
+_ENV_ALLOWLIST = (
+    "PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TEMP", "TMP",
+    "APPDATA", "LOCALAPPDATA", "ComSpec", "PATHEXT",
+)
+
+
+def _build_safe_env(config: dict) -> dict:
+    """Build an environment dict for MCP subprocesses: allowlist + explicit config env only."""
+    safe_env = {k: v for k, v in os.environ.items() if k in _ENV_ALLOWLIST}
+    safe_env.update({k: v for k, v in config.get("env", {}).items() if v is not None})
+    return safe_env
+
+
 def _get_server_config(name: str) -> dict | None:
     """Get MCP server config, supporting env var overrides."""
     config = MCP_SERVERS.get(name)
@@ -66,7 +80,7 @@ async def _call_mcp_tool(server_name: str, tool_name: str, arguments: dict) -> s
     params = StdioServerParameters(
         command=config["command"],
         args=config["args"],
-        env={**config.get("env", {}), **os.environ},
+        env=_build_safe_env(config),
     )
 
     try:
@@ -109,7 +123,7 @@ async def _list_mcp_tools(server_name: str) -> str:
     params = StdioServerParameters(
         command=config["command"],
         args=config["args"],
-        env={**config.get("env", {}), **os.environ},
+        env=_build_safe_env(config),
     )
 
     try:

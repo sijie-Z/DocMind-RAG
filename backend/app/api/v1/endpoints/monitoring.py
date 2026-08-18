@@ -23,7 +23,7 @@ from app.core.elasticsearch import get_elasticsearch
 from app.core.middleware import metrics_collector
 from app.core.redis import redis_client
 from app.core.security import get_current_user, permission_required
-from app.exceptions import AuthenticationError
+from app.exceptions import AuthenticationError, ValidationError
 from app.models.chat import ChatSession
 from app.models.document import Document
 from app.models.organization import Organization
@@ -776,6 +776,9 @@ async def rag_eval_single(item: EvalItem):
 @router.post("/rag-eval-batch", summary="RAG 质量批量评估", dependencies=[Depends(get_current_user)])
 async def rag_eval_batch(body: BatchEvalRequest):
     """批量评估多条 RAG 回答，返回聚合指标。"""
+    # 限制批量条目数，防止成本 DoS
+    if len(body.items) > 20:
+        raise ValidationError("批量评估条目数不能超过 20 条")
     try:
         from openai import AsyncOpenAI
 

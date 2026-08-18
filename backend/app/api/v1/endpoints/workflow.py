@@ -373,6 +373,13 @@ async def get_execution(
     if not execution:
         raise NotFoundError(detail="执行记录不存在")
 
+    # 权限校验：仅创建者本人或管理员/超管可查看执行记录（防止 IDOR 越权）
+    if not current_user.is_superuser and current_user.role != "admin":
+        workflow_result = await db.execute(select(Workflow).where(Workflow.id == execution.workflow_id))
+        workflow = workflow_result.scalar_one_or_none()
+        if not workflow or workflow.created_by != current_user.id:
+            raise NotFoundError(detail="执行记录不存在")
+
     return {
         "success": True,
         "data": {

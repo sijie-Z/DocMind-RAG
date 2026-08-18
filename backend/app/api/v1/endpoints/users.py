@@ -212,6 +212,9 @@ async def update_user_admin(
             target_id=str(user_id),
             detail=f"更新用户 {user.username}",
         )
+        # 安全加固：角色/组织/状态变更后使目标用户缓存失效
+        from app.core.redis import RedisTools
+        await RedisTools.delete_cache(f"user:{user_id}")
         await db.commit()
         return {"message": "用户更新成功", "user_id": user_id}
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
@@ -241,6 +244,9 @@ async def reset_user_password_admin(
             raise AuthorizationError("无权重置该用户密码")
 
         user.hashed_password = auth_service.hash_password(body.new_password)
+        # 安全加固：重置密码后使目标用户缓存失效
+        from app.core.redis import RedisTools
+        await RedisTools.delete_cache(f"user:{user_id}")
         await _log_user_activity(
             db,
             current_user.id,
@@ -834,6 +840,17 @@ async def update_user_role(
         if user.id == current_user.id:
             raise ValidationError("不能修改自己的角色")
 
+        # 安全加固：非超管仅能修改同组织成员的角色，禁止跨组织提权
+        if not current_user.is_superuser and (
+            user.organization_id != current_user.organization_id
+            or current_user.organization_id is None
+        ):
+            raise AuthorizationError("无权修改该用户的角色")
+
+        # 安全加固：修改角色后使目标用户缓存失效，防止陈旧权限继续生效
+        from app.core.redis import RedisTools
+        await RedisTools.delete_cache(f"user:{user.id}")
+
         user_obj: Any = user
         user_obj.role = role
         await _log_user_activity(
@@ -872,6 +889,9 @@ async def delete_user(
 
         user_to_deactivate: Any = user
         user_to_deactivate.is_active = False
+        # 安全加固：禁用账号后使目标用户缓存失效
+        from app.core.redis import RedisTools
+        await RedisTools.delete_cache(f"user:{user_id}")
         await _log_user_activity(
             db,
             current_user.id,
@@ -998,11 +1018,18 @@ async def update_password(
 ):
     """修改当前用户密码"""
     try:
-        if not auth_service.verify_password(password_in.old_password, current_user.hashed_password):
+        # 安全加固：从 DB 重新加载用户校验旧密码（Redis 缓存不含 hashed_password）
+        db_user = await db.get(User, current_user.id)
+        if db_user is None:
+            raise ValidationError("用户不存在")
+        if not auth_service.verify_password(password_in.old_password, db_user.hashed_password):
             raise ValidationError("旧密码错误")
 
-        current_user_obj: Any = current_user
+        current_user_obj: Any = db_user
         current_user_obj.hashed_password = auth_service.hash_password(password_in.new_password)
+        # 安全加固：改密后使用户缓存失效
+        from app.core.redis import RedisTools
+        await RedisTools.delete_cache(f"user:{current_user.id}")
 
         await create_notification(
             db,

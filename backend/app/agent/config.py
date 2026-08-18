@@ -15,7 +15,11 @@ logger = logging.getLogger(__name__)
 Personality = Literal["precise", "creative", "balanced"]
 PlanningMode = Literal["coarse", "normal", "fine"]
 
-DEFAULT_DISABLED_TOOLS: list[str] = ["execute_python", "execute_sql"]
+DEFAULT_DISABLED_TOOLS: list[str] = [
+    "execute_python",
+    "execute_sql",
+    "mcp_call",  # 高危：宿主机文件读写 + 子进程环境变量泄露，默认禁用
+]
 
 
 @dataclass

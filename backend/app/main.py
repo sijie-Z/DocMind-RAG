@@ -524,6 +524,25 @@ async def get_minio_file(
     if not normalized.startswith(("avatars/", "demo/")) and current_user is None:
         raise HTTPException(status_code=401, detail="需要登录")
 
+    # 安全加固：按对象名前缀校验组织归属，防止跨租户读取其他组织的文件。
+    # 对象命名规范：documents/{org_id}/{uuid}.ext（file_service 路径）或 {org_id}/{md5}.ext（documents 路径）
+    if current_user is not None and not current_user.is_superuser and current_user.role != "admin":
+        org_prefix: str | None = None
+        if normalized.startswith("documents/"):
+            parts = normalized.split("/")
+            if len(parts) >= 2:
+                org_prefix = parts[1]
+        else:
+            first_seg = normalized.split("/", 1)[0]
+            if first_seg.isdigit():
+                org_prefix = first_seg
+        if org_prefix is not None:
+            user_org = getattr(current_user, "organization_id", None) or getattr(
+                current_user, "token_organization_id", None
+            ) or 1
+            if not org_prefix.isdigit() or int(org_prefix) != user_org:
+                raise HTTPException(status_code=403, detail="无权访问该文件")
+
     try:
         response = minio_client.get_object(normalized)
         media_type = "application/octet-stream"

@@ -140,6 +140,7 @@ class RAGEvaluator:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
                 max_tokens=200,
+                timeout=30,
             )
             text = response.choices[0].message.content or ""
             return _extract_score(text), text

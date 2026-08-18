@@ -1,9 +1,11 @@
 """Agent 记忆系统 API 端点"""
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends
 
 from app.core.security import get_current_user
+from app.exceptions import ValidationError
 from app.models.user import User
 from app.schemas.memory import (
     ExperienceRequest,
@@ -15,6 +17,19 @@ from app.schemas.memory import (
 from app.services.memory_service import get_memory_system
 
 router = APIRouter()
+
+# agent_id 会拼入全局 memory dict 的 key，必须严格限制字符与长度，防止内存 DoS
+_AGENT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def _normalize_agent_id(agent_id: str) -> str:
+    """校验并规范化 agent_id：空值回退为 "default"，非法字符抛 ValidationError"""
+    agent_id = (agent_id or "").strip()
+    if not agent_id:
+        return "default"
+    if not _AGENT_ID_PATTERN.match(agent_id):
+        raise ValidationError("agent_id 仅允许字母、数字、下划线、连字符，长度 1-64")
+    return agent_id
 
 
 async def _get_user_memory_system(current_user: User, agent_id: str):
@@ -31,6 +46,7 @@ async def get_agent_memory(
     current_user: User = Depends(get_current_user)
 ):
     """获取 Agent 的完整记忆"""
+    agent_id = _normalize_agent_id(agent_id)
     memory_system = await _get_user_memory_system(current_user, agent_id)
     return {"success": True, "data": memory_system.export()}
 
@@ -42,6 +58,7 @@ async def store_memory(
     current_user: User = Depends(get_current_user)
 ):
     """存储记忆"""
+    agent_id = _normalize_agent_id(agent_id)
     memory_system = await _get_user_memory_system(current_user, agent_id)
     item = await memory_system.remember(
         content=body.content,
@@ -67,6 +84,7 @@ async def recall_memory(
     current_user: User = Depends(get_current_user)
 ):
     """检索记忆"""
+    agent_id = _normalize_agent_id(agent_id)
     memory_system = await _get_user_memory_system(current_user, agent_id)
     results = await memory_system.recall(
         query=body.query,
@@ -86,6 +104,7 @@ async def store_interaction(
     current_user: User = Depends(get_current_user)
 ):
     """存储交互记录"""
+    agent_id = _normalize_agent_id(agent_id)
     memory_system = await _get_user_memory_system(current_user, agent_id)
     await memory_system.store_interaction(body.user_input, body.assistant_response)
     return {"success": True, "message": "交互已存储"}
@@ -98,6 +117,7 @@ async def store_experience(
     current_user: User = Depends(get_current_user)
 ):
     """存储经验"""
+    agent_id = _normalize_agent_id(agent_id)
     memory_system = await _get_user_memory_system(current_user, agent_id)
     await memory_system.store_experience(
         success=body.success,
@@ -115,6 +135,7 @@ async def get_memory_context(
     current_user: User = Depends(get_current_user)
 ):
     """获取记忆上下文（用于LLM输入）"""
+    agent_id = _normalize_agent_id(agent_id)
     memory_system = await _get_user_memory_system(current_user, agent_id)
     context = await memory_system.get_context(query)
     return {"success": True, "data": {"context": context}}
@@ -127,6 +148,7 @@ async def clear_memory(
     current_user: User = Depends(get_current_user)
 ):
     """清空记忆"""
+    agent_id = _normalize_agent_id(agent_id)
     memory_system = await _get_user_memory_system(current_user, agent_id)
 
     if memory_type:
@@ -158,6 +180,7 @@ async def import_memory(
     current_user: User = Depends(get_current_user)
 ):
     """导入记忆数据"""
+    agent_id = _normalize_agent_id(agent_id)
     memory_system = await _get_user_memory_system(current_user, agent_id)
     memory_system.import_data(body.data)
     await memory_system._save_to_redis()
@@ -172,6 +195,7 @@ async def get_insights(
     current_user: User = Depends(get_current_user)
 ):
     """获取洞察"""
+    agent_id = _normalize_agent_id(agent_id)
     memory_system = await _get_user_memory_system(current_user, agent_id)
     if context:
         insights = memory_system.reflective.get_relevant_insights(context, top_k)
@@ -187,6 +211,7 @@ async def get_lessons(
     current_user: User = Depends(get_current_user)
 ):
     """获取经验教训"""
+    agent_id = _normalize_agent_id(agent_id)
     memory_system = _get_user_memory_system(current_user, agent_id)
     if situation:
         lessons = memory_system.reflective.get_lessons_for_situation(situation)

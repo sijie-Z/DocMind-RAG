@@ -143,6 +143,13 @@ class AuthService:
                 user_columns = {c.name for c in User.__table__.columns}
                 filtered_data = {k: v for k, v in user_data.items() if k in user_columns}
 
+                # 安全加固：禁用账号即使 token 未过期也不得通过缓存路径恢复身份
+                if not user_data.get("is_active", True):
+                    logger.warning(f"用户 {user_id} 已被禁用，拒绝缓存恢复")
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="账号已被禁用",
+                    )
                 user = User(**filtered_data)
                 # 将JWT中的权限信息添加到用户对象
                 user.token_role = payload.get("role")
@@ -161,6 +168,14 @@ class AuthService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="用户不存在"
+            )
+
+        # 安全加固：禁用账号即使 token 未过期也不得访问
+        if not user.is_active:
+            logger.warning(f"用户 {user_id} 已被禁用，拒绝访问")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="账号已被禁用",
             )
 
         # 将JWT中的权限信息添加到用户对象

@@ -376,7 +376,9 @@ class RateLimitASGIMiddleware:
         pipeline = redis_client.pipeline()
         pipeline.zremrangebyscore(key, 0, window_start)
         pipeline.zcard(key)
-        pipeline.zadd(key, {str(now): now})
+        # 安全修复：成员用唯一值（时间戳+随机后缀），score 仍为 now。
+        # 原实现以秒级时间戳为成员，同一秒内多请求 zadd 互相覆盖导致计数漏计、限流失效。
+        pipeline.zadd(key, {f"{now}:{uuid.uuid4().hex}": now})
         pipeline.expire(key, self.window_seconds + 5)
         results = await pipeline.execute()
         return int(results[1]) + 1, reset_at
@@ -481,7 +483,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         pipeline = redis_client.pipeline()
         pipeline.zremrangebyscore(key, 0, window_start)
         pipeline.zcard(key)
-        pipeline.zadd(key, {str(now): now})
+        # 安全修复：成员用唯一值（时间戳+随机后缀），score 仍为 now，防止同秒覆盖漏计
+        pipeline.zadd(key, {f"{now}:{uuid.uuid4().hex}": now})
         pipeline.expire(key, self.window_seconds + 5)
         results = await pipeline.execute()
 
