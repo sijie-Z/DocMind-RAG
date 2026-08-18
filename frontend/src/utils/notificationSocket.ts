@@ -84,9 +84,10 @@ class NotificationSocketService {
       wsBaseUrl = `${protocol}//${host}${baseUrl.startsWith('/') ? '' : '/'}${baseUrl}`
     }
     
-    const url = `${wsBaseUrl}/notifications/ws?token=${cleanToken}`
+    // 安全加固：token 走 WebSocket subprotocol，不再放入 URL 查询串（防日志/历史泄露）
+    const url = `${wsBaseUrl}/notifications/ws`
     this.manualDisconnect = false
-    this.ws = new WebSocket(url)
+    this.ws = new WebSocket(url, [`auth.${cleanToken}`])
 
     this.ws.onmessage = (event) => {
       try {

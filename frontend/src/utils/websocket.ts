@@ -24,6 +24,7 @@ class WebSocketService {
   private url: string
   private reconnectAttempts = 0
   private maxReconnectAttempts = 5
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private messageHandlers: Map<string, (_data: WebSocketMessage) => void> = new Map()
   private connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error' = 'disconnected'
   private currentUserId: number = 0
@@ -55,6 +56,9 @@ class WebSocketService {
       return
     }
 
+    // 安全修复：手动断开后禁止被遗留的重连定时器悄悄重连
+    if (this.manualDisconnect) return
+
     if (this.ws && (this.connectionStatus === 'connected' || this.connectionStatus === 'connecting')) {
       return
     }
@@ -74,8 +78,9 @@ class WebSocketService {
 
     const cleanToken = rawToken.replace(/"/g, '')
 
-    // token 同时走 subprotocol（安全）和 query param（兼容 Vite 代理转发）
-    const wsUrl = `${this.getWsBaseUrl()}${this.getWsPath()}?user_id=${userId}&token=${encodeURIComponent(cleanToken)}${conversationId ? `&conversation_id=${conversationId}` : ''}`
+    // 安全加固：token 仅走 subprotocol（不落 URL/代理日志/浏览器历史）。
+    // conversation_id 非敏感，保留在查询串中。
+    const wsUrl = `${this.getWsBaseUrl()}${this.getWsPath()}${conversationId ? `?conversation_id=${conversationId}` : ''}`
 
     try {
       this.manualDisconnect = false
@@ -186,7 +191,8 @@ class WebSocketService {
 
     this.reconnectAttempts++
 
-    setTimeout(() => {
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
       if (this.currentUserId > 0) {
         this.connect(this.currentUserId)
       }
@@ -194,6 +200,11 @@ class WebSocketService {
   }
 
   disconnect() {
+    // 安全修复：清除遗留的重连定时器，防止手动断开后被悄悄重连
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     if (this.ws) {
       this.manualDisconnect = true
       this.ws.close()

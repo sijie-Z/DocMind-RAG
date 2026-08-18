@@ -1,6 +1,7 @@
 import request from '@/utils/request'
 import type { AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
+import { getToken } from '@/utils/auth'
 
 export interface AuditLog {
   id: number
@@ -56,8 +57,11 @@ export const downloadAuditLogs = (params?: {
   if (params?.start_date) query.append('start_date', params.start_date)
   if (params?.end_date) query.append('end_date', params.end_date)
 
-  const token = localStorage.getItem('access_token') || localStorage.getItem('token')
-  const url = `${baseUrl}/api/v1/users/audit-logs/export${query.toString() ? '?' + query.toString() : ''}`
+  // 修复：使用统一 token 读取入口（原代码读取的 access_token/token 键从未被写入，导出恒 401）
+  const token = getToken()
+  // 修复：与 request.ts 的 baseURL 规则保持一致（VITE_API_BASE_URL 已含 /api/v1 时不重复拼接）
+  const apiBase = baseUrl.endsWith('/api/v1') ? baseUrl : `${baseUrl}/api/v1`
+  const url = `${apiBase}/users/audit-logs/export${query.toString() ? '?' + query.toString() : ''}`
 
   fetch(url, {
     headers: {

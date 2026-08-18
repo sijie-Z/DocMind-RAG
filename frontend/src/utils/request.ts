@@ -315,8 +315,8 @@ request.interceptors.response.use(
           errorMsg = '请求过于频繁，请稍后再试'
           break
         case 500:
-          errorMsg = errorMsg === '请求失败' ? `服务器内部错误: ${data?.detail ?? data?.message ?? '未知'}` : `服务器内部错误: ${errorMsg}`
-          // 500 Error Details
+          // 安全加固：5xx 不向用户展示内部异常细节（可能含堆栈/内部路径），详情仅进日志
+          errorMsg = '服务器内部错误，请稍后重试'
           break
       }
       
