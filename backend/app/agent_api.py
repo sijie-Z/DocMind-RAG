@@ -495,4 +495,4 @@ async def plan(req: AgentRequest, _: None = Depends(verify_agent_api_key)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8010)
+    uvicorn.run(app, host="0.0.0.0", port=8010)  # nosec B104 - 容器内需绑定全部网卡

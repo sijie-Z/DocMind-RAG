@@ -133,7 +133,9 @@ class SkillManager:
         tool_sequence: list[dict[str, Any]],
     ) -> Skill:
         """Create a new skill from a successful tool sequence."""
-        skill_id = hashlib.md5(f"{name}:{time.time()}".encode()).hexdigest()[:12]
+        skill_id = hashlib.md5(
+            f"{name}:{time.time()}".encode(), usedforsecurity=False
+        ).hexdigest()[:12]
         skill = Skill(
             id=skill_id,
             name=name,

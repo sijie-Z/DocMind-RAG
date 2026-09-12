@@ -311,7 +311,7 @@ async def execute_python(code: str, **_: Any) -> str:
 
         def _run():
             with redirect_stdout(f_out), redirect_stderr(f_err):
-                exec(code, safe_globals, {})
+                exec(code, safe_globals, {})  # nosec B102 - 本工具的用途即沙箱执行，已做 AST 拦截
 
         # Run in a thread with timeout
         loop = asyncio.get_event_loop()

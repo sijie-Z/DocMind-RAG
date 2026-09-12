@@ -144,7 +144,7 @@ class PatternMiner:
 
             # Generate pattern ID
             pattern_id = hashlib.md5(
-                "|".join(tool_tuple).encode()
+                "|".join(tool_tuple).encode(), usedforsecurity=False
             ).hexdigest()[:12]
 
             # Extract trigger keywords from successful queries

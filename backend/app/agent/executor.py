@@ -805,7 +805,7 @@ class Executor:
         normalized = step_result.strip().lower()[:300]
         numbers = re.findall(r"\b\d+(?:\.\d+)?%?", step_result)
         fingerprint_source = normalized + "|" + "|".join(sorted(numbers))
-        fp = hashlib.md5(fingerprint_source.encode()).digest()
+        fp = hashlib.md5(fingerprint_source.encode(), usedforsecurity=False).digest()
 
         if fp in self._seen_fingerprints:
             self._consecutive_low_gain += 1

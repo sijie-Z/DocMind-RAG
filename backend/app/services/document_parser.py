@@ -10,11 +10,11 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from xml.etree import ElementTree as ET
 
 import docx2txt
 import pandas as pd
 import pdfplumber
+from defusedxml.ElementTree import fromstring as _safe_xml_fromstring
 from docx import Document as DocxDocument
 from openpyxl import load_workbook
 from sqlalchemy import select
@@ -290,7 +290,9 @@ class DocumentParser:
                 if "word/document.xml" not in zf.namelist():
                     return ""
                 xml_bytes = zf.read("word/document.xml")
-            root = ET.fromstring(xml_bytes)
+            # 解析的是用户上传文件的内嵌 XML：defusedxml 会拒绝实体定义与外部引用，
+            # 防住实体膨胀/XXE（对应 bandit B314）。
+            root = _safe_xml_fromstring(xml_bytes)
             namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
             texts = [node.text for node in root.findall(".//w:t", namespace) if node.text]
             return "\n".join([t.strip() for t in texts if t and t.strip()])

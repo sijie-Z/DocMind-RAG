@@ -36,29 +36,36 @@
           <div class="grid grid-cols-1 gap-4">
             <div class="space-y-2">
               <label class="text-sm font-bold text-gray-700 dark:text-gray-300 ml-1">{{ t('knowledge.fileTitle') }}</label>
-              <n-input v-model:value="uploadForm.title" :placeholder="t('knowledge.fileTitle')" round />
+              <n-input
+                :value="uploadForm.title"
+                :placeholder="t('knowledge.fileTitle')"
+                round
+                @update:value="(v: string) => updateForm({ title: v })"
+              />
             </div>
 
             <n-form-item :label="t('knowledge.addTags')" path="tags">
               <n-select
-                v-model:value="uploadForm.tags"
+                :value="uploadForm.tags"
                 multiple
                 filterable
                 tag
                 :placeholder="t('knowledge.addTags')"
                 :options="tagOptions"
                 round
+                @update:value="(v: string[]) => updateForm({ tags: v })"
               />
             </n-form-item>
 
             <div class="space-y-2">
               <label class="text-sm font-bold text-gray-700 dark:text-gray-300 ml-1">{{ t('knowledge.fileDesc') }}</label>
               <n-input
-                v-model:value="uploadForm.description"
+                :value="uploadForm.description"
                 type="textarea"
                 :placeholder="t('knowledge.fileDesc')"
                 :rows="3"
                 class="rounded-xl"
+                @update:value="(v: string) => updateForm({ description: v })"
               />
             </div>
           </div>
@@ -231,6 +238,11 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const uploadRef = ref<HTMLElement | null>(null)
+
+// uploadForm 是 prop，只能通过 emit 更新（单向数据流）；此处统一收敛字段级修改。
+const updateForm = (patch: Partial<UploadForm>) => {
+  emit('update:uploadForm', { ...props.uploadForm, ...patch })
+}
 
 const handleFileChange = (options: { file: UploadFileInfo }) => {
   const file = options.file.file
