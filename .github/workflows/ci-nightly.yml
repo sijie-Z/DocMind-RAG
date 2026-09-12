@@ -5,27 +5,51 @@ on:
     - cron: '0 2 * * *'  # 02:00 UTC daily
   workflow_dispatch:       # manual trigger
 
+concurrency:
+  group: ci-nightly-${{ github.ref }}
+  cancel-in-progress: false   # 定时任务让它跑完，便于对比历史
+
+permissions:
+  contents: read
+
+env:
+  SECRET_KEY: test-secret-key-for-pytest-only-32chars!
+  JWT_SECRET_KEY: test-jwt-secret-key-for-pytest-only!
+  DEEPSEEK_API_KEY: test-key
+  EMBEDDING_API_KEY: test-key
+  ENABLE_RATE_LIMIT: 'false'
+  ENABLE_MONITORING: 'false'
+  RUN_INTEGRATION: '1'
+
 jobs:
   backend-integration:
-    name: Backend Integration Tests
+    name: Backend Integration Tests (MySQL + Redis)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
+      fail-fast: false        # 一个 Python 版本挂了不影响另一个跑完
       matrix:
         python-version: ['3.11', '3.12']
 
     services:
       mysql:
         image: mysql:8.0
+        # 与 docker-compose.yml 的 MySQL 启动参数一致。CI 要模拟生产的“行为”，
+        # 而不只是连上同一个端口——否则测的是一个生产里不存在的配置。
+        # 仓库约定的 canonical collation 见 CHANGELOG。
+        command: >-
+          --character-set-server=utf8mb4
+          --collation-server=utf8mb4_unicode_ci
         env:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: test_db
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h localhost"
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=5
+          --health-retries=10
       redis:
         image: redis:7-alpine
         ports:
@@ -35,6 +59,14 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+
+    env:
+      DATABASE_URL: mysql+aiomysql://root:root@127.0.0.1:3306/test_db
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: '6379'
+      ELASTICSEARCH_HOSTS: '["http://localhost:9200"]'
+      KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+      MINIO_ENDPOINT: localhost:9000
 
     steps:
       - uses: actions/checkout@v7
@@ -48,9 +80,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt', 'backend/requirements-dev.txt') }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('backend/requirements.txt', 'backend/requirements-dev.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
 
       - name: Install dependencies
         working-directory: backend
@@ -59,27 +91,11 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Set test environment
-        run: |
-          echo "SECRET_KEY=test-secret-key-for-pytest-only-32chars!" >> $GITHUB_ENV
-          echo "JWT_SECRET_KEY=test-jwt-secret-key-for-pytest-only!" >> $GITHUB_ENV
-          echo "DATABASE_URL=mysql+aiomysql://root:root@localhost:3306/test_db" >> $GITHUB_ENV
-          echo "REDIS_HOST=localhost" >> $GITHUB_ENV
-          echo "REDIS_PORT=6379" >> $GITHUB_ENV
-          echo "ELASTICSEARCH_HOSTS=[\"http://localhost:9200\"]" >> $GITHUB_ENV
-          echo "KAFKA_BOOTSTRAP_SERVERS=localhost:9092" >> $GITHUB_ENV
-          echo "MINIO_ENDPOINT=localhost:9000" >> $GITHUB_ENV
-          echo "DEEPSEEK_API_KEY=test-key" >> $GITHUB_ENV
-          echo "EMBEDDING_API_KEY=test-key" >> $GITHUB_ENV
-          echo "ENABLE_RATE_LIMIT=false" >> $GITHUB_ENV
-          echo "ENABLE_MONITORING=false" >> $GITHUB_ENV
-          echo "RUN_INTEGRATION=1" >> $GITHUB_ENV
-
-      - name: Migration smoke test on real MySQL (alembic upgrade head)
+      - name: Migration smoke test on real MySQL
         working-directory: backend
         run: |
           alembic upgrade head
-          python -c "import pymysql; c=pymysql.connect(host='localhost',user='root',password='root',database='test_db'); cur=c.cursor(); cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='test_db'"); n=cur.fetchone()[0]; assert n >= 26, f'expected >=26 tables, got {n}'"
+          python scripts/check_schema.py
 
       - name: Run integration tests
         working-directory: backend
@@ -96,6 +112,7 @@ jobs:
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -120,18 +137,100 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # 名字里显式写出 "audits advisory"：bandit 是阻断门禁，依赖审计不是。
+  # 否则 Actions 页面上的绿色对勾会被误读成"没有已知漏洞"。
   security:
-    name: Security Audit
+    name: Security Scan (audits advisory)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
-      - name: Run npm audit
-        working-directory: frontend
-        run: npm audit --audit-level=high || true
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      - name: Check for known vulnerabilities (backend)
+      - name: Install dependencies
         working-directory: backend
         run: |
-          pip install safety
-          safety check -r requirements.txt || true
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # 阻断门禁：Medium 及以上当前为 0。真问题已在代码里修掉（如 B314 的 XML 解析），
+      # 有意为之的项用带理由的 `# nosec BXXX` 精确抑制，不做全局忽略。
+      - name: Static security scan (bandit, medium+)
+        working-directory: backend
+        run: bandit -r app/ -ll
+
+      # Low 档仅报告：数量多、误报率高（try/except pass、assert 之类）。
+      - name: Static security scan (bandit, low, report only)
+        if: always()
+        working-directory: backend
+        run: |
+          {
+            echo "## Bandit — Low 档（仅报告，不阻断）"
+            echo '```'
+            bandit -r app/ -l || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 依赖漏洞审计暂为「仅报告」：修复常受制于上游，长期红灯会被无视。
+      # 但**工具自身失败必须与「发现漏洞」区分开**——pip-audit 两种情况都可能返回 1，
+      # 所以用「报告能否解析出来」判定，而不是用退出码。想升级为阻断门禁时，
+      # 把末尾的 ::warning:: 改成 exit 1 即可。
+      - name: Audit frontend dependencies (npm audit)
+        working-directory: frontend
+        run: |
+          code=0
+          npm audit --audit-level=high --json > "$RUNNER_TEMP/npm-audit.json" 2>&1 || code=$?
+          # 「能解析」只是工具完成的**必要**条件,不是充分条件——工具失败时也可能留下
+          # 合法但结构不对的 JSON。所以要连结构一起校验。
+          if ! node -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); if(!r||typeof r!=='object'||typeof r.metadata!=='object'||typeof r.vulnerabilities!=='object') process.exit(1);" "$RUNNER_TEMP/npm-audit.json" 2>/dev/null; then
+            echo "::error::npm audit 未产出结构完整的报告（退出码 $code）—— 工具失败，不是发现漏洞"
+            cat "$RUNNER_TEMP/npm-audit.json"
+            exit 1
+          fi
+          {
+            echo "## 前端依赖审计 —— ⚠️ STATUS: ADVISORY ONLY"
+            echo "> 仅报告,**不阻断构建**。此项为绿色不代表没有已知漏洞。"
+            node -e "
+              const r = JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));
+              console.log('漏洞计数: ' + JSON.stringify(r.metadata?.vulnerabilities ?? {}));
+              for (const [n, a] of Object.entries(r.vulnerabilities ?? {})) {
+                if (a.severity === 'high' || a.severity === 'critical') {
+                  console.log('- ' + n + ' [' + a.severity + '] ' + (a.fixAvailable ? '有修复版本' : '暂无修复'));
+                }
+              }
+            " "$RUNNER_TEMP/npm-audit.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -ne 0 ]; then
+            echo "::warning::npm audit 报告了高危及以上漏洞（当前策略：仅报告，不阻断）"
+          fi
+
+      - name: Audit backend dependencies (pip-audit)
+        working-directory: backend
+        run: |
+          pip install pip-audit
+          code=0
+          pip-audit -r requirements.txt --format json --progress-spinner off \
+            -o "$RUNNER_TEMP/pip-audit.json" || code=$?
+          # 同 npm audit：结构校验而不只是「能解析」。
+          # pip-audit 的 JSON 是 [{name, version, vulns: [...]}, ...]。
+          if ! python -c "import json,sys; d=json.load(open(sys.argv[1])); assert isinstance(d,list) and d, 'not a non-empty list'; assert all(isinstance(x,dict) and 'name' in x and 'version' in x for x in d), 'entries missing name/version'" "$RUNNER_TEMP/pip-audit.json" 2>/dev/null; then
+            echo "::error::pip-audit 未产出结构完整的报告（退出码 $code）—— 工具失败，不是发现漏洞"
+            exit 1
+          fi
+          {
+            echo "## 后端依赖审计 —— ⚠️ STATUS: ADVISORY ONLY"
+            echo "> 仅报告,**不阻断构建**。此项为绿色不代表没有已知漏洞。"
+            python -c "import json,sys; d=json.load(open(sys.argv[1])); v=[(x['name'],x['version'],'|'.join(i['id'] for i in x.get('vulns',[]))) for x in d if x.get('vulns')]; print('未发现已知漏洞。' if not v else '发现 %d 个存在漏洞的依赖：' % len(v)); [print('- %s %s — %s' % t) for t in v]" "$RUNNER_TEMP/pip-audit.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -ne 0 ]; then
+            echo "::warning::pip-audit 报告了依赖漏洞（当前策略：仅报告，不阻断）"
+          fi

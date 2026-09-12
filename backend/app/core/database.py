@@ -5,7 +5,7 @@
 import logging
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 # 创建基类
 Base = declarative_base()
+
+# 项目约定的 MySQL collation。外键要求两端完全一致，且 collation 决定唯一约束
+# 与字符串比较的语义（如尾随空格），因此它属于 schema 契约的一部分。
+# docker-compose.yml 的 --collation-server 与 SETUP.md 的 CREATE DATABASE 都用这个值，
+# CI 也用它启动 MySQL service；三处必须保持一致，见 CHANGELOG。
+CANONICAL_MYSQL_COLLATION = "utf8mb4_unicode_ci"
 
 # 数据库引擎
 _is_sqlite = "sqlite" in settings.DATABASE_URL.lower()
@@ -37,6 +43,27 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False
 )
 
+async def _warn_if_collation_differs() -> None:
+    """MySQL 上若数据库默认 collation 与项目约定不符，打一条明确的告警。
+
+    刻意只告警不抛异常：库仍然可用，但唯一约束与字符串比较的语义会与约定不同
+    （例如 tags.name 的尾随空格处理），这类偏差不应该静默发生。
+    """
+    if _is_sqlite or "mysql" not in settings.DATABASE_URL.lower():
+        return
+    try:
+        async with engine.connect() as conn:
+            collation = (await conn.execute(text("SELECT @@collation_database"))).scalar()
+        if collation and collation != CANONICAL_MYSQL_COLLATION:
+            logger.warning(
+                f"数据库默认 collation 为 {collation}，与项目约定的 "
+                f"{CANONICAL_MYSQL_COLLATION} 不一致——唯一约束与字符串比较语义可能不同。"
+                f"建议: CREATE DATABASE ... COLLATE {CANONICAL_MYSQL_COLLATION}（见 SETUP.md）"
+            )
+    except Exception as e:
+        logger.debug(f"collation 检查跳过: {str(e)}")
+
+
 async def init_db():
     """初始化数据库 — 开发模式使用 create_all，生产模式应使用 Alembic。
 
@@ -45,6 +72,8 @@ async def init_db():
     try:
         import os
         use_alembic = os.getenv("USE_ALEMBIC", "").lower() in ("1", "true", "yes")
+
+        await _warn_if_collation_differs()
 
         if use_alembic:
             logger.info("数据库 schema 由 Alembic 管理，跳过 create_all")

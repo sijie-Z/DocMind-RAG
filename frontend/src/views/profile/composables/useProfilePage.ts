@@ -469,7 +469,9 @@ const loadProviders = async () => {
       providerForm.api_key = cur.api_key || ''
       providerForm.base_url = cur.base_url || ''
     }
-  } catch {}
+  } catch {
+    // 最佳努力加载：失败时保留默认 provider 配置，不阻塞页面渲染
+  }
 }
 
 const settingsChanged = computed(() => {

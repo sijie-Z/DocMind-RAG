@@ -73,9 +73,9 @@ class Document(Base):
     uploader: Mapped[Optional["User"]] = relationship("User", back_populates="documents")
     chunks: Mapped[list["DocumentChunk"]] = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
 
-    __table_args__ = (
-        {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'},
-    )
+    # 不在此声明 collation：全库统一继承数据库默认值（canonical =
+    # utf8mb4_unicode_ci，由部署配置与 CI 保证），避免迁移路径与 create_all
+    # 路径因逐表覆盖而产生分歧。
 
 
 class DocumentChunk(Base):
@@ -108,9 +108,9 @@ class DocumentChunk(Base):
     # 关联关系
     document: Mapped[Optional["Document"]] = relationship("Document", back_populates="chunks")
 
-    __table_args__ = (
-        {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'},
-    )
+    # 不在此声明 collation：全库统一继承数据库默认值（canonical =
+    # utf8mb4_unicode_ci，由部署配置与 CI 保证），避免迁移路径与 create_all
+    # 路径因逐表覆盖而产生分歧。
 
 
 class DocumentTag(Base):
@@ -124,9 +124,9 @@ class DocumentTag(Base):
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
 
-    __table_args__ = (
-        {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'},
-    )
+    # 不在此声明 collation：全库统一继承数据库默认值（canonical =
+    # utf8mb4_unicode_ci，由部署配置与 CI 保证），避免迁移路径与 create_all
+    # 路径因逐表覆盖而产生分歧。
 
 
 class Tag(Base):
@@ -145,6 +145,6 @@ class Tag(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now(), comment="更新时间")
 
-    __table_args__ = (
-        {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'},
-    )
+    # 不在此声明 collation：全库统一继承数据库默认值（canonical =
+    # utf8mb4_unicode_ci，由部署配置与 CI 保证），避免迁移路径与 create_all
+    # 路径因逐表覆盖而产生分歧。

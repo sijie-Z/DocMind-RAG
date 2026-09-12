@@ -48,7 +48,7 @@ def get_document_type(filename: str) -> DocumentType:
     return DocumentType.OTHER
 
 async def calculate_md5(file: UploadFile) -> str:
-    md5_hash = hashlib.md5()
+    md5_hash = hashlib.md5(usedforsecurity=False)
     while chunk := await file.read(8192):
         md5_hash.update(chunk)
     await file.seek(0)

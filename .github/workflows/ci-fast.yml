@@ -6,14 +6,42 @@ on:
   pull_request:
     branches: [main]
 
+# 同一分支上新的 push 取消仍在跑的旧 run，避免堆积
+concurrency:
+  group: ci-fast-${{ github.ref }}
+  cancel-in-progress: true
+
+# 最小权限：CI 只需要读代码
+permissions:
+  contents: read
+
+env:
+  # 测试用的假凭据（非机密），集中在此避免各 job 重复
+  SECRET_KEY: test-secret-key-for-pytest-only-32chars!
+  JWT_SECRET_KEY: test-jwt-secret-key-for-pytest-only!
+  DEEPSEEK_API_KEY: test-key
+  EMBEDDING_API_KEY: test-key
+  ENABLE_RATE_LIMIT: 'false'
+  ENABLE_MONITORING: 'false'
+  # 这些服务在 fast 档不启动，仅提供配置值让 app.core.config 能加载
+  REDIS_HOST: localhost
+  REDIS_PORT: '6379'
+  ELASTICSEARCH_HOSTS: '["http://localhost:9200"]'
+  KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+  MINIO_ENDPOINT: localhost:9000
+
 jobs:
   backend-tests:
     name: Backend Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         python-version: ['3.11', '3.12']
+
+    env:
+      DATABASE_URL: sqlite+aiosqlite:///test.db
 
     steps:
       - uses: actions/checkout@v7
@@ -27,9 +55,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt', 'backend/requirements-dev.txt') }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('backend/requirements.txt', 'backend/requirements-dev.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
 
       - name: Install dependencies
         working-directory: backend
@@ -40,28 +68,13 @@ jobs:
 
       - name: Lint with ruff
         working-directory: backend
-        run: ruff check app/ tests/
+        run: ruff check app/ tests/ scripts/
 
-      - name: Set test environment
-        run: |
-          echo "SECRET_KEY=test-secret-key-for-pytest-only-32chars!" >> $GITHUB_ENV
-          echo "JWT_SECRET_KEY=test-jwt-secret-key-for-pytest-only!" >> $GITHUB_ENV
-          echo "DATABASE_URL=sqlite+aiosqlite:///test.db" >> $GITHUB_ENV
-          echo "REDIS_HOST=localhost" >> $GITHUB_ENV
-          echo "REDIS_PORT=6379" >> $GITHUB_ENV
-          echo "ELASTICSEARCH_HOSTS=[\"http://localhost:9200\"]" >> $GITHUB_ENV
-          echo "KAFKA_BOOTSTRAP_SERVERS=localhost:9092" >> $GITHUB_ENV
-          echo "MINIO_ENDPOINT=localhost:9000" >> $GITHUB_ENV
-          echo "DEEPSEEK_API_KEY=test-key" >> $GITHUB_ENV
-          echo "EMBEDDING_API_KEY=test-key" >> $GITHUB_ENV
-          echo "ENABLE_RATE_LIMIT=false" >> $GITHUB_ENV
-          echo "ENABLE_MONITORING=false" >> $GITHUB_ENV
-
-      - name: Migration smoke test (alembic upgrade head)
+      - name: Migration smoke test (SQLite)
         working-directory: backend
         run: |
           alembic upgrade head
-          python -c "import sqlite3; c=sqlite3.connect('test.db'); t={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}; assert len(t) >= 26, f'expected >=26 tables, got {len(t)}'"
+          python scripts/check_schema.py
 
       - name: Run fast tests (unit + behavior + API security regressions)
         working-directory: backend
@@ -75,9 +88,97 @@ jobs:
           flags: backend
           fail_ci_if_error: false
 
+  # 迁移必须在真实 MySQL 上验证：SQLite 不校验外键目标表是否存在，
+  # 001 曾因此在 SQLite 上假绿、在 MySQL 上 1824 失败。
+  migration-mysql:
+    name: Migration (MySQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      mysql:
+        image: mysql:8.0
+        # 与 docker-compose.yml 的 MySQL 启动参数一致。CI 要模拟生产的“行为”，
+        # 而不只是连上同一个端口——否则测的是一个生产里不存在的配置。
+        # 仓库约定的 canonical collation 见 CHANGELOG。
+        command: >-
+          --character-set-server=utf8mb4
+          --collation-server=utf8mb4_unicode_ci
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-mysql-${{ hashFiles('backend/requirements.txt', 'backend/requirements-dev.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-mysql-
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      # 两个库共用同一个 MySQL service：一条走 Alembic（未来路径），
+      # 一条走 create_all（生产当前实际路径），避免另起 job 的额外开销。
+      - name: Create test databases
+        env:
+          MYSQL_PWD: root
+        run: |
+          mysql -h 127.0.0.1 -uroot -e "CREATE DATABASE test_alembic;"
+          mysql -h 127.0.0.1 -uroot -e "CREATE DATABASE test_create_all;"
+
+      - name: Alembic path — upgrade / downgrade / upgrade
+        working-directory: backend
+        env:
+          DATABASE_URL: mysql+aiomysql://root:root@127.0.0.1:3306/test_alembic
+        run: |
+          echo "::group::alembic upgrade head"
+          alembic upgrade head
+          python scripts/check_schema.py --report-columns
+          echo "::endgroup::"
+
+          echo "::group::alembic downgrade base"
+          alembic downgrade base
+          echo "::endgroup::"
+
+          echo "::group::alembic upgrade head（round-trip：验证迁移可逆、可重建）"
+          alembic upgrade head
+          python scripts/check_schema.py --report-columns
+          echo "::endgroup::"
+
+      # 生产实际调用的是 init_db() → Base.metadata.create_all
+      # （app/core/database.py）。只验证 Alembic 会漏掉生产路径上的方言问题。
+      - name: create_all path — production schema bootstrap
+        working-directory: backend
+        env:
+          DATABASE_URL: mysql+aiomysql://root:root@127.0.0.1:3306/test_create_all
+        run: |
+          python -c "import asyncio; from app.core.database import init_db; asyncio.run(init_db())"
+          python scripts/check_schema.py --create-all --report-columns
+
   frontend-tests:
     name: Frontend Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         node-version: [20]
@@ -119,14 +220,43 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+  # 校验 workflow 文件本身：表达式、needs 引用、shellcheck run 块
+  workflow-lint:
+    name: Workflow Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run actionlint
+        run: |
+          bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.12
+          # TODO(actionlint): 临时兼容,不是永久设计。
+          # actionlint 1.7.12 的内置 schema 还没有 2026-04 GA 的 services.command /
+          # entrypoint，会把下面这行报成错误——属误报。
+          # 依据: https://github.blog/changelog/2026-04-02-github-actions-early-april-2026-updates/
+          #       （"Customizing entrypoints for service containers"）
+          # actionlint 更新 schema 后即可删除这条 -ignore。
+          # 正则用 `.` 代替字面双引号：结果等价，且 PowerShell 下也不会因引号传递而失效。
+          ./actionlint -color \
+            -ignore 'unexpected key .command. for .services. section'
+
   ci-pass:
     name: CI Pass
     if: always()
-    needs: [backend-tests, frontend-tests]
+    needs: [backend-tests, migration-mysql, frontend-tests, workflow-lint]
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs
         run: |
-          if [ "${{ needs.backend-tests.result }}" != "success" ]; then echo "backend-tests failed"; exit 1; fi
-          if [ "${{ needs.frontend-tests.result }}" != "success" ]; then echo "frontend-tests failed"; exit 1; fi
-          echo "All CI checks passed!"
+          failed=0
+          for r in \
+            "backend-tests=${{ needs.backend-tests.result }}" \
+            "migration-mysql=${{ needs.migration-mysql.result }}" \
+            "frontend-tests=${{ needs.frontend-tests.result }}" \
+            "workflow-lint=${{ needs.workflow-lint.result }}"; do
+            name="${r%%=*}"; result="${r#*=}"
+            if [ "$result" != "success" ]; then echo "::error::$name -> $result"; failed=1; fi
+          done
+          [ "$failed" -eq 0 ] && echo "All CI checks passed!"
+          exit "$failed"
