@@ -4,7 +4,9 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main]
+    # git flow 下 feature/hotfix 的合并目标既可能是 develop 也可能是 main，
+    # 两者都要跑门禁——否则合并到 develop 的 PR 完全没有 CI 把关。
+    branches: [main, develop]
 
 # 同一分支上新的 push 取消仍在跑的旧 run，避免堆积
 concurrency:

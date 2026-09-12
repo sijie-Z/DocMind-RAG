@@ -2,9 +2,9 @@ name: CodeQL
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   schedule:
     - cron: '0 3 * * 1'   # 每周一 03:00 UTC，补 nightly 不覆盖的语义级漏洞
 
