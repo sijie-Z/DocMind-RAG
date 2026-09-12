@@ -1,18 +1,36 @@
 version: 2
 updates:
+  # git flow：依赖更新也属于变更，先进 develop，再随 release 进 main。
+  # 此前未设 target-branch，dependabot 默认把 PR 指向 main（仓库默认分支），
+  # 与 git flow 冲突，也导致 PR 无法通过 develop 的 CI 把关。
   - package-ecosystem: "pip"
     directory: "/backend"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      # patch/minor 合成一个 PR，避免积压；major 仍单独出，便于逐个评估破坏性变更。
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: "npm"
     directory: "/frontend"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "monthly"
+    groups:
+      github-actions:
+        patterns: ["*"]
