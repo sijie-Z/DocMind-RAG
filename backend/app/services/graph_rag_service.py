@@ -173,7 +173,7 @@ JSON返回："""
         await self.save(organization_id)
 
     def _normalize_entity(self, entity: str) -> str:
-        return hashlib.md5(entity.lower().encode()).hexdigest()[:16]
+        return hashlib.md5(entity.lower().encode(), usedforsecurity=False).hexdigest()[:16]
 
     async def search_graph(self, query: str, organization_id: int = 1, max_hops: int = 2) -> list[dict[str, Any]]:
         await self.load(organization_id)

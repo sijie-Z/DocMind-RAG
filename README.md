@@ -436,7 +436,7 @@ DocMind/
 | `ENABLE_TRACING` | OpenTelemetry 开关 | `false` |
 | `ENABLE_DEMO_ACCOUNT` | 启用演示账号 | `true` |
 | `ENABLE_WORKFLOW_CODE_NODES` | 允许工作流代码节点（存在安全风险，默认关闭） | `false` |
-| `APP_VERSION` | 应用版本 | `1.0.0` |
+| `APP_VERSION` | 应用版本 | `1.21.0` |
 
 完整配置见 `backend/.env.example` 和 `backend/.env.docker.example`。
 

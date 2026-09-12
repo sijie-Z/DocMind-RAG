@@ -5,6 +5,80 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0] - 2026-09-12
+
+### Fixed
+- **CI：迁移冒烟步骤的 shell 引号 bug**（`ci-fast.yml` / `ci-nightly.yml`）。`python -c "..."`
+  内嵌了双引号，内层把外层字符串提前闭合，导致该步骤每次都报
+  `SyntaxError: '(' was never closed`，自 2026-08-18 引入后从未通过。
+- **Alembic 迁移链在真实 MySQL 上从不可用**——共 4 处独立缺陷，此前只在 SQLite 上验证过
+  （SQLite 不校验外键目标表与 collation），因此长期假绿：
+  - `001`：`users` 先于 `organizations` 创建，但前者外键指向后者 → MySQL 1824。已调整顺序。
+  - `003`：`prompt_template_versions.prompt_id` 外键指向 `prompt_templates`，而该表只在 `005`
+    创建，`003` 执行时并不存在 → MySQL 1824。已将该表定义移入 `003`。
+  - `003`：revision id `003_add_prompt_versions_token_usage` 长 35 字符，超出 MySQL
+    `alembic_version.version_num` 的 VARCHAR(32) → 1406。已改名为
+    `003_prompt_versions_token_usage`（31 字符）。
+  - `001`：downgrade 显式 `DROP INDEX`，MySQL 拒绝删除外键仍引用的索引 → 1553；且末尾
+    `DROP TYPE IF EXISTS` 是 PostgreSQL 语法，在 MySQL/SQLite 上必然报错。已改为只删表，
+    枚举类型仅在 PostgreSQL 下清理。
+- **CI 的 MySQL 与生产配置不一致**（3780 的成因）。`docker-compose.yml` 的 MySQL 以
+  `--collation-server=utf8mb4_unicode_ci` 启动，而 CI 的 service container 用的是 MySQL 8
+  默认的 `utf8mb4_0900_ai_ci`——`backend/app/models/document.py` 曾为 documents/
+  document_chunks/document_tags/tags 显式声明 `utf8mb4_unicode_ci`，与其余继承库默认的表
+  混用即在字符串外键上报 3780。**CI 一直在测一个生产里不存在的配置。**
+- **schema 定义缺少唯一来源**：`004`/`005` 逐表硬编码 collation，而 4 个模型又各自覆盖，
+  迁移路径与 `create_all` 路径会因数据库默认值不同而分歧。现已统一收敛（见 Changed）。
+- **B314：用标准库 `xml.etree` 解析用户上传的 DOCX 内嵌 XML**。改为 `defusedxml`，
+  拒绝实体定义与外部引用，防住实体膨胀/XXE。
+- **前端 4 个 lint 错误**（自 2026-08-04 起使 CI 常红）：
+  `KnowledgeUploadPanel.vue` 直接修改 `uploadForm` prop（`vue/no-mutating-props` ×3，改为
+  `:value` + `@update:value` 经 emit 更新，恢复单向数据流）；`useProfilePage.ts` 空 catch 块。
+
+### Added
+- **CI 新增 MySQL schema 门禁**（`ci-fast.yml` 的 `migration-mysql` job）。同一个 MySQL service
+  上开两个库，覆盖**两条路径**：
+  - `test_alembic`：`upgrade head` → 校验 → `downgrade base` → `upgrade head` → 再校验
+    （round-trip，验证迁移可逆、可重建）
+  - `test_create_all`：`init_db()` → 校验
+
+  此前只验证 Alembic 会漏掉**生产实际走的 `create_all` 路径**，这是本次最大的覆盖缺口。
+- `backend/scripts/check_schema.py`：
+  - revision 校验改为**集合相等**（原先用 `scalar()` 只取首行，数据库里有多行 revision 时会漏检）
+  - 新增 revision id ≤32 字符检查（MySQL 的 `version_num` 是 VARCHAR(32)）
+  - 新增 MySQL collation 断言（所有表必须等于约定的 canonical collation）
+  - 新增 `--report-columns`：打印模型与数据库的**列级漂移报告**（仅报告，不阻断）。
+    首次运行即发现 5 张表存在真实漂移（如 `document_chunks.meta_data` vs 库里的 `metadata`）
+  - 新增 `--create-all`：供未经过 Alembic 的库跳过 revision 校验
+- **CodeQL** 工作流（Python + JavaScript/TypeScript，`security-and-quality` 查询集）。
+- **workflow 自检**（actionlint）纳入 PR 门禁。
+- CI 通用加固：`concurrency` 取消同分支过期运行、`permissions: contents: read` 最小权限、
+  各 job `timeout-minutes`、`ci-nightly` 集成测试矩阵启用 `fail-fast: false`（此前一个 Python
+  版本失败会取消另一个，导致结果不可见）。
+- bandit 静态扫描纳入 nightly，阻断档位提升到 **Medium 及以上**（当前为 0）；依赖漏洞审计由
+  `safety` 换为 `pip-audit`，并**区分「发现漏洞」与「工具自身失败」**——两者退出码都可能为 1，
+  故按报告判定。判定条件是「**结构完整的报告**」而非「JSON 能解析」：工具失败时也可能留下
+  合法但结构不对的 JSON（如 `{"error": ...}`），只查可解析性会把这类故障误判为正常结果。
+  审计步骤的摘要以 `STATUS: ADVISORY ONLY` 开头，job 名也标注 `audits advisory`，避免绿色
+  对勾被误读为"没有已知漏洞"。
+
+### Changed
+- **canonical MySQL collation 收敛为 `utf8mb4_unicode_ci`**（与 `docker-compose.yml`、
+  `SETUP.md` 一致），并让三处强制它：
+  - CI：MySQL service 用 `services.mysql.command` 传入与生产相同的 `--collation-server`
+    （GitHub 2026-04 新增的 service container 覆盖能力，语义与 docker-compose 的 `command` 一致；
+    actionlint 1.7.12 的 schema 尚未跟进，已用 `-ignore` 标注为误报）
+  - 校验：`check_schema.py` 断言所有表的 collation
+  - 运行时：`init_db()` 在 MySQL 上若发现数据库默认 collation 不符会打明确告警
+- 移除 `app/models/document.py` 中 4 张表的逐表 collation 覆盖，并去掉 `004`/`005` 里冗余的
+  硬编码——**全库统一继承数据库默认值**。这样迁移路径与 `create_all` 路径在任何数据库默认值下
+  都产出一致的 schema（此前在非 canonical 的库上，`create_all` 会以 3780 直接崩溃）。
+- 6 处 `hashlib.md5()` 显式标注 `usedforsecurity=False`（均为缓存键/指纹/ID 生成等非安全用途）。
+- B102（沙箱 exec）/ B104（容器内 bind 0.0.0.0）×2 改为带理由的精确 `# nosec`，不做全局忽略。
+- `mcp_bridge` 的文件系统 MCP 默认根目录由硬编码 `/tmp` 改为 `tempfile.gettempdir()`
+  （Windows 上没有 `/tmp`）。
+- `requirements.txt` 新增 `defusedxml>=0.7.1`。
+
 ## [1.20.0] - 2026-08-06
 
 ### Security hardening

@@ -15,12 +15,12 @@ class BaseAppSettings(BaseSettings):
 
     # App identity
     APP_NAME: str = "DocMind 企业级 RAG 知识库"
-    APP_VERSION: str = "1.0.0"
+    APP_VERSION: str = "1.21.0"
     DEBUG: bool = False
     ENABLE_DEMO_ACCOUNT: bool = False
     ENABLE_ENSURE_DEMO_ENDPOINT: bool = False
     EXPOSE_EXCEPTION_DETAIL: bool = False
-    HOST: str = "0.0.0.0"
+    HOST: str = "0.0.0.0"  # nosec B104 - 容器内需绑定全部网卡，可由环境变量覆盖
     PORT: int = 8000
 
     # Logging

@@ -13,6 +13,25 @@ depends_on = None
 
 
 def upgrade():
+    # 创建组织表
+    # 必须先于 users：users.organization_id 的外键指向本表，
+    # 而 MySQL 在 CREATE TABLE 时就会校验被引用表是否存在（错误 1824）。
+    op.create_table(
+        'organizations',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('name', sa.String(length=100), nullable=False),
+        sa.Column('description', sa.Text(), nullable=True),
+        sa.Column('parent_id', sa.Integer(), nullable=True),
+        sa.Column('level', sa.Integer(), nullable=False),
+        sa.Column('path', sa.String(length=500), nullable=True),
+        sa.Column('is_active', sa.Boolean(), nullable=False),
+        sa.Column('created_at', sa.DateTime(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), nullable=False),
+        sa.ForeignKeyConstraint(['parent_id'], ['organizations.id']),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('name')
+    )
+
     # 创建用户表
     op.create_table(
         'users',
@@ -37,23 +56,6 @@ def upgrade():
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('email'),
         sa.UniqueConstraint('username')
-    )
-    
-    # 创建组织表
-    op.create_table(
-        'organizations',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('name', sa.String(length=100), nullable=False),
-        sa.Column('description', sa.Text(), nullable=True),
-        sa.Column('parent_id', sa.Integer(), nullable=True),
-        sa.Column('level', sa.Integer(), nullable=False),
-        sa.Column('path', sa.String(length=500), nullable=True),
-        sa.Column('is_active', sa.Boolean(), nullable=False),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.Column('updated_at', sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(['parent_id'], ['organizations.id']),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('name')
     )
     
     # 创建文档表
@@ -177,31 +179,20 @@ def upgrade():
 
 
 def downgrade():
-    # 删除索引
-    op.drop_index('ix_chat_messages_session_id', table_name='chat_messages')
-    op.drop_index('ix_chat_sessions_organization_id', table_name='chat_sessions')
-    op.drop_index('ix_chat_sessions_user_id', table_name='chat_sessions')
-    op.drop_index('ix_document_chunks_embedding_id', table_name='document_chunks')
-    op.drop_index('ix_document_chunks_document_id', table_name='document_chunks')
-    op.drop_index('ix_documents_status', table_name='documents')
-    op.drop_index('ix_documents_uploaded_by', table_name='documents')
-    op.drop_index('ix_documents_organization_id', table_name='documents')
-    op.drop_index('ix_documents_id', table_name='documents')
-    op.drop_index('ix_users_username', table_name='users')
-    op.drop_index('ix_users_email', table_name='users')
-    
-    # 删除表
+    # 只删表即可，索引随表一并消失。
+    # 不要显式 DROP INDEX：MySQL 会拒绝删除外键仍在引用的索引（错误 1553）。
+    # 顺序与 upgrade 相反——先删引用 organizations 的 users。
     op.drop_table('chat_messages')
     op.drop_table('chat_sessions')
     op.drop_table('document_tags')
     op.drop_table('tags')
     op.drop_table('document_chunks')
     op.drop_table('documents')
-    op.drop_table('organizations')
     op.drop_table('users')
-    
-    # 删除枚举类型
-    op.execute('DROP TYPE IF EXISTS messagetype')
-    op.execute('DROP TYPE IF EXISTS chatsessionstatus')
-    op.execute('DROP TYPE IF EXISTS documentstatus')
-    op.execute('DROP TYPE IF EXISTS documenttype')
+    op.drop_table('organizations')
+
+    # PostgreSQL 下 sa.Enum 是独立 TYPE，需要显式删除；
+    # MySQL/SQLite 的枚举内联在表定义里，随表一起消失。
+    if op.get_bind().dialect.name == 'postgresql':
+        for enum_name in ('messagetype', 'chatsessionstatus', 'documentstatus', 'documenttype'):
+            op.execute(f'DROP TYPE IF EXISTS {enum_name}')

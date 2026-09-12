@@ -28,7 +28,7 @@ def upgrade():
         sa.Column('updated_at', sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('name'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
     op.create_index('ix_permissions_id', 'permissions', ['id'])
 
@@ -42,7 +42,7 @@ def upgrade():
         sa.Column('updated_at', sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('name'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
     op.create_index('ix_roles_id', 'roles', ['id'])
 
@@ -53,7 +53,7 @@ def upgrade():
         sa.ForeignKeyConstraint(['permission_id'], ['permissions.id']),
         sa.ForeignKeyConstraint(['role_id'], ['roles.id']),
         sa.PrimaryKeyConstraint('role_id', 'permission_id'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
 
     op.create_table(
@@ -64,7 +64,7 @@ def upgrade():
         sa.ForeignKeyConstraint(['organization_id'], ['organizations.id']),
         sa.ForeignKeyConstraint(['user_id'], ['users.id']),
         sa.PrimaryKeyConstraint('user_id', 'organization_id'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
 
     op.create_table(
@@ -76,7 +76,7 @@ def upgrade():
         sa.ForeignKeyConstraint(['role_id'], ['roles.id']),
         sa.ForeignKeyConstraint(['user_id'], ['users.id']),
         sa.PrimaryKeyConstraint('user_id', 'organization_id', 'role_id'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
 
     # ── User settings ────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ def upgrade():
         sa.ForeignKeyConstraint(['user_id'], ['users.id']),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('user_id'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
     op.create_index('ix_user_settings_id', 'user_settings', ['id'])
 
@@ -110,29 +110,14 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(['user_id'], ['users.id']),
         sa.PrimaryKeyConstraint('id'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
     op.create_index('ix_notifications_id', 'notifications', ['id'])
     op.create_index('ix_notifications_user_id', 'notifications', ['user_id'])
 
-    # ── Prompt templates（003 的外键引用此表，但从未被创建）────────────
-    op.create_table(
-        'prompt_templates',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('name', sa.String(length=100), nullable=False),
-        sa.Column('content', sa.Text(), nullable=False),
-        sa.Column('description', sa.String(length=255), nullable=True),
-        sa.Column('category', sa.String(length=50), nullable=True),
-        sa.Column('is_active', sa.Boolean(), nullable=False),
-        sa.Column('version', sa.Integer(), nullable=False),
-        sa.Column('creator_id', sa.Integer(), nullable=True),
-        sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
-        sa.Column('updated_at', sa.DateTime(), nullable=True),
-        sa.ForeignKeyConstraint(['creator_id'], ['users.id']),
-        sa.PrimaryKeyConstraint('id'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
-    )
-    op.create_index('ix_prompt_templates_id', 'prompt_templates', ['id'])
+    # ── Prompt templates 已移至 003 ──────────────────────────────────────
+    # 003 的 prompt_template_versions.prompt_id 外键引用本表，若在此创建则
+    # 003 先执行时会引用不存在的表（MySQL 1824）。表定义见 003。
 
     # ── Knowledge processing jobs ────────────────────────────────────────
     op.create_table(
@@ -151,7 +136,7 @@ def upgrade():
         sa.ForeignKeyConstraint(['document_id'], ['documents.id']),
         sa.ForeignKeyConstraint(['organization_id'], ['organizations.id']),
         sa.PrimaryKeyConstraint('id'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
     op.create_index('ix_knowledge_processing_jobs_id', 'knowledge_processing_jobs', ['id'])
     op.create_index('ix_knowledge_processing_jobs_document_id', 'knowledge_processing_jobs', ['document_id'])
@@ -169,7 +154,7 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint('id'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
     op.create_index('ix_system_manuals_id', 'system_manuals', ['id'])
 
@@ -186,7 +171,7 @@ def upgrade():
         sa.Column('updated_at', sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(['created_by'], ['users.id']),
         sa.PrimaryKeyConstraint('id'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
 
     op.create_table(
@@ -203,7 +188,7 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(['workflow_id'], ['workflows.id']),
         sa.PrimaryKeyConstraint('id'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
 
     op.create_table(
@@ -220,7 +205,7 @@ def upgrade():
         sa.Column('is_active', sa.Boolean(), nullable=False),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.PrimaryKeyConstraint('id'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
 
     # ── Audit & sessions ─────────────────────────────────────────────────
@@ -237,7 +222,7 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(['user_id'], ['users.id']),
         sa.PrimaryKeyConstraint('id'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
     op.create_index('ix_user_activity_logs_id', 'user_activity_logs', ['id'])
     op.create_index('ix_user_activity_logs_action', 'user_activity_logs', ['action'])
@@ -258,7 +243,7 @@ def upgrade():
         sa.ForeignKeyConstraint(['user_id'], ['users.id']),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('token_hash'),
-        mysql_engine='InnoDB', mysql_charset='utf8mb4', mysql_collate='utf8mb4_unicode_ci',
+        mysql_engine='InnoDB',
     )
     op.create_index('ix_user_login_sessions_id', 'user_login_sessions', ['id'])
     op.create_index('ix_user_login_sessions_user_id', 'user_login_sessions', ['user_id'])
@@ -267,7 +252,7 @@ def upgrade():
 def downgrade():
     for table in ('user_login_sessions', 'user_activity_logs', 'node_definitions',
                   'workflow_executions', 'workflows', 'system_manuals',
-                  'knowledge_processing_jobs', 'prompt_templates', 'notifications',
+                  'knowledge_processing_jobs', 'notifications',
                   'user_settings', 'user_organization_role_association', 'user_organization',
                   'role_permission_association', 'roles', 'permissions'):
         op.drop_table(table)

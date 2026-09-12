@@ -10,6 +10,7 @@ Usage:
 
 import logging
 import os
+import tempfile
 from typing import Any
 
 from mcp import StdioServerParameters, stdio_client
@@ -30,7 +31,12 @@ MCP_SERVERS: dict[str, dict[str, Any]] = {
     },
     "filesystem": {
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", os.getenv("MCP_FS_ROOT", "/tmp")],
+        "args": [
+            "-y",
+            "@modelcontextprotocol/server-filesystem",
+            # 用 tempfile.gettempdir() 而非硬编码 "/tmp"：Windows 上没有 /tmp
+            os.getenv("MCP_FS_ROOT", tempfile.gettempdir()),
+        ],
         "env": {},
         "description": "本地文件系统读写",
     },

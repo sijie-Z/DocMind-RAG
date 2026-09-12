@@ -1,0 +1,55 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 3 * * 1'   # 每周一 03:00 UTC，补 nightly 不覆盖的语义级漏洞
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      security-events: write   # 需要写入 SARIF 结果到 Security 面板
+      actions: read            # 私有仓库需要，公开仓库无害
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Python 与 JavaScript/TypeScript 都是解释型语言，不需要构建。
+        # build-mode 只在「每个 job 只分析一种语言」时可用，matrix 正好满足。
+        include:
+          - language: python
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-and-quality
+
+      # 解释型语言无需 autobuild：build-mode=none 由 CodeQL 直接抽取源码。
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:${{ matrix.language }}'

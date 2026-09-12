@@ -162,7 +162,7 @@ class SemanticCache:
 
     def _hash_key(self, embedding: list[float]) -> str:
         vec_str = ",".join(f"{v:.4f}" for v in embedding[:20])
-        return hashlib.md5(vec_str.encode()).hexdigest()[:16]
+        return hashlib.md5(vec_str.encode(), usedforsecurity=False).hexdigest()[:16]
 
     async def get(self, query_embedding: list[float], organization_id: int = 0) -> dict[str, Any] | None:
         """Find the most similar cached answer using sorted set candidates."""

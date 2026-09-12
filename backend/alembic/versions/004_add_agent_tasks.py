@@ -1,7 +1,7 @@
 """Add agent_tasks table for persistent agent task lifecycle checkpointing.
 
 Revision ID: 004_add_agent_tasks
-Revises: 003_add_prompt_versions_token_usage
+Revises: 003_prompt_versions_token_usage
 """
 
 import sqlalchemy as sa
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "004_add_agent_tasks"
-down_revision = "003_add_prompt_versions_token_usage"
+down_revision = "003_prompt_versions_token_usage"
 branch_labels = None
 depends_on = None
 
@@ -36,8 +36,6 @@ def upgrade():
         sa.Column("completed_at", sa.DateTime(timezone=True)),
         sa.Column("expires_at", sa.DateTime(timezone=True), index=True),
         mysql_engine="InnoDB",
-        mysql_charset="utf8mb4",
-        mysql_collate="utf8mb4_unicode_ci",
     )
 
 
