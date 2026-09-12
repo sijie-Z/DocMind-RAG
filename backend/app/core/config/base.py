@@ -15,7 +15,7 @@ class BaseAppSettings(BaseSettings):
 
     # App identity
     APP_NAME: str = "DocMind 企业级 RAG 知识库"
-    APP_VERSION: str = "1.0.0"
+    APP_VERSION: str = "1.21.0"
     DEBUG: bool = False
     ENABLE_DEMO_ACCOUNT: bool = False
     ENABLE_ENSURE_DEMO_ENDPOINT: bool = False

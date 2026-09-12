@@ -333,7 +333,7 @@ Environment variables via `.env` file. Key settings:
 | `ENABLE_TRACING` | OpenTelemetry toggle | `false` |
 | `ENABLE_DEMO_ACCOUNT` | Enable demo accounts | `true` |
 | `ENABLE_WORKFLOW_CODE_NODES` | Allow workflow code nodes (security risk; disabled by default) | `false` |
-| `APP_VERSION` | App version | `1.0.0` |
+| `APP_VERSION` | App version | `1.21.0` |
 
 Full configuration reference: `backend/.env.example` and `backend/.env.docker.example`.
 
