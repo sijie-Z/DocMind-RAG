@@ -5,7 +5,7 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.21.0] - 2026-09-12
 
 ### Fixed
 - **CI：迁移冒烟步骤的 shell 引号 bug**（`ci-fast.yml` / `ci-nightly.yml`）。`python -c "..."`
