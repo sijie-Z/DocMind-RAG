@@ -2,7 +2,10 @@
   <div class="min-h-screen bg-gray-50 dark:bg-gray-900 pb-12 transition-colors duration-300">
     <!-- 顶部背景图 -->
     <div class="h-64 bg-gradient-to-r from-blue-500 via-blue-600 to-blue-700 relative overflow-hidden">
-      <div class="absolute inset-0 bg-[url('@/assets/pattern.svg')] opacity-10"></div>
+      <!-- 注：此处原引用 @/assets/pattern.svg，但该文件从未存在于仓库中
+           （vite 5 + unocss 0.58 容忍了悬空引用，升级到 vite 6 + unocss 0.65 后
+           构建会真正解析它并报 ENOENT）。已移除该死引用，视觉结果不变。
+           如需图案底纹，请补上 src/assets/pattern.svg 后恢复本行。 -->
       <div class="absolute inset-0 bg-black/10"></div>
     </div>
 
