@@ -47,7 +47,12 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          queries: security-and-quality
+          # security-extended：只跑安全查询（比默认集更多），不含「代码质量」查询。
+          # 原先用 security-and-quality，python 侧产生 135 条结果、其中 83 条是
+          # note 级的质量提示（empty-except / unused-import / unused-variable）——
+          # 这些与仓库已有的 ruff + eslint 重复，却把真正的安全发现淹没，
+          # 并把 SARIF 撑大（python 上传约 20 秒后失败，js 仅 19 条结果则从不失败）。
+          queries: security-extended
 
       # 解释型语言无需 autobuild：build-mode=none 由 CodeQL 直接抽取源码。
 
