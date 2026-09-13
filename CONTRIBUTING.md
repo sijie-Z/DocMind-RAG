@@ -37,8 +37,20 @@ pip install -r requirements.txt
 
 # Set up frontend
 cd ../frontend
-npm install
+npm ci          # 只安装依赖时用它（CI 走的也是这条）
 ```
+
+> **前端依赖安装须知**
+>
+> `frontend/package-lock.json` 由 **npm 12** 生成。原因：npm 10.9.8（Node 22 自带，CI 使用的版本）
+> 在解析本项目依赖树时会触发其 Arborist 缺陷 ——
+> `TypeError: Cannot read properties of null (reading 'edgesOut')`，位置在
+> `@npmcli/arborist/lib/arborist/build-ideal-tree.js` 的 `#loadPeerSet`。
+>
+> 已验证：npm 12 生成的 lockfile **可被 npm 10 的 `npm ci` 正常使用**，因此 **CI 无需固定 npm 版本**。
+>
+> - **只安装依赖** → `npm ci` 即可
+> - **需要改动/新增前端依赖** → 用 `npx npm@12 install`（用 npm 10 的 `npm install` 会崩）
 
 #### Development Workflow
 
