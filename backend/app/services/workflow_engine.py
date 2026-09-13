@@ -81,6 +81,14 @@ class NodeExecutor:
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(self.retry_delay * (2 ** attempt))  # 指数退避
 
+        # max_retries <= 0 时循环体一次都不执行，last_error 仍为 None；
+        # 直接 raise None 会抛 TypeError: exceptions must derive from BaseException，
+        # 掩盖真正的原因。这里给出明确错误。
+        # （max_retries 来自工作流配置 self.config.get("max_retries", 3)，可为 0。）
+        if last_error is None:
+            raise RuntimeError(
+                f"节点 {self.node.id} 未被执行：max_retries={self.max_retries}（须 >= 1）"
+            )
         raise last_error
 
     def get_llm(self, model_type: str = "openai") -> ChatOpenAI:

@@ -6,6 +6,7 @@ from minio import Minio
 from minio.error import S3Error
 
 from app.core.config import settings
+from app.core.logging import sanitize_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ class MinioClient:
         try:
             target_bucket = kwargs.get("bucket_name") or kwargs.get("bucket") or self.bucket_name
             self.client.put_object(target_bucket, object_name, data, length, content_type=content_type)
-            logger.info(f"Uploaded {object_name} to {target_bucket}")
+            logger.info(f"Uploaded {sanitize_log_value(object_name)} to {sanitize_log_value(target_bucket)}")
             return object_name
         except S3Error as e:
             logger.error(f"Error uploading object: {e}")

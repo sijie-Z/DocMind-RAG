@@ -14,6 +14,20 @@ trace_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("trace
 user_id_var: contextvars.ContextVar[str | int | None] = contextvars.ContextVar("user_id", default=None)
 
 
+def sanitize_log_value(value: object) -> str:
+    """把不可信的值净化后再写进日志。
+
+    来源不可控的字符串（HTTP 请求体、上传的对象名等）可能含 CR/LF，直接落进
+    日志会伪造出额外的日志行（log injection，对应 CodeQL 的 py/log-injection）。
+
+    注意：改用 %s 占位符**并不能**防住这一点 —— 值最终仍会被拼进日志文本，
+    必须在这里把它转义掉。
+    """
+    if value is None:
+        return "-"
+    return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
+
 class JsonFormatter(logging.Formatter):
     """JSON 结构化日志格式化器。
 

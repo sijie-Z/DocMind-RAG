@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.elasticsearch import get_elasticsearch
+from app.core.logging import sanitize_log_value
 from app.core.middleware import metrics_collector
 from app.core.redis import redis_client
 from app.core.security import get_current_user, permission_required
@@ -340,13 +341,14 @@ async def receive_alertmanager_webhook(request: Request):
         received += 1
 
         log_level = logger.error if normalized["severity"] in ("critical", "high") else logger.warning
+        # 这些值来自外部告警请求体，换行符可伪造日志行；落日志前净化
         log_level(
             "Alert received: alertname=%s severity=%s status=%s instance=%s summary=%s",
-            normalized["alertname"],
-            normalized["severity"],
-            normalized["status"],
-            normalized["instance"],
-            normalized["summary"],
+            sanitize_log_value(normalized["alertname"]),
+            sanitize_log_value(normalized["severity"]),
+            sanitize_log_value(normalized["status"]),
+            sanitize_log_value(normalized["instance"]),
+            sanitize_log_value(normalized["summary"]),
         )
 
     return {
