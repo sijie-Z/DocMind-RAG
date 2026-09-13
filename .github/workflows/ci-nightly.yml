@@ -178,7 +178,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       # 依赖漏洞审计暂为「仅报告」：修复常受制于上游，长期红灯会被无视。
       # 但**工具自身失败必须与「发现漏洞」区分开**——pip-audit 两种情况都可能返回 1，
