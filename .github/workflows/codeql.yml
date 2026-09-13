@@ -7,6 +7,8 @@ on:
     branches: [main, develop]
   schedule:
     - cron: '0 3 * * 1'   # 每周一 03:00 UTC，补 nightly 不覆盖的语义级漏洞
+  workflow_dispatch:       # 允许手动触发：CodeQL 的 SARIF 上传偶发瞬时失败时，
+                           # 可不必等下一次 push 或周一的 schedule 就重跑
 
 concurrency:
   group: codeql-${{ github.ref }}
