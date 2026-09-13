@@ -26,6 +26,8 @@ def upgrade():
         sa.Column('description', sa.String(length=255), nullable=True),
         sa.Column('category', sa.String(length=50), nullable=True),
         sa.Column('is_active', sa.Boolean(), nullable=False),
+        # 与模型一致：模型有 is_system 且运行时读写（agent/core_tools.py、api/v1/endpoints/prompts.py）
+        sa.Column('is_system', sa.Boolean(), nullable=False),
         sa.Column('version', sa.Integer(), nullable=False),
         sa.Column('creator_id', sa.Integer(), nullable=True),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
