@@ -19,24 +19,23 @@ repos:
       - id: ruff-format
         files: ^backend/
 
-  - repo: https://github.com/pre-commit/mirrors-eslint
-    rev: v8.56.0
+  # 用项目自身的 eslint（flat config）而不是在 pre-commit 里另装一套：
+  # 后者会与 package.json 版本漂移（此前 pre-commit 装 8.56 + 旧插件，而 CI 用 9/10），
+  # 且 ESLint 8 不认 flat config。entry 用 --prefix 以便从仓库根目录执行。
+  - repo: local
     hooks:
-      - id: eslint
+      - id: frontend-eslint
+        name: Frontend ESLint
+        entry: npm --prefix frontend run lint
+        language: system
+        pass_filenames: false
         files: ^frontend/.*\.(vue|ts|tsx)$
-        types: [file]
-        additional_dependencies:
-          - eslint@8.56.0
-          - eslint-plugin-vue@9.19.2
-          - '@typescript-eslint/eslint-plugin@6.15.0'
-          - '@typescript-eslint/parser@6.15.0'
-          - 'vue-eslint-parser@9.3.2'
 
   - repo: local
     hooks:
       - id: frontend-typecheck
         name: Frontend type check
-        entry: npm run type-check
+        entry: npm --prefix frontend run type-check
         language: system
         pass_filenames: false
         files: ^frontend/
