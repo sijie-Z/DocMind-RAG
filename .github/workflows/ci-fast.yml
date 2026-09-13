@@ -201,7 +201,8 @@ jobs:
 
       - name: Lint
         working-directory: frontend
-        run: npx eslint . --ext .vue,.ts,.tsx
+        # ESLint 9+ 移除了 --ext（改由 flat config 的 files 决定范围）
+        run: npx eslint .
 
       - name: Type check
         working-directory: frontend
