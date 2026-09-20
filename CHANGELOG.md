@@ -5,6 +5,18 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **CI：nightly 的 pip-audit 结构校验把正常报告判成"工具失败"**（`ci-nightly.yml`）。
+  该校验内联在 workflow 里，并写死了「pip-audit 的 JSON 是顶层数组」这个假设；而 pip-audit 2.x
+  实际输出的是 `{"dependencies": [...], "fixes": [...]}`。于是一份**结构完全正常、也确实扫出了
+  漏洞**的报告被判为工具失败，Security Scan 长期红着却指向一个错误的原因——比不做校验更糟，
+  因为它消耗掉排查者的信任。解析逻辑已移入 `backend/scripts/audit_report.py`（兼容两种顶层形态，
+  未知形态按工具失败拒绝并打印实际结构），格式假设由 `tests/unit/test_audit_report.py` 用真实输出
+  样本钉住。顺带修正两处：diagnostic 不再被 `2>/dev/null` 吞掉；摘要强制 UTF-8 输出
+  （`$GITHUB_STEP_SUMMARY` 要求 UTF-8，而 stdout 被重定向时 Python 默认用 locale 编码）。
+
 ## [1.21.0] - 2026-09-12
 
 ### Fixed

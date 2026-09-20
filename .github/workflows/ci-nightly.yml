@@ -220,16 +220,20 @@ jobs:
           code=0
           pip-audit -r requirements.txt --format json --progress-spinner off \
             -o "$RUNNER_TEMP/pip-audit.json" || code=$?
-          # 同 npm audit：结构校验而不只是「能解析」。
-          # pip-audit 的 JSON 是 [{name, version, vulns: [...]}, ...]。
-          if ! python -c "import json,sys; d=json.load(open(sys.argv[1])); assert isinstance(d,list) and d, 'not a non-empty list'; assert all(isinstance(x,dict) and 'name' in x and 'version' in x for x in d), 'entries missing name/version'" "$RUNNER_TEMP/pip-audit.json" 2>/dev/null; then
-            echo "::error::pip-audit 未产出结构完整的报告（退出码 $code）—— 工具失败，不是发现漏洞"
+          # 结构校验走仓库内脚本，不内联 python -c——格式假设需要被测试钉住。
+          # 2026-09-20 事故：内联版假定顶层是数组，而 pip-audit 2.x 实际是
+          # {"dependencies": [...]}，于是把一份**正常且确实扫出漏洞**的报告判成了"工具失败"，
+          # nightly 因此长期红着却指向错误的原因。回归测试见 tests/unit/test_audit_report.py。
+          # 脚本的诊断写 stderr，所以这里**不重定向 stderr**——它必须留在 job 日志里。
+          # 未知形态会被拒绝并打印实际结构（脚本版本未固定，形状再变也要响亮地失败）。
+          if ! python scripts/audit_report.py --summary "$RUNNER_TEMP/pip-audit.json" > "$RUNNER_TEMP/pip-audit.md"; then
+            echo "::error::pip-audit 未产出结构完整的报告（退出码 $code）—— 工具失败，不是发现漏洞；原因见上方 stderr"
             exit 1
           fi
           {
             echo "## 后端依赖审计 —— ⚠️ STATUS: ADVISORY ONLY"
             echo "> 仅报告,**不阻断构建**。此项为绿色不代表没有已知漏洞。"
-            python -c "import json,sys; d=json.load(open(sys.argv[1])); v=[(x['name'],x['version'],'|'.join(i['id'] for i in x.get('vulns',[]))) for x in d if x.get('vulns')]; print('未发现已知漏洞。' if not v else '发现 %d 个存在漏洞的依赖：' % len(v)); [print('- %s %s — %s' % t) for t in v]" "$RUNNER_TEMP/pip-audit.json"
+            cat "$RUNNER_TEMP/pip-audit.md"
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$code" -ne 0 ]; then
             echo "::warning::pip-audit 报告了依赖漏洞（当前策略：仅报告，不阻断）"
