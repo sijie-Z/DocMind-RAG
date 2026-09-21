@@ -163,6 +163,11 @@ class AuthService:
                 user.token_role = payload.get("role")
                 user.token_organization_id = payload.get("organization_id")
                 return user
+            except HTTPException:
+                # 认证决策（如「账号已被禁用」）必须直接成为响应，
+                # 不能被下面的 `except Exception` 吞成「回退到数据库查询」。
+                # HTTPException 继承自 Exception，不加这个分支就必然被兜底捕获。
+                raise
             except Exception as e:
                 logger.warning(f"从缓存恢复用户对象失败: {e}，将回退到数据库查询")
                 # 如果缓存解析失败，删除该缓存

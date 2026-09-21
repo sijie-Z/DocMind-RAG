@@ -1,9 +1,12 @@
 """AuthService 单元测试 — 不依赖外部服务。"""
+import json
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import jwt
 import pytest
+from fastapi import HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 
 from app.services.auth_service import AuthService
 
@@ -176,3 +179,63 @@ class TestRBAC:
     def test_require_admin_returns_dependency(self, auth_service: AuthService):
         dep = auth_service.require_admin()
         assert callable(dep)
+
+
+# ── 缓存恢复路径的认证决策 ────────────────────────────────
+
+class TestCachePathAuthDecision:
+    """缓存路径抛出的 `HTTPException` 必须直接成为响应。
+
+    回归 #85：`except Exception` 曾把「账号已被禁用」的 401 吞成「回退到数据库查询」，
+    与那行「安全加固」注释声称的行为相反。
+    """
+
+    @staticmethod
+    def _credentials(auth_service: AuthService) -> HTTPAuthorizationCredentials:
+        token = auth_service.create_access_token({"user_id": 1})
+        return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    @pytest.mark.asyncio
+    async def test_disabled_cached_user_raises_401_without_db_fallback(
+        self, auth_service: AuthService
+    ):
+        cached = json.dumps({"id": 1, "username": "u", "role": "user", "is_active": False})
+        db = AsyncMock()
+
+        with patch("app.services.auth_service.RedisTools") as mock_redis:
+            mock_redis.exists = AsyncMock(return_value=False)  # 未在黑名单
+            mock_redis.get_cache = AsyncMock(return_value=cached)
+            mock_redis.delete_cache = AsyncMock()
+
+            with pytest.raises(HTTPException) as exc:
+                await auth_service.get_current_user(
+                    credentials=self._credentials(auth_service), db=db
+                )
+
+        assert exc.value.status_code == 401
+        # 关键断言：认证决策不得被吞成数据库查询
+        db.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unparsable_cache_still_falls_back_to_db(self, auth_service: AuthService):
+        """反向守卫：只吞「认证决策」，合法的解析失败仍应回退到数据库。
+
+        没有这条，把 `except Exception` 整个删掉也能让上面那条测试通过。
+        """
+        db = AsyncMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None  # DB 里也查不到 → 走 404 分支
+        db.execute.return_value = result
+
+        with patch("app.services.auth_service.RedisTools") as mock_redis:
+            mock_redis.exists = AsyncMock(return_value=False)
+            mock_redis.get_cache = AsyncMock(return_value="{ 不是合法 JSON")
+            mock_redis.delete_cache = AsyncMock()
+
+            with pytest.raises(HTTPException):
+                await auth_service.get_current_user(
+                    credentials=self._credentials(auth_service), db=db
+                )
+
+        mock_redis.delete_cache.assert_called_once()
+        db.execute.assert_called_once()
