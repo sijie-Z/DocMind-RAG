@@ -288,11 +288,26 @@ class TestDocumentContent:
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.core.elasticsearch.ElasticsearchTools") as mock_es:
+            # 索引侧同时写 `content` 与 `chunk_text` 两个字段（app/worker/doc_processor.py:174-175），
+            # 而端点读的是 `chunk_text`（app/api/v1/endpoints/documents.py:351）。
+            # 原 mock 只给 `content`，于是每个 hit 都取到空串，join 出 "\n"。
             mock_es.search_documents = AsyncMock(return_value={
                 "hits": {
                     "hits": [
-                        {"_source": {"content": "This is chunk 1.", "metadata": {"chunk_index": 0}}},
-                        {"_source": {"content": "This is chunk 2.", "metadata": {"chunk_index": 1}}},
+                        {
+                            "_source": {
+                                "content": "This is chunk 1.",
+                                "chunk_text": "This is chunk 1.",
+                                "metadata": {"chunk_index": 0},
+                            }
+                        },
+                        {
+                            "_source": {
+                                "content": "This is chunk 2.",
+                                "chunk_text": "This is chunk 2.",
+                                "metadata": {"chunk_index": 1},
+                            }
+                        },
                     ]
                 }
             })
