@@ -31,6 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   声称的行为相反。最终响应仍然正确（数据库路径也会拦），但日志自相矛盾，且**任何未来加在
   这个 `try` 里的 `HTTPException` 都会被静默吞掉**。已在 `except Exception` 之前补
   `except HTTPException: raise`。
+- **资源不存在 / 无权限时接口返回 500 而非 404/403**（issue #90）。
+  `app/core/security.py` 的 `get_document_for_user` 抛的是 `HTTPException(404/403)` ——
+  **状态码是对的**，但 `HTTPException` 不是 `AppError`。而调用方清一色只
+  `except (AppError, NotFoundError, AuthorizationError, ...)` 放行，于是它落进各自的
+  `except Exception` 被包装成 `AppError("...失败")` → **500**。表现是日志里记着
+  「404: 文档不存在」而响应却是 500，自相矛盾。
+  已改为抛 `NotFoundError` / `AuthorizationError`（`AppError` 子类），
+  **一处修改覆盖全部 5 个调用点**（`documents.py:279,330,383`、`knowledge.py:312,519`）。
+  回归测试 `tests/unit/test_document_access_guard.py` 断言的核心是**「异常类型必须是
+  `AppError` 子类」而不是「状态码是 404」** —— 只有前者才能保证调用方的 `except` 接得住，
+  后者正是漏掉的那一半。
 
 ## [1.21.0] - 2026-09-12
 
