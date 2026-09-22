@@ -32,6 +32,29 @@ LOGIN_LOCKOUT_SECONDS = 900     # 锁定窗口（15 分钟）
 # 消除"用户不存在 vs 密码错误"的时序差异，防止用户枚举。
 _DUMMY_HASH = bcrypt.hashpw(b"dummy-password-for-timing", bcrypt.gensalt()).decode("utf-8")
 
+# ── 统一认证失败响应 ─────────────────────────────────────────────
+# 「用户不存在」与「账号已被禁用」必须**不可区分**：OWASP Authentication Cheat Sheet 要求
+# 应用对这两种情况返回同一个 generic 响应，否则构成 discrepancy factor —— 攻击者拿一个
+# 过期 token 轮询即可区分「该 id 存在过但被封」与「从未存在」。
+# 区分只发生在服务端日志里（logger.warning 的措辞），绝不进响应体。
+# 上面的 _DUMMY_HASH 是同一原则在登录侧（时序）的实现。
+_AUTH_FAILED_DETAIL = "认证失败"
+
+
+def _auth_failed() -> HTTPException:
+    """认证失败：用户不存在 / 账号被禁用 / 主体无法建立，三者共用的唯一响应。
+
+    RFC 9110 规定 401 **MUST** 携带 `WWW-Authenticate`。注意 `app/main.py` 的
+    HTTPException handler 原先丢弃了 `exc.headers`，使这里设置的响应头到不了客户端 ——
+    已在同一次修复中改正。
+    """
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=_AUTH_FAILED_DETAIL,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 # JWT认证方案
 security = HTTPBearer()
 
@@ -153,11 +176,9 @@ class AuthService:
 
                 # 安全加固：禁用账号即使 token 未过期也不得通过缓存路径恢复身份
                 if not user_data.get("is_active", True):
-                    logger.warning(f"用户 {user_id} 已被禁用，拒绝缓存恢复")
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="账号已被禁用",
-                    )
+                    # 服务端日志保留区分（user_inactive），响应体不区分
+                    logger.warning(f"user_inactive: 用户 {user_id} 已被禁用，拒绝缓存恢复")
+                    raise _auth_failed()
                 user = User(**filtered_data)
                 # 将JWT中的权限信息添加到用户对象
                 user.token_role = payload.get("role")
@@ -178,18 +199,14 @@ class AuthService:
         user = result.scalar_one_or_none()
 
         if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="用户不存在"
-            )
+            # 服务端日志保留区分（user_not_found），响应体与「账号被禁用」完全不区分
+            logger.warning(f"user_not_found: 令牌指向的用户 {user_id} 不存在")
+            raise _auth_failed()
 
         # 安全加固：禁用账号即使 token 未过期也不得访问
         if not user.is_active:
-            logger.warning(f"用户 {user_id} 已被禁用，拒绝访问")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="账号已被禁用",
-            )
+            logger.warning(f"user_inactive: 用户 {user_id} 已被禁用，拒绝访问")
+            raise _auth_failed()
 
         # 将JWT中的权限信息添加到用户对象
         user.token_role = payload.get("role")

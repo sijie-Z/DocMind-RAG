@@ -42,6 +42,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   回归测试 `tests/unit/test_document_access_guard.py` 断言的核心是**「异常类型必须是
   `AppError` 子类」而不是「状态码是 404」** —— 只有前者才能保证调用方的 `except` 接得住，
   后者正是漏掉的那一半。
+- **认证失败响应契约：「用户不存在」与「账号被禁用」不再可区分**（issue #82 的 PR A）。
+  此前同一件事有**三种答案**：DB 路径对用户不存在返回 **404** `"用户不存在"`、
+  禁用返回 **401** `"账号已被禁用"`、而 `permission_required` 路径直接 **500**。
+  OWASP Authentication Cheat Sheet 要求这两种情况返回同一个 generic 响应，
+  否则构成 discrepancy factor —— 攻击者拿一个过期 token 轮询即可枚举有效用户 id。
+  现统一为 **401 + 同一 `detail`（"认证失败"）+ 同一响应头**，区分只保留在服务端日志
+  （`user_not_found` / `user_inactive`）。
+  同时修正 `app/main.py` 的 HTTPException handler **静默丢弃 `WWW-Authenticate`**：
+  它构造 `JSONResponse` 时没传 `headers=exc.headers`，导致 `auth_service` 里四处显式
+  设置的响应头**一个都到不了客户端**，而 RFC 9110 规定 401 **MUST** 携带该头。
+
+  **行为变更**：客户端若依赖「用户不存在 → 404」需同步调整。
+  已核查前端 `src/`：**不存在**这种依赖（`404` 的用法只有两处，且都是死代码；
+  也没有任何按 `detail` 文案判断的逻辑）。
 
 ## [1.21.0] - 2026-09-12
 
