@@ -16,6 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   未知形态按工具失败拒绝并打印实际结构），格式假设由 `tests/unit/test_audit_report.py` 用真实输出
   样本钉住。顺带修正两处：diagnostic 不再被 `2>/dev/null` 吞掉；摘要强制 UTF-8 输出
   （`$GITHUB_STEP_SUMMARY` 要求 UTF-8，而 stdout 被重定向时 Python 默认用 locale 编码）。
+- **测试配置：`pytest.ini` 遮蔽了 `pyproject.toml`，导致 markers 全部失效**（issue #86）。
+  pytest 的配置优先级是 `pytest.ini` > `pyproject.toml`，两份配置并存时后者被整体忽略，
+  于是 `pyproject.toml` 里声明的 `unit` / `integration` / `slow` 三个 marker **从未生效**，
+  且全仓没有一个测试使用它们——`-m` 过滤实际不可用。已删除 `backend/pytest.ini`，把
+  `testpaths` / `asyncio_mode` / `filterwarnings` 三键与 markers 合并进 `pyproject.toml`
+  （单一配置源），并新增 `tests/integration/conftest.py` 按目录自动给该目录下的用例
+  打 `integration` marker。
+  合并前后 `--collect-only` 逐项一致（裸跑 633 / unit 427 / behavior 40 / integration 156），
+  `-m integration` 与 `-m "not integration"` 现可正确切分（156 / 477）。
+- **认证：缓存恢复路径的认证决策被 `except Exception` 吞掉**（issue #85）。
+  `auth_service.get_current_user` 中，「账号已被禁用」有意抛出的 `HTTPException(401)` 落在
+  同一个 `try` 的 `except Exception` 里，被吞成「回退到数据库查询」——与那行「安全加固」注释
+  声称的行为相反。最终响应仍然正确（数据库路径也会拦），但日志自相矛盾，且**任何未来加在
+  这个 `try` 里的 `HTTPException` 都会被静默吞掉**。已在 `except Exception` 之前补
+  `except HTTPException: raise`。
 
 ## [1.21.0] - 2026-09-12
 
