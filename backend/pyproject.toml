@@ -55,9 +55,27 @@ line-ending = "lf"
 "tests/*" = ["A", "SLF", "N818"]
 "app/models/*" = ["F821", "F401"]  # SQLAlchemy string-based relationship() references; re-exports
 
+# pytest 的唯一配置源。backend/pytest.ini 已删除——只要它存在，pytest 就整体忽略本段
+# （pytest.ini 优先级高于 pyproject.toml），`markers` 声而不效即源于此。
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+# 以下三键原先只存在于 pytest.ini，合并时漏搬会静默改变行为：
+#   testpaths      —— 裸跑 pytest 会收进 backend/ 根下的脚本（test_api.py 里的用例会真发 httpx 请求）
+#   asyncio_mode   —— 见下方说明
+#   filterwarnings —— 只影响告警噪音
+#
+# asyncio_mode 目前是【冗余】的：全仓 96 个 async 测试函数**全部**带显式
+# @pytest.mark.asyncio（AST 统计：未标记数为 0），实测 auto 与 strict 结果完全一致
+# （466 passed, 1 skipped）。保留它是为了不让**将来新增的**未标记 async 测试
+# 在 strict 模式下静默不执行。
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
 markers = [
     "unit: Unit tests (no external deps)",
     "integration: Integration tests (need DB/ES/Redis)",
