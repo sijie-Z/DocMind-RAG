@@ -571,9 +571,7 @@ async def change_password(
             current_user.id,
             body.new_password
         )
-        # 安全加固：改密后使用户缓存失效
-        from app.core.redis import RedisTools
-        await RedisTools.delete_cache(f"user:{current_user.id}")
+        # 安全加固：改密后立即对后续请求生效（身份由每次请求回源 DB 决定）
         await db.commit()
 
         return {"message": "密码修改成功"}

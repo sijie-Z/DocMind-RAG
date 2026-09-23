@@ -42,32 +42,45 @@ def _credentials(auth_service: AuthService) -> HTTPAuthorizationCredentials:
     )
 
 
-async def _raise_for_deleted_user(auth_service: AuthService) -> HTTPException:
-    """用户行已从 DB 消失（DB 路径：缓存未命中 → 回源查不到）。"""
+def _user(is_active: bool = True):
+    user = MagicMock()
+    user.id = 1
+    user.username = "u"
+    user.role = "user"
+    user.is_active = is_active
+    user.is_superuser = False
+    return user
+
+
+def _db_returning(user) -> AsyncMock:
+    """假会话：`db.execute(select(User)...)` 查到 `user`（None 表示行不存在）。"""
     db = AsyncMock()
     result = MagicMock()
-    result.scalar_one_or_none.return_value = None
+    result.scalar_one_or_none.return_value = user
     db.execute.return_value = result
+    return db
 
+
+async def _raise_for_deleted_user(auth_service: AuthService) -> HTTPException:
+    """用户行已从 DB 消失（回源查不到）。"""
     with patch("app.services.auth_service.RedisTools") as mock_redis:
         mock_redis.exists = AsyncMock(return_value=False)  # 未在黑名单
-        mock_redis.get_cache = AsyncMock(return_value=None)  # 缓存未命中
         with pytest.raises(HTTPException) as exc:
-            await auth_service.get_current_user(credentials=_credentials(auth_service), db=db)
+            await auth_service.get_current_user(
+                credentials=_credentials(auth_service), db=_db_returning(None)
+            )
     return exc.value
 
 
 async def _raise_for_disabled_user(auth_service: AuthService) -> HTTPException:
-    """用户存在但 is_active=False（缓存路径即可判定，无需回源）。"""
-    cached = json.dumps({"id": 1, "username": "u", "role": "user", "is_active": False})
-    db = AsyncMock()
-
+    """用户存在但 is_active=False（身份只认 DB）。"""
     with patch("app.services.auth_service.RedisTools") as mock_redis:
         mock_redis.exists = AsyncMock(return_value=False)
-        mock_redis.get_cache = AsyncMock(return_value=cached)
-        mock_redis.delete_cache = AsyncMock()
         with pytest.raises(HTTPException) as exc:
-            await auth_service.get_current_user(credentials=_credentials(auth_service), db=db)
+            await auth_service.get_current_user(
+                credentials=_credentials(auth_service),
+                db=_db_returning(_user(is_active=False)),
+            )
     return exc.value
 
 
@@ -108,6 +121,80 @@ async def test_auth_failure_carries_www_authenticate(auth_service: AuthService):
 def test_user_missing_is_401_not_404():
     """回归：DB 路径原先对「用户不存在」返回 **404**，与禁用的 401 可区分。"""
     assert _auth_failed().status_code == 401
+
+
+# ── DB 是唯一身份权威（issue #82 / PR B）────────────────────
+
+
+def _planted_stale_snapshot(mock_redis, *, is_active: bool) -> None:
+    """让 `RedisTools.get_cache` 返回一个「陈旧快照」。"""
+    mock_redis.exists = AsyncMock(return_value=False)  # 未在黑名单
+    mock_redis.get_cache = AsyncMock(
+        return_value=json.dumps(
+            {"id": 1, "username": "u", "role": "user", "is_active": is_active}
+        )
+    )
+    mock_redis.delete_cache = AsyncMock()
+
+
+def _user_cache_reads(mock_redis) -> list[str]:
+    """本次调用里所有针对 `user:*` 的缓存读。"""
+    return [
+        call.args[0]
+        for call in mock_redis.get_cache.await_args_list
+        if call.args and str(call.args[0]).startswith("user:")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stale_redis_snapshot_cannot_resurrect_a_disabled_account(auth_service: AuthService):
+    """Redis 里躺着「禁用前」的快照 → 仍然 401。
+
+    改造前这条必然失败：缓存命中后直接 `User(**快照)` 返回，既不回查 DB，
+    也就绕过禁用检查 —— 账号被禁用后还能在 TTL 内继续以旧身份放行。
+    """
+    db = _db_returning(_user(is_active=False))
+
+    with patch("app.services.auth_service.RedisTools") as mock_redis:
+        _planted_stale_snapshot(mock_redis, is_active=True)  # 快照里账号还是有效的
+        with pytest.raises(HTTPException) as exc:
+            await auth_service.get_current_user(credentials=_credentials(auth_service), db=db)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == _AUTH_FAILED_DETAIL
+    # 判定确实来自 DB，而不是「碰巧缓存也没命中」
+    db.execute.assert_called_once()
+    # 身份判定不得读 `user:*` 快照（改回缓存读路径会被这条抓住）
+    assert _user_cache_reads(mock_redis) == []
+
+
+@pytest.mark.asyncio
+async def test_stale_redis_snapshot_cannot_resurrect_a_deleted_account(auth_service: AuthService):
+    """Redis 里躺着「删除前」的快照 → 仍然 401。"""
+    db = _db_returning(None)  # 行已不在
+
+    with patch("app.services.auth_service.RedisTools") as mock_redis:
+        _planted_stale_snapshot(mock_redis, is_active=True)
+        with pytest.raises(HTTPException) as exc:
+            await auth_service.get_current_user(credentials=_credentials(auth_service), db=db)
+
+    assert exc.value.status_code == 401
+    db.execute.assert_called_once()
+    assert _user_cache_reads(mock_redis) == []
+
+
+@pytest.mark.asyncio
+async def test_auth_does_not_write_user_cache(auth_service: AuthService):
+    """认证路径不得再写 `user:{id}` 快照 —— 没有读者，只会制造下一份陈旧快照。"""
+    with patch("app.services.auth_service.RedisTools") as mock_redis:
+        mock_redis.exists = AsyncMock(return_value=False)
+        mock_redis.set_cache = AsyncMock()
+        user = await auth_service.get_current_user(
+            credentials=_credentials(auth_service), db=_db_returning(_user())
+        )
+
+    assert user.is_active is True
+    assert mock_redis.set_cache.await_args_list == []
 
 
 # ── handler 是否把响应头透传给客户端 ────────────────────────

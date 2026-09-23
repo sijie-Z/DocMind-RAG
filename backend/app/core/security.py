@@ -85,10 +85,12 @@ def permission_required(required_permissions: list[PermissionType], organization
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db)
     ):
-        # 1. 核心修复：上帝模式（优先判断超管）
-        # 必须先从数据库 reload 一下，确保 is_superuser 状态是最新的
-        user = await db.get(User, current_user.id)
-        if user and user.is_superuser:
+        # 1. 上帝模式（优先判断超管）
+        # `current_user` 由 `auth_service.get_current_user` 每次请求回源 DB 得到，
+        # 本身就是最新状态 —— 不必、也不该在这里再查一次。那次二次查询是
+        # 「缓存快照 vs DB」两套真相的来源之一：它只补救了超管位，其余字段
+        # （is_active / role / organization_id）仍然可能是快照里的旧值。
+        if current_user.is_superuser:
             return True
 
         # 2. 提取组织 ID
@@ -114,7 +116,7 @@ def permission_required(required_permissions: list[PermissionType], organization
 
         # 3. 获取用户权限集合
         # ✅ 修正：传递 user 对象，而不是 user.id
-        user_permissions = await permission_service.get_user_permissions(db, user, organization_id)
+        user_permissions = await permission_service.get_user_permissions(db, current_user, organization_id)
 
         # 4. 校验权限名 (对比字符串)
         for perm in required_permissions:

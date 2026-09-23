@@ -2,7 +2,6 @@
 派聪明AI知识库系统 - 认证服务
 """
 
-import json
 import logging
 import uuid
 from collections.abc import Callable
@@ -12,7 +11,6 @@ from typing import Any
 import bcrypt
 import jwt
 from fastapi import Depends, HTTPException, status
-from fastapi.encoders import jsonable_encoder  # 确保有这个
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -155,46 +153,14 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # 从缓存获取用户信息
-        cache_key = f"user:{user_id}"
-        cached_user = await RedisTools.get_cache(cache_key)
-
-        if cached_user:
-            try:
-                # 解析缓存的用户数据
-                user_data = json.loads(cached_user)
-
-                # 处理日期字段，将字符串转换回 datetime 对象
-                for date_field in ['created_at', 'updated_at', 'last_login_at']:
-                    if user_data.get(date_field):
-                        user_data[date_field] = datetime.fromisoformat(user_data[date_field])
-
-                # 过滤掉 User 模型中不存在的字段
-                # 获取 User 模型的所有列名
-                user_columns = {c.name for c in User.__table__.columns}
-                filtered_data = {k: v for k, v in user_data.items() if k in user_columns}
-
-                # 安全加固：禁用账号即使 token 未过期也不得通过缓存路径恢复身份
-                if not user_data.get("is_active", True):
-                    # 服务端日志保留区分（user_inactive），响应体不区分
-                    logger.warning(f"user_inactive: 用户 {user_id} 已被禁用，拒绝缓存恢复")
-                    raise _auth_failed()
-                user = User(**filtered_data)
-                # 将JWT中的权限信息添加到用户对象
-                user.token_role = payload.get("role")
-                user.token_organization_id = payload.get("organization_id")
-                return user
-            except HTTPException:
-                # 认证决策（如「账号已被禁用」）必须直接成为响应，
-                # 不能被下面的 `except Exception` 吞成「回退到数据库查询」。
-                # HTTPException 继承自 Exception，不加这个分支就必然被兜底捕获。
-                raise
-            except Exception as e:
-                logger.warning(f"从缓存恢复用户对象失败: {e}，将回退到数据库查询")
-                # 如果缓存解析失败，删除该缓存
-                await RedisTools.delete_cache(cache_key)
-
-        # 从数据库获取用户信息
+        # ── 身份权威只有一个：数据库 ──────────────────────────────────
+        # 这里刻意**不读** Redis。`user:{id}` 存的是 User 对象的**历史快照**，
+        # 一旦它参与身份判定，就等于把「用户是谁」这个问题的答案冻结在 TTL
+        # （默认 24h）之前：用户被删除/禁用/降权之后，只要缓存还在命中，旧身份
+        # 就继续放行。清缓存是「尽力而为」的补救——漏删一处、删早一步（在
+        # `db.commit()` 之前执行）、或并发回填，任何一条都能让快照复活，
+        # 而这类竞态无法用测试穷举。所以正确的做法不是「记得删缓存」，
+        # 而是让缓存根本不参与判定（issue #82）。
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
 
@@ -211,18 +177,6 @@ class AuthService:
         # 将JWT中的权限信息添加到用户对象
         user.token_role = payload.get("role")
         user.token_organization_id = payload.get("organization_id")
-
-        # 缓存用户信息
-        from app.schemas.user import UserInfoResponse
-        user_dict = jsonable_encoder(UserInfoResponse.model_validate(user).model_dump())
-        user_json_str = json.dumps(user_dict)
-
-        # 2. 存入 Redis (Redis 只吃字符串)
-        await RedisTools.set_cache(
-            f"user:{user.id}",
-            user_json_str,
-            expire=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        )
 
         return user
 

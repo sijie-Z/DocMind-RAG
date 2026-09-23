@@ -29,7 +29,14 @@ class _AsyncCtxMgr:
         return False
 
 
-def _make_mock_user():
+def _make_mock_user(*, is_superuser=False):
+    """调用方主体。
+
+    `permission_required` 现在直接信任 `current_user`（它本身就是每次请求回源 DB
+    加载的 User），不再二次 `db.get(User, ...)`。所以「这个调用方有权限」只能通过
+    `current_user` 表达 —— 以前那种「`current_user` 是普通用户、但 mock 的 `db.get`
+    返回超管」的搭配不再能绕过权限检查（issue #82 / PR B）。
+    """
     user = MagicMock()
     user.id = 1
     user.username = "testuser"
@@ -37,7 +44,7 @@ def _make_mock_user():
     user.full_name = "Test User"
     user.role = "user"
     user.organization_id = 1
-    user.is_superuser = False
+    user.is_superuser = is_superuser
     user.is_active = True
     return user
 
@@ -117,7 +124,8 @@ class TestKnowledgeList:
     def test_list_knowledge_bases(self, client: TestClient):
         """GET /knowledge/ 应返回文档列表。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        # 本用例只关心列表主流程，权限门禁用超管主体一次性通过
+        mock_user = _make_mock_user(is_superuser=True)
         doc = _make_mock_document()
 
         override_func, mock_db = _override_get_db()
@@ -153,7 +161,7 @@ class TestKnowledgeList:
     def test_list_knowledge_bases_pagination(self, client: TestClient):
         """分页参数应正确返回。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
         doc1 = _make_mock_document(doc_id="doc-1")
         doc2 = _make_mock_document(doc_id="doc-2", filename="budget.xlsx")
 
@@ -191,7 +199,7 @@ class TestKnowledgeList:
     def test_list_knowledge_bases_empty(self, client: TestClient):
         """无文档时应返回空列表。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
 
@@ -231,7 +239,7 @@ class TestKnowledgeStats:
     def test_get_stats_success(self, client: TestClient):
         """GET /knowledge/stats/{org_id} 应返回统计信息。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         # permission_required 不看注入的 current_user，而是用 `db.get(User, ...)` 重查
         # （app/core/security.py:82）。只 override get_current_user 会让校验打到真库，
@@ -273,7 +281,7 @@ class TestKnowledgeSearch:
     def test_search_success(self, client: TestClient):
         """POST /knowledge/search 应返回搜索结果。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
 
@@ -314,7 +322,7 @@ class TestKnowledgeSearch:
     def test_search_no_results(self, client: TestClient):
         """无匹配结果应返回空列表。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
 
@@ -343,7 +351,7 @@ class TestKnowledgeSearch:
     def test_search_missing_query(self, client: TestClient):
         """缺少查询参数应返回 422。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
 
@@ -369,7 +377,7 @@ class TestKnowledgeSuggestions:
     def test_get_suggestions(self, client: TestClient):
         """GET /knowledge/suggestions 应返回建议列表。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         # 必须连 get_db 一起 mock：`permission_required` 依赖会 `await db.get(User, ...)`
         # 再把它交给 `permission_service`。原先只 override 了 get_current_user，
@@ -406,7 +414,7 @@ class TestKnowledgeSuggestions:
         校验响应体，缺字段会以 ValidationError 的形式当场暴露。
         """
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         override_db, _mock_db = _override_get_db()
 
@@ -444,7 +452,7 @@ class TestKnowledgeRebuild:
     def test_rebuild_success(self, client: TestClient):
         """POST /knowledge/rebuild/{id} 应提交重建任务。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         doc = MagicMock()
         doc.id = "doc-1"
