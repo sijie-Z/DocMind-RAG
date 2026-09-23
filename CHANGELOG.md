@@ -57,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   已核查前端 `src/`：**不存在**这种依赖（`404` 的用法只有两处，且都是死代码；
   也没有任何按 `detail` 文案判断的逻辑）。
 
+  同一 oracle 在 `/auth/refresh` 还有一处（`auth.py` 用「用户不存在」与
+  「账号已被禁用」两个不同文案），也已统一。修它时暴露出**同一 bug 类的第 5 处**：
+  该端点的 `except Exception` 会把 `_auth_failed()` 抛出的 `HTTPException` 吞成
+  `AppError("刷新令牌失败")` → 500，已一并补上 `except HTTPException: raise`。
+  同时给 `AppError` handler 的 **401 响应补上 `WWW-Authenticate`** ——
+  `AuthenticationError` 及其子类走的是这条 handler，此前同样没有该头。
+
 ## [1.21.0] - 2026-09-12
 
 ### Fixed

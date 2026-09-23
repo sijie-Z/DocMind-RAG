@@ -140,3 +140,81 @@ async def test_http_exception_handler_tolerates_missing_headers():
     response = await http_exception_handler(request, exc)
 
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_app_error_handler_adds_www_authenticate_for_401():
+    """`AuthenticationError` 走的是 AppError handler，此前同样没有该头。"""
+    from app.exceptions import AuthenticationError
+    from app.main import app_error_handler
+
+    request = SimpleNamespace(state=SimpleNamespace(request_id="test-request-id"))
+    response = await app_error_handler(request, AuthenticationError("任意文案"))
+
+    assert response.status_code == 401
+    assert response.headers.get("www-authenticate") == "Bearer"
+
+
+@pytest.mark.asyncio
+async def test_app_error_handler_leaves_non_401_alone():
+    """403 / 404 不该被加上认证挑战头。"""
+    from app.exceptions import AuthorizationError, NotFoundError
+    from app.main import app_error_handler
+
+    request = SimpleNamespace(state=SimpleNamespace(request_id="test-request-id"))
+
+    forbidden = await app_error_handler(request, AuthorizationError("权限不足"))
+    missing = await app_error_handler(request, NotFoundError("资源不存在"))
+
+    assert forbidden.status_code == 403
+    assert forbidden.headers.get("www-authenticate") is None
+    assert missing.status_code == 404
+    assert missing.headers.get("www-authenticate") is None
+
+
+# ── refresh 端点：同一个 oracle 的另一处 ────────────────────
+
+def _refresh_response(user_obj):
+    """以给定的「查到的用户」调用 /auth/refresh，返回响应。"""
+    from fastapi.testclient import TestClient
+
+    from app.core.database import get_db
+    from app.main import app
+    from app.services.auth_service import auth_service as real_auth_service
+
+    token = real_auth_service.create_refresh_token({"user_id": 1, "sub": "someone"})
+
+    async def _override_db():
+        yield AsyncMock()
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with (
+            patch.object(real_auth_service, "is_token_blacklisted", AsyncMock(return_value=False)),
+            patch.object(real_auth_service, "get_user_by_id", AsyncMock(return_value=user_obj)),
+        ):
+            return TestClient(app).post("/api/v1/auth/refresh", json={"refresh_token": token})
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_refresh_endpoint_deleted_and_disabled_are_indistinguishable():
+    """回归：refresh 端点曾用「用户不存在」与「账号已被禁用」两个不同文案 ——
+    同一个用户枚举 oracle 的另一处（PR A 初版漏掉了它）。"""
+    disabled = MagicMock()
+    disabled.username = "someone"
+    disabled.is_active = False
+
+    deleted = _refresh_response(None)
+    inactive = _refresh_response(disabled)
+
+    assert deleted.status_code == inactive.status_code == 401
+    # request_id 每次请求都不同，比较时剔除
+    dropped = {k: v for k, v in deleted.json().items() if k != "request_id"}
+    inact = {k: v for k, v in inactive.json().items() if k != "request_id"}
+    assert dropped == inact
+
+    for response in (deleted, inactive):
+        assert response.headers.get("www-authenticate") == "Bearer"
+        for leak in ("不存在", "禁用"):
+            assert leak not in response.text

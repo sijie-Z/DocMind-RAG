@@ -230,6 +230,9 @@ async def app_error_handler(request: Request, exc: AppError):
             "request_id": request_id,
             "data": None,
         },
+        # RFC 9110：401 MUST 携带 `WWW-Authenticate`。`AuthenticationError` 及其子类
+        # 走的是这条 handler，此前同样没有该头（issue #82）。
+        headers={"WWW-Authenticate": "Bearer"} if exc.status_code == 401 else None,
     )
 
 

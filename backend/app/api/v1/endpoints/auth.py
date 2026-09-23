@@ -7,7 +7,7 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr, field_validator
@@ -29,7 +29,7 @@ from app.models.user import User
 from app.models.user_audit import UserLoginSession
 from app.schemas.auth import ChangePasswordRequest, UpdateProfileRequest
 from app.services.audit_service import audit_service
-from app.services.auth_service import auth_service
+from app.services.auth_service import _auth_failed, auth_service
 
 logger = logging.getLogger(__name__)
 
@@ -433,11 +433,15 @@ async def refresh_token(
         user = await auth_service.get_user_by_id(db, user_id)
 
         if not user or user.username != username:
-            raise AuthenticationError("用户不存在")
+            # 与其他认证失败共用同一响应：不得暴露账户是否存在（否则与下面的
+            # 「账号已被禁用」构成用户枚举 oracle，见 issue #82）
+            logger.warning(f"user_not_found: 刷新令牌指向的用户 {user_id} 不存在")
+            raise _auth_failed()
 
         # 安全加固：被禁用用户不得刷新
         if not user.is_active:
-            raise AuthenticationError("账号已被禁用")
+            logger.warning(f"user_inactive: 用户 {user_id} 已被禁用，拒绝刷新")
+            raise _auth_failed()
 
         # 生成新的访问令牌（与登录 token 的 claims 保持一致）
         new_access_token = auth_service.create_access_token(
@@ -475,6 +479,11 @@ async def refresh_token(
         }
 
     except AuthenticationError:
+        raise
+    except HTTPException:
+        # 认证决策（_auth_failed()）必须直接成为响应，不能被下面的
+        # `except Exception` 吞成 AppError → 500。
+        # 与 `auth_service.get_current_user` 的缓存路径是同一类缺陷（issue #85）。
         raise
     except Exception as e:
         raise AppError("刷新令牌失败", detail=str(e) if settings.EXPOSE_EXCEPTION_DETAIL else None)
