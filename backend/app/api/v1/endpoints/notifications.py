@@ -9,10 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.notification_ws import notification_ws_manager
 from app.core.security import get_current_user
+from app.core.ws_auth import authenticate_ws
 from app.exceptions import NotFoundError
 from app.models.notification import Notification
 from app.models.user import User
-from app.services.auth_service import auth_service
 
 router = APIRouter()
 
@@ -53,41 +53,17 @@ class NotificationCreate(BaseModel):
 @router.websocket("/ws")
 async def notification_ws(
     websocket: WebSocket,
-    token: str | None = Query(None, description="兼容旧客户端：token 走查询参数"),
+    db: AsyncSession = Depends(get_db),
 ):
-    # 安全加固：优先从 Sec-WebSocket-Protocol 提取 auth.<token>（token 不落 URL/日志）
-    protocols = websocket.headers.get("sec-websocket-protocol", "")
-    for proto in protocols.split(","):
-        proto = proto.strip()
-        if proto.startswith("auth."):
-            token = proto[5:]
-            break
-
-    if not token:
-        await websocket.close(code=4003, reason="Token required")
+    # 安全加固：握手阶段必须查库（见 issue #82）。令牌只证明它自己有效——
+    # 用户被删除或禁用后仍可能持有未过期的令牌，此时不得建立连接。
+    # 已删除与已禁用返回完全相同的 close code + reason，不可区分。
+    user = await authenticate_ws(websocket, db)
+    if user is None:
         return
+    user_id = user.id
 
-    clean_token = token.strip().replace('"', '').replace("'", "")
-    payload = auth_service.verify_token(clean_token)
-    if not payload:
-        await websocket.close(code=4001, reason="Invalid token")
-        return
-
-    # 安全加固：仅接受 access token（refresh token 不得建立 WS 连接）
-    if payload.get("type") != "access":
-        await websocket.close(code=4001, reason="Invalid token type")
-        return
-    # 安全加固：校验令牌是否已被吊销
-    if await auth_service.is_token_blacklisted(clean_token):
-        await websocket.close(code=4001, reason="Token revoked")
-        return
-
-    user_id = payload.get("user_id")
-    if not user_id:
-        await websocket.close(code=4002, reason="Missing user id")
-        return
-
-    await notification_ws_manager.connect(int(user_id), websocket)
+    await notification_ws_manager.connect(user_id, websocket)
     try:
         while True:
             data = await websocket.receive_text()
@@ -101,7 +77,7 @@ async def notification_ws(
     except WebSocketDisconnect:
         pass
     finally:
-        notification_ws_manager.disconnect(int(user_id), websocket)
+        notification_ws_manager.disconnect(user_id, websocket)
 
 @router.get("/", response_model=NotificationListResponse, summary="获取通知列表")
 async def get_notifications(
