@@ -274,17 +274,29 @@ async def test_stale_snapshot_of_deleted_user_is_not_trusted(http_client, make_u
 
 
 @pytest.mark.asyncio
-async def test_redis_outage_does_not_change_the_verdict(http_client, make_user):
-    """Redis 不可用不应改变判定结果：DB 才是权威。
+async def test_redis_outage_does_not_change_the_verdict(http_client, make_user, monkeypatch):
+    """Redis 挂掉不应改变判定结果：DB 才是权威。
 
-    （改造前这里也是 200，但走的是「缓存拿不到 → 回退 DB」；现在 Redis 对身份
-    判定已经完全不参与，只有 token 黑名单还依赖它，且黑名单检查是 fail-open 的。）
+    token 黑名单仍依赖 Redis，但它的检查是 fail-open 的（查不到就当没吊销）；
+    身份判定则完全不碰 Redis。
     """
     user = await make_user()
+    calls: list[str] = []
+
+    async def _redis_down(*args, **_kwargs):
+        # 记一笔，证明这次「Redis 挂了」不是空转（否则用例可能只是没走到 Redis）
+        calls.append(str(args[0]) if args else "?")
+        raise ConnectionError("Redis down")
+
+    monkeypatch.setattr("app.services.auth_service.RedisTools.exists", _redis_down)
+    monkeypatch.setattr("app.services.auth_service.RedisTools.get_cache", _redis_down)
 
     response = await http_client.get(_ME, headers=_auth_header(user.id))
 
     assert response.status_code == 200
+    assert any(key.startswith("blacklist:") for key in calls), (
+        f"前提不成立：认证路径没有查过 Redis 黑名单，这次「宕机」是空转（calls={calls}）"
+    )
 
 
 @pytest.mark.asyncio
