@@ -12,12 +12,18 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.security import get_current_user
+from app.core.ws_auth import (
+    WS_CLOSE_AUTH_FAILED,
+    WS_REASON_USER_INVALID,
+    authenticate_ws,
+    close_ws,
+    load_active_ws_user,
+)
 from app.exceptions import AppError, AuthorizationError, NotFoundError, ValidationError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.chat import ChatSessionCreate, ChatStreamRequest, FeedbackRequest
-from app.services.auth_service import auth_service
 from app.services.chat_service import RAGEvent, run_rag_pipeline
 from app.services.rag_service import rag_service
 
@@ -436,39 +442,14 @@ async def get_rag_metrics(
 async def websocket_endpoint(
     websocket: WebSocket,
     conversation_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
 ):
-    # Extract token from Sec-WebSocket-Protocol header (auth.<token>)
-    # Falls back to query param for backward compatibility
-    token = None
-    protocols = websocket.headers.get("sec-websocket-protocol", "")
-    for proto in protocols.split(","):
-        proto = proto.strip()
-        if proto.startswith("auth."):
-            token = proto[5:]
-            break
-    if not token:
-        token = websocket.query_params.get("token")
-
-    if not token:
-        await websocket.close(code=4003, reason="Token required")
+    # 安全加固：握手阶段必须查库。JWT 只证明令牌本身有效——用户被删除或禁用后
+    # 仍可能持有未过期的令牌，此时不得建立连接（见 issue #82）。
+    user = await authenticate_ws(websocket, db)
+    if user is None:
         return
-    try:
-        payload = auth_service.verify_token(token.strip().replace('"', "").replace("'", ""))
-        if not payload:
-            await websocket.close(code=4001, reason="Invalid token")
-            return
-        # 安全加固：仅接受 access token（refresh token 不得建立 WS 连接）
-        if payload.get("type") != "access":
-            await websocket.close(code=4001, reason="Invalid token type")
-            return
-        # 安全加固：校验令牌是否已被吊销
-        if await auth_service.is_token_blacklisted(token.strip().replace('"', "").replace("'", "")):
-            await websocket.close(code=4001, reason="Token revoked")
-            return
-        user_id = payload.get("user_id")
-    except Exception as e:
-        await websocket.close(code=4002, reason=str(e))
-        return
+    user_id = user.id
 
     # Accept the auth subprotocol so the client knows it was accepted
     await manager.connect(websocket, user_id)
@@ -492,20 +473,18 @@ async def websocket_endpoint(
                     continue
 
                 async with AsyncSessionLocal() as session:
-                    user_result = await session.execute(
-                        select(User).where(User.id == user_id)
-                    )
-                    db_user = user_result.scalar_one_or_none()
-                    search_org_id = (
-                        db_user.organization_id
-                        if (db_user and db_user.organization_id)
-                        else 1
-                    )
-                    org_id = (
-                        db_user.organization_id
-                        if (db_user and db_user.organization_id)
-                        else None
-                    )
+                    # 安全加固：每条消息都重新校验用户状态——连接建立后用户被删除
+                    # 或禁用时，既不回退组织继续跑 RAG，也不静默降级，直接断开。
+                    user_state = await load_active_ws_user(session, user_id)
+                    if user_state is None:
+                        logger.warning(
+                            f"WebSocket 用户 {user_id} 已被删除或禁用，关闭连接"
+                        )
+                        await close_ws(websocket, WS_CLOSE_AUTH_FAILED, WS_REASON_USER_INVALID)
+                        return
+
+                    search_org_id = user_state.organization_id or 1
+                    org_id = user_state.organization_id or None
 
                     # Use an asyncio.Queue to collect pipeline events
                     queue: asyncio.Queue = asyncio.Queue()
@@ -586,7 +565,10 @@ async def websocket_endpoint(
                 )
 
     except WebSocketDisconnect:
-        # 安全加固：客户端断连时取消正在运行的 pipeline 任务（LLM 流/DB 会话随之释放）
+        pass
+    finally:
+        # 安全加固：客户端断连时取消正在运行的 pipeline 任务（LLM 流/DB 会话随之释放）；
+        # 服务端主动关闭（认证失效）同样走这条收尾路径，连接表不会残留死连接。
         if pipeline_task is not None and not pipeline_task.done():
             pipeline_task.cancel()
             try:
