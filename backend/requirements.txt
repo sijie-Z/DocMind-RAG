@@ -50,4 +50,4 @@ opentelemetry-sdk>=1.22.0
 opentelemetry-exporter-otlp-proto-grpc>=1.22.0
 opentelemetry-instrumentation-fastapi>=0.43b0
 langfuse>=2.55.0
-mcp>=1.0.0
+mcp>=2.2.0
