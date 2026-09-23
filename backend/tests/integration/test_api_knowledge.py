@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.models.document import Document
+from app.models.user import User
 from app.schemas.knowledge import SearchSuggestionResponse
 
 
@@ -67,6 +69,26 @@ def _make_mock_document(doc_id="doc-1", filename="report.pdf", status_name="inde
     doc.uploaded_by = 1
     doc.organization_id = 1
     return doc
+
+
+def _make_db_get_side_effect(document, user=None):
+    """按模型分派的 `db.get` side_effect。
+
+    同一个 `db.get` 被两处共用：`permission_required` 查 `User`（app/core/security.py:82），
+    `get_document_for_user` 查 `Document`（app/core/security.py:60）。所以只有 `Document`
+    路由能用笼统的 `return_value=`；同时经过权限校验的路由必须按模型分派，
+    否则用户 mock 会被当成文档返回（或反之），权限/存在性判断全部失真。
+    """
+    user = user if user is not None else _make_mock_db_user()
+
+    async def _side_effect(model, *args, **kwargs):
+        if model is User:
+            return user
+        if model is Document:
+            return document
+        return None
+
+    return _side_effect
 
 
 def _override_get_db(mock_db=None):
@@ -211,9 +233,15 @@ class TestKnowledgeStats:
         from app.main import app
         mock_user = _make_mock_user()
 
+        # permission_required 不看注入的 current_user，而是用 `db.get(User, ...)` 重查
+        # （app/core/security.py:82）。只 override get_current_user 会让校验打到真库，
+        # 查不到用户 -> get_user_permissions(db, None, ...) 直接 AttributeError。
+        override_func, _mock_db = _override_get_db()
+
         async def _override_user():
             return mock_user
 
+        app.dependency_overrides[get_db] = override_func
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
@@ -232,6 +260,7 @@ class TestKnowledgeStats:
                 assert data["success"] is True
                 assert "stats" in data
             finally:
+                app.dependency_overrides.pop(get_db, None)
                 app.dependency_overrides.pop(get_current_user, None)
 
     def test_get_stats_no_auth(self, client: TestClient):
@@ -347,7 +376,6 @@ class TestKnowledgeSuggestions:
         # 于是 `db.get` 落回真库、返回 None，请求在依赖阶段就炸了，根本到不了 handler
         # —— 这个用例因此一直红着，且与它想验证的东西无关（issue #83 的 mock 装配类问题）。
         override_db, _mock_db = _override_get_db()
-
         async def _override_user():
             return mock_user
 
@@ -428,9 +456,9 @@ class TestKnowledgeRebuild:
         doc.organization_id = 1
 
         override_func, mock_db = _override_get_db()
-        mock_scalar = MagicMock()
-        mock_scalar.scalar_one_or_none.return_value = doc
-        mock_db.execute = AsyncMock(return_value=mock_scalar)
+        # 端点走的是 get_document_for_user -> db.get(Document, ...)，不是 db.execute；
+        # 且 db.get 还要先给 permission_required 返回 User，故按模型分派。
+        mock_db.get = AsyncMock(side_effect=_make_db_get_side_effect(doc))
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
 
