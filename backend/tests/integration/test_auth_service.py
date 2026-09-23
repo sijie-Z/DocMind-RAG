@@ -181,13 +181,15 @@ class TestRBAC:
         assert callable(dep)
 
 
-# ── 缓存恢复路径的认证决策 ────────────────────────────────
+# ── 身份权威：DB（issue #82 / PR B）────────────────────────
 
-class TestCachePathAuthDecision:
-    """缓存路径抛出的 `HTTPException` 必须直接成为响应。
+class TestDbIsTheOnlyIdentityAuthority:
+    """`get_current_user` 不再读 `user:{id}` 缓存，身份每次请求回源 DB。
 
-    回归 #85：`except Exception` 曾把「账号已被禁用」的 401 吞成「回退到数据库查询」，
-    与那行「安全加固」注释声称的行为相反。
+    这里替换掉了 PR A 的 `TestCachePathAuthDecision`（回归 #85）—— 那个类测的是
+    「缓存命中」这条路径的异常语义，而该路径已被整体删除（issue #82 / PR B）。
+    `except Exception` 吞掉认证决策的坑也随之消失：缓存解析不再存在，也就没有
+    需要吞的解析失败。
     """
 
     @staticmethod
@@ -195,47 +197,54 @@ class TestCachePathAuthDecision:
         token = auth_service.create_access_token({"user_id": 1})
         return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
-    @pytest.mark.asyncio
-    async def test_disabled_cached_user_raises_401_without_db_fallback(
-        self, auth_service: AuthService
-    ):
-        cached = json.dumps({"id": 1, "username": "u", "role": "user", "is_active": False})
-        db = AsyncMock()
-
-        with patch("app.services.auth_service.RedisTools") as mock_redis:
-            mock_redis.exists = AsyncMock(return_value=False)  # 未在黑名单
-            mock_redis.get_cache = AsyncMock(return_value=cached)
-            mock_redis.delete_cache = AsyncMock()
-
-            with pytest.raises(HTTPException) as exc:
-                await auth_service.get_current_user(
-                    credentials=self._credentials(auth_service), db=db
-                )
-
-        assert exc.value.status_code == 401
-        # 关键断言：认证决策不得被吞成数据库查询
-        db.execute.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_unparsable_cache_still_falls_back_to_db(self, auth_service: AuthService):
-        """反向守卫：只吞「认证决策」，合法的解析失败仍应回退到数据库。
-
-        没有这条，把 `except Exception` 整个删掉也能让上面那条测试通过。
-        """
+    @staticmethod
+    def _db_returning(user) -> AsyncMock:
         db = AsyncMock()
         result = MagicMock()
-        result.scalar_one_or_none.return_value = None  # DB 里也查不到 → 走 404 分支
+        result.scalar_one_or_none.return_value = user
         db.execute.return_value = result
+        return db
+
+    @pytest.mark.asyncio
+    async def test_redis_outage_does_not_affect_identity(self, auth_service: AuthService):
+        """Redis 全挂时身份判定照常。
+
+        改造前这是「缓存拿不到 → 回退 DB」；现在 DB 不是回退路径，而是唯一路径，
+        所以 Redis 的可用性对身份判定不再有任何影响（token 黑名单仍用它，且
+        `is_token_blacklisted` 是 fail-open 的）。
+        """
+        user = MagicMock()
+        user.id = 1
+        user.username = "u"
+        user.role = "user"
+        user.is_active = True
+        db = self._db_returning(user)
+
+        with patch("app.services.auth_service.RedisTools") as mock_redis:
+            mock_redis.exists = AsyncMock(side_effect=ConnectionError("Redis down"))
+            mock_redis.get_cache = AsyncMock(side_effect=ConnectionError("Redis down"))
+            result = await auth_service.get_current_user(
+                credentials=self._credentials(auth_service), db=db
+            )
+
+        assert result is user
+        db.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_decision_comes_from_db_not_cache(self, auth_service: AuthService):
+        """缓存里是「有效账号」的快照，DB 里该账号已被禁用 → 401。"""
+        stale = json.dumps({"id": 1, "username": "u", "role": "user", "is_active": True})
+        disabled = MagicMock()
+        disabled.id = 1
+        disabled.is_active = False
 
         with patch("app.services.auth_service.RedisTools") as mock_redis:
             mock_redis.exists = AsyncMock(return_value=False)
-            mock_redis.get_cache = AsyncMock(return_value="{ 不是合法 JSON")
-            mock_redis.delete_cache = AsyncMock()
-
-            with pytest.raises(HTTPException):
+            mock_redis.get_cache = AsyncMock(return_value=stale)
+            with pytest.raises(HTTPException) as exc:
                 await auth_service.get_current_user(
-                    credentials=self._credentials(auth_service), db=db
+                    credentials=self._credentials(auth_service),
+                    db=self._db_returning(disabled),
                 )
 
-        mock_redis.delete_cache.assert_called_once()
-        db.execute.assert_called_once()
+        assert exc.value.status_code == 401

@@ -218,9 +218,8 @@ async def update_user_admin(
             target_id=str(user_id),
             detail=f"更新用户 {user.username}",
         )
-        # 安全加固：角色/组织/状态变更后使目标用户缓存失效
-        from app.core.redis import RedisTools
-        await RedisTools.delete_cache(f"user:{user_id}")
+        # 安全加固：角色/组织/状态变更立即对后续请求生效
+        # （身份由每次请求回源 DB 决定，不再需要让任何缓存失效）
         await db.commit()
         return {"message": "用户更新成功", "user_id": user_id}
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
@@ -250,9 +249,6 @@ async def reset_user_password_admin(
             raise AuthorizationError("无权重置该用户密码")
 
         user.hashed_password = auth_service.hash_password(body.new_password)
-        # 安全加固：重置密码后使目标用户缓存失效
-        from app.core.redis import RedisTools
-        await RedisTools.delete_cache(f"user:{user_id}")
         await _log_user_activity(
             db,
             current_user.id,
@@ -859,10 +855,7 @@ async def update_user_role(
         ):
             raise AuthorizationError("无权修改该用户的角色")
 
-        # 安全加固：修改角色后使目标用户缓存失效，防止陈旧权限继续生效
-        from app.core.redis import RedisTools
-        await RedisTools.delete_cache(f"user:{user.id}")
-
+        # 安全加固：角色变更立即对后续请求生效（身份由每次请求回源 DB 决定）
         user_obj: Any = user
         user_obj.role = role
         await _log_user_activity(
@@ -901,9 +894,6 @@ async def delete_user(
 
         user_to_deactivate: Any = user
         user_to_deactivate.is_active = False
-        # 安全加固：禁用账号后使目标用户缓存失效
-        from app.core.redis import RedisTools
-        await RedisTools.delete_cache(f"user:{user_id}")
         await _log_user_activity(
             db,
             current_user.id,
@@ -1040,9 +1030,6 @@ async def update_password(
 
         current_user_obj: Any = db_user
         current_user_obj.hashed_password = auth_service.hash_password(password_in.new_password)
-        # 安全加固：改密后使用户缓存失效
-        from app.core.redis import RedisTools
-        await RedisTools.delete_cache(f"user:{current_user.id}")
 
         await create_notification(
             db,

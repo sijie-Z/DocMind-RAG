@@ -29,7 +29,14 @@ class _AsyncCtxMgr:
         return False
 
 
-def _make_mock_user(org_id=1):
+def _make_mock_user(org_id=1, *, is_superuser=False):
+    """调用方主体。
+
+    `permission_required` 现在直接信任 `current_user`（它本身就是每次请求回源 DB
+    加载的 User），不再二次 `db.get(User, ...)`。所以「这个调用方有权限」只能通过
+    `current_user` 表达 —— 以前那种「`current_user` 是普通用户、但 mock 的 `db.get`
+    返回超管」的搭配不再能绕过权限检查（issue #82 / PR B）。
+    """
     user = MagicMock()
     user.id = 1
     user.username = "testuser"
@@ -37,7 +44,7 @@ def _make_mock_user(org_id=1):
     user.full_name = "Test User"
     user.role = "user"
     user.organization_id = org_id
-    user.is_superuser = False
+    user.is_superuser = is_superuser
     user.is_active = True
     return user
 
@@ -123,7 +130,8 @@ class TestDocumentUpload:
     def test_upload_success(self, client: TestClient):
         """上传有效文件应返回 201 或 200。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        # 本用例只关心上传主流程，权限门禁用超管主体一次性通过
+        mock_user = _make_mock_user(is_superuser=True)
         override_func, mock_db = _override_get_db()
 
         async def _override_user():

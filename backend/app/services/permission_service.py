@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import AsyncSessionLocal
+from app.exceptions import AuthenticationError
 from app.models.rbac import Permission, PermissionType, Role, user_organization_role_association
 from app.models.user import User
 
@@ -23,6 +24,18 @@ class PermissionService:
         # 确保传入的是对象而不是ID
         if isinstance(user, int):
             user = await db.get(User, user)
+
+        if user is None:
+            # 纵深防御，两个来源都要挡住：
+            #   1. 调用方直接把 None 传进来；
+            #   2. 上面那次 `db.get` 查不到（用户已被删除）—— 传入 int 的分支。
+            # 此前这两种情况都会一路走到 `user.is_superuser` 抛 AttributeError，
+            # 被上游的 `except Exception` 包成 500；但「认证主体不存在」是 401，
+            # 不是服务器内部错误（issue #82）。
+            # 抛 `AuthenticationError`（AppError 子类）而不是 `HTTPException`：
+            # `app.main` 的 AppError handler 会给 401 补上 RFC 9110 要求的
+            # `WWW-Authenticate: Bearer`，与其它认证失败响应保持同一形状。
+            raise AuthenticationError("认证主体不存在，无法解析权限")
 
         permissions_set = set()
 
