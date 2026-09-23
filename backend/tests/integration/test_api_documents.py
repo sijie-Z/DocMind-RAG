@@ -199,7 +199,7 @@ class TestDocumentUpload:
     def test_upload_no_file(self, client: TestClient):
         """不传文件应返回 422。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         # 默认 _override_get_db() 的 db.get 返回超管 -> 权限放行，才会走到缺 file 的 422。
         override_func, _mock_db = _override_get_db()
@@ -379,7 +379,7 @@ class TestDocumentDelete:
     def test_delete_document_success(self, client: TestClient):
         """删除文档应返回成功。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
         doc = _make_mock_document()
 
         override_func, mock_db = _override_get_db()
@@ -411,7 +411,7 @@ class TestDocumentDelete:
     def test_delete_document_not_found(self, client: TestClient):
         """不存在的文档删除应返回 404。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
         # Document 查不到 -> get_document_for_user 抛 404；User 仍返回超管让权限放行。

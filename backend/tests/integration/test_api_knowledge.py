@@ -239,7 +239,7 @@ class TestKnowledgeStats:
     def test_get_stats_success(self, client: TestClient):
         """GET /knowledge/stats/{org_id} 应返回统计信息。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         # permission_required 不看注入的 current_user，而是用 `db.get(User, ...)` 重查
         # （app/core/security.py:82）。只 override get_current_user 会让校验打到真库，
@@ -377,7 +377,7 @@ class TestKnowledgeSuggestions:
     def test_get_suggestions(self, client: TestClient):
         """GET /knowledge/suggestions 应返回建议列表。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         # 必须连 get_db 一起 mock：`permission_required` 依赖会 `await db.get(User, ...)`
         # 再把它交给 `permission_service`。原先只 override 了 get_current_user，
@@ -414,7 +414,7 @@ class TestKnowledgeSuggestions:
         校验响应体，缺字段会以 ValidationError 的形式当场暴露。
         """
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         override_db, _mock_db = _override_get_db()
 
@@ -452,7 +452,7 @@ class TestKnowledgeRebuild:
     def test_rebuild_success(self, client: TestClient):
         """POST /knowledge/rebuild/{id} 应提交重建任务。"""
         from app.main import app
-        mock_user = _make_mock_user()
+        mock_user = _make_mock_user(is_superuser=True)
 
         doc = MagicMock()
         doc.id = "doc-1"
