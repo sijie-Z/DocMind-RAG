@@ -230,6 +230,9 @@ async def app_error_handler(request: Request, exc: AppError):
             "request_id": request_id,
             "data": None,
         },
+        # RFC 9110：401 MUST 携带 `WWW-Authenticate`。`AuthenticationError` 及其子类
+        # 走的是这条 handler，此前同样没有该头（issue #82）。
+        headers={"WWW-Authenticate": "Bearer"} if exc.status_code == 401 else None,
     )
 
 
@@ -246,7 +249,11 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             "detail": exc.detail,
             "request_id": request_id,
             "data": None
-        }
+        },
+        # 必须透传：RFC 9110 规定 401 MUST 携带 `WWW-Authenticate`。
+        # 原先没传这一项，导致 auth_service 里显式设置的 `WWW-Authenticate: Bearer`
+        # 全部到不了客户端（issue #82）。
+        headers=exc.headers,
     )
 
 

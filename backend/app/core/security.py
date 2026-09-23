@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.exceptions import AuthorizationError, NotFoundError
 from app.models.rbac import PermissionType
 from app.models.user import User
 from app.services.auth_service import auth_service
@@ -54,12 +55,19 @@ async def get_document_for_user(
     current_user: User,
     document_id: str,
 ) -> "Document":
-    """Load a document and enforce org-level access in one place."""
+    """Load a document and enforce org-level access in one place.
+
+    抛 `AppError` 子类（`NotFoundError` / `AuthorizationError`）而**不是** `HTTPException`：
+    这是应用层语义错误，会被 `app/main.py:218` 的 `AppError` handler 转成正确的
+    404/403。调用方本来就都在 `except (AppError, NotFoundError, AuthorizationError, ...)`
+    里 `raise` 放行；抛 `HTTPException` 则会绕过它们、落进各自的 `except Exception`
+    被包装成 `AppError("...失败")` → **500**（见 issue #90）。
+    """
     from app.models.document import Document
 
     document = await db.get(Document, document_id)
     if not document:
-        raise HTTPException(status_code=404, detail="文档不存在")
+        raise NotFoundError("文档不存在")
 
     org_id = get_user_org_id(current_user) or 1
     if (
@@ -67,7 +75,7 @@ async def get_document_for_user(
         and current_user.role != "admin"
         and document.organization_id != org_id
     ):
-        raise HTTPException(status_code=403, detail="无权访问该文档")
+        raise AuthorizationError("无权访问该文档")
     return document
 
 
