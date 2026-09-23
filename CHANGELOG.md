@@ -77,6 +77,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   依赖里就炸了，**从未跑到过 handler**（issue #83 的 mock 装配类问题），
   并非「一直红着」的合法红灯。
 
+  回归（`tests/unit` + `tests/integration`）：基线 7 failed / 589 passed → 6 failed / 595 passed，
+  失败集合逐条相同，多出的 6 个 passed 即本 PR 新增与修好的用例。
+- **组织树查询对「认证主体不存在」无防护**（issue #82 的 5.2）。
+  `organization_service.get_organization_tree` 直接解引用 `user.is_superuser`，
+  `user` 为 None 时抛 `AttributeError` —— 与 `permission_service.py:30` 是同一类缺陷。
+  **实测症状与 issue 描述不同**：方法体内的兜底 `except Exception` 把它吞成空树
+  （`await get_organization_tree(db, None)` → `[]`），调用方拿到的是
+  **200 + `data: []`** 而不是 500 —— 问题没变小，反而更难发现：
+  **认证失败被伪装成一次成功的空查询**。
+  已加显式守卫并抛 `AuthenticationError`（**401**）：401 而非 403，因为 403 的前提是
+  「已认证但权限不足」，而这里根本不知道请求者是谁；401 而非空结果，因为本方法返回的
+  正是**授权可见范围**（超管看全树），对未建立身份的主体回一个「成功的空结果」
+  等于用一个合法业务响应回答认证问题。这与 PR A 刚统一的 401 契约一致
+  （`_auth_failed()` 覆盖的第三种情形正是「主体无法建立」）。
+  守卫**放在 `try` 之外** —— 放进 try 会被同一个兜底 `except` 吞掉，等于没抛。
+  同时给调用方 `app/api/v1/endpoints/organizations.py` 的 `except Exception` 之前补
+  `except AppError: raise`，否则 401 会被重新包装成 `AppError` → 500（与 issue #90 同一修法）。
+
 ## [1.21.0] - 2026-09-12
 
 ### Fixed
