@@ -18,13 +18,15 @@
 import json
 import os
 import uuid
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, update
+from sqlalchemy.exc import OperationalError
 
-from app.core.database import AsyncSessionLocal, engine
+from app.core.database import AsyncSessionLocal, engine, get_db
 from app.core.redis import close_redis, get_redis
 from app.main import app
 from app.models.user import User
@@ -315,3 +317,48 @@ async def test_auth_path_writes_no_user_cache(http_client, make_user):
 
     assert response.status_code == 200
     assert await redis.get(key) is None
+
+
+# ── DB 故障 ≠ 查无此人 ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_db_outage_is_not_disguised_as_401(make_user):
+    """数据库抖动不得被伪装成「认证失败」。
+
+    PR B 之后 `get_current_user` **每个请求**都要查库，而 PR A 把「用户不存在」
+    统一成了 401。这两件事叠在一起就有一个陷阱：只要用户加载路径经过
+    `AuthService.get_user_by_id`（它 `except Exception: return None`），
+    一次 DB 超时/连接中断就会被映射成「用户不存在」→ 401 → 前端清 token 跳登录页。
+    用户看到「登录已过期」，真实原因是数据库挂了，而且从此每个请求都中招。
+
+    所以这条断言的是：**DB 抛错时不得是 401**（当前实现让它冒泡成 5xx）。
+    它同时是 `get_user_by_id` 那个吞异常 helper 的护栏 —— 谁把加载路径改成走它，
+    这条就会红。
+    """
+    user = await make_user()
+
+    session = MagicMock()
+    session.execute = AsyncMock(
+        side_effect=OperationalError("SELECT ...", {}, Exception("connection lost"))
+    )
+    session.rollback = AsyncMock()
+    session.close = AsyncMock()
+
+    async def _override_db():
+        yield session
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        # 需要看真实的错误响应，而不是让异常穿出 ASGI 层
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get(_ME, headers=_auth_header(user.id))
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code != 401, (
+        "DB 故障被伪装成了认证失败 —— 前端会把「数据库挂了」显示成「登录已过期」。"
+        f"实际响应: {response.status_code} {response.text}"
+    )
+    assert response.status_code >= 500
