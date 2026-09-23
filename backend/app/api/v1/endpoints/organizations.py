@@ -41,6 +41,11 @@ async def get_organization_tree(
             "message": "获取成功",
             "data": tree
         }
+    except AppError:
+        # 领域异常自带正确的状态码（如 AuthenticationError → 401，issue #82）。
+        # 不先放行的话，它会被下面的 `except Exception` 重新包装成 500 —— 与
+        # issue #90 是同一修法。本文件其余端点（如 create_organization）同理。
+        raise
     except Exception as e:
         raise AppError(f"获取组织架构树失败: {str(e)}")
 

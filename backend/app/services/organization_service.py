@@ -9,6 +9,7 @@ from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.exceptions import AuthenticationError
 from app.models.document import Document
 from app.models.organization import Organization, user_organization
 from app.models.user import User
@@ -21,14 +22,25 @@ class OrganizationService:
     async def get_organization_tree(self, db: AsyncSession, user: User) -> list[dict]:
         """
         获取组织树结构
-        
+
         Args:
             db: 数据库会话
             user: 当前用户对象 (User)
-            
+
         Returns:
             树形结构的组织列表
+
+        Raises:
+            AuthenticationError: `user` 为 None —— 认证主体不存在，可见范围无从判定（issue #82）。
         """
+        # 认证主体不存在 → 401。原先直接 `user.is_superuser` 会 AttributeError，
+        # 而下面的 `except Exception` 会把它吞成「空树」，于是**认证失败被伪装成
+        # 一次成功的空查询**。注意这个判断必须在 `try` 之外：放进 try 里，
+        # 同样会被那个兜底 except 吞掉，等于没抛。
+        if user is None:
+            logger.warning("get_organization_tree 收到 user=None，拒绝返回组织树")
+            raise AuthenticationError()
+
         try:
             # 1. 获取所有组织
             # 这里可以利用刚才设置的超管特权
