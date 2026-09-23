@@ -211,6 +211,9 @@ async def get_search_suggestions(
 
         return {
             "success": True,
+            # `SearchSuggestionResponse.query` 是必填字段（描述即「原始查询」），
+            # 缺了它响应模型校验必然失败 —— 即本端点不可能返回 200（issue #91）。
+            "query": q,
             "suggestions": suggestions
         }
 

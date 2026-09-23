@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.schemas.knowledge import SearchSuggestionResponse
 
 
 @pytest.fixture
@@ -341,9 +342,16 @@ class TestKnowledgeSuggestions:
         from app.main import app
         mock_user = _make_mock_user()
 
+        # 必须连 get_db 一起 mock：`permission_required` 依赖会 `await db.get(User, ...)`
+        # 再把它交给 `permission_service`。原先只 override 了 get_current_user，
+        # 于是 `db.get` 落回真库、返回 None，请求在依赖阶段就炸了，根本到不了 handler
+        # —— 这个用例因此一直红着，且与它想验证的东西无关（issue #83 的 mock 装配类问题）。
+        override_db, _mock_db = _override_get_db()
+
         async def _override_user():
             return mock_user
 
+        app.dependency_overrides[get_db] = override_db
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
@@ -359,6 +367,43 @@ class TestKnowledgeSuggestions:
                 data = r.json()
                 assert len(data["suggestions"]) == 3
             finally:
+                app.dependency_overrides.pop(get_db, None)
+                app.dependency_overrides.pop(get_current_user, None)
+
+    def test_get_suggestions_response_matches_model(self, client: TestClient):
+        """成功响应必须能通过本端点自己声明的响应模型（issue #91）。
+
+        `SearchSuggestionResponse.query` 是必填字段，而 handler 原先不返回它，
+        于是响应模型校验必然失败 —— 端点不可能返回 200。这里直接拿声明的模型
+        校验响应体，缺字段会以 ValidationError 的形式当场暴露。
+        """
+        from app.main import app
+        mock_user = _make_mock_user()
+
+        override_db, _mock_db = _override_get_db()
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_current_user] = _override_user
+
+        with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
+            mock_ks.get_search_suggestions = AsyncMock(return_value=["annual report"])
+            try:
+                r = client.get(
+                    "/api/v1/knowledge/suggestions?q=annual&organization_id=1",
+                    headers={"Authorization": "Bearer test_token"}
+                )
+                assert r.status_code == 200
+                data = r.json()
+
+                # 通过响应模型 = 端点的契约成立
+                parsed = SearchSuggestionResponse.model_validate(data)
+                assert parsed.query == "annual"  # 回显原始查询串
+                assert parsed.suggestions == ["annual report"]
+            finally:
+                app.dependency_overrides.pop(get_db, None)
                 app.dependency_overrides.pop(get_current_user, None)
 
     def test_get_suggestions_no_auth(self, client: TestClient):

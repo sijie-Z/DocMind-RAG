@@ -63,6 +63,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AppError("刷新令牌失败")` → 500，已一并补上 `except HTTPException: raise`。
   同时给 `AppError` handler 的 **401 响应补上 `WWW-Authenticate`** ——
   `AuthenticationError` 及其子类走的是这条 handler，此前同样没有该头。
+- **`GET /knowledge/suggestions` 不可能返回 200**（issue #91）。
+  端点声明 `response_model=SearchSuggestionResponse`，而该模型的 `query` 字段是必填
+  （字段描述即「原始查询」），handler 的成功返回值里却只有 `success` / `suggestions`。
+  于是**成功路径必然触发响应模型校验失败**
+  （`ResponseValidationError: {'type': 'missing', 'loc': ('response', 'query')}`），
+  被全局异常处理兜成 500 —— 该端点**没有任何一条路径能返回 200**，而 500 的成因
+  （响应模型不匹配）在报错里完全看不出来。已按裁定补上 `"query": q`（回显原始查询串，
+  与字段描述一致），**schema 未改**。
+  回归测试 `TestKnowledgeSuggestions::test_get_suggestions_response_matches_model`
+  直接拿端点自己声明的模型校验响应体。同文件原有的 `test_get_suggestions` 也一并修好：
+  它只 override 了 `get_current_user` 而没 override `get_db`，请求在 `permission_required`
+  依赖里就炸了，**从未跑到过 handler**（issue #83 的 mock 装配类问题），
+  并非「一直红着」的合法红灯。
 
 ## [1.21.0] - 2026-09-12
 
