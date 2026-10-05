@@ -24,6 +24,10 @@ jobs:
           # 只阻断 high 及以上：单人项目不该因为一个 low 级 advisory 就卡住 PR。
           # 较低等级交由 Dependabot 持续跟踪。
           fail-on-severity: high
+          # 默认只查 runtime scope，而本仓库 6 个 high 里 4 个源自 devDependency
+          # （@vue/eslint-config-typescript 那条链）—— 开发依赖同样会在本地与 CI 里
+          # 执行（postinstall / 构建工具），不属于"可以忽略"的类别。
+          fail-on-scopes: runtime, development
           # 不启 license 检查：仓库目前没有明确的许可证策略，
           # 没有规则的门禁只是"看起来专业"的噪音。
           license-check: false
