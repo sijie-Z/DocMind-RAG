@@ -69,6 +69,23 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+      elasticsearch:
+        # 与 ci-fast.yml 的 integration job 保持同一份定义（有意的重复，见那边注释）。
+        # 加它的原因：这个 job 的 env 里 ELASTICSEARCH_HOSTS 指向 localhost:9200，
+        # 而 services 里只有 MySQL + Redis —— **env 指向一个不存在的服务**，
+        # 任何依赖真实 ES 的集成测试在这里必然连接失败。
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: 'false'
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd="curl -sf http://localhost:9200/_cluster/health"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
 
     env:
       DATABASE_URL: mysql+aiomysql://root:root@127.0.0.1:3306/test_db

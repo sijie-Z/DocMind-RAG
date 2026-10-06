@@ -214,7 +214,7 @@ jobs:
   # （本仓库的 main 只在发版时更新），会让 integration 的定义无法跟随 develop 演进。
   # 用同 workflow 内的 needs + if 表达同一语义，且无此约束。
   integration:
-    name: Integration Tests (MySQL + Redis)
+    name: Integration Tests (MySQL + Redis + ES)
     needs: [backend-tests, migration-mysql]
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
@@ -259,6 +259,29 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+      elasticsearch:
+        # 版本与 docker-compose.yml 的 docmind-elasticsearch 保持一致 ——
+        # CI 要验的是生产的**行为**，用别的版本等于测一个生产里不存在的组合。
+        #
+        # 为什么必须加：此前 job 名写着 "(MySQL + Redis)"、services 里也确实没有 ES，
+        # 但 env 里 ELASTICSEARCH_HOSTS 指向 localhost:9200 —— **指向一个不存在的服务**。
+        # 后果是任何依赖真实 ES 的集成测试在 CI 上必然连接失败
+        # （`tests/integration/test_index_*.py` 就是撞在这上面）。
+        #
+        # 单节点 + 关安全：CI 里不需要集群与认证，只验行为。
+        # 堆内存压到 512m，避免这个 job 拖垮 runner。
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: 'false'
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd="curl -sf http://localhost:9200/_cluster/health"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
 
     env:
       DATABASE_URL: mysql+aiomysql://root:root@127.0.0.1:3306/test_db
