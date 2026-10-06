@@ -45,6 +45,32 @@ pytestmark = pytest.mark.skipif(
     reason="需要真实 Elasticsearch（设置 RUN_INTEGRATION=1，并确保 ES 可达）",
 )
 
+
+def _es_reachable() -> bool:
+    """CI 的 integration job **只提供 MySQL + Redis**（job 名字里就写着），没有 ES。
+
+    没有这个守卫，本文件会在 CI 上全部 **ERROR** 而不是 SKIP —— 而 ERROR 是红的。
+    `RUN_INTEGRATION` 门只说明"允许跑集成测试"，不等于"ES 一定在"。
+    """
+    import socket
+    from urllib.parse import urlparse
+
+    for host in settings.ELASTICSEARCH_HOSTS:
+        u = urlparse(host)
+        try:
+            with socket.create_connection((u.hostname, u.port or 9200), timeout=2):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+if not _es_reachable():
+    pytestmark = [
+        pytestmark,
+        pytest.mark.skip(reason="Elasticsearch 不可达（CI 的 integration job 不提供 ES）"),
+    ]
+
 # 与配置**故意不同**的维度，用来触发不匹配
 _WRONG_DIMS = 17
 _SEED_DOCS = 3
