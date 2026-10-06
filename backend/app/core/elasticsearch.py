@@ -14,6 +14,15 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+class IndexConfigError(Exception):
+    """索引配置与现存索引不一致（向量维度不匹配、mapping 缺字段等）。
+
+    **这个异常的存在意义是阻止自动删数据。**
+    维度对不上时重建索引会销毁全部已索引内容，所以这里一律只报告、不重建 ——
+    删除必须由人显式发起。
+    """
+
+
 class _ESHolder:
     """Lifecycle-managed Elasticsearch client holder."""
 
@@ -21,6 +30,9 @@ class _ESHolder:
         self._client: AsyncElasticsearch | None = None
         self.es_analyzer: str = "cjk"
         self.es_search_analyzer: str = "cjk"
+        # 索引配置问题：不阻断 ES 客户端的其他用途，但索引/检索会不可用。
+        # 由 /health 与文档处理路径读取（见 get_index_error）。
+        self.index_error: str | None = None
 
     @property
     def client(self) -> AsyncElasticsearch | None:
@@ -50,7 +62,16 @@ class _ESHolder:
             except Exception:
                 logger.info(f"IK analyzer not found — using built-in '{self.es_analyzer}' analyzer")
 
-            await _create_index_if_not_exists(self._client)
+            try:
+                await _create_index_if_not_exists(self._client)
+            except IndexConfigError as e:
+                # 索引配置不一致：**保留客户端**（ES 的其他用途仍可用），只记下问题。
+                #
+                # 关键：不能让这个异常落进下面的 `except Exception` —— 那会把 _client
+                # 置为 None，使整个 ES 不可用，反而让"维度配错了"表现为"ES 连不上"，
+                # 更难排查。配置问题就该如实报成配置问题。
+                self.index_error = str(e)
+                logger.error(f"[索引配置错误] {e}")
         except Exception as e:
             logger.error(f"Elasticsearch connection failed: {e}")
             self._client = None
@@ -164,56 +185,125 @@ def _knowledge_index_mapping() -> dict:
     }
 
 
-async def _create_index_if_not_exists(client: AsyncElasticsearch):
-    """Create the knowledge index if it doesn't exist, or fix dimension mismatches."""
+async def _count_index_docs(client: AsyncElasticsearch, index_name: str) -> int:
+    """索引里现有文档数。
+
+    用于在任何破坏性操作**之前**如实报告「将要失去什么」。
+    统计失败返回 -1（区别于「确实是 0 篇」）。
+    """
     try:
-        index_name = settings.ELASTICSEARCH_INDEX_NAME
+        res = await client.count(index=index_name)
+        return int(res.get("count", 0))
+    except Exception as e:  # noqa: BLE001 — 统计失败不该阻断主流程，但必须如实标注
+        logger.warning(f"统计索引文档数失败（{index_name}）: {e}")
+        return -1
+
+
+async def _create_index_if_not_exists(client: AsyncElasticsearch):
+    """索引不存在则创建；**存在则只校验，永不删除**。
+
+    维度或 mapping 不一致时抛 `IndexConfigError`，由调用方决定怎么处理。
+    这个函数**不会**销毁已有数据 —— 删除必须显式发起（见 recreate_knowledge_index）。
+
+    此前的行为是「不匹配就重建」，等于**改一次 VECTOR_DIMENSION 就清空整个知识库**，
+    而且它挂在每次文档处理都会走到的路径上。
+    """
+    index_name = settings.ELASTICSEARCH_INDEX_NAME
+
+    try:
         exists = await client.indices.exists(index=index_name)
-        if not exists:
-            logger.info(f"Creating index: {index_name}")
-            mapping = _knowledge_index_mapping()
-            await client.indices.create(
-                index=index_name, mappings=mapping["mappings"], settings=mapping["settings"]
-            )
-            logger.info("Index created")
-        else:
-            mapping = await client.indices.get_mapping(index=index_name)
-            try:
-                current_dims = mapping[index_name]["mappings"]["properties"]["embedding"]["dims"]
-                if current_dims != settings.VECTOR_DIMENSION:
-                    logger.warning(
-                        f"Dimension mismatch: ES={current_dims}, Config={settings.VECTOR_DIMENSION}. Recreating..."
-                    )
-                    await recreate_knowledge_index()
-                else:
-                    logger.info(f"Index exists with matching dims: {index_name} (dims={current_dims})")
-            except KeyError:
-                logger.warning(f"Index {index_name} missing embedding field — recreating...")
-                await recreate_knowledge_index()
-    except Exception as e:
-        logger.error(f"Index creation/check failed: {e}")
+    except Exception as e:  # noqa: BLE001 — 连不上 ES 是另一类问题，由 initialize 处理
+        logger.error(f"检查索引 {index_name} 是否存在失败: {e}")
+        return
+
+    if not exists:
+        logger.info(f"Creating index: {index_name}")
+        mapping = _knowledge_index_mapping()
+        await client.indices.create(
+            index=index_name, mappings=mapping["mappings"], settings=mapping["settings"]
+        )
+        logger.info("Index created")
+        return
+
+    mapping = await client.indices.get_mapping(index=index_name)
+    props = mapping.get(index_name, {}).get("mappings", {}).get("properties", {})
+    current_dims = (props.get("embedding") or {}).get("dims")
+
+    if current_dims is None:
+        doc_count = await _count_index_docs(client, index_name)
+        raise IndexConfigError(
+            f"索引 {index_name} 存在但读不到 embedding 维度（mapping 缺该字段）。"
+            f"索引现有 {doc_count} 篇文档，**不自动重建**。"
+            f"确认可以丢弃这些数据后，显式调用 recreate_knowledge_index(confirm=True)。"
+        )
+
+    if current_dims != settings.VECTOR_DIMENSION:
+        doc_count = await _count_index_docs(client, index_name)
+        raise IndexConfigError(
+            f"向量维度不匹配：索引里是 {current_dims}，配置（VECTOR_DIMENSION）是 "
+            f"{settings.VECTOR_DIMENSION}。索引现有 {doc_count} 篇文档，**不自动重建**。"
+            f"处理方式二选一："
+            f"① 把 VECTOR_DIMENSION 改回 {current_dims} —— 不动数据，立刻恢复；"
+            f"② 确认可以丢弃这 {doc_count} 篇索引后，显式调用 "
+            f"recreate_knowledge_index(confirm=True)，**并重新索引全部文档**。"
+        )
+
+    logger.info(f"Index exists with matching dims: {index_name} (dims={current_dims})")
 
 
 async def create_index_if_not_exists():
-    """Public wrapper — uses the holder's client."""
+    """公开包装 —— 用 holder 的客户端。
+
+    **索引配置不一致时会抛 IndexConfigError**（而不是静默重建）。
+    调用方应捕获它并如实上报，不要吞掉。
+    """
     client = await get_elasticsearch()
     await _create_index_if_not_exists(client)
 
 
-async def recreate_knowledge_index() -> bool:
-    """Force-recreate the knowledge index (for dimension/mapping changes)."""
+def get_index_error() -> str | None:
+    """返回最近一次索引配置错误（没有则 None）。
+
+    供 /health 与文档处理路径读取 —— 让"索引坏了"这件事有个可读的出口，
+    而不是只留在日志里。
+    """
+    return _holder.index_error
+
+
+async def recreate_knowledge_index(*, confirm: bool = False) -> bool:
+    """**删除并重建**知识库索引。会丢失索引中的全部数据。
+
+    必须显式传 `confirm=True` 才执行。
+
+    加这道门槛是因为此前的自动调用路径极其危险：维度一旦不匹配就静默重建，
+    而"改配置换 embedding 模型"正是维度不匹配的常见来源 ——
+    等于换一次模型就把知识库清空，且没有二次确认、没有备份。
+    """
+    if not confirm:
+        logger.error(
+            "recreate_knowledge_index() 被调用但未确认（confirm=False）—— 拒绝执行。"
+            "该操作会删除整个索引；确实需要时请显式传 confirm=True。"
+        )
+        return False
+
     client = await get_elasticsearch()
+    index_name = settings.ELASTICSEARCH_INDEX_NAME
     try:
-        index_name = settings.ELASTICSEARCH_INDEX_NAME
         exists = await client.indices.exists(index=index_name)
         if exists:
+            doc_count = await _count_index_docs(client, index_name)
+            logger.warning(
+                f"[破坏性操作] 即将删除索引 {index_name}，其中含 {doc_count} 篇文档。"
+                f"删除后这些文档必须重新索引才能被检索到。"
+            )
             await client.indices.delete(index=index_name)
-            logger.warning(f"Deleted old index: {index_name}")
+            logger.warning(f"已删除索引 {index_name}（原有 {doc_count} 篇文档）")
         mapping = _knowledge_index_mapping()
         await client.indices.create(
             index=index_name, mappings=mapping["mappings"], settings=mapping["settings"]
         )
         logger.info(f"Recreated index: {index_name}")
+        _holder.index_error = None  # 重建成功，清掉此前记录的错误
         return True
     except Exception as e:
         logger.error(f"Index recreation failed: {e}")
