@@ -387,6 +387,60 @@ async def general_exception_handler(request: Request, exc: Exception):
 _APP_START_TIME: float = time.time()
 
 
+async def _knowledge_base_health() -> tuple[str, dict]:
+    """检查知识库**索引的内容**，而不只是 ES 进程活着。
+
+    `_check_elasticsearch` 查的是集群健康（green/yellow）—— **一个全新的空集群同样
+    healthy**，所以它对「索引里一篇都没有」完全沉默。issue #183 就是这个缺口：
+    文档表里 10 篇标着 INDEXED、ES 里 0 篇，而 `/health` 五项全绿。
+
+    返回 `(状态, 细节)`。能抓出三种情况：
+
+    1. 索引配置错误（维度不匹配等，见 `get_index_error`）→ `unhealthy`
+    2. **有文档声称已索引，但索引里一篇都没有** → `unhealthy` ← 正是 #183 的「假状态」
+    3. 索引为空且没有文档声称已索引 → `healthy`（全新部署，合法）
+
+    抽成模块级函数是为了能独立测试 —— 埋在 `/health` 的闭包里就只能整端点测。
+    """
+    from app.core.elasticsearch import get_elasticsearch, get_index_error
+
+    details: dict = {}
+
+    cfg_err = get_index_error()
+    if cfg_err:
+        details["index_error"] = cfg_err
+        return "unhealthy", details
+
+    client = await get_elasticsearch()
+    res = await asyncio.wait_for(
+        client.count(index=settings.ELASTICSEARCH_INDEX_NAME), timeout=3
+    )
+    indexed_chunks = int(res.get("count", 0))
+    details["indexed_chunks"] = indexed_chunks
+
+    # 与数据库对账：有多少文档**声称**已索引
+    from sqlalchemy import func, select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.document import Document, DocumentStatus
+
+    async with AsyncSessionLocal() as sess:
+        q = await sess.execute(
+            select(func.count())
+            .select_from(Document)
+            .where(Document.status == DocumentStatus.INDEXED)
+        )
+        claimed = int(q.scalar() or 0)
+    details["documents_marked_indexed"] = claimed
+
+    if indexed_chunks == 0 and claimed > 0:
+        # 状态在撒谎 —— 这正是「检索恒返回 0 条却没人在意」的根源
+        details["mismatch"] = f"{claimed} 篇文档状态为 INDEXED，但索引里一篇都没有"
+        return "unhealthy", details
+
+    return "healthy", details
+
+
 # 健康检查端点 — enhanced with per-service dependency checks
 @app.get("/health")
 async def health_check():
@@ -397,6 +451,9 @@ async def health_check():
     on a single failure.
     """
     services: dict = {}
+    # 知识库检查的细节（索引里有几篇、文档表声称几篇）——
+    # 这些数字让「为什么 unhealthy」一眼可见，而不是只给一个状态词（issue #183）
+    kb_details: dict = {}
 
     async def _check_db():
         try:
@@ -472,6 +529,18 @@ async def health_check():
             services["kafka"] = "degraded"
             logger.debug("Health check — kafka: %s", e)
 
+    async def _check_knowledge_base():
+        """薄封装 —— 真正的判断在模块级 `_knowledge_base_health()` 里（便于单测）。"""
+        try:
+            status, details = await _knowledge_base_health()
+            services["knowledge_base"] = status
+            kb_details.update(details)
+        except TimeoutError:
+            services["knowledge_base"] = "degraded"
+        except Exception as e:
+            services["knowledge_base"] = "degraded"
+            logger.debug("Health check — knowledge_base: %s", e)
+
     # Run all checks concurrently
     await asyncio.gather(
         _check_db(),
@@ -479,6 +548,7 @@ async def health_check():
         _check_elasticsearch(),
         _check_minio(),
         _check_kafka(),
+        _check_knowledge_base(),
         return_exceptions=True,
     )
 
@@ -498,6 +568,8 @@ async def health_check():
         "version": settings.APP_VERSION,
         "services": services,
         "uptime_seconds": round(uptime, 1),
+        # 仅在有内容时出现，避免给老调用方增加噪音
+        **({"knowledge_base": kb_details} if kb_details else {}),
     }
 
 

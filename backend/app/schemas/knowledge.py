@@ -43,6 +43,14 @@ class KnowledgeSearchResponse(BaseModel):
     total_count: int = Field(..., description="结果总数")
     search_mode: str = Field(..., description="搜索模式")
     search_time: float | None = Field(None, description="搜索耗时（秒）")
+    # 空结果的原因。没有它时「没匹配到」与「索引是空的」在响应里同形（issue #182）：
+    #   ok / empty_index / index_error / unknown
+    index_status: str = Field(
+        "ok", description="索引状态：ok(有数据) / empty_index(索引为空) / index_error(配置错误)"
+    )
+    index_doc_count: int | None = Field(
+        None, description="索引中的文档数；仅在结果为空时诊断，其余情况为 null"
+    )
 
 
 class SearchSuggestionResponse(BaseModel):
