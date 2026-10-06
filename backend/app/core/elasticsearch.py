@@ -64,14 +64,20 @@ class _ESHolder:
 
             try:
                 await _create_index_if_not_exists(self._client)
-            except IndexConfigError as e:
-                # 索引配置不一致：**保留客户端**（ES 的其他用途仍可用），只记下问题。
+            except Exception as e:
+                # **索引这一层出问题，不该把整个 ES 客户端打掉。**
                 #
-                # 关键：不能让这个异常落进下面的 `except Exception` —— 那会把 _client
-                # 置为 None，使整个 ES 不可用，反而让"维度配错了"表现为"ES 连不上"，
-                # 更难排查。配置问题就该如实报成配置问题。
+                # 这里原先是 `except IndexConfigError` —— 只保护了「索引已存在、维度不匹配」
+                # 那一条路径。但**索引不存在时 `indices.create` 失败**（典型：mapping 里
+                # `dims` 是字符串，ES 返回 400 mapper_parsing_exception）会落进下面的通用
+                # `except`，把 `_client` 置为 None。后果是 `get_elasticsearch()` 每次都抛
+                # RuntimeError ——「索引配置错了」表现成「ES 连不上」，正是本 PR 要消除的
+                # 那种误导。（这一条由对抗评审指出，已在真机上复现。）
+                #
+                # 注意：**真的连不上 ES** 不会走到这里 —— 上面那句 `self._client.info()`
+                # 会先失败并落进通用 except，那时把 client 置空才是对的。
                 self.index_error = str(e)
-                logger.error(f"[索引配置错误] {e}")
+                logger.error(f"[索引不可用] {type(e).__name__}: {e}")
         except Exception as e:
             logger.error(f"Elasticsearch connection failed: {e}")
             self._client = None

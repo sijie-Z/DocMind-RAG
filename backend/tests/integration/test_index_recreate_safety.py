@@ -212,3 +212,49 @@ async def test_initialize_keeps_client_when_index_config_is_wrong(isolated_index
 
     # 清掉，避免污染同进程内的其他用例
     _holder.index_error = None
+
+
+@pytest.mark.asyncio
+async def test_initialize_keeps_client_when_index_creation_fails(isolated_index, monkeypatch):
+    """★ 索引**不存在**、`indices.create` 失败时，也必须保留客户端。
+
+    这一条是对抗评审指出的 blocker：原来只写了 `except IndexConfigError`，
+    而那**只保护「索引已存在、维度不匹配」这一条路径**。
+    索引不存在时 `indices.create` 会抛别的异常（典型：mapping 里 `dims` 是字符串，
+    ES 返回 400）—— 它会落进通用 `except`，把 `_client` 置为 None，
+    于是 `get_elasticsearch()` 每次抛 RuntimeError：
+
+        「索引配置错了」表现成「ES 连不上」
+
+    —— 正是本 PR 自己声称要消除的那种误导。
+
+    构造方式：把 `_knowledge_index_mapping` 换成一份非法 mapping（`dims` 写成字符串，
+    即 issue #213 的真实形态），并指向一个全新的索引名，逼 `create` 必然失败。
+    """
+    monkeypatch.setattr(_holder, "_client", None)
+    monkeypatch.setattr(_holder, "index_error", None)
+    monkeypatch.setattr(
+        settings, "ELASTICSEARCH_INDEX_NAME", f"docmind_test_bad_{uuid.uuid4().hex[:12]}"
+    )
+    monkeypatch.setattr(
+        "app.core.elasticsearch._knowledge_index_mapping",
+        lambda: {
+            "mappings": {
+                "properties": {"embedding": {"type": "dense_vector", "dims": "1024"}}
+            },
+            "settings": {"number_of_shards": 1, "number_of_replicas": 0},
+        },
+    )
+
+    await _holder.initialize()
+
+    assert _holder.client is not None, (
+        "create 失败不该把整个 ES 客户端打掉 —— 那会让「索引配置错了」"
+        "表现成「ES 连不上」（评审指出的 blocker）"
+    )
+    assert _holder.index_error, "create 失败必须被记录下来"
+    assert "400" in _holder.index_error or "mapper_parsing" in _holder.index_error, (
+        f"记录的原因里应带 ES 的原始报错，便于定位；实际: {_holder.index_error[:120]}"
+    )
+
+    _holder.index_error = None
