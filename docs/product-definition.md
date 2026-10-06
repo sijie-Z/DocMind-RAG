@@ -390,7 +390,7 @@ Agent = 想得透（推理层）
 | 维度 | 状态 |
 |---|---|
 | **代码完整性** | 核心流程全部实现，仅 1 处 TODO（工作流的 TTS 节点） |
-| **测试覆盖** | 273 个测试，25 个测试文件 |
+| **测试覆盖** | 911 个后端测试用例 + 111 个前端测试（89 个测试文件）。全量套件（含 MySQL + Redis）只在 Python 3.12 上跑；3.11 跑的是无服务子集（877 passed, 1 skipped） |
 | **Guest 体验** | guest/123456 账号自动初始化，Demo 数据可一键生成 |
 | **并发能力** | Kafka 异步处理文档上传，支持多用户 |
 | **多租户** | RBAC + Organization 隔离 |
@@ -398,7 +398,7 @@ Agent = 想得透（推理层）
 
 ### 已知不足
 
-- **Agent 测试覆盖为 0** —— 273 个测试无一是 Agent 相关的
+- **Agent 行覆盖率仍未测算** —— 现有 5 个直接针对 Agent 的测试文件（`test_agent.py` / `test_agent_behavior.py` / `test_agent_loop_wiring.py` / `test_memory_fix_agent_id.py` / `test_security_agent_session_scope.py`），但**没有测量过行覆盖率**
 - **产品体验未闭环** —— Demo 数据需要手动调接口触发，不是首次访问自动触发
 - **未做生产压测** —— 不知道高并发下的实际表现
 - **无集成文档** —— 虽然有 Swagger，但没有面向集成方的 API 使用指南

@@ -70,7 +70,7 @@
           </div>
           <div class="feature-list">
             <div class="feature-item">📋 自动规划：复杂任务自动拆分</div>
-            <div class="feature-item">🔧 25+ 工具：搜索、分析、代码、翻译</div>
+            <div class="feature-item">🔧 30 个工具：搜索、分析、代码、翻译</div>
             <div class="feature-item">🧠 记忆系统：记住你的偏好和历史</div>
             <div class="feature-item">🔍 自我反思：执行后自动评估纠正</div>
           </div>

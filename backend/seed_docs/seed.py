@@ -40,7 +40,7 @@ DOCUMENTS = [
         "chunks": [
             ("系统分层架构", "DocMind 采用五层架构：表现层(Vue3)、API网关层(FastAPI)、业务逻辑层、AI/LLM层(DeepSeek)、数据存储层(SQLite/MySQL, Redis, ES, MinIO)。"),
             ("RAG 检索管线", "RAG 管线流程：用户提问 → 向量化+关键词提取 → 混合检索 → RRF融合排序 → 语义缓存检查 → LLM生成 → 引用溯源。支持 strict_mode 精准模式和 privacy_mode 隐私模式。"),
-            ("Agent 系统 PER 架构", "Agent 系统采用 PER 架构：Plan(规划)将复杂任务拆解为步骤，Execute(执行)按序调用工具，Reflect(反思)自我评估纠正。内置 25+ 工具涵盖搜索、分析、翻译、代码执行等。"),
+            ("Agent 系统 PER 架构", "Agent 系统采用 PER 架构：Plan(规划)将复杂任务拆解为步骤，Execute(执行)按序调用工具，Reflect(反思)自我评估纠正。内置 30 个工具涵盖搜索、分析、翻译、代码执行等。"),
         ],
     },
 ]

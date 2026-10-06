@@ -23,7 +23,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 核心场景：
 - 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV，自动解析、分块、向量化，支持语义搜索
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
-- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 25+ 工具完成复杂任务
+- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 30 个工具完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
 - 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、12 种 SSE 事件、RunReport 运行摘要
 - 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
@@ -37,7 +37,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 > 当前定位：**公开项目 / 不成熟产品**。功能完整度高于稳定度，适合学习、二次开发和本地演示；正式生产部署前请自行加固安全与运维配置。
 
 当前基线：
-- 后端 `tests/unit + tests/behavior`：409 通过 / 1 跳过；前端 `vue-tsc --noEmit` 通过。
+- 后端 `pytest tests/`：911 passed（CI，MySQL + Redis）；前端 111 tests passed + `vue-tsc --noEmit` 通过。
 - 已修复：语义缓存按组织隔离、会话归属校验、知识库搜索/删除/重建的组织隔离、文件上传路径穿越与 MinIO 删除、API Key 掩码、Web 抓取 SSRF 防护、工作流归属隔离、Kafka 不可用时的进程内文档处理、本地启动脚本、敏感产物移出 git 跟踪。
 - 安全加固（1.20）：Agent 沙箱逃逸封堵（下划线属性拦截 + 长度/输出上限）、execute_sql 租户过滤与 UNION/子查询拦截、disabled_tools 服务端强制合并、mcp 子进程环境变量白名单、注册禁自选组织、角色变更同组织校验、登录失败锁定 + 用户枚举时序防护、refresh token 轮换、WS 仅接受 access token、PII 掩码全链路（上下文+流式）、GraphRAG 组织分区、/files 代理归属校验、RAG 缓存按组织失效、Alembic 001 FK 类型修复 + 005 补齐 15 张表、compose 凭据/端口收紧、24 个安全回归测试（446 单测通过）。
 - 架构收敛：文档解析/向量化/ES 索引统一为单一 Processor；聊天核心管线从路由下沉到 `services/chat_service.py`；新增统一文档授权辅助层。
@@ -61,7 +61,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 │  WebSocket 实时推送 · Request ID 追踪        │
 ├── AI Agent 核心 ─────────────────────────────┤
 │  PER Loop  (Planner → Executor → Reflector)  │
-│  Tool Registry (25+) · RunReport · Reviewer  │
+│  Tool Registry (30) · RunReport · Reviewer  │
 │  经验记忆 · 执行回放 · 模式挖掘              │
 ├── RAG 管线 ──────────────────────────────────┤
 │  HybridRetriever (BM25 + 向量 + RRF 融合)    │
@@ -102,7 +102,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 上下文引擎 | `context.py` | 令牌预算管理，消息窗口构建 |
 | 配置 | `config.py` | AgentConfig（模型/温度/最大步骤/阶段开关） |
 
-**25+ 内置工具** (`tools/`)：
+**30 个内置工具** (`tools/`)：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -347,7 +347,7 @@ DocMind/
 │   │   │   ├── events.py            #   SSE 事件类型（12 种）
 │   │   │   ├── message.py           #   Agent 间消息总线
 │   │   │   ├── tracing.py           #   执行追踪记录
-│   │   │   ├── tools/               #   25+ 工具实现
+│   │   │   ├── tools/               #   30 个工具实现
 │   │   │   │   ├── web_search.py    #   网络搜索
 │   │   │   │   ├── code_execution.py #  Python/SQL 沙箱
 │   │   │   │   ├── data_analysis.py #   数据分析
@@ -399,7 +399,7 @@ DocMind/
 │   │   ├── models/                  # ORM 模型（14 个实体）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者
-│   ├── tests/                       # 400+ 测试用例
+│   ├── tests/                       # 911 个后端测试用例（前端另有 111 个）
 │   ├── benchmark/                   # 评测框架
 │   ├── alembic/                     # 数据库迁移
 │   ├── scripts/                     # 工具脚本
