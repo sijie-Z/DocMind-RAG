@@ -1,24 +1,34 @@
 """AI and RAG settings — LLM, embedding, reranker, vector search, caching."""
 
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _auto_tier_defaults() -> dict[str, str]:
-    """Apply hardware-detected defaults for fields not explicitly set via env."""
+def _auto_tier_defaults() -> dict[str, object]:
+    """Apply hardware-detected defaults for fields not explicitly set via env.
+
+    **不要在这里对返回值做 `str()`。** 调用方（`app/core/config/__init__.py`）用
+    `object.__setattr__` 写进 settings，**绕过 pydantic 的类型校验与转换** ——
+    所以这里给的类型就是最终生效的类型。
+
+    曾经这里写的是 `str(getattr(hw, attr))`，于是 `VECTOR_DIMENSION`（int 字段）
+    在运行时变成字符串 `'1024'`，而它被直接塞进 ES 的索引 mapping，
+    ES 以 `400 mapper_parsing_exception: Property [dims] must be an integer` 拒绝 ——
+    **在没把 VECTOR_DIMENSION 写进环境变量的机器上（即全新部署的默认路径），
+    索引根本建不出来。**
+    """
     try:
         from app.core.hardware import detect as _detect
 
         hw = _detect()
     except Exception:
         return {}
-    overrides: dict[str, str] = {}
+    overrides: dict[str, object] = {}
     for field, attr, env_var in [
         ("EMBEDDING_MODEL", "embedding_model", "EMBEDDING_MODEL"),
         ("VECTOR_DIMENSION", "vector_dim", "VECTOR_DIMENSION"),
     ]:
         if env_var not in __import__("os").environ:
-            overrides[field] = str(getattr(hw, attr))
+            overrides[field] = getattr(hw, attr)
     return overrides
 
 

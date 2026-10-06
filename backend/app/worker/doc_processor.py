@@ -34,6 +34,43 @@ def _noop() -> None:
     """默认进度回调（不关心进度的调用方）。"""
 
 
+async def _verify_indexed(client, document_id: str, expected: int) -> int:
+    """确认该文档的 chunk **真的**进了 Elasticsearch；没进去就抛错。
+
+    为什么必须校验（issue #181）：`bulk_index_documents` **不抛错 ≠ 数据进去了**。
+    bulk 的部分失败、mapping 冲突、写入被拒都可能让 chunk 一条都没落，
+    而 `_mark_success` 是无条件把状态置成 `INDEXED` 的 ——
+    于是出现「状态说已索引，ES 里一篇都没有」，检索恒返回 0 条却没人发现。
+
+    返回实际索引到的条数（便于调用方记录）。
+    """
+    index_name = settings.ELASTICSEARCH_INDEX_NAME
+    await client.indices.refresh(index=index_name)
+    res = await client.count(
+        index=index_name, query={"term": {"document_id": document_id}}
+    )
+    indexed = int(res.get("count", 0))
+
+    if indexed == 0:
+        raise RuntimeError(
+            f"索引校验失败：文档 {document_id} 的 {expected} 个 chunk 已提交给 Elasticsearch，"
+            f"但刷新后在索引 {index_name} 里查不到任何一条。"
+            f"拒绝把该文档标记为已索引 —— 否则会出现「状态已索引、检索却查不到」。"
+        )
+
+    if indexed != expected:
+        # 部分落库：文档确实可被检索到，但内容不完整。不阻断，但必须留痕。
+        logger.warning(
+            "[DOC_PROC] 索引条数与预期不符 document_id=%s 预期=%d 实际=%d",
+            document_id,
+            expected,
+            indexed,
+        )
+    return indexed
+
+
+
+
 class DocumentProcessor:
     """Parse, embed, and index one document with idempotent replacement."""
 
@@ -231,6 +268,8 @@ class DocumentProcessor:
             refresh=True,
         )
         await ElasticsearchTools.bulk_index_documents(es_docs)
+        # bulk 不抛错不代表写进去了 —— 必须回读确认（issue #181）
+        await _verify_indexed(client, doc.id, len(es_docs))
 
         # 替换成功后按组织清空 RAG 缓存，避免旧内容仍命中缓存
         from app.rag.cache import RetrievalCache, SemanticCache
