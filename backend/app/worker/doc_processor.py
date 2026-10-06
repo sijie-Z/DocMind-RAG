@@ -37,10 +37,18 @@ def _noop() -> None:
 async def _verify_indexed(client, document_id: str, expected: int) -> int:
     """确认该文档的 chunk **真的**进了 Elasticsearch；没进去就抛错。
 
-    为什么必须校验（issue #181）：`bulk_index_documents` **不抛错 ≠ 数据进去了**。
-    bulk 的部分失败、mapping 冲突、写入被拒都可能让 chunk 一条都没落，
-    而 `_mark_success` 是无条件把状态置成 `INDEXED` 的 ——
-    于是出现「状态说已索引，ES 里一篇都没有」，检索恒返回 0 条却没人发现。
+    为什么必须校验（issue #181）：**`_mark_success` 是无条件把状态置成 `INDEXED` 的** ——
+    它不看 ES 里到底有没有东西。而「已索引」这个状态是运维、前端与监控判断
+    「知识库到底能不能用」的唯一依据。
+
+    **不要用「库会抛错」当判据。** 我最初在这里写的是"bulk 不抛错 ≠ 数据进去了"，
+    但**实测不成立**：`async_bulk` 默认 `raise_on_error=True`，遇到 mapping 冲突会抛
+    `BulkIndexError`（对抗评审 F1 指出，已实测复现）。那条因果故事当时没验证过。
+
+    真正的理由是**不变式要在它被断言的地方强制**：
+    「状态 = INDEXED ⟹ 这篇文档在 ES 里查得到」这条不变式，此前唯一的执行者是
+    「bulk 库大概会抛错」这个假设。回读校验把它变成一条可执行的断言 ——
+    库的行为变了、mapping 改了、将来有人把 bulk 换成别的写法，都不再能让它悄悄失效。
 
     返回实际索引到的条数（便于调用方记录）。
     """

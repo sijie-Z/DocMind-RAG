@@ -5,9 +5,16 @@
 `DocumentProcessor._replace_document_state` 在 `bulk_index_documents` 之后
 **无条件进入 `_mark_success`**，而 `_mark_success` 又**无条件**把文档状态置成 `INDEXED`。
 
-问题是：**`bulk` 不抛错 ≠ 数据进去了。** bulk 的部分失败、mapping 冲突、
-写入被拒，都可能让 chunk 一条都没落 —— 而状态照样显示"已索引"。
-真实的临床表现就是：**状态说索引成功，检索却恒返回 0 条，且没有任何信号。**
+真正的理由是**不变式要在它被断言的地方强制**：
+`_mark_success` 是**无条件**置 `INDEXED` 的，它不看 ES 里有没有东西 ——
+而「已索引」这个状态是运维、前端与监控判断「知识库到底能不能用」的唯一依据。
+此前这条不变式唯一的执行者是**「bulk 库大概会抛错」这个假设**。
+
+> **一处更正**：我最初在这里写过「`bulk` 不抛错 ≠ 数据进去了」，那条因果故事
+> **实测不成立** —— `async_bulk` 默认 `raise_on_error=True`，遇到 mapping 冲突会抛
+> `BulkIndexError`（对抗评审 F1 指出，已实测复现）。
+> 所以回读校验的价值不在"抓 bulk 的静默失败"，而在**把不变式从"依赖库的行为"
+> 变成"可执行的断言"**。
 
 ## 本文件钉住的（真实 Elasticsearch，`RUN_INTEGRATION=1` 门控）
 
