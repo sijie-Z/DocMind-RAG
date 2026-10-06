@@ -1,0 +1,69 @@
+name: 技术债 / 未接线
+description: 已实现但未接线、设计债、或有配置存在但没人读
+title: "[tech-debt] "
+labels: ["tech-debt"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        用于「代码写好了但零调用者」「配置存在但没人读」「行为与文档/类型声明不一致」这类问题。
+
+        **这类问题最大的风险是被当成「已完成」。** 请务必在「证据」里给出
+        「它确实没被用上」的验证方式（grep 结果、运行时观测等），而不只是「我没看到有人用」。
+
+  - type: textarea
+    id: current
+    attributes:
+      label: 现状
+      description: 现在是什么样？贴代码位置与关键片段。
+      placeholder: |
+        例如：app/agent/subagent.py:24 定义了 delegate_task()，
+        但全仓 grep 只有 __init__.py 的一句 docstring 提到它。
+    validations:
+      required: true
+
+  - type: textarea
+    id: gap
+    attributes:
+      label: 缺口
+      description: |
+        差在哪一步？是「完全没接线」「接了但断在中间」「配置没开」还是「类型声明与实现不一致」？
+        如果是断链，请把断点逐处列出来。
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 证据
+      description: |
+        证明「它确实没生效」。给出可复核的验证方式：
+        grep 指令与结果 / 运行时观测输出 / 接口响应 / 数据库查询结果。
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影响
+    validations:
+      required: true
+
+  - type: textarea
+    id: cost
+    attributes:
+      label: 改造代价的初步判断
+      description: 小 / 中 / 大，以及判断依据。**不需要设计方案**，给个量级即可。
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: self-check
+    attributes:
+      label: 自检
+      options:
+        - label: 我已经用 grep / 运行时观测确认过「零调用者」或「未生效」，而不是凭印象
+          required: true
+        - label: 我没有在正文里粘贴密钥、凭证、真实用户数据或本机绝对路径
+          required: true

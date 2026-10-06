@@ -1,0 +1,80 @@
+name: Bug 报告
+description: 报告一个可复现的缺陷
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你花时间报告问题。请先读两遍下面这两条：
+
+        - **「本地测试通过」不算证据。** 请给出 reviewer 能自己跑的命令**和真实输出**。
+        - **判据要覆盖真实失败面。** 如果写的是新增检查，请说明「它红了会是什么样」——
+          永远绿的检查比没有检查更糟。
+
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 症状
+      description: 实际观察到了什么？贴原始输出、错误栈、接口响应。不要只描述，要贴证据。
+      placeholder: |
+        例如：
+        DELETE /api/v1/knowledge/document/{id} → 500
+        {"success":false,"code":500,"message":"删除失败"}
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      description: 本来应该是什么样？如果是「静默失败」，请明确写出「本该报错却报了什么」。
+    validations:
+      required: true
+
+  - type: textarea
+    id: root-cause
+    attributes:
+      label: 根因
+      description: |
+        定位到代码就贴 `文件:行号`。**没定位到就写「未知」**，并说明已经排除了哪些可能——
+        不要把推测写成结论。
+    validations:
+      required: false
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影响面
+      description: 谁会受影响？有没有绕过办法？会不会静默造成错误结果（而不是报错）？
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: reviewer 能照着跑的步骤或命令。能给出「改坏一处它必须变红」的变异验证更好。
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: revision
+    attributes:
+      label: 版本 / 提交
+      description: 在哪条分支的哪个提交上复现的
+      placeholder: develop @ e5b2eb1
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: self-check
+    attributes:
+      label: 自检
+      options:
+        - label: 我已在当前 `develop` 上复现过（不是旧版本或陈旧工作区的残留）
+          required: true
+        - label: 我没有在正文里粘贴密钥、凭证、真实用户数据或本机绝对路径
+          required: true

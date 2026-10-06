@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/sijie-Z/DocMind-RAG/security/advisories/new
+    about: 请通过私有的漏洞报告渠道提交，不要开公开 issue。
+  - name: 动手之前先看这里
+    url: https://github.com/sijie-Z/DocMind-RAG/blob/develop/CONTRIBUTING.md
+    about: 分支策略、提交规范、CI 门禁与验证要求。
