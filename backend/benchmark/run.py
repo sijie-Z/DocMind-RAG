@@ -106,7 +106,9 @@ async def _run_baseline(question: dict, org_id: int = 3, lf=None) -> QuestionRes
 
     try:
         # 1. Search knowledge base
-        docs = await pipeline.search_knowledge_base(
+        # pipeline 返回 (results, debug_info) 元组，必须解包（同 issue #219）——
+        # 不解包时 docs[:5] 迭代出的是「列表」和 None，d.get 会 AttributeError。
+        docs, _ = await pipeline.search_knowledge_base(
             query=query, organization_id=org_id, top_k=5,
         )
 
