@@ -757,7 +757,7 @@ async def rag_eval_single(item: EvalItem):
 
         client = AsyncOpenAI(
             api_key=settings.DEEPSEEK_API_KEY,
-            base_url=settings.DEEPSEEK_BASE_URL,
+            base_url=settings.DEEPSEEK_API_URL,
         )
         evaluator = RAGEvaluator(client=client, model=settings.DEEPSEEK_MODEL)
         result = await evaluator.evaluate(
@@ -798,7 +798,7 @@ async def rag_eval_batch(body: BatchEvalRequest):
 
         client = AsyncOpenAI(
             api_key=settings.DEEPSEEK_API_KEY,
-            base_url=settings.DEEPSEEK_BASE_URL,
+            base_url=settings.DEEPSEEK_API_URL,
         )
         evaluator = RAGEvaluator(client=client, model=settings.DEEPSEEK_MODEL)
         batch_result = await evaluator.evaluate_batch(
