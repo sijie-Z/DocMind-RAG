@@ -204,3 +204,45 @@ async def test_unrestricted_context_executes_normally():
         await _run(_mk_executor(cfg, client))
 
     assert spy.await_count == 1, "无限制上下文不应拦截任何工具"
+
+
+@pytest.mark.asyncio
+async def test_synthesis_uses_structural_truncation():
+    """issue #203 ④：工具结果进合成 LLM 前走 `_smart_truncate`（结构化截断）。
+
+    变异点：把 `_smart_truncate(r['result'], r['tool'])` 改回 `r['result'][:1500]` →
+    本测试必红（无 "... and N more items" 标记，且 doc-14 行放不进 1500 字符）。
+    """
+    captured: dict = {}
+    client = _client_with_tool_call("list_documents", capture=captured)
+    cfg = AgentConfig(
+        enable_planning=False,
+        enable_reflection=False,
+        max_tool_calls_per_turn=1,
+    )
+
+    # 60 行 × ~140 字符 ≈ 8.4k 字符 > 6000 阈值 → 触发 list 分支（保前 15 行 + 计数标记）
+    payload = "\n".join(
+        f"- ID: doc-{i:02d} | 文件名: very-long-filename-{i}-{'q' * 60}.pdf"
+        f" | 状态: indexed | 创建: 2026-01-01"
+        for i in range(60)
+    )
+
+    class _Long:
+        success = True
+        error = None
+
+        def __str__(self):
+            return payload
+
+    with patch.object(tool_registry, "execute_detailed", new=AsyncMock(return_value=_Long())):
+        await _run(_mk_executor(cfg, client))
+
+    synthesis_msgs = captured["messages"][-1]
+    user_msgs = [m for m in synthesis_msgs if m.get("role") == "user"]
+    assert user_msgs, "合成调用应有 user 消息"
+    synth_user = user_msgs[0]["content"]
+    assert "- ID: doc-14" in synth_user and "doc-15" not in synth_user, (
+        "list 分支应保留前 15 行、丢弃第 16 行起的条目"
+    )
+    assert "... and 45 more items" in synth_user, "应带计数标记（裸切不会产生）"

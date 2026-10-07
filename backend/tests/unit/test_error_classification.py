@@ -191,6 +191,8 @@ def test_doom_loop_detected():
         ("invalid parameter out of range", "validation_error"),
         ("500 internal server error", "api_error"),
         ("billing quota exceeded — insufficient funds", "budget_exceeded"),
+        # issue #203 ②：insufficient_quota（OpenAI 余额耗尽）从 permission 分支移入预算语义
+        ("insufficient_quota — you exceeded your current quota", "budget_exceeded"),
         ("model glmx-v4 not found — unknown model", "invalid_configuration"),
         ("unsupported image format: webp", "image_processing_error"),
     ],

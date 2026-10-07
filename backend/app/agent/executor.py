@@ -158,6 +158,51 @@ class Executor:
                     )
                     break
 
+            # ── Issue #203 ①: iteration budget（每 run 步骤执行数，跨 replan 累计）──
+            # 计数在派发时写入 ctx.artifacts（不能用实例属性：loop 每轮 replan
+            # 都会 reset_for_request）。软上限：并行批次一次派发 N 步最多超帽 N-1。
+            if ctx is not None and self.config.max_iterations > 0 and \
+                    ctx.artifacts.get("iterations_used", 0) >= self.config.max_iterations:
+                remaining = [s for s in plan.steps if s.status == "pending"]
+                if remaining:
+                    for s in remaining:
+                        s.status = "skipped"
+                    ctx.record_decision(
+                        "execute", "iteration_limit",
+                        f"已达迭代上限 max_iterations={self.config.max_iterations}，"
+                        f"跳过剩余 {len(remaining)} 步",
+                    )
+                    yield AgentEvent(
+                        type="thinking",
+                        content=f"已达迭代上限（{self.config.max_iterations} 步），剩余步骤已跳过",
+                        thinking_type="evaluation",
+                        plan_id=plan.id,
+                    )
+                    break
+
+            # ── Issue #203 ②: token 预算熔断（max_total_tokens=0 表示不限制）──
+            # 派发前判定：预算已尽则剩余 pending 全部跳过（消费点见 _execute_step_with_retry）。
+            if ctx is not None and self.config.over_budget(ctx):
+                remaining = [s for s in plan.steps if s.status == "pending"]
+                if remaining:
+                    for s in remaining:
+                        s.status = "skipped"
+                    ctx.record_decision(
+                        "execute", "budget_exceeded",
+                        f"本次 run 累计 tokens {getattr(ctx, 'total_tokens', 0)} 已达上限 "
+                        f"{self.config.max_total_tokens}，跳过剩余 {len(remaining)} 步",
+                    )
+                    yield AgentEvent(
+                        type="thinking",
+                        content=(
+                            f"已达 token 预算（{getattr(ctx, 'total_tokens', 0)}/"
+                            f"{self.config.max_total_tokens}），剩余步骤已跳过"
+                        ),
+                        thinking_type="evaluation",
+                        plan_id=plan.id,
+                    )
+                    break
+
             # Information gain: auto-skip if too many consecutive low-gain steps
             if self._consecutive_low_gain >= self.MAX_LOW_GAIN_STEPS:
                 remaining = [s for s in plan.steps if s.status == "pending"]
@@ -188,12 +233,24 @@ class Executor:
                             plan_id=plan.id,
                             plan_step_id=step.id,
                         )
+                if not pending:
+                    # 全部剩余步骤的前置均已失败，已无可执行步骤；
+                    # 原代码此处会用 pending[0] 越界崩溃（#203 顺手修）。
+                    break
+                if ctx is not None:
+                    ctx.artifacts["iterations_used"] = ctx.artifacts.get("iterations_used", 0) + 1
                 step = pending[0]
                 async for event in self._execute_single_step(
                     step, plan, history, organization_id, user_id, enable_thinking, ctx=ctx,
                 ):
                     yield event
                 continue
+
+            # Issue #203 ①: DAG 一次可派发多步，按实际派发数计数
+            if ctx is not None:
+                ctx.artifacts["iterations_used"] = (
+                    ctx.artifacts.get("iterations_used", 0) + len(ready_steps)
+                )
 
             # Execute ready steps — parallel when multiple independent steps exist
             if len(ready_steps) > 1:
@@ -373,6 +430,30 @@ class Executor:
         max_attempts = 1 if step.retry_strategy in ("ask_user", "skip") else self.config.max_retries_per_step + 1
 
         for attempt in range(max_attempts):
+            # ── Issue #203 ②: token 预算熔断 —— 每次 attempt（含重试）前检查，
+            # 预算已尽就不再发起任何新的 LLM 调用。不复用尾部降级形状：
+            # 其文案（"已重试 N 次/连接问题"）对预算场景是错的，且会吞掉错误码。
+            if ctx is not None and self.config.over_budget(ctx):
+                step.status = "failed"
+                step.error_context = (
+                    f"budget_exceeded: 本次 run 累计 tokens {getattr(ctx, 'total_tokens', 0)} "
+                    f"已达上限 {self.config.max_total_tokens}"
+                )
+                ctx.record_decision("execute", "budget_exceeded", step.error_context)
+                # 点亮 ctx.failures / run_report 的 has-failures（complete_step 是唯一写者）。
+                ctx.complete_step(
+                    step.id, step.description, step.tool_hint, "failed",
+                    error=step.error_context,
+                )
+                yield AgentEvent(
+                    type="tool_error",
+                    content=step.error_context,
+                    error_type="budget_exceeded",
+                    plan_id=plan.id,
+                    plan_step_id=step.id,
+                    plan_step_status="failed",
+                )
+                return
             if attempt > 0:
                 step.retry_count = attempt
                 # ── Classify the last error → lookup policy → jittered backoff ──
@@ -878,8 +959,12 @@ class Executor:
         if not tool_results:
             return ""
 
+        # 工具结果 → 合成 LLM 的结构化截断（issue #203 ④：恢复 PER 重写时丢掉的接线）。
+        # 函数内导入：loop.py 顶层 import 本模块，顶层反向导入会构成循环。
+        from app.agent.loop import _smart_truncate
+
         results_text = "\n\n".join(
-            f"工具: {r['tool']}\n结果: {r['result'][:1500]}"
+            f"工具: {r['tool']}\n结果: {_smart_truncate(r['result'], r['tool'])}"
             for r in tool_results
         )
 

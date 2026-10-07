@@ -404,8 +404,9 @@ class PERAgentLoop:
                     logger.warning("Experience write-back failed: %s", e)
 
             # ── Phase 3: Reflection ──────────────────────────────────────────
+            # 预算已尽则跳过反思：不再为"评价结果"发起额外 LLM 调用（issue #203 ②）。
             replan_requested = False
-            if self.config.enable_reflection and plan.steps:
+            if self.config.enable_reflection and plan.steps and not self.config.over_budget(ctx):
                 results = self.memory.get_all_results()
                 feedback_parts: list[str] = []
                 async for event in self.reflector.reflect(plan, results, ctx=ctx):
@@ -447,6 +448,24 @@ class PERAgentLoop:
                             thinking_type="evaluation",
                             plan_id=plan.id,
                         )
+                    elif self.config.over_budget(ctx):
+                        # 反思在预算耗尽后才判出 replan：不再重新规划
+                        # （一次 replan ≈ 一次完整 run 的执行成本，issue #203 ②）。
+                        ctx.record_decision(
+                            "plan",
+                            "budget_exceeded",
+                            f"本次 run 累计 tokens 已达上限 "
+                            f"{self.config.max_total_tokens}，不再重新规划",
+                        )
+                        yield AgentEvent(
+                            type="thinking",
+                            content=(
+                                f"反思判定需要重新规划，但本次 run 的 token 预算已尽"
+                                f"（{ctx.total_tokens}/{self.config.max_total_tokens}），按当前结果收尾"
+                            ),
+                            thinking_type="evaluation",
+                            plan_id=plan.id,
+                        )
                     else:
                         replan_attempts += 1
                         replan_feedback = "\n".join(feedback_parts)[:2000] or (
@@ -477,7 +496,8 @@ class PERAgentLoop:
             break
 
         # ── Phase 3b: Adversarial Review ────────────────────────────────
-        if self.config.enable_reflection and plan.steps:
+        # 预算已尽则跳过对抗审查（同 Phase 3，issue #203 ②）。
+        if self.config.enable_reflection and plan.steps and not self.config.over_budget(ctx):
             results = self.memory.get_all_results()
             yield AgentEvent(
                 type="thinking",

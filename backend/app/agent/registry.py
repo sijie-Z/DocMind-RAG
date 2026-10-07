@@ -732,8 +732,9 @@ class ToolRegistry:
             return
 
         # ── Non-retryable: permission ──
+        # 注：insufficient_quota 已移至 budget 分支（余额耗尽属预算语义，issue #203 ②）
         if any(kw in raw_str for kw in ("403", "forbidden", "permission", "access denied",
-                                          "not allowed", "insufficient_quota")):
+                                          "not allowed")):
             result.error.code = "permission_denied"
             return
 
@@ -793,7 +794,9 @@ class ToolRegistry:
             return
 
         # ── Non-retryable: budget ──
-        if any(kw in raw_str for kw in ("billing", "budget", "quota exceeded", "insufficient funds",
+        # insufficient_quota（OpenAI 余额耗尽）从 permission 分支移来，issue #203 ②
+        if any(kw in raw_str for kw in ("billing", "budget", "quota exceeded", "insufficient_quota",
+                                          "insufficient funds",
                                           "account balance", "payment required", "402")):
             result.error.code = "budget_exceeded"
             return

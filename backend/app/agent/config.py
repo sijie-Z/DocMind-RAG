@@ -35,7 +35,11 @@ class AgentConfig:
 
     # ── Loop limits ──
     max_plan_steps: int = 10
-    max_iterations: int = 10
+    # 单次 run 内可「执行」的计划步骤数，跨 replan 轮次累计；重试不另计
+    # （重试由 max_retries_per_step 管）。0 或负值 = 不限制。默认 20：
+    # max_plan_steps(10) × (1 + MAX_REPLANS_PER_RUN=1) —— 默认组合下合法的
+    # 最坏情形是两轮计划全部执行，默认值不应把合法的 replan 轮饿死（issue #203 ①）。
+    max_iterations: int = 20
     max_tool_calls_per_turn: int = 5
     max_retries_per_step: int = 3
 
@@ -67,6 +71,10 @@ class AgentConfig:
     # ── Limits ──
     timeout: float = 120.0
     max_context_tokens: int = 8000
+    # 单次 run 累计 token 上限（prompt + completion），0 或负值 = 不限制。
+    # 与 max_tokens（单次 LLM 调用的输出上限）语义不同；用量由 issue #202 的
+    # 单一入口 record_llm_usage 累计（issue #203 ②）。
+    max_total_tokens: int = 0
 
     # ── Model selection ──
     def get_deep_model(self) -> str:
@@ -76,6 +84,19 @@ class AgentConfig:
     def get_quick_model(self) -> str:
         """模型用于信息收集/工具调用（Executor step, synthesis）"""
         return self.quick_think_model or self.model
+
+    # ── Budget (issue #203 ②) ──
+
+    def over_budget(self, ctx) -> bool:
+        """单次 run 累计 token 是否已达上限。
+
+        只读判断：max_total_tokens <= 0（默认）或 ctx 缺失 → 不限制。
+        `total_tokens` 由 `app.agent.usage.record_llm_usage`（issue #202）累计，
+        本方法不产生用量。
+        """
+        if self.max_total_tokens <= 0 or ctx is None:
+            return False
+        return getattr(ctx, "total_tokens", 0) >= self.max_total_tokens
 
     # ── Advanced ──
     thinking_max_tokens: int = 500
@@ -106,6 +127,7 @@ class AgentConfig:
             "agent_id": self.agent_id,
             "timeout": self.timeout,
             "max_context_tokens": self.max_context_tokens,
+            "max_total_tokens": self.max_total_tokens,
             "thinking_max_tokens": self.thinking_max_tokens,
             "plan_max_tokens": self.plan_max_tokens,
             "reflection_max_tokens": self.reflection_max_tokens,
