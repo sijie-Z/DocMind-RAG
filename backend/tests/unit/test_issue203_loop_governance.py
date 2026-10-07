@@ -326,3 +326,12 @@ def test_over_budget_helper_semantics():
     assert capped.over_budget(ctx) is False
     ctx.total_tokens = 100
     assert capped.over_budget(ctx) is True
+
+
+def test_thinking_max_tokens_removed_stale_key_ignored():
+    """扫尾：thinking_max_tokens 零消费且无合法消费点（同组的 plan/reflection 都有真实
+    限幅调用，而它对应的"思考 LLM 调用"并不存在——同类调用是最终答案生成，不能按
+    500 截断），按"接或删"原则删除；旧持久化配置的残留键被 from_dict 安全忽略。"""
+    assert not hasattr(AgentConfig(), "thinking_max_tokens")
+    cfg = AgentConfig.from_dict({"thinking_max_tokens": 500, "model": "m"})
+    assert cfg.model == "m"

@@ -99,7 +99,6 @@ class AgentConfig:
         return getattr(ctx, "total_tokens", 0) >= self.max_total_tokens
 
     # ── Advanced ──
-    thinking_max_tokens: int = 500
     plan_max_tokens: int = 800
     reflection_max_tokens: int = 400
 
@@ -128,7 +127,6 @@ class AgentConfig:
             "timeout": self.timeout,
             "max_context_tokens": self.max_context_tokens,
             "max_total_tokens": self.max_total_tokens,
-            "thinking_max_tokens": self.thinking_max_tokens,
             "plan_max_tokens": self.plan_max_tokens,
             "reflection_max_tokens": self.reflection_max_tokens,
         }
