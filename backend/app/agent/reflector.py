@@ -20,6 +20,7 @@ from openai import AsyncOpenAI
 from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.planner import Plan
+from app.agent.usage import record_llm_usage
 from app.core.prometheus import AGENT_REFLECTION_DECISIONS
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,7 @@ class Reflector:
                 max_tokens=self.config.reflection_max_tokens,
                 timeout=30.0,
             )
+            record_llm_usage(response, ctx)
 
             content = response.choices[0].message.content or ""
             reflection_data = self._extract_json(content)

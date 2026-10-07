@@ -30,6 +30,7 @@ from app.agent.planner import Plan, PlanStep
 from app.agent.registry import tool_registry
 from app.agent.retry_policy import compute_backoff, get_policy
 from app.agent.run_context import RunContext
+from app.agent.usage import record_llm_usage
 from app.core.prometheus import (
     AGENT_EXECUTION_STEPS,
     AGENT_TOOL_CALLS,
@@ -612,6 +613,7 @@ class Executor:
             # the client-level protection failed to bound the call. max_retries=0:
             # retries stay owned by the executor's own policy-driven retry loop —
             # retrying here would re-multiply the attempt count.
+            step_tokens = 0  # 本步骤 LLM 用量（issue #202）
             call = await StepRunner(
                 timeout=self.config.timeout + self.LLM_HARD_TIMEOUT_MARGIN_SECONDS,
                 max_retries=0,
@@ -646,6 +648,7 @@ class Executor:
                 return
 
             response = call.output
+            step_tokens = record_llm_usage(response, ctx)
 
             if lf and llm_span:
                 tool_names = [tc.function.name for tc in (response.choices[0].message.tool_calls or [])]
@@ -842,6 +845,7 @@ class Executor:
                 step_description=step.description,
                 tool_results=tool_results,
                 original_instruction=message.content or "",
+                ctx=ctx,
             )
             if synthesis:
                 yield AgentEvent(
@@ -866,6 +870,7 @@ class Executor:
                 status="completed",
                 result=synthesis if tool_results and synthesis else None,
                 duration=step_duration,
+                tokens=step_tokens,
             )
 
     async def _synthesize_tool_results(
@@ -873,6 +878,7 @@ class Executor:
         step_description: str,
         tool_results: list[dict[str, str]],
         original_instruction: str,
+        ctx=None,
     ) -> str:
         """Synthesize tool results into a natural language answer."""
         if not tool_results:
@@ -901,6 +907,7 @@ class Executor:
                 max_tokens=1024,
                 timeout=10,
             )
+            record_llm_usage(response, ctx)
             return response.choices[0].message.content or ""
         except Exception as e:
             logger.warning(f"Synthesis LLM call failed: {e}")

@@ -18,6 +18,7 @@ from openai import AsyncOpenAI
 
 from app.agent.config import AgentConfig
 from app.agent.planner import Plan
+from app.agent.usage import record_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ class Reviewer:
         self,
         plan: Plan,
         results: dict[str, Any],
+        ctx=None,
     ) -> dict[str, Any]:
         """Review execution results from an adversarial perspective.
 
@@ -104,6 +106,7 @@ class Reviewer:
                 timeout=30.0,
                 response_format={"type": "json_object"},
             )
+            record_llm_usage(response, ctx)
 
             import json
 
