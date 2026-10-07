@@ -46,6 +46,7 @@ class AgentConfig:
     enable_memory: bool = True
     enable_thinking: bool = True
     enable_experience: bool = True  # Self-Improving: learn from past failures
+    enable_skills: bool = True  # issue #200：技能索引注入 + load_skill_reference + 学习闭环
 
     # ── Planning granularity (experimental) ──
     planning_mode: PlanningMode = "normal"
@@ -99,6 +100,7 @@ class AgentConfig:
             "enable_memory": self.enable_memory,
             "enable_thinking": self.enable_thinking,
             "enable_experience": self.enable_experience,
+            "enable_skills": self.enable_skills,
             "tool_tags": self.tool_tags,
             "disabled_tools": self.disabled_tools,
             "system_prompt_override": self.system_prompt_override,
