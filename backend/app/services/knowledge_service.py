@@ -45,15 +45,13 @@ class KnowledgeService:
             org_id = int(organization_id) if organization_id else 0
 
             # 使用 RagService 进行高级检索
-            results = await rag_service.search_knowledge_base(
+            results, _ = await rag_service.search_knowledge_base(
                 query=query,
                 organization_id=org_id,
                 top_k=top_k,
             )
 
-            # 安全修复：移除检索结果全文日志（原 DEBUG 日志把文档内容写入日志文件，
-            # 且 warning 级别刷屏）；如需调试请显式开启 DEBUG 级别。
-            logger.debug(f"search_knowledge: got {len(results) if isinstance(results, list) else 'n/a'} results")
+            logger.debug(f"search_knowledge: got {len(results)} results")
 
             # 格式化为 KnowledgeService 期望的输出格式以保持兼容性
             formatted_results = []
