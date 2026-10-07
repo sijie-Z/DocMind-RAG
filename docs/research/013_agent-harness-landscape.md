@@ -34,7 +34,7 @@
 
 ## 0.3 对你的直接映射（一句话版）
 
-- **DocMind**：它已经是"**Web 形态的 harness**"——PER 循环、25 工具、上下文压缩（本仓库 `context.py` 注释自述 *"Inspired by hermes-agent's ContextEngine / ContextCompressor pattern"*）、四层记忆、SSE、replay、评估都在。缺的**不是形态**，而是：**"手"**（一个能触及用户真实环境的执行体——本地桥接，或云沙箱）和**几件内核**（任务级状态持久化/续跑、评估闭环落地；详见 A3/A6 及本文 §6）。
+- **DocMind**：它已经是"**Web 形态的 harness**"——PER 循环、25 工具、上下文压缩（本仓库 `context.py` 注释自述 *"Inspired by hermes-agent's ContextEngine / ContextCompressor pattern"*）、四层记忆、SSE、replay、评估都在。缺的**不是形态**，而是：**"手"**（一个能触及用户真实环境的执行体——本地桥接，或云沙箱）和**几件内核**（任务级状态持久化/续跑、评估闭环落地；详见 `docs/research/014`（指标规格）/ `010`（内核审计）及本文 §6）。
 - **新项目（个人 AI 工作台）**：决策文档 v4 的"**入口无关、CLI 第一**"与 2026 年行业答案完全一致——**一个内核、多种入口**（Codex / Claude Code / Goose / Hermes / Pi / OpenClaw 全部如此）。
 - **结论**：不需要"转做桌面"，也不需要为"是前后端"焦虑；要做的是**内核与形态解耦**，然后把"手和钥匙"按需补上。
 
@@ -118,8 +118,8 @@ Builder.io 的类比（2026-04）："**Node is the runtime, Express is the frame
 | **Devin**（Cognition） | 云 VM（自带 shell/编辑器/浏览器）+ Devin Desktop（原 Windsurf）+ Local + CLI | 每会话独立沙箱 VM；企业版 VPC 隔离 | 云会话持久；2026-02 起多并行会话 | Devin 2.0 起 $20/月（从 $500 大幅下调）；"云+桌面+本地+CLI"全家桶 https://devin.ai/pricing |
 | **ChatGPT Agent mode / Dots**（OpenAI） | 云托管"虚拟电脑"（视觉浏览器+文本浏览器+终端+API）；2026-09-30 DevDay 发 **Dots**（永远在线 agent：自有云端电脑/身份/权限/浏览器，24h 执行） | 远程虚拟电脑 + 沙箱浏览器；**不能直接接触密码/银行凭据**；登录环节暂停交还用户接管 | 按任务弃置，无持久 VM 承诺 | https://openai.com/index/introducing-chatgpt-agent/ ；netmag.tw 10/4 报道（Dots） |
 | **Jules**（Google） | Web + Jules Tools CLI + API + GitHub 触发 | 一次性 Google Cloud VM（克隆→计划→执行→PR，完成后销毁） | 任务制 | **与 Gemini CLI 非同内核**（反例）；Gemini CLI 本体 2026-05 起被并入 Antigravity CLI（桌面+CLI 统一 harness，非开源）【确证·多源】 |
-| **Supermew**（用户截图产品，icey1287/SuperMew） | **前后端架构**：backend + frontend + evals + ADR（LangChain/LangGraph + Milvus） | `guardrails-and-isolated-sandbox` ADR（后端内建） | **checkpointing.py / checkpoint_runner.py**；canonical-thread-lifecycle ADR | 884 星、2025-12 建、2026-09 仍活跃；**fe/BE + harness 全套（中间件链、checkpoint、skill、评估门禁）**——见 A8 拆解 |
-| （对照）**你的 DocMind** | FastAPI + Vue；JWT+RBAC+多租户；SSE 12 事件；PER+25 工具+四层记忆+replay+评估 | 代码执行默认禁用+受限执行；另有 docker_sandbox（工作流代码节点走 Docker 沙箱） | 会话/记忆 DB + Redis；**任务级续跑与结果落库是 A3/A6 指出的缺口** | 本仓库（v1.22.0-rc，2026-10-05） |
+| **Supermew**（用户截图产品，icey1287/SuperMew） | **前后端架构**：backend + frontend + evals + ADR（LangChain/LangGraph + Milvus） | `guardrails-and-isolated-sandbox` ADR（后端内建） | **checkpointing.py / checkpoint_runner.py**；canonical-thread-lifecycle ADR | 884 星、2025-12 建、2026-09 仍活跃；**fe/BE + harness 全套（中间件链、checkpoint、skill、评估门禁）**——见 `docs/research/012` 的拆解 |
+| （对照）**你的 DocMind** | FastAPI + Vue；JWT+RBAC+多租户；SSE 12 事件；PER+25 工具+四层记忆+replay+评估 | 代码执行默认禁用+受限执行；另有 docker_sandbox（工作流代码节点走 Docker 沙箱） | 会话/记忆 DB + Redis；**任务级续跑与结果落库是 `014` / `010` 指出的缺口** | 本仓库（v1.22.0-rc，2026-10-05） |
 
 ## 2.3 "一个内核、多前端"专表（讨论"形态"问题的核心证据）
 
@@ -303,12 +303,12 @@ Builder.io 的类比（2026-04）："**Node is the runtime, Express is the frame
 理由（均有证据）：
 - 前后端不是弱点：Supermew（你截图的产品，FE/BE+LangGraph+checkpoint+eval 门禁）、DeerFlow 2.0（自托管 Web，自称 super agent harness）、OpenHands（web-first）都是/web 系；**"效果"来自内核**（§0.1 三条）。
 - 多租户/RBAC/审计是**Web 的独有资产**，转 CLI 等于把差异化扔掉。
-- 你的内核其实已 70%：PER 循环、25 工具、context.py（自述吸收 hermes-agent 模式）、四层记忆、SSE 12 事件、replay、RunReport、评估框架（A3 已给出最小指标集）。缺口是**具体、可清单化**的：
-  - **P0（1–2 周，直接提"效果"）**：① 任务级结果与 agent token/成本落库（A3 MVP-12 #1/#5/#6 已有公式与代码坐标）；② Run 级 resume/checkpoint——照抄三家先例的最小版：OpenHands 的"事件先落盘再分发" + LangGraph 的"每步 checkpoint+pending writes"即可（你已有 events/replay 基础设施）；③ 把已实现但无消费者的模块接线（subagent/skills/escalation——A6 列了死代码清单）。
-  - **P1（2–4 周，"手和钥匙"）**：给 DocMind 加**两种执行位置可选**：a) 现状（服务端受限执行+Docker 沙箱）；b) **本地桥**——参考 Claude Code Remote Control 模式（本地装一个薄执行体，仅出站连接，web 只是窗口；设备信任+逐次审批）或更便宜的：**把 DocMind 暴露为 MCP server**，让用户自己已装的 Hermes/Pi/Claude Code 来调用你的知识库与工具（反向整合，比自研桌面端便宜一个数量级，且直接呼应你决策文档"记忆引擎独立成 MCP Server"的构想）。
+- 你的内核其实已 70%：PER 循环、25 工具、context.py（自述吸收 hermes-agent 模式）、四层记忆、SSE 12 事件、replay、RunReport、评估框架（`docs/research/014` 已给出最小指标集）。缺口是**具体、可清单化**的：
+  - **P0（1–2 周，直接提"效果"）**：① 任务级结果与 agent token/成本落库（`014` 的 MVP-12 #1/#5/#6 已有公式与代码坐标）；② Run 级 resume/checkpoint——照抄三家先例的最小版：OpenHands 的"事件先落盘再分发" + LangGraph 的"每步 checkpoint+pending writes"即可（你已有 events/replay 基础设施）；③ 把已实现但无消费者的模块接线（subagent/skills/escalation——内核审计 `010` 列了死代码清单）。
+  - **P1（2–4 周，"手和钥匙"）**：给 DocMind 加**两种执行位置可选**：a) 现状（服务端受限执行+Docker 沙箱）；b) **本地桥**——参考 Claude Code Remote Control 模式（本地装一个薄执行体，仅出站连接，web 只是窗口；设备信任+逐次审批）或更便宜的：**把 DocMind 暴露为 MCP server**，让用户自己已装的 Hermes/Pi/Claude Code 来调用你的知识库与工具（反向整合，**成本远低于自研桌面端**——估算，未做成本模型；且注意 MCP 接入等于新增一个外部控制面，认证/租户/限流/审计都要补齐；直接呼应你决策文档"记忆引擎独立成 MCP Server"的构想）。
   - **P2（多租户客户需要执行不可信代码时）**：再上 microVM 级沙箱（K8s 已有 manifest → 走 agent-sandbox/Kata/gVisor 路线）。
 - **反方观点 A（"干脆转 CLI/桌面"）**：2026 注意力与星数都在 CLI/桌面（DeepSeek Harness 24.4 万星、Pi 10 万+、Hermes 十万级、OpenClaw 29.5 万）；CLI 项目对求职的 star 杠杆更大。**回应**：这个论点对**新项目**成立（所以你的决策文档 CLI 第一是对的），但对 DocMind 不成立——重写成本高、丢弃多租户叙事，且"效果"差距不来自壳（§0.1）。
-- **反方观点 B（"保持现状不动"）**：DocMind 已收口（0 issue/0 PR/CI 全绿），有求职价值，别再动。**回应**：A3/A6 已证明"内核缺口"是真实且廉价的——不做，你的 agent 在"能感受到的效果"上就是比人家差；做，边际成本 1–2 周。**这也是你 MEMORY 里"用户偏好能感受到的改进"的正确用法：补 resume 和任务结果，就是"能感受到"的改进。**
+- **反方观点 B（"保持现状不动"）**：以"仓库当前 0 issue/0 PR/CI 全绿"为由主张不再改动。**回应**：（一）该"0/0"只是约 4 小时的瞬时窗口，随后即有 30 条 issue 立项——开放条数反映维护节奏，不是"已收口"的度量；（二）`009` / `010` 的专项审计已逐条列出内核与 RAG 的真实缺口——不做，你的 agent 在"能感受到的效果"上就是比人家差；做，边际成本 1–2 周。**这也是"用户偏好能感受到的改进"的正确用法：补 resume 和任务结果，就是"能感受到"的改进。**
 
 **(2) 个人 AI 工作台（新项目）：按 v4 决策执行——CLI 第一入口、单进程、入口无关；把它做成"内核+薄入口"，桌面/Web 以后只是加壳。**
 证据：Hermes 是"本地运行时+多入口"（你亲自跑过，踩坑记录也在），Pi 证明"4 个工具+<1000 token 提示词"也能是 10 万星 harness（**反过度设计**）；OpenClaw（Pi 内核+多平台壳）是 2026 最大开源现象。你的"单进程可跑"约束与"harness=内核工程"的行业共识完全同向；**唯一要防的是"入口多样化焦虑"**——先内核后壳，壳永远是最便宜的部分（Claude Code 给桌面加的每样东西，内核都没变）。
