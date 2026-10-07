@@ -415,7 +415,7 @@ class PERAgentLoop:
                     if event.type == "reflection" and event.reflection_result == "retry":
                         step_id = event.plan_step_id
                         if step_id:
-                            async for evt in self._retry_step(step_id, plan, history):
+                            async for evt in self._retry_step(step_id, plan, history, ctx=ctx):
                                 if evt.type == "chunk":
                                     final_output += "\n\n[重试结果]\n" + evt.content
                                 yield evt
@@ -693,8 +693,13 @@ class PERAgentLoop:
         step_id: str,
         plan: Plan,
         history: list[dict[str, str]] | None,
+        ctx: Any = None,
     ) -> AsyncGenerator[AgentEvent, None]:
-        """Re-execute a single step the reflector asked for, with a retry ceiling."""
+        """Re-execute a single step the reflector asked for, with a retry ceiling.
+
+        ctx 透传（复核补缝）：反思重试同样受预算门约束（此前不带 ctx 会绕过
+        预算熔断与迭代计数）。
+        """
         for step in plan.steps:
             if step.id != step_id:
                 continue
@@ -721,6 +726,7 @@ class PERAgentLoop:
                 organization_id=self.organization_id,
                 user_id=self.user_id,
                 enable_thinking=self.config.enable_thinking,
+                ctx=ctx,
             ):
                 yield retry_event
             return

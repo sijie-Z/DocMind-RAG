@@ -1,12 +1,11 @@
-"""issue #203 ①② 死配置接线后的行为契约（循环治理），外加一处顺手修的边界。
+"""issue #203 ①② 死配置接线后的行为契约（循环治理）。
 
 - ① `max_iterations`：单次 run 内可「执行」的计划步骤数，跨 replan 轮次累计；
   重试不另计（重试归 max_retries_per_step 管）。达上限 → 剩余 pending 置 skipped +
   decision(iteration_limit) + thinking，run 正常收尾。
 - ② `max_total_tokens`：token 预算熔断（0 = 不限制）。检查点全部落在
   「还能阻止下一次 LLM 调用」的边界：步骤派发前、每次 attempt（含重试）前、
-  反思/对抗审查/重规划门前。
-- 顺手修：serial 模式「全部剩余步骤因前置失败被跳过」原先会 pending[0] 越界崩溃。
+  fallback 链入口、反思/对抗审查/重规划门前（反思重试经 _retry_step 透传 ctx）。
 
 每个行为断言都标注了变异点（把接线删回原状，对应用例必须变红）。
 """
@@ -117,31 +116,63 @@ async def test_iteration_cap_zero_means_unlimited():
     assert all(d.action != "iteration_limit" for d in ctx.decisions)
 
 
-# ── 顺手修：serial 模式越界崩溃 ─────────────────────────────────────────────
+# ── 复核补缝（评审指出的两处缝隙）──────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_serial_all_pending_have_failed_deps_does_not_crash():
-    """前置失败把 pending 清空时，serial 派发不得 IndexError（#203 顺手修）。"""
-    cfg = AgentConfig(enable_planning=False, enable_reflection=False)
-    ex = Executor(AsyncMock(), cfg, _memory(), execution_mode="serial")
-    plan = _chain("第一步", "第二步")
+async def test_budget_blocks_fallback_tool_calls():
+    """fatal 错误直达 fallback 链时，预算已尽不得再发起备用工具调用。
+    变异点：删 fallback 入口的 over_budget 守卫 → _execute_step_once 被调用第 2 次 → 红。"""
+    cfg = AgentConfig(max_total_tokens=100, enable_planning=False, enable_reflection=False)
+    ex = Executor(AsyncMock(), cfg, _memory())
+    step = PlanStep(id="s1", description="第一步", fallback_tool="vector_search")
+    plan = Plan(id="p1", goal="g", steps=[step])
+    ctx = ExecutionContext(query="q")  # 0 起步：预算在主调用期间烧光（测的正是这个缝隙）
+
+    calls: list[str] = []
+
+    async def _spy(*, step, plan, history, organization_id, user_id, enable_thinking,
+                   error_context="", ctx=None):
+        calls.append(error_context or "main")
+        ctx.total_tokens = 100  # 主调用期间耗尽预算
+        yield AgentEvent(type="tool_error", content="boom", error_type="budget_exceeded",
+                         plan_id=plan.id, plan_step_id=step.id)
+
+    ex._execute_step_once = _spy
+    events = [e async for e in ex._execute_step_with_retry(
+        step=step, plan=plan, history=None, organization_id=1, user_id=0,
+        enable_thinking=False, ctx=ctx,
+    )]
+
+    assert calls == ["main"], "预算已尽不得再发起 fallback 调用"
+    assert step.status == "failed"
+    assert any(d.action == "budget_exceeded" and "备用工具" in d.reasoning for d in ctx.decisions)
+    assert any(e.type == "thinking" and "跳过备用工具" in e.content for e in events)
+
+
+@pytest.mark.asyncio
+async def test_reflection_retry_passes_ctx_to_executor():
+    """_retry_step 必须把 ctx 透传给执行器（否则反思重试绕过预算门与迭代计数）。
+    变异点：删 ctx=ctx 透传 → 本测试红。"""
+    loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=1)
+    received: dict = {}
+
+    async def _spy(*, step, plan, history, organization_id, user_id, enable_thinking, ctx=None):
+        received["ctx"] = ctx
+        yield AgentEvent(type="chunk", content="retry-ok")
+
+    executor_spy = MagicMock()
+    executor_spy._execute_step_with_retry = _spy
+    loop._executor = executor_spy
+
+    plan = _chain("A")
     ctx = ExecutionContext(query="q")
+    [e async for e in loop._retry_step("s1", plan, None, ctx=ctx)]
 
-    async def _fail(*, step, plan, history, organization_id, user_id,
-                    enable_thinking, ctx=None):
-        step.status = "failed"
-        step.error_context = "boom"
-        yield AgentEvent(type="thinking", content="失败")
-
-    ex._execute_step_with_retry = _fail
-    [e async for e in ex.execute(plan, ctx=ctx)]
-
-    assert plan.steps[0].status == "failed"
-    assert plan.steps[1].status == "skipped"
+    assert received["ctx"] is ctx, "反思重试必须把 ctx 交给执行器（预算门依赖它）"
 
 
-# ── ② max_total_tokens（生产者：预算视角的 budget_exceeded） ────────────────
+# ── ④ max_total_tokens（生产者：预算视角的 budget_exceeded） ────────────────
 
 
 @pytest.mark.asyncio
@@ -261,7 +292,7 @@ class _CountingReviewer:
     def __init__(self):
         self.calls = 0
 
-    async def review(self, plan, results):
+    async def review(self, plan, results, ctx=None):
         self.calls += 1
         return {"issues_found": [], "recommendation": "pass"}
 

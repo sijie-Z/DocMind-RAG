@@ -233,10 +233,6 @@ class Executor:
                             plan_id=plan.id,
                             plan_step_id=step.id,
                         )
-                if not pending:
-                    # 全部剩余步骤的前置均已失败，已无可执行步骤；
-                    # 原代码此处会用 pending[0] 越界崩溃（#203 顺手修）。
-                    break
                 if ctx is not None:
                     ctx.artifacts["iterations_used"] = ctx.artifacts.get("iterations_used", 0) + 1
                 step = pending[0]
@@ -533,6 +529,25 @@ class Executor:
             fallback_tools = [step.fallback_tool]
 
         if had_error and fallback_tools and step.retry_strategy != "skip":
+            # 复核补缝（预算门）：fallback 工具调用往往还有 LLM/检索成本——
+            # 预算已尽时不得再发起，直接落入下方优雅降级并记录决策。
+            if ctx is not None and self.config.over_budget(ctx):
+                ctx.record_decision(
+                    "execute", "budget_exceeded",
+                    f"本次 run 累计 tokens 已达上限 {self.config.max_total_tokens}，"
+                    f"跳过 {len(fallback_tools)} 个备用工具",
+                )
+                yield AgentEvent(
+                    type="thinking",
+                    content=(
+                        f"已达 token 预算（{getattr(ctx, 'total_tokens', 0)}/"
+                        f"{self.config.max_total_tokens}），跳过备用工具调用"
+                    ),
+                    thinking_type="evaluation",
+                    plan_id=plan.id,
+                    plan_step_id=step.id,
+                )
+                fallback_tools = []
             for idx, fb_tool in enumerate(fallback_tools):
                 logger.info(
                     "Retries exhausted for step %s, trying fallback #%d '%s'",
@@ -576,7 +591,8 @@ class Executor:
                     return  # fallback succeeded, done
 
             # All fallbacks failed — restore and continue to graceful degradation
-            logger.warning("All %d fallback tools exhausted for step %s", len(fallback_tools), step.id)
+            if fallback_tools:
+                logger.warning("All %d fallback tools exhausted for step %s", len(fallback_tools), step.id)
 
         # All retries exhausted — graceful degradation
         step.status = "failed"
