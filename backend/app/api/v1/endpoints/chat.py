@@ -769,6 +769,23 @@ async def chat_stream_endpoint(
                     elif agent_event.type == "error":
                         yield await sse_event("error", {"content": agent_event.content})
                         return
+                    elif agent_event.type == "execution_context":
+                        # issue #222：PER 循环收尾时真的会发出它，此前无 case 被静默丢弃。
+                        # 该事件带结构性字段，投影风格与上面各分支保持一致。
+                        yield await sse_event("execution_context", {
+                            "content": agent_event.content,
+                            "planId": agent_event.plan_id,
+                            "planProgress": agent_event.plan_progress if agent_event.plan_progress >= 0 else None,
+                        })
+                    else:
+                        # issue #222：这里是白名单式 if/elif，缺 case 的事件（如
+                        # run_report——PER 循环真的会发出）会**静默消失**，而 /agent 出口
+                        # 是全量转发的——同一个 run 从两个入口看到的流不一致。未知类型
+                        # 统一原样转发 content，客户端按需忽略（SSE 按 event 名分发，
+                        # 没有监听器的类型是安全的）；宁可在流里多一个没人听的事件，
+                        # 也不要静默丢数据。
+                        logger.debug("chat SSE 转发未投影的事件类型: %s", agent_event.type)
+                        yield await sse_event(agent_event.type, {"content": agent_event.content})
 
                 yield await sse_event("message", {
                     "content": full_response,
