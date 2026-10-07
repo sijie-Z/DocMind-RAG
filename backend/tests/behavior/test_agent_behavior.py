@@ -11,7 +11,7 @@ DocMind testing-strategy.md §"必须保证":
 
 import json
 import os
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -238,10 +238,15 @@ class TestExecutorBehavior:
         executor = Executor(client, AgentConfig(), memory)
 
         executed = []
+        captured: dict = {}
 
         async def _spy(name, args, **kwargs):
             executed.append((name, args))
             raise AssertionError("非法 JSON 时工具不得被执行")
+
+        async def _fake_synth(*, step_description, tool_results, original_instruction):
+            captured["tool_results"] = tool_results
+            return ""
 
         original = tool_registry.execute_detailed
         tool_registry.execute_detailed = _spy
@@ -249,11 +254,12 @@ class TestExecutorBehavior:
             step = PlanStep(id="s1", description="search")
             plan = Plan(id="p1", goal="test", steps=[step])
             events = []
-            async for event in executor._execute_step_once(
-                step=step, plan=plan, history=None,
-                organization_id=1, user_id=0, enable_thinking=False,
-            ):
-                events.append(event)
+            with patch.object(executor, "_synthesize_tool_results", new=_fake_synth):
+                async for event in executor._execute_step_once(
+                    step=step, plan=plan, history=None,
+                    organization_id=1, user_id=0, enable_thinking=False,
+                ):
+                    events.append(event)
         finally:
             tool_registry.execute_detailed = original
 
@@ -262,6 +268,11 @@ class TestExecutorBehavior:
         assert errs, f"应发出显式 tool_error，实际事件: {[e.type for e in events]}"
         assert errs[0].error_type == "serialization_error", \
             f"错误码应对齐 retry_policy 的 serialization_error，实际: {errs[0].error_type}"
+        # 失败原因必须记入 tool_results，由 synthesis 呈现给用户/模型（对抗评审 minor-1：
+        # 一个"发了事件但不记录"的半吊子修复必须也被这条钉死）。
+        recorded = captured.get("tool_results") or []
+        assert recorded and recorded[0].get("error_type") == "serialization_error", \
+            f"失败原因必须记入 tool_results 供 synthesis 呈现，实际: {recorded}"
 
     @pytest.mark.asyncio
     async def test_empty_arguments_remain_legal_no_arg_call(self):
