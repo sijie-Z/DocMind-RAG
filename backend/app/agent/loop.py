@@ -406,8 +406,9 @@ class PERAgentLoop:
                     logger.warning("Experience write-back failed: %s", e)
 
             # ── Phase 3: Reflection ──────────────────────────────────────────
+            # 预算已尽则跳过反思：不再为"评价结果"发起额外 LLM 调用（issue #203 ②）。
             replan_requested = False
-            if self.config.enable_reflection and plan.steps:
+            if self.config.enable_reflection and plan.steps and not self.config.over_budget(ctx):
                 results = self.memory.get_all_results()
                 feedback_parts: list[str] = []
                 async for event in self.reflector.reflect(plan, results, ctx=ctx):
@@ -416,7 +417,7 @@ class PERAgentLoop:
                     if event.type == "reflection" and event.reflection_result == "retry":
                         step_id = event.plan_step_id
                         if step_id:
-                            async for evt in self._retry_step(step_id, plan, history):
+                            async for evt in self._retry_step(step_id, plan, history, ctx=ctx):
                                 if evt.type == "chunk":
                                     final_output += "\n\n[重试结果]\n" + evt.content
                                 yield evt
@@ -445,6 +446,24 @@ class PERAgentLoop:
                             content=(
                                 f"反思判定需要重新规划，但本轮运行的重新规划次数已达上限"
                                 f"（{MAX_REPLANS_PER_RUN} 次），按当前结果收尾"
+                            ),
+                            thinking_type="evaluation",
+                            plan_id=plan.id,
+                        )
+                    elif self.config.over_budget(ctx):
+                        # 反思在预算耗尽后才判出 replan：不再重新规划
+                        # （一次 replan ≈ 一次完整 run 的执行成本，issue #203 ②）。
+                        ctx.record_decision(
+                            "plan",
+                            "budget_exceeded",
+                            f"本次 run 累计 tokens 已达上限 "
+                            f"{self.config.max_total_tokens}，不再重新规划",
+                        )
+                        yield AgentEvent(
+                            type="thinking",
+                            content=(
+                                f"反思判定需要重新规划，但本次 run 的 token 预算已尽"
+                                f"（{ctx.total_tokens}/{self.config.max_total_tokens}），按当前结果收尾"
                             ),
                             thinking_type="evaluation",
                             plan_id=plan.id,
@@ -479,7 +498,8 @@ class PERAgentLoop:
             break
 
         # ── Phase 3b: Adversarial Review ────────────────────────────────
-        if self.config.enable_reflection and plan.steps:
+        # 预算已尽则跳过对抗审查（同 Phase 3，issue #203 ②）。
+        if self.config.enable_reflection and plan.steps and not self.config.over_budget(ctx):
             results = self.memory.get_all_results()
             yield AgentEvent(
                 type="thinking",
@@ -675,8 +695,13 @@ class PERAgentLoop:
         step_id: str,
         plan: Plan,
         history: list[dict[str, str]] | None,
+        ctx: Any = None,
     ) -> AsyncGenerator[AgentEvent, None]:
-        """Re-execute a single step the reflector asked for, with a retry ceiling."""
+        """Re-execute a single step the reflector asked for, with a retry ceiling.
+
+        ctx 透传（复核补缝）：反思重试同样受预算门约束（此前不带 ctx 会绕过
+        预算熔断与迭代计数）。
+        """
         for step in plan.steps:
             if step.id != step_id:
                 continue
@@ -703,6 +728,7 @@ class PERAgentLoop:
                 organization_id=self.organization_id,
                 user_id=self.user_id,
                 enable_thinking=self.config.enable_thinking,
+                ctx=ctx,
             ):
                 yield retry_event
             return
