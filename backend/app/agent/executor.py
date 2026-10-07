@@ -675,10 +675,34 @@ class Executor:
             tool_call_id = tc.id or uuid.uuid4().hex[:16]
 
             # Parse arguments
+            # 区分两种形态（issue #205）：
+            #   空/None arguments —— 无参工具的合法形态，继续按 {} 执行；
+            #   JSON 解析失败    —— 绝不能用 {} 顶替后继续执行：那会把"模型发来的
+            #                      参数是垃圾"静默变成"工具没收到参数"，对可能带副
+            #                      作用的工具执行一次用户没要求的动作。显式报
+            #                      tool_error（错误码对齐 retry_policy 的
+            #                      serialization_error）并跳过该调用。
             try:
                 args = json.loads(func.arguments) if func.arguments else {}
-            except json.JSONDecodeError:
-                args = {}
+            except json.JSONDecodeError as e:
+                logger.warning(f"Tool {func.name} 的 arguments 不是合法 JSON，已拒绝执行: {e}")
+                AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
+                yield AgentEvent(
+                    type="tool_error",
+                    tool_name=func.name,
+                    tool_call_id=tool_call_id,
+                    content=f"工具参数不是合法 JSON，已拒绝执行：{e}",
+                    plan_id=plan.id,
+                    plan_step_id=step.id,
+                    retry_attempt=getattr(step, "retry_count", 0),
+                    error_type="serialization_error",
+                )
+                tool_results.append({
+                    "tool": func.name,
+                    "result": f"参数解析失败，工具未执行：{e}",
+                    "error_type": "serialization_error",
+                })
+                continue
 
             # Yield tool_call event
             yield AgentEvent(
