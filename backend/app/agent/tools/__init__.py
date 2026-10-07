@@ -15,6 +15,7 @@ Tool categories:
 # v2.1: 企业协同工具集
 from app.agent.tools import (
     code_execution,  # noqa: F401
+    curated_skill_tools,  # noqa: F401  — 技能工具（issue #200 接线）
     data_analysis,  # noqa: F401
     delegation,  # noqa: F401  — 子代理委派（issue #199 接线）
     feishu,  # noqa: F401

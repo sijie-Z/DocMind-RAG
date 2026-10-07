@@ -575,6 +575,15 @@ class Executor:
                 previous_results=previous_results or "(无前置结果)",
             )
 
+        # 技能索引进执行器提示词（issue #200）：SKILL.md 此前从不进任何提示词，
+        # 执行器里承诺的 load_skill_reference 工具也不存在——模型无从知道技能存在。
+        if self.config.enable_skills:
+            from app.agent.skill_prompt import build_skills_index
+
+            skills_index = build_skills_index()
+            if skills_index:
+                system_prompt += f"\n\n{skills_index}"
+
         if error_context:
             system_prompt += f"\n\n⚠️ 上次执行失败，请调整策略：{error_context}"
 

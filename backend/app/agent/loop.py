@@ -29,6 +29,8 @@ from app.agent.reflector import Reflector
 from app.agent.registry import tool_registry
 from app.agent.reviewer import Reviewer
 from app.agent.run_report import build_run_report, render_run_report_text
+from app.agent.skill_prompt import build_skills_index
+from app.agent.skills import skill_manager
 from app.agent.usage import record_llm_usage
 
 logger = logging.getLogger(__name__)
@@ -135,6 +137,8 @@ class PERAgentLoop:
         self.organization_id = organization_id
         self.user_id = user_id
         self._execution_mode = execution_mode
+        # 技能学习闭环（issue #200）：此前 SkillManager 全仓零调用者
+        self.skill_manager = skill_manager
 
         # Context engine with LLM-based summarization
         self.context_engine = ContextEngine(
@@ -240,6 +244,13 @@ class PERAgentLoop:
         # ── Execution Context (per-request state) ────────────────────────
         ctx = ExecutionContext(query=query)
 
+        # 技能（issue #200）：懒加载已学技能（load 幂等）；失败绝不阻塞主流程
+        if self.config.enable_skills:
+            try:
+                await self.skill_manager.load()
+            except Exception as e:
+                logger.warning("Skill manager load failed: %s", e)
+
         # ── Phase 0a: Context fitting ────────────────────────────────────
         # Compress conversation history so it fits the model's budget before
         # it reaches the planner and executor. Without this every downstream
@@ -290,6 +301,11 @@ class PERAgentLoop:
             ):
                 yield event
             plan = plan_sink[0]
+
+            # 学习闭环（读侧，issue #200）：命中已学技能时，把其工具序列补进
+            # 没有 tool_hint 的步骤（只补空缺，不覆盖 planner 的判断）
+            if self.config.enable_skills and plan:
+                self._apply_skill_hints(plan, query)
 
             # ── Phase 2: Execution ───────────────────────────────────────────
             pass_output = ""
@@ -402,6 +418,9 @@ class PERAgentLoop:
                 # 写入失败绝不能影响用户请求：整段包在 try 里，只记 warning。
                 try:
                     await self._write_experiences(ctx, plan, qg_result)
+                    # 学习闭环（写侧，issue #200）：成功计划 → 沉淀为可复用技能
+                    if self.config.enable_skills:
+                        await self._learn_skills(ctx, plan, qg_result)
                 except Exception as e:
                     logger.warning("Experience write-back failed: %s", e)
 
@@ -707,6 +726,56 @@ class PERAgentLoop:
                 yield retry_event
             return
 
+    def _apply_skill_hints(self, plan: Plan, query: str) -> None:
+        """学习闭环（读侧，issue #200）：命中的已学技能 → 补全步骤的工具提示。
+
+        只补没有 tool_hint 的步骤、不覆盖 planner 自己的判断；来源是
+        SkillManager.match()（trigger_patterns 命中且成功率加权达标）。
+        任何失败只记日志——学习闭环绝不阻塞主流程。
+        """
+        try:
+            hints = self.skill_manager.get_tool_hints_for_query(query or plan.goal or "")
+        except Exception as e:
+            logger.warning("Skill hint lookup failed: %s", e)
+            return
+        if not hints:
+            return
+        applied = 0
+        i = 0
+        for step in plan.steps:
+            if step.tool_hint:
+                continue
+            if i >= len(hints):
+                break
+            hint = hints[i].get("tool_name") if isinstance(hints[i], dict) else None
+            if hint:
+                step.tool_hint = hint
+                applied += 1
+            i += 1
+        if applied:
+            logger.info(
+                "Skill hints applied: %d/%d 个步骤（来自技能学习闭环）", applied, len(plan.steps)
+            )
+
+    async def _learn_skills(self, ctx: Any, plan: Plan, qg_result: dict | None) -> None:
+        """学习闭环（写侧，issue #200）：成功计划 → 自动沉淀为可复用技能。
+
+        与 `_write_experiences` 同址调用（质检之后），门槛同样刻意设高——
+        只在质检**全 A** 时学习，避免把平庸路径固化成"技能"污染后续规划。
+        失败绝不影响用户请求。
+        """
+        grades = (qg_result or {}).get("grades") or {}
+        if not grades or not all(g == "A" for g, _ in grades.values()):
+            return
+        steps = [
+            {"tool_hint": s.tool_hint, "description": s.description} for s in plan.steps
+        ]
+        learned = await self.skill_manager.learn_from_plan_success(
+            query=ctx.query or plan.goal, plan_steps=steps
+        )
+        if learned:
+            logger.info("Skill learned from successful run: %s", learned.name)
+
     async def _write_experiences(self, ctx: Any, plan: Plan, qg_result: dict | None) -> None:
         """经验回路的写入侧：把本次执行的成败转成经验落库。
 
@@ -778,6 +847,12 @@ class PERAgentLoop:
             "balanced": "请给出结构化、全面的回答，兼顾准确性和可读性。",
         }
         system_prompt += f"\n\n{personality_guide.get(self.config.personality, personality_guide['balanced'])}"
+
+        # 技能索引进提示词（issue #200）：SKILL.md 此前从不进任何提示词
+        if self.config.enable_skills:
+            skills_index = build_skills_index()
+            if skills_index:
+                system_prompt += f"\n\n{skills_index}"
 
         messages.append({"role": "system", "content": system_prompt})
 
