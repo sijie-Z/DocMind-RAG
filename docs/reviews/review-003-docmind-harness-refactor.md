@@ -395,4 +395,4 @@ docker exec docmind-backend env | grep -i prometheus    → 无
 | `010_agent-core-audit.md` | DocMind Agent 核心审计（能力清单 + harness 差距表） |
 | `012_reference-rag-architecture.md` | SuperMew 完整拆解（含它的评估契约原文） |
 | `008_rag-never-indexed.md` | 活体根因实测（四条证据链） |
-| `_PLAN.md` | 三档计划（本方案的执行版） |
+| `docs/decisions/2026-10-06-harness-refactor-plan.md` | 三档计划（本方案的执行版） |
