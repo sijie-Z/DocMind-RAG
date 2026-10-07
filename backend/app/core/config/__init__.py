@@ -23,7 +23,7 @@ settings = Settings()
 try:
     from app.core.config.ai import _auto_tier_defaults
 
-    for _k, _v in _auto_tier_defaults().items():
+    for _k, _v in _auto_tier_defaults(explicitly_set=settings.model_fields_set).items():
         if hasattr(settings, _k):
             object.__setattr__(settings, _k, _v)
 except Exception:
