@@ -21,6 +21,8 @@ services:
       - RATE_LIMIT_REQUESTS_PER_MINUTE=300
       - DATABASE_POOL_SIZE=20
       - DATABASE_MAX_OVERFLOW=30
+      # issue #207：打开 31 个 Prometheus 指标（此前默认 no-op）
+      - PROMETHEUS_ENABLED=true
     depends_on:
       mysql:
         condition: service_healthy
@@ -63,6 +65,8 @@ services:
       # 容器内经此变量固定 /tmp 路径；应用层默认值走 tempfile.gettempdir()（可移植）。
       - WORKER_HEARTBEAT_FILE=/tmp/docmind_worker_heartbeat
       - WORKER_HEARTBEAT_MAX_AGE_SECONDS=90
+      # issue #207：worker 侧同样开启指标
+      - PROMETHEUS_ENABLED=true
     depends_on:
       mysql:
         condition: service_healthy

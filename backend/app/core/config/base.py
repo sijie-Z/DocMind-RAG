@@ -41,6 +41,12 @@ class BaseAppSettings(BaseSettings):
     # "Authorization: Bearer <METRICS_TOKEN>". Leave empty to keep it open.
     METRICS_TOKEN: str = ""
 
+    # Prometheus 指标总开关（issue #207）：31 个指标默认 no-op。此前只有**真实
+    # 环境变量**能打开它（prometheus.py 用 os.environ 判定），.env 配置无效——
+    # 与 #232 同源的静默覆盖问题。现由 settings 承接；部署侧在
+    # compose / k8s configmap / .env.docker 里置 true 即可。
+    PROMETHEUS_ENABLED: bool = False
+
     # Alerting thresholds
     ALERT_ERROR_RATE_PERCENT: float = 5.0
     ALERT_P95_MS: float = 1200.0

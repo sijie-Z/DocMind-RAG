@@ -12,3 +12,5 @@ data:
   DEBUG: "false"
   LOG_LEVEL: "INFO"
   ENABLE_DEMO_ACCOUNT: "true"
+  # issue #207：打开 31 个 Prometheus 指标（此前任何部署配置都没设过，全为 no-op）
+  PROMETHEUS_ENABLED: "true"

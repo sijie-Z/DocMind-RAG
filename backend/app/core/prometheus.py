@@ -15,7 +15,24 @@ import os
 import threading
 from typing import Any
 
-_METRICS_ENABLED = os.environ.get("PROMETHEUS_ENABLED", "").lower() in ("1", "true", "yes")
+
+def _resolve_enabled() -> bool:
+    """总开关判定（issue #207）：真实环境变量优先；其次读 settings ——
+    让 **.env 配置也能生效**（此前只看 os.environ，.env 里的开关无效，
+    与 #232 同源）。settings 不可用（极端导入顺序）时安全回退 False。
+    """
+    env = os.environ.get("PROMETHEUS_ENABLED", "")
+    if env:
+        return env.lower() in ("1", "true", "yes")
+    try:
+        from app.core.config import settings
+
+        return bool(getattr(settings, "PROMETHEUS_ENABLED", False))
+    except Exception:
+        return False
+
+
+_METRICS_ENABLED = _resolve_enabled()
 _lock = threading.Lock()
 _real_metrics: dict[str, Any] | None = None
 
