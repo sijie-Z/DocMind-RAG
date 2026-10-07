@@ -11,7 +11,7 @@ DocMind testing-strategy.md §"必须保证":
 
 import json
 import os
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -200,6 +200,121 @@ class TestExecutorBehavior:
 
         assert any(e.type == "tool_error" for e in events), \
             "LLM failure should produce tool_error event"
+
+    @staticmethod
+    def _client_with_tool_call(tool_name: str, raw_arguments):
+        """构造一个「执行阶段返回单个 tool_call」的假 LLM，arguments 原样透传。"""
+        client = MagicMock()
+
+        async def _create(*, messages, tools=None, **kwargs):
+            resp = MagicMock()
+            choice = MagicMock()
+            msg = MagicMock()
+            tc = MagicMock()
+            tc.id = "tc_under_test"
+            tc.function.name = tool_name
+            tc.function.arguments = raw_arguments
+            msg.tool_calls = [tc]
+            msg.content = ""
+            msg.role = "assistant"
+            choice.message = msg
+            resp.choices = [choice]
+            return resp
+
+        client.chat.completions.create = _create
+        return client
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_arguments_are_rejected_not_silently_emptied(self):
+        """issue #205：参数 JSON 解析失败必须显式 tool_error 且跳过执行——
+        不得用 args={} 顶替后继续（「解析失败」与「空参数」是两回事）。"""
+        from app.agent.config import AgentConfig
+        from app.agent.executor import Executor
+
+        client = self._client_with_tool_call(
+            "search_knowledge_base", '{"query": "缺右括号"',
+        )
+        memory = AgentMemoryBridge(agent_id="test_bad_args", organization_id=1, user_id=0)
+        executor = Executor(client, AgentConfig(), memory)
+
+        executed = []
+        captured: dict = {}
+
+        async def _spy(name, args, **kwargs):
+            executed.append((name, args))
+            raise AssertionError("非法 JSON 时工具不得被执行")
+
+        async def _fake_synth(*, step_description, tool_results, original_instruction):
+            captured["tool_results"] = tool_results
+            return ""
+
+        original = tool_registry.execute_detailed
+        tool_registry.execute_detailed = _spy
+        try:
+            step = PlanStep(id="s1", description="search")
+            plan = Plan(id="p1", goal="test", steps=[step])
+            events = []
+            with patch.object(executor, "_synthesize_tool_results", new=_fake_synth):
+                async for event in executor._execute_step_once(
+                    step=step, plan=plan, history=None,
+                    organization_id=1, user_id=0, enable_thinking=False,
+                ):
+                    events.append(event)
+        finally:
+            tool_registry.execute_detailed = original
+
+        assert executed == [], f"非法 JSON 时工具不得执行，实际: {executed}"
+        errs = [e for e in events if e.type == "tool_error"]
+        assert errs, f"应发出显式 tool_error，实际事件: {[e.type for e in events]}"
+        assert errs[0].error_type == "serialization_error", \
+            f"错误码应对齐 retry_policy 的 serialization_error，实际: {errs[0].error_type}"
+        # 失败原因必须记入 tool_results，由 synthesis 呈现给用户/模型（对抗评审 minor-1：
+        # 一个"发了事件但不记录"的半吊子修复必须也被这条钉死）。
+        recorded = captured.get("tool_results") or []
+        assert recorded and recorded[0].get("error_type") == "serialization_error", \
+            f"失败原因必须记入 tool_results 供 synthesis 呈现，实际: {recorded}"
+
+    @pytest.mark.asyncio
+    async def test_empty_arguments_remain_legal_no_arg_call(self):
+        """空 arguments 是无参工具的合法形态：仍应按 {} 执行（与解析失败区分）。"""
+        from app.agent.config import AgentConfig
+        from app.agent.executor import Executor
+
+        client = self._client_with_tool_call("search_knowledge_base", None)
+        memory = AgentMemoryBridge(agent_id="test_no_args", organization_id=1, user_id=0)
+        executor = Executor(client, AgentConfig(), memory)
+
+        executed = []
+
+        class _Ok:
+            success = True
+            error = None
+
+            def __str__(self):
+                return "ok"
+
+        async def _spy(name, args, **kwargs):
+            executed.append((name, args))
+            return _Ok()
+
+        original = tool_registry.execute_detailed
+        tool_registry.execute_detailed = _spy
+        try:
+            step = PlanStep(id="s1", description="search")
+            plan = Plan(id="p1", goal="test", steps=[step])
+            events = []
+            async for event in executor._execute_step_once(
+                step=step, plan=plan, history=None,
+                organization_id=1, user_id=0, enable_thinking=False,
+            ):
+                events.append(event)
+        finally:
+            tool_registry.execute_detailed = original
+
+        assert executed == [("search_knowledge_base", {})], \
+            f"空参数应作为无参调用继续执行，实际: {executed}"
+        assert any(e.type == "tool_result" for e in events), \
+            f"空参数调用应产出 tool_result，实际事件: {[e.type for e in events]}"
 
 
 # ── Experience recording behavior ───────────────────────────────────────────
