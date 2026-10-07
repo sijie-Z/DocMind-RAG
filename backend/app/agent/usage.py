@@ -32,7 +32,9 @@ def record_llm_usage(response, ctx=None) -> int:
         prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
         completion = int(getattr(usage, "completion_tokens", 0) or 0)
     except (TypeError, ValueError):
-        # MagicMock 等"形状不对"的对象（getattr 自动造属性）——计 0 不抛错
+        # 防御：非数值字段（如 int() 转换不了的字符串）→ 计 0 不抛错。
+        # 注意（评审 minor-5 更正）：MagicMock 不在此列——int(MagicMock()) == 1，
+        # 它会记入极小值（1+1=2）而不是归零；此前的注释声称"MagicMock 计 0"不实。
         return 0
     if prompt:
         LLM_TOKENS.labels(direction="input").inc(prompt)

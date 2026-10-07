@@ -246,7 +246,7 @@ class PERAgentLoop:
         # LLM call sees whatever the caller passed in, unbounded.
         if history:
             try:
-                history = await self.context_engine.fit_async(history)
+                history = await self.context_engine.fit_async(history, ctx=ctx)
             except Exception as e:
                 logger.warning(f"Context compression failed, using raw history: {e}")
 
