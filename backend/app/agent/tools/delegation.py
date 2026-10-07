@@ -63,10 +63,10 @@ async def delegate_subtask(
     organization_id: int | None = None,
 ) -> str | ToolResult:
     if not tasks:
-        return ToolResult.fail(code="invalid_arguments", message="tasks 不能为空")
+        return ToolResult.fail(code="validation_error", message="tasks 不能为空")
     if len(tasks) > MAX_TASKS:
         return ToolResult.fail(
-            code="invalid_arguments",
+            code="validation_error",
             message=f"最多 {MAX_TASKS} 个子任务（与子代理并发上限一致），收到 {len(tasks)} 个",
         )
 
@@ -79,7 +79,7 @@ async def delegate_subtask(
         logger.warning("[DELEGATE] 获取 LLM 客户端失败: %s", e)
     if client is None:
         return ToolResult.fail(
-            code="llm_not_configured",
+            code="invalid_configuration",
             message="LLM 客户端未配置，无法委派子任务",
         )
 

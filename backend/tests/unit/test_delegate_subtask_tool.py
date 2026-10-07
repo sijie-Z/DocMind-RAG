@@ -89,7 +89,7 @@ async def test_more_than_three_tasks_rejected():
         user_id=0,
     )
     assert not result.success
-    assert result.error.code == "invalid_arguments"
+    assert result.error.code == "validation_error"
 
 
 @pytest.mark.asyncio
@@ -102,7 +102,7 @@ async def test_no_client_returns_explicit_failure():
             user_id=0,
         )
     assert not result.success
-    assert result.error.code == "llm_not_configured"
+    assert result.error.code == "invalid_configuration"
 
 
 @pytest.mark.asyncio
