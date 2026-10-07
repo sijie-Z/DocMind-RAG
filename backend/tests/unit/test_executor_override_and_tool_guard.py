@@ -145,11 +145,42 @@ async def test_b3_allowed_tool_still_executes():
 
 def test_b2_tool_timeout_resolved_from_registry():
     ex = _mk_executor(AgentConfig(), MagicMock())
-    assert ex._tool_timeout("delegate_subtask") == 600.0, (
-        "B2：声明 600s 的工具不得被 30s 掐死"
+    assert ex._tool_timeout("delegate_subtask") == 601.0, (
+        "B2：声明 600s 的工具不得被 30s 掐死（外层=声明值+1s 缓冲）"
     )
-    assert ex._tool_timeout("calculate") == ex.TOOL_TIMEOUT_SECONDS
+    assert ex._tool_timeout("calculate") == ex.TOOL_TIMEOUT_SECONDS + 1.0
     assert ex._tool_timeout("不存在的工具") == ex.TOOL_TIMEOUT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_synthesis_also_honors_override():
+    """评审 minor：合成阶段（子代理的最终答复）同样带 override 人设。"""
+    captured: dict = {}
+
+    client = _client_with_tool_call("search_knowledge_base", capture=captured)
+    cfg = AgentConfig(
+        enable_planning=False,
+        enable_reflection=False,
+        tool_tags=["search", "analysis"],
+        max_tool_calls_per_turn=1,
+        system_prompt_override="CTX_MARKER_42 你是子任务代理",
+    )
+
+    class _Ok:
+        success = True
+        error = None
+
+        def __str__(self):
+            return "ok"
+
+    with patch.object(tool_registry, "execute_detailed", new=AsyncMock(return_value=_Ok())):
+        await _run(_mk_executor(cfg, client))
+
+    assert len(captured["messages"]) >= 2, "应有工具循环 + 合成两次 LLM 调用"
+    synthesis_sys = [m for m in captured["messages"][-1] if m.get("role") == "system"]
+    assert synthesis_sys and "CTX_MARKER_42" in synthesis_sys[0]["content"], (
+        "合成阶段的系统消息也必须带 override 人设"
+    )
 
 
 @pytest.mark.asyncio
