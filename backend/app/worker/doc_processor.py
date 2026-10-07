@@ -42,7 +42,8 @@ async def _verify_indexed(
     三条不变式（issue #181 / #224）——「状态 = INDEXED」必须意味着文档可被检索：
 
     1. 该文档至少有一条 chunk 落在索引里（#181）；
-    2. 其中至少一条带**有效 embedding**（#224）：空向量在 ES 里 `exists=false`，
+    2. 其中至少一条带 **embedding 字段**（#224；`exists` 判据只证"存在"，
+       不证"非退化" —— 零向量由写入路径保证不产生）：空值在 ES 里 `exists=false`，
        而向量通道硬过滤 `exists: embedding` —— 一条都没有 = 混合检索的向量臂
        永远查不到它；
     3. chunk 的 `organization_id` 与该文档一致（#224）：检索通道硬过滤组织 ——
@@ -93,7 +94,7 @@ async def _verify_indexed(
     if with_embedding == 0:
         raise RuntimeError(
             f"索引校验失败：文档 {document_id} 在索引 {index_name} 里有 {indexed} 条 chunk，"
-            f"但**没有任何一条带有效 embedding** —— 向量通道硬过滤 exists:embedding，"
+            f"但**没有任何一条带 embedding 字段** —— 向量通道硬过滤 exists:embedding，"
             f"这些内容对混合检索的向量臂永远不可见（#224）。拒绝把该文档标记为已索引。"
         )
 

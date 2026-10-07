@@ -7,8 +7,8 @@
 
 三条不变式（「状态 = INDEXED ⟹ 文档可被检索到」）：
 1. 至少一条 chunk 落了（#181）；
-2. 至少一条带**有效 embedding**（#224）—— 向量通道硬过滤 `exists: embedding`，
-   没有向量的 chunk 对混合检索的向量臂永远不可见；
+2. 至少一条带 **embedding 字段**（#224；`exists` 判据只证"存在"，不证"非退化"）——
+   向量通道硬过滤 `exists: embedding`，没有 embedding 的 chunk 对混合检索的向量臂永远不可见；
 3. `organization_id` 与文档一致（#224）—— 检索通道硬过滤组织，org 写错 = 谁都搜不到。
 
 > **一处更正（#181 轮）**：我最初写过「`bulk` 不抛错 ≠ 数据进去了」，那条因果故事
@@ -21,7 +21,7 @@
 
 - 一条都没落 → 抛错（调用方 `except` 会把文档标 FAILED 并带原因）；
 - **他人文档的 chunk 不得为本文档"挡枪"** —— 校验必须按 `document_id` 过滤（#224）；
-- 一条带有效 embedding 的都没有 → 抛错（#224）；
+- 一条带 embedding 的都没有 → 抛错（#224）；
 - `organization_id` 全不匹配 → 抛错（#224）；
 - 全部落库 → 通过并返回条数；
 - 部分落库 → 不阻断但 WARNING；部分缺向量 → 不阻断但 WARNING（#224）。
@@ -165,10 +165,10 @@ async def test_other_documents_do_not_mask_missing_chunks(test_index):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 不变式 2（#224）：没有任何一条带有效 embedding → 必须抛错
+# 不变式 2（#224）：没有任何一条带 embedding → 必须抛错
 # ══════════════════════════════════════════════════════════════════════
 @pytest.mark.asyncio
-async def test_raises_when_no_chunk_has_valid_embedding(test_index):
+async def test_raises_when_no_chunk_has_embedding(test_index):
     client, _index_name, seed = test_index
     await seed(3, with_embedding=False)  # 落库了，但没有任何向量
 
