@@ -15,7 +15,6 @@ import pytest
 
 from app.services.knowledge_service import KnowledgeService
 
-
 HITS = [
     {
         "document_id": "doc-1",
