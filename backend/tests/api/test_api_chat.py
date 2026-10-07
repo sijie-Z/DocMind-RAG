@@ -1,5 +1,5 @@
 """Chat API 集成测试 — 会话与消息流程。"""
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -356,3 +356,52 @@ class TestMessageFeedback:
         finally:
             app.dependency_overrides.pop(get_db, None)
             app.dependency_overrides.pop(get_current_user, None)
+
+
+class TestAgentSSEForwarding:
+    """issue #222：chat 的 SSE 出口不得静默丢弃白名单外的事件类型。
+
+    修复前 chat.py 的转发是白名单式 if/elif，PER 循环真的会发出的
+    `run_report` 与 `execution_context` 没有 case，就此消失；而 /agent 出口
+    是全量转发的——同一个 run 从两个入口看到的流不一致。
+    """
+
+    def test_run_report_and_execution_context_are_forwarded(self, client: TestClient):
+        from app.agent.events import AgentEvent
+        from app.agent.service import agent_service
+        from app.main import app
+
+        mock_user = _make_mock_user()
+        override_func, _ = _override_get_db()
+
+        async def _override_user():
+            return mock_user
+
+        async def _fake_chat(**kwargs):
+            yield AgentEvent(type="chunk", content="你好")
+            yield AgentEvent(type="run_report", content="RUN_REPORT_MARKER")
+            yield AgentEvent(
+                type="execution_context",
+                content={"steps": ["s1"]},
+                plan_id="p1",
+                plan_progress=1.0,
+            )
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+        try:
+            with patch.object(agent_service, "chat", new=_fake_chat):
+                r = client.post(
+                    "/api/v1/chat/stream",
+                    json={"content": "你好", "useAgent": True},
+                )
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
+        assert r.status_code == 200, r.text
+        text = r.text
+        assert "event: run_report" in text, f"run_report 被丢弃，实际流: {text[:500]}"
+        assert "RUN_REPORT_MARKER" in text
+        assert "event: execution_context" in text, f"execution_context 被丢弃，实际流: {text[:500]}"
+        assert '"p1"' in text
