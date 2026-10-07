@@ -16,6 +16,7 @@ Tool categories:
 from app.agent.tools import (
     code_execution,  # noqa: F401
     data_analysis,  # noqa: F401
+    delegation,  # noqa: F401  — 子代理委派（issue #199 接线）
     feishu,  # noqa: F401
     mcp_bridge,  # noqa: F401
     skills,  # noqa: F401

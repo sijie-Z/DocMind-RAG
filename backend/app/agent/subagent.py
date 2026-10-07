@@ -7,6 +7,7 @@ returns a summary to the parent.
 Uses PERAgentLoop with planning and reflection disabled for efficiency.
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 
@@ -75,25 +76,47 @@ async def run_parallel_subtasks(
     tasks: list[str],
     model: str = "deepseek-v4-flash",
     organization_id: int = 1,
+    parent_context: str = "",
+    per_task_timeout: float | None = 300.0,
 ) -> list[str]:
     """Execute multiple subtasks in parallel and collect results.
 
-    Returns a list of final answers from each subtask.
+    返回与 `tasks` **同序**的结论列表。单个子任务的失败/超时**不外溢**：
+    以 `[Error: …]` / `[子任务超时…]` 标注在该条结果里（issue #199 验收：
+    错误要能传播进结果、并发要有上限、单任务要有墙钟上限）。
+
+    `per_task_timeout`：单个子任务墙钟上限（秒）；None 表示不设。
     """
 
-    async def _run_one(task: str) -> str:
-        answer_parts: list[str] = []
+    async def _collect_events(task: str) -> list[str]:
+        parts: list[str] = []
         async for event in delegate_task(
             client=client,
             task=task,
+            parent_context=parent_context,
             model=model,
             organization_id=organization_id,
         ):
             if event.type == "chunk":
-                answer_parts.append(event.content)
+                parts.append(event.content)
             elif event.type == "error":
-                answer_parts.append(f"[Error: {event.content}]")
-        return "".join(answer_parts) or "No result."
+                parts.append(f"[Error: {event.content}]")
+        return parts
+
+    async def _run_one(task: str) -> str:
+        try:
+            if per_task_timeout:
+                parts = await asyncio.wait_for(
+                    _collect_events(task), timeout=per_task_timeout
+                )
+            else:
+                parts = await _collect_events(task)
+        except TimeoutError:
+            return f"[子任务超时（>{per_task_timeout:.0f}s）]"
+        except Exception as e:
+            logger.warning("子任务执行失败（不拖垮整批）: %s | %s", type(e).__name__, e)
+            return f"[Error: {type(e).__name__}: {e}]"
+        return "".join(parts) or "No result."
 
     return await _gather_with_concurrency(
         [_run_one(task) for task in tasks],
@@ -103,7 +126,6 @@ async def run_parallel_subtasks(
 
 async def _gather_with_concurrency(coros, max_concurrency: int = 3):
     """Run coroutines with limited concurrency."""
-    import asyncio
     semaphore = asyncio.Semaphore(max_concurrency)
 
     async def _wrap(coro):
