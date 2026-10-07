@@ -70,8 +70,11 @@ class KnowledgeService:
             # 转换 organization_id 为 int
             org_id = int(organization_id) if organization_id else 0
 
-            # 使用 RagService 进行高级检索
-            results = await rag_service.search_knowledge_base(
+            # 使用 RagService 进行高级检索。
+            # pipeline 返回 (results, debug_info) 元组，必须解包——issue #219：
+            # 这里曾把元组当列表迭代，`isinstance(res, dict)` 把「hits 列表」和
+            # `None` 两个元素全部跳过，本方法恒返回 []，REST 搜索端点永远搜不到东西。
+            results, _ = await rag_service.search_knowledge_base(
                 query=query,
                 organization_id=org_id,
                 top_k=top_k,
