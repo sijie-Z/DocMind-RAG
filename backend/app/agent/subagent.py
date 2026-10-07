@@ -50,6 +50,10 @@ async def delegate_task(
         max_iterations=max_iterations,
         max_tool_calls_per_turn=3,
         tool_tags=SUBAGENT_ALLOWED_TAGS,
+        # 技能（issue #200 评审 B1）：子代理上下文看不到技能工具（schema 过滤 +
+        # 执行层白名单拒绝），因此技能索引注入 / 读侧提示 / 写侧学习对子代理全部关闭，
+        # 避免提示词承诺一个子代理必被拒绝的工具。
+        enable_skills=False,
         enable_planning=False,
         enable_reflection=False,
         enable_memory=False,

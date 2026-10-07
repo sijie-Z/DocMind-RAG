@@ -84,7 +84,9 @@ class SkillManager:
             self._loaded = True
         except Exception as e:
             logger.warning(f"Failed to load skills: {e}")
-            self._loaded = True
+            # 不置 _loaded：Redis 瞬时故障不应让本进程"永不重试加载"（评审 m2），
+            # 下个 run 会再次尝试（load 本身仍然幂等）。
+            return
 
     async def save(self) -> None:
         """Persist skills to Redis."""
@@ -178,17 +180,6 @@ class SkillManager:
         """List all active skills."""
         return [s for s in self._skills.values() if not s.is_stale]
 
-    def get_tool_hints_for_query(self, query: str) -> list[dict[str, Any]]:
-        """Get tool sequence hints from a matching skill for the Planner.
-
-        Returns the tool_sequence from the best matching skill,
-        which can be used to suggest tool hints for plan steps.
-        """
-        skill = self.match(query)
-        if skill and skill.tool_sequence:
-            return skill.tool_sequence
-        return []
-
     async def learn_from_plan_success(
         self,
         query: str,
@@ -208,11 +199,23 @@ class SkillManager:
         import re
         keywords = re.findall(r'[一-鿿]{2,}', query)  # Chinese bigrams
         keywords += [w.lower() for w in query.split() if len(w) > 3 and w.isalpha()]
+        keywords = keywords[:5]
+
+        # 无触发词的技能永远匹配不上：不制造注定无用的记录（评审 B2 配套）。
+        if not keywords:
+            return None
+
+        # 同一 query（触发词列表完全相同）已学过 → 不重复沉淀（评审 m3：
+        # 原先每次全 A 成功都会 create_skill 一条新记录，全 A 常客会堆积重复技能）。
+        for existing in self._skills.values():
+            if existing.trigger_patterns == keywords:
+                logger.info(f"Skill already learned for this query: {existing.id}")
+                return None
 
         return await self.create_skill(
             name=f"Auto: {query[:50]}",
             description=f"Learned from: {query[:80]}",
-            trigger_patterns=keywords[:5],
+            trigger_patterns=keywords,
             tool_sequence=[{
                 "tool_name": s.get("tool_hint", ""),
                 "description": s.get("description", ""),

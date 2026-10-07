@@ -577,7 +577,9 @@ class Executor:
 
         # 技能索引进执行器提示词（issue #200）：SKILL.md 此前从不进任何提示词，
         # 执行器里承诺的 load_skill_reference 工具也不存在——模型无从知道技能存在。
-        if self.config.enable_skills:
+        # 受限工具上下文（tool_tags 非空，如子代理）不得注入：技能工具在其白名单外，
+        # 提示词不能承诺一个必被拒绝的工具（issue #200 评审 B1）。
+        if self.config.enable_skills and not self.config.tool_tags:
             from app.agent.skill_prompt import build_skills_index
 
             skills_index = build_skills_index()
