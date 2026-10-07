@@ -34,8 +34,20 @@ def _noop() -> None:
     """默认进度回调（不关心进度的调用方）。"""
 
 
-async def _verify_indexed(client, document_id: str, expected: int) -> int:
-    """确认该文档的 chunk **真的**进了 Elasticsearch；没进去就抛错。
+async def _verify_indexed(
+    client, document_id: str, expected: int, *, organization_id: str
+) -> int:
+    """确认该文档的 chunk **真的**能被检索到；不能就抛错。
+
+    三条不变式（issue #181 / #224）——「状态 = INDEXED」必须意味着文档可被检索：
+
+    1. 该文档至少有一条 chunk 落在索引里（#181）；
+    2. 其中至少一条带 **embedding 字段**（#224；`exists` 判据只证"存在"，
+       不证"非退化" —— 零向量由写入路径保证不产生）：空值在 ES 里 `exists=false`，
+       而向量通道硬过滤 `exists: embedding` —— 一条都没有 = 混合检索的向量臂
+       永远查不到它；
+    3. chunk 的 `organization_id` 与该文档一致（#224）：检索通道硬过滤组织 ——
+       org 写错 = 谁都搜不到。
 
     为什么必须校验（issue #181）：**`_mark_success` 是无条件把状态置成 `INDEXED` 的** ——
     它不看 ES 里到底有没有东西。而「已索引」这个状态是运维、前端与监控判断
@@ -54,6 +66,7 @@ async def _verify_indexed(client, document_id: str, expected: int) -> int:
     """
     index_name = settings.ELASTICSEARCH_INDEX_NAME
     await client.indices.refresh(index=index_name)
+
     res = await client.count(
         index=index_name, query={"term": {"document_id": document_id}}
     )
@@ -66,6 +79,44 @@ async def _verify_indexed(client, document_id: str, expected: int) -> int:
             f"拒绝把该文档标记为已索引 —— 否则会出现「状态已索引、检索却查不到」。"
         )
 
+    res_emb = await client.count(
+        index=index_name,
+        query={
+            "bool": {
+                "filter": [
+                    {"term": {"document_id": document_id}},
+                    {"exists": {"field": "embedding"}},
+                ]
+            }
+        },
+    )
+    with_embedding = int(res_emb.get("count", 0))
+    if with_embedding == 0:
+        raise RuntimeError(
+            f"索引校验失败：文档 {document_id} 在索引 {index_name} 里有 {indexed} 条 chunk，"
+            f"但**没有任何一条带 embedding 字段** —— 向量通道硬过滤 exists:embedding，"
+            f"这些内容对混合检索的向量臂永远不可见（#224）。拒绝把该文档标记为已索引。"
+        )
+
+    res_org = await client.count(
+        index=index_name,
+        query={
+            "bool": {
+                "filter": [
+                    {"term": {"document_id": document_id}},
+                    {"term": {"organization_id": str(organization_id)}},
+                ]
+            }
+        },
+    )
+    with_org = int(res_org.get("count", 0))
+    if with_org == 0:
+        raise RuntimeError(
+            f"索引校验失败：文档 {document_id} 的 chunk 的 organization_id 与文档不一致"
+            f"（期望 {organization_id!r}）—— 检索通道硬过滤组织，谁都搜不到它（#224）。"
+            f"拒绝把该文档标记为已索引。"
+        )
+
     if indexed != expected:
         # 部分落库：文档确实可被检索到，但内容不完整。不阻断，但必须留痕。
         logger.warning(
@@ -73,6 +124,16 @@ async def _verify_indexed(client, document_id: str, expected: int) -> int:
             document_id,
             expected,
             indexed,
+        )
+    if with_embedding < indexed or with_org < indexed:
+        # 部分 chunk 对某条检索引擎通道不可见：文档整体可检索（有带向量的、
+        # 组织匹配的 chunk），但不完整。不阻断，必须留痕。
+        logger.warning(
+            "[DOC_PROC] 索引可检索性不完整 document_id=%s 总数=%d 带embedding=%d 组织匹配=%d",
+            document_id,
+            indexed,
+            with_embedding,
+            with_org,
         )
     return indexed
 
@@ -276,8 +337,11 @@ class DocumentProcessor:
             refresh=True,
         )
         await ElasticsearchTools.bulk_index_documents(es_docs)
-        # bulk 不抛错不代表写进去了 —— 必须回读确认（issue #181）
-        await _verify_indexed(client, doc.id, len(es_docs))
+        # bulk 不抛错不代表写进去了 —— 必须回读确认（issue #181；
+        # 校验范围在 #224 加严：embedding 有效性与 organization_id 一致性）
+        await _verify_indexed(
+            client, doc.id, len(es_docs), organization_id=str(doc.organization_id)
+        )
 
         # 替换成功后按组织清空 RAG 缓存，避免旧内容仍命中缓存
         from app.rag.cache import RetrievalCache, SemanticCache
