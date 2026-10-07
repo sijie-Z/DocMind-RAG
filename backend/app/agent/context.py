@@ -107,6 +107,7 @@ class ContextEngine:
         self,
         messages: list[dict[str, str]],
         system_prompt: str | None = None,
+        ctx=None,
     ) -> list[dict[str, str]]:
         """Async version: trim/compress messages with LLM summarization."""
         if not messages:
@@ -133,7 +134,7 @@ class ContextEngine:
             - 50,
         )
 
-        compressed = await self._compress_messages_async(old_messages, budget_for_old)
+        compressed = await self._compress_messages_async(old_messages, budget_for_old, ctx=ctx)
         result = compressed + recent_messages
 
         final_tokens = estimate_messages_tokens(result)
@@ -143,7 +144,7 @@ class ContextEngine:
         return result
 
     async def _compress_messages_async(
-        self, messages: list[dict[str, str]], token_budget: int
+        self, messages: list[dict[str, str]], token_budget: int, ctx=None
     ) -> list[dict[str, str]]:
         """Compress messages using LLM summarization when available."""
         if not messages:
@@ -152,7 +153,7 @@ class ContextEngine:
         # Try LLM summarization for 4+ messages
         if self._llm_client and len(messages) >= 4:
             try:
-                summary = await self._summarize_with_llm(messages, token_budget)
+                summary = await self._summarize_with_llm(messages, token_budget, ctx=ctx)
                 if summary:
                     return [{"role": "system", "content": "[Conversation summary]\n" + summary}]
             except Exception:
@@ -188,7 +189,7 @@ class ContextEngine:
         return [{"role": "system", "content": summary_text}]
 
     async def _summarize_with_llm(
-        self, messages: list[dict[str, str]], token_budget: int
+        self, messages: list[dict[str, str]], token_budget: int, ctx=None
     ) -> str:
         """Use the LLM to produce a concise summary of older messages."""
         if not self._llm_client:
@@ -218,6 +219,11 @@ class ContextEngine:
                 temperature=0.0,
                 max_tokens=min(300, max_chars // 2),
             )
+            # 用量记账（issue #202 评审 minor-1）：环内第七个调用点——
+            # ContextEngine 摘要，经 loop.py 的 fit_async 在产品路径可达
+            from app.agent.usage import record_llm_usage
+
+            record_llm_usage(resp, ctx)
             return resp.choices[0].message.content or ""
         except Exception:
             return ""

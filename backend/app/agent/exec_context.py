@@ -85,6 +85,15 @@ class ExecutionContext:
 
     # ── Convenience methods ──
 
+    def add_tokens(self, n: int) -> None:
+        """累加 LLM 用量（issue #202）。
+
+        统一由 `app.agent.usage.record_llm_usage` 调用；调用点不要各自直改
+        `total_tokens`——单一入口才能保证"新增调用点漏记"时一眼可见。
+        """
+        if n and n > 0:
+            self.total_tokens += int(n)
+
     def add_finding(
         self,
         step_id: str,

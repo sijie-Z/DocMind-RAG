@@ -103,6 +103,8 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
         "evaluation": evaluation,
         "final_output_preview": (final_output or "")[:400],
         "duration_ms": round(ctx.duration_ms, 1),
+        # issue #202 评审 minor-8：人读报告此前答不出"花了多少 token"
+        "total_tokens": ctx.total_tokens,
     }
 
 
@@ -125,6 +127,7 @@ def render_run_report_text(report: dict[str, Any]) -> str:
     lines.append(f"Query: {report['query']}")
     lines.append(f"Goal:  {report['goal'] or '(unset)'}")
     lines.append(f"Duration: {report['duration_ms']} ms")
+    lines.append(f"Tokens:   {report.get('total_tokens', 0)}")
     lines.append("")
     lines.append("## Plan reasoning")
     lines.extend(f"  - {r}" for r in report["plan_reasoning"])

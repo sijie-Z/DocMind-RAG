@@ -151,7 +151,7 @@ class StubReviewer:
         )
         self.calls = 0
 
-    async def review(self, plan, results):
+    async def review(self, plan, results, ctx=None):
         self.calls += 1
         return self.result
 

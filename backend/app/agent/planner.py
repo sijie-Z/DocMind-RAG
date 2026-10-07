@@ -27,6 +27,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -34,6 +35,7 @@ from openai import AsyncOpenAI
 from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.registry import tool_registry
+from app.agent.usage import record_llm_usage
 from app.core.prometheus import AGENT_PLANNING_LATENCY, AGENT_PLANNING_TOTAL
 
 logger = logging.getLogger(__name__)
@@ -300,12 +302,17 @@ class Planner:
                 max_tokens=self.config.plan_max_tokens,
                 timeout=30.0,
                 stream=True,
+                # 流式调用默认不带 usage，显式索取（issue #202；DeepSeek 支持）
+                stream_options={"include_usage": True},
             )
 
             full_content = ""
+            stream_usage = None  # 最后一个 chunk 携带（include_usage）
             fence_start = -1  # index of opening "```" in full_content, -1 = not found
 
             async for chunk in stream:
+                if getattr(chunk, "usage", None):
+                    stream_usage = chunk.usage
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if not delta or not delta.content:
                     continue
@@ -330,6 +337,10 @@ class Planner:
                             thinking_type="planning",
                             plan_id=plan_id,
                         )
+
+            # 用量记账（issue #202）：流式 usage 统一走单一入口
+            if stream_usage is not None:
+                record_llm_usage(SimpleNamespace(usage=stream_usage), ctx)
 
             # Parse the complete response
             plan_json = self._extract_json(full_content)

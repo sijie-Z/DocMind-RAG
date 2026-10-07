@@ -244,7 +244,7 @@ class TestExecutorBehavior:
             executed.append((name, args))
             raise AssertionError("非法 JSON 时工具不得被执行")
 
-        async def _fake_synth(*, step_description, tool_results, original_instruction):
+        async def _fake_synth(*, step_description, tool_results, original_instruction, ctx=None):
             captured["tool_results"] = tool_results
             return ""
 

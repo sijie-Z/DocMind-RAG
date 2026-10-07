@@ -29,6 +29,7 @@ from app.agent.reflector import Reflector
 from app.agent.registry import tool_registry
 from app.agent.reviewer import Reviewer
 from app.agent.run_report import build_run_report, render_run_report_text
+from app.agent.usage import record_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +246,7 @@ class PERAgentLoop:
         # LLM call sees whatever the caller passed in, unbounded.
         if history:
             try:
-                history = await self.context_engine.fit_async(history)
+                history = await self.context_engine.fit_async(history, ctx=ctx)
             except Exception as e:
                 logger.warning(f"Context compression failed, using raw history: {e}")
 
@@ -340,6 +341,7 @@ class PERAgentLoop:
                         max_tokens=self.config.max_tokens,
                         timeout=self.config.timeout,
                     )
+                    record_llm_usage(response, ctx)
                     content = response.choices[0].message.content or ""
                     if content:
                         yield AgentEvent(type="chunk", content=content)
@@ -485,7 +487,7 @@ class PERAgentLoop:
                 thinking_type="evaluation",
             )
             await _yield_control()
-            review = await self.reviewer.review(plan, results)
+            review = await self.reviewer.review(plan, results, ctx=ctx)
             issues = review.get("issues_found", [])
             high_issues = [i for i in issues if i.get("severity") == "high"]
             # §5c：消费 recommendation（此前全仓零读取者）。取值收敛到
