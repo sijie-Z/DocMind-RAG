@@ -3,8 +3,15 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _auto_tier_defaults() -> dict[str, object]:
-    """Apply hardware-detected defaults for fields not explicitly set via env.
+def _auto_tier_defaults(*, explicitly_set: set[str] | frozenset[str] | None = None) -> dict[str, object]:
+    """Apply hardware-detected defaults for fields the user did NOT set anywhere.
+
+    ``explicitly_set`` 应传 pydantic 的 ``settings.model_fields_set`` —— 它包含
+    **所有显式来源**（真实环境变量 / `.env` 文件 / 初始化参数）。**不能只查
+    `os.environ`**：`.env` 的值不在 `os.environ` 里，曾经因此把 `.env` 里显式
+    配置的字段静默覆盖成硬件档位默认值（issue #232：`.env` 写
+    `EMBEDDING_MODEL=qwen3-embedding:0.6b`，运行时被覆盖成 `bge-m3`，
+    worker 报 `404 model not found`，排查代价极高）。
 
     **不要在这里对返回值做 `str()`。** 调用方（`app/core/config/__init__.py`）用
     `object.__setattr__` 写进 settings，**绕过 pydantic 的类型校验与转换** ——
@@ -23,12 +30,14 @@ def _auto_tier_defaults() -> dict[str, object]:
     except Exception:
         return {}
     overrides: dict[str, object] = {}
+    explicit = explicitly_set or set()
     for field, attr, env_var in [
         ("EMBEDDING_MODEL", "embedding_model", "EMBEDDING_MODEL"),
         ("VECTOR_DIMENSION", "vector_dim", "VECTOR_DIMENSION"),
     ]:
-        if env_var not in __import__("os").environ:
-            overrides[field] = getattr(hw, attr)
+        if field in explicit or env_var in __import__("os").environ:
+            continue
+        overrides[field] = getattr(hw, attr)
     return overrides
 
 

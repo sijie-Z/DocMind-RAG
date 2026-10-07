@@ -54,18 +54,26 @@ class MinioClient:
     def bucket_name(self):
         return settings.MINIO_BUCKET_NAME
 
-    def _ensure_bucket_exists(self):
+    def _ensure_bucket_exists(self) -> None:
+        """首次使用时确保 bucket 存在（issue #234）。
+
+        此前这段是**死代码**——没有任何调用者，于是全新环境（空 MinIO）上传
+        必然 `NoSuchBucket`。现在由 put/get 入口懒调用；用 `self.client`
+        （会懒初始化，原实现用 `self._client` 在首用时为 None）；仅**成功**后
+        才置标记，失败留痕且下次重试。失败不阻断（与既有容错风格一致）。
+        """
         if self._bucket_checked:
             return
-        self._bucket_checked = True
         try:
-            if not self._client.bucket_exists(self.bucket_name):
-                self._client.make_bucket(self.bucket_name)
+            if not self.client.bucket_exists(self.bucket_name):
+                self.client.make_bucket(self.bucket_name)
                 logger.info(f"Created bucket {self.bucket_name}")
+            self._bucket_checked = True
         except Exception as e:
-            logger.warning(f"MinIO bucket check failed (non-blocking): {e}")
+            logger.warning(f"MinIO bucket check failed (non-blocking, will retry): {e}")
 
     def put_object(self, object_name: str, data: BinaryIO, length: int, content_type: str = "application/octet-stream", **kwargs):
+        self._ensure_bucket_exists()
         try:
             target_bucket = kwargs.get("bucket_name") or kwargs.get("bucket") or self.bucket_name
             self.client.put_object(target_bucket, object_name, data, length, content_type=content_type)
@@ -76,6 +84,7 @@ class MinioClient:
             raise
 
     def get_object(self, object_name: str):
+        self._ensure_bucket_exists()
         try:
             return self.client.get_object(self.bucket_name, object_name)
         except S3Error as e:

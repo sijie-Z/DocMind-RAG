@@ -8,6 +8,9 @@ pydantic-settings>=2.1.0
 # Backend Tests 与 Migration (MySQL) 三个 job 都因此失败。
 sqlalchemy[asyncio]>=2.0.23
 aiomysql>=0.2.0
+# `.env` 的 DATABASE_URL 用 `mysql+asyncmy://`（issue #231：此前 requirements 缺 asyncmy，
+# 全新环境启动即 ModuleNotFoundError；老环境能跑只是有人手工装过）。
+asyncmy>=0.2.16
 alembic>=1.20.0
 redis>=8.1.0
 elasticsearch==8.11.0
