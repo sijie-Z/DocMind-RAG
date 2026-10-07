@@ -357,7 +357,7 @@ class _FakeReflector:
 
 
 class _FakeReviewer:
-    async def review(self, plan, results):
+    async def review(self, plan, results, ctx=None):
         return {"issues_found": [], "recommendation": "pass"}
 
 
