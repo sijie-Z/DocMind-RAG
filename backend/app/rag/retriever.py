@@ -48,7 +48,8 @@ class HybridRetriever:
         rewrite_queries = rewrite_query_candidates(query)
         base_count = len(rewrite_queries)  # 本地改写站产出条数（含原查询），用于折算存活新增
         if enable_qr:
-            timeout_sec = float(getattr(settings, "RAG_QUERY_REWRITE_TIMEOUT_SECONDS", 1.2) or 1.2)
+            # issue #259：字段已补进 Settings（此前 getattr 兜底因字段缺失而 .env 无效）
+            timeout_sec = settings.RAG_QUERY_REWRITE_TIMEOUT_SECONDS
             try:
                 llm_rewrites = await asyncio.wait_for(
                     rewrite_query_llm(query, self.openai_client, settings.DEEPSEEK_MODEL),

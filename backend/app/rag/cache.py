@@ -163,8 +163,9 @@ class SemanticCache:
     RETRIEVAL_INDEX_KEY = "rag:semantic_index:retrieval"
 
     def __init__(self, prefix: str = "rag:sem:", index_key: str = "rag:semantic_index"):
-        self.threshold = getattr(settings, "SEMANTIC_CACHE_THRESHOLD", 0.92)
-        self.ttl = getattr(settings, "SEMANTIC_CACHE_TTL_SECONDS", 3600)
+        # issue #259：字段已补进 Settings（此前 getattr 兜底因字段缺失而 .env 无效）
+        self.threshold = settings.SEMANTIC_CACHE_THRESHOLD
+        self.ttl = settings.SEMANTIC_CACHE_TTL_SECONDS
         self.index_key = index_key
         self.prefix = prefix
         self._quantize_bits = 64
