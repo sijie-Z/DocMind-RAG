@@ -209,6 +209,28 @@ async def test_concurrent_resume_is_rejected_by_lease(db_factory, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_resume_chat_with_claim_false_does_not_reclaim(db_factory):
+    """端点先 prepare_resume（HTTP 409 语义在开流前），再 resume_chat(claim=False)。
+    变异点：claim=False 仍走 begin_resume → 陈旧 RUNNING→FAILED→RUNNING 再来一遍
+    → retry_count 变 2（断言 1 → 红）。"""
+    client, calls = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    events = await _crash_after_n_completed_steps(agen, n=2)
+    task_id = _task_id_of(events)
+
+    task, payload = await svc.prepare_resume(task_id, user_id=USER_ID)
+    assert task.status == TaskStatus.RUNNING and payload is not None
+    assert (await _get_task(db_factory, task_id)).retry_count == 1
+
+    events2 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID, claim=False)]
+
+    assert any(e.type == "done" for e in events2)
+    assert calls["n"] == 3, "claim=False 路径同样只续跑剩余 1 步"
+    assert (await _get_task(db_factory, task_id)).retry_count == 1, "不得重复认领"
+
+
+@pytest.mark.asyncio
 async def test_without_checkpoint_write_progress_is_lost_baseline(db_factory, monkeypatch):
     """红基线（报告测试 1）：把 checkpoint 写路径拔成 no-op → 崩溃后进度全丢 →
     resume 只能从规划阶段重跑全部步骤。"不接 checkpoint 会丢"的判别性证明；

@@ -11,12 +11,42 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
+from app.core.log_safety import log_safe
+
 logger = logging.getLogger(__name__)
+
+_REPLAY_DIR = Path("benchmark/replay")
+
+# task_id 进文件名前的白名单（CodeQL py/path-injection 修复）：
+# uuid hex（12/32 位）天然满足；'/'、'\\'、':'、'..' 等一律无法通过。
+_SAFE_FILE_STEM = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
+
+
+def _replay_file_for(task_id: str | None) -> Path | None:
+    """由 task_id 构造本地 replay 文件落点；不满足约束 → None（拒绝拼接）。
+
+    task_id 来自请求/快照（不可信）。三重防线保证落点被约束在 benchmark/replay/
+    之内：① 白名单字符集（见 _SAFE_FILE_STEM）；② os.path.abspath 规范化
+    （CodeQL 识别为 PathNormalization）；③ 规范化后用 startswith 校验前缀仍在
+    基准目录（CodeQL 识别为 SafeAccessCheck）。不做改写式"消毒"——非法即拒绝，
+    绝不把原始值拼进路径。
+    """
+    raw = "" if task_id is None else str(task_id)
+    if not _SAFE_FILE_STEM.fullmatch(raw):
+        return None
+    base = os.path.abspath(_REPLAY_DIR)
+    target = os.path.abspath(os.path.join(base, f"{raw}.json"))
+    if not target.startswith(base + os.sep):
+        return None
+    return Path(target)
 
 
 @dataclass
@@ -271,6 +301,11 @@ class ExecutionContext:
 
         Returns:
             True if saved successfully (either backend).
+
+        Note:
+            task_id 的**路径安全化只作用于本地回退分支**：Redis 键没有路径语义，
+            Redis 可用时非法 task_id 也照常保存（返回 True）——这是刻意的双后端
+            语义（用例 test_save_with_redis_available_never_touches_disk 钉住）。
         """
         data = self.to_dict()
         # Try Redis
@@ -279,21 +314,26 @@ class ExecutionContext:
             if redis_client:
                 key = f"agent:replay:{self.task_id}"
                 await redis_client.setex(key, ttl, json.dumps(data, ensure_ascii=False))
-                logger.debug("ExecutionContext saved to Redis: %s", self.task_id)
+                logger.debug("ExecutionContext saved to Redis: %s", log_safe(self.task_id))
                 return True
         except Exception as e:
-            logger.debug("Failed to save ExecutionContext to Redis: %s", e)
+            logger.debug("Failed to save ExecutionContext to Redis: %s", log_safe(e))
 
-        # Fallback: local file
+        # Fallback: local file（task_id 先经 _replay_file_for 约束；非法即拒绝落盘）
         try:
-            from pathlib import Path
-            p = Path("benchmark/replay") / f"{self.task_id}.json"
+            p = _replay_file_for(self.task_id)
+            if p is None:
+                logger.warning(
+                    "跳过本地 replay 落盘：task_id 含不安全字符，已拒绝拼接路径（task_id=%s）",
+                    log_safe(self.task_id),
+                )
+                return False
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            logger.info("ExecutionContext saved locally: %s", p)
+            logger.info("ExecutionContext saved locally: %s", log_safe(p))
             return True
         except Exception as e:
-            logger.debug("Failed to save ExecutionContext locally: %s", e)
+            logger.debug("Failed to save ExecutionContext locally: %s", log_safe(e))
         return False
 
     @classmethod
@@ -310,7 +350,7 @@ class ExecutionContext:
                 if raw:
                     return json.loads(raw)
         except Exception as e:
-            logger.debug("Failed to load ExecutionContext from Redis: %s", e)
+            logger.debug("Failed to load ExecutionContext from Redis: %s", log_safe(e))
         return None
 
     @classmethod
@@ -322,7 +362,7 @@ class ExecutionContext:
             if p.exists():
                 return json.loads(p.read_text(encoding="utf-8"))
         except Exception as e:
-            logger.debug("Failed to load ExecutionContext from %s: %s", path, e)
+            logger.debug("Failed to load ExecutionContext from %s: %s", log_safe(path), log_safe(e))
         return None
 
     async def save_local(self, path: str | None = None) -> str:
@@ -330,15 +370,19 @@ class ExecutionContext:
 
         Args:
             path: Optional file path. Default: benchmark/replay/{task_id}.json
+                （task_id 先经 _replay_file_for 约束；非法 → ValueError）
 
         Returns:
             The file path saved to.
         """
-        from pathlib import Path
         if path is None:
-            path = f"benchmark/replay/{self.task_id}.json"
-        p = Path(path)
+            target = _replay_file_for(self.task_id)
+            if target is None:
+                raise ValueError("task_id 含不安全字符，拒绝构造本地 replay 路径")
+            p = target
+        else:
+            p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
-        logger.info("ExecutionContext saved locally: %s", p)
+        logger.info("ExecutionContext saved locally: %s", log_safe(p))
         return str(p)

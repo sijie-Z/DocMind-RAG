@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from app.core.database import AsyncSessionLocal
+from app.core.log_safety import log_safe
 from app.core.redis import redis_client
 from app.exceptions import ConflictError, NotFoundError
 from app.models.agent_task import AgentTask, TaskStatus
@@ -180,7 +181,7 @@ async def create_task(
             await db.commit()
             return task.id
     except Exception as e:
-        logger.warning("checkpoint create_task failed: %s", e)
+        logger.warning("checkpoint create_task failed: %s", log_safe(e))
         return None
 
 
@@ -212,7 +213,7 @@ async def save_checkpoint(
         async with AsyncSessionLocal() as db:
             task = await _load_task_row(db, task_id)
             if task is None:
-                logger.warning("checkpoint save skipped: task %s 不存在", task_id)
+                logger.warning("checkpoint save skipped: task %s 不存在", log_safe(task_id))
                 return False
             task.context_snapshot = envelope
             if plan is not None:
@@ -224,7 +225,7 @@ async def save_checkpoint(
                 task.current_step_id = getattr(ctx, "current_step_id", None)
             await db.commit()
     except Exception as e:
-        logger.warning("checkpoint save failed (task=%s, trigger=%s): %s", task_id, trigger, e)
+        logger.warning("checkpoint save failed (task=%s, trigger=%s): %s", log_safe(task_id), log_safe(trigger), log_safe(e))
         return False
     await _renew_lease(task_id)
     return True
@@ -276,14 +277,14 @@ async def mark_terminal(
             try:
                 task.transition(to)
             except ValueError as e:
-                logger.warning("mark_terminal 拒绝非法转换 (task=%s): %s", task_id, e)
+                logger.warning("mark_terminal 拒绝非法转换 (task=%s): %s", log_safe(task_id), log_safe(e))
                 return False
             if error:
                 task.last_error = str(error)[:2000]
                 task.last_error_type = (error_type or "")[:50] or None
             await db.commit()
     except Exception as e:
-        logger.warning("mark_terminal failed (task=%s): %s", task_id, e)
+        logger.warning("mark_terminal failed (task=%s): %s", log_safe(task_id), log_safe(e))
         return False
     await release_task(task_id)
     return True
@@ -292,24 +293,77 @@ async def mark_terminal(
 # ── 读路径 / resume 认领 ─────────────────────────────────────────────────────
 
 
+async def load_task(
+    *, task_id: str, user_id: int, organization_id: int | None = None
+) -> AgentTask:
+    """取任务行（状态视图与 resume 共用的归属校验）。
+
+    - 行不存在 / 不属于 user_id → TaskNotFoundError（对外 404，不区分二者以免泄露归属）；
+    - organization_id 给定时要求**严格相等**（含"任务 org 为 None"的情形——给定组织
+      上下文却拿不到同组织任务，一律 404）。HTTP 端点必须先经 `require_organization`
+      解析出非空组织上下文再传进来：无组织用户由端点层 fail-closed（403，与 /chat
+      同纪律），不允许把 None 传到这里"跳过检查"（评审 B1）。
+    - 读行经 `_load_task_row`（defer 快照列，issue #278/R1 毒丸防线）：快照列若是
+      截断/半写 JSON，"读任务行"不得被它整个炸掉。
+    返回 detached 实例：只读其列属性（**不含** context_snapshot——需要它的调用方
+    走 load_for_resume 的单独容错读取），任何写都必须经本模块函数。
+    """
+    async with AsyncSessionLocal() as db:
+        task = await _load_task_row(db, task_id)
+    _check_task_access(task, user_id=user_id, organization_id=organization_id)
+    return task
+
+
+def _check_task_access(
+    task: AgentTask | None, *, user_id: int, organization_id: int | None
+) -> None:
+    """归属 / 组织校验（load_task 与 load_for_resume 共用，避免两处守卫漂移）。
+
+    - 行缺失或非本人 → TaskNotFoundError（对外 404，不区分二者以免泄露归属）；
+    - organization_id 给定 ⇒ 严格相等（含任务 org=None → 404；评审 B1）。
+    """
+    if task is None or task.user_id != user_id:
+        raise TaskNotFoundError("任务不存在或无权访问")
+    if organization_id is not None and task.organization_id != organization_id:
+        raise TaskNotFoundError("任务不存在或无权访问")
+
+
+def task_to_status_dict(task: AgentTask) -> dict[str, Any]:
+    """任务状态视图（GET /tasks/{id} 的 data 段；纯函数，不解快照）。"""
+    return {
+        "task_id": task.id,
+        "state": task.status.value,
+        "is_recoverable": task.is_recoverable,
+        "progress": task.progress,
+        "completed_steps": task.completed_steps,
+        "total_steps": task.total_steps,
+        "current_step_id": task.current_step_id,
+        "last_error": task.last_error,
+        "last_error_type": task.last_error_type,
+        "retry_count": task.retry_count,
+        "query": task.query,
+        "created_at": task.created_at.isoformat() if task.created_at else "",
+        "updated_at": task.updated_at.isoformat() if task.updated_at else "",
+    }
+
+
 async def load_for_resume(
-    *, task_id: str, user_id: int
+    *, task_id: str, user_id: int, organization_id: int | None = None
 ) -> tuple[AgentTask, dict[str, Any] | None]:
     """取任务行 + 校验过的快照信封。
 
-    - 行不存在或不属于 user_id → TaskNotFoundError（对外 404，不区分二者）；
+    - 行不存在或不属于 user_id（或组织不一致，给定 organization_id 时）→
+      TaskNotFoundError（对外 404，不区分二者）；
     - 快照缺失/损坏/版本不符 → payload=None（安全降级：调用方从规划阶段重跑）；
     - 快照列反序列化失败（截断/半写 JSON，issue #278/R1）同样按"无快照"降级：
       行本身照常返回（其余列完好），毒丸行不得拖垮每次 resume。
     终态判定由调用方做（is_terminal → TaskNotResumableError，409 语义）。
-    返回的 AgentTask 是 detached 实例：只读其列属性，任何写都必须经本模块函数。
     """
     async with AsyncSessionLocal() as db:
         # 行与快照列分开读：整行 get 会把快照列的 json.loads 失败扩散成
         # "整个任务行读不出来"（毒丸——此后每次 resume/落盘/收尾都炸）。
         task = await _load_task_row(db, task_id)
-        if task is None or task.user_id != user_id:
-            raise TaskNotFoundError("任务不存在或无权访问")
+        _check_task_access(task, user_id=user_id, organization_id=organization_id)
         raw_snapshot: Any | None = None
         try:
             cursor = await db.execute(
@@ -320,8 +374,8 @@ async def load_for_resume(
             # json.JSONDecodeError 是 ValueError 子类（截断/半写 JSON 的实测形态）。
             logger.warning(
                 "checkpoint 快照列反序列化失败（task=%s）：按无快照安全降级：%s",
-                task_id,
-                e,
+                log_safe(task_id),
+                log_safe(e),
             )
     payload: dict[str, Any] | None = None
     if raw_snapshot is not None:
@@ -329,7 +383,7 @@ async def load_for_resume(
         if payload is None:
             logger.warning(
                 "checkpoint 快照损坏/版本不符（task=%s）：resume 安全降级为从规划阶段重跑",
-                task_id,
+                log_safe(task_id),
             )
     return task, payload
 
@@ -342,12 +396,12 @@ async def claim_task(task_id: str, lease_seconds: int = LEASE_SECONDS) -> bool:
     """
     try:
         if not redis_client:
-            logger.warning("Redis 不可用：resume 并发锁降级为仅状态检查（task=%s）", task_id)
+            logger.warning("Redis 不可用：resume 并发锁降级为仅状态检查（task=%s）", log_safe(task_id))
             return True
         ok = await redis_client.set(_lock_key(task_id), "1", nx=True, ex=lease_seconds)
         return bool(ok)
     except Exception as e:
-        logger.warning("claim_task 失败，降级放行（task=%s）：%s", task_id, e)
+        logger.warning("claim_task 失败，降级放行（task=%s）：%s", log_safe(task_id), log_safe(e))
         return True
 
 
@@ -357,7 +411,7 @@ async def release_task(task_id: str) -> None:
         if redis_client:
             await redis_client.delete(_lock_key(task_id))
     except Exception as e:
-        logger.debug("release_task failed (task=%s): %s", task_id, e)
+        logger.debug("release_task failed (task=%s): %s", log_safe(task_id), log_safe(e))
 
 
 async def _renew_lease(task_id: str, lease_seconds: int = LEASE_SECONDS) -> None:
@@ -366,7 +420,7 @@ async def _renew_lease(task_id: str, lease_seconds: int = LEASE_SECONDS) -> None
         if redis_client:
             await redis_client.expire(_lock_key(task_id), lease_seconds)
     except Exception as e:
-        logger.debug("renew lease failed (task=%s): %s", task_id, e)
+        logger.debug("renew lease failed (task=%s): %s", log_safe(task_id), log_safe(e))
 
 
 async def begin_resume(task_id: str, lease_seconds: int = LEASE_SECONDS) -> AgentTask:

@@ -2,6 +2,8 @@
 
 Endpoints:
     POST /api/v1/agent/chat           — PER agent chat (SSE streaming)
+    GET  /api/v1/agent/tasks/{id}     — Agent task status (checkpoint/resume, #201)
+    POST /api/v1/agent/tasks/{id}/resume — Resume an interrupted task (SSE, #201)
     GET  /api/v1/agent/tools          — List available tools with status
     GET  /api/v1/agent/skills         — List learned skills
     GET  /api/v1/agent/sessions       — List agent sessions
@@ -24,11 +26,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent import checkpoint
 from app.agent.config import DEFAULT_DISABLED_TOOLS, AgentConfig
 from app.agent.registry import tool_registry
 from app.agent.service import agent_service
 from app.agent.skills import skill_manager
 from app.core.database import AsyncSessionLocal, get_db
+from app.core.log_safety import log_safe
 from app.core.prometheus import AGENT_FEEDBACK_TOTAL
 from app.core.security import get_current_user, require_organization
 from app.exceptions import AuthorizationError, NotFoundError, ValidationError
@@ -180,14 +184,127 @@ async def agent_chat(
                 )
 
         except Exception as e:
-            logger.error(f"Agent chat error: {e}", exc_info=True)
-            error_data = {"type": "error", "content": f"Agent 执行出错: {str(e)}"}
+            # 完整异常/堆栈只进服务端日志；客户端收通用文案（CodeQL 信息暴露修复：
+            # 异常原文此前直出 SSE）。
+            logger.error("Agent chat error: %s", log_safe(e), exc_info=True)
+            error_data = {"type": "error", "content": "Agent 执行出错，请稍后重试"}
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
         done_data: dict[str, Any] = {"type": "done", "content": ""}
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         yield f"data: {json.dumps(done_data)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+# ── Checkpoint / Resume（issue #201 最小版）───────────────────────────────────
+
+async def _fallback_resume_config(user_id: int) -> AgentConfig:
+    """快照缺失/损坏（安全降级路径）时 resume 用的规则：用户已保存配置为基底，
+    并强制合并服务端禁用清单（与 _build_agent_config 同一安全保证）。"""
+    config = await AgentConfig.load_from_redis(f"user:{user_id}") or AgentConfig()
+    config.disabled_tools = _merge_disabled_tools(config.disabled_tools)
+    return config
+
+
+@router.get("/tasks/{task_id}")
+async def get_agent_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """任务状态视图（checkpoint/resume 的发现性入口；只读行、不解快照）。
+
+    - 403：未登录 / 用户无组织上下文（S3 纪律，与 /chat 完全一致——无组织用户
+      绝不带着 None 组织上下文去读任务，那会放行"已被移出组织的前成员"在旧
+      组织上读取任务，评审 B1）；
+    - 404：任务不存在 / 非本人 / 组织不一致（不区分，避免泄露归属）。
+    """
+    effective_org_id = await require_organization(current_user, db)
+    task = await checkpoint.load_task(
+        task_id=task_id,
+        user_id=current_user.id,
+        organization_id=effective_org_id,
+    )
+    return {"success": True, "data": checkpoint.task_to_status_dict(task)}
+
+
+@router.post("/tasks/{task_id}/resume")
+async def resume_agent_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """从 checkpoint 恢复中断的任务（SSE 流；事件契约与 /chat 完全一致）。
+
+    - 200：从断点继续执行，事件流正常产出（不回放中断前事件——最小版边界）；
+    - 403：未登录 / 用户无组织上下文（S3 纪律，与 /chat 一致；无组织用户不得在
+      "旧组织"的执行上下文里续跑任务——评审 B1）；
+    - 404：任务不存在 / 非本人 / 组织不一致（不区分）；
+    - 409：任务已终态，或正被另一个 resume 持有（detail 回带当前 state）。
+
+    预检与认领（prepare_resume）必须在开流之前完成：HTTP 状态码只在开始
+    流式输出前可写，403/404/409 语义全靠它拍板。
+    """
+    effective_org_id = await require_organization(current_user, db)
+    task, payload = await agent_service.prepare_resume(
+        task_id,
+        user_id=current_user.id,
+        organization_id=effective_org_id,
+    )
+    session_id = (payload or {}).get("session_id") or None
+    # 崩溃前已流给用户的部分不回放（最小版边界），但收尾落库要拼成完整回复。
+    prefix = (payload or {}).get("partial_output") or ""
+    fallback_config = await _fallback_resume_config(current_user.id)
+
+    async def event_stream():
+        final_answer = prefix
+        assistant_message_id = None
+        try:
+            async for event in agent_service.resume_chat(
+                task_id,
+                user_id=current_user.id,
+                config=fallback_config,
+                claim=False,  # 已在上方 prepare_resume 认领（HTTP 409 语义在开流前）
+            ):
+                sse_data = event.to_sse_dict()
+                yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
+                if event.type == "chunk":
+                    final_answer += event.content
+
+            # 收尾补写会话（与 /chat 同口径）。能走到这里说明原流从未完成落库
+            # （任务可恢复 ⇒ chat 的正常收尾分支没跑过），不存在重复写入窗口。
+            # org 与 /chat 同链（issue #277/R2 对齐）：传 resolved org
+            # （effective_org_id，含 token 组织回退 / 无组织超管回源），
+            # 不传 raw current_user.organization_id——两者对回退用户不相等。
+            if session_id:
+                assistant_message_id = await _save_session_interaction(
+                    session_id,
+                    current_user.id,
+                    task.query,
+                    effective_org_id,
+                    final_answer,
+                )
+        except Exception as e:
+            # 完整异常/堆栈只进服务端日志；客户端收通用文案（CodeQL 信息暴露修复：
+            # 异常原文此前直出 SSE）。
+            logger.error("Agent resume error: %s", log_safe(e), exc_info=True)
+            error_data = {"type": "error", "content": "Agent 恢复执行出错，请稍后重试"}
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+
+        done_data: dict[str, Any] = {"type": "done", "content": "", "task_id": task_id}
+        if assistant_message_id:
+            done_data["message_id"] = assistant_message_id
+        yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_stream(),

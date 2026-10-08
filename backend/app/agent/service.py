@@ -22,7 +22,8 @@ from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.loop import PERAgentLoop
 from app.agent.memory_bridge import AgentMemoryBridge
-from app.models.agent_task import TaskStatus
+from app.core.log_safety import log_safe
+from app.models.agent_task import AgentTask, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -142,12 +143,40 @@ class AgentService:
         if session_id:
             await agent_config.save_to_redis(session_id)
 
+    async def prepare_resume(
+        self,
+        task_id: str,
+        user_id: int,
+        *,
+        organization_id: int | None = None,
+    ) -> tuple[AgentTask, dict[str, Any] | None]:
+        """resume 的同步预检 + 认领（端点层在开流前调用——404/409 必须用 HTTP
+        状态码表达，SSE 一旦开始就没有状态码可改了）：
+
+        - 404：任务不存在 / 非本人 / 组织不一致（TaskNotFoundError）；
+        - 409：已终态（TaskNotResumableError，detail 回带当前 state）/ 并发 resume
+          正持有租约（TaskBusyError）；
+        - 成功 = 已拿租约并把状态推进到 RUNNING（retry_count += 1），返回 (task, payload)。
+        """
+        task, payload = await checkpoint.load_for_resume(
+            task_id=task_id, user_id=user_id, organization_id=organization_id,
+        )
+        if task.is_terminal:
+            raise checkpoint.TaskNotResumableError(
+                f"任务已处于终态 {task.status.value}，不可恢复",
+                detail={"task_id": task_id, "state": task.status.value},
+            )
+        # 认领：Redis 租约 + RUNNING→FAILED→RUNNING（陈旧 RUNNING 接管）等状态流转。
+        task = await checkpoint.begin_resume(task_id)
+        return task, payload
+
     async def resume_chat(
         self,
         task_id: str,
         user_id: int,
         *,
         config: AgentConfig | None = None,
+        claim: bool = True,
     ) -> AsyncGenerator[AgentEvent, None]:
         """从 checkpoint 恢复一个未终态任务（issue #201 最小版）。
 
@@ -157,19 +186,18 @@ class AgentService:
         - 快照缺失/损坏安全降级：从规划阶段干净重跑（没有任何步骤被越过）。
         - 并发/重复 resume 由 Redis 租约 + 状态机拒绝（TaskBusy/NotResumable，
           AppError 子类 → 端点层映射 404/409）。
+
+        claim=False：调用方已先走 prepare_resume（端点预检拿 HTTP 状态码）；
+        这里只补读快照，不再重复认领。
         """
         if not self.client:
             yield AgentEvent(type="error", content="LLM 未配置，请检查 DEEPSEEK_API_KEY 环境变量。")
             return
 
-        task, payload = await checkpoint.load_for_resume(task_id=task_id, user_id=user_id)
-        if task.is_terminal:
-            raise checkpoint.TaskNotResumableError(
-                f"任务已处于终态 {task.status.value}，不可恢复",
-                detail={"task_id": task_id, "state": task.status.value},
-            )
-        # 认领：Redis 租约 + RUNNING→FAILED→RUNNING（陈旧 RUNNING 接管）等状态流转。
-        task = await checkpoint.begin_resume(task_id)
+        if claim:
+            task, payload = await self.prepare_resume(task_id, user_id)
+        else:
+            task, payload = await checkpoint.load_for_resume(task_id=task_id, user_id=user_id)
 
         if payload:
             query = (payload.get("ctx") or {}).get("query") or task.query
@@ -177,7 +205,7 @@ class AgentService:
             session_id = payload.get("session_id") or None
         else:
             # 快照缺失/损坏：降级为从规划阶段重跑（仍幂等）；规则取调用方传入的配置。
-            logger.warning("任务 %s 无可用快照，resume 从规划阶段重新开始", task_id)
+            logger.warning("任务 %s 无可用快照，resume 从规划阶段重新开始", log_safe(task_id))
             query = task.query
             agent_config = config or AgentConfig()
             session_id = None
@@ -237,7 +265,7 @@ class AgentService:
                 task_id=task_id, live=agent.checkpoint_live, trigger="on_disconnect",
             ))
         except Exception as e:
-            logger.warning("checkpoint on_disconnect failed (task=%s): %s", task_id, e)
+            logger.warning("checkpoint on_disconnect failed (task=%s): %s", log_safe(task_id), log_safe(e))
         if release_lease:
             # 顺序不可反：先落快照再还租——否则新认领者可能先开跑，
             # 迟到的旧快照会覆盖它的更新状态。与落盘同样 best-effort：
@@ -246,7 +274,9 @@ class AgentService:
                 await asyncio.shield(checkpoint.release_task(task_id))
             except Exception as e:
                 logger.debug(
-                    "checkpoint lease release on disconnect failed (task=%s): %s", task_id, e
+                    "checkpoint lease release on disconnect failed (task=%s): %s",
+                    log_safe(task_id),
+                    log_safe(e),
                 )
 
     async def _checkpoint_error(
@@ -260,7 +290,7 @@ class AgentService:
                 task_id=task_id, live=agent.checkpoint_live, trigger="on_error",
             ))
         except Exception as e:
-            logger.warning("checkpoint on_error save failed (task=%s): %s", task_id, e)
+            logger.warning("checkpoint on_error save failed (task=%s): %s", log_safe(task_id), log_safe(e))
         await checkpoint.mark_terminal(
             task_id,
             TaskStatus.FAILED,
@@ -354,9 +384,9 @@ class AgentService:
                     key, 86400 * 7,
                     json.dumps(state, ensure_ascii=False, default=str),
                 )
-                logger.info(f"Agent session state saved: {session_id}")
+                logger.info("Agent session state saved: %s", log_safe(session_id))
         except Exception as e:
-            logger.warning(f"Failed to save session state: {e}")
+            logger.warning("Failed to save session state: %s", log_safe(e))
 
     async def load_session_state(
         self,
@@ -374,7 +404,7 @@ class AgentService:
             if raw:
                 return json.loads(raw)
         except Exception as e:
-            logger.warning(f"Failed to load session state: {e}")
+            logger.warning("Failed to load session state: %s", log_safe(e))
         return None
 
 

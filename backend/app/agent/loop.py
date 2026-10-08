@@ -33,6 +33,7 @@ from app.agent.run_report import build_run_report, render_run_report_text
 from app.agent.skill_prompt import build_skills_index
 from app.agent.skills import skill_manager
 from app.agent.usage import record_llm_usage
+from app.core.log_safety import log_safe
 
 logger = logging.getLogger(__name__)
 
@@ -300,8 +301,8 @@ class PERAgentLoop:
                 logger.warning(
                     "checkpoint 快照深结构损坏（task=%s）：按无快照安全降级，"
                     "从规划阶段干净重跑：%s",
-                    task_id,
-                    e,
+                    log_safe(task_id),
+                    log_safe(e),
                 )
                 # 重建半途失败可能已留下部分回灌：清干净，避免坏计划的步骤
                 # id 与干净重跑的新步骤撞名、把旧结果混进新上下文。
@@ -741,7 +742,9 @@ class PERAgentLoop:
         # Does NOT trigger retry/replan/approval/memory/experience. See ADR-1.
         run_report = build_run_report(ctx, final_output)
         try:
-            logger.info("\n%s", render_run_report_text(run_report))
+            # 日志安全（CodeQL py/log-injection）：run_report 内嵌用户查询与外部数据
+            # （工具/文档内容），换行不可信——转义后再落日志，防止伪造日志行。
+            logger.info("run_report: %s", log_safe(render_run_report_text(run_report)))
         except Exception:
             pass
         yield AgentEvent(
@@ -760,7 +763,7 @@ class PERAgentLoop:
         elapsed = (time.perf_counter() - start_time) * 1000
         logger.info(
             f"PER loop completed in {elapsed:.0f}ms | "
-            f"Plan: {plan.goal[:50]}... | Steps: {plan.completed_steps}/{plan.total_steps} | "
+            f"Plan: {log_safe(plan.goal[:50])}... | Steps: {plan.completed_steps}/{plan.total_steps} | "
             f"Output: {len(final_output)} chars"
         )
 
@@ -800,7 +803,7 @@ class PERAgentLoop:
                 session_id=live["session_id"],
             )
         except Exception as e:
-            logger.warning("checkpoint save failed (trigger=%s): %s", trigger, e)
+            logger.warning("checkpoint save failed (trigger=%s): %s", log_safe(trigger), log_safe(e))
 
     def _seed_working_from_plan(self, plan: Plan) -> None:
         """resume 时把已完成步骤的结果回灌 WorkingMemory。
