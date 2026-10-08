@@ -4,6 +4,10 @@
 而 input 是未校验的请求体，任意认证用户可跨租户读取知识库。
 修复后：组织由 API 层从认证用户推导、经 WorkflowEngine 显式注入，
 请求体中的同名字段被忽略。
+
+issue #268 补充：注入值本身不再 `or 1` 兜底——API 层如实传调用者的组织（可能为
+None）；引擎/节点对缺组织**显式失败**（此前 `else 1` 会把缺组织的检索静默放进
+1 号组织，而检索结果随执行输出返回 = 跨租户泄漏）。
 """
 import pytest
 
@@ -59,8 +63,14 @@ class TestWorkflowRetrievalOrgScope:
         assert result["context"]["knowledge_context"] == "命中内容"
 
     @pytest.mark.asyncio
-    async def test_executor_without_injected_org_falls_back_to_default(self, monkeypatch):
-        """引擎未注入组织时退回默认组织 1，且依旧忽略请求体字段。"""
+    async def test_executor_without_injected_org_refuses_not_org1(self, monkeypatch):
+        """引擎未注入组织时不得退回 1 号组织（issue #268）——显式失败、不检索任何组织。
+
+        修复前这里是 `... else 1`：检索结果会随执行输出返回，缺组织时静默检索 1 号
+        组织 = 跨租户泄漏。现在缺组织即抛错（与委派子代理的 fail-closed 同风格）。
+
+        变异验证：把 `if organization_id is None: raise ...` 改回 `else 1` → 本用例红。
+        """
         from app.services.rag_service import rag_service
 
         calls: list[int] = []
@@ -72,9 +82,10 @@ class TestWorkflowRetrievalOrgScope:
         monkeypatch.setattr(rag_service, "search_knowledge_base", fake_search)
 
         executor = KnowledgeSearchNodeExecutor(_make_node())
-        await executor.execute(_make_state(input={"text": "x", "organization_id": 42}))
+        with pytest.raises(ValueError):
+            await executor.execute(_make_state(input={"text": "x", "organization_id": 42}))
 
-        assert calls == [1]
+        assert calls == [], "缺组织时不得检索任何组织（bug 形态: 被伪造为 org 1 检索）"
 
     def test_engine_injects_organization_id_into_search_executor(self):
         """WorkflowEngine(organization_id=...) 必须把组织注入 tool_search 执行器。"""

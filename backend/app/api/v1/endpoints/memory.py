@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_user_org_id
 from app.exceptions import ValidationError
 from app.models.user import User
 from app.schemas.memory import (
@@ -36,7 +36,10 @@ def _normalize_agent_id(agent_id: str) -> str:
 
 async def _get_user_memory_system(current_user: User, agent_id: str):
     """Scope agent memory to the current user's org+user namespace."""
-    org_id = current_user.organization_id or 1
+    # 安全加固（issue #268）：此前 `organization_id or 1` 把无组织用户的命名空间
+    # 标成 1 号组织（仅标签错——键里另有 user_id 段，无跨租户读）。现在用真实的
+    # org/user 键：无组织时该段如实为 None，绝不冒充 1 号组织。
+    org_id = get_user_org_id(current_user)
     system = get_memory_system(f"{org_id}:{current_user.id}:{agent_id}")
     await system._load_from_redis()
     return system

@@ -23,8 +23,8 @@ from app.core.elasticsearch import get_elasticsearch
 from app.core.logging import sanitize_log_value
 from app.core.middleware import metrics_collector
 from app.core.redis import redis_client
-from app.core.security import get_current_user, permission_required
-from app.exceptions import AuthenticationError, ValidationError
+from app.core.security import get_current_user, get_user_org_id, permission_required
+from app.exceptions import AuthenticationError, AuthorizationError, ValidationError
 from app.models.chat import ChatSession
 from app.models.document import Document
 from app.models.organization import Organization
@@ -671,15 +671,25 @@ async def get_org_summary(
         return {"organizations": []}
 
 
-@router.get("/admin-summary", summary="管理员仪表盘概览", dependencies=[Depends(get_current_user)])
+@router.get(
+    "/admin-summary",
+    summary="管理员仪表盘概览",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def get_admin_summary(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取管理员仪表盘所需的汇总数据"""
+    """获取管理员仪表盘所需的汇总数据（组织作用域；全系统组织数仅超管可见）。"""
+    # 安全加固（issue #268）：此前本端点只有登录门槛——与同文件相邻端点不同，漏了
+    # VIEW_SYSTEM_HEALTH 权限门；且对无组织用户 `if org_id:` 全部落空，任何登录用户
+    # 直接拿到全库 total_users/total_documents/total_sessions（跨租户计数泄漏）。
+    # 现在：① 补上与众相邻端点一致的权限门；② 无组织的非超管显式 403（必须置于
+    # try 之前——否则会被下面的 `except Exception` 吞成 200 零值）。
+    org_id = get_user_org_id(current_user)
+    if org_id is None and not current_user.is_superuser:
+        raise AuthorizationError("当前用户未加入任何组织，无权访问组织统计数据")
     try:
-        org_id = current_user.organization_id
-
         # 总用户数
         user_count_q = select(func.count(User.id))
         if org_id:
@@ -707,9 +717,14 @@ async def get_admin_summary(
             active_q = active_q.where(User.organization_id == org_id)
         active_users = (await db.execute(active_q)).scalar() or 0
 
-        # 组织数
-        org_count_q = select(func.count(Organization.id))
-        total_orgs = (await db.execute(org_count_q)).scalar() or 0
+        # 组织数：全系统口径只给超管（系统管理员）；组织作用域的租户管理员看到的
+        # 是「自己所属的 1 个组织」。此前该数对任何通过认证的用户恒为全系统数
+        # （跨租户元数据）。
+        if current_user.is_superuser:
+            org_count_q = select(func.count(Organization.id))
+            total_orgs = (await db.execute(org_count_q)).scalar() or 0
+        else:
+            total_orgs = 1
 
         return {
             "total_users": total_users,

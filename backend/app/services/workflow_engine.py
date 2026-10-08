@@ -212,8 +212,15 @@ class KnowledgeSearchNodeExecutor(NodeExecutor):
         score_threshold = self.node.data.get("scoreThreshold", self.node.data.get("score_threshold", 0.5))
 
         # 搜索知识库（安全修复：检索范围取服务端注入的 organization_id，
-        # 忽略输入中客户端可控的同名字段）
-        organization_id = self.organization_id if self.organization_id is not None else 1
+        # 忽略输入中客户端可控的同名字段）。
+        # 安全加固（issue #268）：此前 `else 1` 把缺组织的检索静默放进 1 号组织，
+        # 而检索结果会随执行输出返回 → 跨租户泄漏。现在缺组织**显式失败**
+        # （与子代理委派的 fail-closed 同风格）：不检索任何组织。
+        organization_id = self.organization_id
+        if organization_id is None:
+            raise ValueError(
+                "知识库检索缺少组织上下文（organization_id=None），已拒绝执行检索（issue #268）"
+            )
         docs, _ = await rag_service.search_knowledge_base(query, organization_id=organization_id, top_k=top_k)
 
         # 过滤低相关性结果

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.elasticsearch import ElasticsearchTools
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_organization
 from app.exceptions import AppError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
@@ -123,6 +123,14 @@ async def seed_demo_data(
     为当前用户创建示例数据：3 篇文档 + 索引 + 1 个示例对话。
     如果已有示例文档则跳过。
     """
+    # 安全加固（issue #268）：示例数据归属「当前用户自己的组织」——文件中不存在
+    # 「demo 组织」概念，此前 `organization_id or 1` 兜底会把固定示例文本写进 1 号
+    # 组织的命名空间（且 1 号组织未必存在——见 security.py 注释：本库唯一组织的
+    # id 是 3，写库会因外键失败炸成 500）。无组织的普通用户显式 403；超管无组织时
+    # 按 #168 解析库中真实存在的组织。必须在 try 块之前 —— 否则 AuthorizationError
+    # 会被下面的 `except Exception` 吞掉、包装成 AppError(500)。
+    org_id = await require_organization(current_user, db)
+
     try:
         # 检查是否已经加载过示例数据
         existing = await db.execute(
@@ -134,7 +142,6 @@ async def seed_demo_data(
         if existing.scalar() and existing.scalar() > 0:
             return {"success": True, "message": "示例数据已存在", "skipped": True}
 
-        org_id = current_user.organization_id or 1
         created_doc_ids = []
 
         # 1. 创建文档记录并索引到 ES

@@ -244,7 +244,12 @@ async def agent_feedback(
                 if session:
                     bridge = AgentMemoryBridge(
                         agent_id=f"session:{message_obj.session_id}",
-                        organization_id=session.organization_id or 1,
+                        # 安全加固（issue #268）：不再 `or 1` —— 命名空间必须与
+                        # agent 侧读侧一致（agent 侧用调用者的真实 org，无组织即
+                        # None）。此前无组织会话的 lesson 写进 `1:…` 命名空间，
+                        # agent 侧从 `None:…` 读，自己写的 lesson 自己学不到
+                        # （功能静默失效，非泄漏）。
+                        organization_id=session.organization_id,
                         user_id=current_user.id,
                     )
                     await bridge.ensure_loaded()
