@@ -280,11 +280,13 @@ async def test_stale_snapshot_of_deleted_user_is_not_trusted(http_client, make_u
 
 
 @pytest.mark.asyncio
-async def test_redis_outage_does_not_change_the_verdict(http_client, make_user, monkeypatch):
-    """Redis 挂掉不应改变判定结果：DB 才是权威。
+async def test_redis_outage_fails_closed_at_blacklist_check(http_client, make_user, monkeypatch):
+    """Redis 挂掉 → 吊销状态不可核验 → fail-closed（503），不得放行（issue #291）。
 
-    token 黑名单仍依赖 Redis，但它的检查是 fail-open 的（查不到就当没吊销）；
-    身份判定则完全不碰 Redis。
+    token 黑名单依赖 Redis；#291 之前它的检查是 fail-open 的（查不到就当没吊销），
+    于是故障期间「已登出/已轮换」的 token 全部照常通过认证。身份判定仍只认 DB
+    （不碰 Redis），但吊销核验属安全面——判不了即拒绝，且用 503 而不是 401
+    （前端对 401 会清 token 跳登录页，而重登后同样的核验依然不可用）。
     """
     user = await make_user()
     calls: list[str] = []
@@ -299,7 +301,9 @@ async def test_redis_outage_does_not_change_the_verdict(http_client, make_user, 
 
     response = await http_client.get(_ME, headers=_auth_header(user.id))
 
-    assert response.status_code == 200
+    assert response.status_code == 503, (
+        f"Redis 故障时认证路径 fail-open 放行了（应为 503）。实际: {response.status_code}"
+    )
     assert any(key.startswith("blacklist:") for key in calls), (
         f"前提不成立：认证路径没有查过 Redis 黑名单，这次「宕机」是空转（calls={calls}）"
     )

@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 from starlette.websockets import WebSocketDisconnect
 
+import app.core.redis as redis_module
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.user import User
@@ -118,6 +119,42 @@ def _connect(client: TestClient, url: str, token: str) -> tuple[int, str] | None
         return exc.code, exc.reason
 
 
+# ── redis 单例 × 「每连接一个新事件循环」───────────────────────────────────
+# TestClient 每次 websocket_connect 都在各自**新建**的事件循环（portal）里跑 app，
+# 而 `app.core.redis` 的客户端是模块级单例：连接池里的连接绑定在创建它的循环上，
+# 被下一个 connect 复用时 redis-py 会报 "Event loop is closed"（Windows 上先现
+# AttributeError: 'NoneType' object has no attribute 'send'，再被 redis-py 的
+# disconnect 包成 RuntimeError）。
+#
+# 这是测试基建的伪故障，不是产品缺陷：issue #291（fail-closed）之前，黑名单检查
+# 把这类异常吞成「未吊销」，用例照样全绿——底层警告一直在（基线 63f4835 上跑本
+# 文件：8 条 "Redis exists check failed: Event loop is closed"，15 passed）；
+# fail-closed 让伪故障真实拒绝握手后才显形。
+#
+# 解法与 DB 侧的 NullPool 同类同源：每个 connect 前把单例拆掉，让黑名单检查在
+# **本次 connect 自己的循环**里新建客户端与连接池。夹具是本文件私有的，其它集成
+# 文件不受影响；其它文件要复用同套路（见 test_auth_db_authority.py 的
+# `_fresh_pools`，前后重置，同一思路）。
+def _reset_redis_singleton() -> None:
+    """拆掉模块级 redis 单例（置空引用，下一次 `get_redis()` 在新循环里重建）。
+
+    刻意**不**走 `close_redis()`：它会对绑定在已关闭循环上的连接池执行 close，
+    每次建连都记一条 "Error closing Redis: Event loop is closed" ——而那种清理
+    本身做不到（连接随旧循环的 proactor 一起消亡），只会制造噪声、并让日志里
+    重现我们要甩掉的字符串。这里仅置空引用、残留对象交给 GC；`get_redis()` 见
+    None 会在**本次 connect 自己的循环**里新建客户端与连接池。
+    """
+    redis_module._holder._client = None
+
+
+class _LoopSafeTestClient(TestClient):
+    """TestClient：每次 WS 建连前重置（可能绑定旧循环的）redis 单例，其余不变。"""
+
+    def websocket_connect(self, url, subprotocols=None, **kwargs):
+        _reset_redis_singleton()
+        return super().websocket_connect(url, subprotocols=subprotocols, **kwargs)
+
+
 # ── fixtures ────────────────────────────────────────────────────────────────
 @pytest.fixture
 def client():
@@ -129,7 +166,7 @@ def client():
             yield session
 
     app.dependency_overrides[get_db] = _override_get_db
-    test_client = TestClient(app)
+    test_client = _LoopSafeTestClient(app)
     try:
         yield test_client
     finally:
