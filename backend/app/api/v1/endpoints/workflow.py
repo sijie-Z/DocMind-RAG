@@ -3,6 +3,7 @@ Agent 工作流 API 端点
 """
 import asyncio
 import json
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -23,6 +24,7 @@ from app.schemas.workflow import (
 from app.services.workflow_engine import WorkflowEngine
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/", response_model=dict[str, Any])
@@ -236,6 +238,23 @@ async def execute_workflow(
 
     if stream:
         # 流式执行 - 使用 SSE
+        # #281：失败收尾助手——执行记录必须落 failed（错误信息 + 完成时间），
+        # 不再因事件序列化等异常永卡 running。rollback 先行：异常可能来自上一次
+        # commit 失败（会话处于 PendingRollback，直接 commit 会再抛）；收尾自身
+        # 失败只记日志、不向上抛——不得掩盖原始错误，也不得吞掉事件流收口。
+        async def mark_execution_failed(error_text: str | None) -> None:
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            try:
+                execution.status = "failed"
+                execution.error_message = error_text
+                execution.completed_at = datetime.now()
+                await db.commit()
+            except Exception as finalize_err:
+                logger.warning(f"执行记录（id={execution.id}）failed 收尾失败: {finalize_err}")
+
         async def event_generator():
             try:
                 from app.schemas.workflow import WorkflowConfig as WConfig
@@ -296,12 +315,14 @@ async def execute_workflow(
                             yield f"event: complete\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
                             break
                         elif event_type == "workflow_error":
-                            execution.status = "failed"
-                            execution.error_message = event_data.get("error")
-                            execution.completed_at = datetime.now()
-                            await db.commit()
+                            await mark_execution_failed(event_data.get("error"))
 
                             yield f"event: error\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                            # #281：错误路径与 /chat 的 SSE 契约对齐（agent.py 错误路径
+                            # error 事件后照常补发 done，评审 r201p2 实测口径）——工作流
+                            # 的全部失败出口（workflow_error 事件、事件泵异常、外层异常）
+                            # 都是先 error 再 done，客户端始终能等到流终信号。
+                            yield f"event: done\ndata: {json.dumps({'success': False, 'execution_id': execution.id}, ensure_ascii=False)}\n\n"
                             break
                         else:
                             yield f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
@@ -309,19 +330,25 @@ async def execute_workflow(
                         # 发送心跳保持连接
                         yield f"event: heartbeat\ndata: {json.dumps({'timestamp': datetime.now().isoformat()})}\n\n"
                     except Exception as e:
+                        # #281：事件泵内异常（此前实测：node_complete 载荷含
+                        # HumanMessage → json.dumps 抛 TypeError）只发 error 事件便
+                        # break，执行记录永卡 running、node_results 不落库（评审 #280
+                        # §7）。现在统一收尾：落 failed + error 后补 done。
+                        await mark_execution_failed(str(e))
                         yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+                        yield f"event: done\ndata: {json.dumps({'success': False, 'execution_id': execution.id}, ensure_ascii=False)}\n\n"
                         break
 
                 # 等待执行任务完成
                 await task
 
             except Exception as e:
-                execution.status = "failed"
-                execution.error_message = str(e)
-                execution.completed_at = datetime.now()
-                await db.commit()
+                # #281：开流前/开流中的装配类异常同样按"落 failed + error 后补 done"
+                # 收口（与 /chat 错误路径同模式）。
+                await mark_execution_failed(str(e))
 
                 yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+                yield f"event: done\ndata: {json.dumps({'success': False, 'execution_id': execution.id}, ensure_ascii=False)}\n\n"
 
         return StreamingResponse(
             event_generator(),
