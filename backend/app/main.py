@@ -159,19 +159,13 @@ async def lifespan(app: FastAPI):
         from app.dependencies import wire_memory_embedding_provider
         await wire_memory_embedding_provider()
 
+        # 演示账号（issue #246）：只做创建/补齐（ensure_demo_user 内部自带日志）。
+        # 先前版本在此处以固定口令 "123456" 真登录做"自检"——加固后该口令永不可能正确，
+        # 每次启动都会给 login:fail:guest +1；锁死后 AccountLockedError 直接打崩启动。
+        # 启动路径不得再产生登录尝试；任何自检都必须不阻塞启动。
         if settings.ENABLE_DEMO_ACCOUNT:
             from app.core.ensure_demo_user import ensure_demo_user
-            from app.services.auth_service import auth_service
             await ensure_demo_user()
-
-            async with AsyncSessionLocal() as db:
-                demo_user = await auth_service.authenticate_user(db, "guest", "123456")
-                if demo_user:
-                    logger.info("演示账号验证通过: guest/123456")
-                else:
-                    logger.error(
-                        "演示账号验证失败: guest/123456 无法通过认证，请检查数据库或运行 python reset_admin.py"
-                    )
 
         # 启动指标监控快照任务
         metrics_task = asyncio.create_task(metrics_snapshot_task())
@@ -421,7 +415,6 @@ async def _knowledge_base_health() -> tuple[str, dict]:
     # 与数据库对账：有多少文档**声称**已索引
     from sqlalchemy import func, select
 
-    from app.core.database import AsyncSessionLocal
     from app.models.document import Document, DocumentStatus
 
     async with AsyncSessionLocal() as sess:
