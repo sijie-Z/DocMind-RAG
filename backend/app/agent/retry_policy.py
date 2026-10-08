@@ -142,6 +142,11 @@ RETRY_POLICIES: dict[str, RetryPolicy] = {
     "doom_loop_detected": RetryPolicy(
         retryable=False, action="fatal",
     ),
+    # LLM 跨请求熔断开启（issue #242 第 7 条）：OPEN 期内本步重试必然被门拒绝——
+    # 重试只是白付探测成本；fatal → executor 直接走既有降级/fallback 路径。
+    "circuit_open": RetryPolicy(
+        retryable=False, action="fatal",
+    ),
     # Registry fallback for an unclassified handler exception. Declared explicitly
     # (same shape as the get_policy fallback) so the registry's own codes are all
     # visible in this table rather than resolving silently through the default.

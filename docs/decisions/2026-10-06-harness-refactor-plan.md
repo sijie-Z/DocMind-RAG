@@ -38,7 +38,7 @@
 | 技能学习闭环 | **零调用者** | `agent/skills.py:181,192` |
 | `skills/` 的 SKILL.md 进 prompt | 只被 REST 端点读 | `curated_skills.py` |
 | Checkpoint / 断点续跑 | 表建好了、状态机定义了、**零 CRUD** | `models/agent_task.py` |
-| 两套 trace 设施 | 只被未挂载的 `agent_api.py` 用 | `core/trace_logger.py`、`agent/tracing.py` |
+| 两套 trace 设施 | 只被未挂载的 `agent_api.py` 用；**已按 dev-only 标注处置（#242）** | `core/trace_logger.py`、`agent/tracing.py` |
 | 分层结果截断器 `_smart_truncate` | **零调用** | `loop.py:56` |
 | 人工升级 `escalation` | 实例化了但**从不查询** | `escalation.py:51` |
 

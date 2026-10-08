@@ -1,5 +1,8 @@
 """Agent System Evaluation Harness — run test scenarios, collect traces, produce reports.
 
+接线状态（#242 核实）：**dev-only harness** —— 全仓无运行时导入者，无 CLI 入口
+（`quick_eval` 亦零调用者）。
+
 Purpose:
     This is NOT a test framework in the traditional sense. It is a
     system-level evaluation harness that runs real Agent tasks through

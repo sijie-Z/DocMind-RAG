@@ -153,6 +153,7 @@ python -m pytest tests/ -v
 | `test_auth_service.py` | JWT 创建/验证、密码哈希、Token 黑名单、RBAC | 22 |
 | `test_masking_service.py` | PII 脱敏（手机/邮箱/身份证/IP）、还原 | 11 |
 | `test_circuit_breaker.py` | 熔断器状态机、降级返回值、异步支持 | 10 |
+| `test_circuit_breaker_wiring.py` | 熔断器接线：allow_request/record_* 语义 + executor 快速失败与半开恢复 | 5 |
 | `test_semantic_cache.py` | 余弦相似度边界情况 | 7 |
 | `test_rag_service.py` | RRF 融合、查询意图、上下文压缩、长查询优化 | 7 |
 | `test_config.py` | 弱密钥拒绝、连接池、限流配置 | 5 |

@@ -238,6 +238,8 @@ def setup_opentelemetry(app):
 
 **位置**:`backend/app/agent/tracing.py`(382 行)
 
+**接线状态（#242 核实）**:进程内 ring;**写入者仅评测 harness 路径**;生产 run 不写——运行时轨迹由 Run Report / `execution_context` SSE / ExecutionContext(Redis 7 天 → benchmark/mining)承担。
+
 ### 5.1 数据模型
 
 ```python
@@ -267,6 +269,8 @@ class ExecutionTrace:
 **亮点**:`planner_tool_hints` vs `executor_tool_calls` 的 diff,这是评估"Planner 推荐的工具准不准"的关键数据。
 
 ### 5.2 TraceStore(进程内 ring buffer)
+
+（#242 核实：仅评测 harness 路径写入;生产不写。）
 
 ```python
 class TraceStore:
@@ -504,6 +508,8 @@ def get_langfuse():
 **为什么**:没 API key 时不能强依赖,必须能优雅退化。
 
 ### 11.3 TraceStore 进程内
+
+（#242 核实：本行为 dev-only;下一行的 ExecutionContext 才是生产实写链,且已有 benchmark/mining 离线消费。）
 
 ```python
 self._traces = deque(maxlen=2000)

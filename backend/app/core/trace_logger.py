@@ -1,5 +1,8 @@
 """Observability Layer — structured trace collection and export.
 
+接线状态（#242 核实）：**dev-only** —— 唯一消费者是未挂载的独立测试 app
+`agent_api.py`（:8010）；JSONL 落盘在仓库内无任何读者。
+
 Usage:
     from app.core.trace_logger import AgentTracer, TraceExporter
 

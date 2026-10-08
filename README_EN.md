@@ -123,7 +123,7 @@ User instruction
 |-----------|-----------|---------|
 | Experience Memory | `experience/` | Auto-extract lessons from failed runs, inject into Planner |
 | Execution Replay | `replay/` | Full execution snapshots, save & replay with diff comparison |
-| Pattern Mining | `mining/` | Scan replays for high-frequency tool sequences → skill suggestions |
+| Pattern Mining | `mining/` | Scan replays for high-frequency tool sequences → skill suggestions (offline CLI; reads benchmark/replay/) |
 
 ### 📚 RAG Pipeline (`backend/app/rag/`)
 
@@ -167,10 +167,10 @@ Query enters
 | Messaging | `kafka_client.py` | aiokafka producer |
 | Auth | `security.py` | JWT + bcrypt, get_current_user dependency, RBAC helpers |
 | Middleware | `middleware.py` | Metrics collection (request count/latency/errors) |
-| Circuit Breaker | `circuit_breaker.py` | Circuit breaker pattern — **not wired into the production path** (swallows exceptions and returns degraded values on open/failure, which would defeat the executor's error classification; see module docstring) |
+| Circuit Breaker | `circuit_breaker.py` | Circuit breaker pattern — **state-machine API is wired into the LLM step path (cross-request breaking + half-open recovery, issue #242)**; the decorator's degraded-value contract remains unwired (see module docstring) |
 | Step Runner | `step_runner.py` | Safe step execution with retry/fallback |
 | Tracing | `tracing.py` | OpenTelemetry OTLP gRPC export |
-| Trace Logger | `trace_logger.py` | Agent execution tracing to JSONL |
+| Trace Logger | `trace_logger.py` | Agent execution tracing to JSONL (dev-only: used solely by the unmounted standalone test app `agent_api.py`:8010; no in-repo readers) |
 | Metrics | `prometheus.py` | Custom counters/histograms (retrieval latency, LLM tokens, cache hits, RAG quality) |
 | WebSocket | `notification_ws.py` | Real-time push notification connection manager |
 | Request ID | `request_id.py` | X-Request-ID injection |
@@ -367,7 +367,7 @@ DocMind/
 │   │   │   ├── memory_bridge.py     #   Memory bridge
 │   │   │   ├── events.py            #   SSE event types (12 types)
 │   │   │   ├── message.py           #   Agent message bus
-│   │   │   ├── tracing.py           #   Execution trace records
+│   │   │   ├── tracing.py           #   Execution trace records (dev-only: eval/offline; not written in production)
 │   │   │   ├── tools/               #   30 tool implementations
 │   │   │   │   ├── web_search.py    #   Web search
 │   │   │   │   ├── code_execution.py #  Python/SQL sandbox
