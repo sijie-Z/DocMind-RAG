@@ -8,7 +8,7 @@ from datetime import datetime
 
 from app.core.config import settings
 from app.core.elasticsearch import ElasticsearchTools
-from app.core.prometheus import RAG_ADAPTIVE_STRATEGY
+from app.core.prometheus import RAG_ADAPTIVE_STRATEGY, RAG_QUERY_REWRITE_TOTAL
 from app.rag.query_processor import (
     QueryComplexityClassifier,
     QueryIntentClassifier,
@@ -53,10 +53,15 @@ class HybridRetriever:
                     rewrite_query_llm(query, self.openai_client, settings.DEEPSEEK_MODEL),
                     timeout=max(0.2, timeout_sec),
                 )
+                added = 0
                 for item in llm_rewrites:
                     cleaned = (item or "").strip()
                     if cleaned and cleaned not in rewrite_queries:
                         rewrite_queries.append(cleaned)
+                        added += 1
+                if added:
+                    # 指标补埋（issue #242 第 10 条）：LLM 改写变体同样计入。
+                    RAG_QUERY_REWRITE_TOTAL.inc(added)
             except Exception as e:
                 logger.warning(f"LLM query rewrite timeout/fail: {e}")
 

@@ -26,6 +26,7 @@ EventType = Literal[
     "tool_call",
     "tool_result",
     "tool_error",
+    "retry_hint",
     "reflection",
     "chunk",
     "done",

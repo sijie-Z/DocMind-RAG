@@ -55,8 +55,12 @@ class BoundedLRUCache:
         if key in self._cache:
             self._cache.move_to_end(key)
         self._cache[key] = value
-        while len(self._cache) > self._max_size:
-            self._cache.popitem(last=False)
+        if len(self._cache) > self._max_size:
+            # 指标补埋（issue #242 第 10 条）：内存回退缓存的淘汰此前从未计数。
+            from app.core.prometheus import RAG_CACHE_EVICTIONS
+            while len(self._cache) > self._max_size:
+                self._cache.popitem(last=False)
+                RAG_CACHE_EVICTIONS.labels(cache_type="memory").inc()
 
     def pop(self, key: str) -> Any | None:
         return self._cache.pop(key, None)
