@@ -607,20 +607,59 @@ async def get_performance_metrics(
 async def get_llm_stats(
     db: AsyncSession = Depends(get_db)
 ):
-    """获取 LLM Token 消耗、延迟等统计信息 — 基于真实记录"""
+    """获取 LLM Token 消耗、延迟等统计信息 — 基于真实记录。
+
+    issue #286：修前处理体调用的 `metrics_collector.get_application_stats`
+    在类上不存在 → 恒 AttributeError → except 吞掉 → 恒返回降级零值 200
+    （管理员面板 LLM 统计一直是假零）。同函数另有两处同款影子调用一并接回：
+    RAG 侧按 `total_input_tokens/total_output_tokens` 读 snapshot（键从未存在，
+    静默 0——RAGMetrics 现已把窗口口径暴露出来）；延迟按 `avg_response_time_ms`
+    读（`get_stats()` 真实键是 `response_time`，静默 0）。
+
+    数据源（issue #286 修复方向）：
+    - agent 侧（PER 环 + 工具内调用）：`agent_tokens_total{model,direction}`
+      计数样本读回（prometheus 未启用时该侧计 0，与写入侧 no-op 对称）；
+    - RAG 侧：RAGMetrics 24h 窗口 token 事件（report_tokens 落账）；
+    - 延迟：metrics_collector（HTTP 层）真实键名。
+    """
     try:
+        from app.core.prometheus import read_counter_samples
         from app.services.rag_service import rag_service
-        app_stats = metrics_collector.get_application_stats()
-        avg_latency = int(app_stats.get("avg_response_time_ms", 0))
+
+        app_stats = await metrics_collector.get_stats()
+        avg_latency = int(app_stats.get("response_time", 0))
         p95_latency = int(app_stats.get("p95_response_time_ms", 0))
 
         rag_metrics = rag_service.get_metrics(window_seconds=24 * 3600)
-        total_input_tokens = int(rag_metrics.get("total_input_tokens", 0)) if "total_input_tokens" in rag_metrics else 0
-        total_output_tokens = int(rag_metrics.get("total_output_tokens", 0)) if "total_output_tokens" in rag_metrics else 0
-        total_tokens = total_input_tokens + total_output_tokens
+        rag_input_tokens = int(rag_metrics.get("total_input_tokens", 0))
+        rag_output_tokens = int(rag_metrics.get("total_output_tokens", 0))
+
+        agent_samples = read_counter_samples("AGENT_TOKENS")
+        agent_input_tokens = int(sum(v for labels, v in agent_samples if labels.get("direction") == "input"))
+        agent_output_tokens = int(sum(v for labels, v in agent_samples if labels.get("direction") == "output"))
+        # model 维度（可得则带）：agent 侧指标含 model 标签；RAG 侧
+        # rag_llm_tokens_total 只有 direction 标签、进程内指标无 model，不入此列。
+        agent_by_model: dict[str, dict[str, Any]] = {}
+        for labels, value in agent_samples:
+            model_name = labels.get("model", "unknown")
+            entry = agent_by_model.setdefault(
+                model_name,
+                {"model": model_name, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            )
+            if labels.get("direction") == "input":
+                entry["input_tokens"] += int(value)
+            elif labels.get("direction") == "output":
+                entry["output_tokens"] += int(value)
+        for entry in agent_by_model.values():
+            entry["total_tokens"] = entry["input_tokens"] + entry["output_tokens"]
+
+        # agent + RAG 两侧合计（前端「今日 Token 消耗」卡片语义：输入 + 输出）
+        input_tokens = rag_input_tokens + agent_input_tokens
+        output_tokens = rag_output_tokens + agent_output_tokens
+        total_tokens = input_tokens + output_tokens
 
         # Cost estimate: GPT-4o-mini rate ($0.15/1M input, $0.60/1M output)
-        cost_usd = round(total_input_tokens * 0.00000015 + total_output_tokens * 0.0000006, 4)
+        cost_usd = round(input_tokens * 0.00000015 + output_tokens * 0.0000006, 4)
 
         trend = [0] * 7
         if total_tokens > 0:
@@ -630,8 +669,13 @@ async def get_llm_stats(
 
         return {
             "total_tokens_today": total_tokens,
-            "input_tokens_today": total_input_tokens,
-            "output_tokens_today": total_output_tokens,
+            "input_tokens_today": input_tokens,
+            "output_tokens_today": output_tokens,
+            "rag_tokens_today": rag_input_tokens + rag_output_tokens,
+            "agent_tokens_today": agent_input_tokens + agent_output_tokens,
+            "agent_tokens_by_model": sorted(
+                agent_by_model.values(), key=lambda item: item["total_tokens"], reverse=True
+            ),
             "cost_today_usd": cost_usd,
             "avg_latency_ms": avg_latency,
             "p95_latency_ms": p95_latency,
@@ -642,7 +686,9 @@ async def get_llm_stats(
     except Exception as e:
         logger.error(f"Failed to get LLM stats: {e}")
         return {
-            "total_tokens_today": 0, "cost_today_usd": 0,
+            "total_tokens_today": 0, "input_tokens_today": 0, "output_tokens_today": 0,
+            "rag_tokens_today": 0, "agent_tokens_today": 0, "agent_tokens_by_model": [],
+            "cost_today_usd": 0,
             "avg_latency_ms": 0, "p95_latency_ms": 0,
             "request_count_today": 0, "cost_warning": False,
             "token_trend_7d": [0] * 7

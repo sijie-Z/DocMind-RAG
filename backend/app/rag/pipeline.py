@@ -289,6 +289,10 @@ class RAGPipeline:
         self.metrics.inc("total_input_tokens", input_tokens)
         self.metrics.inc("total_output_tokens", output_tokens)
         self.metrics.inc("llm_request_count")
+        # issue #286：token 事件入窗口账 —— /llm-stats 的 24h 窗口 token 总量
+        # 由此累计（_counters 是进程累计值，无窗口语义）。
+        self.metrics.record_event("tokens_in", input_tokens)
+        self.metrics.record_event("tokens_out", output_tokens)
         self._token_usage_var.set((input_tokens, output_tokens))
 
     def get_last_token_usage(self) -> tuple[int, int] | None:
