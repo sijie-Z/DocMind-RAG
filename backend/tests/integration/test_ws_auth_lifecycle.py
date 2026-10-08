@@ -239,6 +239,34 @@ class TestHandshakeChecksUserState:
         assert deleted_close == AUTH_FAILED_CLOSE
 
 
+# ── 子协议回显（issue #258）─────────────────────────────────────────────────
+class TestSubprotocolEcho:
+    """accept() 必须原样回显客户端请求的 auth.* 子协议。
+
+    未回显时浏览器强制判定握手失败（close 1006，前端表现为反复重连）；TestClient
+    不校验回显，必须显式断言 ``accepted_subprotocol``，否则该缺陷在此文件同样漏网。
+    """
+
+    def test_chat_ws_echoes_auth_subprotocol(self, client, ws_user):
+        with client.websocket_connect(
+            CHAT_WS, subprotocols=[f"auth.{ws_user['token']}"]
+        ) as ws:
+            assert ws.accepted_subprotocol == f"auth.{ws_user['token']}"
+
+    def test_notification_ws_echoes_auth_subprotocol(self, client, ws_user):
+        with client.websocket_connect(
+            NOTIFY_WS, subprotocols=[f"auth.{ws_user['token']}"]
+        ) as ws:
+            assert ws.accepted_subprotocol == f"auth.{ws_user['token']}"
+
+    def test_query_token_handshake_echoes_nothing(self, client, ws_user):
+        # 兼容回退路径：无请求子协议 → 无回显，与裸 accept() 语义一致
+        with client.websocket_connect(
+            f"{NOTIFY_WS}?token={ws_user['token']}"
+        ) as ws:
+            assert ws.accepted_subprotocol is None
+
+
 # ── 消息阶段 ────────────────────────────────────────────────────────────────
 class TestMessagesRejectedAfterUserInvalidated:
     """连接建立后用户失效 → 后续消息必须被拒绝，且不得回退组织继续跑 RAG。"""

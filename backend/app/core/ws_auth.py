@@ -56,17 +56,40 @@ def _clean_token(raw: str) -> str:
     return raw.strip().replace('"', "").replace("'", "")
 
 
-def extract_ws_token(websocket: WebSocket) -> str | None:
-    """提取令牌：优先 Sec-WebSocket-Protocol 的 ``auth.<token>``（令牌不落 URL/日志），
-    兼容旧的 ``?token=`` 查询参数。"""
+def _first_auth_subprotocol(websocket: WebSocket) -> str | None:
+    """返回握手中第一个 ``auth.*`` 子协议的**原文**（未清洗、未二次拼接）。
+
+    按客户端原始顺序逐项匹配（浏览器可带多个子协议，逗号分隔），大小写敏感、
+    不带任何改写——鉴权与回显必须选中同一个子协议，故共用这一处解析。
+    """
     protocols = websocket.headers.get("sec-websocket-protocol", "")
     for proto in protocols.split(","):
         proto = proto.strip()
         if proto.startswith("auth."):
-            return _clean_token(proto[5:])
+            return proto
+    return None
+
+
+def extract_ws_token(websocket: WebSocket) -> str | None:
+    """提取令牌：优先 Sec-WebSocket-Protocol 的 ``auth.<token>``（令牌不落 URL/日志），
+    兼容旧的 ``?token=`` 查询参数。"""
+    proto = _first_auth_subprotocol(websocket)
+    if proto is not None:
+        return _clean_token(proto[5:])
 
     token = websocket.query_params.get("token")
     return _clean_token(token) if token else None
+
+
+def extract_ws_subprotocol(websocket: WebSocket) -> str | None:
+    """提取客户端请求的 ``auth.*`` 子协议原文，供 ``accept(subprotocol=...)`` 回显。
+
+    浏览器契约：请求了 ``Sec-WebSocket-Protocol`` 而 101 响应未回显其中之一时，
+    必须判定握手失败（close 1006）。回显串必须与客户端发送的原文逐字符一致
+    （大小写、引号等原样保留），因此返回原始子协议而不是用清洗后的令牌重新拼接。
+    提取不到时返回 ``None``，调用方以裸 ``accept()`` 语义处理。
+    """
+    return _first_auth_subprotocol(websocket)
 
 
 async def _load_user_state(db: AsyncSession, user_id: int) -> WsUserState | None:

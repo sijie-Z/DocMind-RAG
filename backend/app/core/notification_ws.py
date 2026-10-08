@@ -20,8 +20,13 @@ class NotificationConnectionManager:
             "send_fail_total": 0,
         }
 
-    async def connect(self, user_id: int, websocket: WebSocket) -> None:
-        await websocket.accept()
+    async def connect(
+        self, user_id: int, websocket: WebSocket, subprotocol: str | None = None
+    ) -> None:
+        # 原样回显客户端请求的 auth.* 子协议（issue #258）：浏览器在"请求了子协议
+        # 而 101 响应未回显"时强制判定握手失败（close 1006）。提取不到时传 None，
+        # 与裸 accept() 语义一致。
+        await websocket.accept(subprotocol=subprotocol)
         async with self._lock:
             self._connections[user_id].add(websocket)
             self._stats["connect_total"] += 1
