@@ -21,11 +21,24 @@
    显式 403（修前任何登录用户直接拿全库 total_users/total_documents/total_sessions）；
    作用域计数按组织过滤，全系统组织数仅超管可见。
 
+追加（issue #277，同一评审 review_or1268 的残余收账）：
+
+7. **/agent/chat 会话 org 对称性（R2）**：会话落库 org、运行解析 org、feedback
+   lesson 命名空间 org 三处统一为 require_organization 的 resolved org（含
+   token_organization_id 回退 / 无组织超管回源）；历史遗留会话（org=None）在
+   下一次运行落库时自愈。判别：回退链用户的 lesson 必须能被运行侧同键加载。
+8. **/llm-stats 权限门（R3）**：全局 token/成本聚合从「仅登录」升级为
+   VIEW_SYSTEM_HEALTH（前端唯一消费方 dashboard/admin.vue 仅对 admin 渲染）。
+9. **token 回退路径直接用例（R6）**：/files 代理对「库 org=None、令牌 org=9」
+   的用户按回退 org 授权（自己的 9 放行、其它组织 403），钉住 #268 引入的
+   `get_user_org_id` 回退写法（此前仅代码推导，无直接用例）。
+
 DB 侧与既有用例同风格：能真跑就真跑（内存 SQLite 真建表），外部依赖（语义缓存、
 检索、ES、MinIO、embedding）用「触碰即炸 / 记录调用」的假对象 —— 断言的是
 「1 号组织数据/缓存零出现」，而不是假对象的善意。
 """
 import asyncio
+import io
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -38,7 +51,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import get_db
 from app.core.security import get_current_user, optional_current_user
 from app.models import Base, Organization, User
-from app.models.chat import ChatSession
+from app.models.chat import ChatMessage, ChatSession, MessageType
 from app.models.document import Document, DocumentType
 
 REFUSAL_TEXT = "当前用户未加入任何组织"
@@ -571,7 +584,9 @@ class TestAdminSummaryHole:
             _cleanup()
 
         assert r.status_code == 403, r.text
-        db.execute.assert_not_called(), "权限拒绝必须发生在任何统计查询之前"
+        # issue #277（评审 or1268 R5）：逗号表达式一拆为「有效断言 + 活消息」
+        # （原写法 `db.execute.assert_not_called(), "…"` 的消息文本是死串）。
+        assert db.execute.call_count == 0, "权限拒绝必须发生在任何统计查询之前"
 
     def test_admin_summary_orgless_non_superuser_forbidden_no_queries(self, client: TestClient):
         """无组织的非超管即使持有权限也被显式拒绝（修前拿全库计数）。
@@ -592,7 +607,8 @@ class TestAdminSummaryHole:
             _cleanup()
 
         assert r.status_code == 403, r.text
-        db.execute.assert_not_called(), "拒绝必须在 try 内任何计数查询之前（且不被吞成 200）"
+        # issue #277（评审 or1268 R5）：同 §6.1，拆开逗号表达式。
+        assert db.execute.call_count == 0, "拒绝必须在 try 内任何计数查询之前（且不被吞成 200）"
 
     @pytest.mark.asyncio
     async def test_admin_summary_org_scoped_counts_via_real_sqlite(self, client: TestClient):
@@ -725,3 +741,317 @@ class TestAdminSummaryHole:
         data = r.json()
         assert data["total_users"] == 2
         assert data["total_organizations"] == 2, "无组织超管是系统管理员，保留全局组织数"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 7 · /agent/chat 会话 org 对称性（issue #277 / 评审 or1268 R2）
+# ══════════════════════════════════════════════════════════════════════════
+def _token_org_user(user_id: int = 77, token_org: int = 42) -> SimpleNamespace:
+    """org 来自 token_organization_id 回退的用户（库中 organization_id=None）。"""
+    return SimpleNamespace(
+        id=user_id,
+        organization_id=None,
+        token_organization_id=token_org,
+        is_superuser=False,
+        role="user",
+        is_active=True,
+    )
+
+
+class _CaptureDbSession:
+    """_save_session_interaction 的可捕获假库会话：查无会话 → 走新建分支。"""
+
+    def __init__(self):
+        self.added: list = []
+
+    async def execute(self, stmt):
+        res = MagicMock()
+        res.scalar_one_or_none = MagicMock(return_value=None)
+        return res
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def commit(self):
+        pass
+
+
+class TestAgentChatSessionOrgSymmetry:
+    def test_create_session_persists_resolved_token_org(self, client: TestClient, monkeypatch):
+        """回退链用户建会话（POST /agent/sessions）：落库 org == 运行解析 org（42）。
+
+        变异验证：organization_id 改回 current_user.organization_id → 落库 None → 红。
+        """
+        user = _token_org_user()
+        captured: list = []
+        fake_db = MagicMock()
+        fake_db.add = MagicMock(side_effect=captured.append)
+        fake_db.commit = AsyncMock()
+        monkeypatch.setattr(
+            "app.core.database.AsyncSessionLocal", lambda: _AsyncCtx(fake_db)
+        )
+
+        _cleanup = _override_http(user=user)
+        try:
+            r = client.post("/api/v1/agent/sessions", json={"title": "新会话"})
+        finally:
+            _cleanup()
+
+        assert r.status_code == 200, r.text
+        sessions = [o for o in captured if isinstance(o, ChatSession)]
+        assert len(sessions) == 1, f"应创建 1 个会话: {captured}"
+        assert sessions[0].organization_id == 42, (
+            "落库 org 必须是 resolved org（token 回退 42），而不是 raw None"
+        )
+
+    def test_agent_chat_run_and_persist_org_unified_then_feedback_lesson_loads(
+        self, client: TestClient, monkeypatch
+    ):
+        """回退链用户走 /agent/chat：运行 org == 落库 org == 42，feedback lesson 可加载。
+
+        判别链（R2 题目原话）：org 来自回退链的用户建会话 → 落库 org == 运行 org
+        → feedback lesson 可加载。修前落库 raw None：lesson 写入 `None:{user}:…`，
+        运行侧读 `42:{user}:…`，自己写的 lesson 自己学不到。
+
+        变异验证：chat 落库参数改回 current_user.organization_id →
+        落库 None ≠ 运行 42 → 红。
+        """
+        import app.api.v1.endpoints.agent as agent_mod
+        from app.agent.memory_bridge import AgentMemoryBridge
+        from app.services.memory_service import get_memory_system
+
+        user = _token_org_user()
+        session_id = str(uuid.uuid4())
+        captured: dict = {}
+
+        async def _fake_agent_chat(**kwargs):
+            captured["run_org"] = kwargs.get("organization_id")
+            captured["run_session_id"] = kwargs.get("session_id")
+            yield SimpleNamespace(
+                type="chunk",
+                content="好的",
+                to_sse_dict=lambda: {"type": "chunk", "content": "好的"},
+            )
+
+        fake_db = _CaptureDbSession()
+        monkeypatch.setattr(agent_mod, "AsyncSessionLocal", lambda: _AsyncCtx(fake_db))
+        monkeypatch.setattr(agent_mod.agent_service, "chat", _fake_agent_chat)
+
+        _cleanup = _override_http(user=user)
+        try:
+            r = client.post(
+                "/api/v1/agent/chat",
+                json={"query": "你好", "session_id": session_id},
+            )
+        finally:
+            _cleanup()
+
+        assert r.status_code == 200, r.text
+        assert captured.get("run_org") == 42, "运行侧必须用 resolved org（token 回退 42）"
+        assert captured.get("run_session_id") == session_id
+
+        sessions = [o for o in fake_db.added if isinstance(o, ChatSession)]
+        assert len(sessions) == 1, f"会话应落库: {fake_db.added}"
+        assert sessions[0].organization_id == captured["run_org"] == 42, (
+            "落库 org 必须与运行解析 org 相同（修前 raw None ≠ 运行 42）"
+        )
+        assistant_msgs = [
+            o
+            for o in fake_db.added
+            if isinstance(o, ChatMessage) and o.message_type == MessageType.ASSISTANT
+        ]
+        assert assistant_msgs, "助手消息应已落库（feedback 的锚点）"
+
+        # ── feedback：lesson 必须落在运行侧同命名空间（42:77:session:<id>）──
+        msg_result = MagicMock()
+        msg_result.scalar_one_or_none = MagicMock(return_value=assistant_msgs[0])
+        session_result = MagicMock()
+        session_result.scalar_one_or_none = MagicMock(return_value=sessions[0])
+        fb_db = MagicMock()
+        fb_db.execute = AsyncMock(side_effect=[msg_result, session_result])
+        fb_db.commit = AsyncMock()
+
+        _cleanup = _override_http(user=user, db=fb_db)
+        try:
+            r = client.post(
+                "/api/v1/agent/feedback",
+                json={
+                    "message_id": assistant_msgs[0].id,
+                    "feedback": -1,
+                    "note": "R2 判别：答案不对",
+                },
+            )
+        finally:
+            _cleanup()
+
+        assert r.status_code == 200, r.text
+        reader = AgentMemoryBridge(
+            agent_id=f"session:{session_id}", organization_id=42, user_id=77
+        )
+        assert any(
+            lesson.get("lesson") == "R2 判别：答案不对"
+            for lesson in reader.system.reflective.lessons
+        ), "运行侧（resolved org 42）必须能加载 feedback 写入的 lesson（修前静默失效）"
+        bugged_ns = get_memory_system(f"None:77:session:{session_id}")
+        assert not any(
+            lesson.get("lesson") == "R2 判别：答案不对"
+            for lesson in bugged_ns.reflective.lessons
+        ), "lesson 不得落在 raw org（None）命名空间"
+
+    def test_feedback_lesson_resolves_run_org_for_legacy_orgless_session(self, client: TestClient):
+        """历史会话（落库 org=None）上的 feedback：lesson 仍落在运行侧 resolved org。
+
+        运行侧（/agent/chat，token 回退）= 42；修前 bridge 用 session.organization_id
+        （None）→ 运行读 42 找不到。历史会话不因落库值陈旧而丢 lesson。
+
+        变异验证：lesson org 改回 session.organization_id → 本用例红。
+        """
+        from app.agent.memory_bridge import AgentMemoryBridge
+        from app.services.memory_service import get_memory_system
+
+        session_id = str(uuid.uuid4())
+        user = _token_org_user()
+        message = MagicMock()
+        message.id = "msg-277"
+        message.session_id = session_id
+        message.content = "算错了"
+        chat_session = SimpleNamespace(id=session_id, organization_id=None)
+
+        msg_result = MagicMock()
+        msg_result.scalar_one_or_none = MagicMock(return_value=message)
+        session_result = MagicMock()
+        session_result.scalar_one_or_none = MagicMock(return_value=chat_session)
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[msg_result, session_result])
+        db.commit = AsyncMock()
+
+        _cleanup = _override_http(user=user, db=db)
+        try:
+            r = client.post(
+                "/api/v1/agent/feedback",
+                json={"message_id": "msg-277", "feedback": -1, "note": "遗留会话判别"},
+            )
+        finally:
+            _cleanup()
+
+        assert r.status_code == 200, r.text
+        reader = AgentMemoryBridge(
+            agent_id=f"session:{session_id}", organization_id=42, user_id=77
+        )
+        assert any(
+            lesson.get("lesson") == "遗留会话判别"
+            for lesson in reader.system.reflective.lessons
+        ), "历史会话的 feedback lesson 也必须落在运行侧 resolved org（42）"
+        bugged_ns = get_memory_system(f"None:77:session:{session_id}")
+        assert not any(
+            lesson.get("lesson") == "遗留会话判别"
+            for lesson in bugged_ns.reflective.lessons
+        ), "不得沿用会话落库的 raw org（None）"
+
+    @pytest.mark.asyncio
+    async def test_save_session_interaction_heals_legacy_none_org(self, monkeypatch):
+        """历史会话（org=None）在带 resolved org 的消息落库时自愈（只补空值）。
+
+        变异验证：删掉 `elif existing.organization_id is None` 自愈分支 → 本用例红。
+        """
+        import app.api.v1.endpoints.agent as agent_mod
+
+        legacy = MagicMock()
+        legacy.user_id = 77
+        legacy.title = "Existing session"
+        legacy.organization_id = None
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none = MagicMock(return_value=legacy)
+        fake = MagicMock()
+        fake.execute = AsyncMock(return_value=result_mock)
+        fake.add = MagicMock()
+        fake.commit = AsyncMock()
+        monkeypatch.setattr(agent_mod, "AsyncSessionLocal", lambda: _AsyncCtx(fake))
+
+        out = await agent_mod._save_session_interaction("sess-legacy", 77, "q", 42, "a")
+
+        assert out is not None
+        assert legacy.organization_id == 42, "落库 org 应与本次运行解析 org 收敛（自愈）"
+        assert fake.add.call_count == 2  # user + assistant 消息
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 8 · monitoring /llm-stats —— 全局聚合升级为 VIEW_SYSTEM_HEALTH 门槛（R3）
+# ══════════════════════════════════════════════════════════════════════════
+class TestLlmStatsGate:
+    def test_llm_stats_without_permission_forbidden(self, client: TestClient):
+        """普通已登录用户（无 system:health）→ 403，处理器不执行、不触碰 DB。
+
+        修前本端点仅登录门：全局 token/成本/延迟聚合任意登录用户可见。
+
+        变异验证：去掉 dependencies 里的 permission_required → 200 → 本用例红。
+        """
+        user = SimpleNamespace(
+            id=1, organization_id=5, is_superuser=False, role="user", is_active=True
+        )
+        db = MagicMock()
+        db.execute = AsyncMock()
+        _cleanup = _override_http(user=user, db=db)
+        try:
+            with _allow_permissions(perms=set()):
+                r = client.get("/api/v1/monitoring/llm-stats")
+        finally:
+            _cleanup()
+
+        assert r.status_code == 403, r.text
+        assert db.execute.call_count == 0, "权限拒绝必须发生在任何统计查询之前"
+
+    def test_llm_stats_with_permission_accessible(self, client: TestClient):
+        """持 system:health 的用户（管理员）不被过度收窄：仍 200 且聚合字段齐全。"""
+        user = SimpleNamespace(
+            id=1, organization_id=5, is_superuser=False, role="admin", is_active=True
+        )
+        _cleanup = _override_http(user=user)
+        try:
+            with _allow_permissions():
+                r = client.get("/api/v1/monitoring/llm-stats")
+        finally:
+            _cleanup()
+
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert "total_tokens_today" in data and "cost_today_usd" in data
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 9 · token 回退路径直接用例（R6）—— /files 代理按回退 org 授权
+# ══════════════════════════════════════════════════════════════════════════
+class TestFilesProxyTokenOrgFallback:
+    def test_files_proxy_token_org_user_reads_own_org_only(self, client: TestClient):
+        """库中 org=None、令牌 org=9 的用户：documents/9/… 放行、其它组织 403。
+
+        issue #277（评审 or1268 R6）：#268 把 /files 的 `… or 1` 换成
+        get_user_org_id 回退写法后，回退路径无直接用例（仅代码推导）。此处钉：
+        回退 org 恰好授予该组织的读权——既不放行他人（8 → 403），也不拒绝自己。
+
+        变异验证：main.py 改回 raw `current_user.organization_id` → 回退用户被判
+        无组织 → 第一条断言红（403）。
+        """
+        user = SimpleNamespace(
+            id=5,
+            organization_id=None,
+            token_organization_id=9,
+            is_superuser=False,
+            role="user",
+            is_active=True,
+        )
+        _cleanup = _override_http(user=user, optional_user=True)
+        try:
+            with patch(
+                "app.main.minio_client.get_object",
+                return_value=io.BytesIO(b"data"),
+            ) as get_obj:
+                ok = client.get("/files/documents/9/abc.pdf")
+                denied = client.get("/files/documents/8/abc.pdf")
+        finally:
+            _cleanup()
+
+        assert ok.status_code == 200, f"token 回退组织（9）本组织对象必须可读: {ok.status_code}"
+        assert ok.content == b"data"
+        assert get_obj.call_count == 1, "拒绝的请求不得触达对象存储"
+        assert denied.status_code == 403, "其它组织（8）前缀必须 403（回退不得放大读权）"
