@@ -302,7 +302,10 @@ class Planner:
                 max_tokens=self.config.plan_max_tokens,
                 timeout=30.0,
                 stream=True,
-                # 流式调用默认不带 usage，显式索取（issue #202；DeepSeek 支持）
+                # 流式调用默认不带 usage，显式索取（issue #202；DeepSeek 支持）。
+                # 可移植性注（#239 minor-4）：仅 DeepSeek / OpenAI 兼容端点实测；
+                # 目标服务不支持该参数时可能报错或被忽略——被忽略时流式用量将静默
+                # 计 0（服务端行为，非本调用点问题）。
                 stream_options={"include_usage": True},
             )
 
