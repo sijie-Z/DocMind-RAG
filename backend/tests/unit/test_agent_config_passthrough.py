@@ -75,8 +75,9 @@ def test_config_update_rejects_out_of_range():
 async def test_chat_config_seeds_from_stored_and_request_overrides(redis_store):
     """变异点：helper 忽略 stored（`config = AgentConfig()`）→ 本用例红。
 
-    注意本用例走的是**整条链**：_build_agent_config 内部自己 load_from_redis，
-    所以它同时钉住"聊天真的读了用户已保存配置"这个接线本身。
+    注意：本用例钉住的是 helper 自身的语义；**端点的接线**由
+    `test_chat_endpoint_wires_stored_config_into_run` 单独钉住（评审指出：
+    仅测 helper 无法防"端点忘记调用 helper"式的回归）。
     """
     redis_store["user:7"] = AgentConfig(
         max_plan_steps=7,
@@ -110,6 +111,64 @@ async def test_chat_config_merges_server_side_disabled_tools(redis_store):
     body = agent_ep.AgentChatRequest(query="q", disabled_tools=["web_search"])
     cfg = await agent_ep._build_agent_config(body, 7)
     assert "web_search" in cfg.disabled_tools and "execute_python" in cfg.disabled_tools
+
+
+# ── 评审 B-1：继承存储值时也必须重新合并服务端禁用清单 ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_empty_request_never_unlocks_server_forced_tools(redis_store):
+    """评审 B-1：请求不带 disabled_tools 时，继承的存储值也必须重新合并服务端清单。
+
+    存储可能来自旧版本或带外写入（如 `[]`，不含后来新增的默认禁用项）。
+    变异点：把 helper 改回"仅请求非空才 merge" → 本用例红。
+    """
+    redis_store["user:7"] = AgentConfig(disabled_tools=[])  # 带外写入/旧版本存储形态
+    cfg = await agent_ep._build_agent_config(agent_ep.AgentChatRequest(query="q"), 7)
+    for tool in ("execute_python", "execute_sql", "mcp_call"):
+        assert tool in cfg.disabled_tools, f"{tool} 不得因存储值形态而被放开"
+
+
+@pytest.mark.asyncio
+async def test_stored_disabled_list_is_extended_not_replaced(redis_store):
+    """继承的存储清单同样要与服务端默认清单取并集（不是二选一）。"""
+    redis_store["user:7"] = AgentConfig(disabled_tools=["web_search"])
+    cfg = await agent_ep._build_agent_config(agent_ep.AgentChatRequest(query="q"), 7)
+    assert "web_search" in cfg.disabled_tools, "用户存储的禁用项必须保留"
+    assert "execute_python" in cfg.disabled_tools, "服务端默认清单必须合并进来"
+
+
+# ── 端点接线（评审：仅测 helper 防不住"端点忘记调用 helper"）────────────────
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_wires_stored_config_into_run(redis_store, monkeypatch):
+    """驱动真实端点：存储的配置必须到达 agent_service.chat。
+
+    变异点：把 event_stream 里 `await _build_agent_config(body, current_user.id)`
+    还原为纯请求构造 → 本用例红（捕获到的 max_plan_steps 变回默认 10）。
+    """
+    from app.agent.events import AgentEvent
+
+    redis_store["user:7"] = AgentConfig(max_plan_steps=7)
+    captured: dict = {}
+
+    async def _fake_chat(**kwargs):
+        captured.update(kwargs)
+        yield AgentEvent(type="done")
+
+    monkeypatch.setattr(agent_ep.agent_service, "chat", _fake_chat)
+    monkeypatch.setattr(agent_ep, "require_organization", AsyncMock(return_value=3))
+
+    resp = await agent_ep.agent_chat(
+        agent_ep.AgentChatRequest(query="q"), current_user=_fake_user(), db=MagicMock(),
+    )
+    async for _ in resp.body_iterator:
+        break
+
+    assert captured, "agent_service.chat 应被调用"
+    assert captured["config"].max_plan_steps == 7, "存储配置必须真正进入这次 run"
+    assert captured["organization_id"] == 3
 
 
 # ── #239 minor-3：编排器评审透传 ctx ───────────────────────────────────────

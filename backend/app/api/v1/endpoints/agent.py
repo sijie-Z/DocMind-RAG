@@ -94,8 +94,9 @@ async def _build_agent_config(body: AgentChatRequest, user_id: int) -> AgentConf
 
     - 请求模型里恒有值的字段（model / temperature / enable_*）总是以请求为准；
     - 可选字段（system_prompt_override）仅在请求显式给值时覆盖；
-    - 列表字段（disabled_tools）仅在请求非空时覆盖（空 = 无意见，继承已保存值；
-      无论哪条路径，服务端强制禁用清单都会合并，安全加固不受影响）。
+    - 列表字段（disabled_tools）：请求非空时以请求为准、为空时以已保存值（或数据类
+      默认值）为准；**两条路径都会强制合并服务端禁用清单**（安全保证与改动前的
+      无条件重合并一致，见下方注释）。
     """
     stored = await AgentConfig.load_from_redis(f"user:{user_id}")
     config = stored or AgentConfig()
@@ -108,9 +109,11 @@ async def _build_agent_config(body: AgentChatRequest, user_id: int) -> AgentConf
     config.enable_thinking = body.enable_thinking
     if body.system_prompt_override is not None:
         config.system_prompt_override = body.system_prompt_override
-    if body.disabled_tools:
-        # 安全加固：高危工具由服务端强制禁用，客户端无法解除
-        config.disabled_tools = _merge_disabled_tools(body.disabled_tools)
+    # 安全加固：无论请求是否携带 disabled_tools，服务端强制禁用清单都必须合并。
+    # 继承存储值时同样重新合并——存储可能来自旧版本或带外写入（不含后来新增的默认
+    # 禁用项），原样继承会把 execute_python/execute_sql/mcp_call 在聊天中放开；
+    # 改动前的 chat 每次无条件重合并，这里保持同等保证（评审 B-1）。
+    config.disabled_tools = _merge_disabled_tools(body.disabled_tools or config.disabled_tools)
     return config
 
 
