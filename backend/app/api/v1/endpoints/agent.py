@@ -212,15 +212,20 @@ async def _fallback_resume_config(user_id: int) -> AgentConfig:
 async def get_agent_task(
     task_id: str,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """任务状态视图（checkpoint/resume 的发现性入口；只读行、不解快照）。
 
-    404：不存在 / 非本人 / 组织不一致（不区分，避免泄露归属）。
+    - 403：未登录 / 用户无组织上下文（S3 纪律，与 /chat 完全一致——无组织用户
+      绝不带着 None 组织上下文去读任务，那会放行"已被移出组织的前成员"在旧
+      组织上读取任务，评审 B1）；
+    - 404：任务不存在 / 非本人 / 组织不一致（不区分，避免泄露归属）。
     """
+    effective_org_id = await require_organization(current_user, db)
     task = await checkpoint.load_task(
         task_id=task_id,
         user_id=current_user.id,
-        organization_id=current_user.organization_id,
+        organization_id=effective_org_id,
     )
     return {"success": True, "data": checkpoint.task_to_status_dict(task)}
 
@@ -229,20 +234,24 @@ async def get_agent_task(
 async def resume_agent_task(
     task_id: str,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """从 checkpoint 恢复中断的任务（SSE 流；事件契约与 /chat 完全一致）。
 
     - 200：从断点继续执行，事件流正常产出（不回放中断前事件——最小版边界）；
-    - 404：任务不存在 / 非本人（不区分）；
+    - 403：未登录 / 用户无组织上下文（S3 纪律，与 /chat 一致；无组织用户不得在
+      "旧组织"的执行上下文里续跑任务——评审 B1）；
+    - 404：任务不存在 / 非本人 / 组织不一致（不区分）；
     - 409：任务已终态，或正被另一个 resume 持有（detail 回带当前 state）。
 
     预检与认领（prepare_resume）必须在开流之前完成：HTTP 状态码只在开始
-    流式输出前可写，404/409 语义全靠它拍板。
+    流式输出前可写，403/404/409 语义全靠它拍板。
     """
+    effective_org_id = await require_organization(current_user, db)
     task, payload = await agent_service.prepare_resume(
         task_id,
         user_id=current_user.id,
-        organization_id=current_user.organization_id,
+        organization_id=effective_org_id,
     )
     session_id = (payload or {}).get("session_id") or None
     # 崩溃前已流给用户的部分不回放（最小版边界），但收尾落库要拼成完整回复。

@@ -275,18 +275,17 @@ async def load_task(
     """取任务行（状态视图与 resume 共用的归属校验）。
 
     - 行不存在 / 不属于 user_id → TaskNotFoundError（对外 404，不区分二者以免泄露归属）；
-    - organization_id 给定时要求组织一致（任务在旧组织下建的、用户已换组织 → 同样 404）。
+    - organization_id 给定时要求**严格相等**（含"任务 org 为 None"的情形——给定组织
+      上下文却拿不到同组织任务，一律 404）。HTTP 端点必须先经 `require_organization`
+      解析出非空组织上下文再传进来：无组织用户由端点层 fail-closed（403，与 /chat
+      同纪律），不允许把 None 传到这里"跳过检查"（评审 B1）。
     返回 detached 实例：只读其列属性，任何写都必须经本模块函数。
     """
     async with AsyncSessionLocal() as db:
         task = await db.get(AgentTask, task_id)
     if task is None or task.user_id != user_id:
         raise TaskNotFoundError("任务不存在或无权访问")
-    if (
-        organization_id is not None
-        and task.organization_id is not None
-        and task.organization_id != organization_id
-    ):
+    if organization_id is not None and task.organization_id != organization_id:
         raise TaskNotFoundError("任务不存在或无权访问")
     return task
 

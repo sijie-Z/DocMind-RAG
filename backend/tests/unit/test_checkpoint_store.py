@@ -137,6 +137,23 @@ async def test_load_for_resume_scopes_to_owner(db_factory):
         await checkpoint.load_for_resume(task_id="does-not-exist", user_id=7)
 
 
+async def test_load_task_org_none_task_not_reachable_with_org_context(db_factory):
+    """收紧语义（评审 B1 附带项）：给定组织上下文时要求**严格相等**——任务
+    org=None 的旧守卫（`task.organization_id is not None`）会把它放行给任意组织。
+    变异点：恢复该守卫 → 本条红（返回值不再抛错）。"""
+    async with db_factory() as db:
+        db.add(AgentTask(id="noorg0000001", user_id=1, organization_id=None,
+                         query="q", status=TaskStatus.RUNNING))
+        await db.commit()
+
+    with pytest.raises(TaskNotFoundError):
+        await checkpoint.load_task(task_id="noorg0000001", user_id=1, organization_id=1)
+
+    # 不带组织上下文（归一化的 service 内部读路径）仍可读：None = "不校验"
+    task = await checkpoint.load_task(task_id="noorg0000001", user_id=1)
+    assert task.id == "noorg0000001"
+
+
 async def test_corrupt_snapshot_degrades_to_no_payload_without_raising(db_factory):
     """损坏 checkpoint 的安全降级：任何结构性坏数据 → payload None，绝不崩。
     变异点：parse_snapshot 放行未知版本/非 dict → 对应断言变红。"""
