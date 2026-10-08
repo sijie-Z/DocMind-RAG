@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal, close_db, init_db
+from app.core.database import close_db, init_db
 from app.core.elasticsearch import es_client, init_elasticsearch
 from app.core.kafka_client import kafka_producer
 from app.core.logging import setup_logging
@@ -415,6 +415,9 @@ async def _knowledge_base_health() -> tuple[str, dict]:
     # 与数据库对账：有多少文档**声称**已索引
     from sqlalchemy import func, select
 
+    # 局部导入是**有意的**（勿"顺手清理"）：测试以 patch("app.core.database.AsyncSessionLocal")
+    # 替换会话工厂，需在调用时重新解析；模块级绑定会绕过 patch（见 test_index_visibility）。
+    from app.core.database import AsyncSessionLocal
     from app.models.document import Document, DocumentStatus
 
     async with AsyncSessionLocal() as sess:
