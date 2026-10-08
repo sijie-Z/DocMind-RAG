@@ -4,7 +4,17 @@
 端点返回 200 + 空数组（"服务坏了" 呈现为 "没搜到"）。修后：如实 502。
 
 链路取真实的两层（端点 → KnowledgeService → RagServiceFacade），只替换最底层
-facade 的 `search_knowledge_base` 抛结构化故障 —— 钉住「层层不吞」。
+facade **模块单例对象**抛结构化故障 —— 钉住「层层不吞」。
+
+密封化说明（issue #292 CI 红的根因复盘）：故障注入**不能**用
+`patch("app.services.rag_service.RagServiceFacade.search_knowledge_base")`（类方法）。
+同进程跑整包时，任何先跑过的「实例级 monkeypatch」会把绑定方法写回成实例属性
+（`monkeypatch.setattr(rag_service, "search_knowledge_base", fake)` 撤销时，
+hasattr 命中类方法 → setattr 到实例）→ 单例被永久 shadow，类级 patch 静默失效，
+用例吃到真实 pipeline 的 ES 故障（kind=failed）——本地单跑绿、CI 整包红。
+替换模块属性 `app.services.rag_service.rag_service`（knowledge_service 函数内
+import 每次取模块属性）对实例 shadow 免疫；源头泄漏已在
+tests/unit/test_rag_fix_org_scope.py 一并修复。
 """
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,6 +30,15 @@ from app.rag.errors import RetrievalUnavailableError
 def client():
     from app.main import app
     return TestClient(app)
+
+
+def _stub_facade(kind: str):
+    """把模块单例换成「检索即抛结构化故障」的替身（对实例级 shadow 免疫）。"""
+    stub = MagicMock()
+    stub.search_knowledge_base = AsyncMock(
+        side_effect=RetrievalUnavailableError(f"stubbed retrieval failure ({kind})", kind=kind)
+    )
+    return patch("app.services.rag_service.rag_service", new=stub)
 
 
 def _make_mock_user():
@@ -67,12 +86,7 @@ def test_search_retrieval_unavailable_maps_to_502_not_empty_200(client: TestClie
     app.dependency_overrides[get_db] = _override_get_db()
     app.dependency_overrides[get_current_user] = _override_user
     try:
-        with patch(
-            "app.services.rag_service.RagServiceFacade.search_knowledge_base",
-            new=AsyncMock(
-                side_effect=RetrievalUnavailableError("ES connection refused", kind="failed")
-            ),
-        ):
+        with _stub_facade("failed"):
             r = client.post(
                 "/api/v1/knowledge/search",
                 json={"query": "报销流程", "top_k": 5, "organization_id": 1},
@@ -99,12 +113,7 @@ def test_search_timeout_kind_is_preserved_in_error_detail(client: TestClient):
     app.dependency_overrides[get_db] = _override_get_db()
     app.dependency_overrides[get_current_user] = _override_user
     try:
-        with patch(
-            "app.services.rag_service.RagServiceFacade.search_knowledge_base",
-            new=AsyncMock(
-                side_effect=RetrievalUnavailableError("read timeout", kind="timeout")
-            ),
-        ):
+        with _stub_facade("timeout"):
             r = client.post(
                 "/api/v1/knowledge/search",
                 json={"query": "报销流程", "top_k": 5, "organization_id": 1},

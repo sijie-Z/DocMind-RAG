@@ -594,6 +594,21 @@ class TestAgentChainHonesty:
 # ══════════════════════════════════════════════════════════════════════════
 # 7 · 上层诚实降级：knowledge_service（/search 链 + suggestions）
 # ══════════════════════════════════════════════════════════════════════════
+def _stub_rag_facade(kind: str):
+    """故障注入替身：替换 **模块单例对象**（app.services.rag_service.rag_service），
+    而不是 patch 类方法 `RagServiceFacade.search_knowledge_base`。
+
+    原因（issue #292 CI 红复盘）：实例级 monkeypatch 泄漏会把绑定方法写回成实例属性，
+    永久 shadow 类属性 → 后续类级 patch 静默失效（同进程整包跑时命中真实 ES 故障）。
+    替换模块属性（knowledge_service 函数内 import 每次取模块属性）对实例 shadow 免疫。
+    """
+    stub = MagicMock()
+    stub.search_knowledge_base = AsyncMock(
+        side_effect=RetrievalUnavailableError(f"stubbed retrieval failure ({kind})", kind=kind)
+    )
+    return patch("app.services.rag_service.rag_service", new=stub)
+
+
 class TestKnowledgeServiceHonesty:
     @pytest.mark.asyncio
     async def test_retrieval_unavailable_is_reraised_not_swallowed_to_empty(self):
@@ -601,20 +616,14 @@ class TestKnowledgeServiceHonesty:
 
         变异验证：给 search_knowledge 恢复笼统吞异常 → 红。
         """
-        with patch(
-            "app.services.rag_service.RagServiceFacade.search_knowledge_base",
-            new=AsyncMock(side_effect=RetrievalUnavailableError("backend down", kind="failed")),
-        ):
+        with _stub_rag_facade("failed"):
             with pytest.raises(RetrievalUnavailableError):
                 await KnowledgeService().search_knowledge("q", "1", top_k=5)
 
     @pytest.mark.asyncio
     async def test_suggestions_degrade_to_empty_without_raising(self):
         """搜索建议是 best-effort：故障降级为空列表并留日志，不把故障扩大成 5xx。"""
-        with patch(
-            "app.services.rag_service.RagServiceFacade.search_knowledge_base",
-            new=AsyncMock(side_effect=RetrievalUnavailableError("backend down", kind="timeout")),
-        ):
+        with _stub_rag_facade("timeout"):
             out = await KnowledgeService().get_search_suggestions("q", "1")
 
         assert out == []
