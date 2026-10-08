@@ -190,6 +190,29 @@ def get_prometheus_metrics() -> bytes:
     return generate_latest(REGISTRY)
 
 
+def read_counter_samples(registry_key: str) -> list[tuple[dict[str, str], float]]:
+    """读回指定计数器的全部标签样本（issue #286：消费端读回已埋指标）。
+
+    registry_key 为 `_build_metrics()` 的注册键（如 `"AGENT_TOKENS"`），
+    返回 `[(labels, value), ...]`（已过滤 `_created` 时间戳样本）。
+    真实指标未启用（no-op 模式）或键不存在时返回 `[]` —— 调用方按 0/空处理，
+    与写入侧 no-op 语义**对称**（写入即静默丢弃，读取即静默为空）。
+    """
+    r = _get_real()
+    if r is None:
+        return []
+    metric = r.get(registry_key)
+    if metric is None:
+        return []
+    out: list[tuple[dict[str, str], float]] = []
+    for family in metric.collect():
+        for sample in family.samples:
+            if sample.name.endswith("_created"):
+                continue
+            out.append((dict(sample.labels), float(sample.value)))
+    return out
+
+
 def get_content_type() -> str:
     from prometheus_client import CONTENT_TYPE_LATEST
     return CONTENT_TYPE_LATEST

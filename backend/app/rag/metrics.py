@@ -55,6 +55,10 @@ class RAGMetrics:
             rt_retry = self.window_sum("retry", window_seconds)
             return {
                 "window_seconds": window_seconds,
+                # issue #286：token 窗口总量（report_tokens 落 tokens_in/out 事件）——
+                # 此前只有进程累计 _counters，从未暴露给 snapshot，/llm-stats 恒读 0。
+                "total_input_tokens": int(self.window_sum("tokens_in", window_seconds)),
+                "total_output_tokens": int(self.window_sum("tokens_out", window_seconds)),
                 "retrieval_total": int(rt),
                 "retrieval_hit": int(rh),
                 "hit_rate": round(rh / rt, 4),
@@ -76,6 +80,9 @@ class RAGMetrics:
         lc = max(1, self._counters["latency_count"])
         return {
             "window_seconds": 0,
+            # issue #286：进程累计口径与窗口口径同名对称（同 retrieval_total 惯例）。
+            "total_input_tokens": self._counters["total_input_tokens"],
+            "total_output_tokens": self._counters["total_output_tokens"],
             "retrieval_total": self._counters["retrieval_total"],
             "retrieval_hit": self._counters["retrieval_hit"],
             "hit_rate": round(self._counters["retrieval_hit"] / rt, 4),
