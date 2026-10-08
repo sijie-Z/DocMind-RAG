@@ -74,6 +74,25 @@ async def test_load_skill_reference_guide_and_reference():
 
 
 @pytest.mark.asyncio
+async def test_load_skill_reference_missing_reference_not_found():
+    """#245 第 4 条：技能存在、但 reference 名不存在 → not_found（此前只测了
+    "技能不存在"分支，这条 reference 分支无自动化测试）。
+
+    变异点：删掉 curated_skill_tools.load_skill_reference 里 `if content is None:`
+    的 not_found 分支（或置 False）→ 本用例红。
+    """
+    miss = await tool_registry.execute_detailed(
+        "load_skill_reference",
+        {"skill_name": "ai-podcast", "reference": "no-such-reference"},
+        organization_id=1,
+        user_id=0,
+    )
+    assert not miss.success, "reference 不存在必须显式失败，不得静默返回 None"
+    assert miss.error.code == "not_found"
+    assert "没有名为" in miss.error.message and "ai-podcast" in miss.error.message
+
+
+@pytest.mark.asyncio
 async def test_executor_prompt_injects_skills_index_per_switch():
     captured: dict = {}
     client = MagicMock()
@@ -153,6 +172,93 @@ async def test_apply_skill_hints_only_fills_missing():
     assert steps[0].tool_hint == "search_knowledge_base", "空缺应被技能提示补上"
     assert steps[1].tool_hint == "execute_python", "已有提示不得被覆盖"
     assert matched_id == "sk-1", "应返回实际被应用的 skill_id（B2 反馈边的输入）"
+
+
+@pytest.mark.asyncio
+async def test_apply_skill_hints_skips_tools_not_visible_in_context():
+    """#245 第 5/6 条：跨会话工具配置漂移——技能记的工具名不在当前可见集（tool_tags
+    受限）时跳过应用，不得写进步骤诱导模型调用被执行层拒绝的工具。
+
+    变异点：_apply_skill_hints 里 `hint and hint in visible` 还原为 `hint` → 红。
+    """
+    from app.agent.loop import PERAgentLoop
+
+    loop = PERAgentLoop(
+        MagicMock(), AgentConfig(tool_tags=["search", "analysis"]), organization_id=1
+    )
+    loop.skill_manager = MagicMock()
+    loop.skill_manager.match.return_value = SimpleNamespace(
+        id="sk-9",
+        tool_sequence=[
+            {"tool_name": "delegate_subtask", "description": "漂移前学到的（不在白名单）"},
+            {"tool_name": "search_knowledge_base", "description": "当前可见"},
+        ],
+    )
+    steps = [PlanStep(id="s1", description="a"), PlanStep(id="s2", description="b")]
+    plan = Plan(id="p1", goal="g", steps=steps)
+
+    matched_id = loop._apply_skill_hints(plan, "查一下")
+
+    assert steps[0].tool_hint is None, "不在当前可见集的 hint 必须跳过（不为不可见工具背书）"
+    assert steps[1].tool_hint == "search_knowledge_base", "可见 hint 仍按位置配对应用"
+    assert matched_id == "sk-9"
+
+    # 全部不可见 → 一条都没应用上 → None：反馈边不得把"没真正用上"算作使用。
+    loop.skill_manager.match.return_value = SimpleNamespace(
+        id="sk-10",
+        tool_sequence=[{"tool_name": "delegate_subtask", "description": "不可见"}],
+    )
+    plan2 = Plan(id="p2", goal="g", steps=[PlanStep(id="s1", description="a")])
+    assert loop._apply_skill_hints(plan2, "查一下") is None
+    assert plan2.steps[0].tool_hint is None
+
+
+@pytest.mark.asyncio
+async def test_apply_skill_hints_respects_disabled_tools():
+    """#245 第 5/6 条（disabled_tools 侧）：被 disabled_tools 过滤掉的工具同样
+    不可见——hint 跳过应用。
+
+    变异点：同 test_apply_skill_hints_skips_tools_not_visible_in_context。
+    """
+    from app.agent.loop import PERAgentLoop
+
+    loop = PERAgentLoop(
+        MagicMock(), AgentConfig(disabled_tools=["web_search"]), organization_id=1
+    )
+    loop.skill_manager = MagicMock()
+    loop.skill_manager.match.return_value = SimpleNamespace(
+        id="sk-11",
+        tool_sequence=[{"tool_name": "web_search", "description": "已被禁用"}],
+    )
+    plan = Plan(id="p1", goal="g", steps=[PlanStep(id="s1", description="a")])
+
+    assert loop._apply_skill_hints(plan, "查一下") is None
+    assert plan.steps[0].tool_hint is None, "disabled_tools 里的工具不得被 hint 复活"
+
+
+def test_build_messages_skill_index_gates():
+    """#245 第 1/3 条：loop._build_messages（tool-less 入口，经 POST /agent/chat
+    enable_tools=false 真实可达——不是死代码）的技能索引门三态：
+    默认注入 / 受限上下文不注入（B1）/ toolless 不注入（悬挂引用：#245 第 3 条）。
+
+    变异点：门中删去 `self.config.enable_tools` 条件 → toolless 断言红。
+    """
+    from app.agent.loop import PERAgentLoop
+
+    def _system_of(config: AgentConfig) -> str:
+        loop = PERAgentLoop(MagicMock(), config, organization_id=1)
+        msgs = loop._build_messages("q", None, None, "")
+        return [m for m in msgs if m.get("role") == "system"][0]["content"]
+
+    sys_default = _system_of(AgentConfig())
+    assert "## 可用技能" in sys_default, "默认（有工具）路径应注入技能索引"
+
+    sys_child = _system_of(AgentConfig(tool_tags=["search", "analysis"]))
+    assert "## 可用技能" not in sys_child, "受限上下文不得注入（B1 同立场）"
+
+    sys_toolless = _system_of(AgentConfig(enable_tools=False))
+    assert "## 可用技能" not in sys_toolless, "toolless 不得注入索引（悬挂引用，#245 第 3 条）"
+    assert "load_skill_reference" not in sys_toolless, "调用不带 tools，不得引导调用技能工具"
 
 
 @pytest.mark.asyncio
