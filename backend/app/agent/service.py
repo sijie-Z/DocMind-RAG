@@ -22,7 +22,7 @@ from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.loop import PERAgentLoop
 from app.agent.memory_bridge import AgentMemoryBridge
-from app.models.agent_task import TaskStatus
+from app.models.agent_task import AgentTask, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -142,12 +142,40 @@ class AgentService:
         if session_id:
             await agent_config.save_to_redis(session_id)
 
+    async def prepare_resume(
+        self,
+        task_id: str,
+        user_id: int,
+        *,
+        organization_id: int | None = None,
+    ) -> tuple[AgentTask, dict[str, Any] | None]:
+        """resume 的同步预检 + 认领（端点层在开流前调用——404/409 必须用 HTTP
+        状态码表达，SSE 一旦开始就没有状态码可改了）：
+
+        - 404：任务不存在 / 非本人 / 组织不一致（TaskNotFoundError）；
+        - 409：已终态（TaskNotResumableError，detail 回带当前 state）/ 并发 resume
+          正持有租约（TaskBusyError）；
+        - 成功 = 已拿租约并把状态推进到 RUNNING（retry_count += 1），返回 (task, payload)。
+        """
+        task, payload = await checkpoint.load_for_resume(
+            task_id=task_id, user_id=user_id, organization_id=organization_id,
+        )
+        if task.is_terminal:
+            raise checkpoint.TaskNotResumableError(
+                f"任务已处于终态 {task.status.value}，不可恢复",
+                detail={"task_id": task_id, "state": task.status.value},
+            )
+        # 认领：Redis 租约 + RUNNING→FAILED→RUNNING（陈旧 RUNNING 接管）等状态流转。
+        task = await checkpoint.begin_resume(task_id)
+        return task, payload
+
     async def resume_chat(
         self,
         task_id: str,
         user_id: int,
         *,
         config: AgentConfig | None = None,
+        claim: bool = True,
     ) -> AsyncGenerator[AgentEvent, None]:
         """从 checkpoint 恢复一个未终态任务（issue #201 最小版）。
 
@@ -157,19 +185,18 @@ class AgentService:
         - 快照缺失/损坏安全降级：从规划阶段干净重跑（没有任何步骤被越过）。
         - 并发/重复 resume 由 Redis 租约 + 状态机拒绝（TaskBusy/NotResumable，
           AppError 子类 → 端点层映射 404/409）。
+
+        claim=False：调用方已先走 prepare_resume（端点预检拿 HTTP 状态码）；
+        这里只补读快照，不再重复认领。
         """
         if not self.client:
             yield AgentEvent(type="error", content="LLM 未配置，请检查 DEEPSEEK_API_KEY 环境变量。")
             return
 
-        task, payload = await checkpoint.load_for_resume(task_id=task_id, user_id=user_id)
-        if task.is_terminal:
-            raise checkpoint.TaskNotResumableError(
-                f"任务已处于终态 {task.status.value}，不可恢复",
-                detail={"task_id": task_id, "state": task.status.value},
-            )
-        # 认领：Redis 租约 + RUNNING→FAILED→RUNNING（陈旧 RUNNING 接管）等状态流转。
-        task = await checkpoint.begin_resume(task_id)
+        if claim:
+            task, payload = await self.prepare_resume(task_id, user_id)
+        else:
+            task, payload = await checkpoint.load_for_resume(task_id=task_id, user_id=user_id)
 
         if payload:
             query = (payload.get("ctx") or {}).get("query") or task.query
