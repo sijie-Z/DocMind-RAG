@@ -26,6 +26,10 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
+
 from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_client
 from app.exceptions import ConflictError, NotFoundError
@@ -42,7 +46,10 @@ LEASE_SECONDS = 900
 # 任务行的过期时间（只写字段；定期清理作业不在本版）。
 TASK_EXPIRES_DAYS = 3
 
-# 快照里"已产出答案"的字符上限（截尾保留；防单条 UPDATE 过大）。
+# 快照里"已产出答案"的字符上限（截尾=只保头部；防单条 UPDATE 过大）。
+# 语义边界（issue #278/m4，评审 R5）：崩溃点产出 >16KB 时恢复答案会缺中段
+# （无校验和、无中段保留）——最小版的有意取舍，完整版再议；现有用例只钉
+# cap 长度语义（test_checkpoint_roundtrip::test_envelope_carries_session_and_caps_partial_and_history）。
 PARTIAL_OUTPUT_CAP = 16_384
 
 # 冻结进快照的历史消息条数上限。
@@ -72,6 +79,22 @@ class TaskBusyError(ConflictError):
 
 def _lock_key(task_id: str) -> str:
     return f"agent:task:lock:{task_id}"
+
+
+# ── 任务行读取（快照列容错，issue #278/R1）────────────────────────────────────
+
+
+async def _load_task_row(db: AsyncSession, task_id: str) -> AgentTask | None:
+    """读任务行，**不加载快照列**（defer），与 ``db.get`` 同语义。
+
+    背景：``db.get`` 默认加载全部列，快照列若是截断/半写的非法 JSON（生产
+    MySQL 的 JSON 列有服务端校验拦得住，sqlite / 带外写库拦不住），读行时
+    的 ``json.loads`` 失败会把"读任务行"整个炸掉——该行此后每次读写都炸
+    （毒丸）。认领 / 落盘 / 收尾都不需要旧快照值：defer 后该列不进 SELECT，
+    UPDATE 只写被改动的列（落盘覆盖坏值也不受影响）；需要快照值的
+    ``load_for_resume`` 在行读取完成后单独容错读取该列。
+    """
+    return await db.get(AgentTask, task_id, options=[defer(AgentTask.context_snapshot)])
 
 
 # ── 快照信封：构建 / 解析 ────────────────────────────────────────────────────
@@ -187,7 +210,7 @@ async def save_checkpoint(
     )
     try:
         async with AsyncSessionLocal() as db:
-            task = await db.get(AgentTask, task_id)
+            task = await _load_task_row(db, task_id)
             if task is None:
                 logger.warning("checkpoint save skipped: task %s 不存在", task_id)
                 return False
@@ -245,7 +268,7 @@ async def mark_terminal(
         return False
     try:
         async with AsyncSessionLocal() as db:
-            task = await db.get(AgentTask, task_id)
+            task = await _load_task_row(db, task_id)
             if task is None:
                 return False
             if task.status == to:
@@ -276,16 +299,33 @@ async def load_for_resume(
 
     - 行不存在或不属于 user_id → TaskNotFoundError（对外 404，不区分二者）；
     - 快照缺失/损坏/版本不符 → payload=None（安全降级：调用方从规划阶段重跑）；
-      终态判定由调用方做（is_terminal → TaskNotResumableError，409 语义）。
+    - 快照列反序列化失败（截断/半写 JSON，issue #278/R1）同样按"无快照"降级：
+      行本身照常返回（其余列完好），毒丸行不得拖垮每次 resume。
+    终态判定由调用方做（is_terminal → TaskNotResumableError，409 语义）。
     返回的 AgentTask 是 detached 实例：只读其列属性，任何写都必须经本模块函数。
     """
     async with AsyncSessionLocal() as db:
-        task = await db.get(AgentTask, task_id)
-    if task is None or task.user_id != user_id:
-        raise TaskNotFoundError("任务不存在或无权访问")
+        # 行与快照列分开读：整行 get 会把快照列的 json.loads 失败扩散成
+        # "整个任务行读不出来"（毒丸——此后每次 resume/落盘/收尾都炸）。
+        task = await _load_task_row(db, task_id)
+        if task is None or task.user_id != user_id:
+            raise TaskNotFoundError("任务不存在或无权访问")
+        raw_snapshot: Any | None = None
+        try:
+            cursor = await db.execute(
+                select(AgentTask.context_snapshot).where(AgentTask.id == task_id)
+            )
+            raw_snapshot = cursor.scalar_one_or_none()
+        except (TypeError, ValueError) as e:
+            # json.JSONDecodeError 是 ValueError 子类（截断/半写 JSON 的实测形态）。
+            logger.warning(
+                "checkpoint 快照列反序列化失败（task=%s）：按无快照安全降级：%s",
+                task_id,
+                e,
+            )
     payload: dict[str, Any] | None = None
-    if task.context_snapshot is not None:
-        payload = parse_snapshot(task.context_snapshot)
+    if raw_snapshot is not None:
+        payload = parse_snapshot(raw_snapshot)
         if payload is None:
             logger.warning(
                 "checkpoint 快照损坏/版本不符（task=%s）：resume 安全降级为从规划阶段重跑",
@@ -343,7 +383,7 @@ async def begin_resume(task_id: str, lease_seconds: int = LEASE_SECONDS) -> Agen
         raise TaskBusyError("任务正在被另一个恢复请求处理")
     try:
         async with AsyncSessionLocal() as db:
-            task = await db.get(AgentTask, task_id)
+            task = await _load_task_row(db, task_id)
             if task is None:
                 raise TaskNotFoundError("任务不存在或无权访问")
             if task.is_terminal:

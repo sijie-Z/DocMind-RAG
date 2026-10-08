@@ -272,24 +272,50 @@ class PERAgentLoop:
         replan_feedback = ""
         replan_attempts = 0
         if resume:
-            ctx = ExecutionContext.from_checkpoint_dict(resume.get("ctx") or {})
-            run_state = resume.get("run") or {}
-            replan_attempts = int(run_state.get("replan_attempts", 0) or 0)
-            replan_feedback = run_state.get("replan_feedback") or ""
-            partial_prefix = resume.get("partial_output") or ""
-            frozen_history = resume.get("history")
-            if frozen_history is not None:
-                # history 在首快照时冻结：resume 不重读会话新消息（否则等于换上下文续跑）。
-                history = frozen_history
-            plan_data = resume.get("plan")
-            if plan_data:
-                resume_plan = Plan.from_checkpoint_dict(plan_data)
-                # 崩溃时"在途"（running）的步骤复位为 pending：重跑一次
-                # （at-least-once；工具副作用幂等由默认禁用的 mutating 工具兜底）。
-                for step in resume_plan.steps:
-                    if step.status == "running":
-                        step.status = "pending"
-                self._seed_working_from_plan(resume_plan)
+            # 重建段整体兜底（issue #278/R1）：parse_snapshot 只校验信封顶层，
+            # "合法 JSON、深结构坏形状"（如 plan.steps 非列表 / ctx.artifacts
+            # 非映射）此前会在这里抛 AttributeError/TypeError——快照不被覆盖，
+            # 该任务之后每次 resume 都同样崩溃（毒丸）。现在任何重建异常一律
+            # 按"损坏即无快照"安全降级：从规划阶段干净重跑（与 parse_snapshot
+            # 顶层损坏同语义）；首个新快照落盘后坏数据即被覆盖，毒丸自愈。
+            try:
+                rebuilt_ctx = ExecutionContext.from_checkpoint_dict(resume.get("ctx") or {})
+                run_state = resume.get("run") or {}
+                rebuilt_replans = int(run_state.get("replan_attempts", 0) or 0)
+                rebuilt_feedback = run_state.get("replan_feedback") or ""
+                rebuilt_partial = resume.get("partial_output") or ""
+                frozen_history = resume.get("history")
+                plan_data = resume.get("plan")
+                rebuilt_plan: Plan | None = None
+                if plan_data:
+                    rebuilt_plan = Plan.from_checkpoint_dict(plan_data)
+                    # 崩溃时"在途"（running）的步骤复位为 pending：重跑一次
+                    # （at-least-once；工具副作用幂等由默认禁用的 mutating 工具兜底）。
+                    for step in rebuilt_plan.steps:
+                        if step.status == "running":
+                            step.status = "pending"
+                if rebuilt_plan is not None:
+                    self._seed_working_from_plan(rebuilt_plan)
+            except Exception as e:
+                logger.warning(
+                    "checkpoint 快照深结构损坏（task=%s）：按无快照安全降级，"
+                    "从规划阶段干净重跑：%s",
+                    task_id,
+                    e,
+                )
+                # 重建半途失败可能已留下部分回灌：清干净，避免坏计划的步骤
+                # id 与干净重跑的新步骤撞名、把旧结果混进新上下文。
+                self.memory.reset_working()
+                ctx = ExecutionContext(query=query)
+            else:
+                ctx = rebuilt_ctx
+                replan_attempts = rebuilt_replans
+                replan_feedback = rebuilt_feedback
+                partial_prefix = rebuilt_partial
+                resume_plan = rebuilt_plan
+                if frozen_history is not None:
+                    # history 在首快照时冻结：resume 不重读会话新消息（否则等于换上下文续跑）。
+                    history = frozen_history
         else:
             ctx = ExecutionContext(query=query)
         if task_id:
