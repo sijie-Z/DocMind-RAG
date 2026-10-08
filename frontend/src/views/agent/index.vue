@@ -123,6 +123,14 @@
                 <div v-else-if="evt.type === 'retry_hint'" class="retry-hint">
                   ♻ {{ formatRetryHint(evt) }}
                 </div>
+                <!-- 整次运行失败（issue #288：error 事件此前只到 store 的
+                     msg.events（170-176 已停 loading），视图没有渲染分支 ——
+                     失败时用户只见空气泡、看不到失败原因；与 tool_error 的
+                     单工具失败行以「运行失败」徽标 + 红边框做视觉区分） -->
+                <div v-else-if="evt.type === 'error'" class="run-error-standalone">
+                  <span class="run-error-badge">运行失败</span>
+                  <span class="run-error-text">{{ evt.content }}</span>
+                </div>
               </template>
             </div>
 
@@ -894,6 +902,39 @@ async function loadInit() {
   font-size: 12px;
   color: #dc2626;
   margin: 4px 0;
+}
+
+/* 整次运行失败（issue #288：error 事件的渲染分支）。与 tool_error 的
+   单工具失败行（上方 .tool-error-standalone，浅底无边框）区分：加「运行
+   失败」实心徽标 + 左边框强调，表明是整次运行中止而非某个工具出错。 */
+.run-error-standalone {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 8px 12px;
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  border-left: 3px solid #dc2626;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+.run-error-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.run-error-text {
+  word-break: break-word;
+  line-height: 18px;
 }
 
 .loading-indicator {
