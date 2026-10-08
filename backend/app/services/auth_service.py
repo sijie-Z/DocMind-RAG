@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import RedisTools
-from app.exceptions import AccountLockedError
+from app.exceptions import AccountLockedError, ServiceUnavailableError
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -128,7 +128,10 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # 检查令牌是否已被吊销
+        # 检查令牌是否已被吊销（issue #291 fail-closed）：Redis 不可用时
+        # `is_token_blacklisted` 抛 `ServiceUnavailableError` → 503，不降级放行。
+        # 用 503 而不是 401：前端对 401 会清 token 跳登录页，而此时重新登录
+        # 后的每个请求同样过不了这一步——只会制造 token 清空风暴。
         if await self.is_token_blacklisted(token):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -322,35 +325,63 @@ class AuthService:
             raise
 
     async def blacklist_token(self, token: str) -> None:
-        """Blacklist a token using its jti (JWT ID) for precise revocation."""
+        """Blacklist a token using its jti (JWT ID) for precise revocation.
+
+        写入失败**如实上抛** `ServiceUnavailableError`（issue #291）：此前整个
+        异常被吞掉，调用方以为吊销成功——登出端点照常回 200「登出成功」、
+        refresh 轮换默默放行旧 token，而它们实际都没进黑名单。
+
+        过期/无效 token 保持 no-op：本地验签失败说明该 token 不可能再通过
+        `get_current_user`/refresh/WS 的任何一处校验，没有可吊销的东西——
+        这不是失败，调用方不应据此报错误。
+        """
+        payload = self.verify_token(token)
+        if not payload or "exp" not in payload:
+            return
+        exp_timestamp = payload["exp"]
+        current_timestamp = datetime.now(UTC).timestamp()
+        if exp_timestamp <= current_timestamp:
+            return
+        ttl = int(exp_timestamp - current_timestamp)
+        jti = payload.get("jti")
+        if jti:
+            blacklist_key = f"blacklist:jti:{jti}"
+        else:
+            blacklist_key = f"blacklist:{hash(token)}"
         try:
-            payload = self.verify_token(token)
-            if payload and "exp" in payload:
-                exp_timestamp = payload["exp"]
-                current_timestamp = datetime.now(UTC).timestamp()
-                if exp_timestamp > current_timestamp:
-                    ttl = int(exp_timestamp - current_timestamp)
-                    jti = payload.get("jti")
-                    if jti:
-                        blacklist_key = f"blacklist:jti:{jti}"
-                    else:
-                        blacklist_key = f"blacklist:{hash(token)}"
-                    await RedisTools.set_cache(blacklist_key, "1", expire=ttl)
-                    logger.info(f"Token blacklisted (jti={jti}), ttl={ttl}s")
+            await RedisTools.set_cache(blacklist_key, "1", expire=ttl)
         except Exception as e:
             logger.error(f"Token blacklist failed: {e}")
+            raise ServiceUnavailableError(
+                "服务端令牌吊销失败",
+                detail="吊销服务（Redis）暂不可用，令牌未能加入吊销名单，请稍后重试",
+            ) from e
+        logger.info(f"Token blacklisted (jti={jti}), ttl={ttl}s")
 
     async def is_token_blacklisted(self, token: str) -> bool:
-        """Check if a token is blacklisted by its jti."""
+        """Check if a token is blacklisted by its jti.
+
+        查询失败**如实上抛** `ServiceUnavailableError`（issue #291），fail-closed：
+        此前 `except Exception: return False` 把「Redis 查不了」归成「不在黑名单」，
+        与「未吊销」同形——吊销检查形同虚设，已登出/已轮换的 token 在 Redis
+        故障期间全部照常放行。判不了就不放行。
+
+        无效/过期/无 jti 的 token 返回 False（不可能是吊销对象）。
+        """
+        payload = self.verify_token(token)
+        if not payload:
+            return False
+        jti = payload.get("jti")
+        if not jti:
+            return False
         try:
-            payload = self.verify_token(token)
-            if payload:
-                jti = payload.get("jti")
-                if jti:
-                    return await RedisTools.exists(f"blacklist:jti:{jti}")
-            return False
-        except Exception:
-            return False
+            return await RedisTools.exists(f"blacklist:jti:{jti}")
+        except Exception as e:
+            logger.error(f"Token blacklist check failed: {e}")
+            raise ServiceUnavailableError(
+                "令牌吊销状态查询失败",
+                detail="吊销服务（Redis）暂不可用，无法核验令牌，请稍后重试",
+            ) from e
 
     async def get_user_by_username(self, db: AsyncSession, username: str) -> User | None:
         """根据用户名获取用户。

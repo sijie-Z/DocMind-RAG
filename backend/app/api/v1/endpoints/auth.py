@@ -487,6 +487,12 @@ async def refresh_token(
 
     except AuthenticationError:
         raise
+    except AppError:
+        # 吊销链 fail-closed（issue #291）：`is_token_blacklisted` / `blacklist_token`
+        # 在 Redis 不可用时抛 `ServiceUnavailableError`（自带 503），不得被下面的
+        # `except Exception` 重包成 500。放行其余 AppError 亦符合本仓库「控制流异常
+        # 不被兜底改写」的既有方向（issue #85 / #90 / #98）。
+        raise
     except HTTPException:
         # 认证决策（_auth_failed()）必须直接成为响应，不能被下面的
         # `except Exception` 吞成 AppError → 500。
@@ -504,7 +510,14 @@ async def logout(
     body: LogoutRequest | None = None,
     token: str = Depends(oauth2_scheme),
 ):
-    """用户登出：吊销 access token，若携带 refresh_token 一并吊销（防止登出后继续续期）"""
+    """用户登出：吊销 access token，若携带 refresh_token 一并吊销（防止登出后继续续期）
+
+    响应语义（issue #291）：**只有 200 才代表服务端吊销已完成**（含「token
+    已过期/无效、无需吊销」的 no-op）。Redis 写失败时 `blacklist_token` 抛
+    `ServiceUnavailableError` → 503「服务端令牌吊销失败」——此前异常被服务层
+    吞掉，本端点恒 200「登出成功」而 token 实际未进黑名单，仍可继续使用。
+    客户端收到 5xx 时应清除本地凭证；稍后重试登出即可（吊销幂等）。
+    """
     await auth_service.blacklist_token(token)
     if body is not None and body.refresh_token:
         await auth_service.blacklist_token(body.refresh_token)

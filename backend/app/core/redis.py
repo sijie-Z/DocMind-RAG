@@ -118,41 +118,57 @@ async def close_redis():
 # Redis helper utilities
 # ---------------------------------------------------------------------------
 class RedisTools:
-    """Static convenience wrappers around common Redis operations."""
+    """Static convenience wrappers around common Redis operations.
+
+    失败语义（issue #291）：**查询/写入失败一律如实上抛**，不得与
+    「键不存在」/「写入成功」同形。此前四个数据面方法把异常吞成
+    None/False/空操作，调用方（令牌吊销链）无法区分「Redis 查不了」与
+    「令牌不在黑名单」，于是登出恒报 200、已吊销 token 照常放行——三重
+    fail-open。降级策略由调用方决定：本模块不替它猜。
+
+    例外：*increment/decrement* 不在吊销链上，维持旧的「失败降级为 0」
+    语义——全仓暂无调用方（待接线时需连同降级语义一起改造）。
+    """
 
     @staticmethod
-    async def set_cache(key: str, value: str, expire: int = 3600):
+    async def set_cache(key: str, value: str, expire: int = 3600) -> None:
+        """写入缓存键；失败上抛（此前静默吞掉，写入方无从知道自己没写成）。"""
         try:
             client = await get_redis()
             await client.setex(key, expire, value)
         except Exception as e:
             logger.warning(f"Redis cache set failed: {e}")
+            raise
 
     @staticmethod
     async def get_cache(key: str) -> str | None:
+        """读取缓存键；键不存在返回 None，**查询失败上抛**（不得与「不存在」同形）。"""
         try:
             client = await get_redis()
             return await client.get(key)
         except Exception as e:
             logger.warning(f"Redis cache get failed: {e}")
-            return None
+            raise
 
     @staticmethod
-    async def delete_cache(key: str):
+    async def delete_cache(key: str) -> None:
+        """删除缓存键；失败上抛。"""
         try:
             client = await get_redis()
             await client.delete(key)
         except Exception as e:
             logger.warning(f"Redis cache delete failed: {e}")
+            raise
 
     @staticmethod
     async def exists(key: str) -> bool:
+        """键是否存在；**查询失败上抛**（不得与「不存在」同形，issue #291）。"""
         try:
             client = await get_redis()
             return await client.exists(key) > 0
         except Exception as e:
             logger.warning(f"Redis exists check failed: {e}")
-            return False
+            raise
 
     @staticmethod
     async def increment(key: str, amount: int = 1) -> int:

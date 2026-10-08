@@ -103,6 +103,19 @@ class ExternalServiceError(AppError):
     message = "外部服务调用失败"
 
 
+class ServiceUnavailableError(AppError):
+    """503 — a dependency the **decision requires** is unavailable.
+
+    用于「查不了」必须与「不存在」/「失败」区分的场合（issue #291 吊销链）：
+    依赖不可用导致无法做出安全判定时，宁可拒绝也不放行。语义是
+    「暂时不可用、可重试」，不得被伪装成 401（会诱导客户端清 token 重登，
+    而重登后同样的判定依然不可用）或 200。
+    """
+    status_code = 503
+    error_code = "SERVICE_UNAVAILABLE"
+    message = "服务暂时不可用，请稍后重试"
+
+
 class PipelineError(AppError):
     """500 — RAG pipeline execution failed."""
     status_code = 500

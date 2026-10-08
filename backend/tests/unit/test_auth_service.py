@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
+from app.exceptions import ServiceUnavailableError
 from app.services.auth_service import AuthService
 
 
@@ -160,13 +161,28 @@ class TestTokenBlacklist:
             mock_redis.set_cache.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_blacklist_redis_error_graceful(self, auth_service: AuthService):
-        """Redis errors should be caught, not raised."""
+    async def test_blacklist_check_redis_error_is_fail_closed(self, auth_service: AuthService):
+        """Redis 故障时「查不了」必须与「不在黑名单」可区分（issue #291）。
+
+        旧契约是 `result is False  # fails open` —— 与「未吊销」同形，于是
+        Redis 故障期间已登出/已轮换的 token 全部照常放行。现在必须上抛
+        `ServiceUnavailableError`（503 语义），由调用方 fail-closed。
+        """
         token = auth_service.create_access_token({"user_id": 1})
         with patch("app.services.auth_service.RedisTools") as mock_redis:
             mock_redis.exists = AsyncMock(side_effect=ConnectionError("Redis down"))
-            result = await auth_service.is_token_blacklisted(token)
-        assert result is False  # fails open
+            with pytest.raises(ServiceUnavailableError):
+                await auth_service.is_token_blacklisted(token)
+
+    @pytest.mark.asyncio
+    async def test_blacklist_write_redis_error_propagates(self, auth_service: AuthService):
+        """吊销写入失败必须如实上抛（issue #291）——旧行为整个吞掉，登出端点
+        因此恒 200「登出成功」而 token 根本没进黑名单。"""
+        token = auth_service.create_access_token({"user_id": 1})
+        with patch("app.services.auth_service.RedisTools") as mock_redis:
+            mock_redis.set_cache = AsyncMock(side_effect=ConnectionError("Redis down"))
+            with pytest.raises(ServiceUnavailableError):
+                await auth_service.blacklist_token(token)
 
 
 # ── RBAC ──────────────────────────────────────────────────
@@ -206,12 +222,14 @@ class TestDbIsTheOnlyIdentityAuthority:
         return db
 
     @pytest.mark.asyncio
-    async def test_redis_outage_does_not_affect_identity(self, auth_service: AuthService):
-        """Redis 全挂时身份判定照常。
+    async def test_redis_outage_fails_closed_at_revocation_check(self, auth_service: AuthService):
+        """身份仍只认 DB；但 Redis 全挂时吊销状态不可核验 → fail-closed（issue #291）。
 
-        改造前这是「缓存拿不到 → 回退 DB」；现在 DB 不是回退路径，而是唯一路径，
-        所以 Redis 的可用性对身份判定不再有任何影响（token 黑名单仍用它，且
-        `is_token_blacklisted` 是 fail-open 的）。
+        改造前这里断言的是「Redis 挂了身份判定照常放行」——当时吊销检查是
+        fail-open 的（见已重写的 `test_blacklist_check_redis_error_is_fail_closed`），
+        放行等于「已吊销 token 在故障期间照样能用」。现在吊销核验失败一律拒绝，
+        且必须是 `ServiceUnavailableError`（503），不得伪装成 401 认证失败
+        ——前端对 401 会清 token 跳登录页，而重登后同样的核验依然不可用。
         """
         user = MagicMock()
         user.id = 1
@@ -223,12 +241,12 @@ class TestDbIsTheOnlyIdentityAuthority:
         with patch("app.services.auth_service.RedisTools") as mock_redis:
             mock_redis.exists = AsyncMock(side_effect=ConnectionError("Redis down"))
             mock_redis.get_cache = AsyncMock(side_effect=ConnectionError("Redis down"))
-            result = await auth_service.get_current_user(
-                credentials=self._credentials(auth_service), db=db
-            )
+            with pytest.raises(ServiceUnavailableError) as exc:
+                await auth_service.get_current_user(
+                    credentials=self._credentials(auth_service), db=db
+                )
 
-        assert result is user
-        db.execute.assert_called_once()
+        assert exc.value.status_code == 503
 
     @pytest.mark.asyncio
     async def test_decision_comes_from_db_not_cache(self, auth_service: AuthService):
