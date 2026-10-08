@@ -248,35 +248,47 @@ def _to_markdown_table(data) -> str:
 @register_tool(
     name="get_system_status",
     description=(
-        "Query the DocMind system status including Elasticsearch document count, "
-        "Redis memory usage, and database statistics. Use this to check system health "
-        "or answer questions about the knowledge base size."
+        "Query the DocMind system status **scoped to the caller's own organization**: "
+        "the number of indexed chunks and document records belonging to this "
+        "organization, plus Redis memory usage. Use this to check system health or "
+        "answer questions about the size of the user's own knowledge base. "
+        "Organization-scoped: it never returns system-wide totals across tenants."
     ),
     parameters={"type": "object", "properties": {}},
     tags=["utility", "system"],
+    requires_auth=True,
 )
-async def get_system_status(**_: Any) -> str:
-    status = {}
+async def get_system_status(organization_id: int | None = None, **_: Any) -> str:
+    # 安全加固（issue #257）：此前签名为 `**_: Any`，注册表按签名过滤掉 org 上下文，
+    # 于是本工具返回全集群/全库的全局计数（ES cat.indices 求和 + 无 where 的
+    # documents/users count），任何租户（哪怕空库）都能看到别人的数据量。现在：
+    #   · `requires_auth=True`——注册表 auth 钩子对缺 org 的调用 fail-closed；
+    #   · 缺 org 直接拒答（防御绕过注册表的直接调用路径，与 compare_documents
+    #     的 fail-closed 风格一致），不触达 ES/DB；
+    #   · 三条查询全部按调用者所在组织过滤（ES 走 organization_id term 硬过滤）。
+    if organization_id is None:
+        return "Error: 无法确定组织范围，拒绝返回系统统计。"
 
-    # ES status
+    status: dict[str, Any] = {"organization_id": organization_id}
+
+    # ES status —— 你所在组织的已索引 chunk 数（共享索引，按 organization_id 过滤）
     try:
+        from app.core.config import settings
         from app.core.elasticsearch import es_client
         if es_client:
-            indices = await es_client.cat.indices(format="json")
-            doc_count = sum(int(idx.get("docs.count", 0)) for idx in indices)
-            store_size = sum(int(idx.get("store.size", 0)) for idx in indices)
+            res = await es_client.count(
+                index=settings.ELASTICSEARCH_INDEX_NAME,
+                query={"bool": {"filter": [{"term": {"organization_id": str(organization_id)}}]}},
+            )
             status["elasticsearch"] = {
-                "indices": len(indices),
-                "total_documents": doc_count,
-                "total_size_bytes": store_size,
-                "total_size_mb": round(store_size / (1024 * 1024), 1),
+                "chunks": int(res.get("count", 0)),
             }
         else:
             status["elasticsearch"] = "Not connected"
     except Exception as e:
         status["elasticsearch"] = f"Error: {e}"
 
-    # Redis status
+    # Redis status —— 进程级聚合（内存/连接数/uptime），不含租户数据归属，保持原样
     try:
         from app.core.redis import redis_client
         if redis_client:
@@ -291,7 +303,7 @@ async def get_system_status(**_: Any) -> str:
     except Exception as e:
         status["redis"] = f"Error: {e}"
 
-    # DB status
+    # DB status —— 全部按调用者所在组织过滤（此前无 where，返回全库行数）
     try:
         from sqlalchemy import func, select
 
@@ -300,8 +312,20 @@ async def get_system_status(**_: Any) -> str:
         from app.models.user import User
 
         async with AsyncSessionLocal() as session:
-            doc_count = (await session.execute(select(func.count(Document.id)))).scalar() or 0
-            user_count = (await session.execute(select(func.count(User.id)))).scalar() or 0
+            doc_count = (
+                await session.execute(
+                    select(func.count(Document.id)).where(
+                        Document.organization_id == organization_id
+                    )
+                )
+            ).scalar() or 0
+            user_count = (
+                await session.execute(
+                    select(func.count(User.id)).where(
+                        User.organization_id == organization_id
+                    )
+                )
+            ).scalar() or 0
             status["database"] = {
                 "documents": doc_count,
                 "users": user_count,
