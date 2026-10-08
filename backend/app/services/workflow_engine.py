@@ -25,6 +25,15 @@ from app.schemas.workflow import NodeResult, WorkflowConfig, WorkflowNode
 logger = logging.getLogger(__name__)
 
 
+class TransientNodeError(Exception):
+    """瞬时故障（网络抖动、上游服务错误等）——execute_with_retry 会按退避重试。
+
+    与确定性错误相对：守卫、配置、参数与安全校验类错误以 ValueError /
+    NotImplementedError 抛出，重试结果不变，会被 execute_with_retry 直接失败
+    （fail-fast，见 #277 R4）。
+    """
+
+
 class ExecutionStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -70,11 +79,19 @@ class NodeExecutor:
         raise NotImplementedError
 
     async def execute_with_retry(self, state: WorkflowState) -> dict[str, Any]:
-        """带重试的执行"""
+        """带重试的执行。
+
+        确定性错误（ValueError / NotImplementedError —— 守卫、配置、参数与
+        安全校验类）重试结果不变，直接失败，不做 3 次退避空转（#277 R4）；
+        TransientNodeError（瞬时故障）与其它异常维持指数退避重试。
+        """
         last_error = None
         for attempt in range(self.max_retries):
             try:
                 return await self.execute(state)
+            except (ValueError, NotImplementedError) as e:
+                logger.warning(f"节点 {self.node.id} 命中确定性错误（不重试）: {str(e)}")
+                raise
             except Exception as e:
                 last_error = e
                 logger.warning(f"节点 {self.node.id} 执行失败 (尝试 {attempt + 1}/{self.max_retries}): {str(e)}")
@@ -570,6 +587,10 @@ class APICallNodeExecutor(NodeExecutor):
         # SSRF 防护：验证 URL 不指向内网
         url = self._validate_url(url)
 
+        # 方法校验是确定性错误，放在 try 外：不落入下面的"瞬时故障"包裹而被重试
+        if method not in ("GET", "POST", "PUT", "DELETE"):
+            raise ValueError(f"不支持的方法: {method}")
+
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 if method == "GET":
@@ -578,10 +599,8 @@ class APICallNodeExecutor(NodeExecutor):
                     response = await client.post(url, headers=headers, content=body_template)
                 elif method == "PUT":
                     response = await client.put(url, headers=headers, content=body_template)
-                elif method == "DELETE":
+                else:  # DELETE（其余方法已在上方放行前拦下）
                     response = await client.delete(url, headers=headers)
-                else:
-                    raise ValueError(f"不支持的方法: {method}")
 
                 result = response.json() if response.headers.get("content-type", "").startswith("application/json") else response.text
 
@@ -593,7 +612,8 @@ class APICallNodeExecutor(NodeExecutor):
                     "context": {"api_result": result}
                 }
         except Exception as e:
-            raise ValueError(f"API 调用失败: {str(e)}")
+            # 网络/上游瞬时故障：包裹为 TransientNodeError 以保留重试（#277 R4）
+            raise TransientNodeError(f"API 调用失败: {str(e)}")
 
 
 class TransformNodeExecutor(NodeExecutor):

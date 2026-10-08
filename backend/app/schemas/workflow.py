@@ -81,6 +81,9 @@ class NodeResult(BaseModel):
     error: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    # 节点耗时（毫秒）。引擎在完成/失败时写入（workflow_engine.py node_func），
+    # 未完成或历史记录为 None；前端按 `${duration}ms` 渲染。
+    duration: int | None = None
 
 
 class ExecutionResponse(BaseModel):
