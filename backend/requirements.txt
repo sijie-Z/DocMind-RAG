@@ -22,6 +22,12 @@ aiofiles>=25.1.0
 openai>=3.11.0
 langchain>=1.4.2
 langchain-community>=0.0.10
+# 工作流 llm_qwen 节点用 langchain-community 的 ChatTongyi，其构造期
+# validate_environment（@pre_init）即 `import dashscope`：此前未声明该包，
+# 面板可见的 llm_qwen 节点任何真实构造必 ImportError（issue #285）。
+# 下界 1.14.0：实测该版本起 Generation / MultiModalConversation 两属性齐备
+# （ChatTongyi 构造按模型名二选一取值）；上界 <2：防 1.x→2.x API 漂移。
+dashscope>=1.14.0,<2
 langchain-openai>=0.0.5
 tiktoken>=0.5.2
 pypdf>=6.19.0
