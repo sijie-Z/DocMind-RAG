@@ -3,12 +3,14 @@ import { setActivePinia, createPinia } from 'pinia'
 import { useAgentStore } from '../agent'
 
 /**
- * issue #242 收尾：run_report / execution_context 两个事件此前在
- * sseService 白名单层被静默丢弃（后端产、前端扔），UI 永远看不到
- * Run Report 与 Tokens——本文件钉住"事件必须落账到最后一条回答上"。
+ * issue #242 收尾：run_report / execution_context 两个事件此前**在 store 的
+ * switch 里没有 case**（Agent 视图的解析器无白名单，事件其实直达 store），
+ * 于是 Run Report 与 Tokens 在 UI 里永远不见——本文件钉住这两个事件的落账。
  *
- * 变异点：删 stores/agent.ts 里对应的 case（或从 sseService 白名单移除类型）
- * → 对应用例红。
+ * 边界（评审核实）：本测试只覆盖 store 层；`utils/sseService.ts` 的两处白名单
+ * 放行属于 Chat 视图路径的同类防线（当前无消费者、无解析级测试覆盖——已知缺口）。
+ *
+ * 变异点：删 stores/agent.ts 里对应的 case → 对应用例红（已实测）。
  */
 describe('useAgentStore · SSE 可见性事件落账', () => {
   beforeEach(() => {
