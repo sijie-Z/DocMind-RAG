@@ -70,6 +70,15 @@ async def delegate_subtask(
             message=f"最多 {MAX_TASKS} 个子任务（与子代理并发上限一致），收到 {len(tasks)} 个",
         )
 
+    # 安全加固（issue #257）：此前 `organization_id or 1` 把无组织调用静默落到
+    # 1 号组织——子代理的检索会在错误的租户上下文里跑。现在 fail-closed（风格与
+    # compare_documents 一致）：缺组织上下文直接拒绝，绝不伪造。
+    if organization_id is None:
+        return ToolResult.fail(
+            code="auth_required",
+            message="无法确定组织范围，禁止委派子任务（子代理检索依赖组织上下文）",
+        )
+
     try:
         from app.dependencies import get_rag_pipeline
 
@@ -89,7 +98,7 @@ async def delegate_subtask(
     results = await run_parallel_subtasks(
         client=client,
         tasks=tasks,
-        organization_id=organization_id or 1,
+        organization_id=organization_id,
         parent_context=context,
         per_task_timeout=PER_TASK_TIMEOUT,
     )
