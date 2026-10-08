@@ -326,5 +326,5 @@ class Orchestrator:
             config=self._config,
         )
 
-        review = await reviewer.review(plan, step_results)
+        review = await reviewer.review(plan, step_results, ctx=ctx)
         return review.get("issues_found", [])
