@@ -257,3 +257,47 @@ class TestNormalPathPreserved:
         with patch("app.services.auth_service.RedisTools", _redis_store({})):
             r = client.get(_ME, headers=_auth_header(token))
         assert r.status_code == 200, r.text
+
+
+# ── 第 1 环契约：真实 RedisTools 失败必须上抛 ────────────────
+
+
+class TestRedisToolsFailureContract:
+    """`RedisTools` 数据面失败必须上抛，不得与「不存在 / 写入成功」同形（#291 第 1 环）。
+
+    上面的端点/服务用例把整个 `RedisTools` 打桩掉了（测第 2/3 环）；这一组
+    打的是**真实的** `RedisTools`，注入点在它下层（`get_redis`）——防第 1 环
+    被单独还原成 fail-open 时上面所有用例仍全绿（变异 MA 的精确红点）。
+    """
+
+    @staticmethod
+    def _outage(monkeypatch) -> None:
+        async def _down():
+            raise ConnectionError("Redis down (injected)")
+
+        monkeypatch.setattr("app.core.redis.get_redis", _down)
+
+    @pytest.mark.asyncio
+    async def test_exists_raises_instead_of_returning_false(self, monkeypatch):
+        """旧行为 `except: return False` 与「不在黑名单」同形——必须改为上抛。"""
+        self._outage(monkeypatch)
+        from app.core.redis import RedisTools
+
+        with pytest.raises(ConnectionError):
+            await RedisTools.exists("blacklist:jti:probe")
+
+    @pytest.mark.asyncio
+    async def test_set_cache_raises_instead_of_swallowing(self, monkeypatch):
+        self._outage(monkeypatch)
+        from app.core.redis import RedisTools
+
+        with pytest.raises(ConnectionError):
+            await RedisTools.set_cache("blacklist:jti:probe", "1", expire=60)
+
+    @pytest.mark.asyncio
+    async def test_get_cache_raises_instead_of_returning_none(self, monkeypatch):
+        self._outage(monkeypatch)
+        from app.core.redis import RedisTools
+
+        with pytest.raises(ConnectionError):
+            await RedisTools.get_cache("user:1")
