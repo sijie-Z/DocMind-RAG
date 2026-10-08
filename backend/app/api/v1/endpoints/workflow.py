@@ -12,7 +12,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_user_org_id
 from app.exceptions import AppError, NotFoundError, ValidationError
 from app.models.user import User
 from app.models.workflow import NodeDefinition, Workflow, WorkflowExecution
@@ -219,7 +219,10 @@ async def execute_workflow(
 
     # 安全修复（R0）：知识库检索范围由服务端根据认证用户推导（参考 /knowledge/search），
     # 忽略请求体中客户端可传的 organization_id，防止跨租户读取。
-    effective_org_id = current_user.organization_id or 1
+    # 安全加固（issue #268）：不再 `or 1` 兜底——无组织如实传 None（含 token 组织回退，
+    # 与 get_user_org_id 的其它调用方一致）；引擎侧对缺组织的检索节点显式失败，
+    # 绝不静默检索 1 号组织。
+    effective_org_id = get_user_org_id(current_user)
 
     # 创建执行记录
     execution = WorkflowExecution(
