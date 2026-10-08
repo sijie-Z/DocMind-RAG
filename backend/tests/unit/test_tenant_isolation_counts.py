@@ -76,6 +76,44 @@ class _ExplodingDB:
         raise AssertionError("fail-closed 路径不得触达 DB")
 
 
+class _RecordingES:
+    """记录式 ES：只统计调用次数、不炸（issue #269 P2⑤b 的判别器）。
+
+    为什么必须记录式：handler 的 `except Exception` 会把爆炸吞进 status dict
+    （review_iso257 MA7 实测：时序变异下爆炸式断言 8/8 全绿）——只有"事后断言
+    计数为 0"才钉得住「guard 在任何 await 之前」这一属性。
+    """
+
+    def __init__(self):
+        self.count_calls = 0
+
+    async def count(self, *args, **kwargs):
+        self.count_calls += 1
+        return {"count": 0}
+
+
+class _RecordingRedis:
+    """记录式 Redis：同上，断言 fail-closed 路径不触碰。"""
+
+    def __init__(self):
+        self.info_calls = 0
+
+    async def info(self, *args, **kwargs):
+        self.info_calls += 1
+        return {}
+
+
+class _RecordingDBFactory:
+    """记录式会话工厂：被实例化即记账（不炸，同上）。"""
+
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        return MagicMock()
+
+
 async def _make_tenant_db():
     """内存 SQLite 真建表 + 真写入；StaticPool 保证跨会话共享同一内存库。
 
@@ -243,6 +281,33 @@ async def test_system_status_missing_org_direct_call_refuses():
     assert out.startswith("Error:"), f"缺 org 的直接调用必须拒答，实际: {out[:120]}"
 
 
+@pytest.mark.asyncio
+async def test_system_status_missing_org_zero_touch_recorded():
+    """缺 org 直调：fail-closed 且 ES/Redis/DB **零调用**——记录式断言。
+
+    review_iso257 MA7 的既有盲区：`_ExplodingES` 那条抓不住 guard 的时序，
+    因为爆炸被 handler 的 `except Exception` 吞进 status dict；把 guard 挪到
+    任何 await 之后仍 8/8 全绿。本用例把三个外部触点换成记录器：guard 一旦
+    晚于任一 await → 对应计数非零 → 精确红（P2⑤b）。
+    """
+    from app.agent.tools.utility import get_system_status
+
+    es, rd, db = _RecordingES(), _RecordingRedis(), _RecordingDBFactory()
+    with (
+        patch("app.core.elasticsearch.es_client", es),
+        patch("app.core.redis.redis_client", rd),
+        patch("app.core.database.AsyncSessionLocal", new=db),
+    ):
+        out = await get_system_status()
+
+    assert isinstance(out, str) and out.startswith("Error:"), (
+        f"缺 org 的直接调用必须拒答，实际: {out[:120]}"
+    )
+    assert es.count_calls == 0, "guard 必须在任何 await 之前：缺 org 不得触碰 ES"
+    assert rd.info_calls == 0, "缺 org 不得触碰 Redis"
+    assert db.calls == 0, "缺 org 不得创建 DB 会话"
+
+
 # ══════════════════════════════════════════════════════════════════════
 # 2 · _diagnose_empty_results —— 空结果诊断按 org 计数
 # ══════════════════════════════════════════════════════════════════════
@@ -274,6 +339,73 @@ async def test_diagnose_empty_results_scoped_to_caller_org():
     assert (status_a, n_a) == ("ok", A_CHUNKS), "有数据的 org 口径不变"
     term = fake_es.calls[0]["query"]["bool"]["filter"][0]["term"]
     assert term == {"organization_id": str(ORG_B)}
+
+
+def test_search_endpoint_diagnose_receives_caller_org(client: TestClient):
+    """★ 调用点接线（issue #269 P2⑤a）：空结果时端点必须把 effective_org_id
+    传进诊断——不是固定值 1。
+
+    既有 16 条用例（本文件 helper 直调 + test_index_visibility 端点用例）全部把
+    `_diagnose_empty_results` 整个 patch 掉，或只直测 helper——调用点被改成
+    `(1)` 时 16/16 全绿（review_iso257 MA2 实锤）。本用例让**真实端点**驱动
+    **真实诊断**：org B 调用者（空库）、假 ES 编码 org 1=13（bug 形态数字）。
+    若调用点回退成 1，响应变成 ok/13（正是 #257 的泄漏形态）→ 精确红。
+    """
+    from app.main import app
+    from app.models.rbac import PermissionType
+
+    mock_user = MagicMock()
+    mock_user.id = 7
+    mock_user.organization_id = ORG_B
+    mock_user.is_superuser = False
+    mock_user.is_active = True
+    mock_user.token_organization_id = None
+
+    async def _user():
+        return mock_user
+
+    async def _db():
+        return MagicMock()
+
+    fake_es = _FakeOrgAwareES({ORG_A: A_CHUNKS, 1: 13, ORG_B: 0})
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = _user
+    try:
+        with (
+            patch(
+                "app.services.permission_service.permission_service.get_user_permissions",
+                new=AsyncMock(return_value={p.value for p in PermissionType}),
+            ),
+            patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks,
+            # knowledge.py 在模块级 `from app.core.elasticsearch import get_elasticsearch`
+            patch(
+                "app.api.v1.endpoints.knowledge.get_elasticsearch",
+                new=AsyncMock(return_value=fake_es),
+            ),
+            patch("app.core.elasticsearch.get_index_error", return_value=None),
+        ):
+            mock_ks.search_knowledge = AsyncMock(return_value=[])
+            r = client.post(
+                "/api/v1/knowledge/search",
+                # 非超管：请求体里的 organization_id 不作数，effective_org_id
+                # 由 require_organization 解析成调用者自己的组织（ORG_B）
+                json={"query": "revenue", "organization_id": 1},
+            )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["index_status"], body["index_doc_count"]) == ("empty_index", 0), (
+        "诊断必须按调用者组织：org B 空库 → empty_index/0"
+        "（调用点回退成 1 时这里是 ok/13 —— 正是 #257 的泄漏形态）"
+    )
+    term = fake_es.calls[0]["query"]["bool"]["filter"][0]["term"]
+    assert term == {"organization_id": str(ORG_B)}, (
+        f"诊断 count 必须带调用者 org 的硬过滤 term，实际 {term}"
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════

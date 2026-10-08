@@ -264,6 +264,152 @@ async def test_core_tools_llm_call_counted_into_ctx():
     assert ctx.total_tokens == 700, f"generate_report 工具内用量应入账，实际 {ctx.total_tokens}"
 
 
+# ── 接线挂载点回归（issue #269 P2②/P2③：此前两处删除全量静默） ──────────────
+
+
+@pytest.mark.asyncio
+async def test_executor_mounts_exec_ctx_for_tool_internal_accounting():
+    """P2②：executor → 工具链路的挂载点（`extra={"exec_ctx": ctx}`）必须把工具内
+    用量送进本轮 ctx.total_tokens。
+
+    与上文两条用例（手工构造 RunContext 直调注册表）不同，本用例**经 executor 的
+    工具执行路径**驱动真工具（translate_text）：删掉 executor.py 的 exec_ctx 挂载
+    → 工具内 400 tokens 丢账 → 800 处精确红。此前该变异在全量测试下静默
+    （review_mx250 M1：866 passed），缺口由此闭合。
+    """
+    from unittest.mock import patch
+
+    client = MagicMock()
+    call_count = {"n": 0}
+
+    async def _create(*, messages, tools=None, **kwargs):
+        call_count["n"] += 1
+        resp = MagicMock()
+        choice = MagicMock()
+        msg = MagicMock()
+        if call_count["n"] == 1:
+            tc = MagicMock()
+            tc.id = "tc1"
+            tc.function.name = "translate_text"
+            tc.function.arguments = '{"text": "hello world", "target_language": "zh"}'
+            msg.tool_calls = [tc]
+            resp.usage = _usage(200, 50)  # 主调：250
+        else:
+            msg.tool_calls = None
+            resp.usage = _usage(120, 30)  # 合成：150
+        msg.content = "s"
+        msg.role = "assistant"
+        choice.message = msg
+        resp.choices = [choice]
+        return resp
+
+    client.chat.completions.create = _create
+
+    # 工具内 LLM（translate_text 经 app.dependencies.get_rag_pipeline 取客户端）
+    tool_pipeline = _fake_pipeline_with_llm("你好，世界", _usage(300, 100))
+
+    memory = AgentMemoryBridge(agent_id="t", organization_id=1, user_id=0)
+    executor = Executor(
+        client, AgentConfig(enable_planning=False, enable_reflection=False), memory
+    )
+
+    ctx = ExecutionContext(query="t")
+    step = PlanStep(id="s1", description="d")
+    plan = Plan(id="p1", goal="g", steps=[step])
+
+    with patch("app.dependencies.get_rag_pipeline", return_value=tool_pipeline):
+        async for _ in executor._execute_step_once(
+            step=step,
+            plan=plan,
+            history=None,
+            organization_id=1,
+            user_id=0,
+            enable_thinking=False,
+            ctx=ctx,
+        ):
+            pass
+
+    assert ctx.total_tokens == 800, (
+        f"主调 250 + 合成 150 + 工具内 400 应全部入账，实际 {ctx.total_tokens}"
+        "（删 executor 的 exec_ctx 挂载 → 工具内丢账 → 本断言红）"
+    )
+
+
+@pytest.mark.asyncio
+async def test_composite_skill_inner_calls_counted_into_ctx():
+    """P2③：复合技能（knowledge_analysis）内层工具的 LLM 用量经 run_context 透传
+    计入任务级累计。
+
+    链路（全真代码，只打桩 pipeline/ES 两个外部边界）：
+      knowledge_analysis → search_knowledge_base（假检索返回带 "ID: doc1" 的结果）
+      → extract_insights（假 ES + 假 LLM：300/100）→ generate_report（假 LLM：500/200）。
+
+    变异验证：删 skills.py 任一内层 `run_context=run_context` 透传（如
+    knowledge_analysis → generate_report）→ 对应用量丢账 → 1100 处红。
+    此前该变异在全量测试下静默（review_mx250 M4：866 passed）。
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from app.agent.registry import tool_registry
+    from app.agent.run_context import RunContext
+
+    responses = [
+        SimpleNamespace(  # extract_insights 的 LLM 响应
+            usage=_usage(300, 100),
+            model="deepseek-chat",
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"claims": []}'))],
+        ),
+        SimpleNamespace(  # generate_report 的 LLM 响应
+            usage=_usage(500, 200),
+            model="deepseek-chat",
+            choices=[SimpleNamespace(message=SimpleNamespace(content="# 报告正文"))],
+        ),
+    ]
+    calls = {"n": 0}
+
+    async def _create(*, model, messages, **kwargs):
+        resp = responses[min(calls["n"], len(responses) - 1)]
+        calls["n"] += 1
+        return resp
+
+    llm_client = MagicMock()
+    llm_client.chat.completions.create = _create
+
+    async def _search_kb(*, query, organization_id, top_k, document_ids=None):
+        # snippet 带 "ID: doc1" → 技能会把它解析成内层 extract_insights 的入参
+        return (
+            [{"score": 0.9, "filename": "f.md", "snippet": "ID: doc1 | 文件名: f.md"}],
+            None,
+        )
+
+    pipeline = SimpleNamespace(openai_client=llm_client, search_knowledge_base=_search_kb)
+    es_hits = {"hits": {"hits": [{"_source": {"content": "全文内容", "filename": "f.md"}}]}}
+
+    ctx = ExecutionContext(query="t")
+    run_context = RunContext(user_id=0, organization_id=1, extra={"exec_ctx": ctx})
+
+    with (
+        patch("app.dependencies.get_rag_pipeline", return_value=pipeline),
+        patch(
+            "app.core.elasticsearch.ElasticsearchTools.search_documents",
+            new=AsyncMock(return_value=es_hits),
+        ),
+    ):
+        out = await tool_registry.execute(
+            "knowledge_analysis",
+            {"query": "主题"},
+            organization_id=1,
+            user_id=0,
+            run_context=run_context,
+        )
+
+    assert out and "Error" not in out, f"技能应正常执行，实际: {out[:200]}"
+    assert ctx.total_tokens == 1100, (
+        f"内层 extract_insights 400 + generate_report 700 应经透传入账，"
+        f"实际 {ctx.total_tokens}（删任一内层 run_context 透传 → 本断言红）"
+    )
+
+
 # ── 指标拆分（issue #239 minor-9） ──────────────────────────────────────────
 
 

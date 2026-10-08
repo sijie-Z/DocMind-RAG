@@ -141,7 +141,7 @@ class CircuitBreaker:
 
         注入异常只承载分类（error_type="circuit_open"），文案保持中性——
         它同时服务真实调用失败与半开探测失败，不应显示为"probe failed"
-        （issue #256 minor-7）。
+        （#255 复核报告 minor-7；该编号属复核报告体系，issue #256 明细为 1~6）。
         """
         self._handle_failure(CircuitOpenError("failure recorded"))
 

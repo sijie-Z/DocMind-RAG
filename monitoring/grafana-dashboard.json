@@ -180,13 +180,13 @@
           "refId": "B"
         },
         {
-          "expr": "sum(rate(agent_tokens_total{direction=\"input\"}[5m]))",
-          "legendFormat": "Agent Input Tokens/s",
+          "expr": "sum by (model) (rate(agent_tokens_total{direction=\"input\"}[5m]))",
+          "legendFormat": "Agent Input · {{model}}",
           "refId": "C"
         },
         {
-          "expr": "sum(rate(agent_tokens_total{direction=\"output\"}[5m]))",
-          "legendFormat": "Agent Output Tokens/s",
+          "expr": "sum by (model) (rate(agent_tokens_total{direction=\"output\"}[5m]))",
+          "legendFormat": "Agent Output · {{model}}",
           "refId": "D"
         }
       ],

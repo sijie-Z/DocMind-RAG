@@ -95,6 +95,18 @@ async def test_lifespan_starts_snapshot_task_when_enabled(monkeypatch, _lifespan
         assert started == [True], "ENABLE_MONITORING=true 时应启动指标快照任务"
 
 
+def test_enable_monitoring_default_is_true():
+    """默认值锚点（review_cfg242 minor-1）：`ENABLE_MONITORING` 默认必须是 True。
+
+    上面两条用例都在运行时 monkeypatch settings，钉不到**类默认值**——
+    变异默认值 True→False 时它们全绿（review_cfg242 MUT-A：6 passed），
+    而未设 env 的部署会静默关闭监控快照。本用例把默认值本身钉住。
+    """
+    from app.core.config.base import BaseAppSettings
+
+    assert BaseAppSettings.model_fields["ENABLE_MONITORING"].default is True
+
+
 # ── CHUNK_SIZE → FileUploadService ───────────────────────────────────
 
 

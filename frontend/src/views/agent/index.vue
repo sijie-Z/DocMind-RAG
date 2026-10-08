@@ -117,6 +117,12 @@
                 >
                   ❌ {{ evt.content }}
                 </div>
+                <!-- Retry hint（issue #250 第 6 条收尾：事件此前只落 store 的
+                     msg.events，视图没有渲染分支 —— UI 仍看不到；#253 run_report
+                     同款处置的"展示"一半） -->
+                <div v-else-if="evt.type === 'retry_hint'" class="retry-hint">
+                  ♻ {{ formatRetryHint(evt) }}
+                </div>
               </template>
             </div>
 
@@ -255,6 +261,19 @@ function getLastThinkingType(msg: AgentChatMessage): ThinkingType {
   const thinkEvents = msg.events.filter((e) => e.type === 'thinking')
   if (thinkEvents.length === 0) return 'reasoning'
   return thinkEvents[thinkEvents.length - 1].thinking_type || 'reasoning'
+}
+
+// retry_hint 的展示文案（issue #250 第 6 条收尾）：后端 content 形如
+// "retry_action=reset_transport"（executor.py 发射），直接显示原始串对
+// 用户不友好；映射成中文动作说明，未知动作回退原文。
+const RETRY_ACTION_LABELS: Record<string, string> = {
+  reset_transport: '连接中断，正在重建连接后重试',
+  refresh_auth: '凭据失效，正在刷新凭据后重试',
+}
+
+function formatRetryHint(evt: AgentEvent): string {
+  const action = (evt.content || '').replace('retry_action=', '')
+  return RETRY_ACTION_LABELS[action] || evt.content || '正在重试'
 }
 
 function getToolResult(events: AgentEvent[], callIdx: number): string | undefined {
@@ -501,6 +520,16 @@ async function loadInit() {
 </script>
 
 <style scoped>
+/* 重试提示行（issue #250 第 6 条收尾：retry_hint 事件的渲染分支；
+   风格对齐 run-report 的轻量辅助信息） */
+.retry-hint {
+  margin: 4px 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.08);
+  border-radius: 8px;
+}
 /* 运行报告折叠块（issue #242 收尾） */
 .run-report {
   margin-top: 10px;
