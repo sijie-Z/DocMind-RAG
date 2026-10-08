@@ -9,6 +9,7 @@ AgentTask 表经 create_all 建（与迁移路径的口径由 test_schema_path_p
 """
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401 — 注册全部表，供 create_all（AgentTask 在内）
@@ -165,6 +166,39 @@ async def test_corrupt_snapshot_degrades_to_no_payload_without_raising(db_factor
             await db.commit()
         task, payload = await checkpoint.load_for_resume(task_id=task_id, user_id=1)
         assert task is not None and payload is None
+
+
+async def test_truncated_json_snapshot_row_read_write_heals(db_factory):
+    """R1（issue #278）：快照列是截断 JSON（无服务端校验的载体可达；生产 MySQL
+    JSON 列拦得住，sqlite/带外写库拦不住）时，任务行照常可读可写——读路径按
+    "无快照"降级不抛，认领/收尾/落盘不被毒丸卡死，首个新快照覆盖坏数据（自愈）。
+
+    变异点：还原 _load_task_row 的 defer（整行 db.get）/ 单独读快照的 try/except
+    → 对应步骤抛 JSONDecodeError → 本用例红。
+    """
+    task_id = await checkpoint.create_task(user_id=7, organization_id=1, query="q")
+    async with db_factory() as db:
+        await db.execute(
+            text("UPDATE agent_tasks SET context_snapshot = :s WHERE id = :tid"),
+            {"s": '{"v": 1, "ctx": {"query": "q"', "tid": task_id},  # 截断的合法开头
+        )
+        await db.commit()
+
+    task, payload = await checkpoint.load_for_resume(task_id=task_id, user_id=7)
+    assert task is not None and payload is None, "截断快照按无快照降级（不得抛 JSONDecodeError）"
+
+    claimed = await checkpoint.begin_resume(task_id)  # 毒丸行不得卡住认领
+    assert claimed.status == TaskStatus.RUNNING and claimed.retry_count == 1
+
+    assert await checkpoint.mark_terminal(task_id, TaskStatus.FAILED, error="x") is True
+
+    ok = await checkpoint.save_checkpoint(  # 新快照落盘 = 覆盖坏数据（自愈）
+        task_id=task_id, ctx=ExecutionContext(query="q"), plan=None, trigger="after_planning",
+    )
+    assert ok is True
+
+    _, healed = await checkpoint.load_for_resume(task_id=task_id, user_id=7)
+    assert healed is not None and healed["v"] == 1, "坏数据已被新快照覆盖：读路径恢复"
 
 
 async def test_begin_resume_claims_stale_running_and_failed(db_factory):

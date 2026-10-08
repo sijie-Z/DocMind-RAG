@@ -594,7 +594,16 @@ async def get_performance_metrics(
     }
 
 
-@router.get("/llm-stats", summary="获取LLM资源消耗统计", dependencies=[Depends(get_current_user)])
+@router.get(
+    "/llm-stats",
+    summary="获取LLM资源消耗统计",
+    # 安全加固（issue #277，评审 or1268 R3 收账）：此前仅登录门——全局 token/
+    # 成本/延迟聚合任意登录用户可见；与同文件 /stats、/org-summary、/admin-summary
+    # 等相邻端点对齐，升级为 VIEW_SYSTEM_HEALTH 门槛。前端唯一消费方
+    # dashboard/admin.vue 仅对 role=admin 渲染（admin 走 SysAdmin 角色持有该权限），
+    # 普通用户 UI 不受影响。
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def get_llm_stats(
     db: AsyncSession = Depends(get_db)
 ):

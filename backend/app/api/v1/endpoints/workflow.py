@@ -282,12 +282,15 @@ async def execute_workflow(
                             execution.status = "completed"
                             execution.completed_at = datetime.now()
                             execution.output_data = event_data
-                            execution.node_results = [r.model_dump() for r in engine.get_node_results()]
+                            # mode="json"：node_results 含 datetime（started_at/completed_at），
+                            # python 模式的 datetime 对象写不进 JSON 列（StatementError:
+                            # Object of type datetime is not JSON serializable）
+                            execution.node_results = [r.model_dump(mode="json") for r in engine.get_node_results()]
                             await db.commit()
 
                             # 发送节点结果
                             for node_result in engine.get_node_results():
-                                yield f"event: node_complete\ndata: {json.dumps(node_result.model_dump(), ensure_ascii=False)}\n\n"
+                                yield f"event: node_complete\ndata: {json.dumps(node_result.model_dump(mode='json'), ensure_ascii=False)}\n\n"
 
                             # 发送最终结果
                             yield f"event: complete\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
@@ -345,7 +348,10 @@ async def execute_workflow(
         execution.status = "completed"
         execution.completed_at = datetime.now()
         execution.output_data = result
-        execution.node_results = [r.model_dump() for r in engine.get_node_results()]
+        # mode="json"：node_results 含 datetime（started_at/completed_at），python
+        # 模式的 datetime 对象写不进 JSON 列（StatementError: Object of type
+        # datetime is not JSON serializable）
+        execution.node_results = [r.model_dump(mode="json") for r in engine.get_node_results()]
         await db.commit()
 
         return {

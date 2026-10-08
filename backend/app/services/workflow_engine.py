@@ -25,6 +25,15 @@ from app.schemas.workflow import NodeResult, WorkflowConfig, WorkflowNode
 logger = logging.getLogger(__name__)
 
 
+class TransientNodeError(Exception):
+    """瞬时故障（网络抖动、上游服务错误等）——execute_with_retry 会按退避重试。
+
+    与确定性错误相对：守卫、配置、参数与安全校验类错误以 ValueError /
+    NotImplementedError 抛出，重试结果不变，会被 execute_with_retry 直接失败
+    （fail-fast，见 #277 R4）。
+    """
+
+
 class ExecutionStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -70,11 +79,19 @@ class NodeExecutor:
         raise NotImplementedError
 
     async def execute_with_retry(self, state: WorkflowState) -> dict[str, Any]:
-        """带重试的执行"""
+        """带重试的执行。
+
+        确定性错误（ValueError / NotImplementedError —— 守卫、配置、参数与
+        安全校验类）重试结果不变，直接失败，不做 3 次退避空转（#277 R4）；
+        TransientNodeError（瞬时故障）与其它异常维持指数退避重试。
+        """
         last_error = None
         for attempt in range(self.max_retries):
             try:
                 return await self.execute(state)
+            except (ValueError, NotImplementedError) as e:
+                logger.warning(f"节点 {self.node.id} 命中确定性错误（不重试）: {str(e)}")
+                raise
             except Exception as e:
                 last_error = e
                 logger.warning(f"节点 {self.node.id} 执行失败 (尝试 {attempt + 1}/{self.max_retries}): {str(e)}")
@@ -96,17 +113,20 @@ class NodeExecutor:
         llm_settings = self.llm_config.get(model_type, {})
         node_data = self.node.data or {}
 
-        if model_type in ["openai", "deepseek", "aiping"]:
-            api_key = llm_settings.get("api_key") or getattr(settings, 'OPENAI_API_KEY', '')
-            base_url = llm_settings.get("base_url")
-
+        if model_type in ["openai", "deepseek"]:
+            # issue #273：环境默认 key 改直读 Settings 真字段。此前三条路径共用
+            # getattr(settings, 'OPENAI_API_KEY', '')（单引号写法）兜底，因字段缺失
+            # （extra="ignore" 静默吞 .env）恒为空串——工作流 LLM 节点无法经 .env 配 key。
             if model_type == "deepseek":
-                base_url = base_url or "https://api.deepseek.com/v1"
+                # 该分支固定走 api.deepseek.com 端点，只有 DeepSeek key 有效；与仓库
+                # 其它 DeepSeek 消费方同口径（DEEPSEEK_API_KEY，见 dependencies.py /
+                # embedding_service.py），而非 OpenAI key。
+                api_key = llm_settings.get("api_key") or settings.DEEPSEEK_API_KEY
+                base_url = llm_settings.get("base_url") or "https://api.deepseek.com/v1"
                 model = node_data.get("model") or llm_settings.get("model", "deepseek-v4-flash")
-            elif model_type == "aiping":
-                base_url = base_url or getattr(settings, 'AIPING_BASE_URL', '')
-                model = node_data.get("model") or llm_settings.get("model", "gpt-4")
             else:
+                api_key = llm_settings.get("api_key") or settings.OPENAI_API_KEY
+                base_url = llm_settings.get("base_url")
                 model = node_data.get("model") or llm_settings.get("model", "gpt-4o-mini")
 
             temperature = node_data.get("temperature", llm_settings.get("temperature", 0.7))
@@ -120,11 +140,11 @@ class NodeExecutor:
                 base_url=base_url
             )
         if model_type == "qwen":
-            # 通义千问
+            # 通义千问。issue #273：DASHSCOPE_API_KEY 现为 Settings 真字段，直读。
             from langchain_community.chat_models import ChatTongyi
             return ChatTongyi(
                 model=node_data.get("model") or llm_settings.get("model", "qwen-plus"),
-                dashscope_api_key=llm_settings.get("api_key") or getattr(settings, 'DASHSCOPE_API_KEY', '')
+                dashscope_api_key=llm_settings.get("api_key") or settings.DASHSCOPE_API_KEY
             )
 
         return None
@@ -577,6 +597,10 @@ class APICallNodeExecutor(NodeExecutor):
         # SSRF 防护：验证 URL 不指向内网
         url = self._validate_url(url)
 
+        # 方法校验是确定性错误，放在 try 外：不落入下面的"瞬时故障"包裹而被重试
+        if method not in ("GET", "POST", "PUT", "DELETE"):
+            raise ValueError(f"不支持的方法: {method}")
+
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 if method == "GET":
@@ -585,10 +609,8 @@ class APICallNodeExecutor(NodeExecutor):
                     response = await client.post(url, headers=headers, content=body_template)
                 elif method == "PUT":
                     response = await client.put(url, headers=headers, content=body_template)
-                elif method == "DELETE":
+                else:  # DELETE（其余方法已在上方放行前拦下）
                     response = await client.delete(url, headers=headers)
-                else:
-                    raise ValueError(f"不支持的方法: {method}")
 
                 result = response.json() if response.headers.get("content-type", "").startswith("application/json") else response.text
 
@@ -600,7 +622,8 @@ class APICallNodeExecutor(NodeExecutor):
                     "context": {"api_result": result}
                 }
         except Exception as e:
-            raise ValueError(f"API 调用失败: {str(e)}")
+            # 网络/上游瞬时故障：包裹为 TransientNodeError 以保留重试（#277 R4）
+            raise TransientNodeError(f"API 调用失败: {str(e)}")
 
 
 class TransformNodeExecutor(NodeExecutor):
@@ -710,7 +733,6 @@ class WorkflowEngine:
             "llm_openai": LLMNodeExecutor,
             "llm_deepseek": LLMNodeExecutor,
             "llm_qwen": LLMNodeExecutor,
-            "llm_aiping": LLMNodeExecutor,
             "tool_search": KnowledgeSearchNodeExecutor,
             "tool_tts": TTSNodeExecutor,
             "condition": ConditionNodeExecutor,
