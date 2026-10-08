@@ -65,6 +65,10 @@ async def test_planner_streaming_collects_usage_into_ctx():
     assert ctx.total_tokens == 120, (
         "流式 usage（include_usage 末块）必须经单一入口入账（#202 / #239 minor-7）"
     )
+    sent = client.chat.completions.create.await_args.kwargs
+    assert sent.get("stream_options") == {"include_usage": True}, (
+        "请求侧必须显式索取 usage（评审 minor-1：删掉该参数此前无断言拦截）"
+    )
 
 
 @pytest.mark.asyncio
