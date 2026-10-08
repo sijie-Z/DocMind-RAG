@@ -301,6 +301,11 @@ class ExecutionContext:
 
         Returns:
             True if saved successfully (either backend).
+
+        Note:
+            task_id 的**路径安全化只作用于本地回退分支**：Redis 键没有路径语义，
+            Redis 可用时非法 task_id 也照常保存（返回 True）——这是刻意的双后端
+            语义（用例 test_save_with_redis_available_never_touches_disk 钉住）。
         """
         data = self.to_dict()
         # Try Redis
