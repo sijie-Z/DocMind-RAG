@@ -702,7 +702,11 @@ async def chat_stream_endpoint(
                 async for agent_event in agent_service.chat(
                     query=user_content,
                     history=agent_history,
-                    organization_id=getattr(current_user, "organization_id", None) or 1,
+                    # 安全加固（issue #257）：此前 `... or 1` 会把无组织用户静默放进
+                    # 1 号组织的 agent 上下文（1 号组织甚至未必存在）。现在如实传
+                    # None：休闲对话不受影响，需要组织上下文的工具由注册表 auth
+                    # 钩子 fail-closed（与 knowledge.py 检索路径 403 加固同语义）。
+                    organization_id=getattr(current_user, "organization_id", None),
                     user_id=current_user.id,
                     session_id=body.conversationId or None,
                     config=config,

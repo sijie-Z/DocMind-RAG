@@ -46,17 +46,22 @@ from app.services.embedding_service import embedding_service
 from app.services.knowledge_service import knowledge_service
 
 
-async def _diagnose_empty_results() -> tuple[str, int | None]:
-    """结果为空时，说清是「没匹配到」还是「索引里根本没东西」。
+async def _diagnose_empty_results(organization_id: int) -> tuple[str, int | None]:
+    """结果为空时，说清是「没匹配到」还是「你所在组织没有任何已索引内容」。
 
     这两件事在响应里本来是同形的（都是 `results: []`），但性质完全不同：
-    「没匹配到」是正常的检索结果，「索引是空的」是严重故障。
+    「没匹配到」是正常的检索结果，「自己组织的索引是空的」是严重故障。
     调用方没有这个信号，就只能把故障当成正常结果 —— 这正是 issue #182。
+
+    issue #257：计数必须按调用者所在组织过滤。此前这里是**全索引** count ——
+    任何租户搜出空结果都会收到全库 chunk 总量（跨租户信息）；而且「索引是空的」
+    对多租户共享索引根本不成立：别的组织有数据时，自己组织为空会被误报成 `ok`
+    （明明没有可检索内容却被当成正常）。现在与搜索本身的口径一致。
 
     返回 (index_status, index_doc_count)：
       `index_error`  —— 索引配置有问题（维度不匹配等），检索不可能工作
-      `empty_index`  —— 索引里一篇都没有
-      `ok`           —— 索引里有数据，只是这次没匹配到
+      `empty_index`  —— 你所在组织没有任何已索引内容
+      `ok`           —— 你所在组织索引里有数据，只是这次没匹配到
       `unknown`      —— 诊断本身失败（不掩盖，如实报）
     """
     from app.core.elasticsearch import get_index_error
@@ -65,7 +70,10 @@ async def _diagnose_empty_results() -> tuple[str, int | None]:
         return "index_error", None
     try:
         client = await get_elasticsearch()
-        res = await client.count(index=settings.ELASTICSEARCH_INDEX_NAME)
+        res = await client.count(
+            index=settings.ELASTICSEARCH_INDEX_NAME,
+            query={"bool": {"filter": [{"term": {"organization_id": str(organization_id)}}]}},
+        )
         n = int(res.get("count", 0))
         return ("empty_index" if n == 0 else "ok"), n
     except Exception as e:  # noqa: BLE001 — 诊断失败不该让搜索本身失败，但必须如实标注
@@ -209,13 +217,14 @@ async def search_knowledge(
                 "fresh_factor": r.get("fresh_factor", 1.0),
             })
 
-        # 结果为空时，必须能区分「没匹配到」与「索引里根本没东西」——
+        # 结果为空时，必须能区分「没匹配到」与「你所在组织没有任何已索引内容」——
         # 两者在响应里同形（都是 results: []），但后者是严重故障。
         # 没有这一层，调用方（前端 / 测试 / 监控）会把故障当成正常结果（issue #182）。
+        # issue #257：诊断按调用者组织过滤（effective_org_id 已由 require_organization 解析）。
         index_status = "ok"
         index_doc_count: int | None = None
         if not formatted_results:
-            index_status, index_doc_count = await _diagnose_empty_results()
+            index_status, index_doc_count = await _diagnose_empty_results(effective_org_id)
 
         return {
             "query": request.query,

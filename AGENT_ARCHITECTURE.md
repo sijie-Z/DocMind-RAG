@@ -189,7 +189,7 @@ Reflector.reflect(plan, results)
 | `detect_language` | 语言检测（名称/ISO 代码/置信度） | language | — |
 | `calculate` | 安全数学表达式求值 | utility, compute | — |
 | `format_converter` | JSON ↔ YAML ↔ CSV ↔ Markdown 格式互转 | utility, format | — |
-| `get_system_status` | ES 索引统计 + Redis 内存 + DB 表统计 | utility, system | — |
+| `get_system_status` | 本组织已索引 chunk 数 + Redis 内存 + 本组织 DB 统计（按 org 过滤，issue #257） | utility, system | 需登录（缺 org 拒答） |
 
 ### 工具注册模式
 
