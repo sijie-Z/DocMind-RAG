@@ -42,7 +42,9 @@ from app.core.step_runner import StepRunner
 logger = logging.getLogger(__name__)
 
 # 跨请求熔断（issue #242 第 7 条）：LLM 步骤调用路径的进程级熔断器（每 worker 一份）。
-# 阈值 3 与 Executor.MAX_CONSECUTIVE_FAILURES 的语义对齐；OPEN 后 30s 进入半开探测。
+# 阈值 3（与 Executor.MAX_CONSECUTIVE_FAILURES 同量级）；计数口径 = **自上次复位累计**
+# 的失败数（成功的复位只发生在非 CLOSED 态，即半开探测成功时）——provider 连续挂的
+# 场景下与"连续失败"等价。OPEN 后 30s 进入半开探测。
 # 说明：接的是状态机 API（allow_request/record_*）；装饰器的"降级返回值"契约仍未接线。
 _LLM_BREAKER = CircuitBreaker(name="llm", failure_threshold=3, recovery_timeout=30)
 
