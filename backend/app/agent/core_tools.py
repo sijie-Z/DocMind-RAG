@@ -12,6 +12,8 @@ import logging
 from typing import Any
 
 from app.agent.registry import register_tool
+from app.agent.run_context import RunContext
+from app.agent.usage import ctx_from_run_context, record_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +162,7 @@ async def vector_search(
 async def summarize_document(
     document_id: str,
     organization_id: int = 1,
+    run_context: RunContext | None = None,
     **_: Any,
 ) -> str:
     from app.core.elasticsearch import ElasticsearchTools
@@ -202,6 +205,9 @@ async def summarize_document(
             temperature=0.1,
             max_tokens=500,
         )
+        # 工具内 LLM 记账（issue #239 minor-2）：此前直连调用不入账，
+        # 任务级 total_tokens 不含工具内部用量。
+        record_llm_usage(resp, ctx_from_run_context(run_context))
         summary = resp.choices[0].message.content or "Summary generation failed."
         return f"Document: {filename}\n\n{summary}"
     except Exception as e:
@@ -338,6 +344,7 @@ async def extract_insights(
     aspects: str = "all",
     framework: str = "",
     organization_id: int = 1,
+    run_context: RunContext | None = None,
     **_: Any,
 ) -> str:
     from app.core.config import settings
@@ -423,6 +430,7 @@ async def extract_insights(
             max_tokens=1500,
             timeout=30,
         )
+        record_llm_usage(resp, ctx_from_run_context(run_context))  # 工具内记账（#239 minor-2）
         insights_raw = resp.choices[0].message.content or "{}"
         # Try to parse as JSON; fallback to raw string
         try:
@@ -475,6 +483,7 @@ async def cross_document_analysis(
     document_ids: list[str],
     analysis_type: str = "comprehensive",
     organization_id: int = 1,
+    run_context: RunContext | None = None,
     **_: Any,
 ) -> str:
     if not document_ids or len(document_ids) < 2:
@@ -573,6 +582,7 @@ async def cross_document_analysis(
             max_tokens=2000,
             timeout=60,
         )
+        record_llm_usage(resp, ctx_from_run_context(run_context))  # 工具内记账（#239 minor-2）
         analysis_raw = resp.choices[0].message.content or "{}"
         try:
             analysis = json.loads(analysis_raw)
@@ -629,6 +639,7 @@ async def generate_report(
     title: str,
     sections: str,
     format: str = "markdown",
+    run_context: RunContext | None = None,
     **_: Any,
 ) -> str:
     from app.core.config import settings
@@ -679,6 +690,7 @@ async def generate_report(
             max_tokens=3000,
             timeout=60,
         )
+        record_llm_usage(resp, ctx_from_run_context(run_context))  # 工具内记账（#239 minor-2）
         report = resp.choices[0].message.content or ""
         if not report.strip():
             return _generate_markdown_fallback(title, parsed_sections)

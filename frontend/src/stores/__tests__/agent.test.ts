@@ -50,10 +50,24 @@ describe('useAgentStore · SSE 可见性事件落账', () => {
     expect(msg.executionContext?.total_tokens).toBe(14176)
   })
 
+  it('retry_hint 落进事件列表（#250 第 6 条：后端发、前端此前无 case）', () => {
+    const store = seedAssistantMessage()
+    store.processEvent({
+      type: 'retry_hint',
+      content: 'retry_action=reset_transport',
+      plan_step_id: 's1',
+      retry_attempt: 1,
+    } as any)
+    const msg = store.messages[store.messages.length - 1]
+    expect(msg.events.length).toBe(1)
+    expect(msg.events[0].type).toBe('retry_hint')
+    expect(msg.events[0].content).toBe('retry_action=reset_transport')
+  })
+
   it('未知事件类型不抛错、不影响既有消息', () => {
     const store = seedAssistantMessage()
     const before = { ...store.messages[store.messages.length - 1] }
-    store.processEvent({ type: 'retry_hint', content: 'x' } as any)
+    store.processEvent({ type: 'totally_unknown_event', content: 'x' } as any)
     const msg = store.messages[store.messages.length - 1]
     expect(msg.runReport).toBeUndefined()
     expect(msg.executionContext).toBeUndefined()

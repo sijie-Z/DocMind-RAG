@@ -152,6 +152,15 @@ export const useAgentStore = defineStore('agent', () => {
         overallProgress.value = 1.0
         break
 
+      case 'retry_hint':
+        // issue #250 第 6 条：后端（executor）在 reset_transport / refresh_auth
+        // 重试意图时发射该事件，此前 store 无 case —— "发而无收"，重试原因在
+        // UI 里不可见（与 #242 的 run_report 同款处置）。落进事件列表。
+        updateLastAssistant((msg) => {
+          msg.events.push(event)
+        })
+        break
+
       case 'chunk':
         updateLastAssistant((msg) => {
           msg.content += event.content

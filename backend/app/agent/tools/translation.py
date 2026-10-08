@@ -5,6 +5,8 @@ import logging
 from typing import Any
 
 from app.agent.registry import register_tool
+from app.agent.run_context import RunContext
+from app.agent.usage import ctx_from_run_context, record_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,7 @@ async def translate_text(
     text: str,
     target_language: str = "zh",
     source_language: str = "auto",
+    run_context: RunContext | None = None,
     **_: Any,
 ) -> str:
     if not text or len(text) < 2:
@@ -87,6 +90,7 @@ async def translate_text(
             temperature=0.1,
             max_tokens=2000,
         )
+        record_llm_usage(resp, ctx_from_run_context(run_context))  # 工具内记账（#239 minor-2）
         return resp.choices[0].message.content or "Translation failed."
     except Exception as e:
         return f"Translation error: {type(e).__name__}: {e}"

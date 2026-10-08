@@ -45,6 +45,7 @@ async def deep_research(
     query: str,
     depth: str = "detailed",
     organization_id: int = 1,
+    run_context=None,
     **_: Any,
 ) -> str:
     """深度研究：搜索 → 知识库检索 → 结构化摘要"""
@@ -56,6 +57,7 @@ async def deep_research(
             "web_search",
             {"query": query, "max_results": 5},
             organization_id=organization_id,
+            run_context=run_context,
         )
         if web_result and "Error" not in web_result:
             parts.append("## 外部搜索结果\n" + web_result[:1500])
@@ -69,6 +71,7 @@ async def deep_research(
             "search_knowledge_base",
             {"query": query, "top_k": 5},
             organization_id=organization_id,
+            run_context=run_context,
         )
         if kb_result and "Error" not in kb_result and "No relevant" not in kb_result:
             parts.append("## 知识库结果\n" + kb_result[:1500])
@@ -113,6 +116,7 @@ async def document_comparison(
     document_ids: list[str],
     focus: str = "comprehensive",
     organization_id: int = 1,
+    run_context=None,
     **_: Any,
 ) -> str:
     """文档对比：分别摘要 → cross_document_analysis"""
@@ -131,6 +135,7 @@ async def document_comparison(
                 "get_document_info",
                 {"document_id": doc_id},
                 organization_id=organization_id,
+                run_context=run_context,
             )
             if info and "Error" not in info and "not found" not in info:
                 parts.append(f"## 文档 {i}\n{info[:500]}")
@@ -156,6 +161,7 @@ async def document_comparison(
                     "framework": analysis_framework,
                 },
                 organization_id=organization_id,
+                run_context=run_context,
             )
             if insight and "Error" not in insight:
                 # extract_insights 返回 JSON, 取关键部分
@@ -182,6 +188,7 @@ async def document_comparison(
             "cross_document_analysis",
             {"document_ids": doc_ids, "analysis_type": "comprehensive"},
             organization_id=organization_id,
+            run_context=run_context,
         )
         if cross and "Error" not in cross:
             parts.append("## 跨文档综合分析\n" + cross[:2000])
@@ -228,6 +235,7 @@ async def knowledge_analysis(
     framework: str = "comprehensive",
     generate_report: bool = True,
     organization_id: int = 1,
+    run_context=None,
     **_: Any,
 ) -> str:
     """知识分析：搜索 → 框架分析 → 报告生成"""
@@ -240,6 +248,7 @@ async def knowledge_analysis(
             "search_knowledge_base",
             {"query": query, "top_k": 3},
             organization_id=organization_id,
+            run_context=run_context,
         )
         if docs_result and "Error" not in docs_result and "No relevant" not in docs_result:
             parts.append("## 检索到的文档\n" + docs_result[:1000])
@@ -269,6 +278,7 @@ async def knowledge_analysis(
                     "framework": framework if framework != "comprehensive" else "",
                 },
                 organization_id=organization_id,
+                run_context=run_context,
             )
             if insight and "Error" not in insight:
                 analysis_results.append(insight)
@@ -296,6 +306,7 @@ async def knowledge_analysis(
                 "generate_report",
                 {"title": report_title, "sections": sections},
                 organization_id=organization_id,
+                run_context=run_context,
             )
             if report and "Error" not in report:
                 parts.append("## 生成报告\n" + report[:2000])

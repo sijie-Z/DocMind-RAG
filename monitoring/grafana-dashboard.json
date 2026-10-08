@@ -178,6 +178,16 @@
           "expr": "rate(rag_llm_tokens_total{direction=\"output\"}[5m])",
           "legendFormat": "Output Tokens/s",
           "refId": "B"
+        },
+        {
+          "expr": "sum(rate(agent_tokens_total{direction=\"input\"}[5m]))",
+          "legendFormat": "Agent Input Tokens/s",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(agent_tokens_total{direction=\"output\"}[5m]))",
+          "legendFormat": "Agent Output Tokens/s",
+          "refId": "D"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } }
