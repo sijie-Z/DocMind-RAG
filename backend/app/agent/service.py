@@ -185,7 +185,10 @@ class AgentService:
         agent = PERAgentLoop(
             openai_client=self.client,
             config=agent_config,
-            organization_id=task.organization_id or 1,
+            # 安全加固（issue #278/m3，#168/#268 禁模式）：如实传任务归属组织，
+            # 绝不 `or 1` 兜底伪造——无组织如实为 None（下游按各自既有的
+            # fail-closed 语义处理，与 #257/#268 家族口径一致）。
+            organization_id=task.organization_id,
             user_id=task.user_id,
         )
         try:
@@ -195,10 +198,10 @@ class AgentService:
                 event.task_id = task_id
                 yield event
         except GeneratorExit:
-            await self._checkpoint_disconnect(task_id, agent)
+            await self._checkpoint_disconnect(task_id, agent, release_lease=True)
             raise
         except asyncio.CancelledError:
-            await self._checkpoint_disconnect(task_id, agent)
+            await self._checkpoint_disconnect(task_id, agent, release_lease=True)
             raise
         except BaseException as exc:
             await self._checkpoint_error(task_id, agent, exc)
@@ -208,12 +211,24 @@ class AgentService:
 
     # ── Checkpoint 兜底（断流 / 异常；二者都不得改变既有语义）──────────────
 
-    async def _checkpoint_disconnect(self, task_id: str | None, agent: PERAgentLoop) -> None:
+    async def _checkpoint_disconnect(
+        self,
+        task_id: str | None,
+        agent: PERAgentLoop,
+        *,
+        release_lease: bool = False,
+    ) -> None:
         """断流兜底（best-effort）：存一份"到此为止"的快照，不动任务状态。
 
         语义 = 与"进程被硬杀"一致（行停在 RUNNING，resume 从最近成功的
         checkpoint 继续）。await 在被关闭/取消的路径上可能被底层打断——允许
         它失败：最坏退化 = 恢复点停在上一个 T2，不影响正确性（设计报告 E1）。
+
+        release_lease（issue #278/m2，评审 R3）：resume 断流时把本次认领的租约
+        归还——断流 = 持有者已终止（生成器正在关闭，不可能再写入），重试应当
+        立即可认领；此前快照保存会把租约续到 900s，用户立即重试被 TaskBusy
+        拒至多 15 分钟。chat 从未认领租约，保持不释放（避免误删并发 resume
+        持有的锁）。
         """
         if not task_id:
             return
@@ -223,6 +238,16 @@ class AgentService:
             ))
         except Exception as e:
             logger.warning("checkpoint on_disconnect failed (task=%s): %s", task_id, e)
+        if release_lease:
+            # 顺序不可反：先落快照再还租——否则新认领者可能先开跑，
+            # 迟到的旧快照会覆盖它的更新状态。与落盘同样 best-effort：
+            # shield 保证取消路径上归还动作不被二次取消打断。
+            try:
+                await asyncio.shield(checkpoint.release_task(task_id))
+            except Exception as e:
+                logger.debug(
+                    "checkpoint lease release on disconnect failed (task=%s): %s", task_id, e
+                )
 
     async def _checkpoint_error(
         self, task_id: str | None, agent: PERAgentLoop, exc: BaseException,
