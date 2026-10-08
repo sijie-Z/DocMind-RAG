@@ -236,7 +236,7 @@ def setup_opentelemetry(app):
 
 ## 5. Agent TraceStore(自建)
 
-**位置**:`backend/app/agent/tracing.py`(382 行)
+**位置**:`backend/app/agent/tracing.py`
 
 **接线状态（#242 核实）**:进程内 ring;**写入者仅评测 harness 路径**;生产 run 不写——运行时轨迹由 Run Report / `execution_context` SSE / ExecutionContext(Redis 7 天 → benchmark/mining)承担。
 

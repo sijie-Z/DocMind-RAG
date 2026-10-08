@@ -137,8 +137,13 @@ class CircuitBreaker:
             self._reset()
 
     def record_failure(self) -> None:
-        """一次失败调用：计数，达阈值转 OPEN（复用既有 _handle_failure）。"""
-        self._handle_failure(CircuitOpenError("probe failed"))
+        """一次失败调用：计数，达阈值转 OPEN（复用既有 _handle_failure）。
+
+        注入异常只承载分类（error_type="circuit_open"），文案保持中性——
+        它同时服务真实调用失败与半开探测失败，不应显示为"probe failed"
+        （issue #256 minor-7）。
+        """
+        self._handle_failure(CircuitOpenError("failure recorded"))
 
     def _get_fallback_value(self, func: Callable) -> Any:
         """根据函数返回类型提供降级后的默认值"""
