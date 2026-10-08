@@ -53,7 +53,11 @@ class KnowledgeSearchResponse(BaseModel):
         ),
     )
     index_doc_count: int | None = Field(
-        None, description="索引中的文档数；仅在结果为空时诊断，其余情况为 null"
+        None,
+        description=(
+            "你所在组织在索引中的 chunk 数（按 organization_id 过滤，issue #257）；"
+            "仅在结果为空时诊断，其余情况为 null"
+        ),
     )
 
 
