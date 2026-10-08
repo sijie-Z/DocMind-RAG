@@ -167,7 +167,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 消息 | `kafka_client.py` | aiokafka 生产者 |
 | 认证 | `security.py` | JWT + bcrypt，get_current_user 依赖，RBAC 辅助 |
 | 中间件 | `middleware.py` | 指标收集（请求数/延迟/错误率） |
-| 熔断 | `circuit_breaker.py` | 熔断器模式——**状态机 API 已接 LLM 步骤路径（跨请求熔断 + 半开恢复，issue #242）**；装饰器降级契约仍未接线（详见模块 docstring） |
+| 熔断 | `circuit_breaker.py` | 熔断器模式——**状态机 API 已接 LLM 步骤路径（跨请求熔断 + 半开恢复，issue #242）；只覆盖 executor 每步主 LLM 调用，不含 planner（stream）/ synthesis 路径**；装饰器降级契约仍未接线（详见模块 docstring） |
 | 步骤执行 | `step_runner.py` | 带重试/回退的安全步骤执行 |
 | 链路追踪 | `tracing.py` | OpenTelemetry OTLP gRPC 导出 |
 | 追踪日志 | `trace_logger.py` | Agent 执行追踪 JSONL 记录（dev-only：仅未挂载的独立测试 app `agent_api.py`:8010 使用，仓库内无读者） |

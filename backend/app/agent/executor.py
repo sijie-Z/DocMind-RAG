@@ -728,6 +728,12 @@ class Executor:
             # 后续沿用既有降级路径（fallback 链 / 步骤失败文案）。
             if not _LLM_BREAKER.allow_request():
                 logger.warning("LLM breaker OPEN — fast-fail step %s", step.id)
+                # 门早退同样要收尾观测 span（issue #256）：lf 启用时若不 end，
+                # 每个被拦步骤都会泄漏两条未闭合 span，门拦量在观测层不可见。
+                if lf and llm_span:
+                    llm_span.end(output="circuit_open: fast-fail（未发起调用）")
+                if lf and step_span:
+                    step_span.end(output="circuit_open: fast-fail")
                 yield AgentEvent(
                     type="tool_error",
                     tool_name=step.tool_hint or "llm",
