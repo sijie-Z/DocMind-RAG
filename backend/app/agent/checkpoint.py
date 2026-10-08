@@ -269,20 +269,58 @@ async def mark_terminal(
 # ── 读路径 / resume 认领 ─────────────────────────────────────────────────────
 
 
-async def load_for_resume(
-    *, task_id: str, user_id: int
-) -> tuple[AgentTask, dict[str, Any] | None]:
-    """取任务行 + 校验过的快照信封。
+async def load_task(
+    *, task_id: str, user_id: int, organization_id: int | None = None
+) -> AgentTask:
+    """取任务行（状态视图与 resume 共用的归属校验）。
 
-    - 行不存在或不属于 user_id → TaskNotFoundError（对外 404，不区分二者）；
-    - 快照缺失/损坏/版本不符 → payload=None（安全降级：调用方从规划阶段重跑）；
-      终态判定由调用方做（is_terminal → TaskNotResumableError，409 语义）。
-    返回的 AgentTask 是 detached 实例：只读其列属性，任何写都必须经本模块函数。
+    - 行不存在 / 不属于 user_id → TaskNotFoundError（对外 404，不区分二者以免泄露归属）；
+    - organization_id 给定时要求组织一致（任务在旧组织下建的、用户已换组织 → 同样 404）。
+    返回 detached 实例：只读其列属性，任何写都必须经本模块函数。
     """
     async with AsyncSessionLocal() as db:
         task = await db.get(AgentTask, task_id)
     if task is None or task.user_id != user_id:
         raise TaskNotFoundError("任务不存在或无权访问")
+    if (
+        organization_id is not None
+        and task.organization_id is not None
+        and task.organization_id != organization_id
+    ):
+        raise TaskNotFoundError("任务不存在或无权访问")
+    return task
+
+
+def task_to_status_dict(task: AgentTask) -> dict[str, Any]:
+    """任务状态视图（GET /tasks/{id} 的 data 段；纯函数，不解快照）。"""
+    return {
+        "task_id": task.id,
+        "state": task.status.value,
+        "is_recoverable": task.is_recoverable,
+        "progress": task.progress,
+        "completed_steps": task.completed_steps,
+        "total_steps": task.total_steps,
+        "current_step_id": task.current_step_id,
+        "last_error": task.last_error,
+        "last_error_type": task.last_error_type,
+        "retry_count": task.retry_count,
+        "query": task.query,
+        "created_at": task.created_at.isoformat() if task.created_at else "",
+        "updated_at": task.updated_at.isoformat() if task.updated_at else "",
+    }
+
+
+async def load_for_resume(
+    *, task_id: str, user_id: int, organization_id: int | None = None
+) -> tuple[AgentTask, dict[str, Any] | None]:
+    """取任务行 + 校验过的快照信封。
+
+    - 行不存在或不属于 user_id（或组织不一致，给定 organization_id 时）→
+      TaskNotFoundError（对外 404，不区分二者）；
+    - 快照缺失/损坏/版本不符 → payload=None（安全降级：调用方从规划阶段重跑）；
+      终态判定由调用方做（is_terminal → TaskNotResumableError，409 语义）。
+    """
+    task = await load_task(task_id=task_id, user_id=user_id, organization_id=organization_id)
     payload: dict[str, Any] | None = None
     if task.context_snapshot is not None:
         payload = parse_snapshot(task.context_snapshot)

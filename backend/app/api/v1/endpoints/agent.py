@@ -2,6 +2,8 @@
 
 Endpoints:
     POST /api/v1/agent/chat           — PER agent chat (SSE streaming)
+    GET  /api/v1/agent/tasks/{id}     — Agent task status (checkpoint/resume, #201)
+    POST /api/v1/agent/tasks/{id}/resume — Resume an interrupted task (SSE, #201)
     GET  /api/v1/agent/tools          — List available tools with status
     GET  /api/v1/agent/skills         — List learned skills
     GET  /api/v1/agent/sessions       — List agent sessions
@@ -24,6 +26,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent import checkpoint
 from app.agent.config import DEFAULT_DISABLED_TOOLS, AgentConfig
 from app.agent.registry import tool_registry
 from app.agent.service import agent_service
@@ -183,6 +186,103 @@ async def agent_chat(
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         yield f"data: {json.dumps(done_data)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+# ── Checkpoint / Resume（issue #201 最小版）───────────────────────────────────
+
+async def _fallback_resume_config(user_id: int) -> AgentConfig:
+    """快照缺失/损坏（安全降级路径）时 resume 用的规则：用户已保存配置为基底，
+    并强制合并服务端禁用清单（与 _build_agent_config 同一安全保证）。"""
+    config = await AgentConfig.load_from_redis(f"user:{user_id}") or AgentConfig()
+    config.disabled_tools = _merge_disabled_tools(config.disabled_tools)
+    return config
+
+
+@router.get("/tasks/{task_id}")
+async def get_agent_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """任务状态视图（checkpoint/resume 的发现性入口；只读行、不解快照）。
+
+    404：不存在 / 非本人 / 组织不一致（不区分，避免泄露归属）。
+    """
+    task = await checkpoint.load_task(
+        task_id=task_id,
+        user_id=current_user.id,
+        organization_id=current_user.organization_id,
+    )
+    return {"success": True, "data": checkpoint.task_to_status_dict(task)}
+
+
+@router.post("/tasks/{task_id}/resume")
+async def resume_agent_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """从 checkpoint 恢复中断的任务（SSE 流；事件契约与 /chat 完全一致）。
+
+    - 200：从断点继续执行，事件流正常产出（不回放中断前事件——最小版边界）；
+    - 404：任务不存在 / 非本人（不区分）；
+    - 409：任务已终态，或正被另一个 resume 持有（detail 回带当前 state）。
+
+    预检与认领（prepare_resume）必须在开流之前完成：HTTP 状态码只在开始
+    流式输出前可写，404/409 语义全靠它拍板。
+    """
+    task, payload = await agent_service.prepare_resume(
+        task_id,
+        user_id=current_user.id,
+        organization_id=current_user.organization_id,
+    )
+    session_id = (payload or {}).get("session_id") or None
+    # 崩溃前已流给用户的部分不回放（最小版边界），但收尾落库要拼成完整回复。
+    prefix = (payload or {}).get("partial_output") or ""
+    fallback_config = await _fallback_resume_config(current_user.id)
+
+    async def event_stream():
+        final_answer = prefix
+        assistant_message_id = None
+        try:
+            async for event in agent_service.resume_chat(
+                task_id,
+                user_id=current_user.id,
+                config=fallback_config,
+                claim=False,  # 已在上方 prepare_resume 认领（HTTP 409 语义在开流前）
+            ):
+                sse_data = event.to_sse_dict()
+                yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
+                if event.type == "chunk":
+                    final_answer += event.content
+
+            # 收尾补写会话（与 /chat 同口径）。能走到这里说明原流从未完成落库
+            # （任务可恢复 ⇒ chat 的正常收尾分支没跑过），不存在重复写入窗口。
+            if session_id:
+                assistant_message_id = await _save_session_interaction(
+                    session_id,
+                    current_user.id,
+                    task.query,
+                    current_user.organization_id,
+                    final_answer,
+                )
+        except Exception as e:
+            logger.error(f"Agent resume error: {e}", exc_info=True)
+            error_data = {"type": "error", "content": f"Agent 恢复执行出错: {str(e)}"}
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+
+        done_data: dict[str, Any] = {"type": "done", "content": "", "task_id": task_id}
+        if assistant_message_id:
+            done_data["message_id"] = assistant_message_id
+        yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_stream(),
