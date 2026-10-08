@@ -27,9 +27,13 @@ class BaseAppSettings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/docmind.log"
     LOG_JSON: bool = True
-    REQUEST_ID_HEADER: str = "X-Request-ID"
 
-    # Monitoring
+    # Request ID —— 头名不是配置项（issue #242 已删除原 REQUEST_ID_HEADER 字段）：
+    # X-Request-ID 是「前端 request.ts ↔ CORS 白名单 ↔ RequestIDMiddleware 默认参」
+    # 三处硬编码的跨栈契约，单侧 env 旋钮没有可独立生效的空间。
+
+    # Monitoring —— ENABLE_MONITORING 只控制「后台指标快照任务」（main.py lifespan）；
+    # /metrics 端点与 PROMETHEUS_ENABLED 是独立开关，不受此值影响（issue #242 接线）。
     ENABLE_MONITORING: bool = True
     MONITORING_INTERVAL: int = 60
     SLOW_REQUEST_THRESHOLD_MS: int = 1200

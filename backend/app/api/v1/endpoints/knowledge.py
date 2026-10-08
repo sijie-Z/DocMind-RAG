@@ -190,7 +190,8 @@ async def search_knowledge(
         results = await knowledge_service.search_knowledge(
             query=request.query,
             organization_id=effective_org_id,
-            top_k=request.top_k or 10,
+            # 兜底与 schema 默认值同源（issue #242 接线）：默认 10，行为保持
+            top_k=request.top_k or settings.TOP_K_RESULTS,
             search_mode=mode
         )
         elapsed = time.perf_counter() - _t0

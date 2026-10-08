@@ -19,6 +19,11 @@ class SecuritySettings(BaseSettings):
     )
 
     # JWT
+    # 保留字段（issue #242 终单标注）：除下方 validator 的非空启动校验外，
+    # SECRET_KEY 当前无任何代码消费（全仓无加密/hmac/Fernet 读取点）。保留原因是
+    # 真实部署契约：k8s（02-secrets.yaml）、.env 样例、CI 均注入它，validator 借
+    # 此拦住「无密钥启动」。未来若赋予用途，优先候选=provider API key 的静态加密
+    #（user/llm_config 的 api_key 目前明文落盘）。
     SECRET_KEY: str = ""
     JWT_SECRET_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"

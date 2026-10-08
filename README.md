@@ -325,7 +325,7 @@ DocMind/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                  # FastAPI 入口，生命周期管理
-│   │   ├── agent_api.py             # 独立 Agent 测试 API（端口 8010）
+│   │   ├── agent_api.py             # 独立 Agent 测试 API（dev-only，端口 8010，不随生产部署）
 │   │   ├── dependencies.py          # 依赖注入容器
 │   │   ├── exceptions.py            # 自定义异常层次结构
 │   │   ├── api/v1/

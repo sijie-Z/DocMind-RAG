@@ -105,7 +105,6 @@ docker-compose up -d
 
 ### AI配置
 - `VECTOR_DIMENSION`: 向量维度（默认768）
-- `SIMILARITY_THRESHOLD`: 相似度阈值（默认0.7）
 - `TOP_K_RESULTS`: 搜索结果数量（默认10）
 
 ## 📚 API文档
@@ -138,6 +137,20 @@ docker-compose up -d
 - `POST /api/v1/chat/chat/stream` - 流式对话
 - `WebSocket /api/v1/chat/ws/chat` - WebSocket聊天
 - `GET /api/v1/chat/sessions` - 会话列表
+
+### 独立 Agent 测试服务（dev-only，端口 8010）
+
+`app/agent_api.py` 是一个**独立于主应用的** FastAPI app（未挂载进 `app.main`），
+用于 Agent 的离线评估与轨迹调试（`/chat` `/trace` `/plan` `/eval`）——**不属于
+生产部署的一部分**（与 trace 链的 dev-only 定性一致，issue #242）。启动方式：
+
+```bash
+cd backend && uvicorn app.agent_api:app --host 0.0.0.0 --port 8010
+```
+
+它经 `os.environ` 直读 `DEEPSEEK_API_KEY` / `DEEPSEEK_API_URL`（必填，缺失即退出）
+与可选的 `AGENT_API_KEY`（未配置则所有业务端点 503 拒绝）、`AGENT_API_MODEL` 等；
+**不加载 `.env`**，宿主直跑需先导出为真实环境变量（样例见 `.env.example` 注释块）。
 
 ## 🧪 测试
 

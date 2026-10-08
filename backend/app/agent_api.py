@@ -1,5 +1,8 @@
 """DocMind Agent Service API — stateless FastAPI interface for agent execution.
 
+Dev-only：独立于主应用（未挂载进 ``app.main``）、不随生产部署发布；用途为
+Agent 离线评估与轨迹调试（issue #242 定性；与 #255 对 trace 链的定性一致）。
+
 Endpoints:
     POST /chat     — Run agent, return answer + metrics
     POST /trace    — Run agent, return full execution trace

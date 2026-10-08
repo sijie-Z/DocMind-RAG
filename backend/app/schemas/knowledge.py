@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
+
 
 class SearchMode(str, Enum):
     """搜索模式"""
@@ -19,7 +21,13 @@ class KnowledgeSearchRequest(BaseModel):
     """知识库搜索请求"""
     query: str = Field(..., min_length=1, description="搜索查询")
     organization_id: int = Field(..., description="组织ID")
-    top_k: int = Field(10, ge=1, le=50, description="返回结果数量")
+    # 默认值取自 settings.TOP_K_RESULTS（issue #242 接线：此前 README 承诺
+    # 「默认10」但字段零消费）。默认 10==10，行为保持；chat 链路默认 5 不受影响。
+    top_k: int = Field(
+        default_factory=lambda: settings.TOP_K_RESULTS,
+        ge=1, le=50,
+        description="返回结果数量",
+    )
     search_mode: SearchMode = Field(SearchMode.HYBRID, description="搜索模式")
 
 

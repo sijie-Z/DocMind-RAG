@@ -346,7 +346,7 @@ DocMind/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                  # FastAPI entry point, lifecycle management
-│   │   ├── agent_api.py             # Standalone agent test API (port 8010)
+│   │   ├── agent_api.py             # Standalone agent test API (dev-only, port 8010, not in production deploy)
 │   │   ├── dependencies.py          # Dependency injection container
 │   │   ├── exceptions.py            # Custom exception hierarchy
 │   │   ├── api/v1/
