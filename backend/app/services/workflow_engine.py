@@ -10,7 +10,7 @@ import re
 import socket
 import traceback
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Any, TypedDict
 
@@ -62,6 +62,42 @@ def merge_dicts(left: dict, right: dict) -> dict:
 def merge_lists(left: list, right: list) -> list:
     """合并列表的 reducer 函数"""
     return left + right
+
+
+def _to_jsonable(value: Any) -> Any:
+    """把值递归规整为可 JSON 化形态（issue #281）。
+
+    背景：`build_graph.node_func` 发 `node_complete` 事件时携带 executor 原始返回
+    （input 节点必含 `messages: [HumanMessage]`，LLM 节点含 AIMessage）；流式端点
+    事件泵对该载荷直接 `json.dumps`，抛
+    `TypeError: Object of type HumanMessage is not JSON serializable` → SSE 只到
+    error、执行记录永卡 running（评审 #280 §7 实测复现）。
+
+    在引擎出口统一规整（源头治理——事件载荷、NodeResult 落库、execute 返回值
+    三处同口径）：
+
+    - str/int/float/bool/None 原样返回；
+    - dict/list/tuple/set 递归（dict 键统一为 str，JSON 对象的键必须为字符串）；
+    - date/datetime → isoformat（与引擎既有 timestamp 写法一致）；
+    - 有 model_dump 的对象（pydantic 模型、LangChain 消息）→ `model_dump(mode="json")`
+      ——与端点 `NodeResult.model_dump(mode="json")` 的落库形态实测逐字段一致；
+    - 其余对象降级为 `str(value)`：宁可丢类型，也不让事件泵抛异常。
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_jsonable(v) for v in value]
+    if isinstance(value, date):
+        return value.isoformat()
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            return _to_jsonable(model_dump(mode="json"))
+        except Exception:
+            return str(value)
+    return str(value)
 
 
 class NodeExecutor:
@@ -721,9 +757,16 @@ class WorkflowEngine:
         self.event_callback = callback
 
     async def emit_event(self, event_type: str, data: dict[str, Any]) -> None:
-        """发送事件"""
+        """发送事件。
+
+        #281：所有事件载荷在出口统一规整为可 JSON 化形态（_to_jsonable）——
+        流式端点事件泵对载荷直接 json.dumps，任何非 JSON 对象（如 node_complete
+        的 executor 原始返回里的 HumanMessage）都会炸掉整条 SSE。此出口是全部
+        事件类型（workflow_start/node_start/node_complete/node_error/workflow_error/
+        workflow_complete）的单一收口点，未来新增事件类型一并被覆盖。
+        """
         if self.event_callback:
-            await self.event_callback(event_type, data)
+            await self.event_callback(event_type, _to_jsonable(data))
 
     def get_executor(self, node: WorkflowNode) -> NodeExecutor:
         """获取节点执行器"""
@@ -795,15 +838,20 @@ class WorkflowEngine:
                         state_updates["errors"] = result.get("errors", [])
 
                     # 记录完成
+                    # #281：output 先规整为可 JSON 化形态再落 NodeResult —— 落库
+                    # （NodeResult.model_dump(mode="json")）、非流式响应与流式事件
+                    # 三处同形态，不再依赖 pydantic 对 Any 字段里 LangChain 消息的
+                    # 隐式序列化。
+                    jsonable_output = _to_jsonable(result)
                     self.node_results[_node.id].status = "completed"
-                    self.node_results[_node.id].output = result
+                    self.node_results[_node.id].output = jsonable_output
                     self.node_results[_node.id].completed_at = completed_at
                     self.node_results[_node.id].duration = duration
 
                     await self.emit_event("node_complete", {
                         "node_id": _node.id,
                         "node_type": _node.type,
-                        "output": result,
+                        "output": jsonable_output,
                         "duration": duration,
                         "timestamp": completed_at.isoformat()
                     })
@@ -930,13 +978,16 @@ class WorkflowEngine:
                 "timestamp": datetime.now().isoformat()
             })
 
-            return {
+            # #281：返回值会被端点原样 JSON 化（workflow_result 事件载荷 +
+            # workflow_executions.output_data JSON 列 + 非流式响应），与事件出口
+            # 同口径规整，堵住同族缺口。
+            return _to_jsonable({
                 "success": True,
                 "output": final_output,
                 "node_outputs": result.get("node_outputs", {}),
                 "context": result.get("context", {}),
                 "memory": result.get("memory", {})
-            }
+            })
 
         except Exception as e:
             await self.emit_event("workflow_error", {
