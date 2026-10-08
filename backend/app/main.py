@@ -30,7 +30,7 @@ from app.core.minio_client import minio_client
 from app.core.notification_ws import notification_ws_manager
 from app.core.redis import close_redis, init_redis
 from app.core.request_id import RequestIDMiddleware
-from app.core.security import optional_current_user
+from app.core.security import get_user_org_id, optional_current_user
 from app.core.tracing import setup_opentelemetry
 from app.exceptions import AppError
 from app.models.user import User
@@ -692,10 +692,11 @@ async def get_minio_file(
             if first_seg.isdigit():
                 org_prefix = first_seg
         if org_prefix is not None:
-            user_org = getattr(current_user, "organization_id", None) or getattr(
-                current_user, "token_organization_id", None
-            ) or 1
-            if not org_prefix.isdigit() or int(org_prefix) != user_org:
+            # 安全加固（issue #268）：此前 `... or 1` 把无组织用户算作 1 号组织的
+            # 阅读者——`documents/1/…` 与 `1/…` 前缀的对象对他直接放行（跨租户读取）。
+            # 现在无组织（且非超管）显式 403，绝不按 1 号组织授权。
+            user_org = get_user_org_id(current_user)
+            if user_org is None or not org_prefix.isdigit() or int(org_prefix) != int(user_org):
                 raise HTTPException(status_code=403, detail="无权访问该文件")
 
     try:
