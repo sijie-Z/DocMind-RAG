@@ -49,6 +49,19 @@ for k, v in _TEST_ENV.items():
     os.environ.setdefault(k, v)
 
 
+@pytest.fixture(autouse=True)
+def _reset_llm_breaker():
+    """隔离全局熔断器（issue #242）：executor 的 `_LLM_BREAKER` 是进程级单例
+    （生产正确：一个进程一份、跨请求累积）。但测试进程里，注入失败的用例会把
+    它打到 OPEN，污染后续用例的 LLM 调用路径——每个用例前后复位，保证用例间
+    行为与接线前一致。"""
+    from app.agent import executor as _ex_mod
+
+    _ex_mod._LLM_BREAKER._reset()
+    yield
+    _ex_mod._LLM_BREAKER._reset()
+
+
 @pytest.fixture(scope="session")
 def client():
     """创建 FastAPI TestClient（session 级别复用）。"""
