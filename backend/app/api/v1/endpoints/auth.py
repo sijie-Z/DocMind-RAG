@@ -5,6 +5,7 @@
 import hashlib
 import json
 import logging
+import secrets
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -49,8 +50,9 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     full_name: str | None = None
-    # 安全加固：禁止注册时自选组织（防越权加入任意组织读取文档），
-    # 组织归属由管理员分配。
+    # 安全加固：禁止注册时自选组织（防越权加入任意组织读取文档）。
+    # 注册成功后由服务端自动创建个人组织（owner=本人，见 /register 端点），
+    # 不并入任何既有组织。
 
     @field_validator('password')
     @classmethod
@@ -330,8 +332,15 @@ async def register(
             from app.services.organization_service import organization_service
             org_name = f"{user.username} 的空间"
             if await organization_service.get_organization_by_name(db, org_name):
-                # 极端重名兜底（username 唯一时应不可达）
+                # 同名兜底——该分支真实可达，勿按"不可达"删除：持有建组织权限者
+                # 可先预建同名组织；MySQL utf8mb4_unicode_ci 下名称比较不区分
+                # 大小写/重音，近名也会命中；用户行被 DB 层删除后用户名可复用。
                 org_name = f"{user.username}-{user.id} 的空间"
+                if await organization_service.get_organization_by_name(db, org_name):
+                    # 二级兜底名再被占（同样需预构造该前置条件）时追加随机后缀：
+                    # 组织名有 UNIQUE 约束，绝不因重名抛 IntegrityError → 注册 500
+                    # （issue #254 第 3 条）
+                    org_name = f"{user.username}-{user.id}-{secrets.token_hex(4)} 的空间"
             org = await organization_service.create_organization(
                 db,
                 {"name": org_name, "description": "注册时自动创建的个人空间", "is_private": True},
