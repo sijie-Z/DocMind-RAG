@@ -162,3 +162,41 @@ class TestConsumerWiring:
         assert captured == [3.5], (
             f"改写等待超时未跟随 settings.RAG_QUERY_REWRITE_TIMEOUT_SECONDS（issue #259），实际 {captured}"
         )
+
+    @pytest.mark.asyncio
+    async def test_rewrite_timeout_zero_floors_to_point_two(self, monkeypatch):
+        """issue #273 顺带 B（评审 Mu-D1）：0/负值 → `max(0.2, ·)` 下限常驻钉住。
+
+        消费跟随用例对「直读 vs getattr + `or 1.2` 回退」不可判别（字段存在时两式
+        对一切非 0 值等价），唯一分歧点是 0：新语义是显式钳到 0.2 下限，而不是回退
+        1.2。本用例专门锁这个分歧点，防止未来无意回退。
+        """
+        import app.rag.retriever as retriever_mod
+
+        captured: list[float] = []
+        real_wait_for = retriever_mod.asyncio.wait_for
+
+        async def capture_wait_for(coro, timeout):
+            captured.append(timeout)
+            return await real_wait_for(coro, timeout)
+
+        monkeypatch.setattr(
+            retriever_mod,
+            "asyncio",
+            types.SimpleNamespace(wait_for=capture_wait_for, gather=retriever_mod.asyncio.gather),
+        )
+        search = AsyncMock(return_value={"hits": {"hits": []}})
+        monkeypatch.setattr(retriever_mod.ElasticsearchTools, "search_documents", search)
+        monkeypatch.setattr(retriever_mod.settings, "RAG_ENABLE_QUERY_REWRITE", True)
+
+        for configured, expected in ((0, 0.2), (-5, 0.2)):
+            captured.clear()
+            monkeypatch.setattr(
+                retriever_mod.settings, "RAG_QUERY_REWRITE_TIMEOUT_SECONDS", configured
+            )
+            retriever = retriever_mod.HybridRetriever(openai_client=None)
+            await retriever._keyword_hits(f"下限钉住 {configured}", [], candidate_size=5)
+            assert captured == [expected], (
+                f"配置 {configured} 应钳到下限 {expected}（显式 0 ≠ 回退 1.2，issue #273），"
+                f"实际 {captured}"
+            )
