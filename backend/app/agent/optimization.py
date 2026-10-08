@@ -1,5 +1,8 @@
 """Optimization Loop Controller — system self-improvement layer.
 
+接线状态（#242 核实）：**dev-only** —— 全仓零导入者（依赖的 TraceStore 亦仅评测
+harness 写入）。
+
 What this provides:
     Analyzes TraceStore data and evaluation reports to find specific,
     actionable improvements to the Agent system. Tracks before/after

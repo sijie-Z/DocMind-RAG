@@ -31,6 +31,7 @@ from app.agent.registry import tool_registry
 from app.agent.retry_policy import compute_backoff, get_policy
 from app.agent.run_context import RunContext
 from app.agent.usage import record_llm_usage
+from app.core.circuit_breaker import CircuitBreaker
 from app.core.prometheus import (
     AGENT_EXECUTION_STEPS,
     AGENT_TOOL_CALLS,
@@ -39,6 +40,13 @@ from app.core.prometheus import (
 from app.core.step_runner import StepRunner
 
 logger = logging.getLogger(__name__)
+
+# 跨请求熔断（issue #242 第 7 条）：LLM 步骤调用路径的进程级熔断器（每 worker 一份）。
+# 阈值 3（与 Executor.MAX_CONSECUTIVE_FAILURES 同量级）；计数口径 = **自上次复位累计**
+# 的失败数（成功的复位只发生在非 CLOSED 态，即半开探测成功时）——provider 连续挂的
+# 场景下与"连续失败"等价。OPEN 后 30s 进入半开探测。
+# 说明：接的是状态机 API（allow_request/record_*）；装饰器的"降级返回值"契约仍未接线。
+_LLM_BREAKER = CircuitBreaker(name="llm", failure_threshold=3, recovery_timeout=30)
 
 EXECUTION_SYSTEM_PROMPT = """你是 DocMind 智能助手。你的任务是执行计划中的当前步骤。
 
@@ -715,6 +723,21 @@ class Executor:
                     input={"tool_count": len(tools) if tools else 0, "step_id": step.id},
                 )
 
+            # 跨请求熔断（issue #242 第 7 条）：OPEN 时毫秒级快速失败——provider 挂掉后，
+            # 后续请求不再各自重付分钟级超时成本。错误码 fatal（retry_policy），
+            # 后续沿用既有降级路径（fallback 链 / 步骤失败文案）。
+            if not _LLM_BREAKER.allow_request():
+                logger.warning("LLM breaker OPEN — fast-fail step %s", step.id)
+                yield AgentEvent(
+                    type="tool_error",
+                    tool_name=step.tool_hint or "llm",
+                    content="LLM 服务连续失败，熔断开启，快速失败",
+                    plan_id=plan.id,
+                    plan_step_id=step.id,
+                    error_type="circuit_open",
+                )
+                return
+
             # Hard asyncio-level bound for the per-step LLM call (issue #106 §4b).
             # The OpenAI client's own timeout only covers transport-level stalls;
             # this bound sits wider than config.timeout so it fires exactly when
@@ -743,6 +766,7 @@ class Executor:
                 # still sees it — a failed StepResult must not become a silent
                 # success.
                 logger.error(f"LLM call failed for step {step.id}: {call.error}")
+                _LLM_BREAKER.record_failure()  # 跨请求熔断计数（issue #242）
                 if lf and step_span:
                     step_span.end(output=f"llm_error: {call.error}", level="ERROR")
                 yield AgentEvent(
@@ -756,6 +780,7 @@ class Executor:
                 return
 
             response = call.output
+            _LLM_BREAKER.record_success()  # 跨请求熔断：半开探测成功即闭合（issue #242）
             step_tokens = record_llm_usage(response, ctx)
 
             if lf and llm_span:

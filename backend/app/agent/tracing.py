@@ -1,5 +1,10 @@
 """Execution Observability Layer — structured trace recording for the Multi-Agent OS.
 
+接线状态（#242 核实）：**dev-only** —— 写入者为评测 harness 路径（orchestrator /
+executor_agent，均无生产调用者；后者还有一处零读者的 `_pending_step` 悬挂写）；
+生产 run 不写本 store。运行时轨迹由 Run Report / `execution_context` SSE /
+ExecutionContext（Redis 7 天 → benchmark/mining 离线消费）承担。
+
 What this provides:
     ExecutionTrace       — full lineage of one user request (plan → steps → tool calls → results)
     TraceStore           — in-memory ring buffer with query/filter/aggregate

@@ -3,20 +3,15 @@
 小白解释：就像家里的保险丝，如果某个外部服务（比如 AI 接口）一直报错，
 保险丝就会断开，直接返回预设好的“友好提示”，而不是让整个系统卡死在那。
 
-当前接线状态（issue #106 §4c，2026-10 核实）：**本模块未接入生产路径**。
-    - 此前定义的三个模块级实例（AI-DeepSeek / Database / Elasticsearch）在仓库内
-      零引用，已删除 —— 留着它们会诱导把关键调用接成一个「失败时静默返回降级值」
-      的陷阱。
-    - 不接线的理由：本实现在失败/熔断时**吞掉异常**，返回按函数返回注解推导的降级值
-      （list→[]、dict→{...}、str→提示语、无注解→None）。调用方无法区分「成功返回了
-      空结果」与「服务已熔断/失败」；而 Agent 执行器的错误分类与重试
-      （executor.py `_execute_step_with_retry`，依据 tool_error 事件上的 error_type
-      查 retry_policy）依赖异常被分类后上浮 —— 接上会让失败变成静默降级。
-      Agent 执行侧同类保护由 Executor 自身的连续失败熔断（MAX_CONSECUTIVE_FAILURES）
-      与 StepRunner 硬超时承担。证据见 _orchestrate/cc_report_ws106a.md。
-    - 未来若要接入：先让熔断可区分 —— OPEN 时抛出一个可分类的异常（或提供显式的
-      degraded 标记），并同步修改 tests/unit/test_circuit_breaker.py 中锁定的
-      「降级返回值」契约。
+当前接线状态（issue #106 §4c 核实；issue #242 第 7 条更新）：**状态机 API 已接入
+LLM 步骤调用路径**（`executor._execute_step_once` 用 `allow_request/record_success/
+record_failure` + `CircuitOpenError.error_type="circuit_open"` 进 retry_policy 的
+fatal 分支），即"跨请求熔断 + 半开恢复"这一全仓唯一缺失的容错维度已补齐；
+**装饰器路径仍未接线**——它在失败/熔断时吞掉异常并返回按返回注解推导的降级值
+（list→[]、dict→{...}、str→提示语、无注解→None），调用方无法区分「成功返回了
+空结果」与「服务已熔断/失败」，会破坏执行器的错误分类与重试。若要给别的调用层
+用装饰器：先让熔断可区分（OPEN 时抛出可分类异常或显式 degraded 标记），并同步
+修改 tests/unit/test_circuit_breaker.py 中锁定的「降级返回值」契约。
 """
 
 import asyncio
@@ -33,6 +28,15 @@ class CircuitState(Enum):
     CLOSED = "CLOSED"      # 正常运行（保险丝闭合）
     OPEN = "OPEN"          # 熔断开启（保险丝断开）
     HALF_OPEN = "HALF_OPEN" # 半开启（尝试恢复中）
+
+
+class CircuitOpenError(Exception):
+    """熔断开启时的可分类异常（issue #242 第 7 条）。
+
+    带 `error_type="circuit_open"`：调用方可把它并入既有错误分类管线
+    （retry_policy 中为 fatal——OPEN 期内重试必然被门拒绝，重试只是白付探测成本）。
+    """
+    error_type = "circuit_open"
 
 class CircuitBreaker:
     """
@@ -110,6 +114,31 @@ class CircuitBreaker:
         self.state = CircuitState.CLOSED
         self.failure_count = 0
         self.last_failure_time = 0.0
+
+    # ── 状态机 API（issue #242 第 7 条）──────────────────────────────────
+    # 不触碰装饰器（保持 tests/unit/test_circuit_breaker.py 的降级值契约不动）；
+    # 供"失败必须可分类上浮"的调用方（如 executor 的 LLM 步骤路径）显式使用。
+
+    def allow_request(self) -> bool:
+        """是否放行一次真实调用；OPEN 超过恢复窗口则转 HALF_OPEN 放行探测。"""
+        if self.state is CircuitState.CLOSED:
+            return True
+        if self.state is CircuitState.OPEN:
+            if time.time() - self.last_failure_time > self.recovery_timeout:
+                logger.info(f"🔄 熔断器 [{self.name}] 进入半开启状态，尝试恢复...")
+                self.state = CircuitState.HALF_OPEN
+                return True
+            return False
+        return True  # HALF_OPEN：放行探测（v1 不设单探测闸，多并发探测是良性的）
+
+    def record_success(self) -> None:
+        """一次成功调用：半开探测成功（或任何非 CLOSED 态下的成功）→ 闭合。"""
+        if self.state is not CircuitState.CLOSED:
+            self._reset()
+
+    def record_failure(self) -> None:
+        """一次失败调用：计数，达阈值转 OPEN（复用既有 _handle_failure）。"""
+        self._handle_failure(CircuitOpenError("probe failed"))
 
     def _get_fallback_value(self, func: Callable) -> Any:
         """根据函数返回类型提供降级后的默认值"""

@@ -213,7 +213,7 @@ docker exec docmind-backend env | grep -i prometheus    → 无
 | 技能学习闭环 | **零调用者** | `app/agent/skills.py:181, 192` |
 | `skills/` 的 SKILL.md 进提示词 | 只被 REST 端点读 | `curated_skills.py` |
 | Checkpoint / 断点续跑（表已建 + 状态机已定义） | **运行时零读写** | `models/agent_task.py` |
-| 两套轨迹设施（含 JSONL 落盘） | 只被未挂载的模块用 | `core/trace_logger.py`、`agent/tracing.py` |
+| 两套轨迹设施（含 JSONL 落盘） | 只被未挂载的模块用；**已按 dev-only 标注处置（#242）** | `core/trace_logger.py`、`agent/tracing.py` |
 | 分层结果截断器 `_smart_truncate` | **零调用** | `loop.py:56` |
 | 人工升级 `escalation` | 实例化了但**从不查询** | `escalation.py:51` |
 | `ExecutionContext.total_tokens` | **全仓零赋值** | `exec_context.py:82` |

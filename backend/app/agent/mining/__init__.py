@@ -1,5 +1,8 @@
 """Pattern Mining — discovers recurring tool-use patterns from execution history.
 
+接线状态（#242 核实）：**dev-only 离线 CLI** —— 读 benchmark/replay/ 的落盘回放；
+运行时无导入者。
+
 Pipeline:
     Execution Replay (benchmark/replay/*.json)
         ↓

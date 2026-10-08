@@ -123,7 +123,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 |--------|------|------|
 | 经验记忆 | `experience/` | 从失败运行中自动提取经验教训，注入 Planner |
 | 执行回放 | `replay/` | 完整执行快照保存与回放，支持 diff 对比 |
-| 模式挖掘 | `mining/` | 扫描回放发现高频工具序列，生成技能建议 |
+| 模式挖掘 | `mining/` | 扫描回放发现高频工具序列，生成技能建议（离线 CLI，读 benchmark/replay/） |
 
 ### 📚 RAG 管线 (`backend/app/rag/`)
 
@@ -167,10 +167,10 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 消息 | `kafka_client.py` | aiokafka 生产者 |
 | 认证 | `security.py` | JWT + bcrypt，get_current_user 依赖，RBAC 辅助 |
 | 中间件 | `middleware.py` | 指标收集（请求数/延迟/错误率） |
-| 熔断 | `circuit_breaker.py` | 熔断器模式——**当前未接入生产路径**（熔断时吞异常返回降级值，会破坏执行器的错误分类；详见模块 docstring） |
+| 熔断 | `circuit_breaker.py` | 熔断器模式——**状态机 API 已接 LLM 步骤路径（跨请求熔断 + 半开恢复，issue #242）**；装饰器降级契约仍未接线（详见模块 docstring） |
 | 步骤执行 | `step_runner.py` | 带重试/回退的安全步骤执行 |
 | 链路追踪 | `tracing.py` | OpenTelemetry OTLP gRPC 导出 |
-| 追踪日志 | `trace_logger.py` | Agent 执行追踪 JSONL 记录 |
+| 追踪日志 | `trace_logger.py` | Agent 执行追踪 JSONL 记录（dev-only：仅未挂载的独立测试 app `agent_api.py`:8010 使用，仓库内无读者） |
 | 指标 | `prometheus.py` | 自定义计数器/直方图（检索延迟、LLM token、缓存命中、RAG 质量） |
 | WebSocket | `notification_ws.py` | 通知实时推送连接管理器 |
 | 请求 ID | `request_id.py` | X-Request-ID 注入 |
@@ -346,7 +346,7 @@ DocMind/
 │   │   │   ├── memory_bridge.py     #   记忆桥接
 │   │   │   ├── events.py            #   SSE 事件类型（12 种）
 │   │   │   ├── message.py           #   Agent 间消息总线
-│   │   │   ├── tracing.py           #   执行追踪记录
+│   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
 │   │   │   ├── tools/               #   30 个工具实现
 │   │   │   │   ├── web_search.py    #   网络搜索
 │   │   │   │   ├── code_execution.py #  Python/SQL 沙箱
