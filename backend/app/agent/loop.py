@@ -729,8 +729,10 @@ class PERAgentLoop:
     ) -> AsyncGenerator[AgentEvent, None]:
         """Re-execute a single step the reflector asked for, with a retry ceiling.
 
-        ctx 透传（复核补缝）：反思重试同样受预算门约束（此前不带 ctx 会绕过
-        预算熔断与迭代计数）。
+        ctx 透传（复核补缝）：反思重试同样受 token 预算门约束（此前不带 ctx 会
+        绕过预算熔断）。注意：重试**不**重复计入迭代数（iterations_used 仅在
+        executor.execute 派发时累计）——属既定语义，透传前后皆然（#245 第 7 条
+        措辞澄清：原"绕过预算熔断与迭代计数"半句会误读成透传后重试开始计数）。
         """
         for step in plan.steps:
             if step.id != step_id:
@@ -768,6 +770,8 @@ class PERAgentLoop:
 
         只补没有 tool_hint 的步骤、不覆盖 planner 自己的判断；来源是
         SkillManager.match()（trigger_patterns 命中且成功率加权达标）。
+        hint 工具名不在**当前可见工具集**时跳过（#245 第 6 条）：技能学自历史
+        会话，tool_tags / disabled_tools / enable_tools 漂移后旧工具名不可再承诺。
         返回**实际被应用**的 skill_id（供 run 结束时回报使用结果，评审 B2 反馈边）；
         没命中、或一条提示都没应用上 → None。
         任何失败只记日志——学习闭环绝不阻塞主流程。
@@ -779,6 +783,12 @@ class PERAgentLoop:
             return None
         if not skill or not skill.tool_sequence:
             return None
+        # 可见工具预校验（#245 第 5/6 条，与 _get_tools 的呈现过滤同源）：
+        # hint 进提示词会诱导模型调用一个当前看不见、甚至被执行层拒绝的工具。
+        # toolless（enable_tools=False）时可见集为空 → 一条都不应用。
+        visible = {
+            t.get("function", {}).get("name") for t in (self._get_tools() or [])
+        }
         applied = 0
         i = 0
         for step in plan.steps:
@@ -788,9 +798,14 @@ class PERAgentLoop:
                 break
             item = skill.tool_sequence[i]
             hint = item.get("tool_name") if isinstance(item, dict) else None
-            if hint:
+            if hint and hint in visible:
                 step.tool_hint = hint
                 applied += 1
+            elif hint:
+                logger.info(
+                    "Skill hint skipped（跨会话工具漂移）: %s 不在当前可见工具集（技能 %s）",
+                    hint, skill.id,
+                )
             i += 1
         if applied:
             logger.info(
@@ -912,7 +927,14 @@ class PERAgentLoop:
         # 技能索引进提示词（issue #200）：SKILL.md 此前从不进任何提示词。
         # 受限工具上下文（tool_tags 非空，如子代理）不得注入：技能工具在其白名单外，
         # 提示词不能承诺一个必被拒绝的工具（issue #200 评审 B1）。
-        if self.config.enable_skills and not self.config.tool_tags:
+        # toolless（enable_tools=False）同样不得注入（#245 第 1/3 条）：该模式下的
+        # 单次 LLM 调用不带 tools 参数，索引文案（"用 load_skill_reference 工具加载"）
+        # 是悬挂引用——与 B1 同理，不承诺一个不可达的工具。
+        if (
+            self.config.enable_skills
+            and self.config.enable_tools
+            and not self.config.tool_tags
+        ):
             skills_index = build_skills_index()
             if skills_index:
                 system_prompt += f"\n\n{skills_index}"
