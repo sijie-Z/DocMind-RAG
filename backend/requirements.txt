@@ -59,7 +59,7 @@ prometheus-client>=0.26.0
 filetype>=1.2.0
 opentelemetry-api>=1.44.0
 opentelemetry-sdk>=1.22.0
-opentelemetry-exporter-otlp-proto-grpc>=1.22.0
+opentelemetry-exporter-otlp-proto-grpc>=1.45.0
 opentelemetry-instrumentation-fastapi>=0.43b0
 # Langfuse 代码按 v2 API 编写（app/agent/observability.py 的 lf.span / lf.generation）。
 # 4.x 移除了这些 API，无上界会让全新环境装到 4.x、观测链在真正启用时静默失效
