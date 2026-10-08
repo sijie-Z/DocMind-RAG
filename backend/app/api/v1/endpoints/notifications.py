@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.notification_ws import notification_ws_manager
 from app.core.security import get_current_user
-from app.core.ws_auth import authenticate_ws
+from app.core.ws_auth import authenticate_ws, extract_ws_subprotocol
 from app.exceptions import NotFoundError
 from app.models.notification import Notification
 from app.models.user import User
@@ -63,7 +63,10 @@ async def notification_ws(
         return
     user_id = user.id
 
-    await notification_ws_manager.connect(user_id, websocket)
+    # 原样回显客户端请求的 auth.* 子协议（issue #258）：不回显时浏览器强制判定
+    # 握手失败（close 1006）。提取不到时保持裸 accept() 语义。
+    subprotocol = extract_ws_subprotocol(websocket)
+    await notification_ws_manager.connect(user_id, websocket, subprotocol)
     try:
         while True:
             data = await websocket.receive_text()

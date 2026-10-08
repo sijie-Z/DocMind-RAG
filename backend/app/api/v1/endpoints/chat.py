@@ -17,6 +17,7 @@ from app.core.ws_auth import (
     WS_REASON_USER_INVALID,
     authenticate_ws,
     close_ws,
+    extract_ws_subprotocol,
     load_active_ws_user,
 )
 from app.exceptions import AppError, AuthorizationError, NotFoundError, ValidationError
@@ -404,8 +405,11 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: dict[int, list[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket, user_id: int):
-        await websocket.accept()
+    async def connect(self, websocket: WebSocket, user_id: int, subprotocol: str | None = None):
+        # 原样回显客户端请求的 auth.* 子协议（issue #258）：浏览器在"请求了子协议
+        # 而 101 响应未回显"时强制判定握手失败（close 1006）。提取不到时传 None，
+        # 与裸 accept() 语义一致。
+        await websocket.accept(subprotocol=subprotocol)
         self.active_connections.setdefault(user_id, []).append(websocket)
 
     def disconnect(self, websocket: WebSocket):
@@ -451,8 +455,10 @@ async def websocket_endpoint(
         return
     user_id = user.id
 
-    # Accept the auth subprotocol so the client knows it was accepted
-    await manager.connect(websocket, user_id)
+    # 原样回显客户端请求的 auth.* 子协议（issue #258）：不回显时浏览器强制判定
+    # 握手失败（close 1006）。提取不到时保持裸 accept() 语义。
+    subprotocol = extract_ws_subprotocol(websocket)
+    await manager.connect(websocket, user_id, subprotocol)
 
     # 安全加固：跟踪当前 pipeline 任务，客户端断连时取消，防止孤儿任务继续烧 LLM 费用
     pipeline_task: asyncio.Task | None = None
