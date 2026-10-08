@@ -46,6 +46,7 @@ class HybridRetriever:
     async def _keyword_hits(self, query: str, filters: list[dict], candidate_size: int) -> list[dict]:
         enable_qr = bool(getattr(settings, "RAG_ENABLE_QUERY_REWRITE", True))
         rewrite_queries = rewrite_query_candidates(query)
+        base_count = len(rewrite_queries)  # 本地改写站产出条数（含原查询），用于折算存活新增
         if enable_qr:
             timeout_sec = float(getattr(settings, "RAG_QUERY_REWRITE_TIMEOUT_SECONDS", 1.2) or 1.2)
             try:
@@ -53,20 +54,24 @@ class HybridRetriever:
                     rewrite_query_llm(query, self.openai_client, settings.DEEPSEEK_MODEL),
                     timeout=max(0.2, timeout_sec),
                 )
-                added = 0
                 for item in llm_rewrites:
                     cleaned = (item or "").strip()
                     if cleaned and cleaned not in rewrite_queries:
                         rewrite_queries.append(cleaned)
-                        added += 1
-                if added:
-                    # 指标补埋（issue #242 第 10 条）：LLM 改写变体同样计入。
-                    RAG_QUERY_REWRITE_TOTAL.inc(added)
             except Exception as e:
                 logger.warning(f"LLM query rewrite timeout/fail: {e}")
 
         rewrite_limit = max(1, int(getattr(settings, "RAG_QUERY_REWRITE_COUNT", 4) or 4))
         rewrite_queries = rewrite_queries[:rewrite_limit]
+
+        # 指标补埋（issue #242 第 10 条；过计修复 issue #250 第 1 条）：
+        # LLM 改写变体按**最终采用**的一份计数 —— 计数移到截断之后，只记截断后
+        # 仍存活、且由 LLM 追加的变体数。此前在截断前计 `added`，被
+        # `rewrite_limit` 截掉、从未执行的变体也入了账（单次最多过计 2 条），
+        # 与本地站（query_processor 截断后计数）口径不自洽。
+        surviving_llm_added = max(0, len(rewrite_queries) - base_count)
+        if surviving_llm_added:
+            RAG_QUERY_REWRITE_TOTAL.inc(surviving_llm_added)
 
         intent = QueryIntentClassifier.classify(query)
         boost_fields = QueryIntentClassifier.get_boost_fields(intent)

@@ -105,6 +105,13 @@ def _build_metrics() -> dict[str, Any]:
     m["LLM_REQUEST_TOTAL"] = Counter("rag_llm_requests_total", "Total LLM API requests")
     m["LLM_REQUEST_ERRORS"] = Counter("rag_llm_request_errors_total", "LLM API requests that failed")
     m["LLM_TOKENS"] = Counter("rag_llm_tokens_total", "LLM tokens consumed", ["direction"])
+    # agent（PER 环 + 工具内调用）独立口径（issue #239 minor-9）：此前与 RAG 侧
+    # 共用 rag_llm_tokens_total，观测上无法拆分两条链路。model 标签由 usage.py
+    # 从 response.model 提取（取不到回退 "unknown"）。
+    m["AGENT_TOKENS"] = Counter(
+        "agent_tokens_total", "Agent-side LLM tokens consumed (PER loop + tool-internal calls)",
+        ["model", "direction"],
+    )
     m["LLM_LATENCY"] = Histogram("rag_llm_latency_seconds", "LLM streaming response latency",
                                   buckets=[0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0])
     m["RAG_GROUNDED_TOTAL"] = Counter("rag_grounded_total", "Total groundedness checks")
@@ -150,6 +157,7 @@ RAG_CACHE_EVICTIONS      = _LazyMetric("RAG_CACHE_EVICTIONS")
 LLM_REQUEST_TOTAL        = _LazyMetric("LLM_REQUEST_TOTAL")
 LLM_REQUEST_ERRORS       = _LazyMetric("LLM_REQUEST_ERRORS")
 LLM_TOKENS               = _LazyMetric("LLM_TOKENS")
+AGENT_TOKENS             = _LazyMetric("AGENT_TOKENS")
 LLM_LATENCY              = _LazyMetric("LLM_LATENCY")
 RAG_GROUNDED_TOTAL       = _LazyMetric("RAG_GROUNDED_TOTAL")
 RAG_GROUNDED_HITS        = _LazyMetric("RAG_GROUNDED_HITS")

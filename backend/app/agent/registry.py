@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 class ToolError:
     """Structured error information returned by a tool.
 
-    code: one of 23 ToolErrorType literals (§13.3 agent-reliability-design.md)
+    code: one of 26 ToolErrorType literals (§13.3 agent-reliability-design.md)
     """
 
     # ── Union of all known error types ──────────────────────────────────
@@ -671,7 +671,7 @@ class ToolRegistry:
             )
 
     async def _builtin_error_mapper_hook(self, result: ToolResult, ctx: HookContext) -> None:
-        """Post-hook: map raw exception types to 23 standardised ToolErrorType codes.
+        """Post-hook: map raw exception types to 26 standardised ToolErrorType codes.
 
         Classifies into retryable (timeout/rate/unreachable/interrupted),
         non-retryable (not_found/perm/validation/empty/payload...),

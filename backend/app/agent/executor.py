@@ -820,8 +820,13 @@ class Executor:
             if ctx is not None:
                 # 直答步骤此前不产生 StepRecord（#239 minor-10 / #245 第 8 条）：
                 # 这类 run 的 run report / execution_context 的 steps 恒为空。
+                # 修复（#250 第 5 条）：duration/tokens 此前也恒为 0（该路径
+                # step_tokens 有值——主调 usage 已采集——但未传递），run report
+                # 按步展示 token 时全是 0。现按实际墙钟与已采集用量落账。
                 ctx.complete_step(
                     step.id, step.description, step.tool_hint, "completed", result=content,
+                    duration=(time.perf_counter() - step_start) * 1000,
+                    tokens=step_tokens,
                 )
             return
 
@@ -909,6 +914,11 @@ class Executor:
                     session_id=getattr(self.config, "agent_id", None),
                     agent_id=getattr(self.config, "agent_id", "default"),
                     config=getattr(self.config, "model_config", {}) or {},
+                    # 工具内 LLM 记账（issue #239 minor-2）：把本轮 ExecutionContext
+                    # 挂上 run_context，声明了 `run_context` 形参的工具（注册表按
+                    # 签名注入）即可经 usage.ctx_from_run_context 取到 ctx，
+                    # 使任务级 total_tokens 包含工具内部的 LLM 调用。
+                    extra={"exec_ctx": ctx} if ctx is not None else {},
                 )
                 raw_result = await asyncio.wait_for(
                     tool_registry.execute_detailed(

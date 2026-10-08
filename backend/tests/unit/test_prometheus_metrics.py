@@ -11,6 +11,7 @@ from app.core.prometheus import (  # noqa: E402
     AGENT_PLANNING_LATENCY,
     AGENT_PLANNING_TOTAL,
     AGENT_REFLECTION_DECISIONS,
+    AGENT_TOKENS,
     AGENT_TOOL_CALLS,
     AGENT_TOOL_LATENCY,
     LLM_TOKENS,
@@ -84,6 +85,19 @@ class TestPrometheusMetrics:
         LLM_TOKENS.labels(direction="output").inc(50)
         assert _counter_value_labelled(LLM_TOKENS, {"direction": "input"}) >= 100
         assert _counter_value_labelled(LLM_TOKENS, {"direction": "output"}) >= 50
+
+    def test_agent_tokens_labels(self):
+        """agent 侧独立口径（#239 minor-9）：model + direction 双标签。"""
+        AGENT_TOKENS.labels(model="deepseek-chat", direction="input").inc(200)
+        AGENT_TOKENS.labels(model="deepseek-chat", direction="output").inc(80)
+        assert _counter_value_labelled(
+            AGENT_TOKENS, {"model": "deepseek-chat", "direction": "input"}
+        ) >= 200
+        assert _counter_value_labelled(
+            AGENT_TOKENS, {"model": "deepseek-chat", "direction": "output"}
+        ) >= 80
+        data = get_prometheus_metrics().decode("utf-8")
+        assert "agent_tokens_total" in data
 
     def test_pipeline_in_flight_gauge(self):
         """Gauge can increment and decrement."""
