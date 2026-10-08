@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401 — 注册全部表，供 create_all
@@ -25,6 +25,7 @@ from app.agent.loop import PERAgentLoop
 from app.agent.service import AgentService
 from app.core.database import Base
 from app.models.agent_task import AgentTask, TaskStatus
+from app.rag.retriever import HybridRetriever
 
 QUERY = "总结一下这份项目资料"
 USER_ID = 7
@@ -32,12 +33,19 @@ USER_ID = 7
 
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch):
-    """隔离与 checkpoint 无关的副作用（replay 落盘 / 经验回写）。"""
+    """隔离与 checkpoint 无关的副作用（replay 落盘 / 经验回写 / 语义记忆 embedding）。
+
+    m6/R7（#278）：本文件全链用例此前会真实发起 embedding RPC（memory_bridge 的
+    语义记忆召回/经验回写经 RAGPipeline.get_embedding → HybridRetriever.get_embedding
+    打真 Ollama：本机可达时实测 404、CI 不可达时连接失败——环境应答不同）。桩成
+    "无网络、空向量" = 两环境既有的降级结果，用例对环境封闭、结果稳定。
+    """
     async def _save(self, ttl=86400 * 7):
         return False
 
     monkeypatch.setattr(ExecutionContext, "save", _save)
     monkeypatch.setattr(PERAgentLoop, "_write_experiences", AsyncMock())
+    monkeypatch.setattr(HybridRetriever, "get_embedding", AsyncMock(return_value=[]))
 
 
 @pytest.fixture
@@ -249,3 +257,124 @@ async def test_missing_snapshot_resume_degrades_to_fresh_planning(db_factory):
     async with db_factory() as db:
         rows = (await db.execute(select(AgentTask).where(AgentTask.id == task_id))).scalars().all()
     assert len(rows) == 1, "同一 task 行内重跑，不新建任务"
+
+
+@pytest.mark.asyncio
+async def test_truncated_json_snapshot_resume_degrades_and_heals(db_factory):
+    """R1（#278）第二类坏快照：快照列是截断 JSON（无服务端校验的载体可达，如
+    sqlite/带外写库）——resume 不得被毒丸炸崩，按"无快照"降级干净重跑，且首轮
+    新快照落盘即覆盖坏数据（读路径自愈；修复前每次 resume 都在读行时
+    JSONDecodeError）。
+
+    变异点：还原 checkpoint 读路径容错（_load_task_row 的 defer 或单独读快照
+    的 try/except）→ load_for_resume 抛 JSONDecodeError → 本用例红。
+    """
+    client, calls = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    events = await _crash_after_n_completed_steps(agen, n=2)
+    task_id = _task_id_of(events)
+    assert calls["n"] == 2
+
+    # 带外写库把快照列打成截断 JSON（绕过 ORM 序列化）
+    async with db_factory() as db:
+        await db.execute(
+            text("UPDATE agent_tasks SET context_snapshot = :s WHERE id = :tid"),
+            {"s": '{"v": 1, "ctx": {', "tid": task_id},
+        )
+        await db.commit()
+
+    # resume：不得崩（修复前 JSONDecodeError），降级为从规划干净重跑
+    # （快照不可读 → 规则取调用方传入的配置，与"无快照"路径同语义）
+    events2 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID, config=_agent_config())]
+
+    assert any(e.type == "done" for e in events2)
+    assert calls["n"] == 5, "截断快照 = 无快照：3 步全部干净重跑（2 + 3）"
+    task = await _get_task(db_factory, task_id)
+    assert task.status == TaskStatus.COMPLETED, "收尾（mark_terminal）不得被毒丸行卡死"
+    _, healed = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
+    assert healed is not None and healed["plan"], "首轮新快照已覆盖坏数据：读路径自愈"
+
+
+@pytest.mark.asyncio
+async def test_resume_stream_events_all_carry_task_id_stamp(db_factory):
+    """m5/R6（#278）：resume 流的**每一个**事件都必须盖章 task_id（chat 路径已
+    有 _task_id_of 守卫；resume 路径此前零覆盖——评审 MUT-D 删盖章 37 全绿）。
+
+    变异点：删 service.resume_chat 里的 `event.task_id = task_id` → resume 流
+    事件全部退化为空 task_id → 本用例红。
+    """
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    events = await _crash_after_n_completed_steps(agen, n=1)
+    task_id = _task_id_of(events)
+
+    events2 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID)]
+
+    assert any(e.type == "done" for e in events2)
+    unstamped = [e.type for e in events2 if e.task_id != task_id]
+    assert not unstamped, f"resume 流事件必须全部携带 task_id（缺失事件类型: {unstamped}）"
+
+
+@pytest.mark.asyncio
+async def test_resume_disconnect_releases_lease_for_immediate_retry(db_factory, monkeypatch):
+    """m2/R3（#278）：resume 断流（客户端中断）归还租约——立即重试不被 TaskBusy
+    拒（修复前断流兜底快照会把租约续到 900s，重试被拒至多 15 分钟）。
+
+    变异点：去掉 _checkpoint_disconnect 的 release_lease 归还（还原旧形态）→
+    断流后锁仍在、重试抛 TaskBusy → 本用例红。
+    """
+    fake = _FakeRedisLock()
+    monkeypatch.setattr(checkpoint, "redis_client", fake)
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    events = await _crash_after_n_completed_steps(agen, n=2)
+    task_id = _task_id_of(events)
+
+    # 第一次 resume：消费到 1 个步骤完成后断流（= 客户端中断/server 取消）
+    agen2 = svc.resume_chat(task_id, user_id=USER_ID)
+    await _crash_after_n_completed_steps(agen2, n=1)
+
+    assert checkpoint._lock_key(task_id) not in fake.store, (
+        "resume 断流必须归还租约（否则被兜底快照续到 900s）"
+    )
+    # 立即重试：不得被 TaskBusy 拒绝；这一趟必须跑到完成
+    events3 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID)]
+    assert any(e.type == "done" for e in events3)
+    assert (await _get_task(db_factory, task_id)).status == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_resume_passes_task_org_truthfully_without_or1(db_factory, monkeypatch):
+    """m3（#278，#168/#268 禁模式）：resume 构造 PERAgentLoop 时如实传任务归属
+    组织——org=None 如实为 None（绝不 `or 1` 伪造落入 1 号组织）；org=42 如实
+    为 42（防过度修复/防归属错位）。
+
+    变异点：恢复 `task.organization_id or 1` → None 段捕获到 1 → 本用例红。
+    """
+    captured: list[int | None] = []
+
+    class _CapturingLoop:
+        def __init__(self, openai_client=None, config=None, organization_id=None, user_id=None):
+            captured.append(organization_id)
+            self.checkpoint_live = None
+
+        async def run(self, query, **kwargs):
+            if False:  # 空事件 async generator：本用例只钉构造参数
+                yield None
+
+    monkeypatch.setattr("app.agent.service.PERAgentLoop", _CapturingLoop)
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+
+    for org in (None, 42):
+        task_id = await checkpoint.create_task(user_id=USER_ID, organization_id=org, query=QUERY)
+        events = [e async for e in svc.resume_chat(task_id, user_id=USER_ID, config=_agent_config())]
+        assert events == [], "假 loop 不产事件（本用例只钉构造参数）"
+        assert (await _get_task(db_factory, task_id)).status == TaskStatus.COMPLETED
+
+    assert captured == [None, 42], (
+        "resume 必须如实传 task.organization_id（bug 形态：None 被 `or 1` 伪造为 1）"
+    )

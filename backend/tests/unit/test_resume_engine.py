@@ -280,3 +280,41 @@ async def test_resume_uses_frozen_history_from_snapshot():
 
     assert executed == ["s2"]
     assert memory.interactions[0][1] == "R1结果-s2"
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        lambda p: p["plan"].__setitem__("steps", "boom"),
+        lambda p: p["ctx"].__setitem__("artifacts", [1, 2]),
+    ],
+    ids=["plan-steps-not-list", "ctx-artifacts-not-mapping"],
+)
+@pytest.mark.asyncio
+async def test_deep_corrupt_snapshot_degrades_to_fresh_planning(corrupt):
+    """R1（issue #278）：合法 JSON、深结构坏形状的快照不得成为毒丸——重建段
+    任何异常一律按"损坏即无快照"安全降级：从规划阶段干净重跑、全步执行、不崩，
+    损坏快照的残留字段（partial 前缀等）一律不进新 run。
+
+    实测形态：plan.steps 非列表 → Plan.from_checkpoint_dict 迭代字符串抛
+    AttributeError；ctx.artifacts 非映射 → ExecutionContext.from_checkpoint_dict
+    抛 TypeError。变异点：去掉 loop.run 重建段的 try/except（还原抛异常形态）→
+    本例以 AttributeError/TypeError 失败 → 红。
+    """
+    steps = [
+        PlanStep(id="s1", description="一", status="completed", result="R1"),
+        PlanStep(id="s2", description="二", dependencies=["s1"]),
+    ]
+    payload = _crashed_payload(steps=steps, partial="损坏前缀")
+    corrupt(payload)
+    planner = _CountingPlanner(n=2)
+    loop, memory, executed = _make_loop(planner=planner)
+
+    events = [e async for e in loop.run("原始问题", task_id="t-1", resume=payload)]
+
+    assert planner.calls == 1, "损坏快照 = 无快照：必须重新规划（绝不半信半疑地续跑）"
+    assert executed == ["s1", "s2"], "干净重跑全部步骤"
+    assert any(e.type == "done" for e in events)
+    assert memory.interactions == [("原始问题", "结果-s1结果-s2")], (
+        "损坏快照的残留字段（partial 前缀）不得混入新 run 的最终答案"
+    )
