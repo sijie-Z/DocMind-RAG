@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from app.agent.registry import register_tool
+from app.agent.registry import ToolResult, register_tool
 from app.agent.run_context import RunContext
 from app.agent.usage import ctx_from_run_context, record_llm_usage
 
@@ -55,9 +55,9 @@ async def translate_text(
     source_language: str = "auto",
     run_context: RunContext | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     if not text or len(text) < 2:
-        return "Error: Text too short to translate."
+        return ToolResult.fail(code="validation_error", message="Text too short to translate.")
 
     # Normalize language codes
     target_lang = _normalize_lang(target_language)
@@ -69,7 +69,9 @@ async def translate_text(
 
         pipeline = get_rag_pipeline()
         if not pipeline.openai_client:
-            return "Translation unavailable: LLM not configured."
+            return ToolResult.fail(
+                code="invalid_configuration", message="Translation unavailable: LLM not configured."
+            )
 
         source_hint = "" if source_lang == "auto" else f" from {LANG_NAMES.get(source_lang, source_lang)}"
         target_name = LANG_NAMES.get(target_lang, target_lang)
@@ -91,9 +93,16 @@ async def translate_text(
             max_tokens=2000,
         )
         record_llm_usage(resp, ctx_from_run_context(run_context))  # 工具内记账（#239 minor-2）
-        return resp.choices[0].message.content or "Translation failed."
+        content = resp.choices[0].message.content
+        if not content:
+            return ToolResult.fail(code="empty_response", message="Translation failed.")
+        return content
     except Exception as e:
-        return f"Translation error: {type(e).__name__}: {e}"
+        return ToolResult.fail(
+            code="unknown",
+            message=f"Translation error: {type(e).__name__}: {e}",
+            raw=e,
+        )
 
 
 @register_tool(
@@ -114,9 +123,12 @@ async def translate_text(
     },
     tags=["language"],
 )
-async def detect_language(text: str, **_: Any) -> str:
+async def detect_language(text: str, **_: Any) -> str | ToolResult:
     if not text or len(text) < 3:
-        return "Error: Text too short for reliable detection (minimum 3 characters)."
+        return ToolResult.fail(
+            code="validation_error",
+            message="Text too short for reliable detection (minimum 3 characters).",
+        )
 
     try:
         # Try using langdetect library
@@ -137,7 +149,11 @@ async def detect_language(text: str, **_: Any) -> str:
         return _heuristic_detect(text)
 
     except Exception as e:
-        return f"Detection error: {type(e).__name__}: {e}"
+        return ToolResult.fail(
+            code="unknown",
+            message=f"Detection error: {type(e).__name__}: {e}",
+            raw=e,
+        )
 
 
 def _normalize_lang(lang: str) -> str:
