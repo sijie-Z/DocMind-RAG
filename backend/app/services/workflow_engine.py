@@ -96,17 +96,20 @@ class NodeExecutor:
         llm_settings = self.llm_config.get(model_type, {})
         node_data = self.node.data or {}
 
-        if model_type in ["openai", "deepseek", "aiping"]:
-            api_key = llm_settings.get("api_key") or getattr(settings, 'OPENAI_API_KEY', '')
-            base_url = llm_settings.get("base_url")
-
+        if model_type in ["openai", "deepseek"]:
+            # issue #273：环境默认 key 改直读 Settings 真字段。此前三条路径共用
+            # getattr(settings, 'OPENAI_API_KEY', '')（单引号写法）兜底，因字段缺失
+            # （extra="ignore" 静默吞 .env）恒为空串——工作流 LLM 节点无法经 .env 配 key。
             if model_type == "deepseek":
-                base_url = base_url or "https://api.deepseek.com/v1"
+                # 该分支固定走 api.deepseek.com 端点，只有 DeepSeek key 有效；与仓库
+                # 其它 DeepSeek 消费方同口径（DEEPSEEK_API_KEY，见 dependencies.py /
+                # embedding_service.py），而非 OpenAI key。
+                api_key = llm_settings.get("api_key") or settings.DEEPSEEK_API_KEY
+                base_url = llm_settings.get("base_url") or "https://api.deepseek.com/v1"
                 model = node_data.get("model") or llm_settings.get("model", "deepseek-v4-flash")
-            elif model_type == "aiping":
-                base_url = base_url or getattr(settings, 'AIPING_BASE_URL', '')
-                model = node_data.get("model") or llm_settings.get("model", "gpt-4")
             else:
+                api_key = llm_settings.get("api_key") or settings.OPENAI_API_KEY
+                base_url = llm_settings.get("base_url")
                 model = node_data.get("model") or llm_settings.get("model", "gpt-4o-mini")
 
             temperature = node_data.get("temperature", llm_settings.get("temperature", 0.7))
@@ -120,11 +123,11 @@ class NodeExecutor:
                 base_url=base_url
             )
         if model_type == "qwen":
-            # 通义千问
+            # 通义千问。issue #273：DASHSCOPE_API_KEY 现为 Settings 真字段，直读。
             from langchain_community.chat_models import ChatTongyi
             return ChatTongyi(
                 model=node_data.get("model") or llm_settings.get("model", "qwen-plus"),
-                dashscope_api_key=llm_settings.get("api_key") or getattr(settings, 'DASHSCOPE_API_KEY', '')
+                dashscope_api_key=llm_settings.get("api_key") or settings.DASHSCOPE_API_KEY
             )
 
         return None
@@ -710,7 +713,6 @@ class WorkflowEngine:
             "llm_openai": LLMNodeExecutor,
             "llm_deepseek": LLMNodeExecutor,
             "llm_qwen": LLMNodeExecutor,
-            "llm_aiping": LLMNodeExecutor,
             "tool_search": KnowledgeSearchNodeExecutor,
             "tool_tts": TTSNodeExecutor,
             "condition": ConditionNodeExecutor,

@@ -1,5 +1,6 @@
 """AI and RAG settings — LLM, embedding, reranker, vector search, caching."""
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -57,6 +58,14 @@ class AISettings(BaseSettings):
     AI_MAX_TOKENS: int = 10000
     AI_STREAM_TIMEOUT: int = 120
 
+    # Workflow LLM 节点的环境默认 key（services/workflow_engine.py 的 get_llm）。
+    # issue #273：此前引擎用 getattr(settings, 'OPENAI_API_KEY', '')（单引号写法）
+    # 兜底读取，但 Settings 无对应字段——extra="ignore" 下 .env 配置被静默吞掉，
+    # key 恒为空串（与 #259 同族反向缺口，前两轮全仓扫描因单引号口径漏网）。
+    # deepseek 节点复用上方既有 DEEPSEEK_API_KEY，引擎侧已同口径直读。
+    OPENAI_API_KEY: str = ""
+    DASHSCOPE_API_KEY: str = ""
+
     # Local LLM (Ollama / LocalAI)
     ENABLE_LOCAL_LLM: bool = False
     LOCAL_LLM_URL: str = "http://localhost:11434/v1"
@@ -95,7 +104,9 @@ class AISettings(BaseSettings):
     RAG_QUERY_REWRITE_COUNT: int = 4
     # LLM 改写等待超时（秒）。issue #259：此前 retriever 经 getattr 兜底读取但
     # Settings 无此字段，extra="ignore" 下 .env 配置被静默忽略；现补字段可覆盖。
-    RAG_QUERY_REWRITE_TIMEOUT_SECONDS: float = 1.2
+    # issue #273 顺带：补下界（负数此前可入 Settings）。0 是合法显式值——消费端
+    # retriever 以 max(0.2, ·) 钳下限（该偏离由常驻用例钉住）。
+    RAG_QUERY_REWRITE_TIMEOUT_SECONDS: float = Field(default=1.2, ge=0.0)
 
     # Reranker
     RAG_ENABLE_RERANKER: bool = True
@@ -128,9 +139,10 @@ class AISettings(BaseSettings):
 
     # Semantic cache（rag/cache.py 的 SemanticCache）。issue #259：此前经
     # getattr(settings, …) 兜底读取但 Settings 无字段，.env 配置被静默忽略；
-    # 现补字段，类型/默认值与原 getattr 兜底一致。
-    SEMANTIC_CACHE_THRESHOLD: float = 0.92
-    SEMANTIC_CACHE_TTL_SECONDS: int = 3600
+    # 现补字段，类型/默认值与原 getattr 兜底一致。issue #273 顺带：补合理性校验
+    # （阈值 [0,1]；TTL ≥0——负值此前可入 Settings，setex 报 invalid expire）。
+    SEMANTIC_CACHE_THRESHOLD: float = Field(default=0.92, ge=0.0, le=1.0)
+    SEMANTIC_CACHE_TTL_SECONDS: int = Field(default=3600, ge=0)
 
     # Query decomposition (multi-perspective RAG)
     RAG_ENABLE_QUERY_DECOMPOSITION: bool = True
