@@ -70,6 +70,10 @@ class ToolError:
         "permission_denied",
         "validation_error",
         "auth_expired",
+        # 以下三个此前只被赋值、未入 Literal（issue #242 第 5 条：契约漂移）
+        "auth_expired_refreshable",
+        "auth_required",
+        "hook_error",
         "budget_exceeded",
         "ambiguous_input",
         "unreachable",

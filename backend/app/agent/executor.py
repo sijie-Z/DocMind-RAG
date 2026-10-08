@@ -792,6 +792,12 @@ class Executor:
                     plan_step_id=step.id,
                     plan_progress=plan.progress,
                 )
+            if ctx is not None:
+                # 直答步骤此前不产生 StepRecord（#239 minor-10 / #245 第 8 条）：
+                # 这类 run 的 run report / execution_context 的 steps 恒为空。
+                ctx.complete_step(
+                    step.id, step.description, step.tool_hint, "completed", result=content,
+                )
             return
 
         # Process tool calls

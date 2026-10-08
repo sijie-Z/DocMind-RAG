@@ -5,6 +5,7 @@ import re
 from typing import Literal
 
 from app.core.config import settings
+from app.core.prometheus import RAG_QUERY_REWRITE_TOTAL
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,12 @@ def rewrite_query_candidates(query: str) -> list[str]:
         if c and c not in dedup:
             dedup.append(c)
     rewrite_count = max(1, int(getattr(settings, "RAG_QUERY_REWRITE_COUNT", 4) or 4))
-    return dedup[:rewrite_count]
+    dedup = dedup[:rewrite_count]
+    if len(dedup) > 1:
+        # 指标补埋（issue #242 第 10 条）：计数器此前全仓零调用点。
+        # 语义 = 除原查询外新增的改写变体数（不是"又跑了一次检索"）。
+        RAG_QUERY_REWRITE_TOTAL.inc(len(dedup) - 1)
+    return dedup
 
 
 async def rewrite_query_llm(query: str, openai_client, model: str) -> list[str]:
