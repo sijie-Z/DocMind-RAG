@@ -10,6 +10,9 @@ export type AgentEventType =
   | 'reflection'
   | 'chunk'
   | 'done'
+  | 'run_report'
+  | 'execution_context'
+  | 'retry_hint'
   | 'error'
 
 export type ThinkingType = 'reasoning' | 'planning' | 'evaluation' | 'correction'
@@ -134,6 +137,8 @@ export interface AgentChatMessage {
   planId: string
   progress: number
   messageId?: string       // for feedback
+  runReport?: string       // 运行报告文本（run_report 事件；issue #242 收尾补接）
+  executionContext?: Record<string, any>  // 运行上下文（execution_context 事件，含 total_tokens）
   feedback?: number        // 1=thumbs_up, -1=thumbs_down, 0=none
   feedbackNote?: string
 }

@@ -166,6 +166,16 @@ export const useAgentStore = defineStore('agent', () => {
         isLoading.value = false
         break
 
+      case 'run_report':
+        // issue #242 收尾：该事件此前在前端白名单被静默丢弃（后端产、前端扔），
+        // Run Report / Tokens 在 UI 里永远看不见。现在落账到最后一条回答上。
+        updateLastAssistant((m) => { m.runReport = event.content })
+        break
+      case 'execution_context':
+        updateLastAssistant((m) => {
+          m.executionContext = event.content as unknown as Record<string, any>
+        })
+        break
       case 'done':
         updateLastAssistant((msg) => {
           msg.loading = false

@@ -133,6 +133,14 @@
               <Markdown :content="msg.content" />
             </div>
 
+            <!-- 运行报告（issue #242 收尾：此前该事件在前端白名单被丢弃，UI 永远看不到） -->
+            <details v-if="msg.runReport" class="run-report">
+              <summary>
+                运行报告<template v-if="msg.executionContext?.total_tokens"> · Tokens: {{ msg.executionContext.total_tokens }}</template>
+              </summary>
+              <pre>{{ msg.runReport }}</pre>
+            </details>
+
             <!-- Feedback buttons (only after completion, only for messages with a messageId) -->
             <div v-if="!msg.loading && msg.messageId && msg.content" class="feedback-bar">
               <n-tooltip trigger="hover">
@@ -493,6 +501,25 @@ async function loadInit() {
 </script>
 
 <style scoped>
+/* 运行报告折叠块（issue #242 收尾） */
+.run-report {
+  margin-top: 10px;
+  font-size: 12px;
+}
+.run-report summary {
+  cursor: pointer;
+  color: #64748b;
+  user-select: none;
+}
+.run-report pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(100, 116, 139, 0.08);
+  padding: 10px;
+  border-radius: 8px;
+  max-height: 320px;
+  overflow: auto;
+}
 .agent-page {
   display: flex;
   flex-direction: column;

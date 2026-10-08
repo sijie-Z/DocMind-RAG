@@ -93,7 +93,7 @@ class SSEService {
   }
 
   private emit(event: string, data?: unknown) {
-    if (['chunk', 'message', 'error', 'retry', 'thinking', 'tool_call', 'tool_result', 'tool_error', 'plan_start', 'plan_step', 'plan_complete', 'reflection', 'done', 'debug'].includes(event)) {
+    if (['chunk', 'message', 'error', 'retry', 'thinking', 'tool_call', 'tool_result', 'tool_error', 'plan_start', 'plan_step', 'plan_complete', 'reflection', 'done', 'run_report', 'execution_context', 'retry_hint', 'debug'].includes(event)) {
       const handler = this.messageHandlers.get(event)
       if (handler) handler(data as SSEMessage)
     } else if (event === 'connect' || event === 'disconnect') {
@@ -201,7 +201,7 @@ class SSEService {
                 const resolvedType = (eventTypeSet ? currentEventType : parsed.type || currentEventType) as SSEMessage['type']
                 eventTypeSet = false
                 const data = { ...parsed, type: resolvedType } as SSEMessage
-                if (data.type === 'chunk' || data.type === 'thinking' || data.type === 'tool_call' || data.type === 'tool_result' || data.type === 'tool_error' || data.type === 'plan_start' || data.type === 'plan_step' || data.type === 'plan_complete' || data.type === 'reflection' || data.type === 'done' || data.type === 'retry' || data.type === 'debug') {
+                if (data.type === 'chunk' || data.type === 'thinking' || data.type === 'tool_call' || data.type === 'tool_result' || data.type === 'tool_error' || data.type === 'plan_start' || data.type === 'plan_step' || data.type === 'plan_complete' || data.type === 'reflection' || data.type === 'done' || data.type === 'run_report' || data.type === 'execution_context' || data.type === 'retry_hint' || data.type === 'retry' || data.type === 'debug') {
                   const handler = this.messageHandlers.get(data.type)
                   if (handler) handler(data as SSEMessage)
                 } else if (data.type === 'message') {
