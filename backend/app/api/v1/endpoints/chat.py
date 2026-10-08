@@ -489,7 +489,10 @@ async def websocket_endpoint(
                         await close_ws(websocket, WS_CLOSE_AUTH_FAILED, WS_REASON_USER_INVALID)
                         return
 
-                    search_org_id = user_state.organization_id or 1
+                    # 安全加固（issue #268）：此前 `or 1` 把无组织用户的检索静默放进
+                    # 1 号组织（语义缓存与 RAG 检索双重命中原生组织数据）。现在如实
+                    # 传 None，由 run_rag_pipeline 显式拒绝（不检索、不碰缓存）。
+                    search_org_id = user_state.organization_id
                     org_id = user_state.organization_id or None
 
                     # Use an asyncio.Queue to collect pipeline events
@@ -538,6 +541,15 @@ async def websocket_endpoint(
                                     "sources": event.sources,
                                     "is_cached": event.is_cached,
                                 }), websocket)
+                            elif event.type == "error":
+                                # issue #268：RAG 链路的显式拒绝（如无组织）经此事件
+                                # 转发。此前无此 case，错误事件会被静默丢弃、客户端
+                                # 只等到一个无回应的空转。
+                                await manager.send_personal_message(json.dumps({
+                                    "type": "error",
+                                    "content": event.content,
+                                    "conversationId": event.conversation_id,
+                                }), websocket)
                         except TimeoutError:
                             if pipeline_task.done():
                                 # Drain remaining events
@@ -552,6 +564,14 @@ async def websocket_endpoint(
                                                 "messageId": event.message_id,
                                                 "sources": event.sources,
                                                 "is_cached": event.is_cached,
+                                            }), websocket,
+                                        )
+                                    elif event.type == "error":
+                                        await manager.send_personal_message(
+                                            json.dumps({
+                                                "type": "error",
+                                                "content": event.content,
+                                                "conversationId": event.conversation_id,
                                             }), websocket,
                                         )
                                 break
@@ -809,10 +829,12 @@ async def chat_stream_endpoint(
             # ── RAG mode (original) ────────────────────────────────────────
             async with AsyncSessionLocal() as session:
                 db_user = await session.get(User, current_user.id)
+                # 安全加固（issue #268）：与 WS 路径同一语义——不再 `else 1`
+                # 兜底到 1 号组织；无组织如实传 None，由 run_rag_pipeline 显式拒绝。
                 search_org_id = (
                     db_user.organization_id
                     if (db_user and db_user.organization_id)
-                    else 1
+                    else None
                 )
                 org_id = getattr(current_user, "organization_id", None)
 
@@ -862,6 +884,11 @@ async def chat_stream_endpoint(
                                 "sources": event.sources,
                                 "is_cached": event.is_cached,
                             })
+                        elif event.type == "error":
+                            # issue #268：RAG 链路的显式拒绝（如无组织）经此事件
+                            # 转发（与 WS 路径同一语义）。此前无此 case，错误会被
+                            # 静默丢弃。
+                            yield await sse_event("error", {"content": event.content})
                     except TimeoutError:
                         if pipeline_task.done():
                             # Drain remaining events
@@ -875,6 +902,8 @@ async def chat_stream_endpoint(
                                         "sources": event.sources,
                                         "is_cached": event.is_cached,
                                     })
+                                elif event.type == "error":
+                                    yield await sse_event("error", {"content": event.content})
                             break
 
                 await pipeline_task

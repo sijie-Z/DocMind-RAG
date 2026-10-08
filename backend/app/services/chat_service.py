@@ -146,7 +146,7 @@ async def run_rag_pipeline(
     session: AsyncSession,
     user_content: str,
     user_id: int,
-    search_org_id: int,
+    search_org_id: int | None,
     organization_id: int | None,
     conversation_id: str | None,
     file_ids: list[str],
@@ -160,6 +160,23 @@ async def run_rag_pipeline(
     def _emit(event: RAGEvent):
         if event_queue is not None:
             event_queue.put_nowait(event)
+
+    # 安全加固（issue #268）：RAG 链路本质是「组织知识库问答」。此前调用方用
+    # `search_org_id … or 1` 把无组织用户的检索静默放进 1 号组织上下文（语义缓存
+    # `org:1:` 命名空间 + retriever 的 `organization_id` term 双重命中他人数据，
+    # 见 issue #257 评审 §2.6 #1）。现在如实传 None，并由本函数**显式拒绝**。
+    # 选「显式拒绝」而非「空结果」：无组织即无知识库可查，静默空结果会把「你没有
+    # 组织」伪装成「没找到」，非严格模式下还会放任模型无检索作答、形似知识库回答；
+    # 显式拒答与 #257 的工具 fail-closed / knowledge.py 403 风格一致。拒绝先于一切
+    # 组织操作：不检索任何组织、不读写任何（含 org 1 的）缓存命名空间、不落任何
+    # 组织归属为空的会话与消息。无组织用户的休闲对话仍可走 agent 模式（#257 语义）。
+    if search_org_id is None:
+        _emit(RAGEvent(
+            type="error",
+            content="当前用户未加入任何组织，无法进行知识库问答；请先加入组织后重试",
+            conversation_id=conversation_id or "",
+        ))
+        return
 
     conversation_id, bound_doc_ids = await get_or_create_session(
         session, conversation_id, user_id, user_content, organization_id,
