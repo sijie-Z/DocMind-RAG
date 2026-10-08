@@ -18,6 +18,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from app.agent import checkpoint
 from app.agent.config import AgentConfig
 from app.agent.context import ContextEngine
 from app.agent.events import AgentEvent
@@ -140,6 +141,11 @@ class PERAgentLoop:
         # 技能学习闭环（issue #200）：此前 SkillManager 全仓零调用者
         self.skill_manager = skill_manager
 
+        # Checkpoint / resume（issue #201 最小版）：run() 起始处重置两者，
+        # 这里只是类型占位——loop 实例可能被复用，不得泄露上一轮的状态。
+        self._checkpoint_task_id: str | None = None
+        self.checkpoint_live: dict[str, Any] | None = None
+
         # Context engine with LLM-based summarization
         self.context_engine = ContextEngine(
             max_context_tokens=self.config.max_context_tokens,
@@ -223,6 +229,10 @@ class PERAgentLoop:
         query: str,
         history: list[dict[str, str]] | None = None,
         context_docs: list[dict[str, Any]] | None = None,
+        *,
+        task_id: str | None = None,
+        resume: dict[str, Any] | None = None,
+        session_id: str | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Execute the PER agent loop, yielding events as they happen.
 
@@ -230,6 +240,11 @@ class PERAgentLoop:
             query: The user's question or request.
             history: Previous conversation messages.
             context_docs: Pre-retrieved document context (optional, for RAG mode).
+            task_id: AgentTask 行 id（issue #201；提供时才落 checkpoint）。
+            resume: 校验过的快照信封（checkpoint.load_for_resume 的输出）——
+                有 plan 时跳过 Phase 0/1、回灌 WorkingMemory 后从断点续跑；
+                无 plan（崩溃于规划阶段）则从 Phase 1 重跑，仍幂等。
+            session_id: 会话 id（仅为快照信封记录 provenance）。
 
         Yields:
             AgentEvent objects for thinking, plan, tool calls, chunks, etc.
@@ -241,8 +256,44 @@ class PERAgentLoop:
         # otherwise be graded and injected into this run's step prompts.
         self.memory.reset_working()
 
+        # ── Checkpoint / resume（issue #201 最小版）────────────────────────
+        # task_id 由 service 注入；checkpoint_live 是"本 run 最近可落盘状态"的
+        # 活引用——loop 生成器被 aclose（断流）时自身已停在 yield 上，届时由
+        # service 读这份引用做兜底快照（见 checkpoint.save_from_live）。
+        self._checkpoint_task_id = task_id
+        self.checkpoint_live: dict[str, Any] | None = None
+
         # ── Execution Context (per-request state) ────────────────────────
-        ctx = ExecutionContext(query=query)
+        # resume：从快照重建 ctx（含 artifacts/total_tokens/current_step_id ——
+        # 预算与迭代口径必须延续，否则 resume 会静默重置熔断）；计划也在快照里，
+        # 直接跳过 Phase 0/1 进 Phase 2。
+        resume_plan: Plan | None = None
+        partial_prefix = ""
+        replan_feedback = ""
+        replan_attempts = 0
+        if resume:
+            ctx = ExecutionContext.from_checkpoint_dict(resume.get("ctx") or {})
+            run_state = resume.get("run") or {}
+            replan_attempts = int(run_state.get("replan_attempts", 0) or 0)
+            replan_feedback = run_state.get("replan_feedback") or ""
+            partial_prefix = resume.get("partial_output") or ""
+            frozen_history = resume.get("history")
+            if frozen_history is not None:
+                # history 在首快照时冻结：resume 不重读会话新消息（否则等于换上下文续跑）。
+                history = frozen_history
+            plan_data = resume.get("plan")
+            if plan_data:
+                resume_plan = Plan.from_checkpoint_dict(plan_data)
+                # 崩溃时"在途"（running）的步骤复位为 pending：重跑一次
+                # （at-least-once；工具副作用幂等由默认禁用的 mutating 工具兜底）。
+                for step in resume_plan.steps:
+                    if step.status == "running":
+                        step.status = "pending"
+                self._seed_working_from_plan(resume_plan)
+        else:
+            ctx = ExecutionContext(query=query)
+        if task_id:
+            ctx.task_id = task_id
 
         # 技能（issue #200）：懒加载已学技能（load 幂等）；失败绝不阻塞主流程
         if self.config.enable_skills:
@@ -254,30 +305,48 @@ class PERAgentLoop:
             except Exception as e:
                 logger.warning("Skill manager load failed: %s", e)
 
-        # ── Phase 0a: Context fitting ────────────────────────────────────
-        # Compress conversation history so it fits the model's budget before
-        # it reaches the planner and executor. Without this every downstream
-        # LLM call sees whatever the caller passed in, unbounded.
-        if history:
-            try:
-                history = await self.context_engine.fit_async(history, ctx=ctx)
-            except Exception as e:
-                logger.warning(f"Context compression failed, using raw history: {e}")
-
-        # ── Phase 0: Memory recall ────────────────────────────────────────
         memory_context = ""
-        if self.config.enable_memory:
-            try:
-                memory_context = await self.memory.get_context_for_query(query)
-                if memory_context:
-                    yield AgentEvent(
-                        type="thinking",
-                        content="回忆相关上下文...",
-                        thinking_type="reasoning",
-                    )
-                    await _yield_control()
-            except Exception as e:
-                logger.warning(f"Memory recall failed: {e}")
+        if resume_plan is None:
+            # ── Phase 0a: Context fitting ────────────────────────────────
+            # Compress conversation history so it fits the model's budget before
+            # it reaches the planner and executor. Without this every downstream
+            # LLM call sees whatever the caller passed in, unbounded.
+            if history:
+                try:
+                    history = await self.context_engine.fit_async(history, ctx=ctx)
+                except Exception as e:
+                    logger.warning(f"Context compression failed, using raw history: {e}")
+
+            # ── Phase 0: Memory recall ────────────────────────────────────
+            if self.config.enable_memory:
+                try:
+                    memory_context = await self.memory.get_context_for_query(query)
+                    if memory_context:
+                        yield AgentEvent(
+                            type="thinking",
+                            content="回忆相关上下文...",
+                            thinking_type="reasoning",
+                        )
+                        await _yield_control()
+                except Exception as e:
+                    logger.warning(f"Memory recall failed: {e}")
+
+        # 快照活引用（fitted history 之后建立，冻结进快照的是实际被消费的那份）。
+        run_state_live: dict[str, Any] = {
+            "execution_mode": self._execution_mode,
+            "replan_attempts": replan_attempts,
+            "replan_feedback": replan_feedback,
+        }
+        if task_id and self.config.enable_checkpoint:
+            self.checkpoint_live = {
+                "ctx": ctx,
+                "plan": None,
+                "partial_output": partial_prefix,
+                "history": history,
+                "config": self.config,
+                "run_state": run_state_live,
+                "session_id": session_id or "",
+            }
 
         # ── Phase 1–3: 规划 → 执行 → 反思（含有界重新规划）────────────────
         # issue #106 §5a：reflector 的 "replan" 判定此前只被记录、从不执行
@@ -286,31 +355,43 @@ class PERAgentLoop:
         # MAX_REPLANS_PER_RUN 保证终止，不允许无界循环。
         plan: Plan | None = None
         final_output = ""
-        replan_feedback = ""
-        replan_attempts = 0
 
         while True:
             # ── Phase 1: Planning ────────────────────────────────────────
-            # An async generator cannot return a value, so the built plan
-            # travels back through plan_sink.
-            plan_sink: list[Plan] = []
-            async for event in self._plan_once(
-                query=query,
-                history=history,
-                memory_context=memory_context,
-                ctx=ctx,
-                plan_sink=plan_sink,
-                replan_feedback=replan_feedback,
-            ):
-                yield event
-            plan = plan_sink[0]
-
-            # 学习闭环（读侧，issue #200）：命中已学技能时，把其工具序列补进
-            # 没有 tool_hint 的步骤（只补空缺，不覆盖 planner 的判断）。
-            # 返回值 = 实际被应用的 skill_id，供本轮回合结束时回报使用结果（评审 B2 反馈边）。
             matched_skill_id: str | None = None
-            if self.config.enable_skills and plan:
-                matched_skill_id = self._apply_skill_hints(plan, query)
+            if resume_plan is not None:
+                # resume：直接复用快照里的计划（不重新规划——需要修计划时由
+                # 既有的 replan 路径负责）；首轮消费一次后置空。
+                plan = resume_plan
+                resume_plan = None
+                if self.checkpoint_live is not None:
+                    self.checkpoint_live["plan"] = plan
+            else:
+                # An async generator cannot return a value, so the built plan
+                # travels back through plan_sink.
+                plan_sink: list[Plan] = []
+                async for event in self._plan_once(
+                    query=query,
+                    history=history,
+                    memory_context=memory_context,
+                    ctx=ctx,
+                    plan_sink=plan_sink,
+                    replan_feedback=replan_feedback,
+                ):
+                    yield event
+                plan = plan_sink[0]
+
+                # 学习闭环（读侧，issue #200）：命中已学技能时，把其工具序列补进
+                # 没有 tool_hint 的步骤（只补空缺，不覆盖 planner 的判断）。
+                # 返回值 = 实际被应用的 skill_id，供本回合结束时回报使用结果（评审 B2 反馈边）。
+                if self.config.enable_skills and plan:
+                    matched_skill_id = self._apply_skill_hints(plan, query)
+
+                # T1 checkpoint：规划完成（含 skill 提示应用后）——快照 ctx + 完整
+                # plan；崩溃于规划阶段时（尚无任何快照）resume 走"无 plan"重规划路径。
+                if self.checkpoint_live is not None:
+                    self.checkpoint_live["plan"] = plan
+                    await self._save_checkpoint("after_planning")
 
             # ── Phase 2: Execution ───────────────────────────────────────────
             pass_output = ""
@@ -326,11 +407,17 @@ class PERAgentLoop:
                         user_id=self.user_id,
                         enable_thinking=self.config.enable_thinking,
                         ctx=ctx,
+                        # T2 checkpoint（issue #201）：每个步骤终态后的落盘回调；
+                        # 未接 checkpoint（task_id 缺省）时为 None。
+                        on_step_done=self._make_step_checkpoint_callback(),
                     ):
                         yield event
                         if event.type == "chunk":
                             pass_output += event.content
                             execution_output += event.content
+                            if self.checkpoint_live is not None:
+                                # 快照冻结"已产出的答案前缀"：resume 收尾时拼回完整回复。
+                                self.checkpoint_live["partial_output"] = partial_prefix + pass_output
                         elif event.type == "execution_step_result" and event.content:
                             execution_output += event.content
                 finally:
@@ -367,12 +454,22 @@ class PERAgentLoop:
                     if content:
                         yield AgentEvent(type="chunk", content=content)
                         pass_output = content
+                        if self.checkpoint_live is not None:
+                            self.checkpoint_live["partial_output"] = partial_prefix + pass_output
                 except Exception as e:
                     yield AgentEvent(type="error", content=f"LLM Error: {e}")
 
             # 最终答案以最后一版计划的执行产出为准：replan 后旧计划的产出
             # 已被取代，不能再混进 record_interaction / run report。
-            final_output = pass_output
+            # resume 的 partial_prefix：拼一次，让重存/记录拿到完整回复
+            # （崩溃前已流给用户的部分不会在 resume 流里重放，见最小版边界）。
+            final_output = partial_prefix + pass_output
+
+            # T3 checkpoint：一轮执行返回（覆盖 replan 交界）。partial_output
+            # 与 final_output 同源——快照里的答案前缀永远是"当前这一版"的。
+            if self.checkpoint_live is not None:
+                self.checkpoint_live["partial_output"] = final_output
+            await self._save_checkpoint("after_execute_turn")
 
             # ── Phase 2b: Quality Gate ────────────────────────────────────────
             if plan.steps:
@@ -503,6 +600,10 @@ class PERAgentLoop:
                         replan_feedback = "\n".join(feedback_parts)[:2000] or (
                             "反思判定计划需要重做，但未给出具体缺口/质量问题。"
                         )
+                        # 快照里的 replan 计数必须实时跟进：否则崩溃中断本轮后，
+                        # resume 会把已用掉的重规划额度当成没用过（有界性失效）。
+                        run_state_live["replan_attempts"] = replan_attempts
+                        run_state_live["replan_feedback"] = replan_feedback
                         ctx.record_decision(
                             "plan",
                             "replan",
@@ -605,6 +706,10 @@ class PERAgentLoop:
         except Exception:
             pass
 
+        # T4 checkpoint（收尾）：终态快照。status 的翻转由 service/端点层经
+        # checkpoint.mark_terminal 负责——loop 不碰 AgentTask 状态机。
+        await self._save_checkpoint("on_finish")
+
         # ── Run report (observe-only, no behavior change) ───────────────
         # Pure projection of what the run already recorded into ctx.
         # Does NOT trigger retry/replan/approval/memory/experience. See ADR-1.
@@ -634,6 +739,58 @@ class PERAgentLoop:
         )
 
         yield AgentEvent(type="done", plan_progress=1.0)
+
+    # ── Checkpoint（issue #201 最小版）────────────────────────────────────
+
+    def _make_step_checkpoint_callback(self):
+        """T2：返回"每个 PlanStep 终态后落盘一次"的回调；未接 checkpoint 时 None。"""
+        if self.checkpoint_live is None:
+            return None
+
+        async def _on_step_done(_step: PlanStep) -> None:
+            await self._save_checkpoint("after_each_step")
+
+        return _on_step_done
+
+    async def _save_checkpoint(self, trigger: str) -> None:
+        """把当前 run 的快照写进 AgentTask（T1–T4 触发点统一入口）。
+
+        - 未接任务（task_id 缺省）或 kill-switch（enable_checkpoint=False）→ no-op；
+        - 任何失败只记 warning、绝不阻塞主流程（与 ctx.save() 同风格）。
+        """
+        live = self.checkpoint_live
+        if live is None or not self.config.enable_checkpoint:
+            return
+        try:
+            await checkpoint.save_checkpoint(
+                task_id=self._checkpoint_task_id,
+                ctx=live["ctx"],
+                plan=live["plan"],
+                trigger=trigger,
+                partial_output=live["partial_output"],
+                history=live["history"],
+                config=live["config"],
+                run_state=live["run_state"],
+                session_id=live["session_id"],
+            )
+        except Exception as e:
+            logger.warning("checkpoint save failed (trigger=%s): %s", trigger, e)
+
+    def _seed_working_from_plan(self, plan: Plan) -> None:
+        """resume 时把已完成步骤的结果回灌 WorkingMemory。
+
+        恢复的 run 里 `_get_previous_results`（executor）、质检与反思都从
+        WorkingMemory 读已完成步的结果；PlanStep.result 保留 [:2000]（executor
+        终态回写时的截断），足以重建。只回灌 completed（与执行期只存成功结
+        果的口径一致）。
+        """
+        for step in plan.steps:
+            if step.status == "completed" and step.result:
+                self.memory.store_step_result(step.id, {
+                    "description": step.description,
+                    "status": step.status,
+                    "result": step.result,
+                })
 
     async def _plan_once(
         self,

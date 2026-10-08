@@ -116,6 +116,52 @@ class PlanStep:
     retry_strategy: str = "auto_retry" # auto_retry | ask_user | skip
     fallback_tool: str | None = None   # alternative tool
 
+    # ── Checkpoint（issue #201 最小版）──
+
+    def to_checkpoint_dict(self) -> dict[str, Any]:
+        """快照形状（v1）：= _save_plan 的 payload + result/error_context/retry_count。
+
+        _save_plan 的 payload 缺这三项——对"步骤做没做完"这个问题它答不了，
+        因此 checkpoint 里存的是**全量**步骤状态（result 在 executor 侧已截 [:2000]）。
+        """
+        return {
+            "id": self.id,
+            "description": self.description,
+            "dependencies": list(self.dependencies),
+            "tool_hint": self.tool_hint,
+            "status": self.status,
+            "result": self.result,
+            "error_context": self.error_context,
+            "retry_count": self.retry_count,
+            "parallel_group": self.parallel_group,
+            "risk_level": self.risk_level,
+            "retry_strategy": self.retry_strategy,
+            "fallback_tool": self.fallback_tool,
+            "fallback_chain": getattr(self, "fallback_chain", None),
+        }
+
+    @classmethod
+    def from_checkpoint_dict(cls, data: dict[str, Any]) -> "PlanStep":
+        step = cls(
+            id=data.get("id", ""),
+            description=data.get("description", ""),
+            dependencies=list(data.get("dependencies") or []),
+            tool_hint=data.get("tool_hint"),
+            status=data.get("status", "pending"),
+            result=data.get("result"),
+            error_context=data.get("error_context"),
+            retry_count=int(data.get("retry_count") or 0),
+            parallel_group=data.get("parallel_group"),
+            risk_level=data.get("risk_level", "low"),
+            retry_strategy=data.get("retry_strategy", "auto_retry"),
+            fallback_tool=data.get("fallback_tool"),
+        )
+        # fallback_chain 是 v2 字段（dataclass 未声明、executor 用 getattr 读）：
+        # 只在快照里出现过才回填，保持"没有该属性的步骤"与旧行为一致。
+        if data.get("fallback_chain") is not None:
+            step.fallback_chain = list(data["fallback_chain"])
+        return step
+
 
 @dataclass
 class Plan:
@@ -156,6 +202,36 @@ class Plan:
                 # Dependency failed — skip this step automatically
                 step.status = "skipped"
         return ready
+
+    # ── Checkpoint（issue #201 最小版）──
+
+    def to_checkpoint_dict(self) -> dict[str, Any]:
+        """快照形状（v1）：全量步骤状态 + 轮内计数（completed/failed）。"""
+        return {
+            "v": 1,
+            "id": self.id,
+            "goal": self.goal,
+            "reasoning": self.reasoning,
+            "steps": [s.to_checkpoint_dict() for s in self.steps],
+            "completed_steps": self.completed_steps,
+            "failed_steps": self.failed_steps,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_checkpoint_dict(cls, data: dict[str, Any]) -> "Plan":
+        import uuid as _uuid_mod
+
+        steps = [PlanStep.from_checkpoint_dict(s) for s in (data.get("steps") or [])]
+        return cls(
+            id=data.get("id") or _uuid_mod.uuid4().hex[:12],
+            goal=data.get("goal") or "",
+            reasoning=data.get("reasoning") or "",
+            steps=steps,
+            completed_steps=int(data.get("completed_steps") or 0),
+            failed_steps=int(data.get("failed_steps") or 0),
+            created_at=float(data.get("created_at") or time.time()),
+        )
 
 
 class Planner:

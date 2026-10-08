@@ -180,6 +180,70 @@ class ExecutionContext:
             "start_time": self.start_time,
         }
 
+    # ── Checkpoint（issue #201 最小版）────────────────────────────────────
+    # to_dict() 是 replay / SSE execution_context 事件的既有契约（键集不许动）；
+    # checkpoint 快照是它的**超集**：补上 to_dict 缺失的 current_step_id 与
+    # artifacts（iterations_used 迭代预算、quality_gate / review 结论都在
+    # artifacts 里——不序列化它们，resume 后预算口径断裂、迭代计数归零）。
+
+    def to_checkpoint_dict(self) -> dict[str, Any]:
+        """快照形状（v1）。与 to_dict() 的差异只增不改。"""
+        data = self.to_dict()
+        data.update({
+            "v": 1,
+            "current_step_id": self.current_step_id,
+            "artifacts": self.artifacts,
+        })
+        return data
+
+    @classmethod
+    def from_checkpoint_dict(cls, data: dict[str, Any]) -> ExecutionContext:
+        """从 to_checkpoint_dict() 的输出重建 ctx（resume 用）。
+
+        逐字段容错（缺失取默认）；整体结构是否可用由更外层的
+        checkpoint.parse_snapshot 统一判定（损坏 → 安全降级为"无快照"）。
+        不经过 complete_step()：那会按 failed 状态二次追加 failures，与恢复的
+        failures 列表重复。
+        """
+        ctx = cls(query=data.get("query") or "")
+        ctx.task_id = data.get("task_id") or ctx.task_id
+        ctx.goal = data.get("goal") or ""
+        ctx.plan_summary = data.get("plan_summary") or ""
+        ctx.current_step_id = data.get("current_step_id")
+        ctx.artifacts = dict(data.get("artifacts") or {})
+        ctx.total_tokens = int(data.get("total_tokens") or 0)
+        ctx.progress = float(data.get("progress") or 0.0)
+        ctx.duration_ms = float(data.get("duration_ms") or 0.0)
+        if data.get("start_time"):
+            ctx.start_time = float(data["start_time"])
+        ctx.failures = [str(f) for f in (data.get("failures") or [])]
+        for s in data.get("steps") or []:
+            ctx.completed_steps.append(StepRecord(
+                step_id=s.get("step_id", ""),
+                description=s.get("description", ""),
+                tool_used=s.get("tool_used"),
+                status=s.get("status", ""),
+                result_summary=s.get("result_summary"),
+                error=s.get("error"),
+                duration_ms=float(s.get("duration_ms") or 0.0),
+                tokens_used=int(s.get("tokens_used") or 0),
+            ))
+        for f in data.get("findings") or []:
+            ctx.findings.append(Finding(
+                source_step=f.get("source_step", ""),
+                content=f.get("content", ""),
+                source_tool=f.get("source_tool"),
+                confidence=f.get("confidence", "medium"),
+            ))
+        for d in data.get("decisions") or []:
+            ctx.decisions.append(Decision(
+                phase=d.get("phase", ""),
+                action=d.get("action", ""),
+                reasoning=d.get("reasoning", ""),
+                triggered_by=d.get("triggered_by"),
+            ))
+        return ctx
+
     def to_summary_dict(self) -> dict[str, Any]:
         """Lightweight summary for logging / observability."""
         return {

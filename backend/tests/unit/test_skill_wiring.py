@@ -442,7 +442,7 @@ class _FakeExecutor:
         pass
 
     async def execute(self, plan, history=None, organization_id=1, user_id=0,
-                      enable_thinking=True, ctx=None):
+                      enable_thinking=True, ctx=None, on_step_done=None):
         for s in plan.steps:
             self.seen_tool_hints.append(s.tool_hint)
             s.status = "completed"

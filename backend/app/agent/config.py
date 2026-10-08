@@ -69,6 +69,12 @@ class AgentConfig:
     # ── Memory ──
     agent_id: str = "default"
 
+    # ── Checkpoint / resume（issue #201 最小版）──
+    # kill-switch：关闭后 chat 不建任务行、不落快照（完全退回旧行为）。
+    # 不进 REST 更新面（AgentConfigUpdate），但随 to_dict/from_dict 快照进
+    # checkpoint 信封——resume 用 run 起点的规则快照，不重读用户最新配置。
+    enable_checkpoint: bool = True
+
     # ── Limits ──
     timeout: float = 120.0
     max_context_tokens: int = 8000
@@ -126,6 +132,7 @@ class AgentConfig:
             "system_prompt_override": self.system_prompt_override,
             "personality": self.personality,
             "agent_id": self.agent_id,
+            "enable_checkpoint": self.enable_checkpoint,
             "timeout": self.timeout,
             "max_context_tokens": self.max_context_tokens,
             "max_total_tokens": self.max_total_tokens,
