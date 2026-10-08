@@ -28,7 +28,7 @@ langchain-community>=0.0.10
 # 下界 1.14.0：实测该版本起 Generation / MultiModalConversation 两属性齐备
 # （ChatTongyi 构造按模型名二选一取值）；上界 <2：防 1.x→2.x API 漂移。
 dashscope>=1.14.0,<2
-langchain-openai>=0.0.5
+langchain-openai>=1.6.7
 tiktoken>=0.5.2
 pypdf>=6.19.0
 pdfplumber>=0.10.3
