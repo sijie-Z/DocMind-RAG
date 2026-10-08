@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from app.agent.registry import register_tool
+from app.agent.registry import ToolResult, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +29,16 @@ logger = logging.getLogger(__name__)
     },
     tags=["analysis", "data"],
 )
-async def analyze_data(data: str, **_: Any) -> str:
+async def analyze_data(data: str, **_: Any) -> str | ToolResult:
     try:
         values = json.loads(data)
     except json.JSONDecodeError:
-        return "Error: Invalid JSON. Please provide a JSON array of numbers."
+        return ToolResult.fail(
+            code="validation_error", message="Invalid JSON. Please provide a JSON array of numbers."
+        )
 
     if not isinstance(values, list) or not values:
-        return "Error: Please provide a non-empty JSON array."
+        return ToolResult.fail(code="validation_error", message="Please provide a non-empty JSON array.")
 
     # Handle [label, value] pairs
     if isinstance(values[0], list) and len(values[0]) == 2:
@@ -46,12 +48,16 @@ async def analyze_data(data: str, **_: Any) -> str:
             try:
                 numbers.append(float(v[1]))
             except (TypeError, ValueError):
-                return f"Error: '{v[1]}' is not a valid number."
+                return ToolResult.fail(
+                    code="validation_error", message=f"'{v[1]}' is not a valid number."
+                )
     else:
         try:
             numbers = [float(v) for v in values]
         except (TypeError, ValueError):
-            return "Error: All array elements must be numbers."
+            return ToolResult.fail(
+                code="validation_error", message="All array elements must be numbers."
+            )
 
     try:
         import statistics
@@ -94,7 +100,11 @@ async def analyze_data(data: str, **_: Any) -> str:
 
         return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as e:
-        return f"Analysis error: {type(e).__name__}: {e}"
+        return ToolResult.fail(
+            code="unknown",
+            message=f"Analysis error: {type(e).__name__}: {e}",
+            raw=e,
+        )
 
 
 @register_tool(
@@ -127,16 +137,22 @@ async def compare_documents(
     aspect: str = "general",
     organization_id: int | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     if not document_ids or len(document_ids) < 2:
-        return "Error: Please provide at least 2 document IDs to compare."
+        return ToolResult.fail(
+            code="validation_error", message="Please provide at least 2 document IDs to compare."
+        )
     if len(document_ids) > 5:
-        return "Error: Maximum 5 documents can be compared at once."
+        return ToolResult.fail(
+            code="validation_error", message="Maximum 5 documents can be compared at once."
+        )
 
     # 安全加固：与 cross_document_analysis 等工具一致，强制按组织过滤，
     # 防止通过枚举 document_id 跨租户读取其他组织的文档内容。
     if organization_id is None:
-        return "Error: 无法确定组织范围，禁止执行跨组织文档对比。"
+        return ToolResult.fail(
+            code="auth_required", message="无法确定组织范围，禁止执行跨组织文档对比。"
+        )
 
     from app.core.elasticsearch import ElasticsearchTools
 

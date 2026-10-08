@@ -537,7 +537,16 @@ class ToolRegistry:
             if isinstance(raw_result, ToolResult):
                 result = raw_result
             else:
-                # Legacy handler returned a string (or something else)
+                # Legacy handler returned a string (or something else).
+                # issue #293：这里曾把"工具 except 后返回的错误字符串"一并包成
+                # success=True —— SSE/指标/run_report/findings 全绿。修复选择了
+                # "迁移工具到 ToolResult.fail"（web_search / translation /
+                # mcp_bridge / data_analysis 首批，`str()` 即 "Error: [code] ..."
+                # 既有契约），而不是按字符串内容启发式判别：translate_text 的
+                # 翻译结果、execute_python 的 stdout 等**内容透传型**成功输出
+                # 可以合法地长得像错误串（如 "Error: file not found" 的译文），
+                # 内容启发式的误判无法根除。判别权必须留在工具内部——能失败的
+                # 工具应显式 return ToolResult.fail，本分支只兜底纯字符串成功值。
                 result = ToolResult.ok(data=raw_result)
 
             result.meta.latency_ms = elapsed

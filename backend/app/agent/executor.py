@@ -626,6 +626,15 @@ class Executor:
         # All retries exhausted — graceful degradation
         step.status = "failed"
         step.error_context = last_error
+        # 失败记账（issue #293 ②）：重试耗尽/降级此前只回写 step 与 plan，从不写
+        # ctx —— ctx.failures 恒空 → run_report grade_hint=ok / clean_success=True
+        # 假全绿。complete_step 是 ctx.failures 的唯一写者（对齐预算熔断路径
+        # :461-472 的账法），终态失败必须落一条 failed StepRecord。
+        if ctx is not None:
+            ctx.complete_step(
+                step.id, step.description, step.tool_hint, "failed",
+                error=step.error_context,
+            )
         yield AgentEvent(
             type="tool_error",
             tool_name=step.tool_hint or "unknown",
@@ -656,6 +665,10 @@ class Executor:
     ) -> AsyncGenerator[AgentEvent, None]:
         """Execute a single attempt of a plan step."""
         step_start = time.perf_counter()
+        # issue #293 ②：本 attempt 内是否出现过工具失败——决定尾部是否还写
+        # "completed" 记录。失败 attempt 不再伪造绿色记录；终态失败由
+        # _execute_step_with_retry 的重试循环尽头统一落账。
+        attempt_error_detail: str | None = None
         lf = None
         step_span = None
         try:
@@ -918,6 +931,7 @@ class Executor:
                     "result": f"参数解析失败，工具未执行：{e}",
                     "error_type": "serialization_error",
                 })
+                attempt_error_detail = f"工具参数不是合法 JSON，已拒绝执行：{e}"
                 continue
 
             # Yield tool_call event
@@ -977,6 +991,7 @@ class Executor:
                         error_type=error_type,
                     )
                     tool_results.append({"tool": func.name, "result": result, "error_type": error_type})
+                    attempt_error_detail = result
                 else:
                     AGENT_TOOL_CALLS.labels(tool=func.name, result="success").inc()
                     yield AgentEvent(
@@ -1013,6 +1028,7 @@ class Executor:
                     plan_step_id=step.id,
                 )
                 tool_results.append({"tool": func.name, "result": f"Exception: {e}"})
+                attempt_error_detail = f"{type(e).__name__}: {e}"
 
         # Synthesize tool results into a natural language answer
         if tool_results:
@@ -1038,15 +1054,19 @@ class Executor:
 
         if ctx:
             step_duration = (time.perf_counter() - step_start) * 1000
-            ctx.complete_step(
-                step_id=step.id,
-                description=step.description,
-                tool=used_tools[0] if used_tools else None,
-                status="completed",
-                result=synthesis if tool_results and synthesis else None,
-                duration=step_duration,
-                tokens=step_tokens,
-            )
+            # issue #293 ②：带工具失败的 attempt 不写 "completed" 假记录——
+            # 该 attempt 的失败要么被重试后掩盖（成功 attempt 自会记账），要么
+            # 由重试循环尽头的终态 failed 记录唯一落账。无失败的 attempt 照旧。
+            if attempt_error_detail is None:
+                ctx.complete_step(
+                    step_id=step.id,
+                    description=step.description,
+                    tool=used_tools[0] if used_tools else None,
+                    status="completed",
+                    result=synthesis if tool_results and synthesis else None,
+                    duration=step_duration,
+                    tokens=step_tokens,
+                )
 
     async def _synthesize_tool_results(
         self,

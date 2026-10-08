@@ -16,7 +16,7 @@ from typing import Any
 from mcp import StdioServerParameters, stdio_client
 from mcp.client.session import ClientSession
 
-from app.agent.registry import register_tool
+from app.agent.registry import ToolResult, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -73,14 +73,14 @@ def _get_server_config(name: str) -> dict | None:
     return config
 
 
-async def _call_mcp_tool(server_name: str, tool_name: str, arguments: dict) -> str:
+async def _call_mcp_tool(server_name: str, tool_name: str, arguments: dict) -> str | ToolResult:
     """Connect to an MCP server via stdio and call a tool."""
     config = _get_server_config(server_name)
     if not config:
         available = list(MCP_SERVERS.keys())
-        return (
-            f"Error: unknown MCP server '{server_name}'. "
-            f"Available: {', '.join(available)}"
+        return ToolResult.fail(
+            code="validation_error",
+            message=f"unknown MCP server '{server_name}'. Available: {', '.join(available)}",
         )
 
     params = StdioServerParameters(
@@ -100,7 +100,10 @@ async def _call_mcp_tool(server_name: str, tool_name: str, arguments: dict) -> s
                 # Format response
                 if result.isError:
                     content = result.content[0].text if result.content else "Unknown error"
-                    return f"MCP error from {server_name}/{tool_name}: {content}"
+                    return ToolResult.fail(
+                        code="unknown",
+                        message=f"MCP error from {server_name}/{tool_name}: {content}",
+                    )
 
                 parts = []
                 for item in result.content:
@@ -117,14 +120,18 @@ async def _call_mcp_tool(server_name: str, tool_name: str, arguments: dict) -> s
 
     except Exception as e:
         logger.error(f"MCP call failed: server={server_name}, tool={tool_name}: {e}")
-        return f"Error calling MCP server '{server_name}/{tool_name}': {type(e).__name__}: {e}"
+        return ToolResult.fail(
+            code="unknown",
+            message=f"Error calling MCP server '{server_name}/{tool_name}': {type(e).__name__}: {e}",
+            raw=e,
+        )
 
 
-async def _list_mcp_tools(server_name: str) -> str:
+async def _list_mcp_tools(server_name: str) -> str | ToolResult:
     """List available tools from an MCP server."""
     config = _get_server_config(server_name)
     if not config:
-        return f"Unknown MCP server: {server_name}"
+        return ToolResult.fail(code="validation_error", message=f"Unknown MCP server: {server_name}")
 
     params = StdioServerParameters(
         command=config["command"],
@@ -149,7 +156,11 @@ async def _list_mcp_tools(server_name: str) -> str:
                 return "\n".join(lines)
 
     except Exception as e:
-        return f"Error listing MCP tools from '{server_name}': {e}"
+        return ToolResult.fail(
+            code="unknown",
+            message=f"Error listing MCP tools from '{server_name}': {e}",
+            raw=e,
+        )
 
 
 @register_tool(
@@ -187,7 +198,7 @@ async def mcp_call(
     tool: str,
     arguments: dict | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     """LLM-facing tool: call any MCP server's tool or list available tools."""
     if tool == "list_tools":
         return await _list_mcp_tools(server)

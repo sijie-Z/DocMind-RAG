@@ -8,7 +8,7 @@ import ipaddress
 import logging
 from typing import Any
 
-from app.agent.registry import register_tool
+from app.agent.registry import ToolResult, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +102,14 @@ async def web_search(
     max_results: int = 5,
     user_id: int = 0,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     if not await _check_rate_limit(user_id):
-        return "Rate limit exceeded. Please wait before making more web searches."
+        # issue #293：失败必须结构化 —— 返回错误字符串会被注册表归一为
+        # success=True，SSE/指标/run_report/findings 全绿（见该 issue 证据链）。
+        return ToolResult.fail(
+            code="rate_limited",
+            message="Rate limit exceeded. Please wait before making more web searches.",
+        )
 
     max_results = min(max_results, 10)
 
@@ -133,10 +138,18 @@ async def web_search(
             output.append(f"[{i}] {r['title']}\n    {r['snippet'][:200]}\n    {r['url']}")
         return "\n\n".join(output)
     except ImportError:
-        return "Web search unavailable: duckduckgo-search package not installed. Try: pip install duckduckgo-search"
+        return ToolResult.fail(
+            code="invalid_configuration",
+            message="Web search unavailable: duckduckgo-search package not installed. Try: pip install duckduckgo-search",
+        )
     except Exception as e:
         logger.error(f"Web search failed: {e}")
-        return f"Web search error: {type(e).__name__}: {e}"
+        # raw=e 交给注册表内建 error_mapper 再分类（连接类错误 → 可重试码）。
+        return ToolResult.fail(
+            code="unknown",
+            message=f"Web search error: {type(e).__name__}: {e}",
+            raw=e,
+        )
 
 
 @register_tool(
@@ -162,9 +175,9 @@ async def fetch_webpage(
     url: str,
     user_id: int = 0,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     if not await _check_rate_limit(user_id):
-        return "Rate limit exceeded."
+        return ToolResult.fail(code="rate_limited", message="Rate limit exceeded.")
 
     try:
         from urllib.parse import urljoin
@@ -192,30 +205,42 @@ async def fetch_webpage(
                 break
 
             if response is None:
-                return f"Failed to fetch {url}: no response"
+                return ToolResult.fail(code="unknown", message=f"Failed to fetch {url}: no response")
             if response.status_code != 200:
-                return f"Failed to fetch {url}: HTTP {response.status_code}"
+                return ToolResult.fail(
+                    code="api_error", message=f"Failed to fetch {url}: HTTP {response.status_code}"
+                )
 
             # 安全加固：限制响应体大小（2MB），防止恶意服务器返回超大响应拖垮内存
             raw = response.content
             if len(raw) > 2 * 1024 * 1024:
-                return f"Failed to fetch {url}: response too large (>2MB)"
+                return ToolResult.fail(
+                    code="unknown", message=f"Failed to fetch {url}: response too large (>2MB)"
+                )
             html = raw.decode("utf-8", errors="replace")
 
             # Try readability extraction (CPU-bound parsing — keep it off the loop)
             text = await asyncio.to_thread(_extract_text, html)
             if not text:
-                return f"Could not extract text content from {url}"
+                return ToolResult.fail(
+                    code="empty_response", message=f"Could not extract text content from {url}"
+                )
 
             if len(text) > 5000:
                 text = text[:5000] + "\n...[truncated]"
 
             return f"Content from {current_url}:\n\n{text}"
     except ImportError:
-        return "Webpage fetch unavailable: httpx package not installed."
+        return ToolResult.fail(
+            code="invalid_configuration", message="Webpage fetch unavailable: httpx package not installed."
+        )
     except Exception as e:
         logger.error(f"Fetch webpage failed: {e}")
-        return f"Fetch error: {type(e).__name__}: {e}"
+        return ToolResult.fail(
+            code="unknown",
+            message=f"Fetch error: {type(e).__name__}: {e}",
+            raw=e,
+        )
 
 
 def _extract_text(html: str) -> str:

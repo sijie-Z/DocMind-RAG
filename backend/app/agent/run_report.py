@@ -67,11 +67,17 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
     # §5b/§5c 语义：clean_success=False 表示本次 run 不得被呈现为一次干净的
     # 成功 —— 质检有 fatal_issues（硬性失败）或对抗审查判定 reject。
     # revise（建议修改）与质检的 C 档同级：只记录/暴露，不翻转 clean_success。
+    # issue #293 ②：ctx.failures 非空（重试耗尽/预算熔断等终态失败已被记账）同样
+    # 必须翻转 —— 报告里明明有 FAILURE 行却 clean_success=True 是自相矛盾的全绿。
     qg_artifact = ctx.artifacts.get("quality_gate") or {}
     review_artifact = ctx.artifacts.get("review") or {}
     fatal_issues = list(qg_artifact.get("fatal_issues") or [])
     review_recommendation = review_artifact.get("recommendation")
-    clean_success = not fatal_issues and review_recommendation != "reject"
+    clean_success = (
+        not fatal_issues
+        and review_recommendation != "reject"
+        and not ctx.failures
+    )
 
     evaluation = {
         "reflect_decisions": reflect_reasons or ["(no reflection recorded)"],
