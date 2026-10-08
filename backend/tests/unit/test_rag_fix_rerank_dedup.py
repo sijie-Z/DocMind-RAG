@@ -218,7 +218,8 @@ class TestSubQueryMergeDedup:
         responses = iter([[dup, other], [dict(dup)]])
 
         async def fake_retrieve(query, organization_id, top_k, document_ids=None, debug=False):
-            return next(responses), [], None
+            # issue #292：retrieve 契约扩为 (results, query_vector, debug_info, degraded)
+            return next(responses), [], None, []
 
         async def fake_decompose(query, client, model, max_sq):
             return ["子问题一", "子问题二"]

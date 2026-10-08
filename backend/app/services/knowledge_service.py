@@ -13,6 +13,7 @@ from app.core.elasticsearch import get_elasticsearch
 from app.exceptions import AppError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag
 from app.models.knowledge_job import KnowledgeProcessingJob
+from app.rag.errors import RetrievalUnavailableError
 from app.services.file_service import FileUploadService
 
 logger = logging.getLogger(__name__)
@@ -106,14 +107,25 @@ class KnowledgeService:
                     }
                 })
             return formatted_results
+        except RetrievalUnavailableError:
+            # issue #292：检索后端服务故障/超时不得回落成「没有相关内容」（假空数组）。
+            # 原样上抛 —— /search 端点映射为 502（ExternalServiceError），
+            # suggestions 等 best-effort 调用方自行降级为空并留痕；绝不在这里吞成 []。
+            logger.error("Knowledge search unavailable: retrieval backend failure", exc_info=True)
+            raise
         except Exception as e:
             logger.error(f"Knowledge search failed: {e}")
             return []
 
     async def get_search_suggestions(self, query: str, organization_id: str, limit: int = 5) -> list[str]:
-        """获取搜索建议"""
-        # 简单实现：使用关键词搜索的前几个标题
-        results = await self.search_knowledge(query, organization_id, top_k=limit, search_mode="keyword")
+        """获取搜索建议（best-effort：自动补全不应把检索故障扩大成 5xx）。"""
+        try:
+            results = await self.search_knowledge(query, organization_id, top_k=limit, search_mode="keyword")
+        except RetrievalUnavailableError as e:
+            # issue #292：降级为空数组（与「没有建议」同形是此类补全接口可接受的
+            # 语义边界），但必须留痕 —— 不静默。
+            logger.warning(f"Search suggestions degraded (retrieval unavailable, kind={e.kind}): {e}")
+            return []
         return [r["text"][:50] + "..." for r in results]
 
     async def get_knowledge_stats(self, organization_id: str) -> dict[str, Any]:

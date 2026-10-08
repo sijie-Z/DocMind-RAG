@@ -26,6 +26,7 @@ from app.exceptions import (
     AppError,
     AuthorizationError,
     ConflictError,
+    ExternalServiceError,
     NotFoundError,
     ValidationError,
 )
@@ -33,6 +34,7 @@ from app.models.document import Document, DocumentStatus
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.models.rbac import PermissionType
 from app.models.user import User
+from app.rag.errors import RetrievalUnavailableError
 from app.schemas.knowledge import (
     BatchDeleteRequest,
     KnowledgeBuildResponse,
@@ -237,6 +239,15 @@ async def search_knowledge(
             "index_doc_count": index_doc_count,
         }
 
+    except RetrievalUnavailableError as e:
+        # issue #292：检索后端服务故障/超时如实 502，而不是 200 + 空数组
+        # （「服务坏了」不得呈现成「没搜到」；index_status 诊断在故障下也不可信）。
+        logger.error(f"搜索失败（检索后端不可用, kind={e.kind}）: {e}")
+        raise ExternalServiceError(
+            "知识库检索服务暂不可用，请稍后重试",
+            error_code="RETRIEVAL_UNAVAILABLE",
+            detail={"kind": e.kind},
+        ) from e
     except Exception as e:
         logger.error(f"搜索失败: {str(e)}")
         raise AppError(f"搜索知识库失败: {str(e)}")
