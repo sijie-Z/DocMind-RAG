@@ -167,7 +167,7 @@ Query enters
 | Messaging | `kafka_client.py` | aiokafka producer |
 | Auth | `security.py` | JWT + bcrypt, get_current_user dependency, RBAC helpers |
 | Middleware | `middleware.py` | Metrics collection (request count/latency/errors) |
-| Circuit Breaker | `circuit_breaker.py` | Circuit breaker pattern — **state-machine API is wired into the LLM step path (cross-request breaking + half-open recovery, issue #242); covers the executor's per-step main LLM call only — planner (stream) / synthesis paths are not covered**; the decorator's degraded-value contract remains unwired (see module docstring) |
+| Circuit Breaker | `circuit_breaker.py` | Circuit breaker pattern — **state-machine API is wired into the LLM step path (cross-request breaking + half-open recovery, issue #242); covers the executor's per-step main LLM call only — planner (stream) / synthesis / reflector / loop direct-answer paths are not covered**; the decorator's degraded-value contract remains unwired (see module docstring) |
 | Step Runner | `step_runner.py` | Safe step execution with retry/fallback |
 | Tracing | `tracing.py` | OpenTelemetry OTLP gRPC export |
 | Trace Logger | `trace_logger.py` | Agent execution tracing to JSONL (dev-only: used solely by the unmounted standalone test app `agent_api.py`:8010; no in-repo readers) |

@@ -311,9 +311,14 @@ class Planner:
 
             full_content = ""
             stream_usage = None  # 最后一个 chunk 携带（include_usage）
+            # 流式 chunk 携带的 model（issue #269 附带项：此前包装只带 usage，
+            # 不带 model → agent_tokens_total 的 model 标签恒为 "unknown"）
+            stream_model = None
             fence_start = -1  # index of opening "```" in full_content, -1 = not found
 
             async for chunk in stream:
+                if isinstance(getattr(chunk, "model", None), str) and chunk.model:
+                    stream_model = chunk.model
                 if getattr(chunk, "usage", None):
                     stream_usage = chunk.usage
                 delta = chunk.choices[0].delta if chunk.choices else None
@@ -343,7 +348,9 @@ class Planner:
 
             # 用量记账（issue #202）：流式 usage 统一走单一入口
             if stream_usage is not None:
-                record_llm_usage(SimpleNamespace(usage=stream_usage), ctx)
+                record_llm_usage(
+                    SimpleNamespace(usage=stream_usage, model=stream_model), ctx
+                )
 
             # Parse the complete response
             plan_json = self._extract_json(full_content)

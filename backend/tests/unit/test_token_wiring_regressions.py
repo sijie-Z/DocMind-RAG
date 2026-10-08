@@ -14,13 +14,14 @@ from app.agent.exec_context import ExecutionContext
 from app.agent.planner import Planner
 
 
-def _chunk(content=None, usage=None):
+def _chunk(content=None, usage=None, model=None):
     c = MagicMock()
     if content is None:
         c.choices = []
     else:
         c.choices = [SimpleNamespace(delta=SimpleNamespace(content=content))]
     c.usage = usage
+    c.model = model
     return c
 
 
@@ -68,6 +69,51 @@ async def test_planner_streaming_collects_usage_into_ctx():
     sent = client.chat.completions.create.await_args.kwargs
     assert sent.get("stream_options") == {"include_usage": True}, (
         "请求侧必须显式索取 usage（评审 minor-1：删掉该参数此前无断言拦截）"
+    )
+
+
+def _agent_tokens(model: str, direction: str) -> float:
+    from app.core.prometheus import _get_real
+
+    real = _get_real()
+    assert real is not None, "conftest 应已开启 PROMETHEUS_ENABLED（真实指标）"
+    return real["AGENT_TOKENS"].labels(model=model, direction=direction)._value.get()
+
+
+@pytest.mark.asyncio
+async def test_planner_streaming_model_label_carried_into_metric():
+    """issue #269 附带项：流式包装必须带上 chunk 的 model —— 此前恒落 "unknown"。
+
+    变异验证：把 planner 的包装改回 `SimpleNamespace(usage=stream_usage)`
+    （不带 model）→ 本用例红（#239 residual R5 的"后续可给 wrapper 带上 model"）。
+    """
+    plan_json = (
+        '{"goal": "g", "reasoning": "r", '
+        '"steps": [{"id": "s1", "description": "d", "dependencies": []}]}'
+    )
+    chunks = [
+        _chunk("```json\n", model="deepseek-v4-pro"),
+        _chunk(plan_json, model="deepseek-v4-pro"),
+        _chunk("\n```", model="deepseek-v4-pro"),
+        _chunk(
+            None,
+            SimpleNamespace(prompt_tokens=100, completion_tokens=20),
+            model="deepseek-v4-pro",
+        ),
+    ]
+
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock(return_value=_FakeStream(chunks))
+
+    planner = Planner(client, AgentConfig())
+    ctx = ExecutionContext(query="q")
+
+    before = _agent_tokens("deepseek-v4-pro", "input")
+    [_ async for _ in planner.plan("q", ctx=ctx)]
+
+    assert ctx.total_tokens == 120
+    assert _agent_tokens("deepseek-v4-pro", "input") == before + 100, (
+        "流式 usage 的 model 标签必须来自 chunk（此前包装丢 model → 恒 unknown）"
     )
 
 
