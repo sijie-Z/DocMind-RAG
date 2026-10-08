@@ -294,7 +294,7 @@ if doc_id and seen_docs[doc_id] > 2:
 3. **未核实 ES analyzer**：`_holder.es_analyzer` / `es_search_analyzer` 的定义在 `app/core/elasticsearch.py` 的 1-99 行，**没有读**。因此 `第七`/`七条` 到底被切成什么 token、`minimum_should_match: 30%` 的真实效果，未能确证——这是唯一一处无法完全闭环的环节。
 4. **未核实的调用路径**：Agent 路径（`agent/service.py:127`、`agent/core_tools.py:50-74`）用的是同一个 `search_knowledge_base`，但**没有逐行走 Agent 的生成侧**；`graph_rag_service.py` 只做了函数清单级浏览。
 5. **`_semantic_split` 的实际切点未实测**：第 3 节 G 里"整部法律成为单一分区"的分支成立与否，取决于具体 PDF 的抽取结果。
-6. **未核实的配置**：`SEMANTIC_CACHE_THRESHOLD`、`TOP_K_RESULTS`、`RAG_MMR_*` 是否被 `.env` 覆盖。
+6. **未核实的配置**：`SEMANTIC_CACHE_THRESHOLD`、`TOP_K_RESULTS`、`RAG_MMR_*` 是否被 `.env` 覆盖。**（追注，#242 终单 2026-10-08：已闭 —— `TOP_K_RESULTS` 现接线为 `/search` 的 `top_k` 默认值（此前零消费）；`RAG_MMR_*` 经 settings 读取（`retriever.py:460/515`），`.env` 生效；`SEMANTIC_CACHE_THRESHOLD` 在 Settings 无对应字段（`extra="ignore"`，`.env` 配了也无效），属反向缺口、另行立档。）**
 7. **未读**：`app/api/v1/endpoints/monitoring.py:756-810`（RAG 评估接线）、`app/agent/quality_gate.py:71`、`deploy/k8s/*`、`docker-compose*.yml` 全文、`backend/benchmark/**`。
 
 ---

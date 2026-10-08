@@ -68,7 +68,7 @@ Key environment variables (set in `.env.docker`):
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| SECRET_KEY | Yes | 32-byte hex key for encryption |
+| SECRET_KEY | Yes | 32-byte hex key（部署契约：k8s/样例注入 + 启动非空校验；当前未被代码消费，issue #242） |
 | JWT_SECRET_KEY | Yes | 32-byte hex key for JWT signing |
 | DEEPSEEK_API_KEY | Yes | LLM API key (ZhipuAI / OpenAI-compatible) |
 | EMBEDDING_API_KEY | Yes | Embedding model API key |

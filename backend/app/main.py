@@ -167,8 +167,15 @@ async def lifespan(app: FastAPI):
             from app.core.ensure_demo_user import ensure_demo_user
             await ensure_demo_user()
 
-        # 启动指标监控快照任务
-        metrics_task = asyncio.create_task(metrics_snapshot_task())
+        # 启动指标监控快照任务（issue #242：ENABLE_MONITORING 此前被静默忽略——
+        # .env 样例、CI、测试都按预期设过它）。默认 true，行为与接线前一致；
+        # 置 false 才不启动。该开关只管后台快照任务：/metrics 端点与
+        # PROMETHEUS_ENABLED 均独立，不受影响。
+        metrics_task: asyncio.Task | None = None
+        if settings.ENABLE_MONITORING:
+            metrics_task = asyncio.create_task(metrics_snapshot_task())
+        else:
+            logger.info("ENABLE_MONITORING=false，指标快照任务不启动")
 
         logger.info("所有服务初始化完成")
 

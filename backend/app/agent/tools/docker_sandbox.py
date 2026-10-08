@@ -7,14 +7,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import shutil
 import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_SANDBOX_IMAGE = os.environ.get("SANDBOX_DOCKER_IMAGE", "python:3.11-slim")
+# 默认镜像：仅当调用方未显式传 image 时使用。仓库内主调用侧（code_execution.py /
+# workflow_engine.py）都显式传 settings.SANDBOX_DOCKER_IMAGE —— 此处不再读
+# os.environ：宿主直跑时 .env 不注入 os.environ，该通道永远看不到 .env 值，
+# 双通道既不一致也无实际消费者（issue #242 疑点 1，统一入口）。
+_SANDBOX_IMAGE = "python:3.11-slim"
 
 # ── Detection ────────────────────────────────────────────────────────
 

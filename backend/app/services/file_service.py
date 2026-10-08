@@ -41,7 +41,9 @@ class FileUploadService:
     """文件上传服务 - 支持大文件分块上传"""
 
     def __init__(self):
-        self.chunk_size = 5 * 1024 * 1024  # 5MB 分块大小
+        # 分块上限读配置（issue #242 接线）：默认 5MB，与接线前硬编码同值；
+        # 该值是服务端接收分块的合法上限与总块数派生基准（upload_chunk）。
+        self.chunk_size = settings.CHUNK_SIZE
         self.allowed_extensions = {
             '.pdf', '.docx', '.xlsx', '.xls', '.txt', '.md', '.csv'
         }

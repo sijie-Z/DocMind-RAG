@@ -67,14 +67,21 @@ class AISettings(BaseSettings):
     LOCAL_EMBEDDING_MODEL: str = "nomic-embed-text"
 
     # Embedding — default to local Ollama (free); set env vars for paid API
+    # 注：EMBEDDING_BASE_URL 曾是零消费的重复旋钮（真正的旋钮是上方 EMBEDDING_API_URL，
+    # 与 #241 已删的 DEEPSEEK_BASE_URL 同形态，issue #242 已删除）。
     EMBEDDING_API_KEY: str | None = None
     EMBEDDING_API_URL: str = "http://localhost:11434/v1"
-    EMBEDDING_BASE_URL: str | None = None
     EMBEDDING_MODEL: str = "nomic-embed-text"
 
     # Vector search
     VECTOR_DIMENSION: int = 768  # nomic-embed-text
-    SIMILARITY_THRESHOLD: float = 0.7
+    # 注：SIMILARITY_THRESHOLD 曾是 README:108 的承诺（默认 0.7），但实现从未存在
+    # 对应机制（真实过滤是 retriever.py 的两处 min_score 硬编码），issue #242 已
+    # 删除字段与文档承诺。未来若真做「最低相似度」旋钮，应映射 min_score 空间，
+    # 属新功能而不是接线。
+    # 搜索结果默认数量（issue #242 接线）：供 KnowledgeSearchRequest.top_k 的
+    # 默认值使用。注意 chat 检索链路的独立默认值是 5（rag/pipeline.py），
+    # 本字段只承诺 README 所说的「搜索」层。
     TOP_K_RESULTS: int = 10
 
     # RAG retrieval strategy

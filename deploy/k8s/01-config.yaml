@@ -25,8 +25,8 @@ metadata:
   namespace: docmind
 type: Opaque
 stringData:
-  SECRET_KEY: "change-me-in-production-32bytes!"
-  JWT_SECRET_KEY: "change-me-too-32bytes!"
+  # SECRET_KEY / JWT_SECRET_KEY 的正主在 02-secrets.yaml —— 此处为历史遗留文件，
+  # 重复副本已删（issue #242），勿在此补写密钥。
   DEEPSEEK_API_KEY: "your-api-key-here"
   EMBEDDING_API_KEY: "your-api-key-here"
   RERANK_API_KEY: "your-api-key-here"

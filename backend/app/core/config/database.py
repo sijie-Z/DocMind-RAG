@@ -33,15 +33,18 @@ class DatabaseSettings(BaseSettings):
     REDIS_PASSWORD: str | None = None
 
     # Elasticsearch
+    # 注：分词器不是配置项——运行时由 _ESHolder 自动选择（默认 cjk，探测到 IK 后
+    # 用 ik_smart/ik_max_word，见 core/elasticsearch.py）。此前的 ES_ANALYZER /
+    # ES_SEARCH_ANALYZER 字段零消费且默认值 "standard" 与运行时矛盾
+    #（issue #242：误导性强于无用，已删除）。
     ELASTICSEARCH_HOSTS: list[str] = ["http://localhost:9200"]
     ELASTICSEARCH_INDEX_NAME: str = "paicongming_knowledge"
-    ES_ANALYZER: str = "standard"
-    ES_SEARCH_ANALYZER: str = "standard"
 
     # Kafka
+    # 注：chat 链路从不走 Kafka（消费者只订阅 file-processing），此前的
+    # KAFKA_CHAT_PROCESSING_TOPIC 字段零消费（issue #242 已删除）。
     KAFKA_BOOTSTRAP_SERVERS: list[str] | str = "localhost:9092"
     KAFKA_FILE_PROCESSING_TOPIC: str = "file-processing"
-    KAFKA_CHAT_PROCESSING_TOPIC: str = "chat-processing"
 
     # MinIO
     MINIO_ENDPOINT: str = "localhost:9000"
@@ -59,7 +62,8 @@ class DatabaseSettings(BaseSettings):
     USER_STORAGE_LIMIT_BYTES: int = 10 * 1024 * 1024 * 1024
 
     # Document parsing
+    # 注：支持的文件类型不是配置项——白名单与解析器能力强耦合（file_service 的
+    # allowed_extensions / document_parser 的 supported_extensions / 前端 accept
+    # 三处同为 7 种格式）。此前的 SUPPORTED_FILE_TYPES 字段零消费（issue #242 已删除）；
+    # 未来若要放开更多格式，正确动作是扩展 parser，而不是把常量改读 env。
     OCR_LANGUAGE: str = "chi_sim+eng"
-    SUPPORTED_FILE_TYPES: list[str] = [
-        "pdf", "docx", "xlsx", "xls", "txt", "md", "csv",
-    ]
