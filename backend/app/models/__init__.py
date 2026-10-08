@@ -23,6 +23,8 @@ from app.models.workflow import NodeDefinition, Workflow, WorkflowExecution
 __all__ = [
     "Base",
     "User",
+    "AgentTask",
+    "TaskStatus",
     "Organization",
     "user_organization",
     "Document",

@@ -78,6 +78,10 @@ class AgentEvent:
     # Thinking
     thinking_type: ThinkingType = "reasoning"
 
+    # Task context（issue #201 最小版）：任务级 checkpoint/resume 的关联 id。
+    # 由 service 包装层盖章（chat / resume_chat）；默认空 → 既有 SSE 输出不变。
+    task_id: str = ""
+
     # Reflection
     reflection_result: ReflectionResult = "pass"
     retry_attempt: int = 0
@@ -140,6 +144,9 @@ class AgentEvent:
 
         if self.error_type:
             d["error_type"] = self.error_type
+
+        if self.task_id:
+            d["task_id"] = self.task_id
 
         if self.iteration:
             d["iteration"] = self.iteration

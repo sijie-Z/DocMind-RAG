@@ -17,7 +17,7 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -124,8 +124,15 @@ class Executor:
         user_id: int = 0,
         enable_thinking: bool = True,
         ctx: Any = None,  # ExecutionContext
+        on_step_done: Callable[[PlanStep], Awaitable[None]] | None = None,
     ) -> AsyncGenerator[AgentEvent, str]:
         """Execute plan steps in dependency order.
+
+        Args:
+            on_step_done: 可选回调 —— 每个 PlanStep 到达终态（completed/failed）
+                且状态回写完成后调用一次（issue #201 checkpoint 的 T2 触发点：
+                "硬杀最多退一步"的正确性主干）。子代理等不接 checkpoint 的
+                调用方传 None 即天然关闭。
 
         Yields: tool_call, tool_result, tool_error, thinking, chunk events
         Returns: accumulated final answer string (via generator return)
@@ -260,12 +267,14 @@ class Executor:
             # Execute ready steps — parallel when multiple independent steps exist
             if len(ready_steps) > 1:
                 async for event in self._execute_steps_parallel(
-                    ready_steps, plan, history, organization_id, user_id, enable_thinking, ctx=ctx,
+                    ready_steps, plan, history, organization_id, user_id, enable_thinking,
+                    ctx=ctx, on_step_done=on_step_done,
                 ):
                     yield event
             else:
                 async for event in self._execute_single_step(
-                    ready_steps[0], plan, history, organization_id, user_id, enable_thinking, ctx=ctx,
+                    ready_steps[0], plan, history, organization_id, user_id, enable_thinking,
+                    ctx=ctx, on_step_done=on_step_done,
                 ):
                     yield event
 
@@ -273,6 +282,7 @@ class Executor:
 
     async def _execute_single_step(
         self, step, plan, history, organization_id, user_id, enable_thinking, ctx=None,
+        on_step_done=None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Execute a single step (sequential path)."""
         step.status = "running"
@@ -322,6 +332,11 @@ class Executor:
             result=step_result[:200] if step_result else str(step.error_context or "")[:200],
         )
 
+        # T2 checkpoint（issue #201）：终态（completed/failed）与 plan/memory
+        # 回写全部完成后的落盘点——硬杀最多退回这一步重跑。
+        if on_step_done is not None:
+            await on_step_done(step)
+
         yield AgentEvent(
             type="thinking",
             content=f"{'✅' if step.status == 'completed' else '❌'} 步骤完成: {step.description}",
@@ -332,6 +347,7 @@ class Executor:
 
     async def _execute_steps_parallel(
         self, steps, plan, history, organization_id, user_id, enable_thinking, ctx=None,
+        on_step_done=None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Execute multiple independent steps concurrently."""
         # Mark all as running
@@ -399,6 +415,10 @@ class Executor:
                         action=f"{step.tool_hint or 'llm'}: {step.description[:100]}",
                         result=step_result[:200] if step_result else str(step.error_context or "")[:200],
                     )
+
+                    # T2 checkpoint（issue #201）：并行路径的同一落盘点。
+                    if on_step_done is not None:
+                        await on_step_done(step)
 
                     yield AgentEvent(
                         type="thinking",
