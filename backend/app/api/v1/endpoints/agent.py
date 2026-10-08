@@ -32,6 +32,7 @@ from app.agent.registry import tool_registry
 from app.agent.service import agent_service
 from app.agent.skills import skill_manager
 from app.core.database import AsyncSessionLocal, get_db
+from app.core.log_safety import log_safe
 from app.core.prometheus import AGENT_FEEDBACK_TOTAL
 from app.core.security import get_current_user, require_organization
 from app.exceptions import NotFoundError, ValidationError
@@ -178,8 +179,10 @@ async def agent_chat(
                 )
 
         except Exception as e:
-            logger.error(f"Agent chat error: {e}", exc_info=True)
-            error_data = {"type": "error", "content": f"Agent 执行出错: {str(e)}"}
+            # 完整异常/堆栈只进服务端日志；客户端收通用文案（CodeQL 信息暴露修复：
+            # 异常原文此前直出 SSE）。
+            logger.error("Agent chat error: %s", log_safe(e), exc_info=True)
+            error_data = {"type": "error", "content": "Agent 执行出错，请稍后重试"}
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
         done_data: dict[str, Any] = {"type": "done", "content": ""}
@@ -284,8 +287,10 @@ async def resume_agent_task(
                     final_answer,
                 )
         except Exception as e:
-            logger.error(f"Agent resume error: {e}", exc_info=True)
-            error_data = {"type": "error", "content": f"Agent 恢复执行出错: {str(e)}"}
+            # 完整异常/堆栈只进服务端日志；客户端收通用文案（CodeQL 信息暴露修复：
+            # 异常原文此前直出 SSE）。
+            logger.error("Agent resume error: %s", log_safe(e), exc_info=True)
+            error_data = {"type": "error", "content": "Agent 恢复执行出错，请稍后重试"}
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
         done_data: dict[str, Any] = {"type": "done", "content": "", "task_id": task_id}

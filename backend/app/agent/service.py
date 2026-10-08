@@ -22,6 +22,7 @@ from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.loop import PERAgentLoop
 from app.agent.memory_bridge import AgentMemoryBridge
+from app.core.log_safety import log_safe
 from app.models.agent_task import AgentTask, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -204,7 +205,7 @@ class AgentService:
             session_id = payload.get("session_id") or None
         else:
             # 快照缺失/损坏：降级为从规划阶段重跑（仍幂等）；规则取调用方传入的配置。
-            logger.warning("任务 %s 无可用快照，resume 从规划阶段重新开始", task_id)
+            logger.warning("任务 %s 无可用快照，resume 从规划阶段重新开始", log_safe(task_id))
             query = task.query
             agent_config = config or AgentConfig()
             session_id = None
@@ -249,7 +250,7 @@ class AgentService:
                 task_id=task_id, live=agent.checkpoint_live, trigger="on_disconnect",
             ))
         except Exception as e:
-            logger.warning("checkpoint on_disconnect failed (task=%s): %s", task_id, e)
+            logger.warning("checkpoint on_disconnect failed (task=%s): %s", log_safe(task_id), log_safe(e))
 
     async def _checkpoint_error(
         self, task_id: str | None, agent: PERAgentLoop, exc: BaseException,
@@ -262,7 +263,7 @@ class AgentService:
                 task_id=task_id, live=agent.checkpoint_live, trigger="on_error",
             ))
         except Exception as e:
-            logger.warning("checkpoint on_error save failed (task=%s): %s", task_id, e)
+            logger.warning("checkpoint on_error save failed (task=%s): %s", log_safe(task_id), log_safe(e))
         await checkpoint.mark_terminal(
             task_id,
             TaskStatus.FAILED,
@@ -356,9 +357,9 @@ class AgentService:
                     key, 86400 * 7,
                     json.dumps(state, ensure_ascii=False, default=str),
                 )
-                logger.info(f"Agent session state saved: {session_id}")
+                logger.info("Agent session state saved: %s", log_safe(session_id))
         except Exception as e:
-            logger.warning(f"Failed to save session state: {e}")
+            logger.warning("Failed to save session state: %s", log_safe(e))
 
     async def load_session_state(
         self,
@@ -376,7 +377,7 @@ class AgentService:
             if raw:
                 return json.loads(raw)
         except Exception as e:
-            logger.warning(f"Failed to load session state: {e}")
+            logger.warning("Failed to load session state: %s", log_safe(e))
         return None
 
 

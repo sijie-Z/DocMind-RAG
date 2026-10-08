@@ -328,3 +328,50 @@ async def test_no_org_user_is_rejected_fail_closed_on_both_endpoints(tmp_path, m
         t = await db.get(AgentTask, task_id)
     assert t.status == TaskStatus.RUNNING and t.retry_count == 0, "任务未被推进"
     await engine.dispose()
+
+
+def test_resume_stream_error_is_generic_detail_only_in_server_log(client, auth, monkeypatch):
+    """CodeQL 信息暴露修复：SSE 流内异常只进服务端日志（含堆栈），客户端收通用文案。
+
+    变异点：恢复 `f"...{str(e)}"` → "SECRET-TOKEN-xyz 不得出现在 SSE 输出" 断言红。
+    """
+    import logging
+
+    async def _prepare(task_id, user_id, organization_id=None):
+        return _task(), {"session_id": "", "partial_output": ""}
+
+    async def _boom(task_id, user_id, *, config=None, claim=True):
+        raise RuntimeError("SECRET-TOKEN-xyz")
+        yield  # pragma: no cover — 需要 async generator 形态
+
+    monkeypatch.setattr(agent_service, "prepare_resume", _prepare)
+    monkeypatch.setattr(agent_service, "resume_chat", _boom)
+
+    records: list[logging.LogRecord] = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    logger = logging.getLogger("app.api.v1.endpoints.agent")
+    collector = _Collector(level=logging.DEBUG)
+    prev_level, prev_disabled = logger.level, logger.disabled
+    logger.addHandler(collector)
+    logger.setLevel(logging.DEBUG)
+    logger.disabled = False
+    try:
+        r = client.post(f"/api/v1/agent/tasks/{_TASK_ID}/resume")
+    finally:
+        logger.disabled = prev_disabled
+        logger.setLevel(prev_level)
+        logger.removeHandler(collector)
+
+    assert r.status_code == 200, "SSE 已开流：错误只能作为流内事件表达"
+    assert "SECRET-TOKEN-xyz" not in r.text, "异常原文不得出现在 SSE 输出里"
+    lines = [ln for ln in r.text.split("\n\n") if ln.startswith("data: ")]
+    payloads = [json.loads(ln[len("data: "):]) for ln in lines]
+    errs = [p for p in payloads if p.get("type") == "error"]
+    assert errs and errs[0]["content"] == "Agent 恢复执行出错，请稍后重试"
+    assert any(
+        rec.exc_info and "SECRET-TOKEN-xyz" in str(rec.exc_info[1]) for rec in records
+    ), "完整异常/堆栈必须留在服务端日志（exc_info）"

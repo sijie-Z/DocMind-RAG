@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from app.core.database import AsyncSessionLocal
+from app.core.log_safety import log_safe
 from app.core.redis import redis_client
 from app.exceptions import ConflictError, NotFoundError
 from app.models.agent_task import AgentTask, TaskStatus
@@ -157,7 +158,7 @@ async def create_task(
             await db.commit()
             return task.id
     except Exception as e:
-        logger.warning("checkpoint create_task failed: %s", e)
+        logger.warning("checkpoint create_task failed: %s", log_safe(e))
         return None
 
 
@@ -189,7 +190,7 @@ async def save_checkpoint(
         async with AsyncSessionLocal() as db:
             task = await db.get(AgentTask, task_id)
             if task is None:
-                logger.warning("checkpoint save skipped: task %s 不存在", task_id)
+                logger.warning("checkpoint save skipped: task %s 不存在", log_safe(task_id))
                 return False
             task.context_snapshot = envelope
             if plan is not None:
@@ -201,7 +202,7 @@ async def save_checkpoint(
                 task.current_step_id = getattr(ctx, "current_step_id", None)
             await db.commit()
     except Exception as e:
-        logger.warning("checkpoint save failed (task=%s, trigger=%s): %s", task_id, trigger, e)
+        logger.warning("checkpoint save failed (task=%s, trigger=%s): %s", log_safe(task_id), log_safe(trigger), log_safe(e))
         return False
     await _renew_lease(task_id)
     return True
@@ -253,14 +254,14 @@ async def mark_terminal(
             try:
                 task.transition(to)
             except ValueError as e:
-                logger.warning("mark_terminal 拒绝非法转换 (task=%s): %s", task_id, e)
+                logger.warning("mark_terminal 拒绝非法转换 (task=%s): %s", log_safe(task_id), log_safe(e))
                 return False
             if error:
                 task.last_error = str(error)[:2000]
                 task.last_error_type = (error_type or "")[:50] or None
             await db.commit()
     except Exception as e:
-        logger.warning("mark_terminal failed (task=%s): %s", task_id, e)
+        logger.warning("mark_terminal failed (task=%s): %s", log_safe(task_id), log_safe(e))
         return False
     await release_task(task_id)
     return True
@@ -326,7 +327,7 @@ async def load_for_resume(
         if payload is None:
             logger.warning(
                 "checkpoint 快照损坏/版本不符（task=%s）：resume 安全降级为从规划阶段重跑",
-                task_id,
+                log_safe(task_id),
             )
     return task, payload
 
@@ -339,12 +340,12 @@ async def claim_task(task_id: str, lease_seconds: int = LEASE_SECONDS) -> bool:
     """
     try:
         if not redis_client:
-            logger.warning("Redis 不可用：resume 并发锁降级为仅状态检查（task=%s）", task_id)
+            logger.warning("Redis 不可用：resume 并发锁降级为仅状态检查（task=%s）", log_safe(task_id))
             return True
         ok = await redis_client.set(_lock_key(task_id), "1", nx=True, ex=lease_seconds)
         return bool(ok)
     except Exception as e:
-        logger.warning("claim_task 失败，降级放行（task=%s）：%s", task_id, e)
+        logger.warning("claim_task 失败，降级放行（task=%s）：%s", log_safe(task_id), log_safe(e))
         return True
 
 
@@ -354,7 +355,7 @@ async def release_task(task_id: str) -> None:
         if redis_client:
             await redis_client.delete(_lock_key(task_id))
     except Exception as e:
-        logger.debug("release_task failed (task=%s): %s", task_id, e)
+        logger.debug("release_task failed (task=%s): %s", log_safe(task_id), log_safe(e))
 
 
 async def _renew_lease(task_id: str, lease_seconds: int = LEASE_SECONDS) -> None:
@@ -363,7 +364,7 @@ async def _renew_lease(task_id: str, lease_seconds: int = LEASE_SECONDS) -> None
         if redis_client:
             await redis_client.expire(_lock_key(task_id), lease_seconds)
     except Exception as e:
-        logger.debug("renew lease failed (task=%s): %s", task_id, e)
+        logger.debug("renew lease failed (task=%s): %s", log_safe(task_id), log_safe(e))
 
 
 async def begin_resume(task_id: str, lease_seconds: int = LEASE_SECONDS) -> AgentTask:
