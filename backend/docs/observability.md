@@ -145,6 +145,10 @@ scrape_configs:
 
 **位置**:`backend/app/agent/observability.py`(135 行)
 
+> 依赖版本:tracing 目标 **Langfuse v2 API**(`lf.span` / `lf.generation`);`requirements.txt` 已锁
+> `langfuse>=2.55.0,<3`(issue #267 —— 4.x 移除该 API,装到 4.x 时 span 建不起来、观测链静默失效;
+> tracing 默认关闭,不影响默认路径)。
+
 ### 3.1 初始化(懒加载)
 
 ```python

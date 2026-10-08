@@ -93,6 +93,9 @@ class AISettings(BaseSettings):
     # Query rewrite (multi-query expansion)
     RAG_ENABLE_QUERY_REWRITE: bool = True
     RAG_QUERY_REWRITE_COUNT: int = 4
+    # LLM 改写等待超时（秒）。issue #259：此前 retriever 经 getattr 兜底读取但
+    # Settings 无此字段，extra="ignore" 下 .env 配置被静默忽略；现补字段可覆盖。
+    RAG_QUERY_REWRITE_TIMEOUT_SECONDS: float = 1.2
 
     # Reranker
     RAG_ENABLE_RERANKER: bool = True
@@ -122,6 +125,12 @@ class AISettings(BaseSettings):
     RAG_CACHE_TTL_SECONDS: int = 600
     RAG_CACHE_MAX_SIZE: int = 1000
     RAG_RETRIEVAL_MAX_RETRIES: int = 2
+
+    # Semantic cache（rag/cache.py 的 SemanticCache）。issue #259：此前经
+    # getattr(settings, …) 兜底读取但 Settings 无字段，.env 配置被静默忽略；
+    # 现补字段，类型/默认值与原 getattr 兜底一致。
+    SEMANTIC_CACHE_THRESHOLD: float = 0.92
+    SEMANTIC_CACHE_TTL_SECONDS: int = 3600
 
     # Query decomposition (multi-perspective RAG)
     RAG_ENABLE_QUERY_DECOMPOSITION: bool = True
