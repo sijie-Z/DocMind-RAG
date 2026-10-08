@@ -311,7 +311,7 @@ async def register(
         if existing_email:
             raise ConflictError("邮箱已被使用")
 
-        # 创建新用户 + 欢迎通知
+        # 创建新用户 + 个人组织 + 欢迎通知
         # 使用 savepoint 是因为前面的查询已开启隐式事务
         async with db.begin_nested():
             user = await auth_service.create_user(
@@ -320,8 +320,24 @@ async def register(
                 email=register_data.email,
                 password=register_data.password,
                 full_name=register_data.full_name,
-                organization_id=None  # 安全加固：注册用户不归属任何组织，由管理员分配
+                organization_id=None  # 先置空，个人组织建好后回填（同 ensure_demo_user 的自举顺序）
             )
+
+            # issue #242 收尾（用户面洞口）：开放注册却无任何组织 → 所有组织域功能一律
+            # 403，新用户注册即死路（实测：连 Agent 问答都进不去）。安全加固的本意是
+            # "不自动并入既有组织"（防跨租户数据泄漏），保持不变；改为注册时自动创建
+            # **个人组织**（owner=本人，服务层自动加成员），注册即可用、隔离仍成立。
+            from app.services.organization_service import organization_service
+            org_name = f"{user.username} 的空间"
+            if await organization_service.get_organization_by_name(db, org_name):
+                # 极端重名兜底（username 唯一时应不可达）
+                org_name = f"{user.username}-{user.id} 的空间"
+            org = await organization_service.create_organization(
+                db,
+                {"name": org_name, "description": "注册时自动创建的个人空间", "is_private": True},
+                owner_id=user.id,
+            )
+            user.organization_id = org.id
 
             welcome_notification = Notification(
                 user_id=user.id,
