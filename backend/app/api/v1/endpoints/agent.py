@@ -31,7 +31,7 @@ from app.agent.skills import skill_manager
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.prometheus import AGENT_FEEDBACK_TOTAL
 from app.core.security import get_current_user, require_organization
-from app.exceptions import NotFoundError, ValidationError
+from app.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.user import User
 
@@ -166,11 +166,16 @@ async def agent_chat(
             assistant_message_id = None
             # Save interaction to session (user query + assistant response)
             if body.session_id:
+                # issue #277（评审 or1268 R2 收账）：会话落库 org 必须与运行读侧
+                # 同一来源（resolved org）——此前传 raw current_user.organization_id，
+                # 凡 org 来自 token_organization_id 回退（或走无组织超管回源）的用户，
+                # 会话落库 None 而运行读 42 → feedback lesson 命名空间写读不一致、
+                # 静默失效。
                 assistant_message_id = await _save_session_interaction(
                     body.session_id,
                     current_user.id,
                     body.query,
-                    current_user.organization_id,
+                    effective_org_id,
                     final_answer,
                 )
 
@@ -242,14 +247,20 @@ async def agent_feedback(
                 session_result = await db.execute(session_stmt)
                 session = session_result.scalar_one_or_none()
                 if session:
+                    # issue #277（评审 or1268 R2 收账）：lesson 命名空间的 org 必须与
+                    # agent 运行侧同一条解析链（require_organization → resolved org，
+                    # 含 token 组织回退 / 无组织超管回源）——运行读 42 而 feedback 按
+                    # raw session.org 写 None 时，「自己写的 lesson 自己学不到」。
+                    # （#268 只对齐了「无组织 ↔ 1 号组织」这一种组合。）
+                    # 调用者完全无组织上下文时（无组织非超管）退回会话自身记录的
+                    # org：与对应的无组织运行（/chat/stream useAgent 传 None）同键。
+                    try:
+                        lesson_org_id = await require_organization(current_user, db)
+                    except AuthorizationError:
+                        lesson_org_id = session.organization_id
                     bridge = AgentMemoryBridge(
                         agent_id=f"session:{message_obj.session_id}",
-                        # 安全加固（issue #268）：不再 `or 1` —— 命名空间必须与
-                        # agent 侧读侧一致（agent 侧用调用者的真实 org，无组织即
-                        # None）。此前无组织会话的 lesson 写进 `1:…` 命名空间，
-                        # agent 侧从 `None:…` 读，自己写的 lesson 自己学不到
-                        # （功能静默失效，非泄漏）。
-                        organization_id=session.organization_id,
+                        organization_id=lesson_org_id,
                         user_id=current_user.id,
                     )
                     await bridge.ensure_loaded()
@@ -386,10 +397,16 @@ async def list_sessions(
 async def create_session(
     body: SessionCreate,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Create a new agent session."""
+    # issue #277（评审 or1268 R2 收账）：该端点是前端 agent 页「新建会话」入口，
+    # 会话 org 必须与 /agent/chat 的运行解析同链（resolved：含 token 组织回退、
+    # 无组织超管回源）。此前落库 raw organization_id——token 回退 / 无组织超管
+    # 建出的会话记 None，与随后 chat 的运行 org 不对称（feedback lesson 失效）。
+    org_id = await require_organization(current_user, db)
     from app.core.database import AsyncSessionLocal
-    async with AsyncSessionLocal() as db:
+    async with AsyncSessionLocal() as session:
         try:
             session_id = str(uuid.uuid4())
             new_session = ChatSession(
@@ -397,10 +414,10 @@ async def create_session(
                 user_id=current_user.id,
                 title=body.title[:80],
                 status=ChatSessionStatus.ACTIVE,
-                organization_id=current_user.organization_id,
+                organization_id=org_id,
             )
-            db.add(new_session)
-            await db.commit()
+            session.add(new_session)
+            await session.commit()
 
             return {
                 "success": True,
@@ -410,7 +427,7 @@ async def create_session(
                 },
             }
         except Exception as e:
-            await db.rollback()
+            await session.rollback()
             logger.error(f"Create session error: {e}")
             raise ValidationError(f"创建会话失败: {str(e)}")
 
@@ -659,6 +676,12 @@ async def _save_session_interaction(
                     organization_id=organization_id,
                 )
                 session.add(new_session)
+            elif existing.organization_id is None:
+                # issue #277（评审 or1268 R2 收账）：历史会话自愈——本修复前以 raw
+                # org 落库的会话（token 回退 / 无组织超管用户当时记 None）在本次以
+                # resolved org 运行后收敛为运行 org，落库与运行解析保持对称；
+                # 只补空值，绝不改写已记录的非空组织。
+                existing.organization_id = organization_id
 
             user_msg = ChatMessage(
                 id=str(uuid.uuid4()),
