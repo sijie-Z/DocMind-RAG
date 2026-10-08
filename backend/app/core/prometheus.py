@@ -97,6 +97,14 @@ def _build_metrics() -> dict[str, Any]:
     m["RAG_RETRIEVAL_TOTAL"] = Counter("rag_retrieval_total", "Total RAG retrieval attempts")
     m["RAG_RETRIEVAL_HITS"] = Counter("rag_retrieval_hits", "Retrievals that returned at least one document")
     m["RAG_RETRIEVAL_ERRORS"] = Counter("rag_retrieval_errors", "Retrieval attempts that raised an exception")
+    # issue #292：检索故障/超时的终态口径（state: failed / timeout / degraded）。
+    # 与 RAG_RETRIEVAL_ERRORS（按次重试计数）不同，这里按「最终结论」计数：
+    # failed/timeout = 未得出结论的查询；degraded = 有结果但检索臂降级。
+    m["RAG_RETRIEVAL_UNAVAILABLE"] = Counter(
+        "rag_retrieval_unavailable_total",
+        "Retrievals that could not conclude (backend failure/timeout) or ran degraded",
+        ["state"],
+    )
     m["RAG_RETRIEVAL_LATENCY"] = Histogram("rag_retrieval_latency_seconds", "RAG retrieval latency",
                                              buckets=[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0])
     m["RAG_CACHE_HITS"] = Counter("rag_cache_hits_total", "Cache hits", ["cache_type"])
@@ -150,6 +158,7 @@ def _build_metrics() -> dict[str, Any]:
 RAG_RETRIEVAL_TOTAL      = _LazyMetric("RAG_RETRIEVAL_TOTAL")
 RAG_RETRIEVAL_HITS       = _LazyMetric("RAG_RETRIEVAL_HITS")
 RAG_RETRIEVAL_ERRORS     = _LazyMetric("RAG_RETRIEVAL_ERRORS")
+RAG_RETRIEVAL_UNAVAILABLE = _LazyMetric("RAG_RETRIEVAL_UNAVAILABLE")
 RAG_RETRIEVAL_LATENCY    = _LazyMetric("RAG_RETRIEVAL_LATENCY")
 RAG_CACHE_HITS           = _LazyMetric("RAG_CACHE_HITS")
 RAG_CACHE_MISSES         = _LazyMetric("RAG_CACHE_MISSES")

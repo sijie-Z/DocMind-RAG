@@ -25,10 +25,12 @@ from app.core.prometheus import (
     RAG_RETRIEVAL_HITS,
     RAG_RETRIEVAL_LATENCY,
     RAG_RETRIEVAL_TOTAL,
+    RAG_RETRIEVAL_UNAVAILABLE,
 )
 from app.rag.cache import RetrievalCache, SemanticCache
 from app.rag.context_compressor import compress_context_list
 from app.rag.context_window import build_rag_messages
+from app.rag.errors import RetrievalUnavailableError, is_timeout_error
 from app.rag.metrics import RAGMetrics
 from app.rag.query_processor import (
     QueryComplexityClassifier,
@@ -85,6 +87,12 @@ class RAGPipeline:
         """Retrieve relevant documents with caching and retry.
 
         Returns (results, debug_info) — debug_info is None unless debug=True.
+        ``results == []`` 只表示「正常空结果」（各检索臂均正常执行且确实无命中）。
+
+        Raises:
+            RetrievalUnavailableError: 检索后端服务故障或超时（issue #292）。
+                此时结果**不可知**，调用方不得把它当「知识库无相关内容」处理；
+                故障/降级/空结果一律不写缓存。
         """
         start = time.perf_counter()
         RAG_RETRIEVAL_TOTAL.inc()
@@ -172,26 +180,35 @@ class RAGPipeline:
             # Retrieve (single or parallel per sub-query)
             retries = max(0, int(settings.RAG_RETRIEVAL_MAX_RETRIES or 2))
             all_results: list[list[dict]] = []
+            # issue #292：逐子查询记录「重试耗尽后仍失败」与「检索臂级降级」——
+            # 用于三态判定（正常空 / 服务故障 / 超时）与缓存写入门控。
+            failed_sub_queries: list[tuple[str, BaseException]] = []
+            degraded_reasons: list[str] = []
             for sq in sub_queries:
                 sq_result = []
+                sq_error: BaseException | None = None
                 for attempt in range(retries + 1):
                     try:
                         if attempt > 0:
                             self.metrics.inc("retry_total")
                             # 修复：窗口模式读 window_sum("retry")，此前从未记录事件导致重试数恒 0
                             self.metrics.record_event("retry", 1)
-                        sq_result, qv, dbg = await self.retriever.retrieve(
+                        sq_result, qv, dbg, sq_degraded = await self.retriever.retrieve(
                             sq, organization_id,
                             max(top_k, int(settings.RAG_RERANK_TOP_N or 20)),
                             document_ids,
                             debug=debug,
                         )
+                        if sq_degraded:
+                            degraded_reasons.extend(sq_degraded)
                         if not query_vector and qv:
                             query_vector = qv
                         if debug and dbg and debug_info is not None:
                             debug_info["stages"][sq] = dbg
+                        sq_error = None
                         break
                     except Exception as e:
+                        sq_error = e
                         RAG_RETRIEVAL_ERRORS.inc()
                         logger.warning(
                             "Retrieval attempt %d/%d for sub-query %r failed: %s",
@@ -201,6 +218,8 @@ class RAGPipeline:
                             await asyncio.sleep(min(1.5, 0.3 * (2 ** attempt)))
                 if sq_result:
                     all_results.append(sq_result)
+                elif sq_error is not None:
+                    failed_sub_queries.append((sq, sq_error))
 
             # Merge results from multiple sub-queries (dedup by chunk_id / doc_id)
             result = []
@@ -240,9 +259,51 @@ class RAGPipeline:
                     ]
                 result = result[:top_k]
 
-            if not document_ids:
+            # ── 故障语义判定（issue #292）────────────────────────────────────
+            # 三态：正常空结果 / 服务故障（异常）/ 超时。故障或臂级降级发生时，
+            # 「最终为空」与「知识库确实没有相关内容」不可区分 —— 绝不回落成
+            # 「无内容」语义，如实上抛结构化故障，由上层做诚实降级。
+            failures: list[tuple[str, BaseException]] = list(failed_sub_queries)
+            if (failures or degraded_reasons) and not result:
+                excs = [e for _, e in failures]
+                kind = "timeout" if excs and all(is_timeout_error(e) for e in excs) else "failed"
+                reasons = [f"sub-query {sq!r}: {type(e).__name__}: {e}" for sq, e in failures[:3]]
+                reasons.extend(degraded_reasons[:3])
+                RAG_RETRIEVAL_UNAVAILABLE.labels(state=kind).inc()
+                logger.error(
+                    "RAG retrieval unavailable (kind=%s, org=%s, failed_sub_queries=%d, degraded_arms=%d): %s",
+                    kind, organization_id, len(failures), len(degraded_reasons),
+                    "; ".join(reasons) or "no details",
+                )
+                raise RetrievalUnavailableError(
+                    f"检索后端不可用（{kind}），结果不可知：{'; '.join(reasons) or 'no details'}",
+                    kind=kind,
+                    attempts=retries + 1,
+                    sub_queries=[sq for sq, _ in failures],
+                )
+            if failures or degraded_reasons:
+                # 部分降级但有结果：可用性优先——返回真实命中，但不得写缓存，
+                # 否则降级形态会被冻结成 TTL 窗口内的「缓存事实」。
+                RAG_RETRIEVAL_UNAVAILABLE.labels(state="degraded").inc()
+                logger.warning(
+                    "RAG retrieval degraded (org=%s): failed_sub_queries=%s, degraded_arms=%s",
+                    organization_id,
+                    [f"{sq}: {type(e).__name__}" for sq, e in failures],
+                    degraded_reasons,
+                )
+                if debug and debug_info is not None:
+                    debug_info["retrieval_degraded"] = [
+                        f"{sq}: {type(e).__name__}: {e}" for sq, e in failures[:3]
+                    ] + degraded_reasons[:3]
+
+            # 缓存写入门控（issue #292）：只有「全臂正常 + 有结果」才可写入。
+            # - 故障/降级：不写 —— 毒化路径必须断；
+            # - 正常空结果：不写 —— 负缓存把「一次未命中」放大成 TTL 窗口内的持续
+            #   假无结果（如索引/分析器瞬时状态），而重算成本远小于毒化成本。
+            cache_safe = not failures and not degraded_reasons
+            if not document_ids and result and cache_safe:
                 await self.cache.set(query, organization_id, top_k, result)
-            if query_vector and result:
+            if query_vector and result and cache_safe:
                 # 检索缓存条目 answer 为空（仅 sources），写入检索专用命名空间（R4）
                 await self.semantic_cache.set(
                     query, query_vector, "", result, organization_id=organization_id

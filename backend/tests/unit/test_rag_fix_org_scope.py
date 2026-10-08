@@ -43,15 +43,22 @@ class TestWorkflowRetrievalOrgScope:
     @pytest.mark.asyncio
     async def test_client_supplied_organization_id_is_ignored(self, monkeypatch):
         """请求体里的 organization_id=42 不得影响实际检索组织。"""
-        from app.services.rag_service import rag_service
+        from app.services.rag_service import RagServiceFacade
 
         calls: list[int] = []
 
-        async def fake_search(query, organization_id, top_k=5, **kwargs):
+        # 类方法替身：首参 self 承接描述符绑定（类级 patch 的既有语义）
+        async def fake_search(self, query, organization_id, top_k=5, **kwargs):
             calls.append(organization_id)
             return [{"content": "命中内容", "score": 0.9, "title": "资料"}], None
 
-        monkeypatch.setattr(rag_service, "search_knowledge_base", fake_search)
+        # 必须打在**类**上。此前打单例实例（monkeypatch.setattr(rag_service, …)）：
+        # monkeypatch 撤销时经 hasattr 把「绑定方法」写回成实例属性（实测确认
+        # `'search_knowledge_base' in rag_service.__dict__` 为 True）→ 该单例被永久
+        # shadow，此后所有对类方法的 patch（如故障注入用例）静默失效 —— 单独跑绿、
+        # 整包同进程跑红（issue #292 CI 红的一次根因）。类级 patch 覆盖同一单例，
+        # 语义不变、撤销干净。
+        monkeypatch.setattr(RagServiceFacade, "search_knowledge_base", fake_search)
 
         executor = KnowledgeSearchNodeExecutor(_make_node())
         executor.organization_id = 7  # 服务端注入（引擎从认证用户推导）
@@ -71,15 +78,17 @@ class TestWorkflowRetrievalOrgScope:
 
         变异验证：把 `if organization_id is None: raise ...` 改回 `else 1` → 本用例红。
         """
-        from app.services.rag_service import rag_service
+        from app.services.rag_service import RagServiceFacade
 
         calls: list[int] = []
 
-        async def fake_search(query, organization_id, top_k=5, **kwargs):
+        # 类方法替身：首参 self 承接描述符绑定（类级 patch 的既有语义）
+        async def fake_search(self, query, organization_id, top_k=5, **kwargs):
             calls.append(organization_id)
             return [], None
 
-        monkeypatch.setattr(rag_service, "search_knowledge_base", fake_search)
+        # 类级 patch：理由同上（实例级 patch 的绑定方法回写会永久 shadow 单例）。
+        monkeypatch.setattr(RagServiceFacade, "search_knowledge_base", fake_search)
 
         executor = KnowledgeSearchNodeExecutor(_make_node())
         with pytest.raises(ValueError):

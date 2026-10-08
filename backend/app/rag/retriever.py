@@ -9,6 +9,7 @@ from datetime import datetime
 from app.core.config import settings
 from app.core.elasticsearch import ElasticsearchTools
 from app.core.prometheus import RAG_ADAPTIVE_STRATEGY, RAG_QUERY_REWRITE_TOTAL
+from app.rag.errors import EmbeddingUnavailableError
 from app.rag.query_processor import (
     QueryComplexityClassifier,
     QueryIntentClassifier,
@@ -29,6 +30,21 @@ class HybridRetriever:
         self.embedding_client = embedding_client
 
     async def get_embedding(self, text: str) -> list[float]:
+        try:
+            return await self._embed(text)
+        except EmbeddingUnavailableError as e:
+            logger.error(f"Embedding error: {e}")
+            return []
+
+    async def _embed(self, text: str) -> list[float]:
+        """embedding 调用（失败抛 EmbeddingUnavailableError）。
+
+        issue #292：向量层故障此前被 get_embedding 静默吞成 []，向量臂无声关闭，
+        最终与「知识库确实没有内容」同形。_embed 让向量臂能区分
+        「按设计未配置向量臂」（返回 []）与「服务故障」（抛异常），后者由
+        retrieve 以结构化降级信号上抛。get_embedding 保持原吞异常语义不变
+        （问答链、语义缓存等调用方依赖该契约）。
+        """
         if not self.embedding_client:
             return []
         try:
@@ -38,8 +54,7 @@ class HybridRetriever:
             )
             return resp.data[0].embedding
         except Exception as e:
-            logger.error(f"Embedding error: {e}")
-            return []
+            raise EmbeddingUnavailableError(f"embedding service call failed: {e}") from e
 
     # ---- Keyword search ----
 
@@ -140,9 +155,20 @@ class HybridRetriever:
 
     async def _vector_hits(
         self, query: str, filters: list[dict], candidate_size: int, enable_hyde: bool = True
-    ) -> tuple[list[dict], list[float]]:
+    ) -> tuple[list[dict], list[float], str | None]:
+        """向量臂检索。返回 (hits, query_vector, degraded_reason)。
+
+        degraded_reason 非 None 表示向量臂因服务故障未能执行（issue #292）——
+        上层据此区分「确实没有向量命中」与「根本没查成」，不得静默关臂。
+        """
         intent = QueryIntentClassifier.classify(query)
-        query_vector = await self.get_embedding(query)
+        try:
+            query_vector = await self._embed(query)
+        except EmbeddingUnavailableError as e:
+            # 修复（#292）：向量臂因 embedding 服务故障关闭时如实标记降级，
+            # 不再与「没有命中」同形（此前是 #2 假无结果的静默放大器）。
+            logger.error(f"Vector retrieval arm unavailable, query embedding failed: {e}")
+            return [], [], f"vector_arm_unavailable: {e}"
 
         embedding_to_search = query_vector
 
@@ -170,7 +196,7 @@ class HybridRetriever:
                     logger.info(f"HyDE fusion with weight={weight}")
 
         if not embedding_to_search:
-            return [], query_vector
+            return [], query_vector, None
 
         es_query = {
             "size": candidate_size,
@@ -187,7 +213,7 @@ class HybridRetriever:
             "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
         }
         res = await ElasticsearchTools.search_documents(es_query)
-        return res.get("hits", {}).get("hits", []), query_vector
+        return res.get("hits", {}).get("hits", []), query_vector, None
 
     # ---- RRF Fusion ----
 
@@ -411,7 +437,12 @@ class HybridRetriever:
 
     # ---- Fallback ----
 
-    async def _fallback(self, query: str, filters: list[dict], top_k: int) -> list[dict]:
+    async def _fallback(self, query: str, filters: list[dict], top_k: int) -> tuple[list[dict], str | None]:
+        """兜底检索。返回 (hits, degraded_reason)。
+
+        兜底臂自身失败同样是「没查成」而不是「没有命中」（issue #292）：
+        此前 except 吞掉异常返回 []，与正常的空结果在调用方面前同形。
+        """
         try:
             broad = {
                 "size": top_k * 2, "min_score": 0.5,
@@ -421,21 +452,24 @@ class HybridRetriever:
             res = await ElasticsearchTools.search_documents(broad)
             hits = res.get("hits", {}).get("hits", [])
             if hits:
-                return hits
+                return hits, None
 
-            qv = await self.get_embedding(query)
+            try:
+                qv = await self._embed(query)
+            except EmbeddingUnavailableError as e:
+                return [], f"fallback_vector_unavailable: {e}"
             if not qv:
-                return []
+                return [], None
             vec_q = {
                 "size": top_k, "min_score": 1.15,
                 "query": {"script_score": {"query": {"bool": {"filter": filters}}, "script": {"source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0", "params": {"query_vector": qv}}}},
                 "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
             }
             res = await ElasticsearchTools.search_documents(vec_q)
-            return res.get("hits", {}).get("hits", [])
+            return res.get("hits", {}).get("hits", []), None
         except Exception as e:
             logger.error(f"Fallback retrieval failed: {e}")
-            return []
+            return [], f"fallback_failed: {e}"
 
     # ---- Public API ----
 
@@ -446,8 +480,13 @@ class HybridRetriever:
         top_k: int = 5,
         document_ids: list[str] | None = None,
         debug: bool = False,
-    ) -> tuple[list[dict], list[float], dict | None]:
-        """Execute adaptive retrieval and return (results, query_vector, debug_info).
+    ) -> tuple[list[dict], list[float], dict | None, list[str]]:
+        """Execute adaptive retrieval and return (results, query_vector, debug_info, degraded).
+
+        degraded：臂级降级原因列表（空 = 全部预期检索臂都正常执行）。issue #292：
+        向量臂 / 兜底臂因服务故障未能执行时不得与「确实没有命中」同形；
+        keyword 臂失败与兜底臂异常会直接上抛（由 pipeline 归类为故障态）。
+        策略为 keyword_only 时无向量臂是**按设计**行为，不产生降级信号。
 
         Strategy is selected automatically based on query complexity:
         - keyword_only: fast keyword search, no embedding calls
@@ -456,6 +495,7 @@ class HybridRetriever:
 
         When debug=True, returns intermediate retrieval results for visualization.
         """
+        degraded: list[str] = []
         org_filter = {"term": {"organization_id": str(organization_id)}}
         filters = [org_filter]
         if document_ids:
@@ -480,19 +520,21 @@ class HybridRetriever:
                 debug_info["rrf_result"] = debug_info["keyword_top"][:top_k]
                 debug_info["rerank_result"] = []
             documents = self._post_process(query, kw_hits, top_k)
-            return documents, [], debug_info
+            return documents, [], debug_info, degraded
 
         # Hybrid paths: keyword + vector (parallel)
         if strategy == "hybrid_hyde":
-            kw_hits, (vec_hits, query_vector) = await asyncio.gather(
+            kw_hits, (vec_hits, query_vector, vec_degraded) = await asyncio.gather(
                 self._keyword_hits(query, filters, candidate_size),
                 self._vector_hits(query, filters, candidate_size),
             )
         else:
-            kw_hits, (vec_hits, query_vector) = await asyncio.gather(
+            kw_hits, (vec_hits, query_vector, vec_degraded) = await asyncio.gather(
                 self._keyword_hits(query, filters, candidate_size),
                 self._vector_hits(query, filters, candidate_size, enable_hyde=False),
             )
+        if vec_degraded:
+            degraded.append(vec_degraded)
 
         if debug and debug_info is not None:
             debug_info["keyword_top"] = self._debug_format_hits(kw_hits[:10])
@@ -505,11 +547,13 @@ class HybridRetriever:
 
         if not fused:
             logger.warning("RRF fusion empty, trying fallback")
-            fallback = await self._fallback(query, filters, top_k)
+            fallback, fb_degraded = await self._fallback(query, filters, top_k)
+            if fb_degraded:
+                degraded.append(fb_degraded)
             results = self._post_process(query, fallback, top_k) if fallback else []
             if debug and debug_info is not None:
                 debug_info["note"] = "RRF fusion empty, used fallback"
-            return results, query_vector, debug_info
+            return results, query_vector, debug_info, degraded
 
         # MMR
         if settings.RAG_ENABLE_MMR and query_vector:
@@ -520,7 +564,7 @@ class HybridRetriever:
             if mmr_cands:
                 fused = self._mmr_select(mmr_cands, query_vector, top_k, max(0, min(1, settings.RAG_MMR_LAMBDA)))
 
-        return self._post_process(query, fused, top_k), query_vector, debug_info
+        return self._post_process(query, fused, top_k), query_vector, debug_info, degraded
 
     @staticmethod
     def _debug_format_hits(hits: list[dict]) -> list[dict]:

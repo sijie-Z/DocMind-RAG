@@ -316,12 +316,27 @@ class AgentService:
 
         # Step 1: Retrieve context via RAG
         from app.dependencies import get_rag_pipeline
+        from app.rag.errors import RetrievalUnavailableError
+
         pipeline = get_rag_pipeline()
-        context_docs, _ = await pipeline.search_knowledge_base(
-            query=query,
-            organization_id=organization_id,
-            top_k=top_k,
-        )
+        try:
+            context_docs, _ = await pipeline.search_knowledge_base(
+                query=query,
+                organization_id=organization_id,
+                top_k=top_k,
+            )
+        except RetrievalUnavailableError as e:
+            # issue #292：检索故障不得静默当「没有上下文」——如实告知用户 +
+            # 观测留痕（指标/日志），随后不带知识库上下文继续跑 PER 环。
+            from app.core.prometheus import RAG_RETRIEVAL_UNAVAILABLE
+
+            RAG_RETRIEVAL_UNAVAILABLE.labels(state=e.kind).inc()
+            logger.warning("search_and_chat: knowledge retrieval unavailable (kind=%s): %s", e.kind, e)
+            context_docs = []
+            yield {
+                "type": "warning",
+                "content": "知识库检索服务暂不可用（故障/超时），本次回答未使用知识库上下文",
+            }
 
         if context_docs:
             yield {

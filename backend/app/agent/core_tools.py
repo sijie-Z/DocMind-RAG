@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Any
 
-from app.agent.registry import register_tool
+from app.agent.registry import ToolResult, register_tool
 from app.agent.run_context import RunContext
 from app.agent.usage import ctx_from_run_context, record_llm_usage
 
@@ -55,15 +55,31 @@ async def search_knowledge_base(
     document_ids: list[str] | None = None,
     organization_id: int = 1,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     from app.dependencies import get_rag_pipeline
+    from app.rag.errors import RetrievalUnavailableError
+
     pipeline = get_rag_pipeline()
-    results, _ = await pipeline.search_knowledge_base(
-        query=query,
-        organization_id=organization_id,
-        top_k=min(top_k, 20),
-        document_ids=document_ids,
-    )
+    try:
+        results, _ = await pipeline.search_knowledge_base(
+            query=query,
+            organization_id=organization_id,
+            top_k=min(top_k, 20),
+            document_ids=document_ids,
+        )
+    except RetrievalUnavailableError as e:
+        # issue #292：检索故障不得伪装成「没有相关内容」——返回结构化失败，
+        # 走 executor 的 tool_error / run_report failures 通道（SSE 发 tool_error，
+        # 指标记 error），而不是被 legacy 字符串路径归一化成 success=True。
+        state = "超时" if e.kind == "timeout" else "暂不可用"
+        return ToolResult.fail(
+            code="knowledge_base_unavailable",
+            message=(
+                f"知识库检索服务{state}（kind={e.kind}），本次无法判断知识库中是否有"
+                "相关内容；请稍后重试，或将本次查询改用其他信息来源完成。"
+            ),
+            raw=e,
+        )
     if not results:
         return "No relevant documents found for this query."
 
