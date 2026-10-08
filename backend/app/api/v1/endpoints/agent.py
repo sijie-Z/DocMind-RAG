@@ -68,6 +68,9 @@ class AgentChatRequest(BaseModel):
 class AgentConfigUpdate(BaseModel):
     model: str | None = None
     temperature: float | None = None
+    max_tokens: int | None = Field(None, ge=256, le=32768, description="单次 LLM 调用输出上限")
+    max_plan_steps: int | None = Field(None, ge=1, le=50, description="单个计划的步数上限")
+    max_retries_per_step: int | None = Field(None, ge=0, le=10, description="每步重试次数上限")
     enable_planning: bool | None = None
     enable_reflection: bool | None = None
     enable_tools: bool | None = None
@@ -80,6 +83,35 @@ class AgentConfigUpdate(BaseModel):
 
 class SessionCreate(BaseModel):
     title: str = Field("New Agent Session", max_length=80)
+
+
+async def _build_agent_config(body: AgentChatRequest, user_id: int) -> AgentConfig:
+    """组合一次 run 的 AgentConfig：加载用户已保存配置为基底 + 请求字段覆盖。
+
+    优先级：请求字段 > 用户已保存配置 > 数据类默认值。issue #242：此前基底被整体
+    忽略（纯请求构造）——设置页里 `max_plan_steps` / `max_retries_per_step` /
+    `max_tokens` 等请求不携带的旋钮，保存成功也永不生效。
+
+    - 请求模型里恒有值的字段（model / temperature / enable_*）总是以请求为准；
+    - 可选字段（system_prompt_override）仅在请求显式给值时覆盖；
+    - 列表字段（disabled_tools）仅在请求非空时覆盖（空 = 无意见，继承已保存值；
+      无论哪条路径，服务端强制禁用清单都会合并，安全加固不受影响）。
+    """
+    stored = await AgentConfig.load_from_redis(f"user:{user_id}")
+    config = stored or AgentConfig()
+    config.model = body.model
+    config.temperature = body.temperature
+    config.enable_tools = body.enable_tools
+    config.enable_planning = body.enable_planning
+    config.enable_reflection = body.enable_reflection
+    config.enable_memory = body.enable_memory
+    config.enable_thinking = body.enable_thinking
+    if body.system_prompt_override is not None:
+        config.system_prompt_override = body.system_prompt_override
+    if body.disabled_tools:
+        # 安全加固：高危工具由服务端强制禁用，客户端无法解除
+        config.disabled_tools = _merge_disabled_tools(body.disabled_tools)
+    return config
 
 
 # ── Agent Chat (SSE) ─────────────────────────────────────────────────────────
@@ -102,19 +134,9 @@ async def agent_chat(
 
     async def event_stream():
         try:
-            # Build AgentConfig from request
-            config = AgentConfig(
-                model=body.model,
-                temperature=body.temperature,
-                enable_tools=body.enable_tools,
-                enable_planning=body.enable_planning,
-                enable_reflection=body.enable_reflection,
-                enable_memory=body.enable_memory,
-                enable_thinking=body.enable_thinking,
-                system_prompt_override=body.system_prompt_override,
-                # 安全加固：高危工具由服务端强制禁用，客户端无法解除
-                disabled_tools=_merge_disabled_tools(body.disabled_tools),
-            )
+            # Build AgentConfig：用户已保存配置为基底 + 请求字段覆盖（issue #242）。
+            # 此前基底被整体忽略——设置页旋钮保存成功也永不生效。
+            config = await _build_agent_config(body, current_user.id)
 
             # Load history from session if provided
             history = body.history or []
@@ -515,6 +537,12 @@ async def update_config(
         config.model = body.model
     if body.temperature is not None:
         config.temperature = body.temperature
+    if body.max_tokens is not None:
+        config.max_tokens = body.max_tokens
+    if body.max_plan_steps is not None:
+        config.max_plan_steps = body.max_plan_steps
+    if body.max_retries_per_step is not None:
+        config.max_retries_per_step = body.max_retries_per_step
     if body.enable_planning is not None:
         config.enable_planning = body.enable_planning
     if body.enable_reflection is not None:

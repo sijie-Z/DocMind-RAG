@@ -721,7 +721,7 @@ class Executor:
             # the client-level protection failed to bound the call. max_retries=0:
             # retries stay owned by the executor's own policy-driven retry loop —
             # retrying here would re-multiply the attempt count.
-            step_tokens = 0  # 本步骤 LLM 用量（issue #202）
+            step_tokens = 0  # 本步骤 LLM 用量：仅主调，不含工具内部的 LLM 调用（issue #202/#239）
             call = await StepRunner(
                 timeout=self.config.timeout + self.LLM_HARD_TIMEOUT_MARGIN_SECONDS,
                 max_retries=0,
