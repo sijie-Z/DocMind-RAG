@@ -13,7 +13,7 @@
 
 import logging
 
-from app.agent.config import _CONFIG_FIELD_SPECS, AgentConfig
+from app.agent.config import _CONFIG_FIELD_SPECS, DEFAULT_DISABLED_TOOLS, AgentConfig
 from app.agent.exec_context import ExecutionContext
 from app.agent.run_report import build_run_report
 
@@ -113,6 +113,55 @@ def test_config_gate_legal_values_pass_through_byte_for_byte():
     fresh_dump = AgentConfig().to_dict()
     assert set(fresh_dump) == set(AgentConfig.__dataclass_fields__) - {"planning_mode"}
     assert AgentConfig.from_dict(fresh_dump) == AgentConfig()
+
+
+def test_config_disabled_tools_none_rejected_fail_closed(caplog):
+    """#319 评审 m-1（覆盖缺口·安全面回填；评审变异 MY-4「放宽为接受 None」
+    全 unit 1231/1 存活——本用例即其判别用例）：
+
+    `disabled_tools=None` 不是卫生问题而是**安全不变量**。消费方源码核：
+    `executor.py:1162` 与 `loop.py:1235` 均为 `if self.config.disabled_tools:`
+    才过滤——None=假值 ⇒ 过滤器**整段跳过**，`execute_python / execute_sql /
+    mcp_call` 三个服务端强制禁单被**静默放开**（评审探针实证
+    filter_active=False）。因此坏值必须删键 → 数据类默认（含三件套）→
+    过滤恒激活（fail-closed）。
+
+    读侧 + 写侧各判别断言：
+    - 读：`from_dict({"disabled_tools": None})` → 拒斥 → 默认禁单恢复 +
+      `bool(...)` 为真（= 两个消费点的过滤分支必然进入）；
+    - 写：运行态 None（外部写入者/未来 bug）→ 不落盘（删键）→ 读回自愈。
+
+    变异点：契约放宽为 `_is_opt_list_of_str`（接受 None）→ 读侧断言红
+    （None 原样进运行态、禁单消失、filter_active=False）；写侧断言红
+    （None 原样落盘）。合法列表（含自定义）逐字节透传，防过归一化。
+    """
+    with caplog.at_level(logging.WARNING):
+        cfg = AgentConfig.from_dict({"disabled_tools": None})
+    assert cfg.disabled_tools == DEFAULT_DISABLED_TOOLS, (
+        "None 必须被拒斥 → 数据类默认（服务端强制禁单三件套）恢复"
+    )
+    # 消费点形态直证：executor.py:1162 / loop.py:1235 的
+    # `if self.config.disabled_tools:` —— 该值必须为真，过滤器才不整段跳过
+    assert bool(cfg.disabled_tools) is True, (
+        "过滤器必须恒激活（fail-closed）；None/空列表 = 过滤分支整段跳过"
+    )
+    for tool in ("execute_python", "execute_sql", "mcp_call"):
+        assert tool in cfg.disabled_tools
+    assert any("值级漂移" in r.message for r in caplog.records), "降级必须留痕"
+
+    # 误伤对照：合法列表（含用户自定义）原样透传——不得并回默认、不得改写
+    cfg_ok = AgentConfig.from_dict({"disabled_tools": ["custom_tool"]})
+    assert cfg_ok.disabled_tools == ["custom_tool"]
+
+    # 写侧：运行态 None → 落盘删键（读回即默认禁单，快照/Redis 自愈）
+    cfg_drift = AgentConfig()
+    cfg_drift.disabled_tools = None  # type: ignore[assignment] — 模拟运行态漂移
+    with caplog.at_level(logging.WARNING):
+        dumped = cfg_drift.to_dict()
+    assert "disabled_tools" not in dumped, "None 绝不落盘（否则读回 filter 失活）"
+    healed = AgentConfig.from_dict(dumped)
+    assert healed.disabled_tools == DEFAULT_DISABLED_TOOLS
+    assert bool(healed.disabled_tools) is True
 
 
 # ── run_report 消费侧防线（F-CRIT-1 直证形态）───────────────────────────────

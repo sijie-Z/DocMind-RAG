@@ -246,3 +246,46 @@ def test_artifact_consumer_key_shape_gate_read_and_write(caplog):
         {"query": "q", "artifacts": legit}
     ).artifacts == legit
     assert any("值级漂移" in r.message for r in caplog.records), "降级必须留痕"
+
+
+def test_review_recommendation_subkey_shape_contract(caplog):
+    """#319 评审 m-2（覆盖缺口回填；评审变异 MY-1「recommendation 契约放宽
+    为空」全 unit 1231/1 存活——本用例即其判别用例）：
+
+    `review.recommendation` 子键契约（str）的**专项**判别：坏形态删**子键**
+    （不是删整键、也不是放行），零消费点的 issue_count / high_severity_count
+    原样保留。后果非崩（run_report 对域外值容忍、f-string 安全），属状态
+    卫生闸门——但契约既在，就得有钉。
+
+    变异点：删掉 `"recommendation": _is_str` 子键契约 → 读/写两侧断言红
+    （坏值原样进运行态/落回快照）。
+    """
+    with caplog.at_level(logging.WARNING):
+        restored = ExecutionContext.from_checkpoint_dict({
+            "query": "q",
+            "artifacts": {
+                "review": {"recommendation": 123, "issue_count": 1, "high_severity_count": 0},
+            },
+        })
+    assert restored.artifacts["review"] == {"issue_count": 1, "high_severity_count": 0}, (
+        "坏 recommendation 删子键；零消费点计数原样保留（不整键删、不陪葬）"
+    )
+
+    ctx = ExecutionContext(query="q")
+    ctx.artifacts["review"] = {"recommendation": ["reject"], "issue_count": 2}
+    written = ctx.to_checkpoint_dict()["artifacts"]
+    assert written["review"] == {"issue_count": 2}, "写侧同样删子键、坏值不落盘"
+
+    # 误伤对照：合法 str 逐字节透传（含域外串——闸门只看类型不看域，
+    # 域值由 run_report 的消费逻辑容忍）
+    ok = ExecutionContext.from_checkpoint_dict({
+        "query": "q",
+        "artifacts": {"review": {"recommendation": "revise", "issue_count": 1}},
+    })
+    assert ok.artifacts["review"]["recommendation"] == "revise"
+    ok_domain = ExecutionContext.from_checkpoint_dict({
+        "query": "q",
+        "artifacts": {"review": {"recommendation": "通过"}},
+    })
+    assert ok_domain.artifacts["review"]["recommendation"] == "通过", "域外 str 透传"
+    assert any("值级漂移" in r.message for r in caplog.records), "降级必须留痕"
