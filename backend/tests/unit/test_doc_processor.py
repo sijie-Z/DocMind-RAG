@@ -85,3 +85,51 @@ async def test_process_reports_progress_at_stage_boundaries(monkeypatch, with_pr
         ]
     expected.append("release")
     assert events == expected
+
+
+@pytest.mark.asyncio
+async def test_mark_failed_writes_document_and_job_failed(monkeypatch):
+    """真实 _mark_failed 的落库写入（评审 R7：批内用例全部用替身，实现零覆盖）。
+
+    #28 端到端「文档 FAILED」与 #30 终局日志「doc/job already marked FAILED」
+    都依赖这两次真实状态写入；此前 S7 变异（删 `doc.status=FAILED` 一行）全绿。
+
+    变异点：删掉 `doc.status = DocumentStatus.FAILED` 一行 → 本用例红。
+    """
+    import app.worker.doc_processor as dp_mod
+    from app.models.document import Document, DocumentStatus
+    from app.models.knowledge_job import KnowledgeJobStatus
+
+    doc = SimpleNamespace(status=DocumentStatus.PARSING, parse_error=None)
+    job = SimpleNamespace(
+        status=KnowledgeJobStatus.PROCESSING,
+        error_message=None,
+        finished_at=None,
+    )
+    commits = []
+
+    class _Session:
+        async def get(self, model, pk):
+            return doc if model is Document else job
+
+        async def commit(self):
+            commits.append(True)
+
+    class _Ctx:
+        async def __aenter__(self):
+            return _Session()
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(dp_mod, "AsyncSessionLocal", lambda: _Ctx())
+
+    processor = DocumentProcessor()
+    await processor._mark_failed("doc-1", "boom", job_id=7)
+
+    assert doc.status == DocumentStatus.FAILED
+    assert doc.parse_error == "boom"
+    assert job.status == KnowledgeJobStatus.FAILED
+    assert job.error_message == "boom"
+    assert job.finished_at is not None
+    assert len(commits) == 2, "doc 与 job 各提交一次（两次独立 session）"

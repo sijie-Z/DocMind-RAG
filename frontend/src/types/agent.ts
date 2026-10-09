@@ -13,6 +13,7 @@ export type AgentEventType =
   | 'run_report'
   | 'execution_context'
   | 'retry_hint'
+  | 'warning'
   | 'error'
 
 export type ThinkingType = 'reasoning' | 'planning' | 'evaluation' | 'correction'
@@ -51,6 +52,7 @@ export interface AgentEvent {
   iteration?: number
   timestamp?: number
   message_id?: string      // from done event for feedback
+  saved?: boolean          // done 事件：本轮会话落库是否成功（issue #301 批 D）
 }
 
 export interface PlanStep {

@@ -120,6 +120,12 @@ export function useChatAttachments() {
       formData.append('description', t('chat.fileFromChat'))
 
       const res = await uploadKnowledgeBase(formData)
+      const uploadBody = res.data as { success?: boolean; message?: string } | undefined
+      if (uploadBody?.success === false) {
+        // issue #301 批 D（#23）：文件已保存但处理任务启动失败（后端已把 doc
+        // 标为 failed，success=false）。如实报错，不再进入 parsing 轮询假等待。
+        throw new Error(uploadBody.message || t('chat.fileUploadFailed'))
+      }
       const docId = res.data?.data?.id || (res.data as Record<string, unknown>).id
       if (docId) {
         tempFile.id = String(docId)

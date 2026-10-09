@@ -191,30 +191,61 @@ class DocumentProcessor:
 
         ``on_progress``（可选）在每个阶段边界各调用一次：worker 用它刷新心跳，
         避免单篇大文档的长耗时解析/向量化被健康检查误判为"卡死"（issue #156）。
+
+        返回值契约（issue #301 批 D / #30 起对 consumer 生效，此前 consumer 忽略返回值）：
+
+        - ``True``——该消息**已了结**：本进程完成索引，或经判断无需（也不应）重投的
+          跳过（另一持锁者正在处理 / 对象已不存在——两处都有响亮日志）。
+          consumer 可以安全提交偏移；
+        - ``False``——处理**失败**：文档与任务已尽力如实落 ``FAILED``（含原因），
+          consumer 必须按"未提交偏移"处理（走受限重投，见 ``worker/consumer.py``
+          的 ``MAX_DELIVERY_ATTEMPTS``），绝不允许当成功提交。
         """
         notify = on_progress or _noop
         logger.info("[DOC_PROC] start document_id=%s job_id=%s", document_id, job_id)
         lock_acquired = await self._acquire_processing_lock(document_id)
         if lock_acquired is False:
+            # 重复投递/并发处理中：完成责任在持锁者手中，本消息可以安全提交
+            # （持锁者自己的投递在成功前不会提交偏移，崩溃后其消息会重投——
+            # 至少一次语义由那条投递维系）。
             logger.info(
                 "[DOC_PROC] skip document_id=%s job_id=%s: already being processed",
                 document_id,
                 job_id,
             )
-            return False
+            return True
         notify()
         try:
             doc = await self._load_and_mark_parsing(document_id, job_id)
             if doc is None:
-                return False
+                # 对象已不存在：重投永远不会成功——响亮记录后视同"已了结"，
+                # 避免 consumer 对毒消息做无意义的重投/重启循环。
+                logger.error(
+                    "[DOC_PROC] document not found, message is terminal: %s", document_id
+                )
+                return True
 
             parse_result = await self.parser.parse_document(
                 doc.file_path, str(doc.organization_id)
             )
             notify()
             chunks_data = parse_result.get("chunks", [])
+            # issue #301 批 D（#28）：先剔除全空白 chunk 再判空。修前只看"列表非空"，
+            # 而扫描件/OCR 缺失时解析链会产出一个**空文本 chunk**（content="" →
+            # semantic_chunker 返回 [{"text": ""}]）——空内容因此绕过本护栏，
+            # 一路向量化并写 INDEXED（"已完成"的文档永远搜不到）。空内容 = 处理失败。
+            non_empty = [c for c in chunks_data if (c.get("chunk_text") or "").strip()]
+            if len(non_empty) != len(chunks_data):
+                logger.warning(
+                    "[DOC_PROC] dropped %d blank chunk(s) document_id=%s",
+                    len(chunks_data) - len(non_empty),
+                    document_id,
+                )
+            chunks_data = non_empty
             if not chunks_data:
-                raise ValueError("文件解析后无内容，可能为空文件或解析失败。")
+                raise ValueError(
+                    "文件解析后无有效文本内容：可能为空文件、扫描件（OCR 依赖不可用）或解析失败。"
+                )
 
             embeddings = await self._get_embeddings(
                 [c["chunk_text"] for c in chunks_data]

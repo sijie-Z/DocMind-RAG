@@ -725,7 +725,7 @@ const uploadFile = async () => {
     formData.append('description', uploadForm.value.description)
     // 移除硬编码的 organization_id，后端会从 Form 默认值或 User Context 获取
     
-    await uploadKnowledgeBase(formData, (progressEvent) => {
+    const res = await uploadKnowledgeBase(formData, (progressEvent) => {
       const progress = progressEvent.total ? Math.round((progressEvent.loaded * 100) / progressEvent.total) : 0
       const task = activeTasks.value.find(t => t.id === taskId)
       if (task) {
@@ -735,13 +735,24 @@ const uploadFile = async () => {
         }
       }
     })
-    
-    message.success(t('knowledge.uploadSuccess'))
-    
+
+    // issue #301 批 D（#23）：后端在「文件已保存、但处理任务启动失败」时返回
+    // success=false（doc 同步已标记 failed）。此前无条件 message.success —— 失败
+    // 被伪造成「上传成功」。
+    const uploadBody = res.data as { success?: boolean; message?: string }
     const task = activeTasks.value.find(t => t.id === taskId)
-    if (task) {
-      task.status = 'completed'
-      task.progress = 100
+    if (uploadBody?.success === false) {
+      if (task) {
+        task.status = 'error'
+        task.error = uploadBody.message || t('knowledge.uploadFailed')
+      }
+      message.warning(uploadBody.message || t('knowledge.uploadFailed'))
+    } else {
+      message.success(t('knowledge.uploadSuccess'))
+      if (task) {
+        task.status = 'completed'
+        task.progress = 100
+      }
     }
     
     uploadForm.value = {

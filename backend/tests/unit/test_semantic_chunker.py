@@ -97,9 +97,13 @@ class TestFindClauseBoundaries:
 class TestSplitTextShort:
     @pytest.mark.asyncio
     async def test_empty_text(self, chunker):
+        # issue #301 批 D（#28）：空文本曾返回 [{"text": ""}]——这个空 chunk 会绕过
+        # doc_processor 的"无 chunks_data"空内容护栏（列表长度为 1），空内容一路
+        # 向量化并写 INDEXED。语义更正：空/全空白 → 零个 chunk。
         result = await chunker.split_text("")
-        assert len(result) == 1
-        assert result[0]["text"] == ""
+        assert result == []
+        result = await chunker.split_text("   \n\n  ")
+        assert result == []
 
     @pytest.mark.asyncio
     async def test_short_text_returns_single_chunk(self, chunker):

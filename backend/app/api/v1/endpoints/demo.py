@@ -143,6 +143,7 @@ async def seed_demo_data(
             return {"success": True, "message": "示例数据已存在", "skipped": True}
 
         created_doc_ids = []
+        documents_failed: list[dict] = []
 
         # 1. 创建文档记录并索引到 ES
         for doc_data in DEMO_DOCUMENTS:
@@ -155,7 +156,11 @@ async def seed_demo_data(
                 file_path=f"demo/{doc_data['filename']}",
                 file_size=len(full_content.encode("utf-8")),
                 file_type=doc_data["file_type"],
-                status=DocumentStatus.INDEXED,
+                # issue #229（#301 批 D 收口）：创建时**不预写 INDEXED** ——
+                # INDEXED 只能在确认「真的进了 ES」之后写（见下方成功分支）。
+                # 修前创建即 INDEXED、embedding 失败仅 warning 跳过 ES：
+                # 「DB 说 INDEXED，ES 里什么都没有」。
+                status=DocumentStatus.PENDING,
                 title=doc_data["title"],
                 description="示例数据 - DocMind 首次体验",
                 keywords=doc_data["keywords"],
@@ -164,20 +169,29 @@ async def seed_demo_data(
                 organization_id=org_id,
                 uploaded_by=current_user.id,
                 parsed_at=datetime.now(UTC),
-                indexed_at=datetime.now(UTC),
             )
             db.add(doc)
 
             # 2. 生成 embedding 并索引到 ES
+            embed_error = None
             try:
                 embeddings = await embedding_service.get_embeddings(doc_data["chunks"])
             except Exception as e:
-                # 安全修复：不再写零向量（会污染向量检索），改为跳过该文档的 ES 索引
-                logger.warning(f"Embedding failed for {doc_data['title']}: {e}, skipping ES indexing")
+                # 安全修复：不再写零向量（会污染向量检索）；#229：状态如实失败。
+                logger.error(f"Embedding failed for {doc_data['title']}: {e}")
+                embed_error = str(e)
+                embeddings = None
+
+            if embeddings is not None and len(embeddings) != len(doc_data["chunks"]):
+                embed_error = (
+                    f"向量数量与文本块数量不匹配: {len(embeddings)} vs {len(doc_data['chunks'])}"
+                )
+                logger.error(f"Embedding length mismatch for {doc_data['title']}: {embed_error}")
                 embeddings = None
 
             if embeddings is None:
-                # embedding 失败：跳过 ES 索引，仅保留 DB 记录
+                # issue #229：embedding 失败 → 不索引 ES，且状态如实写 FAILED（带原因），
+                # 绝不 INDEXED；失败文档明确记账（不再悄然少 1 仍报「加载成功」）。
                 for i, chunk_text in enumerate(doc_data["chunks"]):
                     db.add(DocumentChunk(
                         id=str(uuid.uuid4()),
@@ -188,8 +202,16 @@ async def seed_demo_data(
                         start_pos=i * 500,
                         end_pos=(i + 1) * 500,
                     ))
+                doc.status = DocumentStatus.FAILED
+                doc.parse_error = f"示例数据向量化失败: {embed_error}"
+                documents_failed.append({
+                    "id": doc_id,
+                    "title": doc_data["title"],
+                    "error": doc.parse_error,
+                })
                 continue
 
+            index_failures = 0
             for i, (chunk_text, embedding) in enumerate(zip(doc_data["chunks"], embeddings, strict=False)):
                 # 保存 chunk 到数据库
                 chunk = DocumentChunk(
@@ -226,8 +248,30 @@ async def seed_demo_data(
                         doc_id=f"{doc_id}_{i}", document=es_doc
                     )
                 except Exception as e:
+                    index_failures += 1
                     logger.warning(f"ES index failed for chunk {i}: {e}")
 
+            if index_failures >= len(doc_data["chunks"]):
+                # issue #229：一条 chunk 都没进 ES —— 不得写 INDEXED
+                # （「状态 = INDEXED ⟹ 可被检索」不变式的 demo 路径执行者）。
+                doc.status = DocumentStatus.FAILED
+                doc.parse_error = "示例数据 ES 索引全部失败"
+                documents_failed.append({
+                    "id": doc_id,
+                    "title": doc_data["title"],
+                    "error": doc.parse_error,
+                })
+                continue
+            if index_failures:
+                # 部分失败与主链路的 #224 部分索引语义对齐：文档整体可被检索，
+                # 留痕但不阻断（demo 数据静态、可重试重建）。
+                logger.warning(
+                    f"Demo doc {doc_data['title']}: {index_failures}/"
+                    f"{len(doc_data['chunks'])} chunk(s) failed to index"
+                )
+
+            doc.status = DocumentStatus.INDEXED
+            doc.indexed_at = datetime.now(UTC)
             created_doc_ids.append(doc_id)
             logger.info(f"Created demo document: {doc_data['title']} ({doc_id})")
 
@@ -259,11 +303,26 @@ async def seed_demo_data(
 
         await db.commit()
 
+        documents_failed_count = len(documents_failed)
+        if documents_failed_count == 0:
+            message = "示例数据加载成功"
+        elif not created_doc_ids:
+            message = "示例数据加载失败：全部文档未能完成索引（文档状态已如实标记为失败）"
+        else:
+            message = (
+                f"示例数据部分加载：{documents_failed_count}/{len(DEMO_DOCUMENTS)} "
+                f"篇文档未能完成索引（已标记为失败）"
+            )
+
+        # issue #229：响应如实 —— 有失败文档就 success=False 且明确报数，
+        # 不再「documents_created 悄然少 1 仍报加载成功」。
         return {
-            "success": True,
-            "message": "示例数据加载成功",
+            "success": documents_failed_count == 0,
+            "message": message,
             "data": {
                 "documents_created": len(created_doc_ids),
+                "documents_failed": documents_failed_count,
+                "failed_documents": documents_failed,
                 "conversation_id": session_id,
                 "conversation_title": DEMO_CONVERSATION["title"],
             }

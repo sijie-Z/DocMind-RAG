@@ -64,6 +64,27 @@ describe('useAgentStore · SSE 可见性事件落账', () => {
     expect(msg.events[0].content).toBe('retry_action=reset_transport')
   })
 
+  it('warning 落进事件列表（#301 批 D：会话落库失败的唯一可见信号，此前会丢）', () => {
+    const store = seedAssistantMessage()
+    store.processEvent({
+      type: 'warning',
+      content: '回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见',
+    } as any)
+    const msg = store.messages[store.messages.length - 1]
+    expect(msg.events.length).toBe(1)
+    expect(msg.events[0].type).toBe('warning')
+    expect(msg.events[0].content).toContain('会话记录保存失败')
+  })
+
+  it('done(saved=false) 不被丢弃、不影响既有落账（#301 批 D）', () => {
+    const store = seedAssistantMessage()
+    store.processEvent({ type: 'done', content: '', saved: false } as any)
+    const msg = store.messages[store.messages.length - 1]
+    expect(msg.loading).toBe(false)
+    // 无 message_id：不得臆造
+    expect(msg.messageId).toBeUndefined()
+  })
+
   it('未知事件类型不抛错、不影响既有消息', () => {
     const store = seedAssistantMessage()
     const before = { ...store.messages[store.messages.length - 1] }
