@@ -173,11 +173,26 @@ async def _embed_texts(client, texts: list[str], model: str) -> list[list[float]
     return vectors
 
 
+async def _close_clients(embed) -> None:
+    """关掉 ES 与 embedding 客户端（含异常路径）——防 aiohttp 会话泄漏告警。"""
+    from app.core.elasticsearch import close_elasticsearch
+
+    try:
+        await close_elasticsearch()
+    except Exception:  # noqa: BLE001 — 关停失败不应再抛
+        pass
+    close = getattr(embed, "close", None)
+    if close is not None:
+        try:
+            await close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 async def _cmd_seed_async(args: argparse.Namespace, golden: GoldenSet) -> int:
     from app.core.config import settings
     from app.core.elasticsearch import (
         ElasticsearchTools,
-        close_elasticsearch,
         get_elasticsearch,
         get_index_error,
         init_elasticsearch,
@@ -203,61 +218,65 @@ async def _cmd_seed_async(args: argparse.Namespace, golden: GoldenSet) -> int:
     embed = _require_embedding_client()
     if embed is None:
         return 2
-    client = await get_elasticsearch()
+    try:
+        client = await get_elasticsearch()
 
-    actions: list[dict] = []
-    dim = settings.VECTOR_DIMENSION
-    for fname in golden.corpus_files:
-        text = (golden.corpus_dir / fname).read_text(encoding="utf-8")
-        chunks = split_corpus_file(text)
-        document_id = f"eval-{Path(fname).stem}"
-        vectors = await _embed_texts(embed, chunks, settings.EMBEDDING_MODEL)
-        for i, (chunk, vec) in enumerate(zip(chunks, vectors, strict=True)):
-            if len(vec) != dim:
-                print(
-                    f"[evals] 向量维度不符：{fname} chunk {i} 得到 {len(vec)}，"
-                    f"VECTOR_DIMENSION={dim}。请对齐配置后重试（不改动已有数据）。",
-                    file=sys.stderr,
+        actions: list[dict] = []
+        dim = settings.VECTOR_DIMENSION
+        for fname in golden.corpus_files:
+            text = (golden.corpus_dir / fname).read_text(encoding="utf-8")
+            chunks = split_corpus_file(text)
+            document_id = f"eval-{Path(fname).stem}"
+            vectors = await _embed_texts(embed, chunks, settings.EMBEDDING_MODEL)
+            for i, (chunk, vec) in enumerate(zip(chunks, vectors, strict=True)):
+                if len(vec) != dim:
+                    print(
+                        f"[evals] 向量维度不符：{fname} chunk {i} 得到 {len(vec)}，"
+                        f"VECTOR_DIMENSION={dim}。请对齐配置后重试（不改动已有数据）。",
+                        file=sys.stderr,
+                    )
+                    return 2
+                actions.append(
+                    {
+                        "_index": index,
+                        "_id": f"{document_id}:c{i:02d}",
+                        "_source": {
+                            "content": chunk,
+                            "chunk_text": chunk,
+                            "embedding": vec,
+                            "organization_id": org,
+                            "document_id": document_id,
+                            "filename": fname,
+                            "file_type": "md",
+                            "file_size": len(chunk.encode("utf-8")),
+                            "upload_time": "2026-10-09T00:00:00+00:00",
+                            "user_id": "eval-seed",
+                            "metadata": {"chunk_index": i, "source": "evals/corpus"},
+                        },
+                    }
                 )
-                return 2
-            actions.append(
-                {
-                    "_index": index,
-                    "_id": f"{document_id}:c{i:02d}",
-                    "_source": {
-                        "content": chunk,
-                        "chunk_text": chunk,
-                        "embedding": vec,
-                        "organization_id": org,
-                        "document_id": document_id,
-                        "filename": fname,
-                        "file_type": "md",
-                        "file_size": len(chunk.encode("utf-8")),
-                        "upload_time": "2026-10-09T00:00:00+00:00",
-                        "user_id": "eval-seed",
-                        "metadata": {"chunk_index": i, "source": "evals/corpus"},
-                    },
-                }
+            # 幂等：先清同文档旧数据再写入（同 worker 的 delete_by_query 惯例）
+            await client.delete_by_query(
+                index=index, query={"term": {"document_id": document_id}}, refresh=True
             )
-        # 幂等：先清同文档旧数据再写入（同 worker 的 delete_by_query 惯例）
-        await client.delete_by_query(
-            index=index, query={"term": {"document_id": document_id}}, refresh=True
-        )
-        print(f"[seed] {fname}: {len(chunks)} chunks → document_id={document_id}")
+            print(f"[seed] {fname}: {len(chunks)} chunks → document_id={document_id}")
 
-    await ElasticsearchTools.bulk_index_documents(actions)
-    count = await client.count(index=index, query={"term": {"organization_id": org}})
-    n = int(count.get("count", 0))
-    expected = len(actions)
-    print(f"[seed] 完成：写入 {len(actions)} chunks，回读 count(org={org})={n}")
-    if n != expected:
-        print(
-            f"[evals] 回读不一致（期望 {expected}，得到 {n}）——先不要跑 run，检查 ES。",
-            file=sys.stderr,
-        )
-        return 3
-    await close_elasticsearch()
-    return 0
+        await ElasticsearchTools.bulk_index_documents(actions)
+        # bulk 默认不刷新：先 refresh 再回读，否则 count 会看到陈旧段（冒烟实测过）
+        await client.indices.refresh(index=index)
+        count = await client.count(index=index, query={"term": {"organization_id": org}})
+        n = int(count.get("count", 0))
+        expected = len(actions)
+        print(f"[seed] 完成：写入 {len(actions)} chunks，回读 count(org={org})={n}")
+        if n != expected:
+            print(
+                f"[evals] 回读不一致（期望 {expected}，得到 {n}）——先不要跑 run，检查 ES。",
+                file=sys.stderr,
+            )
+            return 3
+        return 0
+    finally:
+        await _close_clients(embed)
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +298,6 @@ def _cmd_run_preflight(client_count: int, args: argparse.Namespace) -> int | Non
 async def _cmd_run_async(args: argparse.Namespace, golden: GoldenSet) -> int:
     from app.core.config import settings
     from app.core.elasticsearch import (
-        close_elasticsearch,
         get_elasticsearch,
         get_index_error,
         init_elasticsearch,
@@ -294,34 +312,36 @@ async def _cmd_run_async(args: argparse.Namespace, golden: GoldenSet) -> int:
     embed = _require_embedding_client()
     if embed is None:
         return 2
-    client = await get_elasticsearch()
+    try:
+        client = await get_elasticsearch()
 
-    count = await client.count(
-        index=settings.ELASTICSEARCH_INDEX_NAME,
-        query={"term": {"organization_id": str(args.org_id)}},
-    )
-    doc_count = int(count.get("count", 0))
-    rc = _cmd_run_preflight(doc_count, args)
-    if rc is not None:
-        return rc
-
-    top_k = args.top_k or golden.top_k
-    retriever = HybridRetriever(openai_client=None, embedding_client=embed)
-
-    async def retrieve(query: str, k: int) -> RetrievalObservation:
-        docs, _qv, debug, degraded = await retriever.retrieve(query, args.org_id, k, debug=True)
-        strategy = debug.get("strategy") if isinstance(debug, dict) else None
-        return RetrievalObservation(
-            results=list(docs or []), strategy=strategy, degraded=list(degraded or [])
+        count = await client.count(
+            index=settings.ELASTICSEARCH_INDEX_NAME,
+            query={"term": {"organization_id": str(args.org_id)}},
         )
+        doc_count = int(count.get("count", 0))
+        rc = _cmd_run_preflight(doc_count, args)
+        if rc is not None:
+            return rc
 
-    print(
-        f"[evals] 跑分中：{len(golden.items)} 条 × top_k={top_k} "
-        f"（index={settings.ELASTICSEARCH_INDEX_NAME} org={args.org_id} "
-        f"org 文档数={doc_count}，无 LLM 辅助）"
-    )
-    runs = await run_eval(golden.items, retrieve, top_k)
-    await close_elasticsearch()
+        top_k = args.top_k or golden.top_k
+        retriever = HybridRetriever(openai_client=None, embedding_client=embed)
+
+        async def retrieve(query: str, k: int) -> RetrievalObservation:
+            docs, _qv, debug, degraded = await retriever.retrieve(query, args.org_id, k, debug=True)
+            strategy = debug.get("strategy") if isinstance(debug, dict) else None
+            return RetrievalObservation(
+                results=list(docs or []), strategy=strategy, degraded=list(degraded or [])
+            )
+
+        print(
+            f"[evals] 跑分中：{len(golden.items)} 条 × top_k={top_k} "
+            f"（index={settings.ELASTICSEARCH_INDEX_NAME} org={args.org_id} "
+            f"org 文档数={doc_count}，无 LLM 辅助）"
+        )
+        runs = await run_eval(golden.items, retrieve, top_k)
+    finally:
+        await _close_clients(embed)
 
     report = build_report(
         golden,
@@ -366,7 +386,7 @@ async def _cmd_run_async(args: argparse.Namespace, golden: GoldenSet) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001 — 非交互环境无 reconfigure 也不该挂
         pass
