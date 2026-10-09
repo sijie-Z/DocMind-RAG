@@ -65,6 +65,134 @@ def _minimum_should_match_for(query_text: str) -> int | str:
     return max(1, base * 30 // 100)
 
 
+# ---- #208 Phase 2 决策 c：`第X条` 数形互为扩展（查询侧同义扩展；不动索引/种子） ----
+
+# 「第X条」跨度（X = 阿拉伯数字或中文数词；允许「第 9 条」空格写法）。
+# 中文数词集与 evals/clauses.py 的条号口径一致（零〇两 + 一-九 + 十百千）；
+# 未纳入「廿」（语料与查询均未出现，扩集需同步 evals 口径并显式更新本注释）。
+_CLAUSE_NUM_SPAN_RE = re.compile(r"第[ \t]*([0-9０-９〇零一二三四五六七八九十百千两]+)[ \t]*条")
+_CN_DIGITS = {
+    "零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3,
+    "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+}
+_CN_UNITS = {"十": 10, "百": 100, "千": 1000}
+
+
+def _parse_clause_number(raw: str) -> int | None:
+    """「第X条」的 X 串 → int；无法解析返回 None（全角数字经 NFKC 归一）。
+
+    中文数词口径与 evals/clauses.parse_cn_number 对齐（七→7、十二→12、
+    二十二→22、一百零五→105、两千→2000）。app 层不依赖 evals 包，
+    此处为对齐实现——两处口径需同步修改（校准锚点在判别测试里）。
+    """
+    s = unicodedata.normalize("NFKC", raw or "").strip()
+    if not s:
+        return None
+    if s.isdigit():
+        try:
+            return int(s)
+        except ValueError:
+            return None
+    total = 0
+    current = 0
+    for ch in s:
+        if ch in _CN_DIGITS:
+            current = _CN_DIGITS[ch]
+        elif ch in _CN_UNITS:
+            total += (current or 1) * _CN_UNITS[ch]
+            current = 0
+        else:
+            return None
+    return total + current
+
+
+def _int_to_cn_clause_number(n: int) -> str | None:
+    """1..99 → 中文数词形（七/十二/二十二）；范围外返回 None（该跨度不改写）。
+
+    条号量级（≤99）覆盖语料实况；100+ 只保留阿拉伯向扩展（生成「第105条」），
+    中文形按 None 跳过——避免引入百千构词法与 evals 口径产生第二套映射。
+    """
+    if not 1 <= n <= 99:
+        return None
+    digits = "一二三四五六七八九"
+    if n < 10:
+        return digits[n - 1]
+    tens, ones = divmod(n, 10)
+    head = "" if tens == 1 else digits[tens - 1]
+    return head + "十" + (digits[ones - 1] if ones else "")
+
+
+def _numeral_clause_variants(query: str) -> list[str]:
+    """#208 Phase 2 决策 c：`第X条` 中文形⇄阿拉伯形互为扩展项（查询侧）。
+
+    实验事实：cjk bigram 分词下 `第七` ≠ `第7`，中文数词查询的 gold 连候选
+    都进不去（clause_chinese_7 / clause_chinese_12）；语料条号以阿拉伯写作
+    （第7条/第12条）。本函数对查询里每个「第X条」跨度生成阿拉伯形与中文形
+    两个改写变体（X 可解析且 ≥1 才参与；解析失败/越界的跨度原样保留），
+    随本地改写变体一同进入 keyword 臂的「每变体一次检索 → 合并取最高分」，
+    **不改索引、不重 seed**（同物理索引 before/after 可对照）。
+
+    边界：不触及「第一章」（须以 条 收尾）、「第3.5条」（数字段不含小数点）、
+    「第0条」（0 不转换）；空格写法（第 9 条）按规范形（第9条/第九条）生成；
+    返回最多 2 条（阿拉伯向 + 中文向），与查询相同或重复的不返回。
+    """
+    if not query:
+        return []
+    spans = list(_CLAUSE_NUM_SPAN_RE.finditer(query))
+    if not spans:
+        return []
+    variants: list[str] = []
+    for to_arabic in (True, False):
+        pieces: list[str] = []
+        last = 0
+        changed = False
+        for m in spans:
+            pieces.append(query[last:m.start()])
+            replacement = None
+            n = _parse_clause_number(m.group(1))
+            if n is not None and n >= 1:
+                if to_arabic:
+                    replacement = f"第{n}条"
+                else:
+                    cn = _int_to_cn_clause_number(n)
+                    if cn is not None:
+                        replacement = f"第{cn}条"
+            if replacement is None:
+                pieces.append(m.group(0))
+            else:
+                pieces.append(replacement)
+                changed = changed or replacement != m.group(0)
+            last = m.end()
+        pieces.append(query[last:])
+        candidate = "".join(pieces)
+        if changed and candidate != query and candidate not in variants:
+            variants.append(candidate)
+    return variants
+
+
+# ---- #208 Phase 2 决策 e：条号直查类判据（此类查询跳过 MMR） ----
+
+# 章节引用：§X.Y（允许 § 后空格；至少一段小数点，与 evals/clauses 的章节口径一致）。
+_SECTION_REF_RE = re.compile(r"§[ \t]*\d+(?:\.\d+)+")
+
+
+def _is_clause_lookup_query(query: str) -> bool:
+    """条号直查类查询的确定性判据（#208 Phase 2 决策 e）。
+
+    判据：查询含「第X条」式条号引用（中文/阿拉伯数词、允许空格，同 `_CLAUSE_NUM_SPAN_RE`）
+    或「§X.Y」式章节引用。此类查询的目标是**精确定位**某一条/节，与 MMR 的多样性
+    惩罚相斥——实验实测（hybrid 反事实）：clause_arabic_3 的 gold 分数在场却被
+    `_mmr_select` 从 top5 剔出，post-process 根本没收到它。
+
+    边界（负判）：`第一章`（须以 条 收尾）、`第3.5条`、裸 `2.3`（章节需带 §，
+    避免与版本号/数值混淆）、空串。判据按查询文本模式判定，与路由/语料无关；
+    负难例 `第99条…`（语料中不存在的条号）同样命中此判据（它是「直查」语义）。
+    """
+    if not query:
+        return False
+    return bool(_CLAUSE_NUM_SPAN_RE.search(query) or _SECTION_REF_RE.search(query))
+
+
 class HybridRetriever:
     """Retrieves documents using keyword search, vector search, and RRF fusion."""
 
@@ -104,7 +232,13 @@ class HybridRetriever:
     async def _keyword_hits(self, query: str, filters: list[dict], candidate_size: int) -> list[dict]:
         enable_qr = bool(getattr(settings, "RAG_ENABLE_QUERY_REWRITE", True))
         rewrite_queries = rewrite_query_candidates(query)
-        base_count = len(rewrite_queries)  # 本地改写站产出条数（含原查询），用于折算存活新增
+        # #208 Phase 2 决策 c：`第X条` 数形互为扩展（查询侧同义扩展）——与本地
+        # 改写变体一同走「每变体一次检索 → 合并取最高分」的既有机制，不改索引。
+        for variant in _numeral_clause_variants(query):
+            if variant not in rewrite_queries:
+                rewrite_queries.append(variant)
+        # 本地站产出条数（含原查询与数形扩展），用于折算存活新增
+        base_count = len(rewrite_queries)
         if enable_qr:
             # issue #259：字段已补进 Settings（此前 getattr 兜底因字段缺失而 .env 无效）
             timeout_sec = settings.RAG_QUERY_REWRITE_TIMEOUT_SECONDS
@@ -563,6 +697,11 @@ class HybridRetriever:
 
         if strategy == "keyword_only":
             kw_hits = await self._keyword_hits(query, filters, candidate_size)
+            # #208 Phase 2 决策 d：keyword-only 序的命中来自 keyword 臂本体，补上与
+            # hybrid 序（`_rrf_fuse` 写 `has_keyword`）一致的臂标记——终滤走同一
+            # 质量档（has_kw → ov>=0.10），不再按「无臂命中」的最严 0.15 档论处
+            # （实测 gold overlap=0.1167 恰死两档之间）。命中为拷贝，不改进参对象。
+            kw_hits = [{**h, "has_keyword": True} for h in kw_hits]
             if debug and debug_info is not None:
                 debug_info["keyword_top"] = self._debug_format_hits(kw_hits[:10])
                 debug_info["vector_top"] = []
@@ -605,7 +744,11 @@ class HybridRetriever:
             return results, query_vector, debug_info, degraded
 
         # MMR
-        if settings.RAG_ENABLE_MMR and query_vector:
+        # #208 Phase 2 决策 e：条号直查类查询（第X条 / §X.Y）跳过 MMR——多样性惩罚
+        # 与「精确定位」目标相斥（实测 clause_arabic_3 的 gold 分数在场却被
+        # _mmr_select 从 top5 剔出，post-process 根本没收到它）；此类查询的 RRF 序
+        # 直接进入 post-process。非直查查询的 MMR 行为不变。
+        if settings.RAG_ENABLE_MMR and query_vector and not _is_clause_lookup_query(query):
             mmr_cands = [
                 {**h, "_embedding": h.get("_source", {}).get("embedding", [])}
                 for h in fused[:candidate_size] if h.get("_source", {}).get("embedding")

@@ -71,10 +71,28 @@ token ≈ `知识,识库,库服,服务,务管,管理,理办,办法`（8 个标�
    **→ 已按默认 A 落地（PR #323）**：带《…》全称按剔除标题 token 后的 30%（整数）计算、
    常量 30 不变；Q1/Q2/Q3 的 gold 回候选（@5/@10/@6），终裁仍死在其余环（见 PR #323）。
 3. **数形归一化（#2.10）范围**：至少 `第七↔第7`、`第十二↔第12`；query 侧归一还是 index 侧双写。
+   **→ 已按默认路线落地（本 PR，先落查询侧）**：`第X条` 中文形⇄阿拉伯形互为扩展项并入
+   keyword 臂变体检索（不改索引、不重 seed，同物理索引可对照）；同索引实测
+   clause_chinese_12 的 gold 候选 rank None→#2、clause_chinese_7 rank 10→6，聚合指标
+   零变化。索引侧归一（动 parser/worker/seed）经评估不落——即使实施也无法解除剩余扼杀环
+   （doc 帽/术语表截断），且破坏同物理索引对照（归因见本 PR）。
 4. **keyword_only 命中是否带 `has_keyword` 语义**（终滤 0.15 vs 0.10 的臂标记缺口）：改动即改
    22 条 keyword_only 的终滤口径。
+   **→ 已按默认路线落地（本 PR）**：keyword_only 序的命中补 `has_keyword` 臂标记（与
+   hybrid 序一致），终滤改走 0.10 档；同索引实测结构变化 1/28（clause_chinese_7 n 3→4），
+   aggregates 零变化；Q2/Q3 的 gold 解除 ε 终滤后仍死于 doc 帽（如实归因见本 PR）。
 5. **MMR 对条号直查的适用性**：多样性惩罚与「精确定位」目标相斥（Q1 的 gold 被 MMR 剔除）；
    可选：条号类 query 跳过 MMR。
+   **→ 已按默认路线落地（本 PR）**：新增确定性判据 `_is_clause_lookup_query`（查询含
+   「第X条」/「§X.Y」），直查类查询在 hybrid 路径跳过 MMR、走 RRF 序；同索引实测结构变化
+   1/28（sec_2_3_response 返回构成，gold 仍 @1），负例空答率不变（EmptyAcc 100%）。
+
+**收官态（本 PR，#208 Phase 2 a–e 五环全部落地）**：4 条失败 query 经 c/d/e 后的剩余扼杀环
+如实记录——`clause_arabic_3`/`clause_chinese_7`/`clause_arabic_7` 的 gold 均在候选内、
+质量重算达标，仍死于 **doc 帽 2/文档**（前言+第2条占满 doc01 帽位；该帽为决策 a 保留项，
+不在 c/d/e 范围）；`clause_chinese_12` 的 gold 经数形扩展回到候选 #2，仍死于**术语表 12 项
+截断导致的 overlap=0**（机制 3，仍锁现状）。gold 回收 = 0/4（不美化）；四条失败 query 的
+下一步候选修复（帽上限 / 术语表截断）需单独拍板。
 
 ## 6. 未解释 / 未测量（如实）
 

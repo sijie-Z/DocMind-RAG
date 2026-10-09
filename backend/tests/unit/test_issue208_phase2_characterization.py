@@ -8,9 +8,14 @@
    —— 2026-10-09 决策 a 落地（本 PR）：帽保留，但计数移到质量过滤之后，
    被任一质量闸门剔除的块不占帽位（旧行为「先占槽后剔除」已被换下，见
    `TestPostProcessDocCap` 的旧/新锁对照注释）；
-2. keyword_only 路径的 raw hit 不带 `has_keyword` 标记（该键只由 `_rrf_fuse` 写）
+2. keyword_only 路径的命中此前不带 `has_keyword` 标记（该键只由 `_rrf_fuse` 写）
    → 终滤按最严的 `ov >= 0.15` 档；同一 chunk 在 hybrid 序里带标记（0.10 档）
-   就能通过。实测 gold overlap = 0.1167 恰好落在两档之间（未修，仍锁现状）；
+   就能通过。实测 gold overlap = 0.1167 恰好落在两档之间。
+   —— 2026-10-09 决策 d 落地（本 PR）：`retrieve` 的 keyword_only 分支给命中
+   补上 `has_keyword=True`（与 hybrid 序一致），终滤改走 0.10 档。旧单元锁
+   `TestKeywordOnlyArmMarkerGap` 的两条断言（`_post_process` 函数层语义）保留：
+   函数对「无标记命中」的判定式未变；被换下的是**产品路径不再产出无标记的
+   keyword_only 命中**这一前提。新锁见 `TestKeywordOnlyArmMarkerAligned`；
 3. `extract_query_terms` 截断前 12 个 bigram 且标题 bigram 优先——
    带文档全称的查询里，标题 8 个 bigram 占位，内容词（数据/删除）被截断出列表
    （未修，仍锁现状）；
@@ -20,11 +25,20 @@
    hybrid 反事实 4/4 仍 miss——锁住是为了让未来的路由变更显式发生）；
 6. keyword 臂的 `minimum_should_match`：带《…》文档全称的查询按「剔除标题 token
    后的 30%」（整数）计算；无全称查询保持 `"30%"`。
-   —— 2026-10-09 决策 b 落地（本 PR），闭掉评审发现的 msm 环无断言缺口
+   —— 2026-10-09 决策 b 落地（PR #323），闭掉评审发现的 msm 环无断言缺口
    （此前把常量改 10% 全量测试仍绿，见 `TestKeywordArmMsmCaliber`）。
+7. `第X条` 数形互为扩展（中文形⇄阿拉伯形并入 keyword 臂变体检索，查询侧、
+   不动索引）。—— 2026-10-09 决策 c 落地（本 PR）：`第七`≠`第7` 导致中文数词
+   查询的 gold 连候选都进不去（clause_chinese_7/chinese_12 的实验事实），
+   本文件以 `TestNumeralClauseNormalization` 为新锁。
+8. 条号直查类查询（查询含「第X条」/「§X.Y」引用）跳过 MMR。
+   —— 2026-10-09 决策 e 落地（本 PR）：hybrid 反事实实测 clause_arabic_3 的
+   gold 分数在场却被 `_mmr_select` 从 top5 剔出（多样性惩罚与精确定位相斥）；
+   本文件以 `TestClauseLookupSkipsMMR` 为新锁（判据边界 + MMR 调用端到端）。
 
-**c/d/e 三环（数形归一化 / has_keyword 臂标记 / MMR 适用性）仍受本闸门约束**——
-任何修复其机制的 PR 必须显式更新本文件：这是刻意的「变更前先测量、变更要自觉」闸门。
+**a–e 五环已全部落地**（a/b：PR #323；c/d/e：本 PR）。本文件现有全部锁为该
+机制的**正向锁**：任何再次改动上述机制（doc 帽 / msm 口径 / 数形归一 / 臂标记 /
+MMR 适用性）的 PR 必须显式更新本文件——这是刻意的「变更前先测量、变更要自觉」闸门。
 """
 
 import pytest
@@ -39,7 +53,11 @@ from app.rag.query_processor import (
 from app.rag.retriever import (
     HybridRetriever,
     _count_tokens_cjk,
+    _int_to_cn_clause_number,
+    _is_clause_lookup_query,
     _minimum_should_match_for,
+    _numeral_clause_variants,
+    _parse_clause_number,
 )
 
 # 12 个 ASCII 术语的探针查询：extract_query_terms 对拉丁词的抽取无截断歧义。
@@ -163,7 +181,17 @@ class TestPostProcessDocCap:
 
 
 class TestKeywordOnlyArmMarkerGap:
-    """机制 2：keyword_only raw hit 无臂标记 → 终滤按 0.15 档（hybrid 0.10 档）。"""
+    """机制 2 旧锁（保留为 _post_process 函数级语义）：无臂标记 → 0.15 档。
+
+    旧锁（实验现状）：keyword_only 路径的 raw hit 不带 `has_keyword` 标记
+    （该键只由 `_rrf_fuse` 写）→ 终滤按最严 `ov >= 0.15` 档，实测 gold
+    overlap=0.1167 恰死线上。
+    —— 2026-10-09 决策 d 换锁：产品路径（`retrieve` 的 keyword_only 分支）
+    已给命中补 `has_keyword=True`，不再产出无标记命中（新锁见
+    `TestKeywordOnlyArmMarkerAligned`）。此处两条断言按原样保留：钉住的是
+    `_post_process` 对「无标记命中」与「带标记命中」的判定式本身——函数级
+    契约未变，若未来有人把函数内 0.15/0.10 两档改坏仍会在此处精确红。
+    """
 
     def test_markerless_hit_with_overlap_0117_is_dropped(self):
         retriever = HybridRetriever()
@@ -171,7 +199,7 @@ class TestKeywordOnlyArmMarkerGap:
         docs = retriever._post_process(
             TERM_QUERY, [_hit("docA_c1", "alpha bravo 填充正文", 0.5)], top_k=5
         )
-        assert docs == [], "keyword_only 路径无 has_keyword 标记 → 0.15 档终滤削掉 0.1167"
+        assert docs == [], "无 has_keyword 标记的命中按 0.15 档终滤削掉 0.1167（函数级语义）"
 
     def test_same_hit_with_keyword_marker_passes_at_010(self):
         retriever = HybridRetriever()
@@ -183,6 +211,59 @@ class TestKeywordOnlyArmMarkerGap:
         assert [d["chunk_id"] for d in docs] == ["docA_c1"], (
             "同一 overlap=0.1167，带 has_keyword（hybrid 序形态）时走 0.10 档放行"
         )
+
+
+class TestKeywordOnlyArmMarkerAligned:
+    """机制 2 新锁（决策 d）：keyword_only 序的命中携带 has_keyword 臂标记。
+
+    `retrieve` 的 keyword_only 分支此前不过 `_rrf_fuse`，raw hit 拿不到
+    `has_keyword` → 终滤 0.15 档（旧锁）。决策 d 后该分支显式补标记，
+    与 hybrid 序一致地走 0.10 档；上游闸门（如 γ：has_kw 且 ov<0.02）也随
+    标记语义对齐——标记是「与 hybrid 同口径」，不是无条件放行。
+    """
+
+    @pytest.mark.asyncio
+    async def test_keyword_only_path_marks_hits_and_passes_mid_overlap(self, monkeypatch):
+        """端到端：keyword_only 路由下，overlap=0.1167 的命中经标记后放行。"""
+        retriever = HybridRetriever()
+
+        async def fake_kw(query, filters, candidate_size):
+            # 与旧锁同构：2 个术语命中 → ov = 0.1167（0.10 与 0.15 之间）。
+            return [_hit("docA_c1", "alpha bravo 填充正文", 0.5)]
+
+        monkeypatch.setattr(retriever, "_keyword_hits", fake_kw)
+        monkeypatch.setattr(
+            QueryComplexityClassifier,
+            "get_strategy",
+            classmethod(lambda cls, _q: "keyword_only"),
+        )
+
+        docs, _qv, dbg, _deg = await retriever.retrieve(TERM_QUERY, 1, top_k=5, debug=True)
+        assert [d["chunk_id"] for d in docs] == ["docA_c1"], (
+            "决策 d：keyword_only 命中带臂标记 → 0.1167 走 0.10 档放行"
+        )
+        assert docs[0]["has_keyword"] is True
+        assert dbg.get("strategy") == "keyword_only"
+        # 调试载荷与 post_process 看到同一批标记（keyword_top 也带 has_keyword）。
+        assert dbg["keyword_top"][0]["has_keyword"] is True
+
+    @pytest.mark.asyncio
+    async def test_marked_hit_below_gamma_gate_is_still_dropped(self, monkeypatch):
+        """标记不是无条件放行：ov=0（<0.02）的命中在 γ 闸门（has_kw 档）被剔。"""
+        retriever = HybridRetriever()
+
+        async def fake_kw(query, filters, candidate_size):
+            return [_hit("docA_c1", "完全无关的填充内容", 0.5)]
+
+        monkeypatch.setattr(retriever, "_keyword_hits", fake_kw)
+        monkeypatch.setattr(
+            QueryComplexityClassifier,
+            "get_strategy",
+            classmethod(lambda cls, _q: "keyword_only"),
+        )
+
+        docs, _qv, _dbg, _deg = await retriever.retrieve(TERM_QUERY, 1, top_k=5)
+        assert docs == [], "与 hybrid 序一致：has_kw 且 ov<0.02 仍死于 γ 闸门"
 
 
 class TestQueryTermTruncationTilt:
@@ -313,3 +394,191 @@ class TestKeywordArmMsmCaliber:
         await retriever._keyword_hits("审计日志保留多久？", [], candidate_size=10)
         got = _msms()
         assert got and all(v == "30%" for v in got), f"无全称查询应保持 '30%'，实际 {got}"
+
+
+class TestNumeralClauseNormalization:
+    """机制 7（决策 c 新锁）：`第X条` 中文形⇄阿拉伯形互为扩展项（查询侧，不动索引）。
+
+    实验事实（#208 Phase 2）：cjk bigram 下 `第七`≠`第7`，中文数词查询
+    （clause_chinese_7 / clause_chinese_12）的 gold 连候选都进不去；语料
+    （`backend/evals/corpus/`）条号以阿拉伯写作（第7条/第12条）。修复：
+    查询侧把两种写法互为扩展项并入 keyword 臂的变体检索（每变体一次检索、
+    合并取最高分）——无需重索引，同物理索引 before/after 可对照。
+    """
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            ("《知识库服务管理办法》第七条规定了什么？", ["《知识库服务管理办法》第7条规定了什么？"]),
+            ("《知识库服务管理办法》第7条规定了什么？", ["《知识库服务管理办法》第七条规定了什么？"]),
+            ("第十二条关于数据删除的规定是什么？", ["第12条关于数据删除的规定是什么？"]),
+            # 空格写法按规范形生成两个方向（第9条 / 第九条）。
+            ("第 9 条对审计日志有什么规定？", ["第9条对审计日志有什么规定？", "第九条对审计日志有什么规定？"]),
+            # 100+ 只有阿拉伯向（中文形超出 1..99 映射范围，按 None 跳过）。
+            ("第一百零五条", ["第105条"]),
+            # 多跨度：每个「第X条」都参与转换。
+            ("第7条与第十二条冲突吗？", ["第7条与第12条冲突吗？", "第七条与第十二条冲突吗？"]),
+            # 等价写法（已是目标形）不产生冗余变体。
+            ("第7条", ["第七条"]),
+        ],
+    )
+    def test_mutual_expansion_pairs(self, query, expected):
+        assert _numeral_clause_variants(query) == expected
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "第一章总则是什么？",  # 「章」不动（须以 条 收尾）
+            "第3.5条的规定？",  # 数字段含小数点 → 非「第X条」跨度
+            "第零条",  # 0 不转换
+            "审计日志保留多久？",  # 无条号
+            "",
+        ],
+    )
+    def test_boundaries_generate_no_variant(self, query):
+        assert _numeral_clause_variants(query) == []
+
+    def test_roundtrip_1_to_99(self):
+        for n in range(1, 100):
+            cn = _int_to_cn_clause_number(n)
+            assert cn is not None and _parse_clause_number(cn) == n, f"n={n} 往返失败：{cn}"
+
+    def test_chinese_form_out_of_range(self):
+        assert _int_to_cn_clause_number(0) is None
+        assert _int_to_cn_clause_number(100) is None
+        # 解析口径与 evals/clauses.parse_cn_number 对齐（校准锚点）。
+        assert _parse_clause_number("一百零五") == 105
+        assert _parse_clause_number("两千") == 2000
+        assert _parse_clause_number("廿") is None
+
+    @pytest.mark.asyncio
+    async def test_keyword_arm_searches_both_numeral_forms(self, monkeypatch):
+        """端到端判别：中文数字查询的 keyword 臂真的发出阿拉伯形变体检索。
+
+        这是决策 c 与 keyword 臂的接线闭环——只加函数不接线、或把变体截断丢出，
+        本用例都会红（原查询仍必须被检索，变体紧随其后）。
+        """
+        captured: list[str] = []
+
+        async def fake_search(es_query):
+            captured.append(
+                es_query["query"]["bool"]["must"][0]["bool"]["should"][0]["multi_match"]["query"]
+            )
+            return {"hits": {"hits": []}}
+
+        monkeypatch.setattr(retriever_mod.ElasticsearchTools, "search_documents", fake_search)
+        monkeypatch.setattr(settings, "RAG_ENABLE_QUERY_REWRITE", True)
+        monkeypatch.setattr(settings, "RAG_QUERY_REWRITE_COUNT", 4)
+
+        retriever = HybridRetriever(openai_client=None)
+        await retriever._keyword_hits(
+            "《知识库服务管理办法》第七条规定了什么？", [], candidate_size=10
+        )
+        assert any("第7条" in q for q in captured), f"keyword 臂应检索阿拉伯形变体，实际 {captured}"
+        assert captured[0].startswith("《知识库服务管理办法》第七条"), "原查询仍须被检索"
+        assert len(captured) == 3, f"本地 2 条（原查询+去标点）+ 1 条数形变体，实际 {captured}"
+
+        captured.clear()
+        await retriever._keyword_hits("审计日志保留多久？", [], candidate_size=10)
+        assert captured and all("第" not in q for q in captured), (
+            f"无条号查询不得新增数形变体，实际 {captured}"
+        )
+
+
+class TestClauseLookupSkipsMMR:
+    """机制 8（决策 e 新锁）：条号直查类查询（第X条 / §X.Y）跳过 MMR。
+
+    实验事实（hybrid 反事实）：`clause_arabic_3` 的 gold（kw#4/v#6）在
+    `_mmr_select` 的多样性惩罚下进不了 top5（m1–m5=前言、第1条、第7条、第11条、
+    第13条）——hybrid 上线也送不到 post-process。修复：条号直查类查询的 RRF 序
+    直接进入 post-process；非直查查询的 MMR 行为不变。
+    """
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "《知识库服务管理办法》第3条规定了什么？",
+            "《知识库服务管理办法》第七条规定了什么？",
+            "第 9 条对审计日志有什么规定？",  # 带空格写法
+            "第99条对跨境数据传输是怎么规定的？",  # 负难例同属「直查」语义
+            "§2.3 告警响应时限是怎么规定的？",
+            "§ 2.3 告警响应时限是怎么规定的？",
+        ],
+    )
+    def test_clause_lookup_criterion_true(self, query):
+        assert _is_clause_lookup_query(query) is True
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "第一章总则是什么？",  # 章 不判直查
+            "第3.5条的规定？",  # 数字段含小数点 → 非「第X条」跨度
+            "2.3 告警响应时限是怎么规定的？",  # 裸编号（无 §）不判——避免与版本号混淆
+            "§2 的规定？",  # 章节须至少一段小数点
+            "告警分为哪几个等级？",
+            "",
+        ],
+    )
+    def test_clause_lookup_criterion_false(self, query):
+        assert _is_clause_lookup_query(query) is False
+
+    @staticmethod
+    def _wire_hybrid_arms(monkeypatch, retriever, hits):
+        async def fake_kw(query, filters, candidate_size):
+            return [dict(h) for h in hits]
+
+        async def fake_vec(query, filters, candidate_size, enable_hyde=True):
+            return [dict(h) for h in hits], [0.1, 0.2, 0.3, 0.4], None
+
+        monkeypatch.setattr(retriever, "_keyword_hits", fake_kw)
+        monkeypatch.setattr(retriever, "_vector_hits", fake_vec)
+        monkeypatch.setattr(
+            QueryComplexityClassifier,
+            "get_strategy",
+            classmethod(lambda cls, _q: "hybrid"),
+        )
+        monkeypatch.setattr(settings, "RAG_ENABLE_MMR", True)
+
+    @pytest.mark.asyncio
+    async def test_mmr_skipped_for_clause_lookup_query(self, monkeypatch):
+        retriever = HybridRetriever()
+        hits = [
+            _hit("docA_c1", "alpha bravo charlie 正文", 0.9),
+            _hit("docB_c1", "alpha bravo charlie 另一文档", 0.8),
+        ]
+        for h in hits:
+            h["_source"]["embedding"] = [0.1] * 4
+        self._wire_hybrid_arms(monkeypatch, retriever, hits)
+
+        calls: list[int] = []
+
+        def spy_mmr(candidates, query_vector, top_k, lambda_mult):
+            calls.append(len(candidates))
+            return candidates[:top_k]
+
+        monkeypatch.setattr(HybridRetriever, "_mmr_select", staticmethod(spy_mmr))
+
+        _docs, _qv, _dbg, _deg = await retriever.retrieve("第3条规定了什么？", 1, top_k=5)
+        assert calls == [], "条号直查类查询不得调用 MMR（决策 e）"
+
+    @pytest.mark.asyncio
+    async def test_mmr_still_runs_for_non_clause_query(self, monkeypatch):
+        retriever = HybridRetriever()
+        hits = [
+            _hit("docA_c1", "alpha bravo charlie 正文", 0.9),
+            _hit("docB_c1", "alpha bravo charlie 另一文档", 0.8),
+        ]
+        for h in hits:
+            h["_source"]["embedding"] = [0.1] * 4
+        self._wire_hybrid_arms(monkeypatch, retriever, hits)
+
+        calls: list[int] = []
+
+        def spy_mmr(candidates, query_vector, top_k, lambda_mult):
+            calls.append(len(candidates))
+            return candidates[:top_k]
+
+        monkeypatch.setattr(HybridRetriever, "_mmr_select", staticmethod(spy_mmr))
+
+        _docs, _qv, _dbg, _deg = await retriever.retrieve(TERM_QUERY, 1, top_k=5)
+        assert calls, "非条号直查查询仍必须经过 MMR（决策 e 只针对直查类）"
