@@ -83,11 +83,19 @@ class RAGPipeline:
         top_k: int = 5,
         document_ids: list[str] | None = None,
         debug: bool = False,
+        search_mode: str | None = None,
     ) -> tuple[list[dict[str, Any]], dict | None]:
         """Retrieve relevant documents with caching and retry.
 
         Returns (results, debug_info) — debug_info is None unless debug=True.
         ``results == []`` 只表示「正常空结果」（各检索臂均正常执行且确实无命中）。
+
+        ``search_mode``（hybrid/vector/keyword）：显式覆盖本次请求的检索臂组合
+        （issue #225 决策 7A，详见 retriever.retrieve）；None = 自动路由，行为不变。
+        覆盖仅作用于本次请求，且缓存按模式分域：精确缓存键带模式段（显式模式与
+        自动路由互不可见），显式模式跳过语义缓存读与写（语义相似复用只服务于
+        自动路由——显式模式承诺「本次确实按所选臂执行」，不让同义查询把别的
+        模式的结果借位返回）。
 
         Raises:
             RetrievalUnavailableError: 检索后端服务故障或超时（issue #292）。
@@ -105,7 +113,7 @@ class RAGPipeline:
         try:
             # Exact cache (skip for document-specific queries)
             if not document_ids:
-                cached = await self.cache.get(query, organization_id, top_k)
+                cached = await self.cache.get(query, organization_id, top_k, search_mode=search_mode)
                 if cached is not None:
                     RAG_CACHE_HITS.labels(cache_type="exact").inc()
                     self.metrics.inc("cache_hit")
@@ -127,8 +135,10 @@ class RAGPipeline:
                 RAG_CACHE_MISSES.inc()
 
             # Semantic cache
+            # issue #225 决策 7A：显式 search_mode 请求跳过语义缓存（读与写）——
+            # 见方法 docstring 的「缓存按模式分域」说明；自动路由路径不变。
             query_vector = None
-            if not document_ids:
+            if not document_ids and not search_mode:
                 query_vector = await self.get_embedding(query)
                 if query_vector:
                     sem_cached = await self.semantic_cache.get(query_vector, organization_id)
@@ -144,7 +154,10 @@ class RAGPipeline:
                         self.metrics.inc("latency_count")
                         self.metrics.record_event("latency", elapsed)
                         if not document_ids and sem_cached.get("sources"):
-                            await self.cache.set(query, organization_id, top_k, sem_cached["sources"])
+                            await self.cache.set(
+                                query, organization_id, top_k, sem_cached["sources"],
+                                search_mode=search_mode,
+                            )
                         if debug and debug_info is not None:
                             debug_info["cache_hit"] = True
                             debug_info["cache_type"] = "semantic"
@@ -198,6 +211,7 @@ class RAGPipeline:
                             max(top_k, int(settings.RAG_RERANK_TOP_N or 20)),
                             document_ids,
                             debug=debug,
+                            search_mode=search_mode,
                         )
                         if sq_degraded:
                             degraded_reasons.extend(sq_degraded)
@@ -302,7 +316,8 @@ class RAGPipeline:
             #   假无结果（如索引/分析器瞬时状态），而重算成本远小于毒化成本。
             cache_safe = not failures and not degraded_reasons
             if not document_ids and result and cache_safe:
-                await self.cache.set(query, organization_id, top_k, result)
+                # issue #225 决策 7A：精确缓存键带模式段（None=自动路由，键与修前逐字节相同）。
+                await self.cache.set(query, organization_id, top_k, result, search_mode=search_mode)
             if query_vector and result and cache_safe:
                 # 检索缓存条目 answer 为空（仅 sources），写入检索专用命名空间（R4）
                 await self.semantic_cache.set(
