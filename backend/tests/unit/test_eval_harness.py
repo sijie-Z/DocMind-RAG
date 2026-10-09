@@ -360,6 +360,18 @@ class TestRunnerEnv:
         _apply_env(args)
         assert json.loads(os.environ["ELASTICSEARCH_HOSTS"]) == ["http://x:9200"]
 
+    def test_apply_env_fills_settings_placeholders_only_when_missing(self, monkeypatch):
+        for key in ("DATABASE_URL", "SECRET_KEY", "JWT_SECRET_KEY"):
+            monkeypatch.delenv(key, raising=False)
+        _apply_env(build_parser().parse_args(["check"]))
+        assert os.environ["DATABASE_URL"]
+        assert os.environ["SECRET_KEY"]
+        assert os.environ["JWT_SECRET_KEY"]
+        # 已有值不得被覆盖（setdefault 语义）
+        monkeypatch.setenv("SECRET_KEY", "operator-provided-secret")
+        _apply_env(build_parser().parse_args(["check"]))
+        assert os.environ["SECRET_KEY"] == "operator-provided-secret"
+
 
 # ---------------------------------------------------------------------------
 # 5. 真实 golden set v1 的自洽与 provenance

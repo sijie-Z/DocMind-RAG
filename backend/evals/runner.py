@@ -97,6 +97,11 @@ def _apply_env(args: argparse.Namespace) -> None:
             else json.dumps([h.strip() for h in raw.split(",") if h.strip()])
         )
         os.environ["ELASTICSEARCH_HOSTS"] = value
+    # 评估链不碰 DB / JWT，但 Settings 在生产模式下要求这三键非空 ——
+    # 缺省时补纯占位值（只过校验，不会有任何连接或签发发生）。
+    os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    os.environ.setdefault("SECRET_KEY", "evals-placeholder-not-for-production-0000")
+    os.environ.setdefault("JWT_SECRET_KEY", "evals-placeholder-not-for-production-0000")
 
 
 def _load_golden(args: argparse.Namespace) -> GoldenSet | None:
