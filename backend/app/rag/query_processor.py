@@ -67,7 +67,7 @@ class QueryComplexityClassifier:
 # 显式模式变成对本次请求检索臂组合的强制覆盖；None/缺省保持自动路由。
 SEARCH_MODE_TO_STRATEGY: dict[str, RetrievalStrategy] = {
     "keyword": "keyword_only",
-    "vector": "vector_only",
+    "vector": "vector_only",  # 仅向量臂；与显式 hybrid 一致不跑 HyDE（enable_hyde=False）
     "hybrid": "hybrid",  # 显式 hybrid = 两臂 + RRF（不含 HyDE；HyDE 是自动路由给复杂查询的增强）
 }
 STRATEGY_TO_SEARCH_MODE: dict[str, str] = {

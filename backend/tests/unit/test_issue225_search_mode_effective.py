@@ -52,6 +52,71 @@ class _RecordingCache:
         self.set_calls.append((args, kwargs))
 
 
+class _FakePipe:
+    def __init__(self, r):
+        self.r = r
+        self.ops: list = []
+
+    def setex(self, *a):
+        self.ops.append(("setex", a))
+
+    def zadd(self, *a):
+        self.ops.append(("zadd", a))
+
+    async def execute(self):
+        for op, a in self.ops:
+            if op == "setex":
+                await self.r.setex(*a)
+            else:
+                await self.r.zadd(*a)
+
+
+class _FakeRedis:
+    """内存假 Redis：覆盖 SemanticCache / RetrievalCache 用到的接口。"""
+
+    def __init__(self):
+        self.kv: dict = {}
+        self.z: dict = {}
+
+    async def get(self, k):
+        return self.kv.get(k)
+
+    async def setex(self, k, ttl, v):
+        self.kv[k] = v
+
+    async def zadd(self, key, mapping):
+        self.z.setdefault(key, {}).update(mapping)
+
+    async def zrem(self, key, member):
+        self.z.get(key, {}).pop(member, None)
+
+    async def zrangebyscore(self, key, lo, hi):
+        return [m for m, s in self.z.get(key, {}).items() if lo <= s <= hi]
+
+    def pipeline(self):
+        return _FakePipe(self)
+
+
+# 同 query 跨请求恒定的查询向量 → 语义相似度 1.0（> 阈值），命中与否只取决于条目是否存在。
+_SEM_VEC = [0.5, 0.5, 0.5, 0.5]
+
+
+def _make_sem_pipeline(retrieve_mock, embedding=None):
+    """真 RetrievalCache + 真 SemanticCache（配合假 Redis）的 pipeline。"""
+    from app.rag.cache import RetrievalCache, SemanticCache
+    from app.rag.pipeline import RAGPipeline
+
+    p = RAGPipeline()
+    p.retriever = MagicMock()
+    p.retriever.get_embedding = AsyncMock(
+        return_value=list(embedding if embedding is not None else _SEM_VEC)
+    )
+    p.retriever.retrieve = retrieve_mock
+    p.cache = RetrievalCache()
+    p.semantic_cache = SemanticCache.for_retrieval()
+    return p
+
+
 def _kw_hit(chunk_id: str, text: str, score: float = 0.9) -> dict:
     return {
         "_id": chunk_id,
@@ -137,7 +202,7 @@ class TestForcedArmSelection:
         retriever = HybridRetriever()
         kw_hits = [_kw_hit("doc_kw", "如何提交报销申请正文")]
         vec_hits = [_vec_hit("doc_vec", "如何提交报销申请 另一份内容")]
-        kw_calls, vec_calls, _ = _wire_arms(monkeypatch, retriever, kw_hits, vec_hits)
+        kw_calls, vec_calls, vec_hyde_flags = _wire_arms(monkeypatch, retriever, kw_hits, vec_hits)
         clf_calls = _spy_classifier(monkeypatch)
 
         docs, qv, dbg, _deg = await retriever.retrieve(MEDIUM_Q, 1, top_k=5, debug=True, search_mode="vector")
@@ -145,6 +210,7 @@ class TestForcedArmSelection:
         assert kw_calls == [], "强制 vector 时 keyword 臂不得被调用（零调用断言）"
         assert clf_calls == [], "显式模式不得咨询分类器（覆盖 = 跳过自动路由）"
         assert vec_calls == [MEDIUM_Q]
+        assert vec_hyde_flags == [False], "显式 vector 不跑 HyDE（m1 定夺：与显式 hybrid 对齐）"
         assert qv == [0.1, 0.2, 0.3, 0.4], "向量臂产出的查询向量应随结果返回"
         ids = [d["chunk_id"] for d in docs]
         assert ids == ["doc_vec"], f"只应返回向量臂命中，实际 {ids}"
@@ -360,7 +426,15 @@ class TestModeScopedCache:
         assert len(pipeline2.semantic_cache.get_calls) == 1, "缺省时语义缓存按原路径参与"
 
     @pytest.mark.asyncio
-    async def test_forced_request_skips_semantic_read_write_and_embedding(self, monkeypatch):
+    @pytest.mark.parametrize("mode", ["keyword", "vector", "hybrid"])
+    async def test_forced_request_skips_semantic_read_write_and_embedding(self, monkeypatch, mode):
+        """显式模式（三模式矩阵）：语义缓存读/写全 0 + 不产生查询 embedding。
+
+        评审 B1 修复后的非真空锁：retrieve 替身回传 **非空 qv**（vector/hybrid 臂
+        的真实形态；keyword 臂也用非空 qv 做对抗加固）。修前写条件经回填的
+        `query_vector` 变真、照写语义缓存——keyword「不泄漏」只是其臂回传空向量的
+        侥幸。变异：摘掉 `and not search_mode` 写守卫 → 本用例精确红。
+        """
         from app.rag.pipeline import RAGPipeline
 
         monkeypatch.setattr(
@@ -374,16 +448,16 @@ class TestModeScopedCache:
         pipeline = RAGPipeline()
         pipeline.retriever = MagicMock()
         pipeline.retriever.get_embedding = AsyncMock(return_value=[0.1, 0.2])
-        pipeline.retriever.retrieve = AsyncMock(return_value=(healthy, [], None, []))
+        pipeline.retriever.retrieve = AsyncMock(return_value=(healthy, [0.1, 0.2, 0.3, 0.4], None, []))
         pipeline.cache = _RecordingCache()
         pipeline.semantic_cache = _RecordingCache()
 
-        await pipeline.search_knowledge_base("报销流程", 1, top_k=5, search_mode="keyword")
+        await pipeline.search_knowledge_base("报销流程", 1, top_k=5, search_mode=mode)
 
         assert pipeline.semantic_cache.get_calls == [], "显式模式不得读语义缓存（防借位其它模式的结果）"
-        assert pipeline.semantic_cache.set_calls == [], "显式模式结果不得写语义缓存（防污染后续自动路由）"
-        assert pipeline.retriever.get_embedding.await_count == 0, "显式 keyword 请求不应产生查询 embedding 计算"
-        assert pipeline.cache.set_calls and pipeline.cache.set_calls[0][1]["search_mode"] == "keyword", (
+        assert pipeline.semantic_cache.set_calls == [], "显式模式结果不得写语义缓存（B1 写侧守卫）"
+        assert pipeline.retriever.get_embedding.await_count == 0, "显式模式请求不应产生查询 embedding 计算"
+        assert pipeline.cache.set_calls and pipeline.cache.set_calls[0][1]["search_mode"] == mode, (
             "结果照常写自己的模式分域"
         )
 
@@ -430,3 +504,74 @@ class TestModeScopedCache:
         p3 = _make_pipeline(AsyncMock(return_value=([], [], None, [])))
         await p3.search_knowledge_base(probe_q, 1, top_k=5, search_mode="keyword")
         assert p3.retriever.retrieve.await_count == 0, "同模式重复请求应命中自己模式分域的精确缓存"
+
+    @pytest.mark.asyncio
+    async def test_forced_vector_write_does_not_leak_into_auto_causal_chain(self, monkeypatch):
+        """评审 B1 因果闭环（写侧）：强制 vector 的写侧探针（真 SemanticCache + 假 Redis）
+
+        → 同 query（同向量、相似度 1.0）的自动路由必须执行自己的检索，不得吃到
+        强制向量臂的结果。这是「显式模式跳过语义缓存读**与写**」承诺的端到端判别；
+        修前 vector/hybrid 臂回传的非空 qv 会让写条件变真、污染成立（评审 P2 实测）。
+
+        变异：摘掉语义写条件的 `and not search_mode` 守卫 → 第一条断言先红
+        （强制 vector 写了 rag:sem:retrieval 条目），自动路由随之命中该条目、
+        retrieve 零调用 → 本条精确红。
+        """
+        import app.rag.cache as cache_mod
+
+        fake = _FakeRedis()
+        monkeypatch.setattr(cache_mod, "_get_redis", lambda: fake)
+        monkeypatch.setattr(
+            "app.rag.pipeline.rerank",
+            AsyncMock(side_effect=lambda query, docs, client=None: docs),
+        )
+
+        forced_hit = [{"chunk_id": "forced_vec_only", "content": "强制向量臂独有命中",
+                       "filename": "f.md", "score": 0.9, "document_id": "d1"}]
+        auto_hit = [{"chunk_id": "auto_route_hit", "content": "自动路由命中",
+                     "filename": "a.md", "score": 0.8, "document_id": "d2"}]
+        q = "语义写侧泄漏探针-225"
+
+        p1 = _make_sem_pipeline(AsyncMock(return_value=(forced_hit, list(_SEM_VEC), None, [])))
+        await p1.search_knowledge_base(q, 1, top_k=5, search_mode="vector")
+        sem_keys = [k for k in fake.kv if "rag:sem:retrieval:" in k]
+        assert sem_keys == [], f"显式 vector 不得写语义缓存（B1 写侧守卫），实际写了 {sem_keys}"
+        assert not fake.z.get("rag:semantic_index:retrieval:1"), "语义索引 zset 亦不得出现强制模式条目"
+
+        p2 = _make_sem_pipeline(AsyncMock(return_value=(auto_hit, list(_SEM_VEC), None, [])))
+        res2, _ = await p2.search_knowledge_base(q, 1, top_k=5)  # 自动路由（同 query、同向量）
+        ids2 = [h.get("chunk_id") for h in res2]
+        assert p2.retriever.retrieve.await_count == 1, "自动路由必须执行自己的检索（强制 vector 的写入对其不可见）"
+        assert ids2 == ["auto_route_hit"], f"自动路由不得吃到强制向量臂结果，实际 {ids2}"
+
+    @pytest.mark.asyncio
+    async def test_forced_vector_does_not_read_semantic_cache_written_by_auto(self, monkeypatch):
+        """读侧镜像（评审 P2 场景 B）：自动路由写入的语义缓存，不得被同 query 的显式 vector 借位。
+
+        变异：摘掉读侧 `not search_mode` 守卫 → 强制 vector 命中自动路由条目、
+        返回 auto 的结果且 retrieve 零调用 → 本用例红。
+        """
+        import app.rag.cache as cache_mod
+
+        fake = _FakeRedis()
+        monkeypatch.setattr(cache_mod, "_get_redis", lambda: fake)
+        monkeypatch.setattr(
+            "app.rag.pipeline.rerank",
+            AsyncMock(side_effect=lambda query, docs, client=None: docs),
+        )
+
+        auto_hit = [{"chunk_id": "auto_route_hit", "content": "自动路由命中",
+                     "filename": "a.md", "score": 0.8, "document_id": "d2"}]
+        forced_hit = [{"chunk_id": "forced_vec_only", "content": "强制向量臂独有命中",
+                       "filename": "f.md", "score": 0.9, "document_id": "d1"}]
+        q = "语义读侧借位探针-225"
+
+        p1 = _make_sem_pipeline(AsyncMock(return_value=(auto_hit, list(_SEM_VEC), None, [])))
+        await p1.search_knowledge_base(q, 1, top_k=5)  # 自动路由：写语义缓存（正常行为）
+        assert any("rag:sem:retrieval:" in k for k in fake.kv), "前提：自动路由确实写了语义缓存"
+
+        p2 = _make_sem_pipeline(AsyncMock(return_value=(forced_hit, list(_SEM_VEC), None, [])))
+        res2, _ = await p2.search_knowledge_base(q, 1, top_k=5, search_mode="vector")
+        ids2 = [h.get("chunk_id") for h in res2]
+        assert p2.retriever.retrieve.await_count == 1, "显式 vector 必须执行自己的检索（不得借位自动路由的语义缓存）"
+        assert ids2 == ["forced_vec_only"], f"应返回向量臂自己的结果，实际 {ids2}"

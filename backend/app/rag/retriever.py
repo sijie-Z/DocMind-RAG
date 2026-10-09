@@ -736,7 +736,12 @@ class HybridRetriever:
             # 刻意不做 keyword 兜底、不跑 MMR——显式模式必须**纯**：
             # 静默混入另一臂正是本 issue 要消灭的「模式说了不算」语义。
             # （MMR 是融合序的多样性环节，单臂序无融合可多样化。）
-            vec_hits, query_vector, vec_degraded = await self._vector_hits(query, filters, candidate_size)
+            # HyDE 对齐显式 hybrid：显式模式一概不跑 HyDE（enable_hyde=False）——
+            # HyDE 是自动路由给复杂查询的增强（LLM 调用 + 不确定性），显式模式的
+            # 「纯」语义不含它；这是 m1 的定夺（评审要求二选一时选「对齐」）。
+            vec_hits, query_vector, vec_degraded = await self._vector_hits(
+                query, filters, candidate_size, enable_hyde=False
+            )
             if vec_degraded:
                 degraded.append(vec_degraded)
             # 臂标记与 hybrid 序（`_rrf_fuse` 写 `has_vector`）对齐（同决策 d 口径）。
