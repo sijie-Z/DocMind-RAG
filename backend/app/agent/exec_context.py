@@ -29,34 +29,104 @@ _REPLAY_DIR = Path("benchmark/replay")
 # uuid hex（12/32 位）天然满足；'/'、'\\'、':'、'..' 等一律无法通过。
 _SAFE_FILE_STEM = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 
-# ── 值级校验（issue #287/R1）────────────────────────────────────────────────
-# 快照里"合法 JSON、值类型漂移"的已知键：值读入运行态后会被比较/累加
-# （executor 的 `>= max_iterations`、`+1`），坏值会炸在派发路径，且错误兜底
-# 回写会把坏值原样带回快照（毒丸自续）。读（from_checkpoint_dict）与写
-# （to_checkpoint_dict）两侧过同一道闸门：好值原样通过，坏值降级为默认
-# （删键 = 消费方 `.get(key, 0)` 的默认语义）并留 warning 行迹——绝不把坏值
-# 带进运行态，也绝不让它落回快照。
-_ARTIFACT_INT_KEYS: frozenset[str] = frozenset({"iterations_used"})
+# ── 值级校验（issue #287/R1；#319 扩面）─────────────────────────────────────
+# 快照里"合法 JSON、值类型漂移"的已知键：值读入运行态后会被比较/累加/投影
+# （executor 的 `>= max_iterations`、`+1`；run_report 的 `.get` / `list()`），
+# 坏值会炸在派发或收尾路径，且错误兜底回写会把坏值原样带回快照（毒丸自续）。
+# 读（from_checkpoint_dict）与写（to_checkpoint_dict）两侧过同一道闸门：好值
+# 原样通过，坏值降级为默认（删键 = 消费方 `.get(key, 0)` / `or {}` 的默认
+# 语义）并留 warning 行迹——绝不把坏值带进运行态，也绝不让它落回快照。
+#
+# #319 盘点（artifacts 全键 → 写入者 / 消费点 / 形状契约；闸门只覆盖真实
+# 消费面——零消费点的惰性数据没有炸点，原样透传不繁殖错误行为）：
+# - iterations_used：int 计数。写入者 executor.py:253/263（`+1` / `+len`）；
+#   消费点 executor.py:181（`>= max_iterations`）与 :253/:264（`+`）。
+#   bool 拒斥：isinstance(True, int) 为真，但 JSON true/false 是类型漂移
+#   （写入方只写 int），静默等价为 1/0 即"过归一化"。
+# - quality_gate：映射。写入者 loop.py:566（Phase 2b 每轮覆盖）。消费点
+#   run_report.py（`qg_artifact.get("fatal_issues")` → `list(...)`）：非映射
+#   直接 AttributeError（F-CRIT-1 全链实证的毒丸形态）→ 整键删；子键
+#   fatal_issues 契约 list[str]（非列表 `list(123)` TypeError；str 会静默
+#   变成逐字符垃圾）→ 坏则删子键。passed 当前零消费点 → 不设闸门。
+# - review：映射。写入者 loop.py:751（Phase 3b）。消费点 run_report.py
+#   （`review_artifact.get("recommendation")` 做 reject 判定）：非映射同上
+#   整键删；子键 recommendation 契约 str（写入者已收敛到 pass/revise/
+#   reject/error；消费方对域外值本身容忍）→ 坏则删子键。issue_count /
+#   high_severity_count 当前零消费点 → 不设闸门。
+# - 其余未知键：原样保留（既有语义；无写入者/消费点）。
+
+
+def _is_int(value: Any) -> bool:
+    """整数计数口径。bool 拒斥：JSON true/false → Python True/False 是类型
+    漂移，静默等价为 1/0 即掩盖坏形状。"""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_str(value: Any) -> bool:
+    return isinstance(value, str)
+
+
+def _is_list_of_str(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(x, str) for x in value)
+
+
+_ARTIFACT_SCALAR_SPECS: dict[str, Any] = {
+    "iterations_used": _is_int,
+}
+_ARTIFACT_MAPPING_SPECS: dict[str, dict[str, Any]] = {
+    "quality_gate": {"fatal_issues": _is_list_of_str},
+    "review": {"recommendation": _is_str},
+}
 
 
 def _normalize_artifact_values(raw: dict[str, Any], *, source: str) -> dict[str, Any]:
-    """值级规整（#287/R1；纯函数，除 warning 外无副作用）。
+    """值级规整（#287/R1 + #319 扩面；纯函数，除 warning 外无副作用）。
 
-    已知键的期望类型（见 _ARTIFACT_INT_KEYS）不符时：丢弃该键（消费方按
-    `.get(key, 0)` 默认语义继续）+ warning 留痕；其余键一律原样保留。
+    按上方盘点表逐键校验：标量键缺约 → 删键；映射键非映射 → 删整键、
+    子键缺约 → 删子键（消费方 `.get(...) or {}` / `or []` 默认语义照常）。
+    其余键一律原样保留。
     """
     clean: dict[str, Any] = {}
     for key, value in raw.items():
-        if key in _ARTIFACT_INT_KEYS and not (
-            isinstance(value, int) and not isinstance(value, bool)
-        ):
-            logger.warning(
-                "checkpoint artifacts 值级漂移（key=%s, type=%s, %s）："
-                "按默认值降级（该键为整数计数口径，坏值不得入运行态/快照）",
-                log_safe(key),
-                type(value).__name__,
-                source,
-            )
+        scalar_spec = _ARTIFACT_SCALAR_SPECS.get(key)
+        if scalar_spec is not None:
+            if scalar_spec(value):
+                clean[key] = value
+            else:
+                logger.warning(
+                    "checkpoint artifacts 值级漂移（key=%s, type=%s, %s）："
+                    "按默认值降级（该键为整数计数口径，坏值不得入运行态/快照）",
+                    log_safe(key),
+                    type(value).__name__,
+                    source,
+                )
+            continue
+        mapping_spec = _ARTIFACT_MAPPING_SPECS.get(key)
+        if mapping_spec is not None:
+            if not isinstance(value, dict):
+                logger.warning(
+                    "checkpoint artifacts 值级漂移（key=%s, type=%s, %s）："
+                    "映射键形状不符，整键按默认值降级（消费方 .get 默认语义）",
+                    log_safe(key),
+                    type(value).__name__,
+                    source,
+                )
+                continue
+            normalized: dict[str, Any] = {}
+            for sub_key, sub_value in value.items():
+                sub_spec = mapping_spec.get(sub_key)
+                if sub_spec is None or sub_spec(sub_value):
+                    normalized[sub_key] = sub_value
+                else:
+                    logger.warning(
+                        "checkpoint artifacts 值级漂移（key=%s.%s, type=%s, %s）："
+                        "子键形状不符，删子键（消费方默认语义）",
+                        log_safe(key),
+                        log_safe(sub_key),
+                        type(sub_value).__name__,
+                        source,
+                    )
+            clean[key] = normalized
             continue
         clean[key] = value
     return clean
@@ -251,9 +321,10 @@ class ExecutionContext:
     def to_checkpoint_dict(self) -> dict[str, Any]:
         """快照形状（v1）。与 to_dict() 的差异只增不改。
 
-        artifacts 过值级闸门（#287/R1）：写时以校验后值为准——运行态里
-        万一存在类型漂移的坏值（外部写入者/未来 bug），落盘的是规整后的
-        形态而不是原样坏值（毒丸绝不落回快照续给下一次 resume）。
+        artifacts 过值级闸门（#287/R1；#319 扩到全部消费键）：写时以校验后
+        值为准——运行态里万一存在类型漂移的坏值（外部写入者/未来 bug），
+        落盘的是规整后的形态而不是原样坏值（毒丸绝不落回快照续给下一次
+        resume）。
         """
         data = self.to_dict()
         data.update({
@@ -270,8 +341,8 @@ class ExecutionContext:
         逐字段容错（缺失取默认）；整体结构是否可用由更外层的
         checkpoint.parse_snapshot 统一判定（损坏 → 安全降级为"无快照"）。
         不经过 complete_step()：那会按 failed 状态二次追加 failures，与恢复的
-        failures 列表重复。artifacts 的值级漂移在此降级为默认并留痕（#287/R1，
-        见 _normalize_artifact_values）。
+        failures 列表重复。artifacts 的值级漂移在此按形状契约降级并留痕
+        （#287/R1；#319 扩到全部消费键，见 _normalize_artifact_values）。
         """
         ctx = cls(query=data.get("query") or "")
         ctx.task_id = data.get("task_id") or ctx.task_id

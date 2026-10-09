@@ -72,9 +72,18 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
     # 如实显示，不得静默按 pass 呈现。
     # issue #293 ②：ctx.failures 非空（重试耗尽/预算熔断等终态失败已被记账）同样
     # 必须翻转 —— 报告里明明有 FAILURE 行却 clean_success=True 是自相矛盾的全绿。
-    qg_artifact = ctx.artifacts.get("quality_gate") or {}
-    review_artifact = ctx.artifacts.get("review") or {}
-    fatal_issues = list(qg_artifact.get("fatal_issues") or [])
+    #
+    # #319/F-CRIT-1 消费侧防线：闸门（exec_context._normalize_artifact_values，
+    # 读写同源）保证常态下这里拿到的是契约形状；本防线再兜一层——对**绕过
+    # 闸门**直接构造的 ctx 同样不炸（修前直证：review="boom" → `"boom".get`
+    # AttributeError；fatal_issues=123 → `list(123)` TypeError）。降级语义与
+    # 闸门一致："无记录"（非映射 ≡ 缺键 ≡ `or {}`；非列表 ≡ 缺键 ≡ `or []`）。
+    qg_artifact = ctx.artifacts.get("quality_gate")
+    review_artifact = ctx.artifacts.get("review")
+    qg_artifact = qg_artifact if isinstance(qg_artifact, dict) else {}
+    review_artifact = review_artifact if isinstance(review_artifact, dict) else {}
+    fatal_raw = qg_artifact.get("fatal_issues")
+    fatal_issues = list(fatal_raw) if isinstance(fatal_raw, list) else []
     review_recommendation = review_artifact.get("recommendation")
     clean_success = (
         not fatal_issues
