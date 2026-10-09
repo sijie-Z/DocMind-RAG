@@ -423,6 +423,7 @@ export default {
     askAI: 'Demander à l\'IA',
     button: 'Rechercher',
     type: 'Mode de recherche',
+    auto: 'Auto',
     hybrid: 'Hybride',
     semantic: 'Sémantique',
     keyword: 'Mot-clé',
