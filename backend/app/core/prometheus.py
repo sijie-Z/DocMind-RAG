@@ -11,9 +11,12 @@ Usage:
     from app.core.prometheus import AGENT_TOOL_CALLS
     AGENT_TOOL_CALLS.labels(tool="feishu", result="success").inc()  # no-op unless enabled
 """
+import logging
 import os
 import threading
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_enabled() -> bool:
@@ -35,6 +38,10 @@ def _resolve_enabled() -> bool:
 _METRICS_ENABLED = _resolve_enabled()
 _lock = threading.Lock()
 _real_metrics: dict[str, Any] | None = None
+# issue #301：构建失败必须显形——记录失败原因并保证 ERROR 日志只打一次；
+# /metrics 导出据此输出「不可用」自曝行（区别于「未启用」的声明性空输出）。
+_build_failure: Exception | None = None
+_build_failure_logged = False
 
 
 class _NoopMetric:
@@ -74,8 +81,13 @@ _NOOP = _NoopMetric()
 
 
 def _get_real() -> dict[str, Any] | None:
-    """Load real prometheus_client metrics on first call (if enabled)."""
-    global _real_metrics
+    """Load real prometheus_client metrics on first call (if enabled).
+
+    构建失败不再静默（issue #301）：记 ERROR 日志（每进程一次）并记录失败原因，
+    所有埋点维持 no-op；`get_prometheus_metrics()` 会输出显式「不可用」自曝行，
+    /metrics 不再无声地少掉整族指标。
+    """
+    global _real_metrics, _build_failure, _build_failure_logged
     if _real_metrics is not None:
         return _real_metrics
     if not _METRICS_ENABLED:
@@ -85,8 +97,17 @@ def _get_real() -> dict[str, Any] | None:
             return _real_metrics
         try:
             _real_metrics = _build_metrics()
+            _build_failure = None
             return _real_metrics
-        except Exception:
+        except Exception as exc:
+            _build_failure = exc
+            if not _build_failure_logged:
+                _build_failure_logged = True
+                logger.error(
+                    "Prometheus 指标构建失败（%s: %s）：全部埋点降级为 no-op，"
+                    "/metrics 将输出不可用自曝行",
+                    type(exc).__name__, exc, exc_info=True,
+                )
             return None
 
 
@@ -190,10 +211,29 @@ AGENT_MEMORY_RECALLS     = _LazyMetric("AGENT_MEMORY_RECALLS")
 AGENT_FEEDBACK_TOTAL     = _LazyMetric("AGENT_FEEDBACK_TOTAL")
 
 
+# issue #301：启用但构建失败时的自曝输出（注释行 + 一个 gauge 样本）。
+# 选「自曝行」而非 fail-fast/500：/metrics 语义是抓取端点，http/ws 等既有
+# 指标族仍可用，整端 500 会把可用指标一起淹没；exposition 格式对注释行与
+# 未注册样本都合法（untyped），抓取端安全，告警端可直接对
+# docmind_metrics_unavailable 建规则。
+_METRICS_UNAVAILABLE_TEXT = (
+    b"# docmind prometheus metric build failed - see server logs\n"
+    b"# HELP docmind_metrics_unavailable Metrics pipeline unavailable (1 = prometheus metric build failed)\n"
+    b"# TYPE docmind_metrics_unavailable gauge\n"
+    b"docmind_metrics_unavailable 1\n"
+)
+
+
 def get_prometheus_metrics() -> bytes:
-    """Generate latest metrics in Prometheus exposition format (if enabled)."""
+    """Generate latest metrics in Prometheus exposition format (if enabled).
+
+    启用但构建失败时返回「不可用」自曝行（issue #301）；未启用（no-op 模式）
+    仍返回空——那是声明过的关闭态，不是故障（#207）。
+    """
     r = _get_real()
     if r is None:
+        if _build_failure is not None:
+            return _METRICS_UNAVAILABLE_TEXT
         return b""
     from prometheus_client import REGISTRY, generate_latest
     return generate_latest(REGISTRY)

@@ -24,7 +24,8 @@ ES/MinIO/Kafka（backend-tests 无 services，后端只看 sqlite 文件；backe
 真实端点毫无意义，真实调用还受网络环境影响：本机实测 `/knowledge/suggestions`
 因此空等 12s）。本 fixture 把 ES 初始化、MinIO 取对象、RAG pipeline 的
 LLM/Embedding/rerank 客户端显式钉成「立即失败」，端点代码走的就是它们各自的
-失败分支（ES → RuntimeError → 降级返回；MinIO → ConnectionError → 404；
+失败分支（ES → RuntimeError → 降级返回；MinIO → ConnectionError → 503 如实暴露
+存储故障（#301 起；此前一律假 404「文件不存在」，见 `_EXPECTED_DEPENDENCY_5XX`）；
 Embedding/LLM → ConnectionError → retriever/reranker 内已有的 except 兜底为 []），
 只是不再空等重试。这也让扫描结果与开发机上有没有起这些服务、有没有外网**无关**（确定性）。
 
@@ -72,6 +73,14 @@ _SKIP_PATHS: dict[str, str] = {
     ),
 }
 _MAX_SKIPS = 5  # 跳过清单的预算上限：超过就说明有人在用跳过绕过问题，必须重新评审
+
+# ── 依赖故障的显式 5xx 豁免（issue #301）─────────────────────────────
+# /files 代理在 MinIO 故障（本 fixture 钉死不可达）时**如实**返回 503 —— 此前
+# 一律假 404「文件不存在」，监控面永远只有 4xx。豁免只放行「该路径恰好返回
+# 登记的状态码」；其余任何 5xx 仍判失败，且豁免必须真的命中（防条目空转）。
+_EXPECTED_DEPENDENCY_5XX: dict[str, int] = {
+    "/files/{file_path}": 503,
+}
 
 # ── 路径参数替换表 ─────────────────────────────────────────────────
 _ZERO_UUID = "00000000-0000-0000-0000-000000000000"
@@ -150,9 +159,9 @@ def _pin_external_services(monkeypatch):
 
     与 CI 契约一致（两个 job 都没有 ES/MinIO；第三方 LLM/Embedding 端点更
     不该是测试的依赖），并让本测试结果与开发机本地服务/网络的有无无关。
-    端点走的仍是各自的失败分支（ES→RuntimeError→降级；MinIO→ConnectionError→404；
-    Embedding/LLM→ConnectionError→retriever/reranker 里本来就有 except 兜底为 []），
-    不是被绕过。
+    端点走的仍是各自的失败分支（ES→RuntimeError→降级；MinIO→ConnectionError
+    →503（#301：存储故障如实暴露，不再假 404）；Embedding/LLM→ConnectionError
+    →retriever/reranker 里本来就有 except 兜底为 []），不是被绕过。
     """
     from app.core import elasticsearch as es_module
     from app.core.minio_client import minio_client
@@ -321,6 +330,11 @@ async def test_all_get_endpoints_do_not_return_5xx(seeded_identity):
         assert len(_SKIP_PATHS) <= _MAX_SKIPS, (
             f"跳过清单膨胀到 {len(_SKIP_PATHS)} 条：用跳过绕过问题前先重新评审"
         )
+        # 防呆 1b：依赖故障豁免条目不得随路径改名而静默失效（#301）。
+        for exempted_path in _EXPECTED_DEPENDENCY_5XX:
+            assert exempted_path in all_get_paths, (
+                f"依赖故障豁免清单里的 {exempted_path} 已不存在，请清理/同步"
+            )
 
         param_values = dict(_PATH_PARAM_VALUES)
         param_values.update({
@@ -358,8 +372,15 @@ async def test_all_get_endpoints_do_not_return_5xx(seeded_identity):
         app.dependency_overrides.pop(auth_service.get_current_user, None)
         app.dependency_overrides.pop(optional_current_user, None)
 
-    # 断言 1（本用例的本体）：没有任何 GET 返回 5xx。
-    failures = [r for r in results if not isinstance(r[2], int) or r[2] >= 500]
+    # 断言 1（本用例的本体）：没有任何 GET 返回 5xx —— 仅 `_EXPECTED_DEPENDENCY_5XX`
+    # 登记过的「依赖故障如实 5xx」（路径 + 状态码双匹配）例外。
+    def _exempt(raw: str, code: int | str) -> bool:
+        return isinstance(code, int) and _EXPECTED_DEPENDENCY_5XX.get(raw) == code
+
+    failures = [
+        r for r in results
+        if (not isinstance(r[2], int) or r[2] >= 500) and not _exempt(r[0], r[2])
+    ]
     if failures:
         lines = "\n".join(
             f"  [{status}] {raw}\n      请求: {concrete}\n      响应: {body}"
@@ -368,6 +389,14 @@ async def test_all_get_endpoints_do_not_return_5xx(seeded_identity):
         pytest.fail(
             f"API 表面扫描发现 {len(failures)} 个 5xx/连接层失败的 GET 端点：\n{lines}"
         )
+
+    # 断言 1b：豁免不得空转 —— /files 在 MinIO 不可达时必须真的走 503 分支
+    # （没命中 = #301 的故障分流被回退/改形，先重审豁免再放行）。
+    exempt_hits = [r for r in results if _exempt(r[0], r[2])]
+    assert exempt_hits, (
+        f"依赖故障豁免未命中：{_EXPECTED_DEPENDENCY_5XX} —— /files 未在 MinIO 不可达时"
+        "返回 503（#301 的对象缺失/存储故障分流被回退？）"
+    )
 
     # 断言 2：鉴权必须真的打通（防「静默 401 缩水」——处理器没被执行时扫描是空转）。
     by_raw = {raw: status for raw, _, status, _ in results}
