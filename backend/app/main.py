@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from minio.error import S3Error
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -701,22 +702,38 @@ async def get_minio_file(
 
     try:
         response = minio_client.get_object(normalized)
-        media_type = "application/octet-stream"
-        if normalized.endswith(".png"):
-            media_type = "image/png"
-        elif normalized.endswith((".jpg", ".jpeg")):
-            media_type = "image/jpeg"
-        elif normalized.endswith(".gif"):
-            media_type = "image/gif"
-        elif normalized.endswith(".webp"):
-            media_type = "image/webp"
-        # 安全加固：非图片对象一律作为附件下载，且禁用 MIME 嗅探，防存储型 XSS
-        headers = {"X-Content-Type-Options": "nosniff"}
-        if media_type == "application/octet-stream":
-            headers["Content-Disposition"] = "attachment"
-        return StreamingResponse(response, media_type=media_type, headers=headers)
-    except Exception:
-        raise HTTPException(status_code=404)
+    except S3Error as exc:
+        # issue #301：此前非 NoSuchKey 的故障（MinIO 宕机/凭证错/NoSuchBucket 等）
+        # 也一律伪装 404「文件不存在」，监控面永远只有 4xx。现在只有「对象确实
+        # 不存在」才是 404，其余存储故障如实 503 + 日志。
+        if exc.code in ("NoSuchKey", "NoSuchObject"):
+            raise HTTPException(status_code=404, detail="文件不存在") from exc
+        logger.error(
+            "MinIO 读取对象失败（存储故障，非对象缺失）: object=%s code=%s message=%s",
+            normalized, exc.code, exc.message,
+        )
+        raise HTTPException(status_code=503, detail="文件存储暂不可用，请稍后重试") from exc
+    except Exception as exc:
+        logger.error(
+            "MinIO 读取对象异常（存储故障）: object=%s %s: %s",
+            normalized, type(exc).__name__, exc,
+        )
+        raise HTTPException(status_code=503, detail="文件存储暂不可用，请稍后重试") from exc
+
+    media_type = "application/octet-stream"
+    if normalized.endswith(".png"):
+        media_type = "image/png"
+    elif normalized.endswith((".jpg", ".jpeg")):
+        media_type = "image/jpeg"
+    elif normalized.endswith(".gif"):
+        media_type = "image/gif"
+    elif normalized.endswith(".webp"):
+        media_type = "image/webp"
+    # 安全加固：非图片对象一律作为附件下载，且禁用 MIME 嗅探，防存储型 XSS
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if media_type == "application/octet-stream":
+        headers["Content-Disposition"] = "attachment"
+    return StreamingResponse(response, media_type=media_type, headers=headers)
 
 if __name__ == "__main__":
     import uvicorn

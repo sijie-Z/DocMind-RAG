@@ -1,9 +1,11 @@
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Body, Depends, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete, desc, func, select, update
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -15,6 +17,7 @@ from app.models.notification import Notification
 from app.models.user import User
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # --- Schemas ---
 class NotificationResponse(BaseModel):
@@ -82,6 +85,20 @@ async def notification_ws(
     finally:
         notification_ws_manager.disconnect(user_id, websocket)
 
+def _is_legacy_missing_route_columns(exc: Exception) -> bool:
+    """异常是否确为「旧库没有 target_route/target_id 列」（issue #301）。
+
+    判定要求错误文本**同时**提到目标列与缺列特征（MySQL 1054 / SQLite
+    "no such column"）——缺一不可，避免把任意 SQL 故障当成缺列回退。
+    """
+    text = str(exc).lower()
+    mentions_column = "target_route" in text or "target_id" in text
+    mentions_missing_column = (
+        "1054" in text or "unknown column" in text or "no such column" in text
+    )
+    return mentions_column and mentions_missing_column
+
+
 @router.get("/", response_model=NotificationListResponse, summary="获取通知列表")
 async def get_notifications(
     skip: int = 0,
@@ -125,7 +142,21 @@ async def get_notifications(
             "skip": skip,
             "limit": limit,
         }
-    except Exception:
+    except (OperationalError, ProgrammingError) as exc:
+        # issue #301：此前这里是 `except Exception`，把任意数据库故障（连接丢失、
+        # 超时……）都吞成「回退查询成功、只是所有通知都没有路由字段」——用户面
+        # 分不清「没有路由」与「查询失败」，日志零留痕。现在：
+        # ① 只有确为旧库缺 target_route/target_id 列时才回退（带 warning 留痕）；
+        # ② 其他故障一律抛出 → 全局异常处理如实 500，不再伪装成功。
+        if not _is_legacy_missing_route_columns(exc):
+            logger.error("通知列表查询失败（非缺列故障，如实上报）: %s", exc, exc_info=True)
+            raise
+        logger.warning(
+            "通知列表主查询失败（疑似旧库缺 target_route/target_id 列），已降级为"
+            "回退查询：列表仍可列出，但 target_route/target_id 一律缺失，"
+            "前端将按通知 type 兜底跳转。原始错误: %s",
+            exc,
+        )
         # Fallback for legacy DB without target_route/target_id columns
         base_query = select(Notification.id, Notification.title, Notification.content,
                             Notification.type, Notification.is_read, Notification.created_at

@@ -49,6 +49,8 @@ def _mask_secret(value: str) -> str:
 def _public_config(data: dict[str, Any]) -> dict[str, Any]:
     """Return a config with the API key masked for client responses."""
     out = dict(data)
+    # 损坏配置的原始值仅留在服务端存储（可能含半写的 api_key），绝不出网（#301）。
+    out.pop("_raw_value", None)
     if out.get("api_key"):
         out["api_key"] = _mask_secret(str(out["api_key"]))
     return out
@@ -90,8 +92,33 @@ class LLMConfigUpdate(BaseModel):
 # ── Redis helpers ───────────────────────────────────────────────────────
 
 
+def _corrupt_placeholder(config_id: str, raw: str | None, reason: str) -> dict[str, Any]:
+    """损坏配置的占位条目（issue #301）：条目不消失、显式标记 invalid。
+
+    此前坏值被 `except json.JSONDecodeError: continue` 静默丢弃——条目凭空
+    消失、total 少 1、零日志。现在保留占位条目：列表里可见（invalid=true）、
+    可被删除/重写修复；原始值仅存服务端字段 `_raw_value`（`_public_config`
+    永不外发），供运维排查。
+    """
+    entry: dict[str, Any] = {
+        "id": config_id,
+        "config_name": f"[损坏] {config_id}",
+        "provider": None,
+        "api_key": "",
+        "invalid": True,
+        "invalid_reason": reason,
+    }
+    if raw is not None:
+        entry["_raw_value"] = raw
+    return entry
+
+
 async def _load_all() -> dict[str, dict[str, Any]]:
-    """Load all configs from Redis hash. Returns {config_id: data}."""
+    """Load all configs from Redis hash. Returns {config_id: data}.
+
+    损坏的值（非 UTF-8 / 非 JSON / 非对象）不再静默丢弃：保留占位条目并
+    warning 留痕（issue #301），使故障可观测、可修复。
+    """
     if not redis_client:
         return {}
     raw = await redis_client.hgetall(REDIS_KEY)
@@ -101,12 +128,27 @@ async def _load_all() -> dict[str, dict[str, Any]]:
     for k, v in raw.items():
         if isinstance(k, bytes):
             k = k.decode("utf-8")
-        if isinstance(v, bytes):
-            v = v.decode("utf-8")
+        reason: str | None = None
+        data: dict[str, Any] | None = None
+        raw_text: str | None = None
         try:
-            result[k] = json.loads(v)
-        except json.JSONDecodeError:
-            continue
+            if isinstance(v, bytes):
+                v = v.decode("utf-8")
+            raw_text = v
+            parsed = json.loads(v)
+            if not isinstance(parsed, dict):
+                raise ValueError(f"值为 JSON {type(parsed).__name__}，不是配置对象")
+            data = parsed
+        except (UnicodeDecodeError, ValueError) as exc:
+            reason = f"{type(exc).__name__}: {exc}"
+        if reason is not None:
+            logger.warning(
+                "LLM 配置 '%s' 的值损坏（%s）——保留占位条目（invalid=true），不静默丢弃",
+                k, reason,
+            )
+            result[k] = _corrupt_placeholder(k, raw_text, reason)
+        elif data is not None:
+            result[k] = data
     return result
 
 
