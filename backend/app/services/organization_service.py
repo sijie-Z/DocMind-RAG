@@ -9,7 +9,7 @@ from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.exceptions import AuthenticationError
+from app.exceptions import AuthenticationError, ServiceUnavailableError
 from app.models.document import Document
 from app.models.organization import Organization, user_organization
 from app.models.user import User
@@ -73,8 +73,13 @@ class OrganizationService:
             return tree
 
         except Exception as e:
+            # issue #301（批 C）：查询失败不再回落空树 —— 空树在端点层会被
+            # 包装成 {"success": true, "data": []} 的 200，像「组织全被删」。
+            # 组织树无降级语义（结构本身即全部交付物）：显式 503 冒泡，
+            # 组织管理页（organizations/index.vue）已有「加载失败 + 重试」错误态
+            # 与 X-Silent-Error 静默头，正好承接此语义。
             logger.error(f"获取组织树失败: {str(e)}")
-            return []
+            raise ServiceUnavailableError("组织架构查询失败，请稍后重试") from e
 
     async def update_organization(self, db: AsyncSession, org_id: int, data: dict[str, Any]) -> Organization | None:
         """更新组织信息，自动处理层级变更 — 不负责 commit，由调用方管理事务"""
@@ -196,8 +201,10 @@ class OrganizationService:
                 "document_count": doc_count
             }
         except Exception as e:
+            # issue #301（批 C）：逐一组织统计失败不再回落 0/0 —— 「0 成员 0 文档」
+            # 是对一个具体组织的具体事实陈述，与「查不了」必须可分。
             logger.error(f"获取组织统计失败: {str(e)}")
-            return {"member_count": 0, "document_count": 0}
+            raise ServiceUnavailableError("组织统计查询失败，请稍后重试") from e
 
     async def delete_organization_thoroughly(self, db: AsyncSession, org_id: int) -> bool:
         """彻底删除组织及其所有子组织 — 不负责 commit，由调用方管理事务"""

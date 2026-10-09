@@ -24,12 +24,19 @@ from app.core.logging import sanitize_log_value
 from app.core.middleware import metrics_collector
 from app.core.redis import redis_client
 from app.core.security import get_current_user, get_user_org_id, permission_required
-from app.exceptions import AuthenticationError, AuthorizationError, ValidationError
+from app.exceptions import (
+    AppError,
+    AuthenticationError,
+    AuthorizationError,
+    ExternalServiceError,
+    ValidationError,
+)
 from app.models.chat import ChatSession
 from app.models.document import Document
 from app.models.organization import Organization
 from app.models.rbac import PermissionType
 from app.models.user import User
+from app.rag.errors import EvalJudgeUnavailableError
 
 router = APIRouter()
 _recent_external_alerts: deque = deque(maxlen=max(50, int(settings.ALERT_RECENT_BUFFER_SIZE)))
@@ -518,8 +525,11 @@ async def get_system_logs(
         with open(log_file, encoding="utf-8", errors="replace") as f:
             tail_lines = f.readlines()[-20000:]
     except OSError as e:
-        logger.warning(f"读取日志文件失败: {e}")
-        return {"logs": [], "total": 0, "skip": skip, "limit": limit}
+        # issue #301（批 C）：读取失败不再回落 {"logs": [], "total": 0} 的 200 ——
+        # 「读不了」与「确实没日志」在排障现场不可区分。读失败是服务端自身的
+        # 故障（权限/占用/IO），显式 500，让运维从状态码就能分辨。
+        logger.error(f"读取日志文件失败: {e}")
+        raise AppError("读取系统日志文件失败，请检查服务器日志配置", error_code="LOG_READ_FAILED")
 
     level_upper = (level or "INFO").upper()
     logs = []
@@ -723,7 +733,14 @@ async def get_org_summary(
         return {"organizations": result}
     except Exception as e:
         logger.error(f"Failed to get org summary: {e}")
-        return {"organizations": []}
+        # issue #301（批 C）：不再把查询失败伪装成「零组织」的成功响应。
+        # 带身份的降级形态：既有键 organizations 保持（前端契约不破），
+        # 新增 degraded/reason 供消费方区分「查不了」与「确实没有组织」。
+        return {
+            "organizations": [],
+            "degraded": True,
+            "reason": "组织概览统计查询失败，数据暂不可用",
+        }
 
 
 @router.get(
@@ -790,9 +807,14 @@ async def get_admin_summary(
         }
     except Exception as e:
         logger.error(f"Failed to get admin summary: {e}")
+        # issue #301（批 C）：不再把查询失败伪装成 5 项 KPI 全零的「系统被清空」。
+        # 带身份的降级形态：既有 5 键保持（dashboard/admin.vue 契约不破），
+        # 新增 degraded/reason 供消费方区分「查不了」与「真的都是 0」。
         return {
             "total_users": 0, "total_documents": 0,
-            "total_sessions": 0, "active_users_24h": 0, "total_organizations": 0
+            "total_sessions": 0, "active_users_24h": 0, "total_organizations": 0,
+            "degraded": True,
+            "reason": "管理员概览统计查询失败，数据暂不可用",
         }
 
 
@@ -847,12 +869,16 @@ async def rag_eval_single(item: EvalItem):
             "context_precision": result.context_precision,
             "details": result.details,
         }
-    except Exception as e:
-        logger.error(f"RAG eval failed: {e}")
-        return {
-            "faithfulness": 0, "relevancy": 0, "context_precision": 0,
-            "details": {"error": str(e)},
-        }
+    except EvalJudgeUnavailableError as e:
+        # issue #301（批 C）：评委（LLM）不可用 → 分数不可知，绝不呈现成 0/0/0。
+        # 此前该异常源头被 evaluator._score 吞成 (0.0, err)，端点 except 再兜一层
+        # 全零 200 —— 「测量失败」被伪装成「真实评了 0 分」。评委是外部 LLM 服务
+        # → 502 语义（对齐 #292 检索后端不可用的 502 先例）。
+        logger.error(f"RAG eval judge unavailable: {e}")
+        raise ExternalServiceError(
+            "RAG 质量评估服务暂不可用，请稍后重试",
+            error_code="RAG_EVAL_UNAVAILABLE",
+        )
 
 
 @router.post("/rag-eval-batch", summary="RAG 质量批量评估", dependencies=[Depends(get_current_user)])
@@ -879,6 +905,10 @@ async def rag_eval_batch(body: BatchEvalRequest):
             "avg_faithfulness": batch_result.avg_faithfulness,
             "avg_relevancy": batch_result.avg_relevancy,
             "avg_context_precision": batch_result.avg_context_precision,
+            # issue #301（批 C）：单条评委失败被标注并从均值剔除（见 evaluator），
+            # 新增键如实交代剔除情况；既有键（count/avg_*/results）语义不变。
+            "failed_count": batch_result.failed_count,
+            "failures": batch_result.failures,
             "results": [
                 {
                     "faithfulness": r.faithfulness,
@@ -888,6 +918,11 @@ async def rag_eval_batch(body: BatchEvalRequest):
                 for r in batch_result.results
             ],
         }
-    except Exception as e:
-        logger.error(f"RAG batch eval failed: {e}")
-        return {"count": 0, "avg_faithfulness": 0, "avg_relevancy": 0, "avg_context_precision": 0, "results": []}
+    except EvalJudgeUnavailableError as e:
+        # issue #301（批 C）：全部条目评委不可用 → 严禁回落 count 0 全零 200
+        # （「全零」还会诱导把故障当成「质量极差」的结论）。与单条同语义 502。
+        logger.error(f"RAG batch eval judge unavailable: {e}")
+        raise ExternalServiceError(
+            "RAG 质量评估服务暂不可用，请稍后重试",
+            error_code="RAG_EVAL_UNAVAILABLE",
+        )
