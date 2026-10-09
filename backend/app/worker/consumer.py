@@ -7,7 +7,8 @@ import sys
 # 确保 backend 目录在 path 中，以便能导入 app 模块
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from aiokafka import AIOKafkaConsumer
+from aiokafka import AIOKafkaConsumer, TopicPartition
+from aiokafka.structs import OffsetAndMetadata
 
 from app.core.config import settings
 from app.worker.doc_processor import processor
@@ -31,15 +32,17 @@ MAX_DELIVERY_ATTEMPTS = 3
 
 
 class RedeliveryHalt(Exception):
-    """文档级处理失败且重试预算未尽：不提交偏移、停住消费等重投。
+    """文档级处理失败且重试预算未尽：不提交该条偏移、停住消费等重投。
 
-    为什么不"继续循环 + 不提交"就完事：aIoKafka 的 ``commit()`` 提交的是消费位点
-    ``state.position``——``getmany`` 返回批次时位点已经推进过整批消息
-    （``consumer/fetcher.py`` 的 ``_update_position``），只要后续任意一条成功消息
-    提交，失败消息的偏移就会被一并带过，"不提交"会变成一句空话（这正是修前
-    "失败不提交"注释承诺不生效的机制之一）。让本异常穿出消费循环、进程退出，
-    由容器重启策略（compose ``restart: unless-stopped``）从**上次已提交偏移**
-    重投，才让"不提交"成为真承诺。
+    位点语义（评审 B1 修订）：本循环对**每条处理成功**的消息显式提交
+    ``{tp: msg.offset + 1}``，绝不使用无参 ``commit()``——aIoKafka 的 ``getmany``
+    在**返回批次**时就把消费位点推进到批尾+1（``consumer/fetcher.py`` 的
+    ``_update_position``），无参 commit 提交的正是这个位点，会把同批中尚未处理
+    （或处理失败）的消息一并划过：批内 k≥1 的失败消息不会重投、批尾未处理消息
+    被静默丢弃（修前版本的真实缺陷）。按条提交 + 失败即停之后：重启从
+    「最后一条成功消息」的下一格重投——失败消息与其后所有未处理消息一条不丢，
+    "不提交"才成为可验证的承诺。本异常穿出消费循环 → 进程非零退出 → 由容器
+    重启策略（compose ``restart: unless-stopped``）接住。
     """
 
 
@@ -83,14 +86,31 @@ async def run_consume_loop(consumer, process=None, touch=None, record_attempt=No
 
     ``process`` / ``touch`` / ``record_attempt`` 仅用于测试注入，默认真实实现。
 
-    失败处理（issue #301 批 D / #30，``processor.process`` 的返回值契约见
-    ``doc_processor.py``）：``False`` 或抛异常 = 文档级失败 → 不提交偏移；
-    重试预算未尽时抛 ``RedeliveryHalt`` 停住（重启重投），预算耗尽时响亮记录并
-    终局提交（死信语义：文档/任务已 FAILED，手动重试入口 = 知识库重建端点）。
+    失败处理（issue #301 批 D / #30，评审 B1 修订；``processor.process`` 的返回值
+    契约见 ``doc_processor.py``）：每条成功消息**按条显式提交**（``{tp: offset+1}``）；
+    ``False`` 或抛异常 = 文档级失败 → **不提交该条偏移**；重试预算未尽时抛
+    ``RedeliveryHalt`` 停住（重启从最后成功点重投——失败消息与批内未处理消息
+    一条不丢），预算耗尽时响亮记录并按条提交（终局/死信语义：文档/任务已 FAILED，
+    手动重试入口 = 知识库重建端点）。
     """
     process_call = process or processor.process
     beat = touch or touch_heartbeat
     record = record_attempt or _record_failed_attempt
+
+    last_committed_offset: int | None = None
+
+    async def commit_handled(msg) -> None:
+        """按条显式提交：只把「这一条」的位点推进一格（``msg.offset + 1``）。
+
+        为什么必须显式按条提交（评审 B1）：aIoKafka 的 ``getmany`` 在返回批次时
+        已把 position 推到批尾+1，无参 ``commit()`` 会把本批中尚未处理/失败的消息
+        一并划过（失败不重投 + 批尾静默丢弃）。显式提交后"每条成功才推进一格"
+        成为可验证事实——失败停住即从最后成功点重投。
+        """
+        nonlocal last_committed_offset
+        tp = TopicPartition(msg.topic, msg.partition)
+        await consumer.commit({tp: OffsetAndMetadata(msg.offset + 1, "")})
+        last_committed_offset = msg.offset
 
     while True:
         batches = await consumer.getmany(timeout_ms=POLL_TIMEOUT_MS)
@@ -102,7 +122,7 @@ async def run_consume_loop(consumer, process=None, touch=None, record_attempt=No
                 if not isinstance(data, dict):
                     # 非 dict 消息直接跳过并提交偏移，避免 AttributeError 杀死循环
                     logger.warning(f"Skipping non-dict message: {type(data).__name__}")
-                    await consumer.commit()
+                    await commit_handled(msg)
                     continue
 
                 doc_id = data.get("document_id")
@@ -118,7 +138,7 @@ async def run_consume_loop(consumer, process=None, touch=None, record_attempt=No
                         logger.error(f"Error processing message: {e}", exc_info=True)
 
                     if processed is False:
-                        # 文档级失败：不提交偏移。重试预算见 _record_failed_attempt。
+                        # 文档级失败：不提交该条偏移。重试预算见 _record_failed_attempt。
                         attempts = await record(job_id)
                         if attempts >= MAX_DELIVERY_ATTEMPTS:
                             logger.error(
@@ -130,19 +150,27 @@ async def run_consume_loop(consumer, process=None, touch=None, record_attempt=No
                                 attempts,
                                 doc_id,
                             )
-                            await consumer.commit()
+                            await commit_handled(msg)
                             continue
                         raise RedeliveryHalt(
-                            f"document {doc_id} (job {job_id}) processing failed "
-                            f"(attempt {attempts}/{MAX_DELIVERY_ATTEMPTS}); offset NOT "
-                            f"committed - halting for redelivery after restart"
+                            f"document {doc_id} (job {job_id}) processing failed at "
+                            f"topic={msg.topic} partition={msg.partition} "
+                            f"offset={msg.offset} (attempt {attempts}/"
+                            f"{MAX_DELIVERY_ATTEMPTS}); "
+                            + (
+                                f"last committed offset = {last_committed_offset}"
+                                if last_committed_offset is not None
+                                else "no offset committed in this process run"
+                            )
+                            + "; this message and any messages after it in this batch "
+                            "were NOT committed and will be redelivered after restart"
                         )
 
-                    # True（或其他真值）：消息已了结，可安全提交
-                    await consumer.commit()
+                    # True（或其他真值）：消息已了结，按条提交
+                    await commit_handled(msg)
                 else:
                     logger.warning("Received message without document_id")
-                    await consumer.commit()
+                    await commit_handled(msg)
 
 
 async def consume():
