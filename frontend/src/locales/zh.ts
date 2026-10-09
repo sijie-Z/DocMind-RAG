@@ -205,6 +205,7 @@ export default {
     connectionFailed: '无法连接到服务器，请刷新重试',
     sendFailed: '消息发送失败',
     networkError: '发送失败，请检查网络',
+    retrying: '服务繁忙，正在自动重试（第 {attempt}/{maxRetries} 次）...',
     cleared: '对话已清空',
     historyFailed: '加载会话历史失败',
     status: {

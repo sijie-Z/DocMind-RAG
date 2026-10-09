@@ -145,6 +145,21 @@ export interface SSEMessage {
   thinkingType?: string
   toolName?: string
   toolDurationMs?: number
+  // ── SSE 载荷的其余字段（issue #289：与 sseService 内部口径收敛为单一
+  //    类型；chat /stream Agent 模式投影为 camelCase）──────────────────
+  is_cached?: boolean
+  toolArgs?: Record<string, unknown>
+  toolCallId?: string
+  planId?: string
+  planStepId?: string
+  planProgress?: number | null
+  toolHint?: string
+  dependencies?: string[]
+  result?: string
+  // 'retry' 为纯客户端事件（sseService 429/503 退避时 emit），非后端事件
+  attempt?: number
+  maxRetries?: number
+  waitTime?: number
 }
 
 export interface KnowledgeSourceRef {

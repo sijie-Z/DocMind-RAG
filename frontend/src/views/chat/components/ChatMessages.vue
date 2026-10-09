@@ -87,6 +87,30 @@
                 />
                 <div v-else class="whitespace-pre-wrap">{{ message.content }}</div>
 
+                <!-- Agent 模式（useAgent）PER 事件（issue #289）：run_report 折叠块
+                     + retry_hint 提示行 + 计划树 + reflection，与 Agent 页复用同一
+                     组组件/口径，保证同一 run 双入口信息同构 -->
+                <template v-if="message.messageType === 'assistant'">
+                  <RunReportBlock :report="message.runReport" :total-tokens="totalTokensOf(message)" />
+                  <RetryHintLine
+                    v-for="(evt, eIdx) in agentEventsOf(message, 'retry_hint')"
+                    :key="'rh-' + eIdx"
+                    :content="evt.content"
+                  />
+                  <PlanTree
+                    v-if="message.planSteps && message.planSteps.length"
+                    :steps="message.planSteps"
+                    :progress="message.planProgress"
+                    class="mt-3"
+                  />
+                  <ReflectionBanner
+                    v-for="(evt, eIdx) in agentEventsOf(message, 'reflection')"
+                    :key="'rf-' + eIdx"
+                    :result="evt.reflection_result || 'pass'"
+                    :text="evt.content"
+                  />
+                </template>
+
                 <div v-if="message.sources && message.sources.length > 0" class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
                   <div class="text-xs text-gray-500 dark:text-gray-400 mb-1.5 font-medium">{{ t('chat.sourcesLabel') }}</div>
                   <div class="flex flex-wrap gap-1.5">
@@ -205,7 +229,12 @@ import { useI18n } from 'vue-i18n'
 import { SparklesOutline, ArrowForwardOutline, ArrowDownOutline, ThumbsUpOutline, ThumbsDownOutline, CopyOutline, DocumentTextOutline, RefreshOutline } from '@vicons/ionicons5'
 import { NPopover } from 'naive-ui'
 import Markdown from '@/components/common/Markdown.vue'
+import PlanTree from '@/components/agent/PlanTree.vue'
+import ReflectionBanner from '@/components/agent/ReflectionBanner.vue'
+import RetryHintLine from '@/components/agent/RetryHintLine.vue'
+import RunReportBlock from '@/components/agent/RunReportBlock.vue'
 import type { ChatMessage } from '@/types/chat'
+import type { AgentEvent } from '@/types/agent'
 
 const { t } = useI18n()
 
@@ -216,6 +245,16 @@ defineProps<{
   userAvatar?: string
   suggestions: { title: string; desc: string }[]
 }>()
+
+// issue #289：Agent 模式事件（落账见 useChatSend）的取数与渲染辅助
+function agentEventsOf(message: ChatMessage, type: AgentEvent['type']): AgentEvent[] {
+  return (message.events || []).filter((e) => e.type === type)
+}
+
+function totalTokensOf(message: ChatMessage): number | undefined {
+  const value = message.executionContext?.total_tokens
+  return typeof value === 'number' ? value : undefined
+}
 
 defineEmits<{
   scroll: []

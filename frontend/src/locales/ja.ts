@@ -176,6 +176,7 @@ export default {
     connectionFailed: 'サーバーへの接続に失敗しました',
     sendFailed: 'メッセージの送信に失敗しました',
     networkError: 'ネットワークエラー',
+    retrying: 'サーバー混雑のため自動再試行中（{attempt}/{maxRetries} 回目）...',
     cleared: '対話をクリアしました',
     historyFailed: '履歴の読み込みに失敗しました',
     status: {

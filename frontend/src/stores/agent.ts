@@ -8,6 +8,7 @@ import type {
   PlanStep,
   ToolInfo,
 } from '@/types/agent'
+import { applyPlanStepUpdate, buildPlanStep } from '@/utils/agentPlan'
 
 export const useAgentStore = defineStore('agent', () => {
   // ── Config ──
@@ -72,7 +73,13 @@ export const useAgentStore = defineStore('agent', () => {
           } else {
             msg.thinkingText += event.content
           }
+          // issue #289 G1：此前 thinking 从不进 msg.events，视图
+          // getLastThinkingType() 过滤恒空 → ThinkingStream 的思考类型标签
+          // 恒为 reasoning。落进事件列表后「规划中/评估中/纠正中」标签才可区分；
+          // 该事件同时携带 plan_step_status（G6）与 retry_attempt（G3）。
+          msg.events.push(event)
         })
+        applyPlanStepUpdate(planSteps.value, event)
         break
 
       case 'plan_start':
@@ -84,22 +91,19 @@ export const useAgentStore = defineStore('agent', () => {
         })
         break
 
-      case 'plan_step':
-        if (event.plan_step_id) {
-          const step: PlanStep = {
-            id: event.plan_step_id,
-            description: event.content,
-            dependencies: event.dependencies || [],
-            tool_hint: event.tool_hint || null,
-            status: 'pending',
-            retry_count: 0,
-          }
+      case 'plan_step': {
+        // issue #289 G7：plan_step 事件实际携带 parallel_group/risk_level/
+        // retry_strategy/fallback_tool（planner 发射、to_sse_dict 按非默认值带出），
+        // 统一经 buildPlanStep 落账，PlanTree 才能展示这些语义徽标。
+        const step = buildPlanStep(event)
+        if (step) {
           planSteps.value.push(step)
           updateLastAssistant((msg) => {
             msg.planSteps = [...planSteps.value]
           })
         }
         break
+      }
 
       case 'plan_complete':
         isThinking.value = false
@@ -112,10 +116,7 @@ export const useAgentStore = defineStore('agent', () => {
           msg.events.push(event)
         })
         // Update plan step status
-        if (event.plan_step_id) {
-          const step = planSteps.value.find((s) => s.id === event.plan_step_id)
-          if (step) step.status = 'running'
-        }
+        applyPlanStepUpdate(planSteps.value, event)
         break
 
       case 'tool_result':
@@ -124,10 +125,7 @@ export const useAgentStore = defineStore('agent', () => {
           msg.currentTool = ''
           msg.events.push(event)
         })
-        if (event.plan_step_id) {
-          const step = planSteps.value.find((s) => s.id === event.plan_step_id)
-          if (step && step.status !== 'failed') step.status = 'completed'
-        }
+        applyPlanStepUpdate(planSteps.value, event)
         if (event.plan_progress !== undefined) {
           overallProgress.value = event.plan_progress
         }
@@ -139,10 +137,7 @@ export const useAgentStore = defineStore('agent', () => {
           msg.currentTool = ''
           msg.events.push(event)
         })
-        if (event.plan_step_id) {
-          const step = planSteps.value.find((s) => s.id === event.plan_step_id)
-          if (step) step.status = 'failed'
-        }
+        applyPlanStepUpdate(planSteps.value, event)
         break
 
       case 'reflection':
@@ -159,6 +154,9 @@ export const useAgentStore = defineStore('agent', () => {
         updateLastAssistant((msg) => {
           msg.events.push(event)
         })
+        // issue #289 G3：retry_hint 携带 plan_step_id + retry_attempt，
+        // 把重试次数归约进对应 PlanStep（PlanTree「重试 N 次」徽标的数据源）。
+        applyPlanStepUpdate(planSteps.value, event)
         break
 
       case 'chunk':

@@ -5,7 +5,9 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { wsService } from '@/utils/websocket'
 import { sseService } from '@/utils/sseService'
+import { applyPlanStepUpdate, buildPlanStep } from '@/utils/agentPlan'
 import type { ChatMessage, AttachedFile, KnowledgeSource, RetrievalDebugData } from '@/types/chat'
+import type { AgentEvent } from '@/types/agent'
 import type { SSEMessage } from '@/types/api'
 
 export function useChatSend(
@@ -92,6 +94,13 @@ export function useChatSend(
     sseService.off('tool_result')
     sseService.off('tool_error')
     sseService.off('debug')
+    sseService.off('run_report')
+    sseService.off('execution_context')
+    sseService.off('retry_hint')
+    sseService.off('plan_start')
+    sseService.off('plan_step')
+    sseService.off('plan_complete')
+    sseService.off('reflection')
 
     const onChunk = (data: SSEMessage) => {
       sseStatus.value = 'connected'
@@ -123,13 +132,16 @@ export function useChatSend(
       if (lastMsg && lastMsg.id === aiMsgId) {
         lastMsg.content = data.content || fullContent
         if (data.sources) lastMsg.sources = data.sources as KnowledgeSource[]
-        if ((data as unknown as Record<string, unknown>).is_cached) lastMsg.isCached = true
+        if (data.is_cached) lastMsg.isCached = true
       }
       fetchConversations()
       scrollToBottom()
     }
 
     const onThinking = (data: SSEMessage) => {
+      // 仅保留 reasoning/planning/correction：evaluation 子类型（质检/步骤
+      // 完成叙述）在聊天页为刻意降噪（issue #289 复核记录 #4）。计划步骤
+      // 状态不依赖这些叙述——由 plan_step/tool_* 事件驱动（见下方 #289 块）。
       if (['reasoning', 'planning', 'correction'].includes(data.thinkingType || '')) {
         const lastMsg = messages.value[messages.value.length - 1]
         if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
@@ -144,6 +156,10 @@ export function useChatSend(
         const stamp = `\n\n> 🔧 正在调用: **${data.toolName || 'tool'}**...\n`
         fullContent += stamp
         lastMsg.content = fullContent
+        // 计划步骤状态推进（issue #289：与 Agent 页 store 同款归约）
+        if (lastMsg.planSteps) {
+          applyPlanStepUpdate(lastMsg.planSteps, { type: 'tool_call', plan_step_id: data.planStepId })
+        }
       }
       scrollToBottom()
     }
@@ -154,6 +170,12 @@ export function useChatSend(
         const stamp = `\n> ✅ 工具完成` + (data.toolDurationMs ? ` (${Math.round(data.toolDurationMs)}ms)` : '') + `\n`
         fullContent += stamp
         lastMsg.content = fullContent
+        if (lastMsg.planSteps) {
+          applyPlanStepUpdate(lastMsg.planSteps, { type: 'tool_result', plan_step_id: data.planStepId })
+        }
+        if (typeof data.planProgress === 'number') {
+          lastMsg.planProgress = data.planProgress
+        }
       }
     }
 
@@ -179,6 +201,92 @@ export function useChatSend(
       }
     }
 
+    // ── issue #289：Agent 模式（useAgent）PER 事件的消费者 ─────────────
+    // run_report / execution_context / retry_hint / plan_start / plan_step /
+    // plan_complete / reflection 7 型此前经 sseService 白名单放行（#253）但
+    // useChatSend 从未注册 handler —— 链路止于传输层，同一 run 在聊天页与
+    // Agent 页看到的 UI 不同构。以下按 Agent 页 store（stores/agent.ts
+    // processEvent）同款口径落账；渲染见 ChatMessages.vue。
+
+    const lastAssistantMsg = (): ChatMessage | undefined => {
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) return lastMsg
+      return undefined
+    }
+
+    const pushAgentEvent = (msg: ChatMessage, event: AgentEvent) => {
+      if (!msg.events) msg.events = []
+      msg.events.push(event)
+    }
+
+    const onRunReport = (data: SSEMessage) => {
+      const msg = lastAssistantMsg()
+      if (msg) msg.runReport = data.content
+    }
+
+    const onExecutionContext = (data: SSEMessage) => {
+      const msg = lastAssistantMsg()
+      // chat.py 投影里 execution_context 的 content 是对象（含 total_tokens）
+      if (msg) msg.executionContext = data.content as unknown as Record<string, unknown>
+    }
+
+    const onRetryHint = (data: SSEMessage) => {
+      const msg = lastAssistantMsg()
+      if (msg) pushAgentEvent(msg, { type: 'retry_hint', content: data.content || '' })
+    }
+
+    const onPlanStart = (data: SSEMessage) => {
+      const msg = lastAssistantMsg()
+      if (!msg) return
+      msg.planSteps = []
+      msg.planProgress = undefined
+      pushAgentEvent(msg, { type: 'plan_start', content: data.content || '', plan_id: data.planId })
+    }
+
+    const onPlanStep = (data: SSEMessage) => {
+      const msg = lastAssistantMsg()
+      if (!msg) return
+      const step = buildPlanStep({
+        plan_step_id: data.planStepId,
+        content: data.content,
+        dependencies: data.dependencies,
+        tool_hint: data.toolHint,
+      })
+      if (step) msg.planSteps = [...(msg.planSteps || []), step]
+      pushAgentEvent(msg, {
+        type: 'plan_step',
+        content: data.content || '',
+        plan_id: data.planId,
+        plan_step_id: data.planStepId,
+      })
+    }
+
+    const onPlanComplete = (data: SSEMessage) => {
+      const msg = lastAssistantMsg()
+      if (msg) pushAgentEvent(msg, { type: 'plan_complete', content: data.content || '', plan_id: data.planId })
+    }
+
+    const onReflection = (data: SSEMessage) => {
+      const msg = lastAssistantMsg()
+      if (msg) {
+        pushAgentEvent(msg, {
+          type: 'reflection',
+          content: data.content || '',
+          reflection_result: data.result as AgentEvent['reflection_result'],
+        })
+      }
+    }
+
+    // issue #289 G4：'retry' 是 sseService 的纯客户端事件（429/503 退避时
+    // emit，sseService.ts），此前 Chat 页只 off 未 on —— 自动退避等待期用户
+    // 毫无提示；现在退避时给出进度提示。
+    const onRetry = (data: SSEMessage) => {
+      message.info(t('chat.retrying', {
+        attempt: data.attempt ?? 1,
+        maxRetries: data.maxRetries ?? 3,
+      }))
+    }
+
     sseService.on('chunk', onChunk)
     sseService.on('message', onMessage)
     sseService.on('error', onError)
@@ -187,6 +295,14 @@ export function useChatSend(
     sseService.on('tool_result', onToolResult)
     sseService.on('tool_error', onToolError)
     sseService.on('debug', onDebug)
+    sseService.on('run_report', onRunReport)
+    sseService.on('execution_context', onExecutionContext)
+    sseService.on('retry_hint', onRetryHint)
+    sseService.on('plan_start', onPlanStart)
+    sseService.on('plan_step', onPlanStep)
+    sseService.on('plan_complete', onPlanComplete)
+    sseService.on('reflection', onReflection)
+    sseService.on('retry', onRetry)
 
     const systemPrompt = localStorage.getItem('activeSystemPrompt')
 
@@ -326,6 +442,13 @@ export function useChatSend(
     sseService.off('tool_result')
     sseService.off('tool_error')
     sseService.off('debug')
+    sseService.off('run_report')
+    sseService.off('execution_context')
+    sseService.off('retry_hint')
+    sseService.off('plan_start')
+    sseService.off('plan_step')
+    sseService.off('plan_complete')
+    sseService.off('reflection')
   })
 
   return {

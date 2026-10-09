@@ -1,3 +1,5 @@
+import type { AgentEvent, PlanStep } from '@/types/agent'
+
 export interface ChatMessage {
   id?: string | number
   content: string
@@ -10,6 +12,15 @@ export interface ChatMessage {
   feedbackNote?: string
   isCached?: boolean
   thinking?: string
+  // ── Agent 模式（useAgent=true）PER 事件落账（issue #289）───────────────
+  // 聊天页此前对这 7 型事件（run_report/execution_context/retry_hint/
+  // plan_start/plan_step/plan_complete/reflection）传输放行但零消费者，
+  // 同一 run 与 Agent 页信息不同构。字段口径对齐 Agent 页 store：
+  events?: AgentEvent[]          // reflection / retry_hint（事件台账）
+  runReport?: string             // run_report 文本（折叠块）
+  executionContext?: Record<string, unknown>  // execution_context（总 tokens 等）
+  planSteps?: PlanStep[]         // plan_*（计划树）
+  planProgress?: number
 }
 
 export interface AttachedFile {
