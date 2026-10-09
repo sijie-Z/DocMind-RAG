@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 QueryIntent = Literal["factual", "procedural", "list", "definition", "comparison", "causal", "summary", "other"]
 QueryComplexity = Literal["simple", "medium", "complex"]
-RetrievalStrategy = Literal["keyword_only", "hybrid", "hybrid_hyde"]
+RetrievalStrategy = Literal["keyword_only", "hybrid", "hybrid_hyde", "vector_only"]
 
 
 class QueryComplexityClassifier:
@@ -58,6 +58,50 @@ class QueryComplexityClassifier:
             "medium": "hybrid",
             "complex": "hybrid_hyde",
         }[complexity]
+
+
+# ── issue #225（决策文档第 7 条・默认 A）：search_mode 显式覆盖自动路由 ─────────
+# 公开模式名（API 字段 SearchMode 的取值）⇄ 内部策略名的单一事实源。
+# 此前 REST 端点接受 search_mode 却从不传到检索层（knowledge_service 与
+# rag_service 门面两处静默丢弃），「换个模式再试」是无效动作——本映射把
+# 显式模式变成对本次请求检索臂组合的强制覆盖；None/缺省保持自动路由。
+SEARCH_MODE_TO_STRATEGY: dict[str, RetrievalStrategy] = {
+    "keyword": "keyword_only",
+    "vector": "vector_only",
+    "hybrid": "hybrid",  # 显式 hybrid = 两臂 + RRF（不含 HyDE；HyDE 是自动路由给复杂查询的增强）
+}
+STRATEGY_TO_SEARCH_MODE: dict[str, str] = {
+    "keyword_only": "keyword",
+    "vector_only": "vector",
+    "hybrid": "hybrid",
+    "hybrid_hyde": "hybrid",  # 公开粒度：hybrid_hyde 仍是「混合搜索（+可选 HyDE 增强）」
+}
+
+
+def resolve_retrieval_strategy(query: str, search_mode: str | None = None) -> RetrievalStrategy:
+    """本次检索实际采用的策略：显式 search_mode 覆盖自动路由；None 走分类器。
+
+    未知字符串按「未提供」处理（回落自动路由）——API 边界由 SearchMode 枚举
+    校验（非法值 422），此处只是内部调用方的防御口径，不引入第二套校验。
+    """
+    if search_mode:
+        forced = SEARCH_MODE_TO_STRATEGY.get(search_mode)
+        if forced is not None:
+            return forced
+    return QueryComplexityClassifier.get_strategy(query)
+
+
+def effective_search_mode(query: str, search_mode: str | None = None) -> str:
+    """本次请求实际生效的公开模式名（响应回显口径 = 生效语义，issue #225）。
+
+    - 显式模式：即所传值；
+    - 自动路由：按顶层查询的路由结果映射（simple→keyword；medium/complex→hybrid）。
+      注意：复合查询分解后各子查询独立路由，公开粒度均为上述三值之一，回显取
+      顶层查询的路由档位。
+    """
+    if search_mode in SEARCH_MODE_TO_STRATEGY:
+        return search_mode
+    return STRATEGY_TO_SEARCH_MODE[QueryComplexityClassifier.get_strategy(query)]
 
 
 class QueryIntentClassifier:
