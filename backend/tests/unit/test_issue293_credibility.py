@@ -20,7 +20,9 @@
     M3  删 executor 终态 ctx.complete_step 记账 → 用例 5 / 7 红；
     M4  run_report 恢复 `clean_success = not fatal and review != "reject"` → 用例 5 / 7 红；
     M5  _execute_step_once 尾部恢复无条件 completed 记录 → 用例 7 红（假 completed 复发）；
-    M6  删 mcp_bridge 未知 server 的结构化失败 → 用例 2 红。
+    M6  删 mcp_bridge 未知 server 的结构化失败 → 用例 2 红；
+    M7  删 tool_not_allowed 分支的 attempt_error_detail 赋值（#293 评审 R1 复现）→
+        用例 8 红（同一 attempt 出现 completed+failed 双记录）。
 """
 
 import sys
@@ -337,3 +339,44 @@ async def test_tool_always_fails_task_reports_failure_every_dimension(monkeypatc
     assert report["tool_calls"][0]["error"], "tool_calls 必须携带错误文本"
     text = render_run_report_text(report)
     assert "FAILURE:" in text and "[failed]" in text
+
+
+# ── ⑤ R1（#293 评审核实残余，一行级）：tool_not_allowed attempt 不得写假 completed ──
+
+
+@pytest.mark.asyncio
+async def test_tool_not_allowed_attempt_records_single_failed_no_fake_completed():
+    """R1：受限上下文（tool_tags）里模型发出未列名工具——执行层拒绝并如实发
+    tool_error（fatal 分类，不重试），但该分支此前未设 attempt_error_detail →
+    _execute_step_once 尾部照写一条"completed"假记录：同一 attempt 出现
+    completed+failed 双记录，报告自相矛盾。
+
+    修复：分支补 attempt_error_detail（对齐 serialization_error / ToolResult
+    失败 / 异常三条既有分支）→ 该 attempt 只留重试尽头的终态 failed 一条。
+
+    变异 M7（删 tool_not_allowed 分支的 attempt_error_detail 赋值）→
+    记录变 ["completed", "failed"] → 本用例红。
+    """
+    cfg = AgentConfig(
+        enable_planning=False, enable_reflection=False,
+        tool_tags=["search", "analysis"],  # delegate_subtask 不在白名单
+        max_tool_calls_per_turn=3,
+    )
+    client = _fake_llm_toolclient("delegate_subtask", "{}")
+    executor = Executor(client, cfg, _memory(), execution_mode="serial")
+    ctx = ExecutionContext(query="q-293-r1")
+    step = PlanStep(id="s1", description="受限步骤", tool_hint="delegate_subtask")
+    plan = Plan(id="p1", goal="g", steps=[step])
+
+    events = [e async for e in executor.execute(plan, ctx=ctx)]
+
+    assert any(
+        e.type == "tool_error" and e.error_type == "tool_not_allowed" for e in events
+    ), f"拒绝执行必须如实发 tool_error: {[e.type for e in events]}"
+
+    records = [r for r in ctx.completed_steps if r.step_id == "s1"]
+    assert [r.status for r in records] == ["failed"], (
+        f"同一 attempt 不得出现 completed+failed 双记录，实际 {[r.status for r in records]}"
+    )
+    assert step.status == "failed"
+    assert ctx.failures and "不在当前上下文允许的工具集内" in ctx.failures[0], ctx.failures

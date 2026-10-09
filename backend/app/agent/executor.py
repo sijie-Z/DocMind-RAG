@@ -901,6 +901,11 @@ class Executor:
                     "result": "工具不被允许（未执行）",
                     "error_type": "tool_not_allowed",
                 })
+                # #293 评审 R1：该分支此前未设 attempt_error_detail——attempt 尾部
+                # 照写一条 "completed" 假记录，与重试尽头的终态 failed 记录同
+                # attempt 双记录。补齐（对齐 serialization_error / ToolResult
+                # 失败 / 异常三条既有分支）。
+                attempt_error_detail = f"工具 {func.name} 不在当前上下文允许的工具集内，已拒绝执行"
                 continue
 
             # Parse arguments

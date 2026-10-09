@@ -137,7 +137,17 @@ class AgentService:
             raise
         else:
             if task_id:
-                await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED)
+                # issue #301 批 A #10/#11：终态写入必须被确认——返回值不再被
+                # 丢弃（写失败必有可观测信号），run 级失败（无工具模式 LLM
+                # 全败）按标志如实置 FAILED 而不是 COMPLETED。
+                finalize_event = await self._finalize_task_terminal(
+                    task_id,
+                    failed_run=bool(getattr(agent, "run_failed", False)),
+                    failure_text=getattr(agent, "run_failure", None),
+                )
+                if finalize_event is not None:
+                    finalize_event.task_id = task_id
+                    yield finalize_event
 
         # Persist config for session recovery
         if session_id:
@@ -235,7 +245,16 @@ class AgentService:
             await self._checkpoint_error(task_id, agent, exc)
             raise
         else:
-            await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED)
+            # issue #301 批 A #10/#11：同 chat 路径——消费 mark_terminal 返回值，
+            # 写失败必显形、run 级失败如实置 FAILED。
+            finalize_event = await self._finalize_task_terminal(
+                task_id,
+                failed_run=bool(getattr(agent, "run_failed", False)),
+                failure_text=getattr(agent, "run_failure", None),
+            )
+            if finalize_event is not None:
+                finalize_event.task_id = task_id
+                yield finalize_event
 
     # ── Checkpoint 兜底（断流 / 异常；二者都不得改变既有语义）──────────────
 
@@ -297,6 +316,53 @@ class AgentService:
             error=f"{type(exc).__name__}: {exc}",
             error_type=type(exc).__name__,
         )
+
+    async def _finalize_task_terminal(
+        self,
+        task_id: str,
+        *,
+        failed_run: bool,
+        failure_text: str | None = None,
+    ) -> AgentEvent | None:
+        """run 正常结束后置任务终态，并**消费** mark_terminal 的返回值
+        （issue #301 批 A #10/#11；此前返回值被丢弃——DB 写失败时任务永远
+        RUNNING 且无人知晓）。
+
+        - failed_run（#11：无工具模式 LLM 全败，零产出）→ 如实置 FAILED 并写
+          last_error（FAILED→RUNNING 是既有重试边：任务可被 resume 收敛）；
+        - 否则置 COMPLETED。
+        - 写失败（mark_terminal 已重试一次并留 ERROR 日志）→ 这里再响亮记一笔，
+          并返回一条如实告知客户端的事件（调用方盖章 task_id 后补发）；成功时
+          返回 None（零扰动，成功路径旧行为不变）。
+        """
+        if failed_run:
+            ok = await checkpoint.mark_terminal(
+                task_id,
+                TaskStatus.FAILED,
+                error=failure_text,
+                error_type="llm_failure",
+            )
+        else:
+            ok = await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED)
+        if ok:
+            return None
+        logger.error(
+            "任务 %s 终态（%s）未能落库：任务行将停留原状态"
+            "（任务列表可能仍显示进行中；可经 resume 收敛）",
+            log_safe(task_id),
+            "failed" if failed_run else "completed",
+        )
+        if failed_run:
+            content = (
+                "任务状态收尾失败：本次运行未产出有效回答，且任务记录未能"
+                "标记失败（可稍后恢复重试）。"
+            )
+        else:
+            content = (
+                "任务状态收尾失败：运行结果已产出，但任务记录未能更新"
+                "（任务列表可能仍显示进行中；稍后可恢复收敛）。"
+            )
+        return AgentEvent(type="error", content=content)
 
     async def search_and_chat(
         self,

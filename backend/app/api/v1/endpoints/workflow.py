@@ -297,8 +297,15 @@ async def execute_workflow(
                         event_data = event["data"]
 
                         if event_type == "workflow_result":
-                            # 执行完成
-                            execution.status = "completed"
+                            # 执行完成（issue #301 批 A #5：按引擎总体结果如实
+                            # 落终态——节点失败时记录 failed + error_message，
+                            # 此前无条件 completed）
+                            result_ok = event_data.get("success") is not False
+                            if result_ok:
+                                execution.status = "completed"
+                            else:
+                                execution.status = "failed"
+                                execution.error_message = event_data.get("error") or "工作流节点执行失败"
                             execution.completed_at = datetime.now()
                             execution.output_data = event_data
                             # mode="json"：node_results 含 datetime（started_at/completed_at），
@@ -372,7 +379,15 @@ async def execute_workflow(
 
         result = await engine.execute(input_data)
 
-        execution.status = "completed"
+        # issue #301（批 A #5）：按引擎总体结果如实落执行记录——节点失败时
+        # status=failed + error_message（此前无条件 completed、error_message=null，
+        # 响应也恒为 success=true）。
+        result_ok = result.get("success") is not False
+        if result_ok:
+            execution.status = "completed"
+        else:
+            execution.status = "failed"
+            execution.error_message = result.get("error") or "工作流节点执行失败"
         execution.completed_at = datetime.now()
         execution.output_data = result
         # mode="json"：node_results 含 datetime（started_at/completed_at），python
@@ -382,7 +397,7 @@ async def execute_workflow(
         await db.commit()
 
         return {
-            "success": True,
+            "success": result_ok,
             "data": {
                 "execution_id": execution.id,
                 "status": execution.status,

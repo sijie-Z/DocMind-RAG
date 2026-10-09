@@ -971,23 +971,40 @@ class WorkflowEngine:
 
             final_output = result.get("context", {}).get("final_output", "")
 
+            # issue #301（批 A #5）：节点级失败必须上浮到本次执行的总体结果。
+            # 此前 execute() 无条件 success=True——node_func 虽然把失败节点记进
+            # node_results 并发 node_error 事件，但总体结果、端点写入的执行记录
+            # （status=completed、error_message=null）与执行历史全说"成功"。
+            failed_nodes = [r for r in self.node_results.values() if r.status == "failed"]
+            success = not failed_nodes
+            error_summary = None
+            if failed_nodes:
+                error_summary = "；".join(
+                    f"节点 {r.node_id} 执行失败: {r.error}" for r in failed_nodes
+                )
+
             await self.emit_event("workflow_complete", {
                 "output": final_output,
                 "node_count": len(self.node_results),
                 "success_count": sum(1 for r in self.node_results.values() if r.status == "completed"),
+                "success": success,
+                "failed_count": len(failed_nodes),
                 "timestamp": datetime.now().isoformat()
             })
 
             # #281：返回值会被端点原样 JSON 化（workflow_result 事件载荷 +
             # workflow_executions.output_data JSON 列 + 非流式响应），与事件出口
             # 同口径规整，堵住同族缺口。
-            return _to_jsonable({
-                "success": True,
+            payload: dict[str, Any] = {
+                "success": success,
                 "output": final_output,
                 "node_outputs": result.get("node_outputs", {}),
                 "context": result.get("context", {}),
                 "memory": result.get("memory", {})
-            })
+            }
+            if not success:
+                payload["error"] = error_summary
+            return _to_jsonable(payload)
 
         except Exception as e:
             await self.emit_event("workflow_error", {

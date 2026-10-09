@@ -147,6 +147,12 @@ class PERAgentLoop:
         self._checkpoint_task_id: str | None = None
         self.checkpoint_live: dict[str, Any] | None = None
 
+        # 运行级失败标志（issue #301 批 A #11）：无工具模式下直接回答的 LLM
+        # 调用失败 = 本次 run 零产出，service 收尾据此置 FAILED 而不是
+        # COMPLETED。run() 起始处重置（loop 实例可能被复用）。
+        self.run_failed: bool = False
+        self.run_failure: str | None = None
+
         # Context engine with LLM-based summarization
         self.context_engine = ContextEngine(
             max_context_tokens=self.config.max_context_tokens,
@@ -263,6 +269,9 @@ class PERAgentLoop:
         # service 读这份引用做兜底快照（见 checkpoint.save_from_live）。
         self._checkpoint_task_id = task_id
         self.checkpoint_live: dict[str, Any] | None = None
+        # 运行级失败标志（issue #301 批 A #11）每 run 重置。
+        self.run_failed = False
+        self.run_failure = None
 
         # ── Execution Context (per-request state) ────────────────────────
         # resume：从快照重建 ctx（含 artifacts/total_tokens/current_step_id ——
@@ -484,6 +493,20 @@ class PERAgentLoop:
                         if self.checkpoint_live is not None:
                             self.checkpoint_live["partial_output"] = partial_prefix + pass_output
                 except Exception as e:
+                    # issue #301（批 A #11）：直接回答的 LLM 调用失败 = 本次 run
+                    # 零产出，不得再走"COMPLETED + clean_success=true"假成功链：
+                    # 失败进 ctx.failures（对齐 #293 范式：complete_step 是唯一
+                    # 写者 → run_report clean_success=False），并置 run_failed 标志
+                    # （service 收尾据此置任务 FAILED 而不是 COMPLETED）。
+                    self.run_failed = True
+                    self.run_failure = f"LLM Error: {e}"
+                    ctx.complete_step(
+                        step_id="direct_llm",
+                        description="直接回答（无工具模式）",
+                        tool=None,
+                        status="failed",
+                        error=self.run_failure,
+                    )
                     yield AgentEvent(type="error", content=f"LLM Error: {e}")
 
             # 最终答案以最后一版计划的执行产出为准：replan 后旧计划的产出
