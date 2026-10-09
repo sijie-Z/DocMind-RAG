@@ -16,6 +16,37 @@ from app.agent.registry import register_tool, tool_registry
 logger = logging.getLogger(__name__)
 
 
+def _validated_insight_payload(raw: str | None) -> dict[str, Any] | None:
+    """校验 extract_insights 的返回后才允许消费（issue #301 #12）。
+
+    错误形态一律返回 None —— 不得被当成"分析结果"写进报告/叙述：
+      - ToolResult.fail 的字符串形态 "Error: [code] ..."（#293 契约）；
+      - 带顶层 "error" 键的 JSON 载荷（历史错误形态）；
+      - 无法解析 / 非对象 / 缺 "insights" 字段的未知形态。
+
+    判别只做结构判定（能否解析 + 字段形态），不做大小写无关的子串匹配 ——
+    旧检查 `"Error" not in insight` 既漏（生产者发小写 "error" 键）又可能
+    误伤（合法的分析正文里出现 "Error rate..." 等词；见 #297 教训：内容
+    启发式的误判无法根除）。成功载荷的结构锚点 = 顶层 "insights" 字段
+    （extract_insights 成功路径恒有该字段）。
+    """
+    if not raw:
+        return None
+    if raw.lstrip().startswith("Error:"):
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    if parsed.get("error"):
+        return None
+    if "insights" not in parsed:
+        return None
+    return parsed
+
+
 @register_tool(
     name="deep_research",
     description=(
@@ -163,24 +194,31 @@ async def document_comparison(
                 organization_id=organization_id,
                 run_context=run_context,
             )
-            if insight and "Error" not in insight:
-                # extract_insights 返回 JSON, 取关键部分
-                try:
-                    parsed = json.loads(insight)
-                    filename = parsed.get("filename", doc_id)
-                    insights = parsed.get("insights", {})
-                    summary = f"- 文档: {filename}\n"
-                    if isinstance(insights, dict):
-                        if "claims" in insights:
-                            claims = insights["claims"]
-                            summary += f"- 关键发现: {len(claims)} 条\n"
-                        if "structure" in insights:
-                            summary += f"- 章节: {len(insights['structure'])} 个\n"
-                    parts.append(f"### {filename} 分析摘要\n{summary}")
-                except json.JSONDecodeError:
-                    parts.append(f"### 文档分析\n{insight[:300]}")
         except Exception as e:
             logger.warning(f"document_comparison: extract_insights failed for {doc_id}: {e}")
+            parts.append(f"### 文档分析\n(洞察提取失败: {doc_id})\n")
+            continue
+
+        # issue #301 #12：先校验再消费 —— 错误载荷不得当"分析结果"写进报告。
+        parsed = _validated_insight_payload(insight)
+        if parsed is None:
+            logger.warning(
+                "document_comparison: extract_insights returned no usable analysis for %s: %s",
+                doc_id, str(insight)[:120],
+            )
+            parts.append(f"### 文档分析\n(洞察提取失败: {doc_id})\n")
+            continue
+
+        filename = parsed.get("filename", doc_id)
+        insights = parsed.get("insights", {})
+        summary = f"- 文档: {filename}\n"
+        if isinstance(insights, dict):
+            if "claims" in insights:
+                claims = insights["claims"]
+                summary += f"- 关键发现: {len(claims)} 条\n"
+            if "structure" in insights:
+                summary += f"- 章节: {len(insights['structure'])} 个\n"
+        parts.append(f"### {filename} 分析摘要\n{summary}")
 
     # Step 3: 跨文档综合分析
     try:
@@ -268,6 +306,7 @@ async def knowledge_analysis(
 
     # Step 2: 框架分析
     analysis_results = []
+    failed_count = 0
     for doc_id in doc_ids[:3]:
         try:
             insight = await tool_registry.execute(
@@ -280,18 +319,38 @@ async def knowledge_analysis(
                 organization_id=organization_id,
                 run_context=run_context,
             )
-            if insight and "Error" not in insight:
-                analysis_results.append(insight)
         except Exception as e:
             logger.warning(f"knowledge_analysis: extract_insights failed: {e}")
+            failed_count += 1
+            continue
 
+        # issue #301 #12：先校验再消费 —— 旧检查 `"Error" not in insight` 对
+        # 小写 "error" 键漏检，错误载荷被当"分析结果"写进报告。
+        parsed = _validated_insight_payload(insight)
+        if parsed is None:
+            failed_count += 1
+            logger.warning(
+                "knowledge_analysis: extract_insights returned no usable analysis for %s: %s",
+                doc_id, str(insight)[:120],
+            )
+            continue
+        analysis_results.append(insight)
+
+    framework_label = framework.upper() if framework != "comprehensive" else "综合"
     if analysis_results:
         combined = "\n\n".join(
             r[:800] for r in analysis_results
         )
-        parts.append(f"## {framework.upper() if framework != 'comprehensive' else '综合'}分析\n{combined}")
+        analysis_section = f"## {framework_label}分析\n{combined}"
+        if failed_count:
+            # 部分失败如实标注：成功结果照常呈现，但不得让读者以为全部提取成功。
+            analysis_section += f"\n(另有 {failed_count} 份文档洞察提取失败，未纳入分析)"
+        parts.append(analysis_section)
+    elif failed_count:
+        # 提取全部失败 ≠ "未找到可分析的文档"（那是另一种事实）。
+        parts.append(f"## {framework_label}分析\n(洞察提取失败：{failed_count} 份文档处理异常)\n")
     else:
-        parts.append(f"## {framework.upper() if framework != 'comprehensive' else '综合'}分析\n(未找到可分析的文档)\n")
+        parts.append(f"## {framework_label}分析\n(未找到可分析的文档)\n")
 
     # Step 3: 生成报告（可选）
     if generate_report and analysis_results:

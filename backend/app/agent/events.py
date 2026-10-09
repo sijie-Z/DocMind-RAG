@@ -36,7 +36,10 @@ EventType = Literal[
 ]
 
 ThinkingType = Literal["reasoning", "planning", "evaluation", "correction"]
-ReflectionResult = Literal["pass", "retry", "replan", "escalate"]
+# issue #301 #7/#8：反思降级三态中的第三态（无判定）——"unavailable" = 评估
+# 服务不可用；"unparsed" = 模型输出不含可用判定。两者都不是 "pass"（假成
+# 功），也都不是 run 失败（好 run 不因评估缺席被打坏）。
+ReflectionResult = Literal["pass", "retry", "replan", "escalate", "unavailable", "unparsed"]
 
 
 @dataclass
