@@ -20,10 +20,14 @@
    hybrid 反事实 4/4 仍 miss——锁住是为了让未来的路由变更显式发生）；
 6. keyword 臂的 `minimum_should_match`：带《…》文档全称的查询按「剔除标题 token
    后的 30%」（整数）计算；无全称查询保持 `"30%"`。
-   —— 2026-10-09 决策 b 落地（本 PR），闭掉评审发现的 msm 环无断言缺口
+   —— 2026-10-09 决策 b 落地（PR #323），闭掉评审发现的 msm 环无断言缺口
    （此前把常量改 10% 全量测试仍绿，见 `TestKeywordArmMsmCaliber`）。
+7. `第X条` 数形互为扩展（中文形⇄阿拉伯形并入 keyword 臂变体检索，查询侧、
+   不动索引）。—— 2026-10-09 决策 c 落地（本 PR）：`第七`≠`第7` 导致中文数词
+   查询的 gold 连候选都进不去（clause_chinese_7/chinese_12 的实验事实），
+   本文件以 `TestNumeralClauseNormalization` 为新锁。
 
-**c/d/e 三环（数形归一化 / has_keyword 臂标记 / MMR 适用性）仍受本闸门约束**——
+**d/e 两环（has_keyword 臂标记 / MMR 适用性）仍受本闸门约束**——
 任何修复其机制的 PR 必须显式更新本文件：这是刻意的「变更前先测量、变更要自觉」闸门。
 """
 
@@ -39,7 +43,10 @@ from app.rag.query_processor import (
 from app.rag.retriever import (
     HybridRetriever,
     _count_tokens_cjk,
+    _int_to_cn_clause_number,
     _minimum_should_match_for,
+    _numeral_clause_variants,
+    _parse_clause_number,
 )
 
 # 12 个 ASCII 术语的探针查询：extract_query_terms 对拉丁词的抽取无截断歧义。
@@ -313,3 +320,92 @@ class TestKeywordArmMsmCaliber:
         await retriever._keyword_hits("审计日志保留多久？", [], candidate_size=10)
         got = _msms()
         assert got and all(v == "30%" for v in got), f"无全称查询应保持 '30%'，实际 {got}"
+
+
+class TestNumeralClauseNormalization:
+    """机制 7（决策 c 新锁）：`第X条` 中文形⇄阿拉伯形互为扩展项（查询侧，不动索引）。
+
+    实验事实（#208 Phase 2）：cjk bigram 下 `第七`≠`第7`，中文数词查询
+    （clause_chinese_7 / clause_chinese_12）的 gold 连候选都进不去；语料
+    （`backend/evals/corpus/`）条号以阿拉伯写作（第7条/第12条）。修复：
+    查询侧把两种写法互为扩展项并入 keyword 臂的变体检索（每变体一次检索、
+    合并取最高分）——无需重索引，同物理索引 before/after 可对照。
+    """
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            ("《知识库服务管理办法》第七条规定了什么？", ["《知识库服务管理办法》第7条规定了什么？"]),
+            ("《知识库服务管理办法》第7条规定了什么？", ["《知识库服务管理办法》第七条规定了什么？"]),
+            ("第十二条关于数据删除的规定是什么？", ["第12条关于数据删除的规定是什么？"]),
+            # 空格写法按规范形生成两个方向（第9条 / 第九条）。
+            ("第 9 条对审计日志有什么规定？", ["第9条对审计日志有什么规定？", "第九条对审计日志有什么规定？"]),
+            # 100+ 只有阿拉伯向（中文形超出 1..99 映射范围，按 None 跳过）。
+            ("第一百零五条", ["第105条"]),
+            # 多跨度：每个「第X条」都参与转换。
+            ("第7条与第十二条冲突吗？", ["第7条与第12条冲突吗？", "第七条与第十二条冲突吗？"]),
+            # 等价写法（已是目标形）不产生冗余变体。
+            ("第7条", ["第七条"]),
+        ],
+    )
+    def test_mutual_expansion_pairs(self, query, expected):
+        assert _numeral_clause_variants(query) == expected
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "第一章总则是什么？",  # 「章」不动（须以 条 收尾）
+            "第3.5条的规定？",  # 数字段含小数点 → 非「第X条」跨度
+            "第零条",  # 0 不转换
+            "审计日志保留多久？",  # 无条号
+            "",
+        ],
+    )
+    def test_boundaries_generate_no_variant(self, query):
+        assert _numeral_clause_variants(query) == []
+
+    def test_roundtrip_1_to_99(self):
+        for n in range(1, 100):
+            cn = _int_to_cn_clause_number(n)
+            assert cn is not None and _parse_clause_number(cn) == n, f"n={n} 往返失败：{cn}"
+
+    def test_chinese_form_out_of_range(self):
+        assert _int_to_cn_clause_number(0) is None
+        assert _int_to_cn_clause_number(100) is None
+        # 解析口径与 evals/clauses.parse_cn_number 对齐（校准锚点）。
+        assert _parse_clause_number("一百零五") == 105
+        assert _parse_clause_number("两千") == 2000
+        assert _parse_clause_number("廿") is None
+
+    @pytest.mark.asyncio
+    async def test_keyword_arm_searches_both_numeral_forms(self, monkeypatch):
+        """端到端判别：中文数字查询的 keyword 臂真的发出阿拉伯形变体检索。
+
+        这是决策 c 与 keyword 臂的接线闭环——只加函数不接线、或把变体截断丢出，
+        本用例都会红（原查询仍必须被检索，变体紧随其后）。
+        """
+        captured: list[str] = []
+
+        async def fake_search(es_query):
+            captured.append(
+                es_query["query"]["bool"]["must"][0]["bool"]["should"][0]["multi_match"]["query"]
+            )
+            return {"hits": {"hits": []}}
+
+        monkeypatch.setattr(retriever_mod.ElasticsearchTools, "search_documents", fake_search)
+        monkeypatch.setattr(settings, "RAG_ENABLE_QUERY_REWRITE", True)
+        monkeypatch.setattr(settings, "RAG_QUERY_REWRITE_COUNT", 4)
+
+        retriever = HybridRetriever(openai_client=None)
+        await retriever._keyword_hits(
+            "《知识库服务管理办法》第七条规定了什么？", [], candidate_size=10
+        )
+        assert any("第7条" in q for q in captured), f"keyword 臂应检索阿拉伯形变体，实际 {captured}"
+        assert captured[0].startswith("《知识库服务管理办法》第七条"), "原查询仍须被检索"
+        assert len(captured) == 3, f"本地 2 条（原查询+去标点）+ 1 条数形变体，实际 {captured}"
+
+        captured.clear()
+        await retriever._keyword_hits("审计日志保留多久？", [], candidate_size=10)
+        assert captured and all("第" not in q for q in captured), (
+            f"无条号查询不得新增数形变体，实际 {captured}"
+        )
