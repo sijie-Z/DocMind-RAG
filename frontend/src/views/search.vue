@@ -236,7 +236,7 @@ import { useRouter } from 'vue-router'
 import { useDedupedMessage } from '@/utils/message'
 import { NIcon, NSpin, NRadioGroup, NRadio, NSpace, NCheckboxGroup, NCheckbox, NSelect, NTag, NButton, NModal } from 'naive-ui'
 import { SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline, SparklesOutline, DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline } from '@vicons/ionicons5'
-import { searchKnowledge, getSearchSuggestions, getSearchStats } from '@/api/search'
+import { searchKnowledge, getSearchSuggestions, getSearchStats, buildSearchPayload } from '@/api/search'
 import type { SearchResult, SearchStats } from '@/api/search'
 import { debounce } from 'lodash-es'
 import { useI18n } from 'vue-i18n'
@@ -264,7 +264,10 @@ const showDetailModal = ref(false)
 const loading = ref(false)
 const hasSearched = ref(false)
 
-const currentOrgId = computed(() => userStore.userInfo?.organizations?.[0]?.id)
+// P1 修复：原取值 organizations[0].id 是成员列表首项，多组织用户下未必是
+// 「当前组织」。统一改用 user store 的 currentOrgId 口径（当前组织
+// currentOrganizationId → user.organization_id 兜底）。
+const currentOrgId = computed(() => userStore.currentOrgId)
 
 const sortOptions = [
   { label: t('search.relevance'), value: 'relevance' },
@@ -303,16 +306,24 @@ const formatDate = (ds: string) => new Date(ds).toLocaleString('zh-CN')
 
 const handleSearch = async () => {
   if (!searchQuery.value.trim()) return
+  const orgId = currentOrgId.value
+  if (!orgId) {
+    // organization_id 为后端 schema 必填；无当前组织时请求必 422 ——
+    // 显式报错，不把校验失败伪装成「未找到相关结果」。
+    message.error(t('search.searchFailed') || t('common.error'))
+    return
+  }
   loading.value = true
   hasSearched.value = true
   try {
-    searchResults.value = await searchKnowledge({
+    searchResults.value = await searchKnowledge(buildSearchPayload({
       query: searchQuery.value,
-      // 'auto'（自动路由）时不发送 search_mode —— 与后端"缺省=自动"同语义
-      ...(searchType.value === 'auto' ? {} : { search_mode: searchType.value }),
-      file_types: selectedFileTypes.value.length ? selectedFileTypes.value : undefined,
-      limit: 50
-    })
+      organizationId: orgId,
+      // 'auto'（自动路由）时 buildSearchPayload 不发送 search_mode ——
+      // 与后端"缺省=自动"同语义（issue #225）
+      searchMode: searchType.value,
+      fileTypes: selectedFileTypes.value
+    }))
   } catch (e) {
     message.error(t('search.searchFailed') || t('common.error'))
   } finally {
