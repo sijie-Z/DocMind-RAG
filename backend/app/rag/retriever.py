@@ -332,7 +332,12 @@ class HybridRetriever:
         return None
 
     def _post_process(self, query: str, fused_hits: list[dict], top_k: int) -> list[dict]:
-        """Normalize, deduplicate, and filter retrieval results."""
+        """Normalize, deduplicate, and filter retrieval results.
+
+        #208 Phase 2 决策 a（doc 帽保守修法）：帽保持 2/文档，但计数移到质量过滤
+        之后——被任一质量闸门（含 0.15/0.10/0.07 终滤档）剔除的块不占帽位、
+        也不占 top_k 结果预算（此前计数在质量过滤前，被剔的块也占槽）。
+        """
 
         documents = []
         seen_docs: dict[str, int] = {}
@@ -355,11 +360,6 @@ class HybridRetriever:
             if not text:
                 continue
 
-            doc_id = str(source.get("document_id") or "")
-            seen_docs[doc_id] = seen_docs.get(doc_id, 0) + 1
-            if doc_id and seen_docs[doc_id] > 2:
-                continue
-
             snippet = self._build_snippet(text, query)
             overlap = self._compute_overlap(f"{source.get('filename', '')} {text[:1600]}", query_terms)
             has_kw = bool(hit.get("has_keyword")) or hit.get("keyword_rank") is not None
@@ -379,6 +379,23 @@ class HybridRetriever:
             score_pct = (float(hit.get("_score", 0)) - score_min) / score_range if score_range > 1e-9 else 0
             if score_pct < 0.3 and overlap < 0.05:
                 continue
+
+            # 终滤质量档（#208 Phase 2 决策 a）：判定式与原「Final quality check」一致，
+            # 仅前移为「先过滤、后计数」——被本档剔除的块同样不占 doc 帽槽位。
+            should_keep = (
+                overlap >= 0.15
+                or (has_kw and overlap >= 0.10)
+                or (has_kw and has_vec and overlap >= 0.07)
+            )
+            if not should_keep:
+                continue
+
+            # doc 帽 2/文档：只对通过质量过滤的块计数（被剔的块不占槽）。
+            doc_id = str(source.get("document_id") or "")
+            if doc_id:
+                seen_docs[doc_id] = seen_docs.get(doc_id, 0) + 1
+                if seen_docs[doc_id] > 2:
+                    continue
 
             # Normalize score
             fused_score = float(hit.get("_score", 0))
@@ -421,19 +438,7 @@ class HybridRetriever:
             if len(documents) >= top_k:
                 break
 
-        # Final quality check
-        filtered = []
-        for doc in documents:
-            ov = doc.get("overlap_score", 0)
-            should_keep = (
-                ov >= 0.15
-                or (doc.get("has_keyword") and ov >= 0.10)
-                or (doc.get("has_keyword") and doc.get("has_vector") and ov >= 0.07)
-            )
-            if should_keep:
-                filtered.append(doc)
-
-        return filtered
+        return documents
 
     # ---- Fallback ----
 
