@@ -9,6 +9,8 @@
 - parse_snapshot 对损坏 / 未知版本一律返回 None（安全降级为"无快照"）。
 """
 
+import logging
+
 from app.agent.checkpoint import (
     CHECKPOINT_VERSION,
     HISTORY_CAP,
@@ -186,3 +188,61 @@ def test_value_level_drift_is_normalized_on_read_and_write():
     assert ExecutionContext.from_checkpoint_dict(
         {"query": "q", "artifacts": {"iterations_used": 3}}
     ).artifacts["iterations_used"] == 3
+
+
+def test_artifact_consumer_key_shape_gate_read_and_write(caplog):
+    """#319（F-CRIT-1 残族）：artifacts 闸门从"一张 int 键表"扩成"每个被消费键
+    一条形状契约"（盘点见 exec_context 注释）：
+    - review / quality_gate：run_report 以映射消费（`.get`）——非映射是
+      F-CRIT-1 全链实证的毒丸形态（resume 收尾 AttributeError → 错误兜底
+      回写 → 复炸）：整键删；
+    - quality_gate.fatal_issues：`list(...)` 消费——非列表是 TypeError（int）
+      或逐字符垃圾（str）：坏则删子键；零消费点的 passed 原样保留；
+    - review.recommendation：str 契约，坏则删子键；
+    - iterations_used=True/False：bool 拒斥——isinstance(True, int) 为真，
+      但 JSON bool 是类型漂移，写入方只写 int，静默等价为 1/0 即"过归一化"
+      （评审 MV4 缺口：bool 分支此前零用例钉住）。
+
+    修前红基线：读侧坏 review/quality_gate 原样进运行态（F-CRIT-1 形态）、
+    写侧坏值原样落回快照（毒丸自续通道）。变异点：去掉映射/子键/bool 任一段
+    → 对应断言红。
+    """
+    with caplog.at_level(logging.WARNING):
+        # 读侧：映射键非映射 → 整键删；子键坏 → 删子键；bool → 删键
+        restored = ExecutionContext.from_checkpoint_dict({
+            "query": "q",
+            "artifacts": {
+                "review": "boom",
+                "quality_gate": {"passed": True, "fatal_issues": 123},
+                "iterations_used": True,
+            },
+        })
+    assert "review" not in restored.artifacts, "非映射 review = F-CRIT-1 毒丸形态（整键删）"
+    assert restored.artifacts["quality_gate"] == {"passed": True}, (
+        "fatal_issues 非列表 → 删子键；零消费点的 passed 原样保留"
+    )
+    assert "iterations_used" not in restored.artifacts, "bool 拒斥（不得静默等价为 1）"
+
+    # 写侧：运行态坏值 → 落盘前规整（错误兜底回写 = 毒丸自续的正是这条路径）
+    ctx = ExecutionContext(query="q")
+    ctx.artifacts["review"] = "boom"
+    ctx.artifacts["quality_gate"] = {"passed": False, "fatal_issues": "boom"}
+    ctx.artifacts["iterations_used"] = False
+    written = ctx.to_checkpoint_dict()["artifacts"]
+    assert "review" not in written, "坏值原样回写 = 毒丸自续（整键删）"
+    assert written["quality_gate"] == {"passed": False}, "坏子键不落回快照"
+    assert "iterations_used" not in written
+
+    # 合法值逐字节透传（误伤对照：全契约形态 + 域外但类型合法的值）
+    legit = {
+        "iterations_used": -3,
+        "quality_gate": {"passed": False, "fatal_issues": ["空结果", "重复内容"]},
+        "review": {"recommendation": "revise", "issue_count": 1, "high_severity_count": 0},
+    }
+    ctx_ok = ExecutionContext(query="q")
+    ctx_ok.artifacts.update(legit)
+    assert ctx_ok.to_checkpoint_dict()["artifacts"] == legit
+    assert ExecutionContext.from_checkpoint_dict(
+        {"query": "q", "artifacts": legit}
+    ).artifacts == legit
+    assert any("值级漂移" in r.message for r in caplog.records), "降级必须留痕"

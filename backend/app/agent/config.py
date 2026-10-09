@@ -8,7 +8,7 @@ page reloads and server restarts.
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,108 @@ DEFAULT_DISABLED_TOOLS: list[str] = [
     "execute_sql",
     "mcp_call",  # 高危：宿主机文件读写 + 子进程环境变量泄露，默认禁用
 ]
+
+
+# ── 值级规整（issue #319；与 #287 artifacts 闸门同族，读/写同源）──────────────
+# 快照 / Redis 里"合法 JSON、值类型漂移"的配置字段：坏值会被直接消费
+# （max_iterations 与迭代计数比较、max_total_tokens 预算判断、temperature /
+# timeout 进 LLM 调用参数……），炸在 run 中段；错误兜底又经 to_dict 把坏值
+# **原样回写**快照（毒丸自续——#319 全链实证 chain B）。读（from_dict）与写
+# （to_dict）两侧过同一道闸门：好值原样通过，坏值降级为默认（不传该字段 =
+# 数据类默认值）并留 warning 行迹——绝不把坏值带进运行态，也绝不让它落回
+# 快照。闸门只看**类型**不看域（0 / 负值 / 域外枚举串等类型合法的值一律
+# 透传；域的兜底由各自消费方的既有默认分支负责）。
+# 冻结：本表必须与 AgentConfig 的 dataclass 字段集全等
+# （test_issue319_value_gate_residuals 的冻结用例；新增字段不登记 = 拉红）。
+
+
+def _is_int(value: Any) -> bool:
+    """整数口径（bool 拒斥：JSON true/false 是类型漂移，写入方只写 int）。"""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_str(value: Any) -> bool:
+    return isinstance(value, str)
+
+
+def _is_bool(value: Any) -> bool:
+    return isinstance(value, bool)
+
+
+def _is_opt_str(value: Any) -> bool:
+    return value is None or isinstance(value, str)
+
+
+def _is_list_of_str(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(x, str) for x in value)
+
+
+def _is_opt_list_of_str(value: Any) -> bool:
+    return value is None or _is_list_of_str(value)
+
+
+_CONFIG_FIELD_SPECS: dict[str, Callable[[Any], bool]] = {
+    "model": _is_str,
+    "deep_think_model": _is_str,
+    "quick_think_model": _is_str,
+    "temperature": _is_number,
+    "max_tokens": _is_int,
+    "max_plan_steps": _is_int,
+    "max_iterations": _is_int,
+    "max_tool_calls_per_turn": _is_int,
+    "max_retries_per_step": _is_int,
+    "enable_planning": _is_bool,
+    "enable_reflection": _is_bool,
+    "enable_tools": _is_bool,
+    "enable_memory": _is_bool,
+    "enable_thinking": _is_bool,
+    "enable_experience": _is_bool,
+    "enable_skills": _is_bool,
+    "planning_mode": _is_str,  # Literal 域值由 planner 的默认分支兜底（类型级闸门）
+    "tool_tags": _is_opt_list_of_str,
+    # disabled_tools 拒斥 None/坏形状（不是 _is_opt_*）：消费方按"非空才过滤"
+    # 语义读它——漂移成 None 会静默放开 DEFAULT_DISABLED_TOOLS 的兜底禁单；
+    # 删键 → 数据类默认值（含服务端强制禁用项），安全性恢复。
+    "disabled_tools": _is_list_of_str,
+    "system_prompt_override": _is_opt_str,
+    "personality": _is_str,
+    "agent_id": _is_str,
+    "enable_checkpoint": _is_bool,
+    "timeout": _is_number,
+    "max_context_tokens": _is_int,
+    "max_total_tokens": _is_int,
+    "plan_max_tokens": _is_int,
+    "reflection_max_tokens": _is_int,
+}
+
+
+def _normalize_config_values(raw: dict, *, source: str) -> dict:
+    """值级规整（#319；纯函数，除 warning 外无副作用）。
+
+    逐字段按 _CONFIG_FIELD_SPECS 校验：类型合法原样保留，坏值删键并留
+    warning（读侧=取数据类默认值；写侧=落盘缺键、下次读取同样得默认值）。
+    非本数据类字段（未知/旧键）静默忽略——与 from_dict 既有过滤同语义。
+    """
+    clean: dict[str, Any] = {}
+    for key, value in raw.items():
+        spec = _CONFIG_FIELD_SPECS.get(key)
+        if spec is None:
+            continue
+        if spec(value):
+            clean[key] = value
+        else:
+            logger.warning(
+                "checkpoint config 值级漂移（key=%s, type=%s, %s）："
+                "按默认值降级（坏值不得入运行态/快照）",
+                key,
+                type(value).__name__,
+                source,
+            )
+    return clean
 
 
 @dataclass
@@ -110,7 +212,10 @@ class AgentConfig:
     reflection_max_tokens: int = 400
 
     def to_dict(self) -> dict:
-        return {
+        # 写侧闸门（#319）：运行态里万一存在类型漂移的坏值（外部写入者/未来
+        # bug），落盘的必须是规整后的形态——坏值删键后由读侧取默认值，毒丸
+        # 绝不落回快照/Redis 续给下一次 resume。
+        return _normalize_config_values({
             "model": self.model,
             "deep_think_model": self.deep_think_model,
             "quick_think_model": self.quick_think_model,
@@ -138,12 +243,21 @@ class AgentConfig:
             "max_total_tokens": self.max_total_tokens,
             "plan_max_tokens": self.plan_max_tokens,
             "reflection_max_tokens": self.reflection_max_tokens,
-        }
+        }, source="config-write")
 
     @classmethod
     def from_dict(cls, data: dict) -> "AgentConfig":
-        filtered = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
-        return cls(**filtered)
+        # 读侧闸门（#319）：容器级漂移（非映射）→ 整取默认配置（resume /
+        # 会话加载的读取点不得被坏容器炸掉：chain B' 实证 from_dict("boom")
+        # `.items()` AttributeError）；字段级漂移 → 删字段 = 数据类默认值。
+        if not isinstance(data, dict):
+            logger.warning(
+                "checkpoint config 值级漂移（容器, type=%s, config-read）："
+                "按默认配置降级（坏容器不得炸读取点）",
+                type(data).__name__,
+            )
+            return cls()
+        return cls(**_normalize_config_values(data, source="config-read"))
 
     async def save_to_redis(self, session_id: str, ttl: int = 86400 * 7) -> None:
         """Persist config to Redis for session recovery."""

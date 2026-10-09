@@ -350,8 +350,22 @@ async def test_truncated_json_snapshot_resume_degrades_and_heals(db_factory):
                 isinstance(m, dict) for m in healed["history"]
             ),
         ),
+        # ── #319（F-CRIT-1 残族 + chain B）────────────────────────────────
+        (
+            lambda snap: snap["ctx"]["artifacts"].__setitem__("review", "boom"),
+            lambda healed: "review" not in healed["ctx"]["artifacts"],
+        ),
+        (
+            lambda snap: snap["config"].__setitem__("max_iterations", "很多"),
+            lambda healed: isinstance(healed["config"].get("max_iterations"), int),
+        ),
     ],
-    ids=["artifacts-iterations-not-int", "history-not-list"],
+    ids=[
+        "artifacts-iterations-not-int",
+        "history-not-list",
+        "artifacts-review-not-mapping",
+        "config-value-drift",
+    ],
 )
 @pytest.mark.asyncio
 async def test_value_drift_snapshot_resume_degrades_and_heals(edit, healed_ok, db_factory):
@@ -362,9 +376,21 @@ async def test_value_drift_snapshot_resume_degrades_and_heals(edit, healed_ok, d
     续跑剩余步骤，新快照里坏值被修复（规整后的形态）——读侧闸门 + 写侧"以
     校验后值为准"两半同时闭合。
 
-    变异点：去掉读侧规整 → resume 抛对应异常 → 红（"resume 不炸"面）；
-    写侧规整由 test_checkpoint_roundtrip 的写侧断言单独钉住（"不以坏值
-    回写"面）。
+    #319 增补（F-CRIT-1 / chain B 全链）：
+    - review="boom"：修前 resume 收尾 run_report `"boom".get` AttributeError
+      （评审全链实证），错误兜底原样回写、复炸；修后读侧闸门整键删。
+    - config.max_iterations="很多"：修前 executor 比较 TypeError、错误兜底把坏
+      config 原样回写、复炸；修后 config 读写闸门降级为默认（int）。
+    （config 容器级漂移单列于 test_config_container_drift_resume_degrades —
+    整取默认配置会改变后续调用面，不适配本参数组的等调用数断言。）
+
+    变异点：修前（读写两侧闸门皆无）→ resume 抛对应异常 / 坏值复炸 → 红
+    （红基线在案）。修后单侧拆除由各自专门的断言面钉住（读侧判别在
+    test_resume_engine / roundtrip 的 shape 断言；写侧在 roundtrip /
+    test_issue319 的写侧断言）；本组钉的是端到端不变量——两侧闸门任一在位，
+    healed 快照即无坏值（artifacts 组两层互为"不落回快照"的冗余保证）；
+    config 组单侧即可判别（读侧失控 → executor 比较处 TypeError 先于任何
+    回写，写侧闸门无从介入）。
     """
     client, calls = _fake_openai_client()
     svc = AgentService(openai_client=client)
@@ -395,6 +421,47 @@ async def test_value_drift_snapshot_resume_degrades_and_heals(edit, healed_ok, d
     # 快照被修复：坏值不再存在（写回的是规整后的形态）
     _, healed = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
     assert healed_ok(healed), f"新快照必须已修复坏值（实际 {healed.get('ctx', {}).get('artifacts')} / history={healed.get('history')!r}）"
+
+
+@pytest.mark.asyncio
+async def test_config_container_drift_resume_degrades_to_defaults(db_factory):
+    """#319 chain B'（容器级）：快照 config 被带外改成非映射（"boom"）——
+    修前 resume 读取点 `from_dict("boom")` `.items()` AttributeError（未经
+    try 包裹，先于认领后的 agent.run；每次 resume 必崩，租约还被悬持）；
+    修后整取默认配置继续跑，收尾新快照把 config 修复为合法映射（自愈）。
+
+    本用例不与值级参数组共用等调用数断言：容器级降级 = **全部**字段回默认，
+    enable_reflection 等开关随之打开，resume 会多出反思/审查的假 LLM 调用
+    （调用数不再固定为 3）——这里只钉"不炸 + 跑完 + 快照自愈"三件事。
+
+    变异点：去掉 from_dict 的容器级闸门 → AttributeError → 红。
+    """
+    client, calls = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    events = await _crash_after_n_completed_steps(agen, n=2)
+    task_id = _task_id_of(events)
+    assert calls["n"] == 2
+
+    async with db_factory() as db:
+        row = await db.get(AgentTask, task_id)
+        snap = row.context_snapshot
+        snap["config"] = "boom"
+        await db.execute(
+            text("UPDATE agent_tasks SET context_snapshot = :s WHERE id = :tid"),
+            {"s": json.dumps(snap, ensure_ascii=False), "tid": task_id},
+        )
+        await db.commit()
+
+    events2 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID)]
+
+    assert any(e.type == "done" for e in events2), "坏容器不得炸 resume"
+    assert calls["n"] >= 3, "三步产物至少都产出了（额外反思/审查调用不在此处钉）"
+    task = await _get_task(db_factory, task_id)
+    assert task.status == TaskStatus.COMPLETED, "收尾不得被坏容器卡死"
+    _, healed = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
+    assert isinstance(healed["config"], dict), "新快照 config 已修复为合法映射"
+    assert healed["config"].get("max_iterations") == 20, "降级 = 数据类默认值（读侧取默认）"
 
 
 @pytest.mark.asyncio
