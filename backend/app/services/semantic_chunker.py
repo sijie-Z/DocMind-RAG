@@ -168,7 +168,12 @@ class SemanticChunker:
         - section_title: 所属章节/条款标题（如有）
         - index: 块序号
         """
-        if not text or len(text) < 500:
+        if not text or not text.strip():
+            # issue #301 批 D（#28）：空/全空白文本返回**零个** chunk。修前返回
+            # [{"text": ""}]——这个空 chunk 会绕过 doc_processor 的"无 chunks_data"
+            # 空内容护栏（列表长度为 1），空内容一路向量化并写 INDEXED。
+            return []
+        if len(text) < 500:
             # 短文本不做语义切分，但仍尝试提取条款标题
             title = detect_section_title(text.strip()[:80]) if text else None
             return [{"text": text, "metadata": {"index": 0, "section_title": title}}]

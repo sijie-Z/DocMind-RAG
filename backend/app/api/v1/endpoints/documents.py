@@ -227,16 +227,40 @@ async def upload_document(
         if schedule_local:
             try:
                 from app.worker.doc_processor import processor
-                task = asyncio.create_task(processor.process(doc_id, job.id))
+                # 先建协程再装成 task：create_task 失败时显式 close()，避免
+                # "coroutine was never awaited" 泄漏（失败分支的干净收尾）。
+                coro = processor.process(doc_id, job.id)
+                try:
+                    task = asyncio.create_task(coro)
+                except Exception:
+                    coro.close()
+                    raise
                 _background_tasks.add(task)
                 task.add_done_callback(_background_tasks.discard)
                 logger.info("Kafka unavailable; scheduled in-process document processing")
             except Exception as proc_err:
+                # issue #301 批 D（#23）：此前只把 job 置 FAILED——doc 永远卡 PENDING、
+                # 响应仍是 success:true「上传成功」，状态机与事实脱节（没有消费者会再
+                # 推进这件事）。现在 doc 同步置 FAILED（带原因），响应如实返回
+                # success:false + 失败语义，客户端可见（文件本身已保存，故仍为 201）。
                 logger.error(f"In-process processing setup failed: {proc_err}")
                 job.status = KnowledgeJobStatus.FAILED
                 job.error_message = f"本地处理任务启动失败: {str(proc_err)}"
                 job.finished_at = datetime.now()
+                new_doc.status = DocumentStatus.FAILED
+                new_doc.parse_error = f"本地处理任务启动失败: {str(proc_err)}"
                 await db.commit()
+                return {
+                    "success": False,
+                    "message": "文件已保存，但文档处理任务启动失败（文档已标记为失败，可稍后重建）",
+                    "data": {
+                        "id": new_doc.id,
+                        "filename": new_doc.filename,
+                        "title": new_doc.title,
+                        "status": new_doc.status.value if hasattr(new_doc.status, 'value') else str(new_doc.status),
+                        "parse_error": new_doc.parse_error
+                    }
+                }
 
         # 8. 返回，防止 refresh 导致的懒加载报错，使用 to_dict
         return {

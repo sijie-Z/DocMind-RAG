@@ -194,6 +194,15 @@ class DocumentParser:
                         "tables_found": len(table_mds)
                     })
 
+            # issue #301 批 D（#28）：全页无有效文本（扫描件 + OCR 依赖缺失是生产
+            # 常见组合）必须显式失败，对齐 _parse_docx 的先例——修前这里返回
+            # content="" + 一个空 chunk，空内容会一路向量化并被写成 INDEXED
+            # （列表"已完成"、内容为空、永远搜不到，parse_error=None）。
+            if not text_content.strip():
+                raise Exception(
+                    "未提取到有效文本内容：可能是扫描件（OCR 依赖 pytesseract/pdf2image 不可用），或文件本身为空"
+                )
+
             return {
                 "content": text_content.strip(),
                 "content_length": len(text_content),

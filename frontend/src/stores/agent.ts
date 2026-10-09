@@ -161,6 +161,15 @@ export const useAgentStore = defineStore('agent', () => {
         })
         break
 
+      case 'warning':
+        // issue #301 批 D（#22）：后端在「回答已生成、但会话落库失败」时发射该
+        // 事件（此前落库失败完全静默，用户刷新后本轮问答凭空消失）。store 若
+        // 无 case 会再次把唯一可见的失败信号丢掉 —— 落进事件列表。
+        updateLastAssistant((msg) => {
+          msg.events.push(event)
+        })
+        break
+
       case 'chunk':
         updateLastAssistant((msg) => {
           msg.content += event.content

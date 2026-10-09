@@ -140,6 +140,8 @@ async def agent_chat(
     effective_org_id = await require_organization(current_user, db)
 
     async def event_stream():
+        assistant_message_id = None
+        save_error: str | None = None
         try:
             # Build AgentConfig：用户已保存配置为基底 + 请求字段覆盖（issue #242）。
             # 此前基底被整体忽略——设置页旋钮保存成功也永不生效。
@@ -167,7 +169,6 @@ async def agent_chat(
                 if event.type == "chunk":
                     final_answer += event.content
 
-            assistant_message_id = None
             # Save interaction to session (user query + assistant response)
             if body.session_id:
                 # issue #277（评审 or1268 R2 收账）：会话落库 org 必须与运行读侧
@@ -175,13 +176,26 @@ async def agent_chat(
                 # 凡 org 来自 token_organization_id 回退（或走无组织超管回源）的用户，
                 # 会话落库 None 而运行读 42 → feedback lesson 命名空间写读不一致、
                 # 静默失效。
-                assistant_message_id = await _save_session_interaction(
-                    body.session_id,
-                    current_user.id,
-                    body.query,
-                    effective_org_id,
-                    final_answer,
-                )
+                try:
+                    assistant_message_id = await _save_session_interaction(
+                        body.session_id,
+                        current_user.id,
+                        body.query,
+                        effective_org_id,
+                        final_answer,
+                    )
+                except Exception as save_exc:
+                    # issue #301 批 D（#22）：落库失败不再静默。回答已流给用户，
+                    # 但必须显式告知（warning 事件 + done.saved=false + ERROR 日志）：
+                    # 修前 done 照发、无任何信号，刷新后本轮问答消失。
+                    save_error = log_safe(save_exc)
+                    logger.error(
+                        "Failed to persist agent interaction (session=%s user=%s): %s",
+                        body.session_id,
+                        current_user.id,
+                        save_error,
+                        exc_info=True,
+                    )
 
         except Exception as e:
             # 完整异常/堆栈只进服务端日志；客户端收通用文案（CodeQL 信息暴露修复：
@@ -190,7 +204,18 @@ async def agent_chat(
             error_data = {"type": "error", "content": "Agent 执行出错，请稍后重试"}
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
+        if save_error is not None:
+            warning_data = {
+                "type": "warning",
+                "content": "回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见",
+            }
+            yield f"data: {json.dumps(warning_data, ensure_ascii=False)}\n\n"
+
         done_data: dict[str, Any] = {"type": "done", "content": ""}
+        if body.session_id:
+            # saved=false 专门标记"本轮落库出错"（None 且无异常 = 越权拒绝或空回复，
+            # 两者都不写、也都没有落库错误）。
+            done_data["saved"] = save_error is None
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         yield f"data: {json.dumps(done_data)}\n\n"
@@ -269,6 +294,7 @@ async def resume_agent_task(
     async def event_stream():
         final_answer = prefix
         assistant_message_id = None
+        save_error: str | None = None
         try:
             async for event in agent_service.resume_chat(
                 task_id,
@@ -287,13 +313,24 @@ async def resume_agent_task(
             # （effective_org_id，含 token 组织回退 / 无组织超管回源），
             # 不传 raw current_user.organization_id——两者对回退用户不相等。
             if session_id:
-                assistant_message_id = await _save_session_interaction(
-                    session_id,
-                    current_user.id,
-                    task.query,
-                    effective_org_id,
-                    final_answer,
-                )
+                try:
+                    assistant_message_id = await _save_session_interaction(
+                        session_id,
+                        current_user.id,
+                        task.query,
+                        effective_org_id,
+                        final_answer,
+                    )
+                except Exception as save_exc:
+                    # issue #301 批 D（#22）：与 /chat 同口径——落库失败显式告知。
+                    save_error = log_safe(save_exc)
+                    logger.error(
+                        "Failed to persist resumed interaction (session=%s user=%s): %s",
+                        session_id,
+                        current_user.id,
+                        save_error,
+                        exc_info=True,
+                    )
         except Exception as e:
             # 完整异常/堆栈只进服务端日志；客户端收通用文案（CodeQL 信息暴露修复：
             # 异常原文此前直出 SSE）。
@@ -301,7 +338,16 @@ async def resume_agent_task(
             error_data = {"type": "error", "content": "Agent 恢复执行出错，请稍后重试"}
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
+        if save_error is not None:
+            warning_data = {
+                "type": "warning",
+                "content": "回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见",
+            }
+            yield f"data: {json.dumps(warning_data, ensure_ascii=False)}\n\n"
+
         done_data: dict[str, Any] = {"type": "done", "content": "", "task_id": task_id}
+        if session_id:
+            done_data["saved"] = save_error is None
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
@@ -758,8 +804,12 @@ async def _save_session_interaction(
     S6 安全加固：会话归属按 user_id 校验（与 _load_session_messages 一致），
     绝不允许把消息写进其他用户的会话。
 
-    Returns: the assistant message ID (or None if the session is not owned
-    by the caller / there is no response / on error).
+    Returns: the assistant message ID；None 表示"没有需要写的助手文本（空回复）"
+    或"会话不属于调用者（显式拒绝，日志已记录）"。
+
+    Raises: 落库失败（DB 抖动等）时**原样上抛**，由调用方显式处理——issue #301
+    批 D（#22）：修前这里把异常吞成 None，与"空回复/越权拒绝"无法区分，调用方
+    done 照发且无任何提示，用户刷新后本轮问答凭空消失。
     """
     try:
         async with AsyncSessionLocal() as session:
@@ -827,5 +877,8 @@ async def _save_session_interaction(
             await session.commit()
             return assistant_msg_id
     except Exception as e:
-        logger.warning(f"Failed to save interaction: {e}")
-        return None
+        # issue #301 批 D（#22）：记录后**原样上抛**（不再吞成 None）。调用方
+        # （/chat、/resume）拿到异常后负责显式告知：warning 事件 + done.saved=false
+        # + ERROR 日志——落库失败绝不静默。
+        logger.error(f"Failed to save interaction: {e}")
+        raise

@@ -561,7 +561,14 @@ class FileUploadService:
         return content_type_map.get(file_extension, 'application/octet-stream')
 
     async def _process_document_async(self, document_id: str) -> None:
-        """异步处理文档解析"""
+        """异步处理文档解析。
+
+        issue #301 批 D（#29）：此前本壳的 except 只留一条 error 日志——job 创建
+        窗口 DB 不可用等异常被静默吞掉后，文档永久卡在 UPLOADED（无 FAILED、无
+        job 行、无重试入口）。现在：异常必显形（ERROR + exc_info）并**尽力**把
+        文档状态推进为 FAILED（带原因）；兜底标记自身失败时响亮记录（critical），
+        绝不再次静默。
+        """
         try:
             logger.info(f"开始异步处理文档: {document_id}")
             from app.models.knowledge_job import (
@@ -593,7 +600,40 @@ class FileUploadService:
                 logger.info(f"文档全流程处理完成: {document_id}")
 
         except Exception as e:
-            logger.error(f"文档异步处理失败: {document_id}, 错误: {str(e)}")
+            logger.error(f"文档异步处理失败: {document_id}, 错误: {str(e)}", exc_info=True)
+            await self._mark_document_failed_best_effort(document_id, e)
+
+    async def _mark_document_failed_best_effort(
+        self, document_id: str, error: Exception
+    ) -> None:
+        """兜底路径：尽力把文档推进为 FAILED（issue #301 批 D / #29）。
+
+        单独开 session（异常可能就发生在原连接/session 上）。已 INDEXED 的文档
+        不因晚到的兜底异常被改写（无法归因的异常宁可不写状态）；本方法自身失败
+        只允许响亮记录（critical）——"文档可能卡在 uploaded"这一事实必须留痕。
+        """
+        try:
+            async with AsyncSessionLocal() as session:
+                doc = await session.get(Document, document_id)
+                if doc is None:
+                    logger.error(f"无法标记失败：文档不存在 {document_id}")
+                    return
+                if doc.status == DocumentStatus.INDEXED:
+                    logger.error(
+                        f"文档 {document_id} 已 INDEXED，跳过兜底失败标记"
+                        f"（原异常: {error}）"
+                    )
+                    return
+                doc.status = DocumentStatus.FAILED
+                doc.parse_error = f"异步处理失败: {str(error)}"
+                await session.commit()
+                logger.info(f"文档 {document_id} 已标记为 FAILED（兜底路径）")
+        except Exception as mark_err:
+            logger.critical(
+                f"文档 {document_id} 异步处理失败，且 FAILED 状态写入也失败"
+                f"（文档可能卡在 uploaded）: {mark_err}",
+                exc_info=True,
+            )
 
     async def get_upload_status(self, file_hash: str) -> dict[str, Any]:
         """
