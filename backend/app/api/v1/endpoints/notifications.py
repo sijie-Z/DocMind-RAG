@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Body, Depends, Query, WebSocket, WebSocketDisconnect
@@ -85,18 +86,45 @@ async def notification_ws(
     finally:
         notification_ws_manager.disconnect(user_id, websocket)
 
-def _is_legacy_missing_route_columns(exc: Exception) -> bool:
-    """异常是否确为「旧库没有 target_route/target_id 列」（issue #301）。
+_LEGACY_ROUTE_COLUMN = r"(?:[a-z_]+\.)?(?:target_route|target_id)"
+_MISSING_COLUMN_PATTERNS = (
+    # MySQL/MariaDB：Unknown column 'notifications.target_route' in 'field list'
+    re.compile(rf"unknown column '{_LEGACY_ROUTE_COLUMN}'"),
+    # SQLite：no such column: notifications.target_route
+    re.compile(rf"no such column: ?{_LEGACY_ROUTE_COLUMN}\b"),
+)
 
-    判定要求错误文本**同时**提到目标列与缺列特征（MySQL 1054 / SQLite
-    "no such column"）——缺一不可，避免把任意 SQL 故障当成缺列回退。
+
+def _error_body(exc: Exception) -> str:
+    """取「消息主体段」用于缺列判定（issue #301 评审 B1）。
+
+    execute 期 `str(exc)` 必含 SQLAlchemy 渲染的 `[SQL: ...]`（生产查询文本，
+    恒含 target_route/target_id）与 `[parameters: ...]`（绑定值回显：q 用户可控、
+    user_id 结构性含 "1054"），两者会把朴素子串判定击穿——因此判定只允许读
+    驱动原文：① 优先 `exc.orig`（DBAPI 原始异常，不含任何渲染回显段）；
+    ② 无 orig 时退回 str(exc) 并剥离 `[SQL: ...]`/`[parameters: ...]` 段。
     """
-    text = str(exc).lower()
-    mentions_column = "target_route" in text or "target_id" in text
-    mentions_missing_column = (
-        "1054" in text or "unknown column" in text or "no such column" in text
-    )
-    return mentions_column and mentions_missing_column
+    orig = getattr(exc, "orig", None)
+    if orig is not None:
+        return str(orig).lower()
+    body = str(exc).lower()
+    for marker in ("[sql: ", "[parameters: "):
+        body = body.split(marker, 1)[0]
+    return body
+
+
+def _is_legacy_missing_route_columns(exc: Exception) -> bool:
+    """异常是否确为「旧库没有 target_route/target_id 列」（issue #301 / 评审 B1）。
+
+    在消息主体段内要求**短语与精确列名紧邻**：`unknown column 'X'` /
+    `no such column: X`，X 为 target_route/target_id（可带表名限定）。
+    抗回显污染的机制论证：`[SQL: ...]`/`[parameters: ...]` 是 SQLAlchemy
+    渲染器附加段，**从不属于驱动原文**（`exc.orig`）——剥离后仅剩驱动消息；
+    瞬时故障（锁等待/掉线）的驱动消息不含该短语，参数值与查询文本也无法
+    再拼出「短语+列名」的紧邻形态（独立子串“与”条件已废弃）。
+    """
+    body = _error_body(exc)
+    return any(p.search(body) for p in _MISSING_COLUMN_PATTERNS)
 
 
 @router.get("/", response_model=NotificationListResponse, summary="获取通知列表")

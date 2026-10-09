@@ -44,6 +44,22 @@ class TestFilesProxyStorageErrors:
         resp = client.get("/files/avatars/1.png")
         assert resp.status_code == 404, "对象确实不存在 → 维持 404"
 
+    def test_no_such_object_variant_still_404(self, client, monkeypatch):
+        """NoSuchObject 变体同属「对象缺失」（评审 m2：该分支此前无用例钉住）。"""
+        _pin_minio_failure(monkeypatch, _s3_error("NoSuchObject"))
+        resp = client.get("/files/avatars/1.png")
+        assert resp.status_code == 404
+
+    def test_missing_bucket_is_503_not_404(self, client, monkeypatch, caplog):
+        """NoSuchBucket 是存储故障（桶都没了，不是「文件不存在」）——评审 m2。"""
+        _pin_minio_failure(monkeypatch, _s3_error("NoSuchBucket"))
+        with caplog.at_level(logging.ERROR, logger="app.main"):
+            resp = client.get("/files/avatars/1.png")
+        assert resp.status_code == 503, "桶缺失不得伪装 404「文件不存在」"
+        assert any(
+            r.name == "app.main" and r.levelno >= logging.ERROR for r in caplog.records
+        )
+
     def test_internal_error_is_503_not_404(self, client, monkeypatch, caplog):
         _pin_minio_failure(monkeypatch, _s3_error("InternalError"))
         with caplog.at_level(logging.ERROR, logger="app.main"):

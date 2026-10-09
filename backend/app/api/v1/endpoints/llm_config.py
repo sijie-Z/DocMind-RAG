@@ -97,8 +97,9 @@ def _corrupt_placeholder(config_id: str, raw: str | None, reason: str) -> dict[s
 
     此前坏值被 `except json.JSONDecodeError: continue` 静默丢弃——条目凭空
     消失、total 少 1、零日志。现在保留占位条目：列表里可见（invalid=true）、
-    可被删除/重写修复；原始值仅存服务端字段 `_raw_value`（`_public_config`
-    永不外发），供运维排查。
+    可被删除或 **PUT 全量重写**修复（评审 m1：PATCH 部分更新不清除
+    invalid/invalid_reason 标记，不构成修复路径）；原始值仅存服务端字段
+    `_raw_value`（`_public_config` 永不外发），供运维排查。
     """
     entry: dict[str, Any] = {
         "id": config_id,
