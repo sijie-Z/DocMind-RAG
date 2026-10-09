@@ -293,8 +293,43 @@ class PERAgentLoop:
                 run_state = resume.get("run") or {}
                 rebuilt_replans = int(run_state.get("replan_attempts", 0) or 0)
                 rebuilt_feedback = run_state.get("replan_feedback") or ""
-                rebuilt_partial = resume.get("partial_output") or ""
+                # 值级校验（issue #287/R1，与 ctx.artifacts 同族）：partial/output
+                # 与 history 的"合法 JSON、类型漂移"坏值此前会炸在收尾拼接
+                # （`partial_prefix + pass_output` TypeError）或元素访问
+                # （`msg.get` AttributeError）上，且错误兜底回写会让坏值自续
+                # （build_envelope 对非 str 的 partial 直接抛）。坏值降级为
+                # 默认（无前缀 / 无冻结历史）并留 warning；结构级/其他字段的
+                # 损坏仍走下方整体降级（与 parse_snapshot 同语义）。
+                rebuilt_partial = resume.get("partial_output")
+                if not isinstance(rebuilt_partial, str):
+                    if rebuilt_partial is not None:
+                        logger.warning(
+                            "checkpoint 快照值级漂移（partial_output, type=%s, task=%s）："
+                            "按默认降级（空前缀）",
+                            type(rebuilt_partial).__name__,
+                            log_safe(task_id),
+                        )
+                    rebuilt_partial = ""
                 frozen_history = resume.get("history")
+                if isinstance(frozen_history, list):
+                    clean_history = [m for m in frozen_history if isinstance(m, dict)]
+                    if len(clean_history) != len(frozen_history):
+                        logger.warning(
+                            "checkpoint 快照值级漂移（history 含非映射元素, task=%s）："
+                            "坏元素丢弃（%d/%d 保留）",
+                            log_safe(task_id),
+                            len(clean_history),
+                            len(frozen_history),
+                        )
+                    frozen_history = clean_history
+                elif frozen_history is not None:
+                    logger.warning(
+                        "checkpoint 快照值级漂移（history, type=%s, task=%s）："
+                        "按默认降级（无冻结历史）",
+                        type(frozen_history).__name__,
+                        log_safe(task_id),
+                    )
+                    frozen_history = None
                 plan_data = resume.get("plan")
                 rebuilt_plan: Plan | None = None
                 if plan_data:

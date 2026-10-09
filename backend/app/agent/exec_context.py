@@ -29,6 +29,38 @@ _REPLAY_DIR = Path("benchmark/replay")
 # uuid hex（12/32 位）天然满足；'/'、'\\'、':'、'..' 等一律无法通过。
 _SAFE_FILE_STEM = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 
+# ── 值级校验（issue #287/R1）────────────────────────────────────────────────
+# 快照里"合法 JSON、值类型漂移"的已知键：值读入运行态后会被比较/累加
+# （executor 的 `>= max_iterations`、`+1`），坏值会炸在派发路径，且错误兜底
+# 回写会把坏值原样带回快照（毒丸自续）。读（from_checkpoint_dict）与写
+# （to_checkpoint_dict）两侧过同一道闸门：好值原样通过，坏值降级为默认
+# （删键 = 消费方 `.get(key, 0)` 的默认语义）并留 warning 行迹——绝不把坏值
+# 带进运行态，也绝不让它落回快照。
+_ARTIFACT_INT_KEYS: frozenset[str] = frozenset({"iterations_used"})
+
+
+def _normalize_artifact_values(raw: dict[str, Any], *, source: str) -> dict[str, Any]:
+    """值级规整（#287/R1；纯函数，除 warning 外无副作用）。
+
+    已知键的期望类型（见 _ARTIFACT_INT_KEYS）不符时：丢弃该键（消费方按
+    `.get(key, 0)` 默认语义继续）+ warning 留痕；其余键一律原样保留。
+    """
+    clean: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key in _ARTIFACT_INT_KEYS and not (
+            isinstance(value, int) and not isinstance(value, bool)
+        ):
+            logger.warning(
+                "checkpoint artifacts 值级漂移（key=%s, type=%s, %s）："
+                "按默认值降级（该键为整数计数口径，坏值不得入运行态/快照）",
+                log_safe(key),
+                type(value).__name__,
+                source,
+            )
+            continue
+        clean[key] = value
+    return clean
+
 
 def _replay_file_for(task_id: str | None) -> Path | None:
     """由 task_id 构造本地 replay 文件落点；不满足约束 → None（拒绝拼接）。
@@ -217,12 +249,17 @@ class ExecutionContext:
     # artifacts 里——不序列化它们，resume 后预算口径断裂、迭代计数归零）。
 
     def to_checkpoint_dict(self) -> dict[str, Any]:
-        """快照形状（v1）。与 to_dict() 的差异只增不改。"""
+        """快照形状（v1）。与 to_dict() 的差异只增不改。
+
+        artifacts 过值级闸门（#287/R1）：写时以校验后值为准——运行态里
+        万一存在类型漂移的坏值（外部写入者/未来 bug），落盘的是规整后的
+        形态而不是原样坏值（毒丸绝不落回快照续给下一次 resume）。
+        """
         data = self.to_dict()
         data.update({
             "v": 1,
             "current_step_id": self.current_step_id,
-            "artifacts": self.artifacts,
+            "artifacts": _normalize_artifact_values(self.artifacts, source="snapshot-write"),
         })
         return data
 
@@ -233,14 +270,17 @@ class ExecutionContext:
         逐字段容错（缺失取默认）；整体结构是否可用由更外层的
         checkpoint.parse_snapshot 统一判定（损坏 → 安全降级为"无快照"）。
         不经过 complete_step()：那会按 failed 状态二次追加 failures，与恢复的
-        failures 列表重复。
+        failures 列表重复。artifacts 的值级漂移在此降级为默认并留痕（#287/R1，
+        见 _normalize_artifact_values）。
         """
         ctx = cls(query=data.get("query") or "")
         ctx.task_id = data.get("task_id") or ctx.task_id
         ctx.goal = data.get("goal") or ""
         ctx.plan_summary = data.get("plan_summary") or ""
         ctx.current_step_id = data.get("current_step_id")
-        ctx.artifacts = dict(data.get("artifacts") or {})
+        ctx.artifacts = _normalize_artifact_values(
+            dict(data.get("artifacts") or {}), source="snapshot-read",
+        )
         ctx.total_tokens = int(data.get("total_tokens") or 0)
         ctx.progress = float(data.get("progress") or 0.0)
         ctx.duration_ms = float(data.get("duration_ms") or 0.0)

@@ -147,3 +147,42 @@ def test_parse_snapshot_degrades_safely_on_any_damage():
     assert parse_snapshot(good) is good
     good_with_plan = {"v": CHECKPOINT_VERSION, "ctx": {"query": "q"}, "plan": {"id": "p"}}
     assert parse_snapshot(good_with_plan) is good_with_plan
+
+
+def test_value_level_drift_is_normalized_on_read_and_write():
+    """#287/R1 值级规整：合法 JSON、值类型漂移的已知键（iterations_used 是整数
+    计数口径）在**读**（from_checkpoint_dict）与**写**（to_checkpoint_dict）两侧
+    过同一道闸门——坏值降级为默认（删键 = 消费方 `.get(key, 0)` 的默认语义）
+    并留 warning；绝不把坏值带进运行态，也绝不让它落回快照（错误兜底回写 =
+    毒丸自续的正是这条路径）。
+
+    变异点：去掉任一侧规整 → 对应断言红（读侧：坏值原样进 artifacts；写侧：
+    坏值原样进快照 dict）。
+    """
+    # 读侧：快照里值类型漂移 → 降级；无关键原样保留
+    restored = ExecutionContext.from_checkpoint_dict({
+        "query": "q",
+        "artifacts": {"iterations_used": "很多", "quality_gate": {"passed": True}},
+    })
+    assert "iterations_used" not in restored.artifacts, (
+        "坏值不得进运行态（降级为默认：消费方 .get(k, 0)）"
+    )
+    assert restored.artifacts["quality_gate"] == {"passed": True}, "无关键原样保留"
+
+    # 写侧：运行态里若存在坏值（未来新写入者/内存漂移）→ 落盘前规整，
+    # 坏值绝不落回快照（否则错误兜底回写把毒丸续给下一次 resume）
+    ctx = ExecutionContext(query="q")
+    ctx.artifacts["iterations_used"] = "很多"
+    ctx.artifacts["review"] = {"recommendation": "pass"}
+    written = ctx.to_checkpoint_dict()["artifacts"]
+    assert written.get("iterations_used") != "很多", "坏值原样回写 = 毒丸自续（必须规整）"
+    assert "iterations_used" not in written
+    assert written["review"] == {"recommendation": "pass"}
+
+    # 好值往返不失真（规整不得误伤正常计数）
+    ctx_ok = ExecutionContext(query="q")
+    ctx_ok.artifacts["iterations_used"] = 3
+    assert ctx_ok.to_checkpoint_dict()["artifacts"]["iterations_used"] == 3
+    assert ExecutionContext.from_checkpoint_dict(
+        {"query": "q", "artifacts": {"iterations_used": 3}}
+    ).artifacts["iterations_used"] == 3

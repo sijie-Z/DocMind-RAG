@@ -10,6 +10,7 @@
 - partial_output：resume 的最终答案 = 快照前缀 + 续跑新增（前端旧流不回放）。
 """
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -317,4 +318,64 @@ async def test_deep_corrupt_snapshot_degrades_to_fresh_planning(corrupt):
     assert any(e.type == "done" for e in events)
     assert memory.interactions == [("原始问题", "结果-s1结果-s2")], (
         "损坏快照的残留字段（partial 前缀）不得混入新 run 的最终答案"
+    )
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        lambda p: p["ctx"]["artifacts"].__setitem__("iterations_used", "很多"),
+        lambda p: p.__setitem__("partial_output", 123),
+        lambda p: p.__setitem__("history", "boom"),
+        lambda p: p.__setitem__("history", [42, {"role": "user", "content": "真实消息"}]),
+    ],
+    ids=[
+        "artifacts-iterations-not-int",
+        "partial-output-not-str",
+        "history-not-list",
+        "history-element-not-mapping",
+    ],
+)
+@pytest.mark.asyncio
+async def test_value_level_drift_degrades_per_value_not_poison(corrupt, caplog):
+    """#287/R1 值级漂移（与"深结构损坏"同族，但坏的是**值形状**而非结构）：
+    重建段消费的每个值位过类型闸门——坏值降级为默认并留 warning，绝不炸、
+    绝不流入运行态。
+
+    修复前实测形态（每种都"每次 resume 必炸"）：
+    - artifacts.iterations_used="很多" → executor `"很多" >= max_iterations`
+      TypeError（派发前，任何 LLM 调用之前）；
+    - partial_output=123 → 收尾拼接 `123 + pass_output` TypeError；
+    - history="boom" / 含非映射元素 → 元素访问 `msg.get` AttributeError。
+
+    变异点：去掉重建段对应值位闸门（还原坏值直通）→ 本参数组以对应异常红。
+    """
+    steps = [
+        PlanStep(id="s1", description="一", status="completed", result="R1"),
+        PlanStep(id="s2", description="二", dependencies=["s1"]),
+    ]
+    payload = _crashed_payload(steps=steps)
+    corrupt(payload)
+    planner = _CountingPlanner()
+    loop, memory, executed = _make_loop(planner=planner)
+
+    with caplog.at_level(logging.WARNING):
+        events = [e async for e in loop.run("原始问题", task_id="t-1", resume=payload)]
+
+    assert planner.calls == 0, "值级坏数据不得改变'复用快照计划'这一语义"
+    assert executed == ["s2"], "剩余步骤照常续跑（坏值已降级，不得毒丸）"
+    assert any(e.type == "done" for e in events)
+    assert memory.interactions == [("原始问题", "结果-s2")], (
+        "坏值不得混入最终答案（坏 partial 前缀降级为空串）"
+    )
+    ctx = loop.checkpoint_live["ctx"]
+    assert isinstance(ctx.artifacts.get("iterations_used", 0), int), (
+        "运行态里的迭代计数必须是规整后的整型（写回快照的值同源）"
+    )
+    live_history = loop.checkpoint_live["history"]
+    assert live_history is None or all(isinstance(m, dict) for m in live_history), (
+        "冻结历史必须是映射列表（坏值降级，绝不流入运行态/快照）"
+    )
+    assert any("值级漂移" in r.message for r in caplog.records), (
+        "降级必须留痕（warning：值级漂移）"
     )

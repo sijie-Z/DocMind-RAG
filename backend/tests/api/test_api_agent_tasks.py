@@ -10,7 +10,10 @@ tests/unit/test_agent_recovery_flow.py 的 sqlite 全链用例覆盖）；末段
 与评审探针同款驱动方式——替身测不出 None 组织语义）。
 """
 
+import asyncio
+import contextlib
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -67,6 +70,16 @@ def _task(status: TaskStatus = TaskStatus.RUNNING) -> AgentTask:
         current_step_id="s2",
         retry_count=1,
     )
+
+
+async def _wait_until(pred, timeout: float = 3.0) -> bool:
+    """轮询等待（HTTP 取消路径的后台收尾单元跨任务完成断言用）。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pred():
+            return True
+        await asyncio.sleep(0.01)
+    return pred()
 
 
 def test_get_task_requires_auth(client):
@@ -327,6 +340,129 @@ async def test_no_org_user_is_rejected_fail_closed_on_both_endpoints(tmp_path, m
     async with factory() as db:
         t = await db.get(AgentTask, task_id)
     assert t.status == TaskStatus.RUNNING and t.retry_count == 0, "任务未被推进"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_resume_http_cancel_releases_lease_and_immediate_retry_runs(tmp_path, monkeypatch):
+    """#300/F1 判别用例（真 ASGI 取消路径——经 HTTP 客户端任务取消触发，非直调
+    aclose）：客户端中止 resume SSE 流后，本次认领的租约必须归还——锁清空 +
+    立即重试不再被 409 TASK_BUSY 拒、从断点跑完（COMPLETED）。
+
+    修复前实测（评审 R9 仪器化 trace）：enter(release_lease=True) → save 被调
+    → 取消在首个 shield 的外层 await 处打断（anyio 任务组取消的层级触发式重复
+    投递）→ release 分支不可达 → 租约悬置至 900s（本用例红：锁未还 / 重试 409）。
+
+    机制：Starlette StreamingResponse 把流跑在任务组子任务里，取消反复打在
+    "外层 await"而不动受保护任务——所以 save 与 release 必须并入同一受保护
+    单元（service._checkpoint_disconnect）。变异点：把单元拆回 save/release
+    两个独立 shield → 本用例红。
+
+    走真实链路：真实路由 + prepare_resume + checkpoint（sqlite）+ 假 LLM，
+    仅执行层用 httpx ASGITransport 驱动（与评审探针同款驱动方式）。
+    """
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    import app.models  # noqa: F401 — 注册全部表，供 create_all
+    from app.agent.config import AgentConfig
+    from app.agent.exec_context import ExecutionContext
+    from app.agent.loop import PERAgentLoop
+    from app.agent.planner import Plan, PlanStep
+    from app.core.database import Base
+    from app.main import app
+
+    # sqlite 工厂（checkpoint 与端点模块共用）+ 副作用隔离
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'f1lease.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(checkpoint, "AsyncSessionLocal", factory)
+
+    async def _save(self, ttl=86400 * 7):
+        return False
+
+    monkeypatch.setattr(ExecutionContext, "save", _save)
+    monkeypatch.setattr(PERAgentLoop, "_write_experiences", AsyncMock())
+
+    fake_redis = _FakeRedisLock()
+    monkeypatch.setattr(checkpoint, "redis_client", fake_redis)
+
+    # 种一个"真实可续跑"的任务：org=1、s1 已完成、s2 pending（断点续跑一步）；
+    # config 钉死各增强开关，保证 LLM 调用数可精确断言
+    resume_cfg = AgentConfig(
+        enable_reflection=False, enable_memory=False, enable_skills=False,
+        enable_experience=False, enable_thinking=False,
+    )
+    task_id = await checkpoint.create_task(user_id=1, organization_id=1, query="原问题")
+    ctx = ExecutionContext(query="原问题", task_id=task_id)
+    plan = Plan(id="p1", goal="g", steps=[
+        PlanStep(id="s1", description="一", status="completed", result="R1"),
+        PlanStep(id="s2", description="二", dependencies=["s1"]),
+    ], completed_steps=1)
+    assert await checkpoint.save_checkpoint(
+        task_id=task_id, ctx=ctx, plan=plan, trigger="after_each_step",
+        partial_output="R1", config=resume_cfg, session_id="",
+    )
+
+    calls = {"n": 0}
+    started = asyncio.Event()
+
+    async def _create(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            started.set()
+            await asyncio.sleep(30)  # 挂住首个请求，直到测试取消它
+        msg = SimpleNamespace(content=f"步骤结果{calls['n']}", tool_calls=None, role="assistant")
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=msg, finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create = _create
+    monkeypatch.setattr(agent_service, "_client", fake_client, raising=False)
+
+    app.dependency_overrides[get_current_user] = lambda: _mock_user()
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://f1lease"
+        ) as c:
+            req = asyncio.create_task(c.post(f"/api/v1/agent/tasks/{task_id}/resume"))
+            assert await asyncio.wait_for(started.wait(), timeout=10), (
+                "resume 流未在期限内进入执行（假 LLM 未被调用）"
+            )
+            req.cancel()  # = 客户端中止 SSE 流（ASGI 任务取消路径）
+            with contextlib.suppress(asyncio.CancelledError):
+                await req
+
+            # 断流兜底（受保护单元）在后台完成：租约必须归还
+            lock_key = checkpoint._lock_key(task_id)
+            assert await _wait_until(lambda: lock_key not in fake_redis.store, timeout=5), (
+                "HTTP 取消路径必须归还租约（修复前：release 分支不可达，"
+                "被兜底快照续到 900s）"
+            )
+
+            # 断流不改状态：任务保持 RUNNING = 可恢复（语义不变）
+            async with factory() as db:
+                t = await db.get(AgentTask, task_id)
+            assert t.status == TaskStatus.RUNNING
+
+            # 立即重试：不得被 TaskBusy 拒绝；从断点跑完（COMPLETED）
+            r = await c.post(f"/api/v1/agent/tasks/{task_id}/resume")
+            assert r.status_code == 200, (
+                f"断流后立即重试被拒（{r.status_code} {r.text[:200]}）——租约未归还"
+            )
+            assert r.headers["content-type"].startswith("text/event-stream")
+            assert '"type": "done"' in r.text
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert calls["n"] == 2, "续跑只应新发起 1 次 LLM 调用（s2 重跑一次）"
+    async with factory() as db:
+        t = await db.get(AgentTask, task_id)
+    assert t.status == TaskStatus.COMPLETED, "重试必须从断点跑完"
+    assert fake_redis.store == {}, "收尾后不得残留租约"
     await engine.dispose()
 
 
