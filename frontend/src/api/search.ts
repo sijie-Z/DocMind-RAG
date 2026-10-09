@@ -2,16 +2,49 @@ import request from '@/utils/request'
 
 export interface SearchRequest {
   query: string
+  // P1 修复（UI 验收 round2 待办#2）：organization_id 是后端
+  // KnowledgeSearchRequest 的必填字段，缺它请求 100% 422（此前搜索页
+  // 即因此全程不可用）。由调用方按「用户当前组织」口径取值组包。
+  organization_id: number
+  // 结果条数。schema 字段名为 top_k（ge=1, le=50，默认 settings.TOP_K_RESULTS=10）。
+  // 旧的 limit 从未被 schema 接受（pydantic 静默丢弃），勿再使用。
+  top_k?: number
   // issue #225：后端字段为 search_mode（hybrid/vector/keyword；缺省=自动路由）。
   // 旧的 search_type 字段从未在请求 schema 里出现过（一直被后端静默丢弃），不再发送。
   search_mode?: 'hybrid' | 'vector' | 'keyword'
+  // 后端 KnowledgeSearchRequest 目前不消费 file_types（预存在漂移，已记录）；
+  // 保持既有发送行为，空数组时不发送。
   file_types?: string[]
-  tags?: string[]
-  date_start?: string
-  date_end?: string
-  size_min?: number
-  size_max?: number
-  limit?: number
+}
+
+// top_k 默认值与后端 schema 对齐（settings.TOP_K_RESULTS=10，schema 上限 le=50）。
+export const SEARCH_TOP_K = 10
+
+export interface SearchPayloadInput {
+  query: string
+  /** 用户当前组织（必填——后端 schema 层强制） */
+  organizationId: number
+  /** 'auto'（或缺省）= 不发送 search_mode，走后端自动路由（issue #225 同语义） */
+  searchMode?: 'auto' | 'hybrid' | 'vector' | 'keyword'
+  /** 已选文件类型；空数组 = 不发送 */
+  fileTypes?: string[]
+}
+
+/**
+ * 组包 /knowledge/search 请求体（P1 搜索 422 修复）。
+ * 纯函数、无副作用——单测直接断言「与后端 schema 对齐」的全字段组包。
+ */
+export function buildSearchPayload(input: SearchPayloadInput): SearchRequest {
+  return {
+    query: input.query,
+    organization_id: input.organizationId,
+    top_k: SEARCH_TOP_K,
+    // 'auto' = 自动路由：不发送该字段（与后端「缺省=自动」同语义）
+    ...(input.searchMode && input.searchMode !== 'auto'
+      ? { search_mode: input.searchMode }
+      : {}),
+    ...(input.fileTypes && input.fileTypes.length ? { file_types: input.fileTypes } : {}),
+  }
 }
 
 export interface SearchResult {
