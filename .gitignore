@@ -43,10 +43,12 @@ backend/benchmark/patterns.json
 backend/benchmark/suggested_skills.json
 backend/benchmark/reports/
 benchmark/replay/
+# RAG 评估报告（跑分产物；口径与数据在 backend/evals/，#208 Phase 1）
+backend/evals/reports/
 
 # Trace exports
 traces/
 
 # Logs
 backend/logs/
-frontend/src/views/chat/������.txt
+frontend/src/views/chat/������.txt
