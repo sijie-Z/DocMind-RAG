@@ -244,6 +244,11 @@ class TestMetrics:
         assert hi == 1.0 and 0.6 < lo < 1.0
         assert wilson_ci(0, 0) is None
 
+    def test_wilson_exact_values_baseline(self):
+        # 基线数字 21/25 的精确区间（评审 MR2b：z=1.5 等数值变异曾全绿存活——
+        # 这里把区间钉到 abs=1e-6，远小于任何 z/口径扰动，精确抓红）。
+        assert wilson_ci(21, 25) == pytest.approx((0.6534599, 0.9359665), abs=1e-6)
+
     def test_aggregate_rates_and_error_isolation(self):
         outcomes = [
             evaluate_item(_item("p1", near=(("f.md", "第8条"),)), [_hit_result("f.md", "第7条")]),
@@ -272,6 +277,39 @@ class TestMetrics:
         assert agg["mrr"] == pytest.approx((1.0 + 0.0 + 0.5) / 3)
         assert agg["empty_accuracy"] == pytest.approx(0.5)
         assert agg["error_items"] == ["e1"]
+
+    def test_aggregate_all_errors_yields_none_rates(self):
+        """全错误集：各 rate/CI 必须为 None（空分母语义，绝不伪造 0）。
+
+        评审 MR5（`_rate` 空分母回退 ``0.0``）此前全绿存活——本用例钉死该语义。
+        """
+        outcomes = [
+            evaluate_item(_item("e1"), [], status="error", error="boom"),
+            evaluate_item(_item("e2"), [], status="error", error="boom2"),
+        ]
+        agg = aggregate(outcomes, cutoffs=(1, 3, 5))
+        assert agg["counts"] == {
+            "total": 2,
+            "evaluated": 0,
+            "errors": 2,
+            "positives": 0,
+            "negatives": 0,
+            "positives_with_near_miss": 0,
+        }
+        assert agg["error_items"] == ["e1", "e2"]
+        for key in (
+            "clause_hit@1",
+            "clause_hit@3",
+            "clause_hit@5",
+            "near_miss@1",
+            "near_miss@3",
+            "near_miss@5",
+            "mrr",
+            "empty_accuracy",
+            "clause_hit_ci95",
+            "empty_accuracy_ci95",
+        ):
+            assert agg[key] is None, f"{key} 空分母必须为 None，而不是 {agg[key]!r}"
 
 
 # ---------------------------------------------------------------------------

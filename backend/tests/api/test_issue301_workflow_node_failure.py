@@ -36,6 +36,17 @@ _FAIL_NODE_FLOW = {
     "edges": [{"id": "e1", "source": "n0", "target": "out1"}],
 }
 
+# 全成功图对照（评审 P3-3：S5"过翻"变异——success 硬编码 False——此前在旧用例零红；
+# 两模式都不得把全成功图误报为失败/落 failed）。
+_OK_NODE_FLOW = {
+    "nodes": [
+        {"id": "in1", "type": "input", "data": {"prompt": "{{input}}"},
+         "position": {"x": 0, "y": 0}},
+        {"id": "out1", "type": "output", "data": {}, "position": {"x": 1, "y": 0}},
+    ],
+    "edges": [{"id": "e1", "source": "in1", "target": "out1"}],
+}
+
 
 def _make_user():
     from unittest.mock import MagicMock
@@ -179,5 +190,61 @@ async def test_stream_node_failure_complete_payload_honest_and_record_failed():
         assert "不允许的协议" in (ex.error_message or "")
         assert ex.completed_at is not None
         assert ex.output_data["success"] is False
+    finally:
+        await db_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_nonstream_success_graph_reports_success_and_completed():
+    """全成功图对照（非流式，评审 P3-3）：success=true、记录 completed、无 error_message。
+
+    方向防过翻：S5（引擎 success 硬编码 False）曾在旧用例零红——本用例精确抓红。
+    """
+    from app.models.workflow import WorkflowExecution
+
+    app, db_engine, factory, wf_id = await _setup_app(_OK_NODE_FLOW)
+    try:
+        r = await _request(factory, wf_id, stream=False)
+        assert r.status_code == 200, r.text[:500]
+        body = r.json()
+        assert body["success"] is True, f"全成功图不得被误报失败: {body}"
+        data = body["data"]
+        assert data["status"] == "completed"
+        assert data["output"]["success"] is True
+        by_id = {nr["node_id"]: nr for nr in data["node_results"]}
+        assert by_id["in1"]["status"] == "completed"
+        assert by_id["out1"]["status"] == "completed"
+
+        async with factory() as s:
+            ex = (await s.execute(select(WorkflowExecution))).scalars().one()
+        assert ex.status == "completed"
+        assert not ex.error_message
+        assert ex.output_data["success"] is True
+    finally:
+        await db_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_stream_success_graph_complete_payload_true_and_record_completed():
+    """全成功图对照（流式，评审 P3-3）：无 error/workflow_error、complete 载荷
+    success=true、记录 completed——方向对照（不得被过翻修复打成 failed）。"""
+    from app.models.workflow import WorkflowExecution
+
+    app, db_engine, factory, wf_id = await _setup_app(_OK_NODE_FLOW)
+    try:
+        r = await _request(factory, wf_id, stream=True)
+        assert r.status_code == 200
+        events = _parse_sse_events(r.text)
+        types = [t for t, _ in events]
+        assert "workflow_error" not in types, r.text[:800]
+        assert "error" not in types, r.text[:800]
+        assert types[-1] == "complete", types
+        complete = next(d for t, d in events if t == "complete")
+        assert complete["success"] is True, f"全成功图不得被误报失败: {complete}"
+
+        async with factory() as s:
+            ex = (await s.execute(select(WorkflowExecution))).scalars().one()
+        assert ex.status == "completed"
+        assert not ex.error_message
     finally:
         await db_engine.dispose()

@@ -90,7 +90,7 @@ python -m evals run     # 跑全套 → evals/reports/latest.{json,md}
   覆盖 条号直查（含中文/阿拉伯数字对照对，作为 #2.10 数字归一化的基线证据）、
   语义/数值/跨文档/来源冲突 与 3 条负难例（不存在的条号、语料外主题、词面陷阱）。
 - 真实环境冒烟基线（2026-10-09，dev ES + 本地 Qwen3-Embedding 0.6B，无 LLM 辅助）：
-  **ClauseHit@1 80% / @3 = @5 84%**（95% CI 65.4–93.6%，n=25）、NearMiss@5 12.5%、
+  **ClauseHit@1 80% / @3 = @5 84%**（95% CI 65.3–93.6%，n=25）、NearMiss@5 12.5%、
   MRR 0.82、负例 EmptyAcc 100%、0 错误。失败集中在「带文档全称的条号直查」
   （title token 淹没条号）与中文/阿拉伯数字写法对照——原始证据见 PR #311 正文与
   `_orchestrate/round2/exec_eval208.md`（含 seed/run 原文与报告 JSON/MD）。

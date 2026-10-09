@@ -78,6 +78,10 @@ class TestReflectionUnavailable:
         assert len(events) == 1, "不得再发出携带捏造分数的摘要事件"
         # 不编造分数：不得渲染任何"完成度 N"分数（文案提到"未获得完成度判定"是允许的）。
         assert all("完成度 " not in e.content for e in events)
+        # 人读暴露文本钉死（评审 m1：N1 空串变异曾全绿存活）——降级文案必须如实
+        # 说明为何没有判定，不得被静默清空。
+        assert events[0].content and "评估服务异常" in events[0].content
+        assert "未获得完成度判定" in events[0].content
         # 结构化决策记录（run report 的 reflect_decisions 读它）。
         ctx.record_decision.assert_called_once()
         args = ctx.record_decision.call_args.args
@@ -428,6 +432,29 @@ class TestSkillConsumersHonesty:
         assert "Analysis failed" not in out
         assert "洞察提取失败" in out
         # 全部提取失败时不再"生成报告"（旧行为把错误载荷拼进报告 sections）。
+        assert "generate_report" not in fake.calls
+
+    @pytest.mark.asyncio
+    async def test_knowledge_analysis_rejects_payload_without_insights_anchor(self, monkeypatch):
+        """结构锚缺位（无 insights 键）的未知载荷 → 拒收，不得当分析结果消费。
+
+        评审 m2：N2（删 `"insights" not in parsed` 结构锚）此前 27 全绿存活——
+        该锚是防未来形态漂移的护栏，本用例把它钉住。
+        """
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        no_anchor = json.dumps({"filename": "x.md", "document_id": "doc1"})
+        fake = _FakeExecuteRecorder({
+            "search_knowledge_base": "- ID: doc1 | 文件名: x.md",
+            "extract_insights": no_anchor,
+            "generate_report": "报告已生成",
+        })
+        monkeypatch.setattr(tool_registry, "execute", fake)
+
+        out = await skills.knowledge_analysis("分析")
+
+        assert "洞察提取失败" in out, "缺结构锚的载荷必须被拒收（不得当分析结果消费）"
         assert "generate_report" not in fake.calls
 
     @pytest.mark.asyncio

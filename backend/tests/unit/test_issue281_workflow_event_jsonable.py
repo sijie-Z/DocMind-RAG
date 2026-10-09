@@ -66,6 +66,9 @@ class TestToJsonable:
         assert out["nested"]["pair"] == [1, 2]
         assert out["at"] == "2026-01-02T03:04:05"
         assert isinstance(out["obj"], str)
+        # dict 键统一 str 化（评审 V3：去 str(k) 变异曾全绿存活——JSON 对象键
+        # 必须为字符串；int/tuple 等非 str 键都必须转换）。
+        assert _to_jsonable({1: "a", (2, 3): "b"}) == {"1": "a", "(2, 3)": "b"}
 
     def test_primitives_pass_through_unchanged(self):
         for v in [None, True, 0, 1.5, "s"]:

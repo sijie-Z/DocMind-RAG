@@ -98,13 +98,31 @@ INSERT INTO notifications (user_id, title, content, type, is_read, target_route,
 VALUES (1054, 'hello', 'world', 'system', 0, 'Knowledge', '2', '2026-01-01 00:00:00');
 """
 
+# 评审 m6：半旧库形态——有 target_route、缺 target_id（钉住列名交替的 target_id 半边）。
+_NO_TARGET_ID_SCHEMA = """
+CREATE TABLE notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  content TEXT NOT NULL,
+  type VARCHAR(50) NOT NULL DEFAULT 'system',
+  is_read BOOLEAN NOT NULL DEFAULT 0,
+  target_route VARCHAR(100),
+  created_at DATETIME
+);
+INSERT INTO notifications (user_id, title, content, type, is_read, target_route, created_at)
+VALUES (7, 'hello', 'world', 'system', 0, 'Knowledge', '2026-01-01 00:00:00');
+"""
+
 
 async def _capture_real_endpoint_error(
-    tmp_path, *, legacy: bool, lock: bool, user_id: int, q: str | None
+    tmp_path, *, legacy: bool, lock: bool, user_id: int, q: str | None,
+    schema: str | None = None,
 ):
     """在真 sqlite 上跑端点同款查询（count 子查询 + 列表查询），捕获真实 SQLAlchemy 异常。
 
     - `legacy=True`：旧形态表（无 target_route/target_id）→ 真缺列异常；
+    - `schema=`：显式指定建表脚本（评审 m6：只缺 target_id 的半旧库形态）；
     - `lock=True`：独立连接 BEGIN EXCLUSIVE 制造真锁故障（评审 p1 手法），
       q/user_id 走端点原样参数化路径，渲染文本含真实 `[SQL:]`/`[parameters:]` 回显。
     """
@@ -114,7 +132,7 @@ async def _capture_real_endpoint_error(
     )
     conn = sqlite3.connect(dbf)
     conn.executescript(
-        _LEGACY_NOTIFICATIONS_SCHEMA if legacy else _FULL_NOTIFICATIONS_SCHEMA
+        schema or (_LEGACY_NOTIFICATIONS_SCHEMA if legacy else _FULL_NOTIFICATIONS_SCHEMA)
     )
     conn.commit()
     conn.close()
@@ -304,6 +322,37 @@ class TestNotificationsFallbackHonesty:
         ]
         assert len(warnings) == 1, "缺列回退必须恰留一条 warning（原 bug 为零留痕）"
         assert "target_route" in warnings[0].getMessage()
+
+    @pytest.mark.asyncio
+    async def test_legacy_missing_only_target_id_still_falls_back(self, tmp_path, caplog):
+        """评审 m6：只缺 target_id 的半旧库（有 target_route）同样命中缺列判定与回退。
+
+        M-R12（正则列名交替去掉 target_id）此前 19 passed 全绿存活；本用例钉住
+        「target_id 半边」——实现本身正确，缺的只是判别用例。
+        """
+        exc = await _capture_real_endpoint_error(
+            tmp_path, legacy=True, lock=False, user_id=7, q=None,
+            schema=_NO_TARGET_ID_SCHEMA,
+        )
+        assert exc is not None
+        assert _is_legacy_missing_route_columns(exc) is True, (
+            f"只缺 target_id 必须被识别为旧库缺列: {exc}"
+        )
+
+        rows = [(1, "文档已就绪", "c1", "document", False, datetime.datetime(2026, 1, 1))]
+        db = _ScriptedSession(
+            exc, [_RowResult(scalar=1), _RowResult(scalar=1), _RowResult(rows=rows)]
+        )
+        with caplog.at_level(logging.WARNING, logger=_NOTE):
+            out = await _call_list(db)
+
+        assert out["total"] == 1
+        assert out["items"][0]["target_route"] is None
+        warnings = [
+            r for r in caplog.records
+            if r.name == _NOTE and r.levelno == logging.WARNING
+        ]
+        assert len(warnings) == 1, "缺列回退必须恰留一条 warning"
 
     @pytest.mark.asyncio
     async def test_normal_path_keeps_route_fields(self):

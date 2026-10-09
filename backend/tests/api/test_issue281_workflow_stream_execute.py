@@ -252,3 +252,52 @@ async def test_stream_setup_failure_outer_branch_emits_error_then_done():
         assert ex.completed_at is not None
     finally:
         await db_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_failed_finalize_survives_poisoned_session(monkeypatch):
+    """毒化会话（上一次 commit 因 JSON 列写入失败 → PendingRollback）后，失败收尾
+    仍须落 failed —— rollback 先行回归网（评审 V6：去 rollback 先行全绿存活）。
+
+    构造对齐真实事故形态（workflow.py:311-313 注释记载的 datetime 案例同类）：
+    workflow_result 分支写 node_results 的 commit 抛 StatementError（不可 JSON 化
+    对象进 JSON 列），会话进入 PendingRollback；随后事件泵 except 调
+    mark_execution_failed——该助手必须 rollback 先行，否则再 commit 抛
+    PendingRollbackError，记录卡 running（同场景旧 bug 原样存活）。
+    """
+    from langchain_core.messages import HumanMessage
+
+    from app.models.workflow import WorkflowExecution
+    from app.services.workflow_engine import WorkflowEngine
+
+    class _PoisonNodeResult:
+        """model_dump(mode="json") 仍产出不可 JSON 化值（不规整的漏网形态）。"""
+
+        def model_dump(self, mode="python"):
+            return {"node_id": "in1", "output": {"messages": [HumanMessage(content="毒")]}}
+
+    monkeypatch.setattr(WorkflowEngine, "get_node_results", lambda self: [_PoisonNodeResult()])
+
+    app, db_engine, factory, wf_id = await _setup_app(_MIN_FLOW)
+    try:
+        r = await _execute_stream(factory, wf_id)
+        assert r.status_code == 200
+
+        events = _parse_sse_events(r.text)
+        types = [t for t, _ in events]
+        assert "error" in types, r.text[:800]
+        assert types[-1] == "done", types
+        assert types[-2] == "error", types
+        err = next(d for t, d in events if t == "error")
+        assert "not JSON serializable" in err["error"]
+
+        async with factory() as s:
+            ex = (await s.execute(select(WorkflowExecution))).scalars().one()
+        assert ex.status == "failed", (
+            "毒化会话下失败收尾必须仍落 failed（rollback 先行；去之则卡 running）"
+        )
+        assert "not JSON serializable" in (ex.error_message or "")
+        assert ex.completed_at is not None
+        assert ex.output_data is None, "毒化更新不得泄漏进落库记录"
+    finally:
+        await db_engine.dispose()
