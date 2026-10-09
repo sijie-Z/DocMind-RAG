@@ -276,27 +276,54 @@ class AgentService:
         立即可认领；此前快照保存会把租约续到 900s，用户立即重试被 TaskBusy
         拒至多 15 分钟。chat 从未认领租约，保持不释放（避免误删并发 resume
         持有的锁）。
+
+        #300/F1（评审 R9 仪器化差分 trace）：save 与 release 必须是**同一个**
+        受保护单元（一个协程里按序做两步）。shield 只保护"已进入的任务"——
+        两者各自 shield 时（修复前），ASGI 取消路径上 anyio 任务组取消的
+        层级触发式重复投递会恰好打在第一个 shield 的**外层 await** 上，函数
+        中断、`release` 分支不可达（HTTP 实测：租约悬置至 900s；引擎直连
+        aclose 路径无重复投递所以从未暴露）。合入同一单元后：外层 await 无论
+        被打断几次，受保护任务都在后台按"快照先落、还租在后"跑完——取消
+        落点不再决定归还是否开始。
+
+        顺序不可反：反向会让新认领者先开跑、迟到的旧快照覆盖它的更新状态；
+        且 save 内部还会续租，与"刚释放"打架。
         """
         if not task_id:
             return
-        try:
-            await asyncio.shield(checkpoint.save_from_live(
-                task_id=task_id, live=agent.checkpoint_live, trigger="on_disconnect",
-            ))
-        except Exception as e:
-            logger.warning("checkpoint on_disconnect failed (task=%s): %s", log_safe(task_id), log_safe(e))
-        if release_lease:
-            # 顺序不可反：先落快照再还租——否则新认领者可能先开跑，
-            # 迟到的旧快照会覆盖它的更新状态。与落盘同样 best-effort：
-            # shield 保证取消路径上归还动作不被二次取消打断。
+
+        async def _save_then_release() -> None:
+            """受保护收尾单元：同一任务里按序执行 save → release（不可拆——
+            拆分会让"取消落点"决定 release 是否开始，见方法注释）。"""
             try:
-                await asyncio.shield(checkpoint.release_task(task_id))
-            except Exception as e:
-                logger.debug(
-                    "checkpoint lease release on disconnect failed (task=%s): %s",
-                    log_safe(task_id),
-                    log_safe(e),
+                await checkpoint.save_from_live(
+                    task_id=task_id, live=agent.checkpoint_live, trigger="on_disconnect",
                 )
+            except Exception as e:
+                logger.warning(
+                    "checkpoint on_disconnect failed (task=%s): %s",
+                    log_safe(task_id), log_safe(e),
+                )
+            if release_lease:
+                try:
+                    await checkpoint.release_task(task_id)
+                except Exception as e:
+                    logger.debug(
+                        "checkpoint lease release on disconnect failed (task=%s): %s",
+                        log_safe(task_id),
+                        log_safe(e),
+                    )
+
+        try:
+            await asyncio.shield(_save_then_release())
+        except Exception as e:
+            # CancelledError（BaseException）照常向外传播：调用方正处在取消
+            # 路径上；受保护单元已在后台完成（shield 语义），本 except 只兜
+            # 非取消类的意外故障。
+            logger.warning(
+                "checkpoint on_disconnect interrupted (task=%s): %s",
+                log_safe(task_id), log_safe(e),
+            )
 
     async def _checkpoint_error(
         self, task_id: str | None, agent: PERAgentLoop, exc: BaseException,
