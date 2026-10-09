@@ -2,7 +2,9 @@ import request from '@/utils/request'
 
 export interface SearchRequest {
   query: string
-  search_type?: 'semantic' | 'keyword' | 'hybrid'
+  // issue #225：后端字段为 search_mode（hybrid/vector/keyword；缺省=自动路由）。
+  // 旧的 search_type 字段从未在请求 schema 里出现过（一直被后端静默丢弃），不再发送。
+  search_mode?: 'hybrid' | 'vector' | 'keyword'
   file_types?: string[]
   tags?: string[]
   date_start?: string

@@ -570,6 +570,7 @@ export default {
     askAI: '问问 AI',
     button: '搜索',
     type: '搜索模式',
+    auto: '自动',
     hybrid: '混合搜索',
     semantic: '语义搜索',
     keyword: '关键词搜索',
