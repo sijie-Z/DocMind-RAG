@@ -6,7 +6,9 @@ interface WebSocketSource {
 }
 
 interface WebSocketMessage {
-  type: 'message' | 'error' | 'connect' | 'disconnect' | 'notification'
+  // issue #289 G5：union 此前含 'notification'，但 chat WS（chat.py drain）
+  // 只发 chunk/message/error，通知走独立的 notificationSocket——幽灵联合成员。
+  type: 'message' | 'error' | 'connect' | 'disconnect'
   content?: string
   conversationId?: number | string
   messageId?: string

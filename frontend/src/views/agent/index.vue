@@ -107,7 +107,7 @@
                     :result-text="getToolResult(msg.events, eIdx)"
                     :duration="getToolDuration(msg.events, eIdx)"
                     :status="getToolStatus(msg.events, eIdx)"
-                    :retry-attempt="evt.retry_attempt"
+                    :retry-attempt="getToolRetryAttempt(msg.events, eIdx)"
                   />
                 </template>
                 <!-- Standalone error -->
@@ -119,10 +119,9 @@
                 </div>
                 <!-- Retry hint（issue #250 第 6 条收尾：事件此前只落 store 的
                      msg.events，视图没有渲染分支 —— UI 仍看不到；#253 run_report
-                     同款处置的"展示"一半） -->
-                <div v-else-if="evt.type === 'retry_hint'" class="retry-hint">
-                  ♻ {{ formatRetryHint(evt) }}
-                </div>
+                     同款处置的"展示"一半；issue #289 抽为共享组件，与聊天页
+                     Agent 模式共用） -->
+                <RetryHintLine v-else-if="evt.type === 'retry_hint'" :content="evt.content" />
                 <!-- 整次运行失败（issue #288：error 事件此前只到 store 的
                      msg.events（170-176 已停 loading），视图没有渲染分支 ——
                      失败时用户只见空气泡、看不到失败原因；与 tool_error 的
@@ -147,13 +146,9 @@
               <Markdown :content="msg.content" />
             </div>
 
-            <!-- 运行报告（issue #242 收尾：此前该事件在前端白名单被丢弃，UI 永远看不到） -->
-            <details v-if="msg.runReport" class="run-report">
-              <summary>
-                运行报告<template v-if="msg.executionContext?.total_tokens"> · Tokens: {{ msg.executionContext.total_tokens }}</template>
-              </summary>
-              <pre>{{ msg.runReport }}</pre>
-            </details>
+            <!-- 运行报告（issue #242 收尾：此前该事件在前端白名单被丢弃，UI 永远看不到；
+                 issue #289 抽为共享组件，与聊天页 Agent 模式共用） -->
+            <RunReportBlock :report="msg.runReport" :total-tokens="msg.executionContext?.total_tokens" />
 
             <!-- Feedback buttons (only after completion, only for messages with a messageId) -->
             <div v-if="!msg.loading && msg.messageId && msg.content" class="feedback-bar">
@@ -235,6 +230,8 @@ import PlanTree from '@/components/agent/PlanTree.vue'
 import ThinkingStream from '@/components/agent/ThinkingStream.vue'
 import ToolCallCard from '@/components/agent/ToolCallCard.vue'
 import ReflectionBanner from '@/components/agent/ReflectionBanner.vue'
+import RetryHintLine from '@/components/agent/RetryHintLine.vue'
+import RunReportBlock from '@/components/agent/RunReportBlock.vue'
 import AgentConfigPanel from '@/components/agent/AgentConfigPanel.vue'
 import SessionSelector from '@/components/agent/SessionSelector.vue'
 import AgentInput from '@/components/agent/AgentInput.vue'
@@ -269,19 +266,6 @@ function getLastThinkingType(msg: AgentChatMessage): ThinkingType {
   const thinkEvents = msg.events.filter((e) => e.type === 'thinking')
   if (thinkEvents.length === 0) return 'reasoning'
   return thinkEvents[thinkEvents.length - 1].thinking_type || 'reasoning'
-}
-
-// retry_hint 的展示文案（issue #250 第 6 条收尾）：后端 content 形如
-// "retry_action=reset_transport"（executor.py 发射），直接显示原始串对
-// 用户不友好；映射成中文动作说明，未知动作回退原文。
-const RETRY_ACTION_LABELS: Record<string, string> = {
-  reset_transport: '连接中断，正在重建连接后重试',
-  refresh_auth: '凭据失效，正在刷新凭据后重试',
-}
-
-function formatRetryHint(evt: AgentEvent): string {
-  const action = (evt.content || '').replace('retry_action=', '')
-  return RETRY_ACTION_LABELS[action] || evt.content || '正在重试'
 }
 
 function getToolResult(events: AgentEvent[], callIdx: number): string | undefined {
@@ -336,6 +320,21 @@ function getToolStatus(
     }
   }
   return 'loading'
+}
+
+// issue #289 G2：ToolCallCard 的「重试 N」徽标此前绑定 tool_call 的
+// evt.retry_attempt —— 后端 tool_call 事件从不携带该字段（恒 undefined，
+// 徽标永不显示）。后端真实发射点是 tool_error（executor.py：值为该步骤
+// 已重试次数），故与 getToolResult 同款前瞻配对，从配对的 tool_error 取数。
+function getToolRetryAttempt(events: AgentEvent[], callIdx: number): number | undefined {
+  const callId = events[callIdx]?.tool_call_id
+  if (!callId) return undefined
+  for (let i = callIdx + 1; i < events.length; i++) {
+    if (events[i].tool_call_id !== callId) continue
+    if (events[i].type === 'tool_result') return undefined
+    if (events[i].type === 'tool_error') return events[i].retry_attempt || undefined
+  }
+  return undefined
 }
 
 function scrollToBottom() {
@@ -528,35 +527,9 @@ async function loadInit() {
 </script>
 
 <style scoped>
-/* 重试提示行（issue #250 第 6 条收尾：retry_hint 事件的渲染分支；
-   风格对齐 run-report 的轻量辅助信息） */
-.retry-hint {
-  margin: 4px 0;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: #64748b;
-  background: rgba(100, 116, 139, 0.08);
-  border-radius: 8px;
-}
-/* 运行报告折叠块（issue #242 收尾） */
-.run-report {
-  margin-top: 10px;
-  font-size: 12px;
-}
-.run-report summary {
-  cursor: pointer;
-  color: #64748b;
-  user-select: none;
-}
-.run-report pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: rgba(100, 116, 139, 0.08);
-  padding: 10px;
-  border-radius: 8px;
-  max-height: 320px;
-  overflow: auto;
-}
+/* 注：retry-hint 行与 run-report 折叠块已抽为共享组件
+   （components/agent/RetryHintLine.vue / RunReportBlock.vue，issue #289），
+   样式随组件走，本页与聊天页 Agent 模式共用同一实现。 */
 .agent-page {
   display: flex;
   flex-direction: column;

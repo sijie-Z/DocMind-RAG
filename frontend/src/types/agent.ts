@@ -34,6 +34,12 @@ export interface AgentEvent {
   plan_step_status?: PlanStepStatus
   dependencies?: string[]
   tool_hint?: string
+  // Plan 语义字段（issue #289 G7：后端 to_sse_dict 已发射，前端此前未声明；
+  // 默认值分别为 low / auto_retry / None，非默认时才会出现在载荷里）
+  parallel_group?: number | null
+  risk_level?: string
+  retry_strategy?: string
+  fallback_tool?: string | null
   // Thinking
   thinking_type?: ThinkingType
   // Reflection
@@ -56,6 +62,11 @@ export interface PlanStep {
   result?: string
   error_context?: string
   retry_count: number
+  // 计划语义字段（issue #289 G7：由 plan_step 事件落账，PlanTree 按非默认值出徽标）
+  parallel_group?: number | null
+  risk_level?: string
+  retry_strategy?: string
+  fallback_tool?: string | null
 }
 
 export interface Plan {

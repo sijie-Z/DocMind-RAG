@@ -176,6 +176,7 @@ export default {
     connectionFailed: 'Impossible de se connecter au serveur',
     sendFailed: 'Échec de l\'envoi du message',
     networkError: 'Erreur réseau',
+    retrying: 'Serveur occupé, nouvelle tentative automatique ({attempt}/{maxRetries})...',
     cleared: 'Conversation effacée',
     historyFailed: 'Échec du chargement de l\'historique',
     status: {

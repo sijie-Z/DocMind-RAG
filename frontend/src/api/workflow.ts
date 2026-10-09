@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { getToken } from '@/utils/auth'
 
 // 工作流节点类型
 export interface WorkflowNodeData {
@@ -95,24 +96,114 @@ export const executeWorkflow = async (id: number, inputData?: Record<string, unk
   return request.post(`/workflows/${id}/execute`, { workflow_id: id, input_data: inputData, stream: false })
 }
 
-// 流式执行
-export const executeWorkflowStream = (id: number, inputData: Record<string, unknown>, onEvent: (_event: string, _data: ExecutionResult | NodeResultItem) => void) => {
-  const eventSource = new EventSource(`/api/v1/workflows/${id}/execute?stream=true&input_data=${encodeURIComponent(JSON.stringify(inputData))}`)
+// ── 流式执行（issue #289 修复）────────────────────────────────────────────
+// 修复前的实现有三重断点：
+//   1. `new EventSource(url)` 发的是 GET，而 `/{id}/execute` 是 POST 路由
+//      （backend/app/api/v1/endpoints/workflow.py:197），根本打不通；
+//   2. EventSource 无法携带 Authorization 头，而端点依赖 get_current_user
+//      （Bearer 认证）——即便路由匹配也会 401；
+//   3. `EventSource.onmessage` 只接收**无** `event:` 名的消息，而该端点全部
+//      是命名事件（workflow_start/node_start/node_complete/node_error/
+//      workflow_complete/complete/error/done/heartbeat）——一个都到不了回调。
+// 现改为 fetch + ReadableStream（与 utils/sseService.ts 的既有 fetch-SSE 模式
+// 对齐）：POST JSON body（端点直接以 body 为 input_data），Bearer 走请求头，
+// 命名事件经纯函数解析器逐帧派发 onEvent(eventName, data)。
 
-  eventSource.onmessage = (e) => {
+export interface WorkflowSSEFrame {
+  event: string
+  data: unknown
+}
+
+/**
+ * SSE 文本帧解析器（纯函数工厂，便于单测）：把 fetch ReadableStream 的文本块
+ * 切分成 { event, data } 帧。与 sseService 的内联解析同构（buffer 按行处理、
+ * `event:` 行命名、`data:` 行解析并派发；后端始终单行 data + `\n\n` 收帧，
+ * 故不做 SSE 规范的多行 data 拼接）。坏 JSON 帧跳过（同 sseService 策略）。
+ */
+export function createWorkflowSSEFrameParser() {
+  let buffer = ''
+  let currentEvent = 'message'
+
+  return {
+    push(chunk: string): WorkflowSSEFrame[] {
+      buffer += chunk
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      const frames: WorkflowSSEFrame[] = []
+      for (const rawLine of lines) {
+        const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim()
+          continue
+        }
+        if (line.startsWith('data:')) {
+          const jsonStr = line.slice(5).trim()
+          if (!jsonStr) continue
+          try {
+            frames.push({ event: currentEvent, data: JSON.parse(jsonStr) })
+          } catch {
+            // 坏帧跳过（与 sseService post() 的 catch 同策略）
+          }
+          currentEvent = 'message'
+        }
+      }
+      return frames
+    },
+  }
+}
+
+export const executeWorkflowStream = (
+  id: number,
+  inputData: Record<string, unknown>,
+  onEvent: (_event: string, _data: ExecutionResult | NodeResultItem | Record<string, unknown>) => void,
+) => {
+  const abortController = new AbortController()
+  const parser = createWorkflowSSEFrameParser()
+
+  const run = async () => {
     try {
-      const data = JSON.parse(e.data)
-      onEvent(e.type, data)
+      // token 解析口径与 sseService.post 一致
+      const token = (localStorage.getItem('docmind_token') || localStorage.getItem('paicongming_token') || getToken())?.replace(/"/g, '')
+      const response = await fetch(`/api/v1/workflows/${id}/execute?stream=true`, {
+        method: 'POST',
+        headers: {
+          'Accept': 'text/event-stream',
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(inputData),
+        signal: abortController.signal,
+      })
+
+      if (!response.ok) {
+        onEvent('error', { error: `HTTP ${response.status}` })
+        return
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        onEvent('error', { error: '响应体不可读（环境不支持流式读取）' })
+        return
+      }
+
+      const decoder = new TextDecoder()
+      for (;;) {
+        if (abortController.signal.aborted) { reader.cancel(); break }
+        const { done, value } = await reader.read()
+        if (done) break
+        for (const frame of parser.push(decoder.decode(value, { stream: true }))) {
+          onEvent(frame.event, frame.data as ExecutionResult | NodeResultItem)
+        }
+      }
     } catch {
-      // Parse error silently
+      // abort 或网络异常：静默结束（与修复前 onerror→close 的净效果一致；
+      // 业务级失败由后端以 `event: error` 帧下发，经 onEvent 派发）
     }
   }
 
-  eventSource.onerror = () => {
-    eventSource.close()
-  }
+  void run()
 
-  return () => eventSource.close()
+  return () => abortController.abort()
 }
 
 export const getNodeDefinitions = async () => {

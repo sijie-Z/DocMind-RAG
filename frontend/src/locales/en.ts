@@ -195,6 +195,7 @@ export default {
     connectionFailed: 'Failed to connect to server',
     sendFailed: 'Message sending failed',
     networkError: 'Network error',
+    retrying: 'Server busy, retrying automatically ({attempt}/{maxRetries})...',
     cleared: 'Conversation cleared',
     historyFailed: 'Failed to load history',
     status: {
