@@ -3,7 +3,9 @@ import asyncio
 import hashlib
 import logging
 import math
+import re
 import time
+import unicodedata
 from datetime import datetime
 
 from app.core.config import settings
@@ -20,6 +22,47 @@ from app.rag.query_processor import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ---- #208 Phase 2 决策 b：minimum_should_match 口径（剔除《…》文档全称 token） ----
+
+# 《…》文档全称跨度（查询里引用文档标题的写法）。
+_TITLE_SPAN_RE = re.compile(r"《[^《》]+》")
+# cjk 分析器的 CJK 段：Han / 假名 / 谚文（approximation，见 _count_tokens_cjk）。
+_CJK_RUN_RE = re.compile("[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯]+")
+# 标准分词器的拉丁/数字词（下划线、小数点、千分位逗号粘连为单 token）。
+_ASCII_TOKEN_RE = re.compile(r"[a-z0-9_]+(?:[.,][a-z0-9_]+)*")
+
+
+def _count_tokens_cjk(text: str) -> int:
+    """近似 ES cjk 分析器（standard tokenizer + CJK bigram + lowercase）的 token 数。
+
+    仅用于 #208 Phase 2 决策 b 的 minimum_should_match 基数（不改变查询文本）。
+    已与 ES `_analyze`（评估索引，analyzer=cjk）逐条校准（证据见 PR）。
+    已知近似边界：ASCII 停用词不剔除（偏差 ≤1 个 token 量级）、未建模 per-field
+    分析器差异（基数按 content 形态的 cjk 计数）。
+    """
+    t = unicodedata.normalize("NFKC", text or "").lower()
+    n = 0
+    for run in _CJK_RUN_RE.findall(t):
+        # 单字 CJK 段保留为单 token；≥2 字段产出相邻 bigram（n-1 个）。
+        n += 1 if len(run) == 1 else len(run) - 1
+    n += len(_ASCII_TOKEN_RE.findall(t))
+    return n
+
+
+def _minimum_should_match_for(query_text: str) -> int | str:
+    """multi_match 的 minimum_should_match 取值（#208 Phase 2 决策 b：口径变、常量不变）。
+
+    30% 常量不变，基数剔除《…》文档全称 token——标题 bigram 此前把查询 token 基数
+    抬高（实验实测：标题贡献 8 个 bigram，基数 7 → 15，30% 阈值随之从 2 抬到 4），
+    只命中内容词的 gold 因此被整条剪掉。无《…》全称时返回 "30%"（与剔除口径等价，
+    不改动非全称查询）。返回值：整数（剔除标题后按 30% 向下取整、下限 1）或 "30%"。
+    """
+    if not query_text or not _TITLE_SPAN_RE.search(query_text):
+        return "30%"
+    stripped = _TITLE_SPAN_RE.sub(" ", query_text)
+    base = _count_tokens_cjk(stripped)
+    return max(1, base * 30 // 100)
 
 
 class HybridRetriever:
@@ -100,7 +143,8 @@ class HybridRetriever:
                 {"multi_match": {
                     "query": q_text, "fields": boost_fields,
                     "type": "best_fields", "fuzziness": "AUTO",
-                    "minimum_should_match": "30%",
+                    # #208 Phase 2 决策 b：带《…》全称时按「剔除标题 token 后的 30%」计算。
+                    "minimum_should_match": _minimum_should_match_for(q_text),
                 }},
             ]
             if wildcard_terms:
