@@ -1,0 +1,392 @@
+{
+  "dataset_id": "docmind_clause_v1",
+  "version": 1,
+  "description": "DocMind RAG 检索评估起步集（#208 Phase 1）。以仓库内固定语料（corpus/）为被测对象，主指标 ClauseHit@k：条号定义位命中；每条正例尽量配 near-miss（相邻/同主题易混条）与负难例。口径见 backend/docs/eval-gate-phase1.md。",
+  "corpus_dir": "../corpus",
+  "corpus_files": [
+    "01-knowledge-base-policy.md",
+    "02-incident-response-handbook.md"
+  ],
+  "top_k": 5,
+  "items": [
+    {
+      "id": "clause_arabic_3",
+      "type": "clause_lookup",
+      "query": "《知识库服务管理办法》第3条规定了什么？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第3条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第4条", "why": "相邻条：同章数据管理，且都提到数据等级" }
+      ],
+      "critical": false,
+      "notes": "阿拉伯数字条号直查"
+    },
+    {
+      "id": "clause_chinese_7",
+      "type": "clause_lookup",
+      "query": "《知识库服务管理办法》第七条规定了什么？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第7条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第8条", "why": "相邻条，且第8条正文引用第7条，字面高度重合" }
+      ],
+      "critical": false,
+      "notes": "中文数字条号——与 clause_arabic_7 同 gold 构成 #2.10 数字归一化对照基线"
+    },
+    {
+      "id": "clause_arabic_7",
+      "type": "clause_lookup",
+      "query": "《知识库服务管理办法》第7条规定了什么？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第7条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第8条", "why": "相邻条，且第8条正文引用第7条，字面高度重合" }
+      ],
+      "critical": false,
+      "notes": "阿拉伯数字条号——与 clause_chinese_7 同 gold 构成 #2.10 数字归一化对照基线"
+    },
+    {
+      "id": "clause_12_deletion",
+      "type": "clause_lookup",
+      "query": "第12条对数据删除有什么要求？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第12条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第11条", "why": "相邻条：均属数据流转且都要求审批" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "clause_chinese_12",
+      "type": "clause_lookup",
+      "query": "《知识库服务管理办法》第十二条关于数据删除的规定是什么？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第12条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第11条", "why": "相邻条：均属数据流转且都要求审批" }
+      ],
+      "critical": false,
+      "notes": "中文数字与 clause_12_deletion 构成第二组数字归一化对照"
+    },
+    {
+      "id": "clause_9_audit_space",
+      "type": "clause_lookup",
+      "query": "第 9 条对审计日志有什么规定？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第9条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第10条", "why": "相邻条：同为审计主题" }
+      ],
+      "critical": false,
+      "notes": "带空格条号「第 9 条」的容忍度探针"
+    },
+    {
+      "id": "sec_2_3_response",
+      "type": "clause_lookup",
+      "query": "§2.3 告警响应时限是怎么规定的？",
+      "expect": "hit",
+      "gold": [
+        { "file": "02-incident-response-handbook.md", "clause": "§2.3" }
+      ],
+      "near_miss": [
+        { "file": "02-incident-response-handbook.md", "clause": "§2.1", "why": "第2.1定义告警分级，时限查询最易混" }
+      ],
+      "critical": false,
+      "notes": "§ 引用形式"
+    },
+    {
+      "id": "sec_2_3_p2",
+      "type": "numerical",
+      "query": "P2 告警的响应时限是多少？",
+      "expect": "hit",
+      "gold": [
+        { "file": "02-incident-response-handbook.md", "clause": "§2.3" }
+      ],
+      "near_miss": [
+        { "file": "02-incident-response-handbook.md", "clause": "§2.1", "why": "§2.1 含「一小时内申请调整」，数值形态与响应时限相同" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "sec_3_2_rollback",
+      "type": "semantic",
+      "query": "回滚的触发条件和步骤是什么？",
+      "expect": "hit",
+      "gold": [
+        { "file": "02-incident-response-handbook.md", "clause": "§3.2" }
+      ],
+      "near_miss": [
+        { "file": "02-incident-response-handbook.md", "clause": "§3.1", "why": "相邻节：处置流程与回滚同属故障处置" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "sec_3_3_postmortem",
+      "type": "semantic",
+      "query": "复盘报告需要包含哪些内容？",
+      "expect": "hit",
+      "gold": [
+        { "file": "02-incident-response-handbook.md", "clause": "§3.3" }
+      ],
+      "near_miss": [
+        { "file": "02-incident-response-handbook.md", "clause": "§4.2", "why": "§4.2 提到复盘报告但讲的是归档要求" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "sec_4_1_drill",
+      "type": "numerical",
+      "query": "备份恢复演练多久执行一次？",
+      "expect": "hit",
+      "gold": [
+        { "file": "02-incident-response-handbook.md", "clause": "§4.1" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第13条", "why": "跨文档：办法第13条是「备份」主题条款（策略周期 vs 演练周期）" }
+      ],
+      "critical": false,
+      "notes": "跨文档 near-miss"
+    },
+    {
+      "id": "sec_4_2_archive",
+      "type": "cross_doc",
+      "query": "演练记录需要保存几年？",
+      "expect": "hit",
+      "gold": [
+        { "file": "02-incident-response-handbook.md", "clause": "§4.2" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第13条", "why": "跨文档保留期混淆（演练记录 3 年 vs 备份 30 天）" }
+      ],
+      "critical": false,
+      "notes": "跨文档 near-miss"
+    },
+    {
+      "id": "sec_2_1_levels",
+      "type": "semantic",
+      "query": "告警分为哪几个等级？",
+      "expect": "hit",
+      "gold": [
+        { "file": "02-incident-response-handbook.md", "clause": "§2.1" }
+      ],
+      "near_miss": [
+        { "file": "02-incident-response-handbook.md", "clause": "§2.3", "why": "§2.3 逐条列出 P1/P2/P3" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "cross_doc_report_deadline",
+      "type": "conflict",
+      "query": "故障复盘报告要在几个工作日内提交？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第14条" },
+        { "file": "02-incident-response-handbook.md", "clause": "§3.3" }
+      ],
+      "near_miss": [],
+      "critical": false,
+      "notes": "两来源事实冲突（办法第14条 3 个工作日 vs 手册 §3.3 5 个工作日）：召回任一来源即算命中；冲突本身暴露给 Phase 2 处理"
+    },
+    {
+      "id": "concept_levels",
+      "type": "semantic",
+      "query": "知识库里的数据分为哪几个等级？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第3条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第4条", "why": "第4条两次提到机密级文档，含等级关键词" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "concept_upload_formats",
+      "type": "semantic",
+      "query": "文档上传支持哪些格式，有大小限制吗？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第4条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第2条", "why": "第2条列举功能清单，含「上传」词面" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "process_export",
+      "type": "semantic",
+      "query": "把文档数据导出到知识库之外需要什么流程？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第11条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第12条", "why": "相邻条：均属数据流转且都要求审批" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "process_permission_change",
+      "type": "semantic",
+      "query": "授权成员的增补与回收需要谁审批？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第8条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第7条", "why": "第7条组织隔离是权限主题的相似条" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "process_isolation",
+      "type": "semantic",
+      "query": "不同组织的文档会互相可见吗？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第7条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第2条", "why": "第2条适用范围含「组织」字样" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "clause_15_violation",
+      "type": "semantic",
+      "query": "违规标注数据等级会怎么处理？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第15条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第3条", "why": "第3条定义数据等级，是问题词面的最大重叠条" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "numeric_retention_original",
+      "type": "numerical",
+      "query": "文档原文默认保留多长时间？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第6条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第13条", "why": "同为保留期条款但对象是备份" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "numeric_audit_retention",
+      "type": "numerical",
+      "query": "审计日志保留多久？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第9条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第10条", "why": "第10条同为审计条款，期限词面混淆（180 天 vs 每季度/2 年）" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "numeric_backup_retention",
+      "type": "numerical",
+      "query": "知识库备份的保留周期是多少天？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第13条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第6条", "why": "保留期成对混淆（备份 30 天 vs 原文 5 年）" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "numeric_rto",
+      "type": "numerical",
+      "query": "服务故障后最长多久必须恢复？RTO 是多少？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第14条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第13条", "why": "第13条备份策略常被当作恢复条款" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "definition_rto_rpo",
+      "type": "semantic",
+      "query": "RTO 和 RPO 分别指什么？",
+      "expect": "hit",
+      "gold": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第14条" }
+      ],
+      "near_miss": [
+        { "file": "01-knowledge-base-policy.md", "clause": "第13条", "why": "第13条备份策略常被当作恢复条款" }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "neg_face_login",
+      "type": "unanswerable",
+      "query": "系统支持人脸识别登录吗？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负难例：与语料存在「系统/支持」表层重叠，但语料完全没有登录/人脸主题——期望检索如实返回空"
+    },
+    {
+      "id": "neg_quantum",
+      "type": "unanswerable",
+      "query": "请解释量子纠错码的容错阈值定理。",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：主题完全不在语料内"
+    },
+    {
+      "id": "neg_clause99",
+      "type": "unanswerable",
+      "query": "第99条对跨境数据传输是怎么规定的？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负难例：条号在语料中不存在（最长 16 条）——「问不存在的条号」不得拿别的条充数"
+    }
+  ]
+}

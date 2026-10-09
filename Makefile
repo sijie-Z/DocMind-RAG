@@ -2,6 +2,7 @@
 
 .PHONY: help dev dev-backend dev-frontend install-backend install-frontend
 .PHONY: test test-backend test-frontend lint build build-frontend
+.PHONY: eval eval-check
 .PHONY: docker-up docker-down docker-logs docker-build db-migrate
 .PHONY: clean clean-logs check
 
@@ -51,6 +52,12 @@ test-frontend: ## Run frontend tests
 
 test-frontend-coverage: ## Run frontend tests with coverage
 	cd $(FRONTEND_DIR) && npx vitest run --coverage
+
+eval: ## Run RAG retrieval eval (Phase 1, #208; needs live ES + embeddings, see backend/docs/eval-gate-phase1.md)
+	cd $(BACKEND_DIR) && python -m evals run $(ARGS)
+
+eval-check: ## Validate the golden set only (no ES/network, #208)
+	cd $(BACKEND_DIR) && python -m evals check
 
 # === Linting & Type Check ===
 
