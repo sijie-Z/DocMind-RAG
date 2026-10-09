@@ -263,31 +263,50 @@ async def mark_terminal(
 
     - 已是目标状态 → 幂等成功（重复收尾不报错）；
     - 非法转换（如 PENDING→COMPLETED）→ 记 warning、返回 False、状态不变；
+    - **写入失败**（DB 抖动等，issue #301 批 A #10）→ 重试一次（新会话）；
+      仍失败 → logger.error 响亮留痕（含后果：任务行将停留原状态、可经
+      resume 收敛）并返回 False。刻意不向上抛：本函数也被 _checkpoint_error
+      的清理路径与断流兜底调用，在那些路径上抛异常会顶掉原始异常；成功路径
+      调用方（service）必须检查返回值并如实上报（见 service._finalize_task_terminal）。
     - 终态落定后释放 resume 租约（FAILED 也释放：FAILED→RUNNING 是既有重试边）。
     """
     if not task_id:
         return False
-    try:
-        async with AsyncSessionLocal() as db:
-            task = await _load_task_row(db, task_id)
-            if task is None:
-                return False
-            if task.status == to:
-                return True
-            try:
-                task.transition(to)
-            except ValueError as e:
-                logger.warning("mark_terminal 拒绝非法转换 (task=%s): %s", log_safe(task_id), log_safe(e))
-                return False
-            if error:
-                task.last_error = str(error)[:2000]
-                task.last_error_type = (error_type or "")[:50] or None
-            await db.commit()
-    except Exception as e:
-        logger.warning("mark_terminal failed (task=%s): %s", log_safe(task_id), log_safe(e))
-        return False
-    await release_task(task_id)
-    return True
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            async with AsyncSessionLocal() as db:
+                task = await _load_task_row(db, task_id)
+                if task is None:
+                    return False
+                if task.status == to:
+                    return True
+                try:
+                    task.transition(to)
+                except ValueError as e:
+                    logger.warning("mark_terminal 拒绝非法转换 (task=%s): %s", log_safe(task_id), log_safe(e))
+                    return False
+                if error:
+                    task.last_error = str(error)[:2000]
+                    task.last_error_type = (error_type or "")[:50] or None
+                await db.commit()
+        except Exception as e:
+            last_exc = e
+            if attempt == 0:
+                logger.warning(
+                    "mark_terminal 第 1 次写入失败，重试一次 (task=%s, to=%s): %s",
+                    log_safe(task_id), to.value, log_safe(e),
+                )
+                continue
+            break
+        await release_task(task_id)
+        return True
+    logger.error(
+        "mark_terminal 写入失败（已重试一次）：任务 %s 未能落到 %s，"
+        "将停留原状态（可经 resume 收敛）: %s",
+        log_safe(task_id), to.value, log_safe(last_exc),
+    )
+    return False
 
 
 # ── 读路径 / resume 认领 ─────────────────────────────────────────────────────
