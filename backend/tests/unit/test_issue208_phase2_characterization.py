@@ -31,9 +31,14 @@
    不动索引）。—— 2026-10-09 决策 c 落地（本 PR）：`第七`≠`第7` 导致中文数词
    查询的 gold 连候选都进不去（clause_chinese_7/chinese_12 的实验事实），
    本文件以 `TestNumeralClauseNormalization` 为新锁。
+8. 条号直查类查询（查询含「第X条」/「§X.Y」引用）跳过 MMR。
+   —— 2026-10-09 决策 e 落地（本 PR）：hybrid 反事实实测 clause_arabic_3 的
+   gold 分数在场却被 `_mmr_select` 从 top5 剔出（多样性惩罚与精确定位相斥）；
+   本文件以 `TestClauseLookupSkipsMMR` 为新锁（判据边界 + MMR 调用端到端）。
 
-**e 环（MMR 对条号直查的适用性）仍受本闸门约束**——
-任何修复其机制的 PR 必须显式更新本文件：这是刻意的「变更前先测量、变更要自觉」闸门。
+**a–e 五环已全部落地**（a/b：PR #323；c/d/e：本 PR）。本文件现有全部锁为该
+机制的**正向锁**：任何再次改动上述机制（doc 帽 / msm 口径 / 数形归一 / 臂标记 /
+MMR 适用性）的 PR 必须显式更新本文件——这是刻意的「变更前先测量、变更要自觉」闸门。
 """
 
 import pytest
@@ -49,6 +54,7 @@ from app.rag.retriever import (
     HybridRetriever,
     _count_tokens_cjk,
     _int_to_cn_clause_number,
+    _is_clause_lookup_query,
     _minimum_should_match_for,
     _numeral_clause_variants,
     _parse_clause_number,
@@ -477,3 +483,102 @@ class TestNumeralClauseNormalization:
         assert captured and all("第" not in q for q in captured), (
             f"无条号查询不得新增数形变体，实际 {captured}"
         )
+
+
+class TestClauseLookupSkipsMMR:
+    """机制 8（决策 e 新锁）：条号直查类查询（第X条 / §X.Y）跳过 MMR。
+
+    实验事实（hybrid 反事实）：`clause_arabic_3` 的 gold（kw#4/v#6）在
+    `_mmr_select` 的多样性惩罚下进不了 top5（m1–m5=前言、第1条、第7条、第11条、
+    第13条）——hybrid 上线也送不到 post-process。修复：条号直查类查询的 RRF 序
+    直接进入 post-process；非直查查询的 MMR 行为不变。
+    """
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "《知识库服务管理办法》第3条规定了什么？",
+            "《知识库服务管理办法》第七条规定了什么？",
+            "第 9 条对审计日志有什么规定？",  # 带空格写法
+            "第99条对跨境数据传输是怎么规定的？",  # 负难例同属「直查」语义
+            "§2.3 告警响应时限是怎么规定的？",
+            "§ 2.3 告警响应时限是怎么规定的？",
+        ],
+    )
+    def test_clause_lookup_criterion_true(self, query):
+        assert _is_clause_lookup_query(query) is True
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "第一章总则是什么？",  # 章 不判直查
+            "第3.5条的规定？",  # 数字段含小数点 → 非「第X条」跨度
+            "2.3 告警响应时限是怎么规定的？",  # 裸编号（无 §）不判——避免与版本号混淆
+            "§2 的规定？",  # 章节须至少一段小数点
+            "告警分为哪几个等级？",
+            "",
+        ],
+    )
+    def test_clause_lookup_criterion_false(self, query):
+        assert _is_clause_lookup_query(query) is False
+
+    @staticmethod
+    def _wire_hybrid_arms(monkeypatch, retriever, hits):
+        async def fake_kw(query, filters, candidate_size):
+            return [dict(h) for h in hits]
+
+        async def fake_vec(query, filters, candidate_size, enable_hyde=True):
+            return [dict(h) for h in hits], [0.1, 0.2, 0.3, 0.4], None
+
+        monkeypatch.setattr(retriever, "_keyword_hits", fake_kw)
+        monkeypatch.setattr(retriever, "_vector_hits", fake_vec)
+        monkeypatch.setattr(
+            QueryComplexityClassifier,
+            "get_strategy",
+            classmethod(lambda cls, _q: "hybrid"),
+        )
+        monkeypatch.setattr(settings, "RAG_ENABLE_MMR", True)
+
+    @pytest.mark.asyncio
+    async def test_mmr_skipped_for_clause_lookup_query(self, monkeypatch):
+        retriever = HybridRetriever()
+        hits = [
+            _hit("docA_c1", "alpha bravo charlie 正文", 0.9),
+            _hit("docB_c1", "alpha bravo charlie 另一文档", 0.8),
+        ]
+        for h in hits:
+            h["_source"]["embedding"] = [0.1] * 4
+        self._wire_hybrid_arms(monkeypatch, retriever, hits)
+
+        calls: list[int] = []
+
+        def spy_mmr(candidates, query_vector, top_k, lambda_mult):
+            calls.append(len(candidates))
+            return candidates[:top_k]
+
+        monkeypatch.setattr(HybridRetriever, "_mmr_select", staticmethod(spy_mmr))
+
+        _docs, _qv, _dbg, _deg = await retriever.retrieve("第3条规定了什么？", 1, top_k=5)
+        assert calls == [], "条号直查类查询不得调用 MMR（决策 e）"
+
+    @pytest.mark.asyncio
+    async def test_mmr_still_runs_for_non_clause_query(self, monkeypatch):
+        retriever = HybridRetriever()
+        hits = [
+            _hit("docA_c1", "alpha bravo charlie 正文", 0.9),
+            _hit("docB_c1", "alpha bravo charlie 另一文档", 0.8),
+        ]
+        for h in hits:
+            h["_source"]["embedding"] = [0.1] * 4
+        self._wire_hybrid_arms(monkeypatch, retriever, hits)
+
+        calls: list[int] = []
+
+        def spy_mmr(candidates, query_vector, top_k, lambda_mult):
+            calls.append(len(candidates))
+            return candidates[:top_k]
+
+        monkeypatch.setattr(HybridRetriever, "_mmr_select", staticmethod(spy_mmr))
+
+        _docs, _qv, _dbg, _deg = await retriever.retrieve(TERM_QUERY, 1, top_k=5)
+        assert calls, "非条号直查查询仍必须经过 MMR（决策 e 只针对直查类）"

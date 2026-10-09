@@ -170,6 +170,29 @@ def _numeral_clause_variants(query: str) -> list[str]:
     return variants
 
 
+# ---- #208 Phase 2 决策 e：条号直查类判据（此类查询跳过 MMR） ----
+
+# 章节引用：§X.Y（允许 § 后空格；至少一段小数点，与 evals/clauses 的章节口径一致）。
+_SECTION_REF_RE = re.compile(r"§[ \t]*\d+(?:\.\d+)+")
+
+
+def _is_clause_lookup_query(query: str) -> bool:
+    """条号直查类查询的确定性判据（#208 Phase 2 决策 e）。
+
+    判据：查询含「第X条」式条号引用（中文/阿拉伯数词、允许空格，同 `_CLAUSE_NUM_SPAN_RE`）
+    或「§X.Y」式章节引用。此类查询的目标是**精确定位**某一条/节，与 MMR 的多样性
+    惩罚相斥——实验实测（hybrid 反事实）：clause_arabic_3 的 gold 分数在场却被
+    `_mmr_select` 从 top5 剔出，post-process 根本没收到它。
+
+    边界（负判）：`第一章`（须以 条 收尾）、`第3.5条`、裸 `2.3`（章节需带 §，
+    避免与版本号/数值混淆）、空串。判据按查询文本模式判定，与路由/语料无关；
+    负难例 `第99条…`（语料中不存在的条号）同样命中此判据（它是「直查」语义）。
+    """
+    if not query:
+        return False
+    return bool(_CLAUSE_NUM_SPAN_RE.search(query) or _SECTION_REF_RE.search(query))
+
+
 class HybridRetriever:
     """Retrieves documents using keyword search, vector search, and RRF fusion."""
 
@@ -721,7 +744,11 @@ class HybridRetriever:
             return results, query_vector, debug_info, degraded
 
         # MMR
-        if settings.RAG_ENABLE_MMR and query_vector:
+        # #208 Phase 2 决策 e：条号直查类查询（第X条 / §X.Y）跳过 MMR——多样性惩罚
+        # 与「精确定位」目标相斥（实测 clause_arabic_3 的 gold 分数在场却被
+        # _mmr_select 从 top5 剔出，post-process 根本没收到它）；此类查询的 RRF 序
+        # 直接进入 post-process。非直查查询的 MMR 行为不变。
+        if settings.RAG_ENABLE_MMR and query_vector and not _is_clause_lookup_query(query):
             mmr_cands = [
                 {**h, "_embedding": h.get("_source", {}).get("embedding", [])}
                 for h in fused[:candidate_size] if h.get("_source", {}).get("embedding")
