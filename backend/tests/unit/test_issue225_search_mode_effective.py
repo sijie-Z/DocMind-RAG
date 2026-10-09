@@ -89,13 +89,21 @@ def _wire_arms(monkeypatch, retriever, kw_hits, vec_hits, query_vector=(0.1, 0.2
     return kw_calls, vec_calls, vec_hyde_flags
 
 
-def _forbid_classifier(monkeypatch):
-    """显式模式下分类器不得被咨询（覆盖 = 跳过自动路由）。"""
+def _spy_classifier(monkeypatch):
+    """分类器咨询 spy：显式模式下不得被咨询（覆盖 = 跳过自动路由）。
 
-    def _boom(cls, _q):
-        raise AssertionError("显式 search_mode 生效时不得再咨询 QueryComplexityClassifier")
+    保留真实分类行为（返回真实策略），让「覆盖失效」时先红在臂组合断言上
+    （vec_calls/kw_calls 零调用断言），而不是被 tripwire 抛错掩盖。
+    """
+    calls: list = []
+    real = QueryComplexityClassifier.get_strategy
 
-    monkeypatch.setattr(QueryComplexityClassifier, "get_strategy", classmethod(_boom))
+    def _rec(cls, q):
+        calls.append(q)
+        return real(q)
+
+    monkeypatch.setattr(QueryComplexityClassifier, "get_strategy", classmethod(_rec))
+    return calls
 
 
 class TestForcedArmSelection:
@@ -109,11 +117,12 @@ class TestForcedArmSelection:
         kw_hits = [_kw_hit("doc_kw", "如何提交报销申请正文")]
         vec_hits = [_vec_hit("doc_vec", "如何提交报销申请 另一份内容")]
         kw_calls, vec_calls, _ = _wire_arms(monkeypatch, retriever, kw_hits, vec_hits)
-        _forbid_classifier(monkeypatch)
+        clf_calls = _spy_classifier(monkeypatch)
 
         docs, qv, dbg, _deg = await retriever.retrieve(MEDIUM_Q, 1, top_k=5, debug=True, search_mode="keyword")
 
         assert vec_calls == [], "强制 keyword 时 vector 臂不得被调用（零调用断言）"
+        assert clf_calls == [], "显式模式不得咨询分类器（覆盖 = 跳过自动路由）"
         assert kw_calls == [MEDIUM_Q]
         assert qv == [], "keyword 序无查询向量"
         ids = [d["chunk_id"] for d in docs]
@@ -129,11 +138,12 @@ class TestForcedArmSelection:
         kw_hits = [_kw_hit("doc_kw", "如何提交报销申请正文")]
         vec_hits = [_vec_hit("doc_vec", "如何提交报销申请 另一份内容")]
         kw_calls, vec_calls, _ = _wire_arms(monkeypatch, retriever, kw_hits, vec_hits)
-        _forbid_classifier(monkeypatch)
+        clf_calls = _spy_classifier(monkeypatch)
 
         docs, qv, dbg, _deg = await retriever.retrieve(MEDIUM_Q, 1, top_k=5, debug=True, search_mode="vector")
 
         assert kw_calls == [], "强制 vector 时 keyword 臂不得被调用（零调用断言）"
+        assert clf_calls == [], "显式模式不得咨询分类器（覆盖 = 跳过自动路由）"
         assert vec_calls == [MEDIUM_Q]
         assert qv == [0.1, 0.2, 0.3, 0.4], "向量臂产出的查询向量应随结果返回"
         ids = [d["chunk_id"] for d in docs]
@@ -153,7 +163,7 @@ class TestForcedArmSelection:
         kw_hits = [_kw_hit("doc_kw", "报销流程审批说明")]
         vec_hits = [_vec_hit("doc_vec", "报销流程 另一份内容")]
         kw_calls, vec_calls, vec_hyde_flags = _wire_arms(monkeypatch, retriever, kw_hits, vec_hits)
-        _forbid_classifier(monkeypatch)
+        clf_calls = _spy_classifier(monkeypatch)
 
         fuse_calls: list = []
         real_fuse = HybridRetriever._rrf_fuse
@@ -167,6 +177,7 @@ class TestForcedArmSelection:
         docs, _qv, dbg, _deg = await retriever.retrieve(SIMPLE_Q, 1, top_k=5, debug=True, search_mode="hybrid")
 
         assert kw_calls == [SIMPLE_Q] and vec_calls == [SIMPLE_Q], "两臂都必须被调用"
+        assert clf_calls == [], "显式模式不得咨询分类器（覆盖 = 跳过自动路由）"
         assert vec_hyde_flags == [False], "显式 hybrid 不含 HyDE（enable_hyde=False，与自动 hybrid 档一致）"
         assert fuse_calls == [(1, 1)], "RRF 融合路径必须被执行"
         ids = [d["chunk_id"] for d in docs]
