@@ -92,6 +92,32 @@ def _failing_openai_client(exc_text: str = "LLM down (simulated)"):
     return client
 
 
+def _tool_call_client(tool_name: str, args_json: str, synthesis: str = "降级合成答案"):
+    """带 tools 的主调恒发一个 tool_call；不带 tools 的合成调用返回文本。"""
+    client = MagicMock()
+
+    async def _create(*, messages, tools=None, **kwargs):
+        msg = MagicMock()
+        if tools:
+            tc = MagicMock()
+            tc.id = "tc1"
+            tc.function.name = tool_name
+            tc.function.arguments = args_json
+            msg.tool_calls = [tc]
+            msg.content = ""
+        else:
+            msg.tool_calls = None
+            msg.content = synthesis
+        msg.role = "assistant"
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=msg, finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    client.chat.completions.create = _create
+    return client
+
+
 def _agent_config(**overrides) -> AgentConfig:
     base = dict(
         enable_reflection=False, enable_memory=False, enable_skills=False,
@@ -306,3 +332,36 @@ async def test_tooless_success_stays_completed_and_all_green(db_factory):
     assert not any(e.type == "error" for e in events)
     report_events = [e for e in events if e.type == "run_report"]
     assert report_events and "clean_success: True" in report_events[-1].content
+
+
+# ── #11 分界（评审 P3-4）：部分步骤失败 → 保持 COMPLETED 不翻转 ─────────────
+
+
+@pytest.mark.asyncio
+async def test_tools_partial_step_failure_stays_completed_not_flipped(db_factory):
+    """既有分界语义钉防（评审 P3-4）：受限工具集里模型发未列名工具 → 该步骤
+    失败进 ctx.failures / 报告非全绿，但任务终态保持 COMPLETED 不翻转。
+
+    分界：只有"无工具直答 LLM 全败（零产出）"才置 run_failed→FAILED（#11）；
+    "部分步骤失败但有降级产出"是既有 COMPLETED 语义。变异 S3（任意
+    ctx.failures 非空 → run_failed）此前在旧套件零红——本用例精确抓红。
+    """
+    cfg = _agent_config(enable_planning=False, tool_tags=["search", "analysis"])
+    svc = AgentService(openai_client=_tool_call_client("delegate_subtask", "{}"))
+
+    events = [
+        e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=cfg)
+    ]
+
+    task_id = _task_id_of(events)
+    row = await _get_task(db_factory, task_id)
+    assert row.status == TaskStatus.COMPLETED, (
+        f"部分步骤失败保持既有语义（不翻转），实际 {row.status}——只有零产出全败才 FAILED"
+    )
+    report_events = [e for e in events if e.type == "run_report"]
+    assert report_events and "clean_success: False" in report_events[-1].content, (
+        "报告必须非全绿（部分步骤失败进 ctx.failures）"
+    )
+    assert any(e.type == "chunk" and e.content for e in events), "降级输出必须存在"
+    surface = [e for e in events if e.type == "error" and "收尾失败" in (e.content or "")]
+    assert not surface, "成功写路径不得出现收尾失败噪音"

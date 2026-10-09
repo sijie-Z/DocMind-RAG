@@ -213,7 +213,7 @@
         { "file": "01-knowledge-base-policy.md", "clause": "第3条" }
       ],
       "near_miss": [
-        { "file": "01-knowledge-base-policy.md", "clause": "第4条", "why": "第4条两次提到机密级文档，含等级关键词" }
+        { "file": "01-knowledge-base-policy.md", "clause": "第4条", "why": "第4条提到一次机密级文档，含等级关键词" }
       ],
       "critical": false,
       "notes": ""
