@@ -117,7 +117,10 @@ class Reviewer:
             if "issues_found" not in review_data:
                 review_data["issues_found"] = []
             if "recommendation" not in review_data:
-                review_data["recommendation"] = "pass"
+                # issue #301 #9：模型给了 JSON 却没给判定 → 无判定 ≠ 通过。
+                # 旧行为默认 "pass"，与真 pass 在报告里不可区分；与崩溃路径
+                # 同列 "error"（由 loop 收敛并如实记录）。
+                review_data["recommendation"] = "error"
 
             issues_high = sum(1 for i in review_data["issues_found"] if i.get("severity") == "high")
             logger.info(
@@ -129,11 +132,18 @@ class Reviewer:
 
         except Exception as e:
             logger.warning("Adversarial review failed, skipping: %s", e)
+            # issue #301 #9：审查崩溃不再返回 recommendation="pass" ——
+            # 无结论（审查没跑成）与真通过（审查跑了且认可）在报告里必须
+            # 可区分。返回 "error"，由 loop 收敛并如实记录（SSE + 决策 +
+            # run_report 的 review_recommendation 行）；不翻转 clean_success：
+            # 没有证据说明 run 有问题，只是本轮没审查到（与 #7 反思降级
+            # 同一三态原则：降级 ≠ 失败但 ≠ 假 pass）。
             return {
                 "overall_assessment": "质检跳过（评估服务异常）",
                 "issues_found": [],
                 "key_strengths": [],
-                "recommendation": "pass",
+                "recommendation": "error",
+                "error": str(e)[:200],
             }
 
     def _build_results_summary(self, plan: Plan, results: dict[str, Any]) -> str:

@@ -581,6 +581,14 @@ class PERAgentLoop:
                         replan_requested = True
                         if event.content:
                             feedback_parts.append(event.content)
+                    elif event.type == "reflection" and event.reflection_result in ("unavailable", "unparsed"):
+                        # issue #301 #7/#8 三态：反思降级（评估服务异常 / 输出
+                        # 无法解析）= 本轮没有判定可依 —— 不重试、不重规划
+                        # （降级 ≠ 失败，好 run 不因评估缺席被打坏），也不改写
+                        # 用户可见的答案正文。曝光由事件本身 + reflector 写入的
+                        # ctx 决策承担（run report 的 reflect_decisions 会显现）：
+                        # 绝不静默按 pass 通过（旧行为即此假绿）。
+                        pass
 
                 if replan_requested:
                     if not self.config.enable_planning:
@@ -669,12 +677,16 @@ class PERAgentLoop:
             issues = review.get("issues_found", [])
             high_issues = [i for i in issues if i.get("severity") == "high"]
             # §5c：消费 recommendation（此前全仓零读取者）。取值收敛到
-            # pass/revise/reject，未识别值按 pass 处理（不制造噪音）。
+            # pass/revise/reject/error；issue #301 #9 起 "error"（审查未完成、
+            # 无结论）不得被并进 pass —— 无结论 ≠ 通过。其余未识别值仍按
+            # pass 处理（不制造噪音：模型写"通过"等表述时应视为通过）。
             raw_recommendation = str(review.get("recommendation") or "pass").strip().lower()
             if raw_recommendation.startswith("reject"):
                 recommendation = "reject"
             elif raw_recommendation.startswith("revise"):
                 recommendation = "revise"
+            elif raw_recommendation.startswith("error") or raw_recommendation in ("skipped", "unavailable"):
+                recommendation = "error"
             else:
                 recommendation = "pass"
             # 结构化记录：run report 读取；SSE 侧另经 decision 携带。
@@ -683,7 +695,24 @@ class PERAgentLoop:
                 "issue_count": len(issues),
                 "high_severity_count": len(high_issues),
             }
-            if recommendation != "pass":
+            if recommendation == "error":
+                # 审查崩溃/无结论（issue #301 #9）：如实记录 + 暴露；不按
+                # 结论重试/阻断，也不改用户可见的答案正文（保守原则同
+                # revise/reject）。clean_success 不翻转：没有证据说 run 坏，
+                # 只是本轮质量覆盖有缺口 —— 但绝不静默（旧行为即静默 pass）。
+                reason = str(review.get("error") or "").strip()
+                ctx.record_decision(
+                    "review",
+                    "error",
+                    "对抗审查未完成（审查服务异常），本轮无审查结论"
+                    + (f"：{reason[:150]}" if reason else ""),
+                )
+                yield AgentEvent(
+                    type="thinking",
+                    content="对抗审查未完成（审查服务异常），本轮结果未经过对抗质检",
+                    thinking_type="evaluation",
+                )
+            elif recommendation != "pass":
                 # reject/revise 的后果 = 被记录（结构化决策）+ 被暴露（SSE 事件）。
                 # 保守原则：不据此重试/阻断，也不改用户可见的答案正文。
                 verdict = "结果不可接受" if recommendation == "reject" else "结果需要修改"

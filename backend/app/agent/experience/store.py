@@ -33,6 +33,10 @@ class ExperienceStore:
     """Persistent experience store. Thread-safe for single-process usage.
 
     Loads lazily on first access. Always prefers Redis; falls back to local JSON.
+    A load only counts as "loaded" when a backend actually answered (data, or
+    an authoritative "no data"); an unreachable backend leaves the store
+    unloaded so the next access retries (issue #301 #13) instead of freezing
+    an empty view for the process lifetime.
     """
 
     def __init__(self) -> None:
@@ -263,23 +267,54 @@ class ExperienceStore:
     # ── Persistence ──
 
     async def _ensure_loaded(self) -> None:
+        """Load once — but only after a backend actually answered (#301 #13).
+
+        旧行为无条件置 ``_loaded=True``：Redis 瞬断 + 本地无文件时，两个后端
+        都没答上来却宣布"加载完成（空）"，本进程经验库恒空、重启才恢复。
+        新语义（对齐 agent/skills.py 的评审 m2 修法：失败不置位）：
+          - 任一后端载入数据（True）→ 已加载；
+          - 两个后端都明确答复"没有数据"（False/False）→ 空库是确定性事实，
+            置位、不再重试；
+          - 其余（至少一个后端"答不出来"：Redis 不可用 / 本地文件读不了）→
+            不置位，下次访问重试（load 幂等，重复加载只是 merge）。
+        """
         if self._loaded:
             return
-        loaded = await self._load_from_redis()
-        if not loaded:
-            loaded = self._load_from_local()
-        self._loaded = True
-        logger.info(
-            "ExperienceStore loaded: %d experiences (source: %s)",
-            len(self._experiences),
-            "redis" if loaded else "local" if loaded is not None else "empty",
-        )
+        from_redis = await self._load_from_redis()
+        from_local: bool | None = None
+        if from_redis is not True:
+            from_local = self._load_from_local()
 
-    async def _load_from_redis(self) -> bool:
+        if from_redis is True or from_local is True:
+            source = "redis" if from_redis else "local"
+            self._loaded = True
+            logger.info(
+                "ExperienceStore loaded: %d experiences (source: %s)",
+                len(self._experiences), source,
+            )
+        elif from_redis is False and from_local is False:
+            self._loaded = True
+            logger.info("ExperienceStore loaded: 0 experiences (source: empty)")
+        else:
+            logger.debug(
+                "ExperienceStore: load inconclusive (redis=%s, local=%s); "
+                "will retry on next access",
+                from_redis, from_local,
+            )
+
+    async def _load_from_redis(self) -> bool | None:
+        """Tri-state Redis load（issue #301 #13）。
+
+        True  = 载入数据；
+        False = Redis 明确答复"没有数据"（键为空）——确定性；
+        None  = Redis 不可用（未配置 / 连接异常）——"查不了"，不得与
+                "确实没有数据"同形，否则瞬断会被当成空库加载。
+        """
         try:
             from app.core.redis import redis_client
             if not redis_client:
-                return False
+                logger.debug("ExperienceStore: Redis not configured; skipping Redis load")
+                return None
             raw = await redis_client.get(REDIS_KEY)
             if not raw:
                 return False
@@ -289,20 +324,26 @@ class ExperienceStore:
                 self._experiences[exp.id] = exp
             return True
         except Exception as e:
-            logger.debug("ExperienceStore: Redis load failed: %s", e)
-            return False
+            logger.warning("ExperienceStore: Redis load failed: %s", e)
+            return None
 
     def _load_from_local(self) -> bool | None:
+        """Tri-state local load（issue #301 #13）。
+
+        True  = 载入数据；False = 文件不存在（确定性"没有数据"）；
+        None  = 文件存在但读取/解析失败——"答不出来"，下次重试。
+        """
         try:
-            if LOCAL_PATH.exists():
-                data = json.loads(LOCAL_PATH.read_text(encoding="utf-8"))
-                for item in data:
-                    exp = Experience.from_dict(item)
-                    self._experiences[exp.id] = exp
-                return True
+            if not LOCAL_PATH.exists():
+                return False
+            data = json.loads(LOCAL_PATH.read_text(encoding="utf-8"))
+            for item in data:
+                exp = Experience.from_dict(item)
+                self._experiences[exp.id] = exp
+            return True
         except Exception as e:
-            logger.debug("ExperienceStore: local load failed: %s", e)
-        return None
+            logger.warning("ExperienceStore: local load failed: %s", e)
+            return None
 
     async def _save(self) -> None:
         data = [exp.to_dict() for exp in self._experiences.values()]

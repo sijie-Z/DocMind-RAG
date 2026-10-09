@@ -362,7 +362,7 @@ async def extract_insights(
     organization_id: int = 1,
     run_context: RunContext | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     from app.core.config import settings
     from app.core.elasticsearch import ElasticsearchTools
     from app.dependencies import get_rag_pipeline
@@ -383,7 +383,13 @@ async def extract_insights(
     res = await ElasticsearchTools.search_documents(es_query)
     hits = res.get("hits", {}).get("hits", [])
     if not hits:
-        return json.dumps({"error": f"Document {document_id} not found in index."}, ensure_ascii=False)
+        # issue #301 #12：失败必须结构化（#293 契约）—— 旧行为返回
+        # {"error": ...} 的"正常"JSON 字符串，消费端（skills.py）大小写不匹配
+        # 漏检后把它当"分析结果"写进报告。
+        return ToolResult.fail(
+            code="document_not_found",
+            message=f"Document {document_id} not found in index.",
+        )
 
     filename = hits[0].get("_source", {}).get("filename", "Unknown")
     full_text = "\n".join(
@@ -393,12 +399,18 @@ async def extract_insights(
 
     pipeline = get_rag_pipeline()
     if not pipeline.openai_client:
-        return json.dumps({
-            "filename": filename,
-            "document_id": document_id,
-            "insights": {"error": "LLM unavailable"},
-            "raw_preview": text_sample[:2000],
-        }, ensure_ascii=False)
+        # issue #301 #12：无 LLM 就没有洞察——这是工具失败，不是结果。
+        # 旧行为返回 insights={"error": "LLM unavailable"} 的正常 JSON，
+        # 会被消费端原样写进报告（"分析结果"里出现 error 载荷）。
+        return ToolResult.fail(
+            code="llm_unavailable",
+            message="LLM unavailable",
+            raw={
+                "filename": filename,
+                "document_id": document_id,
+                "raw_preview": text_sample[:2000],
+            },
+        )
 
     aspect_instructions = {
         "entities": "提取文档中的关键实体：人物、组织、地点、日期、专有名词。",
@@ -462,12 +474,17 @@ async def extract_insights(
             "insights": insights,
         }, ensure_ascii=False, indent=2)
     except Exception as e:
-        return json.dumps({
-            "filename": filename,
-            "document_id": document_id,
-            "error": f"Analysis failed: {e}",
-            "raw_preview": text_sample[:2000],
-        }, ensure_ascii=False, indent=2)
+        # issue #301 #12：抽取失败的错误 JSON 不得再伪装成"分析结果"——
+        # 旧形态 {"error": ...} 被复合技能漏检后原样写进报告。结构化失败传播。
+        return ToolResult.fail(
+            code="analysis_failed",
+            message=f"Analysis failed: {e}",
+            raw={
+                "filename": filename,
+                "document_id": document_id,
+                "raw_preview": text_sample[:2000],
+            },
+        )
 
 
 @register_tool(
