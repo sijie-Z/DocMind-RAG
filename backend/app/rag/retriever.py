@@ -3,7 +3,9 @@ import asyncio
 import hashlib
 import logging
 import math
+import re
 import time
+import unicodedata
 from datetime import datetime
 
 from app.core.config import settings
@@ -20,6 +22,47 @@ from app.rag.query_processor import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ---- #208 Phase 2 决策 b：minimum_should_match 口径（剔除《…》文档全称 token） ----
+
+# 《…》文档全称跨度（查询里引用文档标题的写法）。
+_TITLE_SPAN_RE = re.compile(r"《[^《》]+》")
+# cjk 分析器的 CJK 段：Han / 假名 / 谚文（approximation，见 _count_tokens_cjk）。
+_CJK_RUN_RE = re.compile("[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯]+")
+# 标准分词器的拉丁/数字词（下划线、小数点、千分位逗号粘连为单 token）。
+_ASCII_TOKEN_RE = re.compile(r"[a-z0-9_]+(?:[.,][a-z0-9_]+)*")
+
+
+def _count_tokens_cjk(text: str) -> int:
+    """近似 ES cjk 分析器（standard tokenizer + CJK bigram + lowercase）的 token 数。
+
+    仅用于 #208 Phase 2 决策 b 的 minimum_should_match 基数（不改变查询文本）。
+    已与 ES `_analyze`（评估索引，analyzer=cjk）逐条校准（证据见 PR）。
+    已知近似边界：ASCII 停用词不剔除（偏差 ≤1 个 token 量级）、未建模 per-field
+    分析器差异（基数按 content 形态的 cjk 计数）。
+    """
+    t = unicodedata.normalize("NFKC", text or "").lower()
+    n = 0
+    for run in _CJK_RUN_RE.findall(t):
+        # 单字 CJK 段保留为单 token；≥2 字段产出相邻 bigram（n-1 个）。
+        n += 1 if len(run) == 1 else len(run) - 1
+    n += len(_ASCII_TOKEN_RE.findall(t))
+    return n
+
+
+def _minimum_should_match_for(query_text: str) -> int | str:
+    """multi_match 的 minimum_should_match 取值（#208 Phase 2 决策 b：口径变、常量不变）。
+
+    30% 常量不变，基数剔除《…》文档全称 token——标题 bigram 此前把查询 token 基数
+    抬高（实验实测：标题贡献 8 个 bigram，基数 7 → 15，30% 阈值随之从 2 抬到 4），
+    只命中内容词的 gold 因此被整条剪掉。无《…》全称时返回 "30%"（与剔除口径等价，
+    不改动非全称查询）。返回值：整数（剔除标题后按 30% 向下取整、下限 1）或 "30%"。
+    """
+    if not query_text or not _TITLE_SPAN_RE.search(query_text):
+        return "30%"
+    stripped = _TITLE_SPAN_RE.sub(" ", query_text)
+    base = _count_tokens_cjk(stripped)
+    return max(1, base * 30 // 100)
 
 
 class HybridRetriever:
@@ -100,7 +143,8 @@ class HybridRetriever:
                 {"multi_match": {
                     "query": q_text, "fields": boost_fields,
                     "type": "best_fields", "fuzziness": "AUTO",
-                    "minimum_should_match": "30%",
+                    # #208 Phase 2 决策 b：带《…》全称时按「剔除标题 token 后的 30%」计算。
+                    "minimum_should_match": _minimum_should_match_for(q_text),
                 }},
             ]
             if wildcard_terms:
@@ -332,7 +376,12 @@ class HybridRetriever:
         return None
 
     def _post_process(self, query: str, fused_hits: list[dict], top_k: int) -> list[dict]:
-        """Normalize, deduplicate, and filter retrieval results."""
+        """Normalize, deduplicate, and filter retrieval results.
+
+        #208 Phase 2 决策 a（doc 帽保守修法）：帽保持 2/文档，但计数移到质量过滤
+        之后——被任一质量闸门（含 0.15/0.10/0.07 终滤档）剔除的块不占帽位、
+        也不占 top_k 结果预算（此前计数在质量过滤前，被剔的块也占槽）。
+        """
 
         documents = []
         seen_docs: dict[str, int] = {}
@@ -355,11 +404,6 @@ class HybridRetriever:
             if not text:
                 continue
 
-            doc_id = str(source.get("document_id") or "")
-            seen_docs[doc_id] = seen_docs.get(doc_id, 0) + 1
-            if doc_id and seen_docs[doc_id] > 2:
-                continue
-
             snippet = self._build_snippet(text, query)
             overlap = self._compute_overlap(f"{source.get('filename', '')} {text[:1600]}", query_terms)
             has_kw = bool(hit.get("has_keyword")) or hit.get("keyword_rank") is not None
@@ -379,6 +423,23 @@ class HybridRetriever:
             score_pct = (float(hit.get("_score", 0)) - score_min) / score_range if score_range > 1e-9 else 0
             if score_pct < 0.3 and overlap < 0.05:
                 continue
+
+            # 终滤质量档（#208 Phase 2 决策 a）：判定式与原「Final quality check」一致，
+            # 仅前移为「先过滤、后计数」——被本档剔除的块同样不占 doc 帽槽位。
+            should_keep = (
+                overlap >= 0.15
+                or (has_kw and overlap >= 0.10)
+                or (has_kw and has_vec and overlap >= 0.07)
+            )
+            if not should_keep:
+                continue
+
+            # doc 帽 2/文档：只对通过质量过滤的块计数（被剔的块不占槽）。
+            doc_id = str(source.get("document_id") or "")
+            if doc_id:
+                seen_docs[doc_id] = seen_docs.get(doc_id, 0) + 1
+                if seen_docs[doc_id] > 2:
+                    continue
 
             # Normalize score
             fused_score = float(hit.get("_score", 0))
@@ -421,19 +482,7 @@ class HybridRetriever:
             if len(documents) >= top_k:
                 break
 
-        # Final quality check
-        filtered = []
-        for doc in documents:
-            ov = doc.get("overlap_score", 0)
-            should_keep = (
-                ov >= 0.15
-                or (doc.get("has_keyword") and ov >= 0.10)
-                or (doc.get("has_keyword") and doc.get("has_vector") and ov >= 0.07)
-            )
-            if should_keep:
-                filtered.append(doc)
-
-        return filtered
+        return documents
 
     # ---- Fallback ----
 
