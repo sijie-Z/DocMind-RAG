@@ -164,6 +164,9 @@ class RAGPipeline:
                         return sem_cached.get("sources", []), debug_info
 
                 # Query decomposition for complex queries
+            # （issue #225 边界注记：分解属查询理解层，不感知 search_mode——显式模式只
+            # 覆盖检索臂组合，复杂查询仍会分解，各子查询按覆盖后的策略检索；如实记录，
+            # 不引入开关。）
             sub_queries = [query]
             complexity = QueryComplexityClassifier.classify(query)
             if (
@@ -318,7 +321,11 @@ class RAGPipeline:
             if not document_ids and result and cache_safe:
                 # issue #225 决策 7A：精确缓存键带模式段（None=自动路由，键与修前逐字节相同）。
                 await self.cache.set(query, organization_id, top_k, result, search_mode=search_mode)
-            if query_vector and result and cache_safe:
+            # 语义缓存写入与读侧同一原则：显式模式一律不写（`not search_mode` 守卫）。
+            # 缺它时 vector/hybrid 臂回传的非空 qv 会经上面回填的 query_vector 让本
+            # 条件变真——强制模式的结果会被写进组织级语义缓存，随后同 query 的自动
+            # 路由请求按相似度命中、借位拿到强制模式的结果（评审 B1 实证的写侧泄漏）。
+            if query_vector and result and cache_safe and not search_mode:
                 # 检索缓存条目 answer 为空（仅 sources），写入检索专用命名空间（R4）
                 await self.semantic_cache.set(
                     query, query_vector, "", result, organization_id=organization_id
