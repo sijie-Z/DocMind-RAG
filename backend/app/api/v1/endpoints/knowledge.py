@@ -28,6 +28,7 @@ from app.exceptions import (
     ConflictError,
     ExternalServiceError,
     NotFoundError,
+    ServiceUnavailableError,
     ValidationError,
 )
 from app.models.document import Document, DocumentStatus
@@ -789,6 +790,11 @@ async def get_rag_stats(
         }
     except Exception as e:
         logger.error(f"Failed to get RAG stats: {e}")
+        # issue #301（批 C）：异常不再伪装成「命中率全零」的成功响应。
+        # 带身份的降级形态（消费方 dashboard/admin.vue 与 dashboard/user.vue
+        # 均只读既有键，加字段不破坏契约）：
+        # - 趋势桶数与成功路径对齐为 8（此前兜底 7 桶 vs 成功 8 桶，图表形状漂移）；
+        # - degraded/reason 供消费方区分「查不了」与「真的没有查询」。
         return {
             "total_queries_7d": 0,
             "hits_with_documents": 0,
@@ -797,7 +803,9 @@ async def get_rag_stats(
             "avg_latency_ms": 0,
             "avg_documents_retrieved": 0,
             "top_keywords": [],
-            "hit_rate_trend_7d": [0] * 7
+            "hit_rate_trend_7d": [0] * 8,
+            "degraded": True,
+            "reason": "RAG 统计查询失败，数据暂不可用",
         }
 
 
@@ -885,5 +893,9 @@ async def get_knowledge_graph(
             "analytics": analytics,
         }
     except Exception as e:
+        # issue #301（批 C）：图谱加载/分析失败不再回落空图谱 200 ——
+        # 「页面空白」此前与「知识库确实没有实体」不可区分（假空图谱）。
+        # 图谱数据是本端点的全部交付物，无降级语义：显式 503（「查不了」），
+        # 前端 graph.vue 的 catch 之外还会收到全局错误提示，不再静默空白。
         logger.error(f"Failed to get knowledge graph: {e}")
-        return {"nodes": [], "edges": [], "analytics": {}}
+        raise ServiceUnavailableError("知识图谱数据暂时不可用，请稍后重试")

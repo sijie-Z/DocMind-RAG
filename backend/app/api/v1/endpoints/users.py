@@ -738,9 +738,17 @@ async def get_user_stats(
         }
     except Exception as e:
         logger.exception(f"Error in get_user_stats: {str(e)}")
+        # issue #301（批 C）：查询失败不再伪装成「面板全零」的成功响应。
+        # 带身份的降级形态：既有键全部保持（dashboard/user.vue 与
+        # profile 页只读各自字段，加字段不破坏契约）；degraded/reason
+        # 供消费方区分「查不了」与「新用户真的都是 0」。
         return {
             "conversation_count": 0, "message_count": 0, "file_count": 0,
-            "knowledge_count": 0, "storage_used": 0, "storage_limit": int(settings.USER_STORAGE_LIMIT_BYTES), "activity_trend": [0] * 7
+            "knowledge_count": 0, "storage_used": 0,
+            "storage_limit": int(settings.USER_STORAGE_LIMIT_BYTES),
+            "activity_trend": [0] * 7,
+            "degraded": True,
+            "reason": "个人统计查询失败，数据暂不可用",
         }
 
 @router.get("/", response_model=dict, summary="获取用户列表")

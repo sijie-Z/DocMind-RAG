@@ -38,6 +38,11 @@ class UserStatsResponse(BaseModel):
     storage_used: int = 0
     storage_limit: int = 0
     activity_trend: list[int] = []
+    # issue #301（批 C）：统计查询失败时不再把「全零」伪装成真实数据 ——
+    # 降级形态带身份（degraded=True + reason 说明）。既有键语义不变，
+    # 前端（dashboard/user.vue、profile 页）可按需展示「数据暂不可用」。
+    degraded: bool = False
+    reason: str | None = None
 
 
 class UserUpdateProfile(BaseModel):

@@ -10,6 +10,8 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from app.rag.errors import EvalJudgeUnavailableError
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,12 +26,19 @@ class EvalResult:
 
 @dataclass
 class BatchEvalResult:
-    """Aggregated evaluation over multiple queries."""
+    """Aggregated evaluation over multiple queries.
+
+    issue #301：`count` 只计**真正评出分**的条目（不再是含故障条目的总数）；
+    `failed_count` / `failures` 标注因评委不可用而被剔除的条目（含原始下标），
+    均值仅对 `results` 计算 —— 故障条目不得以 0 分混入均值。
+    """
     count: int = 0
     avg_faithfulness: float = 0.0
     avg_relevancy: float = 0.0
     avg_context_precision: float = 0.0
     results: list[EvalResult] = field(default_factory=list)
+    failed_count: int = 0
+    failures: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _extract_score(text: str) -> float:
@@ -130,9 +139,13 @@ class RAGEvaluator:
         self.model = model
 
     async def _score(self, prompt: str) -> tuple[float, str]:
-        """Call LLM to score, return (score, raw_response)."""
+        """Call LLM to score, return (score, raw_response).
+
+        issue #301：评委调用失败抛 `EvalJudgeUnavailableError`，不再吞成
+        `(0.0, err)` —— 把「测量失败」伪装成「真实 0 分」正是本族要收的病。
+        """
         if not self.client:
-            return 0.0, "LLM client not configured"
+            raise EvalJudgeUnavailableError("LLM judge client not configured")
 
         try:
             response = await self.client.chat.completions.create(
@@ -146,7 +159,9 @@ class RAGEvaluator:
             return _extract_score(text), text
         except Exception as e:
             logger.warning(f"RAG eval LLM call failed: {e}")
-            return 0.0, str(e)
+            raise EvalJudgeUnavailableError(
+                f"RAG eval judge call failed: {type(e).__name__}"
+            ) from e
 
     async def evaluate_faithfulness(
         self, question: str, answer: str, context: list[dict[str, Any]]
@@ -208,15 +223,30 @@ class RAGEvaluator:
         """Evaluate multiple queries and return aggregated results.
 
         Each item: {"question": str, "answer": str, "context": list}
+
+        issue #301：单条评委不可用 → 记入 `failures`（含原始下标）并从均值
+        剔除，不再以 0 分混入；全部条目失败 → 抛 `EvalJudgeUnavailableError`，
+        由端点映射为 5xx，绝不返回 count/avg 全零的「成功」。
         """
-        results = []
-        for item in items:
-            r = await self.evaluate(
-                question=item["question"],
-                answer=item["answer"],
-                context=item.get("context", []),
-            )
+        results: list[EvalResult] = []
+        failures: list[dict[str, Any]] = []
+        for index, item in enumerate(items):
+            try:
+                r = await self.evaluate(
+                    question=item["question"],
+                    answer=item["answer"],
+                    context=item.get("context", []),
+                )
+            except EvalJudgeUnavailableError as e:
+                logger.warning(f"RAG batch eval item {index} skipped (judge unavailable): {e}")
+                failures.append({"index": index, "error": "judge_unavailable"})
+                continue
             results.append(r)
+
+        if not results:
+            raise EvalJudgeUnavailableError(
+                "批量评估全部条目的评委调用均不可用，评价结果不可知"
+            )
 
         n = max(1, len(results))
         return BatchEvalResult(
@@ -225,4 +255,6 @@ class RAGEvaluator:
             avg_relevancy=round(sum(r.relevancy for r in results) / n, 4),
             avg_context_precision=round(sum(r.context_precision for r in results) / n, 4),
             results=results,
+            failed_count=len(failures),
+            failures=failures,
         )

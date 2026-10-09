@@ -49,6 +49,18 @@ class EmbeddingUnavailableError(RuntimeError):
     """
 
 
+class EvalJudgeUnavailableError(RuntimeError):
+    """RAG 评估评委（LLM-as-judge）不可用 —— 分数不可知，绝不等于「0 分」（issue #301）。
+
+    此前 `RAGEvaluator._score` 把一切评委调用失败吞成 `(0.0, err)`：
+    - 单条评估：0/0/0 的 200 与「真实评了 0 分」不可区分（details.error 是唯一线索）；
+    - 批量评估：故障条目的 0 分还被计入均值，污染整批统计。
+
+    调用方契约：端点映射为 5xx（评委是外部 LLM 服务 → 502 语义），
+    批量评估对单条失败条目标注 `failures` 并从均值剔除，全部失败则上抛。
+    """
+
+
 def is_timeout_error(exc: BaseException) -> bool:
     """判定异常是否属于「超时」态（三态之一）。
 
