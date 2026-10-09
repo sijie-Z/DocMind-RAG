@@ -174,9 +174,11 @@ services:
     restart: unless-stopped
 
   minio:
-    # 固定日期标签：MinIO 官方已停发 `latest`（issue #234）。此前 `:latest` 在无缓存
-    # 的全新环境上必然拉取失败（403）；该 RELEASE 标签 2026-10 实测可拉取。
-    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    # 固定日期标签：MinIO 官方已停发 `latest`（issue #234）。该 RELEASE 标签的上游仓库
+    # 已删（无缓存镜像源直报 404、dl.min.io 410），当前唯一可拉路径=镜像源缓存
+    # （issue #235 侦察实证：daocloud/1panel 双源 200、digest 与本地逐字节一致）。
+    # 故显式写镜像源全名：新环境无需本机 daemon 额外配置即可拉取。
+    image: docker.m.daocloud.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
     container_name: docmind-minio
     environment:
       # 必填：生成随机凭据并写入 .env.docker（MINIO_SECRET_KEY 至少 8 位），默认值仅为占位
