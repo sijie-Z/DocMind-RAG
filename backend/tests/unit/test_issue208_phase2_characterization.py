@@ -8,9 +8,14 @@
    —— 2026-10-09 决策 a 落地（本 PR）：帽保留，但计数移到质量过滤之后，
    被任一质量闸门剔除的块不占帽位（旧行为「先占槽后剔除」已被换下，见
    `TestPostProcessDocCap` 的旧/新锁对照注释）；
-2. keyword_only 路径的 raw hit 不带 `has_keyword` 标记（该键只由 `_rrf_fuse` 写）
+2. keyword_only 路径的命中此前不带 `has_keyword` 标记（该键只由 `_rrf_fuse` 写）
    → 终滤按最严的 `ov >= 0.15` 档；同一 chunk 在 hybrid 序里带标记（0.10 档）
-   就能通过。实测 gold overlap = 0.1167 恰好落在两档之间（未修，仍锁现状）；
+   就能通过。实测 gold overlap = 0.1167 恰好落在两档之间。
+   —— 2026-10-09 决策 d 落地（本 PR）：`retrieve` 的 keyword_only 分支给命中
+   补上 `has_keyword=True`（与 hybrid 序一致），终滤改走 0.10 档。旧单元锁
+   `TestKeywordOnlyArmMarkerGap` 的两条断言（`_post_process` 函数层语义）保留：
+   函数对「无标记命中」的判定式未变；被换下的是**产品路径不再产出无标记的
+   keyword_only 命中**这一前提。新锁见 `TestKeywordOnlyArmMarkerAligned`；
 3. `extract_query_terms` 截断前 12 个 bigram 且标题 bigram 优先——
    带文档全称的查询里，标题 8 个 bigram 占位，内容词（数据/删除）被截断出列表
    （未修，仍锁现状）；
@@ -27,7 +32,7 @@
    查询的 gold 连候选都进不去（clause_chinese_7/chinese_12 的实验事实），
    本文件以 `TestNumeralClauseNormalization` 为新锁。
 
-**d/e 两环（has_keyword 臂标记 / MMR 适用性）仍受本闸门约束**——
+**e 环（MMR 对条号直查的适用性）仍受本闸门约束**——
 任何修复其机制的 PR 必须显式更新本文件：这是刻意的「变更前先测量、变更要自觉」闸门。
 """
 
@@ -170,7 +175,17 @@ class TestPostProcessDocCap:
 
 
 class TestKeywordOnlyArmMarkerGap:
-    """机制 2：keyword_only raw hit 无臂标记 → 终滤按 0.15 档（hybrid 0.10 档）。"""
+    """机制 2 旧锁（保留为 _post_process 函数级语义）：无臂标记 → 0.15 档。
+
+    旧锁（实验现状）：keyword_only 路径的 raw hit 不带 `has_keyword` 标记
+    （该键只由 `_rrf_fuse` 写）→ 终滤按最严 `ov >= 0.15` 档，实测 gold
+    overlap=0.1167 恰死线上。
+    —— 2026-10-09 决策 d 换锁：产品路径（`retrieve` 的 keyword_only 分支）
+    已给命中补 `has_keyword=True`，不再产出无标记命中（新锁见
+    `TestKeywordOnlyArmMarkerAligned`）。此处两条断言按原样保留：钉住的是
+    `_post_process` 对「无标记命中」与「带标记命中」的判定式本身——函数级
+    契约未变，若未来有人把函数内 0.15/0.10 两档改坏仍会在此处精确红。
+    """
 
     def test_markerless_hit_with_overlap_0117_is_dropped(self):
         retriever = HybridRetriever()
@@ -178,7 +193,7 @@ class TestKeywordOnlyArmMarkerGap:
         docs = retriever._post_process(
             TERM_QUERY, [_hit("docA_c1", "alpha bravo 填充正文", 0.5)], top_k=5
         )
-        assert docs == [], "keyword_only 路径无 has_keyword 标记 → 0.15 档终滤削掉 0.1167"
+        assert docs == [], "无 has_keyword 标记的命中按 0.15 档终滤削掉 0.1167（函数级语义）"
 
     def test_same_hit_with_keyword_marker_passes_at_010(self):
         retriever = HybridRetriever()
@@ -190,6 +205,59 @@ class TestKeywordOnlyArmMarkerGap:
         assert [d["chunk_id"] for d in docs] == ["docA_c1"], (
             "同一 overlap=0.1167，带 has_keyword（hybrid 序形态）时走 0.10 档放行"
         )
+
+
+class TestKeywordOnlyArmMarkerAligned:
+    """机制 2 新锁（决策 d）：keyword_only 序的命中携带 has_keyword 臂标记。
+
+    `retrieve` 的 keyword_only 分支此前不过 `_rrf_fuse`，raw hit 拿不到
+    `has_keyword` → 终滤 0.15 档（旧锁）。决策 d 后该分支显式补标记，
+    与 hybrid 序一致地走 0.10 档；上游闸门（如 γ：has_kw 且 ov<0.02）也随
+    标记语义对齐——标记是「与 hybrid 同口径」，不是无条件放行。
+    """
+
+    @pytest.mark.asyncio
+    async def test_keyword_only_path_marks_hits_and_passes_mid_overlap(self, monkeypatch):
+        """端到端：keyword_only 路由下，overlap=0.1167 的命中经标记后放行。"""
+        retriever = HybridRetriever()
+
+        async def fake_kw(query, filters, candidate_size):
+            # 与旧锁同构：2 个术语命中 → ov = 0.1167（0.10 与 0.15 之间）。
+            return [_hit("docA_c1", "alpha bravo 填充正文", 0.5)]
+
+        monkeypatch.setattr(retriever, "_keyword_hits", fake_kw)
+        monkeypatch.setattr(
+            QueryComplexityClassifier,
+            "get_strategy",
+            classmethod(lambda cls, _q: "keyword_only"),
+        )
+
+        docs, _qv, dbg, _deg = await retriever.retrieve(TERM_QUERY, 1, top_k=5, debug=True)
+        assert [d["chunk_id"] for d in docs] == ["docA_c1"], (
+            "决策 d：keyword_only 命中带臂标记 → 0.1167 走 0.10 档放行"
+        )
+        assert docs[0]["has_keyword"] is True
+        assert dbg.get("strategy") == "keyword_only"
+        # 调试载荷与 post_process 看到同一批标记（keyword_top 也带 has_keyword）。
+        assert dbg["keyword_top"][0]["has_keyword"] is True
+
+    @pytest.mark.asyncio
+    async def test_marked_hit_below_gamma_gate_is_still_dropped(self, monkeypatch):
+        """标记不是无条件放行：ov=0（<0.02）的命中在 γ 闸门（has_kw 档）被剔。"""
+        retriever = HybridRetriever()
+
+        async def fake_kw(query, filters, candidate_size):
+            return [_hit("docA_c1", "完全无关的填充内容", 0.5)]
+
+        monkeypatch.setattr(retriever, "_keyword_hits", fake_kw)
+        monkeypatch.setattr(
+            QueryComplexityClassifier,
+            "get_strategy",
+            classmethod(lambda cls, _q: "keyword_only"),
+        )
+
+        docs, _qv, _dbg, _deg = await retriever.retrieve(TERM_QUERY, 1, top_k=5)
+        assert docs == [], "与 hybrid 序一致：has_kw 且 ov<0.02 仍死于 γ 闸门"
 
 
 class TestQueryTermTruncationTilt:

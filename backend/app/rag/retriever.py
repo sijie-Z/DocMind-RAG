@@ -674,6 +674,11 @@ class HybridRetriever:
 
         if strategy == "keyword_only":
             kw_hits = await self._keyword_hits(query, filters, candidate_size)
+            # #208 Phase 2 决策 d：keyword-only 序的命中来自 keyword 臂本体，补上与
+            # hybrid 序（`_rrf_fuse` 写 `has_keyword`）一致的臂标记——终滤走同一
+            # 质量档（has_kw → ov>=0.10），不再按「无臂命中」的最严 0.15 档论处
+            # （实测 gold overlap=0.1167 恰死两档之间）。命中为拷贝，不改进参对象。
+            kw_hits = [{**h, "has_keyword": True} for h in kw_hits]
             if debug and debug_info is not None:
                 debug_info["keyword_top"] = self._debug_format_hits(kw_hits[:10])
                 debug_info["vector_top"] = []
