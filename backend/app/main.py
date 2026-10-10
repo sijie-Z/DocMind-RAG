@@ -48,6 +48,18 @@ async def metrics_snapshot_task():
             logger.error(f"Failed to take metrics snapshot: {e}")
         await asyncio.sleep(max(5, int(settings.MONITORING_INTERVAL)))
 
+
+async def scheduled_tasks_loop():
+    """进程内定时任务调度循环（ENABLE_SCHEDULER 门控，见 lifespan）。
+
+    循环体 = services/scheduler/engine.SchedulerEngine.run_loop（tick 内部
+    自带异常隔离，单次失败不终止调度器）；关闭时由 lifespan cancel，
+    在途运行随事件循环终止（其 agent_tasks 行保持 RUNNING，可经 /agent 恢复）。
+    """
+    from app.services.scheduler.engine import scheduler_engine
+
+    await scheduler_engine.run_loop()
+
 # 设置日志
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -178,6 +190,15 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("ENABLE_MONITORING=false，指标快照任务不启动")
 
+        # 启动定时任务调度器（ENABLE_SCHEDULER 门控，模式同 ENABLE_MONITORING）：
+        # 只控制进程内调度循环；/api/v1/scheduled-tasks 的 CRUD 与 run-now 独立。
+        # 单实例语义：多 worker 部署会各跑一份调度（已知边界，需外部调度器）。
+        scheduler_task: asyncio.Task | None = None
+        if settings.ENABLE_SCHEDULER:
+            scheduler_task = asyncio.create_task(scheduled_tasks_loop())
+        else:
+            logger.info("ENABLE_SCHEDULER=false，定时任务调度器不启动")
+
         logger.info("所有服务初始化完成")
 
     except Exception as e:
@@ -196,6 +217,14 @@ async def lifespan(app: FastAPI):
             logger.info("指标监控快照任务已取消")
     except Exception as e:
         logger.warning(f"取消指标监控快照任务失败: {e}")
+
+    # 取消定时任务调度器（在途运行随事件循环终止；其任务行保持 RUNNING 可恢复）
+    try:
+        if scheduler_task:
+            scheduler_task.cancel()
+            logger.info("定时任务调度器已取消")
+    except Exception as e:
+        logger.warning(f"取消定时任务调度器失败: {e}")
 
     # 关闭Kafka Producer
     await kafka_producer.stop()
@@ -243,6 +272,7 @@ OPENAPI_TAGS = [
     {"name": "Agent工作流", "description": "工作流 CRUD、执行、调试"},
     {"name": "Agent记忆", "description": "短期/长期/工作记忆管理"},
     {"name": "智能Agent", "description": "PER Agent 对话、工具调用、技能学习"},
+    {"name": "定时任务", "description": "定时 agent 任务的 CRUD、暂停/恢复、立即触发"},
 ]
 
 app = FastAPI(
