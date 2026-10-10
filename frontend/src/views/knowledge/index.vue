@@ -229,8 +229,9 @@
                           >
                             <template #icon>
                               <n-icon v-if="item.status === 'completed'"><CheckmarkCircleOutline /></n-icon>
-                              <n-icon v-else-if="item.status === 'processing'" class="animate-spin"><RefreshOutline /></n-icon>
-                              <n-icon v-else><AlertCircleOutline /></n-icon>
+                              <n-icon v-else-if="item.status === 'parsing' || item.status === 'parsed'" class="animate-spin"><RefreshOutline /></n-icon>
+                              <n-icon v-else-if="item.status === 'failed'"><AlertCircleOutline /></n-icon>
+                              <n-icon v-else><TimeOutline /></n-icon>
                             </template>
                           </n-tag>
                           <span class="text-[10px] text-gray-400">{{ formatFileSize(item.file_size) }}</span>
@@ -432,7 +433,8 @@ import {
   CloseCircleOutline,
   ListOutline,
   GridOutline,
-  GitNetworkOutline
+  GitNetworkOutline,
+  TimeOutline
 } from '@vicons/ionicons5'
 import type { UploadFileInfo } from 'naive-ui'
 import { 
@@ -448,7 +450,7 @@ import type { KnowledgeBase } from '@/api/knowledge'
 import { formatDate } from '@/utils/format'
 import { getRagMetrics, type RagMetrics } from '@/api/rag'
 import { useUserStore } from '@/stores/user'
-import { docIconColor } from './docDisplay'
+import { docIconColor, docStatusLabel, docStatusType, isInProgressDoc, computeDocStats } from './docDisplay'
 import KnowledgeUploadPanel from './components/KnowledgeUploadPanel.vue'
 import KnowledgeDetailModals from './components/KnowledgeDetailModals.vue'
 
@@ -562,7 +564,7 @@ let pollTimer: number | null = null
 const startPolling = () => {
   if (pollTimer) return
   pollTimer = window.setInterval(async () => {
-    const hasProcessing = knowledgeBases.value.some(item => item.status === 'processing')
+    const hasProcessing = knowledgeBases.value.some(item => isInProgressDoc(item.status))
     if (hasProcessing) {
       await loadKnowledgeBases()
     } else {
@@ -588,15 +590,7 @@ const tagOptions = computed(() => [
 
 const filteredKnowledgeBases = computed(() => knowledgeBases.value)
 
-const stats = computed(() => {
-  const list = knowledgeBases.value
-  return {
-    total: list.length,
-    completed: list.filter(i => i.status === 'completed').length,
-    processing: list.filter(i => i.status === 'processing').length,
-    failed: list.filter(i => i.status === 'failed').length
-  }
-})
+const stats = computed(() => computeDocStats(knowledgeBases.value))
 
 const isAllSelected = computed(() => {
   return filteredKnowledgeBases.value.length > 0 && selectedIds.value.length === filteredKnowledgeBases.value.length
@@ -677,8 +671,8 @@ const loadKnowledgeBases = async () => {
         const data = response.data.data
         if (Array.isArray(data.data)) {
             knowledgeBases.value = data.data
-            // Start polling if any item is processing
-            if (knowledgeBases.value.some(item => item.status === 'processing')) {
+            // Start polling if any item is in a non-terminal state
+            if (knowledgeBases.value.some(item => isInProgressDoc(item.status))) {
               startPolling()
             }
         } else {
@@ -912,21 +906,9 @@ const isFallbackIndexed = (item: KnowledgeBase | null): boolean => {
   return item.status === 'completed' && (err.includes('降级') || err.includes('关键词索引'))
 }
 
-const getStatusType = (item: KnowledgeBase | null): 'success' | 'warning' | 'error' => {
-  if (!item) return 'error'
-  if (item.status === 'processing') return 'warning'
-  if (item.status === 'failed') return 'error'
-  if (isFallbackIndexed(item)) return 'warning'
-  return 'success'
-}
+const getStatusType = (item: KnowledgeBase | null) => docStatusType(item?.status)
 
-const getStatusLabel = (item: KnowledgeBase | null): string => {
-  if (!item) return '未知'
-  if (item.status === 'processing') return '处理中'
-  if (item.status === 'failed') return '失败'
-  if (isFallbackIndexed(item)) return '已完成（降级索引）'
-  return '已完成'
-}
+const getStatusLabel = (item: KnowledgeBase | null) => docStatusLabel(item?.status)
 
 const getFileIconColor = (fileType: string): string => docIconColor(fileType)
 

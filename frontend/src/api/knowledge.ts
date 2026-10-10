@@ -20,7 +20,8 @@ export interface KnowledgeBase {
   raw_status?: string
   created_at: string
   updated_at: string
-  status: 'processing' | 'completed' | 'failed'
+  // 六值域真源：backend knowledge.py:131-139 status_map（INDEXED → 'completed'）
+  status: 'pending' | 'uploaded' | 'parsing' | 'parsed' | 'completed' | 'failed'
 }
 
 export interface KnowledgeBaseListResponse {

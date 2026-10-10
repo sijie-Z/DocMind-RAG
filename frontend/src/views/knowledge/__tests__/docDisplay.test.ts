@@ -7,7 +7,7 @@
  * 变异点：配色表改回 docx/doc/md 死键 → 「真实枚举六值」用例精确红。
  */
 import { describe, it, expect } from 'vitest'
-import { docIconColor } from '../docDisplay'
+import { docIconColor, docStatusLabel, docStatusType, isInProgressDoc, computeDocStats } from '../docDisplay'
 
 describe('docIconColor · 与后端 DocumentType 枚举对齐（B15）', () => {
   it('真实枚举六值全部命中且颜色各异（pdf/word/excel/ppt/txt/other）', () => {
@@ -30,5 +30,62 @@ describe('docIconColor · 与后端 DocumentType 枚举对齐（B15）', () => {
     expect(docIconColor(null)).toBe('#868e96')
     expect(docIconColor(undefined)).toBe('#868e96')
     expect(docIconColor('whatever')).toBe('#868e96')
+  })
+})
+
+describe('文档状态机 · 六值域（B16：processing 从不存在）', () => {
+  it('六值标签逐一正确 —— pending/parsing 绝不再显示「已完成」（状态撒谎修复）', () => {
+    expect(docStatusLabel('pending')).toBe('等待处理')
+    expect(docStatusLabel('uploaded')).toBe('已上传')
+    expect(docStatusLabel('parsing')).toBe('解析中')
+    expect(docStatusLabel('parsed')).toBe('已解析')
+    expect(docStatusLabel('completed')).toBe('已完成')
+    expect(docStatusLabel('failed')).toBe('失败')
+
+    // 判别：旧实现对它们落 else 分支显示「已完成」
+    expect(docStatusLabel('pending')).not.toBe('已完成')
+    expect(docStatusLabel('parsing')).not.toBe('已完成')
+    expect(docStatusLabel('uploaded')).not.toBe('已完成')
+  })
+
+  it('色档：pending/uploaded=info、parsing/parsed=warning、completed=success、failed=error', () => {
+    expect(docStatusType('pending')).toBe('info')
+    expect(docStatusType('uploaded')).toBe('info')
+    expect(docStatusType('parsing')).toBe('warning')
+    expect(docStatusType('parsed')).toBe('warning')
+    expect(docStatusType('completed')).toBe('success')
+    expect(docStatusType('failed')).toBe('error')
+  })
+
+  it('isInProgressDoc：非终态为 true，终态/空值 false（轮询 gate 口径）', () => {
+    expect(isInProgressDoc('pending')).toBe(true)
+    expect(isInProgressDoc('uploaded')).toBe(true)
+    expect(isInProgressDoc('parsing')).toBe(true)
+    expect(isInProgressDoc('parsed')).toBe(true)
+    expect(isInProgressDoc('completed')).toBe(false)
+    expect(isInProgressDoc('failed')).toBe(false)
+    expect(isInProgressDoc('processing')).toBe(false) // 旧死值也应为 false（不是非终态口径）
+    expect(isInProgressDoc(null)).toBe(false)
+  })
+
+  it('computeDocStats：非终态计入 processing（旧 `status === "processing"` 口径恒 0）', () => {
+    const stats = computeDocStats([
+      { status: 'parsing' },
+      { status: 'pending' },
+      { status: 'completed' },
+      { status: 'failed' },
+      { status: 'uploaded' },
+    ])
+    expect(stats).toEqual({ total: 5, completed: 1, processing: 3, failed: 1 })
+
+    // 全非终态页：旧口径 processing=0，新口径=2
+    expect(computeDocStats([{ status: 'parsing' }, { status: 'pending' }]).processing).toBe(2)
+  })
+
+  it('null/未知状态 → 未知 + default（不谎报任何终态）', () => {
+    expect(docStatusLabel(null)).toBe('未知')
+    expect(docStatusLabel(undefined)).toBe('未知')
+    expect(docStatusType(null)).toBe('default')
+    expect(docStatusType('weird')).toBe('default')
   })
 })

@@ -12,7 +12,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
-import { NMessageProvider, NDialogProvider, NCheckbox } from 'naive-ui'
+import { NMessageProvider, NDialogProvider, NCheckbox, NTooltip } from 'naive-ui'
 
 import KnowledgeView from '../index.vue'
 import { getKnowledgeBases, batchDeleteKnowledgeBases, getDocumentDetail, getDocumentContent } from '@/api/knowledge'
@@ -68,6 +68,28 @@ const listResponse = (docs: unknown[], total?: number) => ({
 const SlotStub = (name: string) =>
   defineComponent({ name, setup(_, { slots }) { return () => h('div', slots.default?.()) } })
 
+// 详情弹窗桩：把视图传入的 getStatusLabel/getStatusType 对当前文档的求值结果出屏，
+// 用于断言状态标签走的是视图真实接线
+const DetailStub = defineComponent({
+  name: 'KnowledgeDetailModals',
+  props: {
+    showDetail: { type: Boolean, default: false },
+    currentDoc: { type: Object, default: null },
+    getStatusLabel: { type: Function, default: () => '' },
+    getStatusType: { type: Function, default: () => 'default' },
+  },
+  setup(props) {
+    return () =>
+      h(
+        'div',
+        { class: 'detail-stub' },
+        props.currentDoc
+          ? `${(props.getStatusLabel as (d: unknown) => string)(props.currentDoc)}|${(props.getStatusType as (d: unknown) => string)(props.currentDoc)}`
+          : ''
+      )
+  },
+})
+
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
 
 const Host = defineComponent({
@@ -86,12 +108,12 @@ function mountView() {
   const wrapper = mount(Host, {
     global: {
       plugins: [pinia, i18n],
-      // n-checkbox 生产由 app.use(naive) 全局注册；测试里注册真组件以驱动勾选
-      components: { NCheckbox },
+      // n-checkbox / n-tooltip 生产由 app.use(naive) 全局注册；测试里注册真组件
+      // （n-tooltip 的 #trigger 槽装着卡片「查看」按钮，缺失则点击链断裂）
+      components: { NCheckbox, NTooltip },
       stubs: {
         KnowledgeUploadPanel: true,
-        KnowledgeDetailModals: true,
-        Tooltip: SlotStub('Tooltip'),
+        KnowledgeDetailModals: DetailStub,
         Pagination: true,
         Select: true,
         Input: true,
@@ -167,7 +189,7 @@ describe('KnowledgeView · 批删组织组包（A2）', () => {  it('全链路�
 
     const wrapper = mountView()
     const user = useUserStore()
-    user.userInfo = { ...(user.userInfo as UserInfo), organization_id: null } as UserInfo
+    user.userInfo = { ...(user.userInfo as UserInfo), organization_id: null } as unknown as UserInfo
 
     await flushPromises()
     await wrapper.find('.n-checkbox').trigger('click')
@@ -195,5 +217,55 @@ describe('KnowledgeView · file_type 图标配色（B15）', () => {
     const iconStyles = wrapper.findAll('.n-icon').map((n) => n.attributes('style') || '')
     // 原配色表无 'word' 键 → 恒灰色兜底；修复后命中 #4dabf7 = rgb(77,171,247)
     expect(iconStyles.some((s) => /77,\s*171,\s*247/.test(s))).toBe(true)
+  })
+})
+
+describe('KnowledgeView · 状态标签接线（B16）', () => {
+  it('status=parsing 文档打开详情 → 「解析中」（旧实现落 else 谎报「已完成」）', async () => {
+    mockedGetKnowledgeBases.mockResolvedValue(listResponse([{ ...REAL_DOC, status: 'parsing' }]) as never)
+    mockedGetDocumentDetail.mockResolvedValue({
+      data: { data: { id: 'doc-1', title: 'architecture.md', filename: 'architecture.md', file_size: 1578, file_type: 'word', status: 'parsing' } },
+    } as never)
+    mockedGetDocumentContent.mockResolvedValue({
+      data: { data: { content: '预览内容', summary: '', suggested_tags: [] } },
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    const card = wrapper.findAll('.group').find((g) => g.text().includes('architecture.md'))
+    expect(card, '文档卡应在屏').toBeTruthy()
+    await card!.findAll('button')[0].trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const stub = wrapper.find('.detail-stub')
+    expect(stub.exists()).toBe(true)
+    expect(stub.text()).toContain('解析中')
+    expect(stub.text()).not.toContain('已完成')
+  })
+
+  it('status=pending 文档打开详情 → 「等待处理」（不谎报终态）', async () => {
+    mockedGetKnowledgeBases.mockResolvedValue(listResponse([{ ...REAL_DOC, status: 'pending' }]) as never)
+    mockedGetDocumentDetail.mockResolvedValue({
+      data: { data: { id: 'doc-1', title: 'architecture.md', filename: 'architecture.md', file_size: 1578, file_type: 'word', status: 'pending' } },
+    } as never)
+    mockedGetDocumentContent.mockResolvedValue({
+      data: { data: { content: '预览内容', summary: '', suggested_tags: [] } },
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    const card = wrapper.findAll('.group').find((g) => g.text().includes('architecture.md'))
+    await card!.findAll('button')[0].trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const stub = wrapper.find('.detail-stub')
+    expect(stub.text()).toContain('等待处理')
+    expect(stub.text()).not.toContain('已完成')
   })
 })

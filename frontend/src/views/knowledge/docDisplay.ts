@@ -21,3 +21,62 @@ const FALLBACK_COLOR = '#868e96'
 
 export const docIconColor = (fileType: string | null | undefined): string =>
   FILE_TYPE_COLORS[fileType || ''] || FALLBACK_COLOR
+
+/**
+ * 文档状态真源：knowledge.py:131-139 status_map 输出的六值域
+ *   pending / uploaded / parsing / parsed / completed / failed
+ * （后端 DocumentStatus.INDEXED 映射为 'completed'；'processing' 从不存在
+ * —— 前端旧判定 `status === 'processing'` 是死路：标签对 pending/parsing
+ * 落 else 显示「已完成」(状态撒谎)、轮询 gate 永不成立、stats 恒 0。）
+ */
+export type DocStatusType = 'success' | 'warning' | 'error' | 'info' | 'default'
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: '等待处理',
+  uploaded: '已上传',
+  parsing: '解析中',
+  parsed: '已解析',
+  completed: '已完成',
+  failed: '失败',
+}
+
+const STATUS_TYPES: Record<string, DocStatusType> = {
+  pending: 'info',
+  uploaded: 'info',
+  parsing: 'warning',
+  parsed: 'warning',
+  completed: 'success',
+  failed: 'error',
+}
+
+export const docStatusLabel = (status: string | null | undefined): string =>
+  (status && STATUS_LABELS[status]) || '未知'
+
+export const docStatusType = (status: string | null | undefined): DocStatusType =>
+  (status && STATUS_TYPES[status]) || 'default'
+
+/** 非终态集合（终态 = completed / failed）：轮询 gate 与统计口径共用 */
+const IN_PROGRESS_STATUSES: ReadonlySet<string> = new Set(['pending', 'uploaded', 'parsing', 'parsed'])
+
+export const isInProgressDoc = (status: string | null | undefined): boolean =>
+  !!status && IN_PROGRESS_STATUSES.has(status)
+
+export interface DocStats {
+  total: number
+  completed: number
+  processing: number
+  failed: number
+}
+
+/** 统计卡口径（真实状态域；旧 `status === 'processing'` 口径恒 0） */
+export const computeDocStats = (list: Array<{ status?: string | null }>): DocStats => {
+  let completed = 0
+  let processing = 0
+  let failed = 0
+  for (const item of list) {
+    if (item.status === 'completed') completed += 1
+    else if (item.status === 'failed') failed += 1
+    else if (isInProgressDoc(item.status)) processing += 1
+  }
+  return { total: list.length, completed, processing, failed }
+}
