@@ -8,6 +8,8 @@ import type {
   AgentConfig,
   AgentSession,
   AgentSessionDetail,
+  AgentTaskView,
+  ApprovalDecisionInput,
 } from '@/types/agent'
 
 interface ChatOptions {
@@ -24,6 +26,51 @@ interface ChatOptions {
   systemPromptOverride?: string
   /** External abort signal (e.g. from the caller's AbortController) */
   signal?: AbortSignal
+}
+
+/** 消费一个 SSE 事件流（chat / approval 续跑共用）。 */
+async function consumeEventStream(
+  response: Response,
+  onEvent: (event: AgentEvent) => void,
+  controller: AbortController,
+): Promise<{ abort: () => void }> {
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('No response body')
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || !trimmed.startsWith('data: ')) continue
+        const data = trimmed.slice(6)
+        if (!data || data === '[DONE]') continue
+
+        try {
+          const event: AgentEvent = JSON.parse(data)
+          onEvent(event)
+        } catch {
+          // Skip malformed events
+        }
+      }
+    }
+  } catch (e: unknown) {
+    // Suppress AbortError from user clicking stop
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      return { abort: () => controller.abort() }
+    }
+    throw e
+  }
+  return { abort: () => controller.abort() }
 }
 
 export const agentApi = {
@@ -74,43 +121,7 @@ export const agentApi = {
       throw new Error(`Agent request failed: ${response.status}`)
     }
 
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('No response body')
-
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    try {
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed || !trimmed.startsWith('data: ')) continue
-          const data = trimmed.slice(6)
-          if (!data || data === '[DONE]') continue
-
-          try {
-            const event: AgentEvent = JSON.parse(data)
-            onEvent(event)
-          } catch {
-            // Skip malformed events
-          }
-        }
-      }
-    } catch (e: unknown) {
-      // Suppress AbortError from user clicking stop
-      if (e instanceof DOMException && e.name === 'AbortError') {
-        return { abort: () => controller.abort() }
-      }
-      throw e
-    }
-    return { abort: () => controller.abort() }
+    return consumeEventStream(response, onEvent, controller)
   },
 
   /** Submit user feedback on an agent response */
@@ -124,6 +135,64 @@ export const agentApi = {
       feedback,
       note: note || undefined,
     })
+  },
+
+  // ── HITL：任务状态 / 取消 / 审批（人在环）──────────────────────────────
+
+  /** 任务状态视图（审批现场 / 取消后的权威状态；HITL 恢复入口） */
+  getTask(taskId: string): Promise<ApiResponse<AgentTaskView>> {
+    return request.get(`/agent/tasks/${taskId}`)
+  },
+
+  /** 协作式取消（服务端停止协议）：202 = 已受理待收敛 / 200 = 已直接终态 */
+  cancelTask(
+    taskId: string,
+  ): Promise<ApiResponse<{ task_id: string; state: string; message?: string; already?: boolean }>> {
+    return request.post(`/agent/tasks/${taskId}/cancel`)
+  },
+
+  /**
+   * 审批应答（approve / deny / 改指令）→ SSE 续跑流。
+   * 事件契约与 chat 一致；续跑可能再次停在下一个审批点（流内再发 approval_required）。
+   */
+  async decideApproval(
+    taskId: string,
+    input: ApprovalDecisionInput,
+    onEvent: (event: AgentEvent) => void,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ abort: () => void }> {
+    const token = getToken()
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+    const controller = new AbortController()
+    const externalSignal = options?.signal
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort()
+      } else {
+        externalSignal.addEventListener('abort', () => controller.abort(), { once: true })
+      }
+    }
+
+    const response = await fetch(`${baseUrl}/agent/tasks/${taskId}/approval`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        decision: input.decision,
+        modified_instruction: input.modified_instruction || undefined,
+        note: input.note || undefined,
+      }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      // 409/404：任务不再处于待审批（已被应答/取消/终态）——由调用方刷新现场
+      throw new Error(`Approval request failed: ${response.status}`)
+    }
+
+    return consumeEventStream(response, onEvent, controller)
   },
 
   /** List available tools */

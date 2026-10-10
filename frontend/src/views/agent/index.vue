@@ -207,11 +207,24 @@
       </span>
     </div>
 
+    <!-- HITL 审批卡（dock 在输入区上方：暂停点在哪，卡片就在哪等人） -->
+    <div v-if="agentStore.pendingApproval" class="approval-dock">
+      <ApprovalCard
+        :tool-name="agentStore.pendingApproval.tool_name"
+        :tool-args="agentStore.pendingApproval.tool_args"
+        :risk-level="agentStore.pendingApproval.risk_level"
+        :reason="agentStore.pendingApproval.reason"
+        :busy="approvalBusy"
+        @decide="handleApprovalDecide"
+      />
+    </div>
+
     <!-- Input -->
     <AgentInput
       :placeholder="'输入复杂任务，Agent 自动规划执行...'"
       :disabled="false"
       :loading="agentStore.isLoading"
+      :stopping="stopping"
       @send="handleSend"
       @stop="handleStop"
     />
@@ -235,6 +248,7 @@ import RunReportBlock from '@/components/agent/RunReportBlock.vue'
 import AgentConfigPanel from '@/components/agent/AgentConfigPanel.vue'
 import SessionSelector from '@/components/agent/SessionSelector.vue'
 import AgentInput from '@/components/agent/AgentInput.vue'
+import ApprovalCard from '@/components/agent/ApprovalCard.vue'
 import Markdown from '@/components/common/Markdown.vue'
 
 const agentStore = useAgentStore()
@@ -242,6 +256,11 @@ const message = useDedupedMessage()
 
 // 当前进行中的 Agent chat 请求控制器（用于停止/卸载时中止）
 let currentChatController: AbortController | null = null
+// HITL：停止中的收敛窗口定时器（服务端取消受理后，给 run 检查点收敛的时间；
+// 超时兜底才硬断流——协作式取消不会被网络层"假装成功"）。
+let stopFallbackTimer: ReturnType<typeof setTimeout> | null = null
+const stopping = ref(false)
+const approvalBusy = ref(false)
 
 const showConfig = ref(false)
 const showPlan = ref(true)
@@ -349,6 +368,8 @@ async function handleSend(query: string) {
   if (agentStore.isLoading || !query.trim()) return
 
   agentStore.clearMessages()
+  agentStore.resetTask()
+  stopping.value = false
 
   // Add user message
   agentStore.addMessage({
@@ -420,23 +441,144 @@ async function handleSend(query: string) {
   } finally {
     currentChatController = null
     agentStore.setLoading(false)
+    stopping.value = false
+    if (stopFallbackTimer) {
+      clearTimeout(stopFallbackTimer)
+      stopFallbackTimer = null
+    }
     scrollToBottom()
   }
 }
 
+/**
+ * HITL 停止：先请求**服务端**协作式取消（POST /tasks/{id}/cancel），流内等
+ * run_cancelled/done 收敛；取消通道不可用才退回客户端断流（如实的能力边界，
+ * 不假装服务端已受理）。无任务上下文（checkpoint 未接）时直接客户端断流。
+ */
 function handleStop() {
+  const taskId = agentStore.taskId
+  if (!taskId) {
+    fallbackAbort()
+    return
+  }
+  stopping.value = true
+  agentApi.cancelTask(taskId).catch(() => {
+    // 503（取消通道不可用）等：如实退回断流
+    fallbackAbort()
+  })
+  // 兜底：run 卡在长调用里（工具/LLM 不中断，等它返回检查点）——给收敛窗口，
+  // 超时仍未收敛才硬断流（UI 不无限等下去）。
+  if (stopFallbackTimer) clearTimeout(stopFallbackTimer)
+  stopFallbackTimer = setTimeout(() => {
+    stopFallbackTimer = null
+    if (agentStore.isLoading) {
+      fallbackAbort()
+    }
+  }, 15000)
+}
+
+function fallbackAbort() {
   currentChatController?.abort()
   currentChatController = null
   agentStore.setLoading(false)
+  stopping.value = false
   agentStore.updateLastAssistant((msg) => {
     msg.loading = false
   })
+}
+
+/**
+ * HITL 审批应答：approve/deny/改指令 → 消费续跑 SSE（事件与 chat 同契约）。
+ * 409/404 = 现场已变（已被应答/取消/超时）→ 刷新权威状态回到现场。
+ */
+async function handleApprovalDecide(payload: {
+  decision: 'approve' | 'deny'
+  modifiedInstruction?: string
+  note?: string
+}) {
+  const taskId = agentStore.taskId
+  if (!taskId || approvalBusy.value) return
+  approvalBusy.value = true
+  const controller = new AbortController()
+  currentChatController = controller
+  agentStore.setTaskState('running')
+  agentStore.setLoading(true)
+  // 乐观清除卡片：续跑若再次暂停，approval_required 事件会重建；失败则由刷新恢复。
+  agentStore.setPendingApproval(null)
+  try {
+    await agentApi.decideApproval(
+      taskId,
+      {
+        decision: payload.decision,
+        modified_instruction: payload.modifiedInstruction,
+        note: payload.note,
+      },
+      (event: AgentEvent) => {
+        agentStore.processEvent(event)
+        scrollToBottom()
+      },
+      { signal: controller.signal },
+    )
+  } catch {
+    message.error('审批提交失败，已刷新任务状态')
+    await refreshTaskState(taskId)
+  } finally {
+    approvalBusy.value = false
+    currentChatController = null
+    agentStore.setLoading(false)
+    scrollToBottom()
+  }
+}
+
+/** 从权威接口刷新任务现场（审批冲突/提交失败后的恢复路径）。 */
+async function refreshTaskState(taskId: string) {
+  try {
+    const res = await agentApi.getTask(taskId)
+    const data = res.data
+    if (!data) return
+    agentStore.setTaskState(data.state)
+    if (data.state === 'waiting_approval' && data.approval) {
+      agentStore.setTaskId(taskId)
+      agentStore.setPendingApproval(data.approval)
+    } else {
+      agentStore.setPendingApproval(null)
+    }
+  } catch {
+    // 刷新失败不覆盖已有现场（保持现状，下一次操作再试）
+  }
+}
+
+/** 刷新/重连后回到审批现场（消费既有 GET task + 持久化的 last task id）。 */
+async function restorePendingApproval() {
+  const last = agentStore.loadPersistedTaskId()
+  if (!last) return
+  try {
+    const res = await agentApi.getTask(last)
+    const data = res.data
+    if (data?.state === 'waiting_approval' && data.approval) {
+      agentStore.setTaskId(last)
+      agentStore.setTaskState('waiting_approval')
+      agentStore.setPendingApproval(data.approval)
+    } else if (
+      data &&
+      ['completed', 'cancelled', 'failed', 'abandoned'].includes(data.state)
+    ) {
+      agentStore.setTaskId(null) // 陈旧指针：清掉
+    }
+  } catch {
+    // 任务不存在/无权（过期清理等）→ 清掉陈旧指针
+    agentStore.setTaskId(null)
+  }
 }
 
 // 组件卸载时中止进行中的 Agent SSE 流，防止请求悬挂
 onUnmounted(() => {
   currentChatController?.abort()
   currentChatController = null
+  if (stopFallbackTimer) {
+    clearTimeout(stopFallbackTimer)
+    stopFallbackTimer = null
+  }
 })
 
 async function handleSessionChange(sessionId: string | null) {
@@ -490,6 +632,8 @@ function handleConfigApply(config: typeof agentStore.config) {
 onMounted(async () => {
   try {
     await loadInit()
+    // HITL：刷新/重连后回到审批现场（last task id 持久化 + 权威状态）
+    await restorePendingApproval()
   } catch (e) {
     console.error('[Agent] onMounted error:', e)
     initError.value = true
@@ -927,6 +1071,12 @@ async function loadInit() {
 @keyframes bounce {
   0%, 100% { opacity: 0.3; transform: translateY(0); }
   50% { opacity: 1; transform: translateY(-4px); }
+}
+
+/* HITL 审批卡 dock：悬在输入区上方（暂停点在哪，卡片就在哪等人） */
+.approval-dock {
+  padding: 0 16px;
+  flex-shrink: 0;
 }
 
 /* Status bar */

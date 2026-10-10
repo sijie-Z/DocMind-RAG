@@ -5,10 +5,15 @@ import type {
   AgentChatMessage,
   AgentEvent,
   AgentSession,
+  AgentTaskState,
+  PendingApproval,
   PlanStep,
   ToolInfo,
 } from '@/types/agent'
 import { applyPlanStepUpdate, buildPlanStep } from '@/utils/agentPlan'
+
+/** 持久化"最近一次运行的 task_id"：刷新/重连后回到审批现场的钥匙。 */
+const LAST_TASK_KEY = 'docmind.agent.lastTaskId'
 
 export const useAgentStore = defineStore('agent', () => {
   // ── Config ──
@@ -42,6 +47,12 @@ export const useAgentStore = defineStore('agent', () => {
   const tools = ref<ToolInfo[]>([])
   const expandedEvents = ref<Set<string>>(new Set())
 
+  // ── HITL（人在环）：当前任务 / 任务态 / 待审批请求 ──
+  const taskId = ref<string | null>(null)
+  // 'idle' 仅是前端占位；其余与后端 TaskStatus 对齐（'failed' 由错误分支落）
+  const taskState = ref<'idle' | AgentTaskState>('idle')
+  const pendingApproval = ref<PendingApproval | null>(null)
+
   // ── Computed ──
   const toolCount = computed(() => tools.value.length)
   const enabledToolCount = computed(
@@ -64,6 +75,10 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   function processEvent(event: AgentEvent) {
+    // HITL：任何携带 task_id 的事件都是取消/审批/恢复的钥匙，实时落账
+    if (event.task_id) {
+      setTaskId(event.task_id)
+    }
     switch (event.type) {
       case 'thinking':
         isThinking.value = true
@@ -192,6 +207,38 @@ export const useAgentStore = defineStore('agent', () => {
           m.executionContext = event.content as unknown as Record<string, any>
         })
         break
+
+      // ── HITL（人在环）──
+      case 'approval_required':
+        // 执行器停在审批点（工具未执行）：任务态 waiting_approval + 弹出审批卡。
+        taskState.value = 'waiting_approval'
+        pendingApproval.value = {
+          tool_name: event.tool_name || 'unknown',
+          tool_args: event.tool_args || {},
+          tool_call_id: event.tool_call_id,
+          risk_level: event.risk_level || 'high',
+          reason: event.content,
+          step_id: event.plan_step_id,
+          plan_id: event.plan_id,
+        }
+        isThinking.value = false
+        updateLastAssistant((msg) => {
+          msg.events.push(event)
+        })
+        break
+
+      case 'run_cancelled':
+        // 协作式取消收敛：诚实落账（不是完成，也不是错误）。
+        taskState.value = 'cancelled'
+        pendingApproval.value = null
+        updateLastAssistant((msg) => {
+          msg.events.push(event)
+          msg.loading = false
+        })
+        isLoading.value = false
+        isThinking.value = false
+        break
+
       case 'done':
         updateLastAssistant((msg) => {
           msg.loading = false
@@ -199,6 +246,17 @@ export const useAgentStore = defineStore('agent', () => {
             msg.messageId = event.message_id
           }
         })
+        // HITL：done 如实盖章任务态（waiting_approval / cancelled 时出现）——
+        // 暂停不是完成，卡片保持；取消不是完成，状态收敛到 cancelled。
+        if (event.task_state === 'waiting_approval') {
+          taskState.value = 'waiting_approval'
+        } else if (event.task_state === 'cancelled') {
+          taskState.value = 'cancelled'
+          pendingApproval.value = null
+        } else {
+          taskState.value = 'completed'
+          pendingApproval.value = null
+        }
         isLoading.value = false
         isThinking.value = false
         overallProgress.value = 1.0
@@ -242,6 +300,45 @@ export const useAgentStore = defineStore('agent', () => {
     expandedEvents.value = next
   }
 
+  // ── HITL actions ──
+
+  function persistTaskId(id: string | null) {
+    try {
+      if (id) localStorage.setItem(LAST_TASK_KEY, id)
+      else localStorage.removeItem(LAST_TASK_KEY)
+    } catch {
+      // localStorage 不可用（隐私模式等）：持久化是增强不是前提
+    }
+  }
+
+  function setTaskId(id: string | null) {
+    taskId.value = id
+    persistTaskId(id)
+  }
+
+  function setTaskState(state: 'idle' | AgentTaskState) {
+    taskState.value = state
+  }
+
+  function setPendingApproval(p: PendingApproval | null) {
+    pendingApproval.value = p
+  }
+
+  /** 新一轮发送前复位任务现场（保留 pendingApproval 由 approval_required 重建）。 */
+  function resetTask() {
+    setTaskId(null)
+    taskState.value = 'running'
+    pendingApproval.value = null
+  }
+
+  function loadPersistedTaskId(): string | null {
+    try {
+      return localStorage.getItem(LAST_TASK_KEY)
+    } catch {
+      return null
+    }
+  }
+
   return {
     // State
     config,
@@ -256,6 +353,9 @@ export const useAgentStore = defineStore('agent', () => {
     overallProgress,
     tools,
     expandedEvents,
+    taskId,
+    taskState,
+    pendingApproval,
     // Computed
     toolCount,
     enabledToolCount,
@@ -271,5 +371,10 @@ export const useAgentStore = defineStore('agent', () => {
     setCurrentSession,
     updateConfig,
     toggleEventExpanded,
+    setTaskId,
+    setTaskState,
+    setPendingApproval,
+    resetTask,
+    loadPersistedTaskId,
   }
 })
