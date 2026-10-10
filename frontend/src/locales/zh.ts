@@ -7,6 +7,7 @@ export default {
     batchDelete: '批量删除',
     copy: '复制',
     copySuccess: '复制成功',
+    copied: '已复制',
     copyFailed: '复制失败',
     close: '关闭',
     edit: '编辑',
@@ -693,5 +694,16 @@ export default {
     planEditInvalid: '编辑内容不合法，请检查步骤（描述/依赖）后重试',
     planFailed: '计划审批提交失败，已刷新任务状态',
     planPendingHint: '任务正在等待计划审批：请先在上方计划卡中批准 / 编辑 / 拒绝（或取消任务）'
+  },
+  artifacts: {
+    kind: {
+      diff: '差异',
+      json: 'JSON',
+      markdown: 'Markdown',
+      text: '文本'
+    },
+    download: '下载',
+    runReport: '运行报告',
+    exportMarkdown: '导出 Markdown'
   }
 };

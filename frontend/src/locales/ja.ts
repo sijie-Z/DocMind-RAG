@@ -15,6 +15,8 @@ export default {
     required: '必須項目',
     saveSuccess: '保存に成功しました',
     deleteSuccess: '削除に成功しました',
+    copy: 'コピー',
+    copied: 'コピーしました',
     logout: 'ログアウト',
     logoutConfirm: 'ログアウトしてもよろしいですか？',
     backToHome: 'ホームに戻る',
@@ -524,5 +526,16 @@ export default {
     planEditInvalid: '編集内容が不正です。ステップ（説明/依存）を確認して再試行してください',
     planFailed: '計画承認の送信に失敗しました。タスク状態を更新しました',
     planPendingHint: 'タスクは計画の承認待ちです：まず上の計画カードで承認 / 編集 / 拒否してください（またはタスクをキャンセル）'
+  },
+  artifacts: {
+    kind: {
+      diff: '差分',
+      json: 'JSON',
+      markdown: 'Markdown',
+      text: 'テキスト'
+    },
+    download: 'ダウンロード',
+    runReport: '実行レポート',
+    exportMarkdown: 'Markdown をエクスポート'
   }
 };

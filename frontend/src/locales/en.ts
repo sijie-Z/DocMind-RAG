@@ -20,7 +20,9 @@ export default {
     backToHome: 'Back to Home',
     back: 'Back',
     close: 'Close',
-    contactSupport: 'Contact Support'
+    contactSupport: 'Contact Support',
+    copy: 'Copy',
+    copied: 'Copied'
   },
   profile: {
     basicInfo: 'Basic Information',
@@ -666,5 +668,16 @@ export default {
     planEditInvalid: 'The edited content is invalid — check step descriptions/dependencies and retry',
     planFailed: 'Failed to submit the plan decision; task state refreshed',
     planPendingHint: 'The task is awaiting plan approval — approve / edit / reject the plan above first (or cancel the task)'
+  },
+  artifacts: {
+    kind: {
+      diff: 'Diff',
+      json: 'JSON',
+      markdown: 'Markdown',
+      text: 'Text'
+    },
+    download: 'Download',
+    runReport: 'Run report',
+    exportMarkdown: 'Export Markdown'
   }
 };

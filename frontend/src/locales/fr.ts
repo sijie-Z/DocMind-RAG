@@ -15,6 +15,8 @@ export default {
     required: 'Champ requis',
     saveSuccess: 'Enregistré avec succès',
     deleteSuccess: 'Supprimé avec succès',
+    copy: 'Copier',
+    copied: 'Copié',
     logout: 'Déconnexion',
     logoutConfirm: 'Êtes-vous sûr de vouloir vous déconnecter ?',
     backToHome: 'Retour à l\'accueil',
@@ -524,5 +526,16 @@ export default {
     planEditInvalid: 'Le contenu modifié est invalide — vérifiez les descriptions/dépendances puis réessayez',
     planFailed: "Échec de l'envoi de la décision ; état de la tâche actualisé",
     planPendingHint: "La tâche attend l'approbation du plan — approuvez / modifiez / rejetez d'abord le plan ci-dessus (ou annulez la tâche)"
+  },
+  artifacts: {
+    kind: {
+      diff: 'Diff',
+      json: 'JSON',
+      markdown: 'Markdown',
+      text: 'Texte'
+    },
+    download: 'Télécharger',
+    runReport: "Rapport d'exécution",
+    exportMarkdown: 'Exporter en Markdown'
   }
 };
