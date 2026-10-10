@@ -165,6 +165,7 @@ export const executeWorkflowStream = (
   id: number,
   inputData: Record<string, unknown>,
   onEvent: (_event: string, _data: ExecutionResult | NodeResultItem | Record<string, unknown>) => void,
+  onClose?: () => void,
 ) => {
   const abortController = new AbortController()
   const parser = createWorkflowSSEFrameParser()
@@ -205,8 +206,12 @@ export const executeWorkflowStream = (
         }
       }
     } catch {
-      // abort 或网络异常：静默结束（与修复前 onerror→close 的净效果一致；
+      // abort 或网络异常：静默结束（未识别帧交 onEvent 语义处理；
       // 业务级失败由后端以 `event: error` 帧下发，经 onEvent 派发）
+    } finally {
+      // 流关闭统一出口：正常结束、abort、网络异常三条路径都收敛到这里。
+      // 消费方（编辑器调试面板）用它收尾执行态，防 executing 悬挂。
+      onClose?.()
     }
   }
 

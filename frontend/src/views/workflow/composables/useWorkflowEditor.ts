@@ -22,7 +22,7 @@ import {
 } from '@vicons/ionicons5'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useLLMConfigStore, type LLMProviderConfig } from '@/stores/llmConfigStore'
-import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflow as execWorkflow, getWorkflows, getNodeDefinitions, type WorkflowNode, type WorkflowEdge, type WorkflowConfig, type NodeDefinition } from '@/api/workflow'
+import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflowStream, getWorkflows, getNodeDefinitions, type WorkflowNode, type WorkflowEdge, type WorkflowConfig, type NodeDefinition } from '@/api/workflow'
 import { agentApi } from '@/api/agent'
 import type { SkillInfo } from '@/types/agent'
 import { useDedupedMessage } from '@/utils/message'
@@ -770,6 +770,9 @@ const openDebugPanel = () => {
   workflowStore.resetExecution()
 }
 
+// 在途流式执行的停止函数（组件卸载/重开执行时中止底层 SSE 请求）
+let stopActiveExecution: (() => void) | null = null
+
 const executeWorkflow = async () => {
   if (!testInput.value.trim()) {
     message.error('请输入测试数据')
@@ -785,54 +788,105 @@ const executeWorkflow = async () => {
     return
   }
 
+  // 流式执行（接线 issue #289 的 executeWorkflowStream；旧入口用非流式
+  // executeWorkflow——整段等待且是 B8/B9 双重漂移的源头）。
+  // 事件序列（workflow.py:239-368）：workflow_start → 引擎实时 node_start /
+  // node_complete / node_error → 失败路径 workflow_error→error+done；
+  // 成功路径端点回放一轮 node_complete（落库结果，含 status 全字段）后发
+  // complete。node_complete 成功路径会出现两帧（实时 + 回放），日志按节点去重。
+  stopActiveExecution?.()
   executing.value = true
   workflowStore.startExecution()
   workflowStore.addExecutionLog('🚀 开始执行工作流...')
 
-  try {
-    const res = await execWorkflow(workflowStore.currentWorkflowId, { text: testInput.value })
-    const result = res.data?.data
-
-    if (result?.node_results) {
-      for (const nodeResult of result.node_results) {
-        executingNodeId.value = nodeResult.node_id
-        // 引擎状态词表：成功态为 completed（ExecutionStatus，workflow_engine.py:37-42）；
-        // 旧代码按 'success' 判定导致成功节点恒被判失败（B10 词表漂移）
-        const status = nodeResult.status || 'completed'
-        const icon = status === 'completed' ? '✅' : status === 'failed' ? '❌' : '📊'
-        workflowStore.updateNodeExecution({
-          nodeId: nodeResult.node_id,
-          nodeType: nodeResult.node_type,
-          status,
-          output: nodeResult.output,
-          duration: nodeResult.duration ?? undefined
-        })
-        workflowStore.addExecutionLog(`${icon} [${getNodeLabel(nodeResult.node_type)}] ${status === 'completed' ? '完成' : status === 'failed' ? '失败' : String(status)} (${nodeResult.duration ?? 0}ms)`)
-      }
+  const loggedNodes = new Set<string>()
+  await new Promise<void>((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      stopActiveExecution = null
+      executing.value = false
+      executingNodeId.value = null
+      resolve()
     }
 
-    // 非流式响应（workflow.py:399-407）：data.output 为引擎总体结果
-    // { success, output, node_outputs, context, memory }（workflow_engine.py execute()）。
-    // 节点失败时 success=false 且带 error 摘要（issue #301 批 A #5），须如实上浮。
-    const engineResult = (result?.output ?? {}) as { success?: boolean; output?: unknown; error?: string }
-    if (engineResult.success === false) {
-      workflowStore.setExecutionComplete(null)
-      workflowStore.addExecutionLog(`❌ 执行失败: ${engineResult.error || '工作流节点执行失败'}`)
-      message.error('执行失败')
-    } else {
-      const finalOut = engineResult.output !== undefined ? engineResult.output : result?.output
-      workflowStore.setExecutionComplete((finalOut ?? null) as Record<string, unknown> | string | null)
-      workflowStore.addExecutionLog('✅ 工作流执行成功!')
+    const logNodeOnce = (nodeId: string, line: string) => {
+      if (loggedNodes.has(nodeId)) return
+      loggedNodes.add(nodeId)
+      workflowStore.addExecutionLog(line)
     }
 
-  } catch (error: unknown) {
-    const errMsg = error instanceof Error ? error.message : '未知错误'
-    workflowStore.addExecutionLog(`❌ 执行失败: ${errMsg}`)
-    message.error('执行失败')
-  } finally {
-    executing.value = false
-    executingNodeId.value = null
-  }
+    stopActiveExecution = executeWorkflowStream(
+      workflowStore.currentWorkflowId!,
+      { text: testInput.value },
+      (event, data) => {
+        switch (event) {
+          case 'node_start': {
+            // 实时帧 {node_id, node_type, timestamp}（workflow_engine.py:816-820）
+            executingNodeId.value = (data as { node_id?: string }).node_id ?? null
+            break
+          }
+          case 'node_complete': {
+            // 实时帧 {node_id,node_type,output,duration}（workflow_engine.py:851-857）
+            // 与端点回放帧（NodeResult 全字段，workflow.py:317-319）同键不同完整度
+            const r = data as { node_id: string; node_type?: string; status?: string; output?: unknown; duration?: number | null }
+            const status = (r.status === 'failed' ? 'failed' : 'completed') as 'completed' | 'failed'
+            workflowStore.updateNodeExecution({
+              nodeId: r.node_id,
+              nodeType: r.node_type ?? '',
+              status,
+              output: r.output as Record<string, unknown> | undefined,
+              duration: r.duration ?? undefined
+            })
+            const icon = status === 'failed' ? '❌' : '✅'
+            logNodeOnce(r.node_id, `${icon} [${getNodeLabel(r.node_type ?? '')}] ${status === 'failed' ? '失败' : '完成'} (${r.duration ?? 0}ms)`)
+            break
+          }
+          case 'node_error': {
+            // 引擎实时失败帧 {node_id,error,traceback}（workflow_engine.py:870-875）
+            const r = data as { node_id: string; error?: string }
+            workflowStore.updateNodeExecution({
+              nodeId: r.node_id,
+              nodeType: '',
+              status: 'failed',
+              error: r.error
+            })
+            logNodeOnce(r.node_id, `❌ [${r.node_id}] 失败: ${r.error || '未知错误'}`)
+            break
+          }
+          case 'complete': {
+            // 引擎总体结果 {success,output,node_outputs,context,memory}
+            // （workflow_engine.py:1008-1016）；success=false 时带 error 摘要
+            const engineResult = (data ?? {}) as { success?: boolean; output?: unknown; error?: string }
+            if (engineResult.success === false) {
+              workflowStore.setExecutionComplete(null)
+              workflowStore.addExecutionLog(`❌ 执行失败: ${engineResult.error || '工作流节点执行失败'}`)
+              message.error('执行失败')
+            } else {
+              const finalOut = engineResult.output !== undefined ? engineResult.output : null
+              workflowStore.setExecutionComplete((finalOut ?? null) as Record<string, unknown> | string | null)
+              workflowStore.addExecutionLog('✅ 工作流执行成功!')
+            }
+            finish()
+            break
+          }
+          case 'error': {
+            // 后端错误收口帧（#281：error 后必补 done）——done / onClose 再收尾
+            const d = (data ?? {}) as { error?: string }
+            workflowStore.addExecutionLog(`❌ 执行失败: ${d.error || '未知错误'}`)
+            message.error('执行失败')
+            break
+          }
+          default:
+            // heartbeat / workflow_start / workflow_complete 等：无 UI 语义，忽略
+            break
+        }
+      },
+      // 流关闭统一收尾（正常结束 / abort / 网络异常），防 executing 悬挂
+      finish,
+    )
+  })
 }
 
 // ── 工作流加载列表 ──
@@ -943,6 +997,8 @@ export function useWorkflowEditor() {
 
   onUnmounted(() => {
     if (autoSaveTimer) clearTimeout(autoSaveTimer)
+    // 组件卸载时中止在途流式执行（onClose 回调负责收尾 executing 状态）
+    stopActiveExecution?.()
   })
 
 // Icon mapping for node types

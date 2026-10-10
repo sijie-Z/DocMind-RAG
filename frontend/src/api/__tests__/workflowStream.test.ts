@@ -117,6 +117,18 @@ describe('executeWorkflowStream（issue #289 接线前置件）', () => {
     expect(signal.aborted).toBe(true)
   })
 
+  it('onClose 在流关闭时回调（编辑器用它收尾 executing 状态，防悬挂）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(makeStreamResponse([
+      'event: complete\ndata: {"execution_id":7}\n\n',
+    ]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const closed = vi.fn()
+    executeWorkflowStream(7, {}, () => {}, closed)
+
+    await vi.waitFor(() => expect(closed).toHaveBeenCalledTimes(1))
+  })
+
   it('HTTP 非 2xx → 以 error 事件上报（修复前静默 close，接线后无法感知失败）', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403 }))
 

@@ -38,6 +38,7 @@ vi.mock('@/api/workflow', () => ({
   createWorkflow: vi.fn().mockResolvedValue({ data: { data: { id: 1 } } }),
   updateWorkflow: vi.fn().mockResolvedValue({ data: { data: {} } }),
   executeWorkflow: vi.fn().mockResolvedValue({ data: { data: null } }),
+  executeWorkflowStream: vi.fn(),
   deleteWorkflow: vi.fn().mockResolvedValue({}),
   // 真实 stub 形状对齐端点：{"success":true,"data":[定义...]}（workflow.py:455-）
   getNodeDefinitions: vi.fn().mockResolvedValue({
@@ -73,7 +74,7 @@ import CodeNode from '../nodes/CodeNode.vue'
 import ApiNode from '../nodes/ApiNode.vue'
 import TransformNode from '../nodes/TransformNode.vue'
 import { useWorkflowStore } from '@/stores/workflow'
-import { getNodeDefinitions, getWorkflow, executeWorkflow } from '@/api/workflow'
+import { getNodeDefinitions, getWorkflow, executeWorkflowStream } from '@/api/workflow'
 
 const Host = defineComponent({
   setup() {
@@ -115,11 +116,9 @@ async function mountEditor(query = '', opts: { resolveCanvasSlots?: boolean } = 
   const router = makeRouter()
   await router.push(`/workflow/editor${query}`)
   await router.isReady()
-  const pinia = createPinia()
-  setActivePinia(pinia)
   const wrapper = mount(Host, {
     global: {
-      plugins: [naive, pinia, router],
+      plugins: [naive, sharedPinia, router],
       stubs: {
         // VueFlow 画布在 jsdom 下无 viewport 语义，整棵子树直通 stub 掉；
         // 节点注册用例用「渲染全部 node-* 插槽」的替身验证组件解析
@@ -134,6 +133,19 @@ async function mountEditor(query = '', opts: { resolveCanvasSlots?: boolean } = 
   await nextTick()
   return wrapper
 }
+
+// 与生产同构：整个应用只有一个 pinia（App 只 install 一次）。useWorkflowEditor.ts
+// 是模块级单例，其内部 computed 首次求值后按依赖缓存——若每个测试新建 pinia，
+// 单例 computed 仍绑定旧 store、不再重追踪，会产生跨测试串扰（实测：executionStatus
+// 保留上一个 store 的缓存值）。共享 pinia + 每测试显式重置状态即可复现生产语义。
+const sharedPinia = createPinia()
+
+beforeEach(() => {
+  setActivePinia(sharedPinia)
+  const store = useWorkflowStore()
+  store.clearWorkflow()
+  store.resetExecution()
+})
 
 type EditorVm = {
   loadTemplate: (_type: string) => void
@@ -203,14 +215,15 @@ describe('workflow/editor 画布节点组件注册（C_polish「九节点 import
   })
 })
 
-describe('workflow/editor 调试执行链路（B8-B10 契约回归）', () => {
-  it('非流式真实响应（completed/duration）→ 成功判定 + 进度 100% + 最终输出上屏（修复前词表漂移恒判失败）', async () => {
+describe('workflow/editor 调试执行链路（流式接线 + B8-B10 契约回归）', () => {
+  it('走 executeWorkflowStream：事件按序驱动日志/进度，成功判定 + 最终输出上屏', async () => {
     const wrapper = await mountEditor()
     const editorVm = wrapper.findComponent(WorkflowEditor).vm as unknown as {
       executeWorkflow: () => Promise<void>
       testInput: string
       executionStatus: string
       executionProgress: number
+      executing: boolean
     }
 
     const store = useWorkflowStore()
@@ -218,69 +231,84 @@ describe('workflow/editor 调试执行链路（B8-B10 契约回归）', () => {
     store.workflowName = '测试流程'
     editorVm.testInput = '测试输入'
 
-    // 真实响应形状：workflow.py:399-407 { success, data: { execution_id, status,
-    // output: 引擎总体结果, node_results: [NodeResult…] } }；
-    // 节点状态 completed、时长键 duration（schemas/workflow.py:74-86）
-    vi.mocked(executeWorkflow).mockResolvedValueOnce({
-      data: {
-        data: {
-          execution_id: 9,
-          status: 'completed',
-          output: {
-            success: true,
-            output: '最终答案',
-            node_outputs: {},
-            context: {},
-            memory: {},
-          },
-          node_results: [
-            { node_id: 'input_1', node_type: 'input', status: 'completed', output: { text: 'hi' }, duration: 12 },
-            { node_id: 'llm_1', node_type: 'llm_deepseek', status: 'completed', output: { content: 'x' }, duration: 340 },
-          ],
-        },
-      },
-    } as never)
+    // 真事件序列（workflow.py:239-368 + workflow_engine 实时帧）：
+    // workflow_start → node_start/node_complete（引擎实时）→ 端点回放一轮
+    // node_complete（NodeResult 全字段，:317-319）→ complete（引擎总体结果）
+    vi.mocked(executeWorkflowStream).mockImplementation((_id, _input, onEvent, onClose) => {
+      onEvent('workflow_start', { execution_id: 9, workflow_name: '测试流程' })
+      onEvent('node_start', { node_id: 'input_1', node_type: 'input', timestamp: 't1' })
+      onEvent('node_complete', { node_id: 'input_1', node_type: 'input', output: { text: 'hi' }, duration: 12, timestamp: 't2' })
+      onEvent('node_start', { node_id: 'llm_1', node_type: 'llm_deepseek', timestamp: 't3' })
+      onEvent('node_complete', { node_id: 'llm_1', node_type: 'llm_deepseek', output: { content: 'x' }, duration: 340, timestamp: 't4' })
+      onEvent('node_complete', { node_id: 'input_1', node_type: 'input', status: 'completed', output: { text: 'hi' }, duration: 12 })
+      onEvent('node_complete', { node_id: 'llm_1', node_type: 'llm_deepseek', status: 'completed', output: { content: 'x' }, duration: 340 })
+      onEvent('complete', { success: true, output: '最终答案', node_outputs: {}, context: {}, memory: {} })
+      onClose?.()
+      return () => {}
+    })
 
     await editorVm.executeWorkflow()
     await nextTick()
 
-    expect(executeWorkflow).toHaveBeenCalledWith(5, { text: '测试输入' })
-    expect(store.executionResults.map(r => r.status)).toEqual(['completed', 'completed'])
+    // 接线断言：调试入口必须走真 SSE 流（变异：换回非流式 executeWorkflow → 红）
+    expect(executeWorkflowStream).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(executeWorkflowStream).mock.calls[0][0]).toBe(5)
+    expect(vi.mocked(executeWorkflowStream).mock.calls[0][1]).toEqual({ text: '测试输入' })
+
+    expect(store.executionResults.map(r => [r.nodeId, r.status])).toEqual([
+      ['input_1', 'completed'],
+      ['llm_1', 'completed'],
+    ])
     expect(editorVm.executionStatus).toBe('success')
     expect(editorVm.executionProgress).toBe(100)
     expect(store.finalOutput).toBe('最终答案')
-    expect(store.executionLogs.some(l => l.includes('✅') && l.includes('完成'))).toBe(true)
+    expect(editorVm.executing).toBe(false)
+
+    // 事件按序到达 → 日志有序（开始 → 节点1完成 → 节点2完成 → 成功）
+    const logs = store.executionLogs
+    const idxStart = logs.findIndex(l => l.includes('开始执行'))
+    const idxIn = logs.findIndex(l => l.includes('[输入节点]'))
+    const idxLlm = logs.findIndex(l => l.includes('[DeepSeek]'))
+    const idxOk = logs.findIndex(l => l.includes('执行成功'))
+    expect(idxStart).toBe(0)
+    expect(idxIn).toBeGreaterThan(idxStart)
+    expect(idxLlm).toBeGreaterThan(idxIn)
+    expect(idxOk).toBeGreaterThan(idxLlm)
+    // 实时帧 + 回放帧双 node_complete → 日志必须按节点去重（各恰一行）
+    expect(logs.filter(l => l.includes('[输入节点]')).length).toBe(1)
+    expect(logs.filter(l => l.includes('[DeepSeek]')).length).toBe(1)
   })
 
-  it('引擎总体 success=false（节点失败上浮）→ 不谎报成功：❌ 日志 + 无最终输出', async () => {
+  it('失败上浮：node_error 实时帧 + complete(success:false) → 不谎报成功、状态回 failed', async () => {
     const wrapper = await mountEditor()
     const editorVm = wrapper.findComponent(WorkflowEditor).vm as unknown as {
       executeWorkflow: () => Promise<void>
       testInput: string
+      executionStatus: string
+      executing: boolean
     }
+
     const store = useWorkflowStore()
     store.currentWorkflowId = 5
     store.workflowName = '测试流程'
     editorVm.testInput = '测试输入'
 
-    vi.mocked(executeWorkflow).mockResolvedValueOnce({
-      data: {
-        data: {
-          execution_id: 10,
-          status: 'failed',
-          output: { success: false, error: '节点 llm_1 执行失败: 超时', node_outputs: {} },
-          node_results: [
-            { node_id: 'llm_1', node_type: 'llm_deepseek', status: 'failed', error: '超时', duration: 30000 },
-          ],
-        },
-      },
-    } as never)
+    vi.mocked(executeWorkflowStream).mockImplementation((_id, _input, onEvent, onClose) => {
+      onEvent('node_start', { node_id: 'llm_1', node_type: 'llm_deepseek', timestamp: 't1' })
+      onEvent('node_error', { node_id: 'llm_1', error: '超时', traceback: '...', timestamp: 't2' })
+      onEvent('node_complete', { node_id: 'llm_1', node_type: 'llm_deepseek', status: 'failed', error: '超时', duration: 30000 })
+      onEvent('complete', { success: false, error: '节点 llm_1 执行失败: 超时', node_outputs: {} })
+      onClose?.()
+      return () => {}
+    })
 
     await editorVm.executeWorkflow()
     await nextTick()
 
     expect(store.executionResults[0].status).toBe('failed')
     expect(store.finalOutput).toBeNull()
+    expect(editorVm.executionStatus).toBe('failed')
+    expect(editorVm.executing).toBe(false)
     expect(store.executionLogs.some(l => l.includes('❌'))).toBe(true)
   })
 })
