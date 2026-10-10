@@ -4,6 +4,8 @@ Endpoints:
     POST /api/v1/agent/chat           — PER agent chat (SSE streaming)
     GET  /api/v1/agent/tasks/{id}     — Agent task status (checkpoint/resume, #201)
     POST /api/v1/agent/tasks/{id}/resume — Resume an interrupted task (SSE, #201)
+    POST /api/v1/agent/tasks/{id}/approval — HITL 审批应答 (SSE; approve/deny/改指令)
+    POST /api/v1/agent/tasks/{id}/cancel   — HITL 协作式取消 (服务端停止协议)
     GET  /api/v1/agent/tools          — List available tools with status
     GET  /api/v1/agent/skills         — List learned skills
     GET  /api/v1/agent/sessions       — List agent sessions
@@ -18,10 +20,10 @@ import contextlib
 import json
 import logging
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +37,13 @@ from app.core.database import AsyncSessionLocal, get_db
 from app.core.log_safety import log_safe
 from app.core.prometheus import AGENT_FEEDBACK_TOTAL
 from app.core.security import get_current_user, require_organization
-from app.exceptions import AuthorizationError, NotFoundError, ValidationError
+from app.exceptions import (
+    AuthorizationError,
+    NotFoundError,
+    ServiceUnavailableError,
+    ValidationError,
+)
+from app.models.agent_task import TaskStatus
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.user import User
 
@@ -67,6 +75,13 @@ class AgentChatRequest(BaseModel):
     temperature: float = Field(0.1, ge=0.0, le=2.0, description="LLM temperature")
     disabled_tools: list[str] = Field(default_factory=list, description="Tools to disable")
     system_prompt_override: str | None = Field(None, description="Custom system prompt")
+    approval_mode: Literal["never", "risky", "always"] | None = Field(
+        None,
+        description=(
+            "HITL 审批模式（覆盖用户已保存配置）：never=不审批 / risky=高危工具需审批（默认）"
+            " / always=所有工具调用需审批"
+        ),
+    )
 
 
 class AgentConfigUpdate(BaseModel):
@@ -83,6 +98,13 @@ class AgentConfigUpdate(BaseModel):
     personality: str | None = None
     system_prompt_override: str | None = None
     disabled_tools: list[str] | None = None
+    approval_mode: Literal["never", "risky", "always"] | None = Field(
+        None, description="HITL 审批模式：never / risky / always"
+    )
+    approval_timeout_seconds: int | None = Field(
+        None, ge=0, le=86400,
+        description="审批等待时限（秒）；0=无限等待（默认，绝不伪造超时拒绝）",
+    )
 
 
 class SessionCreate(BaseModel):
@@ -113,6 +135,8 @@ async def _build_agent_config(body: AgentChatRequest, user_id: int) -> AgentConf
     config.enable_thinking = body.enable_thinking
     if body.system_prompt_override is not None:
         config.system_prompt_override = body.system_prompt_override
+    if body.approval_mode is not None:
+        config.approval_mode = body.approval_mode
     # 安全加固：无论请求是否携带 disabled_tools，服务端强制禁用清单都必须合并。
     # 继承存储值时同样重新合并——存储可能来自旧版本或带外写入（不含后来新增的默认
     # 禁用项），原样继承会把 execute_python/execute_sql/mcp_call 在聊天中放开；
@@ -142,6 +166,7 @@ async def agent_chat(
     async def event_stream():
         assistant_message_id = None
         save_error: str | None = None
+        last_event_type = ""
         try:
             # Build AgentConfig：用户已保存配置为基底 + 请求字段覆盖（issue #242）。
             # 此前基底被整体忽略——设置页旋钮保存成功也永不生效。
@@ -164,13 +189,17 @@ async def agent_chat(
                 session_id=body.session_id,
                 config=config,
             ):
+                last_event_type = event.type
                 sse_data = event.to_sse_dict()
                 yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
                 if event.type == "chunk":
                     final_answer += event.content
 
             # Save interaction to session (user query + assistant response)
-            if body.session_id:
+            # HITL：暂停（approval_required）/取消（run_cancelled）不是"完成"——
+            # 不落库半成品回答：真完成由 approval/resume 流收尾时补写，
+            # 避免同一轮问答落成两条消息。
+            if body.session_id and last_event_type not in ("approval_required", "run_cancelled"):
                 # issue #277（评审 or1268 R2 收账）：会话落库 org 必须与运行读侧
                 # 同一来源（resolved org）——此前传 raw current_user.organization_id，
                 # 凡 org 来自 token_organization_id 回退（或走无组织超管回源）的用户，
@@ -218,6 +247,12 @@ async def agent_chat(
             done_data["saved"] = save_error is None
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
+        # HITL：暂停/取消时如实盖章任务态——前端据此显示"等待审批/已取消"，
+        # 而不是把流结束静默当作完成（诚实的流终结信号）。
+        if last_event_type == "approval_required":
+            done_data["task_state"] = "waiting_approval"
+        elif last_event_type == "run_cancelled":
+            done_data["task_state"] = "cancelled"
         yield f"data: {json.dumps(done_data)}\n\n"
 
     return StreamingResponse(
@@ -253,6 +288,8 @@ async def get_agent_task(
       绝不带着 None 组织上下文去读任务，那会放行"已被移出组织的前成员"在旧
       组织上读取任务，评审 B1）；
     - 404：任务不存在 / 非本人 / 组织不一致（不区分，避免泄露归属）。
+    - HITL：waiting_approval 时附带审批详情（approval：工具/参数/风险/时限 +
+      approval_expired 只读判定）——刷新/重连后的"回到审批现场"入口。
     """
     effective_org_id = await require_organization(current_user, db)
     task = await checkpoint.load_task(
@@ -260,7 +297,15 @@ async def get_agent_task(
         user_id=current_user.id,
         organization_id=effective_org_id,
     )
-    return {"success": True, "data": checkpoint.task_to_status_dict(task)}
+    data = checkpoint.task_to_status_dict(task)
+    if task.status == TaskStatus.WAITING_APPROVAL:
+        pending = await checkpoint.get_pending_approval(task_id)
+        if pending is not None:
+            from app.agent import approval as _approval
+
+            data["approval"] = pending
+            data["approval_expired"] = _approval.approval_expired(pending)
+    return {"success": True, "data": data}
 
 
 @router.post("/tasks/{task_id}/resume")
@@ -295,6 +340,7 @@ async def resume_agent_task(
         final_answer = prefix
         assistant_message_id = None
         save_error: str | None = None
+        last_event_type = ""
         try:
             async for event in agent_service.resume_chat(
                 task_id,
@@ -302,6 +348,7 @@ async def resume_agent_task(
                 config=fallback_config,
                 claim=False,  # 已在上方 prepare_resume 认领（HTTP 409 语义在开流前）
             ):
+                last_event_type = event.type
                 sse_data = event.to_sse_dict()
                 yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
                 if event.type == "chunk":
@@ -309,10 +356,12 @@ async def resume_agent_task(
 
             # 收尾补写会话（与 /chat 同口径）。能走到这里说明原流从未完成落库
             # （任务可恢复 ⇒ chat 的正常收尾分支没跑过），不存在重复写入窗口。
+            # HITL：resume 流也可能再次暂停（多审批循环）或被取消——不落半成品
+            # （同 /chat 口径），等这次 run 真正完成时再补写。
             # org 与 /chat 同链（issue #277/R2 对齐）：传 resolved org
             # （effective_org_id，含 token 组织回退 / 无组织超管回源），
             # 不传 raw current_user.organization_id——两者对回退用户不相等。
-            if session_id:
+            if session_id and last_event_type not in ("approval_required", "run_cancelled"):
                 try:
                     assistant_message_id = await _save_session_interaction(
                         session_id,
@@ -350,6 +399,11 @@ async def resume_agent_task(
             done_data["saved"] = save_error is None
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
+        # HITL：同 /chat——再次暂停/取消时如实盖章任务态。
+        if last_event_type == "approval_required":
+            done_data["task_state"] = "waiting_approval"
+        elif last_event_type == "run_cancelled":
+            done_data["task_state"] = "cancelled"
         yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
@@ -359,6 +413,207 @@ async def resume_agent_task(
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
+        },
+    )
+
+
+# ── HITL：审批应答 / 协作式取消（app/agent/approval.py 的 HTTP 面）────────────
+
+
+class TaskApprovalRequest(BaseModel):
+    decision: Literal["approve", "deny"] = Field(
+        ..., description="审批决定：approve=批准执行 / deny=拒绝（结构化失败喂给反思链路）"
+    )
+    modified_instruction: str | None = Field(
+        None, max_length=2000,
+        description="改指令续跑（仅 approve 生效）：附加人工指导，注入后续步骤提示词",
+    )
+    note: str | None = Field(
+        None, max_length=500, description="备注（拒绝理由等；透传给反思上下文）"
+    )
+
+
+@router.post("/tasks/{task_id}/approval")
+async def decide_agent_task_approval(
+    task_id: str,
+    body: TaskApprovalRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """审批应答（approve / deny / 改指令）→ 记账 + 认领 + SSE 续跑。
+
+    语义（app/agent/approval.py 的模块契约）：
+    - approve：批准的具体行动 = (tool_name, args 指纹)——粘滞于本 run，同调用
+      不再打扰；续跑复用 checkpoint/resume 链（同一步骤重跑一次，at-least-once
+      语义与既有 resume 一致）。
+    - deny：该调用**不执行**，以结构化失败 approval_denied 喂给反思器继续/收敛
+      （粘滞：同 (tool, args) 本 run 内不再执行、也不再打扰人类）。
+    - approve + modified_instruction：改指令续跑——指令作为人工指导注入后续
+      步骤提示词（见 loop.run 的 human_guidance）。
+    续跑可能再次停在下一个未决审批点：流内再发 approval_required，done 带
+    task_state=waiting_approval（前端回到审批卡片）。
+
+    - 200：决定已记账，从暂停点续跑（SSE；事件契约与 /chat 一致）；
+    - 403/404/409：与 resume 同纪律（预检必须在开流前完成）。409 细分：
+      TASK_NOT_WAITING_APPROVAL（状态不符/无待审批请求，含审批超时——
+      超时如实置 FAILED(approval_timeout)，**绝不**伪装成"被拒绝"）、
+      TASK_NOT_RESUMABLE（已终态，含已取消）、TASK_BUSY（并发应答）。
+    """
+    effective_org_id = await require_organization(current_user, db)
+    task, payload, decision_record = await checkpoint.apply_approval_decision(
+        task_id=task_id,
+        user_id=current_user.id,
+        organization_id=effective_org_id,
+        decision=body.decision,
+        modified_instruction=body.modified_instruction,
+        note=body.note,
+    )
+    session_id = (payload or {}).get("session_id") or None
+    # 崩溃前已流给用户的部分不回放（最小版边界），但收尾落库要拼成完整回复。
+    prefix = (payload or {}).get("partial_output") or ""
+    fallback_config = await _fallback_resume_config(current_user.id)
+    logger.info(
+        "审批应答 (task=%s, decision=%s, tool=%s, by=%s)",
+        log_safe(task_id), decision_record.get("decision"),
+        log_safe(str(decision_record.get("tool_name"))), current_user.id,
+    )
+
+    async def event_stream():
+        final_answer = prefix
+        assistant_message_id = None
+        save_error: str | None = None
+        last_event_type = ""
+        try:
+            async for event in agent_service.resume_chat(
+                task_id,
+                user_id=current_user.id,
+                config=fallback_config,
+                claim=False,  # 已在上方 apply_approval_decision 认领（HTTP 409 在开流前）
+            ):
+                last_event_type = event.type
+                sse_data = event.to_sse_dict()
+                yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
+                if event.type == "chunk":
+                    final_answer += event.content
+
+            # 会话补写：只在 run 真正完成时（再次暂停/取消不写半成品，同 /chat 口径）。
+            if session_id and last_event_type not in ("approval_required", "run_cancelled"):
+                try:
+                    assistant_message_id = await _save_session_interaction(
+                        session_id,
+                        current_user.id,
+                        task.query,
+                        effective_org_id,
+                        final_answer,
+                    )
+                except Exception as save_exc:
+                    save_error = log_safe(save_exc)
+                    logger.error(
+                        "Failed to persist approved interaction (session=%s user=%s): %s",
+                        session_id,
+                        current_user.id,
+                        save_error,
+                        exc_info=True,
+                    )
+        except Exception as e:
+            # 完整异常/堆栈只进服务端日志；客户端收通用文案（同 /chat、/resume）。
+            logger.error("Agent approval resume error: %s", log_safe(e), exc_info=True)
+            error_data = {"type": "error", "content": "Agent 审批续跑出错，请稍后重试"}
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+
+        if save_error is not None:
+            warning_data = {
+                "type": "warning",
+                "content": "回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见",
+            }
+            yield f"data: {json.dumps(warning_data, ensure_ascii=False)}\n\n"
+
+        done_data: dict[str, Any] = {
+            "type": "done", "content": "", "task_id": task_id,
+            "decision": decision_record.get("decision"),
+        }
+        if session_id:
+            done_data["saved"] = save_error is None
+        if assistant_message_id:
+            done_data["message_id"] = assistant_message_id
+        if last_event_type == "approval_required":
+            done_data["task_state"] = "waiting_approval"
+        elif last_event_type == "run_cancelled":
+            done_data["task_state"] = "cancelled"
+        yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_agent_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """协作式取消（服务端停止协议；**诚实边界**：合作式，不是硬杀）。
+
+    - waiting_approval（无活跃流）：直接如实置终态 cancelled（200），并留下
+      取消旗作围栏——并发/迟到的 approval、resume 尝试都会被拒（state=cancelled），
+      任务绝不复活；
+    - running / pending / waiting_tool / waiting_human（可能有活跃流）：
+      置取消旗（202，state=cancel_requested）。活跃 run 在下一个检查点
+      （步间 / 工具前 / 阶段间）观察到并收敛：流内发 run_cancelled、任务置
+      cancelled。**正在执行的工具调用 / LLM 调用不会被中断**——等它返回到
+      检查点才生效（诚实：取消有个收敛窗口）；
+    - 已终态：409 TASK_NOT_CANCELLABLE；已 cancelled → 幂等 200；
+    - Redis 不可用（取消旗通道缺失）→ 503：**绝不**假装已受理取消。
+    """
+    effective_org_id = await require_organization(current_user, db)
+    task = await checkpoint.load_task(
+        task_id=task_id,
+        user_id=current_user.id,
+        organization_id=effective_org_id,
+    )
+    if task.status == TaskStatus.CANCELLED:
+        return {
+            "success": True,
+            "data": {"task_id": task_id, "state": "cancelled", "already": True},
+        }
+    if task.is_terminal:
+        raise checkpoint.TaskNotCancellableError(
+            f"任务已处于终态 {task.status.value}，无法取消",
+            detail={"task_id": task_id, "state": task.status.value},
+        )
+    if task.status == TaskStatus.WAITING_APPROVAL:
+        # 无活跃流：DB 态权威收敛 + 取消旗围栏（拦并发应答/恢复的竞态窗口）。
+        ok = await checkpoint.mark_terminal(
+            task_id,
+            TaskStatus.CANCELLED,
+            error="用户取消（审批等待中）",
+            error_type="user_cancelled",
+        )
+        if not ok:
+            raise ServiceUnavailableError("取消失败：任务状态未能落库，请重试")
+        await checkpoint.request_cancel(task_id)
+        return {"success": True, "data": {"task_id": task_id, "state": "cancelled"}}
+    # 活跃运行期：置旗，等 run 在检查点收敛（202 = 已受理，未完成）。
+    if not await checkpoint.request_cancel(task_id):
+        raise ServiceUnavailableError(
+            "取消通道暂不可用（协调存储不可达），请稍后重试"
+        )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "success": True,
+            "data": {
+                "task_id": task_id,
+                "state": "cancel_requested",
+                "message": "已发出取消请求；运行中的任务将在下一个检查点收敛为 cancelled",
+            },
         },
     )
 
@@ -745,6 +1000,10 @@ async def update_config(
         config.personality = body.personality  # type: ignore
     if body.system_prompt_override is not None:
         config.system_prompt_override = body.system_prompt_override
+    if body.approval_mode is not None:
+        config.approval_mode = body.approval_mode
+    if body.approval_timeout_seconds is not None:
+        config.approval_timeout_seconds = body.approval_timeout_seconds
     if body.disabled_tools is not None:
         # 安全加固：高危工具由服务端强制禁用，客户端无法解除
         config.disabled_tools = _merge_disabled_tools(body.disabled_tools)
