@@ -1,0 +1,217 @@
+"""系统指标采样器测试（round2/sampling）。
+
+覆盖：
+- 受控时钟 + 注入采集函数的确定性采样写入（timestamp 秒级 int）；
+- 内存环形缓冲有界保留（超限淘汰最旧）；
+- Redis 侧持久化：键名、JSON 内容、LTRIM 有界；持久化失败不丢内存样本；
+- 读路径三态：有数据 / 空（无 Redis）/ 键缺失；另加 Redis 回填与顺序断言。
+
+变异判别（交付时人工执行并留原始输出，见 _orchestrate/round2/_sampling_mut_*.txt）：
+- 移除 main.py 的 ENABLE_MONITORING 门控 → 门控用例红；
+- deque(maxlen=history_size) → deque() → 有界保留用例红；
+- 删除 _persist_sample 的 ltrim → Redis 有界用例红；
+- _load_samples 的 reversed() 还原 → 回填顺序用例红。
+"""
+
+import json
+
+import pytest
+
+from app.core.system_metrics import (
+    SYSTEM_METRICS_REDIS_KEY,
+    SystemMetricsSampler,
+)
+
+
+def _fixed_collect(cpu: float, memory: float):
+    return lambda: {"cpu_percent": cpu, "memory_percent": memory}
+
+
+class _RecordingRedis:
+    """记录 lpush/ltrim 调用的 fake Redis（写侧）。"""
+
+    def __init__(self) -> None:
+        self.pushed: list[tuple[str, str]] = []
+        self.trims: list[tuple[str, int, int]] = []
+
+    def __bool__(self) -> bool:
+        return True
+
+    async def lpush(self, key: str, value: str) -> None:
+        self.pushed.append((key, value))
+
+    async def ltrim(self, key: str, start: int, end: int) -> None:
+        self.trims.append((key, start, end))
+
+
+class _ListRedis:
+    """给定列表内容的 fake Redis（读侧；newest-first，模拟 lpush 语义）。"""
+
+    def __init__(self, items: list[str]) -> None:
+        self._items = items
+
+    def __bool__(self) -> bool:
+        return True
+
+    async def lrange(self, key: str, start: int, end: int) -> list[str]:
+        assert key == SYSTEM_METRICS_REDIS_KEY
+        return list(self._items)
+
+
+# ── 采样写入（注入采集 + 受控时钟）─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_record_sample_uses_injected_collect_and_clock(monkeypatch):
+    """确定性值断言：cpu/memory 取注入采集值；timestamp 为注入时钟的 int 秒。"""
+    monkeypatch.setattr("app.core.redis.redis_client", None)
+    collect = iter([
+        {"cpu_percent": 7.5, "memory_percent": 63.25},
+        {"cpu_percent": 8.0, "memory_percent": 64.0},
+    ])
+    clock = iter([100.9, 160.1])
+    sampler = SystemMetricsSampler(
+        history_size=10, collect_fn=lambda: next(collect), now_fn=lambda: next(clock)
+    )
+
+    first = await sampler.record_sample()
+    second = await sampler.record_sample()
+
+    assert first == {"cpu_percent": 7.5, "memory_percent": 63.25, "timestamp": 100}
+    assert second == {"cpu_percent": 8.0, "memory_percent": 64.0, "timestamp": 160}
+    # 零真实 sleep：两次采样之间无需等待，时钟完全由注入驱动。
+
+
+@pytest.mark.asyncio
+async def test_record_sample_returns_and_appends_in_order(monkeypatch):
+    """get_history 旧→新返回，且返回副本（外部改动不污染内部缓冲）。"""
+    monkeypatch.setattr("app.core.redis.redis_client", None)
+    clock = iter([1000, 1060, 1120])
+    sampler = SystemMetricsSampler(
+        collect_fn=_fixed_collect(5.0, 50.0), now_fn=lambda: next(clock)
+    )
+    for _ in range(3):
+        await sampler.record_sample()
+
+    history = await sampler.get_history()
+    assert [point["timestamp"] for point in history] == [1000, 1060, 1120]
+
+    history.clear()
+    assert len(await sampler.get_history()) == 3
+
+
+# ── 有界保留（内存环形 + Redis LTRIM）──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_memory_ring_drops_oldest_beyond_bound(monkeypatch):
+    """上界生效：超过 history_size 后淘汰最旧，保留最近 N 条。"""
+    monkeypatch.setattr("app.core.redis.redis_client", None)
+    clock = iter(range(1000, 1100))
+    sampler = SystemMetricsSampler(
+        history_size=3, collect_fn=_fixed_collect(1.0, 2.0), now_fn=lambda: next(clock)
+    )
+    for _ in range(5):
+        await sampler.record_sample()
+
+    history = await sampler.get_history()
+    assert len(history) == 3, "内存环形缓冲未生效：超限未淘汰最旧样本"
+    assert [point["timestamp"] for point in history] == [1002, 1003, 1004]
+
+
+@pytest.mark.asyncio
+async def test_redis_persist_json_and_bounded_ltrim(monkeypatch):
+    """写侧契约：键名对齐 metrics:snapshots 风格；JSON 内容与样本一致；LTRIM 保留 N 条。"""
+    fake = _RecordingRedis()
+    monkeypatch.setattr("app.core.redis.redis_client", fake)
+    sampler = SystemMetricsSampler(
+        history_size=3, collect_fn=_fixed_collect(11.0, 22.0), now_fn=lambda: 42.9
+    )
+
+    sample = await sampler.record_sample()
+
+    assert fake.pushed, "样本未写入 Redis（lpush 未被调用）"
+    key, raw = fake.pushed[0]
+    assert key == "metrics:system:snapshots"  # 键名风格随仓内既有监控键
+    assert json.loads(raw) == sample
+    assert fake.trims == [("metrics:system:snapshots", 0, 2)], (
+        "Redis 侧未做有界保留：LTRIM 应保留最近 history_size 条"
+    )
+
+
+@pytest.mark.asyncio
+async def test_persist_failure_keeps_memory_sample(monkeypatch):
+    """Redis 故障降级：持久化失败不抛出，内存样本仍在。"""
+
+    class _DownRedis:
+        def __bool__(self) -> bool:
+            return True
+
+        async def lpush(self, key: str, value: str) -> None:
+            raise ConnectionError("redis down")
+
+        async def ltrim(self, key: str, start: int, end: int) -> None:  # pragma: no cover
+            raise AssertionError("lpush 已失败，不应到达 ltrim")
+
+    monkeypatch.setattr("app.core.redis.redis_client", _DownRedis())
+    sampler = SystemMetricsSampler(
+        collect_fn=_fixed_collect(9.0, 90.0), now_fn=lambda: 7.0
+    )
+
+    sample = await sampler.record_sample()
+    assert await sampler.get_history() == [sample]
+
+
+# ── 读路径三态：有数据 / 空 / 键缺失 ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_history_empty_without_samples(monkeypatch):
+    """态 2（空）：无内存样本且无 Redis → 空列表（诚实空态）。"""
+    monkeypatch.setattr("app.core.redis.redis_client", None)
+    sampler = SystemMetricsSampler(
+        collect_fn=_fixed_collect(1.0, 1.0), now_fn=lambda: 0.0
+    )
+    assert await sampler.get_history() == []
+
+
+@pytest.mark.asyncio
+async def test_get_history_key_missing_returns_empty(monkeypatch):
+    """态 3（键缺失）：Redis 在但键不存在（lrange 空）→ 空列表，不抛错。"""
+    monkeypatch.setattr("app.core.redis.redis_client", _ListRedis([]))
+    sampler = SystemMetricsSampler(
+        collect_fn=_fixed_collect(1.0, 1.0), now_fn=lambda: 0.0
+    )
+    assert await sampler.get_history() == []
+
+
+@pytest.mark.asyncio
+async def test_get_history_backfills_from_redis_oldest_first(monkeypatch):
+    """内存为空时从 Redis 回填（跨 worker/重启可见）；顺序反转为旧→新。"""
+    newest_first = [
+        json.dumps({"cpu_percent": 2.0, "memory_percent": 20.0, "timestamp": 200}),
+        json.dumps({"cpu_percent": 1.0, "memory_percent": 10.0, "timestamp": 100}),
+    ]
+    monkeypatch.setattr("app.core.redis.redis_client", _ListRedis(newest_first))
+    sampler = SystemMetricsSampler(
+        collect_fn=_fixed_collect(1.0, 1.0), now_fn=lambda: 0.0
+    )
+
+    history = await sampler.get_history()
+    assert [point["timestamp"] for point in history] == [100, 200]
+
+
+@pytest.mark.asyncio
+async def test_get_history_skips_corrupt_redis_entries(monkeypatch):
+    """损坏条目跳过（与 middleware._load_snapshots 同语义），合法条目保留。"""
+    items = [
+        "not-json",
+        json.dumps({"cpu_percent": 3.0, "memory_percent": 30.0, "timestamp": 300}),
+    ]
+    monkeypatch.setattr("app.core.redis.redis_client", _ListRedis(items))
+    sampler = SystemMetricsSampler(
+        collect_fn=_fixed_collect(1.0, 1.0), now_fn=lambda: 0.0
+    )
+
+    history = await sampler.get_history()
+    assert [point["timestamp"] for point in history] == [300]
