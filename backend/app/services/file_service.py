@@ -16,7 +16,7 @@ from sqlalchemy import and_, func, select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.minio_client import minio_client
-from app.exceptions import ValidationError
+from app.exceptions import AppError, ValidationError
 from app.models.document import Document, DocumentStatus, DocumentType
 from app.services.document_parser import DocumentParser
 
@@ -331,7 +331,11 @@ class FileUploadService:
                 "upload_time": document.created_at.isoformat()
             }
 
-        except HTTPException:
+        except (HTTPException, AppError):
+            # 校验类失败（扩展名/大小 → HTTPException 400；MIME 不符 →
+            # ValidationError 400）与其它控制流异常原样放行，不得被下面的
+            # except Exception 重包成 500（round2 后端卫生修复③；issue #98
+            # 同款原则，见 tests/unit/test_control_flow_exception_passthrough.py）。
             raise
         except Exception as e:
             logger.error(f"文件上传失败: {filename}, 错误: {str(e)}")
@@ -375,7 +379,8 @@ class FileUploadService:
             return await self._upload_to_minio(content, object_name, file.content_type or "image/jpeg")
 
 
-        except HTTPException:
+        except (HTTPException, AppError):
+            # 与 upload_file 同款：校验类失败必须诚实 4xx（round2 卫生修复③）
             raise
         except Exception as e:
             logger.error(f"头像上传失败: {str(e)}")
@@ -469,7 +474,8 @@ class FileUploadService:
                 "message": f"分块 {chunk_index + 1}/{total_chunks} 上传成功"
             }
 
-        except HTTPException:
+        except (HTTPException, AppError):
+            # 与 upload_file 同款：校验类失败必须诚实 4xx（round2 卫生修复③）
             raise
         except Exception as e:
             logger.error(f"分块上传失败: {file_name}, 分块 {chunk_index}, 错误: {str(e)}")
@@ -542,6 +548,11 @@ class FileUploadService:
             # 调用普通上传方法
             return await self.upload_file(mock_file, organization_id, user_id)
 
+        except (HTTPException, AppError):
+            # 合并阶段复用的校验（扩展名/大小/MIME）失败必须原样上抛——
+            # 此前统一重包成裸 Exception，把上游的 400 语义打碎成 500
+            # （round2 后端卫生修复③）。
+            raise
         except Exception as e:
             logger.error(f"合并文件处理失败: {file_name}, 错误: {str(e)}")
             raise Exception(f"合并文件处理失败: {str(e)}")

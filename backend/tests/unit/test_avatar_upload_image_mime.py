@@ -20,7 +20,6 @@ upload_avatar 传 is_avatar=True；文档白名单原样不动。
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
 
 from app.exceptions import ValidationError
 from app.services.file_service import _ALLOWED_MIME_TYPES, FileUploadService
@@ -82,15 +81,15 @@ class TestAvatarUploadImageMime:
             svc._validate_mime_type(PNG_BYTES, "avatar.jpg", is_avatar=True)
 
     @pytest.mark.asyncio
-    async def test_mismatch_avatar_end_to_end_rejected(self, svc):
-        """端到端：不符内容仍拒绝（状态码为既有 500 包裹行为，与文档路径
-        upload_file 同款 except 链；本次只修「真图片被判非法」的主 bug，不动
-        该状态码映射，留作已知残余）。"""
+    async def test_mismatch_avatar_end_to_end_rejected_as_400(self, svc):
+        """端到端：不符内容仍拒绝，且为诚实 4xx——round2 后端卫生修复③后
+        ValidationError(400) 在 service 与端点两层都原样放行（此前被 except
+        链包成 500；K 支线评审 medium 实锤，当时留作已知残余）。"""
         upload = _make_upload_file("avatar.jpg", PNG_BYTES, "image/jpeg")
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             await svc.upload_avatar(upload, user_id=1)
-        assert exc_info.value.status_code == 500
-        assert "doesn't match" in str(exc_info.value.detail)
+        assert exc_info.value.status_code == 400
+        assert "doesn't match" in str(exc_info.value.message)
 
     def test_document_path_accepts_images_after_unification(self, svc):
         """round2 后端卫生修复②：文档路径同步放行图片（解析链已接 OCR，
