@@ -55,6 +55,22 @@ class ReplayEngine:
             return None
         return REPLAY_DIR / f"{task_id}.json"
 
+    @staticmethod
+    def _is_valid_replay_ctx(ctx: Any) -> bool:
+        """结构校验（F1）：回放载荷必须是写侧 to_dict() 形状的 dict——
+        `task_id` 非空字符串 + `steps` 为列表。
+
+        合法 JSON 但形状不符（list / 字符串 / 缺键 dict）一律视为损坏，按
+        "无回放数据"处理：读 API 落诚实 404、has_replay 标否——**绝不裸抛 500**，
+        也绝不把畸形载荷喂给 format_timeline/format_replay 的 `.get` 调用。
+        """
+        if not isinstance(ctx, dict):
+            return False
+        task_id = ctx.get("task_id")
+        if not isinstance(task_id, str) or not task_id:
+            return False
+        return isinstance(ctx.get("steps"), list)
+
     async def load(self, task_id: str, *, exact: bool = False) -> dict[str, Any] | None:
         """Load a saved execution context by task_id.
 
@@ -76,38 +92,56 @@ class ReplayEngine:
         try:
             from app.agent.exec_context import ExecutionContext
             ctx = await ExecutionContext.load(task_id)
-            if ctx:
-                return ctx
+            if ctx is not None:
+                if self._is_valid_replay_ctx(ctx):
+                    return ctx
+                # 合法 JSON 但形状畸形（F1）：留 warning 行迹，按无数据降级（继续试本地兜底）
+                logger.warning(
+                    "回放载荷结构畸形（按无数据降级）(source=redis, task=%s, type=%s)",
+                    log_safe(task_id),
+                    type(ctx).__name__,
+                )
         except Exception:
             pass
 
         # Try local file — exact match first, then partial prefix match
         p = self._local_path(task_id)
         if p is not None and p.exists():
-            return self._read_json_file(p)
+            return self._read_ctx_file(p)
 
         # Partial prefix match（仅非 exact 模式）
         if not exact and REPLAY_DIR.exists():
             for f in REPLAY_DIR.glob("*.json"):
                 if f.stem.startswith(task_id):
-                    return self._read_json_file(f)
+                    return self._read_ctx_file(f)
 
         return None
 
     @staticmethod
-    def _read_json_file(p: Path) -> dict[str, Any] | None:
-        """容错读本地回放 JSON：截断/半写文件按"无回放数据"安全降级（不 500）。"""
+    def _read_ctx_file(p: Path) -> dict[str, Any] | None:
+        """容错读本地回放文件：读取/解析失败或**结构畸形** → None（按无回放数据
+        安全降级，绝不 500 裸抛；与 checkpoint 的毒丸防线同纪律）。"""
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            data = json.loads(p.read_text(encoding="utf-8"))
         except Exception as e:
             logger.warning("本地回放文件读取失败（按无数据降级）: %s: %s", log_safe(str(p)), log_safe(e))
             return None
+        if not ReplayEngine._is_valid_replay_ctx(data):
+            logger.warning(
+                "本地回放文件结构畸形（按无数据降级）: %s (type=%s)",
+                log_safe(str(p)),
+                type(data).__name__,
+            )
+            return None
+        return data
 
     async def has_replay(self, task_id: str) -> bool:
-        """该任务是否有可回放数据（Redis 优先，本地精确文件兜底）。
+        """该任务是否有**可读**回放数据（Redis 优先，本地精确文件兜底）。
 
-        与 load(exact=True) 同一查找链；只做存在性判定，不读内容。
-        任何后端故障 → 按"无"处理（诚实：宁可少标，不虚标）。
+        与 load(exact=True) 同一查找链；F3：不只做存在性判定——载荷经结构校验
+        （_is_valid_replay_ctx）后才标真；损坏（parse 失败 / 形状畸形）如实视为
+        "无回放"（UI 绝不亮一个必然打不开的入口）。任何后端故障 → 按"无"处理
+        （诚实：宁可少标，不虚标）。
         """
         if not task_id:
             return False
@@ -116,15 +150,26 @@ class ReplayEngine:
             # app.core.redis.redis_client 后即刻生效。
             from app.core.redis import redis_client
             if redis_client:
-                if await redis_client.exists(f"agent:replay:{task_id}"):
-                    return True
+                raw = await redis_client.get(f"agent:replay:{task_id}")
+                if raw:
+                    try:
+                        parsed = json.loads(raw)
+                    except Exception:
+                        parsed = None
+                    if parsed is not None and self._is_valid_replay_ctx(parsed):
+                        return True
+                    logger.warning(
+                        "回放载荷结构畸形，has_replay 如实标否 (task=%s)", log_safe(task_id)
+                    )
         except Exception:
             pass
         try:
             p = self._local_path(task_id)
-            return bool(p is not None and p.exists())
+            if p is not None and p.exists():
+                return self._read_ctx_file(p) is not None
         except Exception:
             return False
+        return False
 
     def load_sync(self, path: str) -> dict[str, Any] | None:
         """Synchronous load from a local JSON file."""

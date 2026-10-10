@@ -145,7 +145,7 @@ async def test_load_local_fallback_when_redis_empty(replay_dir, no_redis):
     """Redis 无数据 → 本地 benchmark/replay/ 兜底。"""
     replay_dir.mkdir(parents=True, exist_ok=True)
     (replay_dir / f"{_TASK_ID}.json").write_text(
-        json.dumps({"task_id": _TASK_ID, "query": "q"}), encoding="utf-8"
+        json.dumps({"task_id": _TASK_ID, "query": "q", "steps": []}), encoding="utf-8"
     )
     ctx = await ReplayEngine().load(_TASK_ID)
     assert ctx is not None and ctx["task_id"] == _TASK_ID
@@ -159,7 +159,7 @@ async def test_load_exact_never_prefix_matches_other_task(replay_dir, no_redis):
     """
     replay_dir.mkdir(parents=True, exist_ok=True)
     (replay_dir / f"{_TASK_ID}abcd.json").write_text(
-        json.dumps({"task_id": _TASK_ID + "abcd"}), encoding="utf-8"
+        json.dumps({"task_id": _TASK_ID + "abcd", "steps": []}), encoding="utf-8"
     )
     engine = ReplayEngine()
     assert await engine.load(_TASK_ID, exact=True) is None, "精确模式不得前缀命中"
@@ -201,15 +201,17 @@ async def test_has_replay_three_states(replay_dir, monkeypatch):
     # ① 全无 → False（诚实：不虚标）
     monkeypatch.setattr("app.core.redis.redis_client", None)
     assert await engine.has_replay(_TASK_ID) is False
-    # ② 本地文件存在 → True
+    # ② 本地文件存在（可读形状） → True
     replay_dir.mkdir(parents=True, exist_ok=True)
-    (replay_dir / f"{_TASK_ID}.json").write_text("{}", encoding="utf-8")
+    (replay_dir / f"{_TASK_ID}.json").write_text(
+        json.dumps({"task_id": _TASK_ID, "steps": []}), encoding="utf-8"
+    )
     assert await engine.has_replay(_TASK_ID) is True
     # ③ Redis 命中（本地无文件）→ True
     other = "dddddddddddd"
     monkeypatch.setattr(
         "app.core.redis.redis_client",
-        _FakeRedis({f"agent:replay:{other}": "{}"}),
+        _FakeRedis({f"agent:replay:{other}": json.dumps({"task_id": other, "steps": []})}),
     )
     assert await engine.has_replay(other) is True
     assert await engine.has_replay(_TASK_ID) is True, "Redis 不可用/未命中时回退本地判定"
@@ -219,5 +221,60 @@ async def test_has_replay_three_states(replay_dir, monkeypatch):
 async def test_has_replay_does_not_prefix_match(replay_dir, no_redis):
     """has_replay 只认精确文件——前缀命中会把'有回放'标到错的任务上。"""
     replay_dir.mkdir(parents=True, exist_ok=True)
-    (replay_dir / f"{_TASK_ID}zzz.json").write_text("{}", encoding="utf-8")
+    (replay_dir / f"{_TASK_ID}zzz.json").write_text(
+        json.dumps({"task_id": _TASK_ID + "zzz", "steps": []}), encoding="utf-8"
+    )
     assert await ReplayEngine().has_replay(_TASK_ID) is False
+
+
+# ── F1/F3：载荷结构校验（畸形 = 诚实降级，绝不 500 裸抛）─────────────────────
+
+# 三种畸形：合法 JSON 但不是 dict / 是字符串 / 是缺必须键的 dict
+_MALFORMED_PAYLOADS = [
+    ("list", [1, 2, 3]),
+    ("string", "not-a-dict"),
+    ("missing_keys", {"query": "缺 task_id 与 steps"}),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name,payload", _MALFORMED_PAYLOADS)
+async def test_load_rejects_malformed_payloads_both_backends(
+    replay_dir, monkeypatch, name, payload
+):
+    """畸形载荷在 Redis 与本地两条链都按无数据降级（F1）。
+
+    变异点 M6：去掉 _is_valid_replay_ctx 校验 → 本用例红（load 返回畸形载荷；
+    API 层随之 500 裸抛）。
+    """
+    engine = ReplayEngine()
+    # ① Redis 命中畸形
+    monkeypatch.setattr(
+        "app.core.redis.redis_client",
+        _FakeRedis({f"agent:replay:{_TASK_ID}": json.dumps(payload)}),
+    )
+    assert await engine.load(_TASK_ID, exact=True) is None, f"{name}: Redis 畸形必须按无数据"
+    assert await engine.has_replay(_TASK_ID) is False, f"{name}: has_replay 必须如实标否（F3）"
+    # ② Redis 无 → 本地文件畸形
+    monkeypatch.setattr("app.core.redis.redis_client", None)
+    replay_dir.mkdir(parents=True, exist_ok=True)
+    (replay_dir / f"{_TASK_ID}.json").write_text(json.dumps(payload), encoding="utf-8")
+    assert await engine.load(_TASK_ID, exact=True) is None, f"{name}: 本地畸形必须按无数据"
+    assert await engine.has_replay(_TASK_ID) is False
+
+
+@pytest.mark.asyncio
+async def test_corrupt_redis_falls_back_to_valid_local(replay_dir, monkeypatch):
+    """Redis 载荷畸形但本地文件可读 → 仍以本地兜底供回放（一层坏不拖垮整链）。"""
+    monkeypatch.setattr(
+        "app.core.redis.redis_client",
+        _FakeRedis({f"agent:replay:{_TASK_ID}": json.dumps([1, 2, 3])}),
+    )
+    replay_dir.mkdir(parents=True, exist_ok=True)
+    (replay_dir / f"{_TASK_ID}.json").write_text(
+        json.dumps({"task_id": _TASK_ID, "steps": []}), encoding="utf-8"
+    )
+    engine = ReplayEngine()
+    ctx = await engine.load(_TASK_ID, exact=True)
+    assert ctx is not None and ctx["task_id"] == _TASK_ID
+    assert await engine.has_replay(_TASK_ID) is True
