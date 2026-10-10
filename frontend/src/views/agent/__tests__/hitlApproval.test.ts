@@ -29,7 +29,7 @@ const apiMocks = vi.hoisted(() => ({
   createSession: vi.fn().mockResolvedValue({ data: null }),
   updateConfig: vi.fn().mockResolvedValue({}),
   submitFeedback: vi.fn().mockResolvedValue({}),
-  getTask: vi.fn().mockResolvedValue({ data: { state: 'completed' } }),
+  getTask: vi.fn().mockResolvedValue({ data: { success: true, data: { state: 'completed' } } }),
   cancelTask: vi.fn().mockResolvedValue({ data: { state: 'cancel_requested' } }),
   decideApproval: vi.fn().mockResolvedValue({ abort: () => {} }),
 }))
@@ -78,14 +78,15 @@ describe('AgentView · HITL 接线', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.clearAllMocks()
-    apiMocks.getTask.mockResolvedValue({ data: { state: 'completed' } })
+    apiMocks.getTask.mockResolvedValue({ data: { success: true, data: { state: 'completed' } } })
     apiMocks.cancelTask.mockResolvedValue({ data: { state: 'cancel_requested' } })
     apiMocks.decideApproval.mockResolvedValue({ abort: () => {} })
   })
 
   it('停止按钮请求服务端取消（POST cancel 语义）', async () => {
-    // 挂载恢复路径要先拿到"未终态"的任务行，否则会清掉陈旧指针（见下面用例）
-    apiMocks.getTask.mockResolvedValue({ data: { state: 'running' } })
+    // 挂载恢复路径要先拿到"未终态"的任务行，否则会清掉陈旧指针（见下面用例）；
+    // mock 形状=真实拦截器输出（完整 AxiosResponse，信封在 res.data）
+    apiMocks.getTask.mockResolvedValue({ data: { success: true, data: { state: 'running' } } })
     const { pinia, store } = setupStore()
     store.setTaskId('task-1')
     store.setLoading(true)
@@ -107,10 +108,13 @@ describe('AgentView · HITL 接线', () => {
   it('pendingApproval 时渲染审批卡；批准走 decideApproval 并携带改指令', async () => {
     apiMocks.getTask.mockResolvedValue({
       data: {
-        state: 'waiting_approval',
-        approval: {
-          tool_name: 'execute_python', tool_args: { code: 'print(2)' },
-          risk_level: 'high', reason: '高风险工具执行前需人工审批',
+        success: true,
+        data: {
+          state: 'waiting_approval',
+          approval: {
+            tool_name: 'execute_python', tool_args: { code: 'print(2)' },
+            risk_level: 'high', reason: '高风险工具执行前需人工审批',
+          },
         },
       },
     })
@@ -143,12 +147,15 @@ describe('AgentView · HITL 接线', () => {
     localStorage.setItem('docmind.agent.lastTaskId', 't-restore')
     apiMocks.getTask.mockResolvedValue({
       data: {
-        state: 'waiting_approval',
-        approval: {
-          tool_name: 'execute_sql',
-          tool_args: { query: 'select 1' },
-          risk_level: 'high',
-          reason: '高风险工具执行前需人工审批',
+        success: true,
+        data: {
+          state: 'waiting_approval',
+          approval: {
+            tool_name: 'execute_sql',
+            tool_args: { query: 'select 1' },
+            risk_level: 'high',
+            reason: '高风险工具执行前需人工审批',
+          },
         },
       },
     })
@@ -165,7 +172,7 @@ describe('AgentView · HITL 接线', () => {
 
   it('陈旧任务指针（已终态）不重建卡片并清掉持久化', async () => {
     localStorage.setItem('docmind.agent.lastTaskId', 't-stale')
-    apiMocks.getTask.mockResolvedValue({ data: { state: 'completed' } })
+    apiMocks.getTask.mockResolvedValue({ data: { success: true, data: { state: 'completed' } } })
     const { pinia, store } = setupStore()
 
     const wrapper = await mountView(pinia)

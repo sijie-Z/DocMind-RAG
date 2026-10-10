@@ -1,5 +1,6 @@
 import request from '@/utils/request'
 import { getToken } from '@/utils/auth'
+import type { AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
 import type {
   AgentEvent,
@@ -139,15 +140,20 @@ export const agentApi = {
 
   // ── HITL：任务状态 / 取消 / 审批（人在环）──────────────────────────────
 
-  /** 任务状态视图（审批现场 / 取消后的权威状态；HITL 恢复入口） */
-  getTask(taskId: string): Promise<ApiResponse<AgentTaskView>> {
+  /** 任务状态视图（审批现场 / 取消后的权威状态；HITL 恢复入口）。
+   *
+   * 注意返回形状（F2 教训）：request 的响应拦截器返回**完整 AxiosResponse**
+   * （信封在 `res.data = {success, data}`），消费者必须读 `res.data.data`。
+   * 类型如实声明 AxiosResponse，杜绝"类型说已解包、运行时没有"的漂移。
+   */
+  getTask(taskId: string): Promise<AxiosResponse<ApiResponse<AgentTaskView>>> {
     return request.get(`/agent/tasks/${taskId}`)
   },
 
   /** 协作式取消（服务端停止协议）：202 = 已受理待收敛 / 200 = 已直接终态 */
   cancelTask(
     taskId: string,
-  ): Promise<ApiResponse<{ task_id: string; state: string; message?: string; already?: boolean }>> {
+  ): Promise<AxiosResponse<ApiResponse<{ task_id: string; state: string; message?: string; already?: boolean }>>> {
     return request.post(`/agent/tasks/${taskId}/cancel`)
   },
 

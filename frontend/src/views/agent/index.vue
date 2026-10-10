@@ -534,7 +534,8 @@ async function handleApprovalDecide(payload: {
 async function refreshTaskState(taskId: string) {
   try {
     const res = await agentApi.getTask(taskId)
-    const data = res.data
+    // F2：request 拦截器返回完整 AxiosResponse，信封在 res.data = {success, data}
+    const data = res.data?.data
     if (!data) return
     agentStore.setTaskState(data.state)
     if (data.state === 'waiting_approval' && data.approval) {
@@ -554,7 +555,9 @@ async function restorePendingApproval() {
   if (!last) return
   try {
     const res = await agentApi.getTask(last)
-    const data = res.data
+    // F2：读信封内层（res.data = {success, data}；此前读 res.data 导致
+    // data.state 恒 undefined，刷新后审批卡永不恢复——浏览器验收实锤）
+    const data = res.data?.data
     if (data?.state === 'waiting_approval' && data.approval) {
       agentStore.setTaskId(last)
       agentStore.setTaskState('waiting_approval')

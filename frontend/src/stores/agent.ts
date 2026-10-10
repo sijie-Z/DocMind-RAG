@@ -216,7 +216,10 @@ export const useAgentStore = defineStore('agent', () => {
           tool_name: event.tool_name || 'unknown',
           tool_args: event.tool_args || {},
           tool_call_id: event.tool_call_id,
-          risk_level: event.risk_level || 'high',
+          // F3：缺字段 = low（后端对 low 曾省略该字段；徽标兜底成 'high' 与卡片
+          // 理由"风险 low"自相矛盾）。后端现已对审批事件恒显式携带，此兜底
+          // 与线上契约一致。
+          risk_level: event.risk_level || 'low',
           reason: event.content,
           step_id: event.plan_step_id,
           plan_id: event.plan_id,
