@@ -388,6 +388,11 @@ async def get_conversation(
             "data": {
                 "id": session.id, "title": session.title,
                 "messages": formatted_messages,
+                # 文档绑定真值存于 ChatSession.settings（chat_service.bind_docs_to_session
+                # 写 bound_document_ids、get_or_create_session 读回；B35）。此前会话响应
+                # 不含 settings —— 前端 isBoundMode 恒 false，「仅文档模式」标签与解绑
+                # 入口永不出现。此处如实下发（非 dict 时给 {}）。
+                "settings": session.settings if isinstance(session.settings, dict) else {},
                 "created_at": session.created_at.isoformat() if session.created_at else "",
                 "updated_at": session.updated_at.isoformat() if session.updated_at else "",
             },

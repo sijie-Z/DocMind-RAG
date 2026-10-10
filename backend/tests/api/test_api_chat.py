@@ -296,6 +296,80 @@ class TestConversationMessages:
         r = client.get("/api/v1/chat/conversations/conv-123")
         assert r.status_code in (401, 403)
 
+    def test_get_conversation_messages_includes_bound_document_settings(self, client: TestClient):
+        """B35：详情响应必须带 settings.bound_document_ids ——
+        这是前端 isBoundMode（「仅文档模式」标签/解绑入口）的唯一真值来源；
+        旧响应缺 settings 导致标签与解绑入口永不出现。"""
+        from app.main import app
+        mock_user = _make_mock_user()
+        mock_session = _make_mock_session()
+        mock_session.settings = {"bound_document_ids": ["doc-1", "doc-2"]}
+
+        override_func, mock_db = _override_get_db()
+
+        mock_session_result = MagicMock()
+        mock_session_result.scalar_one_or_none.return_value = mock_session
+
+        mock_msgs_scalars = MagicMock()
+        mock_msgs_scalars.all.return_value = []
+        mock_msgs_result = MagicMock()
+        mock_msgs_result.scalars.return_value = mock_msgs_scalars
+
+        mock_db.execute = AsyncMock(side_effect=[mock_session_result, mock_msgs_result])
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+        try:
+            r = client.get(
+                "/api/v1/chat/conversations/conv-123",
+                headers={"Authorization": "Bearer test_token"}
+            )
+            assert r.status_code == 200
+            data = r.json()
+            assert data["success"] is True
+            assert data["data"]["settings"]["bound_document_ids"] == ["doc-1", "doc-2"]
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_get_conversation_messages_settings_non_dict_falls_back_to_empty(self, client: TestClient):
+        """settings 为 None/非 dict 时如实回退 {}（防御脏数据，不抛错）。"""
+        from app.main import app
+        mock_user = _make_mock_user()
+        mock_session = _make_mock_session()
+        mock_session.settings = None
+
+        override_func, mock_db = _override_get_db()
+
+        mock_session_result = MagicMock()
+        mock_session_result.scalar_one_or_none.return_value = mock_session
+
+        mock_msgs_scalars = MagicMock()
+        mock_msgs_scalars.all.return_value = []
+        mock_msgs_result = MagicMock()
+        mock_msgs_result.scalars.return_value = mock_msgs_scalars
+
+        mock_db.execute = AsyncMock(side_effect=[mock_session_result, mock_msgs_result])
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+        try:
+            r = client.get(
+                "/api/v1/chat/conversations/conv-123",
+                headers={"Authorization": "Bearer test_token"}
+            )
+            assert r.status_code == 200
+            assert r.json()["data"]["settings"] == {}
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
 
 class TestMessageFeedback:
     def test_update_feedback_success(self, client: TestClient):
