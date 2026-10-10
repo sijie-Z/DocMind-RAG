@@ -885,6 +885,20 @@ import {
   CodeSlashOutline, GlobeOutline, SyncOutline, RocketOutline, FlashOutline,
   FolderOpenOutline, AddOutline, CloseOutline
 } from '@vicons/ionicons5'
+// VueFlow 自定义节点组件（9 个）——必须在本文件 import 注册：
+// 此前这 9 个组件只以「未使用 import」的形态躺在 useWorkflowEditor.ts 里，
+// 无人注册 → Vue 警告 Failed to resolve component: InputNode/OutputNode/...、
+// 画布节点渲染为空壳（C_polish §2.1「九节点 import 断裂」；A_sweep 同警告实锤）。
+// 模板 <template #node-xxx> 的作用域组件解析依赖本文件的 script 绑定，勿再移走。
+import InputNode from './nodes/InputNode.vue'
+import OutputNode from './nodes/OutputNode.vue'
+import LLMNode from './nodes/LLMNode.vue'
+import ToolNode from './nodes/ToolNode.vue'
+import ConditionNode from './nodes/ConditionNode.vue'
+import MemoryNode from './nodes/MemoryNode.vue'
+import CodeNode from './nodes/CodeNode.vue'
+import ApiNode from './nodes/ApiNode.vue'
+import TransformNode from './nodes/TransformNode.vue'
 
 const {
   NODE_ICON_MAP,

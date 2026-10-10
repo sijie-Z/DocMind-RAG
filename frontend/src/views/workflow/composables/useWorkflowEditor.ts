@@ -26,15 +26,6 @@ import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflow as execWor
 import { agentApi } from '@/api/agent'
 import type { SkillInfo } from '@/types/agent'
 import { useDedupedMessage } from '@/utils/message'
-import InputNode from '../nodes/InputNode.vue'
-import OutputNode from '../nodes/OutputNode.vue'
-import LLMNode from '../nodes/LLMNode.vue'
-import ToolNode from '../nodes/ToolNode.vue'
-import ConditionNode from '../nodes/ConditionNode.vue'
-import MemoryNode from '../nodes/MemoryNode.vue'
-import CodeNode from '../nodes/CodeNode.vue'
-import ApiNode from '../nodes/ApiNode.vue'
-import TransformNode from '../nodes/TransformNode.vue'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
@@ -962,10 +953,6 @@ const NODE_ICON_MAP: Record<string, unknown> = {
 }
 
 const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutline
-
-
-// 节点组件
-
 
   return {
   NODE_ICON_MAP,

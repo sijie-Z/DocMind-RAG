@@ -63,6 +63,15 @@ vi.mock('@/api/llmConfig', () => ({
 }))
 
 import WorkflowEditor from '../editor.vue'
+import InputNode from '../nodes/InputNode.vue'
+import OutputNode from '../nodes/OutputNode.vue'
+import LLMNode from '../nodes/LLMNode.vue'
+import ToolNode from '../nodes/ToolNode.vue'
+import ConditionNode from '../nodes/ConditionNode.vue'
+import MemoryNode from '../nodes/MemoryNode.vue'
+import CodeNode from '../nodes/CodeNode.vue'
+import ApiNode from '../nodes/ApiNode.vue'
+import TransformNode from '../nodes/TransformNode.vue'
 import { useWorkflowStore } from '@/stores/workflow'
 import { getNodeDefinitions, getWorkflow } from '@/api/workflow'
 
@@ -70,6 +79,26 @@ const Host = defineComponent({
   setup() {
     // 真实 App 的包裹层：n-message-provider 在根（App.vue），编辑器是其后代
     return () => h(NMessageProvider, null, { default: () => h(WorkflowEditor) })
+  },
+})
+
+/**
+ * 渲染全部 node-* 具名插槽的 VueFlow 替身：模板里 14 个
+ * <template #node-xxx="nodeProps"> 委托给本 stub 逐一渲染。
+ * 未注册的节点组件会退化为裸元素（Failed to resolve component），
+ * findComponent(真实组件) 即不存在 → 判别注册是否真实生效。
+ */
+const VueFlowSlotStub = defineComponent({
+  name: 'VueFlow',
+  setup(_, { slots }) {
+    const nodeProps = { id: 'n1', data: { label: '测试节点', type: 'input' } }
+    return () =>
+      h(
+        'div',
+        Object.entries(slots)
+          .filter(([name]) => name.startsWith('node-'))
+          .map(([name, slot]) => h('div', { class: `slot-${name}` }, slot?.(nodeProps)))
+      )
   },
 })
 
@@ -82,7 +111,7 @@ function makeRouter(): Router {
   })
 }
 
-async function mountEditor(query = '') {
+async function mountEditor(query = '', opts: { resolveCanvasSlots?: boolean } = {}) {
   const router = makeRouter()
   await router.push(`/workflow/editor${query}`)
   await router.isReady()
@@ -93,8 +122,8 @@ async function mountEditor(query = '') {
       plugins: [naive, pinia, router],
       stubs: {
         // VueFlow 画布在 jsdom 下无 viewport 语义，整棵子树直通 stub 掉；
-        // 本文件的判别目标是 setup 生命周期与 toast 链路，不依赖画布内部
-        VueFlow: true,
+        // 节点注册用例用「渲染全部 node-* 插槽」的替身验证组件解析
+        VueFlow: opts.resolveCanvasSlots ? VueFlowSlotStub : true,
         Background: true,
         Controls: true,
         MiniMap: true,
@@ -139,5 +168,37 @@ describe('workflow/editor 挂载与快速模板（A_sweep 崩溃回归）', () =
     expect(getNodeDefinitions).toHaveBeenCalledTimes(1)
     // 路由 query 被消费 → loadWorkflowById(42)（getWorkflow 命中）
     expect(getWorkflow).toHaveBeenCalledWith(42)
+  })
+})
+
+describe('workflow/editor 画布节点组件注册（C_polish「九节点 import 断裂」回归）', () => {
+  it('14 个 node-* 具名插槽全部解析到真实节点组件（修复前全部 Failed to resolve component）', async () => {
+    const wrapper = await mountEditor('', { resolveCanvasSlots: true })
+
+    // 与 editor.vue 模板 14 个 <template #node-*> 一一对应
+    const cases: Array<[string, unknown]> = [
+      ['node-input', InputNode],
+      ['node-output', OutputNode],
+      ['node-llm', LLMNode],
+      ['node-llm_openai', LLMNode],
+      ['node-llm_deepseek', LLMNode],
+      ['node-llm_qwen', LLMNode],
+      ['node-tool_search', ToolNode],
+      ['node-tool_tts', ToolNode],
+      ['node-condition', ConditionNode],
+      ['node-router', ConditionNode],
+      ['node-memory', MemoryNode],
+      ['node-code', CodeNode],
+      ['node-api_call', ApiNode],
+      ['node-transform', TransformNode],
+    ]
+    for (const [slotName, component] of cases) {
+      const holder = wrapper.find(`.slot-${slotName}`)
+      expect(holder.exists(), `${slotName} 插槽未渲染`).toBe(true)
+      expect(
+        holder.findComponent(component as never).exists(),
+        `${slotName} 未解析到真实组件（组件未 import 注册）`
+      ).toBe(true)
+    }
   })
 })
