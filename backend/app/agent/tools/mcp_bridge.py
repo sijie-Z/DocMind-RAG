@@ -192,6 +192,8 @@ async def _list_mcp_tools(server_name: str) -> str | ToolResult:
         "required": ["server", "tool"],
     },
     tags=["mcp", "external"],
+    # HITL：经 MCP 桥 spawn 子进程 / 触碰外部服务 —— 声明高危，审批门据此判定。
+    risk_level="high",
 )
 async def mcp_call(
     server: str,

@@ -280,6 +280,8 @@ def _ast_safety_check(code: str) -> tuple[bool, str]:
     },
     tags=["code", "compute"],
     requires_auth=True,
+    # HITL：宿主进程内执行任意代码 —— 声明高危，审批门（approval.py）据此判定。
+    risk_level="high",
 )
 async def execute_python(code: str, **_: Any) -> str:
     # ── Resolve sandbox mode ──────────────────────────────────────
@@ -449,6 +451,8 @@ def _inject_org_filter(query: str, org_id: int) -> str:
     },
     tags=["code", "data"],
     requires_auth=True,
+    # HITL：对组织库执行任意（只读）SQL —— 数据面高危，审批门据此判定。
+    risk_level="high",
 )
 async def execute_sql(query: str, organization_id: int | None = None, **_: Any) -> str:
     import json

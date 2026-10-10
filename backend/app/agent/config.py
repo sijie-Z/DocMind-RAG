@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 
 Personality = Literal["precise", "creative", "balanced"]
 PlanningMode = Literal["coarse", "normal", "fine"]
+# HITL 审批模式（见 app/agent/approval.py 的模块 docstring）：
+#   never  — 不审批（完全旧行为）；risky — high 风险工具需审批（默认）；
+#   always — 所有工具调用需审批。
+ApprovalMode = Literal["never", "risky", "always"]
 
 DEFAULT_DISABLED_TOOLS: list[str] = [
     "execute_python",
@@ -96,6 +100,8 @@ _CONFIG_FIELD_SPECS: dict[str, Callable[[Any], bool]] = {
     "max_total_tokens": _is_int,
     "plan_max_tokens": _is_int,
     "reflection_max_tokens": _is_int,
+    "approval_mode": _is_str,  # Literal 域值由 approval.requires_approval 的默认分支兜底（类型级闸门）
+    "approval_timeout_seconds": _is_int,
 }
 
 
@@ -185,6 +191,15 @@ class AgentConfig:
     # 单一入口 record_llm_usage 累计（issue #203 ②）。
     max_total_tokens: int = 0
 
+    # ── HITL 审批（人在环，见 app/agent/approval.py）──
+    # 执行前审批模式；默认 risky（安全默认）——默认禁单已挡住三个高危工具，
+    # 因此默认配置下审批量为 0，既有流程零扰动；启用高危工具后即真实生效。
+    approval_mode: ApprovalMode = "risky"
+    # 审批等待时限（秒）。0（默认）= 无限等待等人类应答——**绝不**在超时时
+    # 伪造"用户拒绝"；>0 时超时在读取/应答点被惰性判定，如实置 failed +
+    # error_type=approval_timeout（不是 deny，见 approval.py 模块头）。
+    approval_timeout_seconds: int = 0
+
     # ── Model selection ──
     def get_deep_model(self) -> str:
         """模型用于综合推理/决策（Reflector, Reviewer, 综合回答）"""
@@ -243,6 +258,8 @@ class AgentConfig:
             "max_total_tokens": self.max_total_tokens,
             "plan_max_tokens": self.plan_max_tokens,
             "reflection_max_tokens": self.reflection_max_tokens,
+            "approval_mode": self.approval_mode,
+            "approval_timeout_seconds": self.approval_timeout_seconds,
         }, source="config-write")
 
     @classmethod

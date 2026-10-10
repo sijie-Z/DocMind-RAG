@@ -195,6 +195,10 @@ class ToolEntry:
 
     # ── v2.1 semantic fields ──
     category: str = ""                       # business domain for tool grouping
+    # ── v2.2 risk declaration（HITL 审批门的判定输入，见 app/agent/approval.py）──
+    # 工具作者显式声明的风险等级："low" | "medium" | "high"；"" = 未声明
+    # （由 approval.TOOL_RISK_LEVELS 集中判定表 + 语义兜底补齐）。
+    risk_level: str = ""
     semantic: dict[str, Any] = field(default_factory=lambda: {
         "type": "read_only",                 # read_only | mutating | long_running
         "idempotent": True,                  # safe to retry without side effects
@@ -235,6 +239,7 @@ class ToolEntry:
             "tags": self.tags,
             "category": self.category,
             "semantic": self.semantic,
+            "risk_level": self.risk_level,
             "requires_auth": self.requires_auth,
             "auth_handler": self.auth_handler,
             "rate_limit": self.rate_limit,
@@ -325,6 +330,8 @@ class ToolRegistry:
         # v2.1 semantic fields
         category: str = "",
         semantic: dict[str, Any] | None = None,
+        # v2.2 risk declaration（HITL：审批门判定输入）
+        risk_level: str = "",
     ) -> ToolEntry:
         """Register a tool. All v2/v2.1 params are optional — zero migration needed."""
         resolved_semantic = semantic if semantic is not None else {
@@ -349,6 +356,8 @@ class ToolRegistry:
             # v2.1
             category=category,
             semantic=resolved_semantic,
+            # v2.2
+            risk_level=risk_level,
         )
         self._tools[name] = entry
         logger.info("Registered tool: %s%s",
@@ -857,6 +866,8 @@ def register_tool(
     # v2.1 semantic fields
     category: str = "",
     semantic: dict[str, Any] | None = None,
+    # v2.2 risk declaration（HITL 审批门判定输入："low" | "medium" | "high"）
+    risk_level: str = "",
 ):
     """Decorator to register a function as a tool.
 
@@ -893,6 +904,8 @@ def register_tool(
             # v2.1
             category=category,
             semantic=semantic,
+            # v2.2
+            risk_level=risk_level,
         )
         return func
     return decorator

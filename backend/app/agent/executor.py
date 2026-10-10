@@ -23,7 +23,6 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from app.agent.config import AgentConfig
-from app.agent.escalation import EscalationConfig
 from app.agent.events import AgentEvent
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, PlanStep
@@ -107,8 +106,6 @@ class Executor:
         self._consecutive_low_gain: int = 0
         # Circuit breaker: skip steps after N consecutive failures
         self._consecutive_failures: int = 0
-        # Escalation counter: reset per request
-        self._escalation_config = EscalationConfig()
 
     def reset_for_request(self) -> None:
         """Clear per-request state so a reused Executor doesn't leak across calls."""

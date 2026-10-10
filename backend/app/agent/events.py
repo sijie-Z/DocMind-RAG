@@ -33,6 +33,12 @@ EventType = Literal[
     "error",
     "execution_step_result",
     "run_report",
+    # HITL（人在环）：
+    #   approval_required — 执行器停在审批点（工具未执行），本流随后结束，
+    #     任务态为 waiting_approval；人类经 POST /tasks/{id}/approval 应答。
+    #   run_cancelled — 协作式取消在检查点被观察到；本 run 收敛为 cancelled。
+    "approval_required",
+    "run_cancelled",
 ]
 
 ThinkingType = Literal["reasoning", "planning", "evaluation", "correction"]
