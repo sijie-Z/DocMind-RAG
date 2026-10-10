@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import logging
@@ -6,6 +7,9 @@ from collections import defaultdict
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# 图数据与幂等标记共用同一 TTL：两者同生共死，过期后回填可整体重建（见 ingest_document）
+_TTL_SECONDS = 86400
 
 class GraphRAGService:
     def __init__(self):
@@ -38,6 +42,10 @@ class GraphRAGService:
     def _redis_key_for(self, organization_id: int) -> str:
         return f"{self._redis_key}:{organization_id}"
 
+    def _docs_key_for(self, organization_id: int) -> str:
+        """已摄入文档的幂等标记集（Set）。"""
+        return f"{self._redis_key}:docs:{organization_id}"
+
     async def load(self, organization_id: int = 1) -> None:
         """Load the graph for an organization from Redis; keeps in-memory state when Redis is unavailable."""
         from app.core.redis import redis_client
@@ -63,11 +71,48 @@ class GraphRAGService:
         try:
             await redis_client.setex(
                 self._redis_key_for(organization_id),
-                86400,
+                _TTL_SECONDS,
                 json.dumps(dict(self._graph_for(organization_id)), ensure_ascii=False),
             )
         except Exception as e:
             logger.warning(f"GraphRAG save to Redis failed: {e}")
+
+    async def is_document_extracted(self, document_id: str, organization_id: int = 1) -> bool | None:
+        """该文档是否已摄入图谱（幂等判据）。
+
+        - True —— 已摄入（标记在且图数据键仍存在）；
+        - False —— 未摄入（含「标记还在但图键已失踪」：/graph/clear 清标记后的
+          图键保留态、或 TTL 先于标记到期 —— 此时必须重抽，否则图谱永远重建不起来）；
+        - None —— Redis 不可用，判断不了（调用方自行决定，与既有降级风格一致）。
+        """
+        from app.core.redis import redis_client
+
+        if not redis_client:
+            return None
+        try:
+            marked = await redis_client.sismember(
+                self._docs_key_for(organization_id), document_id
+            )
+            if not marked:
+                return False
+            raw = await redis_client.get(self._redis_key_for(organization_id))
+            return raw is not None
+        except Exception as e:
+            logger.warning(f"GraphRAG doc marker check failed: {e}")
+            return None
+
+    async def mark_document_extracted(self, document_id: str, organization_id: int = 1) -> None:
+        """写入幂等标记；TTL 与图数据键一致，两者同生共死。"""
+        from app.core.redis import redis_client
+
+        if not redis_client:
+            return
+        try:
+            key = self._docs_key_for(organization_id)
+            await redis_client.sadd(key, document_id)
+            await redis_client.expire(key, _TTL_SECONDS)
+        except Exception as e:
+            logger.warning(f"GraphRAG doc marker save failed: {e}")
 
     async def extract_entities_with_llm(self, text: str, llm_client: Any = None) -> list[dict[str, Any]]:
         if not text or len(text) < 50:
@@ -168,9 +213,52 @@ JSON返回："""
                     })
         await self.save(organization_id)
 
+    async def ingest_document(
+        self,
+        *,
+        document_id: str,
+        organization_id: int = 1,
+        text: str,
+        llm_client: Any = None,
+        timeout: float = 60.0,
+    ) -> dict[str, Any]:
+        """单文档图谱摄入（worker 索引成功后与回填脚本共用的唯一写入口）。
+
+        幂等：同一文档重复调用 → 直接 skipped，occurrences/关系条目不叠加
+        （幂等标记见 mark_document_extracted；标记失效由 is_document_extracted 兜底）。
+
+        非阻塞契约由调用方负责：本方法失败时上抛（含 LLM 挂起被 timeout 切断时的
+        TimeoutError）。timeout 默认 60s < worker 心跳最大容忍 90s（heartbeat.py），
+        保证抽取挂起不会把 worker 拖成「卡死」。
+
+        返回 ``{"status": "skipped"|"extracted", "entities": int}``。
+        """
+        already = await self.is_document_extracted(document_id, organization_id)
+        if already is True:
+            return {"status": "skipped", "entities": 0}
+
+        entities = await asyncio.wait_for(
+            self.extract_entities_with_llm(text, llm_client=llm_client), timeout=timeout
+        )
+        # 先合并存量再写：build_graph_from_entities 改的是进程内存 dict、随后整份
+        # 覆盖 Redis —— 不先 load 会把其它文档已贡献的实体整份冲掉。
+        await self.load(organization_id)
+        await self.build_graph_from_entities(entities, organization_id)
+        await self.mark_document_extracted(document_id, organization_id)
+        return {"status": "extracted", "entities": len(entities)}
+
     async def clear(self, organization_id: int = 1) -> None:
         self._graph_for(organization_id).clear()
         await self.save(organization_id)
+        # 幂等标记描述的是「这份图收进了哪些文档」——图清空后必须同步清标记，
+        # 否则回填脚本会被旧标记整批跳过，图谱永远重建不起来。
+        from app.core.redis import redis_client
+
+        if redis_client:
+            try:
+                await redis_client.delete(self._docs_key_for(organization_id))
+            except Exception as e:
+                logger.warning(f"GraphRAG doc markers clear failed: {e}")
 
     def _normalize_entity(self, entity: str) -> str:
         return hashlib.md5(entity.lower().encode(), usedforsecurity=False).hexdigest()[:16]
