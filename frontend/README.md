@@ -21,7 +21,7 @@
 - **状态管理**: Pinia
 - **路由**: Vue Router
 - **样式**: UnoCSS + SCSS
-- **图标**: Iconify
+- **图标**: @vicons/ionicons5
 
 ## 功能特性
 
