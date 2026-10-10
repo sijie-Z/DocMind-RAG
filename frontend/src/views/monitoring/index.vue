@@ -501,7 +501,7 @@ const updateMetricsCharts = async () => {
     // 元素键 timestamp(秒)/request_count/response_time 等（core/middleware.py:129-136）。
     // 旧前端读不存在的 resp.data.metrics → 三图恒不更新。
     const appMetricsResponse = await getMetrics('application', timeRange.value)
-    const points = (appMetricsResponse.data?.data as Array<Record<string, number>> | undefined) || []
+    const points = appMetricsResponse.data?.data || []
 
     if (requestChart) {
       const requestData = points.map((item) => [item.timestamp * 1000, item.request_count])
