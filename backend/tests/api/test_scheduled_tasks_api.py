@@ -218,6 +218,19 @@ class TestOwnership:
         assert r.status_code == 200
 
     @pytest.mark.asyncio
+    async def test_superuser_has_write_access_others(self, api):
+        """评审 MINOR-3 记录在案的行为：超管对他人任务全权（含写）。
+        对齐仓内 RBAC 上帝模式惯例——本用例把该语义钉住，防无意收紧/放宽。"""
+        d = await _create(api)
+        api.state.user = _make_user(uid=99, org=None, superuser=True)
+        r = await api.client.post(f"{BASE}/{d['id']}/pause")
+        assert r.status_code == 200 and r.json()["enabled"] is False
+        r = await api.client.patch(f"{BASE}/{d['id']}", json={"name": "超管改名"})
+        assert r.status_code == 200 and r.json()["name"] == "超管改名"
+        r = await api.client.delete(f"{BASE}/{d['id']}")
+        assert r.status_code == 200
+
+    @pytest.mark.asyncio
     async def test_list_enabled_filter(self, api):
         await _create(api, name="on")
         await _create(api, name="off", enabled=False)

@@ -2,7 +2,10 @@
 
 权限模型（对齐 workflow 域惯例 + org 域要求）：
 - 创建：`require_organization` fail-closed 解析组织上下文（无组织 403）；
-- 其余操作：任务创建者私有 + 超管全见（他人任务一律 404，不泄露存在性）；
+- 其余操作：任务创建者私有；**超管对本表全权——读（list/get）与写（patch/
+  pause/resume/delete/run-now）**，对齐仓内 RBAC"上帝模式"惯例
+  （app/core/security.py 的 permission_required 对超管整体放行），属记录在案
+  的设计选择（评审 MINOR-3）；非超管访问他人任务一律 404（不泄露存在性）；
 - run-now 是显式用户动作，不受 ENABLE_SCHEDULER 门控影响（门控只管自动循环）。
 """
 
@@ -39,7 +42,11 @@ router = APIRouter()
 async def _get_owned_task(
     db: AsyncSession, task_id: str, current_user: User
 ) -> ScheduledTask:
-    """取任务并做归属校验：非创建者（且非超管）一律 404。"""
+    """取任务并做归属校验：非创建者（且非超管）一律 404。
+
+    超管是**全权**（读+写）——与仓内 permission_required 的上帝模式口径一致，
+    属评审 MINOR-3 记录在案的设计选择。
+    """
     task = await db.get(ScheduledTask, task_id)
     if task is None:
         raise NotFoundError(detail="定时任务不存在")

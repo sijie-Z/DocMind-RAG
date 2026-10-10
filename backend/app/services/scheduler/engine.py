@@ -130,7 +130,14 @@ async def execute_agent_run(request: RunRequest) -> RunOutcome:
                 )
     if error_hint:
         return RunOutcome(ScheduleRunStatus.FAILED.value, None, error=error_hint)
-    return RunOutcome(ScheduleRunStatus.SUCCESS.value, None)
+    # 无 agent 任务记录且无错误事件：运行结果不可追溯（如 checkpoint.create_task
+    # fail-open 返回 None 且生成器无 error 事件）。按诚实原则记失败（不确定），
+    # 不得记 success——无运行记录、无法审计的"成功"是语义空洞（评审 MINOR-2）。
+    return RunOutcome(
+        ScheduleRunStatus.FAILED.value,
+        None,
+        error="无法确认运行结果：本次运行未产生可追溯的 agent 任务记录",
+    )
 
 
 async def send_run_notification(task: ScheduledTask, outcome: RunOutcome) -> None:

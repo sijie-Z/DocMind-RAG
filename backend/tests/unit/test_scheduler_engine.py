@@ -503,7 +503,9 @@ class TestDefaultExecutor:
         assert outcome.agent_task_id is None
 
     @pytest.mark.asyncio
-    async def test_done_without_task_id_is_success(self, monkeypatch, factory):
+    async def test_no_traceable_task_record_is_failed_uncertain(self, monkeypatch, factory):
+        """评审 MINOR-2：无 agent 任务记录且无错误事件 → 记失败（不确定），
+        不得记 success（无运行记录、无法审计的"成功"是语义空洞）。"""
         monkeypatch.setattr(engine_mod, "AsyncSessionLocal", factory)
 
         import app.agent.service as svc_mod
@@ -513,8 +515,9 @@ class TestDefaultExecutor:
 
         monkeypatch.setattr(svc_mod.agent_service, "chat", fake_chat)
         outcome = await execute_agent_run(_req())
-        assert outcome.status == "success"
+        assert outcome.status == "failed"
         assert outcome.agent_task_id is None
+        assert "无法确认运行结果" in (outcome.error or "")
 
 
 # ── 默认通知器：复用 notifications 域 ───────────────────────────────────
