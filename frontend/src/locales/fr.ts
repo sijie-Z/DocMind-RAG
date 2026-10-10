@@ -226,7 +226,7 @@ export default {
     confirmUpload: 'Démarrer le téléchargement',
     uploadTitle: 'Télécharger un fichier',
     dragText: 'Cliquez ou glissez un fichier ici',
-    dragHint: 'Supporte les formats PDF, Word, TXT, Markdown',
+    dragHint: 'Supporte les formats PDF, Word, TXT, Markdown, images, etc.',
     fileTitle: 'Titre (Optionnel)',
     addTags: 'Ajouter des tags (Entrée pour confirmer)',
     fileDesc: 'Description (Optionnel)',

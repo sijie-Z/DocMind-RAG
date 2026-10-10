@@ -226,7 +226,7 @@ export default {
     confirmUpload: 'アップロードを開始',
     uploadTitle: 'ファイルをアップロード',
     dragText: 'クリックまたはドラッグ＆ドロップでアップロード',
-    dragHint: 'PDF, Word, TXT, Markdown形式に対応',
+    dragHint: 'PDF, Word, TXT, Markdown、画像などに対応',
     fileTitle: 'タイトル（任意）',
     addTags: 'タグを追加（Enterで確定）',
     fileDesc: '説明（任意）',

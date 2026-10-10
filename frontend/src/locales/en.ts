@@ -334,7 +334,7 @@ export default {
     confirmUpload: 'Start upload',
     uploadTitle: 'Upload File',
     dragText: 'Click or drag file here to upload',
-    dragHint: 'Supports PDF, Word, TXT, Markdown formats',
+    dragHint: 'Supports PDF, Word, TXT, Markdown, images and more',
     fileTitle: 'Title (Optional)',
     addTags: 'Add tags (Enter to confirm)',
     fileDesc: 'Description (Optional)',

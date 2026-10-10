@@ -358,7 +358,7 @@ export default {
     confirmUpload: '开始上传',
     uploadTitle: '上传文件',
     dragText: '点击或拖拽文件到此处上传',
-    dragHint: '支持 PDF, Word, TXT, Markdown 等格式',
+    dragHint: '支持 PDF, Word, TXT, Markdown, 图片 等格式',
     fileTitle: '文件标题 (选填，默认为文件名)',
     addTags: '添加标签 (回车确认)',
     fileDesc: '文件描述 (选填)',
