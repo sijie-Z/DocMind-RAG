@@ -181,15 +181,64 @@ describe('MonitoringView · 趋势数据链与诚实空态（B2/B4）', () => {
     await flushPromises()
     await nextTick()
 
-    // CPU/内存：后端无系统指标历史数据源，初始即诚实空态
-    expect((chartInstances[0].setOption.mock.calls[0][0] as { title: { subtext: string } }).title.subtext).toBe('暂无数据')
-    expect((chartInstances[1].setOption.mock.calls[0][0] as { title: { subtext: string } }).title.subtext).toBe('暂无数据')
+    // CPU/内存：无样本（trends.system=[]）→ 初始与更新后均为诚实空态 + 空序列
+    const cpuCalls = chartInstances[0].setOption.mock.calls
+    const cpuLast = cpuCalls[cpuCalls.length - 1][0] as {
+      title: { subtext: string }
+      series: Array<{ data: unknown[] }>
+    }
+    expect(cpuLast.title.subtext).toBe('暂无数据')
+    expect(cpuLast.series[0].data).toEqual([])
+
+    const memCalls = chartInstances[1].setOption.mock.calls
+    const memLast = memCalls[memCalls.length - 1][0] as { title: { subtext: string } }
+    expect(memLast.title.subtext).toBe('暂无数据')
 
     // 请求/响应：空响应后最后一次 setOption 仍为「暂无数据」
     const reqCalls = chartInstances[2].setOption.mock.calls
     expect((reqCalls[reqCalls.length - 1][0] as { title: { subtext: string } }).title.subtext).toBe('暂无数据')
     const respCalls = chartInstances[3].setOption.mock.calls
     expect((respCalls[respCalls.length - 1][0] as { title: { subtext: string } }).title.subtext).toBe('暂无数据')
+  })
+
+  it('trends.system 真实采样点（af42e32）→ CPU/内存图映射 timestamp×1000 + cpu/memory_percent', async () => {
+    vi.mocked(getMonitoringDashboard).mockResolvedValue({
+      data: {
+        ...dashboardFixture().data,
+        trends: {
+          // 采样点字段逐字对照 af42e32 实现报告：timestamp(秒)/cpu_percent/memory_percent
+          system: [
+            { timestamp: nowSec - 120, cpu_percent: 12.5, memory_percent: 71.0 },
+            { timestamp: nowSec - 60, cpu_percent: 20.0, memory_percent: 69.5 },
+          ],
+          application: [],
+          knowledge_base: [],
+        },
+      },
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    const cpuCalls = chartInstances[0].setOption.mock.calls
+    const cpuLast = cpuCalls[cpuCalls.length - 1][0] as {
+      series: Array<{ data: unknown[] }>
+      title: { subtext: string }
+    }
+    expect(cpuLast.series[0].data).toEqual([
+      [(nowSec - 120) * 1000, 12.5],
+      [(nowSec - 60) * 1000, 20.0],
+    ])
+    // 有数据时清除「暂无数据」（不画假线也不留空态遮罩）
+    expect(cpuLast.title.subtext).toBe('')
+
+    const memCalls = chartInstances[1].setOption.mock.calls
+    const memLast = memCalls[memCalls.length - 1][0] as { series: Array<{ data: unknown[] }> }
+    expect(memLast.series[0].data).toEqual([
+      [(nowSec - 120) * 1000, 71.0],
+      [(nowSec - 60) * 1000, 69.5],
+    ])
   })
 
   it('负例：旧自造形状 {metrics:[...]} 不再被消费（防回退到契约漂移）', async () => {
