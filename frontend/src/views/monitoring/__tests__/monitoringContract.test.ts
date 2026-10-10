@@ -129,3 +129,80 @@ describe('MonitoringView · 活动告警卡单位（B3）', () => {
     expect(wrapper.text()).not.toContain('严重')
   })
 })
+
+describe('MonitoringView · 趋势数据链与诚实空态（B2/B4）', () => {
+  const trendPoint = (offsetSec: number, requestCount: number, responseTime: number) => ({
+    timestamp: nowSec - offsetSec,
+    request_count: requestCount,
+    response_time: responseTime,
+    error_count: 0,
+    active_connections: 1,
+    slow_request_count: 0,
+    error_rate_percent: 0,
+    p95_response_time_ms: 30,
+    p99_response_time_ms: 40,
+  })
+
+  it('真实 {"data": history[]} → 请求/响应图映射 timestamp*1000 + request_count/response_time', async () => {
+    vi.mocked(getMetrics).mockResolvedValue({
+      data: { data: [trendPoint(120, 3, 12.5), trendPoint(60, 5, 20.1)] },
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    // 实例序：[0]=cpu [1]=memory [2]=request [3]=response（documentChart 死链已删）
+    expect(chartInstances).toHaveLength(4)
+
+    const requestCalls = chartInstances[2].setOption.mock.calls
+    const requestLast = requestCalls[requestCalls.length - 1][0] as {
+      series: Array<{ data: unknown[] }>
+      title: { subtext: string }
+    }
+    expect(requestLast.series[0].data).toEqual([
+      [(nowSec - 120) * 1000, 3],
+      [(nowSec - 60) * 1000, 5],
+    ])
+    // 有数据时清除「暂无数据」
+    expect(requestLast.title.subtext).toBe('')
+
+    const respCalls = chartInstances[3].setOption.mock.calls
+    const respLast = respCalls[respCalls.length - 1][0] as { series: Array<{ data: unknown[] }> }
+    expect(respLast.series[0].data).toEqual([
+      [(nowSec - 120) * 1000, 12.5],
+      [(nowSec - 60) * 1000, 20.1],
+    ])
+  })
+
+  it('空数据（{"data": []}，服务 <2 快照的真实空响应）：四图画布写明「暂无数据」而非白板', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    // CPU/内存：后端无系统指标历史数据源，初始即诚实空态
+    expect((chartInstances[0].setOption.mock.calls[0][0] as { title: { subtext: string } }).title.subtext).toBe('暂无数据')
+    expect((chartInstances[1].setOption.mock.calls[0][0] as { title: { subtext: string } }).title.subtext).toBe('暂无数据')
+
+    // 请求/响应：空响应后最后一次 setOption 仍为「暂无数据」
+    const reqCalls = chartInstances[2].setOption.mock.calls
+    expect((reqCalls[reqCalls.length - 1][0] as { title: { subtext: string } }).title.subtext).toBe('暂无数据')
+    const respCalls = chartInstances[3].setOption.mock.calls
+    expect((respCalls[respCalls.length - 1][0] as { title: { subtext: string } }).title.subtext).toBe('暂无数据')
+  })
+
+  it('负例：旧自造形状 {metrics:[...]} 不再被消费（防回退到契约漂移）', async () => {
+    vi.mocked(getMetrics).mockResolvedValue({
+      data: { metrics: [{ timestamp: nowSec - 60, request_count: 99, response_time: 1 }] },
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    const reqCalls = chartInstances[2].setOption.mock.calls
+    const last = reqCalls[reqCalls.length - 1][0] as { series: Array<{ data: unknown[] }> }
+    // 不存在的 metrics 键不会被误当数据源（诚实空态），更不会画出 99
+    expect(last.series[0].data).toEqual([])
+  })
+})
