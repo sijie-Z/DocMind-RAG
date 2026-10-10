@@ -156,3 +156,21 @@ describe('AdminDashboard · 趋势轴标签与诚实空态（B5）', () => {
     expect(ragOpt.xAxis.data).toEqual([])
   })
 })
+
+describe('AdminDashboard · 今日请求真实口径（C1）', () => {
+  it('「今日请求」卡 = llm-stats.request_count_today（不再用 total_sessions 顶替）', async () => {
+    vi.mocked(getAdminSummary).mockResolvedValue({
+      data: { total_users: 3, total_sessions: 3, total_documents: 2, total_organizations: 2, active_users_24h: 0 },
+    } as never)
+    vi.mocked(getLLMStats).mockResolvedValue(llmFixture({ request_count_today: 777 }) as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    // 卡序：totalUsers / totalSessions / totalDocs / activeUsers / todayRequests / systemStatus
+    const numbers = wrapper.findAll('.text-2xl')
+    expect(numbers[1].text()).toBe('3') // 总会话数 = total_sessions
+    expect(numbers[4].text()).toBe('777') // 今日请求 = request_count_today（旧实现 = 3 顶替）
+  })
+})

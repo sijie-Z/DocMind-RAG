@@ -518,7 +518,10 @@ onMounted(async () => {
         totalDocs: adminRes.data.total_documents || 0,
         totalOrgs: adminRes.data.total_organizations || 0,
         activeUsers: adminRes.data.active_users_24h || 0,
-        totalRequests: adminRes.data.total_sessions || 0,
+        // 「今日请求」不在此填：admin-summary 无请求数口径（monitoring.py:
+        // 801-807 仅 5 键），真实值来自 llm-stats.request_count_today（见下）。
+        // 旧实现用 total_sessions（累计会话数）顶替 —— 静默错义，已改。
+        totalRequests: 0,
         systemHealthy: true,
         esHealth: 'ok'
       }
@@ -539,6 +542,10 @@ onMounted(async () => {
         costWarning: llmRes.data.cost_warning || false,
         trend: llmRes.data.token_trend_7d || []
       }
+      // 「今日请求」真实口径（C1）：llm-stats.request_count_today 是后端真实
+      // 请求计数（rag_service 24h 滚动窗口检索数，字段名即今日请求）——
+      // 替代此前 total_sessions 顶替的谎言口径。
+      adminStats.value.totalRequests = llmRes.data.request_count_today || 0
     }
 
     const ragRes = await getRAGStats()
