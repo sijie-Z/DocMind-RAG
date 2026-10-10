@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict
@@ -344,55 +344,7 @@ async def batch_delete_notifications(
     return {"message": "批量删除成功", "deleted": int(result.rowcount or 0)}
 
 # --- Internal Helpers ---
-async def create_notification(
-    db: AsyncSession,
-    user_id: int,
-    title: str,
-    content: str,
-    type: str = "system",
-    target_route: str | None = None,
-    target_id: str | None = None,
-):
-    """创建通知（内部使用）并推送实时消息，同一 title+user 1 分钟内去重"""
-    from sqlalchemy import and_, select
-
-    cutoff = datetime.now(UTC) - timedelta(minutes=1)
-    existing = (
-        await db.execute(
-            select(Notification).where(
-                and_(
-                    Notification.user_id == user_id,
-                    Notification.title == title,
-                    Notification.created_at >= cutoff,
-                )
-            ).limit(1)
-        )
-    ).scalar_one_or_none()
-
-    if existing:
-        return existing
-
-    notification = Notification(
-        user_id=user_id,
-        title=title,
-        content=content,
-        type=type,
-        target_route=target_route,
-        target_id=target_id,
-    )
-    db.add(notification)
-    await db.commit()
-    await db.refresh(notification)
-
-    await notification_ws_manager.push(user_id, {
-        "id": notification.id,
-        "title": notification.title,
-        "content": notification.content,
-        "type": notification.type,
-        "is_read": notification.is_read,
-        "created_at": notification.created_at.isoformat() if notification.created_at else None,
-        "target_route": target_route,
-        "target_id": target_id,
-    })
-
-    return notification
+# create_notification 已下沉到 app/services/notification_service.py（agent 运行侧
+# 也要用它，端点模块不应被运行侧反向依赖）；此处同名 re-export 保持既有调用方
+# （users / organizations / knowledge 等从本模块导入）零改动。
+from app.services.notification_service import create_notification  # noqa: F401
