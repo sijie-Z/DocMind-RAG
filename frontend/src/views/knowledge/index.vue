@@ -447,6 +447,7 @@ import {
 import type { KnowledgeBase } from '@/api/knowledge'
 import { formatDate } from '@/utils/format'
 import { getRagMetrics, type RagMetrics } from '@/api/rag'
+import { useUserStore } from '@/stores/user'
 import KnowledgeUploadPanel from './components/KnowledgeUploadPanel.vue'
 import KnowledgeDetailModals from './components/KnowledgeDetailModals.vue'
 
@@ -465,6 +466,7 @@ interface UploadForm {
 const message = useDedupedMessage()
 const dialog = useDialog()
 const { t } = useI18n()
+const userStore = useUserStore()
 const loading = ref(false)
 const loadError = ref(false)
 const uploading = ref(false)
@@ -626,7 +628,10 @@ const handleBatchDelete = () => {
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       try {
-        await batchDeleteKnowledgeBases(selectedIds.value)
+        // A2：补 organization_id（后端 knowledge.py:642-646 对非超管强校验
+        // body.organization_id == 有效组织，缺省必 403）。口径照 search P1-2：
+        // 从 user store 取 currentOrgId；无组织时省略，由后端解析（超管语义）。
+        await batchDeleteKnowledgeBases(selectedIds.value, userStore.currentOrgId)
         message.success(t('common.deleteSuccess'))
         selectedIds.value = []
         await loadKnowledgeBases()
