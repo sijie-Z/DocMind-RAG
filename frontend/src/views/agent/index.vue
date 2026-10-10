@@ -223,7 +223,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useAgentStore } from '@/stores/agent'
 import { agentApi } from '@/api/agent'
 import { useDedupedMessage } from '@/utils/message'
-import type { AgentEvent, AgentChatMessage, PlanStep, ThinkingType } from '@/types/agent'
+import type { AgentEvent, AgentChatMessage, PlanStep, ThinkingType, AgentSession } from '@/types/agent'
 import { ThumbsUpOutline, ThumbsDownOutline } from '@vicons/ionicons5'
 
 import PlanTree from '@/components/agent/PlanTree.vue'
@@ -444,8 +444,11 @@ async function handleSessionChange(sessionId: string | null) {
   if (sessionId) {
     try {
       const res = await agentApi.getSession(sessionId)
-      if (res.data?.config) {
-        agentStore.updateConfig(res.data.config)
+      // 真载荷在 data.data.config（agent.py:637-647 的 {success, data:{…,config}}）；
+      // 旧读 res.data.config 恒 undefined → 会话配置静默 no-op（B25）
+      const detail = res.data?.data
+      if (detail?.config) {
+        agentStore.updateConfig(detail.config)
       }
     } catch (e) {
       message.error('加载会话失败')
@@ -469,9 +472,16 @@ async function handleSessionDelete(sessionId: string) {
 async function handleNewSession() {
   try {
     const res = await agentApi.createSession('New Agent Session')
-    if (res.data) {
-      agentStore.setSessions([res.data, ...agentStore.sessions])
-      agentStore.setCurrentSession(res.data.id)
+    // 创建端点只回 {success, data:{id, title}}（agent.py:585-591），真载荷在
+    // data.data；旧实现把整个信封当会话对象 → 幻影「Untitled ()」项（选中即
+    // 404）、currentSessionId 失效（B26）
+    const session = res.data?.data
+    if (session?.id) {
+      agentStore.setSessions([
+        { ...session, message_count: 0, created_at: '', updated_at: '' } as AgentSession,
+        ...agentStore.sessions,
+      ])
+      agentStore.setCurrentSession(session.id)
       message.success('已创建新会话')
     }
   } catch (e) {
@@ -511,11 +521,16 @@ async function loadInit() {
       agentApi.listSessions(),
       agentApi.getConfig(),
     ])
-    const toolsData = toolsRes.data
-    const sessionsData = sessionsRes.data
-    const configData = configRes.data
+    // 三个端点均为 {success, data} 信封（agent.py:450-472 工具数组在 data、
+    // :500-556 会话在 data.sessions、:696-710 配置在 data）——真载荷在
+    // res.data.data（axios body 再一层 data）。旧实现把信封当载荷 →
+    // 工具列表永不下发（「工具: 0/0」）、会话下拉恒空、整信封写入
+    // store.config（B22/B23/B24，同族嵌套漂移）
+    const toolsData = toolsRes.data?.data
+    const sessionsData = sessionsRes.data?.data
+    const configData = configRes.data?.data
     if (Array.isArray(toolsData)) agentStore.tools = toolsData
-    if (sessionsData?.sessions) agentStore.setSessions(sessionsData.sessions)
+    if (Array.isArray(sessionsData?.sessions)) agentStore.setSessions(sessionsData.sessions)
     if (configData && typeof configData === 'object') agentStore.updateConfig(configData)
   } catch (e) {
     initError.value = true
