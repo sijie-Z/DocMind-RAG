@@ -133,3 +133,117 @@ async def test_mark_failed_writes_document_and_job_failed(monkeypatch):
     assert job.error_message == "boom"
     assert job.finished_at is not None
     assert len(commits) == 2, "doc 与 job 各提交一次（两次独立 session）"
+
+
+# ── 图片 OCR 链路（worker 级；仅引擎与边界服务用替身）────────────────
+
+def _make_image_doc(tmp_path, monkeypatch, engine_result):
+    """搭好图片链路：本地 PNG + 引擎替身 + MinIO 下载替身。
+
+    路径含 '/'，两个平台都会走 parse_document 的 MinIO 分支 —— fget_object
+    被替身覆盖为"从本地拷贝到解析层临时文件"，从而在不联网的情况下把
+    「下载 → 格式分发 → _parse_image」整条真链路跑通。
+    """
+    import shutil
+
+    import app.services.document_parser as parser_mod
+    from PIL import Image
+
+    png = tmp_path / "photo.png"
+    Image.linear_gradient("L").convert("RGB").resize((320, 200)).save(str(png))
+
+    class _FakeEngine:
+        def __call__(self, img, **kwargs):
+            return engine_result
+
+    monkeypatch.setattr(parser_mod, "_get_ocr_engine", lambda: _FakeEngine())
+    monkeypatch.setattr(
+        "app.core.minio_client.minio_client.fget_object",
+        lambda bucket, name, dest: shutil.copyfile(str(png), dest),
+    )
+
+    return SimpleNamespace(
+        id="doc-img",
+        file_path=tmp_path.as_posix() + "/photo.png",
+        organization_id="org-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_image_document_zero_text_marks_failed(monkeypatch, tmp_path):
+    """引擎检测不到文字 → worker 必须判 False 且 FAILED 原因含「未识别到文字」。
+
+    这是 #301 诚实语义在图片链路上的落点：照片类图片不许被伪装成有内容的
+    INDEXED（既不是 INDEXED，也不是含糊的通用解析错误）。
+    """
+    doc = _make_image_doc(tmp_path, monkeypatch, engine_result=(None, None))
+
+    processor = DocumentProcessor()
+    failed = {}
+
+    async def fake_lock(_document_id):
+        return True
+
+    async def fake_load(_document_id, _job_id):
+        return doc
+
+    async def fake_failed(_document_id, error, _job_id):
+        failed["error"] = error
+
+    async def fake_release(_document_id):
+        pass
+
+    monkeypatch.setattr(processor, "_acquire_processing_lock", fake_lock)
+    monkeypatch.setattr(processor, "_load_and_mark_parsing", fake_load)
+    monkeypatch.setattr(processor, "_mark_failed", fake_failed)
+    monkeypatch.setattr(processor, "_release_processing_lock", fake_release)
+
+    ok = await processor.process("doc-img")
+
+    assert ok is False
+    assert "未识别到文字" in failed["error"]
+
+
+@pytest.mark.asyncio
+async def test_process_image_document_success_path_feeds_chunks(monkeypatch, tmp_path):
+    """引擎识别出文字 → OCR 文本进入 chunks/嵌入/索引替换链路，process 判 True。"""
+    engine_result = (
+        [[[[10, 10], [300, 10], [300, 50], [10, 50]], "文档图像识别文本", 0.93]],
+        [0.05],
+    )
+    doc = _make_image_doc(tmp_path, monkeypatch, engine_result=engine_result)
+
+    processor = DocumentProcessor()
+    captured = {}
+
+    async def fake_lock(_document_id):
+        return True
+
+    async def fake_load(_document_id, _job_id):
+        return doc
+
+    async def fake_embeddings(texts):
+        captured["texts"] = texts
+        return [[1.0]] * len(texts)
+
+    async def fake_replace(_doc, chunks_data, _embeddings):
+        captured["chunks"] = chunks_data
+
+    async def fake_success(_document_id, _chunks_data, _job_id):
+        pass
+
+    async def fake_release(_document_id):
+        pass
+
+    monkeypatch.setattr(processor, "_acquire_processing_lock", fake_lock)
+    monkeypatch.setattr(processor, "_load_and_mark_parsing", fake_load)
+    monkeypatch.setattr(processor, "_get_embeddings", fake_embeddings)
+    monkeypatch.setattr(processor, "_replace_document_state", fake_replace)
+    monkeypatch.setattr(processor, "_mark_success", fake_success)
+    monkeypatch.setattr(processor, "_release_processing_lock", fake_release)
+
+    ok = await processor.process("doc-img")
+
+    assert ok is True
+    assert any("文档图像识别文本" in c["chunk_text"] for c in captured["chunks"])
+    assert any("文档图像识别文本" in t for t in captured["texts"])
