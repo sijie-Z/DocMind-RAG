@@ -73,7 +73,7 @@ import CodeNode from '../nodes/CodeNode.vue'
 import ApiNode from '../nodes/ApiNode.vue'
 import TransformNode from '../nodes/TransformNode.vue'
 import { useWorkflowStore } from '@/stores/workflow'
-import { getNodeDefinitions, getWorkflow } from '@/api/workflow'
+import { getNodeDefinitions, getWorkflow, executeWorkflow } from '@/api/workflow'
 
 const Host = defineComponent({
   setup() {
@@ -200,5 +200,87 @@ describe('workflow/editor 画布节点组件注册（C_polish「九节点 import
         `${slotName} 未解析到真实组件（组件未 import 注册）`
       ).toBe(true)
     }
+  })
+})
+
+describe('workflow/editor 调试执行链路（B8-B10 契约回归）', () => {
+  it('非流式真实响应（completed/duration）→ 成功判定 + 进度 100% + 最终输出上屏（修复前词表漂移恒判失败）', async () => {
+    const wrapper = await mountEditor()
+    const editorVm = wrapper.findComponent(WorkflowEditor).vm as unknown as {
+      executeWorkflow: () => Promise<void>
+      testInput: string
+      executionStatus: string
+      executionProgress: number
+    }
+
+    const store = useWorkflowStore()
+    store.currentWorkflowId = 5
+    store.workflowName = '测试流程'
+    editorVm.testInput = '测试输入'
+
+    // 真实响应形状：workflow.py:399-407 { success, data: { execution_id, status,
+    // output: 引擎总体结果, node_results: [NodeResult…] } }；
+    // 节点状态 completed、时长键 duration（schemas/workflow.py:74-86）
+    vi.mocked(executeWorkflow).mockResolvedValueOnce({
+      data: {
+        data: {
+          execution_id: 9,
+          status: 'completed',
+          output: {
+            success: true,
+            output: '最终答案',
+            node_outputs: {},
+            context: {},
+            memory: {},
+          },
+          node_results: [
+            { node_id: 'input_1', node_type: 'input', status: 'completed', output: { text: 'hi' }, duration: 12 },
+            { node_id: 'llm_1', node_type: 'llm_deepseek', status: 'completed', output: { content: 'x' }, duration: 340 },
+          ],
+        },
+      },
+    } as never)
+
+    await editorVm.executeWorkflow()
+    await nextTick()
+
+    expect(executeWorkflow).toHaveBeenCalledWith(5, { text: '测试输入' })
+    expect(store.executionResults.map(r => r.status)).toEqual(['completed', 'completed'])
+    expect(editorVm.executionStatus).toBe('success')
+    expect(editorVm.executionProgress).toBe(100)
+    expect(store.finalOutput).toBe('最终答案')
+    expect(store.executionLogs.some(l => l.includes('✅') && l.includes('完成'))).toBe(true)
+  })
+
+  it('引擎总体 success=false（节点失败上浮）→ 不谎报成功：❌ 日志 + 无最终输出', async () => {
+    const wrapper = await mountEditor()
+    const editorVm = wrapper.findComponent(WorkflowEditor).vm as unknown as {
+      executeWorkflow: () => Promise<void>
+      testInput: string
+    }
+    const store = useWorkflowStore()
+    store.currentWorkflowId = 5
+    store.workflowName = '测试流程'
+    editorVm.testInput = '测试输入'
+
+    vi.mocked(executeWorkflow).mockResolvedValueOnce({
+      data: {
+        data: {
+          execution_id: 10,
+          status: 'failed',
+          output: { success: false, error: '节点 llm_1 执行失败: 超时', node_outputs: {} },
+          node_results: [
+            { node_id: 'llm_1', node_type: 'llm_deepseek', status: 'failed', error: '超时', duration: 30000 },
+          ],
+        },
+      },
+    } as never)
+
+    await editorVm.executeWorkflow()
+    await nextTick()
+
+    expect(store.executionResults[0].status).toBe('failed')
+    expect(store.finalOutput).toBeNull()
+    expect(store.executionLogs.some(l => l.includes('❌'))).toBe(true)
   })
 })

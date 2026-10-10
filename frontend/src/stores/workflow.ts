@@ -7,7 +7,9 @@ export type { WorkflowNode, WorkflowEdge }
 export interface NodeExecutionResult {
   nodeId: string
   nodeType: string
-  status: 'pending' | 'running' | 'success' | 'failed'
+  // 与引擎 ExecutionStatus 对齐（workflow_engine.py:37-42）：成功态为 completed。
+  // 旧词表 'success' 使成功节点在进度/图标/文案处恒判失败（B10）。
+  status: 'pending' | 'running' | 'completed' | 'failed'
   input?: Record<string, unknown>
   output?: Record<string, unknown>
   error?: string
@@ -33,7 +35,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const isExecuting = ref(false)
   const executionResults = ref<NodeExecutionResult[]>([])
   const executionLogs = ref<string[]>([])
-  const finalOutput = ref<Record<string, unknown> | null>(null)
+  const finalOutput = ref<Record<string, unknown> | string | null>(null)
 
   // LLM 配置
   const llmConfig = ref({
@@ -120,7 +122,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     }
   }
 
-  const setExecutionComplete = (output: Record<string, unknown> | null) => {
+  const setExecutionComplete = (output: Record<string, unknown> | string | null) => {
     isExecuting.value = false
     finalOutput.value = output
   }

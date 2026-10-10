@@ -331,17 +331,19 @@ const finalOutput = computed(() => workflowStore.finalOutput)
 const executionStatus = computed(() => {
   if (executionResults.value.length === 0) return 'idle'
   if (executionResults.value.some(r => r.status === 'failed')) return 'failed'
-  if (executionResults.value.every(r => r.status === 'success')) return 'success'
+  // 引擎成功态为 "completed"（ExecutionStatus，workflow_engine.py:37-42）——
+  // 旧代码按 'success' 判定导致成功节点恒判失败（B10 词表漂移）
+  if (executionResults.value.every(r => r.status === 'completed')) return 'success'
   return 'running'
 })
 
 const executionProgress = computed(() => {
   if (executionResults.value.length === 0) return 0
-  const completed = executionResults.value.filter(r => r.status === 'success').length
+  const completed = executionResults.value.filter(r => r.status === 'completed').length
   return Math.round((completed / executionResults.value.length) * 100)
 })
 
-const completedNodes = computed(() => executionResults.value.filter(r => r.status === 'success').length)
+const completedNodes = computed(() => executionResults.value.filter(r => r.status === 'completed').length)
 
 const statusText = computed(() => {
   const map: Record<string, string> = {
@@ -794,25 +796,33 @@ const executeWorkflow = async () => {
     if (result?.node_results) {
       for (const nodeResult of result.node_results) {
         executingNodeId.value = nodeResult.node_id
-        const status = nodeResult.status || 'success'
-        const icon = status === 'success' ? '✅' : status === 'failed' ? '❌' : '📊'
+        // 引擎状态词表：成功态为 completed（ExecutionStatus，workflow_engine.py:37-42）；
+        // 旧代码按 'success' 判定导致成功节点恒被判失败（B10 词表漂移）
+        const status = nodeResult.status || 'completed'
+        const icon = status === 'completed' ? '✅' : status === 'failed' ? '❌' : '📊'
         workflowStore.updateNodeExecution({
           nodeId: nodeResult.node_id,
           nodeType: nodeResult.node_type,
           status,
           output: nodeResult.output,
-          duration: nodeResult.duration
+          duration: nodeResult.duration ?? undefined
         })
-        workflowStore.addExecutionLog(`${icon} [${getNodeLabel(nodeResult.node_type)}] ${status === 'success' ? '完成' : '失败'} (${nodeResult.duration || 0}ms)`)
+        workflowStore.addExecutionLog(`${icon} [${getNodeLabel(nodeResult.node_type)}] ${status === 'completed' ? '完成' : status === 'failed' ? '失败' : String(status)} (${nodeResult.duration ?? 0}ms)`)
       }
     }
 
-    if (result?.output) {
-      workflowStore.setExecutionComplete(result.output)
-      workflowStore.addExecutionLog('✅ 工作流执行成功!')
+    // 非流式响应（workflow.py:399-407）：data.output 为引擎总体结果
+    // { success, output, node_outputs, context, memory }（workflow_engine.py execute()）。
+    // 节点失败时 success=false 且带 error 摘要（issue #301 批 A #5），须如实上浮。
+    const engineResult = (result?.output ?? {}) as { success?: boolean; output?: unknown; error?: string }
+    if (engineResult.success === false) {
+      workflowStore.setExecutionComplete(null)
+      workflowStore.addExecutionLog(`❌ 执行失败: ${engineResult.error || '工作流节点执行失败'}`)
+      message.error('执行失败')
     } else {
-      workflowStore.setExecutionComplete(result)
-      workflowStore.addExecutionLog('✅ 工作流执行完成')
+      const finalOut = engineResult.output !== undefined ? engineResult.output : result?.output
+      workflowStore.setExecutionComplete((finalOut ?? null) as Record<string, unknown> | string | null)
+      workflowStore.addExecutionLog('✅ 工作流执行成功!')
     }
 
   } catch (error: unknown) {

@@ -731,11 +731,11 @@
                   <div class="flex items-center justify-between w-full pr-4">
                     <span class="flex items-center gap-2">
                       <n-spin v-if="result.status === 'running'" size="small" />
-                      <n-icon v-else-if="result.status === 'success'" class="text-green-500"><CheckmarkCircleOutline /></n-icon>
+                      <n-icon v-else-if="result.status === 'completed'" class="text-green-500"><CheckmarkCircleOutline /></n-icon>
                       <n-icon v-else-if="result.status === 'failed'" class="text-red-500"><CloseCircleOutline /></n-icon>
                       <span class="text-sm">{{ getNodeLabel(result.nodeType) }}</span>
                     </span>
-                    <n-tag v-if="result.duration" size="small" :type="result.status === 'success' ? 'success' : result.status === 'failed' ? 'error' : 'info'">
+                    <n-tag v-if="result.duration" size="small" :type="result.status === 'completed' ? 'success' : result.status === 'failed' ? 'error' : 'info'">
                       {{ result.duration }}ms
                     </n-tag>
                   </div>
