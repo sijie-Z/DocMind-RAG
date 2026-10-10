@@ -191,7 +191,7 @@
                         <div class="w-10 h-10 rounded-lg bg-gray-50 dark:bg-gray-900 flex-shrink-0 flex items-center justify-center">
                           <n-icon size="24" :color="getFileIconColor(item.file_type)">
                             <DocumentTextOutline v-if="item.file_type === 'pdf'" />
-                            <DocumentOutline v-else-if="item.file_type === 'docx'" />
+                            <DocumentOutline v-else-if="item.file_type === 'word'" />
                             <DocumentAttachOutline v-else />
                           </n-icon>
                         </div>
@@ -306,7 +306,7 @@
                          <div class="flex items-center gap-3">
                             <n-icon size="20" :color="getFileIconColor(item.file_type)">
                               <DocumentTextOutline v-if="item.file_type === 'pdf'" />
-                              <DocumentOutline v-else-if="item.file_type === 'docx'" />
+                              <DocumentOutline v-else-if="item.file_type === 'word'" />
                               <DocumentAttachOutline v-else />
                             </n-icon>
                             <div>
@@ -448,6 +448,7 @@ import type { KnowledgeBase } from '@/api/knowledge'
 import { formatDate } from '@/utils/format'
 import { getRagMetrics, type RagMetrics } from '@/api/rag'
 import { useUserStore } from '@/stores/user'
+import { docIconColor } from './docDisplay'
 import KnowledgeUploadPanel from './components/KnowledgeUploadPanel.vue'
 import KnowledgeDetailModals from './components/KnowledgeDetailModals.vue'
 
@@ -927,16 +928,7 @@ const getStatusLabel = (item: KnowledgeBase | null): string => {
   return '已完成'
 }
 
-const getFileIconColor = (fileType: string): string => {
-  const colors = {
-    pdf: '#ff6b6b',
-    docx: '#4dabf7',
-    doc: '#4dabf7',
-    txt: '#51cf66',
-    md: '#868e96'
-  }
-  return colors[fileType as keyof typeof colors] || '#868e96'
-}
+const getFileIconColor = (fileType: string): string => docIconColor(fileType)
 
 onMounted(() => {
   loadKnowledgeBases()

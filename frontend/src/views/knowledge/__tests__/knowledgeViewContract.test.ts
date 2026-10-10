@@ -130,8 +130,7 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('KnowledgeView · 批删组织组包（A2）', () => {
-  it('全链路：勾选 → 批量删除 → 确认 → 请求带 organization_id=3（userStore.currentOrgId）', async () => {
+describe('KnowledgeView · 批删组织组包（A2）', () => {  it('全链路：勾选 → 批量删除 → 确认 → 请求带 organization_id=3（userStore.currentOrgId）', async () => {
     mockedGetKnowledgeBases.mockResolvedValue(listResponse([REAL_DOC]) as never)
     mockedBatchDelete.mockResolvedValue(undefined as never)
 
@@ -183,5 +182,18 @@ describe('KnowledgeView · 批删组织组包（A2）', () => {
     await flushPromises()
 
     expect(mockedBatchDelete).toHaveBeenCalledWith(['doc-1'], null)
+  })
+})
+
+describe('KnowledgeView · file_type 图标配色（B15）', () => {
+  it('file_type=word（真实枚举）→ 卡片图标配色为 word 蓝 rgb(77,171,247)', async () => {
+    mockedGetKnowledgeBases.mockResolvedValue(listResponse([REAL_DOC]) as never)
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    const iconStyles = wrapper.findAll('.n-icon').map((n) => n.attributes('style') || '')
+    // 原配色表无 'word' 键 → 恒灰色兜底；修复后命中 #4dabf7 = rgb(77,171,247)
+    expect(iconStyles.some((s) => /77,\s*171,\s*247/.test(s))).toBe(true)
   })
 })
