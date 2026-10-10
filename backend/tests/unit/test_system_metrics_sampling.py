@@ -13,7 +13,10 @@
 - _load_samples 的 reversed() 还原 → 回填顺序用例红。
 """
 
+import asyncio
 import json
+from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -215,3 +218,85 @@ async def test_get_history_skips_corrupt_redis_entries(monkeypatch):
 
     history = await sampler.get_history()
     assert [point["timestamp"] for point in history] == [300]
+
+
+# ── 门控：ENABLE_MONITORING 关 → 采样不启动（复用既有 lifespan 门控语义）──
+
+
+@pytest.fixture
+def _lifespan_infra(monkeypatch):
+    """把 lifespan 的外部依赖全部打桩，只保留被测的开关与采样接线；保护 .backend-port。
+
+    与 test_issue242_settings_wiring._lifespan_infra 同款（#242 门控先例）。
+    """
+    from app import main as main_mod
+
+    for name in ("init_db", "init_redis", "init_elasticsearch", "close_redis", "close_db"):
+        monkeypatch.setattr(main_mod, name, AsyncMock())
+    monkeypatch.setattr(main_mod.kafka_producer, "start", AsyncMock())
+    monkeypatch.setattr(main_mod.kafka_producer, "stop", AsyncMock())
+    monkeypatch.setattr(main_mod, "es_client", None)
+    monkeypatch.setattr(
+        "app.services.permission_service.permission_service"
+        ".initialize_default_permissions_and_roles",
+        AsyncMock(),
+    )
+    monkeypatch.setattr("app.dependencies.wire_memory_embedding_provider", AsyncMock())
+    monkeypatch.setattr(main_mod.settings, "ENABLE_DEMO_ACCOUNT", False)
+
+    port_file = Path(main_mod.__file__).resolve().parent.parent / ".backend-port"
+    saved = port_file.read_text(encoding="utf-8") if port_file.exists() else None
+    yield
+    if saved is None:
+        port_file.unlink(missing_ok=True)
+    else:
+        port_file.write_text(saved, encoding="utf-8")
+
+
+def _patch_sampling_recorder(monkeypatch):
+    """把应用快照与系统采样都替换为记录器；返回系统采样调用列表。"""
+    from app import main as main_mod
+
+    calls: list[bool] = []
+
+    async def fake_record_sample():
+        calls.append(True)
+
+    monkeypatch.setattr(main_mod.metrics_collector, "take_snapshot", AsyncMock())
+    monkeypatch.setattr(main_mod.system_metrics_sampler, "record_sample", fake_record_sample)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_lifespan_skips_system_sampling_when_gate_off(monkeypatch, _lifespan_infra):
+    """ENABLE_MONITORING=false → 系统指标采样不运行（门控失效则本用例红）。"""
+    from app import main as main_mod
+
+    calls = _patch_sampling_recorder(monkeypatch)
+    monkeypatch.setattr(main_mod.settings, "ENABLE_MONITORING", False)
+
+    async with main_mod.lifespan(main_mod.app):
+        await asyncio.sleep(0.05)
+        assert calls == [], "ENABLE_MONITORING=false 时系统指标采样不应运行"
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_lifespan_runs_system_sampling_when_gate_on(monkeypatch, _lifespan_infra):
+    """ENABLE_MONITORING=true → 快照任务启动且周期内执行系统采样。"""
+    from app import main as main_mod
+
+    calls = _patch_sampling_recorder(monkeypatch)
+    monkeypatch.setattr(main_mod.settings, "ENABLE_MONITORING", True)
+
+    async with main_mod.lifespan(main_mod.app):
+        for _ in range(100):
+            if calls:
+                break
+            await asyncio.sleep(0.01)
+        assert calls == [True], "ENABLE_MONITORING=true 时系统指标采样应随快照任务启动"
+
+    # lifespan 退出已 cancel 任务；让事件循环把取消落定，避免 pending-task 噪音
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
