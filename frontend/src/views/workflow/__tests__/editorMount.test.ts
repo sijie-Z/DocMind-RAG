@@ -74,7 +74,7 @@ import CodeNode from '../nodes/CodeNode.vue'
 import ApiNode from '../nodes/ApiNode.vue'
 import TransformNode from '../nodes/TransformNode.vue'
 import { useWorkflowStore } from '@/stores/workflow'
-import { getNodeDefinitions, getWorkflow, executeWorkflowStream } from '@/api/workflow'
+import { getNodeDefinitions, getWorkflow, executeWorkflowStream, createWorkflow } from '@/api/workflow'
 
 const Host = defineComponent({
   setup() {
@@ -310,5 +310,24 @@ describe('workflow/editor 调试执行链路（流式接线 + B8-B10 契约回�
     expect(editorVm.executionStatus).toBe('failed')
     expect(editorVm.executing).toBe(false)
     expect(store.executionLogs.some(l => l.includes('❌'))).toBe(true)
+  })
+})
+
+describe('workflow/editor 保存载荷契约（B11）', () => {
+  it('保存不再发送后端没有的 engine_type（旧实现属静默不落库的假持久化）', async () => {
+    const wrapper = await mountEditor()
+    const editorVm = wrapper.findComponent(WorkflowEditor).vm as unknown as {
+      saveWorkflow: () => Promise<boolean>
+    }
+    const store = useWorkflowStore()
+    store.workflowName = '流程X'
+
+    await editorVm.saveWorkflow()
+
+    // currentWorkflowId 为空 → 走 createWorkflow 分支（真实载荷断言）
+    expect(createWorkflow).toHaveBeenCalledTimes(1)
+    const payload = vi.mocked(createWorkflow).mock.calls[0][0] as Record<string, unknown>
+    expect(payload.name).toBe('流程X')
+    expect('engine_type' in payload).toBe(false)
   })
 })

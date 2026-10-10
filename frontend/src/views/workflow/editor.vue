@@ -175,7 +175,16 @@
       <div class="h-14 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
         <div class="flex items-center gap-3">
           <n-input v-model:value="workflowStore.workflowName" placeholder="工作流名称" style="width: 200px" />
-          <n-select v-model:value="engineType" :options="engineTypeOptions" style="width: 140px" size="small" />
+          <!-- 引擎选择器暂未接入：后端无 engine_type 字段（B11），禁用并明示，
+               不再做出「可保存」的暗示 -->
+          <n-tooltip trigger="hover">
+            <template #trigger>
+              <span class="inline-block">
+                <n-select v-model:value="engineType" :options="engineTypeOptions" style="width: 140px" size="small" disabled />
+              </span>
+            </template>
+            引擎选择暂未接入后端（无对应字段），当前统一走默认引擎
+          </n-tooltip>
           <n-button type="primary" @click="saveWorkflow" :loading="saving">
             <template #icon><n-icon><SaveOutline /></n-icon></template>
             保存

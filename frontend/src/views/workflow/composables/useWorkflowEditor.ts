@@ -715,17 +715,18 @@ const saveWorkflow = async () => {
     const flowData = workflowStore.getFlowData() as unknown as WorkflowConfig
 
     if (workflowStore.currentWorkflowId) {
+      // B11 契约对齐：后端 WorkflowUpdate/Workflow 模型均无 engine_type 字段
+      // （models/workflow.py、schemas/workflow.py:45-51），旧实现随载荷发送属
+      // 「静默不落库」的假持久化——不再发送
       await updateWorkflow(workflowStore.currentWorkflowId, {
         name: workflowStore.workflowName,
         flow_data: flowData,
-        engine_type: engineType.value,
-      } as any)
+      })
     } else {
       const res = await createWorkflow({
         name: workflowStore.workflowName,
         flow_data: flowData,
-        engine_type: engineType.value,
-      } as any)
+      })
       workflowStore.currentWorkflowId = res.data?.data?.id
       // Update URL without navigation
       if (workflowStore.currentWorkflowId) {
@@ -752,8 +753,7 @@ const autoSave = () => {
       await updateWorkflow(workflowStore.currentWorkflowId, {
         name: workflowStore.workflowName,
         flow_data: flowData,
-        engine_type: engineType.value,
-      } as any)
+      })
       console.log('[auto-save] 工作流已自动保存')
     } catch {
       // Auto-save failures are silent
@@ -910,7 +910,8 @@ async function loadWorkflowById(id: number) {
     const workflow = res.data?.data
     if (workflow) {
       workflowStore.loadWorkflow(workflow)
-      if (workflow.engine_type) engineType.value = workflow.engine_type as 'dag' | 'langgraph'
+      // B11：详响应无 engine_type（workflow.py:121-132），旧读点恒 undefined——
+      // 移除；选择器保留为本地展示态（见模板 disabled 提示）
       router.replace({ query: { id: String(id) } })
       message.success('工作流加载成功')
     }
