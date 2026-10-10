@@ -9,6 +9,7 @@ export default {
     error: 'エラー',
     failed: '失敗',
     noData: 'データなし',
+    refresh: '更新',
     saveSuccess: '保存に成功しました',
     deleteSuccess: '削除に成功しました',
   },
@@ -366,7 +367,10 @@ export default {
     time: '時間',
     user: 'ユーザー',
     action: '操作',
-    detail: '詳細'
+    detail: '詳細',
+    loadFailed: '読み込みに失敗しました',
+    loadFailedDesc: 'ダッシュボードデータの読み込みに失敗しました。再試行してください。',
+    retry: '再試行'
   },
   monitoring: {
     title: 'システム監視',

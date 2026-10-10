@@ -9,6 +9,7 @@ export default {
     error: 'Erreur',
     failed: 'Échec',
     noData: 'Aucune donnée',
+    refresh: 'Actualiser',
     saveSuccess: 'Enregistré avec succès',
     deleteSuccess: 'Supprimé avec succès',
   },
@@ -366,7 +367,10 @@ export default {
     time: 'Heure',
     user: 'Utilisateur',
     action: 'Action',
-    detail: 'Détail'
+    detail: 'Détail',
+    loadFailed: 'Échec du chargement',
+    loadFailedDesc: 'Impossible de charger les données du tableau de bord. Veuillez réessayer.',
+    retry: 'Réessayer'
   },
   monitoring: {
     title: 'Surveillance Système',

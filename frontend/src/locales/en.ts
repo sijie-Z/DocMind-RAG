@@ -9,6 +9,7 @@ export default {
     error: 'Error',
     failed: 'Failed',
     noData: 'No Data',
+    refresh: 'Refresh',
     saveSuccess: 'Saved successfully',
     deleteSuccess: 'Deleted successfully',
     close: 'Close',
@@ -348,7 +349,12 @@ export default {
     batchRetryFailed: 'Batch retry submission failed, please try again later',
     deleteFailed: 'Delete failed',
     deleteConfirm: 'Are you sure you want to delete this document? It will be removed from the knowledge base and cannot be recovered.',
-    batchDeleteConfirm: 'Are you sure you want to delete the selected {count} documents? This action cannot be undone.'
+    batchDeleteConfirm: 'Are you sure you want to delete the selected {count} documents? This action cannot be undone.',
+    graph: {
+      emptyTitle: 'No graph data yet',
+      emptyDesc: 'Upload documents and complete indexing, and the knowledge graph will be built automatically',
+      loadFailed: 'Failed to load graph data, please try again later'
+    }
   },
   prompts: {
     title: 'Prompt Management',
@@ -484,7 +490,10 @@ export default {
     time: 'Time',
     user: 'User',
     action: 'Action',
-    detail: 'Detail'
+    detail: 'Detail',
+    loadFailed: 'Load Failed',
+    loadFailedDesc: 'Failed to load dashboard data, please try again.',
+    retry: 'Retry'
   },
   monitoring: {
     title: 'System Monitoring',

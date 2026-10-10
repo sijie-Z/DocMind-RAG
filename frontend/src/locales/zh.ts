@@ -366,7 +366,12 @@ export default {
     batchRetryFailed: '批量重试提交失败，请稍后再试',
     deleteFailed: '删除失败',
     deleteConfirm: '确定要删除此文档吗？文档将从知识库中移除，不可恢复。',
-    batchDeleteConfirm: '确定要删除选中的 {count} 个文档吗？此操作不可恢复。'
+    batchDeleteConfirm: '确定要删除选中的 {count} 个文档吗？此操作不可恢复。',
+    graph: {
+      emptyTitle: '暂无图谱数据',
+      emptyDesc: '上传文档并完成索引后，系统会自动构建知识图谱',
+      loadFailed: '图谱数据加载失败，请稍后重试'
+    }
   },
   prompts: {
     title: '提示词管理',
@@ -503,7 +508,10 @@ export default {
     time: '时间',
     user: '用户',
     action: '操作',
-    detail: '详情'
+    detail: '详情',
+    loadFailed: '加载失败',
+    loadFailedDesc: '仪表盘数据加载失败，请重试',
+    retry: '重试'
   },
   monitoring: {
     title: '系统运行监控',
