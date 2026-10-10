@@ -218,4 +218,16 @@ describe('useWorkflowStore', () => {
     expect(flowData.nodes[0].id).toBe('a')
     expect(flowData.edges[0].source).toBe('a')
   })
+
+  it('getFlowData 保留边 label（条件路由键，B12）；不携带后端将剥离的 animated（B13）', () => {
+    const store = useWorkflowStore()
+    store.setEdges([{ ...makeEdge('e1', 'a', 'b'), label: 'yes' }])
+    const flowData = store.getFlowData()
+    // label：WorkflowEdge schema 唯一保留的附加字段（schemas/workflow.py:28），
+    // 引擎条件路由读 edge.label（workflow_engine.py:886-890）——漏发则静默错路由
+    expect(flowData.edges[0].label).toBe('yes')
+    // animated：后端 WorkflowEdge 无该字段（无 extra=allow，保存即剥离），
+    // 渲染侧由 VueFlow defaultEdgeOptions 兜底 —— 序列化不再伪装可持久化
+    expect('animated' in flowData.edges[0]).toBe(false)
+  })
 })
