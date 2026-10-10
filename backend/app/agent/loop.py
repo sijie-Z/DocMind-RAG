@@ -18,7 +18,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from app.agent import approval, checkpoint
+from app.agent import approval, checkpoint, steering
 from app.agent.config import AgentConfig
 from app.agent.context import ContextEngine
 from app.agent.events import AgentEvent
@@ -395,10 +395,12 @@ class PERAgentLoop:
                     ]
                 raw_steering = run_state.get("steering")
                 if isinstance(raw_steering, list):
-                    self.human_guidance = "\n".join(
-                        str(s).strip() for s in raw_steering
-                        if isinstance(s, str) and str(s).strip()
-                    )[:2000]
+                    # 保序 + 保最新（compose_guidance）：多暂停周期/多轮转向下
+                    # 超限时舍弃最旧的整条，绝不半句截断、绝不丢最新一句。
+                    self.human_guidance = steering.compose_guidance(
+                        [s.strip() for s in raw_steering
+                         if isinstance(s, str) and s.strip()]
+                    )
                 if frozen_history is not None:
                     # history 在首快照时冻结：resume 不重读会话新消息（否则等于换上下文续跑）。
                     history = frozen_history
@@ -467,7 +469,8 @@ class PERAgentLoop:
             if isinstance(raw_steering, list) else []
         )
         if cleaned_steering:
-            run_state_live["steering"] = cleaned_steering
+            # 快照只保留最近若干条（注入用全量 compose；历史只为 resume 保真）。
+            run_state_live["steering"] = cleaned_steering[-steering.STEERING_HISTORY_CAP:]
         else:
             run_state_live.pop("steering", None)
         run_state_live["execution_mode"] = self._execution_mode
@@ -483,6 +486,18 @@ class PERAgentLoop:
                 "run_state": run_state_live,
                 "session_id": session_id or "",
             }
+            # resume：先把快照里的计划挂上活引用——run 起点消费转向消息会落一次
+            # 快照，plan 仍为 None 会把既有计划从快照里抹掉（静默降级为"从规划
+            # 阶段重跑"）。首轮 while 里同样会挂（此处提前，幂等）。
+            if resume_plan is not None:
+                self.checkpoint_live["plan"] = resume_plan
+
+        # ── A: 运行中转向（steering）—— run 起点并入等待中的指导 ─────────────
+        # resume（含审批暂停/计划审批后恢复）时把暂停期间暂存于队列的 steer 并入
+        # 注入引导；与 modified_instruction 的 run_state["steering"] 通道在此合流。
+        # chat 起点通常为空（队列无消息 → 零产出）。
+        async for steer_event in self._consume_steering(run_state_live):
+            yield steer_event
 
         # ── Phase 1–3: 规划 → 执行 → 反思（含有界重新规划）────────────────
         # issue #106 §5a：reflector 的 "replan" 判定此前只被记录、从不执行
@@ -567,6 +582,14 @@ class PERAgentLoop:
                                 self.checkpoint_live["partial_output"] = partial_prefix + pass_output
                         elif event.type == "execution_step_result" and event.content:
                             execution_output += event.content
+                        elif event.type == "thinking" and event.plan_step_status in ("completed", "failed"):
+                            # ── A: 步边界消费转向消息（下一步生效）──────────────
+                            # 本循环体在消费者请求下一事件时先于 executor 的下一
+                            # __anext__ 恢复——这里写入 executor.human_guidance
+                            # 必然被下一步的提示词构建读到；暂停/取消（pending_control
+                            # 置位）时 executor 已抛出，走不到本分支。
+                            async for steer_event in self._consume_steering(run_state_live):
+                                yield steer_event
                 except approval.ApprovalRequired as req:
                     # 审批暂停：快照与任务态已由审批回调持久化（waiting_approval）；
                     # 本 run 平静结束——绝不给 service 任何"完成"信号，也不置终态。
@@ -1023,6 +1046,41 @@ class PERAgentLoop:
         executor.human_guidance = self.human_guidance
         executor.approval_degraded = False
         executor.pending_control = ""
+
+    async def _consume_steering(
+        self, run_state_live: dict[str, Any],
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """消费队列中的转向消息（run 起点 / 步边界调用；见 steering.py）。
+
+        - 未接 checkpoint（无队列可写）或通道不可用 / 无消息 → 零产出，绝不打扰执行；
+        - 有消息：并入注入引导（保序、保最新、总量有界）→ 追加进快照
+          run_state["steering"] 活引用 → **落一次快照**——drain 已把消息从队列
+          取走，不落盘会在崩溃时造成"已消费但未生效"的静默丢失；
+        - 每条消息发一个 steer_applied 事件（content = 消息摘要，保序）。
+        """
+        if self.checkpoint_live is None:
+            return
+        messages = await steering.drain_steers(self._checkpoint_task_id or "")
+        if not messages:
+            return
+        history = run_state_live.get("steering")
+        cleaned = (
+            [s for s in history if isinstance(s, str) and s.strip()]
+            if isinstance(history, list) else []
+        )
+        cleaned = (cleaned + messages)[-steering.STEERING_HISTORY_CAP:]
+        run_state_live["steering"] = cleaned
+        self.human_guidance = steering.compose_guidance(cleaned)
+        if self._executor is not None:
+            # 执行期步边界：下一步的提示词构建立即读到新引导。
+            self._executor.human_guidance = self.human_guidance
+        await self._save_checkpoint("after_steer")
+        for message in messages:
+            yield AgentEvent(
+                type="steer_applied",
+                content=message,
+                task_id=self._checkpoint_task_id or "",
+            )
 
     async def _is_cancelled(self) -> bool:
         """取消旗查询；通道故障按"未取消"处理（取消通道打不坏正常执行）。"""

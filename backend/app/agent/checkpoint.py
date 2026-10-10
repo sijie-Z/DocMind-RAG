@@ -30,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
+from app.agent import steering
 from app.core.database import AsyncSessionLocal
 from app.core.log_safety import log_safe
 from app.core.redis import redis_client
@@ -339,6 +340,8 @@ async def mark_terminal(
                 if task is None:
                     return False
                 if task.status == to:
+                    # 幂等成功同样保证"终态 ⇒ 缓冲空"（防带外写入的迟到指导）。
+                    await steering.clear_steers(task_id)
                     return True
                 try:
                     task.transition(to)
@@ -359,6 +362,9 @@ async def mark_terminal(
                 continue
             break
         await release_task(task_id)
+        # A（steering）：终态清转向缓冲——指导不再有任何消费点（下一步边界
+        # 永不到来），留在队列里只会误导后续诊断；清失败不影响终态正确性。
+        await steering.clear_steers(task_id)
         return True
     logger.error(
         "mark_terminal 写入失败（已重试一次）：任务 %s 未能落到 %s，"
@@ -742,6 +748,8 @@ async def begin_resume(task_id: str, lease_seconds: int = LEASE_SECONDS) -> Agen
                     # 当前状态不可转 cancelled（理论不可达：上面的非终态都已放开边）
                     pass
                 await release_task(task_id)
+                # 终态收敛同样清转向缓冲（本路径绕过 mark_terminal 的清理）。
+                await steering.clear_steers(task_id)
                 raise TaskNotResumableError(
                     "任务已被取消，不可恢复",
                     detail={"task_id": task_id, "state": task.status.value},

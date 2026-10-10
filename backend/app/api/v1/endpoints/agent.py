@@ -6,6 +6,7 @@ Endpoints:
     POST /api/v1/agent/tasks/{id}/resume — Resume an interrupted task (SSE, #201)
     POST /api/v1/agent/tasks/{id}/approval — HITL 审批应答 (SSE; approve/deny/改指令)
     POST /api/v1/agent/tasks/{id}/cancel   — HITL 协作式取消 (服务端停止协议)
+    POST /api/v1/agent/tasks/{id}/steer    — 运行中转向（有界队列；步边界注入）
     GET  /api/v1/agent/tools          — List available tools with status
     GET  /api/v1/agent/skills         — List learned skills
     GET  /api/v1/agent/sessions       — List agent sessions
@@ -28,7 +29,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent import checkpoint
+from app.agent import checkpoint, steering
 from app.agent.config import DEFAULT_DISABLED_TOOLS, AgentConfig
 from app.agent.registry import tool_registry
 from app.agent.service import agent_service
@@ -618,8 +619,80 @@ async def cancel_agent_task(
     )
 
 
-# ── Agent Feedback ──────────────────────────────────────────────────────
+# ── 运行中转向（mid-run steering；见 app/agent/steering.py）────────────────────
 
+
+class TaskSteerRequest(BaseModel):
+    message: str = Field(
+        ..., min_length=1, max_length=2000,
+        description="运行中指导：下一个步边界注入后续步骤提示词（不打断当前步骤）",
+    )
+
+
+@router.post("/tasks/{task_id}/steer")
+async def steer_agent_task(
+    task_id: str,
+    body: TaskSteerRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """运行中转向：向 running / waiting_approval 的任务发送一句人工指导。
+
+    语义（app/agent/steering.py 的模块契约）：
+    - 不打断当前步骤；loop 在**下一个步边界**（步骤终态之后）取出，注入后续
+      步骤提示词，并发 SSE ``steer_applied``（含消息摘要）；
+    - waiting_approval（无活跃 run）：消息留在队列，审批恢复的 run 起点并入
+      引导（与"改指令续跑"的 steering 通道合流）；
+    - 缓冲有界（MAX_STEER_QUEUE=5）：满 → 429 如实拒绝（等消费后再发）；
+      终态清缓冲。
+
+    - 200：已入队（data.pending = 当前待消费条数）；
+    - 403/404：与任务状态端点同纪律；
+    - 409：任务不在可转向状态（仅 running / waiting_approval）；
+    - 429：缓冲已满（STEER_BUFFER_FULL）；
+    - 503：协调存储不可达——**绝不**假装已受理（诚实边界同取消旗）。
+    """
+    effective_org_id = await require_organization(current_user, db)
+    task = await checkpoint.load_task(
+        task_id=task_id,
+        user_id=current_user.id,
+        organization_id=effective_org_id,
+    )
+    if task.status not in (TaskStatus.RUNNING, TaskStatus.WAITING_APPROVAL):
+        raise steering.TaskNotSteerableError(
+            f"任务当前状态为 {task.status.value}，不能接收运行中指导"
+            f"（仅 running / waiting_approval）",
+            detail={"task_id": task_id, "state": task.status.value},
+        )
+    pending = await steering.push_steer(task_id, body.message.strip())
+    if pending is None:
+        raise ServiceUnavailableError("转向通道暂不可用（协调存储不可达），请稍后重试")
+    if pending < 0:
+        raise steering.SteerBufferFullError(
+            f"转向缓冲已满（上限 {steering.MAX_STEER_QUEUE} 条），"
+            f"请等待 agent 消费后再发送",
+            detail={"task_id": task_id, "pending": steering.MAX_STEER_QUEUE},
+        )
+    if task.status == TaskStatus.WAITING_APPROVAL:
+        note = "任务正在等待审批；指导已入队，将并入审批恢复后的执行"
+    else:
+        note = "指导已入队；将在下一个步边界生效"
+    logger.info(
+        "转向入队 (task=%s, by=%s, pending=%d, state=%s)",
+        log_safe(task_id), current_user.id, pending, task.status.value,
+    )
+    return {
+        "success": True,
+        "data": {
+            "task_id": task_id,
+            "state": "queued",
+            "pending": pending,
+            "message": note,
+        },
+    }
+
+
+# ── Agent Feedback ──────────────────────────────────────────────────────
 class AgentFeedbackRequest(BaseModel):
     message_id: str = Field(..., description="Assistant message ID to rate")
     feedback: int = Field(..., ge=-1, le=1, description="反馈: 1=点赞, 0=取消, -1=点踩")

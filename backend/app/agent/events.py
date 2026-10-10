@@ -37,8 +37,11 @@ EventType = Literal[
     #   approval_required — 执行器停在审批点（工具未执行），本流随后结束，
     #     任务态为 waiting_approval；人类经 POST /tasks/{id}/approval 应答。
     #   run_cancelled — 协作式取消在检查点被观察到；本 run 收敛为 cancelled。
+    #   steer_applied — 运行中转向（steering）消息在步边界被消费并注入后续
+    #     步骤提示词；content 为消息摘要。见 app/agent/steering.py。
     "approval_required",
     "run_cancelled",
+    "steer_applied",
 ]
 
 ThinkingType = Literal["reasoning", "planning", "evaluation", "correction"]
