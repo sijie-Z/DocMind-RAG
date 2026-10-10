@@ -38,6 +38,7 @@ _TEST_ENV = {
     "EMBEDDING_API_KEY": "test-key",
     "ENABLE_RATE_LIMIT": "false",
     "ENABLE_MONITORING": "false",
+    "ENABLE_SCHEDULER": "false",
     "PROMETHEUS_ENABLED": "true",
     "SANDBOX_MODE": "ast",  # force AST sandbox in tests (no Docker dependency)
 }
