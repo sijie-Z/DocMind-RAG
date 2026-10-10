@@ -28,6 +28,7 @@ class _FakeRedis:
         self.data: dict[str, str] = {}
         self.sets: dict[str, set[str]] = {}
         self.expires: list[tuple[str, int]] = []
+        self.setex_calls: list[tuple[str, int]] = []
 
     def __bool__(self):
         return True
@@ -36,6 +37,7 @@ class _FakeRedis:
         return self.data.get(key)
 
     async def setex(self, key, ttl, value):
+        self.setex_calls.append((key, ttl))
         self.data[key] = value
 
     async def sadd(self, key, member):
@@ -190,6 +192,29 @@ async def test_short_text_is_empty_but_marked(fake_redis):
         document_id="doc-empty", organization_id=1, text="太短", llm_client=None
     )
     assert r2 == {"status": "skipped", "entities": 0}, "零实体文档也不得反复重抽"
+
+
+async def test_persistence_ttl_is_30_days_and_marker_synced(fake_redis):
+    """图键与幂等标记共用 30 天 TTL（对齐 app/agent/experience/store.py 的
+    `setex(..., 86400 * 30, ...)` 先例）。
+
+    原 24h 对展示/使用场景太短：无新摄入的组织图会日常蒸发。两者同生共死，
+    过期后重跑回填 = 干净重建，语义不变。
+
+    变异点：把 _TTL_SECONDS 改回 86400（或标记侧 expire 不用同一常量）→ 本用例红。
+    """
+    service = GraphRAGService()
+    await service.build_graph_from_entities(
+        [{"entity": "DocMind", "type": "PRODUCT", "description": "", "relations": []}]
+    )
+    assert fake_redis.setex_calls, "保存图必须走 setex（带 TTL）"
+    assert fake_redis.setex_calls[-1] == ("rag:graph:1", 86400 * 30)
+
+    await service.mark_document_extracted("doc-1", 1)
+    assert fake_redis.expires, "标记必须设置 TTL"
+    assert fake_redis.expires[-1] == ("rag:graph:docs:1", 86400 * 30), (
+        "标记 TTL 必须与图 TTL 同步（同生共死，回填可重建）"
+    )
 
 
 async def test_redis_unavailable_degrades_without_crash(monkeypatch):

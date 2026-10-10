@@ -8,8 +8,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# 图数据与幂等标记共用同一 TTL：两者同生共死，过期后回填可整体重建（见 ingest_document）
-_TTL_SECONDS = 86400
+# 图数据与幂等标记共用同一 TTL：两者同生共死，过期后回填可整体重建（见 ingest_document）。
+# 取 30 天（对齐仓内先例 app/agent/experience/store.py 的 setex(..., 86400 * 30)）：
+# 原 24h 对展示/使用场景太短——无新摄入的组织图会日常蒸发；30 天仍是有界 TTL，
+# 防止孤儿组织键无限累积，过期后重跑回填脚本即干净重建。
+_TTL_SECONDS = 86400 * 30
 
 class GraphRAGService:
     def __init__(self):
