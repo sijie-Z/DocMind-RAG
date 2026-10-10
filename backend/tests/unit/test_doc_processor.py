@@ -55,6 +55,11 @@ async def test_process_reports_progress_at_stage_boundaries(monkeypatch, with_pr
     async def fake_release(document_id):
         events.append("release")
 
+    async def fake_graph(doc, chunks_data):
+        # 图谱抽取（a8a3d155）：INDEXED 之后的尽力而为步骤，不计入心跳阶段边界，
+        # 由 tests/unit/test_doc_processor_graph_wiring.py 专门覆盖。此处只隔离 I/O。
+        pass
+
     monkeypatch.setattr(processor, "_acquire_processing_lock", fake_lock)
     monkeypatch.setattr(processor, "_load_and_mark_parsing", fake_load)
     monkeypatch.setattr(processor.parser, "parse_document", fake_parse)
@@ -62,6 +67,7 @@ async def test_process_reports_progress_at_stage_boundaries(monkeypatch, with_pr
     monkeypatch.setattr(processor, "_replace_document_state", fake_replace)
     monkeypatch.setattr(processor, "_mark_success", fake_success)
     monkeypatch.setattr(processor, "_release_processing_lock", fake_release)
+    monkeypatch.setattr(processor, "_extract_graph_safely", fake_graph)
 
     on_progress = (lambda: events.append("beat")) if with_progress else None
     ok = await processor.process("doc-1", 7, on_progress=on_progress)
