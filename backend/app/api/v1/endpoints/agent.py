@@ -91,6 +91,13 @@ class AgentChatRequest(BaseModel):
             " / always=每版计划先暂停等人类批准/编辑/拒绝"
         ),
     )
+    referenced_document_ids: list[str] | None = Field(
+        None,
+        description=(
+            "体验第四波 @引用：用户显式引用的知识库文档 id 列表——关键摘要注入"
+            " planner 上下文；失效/无权限逐条以 warning 事件诚实外发"
+        ),
+    )
 
 
 class AgentConfigUpdate(BaseModel):
@@ -202,6 +209,7 @@ async def agent_chat(
                 user_id=current_user.id,
                 session_id=body.session_id,
                 config=config,
+                referenced_document_ids=body.referenced_document_ids,
             ):
                 last_event_type = event.type
                 sse_data = event.to_sse_dict()
