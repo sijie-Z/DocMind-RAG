@@ -516,7 +516,6 @@ export default {
     totalFiles: 'Total Files',
     results: 'results found',
     relevance: 'Sort by Relevance',
-    date: 'Sort by Date',
     name: 'Sort by Name',
     relevanceScore: 'Relevance',
     noResults: 'No results found',

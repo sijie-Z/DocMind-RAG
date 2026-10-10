@@ -398,7 +398,6 @@ export default {
     totalFiles: '総ファイル数',
     results: '件の結果が見つかりました',
     relevance: '関連度順',
-    date: '日付順',
     name: '名前順',
     relevanceScore: '関連度',
     noResults: '結果が見つかりませんでした',

@@ -535,7 +535,6 @@ export default {
     totalFiles: '文件总数',
     results: '找到',
     relevance: '相关度排序',
-    date: '时间排序',
     name: '名称排序',
     relevanceScore: '相关度',
     noResults: '未找到相关结果',

@@ -398,7 +398,6 @@ export default {
     totalFiles: 'Total des fichiers',
     results: 'résultats trouvés',
     relevance: 'Trier par pertinence',
-    date: 'Trier par date',
     name: 'Trier par nom',
     relevanceScore: 'Pertinence',
     noResults: 'Aucun résultat trouvé',

@@ -243,7 +243,7 @@ const message = useDedupedMessage()
 const searchQuery = ref('')
 const searchType = ref<'auto' | 'vector' | 'keyword' | 'hybrid'>('auto')
 const selectedFileTypes = ref<string[]>([])
-const sortBy = ref<'relevance' | 'date' | 'name'>('relevance')
+const sortBy = ref<'relevance' | 'name'>('relevance')
 
 // 结果状态
 const searchResults = ref<SearchResult[]>([])
@@ -261,7 +261,6 @@ const currentOrgId = computed(() => userStore.currentOrgId)
 
 const sortOptions = [
   { label: t('search.relevance'), value: 'relevance' },
-  { label: t('search.date'), value: 'date' },
   { label: t('search.name'), value: 'name' }
 ]
 
@@ -299,8 +298,6 @@ const fileTypeOf = (r: SearchResult): string => {
 const sortedResults = computed(() => {
   const results = [...searchResults.value]
   if (sortBy.value === 'relevance') return results.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0))
-  // 真实响应无日期字段（不可推导）→ 按日期排序暂为稳定空序（P1-3 审计记录）
-  if (sortBy.value === 'date') return results
   if (sortBy.value === 'name') return results.sort((a, b) => filenameOf(a).localeCompare(filenameOf(b)))
   return results
 })
