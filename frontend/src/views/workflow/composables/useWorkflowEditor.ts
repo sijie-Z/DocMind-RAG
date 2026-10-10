@@ -40,13 +40,21 @@ import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
 
-const route = useRoute()
-const router = useRouter()
-const message = useDedupedMessage()
-const workflowStore = useWorkflowStore()
-const llmConfigStore = useLLMConfigStore()
-
-const { fitView: doFitView } = useVueFlow()
+// ── setup 级依赖（模块顶层只声明，获取一律发生在 useWorkflowEditor() 内）──
+// A_sweep 实锤（round2 #1）：旧实现在模块顶层调用 useRoute/useRouter/
+// useDedupedMessage/useVueFlow。模块首次求值发生在组件 setup 之外，inject()
+// 拿不到上下文（Vue 警告 inject() can only be used inside setup()）→ message
+// 为 undefined → 任意 toast（如 loadTemplate 的「模板加载成功」）抛 TypeError，
+// 点「快速模板」即整页进 ErrorBoundary。onMounted/onUnmounted/watch 写在这里
+// 同样不会随组件挂载执行（loadNodeDefinitions 等初始化永不发生）。
+// 现在这些调用全部延迟到 useWorkflowEditor()（由 <script setup> 同步调用）内，
+// 保证组件生命周期之外零执行。
+let route!: ReturnType<typeof useRoute>
+let router!: ReturnType<typeof useRouter>
+let message!: ReturnType<typeof useDedupedMessage>
+let workflowStore!: ReturnType<typeof useWorkflowStore>
+let llmConfigStore!: ReturnType<typeof useLLMConfigStore>
+let doFitView!: ReturnType<typeof useVueFlow>['fitView']
 
 // 边的默认配置
 const defaultEdgeOptions = {
@@ -760,31 +768,8 @@ const autoSave = () => {
   }, 500)
 }
 
-// 监听画布变化 → 触发自动保存
-watch(
-  () => [workflowStore.nodes, workflowStore.edges, workflowStore.workflowName],
-  () => {
-    if (workflowStore.currentWorkflowId) {
-      autoSave()
-    }
-  },
-  { deep: true }
-)
-
-// 监听选中节点配置变化 → 自动保存到节点 data
-watch(
-  () => selectedNode.value?.data,
-  () => {
-    if (selectedNode.value) {
-      workflowStore.updateNodeData(selectedNode.value.id, { ...selectedNode.value.data })
-      // 同时触发自动保存到后端
-      if (workflowStore.currentWorkflowId) {
-        autoSave()
-      }
-    }
-  },
-  { deep: true }
-)
+// 监听画布变化 → 触发自动保存：注册在 useWorkflowEditor() 内（见文件头部说明，
+// 模块顶层注册不随组件生命周期挂载/释放）
 
 // 调试执行
 const openDebugPanel = () => {
@@ -901,26 +886,63 @@ async function loadNodeDefinitions() {
   }
 }
 
-onMounted(async () => {
-  // 并行加载所有初始化数据
-  await Promise.all([
-    loadNodeDefinitions(),
-    llmConfigStore.fetchAll(),
-    loadSkills(),
-  ])
-
-  const id = route.query.id as string
-  if (id) {
-    await loadWorkflowById(parseInt(id))
-  }
-})
-
-onUnmounted(() => {
-  if (autoSaveTimer) clearTimeout(autoSaveTimer)
-})
+// 初始化加载与卸载清理：注册在 useWorkflowEditor() 内（模块顶层注册不会执行）
 
 export function useWorkflowEditor() {
+  // ── setup 级依赖获取（必须在组件 setup 内执行；背景见文件头部说明）──
+  route = useRoute()
+  router = useRouter()
+  message = useDedupedMessage()
+  workflowStore = useWorkflowStore()
+  llmConfigStore = useLLMConfigStore()
+  doFitView = useVueFlow().fitView
 
+  // ── 画布变更 → 自动保存（组件级注册，随组件卸载自动释放）──
+  watch(
+    () => [workflowStore.nodes, workflowStore.edges, workflowStore.workflowName],
+    () => {
+      if (workflowStore.currentWorkflowId) {
+        autoSave()
+      }
+    },
+    { deep: true }
+  )
+
+  // 监听选中节点配置变化 → 自动保存到节点 data
+  watch(
+    () => selectedNode.value?.data,
+    () => {
+      if (selectedNode.value) {
+        workflowStore.updateNodeData(selectedNode.value.id, { ...selectedNode.value.data })
+        // 同时触发自动保存到后端
+        if (workflowStore.currentWorkflowId) {
+          autoSave()
+        }
+      }
+    },
+    { deep: true }
+  )
+
+  // ── 生命周期：初始化加载 + 卸载清理 ──
+  onMounted(async () => {
+    // 并行加载所有初始化数据
+    await Promise.all([
+      loadNodeDefinitions(),
+      // 全局 LLM 配置加载失败不阻断编辑器主流程（与下方 skills 同策略），
+      // 也避免 onMounted 里留下未处理 rejection 触发全局 ErrorBoundary
+      llmConfigStore.fetchAll().catch(() => {}),
+      loadSkills(),
+    ])
+
+    const id = route.query.id as string
+    if (id) {
+      await loadWorkflowById(parseInt(id))
+    }
+  })
+
+  onUnmounted(() => {
+    if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  })
 
 // Icon mapping for node types
 const NODE_ICON_MAP: Record<string, unknown> = {
