@@ -529,7 +529,37 @@ export default {
     activeConnections: 'Active Connections',
     totalRequests: 'Total Requests',
     errors: 'Error Count',
-    avgResponseTime: 'Avg Response Time'
+    avgResponseTime: 'Avg Response Time',
+    kbStatus: 'Knowledge Base',
+    totalDocs: 'Total Documents',
+    totalChunks: 'Total Chunks',
+    indexSize: 'Index Size',
+    searchRequests: 'Search Requests',
+    alertStatus: 'Alert Status',
+    activeAlerts: 'Active Alerts',
+    critical: 'Critical',
+    warning: 'Warning',
+    normal: 'Normal',
+    info: 'Info',
+    cpuTrend: 'CPU Usage Trend',
+    memoryTrend: 'Memory Usage Trend',
+    requestTrend: 'Request Count Trend',
+    responseTrend: 'Response Time Trend',
+    recentAlerts: 'Recent Alerts',
+    noData: 'No data',
+    timeRange: {
+      hour1: 'Last 1 hour',
+      hour6: 'Last 6 hours',
+      hour12: 'Last 12 hours',
+      day1: 'Last 24 hours',
+      day7: 'Last 7 days'
+    },
+    alert: {
+      level: 'Level',
+      message: 'Message',
+      time: 'Time',
+      status: 'Status'
+    }
   },
   search: {
     title: 'Smart Search',

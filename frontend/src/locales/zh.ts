@@ -556,7 +556,37 @@ export default {
     activeConnections: '活跃连接数',
     totalRequests: '请求总数',
     errors: '错误数',
-    avgResponseTime: '平均响应时间'
+    avgResponseTime: '平均响应时间',
+    kbStatus: '知识库状态',
+    totalDocs: '文档总数',
+    totalChunks: '分块总数',
+    indexSize: '索引大小',
+    searchRequests: '检索请求数',
+    alertStatus: '告警状态',
+    activeAlerts: '活动告警',
+    critical: '严重',
+    warning: '警告',
+    normal: '正常',
+    info: '提示',
+    cpuTrend: 'CPU 使用率趋势',
+    memoryTrend: '内存使用率趋势',
+    requestTrend: '请求数趋势',
+    responseTrend: '响应时间趋势',
+    recentAlerts: '最近告警',
+    noData: '暂无数据',
+    timeRange: {
+      hour1: '最近 1 小时',
+      hour6: '最近 6 小时',
+      hour12: '最近 12 小时',
+      day1: '最近 24 小时',
+      day7: '最近 7 天'
+    },
+    alert: {
+      level: '级别',
+      message: '消息',
+      time: '时间',
+      status: '状态'
+    }
   },
   search: {
     title: '智能搜索',

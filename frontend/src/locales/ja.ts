@@ -414,7 +414,37 @@ export default {
     activeConnections: 'アクティブ接続数',
     totalRequests: '総リクエスト数',
     errors: 'エラー数',
-    avgResponseTime: '平均レスポンス時間'
+    avgResponseTime: '平均レスポンス時間',
+    kbStatus: 'ナレッジベース状態',
+    totalDocs: 'ドキュメント総数',
+    totalChunks: 'チャンク総数',
+    indexSize: 'インデックスサイズ',
+    searchRequests: '検索リクエスト数',
+    alertStatus: 'アラート状態',
+    activeAlerts: 'アクティブアラート',
+    critical: '重大',
+    warning: '警告',
+    normal: '正常',
+    info: '情報',
+    cpuTrend: 'CPU使用率推移',
+    memoryTrend: 'メモリ使用率推移',
+    requestTrend: 'リクエスト数推移',
+    responseTrend: '応答時間推移',
+    recentAlerts: '最近のアラート',
+    noData: 'データなし',
+    timeRange: {
+      hour1: '直近1時間',
+      hour6: '直近6時間',
+      hour12: '直近12時間',
+      day1: '直近24時間',
+      day7: '直近7日間'
+    },
+    alert: {
+      level: 'レベル',
+      message: 'メッセージ',
+      time: '時間',
+      status: '状態'
+    }
   },
   search: {
     title: 'スマート検索',
