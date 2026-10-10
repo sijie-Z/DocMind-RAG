@@ -269,3 +269,23 @@ describe('KnowledgeView · 状态标签接线（B16）', () => {
     expect(stub.text()).not.toContain('已完成')
   })
 })
+
+describe('KnowledgeView · 幽灵降级控件已清除（B17）', () => {
+  it('completed + parse_error 含「降级」也绝无「重试向量化」/「重试全部降级文档」入口', async () => {
+    // 旧 isFallbackIndexed 的唯一触发面：status==='completed' 且 parse_error 含「降级」
+    const ghostDoc = { ...REAL_DOC, status: 'completed', parse_error: '降级为关键词索引' }
+    mockedGetKnowledgeBases.mockResolvedValue(listResponse([ghostDoc]) as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    // 工具栏：幽灵入口不存在
+    expect(wrapper.text()).not.toContain('重试全部降级文档')
+
+    // 卡片动作区：只剩 查看 + 删除 两个按钮（旧实现会多出"重试向量化" = 3 个）
+    const card = wrapper.findAll('.group').find((g) => g.text().includes('architecture.md'))
+    expect(card).toBeTruthy()
+    expect(card!.findAll('button')).toHaveLength(2)
+  })
+})

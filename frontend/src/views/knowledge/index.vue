@@ -56,9 +56,6 @@
             <n-button secondary round size="medium" @click="handleRebuildLatestFailedDoc">
               最近失败文档重建
             </n-button>
-            <n-button secondary round size="medium" @click="handleRetryAllFallbackDocs">
-              重试全部降级文档
-            </n-button>
 
           </div>
         </div>
@@ -254,14 +251,6 @@
                              </template>
                              重新解析
                            </n-tooltip>
-                           <n-tooltip v-if="isFallbackIndexed(item)" trigger="hover">
-                             <template #trigger>
-                               <n-button size="tiny" quaternary circle type="warning" @click.stop="handleRetryVector(item)">
-                                 <template #icon><n-icon><RefreshOutline /></n-icon></template>
-                               </n-button>
-                             </template>
-                             重试向量化
-                           </n-tooltip>
                            <n-button size="tiny" quaternary circle type="error" @click.stop="deleteKnowledge(item)">
                               <template #icon><n-icon><TrashOutline /></n-icon></template>
                            </n-button>
@@ -347,7 +336,6 @@
                           <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                              <n-button size="tiny" secondary circle @click="viewKnowledge(item)"><template #icon><n-icon><EyeOutline /></n-icon></template></n-button>
                              <n-button v-if="item.status === 'failed'" size="tiny" secondary circle type="primary" @click="handleRebuild(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
-                             <n-button v-if="isFallbackIndexed(item)" size="tiny" secondary circle type="warning" @click="handleRetryVector(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
                              <n-button size="tiny" secondary circle type="error" @click="deleteKnowledge(item)"><template #icon><n-icon><TrashOutline /></n-icon></template></n-button>
                           </div>
                        </td>
@@ -822,16 +810,6 @@ const handleRebuild = async (item: KnowledgeBase) => {
   }
 }
 
-const handleRetryVector = async (item: KnowledgeBase) => {
-  try {
-    await rebuildKnowledgeBase(item.id)
-    message.success(t('knowledge.retryVectorSuccess'))
-    await loadKnowledgeBases()
-  } catch (error: unknown) {
-    message.error(t('knowledge.retryVectorFailed') + '：' + getErrorMessage(error))
-  }
-}
-
 const handleRebuildLatestFailedDoc = async () => {
   const failed = knowledgeBases.value.find(i => i.status === 'failed')
   if (!failed) {
@@ -845,31 +823,6 @@ const handleRebuildLatestFailedDoc = async () => {
   } catch (error: unknown) {
     message.error(t('knowledge.rebuildSubmitFailed') + '：' + (getErrorMessage(error) || t('knowledge.unknownError')))
   }
-}
-
-const handleRetryAllFallbackDocs = async () => {
-  const fallbackDocs = knowledgeBases.value.filter(i => isFallbackIndexed(i))
-  if (fallbackDocs.length === 0) {
-    message.info(t('knowledge.noFallbackDocs'))
-    return
-  }
-
-  let successCount = 0
-  for (const doc of fallbackDocs) {
-    try {
-      await rebuildKnowledgeBase(doc.id)
-      successCount += 1
-    } catch {
-      // 单个失败不中断批次
-    }
-  }
-
-  if (successCount > 0) {
-    message.success(t('knowledge.batchRetrySubmitted', { success: successCount, total: fallbackDocs.length }))
-  } else {
-    message.error(t('knowledge.batchRetryFailed'))
-  }
-  await loadKnowledgeBases()
 }
 
 const deleteKnowledge = (item: KnowledgeBase) => {
@@ -900,11 +853,12 @@ const formatFileSize = (bytes: number | null | undefined): string => {
   return parseFloat((safe / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-const isFallbackIndexed = (item: KnowledgeBase | null): boolean => {
-  if (!item) return false
-  const err = (item.parse_error || '').toLowerCase()
-  return item.status === 'completed' && (err.includes('降级') || err.includes('关键词索引'))
-}
+// 幽灵「降级索引」标识已整体移除（B17）：后端不存在任何"降级为关键词索引"的
+// 字段或 parse_error 哨兵（models/document.py 无 vector_index_status 列；
+// parse_error 全部写入点复核：worker/doc_processor.py:291,393 清空、:409 写
+// 任意异常串；成功路径必为 None）——原 isFallbackIndexed 恒为 false，行内
+// 「重试向量化」与工具栏「重试全部降级文档」从未真实可达（控件形同虚设）。
+// 产品缺口：如需"降级索引"语义，须后端先落字段，前端再接真值。
 
 const getStatusType = (item: KnowledgeBase | null) => docStatusType(item?.status)
 
