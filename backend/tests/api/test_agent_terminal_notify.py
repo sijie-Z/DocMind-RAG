@@ -184,6 +184,33 @@ async def test_cancelled_finalize_notifies_cancelled(db):
 
 
 @pytest.mark.asyncio
+class _FakeAgentOnError:
+    """_checkpoint_error 路径只需 checkpoint_live 属性（None → 兜底快照快速跳过）。"""
+
+    checkpoint_live = None
+
+
+@pytest.mark.asyncio
+async def test_error_convergence_notifies_failed(db):
+    """异常收敛点（service._checkpoint_error → FAILED）同样发通知（F5 判别）。
+
+    变异点：_checkpoint_error 里删掉 notify_task_terminal 调用 → 本用例红。
+    """
+    task_id = await checkpoint.create_task(user_id=1, organization_id=1, query="异常收敛任务")
+
+    await agent_service._checkpoint_error(
+        task_id, _FakeAgentOnError(), RuntimeError("llm down hard")
+    )
+
+    assert await _task_status(db, task_id) == TaskStatus.FAILED
+    rows = await _notifications(db)
+    assert len(rows) == 1, "异常收敛终态必须发通知"
+    assert "失败" in rows[0].title and task_id in rows[0].title
+    assert "llm down hard" in rows[0].content, "失败原因如实进通知正文"
+    assert rows[0].target_route == "Agent" and rows[0].target_id == task_id
+
+
+@pytest.mark.asyncio
 async def test_cancel_endpoint_waiting_approval_notifies(db):
     """审批等待中经端点直接取消（无活跃流）→ 终态通知同样发出。"""
     task_id = await checkpoint.create_task(user_id=1, organization_id=1, query="待审批任务")

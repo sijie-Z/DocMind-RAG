@@ -241,6 +241,40 @@ def test_replay_text_format_returns_cli_style(client, auth, monkeypatch, replay_
     assert "Tool: search_knowledge_base" in data["text"]
 
 
+def test_replay_malformed_redis_payload_is_honest_404_not_500(
+    client, auth, monkeypatch, replay_dir, no_redis
+):
+    """F1 判别：Redis 值合法 JSON 但形状畸形（list/字符串/缺键 dict）→ 诚实 404，
+    绝不 500 裸抛（修复前 format_timeline 在 list 上 `.get` 直接炸 500）。
+
+    变异点 M6：去掉引擎 _is_valid_replay_ctx 校验 → 本用例红（500）。
+    """
+    _mock_task_loaded(monkeypatch)
+    malformed = [[1, 2, 3], "not-a-dict", {"query": "缺 task_id 与 steps"}]
+    for payload in malformed:
+        monkeypatch.setattr(
+            "app.core.redis.redis_client",
+            _FakeRedis({f"agent:replay:{_TASK_ID}": json.dumps(payload)}),
+        )
+        r = client.get(f"/api/v1/agent/tasks/{_TASK_ID}/replay")
+        assert r.status_code == 404, f"{payload!r} 必须诚实 404，实际 {r.status_code}"
+        assert r.json()["error_code"] == "REPLAY_NOT_FOUND"
+
+
+def test_get_task_has_replay_false_for_malformed_payload(
+    client, auth, monkeypatch, replay_dir
+):
+    """F3 判别：损坏内容不得标 has_replay=True（损坏 = 如实视为无回放）。"""
+    _mock_task_loaded(monkeypatch)
+    monkeypatch.setattr(
+        "app.core.redis.redis_client",
+        _FakeRedis({f"agent:replay:{_TASK_ID}": json.dumps([1, 2, 3])}),
+    )
+    r = client.get(f"/api/v1/agent/tasks/{_TASK_ID}")
+    assert r.status_code == 200
+    assert r.json()["data"]["has_replay"] is False
+
+
 # ── 状态视图 / 列表 has_replay ───────────────────────────────────────────────
 
 
