@@ -193,6 +193,33 @@ class TestTimezones:
         result = next_fire("30 1 * * *", after, "America/New_York")
         assert result == datetime(2026, 11, 1, 5, 30, tzinfo=UTC)
 
+    def test_dst_fall_back_window_strictly_after(self):
+        """评审 MAJOR-1 回归（纯函数级）：after 落在重复小时第二次通过（fold=1）
+        窗口内时，返回时刻必须严格晚于 after。
+
+        旧实现在该窗口返回 05:30Z（比 after 早 45 分钟）→ 引擎每个 tick 都真实
+        重复触发（触发风暴）。修复后按绝对时刻域比较，返回次日第一次通过。"""
+        after = datetime(2026, 11, 1, 6, 15, tzinfo=UTC)  # 01:15 EST（fold=1）
+        result = next_fire("30 1 * * *", after, "America/New_York")
+        assert result > after, f"违反严格大于契约：{result} 不晚于 {after}"
+        assert result == datetime(2026, 11, 2, 6, 30, tzinfo=UTC)  # 次日 01:30 EST
+
+    def test_dst_fall_back_second_pass_never_fires(self):
+        """重复时刻只取 fold=0 第一次通过：第二次通过窗口内起算一律顺延次日。"""
+        for hh, mm in [(5, 45), (6, 0), (6, 29)]:
+            after = datetime(2026, 11, 1, hh, mm, tzinfo=UTC)
+            result = next_fire("30 1 * * *", after, "America/New_York")
+            assert result == datetime(2026, 11, 2, 6, 30, tzinfo=UTC), (
+                f"after={hh:02d}:{mm:02d}Z 应顺延次日 06:30Z，实际 {result}"
+            )
+
+    def test_dst_fall_back_first_pass_still_fires(self):
+        """窗口前起算 → 仍命中第一次通过（fold=0 = 05:30Z），语义不回归。"""
+        after = datetime(2026, 11, 1, 5, 15, tzinfo=UTC)
+        assert next_fire("30 1 * * *", after, "America/New_York") == datetime(
+            2026, 11, 1, 5, 30, tzinfo=UTC
+        )
+
     def test_shanghai_no_dst(self):
         """中国无夏令时：连续两天都是 01:00 UTC。"""
         d1 = next_fire("0 9 * * *", datetime(2026, 7, 1, 0, 0, tzinfo=UTC), "Asia/Shanghai")

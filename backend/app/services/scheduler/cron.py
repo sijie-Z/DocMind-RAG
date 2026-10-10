@@ -19,8 +19,13 @@
 - day-of-week 接受 0-7，0 与 7 都表示周日（7 归一化为 0）。
 
 时区：cron 按 `timezone` 的**墙钟**解释，返回值是 aware UTC datetime。
-DST 处理：春令时跳变中不存在的墙钟时刻（如 02:30）会被跳过（该日不触发，
-下一个匹配日再触发）；秋令时重复的墙钟时刻只触发一次（fold=0，第一次出现）。
+DST 处理（"严格大于"一律在**绝对时刻域**（UTC）判定，跨 fold 单调递增）：
+- 春令时跳变中不存在的墙钟时刻（如 02:30）会被跳过（该日不触发，
+  下一个匹配日再触发）；
+- 秋令时重复的墙钟时刻固定取**第一次通过**（fold=0）的绝对时刻，第二次通过
+  （fold=1）不会再次触发；即使起算点 `after` 落在第二次通过窗口内，
+  next_fire 也保证返回严格晚于 after 的时刻（单调性回归见
+  test_dst_fall_back_window_strictly_after）。
 跨会话/跨平台依赖：zoneinfo 在 Windows 上需要 IANA 时区数据库，本仓由
 pandas 传递依赖的 tzdata 提供（requirements.txt 中 pandas 为硬依赖）。
 
@@ -159,10 +164,13 @@ def _day_matches(expr: CronExpr, day) -> bool:  # day: datetime.date
 
 
 def next_fire(expr: str | CronExpr, after: datetime, timezone_name: str = "UTC") -> datetime:
-    """计算 `after` 之后（严格大于）最近一次触发时刻，返回 aware UTC datetime。
+    """计算 `after` 之后（严格大于，按**绝对时刻域**判定）最近一次触发时刻。
 
-    - `after` 若是 naive，按 UTC 理解；
+    - `after` 若是 naive，按 UTC 理解；返回 aware UTC datetime；
     - cron 按 `timezone_name` 的墙钟解释；
+    - 候选时刻与 `after` 一律换算成 UTC 绝对时刻再比较（与 fold 无关）：
+      `after` 落在秋令时重复小时的第二次通过（fold=1）内时，返回值仍严格
+      晚于 `after`，保证引擎推进单调、不重复触发（评审 MAJOR-1 回归）；
     - 8 年搜索上界内无解（如 "0 0 31 2 *"）抛 CronError。
     """
     cron = expr if isinstance(expr, CronExpr) else parse_cron(expr)
@@ -170,11 +178,12 @@ def next_fire(expr: str | CronExpr, after: datetime, timezone_name: str = "UTC")
 
     if after.tzinfo is None:
         after = after.replace(tzinfo=UTC)
-    local_after = after.astimezone(zone)
-    # 严格大于：先取下分钟后整（after 恰好落在分钟点上时 +1 保证不被重复命中）
-    start = local_after.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    after_utc = after.astimezone(UTC)
+    local_after = after_utc.astimezone(zone)
 
-    day = start.date()
+    # 从 after 的本地日期起扫；任何绝对时刻晚于 after 的候选只可能落在
+    # 该日期或之后（本地日期随绝对时刻单调不减，DST 回拨只重复小时不重复日期）。
+    day = local_after.date()
     sorted_hours = sorted(cron.hours)
     sorted_minutes = sorted(cron.minutes)
     for _ in range(_MAX_SEARCH_DAYS):
@@ -182,8 +191,6 @@ def next_fire(expr: str | CronExpr, after: datetime, timezone_name: str = "UTC")
             for hh in sorted_hours:
                 for mm in sorted_minutes:
                     wall = datetime(day.year, day.month, day.day, hh, mm, tzinfo=zone)
-                    if wall < start:
-                        continue
                     # DST：跳变中不存在的墙钟时刻（往返换算出不同墙钟）→ 该候选作废
                     round_trip = wall.astimezone(UTC).astimezone(zone)
                     if (
@@ -194,7 +201,12 @@ def next_fire(expr: str | CronExpr, after: datetime, timezone_name: str = "UTC")
                         round_trip.minute,
                     ) != (wall.year, wall.month, wall.day, wall.hour, wall.minute):
                         continue
-                    return wall.astimezone(UTC)
+                    # 严格大于：比较绝对时刻（fold 无关）——同 tzinfo 的墙钟比较
+                    # 会忽略 fold，在 fold=1 窗口内误放行"过去"的候选（MAJOR-1）。
+                    candidate_utc = wall.astimezone(UTC)
+                    if candidate_utc <= after_utc:
+                        continue
+                    return candidate_utc
         day += timedelta(days=1)
 
     raise CronError(

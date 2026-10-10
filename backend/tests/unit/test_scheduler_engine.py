@@ -358,6 +358,37 @@ class TestRunNow:
         assert await eng.run_now("nope") == {"triggered": False, "reason": "not_found"}
 
 
+# ── DST 秋令时风暴回归（评审 MAJOR-1，引擎级）───────────────────────────
+
+
+class TestDstStormRegression:
+    @pytest.mark.asyncio
+    async def test_fold_window_no_trigger_storm(self, factory):
+        """时钟停在秋令时重复小时第二次通过（fold=1）窗口内连续 tick，
+        不得重复触发（旧实现 next_fire 返回过去时刻 → 每个 tick 都真实
+        触发一次 = 41 连触风暴）。"""
+        first_pass = datetime(2026, 11, 1, 5, 30)  # 01:30 EDT（fold=0）
+        await _add_task(
+            factory,
+            cron_expr="30 1 * * *",
+            timezone="America/New_York",
+            next_run_at=first_pass,
+        )
+        clock = _Clock(datetime(2026, 11, 1, 6, 15))  # 01:15 EST（fold=1 二现中）
+        ex = _RecordingExecutor()
+        eng = _engine(factory, clock, ex, _RecordingNotifier())
+
+        for _ in range(40):  # 20 分钟 × 30s 轮询
+            await eng.tick_once()
+            await eng.wait_for_idle()  # 假运行即时收尾——确保风暴不被重叠闸门掩盖
+            clock.advance(seconds=30)
+
+        assert len(ex.calls) == 1, f"窗口内应只触发一次，实际 {len(ex.calls)} 次（触发风暴）"
+        row = await _row(factory)
+        assert row.run_count == 1
+        assert row.next_run_at == datetime(2026, 11, 2, 6, 30)  # 次日 01:30 EST
+
+
 # ── run_loop 接线（注入 sleeper，无真实 sleep）─────────────────────────
 
 
