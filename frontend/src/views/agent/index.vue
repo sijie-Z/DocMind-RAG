@@ -15,6 +15,18 @@
         />
       </div>
       <div class="header-right">
+        <n-popover v-model:show="showTasks" trigger="click" placement="bottom-end">
+          <template #trigger>
+            <button class="header-btn" :class="{ active: showTasks }">
+              🕘 {{ t('agentTasks.title') }}
+            </button>
+          </template>
+          <RecentTaskList
+            :tasks="recentTasks"
+            :loading="tasksLoading"
+            @view-replay="handleTaskReplayClick"
+          />
+        </n-popover>
         <button class="header-btn" @click="showConfig = !showConfig" :class="{ active: showConfig }">
           ⚙ 配置
         </button>
@@ -176,6 +188,14 @@
               </n-tooltip>
             </div>
 
+            <!-- 回放入口：本次运行完整结束且确有回放数据（GET task 的 has_replay
+                 如实标记；无数据不亮入口，深链/任务列表可达诚实空态） -->
+            <div v-if="showReplayEntry(idx, msg)" class="replay-entry-line">
+              <button class="replay-entry-btn" @click="openReplay(agentStore.taskId!)">
+                🕘 {{ t('agentReplay.entry') }}
+              </button>
+            </div>
+
             <!-- Loading -->
             <div v-if="msg.loading && msg.content.length === 0 && msg.thinkingText.length === 0" class="loading-indicator">
               <span class="loading-dot"></span>
@@ -219,6 +239,16 @@
       />
     </div>
 
+    <!-- 回放时间线（与审批卡同款 dock；URL ?id= 深链直达） -->
+    <ReplayTimeline
+      v-if="replayOpen"
+      :task-id="replayTaskId"
+      :timeline="replayData"
+      :loading="replayLoading"
+      :error="replayError"
+      @close="closeReplay"
+    />
+
     <!-- Input -->
     <AgentInput
       :placeholder="'输入复杂任务，Agent 自动规划执行...'"
@@ -232,11 +262,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '@/stores/agent'
 import { agentApi } from '@/api/agent'
 import { useDedupedMessage } from '@/utils/message'
-import type { AgentEvent, AgentChatMessage, PlanStep, ThinkingType } from '@/types/agent'
+import type {
+  AgentEvent,
+  AgentChatMessage,
+  AgentTaskListItem,
+  PlanStep,
+  ThinkingType,
+  ReplayTimeline as ReplayTimelineData,
+} from '@/types/agent'
 import { ThumbsUpOutline, ThumbsDownOutline } from '@vicons/ionicons5'
 
 import PlanTree from '@/components/agent/PlanTree.vue'
@@ -249,10 +288,16 @@ import AgentConfigPanel from '@/components/agent/AgentConfigPanel.vue'
 import SessionSelector from '@/components/agent/SessionSelector.vue'
 import AgentInput from '@/components/agent/AgentInput.vue'
 import ApprovalCard from '@/components/agent/ApprovalCard.vue'
+import ReplayTimeline from '@/components/agent/ReplayTimeline.vue'
+import RecentTaskList from '@/components/agent/RecentTaskList.vue'
 import Markdown from '@/components/common/Markdown.vue'
 
 const agentStore = useAgentStore()
 const message = useDedupedMessage()
+const { t } = useI18n()
+// 深链（?id=<task_id>，通知点击/刷新直达回放）：测试环境可能无 router——全部访问带守卫
+const route = useRoute()
+const router = useRouter()
 
 // 当前进行中的 Agent chat 请求控制器（用于停止/卸载时中止）
 let currentChatController: AbortController | null = null
@@ -267,6 +312,18 @@ const showPlan = ref(true)
 const centerPanel = ref<HTMLElement>()
 const initLoading = ref(true)
 const initError = ref(false)
+
+// ── 回放消费面（跑完之后）：入口 / 时间线 dock / 任务记录 / 深链 ──────────────
+const replayOpen = ref(false)
+const replayTaskId = ref('')
+const replayData = ref<ReplayTimelineData | null>(null)
+const replayLoading = ref(false)
+const replayError = ref<'' | 'not_found' | 'failed'>('')
+// 最近一次运行是否有回放可看（由 GET task 的 has_replay 如实判定；null=未知/不亮入口）
+const lastRunHasReplay = ref<boolean | null>(null)
+const showTasks = ref(false)
+const recentTasks = ref<AgentTaskListItem[]>([])
+const tasksLoading = ref(false)
 
 const suggestions = [
   '知识库中有哪些文档？请帮我总结关键主题',
@@ -370,6 +427,7 @@ async function handleSend(query: string) {
   agentStore.clearMessages()
   agentStore.resetTask()
   stopping.value = false
+  lastRunHasReplay.value = null
 
   // Add user message
   agentStore.addMessage({
@@ -446,6 +504,8 @@ async function handleSend(query: string) {
       clearTimeout(stopFallbackTimer)
       stopFallbackTimer = null
     }
+    // 跑完之后：回读 has_replay 决定是否亮「查看回放」入口（旁路，不阻塞收尾）
+    void refreshReplayFlag()
     scrollToBottom()
   }
 }
@@ -526,6 +586,8 @@ async function handleApprovalDecide(payload: {
     approvalBusy.value = false
     currentChatController = null
     agentStore.setLoading(false)
+    // 审批续跑收敛后同款回读（续跑是新的 run 收敛点）
+    void refreshReplayFlag()
     scrollToBottom()
   }
 }
@@ -581,6 +643,93 @@ onUnmounted(() => {
   }
 })
 
+// ── 回放消费面：入口 / 时间线 / 任务记录 / 深链 ────────────────────────────────
+
+/** 运行收敛后回读权威 has_replay：只有"真有回放"才亮入口（不虚标、不空跳）。 */
+async function refreshReplayFlag() {
+  const taskId = agentStore.taskId
+  if (!taskId) {
+    lastRunHasReplay.value = null
+    return
+  }
+  try {
+    const res = await agentApi.getTask(taskId)
+    lastRunHasReplay.value = !!res.data?.has_replay
+  } catch {
+    lastRunHasReplay.value = null
+  }
+}
+
+/** 回放入口显示条件：最新一条助手消息 + 非加载中 + 该运行确有回放数据。 */
+function showReplayEntry(idx: number, msg: AgentChatMessage): boolean {
+  return (
+    lastRunHasReplay.value === true &&
+    idx === agentStore.messages.length - 1 &&
+    msg.role === 'assistant' &&
+    !msg.loading &&
+    !!agentStore.taskId
+  )
+}
+
+/** URL 深链同步：?id=<task_id> 可刷新/分享直达；关闭面板时清掉。 */
+function syncRouteTaskId(taskId: string | null) {
+  if (!router || !route) return
+  const q: Record<string, any> = { ...(route.query || {}) }
+  if (taskId) q.id = taskId
+  else delete q.id
+  router.replace({ query: q }).catch(() => {})
+}
+
+/** 打开回放时间线（入口按钮 / 任务记录 / 深链三处共用）。 */
+async function openReplay(taskId: string) {
+  replayOpen.value = true
+  replayTaskId.value = taskId
+  replayData.value = null
+  replayError.value = ''
+  replayLoading.value = true
+  syncRouteTaskId(taskId)
+  try {
+    const res = await agentApi.getReplay(taskId)
+    replayData.value = res.data || null
+    if (!replayData.value) replayError.value = 'not_found'
+  } catch (e: any) {
+    // 404（REPLAY_NOT_FOUND / TASK_NOT_FOUND）→ 诚实空态；其余 → 加载失败
+    replayError.value = e?.response?.status === 404 ? 'not_found' : 'failed'
+  } finally {
+    replayLoading.value = false
+  }
+}
+
+function closeReplay() {
+  replayOpen.value = false
+  replayData.value = null
+  replayError.value = ''
+  syncRouteTaskId(null)
+}
+
+/** 任务记录（列表带 has_replay：完成态标出「有回放可看」）。 */
+async function loadRecentTasks() {
+  tasksLoading.value = true
+  try {
+    const res = await agentApi.listTasks({ page: 1, page_size: 10 })
+    recentTasks.value = res.data?.tasks || []
+  } catch {
+    recentTasks.value = []
+    message.error(t('agentTasks.loadFailed'))
+  } finally {
+    tasksLoading.value = false
+  }
+}
+
+watch(showTasks, (visible) => {
+  if (visible) loadRecentTasks()
+})
+
+function handleTaskReplayClick(taskId: string) {
+  showTasks.value = false
+  openReplay(taskId)
+}
+
 async function handleSessionChange(sessionId: string | null) {
   agentStore.setCurrentSession(sessionId)
   if (sessionId) {
@@ -634,6 +783,11 @@ onMounted(async () => {
     await loadInit()
     // HITL：刷新/重连后回到审批现场（last task id 持久化 + 权威状态）
     await restorePendingApproval()
+    // 回放深链：URL 带 task id（通知点击/分享/刷新）→ 直接打开时间线（诚实空态兜底）
+    const deepLinkId = route?.query?.id
+    if (typeof deepLinkId === 'string' && deepLinkId) {
+      await openReplay(deepLinkId)
+    }
   } catch (e) {
     console.error('[Agent] onMounted error:', e)
     initError.value = true
@@ -1077,6 +1231,31 @@ async function loadInit() {
 .approval-dock {
   padding: 0 16px;
   flex-shrink: 0;
+}
+
+/* 回放入口（完成后入口行；时间线 dock 样式随 ReplayTimeline 组件走） */
+.replay-entry-line {
+  margin-top: 8px;
+}
+
+.replay-entry-btn {
+  border: 1px solid rgba(37, 99, 235, 0.4);
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.06);
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+
+.replay-entry-btn:hover {
+  background: rgba(37, 99, 235, 0.14);
+}
+
+.dark .replay-entry-btn {
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.12);
 }
 
 /* Status bar */

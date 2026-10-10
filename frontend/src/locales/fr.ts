@@ -493,5 +493,39 @@ export default {
     metricMessages: 'Messages',
     metricDocuments: 'Documents',
     metricRole: 'Rôle Actuel'
+  },
+  agentReplay: {
+    entry: 'Voir le Replay',
+    title: "Replay d'Exécution",
+    close: 'Fermer',
+    loading: 'Chargement du replay…',
+    emptyTitle: 'Aucune donnée de replay pour cette tâche',
+    emptyHint: "Les replays ne sont enregistrés que lorsque l'exécution se termine complètement ; les exécutions échouées, annulées ou inachevées n'en ont pas.",
+    loadFailed: 'Échec du chargement du replay, veuillez réessayer plus tard',
+    steps: 'étapes',
+    tokens: 'jetons',
+    findings: 'Constats Clés',
+    decisions: 'Décisions Clés',
+    failures: 'Échecs',
+    noSteps: 'Aucune étape enregistrée pour cette exécution',
+    stateCompleted: 'Terminé',
+    stateFailed: 'Échoué',
+    stateSkipped: 'Ignoré',
+    statePending: 'En attente',
+    stateRunning: 'En cours'
+  },
+  agentTasks: {
+    title: 'Historique des Tâches',
+    empty: 'Aucune tâche pour le moment',
+    loading: 'Chargement des tâches…',
+    loadFailed: 'Échec du chargement de la liste des tâches',
+    replay: 'Replay',
+    noReplay: 'Pas de replay',
+    stateCompleted: 'Terminée',
+    stateFailed: 'Échouée',
+    stateCancelled: 'Annulée',
+    stateRunning: 'En cours',
+    stateWaitingApproval: 'Approbation requise',
+    statePending: "En file d'attente"
   }
 };

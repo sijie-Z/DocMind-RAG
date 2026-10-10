@@ -13,6 +13,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { NMessageProvider, NSpin, NButton, NTooltip, NIcon } from 'naive-ui'
 import { createPinia, setActivePinia } from 'pinia'
+import i18n from '@/locales'
 
 import AgentView from '../index.vue'
 import { useAgentStore } from '@/stores/agent'
@@ -70,7 +71,7 @@ async function setupView() {
   } as any)
   const wrapper = mount(Host, {
     global: {
-      plugins: [pinia],
+      plugins: [pinia, i18n],
       components: { NSpin, NButton, NTooltip, NIcon },
       stubs,
     },

@@ -662,5 +662,39 @@ export default {
     metricMessages: '消息总量',
     metricDocuments: '知识文档',
     metricRole: '当前角色'
+  },
+  agentReplay: {
+    entry: '查看回放',
+    title: '运行回放',
+    close: '关闭',
+    loading: '正在加载回放…',
+    emptyTitle: '该任务没有可回放的数据',
+    emptyHint: '回放仅在运行完整结束时保存；失败、取消或尚未完成的任务不产生回放。',
+    loadFailed: '回放加载失败，请稍后重试',
+    steps: '步骤',
+    tokens: 'Tokens',
+    findings: '关键发现',
+    decisions: '关键决策',
+    failures: '失败记录',
+    noSteps: '本次运行没有步骤记录',
+    stateCompleted: '完成',
+    stateFailed: '失败',
+    stateSkipped: '跳过',
+    statePending: '待执行',
+    stateRunning: '执行中'
+  },
+  agentTasks: {
+    title: '任务记录',
+    empty: '暂无任务记录',
+    loading: '正在加载任务…',
+    loadFailed: '任务列表加载失败',
+    replay: '回放',
+    noReplay: '无回放',
+    stateCompleted: '已完成',
+    stateFailed: '失败',
+    stateCancelled: '已取消',
+    stateRunning: '进行中',
+    stateWaitingApproval: '待审批',
+    statePending: '排队中'
   }
 };

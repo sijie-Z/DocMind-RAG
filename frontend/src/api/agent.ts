@@ -8,8 +8,10 @@ import type {
   AgentConfig,
   AgentSession,
   AgentSessionDetail,
+  AgentTaskListItem,
   AgentTaskView,
   ApprovalDecisionInput,
+  ReplayTimeline,
 } from '@/types/agent'
 
 interface ChatOptions {
@@ -142,6 +144,25 @@ export const agentApi = {
   /** 任务状态视图（审批现场 / 取消后的权威状态；HITL 恢复入口） */
   getTask(taskId: string): Promise<ApiResponse<AgentTaskView>> {
     return request.get(`/agent/tasks/${taskId}`)
+  },
+
+  // ── 回放消费面（跑完之后的"可带走"体验）────────────────────────────────
+
+  /** 最近任务列表：每条带 has_replay（「有回放可看」标记）。 */
+  listTasks(params?: {
+    page?: number
+    page_size?: number
+  }): Promise<ApiResponse<{ tasks: AgentTaskListItem[]; total: number; page: number; page_size: number }>> {
+    return request.get('/agent/tasks', { params })
+  },
+
+  /**
+   * 执行回放（结构化 timeline，字段与执行写侧逐字对齐）。
+   * 404 REPLAY_NOT_FOUND = 该任务没有回放数据（诚实空态，绝不编造轨迹）；
+   * 404 TASK_NOT_FOUND = 任务不存在/非本人/组织不一致。
+   */
+  getReplay(taskId: string): Promise<ApiResponse<ReplayTimeline>> {
+    return request.get(`/agent/tasks/${taskId}/replay`)
   },
 
   /** 协作式取消（服务端停止协议）：202 = 已受理待收敛 / 200 = 已直接终态 */
