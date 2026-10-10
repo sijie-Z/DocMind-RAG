@@ -72,7 +72,9 @@ _TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
     TaskStatus.WAITING_HUMAN: {TaskStatus.RUNNING, TaskStatus.ABANDONED,
                                TaskStatus.FAILED, TaskStatus.CANCELLED},
     # terminal states
-    TaskStatus.FAILED:        {TaskStatus.RUNNING},  # retry
+    # FAILED 还有 CANCELLED 边：失败任务上滞留的取消旗在下一次 resume 前被
+    # 观察时如实收敛（用户已放弃，不复活）——见 checkpoint.begin_resume。
+    TaskStatus.FAILED:        {TaskStatus.RUNNING, TaskStatus.CANCELLED},
     TaskStatus.COMPLETED:     set(),
     TaskStatus.ABANDONED:     set(),
     TaskStatus.CANCELLED:     set(),
