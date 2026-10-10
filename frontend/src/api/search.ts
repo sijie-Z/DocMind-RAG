@@ -47,16 +47,37 @@ export function buildSearchPayload(input: SearchPayloadInput): SearchRequest {
   }
 }
 
+/** 结果项来源信息（真实响应字段，防御式声明为可缺省） */
+export interface SearchResultSource {
+  filename?: string
+  document_id?: string
+  [key: string]: unknown
+}
+
+/** 结果项元数据（真实响应字段，防御式声明为可缺省） */
+export interface SearchResultMetadata {
+  filename?: string
+  snippet?: string
+  overlap_score?: number
+  mmr_score?: number
+  [key: string]: unknown
+}
+
+// P1-3 修复（UI 复验 round2）：接口与真实响应同形（backend/app/schemas/
+// knowledge.py KnowledgeSearchResponse.results 项）。此前声明的 file_type/
+// file_size/upload_time/filename/content/relevance_score 平铺字段后端从未
+// 返回过——UI 搜索此前 100% 422 从未成功，该渲染路径从未被执行（历史暗雷）。
+// 展示层一律经访问器从 source/metadata/text/score 推导（见 search.vue）。
 export interface SearchResult {
   id: string
-  filename: string
-  content: string
-  file_type: string
-  file_size: number
-  upload_time: string
-  relevance_score: number
-  metadata: Record<string, unknown>
-  highlights: string[]
+  text: string
+  score: number
+  metadata?: SearchResultMetadata
+  source?: SearchResultSource
+  has_keyword?: boolean | null
+  has_vector?: boolean | null
+  rewrite_hits?: number | null
+  fresh_factor?: number | null
 }
 
 export interface SearchStats {
