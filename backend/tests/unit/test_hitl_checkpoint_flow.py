@@ -121,8 +121,7 @@ class TestTransitions:
         from app.models.agent_task import AgentTask as T
 
         def _mk(status):
-            t = T(id="x", user_id=1, query="q", status=status)
-            return t
+            return T(id="x", user_id=1, query="q", status=status)
 
         assert _mk(TaskStatus.CANCELLED).is_terminal
         assert not _mk(TaskStatus.WAITING_APPROVAL).is_terminal

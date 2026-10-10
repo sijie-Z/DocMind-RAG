@@ -23,8 +23,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-import app.models  # noqa: F401 — 注册全部表，供 create_all
 import app.api.v1.endpoints.agent as agent_api
+import app.models  # noqa: F401 — 注册全部表，供 create_all
 from app.agent import checkpoint
 from app.agent.exec_context import ExecutionContext
 from app.agent.loop import PERAgentLoop
@@ -32,7 +32,7 @@ from app.agent.registry import ToolResult, tool_registry
 from app.agent.service import agent_service
 from app.core.database import Base
 from app.core.security import get_current_user
-from app.models.agent_task import AgentTask, TaskStatus
+from app.models.agent_task import TaskStatus
 from app.rag.retriever import HybridRetriever
 
 QUERY = "帮我执行一段脚本"
