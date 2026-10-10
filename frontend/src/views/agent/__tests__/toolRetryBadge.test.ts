@@ -11,7 +11,9 @@ import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { NMessageProvider, NSpin, NButton, NTooltip, NIcon } from 'naive-ui'
+import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
+import zh from '@/locales/zh'
 
 import AgentView from '../index.vue'
 import { useAgentStore } from '@/stores/agent'
@@ -30,6 +32,9 @@ vi.mock('@/api/agent', () => ({
     submitFeedback: vi.fn().mockResolvedValue({}),
   },
 }))
+
+// F4：AgentView 用 t('hitl.*') 渲染取消标识——视图测试统一装 zh 实例
+const i18n = createI18n({ legacy: false, locale: 'zh', fallbackLocale: 'zh', messages: { zh } })
 
 const Host = defineComponent({
   render: () => h(NMessageProvider, null, { default: () => h(AgentView) }),
@@ -69,7 +74,7 @@ async function setupView(events: unknown[]) {
   } as any)
   const wrapper = mount(Host, {
     global: {
-      plugins: [pinia],
+      plugins: [pinia, i18n],
       components: { NSpin, NButton, NTooltip, NIcon },
       stubs,
     },

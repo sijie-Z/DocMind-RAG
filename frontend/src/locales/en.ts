@@ -635,5 +635,9 @@ export default {
     metricMessages: 'Messages',
     metricDocuments: 'Documents',
     metricRole: 'Current Role'
+  },
+  hitl: {
+    cancelled: 'Cancelled',
+    stopped: 'Stopped'
   }
 };

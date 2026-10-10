@@ -493,5 +493,9 @@ export default {
     metricMessages: 'Messages',
     metricDocuments: 'Documents',
     metricRole: 'Rôle Actuel'
+  },
+  hitl: {
+    cancelled: 'Annulé',
+    stopped: 'Arrêté'
   }
 };

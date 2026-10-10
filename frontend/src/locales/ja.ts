@@ -493,5 +493,9 @@ export default {
     metricMessages: 'メッセージ総数',
     metricDocuments: 'ドキュメント',
     metricRole: '現在の役割'
+  },
+  hitl: {
+    cancelled: 'キャンセル済み',
+    stopped: '停止済み'
   }
 };
