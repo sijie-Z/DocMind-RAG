@@ -47,7 +47,7 @@
         <div v-if="suggestions.length > 0"
           class="absolute top-full left-0 right-0 mt-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-2xl border border-white/20 dark:border-gray-800/50 shadow-2xl z-50 overflow-hidden">
           <div v-for="suggestion in suggestions" :key="suggestion"
-            class="px-6 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/30 cursor-pointer transition-colors text-gray-600 dark:text-gray-300 flex items-center space-x-3"
+            class="px-6 py-3 hover:bg-gray-50 dark:hover:bg-gray-900/30 cursor-pointer transition-colors text-gray-600 dark:text-gray-300 flex items-center space-x-3"
             @click="selectSuggestion(suggestion)">
             <n-icon class="text-gray-400"><time-outline /></n-icon>
             <span>{{ suggestion }}</span>
@@ -117,8 +117,8 @@
               <div class="flex justify-between items-start mb-3">
                 <div class="flex items-center space-x-3">
                   <div
-                    class="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-900/30 flex items-center justify-center">
-                    <n-icon size="22" class="text-slate-500 dark:text-slate-400">
+                    class="w-10 h-10 rounded-xl bg-gray-50 dark:bg-gray-900/30 flex items-center justify-center">
+                    <n-icon size="22" class="text-gray-500 dark:text-gray-400">
                       <component :is="getFileTypeIcon(fileTypeOf(result))" />
                     </n-icon>
                   </div>
