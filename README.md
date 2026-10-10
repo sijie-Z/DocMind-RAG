@@ -360,7 +360,7 @@ DocMind/
 │   │   │   │   ├── extractor.py     #   经验提取器
 │   │   │   │   ├── store.py         #   经验存储
 │   │   │   │   ├── models.py        #   数据模型
-│   │   │   │   └── run_extract.py   #   运行级提取
+│   │   │   │   └── run_extract.py   #   经验引导提取（dev-only：benchmark 跑批后手动执行）
 │   │   │   ├── replay/              #   执行回放
 │   │   │   │   └── engine.py        #   回放引擎
 │   │   │   └── mining/              #   模式挖掘
