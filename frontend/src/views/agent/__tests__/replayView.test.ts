@@ -146,6 +146,28 @@ describe('AgentView · 回放消费面', () => {
     wrapper.unmount()
   })
 
+  it('页面已挂载时深链切换任务必须响应（F2 判别：同路由二次导航）', async () => {
+    // 变异点：深链只在 onMounted 处理（无 route watch）→ 二次导航不切换 → 本用例红
+    apiMocks.getReplay.mockImplementation(async (taskId: string) => ({
+      data: {
+        ...TIMELINE,
+        task_id: taskId,
+        steps: [{ ...TIMELINE.steps[0], description: `任务-${taskId}` }],
+      },
+    }))
+    const { router, wrapper } = await setupAt('/agent?id=first-1')
+    expect(wrapper.findComponent(ReplayTimeline).text()).toContain('任务-first-1')
+
+    // 同路由仅 query 变化（组件不重挂）：等价于页面已打开时再点另一条通知
+    await router.push('/agent?id=second-2')
+    await flushPromises()
+
+    expect(apiMocks.getReplay).toHaveBeenCalledWith('second-2')
+    expect(wrapper.findComponent(ReplayTimeline).text()).toContain('任务-second-2')
+    expect(router.currentRoute.value.query.id).toBe('second-2')
+    wrapper.unmount()
+  })
+
   it('完成运行亮「查看回放」入口；点击打开时间线并写入 URL（可刷新直达）', async () => {
     apiMocks.chat.mockImplementation(async (_q: string, onEvent: (e: any) => void) => {
       onEvent({ type: 'thinking', content: '可用工具: 3 个', task_id: 'run-1' })

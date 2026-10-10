@@ -730,6 +730,25 @@ function handleTaskReplayClick(taskId: string) {
   openReplay(taskId)
 }
 
+// 回放深链：URL ?id=<task_id>（通知点击/分享/刷新）→ 打开时间线（诚实空态兜底）。
+// F2：watch 而非一次性 onMounted——页面**已挂载**时再点别的通知只变 query
+// （同路由、组件不重挂），必须照样切到新任务。
+watch(
+  () => route?.query?.id,
+  (newId) => {
+    if (typeof newId === 'string' && newId) {
+      // 面板已展示同一任务则不重复请求（openReplay 回写 URL 不算切换）
+      if (!(replayOpen.value && replayTaskId.value === newId)) {
+        void openReplay(newId)
+      }
+    } else if (replayOpen.value) {
+      // 深链被移除（浏览器后退等）→ 同步收起面板
+      closeReplay()
+    }
+  },
+  { immediate: true },
+)
+
 async function handleSessionChange(sessionId: string | null) {
   agentStore.setCurrentSession(sessionId)
   if (sessionId) {
@@ -783,11 +802,7 @@ onMounted(async () => {
     await loadInit()
     // HITL：刷新/重连后回到审批现场（last task id 持久化 + 权威状态）
     await restorePendingApproval()
-    // 回放深链：URL 带 task id（通知点击/分享/刷新）→ 直接打开时间线（诚实空态兜底）
-    const deepLinkId = route?.query?.id
-    if (typeof deepLinkId === 'string' && deepLinkId) {
-      await openReplay(deepLinkId)
-    }
+    // 回放深链由 setup 里的 route watch（immediate）统一处理——含已挂载后切换（F2）
   } catch (e) {
     console.error('[Agent] onMounted error:', e)
     initError.value = true
