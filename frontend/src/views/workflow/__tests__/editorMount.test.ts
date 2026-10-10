@@ -20,6 +20,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory, type Router } from 'vue-router'
+import { VueFlow } from '@vue-flow/core'
 import naive, { NMessageProvider } from 'naive-ui'
 
 // jsdom 缺口补齐（仅本文件使用；产品代码合法使用这些浏览器 API）
@@ -112,21 +113,27 @@ function makeRouter(): Router {
   })
 }
 
-async function mountEditor(query = '', opts: { resolveCanvasSlots?: boolean } = {}) {
+async function mountEditor(
+  query = '',
+  opts: { resolveCanvasSlots?: boolean; realCanvas?: boolean } = {}
+) {
   const router = makeRouter()
   await router.push(`/workflow/editor${query}`)
   await router.isReady()
   const wrapper = mount(Host, {
     global: {
       plugins: [naive, sharedPinia, router],
-      stubs: {
-        // VueFlow 画布在 jsdom 下无 viewport 语义，整棵子树直通 stub 掉；
-        // 节点注册用例用「渲染全部 node-* 插槽」的替身验证组件解析
-        VueFlow: opts.resolveCanvasSlots ? VueFlowSlotStub : true,
-        Background: true,
-        Controls: true,
-        MiniMap: true,
-      },
+      stubs: opts.realCanvas
+        ? {}
+        : {
+            // VueFlow 画布在 jsdom 下默认直通 stub（大多数用例只测 setup 生命周期/
+            // 载荷），节点注册用例用「渲染全部 node-* 插槽」的替身；
+            // realCanvas: true 时完全不 stub —— 走真实 vue-flow 渲染层（W1 回归用）
+            VueFlow: opts.resolveCanvasSlots ? VueFlowSlotStub : true,
+            Background: true,
+            Controls: true,
+            MiniMap: true,
+          },
     },
   })
   await flushPromises()
@@ -329,5 +336,30 @@ describe('workflow/editor 保存载荷契约（B11）', () => {
     const payload = vi.mocked(createWorkflow).mock.calls[0][0] as Record<string, unknown>
     expect(payload.name).toBe('流程X')
     expect('engine_type' in payload).toBe(false)
+  })
+})
+
+describe('workflow/editor 画布根组件注册 · 真实渲染层（浏览器复验 W1 回归）', () => {
+  it('快速模板加载后画布真实渲染出 .vue-flow__node（不 stub vue-flow；修复前恒 0）', async () => {
+    // 不提供任何 vue-flow stub —— 完全走真实 @vue-flow/core 渲染层。
+    // 修复前：VueFlow/Background/Controls/MiniMap 未在 editor.vue 绑定 →
+    // 模板解析失败渲染为原生壳元素 <vueflow>，.vue-flow__node 恒 0（W1 实锤）。
+    const wrapper = await mountEditor('', { realCanvas: true })
+    const editorVm = wrapper.findComponent(WorkflowEditor).vm as unknown as {
+      loadTemplate: (_type: string) => void
+    }
+
+    // 根组件真实解析（原生壳元素时代 findComponent 为 false）
+    expect(wrapper.findComponent(VueFlow).exists()).toBe(true)
+
+    editorVm.loadTemplate('rag')
+    await flushPromises()
+    await nextTick()
+    await nextTick()
+
+    // RAG 模板 4 节点真实落进画布 DOM
+    const nodeEls = wrapper.findAll('.vue-flow__node')
+    expect(nodeEls.length).toBeGreaterThanOrEqual(1)
+    expect(nodeEls.length).toBe(4)
   })
 })

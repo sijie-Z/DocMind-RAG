@@ -886,6 +886,16 @@
 
 <script setup lang="ts">
 import { useWorkflowEditor } from './composables/useWorkflowEditor'
+// 画布根组件（4 个）——必须在本文件 import 注册：
+// 此前 VueFlow/Background/Controls/MiniMap 只存在于 useWorkflowEditor.ts 的
+// 死引用里（未 return、editor.vue 解构不到），模板解析失败 → 整块画布渲染为
+// 未解析的原生壳元素（<vueflow>/<background>/…），`.vue-flow__node` 恒 0
+// （浏览器复验 W1 实锤；同「九节点」一族，被此前整页崩溃掩盖）。
+// 模板 <VueFlow> 的 v-model/事件/插槽全部依赖此处绑定，勿再移走。
+import { VueFlow } from '@vue-flow/core'
+import { Background } from '@vue-flow/background'
+import { Controls } from '@vue-flow/controls'
+import { MiniMap } from '@vue-flow/minimap'
 import {
   SaveOutline, PlayOutline, TrashOutline, ExpandOutline, SettingsOutline,
   AppsOutline, LocateOutline, CheckmarkCircleOutline, CloseCircleOutline,

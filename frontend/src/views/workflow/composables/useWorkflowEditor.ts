@@ -2,10 +2,7 @@
 
 import { ref, computed, onMounted, watch, onUnmounted, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { VueFlow, useVueFlow, MarkerType, type Connection } from '@vue-flow/core'
-import { Background } from '@vue-flow/background'
-import { Controls } from '@vue-flow/controls'
-import { MiniMap } from '@vue-flow/minimap'
+import { useVueFlow, MarkerType, type Connection } from '@vue-flow/core'
 import {
   NIcon, NInput, NButton, NInputNumber, NCard, NCollapse, NCollapseItem,
   NDivider, NDrawer, NDrawerContent, NTimeline, NTimelineItem, NTag, NSpin, NProgress,
@@ -26,6 +23,8 @@ import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflowStream, get
 import { agentApi } from '@/api/agent'
 import type { SkillInfo } from '@/types/agent'
 import { useDedupedMessage } from '@/utils/message'
+// 画布根组件（VueFlow/Background/Controls/MiniMap）的 import 归 editor.vue
+// ——模板作用域解析要求绑定在编辑器文件本身（W1 修复）；此处仅保留样式副作用
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
