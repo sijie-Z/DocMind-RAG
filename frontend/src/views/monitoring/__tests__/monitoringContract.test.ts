@@ -14,6 +14,7 @@ import { NMessageProvider } from 'naive-ui'
 import MonitoringView from '../index.vue'
 import { getMonitoringDashboard, getMonitoringAlerts, getMetrics } from '@/api/monitoring'
 import { getAuditLogs } from '@/api/user'
+import request from '@/utils/request'
 import zh from '@/locales/zh'
 
 // echarts 实例捕获（jsdom 无 canvas；M2 将断言 setOption 数据映射）
@@ -204,5 +205,18 @@ describe('MonitoringView · 趋势数据链与诚实空态（B2/B4）', () => {
     const last = reqCalls[reqCalls.length - 1][0] as { series: Array<{ data: unknown[] }> }
     // 不存在的 metrics 键不会被误当数据源（诚实空态），更不会画出 99
     expect(last.series[0].data).toEqual([])
+  })
+})
+
+describe('MonitoringView · 通知服务状态路径（B1）', () => {
+  it('单前缀正确路径 /monitoring/notification/status（旧双前缀 /api/monitoring/... 恒 404）', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    const urls = vi.mocked(request.get).mock.calls.map((c) => String(c[0]))
+    expect(urls).toContain('/monitoring/notification/status')
+    // 不再有任何自带 /api 前缀的原始路径（axios baseURL 已含 /api/v1）
+    expect(urls.some((u) => u.startsWith('/api/'))).toBe(false)
   })
 })

@@ -557,7 +557,10 @@ const loadData = async () => {
     
     // 获取通知服务状态
     try {
-      const notificationResponse = await request.get('/api/monitoring/notification/status')
+      // 单前缀正确路径：axios baseURL 已含 /api/v1（utils/request.ts:140），
+      // 旧写法 /api/monitoring/... 实际请求 /api/v1/api/monitoring/... 恒 404
+      // （A_sweep A4 实锤 404；真实路由 monitoring.py:403-409）
+      const notificationResponse = await request.get('/monitoring/notification/status')
       notificationStatus.value = notificationResponse.data
     } catch (error) {
       // 获取通知服务状态失败
