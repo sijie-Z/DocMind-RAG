@@ -243,7 +243,7 @@ describe('KnowledgeView · 状态标签接线（B16）', () => {
     const stub = wrapper.find('.detail-stub')
     expect(stub.exists()).toBe(true)
     expect(stub.text()).toContain('解析中')
-    expect(stub.text()).not.toContain('已完成')
+    expect(stub.text()).not.toContain('已索引')
   })
 
   it('status=pending 文档打开详情 → 「等待处理」（不谎报终态）', async () => {
@@ -266,7 +266,35 @@ describe('KnowledgeView · 状态标签接线（B16）', () => {
 
     const stub = wrapper.find('.detail-stub')
     expect(stub.text()).toContain('等待处理')
-    expect(stub.text()).not.toContain('已完成')
+    expect(stub.text()).not.toContain('已索引')
+  })
+
+  it('详情接口词表（status=indexed）与列表（completed）统一渲染「已索引」（K1：弹窗曾显示「未知」）', async () => {
+    mockedGetKnowledgeBases.mockResolvedValue(listResponse([{ ...REAL_DOC, status: 'completed' }]) as never)
+    // 详情端点真实返回词表：documents.py:296-303 原样吐 'indexed'
+    mockedGetDocumentDetail.mockResolvedValue({
+      data: { data: { id: 'doc-1', title: 'architecture.md', filename: 'architecture.md', file_size: 1578, file_type: 'word', status: 'indexed' } },
+    } as never)
+    mockedGetDocumentContent.mockResolvedValue({
+      data: { data: { content: '预览内容', summary: '', suggested_tags: [] } },
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    const card = wrapper.findAll('.group').find((g) => g.text().includes('architecture.md'))
+    await card!.findAll('button')[0].trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const stub = wrapper.find('.detail-stub')
+    expect(stub.exists()).toBe(true)
+    // 合并详情后 currentDoc.status='indexed' → 必须与列表 completed 一样渲染「已索引」
+    expect(stub.text()).toContain('已索引')
+    expect(stub.text()).not.toContain('未知')
+    expect(stub.text()).not.toContain('indexed')
+    expect(stub.text()).not.toContain('completed')
   })
 })
 

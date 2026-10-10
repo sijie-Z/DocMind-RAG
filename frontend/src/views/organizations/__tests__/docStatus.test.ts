@@ -38,8 +38,8 @@ describe('orgDocStatus · 与 organizations 端点裸枚举对齐（B20）', () 
     expect(orgDocStatusLabel('pending')).not.toBe('已完成')
   })
 
-  it('兼容知识库端口径：completed → success +「已完成」', () => {
-    expect(orgDocStatusLabel('completed')).toBe('已完成')
+  it('两套词表统一：completed → success +「已索引」（与知识库侧 completed==indexed 同语义）', () => {
+    expect(orgDocStatusLabel('completed')).toBe('已索引')
     expect(orgDocStatusType('completed')).toBe('success')
   })
 

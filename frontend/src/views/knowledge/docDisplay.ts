@@ -23,11 +23,12 @@ export const docIconColor = (fileType: string | null | undefined): string =>
   FILE_TYPE_COLORS[fileType || ''] || FALLBACK_COLOR
 
 /**
- * 文档状态真源：knowledge.py:131-139 status_map 输出的六值域
- *   pending / uploaded / parsing / parsed / completed / failed
- * （后端 DocumentStatus.INDEXED 映射为 'completed'；'processing' 从不存在
- * —— 前端旧判定 `status === 'processing'` 是死路：标签对 pending/parsing
- * 落 else 显示「已完成」(状态撒谎)、轮询 gate 永不成立、stats 恒 0。）
+ * 文档状态真源 —— **两套词表**（浏览器复验 K1 实锤的接口漂移）：
+ * - 列表 GET /knowledge/ 把 INDEXED 改写为 'completed'（knowledge.py:131-139
+ *   status_map）：pending / uploaded / parsing / parsed / completed / failed；
+ * - 详情 GET /documents/{id} 原样吐 'indexed'（documents.py:296-303）——
+ *   详情弹窗合并详情响应后 status 变 'indexed'，此前映射表不含该词 →
+ *   回退「未知」。此处统一：completed / indexed 同一语义，均渲染「已索引」。
  */
 export type DocStatusType = 'success' | 'warning' | 'error' | 'info' | 'default'
 
@@ -36,7 +37,8 @@ const STATUS_LABELS: Record<string, string> = {
   uploaded: '已上传',
   parsing: '解析中',
   parsed: '已解析',
-  completed: '已完成',
+  completed: '已索引',
+  indexed: '已索引', // 详情端点同义词（documents.py:296-303）
   failed: '失败',
 }
 
@@ -46,6 +48,7 @@ const STATUS_TYPES: Record<string, DocStatusType> = {
   parsing: 'warning',
   parsed: 'warning',
   completed: 'success',
+  indexed: 'success',
   failed: 'error',
 }
 

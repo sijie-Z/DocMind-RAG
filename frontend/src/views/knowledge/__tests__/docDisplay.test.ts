@@ -33,27 +33,32 @@ describe('docIconColor · 与后端 DocumentType 枚举对齐（B15）', () => {
   })
 })
 
-describe('文档状态机 · 六值域（B16：processing 从不存在）', () => {
-  it('六值标签逐一正确 —— pending/parsing 绝不再显示「已完成」（状态撒谎修复）', () => {
+describe('文档状态机 · 六值域 + 详情同义词（B16/K1 双词表）', () => {
+  it('标签逐一正确 —— pending/parsing 绝不再显示「已完成」；completed/indexed 统一「已索引」', () => {
     expect(docStatusLabel('pending')).toBe('等待处理')
     expect(docStatusLabel('uploaded')).toBe('已上传')
     expect(docStatusLabel('parsing')).toBe('解析中')
     expect(docStatusLabel('parsed')).toBe('已解析')
-    expect(docStatusLabel('completed')).toBe('已完成')
+    expect(docStatusLabel('completed')).toBe('已索引')
+    // 详情端点词表（documents.py:296-303）：indexed 同一语义，不得回退「未知」
+    expect(docStatusLabel('indexed')).toBe('已索引')
     expect(docStatusLabel('failed')).toBe('失败')
 
-    // 判别：旧实现对它们落 else 分支显示「已完成」
-    expect(docStatusLabel('pending')).not.toBe('已完成')
-    expect(docStatusLabel('parsing')).not.toBe('已完成')
-    expect(docStatusLabel('uploaded')).not.toBe('已完成')
+    // 判别：旧实现对非终态落 else 分支显示「已完成」
+    expect(docStatusLabel('pending')).not.toBe('已索引')
+    expect(docStatusLabel('parsing')).not.toBe('已索引')
+    expect(docStatusLabel('uploaded')).not.toBe('已索引')
+    // 判别：旧映射表不含 indexed → 曾回退「未知」（K1 弹窗现场）
+    expect(docStatusLabel('indexed')).not.toBe('未知')
   })
 
-  it('色档：pending/uploaded=info、parsing/parsed=warning、completed=success、failed=error', () => {
+  it('色档：pending/uploaded=info、parsing/parsed=warning、completed/indexed=success、failed=error', () => {
     expect(docStatusType('pending')).toBe('info')
     expect(docStatusType('uploaded')).toBe('info')
     expect(docStatusType('parsing')).toBe('warning')
     expect(docStatusType('parsed')).toBe('warning')
     expect(docStatusType('completed')).toBe('success')
+    expect(docStatusType('indexed')).toBe('success')
     expect(docStatusType('failed')).toBe('error')
   })
 

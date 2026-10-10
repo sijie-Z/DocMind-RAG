@@ -18,7 +18,7 @@ const STATUS_LABELS: Record<string, string> = {
   parsing: '解析中',
   parsed: '已解析',
   indexed: '已索引',
-  completed: '已完成', // 兼容知识库端口径（INDEXED→completed）
+  completed: '已索引', // 与知识库侧词表统一（completed==indexed 同一语义；K1 双词表修复）
   failed: '失败',
 }
 
