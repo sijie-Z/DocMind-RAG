@@ -265,3 +265,67 @@ class TestParseImage:
 
         assert first is second
         assert created == [1]
+
+    def test_prepare_image_composites_transparent_on_white(self, parser: DocumentParser, tmp_path):
+        """透明底 PNG → 合成白底（评审 M5 缺口：删掉合成分支此前全绿）。
+
+        构造用的是"承载色为黑"的透明像素：不合成、直接 convert("RGB") 会得到
+        黑底，深色文字等于消失；合成后透明区必须是白底、不透明内容原样保留。
+        """
+        from PIL import Image
+
+        png = tmp_path / "transparent.png"
+        img = Image.new("RGBA", (200, 80), (0, 0, 0, 0))  # 全透明（承载色为黑）
+        img.paste(Image.new("RGBA", (60, 30), (0, 0, 0, 255)), (20, 20))  # 不透明黑块
+        img.save(str(png))
+
+        with Image.open(str(png)) as im:
+            prepared = parser._prepare_image(im)
+
+        assert prepared.mode == "RGB"
+        assert prepared.getpixel((5, 5)) == (255, 255, 255)  # 透明区 → 白底
+        assert prepared.getpixel((40, 35)) == (0, 0, 0)  # 不透明内容保留
+
+    @pytest.mark.asyncio
+    async def test_parse_image_real_engine_transparent_png(self, parser: DocumentParser, tmp_path):
+        """透明底文本 PNG（真实引擎）：合白底后文字可被识别（端到端钉住 M5 分支）。"""
+        from PIL import Image, ImageDraw, ImageFont
+
+        png = tmp_path / "transparent_text.png"
+        img = Image.new("RGBA", (900, 200), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.text(
+            (40, 60),
+            "TRANSPARENT OCR 777",
+            fill=(0, 0, 0, 255),
+            font=ImageFont.load_default(size=48),
+        )
+        img.save(str(png))
+
+        result = await parser._parse_image(str(png))
+
+        normalized = result["content"].replace(" ", "").upper()
+        assert "TRANSPARENT" in normalized
+        assert "777" in normalized
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fmt", ["WEBP", "BMP"])
+    async def test_parse_image_real_engine_webp_bmp(
+        self, parser: DocumentParser, tmp_path, fmt
+    ):
+        """WEBP / BMP 各一个真实解析用例（评审缺口：此前只登记了扩展名）。"""
+        from PIL import Image
+
+        src = tmp_path / "ascii.png"
+        _make_text_png(str(src))
+        target = tmp_path / f"ascii.{fmt.lower()}"
+        with Image.open(str(src)) as im:
+            im.save(str(target), fmt)
+
+        result = await parser._parse_image(str(target))
+
+        normalized = result["content"].replace(" ", "").upper()
+        assert "DOCMIND" in normalized
+        assert "12345" in normalized
+        assert result["metadata"]["ocr_engine"] == "rapidocr-onnxruntime"
+        assert 0.0 < result["metadata"]["ocr_avg_score"] <= 1.0
