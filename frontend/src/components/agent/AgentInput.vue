@@ -50,7 +50,7 @@
       </button>
     </div>
     <div class="input-hint">
-      {{ steering ? t('hitl.steerHint') : 'Enter 发送 · Shift+Enter 换行' }}
+      {{ hintOverride || (steering ? t('hitl.steerHint') : 'Enter 发送 · Shift+Enter 换行') }}
     </div>
   </div>
 </template>
@@ -67,6 +67,8 @@ const props = defineProps<{
   stopping?: boolean
   /** A：运行中转向——loading 时显示"发送指导"按钮，Enter 亦发送指导。 */
   steering?: boolean
+  /** 覆盖提示行（如 B：等待计划审批时禁用输入并说明原因；空串回退默认提示）。 */
+  hintOverride?: string
 }>()
 
 const emit = defineEmits<{

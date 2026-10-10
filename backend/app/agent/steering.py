@@ -97,9 +97,15 @@ async def push_steer(task_id: str, message: str) -> int | None:
     """入队一条指导。返回新队列长度；-1 = 缓冲已满；None = 通道不可用。
 
     None 绝不与"已受理"同形：端点据此 503（与取消旗的诚实口径一致）。
+    空白消息（strip 后为空）是**编程错误**——端点层 pydantic 已 422 拦下
+    （评审 MINOR-A：判词 strip 后为空不得入库成空条目）；这里用 ValueError
+    守住模块边界，绝不静默收下会变成"内容为空幻影 steer_applied"的空串。
     """
     if not task_id:
         return None
+    text = (message or "").strip()
+    if not text:
+        raise ValueError("steer 消息不能为空或仅空白")
     try:
         if not redis_client:
             return None
@@ -107,12 +113,12 @@ async def push_steer(task_id: str, message: str) -> int | None:
         pending = await redis_client.llen(key)
         if pending >= MAX_STEER_QUEUE:
             return -1
-        await redis_client.rpush(key, message)
+        await redis_client.rpush(key, text)
         await redis_client.expire(key, STEER_TTL_SECONDS)
         post = await redis_client.llen(key)
         if post > MAX_STEER_QUEUE:
             # 快检与入队之间被并发入队挤爆：撤回本次（尾端匹配）并如实拒绝。
-            await redis_client.lrem(key, -1, message)
+            await redis_client.lrem(key, -1, text)
             return -1
         return post
     except Exception as e:
@@ -133,8 +139,12 @@ async def drain_steers(task_id: str) -> list[str] | None:
         if raw is None:
             return []
         if isinstance(raw, str):
-            return [raw]
-        return [s for s in raw if isinstance(s, str)]
+            entries = [raw]
+        else:
+            entries = [s for s in raw if isinstance(s, str)]
+        # 防御（评审 MINOR-A 同族）：空白条目丢弃——旧写入者/带外写入的产物
+        # 绝不变成内容为空的幻影 steer_applied（空条目对注入与展示都无意义）。
+        return [s for s in entries if s.strip()]
     except Exception as e:
         logger.warning("drain_steers failed (task=%s): %s", log_safe(task_id), log_safe(e))
         return None

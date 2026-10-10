@@ -261,10 +261,11 @@
     <!-- Input -->
     <AgentInput
       :placeholder="'输入复杂任务，Agent 自动规划执行...'"
-      :disabled="false"
+      :disabled="planApprovalPending"
       :loading="agentStore.isLoading"
       :stopping="stopping"
       :steering="steerEnabled"
+      :hint-override="planApprovalPending ? t('hitl.planPendingHint') : ''"
       @send="handleSend"
       @stop="handleStop"
       @steer="handleSteer"
@@ -316,6 +317,13 @@ const steerEnabled = computed(
   () =>
     !!agentStore.taskId &&
     (agentStore.isLoading || agentStore.taskState === 'waiting_approval'),
+)
+
+/** B（评审 MINOR-B）：等待计划审批时输入区闸门——此时发送新消息会清掉任务指针、
+ *  把暂停中的任务丢成孤儿（后端对该状态 steer 也诚实 409）。这里禁用输入并
+ *  提示先处理计划卡（保持后端 409 语义不变，闸门只在前端体验层）。 */
+const planApprovalPending = computed(
+  () => agentStore.taskState === 'waiting_plan_approval' && !!agentStore.taskId,
 )
 
 const showConfig = ref(false)

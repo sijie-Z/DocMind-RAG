@@ -120,6 +120,24 @@ async def test_bounded_reject_when_full_and_no_silent_drop(fake_redis):
     assert drained == [f"m{i}" for i in range(5)], "drain 保序"
 
 
+async def test_push_rejects_blank_message(fake_redis):
+    """评审 MINOR-A：空白消息在模块边界就是编程错误（端点层 422 拦下）——
+    绝不静默收下会变成"内容为空幻影 steer_applied"的空串（变异点：移除
+    空白守卫 → 本用例红）。"""
+    for bad in ("", "   ", "\n\t "):
+        with pytest.raises(ValueError):
+            await steering.push_steer("t-blank", bad)
+    assert fake_redis.lists.get(_key("t-blank")) in (None, []), "空白消息不得入队"
+
+
+async def test_drain_skips_blank_entries(fake_redis):
+    """防御（MINOR-A 同族）：旧写入者/带外写入的空白条目在 drain 时丢弃——
+    该条绝不产出幻影 steer_applied（变异点：删掉过滤 → 本用例红）。"""
+    fake_redis.lists[_key("t-blank2")] = ["", "  ", "正常指导", "\t"]
+    drained = await steering.drain_steers("t-blank2")
+    assert drained == ["正常指导"], "空白条目必须被过滤"
+
+
 async def test_drain_order_and_clear(fake_redis):
     for msg in ("先", "中", "后"):
         await steering.push_steer("t2", msg)

@@ -74,4 +74,19 @@ describe('AgentInput · 运行中转向', () => {
     await steerBtn.trigger('click')
     expect(wrapper.emitted('steer')).toBeUndefined()
   })
+
+  it('评审 MINOR-B：disabled + hintOverride —— 输入禁用、发送禁用、提示替换', async () => {
+    // 场景：B 计划审批等待中——视图层用 disabled 闸门防"发消息丢任务指针"，
+    // 提示行说明该先处理计划卡。
+    const wrapper = mountInput({ disabled: true, hintOverride: '任务正在等待计划审批：请先处理计划卡' })
+    expect(wrapper.find('.agent-textarea').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.send-btn').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.input-hint').text()).toBe('任务正在等待计划审批：请先处理计划卡')
+
+    // 即便尝试输入并回车：disabled 闸门拦下，不 emit send/steer
+    await wrapper.find('.agent-textarea').setValue('x')
+    await wrapper.find('.agent-textarea').trigger('keydown.enter')
+    expect(wrapper.emitted('send')).toBeUndefined()
+    expect(wrapper.emitted('steer')).toBeUndefined()
+  })
 })

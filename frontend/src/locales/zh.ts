@@ -691,6 +691,7 @@ export default {
     planTimeline: '计划待审批',
     planRejectedMessage: '计划已被再次拒绝（重规划机会已用尽），任务已终止',
     planEditInvalid: '编辑内容不合法，请检查步骤（描述/依赖）后重试',
-    planFailed: '计划审批提交失败，已刷新任务状态'
+    planFailed: '计划审批提交失败，已刷新任务状态',
+    planPendingHint: '任务正在等待计划审批：请先在上方计划卡中批准 / 编辑 / 拒绝（或取消任务）'
   }
 };

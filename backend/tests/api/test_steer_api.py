@@ -11,6 +11,7 @@
   恢复步骤提示词携带指导 → 终态 completed 后缓冲清空。
 """
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -282,6 +283,18 @@ async def test_steer_422_on_empty_message(db_factory, fake_redis, client):
     tid = await checkpoint.create_task(user_id=USER_ID, organization_id=1, query="q")
     r = await client.post(f"/api/v1/agent/tasks/{tid}/steer", json={"message": ""})
     assert r.status_code == 422
+
+
+async def test_steer_422_on_blank_message_and_queue_untouched(db_factory, fake_redis, client):
+    """评审 MINOR-A：纯空白消息 strip 后为空——422 明确拒绝（文案含指引），
+    且绝不入队（曾以空串入队 → 步边界幻影 steer_applied；变异点：移除
+    TaskSteerRequest 的空白校验器 → 本用例红）。"""
+    tid = await checkpoint.create_task(user_id=USER_ID, organization_id=1, query="q")
+    r = await client.post(f"/api/v1/agent/tasks/{tid}/steer", json={"message": "   \n\t "})
+    assert r.status_code == 422
+    detail = json.dumps(r.json(), ensure_ascii=False)
+    assert "空白" in detail, "422 必须附明确文案"
+    assert f"agent:task:steer:{tid}" not in fake_redis.lists, "空白消息绝不入队"
 
 
 # ── 全环：暂停 → steer → approve 恢复 → 指导并入执行 ─────────────────────────

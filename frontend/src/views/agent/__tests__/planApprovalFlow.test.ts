@@ -252,6 +252,30 @@ describe('AgentView · 计划审批', () => {
     wrapper.unmount()
   })
 
+  it('评审 MINOR-B：waiting_plan_approval 输入闸门——禁用 + 提示，发送/转向不触网', async () => {
+    const { pinia, store } = setupStore()
+    store.setTaskId('task-plan')
+    store.setTaskState('waiting_plan_approval')
+    store.setPendingPlanApproval(PENDING as any)
+    apiMocks.getTask.mockResolvedValue({
+      data: { success: true, data: { state: 'waiting_plan_approval', plan_approval: PENDING } },
+    })
+
+    const wrapper = await mountView(pinia)
+    const ta = wrapper.find('.agent-textarea')
+    expect(ta.attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.input-hint').text()).toContain('计划审批')
+    expect(wrapper.find('.send-btn').attributes('disabled')).toBeDefined()
+
+    // 尝试输入 + 回车：闸门拦下——不触发新聊天（会丢任务指针）也不触发转向
+    await ta.setValue('试探输入')
+    await ta.trigger('keydown.enter')
+    await flushPromises()
+    expect(apiMocks.chat).not.toHaveBeenCalled()
+    expect(apiMocks.steerTask).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('四语键齐备：hitl.plan*（本特性新增键）', () => {
     const locales: Array<[string, Record<string, any>]> = [
       ['zh', zh], ['en', en], ['ja', ja], ['fr', fr],
@@ -261,6 +285,7 @@ describe('AgentView · 计划审批', () => {
       'planSaveApprove', 'planCancelEdit', 'planReject', 'planRejectNotePlaceholder',
       'planRejectHint', 'planAddStep', 'planRemove', 'planDeps', 'planSubmitting',
       'planTimeline', 'planRejectedMessage', 'planEditInvalid', 'planFailed',
+      'planPendingHint',
     ]
     for (const [code, msg] of locales) {
       const hitl = (msg as any).hitl

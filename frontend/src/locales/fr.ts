@@ -522,6 +522,7 @@ export default {
     planTimeline: "Plan en attente d'approbation",
     planRejectedMessage: 'Le plan a de nouveau été rejeté (plus de replanification possible) ; la tâche est terminée',
     planEditInvalid: 'Le contenu modifié est invalide — vérifiez les descriptions/dépendances puis réessayez',
-    planFailed: "Échec de l'envoi de la décision ; état de la tâche actualisé"
+    planFailed: "Échec de l'envoi de la décision ; état de la tâche actualisé",
+    planPendingHint: "La tâche attend l'approbation du plan — approuvez / modifiez / rejetez d'abord le plan ci-dessus (ou annulez la tâche)"
   }
 };

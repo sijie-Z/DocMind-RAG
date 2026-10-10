@@ -26,7 +26,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -844,6 +844,16 @@ class TaskSteerRequest(BaseModel):
         description="运行中指导：下一个步边界注入后续步骤提示词（不打断当前步骤）",
     )
 
+    @field_validator("message")
+    @classmethod
+    def _message_not_blank(cls, value: str) -> str:
+        """判词 strip 后不得为空（评审 MINOR-A：纯空格消息曾以空串入队，
+        步边界冒出内容为空的幻影 steer_applied）。422 明确拒绝 + 归一化。"""
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("指导内容不能为空或仅空白")
+        return stripped
+
 
 @router.post("/tasks/{task_id}/steer")
 async def steer_agent_task(
@@ -880,7 +890,7 @@ async def steer_agent_task(
             f"（仅 running / waiting_approval）",
             detail={"task_id": task_id, "state": task.status.value},
         )
-    pending = await steering.push_steer(task_id, body.message.strip())
+    pending = await steering.push_steer(task_id, body.message)  # 已由校验器 strip
     if pending is None:
         raise ServiceUnavailableError("转向通道暂不可用（协调存储不可达），请稍后重试")
     if pending < 0:

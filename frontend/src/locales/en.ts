@@ -664,6 +664,7 @@ export default {
     planTimeline: 'Plan awaiting approval',
     planRejectedMessage: 'The plan was rejected again (no re-plan attempts left); the task has been terminated',
     planEditInvalid: 'The edited content is invalid — check step descriptions/dependencies and retry',
-    planFailed: 'Failed to submit the plan decision; task state refreshed'
+    planFailed: 'Failed to submit the plan decision; task state refreshed',
+    planPendingHint: 'The task is awaiting plan approval — approve / edit / reject the plan above first (or cancel the task)'
   }
 };
