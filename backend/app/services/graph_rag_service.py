@@ -263,10 +263,22 @@ JSON返回："""
     def _normalize_entity(self, entity: str) -> str:
         return hashlib.md5(entity.lower().encode(), usedforsecurity=False).hexdigest()[:16]
 
-    async def search_graph(self, query: str, organization_id: int = 1, max_hops: int = 2) -> list[dict[str, Any]]:
+    async def search_graph(
+        self, query: str, organization_id: int = 1, max_hops: int = 2, llm_client: Any = None
+    ) -> list[dict[str, Any]]:
         await self.load(organization_id)
         graph = self._graph_for(organization_id)
-        query_entities = await self.extract_entities_with_llm(query)
+        if llm_client is None:
+            # 缺口收口：此前唯一调用点不传 llm_client → 查询实体识别恒走规则回退。
+            # 拿不到真实客户端时降级为 None（规则回退），不阻断查询。
+            try:
+                from app.services.rag_service import rag_service
+
+                llm_client = rag_service.openai_client
+            except Exception as e:
+                logger.warning(f"GraphRAG search: llm client unavailable: {e}")
+                llm_client = None
+        query_entities = await self.extract_entities_with_llm(query, llm_client=llm_client)
         if not query_entities:
             return []
 
