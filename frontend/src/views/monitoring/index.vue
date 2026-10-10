@@ -288,7 +288,10 @@ const kbMetrics = reactive<KnowledgeBaseMetrics>({
 })
 
 const recentAlerts = ref<Alert[]>([])
-const activeAlerts = computed(() => recentAlerts.value.filter(alert => alert.timestamp > Date.now() - 3600000))
+// 后端 alerts 的 timestamp 是秒级 int(time.time())（monitoring.py:175-184；
+// 表格列同样按秒处理 *1000），此前直接与毫秒 Date.now() 比较 → 恒 false →
+// 「活动告警」卡恒 0 且恒「正常」，与下方表格 active 行同屏矛盾。统一按毫秒换算。
+const activeAlerts = computed(() => recentAlerts.value.filter(alert => alert.timestamp * 1000 > Date.now() - 3600000))
 const hasAlerts = computed(() => activeAlerts.value.length > 0)
 const hasCriticalAlerts = computed(() => activeAlerts.value.some(alert => alert.level === 'critical'))
 const hasWarningAlerts = computed(() => activeAlerts.value.some(alert => alert.level === 'warning'))

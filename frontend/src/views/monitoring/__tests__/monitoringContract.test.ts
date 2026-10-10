@@ -1,0 +1,131 @@
+/**
+ * 监控页数据契约判别用例（UI 验收 round2 · 复用挂载基座）。
+ *
+ * - M1（B3）：活动告警卡秒/毫秒单位漂移 —— 恒 0 且恒「正常」，与下方表格
+ *   active 行同屏矛盾（A_sweep A4 实锤）。本提交覆盖。
+ * - M2（B2/B4）、M3（B1）按提交次序在本文件生长。
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
+import { defineComponent, h, nextTick } from 'vue'
+import { createI18n } from 'vue-i18n'
+import { NMessageProvider } from 'naive-ui'
+
+import MonitoringView from '../index.vue'
+import { getMonitoringDashboard, getMonitoringAlerts, getMetrics } from '@/api/monitoring'
+import { getAuditLogs } from '@/api/user'
+import zh from '@/locales/zh'
+
+// echarts 实例捕获（jsdom 无 canvas；M2 将断言 setOption 数据映射）
+const { chartInstances } = vi.hoisted(() => ({
+  chartInstances: [] as Array<Record<string, ReturnType<typeof vi.fn>>>,
+}))
+
+vi.mock('@/utils/echarts', () => ({
+  default: {
+    init: vi.fn(() => {
+      const chart = { setOption: vi.fn(), dispose: vi.fn(), resize: vi.fn() }
+      chartInstances.push(chart)
+      return chart
+    }),
+  },
+}))
+vi.mock('@/api/monitoring', () => ({
+  getMonitoringDashboard: vi.fn(),
+  getMonitoringAlerts: vi.fn(),
+  getMetrics: vi.fn(),
+}))
+vi.mock('@/api/user', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/user')>()
+  return { ...actual, getAuditLogs: vi.fn() }
+})
+vi.mock('@/utils/request', () => ({
+  default: {
+    get: vi.fn().mockResolvedValue({ data: { status: 'active', enabled_channels: ['email', 'system'] } }),
+  },
+}))
+
+const SlotStub = (name: string) =>
+  defineComponent({ name, setup(_, { slots }) { return () => h('div', slots.default?.()) } })
+
+const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
+
+const Host = defineComponent({
+  render: () => h(NMessageProvider, null, { default: () => h(MonitoringView) }),
+})
+
+function mountView() {
+  return mount(Host, {
+    global: {
+      plugins: [i18n],
+      stubs: { Tag: SlotStub('Tag') },
+    },
+  })
+}
+
+// 秒级时间戳（后端真实口径：monitoring.py:175-184 int(time.time())）
+const nowSec = Math.floor(Date.now() / 1000)
+
+const dashboardFixture = () => ({
+  data: {
+    current: {
+      system: { cpu_percent: 20, memory_percent: 50, disk_usage: { C: 50 }, process_count: 100, load_average: [] },
+      application: { active_connections: 1, request_count: 10, error_count: 0, response_time: 12, elasticsearch_health: 'green' },
+      knowledge_base: { total_documents: 1, total_chunks: 5, index_size_mb: 0.1, search_requests: 10 },
+    },
+    trends: { system: [], application: [], knowledge_base: [] },
+    alerts: [],
+    timestamp: nowSec,
+  },
+})
+
+const alertFixture = (level: 'info' | 'warning' | 'critical', timestamp: number) => ({
+  alerts: [{ type: 'system', level, message: 'CPU 使用率过高', timestamp, status: 'active' }],
+  total: 1,
+})
+
+enableAutoUnmount(afterEach)
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  chartInstances.length = 0
+  vi.mocked(getMonitoringDashboard).mockResolvedValue(dashboardFixture() as never)
+  vi.mocked(getMonitoringAlerts).mockResolvedValue({ data: { alerts: [], total: 0 } } as never)
+  vi.mocked(getMetrics).mockResolvedValue({ data: { data: [] } } as never)
+  vi.mocked(getAuditLogs).mockResolvedValue({ data: { success: true, data: { items: [], total: 0 } } } as never)
+})
+
+describe('MonitoringView · 活动告警卡单位（B3）', () => {
+  it('秒级时间戳的 1 小时内 critical 告警 → 卡显示 1 +「严重」徽标（不再恒 0/恒正常）', async () => {
+    vi.mocked(getMonitoringAlerts).mockResolvedValue({
+      data: alertFixture('critical', nowSec - 60),
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    // 活动告警计数（该卡数字是页面唯一 text-3xl）
+    expect(wrapper.find('.text-3xl').text()).toBe('1')
+    // 旧实现（毫秒阈值）：恒 0 且只出「正常」；修复后出「严重」
+    expect(wrapper.text()).toContain('严重')
+    expect(wrapper.text()).not.toContain('正常')
+    expect(wrapper.text()).toContain('活动告警')
+    // i18n 裸键哨兵（monitoring.* 补键后可渲染中文而非键名）
+    expect(wrapper.text()).not.toContain('monitoring.')
+  })
+
+  it('超过 1 小时的旧告警（秒级）不计入活动告警 → 显示「正常」', async () => {
+    vi.mocked(getMonitoringAlerts).mockResolvedValue({
+      data: alertFixture('info', nowSec - 7200),
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('.text-3xl').text()).toBe('0')
+    expect(wrapper.text()).toContain('正常')
+    expect(wrapper.text()).not.toContain('严重')
+  })
+})
