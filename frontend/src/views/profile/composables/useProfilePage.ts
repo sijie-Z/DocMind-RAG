@@ -51,16 +51,17 @@ interface UserInfo {
   id: number
   username: string
   email: string
-  nickname?: string
-  full_name?: string
-  phone?: string
-  avatar?: string
-  avatar_url?: string
+  nickname?: string | null
+  full_name?: string | null
+  phone?: string | null
+  avatar?: string | null
+  avatar_url?: string | null
   role: 'admin' | 'user'
-  status: 'active' | 'inactive'
-  bio?: string
-  created_at: string
-  last_login_at?: string
+  // /users/me 无 status 字段（真身 is_active）；保留可选以免牵连既有初始化
+  status?: 'active' | 'inactive'
+  bio?: string | null
+  created_at: string | null
+  last_login_at?: string | null
 }
 
 interface UserStats {
@@ -740,7 +741,7 @@ const loadUserProfile = async () => {
       userInfo.value = {
         ...data,
         nickname: data.nickname || data.full_name || data.username,
-        avatar: data.avatar_url
+        avatar: data.avatar_url ?? undefined
       }
       
       // 设置 API Key

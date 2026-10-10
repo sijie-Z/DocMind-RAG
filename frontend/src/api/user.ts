@@ -27,10 +27,27 @@ export interface UserListResponse {
   users: User[]
 }
 
-export interface UserProfileResponse extends User {
-  bio?: string
-  preferences?: Record<string, unknown>
-  api_key?: string
+/**
+ * GET /users/me 的真实形状（users.py:429-446）：含 nickname/avatar_url/bio/
+ * api_key/preferences，无 status（真身 is_active 布尔）；与列表 item 形状不同，
+ * 不继承列表的 User。
+ */
+export interface UserProfileResponse {
+  id: number
+  username: string
+  email: string
+  full_name: string | null
+  nickname: string | null
+  phone: string | null
+  avatar_url: string | null
+  bio: string | null
+  organization_id: number | null
+  role: 'admin' | 'user'
+  is_active: boolean
+  created_at: string | null
+  last_login_at: string | null
+  preferences?: Record<string, unknown> | null
+  api_key?: string | null
 }
 
 export interface AuditLogEntry {
