@@ -36,6 +36,11 @@ defusedxml>=0.7.1
 docx2txt>=0.8
 openpyxl>=3.1.5
 unstructured>=0.11.0
+# 图片 OCR（PNG/JPG/WEBP/BMP/GIF 首帧 → 文本 → 现有 chunk/嵌入/索引管道）。
+# 纯 CPU onnxruntime 推理、零系统依赖（不需要 tesseract）。钉 1.4.4：2026-10
+# 实测版本（py3.12 / numpy 2.5 / Pillow 12 可装，uv dry-run 确认其传递依赖
+# onnxruntime/opencv-python/shapely/pyclipper/flatbuffers 均为新增、不动既有包）。
+rapidocr-onnxruntime==1.4.4
 python-magic>=0.4.27; sys_platform != 'win32'
 python-magic-bin>=0.4.14; sys_platform == 'win32'
 python-jose[cryptography]>=3.5.0

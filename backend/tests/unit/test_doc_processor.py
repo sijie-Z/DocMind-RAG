@@ -146,8 +146,9 @@ def _make_image_doc(tmp_path, monkeypatch, engine_result):
     """
     import shutil
 
-    import app.services.document_parser as parser_mod
     from PIL import Image
+
+    import app.services.document_parser as parser_mod
 
     png = tmp_path / "photo.png"
     Image.linear_gradient("L").convert("RGB").resize((320, 200)).save(str(png))
