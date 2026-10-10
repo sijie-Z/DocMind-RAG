@@ -152,7 +152,10 @@ class AgentService:
                 # 全败）按标志如实置 FAILED 而不是 COMPLETED。
                 # HITL：审批暂停绝不置终态（状态已在暂停点置 waiting_approval，
                 # 人类应答经 approval 端点续跑）；协作式取消收敛为 CANCELLED。
-                if getattr(agent, "paused_for_approval", False):
+                # B：计划审批暂停（waiting_plan_approval）同语义——等人类决策。
+                if getattr(agent, "paused_for_approval", False) or getattr(
+                    agent, "paused_for_plan_approval", False
+                ):
                     pass
                 elif getattr(agent, "run_cancelled", False):
                     cancel_event = await self._finalize_task_cancelled(task_id)
@@ -185,7 +188,9 @@ class AgentService:
 
         - 404：任务不存在 / 非本人 / 组织不一致（TaskNotFoundError）；
         - 409：已终态（TaskNotResumableError，detail 回带当前 state）/ 并发 resume
-          正持有租约（TaskBusyError）；
+          正持有租约（TaskBusyError）/ **B：正在等待计划审批
+          （TaskWaitingPlanApprovalError——直连 resume 会让未获批准的计划被执行，
+          必须经 plan-approval 端点应答）**；
         - 成功 = 已拿租约并把状态推进到 RUNNING（retry_count += 1），返回 (task, payload)。
         """
         task, payload = await checkpoint.load_for_resume(
@@ -194,6 +199,13 @@ class AgentService:
         if task.is_terminal:
             raise checkpoint.TaskNotResumableError(
                 f"任务已处于终态 {task.status.value}，不可恢复",
+                detail={"task_id": task_id, "state": task.status.value},
+            )
+        if task.status == TaskStatus.WAITING_PLAN_APPROVAL:
+            # B：审批门不许绕过——resume 的语义是"续跑已批准的计划"，而此处
+            # 计划尚未获批；loop 侧另有重挂起兜底（深度防御，两道闸都开着）。
+            raise checkpoint.TaskWaitingPlanApprovalError(
+                "任务正在等待计划审批，请先经 plan-approval 应答（批准/编辑/拒绝）",
                 detail={"task_id": task_id, "state": task.status.value},
             )
         # 认领：Redis 租约 + RUNNING→FAILED→RUNNING（陈旧 RUNNING 接管）等状态流转。
@@ -270,7 +282,10 @@ class AgentService:
             # issue #301 批 A #10/#11：同 chat 路径——消费 mark_terminal 返回值，
             # 写失败必显形、run 级失败如实置 FAILED。
             # HITL：resume 流还可能再次暂停（多审批循环）/被取消——语义同 chat。
-            if getattr(agent, "paused_for_approval", False):
+            # B：计划审批暂停（再次停在计划卡）同语义。
+            if getattr(agent, "paused_for_approval", False) or getattr(
+                agent, "paused_for_plan_approval", False
+            ):
                 pass
             elif getattr(agent, "run_cancelled", False):
                 cancel_event = await self._finalize_task_cancelled(task_id)

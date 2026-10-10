@@ -91,6 +91,19 @@ class TaskNotCancellableError(ConflictError):
     message = "任务已处于终态，无法取消"
 
 
+class TaskNotWaitingPlanApprovalError(ConflictError):
+    """任务不在 waiting_plan_approval（或没有待审批计划），计划审批应答无处安放。"""
+    error_code = "TASK_NOT_WAITING_PLAN_APPROVAL"
+    message = "任务当前没有待审批的计划"
+
+
+class TaskWaitingPlanApprovalError(ConflictError):
+    """任务正在等待计划审批：直连 resume 被拒——必须经 plan-approval 端点应答
+    （否则计划会在未获人类批准的情况下被执行，审批门形同虚设）。"""
+    error_code = "TASK_WAITING_PLAN_APPROVAL"
+    message = "任务正在等待计划审批，请先批准/编辑/拒绝该计划"
+
+
 def _lock_key(task_id: str) -> str:
     return f"agent:task:lock:{task_id}"
 
@@ -573,6 +586,292 @@ async def apply_approval_decision(
             "可经 resume 重新发起审批",
             detail={"task_id": task_id, "state": "failed", "error_type": "approval_timeout"},
         )
+    except Exception:
+        await release_task(task_id)
+        raise
+
+
+# ── B：计划审批（plan_approval_mode=always 的暂停/决策写路径）────────────────
+#
+# 语义（与 approval 门正交：审批门拦"工具行动"，计划审批拦"整版计划"）：
+# - 暂停：loop 在 planner 产出计划后调 mark_waiting_plan_approval，任务态
+#   RUNNING→WAITING_PLAN_APPROVAL，等人类决策；
+# - approve：照计划执行（resume 复用既有链）；
+# - edit：校验后的步骤**整体替换**快照计划的步骤再执行（白名单字段：
+#   id/description/dependencies/tool_hint；非法输入在端点层即 422）；
+# - reject：**带理由重规划一次**——写 run_state.plan_reject_replan 标记，
+#   resume 的 loop 放弃被拒计划、把理由作为 replan_feedback 重新规划；
+#   第二次拒绝 → 终态 REJECTED（重规划只给一次机会，见 request 语义；
+#   "再拒即终态"，不再无限重规划）。
+MAX_PLAN_APPROVAL_REJECTIONS = 1
+
+
+def _build_edited_steps(edited_steps: list | None) -> list[dict[str, Any]]:
+    """编辑步骤的服务端独立校验 + 快照形状重建（白名单字段）。
+
+    与 PlanStep.from_checkpoint_dict 的读取形状全等：编辑 = 用人类给定的
+    步骤**整体替换**计划步骤（未提供字段取安全默认：pending / auto_retry /
+    low）。端点层 pydantic 已做同一组结构校验（422）；这里是端点豁免路径
+    （服务层直调）的第二道闸门——绝不把未校验的人类输入写进快照。
+    """
+    steps: list[dict[str, Any]] = []
+    for item in edited_steps or []:
+        if not isinstance(item, dict):
+            raise ValueError("edited_steps 的每个元素必须是对象")
+        sid = str(item.get("id") or "").strip()
+        desc = str(item.get("description") or "").strip()
+        if not sid:
+            raise ValueError("每个步骤必须携带非空 id")
+        if not desc:
+            raise ValueError(f"步骤 {sid} 必须携带非空 description")
+        deps = []
+        for d in item.get("dependencies") or []:
+            d_str = str(d).strip()
+            if d_str:
+                deps.append(d_str)
+        tool_hint = item.get("tool_hint")
+        steps.append({
+            "id": sid[:36],
+            "description": desc[:2000],
+            "dependencies": deps,
+            "tool_hint": (str(tool_hint).strip()[:100] or None) if tool_hint else None,
+            "status": "pending",
+            "result": None,
+            "error_context": None,
+            "retry_count": 0,
+            "parallel_group": None,
+            "risk_level": "low",
+            "retry_strategy": "auto_retry",
+            "fallback_tool": None,
+        })
+    if not steps:
+        raise ValueError("edited_steps 不能为空（至少 1 个步骤）")
+    ids = [s["id"] for s in steps]
+    if len(set(ids)) != len(ids):
+        raise ValueError("edited_steps 的 id 必须唯一")
+    idset = set(ids)
+    for s in steps:
+        unknown = [d for d in s["dependencies"] if d not in idset]
+        if unknown:
+            raise ValueError(f"步骤 {s['id']} 的 dependencies 引用了不存在的步骤: {unknown}")
+        if s["id"] in s["dependencies"]:
+            raise ValueError(f"步骤 {s['id']} 不能依赖自身")
+    return steps
+
+
+async def mark_waiting_plan_approval(task_id: str | None) -> bool:
+    """把任务推进到 waiting_plan_approval（RUNNING→…，经状态机）；幂等。
+
+    成功即释放 resume 租约（暂停的 run 已把状态所有权交还给人类决策——与
+    mark_waiting_approval 同款释放纪律）。失败只记 warning、返回 False：
+    调用方（loop 的暂停点）据此走"无法持久化 → 不制造假暂停"降级。
+    """
+    if not task_id:
+        return False
+    try:
+        async with AsyncSessionLocal() as db:
+            task = await _load_task_row(db, task_id)
+            if task is None:
+                return False
+            if task.status == TaskStatus.WAITING_PLAN_APPROVAL:
+                return True  # 幂等（重入同一暂停点）
+            if task.is_terminal:
+                logger.warning(
+                    "mark_waiting_plan_approval 拒绝：任务 %s 已终态 %s",
+                    log_safe(task_id), task.status.value,
+                )
+                return False
+            try:
+                task.transition(TaskStatus.WAITING_PLAN_APPROVAL)
+            except ValueError as e:
+                logger.warning(
+                    "mark_waiting_plan_approval 拒绝非法转换 (task=%s): %s",
+                    log_safe(task_id), log_safe(e),
+                )
+                return False
+            await db.commit()
+    except Exception as e:
+        logger.warning("mark_waiting_plan_approval 写入失败 (task=%s): %s", log_safe(task_id), log_safe(e))
+        return False
+    await release_task(task_id)
+    return True
+
+
+async def get_pending_plan_approval(task_id: str) -> dict[str, Any] | None:
+    """只读取快照 run_state.pending_plan_approval（GET 状态视图用）。
+
+    容错同 get_pending_approval：快照缺失/损坏/无 pending → None（安全降级）。
+    """
+    raw_snapshot: Any | None = None
+    try:
+        async with AsyncSessionLocal() as db:
+            cursor = await db.execute(
+                select(AgentTask.context_snapshot).where(AgentTask.id == task_id)
+            )
+            raw_snapshot = cursor.scalar_one_or_none()
+    except (TypeError, ValueError) as e:
+        logger.warning(
+            "checkpoint 快照列反序列化失败（task=%s，读 pending_plan_approval）：%s",
+            log_safe(task_id), log_safe(e),
+        )
+        return None
+    except Exception as e:
+        logger.debug("get_pending_plan_approval 读取失败 (task=%s): %s", log_safe(task_id), log_safe(e))
+        return None
+    envelope = parse_snapshot(raw_snapshot)
+    if envelope is None:
+        return None
+    run_state = envelope.get("run")
+    pending = run_state.get("pending_plan_approval") if isinstance(run_state, dict) else None
+    return pending if isinstance(pending, dict) else None
+
+
+async def apply_plan_approval_decision(
+    *,
+    task_id: str,
+    user_id: int,
+    organization_id: int | None = None,
+    decision: str,
+    edited_steps: list | None = None,
+    note: str | None = None,
+) -> tuple[AgentTask, dict[str, Any] | None, dict[str, Any]]:
+    """计划审批应答的同步预检 + 记账 + 认领（端点在开流之前调用）。
+
+    单写者顺序：拿租约 → 读行/快照 → 校验（waiting_plan_approval + 有 pending）
+    → 记账 → WAITING_PLAN_APPROVAL→RUNNING（retry_count += 1）→ 返回
+    (task, envelope, record)。任何失败路径都释放租约。
+
+    - approve：弹掉 pending（= 计划获准，resume 直接执行）；
+    - edit：_build_edited_steps 校验后整体替换快照 plan.steps（弹掉 pending）；
+    - reject#1：弹掉 pending + run_state.plan_reject_replan=理由 → 回 RUNNING，
+      调用方续跑 resume 流（loop 放弃被拒计划、带理由重规划）；
+    - reject#2（重规划额度已用尽）：终态 REJECTED + last_error 记拒绝理由
+      （诚实的失败原因：不是 failed、不是 cancelled——是"人类看过，不要"）；
+      record["terminal"]=True，**无流可续**，调用方回 JSON 而非 SSE。
+
+    409 语义（AppError 子类）：终态 → TaskNotResumableError；非
+    waiting_plan_approval / 无 pending / 快照损坏 → TaskNotWaitingPlanApprovalError；
+    并发（租约被持有）→ TaskBusyError。
+    """
+    if decision not in ("approve", "edit", "reject"):
+        raise ValueError(f"非法计划审批决定: {decision!r}")
+    if not await claim_task(task_id):
+        raise TaskBusyError("任务正在被另一个恢复请求处理")
+    try:
+        async with AsyncSessionLocal() as db:
+            task = await _load_task_row(db, task_id)
+            _check_task_access(task, user_id=user_id, organization_id=organization_id)
+            if task.is_terminal:
+                raise TaskNotResumableError(
+                    f"任务已处于终态 {task.status.value}，无待审批计划可应答",
+                    detail={"task_id": task_id, "state": task.status.value},
+                )
+            if task.status != TaskStatus.WAITING_PLAN_APPROVAL:
+                raise TaskNotWaitingPlanApprovalError(
+                    f"任务当前状态为 {task.status.value}，没有待审批的计划",
+                    detail={"task_id": task_id, "state": task.status.value},
+                )
+            raw_snapshot: Any | None = None
+            try:
+                cursor = await db.execute(
+                    select(AgentTask.context_snapshot).where(AgentTask.id == task_id)
+                )
+                raw_snapshot = cursor.scalar_one_or_none()
+            except (TypeError, ValueError) as e:
+                logger.warning(
+                    "checkpoint 快照列反序列化失败（task=%s，计划审批记账）：%s",
+                    log_safe(task_id), log_safe(e),
+                )
+            envelope = parse_snapshot(raw_snapshot)
+            if envelope is None:
+                raise TaskNotWaitingPlanApprovalError(
+                    "任务快照缺失/损坏，无法关联待审批计划",
+                    detail={"task_id": task_id, "state": task.status.value},
+                )
+            run_state = envelope.get("run")
+            pending = (
+                run_state.get("pending_plan_approval")
+                if isinstance(run_state, dict) else None
+            )
+            if not isinstance(pending, dict):
+                raise TaskNotWaitingPlanApprovalError(
+                    "没有待审批的计划（可能已被应答）",
+                    detail={"task_id": task_id, "state": task.status.value},
+                )
+            plan_data = envelope.get("plan")
+            if not isinstance(plan_data, dict):
+                raise TaskNotWaitingPlanApprovalError(
+                    "任务快照缺少计划，无法应答",
+                    detail={"task_id": task_id, "state": task.status.value},
+                )
+
+            now_iso = datetime.utcnow().isoformat() + "Z"
+            record: dict[str, Any] = {
+                "decision": decision,
+                "plan_id": pending.get("plan_id") or plan_data.get("id"),
+                "step_count": len(pending.get("steps") or []),
+                "note": (str(note).strip()[:500] or None) if note else None,
+                "decided_by": user_id,
+                "decided_at": now_iso,
+            }
+
+            if decision in ("approve", "edit"):
+                if decision == "edit":
+                    new_steps = _build_edited_steps(edited_steps)
+                    replaced_plan = dict(plan_data)
+                    replaced_plan["steps"] = new_steps
+                    envelope["plan"] = replaced_plan
+                    record["edited_step_count"] = len(new_steps)
+                run_state.pop("pending_plan_approval", None)
+                envelope["run"] = run_state
+                envelope["updated_by"] = f"plan_{decision}"
+                task.context_snapshot = envelope
+                task.transition(TaskStatus.RUNNING)
+                task.retry_count += 1
+                await db.commit()
+                return task, envelope, record
+
+            # ── reject ──
+            rejections = int(run_state.get("plan_approval_rejections") or 0) + 1
+            run_state["plan_approval_rejections"] = rejections
+            run_state.pop("pending_plan_approval", None)
+            envelope["run"] = run_state
+            if rejections > MAX_PLAN_APPROVAL_REJECTIONS:
+                # 第二次拒绝：终态 REJECTED（重规划机会已用尽——绝不无限重规划）。
+                envelope["updated_by"] = "plan_reject_terminal"
+                task.context_snapshot = envelope
+                task.transition(TaskStatus.REJECTED)
+                reason = record["note"] or "（未附理由）"
+                task.last_error = (
+                    f"计划被用户拒绝（第 {rejections} 次，重规划上限 "
+                    f"{MAX_PLAN_APPROVAL_REJECTIONS} 次）：{reason}"
+                )[:2000]
+                task.last_error_type = "plan_rejected"
+                await db.commit()
+                record.update({
+                    "terminal": True,
+                    "rejections": rejections,
+                    "message": "计划已再次被拒绝，重规划机会已用尽，任务终止（rejected）",
+                })
+                # 终态收尾纪律与 mark_terminal 一致：释放租约 + 清转向缓冲。
+                await release_task(task_id)
+                await steering.clear_steers(task_id)
+                return task, envelope, record
+            # 第一次拒绝：带理由重规划一次（run_state 标记 → resume 的 loop 消费）。
+            run_state["plan_reject_replan"] = {
+                "feedback": record["note"] or (
+                    "用户拒绝了上一个计划，但未附理由；请重新规划：保持目标不变，"
+                    "换一种步骤分解思路，避免与上一版雷同"
+                ),
+                "at": now_iso,
+            }
+            envelope["updated_by"] = "plan_reject_replan"
+            task.context_snapshot = envelope
+            task.transition(TaskStatus.RUNNING)
+            task.retry_count += 1
+            await db.commit()
+            record.update({"rejections": rejections, "replan": True})
+            return task, envelope, record
     except Exception:
         await release_task(task_id)
         raise

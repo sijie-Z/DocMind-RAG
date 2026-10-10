@@ -85,6 +85,19 @@ def _smart_truncate(result: str, tool_name: str) -> str:
     return result[:MAX_RESULT_TOKENS * 2] + "\n...[result truncated]"
 
 
+def _plan_steps_payload(plan: Plan) -> list[dict[str, Any]]:
+    """B：计划审批载荷的结构化步骤（人类决策所需字段的子集）。"""
+    return [
+        {
+            "id": s.id,
+            "description": s.description,
+            "dependencies": list(s.dependencies),
+            "tool_hint": s.tool_hint,
+        }
+        for s in plan.steps
+    ]
+
+
 DEFAULT_SYSTEM_PROMPT = """你是 DocMind 智能助手，一个基于企业知识库的 AI Agent。
 
 ## 能力
@@ -156,14 +169,16 @@ class PERAgentLoop:
         # ── HITL（app/agent/approval.py）────────────────────────────────
         # cancel_check 由 service 接线（task 级取消旗查询）；审批暂停回调是
         # loop 自身方法（需要 checkpoint_live）。run() 起始处重置暂停/取消标志：
-        #   paused_for_approval — 本 run 因审批暂停（service 据此绝不置终态）；
-        #   run_cancelled       — 本 run 经协作式取消收敛（service 据此置 CANCELLED）；
-        #   approval_decisions  — resume 从快照回填的粘滞决定账本；
-        #   human_guidance      — "改指令续跑"的人工指导（注入步骤提示词）。
+        #   paused_for_approval     — 本 run 因工具审批暂停（service 据此绝不置终态）；
+        #   paused_for_plan_approval— 本 run 因计划审批暂停（B；同上语义）；
+        #   run_cancelled           — 本 run 经协作式取消收敛（service 据此置 CANCELLED）；
+        #   approval_decisions      — resume 从快照回填的粘滞决定账本；
+        #   human_guidance          — "改指令续跑"/运行中转向的人工指导（注入步骤提示词）。
         self.cancel_check: Callable[[], Awaitable[bool]] | None = None
         self.approval_decisions: list[dict[str, Any]] = []
         self.human_guidance: str = ""
         self.paused_for_approval: bool = False
+        self.paused_for_plan_approval: bool = False
         self.pending_approval: dict[str, Any] | None = None
         self.run_cancelled: bool = False
 
@@ -291,6 +306,7 @@ class PERAgentLoop:
         self.approval_decisions = []
         self.human_guidance = ""
         self.paused_for_approval = False
+        self.paused_for_plan_approval = False
         self.pending_approval = None
         self.run_cancelled = False
 
@@ -302,6 +318,9 @@ class PERAgentLoop:
         partial_prefix = ""
         replan_feedback = ""
         replan_attempts = 0
+        # B：计划审批的 resume 语义载体——未决计划（应重挂起）与拒绝重规划理由。
+        pending_plan_approval: dict[str, Any] | None = None
+        force_replan_feedback = ""
         # HITL（S4 修复）：resume 信封的 run_state 里承载着跨暂停周期的状态
         # （approval_decisions / steering 等，见下方 run_state_live 的合并写）。
         # 仅当快照重建**成功**时回填——重建失败走"损坏即无快照"干净重跑语义，
@@ -385,6 +404,19 @@ class PERAgentLoop:
                 partial_prefix = rebuilt_partial
                 resume_plan = rebuilt_plan
                 prior_run_state = run_state if isinstance(run_state, dict) else {}
+                # ── B：计划审批的 resume 语义 ──
+                # 1) 未决计划（pending_plan_approval 仍在 = 人类尚未决定）：绝不
+                #    执行——由下方 run 起点重挂起（深度防御，正确入口是
+                #    plan-approval 端点，prepare_resume 已对等待态 409）；
+                # 2) 拒绝重规划标记：被拒计划放弃执行（resume 语义 = 带理由
+                #    重规划一次），理由进 replan_feedback 供 _plan_once 消费。
+                raw_pending_plan = run_state.get("pending_plan_approval")
+                if isinstance(raw_pending_plan, dict):
+                    pending_plan_approval = raw_pending_plan
+                raw_force_replan = run_state.get("plan_reject_replan")
+                if isinstance(raw_force_replan, dict):
+                    force_replan_feedback = str(raw_force_replan.get("feedback") or "").strip()
+                    resume_plan = None
                 # HITL：审批决定账本（粘滞 approve/deny）+ 人工指导（steering）
                 # 从快照 run_state 回填——resume 的审批门用同一份账本，已批准/
                 # 已拒绝的 (tool, args) 不会再次打扰（类型级防漂移：坏元素丢弃）。
@@ -473,6 +505,11 @@ class PERAgentLoop:
             run_state_live["steering"] = cleaned_steering[-steering.STEERING_HISTORY_CAP:]
         else:
             run_state_live.pop("steering", None)
+        # B：拒绝重规划标记一次性消费——理由并入本次 replan_feedback（下方
+        # run_state_live["replan_feedback"] 落盘），标记本身出快照（不复发）。
+        run_state_live.pop("plan_reject_replan", None)
+        if force_replan_feedback:
+            replan_feedback = force_replan_feedback
         run_state_live["execution_mode"] = self._execution_mode
         run_state_live["replan_attempts"] = replan_attempts
         run_state_live["replan_feedback"] = replan_feedback
@@ -498,6 +535,16 @@ class PERAgentLoop:
         # chat 起点通常为空（队列无消息 → 零产出）。
         async for steer_event in self._consume_steering(run_state_live):
             yield steer_event
+
+        # ── B：未获批准的计划绝不被 resume 执行（深度防御）──────────────────
+        # 快照仍带 pending_plan_approval = 人类尚未决定：原地重新挂起（重呈现
+        # 审批卡），绝不进入执行。正确入口是 plan-approval 端点（prepare_resume
+        # 对等待计划审批的任务已 409 拦截）；这条是绕过端点时的最后闸门。
+        if pending_plan_approval is not None and resume_plan is not None:
+            async for plan_event in self._pause_for_plan_approval(resume_plan, run_state_live):
+                yield plan_event
+            if self.paused_for_plan_approval:
+                return
 
         # ── Phase 1–3: 规划 → 执行 → 反思（含有界重新规划）────────────────
         # issue #106 §5a：reflector 的 "replan" 判定此前只被记录、从不执行
@@ -551,6 +598,15 @@ class PERAgentLoop:
                 if self.checkpoint_live is not None:
                     self.checkpoint_live["plan"] = plan
                     await self._save_checkpoint("after_planning")
+
+                # ── B：计划审批暂停点（plan_approval_mode=always）──────────────
+                # 本分支 = 新鲜规划（首轮 / replan / 无快照重规划）——always 模式下
+                # 每版新计划都先经人类确认；resume（携带既批准计划）不经过这里，
+                # 获批计划不会被二次打扰。
+                async for plan_event in self._pause_for_plan_approval(plan, run_state_live):
+                    yield plan_event
+                if self.paused_for_plan_approval:
+                    return
 
             # ── Phase 2: Execution ───────────────────────────────────────────
             pass_output = ""
@@ -1133,6 +1189,84 @@ class PERAgentLoop:
             await self._save_checkpoint("approval_rollback")
             return "unavailable"
         return "paused"
+
+    async def _pause_for_plan_approval(
+        self, plan: Plan, run_state_live: dict[str, Any],
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """B：计划审批暂停（plan_approval_mode=always 时才生效；产出事件）。
+
+        失败降级纪律（镜像 _on_approval_required）：暂停必须可持久化——快照
+        或任务态任一步失败都撤回 pending 并**如实放行执行**（附一条 thinking
+        事件说明），绝不制造"看起来停了、其实没有回来的路"的假暂停。
+
+        成功：run_state.pending_plan_approval 冻结结构化步骤 + 任务态
+        RUNNING→WAITING_PLAN_APPROVAL + plan_approval_required 事件（计划
+        payload 自足携带步骤——resume 流不回放 plan_step 事件）。
+        调用方据 self.paused_for_plan_approval 决定是否结束本 run。
+        """
+        if getattr(self.config, "plan_approval_mode", "never") != "always":
+            return
+        # 取消旗优先：正在取消的 run 不进暂停（与审批门同纪律）——执行阶段的
+        # 检查点会立即观察旗并收敛为 run_cancelled。
+        if await self._is_cancelled():
+            return
+        live = self.checkpoint_live
+        if live is None or not self.config.enable_checkpoint:
+            yield AgentEvent(
+                type="thinking",
+                content=(
+                    "计划审批已启用（plan_approval_mode=always），但检查点不可用"
+                    "（暂停无法持久化）——本 run 按无审批继续执行"
+                ),
+                thinking_type="evaluation",
+                plan_id=plan.id,
+            )
+            return
+        run_state = live.get("run_state")
+        if not isinstance(run_state, dict):  # pragma: no cover — live 由本类自建
+            return
+        existing = run_state.get("pending_plan_approval")
+        requested_at = time.time()
+        if isinstance(existing, dict) and isinstance(existing.get("requested_at"), (int, float)):
+            # 重挂起（bare resume 兜底路径）保留原始等待起点：等多久了要说真话。
+            requested_at = float(existing["requested_at"])
+        run_state["pending_plan_approval"] = {
+            "plan_id": plan.id,
+            "goal": plan.goal,
+            "steps": _plan_steps_payload(plan),
+            "requested_at": requested_at,
+        }
+        if not await self._save_checkpoint("before_plan_approval"):
+            run_state.pop("pending_plan_approval", None)
+            yield AgentEvent(
+                type="thinking",
+                content="计划审批暂停落盘失败（快照不可写）——本 run 按无审批继续执行",
+                thinking_type="evaluation",
+                plan_id=plan.id,
+            )
+            return
+        if not await checkpoint.mark_waiting_plan_approval(self._checkpoint_task_id):
+            run_state.pop("pending_plan_approval", None)
+            await self._save_checkpoint("plan_approval_rollback")
+            yield AgentEvent(
+                type="thinking",
+                content="计划审批暂停落盘失败（任务态不可写）——本 run 按无审批继续执行",
+                thinking_type="evaluation",
+                plan_id=plan.id,
+            )
+            return
+        self.paused_for_plan_approval = True
+        yield AgentEvent(
+            type="plan_approval_required",
+            content=(
+                f"计划已生成（{len(plan.steps)} 个步骤），等待审批："
+                f"批准 / 编辑步骤后批准 / 拒绝（附理由）"
+            ),
+            plan_id=plan.id,
+            plan_goal=plan.goal,
+            plan_steps=_plan_steps_payload(plan),
+            task_id=self._checkpoint_task_id or "",
+        )
 
     def _seed_working_from_plan(self, plan: Plan) -> None:
         """resume 时把已完成步骤的结果回灌 WorkingMemory。
