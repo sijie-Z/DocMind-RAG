@@ -459,7 +459,10 @@ const onProviderChange = (pid: string) => {
 
 const loadProviders = async () => {
   try {
-    const res = await fetch('/api/v1/settings/providers', { headers: { Authorization: `Bearer ${localStorage.getItem('docmind_token')}` }})
+    // 正确路径带 /user 前缀（router.py:51 prefix="/user" + user_settings.py:117
+    // @router.get("/settings/providers")）——旧写法 /api/v1/settings/providers
+    // 恒 404（A_sweep PROF-1 实测：缺前缀 404 / 正确路径 200）
+    const res = await fetch('/api/v1/user/settings/providers', { headers: { Authorization: `Bearer ${localStorage.getItem('docmind_token')}` }})
     if (!res.ok) return
     const data = await res.json()
     providers.value = data.providers || []
