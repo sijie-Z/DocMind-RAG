@@ -130,6 +130,15 @@
                   <span class="run-error-badge">运行失败</span>
                   <span class="run-error-text">{{ evt.content }}</span>
                 </div>
+                <!-- 落库失败告警（issue #301 批 D #22 / B29：后端在「回答已生成、
+                     但会话落库失败」时发射 {type:'warning', content}
+                     （agent.py:207-212 / :341-347），store 已收（stores/agent.ts
+                     warning case），但视图此前无渲染分支 —— 唯一失败信号不可见，
+                     用户刷新后问答消失仍无提示）。amber 底纹与「运行失败」红框区分。 -->
+                <div v-else-if="evt.type === 'warning'" class="run-warning-standalone">
+                  <span class="run-warning-badge">提示</span>
+                  <span class="run-warning-text">{{ evt.content }}</span>
+                </div>
               </template>
             </div>
 
@@ -921,6 +930,40 @@ async function loadInit() {
 }
 
 .run-error-text {
+  word-break: break-word;
+  line-height: 18px;
+}
+
+.run-warning-standalone {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 8px 12px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-left: 3px solid #f59e0b;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #92400e;
+}
+
+.dark .run-warning-standalone {
+  color: #fcd34d;
+}
+
+.run-warning-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.run-warning-text {
   word-break: break-word;
   line-height: 18px;
 }
