@@ -78,8 +78,67 @@ class TaskBusyError(ConflictError):
     message = "任务正在被另一个恢复请求处理"
 
 
+class TaskNotWaitingApprovalError(ConflictError):
+    """任务不在 waiting_approval（或没有待审批请求），审批应答无处安放。"""
+    error_code = "TASK_NOT_WAITING_APPROVAL"
+    message = "任务当前没有待审批的请求"
+
+
+class TaskNotCancellableError(ConflictError):
+    """任务已终态（completed/abandoned/cancelled），取消无意义。"""
+    error_code = "TASK_NOT_CANCELLABLE"
+    message = "任务已处于终态，无法取消"
+
+
 def _lock_key(task_id: str) -> str:
     return f"agent:task:lock:{task_id}"
+
+
+# ── HITL：协作式取消旗（approval.py / 端点 / loop 检查点共用）────────────────
+
+# 取消旗 TTL：够穿越"用户点取消 → 活跃 run 在检查点观察到"的窗口；留 24h 让
+# 陈旧旗还能在 resume 前收敛终态（见 begin_resume）。
+CANCEL_FLAG_TTL_SECONDS = 86_400
+
+
+def _cancel_key(task_id: str) -> str:
+    return f"agent:task:cancel:{task_id}"
+
+
+async def request_cancel(task_id: str) -> bool:
+    """置协作式取消旗（Redis SETEX）。False = 取消通道不可用。
+
+    诚实口径：通道不可用时端点**绝不**假装已受理；活跃 run 会在步间/工具前
+    检查点观察到旗并收敛为 run_cancelled → CANCELLED。
+    """
+    try:
+        if not redis_client:
+            return False
+        await redis_client.setex(_cancel_key(task_id), CANCEL_FLAG_TTL_SECONDS, "1")
+        return True
+    except Exception as e:
+        logger.warning("request_cancel failed (task=%s): %s", log_safe(task_id), log_safe(e))
+        return False
+
+
+async def is_cancel_requested(task_id: str) -> bool:
+    """查询取消旗；通道故障按"未取消"处理（打不坏正常执行）。"""
+    try:
+        if not redis_client:
+            return False
+        return bool(await redis_client.get(_cancel_key(task_id)))
+    except Exception as e:
+        logger.debug("is_cancel_requested failed (task=%s): %s", log_safe(task_id), log_safe(e))
+        return False
+
+
+async def clear_cancel_flag(task_id: str) -> None:
+    """清除取消旗（测试/收敛收尾用；生产 TTL 自清）。"""
+    try:
+        if redis_client:
+            await redis_client.delete(_cancel_key(task_id))
+    except Exception as e:
+        logger.debug("clear_cancel_flag failed (task=%s): %s", log_safe(task_id), log_safe(e))
 
 
 # ── 任务行读取（快照列容错，issue #278/R1）────────────────────────────────────
@@ -309,6 +368,210 @@ async def mark_terminal(
     return False
 
 
+# ── HITL：审批暂停写路径（approval.py 的暂停回调调用）──────────────────────
+
+
+async def mark_waiting_approval(task_id: str | None) -> bool:
+    """把任务推进到 waiting_approval（RUNNING→…，经状态机）；幂等。
+
+    成功即**释放 resume 租约**：暂停的 run 已把状态所有权交还给"人类应答"
+    （run 的生成器已结束）——审批端点的 resume 认领不能被 900s 租约卡住
+    （与 mark_terminal 同款释放纪律）。任何失败只记 warning、返回 False：
+    调用方（loop 的暂停回调）据此走"审批不可用"降级，绝不悬空。
+    """
+    if not task_id:
+        return False
+    try:
+        async with AsyncSessionLocal() as db:
+            task = await _load_task_row(db, task_id)
+            if task is None:
+                return False
+            if task.status == TaskStatus.WAITING_APPROVAL:
+                return True  # 幂等（重入同一暂停点）
+            if task.is_terminal:
+                logger.warning(
+                    "mark_waiting_approval 拒绝：任务 %s 已终态 %s",
+                    log_safe(task_id), task.status.value,
+                )
+                return False
+            try:
+                task.transition(TaskStatus.WAITING_APPROVAL)
+            except ValueError as e:
+                logger.warning(
+                    "mark_waiting_approval 拒绝非法转换 (task=%s): %s",
+                    log_safe(task_id), log_safe(e),
+                )
+                return False
+            await db.commit()
+    except Exception as e:
+        logger.warning("mark_waiting_approval 写入失败 (task=%s): %s", log_safe(task_id), log_safe(e))
+        return False
+    await release_task(task_id)
+    return True
+
+
+async def get_pending_approval(task_id: str) -> dict[str, Any] | None:
+    """只读取快照 run_state.pending_approval（GET 状态视图/恢复现场用）。
+
+    容错同 load_for_resume：快照缺失/损坏/无 pending → None（安全降级）。
+    """
+    raw_snapshot: Any | None = None
+    try:
+        async with AsyncSessionLocal() as db:
+            cursor = await db.execute(
+                select(AgentTask.context_snapshot).where(AgentTask.id == task_id)
+            )
+            raw_snapshot = cursor.scalar_one_or_none()
+    except (TypeError, ValueError) as e:
+        logger.warning(
+            "checkpoint 快照列反序列化失败（task=%s，读 pending_approval）：%s",
+            log_safe(task_id), log_safe(e),
+        )
+        return None
+    except Exception as e:
+        logger.debug("get_pending_approval 读取失败 (task=%s): %s", log_safe(task_id), log_safe(e))
+        return None
+    envelope = parse_snapshot(raw_snapshot)
+    if envelope is None:
+        return None
+    run_state = envelope.get("run")
+    pending = run_state.get("pending_approval") if isinstance(run_state, dict) else None
+    return pending if isinstance(pending, dict) else None
+
+
+async def apply_approval_decision(
+    *,
+    task_id: str,
+    user_id: int,
+    organization_id: int | None = None,
+    decision: str,
+    modified_instruction: str | None = None,
+    note: str | None = None,
+) -> tuple[AgentTask, dict[str, Any] | None, dict[str, Any]]:
+    """审批应答的同步预检 + 记账 + 认领（端点在开流之前调用）。
+
+    单写者顺序：拿租约 → 读行/快照 → 校验（waiting_approval + 有 pending）
+    → 写决定账本（approve + modified_instruction 同时追加 steering 指令）
+    → WAITING_APPROVAL→RUNNING（retry_count += 1）→ 返回 (task, envelope, record)。
+    任何失败路径都释放租约（让调用方拿到 409 后可立即重试）。
+
+    409 语义（AppError 子类）：
+      - 行终态 → TaskNotResumableError（state=…）；已 cancelled 的任务应答被拒，
+        不再"复活"；
+      - 非 waiting_approval / 无 pending / 快照损坏 → TaskNotWaitingApprovalError；
+      - 并发（租约被持有）→ TaskBusyError；
+      - 审批等待超时（approval.py：expires_at 已过）→ 如实置 FAILED +
+        error_type="approval_timeout" 后按 409 上报（**绝不**伪装成"被拒绝"）。
+    """
+    if decision not in ("approve", "deny"):
+        raise ValueError(f"非法审批决定: {decision!r}")
+    if not await claim_task(task_id):
+        raise TaskBusyError("任务正在被另一个恢复请求处理")
+    try:
+        expired_pending: dict[str, Any] | None = None
+        async with AsyncSessionLocal() as db:
+            task = await _load_task_row(db, task_id)
+            _check_task_access(task, user_id=user_id, organization_id=organization_id)
+            if task.is_terminal:
+                raise TaskNotResumableError(
+                    f"任务已处于终态 {task.status.value}，无待审批请求可应答",
+                    detail={"task_id": task_id, "state": task.status.value},
+                )
+            if task.status != TaskStatus.WAITING_APPROVAL:
+                raise TaskNotWaitingApprovalError(
+                    f"任务当前状态为 {task.status.value}，没有待审批的请求",
+                    detail={"task_id": task_id, "state": task.status.value},
+                )
+            raw_snapshot: Any | None = None
+            try:
+                cursor = await db.execute(
+                    select(AgentTask.context_snapshot).where(AgentTask.id == task_id)
+                )
+                raw_snapshot = cursor.scalar_one_or_none()
+            except (TypeError, ValueError) as e:
+                logger.warning(
+                    "checkpoint 快照列反序列化失败（task=%s，审批记账）：%s",
+                    log_safe(task_id), log_safe(e),
+                )
+            envelope = parse_snapshot(raw_snapshot)
+            if envelope is None:
+                raise TaskNotWaitingApprovalError(
+                    "任务快照缺失/损坏，无法关联待审批请求",
+                    detail={"task_id": task_id, "state": task.status.value},
+                )
+            run_state = envelope.get("run")
+            if not isinstance(run_state, dict) or not isinstance(
+                run_state.get("pending_approval"), dict
+            ):
+                raise TaskNotWaitingApprovalError(
+                    "没有待审批的请求（可能已被应答或撤回）",
+                    detail={"task_id": task_id, "state": task.status.value},
+                )
+
+            from app.agent import approval as _approval
+
+            pending = run_state["pending_approval"]
+            if _approval.approval_expired(pending):
+                # 超时：不写任何决定，退出会话后如实置 FAILED(approval_timeout)。
+                expired_pending = pending
+            else:
+                record: dict[str, Any] = {
+                    "tool_name": pending.get("tool_name"),
+                    "args_hash": pending.get("args_hash"),
+                    "tool_call_id": pending.get("tool_call_id"),
+                    "decision": decision,
+                    "modified_instruction": (
+                        str(modified_instruction).strip()[:2000]
+                        if decision == "approve" and modified_instruction
+                        else None
+                    ),
+                    "note": (str(note).strip()[:500] or None) if note else None,
+                    "decided_by": user_id,
+                    "decided_at": datetime.utcnow().isoformat() + "Z",
+                }
+                decisions = run_state.get("approval_decisions")
+                if not isinstance(decisions, list):
+                    decisions = []
+                decisions.append(record)
+                run_state["approval_decisions"] = decisions
+                if record["modified_instruction"]:
+                    # 改指令续跑：指令入 run_state.steering，resume 时注入步骤
+                    # 提示词（见 loop.run 的 human_guidance 提取）。
+                    steering = run_state.get("steering")
+                    if not isinstance(steering, list):
+                        steering = []
+                    steering.append(record["modified_instruction"])
+                    run_state["steering"] = steering
+                run_state.pop("pending_approval", None)
+                envelope["run"] = run_state
+                envelope["updated_by"] = f"approval_{decision}"
+                task.context_snapshot = envelope
+                task.transition(TaskStatus.RUNNING)
+                task.retry_count += 1
+                await db.commit()
+                return task, envelope, record
+
+        # ── 超时分支（会话已退出，避免嵌套会话写）──
+        logger.warning(
+            "审批等待超时（task=%s, tool=%s）：如实置 FAILED(approval_timeout)",
+            log_safe(task_id), log_safe(str((expired_pending or {}).get("tool_name"))),
+        )
+        await mark_terminal(
+            task_id,
+            TaskStatus.FAILED,
+            error="审批等待超时（approval_timeout）：等待期间未收到人类应答",
+            error_type="approval_timeout",
+        )
+        raise TaskNotWaitingApprovalError(
+            "审批等待已超时：任务已如实置为 failed（approval_timeout），"
+            "可经 resume 重新发起审批",
+            detail={"task_id": task_id, "state": "failed", "error_type": "approval_timeout"},
+        )
+    except Exception:
+        await release_task(task_id)
+        raise
+
+
 # ── 读路径 / resume 认领 ─────────────────────────────────────────────────────
 
 
@@ -448,8 +711,11 @@ async def begin_resume(task_id: str, lease_seconds: int = LEASE_SECONDS) -> Agen
     状态流转（不新增状态机边）：
         RUNNING（陈旧，上次进程中断）→ FAILED → RUNNING
         FAILED → RUNNING（既有 "retry" 边）；PENDING → RUNNING；
-        （WAITING_TOOL/HUMAN → RUNNING 保底——本版无写入者）
+        WAITING_APPROVAL/WAITING_TOOL/WAITING_HUMAN → RUNNING（恢复执行）
     终态 → TaskNotResumableError；拿不到租约 → TaskBusyError。
+    HITL 取消旗：观察到旗（= 取消请求在 run 死前未被消费）→ 先把任务如实收敛
+    到 CANCELLED（终态），再以 TaskNotResumableError(state=cancelled) 拒绝本次
+    resume——取消过的任务绝不被 resume 复活。
     任何中途失败都会释放租约（让调用方能立即重试）。
     """
     if not await claim_task(task_id, lease_seconds=lease_seconds):
@@ -462,6 +728,22 @@ async def begin_resume(task_id: str, lease_seconds: int = LEASE_SECONDS) -> Agen
             if task.is_terminal:
                 raise TaskNotResumableError(
                     f"任务已处于终态 {task.status.value}，不可恢复",
+                    detail={"task_id": task_id, "state": task.status.value},
+                )
+            if await is_cancel_requested(task_id):
+                # 取消旗的终态收敛（协作式取消闭环的兜底边）：活跃 run 已死、
+                # 旗无人消费时，下一次 resume 尝试负责如实收敛，绝不静默放跑。
+                try:
+                    task.transition(TaskStatus.CANCELLED)
+                    task.last_error = "用户取消（resume 前观察到取消旗）"
+                    task.last_error_type = "user_cancelled"
+                    await db.commit()
+                except ValueError:
+                    # 当前状态不可转 cancelled（理论不可达：上面的非终态都已放开边）
+                    pass
+                await release_task(task_id)
+                raise TaskNotResumableError(
+                    "任务已被取消，不可恢复",
                     detail={"task_id": task_id, "state": task.status.value},
                 )
             if task.status == TaskStatus.RUNNING:

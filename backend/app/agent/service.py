@@ -10,6 +10,7 @@ Supports:
 """
 
 import asyncio
+import functools
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -45,6 +46,12 @@ class AgentService:
             pipeline = get_rag_pipeline()
             self._client = pipeline.openai_client
         return self._client
+
+    @staticmethod
+    def _wire_cancel(agent: PERAgentLoop, task_id: str | None) -> None:
+        """HITL：给 loop 接上 task 级取消旗查询（无 task_id = 无取消通道，如实不接）。"""
+        if task_id:
+            agent.cancel_check = functools.partial(checkpoint.is_cancel_requested, task_id)
 
     async def chat(
         self,
@@ -101,6 +108,9 @@ class AgentService:
             organization_id=organization_id,
             user_id=user_id,
         )
+        # HITL 取消：task 级取消旗接线（POST /tasks/{id}/cancel 置旗，run 在
+        # 步间/工具前检查点观察并收敛为 run_cancelled → CANCELLED）。
+        self._wire_cancel(agent, task_id)
 
         # Emit available tool count in a metadata event
         tools = agent._get_tools()
@@ -140,14 +150,24 @@ class AgentService:
                 # issue #301 批 A #10/#11：终态写入必须被确认——返回值不再被
                 # 丢弃（写失败必有可观测信号），run 级失败（无工具模式 LLM
                 # 全败）按标志如实置 FAILED 而不是 COMPLETED。
-                finalize_event = await self._finalize_task_terminal(
-                    task_id,
-                    failed_run=bool(getattr(agent, "run_failed", False)),
-                    failure_text=getattr(agent, "run_failure", None),
-                )
-                if finalize_event is not None:
-                    finalize_event.task_id = task_id
-                    yield finalize_event
+                # HITL：审批暂停绝不置终态（状态已在暂停点置 waiting_approval，
+                # 人类应答经 approval 端点续跑）；协作式取消收敛为 CANCELLED。
+                if getattr(agent, "paused_for_approval", False):
+                    pass
+                elif getattr(agent, "run_cancelled", False):
+                    cancel_event = await self._finalize_task_cancelled(task_id)
+                    if cancel_event is not None:
+                        cancel_event.task_id = task_id
+                        yield cancel_event
+                else:
+                    finalize_event = await self._finalize_task_terminal(
+                        task_id,
+                        failed_run=bool(getattr(agent, "run_failed", False)),
+                        failure_text=getattr(agent, "run_failure", None),
+                    )
+                    if finalize_event is not None:
+                        finalize_event.task_id = task_id
+                        yield finalize_event
 
         # Persist config for session recovery
         if session_id:
@@ -229,6 +249,8 @@ class AgentService:
             organization_id=task.organization_id,
             user_id=task.user_id,
         )
+        # HITL：取消旗接线（resume 流同样受协作式取消约束）。
+        self._wire_cancel(agent, task_id)
         try:
             async for event in agent.run(
                 query, task_id=task_id, resume=payload, session_id=session_id,
@@ -247,14 +269,23 @@ class AgentService:
         else:
             # issue #301 批 A #10/#11：同 chat 路径——消费 mark_terminal 返回值，
             # 写失败必显形、run 级失败如实置 FAILED。
-            finalize_event = await self._finalize_task_terminal(
-                task_id,
-                failed_run=bool(getattr(agent, "run_failed", False)),
-                failure_text=getattr(agent, "run_failure", None),
-            )
-            if finalize_event is not None:
-                finalize_event.task_id = task_id
-                yield finalize_event
+            # HITL：resume 流还可能再次暂停（多审批循环）/被取消——语义同 chat。
+            if getattr(agent, "paused_for_approval", False):
+                pass
+            elif getattr(agent, "run_cancelled", False):
+                cancel_event = await self._finalize_task_cancelled(task_id)
+                if cancel_event is not None:
+                    cancel_event.task_id = task_id
+                    yield cancel_event
+            else:
+                finalize_event = await self._finalize_task_terminal(
+                    task_id,
+                    failed_run=bool(getattr(agent, "run_failed", False)),
+                    failure_text=getattr(agent, "run_failure", None),
+                )
+                if finalize_event is not None:
+                    finalize_event.task_id = task_id
+                    yield finalize_event
 
     # ── Checkpoint 兜底（断流 / 异常；二者都不得改变既有语义）──────────────
 
@@ -390,6 +421,26 @@ class AgentService:
                 "（任务列表可能仍显示进行中；稍后可恢复收敛）。"
             )
         return AgentEvent(type="error", content=content)
+
+    async def _finalize_task_cancelled(self, task_id: str) -> AgentEvent | None:
+        """取消收敛：置 CANCELLED 终态（**诚实终态**：不伪装 completed）；
+        写失败同样消费返回值并响亮留痕（#301 批 A 同纪律）。"""
+        ok = await checkpoint.mark_terminal(
+            task_id,
+            TaskStatus.CANCELLED,
+            error="用户取消（协作式取消在检查点收敛）",
+            error_type="user_cancelled",
+        )
+        if ok:
+            return None
+        logger.error(
+            "任务 %s 取消终态未能落库：任务行将停留原状态（可经 resume 收敛）",
+            log_safe(task_id),
+        )
+        return AgentEvent(
+            type="error",
+            content="任务取消状态收尾失败：任务记录未能更新（稍后可经恢复收敛）。",
+        )
 
     async def search_and_chat(
         self,

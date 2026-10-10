@@ -147,6 +147,17 @@ RETRY_POLICIES: dict[str, RetryPolicy] = {
     "circuit_open": RetryPolicy(
         retryable=False, action="fatal",
     ),
+    # HITL：人工拒绝（approval_denied）不是"执行失败"——粘滞拒绝下重试同一
+    # (tool, args) 毫无意义；fatal → 走既有 fallback/降级链路，结构化失败喂给
+    # 反思器继续/收敛（见 app/agent/approval.py）。
+    "approval_denied": RetryPolicy(
+        retryable=False, action="fatal",
+    ),
+    # 审批服务不可用（暂停无法持久化 → 需审批调用一律未执行）：重试同样不会
+    # 变好，fatal 同 deny。
+    "approval_unavailable": RetryPolicy(
+        retryable=False, action="fatal",
+    ),
     # Registry fallback for an unclassified handler exception. Declared explicitly
     # (same shape as the get_policy fallback) so the registry's own codes are all
     # visible in this table rather than resolving silently through the default.
