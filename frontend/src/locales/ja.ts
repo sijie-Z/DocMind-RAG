@@ -503,6 +503,25 @@ export default {
     steerSent: 'ガイダンス送信済み',
     steerApplied: 'ガイダンス反映済み',
     steerFull: 'ステアリングバッファが満杯です。agent の消費後に再送信してください',
-    steerFailed: 'ガイダンスの送信に失敗しました。しばらくして再試行してください'
+    steerFailed: 'ガイダンスの送信に失敗しました。しばらくして再試行してください',
+    // B：計画承認 — カード / タイムライン / 通知
+    planTitle: '計画の承認待ち',
+    planGoal: 'ゴール',
+    planSteps: 'ステップ',
+    planApprove: '計画を承認',
+    planEditSteps: 'ステップを編集',
+    planSaveApprove: '保存して承認',
+    planCancelEdit: '編集をキャンセル',
+    planReject: '計画を拒否',
+    planRejectNotePlaceholder: '拒否理由（再計画に使用、記入推奨）',
+    planRejectHint: '拒否すると理由付きで一度だけ再計画します。再度拒否するとタスクは終了します（rejected）',
+    planAddStep: 'ステップを追加',
+    planRemove: '削除',
+    planDeps: '依存',
+    planSubmitting: '送信中…',
+    planTimeline: '計画の承認待ち',
+    planRejectedMessage: '計画が再度拒否されました（再計画の上限に達しました）。タスクは終了しました',
+    planEditInvalid: '編集内容が不正です。ステップ（説明/依存）を確認して再試行してください',
+    planFailed: '計画承認の送信に失敗しました。タスク状態を更新しました'
   }
 };

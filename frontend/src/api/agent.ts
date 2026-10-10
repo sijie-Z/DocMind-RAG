@@ -11,7 +11,13 @@ import type {
   AgentSessionDetail,
   AgentTaskView,
   ApprovalDecisionInput,
+  PlanApprovalDecisionInput,
 } from '@/types/agent'
+
+/** B：计划审批应答的结果形态（SSE 续跑流 / 终态 JSON 二选一）。 */
+export type PlanApprovalOutcome =
+  | { streamed: true; abort: () => void }
+  | { streamed: false; state: string; rejections?: number; message?: string }
 
 interface ChatOptions {
   sessionId?: string
@@ -216,6 +222,82 @@ export const agentApi = {
     }
 
     return consumeEventStream(response, onEvent, controller)
+  },
+
+  /**
+   * B：计划审批应答（approve / edit / reject）→ 两种结果形态：
+   * - approve / edit / reject#1：SSE 续跑流（事件契约与 /chat 一致；可能再次停在
+   *   计划审批点：流内再发 plan_approval_required）；
+   * - reject#2（重规划机会用尽）：200 JSON 终态 rejected——无流可续（streamed=false）。
+   * 422（非法编辑）由调用方按详情提示（请求带 X-Silent-Error 防通用文案覆盖）。
+   */
+  async decidePlanApproval(
+    taskId: string,
+    input: PlanApprovalDecisionInput,
+    onEvent: (event: AgentEvent) => void,
+    options?: { signal?: AbortSignal },
+  ): Promise<PlanApprovalOutcome> {
+    const token = getToken()
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+    const controller = new AbortController()
+    const externalSignal = options?.signal
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort()
+      } else {
+        externalSignal.addEventListener('abort', () => controller.abort(), { once: true })
+      }
+    }
+
+    const response = await fetch(`${baseUrl}/agent/tasks/${taskId}/plan-approval`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Silent-Error': '1',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        decision: input.decision,
+        edited_steps: input.edited_steps,
+        note: input.note || undefined,
+      }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      const failure = new Error(`Plan approval request failed: ${response.status}`) as Error & {
+        status?: number
+        detail?: string
+      }
+      failure.status = response.status
+      try {
+        const body = await response.json()
+        const raw = body?.detail ?? body?.message
+        if (raw !== undefined) {
+          failure.detail = Array.isArray(raw)
+            ? raw.map((e: any) => (e && typeof e === 'object' && 'msg' in e ? String(e.msg) : String(e))).join('; ')
+            : String(raw)
+        }
+      } catch {
+        // 非 JSON 错误体：保留状态码
+      }
+      throw failure
+    }
+
+    const contentType = response.headers.get('content-type') || ''
+    if (contentType.includes('text/event-stream')) {
+      const stream = await consumeEventStream(response, onEvent, controller)
+      return { streamed: true, abort: stream.abort }
+    }
+    // 终态拒绝：JSON 回执（data.state = "rejected"）
+    const body = await response.json()
+    const data = body?.data || {}
+    return {
+      streamed: false,
+      state: String(data.state || ''),
+      rejections: data.rejections,
+      message: data.message ? String(data.message) : undefined,
+    }
   },
 
   /** List available tools */
