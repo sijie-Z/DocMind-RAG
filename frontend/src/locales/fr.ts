@@ -496,6 +496,13 @@ export default {
   },
   hitl: {
     cancelled: 'Annulé',
-    stopped: 'Arrêté'
+    stopped: 'Arrêté',
+    // A : pilotage en cours d'exécution — zone de saisie / chronologie / erreurs
+    steerSend: 'Envoyer une consigne',
+    steerHint: "En cours : Entrée envoie une consigne (l'étape en cours n'est pas interrompue, application au prochain jalon)",
+    steerSent: 'Consigne envoyée',
+    steerApplied: 'Consigne appliquée',
+    steerFull: "Le tampon de consignes est plein — attendez que l'agent le consomme avant de renvoyer",
+    steerFailed: "Échec de l'envoi de la consigne, veuillez réessayer plus tard"
   }
 };

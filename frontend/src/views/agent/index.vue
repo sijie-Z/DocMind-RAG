@@ -138,6 +138,19 @@
                   <span class="run-cancelled-badge">{{ t('hitl.cancelled') }}</span>
                   <span class="run-cancelled-text">{{ evt.content }}</span>
                 </div>
+                <!-- A：运行中转向——发送成功（本地落账）与步边界生效（后端 SSE）
+                     两条留痕，蓝色系与取消的灰、失败的红区分。 -->
+                <div v-else-if="evt.type === 'steer_sent'" class="steer-standalone">
+                  <span class="steer-badge">{{ t('hitl.steerSent') }}</span>
+                  <span class="steer-text">{{ evt.content }}</span>
+                </div>
+                <div
+                  v-else-if="evt.type === 'steer_applied'"
+                  class="steer-standalone steer-applied"
+                >
+                  <span class="steer-badge steer-badge-applied">{{ t('hitl.steerApplied') }}</span>
+                  <span class="steer-text">{{ evt.content }}</span>
+                </div>
               </template>
             </div>
 
@@ -233,8 +246,10 @@
       :disabled="false"
       :loading="agentStore.isLoading"
       :stopping="stopping"
+      :steering="steerEnabled"
       @send="handleSend"
       @stop="handleStop"
+      @steer="handleSteer"
     />
   </div>
 </template>
@@ -271,6 +286,16 @@ let currentChatController: AbortController | null = null
 let stopFallbackTimer: ReturnType<typeof setTimeout> | null = null
 const stopping = ref(false)
 const approvalBusy = ref(false)
+// A：转向提交在途标志（防连点重复提交）
+const steerBusy = ref(false)
+
+/** A：转向模式——任务 running（流打开）或 waiting_approval（暂停等应答）时可发指导。
+ *  有 taskId 才接通服务端转向通道（无任务的裸跑没有队列可写）。 */
+const steerEnabled = computed(
+  () =>
+    !!agentStore.taskId &&
+    (agentStore.isLoading || agentStore.taskState === 'waiting_approval'),
+)
 
 const showConfig = ref(false)
 const showPlan = ref(true)
@@ -540,9 +565,43 @@ async function handleApprovalDecide(payload: {
   }
 }
 
-/** 从权威接口刷新任务现场（审批冲突/提交失败后的恢复路径）。 */
-async function refreshTaskState(taskId: string) {
+/**
+ * A：运行中转向——把一句指导提交给 running / waiting_approval 的任务。
+ * 不打断当前步骤；后端在下一个步边界消费并注入后续步骤提示词。
+ * 成功：本地乐观落账（"已发送指导"时间线条目），生效留痕由后端
+ * steer_applied 事件（当前流或审批恢复流）承担。失败按诚实文案提示：
+ * 429=缓冲满 / 409=状态不符 / 503=通道不可用 / 网络失败。
+ */
+async function handleSteer(text: string) {
+  const taskId = agentStore.taskId
+  if (!taskId || !text.trim() || steerBusy.value) return
+  steerBusy.value = true
   try {
+    const res = await agentApi.steerTask(taskId, text)
+    const data = res.data?.data
+    agentStore.addSteerSent(text)
+    if (data?.message) message.success(data.message)
+  } catch (err: unknown) {
+    const resp = (err as {
+      response?: { status?: number; data?: { message?: unknown; detail?: unknown } }
+    })?.response
+    const status = resp?.status
+    const detail = resp?.data?.message ?? resp?.data?.detail
+    if (status === 429) {
+      message.warning(t('hitl.steerFull'))
+    } else if (status && detail) {
+      // 409/503 等：后端 AppError 的诚实文案原样呈现（请求带 X-Silent-Error）
+      message.error(String(detail))
+    } else {
+      message.error(t('hitl.steerFailed'))
+    }
+  } finally {
+    steerBusy.value = false
+  }
+}
+
+/** 从权威接口刷新任务现场（审批冲突/提交失败后的恢复路径）。 */
+async function refreshTaskState(taskId: string) {  try {
     const res = await agentApi.getTask(taskId)
     // F2：request 拦截器返回完整 AxiosResponse，信封在 res.data = {success, data}
     const data = res.data?.data
@@ -1097,6 +1156,57 @@ async function loadInit() {
 }
 
 .run-cancelled-text {
+  word-break: break-word;
+  line-height: 18px;
+}
+
+/* A：运行中转向（steering）——蓝色系（"方向"的语言）；已发送=浅蓝描边，
+   已生效=实底徽标加重（生效是方向盘真的转了）。深色下同为低饱和蓝底。 */
+.steer-standalone {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 8px 12px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-left: 3px solid #3b82f6;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #1d4ed8;
+}
+
+.dark .steer-standalone {
+  background: rgba(59, 130, 246, 0.14);
+  color: #93c5fd;
+}
+
+.steer-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.steer-standalone.steer-applied {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.4);
+  border-left-color: #6366f1;
+  color: #4338ca;
+}
+
+.dark .steer-standalone.steer-applied {
+  background: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+}
+
+.steer-badge-applied { background: #6366f1; }
+
+.steer-text {
   word-break: break-word;
   line-height: 18px;
 }

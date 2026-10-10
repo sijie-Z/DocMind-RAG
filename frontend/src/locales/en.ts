@@ -638,6 +638,13 @@ export default {
   },
   hitl: {
     cancelled: 'Cancelled',
-    stopped: 'Stopped'
+    stopped: 'Stopped',
+    // A: mid-run steering — input area / timeline / error toasts
+    steerSend: 'Send guidance',
+    steerHint: 'Running: Enter sends guidance (the current step is not interrupted; it applies at the next step)',
+    steerSent: 'Guidance sent',
+    steerApplied: 'Guidance applied',
+    steerFull: 'Steering buffer is full — wait for the agent to consume it before sending',
+    steerFailed: 'Failed to send guidance, please try again later'
   }
 };

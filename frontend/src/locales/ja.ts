@@ -496,6 +496,13 @@ export default {
   },
   hitl: {
     cancelled: 'キャンセル済み',
-    stopped: '停止済み'
+    stopped: '停止済み',
+    // A：実行中ステアリング — 入力エリア / タイムライン / エラー表示
+    steerSend: 'ガイダンス送信',
+    steerHint: '実行中：Enter でガイダンス送信（現在のステップは中断されず、次のステップ境界で反映）',
+    steerSent: 'ガイダンス送信済み',
+    steerApplied: 'ガイダンス反映済み',
+    steerFull: 'ステアリングバッファが満杯です。agent の消費後に再送信してください',
+    steerFailed: 'ガイダンスの送信に失敗しました。しばらくして再試行してください'
   }
 };

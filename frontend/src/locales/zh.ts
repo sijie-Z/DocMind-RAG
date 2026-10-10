@@ -665,6 +665,13 @@ export default {
   },
   hitl: {
     cancelled: '已取消',
-    stopped: '已停止'
+    stopped: '已停止',
+    // A：运行中转向（steering）——输入区/时间线/错误提示
+    steerSend: '发送指导',
+    steerHint: '运行中：Enter 发送指导（不打断当前步骤，下一个步边界生效）',
+    steerSent: '已发送指导',
+    steerApplied: '指导已生效',
+    steerFull: '转向缓冲已满：请等待 agent 消费后再发送',
+    steerFailed: '指导发送失败，请稍后重试'
   }
 };

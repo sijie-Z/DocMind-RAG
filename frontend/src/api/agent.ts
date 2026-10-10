@@ -158,6 +158,23 @@ export const agentApi = {
   },
 
   /**
+   * A：运行中转向 —— 向 running / waiting_approval 的任务发送一句指导。
+   * 普通 JSON 响应（非 SSE）：不打断当前步骤，在下一个步边界注入。
+   * X-Silent-Error：429（缓冲满）/409（状态不符）的诚实文案由调用方原样呈现
+   * ——拦截器的通用 429 文案（"请求过于频繁"）会盖掉"缓冲已满"的准确语义。
+   */
+  steerTask(
+    taskId: string,
+    messageText: string,
+  ): Promise<AxiosResponse<ApiResponse<{ task_id: string; state: string; pending: number; message: string }>>> {
+    return request.post(
+      `/agent/tasks/${taskId}/steer`,
+      { message: messageText },
+      { headers: { 'X-Silent-Error': '1' } },
+    )
+  },
+
+  /**
    * 审批应答（approve / deny / 改指令）→ SSE 续跑流。
    * 事件契约与 chat 一致；续跑可能再次停在下一个审批点（流内再发 approval_required）。
    */

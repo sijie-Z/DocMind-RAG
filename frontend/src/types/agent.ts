@@ -18,6 +18,11 @@ export type AgentEventType =
   // HITL（人在环）：执行器停在审批点 / 协作式取消收敛（见后端 approval.py）
   | 'approval_required'
   | 'run_cancelled'
+  // A：运行中转向（见后端 steering.py）
+  //   steer_applied — 指导在步边界被消费并注入后续步骤（content=消息摘要）；
+  //   steer_sent    — **前端本地事件**（乐观落账，后端无此类型）：指导已提交成功。
+  | 'steer_applied'
+  | 'steer_sent'
 
 export type ThinkingType = 'reasoning' | 'planning' | 'evaluation' | 'correction'
 export type ReflectionResult = 'pass' | 'retry' | 'replan' | 'escalate'

@@ -242,6 +242,21 @@ export const useAgentStore = defineStore('agent', () => {
         isThinking.value = false
         break
 
+      // ── A：运行中转向 ──
+      case 'steer_applied':
+        // 指导在步边界被消费（注入后续步骤提示词）：时间线留痕，不改任务态。
+        updateLastAssistant((msg) => {
+          msg.events.push(event)
+        })
+        break
+
+      case 'steer_sent':
+        // 前端本地事件（乐观落账）：发送成功即进时间线，不至于"发出去没影"。
+        updateLastAssistant((msg) => {
+          msg.events.push(event)
+        })
+        break
+
       case 'done':
         updateLastAssistant((msg) => {
           msg.loading = false
@@ -327,6 +342,13 @@ export const useAgentStore = defineStore('agent', () => {
     pendingApproval.value = p
   }
 
+  /** A：转向发送成功后的本地乐观落账（时间线"已发送指导"条目；后端无此事件）。 */
+  function addSteerSent(text: string) {
+    updateLastAssistant((msg) => {
+      msg.events.push({ type: 'steer_sent', content: text } as AgentEvent)
+    })
+  }
+
   /** 新一轮发送前复位任务现场（保留 pendingApproval 由 approval_required 重建）。 */
   function resetTask() {
     setTaskId(null)
@@ -377,6 +399,7 @@ export const useAgentStore = defineStore('agent', () => {
     setTaskId,
     setTaskState,
     setPendingApproval,
+    addSteerSent,
     resetTask,
     loadPersistedTaskId,
   }
