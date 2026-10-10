@@ -46,9 +46,13 @@ from app.agent.run_report import build_run_report, render_run_report_text
 # ── 假件 ────────────────────────────────────────────────────────────────────
 
 
-def _failing_ddgs(exc: Exception):
-    """假 duckduckgo_search：进入上下文管理器即抛异常（模拟上游故障）。"""
-    mod = types.ModuleType("duckduckgo_search")
+def _failing_ddgs(exc: Exception) -> list[tuple[str, types.ModuleType]]:
+    """假搜索后端：进入上下文管理器即抛异常（模拟上游故障）。
+
+    web_search 现为「新名 ddgs 优先、旧名 duckduckgo_search 兜底」两段 import
+    （harness 审计·web 依赖补齐）——同一假件同时注入两个模块名，
+    无论代码走到哪段 import 都命中。
+    """
 
     class DDGS:
         def __enter__(self):
@@ -57,8 +61,12 @@ def _failing_ddgs(exc: Exception):
         def __exit__(self, *a):
             return False
 
-    mod.DDGS = DDGS
-    return mod
+    out: list[tuple[str, types.ModuleType]] = []
+    for name in ("ddgs", "duckduckgo_search"):
+        mod = types.ModuleType(name)
+        mod.DDGS = DDGS
+        out.append((name, mod))
+    return out
 
 
 def _fake_llm_toolclient(tool_name: str, args_json: str, synthesis: str = "合成答案"):
@@ -95,7 +103,8 @@ def _memory() -> AgentMemoryBridge:
 
 
 def _failing_web_search_env(monkeypatch, exc: Exception):
-    monkeypatch.setitem(sys.modules, "duckduckgo_search", _failing_ddgs(exc))
+    for name, mod in _failing_ddgs(exc):
+        monkeypatch.setitem(sys.modules, name, mod)
     monkeypatch.setattr(ws_mod, "_check_rate_limit", AsyncMock(return_value=True))
 
 
