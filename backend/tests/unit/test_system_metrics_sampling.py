@@ -16,7 +16,7 @@
 import asyncio
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -300,3 +300,86 @@ async def test_lifespan_runs_system_sampling_when_gate_on(monkeypatch, _lifespan
     # lifespan 退出已 cancel 任务；让事件循环把取消落定，避免 pending-task 噪音
     await asyncio.sleep(0)
     await asyncio.sleep(0)
+
+
+# ── 读路径接线：/monitoring/metrics/system 与 dashboard trends.system ──
+
+
+def _sample(ts: int) -> dict:
+    return {"timestamp": ts, "cpu_percent": 12.5, "memory_percent": 71.0}
+
+
+class _StubSampler:
+    """以固定历史替身 sampling 单例，断言端点的读取与信封。"""
+
+    def __init__(self, history: list[dict]) -> None:
+        self._history = history
+
+    async def get_history(self) -> list[dict]:
+        return list(self._history)
+
+
+@pytest.mark.asyncio
+async def test_metrics_system_returns_data_envelope(monkeypatch):
+    """/metrics/system → {"data": [...]}，元素为采样点（与 K 支线信封对齐）。"""
+    from app.api.v1.endpoints import monitoring as monitoring_mod
+
+    monkeypatch.setattr(monitoring_mod, "system_metrics_sampler", _StubSampler([_sample(100)]))
+
+    result = await monitoring_mod.get_metrics("system", "1h", None)
+    assert result == {"data": [_sample(100)]}
+
+
+@pytest.mark.asyncio
+async def test_metrics_system_empty_stays_honest(monkeypatch):
+    """无样本 → {"data": []}（诚实空态；不造假、不造伪点）。"""
+    from app.api.v1.endpoints import monitoring as monitoring_mod
+
+    monkeypatch.setattr(monitoring_mod, "system_metrics_sampler", _StubSampler([]))
+
+    result = await monitoring_mod.get_metrics("system", "1h", None)
+    assert result == {"data": []}
+
+
+@pytest.mark.asyncio
+async def test_metrics_application_branch_unchanged(monkeypatch):
+    """回归：application 分支仍走 metrics_collector 历史与 <2 防伪门槛。"""
+    from app.api.v1.endpoints import monitoring as monitoring_mod
+
+    monkeypatch.setattr(
+        monitoring_mod.metrics_collector, "get_history", AsyncMock(return_value=[_sample(1)])
+    )
+    assert await monitoring_mod.get_metrics("application", "1h", None) == {"data": []}
+
+    monkeypatch.setattr(
+        monitoring_mod.metrics_collector,
+        "get_history",
+        AsyncMock(return_value=[_sample(1), _sample(2)]),
+    )
+    assert await monitoring_mod.get_metrics("application", "1h", None) == {
+        "data": [_sample(1), _sample(2)]
+    }
+
+
+@pytest.mark.asyncio
+async def test_dashboard_trends_system_reads_sampler_history(monkeypatch):
+    """dashboard.trends.system 为采样器历史（前端 CPU/内存图消费点）。"""
+    from app.api.v1.endpoints import monitoring as monitoring_mod
+
+    monkeypatch.setattr(
+        monitoring_mod, "system_metrics_sampler", _StubSampler([_sample(50), _sample(110)])
+    )
+
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(scalar=MagicMock(return_value=0)))
+    es = MagicMock()
+    es.cluster.health = AsyncMock(return_value={"status": "green"})
+    es.indices.stats = AsyncMock(return_value={})
+    monkeypatch.setattr(monitoring_mod, "get_elasticsearch", AsyncMock(return_value=es))
+
+    body = await monitoring_mod.get_monitoring_dashboard(db=db)
+
+    assert body["trends"]["system"] == [_sample(50), _sample(110)]
+    # 其余趋势维持既有形态（不在本支线范围内）
+    assert body["trends"]["application"] == []
+    assert body["trends"]["knowledge_base"] == []
