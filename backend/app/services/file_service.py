@@ -36,6 +36,16 @@ _ALLOWED_MIME_TYPES = {
     "text/csv": {".csv"},
 }
 
+# 头像专用 MIME 表（媒体审计 §3.4：头像扩展名白名单已放行图片，但共用文档
+# MIME 表（无 image/*）导致真图片必 500）。覆盖前端 accept="image/*" 的主要
+# 格式，与 allowed_avatar_extensions 一一对应；文档路径不受影响。
+_ALLOWED_AVATAR_MIME_TYPES = {
+    "image/png": {".png"},
+    "image/jpeg": {".jpg", ".jpeg"},
+    "image/gif": {".gif"},
+    "image/webp": {".webp"},
+}
+
 
 class FileUploadService:
     """文件上传服务 - 支持大文件分块上传"""
@@ -84,11 +94,12 @@ class FileUploadService:
                 detail=f"文件过大。最大支持 {max_size / (1024*1024):.0f}MB"
             )
 
-    def _validate_mime_type(self, content: bytes, filename: str) -> None:
+    def _validate_mime_type(self, content: bytes, filename: str, is_avatar: bool = False) -> None:
         """Validate file content MIME type against magic bytes.
 
         Raises ValidationError if the detected MIME type doesn't match the file extension
-        or is not in the allowed list.
+        or is not in the allowed list. ``is_avatar=True`` 时使用头像专用 MIME 表
+        （含 image/png|jpeg|gif|webp），文档路径继续使用不含 image/* 的文档表。
         """
         try:
             import filetype
@@ -107,7 +118,8 @@ class FileUploadService:
             detected_mime = kind.mime
             ext = Path(filename).suffix.lower()
 
-            allowed_exts = _ALLOWED_MIME_TYPES.get(detected_mime)
+            allowed_map = _ALLOWED_AVATAR_MIME_TYPES if is_avatar else _ALLOWED_MIME_TYPES
+            allowed_exts = allowed_map.get(detected_mime)
             if allowed_exts is None:
                 raise ValidationError(
                     message=f"File content type '{detected_mime}' is not allowed."
@@ -337,7 +349,7 @@ class FileUploadService:
 
             # 验证文件 (is_avatar=True)
             self._validate_file(filename, file_size, is_avatar=True)
-            self._validate_mime_type(content, filename)
+            self._validate_mime_type(content, filename, is_avatar=True)
 
             # 生成唯一文件名
             file_extension = Path(filename).suffix.lower()
