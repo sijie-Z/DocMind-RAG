@@ -31,6 +31,11 @@ export function useChatAttachments() {
         const status = data.status
         const rawStatus = data.raw_status || status
 
+        // /documents/{id} 的 status/raw_status 值域为六值
+        // pending/uploaded/parsing/parsed/indexed/failed（documents.py:295-310
+        // 与 models/document.py:15-22 枚举一致）——不存在 'completed'（那是
+        // 知识库「列表」端点的展示映射），旧 `|| status === 'completed'` 为死分支
+        // 且 failed 判定误读展示键，统一按 rawStatus 全键域判断（C6）
         const statusDetailMap: Record<string, string> = {
           pending: t('chat.filePending'),
           uploaded: t('chat.fileUploaded'),
@@ -38,7 +43,6 @@ export function useChatAttachments() {
           parsed: t('chat.fileParsed'),
           indexing: t('chat.fileIndexing'),
           indexed: t('chat.fileIndexed'),
-          completed: t('chat.fileCompleted'),
           failed: t('chat.fileFailed')
         }
         tempFile.statusDetail = statusDetailMap[rawStatus] || statusDetailMap[status] || t('chat.fileProcessing')
@@ -52,12 +56,12 @@ export function useChatAttachments() {
         } else if (rawStatus === 'parsed') {
           tempFile.status = 'indexing'
           tempFile.progress = 70
-        } else if (rawStatus === 'indexed' || status === 'completed') {
+        } else if (rawStatus === 'indexed') {
           tempFile.status = 'done'
           tempFile.progress = 100
           tempFile.statusDetail = t('chat.fileReady')
           return
-        } else if (status === 'failed') {
+        } else if (rawStatus === 'failed') {
           tempFile.status = 'error'
           tempFile.errorMsg = data.parse_error || t('chat.fileFailed')
           return
