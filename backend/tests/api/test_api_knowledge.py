@@ -498,3 +498,70 @@ class TestKnowledgeRebuild:
         """未认证重建请求应返回 401/403。"""
         r = client.post("/api/v1/knowledge/rebuild/doc-1")
         assert r.status_code in (401, 403)
+
+
+class TestKnowledgeGraphNodeAttribution:
+    """GET /knowledge/graph —— 真实实体的 type/description 不得被关系目标占位吞掉。
+
+    背景（a8a3d155 写链打通后数据一有就现形）：旧实现的单遍循环里，先被处理的
+    实体先把它的关系目标以 UNKNOWN 占位插入 nodes；等循环走到那个目标自己的
+    实体条目时，又因按名去重被 continue 跳过——真实类型/描述永久丢失（实测
+    56 实体中 13 个被吞）。修复：两遍处理，真实实体先占位，目标解析只补空位。
+    变异点：还原单遍循环 → 本用例红（数据层 type 变成 UNKNOWN）。
+    """
+
+    def test_entity_type_survives_relation_target_prebinding(self, client: TestClient):
+        from app.main import app
+        from app.services.auth_service import auth_service
+        from app.services.graph_rag_service import graph_rag_service
+
+        org = 5
+        graph = graph_rag_service._graph_for(org)
+        graph.clear()
+        hub_key = graph_rag_service._normalize_entity("Hub")
+        layer_key = graph_rag_service._normalize_entity("数据层")
+        graph[hub_key].update({
+            "entity_name": "Hub",
+            "entity_type": "PRODUCT",
+            "description": "中枢实体",
+            "occurrences": 1,
+        })
+        graph[hub_key]["relationships"].append({"target": layer_key, "relation": "PART_OF"})
+        graph[layer_key].update({
+            "entity_name": "数据层",
+            "entity_type": "CONCEPT",
+            "description": "存储层描述",
+            "occurrences": 1,
+        })
+
+        mock_user = _make_mock_user(is_superuser=True)
+        mock_user.organization_id = org
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_current_user] = _override_user
+        app.dependency_overrides[auth_service.get_current_user] = _override_user
+
+        try:
+            r = client.get(
+                "/api/v1/knowledge/graph",
+                headers={"Authorization": "Bearer test_token"},
+            )
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(auth_service.get_current_user, None)
+            graph.clear()
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        nodes = {n["id"]: n for n in body["nodes"]}
+        assert nodes["数据层"]["type"] == "CONCEPT", (
+            f"真实实体类型被关系目标占位吞掉: {nodes}"
+        )
+        assert nodes["数据层"]["description"] == "存储层描述"
+        assert nodes["Hub"]["type"] == "PRODUCT"
+        assert any(
+            e["source"] == "Hub" and e["target"] == "数据层" and e["relation"] == "PART_OF"
+            for e in body["edges"]
+        ), "边不得因修复丢失"
