@@ -272,6 +272,72 @@ async def test_disabled_server_never_connected(registry_isolation):
         await mgr.shutdown()
 
 
+# ── 状态视图（管理面数据源） ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_status_view_started_tool_names_and_description(registry_isolation):
+    """状态视图：未启动/已启动、工具原始名列表、description 透出。"""
+    cfg = make_config("demo")
+    cfg.description = "假 server（测试用）"
+    mgr = MCPManager(configs=[cfg])
+    before = mgr.get_status()
+    assert before["started"] is False
+    assert before["servers"][0]["state"] == "not_connected"  # enabled 但尚未连接
+
+    try:
+        status = await mgr.initialize()
+        assert status["started"] is True
+        srv = status["servers"][0]
+        assert srv["name"] == "demo"
+        assert srv["state"] == "connected"
+        assert srv["description"] == "假 server（测试用）"
+        assert srv["tools"] == 5
+        assert srv["tool_names"] == ["die", "echo", "fail", "set_tools", "slow"]
+        assert srv["last_error"] is None
+    finally:
+        await mgr.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_status_reports_connect_failure_and_clears_stale_error(registry_isolation):
+    """接入失败原文进状态视图；成功接入清除历史错误；shutdown 清空。"""
+    broken = make_config("broken", command="docmind-no-such-binary-xyz")
+    good = make_config("good")
+    mgr = MCPManager(configs=[broken, good])
+    mgr._last_errors["good"] = "stale-from-previous-run"  # 预置脏状态：成功接入必须清除
+
+    try:
+        status = await mgr.initialize()
+        by_name = {s["name"]: s for s in status["servers"]}
+        assert by_name["broken"]["last_error"], "接入失败必须在状态视图可见"
+        assert "broken" in by_name["broken"]["last_error"]
+        assert by_name["good"]["last_error"] is None
+    finally:
+        await mgr.shutdown()
+
+    after = mgr.get_status()
+    assert after["started"] is False
+    assert all(s["last_error"] is None for s in after["servers"])
+
+
+@pytest.mark.asyncio
+async def test_status_tool_names_track_refresh(registry_isolation):
+    """tools/list_changed 刷新后，状态视图的 tool_names 同步增删。"""
+    mgr = MCPManager(configs=[make_config()])
+    try:
+        await mgr.initialize()
+        assert "echo2" not in mgr.get_status()["servers"][0]["tool_names"]
+
+        await tool_registry.execute("mcp__fake__set_tools", {"name": "echo2", "enabled": True})
+        assert await _wait_for(lambda: "echo2" in mgr.get_status()["servers"][0]["tool_names"])
+
+        await tool_registry.execute("mcp__fake__set_tools", {"name": "echo2", "enabled": False})
+        assert await _wait_for(lambda: "echo2" not in mgr.get_status()["servers"][0]["tool_names"])
+    finally:
+        await mgr.shutdown()
+
+
 class TestNamespace:
     def test_default_naming(self):
         assert namespace_tool_name("github", "search_repos") == "mcp__github__search_repos"

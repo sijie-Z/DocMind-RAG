@@ -41,6 +41,14 @@ _MAX_TOOL_NAME_LEN = 64  # OpenAI function-calling 名称上限；超出用哈�
 # 启动接入的连接超时上限（配置 timeout 是“单次请求”概念，不能拖垮启动）
 _CONNECT_TIMEOUT_MAX = 10.0
 
+# 状态视图里错误原文的收敛上限（与 ToolError.raw 截断口径一致）
+_ERROR_MAX_LEN = 500
+
+
+def _bounded_error(exc: BaseException) -> str:
+    """错误原文 → 有界的 ``类型: 消息`` 单行文本（进状态视图，不另造格式）。"""
+    return f"{type(exc).__name__}: {exc}"[:_ERROR_MAX_LEN]
+
 
 def sanitize_segment(segment: str) -> str:
     return _NAME_UNSAFE_RE.sub("_", segment)
@@ -73,6 +81,8 @@ class MCPManager:
         self._connections: dict[str, MCPServerConnection] = {}
         # server → {final_tool_name: 原始工具名}
         self._registered: dict[str, dict[str, str]] = {}
+        # server → 最近一次接入/刷新失败原文（连接成功即清除；只进状态视图）
+        self._last_errors: dict[str, str] = {}
         self._init_lock = asyncio.Lock()
         self._refresh_locks: dict[str, asyncio.Lock] = {}
         self._refresh_tasks: set[asyncio.Task] = set()
@@ -126,10 +136,12 @@ class MCPManager:
                 "MCP server '%s' 接入失败，跳过（不阻塞启动）: %s: %s",
                 cfg.name, type(e).__name__, e,
             )
+            self._last_errors[cfg.name] = _bounded_error(e)
             await conn.close(grace=1.0)
             return
 
         self._connections[cfg.name] = conn
+        self._last_errors.pop(cfg.name, None)
         count = self._register_tools(cfg.name, conn, tools)
         logger.info("MCP server '%s' 已连接（%s），注册工具 %d 个", cfg.name, cfg.transport, count)
 
@@ -153,6 +165,7 @@ class MCPManager:
 
             conns = list(self._connections.values())
             self._connections.clear()
+            self._last_errors.clear()
             if conns:
                 await asyncio.gather(*(c.close() for c in conns), return_exceptions=True)
             self._started = False
@@ -270,7 +283,9 @@ class MCPManager:
                 tools = await conn.list_tools()
             except MCPClientError as e:
                 logger.warning("MCP server '%s' list_changed 刷新失败，保留现有注册: %s", server, e)
+                self._last_errors[server] = _bounded_error(e)
                 return
+            self._last_errors.pop(server, None)
 
             new_finals = {
                 namespace_tool_name(server, d.name.strip())
@@ -293,6 +308,12 @@ class MCPManager:
     # ── 状态 ─────────────────────────────────────────────────────────────
 
     def get_status(self) -> dict[str, Any]:
+        """只读状态视图（管理面/日志共用；不发起任何连接尝试）。
+
+        每 server 字段：name / enabled / transport / description / state /
+        tools（已注册计数）/ tool_names（原始工具名，server 侧命名）/
+        last_error（最近一次接入或刷新失败原文；成功后清除）。
+        """
         servers: list[dict[str, Any]] = []
         for cfg in (self._configs or []):
             conn = self._connections.get(cfg.name)
@@ -300,14 +321,19 @@ class MCPManager:
                 state = conn.state
             else:
                 state = "disabled" if not cfg.enabled else "not_connected"
+            own = self._registered.get(cfg.name, {})
             servers.append({
                 "name": cfg.name,
                 "enabled": cfg.enabled,
                 "transport": cfg.transport,
+                "description": cfg.description,
                 "state": state,
-                "tools": len(self._registered.get(cfg.name, {})),
+                "tools": len(own),
+                "tool_names": sorted(own.values()),
+                "last_error": self._last_errors.get(cfg.name),
             })
         return {
+            "started": self._started,
             "servers": servers,
             "registered_tools": sum(len(m) for m in self._registered.values()),
         }
