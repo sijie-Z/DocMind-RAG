@@ -141,7 +141,15 @@ JSON返回："""
                 )
                 content = response.choices[0].message.content
                 content = content.strip().strip('```json').strip('```').strip()
-                return json.loads(content)
+                parsed = json.loads(content)
+                # LLM 偶尔以 {"entities": [...]} 包裹或混入非对象元素：直接放行会在
+                # build_graph_from_entities 里炸 AttributeError。形状不对 → 抛错走
+                # 下方 except 的规则回退（写链不断）。
+                if not isinstance(parsed, list) or any(
+                    not isinstance(e, dict) for e in parsed
+                ):
+                    raise ValueError("LLM 提取结果不是实体对象数组")
+                return parsed
         except Exception as e:
             logger.warning(f"LLM entity extraction failed: {e}")
 
@@ -211,6 +219,10 @@ JSON返回："""
                         "target": entity_key,
                         "relation": rel.get("relation", "RELATED_TO")
                     })
+                    # 目标未被单独抽成实体时也补上显示名——否则读 API 只能把
+                    # md5 键当节点 id 展示（读侧 entity_name 回退的丑态）。
+                    if not graph[target_key].get("entity_name"):
+                        graph[target_key]["entity_name"] = target
         await self.save(organization_id)
 
     async def ingest_document(

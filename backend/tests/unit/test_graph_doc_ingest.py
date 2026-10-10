@@ -236,3 +236,62 @@ async def test_ingest_uses_llm_client_with_configured_model(fake_redis):
     assert calls[0]["model"] == settings.DEEPSEEK_MODEL
     raw = json.loads(fake_redis.data["rag:graph:1"])
     assert raw[service._normalize_entity("DocMind")]["entity_name"] == "DocMind"
+
+
+async def test_llm_non_array_json_falls_back_not_crash(fake_redis):
+    """LLM 返回非数组 JSON（如 {"entities": [...]} 包裹）→ 回退规则抽取，绝不让
+    write 链在 build_graph_from_entities 里崩出 AttributeError。
+
+    变异点：去掉 extract_entities_with_llm 的 isinstance(list) 护栏 → 本用例红。
+    """
+    from types import SimpleNamespace
+
+    class _Completions:
+        async def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(
+                    message=SimpleNamespace(content='{"entities": [{"entity": "X"}]}')
+                )]
+            )
+
+    class _Client:
+        chat = SimpleNamespace(completions=_Completions())
+
+    service = GraphRAGService()
+    r = await service.ingest_document(
+        document_id="doc-shape",
+        organization_id=1,
+        text="张三在阿里巴巴公司担任架构师，负责整体系统设计工作。" * 3,
+        llm_client=_Client(),
+    )
+
+    # 回退到规则抽取：仍是合法列表（中文正则命中，实体名可能含粘连——规则回退
+    # 本来就粗糙，这里只钉「不崩、有产出」）
+    assert isinstance(r, dict)
+    raw = json.loads(fake_redis.data["rag:graph:1"])
+    names = {v.get("entity_name") for v in raw.values()}
+    assert any(n and n.startswith("张三") for n in names), (
+        f"应回退到规则抽取而非崩溃: {names}"
+    )
+
+
+async def test_relation_target_gets_display_name(fake_redis):
+    """被引用但未单独抽取的关系目标：反向边写入时补上显示名，
+    否则 API 侧只能拿 md5 键当节点 id 展示。
+
+    变异点：去掉 build_graph_from_entities 的目标补名 → 本用例红。
+    """
+    service = GraphRAGService()
+    await service.build_graph_from_entities([
+        {
+            "entity": "DocMind",
+            "type": "PRODUCT",
+            "description": "",
+            "relations": [{"target": "Acme 公司", "relation": "OWN"}],
+        }
+    ])
+
+    target_key = service._normalize_entity("Acme 公司")
+    raw = json.loads(fake_redis.data["rag:graph:1"])
+    assert raw[target_key]["entity_name"] == "Acme 公司"
+    assert raw[target_key]["entity_type"] == "UNKNOWN"
