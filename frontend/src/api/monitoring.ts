@@ -143,3 +143,23 @@ export const getOrgSummary = async (): Promise<{ data: { organizations: OrgSumma
 export const getRAGStats = async (): Promise<{ data: RAGStats }> => {
   return request.get('/knowledge/rag-stats')
 }
+
+/**
+ * 系统健康检查（monitoring.py:461-505，无需认证）。
+ * status: 'healthy'（各服务非 disconnected）/ 'degraded'（任一 disconnected）；
+ * services.elasticsearch 取值域：'green'|'yellow'|'red'|'unknown'|'disconnected'
+ * （与 dashboard 的 elasticsearch_health 同源，无 'ok'/'error'）。
+ */
+export interface MonitoringHealth {
+  status: 'healthy' | 'degraded'
+  timestamp: string
+  services: {
+    database: string
+    redis: string
+    elasticsearch: string
+  }
+}
+
+export const getMonitoringHealth = async (): Promise<{ data: MonitoringHealth }> => {
+  return request.get('/monitoring/health')
+}

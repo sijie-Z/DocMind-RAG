@@ -77,12 +77,12 @@
           </div>
         </div>
         <div class="mt-3">
-          <n-tag :type="adminStats.systemHealthy ? 'success' : 'error'" size="small" round>
-            {{ adminStats.systemHealthy ? t('dashboard.healthy') : t('dashboard.unhealthy') }}
+          <n-tag :type="!healthLoaded ? 'default' : adminStats.systemHealthy ? 'success' : 'error'" size="small" round>
+            {{ !healthLoaded ? '—' : adminStats.systemHealthy ? t('dashboard.healthy') : t('dashboard.unhealthy') }}
           </n-tag>
         </div>
         <div class="flex items-center gap-1 mt-2 text-xs text-gray-300">
-          <span>ES: {{ adminStats.esHealth || 'ok' }}</span>
+          <span>ES: {{ adminStats.esHealth || '—' }}</span>
         </div>
       </div>
     </div>
@@ -321,7 +321,7 @@ import { ref, onMounted, onUnmounted, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NTag } from 'naive-ui'
 import { getAuditLogs, type AuditLogEntry } from '@/api/user'
-import { getLLMStats, getRAGStats, getAdminSummary, getOrgSummary, type OrgSummary } from '@/api/monitoring'
+import { getLLMStats, getRAGStats, getAdminSummary, getOrgSummary, getMonitoringHealth, type OrgSummary } from '@/api/monitoring'
 import { formatDate } from '@/utils/format'
 import { CHART_COLORS } from '@/utils/chartTheme'
 import {
@@ -341,9 +341,13 @@ const adminStats = ref({
   totalOrgs: 0,
   activeUsers: 0,
   totalRequests: 0,
-  systemHealthy: true,
-  esHealth: 'ok'
+  // 健康值不再默认"绿"：加载前卡显示 '—'（healthLoaded）；
+  // 加载后读 /monitoring/health 真实值（B6：旧 systemHealthy:true/esHealth:'ok'
+  // 是硬编码，ES 真挂也恒绿）。
+  systemHealthy: false,
+  esHealth: ''
 })
+const healthLoaded = ref(false)
 
 const llmStats = ref({
   tokensToday: 0,
@@ -505,10 +509,11 @@ const initCharts = () => {
 
 onMounted(async () => {
   try {
-    const [adminRes, auditRes, llmRes] = await Promise.all([
+    const [adminRes, auditRes, llmRes, healthRes] = await Promise.all([
       getAdminSummary(),
       getAuditLogs({ limit: 10 }),
-      getLLMStats()
+      getLLMStats(),
+      getMonitoringHealth()
     ])
 
     if (adminRes.data) {
@@ -522,9 +527,20 @@ onMounted(async () => {
         // 801-807 仅 5 键），真实值来自 llm-stats.request_count_today（见下）。
         // 旧实现用 total_sessions（累计会话数）顶替 —— 静默错义，已改。
         totalRequests: 0,
-        systemHealthy: true,
-        esHealth: 'ok'
+        // 健康字段不在此填（admin-summary 无健康数据）：由 /monitoring/health
+        // 真实值在下方填入（B6）；此处保持中性态，避免被本块重新硬编码成"绿"。
+        systemHealthy: false,
+        esHealth: ''
       }
+    }
+
+    if (healthRes.data) {
+      // 健康卡真实口径（B6）：/monitoring/health 的 status（healthy/degraded）
+      // 与 services.elasticsearch（green/yellow/red/unknown/disconnected）。
+      // 旧硬编码 esHealth:'ok' 与真实值域不相交 —— ES 真挂也恒显绿色。
+      adminStats.value.systemHealthy = healthRes.data.status === 'healthy'
+      adminStats.value.esHealth = healthRes.data.services?.elasticsearch || 'unknown'
+      healthLoaded.value = true
     }
 
     const auditData = auditRes.data as unknown as Record<string, unknown>

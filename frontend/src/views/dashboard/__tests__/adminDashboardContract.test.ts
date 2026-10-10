@@ -11,7 +11,7 @@ import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
 
 import AdminDashboard from '../admin.vue'
-import { getLLMStats, getRAGStats, getAdminSummary, getOrgSummary } from '@/api/monitoring'
+import { getLLMStats, getRAGStats, getAdminSummary, getOrgSummary, getMonitoringHealth } from '@/api/monitoring'
 import { getAuditLogs } from '@/api/user'
 import zh from '@/locales/zh'
 
@@ -37,6 +37,7 @@ vi.mock('@/api/monitoring', () => ({
   getLLMStats: vi.fn(),
   getRAGStats: vi.fn(),
   getOrgSummary: vi.fn(),
+  getMonitoringHealth: vi.fn(),
 }))
 vi.mock('@/api/user', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/user')>()
@@ -96,6 +97,9 @@ beforeEach(() => {
   vi.mocked(getLLMStats).mockResolvedValue(llmFixture() as never)
   vi.mocked(getRAGStats).mockResolvedValue(ragFixture() as never)
   vi.mocked(getOrgSummary).mockResolvedValue({ data: { organizations: [] } } as never)
+  vi.mocked(getMonitoringHealth).mockResolvedValue({
+    data: { status: 'healthy', timestamp: '', services: { database: 'connected', redis: 'connected', elasticsearch: 'green' } },
+  } as never)
 })
 
 describe('AdminDashboard · 趋势轴标签与诚实空态（B5）', () => {
@@ -172,5 +176,36 @@ describe('AdminDashboard · 今日请求真实口径（C1）', () => {
     const numbers = wrapper.findAll('.text-2xl')
     expect(numbers[1].text()).toBe('3') // 总会话数 = total_sessions
     expect(numbers[4].text()).toBe('777') // 今日请求 = request_count_today（旧实现 = 3 顶替）
+  })
+})
+
+describe('AdminDashboard · 健康卡接真实 ES 状态（B6）', () => {
+  it('degraded + ES red → 卡显示「异常」与 ES: red（旧硬编码恒"正常/ok"）', async () => {
+    vi.mocked(getMonitoringHealth).mockResolvedValue({
+      data: {
+        status: 'degraded',
+        timestamp: '',
+        services: { database: 'connected', redis: 'connected', elasticsearch: 'red' },
+      },
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('异常')
+    expect(wrapper.text()).toContain('ES: red')
+    expect(wrapper.text()).not.toContain('ES: ok')
+    expect(wrapper.text()).not.toContain('正常')
+  })
+
+  it('healthy + ES green →「正常」与 ES: green（真值而非硬编码 ok）', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('正常')
+    expect(wrapper.text()).toContain('ES: green')
+    expect(wrapper.text()).not.toContain('ES: ok')
   })
 })
