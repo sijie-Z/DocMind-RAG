@@ -475,7 +475,9 @@ class DocumentParser:
             metadata: dict[str, Any] = {
                 "ocr_engine": "rapidocr-onnxruntime",
                 "ocr_engine_version": _ocr_engine_version(),
-                "ocr_avg_score": round(sum(scores) / len(scores), 4),
+                # 防御性：正常路径 lines 非空 ⟹ scores 非空（同一过滤条件）；
+                # 但均值计算不该依赖这条隐性顺序（评审加固点）——空列表给 None
+                "ocr_avg_score": round(sum(scores) / len(scores), 4) if scores else None,
                 "ocr_lines": len(lines),
                 "image_size": list(img_info["original_size"]),
                 "ocr_image_size": list(img_info["prepared_size"]),
