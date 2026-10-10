@@ -172,17 +172,18 @@ describe('useWorkflowStore', () => {
 
   it('updateNodeExecution adds new result', () => {
     const store = useWorkflowStore()
-    store.updateNodeExecution({ nodeId: 'n1', nodeType: 'llm', status: 'success' })
+    // 状态词表与引擎 ExecutionStatus 对齐（completed，见 stores/workflow.ts 类型注释）
+    store.updateNodeExecution({ nodeId: 'n1', nodeType: 'llm', status: 'completed' })
     expect(store.executionResults).toHaveLength(1)
-    expect(store.executionResults[0].status).toBe('success')
+    expect(store.executionResults[0].status).toBe('completed')
   })
 
   it('updateNodeExecution updates existing result', () => {
     const store = useWorkflowStore()
     store.updateNodeExecution({ nodeId: 'n1', nodeType: 'llm', status: 'running' })
-    store.updateNodeExecution({ nodeId: 'n1', nodeType: 'llm', status: 'success', duration: 100 })
+    store.updateNodeExecution({ nodeId: 'n1', nodeType: 'llm', status: 'completed', duration: 100 })
     expect(store.executionResults).toHaveLength(1)
-    expect(store.executionResults[0].status).toBe('success')
+    expect(store.executionResults[0].status).toBe('completed')
     expect(store.executionResults[0].duration).toBe(100)
   })
 
