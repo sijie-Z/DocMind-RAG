@@ -200,6 +200,17 @@
                  issue #289 抽为共享组件，与聊天页 Agent 模式共用） -->
             <RunReportBlock :report="msg.runReport" :total-tokens="msg.executionContext?.total_tokens" />
 
+            <!-- 计时 + 成本（体验第四波）：运行中秒级计时；终态显示总用时 /
+                 tokens / 估算成本（execution_context 数据 + 可配置价目表） -->
+            <RunStats
+              v-if="msg.startedAt"
+              :loading="msg.loading"
+              :started-at="msg.startedAt"
+              :ended-at="msg.endedAt"
+              :tokens="msg.executionContext?.total_tokens"
+              :model="agentStore.config.model"
+            />
+
             <!-- Feedback buttons (only after completion, only for messages with a messageId) -->
             <div v-if="!msg.loading && msg.messageId && msg.content" class="feedback-bar">
               <n-tooltip trigger="hover">
@@ -309,6 +320,7 @@ import ToolCallCard from '@/components/agent/ToolCallCard.vue'
 import ReflectionBanner from '@/components/agent/ReflectionBanner.vue'
 import RetryHintLine from '@/components/agent/RetryHintLine.vue'
 import RunReportBlock from '@/components/agent/RunReportBlock.vue'
+import RunStats from '@/components/agent/RunStats.vue'
 import AgentConfigPanel from '@/components/agent/AgentConfigPanel.vue'
 import SessionSelector from '@/components/agent/SessionSelector.vue'
 import AgentInput from '@/components/agent/AgentInput.vue'
@@ -470,7 +482,7 @@ async function handleSend(query: string, refs?: ReferencedDoc[]) {
     references: refs,
   })
 
-  // Add assistant placeholder
+  // Add assistant placeholder（startedAt：计时器起点）
   agentStore.addMessage({
     role: 'assistant',
     content: '',
@@ -481,6 +493,7 @@ async function handleSend(query: string, refs?: ReferencedDoc[]) {
     planSteps: [],
     planId: '',
     progress: 0,
+    startedAt: Date.now(),
   })
 
   agentStore.setLoading(true)
@@ -518,12 +531,14 @@ async function handleSend(query: string, refs?: ReferencedDoc[]) {
       agentStore.updateLastAssistant((msg) => {
         if (!msg.content) msg.content = '(已停止)'
         msg.loading = false
+        msg.endedAt = Date.now()  // 计时：客户端断流也是终态
       })
     } else {
       const errMsg = e instanceof Error ? e.message : String(e)
       agentStore.updateLastAssistant((msg) => {
         msg.content = `❌ 错误: ${errMsg || 'Agent 连接失败'}`
         msg.loading = false
+        msg.endedAt = Date.now()  // 计时：连接失败也是终态
       })
     }
   } finally {
@@ -572,6 +587,7 @@ function fallbackAbort() {
   stopping.value = false
   agentStore.updateLastAssistant((msg) => {
     msg.loading = false
+    msg.endedAt = Date.now()  // 计时：硬断流也是终态
   })
 }
 

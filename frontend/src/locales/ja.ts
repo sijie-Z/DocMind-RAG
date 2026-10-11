@@ -551,6 +551,11 @@ export default {
       workflow: '多段階の計画に分解して順に実行してください：{q}'
     }
   },
+  runStats: {
+    running: '実行中 {t}',
+    elapsed: '所要時間 {t}',
+    cost: '≈{c}（推定）'
+  },
   artifacts: {
     kind: {
       diff: '差分',

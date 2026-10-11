@@ -256,6 +256,9 @@ export interface AgentChatMessage {
   feedbackNote?: string
   /** 体验第四波 @引用：用户消息携带的引用文档（渲染 chips 供回溯） */
   references?: ReferencedDoc[]
+  /** 体验第四波 计时：本轮运行开始/终态时间戳（毫秒）——RunStats 数据源 */
+  startedAt?: number
+  endedAt?: number
 }
 
 /** 用户 @ 引用的知识库文档（id 上送后端 referenced_document_ids）。 */

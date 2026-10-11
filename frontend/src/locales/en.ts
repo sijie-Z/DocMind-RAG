@@ -693,6 +693,11 @@ export default {
       workflow: 'Break this into a multi-step plan and execute step by step: {q}'
     }
   },
+  runStats: {
+    running: 'Running {t}',
+    elapsed: 'Duration {t}',
+    cost: '≈{c} (estimated)'
+  },
   artifacts: {
     kind: {
       diff: 'Diff',

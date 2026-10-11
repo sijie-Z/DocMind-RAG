@@ -551,6 +551,11 @@ export default {
       workflow: 'Décomposez en plan multi-étapes et exécutez étape par étape : {q}'
     }
   },
+  runStats: {
+    running: 'En cours {t}',
+    elapsed: 'Durée {t}',
+    cost: '≈{c} (estimation)'
+  },
   artifacts: {
     kind: {
       diff: 'Diff',

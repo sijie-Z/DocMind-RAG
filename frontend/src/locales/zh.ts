@@ -719,6 +719,11 @@ export default {
       workflow: '请拆解为多步计划并逐步执行：{q}'
     }
   },
+  runStats: {
+    running: '已运行 {t}',
+    elapsed: '用时 {t}',
+    cost: '≈{c}（估算）'
+  },
   artifacts: {
     kind: {
       diff: '差异',
