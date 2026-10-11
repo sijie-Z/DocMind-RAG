@@ -1,5 +1,26 @@
 <template>
   <div class="agent-input-area">
+    <!-- 斜杠命令菜单（体验第四波）：输入以 / 开头触发；命令全部映射既有能力
+         （web_search / search_knowledge_base / 规划器），本地展开为输入模板——
+         不发明新功能；/clear 与 /help 为纯本地动作。 -->
+    <div v-if="cmdOpen" class="cmd-menu" data-testid="cmd-menu">
+      <div class="cmd-menu-title">{{ t('slashCmd.heading') }}</div>
+      <button
+        v-for="(cmd, i) in cmdFiltered"
+        :key="cmd.id"
+        class="cmd-option"
+        :class="{ active: i === cmdActive }"
+        data-testid="cmd-option"
+        @mousedown.prevent="applyCommand(cmd.id)"
+      >
+        <span class="cmd-name">/{{ cmd.id }}</span>
+        <span class="cmd-desc">{{ t('slashCmd.desc.' + cmd.id) }}</span>
+      </button>
+      <div v-if="cmdFiltered.length === 0" class="cmd-state" data-testid="cmd-empty">
+        {{ t('slashCmd.empty') }}
+      </div>
+    </div>
+
     <!-- @引用选择层（体验第四波）：输入 @ 触发；搜索/多选/回车或点击选中。
          转向模式（steering）下不开放——转向通道不承载引用（诚实边界）。 -->
     <div v-if="pickerOpen" class="ref-picker" data-testid="ref-picker">
@@ -101,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getKnowledgeBases } from '@/api/knowledge'
 import type { ReferencedDoc } from '@/types/agent'
@@ -150,6 +171,11 @@ function closePicker() {
 }
 
 function updatePicker() {
+  // 斜杠命令优先：以 / 开头时 @选择层让位（命令参数不做引用——诚实 MVP 边界）
+  if (inputText.value.startsWith('/')) {
+    closePicker()
+    return
+  }
   // 转向通道不承载引用：运行中的指导输入不开放 @选择层（诚实边界）
   if (props.steering || props.disabled) {
     closePicker()
@@ -219,7 +245,77 @@ function removeDoc(id: string) {
   selectedDocs.value = selectedDocs.value.filter((d) => d.id !== id)
 }
 
+// ── 斜杠命令（体验第四波）──────────────────────────────────────────────────
+// 触发规则：输入以 "/" 开头。"/cmd 参数" 形态下命令词照常匹配、参数保留；
+// 选中后本地展开为输入模板（模板文案四语，映射既有工具/规划器能力）。
+const CMD_IDS = ['search', 'doc', 'workflow', 'help', 'clear'] as const
+type CmdId = (typeof CMD_IDS)[number]
+const cmdOpen = ref(false)
+const cmdQuery = ref('')
+const cmdArg = ref('')
+const cmdActive = ref(0)
+const cmdHelpShown = ref(false)
+
+const cmdFiltered = computed<Array<{ id: CmdId }>>(() => {
+  if (cmdHelpShown.value) return CMD_IDS.map((id) => ({ id }))
+  const q = cmdQuery.value.toLowerCase()
+  const list = q ? CMD_IDS.filter((id) => id.startsWith(q)) : CMD_IDS
+  return list.map((id) => ({ id }))
+})
+
+function closeCmd() {
+  cmdOpen.value = false
+  cmdQuery.value = ''
+  cmdArg.value = ''
+  cmdActive.value = 0
+  cmdHelpShown.value = false
+}
+
+function updateCmd() {
+  if (props.disabled || props.steering) {
+    closeCmd()
+    return
+  }
+  const text = inputText.value
+  if (!text.startsWith('/')) {
+    closeCmd()
+    return
+  }
+  const rest = text.slice(1)
+  const spaceIdx = rest.indexOf(' ')
+  cmdQuery.value = spaceIdx >= 0 ? rest.slice(0, spaceIdx) : rest
+  cmdArg.value = spaceIdx >= 0 ? rest.slice(spaceIdx + 1).trim() : ''
+  cmdOpen.value = true
+  cmdHelpShown.value = false
+  cmdActive.value = 0
+}
+
+function applyCommand(id: CmdId) {
+  if (id === 'clear') {
+    // 纯本地动作：清空输入框（不动会话历史——那是页头"清空"的职责）
+    inputText.value = ''
+    closeCmd()
+    return
+  }
+  if (id === 'help') {
+    // /help：菜单本身即说明载体——展开全量命令与描述、保持打开
+    cmdHelpShown.value = true
+    cmdQuery.value = ''
+    cmdActive.value = 0
+    return
+  }
+  inputText.value = t(`slashCmd.tpl.${id}`, { q: cmdArg.value })
+  closeCmd()
+  nextTick(() => textareaEl.value?.focus())
+}
+
 function onArrow(delta: number, e: KeyboardEvent) {
+  if (cmdOpen.value && cmdFiltered.value.length > 0) {
+    e.preventDefault()
+    const n = cmdFiltered.value.length
+    cmdActive.value = (cmdActive.value + delta + n) % n
+    return
+  }
   if (!pickerOpen.value || pickerResults.value.length === 0) return
   e.preventDefault()
   const n = pickerResults.value.length
@@ -227,6 +323,7 @@ function onArrow(delta: number, e: KeyboardEvent) {
 }
 
 function onEsc() {
+  if (cmdOpen.value) closeCmd()
   if (pickerOpen.value) closePicker()
 }
 
@@ -244,10 +341,14 @@ function handleSend() {
   closePicker()
 }
 
-/** Enter：@选择层优先（选中当前项）；转向模式发指导；其余发送。 */
+/** Enter：@选择层优先 → 斜杠命令次之（有匹配才拦截）→ 转向/发送。 */
 function handleEnter() {
   if (pickerOpen.value && pickerResults.value.length > 0) {
     selectDoc(pickerResults.value[pickerActive.value])
+    return
+  }
+  if (cmdOpen.value && cmdFiltered.value.length > 0) {
+    applyCommand(cmdFiltered.value[cmdActive.value].id)
     return
   }
   if (props.steering) {
@@ -266,6 +367,7 @@ function handleSteer() {
 
 // Auto-resize textarea
 watch(inputText, async () => {
+  updateCmd()
   updatePicker()
   await nextTick()
   if (textareaEl.value) {
@@ -274,12 +376,17 @@ watch(inputText, async () => {
   }
 })
 
-// 运行开始（转入 steering）时收起选择层
-watch(() => props.steering, (v) => { if (v) closePicker() })
+// 运行开始（转入 steering）时收起选择层与命令菜单
+watch(() => props.steering, (v) => {
+  if (v) {
+    closePicker()
+    closeCmd()
+  }
+})
 
 onUnmounted(() => { if (searchTimer) clearTimeout(searchTimer) })
 
-defineExpose({ clear: () => { inputText.value = ''; selectedDocs.value = []; closePicker() } })
+defineExpose({ clear: () => { inputText.value = ''; selectedDocs.value = []; closePicker(); closeCmd() } })
 </script>
 
 <style scoped>
@@ -376,7 +483,8 @@ defineExpose({ clear: () => { inputText.value = ''; selectedDocs.value = []; clo
 
 /* ── @引用选择层 / chips（体验第四波）────────────────────────────────────── */
 
-.ref-picker {
+.ref-picker,
+.cmd-menu {
   position: absolute;
   bottom: 100%;
   left: 16px;
@@ -392,13 +500,15 @@ defineExpose({ clear: () => { inputText.value = ''; selectedDocs.value = []; clo
   z-index: 30;
 }
 
-.dark .ref-picker {
+.dark .ref-picker,
+.dark .cmd-menu {
   background: var(--bg-primary-dark, #1f2937);
   border-color: var(--border-color-dark, #374151);
   box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4);
 }
 
-.ref-picker-title {
+.ref-picker-title,
+.cmd-menu-title {
   font-size: 10px;
   font-weight: 600;
   color: var(--text-tertiary, #9ca3af);
@@ -407,7 +517,8 @@ defineExpose({ clear: () => { inputText.value = ''; selectedDocs.value = []; clo
   letter-spacing: 0.4px;
 }
 
-.ref-picker-state {
+.ref-picker-state,
+.cmd-state {
   font-size: 12px;
   color: var(--text-tertiary, #9ca3af);
   padding: 8px;
@@ -417,7 +528,8 @@ defineExpose({ clear: () => { inputText.value = ''; selectedDocs.value = []; clo
   color: #dc2626;
 }
 
-.ref-option {
+.ref-option,
+.cmd-option {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -432,12 +544,15 @@ defineExpose({ clear: () => { inputText.value = ''; selectedDocs.value = []; clo
   color: var(--text-primary, #111827);
 }
 
-.dark .ref-option {
+.dark .ref-option,
+.dark .cmd-option {
   color: var(--text-primary-dark, #f9fafb);
 }
 
 .ref-option.active,
-.ref-option:hover {
+.ref-option:hover,
+.cmd-option.active,
+.cmd-option:hover {
   background: rgba(59, 130, 246, 0.1);
 }
 
@@ -447,6 +562,26 @@ defineExpose({ clear: () => { inputText.value = ''; selectedDocs.value = []; clo
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 斜杠命令：命令名（代码字体）+ 描述（弱化色） */
+.cmd-name {
+  flex-shrink: 0;
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #3b82f6;
+}
+
+.cmd-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary, #6b7280);
+}
+
+.dark .cmd-desc {
+  color: var(--text-secondary-dark, #9ca3af);
 }
 
 .ref-chips {

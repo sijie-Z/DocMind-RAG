@@ -701,7 +701,23 @@ export default {
     empty: '未找到匹配文档',
     error: '文档加载失败，请重试',
     remove: '移除引用',
-    inputHint: "Enter 发送 · {'@'} 引用文档 · Shift+Enter 换行"
+    inputHint: "Enter 发送 · {'@'} 引用文档 · / 命令 · Shift+Enter 换行"
+  },
+  slashCmd: {
+    heading: '斜杠命令',
+    empty: '无匹配命令（Enter 直接发送原文）',
+    desc: {
+      search: '联网搜索并总结（web_search 工具）',
+      doc: '基于知识库回答（search_knowledge_base 工具）',
+      workflow: '拆解为多步计划并逐步执行（规划器）',
+      help: '查看全部命令与说明',
+      clear: '清空输入框'
+    },
+    tpl: {
+      search: '联网搜索并总结：{q}',
+      doc: '基于知识库回答：{q}',
+      workflow: '请拆解为多步计划并逐步执行：{q}'
+    }
   },
   artifacts: {
     kind: {

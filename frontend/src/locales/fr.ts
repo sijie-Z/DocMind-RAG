@@ -533,7 +533,23 @@ export default {
     empty: 'Aucun document correspondant',
     error: 'Échec du chargement des documents, veuillez réessayer',
     remove: 'Retirer la référence',
-    inputHint: "Entrée pour envoyer · {'@'} pour référencer · Maj+Entrée pour un saut de ligne"
+    inputHint: "Entrée envoyer · {'@'} référencer · / commandes · Maj+Entrée saut de ligne"
+  },
+  slashCmd: {
+    heading: 'Commandes slash',
+    empty: 'Aucune commande correspondante (Entrée envoie le texte brut)',
+    desc: {
+      search: 'Rechercher sur le web et résumer (outil web_search)',
+      doc: 'Répondre à partir de la base de connaissances (outil search_knowledge_base)',
+      workflow: 'Décomposer en plan multi-étapes et exécuter (planificateur)',
+      help: 'Afficher toutes les commandes et descriptions',
+      clear: "Vider le champ de saisie"
+    },
+    tpl: {
+      search: 'Rechercher sur le web et résumer : {q}',
+      doc: 'Répondre à partir de la base de connaissances : {q}',
+      workflow: 'Décomposez en plan multi-étapes et exécutez étape par étape : {q}'
+    }
   },
   artifacts: {
     kind: {

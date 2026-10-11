@@ -533,7 +533,23 @@ export default {
     empty: '一致する文書がありません',
     error: '文書の読み込みに失敗しました。再試行してください',
     remove: '引用を解除',
-    inputHint: "Enter で送信 · {'@'} で文書引用 · Shift+Enter で改行"
+    inputHint: "Enter で送信 · {'@'} で文書引用 · / でコマンド · Shift+Enter で改行"
+  },
+  slashCmd: {
+    heading: 'スラッシュコマンド',
+    empty: '一致するコマンドがありません（Enter でそのまま送信）',
+    desc: {
+      search: 'ウェブ検索して要約（web_search ツール）',
+      doc: 'ナレッジベースに基づいて回答（search_knowledge_base ツール）',
+      workflow: '多段階の計画に分解して順に実行（プランナー）',
+      help: 'すべてのコマンドと説明を表示',
+      clear: '入力欄をクリア'
+    },
+    tpl: {
+      search: 'ウェブ検索して要約：{q}',
+      doc: 'ナレッジベースに基づいて回答：{q}',
+      workflow: '多段階の計画に分解して順に実行してください：{q}'
+    }
   },
   artifacts: {
     kind: {
