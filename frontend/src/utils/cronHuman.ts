@@ -71,7 +71,6 @@ function parseField(raw: string, index: number): FieldValue | null {
 }
 
 const isStar = (f: FieldValue) => f.kind === 'star'
-const isSingle = (f: FieldValue, value: number) => f.kind === 'single' && f.value === value
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0')

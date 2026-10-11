@@ -18,6 +18,7 @@
             :options="filterOptions"
             class="w-36"
             round
+            @update:value="reloadFromFirstPage"
           />
           <n-button
             type="primary"

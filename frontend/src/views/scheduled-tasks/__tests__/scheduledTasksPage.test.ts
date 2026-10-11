@@ -174,6 +174,22 @@ describe('调度任务管理页', () => {
     expect(findButtonByText(wrapper.element as ParentNode, '新建定时任务')).toBeTruthy()
   })
 
+  it('筛选：切换启用状态 → 带 enabled 参数重新拉取（回到第一页）', async () => {
+    apiMocks.listScheduledTasks.mockResolvedValue({ data: { items: [makeTask()], total: 1 } })
+    const wrapper = await mountView()
+    expect(apiMocks.listScheduledTasks).toHaveBeenLastCalledWith({ skip: 0, limit: 10 })
+
+    const select = wrapper.findComponent(NSelect)
+    expect(select.exists()).toBe(true)
+    select.vm.$emit('update:value', 'enabled')
+    await flushAll()
+    expect(apiMocks.listScheduledTasks).toHaveBeenLastCalledWith({
+      skip: 0,
+      limit: 10,
+      enabled: true,
+    })
+  })
+
   it('错误态：加载失败展示后端原文 + 重试重新拉取', async () => {
     apiMocks.listScheduledTasks.mockRejectedValueOnce({
       response: { data: { detail: '定时任务服务不可用' } },
