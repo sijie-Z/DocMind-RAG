@@ -18,13 +18,15 @@
         <code>{{ argsStr }}</code>
       </div>
 
-      <!-- Result（体验第四波：工件渲染升级——diff/markdown/json 富渲染 + 下载） -->
+      <!-- Result（体验第四波：工件渲染升级——diff/markdown/json 富渲染 + 下载；
+           download-text 恒传全文：下载导出源文本，不受 300 字展示截断影响） -->
       <div v-if="resultText" class="tool-result" :class="{ 'is-error': status === 'error' }">
         <div class="result-content" ref="resultEl">
           <ArtifactViewer
             :text="displayResult"
             :kind="resultKind"
             :name="toolName"
+            :download-text="resultText"
           />
         </div>
         <button

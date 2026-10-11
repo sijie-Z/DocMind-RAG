@@ -41,6 +41,10 @@ const props = defineProps<{
   kind?: ArtifactKind
   /** 下载文件名基底（如工具名）；缺省 'artifact'。 */
   name?: string
+  /** 下载源文本（完整原文）。缺省与 text 同源；**显示被截断时必须由父级传全文**
+       —— 下载永远导出源文本而非截断预览（评审 F1：默认态曾静默导出 303 字符
+       + "…" 的截断品，patch 不可应用/JSON 不可解析）。 */
+  downloadText?: string
 }>()
 
 const { t } = useI18n()
@@ -61,7 +65,7 @@ const jsonHtml = computed<string | null>(() => {
 function handleDownload() {
   downloadTextFile(
     artifactFilename(props.name || 'artifact', kind.value),
-    props.text,
+    props.downloadText ?? props.text,
     kind.value,
   )
 }

@@ -19,6 +19,16 @@ const i18n = createI18n({ legacy: false, locale: 'zh', fallbackLocale: 'zh', mes
 
 const DIFF = '--- a/x.py\n+++ b/x.py\n@@ -1,2 +1,2 @@\n-old()\n+new()\n keep\n'
 
+/** 读 Blob 文本（jsdom 走 FileReader，兼容性最稳）。 */
+function blobText(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader()
+    fr.onload = () => resolve(String(fr.result))
+    fr.onerror = () => reject(fr.error)
+    fr.readAsText(blob)
+  })
+}
+
 function mountCard(resultText: string, toolName = 'search') {
   return mount(ToolCallCard, {
     props: { toolName, resultText, status: 'success' as const },
@@ -86,6 +96,41 @@ describe('ToolCallCard · 工件渲染升级', () => {
     expect(wrapper.find('[data-testid="artifact-kind"]').text()).toBe('文本')
     expect(wrapper.find('.artifact-plain').exists()).toBe(true)
     expect(wrapper.find('[data-testid="diff-view"]').exists()).toBe(false)
+  })
+
+  // 评审 F1：下载必须导出**源文本**，而非 300 字截断预览（默认态曾静默导出
+  // 303 字符 + "..." 的损坏工件）。以下用例做 Blob 逐字节等值断言。
+  it('长 diff 默认态（未展开）下载 → 逐字节等于源文本（.patch 路径）', async () => {
+    const longDiff = '--- a/x.py\n+++ b/x.py\n@@ -1,3 +1,3 @@\n'
+      + Array.from({ length: 60 }, (_, i) => `-旧行 ${i} 内容内容内容内容`).join('\n')
+      + '\n'
+      + Array.from({ length: 60 }, (_, i) => `+新行 ${i} 内容内容内容内容`).join('\n')
+    expect(longDiff.length).toBeGreaterThan(300)
+
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const wrapper = mountCard(longDiff, 'edit_file')
+    // 默认态：展示被截断（展开按钮在场）
+    expect(wrapper.find('.expand-btn').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="artifact-download"]').trigger('click')
+    expect(clickSpy).toHaveBeenCalledTimes(1)
+    const a = clickSpy.mock.instances[0] as unknown as HTMLAnchorElement
+    expect(a.download).toBe('edit_file.patch')
+    const blob = (URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as Blob
+    expect(await blobText(blob)).toBe(longDiff)
+  })
+
+  it('长纯文本默认态（未展开）下载 → 逐字节等于源文本（.txt 路径）', async () => {
+    const longText = '分析结论：'.repeat(1) + 'x'.repeat(1200)
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const wrapper = mountCard(longText, 'summarize')
+    expect(wrapper.find('.expand-btn').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="artifact-download"]').trigger('click')
+    const a = clickSpy.mock.instances[0] as unknown as HTMLAnchorElement
+    expect(a.download).toBe('summarize.txt')
+    const blob = (URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as Blob
+    expect(await blobText(blob)).toBe(longText)
   })
 })
 

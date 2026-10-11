@@ -15,7 +15,17 @@ import RunStats from '@/components/agent/RunStats.vue'
 
 const i18n = createI18n({ legacy: false, locale: 'zh', fallbackLocale: 'zh', messages: { zh } })
 
-function mountStats(props: Record<string, unknown>) {
+// 评审 F2：props 显式类型（此前 Record<string, unknown> 不满足组件 props 契约，
+// vue-tsc 真实退出码 2 / TS2322——CI 类型检查与 build 必红）
+type RunStatsProps = {
+  loading: boolean
+  startedAt?: number
+  endedAt?: number
+  tokens?: number
+  model?: string
+}
+
+function mountStats(props: RunStatsProps) {
   return mount(RunStats, {
     props,
     global: { plugins: [i18n] },
