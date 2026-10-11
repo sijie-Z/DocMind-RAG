@@ -148,7 +148,8 @@ function toggleTool(name: string) {
 onMounted(async () => {
   try {
     const res = await agentApi.listTools()
-    const tools = res.data
+    // SEAM-3 同族：拦截器返回完整 AxiosResponse，信封在 res.data = {success, data}
+    const tools = res.data?.data
     if (Array.isArray(tools)) availableTools.value = tools
   } catch {
     // ignore

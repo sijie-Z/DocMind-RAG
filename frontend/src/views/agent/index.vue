@@ -757,8 +757,10 @@ async function handleSessionChange(sessionId: string | null) {
   if (sessionId) {
     try {
       const res = await agentApi.getSession(sessionId)
-      if (res.data?.config) {
-        agentStore.updateConfig(res.data.config)
+      // SEAM-3 同族：拦截器返回完整 AxiosResponse，信封在 res.data = {success, data}
+      const data = res.data?.data
+      if (data?.config) {
+        agentStore.updateConfig(data.config)
       }
     } catch (e) {
       message.error('加载会话失败')
@@ -782,9 +784,11 @@ async function handleSessionDelete(sessionId: string) {
 async function handleNewSession() {
   try {
     const res = await agentApi.createSession('New Agent Session')
-    if (res.data) {
-      agentStore.setSessions([res.data, ...agentStore.sessions])
-      agentStore.setCurrentSession(res.data.id)
+    // SEAM-3 同族：读信封内层（res.data = {success, data}）
+    const data = res.data?.data
+    if (data) {
+      agentStore.setSessions([data, ...agentStore.sessions])
+      agentStore.setCurrentSession(data.id)
       message.success('已创建新会话')
     }
   } catch (e) {
@@ -827,9 +831,11 @@ async function loadInit() {
       agentApi.listSessions(),
       agentApi.getConfig(),
     ])
-    const toolsData = toolsRes.data
-    const sessionsData = sessionsRes.data
-    const configData = configRes.data
+    // SEAM-3 同族：三条链都读信封内层（res.data = {success, data}）——
+    // 旧"已解包"假设下工具/会话列表永不加载、config 复原为信封对象。
+    const toolsData = toolsRes.data?.data
+    const sessionsData = sessionsRes.data?.data
+    const configData = configRes.data?.data
     if (Array.isArray(toolsData)) agentStore.tools = toolsData
     if (sessionsData?.sessions) agentStore.setSessions(sessionsData.sessions)
     if (configData && typeof configData === 'object') agentStore.updateConfig(configData)

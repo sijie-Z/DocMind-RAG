@@ -127,12 +127,12 @@ export const agentApi = {
     return consumeEventStream(response, onEvent, controller)
   },
 
-  /** Submit user feedback on an agent response */
+  /** Submit user feedback on an agent response（信封契约同 getTask；结果不读） */
   submitFeedback(
     messageId: string,
     feedback: number,
     note?: string,
-  ): Promise<ApiResponse<{ message: string }>> {
+  ): Promise<AxiosResponse<ApiResponse<{ message: string }>>> {
     return request.post('/agent/feedback', {
       message_id: messageId,
       feedback,
@@ -223,54 +223,54 @@ export const agentApi = {
     return consumeEventStream(response, onEvent, controller)
   },
 
-  /** List available tools */
-  listTools(): Promise<ApiResponse<ToolInfo[]>> {
+  /** List available tools。信封契约同 getTask（拦截器返回完整 AxiosResponse，读 res.data.data）。 */
+  listTools(): Promise<AxiosResponse<ApiResponse<ToolInfo[]>>> {
     return request.get('/agent/tools')
   },
 
-  /** List learned skills */
-  listSkills(): Promise<ApiResponse<SkillInfo[]>> {
+  /** List learned skills（信封契约同 getTask） */
+  listSkills(): Promise<AxiosResponse<ApiResponse<SkillInfo[]>>> {
     return request.get('/agent/skills')
   },
 
   // ── Sessions ──
 
-  /** List agent sessions */
+  /** List agent sessions（信封契约同 getTask） */
   listSessions(params?: {
     page?: number
     page_size?: number
-  }): Promise<ApiResponse<{ sessions: AgentSession[]; total: number; page: number; page_size: number }>> {
+  }): Promise<AxiosResponse<ApiResponse<{ sessions: AgentSession[]; total: number; page: number; page_size: number }>>> {
     return request.get('/agent/sessions', { params })
   },
 
-  /** Create agent session */
+  /** Create agent session（信封契约同 getTask） */
   createSession(
     title: string,
-  ): Promise<ApiResponse<AgentSession>> {
+  ): Promise<AxiosResponse<ApiResponse<AgentSession>>> {
     return request.post('/agent/sessions', { title })
   },
 
-  /** Get session details */
-  getSession(sessionId: string): Promise<ApiResponse<AgentSessionDetail>> {
+  /** Get session details（信封契约同 getTask） */
+  getSession(sessionId: string): Promise<AxiosResponse<ApiResponse<AgentSessionDetail>>> {
     return request.get(`/agent/sessions/${sessionId}`)
   },
 
-  /** Delete session */
-  deleteSession(sessionId: string): Promise<ApiResponse<{ message: string }>> {
+  /** Delete session（信封契约同 getTask；结果不读） */
+  deleteSession(sessionId: string): Promise<AxiosResponse<ApiResponse<{ message: string }>>> {
     return request.delete(`/agent/sessions/${sessionId}`)
   },
 
   // ── Configuration ──
 
-  /** Get user agent config */
-  getConfig(): Promise<ApiResponse<AgentConfig>> {
+  /** Get user agent config（信封契约同 getTask） */
+  getConfig(): Promise<AxiosResponse<ApiResponse<AgentConfig>>> {
     return request.get('/agent/config')
   },
 
-  /** Update user agent config */
+  /** Update user agent config（信封契约同 getTask；结果不读） */
   updateConfig(
     updates: Partial<AgentConfig>,
-  ): Promise<ApiResponse<AgentConfig>> {
+  ): Promise<AxiosResponse<ApiResponse<AgentConfig>>> {
     return request.put('/agent/config', updates)
   },
 }
