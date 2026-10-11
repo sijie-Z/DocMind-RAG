@@ -354,6 +354,8 @@ export default {
     workflow: 'Workflow Agent',
     auditLogs: 'Journaux d\'audit',
     monitoring: 'Surveillance Système',
+    mcpServers: 'Serveurs MCP',
+    scheduledTasks: 'Tâches planifiées',
     systemHelp: 'Aide',
     systemAbout: 'À propos',
     systemTitle: 'DocMind Base de Connaissances'
@@ -524,5 +526,144 @@ export default {
     planEditInvalid: 'Le contenu modifié est invalide — vérifiez les descriptions/dépendances puis réessayez',
     planFailed: "Échec de l'envoi de la décision ; état de la tâche actualisé",
     planPendingHint: "La tâche attend l'approbation du plan — approuvez / modifiez / rejetez d'abord le plan ci-dessus (ou annulez la tâche)"
+  },
+  scheduler: {
+    title: 'Tâches planifiées',
+    subtitle: "Gérez les exécutions d'agent planifiées ; les résultats sont consultables depuis la dernière exécution",
+    create: 'Nouvelle tâche planifiée',
+    noData: 'Aucune tâche planifiée',
+    loadFailed: 'Échec du chargement',
+    filterAll: 'Toutes',
+    filterEnabled: 'Activées',
+    filterPaused: 'En pause',
+    columns: {
+      name: 'Nom',
+      schedule: 'Planification',
+      status: 'Statut',
+      lastRun: 'Dernière exécution',
+      nextRun: 'Prochaine exécution',
+      actions: 'Actions'
+    },
+    statusEnabled: 'Activée',
+    statusPaused: 'En pause',
+    statusFinished: 'Terminée',
+    lastStatus: { running: 'En cours', success: 'Succès', failed: 'Échec' },
+    skippedOverlap: '{n} chevauchement(s) ignoré(s)',
+    neverRun: 'Jamais exécutée',
+    noNextRun: 'Aucune',
+    viewResult: 'Voir le résultat',
+    runNow: 'Exécuter maintenant',
+    pause: 'Pause',
+    resume: 'Reprendre',
+    delete: 'Supprimer',
+    runNowTriggered: 'Exécution déclenchée ; vous serez notifié à la fin',
+    runNowReason: {
+      overlap: "L'exécution précédente est encore en cours — celle-ci a été ignorée (sans file d'attente)",
+      not_found: 'Tâche introuvable',
+      unknown: 'Non déclenchée ({reason})'
+    },
+    deleteTitle: 'Supprimer la tâche planifiée',
+    deleteConfirm: "Supprimer « {name} » ? Les exécutions en cours continuent, mais l'enregistrement sera irrécupérable.",
+    createSuccess: 'Créée',
+    plan: {
+      intervalMinutes: 'Toutes les {n} minutes',
+      intervalHours: 'Toutes les {n} heures',
+      intervalSeconds: 'Toutes les {n} secondes',
+      onceAt: 'Unique · {time}'
+    },
+    cron: {
+      everyMinute: 'Chaque minute',
+      everyNMinutes: 'Toutes les {n} minutes',
+      hourlyAtMinute: 'Chaque heure à la minute {m}',
+      dailyAt: 'Tous les jours à {time}',
+      weeklyAt: 'Chaque {days} à {time}',
+      monthlyAt: 'Le {days} de chaque mois à {time}',
+      yearlyAt: 'Chaque année le {day} {month} à {time}',
+      weekdayRange: '{from}–{to}',
+      dayRange: '{from}–{to}',
+      listSep: ', ',
+      weekdays: { '0': 'dim.', '1': 'lun.', '2': 'mar.', '3': 'mer.', '4': 'jeu.', '5': 'ven.', '6': 'sam.' },
+      months: {
+        '1': 'janvier', '2': 'février', '3': 'mars', '4': 'avril', '5': 'mai', '6': 'juin',
+        '7': 'juillet', '8': 'août', '9': 'septembre', '10': 'octobre', '11': 'novembre', '12': 'décembre'
+      }
+    },
+    modal: {
+      title: 'Nouvelle tâche planifiée',
+      name: 'Nom de la tâche',
+      namePlaceholder: 'ex. Briefing quotidien',
+      prompt: 'Instruction (prompt)',
+      promptPlaceholder: "L'instruction transmise à l'agent au déclenchement…",
+      scheduleType: 'Type de planification',
+      type: { cron: 'Récurrent (cron)', interval: 'Intervalle fixe', once: 'Unique' },
+      cronExpr: 'Expression cron (min heure jour mois semaine)',
+      cronPlaceholder: 'ex. 0 9 * * *',
+      cronPreview: 'Aperçu',
+      cronPreviewUnknown: "Hors du sous-ensemble pris en charge — pas d'aperçu en langage clair (la validation serveur fait foi)",
+      timezone: "Fuseau horaire (n'affecte que l'interprétation du cron)",
+      timezoneDefault: 'Défaut du serveur',
+      intervalSeconds: 'Intervalle (secondes)',
+      intervalHint: 'Minimum {n} secondes (précision à la minute)',
+      onceAt: 'Heure de déclenchement',
+      onceAtHint: "Choisir l'heure de déclenchement",
+      enabled: 'Activer dès la création'
+    },
+    validation: {
+      cronRequired: "Veuillez saisir une expression cron",
+      cronMax: "L'expression cron ne peut pas dépasser {n} caractères",
+      intervalRequired: "Veuillez saisir l'intervalle en secondes",
+      intervalMin: "L'intervalle ne peut pas être inférieur à {n} secondes",
+      onceRequired: "Veuillez choisir l'heure de déclenchement",
+      onceFuture: "L'heure de déclenchement doit être dans le futur",
+      nameMax: 'Le nom ne peut pas dépasser {n} caractères',
+      promptMax: "L'instruction ne peut pas dépasser {n} caractères"
+    },
+    result: {
+      title: "Résultat d'exécution (tâche Agent)",
+      taskId: 'ID de tâche',
+      state: 'État',
+      progress: 'Progression (étapes terminées / total)',
+      query: 'Entrée',
+      error: 'Dernière erreur',
+      unavailable: 'Résultat indisponible (tâche introuvable ou non visible)',
+      taskState: {
+        pending: 'En attente',
+        running: 'En cours',
+        waiting_tool: 'Outil en cours',
+        waiting_approval: "En attente d'approbation",
+        waiting_plan_approval: 'En attente du plan',
+        waiting_human: 'En attente humaine',
+        failed: 'Échec',
+        completed: 'Terminé',
+        abandoned: 'Abandonné',
+        cancelled: 'Annulé',
+        rejected: 'Rejeté'
+      }
+    }
+  },
+  mcp: {
+    title: 'Serveurs MCP',
+    subtitle: 'État des serveurs MCP intégrés dynamiquement et de leurs outils enregistrés (lecture seule)',
+    readOnlyNotice: "Vue en lecture seule : pour activer/désactiver ou ajouter un serveur, modifiez backend/mcp_servers.json puis redémarrez le backend. Aucune écriture en ligne sur cette page.",
+    notStarted: "Le gestionnaire MCP n'est pas encore initialisé (le backend n'a peut-être pas fini de démarrer ou aucune configuration n'a été chargée).",
+    registeredTools: '{n} outil(s) dynamique(s) enregistré(s)',
+    loadFailed: 'Échec du chargement',
+    noServers: 'Aucun serveur MCP configuré',
+    noServersHint: 'Ajoutez des entrées sous "servers" dans backend/mcp_servers.json puis redémarrez le backend',
+    transportLabel: 'Transport',
+    enabled: 'Activé',
+    disabled: 'Désactivé',
+    toolCount: '{n} outil(s)',
+    noTools: 'Aucun outil enregistré',
+    lastError: 'Dernière erreur',
+    state: {
+      init: 'Initialisation',
+      connecting: 'Connexion',
+      connected: 'Connecté',
+      dead: 'Connexion perdue',
+      closed: 'Fermé',
+      disabled: 'Désactivé',
+      not_connected: 'Non connecté'
+    }
   }
 };

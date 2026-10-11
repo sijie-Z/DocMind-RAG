@@ -474,6 +474,8 @@ export default {
     workflow: 'Agent Workflow',
     auditLogs: 'Audit Logs',
     monitoring: 'System Monitoring',
+    mcpServers: 'MCP Servers',
+    scheduledTasks: 'Scheduled Tasks',
     systemHelp: 'Help',
     systemAbout: 'About',
     systemTitle: 'DocMind Knowledge Base'
@@ -666,5 +668,144 @@ export default {
     planEditInvalid: 'The edited content is invalid — check step descriptions/dependencies and retry',
     planFailed: 'Failed to submit the plan decision; task state refreshed',
     planPendingHint: 'The task is awaiting plan approval — approve / edit / reject the plan above first (or cancel the task)'
+  },
+  scheduler: {
+    title: 'Scheduled Tasks',
+    subtitle: 'Manage agent runs triggered on a schedule; results are available from the last run',
+    create: 'New Scheduled Task',
+    noData: 'No scheduled tasks yet',
+    loadFailed: 'Failed to load',
+    filterAll: 'All',
+    filterEnabled: 'Enabled',
+    filterPaused: 'Paused',
+    columns: {
+      name: 'Name',
+      schedule: 'Schedule',
+      status: 'Status',
+      lastRun: 'Last Run',
+      nextRun: 'Next Run',
+      actions: 'Actions'
+    },
+    statusEnabled: 'Enabled',
+    statusPaused: 'Paused',
+    statusFinished: 'Finished',
+    lastStatus: { running: 'Running', success: 'Success', failed: 'Failed' },
+    skippedOverlap: 'Skipped {n} overlap(s)',
+    neverRun: 'Never run',
+    noNextRun: 'None',
+    viewResult: 'View result',
+    runNow: 'Run now',
+    pause: 'Pause',
+    resume: 'Resume',
+    delete: 'Delete',
+    runNowTriggered: 'Run triggered; you will be notified when it finishes',
+    runNowReason: {
+      overlap: 'Previous run still in progress — this one was skipped (no queueing)',
+      not_found: 'Task not found',
+      unknown: 'Not triggered ({reason})'
+    },
+    deleteTitle: 'Delete scheduled task',
+    deleteConfirm: 'Delete "{name}"? In-flight runs continue, but the task record cannot be recovered.',
+    createSuccess: 'Created',
+    plan: {
+      intervalMinutes: 'Every {n} minutes',
+      intervalHours: 'Every {n} hours',
+      intervalSeconds: 'Every {n} seconds',
+      onceAt: 'Once · {time}'
+    },
+    cron: {
+      everyMinute: 'Every minute',
+      everyNMinutes: 'Every {n} minutes',
+      hourlyAtMinute: 'Hourly at minute {m}',
+      dailyAt: 'Every day at {time}',
+      weeklyAt: 'Every {days} at {time}',
+      monthlyAt: 'Day {days} of every month at {time}',
+      yearlyAt: 'Every year on {month} {day} at {time}',
+      weekdayRange: '{from}–{to}',
+      dayRange: '{from}–{to}',
+      listSep: ', ',
+      weekdays: { '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat' },
+      months: {
+        '1': 'January', '2': 'February', '3': 'March', '4': 'April', '5': 'May', '6': 'June',
+        '7': 'July', '8': 'August', '9': 'September', '10': 'October', '11': 'November', '12': 'December'
+      }
+    },
+    modal: {
+      title: 'New Scheduled Task',
+      name: 'Task name',
+      namePlaceholder: 'e.g. Daily briefing',
+      prompt: 'Instruction (prompt)',
+      promptPlaceholder: 'The instruction handed to the agent when the schedule fires…',
+      scheduleType: 'Schedule type',
+      type: { cron: 'Recurring (cron)', interval: 'Fixed interval', once: 'One-time' },
+      cronExpr: 'Cron expression (min hour day month weekday)',
+      cronPlaceholder: 'e.g. 0 9 * * *',
+      cronPreview: 'Preview',
+      cronPreviewUnknown: 'Outside the supported subset — no plain-language preview (server validation decides)',
+      timezone: 'Timezone (affects cron interpretation only)',
+      timezoneDefault: 'Server default',
+      intervalSeconds: 'Interval (seconds)',
+      intervalHint: 'Minimum {n} seconds (minute-level precision)',
+      onceAt: 'Run at',
+      onceAtHint: 'Pick the trigger time',
+      enabled: 'Enable right after creation'
+    },
+    validation: {
+      cronRequired: 'Please enter a cron expression',
+      cronMax: 'Cron expression cannot exceed {n} characters',
+      intervalRequired: 'Please enter the interval in seconds',
+      intervalMin: 'Interval cannot be less than {n} seconds',
+      onceRequired: 'Please pick a trigger time',
+      onceFuture: 'Trigger time must be in the future',
+      nameMax: 'Name cannot exceed {n} characters',
+      promptMax: 'Instruction cannot exceed {n} characters'
+    },
+    result: {
+      title: 'Run Result (Agent Task)',
+      taskId: 'Task ID',
+      state: 'State',
+      progress: 'Progress (completed / total steps)',
+      query: 'Input',
+      error: 'Last error',
+      unavailable: 'Result unavailable (task missing or not visible to you)',
+      taskState: {
+        pending: 'Pending',
+        running: 'Running',
+        waiting_tool: 'Tool running',
+        waiting_approval: 'Waiting for approval',
+        waiting_plan_approval: 'Waiting for plan approval',
+        waiting_human: 'Waiting for human',
+        failed: 'Failed',
+        completed: 'Completed',
+        abandoned: 'Abandoned',
+        cancelled: 'Cancelled',
+        rejected: 'Rejected'
+      }
+    }
+  },
+  mcp: {
+    title: 'MCP Servers',
+    subtitle: 'Status of dynamically integrated MCP servers and their registered tools (read-only)',
+    readOnlyNotice: 'Read-only view: to enable/disable or add servers, edit backend/mcp_servers.json and restart the backend. No online write operations on this page.',
+    notStarted: 'The MCP manager has not been initialized yet (backend may not have finished starting, or no config was loaded).',
+    registeredTools: '{n} dynamic tool(s) registered',
+    loadFailed: 'Failed to load',
+    noServers: 'No MCP servers configured',
+    noServersHint: 'Add entries under "servers" in backend/mcp_servers.json and restart the backend',
+    transportLabel: 'Transport',
+    enabled: 'Enabled',
+    disabled: 'Disabled',
+    toolCount: '{n} tool(s)',
+    noTools: 'No tools registered yet',
+    lastError: 'Last error',
+    state: {
+      init: 'Initializing',
+      connecting: 'Connecting',
+      connected: 'Connected',
+      dead: 'Connection lost',
+      closed: 'Closed',
+      disabled: 'Disabled',
+      not_connected: 'Not connected'
+    }
   }
 };
