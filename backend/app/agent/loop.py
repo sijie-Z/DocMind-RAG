@@ -484,6 +484,9 @@ class PERAgentLoop:
             # 引用文档（体验第四波 @引用）：用户显式引用的文档摘要段与记忆
             # 上下文同轨并入——planner 的 system 段与执行合成的用户消息都会
             # 带上；不依赖 enable_memory（引用是用户显式意图，不是回忆）。
+            # ⚠️ 安全注记（评审 F3）：该段内容来自知识库文档（不可信输入），
+            # 注入姿态与既有 RAG context_docs 直拼一致；防护（spotlight/指令
+            # 隔离）为后续独立演进项，详见 service.build_referenced_document_context。
             if document_context:
                 memory_context = (
                     f"{memory_context}\n\n{document_context}"

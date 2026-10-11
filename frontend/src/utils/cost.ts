@@ -23,7 +23,10 @@ export const DEFAULT_PRICE_TABLE: Record<string, ModelPrice> = {
 
 export const COST_TABLE_STORAGE_KEY = 'docmind.agent.costTable'
 
-/** 读取价目表：默认表 ⊕ localStorage 覆盖（非法 JSON / 坏形状 → 忽略覆盖）。 */
+/** 读取价目表：默认表 ⊕ localStorage 覆盖（非法 JSON / 坏形状 → 忽略覆盖）。
+ *  F5（评审）：数值校验用 `Number.isFinite` + 非负——`typeof === 'number'`
+ *  会放过 NaN/Infinity（JSON 溢出如 1e999 即得 Infinity），使估算显示 ≈$0.0000
+ *  而不落 default 档；负单价则会让成本被静默隐藏。 */
 export function getPriceTable(): Record<string, ModelPrice> {
   const table: Record<string, ModelPrice> = { ...DEFAULT_PRICE_TABLE }
   try {
@@ -32,9 +35,14 @@ export function getPriceTable(): Record<string, ModelPrice> {
     const parsed = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return table
     for (const [model, price] of Object.entries(parsed)) {
-      const p = price as Partial<ModelPrice>
-      if (typeof p?.inputPerM === 'number' && typeof p?.outputPerM === 'number') {
-        table[model] = { inputPerM: p.inputPerM, outputPerM: p.outputPerM }
+      const inP = (price as Partial<ModelPrice>)?.inputPerM
+      const outP = (price as Partial<ModelPrice>)?.outputPerM
+      if (
+        typeof inP === 'number' && typeof outP === 'number'
+        && Number.isFinite(inP) && Number.isFinite(outP)
+        && inP >= 0 && outP >= 0
+      ) {
+        table[model] = { inputPerM: inP, outputPerM: outP }
       }
     }
   } catch {
@@ -44,11 +52,11 @@ export function getPriceTable(): Record<string, ModelPrice> {
 }
 
 /**
- * 估算一次运行的成本（美元）。totalTokens 为 0/缺失 → 0。
+ * 估算一次运行的成本（美元）。totalTokens 缺失/非有限/≤0 → 0。
  * 未收录模型 → 兜底 `default` 档（不返回 null，估算不静默消失）。
  */
 export function estimateCostUsd(model: string, totalTokens: number | undefined | null): number {
-  if (!totalTokens || totalTokens <= 0) return 0
+  if (typeof totalTokens !== 'number' || !Number.isFinite(totalTokens) || totalTokens <= 0) return 0
   const table = getPriceTable()
   const price = table[model] || table.default
   if (!price) return 0

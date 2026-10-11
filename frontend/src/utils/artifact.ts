@@ -11,11 +11,13 @@ export type ArtifactKind = 'diff' | 'json' | 'markdown' | 'text'
 
 const HUNK_RE = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/
 
-/** 统一 diff 的强特征判定（git diff / patch 文本）。 */
+/** 统一 diff 的强特征判定（git diff / patch 文本）。
+ *  评审 F6：hunk 头必须**行首**（`@@` 不得先 trimStart）——上下文行形如
+ *  ` @@ …` 的输入不应被当作 diff 证据。 */
 export function isUnifiedDiff(text: string): boolean {
   if (!text) return false
   const lines = text.split('\n')
-  const hasHunk = lines.some((l) => HUNK_RE.test(l.trimStart()))
+  const hasHunk = lines.some((l) => l.startsWith('@@') && HUNK_RE.test(l))
   const hasFileHeaders = lines.some((l) => /^---\s/.test(l)) && lines.some((l) => /^\+\+\+\s/.test(l))
   const addCount = lines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length
   const delCount = lines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length
@@ -78,6 +80,13 @@ export interface DiffLine {
  * - `@@ -a,b +c,d @@` 重置两侧游标；hunk 内 ctx 双增、add 只增新、del 只增旧；
  * - 首个 hunk 之前的行（diff --git / index / --- / +++ 等文件头）记为 meta；
  * - 没有 hunk 的退化输入（如被截断的 diff）按行首字符归 add/del/meta。
+ *
+ * 评审 F6 两处微边界修复：
+ * - hunk 头判定要求**行首 `@@`**（不再 trimStart）——hunk 内形如 ` @@ …` 的
+ *   上下文行归 ctx 正常计行号，不误当 hunk 头去重置游标；
+ * - `--- `/`+++ ` 头仅在 **hunk 外** 归 meta——hunk 内增行内容以 `++ ` 开头
+ *   （原文 `+++ …`）是真正的加行，不再被吞成 meta；`diff --git`/`index ` 出现
+ *   即开启新的文件段（其后 `---`/`+++` 头恢复 meta 语义）。
  */
 export function parseDiffLines(text: string): DiffLine[] {
   const out: DiffLine[] = []
@@ -88,7 +97,7 @@ export function parseDiffLines(text: string): DiffLine[] {
   // 文本以 \n 结尾时 split 产生尾部空元素——不是真实行，丢掉
   if (rawLines.length > 1 && rawLines[rawLines.length - 1] === '') rawLines.pop()
   for (const raw of rawLines) {
-    if (HUNK_RE.test(raw.trimStart())) {
+    if (raw.startsWith('@@') && HUNK_RE.test(raw)) {
       const m = raw.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
       if (m) {
         oldNo = parseInt(m[1], 10)
@@ -98,7 +107,17 @@ export function parseDiffLines(text: string): DiffLine[] {
       out.push({ type: 'hunk', text: raw, oldNo: null, newNo: null })
       continue
     }
-    if (/^(diff --git |index |--- |\+\+\+ |\\ No newline)/.test(raw)) {
+    if (raw.startsWith('diff --git ') || raw.startsWith('index ')) {
+      // 新文件段开始：hunk 外语义复位（随后的 ---/+++ 头是文件头）
+      inHunk = false
+      out.push({ type: 'meta', text: raw, oldNo: null, newNo: null })
+      continue
+    }
+    if (!inHunk && (raw.startsWith('--- ') || raw.startsWith('+++ '))) {
+      out.push({ type: 'meta', text: raw, oldNo: null, newNo: null })
+      continue
+    }
+    if (raw.startsWith('\\ No newline')) {
       out.push({ type: 'meta', text: raw, oldNo: null, newNo: null })
       continue
     }

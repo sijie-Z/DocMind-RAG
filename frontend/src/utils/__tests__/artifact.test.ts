@@ -69,6 +69,10 @@ describe('工件识别 detectArtifactKind', () => {
     expect(detectArtifactKind('')).toBe('text')
     expect(detectArtifactKind('   \n  ')).toBe('text')
   })
+
+  it('评审 F6：行首带空格的 "@@ …"（非行首）不作 diff 证据', () => {
+    expect(isUnifiedDiff('前置说明\n @@ -1 +1 @@\n普通文本\n')).toBe(false)
+  })
 })
 
 describe('diff 行解析 parseDiffLines', () => {
@@ -95,6 +99,31 @@ describe('diff 行解析 parseDiffLines', () => {
     const lines = parseDiffLines('@@ -5,2 +5,2 @@\n\n+x\n')
     expect(lines[1]).toMatchObject({ type: 'ctx', oldNo: 5, newNo: 5 })
     expect(lines[2]).toMatchObject({ type: 'add', newNo: 6 })
+  })
+
+  // 评审 F6：hunk 内两处微边界
+  it('hunk 内增行内容以 ++ 开头（原文 +++）→ 归 add 不吞成 meta', () => {
+    const lines = parseDiffLines('@@ -1,1 +1,2 @@\n+a\n+++ b\n')
+    expect(lines[1]).toMatchObject({ type: 'add', text: 'a', newNo: 1 })
+    expect(lines[2]).toMatchObject({ type: 'add', text: '++ b', newNo: 2 })
+    expect(lines.some((l) => l.type === 'meta')).toBe(false)
+  })
+
+  it('hunk 内形如 " @@ -N +N @@" 的上下文行归 ctx（不误判 hunk、不重置游标）', () => {
+    // 输入必须与真 hunk 头同形（含数字）才能杀死 trimStart 旧判定
+    const lines = parseDiffLines('@@ -5,2 +5,2 @@\n @@ -99 +99 @@\n-x\n')
+    expect(lines[1]).toMatchObject({ type: 'ctx', text: '@@ -99 +99 @@', oldNo: 5, newNo: 5 })
+    expect(lines[2]).toMatchObject({ type: 'del', oldNo: 6 })
+    expect(lines.filter((l) => l.type === 'hunk')).toHaveLength(1)
+  })
+
+  it('第二个文件的 ---/+++ 头（hunk 之间）恢复 meta 语义', () => {
+    const text = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n'
+      + 'diff --git a/y b/y\n--- a/y\n+++ b/y\n@@ -1 +1 @@\n-c\n+d\n'
+    const lines = parseDiffLines(text)
+    expect(lines.filter((l) => l.type === 'meta')).toHaveLength(6)
+    expect(lines.find((l) => l.type === 'del' && l.text === 'c')).toBeTruthy()
+    expect(lines.find((l) => l.type === 'add' && l.text === 'd')).toBeTruthy()
   })
 })
 

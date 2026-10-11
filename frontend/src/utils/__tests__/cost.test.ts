@@ -37,6 +37,28 @@ describe('utils/cost · estimateCostUsd', () => {
     expect(estimateCostUsd('deepseek-v4-flash', -5)).toBe(0)
   })
 
+  it('totalTokens 为 NaN / Infinity → 0（评审 F5：估算不发散）', () => {
+    expect(estimateCostUsd('deepseek-v4-flash', NaN)).toBe(0)
+    expect(estimateCostUsd('deepseek-v4-flash', Infinity)).toBe(0)
+  })
+
+  it('价目表覆盖含 Infinity / 负值 → 忽略该覆盖、走 default 档（评审 F5）', () => {
+    // JSON 溢出：1e999 解析为 Infinity（NaN 无法由 JSON 表达，Infinity 是等价探针）
+    localStorage.setItem(COST_TABLE_STORAGE_KEY, '{"m-inf":{"inputPerM":1e999,"outputPerM":4}}')
+    expect(estimateCostUsd('m-inf', 1_000_000)).toBeCloseTo(0.35, 6)
+
+    localStorage.setItem(COST_TABLE_STORAGE_KEY, JSON.stringify({
+      'm-neg': { inputPerM: -1, outputPerM: -1 },
+    }))
+    expect(estimateCostUsd('m-neg', 1_000_000)).toBeCloseTo(0.35, 6)
+
+    // 合法覆盖仍生效（防止校验过严把正常配置也拒了）
+    localStorage.setItem(COST_TABLE_STORAGE_KEY, JSON.stringify({
+      'm-ok': { inputPerM: 2, outputPerM: 4 },
+    }))
+    expect(estimateCostUsd('m-ok', 1_000_000)).toBeCloseTo(3, 6)
+  })
+
   it('localStorage 覆盖价目表（可配置）；坏 JSON / 坏形状 → 忽略覆盖', () => {
     localStorage.setItem(COST_TABLE_STORAGE_KEY, JSON.stringify({
       'my-model': { inputPerM: 2, outputPerM: 4 },

@@ -49,6 +49,14 @@ async def build_referenced_document_context(
     诚实语义：每个引用要么给出关键摘要（query 相关分块）进上下文，要么给出
     「为什么用不了」的明确警告文案上 SSE —— 绝不静默丢弃。
 
+    ⚠️ 安全注记（评审 F3，必须有记录）：被引文档的检索分块是**不可信输入**
+    ——文档内容可能包含针对模型的指令（prompt injection 载体）。本实现的
+    注入姿态与既有 RAG 一致（`context_docs` 直拼 snippet，见 loop 合成消息），
+    非新类攻击面；现有约束：用户显式引用（非自动召回）+ 组织域校验（跨组织
+    拒注入）+ 条数帽（10）× 长度帽（700 字符/条）。**尚无**定界 spotlight /
+    指令隔离等主动防护——该方向（引用段包裹与注入过滤）作为后续独立演进项，
+    不在本波范围。若未来把引用摘要扩展到自动召回/跨用户语料，须先补防护。
+
     Returns:
         (document_context, warnings)：document_context 为 None 表示没有
         任何可用引用（不外发空段）；warnings 为逐条中文提示（后端无 i18n
