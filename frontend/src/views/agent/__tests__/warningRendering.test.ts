@@ -13,11 +13,13 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
+import { createI18n } from 'vue-i18n'
 import { NMessageProvider, NSpin, NButton, NTooltip, NIcon } from 'naive-ui'
 import { createPinia, setActivePinia } from 'pinia'
 
 import AgentView from '../index.vue'
 import { useAgentStore } from '@/stores/agent'
+import zh from '@/locales/zh'
 
 vi.mock('@/api/agent', () => ({
   agentApi: {
@@ -46,11 +48,17 @@ const stubs = {
   SessionSelector: true,
   AgentInput: true,
   Markdown: true,
+  // replay 支线并入后的新子组件（装配对齐：n-popover 未注册时子组件会被直接渲染）
+  RecentTaskList: true,
+  ReplayTimeline: true,
   NSpin: true,
   NButton: true,
   NTooltip: true,
   NIcon: true,
 }
+
+// replay 支线给 AgentView 引入 useI18n()——mount 必须装 zh i18n 实例
+const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
 
 function seedStore(overrides: Record<string, unknown> = {}) {
   const pinia = createPinia()
@@ -74,7 +82,7 @@ function seedStore(overrides: Record<string, unknown> = {}) {
 async function mountView(pinia: ReturnType<typeof createPinia>) {
   const wrapper = mount(Host, {
     global: {
-      plugins: [pinia],
+      plugins: [pinia, i18n],
       components: { NSpin, NButton, NTooltip, NIcon },
       stubs,
     },
