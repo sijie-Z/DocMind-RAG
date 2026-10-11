@@ -10,6 +10,10 @@
  * - 不读 route.query.id（深链不打开回放）→ 深链用例红；
  * - 完成运行后不亮入口 / 不回读 has_replay → 入口用例红；
  * - 404 不落诚实空态（编造空轨迹）→ 空态用例红。
+ *
+ * 契约纪律（SEAM-3 教训）：mock 形状 = 真实拦截器输出（**完整 AxiosResponse**，
+ * 信封在 res.data = {success, data}，消费者读 res.data.data）——mock 跟着错误
+ * 假设走会放跑"入口永远不亮"的运行时 bug。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -33,10 +37,10 @@ const apiMocks = vi.hoisted(() => ({
   createSession: vi.fn().mockResolvedValue({ data: null }),
   updateConfig: vi.fn().mockResolvedValue({}),
   submitFeedback: vi.fn().mockResolvedValue({}),
-  getTask: vi.fn().mockResolvedValue({ data: { state: 'completed' } }),
+  getTask: vi.fn().mockResolvedValue({ data: { success: true, data: { state: 'completed' } } }),
   cancelTask: vi.fn().mockResolvedValue({ data: { state: 'cancel_requested' } }),
   decideApproval: vi.fn().mockResolvedValue({ abort: () => {} }),
-  listTasks: vi.fn().mockResolvedValue({ data: { tasks: [], total: 0, page: 1, page_size: 10 } }),
+  listTasks: vi.fn().mockResolvedValue({ data: { success: true, data: { tasks: [], total: 0, page: 1, page_size: 10 } } }),
   getReplay: vi.fn(),
 }))
 
@@ -119,12 +123,12 @@ describe('AgentView · 回放消费面', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.clearAllMocks()
-    apiMocks.getTask.mockResolvedValue({ data: { state: 'completed' } })
-    apiMocks.listTasks.mockResolvedValue({ data: { tasks: [], total: 0, page: 1, page_size: 10 } })
+    apiMocks.getTask.mockResolvedValue({ data: { success: true, data: { state: 'completed' } } })
+    apiMocks.listTasks.mockResolvedValue({ data: { success: true, data: { tasks: [], total: 0, page: 1, page_size: 10 } } })
   })
 
   it('深链 ?id= → 挂载即打开回放时间线（通知点击的落点）', async () => {
-    apiMocks.getReplay.mockResolvedValue({ data: TIMELINE })
+    apiMocks.getReplay.mockResolvedValue({ data: { success: true, data: TIMELINE } })
     const { router, wrapper } = await setupAt('/agent?id=deep-1')
 
     expect(apiMocks.getReplay).toHaveBeenCalledWith('deep-1')
@@ -150,9 +154,12 @@ describe('AgentView · 回放消费面', () => {
     // 变异点：深链只在 onMounted 处理（无 route watch）→ 二次导航不切换 → 本用例红
     apiMocks.getReplay.mockImplementation(async (taskId: string) => ({
       data: {
-        ...TIMELINE,
-        task_id: taskId,
-        steps: [{ ...TIMELINE.steps[0], description: `任务-${taskId}` }],
+        success: true,
+        data: {
+          ...TIMELINE,
+          task_id: taskId,
+          steps: [{ ...TIMELINE.steps[0], description: `任务-${taskId}` }],
+        },
       },
     }))
     const { router, wrapper } = await setupAt('/agent?id=first-1')
@@ -168,15 +175,15 @@ describe('AgentView · 回放消费面', () => {
     wrapper.unmount()
   })
 
-  it('完成运行亮「查看回放」入口；点击打开时间线并写入 URL（可刷新直达）', async () => {
+  it('完成运行亮「查看回放」入口；点击打开时间线并写入 URL（可刷新直达；SEAM-3 判别：信封 mock 下入口必须真亮）', async () => {
     apiMocks.chat.mockImplementation(async (_q: string, onEvent: (e: any) => void) => {
       onEvent({ type: 'thinking', content: '可用工具: 3 个', task_id: 'run-1' })
       onEvent({ type: 'chunk', content: '最终答案' })
       onEvent({ type: 'done', content: '' })
       return { abort: () => {} }
     })
-    apiMocks.getTask.mockResolvedValue({ data: { state: 'completed', has_replay: true } })
-    apiMocks.getReplay.mockResolvedValue({ data: TIMELINE })
+    apiMocks.getTask.mockResolvedValue({ data: { success: true, data: { state: 'completed', has_replay: true } } })
+    apiMocks.getReplay.mockResolvedValue({ data: { success: true, data: TIMELINE } })
     const { router, wrapper } = await setupAt('/agent')
 
     wrapper.findComponent(AgentInput).vm.$emit('send', '分析文档')
@@ -200,7 +207,7 @@ describe('AgentView · 回放消费面', () => {
       onEvent({ type: 'done', content: '' })
       return { abort: () => {} }
     })
-    apiMocks.getTask.mockResolvedValue({ data: { state: 'failed', has_replay: false } })
+    apiMocks.getTask.mockResolvedValue({ data: { success: true, data: { state: 'failed', has_replay: false } } })
     const { wrapper } = await setupAt('/agent')
 
     wrapper.findComponent(AgentInput).vm.$emit('send', '分析文档')
@@ -213,7 +220,7 @@ describe('AgentView · 回放消费面', () => {
   })
 
   it('关闭回放面板并清掉 URL 深链', async () => {
-    apiMocks.getReplay.mockResolvedValue({ data: TIMELINE })
+    apiMocks.getReplay.mockResolvedValue({ data: { success: true, data: TIMELINE } })
     const { router, wrapper } = await setupAt('/agent?id=deep-2')
 
     expect(wrapper.findComponent(ReplayTimeline).exists()).toBe(true)

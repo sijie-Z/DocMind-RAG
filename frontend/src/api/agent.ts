@@ -1,5 +1,6 @@
 import request from '@/utils/request'
 import { getToken } from '@/utils/auth'
+import type { AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
 import type {
   AgentEvent,
@@ -141,18 +142,23 @@ export const agentApi = {
 
   // ── HITL：任务状态 / 取消 / 审批（人在环）──────────────────────────────
 
-  /** 任务状态视图（审批现场 / 取消后的权威状态；HITL 恢复入口） */
-  getTask(taskId: string): Promise<ApiResponse<AgentTaskView>> {
+  /** 任务状态视图（审批现场 / 取消后的权威状态；HITL 恢复入口）。
+   *
+   * 注意返回形状（F2 教训）：request 的响应拦截器返回**完整 AxiosResponse**
+   * （信封在 `res.data = {success, data}`），消费者必须读 `res.data.data`。
+   * 类型如实声明 AxiosResponse，杜绝"类型说已解包、运行时没有"的漂移。
+   */
+  getTask(taskId: string): Promise<AxiosResponse<ApiResponse<AgentTaskView>>> {
     return request.get(`/agent/tasks/${taskId}`)
   },
 
-  // ── 回放消费面（跑完之后的"可带走"体验）────────────────────────────────
+  // ── 回放消费面（跑完之后的"可带走"体验；信封契约同 getTask：读 res.data.data）──
 
   /** 最近任务列表：每条带 has_replay（「有回放可看」标记）。 */
   listTasks(params?: {
     page?: number
     page_size?: number
-  }): Promise<ApiResponse<{ tasks: AgentTaskListItem[]; total: number; page: number; page_size: number }>> {
+  }): Promise<AxiosResponse<ApiResponse<{ tasks: AgentTaskListItem[]; total: number; page: number; page_size: number }>>> {
     return request.get('/agent/tasks', { params })
   },
 
@@ -161,14 +167,15 @@ export const agentApi = {
    * 404 REPLAY_NOT_FOUND = 该任务没有回放数据（诚实空态，绝不编造轨迹）；
    * 404 TASK_NOT_FOUND = 任务不存在/非本人/组织不一致。
    */
-  getReplay(taskId: string): Promise<ApiResponse<ReplayTimeline>> {
+  getReplay(taskId: string): Promise<AxiosResponse<ApiResponse<ReplayTimeline>>> {
     return request.get(`/agent/tasks/${taskId}/replay`)
   },
 
-  /** 协作式取消（服务端停止协议）：202 = 已受理待收敛 / 200 = 已直接终态 */
+  /** 协作式取消（服务端停止协议）：202 = 已受理待收敛 / 200 = 已直接终态。
+   * 信封契约同 getTask（拦截器返回完整 AxiosResponse）。 */
   cancelTask(
     taskId: string,
-  ): Promise<ApiResponse<{ task_id: string; state: string; message?: string; already?: boolean }>> {
+  ): Promise<AxiosResponse<ApiResponse<{ task_id: string; state: string; message?: string; already?: boolean }>>> {
     return request.post(`/agent/tasks/${taskId}/cancel`)
   },
 

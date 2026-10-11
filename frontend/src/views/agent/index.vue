@@ -596,7 +596,8 @@ async function handleApprovalDecide(payload: {
 async function refreshTaskState(taskId: string) {
   try {
     const res = await agentApi.getTask(taskId)
-    const data = res.data
+    // F2：request 拦截器返回完整 AxiosResponse，信封在 res.data = {success, data}
+    const data = res.data?.data
     if (!data) return
     agentStore.setTaskState(data.state)
     if (data.state === 'waiting_approval' && data.approval) {
@@ -616,7 +617,8 @@ async function restorePendingApproval() {
   if (!last) return
   try {
     const res = await agentApi.getTask(last)
-    const data = res.data
+    // F2：读信封内层（res.data = {success, data}）
+    const data = res.data?.data
     if (data?.state === 'waiting_approval' && data.approval) {
       agentStore.setTaskId(last)
       agentStore.setTaskState('waiting_approval')
@@ -654,7 +656,8 @@ async function refreshReplayFlag() {
   }
   try {
     const res = await agentApi.getTask(taskId)
-    lastRunHasReplay.value = !!res.data?.has_replay
+    // SEAM-3：拦截器返回完整 AxiosResponse，信封在 res.data = {success, data} → 读内层
+    lastRunHasReplay.value = !!res.data?.data?.has_replay
   } catch {
     lastRunHasReplay.value = null
   }
@@ -690,7 +693,7 @@ async function openReplay(taskId: string) {
   syncRouteTaskId(taskId)
   try {
     const res = await agentApi.getReplay(taskId)
-    replayData.value = res.data || null
+    replayData.value = res.data?.data || null
     if (!replayData.value) replayError.value = 'not_found'
   } catch (e: any) {
     // 404（REPLAY_NOT_FOUND / TASK_NOT_FOUND）→ 诚实空态；其余 → 加载失败
@@ -712,7 +715,7 @@ async function loadRecentTasks() {
   tasksLoading.value = true
   try {
     const res = await agentApi.listTasks({ page: 1, page_size: 10 })
-    recentTasks.value = res.data?.tasks || []
+    recentTasks.value = res.data?.data?.tasks || []
   } catch {
     recentTasks.value = []
     message.error(t('agentTasks.loadFailed'))
