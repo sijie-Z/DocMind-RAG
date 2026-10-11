@@ -8,6 +8,7 @@ export default {
     copy: '复制',
     copySuccess: '复制成功',
     copied: '已复制',
+    warning: '提示',
     copyFailed: '复制失败',
     close: '关闭',
     edit: '编辑',
@@ -694,6 +695,13 @@ export default {
     planEditInvalid: '编辑内容不合法，请检查步骤（描述/依赖）后重试',
     planFailed: '计划审批提交失败，已刷新任务状态',
     planPendingHint: '任务正在等待计划审批：请先在上方计划卡中批准 / 编辑 / 拒绝（或取消任务）'
+  },
+  refPicker: {
+    heading: '引用知识库文档',
+    empty: '未找到匹配文档',
+    error: '文档加载失败，请重试',
+    remove: '移除引用',
+    inputHint: "Enter 发送 · {'@'} 引用文档 · Shift+Enter 换行"
   },
   artifacts: {
     kind: {

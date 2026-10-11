@@ -17,6 +17,7 @@ export default {
     deleteSuccess: '削除に成功しました',
     copy: 'コピー',
     copied: 'コピーしました',
+    warning: 'お知らせ',
     logout: 'ログアウト',
     logoutConfirm: 'ログアウトしてもよろしいですか？',
     backToHome: 'ホームに戻る',
@@ -526,6 +527,13 @@ export default {
     planEditInvalid: '編集内容が不正です。ステップ（説明/依存）を確認して再試行してください',
     planFailed: '計画承認の送信に失敗しました。タスク状態を更新しました',
     planPendingHint: 'タスクは計画の承認待ちです：まず上の計画カードで承認 / 編集 / 拒否してください（またはタスクをキャンセル）'
+  },
+  refPicker: {
+    heading: 'ナレッジベース文書を引用',
+    empty: '一致する文書がありません',
+    error: '文書の読み込みに失敗しました。再試行してください',
+    remove: '引用を解除',
+    inputHint: "Enter で送信 · {'@'} で文書引用 · Shift+Enter で改行"
   },
   artifacts: {
     kind: {

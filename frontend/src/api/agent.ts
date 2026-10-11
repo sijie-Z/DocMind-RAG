@@ -31,6 +31,8 @@ interface ChatOptions {
   temperature?: number
   disabledTools?: string[]
   systemPromptOverride?: string
+  /** 体验第四波 @引用：显式引用的知识库文档 id（后端注入 planner 上下文） */
+  referencedDocumentIds?: string[]
   /** External abort signal (e.g. from the caller's AbortController) */
   signal?: AbortSignal
 }
@@ -120,6 +122,10 @@ export const agentApi = {
         temperature: options?.temperature ?? 0.1,
         disabled_tools: options?.disabledTools ?? [],
         system_prompt_override: options?.systemPromptOverride,
+        // @引用（体验第四波）：仅在携带时上送（空数组 = 不引用，等价省略）
+        referenced_document_ids: options?.referencedDocumentIds?.length
+          ? options.referencedDocumentIds
+          : undefined,
       }),
       signal: controller.signal,
     })

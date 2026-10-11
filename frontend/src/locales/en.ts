@@ -22,7 +22,8 @@ export default {
     close: 'Close',
     contactSupport: 'Contact Support',
     copy: 'Copy',
-    copied: 'Copied'
+    copied: 'Copied',
+    warning: 'Notice'
   },
   profile: {
     basicInfo: 'Basic Information',
@@ -668,6 +669,13 @@ export default {
     planEditInvalid: 'The edited content is invalid — check step descriptions/dependencies and retry',
     planFailed: 'Failed to submit the plan decision; task state refreshed',
     planPendingHint: 'The task is awaiting plan approval — approve / edit / reject the plan above first (or cancel the task)'
+  },
+  refPicker: {
+    heading: 'Reference knowledge documents',
+    empty: 'No matching documents',
+    error: 'Failed to load documents, please retry',
+    remove: 'Remove reference',
+    inputHint: "Enter to send · {'@'} to reference documents · Shift+Enter for newline"
   },
   artifacts: {
     kind: {

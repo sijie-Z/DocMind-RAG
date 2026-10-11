@@ -84,7 +84,17 @@
         >
           <!-- User message -->
           <div v-if="msg.role === 'user'" class="user-msg">
-            <div class="user-bubble">{{ msg.content }}</div>
+            <div class="user-bubble">
+              {{ msg.content }}
+              <!-- 体验第四波 @引用：用户消息携带的引用文档（回溯用） -->
+              <div v-if="msg.references?.length" class="user-refs" data-testid="user-refs">
+                <span
+                  v-for="r in msg.references"
+                  :key="r.id"
+                  class="user-ref-chip"
+                >📄 {{ r.title }}</span>
+              </div>
+            </div>
           </div>
 
           <!-- Agent message -->
@@ -158,6 +168,17 @@
                 >
                   <span class="plan-standalone-badge">{{ t('hitl.planTimeline') }}</span>
                   <span class="plan-standalone-text">{{ evt.content }}</span>
+                </div>
+                <!-- 体验第四波：warning 事件渲染（@引用失效 / #301 落库失败等此前
+                     只落 store、无视图分支——唯一的可见信号被丢掉）。琥珀色：
+                     提醒而非终断，与失败红/取消灰区分。 -->
+                <div
+                  v-else-if="evt.type === 'warning'"
+                  class="warning-standalone"
+                  data-testid="warning-line"
+                >
+                  <span class="warning-badge">{{ t('common.warning') }}</span>
+                  <span class="warning-text">{{ evt.content }}</span>
                 </div>
               </template>
             </div>
@@ -279,7 +300,7 @@ import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '@/stores/agent'
 import { agentApi } from '@/api/agent'
 import { useDedupedMessage } from '@/utils/message'
-import type { AgentEvent, AgentChatMessage, PlanStep, PlanStepEdit, ThinkingType } from '@/types/agent'
+import type { AgentEvent, AgentChatMessage, PlanStep, PlanStepEdit, ThinkingType, ReferencedDoc } from '@/types/agent'
 import { ThumbsUpOutline, ThumbsDownOutline } from '@vicons/ionicons5'
 
 import PlanTree from '@/components/agent/PlanTree.vue'
@@ -428,14 +449,14 @@ function scrollToBottom() {
   })
 }
 
-async function handleSend(query: string) {
+async function handleSend(query: string, refs?: ReferencedDoc[]) {
   if (agentStore.isLoading || !query.trim()) return
 
   agentStore.clearMessages()
   agentStore.resetTask()
   stopping.value = false
 
-  // Add user message
+  // Add user message（@引用随消息落账，供回溯）
   agentStore.addMessage({
     role: 'user',
     content: query,
@@ -446,6 +467,7 @@ async function handleSend(query: string) {
     planSteps: [],
     planId: '',
     progress: 0,
+    references: refs,
   })
 
   // Add assistant placeholder
@@ -486,6 +508,8 @@ async function handleSend(query: string) {
         temperature: agentStore.config.temperature,
         disabledTools: agentStore.config.disabled_tools,
         systemPromptOverride: agentStore.config.system_prompt_override,
+        // @引用（体验第四波）：引用文档 id 上送，后端注入 planner 上下文
+        referencedDocumentIds: refs?.map((r) => r.id),
       },
     )
   } catch (e: unknown) {
@@ -1142,6 +1166,26 @@ async function loadInit() {
   word-break: break-word;
 }
 
+/* 体验第四波 @引用：用户气泡内的引用 chips（半透明白，衬在蓝底上） */
+.user-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.user-ref-chip {
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-msg {
   margin-bottom: 16px;
 }
@@ -1341,6 +1385,43 @@ async function loadInit() {
 }
 
 .plan-standalone-text {
+  word-break: break-word;
+  line-height: 18px;
+}
+
+/* 体验第四波：warning 时间线条目（琥珀=提醒：@引用失效 / 落库失败等；
+   与失败红、取消灰、计划紫区分） */
+.warning-standalone {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 8px 12px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-left: 3px solid #f59e0b;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #92400e;
+}
+
+.dark .warning-standalone {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fcd34d;
+}
+
+.warning-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.warning-text {
   word-break: break-word;
   line-height: 18px;
 }

@@ -17,6 +17,7 @@ export default {
     deleteSuccess: 'Supprimé avec succès',
     copy: 'Copier',
     copied: 'Copié',
+    warning: 'Avis',
     logout: 'Déconnexion',
     logoutConfirm: 'Êtes-vous sûr de vouloir vous déconnecter ?',
     backToHome: 'Retour à l\'accueil',
@@ -526,6 +527,13 @@ export default {
     planEditInvalid: 'Le contenu modifié est invalide — vérifiez les descriptions/dépendances puis réessayez',
     planFailed: "Échec de l'envoi de la décision ; état de la tâche actualisé",
     planPendingHint: "La tâche attend l'approbation du plan — approuvez / modifiez / rejetez d'abord le plan ci-dessus (ou annulez la tâche)"
+  },
+  refPicker: {
+    heading: 'Référencer des documents',
+    empty: 'Aucun document correspondant',
+    error: 'Échec du chargement des documents, veuillez réessayer',
+    remove: 'Retirer la référence',
+    inputHint: "Entrée pour envoyer · {'@'} pour référencer · Maj+Entrée pour un saut de ligne"
   },
   artifacts: {
     kind: {
