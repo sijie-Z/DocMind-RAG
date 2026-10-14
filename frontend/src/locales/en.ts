@@ -13,6 +13,7 @@ export default {
     saveSuccess: 'Saved successfully',
     deleteSuccess: 'Deleted successfully',
     close: 'Close',
+    copyFailed: 'Copy failed',
     actions: 'Actions'
   },
   profile: {
@@ -41,6 +42,7 @@ export default {
     confirmPassword: 'Confirm Password',
     preferences: 'Preferences',
     language: 'Language Setting',
+    languageBeta: 'Beta — some content appears in English',
     theme: 'Theme Setting',
     themeSettingDesc: 'Choose interface theme',
     languageSettingDesc: 'Choose display language',
@@ -185,6 +187,9 @@ export default {
       unknown: 'Unknown'
     },
     noHistory: 'No history',
+    backToBottom: 'Back to latest',
+    stopGenerating: 'Stop generating',
+    stopped: 'Generation stopped',
     suggestions: {
       quantum: 'Explain quantum computing',
       quantumDesc: 'Explain the basic principles in simple terms',
@@ -297,6 +302,7 @@ export default {
     title: 'Knowledge Base Management',
     subtitle: 'Upload and manage your enterprise knowledge documents',
     searchPlaceholder: 'Search knowledge base...',
+    rebuild: 'Rebuild index',
     upload: 'Upload',
     tags: {
       tech: 'Tech Doc',
