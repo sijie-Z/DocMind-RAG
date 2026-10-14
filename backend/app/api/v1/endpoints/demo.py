@@ -89,8 +89,8 @@ DEMO_CONVERSATION = {
             "type": MessageType.ASSISTANT,
             "metadata": {
                 "sources": [
-                    {"filename": "rag_technology.txt", "chunk_index": 2, "relevance_score": 0.92},
-                    {"filename": "rag_technology.txt", "chunk_index": 1, "relevance_score": 0.85},
+                    {"filename": "rag_technology.txt", "chunk_index": 2, "relevance_score": 0.92, "demo": True},
+                    {"filename": "rag_technology.txt", "chunk_index": 1, "relevance_score": 0.85, "demo": True},
                 ]
             }
         },
@@ -103,10 +103,10 @@ DEMO_CONVERSATION = {
             "type": MessageType.ASSISTANT,
             "metadata": {
                 "sources": [
-                    {"filename": "vue3_composition_api.txt", "chunk_index": 0, "relevance_score": 0.95},
-                    {"filename": "vue3_composition_api.txt", "chunk_index": 1, "relevance_score": 0.88},
-                    {"filename": "vue3_composition_api.txt", "chunk_index": 5, "relevance_score": 0.82},
-                    {"filename": "vue3_composition_api.txt", "chunk_index": 6, "relevance_score": 0.79},
+                    {"filename": "vue3_composition_api.txt", "chunk_index": 0, "relevance_score": 0.95, "demo": True},
+                    {"filename": "vue3_composition_api.txt", "chunk_index": 1, "relevance_score": 0.88, "demo": True},
+                    {"filename": "vue3_composition_api.txt", "chunk_index": 5, "relevance_score": 0.82, "demo": True},
+                    {"filename": "vue3_composition_api.txt", "chunk_index": 6, "relevance_score": 0.79, "demo": True},
                 ]
             }
         },
