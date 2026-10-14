@@ -178,7 +178,9 @@ export default {
       reportDesc: 'Téléchargez un PDF pour extraire les indicateurs financiers',
       travel: 'Planifier un voyage',
       travelDesc: 'Itinéraire pour une semaine à Kyoto, Japon'
-    }
+    },
+    // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
+    sseWarning: 'Avis du serveur : cette réponse peut être incomplète'
   },
   validation: {
     required: 'Ce champ est obligatoire',

@@ -206,6 +206,7 @@ export default {
     confirmDelete: '确认删除此对话吗？',
     previewFailed: '无法加载预览内容',
     sseError: 'SSE错误',
+    sseWarning: '服务端提示，本轮回答可能不完整',
     sseRetry: 'SSE连接重试中，剩余重试次数：{left}',
     feedbackLiked: '已点赞，感谢您的反馈！',
     feedbackDisliked: '已点踩，我们会继续优化。',

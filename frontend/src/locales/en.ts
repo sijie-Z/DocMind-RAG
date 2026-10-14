@@ -199,6 +199,7 @@ export default {
     confirmDelete: 'Are you sure you want to delete this conversation?',
     previewFailed: 'Unable to load preview content',
     sseError: 'SSE Error',
+    sseWarning: 'Server notice: this response may be incomplete',
     sseRetry: 'SSE connection retrying, remaining retries: {left}',
     feedbackLiked: 'Liked, thank you for your feedback!',
     feedbackDisliked: 'Disliked, we will continue to improve.',
