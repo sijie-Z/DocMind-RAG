@@ -174,7 +174,8 @@
               <n-badge
                 :value="unreadCount"
                 :max="99"
-                :show="unreadCount > 0"
+                :dot="!!notificationStore.lastError"
+                :show="!!notificationStore.lastError || unreadCount > 0"
               >
                 <n-button text>
                   <n-icon size="18">
@@ -192,6 +193,16 @@
                   全部已读
                 </n-button>
               </div>
+              <!-- 错误态入口（T1 · §7.2③）：拉取失败不再假装"没有通知"，给重试 -->
+              <div
+                v-if="notificationStore.lastError"
+                class="mx-4 mb-2 flex items-center justify-between rounded-md bg-red-50 px-3 py-2 dark:bg-red-500/10"
+              >
+                <span class="text-xs text-red-500">{{ t('notifications.loadFailed') }}</span>
+                <n-button text size="tiny" type="primary" :loading="notificationRetrying" @click="handleNotificationRetry">
+                  {{ t('notifications.retry') }}
+                </n-button>
+              </div>
               <n-list hoverable clickable>
                 <n-list-item v-for="notification in notifications" :key="notification.id" @click="handleNotificationClick(notification)">
                   <div class="flex gap-3 px-2 w-full">
@@ -206,8 +217,8 @@
                     <n-button text size="tiny" @click.stop="handleDeleteNotification(notification.id)">删除</n-button>
                   </div>
                 </n-list-item>
-                <div v-if="notifications.length === 0" class="py-8 text-center text-gray-400 text-sm">
-                  暂无通知
+                <div v-if="notifications.length === 0 && !notificationStore.lastError" class="py-8 text-center text-gray-400 text-sm">
+                  {{ t('notifications.empty') }}
                 </div>
               </n-list>
             </div>
@@ -366,6 +377,17 @@ const handleMarkAllRead = async () => {
     await notificationStore.bootstrap()
   } catch {
     // Failed to mark all as read
+  }
+}
+
+// T1 · §7.2③：加载失败后的重试入口（失败已不再置空，重试成功即以服务端真值恢复）
+const notificationRetrying = ref(false)
+const handleNotificationRetry = async () => {
+  notificationRetrying.value = true
+  try {
+    await notificationStore.bootstrap()
+  } finally {
+    notificationRetrying.value = false
   }
 }
 
