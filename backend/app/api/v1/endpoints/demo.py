@@ -1,6 +1,7 @@
 """
 示例数据端点 - 为新用户提供首次体验
 """
+import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -294,12 +295,21 @@ async def seed_demo_data(
         db.add(session)
 
         for i, msg_data in enumerate(DEMO_CONVERSATION["messages"]):
+            # 真链路实测（T4）：meta_data 列是 SQLAlchemy JSON，但读路径
+            # （chat.py get_conversation）用 json.loads(msg.meta_data) —— 必须写
+            # JSON 字符串（同 chat_service/agent 惯例）。修前写裸 dict → 读侧
+            # json.loads(dict) 抛 TypeError 被静默吞掉，sources 恒空、前端
+            # 来源区/角标/相关度全部落空。
             msg = ChatMessage(
                 id=str(uuid.uuid4()),
                 session_id=session_id,
                 content=msg_data["content"],
                 message_type=msg_data["type"],
-                meta_data=msg_data.get("metadata"),
+                meta_data=(
+                    json.dumps(msg_data["metadata"], ensure_ascii=False)
+                    if msg_data.get("metadata")
+                    else None
+                ),
                 created_at=now + timedelta(seconds=i * 30),
             )
             db.add(msg)
