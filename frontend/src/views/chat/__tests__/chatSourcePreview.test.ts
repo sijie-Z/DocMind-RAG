@@ -63,12 +63,17 @@ import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 const mockedGetDocument = vi.mocked(getDocumentDetail)
 const mockedGetDocumentContent = vi.mocked(getDocumentContent)
 
+// 真实来源形状（chat_service.build_sources_list 逐键对应）：documentId 是文档 id，
+// 无 fileId 键——实现按 fileId 取值会在此精确红（实机曾踩：vitest 自造 fileId 掩盖）。
 const SOURCE: KnowledgeSource = {
-  fileId: 7,
   filename: '架构文档.pdf',
   relevanceScore: 0.82,
   content: '命中的分块内容',
-  chunkIndex: 0,
+  documentId: 'doc-7',
+  hasKeyword: true,
+  hasVector: true,
+  rewriteHits: 1,
+  freshFactor: 1,
 }
 
 // ── Part A：ChatMessages 点击来源卡应冒泡 openSource ─────────────────────
@@ -136,7 +141,7 @@ describe('W2-T7 · ChatMessages 来源卡冒泡 openSource', () => {
 
     const emitted = wrapper.emitted('openSource')
     expect(emitted, '点击来源卡必须冒泡 openSource（修前无任何处理）').toBeTruthy()
-    expect(emitted![0][0]).toMatchObject({ fileId: 7, filename: '架构文档.pdf' })
+    expect(emitted![0][0]).toMatchObject({ documentId: 'doc-7', filename: '架构文档.pdf' })
   })
 })
 
@@ -215,7 +220,7 @@ describe('W2-T7 · chat 页来源卡 → 原文预览接通', () => {
       data: {
         success: true,
         data: {
-          id: '7', title: '架构文档', filename: '架构文档.pdf', file_size: 2048,
+          id: 'doc-7', title: '架构文档', filename: '架构文档.pdf', file_size: 2048,
           file_type: 'pdf', status: 'indexed', created_at: '2026-10-01T00:00:00',
           description: '描述', keywords: ['架构'], upload_source: '知识库上传',
         },
@@ -224,7 +229,7 @@ describe('W2-T7 · chat 页来源卡 → 原文预览接通', () => {
     mockedGetDocumentContent.mockResolvedValue({
       data: {
         success: true,
-        data: { id: '7', filename: '架构文档.pdf', content: '全文内容甲', summary: '摘要', suggested_tags: ['tag'] },
+        data: { id: 'doc-7', filename: '架构文档.pdf', content: '全文内容甲', summary: '摘要', suggested_tags: ['tag'] },
       },
     } as never)
 
@@ -233,20 +238,20 @@ describe('W2-T7 · chat 页来源卡 → 原文预览接通', () => {
     await flushPromises()
     await flushPromises()
 
-    expect(mockedGetDocument).toHaveBeenCalledWith('7')
-    expect(mockedGetDocumentContent).toHaveBeenCalledWith('7')
+    expect(mockedGetDocument).toHaveBeenCalledWith('doc-7')
+    expect(mockedGetDocumentContent).toHaveBeenCalledWith('doc-7')
 
     const modal = wrapper.findComponent(PreviewStub)
     expect(modal.props('show')).toBe(true)
     expect(modal.props('loading')).toBe(false)
     expect(modal.props('content')).toBe('全文内容甲')
-    expect(modal.props('doc')).toMatchObject({ id: '7', filename: '架构文档.pdf', source: '知识库上传', summary: '摘要' })
+    expect(modal.props('doc')).toMatchObject({ id: 'doc-7', filename: '架构文档.pdf', source: '知识库上传', summary: '摘要' })
     expect(messageSpies.error).not.toHaveBeenCalled()
   })
 
   it('全文接口失败：明确报错、弹窗不 silent（loading 收敛）', async () => {
     mockedGetDocument.mockResolvedValue({
-      data: { success: true, data: { id: '7', filename: '架构文档.pdf' } },
+      data: { success: true, data: { id: 'doc-7', filename: '架构文档.pdf' } },
     } as never)
     mockedGetDocumentContent.mockRejectedValue(new Error('boom'))
 
@@ -261,9 +266,9 @@ describe('W2-T7 · chat 页来源卡 → 原文预览接通', () => {
     expect(modal.props('loading')).toBe(false)
   })
 
-  it('无 fileId 的引用：不请求、不开弹窗（防御空引用）', async () => {
+  it('无 documentId 的引用：不请求、不开弹窗（防御空引用）', async () => {
     const wrapper = await mountChat()
-    wrapper.findComponent(MsgStub).vm.$emit('openSource', { filename: 'x', relevanceScore: 0, chunkIndex: 0 })
+    wrapper.findComponent(MsgStub).vm.$emit('openSource', { filename: 'x', relevanceScore: 0 })
     await flushPromises()
 
     expect(mockedGetDocument).not.toHaveBeenCalled()

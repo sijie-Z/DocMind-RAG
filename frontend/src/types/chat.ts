@@ -47,17 +47,22 @@ export interface Conversation {
   }
 }
 
+// W2-T7：对齐后端真实响应形状（chat_service.build_sources_list 逐键对应：
+// {filename, relevanceScore, content, documentId, hasKeyword, hasVector,
+//  rewriteHits, freshFactor}；cited 为最终引用标记）。旧声明含 fileId/chunkIndex
+// 等真实响应没有的键——本轮来源预览接线曾按旧键取值导致实机永不开弹窗
+// （vitest fixture 自造 fileId 掩盖），已修真。既有 chatSourcePopover.test.ts
+// 的 fixture 注释正是这一事实的旁证。
 export interface KnowledgeSource {
-  fileId: number
   filename: string
   relevanceScore: number
-  snippet?: string
   content?: string
-  chunkIndex: number
+  documentId?: string | number | null
   hasKeyword?: boolean
   hasVector?: boolean
   rewriteHits?: number
   freshFactor?: number
+  cited?: boolean
   /** T4（第二轮 §7.2④）：示例对话的写死来源（假分数）逐条标注，前端渲染「演示数据」角标 */
   demo?: boolean
 }

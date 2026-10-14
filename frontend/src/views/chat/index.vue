@@ -443,21 +443,25 @@ const getConnectionStatusText = (status?: string) => {
 // DocumentPreviewModal 的四个 ref 全树无写入点 → 弹窗永不打开）。现在点击来源卡
 // 拉取文档详情（/documents/{id}）+ 全文（/documents/{id}/content）后打开弹窗；
 // 失败明确报错（loading 收敛，不 silent）。
+// 取数键 = documentId（chat_service.build_sources_list 真形；旧按 fileId 取值
+// 在实机恒 undefined——类型同轮修真，见 types/chat.ts）。
 const handleOpenSource = async (source: KnowledgeSource) => {
-  if (!source?.fileId) return
+  const docId = source?.documentId
+  if (docId === undefined || docId === null || docId === '') return
+  const id = String(docId)
   showPreviewModal.value = true
   previewLoading.value = true
-  previewDoc.value = { id: String(source.fileId), filename: source.filename }
+  previewDoc.value = { id, filename: source.filename }
   previewContent.value = ''
   try {
     const [docRes, contentRes] = await Promise.all([
-      getDocumentDetail(String(source.fileId)),
-      getDocumentContent(String(source.fileId)),
+      getDocumentDetail(id),
+      getDocumentContent(id),
     ])
     const doc = (docRes?.data as { data?: DocumentDetail } | undefined)?.data
     const contentData = (contentRes?.data as { data?: DocumentContent } | undefined)?.data
     previewDoc.value = {
-      id: String(source.fileId),
+      id,
       title: doc?.title,
       filename: doc?.filename || source.filename,
       file_type: doc?.file_type,
