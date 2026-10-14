@@ -143,7 +143,7 @@ import { useDedupedMessage } from '@/utils/message'
 import { CloudUploadOutline, AlertCircleOutline, ArrowBackOutline } from '@vicons/ionicons5'
 import { getConversationMessages, clearConversationMessages } from '@/api/chat'
 import type { Conversation } from '@/api/conversation'
-import { getDocument, getDocumentContent } from '@/api/knowledge'
+import { getDocumentDetail, getDocumentContent } from '@/api/knowledge'
 import type { DocumentContent, DocumentDetail } from '@/api/knowledge'
 import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 import { getToken } from '@/utils/auth'
@@ -451,7 +451,7 @@ const handleOpenSource = async (source: KnowledgeSource) => {
   previewContent.value = ''
   try {
     const [docRes, contentRes] = await Promise.all([
-      getDocument(String(source.fileId)),
+      getDocumentDetail(String(source.fileId)),
       getDocumentContent(String(source.fileId)),
     ])
     const doc = (docRes?.data as { data?: DocumentDetail } | undefined)?.data

@@ -50,17 +50,17 @@ vi.mock('@/api/conversation', () => ({
 vi.mock('@/api/knowledge', () => ({
   uploadKnowledgeBase: vi.fn().mockResolvedValue({ data: { success: true, data: { id: 1 } } }),
   getKnowledgeBase: vi.fn().mockResolvedValue({ data: { data: { status: 'indexed' } } }),
-  getDocument: vi.fn(),
+  getDocumentDetail: vi.fn(),
   getDocumentContent: vi.fn(),
 }))
 
 import ChatPage from '../index.vue'
 import ChatMessages from '../components/ChatMessages.vue'
-import { getDocument, getDocumentContent } from '@/api/knowledge'
+import { getDocumentDetail, getDocumentContent } from '@/api/knowledge'
 import { useUserStore } from '@/stores/user'
 import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 
-const mockedGetDocument = vi.mocked(getDocument)
+const mockedGetDocument = vi.mocked(getDocumentDetail)
 const mockedGetDocumentContent = vi.mocked(getDocumentContent)
 
 const SOURCE: KnowledgeSource = {

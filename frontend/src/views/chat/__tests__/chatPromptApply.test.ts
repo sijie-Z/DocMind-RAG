@@ -50,7 +50,7 @@ vi.mock('@/api/conversation', () => ({
 vi.mock('@/api/knowledge', () => ({
   uploadKnowledgeBase: vi.fn().mockResolvedValue({ data: { success: true, data: { id: 1 } } }),
   getKnowledgeBase: vi.fn().mockResolvedValue({ data: { data: { status: 'indexed' } } }),
-  getDocument: vi.fn(),
+  getDocumentDetail: vi.fn(),
   getDocumentContent: vi.fn(),
 }))
 
