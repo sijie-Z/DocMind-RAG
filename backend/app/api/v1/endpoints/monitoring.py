@@ -678,8 +678,13 @@ async def get_llm_stats(
         output_tokens = rag_output_tokens + agent_output_tokens
         total_tokens = input_tokens + output_tokens
 
-        # Cost estimate: GPT-4o-mini rate ($0.15/1M input, $0.60/1M output)
-        cost_usd = round(input_tokens * 0.00000015 + output_tokens * 0.0000006, 4)
+        # Cost estimate（W2-T7 修正）：此前按 GPT-4o-mini 费率（$0.15/$0.60 per 1M）
+        # 估算成本，而实际推理栈是 DeepSeek（settings.DEEPSEEK_MODEL）——前端成本卡
+        # 还直接标注"GPT-4o-mini 费率"，费率表与供应商不符。改为复用 token_usage.py
+        # 的费率真源 `_estimate_cost`（deepseek = 每 1K $0.0005/$0.002），使全仓
+        # token 计费口径（落库 cost_usd 与本聚合）归一。
+        from app.api.v1.endpoints.token_usage import _estimate_cost
+        cost_usd = round(_estimate_cost(settings.DEEPSEEK_MODEL, input_tokens, output_tokens), 4)
 
         trend = [0] * 7
         if total_tokens > 0:
@@ -753,6 +758,45 @@ async def get_org_summary(
         }
 
 
+async def _session_week_over_week(
+    db: AsyncSession, org_id: int | None
+) -> tuple[int, int]:
+    """近 7 日 vs 前 7 日新增会话数（ChatSession.created_at 口径）。
+
+    W2-T7：管理仪表盘「总会话 ↑ +12%（对比上周）」此前是前端写死的假趋势
+    （第三轮终检 §八 实机实锤）——后端从未提供任何环比数据。此助手补上真实
+    口径：本周新增 = created_at >= now-7d；上周新增 = [now-14d, now-7d)。
+    时间基准与既有 active_users_24h 同款（朴素本地时间，与 func.now() 服务端
+    时间一致）；org 作用域同相邻计数（租户管理员只看自己组织）。
+    单条条件聚合查询取回两值，避免两次往返。
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import and_, case
+
+    now = datetime.now()
+    this_start = now - timedelta(days=7)
+    last_start = now - timedelta(days=14)
+    week_q = select(
+        func.count(case((ChatSession.created_at >= this_start, 1))),
+        func.count(
+            case(
+                (
+                    and_(
+                        ChatSession.created_at >= last_start,
+                        ChatSession.created_at < this_start,
+                    ),
+                    1,
+                )
+            )
+        ),
+    )
+    if org_id:
+        week_q = week_q.where(ChatSession.organization_id == org_id)
+    row = (await db.execute(week_q)).one()
+    return int(row[0] or 0), int(row[1] or 0)
+
+
 @router.get(
     "/admin-summary",
     summary="管理员仪表盘概览",
@@ -791,6 +835,9 @@ async def get_admin_summary(
             session_count_q = session_count_q.where(ChatSession.organization_id == org_id)
         total_sessions = (await db.execute(session_count_q)).scalar() or 0
 
+        # 会话环比（W2-T7）：近 7 日 / 前 7 日新增会话数，供前端「对比上周」真值渲染。
+        sessions_this_week, sessions_last_week = await _session_week_over_week(db, org_id)
+
         # 活跃用户（24小时内登录的）
         from datetime import timedelta
         active_cutoff = datetime.now() - timedelta(hours=24)
@@ -813,7 +860,10 @@ async def get_admin_summary(
             "total_documents": total_docs,
             "total_sessions": total_sessions,
             "active_users_24h": active_users,
-            "total_organizations": total_orgs
+            "total_organizations": total_orgs,
+            # W2-T7：会话周环比真值（前端「对比上周」消费；无数据时前端渲染"—"）
+            "sessions_this_week": sessions_this_week,
+            "sessions_last_week": sessions_last_week,
         }
     except Exception as e:
         logger.error(f"Failed to get admin summary: {e}")
@@ -823,6 +873,8 @@ async def get_admin_summary(
         return {
             "total_users": 0, "total_documents": 0,
             "total_sessions": 0, "active_users_24h": 0, "total_organizations": 0,
+            # W2-T7 新键：降级态给 None（≠0），前端渲染"—"而非假环比
+            "sessions_this_week": None, "sessions_last_week": None,
             "degraded": True,
             "reason": "管理员概览统计查询失败，数据暂不可用",
         }
