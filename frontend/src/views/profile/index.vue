@@ -402,24 +402,29 @@
                       />
                     </div>
 
-                    <!-- AI Provider 设置 -->
+                    <!-- AI Provider 设置（W2-T7：实验功能·暂不生效——后端无消费方，
+                         推理只走服务端全局配置；禁用编辑避免"配置了却没反应"陷阱） -->
                     <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-4 mt-4">
                       <div class="font-medium text-gray-800 dark:text-white">AI 模型设置</div>
+                      <n-alert type="warning" :bordered="false" class="text-xs">
+                        <template #header>{{ t('profile.aiProviderExpTitle') }}</template>
+                        {{ t('profile.aiProviderExpDesc') }}
+                      </n-alert>
                       <div>
                         <div class="text-sm text-gray-500 mb-2">提供商</div>
-                        <n-select v-model:value="providerForm.provider" :options="providerOptions" @update:value="onProviderChange" size="small" />
+                        <n-select v-model:value="providerForm.provider" :options="providerOptions" @update:value="onProviderChange" size="small" disabled />
                       </div>
                       <div>
                         <div class="text-sm text-gray-500 mb-2">模型</div>
-                        <n-select v-model:value="providerForm.model" :options="currentModelOptions" :allow-input="providerForm.provider === 'custom'" filterable size="small" />
+                        <n-select v-model:value="providerForm.model" :options="currentModelOptions" :allow-input="providerForm.provider === 'custom'" filterable size="small" disabled />
                       </div>
                       <div v-if="currentProviderNeedsKey">
                         <div class="text-sm text-gray-500 mb-2">API Key</div>
-                        <n-input v-model:value="providerForm.api_key" type="password" show-password-on="click" placeholder="sk-..." size="small" />
+                        <n-input v-model:value="providerForm.api_key" type="password" show-password-on="click" placeholder="sk-..." size="small" disabled />
                       </div>
                       <div v-if="providerForm.provider === 'custom'">
                         <div class="text-sm text-gray-500 mb-2">Base URL</div>
-                        <n-input v-model:value="providerForm.base_url" placeholder="https://api.example.com/v1" size="small" />
+                        <n-input v-model:value="providerForm.base_url" placeholder="https://api.example.com/v1" size="small" disabled />
                       </div>
                     </div>
 

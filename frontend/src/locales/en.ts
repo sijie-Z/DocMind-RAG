@@ -100,6 +100,8 @@ export default {
     sessionRevoked: 'Device offline',
     revokeFailed: 'Failed to go offline',
     apiKeyRevokeFailed: 'Failed to revoke API Key',
+    aiProviderExpTitle: 'Experimental · Not active yet',
+    aiProviderExpDesc: 'Model choice is configured server-side (currently DeepSeek). The selection and API key here do not affect inference; saving is disabled to avoid confusion.',
   },
   users: {
     title: 'User Management',
@@ -296,6 +298,8 @@ export default {
     msgLoadFailed: 'Failed to load message history',
     // Prompt applied notification
     promptApplied: 'Prompt template "{name}" applied, feel free to start the conversation',
+    promptTooLong: 'The prompt exceeds the {max}-character limit and was not applied. Please shorten it and try again.',
+    sourcePreviewFailed: 'Failed to load the document. Please try again later.',
     promptDefaultName: 'Unnamed'
   },
   validation: {

@@ -123,6 +123,9 @@ export interface AdminSummary {
   total_sessions: number
   active_users_24h: number
   total_organizations: number
+  // W2-T7：会话周环比真值（近 7 日/前 7 日新增；降级态为 null）
+  sessions_this_week?: number | null
+  sessions_last_week?: number | null
 }
 
 export interface OrgSummary {

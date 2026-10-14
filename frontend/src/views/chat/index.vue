@@ -79,6 +79,7 @@
         @feedback="handleFeedback"
         @copy="copyText"
         @regenerate="handleRegenerate"
+        @openSource="handleOpenSource"
       />
 
       <!-- Retrieval Debug Panel -->
@@ -142,7 +143,9 @@ import { useDedupedMessage } from '@/utils/message'
 import { CloudUploadOutline, AlertCircleOutline, ArrowBackOutline } from '@vicons/ionicons5'
 import { getConversationMessages, clearConversationMessages } from '@/api/chat'
 import type { Conversation } from '@/api/conversation'
-import type { ChatMessage } from '@/types/chat'
+import { getDocument, getDocumentContent } from '@/api/knowledge'
+import type { DocumentContent, DocumentDetail } from '@/api/knowledge'
+import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 import { getToken } from '@/utils/auth'
 
 import { ChatSidebar, ChatMessages, ChatInput, ChatHeader, DocumentPreviewModal, DebugPanel } from './components'
@@ -159,6 +162,10 @@ const appStore = useAppStore()
 const chatMessagesRef = ref()
 const msgLoadError = ref(false)
 const windowWidth = ref(window.innerWidth)
+
+// W2-T7：系统提示词应用上限（与 prompts/index.vue 表单 maxlength 对齐；
+// 改一处必须同步另一处，chatPromptApply.test.ts 钉住边界）
+const MAX_SYSTEM_PROMPT_LENGTH = 5000
 
 const {
   messages, showBackToBottom,
@@ -195,7 +202,7 @@ const {
 } = useChatSend(
   messages, attachedFiles, attachedFileIds,
   baseScrollToBottom, fetchConversations,
-  isLoading, isRetrieving, sseStatus, useSSE, useAgent, debugEnabled, debugData,
+  isLoading, isRetrieving, sseStatus, useSSE, useAgent, useStream, debugEnabled, debugData,
 )
 
 const handleScroll = baseHandleScroll
@@ -432,6 +439,44 @@ const getConnectionStatusText = (status?: string) => {
   }
 }
 
+// W2-T7 项 5：来源卡 → 原文预览接通（第三轮终检 §2.4：来源 tag 可点样式但零处理，
+// DocumentPreviewModal 的四个 ref 全树无写入点 → 弹窗永不打开）。现在点击来源卡
+// 拉取文档详情（/documents/{id}）+ 全文（/documents/{id}/content）后打开弹窗；
+// 失败明确报错（loading 收敛，不 silent）。
+const handleOpenSource = async (source: KnowledgeSource) => {
+  if (!source?.fileId) return
+  showPreviewModal.value = true
+  previewLoading.value = true
+  previewDoc.value = { id: String(source.fileId), filename: source.filename }
+  previewContent.value = ''
+  try {
+    const [docRes, contentRes] = await Promise.all([
+      getDocument(String(source.fileId)),
+      getDocumentContent(String(source.fileId)),
+    ])
+    const doc = (docRes?.data as { data?: DocumentDetail } | undefined)?.data
+    const contentData = (contentRes?.data as { data?: DocumentContent } | undefined)?.data
+    previewDoc.value = {
+      id: String(source.fileId),
+      title: doc?.title,
+      filename: doc?.filename || source.filename,
+      file_type: doc?.file_type,
+      file_size: doc?.file_size,
+      source: doc?.upload_source,
+      created_at: doc?.created_at,
+      description: doc?.description,
+      keywords: doc?.keywords,
+      summary: contentData?.summary,
+      suggested_tags: contentData?.suggested_tags,
+    }
+    previewContent.value = contentData?.content || ''
+  } catch {
+    message.error(t('chat.sourcePreviewFailed'))
+  } finally {
+    previewLoading.value = false
+  }
+}
+
 onMounted(async () => {
   const token = userStore.token || getToken()
   if (!token) { router.push({ name: 'Login' }); return }
@@ -449,11 +494,15 @@ onMounted(async () => {
     // 用后即从 URL 清除，避免 query 参数残留
     router.replace({ query: { ...route.query, prompt: undefined, promptName: undefined } })
     inputMessage.value = ''
-    // 安全校验：限制 prompt 长度，防止任意 URL 注入超大内容写入 localStorage
-    if (typeof promptContent === 'string' && promptContent.length <= 2000) {
+    // W2-T7：上限与提示词表单 maxlength（prompts/index.vue）对齐 5000——
+    // 修前这里只接受 <=2000 且无 else 分支：2001~5000 字的提示词点「应用」后
+    // 静默丢弃（第三轮终检 §2.4）。超限改为明确报错，不再无声失败。
+    if (typeof promptContent === 'string' && promptContent.length <= MAX_SYSTEM_PROMPT_LENGTH) {
       message.info(t('chat.promptApplied', { name: promptName || t('chat.promptDefaultName') }))
       localStorage.setItem('activeSystemPrompt', promptContent)
       localStorage.setItem('activeSystemPromptName', promptName || '')
+    } else {
+      message.error(t('chat.promptTooLong', { max: MAX_SYSTEM_PROMPT_LENGTH }))
     }
   }
 

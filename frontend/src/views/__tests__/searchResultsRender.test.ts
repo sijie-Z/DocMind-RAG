@@ -44,7 +44,11 @@ vi.mock('@/api/search', async (importOriginal) => {
     getSearchStats: vi.fn().mockResolvedValue({ total_files: 2, file_types: {}, recent_searches: [] }),
   }
 })
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  // W2-T7：search.vue 新增 useRoute（?q= 回填）；本文件不涉及 query，给空对象即可
+  useRoute: () => ({ query: {} }),
+}))
 
 const mockedSearch = vi.mocked(searchKnowledge)
 

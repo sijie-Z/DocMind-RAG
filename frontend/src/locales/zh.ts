@@ -101,6 +101,9 @@ export default {
     sessionRevoked: '设备已下线',
     revokeFailed: '下线失败',
     apiKeyRevokeFailed: '撤销 API Key 失败',
+    // W2-T7：LLM Provider 区块诚实标注（后端无消费方，推理走服务端全局配置）
+    aiProviderExpTitle: '实验功能 · 暂不生效',
+    aiProviderExpDesc: '模型选择由服务端统一配置（当前为 DeepSeek）；此处的选择与 API Key 暂不参与推理，已禁用保存以免误解。',
   },
   users: {
     title: '用户管理',
@@ -297,6 +300,9 @@ export default {
     msgLoadFailed: '加载历史消息失败',
     // Prompt applied notification
     promptApplied: '已应用提示词模板"{name}"，请开始对话',
+    // W2-T7：上限与提示词表单 maxlength 对齐（5000）；超限明确报错不再静默丢弃
+    promptTooLong: '提示词超过 {max} 字上限，未应用。请精简后再试。',
+    sourcePreviewFailed: '原文加载失败，请稍后重试',
     promptDefaultName: '未命名'
   },
   validation: {

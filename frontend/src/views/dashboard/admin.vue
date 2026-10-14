@@ -41,8 +41,14 @@
         </div>
         <p class="text-2xl font-bold">{{ adminStats.totalSessions.toLocaleString() }}</p>
         <div class="flex items-center gap-1 mt-1 text-xs text-emerald-200">
-          <span>↑ {{ adminStats.totalSessions > 0 ? '+12%' : '0%' }}</span>
-          <span>对比上周</span>
+          <!-- W2-T7：此前是写死的「↑ +12%（对比上周）」（§八实机实锤假趋势）；
+               改为后端 sessions_this_week/last_week 真环比，无基线（上周 0/缺）如实说 -->
+          <template v-if="sessionTrend !== null">
+            <span>{{ sessionTrend >= 0 ? '↑' : '↓' }} {{ sessionTrend >= 0 ? '+' : '' }}{{ sessionTrend }}%</span>
+            <span>对比上周</span>
+          </template>
+          <span v-else>上周无数据</span>
+        </div>
         </div>
       </div>
 
@@ -142,7 +148,10 @@
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.costToday') }}</span>
               </div>
               <p class="text-xl font-bold text-blue-600 dark:text-blue-400">${{ llmStats.costToday.toFixed(3) }}</p>
-              <p class="text-xs text-gray-400 mt-1">GPT-4o-mini 费率</p>
+              <!-- W2-T7：实际推理栈是 DeepSeek（settings.DEEPSEEK_MODEL），后端成本
+                   已按 token_usage 真源费率（deepseek $0.0005/$0.002 per 1K）计算；
+                   旧标签「GPT-4o-mini 费率」与实际供应商不符 -->
+              <p class="text-xs text-gray-400 mt-1">DeepSeek 费率</p>
             </div>
             <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
               <div class="flex items-center gap-2 mb-1">
@@ -334,7 +343,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, h, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, h, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NTag } from 'naive-ui'
 import { getAuditLogs, type AuditLogEntry } from '@/api/user'
@@ -362,9 +371,21 @@ const adminStats = ref({
   // 加载后读 /monitoring/health 真实值（B6：旧 systemHealthy:true/esHealth:'ok'
   // 是硬编码，ES 真挂也恒绿）。
   systemHealthy: false,
-  esHealth: ''
+  esHealth: '',
+  // W2-T7：会话周环比真值（后端 admin-summary 新键；null=无基线/降级态）
+  sessionsThisWeek: 0,
+  sessionsLastWeek: null as number | null,
 })
 const healthLoaded = ref(false)
+
+// W2-T7：真实环比 =（本周新增-上周新增）/上周新增；上周为 0/缺（无基线）→ null（渲染"上周无数据"），
+// 不再回退任何写死百分比
+const sessionTrend = computed<number | null>(() => {
+  const cur = adminStats.value.sessionsThisWeek
+  const last = adminStats.value.sessionsLastWeek
+  if (last === null || last === undefined || last === 0) return null
+  return Math.round(((cur - last) / last) * 100)
+})
 
 const llmStats = ref({
   tokensToday: 0,
@@ -551,7 +572,10 @@ const loadData = async () => {
         // 健康字段不在此填（admin-summary 无健康数据）：由 /monitoring/health
         // 真实值在下方填入（B6）；此处保持中性态，避免被本块重新硬编码成"绿"。
         systemHealthy: false,
-        esHealth: ''
+        esHealth: '',
+        // W2-T7：会话周环比真值（后端新键；degraded/缺省 → null → 页面渲染"上周无数据"）
+        sessionsThisWeek: adminRes.data.sessions_this_week ?? 0,
+        sessionsLastWeek: adminRes.data.sessions_last_week ?? null,
       }
     }
 

@@ -376,7 +376,14 @@ const handleCopy = (item: PromptTemplate) => {
 }
 
 // 直接应用到对话 - 跳转到聊天页面并带上提示词
+// W2-T7：上限与聊天页（chat/index.vue MAX_SYSTEM_PROMPT_LENGTH）对齐 5000——
+// 超限在源头即明确报错，不再把词交给聊天页后被静默丢弃（第三轮终检 §2.4）。
+const MAX_PROMPT_LENGTH = 5000
 const handleUse = (item: PromptTemplate) => {
+  if (item.content && item.content.length > MAX_PROMPT_LENGTH) {
+    message.error(t('chat.promptTooLong', { max: MAX_PROMPT_LENGTH }))
+    return
+  }
   router.push({ name: 'Chat', query: { prompt: item.content, promptName: item.name } })
 }
 

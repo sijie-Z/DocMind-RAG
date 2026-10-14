@@ -21,6 +21,7 @@ export function useChatSend(
   sseStatus: { value: string },
   useSSE: { value: boolean },
   useAgent: { value: boolean },
+  useStream: { value: boolean },
   debugEnabled?: { value: boolean },
   debugData?: { value: RetrievalDebugData | null },
 ) {
@@ -103,6 +104,8 @@ export function useChatSend(
     sseService.off('plan_complete')
     sseService.off('reflection')
 
+    // W2-T7 项 4：「流式响应」开关真接线——关闭时只累积 fullContent 不逐字落屏，
+    // 等 message 终态一次性落屏（非流式展示）；开启时维持原逐字渲染（默认行为不回归）。
     const onChunk = (data: SSEMessage) => {
       sseStatus.value = 'connected'
       if (data.conversationId && (!chatStore.currentConversation || chatStore.currentConversation.id !== data.conversationId)) {
@@ -119,7 +122,7 @@ export function useChatSend(
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
         fullContent += data.content || ''
-        lastMsg.content = fullContent
+        if (useStream.value) lastMsg.content = fullContent
         if (data.sources) lastMsg.sources = data.sources as KnowledgeSource[]
       }
       scrollToBottom()
@@ -156,7 +159,7 @@ export function useChatSend(
       if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
         const stamp = `\n\n> 🔧 正在调用: **${data.toolName || 'tool'}**...\n`
         fullContent += stamp
-        lastMsg.content = fullContent
+        if (useStream.value) lastMsg.content = fullContent
         // 计划步骤状态推进（issue #289：与 Agent 页 store 同款归约）
         if (lastMsg.planSteps) {
           applyPlanStepUpdate(lastMsg.planSteps, { type: 'tool_call', plan_step_id: data.planStepId })
@@ -170,7 +173,7 @@ export function useChatSend(
       if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
         const stamp = `\n> ✅ 工具完成` + (data.toolDurationMs ? ` (${Math.round(data.toolDurationMs)}ms)` : '') + `\n`
         fullContent += stamp
-        lastMsg.content = fullContent
+        if (useStream.value) lastMsg.content = fullContent
         if (lastMsg.planSteps) {
           applyPlanStepUpdate(lastMsg.planSteps, { type: 'tool_result', plan_step_id: data.planStepId })
         }
@@ -185,7 +188,7 @@ export function useChatSend(
       if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
         const stamp = `\n> ⚠️ 工具调用异常: ${data.content || '未知错误'}\n`
         fullContent += stamp
-        lastMsg.content = fullContent
+        if (useStream.value) lastMsg.content = fullContent
       }
     }
 
