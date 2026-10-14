@@ -261,6 +261,7 @@ import { formatDate } from '@/utils/format'
 import type { MenuOption, DropdownOption } from 'naive-ui'
 import { NMenu, NIcon, NInput, NButton, NBadge, NPopover, NList, NListItem, NDropdown, NAvatar } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
+import { SIDEBAR_MENU_GROUPS, USER_MENU_ITEMS, type MenuItemDef } from '@/config/menu'
 import {
   ChatbubbleEllipsesOutline,
   TimeOutline,
@@ -438,104 +439,55 @@ const currentRouteTitle = computed(() => {
 })
 const activeKey = computed(() => route.name as string)
 
-const menuOptions = computed<MenuOption[]>(() => {
-  const isAdmin = userStore.isAdmin
-  const options: MenuOption[] = [
-    {
-      label: t('menu.home'),
-      key: 'Dashboard',
-      icon: () => h(NIcon, null, { default: () => h(HomeOutline) })
-    },
-    {
-      label: t('menu.chat'),
-      key: 'Chat',
-      icon: () => h(NIcon, null, { default: () => h(ChatbubbleEllipsesOutline) })
-    },
-    {
-      label: t('menu.conversations'),
-      key: 'Conversations',
-      icon: () => h(NIcon, null, { default: () => h(TimeOutline) })
-    },
-    {
-      label: t('menu.knowledge'),
-      key: 'Knowledge',
-      icon: () => h(NIcon, null, { default: () => h(BookOutline) })
-    },
-    {
-      label: t('menu.prompts'),
-      key: 'Prompts',
-      icon: () => h(NIcon, null, { default: () => h(TerminalOutline) })
-    },
-    {
-      label: t('menu.search'),
-      key: 'Search',
-      icon: () => h(NIcon, null, { default: () => h(SearchOutline) })
-    },
-    {
-      label: t('menu.users'),
-      key: 'Users',
-      icon: () => h(NIcon, null, { default: () => h(PeopleOutline) }),
-      show: isAdmin
-    },
-    {
-      label: t('menu.organizations'),
-      key: 'Organizations',
-      icon: () => h(NIcon, null, { default: () => h(BusinessOutline) }),
-      show: isAdmin
-    },
-    {
-      label: t('menu.auditLogs'),
-      key: 'AuditLogs',
-      icon: () => h(NIcon, null, { default: () => h(DocumentTextOutline) }),
-      show: isAdmin
-    },
-    {
-      label: t('menu.monitoring'),
-      key: 'Monitoring',
-      icon: () => h(NIcon, null, { default: () => h(PulseOutline) }),
-      show: isAdmin
-    },
-    {
-      label: t('menu.personalSettings'),
-      key: 'Profile',
-      icon: () => h(NIcon, null, { default: () => h(PersonOutline) })
-    },
-    {
-      label: t('menu.workflow'),
-      key: 'Workflow',
-      icon: () => h(NIcon, null, { default: () => h(GitNetworkOutline) })
-    },
-    {
-      label: t('menu.agent'),
-      key: 'Agent',
-      icon: () => h(NIcon, null, { default: () => h(HardwareChipOutline) })
-    }
-  ]
-  return options.filter(item => item.show !== false)
+/** 菜单图标名 → 组件映射（menu.ts 保持纯数据，映射留在布局层） */
+const MENU_ICONS: Record<string, Component> = {
+  home: HomeOutline,
+  chat: ChatbubbleEllipsesOutline,
+  history: TimeOutline,
+  book: BookOutline,
+  terminal: TerminalOutline,
+  search: SearchOutline,
+  chip: HardwareChipOutline,
+  'git-network': GitNetworkOutline,
+  calendar: CalendarOutline,
+  people: PeopleOutline,
+  business: BusinessOutline,
+  'document-text': DocumentTextOutline,
+  pulse: PulseOutline,
+  server: ServerOutline,
+  person: PersonOutline,
+  settings: SettingsOutline,
+  help: HelpCircleOutline,
+  info: InformationCircleOutline,
+  logout: LogOutOutline,
+}
+
+const renderIcon = (Icon: Component) => () => h(NIcon, null, { default: () => h(Icon) })
+
+const toMenuOption = (item: MenuItemDef): MenuOption => ({
+  label: t(item.i18nKey),
+  key: item.routeName,
+  icon: renderIcon(MENU_ICONS[item.icon]),
 })
 
-const userMenuOptions = computed<DropdownOption[]>(() => [
-  {
-    label: t('menu.personalSettings'),
-    key: 'settings',
-    icon: () => h(NIcon, null, { default: () => h(SettingsOutline) })
-  },
-  {
-    label: t('menu.systemHelp'),
-    key: 'system-help',
-    icon: () => h(NIcon, null, { default: () => h(HelpCircleOutline) })
-  },
-  {
-    label: t('menu.systemAbout'),
-    key: 'system-about',
-    icon: () => h(NIcon, null, { default: () => h(InformationCircleOutline) })
-  },
-  {
-    label: t('menu.logout'),
-    key: 'logout',
-    icon: () => h(NIcon, null, { default: () => h(LogOutOutline) })
-  }
-])
+const menuOptions = computed<MenuOption[]>(() => {
+  return SIDEBAR_MENU_GROUPS
+    .filter((group) => !group.adminOnly || userStore.isAdmin)
+    .flatMap((group): MenuOption[] => {
+      const items = group.items.map(toMenuOption)
+      return group.groupI18nKey
+        ? [{ type: 'group', label: t(group.groupI18nKey), children: items }]
+        : items
+    })
+})
+
+const userMenuOptions = computed<DropdownOption[]>(() =>
+  USER_MENU_ITEMS.map((item) => ({
+    label: t(item.i18nKey),
+    key: item.actionKey,
+    icon: () => h(NIcon, null, { default: () => h(MENU_ICONS[item.icon]) }),
+  })),
+)
 
 const message = useDedupedMessage()
 
