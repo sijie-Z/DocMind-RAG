@@ -162,7 +162,7 @@ export default {
     tagline: 'RAG-based Intelligent Q&A',
     clearChat: 'Clear Chat',
     newChat: 'New Chat',
-    welcome: 'Hello, I am Paicongming. How can I help you today?',
+    welcome: 'Hello, I am DocMind. How can I help you today?',
     welcomeDesc: 'I can help answer questions, analyze documents, write code, or just chat.',
     sources: 'Sources',
     inputPlaceholder: 'Type your message, Shift + Enter for new line...',
@@ -270,7 +270,6 @@ export default {
     loadFailed: 'Load Failed',
     loadFailedDesc: 'Unable to load conversation list',
     retry: 'Retry',
-    version: 'DocMind v1.0',
     // Drag-and-drop
     dropFiles: 'Drop files here to upload',
     // Export

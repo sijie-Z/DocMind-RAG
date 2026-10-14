@@ -170,7 +170,7 @@ const LayersIcon = { render: () => h('svg', { width: 24, height: 24, viewBox: '0
 const CodeIcon = { render: () => h('svg', { width: 24, height: 24, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [h('polyline', { points: '16 18 22 12 16 6' }), h('polyline', { points: '8 6 2 12 8 18' })]) }
 
 const steps = [
-  { icon: UploadIcon, title: '上传文档', desc: '支持 PDF、Word、Excel、Markdown、CSV 等常见格式，拖拽上传。' },
+  { icon: UploadIcon, title: '上传文档', desc: '支持 PDF、Word、Excel、Markdown、CSV 等 13 种格式，拖拽上传。' },
   { icon: SearchIcon, title: '智能索引', desc: '文档自动解析分块，向量化存入 Elasticsearch，秒级检索。' },
   { icon: BrainIcon, title: 'AI 问答', desc: '自然语言提问，Agent 多步推理，返回带来源引用的精准答案。' },
 ]

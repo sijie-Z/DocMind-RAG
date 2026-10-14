@@ -31,8 +31,8 @@ from app.services.notification_service import create_notification
 logger = logging.getLogger(__name__)
 
 # Force import of all tool modules to trigger registration
-import app.agent.core_tools  # noqa: F401 — original 11 tools
-import app.agent.tools  # noqa: F401 — 14 new tools package
+import app.agent.core_tools  # noqa: F401 — core tools (14)
+import app.agent.tools  # noqa: F401 — tools package (19)
 
 
 async def notify_task_terminal(
