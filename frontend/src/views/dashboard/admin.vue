@@ -326,7 +326,7 @@
       </n-button>
       <n-button type="error" size="large" @click="$router.push('/audit-logs')" class="shadow-md">
         <template #icon><n-icon><ShieldCheckmarkOutline /></n-icon></template>
-        {{ t('audit.title') }}
+        {{ t('menu.auditLogs') }}
       </n-button>
     </div>
     </template>

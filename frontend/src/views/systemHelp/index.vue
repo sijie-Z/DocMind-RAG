@@ -7,7 +7,7 @@
           <n-icon size="28" class="text-emerald-500"><HelpCircleOutline /></n-icon>
         </div>
         <div>
-          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">帮助中心</h1>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('menu.systemHelp') }}</h1>
           <p class="text-sm text-gray-500 dark:text-gray-400">快速上手 DocMind 所需的一切</p>
         </div>
       </div>

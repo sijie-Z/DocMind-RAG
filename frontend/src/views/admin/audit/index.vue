@@ -3,7 +3,7 @@
     <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
       <!-- 顶部工具栏 -->
       <div class="p-4 border-b border-gray-100 dark:border-gray-700 flex flex-wrap items-center justify-between gap-4">
-        <h2 class="text-xl font-bold text-gray-900 dark:text-white">{{ t('audit.title') }}</h2>
+        <h2 class="text-xl font-bold text-gray-900 dark:text-white">{{ t('menu.auditLogs') }}</h2>
         <div class="flex items-center gap-3">
           <n-input v-model:value="searchText" :placeholder="t('audit.searchPlaceholder')" clearable round class="w-48" />
           <n-select v-model:value="actionFilter" :options="actionOptions" :placeholder="t('audit.actionFilter')" clearable class="w-36" />

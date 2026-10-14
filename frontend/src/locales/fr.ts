@@ -15,6 +15,7 @@ export default {
     actions: 'Actions'
   },
   profile: {
+    overview: 'Aperçu',
     basicInfo: 'Informations de base',
     username: 'Nom d\'utilisateur',
     email: 'E-mail',

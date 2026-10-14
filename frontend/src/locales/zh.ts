@@ -20,6 +20,8 @@ export default {
     actions: '操作',
   },
   profile: {
+    // T5 命名归一：个人设置「概览」tab（此前借用 menu.dashboard，现独立页域键）
+    overview: '概览',
     basicInfo: '基本信息',
     username: '用户名',
     email: '邮箱',

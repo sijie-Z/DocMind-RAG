@@ -5,7 +5,7 @@
       <div>
         <h1
           class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-blue-700 dark:from-blue-400 dark:to-blue-600">
-          {{ t('search.title') }}
+          {{ t('menu.search') }}
         </h1>
         <p class="text-gray-500 dark:text-gray-400 mt-1">
           {{ t('search.subtitle') }}

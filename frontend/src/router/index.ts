@@ -50,7 +50,9 @@ export const routes: RouteRecordRaw[] = [
         name: 'Dashboard',
         component: () => import('@/views/dashboard/index.vue'),
         meta: {
-          title: 'menu.dashboard',
+          // T5 命名归一：本页四处（菜单/顶栏 meta.title/h1）统一引用 menu.home，
+          // 与侧边栏一致（值以菜单语义为准）；menu.dashboard 键自此无 UI 引用。
+          title: 'menu.home',
           icon: 'home'
         }
       },
