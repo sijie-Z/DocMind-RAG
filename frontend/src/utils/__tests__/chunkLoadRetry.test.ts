@@ -8,7 +8,7 @@
  * （sessionStorage 防死循环；成功后清除标记，允许下次再兜底）。
  * 变异点：删 reload 调用 → 用例 1 红；删防循环 → 用例 2 红；删成功清除 → 用例 3 红。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { isChunkLoadError, installChunkLoadRetry } from '@/utils/chunkLoadRetry'
 
 /** 极简 fake router：捕获 onError / afterEach 回调 */
