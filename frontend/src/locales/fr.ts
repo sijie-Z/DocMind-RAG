@@ -149,6 +149,7 @@ export default {
     welcome: 'Bonjour, je suis Paicongming. Comment puis-je vous aider ?',
     welcomeDesc: 'Je peux répondre à vos questions, analyser des documents, écrire du code ou simplement discuter.',
     sources: 'Sources',
+    demoData: 'Données de démo',
     inputPlaceholder: 'Posez votre question (Maj + Entrée pour sauter une ligne)...',
     uploadFile: 'Télécharger un fichier (Bientôt disponible)',
     streamResponse: 'Réponse en streaming',

@@ -266,6 +266,7 @@ export default {
     sseMode: 'SSE模式 (企业防火墙兼容)',
     // Message sources
     sourcesLabel: '来源引用：',
+    demoData: '演示数据',
     unknownDoc: '未知文档',
     noPreview: '无预览',
     relevanceScore: '相关度: {score}%',
