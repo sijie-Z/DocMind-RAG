@@ -292,6 +292,15 @@ export default {
       seedFailed: 'Échec de l’initialisation'
     }
   },
+  error: {
+    '404': {
+      title: 'Page introuvable',
+      subtitle: "La page que vous recherchez n'existe pas ou a été supprimée."
+    },
+    backToHome: "Retour à l'accueil",
+    backToWorkbench: 'Aller au tableau de bord',
+    back: 'Retour'
+  },
   login: {
     welcomeBack: 'Bon retour',
     loginDesc: 'Entrez vos identifiants pour vous connecter',
@@ -535,6 +544,7 @@ export default {
     stopped: 'Arrêté'
   },
   router: {
+    notFound: 'Page introuvable',
     welcome: 'Bienvenue',
     login: 'Connexion',
     register: 'S\'inscrire',

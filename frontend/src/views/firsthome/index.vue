@@ -11,7 +11,7 @@
         </div>
         <div class="nav-links">
           <button @click="goToLogin" class="btn-ghost">登录</button>
-          <button @click="goToRegister" class="btn-primary-sm">免费试用</button>
+          <button @click="handlePrimaryCta" class="btn-primary-sm">{{ ctaLabel('免费试用') }}</button>
         </div>
       </div>
     </nav>
@@ -36,8 +36,8 @@
           功能人人会写；让功能不悄悄变坏才是工程。零容差评测门禁进 CI、32 条静默假成功清零、棘轮只缩不涨。
         </p>
         <div class="hero-actions">
-          <button @click="goToRegister" class="btn-primary">
-            免费开始使用
+          <button @click="handlePrimaryCta" class="btn-primary">
+            {{ ctaLabel('免费开始使用') }}
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
           </button>
           <button @click="goToLogin" class="btn-outline">
@@ -133,8 +133,8 @@
       <div class="cta-glow"></div>
       <h2 class="cta-title">准备好构建你的知识库了吗？</h2>
       <p class="cta-desc">免费开始，无需任何配置。上传第一份文档，即刻体验 AI 智能问答。</p>
-      <button @click="goToRegister" class="btn-lg">
-        免费开始
+      <button @click="handlePrimaryCta" class="btn-lg">
+        {{ ctaLabel('免费开始') }}
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
       </button>
     </section>
@@ -153,12 +153,19 @@
 </template>
 
 <script setup lang="ts">
+import { computed, h } from 'vue'
 import { useRouter } from 'vue-router'
-import { h } from 'vue'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
+
+// ISS-1：登录态感知 —— 已登录访客的主 CTA 变为「进入工作台」直通 /dashboard，
+// 未登录维持注册引导（已登录时 /register 会被守卫弹回工作台，CTA 不应再引向注册）
+const isLoggedIn = computed(() => userStore.isLoggedIn)
+const ctaLabel = (guestLabel: string) => (isLoggedIn.value ? '进入工作台' : guestLabel)
+const handlePrimaryCta = () => router.push(isLoggedIn.value ? '/dashboard' : '/register')
 const goToLogin = () => router.push('/login')
-const goToRegister = () => router.push('/register')
 
 // Inline SVG icons
 const UploadIcon = { render: () => h('svg', { width: 24, height: 24, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [h('path', { d: 'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4' }), h('path', { d: 'M17 8l-5-5-5 5' }), h('path', { d: 'M12 3v12' })]) }

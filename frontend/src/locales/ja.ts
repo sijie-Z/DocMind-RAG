@@ -292,6 +292,15 @@ export default {
       seedFailed: '初期化に失敗しました'
     }
   },
+  error: {
+    '404': {
+      title: 'ページが見つかりません',
+      subtitle: 'お探しのページは存在しないか、削除されました。'
+    },
+    backToHome: 'ホームへ戻る',
+    backToWorkbench: 'ワークスペースへ移動',
+    back: '前のページに戻る'
+  },
   login: {
     welcomeBack: 'おかえりなさい',
     loginDesc: '認証情報を入力してログインしてください',
@@ -535,6 +544,7 @@ export default {
     stopped: '停止済み'
   },
   router: {
+    notFound: 'ページが見つかりません',
     welcome: 'ようこそ',
     login: 'ログイン',
     register: '登録',

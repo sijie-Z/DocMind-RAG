@@ -426,6 +426,15 @@ export default {
       seedFailed: '初始化失败'
     }
   },
+  error: {
+    '404': {
+      title: '页面不存在',
+      subtitle: '你访问的页面不存在或已被移除，请检查地址是否正确。'
+    },
+    backToHome: '返回首页',
+    backToWorkbench: '进入工作台',
+    back: '返回上一页'
+  },
   login: {
     welcomeBack: '欢迎回来',
     loginDesc: '请输入您的账号和密码进行登录',
@@ -691,6 +700,7 @@ export default {
     stopped: '已停止'
   },
   router: {
+    notFound: '页面不存在',
     welcome: '欢迎',
     login: '登录',
     register: '注册',
