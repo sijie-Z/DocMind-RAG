@@ -122,10 +122,19 @@ describe('W2-T7 · LLM Provider 区块诚实标注 + 禁用（页面）', () => 
     return mount(Host, { global: { plugins: [pinia, i18n, naive] } })
   }
 
+  // n-tabs 懒渲染：provider 区块在「偏好设置」tab 内，先切换再断言
+  async function openPreferencesTab(wrapper: ReturnType<typeof mountPage>) {
+    const tab = wrapper.findAll('.n-tabs-tab').find(t => t.text().includes('偏好设置'))
+    expect(tab, '「偏好设置」tab 应在屏（provider 区块宿主）').toBeTruthy()
+    await tab!.trigger('click')
+    await flushPromises()
+  }
+
   it('实验标注在屏：区块明示「暂不生效」', async () => {
     const wrapper = mountPage()
     await flushPromises()
     await flushPromises()
+    await openPreferencesTab(wrapper)
 
     const text = wrapper.text()
     expect(text).toContain('实验功能')
@@ -136,6 +145,7 @@ describe('W2-T7 · LLM Provider 区块诚实标注 + 禁用（页面）', () => 
     const wrapper = mountPage()
     await flushPromises()
     await flushPromises()
+    await openPreferencesTab(wrapper)
 
     // 两个 n-select（provider/model）禁用：naive 内部渲染 n-base-selection--disabled
     expect(wrapper.findAll('.n-base-selection--disabled').length).toBeGreaterThanOrEqual(2)

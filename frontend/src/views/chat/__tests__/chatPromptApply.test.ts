@@ -106,6 +106,8 @@ async function mountChat(query: string) {
 
 beforeEach(() => {
   localStorage.clear()
+  // 登录态就绪（chat 页 onMounted 首行 token 门；先例 chatLoadConversation.test.ts）
+  localStorage.setItem('docmind_token', 'tok')
   messageSpies.error.mockClear()
   messageSpies.info.mockClear()
 })

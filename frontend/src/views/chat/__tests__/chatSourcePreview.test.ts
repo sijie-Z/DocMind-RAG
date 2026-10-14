@@ -204,6 +204,7 @@ async function mountChat() {
 
 describe('W2-T7 · chat 页来源卡 → 原文预览接通', () => {
   beforeEach(() => {
+    localStorage.setItem('docmind_token', 'tok') // onMounted token 门（先例 chatLoadConversation）
     messageSpies.error.mockClear()
     mockedGetDocument.mockReset()
     mockedGetDocumentContent.mockReset()
