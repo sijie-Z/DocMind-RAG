@@ -88,9 +88,12 @@ DEMO_CONVERSATION = {
             "content": "RAG 系统中的混合检索是一种将多种检索策略结合的技术方案，主要有以下几个关键点：\n\n**1. 双通道检索**\n混合检索同时执行两种检索方式：\n- **BM25 关键词检索**：基于词频和文档频率的经典算法，擅长精确匹配专业术语和专有名词\n- **向量语义检索**：通过 Embedding 模型将文本转为向量，计算余弦相似度，擅长理解语义相近的表达 [1]\n\n**2. 结果融合（RRF）**\n两种检索结果通过 RRF（Reciprocal Rank Fusion）算法进行融合。RRF 不直接比较分数，而是基于排名位置计算权重，避免了不同检索方式分数尺度不一致的问题 [2]\n\n**3. 效果提升**\n实验数据表明，混合检索策略比单一检索方式的效果提升 15-30%。它既保证了关键词的精确匹配（如搜索 \"FastAPI\" 不会被 \"Flask\" 干扰），又支持语义理解（如搜索 \"Web框架\" 能匹配到 \"FastAPI\"）[2]\n\n**4. 典型实现**\n```\n# 伪代码示例\nbm25_results = bm25_search(query, top_k=20)\nvector_results = vector_search(query_embedding, top_k=20)\nfinal_results = rrf_fusion(bm25_results, vector_results, k=60)\n```\n\n这种混合策略是现代 RAG 系统（包括 DocMind）的核心检索架构 [1][2]",
             "type": MessageType.ASSISTANT,
             "metadata": {
+                # 键名对齐前端读点契约（build_sources_list 的 camelCase：
+                # {filename, relevanceScore, chunkIndex, ...}）——snake 键前端
+                # 恒 undefined，相关度数字静默消失（T4 §7.2④「数字保留」落空）
                 "sources": [
-                    {"filename": "rag_technology.txt", "chunk_index": 2, "relevance_score": 0.92, "demo": True},
-                    {"filename": "rag_technology.txt", "chunk_index": 1, "relevance_score": 0.85, "demo": True},
+                    {"filename": "rag_technology.txt", "chunkIndex": 2, "relevanceScore": 0.92, "demo": True},
+                    {"filename": "rag_technology.txt", "chunkIndex": 1, "relevanceScore": 0.85, "demo": True},
                 ]
             }
         },
@@ -103,10 +106,10 @@ DEMO_CONVERSATION = {
             "type": MessageType.ASSISTANT,
             "metadata": {
                 "sources": [
-                    {"filename": "vue3_composition_api.txt", "chunk_index": 0, "relevance_score": 0.95, "demo": True},
-                    {"filename": "vue3_composition_api.txt", "chunk_index": 1, "relevance_score": 0.88, "demo": True},
-                    {"filename": "vue3_composition_api.txt", "chunk_index": 5, "relevance_score": 0.82, "demo": True},
-                    {"filename": "vue3_composition_api.txt", "chunk_index": 6, "relevance_score": 0.79, "demo": True},
+                    {"filename": "vue3_composition_api.txt", "chunkIndex": 0, "relevanceScore": 0.95, "demo": True},
+                    {"filename": "vue3_composition_api.txt", "chunkIndex": 1, "relevanceScore": 0.88, "demo": True},
+                    {"filename": "vue3_composition_api.txt", "chunkIndex": 5, "relevanceScore": 0.82, "demo": True},
+                    {"filename": "vue3_composition_api.txt", "chunkIndex": 6, "relevanceScore": 0.79, "demo": True},
                 ]
             }
         },

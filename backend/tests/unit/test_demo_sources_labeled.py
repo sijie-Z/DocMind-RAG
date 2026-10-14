@@ -59,7 +59,12 @@ async def _seed_and_capture():
 
 class TestDemoSourcesLabeled:
     def test_every_demo_source_is_flagged_and_keeps_score(self):
-        """结构钉死：每条 source 带 demo=True，且相关度数字保留（只标注、不删）。"""
+        """结构钉死：每条 source 带 demo=True，且相关度数字保留（只标注、不删）。
+
+        数字必须以**前端真实读点键**（camelCase `relevanceScore`，对齐
+        build_sources_list 契约）存放——修前用 snake `relevance_score` 时前端
+        `source.relevanceScore` 恒 undefined、相关度永不渲染（「保留」落空）。
+        """
         import app.api.v1.endpoints.demo as demo_mod
 
         sources = [
@@ -72,8 +77,11 @@ class TestDemoSourcesLabeled:
             assert src.get("demo") is True, (
                 f"source {src.get('filename')} 缺 demo 标记 —— 假分数不得裸奔"
             )
-            assert isinstance(src.get("relevance_score"), (int, float)), (
-                "相关度数字保留（体验价值）—— 只标注、不删数字"
+            assert isinstance(src.get("relevanceScore"), (int, float)), (
+                "相关度数字保留（体验价值）—— 且键必须是前端读点 relevanceScore"
+            )
+            assert "relevance_score" not in src, (
+                "不得再用 snake 键：前端只读 camelCase，数字会静默消失"
             )
 
     @pytest.mark.asyncio
@@ -91,4 +99,7 @@ class TestDemoSourcesLabeled:
             for src in m.meta_data["sources"]:
                 assert src.get("demo") is True, (
                     "落库 sources 缺 demo 标记 —— 前端角标会漏渲染"
+                )
+                assert isinstance(src.get("relevanceScore"), (int, float)), (
+                    "落库数字必须用前端读点键 relevanceScore（camelCase）"
                 )
