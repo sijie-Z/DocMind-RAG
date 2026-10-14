@@ -147,7 +147,16 @@ export default {
     level4: 'レベル 4',
     level5: 'レベル 5',
     levelOther: 'その他',
-    createdAt: '作成日時'
+    createdAt: '作成日時',
+    addMember: 'メンバーを追加',
+    selectUser: 'ユーザーを選択',
+    removeMember: '削除',
+    removeMemberConfirm: 'このメンバーを組織から削除しますか？',
+    memberAdded: 'メンバーを組織に追加しました',
+    memberRemoved: 'メンバーを削除しました',
+    roleUpdated: 'ロールを更新しました',
+    loadUsersFailed: 'ユーザー一覧の読み込みに失敗しました',
+    memberOpFailed: '操作に失敗しました'
   },
   chat: {
     aiAssistant: 'AIアシスタント',

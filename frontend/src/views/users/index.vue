@@ -136,8 +136,8 @@
               </n-radio-group>
             </n-form-item>
           </div>
-          <n-form-item :label="t('users.organizations')" path="organization_ids">
-            <n-select v-model:value="userForm.organization_ids" multiple :options="organizationOptions" :placeholder="t('users.selectOrgs', '请选择所属组织')" />
+          <n-form-item :label="t('users.organizations')" path="organization_id">
+            <n-select v-model:value="userForm.organization_id" :options="organizationOptions" :placeholder="t('users.selectOrgs', '请选择所属组织')" />
           </n-form-item>
         </n-form>
       </n-spin>
@@ -202,6 +202,7 @@ import {
 } from '@vicons/ionicons5'
 import type { DataTableColumns, FormRules, FormInst } from 'naive-ui'
 import { getUsers, createUser, updateUser, deleteUser, resetUserPassword } from '@/api/user'
+import { getOrganizations } from '@/api/organization'
 
 /** Safely extract error message from unknown error */
 function getErrorMessage(error: unknown): string {
@@ -251,7 +252,9 @@ const userForm = ref({
   phone: '',
   role: 'user' as 'admin' | 'user',
   status: 'active' as 'active' | 'inactive',
-  organization_ids: [] as number[],
+  // T8：单组织数据模型（User.organization_id 单外键）——单选；提交时包装为
+  // organization_ids（后端接口字段），多组织选择在后端已显式 400 拒收。
+  organization_id: null as number | null,
   remark: ''
 })
 
@@ -265,10 +268,22 @@ const roleOptions = [
   { label: t('users.roleAdmin'), value: 'admin' }
 ]
 
-const organizationOptions = ref([
-  { label: '技术部', value: 1 },
-  { label: '产品部', value: 2 }
-])
+// T8：组织选项动态拉取（此前硬编码「技术部/产品部」两条，与库内真实组织
+// 毫不相干——真实组织：Default / Tester Org / tester2 的空间 / ...）。
+const organizationOptions = ref<Array<{ label: string; value: number }>>([])
+
+const loadOrganizationOptions = async () => {
+  try {
+    const res = await getOrganizations({ page: 1, page_size: 100 })
+    const rows = (res.data as unknown as { data?: { data?: Array<{ id: number; name: string }> } })?.data?.data
+    organizationOptions.value = Array.isArray(rows)
+      ? rows.map((org) => ({ label: org.name, value: org.id }))
+      : []
+  } catch {
+    // 选项加载失败：下拉留空（不阻塞用户管理主流程），保存时仍可显式跳过组织
+    organizationOptions.value = []
+  }
+}
 
 // 校验规则
 const formRules = computed<FormRules>(() => ({
@@ -423,7 +438,7 @@ const handleEdit = (user: User) => {
     phone: '',
     role: user.role,
     status: user.is_active === false ? 'inactive' : 'active',
-    organization_ids: user.organization_id ? [user.organization_id] : [],
+    organization_id: user.organization_id ?? null,
     remark: ''
   }
   showCreateModal.value = true
@@ -438,19 +453,22 @@ const openResetPwd = (user: User) => {
 const closeCreateModal = () => {
   showCreateModal.value = false
   editingUser.value = null
-  userForm.value = { username: '', password: '', email: '', nickname: '', phone: '', role: 'user', status: 'active', organization_ids: [], remark: '' }
+  userForm.value = { username: '', password: '', email: '', nickname: '', phone: '', role: 'user', status: 'active', organization_id: null, remark: '' }
 }
 
 const saveUser = async () => {
   try {
     await formRef.value?.validate()
     saving.value = true
+    // T8：单选 organization_id → 包装为后端字段 organization_ids（单组织模型）
+    const { organization_id, ...rest } = userForm.value
+    const payload = { ...rest, organization_ids: organization_id != null ? [organization_id] : [] }
     if (editingUser.value) {
-      const { username: _, password: __, ...updateData } = userForm.value
+      const { username: _, password: __, ...updateData } = payload
       await updateUser(editingUser.value.id, updateData)
       message.success(t('common.success'))
     } else {
-      await createUser(userForm.value)
+      await createUser(payload)
       message.success(t('common.success'))
     }
     closeCreateModal()
@@ -499,7 +517,10 @@ const handleSelectionChange = (keys: (string | number)[]) => {
   selectedIds.value = keys.map(k => Number(k))
 }
 
-onMounted(loadUsers)
+onMounted(() => {
+  loadUsers()
+  loadOrganizationOptions()
+})
 </script>
 
 <style scoped>

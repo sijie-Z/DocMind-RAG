@@ -258,10 +258,16 @@
               </div>
             </n-tab-pane>
 
-            <!-- 成员 -->
+            <!-- 成员（T8：补最小管理 UI —— 添加/改角色/移除，接线后端既有端点） -->
             <n-tab-pane name="members" :tab="`${t('org.members', '成员')} (${orgMembers.length})`">
-              <div class="py-4">
-                <n-list hoverable clickable>
+              <div class="py-4 space-y-3">
+                <div class="flex justify-end">
+                  <n-button size="small" type="primary" @click="openAddMember">
+                    <template #icon><n-icon><PersonAddOutline /></n-icon></template>
+                    {{ t('org.addMember', '添加成员') }}
+                  </n-button>
+                </div>
+                <n-list hoverable>
                   <n-list-item v-for="member in orgMembers" :key="member.id">
                     <template #prefix>
                       <n-avatar round size="small" :style="{ backgroundColor: selectedOrg?.color }">
@@ -278,6 +284,23 @@
                         </n-space>
                       </template>
                     </n-thing>
+                    <template #suffix>
+                      <n-space size="small" align="center">
+                        <n-select
+                          size="tiny"
+                          style="width: 108px"
+                          :value="member.role"
+                          :options="memberRoleOptions"
+                          @update:value="(v: string) => handleMemberRoleChange(member, v)"
+                        />
+                        <n-popconfirm @positive-click="() => handleRemoveMember(member)">
+                          <template #trigger>
+                            <n-button size="tiny" quaternary type="error">{{ t('org.removeMember', '移除') }}</n-button>
+                          </template>
+                          {{ t('org.removeMemberConfirm', '确定将该成员移出组织？') }}
+                        </n-popconfirm>
+                      </n-space>
+                    </template>
                   </n-list-item>
                   <div v-if="orgMembers.length === 0" class="py-10 text-center text-gray-400">
                     {{ t('common.noData', '暂无成员') }}
@@ -318,6 +341,35 @@
         </n-spin>
       </n-drawer-content>
     </n-drawer>
+
+    <!-- 添加成员弹窗（T8） -->
+    <n-modal
+      v-model:show="showAddMemberModal"
+      preset="card"
+      :title="t('org.addMember', '添加成员')"
+      class="max-w-md"
+    >
+      <n-spin :show="loadingMemberOptions">
+        <n-form label-placement="top" class="mt-2">
+          <n-form-item :label="t('org.selectUser', '选择用户')">
+            <n-select
+              v-model:value="memberToAdd"
+              filterable
+              :options="candidateUsers"
+              :placeholder="t('org.selectUser', '选择用户')"
+            />
+          </n-form-item>
+        </n-form>
+      </n-spin>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <n-button @click="showAddMemberModal = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :disabled="memberToAdd == null" :loading="addingMember" @click="confirmAddMember">
+            {{ t('common.confirm') }}
+          </n-button>
+        </div>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -329,13 +381,14 @@ import {
   NModal, NForm, NFormItem, NColorPicker, NTreeSelect, NInputNumber,
   NPopconfirm, NTooltip, NTree, NDrawer, NDrawerContent,
   NTabs, NTabPane, NDescriptions, NDescriptionsItem, NList, NListItem,
-  NAvatar, NThing, NTag, NResult
+  NAvatar, NThing, NTag, NResult, NSelect
 } from 'naive-ui'
 import {
   SearchOutline, RefreshOutline, CreateOutline,
   TrashOutline, AddCircleOutline, HelpCircleOutline,
   DocumentTextOutline,
-  DocumentOutline
+  DocumentOutline,
+  PersonAddOutline
 } from '@vicons/ionicons5'
 import type { DataTableColumns, TreeSelectOption, FormInst, TreeOption, TreeDropInfo } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -348,8 +401,12 @@ import {
   batchDeleteOrganizations,
   getOrganizationTree,
   getOrganizationMembers,
-  getOrganizationDocuments
+  getOrganizationDocuments,
+  addOrganizationMember,
+  updateOrganizationMemberRole,
+  removeOrganizationMember
 } from '@/api/organization'
+import { getUsers } from '@/api/user'
 import type { OrganizationMember, OrganizationDocument } from '@/types/api'
 import { orgDocStatusLabel, orgDocStatusType } from './docStatus'
 
@@ -556,6 +613,81 @@ const showOrgDetails = async (orgId: number) => {
     message.error(t('org.loadDetailsFailed') + ': ' + getErrorMessage(err))
   } finally {
     loadingDetails.value = false
+  }
+}
+
+// ---- T8 成员管理最小 UI（后端端点既有：POST 添加 / PATCH 改角色 / DELETE 移除）----
+const showAddMemberModal = ref(false)
+const memberToAdd = ref<number | null>(null)
+const candidateUsers = ref<Array<{ label: string; value: number }>>([])
+const loadingMemberOptions = ref(false)
+const addingMember = ref(false)
+
+const memberRoleOptions = computed(() => [
+  { label: t('users.roleUser'), value: 'user' },
+  { label: t('users.roleAdmin'), value: 'admin' }
+])
+
+const refreshMembers = async () => {
+  if (!selectedOrg.value) return
+  const res = await getOrganizationMembers(selectedOrg.value.id)
+  orgMembers.value = res.data.data
+}
+
+const openAddMember = async () => {
+  memberToAdd.value = null
+  candidateUsers.value = []
+  showAddMemberModal.value = true
+  loadingMemberOptions.value = true
+  try {
+    const res = await getUsers({ skip: 0, limit: 100 })
+    const body = (res as unknown as { data?: { users?: Array<{ id: number; username: string }> } }).data
+    const users = Array.isArray(body?.users) ? body.users : []
+    const memberIds = new Set(orgMembers.value.map((m) => m.id))
+    candidateUsers.value = users
+      .filter((u) => !memberIds.has(u.id))
+      .map((u) => ({ label: u.username, value: u.id }))
+  } catch (err: unknown) {
+    message.error(t('org.loadUsersFailed', '用户列表加载失败') + ': ' + getErrorMessage(err))
+  } finally {
+    loadingMemberOptions.value = false
+  }
+}
+
+const confirmAddMember = async () => {
+  if (!selectedOrg.value || memberToAdd.value == null) return
+  addingMember.value = true
+  try {
+    await addOrganizationMember(selectedOrg.value.id, memberToAdd.value)
+    message.success(t('org.memberAdded', '成员已加入组织'))
+    showAddMemberModal.value = false
+    await refreshMembers()
+  } catch (err: unknown) {
+    message.error(t('org.memberOpFailed', '操作失败') + ': ' + (getResponseDetail(err) || getErrorMessage(err)))
+  } finally {
+    addingMember.value = false
+  }
+}
+
+const handleMemberRoleChange = async (member: OrganizationMember, role: string) => {
+  if (!selectedOrg.value || role === member.role) return
+  try {
+    await updateOrganizationMemberRole(selectedOrg.value.id, member.id, role as 'user' | 'admin')
+    message.success(t('org.roleUpdated', '角色已更新'))
+    await refreshMembers()
+  } catch (err: unknown) {
+    message.error(t('org.memberOpFailed', '操作失败') + ': ' + (getResponseDetail(err) || getErrorMessage(err)))
+  }
+}
+
+const handleRemoveMember = async (member: OrganizationMember) => {
+  if (!selectedOrg.value) return
+  try {
+    await removeOrganizationMember(selectedOrg.value.id, member.id)
+    message.success(t('org.memberRemoved', '成员已移除'))
+    await refreshMembers()
+  } catch (err: unknown) {
+    message.error(t('org.memberOpFailed', '操作失败') + ': ' + (getResponseDetail(err) || getErrorMessage(err)))
   }
 }
 

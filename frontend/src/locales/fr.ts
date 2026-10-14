@@ -147,7 +147,16 @@ export default {
     level4: 'Niveau 4',
     level5: 'Niveau 5',
     levelOther: 'Autres niveaux',
-    createdAt: 'Créé le'
+    createdAt: 'Créé le',
+    addMember: 'Ajouter un membre',
+    selectUser: 'Sélectionner un utilisateur',
+    removeMember: 'Retirer',
+    removeMemberConfirm: "Retirer ce membre de l'organisation ?",
+    memberAdded: "Membre ajouté à l'organisation",
+    memberRemoved: 'Membre retiré',
+    roleUpdated: 'Rôle mis à jour',
+    loadUsersFailed: 'Échec du chargement des utilisateurs',
+    memberOpFailed: "Échec de l'opération"
   },
   chat: {
     aiAssistant: 'Assistant IA',

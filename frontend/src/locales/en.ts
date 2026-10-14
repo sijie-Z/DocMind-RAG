@@ -166,7 +166,16 @@ export default {
     updateSuccess: 'Updated successfully',
     createSuccess: 'Created successfully',
     saveFailed: 'Failed to save',
-    deleted: 'Deleted'
+    deleted: 'Deleted',
+    addMember: 'Add member',
+    selectUser: 'Select user',
+    removeMember: 'Remove',
+    removeMemberConfirm: 'Remove this member from the organization?',
+    memberAdded: 'Member added to the organization',
+    memberRemoved: 'Member removed',
+    roleUpdated: 'Role updated',
+    loadUsersFailed: 'Failed to load users',
+    memberOpFailed: 'Operation failed'
   },
   chat: {
     aiAssistant: 'AI Assistant',
