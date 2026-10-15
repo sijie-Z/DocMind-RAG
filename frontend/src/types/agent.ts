@@ -146,6 +146,60 @@ export interface AgentTaskView {
   approval?: PendingApproval
   approval_expired?: boolean
   plan_approval?: PendingPlanApproval
+  /** 是否有可回放数据（后端按 Redis → 本地文件如实判定，绝无虚标）。 */
+  has_replay?: boolean
+}
+
+/** 任务列表项（GET /agent/tasks）：状态视图 + 有回放可看标记。 */
+export interface AgentTaskListItem extends AgentTaskView {
+  has_replay: boolean
+  created_at: string
+  updated_at: string
+}
+
+// ── 回放（GET /agent/tasks/{id}/replay）──────────────────────────────────
+// 字段与执行写侧 ExecutionContext.to_dict() 逐字对齐（后端 format_timeline
+// 契约；禁止在这里改名/换口径）。
+
+export interface ReplayStep {
+  step_id: string
+  description: string
+  tool_used: string | null
+  status: string // completed / failed / skipped / pending / running
+  result_summary: string | null
+  error: string | null
+  duration_ms: number
+  tokens_used: number
+}
+
+export interface ReplayFinding {
+  source_step: string
+  content: string
+  source_tool: string | null
+  confidence: string
+}
+
+export interface ReplayDecision {
+  phase: string
+  action: string
+  reasoning: string
+  triggered_by: string | null
+}
+
+export interface ReplayTimeline {
+  task_id: string
+  query: string
+  goal: string
+  plan_summary: string
+  steps_completed: number
+  steps: ReplayStep[]
+  findings: ReplayFinding[]
+  decisions: ReplayDecision[]
+  failures: string[]
+  duration_ms: number
+  total_tokens: number
+  progress: number
+  start_time: number
 }
 
 /** 审批应答（POST /agent/tasks/{id}/approval）。 */

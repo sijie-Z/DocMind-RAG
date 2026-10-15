@@ -22,13 +22,13 @@ import ApprovalCard from '@/components/agent/ApprovalCard.vue'
 import { useAgentStore } from '@/stores/agent'
 
 const apiMocks = vi.hoisted(() => ({
-  listTools: vi.fn().mockResolvedValue({ data: [] }),
-  listSessions: vi.fn().mockResolvedValue({ data: { sessions: [] } }),
-  getConfig: vi.fn().mockResolvedValue({ data: {} }),
+  listTools: vi.fn().mockResolvedValue({ data: { success: true, data: [] } }),
+  listSessions: vi.fn().mockResolvedValue({ data: { success: true, data: { sessions: [] } } }),
+  getConfig: vi.fn().mockResolvedValue({ data: { success: true, data: {} } }),
   chat: vi.fn(),
-  getSession: vi.fn().mockResolvedValue({ data: {} }),
+  getSession: vi.fn().mockResolvedValue({ data: { success: true, data: {} } }),
   deleteSession: vi.fn().mockResolvedValue({}),
-  createSession: vi.fn().mockResolvedValue({ data: null }),
+  createSession: vi.fn().mockResolvedValue({ data: { success: true, data: null } }),
   updateConfig: vi.fn().mockResolvedValue({}),
   submitFeedback: vi.fn().mockResolvedValue({}),
   getTask: vi.fn().mockResolvedValue({ data: { success: true, data: { state: 'completed' } } }),
