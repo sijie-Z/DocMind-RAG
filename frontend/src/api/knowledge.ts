@@ -20,9 +20,9 @@ export interface KnowledgeBase {
   raw_status?: string
   created_at: string
   updated_at: string
-  // 列表端点词表（knowledge.py:131-139 status_map，INDEXED → 'completed'）；
-  // 详情端点（documents.py:296-303）同义词 'indexed'，viewKnowledge 合并详情后
-  // 可能出现 —— 两词表均受支持（docDisplay 统一映射）
+  // 列表端点词表已收敛为 DB 枚举原词（fix/status-vocab，INDEXED → 'indexed'，
+  // 与详情端点 documents.py:296-303 一致）；'completed' 为收敛前列表旧词
+  // （在途分支/旧缓存仍可能到达）—— 两词表均受支持（docDisplay 兼容层统一映射）
   status: 'pending' | 'uploaded' | 'parsing' | 'parsed' | 'completed' | 'indexed' | 'failed'
 }
 

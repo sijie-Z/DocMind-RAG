@@ -5,7 +5,7 @@
 ## 🚀 功能特性
 
 ### 📄 文档管理
-- **多格式支持**: PDF、Word、Excel、PPT、TXT、Markdown、CSV
+- **多格式支持**: PDF、Word、Excel、TXT、Markdown、CSV、图片（OCR）
 - **大文件上传**: 支持分块上传和断点续传，最大支持100MB文件
 - **智能解析**: 自动提取文本内容，支持表格和结构化数据
 - **文档分块**: 智能文本分块，支持上下文重叠
@@ -53,7 +53,7 @@
 ### 1. 克隆项目
 ```bash
 git clone <repository-url>
-cd paicongming/backend
+cd DocMind/backend
 ```
 
 ### 2. 安装依赖

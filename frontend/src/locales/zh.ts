@@ -7,9 +7,12 @@ export default {
     batchDelete: '批量删除',
     copy: '复制',
     copySuccess: '复制成功',
+    copied: '已复制',
+    warning: '提示',
     copyFailed: '复制失败',
     close: '关闭',
     edit: '编辑',
+    loading: '加载中...',
     success: '操作成功',
     error: '操作失败',
     failed: '操作失败',
@@ -45,6 +48,7 @@ export default {
     confirmPassword: '确认密码',
     preferences: '偏好设置',
     language: '语言设置',
+    languageBeta: 'Beta，部分内容显示英文',
     theme: '主题设置',
     themeSettingDesc: '选择界面主题风格',
     languageSettingDesc: '选择界面显示语言',
@@ -206,6 +210,7 @@ export default {
     confirmDelete: '确认删除此对话吗？',
     previewFailed: '无法加载预览内容',
     sseError: 'SSE错误',
+    sseWarning: '服务端提示，本轮回答可能不完整',
     sseRetry: 'SSE连接重试中，剩余重试次数：{left}',
     feedbackLiked: '已点赞，感谢您的反馈！',
     feedbackDisliked: '已点踩，我们会继续优化。',
@@ -277,7 +282,6 @@ export default {
     loadFailed: '加载失败',
     loadFailedDesc: '无法加载对话列表',
     retry: '重试',
-    version: 'DocMind v1.0',
     // Drag-and-drop
     dropFiles: '拖拽文件到此处上传',
     // Export
@@ -426,6 +430,15 @@ export default {
       seedFailed: '初始化失败'
     }
   },
+  error: {
+    '404': {
+      title: '页面不存在',
+      subtitle: '你访问的页面不存在或已被移除，请检查地址是否正确。'
+    },
+    backToHome: '返回首页',
+    backToWorkbench: '进入工作台',
+    back: '返回上一页'
+  },
   login: {
     welcomeBack: '欢迎回来',
     loginDesc: '请输入您的账号和密码进行登录',
@@ -464,6 +477,8 @@ export default {
     auditLogs: '操作日志',
     workflow: 'Agent 工作流',
     agent: '智能 Agent',
+    scheduledTasks: '定时任务',
+    mcpServers: 'MCP 服务器',
     systemHelp: '系统帮助',
     systemAbout: '系统关于',
     systemTitle: 'DocMind 知识库'
@@ -688,9 +703,215 @@ export default {
   },
   hitl: {
     cancelled: '已取消',
-    stopped: '已停止'
+    stopped: '已停止',
+    // A：运行中转向（steering）——输入区/时间线/错误提示
+    steerSend: '发送指导',
+    steerHint: '运行中：Enter 发送指导（不打断当前步骤，下一个步边界生效）',
+    steerSent: '已发送指导',
+    steerApplied: '指导已生效',
+    steerFull: '转向缓冲已满：请等待 agent 消费后再发送',
+    steerFailed: '指导发送失败，请稍后重试',
+    // B：计划审批——计划卡/时间线/提示
+    planTitle: '计划待审批',
+    planGoal: '目标',
+    planSteps: '步骤',
+    planApprove: '批准计划',
+    planEditSteps: '编辑步骤',
+    planSaveApprove: '保存并批准',
+    planCancelEdit: '取消编辑',
+    planReject: '拒绝计划',
+    planRejectNotePlaceholder: '拒绝理由（用于重新规划，建议填写）',
+    planRejectHint: '拒绝后将带理由重新规划一次；再次拒绝任务将终止（rejected）',
+    planAddStep: '添加步骤',
+    planRemove: '删除',
+    planDeps: '依赖',
+    planSubmitting: '提交中…',
+    planTimeline: '计划待审批',
+    planRejectedMessage: '计划已被再次拒绝（重规划机会已用尽），任务已终止',
+    planEditInvalid: '编辑内容不合法，请检查步骤（描述/依赖）后重试',
+    planFailed: '计划审批提交失败，已刷新任务状态',
+    planPendingHint: '任务正在等待计划审批：请先在上方计划卡中批准 / 编辑 / 拒绝（或取消任务）'
+  },
+  scheduler: {
+    title: '定时任务',
+    subtitle: '管理定时触发的 Agent 任务：到点自动运行，运行结果可在「上次运行」处查看',
+    create: '新建定时任务',
+    noData: '暂无定时任务',
+    loadFailed: '加载失败',
+    filterAll: '全部',
+    filterEnabled: '已启用',
+    filterPaused: '已暂停',
+    columns: {
+      name: '名称',
+      schedule: '计划',
+      status: '状态',
+      lastRun: '上次运行',
+      nextRun: '下次运行',
+      actions: '操作'
+    },
+    statusEnabled: '已启用',
+    statusPaused: '已暂停',
+    statusFinished: '已跑完',
+    lastStatus: { running: '运行中', success: '成功', failed: '失败' },
+    skippedOverlap: '跳过重叠 {n} 次',
+    neverRun: '尚未运行',
+    noNextRun: '无',
+    viewResult: '查看结果',
+    runNow: '立即运行',
+    pause: '暂停',
+    resume: '恢复',
+    delete: '删除',
+    runNowTriggered: '已触发运行，完成后将发送站内通知',
+    runNowReason: {
+      overlap: '上一轮运行尚未结束，本次已跳过（不排队）',
+      not_found: '任务不存在',
+      unknown: '未触发（{reason}）'
+    },
+    deleteTitle: '删除定时任务',
+    deleteConfirm: '确定要删除「{name}」吗？在途运行会继续，但任务记录将不可恢复。',
+    createSuccess: '创建成功',
+    plan: {
+      intervalMinutes: '每 {n} 分钟',
+      intervalHours: '每 {n} 小时',
+      intervalSeconds: '每 {n} 秒',
+      onceAt: '单次 · {time}'
+    },
+    cron: {
+      everyMinute: '每分钟',
+      everyNMinutes: '每 {n} 分钟',
+      hourlyAtMinute: '每小时的第 {m} 分',
+      dailyAt: '每天 {time}',
+      weeklyAt: '每{days} {time}',
+      monthlyAt: '每月{days}日 {time}',
+      yearlyAt: '每年{month}{day}日 {time}',
+      weekdayRange: '{from}至{to}',
+      dayRange: '{from}至{to}',
+      listSep: '、',
+      weekdays: { '0': '周日', '1': '周一', '2': '周二', '3': '周三', '4': '周四', '5': '周五', '6': '周六' },
+      months: {
+        '1': '1月', '2': '2月', '3': '3月', '4': '4月', '5': '5月', '6': '6月',
+        '7': '7月', '8': '8月', '9': '9月', '10': '10月', '11': '11月', '12': '12月'
+      }
+    },
+    modal: {
+      title: '新建定时任务',
+      name: '任务名称',
+      namePlaceholder: '例如：每日晨报',
+      prompt: '指令（prompt）',
+      promptPlaceholder: '到点交给 Agent 执行的指令……',
+      scheduleType: '调度方式',
+      type: { cron: '周期性（cron）', interval: '固定间隔', once: '单次' },
+      cronExpr: 'cron 表达式（分 时 日 月 周）',
+      cronPlaceholder: '例如：0 9 * * *',
+      cronPreview: '计划预览',
+      cronPreviewUnknown: '子集外表达式，暂无法生成人话预览（以服务端校验为准）',
+      timezone: '时区（仅影响 cron 的解释）',
+      timezoneDefault: '服务端默认',
+      intervalSeconds: '间隔秒数',
+      intervalHint: '最小 {n} 秒（分钟级精度）',
+      onceAt: '触发时间',
+      onceAtHint: '选择触发时间',
+      enabled: '创建后立即启用'
+    },
+    validation: {
+      cronRequired: '请填写 cron 表达式',
+      cronMax: 'cron 表达式不能超过 {n} 个字符',
+      intervalRequired: '请填写间隔秒数',
+      intervalMin: '间隔不能小于 {n} 秒',
+      onceRequired: '请选择触发时间',
+      onceFuture: '触发时间必须晚于当前时间',
+      nameMax: '名称不能超过 {n} 个字符',
+      promptMax: '指令不能超过 {n} 个字符'
+    },
+    result: {
+      title: '运行结果（Agent 任务）',
+      taskId: '任务 ID',
+      state: '状态',
+      progress: '进度（已完成 / 总步骤）',
+      query: '输入',
+      error: '最近错误',
+      unavailable: '结果不可用（任务不存在或不可见）',
+      taskState: {
+        pending: '排队中',
+        running: '运行中',
+        waiting_tool: '工具执行中',
+        waiting_approval: '等待审批',
+        waiting_plan_approval: '等待计划审批',
+        waiting_human: '等待人工',
+        failed: '失败',
+        completed: '完成',
+        abandoned: '已放弃',
+        cancelled: '已取消',
+        rejected: '已拒绝'
+      }
+    }
+  },
+  mcp: {
+    title: 'MCP 服务器',
+    subtitle: '动态接入的 MCP 服务器状态与工具注册情况（只读）',
+    readOnlyNotice: '只读视图：启用/停用或新增服务器请编辑后端 backend/mcp_servers.json 并重启服务，本页不做在线写操作。',
+    notStarted: 'MCP 管理器尚未初始化（后端可能未完成启动或未加载配置）。',
+    registeredTools: '已注册动态工具 {n} 个',
+    loadFailed: '加载失败',
+    noServers: '未配置任何 MCP 服务器',
+    noServersHint: '在 backend/mcp_servers.json 的 servers 中添加配置后重启后端',
+    transportLabel: '传输',
+    enabled: '已启用',
+    disabled: '未启用',
+    toolCount: '工具 {n} 个',
+    noTools: '暂无已注册工具',
+    lastError: '最近错误',
+    state: {
+      init: '初始化中',
+      connecting: '连接中',
+      connected: '已连接',
+      dead: '连接已断开',
+      closed: '已关闭',
+      disabled: '未启用',
+      not_connected: '未连接'
+    }
+  },
+  refPicker: {
+    heading: '引用知识库文档',
+    empty: '未找到匹配文档',
+    error: '文档加载失败，请重试',
+    remove: '移除引用',
+    inputHint: "Enter 发送 · {'@'} 引用文档 · / 命令 · Shift+Enter 换行"
+  },
+  slashCmd: {
+    heading: '斜杠命令',
+    empty: '无匹配命令（Enter 直接发送原文）',
+    desc: {
+      search: '联网搜索并总结（web_search 工具）',
+      doc: '基于知识库回答（search_knowledge_base 工具）',
+      workflow: '拆解为多步计划并逐步执行（规划器）',
+      help: '查看全部命令与说明',
+      clear: '清空输入框'
+    },
+    tpl: {
+      search: '联网搜索并总结：{q}',
+      doc: '基于知识库回答：{q}',
+      workflow: '请拆解为多步计划并逐步执行：{q}'
+    }
+  },
+  runStats: {
+    running: '已运行 {t}',
+    elapsed: '用时 {t}',
+    cost: '≈{c}（估算）'
+  },
+  artifacts: {
+    kind: {
+      diff: '差异',
+      json: 'JSON',
+      markdown: 'Markdown',
+      text: '文本'
+    },
+    download: '下载',
+    runReport: '运行报告',
+    exportMarkdown: '导出 Markdown'
   },
   router: {
+    notFound: '页面不存在',
     welcome: '欢迎',
     login: '登录',
     register: '注册',
