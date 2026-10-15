@@ -136,10 +136,15 @@ class TestAllowedMimeTypes:
         assert ".md" in exts
         assert ".csv" in exts
 
-    def test_unsupported_image_types_removed(self):
-        # Keep upload acceptance aligned with the document parser's capability set.
-        assert "image/jpeg" not in _ALLOWED_MIME_TYPES
-        assert "image/png" not in _ALLOWED_MIME_TYPES
+    def test_image_types_match_parser_capability(self):
+        # round2 后端卫生修复②：解析链已接图片（document_parser 的 _parse_image，
+        # OCR 支线）→ 上传白名单按「准入与解析能力对齐」的初衷同步放行图片；
+        # 解析器不支持的格式（.doc/msword）仍不得放行。
+        assert ".png" in _ALLOWED_MIME_TYPES["image/png"]
+        assert {".jpg", ".jpeg"} <= _ALLOWED_MIME_TYPES["image/jpeg"]
+        assert ".gif" in _ALLOWED_MIME_TYPES["image/gif"]
+        assert ".webp" in _ALLOWED_MIME_TYPES["image/webp"]
+        assert ".bmp" in _ALLOWED_MIME_TYPES["image/bmp"]
         assert "application/msword" not in _ALLOWED_MIME_TYPES
 
 

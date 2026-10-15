@@ -518,11 +518,20 @@ async def cross_document_analysis(
     organization_id: int = 1,
     run_context: RunContext | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     if not document_ids or len(document_ids) < 2:
-        return json.dumps({"error": "Please provide at least 2 document IDs."}, ensure_ascii=False)
+        # issue #301 批次 2：历史 {"error": ...} JSON 出口迁移到结构化失败 ——
+        # 旧的"正常 JSON"形态对消费端的小写键检查隐身（trustB 评审现场复现：
+        # 错误载荷经 document_comparison Step 3 漏进报告）。
+        return ToolResult.fail(
+            code="validation_error",
+            message="Please provide at least 2 document IDs.",
+        )
     if len(document_ids) > 10:
-        return json.dumps({"error": "Maximum 10 documents allowed."}, ensure_ascii=False)
+        return ToolResult.fail(
+            code="validation_error",
+            message="Maximum 10 documents allowed.",
+        )
 
     from app.core.config import settings
     from app.core.elasticsearch import ElasticsearchTools
@@ -580,7 +589,19 @@ async def cross_document_analysis(
 
     pipeline = get_rag_pipeline()
     if not pipeline.openai_client:
-        return json.dumps({"documents": docs_data, "analysis": "LLM unavailable"}, ensure_ascii=False)
+        # issue #301 批次 2：无 LLM 就没有跨文档分析 —— 这是工具失败，不是结果。
+        # 旧行为返回 {"documents": ..., "analysis": "LLM unavailable"} 的正常
+        # JSON，消费端会把它当分析结果消费。
+        return ToolResult.fail(
+            code="llm_unavailable",
+            message="LLM unavailable",
+            raw={
+                "documents": [
+                    {"id": d["id"], "filename": d["filename"], "chunks": d["chunks"]}
+                    for d in docs_data
+                ],
+            },
+        )
 
     doc_list_text = "\n\n".join(
         f"--- 文档 {i+1}: {d['filename']} ---\n{d['text']}"
@@ -629,11 +650,15 @@ async def cross_document_analysis(
             "analysis": analysis,
         }, ensure_ascii=False, indent=2)
     except Exception as e:
-        return json.dumps({
-            "document_count": len(docs_data),
-            "error": f"Analysis failed: {e}",
-            "documents": [{"filename": d["filename"]} for d in docs_data],
-        }, ensure_ascii=False, indent=2)
+        # issue #301 批次 2：异常不再包成 {"error": ...} 的"正常" JSON 返回 ——
+        # 结构化失败传播（判别权在工具内部，#297/#293 契约）。
+        return ToolResult.fail(
+            code="analysis_failed",
+            message=f"Analysis failed: {e}",
+            raw={
+                "documents": [{"filename": d["filename"]} for d in docs_data],
+            },
+        )
 
 
 @register_tool(
@@ -674,7 +699,7 @@ async def generate_report(
     format: str = "markdown",
     run_context: RunContext | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     from app.core.config import settings
     from app.dependencies import get_rag_pipeline
 
@@ -682,9 +707,17 @@ async def generate_report(
     try:
         parsed_sections = json.loads(sections)
         if not isinstance(parsed_sections, list):
-            return json.dumps({"error": "sections must be a JSON array"}, ensure_ascii=False)
+            # issue #301 批次 2：入参校验失败 = 工具失败，旧 {"error": ...} 出口
+            # 迁移到结构化失败（消费端曾漏检小写键）。
+            return ToolResult.fail(
+                code="validation_error",
+                message="sections must be a JSON array",
+            )
     except json.JSONDecodeError as e:
-        return json.dumps({"error": f"Invalid sections JSON: {e}"}, ensure_ascii=False)
+        return ToolResult.fail(
+            code="validation_error",
+            message=f"Invalid sections JSON: {e}",
+        )
 
     if format == "json":
         return json.dumps({
@@ -845,7 +878,7 @@ async def list_documents(
     },
     tags=["management"],
 )
-async def get_document_info(document_id: str, organization_id: int = 1, **_: Any) -> str:
+async def get_document_info(document_id: str, organization_id: int = 1, **_: Any) -> str | ToolResult:
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal
@@ -860,7 +893,13 @@ async def get_document_info(document_id: str, organization_id: int = 1, **_: Any
         doc = result.scalar_one_or_none()
 
     if not doc:
-        return f"Document {document_id} not found."
+        # issue #301 批次 2：文档不存在 = 工具失败。旧行为返回 "Document ... not
+        # found." 普通字符串，消费端只能靠 `"not found" not in info` 内容启发式
+        # 判断（既漏又可能误伤含该词的合法文件名/字段）。
+        return ToolResult.fail(
+            code="not_found",
+            message=f"Document {document_id} not found.",
+        )
 
     status_val = doc.status.value if hasattr(doc.status, "value") else str(doc.status)
     return json.dumps({

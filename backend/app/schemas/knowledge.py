@@ -11,10 +11,10 @@ from app.core.config import settings
 
 
 class SearchMode(str, Enum):
-    """搜索模式"""
-    HYBRID = "hybrid"  # 混合搜索（关键词+向量）
-    VECTOR = "vector"  # 纯向量搜索
-    KEYWORD = "keyword"  # 纯关键词搜索
+    """搜索模式（本次请求强制采用的检索臂组合，issue #225）"""
+    HYBRID = "hybrid"  # 混合搜索（关键词+向量两臂 + RRF 融合）
+    VECTOR = "vector"  # 纯向量搜索（仅向量臂）
+    KEYWORD = "keyword"  # 纯关键词搜索（仅关键词臂）
 
 
 class KnowledgeSearchRequest(BaseModel):
@@ -28,7 +28,12 @@ class KnowledgeSearchRequest(BaseModel):
         ge=1, le=50,
         description="返回结果数量",
     )
-    search_mode: SearchMode = Field(SearchMode.HYBRID, description="搜索模式")
+    # issue #225 决策 7A：None = 自动路由（系统按查询复杂度选策略，缺省行为）；
+    # 显式取值强制本次请求的检索臂组合（hybrid=两臂融合 / vector=仅向量臂 /
+    # keyword=仅关键词臂）。此前默认 HYBRID 且被链路丢弃——字段存在但说了不算。
+    search_mode: SearchMode | None = Field(
+        None, description="搜索模式；缺省（null）= 自动路由，显式值强制本次检索臂组合"
+    )
 
 
 class SearchResult(BaseModel):
@@ -49,7 +54,7 @@ class KnowledgeSearchResponse(BaseModel):
     query: str = Field(..., description="搜索查询")
     results: list[SearchResult] = Field(..., description="搜索结果列表")
     total_count: int = Field(..., description="结果总数")
-    search_mode: str = Field(..., description="搜索模式")
+    search_mode: str = Field(..., description="本次实际生效的搜索模式（显式值或自动路由结果）")
     search_time: float | None = Field(None, description="搜索耗时（秒）")
     # 空结果的原因。没有它时「没匹配到」与「索引是空的」在响应里同形（issue #182）：
     #   ok / empty_index / index_error / unknown

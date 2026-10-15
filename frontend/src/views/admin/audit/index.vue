@@ -81,8 +81,11 @@ const columns = [
   },
   {
     title: t('audit.columns.user'),
-    key: 'user_id',
-    width: 80
+    // 用户列绑定真实 username 字段（同 API 已返回，users.py:328）；此前绑
+    // user_id 直出数字 1/3。username 缺失（如用户已删除）时回退 user_id。
+    key: 'username',
+    width: 100,
+    render: (row: AuditLogEntry) => row.username || String(row.user_id ?? '-')
   },
   {
     title: t('audit.columns.action'),

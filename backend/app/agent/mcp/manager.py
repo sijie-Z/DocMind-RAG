@@ -58,7 +58,9 @@ def namespace_tool_name(server: str, tool: str) -> str:
     """``mcp__<server>__<tool>``；非法字符归一为 ``_``，超长用 sha1 尾缀收敛。"""
     final = f"{TOOL_PREFIX}{sanitize_segment(server)}__{sanitize_segment(tool)}"
     if len(final) > _MAX_TOOL_NAME_LEN:
-        digest = hashlib.sha1(final.encode("utf-8")).hexdigest()[:6]
+        # 仅作名称收敛尾缀（去重标识），非密码学用途——显式标注以免被静态
+        # 扫描当作弱哈希（与 app/rag/retriever.py 的 chunk_id 哈希同款写法）。
+        digest = hashlib.sha1(final.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
         head = final[: _MAX_TOOL_NAME_LEN - len(digest) - 1]
         final = f"{head}_{digest}"
     return final

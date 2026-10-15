@@ -113,6 +113,22 @@ class Experience:
 
     # ── Lifecycle ──
 
+    def content_key(self) -> tuple[str, str, str]:
+        """Deterministic content identity — what the lesson *says*, regardless
+        of transport metadata (id / timestamps / confidence / verification
+        counters / source trace).
+
+        Used by ExperienceStore.add for content-level dedup (round2 卫生修复①):
+        extraction mints a fresh random ``id`` per call, so only the content can
+        tell whether two experiences are the same lesson. Normalization: strip,
+        collapse inner whitespace, casefold — formatting-only differences do
+        not create a new entry.
+        """
+        def _norm(value: str) -> str:
+            return " ".join(value.split()).casefold()
+
+        return (_norm(self.scenario), _norm(self.symptom), _norm(self.lesson))
+
     def record_verification(self, success: bool) -> None:
         """Update confidence based on whether the lesson helped."""
         if success:

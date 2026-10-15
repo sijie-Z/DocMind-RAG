@@ -1,5 +1,21 @@
 <template>
   <div class="user-dashboard p-4 md:p-6 space-y-5">
+    <!-- 三态：加载中 / 加载失败（可重试）/ 内容 -->
+    <div v-if="loading" class="flex items-center justify-center py-24">
+      <n-spin size="large" />
+    </div>
+    <n-result
+      v-else-if="loadFailed"
+      status="error"
+      class="py-16"
+      :title="t('dashboard.loadFailed')"
+      :description="t('dashboard.loadFailedDesc')"
+    >
+      <template #footer>
+        <n-button type="primary" @click="loadData">{{ t('dashboard.retry') }}</n-button>
+      </template>
+    </n-result>
+    <template v-else>
     <!-- 欢迎区域 - 渐变背景 -->
     <div class="bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 rounded-2xl p-6 text-white shadow-xl shadow-blue-500/20 relative overflow-hidden">
       <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIj48Y2lyY2xlIGN4PSIzMCIgY3k9IjMwIiByPSIyIi8+PC9nPjwvZz48L3N2Zz4=')] opacity-50"></div>
@@ -250,11 +266,12 @@
         </n-button>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
 import { useUserStore } from '@/stores/user'
@@ -297,6 +314,8 @@ const ragStats = ref({
 const recentConversations = ref<Conversation[]>([])
 const chartRef = ref<HTMLElement | null>(null)
 const demoLoading = ref(false)
+const loading = ref(true)
+const loadFailed = ref(false)
 let chart: EChartsType | null = null
 
 const formatSize = (bytes: number) => formatFileSize(bytes)
@@ -379,7 +398,9 @@ const handleResize = () => chart?.resize()
 
 watch(() => stats.value.activity_trend, updateChart, { deep: true })
 
-onMounted(async () => {
+const loadData = async () => {
+  loading.value = true
+  loadFailed.value = false
   try {
     const [statsRes, convRes, ragRes] = await Promise.all([
       getUserStats(),
@@ -413,11 +434,19 @@ onMounted(async () => {
       }
     }
 
+    // 三态收口：先放开内容渲染（v-else），等 DOM 就绪后再初始化图表
+    loading.value = false
+    await nextTick()
     initChart()
-  } catch (e) {
-    initChart()
+  } catch {
+    loadFailed.value = true
+  } finally {
+    loading.value = false
   }
+}
 
+onMounted(() => {
+  loadData()
   window.addEventListener('resize', handleResize)
 })
 

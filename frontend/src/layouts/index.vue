@@ -130,7 +130,7 @@
     <!-- 主内容区 -->
     <div class="flex-1 flex flex-col bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
       <!-- 顶部栏 -->
-      <header class="h-14 md:h-16 bg-white dark:bg-gray-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 md:px-6 sticky top-0 z-20">
+      <header class="h-14 md:h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 md:px-6 sticky top-0 z-20">
         <div class="flex items-center gap-3 min-w-0">
           <!-- 移动端汉堡菜单 -->
           <n-button text size="small" class="md:hidden" @click="mobileMenuOpen = !mobileMenuOpen">
@@ -138,9 +138,9 @@
               <n-icon size="20"><MenuOutline /></n-icon>
             </template>
           </n-button>
-          <span class="text-xs font-medium text-slate-400 dark:text-slate-500 hidden sm:inline">DocMind</span>
-          <span class="text-slate-300 dark:text-slate-600 hidden sm:inline">/</span>
-          <h1 class="text-lg font-semibold text-slate-900 dark:text-slate-100 truncate">
+          <span class="text-xs font-medium text-gray-400 dark:text-gray-500 hidden sm:inline">DocMind</span>
+          <span class="text-gray-300 dark:text-gray-600 hidden sm:inline">/</span>
+          <h1 class="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
             {{ currentRouteTitle }}
           </h1>
         </div>
@@ -156,14 +156,14 @@
             @keyup.enter="handleGlobalSearch"
           >
             <template #prefix>
-              <n-icon class="text-slate-400"><SearchOutline /></n-icon>
+              <n-icon class="text-gray-400"><SearchOutline /></n-icon>
             </template>
             <template #suffix>
-              <span class="text-[10px] text-slate-400 pointer-events-none">Ctrl+K</span>
+              <span class="text-[10px] text-gray-400 pointer-events-none">Ctrl+K</span>
             </template>
           </n-input>
           
-          <n-button text size="small" @click="toggleTheme" class="text-slate-500">
+          <n-button text size="small" @click="toggleTheme" class="text-gray-500">
             <n-icon size="18">
               <MoonOutline v-if="!isDark" />
               <SunnyOutline v-else />

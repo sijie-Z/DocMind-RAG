@@ -18,6 +18,11 @@ minio>=7.2.0
 aiokafka>=0.14.0
 
 httpx>=0.28.1
+# web_search 工具的搜索后端（harness 审计·维度1「web 半成品」：此前既未装也未
+# 声明 → 任何全新环境下该工具恒失败）。上游 2025 年由 duckduckgo-search 改名
+# ddgs，旧名冻结在 8.1.1，故声明新名；代码侧保留旧名 import 兜底
+# （app/agent/tools/web_search.py）。上界 <10 防 9.x→10 API 漂移。
+ddgs>=9.16.0,<10
 aiofiles>=25.1.0
 openai>=3.11.0
 langchain>=1.4.2
@@ -36,6 +41,21 @@ defusedxml>=0.7.1
 docx2txt>=0.8
 openpyxl>=3.1.5
 unstructured>=0.11.0
+# 图片 OCR（PNG/JPG/WEBP/BMP/GIF 首帧 → 文本 → 现有 chunk/嵌入/索引管道）。
+# 引擎 rapidocr-onnxruntime 纯 CPU、无外部二进制依赖（不需要 tesseract）。
+# 钉 1.4.4：2026-10 实测版本（py3.12 / numpy 2.5 / Pillow 12 可装）。
+#
+# ⚠ opencv 在容器/无头环境必须换 headless（评审阻塞项，2026-10-10）：
+#   rapidocr 元数据强拉 GUI 版 opencv-python（Requires-Dist: opencv-python>=4.5.1.48），
+#   而 GUI 版在无 X/GL 库的 python:3.11-slim 里 `import cv2` 即失败（缺 libxcb.so.1
+#   等）→ 图片 OCR 在 docker/k8s 部署目标全量不可用。纯 CPU 文字检测/识别不需要
+#   任何 GUI 能力，故容器构建路径由 Dockerfile builder 阶段内置替换（GUI 文件清除 +
+#   同版本 headless 5.0.0.93），runtime 阶段带 `import cv2, rapidocr_onnxruntime` 自检。
+#   本文件不列 headless 包名：与 rapidocr 拉入的 GUI 版会两版共存、文件互相覆盖。
+#   本地无 GUI 环境（如 Linux 服务器 venv）手动两行同款：
+#     pip uninstall -y opencv-python
+#     pip install --no-deps opencv-python-headless==5.0.0.93
+rapidocr-onnxruntime==1.4.4
 python-magic>=0.4.27; sys_platform != 'win32'
 python-magic-bin>=0.4.14; sys_platform == 'win32'
 python-jose[cryptography]>=3.5.0

@@ -376,10 +376,10 @@ PUT    /api/v1/agent/config         更新用户 Agent 配置
 # 健康检查
 curl http://localhost:8000/health
 
-# 登录获取 Token
+# 登录获取 Token（示例占位；现役账号密码见本地 _试用清单.md）
 curl -X POST http://localhost:8000/api/v1/auth/login/json \
   -H "Content-Type: application/json" \
-  -d '{"username":"guest","password":"123456"}'
+  -d '{"username":"tester","password":"<见 _试用清单.md>"}'
 
 # Agent 聊天 (SSE)
 curl -N -X POST http://localhost:8000/api/v1/agent/chat \

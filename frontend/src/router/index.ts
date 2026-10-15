@@ -15,7 +15,7 @@ export const routes: RouteRecordRaw[] = [
     name: 'FirstHome',
     component: () => import('@/views/firsthome/index.vue'),
     meta: {
-      title: '欢迎',
+      title: 'router.welcome',
       requiresAuth: false
     }
   },
@@ -24,7 +24,7 @@ export const routes: RouteRecordRaw[] = [
     name: 'Login',
     component: () => import('@/views/login/index.vue'),
     meta: {
-      title: '登录',
+      title: 'router.login',
       requiresAuth: false
     }
   },
@@ -33,7 +33,7 @@ export const routes: RouteRecordRaw[] = [
     name: 'Register',
     component: () => import('@/views/login/index.vue'),
     meta: {
-      title: '注册',
+      title: 'router.register',
       requiresAuth: false
     }
   },
@@ -86,7 +86,7 @@ export const routes: RouteRecordRaw[] = [
         name: 'KnowledgeGraph',
         component: () => import('@/views/knowledge/graph.vue'),
         meta: {
-          title: '知识图谱',
+          title: 'router.knowledgeGraph',
           icon: 'git-network'
         }
       },
@@ -161,7 +161,7 @@ export const routes: RouteRecordRaw[] = [
         name: 'WorkflowEditor',
         component: () => import('@/views/workflow/editor.vue'),
         meta: {
-          title: '工作流编辑器',
+          title: 'router.workflowEditor',
           icon: 'git-network'
         }
       },
@@ -170,7 +170,7 @@ export const routes: RouteRecordRaw[] = [
         name: 'AgentMemory',
         component: () => import('@/views/workflow/memory.vue'),
         meta: {
-          title: 'Agent记忆',
+          title: 'router.agentMemory',
           icon: 'database'
         }
       },
