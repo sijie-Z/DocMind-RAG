@@ -61,13 +61,10 @@ class KnowledgeService:
         query: str,
         organization_id: str | None = None,
         top_k: int = 5,
-        search_mode: str | None = None
+        search_mode: str = "hybrid"
     ) -> list[dict[str, Any]]:
         """
         搜索知识库 - 统一使用 RagService 以获得更强能力
-
-        search_mode（hybrid/vector/keyword）：显式覆盖本次检索臂组合；None = 自动
-        路由（issue #225 决策 7A：此前该参数收下即丢弃，三层链路都不生效）。
         """
         from app.services.rag_service import rag_service
         try:
@@ -82,7 +79,6 @@ class KnowledgeService:
                 query=query,
                 organization_id=org_id,
                 top_k=top_k,
-                search_mode=search_mode,
             )
 
             # 安全修复：移除检索结果全文日志（原 DEBUG 日志把文档内容写入日志文件，

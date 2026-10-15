@@ -1,16 +1,7 @@
 """
 文件上传API端点 - 已修复头像上传500错误
 """
-from fastapi import (
-    APIRouter,
-    BackgroundTasks,
-    Depends,
-    File,
-    Form,
-    HTTPException,
-    Request,
-    UploadFile,
-)
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -59,9 +50,7 @@ async def upload_file(
         db.add(notification)
         await db.commit()
         return FileUploadResponse(**result)
-    except (AppError, HTTPException):
-        # 校验类 4xx（AppError/HTTPException 家族）原样放行，不得被下面的
-        # except Exception 重包成 500（round2 后端卫生修复③；issue #98 同款）。
+    except AppError:
         raise
     except Exception as e:
         raise AppError(str(e))
@@ -99,12 +88,6 @@ async def upload_avatar(
 
         return {"url": avatar_url, "success": True}
 
-    except (AppError, HTTPException):
-        # 校验类 4xx（类型/大小/MIME 不合规）原样放行——此前被下面的
-        # except Exception 重包成裸 AppError(500)（round2 后端卫生修复③，
-        # K 支线评审 medium；_media_audit §3.4 实测 500 的最后一段包装）。
-        await db.rollback()
-        raise
     except Exception as e:
         await db.rollback()
         raise AppError(f"头像上传失败: {str(e)}")
@@ -127,8 +110,7 @@ async def upload_file_chunk(
             file_name=file_name, file_hash=file_hash, organization_id=organization_id, user_id=current_user.id
         )
         return FileChunkUploadResponse(**result)
-    except (AppError, HTTPException):
-        # 同 /upload：分块合并阶段的校验 4xx 原样放行（round2 卫生修复③）
+    except AppError:
         raise
     except Exception as e:
         raise AppError(str(e))

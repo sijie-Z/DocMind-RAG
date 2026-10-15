@@ -208,19 +208,22 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-// 类型定义 —— 与后端 GET /users/ 列表项真实形状对齐（users.py:784-790）：
-// 没有 nickname（显示名真身是 full_name，可能为 null）、没有 status（真身是布尔
-// is_active）、没有 phone（列表接口不返回）。
+// 类型定义
+// 找到约 117 行左右
 interface User {
   id: number
   username: string
   email: string
-  full_name: string | null
-  organization_id: number | null
+  nickname: string
+  phone?: string
   role: 'admin' | 'user'
-  is_active: boolean
-  created_at: string | null
-  last_login_at: string | null
+  status: 'active' | 'inactive'
+  organization_ids: number[]
+  organizations?: Array<{ id: number; name: string; color: string }>
+  last_login_at?: string
+  created_at: string
+  // --- 加上下面这一行 ---
+  remark?: string 
 }
 
 // 状态管理
@@ -293,17 +296,10 @@ const resetPasswordRules = computed<FormRules>(() => ({
 }))
 
 // 计算与分页
-// 注：后端 /users/ 目前只有 skip/limit，无服务端搜索 —— 此处为「当前页内」的
-// 本地过滤（不再发送会被后端静默忽略的 search 参数）；全名/full_name 都可能为
-// null，一律空串兜底，杜绝 undefined.toLowerCase() 崩溃。
 const filteredUsers = computed(() => {
-  const s = searchText.value.trim().toLowerCase()
-  if (!s) return users.value
-  return users.value.filter(u =>
-    (u.username || '').toLowerCase().includes(s) ||
-    (u.full_name || '').toLowerCase().includes(s) ||
-    (u.email || '').toLowerCase().includes(s)
-  )
+  if (!searchText.value) return users.value
+  const s = searchText.value.toLowerCase()
+  return users.value.filter(u => u.username.toLowerCase().includes(s) || u.nickname.toLowerCase().includes(s))
 })
 
 const pagination = reactive({
@@ -323,18 +319,13 @@ const pagination = reactive({
   }
 })
 
-// 列定义（绑定真实字段：全名 ← full_name（可空），状态 ← is_active 布尔；
-// 原 phone 列因列表接口不返回该字段已移除）
+// 列定义
 const columns: DataTableColumns<User> = [
   { type: 'selection', width: 50 },
   { title: t('profile.username'), key: 'username', width: 120, fixed: 'left' },
-  {
-    title: t('profile.nickname'),
-    key: 'full_name',
-    width: 120,
-    render: (row) => row.full_name || '-'
-  },
+  { title: t('profile.nickname'), key: 'nickname', width: 120 },
   { title: t('profile.email'), key: 'email', width: 180, ellipsis: { tooltip: true } },
+  { title: t('profile.phone'), key: 'phone', width: 120 },
   {
     title: t('profile.role'),
     key: 'role',
@@ -349,13 +340,13 @@ const columns: DataTableColumns<User> = [
   },
   {
     title: t('profile.status'),
-    key: 'is_active',
+    key: 'status',
     width: 100,
     render(row) {
       return h(
         NTag,
-        { type: row.is_active ? 'success' : 'warning', bordered: false },
-        { default: () => row.is_active ? t('users.active') : t('users.inactive') }
+        { type: row.status === 'active' ? 'success' : 'warning', bordered: false },
+        { default: () => row.status === 'active' ? t('users.active') : t('users.inactive') }
       )
     }
   },
@@ -393,15 +384,23 @@ const loadUsers = async () => {
   loading.value = true
   try {
     const params = {
-      // 后端真实分页参数是 skip/limit（page/page_size 会被 FastAPI 静默忽略）
-      skip: (pagination.page - 1) * pagination.pageSize,
-      limit: pagination.pageSize
+      page: pagination.page,
+      page_size: pagination.pageSize,
+      search: searchText.value
     }
     const res = await getUsers(params)
-    // 真实响应为裸扁平形状 {total, skip, limit, users: [...]}（无 success/data 信封）
-    const body = res.data
-    users.value = Array.isArray(body?.users) ? body.users : []
-    pagination.itemCount = body?.total || 0
+    // 修复：后端返回的数据结构是 { success: true, data: { data: [], total: ... } }
+    if (res.data && res.data.data) {
+        if (Array.isArray(res.data.data.data)) {
+            users.value = res.data.data.data
+        } else {
+            users.value = []
+        }
+        pagination.itemCount = res.data.data.total || 0
+    } else {
+        users.value = []
+        pagination.itemCount = 0
+    }
     loadError.value = false
   } catch (err: unknown) {
     message.error('加载失败: ' + getErrorMessage(err))
@@ -414,17 +413,17 @@ const loadUsers = async () => {
 
 const handleEdit = (user: User) => {
   editingUser.value = user
-  // 按真实字段映射表单：显示名 ← full_name（可空），状态 ← is_active 布尔
+  // 使用解构赋值并为可能为 undefined 的字段提供默认空字符串
   userForm.value = {
     username: user.username,
     password: '',
     email: user.email,
-    nickname: user.full_name || '',
-    phone: '',
+    nickname: user.nickname,
+    phone: user.phone || '', // 如果是 undefined，就给个空字符串
     role: user.role,
-    status: user.is_active === false ? 'inactive' : 'active',
-    organization_ids: user.organization_id ? [user.organization_id] : [],
-    remark: ''
+    status: user.status,
+    organization_ids: user.organization_ids || [],
+    remark: user.remark || '' // 同样处理 remark
   }
   showCreateModal.value = true
 }
@@ -480,7 +479,7 @@ const resetPassword = async () => {
 const handleDelete = (row: User) => {
   dialog.warning({
     title: t('common.confirm') || '确认删除',
-    content: t('users.deleteConfirmWithName', { username: row.username || row.full_name || '' }),
+    content: t('users.deleteConfirmWithName', { username: row.username || row.nickname }),
     positiveText: t('common.confirm'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {

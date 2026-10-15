@@ -61,28 +61,10 @@ export const getMonitoringDashboard = async (): Promise<{ data: MonitoringDashbo
   return request.get('/monitoring/dashboard')
 }
 
-/**
- * 趋势快照元素 —— 真实形状（core/middleware.py:129-136 take_snapshot）：
- * HTTP 管道累计计数器快照，timestamp 为秒级。注意：metric_type 与 time_range
- * 在后端函数体内未被使用（任意 type 返回同一份快照历史，monitoring.py:151-166）。
- */
-export interface TrendPoint {
-  timestamp: number
-  request_count: number
-  error_count: number
-  response_time: number
-  active_connections: number
-  slow_request_count: number
-  error_rate_percent: number
-  p95_response_time_ms: number
-  p99_response_time_ms: number
-}
-
 export const getMetrics = async (
   metricType: 'system' | 'application' | 'knowledge_base',
   timeRange: string = '1h'
-): Promise<{ data: { data: TrendPoint[] } }> => {
-  // 旧声明 {metrics, total} 为前端自造形状（后端恒返回 {"data": [...]}，<2 条时 []）
+): Promise<{ data: { metrics: (SystemMetrics | ApplicationMetrics | KnowledgeBaseMetrics)[]; total: number } }> => {
   return request.get(`/monitoring/metrics/${metricType}`, {
     params: { time_range: timeRange }
   })
@@ -142,24 +124,4 @@ export const getOrgSummary = async (): Promise<{ data: { organizations: OrgSumma
 
 export const getRAGStats = async (): Promise<{ data: RAGStats }> => {
   return request.get('/knowledge/rag-stats')
-}
-
-/**
- * 系统健康检查（monitoring.py:461-505，无需认证）。
- * status: 'healthy'（各服务非 disconnected）/ 'degraded'（任一 disconnected）；
- * services.elasticsearch 取值域：'green'|'yellow'|'red'|'unknown'|'disconnected'
- * （与 dashboard 的 elasticsearch_health 同源，无 'ok'/'error'）。
- */
-export interface MonitoringHealth {
-  status: 'healthy' | 'degraded'
-  timestamp: string
-  services: {
-    database: string
-    redis: string
-    elasticsearch: string
-  }
-}
-
-export const getMonitoringHealth = async (): Promise<{ data: MonitoringHealth }> => {
-  return request.get('/monitoring/health')
 }
