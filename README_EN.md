@@ -277,21 +277,33 @@ git clone https://github.com/sijie-Z/DocMind-RAG.git
 cd DocMind-RAG
 ```
 
-### 2. Start Infrastructure
+### 2. Configure
+
+Create the environment files **before starting anything** — without `backend/.env.docker`, every compose command fails outright.
 
 ```bash
-cd backend && docker compose up -d    # MySQL / Redis / ES / Kafka / MinIO
-```
+cd backend
 
-### 3. Configure
+# Local development (apps run on the host — steps 4/5 below)
+cp .env.example .env               # Windows: copy .env.example .env
+# Required: SECRET_KEY / JWT_SECRET_KEY (generate: python -c "import secrets; print(secrets.token_hex(32))")
+# Fill in DEEPSEEK_API_KEY / EMBEDDING_API_KEY as needed (LLM / Embedding credentials)
 
-```bash
+# Any Docker use (including infrastructure-only in step 3) requires this file — compose fails without it:
 cp .env.docker.example .env.docker
 # Edit .env.docker — at minimum fill in LLM API Keys:
 #   DEEPSEEK_API_KEY=sk-xxx
 #   DEEPSEEK_API_URL=https://api.deepseek.com/v1
 #   EMBEDDING_API_KEY=sk-xxx
 #   EMBEDDING_API_URL=https://api.deepseek.com/v1
+```
+
+### 3. Start Infrastructure
+
+```bash
+cd backend && docker compose up -d mysql redis elasticsearch minio kafka zookeeper
+# Infrastructure containers only (apps keep running on the host — see below); skip this step without Docker and use local services per SETUP.md
+# Full Docker deployment (apps in containers): see the Deployment section
 ```
 
 ### 4. Start Backend
@@ -344,7 +356,7 @@ Environment variables via `.env` file. Key settings:
 | `ENABLE_TRACING` | OpenTelemetry toggle | `false` |
 | `ENABLE_DEMO_ACCOUNT` | Enable demo accounts | `true` |
 | `ENABLE_WORKFLOW_CODE_NODES` | Allow workflow code nodes (security risk; disabled by default) | `false` |
-| `APP_VERSION` | App version | `1.21.0` |
+| `APP_VERSION` | App version | `1.22.1-rc.1` |
 
 Full configuration reference: `backend/.env.example` and `backend/.env.docker.example`.
 
@@ -473,6 +485,8 @@ cd ../frontend && npm run test
 ## Deployment
 
 ### Docker Compose
+
+Prerequisite: create and fill `backend/.env.docker` first (see Quick Start · 2. Configure) — without it, every compose command fails outright.
 
 ```bash
 cd backend && docker compose up -d

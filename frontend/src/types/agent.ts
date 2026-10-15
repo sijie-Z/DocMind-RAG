@@ -18,6 +18,14 @@ export type AgentEventType =
   // HITL（人在环）：执行器停在审批点 / 协作式取消收敛（见后端 approval.py）
   | 'approval_required'
   | 'run_cancelled'
+  // A：运行中转向（见后端 steering.py）
+  //   steer_applied — 指导在步边界被消费并注入后续步骤（content=消息摘要）；
+  //   steer_sent    — **前端本地事件**（乐观落账，后端无此类型）：指导已提交成功。
+  | 'steer_applied'
+  | 'steer_sent'
+  // B：计划审批（plan_approval_mode=always）：planner 出计划后暂停，等人类决策
+  // （plan_steps 携带结构化步骤——resume 流不回放 plan_step，卡片数据自足）。
+  | 'plan_approval_required'
 
 export type ThinkingType = 'reasoning' | 'planning' | 'evaluation' | 'correction'
 // 六态真源：backend/app/agent/events.py:39-42（unavailable=评估服务不可用；
@@ -35,6 +43,7 @@ export interface AgentEvent {
   tool_duration_ms?: number
   // Plan
   plan_id?: string
+  plan_goal?: string
   plan_step_id?: string
   plan_progress?: number
   plan_step_status?: PlanStepStatus
@@ -61,6 +70,8 @@ export interface AgentEvent {
   task_id?: string         // 任务级 checkpoint 关联 id（HITL：取消/审批/恢复的钥匙）
   // HITL：done 事件如实盖章任务态（waiting_approval / cancelled 时出现）
   task_state?: AgentTaskState
+  // B：plan_approval_required 的结构化步骤（[{id, description, dependencies, tool_hint}]）
+  plan_steps?: PlanStepEdit[]
 }
 
 // ── HITL（人在环）─────────────────────────────────────────────────────────
@@ -70,11 +81,13 @@ export type AgentTaskState =
   | 'running'
   | 'waiting_tool'
   | 'waiting_approval'
+  | 'waiting_plan_approval'
   | 'waiting_human'
   | 'failed'
   | 'completed'
   | 'abandoned'
   | 'cancelled'
+  | 'rejected'
 
 /** 待审批请求（GET /tasks/{id} 的 data.approval；approval_required 事件同形）。 */
 export interface PendingApproval {
@@ -91,6 +104,33 @@ export interface PendingApproval {
   more_pending?: number
 }
 
+// ── B：计划审批 ──────────────────────────────────────────────────────────
+
+/** 待审批计划的结构化步骤（plan_approval_required 事件 / GET 状态视图同形）。 */
+export interface PlanStepEdit {
+  id: string
+  description: string
+  dependencies: string[]
+  tool_hint: string | null
+}
+
+/** 待审批计划（GET /tasks/{id} 的 data.plan_approval）。 */
+export interface PendingPlanApproval {
+  plan_id: string
+  goal: string
+  steps: PlanStepEdit[]
+  requested_at?: number
+}
+
+/** 计划审批应答（POST /agent/tasks/{id}/plan-approval）。 */
+export interface PlanApprovalDecisionInput {
+  decision: 'approve' | 'edit' | 'reject'
+  /** edit：整体替换计划的步骤列表（白名单字段；非法输入后端 422）。 */
+  edited_steps?: PlanStepEdit[]
+  /** reject：拒绝理由（透传为重规划反馈）。 */
+  note?: string
+}
+
 /** 任务状态视图（GET /agent/tasks/{id}）。 */
 export interface AgentTaskView {
   task_id: string
@@ -105,6 +145,7 @@ export interface AgentTaskView {
   query: string
   approval?: PendingApproval
   approval_expired?: boolean
+  plan_approval?: PendingPlanApproval
   /** 是否有可回放数据（后端按 Redis → 本地文件如实判定，绝无虚标）。 */
   has_replay?: boolean
 }
@@ -269,4 +310,15 @@ export interface AgentChatMessage {
   executionContext?: Record<string, any>  // 运行上下文（execution_context 事件，含 total_tokens）
   feedback?: number        // 1=thumbs_up, -1=thumbs_down, 0=none
   feedbackNote?: string
+  /** 体验第四波 @引用：用户消息携带的引用文档（渲染 chips 供回溯） */
+  references?: ReferencedDoc[]
+  /** 体验第四波 计时：本轮运行开始/终态时间戳（毫秒）——RunStats 数据源 */
+  startedAt?: number
+  endedAt?: number
+}
+
+/** 用户 @ 引用的知识库文档（id 上送后端 referenced_document_ids）。 */
+export interface ReferencedDoc {
+  id: string
+  title: string
 }

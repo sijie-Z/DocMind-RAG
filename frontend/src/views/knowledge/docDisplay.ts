@@ -23,12 +23,12 @@ export const docIconColor = (fileType: string | null | undefined): string =>
   FILE_TYPE_COLORS[fileType || ''] || FALLBACK_COLOR
 
 /**
- * 文档状态真源 —— **两套词表**（浏览器复验 K1 实锤的接口漂移）：
- * - 列表 GET /knowledge/ 把 INDEXED 改写为 'completed'（knowledge.py:131-139
- *   status_map）：pending / uploaded / parsing / parsed / completed / failed；
- * - 详情 GET /documents/{id} 原样吐 'indexed'（documents.py:296-303）——
- *   详情弹窗合并详情响应后 status 变 'indexed'，此前映射表不含该词 →
- *   回退「未知」。此处统一：completed / indexed 同一语义，均渲染「已索引」。
+ * 文档状态真源 —— **双词兼容**（原两套词表已由后端收敛，兼容层保留）：
+ * - 列表 GET /knowledge/ 本波起同吐 DB 枚举原词 'indexed'
+ *   （fix/status-vocab 收敛；此前改写为 'completed'，浏览器复验 K1 实锤）；
+ * - 详情 GET /documents/{id} 原样吐 'indexed'（documents.py），两端同构；
+ * - 'completed' 是列表端点收敛前的旧词，在途分支/旧缓存仍可能到达 ——
+ *   双词容忍：completed / indexed 同一语义，均渲染「已索引」，统计同计。
  */
 export type DocStatusType = 'success' | 'warning' | 'error' | 'info' | 'default'
 
@@ -58,7 +58,7 @@ export const docStatusLabel = (status: string | null | undefined): string =>
 export const docStatusType = (status: string | null | undefined): DocStatusType =>
   (status && STATUS_TYPES[status]) || 'default'
 
-/** 非终态集合（终态 = completed / failed）：轮询 gate 与统计口径共用 */
+/** 非终态集合（终态 = completed / indexed / failed）：轮询 gate 与统计口径共用 */
 const IN_PROGRESS_STATUSES: ReadonlySet<string> = new Set(['pending', 'uploaded', 'parsing', 'parsed'])
 
 export const isInProgressDoc = (status: string | null | undefined): boolean =>
@@ -77,7 +77,8 @@ export const computeDocStats = (list: Array<{ status?: string | null }>): DocSta
   let processing = 0
   let failed = 0
   for (const item of list) {
-    if (item.status === 'completed') completed += 1
+    // 双词容忍：indexed 为收敛后唯一词表，completed 为收敛前列表旧词 —— 同计
+    if (item.status === 'indexed' || item.status === 'completed') completed += 1
     else if (item.status === 'failed') failed += 1
     else if (isInProgressDoc(item.status)) processing += 1
   }

@@ -34,6 +34,7 @@ const i18n = createI18n({
   locale: 'zh',
   messages: {
     zh: {
+      common: { copy: '复制', copied: '已复制' },
       chat: {
         sourcesLabel: '来源',
         sourceDoc: '文档',
@@ -47,12 +48,28 @@ const i18n = createI18n({
         welcome: '欢迎',
         welcomeDesc: '描述',
       },
+      // 体验第四波：RunReportBlock 的 RunReport 摘要与导出按钮走 artifacts.* 键
+      artifacts: {
+        runReport: '运行报告',
+        exportMarkdown: '导出 Markdown',
+        kind: { diff: '差异', json: 'JSON', markdown: 'Markdown', text: '文本' },
+        download: '下载',
+      },
     },
   },
 })
 
+// Markdown 桩改为透传（体验第四波：RunReportBlock 正文从 <pre> 升级为 Markdown
+// 渲染——透传桩保留「报告正文文本可见」的原断言意图）
+const MarkdownPassthrough = defineComponent({
+  props: { content: { type: String, default: '' } },
+  setup(props) {
+    return () => h('pre', props.content)
+  },
+})
+
 const stubs = {
-  Markdown: true,
+  Markdown: MarkdownPassthrough,
   'n-icon': true,
   'n-avatar': true,
   'n-button': true,

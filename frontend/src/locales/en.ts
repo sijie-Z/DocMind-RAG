@@ -5,6 +5,7 @@ export default {
     confirm: 'Confirm',
     delete: 'Delete',
     edit: 'Edit',
+    loading: 'Loading...',
     success: 'Success',
     error: 'Error',
     failed: 'Failed',
@@ -13,6 +14,12 @@ export default {
     saveSuccess: 'Saved successfully',
     deleteSuccess: 'Deleted successfully',
     close: 'Close',
+    batchDelete: 'Batch delete',
+    copy: 'Copy',
+    copySuccess: 'Copied successfully',
+    copyFailed: 'Copy failed',
+    copied: 'Copied',
+    warning: 'Notice',
     actions: 'Actions'
   },
   profile: {
@@ -41,6 +48,7 @@ export default {
     confirmPassword: 'Confirm Password',
     preferences: 'Preferences',
     language: 'Language Setting',
+    languageBeta: 'Beta — some content appears in English',
     theme: 'Theme Setting',
     themeSettingDesc: 'Choose interface theme',
     languageSettingDesc: 'Choose display language',
@@ -162,7 +170,7 @@ export default {
     tagline: 'RAG-based Intelligent Q&A',
     clearChat: 'Clear Chat',
     newChat: 'New Chat',
-    welcome: 'Hello, I am Paicongming. How can I help you today?',
+    welcome: 'Hello, I am DocMind. How can I help you today?',
     welcomeDesc: 'I can help answer questions, analyze documents, write code, or just chat.',
     sources: 'Sources',
     inputPlaceholder: 'Type your message, Shift + Enter for new line...',
@@ -185,6 +193,9 @@ export default {
       unknown: 'Unknown'
     },
     noHistory: 'No history',
+    backToBottom: 'Back to latest',
+    stopGenerating: 'Stop generating',
+    stopped: 'Generation stopped',
     suggestions: {
       quantum: 'Explain quantum computing',
       quantumDesc: 'Explain the basic principles in simple terms',
@@ -199,6 +210,7 @@ export default {
     confirmDelete: 'Are you sure you want to delete this conversation?',
     previewFailed: 'Unable to load preview content',
     sseError: 'SSE Error',
+    sseWarning: 'Server notice: this response may be incomplete',
     sseRetry: 'SSE connection retrying, remaining retries: {left}',
     feedbackLiked: 'Liked, thank you for your feedback!',
     feedbackDisliked: 'Disliked, we will continue to improve.',
@@ -259,6 +271,7 @@ export default {
     sseMode: 'SSE Mode (enterprise firewall compatible)',
     // Message sources
     sourcesLabel: 'Sources:',
+    demoData: 'Demo data',
     unknownDoc: 'Unknown Document',
     noPreview: 'No Preview Available',
     relevanceScore: 'Relevance: {score}%',
@@ -270,7 +283,6 @@ export default {
     loadFailed: 'Load Failed',
     loadFailedDesc: 'Unable to load conversation list',
     retry: 'Retry',
-    version: 'DocMind v1.0',
     // Drag-and-drop
     dropFiles: 'Drop files here to upload',
     // Export
@@ -297,6 +309,16 @@ export default {
     title: 'Knowledge Base Management',
     subtitle: 'Upload and manage your enterprise knowledge documents',
     searchPlaceholder: 'Search knowledge base...',
+    viewDetail: 'View Details',
+    stats: {
+      total: 'Total Documents',
+      completed: 'Indexed',
+      processing: 'Processing',
+      failed: 'Failed'
+    },
+    rebuild: 'Rebuild index',
+    rebuildSuccess: 'Rebuild index job submitted',
+    rebuildFailed: 'Failed to rebuild index',
     upload: 'Upload',
     tags: {
       tech: 'Tech Doc',
@@ -364,6 +386,7 @@ export default {
     title: 'Prompt Management',
     subtitle: 'Manage system prompts and response styles for the AI assistant',
     addTemplate: 'New Template',
+    create: 'Create Template',
     editTemplate: 'Edit Template',
     empty: 'No prompt templates',
     seed: 'Initialize Defaults',
@@ -409,6 +432,15 @@ export default {
       seedFailed: 'Initialization failed'
     }
   },
+  error: {
+    '404': {
+      title: 'Page Not Found',
+      subtitle: 'The page you are looking for does not exist or has been removed.'
+    },
+    backToHome: 'Back to Home',
+    backToWorkbench: 'Go to Dashboard',
+    back: 'Go Back'
+  },
   login: {
     welcomeBack: 'Welcome Back',
     loginDesc: 'Please enter your credentials to login',
@@ -447,6 +479,8 @@ export default {
     agent: 'AI Agent',
     auditLogs: 'Audit Logs',
     monitoring: 'System Monitoring',
+    mcpServers: 'MCP Servers',
+    scheduledTasks: 'Scheduled Tasks',
     systemHelp: 'Help',
     systemAbout: 'About',
     systemTitle: 'DocMind Knowledge Base'
@@ -671,9 +705,215 @@ export default {
   },
   hitl: {
     cancelled: 'Cancelled',
-    stopped: 'Stopped'
+    stopped: 'Stopped',
+    // A: mid-run steering — input area / timeline / error toasts
+    steerSend: 'Send guidance',
+    steerHint: 'Running: Enter sends guidance (the current step is not interrupted; it applies at the next step)',
+    steerSent: 'Guidance sent',
+    steerApplied: 'Guidance applied',
+    steerFull: 'Steering buffer is full — wait for the agent to consume it before sending',
+    steerFailed: 'Failed to send guidance, please try again later',
+    // B: plan approval — card / timeline / toasts
+    planTitle: 'Plan awaiting approval',
+    planGoal: 'Goal',
+    planSteps: 'Steps',
+    planApprove: 'Approve plan',
+    planEditSteps: 'Edit steps',
+    planSaveApprove: 'Save & approve',
+    planCancelEdit: 'Cancel editing',
+    planReject: 'Reject plan',
+    planRejectNotePlaceholder: 'Reason for rejection (used for re-planning; recommended)',
+    planRejectHint: 'Rejecting triggers one re-plan with your reason; a second rejection terminates the task (rejected)',
+    planAddStep: 'Add step',
+    planRemove: 'Remove',
+    planDeps: 'Deps',
+    planSubmitting: 'Submitting…',
+    planTimeline: 'Plan awaiting approval',
+    planRejectedMessage: 'The plan was rejected again (no re-plan attempts left); the task has been terminated',
+    planEditInvalid: 'The edited content is invalid — check step descriptions/dependencies and retry',
+    planFailed: 'Failed to submit the plan decision; task state refreshed',
+    planPendingHint: 'The task is awaiting plan approval — approve / edit / reject the plan above first (or cancel the task)'
+  },
+  scheduler: {
+    title: 'Scheduled Tasks',
+    subtitle: 'Manage agent runs triggered on a schedule; results are available from the last run',
+    create: 'New Scheduled Task',
+    noData: 'No scheduled tasks yet',
+    loadFailed: 'Failed to load',
+    filterAll: 'All',
+    filterEnabled: 'Enabled',
+    filterPaused: 'Paused',
+    columns: {
+      name: 'Name',
+      schedule: 'Schedule',
+      status: 'Status',
+      lastRun: 'Last Run',
+      nextRun: 'Next Run',
+      actions: 'Actions'
+    },
+    statusEnabled: 'Enabled',
+    statusPaused: 'Paused',
+    statusFinished: 'Finished',
+    lastStatus: { running: 'Running', success: 'Success', failed: 'Failed' },
+    skippedOverlap: 'Skipped {n} overlap(s)',
+    neverRun: 'Never run',
+    noNextRun: 'None',
+    viewResult: 'View result',
+    runNow: 'Run now',
+    pause: 'Pause',
+    resume: 'Resume',
+    delete: 'Delete',
+    runNowTriggered: 'Run triggered; you will be notified when it finishes',
+    runNowReason: {
+      overlap: 'Previous run still in progress — this one was skipped (no queueing)',
+      not_found: 'Task not found',
+      unknown: 'Not triggered ({reason})'
+    },
+    deleteTitle: 'Delete scheduled task',
+    deleteConfirm: 'Delete "{name}"? In-flight runs continue, but the task record cannot be recovered.',
+    createSuccess: 'Created',
+    plan: {
+      intervalMinutes: 'Every {n} minutes',
+      intervalHours: 'Every {n} hours',
+      intervalSeconds: 'Every {n} seconds',
+      onceAt: 'Once · {time}'
+    },
+    cron: {
+      everyMinute: 'Every minute',
+      everyNMinutes: 'Every {n} minutes',
+      hourlyAtMinute: 'Hourly at minute {m}',
+      dailyAt: 'Every day at {time}',
+      weeklyAt: 'Every {days} at {time}',
+      monthlyAt: 'Day {days} of every month at {time}',
+      yearlyAt: 'Every year on {month} {day} at {time}',
+      weekdayRange: '{from}–{to}',
+      dayRange: '{from}–{to}',
+      listSep: ', ',
+      weekdays: { '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat' },
+      months: {
+        '1': 'January', '2': 'February', '3': 'March', '4': 'April', '5': 'May', '6': 'June',
+        '7': 'July', '8': 'August', '9': 'September', '10': 'October', '11': 'November', '12': 'December'
+      }
+    },
+    modal: {
+      title: 'New Scheduled Task',
+      name: 'Task name',
+      namePlaceholder: 'e.g. Daily briefing',
+      prompt: 'Instruction (prompt)',
+      promptPlaceholder: 'The instruction handed to the agent when the schedule fires…',
+      scheduleType: 'Schedule type',
+      type: { cron: 'Recurring (cron)', interval: 'Fixed interval', once: 'One-time' },
+      cronExpr: 'Cron expression (min hour day month weekday)',
+      cronPlaceholder: 'e.g. 0 9 * * *',
+      cronPreview: 'Preview',
+      cronPreviewUnknown: 'Outside the supported subset — no plain-language preview (server validation decides)',
+      timezone: 'Timezone (affects cron interpretation only)',
+      timezoneDefault: 'Server default',
+      intervalSeconds: 'Interval (seconds)',
+      intervalHint: 'Minimum {n} seconds (minute-level precision)',
+      onceAt: 'Run at',
+      onceAtHint: 'Pick the trigger time',
+      enabled: 'Enable right after creation'
+    },
+    validation: {
+      cronRequired: 'Please enter a cron expression',
+      cronMax: 'Cron expression cannot exceed {n} characters',
+      intervalRequired: 'Please enter the interval in seconds',
+      intervalMin: 'Interval cannot be less than {n} seconds',
+      onceRequired: 'Please pick a trigger time',
+      onceFuture: 'Trigger time must be in the future',
+      nameMax: 'Name cannot exceed {n} characters',
+      promptMax: 'Instruction cannot exceed {n} characters'
+    },
+    result: {
+      title: 'Run Result (Agent Task)',
+      taskId: 'Task ID',
+      state: 'State',
+      progress: 'Progress (completed / total steps)',
+      query: 'Input',
+      error: 'Last error',
+      unavailable: 'Result unavailable (task missing or not visible to you)',
+      taskState: {
+        pending: 'Pending',
+        running: 'Running',
+        waiting_tool: 'Tool running',
+        waiting_approval: 'Waiting for approval',
+        waiting_plan_approval: 'Waiting for plan approval',
+        waiting_human: 'Waiting for human',
+        failed: 'Failed',
+        completed: 'Completed',
+        abandoned: 'Abandoned',
+        cancelled: 'Cancelled',
+        rejected: 'Rejected'
+      }
+    }
+  },
+  mcp: {
+    title: 'MCP Servers',
+    subtitle: 'Status of dynamically integrated MCP servers and their registered tools (read-only)',
+    readOnlyNotice: 'Read-only view: to enable/disable or add servers, edit backend/mcp_servers.json and restart the backend. No online write operations on this page.',
+    notStarted: 'The MCP manager has not been initialized yet (backend may not have finished starting, or no config was loaded).',
+    registeredTools: '{n} dynamic tool(s) registered',
+    loadFailed: 'Failed to load',
+    noServers: 'No MCP servers configured',
+    noServersHint: 'Add entries under "servers" in backend/mcp_servers.json and restart the backend',
+    transportLabel: 'Transport',
+    enabled: 'Enabled',
+    disabled: 'Disabled',
+    toolCount: '{n} tool(s)',
+    noTools: 'No tools registered yet',
+    lastError: 'Last error',
+    state: {
+      init: 'Initializing',
+      connecting: 'Connecting',
+      connected: 'Connected',
+      dead: 'Connection lost',
+      closed: 'Closed',
+      disabled: 'Disabled',
+      not_connected: 'Not connected'
+    }
+  },
+  refPicker: {
+    heading: 'Reference knowledge documents',
+    empty: 'No matching documents',
+    error: 'Failed to load documents, please retry',
+    remove: 'Remove reference',
+    inputHint: "Enter to send · {'@'} references · / commands · Shift+Enter for newline"
+  },
+  slashCmd: {
+    heading: 'Slash commands',
+    empty: 'No matching command (Enter sends the raw text)',
+    desc: {
+      search: 'Web search & summarize (web_search tool)',
+      doc: 'Answer from the knowledge base (search_knowledge_base tool)',
+      workflow: 'Break into a multi-step plan and execute (planner)',
+      help: 'Show all commands with descriptions',
+      clear: 'Clear the input box'
+    },
+    tpl: {
+      search: 'Search the web and summarize: {q}',
+      doc: 'Answer from the knowledge base: {q}',
+      workflow: 'Break this into a multi-step plan and execute step by step: {q}'
+    }
+  },
+  runStats: {
+    running: 'Running {t}',
+    elapsed: 'Duration {t}',
+    cost: '≈{c} (estimated)'
+  },
+  artifacts: {
+    kind: {
+      diff: 'Diff',
+      json: 'JSON',
+      markdown: 'Markdown',
+      text: 'Text'
+    },
+    download: 'Download',
+    runReport: 'Run report',
+    exportMarkdown: 'Export Markdown'
   },
   router: {
+    notFound: 'Page Not Found',
     welcome: 'Welcome',
     login: 'Login',
     register: 'Register',
