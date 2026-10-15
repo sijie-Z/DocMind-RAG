@@ -863,16 +863,25 @@ class PERAgentLoop:
                 # 结论重试/阻断，也不改用户可见的答案正文（保守原则同
                 # revise/reject）。clean_success 不翻转：没有证据说 run 坏，
                 # 只是本轮质量覆盖有缺口 —— 但绝不静默（旧行为即静默 pass）。
+                #
+                # 文案细分（issue #301 家族尾巴）：「模型没给判定」
+                # （error_kind="no_verdict"）与「审查服务崩了」
+                # （error_kind="service_error"）是两种事实，不得合并表述；
+                # 未标注 kind 的自定义调用方按服务异常（保守、与旧文案一致）。
                 reason = str(review.get("error") or "").strip()
+                if str(review.get("error_kind") or "") == "no_verdict":
+                    unfinished = "对抗审查未完成（模型未给出判定）"
+                else:
+                    unfinished = "对抗审查未完成（审查服务异常）"
                 ctx.record_decision(
                     "review",
                     "error",
-                    "对抗审查未完成（审查服务异常），本轮无审查结论"
+                    unfinished + "，本轮无审查结论"
                     + (f"：{reason[:150]}" if reason else ""),
                 )
                 yield AgentEvent(
                     type="thinking",
-                    content="对抗审查未完成（审查服务异常），本轮结果未经过对抗质检",
+                    content=unfinished + "，本轮结果未经过对抗质检",
                     thinking_type="evaluation",
                 )
             elif recommendation != "pass":
@@ -1316,7 +1325,14 @@ class PERAgentLoop:
         而唯一的质量判据是质检的等级。放在执行器里只能拿到"步骤成功/失败"，分不出
         "成功但平庸"和"成功且优秀"——而把平庸路径记成"有效模式"会污染后续规划
         （这些经验会被注入 planner 的 system prompt）。
+
+        写侧与读侧（planner.py）同门控（round2 卫生修复①）：此前写侧不受
+        enable_experience 管辖——agent_api.py 显式 enable_experience=False 的
+        路径仍会写库。开关关 = 经验回路整体关（既不注入也不落库）。
         """
+        if not self.config.enable_experience:
+            return
+
         from app.agent.experience import get_experience_store
         from app.agent.experience.extractor import (
             extract_from_runtime_error,

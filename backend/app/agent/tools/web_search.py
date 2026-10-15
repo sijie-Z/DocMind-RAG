@@ -114,7 +114,13 @@ async def web_search(
     max_results = min(max_results, 10)
 
     try:
-        from duckduckgo_search import DDGS
+        # 上游 2025 年由 duckduckgo-search 改名 ddgs（旧名冻结在 8.1.1，见
+        # requirements.txt 注释）。新名优先、旧名兜底——环境里装的是哪个都能跑；
+        # 两个都没有时 ImportError 穿透到下方分支（结构化 invalid_configuration）。
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
 
         def _run_search() -> list[dict[str, str]]:
             # DDGS is a blocking HTTP client; running it on the event loop would
@@ -140,7 +146,10 @@ async def web_search(
     except ImportError:
         return ToolResult.fail(
             code="invalid_configuration",
-            message="Web search unavailable: duckduckgo-search package not installed. Try: pip install duckduckgo-search",
+            message=(
+                "Web search unavailable: neither 'ddgs' nor 'duckduckgo-search' "
+                "package installed. Try: pip install ddgs"
+            ),
         )
     except Exception as e:
         logger.error(f"Web search failed: {e}")

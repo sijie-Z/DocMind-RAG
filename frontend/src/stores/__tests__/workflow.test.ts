@@ -172,17 +172,18 @@ describe('useWorkflowStore', () => {
 
   it('updateNodeExecution adds new result', () => {
     const store = useWorkflowStore()
-    store.updateNodeExecution({ nodeId: 'n1', nodeType: 'llm', status: 'success' })
+    // 状态词表与引擎 ExecutionStatus 对齐（completed，见 stores/workflow.ts 类型注释）
+    store.updateNodeExecution({ nodeId: 'n1', nodeType: 'llm', status: 'completed' })
     expect(store.executionResults).toHaveLength(1)
-    expect(store.executionResults[0].status).toBe('success')
+    expect(store.executionResults[0].status).toBe('completed')
   })
 
   it('updateNodeExecution updates existing result', () => {
     const store = useWorkflowStore()
     store.updateNodeExecution({ nodeId: 'n1', nodeType: 'llm', status: 'running' })
-    store.updateNodeExecution({ nodeId: 'n1', nodeType: 'llm', status: 'success', duration: 100 })
+    store.updateNodeExecution({ nodeId: 'n1', nodeType: 'llm', status: 'completed', duration: 100 })
     expect(store.executionResults).toHaveLength(1)
-    expect(store.executionResults[0].status).toBe('success')
+    expect(store.executionResults[0].status).toBe('completed')
     expect(store.executionResults[0].duration).toBe(100)
   })
 
@@ -217,5 +218,17 @@ describe('useWorkflowStore', () => {
     expect(flowData.edges).toHaveLength(1)
     expect(flowData.nodes[0].id).toBe('a')
     expect(flowData.edges[0].source).toBe('a')
+  })
+
+  it('getFlowData 保留边 label（条件路由键，B12）；不携带后端将剥离的 animated（B13）', () => {
+    const store = useWorkflowStore()
+    store.setEdges([{ ...makeEdge('e1', 'a', 'b'), label: 'yes' }])
+    const flowData = store.getFlowData()
+    // label：WorkflowEdge schema 唯一保留的附加字段（schemas/workflow.py:28），
+    // 引擎条件路由读 edge.label（workflow_engine.py:886-890）——漏发则静默错路由
+    expect(flowData.edges[0].label).toBe('yes')
+    // animated：后端 WorkflowEdge 无该字段（无 extra=allow，保存即剥离），
+    // 渲染侧由 VueFlow defaultEdgeOptions 兜底 —— 序列化不再伪装可持久化
+    expect('animated' in flowData.edges[0]).toBe(false)
   })
 })

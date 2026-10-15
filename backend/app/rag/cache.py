@@ -88,13 +88,20 @@ class RetrievalCache:
         # clear_for_org 都能清理到实际服务读写的 pipeline 单例缓存数据。
         self._memory = _get_shared_memory()
 
-    def _key(self, query: str, organization_id: int, top_k: int) -> str:
-        return f"org={organization_id}|topk={top_k}|q={query.strip().lower()}"
+    def _key(self, query: str, organization_id: int, top_k: int, search_mode: str | None = None) -> str:
+        # issue #225 决策 7A：显式 search_mode 的结果按模式分域——显式模式与自动
+        # 路由互不可见（既不让覆盖请求命中/复用自动路由的结果，也防止显式模式的
+        # 结果被后续自动路由请求当作自己的结果返回）。search_mode=None 时键与
+        # 修前逐字节相同（org=…|topk=…|q=…），自动路由行为零变化。
+        mode_seg = f"|mode={search_mode}" if search_mode else ""
+        return f"org={organization_id}|topk={top_k}{mode_seg}|q={query.strip().lower()}"
 
-    async def get(self, query: str, organization_id: int, top_k: int) -> list[dict[str, Any]] | None:
+    async def get(
+        self, query: str, organization_id: int, top_k: int, search_mode: str | None = None
+    ) -> list[dict[str, Any]] | None:
         if not settings.RAG_ENABLE_CACHE:
             return None
-        key = self._key(query, organization_id, top_k)
+        key = self._key(query, organization_id, top_k, search_mode)
         # Try Redis first
         try:
             rc = _get_redis()
@@ -114,10 +121,17 @@ class RetrievalCache:
             return None
         return row["value"]
 
-    async def set(self, query: str, organization_id: int, top_k: int, value: list[dict[str, Any]]) -> None:
+    async def set(
+        self,
+        query: str,
+        organization_id: int,
+        top_k: int,
+        value: list[dict[str, Any]],
+        search_mode: str | None = None,
+    ) -> None:
         if not settings.RAG_ENABLE_CACHE:
             return
-        key = self._key(query, organization_id, top_k)
+        key = self._key(query, organization_id, top_k, search_mode)
         # Try Redis
         try:
             rc = _get_redis()

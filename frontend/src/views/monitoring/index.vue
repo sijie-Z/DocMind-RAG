@@ -288,7 +288,10 @@ const kbMetrics = reactive<KnowledgeBaseMetrics>({
 })
 
 const recentAlerts = ref<Alert[]>([])
-const activeAlerts = computed(() => recentAlerts.value.filter(alert => alert.timestamp > Date.now() - 3600000))
+// 后端 alerts 的 timestamp 是秒级 int(time.time())（monitoring.py:175-184；
+// 表格列同样按秒处理 *1000），此前直接与毫秒 Date.now() 比较 → 恒 false →
+// 「活动告警」卡恒 0 且恒「正常」，与下方表格 active 行同屏矛盾。统一按毫秒换算。
+const activeAlerts = computed(() => recentAlerts.value.filter(alert => alert.timestamp * 1000 > Date.now() - 3600000))
 const hasAlerts = computed(() => activeAlerts.value.length > 0)
 const hasCriticalAlerts = computed(() => activeAlerts.value.some(alert => alert.level === 'critical'))
 const hasWarningAlerts = computed(() => activeAlerts.value.some(alert => alert.level === 'warning'))
@@ -408,18 +411,25 @@ const cpuChartRef = ref<HTMLElement>()
 const memoryChartRef = ref<HTMLElement>()
 const requestChartRef = ref<HTMLElement>()
 const responseTimeChartRef = ref<HTMLElement>()
-const documentChartRef = ref<HTMLElement>()
 let cpuChart: echarts.ECharts | null = null
 let memoryChart: echarts.ECharts | null = null
 let requestChart: echarts.ECharts | null = null
 let responseTimeChart: echarts.ECharts | null = null
-let documentChart: echarts.ECharts | null = null
 
+// 图表 title.subtext 承载诚实空态文案（无数据时画布写明「暂无数据」而非白板）
+const emptySubtext = () => t('monitoring.noData')
+const subtextStyle = { color: '#9ca3af', fontSize: 12 }
+
+// CPU/内存趋势：后端系统指标采样已落地（fix/system-metrics-sampling @ af42e32）
+// ——dashboard.trends.system 与 /monitoring/metrics/system 现返回真实采样点
+// {timestamp(秒), cpu_percent, memory_percent}（ENABLE_MONITORING 门控）。
+// 由 loadData → updateSystemCharts 接线；采样未启用或暂无样本时为空数组，
+// 保持「暂无数据」诚实空态（不画假线）。
 const initCharts = () => {
   if (cpuChartRef.value) {
     cpuChart = echarts.init(cpuChartRef.value)
     cpuChart.setOption({
-      title: { text: t('monitoring.cpu') + ' (%)', left: 'center' },
+      title: { text: t('monitoring.cpu') + ' (%)', subtext: emptySubtext(), subtextStyle, left: 'center' },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'time' },
       yAxis: { type: 'value', min: 0, max: 100 },
@@ -436,7 +446,7 @@ const initCharts = () => {
   if (memoryChartRef.value) {
     memoryChart = echarts.init(memoryChartRef.value)
     memoryChart.setOption({
-      title: { text: t('monitoring.memory') + ' (%)', left: 'center' },
+      title: { text: t('monitoring.memory') + ' (%)', subtext: emptySubtext(), subtextStyle, left: 'center' },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'time' },
       yAxis: { type: 'value', min: 0, max: 100 },
@@ -453,7 +463,7 @@ const initCharts = () => {
   if (requestChartRef.value) {
     requestChart = echarts.init(requestChartRef.value)
     requestChart.setOption({
-      title: { text: t('monitoring.requestTrend'), left: 'center' },
+      title: { text: t('monitoring.requestTrend'), subtext: emptySubtext(), subtextStyle, left: 'center' },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'time' },
       yAxis: { type: 'value' },
@@ -470,7 +480,7 @@ const initCharts = () => {
   if (responseTimeChartRef.value) {
     responseTimeChart = echarts.init(responseTimeChartRef.value)
     responseTimeChart.setOption({
-      title: { text: t('monitoring.responseTrend') + ' (ms)', left: 'center' },
+      title: { text: t('monitoring.responseTrend') + ' (ms)', subtext: emptySubtext(), subtextStyle, left: 'center' },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'time' },
       yAxis: { type: 'value' },
@@ -483,84 +493,62 @@ const initCharts = () => {
       }]
     })
   }
-
-  if (documentChartRef.value) {
-    documentChart = echarts.init(documentChartRef.value)
-    documentChart.setOption({
-      title: { text: t('monitoring.docTrend'), left: 'center' },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'time' },
-      yAxis: { type: 'value' },
-      series: [{
-        name: t('monitoring.totalDocs'),
-        type: 'line',
-        data: [],
-        smooth: true,
-        lineStyle: { color: '#73c0de' }
-      }]
-    })
-  }
-}
-
-const updateCharts = (data: Record<string, unknown>) => {
-  const trends = data.trends as Record<string, unknown> | undefined
-  if (trends?.system) {
-    const systemTrend = trends.system as Array<Record<string, number>>
-    if (cpuChart && systemTrend.length > 0) {
-      const cpuData = systemTrend.map((item) => [item.timestamp * 1000, item.cpu_percent])
-      cpuChart.setOption({
-        series: [{ data: cpuData }]
-      })
-    }
-    if (memoryChart && systemTrend.length > 0) {
-      const memoryData = systemTrend.map((item) => [item.timestamp * 1000, item.memory_percent])
-      memoryChart.setOption({
-        series: [{ data: memoryData }]
-      })
-    }
-  }
 }
 
 const updateMetricsCharts = async () => {
   try {
-    // 获取应用指标趋势
+    // 趋势真实形状：{"data": [<快照>]}（monitoring.py:151-166；<2 条时 {"data": []}），
+    // 元素键 timestamp(秒)/request_count/response_time 等（core/middleware.py:129-136）。
+    // 旧前端读不存在的 resp.data.metrics → 三图恒不更新。
     const appMetricsResponse = await getMetrics('application', timeRange.value)
-    const appMetricsData = appMetricsResponse.data?.metrics || []
+    const points = appMetricsResponse.data?.data || []
 
-    if (appMetricsData.length > 0) {
-      // 更新请求数趋势图
-      if (requestChart) {
-        const requestData = (appMetricsData as unknown as Array<Record<string, number>>).map((item) => [item.timestamp * 1000, item.request_count])
-        requestChart.setOption({
-          series: [{ data: requestData }]
-        })
-      }
-      
-      // 更新响应时间趋势图
-      if (responseTimeChart) {
-        const responseTimeData = (appMetricsData as unknown as Array<Record<string, number>>).map((item) => [item.timestamp * 1000, item.response_time])
-        responseTimeChart.setOption({
-          series: [{ data: responseTimeData }]
-        })
-      }
+    if (requestChart) {
+      const requestData = points.map((item) => [item.timestamp * 1000, item.request_count])
+      requestChart.setOption({
+        title: { subtext: points.length ? '' : emptySubtext() },
+        series: [{ data: requestData }]
+      })
     }
-    
-    // 获取知识库指标趋势
-    const kbMetricsResponse = await getMetrics('knowledge_base', timeRange.value)
-    const kbMetricsData = kbMetricsResponse.data?.metrics || []
 
-    if (kbMetricsData.length > 0) {
-      // 更新文档数趋势图
-      if (documentChart) {
-        const documentData = (kbMetricsData as unknown as Array<Record<string, number>>).map((item) => [item.timestamp * 1000, item.total_documents])
-        documentChart.setOption({
-          series: [{ data: documentData }]
-        })
-      }
+    if (responseTimeChart) {
+      const responseTimeData = points.map((item) => [item.timestamp * 1000, item.response_time])
+      responseTimeChart.setOption({
+        title: { subtext: points.length ? '' : emptySubtext() },
+        series: [{ data: responseTimeData }]
+      })
     }
-    
   } catch (error) {
-    // 更新指标图表失败
+    // 更新指标图表失败：保持空态（subtext 已在初始化写明「暂无数据」）
+  }
+}
+
+/**
+ * 系统指标趋势（CPU/内存）接线：数据源 dashboard.trends.system —— 采样点
+ * {timestamp(秒), cpu_percent, memory_percent}（af42e32 实现报告逐字核对；
+ * 与 /metrics/system 同一信封但本图走 dashboard 既有响应，零额外请求）。
+ * timestamp×1000 转毫秒与前端时间轴既有约定一致；空数组 → 保持
+ * 「暂无数据」诚实空态（不画假线）。
+ */
+const updateSystemCharts = (
+  systemTrend: Array<{ timestamp: number; cpu_percent: number; memory_percent: number }> | undefined
+) => {
+  const points = Array.isArray(systemTrend) ? systemTrend : []
+
+  if (cpuChart) {
+    const cpuData = points.map((item) => [item.timestamp * 1000, item.cpu_percent])
+    cpuChart.setOption({
+      title: { subtext: points.length ? '' : emptySubtext() },
+      series: [{ data: cpuData }]
+    })
+  }
+
+  if (memoryChart) {
+    const memoryData = points.map((item) => [item.timestamp * 1000, item.memory_percent])
+    memoryChart.setOption({
+      title: { subtext: points.length ? '' : emptySubtext() },
+      series: [{ data: memoryData }]
+    })
   }
 }
 
@@ -593,15 +581,19 @@ const loadData = async () => {
     // 更新告警
     recentAlerts.value = alertsData.alerts || []
 
-    // 更新图表
-    updateCharts(dashboardData as unknown as Record<string, unknown>)
-    
-    // 更新时间范围相关的图表
+    // 系统指标趋势（CPU/内存）：dashboard.trends.system 真实采样点
+    // （fix/system-metrics-sampling @ af42e32；空数组 → 诚实空态）
+    updateSystemCharts(dashboardData.trends?.system)
+
+    // 更新时间范围相关的图表（请求/响应趋势：真实 {data: history[]}）
     await updateMetricsCharts()
     
     // 获取通知服务状态
     try {
-      const notificationResponse = await request.get('/api/monitoring/notification/status')
+      // 单前缀正确路径：axios baseURL 已含 /api/v1（utils/request.ts:140），
+      // 旧写法 /api/monitoring/... 实际请求 /api/v1/api/monitoring/... 恒 404
+      // （A_sweep A4 实锤 404；真实路由 monitoring.py:403-409）
+      const notificationResponse = await request.get('/monitoring/notification/status')
       notificationStatus.value = notificationResponse.data
     } catch (error) {
       // 获取通知服务状态失败
@@ -653,9 +645,6 @@ onUnmounted(() => {
   }
   if (responseTimeChart) {
     responseTimeChart.dispose()
-  }
-  if (documentChart) {
-    documentChart.dispose()
   }
 })
 </script>

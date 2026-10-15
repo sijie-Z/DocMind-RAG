@@ -13,10 +13,11 @@ from app.core.elasticsearch import ElasticsearchTools
 from app.core.prometheus import RAG_ADAPTIVE_STRATEGY, RAG_QUERY_REWRITE_TOTAL
 from app.rag.errors import EmbeddingUnavailableError
 from app.rag.query_processor import (
-    QueryComplexityClassifier,
+    SEARCH_MODE_TO_STRATEGY,
     QueryIntentClassifier,
     extract_query_terms,
     generate_hyde_doc,
+    resolve_retrieval_strategy,
     rewrite_query_candidates,
     rewrite_query_llm,
 )
@@ -63,6 +64,42 @@ def _minimum_should_match_for(query_text: str) -> int | str:
     stripped = _TITLE_SPAN_RE.sub(" ", query_text)
     base = _count_tokens_cjk(stripped)
     return max(1, base * 30 // 100)
+
+
+# ---- #208 Phase 2 环 C：keyword 臂语料术语表（corpus-derived glossary） ----
+
+# 由 `backend/evals/corpus/` 的 bigram 统计按冻结规则 FR-1 推得的前 16 名
+# （2026-10-09 预注册，脚本 `_orchestrate/round2/_ringc_glossary_stats.py`，
+# 完整排序表 `_ringc_glossary_table.tsv`）：
+#   score(bigram) = body_count + 0.3 × heading_count（标题位折扣 0.3，
+#   heading = 行首 `#` 标题行；计数按出现次数、重叠窗口；排序 score↓→body↓→heading↓→码点↑；
+#   取前 16）。规则只用语料数据推表——不引用评测集（golden set）、不针对任何具体查询。
+# 机制 3 实测（PR #325 前）：keyword 臂按查询序截前 12 项，带《…》全称的查询里
+# 标题 bigram 占 8 位，内容 bigram 被截断出列表、overlap 分子结构性归零；
+# 环 C：改为「语料表成员优先 + 上限 16」（见 _keyword_arm_terms）。
+_CORPUS_GLOSSARY: tuple[str, ...] = (
+    "文档", "数据", "知识", "组织", "故障", "识库", "告警", "恢复",
+    "服务", "的文", "负责", "响应", "成员", "演练", "上传", "保留",
+)
+
+# keyword 臂术语表上限（机制 3 旧值 12；环 C 起 16）。
+_KEYWORD_TERM_CAP = 16
+
+
+def _keyword_arm_terms(query: str) -> list[str]:
+    """keyword 臂术语选择（#208 Phase 2 环 C）：语料术语表优先 + 上限 16。
+
+    把查询的全部术语（不先行截断）按「是否属于语料术语表 `_CORPUS_GLOSSARY`」分两档
+    ——表内成员（按查询序）在前、其余（按查询序）在后——再截到 ≤ `_KEYWORD_TERM_CAP`。
+    表由语料统计（FR-1）推得，与评测集无关；选择规则不引用任何具体查询。
+    查询术语 ≤12 项时与旧口径的集合相同（仅排序不同，overlap 判定与序无关）；
+    仅用于 keyword 臂 post-process 的 overlap/术语匹配口径——`extract_query_terms`
+    对其它调用方（context_compressor / agent core_tools）的默认行为保持不变。
+    """
+    raw = extract_query_terms(query, limit=None)
+    in_glossary = [t for t in raw if t in _CORPUS_GLOSSARY]
+    rest = [t for t in raw if t not in _CORPUS_GLOSSARY]
+    return (in_glossary + rest)[:_KEYWORD_TERM_CAP]
 
 
 # ---- #208 Phase 2 决策 c：`第X条` 数形互为扩展（查询侧同义扩展；不动索引/种子） ----
@@ -519,7 +556,9 @@ class HybridRetriever:
 
         documents = []
         seen_docs: dict[str, int] = {}
-        query_terms = extract_query_terms(query)
+        # #208 Phase 2 环 C：overlap 口径改用「语料术语表优先 + 上限 16」的术语选择
+        # （机制 3 修复点；见 _keyword_arm_terms 与 _CORPUS_GLOSSARY）。
+        query_terms = _keyword_arm_terms(query)
         raw_scores = [float(h.get("_score", 0)) for h in fused_hits]
         score_min, score_max = (min(raw_scores), max(raw_scores)) if raw_scores else (0, 0)
         now_ts = time.time()
@@ -663,18 +702,24 @@ class HybridRetriever:
         top_k: int = 5,
         document_ids: list[str] | None = None,
         debug: bool = False,
+        search_mode: str | None = None,
     ) -> tuple[list[dict], list[float], dict | None, list[str]]:
         """Execute adaptive retrieval and return (results, query_vector, debug_info, degraded).
 
         degraded：臂级降级原因列表（空 = 全部预期检索臂都正常执行）。issue #292：
         向量臂 / 兜底臂因服务故障未能执行时不得与「确实没有命中」同形；
         keyword 臂失败与兜底臂异常会直接上抛（由 pipeline 归类为故障态）。
-        策略为 keyword_only 时无向量臂是**按设计**行为，不产生降级信号。
+        策略为 keyword_only / vector_only 时无另一臂是**按设计**行为，不产生降级信号。
 
-        Strategy is selected automatically based on query complexity:
+        Strategy：显式 `search_mode`（hybrid/vector/keyword）**强制本次请求的检索臂组合**
+        （issue #225 决策 7A）；为 None 时按查询复杂度自动路由：
         - keyword_only: fast keyword search, no embedding calls
+        - vector_only:  pure vector arm（仅显式 search_mode="vector" 可达，自动路由不产生）
         - hybrid: keyword + vector (default)
         - hybrid_hyde: keyword + vector + HyDE + multi-rewrite (full pipeline)
+
+        覆盖仅作用于本次调用：不修改任何进程级状态，其它请求/路径（chat、agent、
+        workflow）不传 search_mode 时行为逐条不变。
 
         When debug=True, returns intermediate retrieval results for visualization.
         """
@@ -688,12 +733,25 @@ class HybridRetriever:
 
         candidate_size = max(top_k * max(1, settings.RAG_MMR_CANDIDATE_MULTIPLIER), 12)
 
-        # Adaptive strategy selection
-        strategy = QueryComplexityClassifier.get_strategy(query)
-        RAG_ADAPTIVE_STRATEGY.labels(strategy=strategy).inc()
-        logger.info(f"Adaptive RAG: query='{query[:50]}...' → strategy={strategy}")
+        # Strategy selection：显式模式覆盖自动路由（issue #225 决策 7A）。
+        # 覆盖只在本次调用内生效；显式值与未知值都经 resolve_retrieval_strategy
+        # 单点解析（未知值回落自动路由，API 边界由 SearchMode 枚举 422 兜住）。
+        forced_mode = search_mode if search_mode in SEARCH_MODE_TO_STRATEGY else None
+        strategy = resolve_retrieval_strategy(query, search_mode)
+        # 指标口径：自动路由保持 keyword_only/hybrid/hybrid_hyde 三值（回归不变）；
+        # 显式覆盖用 forced_* 单列，运维可直接看到「模式字段真的开始被使用」。
+        strategy_label = f"forced_{forced_mode}" if forced_mode else strategy
+        RAG_ADAPTIVE_STRATEGY.labels(strategy=strategy_label).inc()
+        logger.info(
+            "Adaptive RAG: query='%s...' → strategy=%s%s",
+            query[:50], strategy,
+            f" (forced by search_mode={forced_mode})" if forced_mode else "",
+        )
 
-        debug_info = {"strategy": strategy, "query": query} if debug else None
+        debug_info = (
+            {"strategy": strategy, "query": query, "search_mode": search_mode}
+            if debug else None
+        )
 
         if strategy == "keyword_only":
             kw_hits = await self._keyword_hits(query, filters, candidate_size)
@@ -709,6 +767,30 @@ class HybridRetriever:
                 debug_info["rerank_result"] = []
             documents = self._post_process(query, kw_hits, top_k)
             return documents, [], debug_info, degraded
+
+        if strategy == "vector_only":
+            # issue #225 决策 7A：显式 search_mode="vector" → 仅向量臂。
+            # 与 keyword_only 分支对称：单臂序直接进 post-process。
+            # 刻意不做 keyword 兜底、不跑 MMR——显式模式必须**纯**：
+            # 静默混入另一臂正是本 issue 要消灭的「模式说了不算」语义。
+            # （MMR 是融合序的多样性环节，单臂序无融合可多样化。）
+            # HyDE 对齐显式 hybrid：显式模式一概不跑 HyDE（enable_hyde=False）——
+            # HyDE 是自动路由给复杂查询的增强（LLM 调用 + 不确定性），显式模式的
+            # 「纯」语义不含它；这是 m1 的定夺（评审要求二选一时选「对齐」）。
+            vec_hits, query_vector, vec_degraded = await self._vector_hits(
+                query, filters, candidate_size, enable_hyde=False
+            )
+            if vec_degraded:
+                degraded.append(vec_degraded)
+            # 臂标记与 hybrid 序（`_rrf_fuse` 写 `has_vector`）对齐（同决策 d 口径）。
+            vec_hits = [{**h, "has_vector": True} for h in vec_hits]
+            if debug and debug_info is not None:
+                debug_info["keyword_top"] = []
+                debug_info["vector_top"] = self._debug_format_hits(vec_hits[:10])
+                debug_info["rrf_result"] = debug_info["vector_top"][:top_k]
+                debug_info["rerank_result"] = []
+            documents = self._post_process(query, vec_hits, top_k)
+            return documents, query_vector, debug_info, degraded
 
         # Hybrid paths: keyword + vector (parallel)
         if strategy == "hybrid_hyde":

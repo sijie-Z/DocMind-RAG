@@ -20,7 +20,9 @@ export type AgentEventType =
   | 'run_cancelled'
 
 export type ThinkingType = 'reasoning' | 'planning' | 'evaluation' | 'correction'
-export type ReflectionResult = 'pass' | 'retry' | 'replan' | 'escalate'
+// 六态真源：backend/app/agent/events.py:39-42（unavailable=评估服务不可用；
+// unparsed=模型输出不含可用判定——两者都不是 pass（假成功），也不是 run 失败）
+export type ReflectionResult = 'pass' | 'retry' | 'replan' | 'escalate' | 'unavailable' | 'unparsed'
 export type PlanStepStatus = 'pending' | 'ready' | 'running' | 'completed' | 'failed' | 'skipped'
 
 export interface AgentEvent {
