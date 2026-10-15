@@ -116,11 +116,25 @@ class Reviewer:
             # Ensure expected keys exist
             if "issues_found" not in review_data:
                 review_data["issues_found"] = []
-            if "recommendation" not in review_data:
-                # issue #301 #9：模型给了 JSON 却没给判定 → 无判定 ≠ 通过。
-                # 旧行为默认 "pass"，与真 pass 在报告里不可区分；与崩溃路径
-                # 同列 "error"（由 loop 收敛并如实记录）。
+            # issue #301 #9（评审 m3 尾款）：判定必须是**可用的非空字符串**。
+            # 缺键、null、空串/空白串、非字符串（数字/布尔/对象/数组）同语义
+            # —— 无判定 ≠ 通过（旧行为：这些值经 loop 的 `or "pass"` 宽容归一
+            # 为 pass，与真 pass 不可区分）。与崩溃路径同列 "error"（由 loop
+            # 收敛并如实记录）；error_kind=no_verdict 对齐三态约定（loop 侧
+            # 据此走「模型未给出判定」文案，与「审查服务异常」各自可辨识）。
+            recommendation_value = review_data.get("recommendation")
+            if not isinstance(recommendation_value, str) or not recommendation_value.strip():
                 review_data["recommendation"] = "error"
+                review_data["error_kind"] = "no_verdict"
+                review_data["error"] = (
+                    "模型返回的 JSON 未给出可用判定"
+                    f"（recommendation 缺失或为不可用值：{type(recommendation_value).__name__}）"
+                )
+                logger.warning(
+                    "Adversarial review: model gave no usable recommendation "
+                    "(error_kind=no_verdict, type=%s), goal=%s",
+                    type(recommendation_value).__name__, plan.goal[:40],
+                )
 
             issues_high = sum(1 for i in review_data["issues_found"] if i.get("severity") == "high")
             logger.info(

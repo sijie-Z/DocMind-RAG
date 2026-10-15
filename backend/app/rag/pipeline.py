@@ -303,7 +303,14 @@ class RAGPipeline:
             cache_safe = not failures and not degraded_reasons
             if not document_ids and result and cache_safe:
                 await self.cache.set(query, organization_id, top_k, result)
-            if query_vector and result and cache_safe:
+            # 语义写门控补 `not document_ids`（评审 #225 m4，先行存在）：读侧
+            # （精确/语义）对文档限定查询一律跳过，写侧此前没有对应守卫 ——
+            # 被限定文档范围的检索结果经 qv 回填（上方 `if not query_vector
+            # and qv`）后照样写入 **org 级**语义缓存（键只含 org，不含文档
+            # 范围），同 query 的后续无范围请求会命中并吃到被裁剪过的结果
+            # （泄漏形态；Redis 可用时成立）。守卫位置/原则与上一行精确缓存
+            # 写入一致。
+            if query_vector and result and cache_safe and not document_ids:
                 # 检索缓存条目 answer 为空（仅 sources），写入检索专用命名空间（R4）
                 await self.semantic_cache.set(
                     query, query_vector, "", result, organization_id=organization_id
