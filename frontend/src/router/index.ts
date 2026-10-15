@@ -184,6 +184,15 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'scheduled-tasks',
+        name: 'ScheduledTasks',
+        component: () => import('@/views/scheduled-tasks/index.vue'),
+        meta: {
+          title: 'menu.scheduledTasks',
+          icon: 'calendar'
+        }
+      },
+      {
         path: 'system-help',
         name: 'SystemHelp',
         component: () => import('@/views/systemHelp/index.vue'),
@@ -217,6 +226,16 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'menu.monitoring',
           icon: 'activity',
+          requiresAdmin: true
+        }
+      },
+      {
+        path: 'mcp-servers',
+        name: 'McpServers',
+        component: () => import('@/views/mcp-servers/index.vue'),
+        meta: {
+          title: 'menu.mcpServers',
+          icon: 'server',
           requiresAdmin: true
         }
       }
