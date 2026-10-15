@@ -287,6 +287,8 @@ import {
   HardwareChipOutline,
   MenuOutline,
   GlobeOutline,
+  CalendarOutline,
+  ServerOutline,
 } from '@vicons/ionicons5'
 
 const route = useRoute()
@@ -496,6 +498,12 @@ const menuOptions = computed<MenuOption[]>(() => {
       show: isAdmin
     },
     {
+      label: t('menu.mcpServers'),
+      key: 'McpServers',
+      icon: () => h(NIcon, null, { default: () => h(ServerOutline) }),
+      show: isAdmin
+    },
+    {
       label: t('menu.personalSettings'),
       key: 'Profile',
       icon: () => h(NIcon, null, { default: () => h(PersonOutline) })
@@ -509,6 +517,11 @@ const menuOptions = computed<MenuOption[]>(() => {
       label: t('menu.agent'),
       key: 'Agent',
       icon: () => h(NIcon, null, { default: () => h(HardwareChipOutline) })
+    },
+    {
+      label: t('menu.scheduledTasks'),
+      key: 'ScheduledTasks',
+      icon: () => h(NIcon, null, { default: () => h(CalendarOutline) })
     }
   ]
   return options.filter(item => item.show !== false)
