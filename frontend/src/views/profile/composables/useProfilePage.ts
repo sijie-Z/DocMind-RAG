@@ -32,6 +32,7 @@ import {
 import { getUserProfile, getUserStats, updateUserProfile, updatePassword, uploadAvatar, getUserActivities, generateApiKey as apiGenerateKey, revokeApiKey as apiRevokeKey, getMySessions, revokeMySession, getMyActivityLogs } from '@/api/user'
 import type { Activity, UserSession, UserAuditLog } from '@/api/user'
 import { formatDate } from '@/utils/format'
+import { LANGUAGES } from '@/utils/languages'
 import type { UploadCustomRequestOptions } from 'naive-ui'
 
 export function useProfilePage() {
@@ -418,12 +419,11 @@ const themeOptions = [
   { label: '跟随系统', value: 'auto' }
 ]
 
-const languageOptions = [
-  { label: '简体中文', value: 'zh' },
-  { label: 'English', value: 'en' },
-  { label: '日本語', value: 'ja' },
-  { label: 'Français', value: 'fr' }
-]
+// 语言清单单一事实源（ISS-4）；下拉用纯文本 label，Beta 以 · 后缀标注
+const languageOptions = LANGUAGES.map((l) => ({
+  label: l.beta ? `${l.label} · Beta` : l.label,
+  value: l.value,
+}))
 
 const handleLanguageChange = (val: string) => {
   localStorage.setItem('language', val)

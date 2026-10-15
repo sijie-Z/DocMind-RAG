@@ -63,7 +63,7 @@ class DatabaseSettings(BaseSettings):
 
     # Document parsing
     # 注：支持的文件类型不是配置项——白名单与解析器能力强耦合（file_service 的
-    # allowed_extensions / document_parser 的 supported_extensions / 前端 accept
-    # 三处同为 7 种格式）。此前的 SUPPORTED_FILE_TYPES 字段零消费（issue #242 已删除）；
+    # allowed_extensions / document_parser 的 supported_extensions 两处同为
+    # 13 种格式（7 文档 + 6 图片）。此前的 SUPPORTED_FILE_TYPES 字段零消费（issue #242 已删除）；
     # 未来若要放开更多格式，正确动作是扩展 parser，而不是把常量改读 env。
     OCR_LANGUAGE: str = "chi_sim+eng"

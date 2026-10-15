@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 系统监控端点
+DocMind AI知识库系统 - 系统监控端点
 """
 
 import hashlib

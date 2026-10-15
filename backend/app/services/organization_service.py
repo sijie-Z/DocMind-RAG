@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 组织服务
+DocMind AI知识库系统 - 组织服务
 """
 
 import logging
