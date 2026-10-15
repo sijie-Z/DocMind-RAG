@@ -182,7 +182,9 @@ export default {
       reportDesc: 'PDFをアップロードして財務指標を抽出します',
       travel: '旅行の計画を立てて',
       travelDesc: '京都1週間旅行の旅程を作成してください'
-    }
+    },
+    // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
+    sseWarning: 'サーバーからの通知：今回の回答が不完全な可能性があります'
   },
   validation: {
     required: 'この項目は必須です',
