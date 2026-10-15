@@ -132,6 +132,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 
     <div class="nav-label">测试</div>
     <a class="nav-item" href="#testing"><span class="badge">11</span><span>测试体系</span></a>
+    <a class="nav-item" href="#quality"><span class="badge">12</span><span>质量门禁</span></a>
   </div>
 </nav>
 
@@ -141,13 +142,13 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 <!-- ─── 头部 ─── -->
 <div class="header">
   <h1>DocMind Architecture</h1>
-  <div class="sub">企业级 AI Agent 平台 · v1.2.1</div>
+  <div class="sub">企业级 AI Agent 平台 · v1.22</div>
   <div class="badge-row">
     <span class="badge"><span class="dot g"></span><a href="index.html" style="color:var(--text2);text-decoration:none;">← 返回首页</a></span>
-    <span class="badge"><span class="dot g"></span>1022 个测试</span>
-    <span class="badge"><span class="dot b"></span>17 API 模块</span>
-    <span class="badge"><span class="dot a"></span>30 Agent 工具</span>
-    <span class="badge">108,000+ LOC</span>
+    <span class="badge"><span class="dot g"></span>3084 个测试</span>
+    <span class="badge"><span class="dot b"></span>19 API 模块</span>
+    <span class="badge"><span class="dot a"></span>33 Agent 工具</span>
+    <span class="badge">100,000+ LOC</span>
   </div>
 </div>
 
@@ -156,11 +157,11 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
   <div class="sec-head"><span class="sec-num">01</span><h2>系统总览</h2><span class="meta">2026.05</span></div>
 
   <div class="g3" style="margin-bottom:14px">
-    <div class="card" style="text-align:center;padding:24px"><div class="big">17</div><div class="sl">Python 后端模块</div></div>
+    <div class="card" style="text-align:center;padding:24px"><div class="big">19</div><div class="sl">后端 API 模块</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">20+</div><div class="sl">前端视图</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">4</div><div class="sl">语言支持</div></div>
-    <div class="card" style="text-align:center;padding:24px"><div class="big">30</div><div class="sl">Agent 工具</div></div>
-    <div class="card" style="text-align:center;padding:24px"><div class="big">1022</div><div class="sl">自动化测试</div></div>
+    <div class="card" style="text-align:center;padding:24px"><div class="big">33</div><div class="sl">Agent 工具</div></div>
+    <div class="card" style="text-align:center;padding:24px"><div class="big">3084</div><div class="sl">自动化测试（后端 2223 · 前端 861）</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">2</div><div class="sl">部署方案</div></div>
   </div>
 
@@ -412,21 +413,21 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 
 <!-- ═══ 03. 后端架构 ═══ -->
 <div class="sec" id="backend">
-  <div class="sec-head"><span class="sec-num">03</span><h2>后端架构</h2><span class="meta">FastAPI · 17 模块</span></div>
+  <div class="sec-head"><span class="sec-num">03</span><h2>后端架构</h2><span class="meta">FastAPI · 19 模块</span></div>
 
   <div class="card">
     <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 📦 模块结构</div>
     <div class="card-body show">
       <pre style="font-size:.72rem;color:var(--text2);line-height:1.8;background:var(--bg3);padding:14px;border-radius:8px;overflow-x:auto"><code>backend/app/
 ├── api/v1/          # REST 端点 (auth, chat, documents, agent, knowledge...)
-│   └── endpoints/   # 17 个路由模块
+│   └── endpoints/   # 19 个路由模块
 ├── agent/           # PER Agent 系统
 │   ├── loop.py      # Agent 主循环
 │   ├── registry.py  # 工具注册中心
 │   ├── context.py   # 上下文引擎
 │   ├── events.py    # SSE 事件模型
 │   ├── skills.py    # 技能学习
-│   └── tools/       # 30 个工具实现
+│   └── tools/       # 33 个工具实现
 ├── core/            # 基础设施 (config, database, redis, security, tracing)
 ├── models/          # SQLAlchemy ORM 模型
 ├── rag/             # RAG 管道 (retriever, reranker, chunker, evaluator)
@@ -507,10 +508,10 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 
 <!-- ═══ 05. 工具系统 ═══ -->
 <div class="sec" id="tools">
-  <div class="sec-head"><span class="sec-num">04b</span><h2>工具系统</h2><span class="meta">30 个内置工具</span></div>
+  <div class="sec-head"><span class="sec-num">04b</span><h2>工具系统</h2><span class="meta">33 个内置工具</span></div>
 
   <div class="card">
-    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔧 内置工具（注册表共 30 个；下表为功能示意，非完整清单）</div>
+    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔧 内置工具（注册表共 33 个；下表为功能示意，非完整清单）</div>
     <div class="card-body show">
       <table class="data-table">
         <tr><th>#</th><th>工具</th><th>用途</th><th>安全级别</th></tr>
@@ -766,12 +767,13 @@ cd frontend && npm run dev</code></pre>
 
 <!-- ═══ 12. 测试体系 ═══ -->
 <div class="sec" id="testing">
-  <div class="sec-head"><span class="sec-num">11</span><h2>测试体系</h2><span class="meta">911 后端 + 111 前端</span></div>
+  <div class="sec-head"><span class="sec-num">11</span><h2>测试体系</h2><span class="meta">2223 后端 + 861 前端</span></div>
 
   <div class="g2">
-    <div class="card green-ac" style="text-align:center;padding:20px"><div class="big">1022</div><div class="sl">后端 911 · 前端 111</div></div>
-    <div class="card blue-ac" style="text-align:center;padding:20px"><div class="big b">89</div><div class="sl">后端 80 · 前端 9</div></div>
+    <div class="card green-ac" style="text-align:center;padding:20px"><div class="big">3084</div><div class="sl">后端 2223 · 前端 861</div></div>
+    <div class="card blue-ac" style="text-align:center;padding:20px"><div class="big b">5</div><div class="sl">只缩不涨棘轮（覆盖率 + 前端四道）</div></div>
   </div>
+  <p style="font-size:.72rem;color:var(--text3);margin:8px 2px 0">数字为 2026-10-15 冻结快照：后端 2223 passed / 51 skipped、前端 861 passed（128 个测试文件）、vue-tsc 0 错误——随 CI 实时演进，CI 为实时真源。</p>
   <div class="card">
     <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🧪 测试分类</div>
     <div class="card-body show">
@@ -786,8 +788,33 @@ cd frontend && npm run dev</code></pre>
   </div>
 </div>
 
+<!-- ═══ 13. 质量门禁与防回退 ═══ -->
+<div class="sec" id="quality">
+  <div class="sec-head"><span class="sec-num">12</span><h2>质量门禁与防回退</h2><span class="meta">Eval Gate · 棘轮 · 变异验证</span></div>
+
+  <div class="card green-ac">
+    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🛡️ 质量流水线（每个 PR）</div>
+    <div class="card-body show">
+      <div class="flow">
+        <span class="flow-box g">PR 提交</span><span class="flow-arrow">→</span>
+        <span class="flow-box b">后端测试（ruff · bandit · 快速测试 · 覆盖率 ≥ 42%）</span><span class="flow-arrow">→</span>
+        <span class="flow-box a">Eval Gate（零容差检索门禁）</span><span class="flow-arrow">→</span>
+        <span class="flow-box b">前端测试（eslint · vue-tsc · vitest）</span><span class="flow-arrow">→</span>
+        <span class="flow-box g">CI Pass 汇聚（红 = 拦下合并）</span>
+      </div>
+      <ul style="font-size:.8rem;color:var(--text2);line-height:2;list-style:none;padding-left:0">
+        <li>→ <b>Eval Gate</b>：28 条 golden set 检索评测进 CI——7 项指标容差 0、fail-closed；基线更新是显式 PR 行为。ClauseHit@3/@5 实测 88%（基线 84% 托底）。</li>
+        <li>→ <b>棘轮只缩不涨</b>：后端覆盖率下限 42% ＋ 前端四道基线棘轮（硬编码中文 / i18n 完备性 / 命名一致 / 用键定义）。</li>
+        <li>→ <b>静默假成功清零</b>：全仓 ~551 处异常捕获全量审计，32 条静默假成功全部闭环，修复均带回归测试（#301）。</li>
+        <li>→ <b>变异验证</b>：修复先红后绿；注入缺陷必须精确变红；门禁自身逐一演练过 fail-closed——「一个永远绿的检查，比没有检查更危险」。</li>
+        <li>→ <b>诚实原则</b>：宁可不说、不可说假——数字带口径与样本量，失败留痕不静默，边界如实披露。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
 <div style="text-align:center;padding:2rem 0;color:var(--text3);font-size:.8rem;border-top:1px solid var(--border);margin-top:2rem">
-  DocMind Architecture · v1.2.1 · <a href="index.html" style="color:var(--green);text-decoration:none;">返回首页</a> · <a href="https://github.com/sijie-Z/DocMind-RAG" style="color:var(--green);text-decoration:none;">GitHub</a>
+  DocMind Architecture · v1.22 · <a href="index.html" style="color:var(--green);text-decoration:none;">返回首页</a> · <a href="https://github.com/sijie-Z/DocMind-RAG" style="color:var(--green);text-decoration:none;">GitHub</a>
 </div>
 
 </div><!-- /main -->
