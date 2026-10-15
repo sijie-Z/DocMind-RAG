@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 安全工具
+DocMind AI知识库系统 - 安全工具
 """
 
 # backend/app/core/security.py

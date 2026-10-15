@@ -87,6 +87,20 @@ describe('文档状态机 · 六值域 + 详情同义词（B16/K1 双词表）',
     expect(computeDocStats([{ status: 'parsing' }, { status: 'pending' }]).processing).toBe(2)
   })
 
+  it('词表收敛（第二轮 7.2⑤）：列表索引终态吐 indexed 后，completed 计数不归零', () => {
+    // 收敛前列表吐 'completed'、详情吐 'indexed'；收敛后列表也吐 'indexed'。
+    // 统计卡口径必须双词同计「已索引」，否则列表页统计卡已完成恒 0。
+    const stats = computeDocStats([
+      { status: 'indexed' },
+      { status: 'completed' },
+      { status: 'parsing' },
+      { status: 'failed' },
+    ])
+    expect(stats).toEqual({ total: 4, completed: 2, processing: 1, failed: 1 })
+    // 判别：只认旧词时 completed 会少计（1 而非 2）
+    expect(computeDocStats([{ status: 'indexed' }]).completed).toBe(1)
+  })
+
   it('null/未知状态 → 未知 + default（不谎报任何终态）', () => {
     expect(docStatusLabel(null)).toBe('未知')
     expect(docStatusLabel(undefined)).toBe('未知')

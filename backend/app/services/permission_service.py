@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 权限服务
+DocMind AI知识库系统 - 权限服务
 """
 
 import logging

@@ -20,6 +20,10 @@ dist/
 backend/_review_temp2/
 .claude/
 
+# 内部工作/CI 报告（不得提交到仓库根目录；由 ci-hygiene 的 Internal Reports Guard 兜底）
+/.ci-*.md
+/.e2e-*.md
+
 # Benchmark cache (eval outputs, replays, results)
 backend/benchmark/cases/
 backend/benchmark/replay/

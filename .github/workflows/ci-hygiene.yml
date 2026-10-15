@@ -71,6 +71,26 @@ jobs:
           fi
           echo "未发现冲突标记"
 
+  # 根目录内部工作报告（.ci-*.md / .e2e-*.md，如第一轮问题清单的排查产物）
+  # 不得再提交：它们是会话过程的个人备忘与临时结论，不属于产品文档。
+  # 六个文件已随 chore/repo-hygiene 从历史中 git rm 并加入 .gitignore；本 job
+  # 是防再提交的兜底——.gitignore 只挡 `git add`，挡不住 `git add -f` 与回填。
+  internal-reports:
+    name: Internal Reports Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fail if internal work reports exist at repo root
+        run: |
+          matches=$(find . -maxdepth 1 -type f \( -name '.ci-*.md' -o -name '.e2e-*.md' \) -print)
+          if [ -n "$matches" ]; then
+            echo "::error::内部工作报告不得提交到仓库根目录:"
+            echo "$matches"
+            exit 1
+          fi
+          echo "OK: 根目录无内部工作报告"
+
   # issue #98：`try` 体内**直接** raise 的控制流异常（AppError 及其子类、
   # fastapi.HTTPException）不得被同层 `except Exception` 降级成 500 / 200 错误
   # 字典。这一缺陷模式已复发多次（issue #82 / #90 / #98），加静态门禁防止第 8 次。
