@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 组织数据架构
+DocMind AI 知识库系统 - 组织数据架构
 """
 
 from datetime import datetime

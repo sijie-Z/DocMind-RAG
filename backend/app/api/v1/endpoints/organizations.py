@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 组织管理端点
+DocMind AI 知识库系统 - 组织管理端点
 """
 
 from typing import Any

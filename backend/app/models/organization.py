@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 组织模型
+DocMind AI 知识库系统 - 组织模型
 """
 from datetime import datetime
 from typing import Optional

@@ -25,10 +25,12 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
 - 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 33 个工具完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
-- 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、12 种 SSE 事件、RunReport 运行摘要
+- 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、14 种 SSE 事件、RunReport 运行摘要
 - 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
 
 > 关于架构决策和实验数据，请参见研究仓库：[DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
+>
+> 主仓库：[github.com/sijie-Z/DocMind-RAG](https://github.com/sijie-Z/DocMind-RAG)（完整提交历史 / Issues）
 
 ---
 
@@ -45,7 +47,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 
 已知限制：
 - 工作流代码节点默认关闭，需显式设置 `ENABLE_WORKFLOW_CODE_NODES=true`，且必须通过 Docker 沙箱执行。
-- GraphRAG 图谱、Agent 记忆、指标快照与实时计数均已支持 Redis 持久化；实时计数按实例写入并在读取时聚合，适合多实例部署。
+- GraphRAG 图谱、指标快照与实时计数均已支持 Redis 持久化；Agent 记忆为分层存储——长时/反思记忆持久化到 Redis（TTL 7 天），短期/工作记忆在进程内；实时计数按实例写入并在读取时聚合，适合多实例部署。
 - 前端 `knowledge/index.vue`、`profile/index.vue`、`workflow/editor.vue` 均已拆分到组件/组合式函数，不再有千行级单文件页面。
 
 ---
@@ -216,7 +218,7 @@ Swagger 文档：`http://localhost:8000/docs`
 
 ### 🖥 前端 (`frontend/src/`)
 
-Vue 3 + TypeScript + Naive UI 单页应用，21 条路由：
+Vue 3 + TypeScript + Naive UI 单页应用，24 条路由：
 
 | 页面 | 路由 | 功能 |
 |------|------|------|
@@ -355,7 +357,7 @@ DocMind/
 │   │   │   ├── exec_context.py      #   ExecutionContext
 │   │   │   ├── registry.py          #   工具注册表
 │   │   │   ├── memory_bridge.py     #   记忆桥接
-│   │   │   ├── events.py            #   SSE 事件类型（12 种）
+│   │   │   ├── events.py            #   SSE 事件类型（14 种）
 │   │   │   ├── message.py           #   Agent 间消息总线
 │   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
 │   │   │   ├── tools/               #   33 个工具实现
@@ -406,8 +408,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  上下文压缩
 │   │   │   ├── context_window.py    #   令牌预算管理
 │   │   │   └── evaluator.py         #   质量评估
-│   │   ├── services/                # 业务服务层（14 个服务）
-│   │   ├── models/                  # ORM 模型（14 个实体）
+│   │   ├── services/                # 业务服务层（15 个服务）
+│   │   ├── models/                  # ORM 模型（23 张表）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者
 │   ├── tests/                       # 2223 个后端测试（前端另有 861 个）
@@ -419,7 +421,7 @@ DocMind/
 │   └── docker-compose.yml           # 10 服务编排
 ├── frontend/
 │   └── src/
-│       ├── views/                   # 页面（19 个模块，21 条路由）
+│       ├── views/                   # 页面（19 个模块，24 条路由）
 │       ├── components/              # 共享组件
 │       ├── api/                     # Axios API 客户端
 │       ├── stores/                  # Pinia 状态管理

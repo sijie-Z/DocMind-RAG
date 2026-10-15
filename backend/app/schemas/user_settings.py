@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 用户设置 Schemas
+DocMind AI 知识库系统 - 用户设置 Schemas
 """
 from datetime import datetime
 from typing import Any

@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - RBAC (Role-Based Access Control) 模型
+DocMind AI 知识库系统 - RBAC (Role-Based Access Control) 模型
 """
 from datetime import datetime
 from enum import Enum

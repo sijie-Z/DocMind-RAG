@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 认证端点
+DocMind AI 知识库系统 - 认证端点
 """
 
 import hashlib

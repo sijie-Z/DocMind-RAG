@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 数据库连接模块
+DocMind AI 知识库系统 - 数据库连接模块
 """
 
 import logging
