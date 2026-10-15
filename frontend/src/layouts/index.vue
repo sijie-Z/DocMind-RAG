@@ -341,6 +341,9 @@ const navigateByNotification = async (notification: Notification) => {
     await router.push({ name: 'Chat' })
   } else if (nType === 'account' || nType === 'security') {
     await router.push({ name: 'Profile' })
+  } else if (nType === 'agent') {
+    // Agent 任务终态通知（无 target_route 的旧行兜底）：落到 /agent
+    await router.push({ name: 'Agent' })
   } else {
     await router.push({ name: 'Notifications' })
   }
