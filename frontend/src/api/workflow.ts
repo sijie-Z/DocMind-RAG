@@ -58,10 +58,14 @@ export interface NodeDefinition {
 
 export interface NodeResultItem {
   node_id: string
-  status: 'pending' | 'running' | 'success' | 'failed'
+  node_type: string
+  // 引擎成功态为 "completed"（ExecutionStatus，workflow_engine.py:37-42）；
+  // 旧类型声明 'success' 属词表漂移（B10/C2）
+  status: 'pending' | 'running' | 'completed' | 'failed'
   output?: unknown
   error?: string
-  duration_ms?: number
+  // 引擎字段名为 duration（毫秒）（schemas/workflow.py:84-86）；旧声明 duration_ms 为死键
+  duration?: number | null
 }
 
 export interface ExecutionResult {
@@ -93,7 +97,12 @@ export const deleteWorkflow = async (id: number) => {
 }
 
 export const executeWorkflow = async (id: number, inputData?: Record<string, unknown>) => {
-  return request.post(`/workflows/${id}/execute`, { workflow_id: id, input_data: inputData, stream: false })
+  // 契约对齐（B8/B9，workflow.py:197-220）：
+  //  - stream 是 **query** 参数（旧实现塞进 body → 后端不认 → 默认 True 走 SSE 分支，
+  //    响应体是事件流 → res.data?.data 恒 undefined，面板静默假「执行完成」）；
+  //  - 请求体本身就是 input_data（端点 `input_data = body`，引擎读 input["text"]；
+  //    旧实现包成 {workflow_id, input_data, stream} → input["text"] 恒空）。
+  return request.post(`/workflows/${id}/execute`, inputData ?? {}, { params: { stream: false } })
 }
 
 // ── 流式执行（issue #289 修复）────────────────────────────────────────────
@@ -156,6 +165,7 @@ export const executeWorkflowStream = (
   id: number,
   inputData: Record<string, unknown>,
   onEvent: (_event: string, _data: ExecutionResult | NodeResultItem | Record<string, unknown>) => void,
+  onClose?: () => void,
 ) => {
   const abortController = new AbortController()
   const parser = createWorkflowSSEFrameParser()
@@ -196,8 +206,12 @@ export const executeWorkflowStream = (
         }
       }
     } catch {
-      // abort 或网络异常：静默结束（与修复前 onerror→close 的净效果一致；
+      // abort 或网络异常：静默结束（未识别帧交 onEvent 语义处理；
       // 业务级失败由后端以 `event: error` 帧下发，经 onEvent 派发）
+    } finally {
+      // 流关闭统一出口：正常结束、abort、网络异常三条路径都收敛到这里。
+      // 消费方（编辑器调试面板）用它收尾执行态，防 executing 悬挂。
+      onClose?.()
     }
   }
 

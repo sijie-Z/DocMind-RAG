@@ -1,5 +1,21 @@
 <template>
   <div class="admin-dashboard p-4 md:p-6 space-y-5">
+    <!-- 三态：加载中 / 加载失败（可重试）/ 内容 -->
+    <div v-if="loading" class="flex items-center justify-center py-24">
+      <n-spin size="large" />
+    </div>
+    <n-result
+      v-else-if="loadFailed"
+      status="error"
+      class="py-16"
+      :title="t('dashboard.loadFailed')"
+      :description="t('dashboard.loadFailedDesc')"
+    >
+      <template #footer>
+        <n-button type="primary" @click="loadData">{{ t('dashboard.retry') }}</n-button>
+      </template>
+    </n-result>
+    <template v-else>
     <!-- 顶部统计卡片 - 渐变背景 -->
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
       <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg shadow-blue-500/20">
@@ -313,11 +329,12 @@
         {{ t('audit.title') }}
       </n-button>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, h } from 'vue'
+import { ref, onMounted, onUnmounted, h, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NTag } from 'naive-ui'
 import { getAuditLogs, type AuditLogEntry } from '@/api/user'
@@ -368,6 +385,8 @@ const ragStats = ref({
 
 const orgList = ref<OrgSummary[]>([])
 const recentLogs = ref<AuditLogEntry[]>([])
+const loading = ref(true)
+const loadFailed = ref(false)
 
 const llmChartRef = ref<HTMLElement | null>(null)
 const ragChartRef = ref<HTMLElement | null>(null)
@@ -507,7 +526,9 @@ const initCharts = () => {
   }
 }
 
-onMounted(async () => {
+const loadData = async () => {
+  loading.value = true
+  loadFailed.value = false
   try {
     const [adminRes, auditRes, llmRes, healthRes] = await Promise.all([
       getAdminSummary(),
@@ -580,12 +601,19 @@ onMounted(async () => {
       orgList.value = orgRes.data.organizations
     }
 
+    // 三态收口：先放开内容渲染（v-else），等 DOM 就绪后再初始化图表
+    loading.value = false
+    await nextTick()
     initCharts()
-  } catch (e) {
-    // Failed to load admin dashboard
-    initCharts()
+  } catch {
+    loadFailed.value = true
+  } finally {
+    loading.value = false
   }
+}
 
+onMounted(() => {
+  loadData()
   window.addEventListener('resize', handleResize)
 })
 

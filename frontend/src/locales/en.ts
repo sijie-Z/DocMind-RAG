@@ -5,22 +5,14 @@ export default {
     confirm: 'Confirm',
     delete: 'Delete',
     edit: 'Edit',
-    add: 'Add',
-    search: 'Search',
-    loading: 'Loading...',
     success: 'Success',
     error: 'Error',
     failed: 'Failed',
     noData: 'No Data',
-    required: 'Required',
+    refresh: 'Refresh',
     saveSuccess: 'Saved successfully',
     deleteSuccess: 'Deleted successfully',
-    logout: 'Logout',
-    logoutConfirm: 'Are you sure you want to logout?',
-    backToHome: 'Back to Home',
-    back: 'Back',
     close: 'Close',
-    contactSupport: 'Contact Support',
     actions: 'Actions'
   },
   profile: {
@@ -37,35 +29,25 @@ export default {
     bio: 'Bio',
     defaultBio: 'This user hasn\'t written a bio yet...',
     stats: {
-      title: 'Statistics',
       conversations: 'Conversations',
       messages: 'Messages',
       files: 'Files',
       knowledge: 'Knowledge'
     },
-    accountSettings: 'Account Settings',
     accountSecurity: 'Account Security',
     changePassword: 'Change Password',
-    loginPassword: 'Login Password',
-    passwordDesc: 'Regularly changing your password protects your account security',
     currentPassword: 'Current Password',
     newPassword: 'New Password',
     confirmPassword: 'Confirm Password',
     preferences: 'Preferences',
     language: 'Language Setting',
     theme: 'Theme Setting',
-    themeLight: 'Light',
-    themeDark: 'Dark',
-    themeAuto: 'System',
     themeSettingDesc: 'Choose interface theme',
     languageSettingDesc: 'Choose display language',
-    notifications: 'Notification Settings',
-    notificationDesc: 'Receive system notifications and message alerts',
     apiKey: 'API Key Management',
     apiKeyDesc: 'Keys used to call API interfaces, please keep them safe',
     apiKeyWarning: 'Warning: API Key is equivalent to your password, do not leak it.',
     noApiKey: 'No API Key',
-    manage: 'Manage',
     revokeKey: 'Revoke Key',
     generateKey: 'Generate Key',
     regenerateKey: 'Regenerate',
@@ -78,8 +60,6 @@ export default {
     apiKeyGenerated: 'API Key generated successfully',
     apiKeyRevoked: 'API Key revoked',
     apiKeyGenerateFailed: 'Generation failed',
-    updateSuccess: 'Update successful',
-    loadUserError: 'User information loading exception: data is empty',
     validation: {
       nicknameLength: 'Nickname must be between 2-50 characters',
       phoneInvalid: 'Please enter a valid phone number',
@@ -99,8 +79,6 @@ export default {
     upload: {
       success: 'Avatar uploaded successfully',
       failed: 'Avatar upload failed',
-      imageOnly: 'Only image files are allowed',
-      sizeLimit: 'Image size cannot exceed 5MB'
     },
     storage: 'Storage',
     realData: 'Real-time',
@@ -113,8 +91,6 @@ export default {
     sessionRevoked: 'Device offline',
     revokeFailed: 'Failed to go offline',
     apiKeyRevokeFailed: 'Failed to revoke API Key',
-    realTime: 'Real-time',
-    estimated: 'Estimated'
   },
   users: {
     title: 'User Management',
@@ -141,7 +117,6 @@ export default {
     searchPlaceholder: 'Search organizations...',
     create: 'New Organization',
     edit: 'Edit Organization',
-    refresh: 'Refresh',
     deleteConfirm: 'Are you sure you want to delete this organization? This action cannot be undone.',
     name: 'Organization Name',
     namePlaceholder: 'Please enter organization name',
@@ -156,18 +131,13 @@ export default {
     dragHint: 'Drag nodes to adjust hierarchy and order',
     searchTree: 'Quick search...',
     detailList: 'Detailed List',
-    root: 'Root Organization',
-    isPrivate: 'Private Organization',
     stats: {
       total: 'Total Organizations',
-      root: 'Root Level',
-      levels: 'Hierarchy Depth'
     },
     validation: {
       nameRequired: 'Please enter organization name',
       nameLength: 'Name must be between 2-50 characters',
       colorRequired: 'Please select a color',
-      parentSelf: 'Cannot set self as parent organization'
     },
     level1: 'Level 1',
     level2: 'Level 2',
@@ -383,7 +353,12 @@ export default {
     unknownError: 'Unknown error',
     deleteFailed: 'Delete failed',
     deleteConfirm: 'Are you sure you want to delete this document? It will be removed from the knowledge base and cannot be recovered.',
-    batchDeleteConfirm: 'Are you sure you want to delete the selected {count} documents? This action cannot be undone.'
+    batchDeleteConfirm: 'Are you sure you want to delete the selected {count} documents? This action cannot be undone.',
+    graph: {
+      emptyTitle: 'No graph data yet',
+      emptyDesc: 'Upload documents and complete indexing, and the knowledge graph will be built automatically',
+      loadFailed: 'Failed to load graph data, please try again later'
+    }
   },
   prompts: {
     title: 'Prompt Management',
@@ -435,7 +410,6 @@ export default {
     }
   },
   login: {
-    title: 'Login',
     welcomeBack: 'Welcome Back',
     loginDesc: 'Please enter your credentials to login',
     createAccount: 'Create Account',
@@ -446,12 +420,6 @@ export default {
     emailPlaceholder: 'Enter email address',
     password: 'Password',
     passwordPlaceholder: 'Enter password',
-    confirmPassword: 'Confirm Password',
-    confirmPasswordPlaceholder: 'Please confirm password',
-    loginButton: 'Login',
-    registerButton: 'Register',
-    loggingIn: 'Logging in...',
-    registering: 'Registering...',
     noAccount: 'No account?',
     hasAccount: 'Already have an account?',
     login: 'Login',
@@ -460,7 +428,6 @@ export default {
     registerSuccess: 'Registration successful',
     goToLogin: 'Go to Login',
     goToRegister: 'Go to Register',
-    demoAccount: 'Demo Account',
     demoDesc: 'Use demo account (guest / 123456)'
   },
   menu: {
@@ -469,6 +436,7 @@ export default {
     chat: 'Smart Chat',
     search: 'Semantic Search',
     knowledge: 'Knowledge Base',
+    prompts: 'Prompt Management',
     users: 'User Management',
     organizations: 'Organizations',
     personalSettings: 'Settings',
@@ -476,6 +444,7 @@ export default {
     conversations: 'Conversations',
     notifications: 'Notifications',
     workflow: 'Agent Workflow',
+    agent: 'AI Agent',
     auditLogs: 'Audit Logs',
     monitoring: 'System Monitoring',
     systemHelp: 'Help',
@@ -525,7 +494,10 @@ export default {
     time: 'Time',
     user: 'User',
     action: 'Action',
-    detail: 'Detail'
+    detail: 'Detail',
+    loadFailed: 'Load Failed',
+    loadFailedDesc: 'Failed to load dashboard data, please try again.',
+    retry: 'Retry'
   },
   monitoring: {
     title: 'System Monitoring',
@@ -582,24 +554,16 @@ export default {
     semantic: 'Semantic',
     keyword: 'Keyword',
     fileType: 'File Type',
-    dateRange: 'Date Range',
     fileSize: 'File Size',
-    to: 'to',
-    min: 'Min',
-    max: 'Max',
     clear: 'Reset',
-    apply: 'Apply Filters',
     totalFiles: 'Total Files',
     results: 'results found',
     relevance: 'Sort by Relevance',
-    date: 'Sort by Date',
     name: 'Sort by Name',
     relevanceScore: 'Relevance',
-    matchContent: 'Matched Content',
     noResults: 'No results found',
     noResultsDesc: 'Try different keywords or adjust filters',
     fileContent: 'File Content',
-    allTypes: 'All Types',
     searchFailed: 'Search failed'
   },
   conversations: {
@@ -670,5 +634,13 @@ export default {
     metricMessages: 'Messages',
     metricDocuments: 'Documents',
     metricRole: 'Current Role'
+  },
+  router: {
+    welcome: 'Welcome',
+    login: 'Login',
+    register: 'Register',
+    knowledgeGraph: 'Knowledge Graph',
+    workflowEditor: 'Workflow Editor',
+    agentMemory: 'Agent Memory'
   }
 };
