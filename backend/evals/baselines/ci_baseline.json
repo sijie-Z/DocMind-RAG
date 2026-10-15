@@ -1,0 +1,51 @@
+{
+  "baseline_id": "ci-gate-v1",
+  "description": "CI 评估门禁基线（#208 第⑤步）。运行协议 = 专用评估索引先删后建 + 确定性伪嵌入 hash-bigram-char-v1(dim=256) + 无 LLM；此文件是门禁的唯一真相——更新它等于接受一次行为变化，属显式 PR 行为（评审可见）。",
+  "tolerance": "0（固定协议下确定性：floor 实测≥基线、cap 实测≤基线，相等即通过）",
+  "protocol": {
+    "embedding_mode": "fake",
+    "embedding_impl": "hash-bigram-char-v1 (dim=256)",
+    "dataset_id": "docmind_clause_v1",
+    "dataset_version": 1,
+    "top_k": 5,
+    "index": "docmind_knowledge_eval_ci_v1",
+    "es_version": "8.11.0",
+    "corpus_chunks": {
+      "01-knowledge-base-policy.md": 17,
+      "02-incident-response-handbook.md": 11
+    },
+    "seed": "recreate(先删后建) → bulk → refresh → 回读 count==写入块数 且 distinct doc==语料文件数"
+  },
+  "stamped_at": "2026-10-09T06:21:34+00:00",
+  "stamped_note": "由 python -m evals compare --update-baseline 生成",
+  "metrics": {
+    "clause_hit@1": {
+      "kind": "floor",
+      "value": 0.8
+    },
+    "clause_hit@3": {
+      "kind": "floor",
+      "value": 0.84
+    },
+    "clause_hit@5": {
+      "kind": "floor",
+      "value": 0.84
+    },
+    "near_miss@5": {
+      "kind": "cap",
+      "value": 0.16666666666666666
+    },
+    "mrr": {
+      "kind": "floor",
+      "value": 0.82
+    },
+    "empty_accuracy": {
+      "kind": "floor",
+      "value": 1.0
+    },
+    "errors": {
+      "kind": "cap",
+      "value": 0
+    }
+  }
+}

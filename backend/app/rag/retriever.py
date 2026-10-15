@@ -66,6 +66,42 @@ def _minimum_should_match_for(query_text: str) -> int | str:
     return max(1, base * 30 // 100)
 
 
+# ---- #208 Phase 2 环 C：keyword 臂语料术语表（corpus-derived glossary） ----
+
+# 由 `backend/evals/corpus/` 的 bigram 统计按冻结规则 FR-1 推得的前 16 名
+# （2026-10-09 预注册，脚本 `_orchestrate/round2/_ringc_glossary_stats.py`，
+# 完整排序表 `_ringc_glossary_table.tsv`）：
+#   score(bigram) = body_count + 0.3 × heading_count（标题位折扣 0.3，
+#   heading = 行首 `#` 标题行；计数按出现次数、重叠窗口；排序 score↓→body↓→heading↓→码点↑；
+#   取前 16）。规则只用语料数据推表——不引用评测集（golden set）、不针对任何具体查询。
+# 机制 3 实测（PR #325 前）：keyword 臂按查询序截前 12 项，带《…》全称的查询里
+# 标题 bigram 占 8 位，内容 bigram 被截断出列表、overlap 分子结构性归零；
+# 环 C：改为「语料表成员优先 + 上限 16」（见 _keyword_arm_terms）。
+_CORPUS_GLOSSARY: tuple[str, ...] = (
+    "文档", "数据", "知识", "组织", "故障", "识库", "告警", "恢复",
+    "服务", "的文", "负责", "响应", "成员", "演练", "上传", "保留",
+)
+
+# keyword 臂术语表上限（机制 3 旧值 12；环 C 起 16）。
+_KEYWORD_TERM_CAP = 16
+
+
+def _keyword_arm_terms(query: str) -> list[str]:
+    """keyword 臂术语选择（#208 Phase 2 环 C）：语料术语表优先 + 上限 16。
+
+    把查询的全部术语（不先行截断）按「是否属于语料术语表 `_CORPUS_GLOSSARY`」分两档
+    ——表内成员（按查询序）在前、其余（按查询序）在后——再截到 ≤ `_KEYWORD_TERM_CAP`。
+    表由语料统计（FR-1）推得，与评测集无关；选择规则不引用任何具体查询。
+    查询术语 ≤12 项时与旧口径的集合相同（仅排序不同，overlap 判定与序无关）；
+    仅用于 keyword 臂 post-process 的 overlap/术语匹配口径——`extract_query_terms`
+    对其它调用方（context_compressor / agent core_tools）的默认行为保持不变。
+    """
+    raw = extract_query_terms(query, limit=None)
+    in_glossary = [t for t in raw if t in _CORPUS_GLOSSARY]
+    rest = [t for t in raw if t not in _CORPUS_GLOSSARY]
+    return (in_glossary + rest)[:_KEYWORD_TERM_CAP]
+
+
 # ---- #208 Phase 2 决策 c：`第X条` 数形互为扩展（查询侧同义扩展；不动索引/种子） ----
 
 # 「第X条」跨度（X = 阿拉伯数字或中文数词；允许「第 9 条」空格写法）。
@@ -520,7 +556,9 @@ class HybridRetriever:
 
         documents = []
         seen_docs: dict[str, int] = {}
-        query_terms = extract_query_terms(query)
+        # #208 Phase 2 环 C：overlap 口径改用「语料术语表优先 + 上限 16」的术语选择
+        # （机制 3 修复点；见 _keyword_arm_terms 与 _CORPUS_GLOSSARY）。
+        query_terms = _keyword_arm_terms(query)
         raw_scores = [float(h.get("_score", 0)) for h in fused_hits]
         score_min, score_max = (min(raw_scores), max(raw_scores)) if raw_scores else (0, 0)
         now_ts = time.time()

@@ -6,6 +6,10 @@
 - #12 错误 JSON 不得被当"分析结果"写进报告（生产者结构化失败 + 消费端先校验；
       合法 JSON 含 "Error..." 字样不得被误伤 —— #297 教训的对照用例）
 - #13 经验库加载失败不得置 _loaded（下次访问可重试，不必重启）
+- 批次 2（家族尾巴）：复合技能消费点全面弃用 `"Error" not in x` 字符串启发式
+  （execute_detailed 结构化判定 + {"error": ...} 信封结构判定）；cross 错误
+  载荷漏进 document_comparison 报告的主账闭合；审查 error 文案按
+  no_verdict/service_error 细分；AgentMemorySystem 的 _loaded（#13 同族）。
 
 断言的对象是外在可观察面：事件字段、ctx 决策、run report 文本、经验库写入、
 工具返回值形态、store 的加载状态。
@@ -397,7 +401,11 @@ class TestExtractInsightsHonesty:
 
 
 class _FakeExecuteRecorder:
-    """按工具名返回预置结果，并记录调用（给复合技能当 tool_registry.execute 替身）。"""
+    """按工具名返回预置结果，并记录调用（给复合技能当 tool_registry.execute_detailed 替身）。
+
+    mapping 值可以是 str（包装为 ToolResult.ok 成功载荷）、ToolResult（原样返回，
+    用于模拟结构化失败/异常形态）或 callable(arguments)。
+    """
 
     def __init__(self, mapping):
         self.mapping = mapping
@@ -406,7 +414,8 @@ class _FakeExecuteRecorder:
     async def __call__(self, name, arguments, **context):
         self.calls.append(name)
         value = self.mapping.get(name, "")
-        return value(arguments) if callable(value) else value
+        value = value(arguments) if callable(value) else value
+        return value if isinstance(value, ToolResult) else ToolResult.ok(data=value)
 
 
 class TestSkillConsumersHonesty:
@@ -424,7 +433,7 @@ class TestSkillConsumersHonesty:
             "extract_insights": error_json,
             "generate_report": "报告已生成",
         })
-        monkeypatch.setattr(tool_registry, "execute", fake)
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("分析f.md的财务情况")
 
@@ -450,7 +459,7 @@ class TestSkillConsumersHonesty:
             "extract_insights": no_anchor,
             "generate_report": "报告已生成",
         })
-        monkeypatch.setattr(tool_registry, "execute", fake)
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("分析")
 
@@ -458,7 +467,30 @@ class TestSkillConsumersHonesty:
         assert "generate_report" not in fake.calls
 
     @pytest.mark.asyncio
-    async def test_knowledge_analysis_skips_toolresult_fail_string(self, monkeypatch):
+    async def test_knowledge_analysis_skips_toolresult_fail(self, monkeypatch):
+        """结构化失败（success=False）经 execute_detailed 可见 → 拒收（批次 2）。"""
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "search_knowledge_base": "- ID: doc1 | 文件名: f.md",
+            "extract_insights": ToolResult.fail(
+                "document_not_found", "Document doc1 not found in index."
+            ),
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.knowledge_analysis("分析")
+        assert "not found in index" not in out
+        assert "洞察提取失败" in out
+
+    @pytest.mark.asyncio
+    async def test_knowledge_analysis_skips_string_form_fail(self, monkeypatch):
+        """#293 字符串形态（包装成成功载荷的 "Error: [code] ..."）同样不得消费。
+
+        extract_insights 的成功形态恒为 JSON 对象（"insights" 结构锚），
+        以 "Error: " 开头的非 JSON 字符串不可能是合法成功载荷。
+        """
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
@@ -466,7 +498,7 @@ class TestSkillConsumersHonesty:
             "search_knowledge_base": "- ID: doc1 | 文件名: f.md",
             "extract_insights": "Error: [document_not_found] Document doc1 not found in index.",
         })
-        monkeypatch.setattr(tool_registry, "execute", fake)
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("分析")
         assert "not found in index" not in out
@@ -488,7 +520,7 @@ class TestSkillConsumersHonesty:
             "extract_insights": lambda args: ok_payload if args["document_id"] == "doc1" else error_json,
             "generate_report": "报告已生成",
         })
-        monkeypatch.setattr(tool_registry, "execute", fake)
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("对比", generate_report=False)
 
@@ -507,12 +539,457 @@ class TestSkillConsumersHonesty:
             "extract_insights": error_json,
             "cross_document_analysis": "跨文档分析正文",
         })
-        monkeypatch.setattr(tool_registry, "execute", fake)
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.document_comparison(["doc1", "doc2"])
 
         assert "Analysis failed" not in out
         assert "洞察提取失败" in out
+
+
+# ── #301 批次 2（家族尾巴）：结构判定升级 + 信任边界 + 文案细分 ──────────────
+
+
+class TestLegacyErrorEnvelopeHelper:
+    """`_legacy_error_envelope` 结构判定电池（只认顶层 error 真值键）。"""
+
+    def test_top_level_error_key_detected(self):
+        from app.agent.tools.skills import _legacy_error_envelope
+
+        assert _legacy_error_envelope('{"error": "boom"}') is True
+        assert _legacy_error_envelope(
+            '  \n{"document_count": 2, "error": "Analysis failed: ES down", "documents": []}'
+        ) is True
+
+    def test_non_envelopes_pass(self):
+        from app.agent.tools.skills import _legacy_error_envelope
+
+        # 空串 error 不是失败标记
+        assert _legacy_error_envelope('{"error": ""}') is False
+        # 合法分析载荷（error 词只在嵌套正文）不受影响
+        assert _legacy_error_envelope('{"insights": {"claims": [{"claim": "Error rate declined"}]}}') is False
+        # 纯文本 / 前缀串 / 数组形态都不在此拒收（#297：不做内容启发式）
+        assert _legacy_error_envelope("Error: file not found (translated)") is False
+        assert _legacy_error_envelope('Error: [not_found] Document x not found.') is False
+        assert _legacy_error_envelope('[{"error": 1}]') is False
+        assert _legacy_error_envelope(None) is False
+        assert _legacy_error_envelope("") is False
+
+
+class TestSkillConsumptionGateStructured:
+    """六个消费点逐一判别：结构化失败/错误信封 → 拒收+标注；合法含词文本 → 照常。"""
+
+    # ── deep_research Step 1: web_search ──
+    @pytest.mark.asyncio
+    async def test_deep_research_web_structured_failure_annotated(self, monkeypatch):
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "web_search": ToolResult.fail("rate_limited", "Rate limit exceeded."),
+            "search_knowledge_base": "[1] (0.9) f.md\n知识库正文",
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.deep_research("市场趋势")
+        # 旧行为：失败被静默丢弃（`"Error" not in x` 截住后不落节、不标注）。
+        assert "Rate limit exceeded" not in out
+        assert "搜索服务暂不可用" in out
+        assert "知识库正文" in out, "另一路的合法结果照常消费"
+
+    @pytest.mark.asyncio
+    async def test_deep_research_web_error_envelope_rejected(self, monkeypatch):
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "web_search": json.dumps({"error": "quota exceeded"}),
+            "search_knowledge_base": "[1] (0.9) f.md\n知识库正文",
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.deep_research("市场趋势")
+        assert "quota exceeded" not in out
+        assert "搜索服务暂不可用" in out
+
+    @pytest.mark.asyncio
+    async def test_deep_research_consumes_legit_text_with_error_words(self, monkeypatch):
+        """误伤对照：合法搜索结果正文含 "Error" 词照常消费（旧子串启发式会误伤）。"""
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "web_search": "Web search results for: x\n[1] T\n    Error rate declined in 2025",
+            "search_knowledge_base": "[1] (0.9) Error budget report.md\n正文",
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.deep_research("市场趋势")
+        assert "Error rate declined" in out
+        assert "Error budget report.md" in out
+
+    @pytest.mark.asyncio
+    async def test_deep_research_kb_structured_failure_annotated(self, monkeypatch):
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "web_search": "Web search results for: x\n[1] T",
+            "search_knowledge_base": ToolResult.fail(
+                "knowledge_base_unavailable", "知识库检索服务暂不可用（kind=connection）"
+            ),
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.deep_research("市场趋势")
+        assert "kind=connection" not in out
+        assert "知识库检索暂不可用" in out
+
+    # ── document_comparison Step 1: get_document_info ──
+    @pytest.mark.asyncio
+    async def test_document_comparison_step1_structured_failure_annotated(self, monkeypatch):
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "get_document_info": ToolResult.fail("not_found", "Document doc1 not found."),
+            "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
+            "cross_document_analysis": "跨文档分析正文",
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.document_comparison(["doc1", "doc2"])
+        assert "not found." not in out
+        assert "无法获取文档信息: doc1" in out
+
+    @pytest.mark.asyncio
+    async def test_document_comparison_step1_consumes_not_found_words(self, monkeypatch):
+        """误伤对照：合法文档信息里含 "not found"/"Error" 词照常消费。"""
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "get_document_info": json.dumps(
+                {"id": "doc1", "filename": "why error rate not found in Q3.md"}
+            ),
+            "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
+            "cross_document_analysis": "跨文档分析正文",
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.document_comparison(["doc1", "doc2"])
+        assert "why error rate not found in Q3.md" in out
+
+    # ── document_comparison Step 3: cross_document_analysis（漏报主账） ──
+    @pytest.mark.asyncio
+    async def test_document_comparison_step3_rejects_error_envelope(self, monkeypatch):
+        """trustB 评审现场复现过的信任边界：cross 的 {"error": ...} 载荷不得漏进报告。"""
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        cross_err = json.dumps({
+            "document_count": 2,
+            "error": "Analysis failed: ES connection refused",
+            "documents": [{"filename": "a.md"}],
+        }, ensure_ascii=False)
+        fake = _FakeExecuteRecorder({
+            "get_document_info": json.dumps({"id": "doc1", "filename": "a.md"}),
+            "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
+            "cross_document_analysis": cross_err,
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.document_comparison(["doc1", "doc2"])
+        # 旧行为：小写 error 键躲过 `"Error" not in cross` → 原样写进报告。
+        assert "ES connection refused" not in out
+        assert "分析服务暂不可用" in out
+
+    @pytest.mark.asyncio
+    async def test_document_comparison_step3_structured_failure_rejected(self, monkeypatch):
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "get_document_info": json.dumps({"id": "doc1", "filename": "a.md"}),
+            "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
+            "cross_document_analysis": ToolResult.fail(
+                "analysis_failed", "Analysis failed: LLM boom"
+            ),
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.document_comparison(["doc1", "doc2"])
+        assert "LLM boom" not in out
+        assert "分析服务暂不可用" in out
+
+    @pytest.mark.asyncio
+    async def test_document_comparison_step3_consumes_legit_with_error_words(self, monkeypatch):
+        """误伤对照：合法跨文档分析正文含 "Error" 词照常消费。"""
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "get_document_info": json.dumps({"id": "doc1", "filename": "a.md"}),
+            "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
+            "cross_document_analysis": "跨文档分析：两份文档均提到 Error rate declined",
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.document_comparison(["doc1", "doc2"])
+        assert "Error rate declined" in out
+        assert "分析服务暂不可用" not in out
+
+    # ── knowledge_analysis Step 1: search_knowledge_base ──
+    @pytest.mark.asyncio
+    async def test_knowledge_analysis_step1_structured_failure_annotated(self, monkeypatch):
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "search_knowledge_base": ToolResult.fail(
+                "knowledge_base_unavailable", "知识库检索服务暂不可用（kind=connection）"
+            ),
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.knowledge_analysis("分析主题")
+        assert "kind=connection" not in out
+        assert "检索服务暂不可用" in out
+        # 检索失败 ≠ "未找到可分析的文档"（另一种事实）
+        assert "未找到可分析的文档" in out
+
+    @pytest.mark.asyncio
+    async def test_knowledge_analysis_step1_consumes_error_prefixed_snippet(self, monkeypatch):
+        """误伤对照：检索结果正文以 "Error:" 开头（文档内容）照常消费。"""
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "search_knowledge_base": "Error: file not found in config.txt（文档原文片段）",
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.knowledge_analysis("分析主题")
+        assert "Error: file not found in config.txt" in out
+
+    # ── knowledge_analysis Step 3: generate_report ──
+    @pytest.mark.asyncio
+    async def test_knowledge_analysis_step3_report_envelope_rejected(self, monkeypatch):
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "search_knowledge_base": "- ID: doc1 | 文件名: f.md",
+            "extract_insights": json.dumps(
+                {"filename": "f.md", "insights": {"claims": [{"claim": "c"}]}}
+            ),
+            "generate_report": json.dumps({"error": "Invalid sections JSON: boom"}),
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.knowledge_analysis("分析主题")
+        # 旧行为：小写 error 信封躲过 `"Error" not in report` → 漏进报告。
+        assert "Invalid sections JSON" not in out
+        assert "报告生成失败" in out
+
+    @pytest.mark.asyncio
+    async def test_knowledge_analysis_step3_report_consumed_when_ok(self, monkeypatch):
+        from app.agent.registry import tool_registry
+        from app.agent.tools import skills
+
+        fake = _FakeExecuteRecorder({
+            "search_knowledge_base": "- ID: doc1 | 文件名: f.md",
+            "extract_insights": json.dumps(
+                {"filename": "f.md", "insights": {"claims": [{"claim": "c"}]}}
+            ),
+            "generate_report": "# 报告正文：Error rate declined",
+        })
+        monkeypatch.setattr(tool_registry, "execute_detailed", fake)
+
+        out = await skills.knowledge_analysis("分析主题")
+        assert "报告正文" in out
+        assert "报告生成失败" not in out
+
+
+class TestReviewerErrorKindClassification:
+    """审查 error 两种情形按 error_kind 可辨识（model 侧 no_verdict vs 服务侧 service_error）。"""
+
+    @pytest.mark.asyncio
+    async def test_missing_recommendation_is_no_verdict_kind(self):
+        from app.agent.reviewer import Reviewer
+
+        reviewer = Reviewer(
+            _client_returning('{"overall_assessment": "看起来还行", "issues_found": []}'),
+            AgentConfig(),
+        )
+        review = await reviewer.review(_plan_with_failed_step(), {})
+
+        assert review["recommendation"] == "error"
+        assert review["error_kind"] == "no_verdict"
+        assert "recommendation" in str(review.get("error", ""))
+
+    @pytest.mark.asyncio
+    async def test_crash_is_service_error_kind(self):
+        from app.agent.reviewer import Reviewer
+
+        reviewer = Reviewer(_failing_client(RuntimeError("review model down")), AgentConfig())
+        review = await reviewer.review(_plan_with_failed_step(), {})
+
+        assert review["recommendation"] == "error"
+        assert review["error_kind"] == "service_error"
+
+    @pytest.mark.asyncio
+    async def test_non_json_content_is_no_verdict_kind(self):
+        """模型有响应但输出无法解析 → 模型侧未给出判定（不是服务崩了）。"""
+        from app.agent.reviewer import Reviewer
+
+        reviewer = Reviewer(_client_returning("请自行判断"), AgentConfig())
+        review = await reviewer.review(_plan_with_failed_step(), {})
+
+        assert review["recommendation"] == "error"
+        assert review["error_kind"] == "no_verdict"
+
+    @pytest.mark.asyncio
+    async def test_valid_review_has_no_error_kind(self):
+        from app.agent.reviewer import Reviewer
+
+        reviewer = Reviewer(
+            _client_returning('{"issues_found": [], "recommendation": "pass"}'),
+            AgentConfig(),
+        )
+        review = await reviewer.review(_plan_with_failed_step(), {})
+
+        assert review["recommendation"] == "pass"
+        assert "error_kind" not in review
+
+
+class TestReviewWordingDifferentiation:
+    """SSE/决策文案三态各自可辨识：模型未给判定 / 审查服务异常 / 正常 pass。"""
+
+    @pytest.mark.asyncio
+    async def test_no_verdict_wording_distinct(self):
+        reviewer = StubReviewer({
+            "issues_found": [],
+            "recommendation": "error",
+            "error_kind": "no_verdict",
+            "error": "模型返回的 JSON 缺少 recommendation 判定",
+        })
+        loop = make_loop(ScriptedReflector(["pass"]), reviewer=reviewer)
+        events = await drive(loop)
+
+        contents = [e.content or "" for e in events if e.type == "thinking"]
+        assert any("模型未给出判定" in c for c in contents)
+        assert not any("审查服务异常" in c for c in contents)
+        decisions = decisions_of(events)
+        reasoning = next(
+            d["reasoning"] for d in decisions
+            if d["phase"] == "review" and d["action"] == "error"
+        )
+        assert "模型未给出判定" in reasoning
+        assert "审查服务异常" not in reasoning
+
+    @pytest.mark.asyncio
+    async def test_service_error_wording_distinct(self):
+        reviewer = StubReviewer({
+            "issues_found": [],
+            "recommendation": "error",
+            "error_kind": "service_error",
+            "error": "review model down",
+        })
+        loop = make_loop(ScriptedReflector(["pass"]), reviewer=reviewer)
+        events = await drive(loop)
+
+        contents = [e.content or "" for e in events if e.type == "thinking"]
+        assert any("审查服务异常" in c for c in contents)
+        assert not any("模型未给出判定" in c for c in contents)
+
+    @pytest.mark.asyncio
+    async def test_unclassified_error_defaults_to_service_wording(self):
+        """未标注 error_kind 的自定义调用方按服务异常（保守、与旧文案一致）。"""
+        reviewer = StubReviewer({
+            "issues_found": [], "recommendation": "error", "error": "legacy caller",
+        })
+        loop = make_loop(ScriptedReflector(["pass"]), reviewer=reviewer)
+        events = await drive(loop)
+
+        contents = [e.content or "" for e in events if e.type == "thinking"]
+        assert any("审查服务异常" in c for c in contents)
+
+    @pytest.mark.asyncio
+    async def test_pass_has_no_unfinished_wording(self):
+        reviewer = StubReviewer()  # pass
+        loop = make_loop(ScriptedReflector(["pass"]), reviewer=reviewer)
+        events = await drive(loop)
+
+        contents = [e.content or "" for e in events if e.type == "thinking"]
+        assert not any("对抗审查未完成" in c for c in contents)
+
+
+_AMS_PAYLOAD = json.dumps({
+    "agent_id": "m6-src",
+    "interaction_count": 1,
+    "long_term": {"long_term": [{
+        "id": "m1", "content": "长期记忆一条", "memory_type": "long_term",
+        "importance": 0.9, "metadata": {}, "created_at": None,
+        "last_accessed": None, "access_count": 0,
+    }]},
+}, ensure_ascii=False)
+
+
+class TestAgentMemoryLoadRetry:
+    """#301 家族尾巴（m6，#13 同族）：AgentMemorySystem 加载失败不得置 _loaded。"""
+
+    @pytest.mark.asyncio
+    async def test_redis_outage_not_loaded_then_recovers_without_restart(self, monkeypatch):
+        from app.services.memory_service import AgentMemorySystem
+
+        ams = AgentMemorySystem(agent_id="m6-outage")
+        monkeypatch.setattr("app.core.redis.redis_client", _FakeRedis(ConnectionError("transient")))
+        await ams._load_from_redis()
+        # 旧行为：finally 无条件置位——加载失败被冒充成"已加载完毕"。
+        assert ams._loaded is False
+
+        # Redis 恢复（同进程，不重启）→ 下一次访问必须真的加载出来。
+        monkeypatch.setattr("app.core.redis.redis_client", _FakeRedis(_AMS_PAYLOAD))
+        await ams._load_from_redis()
+        assert ams._loaded is True
+        assert sum(len(v) for v in ams.long_term.memories.values()) == 1
+
+    @pytest.mark.asyncio
+    async def test_authoritative_empty_marks_loaded(self, monkeypatch):
+        from app.services.memory_service import AgentMemorySystem
+
+        ams = AgentMemorySystem(agent_id="m6-empty")
+        monkeypatch.setattr("app.core.redis.redis_client", _FakeRedis(None))
+
+        await ams._load_from_redis()
+        # Redis 明确答复"没有数据" → 确定性空库，可以置位。
+        assert ams._loaded is True
+
+    @pytest.mark.asyncio
+    async def test_corrupt_payload_not_loaded(self, monkeypatch):
+        from app.services.memory_service import AgentMemorySystem
+
+        ams = AgentMemorySystem(agent_id="m6-corrupt")
+        monkeypatch.setattr("app.core.redis.redis_client", _FakeRedis("{not json"))
+
+        await ams._load_from_redis()
+        # 载荷坏了 = "答不出来"，不得冒充确定性空库。
+        assert ams._loaded is False
+
+    @pytest.mark.asyncio
+    async def test_no_redis_configured_not_loaded_until_configured(self, monkeypatch):
+        from app.services.memory_service import AgentMemorySystem
+
+        ams = AgentMemorySystem(agent_id="m6-noredis")
+        monkeypatch.setattr("app.core.redis.redis_client", None)
+        await ams._load_from_redis()
+        assert ams._loaded is False
+
+        # 随后配置可用 → 下一次访问可加载（不因"曾未配置"被永久锁死）。
+        monkeypatch.setattr("app.core.redis.redis_client", _FakeRedis(_AMS_PAYLOAD))
+        await ams._load_from_redis()
+        assert ams._loaded is True
 
 
 # ── #13：经验库加载失败不置 _loaded（下次可重试） ───────────────────────────
