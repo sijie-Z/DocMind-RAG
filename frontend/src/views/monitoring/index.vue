@@ -420,11 +420,11 @@ let responseTimeChart: echarts.ECharts | null = null
 const emptySubtext = () => t('monitoring.noData')
 const subtextStyle = { color: '#9ca3af', fontSize: 12 }
 
-// CPU/内存趋势：后端无历史采样数据源（/monitoring/metrics/{type} 实际返回的是
-// HTTP 管道快照历史，元素键只有 request_count/response_time 等，无 cpu/memory；
-// dashboard.trends.system 恒为硬编码 []——monitoring.py:143 comment「待实现历史
-// 记录」）。按「不可推导→诚实空态」处理：画布写明「暂无数据」；若后端未来落
-// 系统指标采样，这里再接线（产品缺口已记录）。
+// CPU/内存趋势：后端系统指标采样已落地（fix/system-metrics-sampling @ af42e32）
+// ——dashboard.trends.system 与 /monitoring/metrics/system 现返回真实采样点
+// {timestamp(秒), cpu_percent, memory_percent}（ENABLE_MONITORING 门控）。
+// 由 loadData → updateSystemCharts 接线；采样未启用或暂无样本时为空数组，
+// 保持「暂无数据」诚实空态（不画假线）。
 const initCharts = () => {
   if (cpuChartRef.value) {
     cpuChart = echarts.init(cpuChartRef.value)
@@ -523,6 +523,35 @@ const updateMetricsCharts = async () => {
   }
 }
 
+/**
+ * 系统指标趋势（CPU/内存）接线：数据源 dashboard.trends.system —— 采样点
+ * {timestamp(秒), cpu_percent, memory_percent}（af42e32 实现报告逐字核对；
+ * 与 /metrics/system 同一信封但本图走 dashboard 既有响应，零额外请求）。
+ * timestamp×1000 转毫秒与前端时间轴既有约定一致；空数组 → 保持
+ * 「暂无数据」诚实空态（不画假线）。
+ */
+const updateSystemCharts = (
+  systemTrend: Array<{ timestamp: number; cpu_percent: number; memory_percent: number }> | undefined
+) => {
+  const points = Array.isArray(systemTrend) ? systemTrend : []
+
+  if (cpuChart) {
+    const cpuData = points.map((item) => [item.timestamp * 1000, item.cpu_percent])
+    cpuChart.setOption({
+      title: { subtext: points.length ? '' : emptySubtext() },
+      series: [{ data: cpuData }]
+    })
+  }
+
+  if (memoryChart) {
+    const memoryData = points.map((item) => [item.timestamp * 1000, item.memory_percent])
+    memoryChart.setOption({
+      title: { subtext: points.length ? '' : emptySubtext() },
+      series: [{ data: memoryData }]
+    })
+  }
+}
+
 const loadData = async () => {
   loading.value = true
   try {
@@ -551,6 +580,10 @@ const loadData = async () => {
 
     // 更新告警
     recentAlerts.value = alertsData.alerts || []
+
+    // 系统指标趋势（CPU/内存）：dashboard.trends.system 真实采样点
+    // （fix/system-metrics-sampling @ af42e32；空数组 → 诚实空态）
+    updateSystemCharts(dashboardData.trends?.system)
 
     // 更新时间范围相关的图表（请求/响应趋势：真实 {data: history[]}）
     await updateMetricsCharts()

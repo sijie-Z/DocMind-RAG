@@ -13,11 +13,14 @@ export default {
     saveSuccess: 'Saved successfully',
     deleteSuccess: 'Deleted successfully',
     close: 'Close',
+    actions: 'Actions'
   },
   profile: {
     basicInfo: 'Basic Information',
     username: 'Username',
+    email: 'Email',
     role: 'Role',
+    status: 'Status',
     roleAdmin: 'Administrator',
     roleUser: 'User',
     phone: 'Phone',
@@ -64,7 +67,9 @@ export default {
     },
     nickname: 'Nickname',
     placeholder: {
+      username: 'Please enter username',
       nickname: 'Please enter nickname',
+      email: 'Please enter email',
       phone: 'Please enter phone number',
       bio: 'Please enter bio',
       oldPassword: 'Please enter current password',
@@ -100,7 +105,11 @@ export default {
     roleUser: 'User',
     roleAdmin: 'Administrator',
     deleteConfirm: 'Confirm delete this user?',
-    deleteConfirmWithName: 'Are you sure you want to delete user {username}? This action cannot be undone.'
+    deleteConfirmWithName: 'Are you sure you want to delete user {username}? This action cannot be undone.',
+    subtitle: 'Manage all users and their permissions',
+    noData: 'No user data',
+    selectOrgs: 'Select organizations',
+    initialPassword: 'Initial Password'
   },
   org: {
     title: 'Organization Structure',

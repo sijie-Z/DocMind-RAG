@@ -15,11 +15,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
+import { createI18n } from 'vue-i18n'
 import { NMessageProvider, NSpin, NButton, NTooltip, NIcon } from 'naive-ui'
 import { createPinia, setActivePinia } from 'pinia'
 
 import AgentView from '../index.vue'
 import { useAgentStore } from '@/stores/agent'
+import zh from '@/locales/zh'
 
 const { agentApiMock } = vi.hoisted(() => ({
   agentApiMock: {
@@ -50,11 +52,18 @@ const stubs = {
   SessionSelector: true,
   AgentInput: true,
   Markdown: true,
+  // replay 支线并入后的新子组件（装配对齐：n-popover 未注册时子组件会被直接渲染）
+  RecentTaskList: true,
+  ReplayTimeline: true,
   NSpin: true,
   NButton: true,
   NTooltip: true,
   NIcon: true,
 }
+
+// replay 支线给 AgentView 引入 useI18n()——mount 必须装 zh i18n 实例
+// （仓内先例：searchResultsRender/monitoringContract 等）
+const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
 
 // 真实响应 fixture（字段逐字对齐 agent.py 各端点）
 const TOOLS = [
@@ -71,7 +80,7 @@ async function setupView() {
   setActivePinia(pinia)
   const store = useAgentStore()
   const wrapper = mount(Host, {
-    global: { plugins: [pinia], components: { NSpin, NButton, NTooltip, NIcon }, stubs },
+    global: { plugins: [pinia, i18n], components: { NSpin, NButton, NTooltip, NIcon }, stubs },
   })
   await flushPromises()
   return { wrapper, store }

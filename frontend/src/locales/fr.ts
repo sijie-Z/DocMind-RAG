@@ -12,11 +12,14 @@ export default {
     refresh: 'Actualiser',
     saveSuccess: 'Enregistré avec succès',
     deleteSuccess: 'Supprimé avec succès',
+    actions: 'Actions'
   },
   profile: {
     basicInfo: 'Informations de base',
     username: 'Nom d\'utilisateur',
+    email: 'E-mail',
     role: 'Rôle',
+    status: 'Statut',
     roleAdmin: 'Administrateur',
     roleUser: 'Utilisateur',
     phone: 'Téléphone',
@@ -61,7 +64,9 @@ export default {
     },
     nickname: 'Pseudo',
     placeholder: {
+      username: 'Entrez votre nom d\'utilisateur',
       nickname: 'Entrez votre pseudo',
+      email: 'Entrez votre e-mail',
       phone: 'Entrez votre numéro de téléphone',
       bio: 'Entrez votre biographie',
       oldPassword: 'Entrez votre mot de passe actuel',
@@ -93,7 +98,12 @@ export default {
     organizations: 'Organisations',
     roleUser: 'Utilisateur',
     roleAdmin: 'Administrateur',
-    deleteConfirm: 'Voulez-vous supprimer cet utilisateur ?'
+    deleteConfirm: 'Voulez-vous supprimer cet utilisateur ?',
+    deleteConfirmWithName: 'Voulez-vous vraiment supprimer l\'utilisateur {username} ? Cette action est irréversible.',
+    subtitle: 'Gérer toutes les informations et permissions des utilisateurs',
+    noData: 'Aucune donnée utilisateur',
+    selectOrgs: 'Sélectionnez les organisations',
+    initialPassword: 'Mot de passe initial'
   },
   org: {
     title: 'Organigramme',

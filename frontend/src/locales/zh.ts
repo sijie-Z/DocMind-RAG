@@ -22,7 +22,9 @@ export default {
   profile: {
     basicInfo: '基本信息',
     username: '用户名',
+    email: '邮箱',
     role: '角色',
+    status: '状态',
     roleAdmin: '管理员',
     roleUser: '普通用户',
     phone: '手机号',
@@ -69,7 +71,9 @@ export default {
     },
     nickname: '昵称',
     placeholder: {
+      username: '请输入用户名',
       nickname: '请输入昵称',
+      email: '请输入邮箱',
       phone: '请输入手机号',
       bio: '请输入个人简介',
       oldPassword: '请输入当前密码',
@@ -105,7 +109,11 @@ export default {
     roleUser: '普通用户',
     roleAdmin: '管理员',
     deleteConfirm: '确认删除该用户吗？',
-    deleteConfirmWithName: '确定要删除用户 {username} 吗？此操作不可撤销。'
+    deleteConfirmWithName: '确定要删除用户 {username} 吗？此操作不可撤销。',
+    subtitle: '管理系统内的所有用户信息及其权限',
+    noData: '暂无用户数据',
+    selectOrgs: '请选择所属组织',
+    initialPassword: '初始密码'
   },
   org: {
     title: '组织架构',

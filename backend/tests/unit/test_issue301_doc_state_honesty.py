@@ -135,6 +135,11 @@ def _processor_with_fakes(monkeypatch, parse_result=None, parse_error=None):
     async def fake_release(document_id):
         pass
 
+    async def fake_graph(doc, chunks_data):
+        # 图谱抽取（a8a3d155）：成功路径的尽力而为步骤，非本文件主题；
+        # 隔离真实 Redis/LLM I/O，接线契约见 test_doc_processor_graph_wiring.py。
+        pass
+
     processor._acquire_processing_lock = fake_lock
     processor._load_and_mark_parsing = fake_load
     monkeypatch.setattr(processor.parser, "parse_document", fake_parse)
@@ -143,6 +148,7 @@ def _processor_with_fakes(monkeypatch, parse_result=None, parse_error=None):
     processor._mark_success = fake_success
     processor._mark_failed = fake_failed
     processor._release_processing_lock = fake_release
+    processor._extract_graph_safely = fake_graph
     return processor, events
 
 

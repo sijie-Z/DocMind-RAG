@@ -12,11 +12,14 @@ export default {
     refresh: '更新',
     saveSuccess: '保存に成功しました',
     deleteSuccess: '削除に成功しました',
+    actions: '操作'
   },
   profile: {
     basicInfo: '基本情報',
     username: 'ユーザー名',
+    email: 'メールアドレス',
     role: '役割',
+    status: '状態',
     roleAdmin: '管理者',
     roleUser: '一般ユーザー',
     phone: '電話番号',
@@ -61,7 +64,9 @@ export default {
     },
     nickname: 'ニックネーム',
     placeholder: {
+      username: 'ユーザー名を入力',
       nickname: 'ニックネームを入力',
+      email: 'メールアドレスを入力',
       phone: '電話番号を入力',
       bio: '自己紹介を入力',
       oldPassword: '現在のパスワードを入力',
@@ -93,7 +98,12 @@ export default {
     organizations: '所属組織',
     roleUser: '一般ユーザー',
     roleAdmin: '管理者',
-    deleteConfirm: 'このユーザーを削除しますか？'
+    deleteConfirm: 'このユーザーを削除しますか？',
+    deleteConfirmWithName: 'ユーザー「{username}」を削除しますか？この操作は取り消せません。',
+    subtitle: 'システム内の全ユーザー情報と権限を管理',
+    noData: 'ユーザーデータがありません',
+    selectOrgs: '所属組織を選択',
+    initialPassword: '初期パスワード'
   },
   org: {
     title: '組織図',

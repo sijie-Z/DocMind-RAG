@@ -68,7 +68,7 @@ const flatBody = (users: unknown[], total?: number) => ({
   data: { total: total ?? users.length, skip: 0, limit: 100, users },
 })
 
-// naive-ui 组件内部 name 无 N 前缀；DataTable 以轻量桩渲染行/列文本
+// naive-ui 组件内部 name 无 N 前缀；DataTable 以轻量桩渲染行/列文本（含表头）
 const DataTableStub = defineComponent({
   name: 'DataTable',
   props: {
@@ -78,10 +78,15 @@ const DataTableStub = defineComponent({
   },
   setup(props) {
     return () =>
-      h(
-        'div',
-        { class: 'dt-stub' },
-        (props.data as Record<string, unknown>[]).map((row, ri) =>
+      h('div', { class: 'dt-stub' }, [
+        h(
+          'div',
+          { class: 'dt-head' },
+          (props.columns as Array<Record<string, unknown>>).map((col, ci) =>
+            h('span', { class: 'dt-hcell', key: ci }, typeof col?.title === 'string' ? (col.title as string) : '')
+          )
+        ),
+        ...(props.data as Record<string, unknown>[]).map((row, ri) =>
           h(
             'div',
             { class: 'dt-row', key: ri },
@@ -93,8 +98,8 @@ const DataTableStub = defineComponent({
               }
             )
           )
-        )
-      )
+        ),
+      ])
   },
 })
 
@@ -201,5 +206,22 @@ describe('UsersView · 列表契约（A1/B18/B19/B21）', () => {
 
     expect(wrapper.findAll('.dt-row')).toHaveLength(0)
     expect(wrapper.text()).toContain('暂无用户数据')
+  })
+
+  it('表头渲染中文标签而非裸 i18n 键（K2：profile.email / profile.status 曾直出）', async () => {
+    mockedGetUsers.mockResolvedValue(flatBody([ADMIN]) as never)
+    const wrapper = mountView()
+    await flushPromises()
+
+    const head = wrapper.find('.dt-head').text()
+    expect(head).toContain('用户名')
+    expect(head).toContain('邮箱')
+    expect(head).toContain('状态')
+    expect(head).toContain('操作')
+    // 判别：任何裸键名不得上屏（含表单/弹窗引用族）
+    expect(wrapper.text()).not.toMatch(/profile\.[a-z]/)
+    expect(wrapper.text()).not.toMatch(/users\.[a-z]/)
+    expect(wrapper.text()).not.toMatch(/common\.[a-z]/)
+    expect(wrapper.text()).not.toMatch(/validation\.[a-z]/)
   })
 })

@@ -20,8 +20,10 @@ export interface KnowledgeBase {
   raw_status?: string
   created_at: string
   updated_at: string
-  // 六值域真源：backend knowledge.py:131-139 status_map（INDEXED → 'completed'）
-  status: 'pending' | 'uploaded' | 'parsing' | 'parsed' | 'completed' | 'failed'
+  // 列表端点词表（knowledge.py:131-139 status_map，INDEXED → 'completed'）；
+  // 详情端点（documents.py:296-303）同义词 'indexed'，viewKnowledge 合并详情后
+  // 可能出现 —— 两词表均受支持（docDisplay 统一映射）
+  status: 'pending' | 'uploaded' | 'parsing' | 'parsed' | 'completed' | 'indexed' | 'failed'
 }
 
 export interface KnowledgeBaseListResponse {
