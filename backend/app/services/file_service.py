@@ -16,7 +16,7 @@ from sqlalchemy import and_, func, select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.minio_client import minio_client
-from app.exceptions import ValidationError
+from app.exceptions import AppError, ValidationError
 from app.models.document import Document, DocumentStatus, DocumentType
 from app.services.document_parser import DocumentParser
 
@@ -34,11 +34,22 @@ _ALLOWED_MIME_TYPES = {
     "text/plain": {".txt", ".md", ".csv"},
     "text/markdown": {".md"},
     "text/csv": {".csv"},
+    # 图片（round2 后端卫生修复②）：解析链已接图片（document_parser 按扩展名
+    # 分发 _parse_image，OCR 支线）；/files/upload 与分块上传的白名单同步放行，
+    # 与主端点 /documents/upload（本就无类型闸门）口径一致。mime 串为 filetype
+    # 库实测值（image/png|jpeg|gif|webp|bmp）。
+    "image/png": {".png"},
+    "image/jpeg": {".jpg", ".jpeg"},
+    "image/gif": {".gif"},
+    "image/webp": {".webp"},
+    "image/bmp": {".bmp"},
 }
 
-# 头像专用 MIME 表（媒体审计 §3.4：头像扩展名白名单已放行图片，但共用文档
-# MIME 表（无 image/*）导致真图片必 500）。覆盖前端 accept="image/*" 的主要
-# 格式，与 allowed_avatar_extensions 一一对应；文档路径不受影响。
+# 头像专用 MIME 表（媒体审计 §3.4：头像扩展名白名单已放行图片，但当时共用的
+# 文档 MIME 表无 image/* 导致真图片必 500）。覆盖前端 accept="image/*" 的主要
+# 格式，与 allowed_avatar_extensions 一一对应。round2 卫生修复②后文档表同样
+# 放行图片（解析链已接 OCR）——此表保留的差异是**收窄**：头像路径只收图片，
+# 不收文档格式。
 _ALLOWED_AVATAR_MIME_TYPES = {
     "image/png": {".png"},
     "image/jpeg": {".jpg", ".jpeg"},
@@ -55,7 +66,10 @@ class FileUploadService:
         # 该值是服务端接收分块的合法上限与总块数派生基准（upload_chunk）。
         self.chunk_size = settings.CHUNK_SIZE
         self.allowed_extensions = {
-            '.pdf', '.docx', '.xlsx', '.xls', '.txt', '.md', '.csv'
+            '.pdf', '.docx', '.xlsx', '.xls', '.txt', '.md', '.csv',
+            # 图片（round2 后端卫生修复②）：OCR 支线解析链已支持，
+            # 与主端点 /documents/upload 口径对齐
+            '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp',
         }
         self.allowed_avatar_extensions = {
             '.jpg', '.jpeg', '.png', '.gif', '.webp'
@@ -99,7 +113,8 @@ class FileUploadService:
 
         Raises ValidationError if the detected MIME type doesn't match the file extension
         or is not in the allowed list. ``is_avatar=True`` 时使用头像专用 MIME 表
-        （含 image/png|jpeg|gif|webp），文档路径继续使用不含 image/* 的文档表。
+        （只收 image/png|jpeg|gif|webp）；文档路径使用文档表（round2 卫生修复②
+        起同样含 image/png|jpeg|gif|webp|bmp）。
         """
         try:
             import filetype
@@ -316,7 +331,11 @@ class FileUploadService:
                 "upload_time": document.created_at.isoformat()
             }
 
-        except HTTPException:
+        except (HTTPException, AppError):
+            # 校验类失败（扩展名/大小 → HTTPException 400；MIME 不符 →
+            # ValidationError 400）与其它控制流异常原样放行，不得被下面的
+            # except Exception 重包成 500（round2 后端卫生修复③；issue #98
+            # 同款原则，见 tests/unit/test_control_flow_exception_passthrough.py）。
             raise
         except Exception as e:
             logger.error(f"文件上传失败: {filename}, 错误: {str(e)}")
@@ -360,7 +379,8 @@ class FileUploadService:
             return await self._upload_to_minio(content, object_name, file.content_type or "image/jpeg")
 
 
-        except HTTPException:
+        except (HTTPException, AppError):
+            # 与 upload_file 同款：校验类失败必须诚实 4xx（round2 卫生修复③）
             raise
         except Exception as e:
             logger.error(f"头像上传失败: {str(e)}")
@@ -454,7 +474,8 @@ class FileUploadService:
                 "message": f"分块 {chunk_index + 1}/{total_chunks} 上传成功"
             }
 
-        except HTTPException:
+        except (HTTPException, AppError):
+            # 与 upload_file 同款：校验类失败必须诚实 4xx（round2 卫生修复③）
             raise
         except Exception as e:
             logger.error(f"分块上传失败: {file_name}, 分块 {chunk_index}, 错误: {str(e)}")
@@ -527,6 +548,11 @@ class FileUploadService:
             # 调用普通上传方法
             return await self.upload_file(mock_file, organization_id, user_id)
 
+        except (HTTPException, AppError):
+            # 合并阶段复用的校验（扩展名/大小/MIME）失败必须原样上抛——
+            # 此前统一重包成裸 Exception，把上游的 400 语义打碎成 500
+            # （round2 后端卫生修复③）。
+            raise
         except Exception as e:
             logger.error(f"合并文件处理失败: {file_name}, 错误: {str(e)}")
             raise Exception(f"合并文件处理失败: {str(e)}")
@@ -569,6 +595,14 @@ class FileUploadService:
             '.txt': 'text/plain',
             '.md': 'text/markdown',
             '.csv': 'text/csv',
+            # 图片（round2 卫生修复②）：分块合并路径经此派生 MockUploadFile 的
+            # content_type，落 MinIO 时不再退化成 application/octet-stream
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp',
+            '.bmp': 'image/bmp',
         }
         return content_type_map.get(file_extension, 'application/octet-stream')
 

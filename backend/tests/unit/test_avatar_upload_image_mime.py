@@ -8,8 +8,8 @@
   {.jpg,.jpeg,.png,.gif,.webp}；
 - 但 _validate_mime_type 共用**文档** MIME 表 _ALLOWED_MIME_TYPES（无任何
   image/*）→ 魔术字节识别出 image/png 后直接拒绝 → 端点在赋值前炸成 500。
-  （与 test_file_service.py::test_unsupported_image_types_removed 的
-  文档白名单断言不冲突：文档路径必须保持无 image/*，头像走专用表。）
+  （K 支线当时文档路径保持无 image/*；round2 后端卫生修复②后文档表也放行
+  图片——解析链已接 OCR——本文件的对应断言已随修复②更新。）
 
 修复：_validate_mime_type 增 is_avatar 分支用 _ALLOWED_AVATAR_MIME_TYPES，
 upload_avatar 传 is_avatar=True；文档白名单原样不动。
@@ -20,7 +20,6 @@ upload_avatar 传 is_avatar=True；文档白名单原样不动。
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
 
 from app.exceptions import ValidationError
 from app.services.file_service import _ALLOWED_MIME_TYPES, FileUploadService
@@ -82,22 +81,24 @@ class TestAvatarUploadImageMime:
             svc._validate_mime_type(PNG_BYTES, "avatar.jpg", is_avatar=True)
 
     @pytest.mark.asyncio
-    async def test_mismatch_avatar_end_to_end_rejected(self, svc):
-        """端到端：不符内容仍拒绝（状态码为既有 500 包裹行为，与文档路径
-        upload_file 同款 except 链；本次只修「真图片被判非法」的主 bug，不动
-        该状态码映射，留作已知残余）。"""
+    async def test_mismatch_avatar_end_to_end_rejected_as_400(self, svc):
+        """端到端：不符内容仍拒绝，且为诚实 4xx——round2 后端卫生修复③后
+        ValidationError(400) 在 service 与端点两层都原样放行（此前被 except
+        链包成 500；K 支线评审 medium 实锤，当时留作已知残余）。"""
         upload = _make_upload_file("avatar.jpg", PNG_BYTES, "image/jpeg")
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             await svc.upload_avatar(upload, user_id=1)
-        assert exc_info.value.status_code == 500
-        assert "doesn't match" in str(exc_info.value.detail)
+        assert exc_info.value.status_code == 400
+        assert "doesn't match" in str(exc_info.value.message)
 
-    def test_document_path_stays_image_free(self, svc):
-        """文档路径不得因头像修复而放行图片（守既有安全边界）。"""
-        with pytest.raises(ValidationError, match="not allowed"):
-            svc._validate_mime_type(PNG_BYTES, "report.png")
-        assert "image/png" not in _ALLOWED_MIME_TYPES
-        assert "image/jpeg" not in _ALLOWED_MIME_TYPES
+    def test_document_path_accepts_images_after_unification(self, svc):
+        """round2 后端卫生修复②：文档路径同步放行图片（解析链已接 OCR，
+        /files/upload 与主端点口径对齐）——真 PNG 内容通过 MIME 校验；
+        内容/扩展名一致性校验不放宽。"""
+        svc._validate_mime_type(PNG_BYTES, "report.png")
+        with pytest.raises(ValidationError, match="doesn't match"):
+            svc._validate_mime_type(PNG_BYTES, "report.jpg")
+        assert ".png" in _ALLOWED_MIME_TYPES["image/png"]
 
     def test_avatar_whitelist_covers_frontend_accept(self, svc):
         """头像专用 MIME 表覆盖前端 accept=image/* 的主要格式（png/jpeg/gif/webp）。"""
