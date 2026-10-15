@@ -3,7 +3,7 @@
   "files": {
     "api/workflow.ts": 1,
     "components/agent/AgentConfigPanel.vue": 16,
-    "components/agent/AgentInput.vue": 3,
+    "components/agent/AgentInput.vue": 4,
     "components/agent/ApprovalCard.vue": 11,
     "components/agent/PlanTree.vue": 8,
     "components/agent/RunReportBlock.vue": 1,
@@ -34,7 +34,7 @@
     "views/conversations/index.vue": 17,
     "views/dashboard/admin.vue": 13,
     "views/dashboard/user.vue": 23,
-    "views/firsthome/index.vue": 37,
+    "views/firsthome/index.vue": 38,
     "views/knowledge/components/KnowledgeDetailModals.vue": 14,
     "views/knowledge/components/KnowledgeUploadPanel.vue": 4,
     "views/knowledge/docDisplay.ts": 8,

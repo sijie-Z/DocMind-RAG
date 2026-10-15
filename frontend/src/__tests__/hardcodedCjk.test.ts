@@ -14,7 +14,7 @@
  * 变异点：任一新硬编码中文行 / 基线文件删条目后增长 → 对应断言红并点名。
  */
 import { describe, it, expect } from 'vitest'
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 const SRC = join(process.cwd(), 'src')
@@ -23,19 +23,35 @@ const CJK = /[㐀-䶿一-鿿]/
 
 /** 剥离注释：<!-- -->（Vue 模板）/ 块注释 / // 行注释（含行尾） */
 function stripComments(text: string, isVue: boolean): string {
-  let t = isVue ? text.replace(/<!--[\s\S]*?-->/g, '') : text
+  let t = isVue ? stripHtmlComments(text) : text
   t = t.replace(/\/\*[\s\S]*?\*\//g, '')
   t = t.replace(/\/\/.*$/gm, '')
   return t
+}
+
+/** 去除 HTML 注释：与 /<!--[\s\S]*?-->/g 等价的逐段扫描实现
+ * （仅用于计数，非安全语境；逐段扫描同时避免正则式多字符剥离的静态告警） */
+function stripHtmlComments(s: string): string {
+  let out = ''
+  let i = 0
+  for (;;) {
+    const a = s.indexOf('<!--', i)
+    if (a < 0) return out + s.slice(i)
+    const b = s.indexOf('-->', a + 4)
+    if (b < 0) return out + s.slice(i)
+    out += s.slice(i, a)
+    i = b + 3
+  }
 }
 
 /** 扫描 src：返回 { 相对路径: 含 CJK 行数 }，仅收录 > 0 的文件 */
 function scan(): Record<string, number> {
   const out: Record<string, number> = {}
   const walk = (dir: string): void => {
-    for (const name of readdirSync(dir).sort()) {
+    for (const ent of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const name = ent.name
       const p = join(dir, name)
-      if (statSync(p).isDirectory()) {
+      if (ent.isDirectory()) {
         if (name === '__tests__' || name === 'node_modules') continue
         walk(p)
         continue
