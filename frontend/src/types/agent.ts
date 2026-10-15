@@ -15,6 +15,9 @@ export type AgentEventType =
   | 'retry_hint'
   | 'warning'
   | 'error'
+  // HITL（人在环）：执行器停在审批点 / 协作式取消收敛（见后端 approval.py）
+  | 'approval_required'
+  | 'run_cancelled'
 
 export type ThinkingType = 'reasoning' | 'planning' | 'evaluation' | 'correction'
 // 六态真源：backend/app/agent/events.py:39-42（unavailable=评估服务不可用；
@@ -55,6 +58,62 @@ export interface AgentEvent {
   timestamp?: number
   message_id?: string      // from done event for feedback
   saved?: boolean          // done 事件：本轮会话落库是否成功（issue #301 批 D）
+  task_id?: string         // 任务级 checkpoint 关联 id（HITL：取消/审批/恢复的钥匙）
+  // HITL：done 事件如实盖章任务态（waiting_approval / cancelled 时出现）
+  task_state?: AgentTaskState
+}
+
+// ── HITL（人在环）─────────────────────────────────────────────────────────
+
+export type AgentTaskState =
+  | 'pending'
+  | 'running'
+  | 'waiting_tool'
+  | 'waiting_approval'
+  | 'waiting_human'
+  | 'failed'
+  | 'completed'
+  | 'abandoned'
+  | 'cancelled'
+
+/** 待审批请求（GET /tasks/{id} 的 data.approval；approval_required 事件同形）。 */
+export interface PendingApproval {
+  tool_name: string
+  tool_args?: Record<string, any>
+  tool_call_id?: string
+  args_hash?: string
+  risk_level?: string
+  reason?: string
+  step_id?: string
+  plan_id?: string
+  requested_at?: number
+  expires_at?: number | null
+  more_pending?: number
+}
+
+/** 任务状态视图（GET /agent/tasks/{id}）。 */
+export interface AgentTaskView {
+  task_id: string
+  state: AgentTaskState
+  is_recoverable: boolean
+  progress: number
+  completed_steps: number
+  total_steps: number | null
+  current_step_id: string | null
+  last_error: string | null
+  last_error_type: string | null
+  query: string
+  approval?: PendingApproval
+  approval_expired?: boolean
+}
+
+/** 审批应答（POST /agent/tasks/{id}/approval）。 */
+export interface ApprovalDecisionInput {
+  decision: 'approve' | 'deny'
+  /** 改指令续跑（仅 approve）：批准时附加的人工指导，注入后续步骤提示词。 */
+  modified_instruction?: string
+  /** 备注（拒绝理由等）。 */
+  note?: string
 }
 
 export interface PlanStep {

@@ -652,6 +652,10 @@ export default {
     metricDocuments: '知识文档',
     metricRole: '当前角色'
   },
+  hitl: {
+    cancelled: '已取消',
+    stopped: '已停止'
+  },
   router: {
     welcome: '欢迎',
     login: '登录',

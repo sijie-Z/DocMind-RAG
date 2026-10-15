@@ -496,6 +496,10 @@ export default {
     metricDocuments: 'Documents',
     metricRole: 'Rôle Actuel'
   },
+  hitl: {
+    cancelled: 'Annulé',
+    stopped: 'Arrêté'
+  },
   router: {
     welcome: 'Bienvenue',
     login: 'Connexion',

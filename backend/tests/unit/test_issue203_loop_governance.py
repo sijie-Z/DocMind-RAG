@@ -266,7 +266,8 @@ class _BudgetBurningExecutor:
         pass
 
     async def execute(self, plan, history=None, organization_id=1, user_id=0,
-                      enable_thinking=True, ctx=None, on_step_done=None):
+                      enable_thinking=True, ctx=None, on_step_done=None,
+                      human_guidance=""):
         for s in plan.steps:
             s.status = "completed"
             plan.completed_steps += 1

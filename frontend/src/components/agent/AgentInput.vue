@@ -22,9 +22,10 @@
       <button
         v-else
         class="stop-btn"
+        :disabled="stopping"
         @click="$emit('stop')"
       >
-        ⏹ 停止
+        {{ stopping ? '⏳ 停止中…' : '⏹ 停止' }}
       </button>
     </div>
     <div class="input-hint">
@@ -40,6 +41,8 @@ const props = defineProps<{
   placeholder?: string
   disabled?: boolean
   loading?: boolean
+  /** HITL：服务端取消已受理、等待 run 在检查点收敛（按钮显示"停止中…"）。 */
+  stopping?: boolean
 }>()
 
 const emit = defineEmits<{

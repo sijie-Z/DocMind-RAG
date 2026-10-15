@@ -496,6 +496,10 @@ export default {
     metricDocuments: 'ドキュメント',
     metricRole: '現在の役割'
   },
+  hitl: {
+    cancelled: 'キャンセル済み',
+    stopped: '停止済み'
+  },
   router: {
     welcome: 'ようこそ',
     login: 'ログイン',

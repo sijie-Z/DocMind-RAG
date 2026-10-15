@@ -22,8 +22,8 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from app.agent import approval
 from app.agent.config import AgentConfig
-from app.agent.escalation import EscalationConfig
 from app.agent.events import AgentEvent
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, PlanStep
@@ -107,14 +107,160 @@ class Executor:
         self._consecutive_low_gain: int = 0
         # Circuit breaker: skip steps after N consecutive failures
         self._consecutive_failures: int = 0
-        # Escalation counter: reset per request
-        self._escalation_config = EscalationConfig()
+        # ── HITL（见 app/agent/approval.py）：由 loop 在接上 checkpoint（task_id）
+        # 后每轮执行前接线；未接线（裸执行器 / 子代理 / toolless）时全部 no-op。──
+        # 审批暂停回调（返回 "paused"|"cancelled"|"unavailable"；见 _approval_precheck）。
+        self.approval_check: Callable[[approval.ApprovalRequest], Awaitable[str]] | None = None
+        # 协作式取消旗查询（True = 已请求取消）。
+        self.cancel_check: Callable[[], Awaitable[bool]] | None = None
+        # 本 run 的人类决定账本（(tool, args) → 粘滞 approve/deny；resume 时从快照回填）。
+        self.approval_decisions: list[dict[str, Any]] = []
+        # 审批暂停无法持久化（DB 故障）→ 本 run 降级：需审批调用直接结构化失败。
+        self.approval_degraded: bool = False
+        # 审批附加指令（"改指令续跑"）：注入后续步骤提示词（人工指导段）。
+        self.human_guidance: str = ""
+        # 控制流信号（"approval"/"cancel"）：置位后抛 ApprovalRequired/RunCancelled；
+        # loop 据此抑制"条件路由"并区分暂停/取消收尾。每 run 起始处复位。
+        self.pending_control: str = ""
 
     def reset_for_request(self) -> None:
         """Clear per-request state so a reused Executor doesn't leak across calls."""
         self._seen_fingerprints.clear()
         self._consecutive_low_gain = 0
         self._consecutive_failures = 0
+        # HITL：每 run 复位（loop 在 reset 后经 _arm_executor_hitl 重新接线——
+        # replan 轮同样重新接线，决定账本跨轮保持）。
+        self.approval_check = None
+        self.cancel_check = None
+        self.approval_decisions = []
+        self.approval_degraded = False
+        self.human_guidance = ""
+        self.pending_control = ""
+
+    # ── HITL helpers（approval.py）────────────────────────────────────────────
+
+    async def _cancel_requested(self) -> bool:
+        """取消旗查询；通道故障按"未取消"处理（取消通道打不坏正常执行）。"""
+        if self.cancel_check is None:
+            return False
+        try:
+            return bool(await self.cancel_check())
+        except Exception as e:
+            logger.warning("cancel check failed: %s", e)
+            return False
+
+    def _filter_executable_calls(
+        self,
+        tool_calls: list[Any],
+        allowed_tool_names: set[str] | None,
+    ) -> list[tuple[Any, dict[str, Any]]]:
+        """本回合**将实际执行**的调用（白名单通过 + 参数可解析）——审批预检扫描域。
+
+        与主循环的过滤条件保持一致：不在白名单 / JSON 非法的调用在执行前会被
+        各自的结构化失败分支拦下（不执行），因此不参与审批预检。
+        """
+        executable: list[tuple[Any, dict[str, Any]]] = []
+        for tc in tool_calls:
+            name = tc.function.name
+            if allowed_tool_names is not None and name not in allowed_tool_names:
+                continue
+            try:
+                args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+            except json.JSONDecodeError:
+                continue
+            executable.append((tc, args))
+        return executable
+
+    async def _approval_precheck(
+        self,
+        calls: list[tuple[Any, dict[str, Any]]],
+        plan: Plan,
+        step: PlanStep,
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """审批门预检（工具前暂停点）。**在本次任何调用执行之前**运行。
+
+        扫描将实际执行的调用：任何需要审批且 (tool, args) 没有粘滞决定的调用，
+        都必须在**任何**调用执行前处理——人类批准的对象是具体调用，先执行别的
+        调用再暂停会让重跑时的重复执行带上副作用。第一个未决调用触发暂停：
+
+        - 回调 "paused"（快照 + waiting_approval 已持久化）→ 发 approval_required
+          事件后抛 ApprovalRequired（本 run 平静结束，等人类应答）；
+        - 回调 "cancelled"（暂停前观察到取消旗）→ 抛 RunCancelled；
+        - 回调 "unavailable"（暂停无法持久化，如 DB 故障）→ 降级：本 run 内所有
+          需审批调用以结构化失败 approval_unavailable 物化（绝不静默执行）。
+
+        已决定（approve/deny 粘滞）的调用不触发暂停：approve 由主循环放行、
+        deny 由主循环物化为 approval_denied 结构化失败。
+        """
+        if self.approval_check is None:
+            return
+        mode = getattr(self.config, "approval_mode", "risky")
+        pending: tuple[Any, dict[str, Any]] | None = None
+        for tc, args in calls:
+            if not approval.requires_approval(mode, tc.function.name):
+                continue
+            if approval.find_decision(self.approval_decisions, tc.function.name, args) is not None:
+                continue
+            if pending is None:
+                pending = (tc, args)
+        if pending is None:
+            return
+
+        tc, args = pending
+        risk = approval.tool_risk_level(tc.function.name)
+        ttl = int(getattr(self.config, "approval_timeout_seconds", 0) or 0)
+        request = approval.ApprovalRequest(
+            tool_name=tc.function.name,
+            tool_args=args,
+            tool_call_id=getattr(tc, "id", "") or "",
+            risk_level=risk,
+            reason=approval.build_approval_reason(mode, tc.function.name, risk),
+            step_id=step.id if step is not None else "",
+            plan_id=plan.id if plan is not None else "",
+            expires_at=(time.time() + ttl) if ttl > 0 else None,
+        )
+        try:
+            outcome = await self.approval_check(request)
+        except Exception as e:
+            # 回调自身故障（理论不可达：loop 回调内部全兜）→ 同"无法持久化"。
+            logger.error("approval pause persistence failed: %s", e)
+            outcome = "unavailable"
+
+        if outcome == "cancelled":
+            self.pending_control = "cancel"
+            raise approval.RunCancelled()
+        if outcome == "paused":
+            yield AgentEvent(
+                type="approval_required",
+                content=request.reason,
+                tool_name=request.tool_name,
+                tool_args=request.tool_args,
+                tool_call_id=request.tool_call_id,
+                risk_level=request.risk_level,
+                plan_id=request.plan_id,
+                plan_step_id=request.step_id,
+            )
+            self.pending_control = "approval"
+            raise approval.ApprovalRequired(request)
+        # unavailable：暂停没有"回来的路"→ 本 run 降级，需审批调用全部失败化。
+        self.approval_degraded = True
+
+    def _gate_materialization(self, func_name: str, args: dict[str, Any]) -> str | None:
+        """已决定/降级调用的物化判定（主循环用）。
+
+        返回 None = 放行；"deny" = 人工拒绝（结构化失败 approval_denied）；
+        "unavailable" = 审批服务不可用降级（结构化失败 approval_unavailable）。
+        """
+        if self.approval_check is None:
+            return None
+        if not approval.requires_approval(getattr(self.config, "approval_mode", "risky"), func_name):
+            return None
+        decision = approval.find_decision(self.approval_decisions, func_name, args)
+        if decision is not None:
+            return "deny" if decision.get("decision") == "deny" else None
+        if self.approval_degraded:
+            return "unavailable"
+        return None
 
     async def execute(
         self,
@@ -125,6 +271,7 @@ class Executor:
         enable_thinking: bool = True,
         ctx: Any = None,  # ExecutionContext
         on_step_done: Callable[[PlanStep], Awaitable[None]] | None = None,
+        human_guidance: str = "",
     ) -> AsyncGenerator[AgentEvent, str]:
         """Execute plan steps in dependency order.
 
@@ -133,12 +280,21 @@ class Executor:
                 且状态回写完成后调用一次（issue #201 checkpoint 的 T2 触发点：
                 "硬杀最多退一步"的正确性主干）。子代理等不接 checkpoint 的
                 调用方传 None 即天然关闭。
+            human_guidance: HITL"改指令续跑"的人工指导（审批应答附加），注入
+                后续步骤提示词（见 _execute_step_once）。
 
         Yields: tool_call, tool_result, tool_error, thinking, chunk events
         Returns: accumulated final answer string (via generator return)
         """
+        if human_guidance:
+            self.human_guidance = human_guidance
 
         while not plan.is_complete:
+            # ── HITL：协作式取消（步间检查点）──
+            if await self._cancel_requested():
+                self.pending_control = "cancel"
+                raise approval.RunCancelled()
+
             ready_steps = plan.get_ready_steps()
 
             # ── DAG MODE: deadlock check (serial mode ignores dependencies) ──
@@ -665,6 +821,10 @@ class Executor:
     ) -> AsyncGenerator[AgentEvent, None]:
         """Execute a single attempt of a plan step."""
         step_start = time.perf_counter()
+        # HITL：协作式取消（步骤前检查点）——在发起本步 LLM 调用前观察取消旗。
+        if await self._cancel_requested():
+            self.pending_control = "cancel"
+            raise approval.RunCancelled()
         # issue #293 ②：本 attempt 内是否出现过工具失败——决定尾部是否还写
         # "completed" 记录。失败 attempt 不再伪造绿色记录；终态失败由
         # _execute_step_with_retry 的重试循环尽头统一落账。
@@ -726,6 +886,14 @@ class Executor:
 
         if error_context:
             system_prompt += f"\n\n⚠️ 上次执行失败，请调整策略：{error_context}"
+
+        # HITL"改指令续跑"：审批应答附加的人工指导（与用户请求同级注入——
+        # 指令来自人类本人，非不可信数据；截断防提示词膨胀）。
+        if self.human_guidance:
+            system_prompt += (
+                "\n\n## 人工指导（审批应答时附加，优先级等同用户请求）\n"
+                + self.human_guidance[:2000]
+            )
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
@@ -880,7 +1048,23 @@ class Executor:
             if self.config.tool_tags
             else None
         )
+        # ── HITL：取消检查 + 审批预检（工具前检查点）────────────────────────
+        # 顺序：取消优先（正在取消的 run 不该再进暂停），随后预检——它必须在
+        # **任何**调用执行前完成（见 _approval_precheck 的 docstring）。
+        if await self._cancel_requested():
+            self.pending_control = "cancel"
+            raise approval.RunCancelled()
+        gated_calls = self._filter_executable_calls(
+            message.tool_calls[:self.config.max_tool_calls_per_turn], allowed_tool_names,
+        )
+        async for gate_event in self._approval_precheck(gated_calls, plan, step):
+            yield gate_event
+
         for tc in message.tool_calls[:self.config.max_tool_calls_per_turn]:
+            # HITL：协作式取消（逐工具前检查点）——每个调用执行前观察一次。
+            if await self._cancel_requested():
+                self.pending_control = "cancel"
+                raise approval.RunCancelled()
             func = tc.function
             tool_call_id = tc.id or uuid.uuid4().hex[:16]
 
@@ -937,6 +1121,39 @@ class Executor:
                     "error_type": "serialization_error",
                 })
                 attempt_error_detail = f"工具参数不是合法 JSON，已拒绝执行：{e}"
+                continue
+
+            # ── HITL：审批决定物化（预检已保证没有未决调用能走到这里）──────
+            # deny：人工拒绝 → 该调用以结构化失败 approval_denied 喂给反思链路
+            # （粘滞：同 (tool, args) 在本 run 内不再执行、也不再打扰人类）；
+            # unavailable：暂停无法持久化 → 需审批调用一律不执行（绝不静默放行）。
+            gate = self._gate_materialization(func.name, args)
+            if gate is not None:
+                if gate == "deny":
+                    decision = approval.find_decision(self.approval_decisions, func.name, args) or {}
+                    note = decision.get("note") or ""
+                    denial = f"人工审批拒绝执行工具 {func.name}（approval_denied）"
+                    if note:
+                        denial += f"：{note}"
+                    error_type = "approval_denied"
+                else:
+                    denial = f"审批服务不可用（暂停状态无法持久化），工具 {func.name} 未执行"
+                    error_type = "approval_unavailable"
+                AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
+                yield AgentEvent(
+                    type="tool_error",
+                    tool_name=func.name,
+                    tool_call_id=tool_call_id,
+                    content=denial,
+                    plan_id=plan.id,
+                    plan_step_id=step.id,
+                    retry_attempt=getattr(step, "retry_count", 0),
+                    error_type=error_type,
+                )
+                tool_results.append({
+                    "tool": func.name, "result": denial, "error_type": error_type,
+                })
+                attempt_error_detail = denial
                 continue
 
             # Yield tool_call event

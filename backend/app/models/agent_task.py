@@ -31,40 +31,53 @@ from app.core.database import Base
 
 
 class TaskStatus(enum.Enum):
-    """Lifecycle states (§3.1 + §13.5-13.6).
+    """Lifecycle states (§3.1 + §13.5-13.6 + HITL).
 
-    pending   — queued, not yet started
-    running   — active coroutine
-    waiting_tool  — a tool is executing (potentially long)
-    waiting_human — blocked on human response
-    failed    — terminal: unrecoverable (can retry)
-    completed — terminal: succeeded
-    abandoned — terminal: user explicitly gave up
+    pending          — queued, not yet started
+    running          — active coroutine
+    waiting_tool     — a tool is executing (potentially long)
+    waiting_approval — 审批门挂起：执行器停在"待执行工具"之前，等人类
+                       批准/拒绝/改指令（POST /tasks/{id}/approval）
+    waiting_human    — blocked on human response（legacy 态：无写入者）
+    failed           — terminal: unrecoverable (can retry)
+    completed        — terminal: succeeded
+    abandoned        — terminal: user explicitly gave up（legacy 态：无写入者）
+    cancelled        — terminal: 经 cancel 协议协作式取消（诚实终态：不伪装完成）
     """
 
     PENDING = "pending"
     RUNNING = "running"
     WAITING_TOOL = "waiting_tool"
+    WAITING_APPROVAL = "waiting_approval"
     WAITING_HUMAN = "waiting_human"
     FAILED = "failed"
     COMPLETED = "completed"
     ABANDONED = "abandoned"
+    CANCELLED = "cancelled"
 
 
 # ── Valid transitions ──────────────────────────────────────────────────
 _TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
-    TaskStatus.PENDING:       {TaskStatus.RUNNING, TaskStatus.ABANDONED},
+    TaskStatus.PENDING:       {TaskStatus.RUNNING, TaskStatus.ABANDONED,
+                               TaskStatus.CANCELLED},
     TaskStatus.RUNNING:       {TaskStatus.WAITING_TOOL, TaskStatus.WAITING_HUMAN,
+                               TaskStatus.WAITING_APPROVAL,
                                TaskStatus.FAILED, TaskStatus.COMPLETED,
-                               TaskStatus.ABANDONED},
+                               TaskStatus.ABANDONED, TaskStatus.CANCELLED},
     TaskStatus.WAITING_TOOL:  {TaskStatus.RUNNING, TaskStatus.FAILED,
-                               TaskStatus.ABANDONED},
+                               TaskStatus.ABANDONED, TaskStatus.CANCELLED},
+    # HITL 审批等待（approval.py）：人类应答 → 回 RUNNING 续跑；取消 → 终态。
+    TaskStatus.WAITING_APPROVAL: {TaskStatus.RUNNING, TaskStatus.FAILED,
+                                  TaskStatus.CANCELLED},
     TaskStatus.WAITING_HUMAN: {TaskStatus.RUNNING, TaskStatus.ABANDONED,
-                               TaskStatus.FAILED},
+                               TaskStatus.FAILED, TaskStatus.CANCELLED},
     # terminal states
-    TaskStatus.FAILED:        {TaskStatus.RUNNING},  # retry
+    # FAILED 还有 CANCELLED 边：失败任务上滞留的取消旗在下一次 resume 前被
+    # 观察时如实收敛（用户已放弃，不复活）——见 checkpoint.begin_resume。
+    TaskStatus.FAILED:        {TaskStatus.RUNNING, TaskStatus.CANCELLED},
     TaskStatus.COMPLETED:     set(),
     TaskStatus.ABANDONED:     set(),
+    TaskStatus.CANCELLED:     set(),
 }
 
 
@@ -145,7 +158,9 @@ class AgentTask(Base):
 
     @property
     def is_terminal(self) -> bool:
-        return self.status in (TaskStatus.COMPLETED, TaskStatus.ABANDONED)
+        return self.status in (
+            TaskStatus.COMPLETED, TaskStatus.ABANDONED, TaskStatus.CANCELLED,
+        )
 
     @property
     def is_recoverable(self) -> bool:
@@ -153,6 +168,7 @@ class AgentTask(Base):
         return self.status in (
             TaskStatus.RUNNING,
             TaskStatus.WAITING_TOOL,
+            TaskStatus.WAITING_APPROVAL,
             TaskStatus.WAITING_HUMAN,
             TaskStatus.FAILED,
         )
@@ -164,7 +180,7 @@ class AgentTask(Base):
                 f"Invalid transition: {self.status.value} → {to.value}"
             )
         self.status = to
-        if to in (TaskStatus.COMPLETED, TaskStatus.ABANDONED):
+        if to in (TaskStatus.COMPLETED, TaskStatus.ABANDONED, TaskStatus.CANCELLED):
             self.completed_at = datetime.utcnow()
 
     def __repr__(self) -> str:

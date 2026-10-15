@@ -635,6 +635,10 @@ export default {
     metricDocuments: 'Documents',
     metricRole: 'Current Role'
   },
+  hitl: {
+    cancelled: 'Cancelled',
+    stopped: 'Stopped'
+  },
   router: {
     welcome: 'Welcome',
     login: 'Login',
