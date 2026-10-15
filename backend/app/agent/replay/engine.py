@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,8 @@ REPLAY_DIR = Path("benchmark/replay")
 
 # task_id 进文件名前的白名单（与 exec_context._SAFE_FILE_STEM 同款约束）：
 # 读侧 task_id 来自 HTTP 路径参数（不可信）——'/'、'\\'、'..' 一律拒绝拼接，
-# 绝不把原始值带进路径（CodeQL py/path-injection 防线）。
+# 绝不把原始值带进路径；再叠加 abspath 规范化 + startswith 前缀校验两道
+# （见 _local_path；与写侧 _replay_file_for 同款 CodeQL 可识别防线）。
 _SAFE_TASK_ID = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 
 # 结构化 timeline 的字段契约：与 ExecutionContext.to_dict()（写侧）逐字对齐。
@@ -46,14 +48,21 @@ class ReplayEngine:
 
     @staticmethod
     def _local_path(task_id: str) -> Path | None:
-        """由 task_id 构造本地 replay 文件落点；白名单不过 → None（拒绝拼接）。
+        """由 task_id 构造本地 replay 文件落点；不满足约束 → None（拒绝拼接）。
 
-        读侧与写侧（exec_context._replay_file_for）同款防线：非法即拒绝，
-        绝不"消毒"后拼接。
+        读侧 task_id 来自 HTTP 路径参数（不可信），与写侧（exec_context.
+        _replay_file_for）同款三重防线：① 白名单字符集（见 _SAFE_TASK_ID）；
+        ② os.path.abspath 规范化（CodeQL 识别为 PathNormalization）；
+        ③ 规范化后用 startswith 校验前缀仍在基准目录（CodeQL 识别为
+        SafeAccessCheck）。非法即拒绝，绝不"消毒"后拼接。
         """
         if not _SAFE_TASK_ID.fullmatch(str(task_id)):
             return None
-        return REPLAY_DIR / f"{task_id}.json"
+        base = os.path.abspath(REPLAY_DIR)
+        target = os.path.abspath(os.path.join(base, f"{task_id}.json"))
+        if not target.startswith(base + os.sep):
+            return None
+        return Path(target)
 
     @staticmethod
     def _is_valid_replay_ctx(ctx: Any) -> bool:
