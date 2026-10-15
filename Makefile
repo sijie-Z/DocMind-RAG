@@ -2,7 +2,7 @@
 
 .PHONY: help dev dev-backend dev-frontend install-backend install-frontend
 .PHONY: test test-backend test-frontend lint build build-frontend
-.PHONY: eval eval-check
+.PHONY: eval eval-check eval-ci eval-ci-baseline
 .PHONY: docker-up docker-down docker-logs docker-build db-migrate
 .PHONY: clean clean-logs check
 
@@ -53,11 +53,25 @@ test-frontend: ## Run frontend tests
 test-frontend-coverage: ## Run frontend tests with coverage
 	cd $(FRONTEND_DIR) && npx vitest run --coverage
 
-eval: ## Run RAG retrieval eval (Phase 1, #208; needs live ES + embeddings, see backend/docs/eval-gate-phase1.md)
+# === RAG 评估（#208）===
+# CI 门禁专用评估索引（固定名；seed --recreate 先删后建的就是它）
+EVAL_CI_INDEX := docmind_knowledge_eval_ci_v1
+
+eval: ## Run RAG retrieval eval (live ES + live embeddings, #208; see backend/docs/eval-gate-phase1.md)
 	cd $(BACKEND_DIR) && python -m evals run $(ARGS)
 
 eval-check: ## Validate the golden set only (no ES/network, #208)
 	cd $(BACKEND_DIR) && python -m evals check
+
+eval-ci: ## CI 评估门禁（#208 第⑤步）：确定性重建索引 → 伪嵌入跑分 → 对基线比对（红=非零退出；需 ES 8.11，无需 Ollama）
+	cd $(BACKEND_DIR) && python -m evals seed --recreate --embedding fake --index $(EVAL_CI_INDEX) $(ARGS)
+	cd $(BACKEND_DIR) && python -m evals run --embedding fake --index $(EVAL_CI_INDEX) --out evals/reports/ci
+	cd $(BACKEND_DIR) && python -m evals compare --report evals/reports/ci/latest.json --baseline evals/baselines/ci_baseline.json
+
+eval-ci-baseline: ## 有意识更新 CI 基线（重跑并重盖 ci_baseline.json；改基线=显式 PR 行为，评审可见）
+	cd $(BACKEND_DIR) && python -m evals seed --recreate --embedding fake --index $(EVAL_CI_INDEX) $(ARGS)
+	cd $(BACKEND_DIR) && python -m evals run --embedding fake --index $(EVAL_CI_INDEX) --out evals/reports/ci
+	cd $(BACKEND_DIR) && python -m evals compare --report evals/reports/ci/latest.json --baseline evals/baselines/ci_baseline.json --update-baseline
 
 # === Linting & Type Check ===
 
