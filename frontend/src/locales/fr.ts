@@ -150,7 +150,7 @@ export default {
     tagline: 'Q&A intelligent basé sur RAG',
     clearChat: 'Effacer la conversation',
     newChat: 'Nouvelle discussion',
-    welcome: 'Bonjour, je suis Paicongming. Comment puis-je vous aider ?',
+    welcome: 'Bonjour, je suis DocMind. Comment puis-je vous aider ?',
     welcomeDesc: 'Je peux répondre à vos questions, analyser des documents, écrire du code ou simplement discuter.',
     sources: 'Sources',
     inputPlaceholder: 'Posez votre question (Maj + Entrée pour sauter une ligne)...',

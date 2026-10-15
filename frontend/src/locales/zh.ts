@@ -280,7 +280,6 @@ export default {
     loadFailed: '加载失败',
     loadFailedDesc: '无法加载对话列表',
     retry: '重试',
-    version: 'DocMind v1.0',
     // Drag-and-drop
     dropFiles: '拖拽文件到此处上传',
     // Export

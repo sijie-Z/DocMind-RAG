@@ -427,7 +427,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 │   ├── context.py   # 上下文引擎
 │   ├── events.py    # SSE 事件模型
 │   ├── skills.py    # 技能学习
-│   └── tools/       # 33 个工具实现
+│   └── tools/       # 19 个工具实现
 ├── core/            # 基础设施 (config, database, redis, security, tracing)
 ├── models/          # SQLAlchemy ORM 模型
 ├── rag/             # RAG 管道 (retriever, reranker, chunker, evaluator)
@@ -511,7 +511,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
   <div class="sec-head"><span class="sec-num">04b</span><h2>工具系统</h2><span class="meta">33 个内置工具</span></div>
 
   <div class="card">
-    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔧 内置工具（注册表共 33 个；下表为功能示意，非完整清单）</div>
+    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔧 内置工具（内置 33 个，MCP 动态工具另计；下表为功能示意，非完整清单）</div>
     <div class="card-body show">
       <table class="data-table">
         <tr><th>#</th><th>工具</th><th>用途</th><th>安全级别</th></tr>

@@ -124,6 +124,10 @@ export default defineConfig({
       },
       '/api': `http://127.0.0.1:${getBackendPort()}`,
       '/static': `http://127.0.0.1:${getBackendPort()}`,
+      // 版本号动态读取（ISS-2 数字对账）：关于页/聊天侧栏经 GET /health 读
+      // 后端 APP_VERSION。根级路由不走 /api 前缀，不代理会落进 SPA 回退
+      // 拿到 index.html。
+      '/health': `http://127.0.0.1:${getBackendPort()}`,
     },
   },
   build: {

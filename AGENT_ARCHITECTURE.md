@@ -2,7 +2,7 @@
 
 ## 概览
 
-DocMind Agent 是一个 **Planning-Execution-Reflection (PER)** 三阶段自主智能体系统，集成了 25 个生产级工具、四层记忆系统和实时 SSE 流式事件协议。架构设计参考了学术界和工业界的主流 Agent 范式，面向企业 RAG 知识库场景深度定制。
+DocMind Agent 是一个 **Planning-Execution-Reflection (PER)** 三阶段自主智能体系统，集成了 33 个生产级工具、四层记忆系统和实时 SSE 流式事件协议。架构设计参考了学术界和工业界的主流 Agent 范式，面向企业 RAG 知识库场景深度定制。
 
 ## 架构总览
 
@@ -78,7 +78,7 @@ AgentMemoryBridge
 Planner.plan(query, history, memory_context)
   │
   ├─► LLM 调用 (temperature=0.1)
-  │     System: 任务规划专家提示 + 25 个工具描述
+  │     System: 任务规划专家提示 + 33 个工具描述
   │     User: 用户 query
   │
   ├─► 流式 reasoning tokens (thinking events)
@@ -157,9 +157,11 @@ Reflector.reflect(plan, results)
           }
 ```
 
-## 工具生态（25 个）
+## 工具生态（33 个内置 + MCP 动态）
 
-### 原始工具 (11) — `core_tools.py`
+### 核心工具 (14) — `core_tools.py`
+
+> 下表为功能示意，非完整清单（完整注册列表见 `GET /api/v1/agent/tools`）。
 
 | 工具 | 描述 | 标签 |
 |------|------|------|
@@ -175,7 +177,9 @@ Reflector.reflect(plan, results)
 | `get_prompt_template` | 获取指定模板内容 | prompts |
 | `get_current_time` | 当前日期时间 | utility |
 
-### 新增工具 (14) — `tools/` 包
+### 工具包工具 (19) — `tools/` 包
+
+> 下表为功能示意，非完整清单（完整注册列表见 `GET /api/v1/agent/tools`）。
 
 | 工具 | 描述 | 标签 | 安全 |
 |------|------|------|------|
@@ -305,7 +309,7 @@ SSE 客户端 (api/agent.ts)
 | 执行 | Thought→Action→Observe 循环 | 按计划步骤顺序执行 | ReAct 循环 | **步骤级重试 (3x) + 指数退避** |
 | 反思 | 无（Observation 即反馈） | 无 | LLM 自我反思 + 长期记忆 | **目标达成度评估 + pass/retry/replan** |
 | 记忆 | 无 | 无 | 向量数据库长期记忆 | **四层：STM/LTM/Work/Reflective** |
-| 工具 | 预定义工具集 | 预定义工具集 | 预定义工具集 | **25 个自注册工具 + tags 分类 + 安全分级** |
+| 工具 | 预定义工具集 | 预定义工具集 | 预定义工具集 | **33 个自注册工具 + tags 分类 + 安全分级** |
 | 流式 | 取决于实现 | 取决于实现 | 取决于实现 | **11 种 SSE 事件类型, 前端可视化** |
 | 多步依赖 | 不支持 | 线性依赖 | 不支持 | **完整 DAG 依赖管理** |
 | 失败恢复 | 无 | 无 | 基本反思 | **步骤级重试 + 错误上下文传递** |
@@ -408,8 +412,8 @@ backend/app/agent/
   ├── skills.py          # 技能学习
   ├── subagent.py        # 子代理委托
   ├── service.py         # AgentService 入口
-  ├── core_tools.py      # 原始 11 个工具
-  └── tools/             # 新增 14 个工具
+  ├── core_tools.py      # 核心工具（14 个）
+  └── tools/             # 工具包（19 个）
       ├── web_search.py
       ├── code_execution.py
       ├── data_analysis.py

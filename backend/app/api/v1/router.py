@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - API路由模块
+DocMind AI知识库系统 - API路由模块
 """
 
 from fastapi import APIRouter
