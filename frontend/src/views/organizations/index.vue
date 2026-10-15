@@ -264,7 +264,7 @@
                 <div class="flex justify-end">
                   <n-button size="small" type="primary" @click="openAddMember">
                     <template #icon><n-icon><PersonAddOutline /></n-icon></template>
-                    {{ t('org.addMember', '添加成员') }}
+                    {{ t('org.addMember') }}
                   </n-button>
                 </div>
                 <n-list hoverable>
@@ -295,9 +295,9 @@
                         />
                         <n-popconfirm @positive-click="() => handleRemoveMember(member)">
                           <template #trigger>
-                            <n-button size="tiny" quaternary type="error">{{ t('org.removeMember', '移除') }}</n-button>
+                            <n-button size="tiny" quaternary type="error">{{ t('org.removeMember') }}</n-button>
                           </template>
-                          {{ t('org.removeMemberConfirm', '确定将该成员移出组织？') }}
+                          {{ t('org.removeMemberConfirm') }}
                         </n-popconfirm>
                       </n-space>
                     </template>
@@ -346,17 +346,17 @@
     <n-modal
       v-model:show="showAddMemberModal"
       preset="card"
-      :title="t('org.addMember', '添加成员')"
+      :title="t('org.addMember')"
       class="max-w-md"
     >
       <n-spin :show="loadingMemberOptions">
         <n-form label-placement="top" class="mt-2">
-          <n-form-item :label="t('org.selectUser', '选择用户')">
+          <n-form-item :label="t('org.selectUser')">
             <n-select
               v-model:value="memberToAdd"
               filterable
               :options="candidateUsers"
-              :placeholder="t('org.selectUser', '选择用户')"
+              :placeholder="t('org.selectUser')"
             />
           </n-form-item>
         </n-form>
@@ -648,7 +648,7 @@ const openAddMember = async () => {
       .filter((u) => !memberIds.has(u.id))
       .map((u) => ({ label: u.username, value: u.id }))
   } catch (err: unknown) {
-    message.error(t('org.loadUsersFailed', '用户列表加载失败') + ': ' + getErrorMessage(err))
+    message.error(t('org.loadUsersFailed') + ': ' + getErrorMessage(err))
   } finally {
     loadingMemberOptions.value = false
   }
@@ -659,11 +659,11 @@ const confirmAddMember = async () => {
   addingMember.value = true
   try {
     await addOrganizationMember(selectedOrg.value.id, memberToAdd.value)
-    message.success(t('org.memberAdded', '成员已加入组织'))
+    message.success(t('org.memberAdded'))
     showAddMemberModal.value = false
     await refreshMembers()
   } catch (err: unknown) {
-    message.error(t('org.memberOpFailed', '操作失败') + ': ' + (getResponseDetail(err) || getErrorMessage(err)))
+    message.error(t('org.memberOpFailed') + ': ' + (getResponseDetail(err) || getErrorMessage(err)))
   } finally {
     addingMember.value = false
   }
@@ -673,10 +673,10 @@ const handleMemberRoleChange = async (member: OrganizationMember, role: string) 
   if (!selectedOrg.value || role === member.role) return
   try {
     await updateOrganizationMemberRole(selectedOrg.value.id, member.id, role as 'user' | 'admin')
-    message.success(t('org.roleUpdated', '角色已更新'))
+    message.success(t('org.roleUpdated'))
     await refreshMembers()
   } catch (err: unknown) {
-    message.error(t('org.memberOpFailed', '操作失败') + ': ' + (getResponseDetail(err) || getErrorMessage(err)))
+    message.error(t('org.memberOpFailed') + ': ' + (getResponseDetail(err) || getErrorMessage(err)))
   }
 }
 
@@ -684,10 +684,10 @@ const handleRemoveMember = async (member: OrganizationMember) => {
   if (!selectedOrg.value) return
   try {
     await removeOrganizationMember(selectedOrg.value.id, member.id)
-    message.success(t('org.memberRemoved', '成员已移除'))
+    message.success(t('org.memberRemoved'))
     await refreshMembers()
   } catch (err: unknown) {
-    message.error(t('org.memberOpFailed', '操作失败') + ': ' + (getResponseDetail(err) || getErrorMessage(err)))
+    message.error(t('org.memberOpFailed') + ': ' + (getResponseDetail(err) || getErrorMessage(err)))
   }
 }
 

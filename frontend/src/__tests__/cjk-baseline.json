@@ -42,7 +42,7 @@
     "views/monitoring/index.vue": 12,
     "views/notifications/index.vue": 36,
     "views/organizations/docStatus.ts": 8,
-    "views/organizations/index.vue": 31,
+    "views/organizations/index.vue": 18,
     "views/profile/composables/useProfilePage.ts": 57,
     "views/profile/index.vue": 3,
     "views/prompts/index.vue": 58,
