@@ -14,6 +14,7 @@ from app.models.rbac import (
     role_permission_association,
     user_organization_role_association,
 )
+from app.models.scheduled_task import ScheduledTask, ScheduleRunStatus, ScheduleType
 from app.models.token_usage import TokenUsageRecord
 from app.models.user import User
 from app.models.user_audit import UserActivityLog, UserLoginSession
@@ -46,5 +47,8 @@ __all__ = [
     "UserSettings",
     "Workflow",
     "WorkflowExecution",
-    "NodeDefinition"
+    "NodeDefinition",
+    "ScheduledTask",
+    "ScheduleType",
+    "ScheduleRunStatus",
 ]
