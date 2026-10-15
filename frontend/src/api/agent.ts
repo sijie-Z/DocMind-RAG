@@ -1,6 +1,5 @@
 import request from '@/utils/request'
 import { getToken } from '@/utils/auth'
-import type { AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
 import type {
   AgentEvent,
@@ -127,8 +126,8 @@ export const agentApi = {
     })
   },
 
-  /** List available tools（真载荷 data.data；agent.py:450-472） */
-  listTools(): Promise<AxiosResponse<ApiResponse<ToolInfo[]>>> {
+  /** List available tools */
+  listTools(): Promise<ApiResponse<ToolInfo[]>> {
     return request.get('/agent/tools')
   },
 
@@ -139,23 +138,23 @@ export const agentApi = {
 
   // ── Sessions ──
 
-  /** List agent sessions（真载荷 data.data.sessions；agent.py:500-556） */
+  /** List agent sessions */
   listSessions(params?: {
     page?: number
     page_size?: number
-  }): Promise<AxiosResponse<ApiResponse<{ sessions: AgentSession[]; total: number; page: number; page_size: number }>>> {
+  }): Promise<ApiResponse<{ sessions: AgentSession[]; total: number; page: number; page_size: number }>> {
     return request.get('/agent/sessions', { params })
   },
 
-  /** Create agent session（后端只回 {id, title}，真载荷 data.data；agent.py:585-591） */
+  /** Create agent session */
   createSession(
     title: string,
-  ): Promise<AxiosResponse<ApiResponse<{ id: string; title: string }>>> {
+  ): Promise<ApiResponse<AgentSession>> {
     return request.post('/agent/sessions', { title })
   },
 
-  /** Get session details（真载荷 data.data.config；agent.py:637-647） */
-  getSession(sessionId: string): Promise<AxiosResponse<ApiResponse<AgentSessionDetail>>> {
+  /** Get session details */
+  getSession(sessionId: string): Promise<ApiResponse<AgentSessionDetail>> {
     return request.get(`/agent/sessions/${sessionId}`)
   },
 
@@ -166,8 +165,8 @@ export const agentApi = {
 
   // ── Configuration ──
 
-  /** Get user agent config（真载荷 data.data；agent.py:696-710） */
-  getConfig(): Promise<AxiosResponse<ApiResponse<AgentConfig>>> {
+  /** Get user agent config */
+  getConfig(): Promise<ApiResponse<AgentConfig>> {
     return request.get('/agent/config')
   },
 

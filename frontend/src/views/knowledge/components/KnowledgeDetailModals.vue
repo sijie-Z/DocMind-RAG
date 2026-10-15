@@ -87,7 +87,7 @@ const props = defineProps<{
   currentErrorDetail: string
   detailLoading: boolean
   getFileIconColor: (type: string) => string
-  getStatusType: (item: KnowledgeBase | null) => 'success' | 'warning' | 'error' | 'info' | 'default'
+  getStatusType: (item: KnowledgeBase | null) => 'success' | 'warning' | 'error'
   getStatusLabel: (item: KnowledgeBase | null) => string
   formatFileSize: (bytes: number | null | undefined) => string
   formatDate: (value: string | undefined) => string

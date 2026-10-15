@@ -13,11 +13,10 @@ from app.core.elasticsearch import ElasticsearchTools
 from app.core.prometheus import RAG_ADAPTIVE_STRATEGY, RAG_QUERY_REWRITE_TOTAL
 from app.rag.errors import EmbeddingUnavailableError
 from app.rag.query_processor import (
-    SEARCH_MODE_TO_STRATEGY,
+    QueryComplexityClassifier,
     QueryIntentClassifier,
     extract_query_terms,
     generate_hyde_doc,
-    resolve_retrieval_strategy,
     rewrite_query_candidates,
     rewrite_query_llm,
 )
@@ -702,24 +701,18 @@ class HybridRetriever:
         top_k: int = 5,
         document_ids: list[str] | None = None,
         debug: bool = False,
-        search_mode: str | None = None,
     ) -> tuple[list[dict], list[float], dict | None, list[str]]:
         """Execute adaptive retrieval and return (results, query_vector, debug_info, degraded).
 
         degraded：臂级降级原因列表（空 = 全部预期检索臂都正常执行）。issue #292：
         向量臂 / 兜底臂因服务故障未能执行时不得与「确实没有命中」同形；
         keyword 臂失败与兜底臂异常会直接上抛（由 pipeline 归类为故障态）。
-        策略为 keyword_only / vector_only 时无另一臂是**按设计**行为，不产生降级信号。
+        策略为 keyword_only 时无向量臂是**按设计**行为，不产生降级信号。
 
-        Strategy：显式 `search_mode`（hybrid/vector/keyword）**强制本次请求的检索臂组合**
-        （issue #225 决策 7A）；为 None 时按查询复杂度自动路由：
+        Strategy is selected automatically based on query complexity:
         - keyword_only: fast keyword search, no embedding calls
-        - vector_only:  pure vector arm（仅显式 search_mode="vector" 可达，自动路由不产生）
         - hybrid: keyword + vector (default)
         - hybrid_hyde: keyword + vector + HyDE + multi-rewrite (full pipeline)
-
-        覆盖仅作用于本次调用：不修改任何进程级状态，其它请求/路径（chat、agent、
-        workflow）不传 search_mode 时行为逐条不变。
 
         When debug=True, returns intermediate retrieval results for visualization.
         """
@@ -733,25 +726,12 @@ class HybridRetriever:
 
         candidate_size = max(top_k * max(1, settings.RAG_MMR_CANDIDATE_MULTIPLIER), 12)
 
-        # Strategy selection：显式模式覆盖自动路由（issue #225 决策 7A）。
-        # 覆盖只在本次调用内生效；显式值与未知值都经 resolve_retrieval_strategy
-        # 单点解析（未知值回落自动路由，API 边界由 SearchMode 枚举 422 兜住）。
-        forced_mode = search_mode if search_mode in SEARCH_MODE_TO_STRATEGY else None
-        strategy = resolve_retrieval_strategy(query, search_mode)
-        # 指标口径：自动路由保持 keyword_only/hybrid/hybrid_hyde 三值（回归不变）；
-        # 显式覆盖用 forced_* 单列，运维可直接看到「模式字段真的开始被使用」。
-        strategy_label = f"forced_{forced_mode}" if forced_mode else strategy
-        RAG_ADAPTIVE_STRATEGY.labels(strategy=strategy_label).inc()
-        logger.info(
-            "Adaptive RAG: query='%s...' → strategy=%s%s",
-            query[:50], strategy,
-            f" (forced by search_mode={forced_mode})" if forced_mode else "",
-        )
+        # Adaptive strategy selection
+        strategy = QueryComplexityClassifier.get_strategy(query)
+        RAG_ADAPTIVE_STRATEGY.labels(strategy=strategy).inc()
+        logger.info(f"Adaptive RAG: query='{query[:50]}...' → strategy={strategy}")
 
-        debug_info = (
-            {"strategy": strategy, "query": query, "search_mode": search_mode}
-            if debug else None
-        )
+        debug_info = {"strategy": strategy, "query": query} if debug else None
 
         if strategy == "keyword_only":
             kw_hits = await self._keyword_hits(query, filters, candidate_size)
@@ -767,30 +747,6 @@ class HybridRetriever:
                 debug_info["rerank_result"] = []
             documents = self._post_process(query, kw_hits, top_k)
             return documents, [], debug_info, degraded
-
-        if strategy == "vector_only":
-            # issue #225 决策 7A：显式 search_mode="vector" → 仅向量臂。
-            # 与 keyword_only 分支对称：单臂序直接进 post-process。
-            # 刻意不做 keyword 兜底、不跑 MMR——显式模式必须**纯**：
-            # 静默混入另一臂正是本 issue 要消灭的「模式说了不算」语义。
-            # （MMR 是融合序的多样性环节，单臂序无融合可多样化。）
-            # HyDE 对齐显式 hybrid：显式模式一概不跑 HyDE（enable_hyde=False）——
-            # HyDE 是自动路由给复杂查询的增强（LLM 调用 + 不确定性），显式模式的
-            # 「纯」语义不含它；这是 m1 的定夺（评审要求二选一时选「对齐」）。
-            vec_hits, query_vector, vec_degraded = await self._vector_hits(
-                query, filters, candidate_size, enable_hyde=False
-            )
-            if vec_degraded:
-                degraded.append(vec_degraded)
-            # 臂标记与 hybrid 序（`_rrf_fuse` 写 `has_vector`）对齐（同决策 d 口径）。
-            vec_hits = [{**h, "has_vector": True} for h in vec_hits]
-            if debug and debug_info is not None:
-                debug_info["keyword_top"] = []
-                debug_info["vector_top"] = self._debug_format_hits(vec_hits[:10])
-                debug_info["rrf_result"] = debug_info["vector_top"][:top_k]
-                debug_info["rerank_result"] = []
-            documents = self._post_process(query, vec_hits, top_k)
-            return documents, query_vector, debug_info, degraded
 
         # Hybrid paths: keyword + vector (parallel)
         if strategy == "hybrid_hyde":

@@ -46,25 +46,8 @@ class ExperienceStore:
     # ── CRUD ──
 
     async def add(self, exp: Experience) -> None:
-        """Insert or update an experience.
-
-        Insert 走内容级去重（round2 卫生修复①）：抽取器每次调用都铸造新
-        ``id``（models.py 的 default_factory），同一模板经验重新抽到时此前会
-        按新 id 无限重复入库——现实库 47 条里 19 条逐字相同。现在：同内容
-        （归一化 scenario/symptom/lesson）不同 id = 同一条经验，已存记录
-        （含累积的 confidence/verified_count，见 record_verification 生命周期）
-        胜出，新记录不落库。同 id 的再 add 仍按原语义原地更新。
-        """
+        """Insert or update an experience."""
         await self._ensure_loaded()
-        if exp.id not in self._experiences and any(
-            existing.content_key() == exp.content_key()
-            for existing in self._experiences.values()
-        ):
-            logger.debug(
-                "Experience content already stored, skipping duplicate: %s",
-                exp.short_summary(),
-            )
-            return
         self._experiences[exp.id] = exp
         await self._save()
         logger.debug("Experience stored: %s", exp.short_summary())

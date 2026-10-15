@@ -373,61 +373,6 @@ class TestKnowledgeSearch:
             app.dependency_overrides.pop(get_current_user, None)
 
 
-class TestKnowledgeSearchModeContract:
-    """issue #225：search_mode 真正生效（送达 service）+ 回显一致 + 非法值 422。"""
-
-    @staticmethod
-    def _post_search(client: TestClient, payload: dict):
-        from app.main import app
-        mock_user = _make_mock_user(is_superuser=True)
-        override_func, _mock_db = _override_get_db()
-
-        async def _override_user():
-            return mock_user
-
-        app.dependency_overrides[get_db] = override_func
-        app.dependency_overrides[get_current_user] = _override_user
-        try:
-            with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
-                mock_ks.search_knowledge = AsyncMock(return_value=[])
-                r = client.post(
-                    "/api/v1/knowledge/search",
-                    json=payload,
-                    headers={"Authorization": "Bearer test_token"},
-                )
-            return r, mock_ks
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(get_current_user, None)
-
-    def test_forced_mode_reaches_service_and_echoes(self, client: TestClient):
-        """显式 search_mode 必须传到 service（修前被链路丢弃），且回显同一值。"""
-        r, mock_ks = self._post_search(
-            client, {"query": "annual report", "organization_id": 1, "search_mode": "keyword"}
-        )
-        assert r.status_code == 200
-        assert mock_ks.search_knowledge.await_args.kwargs["search_mode"] == "keyword"
-        assert r.json()["search_mode"] == "keyword"
-
-    def test_omitted_mode_runs_auto_and_echoes_effective_mode(self, client: TestClient):
-        """缺省 → 自动路由（service 收到 None）；回显 = 实际生效档位，不再恒为 'hybrid'。"""
-        r, mock_ks = self._post_search(client, {"query": "报销流程", "organization_id": 1})
-        assert r.status_code == 200
-        assert mock_ks.search_knowledge.await_args.kwargs["search_mode"] is None
-        # simple → keyword_only：回显公开模式名 keyword（修前恒回显 hybrid，与生效语义不符）
-        assert r.json()["search_mode"] == "keyword"
-
-        r2, mock_ks2 = self._post_search(client, {"query": "如何提交报销申请？", "organization_id": 1})
-        assert mock_ks2.search_knowledge.await_args.kwargs["search_mode"] is None
-        assert r2.json()["search_mode"] == "hybrid"  # medium → hybrid
-
-    def test_invalid_mode_value_is_422(self, client: TestClient):
-        """非法值（含前端旧字段值 'semantic'、大写 'VECTOR'）→ 422，不静默降级。"""
-        for bad in ("semantic", "fuzzy", "VECTOR"):
-            r, _ = self._post_search(client, {"query": "x", "organization_id": 1, "search_mode": bad})
-            assert r.status_code == 422, f"search_mode={bad!r} 必须 422"
-
-
 class TestKnowledgeSuggestions:
     def test_get_suggestions(self, client: TestClient):
         """GET /knowledge/suggestions 应返回建议列表。"""

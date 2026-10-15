@@ -1132,14 +1132,7 @@ class PERAgentLoop:
         而唯一的质量判据是质检的等级。放在执行器里只能拿到"步骤成功/失败"，分不出
         "成功但平庸"和"成功且优秀"——而把平庸路径记成"有效模式"会污染后续规划
         （这些经验会被注入 planner 的 system prompt）。
-
-        写侧与读侧（planner.py）同门控（round2 卫生修复①）：此前写侧不受
-        enable_experience 管辖——agent_api.py 显式 enable_experience=False 的
-        路径仍会写库。开关关 = 经验回路整体关（既不注入也不落库）。
         """
-        if not self.config.enable_experience:
-            return
-
         from app.agent.experience import get_experience_store
         from app.agent.experience.extractor import (
             extract_from_runtime_error,

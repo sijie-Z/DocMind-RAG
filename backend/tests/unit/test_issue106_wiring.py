@@ -8,23 +8,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
-@pytest.fixture
-def isolated_store(tmp_path, monkeypatch):
-    """独立 ExperienceStore：不读环境遗留的 benchmark/experiences.json
-    （gitignored，上一次测试运行可能写过），不碰 Redis。
-
-    round2 内容级去重落地（store.add 同内容不再新增）后必须的确定性前提：
-    本用例断言的是"新经验 +1"，只有在空库上才成立——旧库存在同一模板
-    经验时（那正是修复目标形态），重复写入本就不该增长。"""
-    import app.agent.experience.store as store_mod
-
-    monkeypatch.setattr("app.core.redis.redis_client", None)
-    monkeypatch.setattr(store_mod, "LOCAL_PATH", tmp_path / "experiences.json")
-    store_mod.reset_experience_store()
-    yield store_mod.get_experience_store()
-    store_mod.reset_experience_store()
-
 # ── #106 §2.6：requires_auth 此前只 logger.debug，从不阻断 ────────────────
 
 class TestRequiresAuthEnforced:
@@ -77,13 +60,14 @@ class TestExperienceWriteBack:
     """要求：runtime 真的会往 ExperienceStore 写，而不只是 planner 读。"""
 
     @pytest.mark.asyncio
-    async def test_failed_step_writes_an_experience(self, isolated_store):
+    async def test_failed_step_writes_an_experience(self):
         from app.agent.config import AgentConfig
         from app.agent.exec_context import ExecutionContext
+        from app.agent.experience import get_experience_store
         from app.agent.loop import PERAgentLoop
         from app.agent.planner import Plan, PlanStep
 
-        store = isolated_store
+        store = get_experience_store()
         before = await store.count()
 
         loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=1, user_id=0)
@@ -103,14 +87,15 @@ class TestExperienceWriteBack:
         )
 
     @pytest.mark.asyncio
-    async def test_successful_run_with_non_a_grades_writes_nothing(self, isolated_store):
+    async def test_successful_run_with_non_a_grades_writes_nothing(self):
         """质检不是全 A 时不记正向经验 —— 门槛刻意设高，避免污染 planner。"""
         from app.agent.config import AgentConfig
         from app.agent.exec_context import ExecutionContext
+        from app.agent.experience import get_experience_store
         from app.agent.loop import PERAgentLoop
         from app.agent.planner import Plan, PlanStep
 
-        store = isolated_store
+        store = get_experience_store()
         before = await store.count()
 
         loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=1, user_id=0)

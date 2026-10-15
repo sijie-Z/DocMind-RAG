@@ -5,20 +5,6 @@ All notable changes to DocMind will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Changed
-
-- **搜索接口 `search_mode` 真正生效（#225）**：`POST /api/v1/knowledge/search` 的
-  `search_mode`（hybrid/vector/keyword）此前被调用链静默丢弃、实际恒走自动路由，
-  现在**非空时强制本次请求的检索臂组合**（缺省保持自动路由，行为不变）。响应同名字段
-  回显**实际生效**的模式——连带一处行为变更：**缺省请求且查询命中 simple 档时，
-  回显由恒定的 `hybrid` 改为 `keyword`**（与真实路由一致；前端只消费 `results`，不受影响）。
-- 检索缓存按模式分域：显式模式的精确缓存与自动路由互不可见，且不读写语义缓存
-  （「换个模式再试」不会经缓存取到另一模式的结果）。
-- 请求字段 `search_type`（从未在 schema 中存在、一直被解析器忽略）从文档中移除；
-  前端搜索页改用 `search_mode` 并新增「自动」（默认）选项。
-
 ## [1.22.1-rc.1] - 2026-10-05
 
 > **预发布（pre-release）**。本版的主体是**依赖大版本升级与 CI 加固**，没有面向产品的新功能。
