@@ -25,10 +25,12 @@ Core use cases:
 - 💬 **Intelligent Q&A** — RAG pipeline: keyword + vector hybrid search, reranking, LLM generation with SSE streaming.
 - 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 33 tools for complex multi-step tasks.
 - 🧩 **Workflow Editor** — Visual DAG design & debugging (Vue Flow). Configurable LLM models, prompts, and execution engines.
-- 📊 **Observability** — Prometheus metrics, Langfuse full-trace, 12 SSE event types, RunReport execution summaries.
+- 📊 **Observability** — Prometheus metrics, Langfuse full-trace, 14 SSE event types, RunReport execution summaries.
 - 🔐 **Multi-Tenant + RBAC** — Organization isolation, role-based permissions, JWT authentication.
 
 > Design decisions and experimental data belong in the research repo: [DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
+>
+> Main repo: [github.com/sijie-Z/DocMind-RAG](https://github.com/sijie-Z/DocMind-RAG) (full commit history / Issues)
 
 ---
 
@@ -44,7 +46,7 @@ Current baseline:
 
 Known limitations:
 - Workflow code nodes are disabled by default. Set `ENABLE_WORKFLOW_CODE_NODES=true` to opt in; execution now requires the Docker sandbox.
-- GraphRAG graphs, agent memory, metrics snapshots, and live counters now persist to Redis; live counters are written per instance and aggregated on read for multi-instance deployments.
+- GraphRAG graphs, metrics snapshots, and live counters persist to Redis; agent memory is tiered — long-term/reflective memory persists to Redis (7-day TTL) while short-term/working memory stays in-process. Live counters are written per instance and aggregated on read for multi-instance deployments.
 - The knowledge, profile, and workflow editor pages have all been split into components/composables; no 1000-line SFC pages remain.
 
 ---
@@ -216,7 +218,7 @@ Swagger docs: `http://localhost:8000/docs`
 
 ### 🖥 Frontend (`frontend/src/`)
 
-Vue 3 + TypeScript + Naive UI SPA, 21 routes:
+Vue 3 + TypeScript + Naive UI SPA, 24 routes:
 
 | Page | Route | Description |
 |------|-------|-------------|
@@ -376,7 +378,7 @@ DocMind/
 │   │   │   ├── exec_context.py      #   ExecutionContext
 │   │   │   ├── registry.py          #   Tool registry
 │   │   │   ├── memory_bridge.py     #   Memory bridge
-│   │   │   ├── events.py            #   SSE event types (12 types)
+│   │   │   ├── events.py            #   SSE event types (14 types)
 │   │   │   ├── message.py           #   Agent message bus
 │   │   │   ├── tracing.py           #   Execution trace records (dev-only: eval/offline; not written in production)
 │   │   │   ├── tools/               #   33 tool implementations
@@ -427,8 +429,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  Context compression
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (14 services)
-│   │   ├── models/                  # ORM models (14 entities)
+│   │   ├── services/                # Business service layer (15 services)
+│   │   ├── models/                  # ORM models (23 tables)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer
 │   ├── tests/                       # 2223 backend tests (plus 861 frontend)
@@ -440,7 +442,7 @@ DocMind/
 │   └── docker-compose.yml           # 10-service orchestration
 ├── frontend/
 │   └── src/
-│       ├── views/                   # Pages (19 modules, 21 routes)
+│       ├── views/                   # Pages (19 modules, 24 routes)
 │       ├── components/              # Shared components
 │       ├── api/                     # Axios API clients
 │       ├── stores/                  # Pinia state stores

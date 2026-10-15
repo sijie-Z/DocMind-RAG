@@ -53,7 +53,7 @@
 ### 1. 克隆项目
 ```bash
 git clone <repository-url>
-cd paicongming/backend
+cd backend
 ```
 
 ### 2. 安装依赖
@@ -97,14 +97,14 @@ docker-compose up -d
 - `ELASTICSEARCH_HOSTS`: Elasticsearch节点地址
 - `MINIO_ENDPOINT`: MinIO服务器地址
 - `DEEPSEEK_API_KEY`: DeepSeek API密钥
-- `OPENAI_API_KEY`: OpenAI API密钥（用于嵌入）
+- `EMBEDDING_API_KEY`: 嵌入模型 API 密钥（OpenAI 兼容）
 
 ### 文件上传配置
 - `MAX_FILE_SIZE`: 最大文件大小（默认100MB）
 - `CHUNK_SIZE`: 分块大小（默认5MB）
 
 ### AI配置
-- `VECTOR_DIMENSION`: 向量维度（默认768）
+- `VECTOR_DIMENSION`: 向量维度（默认 1536，随嵌入模型配置）
 - `TOP_K_RESULTS`: 搜索结果数量（默认10）
 
 ## 📚 API文档
@@ -159,7 +159,7 @@ cd backend && uvicorn app.agent_api:app --host 0.0.0.0 --port 8010
 python -m pytest tests/ -v
 ```
 
-### 测试用例（132 个）
+### 测试用例（示例；全量 1573 个，unit/api/behavior/integration 四层）
 
 | 文件 | 覆盖范围 | 用例数 |
 |------|----------|--------|
@@ -257,6 +257,6 @@ pytest tests/ --cov=app --cov-report=html
 
 ## 📞 联系方式
 
-- 项目维护者: [Your Name]
-- 邮箱: [your.email@example.com]
-- 项目主页: [项目URL]
+- 项目维护者: 曾思杰（sijie-Z）
+- 项目主页: https://github.com/sijie-Z/DocMind-RAG
+- 问题反馈: https://github.com/sijie-Z/DocMind-RAG/issues

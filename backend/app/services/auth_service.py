@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 认证服务
+DocMind AI 知识库系统 - 认证服务
 """
 
 import logging

@@ -29,7 +29,7 @@ docker-compose ps
 | 服务 | 端口 | 说明 |
 |------|------|------|
 | MySQL | 3308 | 宿主机 3308 → 容器 3306 |
-| Redis | 6379 | 默认端口 |
+| Redis | 6390 | 宿主机 6390 → 容器 6379 |
 | Elasticsearch | 9200 | 默认端口 |
 | MinIO API | 9000 | 对象存储 |
 | MinIO Console | 9001 | Web 管理界面 |
@@ -39,10 +39,10 @@ docker-compose ps
 
 ```sql
 -- 连接 MySQL（端口 3308）
-mysql -h 127.0.0.1 -P 3308 -u root -pchangeme_root_pw
+mysql -h 127.0.0.1 -P 3308 -u root -pdocmind_db_root_pw_change_me
 
 -- 创建数据库
-CREATE DATABASE docmind_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE docmind CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
 ---
@@ -53,8 +53,8 @@ CREATE DATABASE docmind_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 | 服务 | 默认连接 |
 |------|----------|
-| MySQL | `root:root@localhost:3306/docmind_db` |
-| Redis | `localhost:6379` |
+| MySQL | `localhost:3308`，库名 `docmind`（与 `backend/.env` 的 `DATABASE_URL` 保持一致） |
+| Redis | `localhost:6390`（与 `backend/.env` 保持一致） |
 | Elasticsearch | `http://localhost:9200` |
 | MinIO | `localhost:9000` (minioadmin/minioadmin) |
 | Kafka | `localhost:9092` |

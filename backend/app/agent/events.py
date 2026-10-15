@@ -8,10 +8,13 @@ Event types:
     tool_call    — Tool invocation request
     tool_result  — Tool execution result
     tool_error   — Tool execution error with retry context
+    retry_hint   — Retry guidance emitted while recovering from a failure
     reflection   — Post-execution reflection result
     chunk        — Final answer streaming token
     done         — Agent finished successfully
     error        — Fatal/unrecoverable error
+    execution_step_result — Per-step execution outcome for plan visualization
+    run_report   — Execution summary emitted at the end of a run
 """
 
 import time
