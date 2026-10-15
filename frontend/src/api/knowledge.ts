@@ -20,7 +20,8 @@ export interface KnowledgeBase {
   raw_status?: string
   created_at: string
   updated_at: string
-  status: 'processing' | 'completed' | 'failed'
+  // 六值域真源：backend knowledge.py:131-139 status_map（INDEXED → 'completed'）
+  status: 'pending' | 'uploaded' | 'parsing' | 'parsed' | 'completed' | 'failed'
 }
 
 export interface KnowledgeBaseListResponse {
@@ -103,8 +104,29 @@ export const deleteKnowledgeBase = async (id: string): Promise<void> => {
   return request.delete(`/knowledge/document/${id}`)
 }
 
-export const batchDeleteKnowledgeBases = async (ids: string[]): Promise<void> => {
-  return request.post('/knowledge/batch-delete', { document_ids: ids })
+/**
+ * 批量删除请求体构造（A2 判别先例：照 search P1-2 buildSearchPayload 模式）。
+ *
+ * 后端校验（knowledge.py:642-646）：`require_organization` 解析有效组织后，
+ * 非超管必须满足 `request.organization_id == effective_org_id`，否则 403 ——
+ * 原前端只发 {document_ids}（organization_id 缺省 None）对非超管**每次必 403**。
+ * 超管无组织时后端自行解析组织上下文（校验短路），此时省略该字段即可。
+ */
+export const buildBatchDeletePayload = (
+  documentIds: string[],
+  organizationId: number | null | undefined
+): { document_ids: string[]; organization_id?: number } => {
+  if (organizationId == null) {
+    return { document_ids: documentIds }
+  }
+  return { document_ids: documentIds, organization_id: organizationId }
+}
+
+export const batchDeleteKnowledgeBases = async (
+  ids: string[],
+  organizationId?: number | null
+): Promise<void> => {
+  return request.post('/knowledge/batch-delete', buildBatchDeletePayload(ids, organizationId))
 }
 
 export const rebuildKnowledgeBase = async (id: string): Promise<AxiosResponse<ApiResponse<unknown>>> => {

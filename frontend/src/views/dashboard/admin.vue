@@ -77,12 +77,12 @@
           </div>
         </div>
         <div class="mt-3">
-          <n-tag :type="adminStats.systemHealthy ? 'success' : 'error'" size="small" round>
-            {{ adminStats.systemHealthy ? t('dashboard.healthy') : t('dashboard.unhealthy') }}
+          <n-tag :type="!healthLoaded ? 'default' : adminStats.systemHealthy ? 'success' : 'error'" size="small" round>
+            {{ !healthLoaded ? '—' : adminStats.systemHealthy ? t('dashboard.healthy') : t('dashboard.unhealthy') }}
           </n-tag>
         </div>
         <div class="flex items-center gap-1 mt-2 text-xs text-gray-300">
-          <span>ES: {{ adminStats.esHealth || 'ok' }}</span>
+          <span>ES: {{ adminStats.esHealth || '—' }}</span>
         </div>
       </div>
     </div>
@@ -161,7 +161,7 @@
             </div>
             <div>
               <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.ragStats') }}</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">近 7 天文档检索效果</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">近 24 小时文档检索效果（3 小时桶）</p>
             </div>
           </div>
           <div class="flex items-center gap-2">
@@ -321,7 +321,7 @@ import { ref, onMounted, onUnmounted, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NTag } from 'naive-ui'
 import { getAuditLogs, type AuditLogEntry } from '@/api/user'
-import { getLLMStats, getRAGStats, getAdminSummary, getOrgSummary, type OrgSummary } from '@/api/monitoring'
+import { getLLMStats, getRAGStats, getAdminSummary, getOrgSummary, getMonitoringHealth, type OrgSummary } from '@/api/monitoring'
 import { formatDate } from '@/utils/format'
 import { CHART_COLORS } from '@/utils/chartTheme'
 import {
@@ -341,9 +341,13 @@ const adminStats = ref({
   totalOrgs: 0,
   activeUsers: 0,
   totalRequests: 0,
-  systemHealthy: true,
-  esHealth: 'ok'
+  // 健康值不再默认"绿"：加载前卡显示 '—'（healthLoaded）；
+  // 加载后读 /monitoring/health 真实值（B6：旧 systemHealthy:true/esHealth:'ok'
+  // 是硬编码，ES 真挂也恒绿）。
+  systemHealthy: false,
+  esHealth: ''
 })
+const healthLoaded = ref(false)
 
 const llmStats = ref({
   tokensToday: 0,
@@ -416,19 +420,49 @@ function highlightSensitiveRow(row: AuditLogEntry) {
   return isSensitive ? 'bg-red-50/70 dark:bg-red-900/10' : ''
 }
 
+/**
+ * RAG 命中率趋势轴标签：后端 hit_rate_trend_7d 实为 8 个 3 小时桶覆盖最近
+ * 24h（knowledge.py rag-stats 构造，range(8)×3h；事件仅保留 24h），第 k 点
+ * 桶起点 = now - (N - k) 个 3h。旧实现套「周一~周日」7 个标签 → 第 8 点丢失/
+ * 错贴（B5）。此处按真实桶生成 HH:00 标签（最小诚实）。
+ */
+const ragBucketLabels = (count: number): string[] => {
+  const labels: string[] = []
+  const now = Date.now()
+  for (let k = 0; k < count; k++) {
+    const start = new Date(now - (count - k) * 3 * 3600 * 1000)
+    labels.push(`${String(start.getHours()).padStart(2, '0')}:00`)
+  }
+  return labels
+}
+
+const emptyChartSubtext = (data: number[]) => ({
+  title: {
+    text: '',
+    subtext: data.length ? '' : '暂无数据',
+    subtextStyle: { color: '#9ca3af', fontSize: 12 },
+    left: 'center',
+    top: 'middle'
+  }
+})
+
 const initCharts = () => {
-  const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
-  const trendData = llmStats.value.trend.length ? llmStats.value.trend : [1200, 1800, 1500, 2200, 1900, 2500, 2100]
+  const llmTrend = llmStats.value.trend
+  const ragTrend = ragStats.value.trend
+  // LLM token 趋势：后端 token_trend_7d 为 7 个日桶 → 保留 7 天标签
+  const llmDays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
   if (llmChartRef.value) {
     llmChart = echarts.init(llmChartRef.value)
     llmChart.setOption({
+      ...emptyChartSubtext(llmTrend),
       tooltip: { trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e5e7eb', textStyle: { color: '#374151' } },
       grid: { left: '2%', right: '3%', bottom: '3%', top: '8%', containLabel: true },
-      xAxis: { type: 'category', data: days, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: llmDays, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { show: false } },
       yAxis: { type: 'value', axisLine: { show: false }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
       series: [{
-        data: trendData,
+        // 无数据即为空序列（旧实现回退 [1200,1800,…] 伪造曲线——已删）
+        data: llmTrend,
         type: 'line',
         smooth: 0.4,
         lineStyle: { width: 2, color: CHART_COLORS.sky },
@@ -448,12 +482,14 @@ const initCharts = () => {
   if (ragChartRef.value) {
     ragChart = echarts.init(ragChartRef.value)
     ragChart.setOption({
+      ...emptyChartSubtext(ragTrend),
       tooltip: { trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e5e7eb', textStyle: { color: '#374151' } },
       grid: { left: '2%', right: '3%', bottom: '3%', top: '8%', containLabel: true },
-      xAxis: { type: 'category', data: days, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: ragBucketLabels(ragTrend.length), axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { show: false } },
       yAxis: { type: 'value', min: 0, max: 100, axisLine: { show: false }, axisLabel: { color: '#6b7280', fontSize: 10, formatter: '{value}%' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
       series: [{
-        data: ragStats.value.trend.length ? ragStats.value.trend : [0, 0, 0, 0, 0, 0, ragStats.value.hitRate || 0],
+        // 真实 8 桶数据；空即空（旧实现回退 [0,…,hitRate] 伪造末点——已删）
+        data: ragTrend,
         type: 'line',
         smooth: 0.4,
         lineStyle: { width: 2, color: CHART_COLORS.secondary },
@@ -473,10 +509,11 @@ const initCharts = () => {
 
 onMounted(async () => {
   try {
-    const [adminRes, auditRes, llmRes] = await Promise.all([
+    const [adminRes, auditRes, llmRes, healthRes] = await Promise.all([
       getAdminSummary(),
       getAuditLogs({ limit: 10 }),
-      getLLMStats()
+      getLLMStats(),
+      getMonitoringHealth()
     ])
 
     if (adminRes.data) {
@@ -486,10 +523,24 @@ onMounted(async () => {
         totalDocs: adminRes.data.total_documents || 0,
         totalOrgs: adminRes.data.total_organizations || 0,
         activeUsers: adminRes.data.active_users_24h || 0,
-        totalRequests: adminRes.data.total_sessions || 0,
-        systemHealthy: true,
-        esHealth: 'ok'
+        // 「今日请求」不在此填：admin-summary 无请求数口径（monitoring.py:
+        // 801-807 仅 5 键），真实值来自 llm-stats.request_count_today（见下）。
+        // 旧实现用 total_sessions（累计会话数）顶替 —— 静默错义，已改。
+        totalRequests: 0,
+        // 健康字段不在此填（admin-summary 无健康数据）：由 /monitoring/health
+        // 真实值在下方填入（B6）；此处保持中性态，避免被本块重新硬编码成"绿"。
+        systemHealthy: false,
+        esHealth: ''
       }
+    }
+
+    if (healthRes.data) {
+      // 健康卡真实口径（B6）：/monitoring/health 的 status（healthy/degraded）
+      // 与 services.elasticsearch（green/yellow/red/unknown/disconnected）。
+      // 旧硬编码 esHealth:'ok' 与真实值域不相交 —— ES 真挂也恒显绿色。
+      adminStats.value.systemHealthy = healthRes.data.status === 'healthy'
+      adminStats.value.esHealth = healthRes.data.services?.elasticsearch || 'unknown'
+      healthLoaded.value = true
     }
 
     const auditData = auditRes.data as unknown as Record<string, unknown>
@@ -507,6 +558,10 @@ onMounted(async () => {
         costWarning: llmRes.data.cost_warning || false,
         trend: llmRes.data.token_trend_7d || []
       }
+      // 「今日请求」真实口径（C1）：llm-stats.request_count_today 是后端真实
+      // 请求计数（rag_service 24h 滚动窗口检索数，字段名即今日请求）——
+      // 替代此前 total_sessions 顶替的谎言口径。
+      adminStats.value.totalRequests = llmRes.data.request_count_today || 0
     }
 
     const ragRes = await getRAGStats()

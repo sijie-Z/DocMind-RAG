@@ -130,6 +130,15 @@
                   <span class="run-error-badge">运行失败</span>
                   <span class="run-error-text">{{ evt.content }}</span>
                 </div>
+                <!-- 落库失败告警（issue #301 批 D #22 / B29：后端在「回答已生成、
+                     但会话落库失败」时发射 {type:'warning', content}
+                     （agent.py:207-212 / :341-347），store 已收（stores/agent.ts
+                     warning case），但视图此前无渲染分支 —— 唯一失败信号不可见，
+                     用户刷新后问答消失仍无提示）。amber 底纹与「运行失败」红框区分。 -->
+                <div v-else-if="evt.type === 'warning'" class="run-warning-standalone">
+                  <span class="run-warning-badge">提示</span>
+                  <span class="run-warning-text">{{ evt.content }}</span>
+                </div>
               </template>
             </div>
 
@@ -223,7 +232,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useAgentStore } from '@/stores/agent'
 import { agentApi } from '@/api/agent'
 import { useDedupedMessage } from '@/utils/message'
-import type { AgentEvent, AgentChatMessage, PlanStep, ThinkingType } from '@/types/agent'
+import type { AgentEvent, AgentChatMessage, PlanStep, ThinkingType, AgentSession } from '@/types/agent'
 import { ThumbsUpOutline, ThumbsDownOutline } from '@vicons/ionicons5'
 
 import PlanTree from '@/components/agent/PlanTree.vue'
@@ -444,8 +453,11 @@ async function handleSessionChange(sessionId: string | null) {
   if (sessionId) {
     try {
       const res = await agentApi.getSession(sessionId)
-      if (res.data?.config) {
-        agentStore.updateConfig(res.data.config)
+      // 真载荷在 data.data.config（agent.py:637-647 的 {success, data:{…,config}}）；
+      // 旧读 res.data.config 恒 undefined → 会话配置静默 no-op（B25）
+      const detail = res.data?.data
+      if (detail?.config) {
+        agentStore.updateConfig(detail.config)
       }
     } catch (e) {
       message.error('加载会话失败')
@@ -469,9 +481,16 @@ async function handleSessionDelete(sessionId: string) {
 async function handleNewSession() {
   try {
     const res = await agentApi.createSession('New Agent Session')
-    if (res.data) {
-      agentStore.setSessions([res.data, ...agentStore.sessions])
-      agentStore.setCurrentSession(res.data.id)
+    // 创建端点只回 {success, data:{id, title}}（agent.py:585-591），真载荷在
+    // data.data；旧实现把整个信封当会话对象 → 幻影「Untitled ()」项（选中即
+    // 404）、currentSessionId 失效（B26）
+    const session = res.data?.data
+    if (session?.id) {
+      agentStore.setSessions([
+        { ...session, message_count: 0, created_at: '', updated_at: '' } as AgentSession,
+        ...agentStore.sessions,
+      ])
+      agentStore.setCurrentSession(session.id)
       message.success('已创建新会话')
     }
   } catch (e) {
@@ -511,11 +530,16 @@ async function loadInit() {
       agentApi.listSessions(),
       agentApi.getConfig(),
     ])
-    const toolsData = toolsRes.data
-    const sessionsData = sessionsRes.data
-    const configData = configRes.data
+    // 三个端点均为 {success, data} 信封（agent.py:450-472 工具数组在 data、
+    // :500-556 会话在 data.sessions、:696-710 配置在 data）——真载荷在
+    // res.data.data（axios body 再一层 data）。旧实现把信封当载荷 →
+    // 工具列表永不下发（「工具: 0/0」）、会话下拉恒空、整信封写入
+    // store.config（B22/B23/B24，同族嵌套漂移）
+    const toolsData = toolsRes.data?.data
+    const sessionsData = sessionsRes.data?.data
+    const configData = configRes.data?.data
     if (Array.isArray(toolsData)) agentStore.tools = toolsData
-    if (sessionsData?.sessions) agentStore.setSessions(sessionsData.sessions)
+    if (Array.isArray(sessionsData?.sessions)) agentStore.setSessions(sessionsData.sessions)
     if (configData && typeof configData === 'object') agentStore.updateConfig(configData)
   } catch (e) {
     initError.value = true
@@ -906,6 +930,40 @@ async function loadInit() {
 }
 
 .run-error-text {
+  word-break: break-word;
+  line-height: 18px;
+}
+
+.run-warning-standalone {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 8px 12px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-left: 3px solid #f59e0b;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #92400e;
+}
+
+.dark .run-warning-standalone {
+  color: #fcd34d;
+}
+
+.run-warning-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.run-warning-text {
   word-break: break-word;
   line-height: 18px;
 }

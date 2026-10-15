@@ -300,8 +300,8 @@
                     <n-thing :title="doc.title">
                       <template #description>
                         <n-space size="small">
-                          <n-tag size="tiny" :type="doc.status === 'completed' ? 'success' : 'warning'">
-                            {{ doc.status }}
+                          <n-tag size="tiny" :type="orgDocStatusType(doc.status)">
+                            {{ orgDocStatusLabel(doc.status) }}
                           </n-tag>
                           <span class="text-xs text-gray-400">{{ formatDate(doc.created_at) }}</span>
                         </n-space>
@@ -351,6 +351,7 @@ import {
   getOrganizationDocuments
 } from '@/api/organization'
 import type { OrganizationMember, OrganizationDocument } from '@/types/api'
+import { orgDocStatusLabel, orgDocStatusType } from './docStatus'
 
 /** Safely extract error message from unknown error */
 function getErrorMessage(error: unknown): string {
