@@ -18,6 +18,11 @@ minio>=7.2.0
 aiokafka>=0.14.0
 
 httpx>=0.28.1
+# web_search 工具的搜索后端（harness 审计·维度1「web 半成品」：此前既未装也未
+# 声明 → 任何全新环境下该工具恒失败）。上游 2025 年由 duckduckgo-search 改名
+# ddgs，旧名冻结在 8.1.1，故声明新名；代码侧保留旧名 import 兜底
+# （app/agent/tools/web_search.py）。上界 <10 防 9.x→10 API 漂移。
+ddgs>=9.16.0,<10
 aiofiles>=25.1.0
 openai>=3.11.0
 langchain>=1.4.2
