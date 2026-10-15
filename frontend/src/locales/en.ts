@@ -413,6 +413,15 @@ export default {
       seedFailed: 'Initialization failed'
     }
   },
+  error: {
+    '404': {
+      title: 'Page Not Found',
+      subtitle: 'The page you are looking for does not exist or has been removed.'
+    },
+    backToHome: 'Back to Home',
+    backToWorkbench: 'Go to Dashboard',
+    back: 'Go Back'
+  },
   login: {
     welcomeBack: 'Welcome Back',
     loginDesc: 'Please enter your credentials to login',
@@ -885,6 +894,7 @@ export default {
     exportMarkdown: 'Export Markdown'
   },
   router: {
+    notFound: 'Page Not Found',
     welcome: 'Welcome',
     login: 'Login',
     register: 'Register',

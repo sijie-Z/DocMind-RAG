@@ -111,17 +111,31 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  const register = async (form: RegisterForm) => {
+  const register = async (
+    form: RegisterForm
+  ): Promise<{ success: true; tokenIssued: boolean } | { success: false; message: string }> => {
     try {
       const response = await apiRegister(form)
       const raw = response.data as unknown as Record<string, unknown>
-      const payload = (raw?.data as Record<string, unknown>) ?? raw
-      if (payload?.access_token) {
-        setToken(payload.access_token as string, (payload.expires_in as number) ?? 86400)
-        if (payload.refresh_token) setRefreshToken(payload.refresh_token as string)
-        _applyValidatedAuth(payload.access_token as string, payload.user_info as UserInfo | undefined)
+      // 后端返回形态双兼容：token 可能在 data 包装里，也可能平铺在根上
+      const asRecord = (v: unknown): Record<string, unknown> | null =>
+        v && typeof v === 'object' ? (v as Record<string, unknown>) : null
+      const root = asRecord(raw)
+      const wrapped = asRecord(root?.data)
+      const accessToken = (wrapped?.access_token ?? root?.access_token ?? wrapped?.token ?? root?.token) as
+        | string
+        | undefined
+
+      if (accessToken) {
+        const expiresIn = (wrapped?.expires_in ?? root?.expires_in ?? 86400) as number
+        setToken(accessToken, expiresIn)
+        const refreshToken = (wrapped?.refresh_token ?? root?.refresh_token) as string | undefined
+        if (refreshToken) setRefreshToken(refreshToken)
+        _applyValidatedAuth(accessToken, (wrapped?.user_info ?? root?.user_info) as UserInfo | undefined)
       }
-      return { success: true }
+      // tokenIssued 供调用方分流：拿到 token → 按认证后落点跳转；
+      // 未拿到（后端未直接发放）→ 回登录页预填用户名并提示
+      return { success: true, tokenIssued: !!accessToken }
     } catch (error: unknown) {
       return {
         success: false,
