@@ -171,12 +171,28 @@ class TestConditionNodeExecutor:
 
 class TestTTSNodeExecutor:
     @pytest.mark.asyncio
-    async def test_returns_audio_url(self):
+    async def test_not_supported_without_fake_url(self):
+        """TTS 未实现：必须显式 not_supported，不得返回任何假 URL。
+
+        修前此处断言 `/api/v1/tts/generate` 出现在 audio_url 里——为一个不存在的
+        端点（死链）背书（第二轮 §7.2②）。诚实化后：error=="not_supported" 且
+        输出中不含该 URL。
+        """
         node = _make_node(data={}, node_type="tool_tts")
         state = _make_state(messages=[AIMessage(content="这是要朗读的文本")])
         result = await TTSNodeExecutor(node).execute(state)
-        assert "audio_url" in result["node_outputs"]["n1"]
-        assert "/api/v1/tts/generate" in result["node_outputs"]["n1"]["audio_url"]
+        output = result["node_outputs"]["n1"]
+        assert output.get("error") == "not_supported"
+        assert not output.get("audio_url")
+        assert "tts/generate" not in str(result)
+
+    @pytest.mark.asyncio
+    async def test_registry_keeps_tool_tts(self):
+        """节点注册表保留 tool_tts（存量工作流不炸，只是如实标注未支持）。"""
+        node = _make_node(data={}, node_type="tool_tts")
+        engine = WorkflowEngine(WorkflowConfig(nodes=[], edges=[]))
+        executor = engine.get_executor(node)
+        assert isinstance(executor, TTSNodeExecutor)
 
     @pytest.mark.asyncio
     async def test_uses_context_final_output(self):

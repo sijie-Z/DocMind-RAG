@@ -18,10 +18,16 @@
         <code>{{ argsStr }}</code>
       </div>
 
-      <!-- Result -->
+      <!-- Result（体验第四波：工件渲染升级——diff/markdown/json 富渲染 + 下载；
+           download-text 恒传全文：下载导出源文本，不受 300 字展示截断影响） -->
       <div v-if="resultText" class="tool-result" :class="{ 'is-error': status === 'error' }">
         <div class="result-content" ref="resultEl">
-          <pre>{{ displayResult }}</pre>
+          <ArtifactViewer
+            :text="displayResult"
+            :kind="resultKind"
+            :name="toolName"
+            :download-text="resultText"
+          />
         </div>
         <button
           v-if="resultText.length > 300"
@@ -42,6 +48,8 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import ArtifactViewer from '@/components/agent/ArtifactViewer.vue'
+import { detectArtifactKind } from '@/utils/artifact'
 
 const props = defineProps<{
   toolName: string
@@ -80,6 +88,10 @@ const displayResult = computed(() => {
   if (expanded.value || props.resultText.length <= 300) return props.resultText
   return props.resultText.slice(0, 300) + '...'
 })
+
+// 按全文识别工件类型（截断预览下仍能显示正确的类型徽标；json 截断不可解析时
+// ArtifactViewer 会诚实回退纯文本）
+const resultKind = computed(() => detectArtifactKind(props.resultText || ''))
 
 const duration = computed(() => {
   if (!props.duration) return ''
@@ -212,20 +224,8 @@ const duration = computed(() => {
 }
 
 .result-content {
-  max-height: 150px;
+  max-height: 220px;
   overflow-y: auto;
-}
-
-.result-content pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--text-secondary, #4b5563);
-  font-family: inherit;
-}
-
-.dark .result-content pre {
-  color: var(--text-secondary-dark, #d1d5db);
 }
 
 .expand-btn {
