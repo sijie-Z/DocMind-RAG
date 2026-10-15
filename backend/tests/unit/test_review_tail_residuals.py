@@ -175,8 +175,11 @@ class _RecordingExecutor:
     def reset_for_request(self) -> None:
         pass
 
+    # human_guidance：前向兼容 HITL 合流——loop→executor 接缝在 HITL 后新增该
+    # kwarg（本替身先于 HITL 落地，合入顺序下两态都须成立；缺省 None 不改本分支基线行为）。
     async def execute(self, plan, history=None, organization_id=1, user_id=0,
-                      enable_thinking=True, ctx=None, on_step_done=None):
+                      enable_thinking=True, ctx=None, on_step_done=None,
+                      human_guidance=None):
         for s in plan.steps:
             s.status = "completed"
             plan.completed_steps += 1
