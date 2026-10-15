@@ -5,6 +5,7 @@ export default {
     confirm: 'Confirmer',
     delete: 'Supprimer',
     edit: 'Modifier',
+    loading: 'Chargement...',
     success: 'Succès',
     error: 'Erreur',
     failed: 'Échec',

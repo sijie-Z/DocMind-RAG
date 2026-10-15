@@ -5,6 +5,7 @@ export default {
     confirm: 'Confirm',
     delete: 'Delete',
     edit: 'Edit',
+    loading: 'Loading...',
     success: 'Success',
     error: 'Error',
     failed: 'Failed',

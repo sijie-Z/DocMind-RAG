@@ -5,6 +5,7 @@ export default {
     confirm: '確認',
     delete: '削除',
     edit: '編集',
+    loading: '読み込み中...',
     success: '成功',
     error: 'エラー',
     failed: '失敗',

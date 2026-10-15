@@ -10,6 +10,7 @@ export default {
     copyFailed: '复制失败',
     close: '关闭',
     edit: '编辑',
+    loading: '加载中...',
     success: '操作成功',
     error: '操作失败',
     failed: '操作失败',
