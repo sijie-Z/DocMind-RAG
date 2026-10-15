@@ -13,6 +13,9 @@ export default {
     saveSuccess: 'Saved successfully',
     deleteSuccess: 'Deleted successfully',
     close: 'Close',
+    batchDelete: 'Batch delete',
+    copy: 'Copy',
+    copySuccess: 'Copied successfully',
     copyFailed: 'Copy failed',
     actions: 'Actions'
   },
@@ -302,7 +305,16 @@ export default {
     title: 'Knowledge Base Management',
     subtitle: 'Upload and manage your enterprise knowledge documents',
     searchPlaceholder: 'Search knowledge base...',
+    viewDetail: 'View Details',
+    stats: {
+      total: 'Total Documents',
+      completed: 'Indexed',
+      processing: 'Processing',
+      failed: 'Failed'
+    },
     rebuild: 'Rebuild index',
+    rebuildSuccess: 'Rebuild index job submitted',
+    rebuildFailed: 'Failed to rebuild index',
     upload: 'Upload',
     tags: {
       tech: 'Tech Doc',
@@ -370,6 +382,7 @@ export default {
     title: 'Prompt Management',
     subtitle: 'Manage system prompts and response styles for the AI assistant',
     addTemplate: 'New Template',
+    create: 'Create Template',
     editTemplate: 'Edit Template',
     empty: 'No prompt templates',
     seed: 'Initialize Defaults',
