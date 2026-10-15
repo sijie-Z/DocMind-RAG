@@ -4,7 +4,8 @@
   （受限工具上下文除外——评审 B1）；
 - **真工具**：`list_skills` / `load_skill_reference`（指南与参考两种形态、错误显式）；
 - **学习闭环（读/写/反馈/清理侧）**：`_apply_skill_hints` 只补空缺不覆盖；
-  `_learn_skills` 质检全 A 才学；使用结果反馈（B2）；过期清理（B2）；同 query 去重（m3）。
+  `_learn_skills` 质检全 A 才学；使用结果反馈（B2）；过期清理（B2）；同 query 去重（m3）；
+  触发词重复记账去重。
 """
 import asyncio
 from types import SimpleNamespace
@@ -399,6 +400,61 @@ async def test_learn_dedups_same_query_and_rejects_no_trigger():
     assert second is None, "同一 query 不重复沉淀（m3）"
     assert len(mgr._skills) == 1
     assert await mgr.learn_from_plan_success("ok go", steps) is None, "无触发词不造注定无用的技能"
+
+
+# ── 学习侧触发词"重复记账"去重 ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_learn_dedups_repeated_chinese_trigger_cold_start_no_match():
+    """纯中文查询曾被同一串重复记两次触发词（`re.findall` 提整段
+    汉字串 + `split()` 循环 `isalpha()` 再记一遍）→ 冷启动单模式 2.0×0.5=1.0
+    恰好踩线命中。提取器保序去重后：单串 1.0×0.5=0.5 < 1.0 不命中。
+
+    变异点：删去 `learn_from_plan_success` 的 `list(dict.fromkeys(keywords))`
+    → 两条断言同时红（pattern 变回重复；match 由 None 变命中）。
+    """
+    from app.agent.skills import SkillManager
+
+    mgr = SkillManager()
+    steps = [{"tool_hint": "t1", "description": "a"}, {"tool_hint": "t2", "description": "b"}]
+    query = "帮我分析销售数据"  # 纯中文串：findall 与 split 循环各记一次
+
+    skill = await mgr.learn_from_plan_success(query, steps)
+
+    assert skill is not None
+    assert skill.trigger_patterns == [query], (
+        "同一串重复记账必须保序去重：重复数不得变成额外加分（凑数踩线 1.0）"
+    )
+    assert mgr.match(query) is None, "冷启动 1 模式 × 0.5 = 0.5 < 1.0：不命中"
+
+
+@pytest.mark.asyncio
+async def test_dedup_keeps_existing_patterns_and_strengthened_match_intact():
+    """对照（存量不受影响 + 设计路径不回归）：修复只作用于学习侧
+    提取器——① 存量技能（含修复前重复记账的 pattern）原样保留、强化后照常命中；
+    ② 去重后的新学技能经一次使用强化，从"冷启动不命中"变为"命中"。
+    """
+    from app.agent.skills import SkillManager
+
+    mgr = SkillManager()
+    legacy = await mgr.create_skill(
+        name="Auto: 存量", description="d",
+        trigger_patterns=["帮我生成播客脚本", "帮我生成播客脚本"],  # 修复前学习侧产物
+        tool_sequence=[{"tool_name": "search_knowledge_base", "description": "x"}],
+    )
+    legacy.success_count = 1  # 存量已强化
+    assert legacy.trigger_patterns == ["帮我生成播客脚本", "帮我生成播客脚本"], (
+        "存量 pattern 保留，不做迁移改写（修复只作用于提取器）"
+    )
+    assert mgr.match("帮我生成播客脚本") is legacy, "存量已强化技能照常命中"
+
+    steps = [{"tool_hint": "t1", "description": "a"}, {"tool_hint": "t2", "description": "b"}]
+    fresh = await mgr.learn_from_plan_success("帮我分析销售数据", steps)
+    assert fresh is not None, "与存量 pattern 不同，应正常学习"
+    assert mgr.match("帮我分析销售数据") is None, "冷启动不命中（0.5 < 1.0）"
+    await mgr.record_success(fresh.id)
+    assert mgr.match("帮我分析销售数据") is fresh, "强化后 1×1.0 ≥ 1.0 命中（设计路径不回归）"
 
 
 class _FakeMemory:
