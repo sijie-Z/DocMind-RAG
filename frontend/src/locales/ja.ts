@@ -12,11 +12,14 @@ export default {
     refresh: '更新',
     saveSuccess: '保存に成功しました',
     deleteSuccess: '削除に成功しました',
+    actions: '操作'
   },
   profile: {
     basicInfo: '基本情報',
     username: 'ユーザー名',
+    email: 'メールアドレス',
     role: '役割',
+    status: '状態',
     roleAdmin: '管理者',
     roleUser: '一般ユーザー',
     phone: '電話番号',
@@ -61,7 +64,9 @@ export default {
     },
     nickname: 'ニックネーム',
     placeholder: {
+      username: 'ユーザー名を入力',
       nickname: 'ニックネームを入力',
+      email: 'メールアドレスを入力',
       phone: '電話番号を入力',
       bio: '自己紹介を入力',
       oldPassword: '現在のパスワードを入力',
@@ -93,7 +98,12 @@ export default {
     organizations: '所属組織',
     roleUser: '一般ユーザー',
     roleAdmin: '管理者',
-    deleteConfirm: 'このユーザーを削除しますか？'
+    deleteConfirm: 'このユーザーを削除しますか？',
+    deleteConfirmWithName: 'ユーザー「{username}」を削除しますか？この操作は取り消せません。',
+    subtitle: 'システム内の全ユーザー情報と権限を管理',
+    noData: 'ユーザーデータがありません',
+    selectOrgs: '所属組織を選択',
+    initialPassword: '初期パスワード'
   },
   org: {
     title: '組織図',
@@ -198,7 +208,7 @@ export default {
     confirmUpload: 'アップロードを開始',
     uploadTitle: 'ファイルをアップロード',
     dragText: 'クリックまたはドラッグ＆ドロップでアップロード',
-    dragHint: 'PDF, Word, TXT, Markdown形式に対応',
+    dragHint: 'PDF, Word, TXT, Markdown、画像などに対応',
     fileTitle: 'タイトル（任意）',
     addTags: 'タグを追加（Enterで確定）',
     fileDesc: '説明（任意）',
@@ -383,7 +393,37 @@ export default {
     activeConnections: 'アクティブ接続数',
     totalRequests: '総リクエスト数',
     errors: 'エラー数',
-    avgResponseTime: '平均レスポンス時間'
+    avgResponseTime: '平均レスポンス時間',
+    kbStatus: 'ナレッジベース状態',
+    totalDocs: 'ドキュメント総数',
+    totalChunks: 'チャンク総数',
+    indexSize: 'インデックスサイズ',
+    searchRequests: '検索リクエスト数',
+    alertStatus: 'アラート状態',
+    activeAlerts: 'アクティブアラート',
+    critical: '重大',
+    warning: '警告',
+    normal: '正常',
+    info: '情報',
+    cpuTrend: 'CPU使用率推移',
+    memoryTrend: 'メモリ使用率推移',
+    requestTrend: 'リクエスト数推移',
+    responseTrend: '応答時間推移',
+    recentAlerts: '最近のアラート',
+    noData: 'データなし',
+    timeRange: {
+      hour1: '直近1時間',
+      hour6: '直近6時間',
+      hour12: '直近12時間',
+      day1: '直近24時間',
+      day7: '直近7日間'
+    },
+    alert: {
+      level: 'レベル',
+      message: 'メッセージ',
+      time: '時間',
+      status: '状態'
+    }
   },
   search: {
     title: 'スマート検索',

@@ -12,11 +12,14 @@ export default {
     refresh: 'Actualiser',
     saveSuccess: 'Enregistré avec succès',
     deleteSuccess: 'Supprimé avec succès',
+    actions: 'Actions'
   },
   profile: {
     basicInfo: 'Informations de base',
     username: 'Nom d\'utilisateur',
+    email: 'E-mail',
     role: 'Rôle',
+    status: 'Statut',
     roleAdmin: 'Administrateur',
     roleUser: 'Utilisateur',
     phone: 'Téléphone',
@@ -61,7 +64,9 @@ export default {
     },
     nickname: 'Pseudo',
     placeholder: {
+      username: 'Entrez votre nom d\'utilisateur',
       nickname: 'Entrez votre pseudo',
+      email: 'Entrez votre e-mail',
       phone: 'Entrez votre numéro de téléphone',
       bio: 'Entrez votre biographie',
       oldPassword: 'Entrez votre mot de passe actuel',
@@ -93,7 +98,12 @@ export default {
     organizations: 'Organisations',
     roleUser: 'Utilisateur',
     roleAdmin: 'Administrateur',
-    deleteConfirm: 'Voulez-vous supprimer cet utilisateur ?'
+    deleteConfirm: 'Voulez-vous supprimer cet utilisateur ?',
+    deleteConfirmWithName: 'Voulez-vous vraiment supprimer l\'utilisateur {username} ? Cette action est irréversible.',
+    subtitle: 'Gérer toutes les informations et permissions des utilisateurs',
+    noData: 'Aucune donnée utilisateur',
+    selectOrgs: 'Sélectionnez les organisations',
+    initialPassword: 'Mot de passe initial'
   },
   org: {
     title: 'Organigramme',
@@ -198,7 +208,7 @@ export default {
     confirmUpload: 'Démarrer le téléchargement',
     uploadTitle: 'Télécharger un fichier',
     dragText: 'Cliquez ou glissez un fichier ici',
-    dragHint: 'Supporte les formats PDF, Word, TXT, Markdown',
+    dragHint: 'Supporte les formats PDF, Word, TXT, Markdown, images, etc.',
     fileTitle: 'Titre (Optionnel)',
     addTags: 'Ajouter des tags (Entrée pour confirmer)',
     fileDesc: 'Description (Optionnel)',
@@ -383,7 +393,37 @@ export default {
     activeConnections: 'Connexions actives',
     totalRequests: 'Total des requêtes',
     errors: 'Nombre d\'erreurs',
-    avgResponseTime: 'Temps de réponse moyen'
+    avgResponseTime: 'Temps de réponse moyen',
+    kbStatus: 'Base de connaissances',
+    totalDocs: 'Documents totaux',
+    totalChunks: 'Chunks totaux',
+    indexSize: 'Taille de l\'index',
+    searchRequests: 'Requêtes de recherche',
+    alertStatus: 'Statut des alertes',
+    activeAlerts: 'Alertes actives',
+    critical: 'Critique',
+    warning: 'Avertissement',
+    normal: 'Normal',
+    info: 'Info',
+    cpuTrend: 'Tendance CPU',
+    memoryTrend: 'Tendance mémoire',
+    requestTrend: 'Tendance des requêtes',
+    responseTrend: 'Tendance du temps de réponse',
+    recentAlerts: 'Alertes récentes',
+    noData: 'Aucune donnée',
+    timeRange: {
+      hour1: 'Dernière heure',
+      hour6: '6 dernières heures',
+      hour12: '12 dernières heures',
+      day1: '24 dernières heures',
+      day7: '7 derniers jours'
+    },
+    alert: {
+      level: 'Niveau',
+      message: 'Message',
+      time: 'Heure',
+      status: 'Statut'
+    }
   },
   search: {
     title: 'Recherche Intelligente',
