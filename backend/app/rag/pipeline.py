@@ -325,7 +325,14 @@ class RAGPipeline:
             # 缺它时 vector/hybrid 臂回传的非空 qv 会经上面回填的 query_vector 让本
             # 条件变真——强制模式的结果会被写进组织级语义缓存，随后同 query 的自动
             # 路由请求按相似度命中、借位拿到强制模式的结果（评审 B1 实证的写侧泄漏）。
-            if query_vector and result and cache_safe and not search_mode:
+            # 语义写门控补 `not document_ids`（评审 #225 m4，先行存在）：读侧
+            # （精确/语义）对文档限定查询一律跳过，写侧此前没有对应守卫 ——
+            # 被限定文档范围的检索结果经 qv 回填（上方 `if not query_vector
+            # and qv`）后照样写入 **org 级**语义缓存（键只含 org，不含文档
+            # 范围），同 query 的后续无范围请求会命中并吃到被裁剪过的结果
+            # （泄漏形态；Redis 可用时成立）。守卫位置/原则与上一行精确缓存
+            # 写入一致。
+            if query_vector and result and cache_safe and not search_mode and not document_ids:
                 # 检索缓存条目 answer 为空（仅 sources），写入检索专用命名空间（R4）
                 await self.semantic_cache.set(
                     query, query_vector, "", result, organization_id=organization_id
