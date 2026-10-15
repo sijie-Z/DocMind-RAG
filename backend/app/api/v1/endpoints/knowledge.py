@@ -128,18 +128,21 @@ async def list_knowledge_bases(
         # 4. 转换数据
         data = []
         for doc in documents:
-            # 映射状态
+            # 映射状态（词表收敛：唯一词表 = DB 枚举原词，INDEXED → "indexed"，
+            # 与详情端点 documents.py 对齐；此前改写为 "completed" 造成双词表）
             status_map: dict[Any, str] = {
                 DocumentStatus.PENDING: "pending",
                 DocumentStatus.UPLOADED: "uploaded",
                 DocumentStatus.PARSING: "parsing",
                 DocumentStatus.PARSED: "parsed",
-                DocumentStatus.INDEXED: "completed",
+                DocumentStatus.INDEXED: "indexed",
                 DocumentStatus.FAILED: "failed"
             }
 
             # 声明 doc_status 为 Any 类型，以避免 pyright 中 status_map.get 方法对于 SQLAlchemy Column 参数的匹配报错
             doc_status: Any = doc.status
+            # raw_status 冗余携带原词（与详情端点同构），供前端双词容忍兼容层消费
+            raw_status = doc.status.value if hasattr(doc.status, "value") else str(doc.status)
 
             data.append({
                 "id": doc.id,
@@ -152,7 +155,8 @@ async def list_knowledge_bases(
                 "parse_error": doc.parse_error,
                 "created_at": doc.created_at.isoformat() if doc.created_at else "",
                 "updated_at": doc.updated_at.isoformat() if doc.updated_at else "",
-                "status": status_map.get(doc_status, "failed")
+                "status": status_map.get(doc_status, "failed"),
+                "raw_status": raw_status
             })
 
         return {

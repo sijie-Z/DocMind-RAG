@@ -31,8 +31,112 @@ from app.services.notification_service import create_notification
 logger = logging.getLogger(__name__)
 
 # Force import of all tool modules to trigger registration
-import app.agent.core_tools  # noqa: F401 — original 11 tools
-import app.agent.tools  # noqa: F401 — 14 new tools package
+import app.agent.core_tools  # noqa: F401 — core tools (14)
+import app.agent.tools  # noqa: F401 — tools package (19)
+
+# ── 引用文档（体验第四波 @引用）────────────────────────────────────────────
+
+MAX_REFERENCED_DOCS = 10
+MAX_EXCERPT_CHARS = 700
+
+
+async def build_referenced_document_context(
+    document_ids: list[str],
+    query: str,
+    organization_id: int,
+    pipeline=None,
+) -> tuple[str | None, list[str]]:
+    """把用户 @ 引用的知识库文档解析为注入 planner 的上下文段。
+
+    诚实语义：每个引用要么给出关键摘要（query 相关分块）进上下文，要么给出
+    「为什么用不了」的明确警告文案上 SSE —— 绝不静默丢弃。
+
+    ⚠️ 安全注记（评审 F3，必须有记录）：被引文档的检索分块是**不可信输入**
+    ——文档内容可能包含针对模型的指令（prompt injection 载体）。本实现的
+    注入姿态与既有 RAG 一致（`context_docs` 直拼 snippet，见 loop 合成消息），
+    非新类攻击面；现有约束：用户显式引用（非自动召回）+ 组织域校验（跨组织
+    拒注入）+ 条数帽（10）× 长度帽（700 字符/条）。**尚无**定界 spotlight /
+    指令隔离等主动防护——该方向（引用段包裹与注入过滤）作为后续独立演进项，
+    不在本波范围。若未来把引用摘要扩展到自动召回/跨用户语料，须先补防护。
+
+    Returns:
+        (document_context, warnings)：document_context 为 None 表示没有
+        任何可用引用（不外发空段）；warnings 为逐条中文提示（后端无 i18n
+        层，与既有错误文案约定一致：中文文案 + 前端映射）。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.document import Document
+
+    warnings: list[str] = []
+    entries: list[dict[str, str]] = []
+
+    ids = [str(d).strip() for d in document_ids if str(d).strip()]
+    if len(ids) > MAX_REFERENCED_DOCS:
+        for extra in ids[MAX_REFERENCED_DOCS:]:
+            warnings.append(f"引用文档超出单次上限（{MAX_REFERENCED_DOCS} 个），已忽略：{extra}")
+        ids = ids[:MAX_REFERENCED_DOCS]
+
+    for did in ids:
+        doc = None
+        try:
+            async with AsyncSessionLocal() as db:
+                doc = (
+                    (await db.execute(select(Document).where(Document.id == did)))
+                    .scalars()
+                    .first()
+                )
+        except Exception as e:
+            logger.warning("引用文档查询失败 %s: %s", did, log_safe(e))
+            warnings.append(f"引用文档不可用（查询失败），已忽略：{did}")
+            continue
+        if doc is None:
+            warnings.append(f"引用文档不可用（不存在），已忽略：{did}")
+            continue
+        if doc.organization_id != organization_id:
+            warnings.append(f"引用文档无权访问（不属于当前组织），已忽略：{did}")
+            continue
+
+        title = doc.title or doc.filename or did
+        excerpt = ""
+        note_added = False
+        if pipeline is not None:
+            try:
+                results, _ = await pipeline.search_knowledge_base(
+                    query, organization_id, top_k=3, document_ids=[did],
+                )
+                excerpt = "\n".join(
+                    (r.get("text") or r.get("snippet") or "").strip()
+                    for r in results[:3]
+                    if (r.get("text") or r.get("snippet"))
+                ).strip()
+            except Exception as e:
+                logger.warning("引用文档检索失败 %s: %s", did, log_safe(e))
+                warnings.append(f"引用文档「{title}」内容检索失败，仅按标题/描述注入")
+                note_added = True
+        else:
+            warnings.append(f"引用文档「{title}」摘要服务不可用，仅按标题/描述注入")
+            note_added = True
+
+        if not excerpt:
+            excerpt = (doc.description or "").strip()
+            if not note_added:
+                # 检索正常但零命中：如实告知降级为标题/描述
+                warnings.append(f"引用文档「{title}」未检索到相关正文，仅按标题/描述注入")
+        if len(excerpt) > MAX_EXCERPT_CHARS:
+            excerpt = excerpt[:MAX_EXCERPT_CHARS] + "…"
+        entries.append({"id": did, "title": title, "excerpt": excerpt})
+
+    if not entries:
+        return None, warnings
+
+    lines = ["## 用户显式引用的知识库文档（回答时优先依据这些文档）"]
+    for i, e in enumerate(entries, 1):
+        lines.append(f"### [{i}] {e['title']}（document_id: {e['id']}）")
+        if e["excerpt"]:
+            lines.append(e["excerpt"])
+    return "\n".join(lines), warnings
 
 
 async def notify_task_terminal(
@@ -113,6 +217,7 @@ class AgentService:
         user_id: int = 0,
         session_id: str | None = None,
         config: AgentConfig | None = None,
+        referenced_document_ids: list[str] | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Run the PER agent loop and yield events.
 
@@ -126,6 +231,9 @@ class AgentService:
             user_id: Current user ID.
             session_id: Optional session ID for config persistence.
             config: Per-request agent configuration overrides.
+            referenced_document_ids: 用户显式 @ 引用的知识库文档 id（体验
+                第四波）——解析为关键摘要注入 planner 上下文；失效/无权限
+                逐条以 warning 事件诚实外发，绝不静默。
         """
         if not self.client:
             yield AgentEvent(type="error", content="LLM 未配置，请检查 DEEPSEEK_API_KEY 环境变量。")
@@ -153,6 +261,29 @@ class AgentService:
                 query=query,
             )
 
+        # 引用文档（体验第四波 @引用）：解析为 planner 上下文段 + 诚实警告。
+        # 解析失败不阻塞聊天——引用是增强不是前提（fail-open 与 checkpoint 同）。
+        document_context: str | None = None
+        if referenced_document_ids:
+            try:
+                from app.dependencies import get_rag_pipeline
+
+                rag_pipeline = get_rag_pipeline()
+            except Exception as e:
+                logger.warning("引用文档摘要服务获取失败: %s", log_safe(e))
+                rag_pipeline = None
+            document_context, ref_warnings = await build_referenced_document_context(
+                referenced_document_ids,
+                query,
+                organization_id,
+                pipeline=rag_pipeline,
+            )
+            for w in ref_warnings:
+                warn_event = AgentEvent(type="warning", content=w)
+                if task_id:
+                    warn_event.task_id = task_id
+                yield warn_event
+
         # Create the PER loop
         agent = PERAgentLoop(
             openai_client=self.client,
@@ -176,10 +307,12 @@ class AgentService:
             meta_event.task_id = task_id
         yield meta_event
 
-        # Run the PER loop（task_id 接通 checkpoint：T1–T4 触发点全部生效）
+        # Run the PER loop（task_id 接通 checkpoint：T1–T4 触发点全部生效；
+        # document_context：@引用文档摘要并入预规划上下文）
         try:
             async for event in agent.run(
                 query, history=history, task_id=task_id, session_id=session_id,
+                document_context=document_context,
             ):
                 if task_id:
                     event.task_id = task_id
@@ -204,7 +337,10 @@ class AgentService:
                 # 全败）按标志如实置 FAILED 而不是 COMPLETED。
                 # HITL：审批暂停绝不置终态（状态已在暂停点置 waiting_approval，
                 # 人类应答经 approval 端点续跑）；协作式取消收敛为 CANCELLED。
-                if getattr(agent, "paused_for_approval", False):
+                # B：计划审批暂停（waiting_plan_approval）同语义——等人类决策。
+                if getattr(agent, "paused_for_approval", False) or getattr(
+                    agent, "paused_for_plan_approval", False
+                ):
                     pass
                 elif getattr(agent, "run_cancelled", False):
                     cancel_event = await self._finalize_task_cancelled(task_id)
@@ -237,7 +373,9 @@ class AgentService:
 
         - 404：任务不存在 / 非本人 / 组织不一致（TaskNotFoundError）；
         - 409：已终态（TaskNotResumableError，detail 回带当前 state）/ 并发 resume
-          正持有租约（TaskBusyError）；
+          正持有租约（TaskBusyError）/ **B：正在等待计划审批
+          （TaskWaitingPlanApprovalError——直连 resume 会让未获批准的计划被执行，
+          必须经 plan-approval 端点应答）**；
         - 成功 = 已拿租约并把状态推进到 RUNNING（retry_count += 1），返回 (task, payload)。
         """
         task, payload = await checkpoint.load_for_resume(
@@ -246,6 +384,13 @@ class AgentService:
         if task.is_terminal:
             raise checkpoint.TaskNotResumableError(
                 f"任务已处于终态 {task.status.value}，不可恢复",
+                detail={"task_id": task_id, "state": task.status.value},
+            )
+        if task.status == TaskStatus.WAITING_PLAN_APPROVAL:
+            # B：审批门不许绕过——resume 的语义是"续跑已批准的计划"，而此处
+            # 计划尚未获批；loop 侧另有重挂起兜底（深度防御，两道闸都开着）。
+            raise checkpoint.TaskWaitingPlanApprovalError(
+                "任务正在等待计划审批，请先经 plan-approval 应答（批准/编辑/拒绝）",
                 detail={"task_id": task_id, "state": task.status.value},
             )
         # 认领：Redis 租约 + RUNNING→FAILED→RUNNING（陈旧 RUNNING 接管）等状态流转。
@@ -322,7 +467,10 @@ class AgentService:
             # issue #301 批 A #10/#11：同 chat 路径——消费 mark_terminal 返回值，
             # 写失败必显形、run 级失败如实置 FAILED。
             # HITL：resume 流还可能再次暂停（多审批循环）/被取消——语义同 chat。
-            if getattr(agent, "paused_for_approval", False):
+            # B：计划审批暂停（再次停在计划卡）同语义。
+            if getattr(agent, "paused_for_approval", False) or getattr(
+                agent, "paused_for_plan_approval", False
+            ):
                 pass
             elif getattr(agent, "run_cancelled", False):
                 cancel_event = await self._finalize_task_cancelled(task_id)

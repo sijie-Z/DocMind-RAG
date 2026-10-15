@@ -1,6 +1,6 @@
 {
   "name": "docmind-frontend",
-  "version": "1.0.0",
+  "version": "1.22.1-rc.1",
   "description": "DocMind 企业级 RAG 知识库前端 - Vue 3 + TypeScript + Naive UI",
   "scripts": {
     "dev": "vite",

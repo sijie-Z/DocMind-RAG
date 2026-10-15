@@ -88,6 +88,7 @@ export function useChatSend(
     sseService.off('chunk')
     sseService.off('message')
     sseService.off('error')
+    sseService.off('warning')
     sseService.off('retry')
     sseService.off('thinking')
     sseService.off('tool_call')
@@ -195,6 +196,12 @@ export function useChatSend(
       message.error(data.content || t('chat.sseError'))
     }
 
+    // ISS-3：后端 warning 事件（落库失败可见 / Agent 侧降级提示）此前被传输层
+    // 白名单静默丢弃，聊天页无任何提示；补订阅，content 原样提示并带 i18n 兜底。
+    const onWarning = (data: SSEMessage) => {
+      message.warning(data.content || t('chat.sseWarning'))
+    }
+
     const onDebug = (data: SSEMessage) => {
       if (debugData && debugEnabled?.value) {
         debugData.value = (data as unknown as Record<string, unknown>).data as RetrievalDebugData
@@ -290,6 +297,7 @@ export function useChatSend(
     sseService.on('chunk', onChunk)
     sseService.on('message', onMessage)
     sseService.on('error', onError)
+    sseService.on('warning', onWarning)
     sseService.on('thinking', onThinking)
     sseService.on('tool_call', onToolCall)
     sseService.on('tool_result', onToolResult)
@@ -436,6 +444,7 @@ export function useChatSend(
     sseService.off('chunk')
     sseService.off('message')
     sseService.off('error')
+    sseService.off('warning')
     sseService.off('retry')
     sseService.off('thinking')
     sseService.off('tool_call')

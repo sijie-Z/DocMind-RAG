@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.document import Document
+from app.models.document import Document, DocumentStatus
 from app.models.user import User
 from app.schemas.knowledge import SearchSuggestionResponse
 
@@ -233,6 +233,74 @@ class TestKnowledgeList:
         """未认证请求应返回 401/403。"""
         r = client.get("/api/v1/knowledge/")
         assert r.status_code in (401, 403)
+
+
+class TestStatusVocabularyConsistent:
+    """第二轮 7.2⑤ 词表收敛契约：同一文档在列表接口与详情接口的 status 必须一致。
+
+    先红实证（本波分支前）：列表 status_map 把 INDEXED 改写为 'completed'
+    （knowledge.py status_map），详情端点原样输出 'indexed'（documents.py）——
+    同一文档两种词表。唯一词表定为 DB 枚举原词 'indexed'
+    （models/document.py DocumentStatus.INDEXED = "indexed"）。
+    """
+
+    def test_status_vocabulary_consistent(self, client: TestClient):
+        from app.main import app
+
+        mock_user = _make_mock_user(is_superuser=True)
+        doc = _make_mock_document(doc_id="doc-vocab-1")
+        # 必须用真枚举成员：MagicMock 状态会让 status_map.get 永远 miss，
+        # 测不到「列表把 INDEXED 改写为 completed」的真实路径
+        doc.status = DocumentStatus.INDEXED
+        doc.parsed_at = None
+        doc.indexed_at = None
+        doc.chunk_count = 0
+
+        override_func, mock_db = _override_get_db()
+
+        # 列表端点经 execute（count + scalars），详情端点经 db.get(Document, id)
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [doc]
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 1
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.get = AsyncMock(return_value=doc)
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+
+        try:
+            r_list = client.get(
+                "/api/v1/knowledge/",
+                headers={"Authorization": "Bearer test_token"}
+            )
+            assert r_list.status_code == 200
+            item = r_list.json()["data"]["data"][0]
+
+            r_detail = client.get(
+                "/api/v1/documents/doc-vocab-1",
+                headers={"Authorization": "Bearer test_token"}
+            )
+            assert r_detail.status_code == 200
+            detail = r_detail.json()["data"]
+
+            # 主断言（先红点）：列表 == 详情
+            assert item["status"] == detail["status"], (
+                f"词表漂移：列表={item['status']!r} vs 详情={detail['status']!r}"
+            )
+            # 唯一词表 = DB 枚举原词
+            assert item["status"] == "indexed"
+            assert detail["status"] == "indexed"
+            # raw_status 冗余携带原词（列表本波补上；详情已有）
+            assert item["raw_status"] == "indexed"
+            assert detail["raw_status"] == "indexed"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
 
 
 class TestKnowledgeStats:

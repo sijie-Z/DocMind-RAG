@@ -12,7 +12,7 @@
 DocMind — Agent Research & Evaluation Platform
 
 • Built a benchmark-driven agent system (PER architecture: Planning → Execution → Reflection)
-  with DAG-based parallel execution and 30 integrated tools.
+  with DAG-based parallel execution and 33 integrated tools.
 
 • Designed and conducted 5 controlled experiments on Planner granularity and execution
   architecture trade-offs; identified planning quality as the dominant performance factor.
@@ -34,7 +34,7 @@ DocMind — Agent Research & Evaluation Platform
 ```
 DocMind — Agent 研究与评测平台
 
-• 构建了基于 PER（规划-执行-反思）架构的 Agent 系统，支持 DAG 并行调度和 30 个内置工具。
+• 构建了基于 PER（规划-执行-反思）架构的 Agent 系统，支持 DAG 并行调度和 33 个内置工具。
 
 • 设计并执行 5 轮控制实验，系统评估了规划粒度和执行架构对 Agent 性能的影响，
   发现"规划质量"而非"执行架构"是 Agent 性能的主导因素。
@@ -59,7 +59,7 @@ DocMind — Agent 研究与评测平台
 
 "我做了一个 Agent 研究与评测平台，叫 DocMind。它不是又一个 Agent 框架——而是一个把 Agent 当作实验对象来研究的平台。
 
-核心是 PER 三阶段架构：规划→执行→反思，支持 DAG 并行调度和 30 个工具。但这个架构本身不是项目的亮点，亮点是我们在上面做的 5 轮实验。"
+核心是 PER 三阶段架构：规划→执行→反思，支持 DAG 并行调度和 33 个工具。但这个架构本身不是项目的亮点，亮点是我们在上面做的 5 轮实验。"
 
 ### 问题发现（60s）
 
