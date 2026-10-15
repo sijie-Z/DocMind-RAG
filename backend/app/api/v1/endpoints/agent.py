@@ -2,7 +2,9 @@
 
 Endpoints:
     POST /api/v1/agent/chat           — PER agent chat (SSE streaming)
+    GET  /api/v1/agent/tasks          — Recent agent tasks (with has_replay flag)
     GET  /api/v1/agent/tasks/{id}     — Agent task status (checkpoint/resume, #201)
+    GET  /api/v1/agent/tasks/{id}/replay — Execution replay (Redis → local fallback)
     POST /api/v1/agent/tasks/{id}/resume — Resume an interrupted task (SSE, #201)
     POST /api/v1/agent/tasks/{id}/approval — HITL 审批应答 (SSE; approve/deny/改指令)
     POST /api/v1/agent/tasks/{id}/cancel   — HITL 协作式取消 (服务端停止协议)
@@ -16,6 +18,7 @@ Endpoints:
     PUT  /api/v1/agent/config         — Update user agent config
 """
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -31,7 +34,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent import checkpoint
 from app.agent.config import DEFAULT_DISABLED_TOOLS, AgentConfig
 from app.agent.registry import tool_registry
-from app.agent.service import agent_service
+from app.agent.replay.engine import ReplayEngine
+from app.agent.service import agent_service, notify_task_terminal
 from app.agent.skills import skill_manager
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.log_safety import log_safe
@@ -49,6 +53,8 @@ from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_replay_engine = ReplayEngine()
 
 
 def _merge_disabled_tools(client_disabled: list[str] | None) -> list[str]:
@@ -276,6 +282,40 @@ async def _fallback_resume_config(user_id: int) -> AgentConfig:
     return config
 
 
+@router.get("/tasks")
+async def list_agent_tasks(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """最近任务列表（回放消费面的发现性入口）。
+
+    - 归属纪律与 GET /tasks/{id} 完全一致：403（无组织）/ 本人 + 严格同组织；
+    - 每条任务带 `has_replay` 布尔——完成态（或任何已落回放的 run）标出
+      "有回放可看"，前端据此渲染「回放」入口；无数据如实 False（不虚标）。
+    """
+    effective_org_id = await require_organization(current_user, db)
+    total, rows = await checkpoint.list_tasks(
+        user_id=current_user.id,
+        organization_id=effective_org_id,
+        offset=(page - 1) * page_size,
+        limit=page_size,
+    )
+
+    flags = await asyncio.gather(
+        *(_replay_engine.has_replay(t.id) for t in rows)
+    ) if rows else []
+    data = [
+        {**checkpoint.task_to_status_dict(t), "has_replay": has_replay}
+        for t, has_replay in zip(rows, flags, strict=True)
+    ]
+    return {
+        "success": True,
+        "data": {"tasks": data, "total": total, "page": page, "page_size": page_size},
+    }
+
+
 @router.get("/tasks/{task_id}")
 async def get_agent_task(
     task_id: str,
@@ -290,6 +330,7 @@ async def get_agent_task(
     - 404：任务不存在 / 非本人 / 组织不一致（不区分，避免泄露归属）。
     - HITL：waiting_approval 时附带审批详情（approval：工具/参数/风险/时限 +
       approval_expired 只读判定）——刷新/重连后的"回到审批现场"入口。
+    - has_replay：该任务是否有可回放数据（前端据此决定是否亮出「查看回放」）。
     """
     effective_org_id = await require_organization(current_user, db)
     task = await checkpoint.load_task(
@@ -298,6 +339,7 @@ async def get_agent_task(
         organization_id=effective_org_id,
     )
     data = checkpoint.task_to_status_dict(task)
+    data["has_replay"] = await _replay_engine.has_replay(task_id)
     if task.status == TaskStatus.WAITING_APPROVAL:
         pending = await checkpoint.get_pending_approval(task_id)
         if pending is not None:
@@ -306,6 +348,50 @@ async def get_agent_task(
             data["approval"] = pending
             data["approval_expired"] = _approval.approval_expired(pending)
     return {"success": True, "data": data}
+
+
+@router.get("/tasks/{task_id}/replay")
+async def get_agent_task_replay(
+    task_id: str,
+    format_: Literal["json", "text"] = Query("json", alias="format"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """执行回放读取（Redis 优先 → 本地 benchmark/replay/ 兜底；无数据如实 404）。
+
+    - 403：无组织上下文（与 GET /tasks/{id} 同纪律）；
+    - 404 TASK_NOT_FOUND：任务不存在 / 非本人 / 组织不一致——回放数据含查询
+      原文与执行细节，必须先过与任务状态视图同一个归属闸门，绝不按裸 task_id
+      放行；
+    - 404 REPLAY_NOT_FOUND：任务存在但没有回放数据（未完整结束 / 已过期 /
+      从未落盘）——诚实空态：**绝不**编造空轨迹冒充"有回放"；
+    - format=json（默认）：结构化 timeline（字段与 ExecutionContext.to_dict()
+      写侧逐字对齐，见 ReplayEngine.format_timeline）；
+    - format=text：format_replay 的人类可读文本（CLI 同款格式，原样保留）。
+    """
+    effective_org_id = await require_organization(current_user, db)
+    await checkpoint.load_task(
+        task_id=task_id,
+        user_id=current_user.id,
+        organization_id=effective_org_id,
+    )
+    ctx = await _replay_engine.load(task_id, exact=True)
+    if ctx is None:
+        raise NotFoundError(
+            "该任务没有可回放的数据",
+            error_code="REPLAY_NOT_FOUND",
+            detail={"task_id": task_id},
+        )
+    if format_ == "text":
+        return {
+            "success": True,
+            "data": {
+                "task_id": task_id,
+                "format": "text",
+                "text": _replay_engine.format_replay(ctx),
+            },
+        }
+    return {"success": True, "data": _replay_engine.format_timeline(ctx)}
 
 
 @router.post("/tasks/{task_id}/resume")
@@ -599,6 +685,8 @@ async def cancel_agent_task(
         if not ok:
             raise ServiceUnavailableError("取消失败：任务状态未能落库，请重试")
         await checkpoint.request_cancel(task_id)
+        # 终态站内通知（best-effort 旁路；通知失败绝不影响刚落的 cancelled 终态）。
+        await notify_task_terminal(task_id, TaskStatus.CANCELLED)
         return {"success": True, "data": {"task_id": task_id, "state": "cancelled"}}
     # 活跃运行期：置旗，等 run 在检查点收敛（202 = 已受理，未完成）。
     if not await checkpoint.request_cancel(task_id):

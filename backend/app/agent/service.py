@@ -23,14 +23,66 @@ from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.loop import PERAgentLoop
 from app.agent.memory_bridge import AgentMemoryBridge
+from app.core.database import AsyncSessionLocal
 from app.core.log_safety import log_safe
 from app.models.agent_task import AgentTask, TaskStatus
+from app.services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
 
 # Force import of all tool modules to trigger registration
 import app.agent.core_tools  # noqa: F401 — original 11 tools
 import app.agent.tools  # noqa: F401 — 14 new tools package
+
+
+async def notify_task_terminal(
+    task_id: str, state: TaskStatus, *, error: str | None = None
+) -> None:
+    """任务终态站内通知（best-effort；由各终态收敛点在前置 mark_terminal
+    成功落库后触发）。
+
+    - 覆盖三种终态：completed / failed / cancelled——任务在后台跑完而人已离开
+      页面时，铃铛与通知中心仍能收到，点击一键跳回（target_route="Agent" +
+      target_id=task_id；前端既有跳转链按 `?id=` 导航到 /agent 并打开回放）。
+    - **诚实降级**：通知是旁路，不是主链——任何失败（DB 抖动、WS 不可达等）
+      只记 warning 留痕，绝不上抛、绝不回滚/影响任务状态（调用方此刻已落终态）。
+    - 标题带 task_id：create_notification 按 title+user 1 分钟去重，同一分钟
+      内多个任务收敛时标题必须可区分，否则后来的通知会被吞。
+    - 自带 DB 会话（照 checkpoint.save_checkpoint 模式）：本函数被 SSE 收尾
+      与异常路径调用，不能假设请求会话的生命周期还健在。
+    """
+    try:
+        row = await checkpoint.load_task_row(task_id)
+        if row is None:
+            return
+        query_part = " ".join((row.query or "").split())[:60]
+        if state is TaskStatus.COMPLETED:
+            title = f"Agent 任务已完成（{task_id}）"
+            content = f"「{query_part}」执行完成，点击查看回放。"
+        elif state is TaskStatus.CANCELLED:
+            title = f"Agent 任务已取消（{task_id}）"
+            content = f"「{query_part}」已取消。"
+        else:
+            title = f"Agent 任务失败（{task_id}）"
+            reason = " ".join((error or "").split())[:100]
+            content = f"「{query_part}」执行失败" + (f"：{reason}" if reason else "") + "。"
+        async with AsyncSessionLocal() as db:
+            await create_notification(
+                db,
+                user_id=row.user_id,
+                title=title,
+                content=content,
+                type="agent",
+                target_route="Agent",
+                target_id=str(task_id),
+            )
+    except Exception as e:
+        logger.warning(
+            "终态通知发送失败（不影响任务状态）(task=%s, state=%s): %s",
+            log_safe(task_id),
+            getattr(state, "value", state),
+            log_safe(e),
+        )
 
 
 class AgentService:
@@ -359,7 +411,10 @@ class AgentService:
     async def _checkpoint_error(
         self, task_id: str | None, agent: PERAgentLoop, exc: BaseException,
     ) -> None:
-        """run 内异常：快照 + 标记 FAILED（写 last_error）；从不吞掉原异常。"""
+        """run 内异常：快照 + 标记 FAILED（写 last_error）；从不吞掉原异常。
+
+        终态落库成功才发通知（best-effort，旁路绝不影响异常传播与任务状态）。
+        """
         if not task_id:
             return
         try:
@@ -368,12 +423,15 @@ class AgentService:
             ))
         except Exception as e:
             logger.warning("checkpoint on_error save failed (task=%s): %s", log_safe(task_id), log_safe(e))
-        await checkpoint.mark_terminal(
+        failure_text = f"{type(exc).__name__}: {exc}"
+        ok = await checkpoint.mark_terminal(
             task_id,
             TaskStatus.FAILED,
-            error=f"{type(exc).__name__}: {exc}",
+            error=failure_text,
             error_type=type(exc).__name__,
         )
+        if ok:
+            await notify_task_terminal(task_id, TaskStatus.FAILED, error=failure_text)
 
     async def _finalize_task_terminal(
         self,
@@ -403,6 +461,12 @@ class AgentService:
         else:
             ok = await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED)
         if ok:
+            # 终态落库成功 → 站内通知（best-effort；通知失败绝不回滚任务状态）
+            await notify_task_terminal(
+                task_id,
+                TaskStatus.FAILED if failed_run else TaskStatus.COMPLETED,
+                error=failure_text if failed_run else None,
+            )
             return None
         logger.error(
             "任务 %s 终态（%s）未能落库：任务行将停留原状态"
@@ -424,7 +488,8 @@ class AgentService:
 
     async def _finalize_task_cancelled(self, task_id: str) -> AgentEvent | None:
         """取消收敛：置 CANCELLED 终态（**诚实终态**：不伪装 completed）；
-        写失败同样消费返回值并响亮留痕（#301 批 A 同纪律）。"""
+        写失败同样消费返回值并响亮留痕（#301 批 A 同纪律）。
+        终态落库成功 → 站内通知（best-effort 旁路）。"""
         ok = await checkpoint.mark_terminal(
             task_id,
             TaskStatus.CANCELLED,
@@ -432,6 +497,7 @@ class AgentService:
             error_type="user_cancelled",
         )
         if ok:
+            await notify_task_terminal(task_id, TaskStatus.CANCELLED)
             return None
         logger.error(
             "任务 %s 取消终态未能落库：任务行将停留原状态（可经 resume 收敛）",

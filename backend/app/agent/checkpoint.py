@@ -26,7 +26,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
@@ -608,6 +608,52 @@ def _check_task_access(
         raise TaskNotFoundError("任务不存在或无权访问")
     if organization_id is not None and task.organization_id != organization_id:
         raise TaskNotFoundError("任务不存在或无权访问")
+
+
+async def load_task_row(task_id: str) -> AgentTask | None:
+    """按 id 裸读任务行（无归属校验），供内部旁路（终态通知）使用。
+
+    返回 detached 实例、不加载快照列（同 _load_task_row 的毒丸防线）；
+    行缺失 / 任何读取故障 → None（诚实降级）。**HTTP 面绝不使用本函数**——
+    对外一律走 load_task 的归属闸门。
+    """
+    if not task_id:
+        return None
+    try:
+        async with AsyncSessionLocal() as db:
+            return await _load_task_row(db, task_id)
+    except Exception as e:
+        logger.warning("load_task_row failed (task=%s): %s", log_safe(task_id), log_safe(e))
+        return None
+
+
+async def list_tasks(
+    *, user_id: int, organization_id: int | None, offset: int, limit: int
+) -> tuple[int, list[AgentTask]]:
+    """任务列表分页（GET /agent/tasks 用）。
+
+    归属过滤与 load_task 同纪律（严格同组织，含 org=None 的精确匹配）；
+    行读取 defer 快照列（#278/R1 毒丸防线——列表绝不因某行快照坏 JSON 而炸）。
+    """
+    conditions = (
+        AgentTask.user_id == user_id,
+        AgentTask.organization_id == organization_id,
+    )
+    async with AsyncSessionLocal() as db:
+        total = (
+            await db.execute(select(func.count(AgentTask.id)).where(*conditions))
+        ).scalar() or 0
+        rows = (
+            await db.execute(
+                select(AgentTask)
+                .where(*conditions)
+                .options(defer(AgentTask.context_snapshot))
+                .order_by(AgentTask.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+        ).scalars().all()
+    return int(total), list(rows)
 
 
 def task_to_status_dict(task: AgentTask) -> dict[str, Any]:

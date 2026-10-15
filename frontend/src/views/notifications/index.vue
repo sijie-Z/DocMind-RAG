@@ -122,7 +122,9 @@ const typeOptions = [
   { label: '安全', value: 'security' },
   { label: '账户', value: 'account' },
   { label: '文档', value: 'document' },
-  { label: '对话', value: 'chat' }
+  { label: '对话', value: 'chat' },
+  // Agent 任务终态通知（完成/失败/取消；点击经 target_route="Agent" 跳回放）
+  { label: '智能体', value: 'agent' }
 ]
 
 const readOptions = [
@@ -149,6 +151,9 @@ const jumpToNotificationTarget = async (row: Notification) => {
     await router.push({ name: 'Chat' })
   } else if (row.type === 'account' || row.type === 'security') {
     await router.push({ name: 'Profile' })
+  } else if (row.type === 'agent') {
+    // 无 target_route 的旧 agent 通知兜底：仍落到 /agent
+    await router.push({ name: 'Agent' })
   }
 }
 
@@ -322,7 +327,9 @@ watch(
 )
 
 onUnmounted(() => {
-  notificationSocket.offNotification()
+  // 只移除本视图的处理器：裸调 offNotification() 会清空全部处理器——
+  // 离开本页后铃铛/layout 的实时推送会静默失效（bug 修复）
+  notificationSocket.offNotification(handleRealtime)
 })
 </script>
 
