@@ -423,6 +423,7 @@ export default {
     askAI: 'AIに聞く',
     button: '検索',
     type: '検索モード',
+    auto: '自動',
     hybrid: 'ハイブリッド',
     semantic: 'セマンティック',
     keyword: 'キーワード',
