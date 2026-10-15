@@ -95,35 +95,42 @@
         </n-tooltip>
       </div>
 
-      <!-- 用户信息 -->
+      <!-- 用户信息（点击弹出用户菜单：个人设置 / 系统帮助 / 关于 / 退出登录） -->
       <div class="p-4 border-t border-gray-200 dark:border-gray-800 overflow-hidden">
-        <div class="flex items-center space-x-3">
-          <n-avatar
-            round
-            :size="32"
-            :src="userInfo?.avatar_url || userInfo?.avatar || '/avatar.png'"
-          >
-            {{ userInfo?.username?.charAt(0).toUpperCase() }}
-          </n-avatar>
-          <div v-if="!appStore.sidebarCollapsed" class="flex-1 min-w-0">
-            <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-              {{ userInfo?.username }}
-            </p>
-            <n-tag
-              v-if="currentOrgId"
-              size="tiny"
+        <n-dropdown
+          trigger="click"
+          placement="top-start"
+          :options="userMenuOptions"
+          @select="handleUserMenuSelect"
+        >
+          <div class="flex items-center space-x-3 cursor-pointer">
+            <n-avatar
               round
-              :bordered="false"
-              type="info"
-              class="mt-0.5"
+              :size="32"
+              :src="userInfo?.avatar_url || userInfo?.avatar || '/avatar.png'"
             >
-              <template #icon>
-                <n-icon size="10"><BusinessOutline /></n-icon>
-              </template>
-              组织 {{ currentOrgId }}
-            </n-tag>
+              {{ userInfo?.username?.charAt(0).toUpperCase() }}
+            </n-avatar>
+            <div v-if="!appStore.sidebarCollapsed" class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                {{ userInfo?.username }}
+              </p>
+              <n-tag
+                v-if="currentOrgId"
+                size="tiny"
+                round
+                :bordered="false"
+                type="info"
+                class="mt-0.5"
+              >
+                <template #icon>
+                  <n-icon size="10"><BusinessOutline /></n-icon>
+                </template>
+                组织 {{ currentOrgId }}
+              </n-tag>
+            </div>
           </div>
-        </div>
+        </n-dropdown>
       </div>
     </div>
     
@@ -215,6 +222,7 @@
           
           <!-- 用户菜单 -->
           <n-dropdown
+            trigger="click"
             :options="userMenuOptions"
             @select="handleUserMenuSelect"
           >
@@ -287,6 +295,8 @@ import {
   HardwareChipOutline,
   MenuOutline,
   GlobeOutline,
+  CalendarOutline,
+  ServerOutline,
 } from '@vicons/ionicons5'
 
 const route = useRoute()
@@ -496,6 +506,12 @@ const menuOptions = computed<MenuOption[]>(() => {
       show: isAdmin
     },
     {
+      label: t('menu.mcpServers'),
+      key: 'McpServers',
+      icon: () => h(NIcon, null, { default: () => h(ServerOutline) }),
+      show: isAdmin
+    },
+    {
       label: t('menu.personalSettings'),
       key: 'Profile',
       icon: () => h(NIcon, null, { default: () => h(PersonOutline) })
@@ -509,6 +525,11 @@ const menuOptions = computed<MenuOption[]>(() => {
       label: t('menu.agent'),
       key: 'Agent',
       icon: () => h(NIcon, null, { default: () => h(HardwareChipOutline) })
+    },
+    {
+      label: t('menu.scheduledTasks'),
+      key: 'ScheduledTasks',
+      icon: () => h(NIcon, null, { default: () => h(CalendarOutline) })
     }
   ]
   return options.filter(item => item.show !== false)

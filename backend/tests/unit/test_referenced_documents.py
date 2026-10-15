@@ -1,0 +1,301 @@
+"""体验第四波 @引用 —— 后端最小接线的判别测试。
+
+被测契约：
+- build_referenced_document_context：可用引用 → 关键摘要（query 相关分块）
+  进上下文段；不存在 / 跨组织 / 检索失败 / 服务不可用 / 超上限 → 逐条诚实
+  警告（绝不静默）；全部失败 → document_context 为 None（不外发空段）。
+- loop.run(document_context=...)：并入预规划上下文——planner 的 memory_context
+  可见（与记忆同轨），无引用时不注入（负例）。
+- AgentService.chat：把引用解析成上下文段传给 run，警告以 warning 事件先于
+  任务事件外发（含 task_id）。
+
+变异点：
+- builder 把「跨组织」分支删掉 → 跨组织用例红（文档泄漏进上下文）；
+- loop 不拼 document_context → planner 捕获用例红；
+- chat 不传 referenced_document_ids → service 传参用例红。
+"""
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+import app.models  # noqa: F401 — 注册全部表，供 create_all
+from app.agent import checkpoint
+from app.agent import service as service_mod
+from app.agent.config import AgentConfig
+from app.agent.events import AgentEvent
+from app.agent.exec_context import ExecutionContext
+from app.agent.loop import PERAgentLoop
+from app.agent.service import AgentService, build_referenced_document_context
+from app.core.database import Base
+from app.models.document import Document, DocumentType
+from app.rag.retriever import HybridRetriever
+
+DOC_CTX = "## 用户显式引用的知识库文档（回答时优先依据）\n### [1] 预算报告（document_id: d1）\nQ3 预算要点……"
+
+
+# ── 假件 ─────────────────────────────────────────────────────────────────────
+
+
+class _FakePipeline:
+    def __init__(self, texts: dict[str, list[str]] | None = None, fail: bool = False):
+        self.texts = texts or {}
+        self.fail = fail
+        self.calls: list[dict] = []
+
+    async def search_knowledge_base(
+        self, query, organization_id, top_k=5, document_ids=None, debug=False,
+    ):
+        self.calls.append({"query": query, "document_ids": document_ids, "org": organization_id})
+        if self.fail:
+            raise RuntimeError("ES 不可用（替身）")
+        results = [
+            {"document_id": did, "text": t, "snippet": t[:50], "score": 0.9}
+            for did in (document_ids or [])
+            for t in self.texts.get(did, [])
+        ]
+        return results, None
+
+
+class _FakeMemory:
+    def __init__(self):
+        self.results: dict = {}
+
+    def reset_working(self):
+        self.results = {}
+
+    def get_all_results(self):
+        return dict(self.results)
+
+    def store_step_result(self, step_id, result):
+        self.results[step_id] = result
+
+    def get_step_result(self, step_id, run_id=None):
+        return self.results.get(step_id)
+
+    async def get_context_for_query(self, query):
+        return ""
+
+    async def record_experience(self, **kwargs):
+        pass
+
+    async def record_interaction(self, user_input, assistant_response):
+        pass
+
+
+class _CapturingPlanner:
+    """记录每次 plan() 收到的 memory_context（@引用注入的观测点）。"""
+
+    def __init__(self):
+        self.memory_contexts: list[str] = []
+
+    async def plan(self, query, history=None, memory_context="", ctx=None, replan_feedback=""):
+        self.memory_contexts.append(memory_context)
+        yield AgentEvent(type="plan_start", plan_id="plan-1", content="制定计划...")
+        yield AgentEvent(
+            type="plan_step", plan_id="plan-1", plan_step_id="s1",
+            content="第1步", dependencies=[],
+        )
+        yield AgentEvent(type="plan_complete", plan_id="plan-1", plan_goal="目标", content="计划完成")
+
+
+def _capturing_client():
+    async def _create(*, messages, tools=None, **kwargs):
+        msg = SimpleNamespace(content="结论", tool_calls=None, role="assistant")
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=msg, finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2),
+        )
+
+    client = MagicMock()
+    client.chat.completions.create = _create
+    return client
+
+
+def _loop_cfg() -> AgentConfig:
+    return AgentConfig(
+        enable_memory=False, enable_reflection=False, enable_skills=False,
+        enable_experience=False, enable_thinking=False, enable_planning=True,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _hermetic(monkeypatch):
+    async def _save(self, ttl=86400 * 7):
+        return False
+
+    monkeypatch.setattr(ExecutionContext, "save", _save)
+    monkeypatch.setattr(HybridRetriever, "get_embedding", AsyncMock(return_value=[]))
+
+
+@pytest.fixture
+async def doc_factory(tmp_path, monkeypatch):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'refdocs.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    import app.core.database as core_db
+
+    monkeypatch.setattr(core_db, "AsyncSessionLocal", factory)
+    monkeypatch.setattr(checkpoint, "AsyncSessionLocal", factory)
+    yield factory
+    await engine.dispose()
+
+
+async def _add_doc(factory, doc_id: str, *, org: int = 1, title: str = "预算报告", description=None):
+    async with factory() as db:
+        db.add(Document(
+            id=doc_id,
+            filename=f"{doc_id}.pdf",
+            file_path=f"/tmp/{doc_id}.pdf",
+            file_size=10,
+            file_type=DocumentType.PDF,
+            title=title,
+            description=description,
+            organization_id=org,
+            uploaded_by=1,
+        ))
+        await db.commit()
+
+
+# ── builder 单元 ─────────────────────────────────────────────────────────────
+
+
+class TestBuildReferencedDocumentContext:
+    async def test_available_doc_injects_excerpt_without_warnings(self, doc_factory):
+        await _add_doc(doc_factory, "d1")
+        pipe = _FakePipeline(texts={"d1": ["Q3 预算要点：营收增长 12%", "成本下降 3%"]})
+
+        ctx, warnings = await build_referenced_document_context(["d1"], "预算", 1, pipeline=pipe)
+
+        assert ctx is not None
+        assert "预算报告" in ctx and "d1" in ctx
+        assert "营收增长 12%" in ctx
+        assert warnings == []
+        # 检索被限定到引用文档（document_ids 过滤）
+        assert pipe.calls[0]["document_ids"] == ["d1"]
+
+    async def test_missing_doc_warns_and_no_empty_section(self, doc_factory):
+        ctx, warnings = await build_referenced_document_context(["ghost"], "q", 1, pipeline=_FakePipeline())
+        assert ctx is None
+        assert len(warnings) == 1 and "不存在" in warnings[0]
+
+    async def test_cross_org_doc_warns_not_leaked(self, doc_factory):
+        await _add_doc(doc_factory, "d2", org=2)
+        ctx, warnings = await build_referenced_document_context(["d2"], "q", 1, pipeline=_FakePipeline())
+        assert ctx is None
+        assert len(warnings) == 1 and "无权访问" in warnings[0]
+
+    async def test_retrieval_failure_falls_back_to_description_with_warning(self, doc_factory):
+        await _add_doc(doc_factory, "d3", description="涵盖 Q3 预算编制口径")
+        ctx, warnings = await build_referenced_document_context(
+            ["d3"], "q", 1, pipeline=_FakePipeline(fail=True),
+        )
+        assert ctx is not None and "涵盖 Q3 预算编制口径" in ctx
+        assert any("检索失败" in w for w in warnings)
+
+    async def test_pipeline_unavailable_warns(self, doc_factory):
+        await _add_doc(doc_factory, "d4")
+        ctx, warnings = await build_referenced_document_context(["d4"], "q", 1, pipeline=None)
+        assert ctx is not None and "预算报告" in ctx
+        assert any("摘要服务不可用" in w for w in warnings)
+
+    async def test_over_cap_ids_warned_not_silent(self, doc_factory):
+        ids = [f"missing-{i}" for i in range(12)]
+        ctx, warnings = await build_referenced_document_context(ids, "q", 1, pipeline=_FakePipeline())
+        assert ctx is None
+        assert sum("超出单次上限" in w for w in warnings) == 2
+        assert len(warnings) == 12  # 10 条（不存在）+ 2 条（超出）——一条不吞
+
+
+# ── loop 接线 ────────────────────────────────────────────────────────────────
+
+
+class TestLoopDocumentContextWiring:
+    async def test_document_context_reaches_planner(self):
+        loop = PERAgentLoop(_capturing_client(), _loop_cfg(), organization_id=1, user_id=0)
+        loop.memory = _FakeMemory()
+        planner = _CapturingPlanner()
+        loop._planner = planner
+
+        events = [ev async for ev in loop.run("查预算", document_context=DOC_CTX)]
+
+        assert any(ev.type == "done" for ev in events)
+        assert len(planner.memory_contexts) >= 1
+        assert "用户显式引用的知识库文档" in planner.memory_contexts[0]
+
+    async def test_without_document_context_planner_unaffected(self):
+        loop = PERAgentLoop(_capturing_client(), _loop_cfg(), organization_id=1, user_id=0)
+        loop.memory = _FakeMemory()
+        planner = _CapturingPlanner()
+        loop._planner = planner
+
+        _ = [ev async for ev in loop.run("查预算")]
+
+        assert "用户显式引用的知识库文档" not in planner.memory_contexts[0]
+
+
+# ── service.chat 接线 ────────────────────────────────────────────────────────
+
+
+class _StubLoop:
+    last_kwargs: dict = {}
+
+    def __init__(self, *args, **kwargs):
+        self.cancel_check = None
+        self.paused_for_approval = False
+        self.paused_for_plan_approval = False
+        self.run_cancelled = False
+        self.run_failed = False
+        self.checkpoint_live = None
+
+    def _get_tools(self):
+        return []
+
+    async def run(self, query, history=None, task_id=None, session_id=None, document_context=None):
+        _StubLoop.last_kwargs = {"document_context": document_context, "task_id": task_id}
+        yield AgentEvent(type="done", content="")
+
+
+class TestServiceChatWiring:
+    async def test_warns_missing_refs_and_passes_context_to_run(self, doc_factory, monkeypatch):
+        await _add_doc(doc_factory, "d9")
+        pipe = _FakePipeline(texts={"d9": ["Q3 要点"]})
+        monkeypatch.setattr(service_mod, "PERAgentLoop", _StubLoop)
+        # get_rag_pipeline 在 chat 函数体内 import：打桩来源模块属性
+        import app.dependencies as deps
+
+        monkeypatch.setattr(deps, "get_rag_pipeline", lambda: pipe)
+
+        svc = AgentService(openai_client=MagicMock())
+        cfg = _loop_cfg()
+        cfg.enable_checkpoint = True
+
+        events = [
+            ev async for ev in svc.chat(
+                "查预算", organization_id=1, user_id=1, config=cfg,
+                referenced_document_ids=["d9", "ghost"],
+            )
+        ]
+
+        warn_events = [ev for ev in events if ev.type == "warning"]
+        assert any("ghost" in ev.content and "不存在" in ev.content for ev in warn_events)
+        # 警告携带 task_id（checkpoint 开着时建了任务行）
+        assert all(ev.task_id for ev in warn_events)
+        assert "用户显式引用的知识库文档" in _StubLoop.last_kwargs["document_context"]
+        assert any(ev.type == "done" for ev in events)
+
+    async def test_no_refs_no_document_context(self, doc_factory, monkeypatch):
+        monkeypatch.setattr(service_mod, "PERAgentLoop", _StubLoop)
+        import app.dependencies as deps
+
+        monkeypatch.setattr(deps, "get_rag_pipeline", lambda: _FakePipeline())
+
+        svc = AgentService(openai_client=MagicMock())
+        cfg = _loop_cfg()
+        cfg.enable_checkpoint = True
+
+        _ = [ev async for ev in svc.chat("q", organization_id=1, user_id=1, config=cfg)]
+        assert _StubLoop.last_kwargs["document_context"] is None
