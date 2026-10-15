@@ -146,10 +146,10 @@
                           {{ source.filename || t('chat.unknownDoc') }}
                         </div>
                         <div class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed line-clamp-6">
-                          {{ source.snippet || source.text || t('chat.noPreview') }}
+                          {{ source.content || t('chat.noPreview') }}
                         </div>
-                        <div v-if="source.score" class="mt-1.5 text-[10px] text-gray-400">
-                          {{ t('chat.relevanceScore', { score: (source.score * 100).toFixed(0) }) }}
+                        <div v-if="source.relevanceScore" class="mt-1.5 text-[10px] text-gray-400">
+                          {{ t('chat.relevanceScore', { score: (source.relevanceScore * 100).toFixed(0) }) }}
                         </div>
                       </div>
                     </n-popover>

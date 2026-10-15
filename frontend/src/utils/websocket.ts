@@ -10,12 +10,13 @@ interface WebSocketMessage {
   // 只发 chunk/message/error，通知走独立的 notificationSocket——幽灵联合成员。
   // R2（#289 评审残余）：union 此前还漏了运行时实发的 'chunk'（dispatch 走
   // string key、不受类型面约束）；本次补全，与 drain 实况对齐。
+  // B41：移除 title —— chat.py:520-545 三类载荷（chunk/message/error）均无该键，
+  // 旧声明与旧读点（useChatConnection）同为幽灵字段。
   type: 'chunk' | 'message' | 'error' | 'connect' | 'disconnect'
   content?: string
   conversationId?: number | string
   messageId?: string
   sources?: WebSocketSource[]
-  title?: string
   fileIds?: string[]
   payload?: Record<string, unknown>
   is_cached?: boolean

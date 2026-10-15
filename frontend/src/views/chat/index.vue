@@ -346,10 +346,17 @@ const handleSelectConversation = async (conv: Conversation) => {
 
 const loadConversation = async (id: string) => {
   isLoading.value = true
+  msgLoadError.value = false
   try {
     const res = await getConversationMessages(id)
     if (res.data) {
       const rawData = res.data as unknown as Record<string, unknown>
+      // 无权/会话不存在：HTTP 200 但 { success:false, message:"无权访问" }（chat.py:340）
+      // ——旧实现静默落入空聊天态不报错（C7）；现在如实提示并中止
+      if (rawData?.success === false) {
+        message.error((rawData.message as string) || t('chat.historyFailed'))
+        return
+      }
       const data = (rawData?.data as Record<string, unknown>) || rawData
       const msgs = (data.messages as Record<string, unknown>[]) || []
       chatStore.setCurrentConversation({
@@ -358,8 +365,15 @@ const loadConversation = async (id: string) => {
         settings: data.settings as Record<string, unknown> | undefined
       })
       messages.value = msgs.map((m: Record<string, unknown>) => ({
-        id: m.id as string, content: m.content as string, messageType: (m.message_type || m.messageType) as 'user' | 'assistant',
-        conversationId: data.id as string, createdAt: m.created_at as string, sources: m.sources as ChatMessage['sources'], files: m.files as ChatMessage['files']
+        id: m.id as string, content: m.content as string,
+        messageType: (m.messageType ?? m.message_type) as 'user' | 'assistant',
+        conversationId: data.id as string,
+        // 真键 camelCase（chat.py:353-359）：createdAt/feedback/feedbackNote——
+        // 旧映射读 m.created_at（时间丢，B36）且丢失 feedback（重载后点赞高亮必丢，B34）
+        createdAt: m.createdAt as string,
+        feedback: (m.feedback ?? undefined) as number | undefined,
+        feedbackNote: (m.feedbackNote ?? undefined) as string | undefined,
+        sources: m.sources as ChatMessage['sources'], files: m.files as ChatMessage['files']
       }))
     }
   } catch {

@@ -60,7 +60,9 @@ export function useChatConnection(
       if (data.conversationId && (!chatStore.currentConversation || chatStore.currentConversation.id !== data.conversationId)) {
         chatStore.setCurrentConversation({
           id: data.conversationId,
-          title: data.title || (messages.value.find(m => m.messageType === 'user')?.content?.slice(0, 20) || t('chat.newConversation')),
+          // chat WS 三类载荷（chunk/message/error，chat.py:520-545）均无 title 键——
+          // 旧读点 data.title 恒 undefined（B41）；直接用首条用户消息回退命名
+          title: messages.value.find(m => m.messageType === 'user')?.content?.slice(0, 20) || t('chat.newConversation'),
           userId: userId!,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()

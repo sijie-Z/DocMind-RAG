@@ -59,6 +59,26 @@
             <div><span class="text-gray-500">关系:</span> <span class="font-bold text-blue-600">{{ graphEdges.length }}</span></div>
           </div>
         </div>
+        <!-- 诚实空态 / 错误态：不再以"白画布"代替数据状态 -->
+        <div
+          v-if="!loading && !loadFailed && graphNodes.length === 0"
+          class="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none bg-white/60 dark:bg-gray-950/60"
+        >
+          <n-icon size="56" class="text-gray-300 dark:text-gray-600 mb-4"><GitNetworkOutline /></n-icon>
+          <p class="font-medium text-gray-500 dark:text-gray-400">{{ t('knowledge.graph.emptyTitle') }}</p>
+          <p class="text-sm text-gray-400 dark:text-gray-500 mt-1">{{ t('knowledge.graph.emptyDesc') }}</p>
+        </div>
+        <div
+          v-else-if="loadFailed"
+          class="absolute inset-0 flex flex-col items-center justify-center text-center bg-white/70 dark:bg-gray-950/70"
+        >
+          <n-icon size="56" class="text-gray-300 dark:text-gray-600 mb-4"><WarningOutline /></n-icon>
+          <p class="font-medium text-gray-500 dark:text-gray-400">{{ t('knowledge.graph.loadFailed') }}</p>
+          <n-button size="small" class="mt-4" @click="fetchGraph">
+            <template #icon><n-icon><RefreshOutline /></n-icon></template>
+            {{ t('common.refresh') }}
+          </n-button>
+        </div>
       </div>
 
       <!-- Side Panel -->
@@ -113,13 +133,17 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { NInput, NButton, NIcon, NTag } from 'naive-ui'
-import { GitNetworkOutline, SearchOutline, RefreshOutline, CloseOutline } from '@vicons/ionicons5'
+import { GitNetworkOutline, SearchOutline, RefreshOutline, CloseOutline, WarningOutline } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import { getKnowledgeGraph, type GraphNode, type GraphEdge } from '@/api/knowledge'
+
+const { t } = useI18n()
 
 const canvas = ref<HTMLCanvasElement>()
 const canvasContainer = ref<HTMLDivElement>()
 const searchQuery = ref('')
 const loading = ref(false)
+const loadFailed = ref(false)
 const graphNodes = ref<(GraphNode & { x: number; y: number; vx: number; vy: number })[]>([])
 const graphEdges = ref<GraphEdge[]>([])
 const selectedNode = ref<(GraphNode & { x: number; y: number }) | null>(null)
@@ -181,6 +205,7 @@ const initCanvas = () => {
 
 const fetchGraph = async () => {
   loading.value = true
+  loadFailed.value = false
   try {
     const res = await getKnowledgeGraph(searchQuery.value || undefined, 80)
     const data = res.data?.data || res.data
@@ -193,9 +218,12 @@ const fetchGraph = async () => {
         vy: 0,
       }))
       graphEdges.value = data.edges || []
+    } else {
+      graphNodes.value = []
+      graphEdges.value = []
     }
   } catch {
-    // ignore
+    loadFailed.value = true
   } finally {
     loading.value = false
   }
