@@ -5,6 +5,7 @@ export default {
     confirm: '確認',
     delete: '削除',
     edit: '編集',
+    loading: '読み込み中...',
     success: '成功',
     error: 'エラー',
     failed: '失敗',
@@ -12,6 +13,9 @@ export default {
     refresh: '更新',
     saveSuccess: '保存に成功しました',
     deleteSuccess: '削除に成功しました',
+    copy: 'コピー',
+    copied: 'コピーしました',
+    warning: 'お知らせ',
     actions: '操作'
   },
   profile: {
@@ -560,6 +564,45 @@ export default {
     planEditInvalid: '編集内容が不正です。ステップ（説明/依存）を確認して再試行してください',
     planFailed: '計画承認の送信に失敗しました。タスク状態を更新しました',
     planPendingHint: 'タスクは計画の承認待ちです：まず上の計画カードで承認 / 編集 / 拒否してください（またはタスクをキャンセル）'
+  },
+  refPicker: {
+    heading: 'ナレッジベース文書を引用',
+    empty: '一致する文書がありません',
+    error: '文書の読み込みに失敗しました。再試行してください',
+    remove: '引用を解除',
+    inputHint: "Enter で送信 · {'@'} で文書引用 · / でコマンド · Shift+Enter で改行"
+  },
+  slashCmd: {
+    heading: 'スラッシュコマンド',
+    empty: '一致するコマンドがありません（Enter でそのまま送信）',
+    desc: {
+      search: 'ウェブ検索して要約（web_search ツール）',
+      doc: 'ナレッジベースに基づいて回答（search_knowledge_base ツール）',
+      workflow: '多段階の計画に分解して順に実行（プランナー）',
+      help: 'すべてのコマンドと説明を表示',
+      clear: '入力欄をクリア'
+    },
+    tpl: {
+      search: 'ウェブ検索して要約：{q}',
+      doc: 'ナレッジベースに基づいて回答：{q}',
+      workflow: '多段階の計画に分解して順に実行してください：{q}'
+    }
+  },
+  runStats: {
+    running: '実行中 {t}',
+    elapsed: '所要時間 {t}',
+    cost: '≈{c}（推定）'
+  },
+  artifacts: {
+    kind: {
+      diff: '差分',
+      json: 'JSON',
+      markdown: 'Markdown',
+      text: 'テキスト'
+    },
+    download: 'ダウンロード',
+    runReport: '実行レポート',
+    exportMarkdown: 'Markdown をエクスポート'
   },
   router: {
     welcome: 'ようこそ',

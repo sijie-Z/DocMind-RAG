@@ -7,9 +7,12 @@ export default {
     batchDelete: '批量删除',
     copy: '复制',
     copySuccess: '复制成功',
+    copied: '已复制',
+    warning: '提示',
     copyFailed: '复制失败',
     close: '关闭',
     edit: '编辑',
+    loading: '加载中...',
     success: '操作成功',
     error: '操作失败',
     failed: '操作失败',
@@ -716,6 +719,45 @@ export default {
     planEditInvalid: '编辑内容不合法，请检查步骤（描述/依赖）后重试',
     planFailed: '计划审批提交失败，已刷新任务状态',
     planPendingHint: '任务正在等待计划审批：请先在上方计划卡中批准 / 编辑 / 拒绝（或取消任务）'
+  },
+  refPicker: {
+    heading: '引用知识库文档',
+    empty: '未找到匹配文档',
+    error: '文档加载失败，请重试',
+    remove: '移除引用',
+    inputHint: "Enter 发送 · {'@'} 引用文档 · / 命令 · Shift+Enter 换行"
+  },
+  slashCmd: {
+    heading: '斜杠命令',
+    empty: '无匹配命令（Enter 直接发送原文）',
+    desc: {
+      search: '联网搜索并总结（web_search 工具）',
+      doc: '基于知识库回答（search_knowledge_base 工具）',
+      workflow: '拆解为多步计划并逐步执行（规划器）',
+      help: '查看全部命令与说明',
+      clear: '清空输入框'
+    },
+    tpl: {
+      search: '联网搜索并总结：{q}',
+      doc: '基于知识库回答：{q}',
+      workflow: '请拆解为多步计划并逐步执行：{q}'
+    }
+  },
+  runStats: {
+    running: '已运行 {t}',
+    elapsed: '用时 {t}',
+    cost: '≈{c}（估算）'
+  },
+  artifacts: {
+    kind: {
+      diff: '差异',
+      json: 'JSON',
+      markdown: 'Markdown',
+      text: '文本'
+    },
+    download: '下载',
+    runReport: '运行报告',
+    exportMarkdown: '导出 Markdown'
   },
   router: {
     welcome: '欢迎',

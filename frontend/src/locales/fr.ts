@@ -5,6 +5,7 @@ export default {
     confirm: 'Confirmer',
     delete: 'Supprimer',
     edit: 'Modifier',
+    loading: 'Chargement...',
     success: 'Succès',
     error: 'Erreur',
     failed: 'Échec',
@@ -12,6 +13,9 @@ export default {
     refresh: 'Actualiser',
     saveSuccess: 'Enregistré avec succès',
     deleteSuccess: 'Supprimé avec succès',
+    copy: 'Copier',
+    copied: 'Copié',
+    warning: 'Avis',
     actions: 'Actions'
   },
   profile: {
@@ -560,6 +564,45 @@ export default {
     planEditInvalid: 'Le contenu modifié est invalide — vérifiez les descriptions/dépendances puis réessayez',
     planFailed: "Échec de l'envoi de la décision ; état de la tâche actualisé",
     planPendingHint: "La tâche attend l'approbation du plan — approuvez / modifiez / rejetez d'abord le plan ci-dessus (ou annulez la tâche)"
+  },
+  refPicker: {
+    heading: 'Référencer des documents',
+    empty: 'Aucun document correspondant',
+    error: 'Échec du chargement des documents, veuillez réessayer',
+    remove: 'Retirer la référence',
+    inputHint: "Entrée envoyer · {'@'} référencer · / commandes · Maj+Entrée saut de ligne"
+  },
+  slashCmd: {
+    heading: 'Commandes slash',
+    empty: 'Aucune commande correspondante (Entrée envoie le texte brut)',
+    desc: {
+      search: 'Rechercher sur le web et résumer (outil web_search)',
+      doc: 'Répondre à partir de la base de connaissances (outil search_knowledge_base)',
+      workflow: 'Décomposer en plan multi-étapes et exécuter (planificateur)',
+      help: 'Afficher toutes les commandes et descriptions',
+      clear: "Vider le champ de saisie"
+    },
+    tpl: {
+      search: 'Rechercher sur le web et résumer : {q}',
+      doc: 'Répondre à partir de la base de connaissances : {q}',
+      workflow: 'Décomposez en plan multi-étapes et exécutez étape par étape : {q}'
+    }
+  },
+  runStats: {
+    running: 'En cours {t}',
+    elapsed: 'Durée {t}',
+    cost: '≈{c} (estimation)'
+  },
+  artifacts: {
+    kind: {
+      diff: 'Diff',
+      json: 'JSON',
+      markdown: 'Markdown',
+      text: 'Texte'
+    },
+    download: 'Télécharger',
+    runReport: "Rapport d'exécution",
+    exportMarkdown: 'Exporter en Markdown'
   },
   router: {
     welcome: 'Bienvenue',

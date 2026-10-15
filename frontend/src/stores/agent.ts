@@ -196,6 +196,8 @@ export const useAgentStore = defineStore('agent', () => {
         updateLastAssistant((msg) => {
           msg.events.push(event)
           msg.loading = false
+          // 体验第四波 计时：整次运行失败也是终态（冻结总用时）
+          msg.endedAt = Date.now()
         })
         isLoading.value = false
         break
@@ -240,6 +242,8 @@ export const useAgentStore = defineStore('agent', () => {
         updateLastAssistant((msg) => {
           msg.events.push(event)
           msg.loading = false
+          // 体验第四波 计时：取消即终态（冻结总用时）
+          msg.endedAt = Date.now()
         })
         isLoading.value = false
         isThinking.value = false
@@ -296,6 +300,9 @@ export const useAgentStore = defineStore('agent', () => {
       case 'done':
         updateLastAssistant((msg) => {
           msg.loading = false
+          // 体验第四波 计时：done 落终态时间（审批暂停也会写上——恢复续跑时
+          // loading 再起、最终 done 覆盖为真实总用时）
+          msg.endedAt = Date.now()
           if (event.message_id) {
             msg.messageId = event.message_id
           }

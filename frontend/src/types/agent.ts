@@ -310,4 +310,15 @@ export interface AgentChatMessage {
   executionContext?: Record<string, any>  // 运行上下文（execution_context 事件，含 total_tokens）
   feedback?: number        // 1=thumbs_up, -1=thumbs_down, 0=none
   feedbackNote?: string
+  /** 体验第四波 @引用：用户消息携带的引用文档（渲染 chips 供回溯） */
+  references?: ReferencedDoc[]
+  /** 体验第四波 计时：本轮运行开始/终态时间戳（毫秒）——RunStats 数据源 */
+  startedAt?: number
+  endedAt?: number
+}
+
+/** 用户 @ 引用的知识库文档（id 上送后端 referenced_document_ids）。 */
+export interface ReferencedDoc {
+  id: string
+  title: string
 }

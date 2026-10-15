@@ -33,6 +33,13 @@ EventType = Literal[
     "error",
     "execution_step_result",
     "run_report",
+    # 评审 F4：补两枚实际在发但 Literal 未列的既有事件——
+    #   warning           — 非致命提醒（#301 落库失败 / 体验第四波 @引用
+    #                       失效、无权限、检索降级），前端有琥珀时间线分支；
+    #   execution_context — 终态运行上下文（exec_context.to_dict()：total_tokens
+    #                       / duration_ms 等），前端计时与成本的数据源。
+    "warning",
+    "execution_context",
     # HITL（人在环）：
     #   approval_required — 执行器停在审批点（工具未执行），本流随后结束，
     #     任务态为 waiting_approval；人类经 POST /tasks/{id}/approval 应答。
