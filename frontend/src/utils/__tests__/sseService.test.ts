@@ -8,9 +8,11 @@
  * - G8：SSEEventType 别名与运行时白名单收敛为单一 SSE_EVENT_TYPES 后，
  *   `on('run_report', ...)` 这类此前 TS 不允许的注册现在合法（vue-tsc 把关）。
  * - G4 生产者侧：429 退避时 emit('retry')，payload 含 attempt/maxRetries/waitTime。
+ * - ISS-3：后端 warning 帧（落库失败可见 / Agent 侧降级提示，载荷 type+content）
+ *   此前不在白名单被静默丢弃；新增用例钉住「warning 白名单放行 → handler 抵达」。
  *
  * 变异点：post() 的 includes 判断改坏 → 命名事件用例红；retry emit 删除 →
- * G4 用例红。
+ * G4 用例红；从 SSE_EVENT_TYPES 删 'warning' → ISS-3 用例红。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { sseService } from '../sseService'
@@ -36,7 +38,7 @@ function makeStreamResponse(chunks: string[]) {
 }
 
 const REGISTERED = [
-  'chunk', 'message', 'error', 'thinking', 'tool_call', 'tool_result',
+  'chunk', 'message', 'error', 'warning', 'thinking', 'tool_call', 'tool_result',
   'tool_error', 'plan_start', 'plan_step', 'plan_complete', 'reflection', 'done',
   'run_report', 'execution_context', 'retry_hint', 'retry', 'debug',
 ] as const
@@ -80,6 +82,24 @@ describe('sseService · 命名事件派发（issue #289，白名单条目回归�
     expect(got.get('reflection')?.result).toBe('pass')
     expect(got.get('message')?.content).toBe('收尾')
     expect(got.get('error')?.content).toBe('炸了')
+  })
+
+  it('ISS-3：warning 帧抵达 warning handler（#301 批 D 落库失败可见的传输锚点）', async () => {
+    // 线上帧形如 chat.py 对 Agent 侧 warning 的转发：event: warning + data 仅含
+    // content（无 data.type），类型由 event: 行解析。
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeStreamResponse([
+      'event: warning\ndata: {"content":"回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见"}\n\n',
+    ])))
+
+    const warningHandler = vi.fn()
+    sseService.on('warning', warningHandler)
+
+    const ok = await sseService.post('stream', {})
+    expect(ok).toBe(true)
+
+    expect(warningHandler).toHaveBeenCalledTimes(1)
+    expect(warningHandler.mock.calls[0][0].type).toBe('warning')
+    expect(warningHandler.mock.calls[0][0].content).toBe('回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见')
   })
 
   it('event: 行权威于 data.type（thinking 帧内 type=chunk 仍派发 thinking）', async () => {

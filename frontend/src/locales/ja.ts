@@ -5,6 +5,7 @@ export default {
     confirm: '確認',
     delete: '削除',
     edit: '編集',
+    loading: '読み込み中...',
     success: '成功',
     error: 'エラー',
     failed: '失敗',
@@ -12,6 +13,9 @@ export default {
     refresh: '更新',
     saveSuccess: '保存に成功しました',
     deleteSuccess: '削除に成功しました',
+    copy: 'コピー',
+    copied: 'コピーしました',
+    warning: 'お知らせ',
     actions: '操作'
   },
   profile: {
@@ -179,7 +183,9 @@ export default {
       reportDesc: 'PDFをアップロードして財務指標を抽出します',
       travel: '旅行の計画を立てて',
       travelDesc: '京都1週間旅行の旅程を作成してください'
-    }
+    },
+    // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
+    sseWarning: 'サーバーからの通知：今回の回答が不完全な可能性があります'
   },
   validation: {
     required: 'この項目は必須です',
@@ -293,6 +299,15 @@ export default {
       seedFailed: '初期化に失敗しました'
     }
   },
+  error: {
+    '404': {
+      title: 'ページが見つかりません',
+      subtitle: 'お探しのページは存在しないか、削除されました。'
+    },
+    backToHome: 'ホームへ戻る',
+    backToWorkbench: 'ワークスペースへ移動',
+    back: '前のページに戻る'
+  },
   login: {
     welcomeBack: 'おかえりなさい',
     loginDesc: '認証情報を入力してログインしてください',
@@ -331,6 +346,8 @@ export default {
     agent: 'AI エージェント',
     auditLogs: '監査ログ',
     monitoring: 'システム監視',
+    mcpServers: 'MCP サーバー',
+    scheduledTasks: '定期タスク',
     systemHelp: 'ヘルプ',
     systemAbout: 'このシステムについて',
     systemTitle: 'DocMind ナレッジベース'
@@ -533,9 +550,215 @@ export default {
   },
   hitl: {
     cancelled: 'キャンセル済み',
-    stopped: '停止済み'
+    stopped: '停止済み',
+    // A：実行中ステアリング — 入力エリア / タイムライン / エラー表示
+    steerSend: 'ガイダンス送信',
+    steerHint: '実行中：Enter でガイダンス送信（現在のステップは中断されず、次のステップ境界で反映）',
+    steerSent: 'ガイダンス送信済み',
+    steerApplied: 'ガイダンス反映済み',
+    steerFull: 'ステアリングバッファが満杯です。agent の消費後に再送信してください',
+    steerFailed: 'ガイダンスの送信に失敗しました。しばらくして再試行してください',
+    // B：計画承認 — カード / タイムライン / 通知
+    planTitle: '計画の承認待ち',
+    planGoal: 'ゴール',
+    planSteps: 'ステップ',
+    planApprove: '計画を承認',
+    planEditSteps: 'ステップを編集',
+    planSaveApprove: '保存して承認',
+    planCancelEdit: '編集をキャンセル',
+    planReject: '計画を拒否',
+    planRejectNotePlaceholder: '拒否理由（再計画に使用、記入推奨）',
+    planRejectHint: '拒否すると理由付きで一度だけ再計画します。再度拒否するとタスクは終了します（rejected）',
+    planAddStep: 'ステップを追加',
+    planRemove: '削除',
+    planDeps: '依存',
+    planSubmitting: '送信中…',
+    planTimeline: '計画の承認待ち',
+    planRejectedMessage: '計画が再度拒否されました（再計画の上限に達しました）。タスクは終了しました',
+    planEditInvalid: '編集内容が不正です。ステップ（説明/依存）を確認して再試行してください',
+    planFailed: '計画承認の送信に失敗しました。タスク状態を更新しました',
+    planPendingHint: 'タスクは計画の承認待ちです：まず上の計画カードで承認 / 編集 / 拒否してください（またはタスクをキャンセル）'
+  },
+  scheduler: {
+    title: '定期タスク',
+    subtitle: 'スケジュールで実行される Agent タスクの管理。実行結果は「前回の実行」から確認できます',
+    create: '定期タスクを作成',
+    noData: '定期タスクがありません',
+    loadFailed: '読み込みに失敗しました',
+    filterAll: 'すべて',
+    filterEnabled: '有効',
+    filterPaused: '一時停止',
+    columns: {
+      name: '名前',
+      schedule: 'スケジュール',
+      status: '状態',
+      lastRun: '前回の実行',
+      nextRun: '次回の実行',
+      actions: '操作'
+    },
+    statusEnabled: '有効',
+    statusPaused: '一時停止',
+    statusFinished: '実行完了',
+    lastStatus: { running: '実行中', success: '成功', failed: '失敗' },
+    skippedOverlap: '重複を {n} 回スキップ',
+    neverRun: '未実行',
+    noNextRun: 'なし',
+    viewResult: '結果を表示',
+    runNow: '今すぐ実行',
+    pause: '一時停止',
+    resume: '再開',
+    delete: '削除',
+    runNowTriggered: '実行をトリガーしました。完了後に通知されます',
+    runNowReason: {
+      overlap: '前回の実行が終了していないため、今回はスキップされました（キューなし）',
+      not_found: 'タスクが存在しません',
+      unknown: '未トリガー（{reason}）'
+    },
+    deleteTitle: '定期タスクの削除',
+    deleteConfirm: '「{name}」を削除しますか？実行中のタスクは継続しますが、レコードは復元できません。',
+    createSuccess: '作成しました',
+    plan: {
+      intervalMinutes: '{n}分ごと',
+      intervalHours: '{n}時間ごと',
+      intervalSeconds: '{n}秒ごと',
+      onceAt: '単発 · {time}'
+    },
+    cron: {
+      everyMinute: '毎分',
+      everyNMinutes: '毎{n}分',
+      hourlyAtMinute: '毎時{m}分',
+      dailyAt: '毎日 {time}',
+      weeklyAt: '毎週{days} {time}',
+      monthlyAt: '毎月{days}日 {time}',
+      yearlyAt: '毎年{month}{day}日 {time}',
+      weekdayRange: '{from}〜{to}',
+      dayRange: '{from}〜{to}',
+      listSep: '・',
+      weekdays: { '0': '日曜', '1': '月曜', '2': '火曜', '3': '水曜', '4': '木曜', '5': '金曜', '6': '土曜' },
+      months: {
+        '1': '1月', '2': '2月', '3': '3月', '4': '4月', '5': '5月', '6': '6月',
+        '7': '7月', '8': '8月', '9': '9月', '10': '10月', '11': '11月', '12': '12月'
+      }
+    },
+    modal: {
+      title: '定期タスクを作成',
+      name: 'タスク名',
+      namePlaceholder: '例：毎朝のブリーフィング',
+      prompt: '指示（prompt）',
+      promptPlaceholder: '実行時に Agent へ渡す指示……',
+      scheduleType: 'スケジュール種別',
+      type: { cron: '定期（cron）', interval: '固定間隔', once: '単発' },
+      cronExpr: 'cron 式（分 時 日 月 曜日）',
+      cronPlaceholder: '例：0 9 * * *',
+      cronPreview: 'プレビュー',
+      cronPreviewUnknown: 'サポート外の式のため、平易なプレビューを生成できません（サーバー検証に従います）',
+      timezone: 'タイムゾーン（cron の解釈のみに影響）',
+      timezoneDefault: 'サーバーデフォルト',
+      intervalSeconds: '間隔（秒）',
+      intervalHint: '最小 {n} 秒（分単位の精度）',
+      onceAt: '実行時刻',
+      onceAtHint: '実行時刻を選択',
+      enabled: '作成後すぐに有効化'
+    },
+    validation: {
+      cronRequired: 'cron 式を入力してください',
+      cronMax: 'cron 式は {n} 文字以内で入力してください',
+      intervalRequired: '間隔（秒）を入力してください',
+      intervalMin: '間隔は {n} 秒以上にしてください',
+      onceRequired: '実行時刻を選択してください',
+      onceFuture: '実行時刻は現在より後にしてください',
+      nameMax: '名前は {n} 文字以内で入力してください',
+      promptMax: '指示は {n} 文字以内で入力してください'
+    },
+    result: {
+      title: '実行結果（Agent タスク）',
+      taskId: 'タスク ID',
+      state: '状態',
+      progress: '進捗（完了 / 全ステップ）',
+      query: '入力',
+      error: '最近のエラー',
+      unavailable: '結果を表示できません（タスクが存在しないか、表示権限がありません）',
+      taskState: {
+        pending: '待機中',
+        running: '実行中',
+        waiting_tool: 'ツール実行中',
+        waiting_approval: '承認待ち',
+        waiting_plan_approval: '計画承認待ち',
+        waiting_human: '人手待ち',
+        failed: '失敗',
+        completed: '完了',
+        abandoned: '放棄',
+        cancelled: 'キャンセル',
+        rejected: '拒否'
+      }
+    }
+  },
+  mcp: {
+    title: 'MCP サーバー',
+    subtitle: '動的接続された MCP サーバーの状態とツール登録状況（読み取り専用）',
+    readOnlyNotice: '読み取り専用ビュー：有効化/無効化や追加は backend/mcp_servers.json を編集してバックエンドを再起動してください。このページではオンライン書き込みを行いません。',
+    notStarted: 'MCP マネージャーはまだ初期化されていません（バックエンドの起動が未完了、または設定が未読み込みの可能性があります）。',
+    registeredTools: '登録済み動的ツール {n} 個',
+    loadFailed: '読み込みに失敗しました',
+    noServers: 'MCP サーバーが構成されていません',
+    noServersHint: 'backend/mcp_servers.json の servers に設定を追加してバックエンドを再起動してください',
+    transportLabel: 'トランスポート',
+    enabled: '有効',
+    disabled: '無効',
+    toolCount: 'ツール {n} 個',
+    noTools: '登録済みツールはありません',
+    lastError: '最近のエラー',
+    state: {
+      init: '初期化中',
+      connecting: '接続中',
+      connected: '接続済み',
+      dead: '接続断',
+      closed: 'クローズ済み',
+      disabled: '無効',
+      not_connected: '未接続'
+    }
+  },
+  refPicker: {
+    heading: 'ナレッジベース文書を引用',
+    empty: '一致する文書がありません',
+    error: '文書の読み込みに失敗しました。再試行してください',
+    remove: '引用を解除',
+    inputHint: "Enter で送信 · {'@'} で文書引用 · / でコマンド · Shift+Enter で改行"
+  },
+  slashCmd: {
+    heading: 'スラッシュコマンド',
+    empty: '一致するコマンドがありません（Enter でそのまま送信）',
+    desc: {
+      search: 'ウェブ検索して要約（web_search ツール）',
+      doc: 'ナレッジベースに基づいて回答（search_knowledge_base ツール）',
+      workflow: '多段階の計画に分解して順に実行（プランナー）',
+      help: 'すべてのコマンドと説明を表示',
+      clear: '入力欄をクリア'
+    },
+    tpl: {
+      search: 'ウェブ検索して要約：{q}',
+      doc: 'ナレッジベースに基づいて回答：{q}',
+      workflow: '多段階の計画に分解して順に実行してください：{q}'
+    }
+  },
+  runStats: {
+    running: '実行中 {t}',
+    elapsed: '所要時間 {t}',
+    cost: '≈{c}（推定）'
+  },
+  artifacts: {
+    kind: {
+      diff: '差分',
+      json: 'JSON',
+      markdown: 'Markdown',
+      text: 'テキスト'
+    },
+    download: 'ダウンロード',
+    runReport: '実行レポート',
+    exportMarkdown: 'Markdown をエクスポート'
   },
   router: {
+    notFound: 'ページが見つかりません',
     welcome: 'ようこそ',
     login: 'ログイン',
     register: '登録',

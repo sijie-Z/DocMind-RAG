@@ -33,12 +33,26 @@ EventType = Literal[
     "error",
     "execution_step_result",
     "run_report",
+    # 评审 F4：补两枚实际在发但 Literal 未列的既有事件——
+    #   warning           — 非致命提醒（#301 落库失败 / 体验第四波 @引用
+    #                       失效、无权限、检索降级），前端有琥珀时间线分支；
+    #   execution_context — 终态运行上下文（exec_context.to_dict()：total_tokens
+    #                       / duration_ms 等），前端计时与成本的数据源。
+    "warning",
+    "execution_context",
     # HITL（人在环）：
     #   approval_required — 执行器停在审批点（工具未执行），本流随后结束，
     #     任务态为 waiting_approval；人类经 POST /tasks/{id}/approval 应答。
     #   run_cancelled — 协作式取消在检查点被观察到；本 run 收敛为 cancelled。
+    #   steer_applied — 运行中转向（steering）消息在步边界被消费并注入后续
+    #     步骤提示词；content 为消息摘要。见 app/agent/steering.py。
+    #   plan_approval_required — 计划审批挂起（plan_approval_mode=always）：
+    #     planner 产出计划后暂停，任务态 waiting_plan_approval；plan_steps
+    #     携带结构化步骤（resume 流不回放 plan_step 事件，卡片数据必须自足）。
     "approval_required",
     "run_cancelled",
+    "steer_applied",
+    "plan_approval_required",
 ]
 
 ThinkingType = Literal["reasoning", "planning", "evaluation", "correction"]
@@ -77,6 +91,9 @@ class AgentEvent:
     dependencies: list[str] = field(default_factory=list)
     tool_hint: str = ""
     plan_step_status: str = ""
+    # B（计划审批）：plan_approval_required 的结构化步骤载荷
+    # （[{id, description, dependencies, tool_hint}…]；其余事件类型空）。
+    plan_steps: list[dict[str, Any]] = field(default_factory=list)
 
     # Semantic fields (v1 — must survive event round-trip)
     parallel_group: int | None = None
@@ -130,6 +147,8 @@ class AgentEvent:
             d["tool_hint"] = self.tool_hint
         if self.plan_step_status:
             d["plan_step_status"] = self.plan_step_status
+        if self.plan_steps:
+            d["plan_steps"] = self.plan_steps
 
         if self.parallel_group is not None:
             d["parallel_group"] = self.parallel_group

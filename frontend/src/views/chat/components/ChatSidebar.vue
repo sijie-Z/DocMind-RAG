@@ -101,7 +101,7 @@
     </div>
 
     <div class="p-4 border-t border-gray-100 dark:border-gray-800 text-xs text-center text-gray-400 dark:text-gray-600">
-      {{ t('chat.version') }}
+      {{ appVersion ? `DocMind v${appVersion}` : 'DocMind' }}
     </div>
   </aside>
 </template>
@@ -110,11 +110,15 @@
 import { useI18n } from 'vue-i18n'
 import type { Conversation } from '@/api/conversation'
 import { format } from 'date-fns'
+import { useAppVersion } from '@/composables/useAppVersion'
 import {
   AddOutline, RefreshOutline, ChatboxOutline, ChatboxEllipsesOutline, TrashOutline
 } from '@vicons/ionicons5'
 
 const { t } = useI18n()
+
+// ISS-2 数字对账：侧栏版本动态读取（后端 APP_VERSION 唯一真源，经 /health）
+const appVersion = useAppVersion()
 
 defineProps<{
   sidebarOpen: boolean

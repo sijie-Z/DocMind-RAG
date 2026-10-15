@@ -93,3 +93,57 @@ describe('导航守卫（真实行为）', () => {
     expect(mod.default.currentRoute.value.name).toBe('FirstHome')
   })
 })
+
+describe('真实 404（未知路径不再静默弹回营销页）', () => {
+  it('未知路径命中具名 NotFound 路由，且停留在原路径上', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes })
+    await router.push('/this-page-is-not-registered-xyz')
+
+    expect(router.currentRoute.value.name).toBe('NotFound')
+    expect(router.currentRoute.value.path).toBe('/this-page-is-not-registered-xyz')
+    // 修复前 catch-all 是 redirect '/firsthome'，命中重定向时 redirectedFrom 会非空
+    expect(router.currentRoute.value.redirectedFrom).toBeUndefined()
+  })
+
+  it('NotFound 为懒加载组件、不要求登录态', () => {
+    const record = flatten(routes).find((r) => r.name === 'NotFound')
+    expect(record, '缺少具名 NotFound 路由').toBeTruthy()
+    expect(typeof record?.component, 'NotFound 应为懒加载组件').toBe('function')
+    expect(record?.meta?.requiresAuth).toBe(false)
+  })
+
+  it('catch-all 记录本身不再是 redirect（组件渲染真 404 页）', () => {
+    const record = flatten(routes).find((r) => r.path === '/:pathMatch(.*)*')
+    expect(record?.name).toBe('NotFound')
+    expect(record?.redirect).toBeUndefined()
+  })
+})
+
+describe('历史写法兼容重定向（放 catch-all 之前，进真路由而非 404/营销页）', () => {
+  const cases: Array<[string, string, string]> = [
+    ['/systemHelp', '/system-help', 'SystemHelp'],
+    ['/help', '/system-help', 'SystemHelp'],
+    ['/systemAbout', '/system-about', 'SystemAbout'],
+    ['/about', '/system-about', 'SystemAbout'],
+  ]
+
+  for (const [from, to, expectedName] of cases) {
+    it(`${from} → ${to}`, async () => {
+      const router = createRouter({ history: createMemoryHistory(), routes })
+      await router.push(from)
+
+      expect(router.currentRoute.value.path).toBe(to)
+      expect(router.currentRoute.value.name).toBe(expectedName)
+    })
+  }
+
+  it('重定向保留查询串与哈希', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes })
+    await router.push('/help?topic=faq#install')
+
+    const cur = router.currentRoute.value
+    expect(cur.path).toBe('/system-help')
+    expect(cur.query.topic).toBe('faq')
+    expect(cur.hash).toBe('#install')
+  })
+})
