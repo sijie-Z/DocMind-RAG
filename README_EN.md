@@ -392,7 +392,7 @@ DocMind/
 │   │   │   │   ├── extractor.py     #   Experience extractor
 │   │   │   │   ├── store.py         #   Experience store
 │   │   │   │   ├── models.py        #   Data models
-│   │   │   │   └── run_extract.py   #   Run-level extraction
+│   │   │   │   └── run_extract.py   #   Experience bootstrap (dev-only; manual run after benchmarks)
 │   │   │   ├── replay/              #   Execution replay
 │   │   │   │   └── engine.py        #   Replay engine
 │   │   │   └── mining/              #   Pattern mining

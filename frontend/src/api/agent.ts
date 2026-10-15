@@ -9,9 +9,11 @@ import type {
   AgentConfig,
   AgentSession,
   AgentSessionDetail,
+  AgentTaskListItem,
   AgentTaskView,
   ApprovalDecisionInput,
   PlanApprovalDecisionInput,
+  ReplayTimeline,
 } from '@/types/agent'
 
 /** B：计划审批应答的结果形态（SSE 续跑流 / 终态 JSON 二选一）。 */
@@ -131,12 +133,12 @@ export const agentApi = {
     return consumeEventStream(response, onEvent, controller)
   },
 
-  /** Submit user feedback on an agent response */
+  /** Submit user feedback on an agent response（信封契约同 getTask；结果不读） */
   submitFeedback(
     messageId: string,
     feedback: number,
     note?: string,
-  ): Promise<ApiResponse<{ message: string }>> {
+  ): Promise<AxiosResponse<ApiResponse<{ message: string }>>> {
     return request.post('/agent/feedback', {
       message_id: messageId,
       feedback,
@@ -156,7 +158,27 @@ export const agentApi = {
     return request.get(`/agent/tasks/${taskId}`)
   },
 
-  /** 协作式取消（服务端停止协议）：202 = 已受理待收敛 / 200 = 已直接终态 */
+  // ── 回放消费面（跑完之后的"可带走"体验；信封契约同 getTask：读 res.data.data）──
+
+  /** 最近任务列表：每条带 has_replay（「有回放可看」标记）。 */
+  listTasks(params?: {
+    page?: number
+    page_size?: number
+  }): Promise<AxiosResponse<ApiResponse<{ tasks: AgentTaskListItem[]; total: number; page: number; page_size: number }>>> {
+    return request.get('/agent/tasks', { params })
+  },
+
+  /**
+   * 执行回放（结构化 timeline，字段与执行写侧逐字对齐）。
+   * 404 REPLAY_NOT_FOUND = 该任务没有回放数据（诚实空态，绝不编造轨迹）；
+   * 404 TASK_NOT_FOUND = 任务不存在/非本人/组织不一致。
+   */
+  getReplay(taskId: string): Promise<AxiosResponse<ApiResponse<ReplayTimeline>>> {
+    return request.get(`/agent/tasks/${taskId}/replay`)
+  },
+
+  /** 协作式取消（服务端停止协议）：202 = 已受理待收敛 / 200 = 已直接终态。
+   * 信封契约同 getTask（拦截器返回完整 AxiosResponse）。 */
   cancelTask(
     taskId: string,
   ): Promise<AxiosResponse<ApiResponse<{ task_id: string; state: string; message?: string; already?: boolean }>>> {
@@ -305,8 +327,8 @@ export const agentApi = {
     return request.get('/agent/tools')
   },
 
-  /** List learned skills */
-  listSkills(): Promise<ApiResponse<SkillInfo[]>> {
+  /** List learned skills（信封契约同 getTask） */
+  listSkills(): Promise<AxiosResponse<ApiResponse<SkillInfo[]>>> {
     return request.get('/agent/skills')
   },
 
@@ -332,8 +354,8 @@ export const agentApi = {
     return request.get(`/agent/sessions/${sessionId}`)
   },
 
-  /** Delete session */
-  deleteSession(sessionId: string): Promise<ApiResponse<{ message: string }>> {
+  /** Delete session（信封契约同 getTask；结果不读） */
+  deleteSession(sessionId: string): Promise<AxiosResponse<ApiResponse<{ message: string }>>> {
     return request.delete(`/agent/sessions/${sessionId}`)
   },
 
@@ -344,10 +366,10 @@ export const agentApi = {
     return request.get('/agent/config')
   },
 
-  /** Update user agent config */
+  /** Update user agent config（信封契约同 getTask；结果不读） */
   updateConfig(
     updates: Partial<AgentConfig>,
-  ): Promise<ApiResponse<AgentConfig>> {
+  ): Promise<AxiosResponse<ApiResponse<AgentConfig>>> {
     return request.put('/agent/config', updates)
   },
 }

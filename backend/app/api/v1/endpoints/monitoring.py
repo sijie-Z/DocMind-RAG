@@ -24,6 +24,7 @@ from app.core.logging import sanitize_log_value
 from app.core.middleware import metrics_collector
 from app.core.redis import redis_client
 from app.core.security import get_current_user, get_user_org_id, permission_required
+from app.core.system_metrics import system_metrics_sampler
 from app.exceptions import (
     AppError,
     AuthenticationError,
@@ -140,7 +141,9 @@ async def get_monitoring_dashboard(
             }
         },
         "trends": {
-            "system": [], # 待实现历史记录
+            # 系统指标趋势：读采样器真实数据（round2/sampling）；采样未启用
+            # 或尚无样本时为空数组——诚实空态，不造假（此前为硬编码 []）。
+            "system": await system_metrics_sampler.get_history(),
             "application": [],
             "knowledge_base": []
         },
@@ -155,6 +158,13 @@ async def get_metrics(
     db: AsyncSession = Depends(get_db)
 ):
     """获取指标趋势数据（需要 VIEW_SYSTEM_HEALTH 权限）"""
+
+    if metric_type == "system":
+        # 系统指标采样历史（round2/sampling）：信封与下方应用分支一致
+        # {"data": [...]}（K 支线已把前端读取对齐到该风格）；无样本 → 空数组
+        # （诚实空态，不造假）。单条样本也原样返回——它不是伪造数据，
+        # 无需应用分支 <2 的防伪门槛。
+        return {"data": await system_metrics_sampler.get_history()}
 
     # 获取性能指标历史
     history = await metrics_collector.get_history()
