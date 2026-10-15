@@ -522,7 +522,14 @@ class AgentMemorySystem:
             return None
 
     async def _load_from_redis(self):
-        """从 Redis 加载长期记忆和反思记忆"""
+        """从 Redis 加载长期记忆和反思记忆。
+
+        issue #301 家族尾巴（#13 同族）：加载失败不得置 ``_loaded`` ——
+        旧 ``finally`` 无条件置位会把"读不出来"冒充成"已加载完毕"，
+        本进程从此不再重试（恒空，重启才恢复）。只有"Redis 明确答复无数据"
+        （确定性空库）或导入成功才是可置位的确定性事实；未配置 Redis 的
+        情况同样不置位（随后配置可用时可恢复）。
+        """
         if self._loaded:
             return
         try:
@@ -531,14 +538,16 @@ class AgentMemorySystem:
                 return
             data_raw = await r.get(self._persist_key)
             if not data_raw:
+                # Redis 明确答复"没有数据" → 确定性空库，可以置位。
+                self._loaded = True
                 return
             data = json.loads(data_raw)
             self.import_data(data)
+            self._loaded = True
             logger.info(f"Agent '{self.agent_id}' 记忆已从 Redis 恢复")
         except Exception as e:
+            # 加载失败不是"确定性空库"：不置位，下次访问可重试。
             logger.warning(f"从 Redis 加载记忆失败: {e}")
-        finally:
-            self._loaded = True
 
     async def _save_to_redis(self):
         """保存长期记忆和反思记忆到 Redis"""
