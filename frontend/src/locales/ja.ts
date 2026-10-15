@@ -13,6 +13,9 @@ export default {
     refresh: '更新',
     saveSuccess: '保存に成功しました',
     deleteSuccess: '削除に成功しました',
+    copy: 'コピー',
+    copied: 'コピーしました',
+    warning: 'お知らせ',
     actions: '操作'
   },
   profile: {
@@ -702,6 +705,45 @@ export default {
       disabled: '無効',
       not_connected: '未接続'
     }
+  },
+  refPicker: {
+    heading: 'ナレッジベース文書を引用',
+    empty: '一致する文書がありません',
+    error: '文書の読み込みに失敗しました。再試行してください',
+    remove: '引用を解除',
+    inputHint: "Enter で送信 · {'@'} で文書引用 · / でコマンド · Shift+Enter で改行"
+  },
+  slashCmd: {
+    heading: 'スラッシュコマンド',
+    empty: '一致するコマンドがありません（Enter でそのまま送信）',
+    desc: {
+      search: 'ウェブ検索して要約（web_search ツール）',
+      doc: 'ナレッジベースに基づいて回答（search_knowledge_base ツール）',
+      workflow: '多段階の計画に分解して順に実行（プランナー）',
+      help: 'すべてのコマンドと説明を表示',
+      clear: '入力欄をクリア'
+    },
+    tpl: {
+      search: 'ウェブ検索して要約：{q}',
+      doc: 'ナレッジベースに基づいて回答：{q}',
+      workflow: '多段階の計画に分解して順に実行してください：{q}'
+    }
+  },
+  runStats: {
+    running: '実行中 {t}',
+    elapsed: '所要時間 {t}',
+    cost: '≈{c}（推定）'
+  },
+  artifacts: {
+    kind: {
+      diff: '差分',
+      json: 'JSON',
+      markdown: 'Markdown',
+      text: 'テキスト'
+    },
+    download: 'ダウンロード',
+    runReport: '実行レポート',
+    exportMarkdown: 'Markdown をエクスポート'
   },
   router: {
     welcome: 'ようこそ',

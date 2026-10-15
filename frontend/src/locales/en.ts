@@ -14,6 +14,9 @@ export default {
     saveSuccess: 'Saved successfully',
     deleteSuccess: 'Deleted successfully',
     close: 'Close',
+    copy: 'Copy',
+    copied: 'Copied',
+    warning: 'Notice',
     actions: 'Actions'
   },
   profile: {
@@ -841,6 +844,45 @@ export default {
       disabled: 'Disabled',
       not_connected: 'Not connected'
     }
+  },
+  refPicker: {
+    heading: 'Reference knowledge documents',
+    empty: 'No matching documents',
+    error: 'Failed to load documents, please retry',
+    remove: 'Remove reference',
+    inputHint: "Enter to send · {'@'} references · / commands · Shift+Enter for newline"
+  },
+  slashCmd: {
+    heading: 'Slash commands',
+    empty: 'No matching command (Enter sends the raw text)',
+    desc: {
+      search: 'Web search & summarize (web_search tool)',
+      doc: 'Answer from the knowledge base (search_knowledge_base tool)',
+      workflow: 'Break into a multi-step plan and execute (planner)',
+      help: 'Show all commands with descriptions',
+      clear: 'Clear the input box'
+    },
+    tpl: {
+      search: 'Search the web and summarize: {q}',
+      doc: 'Answer from the knowledge base: {q}',
+      workflow: 'Break this into a multi-step plan and execute step by step: {q}'
+    }
+  },
+  runStats: {
+    running: 'Running {t}',
+    elapsed: 'Duration {t}',
+    cost: '≈{c} (estimated)'
+  },
+  artifacts: {
+    kind: {
+      diff: 'Diff',
+      json: 'JSON',
+      markdown: 'Markdown',
+      text: 'Text'
+    },
+    download: 'Download',
+    runReport: 'Run report',
+    exportMarkdown: 'Export Markdown'
   },
   router: {
     welcome: 'Welcome',
