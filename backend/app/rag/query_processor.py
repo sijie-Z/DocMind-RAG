@@ -100,8 +100,13 @@ class QueryIntentClassifier:
         return field_boosts.get(intent, ["chunk_text^2", "content^2", "filename^1.2"])
 
 
-def extract_query_terms(query: str) -> list[str]:
-    """Extract meaningful terms from query (bigrams for CJK, words for Latin)."""
+def extract_query_terms(query: str, limit: int | None = 12) -> list[str]:
+    """Extract meaningful terms from query (bigrams for CJK, words for Latin).
+
+    limit：返回上限（默认 12，既有调用方行为不变）；``None`` = 不截断。
+    #208 Phase 2 环 C：keyword 臂的语料术语表选择需要「先拿到全部候选项、
+    再按术语表成员优先取舍」，因此提供不截断出口（`retriever._keyword_arm_terms`）。
+    """
     q = (query or "").strip().lower()
     if not q:
         return []
@@ -122,7 +127,8 @@ def extract_query_terms(query: str) -> list[str]:
         "the", "and", "for", "with", "from", "that", "this", "is", "are", "was",
         "be", "have", "has", "had", "do", "does", "did", "will", "would", "could",
     }
-    return [t for t in raw_terms if t.strip() and len(t) >= 2 and t not in stop_words][:12]
+    terms = [t for t in raw_terms if t.strip() and len(t) >= 2 and t not in stop_words]
+    return terms if limit is None else terms[:limit]
 
 
 def rewrite_query_candidates(query: str) -> list[str]:
