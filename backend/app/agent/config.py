@@ -18,6 +18,12 @@ PlanningMode = Literal["coarse", "normal", "fine"]
 #   never  — 不审批（完全旧行为）；risky — high 风险工具需审批（默认）；
 #   always — 所有工具调用需审批。
 ApprovalMode = Literal["never", "risky", "always"]
+# 计划审批模式（B 特性；见 app/agent/checkpoint.apply_plan_approval_decision）：
+#   never（默认）— 不暂停，planner 出计划即执行（完全旧行为）；
+#   always       — planner 每产出一版计划都先暂停任务态 waiting_plan_approval，
+#                  等人类批准 / 编辑步骤后批准 / 拒绝（带理由重规划一次，
+#                  再拒即终态 rejected）。
+PlanApprovalMode = Literal["never", "always"]
 
 DEFAULT_DISABLED_TOOLS: list[str] = [
     "execute_python",
@@ -102,6 +108,7 @@ _CONFIG_FIELD_SPECS: dict[str, Callable[[Any], bool]] = {
     "reflection_max_tokens": _is_int,
     "approval_mode": _is_str,  # Literal 域值由 approval.requires_approval 的默认分支兜底（类型级闸门）
     "approval_timeout_seconds": _is_int,
+    "plan_approval_mode": _is_str,  # Literal 域值由 loop 暂停点的 != "always" 默认分支兜底（类型级闸门）
 }
 
 
@@ -200,6 +207,10 @@ class AgentConfig:
     # error_type=approval_timeout（不是 deny，见 approval.py 模块头）。
     approval_timeout_seconds: int = 0
 
+    # ── 计划审批（B 特性；与 approval_mode 正交）──
+    # never（默认，不扰既有流）/ always（planner 每版计划先经人类批准）。
+    plan_approval_mode: PlanApprovalMode = "never"
+
     # ── Model selection ──
     def get_deep_model(self) -> str:
         """模型用于综合推理/决策（Reflector, Reviewer, 综合回答）"""
@@ -260,6 +271,7 @@ class AgentConfig:
             "reflection_max_tokens": self.reflection_max_tokens,
             "approval_mode": self.approval_mode,
             "approval_timeout_seconds": self.approval_timeout_seconds,
+            "plan_approval_mode": self.plan_approval_mode,
         }, source="config-write")
 
     @classmethod

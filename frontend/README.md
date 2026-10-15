@@ -1,4 +1,4 @@
-# 派聪明AI知识库系统
+# DocMind AI知识库系统
 
 基于RAG架构的企业级AI知识库智能问答平台
 
@@ -71,7 +71,7 @@
 pip install -r requirements.txt
 
 # 启动后端服务
-cd paicongming_backend
+cd backend
 python main.py
 
 # 启动文件处理服务
@@ -81,7 +81,7 @@ python file_processor.py
 ### 前端启动
 ```bash
 # 安装依赖
-cd paicongming_frontend
+cd frontend
 npm install
 
 # 启动开发服务器
@@ -143,7 +143,7 @@ npm run dev
 ## 核心算法
 
 ### RAG检索算法
-1. **文档预处理**: 支持20+种文件格式解析
+1. **文档预处理**: 支持 13 种文件格式解析
 2. **文本分块**: 智能文本分割，块大小512字符
 3. **向量生成**: 768维向量嵌入
 4. **混合检索**: 语义检索 + 关键词检索 + 重排序

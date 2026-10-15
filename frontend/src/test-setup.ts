@@ -30,3 +30,15 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
     }),
   })
 }
+
+// ResizeObserver 同属 jsdom 缺口（NDataTable/NCollapse 等组件挂载即用），
+// 测试侧补最小桩：observe/unobserve/disconnect 全空操作即可（无布局断言需求）。
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  ;(globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
+    ResizeObserverStub
+}

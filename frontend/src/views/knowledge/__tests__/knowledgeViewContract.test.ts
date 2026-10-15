@@ -298,6 +298,29 @@ describe('KnowledgeView · 状态标签接线（B16）', () => {
   })
 })
 
+describe('KnowledgeView · 统计卡口径（词表收敛 7.2⑤）', () => {
+  it('列表吐收敛后新词表 indexed → 统计卡「已索引」计数不为 0', async () => {
+    // 后端本波起列表与详情同吐 'indexed'（DB 枚举原词）。
+    // 统计卡若只认旧词 'completed'，此处 completed 会归零（红）。
+    mockedGetKnowledgeBases.mockResolvedValue(
+      listResponse([
+        { ...REAL_DOC, id: 'doc-1', status: 'indexed' },
+        { ...REAL_DOC, id: 'doc-2', status: 'parsing' },
+        { ...REAL_DOC, id: 'doc-3', status: 'failed' },
+      ]) as never
+    )
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    // 统计卡四个数字，DOM 顺序：总数 / 已索引 / 处理中 / 失败
+    // （视图数字元素为 p.text-2xl.font-bold，页面大标题为 h1、RAG 指标区为 text-xl，不混入）
+    const nums = wrapper.findAll('p.text-2xl.font-bold').map((n) => n.text()).slice(0, 4)
+    expect(nums).toEqual(['3', '1', '1', '1'])
+  })
+})
+
 describe('KnowledgeView · 幽灵降级控件已清除（B17）', () => {
   it('completed + parse_error 含「降级」也绝无「重试向量化」/「重试全部降级文档」入口', async () => {
     // 旧 isFallbackIndexed 的唯一触发面：status==='completed' 且 parse_error 含「降级」

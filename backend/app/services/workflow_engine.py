@@ -370,7 +370,7 @@ class OutputNodeExecutor(NodeExecutor):
 
 
 class TTSNodeExecutor(NodeExecutor):
-    """TTS 语音合成节点执行器"""
+    """TTS 语音合成节点执行器（未实现——显式 not_supported，绝不返回假 URL）"""
 
     async def execute(self, state: WorkflowState) -> dict[str, Any]:
         messages = state.get("messages", [])
@@ -384,11 +384,19 @@ class TTSNodeExecutor(NodeExecutor):
         if not text:
             text = state.get("context", {}).get("final_output", "")
 
-        # TODO: 实现实际的 TTS 调用
-        audio_url = f"/api/v1/tts/generate?text={text[:100]}"
-
+        # 诚实化（第二轮 §7.2②）：此前返回指向不存在端点的假 URL
+        # （/api/v1/tts/generate?text=...），前端拿到的是死链、永远无法播放。
+        # 现在如实返回 audio_url=null + error="not_supported"；节点保留注册
+        # （存量工作流改为如实失败/标注，而不是假装成功）。真 TTS 单独立项
+        # （备选路径 edge-tts），不被本修复顺带驱动。
         return {
-            "node_outputs": {self.node.id: {"audio_url": audio_url, "text": text[:500]}}
+            "node_outputs": {
+                self.node.id: {
+                    "audio_url": None,
+                    "text": text[:500],
+                    "error": "not_supported",
+                }
+            }
         }
 
 

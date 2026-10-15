@@ -9,7 +9,7 @@
           <p class="text-sm text-gray-500 dark:text-gray-400">企业级 RAG 知识库系统</p>
         </div>
         <div class="ml-auto">
-          <n-tag type="success" round size="small">v2.0.0</n-tag>
+          <n-tag v-if="appVersion" type="success" round size="small">v{{ appVersion }}</n-tag>
         </div>
       </div>
 
@@ -71,6 +71,11 @@
 
 <script setup lang="ts">
 import { NDescriptions, NDescriptionsItem, NTag } from 'naive-ui'
+import { useAppVersion } from '@/composables/useAppVersion'
+
+// ISS-2 数字对账：版本号动态读取——后端 APP_VERSION 是唯一版本真源，
+// 经 GET /health 会话级缓存读取（见 useAppVersion）；拿不到时空态不显示。
+const appVersion = useAppVersion()
 
 const highlights = [
   { title: '混合检索', desc: '结合 BM25 关键词搜索与向量语义搜索，使用倒数排名融合 (RRF) 最大化召回率。' },
