@@ -13,8 +13,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { NMessageProvider, NSpin, NButton, NTooltip, NIcon } from 'naive-ui'
+import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
-import i18n from '@/locales'
+import zh from '@/locales/zh'
 
 import AgentView from '../index.vue'
 import ApprovalCard from '@/components/agent/ApprovalCard.vue'
@@ -36,6 +37,9 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api/agent', () => ({ agentApi: apiMocks }))
+
+// F4：AgentView 用 t('hitl.*') 渲染取消标识——视图测试统一装 zh 实例
+const i18n = createI18n({ legacy: false, locale: 'zh', fallbackLocale: 'zh', messages: { zh } })
 
 const Host = defineComponent({
   render: () => h(NMessageProvider, null, { default: () => h(AgentView) }),
@@ -85,7 +89,8 @@ describe('AgentView · HITL 接线', () => {
   })
 
   it('停止按钮请求服务端取消（POST cancel 语义）', async () => {
-    // 挂载恢复路径要先拿到"未终态"的任务行，否则会清掉陈旧指针（见下面用例）
+    // 挂载恢复路径要先拿到"未终态"的任务行，否则会清掉陈旧指针（见下面用例）；
+    // mock 形状=真实拦截器输出（完整 AxiosResponse，信封在 res.data）
     apiMocks.getTask.mockResolvedValue({ data: { success: true, data: { state: 'running' } } })
     const { pinia, store } = setupStore()
     store.setTaskId('task-1')
@@ -180,5 +185,42 @@ describe('AgentView · HITL 接线', () => {
     expect(store.pendingApproval).toBeNull()
     expect(localStorage.getItem('docmind.agent.lastTaskId')).toBeNull()
     wrapper.unmount()
+  })
+
+  it('F4：run_cancelled 事件有可见"已取消"徽标 + 思考流切换停止态', async () => {
+    const { pinia, store } = setupStore()
+    store.setTaskState('cancelled')
+    store.addMessage({
+      role: 'assistant',
+      content: '',
+      events: [{ type: 'run_cancelled', content: '任务已被用户取消', task_id: 't-c' } as any],
+      loading: false,
+      currentTool: '',
+      thinkingText: '执行步骤: 一',
+      planSteps: [],
+      planId: '',
+      progress: 0,
+    } as any)
+
+    const wrapper = await mountView(pinia)
+
+    const badge = wrapper.find('.run-cancelled-badge')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('已取消')
+    expect(wrapper.find('.run-cancelled-text').text()).toContain('任务已被用户取消')
+    // 思考流收到停止态（组件的终态标签渲染由 thinkingStopped.test.ts 单独钉）
+    expect(wrapper.findComponent({ name: 'ThinkingStream' }).props('stopped')).toBe(true)
+    // 与"运行失败"的红色徽标体系区分（取消是正常收敛，不是错误）
+    expect(wrapper.find('.run-error-badge').exists()).toBe(false)
+    // 未取消时不得出现（不是恒显）
+    const clean = setupStore()
+    clean.store.addMessage({
+      role: 'assistant', content: 'a', events: [], loading: false, currentTool: '',
+      thinkingText: '', planSteps: [], planId: '', progress: 0,
+    } as any)
+    const w2 = await mountView(clean.pinia)
+    expect(w2.find('.run-cancelled-badge').exists()).toBe(false)
+    wrapper.unmount()
+    w2.unmount()
   })
 })

@@ -686,6 +686,10 @@ export default {
     stateWaitingApproval: '待审批',
     statePending: '排队中'
   },
+  hitl: {
+    cancelled: '已取消',
+    stopped: '已停止'
+  },
   router: {
     welcome: '欢迎',
     login: '登录',

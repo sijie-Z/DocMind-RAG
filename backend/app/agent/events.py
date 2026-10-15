@@ -133,7 +133,10 @@ class AgentEvent:
 
         if self.parallel_group is not None:
             d["parallel_group"] = self.parallel_group
-        if self.risk_level != "low":
+        # HITL：approval_required 的 risk_level 是安全关键信息——即使 low 也必须
+        # 显式在线上（缺字段曾让前端徽标兜底成"高风险"，并与卡片理由自相矛盾；
+        # 浏览器验收 F3）。其余事件类型维持"非默认值才带"的瘦身契约。
+        if self.risk_level != "low" or self.type == "approval_required":
             d["risk_level"] = self.risk_level
         if self.retry_strategy != "auto_retry":
             d["retry_strategy"] = self.retry_strategy

@@ -530,6 +530,10 @@ export default {
     stateWaitingApproval: 'Approbation requise',
     statePending: "En file d'attente"
   },
+  hitl: {
+    cancelled: 'Annulé',
+    stopped: 'Arrêté'
+  },
   router: {
     welcome: 'Bienvenue',
     login: 'Connexion',

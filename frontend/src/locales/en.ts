@@ -669,6 +669,10 @@ export default {
     stateWaitingApproval: 'Awaiting approval',
     statePending: 'Queued'
   },
+  hitl: {
+    cancelled: 'Cancelled',
+    stopped: 'Stopped'
+  },
   router: {
     welcome: 'Welcome',
     login: 'Login',

@@ -60,6 +60,18 @@ describe('useAgentStore · HITL 事件落账', () => {
     expect(msg.events.some((e) => e.type === 'approval_required')).toBe(true)
   })
 
+  it('approval_required 缺 risk_level 字段时兜底 low（F3：低风险工具不再误显"高风险"）', () => {
+    const store = seedAssistant()
+    store.processEvent({
+      type: 'approval_required',
+      content: '审批模式 always：调用工具 calculate（风险 low）需人工确认后执行',
+      tool_name: 'calculate',
+      tool_args: { expression: '123*456' },
+      task_id: 't-low',
+    } as any)
+    expect(store.pendingApproval?.risk_level).toBe('low')
+  })
+
   it('run_cancelled：诚实收敛到 cancelled（不是完成也不是错误）', () => {
     const store = seedAssistant()
     store.processEvent({ type: 'run_cancelled', content: '任务已被用户取消', task_id: 't-1' } as any)

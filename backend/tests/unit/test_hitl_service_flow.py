@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401 — 注册全部表，供 create_all
-from app.agent import checkpoint
+from app.agent import approval, checkpoint
 from app.agent.config import AgentConfig
 from app.agent.exec_context import ExecutionContext
 from app.agent.loop import PERAgentLoop
@@ -122,6 +122,39 @@ def _client_tool_then_plain(
                 await block.wait()
             tc = SimpleNamespace(id="tc-1", function=SimpleNamespace(name=tool, arguments=args))
             msg = SimpleNamespace(content="", tool_calls=[tc], role="assistant")
+        else:
+            counters["plain"] += 1
+            msg = SimpleNamespace(content="已完成。", tool_calls=None, role="assistant")
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=msg, finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2),
+        )
+
+    client = MagicMock()
+    client.chat.completions.create = _create
+    return client, counters
+
+
+def _client_multi_tool(
+    calls_spec: list[tuple[str, str, str]],
+    *,
+    capture: dict | None = None,
+):
+    """执行步每次发**同一组**多个 tool_call（S4 场景：一回合内两个高危调用）。"""
+    counters = {"tools": 0, "plain": 0}
+
+    async def _create(*, messages, tools=None, **kwargs):
+        if capture is not None:
+            capture.setdefault("messages", []).append(messages)
+        if tools:
+            counters["tools"] += 1
+            tcs = [
+                SimpleNamespace(
+                    id=cid, function=SimpleNamespace(name=name, arguments=args),
+                )
+                for name, args, cid in calls_spec
+            ]
+            msg = SimpleNamespace(content="", tool_calls=tcs, role="assistant")
         else:
             counters["plain"] += 1
             msg = SimpleNamespace(content="已完成。", tool_calls=None, role="assistant")
@@ -295,3 +328,84 @@ async def test_pause_uses_ttl_from_config(db_factory, fake_redis):
     task_id = next(e.task_id for e in events if e.task_id)
     pending = await checkpoint.get_pending_approval(task_id)
     assert pending is not None and isinstance(pending.get("expires_at"), float)
+
+
+@pytest.mark.asyncio
+async def test_multi_pause_cycles_keep_ledger_and_steering(db_factory, fake_redis):
+    """S4 原样复刻（浏览器验收 F1）：单 run 两个审批周期——第一周期 批准+改指令，
+    第二周期不得重弹已批指纹、人工指导必须仍生效。
+
+    现场构造（与浏览器 S4 同构）：执行步一次发**两个**高危调用 c1/c2 →
+    预检在任何执行前暂停 → 周期1 批 c1+steer → 周期2 只应弹 c2（c1 粘滞）→
+    批 c2 后两调用全放行、无第三张卡。
+
+    变异点：把 loop.run 的 run_state_live 还原成窄三键（不做基底合并写）→
+    resume#1 的暂停快照覆盖掉 apply 写入的 decisions/steering → resume#2 时
+    c1 无决定被重弹、指导归零 → 本用例红（已实测，见 _hitl_mutations.txt M6）。
+    """
+    c1_args = {"code": "print(123*456)"}
+    c2_args = {"code": "print(999)"}
+    capture: dict = {}
+    client, counters = _client_multi_tool(
+        [("execute_python", '{"code": "print(123*456)"}', "c1"),
+         ("execute_python", '{"code": "print(999)"}', "c2")],
+        capture=capture,
+    )
+    svc = AgentService(openai_client=client)
+    spy = AsyncMock(return_value=ToolResult.ok(data="假执行结果"))
+    steer = "只读模式：先确认再计算"
+
+    with patch.object(tool_registry, "execute_detailed", new=spy):
+        # ── 周期 0：chat 跑到第一个审批点（c1 先弹；两调用都未执行）──
+        events1 = [e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_cfg())]
+        first = [e for e in events1 if e.type == "approval_required"]
+        assert len(first) == 1 and first[0].tool_args == c1_args
+        task_id = first[0].task_id
+        assert spy.await_count == 0
+
+        # ── 周期 1：批准 c1 + 改指令 → resume#1 只应弹 c2 ──
+        await checkpoint.apply_approval_decision(
+            task_id=task_id, user_id=USER_ID, organization_id=1,
+            decision="approve", modified_instruction=steer,
+        )
+        events2 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID, claim=False)]
+        second = [e for e in events2 if e.type == "approval_required"]
+        assert len(second) == 1 and second[0].tool_args == c2_args, (
+            "第二周期只应弹未批的 c2——已批的 c1 重弹即 F1 回归"
+        )
+        assert spy.await_count == 0, "任何调用执行前暂停（同批预检）"
+
+        # 快照层复核（合并写）：账本是 [c1]，指导仍在——不是从空列表重建
+        _, payload_mid = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
+        run_mid = payload_mid["run"]
+        assert run_mid["approval_decisions"][0]["args_hash"] == approval.args_fingerprint(c1_args), (
+            "周期 1 的暂停快照必须原样带回已批决定（窄覆盖=此断言红）"
+        )
+        assert run_mid["steering"] == [steer], "改指令必须跨暂停周期存活"
+
+        # ── 周期 2：批准 c2 → 两调用全放行、run 收尾，无第三张卡 ──
+        await checkpoint.apply_approval_decision(
+            task_id=task_id, user_id=USER_ID, organization_id=1, decision="approve",
+        )
+        events3 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID, claim=False)]
+
+    assert not any(e.type == "approval_required" for e in events3), (
+        "c1/c2 都已批：不得出现第三个审批点（旧病：c1 账本丢失重弹）"
+    )
+    assert spy.await_count == 2, "c1、c2 各执行一次"
+    executed = {str(call.args[1]) for call in spy.await_args_list}
+    assert executed == {str(c1_args), str(c2_args)}
+    assert any(e.type == "done" for e in events3)
+
+    # 人工指导仍生效：resume#1 与 resume#2 的步骤提示词里都必须有它
+    prompts = [m[0]["content"] for m in capture["messages"]]
+    with_guidance = [p for p in prompts if steer in p]
+    assert len(with_guidance) >= 2, (
+        f"改指令应跨两个 resume 周期持续注入（实际 {len(with_guidance)}/2）——只活一轮即 F1"
+    )
+
+    task = await _get_task(db_factory, task_id)
+    assert task.status == TaskStatus.COMPLETED
+    # 终版快照的账本完整（含两枚决定）；指导随 run 保留（审计面）
+    _, payload_final = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
+    assert len(payload_final["run"]["approval_decisions"]) == 2

@@ -302,6 +302,11 @@ class PERAgentLoop:
         partial_prefix = ""
         replan_feedback = ""
         replan_attempts = 0
+        # HITL（S4 修复）：resume 信封的 run_state 里承载着跨暂停周期的状态
+        # （approval_decisions / steering 等，见下方 run_state_live 的合并写）。
+        # 仅当快照重建**成功**时回填——重建失败走"损坏即无快照"干净重跑语义，
+        # 不携带任何旧值（与 parse_snapshot 顶层损坏同口径）。
+        prior_run_state: dict[str, Any] = {}
         if resume:
             # 重建段整体兜底（issue #278/R1）：parse_snapshot 只校验信封顶层，
             # "合法 JSON、深结构坏形状"（如 plan.steps 非列表 / ctx.artifacts
@@ -379,6 +384,7 @@ class PERAgentLoop:
                 replan_feedback = rebuilt_feedback
                 partial_prefix = rebuilt_partial
                 resume_plan = rebuilt_plan
+                prior_run_state = run_state if isinstance(run_state, dict) else {}
                 # HITL：审批决定账本（粘滞 approve/deny）+ 人工指导（steering）
                 # 从快照 run_state 回填——resume 的审批门用同一份账本，已批准/
                 # 已拒绝的 (tool, args) 不会再次打扰（类型级防漂移：坏元素丢弃）。
@@ -438,11 +444,35 @@ class PERAgentLoop:
                     logger.warning(f"Memory recall failed: {e}")
 
         # 快照活引用（fitted history 之后建立，冻结进快照的是实际被消费的那份）。
-        run_state_live: dict[str, Any] = {
-            "execution_mode": self._execution_mode,
-            "replan_attempts": replan_attempts,
-            "replan_feedback": replan_feedback,
-        }
+        # HITL（S4 修复，浏览器验收 F1）：run_state 是"多暂停周期间不丢"的载体
+        # ——apply_approval_decision 往信封的 run_state 追加 approval_decisions /
+        # steering，loop 读取后必须**原样带回**。此前这里只写三个运行期键，
+        # resume 后的第一次快照（如下一轮 before_approval）就把上一轮 apply 写入
+        # 的决定/指导整份覆盖掉——多审批周期下已批指纹重新弹卡、改指令只活一轮。
+        # 现在以既有 run_state 为基底**合并写**；HITL 两个键做值级规整（#319
+        # 同族：坏形状绝不落回快照，清空即删键）。
+        run_state_live: dict[str, Any] = dict(prior_run_state)
+        raw_decisions = prior_run_state.get("approval_decisions")
+        cleaned_decisions = (
+            [d for d in raw_decisions if isinstance(d, dict)]
+            if isinstance(raw_decisions, list) else []
+        )
+        if cleaned_decisions:
+            run_state_live["approval_decisions"] = cleaned_decisions
+        else:
+            run_state_live.pop("approval_decisions", None)
+        raw_steering = prior_run_state.get("steering")
+        cleaned_steering = (
+            [s for s in raw_steering if isinstance(s, str) and s.strip()]
+            if isinstance(raw_steering, list) else []
+        )
+        if cleaned_steering:
+            run_state_live["steering"] = cleaned_steering
+        else:
+            run_state_live.pop("steering", None)
+        run_state_live["execution_mode"] = self._execution_mode
+        run_state_live["replan_attempts"] = replan_attempts
+        run_state_live["replan_feedback"] = replan_feedback
         if task_id and self.config.enable_checkpoint:
             self.checkpoint_live = {
                 "ctx": ctx,

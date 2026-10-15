@@ -212,6 +212,26 @@ class TestApprovalModule:
         assert approval.approval_expired({"expires_at": 1e12}) is False
         assert approval.approval_expired({"expires_at": 1.0}) is True
 
+    def test_approval_required_always_carries_risk_level(self):
+        """F3：审批事件的风险等级必须显式在线上（含 low），其余事件维持瘦身契约。"""
+        from app.agent.events import AgentEvent
+
+        low = AgentEvent(
+            type="approval_required", content="r", tool_name="calculate",
+            tool_args={"expression": "1+1"}, risk_level="low",
+        )
+        assert low.to_sse_dict()["risk_level"] == "low"
+
+        high = AgentEvent(
+            type="approval_required", content="r", tool_name="execute_python",
+            risk_level="high",
+        )
+        assert high.to_sse_dict()["risk_level"] == "high"
+
+        # 非审批事件：low 仍被省略（载荷瘦身契约不变）
+        assert "risk_level" not in AgentEvent(type="tool_call", risk_level="low").to_sse_dict()
+        assert AgentEvent(type="tool_call", risk_level="medium").to_sse_dict()["risk_level"] == "medium"
+
 
 # ── 执行器级行为 ─────────────────────────────────────────────────────────────
 

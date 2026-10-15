@@ -106,6 +106,7 @@
               :text="msg.thinkingText"
               :thinkingType="getLastThinkingType(msg)"
               :active="msg.loading && msg.content.length === 0"
+              :stopped="agentStore.taskState === 'cancelled'"
             />
 
             <!-- Tool calls -->
@@ -141,6 +142,13 @@
                 <div v-else-if="evt.type === 'error'" class="run-error-standalone">
                   <span class="run-error-badge">运行失败</span>
                   <span class="run-error-text">{{ evt.content }}</span>
+                </div>
+                <!-- HITL 取消（浏览器验收 F4）：run_cancelled 此前只落 store，
+                     页面无"已取消"字样——用户无法分辨"停住了"。中立灰徽标：
+                     取消是正常收敛，不是错误（诚实：停得住 ≠ 出错）。 -->
+                <div v-else-if="evt.type === 'run_cancelled'" class="run-cancelled-standalone">
+                  <span class="run-cancelled-badge">{{ t('hitl.cancelled') }}</span>
+                  <span class="run-cancelled-text">{{ evt.content }}</span>
                 </div>
                 <!-- 落库失败告警（issue #301 批 D #22 / B29：后端在「回答已生成、
                      但会话落库失败」时发射 {type:'warning', content}
@@ -303,8 +311,8 @@ import RecentTaskList from '@/components/agent/RecentTaskList.vue'
 import Markdown from '@/components/common/Markdown.vue'
 
 const agentStore = useAgentStore()
-const message = useDedupedMessage()
 const { t } = useI18n()
+const message = useDedupedMessage()
 // 深链（?id=<task_id>，通知点击/刷新直达回放）：测试环境可能无 router——全部访问带守卫
 const route = useRoute()
 const router = useRouter()
@@ -627,7 +635,8 @@ async function restorePendingApproval() {
   if (!last) return
   try {
     const res = await agentApi.getTask(last)
-    // F2：读信封内层（res.data = {success, data}）
+    // F2：读信封内层（res.data = {success, data}；此前读 res.data 导致
+    // data.state 恒 undefined，刷新后审批卡永不恢复——浏览器验收实锤）
     const data = res.data?.data
     if (data?.state === 'waiting_approval' && data.approval) {
       agentStore.setTaskId(last)
@@ -1251,6 +1260,35 @@ async function loadInit() {
   line-height: 18px;
 }
 
+/* HITL 取消标识（F4）：中立灰——取消是正常收敛而非运行失败，视觉上不与
+   "运行失败"红徽标混淆。 */
+.run-cancelled-standalone {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 8px 12px;
+  background: rgba(100, 116, 139, 0.08);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-left: 3px solid #64748b;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.dark .run-cancelled-standalone { color: #94a3b8; }
+
+.run-cancelled-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #64748b;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
 .run-warning-standalone {
   display: flex;
   align-items: flex-start;
@@ -1277,6 +1315,11 @@ async function loadInit() {
   color: #fff;
   font-size: 10px;
   font-weight: 600;
+  line-height: 18px;
+}
+
+.run-cancelled-text {
+  word-break: break-word;
   line-height: 18px;
 }
 

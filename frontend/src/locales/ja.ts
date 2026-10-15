@@ -530,6 +530,10 @@ export default {
     stateWaitingApproval: '承認待ち',
     statePending: '待機中'
   },
+  hitl: {
+    cancelled: 'キャンセル済み',
+    stopped: '停止済み'
+  },
   router: {
     welcome: 'ようこそ',
     login: 'ログイン',
