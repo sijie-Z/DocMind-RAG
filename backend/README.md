@@ -82,7 +82,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```bash
 python reset_admin.py
 ```
-会将 `admin` 用户密码重置为 `123456`（若不存在则创建）。然后使用 **admin / 123456** 登录。
+需先设置环境变量 `ADMIN_PASSWORD`（至少 8 位，安全加固后不再有弱口令默认值），它会把 `admin` 用户密码重置为该值（若不存在则创建）。然后使用 **admin / 该密码** 登录（本地现役口令见 `_试用清单.md`）。
 
 ### 7. Docker部署（推荐）
 ```bash

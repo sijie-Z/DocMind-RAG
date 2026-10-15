@@ -47,7 +47,7 @@
         <div v-if="suggestions.length > 0"
           class="absolute top-full left-0 right-0 mt-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-2xl border border-white/20 dark:border-gray-800/50 shadow-2xl z-50 overflow-hidden">
           <div v-for="suggestion in suggestions" :key="suggestion"
-            class="px-6 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/30 cursor-pointer transition-colors text-gray-600 dark:text-gray-300 flex items-center space-x-3"
+            class="px-6 py-3 hover:bg-gray-50 dark:hover:bg-gray-900/30 cursor-pointer transition-colors text-gray-600 dark:text-gray-300 flex items-center space-x-3"
             @click="selectSuggestion(suggestion)">
             <n-icon class="text-gray-400"><time-outline /></n-icon>
             <span>{{ suggestion }}</span>
@@ -67,8 +67,9 @@
             <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">{{ t('search.type') }}</h3>
             <n-radio-group v-model:value="searchType" name="searchType" class="w-full">
               <n-space vertical>
+                <n-radio value="auto">{{ t('search.auto') }}</n-radio>
                 <n-radio value="hybrid">{{ t('search.hybrid') }}</n-radio>
-                <n-radio value="semantic">{{ t('search.semantic') }}</n-radio>
+                <n-radio value="vector">{{ t('search.semantic') }}</n-radio>
                 <n-radio value="keyword">{{ t('search.keyword') }}</n-radio>
               </n-space>
             </n-radio-group>
@@ -116,33 +117,31 @@
               <div class="flex justify-between items-start mb-3">
                 <div class="flex items-center space-x-3">
                   <div
-                    class="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-900/30 flex items-center justify-center">
-                    <n-icon size="22" class="text-slate-500 dark:text-slate-400">
-                      <component :is="getFileTypeIcon(result.file_type)" />
+                    class="w-10 h-10 rounded-xl bg-gray-50 dark:bg-gray-900/30 flex items-center justify-center">
+                    <n-icon size="22" class="text-gray-500 dark:text-gray-400">
+                      <component :is="getFileTypeIcon(fileTypeOf(result))" />
                     </n-icon>
                   </div>
                   <div>
                     <h3
                       class="font-bold text-gray-800 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                      {{ result.filename }}
+                      {{ filenameOf(result) }}
                     </h3>
-                    <div class="flex items-center space-x-3 text-xs text-gray-400">
-                      <span>{{ formatFileSize(result.file_size) }}</span>
-                      <span>•</span>
-                      <span>{{ formatDate(result.upload_time) }}</span>
-                    </div>
+                    <!-- P1-3：大小/日期不可推导（真实响应无对应字段）→ 不渲染；
+                         原先 formatFileSize(undefined)→"NaN undefined" /
+                         formatDate(undefined)→"Invalid Date" 畸形显示随之消除 -->
                   </div>
                 </div>
                 <div class="flex items-center space-x-2">
-                  <n-tag :bordered="false" type="success" size="small" round
+                  <n-tag v-if="scorePctOf(result)" :bordered="false" type="success" size="small" round
                     class="bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600">
-                    {{ (result.relevance_score * 100).toFixed(1) }}% {{ t('search.relevanceScore') }}
+                    {{ scorePctOf(result) }}% {{ t('search.relevanceScore') }}
                   </n-tag>
                 </div>
               </div>
 
               <div class="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed mb-3">
-                {{ result.content }}
+                {{ contentOf(result) }}
               </div>
 
               <div class="flex items-center justify-between mt-4 pt-4 border-t border-gray-100 dark:border-gray-800/50">
@@ -183,26 +182,18 @@
 
     <!-- 结果详情模态框 (现代风格) -->
     <n-modal v-model:show="showDetailModal" preset="card" style="width: min(800px, 90vw); border-radius: 2rem;"
-      class="backdrop-blur-2xl bg-white/80 dark:bg-gray-900/80" :title="selectedResult?.filename">
+      class="backdrop-blur-2xl bg-white/80 dark:bg-gray-900/80" :title="selectedResult ? filenameOf(selectedResult) : ''">
       <div v-if="selectedResult" class="space-y-6 p-2">
-        <div class="grid grid-cols-4 gap-4">
+        <!-- P1-3：仅保留可推导的两个信息格（类型←文件名、匹配度←score）；
+             大小/日期真实响应无对应字段（不可推导）→ 不渲染 -->
+        <div class="grid grid-cols-2 gap-4">
           <div class="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50">
             <span class="text-xs text-gray-400 block mb-1">{{ t('search.fileType') }}</span>
-            <span class="font-bold text-gray-700 dark:text-gray-200">{{ selectedResult.file_type.toUpperCase() }}</span>
-          </div>
-          <div class="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50">
-            <span class="text-xs text-gray-400 block mb-1">{{ t('search.fileSize') }}</span>
-            <span class="font-bold text-gray-700 dark:text-gray-200">{{ formatFileSize(selectedResult.file_size)
-            }}</span>
+            <span class="font-bold text-gray-700 dark:text-gray-200">{{ fileTypeOf(selectedResult).toUpperCase() || '—' }}</span>
           </div>
           <div class="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50">
             <span class="text-xs text-gray-400 block mb-1">匹配度</span>
-            <span class="font-bold text-emerald-600">{{ (selectedResult.relevance_score * 100).toFixed(1) }}%</span>
-          </div>
-          <div class="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50">
-            <span class="text-xs text-gray-400 block mb-1">日期</span>
-            <span class="font-bold text-gray-700 dark:text-gray-200">{{ formatDate(selectedResult.upload_time).split('')[0]
-            }}</span>
+            <span class="font-bold text-emerald-600">{{ scoreLabelOf(selectedResult) }}</span>
           </div>
         </div>
 
@@ -210,7 +201,7 @@
           <h4 class="text-sm font-bold text-gray-400 uppercase tracking-widest">{{ t('search.fileContent') }}</h4>
           <div
             class="p-6 rounded-3xl bg-gray-50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 leading-loose whitespace-pre-wrap max-h-96 overflow-y-auto custom-scrollbar border border-gray-100 dark:border-gray-700/30">
-            {{ selectedResult.content }}
+            {{ contentOf(selectedResult) }}
           </div>
         </div>
 
@@ -235,7 +226,7 @@ import { useRouter } from 'vue-router'
 import { useDedupedMessage } from '@/utils/message'
 import { NIcon, NSpin, NRadioGroup, NRadio, NSpace, NCheckboxGroup, NCheckbox, NSelect, NTag, NButton, NModal } from 'naive-ui'
 import { SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline, SparklesOutline, DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline } from '@vicons/ionicons5'
-import { searchKnowledge, getSearchSuggestions, getSearchStats } from '@/api/search'
+import { searchKnowledge, getSearchSuggestions, getSearchStats, buildSearchPayload } from '@/api/search'
 import type { SearchResult, SearchStats } from '@/api/search'
 import { debounce } from 'lodash-es'
 import { useI18n } from 'vue-i18n'
@@ -247,10 +238,12 @@ const router = useRouter()
 const message = useDedupedMessage()
 
 // 搜索状态
+// issue #225：searchType 取值与后端 search_mode 同语义（vector 即后端"语义搜索"），
+// 'auto' = 不发送该字段（走后端自动路由，缺省行为与修复前一致）。
 const searchQuery = ref('')
-const searchType = ref<'semantic' | 'keyword' | 'hybrid'>('hybrid')
+const searchType = ref<'auto' | 'vector' | 'keyword' | 'hybrid'>('auto')
 const selectedFileTypes = ref<string[]>([])
-const sortBy = ref<'relevance' | 'date' | 'name'>('relevance')
+const sortBy = ref<'relevance' | 'name'>('relevance')
 
 // 结果状态
 const searchResults = ref<SearchResult[]>([])
@@ -261,11 +254,13 @@ const showDetailModal = ref(false)
 const loading = ref(false)
 const hasSearched = ref(false)
 
-const currentOrgId = computed(() => userStore.userInfo?.organizations?.[0]?.id)
+// P1 修复：原取值 organizations[0].id 是成员列表首项，多组织用户下未必是
+// 「当前组织」。统一改用 user store 的 currentOrgId 口径（当前组织
+// currentOrganizationId → user.organization_id 兜底）。
+const currentOrgId = computed(() => userStore.currentOrgId)
 
 const sortOptions = [
   { label: t('search.relevance'), value: 'relevance' },
-  { label: t('search.date'), value: 'date' },
   { label: t('search.name'), value: 'name' }
 ]
 
@@ -277,38 +272,62 @@ const fileTypes = [
   { value: 'md', label: 'Markdown' }
 ]
 
+// ── P1-3 修复（UI 复验 round2）：真实响应字段访问器 ─────────────────────
+// 后端 results 项真实 shape = {id, text, score, metadata, source, ...}（见
+// api/search.ts SearchResult）；旧模板读的 file_type/filename/content/
+// file_size/upload_time/relevance_score 平铺字段不存在——首个渲染即崩
+// （getFileTypeIcon 对 undefined 调 toLowerCase），即便不崩也会显示
+// "NaN undefined" / "Invalid Date"。展示层读值一律收敛到以下访问器：能
+// 推导的推导（类型←文件名扩展名、得分←score、正文←text、文件名←source/
+// metadata），推导不出的（大小/日期）不渲染；兜底不允许 undefined 进入
+// toLowerCase / 数值格式化 / Date。
+const filenameOf = (r: SearchResult): string => r.source?.filename ?? r.metadata?.filename ?? ''
+const contentOf = (r: SearchResult): string => r.text ?? r.metadata?.snippet ?? ''
+const scorePctOf = (r: SearchResult): string | null =>
+  Number.isFinite(r.score) ? (r.score * 100).toFixed(1) : null
+const scoreLabelOf = (r: SearchResult): string => {
+  const pct = scorePctOf(r)
+  return pct === null ? '—' : pct + '%'
+}
+const fileTypeOf = (r: SearchResult): string => {
+  const name = filenameOf(r)
+  const dot = name.lastIndexOf('.')
+  return dot > -1 ? name.slice(dot + 1).toLowerCase() : ''
+}
+
 const sortedResults = computed(() => {
   const results = [...searchResults.value]
-  if (sortBy.value === 'relevance') return results.sort((a, b) => b.relevance_score - a.relevance_score)
-  if (sortBy.value === 'date') return results.sort((a, b) => new Date(b.upload_time).getTime() - new Date(a.upload_time).getTime())
-  if (sortBy.value === 'name') return results.sort((a, b) => a.filename.localeCompare(b.filename))
+  if (sortBy.value === 'relevance') return results.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0))
+  if (sortBy.value === 'name') return results.sort((a, b) => filenameOf(a).localeCompare(filenameOf(b)))
   return results
 })
 
-const getFileTypeIcon = (type: string) => {
+const getFileTypeIcon = (type?: string) => {
   const map: Record<string, unknown> = { pdf: DocumentOutline, docx: DocumentTextOutline, xlsx: GridOutline, txt: DocumentTextOutline, md: NewspaperOutline }
-  return map[type.toLowerCase()] || DocumentOutline
+  // P1-3：空/未知一律 DocumentOutline 兜底，永不 toLowerCase undefined
+  return map[(type ?? '').toLowerCase()] || DocumentOutline
 }
-
-const formatFileSize = (bytes: number) => {
-  if (bytes === 0) return '0 B'
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + ['B', 'KB', 'MB', 'GB'][i]
-}
-
-const formatDate = (ds: string) => new Date(ds).toLocaleString('zh-CN')
 
 const handleSearch = async () => {
   if (!searchQuery.value.trim()) return
+  const orgId = currentOrgId.value
+  if (!orgId) {
+    // organization_id 为后端 schema 必填；无当前组织时请求必 422 ——
+    // 显式报错，不把校验失败伪装成「未找到相关结果」。
+    message.error(t('search.searchFailed') || t('common.error'))
+    return
+  }
   loading.value = true
   hasSearched.value = true
   try {
-    searchResults.value = await searchKnowledge({
+    searchResults.value = await searchKnowledge(buildSearchPayload({
       query: searchQuery.value,
-      search_type: searchType.value,
-      file_types: selectedFileTypes.value.length ? selectedFileTypes.value : undefined,
-      limit: 50
-    })
+      organizationId: orgId,
+      // 'auto'（自动路由）时 buildSearchPayload 不发送 search_mode ——
+      // 与后端"缺省=自动"同语义（issue #225）
+      searchMode: searchType.value,
+      fileTypes: selectedFileTypes.value
+    }))
   } catch (e) {
     message.error(t('search.searchFailed') || t('common.error'))
   } finally {
@@ -324,7 +343,7 @@ const handleInputChange = debounce(async () => {
 const selectSuggestion = (s: string) => { searchQuery.value = s; suggestions.value = []; handleSearch() }
 
 const clearFilters = () => {
-  searchType.value = 'hybrid'
+  searchType.value = 'auto'
   selectedFileTypes.value = []
   sortBy.value = 'relevance'
 }
@@ -332,12 +351,12 @@ const clearFilters = () => {
 const showResultDetail = (r: SearchResult) => { selectedResult.value = r; showDetailModal.value = true }
 
 const askAI = (r: SearchResult) => {
-  router.push({ name: 'Chat', query: { q: `关于文件 "${r.filename}"...`, context_id: r.id } })
+  router.push({ name: 'Chat', query: { q: `关于文件 "${filenameOf(r)}"...`, context_id: r.id } })
 }
 
 const copyResultContent = async (r: SearchResult | null) => {
   if (!r) return
-  await navigator.clipboard.writeText(r.content)
+  await navigator.clipboard.writeText(contentOf(r))
   message.success(t('common.copySuccess'))
 }
 

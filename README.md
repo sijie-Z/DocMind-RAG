@@ -11,7 +11,7 @@
 
 <div align="center">
   <h1>🤖 DocMind</h1>
-  <p><strong>企业级 AI Agent 知识库系统 — PER 架构 · 混合检索 · 可观测 · 自我进化</strong></p>
+  <p><strong>企业级 RAG×Agent 平台 —— 评测门禁进 CI、静默假成功清零、棘轮只缩不涨：质量，不可静默回退。</strong></p>
 </div>
 
 ---
@@ -23,7 +23,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 核心场景：
 - 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV，自动解析、分块、向量化，支持语义搜索
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
-- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 30 个工具完成复杂任务
+- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 33 个工具完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
 - 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、12 种 SSE 事件、RunReport 运行摘要
 - 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
@@ -34,10 +34,10 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 
 ## 项目状态
 
-> 当前定位：**公开项目 / 不成熟产品**。功能完整度高于稳定度，适合学习、二次开发和本地演示；正式生产部署前请自行加固安全与运维配置。
+> 定位：**公开项目 / 不成熟产品**——功能完整度高于稳定度，适合学习、二次开发与本地演示；正式生产部署前请自行加固安全与运维配置。产品可以还在打磨，工程纪律先行：**数字带口径，修复带证据，退化拦在合并前**（见「质量与门禁」）。
 
 当前基线：
-- 后端 `pytest tests/`：911 passed（CI，MySQL + Redis）；前端 111 tests passed + `vue-tsc --noEmit` 通过。
+- 测试基线（冻结快照 2026-10-15）：后端 `pytest tests/` **2223 passed / 51 skipped**（0 failed）；前端 **861 passed**（128 个测试文件）+ `vue-tsc --noEmit` 0 错误。数字随 CI 实时演进——CI 是唯一真源，本页只记录冻结快照。
 - 已修复：语义缓存按组织隔离、会话归属校验、知识库搜索/删除/重建的组织隔离、文件上传路径穿越与 MinIO 删除、API Key 掩码、Web 抓取 SSRF 防护、工作流归属隔离、Kafka 不可用时的进程内文档处理、本地启动脚本、敏感产物移出 git 跟踪。
 - 安全加固（1.20）：Agent 沙箱逃逸封堵（下划线属性拦截 + 长度/输出上限）、execute_sql 租户过滤与 UNION/子查询拦截、disabled_tools 服务端强制合并、mcp 子进程环境变量白名单、注册禁自选组织、角色变更同组织校验、登录失败锁定 + 用户枚举时序防护、refresh token 轮换、WS 仅接受 access token、PII 掩码全链路（上下文+流式）、GraphRAG 组织分区、/files 代理归属校验、RAG 缓存按组织失效、Alembic 001 FK 类型修复 + 005 补齐 15 张表、compose 凭据/端口收紧、24 个安全回归测试（446 单测通过）。
 - 架构收敛：文档解析/向量化/ES 索引统一为单一 Processor；聊天核心管线从路由下沉到 `services/chat_service.py`；新增统一文档授权辅助层。
@@ -47,6 +47,17 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 - 工作流代码节点默认关闭，需显式设置 `ENABLE_WORKFLOW_CODE_NODES=true`，且必须通过 Docker 沙箱执行。
 - GraphRAG 图谱、Agent 记忆、指标快照与实时计数均已支持 Redis 持久化；实时计数按实例写入并在读取时聚合，适合多实例部署。
 - 前端 `knowledge/index.vue`、`profile/index.vue`、`workflow/editor.vue` 均已拆分到组件/组合式函数，不再有千行级单文件页面。
+
+---
+
+## 质量与门禁
+
+「不静默回退」不是口号，而是一组可核对的机制：
+
+- **评测门禁进 CI（Eval Gate）**：检索质量由零容差门禁逐 PR 守护——28 条 golden set（25 正例 + 3 负例），ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors 七项指标容差为 0，任何下跌即红、fail-closed；`ClauseHit@3/@5` 实测 88%（CI 基线 84% 托底）。基线更新是显式 PR 行为（规则见 `backend/docs/eval-gate-phase1.md`）。
+- **棘轮只缩不涨**：后端覆盖率下限 `--cov-fail-under=42`＋前端四道基线棘轮（硬编码中文 / i18n 完备性 / 命名一致 / 用键定义）——只拦下滑、不追高分，新增长即红。
+- **静默假成功清零（#301）**：全仓 ~551 处异常捕获全量审计，32 条静默假成功全部闭环（登出 fail-closed、检索三态、文档状态机诚实化、统计端点降级身份……），修复均带回归测试。
+- **先红后绿＋变异验证**：每笔修复先写失败测试；修复后注入缺陷必须「精确变红」，证明测试真的有判别力。
 
 ---
 
@@ -61,7 +72,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 │  WebSocket 实时推送 · Request ID 追踪        │
 ├── AI Agent 核心 ─────────────────────────────┤
 │  PER Loop  (Planner → Executor → Reflector)  │
-│  Tool Registry (30) · RunReport · Reviewer  │
+│  Tool Registry (33) · RunReport · Reviewer  │
 │  经验记忆 · 执行回放 · 模式挖掘              │
 ├── RAG 管线 ──────────────────────────────────┤
 │  HybridRetriever (BM25 + 向量 + RRF 融合)    │
@@ -102,7 +113,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 上下文引擎 | `context.py` | 令牌预算管理，消息窗口构建 |
 | 配置 | `config.py` | AgentConfig（模型/温度/最大步骤/阶段开关） |
 
-**30 个内置工具** (`tools/`)：
+**33 个内置工具** (`tools/`)：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -347,7 +358,7 @@ DocMind/
 │   │   │   ├── events.py            #   SSE 事件类型（12 种）
 │   │   │   ├── message.py           #   Agent 间消息总线
 │   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
-│   │   │   ├── tools/               #   30 个工具实现
+│   │   │   ├── tools/               #   33 个工具实现
 │   │   │   │   ├── web_search.py    #   网络搜索
 │   │   │   │   ├── code_execution.py #  Python/SQL 沙箱
 │   │   │   │   ├── data_analysis.py #   数据分析
@@ -399,7 +410,7 @@ DocMind/
 │   │   ├── models/                  # ORM 模型（14 个实体）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者
-│   ├── tests/                       # 911 个后端测试用例（前端另有 111 个）
+│   ├── tests/                       # 2223 个后端测试（前端另有 861 个）
 │   ├── benchmark/                   # 评测框架
 │   ├── alembic/                     # 数据库迁移
 │   ├── scripts/                     # 工具脚本

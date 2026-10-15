@@ -306,8 +306,8 @@ export const agentApi = {
     }
   },
 
-  /** List available tools */
-  listTools(): Promise<ApiResponse<ToolInfo[]>> {
+  /** List available tools（真载荷 data.data；agent.py:450-472） */
+  listTools(): Promise<AxiosResponse<ApiResponse<ToolInfo[]>>> {
     return request.get('/agent/tools')
   },
 
@@ -318,23 +318,23 @@ export const agentApi = {
 
   // ── Sessions ──
 
-  /** List agent sessions */
+  /** List agent sessions（真载荷 data.data.sessions；agent.py:500-556） */
   listSessions(params?: {
     page?: number
     page_size?: number
-  }): Promise<ApiResponse<{ sessions: AgentSession[]; total: number; page: number; page_size: number }>> {
+  }): Promise<AxiosResponse<ApiResponse<{ sessions: AgentSession[]; total: number; page: number; page_size: number }>>> {
     return request.get('/agent/sessions', { params })
   },
 
-  /** Create agent session */
+  /** Create agent session（后端只回 {id, title}，真载荷 data.data；agent.py:585-591） */
   createSession(
     title: string,
-  ): Promise<ApiResponse<AgentSession>> {
+  ): Promise<AxiosResponse<ApiResponse<{ id: string; title: string }>>> {
     return request.post('/agent/sessions', { title })
   },
 
-  /** Get session details */
-  getSession(sessionId: string): Promise<ApiResponse<AgentSessionDetail>> {
+  /** Get session details（真载荷 data.data.config；agent.py:637-647） */
+  getSession(sessionId: string): Promise<AxiosResponse<ApiResponse<AgentSessionDetail>>> {
     return request.get(`/agent/sessions/${sessionId}`)
   },
 
@@ -345,8 +345,8 @@ export const agentApi = {
 
   // ── Configuration ──
 
-  /** Get user agent config */
-  getConfig(): Promise<ApiResponse<AgentConfig>> {
+  /** Get user agent config（真载荷 data.data；agent.py:696-710） */
+  getConfig(): Promise<AxiosResponse<ApiResponse<AgentConfig>>> {
     return request.get('/agent/config')
   },
 

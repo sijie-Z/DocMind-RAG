@@ -16,7 +16,7 @@
               :on-change="handleFileChange"
               :on-remove="handleFileRemove"
               :max="1"
-              accept=".pdf,.docx,.xlsx,.xls,.txt,.md,.csv"
+              accept=".pdf,.docx,.xlsx,.xls,.txt,.md,.csv,.png,.jpg,.jpeg,.webp,.bmp"
               class="w-full"
             >
               <n-upload-dragger class="!bg-transparent !border-none">

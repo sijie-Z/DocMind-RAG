@@ -21,7 +21,7 @@
 - **状态管理**: Pinia
 - **路由**: Vue Router
 - **样式**: UnoCSS + SCSS
-- **图标**: Iconify
+- **图标**: @vicons/ionicons5
 
 ## 功能特性
 
@@ -90,7 +90,7 @@ npm run dev
 
 ### 默认账户
 - 用户名: admin
-- 密码: 123456
+- 密码: 见 `_试用清单.md`（本地文档，不随仓库分发；部署环境由 `reset_admin.py` 的 `ADMIN_PASSWORD` 指定）
 
 ## API文档
 

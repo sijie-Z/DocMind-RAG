@@ -17,8 +17,12 @@
    函数对「无标记命中」的判定式未变；被换下的是**产品路径不再产出无标记的
    keyword_only 命中**这一前提。新锁见 `TestKeywordOnlyArmMarkerAligned`；
 3. `extract_query_terms` 截断前 12 个 bigram 且标题 bigram 优先——
-   带文档全称的查询里，标题 8 个 bigram 占位，内容词（数据/删除）被截断出列表
-   （未修，仍锁现状）；
+   带文档全称的查询里，标题 8 个 bigram 占位，内容词（数据/删除）被截断出列表。
+   —— 2026-10-09 环 C 落地（本 PR）：keyword 臂术语选择改为「语料术语表
+   （FR-1 冻结规则从 backend/evals/corpus/ 统计推得）成员优先 + 上限 16」；
+   旧锁 `TestQueryTermTruncationTilt` 已换下，新锁见 `TestCorpusGlossaryTermSelection`
+   与防漂移锁 `TestCorpusGlossaryDerivation`；`extract_query_terms` 默认 12 上限
+   保留（其它调用方不变的正向契约）；
 4. `rewrite_query_candidates` 保留条号文案（实验否证了「改写丢条号」假设，
    作为正向契约锁定）；
 5. 4 条失败 query 现状路由 `keyword_only`（实验同时证明改路由不是修复点：
@@ -36,10 +40,15 @@
    gold 分数在场却被 `_mmr_select` 从 top5 剔出（多样性惩罚与精确定位相斥）；
    本文件以 `TestClauseLookupSkipsMMR` 为新锁（判据边界 + MMR 调用端到端）。
 
-**a–e 五环已全部落地**（a/b：PR #323；c/d/e：本 PR）。本文件现有全部锁为该
-机制的**正向锁**：任何再次改动上述机制（doc 帽 / msm 口径 / 数形归一 / 臂标记 /
-MMR 适用性）的 PR 必须显式更新本文件——这是刻意的「变更前先测量、变更要自觉」闸门。
+**a–e 五环已全部落地**（a/b：PR #323；c/d/e：PR #325）；**环 C（术语表按语料统计
+重算，机制 3 修复）由本 PR 落地**。本文件现有全部锁为该机制的**正向锁**：任何再次
+改动上述机制（doc 帽 / msm 口径 / 数形归一 / 臂标记 / MMR 适用性 / 语料术语表与术语
+选择）的 PR 必须显式更新本文件——这是刻意的「变更前先测量、变更要自觉」闸门。
 """
+
+import pathlib
+import re
+from collections import Counter
 
 import pytest
 
@@ -51,10 +60,12 @@ from app.rag.query_processor import (
     rewrite_query_candidates,
 )
 from app.rag.retriever import (
+    _KEYWORD_TERM_CAP,
     HybridRetriever,
     _count_tokens_cjk,
     _int_to_cn_clause_number,
     _is_clause_lookup_query,
+    _keyword_arm_terms,
     _minimum_should_match_for,
     _numeral_clause_variants,
     _parse_clause_number,
@@ -70,6 +81,29 @@ FAILING_QUERIES = [
     ("《知识库服务管理办法》第7条规定了什么？", "第7条"),
     ("《知识库服务管理办法》第十二条关于数据删除的规定是什么？", "第十二条"),
 ]
+
+
+def _derived_glossary() -> tuple[str, ...]:
+    """按 FR-1 冻结规则从 backend/evals/corpus/ 重推语料术语表。
+
+    与预注册脚本 `_orchestrate/round2/_ringc_glossary_stats.py` 同口径：
+    heading = 行首（允许前导空白）`#`×1-6 + 空白；计数按出现次数（重叠窗口）；
+    score = body + 0.3×heading；排序 score↓→body↓→heading↓→码点↑；取前 16。
+    """
+    corpus_dir = pathlib.Path(__file__).resolve().parents[2] / "evals" / "corpus"
+    body: Counter = Counter()
+    head: Counter = Counter()
+    for path in sorted(corpus_dir.glob("*.md")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            target = head if re.match(r"^#{1,6}\s", line.lstrip()) else body
+            for seg in re.findall(r"[一-鿿]+", line.lower()):
+                for i in range(len(seg) - 1):
+                    target[seg[i : i + 2]] += 1
+    rows = sorted(
+        set(body) | set(head),
+        key=lambda g: (-(body[g] + 0.3 * head[g]), -body[g], -head[g], g),
+    )
+    return tuple(rows[:16])
 
 
 def _hit(chunk_id: str, text: str, score: float, *, keyword_marked: bool = False) -> dict:
@@ -266,32 +300,96 @@ class TestKeywordOnlyArmMarkerAligned:
         assert docs == [], "与 hybrid 序一致：has_kw 且 ov<0.02 仍死于 γ 闸门"
 
 
-class TestQueryTermTruncationTilt:
-    """机制 3：术语表 12 项截断 + 标题 bigram 占前 8 位。"""
+class TestCorpusGlossaryTermSelection:
+    """机制 3 换锁（环 C，本 PR）：「术语表 12 项截断」→ 语料术语表优先 + 上限 16。
 
-    def test_title_bigrams_fill_the_12_term_budget(self):
-        terms = extract_query_terms("《知识库服务管理办法》第3条规定了什么？")
+    旧锁（``TestQueryTermTruncationTilt``，已换下）钉住的实验现状：
+        extract_query_terms("《知识库服务管理办法》第3条规定了什么？")
+        == [知识..办法（标题 8 项）, 条规, 规定, 定了, 了什]   # 标题 bigram 填满 12 预算
+        extract_query_terms("《知识库服务管理办法》第十二条关于数据删除的规定是什么？")
+        长度 12 且 "数据"/"删除" 均不在——overlap 分子结构性归零（clause_chinese_12 ov=0 实测）。
+    新锁（环 C）：keyword 臂 overlap 口径改用 ``_keyword_arm_terms``——语料术语表
+    ``_CORPUS_GLOSSARY``（FR-1 冻结规则从 backend/evals/corpus/ 统计推得、cap 16；
+    不引用评测集/失败 query）成员优先、其余按查询序补齐、上限 16。
+    ``extract_query_terms`` 默认上限 12 保留（context_compressor / agent core_tools 等
+    调用方行为不变——正向契约）。判定式/阈值（0.02/0.10/0.15 档）均未变。
+    """
+
+    def test_extract_query_terms_default_still_caps_at_12_for_other_callers(self):
+        terms = extract_query_terms("《知识库服务管理办法》第十二条关于数据删除的规定是什么？")
         assert terms == [
-            "知识",
-            "识库",
-            "库服",
-            "服务",
-            "务管",
-            "管理",
-            "理办",
-            "办法",
-            "条规",
-            "规定",
-            "定了",
-            "了什",
+            "知识", "识库", "库服", "服务", "务管", "管理", "理办", "办法",
+            "第十", "十二", "二条", "条关",
+        ]
+        # 旧口径的证据面仍在（共享函数默认行为未动）；keyword 臂不再走这条路径。
+
+    def test_extract_query_terms_limit_none_returns_full_list(self):
+        raw = extract_query_terms(
+            "《知识库服务管理办法》第十二条关于数据删除的规定是什么？", limit=None
+        )
+        assert len(raw) == 21
+        assert "数据" in raw and "据删" in raw and "删除" in raw
+
+    def test_glossary_members_get_priority_slots_in_keyword_arm_terms(self):
+        terms = _keyword_arm_terms("《知识库服务管理办法》第十二条关于数据删除的规定是什么？")
+        assert len(terms) == _KEYWORD_TERM_CAP == 16
+        # 表内成员（按查询序）优先占位；非表内成员按查询序补齐。
+        assert terms[:4] == ["知识", "识库", "服务", "数据"]
+        assert terms == [
+            "知识", "识库", "服务", "数据",
+            "库服", "务管", "管理", "理办", "办法", "第十", "十二", "二条", "条关",
+            "于数", "据删", "删除",
         ]
 
-    def test_content_terms_are_truncated_out_for_title_heavy_query(self):
-        terms = extract_query_terms("《知识库服务管理办法》第十二条关于数据删除的规定是什么？")
-        assert len(terms) == 12
-        # 标题占 8 位后，第 9-12 位是条号 bigram；内容词（数据/删除）在截断外——
-        # 实验里 clause_chinese_12 的 overlap 分子正是因此为 0。
-        assert "数据" not in terms and "删除" not in terms
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "文档解析失败之后应该怎么办？",
+            "值班表多久更新一次？",
+            "第12条对数据删除有什么要求？",
+        ],
+    )
+    def test_short_queries_keep_legacy_term_set(self, query):
+        """≤12 项术语的查询：与旧口径**集合相同**（仅排序不同；overlap 判定与序无关）。"""
+        assert set(_keyword_arm_terms(query)) == set(extract_query_terms(query))
+
+    def test_post_process_end_to_end_admits_glossary_matched_content(self):
+        """端到端：内容含「数据删除」的块经新术语表命中 overlap、通过质量闸门。
+
+        旧口径：12 项术语被《…》标题挤占，该块 overlap=0 → 死 γ 档（has_kw 且 ov<0.02）
+        —— clause_chinese_12 gold 的实测死因；新口径 ov=3/16×1.15=0.2156 → 放行。
+        """
+        retriever = HybridRetriever()
+        hit = {
+            "_id": "doc01_c11",
+            "_score": 0.5,
+            "_source": {
+                "content": "第12条 数据删除申请需经数据负责人审批。",
+                "filename": "01-knowledge-base-policy.md",
+                "document_id": "doc01",
+            },
+            "has_keyword": True,
+            "keyword_rank": 1,
+        }
+        docs = retriever._post_process(
+            "《知识库服务管理办法》第十二条关于数据删除的规定是什么？", [hit], top_k=5
+        )
+        assert [d["chunk_id"] for d in docs] == ["doc01_c11"]
+
+
+class TestCorpusGlossaryDerivation:
+    """环 C 防漂移锁：产品 ``_CORPUS_GLOSSARY`` 必须与 FR-1 规则对语料的重推一致。
+
+    FR-1（2026-10-09 预注册，脚本 ``_orchestrate/round2/_ringc_glossary_stats.py``）：
+    逐行切分（行首 ``#`` 标题行为标题位，其余为正文位）；每行 CJK 段取全部相邻
+    bigram（按出现次数计）；score = body_count + 0.3 × heading_count；排序
+    score↓ → body↓ → heading↓ → 码点↑；取前 16。
+    本测试在测试进程内重推同一规则并逐字比对——产品表只能经显式改规则/改语料/改
+    预注册更新，任何「手工塞词/删词」都会在这里精确变红（见 PR 变异记录）。
+    """
+
+    def test_shipped_glossary_equals_rule_output_on_corpus(self):
+        assert _derived_glossary() == retriever_mod._CORPUS_GLOSSARY
 
 
 class TestRewriteKeepsClauseNumber:
