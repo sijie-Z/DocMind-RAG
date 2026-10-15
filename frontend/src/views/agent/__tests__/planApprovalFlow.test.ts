@@ -213,7 +213,7 @@ describe('AgentView · 计划审批', () => {
     expect(store.planSteps.map((s) => s.id)).toEqual(['s1', 's2'])
 
     store.processEvent({ type: 'done', task_state: 'waiting_plan_approval' } as any)
-    expect(store.pendingPlanApproval).not.toBeNull(), '暂停不是完成，卡片保持'
+    expect(store.pendingPlanApproval, '暂停不是完成，卡片保持').not.toBeNull()
 
     store.processEvent({ type: 'done' } as any)
     expect(store.pendingPlanApproval).toBeNull()
