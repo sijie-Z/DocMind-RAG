@@ -2,10 +2,7 @@
 
 import { ref, computed, onMounted, watch, onUnmounted, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { VueFlow, useVueFlow, MarkerType, type Connection } from '@vue-flow/core'
-import { Background } from '@vue-flow/background'
-import { Controls } from '@vue-flow/controls'
-import { MiniMap } from '@vue-flow/minimap'
+import { useVueFlow, MarkerType, type Connection } from '@vue-flow/core'
 import {
   NIcon, NInput, NButton, NInputNumber, NCard, NCollapse, NCollapseItem,
   NDivider, NDrawer, NDrawerContent, NTimeline, NTimelineItem, NTag, NSpin, NProgress,
@@ -22,31 +19,32 @@ import {
 } from '@vicons/ionicons5'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useLLMConfigStore, type LLMProviderConfig } from '@/stores/llmConfigStore'
-import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflow as execWorkflow, getWorkflows, getNodeDefinitions, type WorkflowNode, type WorkflowEdge, type WorkflowConfig, type NodeDefinition } from '@/api/workflow'
+import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflowStream, getWorkflows, getNodeDefinitions, type WorkflowNode, type WorkflowEdge, type WorkflowConfig, type NodeDefinition } from '@/api/workflow'
 import { agentApi } from '@/api/agent'
 import type { SkillInfo } from '@/types/agent'
 import { useDedupedMessage } from '@/utils/message'
-import InputNode from '../nodes/InputNode.vue'
-import OutputNode from '../nodes/OutputNode.vue'
-import LLMNode from '../nodes/LLMNode.vue'
-import ToolNode from '../nodes/ToolNode.vue'
-import ConditionNode from '../nodes/ConditionNode.vue'
-import MemoryNode from '../nodes/MemoryNode.vue'
-import CodeNode from '../nodes/CodeNode.vue'
-import ApiNode from '../nodes/ApiNode.vue'
-import TransformNode from '../nodes/TransformNode.vue'
+// 画布根组件（VueFlow/Background/Controls/MiniMap）的 import 归 editor.vue
+// ——模板作用域解析要求绑定在编辑器文件本身（W1 修复）；此处仅保留样式副作用
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
 
-const route = useRoute()
-const router = useRouter()
-const message = useDedupedMessage()
-const workflowStore = useWorkflowStore()
-const llmConfigStore = useLLMConfigStore()
-
-const { fitView: doFitView } = useVueFlow()
+// ── setup 级依赖（模块顶层只声明，获取一律发生在 useWorkflowEditor() 内）──
+// A_sweep 实锤（round2 #1）：旧实现在模块顶层调用 useRoute/useRouter/
+// useDedupedMessage/useVueFlow。模块首次求值发生在组件 setup 之外，inject()
+// 拿不到上下文（Vue 警告 inject() can only be used inside setup()）→ message
+// 为 undefined → 任意 toast（如 loadTemplate 的「模板加载成功」）抛 TypeError，
+// 点「快速模板」即整页进 ErrorBoundary。onMounted/onUnmounted/watch 写在这里
+// 同样不会随组件挂载执行（loadNodeDefinitions 等初始化永不发生）。
+// 现在这些调用全部延迟到 useWorkflowEditor()（由 <script setup> 同步调用）内，
+// 保证组件生命周期之外零执行。
+let route!: ReturnType<typeof useRoute>
+let router!: ReturnType<typeof useRouter>
+let message!: ReturnType<typeof useDedupedMessage>
+let workflowStore!: ReturnType<typeof useWorkflowStore>
+let llmConfigStore!: ReturnType<typeof useLLMConfigStore>
+let doFitView!: ReturnType<typeof useVueFlow>['fitView']
 
 // 边的默认配置
 const defaultEdgeOptions = {
@@ -332,17 +330,19 @@ const finalOutput = computed(() => workflowStore.finalOutput)
 const executionStatus = computed(() => {
   if (executionResults.value.length === 0) return 'idle'
   if (executionResults.value.some(r => r.status === 'failed')) return 'failed'
-  if (executionResults.value.every(r => r.status === 'success')) return 'success'
+  // 引擎成功态为 "completed"（ExecutionStatus，workflow_engine.py:37-42）——
+  // 旧代码按 'success' 判定导致成功节点恒判失败（B10 词表漂移）
+  if (executionResults.value.every(r => r.status === 'completed')) return 'success'
   return 'running'
 })
 
 const executionProgress = computed(() => {
   if (executionResults.value.length === 0) return 0
-  const completed = executionResults.value.filter(r => r.status === 'success').length
+  const completed = executionResults.value.filter(r => r.status === 'completed').length
   return Math.round((completed / executionResults.value.length) * 100)
 })
 
-const completedNodes = computed(() => executionResults.value.filter(r => r.status === 'success').length)
+const completedNodes = computed(() => executionResults.value.filter(r => r.status === 'completed').length)
 
 const statusText = computed(() => {
   const map: Record<string, string> = {
@@ -714,17 +714,18 @@ const saveWorkflow = async () => {
     const flowData = workflowStore.getFlowData() as unknown as WorkflowConfig
 
     if (workflowStore.currentWorkflowId) {
+      // B11 契约对齐：后端 WorkflowUpdate/Workflow 模型均无 engine_type 字段
+      // （models/workflow.py、schemas/workflow.py:45-51），旧实现随载荷发送属
+      // 「静默不落库」的假持久化——不再发送
       await updateWorkflow(workflowStore.currentWorkflowId, {
         name: workflowStore.workflowName,
         flow_data: flowData,
-        engine_type: engineType.value,
-      } as any)
+      })
     } else {
       const res = await createWorkflow({
         name: workflowStore.workflowName,
         flow_data: flowData,
-        engine_type: engineType.value,
-      } as any)
+      })
       workflowStore.currentWorkflowId = res.data?.data?.id
       // Update URL without navigation
       if (workflowStore.currentWorkflowId) {
@@ -751,8 +752,7 @@ const autoSave = () => {
       await updateWorkflow(workflowStore.currentWorkflowId, {
         name: workflowStore.workflowName,
         flow_data: flowData,
-        engine_type: engineType.value,
-      } as any)
+      })
       console.log('[auto-save] 工作流已自动保存')
     } catch {
       // Auto-save failures are silent
@@ -760,37 +760,17 @@ const autoSave = () => {
   }, 500)
 }
 
-// 监听画布变化 → 触发自动保存
-watch(
-  () => [workflowStore.nodes, workflowStore.edges, workflowStore.workflowName],
-  () => {
-    if (workflowStore.currentWorkflowId) {
-      autoSave()
-    }
-  },
-  { deep: true }
-)
-
-// 监听选中节点配置变化 → 自动保存到节点 data
-watch(
-  () => selectedNode.value?.data,
-  () => {
-    if (selectedNode.value) {
-      workflowStore.updateNodeData(selectedNode.value.id, { ...selectedNode.value.data })
-      // 同时触发自动保存到后端
-      if (workflowStore.currentWorkflowId) {
-        autoSave()
-      }
-    }
-  },
-  { deep: true }
-)
+// 监听画布变化 → 触发自动保存：注册在 useWorkflowEditor() 内（见文件头部说明，
+// 模块顶层注册不随组件生命周期挂载/释放）
 
 // 调试执行
 const openDebugPanel = () => {
   showDebugPanel.value = true
   workflowStore.resetExecution()
 }
+
+// 在途流式执行的停止函数（组件卸载/重开执行时中止底层 SSE 请求）
+let stopActiveExecution: (() => void) | null = null
 
 const executeWorkflow = async () => {
   if (!testInput.value.trim()) {
@@ -807,46 +787,105 @@ const executeWorkflow = async () => {
     return
   }
 
+  // 流式执行（接线 issue #289 的 executeWorkflowStream；旧入口用非流式
+  // executeWorkflow——整段等待且是 B8/B9 双重漂移的源头）。
+  // 事件序列（workflow.py:239-368）：workflow_start → 引擎实时 node_start /
+  // node_complete / node_error → 失败路径 workflow_error→error+done；
+  // 成功路径端点回放一轮 node_complete（落库结果，含 status 全字段）后发
+  // complete。node_complete 成功路径会出现两帧（实时 + 回放），日志按节点去重。
+  stopActiveExecution?.()
   executing.value = true
   workflowStore.startExecution()
   workflowStore.addExecutionLog('🚀 开始执行工作流...')
 
-  try {
-    const res = await execWorkflow(workflowStore.currentWorkflowId, { text: testInput.value })
-    const result = res.data?.data
-
-    if (result?.node_results) {
-      for (const nodeResult of result.node_results) {
-        executingNodeId.value = nodeResult.node_id
-        const status = nodeResult.status || 'success'
-        const icon = status === 'success' ? '✅' : status === 'failed' ? '❌' : '📊'
-        workflowStore.updateNodeExecution({
-          nodeId: nodeResult.node_id,
-          nodeType: nodeResult.node_type,
-          status,
-          output: nodeResult.output,
-          duration: nodeResult.duration
-        })
-        workflowStore.addExecutionLog(`${icon} [${getNodeLabel(nodeResult.node_type)}] ${status === 'success' ? '完成' : '失败'} (${nodeResult.duration || 0}ms)`)
-      }
+  const loggedNodes = new Set<string>()
+  await new Promise<void>((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      stopActiveExecution = null
+      executing.value = false
+      executingNodeId.value = null
+      resolve()
     }
 
-    if (result?.output) {
-      workflowStore.setExecutionComplete(result.output)
-      workflowStore.addExecutionLog('✅ 工作流执行成功!')
-    } else {
-      workflowStore.setExecutionComplete(result)
-      workflowStore.addExecutionLog('✅ 工作流执行完成')
+    const logNodeOnce = (nodeId: string, line: string) => {
+      if (loggedNodes.has(nodeId)) return
+      loggedNodes.add(nodeId)
+      workflowStore.addExecutionLog(line)
     }
 
-  } catch (error: unknown) {
-    const errMsg = error instanceof Error ? error.message : '未知错误'
-    workflowStore.addExecutionLog(`❌ 执行失败: ${errMsg}`)
-    message.error('执行失败')
-  } finally {
-    executing.value = false
-    executingNodeId.value = null
-  }
+    stopActiveExecution = executeWorkflowStream(
+      workflowStore.currentWorkflowId!,
+      { text: testInput.value },
+      (event, data) => {
+        switch (event) {
+          case 'node_start': {
+            // 实时帧 {node_id, node_type, timestamp}（workflow_engine.py:816-820）
+            executingNodeId.value = (data as { node_id?: string }).node_id ?? null
+            break
+          }
+          case 'node_complete': {
+            // 实时帧 {node_id,node_type,output,duration}（workflow_engine.py:851-857）
+            // 与端点回放帧（NodeResult 全字段，workflow.py:317-319）同键不同完整度
+            const r = data as { node_id: string; node_type?: string; status?: string; output?: unknown; duration?: number | null }
+            const status = (r.status === 'failed' ? 'failed' : 'completed') as 'completed' | 'failed'
+            workflowStore.updateNodeExecution({
+              nodeId: r.node_id,
+              nodeType: r.node_type ?? '',
+              status,
+              output: r.output as Record<string, unknown> | undefined,
+              duration: r.duration ?? undefined
+            })
+            const icon = status === 'failed' ? '❌' : '✅'
+            logNodeOnce(r.node_id, `${icon} [${getNodeLabel(r.node_type ?? '')}] ${status === 'failed' ? '失败' : '完成'} (${r.duration ?? 0}ms)`)
+            break
+          }
+          case 'node_error': {
+            // 引擎实时失败帧 {node_id,error,traceback}（workflow_engine.py:870-875）
+            const r = data as { node_id: string; error?: string }
+            workflowStore.updateNodeExecution({
+              nodeId: r.node_id,
+              nodeType: '',
+              status: 'failed',
+              error: r.error
+            })
+            logNodeOnce(r.node_id, `❌ [${r.node_id}] 失败: ${r.error || '未知错误'}`)
+            break
+          }
+          case 'complete': {
+            // 引擎总体结果 {success,output,node_outputs,context,memory}
+            // （workflow_engine.py:1008-1016）；success=false 时带 error 摘要
+            const engineResult = (data ?? {}) as { success?: boolean; output?: unknown; error?: string }
+            if (engineResult.success === false) {
+              workflowStore.setExecutionComplete(null)
+              workflowStore.addExecutionLog(`❌ 执行失败: ${engineResult.error || '工作流节点执行失败'}`)
+              message.error('执行失败')
+            } else {
+              const finalOut = engineResult.output !== undefined ? engineResult.output : null
+              workflowStore.setExecutionComplete((finalOut ?? null) as Record<string, unknown> | string | null)
+              workflowStore.addExecutionLog('✅ 工作流执行成功!')
+            }
+            finish()
+            break
+          }
+          case 'error': {
+            // 后端错误收口帧（#281：error 后必补 done）——done / onClose 再收尾
+            const d = (data ?? {}) as { error?: string }
+            workflowStore.addExecutionLog(`❌ 执行失败: ${d.error || '未知错误'}`)
+            message.error('执行失败')
+            break
+          }
+          default:
+            // heartbeat / workflow_start / workflow_complete 等：无 UI 语义，忽略
+            break
+        }
+      },
+      // 流关闭统一收尾（正常结束 / abort / 网络异常），防 executing 悬挂
+      finish,
+    )
+  })
 }
 
 // ── 工作流加载列表 ──
@@ -870,7 +909,8 @@ async function loadWorkflowById(id: number) {
     const workflow = res.data?.data
     if (workflow) {
       workflowStore.loadWorkflow(workflow)
-      if (workflow.engine_type) engineType.value = workflow.engine_type as 'dag' | 'langgraph'
+      // B11：详响应无 engine_type（workflow.py:121-132），旧读点恒 undefined——
+      // 移除；选择器保留为本地展示态（见模板 disabled 提示）
       router.replace({ query: { id: String(id) } })
       message.success('工作流加载成功')
     }
@@ -901,26 +941,65 @@ async function loadNodeDefinitions() {
   }
 }
 
-onMounted(async () => {
-  // 并行加载所有初始化数据
-  await Promise.all([
-    loadNodeDefinitions(),
-    llmConfigStore.fetchAll(),
-    loadSkills(),
-  ])
-
-  const id = route.query.id as string
-  if (id) {
-    await loadWorkflowById(parseInt(id))
-  }
-})
-
-onUnmounted(() => {
-  if (autoSaveTimer) clearTimeout(autoSaveTimer)
-})
+// 初始化加载与卸载清理：注册在 useWorkflowEditor() 内（模块顶层注册不会执行）
 
 export function useWorkflowEditor() {
+  // ── setup 级依赖获取（必须在组件 setup 内执行；背景见文件头部说明）──
+  route = useRoute()
+  router = useRouter()
+  message = useDedupedMessage()
+  workflowStore = useWorkflowStore()
+  llmConfigStore = useLLMConfigStore()
+  doFitView = useVueFlow().fitView
 
+  // ── 画布变更 → 自动保存（组件级注册，随组件卸载自动释放）──
+  watch(
+    () => [workflowStore.nodes, workflowStore.edges, workflowStore.workflowName],
+    () => {
+      if (workflowStore.currentWorkflowId) {
+        autoSave()
+      }
+    },
+    { deep: true }
+  )
+
+  // 监听选中节点配置变化 → 自动保存到节点 data
+  watch(
+    () => selectedNode.value?.data,
+    () => {
+      if (selectedNode.value) {
+        workflowStore.updateNodeData(selectedNode.value.id, { ...selectedNode.value.data })
+        // 同时触发自动保存到后端
+        if (workflowStore.currentWorkflowId) {
+          autoSave()
+        }
+      }
+    },
+    { deep: true }
+  )
+
+  // ── 生命周期：初始化加载 + 卸载清理 ──
+  onMounted(async () => {
+    // 并行加载所有初始化数据
+    await Promise.all([
+      loadNodeDefinitions(),
+      // 全局 LLM 配置加载失败不阻断编辑器主流程（与下方 skills 同策略），
+      // 也避免 onMounted 里留下未处理 rejection 触发全局 ErrorBoundary
+      llmConfigStore.fetchAll().catch(() => {}),
+      loadSkills(),
+    ])
+
+    const id = route.query.id as string
+    if (id) {
+      await loadWorkflowById(parseInt(id))
+    }
+  })
+
+  onUnmounted(() => {
+    if (autoSaveTimer) clearTimeout(autoSaveTimer)
+    // 组件卸载时中止在途流式执行（onClose 回调负责收尾 executing 状态）
+    stopActiveExecution?.()
+  })
 
 // Icon mapping for node types
 const NODE_ICON_MAP: Record<string, unknown> = {
@@ -940,10 +1019,6 @@ const NODE_ICON_MAP: Record<string, unknown> = {
 }
 
 const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutline
-
-
-// 节点组件
-
 
   return {
   NODE_ICON_MAP,

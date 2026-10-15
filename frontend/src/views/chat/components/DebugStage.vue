@@ -1,5 +1,22 @@
 <template>
   <div class="space-y-2">
+    <!-- 策略徽标 + RRF 告警：只挂在子查询 stage 上（rag/retriever.py:696 写
+        strategy、:787 写 note，随 stages[sq] 下发）；旧 UI 在顶层读恒空（B37/B38） -->
+    <div v-if="debugData.strategy || debugData.note" class="flex flex-wrap items-center gap-2">
+      <span
+        v-if="debugData.strategy"
+        class="px-1.5 py-0.5 rounded text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+      >
+        {{ debugData.strategy }}
+      </span>
+      <span
+        v-if="debugData.note"
+        class="px-1.5 py-0.5 rounded text-xs bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/40 text-orange-600 dark:text-orange-400"
+      >
+        ⚠️ {{ debugData.note }}
+      </span>
+    </div>
+
     <!-- Final Context (LLM 实际收到的上下文) -->
     <div v-if="debugData.final_context?.length" class="border border-gray-200 dark:border-gray-700 rounded overflow-hidden">
       <button

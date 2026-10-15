@@ -368,6 +368,20 @@ class ToolRegistry:
     def get(self, name: str) -> ToolEntry | None:
         return self._tools.get(name)
 
+    def unregister(self, name: str) -> bool:
+        """移除一个已注册工具（动态工具生命周期管理，目前消费者：MCP 客户端）。
+
+        静态工具（@register_tool 装饰器注册）不依赖本方法；MCP 管理器在
+        server 断开 / tools/list 变更时用它对动态工具做精确下线。
+
+        Returns:
+            True 表示该工具存在且已移除；False 表示本就不存在（幂等）。
+        """
+        removed = self._tools.pop(name, None)
+        if removed is not None:
+            logger.info("Unregistered tool: %s", name)
+        return removed is not None
+
     def list_tools(self, tags: list[str] | None = None) -> list[ToolEntry]:
         if not tags:
             return list(self._tools.values())

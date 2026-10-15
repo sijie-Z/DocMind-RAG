@@ -20,11 +20,11 @@ import { useAgentStore } from '@/stores/agent'
 // 视图 onMounted 会拉初始数据；测试里全部打桩为空。
 vi.mock('@/api/agent', () => ({
   agentApi: {
-    listTools: vi.fn().mockResolvedValue({ data: { success: true, data: [] } }),
-    listSessions: vi.fn().mockResolvedValue({ data: { success: true, data: { sessions: [] } } }),
+    listTools: vi.fn().mockResolvedValue({ data: { success: true, data: [], total: 0 } }),
+    listSessions: vi.fn().mockResolvedValue({ data: { success: true, data: { sessions: [], total: 0, page: 1, page_size: 20 } } }),
     getConfig: vi.fn().mockResolvedValue({ data: { success: true, data: {} } }),
     chat: vi.fn(),
-    getSession: vi.fn().mockResolvedValue({ data: { success: true, data: {} } }),
+    getSession: vi.fn().mockResolvedValue({ data: { success: true, data: null } }),
     deleteSession: vi.fn().mockResolvedValue({}),
     createSession: vi.fn().mockResolvedValue({ data: { success: true, data: null } }),
     updateConfig: vi.fn().mockResolvedValue({}),

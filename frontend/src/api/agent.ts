@@ -223,7 +223,7 @@ export const agentApi = {
     return consumeEventStream(response, onEvent, controller)
   },
 
-  /** List available tools。信封契约同 getTask（拦截器返回完整 AxiosResponse，读 res.data.data）。 */
+  /** List available tools（真载荷 data.data；agent.py:450-472） */
   listTools(): Promise<AxiosResponse<ApiResponse<ToolInfo[]>>> {
     return request.get('/agent/tools')
   },
@@ -235,7 +235,7 @@ export const agentApi = {
 
   // ── Sessions ──
 
-  /** List agent sessions（信封契约同 getTask） */
+  /** List agent sessions（真载荷 data.data.sessions；agent.py:500-556） */
   listSessions(params?: {
     page?: number
     page_size?: number
@@ -243,14 +243,14 @@ export const agentApi = {
     return request.get('/agent/sessions', { params })
   },
 
-  /** Create agent session（信封契约同 getTask） */
+  /** Create agent session（后端只回 {id, title}，真载荷 data.data；agent.py:585-591） */
   createSession(
     title: string,
-  ): Promise<AxiosResponse<ApiResponse<AgentSession>>> {
+  ): Promise<AxiosResponse<ApiResponse<{ id: string; title: string }>>> {
     return request.post('/agent/sessions', { title })
   },
 
-  /** Get session details（信封契约同 getTask） */
+  /** Get session details（真载荷 data.data.config；agent.py:637-647） */
   getSession(sessionId: string): Promise<AxiosResponse<ApiResponse<AgentSessionDetail>>> {
     return request.get(`/agent/sessions/${sessionId}`)
   },
@@ -262,7 +262,7 @@ export const agentApi = {
 
   // ── Configuration ──
 
-  /** Get user agent config（信封契约同 getTask） */
+  /** Get user agent config（真载荷 data.data；agent.py:696-710） */
   getConfig(): Promise<AxiosResponse<ApiResponse<AgentConfig>>> {
     return request.get('/agent/config')
   },

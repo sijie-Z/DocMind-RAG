@@ -11,7 +11,7 @@
 
 <div align="center">
   <h1>🤖 DocMind</h1>
-  <p><strong>Enterprise AI Agent Knowledge Base — PER Architecture · Hybrid RAG · Observable · Self-Improving</strong></p>
+  <p><strong>Enterprise RAG×Agent platform — eval gates in CI, fake-successes cleared, ratchets that only shrink. Quality can't silently regress.</strong></p>
 </div>
 
 ---
@@ -23,7 +23,7 @@ DocMind is a full-stack enterprise AI knowledge base system built around the **P
 Core use cases:
 - 📄 **Document KB** — Upload PDF, Word, Excel, TXT, Markdown, and CSV files. Auto-parse, chunk, embed, and semantic search.
 - 💬 **Intelligent Q&A** — RAG pipeline: keyword + vector hybrid search, reranking, LLM generation with SSE streaming.
-- 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 30 tools for complex multi-step tasks.
+- 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 33 tools for complex multi-step tasks.
 - 🧩 **Workflow Editor** — Visual DAG design & debugging (Vue Flow). Configurable LLM models, prompts, and execution engines.
 - 📊 **Observability** — Prometheus metrics, Langfuse full-trace, 12 SSE event types, RunReport execution summaries.
 - 🔐 **Multi-Tenant + RBAC** — Organization isolation, role-based permissions, JWT authentication.
@@ -34,10 +34,10 @@ Core use cases:
 
 ## Project Status
 
-> Current positioning: **public project / immature product**. Feature completeness is higher than production stability. It is suitable for learning, secondary development, and local demos; harden security and operations before deploying publicly.
+> Positioning: **public project / immature product** — feature completeness runs ahead of stability; suitable for learning, secondary development, and local demos; harden security and operations before deploying publicly. The product can still be maturing while engineering discipline leads: **numbers carry their method, fixes carry evidence, regressions are stopped before merge** (see Quality & Gates).
 
 Current baseline:
-- Backend `pytest tests/`: 911 passed (CI, MySQL + Redis). Frontend: 111 tests passed; `vue-tsc --noEmit` passes.
+- Test baseline (frozen snapshot, 2026-10-15): backend `pytest tests/` **2223 passed / 51 skipped** (0 failed); frontend **861 passed** (128 test files) + `vue-tsc --noEmit` 0 errors. Numbers evolve with CI in real time — CI is the single source of truth; this page keeps a frozen snapshot.
 - Recent fixes: org-scoped semantic cache, conversation ownership checks, org isolation for knowledge search/delete/rebuild, upload path traversal and MinIO deletion fixes, API key masking, web-fetch SSRF protection, workflow ownership isolation, in-process document processing when Kafka is unavailable, local startup scripts, and removal of sensitive artifacts from git tracking.
 - Architecture: document parsing/embedding/ES indexing is unified in a single processor, the chat pipeline moved into `services/chat_service.py`, and a shared document authorization helper was added.
 - Hardening: agent memory endpoints are user-scoped, the `/files` proxy requires auth for non-public objects, pure-ASGI metrics and rate-limit middleware are enabled, and the legacy `ci.yml` was removed.
@@ -46,6 +46,17 @@ Known limitations:
 - Workflow code nodes are disabled by default. Set `ENABLE_WORKFLOW_CODE_NODES=true` to opt in; execution now requires the Docker sandbox.
 - GraphRAG graphs, agent memory, metrics snapshots, and live counters now persist to Redis; live counters are written per instance and aggregated on read for multi-instance deployments.
 - The knowledge, profile, and workflow editor pages have all been split into components/composables; no 1000-line SFC pages remain.
+
+---
+
+## Quality & Gates
+
+"Never silently regress" is not a slogan — it is a set of checkable mechanisms:
+
+- **Eval gate in CI (`Eval Gate`)** — retrieval quality is guarded per PR by a zero-tolerance gate: 28 golden-set items (25 positive / 3 negative) and seven metrics (ClauseHit@1/@3/@5, MRR, EmptyAcc, NearMiss@5, errors) with zero tolerance — any drop turns the build red (fail-closed). `ClauseHit@3/@5` measures 88% (CI baseline 84% as the floor). Updating the baseline is an explicit PR action (rules in `backend/docs/eval-gate-phase1.md`).
+- **Ratchets only shrink** — a backend coverage floor (`--cov-fail-under=42`) plus four frontend baseline ratchets (hardcoded CJK / i18n completeness / naming consistency / translation-key usage). Growth turns them red; shrinkage is allowed.
+- **Silent false-successes cleared (#301)** — a full audit of ~551 exception handlers; all 32 silent false-success paths closed (fail-closed logout, three-state retrieval, honest document status, degraded-identity stats…), each backed by regression tests.
+- **Red-first + mutation verification** — every fix starts with a failing test; after the fix, injected defects must turn exactly the right tests red, proving the tests can actually detect the bug.
 
 ---
 
@@ -60,7 +71,7 @@ Known limitations:
 │  WebSocket Push · Request ID Tracking        │
 ├── AI Agent Core ─────────────────────────────┤
 │  PER Loop (Planner → Executor → Reflector)   │
-│  Tool Registry (30) · RunReport · Reviewer  │
+│  Tool Registry (33) · RunReport · Reviewer  │
 │  Experience Memory · Replay · Pattern Mining │
 ├── RAG Pipeline ──────────────────────────────┤
 │  HybridRetriever (BM25 + Vector + RRF fusion)│
@@ -102,7 +113,7 @@ User instruction
 | Context Engine | `context.py` | Token budget management, message window builder |
 | Config | `config.py` | AgentConfig (model/temperature/max steps/phase toggles) |
 
-**30 Built-In Tools** (`tools/`):
+**33 Built-In Tools** (`tools/`):
 
 | Category | Tool | Description |
 |----------|------|-------------|
@@ -368,7 +379,7 @@ DocMind/
 │   │   │   ├── events.py            #   SSE event types (12 types)
 │   │   │   ├── message.py           #   Agent message bus
 │   │   │   ├── tracing.py           #   Execution trace records (dev-only: eval/offline; not written in production)
-│   │   │   ├── tools/               #   30 tool implementations
+│   │   │   ├── tools/               #   33 tool implementations
 │   │   │   │   ├── web_search.py    #   Web search
 │   │   │   │   ├── code_execution.py #  Python/SQL sandbox
 │   │   │   │   ├── data_analysis.py #   Data analysis
@@ -420,7 +431,7 @@ DocMind/
 │   │   ├── models/                  # ORM models (14 entities)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer
-│   ├── tests/                       # 911 backend test cases (plus 111 frontend)
+│   ├── tests/                       # 2223 backend tests (plus 861 frontend)
 │   ├── benchmark/                   # Benchmark framework
 │   ├── alembic/                     # DB migrations
 │   ├── scripts/                     # Utility scripts

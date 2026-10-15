@@ -1,3 +1,5 @@
+// 说明：当前产品代码无消费者，仅由 __tests__/useDebounce.test.ts 覆盖；
+// 按「测试资产」保留，请勿误删（如需复活，从生产代码 import 后即可）。
 import { ref, watch, onUnmounted } from 'vue'
 import type { Ref } from 'vue'
 

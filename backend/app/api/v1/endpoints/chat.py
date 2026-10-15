@@ -110,6 +110,7 @@ async def clear_conversation_messages(
 @router.get("/conversations", response_model=dict, dependencies=[Depends(get_current_user)])
 async def get_conversations(
     page: int = 1, page_size: int = 20,
+    search: str | None = Query(None, max_length=100, description="按标题模糊过滤"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -123,20 +124,29 @@ async def get_conversations(
         else:
             org_filter = ChatSession.organization_id.is_(None)
 
-        total_query = select(func.count(ChatSession.id)).where(
+        conditions = [
             ChatSession.user_id == current_user.id,
             ChatSession.status != ChatSessionStatus.ENDED,
             org_filter,
-        )
+        ]
+        # B30：前端搜索框一直发送 search 参数（A_sweep CONV-2 实测），端点此前
+        # 未声明该参数、被 FastAPI 静默忽略 → 列表恒全量。对标题做大小写不敏感
+        # LIKE；%/_/\ 转义防止通配注入（escape 字符为反斜杠）。max_length=100 校验。
+        if search and search.strip():
+            pattern = (
+                search.strip()
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            conditions.append(ChatSession.title.ilike(f"%{pattern}%", escape="\\"))
+
+        total_query = select(func.count(ChatSession.id)).where(*conditions)
         total = (await db.execute(total_query)).scalar() or 0
 
         query = (
             select(ChatSession)
-            .where(
-                ChatSession.user_id == current_user.id,
-                ChatSession.status != ChatSessionStatus.ENDED,
-                org_filter,
-            )
+            .where(*conditions)
             .order_by(desc(ChatSession.updated_at))
             .offset(skip)
             .limit(page_size)
@@ -388,6 +398,11 @@ async def get_conversation(
             "data": {
                 "id": session.id, "title": session.title,
                 "messages": formatted_messages,
+                # 文档绑定真值存于 ChatSession.settings（chat_service.bind_docs_to_session
+                # 写 bound_document_ids、get_or_create_session 读回；B35）。此前会话响应
+                # 不含 settings —— 前端 isBoundMode 恒 false，「仅文档模式」标签与解绑
+                # 入口永不出现。此处如实下发（非 dict 时给 {}）。
+                "settings": session.settings if isinstance(session.settings, dict) else {},
                 "created_at": session.created_at.isoformat() if session.created_at else "",
                 "updated_at": session.updated_at.isoformat() if session.updated_at else "",
             },

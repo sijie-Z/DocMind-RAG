@@ -217,8 +217,9 @@ class TestSubQueryMergeDedup:
         other = _post_processed_hit("doc2_c2", "另一片段", "b.md", 0.8)
         responses = iter([[dup, other], [dict(dup)]])
 
-        async def fake_retrieve(query, organization_id, top_k, document_ids=None, debug=False):
+        async def fake_retrieve(query, organization_id, top_k, document_ids=None, debug=False, search_mode=None):
             # issue #292：retrieve 契约扩为 (results, query_vector, debug_info, degraded)
+            # issue #225：retrieve 增加 search_mode 透传参数（本用例恒 None=自动路由）
             return next(responses), [], None, []
 
         async def fake_decompose(query, client, model, max_sq):
