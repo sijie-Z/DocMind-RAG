@@ -853,6 +853,10 @@ async def get_knowledge_graph(
                 })
 
         # Build graph data for visualization
+        # 两遍处理（写链打通后数据一有就现形的漂移修复）：真实实体（带
+        # type/description）必须先于关系目标占位——旧单遍循环里，先被处理的实体
+        # 会把它的关系目标以 UNKNOWN 预插进 nodes，等循环走到目标自己的实体条目
+        # 时又因按名去重被跳过，真实类型/描述永久丢失。
         nodes = []
         edges = []
         node_ids = set()
@@ -869,6 +873,10 @@ async def get_knowledge_graph(
                 "occurrences": ent.get("occurrences", 1),
             })
 
+        for ent in results:
+            entity_name = ent.get("entity", "")
+            if not entity_name:
+                continue
             for rel in ent.get("relationships", []):
                 target_key = rel.get("target", "")
                 # Find target entity name
@@ -878,6 +886,7 @@ async def get_knowledge_graph(
                         target_name = v.get("entity_name", target_key)
                         break
                 if target_name and target_name not in node_ids:
+                    # 仅真实实体之外的目标才落 UNKNOWN 补位
                     node_ids.add(target_name)
                     nodes.append({
                         "id": target_name,
