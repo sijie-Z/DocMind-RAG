@@ -21,7 +21,7 @@ import asyncio
 import os
 import sys
 
-# 确保 backend 在 path 中（与 scripts/check_login.py 同款）
+# 确保 backend 在 path 中（与 scripts 目录其他脚本同款）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import select  # noqa: E402
