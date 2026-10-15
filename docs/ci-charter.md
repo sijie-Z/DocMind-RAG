@@ -1,7 +1,7 @@
 # DocMind CI 章程
 
 > 这份文件定义 CI 的边界：有哪些门禁、各自管什么、什么时候该加、什么时候该删。**改 CI 之前先读它。**
-> 最后更新：2026-10-05（第 4 轮：Dependency Review 门禁 + 本章程）
+> 最后更新：2026-10-09（第 5 轮：#208 第⑤步 Eval Gate 检索评估门禁）
 
 ## 1. CI 的目标
 
@@ -10,11 +10,12 @@
 ## 2. 门禁全景（PR 门禁 + 其它 workflow 的职责）
 
 `ci-fast.yml`（PR → main/develop；push 也触发，develop push 上额外跑 integration，见 §3）：
-- **Backend Tests**（3.11 + 3.12 矩阵）：ruff → bandit(medium+ 阻断) → SQLite 迁移冒烟 → 快速测试集（unit + behavior + 2 组安全回归；仅 3.12 腿带覆盖率门禁）
+- **Backend Tests**（3.11 + 3.12 矩阵）：ruff（app/tests/scripts/**evals**）→ bandit(medium+ 阻断) → SQLite 迁移冒烟 → 快速测试集（unit + behavior + 2 组安全回归；仅 3.12 腿带覆盖率门禁）
 - **Migration (MySQL)**：真实 MySQL 上 alembic upgrade/downgrade/upgrade 往返 + 生产路径 create_all
+- **Eval Gate**（#208 第⑤步）：真实 ES 上跑检索评估门禁——专用评估索引先删后建 + 确定性伪嵌入 + 与入库基线比对（floor/cap，容差 0）；非零退出 = 红。口径与维护纪律见 `backend/docs/eval-gate-phase1.md` §6
 - **Frontend Tests**：eslint → vue-tsc → vitest(+coverage) → build
 - **Workflow Lint**：actionlint 校验 workflow 文件自身
-- **CI Pass**：上述四者的聚合门禁（把并行结果收敛成单一结论）
+- **CI Pass**：上述无条件 jobs 的聚合门禁（把并行结果收敛成单一结论；eval-gate 是无条件 job，直接进汇聚——红点必须有人消费，见 §8 孤儿检查教训）
 
 `ci-hygiene.yml`（仅 PR）：commitlint（只查本 PR 新增提交）、PR labeler、conflict-markers。
 `dependency-review.yml`（仅 PR）：只审查本 PR **新增**依赖的已知漏洞，high+ 阻断；**scope 含 runtime + development**（默认只含 runtime，而本仓库 4/6 个 high 源自 devDependency）。
@@ -24,8 +25,10 @@
 
 ## 3. integration 测什么、什么时候跑
 
-integration 是 `ci-fast.yml` 里的 job：只在 **push 到 develop**、且 backend-tests / migration-mysql 通过后运行（真实 MySQL + Redis，Python 3.12）。
-语义：integration 永远验证「一个已通过 PR 门禁的 develop 提交」；PR 不会触发它。**develop 的绿点包含 integration，PR 的绿点不需要。**
+integration 是 `ci-fast.yml` 里的 job：在 **push 到 develop** 与 **PR → develop** 时运行（issue #176 起 PR 也跑集成用例，避免集成测试改动在合并前从未执行），且需 backend-tests / migration-mysql 通过（真实 MySQL + Redis + ES，Python 3.12）。
+语义：integration 验证「一个已通过快速门禁的 develop 提交」；指向 main 的 PR 不触发它。**develop 的绿点包含 integration，PR 的绿点不需要。**
+
+Eval Gate 的触发面比 integration 宽：**每个 PR / 每次 push 都跑**（无条件、无 needs、与后端测试并行起步，不进关键路径）。理由：它是「拦住任何一次合入」的评估门禁，必须进 CI Pass 才不是孤儿检查（§8 教训）；只跑到 develop 就失去了 PR 阶段的拦截。为控制墙钟，它不等待其它 job、只装 runtime 依赖、跑 <2 分钟。
 
 ## 4. main / develop 的语义
 
@@ -41,7 +44,7 @@ integration 是 `ci-fast.yml` 里的 job：只在 **push 到 develop**、且 bac
 
 ## 6. 时间 / 墙钟预算
 
-硬上限（timeout-minutes，超时 = 失败）：backend 20 / migration 15 / frontend 20 / workflow-lint 5 / integration 30 / docker 30 / codeql 30。
+硬上限（timeout-minutes，超时 = 失败）：backend 20 / migration 15 / eval 15 / frontend 20 / workflow-lint 5 / integration 30 / docker 30 / codeql 30。
 已做的瘦身：integration 只留 3.12 一条腿（省 ~95s/次合并）；docker 构建移出 nightly（曾占 nightly 墙钟 429s/432s）改为路径触发；nightly 从每天改为每周一。
 原则：**快速门禁的墙钟是稀缺资源——加检查前先想清楚它替代谁、以及会不会把发现问题的时刻推得更晚。**
 

@@ -96,3 +96,83 @@ python -m evals run     # 跑全套 → evals/reports/latest.{json,md}
   `_orchestrate/round2/exec_eval208.md`（含 seed/run 原文与报告 JSON/MD）。
 - Phase 2 计划：把 `run` 接入 CI（临时索引 + baseline 对比 + `--fail-on-regression`）、
   逐阶段 trace（rerank 前/后、RRF 权重、条号过滤）最小实验——**只修被实验证明的环**。
+
+## 6. CI 门禁（#208 第⑤步，2026-10-09 起）
+
+> 一句话：`make eval-ci` 每次**从零重建**专用索引、用**确定性伪嵌入**跑全套、
+> 与入库基线 `evals/baselines/ci_baseline.json` 比对，任何指标越界 = 非零退出码 = 红。
+> CI（`.github/workflows/ci-fast.yml` 的 `Eval Gate` job，已接入 `CI Pass` 汇聚）
+> 与本地跑的是**同一条命令**。
+
+### 6.1 为什么需要「固定索引刷新协议」
+
+独立评审（`_orchestrate/round2/review_eval208.md` §6）实测：同一语料、同一代码，
+仅重灌一次 seed，`NearMiss@5` 会在 12.5% ↔ 16.7% 之间摆动（BM25 统计在
+tombstone/merge 物理状态下的差异）；同物理状态内则逐位稳定。因此**不能**拿
+「随便哪个索引状态」跑出的数字当门禁基线。协议（写死在 `seed --recreate` 里）：
+
+1. `recreate_knowledge_index(confirm=True)`——**先删后建**，索引名必须含 `eval`
+   （护栏：防误指生产索引）；重建后断言 `count==0`；
+2. bulk 写入 28 chunks（17+11）→ `indices.refresh` 刷到 visible；
+3. 回读断言：`count(org) == 写入块数` 且 `distinct document_id == 语料文件数(2)`；
+4. 跑分、比对都只发生在这一次重建后的物理状态上（无 tombstone：`docs.deleted=0`）。
+
+### 6.2 两种模式：live（本地工具）与 fake（CI 门禁）
+
+| | live 模式（`--embedding live`，默认） | CI 模式（`--embedding fake`） |
+|---|---|---|
+| 嵌入 | 真实服务（本地 Ollama / API），`VECTOR_DIMENSION` 自定 | `evals/deterministic_embedding.py` 的确定性伪嵌入（`hash-bigram-char-v1`，dim 固定 256，`VECTOR_DIMENSION` 被 CLI 强制覆盖） |
+| 依赖 | ES + 嵌入服务 | 只需 ES 8.11（**无需 Ollama / 无网络**） |
+| 数字用途 | 质量观测、逐阶段实验 | **门禁基线**（`ci_baseline.json`）保护的对象 |
+| 索引 | `docmind_knowledge_eval_v1`，可反复 seed 不重建 | `docmind_knowledge_eval_ci_v1`，每次先删后建 |
+
+伪嵌入不是随机向量：非空白字符的 unigram+bigram 经 sha256 分桶计数 + L2 归一化
+（语义 ≈ 字符 n-gram 余弦相似度——实测 hybrid 查询与其 gold chunk 的 cos 到
+0.34–0.62，向量臂真实参与检索），且**逐位可复现**（算法指纹锁在
+`tests/unit/test_eval_ci_gate.py`）。两条模式的数字**不可混比**：`compare`
+会校验报告的 `embedding_mode`/`top_k`/`dataset_id`/`dataset_version`/`corpus_chunks`
+与基线协议逐键一致，不一致直接红（fail-closed）。
+
+### 6.3 一键与产物
+
+```bash
+make eval-ci            # seed --recreate → run --embedding fake → compare（红=非零退出）
+make eval-ci-baseline   # 有意识地重盖基线（见 6.4）
+```
+
+产物：报告 `backend/evals/reports/ci/latest.{json,md}`（gitignore）；基线
+`backend/evals/baselines/ci_baseline.json`（**入库**）。基线 schema：
+`protocol`（协议记录）+ `metrics`（7 项固定指标：`clause_hit@1/@3/@5`、`mrr`、
+`empty_accuracy` 为 floor；`near_miss@5`、`errors` 为 cap；**容差 = 0**——
+固定协议下相等即通过，任何下跌即红、任何提升都放行）。门禁的失败语义
+（章程 §9/§10）：指标越界 → exit 1；报告/基线缺失、损坏、协议不符 → exit 2；
+两者都是红，绝无「静默放行」。
+
+### 6.4 基线维护纪律（最重要）
+
+- **改基线 = 显式 PR 行为。** 有意变更检索行为（并接受新数字）时：跑
+  `make eval-ci-baseline` 或 `python -m evals compare --update-baseline`，把
+  `ci_baseline.json` 的 diff 放进同一个 PR 供评审核对（stamp 时会打印旧→新逐项对照；
+  报告含 errors 时拒绝盖章）。「红灯 → 直接重盖基线」而不修代码 = 把回归合法化，
+  评审拒收。
+- **回归 ≠ 改基线。** 红灯先看 `compare` 打出的越界行与 `reports/ci/latest.md`
+  的失败明细；是回归就修代码。
+- **物理问题卫生：永远经 `seed --recreate` 重建后再跑/比。** 不要对「反复 seed
+  过的旧索引」跑门禁比对（tombstone 状态会让分数摆动）；本地手跑也与
+  CI 同一命令（`make eval-ci`），数字逐位一致才说明复现成功。
+- 语料 / golden set / 伪嵌入算法 / ES 大版本任一变化都会改变基线语义——都在
+  PR 里显式可见（语料分块数与伪嵌入指纹都有锁测试）。
+- 本地复现 CI 门禁只需要 ES 8.11（无需 Ollama）：
+
+```bash
+docker run -d --name es-eval -p 9200:9200 -e discovery.type=single-node \
+  -e xpack.security.enabled=false -e ES_JAVA_OPTS="-Xms512m -Xmx512m" \
+  docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+export ELASTICSEARCH_HOSTS='["http://localhost:9200"]'
+make eval-ci   # 与 CI 逐位一致；门禁红/绿与 CI 相同
+```
+
+- 基线首次盖章环境（2026-10-09）：WSL2 ES 8.11.0（cjk、1 shard、no replica）+
+  Python 3.12；连续两次 `seed --recreate + run` 报告除 `generated_at`/`elapsed_ms`
+  外**逐字段 bit 级一致**（证据存档在 `_orchestrate/round2/`）。CI（Linux runner +
+  同版本 ES 容器）与本地逐位一致，由本门禁自身的首次运行验证。

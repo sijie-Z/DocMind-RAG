@@ -199,6 +199,11 @@ class SkillManager:
         import re
         keywords = re.findall(r'[一-鿿]{2,}', query)  # Chinese bigrams
         keywords += [w.lower() for w in query.split() if len(w) > 3 and w.isalpha()]
+        # 保序去重止血——纯中文查询同一串被上面两行各记一次触发词
+        # （findall 提整段汉字串 + split 循环 isalpha 再记一遍），冷启动单模式会
+        # 2×0.5=1.0 恰好踩线命中；去重后单串 0.5<1.0（未验证技能不凭一个词命中）。
+        # 只去重，不做分词、不动阈值与其它学习逻辑。
+        keywords = list(dict.fromkeys(keywords))
         keywords = keywords[:5]
 
         # 无触发词的技能永远匹配不上：不制造注定无用的记录（评审 B2 配套）。
