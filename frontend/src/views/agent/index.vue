@@ -150,6 +150,27 @@
                   <span class="run-cancelled-badge">{{ t('hitl.cancelled') }}</span>
                   <span class="run-cancelled-text">{{ evt.content }}</span>
                 </div>
+                <!-- A：运行中转向——发送成功（本地落账）与步边界生效（后端 SSE）
+                     两条留痕，蓝色系与取消的灰、失败的红区分。 -->
+                <div v-else-if="evt.type === 'steer_sent'" class="steer-standalone">
+                  <span class="steer-badge">{{ t('hitl.steerSent') }}</span>
+                  <span class="steer-text">{{ evt.content }}</span>
+                </div>
+                <div
+                  v-else-if="evt.type === 'steer_applied'"
+                  class="steer-standalone steer-applied"
+                >
+                  <span class="steer-badge steer-badge-applied">{{ t('hitl.steerApplied') }}</span>
+                  <span class="steer-text">{{ evt.content }}</span>
+                </div>
+                <!-- B：计划审批留痕（与取消/转向同款徽标族；紫=计划域） -->
+                <div
+                  v-else-if="evt.type === 'plan_approval_required'"
+                  class="plan-standalone"
+                >
+                  <span class="plan-standalone-badge">{{ t('hitl.planTimeline') }}</span>
+                  <span class="plan-standalone-text">{{ evt.content }}</span>
+                </div>
                 <!-- 落库失败告警（issue #301 批 D #22 / B29：后端在「回答已生成、
                      但会话落库失败」时发射 {type:'warning', content}
                      （agent.py:207-212 / :341-347），store 已收（stores/agent.ts
@@ -256,6 +277,16 @@
       />
     </div>
 
+    <!-- B：计划审批卡（同一 dock 家族；计划与工具的审批互斥，不会同屏两张） -->
+    <div v-if="agentStore.pendingPlanApproval" class="approval-dock">
+      <PlanApprovalCard
+        :goal="agentStore.pendingPlanApproval.goal"
+        :steps="agentStore.pendingPlanApproval.steps"
+        :busy="planApprovalBusy"
+        @decide="handlePlanApprovalDecide"
+      />
+    </div>
+
     <!-- 回放时间线（与审批卡同款 dock；URL ?id= 深链直达） -->
     <ReplayTimeline
       v-if="replayOpen"
@@ -269,11 +300,14 @@
     <!-- Input -->
     <AgentInput
       :placeholder="'输入复杂任务，Agent 自动规划执行...'"
-      :disabled="false"
+      :disabled="planApprovalPending"
       :loading="agentStore.isLoading"
       :stopping="stopping"
+      :steering="steerEnabled"
+      :hint-override="planApprovalPending ? t('hitl.planPendingHint') : ''"
       @send="handleSend"
       @stop="handleStop"
+      @steer="handleSteer"
     />
   </div>
 </template>
@@ -291,6 +325,7 @@ import type {
   AgentTaskListItem,
   AgentSession,
   PlanStep,
+  PlanStepEdit,
   ThinkingType,
   ReplayTimeline as ReplayTimelineData,
 } from '@/types/agent'
@@ -306,6 +341,7 @@ import AgentConfigPanel from '@/components/agent/AgentConfigPanel.vue'
 import SessionSelector from '@/components/agent/SessionSelector.vue'
 import AgentInput from '@/components/agent/AgentInput.vue'
 import ApprovalCard from '@/components/agent/ApprovalCard.vue'
+import PlanApprovalCard from '@/components/agent/PlanApprovalCard.vue'
 import ReplayTimeline from '@/components/agent/ReplayTimeline.vue'
 import RecentTaskList from '@/components/agent/RecentTaskList.vue'
 import Markdown from '@/components/common/Markdown.vue'
@@ -324,6 +360,25 @@ let currentChatController: AbortController | null = null
 let stopFallbackTimer: ReturnType<typeof setTimeout> | null = null
 const stopping = ref(false)
 const approvalBusy = ref(false)
+// A：转向提交在途标志（防连点重复提交）
+const steerBusy = ref(false)
+// B：计划审批提交在途标志
+const planApprovalBusy = ref(false)
+
+/** A：转向模式——任务 running（流打开）或 waiting_approval（暂停等应答）时可发指导。
+ *  有 taskId 才接通服务端转向通道（无任务的裸跑没有队列可写）。 */
+const steerEnabled = computed(
+  () =>
+    !!agentStore.taskId &&
+    (agentStore.isLoading || agentStore.taskState === 'waiting_approval'),
+)
+
+/** B（评审 MINOR-B）：等待计划审批时输入区闸门——此时发送新消息会清掉任务指针、
+ *  把暂停中的任务丢成孤儿（后端对该状态 steer 也诚实 409）。这里禁用输入并
+ *  提示先处理计划卡（保持后端 409 语义不变，闸门只在前端体验层）。 */
+const planApprovalPending = computed(
+  () => agentStore.taskState === 'waiting_plan_approval' && !!agentStore.taskId,
+)
 
 const showConfig = ref(false)
 const showPlan = ref(true)
@@ -610,6 +665,97 @@ async function handleApprovalDecide(payload: {
   }
 }
 
+/**
+ * A：运行中转向——把一句指导提交给 running / waiting_approval 的任务。
+ * 不打断当前步骤；后端在下一个步边界消费并注入后续步骤提示词。
+ * 成功：本地乐观落账（"已发送指导"时间线条目），生效留痕由后端
+ * steer_applied 事件（当前流或审批恢复流）承担。失败按诚实文案提示：
+ * 429=缓冲满 / 409=状态不符 / 503=通道不可用 / 网络失败。
+ */
+async function handleSteer(text: string) {
+  const taskId = agentStore.taskId
+  if (!taskId || !text.trim() || steerBusy.value) return
+  steerBusy.value = true
+  try {
+    const res = await agentApi.steerTask(taskId, text)
+    const data = res.data?.data
+    agentStore.addSteerSent(text)
+    if (data?.message) message.success(data.message)
+  } catch (err: unknown) {
+    const resp = (err as {
+      response?: { status?: number; data?: { message?: unknown; detail?: unknown } }
+    })?.response
+    const status = resp?.status
+    const detail = resp?.data?.message ?? resp?.data?.detail
+    if (status === 429) {
+      message.warning(t('hitl.steerFull'))
+    } else if (status && detail) {
+      // 409/503 等：后端 AppError 的诚实文案原样呈现（请求带 X-Silent-Error）
+      message.error(String(detail))
+    } else {
+      message.error(t('hitl.steerFailed'))
+    }
+  } finally {
+    steerBusy.value = false
+  }
+}
+
+/**
+ * B：计划审批应答（approve / edit / reject）→ 消费续跑 SSE（事件同 chat 契约）。
+ * - reject#2（重规划机会用尽）：后端回 JSON 终态 rejected（无流可续）——如实收敛现场；
+ * - 422（非法编辑）/409（现场已变）：按详情提示 + 刷新权威状态。
+ */
+async function handlePlanApprovalDecide(payload: {
+  decision: 'approve' | 'edit' | 'reject'
+  edited_steps?: PlanStepEdit[]
+  note?: string
+}) {
+  const taskId = agentStore.taskId
+  if (!taskId || planApprovalBusy.value) return
+  planApprovalBusy.value = true
+  const controller = new AbortController()
+  currentChatController = controller
+  agentStore.setTaskState('running')
+  agentStore.setLoading(true)
+  // 乐观清卡：续跑若再次暂停（reject#1 重规划后 / 下一版计划），
+  // plan_approval_required 事件会重建；失败则由刷新恢复。
+  agentStore.setPendingPlanApproval(null)
+  try {
+    const outcome = await agentApi.decidePlanApproval(
+      taskId,
+      {
+        decision: payload.decision,
+        edited_steps: payload.edited_steps,
+        note: payload.note,
+      },
+      (event: AgentEvent) => {
+        agentStore.processEvent(event)
+        scrollToBottom()
+      },
+      { signal: controller.signal },
+    )
+    if (!outcome.streamed) {
+      // 终态拒绝：决定已被受理并导致终态——如实告知，不用流装完成。
+      agentStore.setTaskState('rejected')
+      message.info(outcome.message || t('hitl.planRejectedMessage'))
+      await refreshTaskState(taskId)
+    }
+  } catch (err: unknown) {
+    const e = err as { status?: number; detail?: string }
+    if (e?.status === 422) {
+      message.error(e.detail || t('hitl.planEditInvalid'))
+    } else {
+      message.error(t('hitl.planFailed'))
+    }
+    await refreshTaskState(taskId)
+  } finally {
+    planApprovalBusy.value = false
+    currentChatController = null
+    agentStore.setLoading(false)
+    scrollToBottom()
+  }
+}
+
 /** 从权威接口刷新任务现场（审批冲突/提交失败后的恢复路径）。 */
 async function refreshTaskState(taskId: string) {
   try {
@@ -621,15 +767,22 @@ async function refreshTaskState(taskId: string) {
     if (data.state === 'waiting_approval' && data.approval) {
       agentStore.setTaskId(taskId)
       agentStore.setPendingApproval(data.approval)
+    } else if (data.state === 'waiting_plan_approval' && data.plan_approval) {
+      // B：回到计划审批现场
+      agentStore.setTaskId(taskId)
+      agentStore.setPendingPlanApproval(data.plan_approval)
+      agentStore.setPendingApproval(null)
     } else {
       agentStore.setPendingApproval(null)
+      agentStore.setPendingPlanApproval(null)
     }
   } catch {
     // 刷新失败不覆盖已有现场（保持现状，下一次操作再试）
   }
 }
 
-/** 刷新/重连后回到审批现场（消费既有 GET task + 持久化的 last task id）。 */
+/** 刷新/重连后回到审批现场（消费既有 GET task + 持久化的 last task id）。
+ *  HITL 工具审批与 B 计划审批两种现场都恢复。 */
 async function restorePendingApproval() {
   const last = agentStore.loadPersistedTaskId()
   if (!last) return
@@ -642,9 +795,14 @@ async function restorePendingApproval() {
       agentStore.setTaskId(last)
       agentStore.setTaskState('waiting_approval')
       agentStore.setPendingApproval(data.approval)
+    } else if (data?.state === 'waiting_plan_approval' && data.plan_approval) {
+      // B：计划审批现场恢复
+      agentStore.setTaskId(last)
+      agentStore.setTaskState('waiting_plan_approval')
+      agentStore.setPendingPlanApproval(data.plan_approval)
     } else if (
       data &&
-      ['completed', 'cancelled', 'failed', 'abandoned'].includes(data.state)
+      ['completed', 'cancelled', 'failed', 'abandoned', 'rejected'].includes(data.state)
     ) {
       agentStore.setTaskId(null) // 陈旧指针：清掉
     }
@@ -1289,6 +1447,98 @@ async function loadInit() {
   line-height: 18px;
 }
 
+.run-cancelled-text {
+  word-break: break-word;
+  line-height: 18px;
+}
+
+/* A：运行中转向（steering）——蓝色系（"方向"的语言）；已发送=浅蓝描边，
+   已生效=实底徽标加重（生效是方向盘真的转了）。深色下同为低饱和蓝底。 */
+.steer-standalone {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 8px 12px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-left: 3px solid #3b82f6;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #1d4ed8;
+}
+
+.dark .steer-standalone {
+  background: rgba(59, 130, 246, 0.14);
+  color: #93c5fd;
+}
+
+.steer-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.steer-standalone.steer-applied {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.4);
+  border-left-color: #6366f1;
+  color: #4338ca;
+}
+
+.dark .steer-standalone.steer-applied {
+  background: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+}
+
+.steer-badge-applied { background: #6366f1; }
+
+.steer-text {
+  word-break: break-word;
+  line-height: 18px;
+}
+
+/* B：计划审批时间线条目（青紫=计划域；与转向蓝、取消灰、失败红区分）。 */
+.plan-standalone {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 8px 12px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-left: 3px solid #6366f1;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #4338ca;
+}
+
+.dark .plan-standalone {
+  background: rgba(99, 102, 241, 0.14);
+  color: #c7d2fe;
+}
+
+.plan-standalone-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #6366f1;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.plan-standalone-text {
+  word-break: break-word;
+  line-height: 18px;
+}
+
 .run-warning-standalone {
   display: flex;
   align-items: flex-start;
@@ -1315,11 +1565,6 @@ async function loadInit() {
   color: #fff;
   font-size: 10px;
   font-weight: 600;
-  line-height: 18px;
-}
-
-.run-cancelled-text {
-  word-break: break-word;
   line-height: 18px;
 }
 

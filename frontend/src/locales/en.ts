@@ -671,7 +671,34 @@ export default {
   },
   hitl: {
     cancelled: 'Cancelled',
-    stopped: 'Stopped'
+    stopped: 'Stopped',
+    // A: mid-run steering — input area / timeline / error toasts
+    steerSend: 'Send guidance',
+    steerHint: 'Running: Enter sends guidance (the current step is not interrupted; it applies at the next step)',
+    steerSent: 'Guidance sent',
+    steerApplied: 'Guidance applied',
+    steerFull: 'Steering buffer is full — wait for the agent to consume it before sending',
+    steerFailed: 'Failed to send guidance, please try again later',
+    // B: plan approval — card / timeline / toasts
+    planTitle: 'Plan awaiting approval',
+    planGoal: 'Goal',
+    planSteps: 'Steps',
+    planApprove: 'Approve plan',
+    planEditSteps: 'Edit steps',
+    planSaveApprove: 'Save & approve',
+    planCancelEdit: 'Cancel editing',
+    planReject: 'Reject plan',
+    planRejectNotePlaceholder: 'Reason for rejection (used for re-planning; recommended)',
+    planRejectHint: 'Rejecting triggers one re-plan with your reason; a second rejection terminates the task (rejected)',
+    planAddStep: 'Add step',
+    planRemove: 'Remove',
+    planDeps: 'Deps',
+    planSubmitting: 'Submitting…',
+    planTimeline: 'Plan awaiting approval',
+    planRejectedMessage: 'The plan was rejected again (no re-plan attempts left); the task has been terminated',
+    planEditInvalid: 'The edited content is invalid — check step descriptions/dependencies and retry',
+    planFailed: 'Failed to submit the plan decision; task state refreshed',
+    planPendingHint: 'The task is awaiting plan approval — approve / edit / reject the plan above first (or cancel the task)'
   },
   router: {
     welcome: 'Welcome',

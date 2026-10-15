@@ -8,6 +8,8 @@ Endpoints:
     POST /api/v1/agent/tasks/{id}/resume — Resume an interrupted task (SSE, #201)
     POST /api/v1/agent/tasks/{id}/approval — HITL 审批应答 (SSE; approve/deny/改指令)
     POST /api/v1/agent/tasks/{id}/cancel   — HITL 协作式取消 (服务端停止协议)
+    POST /api/v1/agent/tasks/{id}/steer    — 运行中转向（有界队列；步边界注入）
+    POST /api/v1/agent/tasks/{id}/plan-approval — 计划审批（approve/edit/reject）
     GET  /api/v1/agent/tools          — List available tools with status
     GET  /api/v1/agent/skills         — List learned skills
     GET  /api/v1/agent/sessions       — List agent sessions
@@ -27,11 +29,11 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent import checkpoint
+from app.agent import checkpoint, steering
 from app.agent.config import DEFAULT_DISABLED_TOOLS, AgentConfig
 from app.agent.registry import tool_registry
 from app.agent.replay.engine import ReplayEngine
@@ -88,6 +90,13 @@ class AgentChatRequest(BaseModel):
             " / always=所有工具调用需审批"
         ),
     )
+    plan_approval_mode: Literal["never", "always"] | None = Field(
+        None,
+        description=(
+            "B：计划审批模式（覆盖用户已保存配置）：never=planner 出计划即执行（默认）"
+            " / always=每版计划先暂停等人类批准/编辑/拒绝"
+        ),
+    )
 
 
 class AgentConfigUpdate(BaseModel):
@@ -110,6 +119,9 @@ class AgentConfigUpdate(BaseModel):
     approval_timeout_seconds: int | None = Field(
         None, ge=0, le=86400,
         description="审批等待时限（秒）；0=无限等待（默认，绝不伪造超时拒绝）",
+    )
+    plan_approval_mode: Literal["never", "always"] | None = Field(
+        None, description="B：计划审批模式：never（默认）/ always"
     )
 
 
@@ -143,6 +155,8 @@ async def _build_agent_config(body: AgentChatRequest, user_id: int) -> AgentConf
         config.system_prompt_override = body.system_prompt_override
     if body.approval_mode is not None:
         config.approval_mode = body.approval_mode
+    if body.plan_approval_mode is not None:
+        config.plan_approval_mode = body.plan_approval_mode
     # 安全加固：无论请求是否携带 disabled_tools，服务端强制禁用清单都必须合并。
     # 继承存储值时同样重新合并——存储可能来自旧版本或带外写入（不含后来新增的默认
     # 禁用项），原样继承会把 execute_python/execute_sql/mcp_call 在聊天中放开；
@@ -205,7 +219,7 @@ async def agent_chat(
             # HITL：暂停（approval_required）/取消（run_cancelled）不是"完成"——
             # 不落库半成品回答：真完成由 approval/resume 流收尾时补写，
             # 避免同一轮问答落成两条消息。
-            if body.session_id and last_event_type not in ("approval_required", "run_cancelled"):
+            if body.session_id and last_event_type not in ("approval_required", "run_cancelled", "plan_approval_required"):
                 # issue #277（评审 or1268 R2 收账）：会话落库 org 必须与运行读侧
                 # 同一来源（resolved org）——此前传 raw current_user.organization_id，
                 # 凡 org 来自 token_organization_id 回退（或走无组织超管回源）的用户，
@@ -257,6 +271,9 @@ async def agent_chat(
         # 而不是把流结束静默当作完成（诚实的流终结信号）。
         if last_event_type == "approval_required":
             done_data["task_state"] = "waiting_approval"
+        elif last_event_type == "plan_approval_required":
+            # B：计划审批挂起——如实盖章（前端保持计划卡在屏）。
+            done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
         yield f"data: {json.dumps(done_data)}\n\n"
@@ -347,6 +364,11 @@ async def get_agent_task(
 
             data["approval"] = pending
             data["approval_expired"] = _approval.approval_expired(pending)
+    elif task.status == TaskStatus.WAITING_PLAN_APPROVAL:
+        # B：等待计划审批时的现场（刷新/重连回到计划卡的入口）。
+        pending_plan = await checkpoint.get_pending_plan_approval(task_id)
+        if pending_plan is not None:
+            data["plan_approval"] = pending_plan
     return {"success": True, "data": data}
 
 
@@ -447,7 +469,7 @@ async def resume_agent_task(
             # org 与 /chat 同链（issue #277/R2 对齐）：传 resolved org
             # （effective_org_id，含 token 组织回退 / 无组织超管回源），
             # 不传 raw current_user.organization_id——两者对回退用户不相等。
-            if session_id and last_event_type not in ("approval_required", "run_cancelled"):
+            if session_id and last_event_type not in ("approval_required", "run_cancelled", "plan_approval_required"):
                 try:
                     assistant_message_id = await _save_session_interaction(
                         session_id,
@@ -488,6 +510,9 @@ async def resume_agent_task(
         # HITL：同 /chat——再次暂停/取消时如实盖章任务态。
         if last_event_type == "approval_required":
             done_data["task_state"] = "waiting_approval"
+        elif last_event_type == "plan_approval_required":
+            # B：计划审批挂起——如实盖章（前端保持计划卡在屏）。
+            done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
         yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
@@ -583,7 +608,7 @@ async def decide_agent_task_approval(
                     final_answer += event.content
 
             # 会话补写：只在 run 真正完成时（再次暂停/取消不写半成品，同 /chat 口径）。
-            if session_id and last_event_type not in ("approval_required", "run_cancelled"):
+            if session_id and last_event_type not in ("approval_required", "run_cancelled", "plan_approval_required"):
                 try:
                     assistant_message_id = await _save_session_interaction(
                         session_id,
@@ -624,6 +649,194 @@ async def decide_agent_task_approval(
             done_data["message_id"] = assistant_message_id
         if last_event_type == "approval_required":
             done_data["task_state"] = "waiting_approval"
+        elif last_event_type == "plan_approval_required":
+            # B：计划审批挂起——如实盖章（前端保持计划卡在屏）。
+            done_data["task_state"] = "waiting_plan_approval"
+        elif last_event_type == "run_cancelled":
+            done_data["task_state"] = "cancelled"
+        yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+# ── B：计划审批（plan_approval_mode=always 的 HTTP 面）───────────────────────
+
+
+class PlanStepEdit(BaseModel):
+    """编辑后的步骤（白名单字段；与快照 PlanStep 形状对齐的子集）。"""
+
+    id: str = Field(..., min_length=1, max_length=36, description="步骤 id（唯一）")
+    description: str = Field(..., min_length=1, max_length=2000, description="步骤描述")
+    dependencies: list[str] = Field(
+        default_factory=list, max_length=20, description="依赖的步骤 id（必须在列表内）"
+    )
+    tool_hint: str | None = Field(None, max_length=100, description="建议工具名（可空）")
+
+
+class TaskPlanApprovalRequest(BaseModel):
+    """计划审批决定：approve（照计划执行）/ edit（校验后替换步骤再执行）/ reject（带理由重规划一次）。"""
+
+    decision: Literal["approve", "edit", "reject"]
+    edited_steps: list[PlanStepEdit] | None = Field(
+        None, max_length=50, description="edit 必填：整体替换计划的步骤列表（1..50）"
+    )
+    note: str | None = Field(
+        None, max_length=500,
+        description="拒绝理由（透传为重规划反馈）；edit/approve 时忽略",
+    )
+
+    @model_validator(mode="after")
+    def _validate_decision_payload(self):
+        """决策 × 载荷一致性（非法输入由 FastAPI 自然映射 422）。"""
+        if self.decision == "edit":
+            if not self.edited_steps:
+                raise ValueError("edit 决策必须提供 edited_steps（至少 1 个步骤）")
+            ids = [s.id for s in self.edited_steps]
+            if len(set(ids)) != len(ids):
+                raise ValueError("edited_steps 的 id 必须唯一")
+            id_set = set(ids)
+            for s in self.edited_steps:
+                unknown = [d for d in s.dependencies if d not in id_set]
+                if unknown:
+                    raise ValueError(
+                        f"步骤 {s.id} 的 dependencies 引用了不存在的步骤: {unknown}"
+                    )
+                if s.id in s.dependencies:
+                    raise ValueError(f"步骤 {s.id} 不能依赖自身")
+        elif self.edited_steps:
+            raise ValueError("edited_steps 仅在 decision=edit 时可携带")
+        return self
+
+
+@router.post("/tasks/{task_id}/plan-approval")
+async def decide_agent_task_plan_approval(
+    task_id: str,
+    body: TaskPlanApprovalRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """计划审批应答（approve / edit / reject）→ 记账 + 认领 + 续跑。
+
+    语义（app/agent/checkpoint.py 的 apply_plan_approval_decision）：
+    - approve：照计划执行（resume 复用既有链）；
+    - edit：校验步骤 schema（非法输入 422）后整体替换快照计划的步骤再执行；
+    - reject：**带理由重规划一次**（note → planner 反馈）——上限 1 次；
+      **再次拒绝 → 终态 rejected**（last_error 记理由，诚实失败原因），
+      此决定无流可续，返回 JSON（非 SSE）。
+
+    - 200 + SSE：approve/edit/reject#1 的续跑流（事件契约与 /chat 一致；
+      可能再次停在计划审批点：流内再发 plan_approval_required）；
+    - 200 + JSON：reject#2（终态 rejected，data.state="rejected"）；
+    - 403/404/409：与 resume 同纪律；409 细分：TASK_NOT_WAITING_PLAN_APPROVAL
+      （状态不符/无待审批计划）、TASK_NOT_RESUMABLE（已终态）、TASK_BUSY（并发）。
+    """
+    effective_org_id = await require_organization(current_user, db)
+    task, payload, record = await checkpoint.apply_plan_approval_decision(
+        task_id=task_id,
+        user_id=current_user.id,
+        organization_id=effective_org_id,
+        decision=body.decision,
+        edited_steps=(
+            [s.model_dump() for s in body.edited_steps]
+            if body.decision == "edit" and body.edited_steps else None
+        ),
+        note=body.note,
+    )
+    logger.info(
+        "计划审批应答 (task=%s, decision=%s, rejections=%s, by=%s)",
+        log_safe(task_id), record.get("decision"),
+        record.get("rejections"), current_user.id,
+    )
+
+    # 终态拒绝（reject#2）：决定已被受理并导致终态——JSON 回执（无流可续）。
+    if record.get("terminal"):
+        return {
+            "success": True,
+            "data": {
+                "task_id": task_id,
+                "state": task.status.value,
+                "decision": "reject",
+                "rejections": record.get("rejections"),
+                "message": record.get("message"),
+            },
+        }
+
+    session_id = (payload or {}).get("session_id") or None
+    prefix = (payload or {}).get("partial_output") or ""
+    fallback_config = await _fallback_resume_config(current_user.id)
+
+    async def event_stream():
+        final_answer = prefix
+        assistant_message_id = None
+        save_error: str | None = None
+        last_event_type = ""
+        try:
+            async for event in agent_service.resume_chat(
+                task_id,
+                user_id=current_user.id,
+                config=fallback_config,
+                claim=False,  # 已在上方 apply_plan_approval_decision 认领（HTTP 409 在开流前）
+            ):
+                last_event_type = event.type
+                sse_data = event.to_sse_dict()
+                yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
+                if event.type == "chunk":
+                    final_answer += event.content
+
+            # 会话补写：只在 run 真正完成时（再次暂停/取消不写半成品，同 /chat 口径）。
+            if session_id and last_event_type not in (
+                "approval_required", "run_cancelled", "plan_approval_required"
+            ):
+                try:
+                    assistant_message_id = await _save_session_interaction(
+                        session_id,
+                        current_user.id,
+                        task.query,
+                        effective_org_id,
+                        final_answer,
+                    )
+                except Exception as save_exc:
+                    save_error = log_safe(save_exc)
+                    logger.error(
+                        "Failed to persist plan-approved interaction (session=%s user=%s): %s",
+                        session_id,
+                        current_user.id,
+                        save_error,
+                        exc_info=True,
+                    )
+        except Exception as e:
+            # 完整异常/堆栈只进服务端日志；客户端收通用文案（同 /chat、/resume）。
+            logger.error("Agent plan-approval resume error: %s", log_safe(e), exc_info=True)
+            error_data = {"type": "error", "content": "Agent 计划审批续跑出错，请稍后重试"}
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+
+        if save_error is not None:
+            warning_data = {
+                "type": "warning",
+                "content": "回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见",
+            }
+            yield f"data: {json.dumps(warning_data, ensure_ascii=False)}\n\n"
+
+        done_data: dict[str, Any] = {
+            "type": "done", "content": "", "task_id": task_id,
+            "decision": record.get("decision"),
+        }
+        if session_id:
+            done_data["saved"] = save_error is None
+        if assistant_message_id:
+            done_data["message_id"] = assistant_message_id
+        if last_event_type == "approval_required":
+            done_data["task_state"] = "waiting_approval"
+        elif last_event_type == "plan_approval_required":
+            done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
         yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
@@ -647,9 +860,9 @@ async def cancel_agent_task(
 ):
     """协作式取消（服务端停止协议；**诚实边界**：合作式，不是硬杀）。
 
-    - waiting_approval（无活跃流）：直接如实置终态 cancelled（200），并留下
-      取消旗作围栏——并发/迟到的 approval、resume 尝试都会被拒（state=cancelled），
-      任务绝不复活；
+    - waiting_approval / waiting_plan_approval（无活跃流）：直接如实置终态
+      cancelled（200），并留下取消旗作围栏——并发/迟到的 approval、resume 尝试
+      都会被拒（state=cancelled），任务绝不复活；
     - running / pending / waiting_tool / waiting_human（可能有活跃流）：
       置取消旗（202，state=cancel_requested）。活跃 run 在下一个检查点
       （步间 / 工具前 / 阶段间）观察到并收敛：流内发 run_cancelled、任务置
@@ -674,12 +887,16 @@ async def cancel_agent_task(
             f"任务已处于终态 {task.status.value}，无法取消",
             detail={"task_id": task_id, "state": task.status.value},
         )
-    if task.status == TaskStatus.WAITING_APPROVAL:
+    if task.status in (TaskStatus.WAITING_APPROVAL, TaskStatus.WAITING_PLAN_APPROVAL):
         # 无活跃流：DB 态权威收敛 + 取消旗围栏（拦并发应答/恢复的竞态窗口）。
+        waiting_label = (
+            "计划审批等待中" if task.status == TaskStatus.WAITING_PLAN_APPROVAL
+            else "审批等待中"
+        )
         ok = await checkpoint.mark_terminal(
             task_id,
             TaskStatus.CANCELLED,
-            error="用户取消（审批等待中）",
+            error=f"用户取消（{waiting_label}）",
             error_type="user_cancelled",
         )
         if not ok:
@@ -706,8 +923,90 @@ async def cancel_agent_task(
     )
 
 
-# ── Agent Feedback ──────────────────────────────────────────────────────
+# ── 运行中转向（mid-run steering；见 app/agent/steering.py）────────────────────
 
+
+class TaskSteerRequest(BaseModel):
+    message: str = Field(
+        ..., min_length=1, max_length=2000,
+        description="运行中指导：下一个步边界注入后续步骤提示词（不打断当前步骤）",
+    )
+
+    @field_validator("message")
+    @classmethod
+    def _message_not_blank(cls, value: str) -> str:
+        """判词 strip 后不得为空（评审 MINOR-A：纯空格消息曾以空串入队，
+        步边界冒出内容为空的幻影 steer_applied）。422 明确拒绝 + 归一化。"""
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("指导内容不能为空或仅空白")
+        return stripped
+
+
+@router.post("/tasks/{task_id}/steer")
+async def steer_agent_task(
+    task_id: str,
+    body: TaskSteerRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """运行中转向：向 running / waiting_approval 的任务发送一句人工指导。
+
+    语义（app/agent/steering.py 的模块契约）：
+    - 不打断当前步骤；loop 在**下一个步边界**（步骤终态之后）取出，注入后续
+      步骤提示词，并发 SSE ``steer_applied``（含消息摘要）；
+    - waiting_approval（无活跃 run）：消息留在队列，审批恢复的 run 起点并入
+      引导（与"改指令续跑"的 steering 通道合流）；
+    - 缓冲有界（MAX_STEER_QUEUE=5）：满 → 429 如实拒绝（等消费后再发）；
+      终态清缓冲。
+
+    - 200：已入队（data.pending = 当前待消费条数）；
+    - 403/404：与任务状态端点同纪律；
+    - 409：任务不在可转向状态（仅 running / waiting_approval）；
+    - 429：缓冲已满（STEER_BUFFER_FULL）；
+    - 503：协调存储不可达——**绝不**假装已受理（诚实边界同取消旗）。
+    """
+    effective_org_id = await require_organization(current_user, db)
+    task = await checkpoint.load_task(
+        task_id=task_id,
+        user_id=current_user.id,
+        organization_id=effective_org_id,
+    )
+    if task.status not in (TaskStatus.RUNNING, TaskStatus.WAITING_APPROVAL):
+        raise steering.TaskNotSteerableError(
+            f"任务当前状态为 {task.status.value}，不能接收运行中指导"
+            f"（仅 running / waiting_approval）",
+            detail={"task_id": task_id, "state": task.status.value},
+        )
+    pending = await steering.push_steer(task_id, body.message)  # 已由校验器 strip
+    if pending is None:
+        raise ServiceUnavailableError("转向通道暂不可用（协调存储不可达），请稍后重试")
+    if pending < 0:
+        raise steering.SteerBufferFullError(
+            f"转向缓冲已满（上限 {steering.MAX_STEER_QUEUE} 条），"
+            f"请等待 agent 消费后再发送",
+            detail={"task_id": task_id, "pending": steering.MAX_STEER_QUEUE},
+        )
+    if task.status == TaskStatus.WAITING_APPROVAL:
+        note = "任务正在等待审批；指导已入队，将并入审批恢复后的执行"
+    else:
+        note = "指导已入队；将在下一个步边界生效"
+    logger.info(
+        "转向入队 (task=%s, by=%s, pending=%d, state=%s)",
+        log_safe(task_id), current_user.id, pending, task.status.value,
+    )
+    return {
+        "success": True,
+        "data": {
+            "task_id": task_id,
+            "state": "queued",
+            "pending": pending,
+            "message": note,
+        },
+    }
+
+
+# ── Agent Feedback ──────────────────────────────────────────────────────
 class AgentFeedbackRequest(BaseModel):
     message_id: str = Field(..., description="Assistant message ID to rate")
     feedback: int = Field(..., ge=-1, le=1, description="反馈: 1=点赞, 0=取消, -1=点踩")
@@ -1090,6 +1389,8 @@ async def update_config(
         config.system_prompt_override = body.system_prompt_override
     if body.approval_mode is not None:
         config.approval_mode = body.approval_mode
+    if body.plan_approval_mode is not None:
+        config.plan_approval_mode = body.plan_approval_mode
     if body.approval_timeout_seconds is not None:
         config.approval_timeout_seconds = body.approval_timeout_seconds
     if body.disabled_tools is not None:

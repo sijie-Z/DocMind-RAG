@@ -7,6 +7,7 @@ import type {
   AgentSession,
   AgentTaskState,
   PendingApproval,
+  PendingPlanApproval,
   PlanStep,
   ToolInfo,
 } from '@/types/agent'
@@ -52,6 +53,8 @@ export const useAgentStore = defineStore('agent', () => {
   // 'idle' 仅是前端占位；其余与后端 TaskStatus 对齐（'failed' 由错误分支落）
   const taskState = ref<'idle' | AgentTaskState>('idle')
   const pendingApproval = ref<PendingApproval | null>(null)
+  // B：待审批计划（plan_approval_mode=always 的暂停现场）
+  const pendingPlanApproval = ref<PendingPlanApproval | null>(null)
 
   // ── Computed ──
   const toolCount = computed(() => tools.value.length)
@@ -242,6 +245,54 @@ export const useAgentStore = defineStore('agent', () => {
         isThinking.value = false
         break
 
+      // ── A：运行中转向 ──
+      case 'steer_applied':
+        // 指导在步边界被消费（注入后续步骤提示词）：时间线留痕，不改任务态。
+        updateLastAssistant((msg) => {
+          msg.events.push(event)
+        })
+        break
+
+      case 'steer_sent':
+        // 前端本地事件（乐观落账）：发送成功即进时间线，不至于"发出去没影"。
+        updateLastAssistant((msg) => {
+          msg.events.push(event)
+        })
+        break
+
+      // ── B：计划审批 ──
+      case 'plan_approval_required': {
+        // planner 出计划后暂停：任务态 waiting_plan_approval + 弹计划审批卡。
+        taskState.value = 'waiting_plan_approval'
+        pendingPlanApproval.value = {
+          plan_id: event.plan_id || '',
+          goal: event.plan_goal || '',
+          steps: event.plan_steps || [],
+        }
+        isThinking.value = false
+        // 恢复流不回放 plan_step 事件——用事件自足载荷回填 PlanTree，
+        // 让左侧计划树在 resume 场景也能显示待审批计划（无 assistant 消息
+        // 在场时同样生效，故不放进 updateLastAssistant 回调）。
+        if (event.plan_steps && event.plan_steps.length > 0) {
+          const steps: PlanStep[] = event.plan_steps.map((s) => ({
+            id: s.id,
+            description: s.description,
+            dependencies: s.dependencies || [],
+            tool_hint: s.tool_hint ?? null,
+            status: 'pending',
+            retry_count: 0,
+          }))
+          planSteps.value = steps
+          updateLastAssistant((msg) => {
+            msg.planSteps = steps
+          })
+        }
+        updateLastAssistant((msg) => {
+          msg.events.push(event)
+        })
+        break
+      }
+
       case 'done':
         updateLastAssistant((msg) => {
           msg.loading = false
@@ -251,14 +302,19 @@ export const useAgentStore = defineStore('agent', () => {
         })
         // HITL：done 如实盖章任务态（waiting_approval / cancelled 时出现）——
         // 暂停不是完成，卡片保持；取消不是完成，状态收敛到 cancelled。
+        // B：waiting_plan_approval 同款——计划卡保持。
         if (event.task_state === 'waiting_approval') {
           taskState.value = 'waiting_approval'
+        } else if (event.task_state === 'waiting_plan_approval') {
+          taskState.value = 'waiting_plan_approval'
         } else if (event.task_state === 'cancelled') {
           taskState.value = 'cancelled'
           pendingApproval.value = null
+          pendingPlanApproval.value = null
         } else {
           taskState.value = 'completed'
           pendingApproval.value = null
+          pendingPlanApproval.value = null
         }
         isLoading.value = false
         isThinking.value = false
@@ -327,11 +383,24 @@ export const useAgentStore = defineStore('agent', () => {
     pendingApproval.value = p
   }
 
+  /** B：计划审批现场（刷新/重连恢复 + 事件驱动的权威重建）。 */
+  function setPendingPlanApproval(p: PendingPlanApproval | null) {
+    pendingPlanApproval.value = p
+  }
+
+  /** A：转向发送成功后的本地乐观落账（时间线"已发送指导"条目；后端无此事件）。 */
+  function addSteerSent(text: string) {
+    updateLastAssistant((msg) => {
+      msg.events.push({ type: 'steer_sent', content: text } as AgentEvent)
+    })
+  }
+
   /** 新一轮发送前复位任务现场（保留 pendingApproval 由 approval_required 重建）。 */
   function resetTask() {
     setTaskId(null)
     taskState.value = 'running'
     pendingApproval.value = null
+    pendingPlanApproval.value = null
   }
 
   function loadPersistedTaskId(): string | null {
@@ -359,6 +428,7 @@ export const useAgentStore = defineStore('agent', () => {
     taskId,
     taskState,
     pendingApproval,
+    pendingPlanApproval,
     // Computed
     toolCount,
     enabledToolCount,
@@ -377,6 +447,8 @@ export const useAgentStore = defineStore('agent', () => {
     setTaskId,
     setTaskState,
     setPendingApproval,
+    setPendingPlanApproval,
+    addSteerSent,
     resetTask,
     loadPersistedTaskId,
   }

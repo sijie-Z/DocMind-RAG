@@ -532,7 +532,34 @@ export default {
   },
   hitl: {
     cancelled: 'Annulé',
-    stopped: 'Arrêté'
+    stopped: 'Arrêté',
+    // A : pilotage en cours d'exécution — zone de saisie / chronologie / erreurs
+    steerSend: 'Envoyer une consigne',
+    steerHint: "En cours : Entrée envoie une consigne (l'étape en cours n'est pas interrompue, application au prochain jalon)",
+    steerSent: 'Consigne envoyée',
+    steerApplied: 'Consigne appliquée',
+    steerFull: "Le tampon de consignes est plein — attendez que l'agent le consomme avant de renvoyer",
+    steerFailed: "Échec de l'envoi de la consigne, veuillez réessayer plus tard",
+    // B : approbation du plan — carte / chronologie / notifications
+    planTitle: "Plan en attente d'approbation",
+    planGoal: 'Objectif',
+    planSteps: 'Étapes',
+    planApprove: 'Approuver le plan',
+    planEditSteps: 'Modifier les étapes',
+    planSaveApprove: 'Enregistrer et approuver',
+    planCancelEdit: 'Annuler la modification',
+    planReject: 'Rejeter le plan',
+    planRejectNotePlaceholder: 'Motif du rejet (utilisé pour la replanification ; recommandé)',
+    planRejectHint: "Un rejet déclenche une replanification unique avec votre motif ; un second rejet met fin à la tâche (rejected)",
+    planAddStep: 'Ajouter une étape',
+    planRemove: 'Supprimer',
+    planDeps: 'Dépend de',
+    planSubmitting: 'Envoi…',
+    planTimeline: "Plan en attente d'approbation",
+    planRejectedMessage: 'Le plan a de nouveau été rejeté (plus de replanification possible) ; la tâche est terminée',
+    planEditInvalid: 'Le contenu modifié est invalide — vérifiez les descriptions/dépendances puis réessayez',
+    planFailed: "Échec de l'envoi de la décision ; état de la tâche actualisé",
+    planPendingHint: "La tâche attend l'approbation du plan — approuvez / modifiez / rejetez d'abord le plan ci-dessus (ou annulez la tâche)"
   },
   router: {
     welcome: 'Bienvenue',

@@ -3,7 +3,7 @@
     <div class="input-row">
       <textarea
         v-model="inputText"
-        @keydown.enter.exact.prevent="handleSend"
+        @keydown.enter.exact.prevent="handleEnter"
         @keydown.shift.enter="inputText += '\n'"
         :placeholder="placeholder"
         :disabled="disabled"
@@ -11,8 +11,29 @@
         rows="1"
         ref="textareaEl"
       ></textarea>
+      <template v-if="steering">
+        <!-- A：运行中转向（steering）——不打断当前步骤，步边界生效。
+             转向模式出现时（running / waiting_approval）以"发送指导"为主动作；
+             仍在运行中（loading）时保留"停止"。 -->
+        <button
+          class="steer-btn"
+          :disabled="!inputText.trim() || disabled"
+          data-testid="steer-btn"
+          @click="handleSteer"
+        >
+          {{ t('hitl.steerSend') }}
+        </button>
+        <button
+          v-if="loading"
+          class="stop-btn"
+          :disabled="stopping"
+          @click="$emit('stop')"
+        >
+          {{ stopping ? '⏳ 停止中…' : '⏹ 停止' }}
+        </button>
+      </template>
       <button
-        v-if="!loading"
+        v-else-if="!loading"
         class="send-btn"
         :disabled="!inputText.trim() || disabled"
         @click="handleSend"
@@ -29,13 +50,14 @@
       </button>
     </div>
     <div class="input-hint">
-      Enter 发送 · Shift+Enter 换行
+      {{ hintOverride || (steering ? t('hitl.steerHint') : 'Enter 发送 · Shift+Enter 换行') }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   placeholder?: string
@@ -43,13 +65,19 @@ const props = defineProps<{
   loading?: boolean
   /** HITL：服务端取消已受理、等待 run 在检查点收敛（按钮显示"停止中…"）。 */
   stopping?: boolean
+  /** A：运行中转向——loading 时显示"发送指导"按钮，Enter 亦发送指导。 */
+  steering?: boolean
+  /** 覆盖提示行（如 B：等待计划审批时禁用输入并说明原因；空串回退默认提示）。 */
+  hintOverride?: string
 }>()
 
 const emit = defineEmits<{
   send: [text: string]
   stop: []
+  steer: [text: string]
 }>()
 
+const { t } = useI18n()
 const inputText = ref('')
 const textareaEl = ref<HTMLTextAreaElement>()
 
@@ -57,6 +85,22 @@ function handleSend() {
   const text = inputText.value.trim()
   if (!text || props.disabled) return
   emit('send', text)
+  inputText.value = ''
+}
+
+/** Enter：转向模式发指导（running / waiting_approval 皆然）；其余维持"发送"。 */
+function handleEnter() {
+  if (props.steering) {
+    handleSteer()
+    return
+  }
+  handleSend()
+}
+
+function handleSteer() {
+  const text = inputText.value.trim()
+  if (!text || props.disabled) return
+  emit('steer', text)
   inputText.value = ''
 }
 
@@ -118,7 +162,7 @@ defineExpose({ clear: () => { inputText.value = '' } })
   opacity: 0.6;
 }
 
-.send-btn, .stop-btn {
+.send-btn, .stop-btn, .steer-btn {
   padding: 10px 20px;
   border-radius: 12px;
   border: none;
@@ -136,6 +180,18 @@ defineExpose({ clear: () => { inputText.value = '' } })
 
 .send-btn:hover:not(:disabled) { background: #2563eb; }
 .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* A：运行中转向——蓝色系（与"停止"的红形成动作区分），深色下同色仍达标 */
+.steer-btn {
+  background: #6366f1;
+  color: white;
+}
+
+.steer-btn:hover:not(:disabled) { background: #4f46e5; }
+.steer-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.dark .steer-btn { background: #818cf8; }
+.dark .steer-btn:hover:not(:disabled) { background: #6366f1; }
 
 .stop-btn {
   background: #ef4444;

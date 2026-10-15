@@ -688,7 +688,34 @@ export default {
   },
   hitl: {
     cancelled: '已取消',
-    stopped: '已停止'
+    stopped: '已停止',
+    // A：运行中转向（steering）——输入区/时间线/错误提示
+    steerSend: '发送指导',
+    steerHint: '运行中：Enter 发送指导（不打断当前步骤，下一个步边界生效）',
+    steerSent: '已发送指导',
+    steerApplied: '指导已生效',
+    steerFull: '转向缓冲已满：请等待 agent 消费后再发送',
+    steerFailed: '指导发送失败，请稍后重试',
+    // B：计划审批——计划卡/时间线/提示
+    planTitle: '计划待审批',
+    planGoal: '目标',
+    planSteps: '步骤',
+    planApprove: '批准计划',
+    planEditSteps: '编辑步骤',
+    planSaveApprove: '保存并批准',
+    planCancelEdit: '取消编辑',
+    planReject: '拒绝计划',
+    planRejectNotePlaceholder: '拒绝理由（用于重新规划，建议填写）',
+    planRejectHint: '拒绝后将带理由重新规划一次；再次拒绝任务将终止（rejected）',
+    planAddStep: '添加步骤',
+    planRemove: '删除',
+    planDeps: '依赖',
+    planSubmitting: '提交中…',
+    planTimeline: '计划待审批',
+    planRejectedMessage: '计划已被再次拒绝（重规划机会已用尽），任务已终止',
+    planEditInvalid: '编辑内容不合法，请检查步骤（描述/依赖）后重试',
+    planFailed: '计划审批提交失败，已刷新任务状态',
+    planPendingHint: '任务正在等待计划审批：请先在上方计划卡中批准 / 编辑 / 拒绝（或取消任务）'
   },
   router: {
     welcome: '欢迎',
