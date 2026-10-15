@@ -23,6 +23,7 @@ DocMind 的检索不是"调用一次向量检索",而是**根据问题复杂度�
   │
   ▼
 [RetrievalStrategy] → keyword_only / hybrid / hybrid_hyde
+  │                     （REST search 可显式 search_mode=hybrid/vector/keyword 覆盖本步,见 4.4）
   │
   ▼
         ┌─ keyword_only ──► [BM25] ─────────────────────────────┐
@@ -132,6 +133,25 @@ INTENT_FIELD_BOOSTS = {
 - **改写**:生成 3-5 个 sub-queries,每个都检索
 - **延迟**:**500ms-2s**
 - **成本**:embedding 多次 + HyDE 一次 + LLM 改写
+
+### 4.4 显式覆盖(REST `search_mode`,issue #225)
+
+`POST /api/v1/knowledge/search` 的 `search_mode` 字段**真的生效**——非空时跳过
+复杂度分类,直接强制本次请求的检索臂组合:
+
+| search_mode | 内部策略 | 说明 |
+|---|---|---|
+| `hybrid` | `hybrid` | 两臂 + RRF(不含 HyDE;HyDE 留给自动路由的复杂档) |
+| `vector` | `vector_only` | 仅向量臂(自动路由不会产生此策略,只由显式模式触发) |
+| `keyword` | `keyword_only` | 仅关键词臂 |
+
+- 缺省(null)= 自动路由,行为与不传该字段完全一致;
+- 覆盖只作用于**该请求**:不改任何进程级状态,其它链路(chat/agent/workflow)不传
+  该字段时逐条不变;
+- 缓存按模式分域:精确缓存键带 `mode=` 段(显式模式与自动路由互不可见),显式模式
+  跳过语义缓存读/写(显式模式承诺「本次确实按所选臂执行」);
+- 响应同名字段回显**实际生效**的模式:显式值原样,自动路由回显顶层查询路由档位
+  对应的公开模式名(simple→`keyword`,medium/complex→`hybrid`)。
 
 **面试话术**:
 

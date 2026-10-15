@@ -80,11 +80,17 @@
                   ? 'bg-gradient-to-br from-slate-600 to-blue-600 text-white rounded-tr-md'
                   : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-tl-md border border-gray-100 dark:border-gray-700'"
               >
-                <Markdown v-if="message.messageType === 'assistant'" :content="message.content" />
-                <span
-                  v-if="message.messageType === 'assistant' && isLoading && index === messages.length - 1"
-                  class="inline-block w-0.5 h-4 bg-slate-500 dark:bg-slate-400 ml-0.5 align-middle animate-blink"
-                />
+                <!-- P1 双渲染修复（UI 验收 round2 待办#1）：原结构中光标 span 的
+                     v-if 劫持了 v-else 的配对——loading 结束后 v-else=true，
+                     assistant 消息的 Markdown 与纯文本副本同时渲染。
+                     重排为「assistant → Markdown(+光标) | 否则 → 纯文本」严格互斥。 -->
+                <template v-if="message.messageType === 'assistant'">
+                  <Markdown :content="message.content" />
+                  <span
+                    v-if="isLoading && index === messages.length - 1"
+                    class="inline-block w-0.5 h-4 bg-slate-500 dark:bg-slate-400 ml-0.5 align-middle animate-blink"
+                  />
+                </template>
                 <div v-else class="whitespace-pre-wrap">{{ message.content }}</div>
 
                 <!-- Agent 模式（useAgent）PER 事件（issue #289）：run_report 折叠块
@@ -140,10 +146,10 @@
                           {{ source.filename || t('chat.unknownDoc') }}
                         </div>
                         <div class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed line-clamp-6">
-                          {{ source.snippet || source.text || t('chat.noPreview') }}
+                          {{ source.content || t('chat.noPreview') }}
                         </div>
-                        <div v-if="source.score" class="mt-1.5 text-[10px] text-gray-400">
-                          {{ t('chat.relevanceScore', { score: (source.score * 100).toFixed(0) }) }}
+                        <div v-if="source.relevanceScore" class="mt-1.5 text-[10px] text-gray-400">
+                          {{ t('chat.relevanceScore', { score: (source.relevanceScore * 100).toFixed(0) }) }}
                         </div>
                       </div>
                     </n-popover>

@@ -51,16 +51,17 @@ interface UserInfo {
   id: number
   username: string
   email: string
-  nickname?: string
-  full_name?: string
-  phone?: string
-  avatar?: string
-  avatar_url?: string
+  nickname?: string | null
+  full_name?: string | null
+  phone?: string | null
+  avatar?: string | null
+  avatar_url?: string | null
   role: 'admin' | 'user'
-  status: 'active' | 'inactive'
-  bio?: string
-  created_at: string
-  last_login_at?: string
+  // /users/me 无 status 字段（真身 is_active）；保留可选以免牵连既有初始化
+  status?: 'active' | 'inactive'
+  bio?: string | null
+  created_at: string | null
+  last_login_at?: string | null
 }
 
 interface UserStats {
@@ -458,7 +459,10 @@ const onProviderChange = (pid: string) => {
 
 const loadProviders = async () => {
   try {
-    const res = await fetch('/api/v1/settings/providers', { headers: { Authorization: `Bearer ${localStorage.getItem('docmind_token')}` }})
+    // 正确路径带 /user 前缀（router.py:51 prefix="/user" + user_settings.py:117
+    // @router.get("/settings/providers")）——旧写法 /api/v1/settings/providers
+    // 恒 404（A_sweep PROF-1 实测：缺前缀 404 / 正确路径 200）
+    const res = await fetch('/api/v1/user/settings/providers', { headers: { Authorization: `Bearer ${localStorage.getItem('docmind_token')}` }})
     if (!res.ok) return
     const data = await res.json()
     providers.value = data.providers || []
@@ -740,7 +744,7 @@ const loadUserProfile = async () => {
       userInfo.value = {
         ...data,
         nickname: data.nickname || data.full_name || data.username,
-        avatar: data.avatar_url
+        avatar: data.avatar_url ?? undefined
       }
       
       // 设置 API Key

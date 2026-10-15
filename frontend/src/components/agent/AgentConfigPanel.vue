@@ -148,7 +148,9 @@ function toggleTool(name: string) {
 onMounted(async () => {
   try {
     const res = await agentApi.listTools()
-    const tools = res.data
+    // 真载荷 data.data（{success, data:[...tools], total}，agent.py:458-472）；
+    // 旧读 res.data（整信封）Array.isArray 恒 false → 工具开关列表恒空（B27）
+    const tools = res.data?.data
     if (Array.isArray(tools)) availableTools.value = tools
   } catch {
     // ignore

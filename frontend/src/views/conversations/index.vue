@@ -80,7 +80,9 @@
               <div class="flex-1 min-w-0">
                 <h3 class="font-medium text-gray-800 dark:text-gray-100 truncate">{{ item.title || '未命名对话' }}</h3>
                 <div class="flex items-center gap-3 text-xs text-gray-400 mt-1">
-                  <span>{{ formatDate(item.updated_at) }}</span>
+                  <!-- updated_at 可为空串（chat.py:191 `isoformat() if s.updated_at else ""`），
+                       dayjs('') → "Invalid Date"——空串/非法值不渲染时间（B31） -->
+                  <span v-if="formatDate(item.updated_at)">{{ formatDate(item.updated_at) }}</span>
                   <span>{{ item.message_count || 0 }} 条消息</span>
                 </div>
               </div>
@@ -203,8 +205,11 @@ const deleteItem = (item: Conversation) => {
   })
 }
 
+// updated_at 后端可为空串（chat.py:191）；空串/非法值返回 ''，由模板 v-if 决定不渲染
 const formatDate = (date: string) => {
-  return dayjs(date).format('MM-DD HH:mm')
+  if (!date) return ''
+  const d = dayjs(date)
+  return d.isValid() ? d.format('MM-DD HH:mm') : ''
 }
 
 onMounted(() => {

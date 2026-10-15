@@ -260,6 +260,10 @@ class DocumentProcessor:
             notify()
             await self._mark_success(document_id, chunks_data, job_id)
             notify()
+            # 图谱抽取（GraphRAG 写链 a8a3d155）：放在 INDEXED 落库之后、独立
+            # try/except 内（见 _extract_graph_safely）——抽取失败/LLM 不可用
+            # 不得把已成功的文档拖成 FAILED。
+            await self._extract_graph_safely(doc, chunks_data)
             logger.info(
                 "[DOC_PROC] done document_id=%s chunks=%d", document_id, len(chunks_data)
             )
@@ -417,6 +421,43 @@ class DocumentProcessor:
                     job.error_message = error
                     job.finished_at = datetime.now()
                     await session.commit()
+
+    async def _extract_graph_safely(self, doc: Document, chunks_data: list[dict]) -> None:
+        """索引成功后的知识图谱抽取（非阻塞契约）。
+
+        - 任何失败（LLM 不可用/超时/Redis 异常）只记 warning，文档保持 INDEXED，
+          绝不进入 ``_mark_failed``；
+        - llm_client 取自 RAG 管线（与 document_parser 摘要生成同口径）；
+        - 幂等由 ``graph_rag_service.ingest_document`` 的文档标记保证——
+          同一文档重复处理不会二次叠加图谱数据。
+        """
+        try:
+            from app.services.graph_rag_service import graph_rag_service
+            from app.services.rag_service import rag_service
+
+            text = "\n".join((c.get("chunk_text") or "") for c in chunks_data)
+            result = await graph_rag_service.ingest_document(
+                document_id=doc.id,
+                organization_id=doc.organization_id,
+                text=text,
+                llm_client=rag_service.openai_client,
+            )
+            if result["status"] == "skipped":
+                logger.info(
+                    "[DOC_PROC] graph skipped (already ingested) document_id=%s", doc.id
+                )
+            else:
+                logger.info(
+                    "[DOC_PROC] graph extracted document_id=%s entities=%d",
+                    doc.id,
+                    result["entities"],
+                )
+        except Exception as e:
+            logger.warning(
+                "[DOC_PROC] graph extraction failed (non-blocking) document_id=%s: %s",
+                doc.id,
+                e,
+            )
 
     async def _get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Batch embedding with stable length; empty text becomes a placeholder."""

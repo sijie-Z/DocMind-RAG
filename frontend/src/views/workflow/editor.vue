@@ -175,7 +175,16 @@
       <div class="h-14 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
         <div class="flex items-center gap-3">
           <n-input v-model:value="workflowStore.workflowName" placeholder="工作流名称" style="width: 200px" />
-          <n-select v-model:value="engineType" :options="engineTypeOptions" style="width: 140px" size="small" />
+          <!-- 引擎选择器暂未接入：后端无 engine_type 字段（B11），禁用并明示，
+               不再做出「可保存」的暗示 -->
+          <n-tooltip trigger="hover">
+            <template #trigger>
+              <span class="inline-block">
+                <n-select v-model:value="engineType" :options="engineTypeOptions" style="width: 140px" size="small" disabled />
+              </span>
+            </template>
+            引擎选择暂未接入后端（无对应字段），当前统一走默认引擎
+          </n-tooltip>
           <n-button type="primary" @click="saveWorkflow" :loading="saving">
             <template #icon><n-icon><SaveOutline /></n-icon></template>
             保存
@@ -731,11 +740,11 @@
                   <div class="flex items-center justify-between w-full pr-4">
                     <span class="flex items-center gap-2">
                       <n-spin v-if="result.status === 'running'" size="small" />
-                      <n-icon v-else-if="result.status === 'success'" class="text-green-500"><CheckmarkCircleOutline /></n-icon>
+                      <n-icon v-else-if="result.status === 'completed'" class="text-green-500"><CheckmarkCircleOutline /></n-icon>
                       <n-icon v-else-if="result.status === 'failed'" class="text-red-500"><CloseCircleOutline /></n-icon>
                       <span class="text-sm">{{ getNodeLabel(result.nodeType) }}</span>
                     </span>
-                    <n-tag v-if="result.duration" size="small" :type="result.status === 'success' ? 'success' : result.status === 'failed' ? 'error' : 'info'">
+                    <n-tag v-if="result.duration" size="small" :type="result.status === 'completed' ? 'success' : result.status === 'failed' ? 'error' : 'info'">
                       {{ result.duration }}ms
                     </n-tag>
                   </div>
@@ -877,6 +886,16 @@
 
 <script setup lang="ts">
 import { useWorkflowEditor } from './composables/useWorkflowEditor'
+// 画布根组件（4 个）——必须在本文件 import 注册：
+// 此前 VueFlow/Background/Controls/MiniMap 只存在于 useWorkflowEditor.ts 的
+// 死引用里（未 return、editor.vue 解构不到），模板解析失败 → 整块画布渲染为
+// 未解析的原生壳元素（<vueflow>/<background>/…），`.vue-flow__node` 恒 0
+// （浏览器复验 W1 实锤；同「九节点」一族，被此前整页崩溃掩盖）。
+// 模板 <VueFlow> 的 v-model/事件/插槽全部依赖此处绑定，勿再移走。
+import { VueFlow } from '@vue-flow/core'
+import { Background } from '@vue-flow/background'
+import { Controls } from '@vue-flow/controls'
+import { MiniMap } from '@vue-flow/minimap'
 import {
   SaveOutline, PlayOutline, TrashOutline, ExpandOutline, SettingsOutline,
   AppsOutline, LocateOutline, CheckmarkCircleOutline, CloseCircleOutline,
@@ -885,6 +904,20 @@ import {
   CodeSlashOutline, GlobeOutline, SyncOutline, RocketOutline, FlashOutline,
   FolderOpenOutline, AddOutline, CloseOutline
 } from '@vicons/ionicons5'
+// VueFlow 自定义节点组件（9 个）——必须在本文件 import 注册：
+// 此前这 9 个组件只以「未使用 import」的形态躺在 useWorkflowEditor.ts 里，
+// 无人注册 → Vue 警告 Failed to resolve component: InputNode/OutputNode/...、
+// 画布节点渲染为空壳（C_polish §2.1「九节点 import 断裂」；A_sweep 同警告实锤）。
+// 模板 <template #node-xxx> 的作用域组件解析依赖本文件的 script 绑定，勿再移走。
+import InputNode from './nodes/InputNode.vue'
+import OutputNode from './nodes/OutputNode.vue'
+import LLMNode from './nodes/LLMNode.vue'
+import ToolNode from './nodes/ToolNode.vue'
+import ConditionNode from './nodes/ConditionNode.vue'
+import MemoryNode from './nodes/MemoryNode.vue'
+import CodeNode from './nodes/CodeNode.vue'
+import ApiNode from './nodes/ApiNode.vue'
+import TransformNode from './nodes/TransformNode.vue'
 
 const {
   NODE_ICON_MAP,

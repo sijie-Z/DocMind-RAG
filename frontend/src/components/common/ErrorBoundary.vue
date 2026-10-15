@@ -228,8 +228,8 @@ const handleGoHome = () => {
   font-family: 'Cascadia Code', 'Fira Code', monospace;
 }
 
-/* 暗色模式 */
-@media (prefers-color-scheme: dark) {
+/* 暗色模式（跟随全站 .dark class 机制，与媒体查询解耦） */
+html.dark {
   .error-page {
     background: #0f172a;
   }

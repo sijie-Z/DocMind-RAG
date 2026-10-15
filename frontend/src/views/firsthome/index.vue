@@ -33,7 +33,7 @@
           <span class="hero-title-accent">都能对话</span>
         </h1>
         <p class="hero-desc">
-          上传文档，用自然语言提问。AI Agent 自动检索、推理、引用来源 — 不只是搜索，而是理解。
+          功能人人会写；让功能不悄悄变坏才是工程。零容差评测门禁进 CI、32 条静默假成功清零、棘轮只缩不涨。
         </p>
         <div class="hero-actions">
           <button @click="goToRegister" class="btn-primary">
@@ -46,18 +46,18 @@
         </div>
         <div class="hero-stats">
           <div class="stat-item">
-            <span class="stat-value">99.7%</span>
-            <span class="stat-label">检索准确率</span>
+            <span class="stat-value">88%</span>
+            <span class="stat-label">ClauseHit@3/@5（实测）</span>
           </div>
           <div class="stat-divider"></div>
           <div class="stat-item">
-            <span class="stat-value">&lt;1.2s</span>
-            <span class="stat-label">平均响应</span>
+            <span class="stat-value">28</span>
+            <span class="stat-label">检索评测用例 · golden set</span>
           </div>
           <div class="stat-divider"></div>
           <div class="stat-item">
-            <span class="stat-value">50+</span>
-            <span class="stat-label">支持文档格式</span>
+            <span class="stat-value">4</span>
+            <span class="stat-label">zh / en / ja / fr</span>
           </div>
         </div>
       </div>
@@ -111,16 +111,17 @@
               <span></span><span></span><span></span>
             </div>
             <span class="terminal-title">Agent Terminal</span>
+            <span class="terminal-demo">演示数据</span>
           </div>
           <div class="terminal-body">
             <div class="terminal-line query">❯ 2025年Q3的销售数据中，哪个产品线增长最快？</div>
             <div class="terminal-line think">⟳ 正在调用 search_knowledge_base...</div>
-            <div class="terminal-line result">✓ 检索到 5 份销售报表 (相似度: 0.94)</div>
+            <div class="terminal-line result">✓ 检索到 5 份销售报表</div>
             <div class="terminal-line think">⟳ 正在调用 analyze_document...</div>
             <div class="terminal-line think">⟳ 正在调用 compare_data...</div>
             <div class="terminal-line answer">
               <span class="answer-label">▸ 答案</span>
-              <span>企业云服务产品线增长最快，Q3 环比增长 34.2%，主要驱动来自金融行业客户的私有化部署需求。<br><br><span class="source-ref">[1] Q3销售报表.xlsx · [2] 行业分析-金融.pdf</span></span>
+              <span>企业云服务产品线增长最快，主要驱动来自金融行业客户的私有化部署需求。<br><br><span class="source-ref">[1] Q3销售报表.xlsx · [2] 行业分析-金融.pdf</span></span>
             </div>
           </div>
         </div>
@@ -169,7 +170,7 @@ const LayersIcon = { render: () => h('svg', { width: 24, height: 24, viewBox: '0
 const CodeIcon = { render: () => h('svg', { width: 24, height: 24, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [h('polyline', { points: '16 18 22 12 16 6' }), h('polyline', { points: '8 6 2 12 8 18' })]) }
 
 const steps = [
-  { icon: UploadIcon, title: '上传文档', desc: '支持 PDF、Word、Excel、PPT、Markdown 等 50+ 格式，拖拽上传。' },
+  { icon: UploadIcon, title: '上传文档', desc: '支持 PDF、Word、Excel、Markdown、CSV 等常见格式，拖拽上传。' },
   { icon: SearchIcon, title: '智能索引', desc: '文档自动解析分块，向量化存入 Elasticsearch，秒级检索。' },
   { icon: BrainIcon, title: 'AI 问答', desc: '自然语言提问，Agent 多步推理，返回带来源引用的精准答案。' },
 ]
@@ -591,6 +592,15 @@ const features = [
   font-size: 11px;
   color: #64748b;
   font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.terminal-demo {
+  margin-left: auto;
+  font-size: 11px;
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 999px;
+  padding: 2px 10px;
+  letter-spacing: 0.5px;
 }
 .terminal-body {
   padding: 20px 22px;

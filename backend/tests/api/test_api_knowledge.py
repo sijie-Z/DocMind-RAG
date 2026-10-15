@@ -373,6 +373,61 @@ class TestKnowledgeSearch:
             app.dependency_overrides.pop(get_current_user, None)
 
 
+class TestKnowledgeSearchModeContract:
+    """issue #225：search_mode 真正生效（送达 service）+ 回显一致 + 非法值 422。"""
+
+    @staticmethod
+    def _post_search(client: TestClient, payload: dict):
+        from app.main import app
+        mock_user = _make_mock_user(is_superuser=True)
+        override_func, _mock_db = _override_get_db()
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+        try:
+            with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
+                mock_ks.search_knowledge = AsyncMock(return_value=[])
+                r = client.post(
+                    "/api/v1/knowledge/search",
+                    json=payload,
+                    headers={"Authorization": "Bearer test_token"},
+                )
+            return r, mock_ks
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_forced_mode_reaches_service_and_echoes(self, client: TestClient):
+        """显式 search_mode 必须传到 service（修前被链路丢弃），且回显同一值。"""
+        r, mock_ks = self._post_search(
+            client, {"query": "annual report", "organization_id": 1, "search_mode": "keyword"}
+        )
+        assert r.status_code == 200
+        assert mock_ks.search_knowledge.await_args.kwargs["search_mode"] == "keyword"
+        assert r.json()["search_mode"] == "keyword"
+
+    def test_omitted_mode_runs_auto_and_echoes_effective_mode(self, client: TestClient):
+        """缺省 → 自动路由（service 收到 None）；回显 = 实际生效档位，不再恒为 'hybrid'。"""
+        r, mock_ks = self._post_search(client, {"query": "报销流程", "organization_id": 1})
+        assert r.status_code == 200
+        assert mock_ks.search_knowledge.await_args.kwargs["search_mode"] is None
+        # simple → keyword_only：回显公开模式名 keyword（修前恒回显 hybrid，与生效语义不符）
+        assert r.json()["search_mode"] == "keyword"
+
+        r2, mock_ks2 = self._post_search(client, {"query": "如何提交报销申请？", "organization_id": 1})
+        assert mock_ks2.search_knowledge.await_args.kwargs["search_mode"] is None
+        assert r2.json()["search_mode"] == "hybrid"  # medium → hybrid
+
+    def test_invalid_mode_value_is_422(self, client: TestClient):
+        """非法值（含前端旧字段值 'semantic'、大写 'VECTOR'）→ 422，不静默降级。"""
+        for bad in ("semantic", "fuzzy", "VECTOR"):
+            r, _ = self._post_search(client, {"query": "x", "organization_id": 1, "search_mode": bad})
+            assert r.status_code == 422, f"search_mode={bad!r} 必须 422"
+
+
 class TestKnowledgeSuggestions:
     def test_get_suggestions(self, client: TestClient):
         """GET /knowledge/suggestions 应返回建议列表。"""
@@ -498,3 +553,70 @@ class TestKnowledgeRebuild:
         """未认证重建请求应返回 401/403。"""
         r = client.post("/api/v1/knowledge/rebuild/doc-1")
         assert r.status_code in (401, 403)
+
+
+class TestKnowledgeGraphNodeAttribution:
+    """GET /knowledge/graph —— 真实实体的 type/description 不得被关系目标占位吞掉。
+
+    背景（a8a3d155 写链打通后数据一有就现形）：旧实现的单遍循环里，先被处理的
+    实体先把它的关系目标以 UNKNOWN 占位插入 nodes；等循环走到那个目标自己的
+    实体条目时，又因按名去重被 continue 跳过——真实类型/描述永久丢失（实测
+    56 实体中 13 个被吞）。修复：两遍处理，真实实体先占位，目标解析只补空位。
+    变异点：还原单遍循环 → 本用例红（数据层 type 变成 UNKNOWN）。
+    """
+
+    def test_entity_type_survives_relation_target_prebinding(self, client: TestClient):
+        from app.main import app
+        from app.services.auth_service import auth_service
+        from app.services.graph_rag_service import graph_rag_service
+
+        org = 5
+        graph = graph_rag_service._graph_for(org)
+        graph.clear()
+        hub_key = graph_rag_service._normalize_entity("Hub")
+        layer_key = graph_rag_service._normalize_entity("数据层")
+        graph[hub_key].update({
+            "entity_name": "Hub",
+            "entity_type": "PRODUCT",
+            "description": "中枢实体",
+            "occurrences": 1,
+        })
+        graph[hub_key]["relationships"].append({"target": layer_key, "relation": "PART_OF"})
+        graph[layer_key].update({
+            "entity_name": "数据层",
+            "entity_type": "CONCEPT",
+            "description": "存储层描述",
+            "occurrences": 1,
+        })
+
+        mock_user = _make_mock_user(is_superuser=True)
+        mock_user.organization_id = org
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_current_user] = _override_user
+        app.dependency_overrides[auth_service.get_current_user] = _override_user
+
+        try:
+            r = client.get(
+                "/api/v1/knowledge/graph",
+                headers={"Authorization": "Bearer test_token"},
+            )
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(auth_service.get_current_user, None)
+            graph.clear()
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        nodes = {n["id"]: n for n in body["nodes"]}
+        assert nodes["数据层"]["type"] == "CONCEPT", (
+            f"真实实体类型被关系目标占位吞掉: {nodes}"
+        )
+        assert nodes["数据层"]["description"] == "存储层描述"
+        assert nodes["Hub"]["type"] == "PRODUCT"
+        assert any(
+            e["source"] == "Hub" and e["target"] == "数据层" and e["relation"] == "PART_OF"
+            for e in body["edges"]
+        ), "边不得因修复丢失"

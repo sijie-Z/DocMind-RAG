@@ -2,36 +2,52 @@ import request from '@/utils/request'
 import type { AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
 
+/**
+ * 用户列表项 —— 与后端 GET /users/ 的实际返回逐字对齐
+ * （backend/app/api/v1/endpoints/users.py:784-790）。
+ * 注意：列表接口返回裸扁平结构 {total, skip, limit, users}（无 success/data 信封），
+ * 且没有 nickname/status/phone/updated_at 字段（status 的真身是布尔 is_active）。
+ */
 export interface User {
   id: number
   username: string
   email: string
-  nickname: string
-  full_name?: string
-  phone?: string
-  avatar?: string
-  avatar_url?: string
+  full_name: string | null
+  organization_id: number | null
   role: 'admin' | 'user'
-  status: 'active' | 'inactive'
-  organization_ids: number[]
-  organizations?: Array<{ id: number; name: string; color: string }>
-  last_login_at?: string
-  created_at: string
-  updated_at: string
-  remark?: string
+  is_active: boolean
+  created_at: string | null
+  last_login_at: string | null
 }
 
 export interface UserListResponse {
-  data: User[]
   total: number
-  page: number
-  page_size: number
+  skip: number
+  limit: number
+  users: User[]
 }
 
-export interface UserProfileResponse extends User {
-  bio?: string
-  preferences?: Record<string, unknown>
-  api_key?: string
+/**
+ * GET /users/me 的真实形状（users.py:429-446）：含 nickname/avatar_url/bio/
+ * api_key/preferences，无 status（真身 is_active 布尔）；与列表 item 形状不同，
+ * 不继承列表的 User。
+ */
+export interface UserProfileResponse {
+  id: number
+  username: string
+  email: string
+  full_name: string | null
+  nickname: string | null
+  phone: string | null
+  avatar_url: string | null
+  bio: string | null
+  organization_id: number | null
+  role: 'admin' | 'user'
+  is_active: boolean
+  created_at: string | null
+  last_login_at: string | null
+  preferences?: Record<string, unknown> | null
+  api_key?: string | null
 }
 
 export interface AuditLogEntry {
@@ -46,13 +62,15 @@ export interface AuditLogEntry {
   created_at: string
 }
 
+/**
+ * 用户列表。后端端点仅声明 skip/limit 两个查询参数
+ * （users.py:755-761），不存在的 page/page_size/search 会被 FastAPI 静默忽略
+ * —— 不发送装样子的假参数；服务端搜索当前不可用（见 users 视图内注释）。
+ */
 export const getUsers = async (params?: {
-  page?: number
-  page_size?: number
-  search?: string
-  role?: string
-  status?: string
-}): Promise<AxiosResponse<ApiResponse<UserListResponse>>> => {
+  skip?: number
+  limit?: number
+}): Promise<AxiosResponse<UserListResponse>> => {
   return request.get('/users/', { params })
 }
 

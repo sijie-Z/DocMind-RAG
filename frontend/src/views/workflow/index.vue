@@ -82,23 +82,25 @@
             :key="item.id"
             class="group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500 hover:shadow-lg transition-all overflow-hidden"
           >
-            <!-- 节点预览 -->
-            <div class="h-24 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center gap-2 overflow-hidden px-4">
-              <template v-if="item.flow_data?.nodes?.length">
-                <div
-                  v-for="node in item.flow_data.nodes.slice(0, 5)"
-                  :key="node.id"
-                  class="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
-                  :class="getNodePreviewClass(node.type)"
-                >
-                  <n-icon size="18"><component :is="getNodeIcon(node.type)" /></n-icon>
-                </div>
-                <div v-if="item.flow_data.nodes.length > 5" class="text-gray-400 text-sm">
-                  +{{ item.flow_data.nodes.length - 5 }}
-                </div>
-              </template>
-              <div v-else class="text-gray-400 text-sm">空白工作流</div>
-            </div>
+              <!-- 节点预览：列表响应不含 flow_data（workflow.py:57-72，B7），
+                   无从推导节点构成 → 不渲染任何节点/空态断言（旧文案「空白工作流」
+                   对非空工作流是谎报），只保留中性占位图标 -->
+              <div class="h-24 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center gap-2 overflow-hidden px-4">
+                <template v-if="item.flow_data?.nodes?.length">
+                  <div
+                    v-for="node in item.flow_data.nodes.slice(0, 5)"
+                    :key="node.id"
+                    class="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
+                    :class="getNodePreviewClass(node.type)"
+                  >
+                    <n-icon size="18"><component :is="getNodeIcon(node.type)" /></n-icon>
+                  </div>
+                  <div v-if="item.flow_data.nodes.length > 5" class="text-gray-400 text-sm">
+                    +{{ item.flow_data.nodes.length - 5 }}
+                  </div>
+                </template>
+                <n-icon v-else size="28" class="text-gray-300 dark:text-gray-600"><AppsOutline /></n-icon>
+              </div>
 
             <!-- 内容 -->
             <div class="p-4">
@@ -161,7 +163,7 @@ import {
   HardwareChipOutline, ChatbubbleEllipsesOutline, VolumeHighOutline, EnterOutline, ExitOutline,
   CompassOutline, AppsOutline
 } from '@vicons/ionicons5'
-import { getWorkflows, deleteWorkflow as deleteWorkflowApi, createWorkflow, type WorkflowConfig } from '@/api/workflow'
+import { getWorkflows, getWorkflow, deleteWorkflow as deleteWorkflowApi, createWorkflow, type WorkflowConfig } from '@/api/workflow'
 import dayjs from 'dayjs'
 
 interface WorkflowItem {
@@ -238,10 +240,19 @@ const deleteWorkflow = async (id: number) => {
 
 const duplicateWorkflow = async (item: WorkflowItem) => {
   try {
+    // 列表响应只有 6 键、不含 flow_data（workflow.py:57-72，B7）——复制必须走
+    // 详情接口取真配置，否则副本恒为空壳（旧实现直接传 item.flow_data === undefined，
+    // 静默丢数据）
+    const res = await getWorkflow(item.id)
+    const detail = res.data?.data as WorkflowItem | undefined
+    if (!detail) {
+      message.error('复制失败')
+      return
+    }
     await createWorkflow({
       name: `${item.name} (副本)`,
       description: item.description,
-      flow_data: item.flow_data!
+      flow_data: detail.flow_data
     })
     message.success('复制成功')
     loadWorkflows()
