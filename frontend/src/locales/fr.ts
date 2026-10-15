@@ -44,6 +44,7 @@ export default {
     confirmPassword: 'Confirmer le mot de passe',
     preferences: 'Préférences',
     language: 'Langue',
+    languageBeta: 'Bêta — certains contenus s’affichent en anglais',
     theme: 'Thème',
     apiKey: 'Gestion des clés API',
     apiKeyDesc: 'Utilisées pour appeler les interfaces API. Gardez-les secrètes.',

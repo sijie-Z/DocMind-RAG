@@ -87,6 +87,12 @@
                   @click="switchLanguage(lang.value)"
                 >
                   {{ lang.label }}
+                  <n-tooltip v-if="lang.beta" trigger="hover" :delay="200" :content-style="{ maxWidth: '260px', width: 'max-content' }">
+                    <template #trigger>
+                      <n-tag size="tiny" :bordered="false" round type="warning" class="ml-1">Beta</n-tag>
+                    </template>
+                    {{ t('profile.languageBeta') }}
+                  </n-tooltip>
                 </n-button>
               </div>
             </n-popover>
@@ -269,6 +275,7 @@ import { formatDate } from '@/utils/format'
 import type { MenuOption, DropdownOption } from 'naive-ui'
 import { NMenu, NIcon, NInput, NButton, NBadge, NPopover, NList, NListItem, NDropdown, NAvatar } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
+import { LANGUAGES, isLanguageCode, type LanguageCode } from '@/utils/languages'
 import {
   ChatbubbleEllipsesOutline,
   TimeOutline,
@@ -308,17 +315,12 @@ const userStore = useUserStore()
 const searchValue = ref('')
 const mobileMenuOpen = ref(false)
 
-// Language options
-const languageOptions = [
-  { label: '简体中文', value: 'zh' },
-  { label: 'English', value: 'en' },
-  { label: '日本語', value: 'ja' },
-  { label: 'Français', value: 'fr' },
-]
+// Language options：单一事实源 utils/languages.ts（beta 字段驱动徽标展示）
+const languageOptions = LANGUAGES
 
 const currentLang = computed(() => locale.value)
 
-const switchLanguage = (lang: string) => {
+const switchLanguage = (lang: LanguageCode) => {
   locale.value = lang
   localStorage.setItem('language', lang)
   userStore.updateSettings({ language: lang })
@@ -422,9 +424,9 @@ onMounted(async () => {
       if (theme && ['light', 'dark', 'auto'].includes(theme)) {
         appStore.setTheme(theme as 'light' | 'dark' | 'auto')
       }
-      // Apply language from settings
+      // Apply language from settings（守卫：非法语码不注入 locale）
       const lang = userStore.settings.language
-      if (lang) {
+      if (isLanguageCode(lang)) {
         locale.value = lang
         localStorage.setItem('language', lang)
       }

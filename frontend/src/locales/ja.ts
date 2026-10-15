@@ -44,6 +44,7 @@ export default {
     confirmPassword: 'パスワード確認',
     preferences: '基本設定',
     language: '言語設定',
+    languageBeta: 'ベータ版 — 一部のコンテンツは英語で表示されます',
     theme: 'テーマ設定',
     apiKey: 'APIキー管理',
     apiKeyDesc: 'API呼び出しに使用するキーです。大切に保管してください。',

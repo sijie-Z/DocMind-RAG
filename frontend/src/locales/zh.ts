@@ -48,6 +48,7 @@ export default {
     confirmPassword: '确认密码',
     preferences: '偏好设置',
     language: '语言设置',
+    languageBeta: 'Beta，部分内容显示英文',
     theme: '主题设置',
     themeSettingDesc: '选择界面主题风格',
     languageSettingDesc: '选择界面显示语言',
