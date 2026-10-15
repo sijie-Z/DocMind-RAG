@@ -10,6 +10,7 @@ import DOMPurify from 'dompurify'
 import mdKatex from '@vscode/markdown-it-katex'
 import 'highlight.js/styles/github-dark.css'
 import 'katex/dist/katex.min.css'
+import i18n from '@/locales'
 
 interface Props {
   content: string
@@ -61,6 +62,8 @@ const renderedContent = computed(() => {
 })
 
 // 为代码块添加复制按钮的逻辑
+// （体验第四波：按钮文案改走全局 i18n 单例——动态创建的 DOM 无法注入 useI18n；
+//   按钮在内容变化时重建，语言切换后在下次内容更新时取到新文案）
 const addCopyButtons = () => {
   const blocks = document.querySelectorAll('pre.hljs')
   blocks.forEach((block) => {
@@ -70,15 +73,15 @@ const addCopyButtons = () => {
     const button = document.createElement('button')
     button.className = 'copy-btn'
     button.setAttribute('data-state', 'idle')
-    button.textContent = '复制'
+    button.textContent = i18n.global.t('common.copy')
     button.onclick = () => {
       const code = block.querySelector('code')?.innerText || ''
       navigator.clipboard.writeText(code).then(() => {
         button.setAttribute('data-state', 'copied')
-        button.textContent = '已复制！'
+        button.textContent = i18n.global.t('common.copied')
         setTimeout(() => {
           button.setAttribute('data-state', 'idle')
-          button.textContent = '复制'
+          button.textContent = i18n.global.t('common.copy')
         }, 2000)
       })
     }

@@ -227,7 +227,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # 关闭服务
-    logger.info("派聪明AI知识库系统关闭中...")
+    logger.info("DocMind AI知识库系统关闭中...")
 
     # 先摘 MCP：注销动态工具 + 关闭常驻子进程/会话（内部自兜异常）
     try:

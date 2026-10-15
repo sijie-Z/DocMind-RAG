@@ -87,6 +87,12 @@
                   @click="switchLanguage(lang.value)"
                 >
                   {{ lang.label }}
+                  <n-tooltip v-if="lang.beta" trigger="hover" :delay="200" :content-style="{ maxWidth: '260px', width: 'max-content' }">
+                    <template #trigger>
+                      <n-tag size="tiny" :bordered="false" round type="warning" class="ml-1">Beta</n-tag>
+                    </template>
+                    {{ t('profile.languageBeta') }}
+                  </n-tooltip>
                 </n-button>
               </div>
             </n-popover>
@@ -95,35 +101,42 @@
         </n-tooltip>
       </div>
 
-      <!-- 用户信息 -->
+      <!-- 用户信息（点击弹出用户菜单：个人设置 / 系统帮助 / 关于 / 退出登录） -->
       <div class="p-4 border-t border-gray-200 dark:border-gray-800 overflow-hidden">
-        <div class="flex items-center space-x-3">
-          <n-avatar
-            round
-            :size="32"
-            :src="userInfo?.avatar_url || userInfo?.avatar || '/avatar.png'"
-          >
-            {{ userInfo?.username?.charAt(0).toUpperCase() }}
-          </n-avatar>
-          <div v-if="!appStore.sidebarCollapsed" class="flex-1 min-w-0">
-            <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-              {{ userInfo?.username }}
-            </p>
-            <n-tag
-              v-if="currentOrgId"
-              size="tiny"
+        <n-dropdown
+          trigger="click"
+          placement="top-start"
+          :options="userMenuOptions"
+          @select="handleUserMenuSelect"
+        >
+          <div class="flex items-center space-x-3 cursor-pointer">
+            <n-avatar
               round
-              :bordered="false"
-              type="info"
-              class="mt-0.5"
+              :size="32"
+              :src="userInfo?.avatar_url || userInfo?.avatar || '/avatar.png'"
             >
-              <template #icon>
-                <n-icon size="10"><BusinessOutline /></n-icon>
-              </template>
-              组织 {{ currentOrgId }}
-            </n-tag>
+              {{ userInfo?.username?.charAt(0).toUpperCase() }}
+            </n-avatar>
+            <div v-if="!appStore.sidebarCollapsed" class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                {{ userInfo?.username }}
+              </p>
+              <n-tag
+                v-if="currentOrgId"
+                size="tiny"
+                round
+                :bordered="false"
+                type="info"
+                class="mt-0.5"
+              >
+                <template #icon>
+                  <n-icon size="10"><BusinessOutline /></n-icon>
+                </template>
+                组织 {{ currentOrgId }}
+              </n-tag>
+            </div>
           </div>
-        </div>
+        </n-dropdown>
       </div>
     </div>
     
@@ -226,6 +239,7 @@
           
           <!-- 用户菜单 -->
           <n-dropdown
+            trigger="click"
             :options="userMenuOptions"
             @select="handleUserMenuSelect"
           >
@@ -272,6 +286,7 @@ import { formatDate } from '@/utils/format'
 import type { MenuOption, DropdownOption } from 'naive-ui'
 import { NMenu, NIcon, NInput, NButton, NBadge, NPopover, NList, NListItem, NDropdown, NAvatar } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
+import { LANGUAGES, isLanguageCode, type LanguageCode } from '@/utils/languages'
 import {
   ChatbubbleEllipsesOutline,
   TimeOutline,
@@ -298,6 +313,8 @@ import {
   HardwareChipOutline,
   MenuOutline,
   GlobeOutline,
+  CalendarOutline,
+  ServerOutline,
 } from '@vicons/ionicons5'
 
 const route = useRoute()
@@ -309,17 +326,12 @@ const userStore = useUserStore()
 const searchValue = ref('')
 const mobileMenuOpen = ref(false)
 
-// Language options
-const languageOptions = [
-  { label: '简体中文', value: 'zh' },
-  { label: 'English', value: 'en' },
-  { label: '日本語', value: 'ja' },
-  { label: 'Français', value: 'fr' },
-]
+// Language options：单一事实源 utils/languages.ts（beta 字段驱动徽标展示）
+const languageOptions = LANGUAGES
 
 const currentLang = computed(() => locale.value)
 
-const switchLanguage = (lang: string) => {
+const switchLanguage = (lang: LanguageCode) => {
   locale.value = lang
   localStorage.setItem('language', lang)
   userStore.updateSettings({ language: lang })
@@ -434,9 +446,9 @@ onMounted(async () => {
       if (theme && ['light', 'dark', 'auto'].includes(theme)) {
         appStore.setTheme(theme as 'light' | 'dark' | 'auto')
       }
-      // Apply language from settings
+      // Apply language from settings（守卫：非法语码不注入 locale）
       const lang = userStore.settings.language
-      if (lang) {
+      if (isLanguageCode(lang)) {
         locale.value = lang
         localStorage.setItem('language', lang)
       }
@@ -518,6 +530,12 @@ const menuOptions = computed<MenuOption[]>(() => {
       show: isAdmin
     },
     {
+      label: t('menu.mcpServers'),
+      key: 'McpServers',
+      icon: () => h(NIcon, null, { default: () => h(ServerOutline) }),
+      show: isAdmin
+    },
+    {
       label: t('menu.personalSettings'),
       key: 'Profile',
       icon: () => h(NIcon, null, { default: () => h(PersonOutline) })
@@ -531,6 +549,11 @@ const menuOptions = computed<MenuOption[]>(() => {
       label: t('menu.agent'),
       key: 'Agent',
       icon: () => h(NIcon, null, { default: () => h(HardwareChipOutline) })
+    },
+    {
+      label: t('menu.scheduledTasks'),
+      key: 'ScheduledTasks',
+      icon: () => h(NIcon, null, { default: () => h(CalendarOutline) })
     }
   ]
   return options.filter(item => item.show !== false)

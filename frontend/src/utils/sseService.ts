@@ -14,6 +14,10 @@ const SSE_EVENT_TYPES = [
   'chunk',
   'message',
   'error',
+  // ISS-3：后端 warning 事件（#301 批 D 落库失败可见 / Agent 侧降级提示，载荷
+  // type+content，agent.py 出口经 chat.py 转发）此前不在白名单被静默丢弃 →
+  // 聊天页无任何提示。此处放行后 emit()/post() 两处同源校验随之生效。
+  'warning',
   'retry',
   'thinking',
   'tool_call',

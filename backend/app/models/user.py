@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 用户模型
+DocMind AI知识库系统 - 用户模型
 """
 
 from datetime import datetime
