@@ -457,6 +457,30 @@ async def test_dedup_keeps_existing_patterns_and_strengthened_match_intact():
     assert mgr.match("帮我分析销售数据") is fresh, "强化后 1×1.0 ≥ 1.0 命中（设计路径不回归）"
 
 
+@pytest.mark.asyncio
+async def test_dedup_keeps_first_occurrence_order_before_cap5():
+    """次序锁定（评审补强）：从 >5 候选（含重复）中**先保序去重、
+    后截 5**——重复不得占帽位，首现序不得漂移。
+
+    变异点：① 去重挪到截 5 之后（`keywords[:5]` 再 `dict.fromkeys`）→ 重复占掉
+    帽位、只剩 4 个唯一词 → 红；② `dict.fromkeys` 换 `set` → 顺序漂移 → 红。
+    """
+    from app.agent.skills import SkillManager
+
+    mgr = SkillManager()
+    steps = [{"tool_hint": "t1", "description": "a"}, {"tool_hint": "t2", "description": "b"}]
+    # 提取器原始序列：[汉字串, 汉字串, alpha, bravo, charlie, delta, echo, foxtrot]
+    # （findall 汉字串 1 条 + split 循环含汉字串再记 1 次与 6 个英文词）
+    query = "汇总季度财务报告 alpha bravo charlie delta echo foxtrot"
+
+    skill = await mgr.learn_from_plan_success(query, steps)
+
+    assert skill is not None
+    assert skill.trigger_patterns == [
+        "汇总季度财务报告", "alpha", "bravo", "charlie", "delta",
+    ], "先去重后截 5 且保首现序：重复不得占帽位（否则只剩 4 唯一词）、顺序不得漂移"
+
+
 class _FakeMemory:
     def __init__(self):
         self.results: dict = {}
