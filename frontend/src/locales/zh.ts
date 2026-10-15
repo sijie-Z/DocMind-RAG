@@ -10,28 +10,14 @@ export default {
     copyFailed: '复制失败',
     close: '关闭',
     edit: '编辑',
-    add: '添加',
-    search: '搜索',
-    loading: '加载中...',
     success: '操作成功',
     error: '操作失败',
     failed: '操作失败',
     noData: '暂无数据',
-    required: '必填项',
     saveSuccess: '保存成功',
     deleteSuccess: '删除成功',
-    logout: '退出登录',
-    logoutConfirm: '确认退出登录吗？',
-    backToHome: '返回首页',
-    back: '返回上页',
-    contactSupport: '联系支持',
     refresh: '刷新',
     actions: '操作',
-    view: '查看',
-    viewDetail: '查看详情',
-    rebuildIndex: '重建索引',
-    rebuildIndexSuccess: '重建索引任务已提交',
-    rebuildIndexFailed: '重建索引失败'
   },
   profile: {
     basicInfo: '基本信息',
@@ -45,35 +31,25 @@ export default {
     bio: '个人简介',
     defaultBio: '这个人很懒，什么都没有留下...',
     stats: {
-      title: '数据统计',
       conversations: '对话数量',
       messages: '消息总数',
       files: '文件上传',
       knowledge: '知识库'
     },
-    accountSettings: '账号设置',
     accountSecurity: '账号安全',
     changePassword: '修改密码',
-    loginPassword: '登录密码',
-    passwordDesc: '定期修改密码可以保护您的账号安全',
     currentPassword: '当前密码',
     newPassword: '新密码',
     confirmPassword: '确认密码',
     preferences: '偏好设置',
     language: '语言设置',
     theme: '主题设置',
-    themeLight: '浅色',
-    themeDark: '深色',
-    themeAuto: '跟随系统',
     themeSettingDesc: '选择界面主题风格',
     languageSettingDesc: '选择界面显示语言',
-    notifications: '通知设置',
-    notificationDesc: '接收系统通知和消息提醒',
     apiKey: 'API Key 管理',
     apiKeyDesc: '用于调用 API 接口的密钥，请妥善保管',
     apiKeyWarning: '注意：API Key 等同于您的账号密码，请勿泄露给他人。',
     noApiKey: '暂无 API Key',
-    manage: '管理',
     revokeKey: '撤销 Key',
     generateKey: '生成 Key',
     regenerateKey: '重新生成',
@@ -86,8 +62,6 @@ export default {
     apiKeyGenerated: 'API Key 生成成功',
     apiKeyRevoked: 'API Key 已撤销',
     apiKeyGenerateFailed: '生成失败',
-    updateSuccess: '更新成功',
-    loadUserError: '用户信息加载异常：数据为空',
     validation: {
       nicknameLength: '昵称长度需在 2-50 个字符之间',
       phoneInvalid: '请输入有效的手机号',
@@ -105,8 +79,6 @@ export default {
     upload: {
       success: '头像上传成功',
       failed: '头像上传失败',
-      imageOnly: '只能上传图片文件',
-      sizeLimit: '图片大小不能超过 5MB'
     },
     storage: '存储使用',
     realData: '实时数据',
@@ -119,8 +91,6 @@ export default {
     sessionRevoked: '设备已下线',
     revokeFailed: '下线失败',
     apiKeyRevokeFailed: '撤销 API Key 失败',
-    realTime: '实时',
-    estimated: '估算'
   },
   users: {
     title: '用户管理',
@@ -143,7 +113,6 @@ export default {
     searchPlaceholder: '搜索组织...',
     create: '新建组织',
     edit: '编辑组织',
-    refresh: '刷新',
     deleteConfirm: '确认删除该组织吗？此操作不可恢复。',
     name: '组织名称',
     namePlaceholder: '请输入组织名称',
@@ -158,18 +127,13 @@ export default {
     dragHint: '拖拽节点可调整层级及排序',
     searchTree: '快速查找...',
     detailList: '组织列表',
-    root: '顶级组织',
-    isPrivate: '私有组织',
     stats: {
       total: '总组织数',
-      root: '一级组织',
-      levels: '层级深度'
     },
     validation: {
       nameRequired: '请输入组织名称',
       nameLength: '组织名称长度需在 2-50 个字符之间',
       colorRequired: '请选择标识颜色',
-      parentSelf: '不能将自己设为上级组织'
     },
     level1: '一级部门',
     level2: '二级部门',
@@ -402,7 +366,12 @@ export default {
     batchRetryFailed: '批量重试提交失败，请稍后再试',
     deleteFailed: '删除失败',
     deleteConfirm: '确定要删除此文档吗？文档将从知识库中移除，不可恢复。',
-    batchDeleteConfirm: '确定要删除选中的 {count} 个文档吗？此操作不可恢复。'
+    batchDeleteConfirm: '确定要删除选中的 {count} 个文档吗？此操作不可恢复。',
+    graph: {
+      emptyTitle: '暂无图谱数据',
+      emptyDesc: '上传文档并完成索引后，系统会自动构建知识图谱',
+      loadFailed: '图谱数据加载失败，请稍后重试'
+    }
   },
   prompts: {
     title: '提示词管理',
@@ -455,7 +424,6 @@ export default {
     }
   },
   login: {
-    title: '登录',
     welcomeBack: '欢迎回来',
     loginDesc: '请输入您的账号和密码进行登录',
     createAccount: '创建账号',
@@ -466,12 +434,6 @@ export default {
     emailPlaceholder: '请输入邮箱地址',
     password: '密码',
     passwordPlaceholder: '请输入密码',
-    confirmPassword: '确认密码',
-    confirmPasswordPlaceholder: '请再次输入密码',
-    loginButton: '登录',
-    registerButton: '注册',
-    loggingIn: '登录中...',
-    registering: '注册中...',
     noAccount: '还没有账号？',
     hasAccount: '已有账号？',
     login: '登录',
@@ -480,14 +442,12 @@ export default {
     registerSuccess: '注册成功',
     goToLogin: '去登录',
     goToRegister: '去注册',
-    demoAccount: '演示账号',
     demoDesc: '使用演示账号 (guest / 123456)'
   },
   menu: {
     home: '首页',
     dashboard: '仪表盘',
     chat: '智能对话',
-    chatHelper: '对话助手',
     knowledge: '知识库',
     prompts: '提示词管理',
     search: '语义搜索',
@@ -548,7 +508,10 @@ export default {
     time: '时间',
     user: '用户',
     action: '操作',
-    detail: '详情'
+    detail: '详情',
+    loadFailed: '加载失败',
+    loadFailedDesc: '仪表盘数据加载失败，请重试',
+    retry: '重试'
   },
   monitoring: {
     title: '系统运行监控',
@@ -575,24 +538,16 @@ export default {
     semantic: '语义搜索',
     keyword: '关键词搜索',
     fileType: '文件类型',
-    dateRange: '时间范围',
     fileSize: '文件大小',
-    to: '至',
-    min: '最小',
-    max: '最大',
     clear: '重置',
-    apply: '应用筛选',
     totalFiles: '文件总数',
     results: '找到',
     relevance: '相关度排序',
-    date: '时间排序',
     name: '名称排序',
     relevanceScore: '相关度',
-    matchContent: '匹配内容',
     noResults: '未找到相关结果',
     noResultsDesc: '尝试更换关键词或调整筛选条件',
     fileContent: '文件内容',
-    allTypes: '全部类型',
     searchFailed: '搜索失败'
   },
   conversations: {
@@ -663,5 +618,13 @@ export default {
     metricMessages: '消息总量',
     metricDocuments: '知识文档',
     metricRole: '当前角色'
+  },
+  router: {
+    welcome: '欢迎',
+    login: '登录',
+    register: '注册',
+    knowledgeGraph: '知识图谱',
+    workflowEditor: '工作流编辑器',
+    agentMemory: 'Agent记忆'
   }
 };

@@ -5,21 +5,13 @@ export default {
     confirm: '確認',
     delete: '削除',
     edit: '編集',
-    add: '追加',
-    search: '検索',
-    loading: '読み込み中...',
     success: '成功',
     error: 'エラー',
     failed: '失敗',
     noData: 'データなし',
-    required: '必須項目',
+    refresh: '更新',
     saveSuccess: '保存に成功しました',
     deleteSuccess: '削除に成功しました',
-    logout: 'ログアウト',
-    logoutConfirm: 'ログアウトしてもよろしいですか？',
-    backToHome: 'ホームに戻る',
-    back: '戻る',
-    contactSupport: 'サポートに連絡'
   },
   profile: {
     basicInfo: '基本情報',
@@ -33,33 +25,23 @@ export default {
     bio: '自己紹介',
     defaultBio: 'このユーザーはまだ自己紹介を書いていません...',
     stats: {
-      title: '統計データ',
       conversations: '対話数',
       messages: 'メッセージ総数',
       files: 'ファイル数',
       knowledge: 'ナレッジベース'
     },
-    accountSettings: 'アカウント設定',
     accountSecurity: 'セキュリティ',
     changePassword: 'パスワード変更',
-    loginPassword: 'ログインパスワード',
-    passwordDesc: '定期的なパスワード変更をお勧めします',
     currentPassword: '現在のパスワード',
     newPassword: '新しいパスワード',
     confirmPassword: 'パスワード確認',
     preferences: '基本設定',
     language: '言語設定',
     theme: 'テーマ設定',
-    themeLight: 'ライト',
-    themeDark: 'ダーク',
-    themeAuto: 'システム',
-    notifications: '通知設定',
-    notificationDesc: 'システム通知とメッセージアラートを受け取る',
     apiKey: 'APIキー管理',
     apiKeyDesc: 'API呼び出しに使用するキーです。大切に保管してください。',
     apiKeyWarning: '警告：APIキーはパスワードと同じです。他人に教えないでください。',
     noApiKey: 'APIキーがありません',
-    manage: '管理',
     revokeKey: '無効化',
     generateKey: 'キーを生成',
     regenerateKey: '再生成',
@@ -72,8 +54,6 @@ export default {
     apiKeyGenerated: 'APIキーを生成しました',
     apiKeyRevoked: 'APIキーを無効化しました',
     apiKeyGenerateFailed: '生成に失敗しました',
-    updateSuccess: '更新が完了しました',
-    loadUserError: 'ユーザー情報の読み込み中にエラーが発生しました',
     validation: {
       nicknameLength: 'ニックネームは2〜50文字以内で入力してください',
       phoneInvalid: '有効な電話番号を入力してください',
@@ -91,8 +71,6 @@ export default {
     upload: {
       success: 'アバターを更新しました',
       failed: 'アバターの更新に失敗しました',
-      imageOnly: '画像ファイルのみアップロード可能です',
-      sizeLimit: '画像サイズは5MB以下にしてください'
     },
     storage: 'ストレージ',
     realData: 'リアルタイム',
@@ -123,7 +101,6 @@ export default {
     searchPlaceholder: '組織を検索...',
     create: '新規組織',
     edit: '組織を編集',
-    refresh: '更新',
     deleteConfirm: 'この組織を削除してもよろしいですか？この操作は取り消せません。',
     name: '組織名',
     namePlaceholder: '組織名を入力してください',
@@ -138,18 +115,13 @@ export default {
     dragHint: 'ドラッグ＆ドロップで階層と順序を調整',
     searchTree: 'クイック検索...',
     detailList: '詳細リスト',
-    root: 'ルート組織',
-    isPrivate: 'プライベート組織',
     stats: {
       total: '総組織数',
-      root: 'ルートレベル',
-      levels: '階層の深さ'
     },
     validation: {
       nameRequired: '組織名を入力してください',
       nameLength: '名前は2〜50文字以内で入力してください',
       colorRequired: '色を選択してください',
-      parentSelf: '自分自身を親組織に設定することはできません'
     },
     level1: 'レベル 1',
     level2: 'レベル 2',
@@ -311,7 +283,6 @@ export default {
     }
   },
   login: {
-    title: 'ログイン',
     welcomeBack: 'おかえりなさい',
     loginDesc: '認証情報を入力してログインしてください',
     createAccount: 'アカウント作成',
@@ -322,12 +293,6 @@ export default {
     emailPlaceholder: 'メールアドレスを入力',
     password: 'パスワード',
     passwordPlaceholder: 'パスワードを入力',
-    confirmPassword: 'パスワード確認',
-    confirmPasswordPlaceholder: 'パスワードを再入力してください',
-    loginButton: 'ログイン',
-    registerButton: '登録',
-    loggingIn: 'ログイン中...',
-    registering: '登録中...',
     noAccount: 'アカウントをお持ちでないですか？',
     hasAccount: '既にアカウントをお持ちですか？',
     login: 'ログイン',
@@ -336,7 +301,6 @@ export default {
     registerSuccess: '登録に成功しました',
     goToLogin: 'ログインへ',
     goToRegister: '登録へ',
-    demoAccount: 'デモアカウント',
     demoDesc: 'デモアカウントを使用 (guest / 123456)'
   },
   menu: {
@@ -345,6 +309,7 @@ export default {
     chat: 'スマート対話',
     search: 'セマンティック検索',
     knowledge: 'ナレッジベース',
+    prompts: 'プロンプト管理',
     users: 'ユーザー管理',
     organizations: '組織管理',
     personalSettings: '設定',
@@ -352,6 +317,7 @@ export default {
     conversations: '対話履歴',
     notifications: '通知',
     workflow: 'Agent ワークフロー',
+    agent: 'AI エージェント',
     auditLogs: '監査ログ',
     monitoring: 'システム監視',
     systemHelp: 'ヘルプ',
@@ -401,7 +367,10 @@ export default {
     time: '時間',
     user: 'ユーザー',
     action: '操作',
-    detail: '詳細'
+    detail: '詳細',
+    loadFailed: '読み込みに失敗しました',
+    loadFailedDesc: 'ダッシュボードデータの読み込みに失敗しました。再試行してください。',
+    retry: '再試行'
   },
   monitoring: {
     title: 'システム監視',
@@ -428,24 +397,16 @@ export default {
     semantic: 'セマンティック',
     keyword: 'キーワード',
     fileType: 'ファイル形式',
-    dateRange: '期間',
     fileSize: 'ファイルサイズ',
-    to: '〜',
-    min: '最小',
-    max: '最大',
     clear: 'リセット',
-    apply: 'フィルタを適用',
     totalFiles: '総ファイル数',
     results: '件の結果が見つかりました',
     relevance: '関連度順',
-    date: '日付順',
     name: '名前順',
     relevanceScore: '関連度',
-    matchContent: '一致した内容',
     noResults: '結果が見つかりませんでした',
     noResultsDesc: '別のキーワードを試すか、フィルタを調整してください',
     fileContent: 'ファイル内容',
-    allTypes: 'すべての形式'
   },
   conversations: {
     title: '対話履歴',
@@ -494,5 +455,13 @@ export default {
     metricMessages: 'メッセージ総数',
     metricDocuments: 'ドキュメント',
     metricRole: '現在の役割'
+  },
+  router: {
+    welcome: 'ようこそ',
+    login: 'ログイン',
+    register: '登録',
+    knowledgeGraph: 'ナレッジグラフ',
+    workflowEditor: 'ワークフローエディタ',
+    agentMemory: 'Agent メモリ'
   }
 };

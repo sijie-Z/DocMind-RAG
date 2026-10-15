@@ -5,21 +5,13 @@ export default {
     confirm: 'Confirmer',
     delete: 'Supprimer',
     edit: 'Modifier',
-    add: 'Ajouter',
-    search: 'Rechercher',
-    loading: 'Chargement...',
     success: 'Succès',
     error: 'Erreur',
     failed: 'Échec',
     noData: 'Aucune donnée',
-    required: 'Champ requis',
+    refresh: 'Actualiser',
     saveSuccess: 'Enregistré avec succès',
     deleteSuccess: 'Supprimé avec succès',
-    logout: 'Déconnexion',
-    logoutConfirm: 'Êtes-vous sûr de vouloir vous déconnecter ?',
-    backToHome: 'Retour à l\'accueil',
-    back: 'Retour',
-    contactSupport: 'Contacter le support'
   },
   profile: {
     basicInfo: 'Informations de base',
@@ -33,33 +25,23 @@ export default {
     bio: 'Biographie',
     defaultBio: 'Cet utilisateur n\'a pas encore de biographie...',
     stats: {
-      title: 'Statistiques',
       conversations: 'Conversations',
       messages: 'Messages',
       files: 'Fichiers',
       knowledge: 'Base de connaissances'
     },
-    accountSettings: 'Paramètres du compte',
     accountSecurity: 'Sécurité du compte',
     changePassword: 'Changer le mot de passe',
-    loginPassword: 'Mot de passe',
-    passwordDesc: 'Changez régulièrement votre mot de passe pour plus de sécurité',
     currentPassword: 'Mot de passe actuel',
     newPassword: 'Nouveau mot de passe',
     confirmPassword: 'Confirmer le mot de passe',
     preferences: 'Préférences',
     language: 'Langue',
     theme: 'Thème',
-    themeLight: 'Clair',
-    themeDark: 'Sombre',
-    themeAuto: 'Système',
-    notifications: 'Notifications',
-    notificationDesc: 'Recevoir les notifications système et les alertes',
     apiKey: 'Gestion des clés API',
     apiKeyDesc: 'Utilisées pour appeler les interfaces API. Gardez-les secrètes.',
     apiKeyWarning: 'Attention : Une clé API est équivalente à un mot de passe. Ne la partagez pas.',
     noApiKey: 'Aucune clé API',
-    manage: 'Gérer',
     revokeKey: 'Révoquer',
     generateKey: 'Générer une clé',
     regenerateKey: 'Régénérer',
@@ -72,8 +54,6 @@ export default {
     apiKeyGenerated: 'Clé API générée avec succès',
     apiKeyRevoked: 'Clé API révoquée',
     apiKeyGenerateFailed: 'Échec de la génération',
-    updateSuccess: 'Mise à jour réussie',
-    loadUserError: 'Erreur de chargement des données utilisateur',
     validation: {
       nicknameLength: 'Le pseudo doit contenir entre 2 et 50 caractères',
       phoneInvalid: 'Veuillez entrer un numéro de téléphone valide',
@@ -91,8 +71,6 @@ export default {
     upload: {
       success: 'Avatar mis à jour avec succès',
       failed: 'Échec de la mise à jour de l\'avatar',
-      imageOnly: 'Seules les images sont autorisées',
-      sizeLimit: 'La taille de l\'image ne doit pas dépasser 5 Mo'
     },
     storage: 'Stockage',
     realData: 'Temps réel',
@@ -123,7 +101,6 @@ export default {
     searchPlaceholder: 'Rechercher une organisation...',
     create: 'Nouvelle Organisation',
     edit: 'Modifier l\'Organisation',
-    refresh: 'Actualiser',
     deleteConfirm: 'Êtes-vous sûr de vouloir supprimer cette organisation ? Cette action est irréversible.',
     name: 'Nom de l\'organisation',
     namePlaceholder: 'Entrez le nom de l\'organisation',
@@ -138,18 +115,13 @@ export default {
     dragHint: 'Glisser-déposer pour réorganiser',
     searchTree: 'Recherche rapide...',
     detailList: 'Liste détaillée',
-    root: 'Organisation racine',
-    isPrivate: 'Privé',
     stats: {
       total: 'Total des organisations',
-      root: 'Niveau racine',
-      levels: 'Profondeur hiérarchique'
     },
     validation: {
       nameRequired: 'Veuillez entrer le nom de l\'organisation',
       nameLength: 'Le nom doit contenir entre 2 et 50 caractères',
       colorRequired: 'Veuillez choisir une couleur',
-      parentSelf: 'Impossible de se définir comme sa propre organisation parente'
     },
     level1: 'Niveau 1',
     level2: 'Niveau 2',
@@ -311,7 +283,6 @@ export default {
     }
   },
   login: {
-    title: 'Connexion',
     welcomeBack: 'Bon retour',
     loginDesc: 'Entrez vos identifiants pour vous connecter',
     createAccount: 'Créer un compte',
@@ -322,12 +293,6 @@ export default {
     emailPlaceholder: 'Entrez votre adresse e-mail',
     password: 'Mot de passe',
     passwordPlaceholder: 'Entrez votre mot de passe',
-    confirmPassword: 'Confirmer le mot de passe',
-    confirmPasswordPlaceholder: 'Veuillez confirmer votre mot de passe',
-    loginButton: 'Se connecter',
-    registerButton: 'S\'inscrire',
-    loggingIn: 'Connexion en cours...',
-    registering: 'Inscription en cours...',
     noAccount: 'Pas encore de compte ?',
     hasAccount: 'Déjà un compte ?',
     login: 'Connexion',
@@ -336,7 +301,6 @@ export default {
     registerSuccess: 'Inscription réussie',
     goToLogin: 'Se connecter',
     goToRegister: 'S\'inscrire',
-    demoAccount: 'Compte Démo',
     demoDesc: 'Utiliser le compte démo (guest / 123456)'
   },
   menu: {
@@ -345,6 +309,7 @@ export default {
     chat: 'Chat Intelligent',
     search: 'Recherche Sémantique',
     knowledge: 'Base de connaissances',
+    prompts: 'Gestion des prompts',
     users: 'Utilisateurs',
     organizations: 'Organisations',
     personalSettings: 'Paramètres',
@@ -352,6 +317,7 @@ export default {
     conversations: 'Conversations',
     notifications: 'Notifications',
     workflow: 'Workflow Agent',
+    agent: 'Agent IA',
     auditLogs: 'Journaux d\'audit',
     monitoring: 'Surveillance Système',
     systemHelp: 'Aide',
@@ -401,7 +367,10 @@ export default {
     time: 'Heure',
     user: 'Utilisateur',
     action: 'Action',
-    detail: 'Détail'
+    detail: 'Détail',
+    loadFailed: 'Échec du chargement',
+    loadFailedDesc: 'Impossible de charger les données du tableau de bord. Veuillez réessayer.',
+    retry: 'Réessayer'
   },
   monitoring: {
     title: 'Surveillance Système',
@@ -428,24 +397,16 @@ export default {
     semantic: 'Sémantique',
     keyword: 'Mot-clé',
     fileType: 'Type de fichier',
-    dateRange: 'Période',
     fileSize: 'Taille du fichier',
-    to: 'à',
-    min: 'Min',
-    max: 'Max',
     clear: 'Réinitialiser',
-    apply: 'Appliquer',
     totalFiles: 'Total des fichiers',
     results: 'résultats trouvés',
     relevance: 'Trier par pertinence',
-    date: 'Trier par date',
     name: 'Trier par nom',
     relevanceScore: 'Pertinence',
-    matchContent: 'Contenu correspondant',
     noResults: 'Aucun résultat trouvé',
     noResultsDesc: 'Essayez d\'autres mots-clés ou ajustez les filtres',
     fileContent: 'Contenu du fichier',
-    allTypes: 'Tous les types'
   },
   conversations: {
     title: 'Historique des conversations',
@@ -494,5 +455,13 @@ export default {
     metricMessages: 'Messages',
     metricDocuments: 'Documents',
     metricRole: 'Rôle Actuel'
+  },
+  router: {
+    welcome: 'Bienvenue',
+    login: 'Connexion',
+    register: 'S\'inscrire',
+    knowledgeGraph: 'Graphe de connaissances',
+    workflowEditor: 'Éditeur de workflow',
+    agentMemory: 'Mémoire de l\'Agent'
   }
 };

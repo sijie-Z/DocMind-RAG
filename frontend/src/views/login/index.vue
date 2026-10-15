@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-[#fafafa] dark:bg-[#0a0a0a] flex flex-col md:flex-row overflow-hidden transition-colors duration-300">
+  <div class="min-h-screen bg-[#fafafa] dark:bg-gray-950 flex flex-col md:flex-row overflow-hidden transition-colors duration-300">
     <!-- 左侧：品牌区 -->
     <div class="hidden md:flex md:w-[44%] bg-slate-900 dark:bg-slate-950 p-12 flex-col justify-between relative overflow-hidden login-animate-in">
       <div class="relative z-10 flex items-center gap-3">
@@ -25,7 +25,7 @@
     </div>
 
     <!-- 右侧：表单 -->
-    <div class="flex-1 flex items-center justify-center p-6 md:p-12 bg-[#fafafa] dark:bg-[#0a0a0a]">
+    <div class="flex-1 flex items-center justify-center p-6 md:p-12 bg-[#fafafa] dark:bg-gray-950">
       <div class="max-w-md w-full login-card-animate">
         <div class="md:hidden text-center mb-8">
           <div class="w-14 h-14 rounded-2xl bg-slate-800 dark:bg-slate-700 text-white font-bold text-lg flex items-center justify-center mx-auto mb-4">
