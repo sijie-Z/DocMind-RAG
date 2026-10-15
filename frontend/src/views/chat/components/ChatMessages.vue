@@ -118,7 +118,16 @@
                 </template>
 
                 <div v-if="message.sources && message.sources.length > 0" class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-                  <div class="text-xs text-gray-500 dark:text-gray-400 mb-1.5 font-medium">{{ t('chat.sourcesLabel') }}</div>
+                  <div class="flex items-center gap-1.5 mb-1.5">
+                    <span class="text-xs text-gray-500 dark:text-gray-400 font-medium">{{ t('chat.sourcesLabel') }}</span>
+                    <!-- T4（第二轮 §7.2④）：示例对话来源是写死的假分数（demo 标记），
+                         角标如实标注「演示数据」；相关度数字保留（体验价值），只标注不隐藏 -->
+                    <span
+                      v-if="hasDemoSources(message)"
+                      data-testid="demo-source-badge"
+                      class="inline-flex items-center rounded-full border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-[1px] text-[10px] font-medium leading-4 text-amber-700 dark:text-amber-400"
+                    >{{ t('chat.demoData') }}</span>
+                  </div>
                   <div class="flex flex-wrap gap-1.5">
                     <n-popover
                       v-for="(source, idx) in message.sources"
@@ -260,6 +269,12 @@ function agentEventsOf(message: ChatMessage, type: AgentEvent['type']): AgentEve
 function totalTokensOf(message: ChatMessage): number | undefined {
   const value = message.executionContext?.total_tokens
   return typeof value === 'number' ? value : undefined
+}
+
+// T4（第二轮 §7.2④）：来源含 demo 标记（示例对话写死的假分数）→ 渲染「演示数据」角标；
+// 真实检索结果不带该键、不得误标
+function hasDemoSources(message: ChatMessage): boolean {
+  return (message.sources || []).some((s) => s.demo === true)
 }
 
 defineEmits<{

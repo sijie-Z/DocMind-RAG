@@ -154,6 +154,7 @@ export default {
     welcome: 'こんにちは、DocMind アシスタントです。何かお手伝いしましょうか？',
     welcomeDesc: '質問に答えたり、ドキュメントを分析したり、コードを書いたり、ただおしゃべりしたりできます。',
     sources: '出典',
+    demoData: 'デモデータ',
     inputPlaceholder: 'メッセージを入力（Shift + Enterで改行）...',
     uploadFile: 'ファイルをアップロード（近日公開）',
     streamResponse: 'ストリーム応答',
