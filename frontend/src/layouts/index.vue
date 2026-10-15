@@ -249,7 +249,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, h, onMounted, onUnmounted } from 'vue'
+import { computed, ref, h, onMounted, onUnmounted, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -265,12 +265,14 @@ import { SIDEBAR_MENU_GROUPS, USER_MENU_ITEMS, type MenuItemDef } from '@/config
 import {
   ChatbubbleEllipsesOutline,
   TimeOutline,
+  CalendarOutline,
   BookOutline,
   PeopleOutline,
   PersonOutline,
   LogOutOutline,
   SettingsOutline,
   PulseOutline,
+  ServerOutline,
   SearchOutline,
   MoonOutline,
   SunnyOutline,

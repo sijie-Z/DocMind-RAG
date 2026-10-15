@@ -96,10 +96,13 @@
 
 <script setup lang="ts">
 import { NCollapse, NCollapseItem, NIcon } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import {
   HelpCircleOutline, RocketOutline, GridOutline, ChatbubblesOutline, KeyOutline,
   SearchOutline, HardwareChipOutline, LinkOutline, DocumentsOutline
 } from '@vicons/ionicons5'
+
+const { t } = useI18n()
 
 const quickStart = [
   { title: '上传文档', desc: '前往知识库上传 PDF、Word、Excel 或文本文件，系统会自动解析并建立索引。' },
