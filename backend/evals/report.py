@@ -1,8 +1,10 @@
 """报告输出：机器可读 JSON + 人类可读 Markdown（纯标准库）。
 
-报告是可回归的基线载体（Phase 2 的 CI 门禁将基于同一 JSON 做
---fail-on-regression），所以字段口径在这里固定：
-- meta：数据集/索引/组织/参数/时间——复现一次跑分所需的一切；
+报告是可回归的基线载体（CI 门禁 `python -m evals compare` 基于同一 JSON 做
+floor/cap 比对），所以字段口径在这里固定：
+- meta：数据集/索引/组织/参数/时间/嵌入模式——复现一次跑分所需的一切；
+  `embedding_mode`/`es_version`/`corpus_chunks` 同时是门禁的协议字段
+  （compare 与基线逐键校验，防 apples 对 oranges）；
 - aggregates：metrics.aggregate 的输出原样放入；
 - items：逐条判定 + top-k 结果摘要（只保留诊断需要的字段）。
 """
@@ -51,21 +53,30 @@ def build_report(
     retriever_label: str,
     cutoffs: tuple[int, ...] = (1, 3, 5),
     generated_at: str | None = None,
+    embedding_mode: str = "live",
+    es_version: str | None = None,
+    corpus_chunks: dict[str, int] | None = None,
 ) -> dict:
     """构建报告 dict（可直接 json.dump 到文件）。"""
     return {
         "meta": {
             "phase": 1,
-            "phase_note": "Phase 1 只测量、不设门槛；CI 门禁与 baseline 回归是 Phase 2",
+            "phase_note": (
+                "测量口径见 backend/docs/eval-gate-phase1.md；embedding_mode=fake 为 CI 门禁模式"
+                "（确定性伪嵌入 + 专用索引先删后建），live 为本地真嵌入工具模式"
+            ),
             "dataset_id": golden.dataset_id,
             "dataset_version": golden.version,
             "golden_path": str(golden.path),
             "corpus_files": list(golden.corpus_files),
+            "corpus_chunks": dict(corpus_chunks or {}),
             "index": index,
             "org_id": org_id,
             "top_k": top_k,
             "cutoffs": list(cutoffs),
             "retriever": retriever_label,
+            "embedding_mode": embedding_mode,
+            "es_version": es_version,
             "llm_assist": False,
             "generated_at": generated_at or datetime.now(UTC).isoformat(timespec="seconds"),
         },
@@ -127,7 +138,7 @@ def render_markdown(report: dict) -> str:
     counts = agg["counts"]
     top_k = meta["top_k"]
     lines: list[str] = []
-    lines.append(f"# RAG 检索评估报告（Phase 1 · {meta['dataset_id']} v{meta['dataset_version']}）")
+    lines.append(f"# RAG 检索评估报告（{meta['dataset_id']} v{meta['dataset_version']}）")
     lines.append("")
     lines.append(f"- 索引：`{meta['index']}`　组织：`{meta['org_id']}`　top_k：{top_k}")
     lines.append(
@@ -135,7 +146,7 @@ def render_markdown(report: dict) -> str:
         f"{'，错误 ' + str(counts['errors']) if counts['errors'] else ''}）"
     )
     lines.append(f"- 生成时间：{meta['generated_at']}　检索器：{meta['retriever']}")
-    lines.append(f"- 说明：{meta['phase_note']}；LLM 辅助（改写/HyDE）关闭以保证可复现")
+    lines.append(f"- 嵌入模式：{meta.get('embedding_mode', 'live')}　说明：{meta['phase_note']}；LLM 辅助（改写/HyDE）关闭以保证可复现")
     lines.append("")
     lines.append("## 汇总")
     lines.append("")
