@@ -49,7 +49,6 @@
           </template>
           <span v-else>上周无数据</span>
         </div>
-        </div>
       </div>
 
       <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg shadow-blue-500/20">
