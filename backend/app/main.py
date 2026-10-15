@@ -160,6 +160,15 @@ async def lifespan(app: FastAPI):
         from app.dependencies import wire_memory_embedding_provider
         await wire_memory_embedding_provider()
 
+        # MCP client（动态外部工具，feat/mcp-client）：配置（backend/mcp_servers.json）
+        # 驱动连接 enabled server，把 tools/list 注册为 mcp__<server>__<tool>。
+        # 任何 server 起不来只 warning，不阻塞主启动；无配置 = 零行为变化。
+        try:
+            from app.agent.mcp.manager import mcp_manager
+            await mcp_manager.initialize()
+        except Exception as e:
+            logger.warning(f"MCP 初始化失败（不影响启动）: {e}")
+
         # 演示账号（issue #246）：只做创建/补齐（ensure_demo_user 内部自带日志）。
         # 先前版本在此处以固定口令 "123456" 真登录做"自检"——加固后该口令永不可能正确，
         # 每次启动都会给 login:fail:guest +1；锁死后 AccountLockedError 直接打崩启动。
@@ -188,6 +197,13 @@ async def lifespan(app: FastAPI):
 
     # 关闭服务
     logger.info("派聪明AI知识库系统关闭中...")
+
+    # 先摘 MCP：注销动态工具 + 关闭常驻子进程/会话（内部自兜异常）
+    try:
+        from app.agent.mcp.manager import mcp_manager
+        await mcp_manager.shutdown()
+    except Exception as e:
+        logger.warning(f"MCP 关闭失败: {e}")
 
     # 取消指标监控快照任务
     try:
