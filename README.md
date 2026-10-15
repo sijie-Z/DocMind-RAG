@@ -277,21 +277,33 @@ git clone https://github.com/sijie-Z/DocMind-RAG.git
 cd DocMind-RAG
 ```
 
-### 2. 启动基础设施
+### 2. 配置
+
+环境变量文件要在启动任何服务**之前**创建——缺少 `backend/.env.docker` 时，compose 的任意命令都会直接报错。
 
 ```bash
-cd backend && docker compose up -d    # MySQL / Redis / ES / Kafka / MinIO
-```
+cd backend
 
-### 3. 配置
+# 本地开发（应用在宿主机跑，见第 4/5 步）
+cp .env.example .env               # Windows: copy .env.example .env
+# 必填：SECRET_KEY / JWT_SECRET_KEY（生成: python -c "import secrets; print(secrets.token_hex(32))"）
+# 按需填写 DEEPSEEK_API_KEY / EMBEDDING_API_KEY 等（LLM / Embedding 凭据）
 
-```bash
+# 只要使用 Docker（含第 3 步的纯基础设施），都需要本文件（否则 compose 直接报错）：
 cp .env.docker.example .env.docker
 # 编辑 .env.docker，至少填入 LLM API Key：
 #   DEEPSEEK_API_KEY=sk-xxx
 #   DEEPSEEK_API_URL=https://api.deepseek.com/v1
 #   EMBEDDING_API_KEY=sk-xxx
 #   EMBEDDING_API_URL=https://api.deepseek.com/v1
+```
+
+### 3. 启动基础设施
+
+```bash
+cd backend && docker compose up -d mysql redis elasticsearch minio kafka zookeeper
+# 只启动基础设施容器（应用继续在宿主机跑，见下）；不用 Docker 的话跳过本步，按 SETUP.md 用本机服务替代
+# 完整 Docker 部署（应用也在容器里）：见「部署」一节
 ```
 
 ### 4. 启动后端
@@ -473,6 +485,8 @@ cd ../frontend && npm run test
 ## 部署
 
 ### Docker Compose
+
+前置：按「快速开始 · 2. 配置」创建并填写好 `backend/.env.docker`——缺失时 compose 的任意命令都会直接报错。
 
 ```bash
 cd backend && docker compose up -d
