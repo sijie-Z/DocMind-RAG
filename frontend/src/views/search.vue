@@ -67,8 +67,9 @@
             <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">{{ t('search.type') }}</h3>
             <n-radio-group v-model:value="searchType" name="searchType" class="w-full">
               <n-space vertical>
+                <n-radio value="auto">{{ t('search.auto') }}</n-radio>
                 <n-radio value="hybrid">{{ t('search.hybrid') }}</n-radio>
-                <n-radio value="semantic">{{ t('search.semantic') }}</n-radio>
+                <n-radio value="vector">{{ t('search.semantic') }}</n-radio>
                 <n-radio value="keyword">{{ t('search.keyword') }}</n-radio>
               </n-space>
             </n-radio-group>
@@ -247,8 +248,10 @@ const router = useRouter()
 const message = useDedupedMessage()
 
 // 搜索状态
+// issue #225：searchType 取值与后端 search_mode 同语义（vector 即后端"语义搜索"），
+// 'auto' = 不发送该字段（走后端自动路由，缺省行为与修复前一致）。
 const searchQuery = ref('')
-const searchType = ref<'semantic' | 'keyword' | 'hybrid'>('hybrid')
+const searchType = ref<'auto' | 'vector' | 'keyword' | 'hybrid'>('auto')
 const selectedFileTypes = ref<string[]>([])
 const sortBy = ref<'relevance' | 'date' | 'name'>('relevance')
 
@@ -305,7 +308,8 @@ const handleSearch = async () => {
   try {
     searchResults.value = await searchKnowledge({
       query: searchQuery.value,
-      search_type: searchType.value,
+      // 'auto'（自动路由）时不发送 search_mode —— 与后端"缺省=自动"同语义
+      ...(searchType.value === 'auto' ? {} : { search_mode: searchType.value }),
       file_types: selectedFileTypes.value.length ? selectedFileTypes.value : undefined,
       limit: 50
     })
@@ -324,7 +328,7 @@ const handleInputChange = debounce(async () => {
 const selectSuggestion = (s: string) => { searchQuery.value = s; suggestions.value = []; handleSearch() }
 
 const clearFilters = () => {
-  searchType.value = 'hybrid'
+  searchType.value = 'auto'
   selectedFileTypes.value = []
   sortBy.value = 'relevance'
 }

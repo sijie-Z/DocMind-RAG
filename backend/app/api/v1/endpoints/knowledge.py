@@ -36,6 +36,7 @@ from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.models.rbac import PermissionType
 from app.models.user import User
 from app.rag.errors import RetrievalUnavailableError
+from app.rag.query_processor import effective_search_mode
 from app.schemas.knowledge import (
     BatchDeleteRequest,
     KnowledgeBuildResponse,
@@ -185,8 +186,11 @@ async def search_knowledge(
         effective_org_id = await require_organization(current_user, db)
 
     try:
-        # 允许 search_type 或 search_mode
-        mode = request.search_mode or getattr(request, 'search_type', 'hybrid')
+        # issue #225 决策 7A：显式 search_mode（hybrid/vector/keyword）强制本次
+        # 检索臂组合；缺省（None）走自动路由。旧的 `search_type` 兜底已移除——
+        # 该字段从来不在请求 schema 里（一直被解析器静默丢弃、从未生效过），
+        # 保留 getattr 只会制造「它能用」的假象；前端已改发 search_mode。
+        requested_mode = request.search_mode.value if request.search_mode else None
 
         # 执行搜索
         _t0 = time.perf_counter()
@@ -195,7 +199,7 @@ async def search_knowledge(
             organization_id=effective_org_id,
             # 兜底与 schema 默认值同源（issue #242 接线）：默认 10，行为保持
             top_k=request.top_k or settings.TOP_K_RESULTS,
-            search_mode=mode
+            search_mode=requested_mode
         )
         elapsed = time.perf_counter() - _t0
 
@@ -234,7 +238,10 @@ async def search_knowledge(
             "query": request.query,
             "results": formatted_results,
             "total_count": len(formatted_results),
-            "search_mode": mode,
+            # 回显语义与生效语义一致（issue #225）：显式模式回显所传值；自动路由
+            # 回显本次顶层查询实际路由档位映射的公开模式名（此前无条件回显
+            # "hybrid"，与真实路由不符）。
+            "search_mode": effective_search_mode(request.query, requested_mode),
             "search_time": round(elapsed, 4),
             "index_status": index_status,
             "index_doc_count": index_doc_count,

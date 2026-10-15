@@ -543,6 +543,7 @@ export default {
     askAI: 'Ask AI',
     button: 'Search',
     type: 'Search Mode',
+    auto: 'Auto',
     hybrid: 'Hybrid',
     semantic: 'Semantic',
     keyword: 'Keyword',

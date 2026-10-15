@@ -11,6 +11,7 @@ with a fundamentally different perspective: it is told to be critical and
 to find problems, not to assess quality neutrally.
 """
 
+import json
 import logging
 from typing import Any
 
@@ -86,6 +87,15 @@ class Reviewer:
 
         Returns:
             Structured review with issues found and recommendation.
+
+        "error" 判定按 error_kind 细分（issue #301 家族尾巴）：
+          - ``no_verdict``   —— 模型有响应但未给出可用的判定（JSON 缺
+            recommendation 键 / 输出无法解析为非空对象）。调用侧文案：
+            「模型未给出判定」。
+          - ``service_error`` —— 审查调用本身失败（异常/超时/连接类）。
+            调用侧文案：「审查服务异常」。
+        两种情形此前在 SSE/决策里都表述为"审查服务异常"，把"模型未给判定"
+        与"审查服务崩了"合并了。
         """
         results_summary = self._build_results_summary(plan, results)
 
@@ -107,45 +117,9 @@ class Reviewer:
                 response_format={"type": "json_object"},
             )
             record_llm_usage(response, ctx)
-
-            import json
-
             content = response.choices[0].message.content or "{}"
-            review_data = json.loads(content)
-
-            # Ensure expected keys exist
-            if "issues_found" not in review_data:
-                review_data["issues_found"] = []
-            # issue #301 #9（评审 m3 尾款）：判定必须是**可用的非空字符串**。
-            # 缺键、null、空串/空白串、非字符串（数字/布尔/对象/数组）同语义
-            # —— 无判定 ≠ 通过（旧行为：这些值经 loop 的 `or "pass"` 宽容归一
-            # 为 pass，与真 pass 不可区分）。与崩溃路径同列 "error"（由 loop
-            # 收敛并如实记录）；error_kind=no_verdict 对齐三态约定（loop 侧
-            # 据此走「模型未给出判定」文案，与「审查服务异常」各自可辨识）。
-            recommendation_value = review_data.get("recommendation")
-            if not isinstance(recommendation_value, str) or not recommendation_value.strip():
-                review_data["recommendation"] = "error"
-                review_data["error_kind"] = "no_verdict"
-                review_data["error"] = (
-                    "模型返回的 JSON 未给出可用判定"
-                    f"（recommendation 缺失或为不可用值：{type(recommendation_value).__name__}）"
-                )
-                logger.warning(
-                    "Adversarial review: model gave no usable recommendation "
-                    "(error_kind=no_verdict, type=%s), goal=%s",
-                    type(recommendation_value).__name__, plan.goal[:40],
-                )
-
-            issues_high = sum(1 for i in review_data["issues_found"] if i.get("severity") == "high")
-            logger.info(
-                "Review complete: %s, %d issues (%d high), recommendation=%s",
-                plan.goal[:40], len(review_data["issues_found"]), issues_high,
-                review_data["recommendation"],
-            )
-            return review_data
-
         except Exception as e:
-            logger.warning("Adversarial review failed, skipping: %s", e)
+            logger.warning("Adversarial review failed, skipping (error_kind=service_error): %s", e)
             # issue #301 #9：审查崩溃不再返回 recommendation="pass" ——
             # 无结论（审查没跑成）与真通过（审查跑了且认可）在报告里必须
             # 可区分。返回 "error"，由 loop 收敛并如实记录（SSE + 决策 +
@@ -157,8 +131,86 @@ class Reviewer:
                 "issues_found": [],
                 "key_strengths": [],
                 "recommendation": "error",
+                "error_kind": "service_error",
                 "error": str(e)[:200],
             }
+
+        try:
+            review_data = json.loads(content)
+        except (json.JSONDecodeError, ValueError) as e:
+            # 模型有响应但输出不是 JSON —— 模型侧没给出判定（不是服务崩了）。
+            logger.warning(
+                "Adversarial review: unparseable model output recorded as error "
+                "(error_kind=no_verdict): %s", str(e)[:120]
+            )
+            return {
+                "overall_assessment": "质检未完成（模型未给出判定）",
+                "issues_found": [],
+                "key_strengths": [],
+                "recommendation": "error",
+                "error_kind": "no_verdict",
+                "error": f"模型输出非 JSON: {str(e)[:120]}",
+            }
+
+        if not isinstance(review_data, dict):
+            # JSON 合法但不是对象（如列表/标量）→ 同样没有可用的判定。
+            logger.warning(
+                "Adversarial review: model output is not a JSON object recorded as error "
+                "(error_kind=no_verdict): %s", type(review_data).__name__
+            )
+            return {
+                "overall_assessment": "质检未完成（模型未给出判定）",
+                "issues_found": [],
+                "key_strengths": [],
+                "recommendation": "error",
+                "error_kind": "no_verdict",
+                "error": "模型输出不是 JSON 对象",
+            }
+
+        # Ensure expected keys exist
+        if "issues_found" not in review_data:
+            review_data["issues_found"] = []
+        if "recommendation" not in review_data:
+            # issue #301 #9：模型给了 JSON 却没给判定 → 无判定 ≠ 通过。
+            # 旧行为默认 "pass"，与真 pass 在报告里不可区分；与崩溃路径
+            # 同列 "error"（由 loop 收敛并如实记录），并按 error_kind 细分
+            # 为 no_verdict —— 调用侧文案「模型未给出判定」，与"审查服务
+            # 异常"（service_error）各自可辨识（issue #301 家族尾巴）。
+            review_data["recommendation"] = "error"
+            review_data["error_kind"] = "no_verdict"
+            review_data["error"] = "模型返回的 JSON 缺少 recommendation 判定"
+            logger.warning(
+                "Adversarial review: model output missing recommendation recorded as error "
+                "(error_kind=no_verdict), goal=%s", plan.goal[:40]
+            )
+
+        # issue #301 #9（评审 m3 尾款）：判定必须是**可用的非空字符串**。
+        # 缺键（上方块已归置）、null、空串/空白串、非字符串（数字/布尔/对象/
+        # 数组）同语义 —— 无判定 ≠ 通过（旧行为：这些值经 loop 的 `or "pass"`
+        # 宽容归一为 pass，与真 pass 不可区分）。与崩溃路径同列 "error"（由
+        # loop 收敛并如实记录）；error_kind=no_verdict 对齐三态约定（loop 侧
+        # 据此走「模型未给出判定」文案，与「审查服务异常」各自可辨识）。
+        recommendation_value = review_data.get("recommendation")
+        if not isinstance(recommendation_value, str) or not recommendation_value.strip():
+            review_data["recommendation"] = "error"
+            review_data["error_kind"] = "no_verdict"
+            review_data["error"] = (
+                "模型返回的 JSON 未给出可用判定"
+                f"（recommendation 缺失或为不可用值：{type(recommendation_value).__name__}）"
+            )
+            logger.warning(
+                "Adversarial review: model gave no usable recommendation "
+                "(error_kind=no_verdict, type=%s), goal=%s",
+                type(recommendation_value).__name__, plan.goal[:40],
+            )
+
+        issues_high = sum(1 for i in review_data["issues_found"] if i.get("severity") == "high")
+        logger.info(
+            "Review complete: %s, %d issues (%d high), recommendation=%s",
+            plan.goal[:40], len(review_data["issues_found"]), issues_high,
+            review_data["recommendation"],
+        )
+        return review_data
 
     def _build_results_summary(self, plan: Plan, results: dict[str, Any]) -> str:
         """Build a concise summary of execution results for the reviewer."""
