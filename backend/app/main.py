@@ -32,13 +32,14 @@ from app.core.notification_ws import notification_ws_manager
 from app.core.redis import close_redis, init_redis
 from app.core.request_id import RequestIDMiddleware
 from app.core.security import get_user_org_id, optional_current_user
+from app.core.system_metrics import system_metrics_sampler
 from app.core.tracing import setup_opentelemetry
 from app.exceptions import AppError
 from app.models.user import User
 
 
 async def metrics_snapshot_task():
-    """定期记录性能指标快照"""
+    """定期记录性能指标快照（应用指标 + 系统指标）"""
     while True:
         try:
             await metrics_collector.take_snapshot()
@@ -46,6 +47,15 @@ async def metrics_snapshot_task():
             break
         except Exception as e:
             logger.error(f"Failed to take metrics snapshot: {e}")
+        try:
+            # 系统指标采样（round2/sampling）：CPU%/内存% → dashboard trends.system
+            # 与 /monitoring/metrics/system 的数据源。与应用快照各自独立兜异常，
+            # 一侧失败不吞另一侧；无 Redis 时仅内存环形缓冲。
+            await system_metrics_sampler.record_sample()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Failed to record system metrics sample: {e}")
         await asyncio.sleep(max(5, int(settings.MONITORING_INTERVAL)))
 
 
