@@ -54,6 +54,7 @@ export const SIDEBAR_MENU_GROUPS: MenuGroupDef[] = [
       { routeName: 'Organizations', i18nKey: 'menu.organizations', icon: 'business' },
       { routeName: 'AuditLogs', i18nKey: 'menu.auditLogs', icon: 'document-text' },
       { routeName: 'Monitoring', i18nKey: 'menu.monitoring', icon: 'pulse' },
+      { routeName: 'McpServers', i18nKey: 'menu.mcpServers', icon: 'server' },
     ],
   },
   {
@@ -61,6 +62,7 @@ export const SIDEBAR_MENU_GROUPS: MenuGroupDef[] = [
       { routeName: 'Profile', i18nKey: 'menu.personalSettings', icon: 'person' },
       { routeName: 'Workflow', i18nKey: 'menu.workflow', icon: 'git-network' },
       { routeName: 'Agent', i18nKey: 'menu.agent', icon: 'chip' },
+      { routeName: 'ScheduledTasks', i18nKey: 'menu.scheduledTasks', icon: 'calendar' },
     ],
   },
 ]

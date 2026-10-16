@@ -131,11 +131,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, nextTick } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
+import { resolvePostAuthTarget } from '@/utils/postAuthRedirect'
 import {
   PersonOutline as UserOutline,
   LockClosedOutline,
@@ -153,14 +154,30 @@ const formRef = ref()
 const loading = ref(false)
 const isRegister = ref(route.name === 'Register')
 
-watch(() => route.name, (newName) => {
-  isRegister.value = newName === 'Register'
-})
-
 const form = reactive({
   username: '',
   password: '',
   email: ''
+})
+
+// 注册后后端未直接发放 token 的兜底：带着 username + registered=1 回登录页时，
+// 预填用户名并给出「注册成功」提示。/register → /login 复用同一组件实例，
+// 故首挂载（onMounted）与后续路由切换（watch）两个时机都要处理。
+const applyLoginQueryHints = () => {
+  if (route.name !== 'Login') return
+  const { username, registered } = route.query
+  if (typeof username === 'string' && username) {
+    form.username = username
+  }
+  if (registered === '1') {
+    message.success(t('login.registerSuccess'))
+  }
+}
+onMounted(applyLoginQueryHints)
+
+watch(() => route.name, (newName) => {
+  isRegister.value = newName === 'Register'
+  if (newName === 'Login') applyLoginQueryHints()
 })
 
 const rules = computed(() => ({
@@ -194,9 +211,17 @@ const handleSubmit = async () => {
         email: form.email
       })
       if (res.success) {
-        message.success(t('login.registerSuccess'))
-        await nextTick()
-        router.push('/')
+        if (res.tokenIssued) {
+          // 后端已直接发放 token：视为注册即登录，按认证后落点规则跳转
+          // （合法站内 redirect 优先，默认 /dashboard —— 此前硬跳 '/' 被丢回营销页）
+          message.success(t('login.registerSuccess'))
+          await nextTick()
+          router.replace(resolvePostAuthTarget(route.query.redirect))
+        } else {
+          // 后端未直接发放 token：回登录页，预填用户名并提示
+          await nextTick()
+          router.replace({ path: '/login', query: { username: form.username, registered: '1' } })
+        }
       } else {
         message.error(res.message || t('login.registerFailed'))
       }
@@ -208,19 +233,14 @@ const handleSubmit = async () => {
       if (result.success) {
         message.success(t('login.loginSuccess'))
         await nextTick()
-        // 路由守卫传入的 redirect（如 ?redirect=/chat）登录成功后回跳；
-        // 校验以 / 开头、非 // 开头、非 javascript:，避免开放重定向
-        const redirect = route.query.redirect
-        if (typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//') && !/^javascript:/i.test(redirect)) {
-          router.replace(redirect)
-        } else {
-          router.push('/dashboard')
-        }
+        // 认证后落点统一走共享函数：合法站内 redirect（如守卫传入的 ?redirect=/chat）
+        // 优先，其余（含 //evil.com、/\evil.com、/%09 等恶意变体）一律回落 /dashboard
+        router.replace(resolvePostAuthTarget(route.query.redirect))
       } else {
         message.error(result.message || t('login.loginFailed'))
       }
     }
-  } catch (error: unknown) {
+  } catch {
     // 操作失败
   } finally {
     loading.value = false

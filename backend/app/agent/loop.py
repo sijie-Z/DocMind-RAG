@@ -269,6 +269,7 @@ class PERAgentLoop:
         task_id: str | None = None,
         resume: dict[str, Any] | None = None,
         session_id: str | None = None,
+        document_context: str | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Execute the PER agent loop, yielding events as they happen.
 
@@ -281,6 +282,9 @@ class PERAgentLoop:
                 有 plan 时跳过 Phase 0/1、回灌 WorkingMemory 后从断点续跑；
                 无 plan（崩溃于规划阶段）则从 Phase 1 重跑，仍幂等。
             session_id: 会话 id（仅为快照信封记录 provenance）。
+            document_context: 用户 @ 引用文档的摘要段（体验第四波）——与记忆
+                上下文同轨并入预规划上下文：planner 与答案合成都能看到。
+                有 plan 的 resume 跳过规划，该参数自然不生效（如实）。
 
         Yields:
             AgentEvent objects for thinking, plan, tool calls, chunks, etc.
@@ -476,6 +480,18 @@ class PERAgentLoop:
                         await _yield_control()
                 except Exception as e:
                     logger.warning(f"Memory recall failed: {e}")
+
+            # 引用文档（体验第四波 @引用）：用户显式引用的文档摘要段与记忆
+            # 上下文同轨并入——planner 的 system 段与执行合成的用户消息都会
+            # 带上；不依赖 enable_memory（引用是用户显式意图，不是回忆）。
+            # ⚠️ 安全注记（评审 F3）：该段内容来自知识库文档（不可信输入），
+            # 注入姿态与既有 RAG context_docs 直拼一致；防护（spotlight/指令
+            # 隔离）为后续独立演进项，详见 service.build_referenced_document_context。
+            if document_context:
+                memory_context = (
+                    f"{memory_context}\n\n{document_context}"
+                    if memory_context else document_context
+                )
 
         # 快照活引用（fitted history 之后建立，冻结进快照的是实际被消费的那份）。
         # HITL（S4 修复，浏览器验收 F1）：run_state 是"多暂停周期间不丢"的载体

@@ -8,6 +8,9 @@ export const useNotificationStore = defineStore('notification', () => {
   const unreadCount = ref(0)
   const summary = ref<NotificationSummaryResponse>({ total: 0, unread_count: 0, by_type: {} })
   const latestRealtimeId = ref<number | null>(null)
+  // 错误态（第二轮 §7.2③）：失败可判别 + 是否至少成功加载过一次
+  const lastError = ref<string | null>(null)
+  const loadedOnce = ref(false)
 
   const bootstrap = async () => {
     try {
@@ -22,10 +25,13 @@ export const useNotificationStore = defineStore('notification', () => {
       if (summaryRes.data) {
         summary.value = summaryRes.data
       }
+      // 只在成功时清错误标记（对照 notificationSocket.ts：状态只在成功路径复位）
+      lastError.value = null
+      loadedOnce.value = true
     } catch (error) {
-      headerItems.value = []
-      unreadCount.value = 0
-      summary.value = { total: 0, unread_count: 0, by_type: {} }
+      // 失败保留上次成功值，不置空——否则失败与"真没通知"不可区分（铃铛假装"没有通知"）
+      lastError.value = error instanceof Error ? error.message : String(error)
+      console.warn('[notification] bootstrap failed:', error)
     }
   }
 
@@ -44,12 +50,14 @@ export const useNotificationStore = defineStore('notification', () => {
 
     headerItems.value = [normalized, ...headerItems.value.filter((n) => n.id !== normalized.id)].slice(0, 8)
     latestRealtimeId.value = payload.id
-    if (!existed) {
-      summary.value.total += 1
-      if (!normalized.is_read) {
-        unreadCount.value += 1
-        summary.value.unread_count += 1
-      }
+    if (existed) return
+    // 未成功加载过（无有效基线）时实时推送不加计：否则未读数会"从 0 起跳"伪造
+    // （失败置空后的持续失真放大 bug）；等重试成功后以服务端真值覆盖
+    if (!loadedOnce.value) return
+    summary.value.total += 1
+    if (!normalized.is_read) {
+      unreadCount.value += 1
+      summary.value.unread_count += 1
     }
   }
 
@@ -66,6 +74,8 @@ export const useNotificationStore = defineStore('notification', () => {
     unreadCount,
     summary,
     latestRealtimeId,
+    lastError,
+    loadedOnce,
     bootstrap,
     applyRealtime,
     consumeRead,

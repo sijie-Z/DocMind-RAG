@@ -186,6 +186,15 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'scheduled-tasks',
+        name: 'ScheduledTasks',
+        component: () => import('@/views/scheduled-tasks/index.vue'),
+        meta: {
+          title: 'menu.scheduledTasks',
+          icon: 'calendar'
+        }
+      },
+      {
         path: 'system-help',
         name: 'SystemHelp',
         component: () => import('@/views/systemHelp/index.vue'),
@@ -221,12 +230,46 @@ export const routes: RouteRecordRaw[] = [
           icon: 'activity',
           requiresAdmin: true
         }
+      },
+      {
+        path: 'mcp-servers',
+        name: 'McpServers',
+        component: () => import('@/views/mcp-servers/index.vue'),
+        meta: {
+          title: 'menu.mcpServers',
+          icon: 'server',
+          requiresAdmin: true
+        }
       }
     ]
   },
+  // 历史写法兼容（常见 camelCase / 短别名误写）：放 catch-all 之前，
+  // 重定向进真路由而非 404；保留查询串与哈希
   {
+    path: '/systemHelp',
+    redirect: (to) => ({ path: '/system-help', query: to.query, hash: to.hash })
+  },
+  {
+    path: '/systemAbout',
+    redirect: (to) => ({ path: '/system-about', query: to.query, hash: to.hash })
+  },
+  {
+    path: '/help',
+    redirect: (to) => ({ path: '/system-help', query: to.query, hash: to.hash })
+  },
+  {
+    path: '/about',
+    redirect: (to) => ({ path: '/system-about', query: to.query, hash: to.hash })
+  },
+  {
+    // 真实 404：未知路径停留在原地址并渲染 404 页（不再静默弹回营销页）
     path: '/:pathMatch(.*)*',
-    redirect: '/firsthome'
+    name: 'NotFound',
+    component: () => import('@/views/error/404.vue'),
+    meta: {
+      title: 'router.notFound',
+      requiresAuth: false
+    }
   }
 ]
 

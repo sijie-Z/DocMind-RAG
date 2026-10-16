@@ -58,6 +58,8 @@ export interface KnowledgeSource {
   hasVector?: boolean
   rewriteHits?: number
   freshFactor?: number
+  /** T4（第二轮 §7.2④）：示例对话的写死来源（假分数）逐条标注，前端渲染「演示数据」角标 */
+  demo?: boolean
 }
 
 export interface RetrievalDebugData {

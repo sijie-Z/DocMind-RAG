@@ -93,6 +93,8 @@ const PENDING_TITLE_UNIFICATION: Record<string, string> = {
   Users: 'h1 用 users.title（同文本异键）',
   Organizations: 'h1 用 org.title（同文本异键）',
   Monitoring: 'h1 用 monitoring.title，与 menu.monitoring 文案亦不同',
+  McpServers: 'h1 用 mcp.title（同文本异键）',
+  ScheduledTasks: 'h1 用 scheduler.title（同文本异键）',
   Notifications: 'h1 用 notifications.title，与 menu.notifications 文案亦不同；通知组术语随 T9',
   Agent: 'h1 硬编码；Agent 运行组命名随 T9',
   Workflow: 'h1 硬编码；随 T9',

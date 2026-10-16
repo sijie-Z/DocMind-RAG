@@ -108,8 +108,10 @@ services:
     ports:
       - "127.0.0.1:3308:3306"
     volumes:
+      # 不挂载初始化 SQL（原 docker/mysql/init.sql 已删）：建表归 ORM
+      # create_all / alembic；旧脚本 MariaDB 专有语法（CREATE INDEX
+      # IF NOT EXISTS）在 mysql:8.0 直接失败，且 initdb 时序早于建表。
       - mysql-data:/var/lib/mysql
-      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - docmind-network
     healthcheck:

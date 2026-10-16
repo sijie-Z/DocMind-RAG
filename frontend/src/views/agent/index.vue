@@ -82,7 +82,7 @@
           </div>
           <div class="feature-list">
             <div class="feature-item">📋 自动规划：复杂任务自动拆分</div>
-            <div class="feature-item">🔧 30 个工具：搜索、分析、代码、翻译</div>
+            <div class="feature-item">🔧 33 个内置工具：搜索、分析、代码、翻译</div>
             <div class="feature-item">🧠 记忆系统：记住你的偏好和历史</div>
             <div class="feature-item">🔍 自我反思：执行后自动评估纠正</div>
           </div>
@@ -96,7 +96,17 @@
         >
           <!-- User message -->
           <div v-if="msg.role === 'user'" class="user-msg">
-            <div class="user-bubble">{{ msg.content }}</div>
+            <div class="user-bubble">
+              {{ msg.content }}
+              <!-- 体验第四波 @引用：用户消息携带的引用文档（回溯用） -->
+              <div v-if="msg.references?.length" class="user-refs" data-testid="user-refs">
+                <span
+                  v-for="r in msg.references"
+                  :key="r.id"
+                  class="user-ref-chip"
+                >📄 {{ r.title }}</span>
+              </div>
+            </div>
           </div>
 
           <!-- Agent message -->
@@ -171,13 +181,17 @@
                   <span class="plan-standalone-badge">{{ t('hitl.planTimeline') }}</span>
                   <span class="plan-standalone-text">{{ evt.content }}</span>
                 </div>
-                <!-- 落库失败告警（issue #301 批 D #22 / B29：后端在「回答已生成、
-                     但会话落库失败」时发射 {type:'warning', content}
-                     （agent.py:207-212 / :341-347），store 已收（stores/agent.ts
-                     warning case），但视图此前无渲染分支 —— 唯一失败信号不可见，
-                     用户刷新后问答消失仍无提示）。amber 底纹与「运行失败」红框区分。 -->
-                <div v-else-if="evt.type === 'warning'" class="run-warning-standalone">
-                  <span class="run-warning-badge">提示</span>
+                <!-- warning 事件渲染（B29 / 体验第四波：@引用失效、#301 落库失败等
+                     此前只落 store、无视图分支——唯一可见信号不可见，用户刷新后
+                     问答消失仍无提示）。两支同型实现（本支 timeline 条目 /
+                     develop B29 落库失败提示）合一：取 develop 类名，补本支
+                     data-testid 锚点；徽标文案走 i18n，琥珀色与失败红/取消灰区分。 -->
+                <div
+                  v-else-if="evt.type === 'warning'"
+                  class="run-warning-standalone"
+                  data-testid="warning-line"
+                >
+                  <span class="run-warning-badge">{{ t('common.warning') }}</span>
                   <span class="run-warning-text">{{ evt.content }}</span>
                 </div>
               </template>
@@ -199,6 +213,17 @@
             <!-- 运行报告（issue #242 收尾：此前该事件在前端白名单被丢弃，UI 永远看不到；
                  issue #289 抽为共享组件，与聊天页 Agent 模式共用） -->
             <RunReportBlock :report="msg.runReport" :total-tokens="msg.executionContext?.total_tokens" />
+
+            <!-- 计时 + 成本（体验第四波）：运行中秒级计时；终态显示总用时 /
+                 tokens / 估算成本（execution_context 数据 + 可配置价目表） -->
+            <RunStats
+              v-if="msg.startedAt"
+              :loading="msg.loading"
+              :started-at="msg.startedAt"
+              :ended-at="msg.endedAt"
+              :tokens="msg.executionContext?.total_tokens"
+              :model="agentStore.config.model"
+            />
 
             <!-- Feedback buttons (only after completion, only for messages with a messageId) -->
             <div v-if="!msg.loading && msg.messageId && msg.content" class="feedback-bar">
@@ -327,6 +352,7 @@ import type {
   PlanStep,
   PlanStepEdit,
   ThinkingType,
+  ReferencedDoc,
   ReplayTimeline as ReplayTimelineData,
 } from '@/types/agent'
 import { ThumbsUpOutline, ThumbsDownOutline } from '@vicons/ionicons5'
@@ -337,6 +363,7 @@ import ToolCallCard from '@/components/agent/ToolCallCard.vue'
 import ReflectionBanner from '@/components/agent/ReflectionBanner.vue'
 import RetryHintLine from '@/components/agent/RetryHintLine.vue'
 import RunReportBlock from '@/components/agent/RunReportBlock.vue'
+import RunStats from '@/components/agent/RunStats.vue'
 import AgentConfigPanel from '@/components/agent/AgentConfigPanel.vue'
 import SessionSelector from '@/components/agent/SessionSelector.vue'
 import AgentInput from '@/components/agent/AgentInput.vue'
@@ -494,7 +521,7 @@ function scrollToBottom() {
   })
 }
 
-async function handleSend(query: string) {
+async function handleSend(query: string, refs?: ReferencedDoc[]) {
   if (agentStore.isLoading || !query.trim()) return
 
   agentStore.clearMessages()
@@ -502,7 +529,7 @@ async function handleSend(query: string) {
   stopping.value = false
   lastRunHasReplay.value = null
 
-  // Add user message
+  // Add user message（@引用随消息落账，供回溯）
   agentStore.addMessage({
     role: 'user',
     content: query,
@@ -513,9 +540,10 @@ async function handleSend(query: string) {
     planSteps: [],
     planId: '',
     progress: 0,
+    references: refs,
   })
 
-  // Add assistant placeholder
+  // Add assistant placeholder（startedAt：计时器起点）
   agentStore.addMessage({
     role: 'assistant',
     content: '',
@@ -526,6 +554,7 @@ async function handleSend(query: string) {
     planSteps: [],
     planId: '',
     progress: 0,
+    startedAt: Date.now(),
   })
 
   agentStore.setLoading(true)
@@ -553,6 +582,8 @@ async function handleSend(query: string) {
         temperature: agentStore.config.temperature,
         disabledTools: agentStore.config.disabled_tools,
         systemPromptOverride: agentStore.config.system_prompt_override,
+        // @引用（体验第四波）：引用文档 id 上送，后端注入 planner 上下文
+        referencedDocumentIds: refs?.map((r) => r.id),
       },
     )
   } catch (e: unknown) {
@@ -561,12 +592,14 @@ async function handleSend(query: string) {
       agentStore.updateLastAssistant((msg) => {
         if (!msg.content) msg.content = '(已停止)'
         msg.loading = false
+        msg.endedAt = Date.now()  // 计时：客户端断流也是终态
       })
     } else {
       const errMsg = e instanceof Error ? e.message : String(e)
       agentStore.updateLastAssistant((msg) => {
         msg.content = `❌ 错误: ${errMsg || 'Agent 连接失败'}`
         msg.loading = false
+        msg.endedAt = Date.now()  // 计时：连接失败也是终态
       })
     }
   } finally {
@@ -617,6 +650,7 @@ function fallbackAbort() {
   stopping.value = false
   agentStore.updateLastAssistant((msg) => {
     msg.loading = false
+    msg.endedAt = Date.now()  // 计时：硬断流也是终态
   })
 }
 
@@ -1336,6 +1370,26 @@ async function loadInit() {
   word-break: break-word;
 }
 
+/* 体验第四波 @引用：用户气泡内的引用 chips（半透明白，衬在蓝底上） */
+.user-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.user-ref-chip {
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-msg {
   margin-bottom: 16px;
 }
@@ -1539,6 +1593,8 @@ async function loadInit() {
   line-height: 18px;
 }
 
+/* warning 时间线条目（琥珀=提醒：@引用失效 / 落库失败等；与失败红、取消灰、
+   计划紫区分）。双实现合一后取 develop 类名。 */
 .run-warning-standalone {
   display: flex;
   align-items: flex-start;
@@ -1554,6 +1610,7 @@ async function loadInit() {
 }
 
 .dark .run-warning-standalone {
+  background: rgba(245, 158, 11, 0.14);
   color: #fcd34d;
 }
 
