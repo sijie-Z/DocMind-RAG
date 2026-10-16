@@ -928,6 +928,24 @@ export default {
     runReport: 'Run report',
     exportMarkdown: 'Export Markdown'
   },
+  help: {
+    tasks: {
+      items: {
+        ocr: {
+          title: 'Can images be recognized?',
+          desc: 'Yes — when you upload PNG, JPG, JPEG, WebP or BMP images to the Knowledge Base, OCR runs automatically to recognize the text and index it; you can then search or ask about the image content in Smart Chat. Images in which no text is recognized fail to parse.'
+        },
+        replay: {
+          title: 'How to review an Agent run',
+          desc: 'After a task completes in AI Agent, a "View Replay" button appears below the final answer (the "Task History" list in the header also offers "Replay" for completed tasks). The replay walks through the run on a timeline — the tool called at each step, duration and result summary, plus "Key Findings" and "Key Decisions". Only successfully completed runs have a replay; data is kept for 7 days.'
+        },
+        mcp: {
+          title: 'What is an MCP server?',
+          desc: 'MCP (Model Context Protocol) connects external tool servers to the Agent. Admins can open Administration → MCP Servers (admins only) to view the status of each server and its registered tools; the page is read-only — enabling, disabling or adding servers means editing backend/mcp_servers.json and restarting the service.'
+        },
+      }
+    }
+  },
   router: {
     notFound: 'Page Not Found',
     welcome: 'Welcome',
