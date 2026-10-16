@@ -930,6 +930,24 @@ export default {
     runReport: '运行报告',
     exportMarkdown: '导出 Markdown'
   },
+  help: {
+    tasks: {
+      items: {
+        ocr: {
+          title: '图片里的文字能识别吗',
+          desc: '可以：「知识库」页上传 PNG、JPG、JPEG、WebP、BMP 图片时，系统会自动进行 OCR 文字识别并建立索引，之后可在「智能对话」中检索或提问图片中的文字内容；识别不到文字的图片会解析失败。'
+        },
+        replay: {
+          title: '怎么回看 Agent 的运行过程',
+          desc: '在「智能 Agent」页完成任务后，最后一条回答下方会出现「查看回放」按钮（页头「任务记录」中也可对已完成任务点「回放」）。回放以时间线逐步展示执行过程——每步调用的工具、耗时、结果摘要，以及关键发现与关键决策；仅正常完成的任务有回放，数据保留 7 天。'
+        },
+        mcp: {
+          title: 'MCP 服务器是什么',
+          desc: 'MCP（Model Context Protocol）可以把外部工具服务器接入 Agent 使用。管理员可在「管理 → MCP 服务器」（仅管理员可见）查看各服务器状态与已注册的工具；该页是只读视图——启用/停用或新增服务器需编辑后端 backend/mcp_servers.json 并重启服务。'
+        },
+      }
+    }
+  },
   router: {
     notFound: '页面不存在',
     welcome: '欢迎',

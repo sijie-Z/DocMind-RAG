@@ -773,6 +773,24 @@ export default {
     runReport: "Rapport d'exécution",
     exportMarkdown: 'Exporter en Markdown'
   },
+  help: {
+    tasks: {
+      items: {
+        ocr: {
+          title: 'Les images sont-elles reconnues ?',
+          desc: "Oui : lorsque vous importez des images PNG, JPG, JPEG, WebP ou BMP dans la base de connaissances, l'OCR reconnaît automatiquement le texte et l'indexe ; vous pouvez ensuite rechercher ou interroger le contenu de l'image dans le chat. Les images dont aucun texte n'est reconnu échouent à l'analyse."
+        },
+        replay: {
+          title: "Revoir l'exécution de l'Agent",
+          desc: "Une fois une tâche terminée dans « Agent IA », un bouton « Voir le Replay » apparaît sous la dernière réponse (la liste « Historique des Tâches » de l'en-tête permet aussi de cliquer « Replay » pour les tâches terminées). Le replay retrace l'exécution sur une chronologie — outil appelé à chaque étape, durée et résumé du résultat, ainsi que « Constats Clés » et « Décisions Clés ». Seules les exécutions terminées avec succès disposent d'un replay ; les données sont conservées 7 jours."
+        },
+        mcp: {
+          title: "Qu'est-ce qu'un serveur MCP ?",
+          desc: "MCP (Model Context Protocol) permet de connecter des serveurs d'outils externes à l'Agent. Les administrateurs peuvent ouvrir « Administration → Serveurs MCP » (administrateurs uniquement) pour consulter l'état de chaque serveur et les outils enregistrés ; la page est en lecture seule — activer, désactiver ou ajouter un serveur nécessite de modifier backend/mcp_servers.json puis de redémarrer le service."
+        },
+      }
+    }
+  },
   router: {
     notFound: 'Page introuvable',
     welcome: 'Bienvenue',
