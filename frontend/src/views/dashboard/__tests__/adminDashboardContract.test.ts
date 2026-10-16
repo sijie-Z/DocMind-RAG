@@ -209,3 +209,58 @@ describe('AdminDashboard · 健康卡接真实 ES 状态（B6）', () => {
     expect(wrapper.text()).not.toContain('ES: ok')
   })
 })
+
+describe('AdminDashboard · 总会话环比真值 & 成本费率对齐（W2-T7）', () => {
+  it('写死的「↑ +12%（对比上周）」不再出现；无环比基线时显示「上周无数据」', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    // before 实测在屏的假趋势（total_sessions=3>0 → 恒 '+12%'）必须消失
+    expect(wrapper.text()).not.toContain('+12%')
+    expect(wrapper.text()).toContain('上周无数据')
+  })
+
+  it('真实环比（上升）：本周 6 / 上周 4 → ↑ +50% 对比上周', async () => {
+    vi.mocked(getAdminSummary).mockResolvedValue({
+      data: {
+        total_users: 3, total_sessions: 10, total_documents: 2, total_organizations: 2,
+        active_users_24h: 0, sessions_this_week: 6, sessions_last_week: 4,
+      },
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('+50%')
+    expect(wrapper.text()).toContain('对比上周')
+    expect(wrapper.text()).not.toContain('+12%')
+    expect(wrapper.text()).not.toContain('上周无数据')
+  })
+
+  it('真实环比（下降）：本周 3 / 上周 6 → ↓ -50%', async () => {
+    vi.mocked(getAdminSummary).mockResolvedValue({
+      data: {
+        total_users: 3, total_sessions: 9, total_documents: 2, total_organizations: 2,
+        active_users_24h: 0, sessions_this_week: 3, sessions_last_week: 6,
+      },
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('↓')
+    expect(wrapper.text()).toContain('-50%')
+  })
+
+  it('成本卡费率标签对齐真实栈：DeepSeek（不再是 GPT-4o-mini）', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('DeepSeek 费率')
+    expect(wrapper.text()).not.toContain('GPT-4o-mini')
+  })
+})

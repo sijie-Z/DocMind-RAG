@@ -69,6 +69,12 @@ export function useChatConnection(
         })
         fetchConversations()
       }
+      // W2-T7 项 4：流式开关关闭时 chunk 不逐字上屏，等待 'message' 终态一次性落屏
+      // （WS 与 SSE 两条传送带同一开关语义）。
+      if (!useStream.value) {
+        scrollToBottom()
+        return
+      }
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === data.messageId) {
         lastMsg.content += (data.content || '')

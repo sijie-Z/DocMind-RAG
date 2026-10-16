@@ -143,6 +143,7 @@
                           round
                           :bordered="false"
                           class="cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                          @click="$emit('openSource', source)"
                         >
                           <template #icon>
                             <n-icon size="10" class="mr-0.5"><DocumentTextOutline /></n-icon>
@@ -248,7 +249,7 @@ import PlanTree from '@/components/agent/PlanTree.vue'
 import ReflectionBanner from '@/components/agent/ReflectionBanner.vue'
 import RetryHintLine from '@/components/agent/RetryHintLine.vue'
 import RunReportBlock from '@/components/agent/RunReportBlock.vue'
-import type { ChatMessage } from '@/types/chat'
+import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 import type { AgentEvent } from '@/types/agent'
 
 const { t } = useI18n()
@@ -284,6 +285,7 @@ defineEmits<{
   feedback: [msg: ChatMessage, feedback: number]
   copy: [text: string]
   regenerate: [msg: ChatMessage]
+  openSource: [source: KnowledgeSource]
 }>()
 </script>
 

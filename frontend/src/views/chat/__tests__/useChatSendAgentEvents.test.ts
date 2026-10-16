@@ -82,7 +82,7 @@ const Host = defineComponent({
     const { handleSSESend } = useChatSend(
       messages, attachedFiles, attachedFileIds,
       () => {}, async () => {},
-      isLoading, isRetrieving, sseStatus, useSSE, useAgent, debugEnabled, debugData,
+      isLoading, isRetrieving, sseStatus, useSSE, useAgent, ref(true), debugEnabled, debugData,
     )
     send = () => handleSSESend('测试问题')
     return () => h('div')

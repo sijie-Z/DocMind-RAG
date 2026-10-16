@@ -221,8 +221,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useDedupedMessage } from '@/utils/message'
 import { NIcon, NSpin, NRadioGroup, NRadio, NSpace, NCheckboxGroup, NCheckbox, NSelect, NTag, NButton, NModal } from 'naive-ui'
 import { SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline, SparklesOutline, DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline } from '@vicons/ionicons5'
@@ -235,6 +235,7 @@ import { useUserStore } from '@/stores/user'
 const { t } = useI18n()
 const userStore = useUserStore()
 const router = useRouter()
+const route = useRoute()
 const message = useDedupedMessage()
 
 // 搜索状态
@@ -360,8 +361,22 @@ const copyResultContent = async (r: SearchResult | null) => {
   message.success(t('common.copySuccess'))
 }
 
+// W2-T7 项 3：顶栏搜索/Ctrl+K/深链 `?q=` 回填并自动发起搜索（第三轮终检 §2.4：
+// 布局 handleGlobalSearch 确实 push 了 { name:'Search', query:{ q } }，但本页此前
+// 不读 route.query —— 搜索词直接丢）。同页再次提交（q 变化）经 watch 重跑。
+const applyQueryFromRoute = () => {
+  const q = route.query.q
+  if (typeof q !== 'string' || !q.trim()) return
+  if (q === searchQuery.value && hasSearched.value) return
+  searchQuery.value = q
+  handleSearch()
+}
+
+watch(() => route.query.q, applyQueryFromRoute)
+
 onMounted(async () => {
   if (currentOrgId.value) searchStats.value = await getSearchStats(currentOrgId.value)
+  applyQueryFromRoute()
 })
 </script>
 

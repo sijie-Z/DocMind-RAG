@@ -494,10 +494,13 @@ const handleSaveSettings = async () => {
     locale.value = settingsForm.language
     localStorage.setItem('language', settingsForm.language)
     // Save to backend
+    // W2-T7：不再携带 preferences.ai_provider——后端全局无任何服务消费该字段
+    // （推理只走 .env 全局 DeepSeek），且 GET /settings/providers 回读的 api_key
+    // 是掩码值，随保存回写会覆盖真实 key。provider 区块已按「实验功能·暂不生效」
+    // 标注并禁用（见 profile/index.vue），保存仅剩语言/主题两个真实生效字段。
     const result = await userStore.updateSettings({
       language: settingsForm.language,
       theme: settingsForm.theme,
-      preferences: { ai_provider: { ...providerForm } },
     })
     if (result.success) {
       settingsSaveMessage.value = t('common.saveSuccess')

@@ -694,6 +694,10 @@ class TestAdminSummaryHole:
             "total_sessions": 4,       # org 66 的 1 个不得计入
             "active_users_24h": 0,
             "total_organizations": 1,  # 组织作用域视图：自己所属的 1 个（≠全局 2）
+            # W2-T7 契约扩展：会话周环比真值——本 fixture 的 4 个会话均为
+            # 插入时刻 NOW（server_default），无显式 created_at → 全落本周（4/0）。
+            "sessions_this_week": 4,
+            "sessions_last_week": 0,
         }, f"计数必须全部按调用者组织口径: {data}"
 
     @pytest.mark.asyncio

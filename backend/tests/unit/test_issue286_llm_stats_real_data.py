@@ -149,9 +149,14 @@ def test_llm_stats_returns_real_known_usage(client: TestClient):
     assert data["avg_latency_ms"] == 200, data
     assert data["p95_latency_ms"] == 100, data
 
-    # 4) 派生字段与合计一致（成本按前端标注的 GPT-4o-mini 费率）
+    # 4) 派生字段与合计一致（W2-T7：成本按 token_usage 费率真源——deepseek 每 1K
+    #    $0.0005/$0.002；修前按 GPT-4o-mini 费率（$0.15/$0.60 per 1M）估算，
+    #    与实际 DeepSeek 推理栈不符——该旧口径正是本批清除的"假费率"之一）
+    from app.api.v1.endpoints.token_usage import _estimate_cost
+    from app.core.config import settings as _settings
+
     assert data["cost_today_usd"] == round(
-        data["input_tokens_today"] * 0.00000015 + data["output_tokens_today"] * 0.0000006, 4
+        _estimate_cost(_settings.DEEPSEEK_MODEL, data["input_tokens_today"], data["output_tokens_today"]), 4
     )
     assert len(data["token_trend_7d"]) == 7
     assert all(v > 0 for v in data["token_trend_7d"]), "有真实用量时趋势不得全零"
