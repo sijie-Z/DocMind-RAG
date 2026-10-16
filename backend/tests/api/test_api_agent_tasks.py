@@ -443,10 +443,13 @@ async def test_resume_http_cancel_releases_lease_and_immediate_retry_runs(tmp_pa
                 "被兜底快照续到 900s）"
             )
 
-            # 断流不改状态：任务保持 RUNNING = 可恢复（语义不变）
+            # 断流收敛（第四波修复）：任务从"正在跑"系收敛为 FAILED（可恢复的
+            # 诚实中断态）——不再永停 RUNNING/“进行中”（旧语义）；恢复语义
+            # 不变（下方立即重试必须成功）。
             async with factory() as db:
                 t = await db.get(AgentTask, task_id)
-            assert t.status == TaskStatus.RUNNING
+            assert t.status == TaskStatus.FAILED
+            assert t.last_error_type == "client_disconnect"
 
             # 立即重试：不得被 TaskBusy 拒绝；从断点跑完（COMPLETED）
             r = await c.post(f"/api/v1/agent/tasks/{task_id}/resume")

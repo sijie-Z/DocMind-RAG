@@ -46,14 +46,18 @@ async def build_referenced_document_context(
     organization_id: int,
     pipeline=None,
 ) -> tuple[str | None, list[str]]:
-    """把用户 @ 引用的知识库文档解析为注入 planner 的上下文段。
+    """把用户 @ 引用的知识库文档解析为注入 planner 与 executor 的上下文段。
 
-    诚实语义：每个引用要么给出关键摘要（query 相关分块）进上下文，要么给出
-    「为什么用不了」的明确警告文案上 SSE —— 绝不静默丢弃。
+    取文两段式（第四波实机缺陷修复）：
+    ① query 相关分块检索（相关摘要优先）；
+    ② 零命中 → 按 document_id 直读文档头部 chunk 兜底（"总结这份文档"类
+       元问题与正文零词汇重叠，不能押注在检索命中上）。
+    诚实语义：每个引用要么给出正文摘要进上下文，要么给出「为什么用不了」的
+    明确警告文案上 SSE —— 绝不静默丢弃（直读成功不算降级，不外发警告）。
 
     ⚠️ 安全注记（评审 F3，必须有记录）：被引文档的检索分块是**不可信输入**
     ——文档内容可能包含针对模型的指令（prompt injection 载体）。本实现的
-    注入姿态与既有 RAG 一致（`context_docs` 直拼 snippet，见 loop 合成消息），
+    注入姿态与既有 RAG 一致（`context_docs` 直拼检索全文 text，见 loop 合成消息），
     非新类攻击面；现有约束：用户显式引用（非自动召回）+ 组织域校验（跨组织
     拒注入）+ 条数帽（10）× 长度帽（700 字符/条）。**尚无**定界 spotlight /
     指令隔离等主动防护——该方向（引用段包裹与注入过滤）作为后续独立演进项，
@@ -100,7 +104,7 @@ async def build_referenced_document_context(
 
         title = doc.title or doc.filename or did
         excerpt = ""
-        note_added = False
+        retrieval_note: str | None = None
         if pipeline is not None:
             try:
                 results, _ = await pipeline.search_knowledge_base(
@@ -113,17 +117,46 @@ async def build_referenced_document_context(
                 ).strip()
             except Exception as e:
                 logger.warning("引用文档检索失败 %s: %s", did, log_safe(e))
-                warnings.append(f"引用文档「{title}」内容检索失败，仅按标题/描述注入")
-                note_added = True
+                retrieval_note = f"引用文档「{title}」内容检索失败"
         else:
-            warnings.append(f"引用文档「{title}」摘要服务不可用，仅按标题/描述注入")
-            note_added = True
+            retrieval_note = f"引用文档「{title}」摘要服务不可用"
+
+        if not excerpt:
+            # 直读兜底（第四波实机缺陷修复）：用户显式引用了该文档——正文该按
+            # document_id 直取，不该押注在 query 检索命中上（"总结这份文档"类
+            # 元问题与正文零词汇重叠，质量门会全数滤掉 → 修前只注入标题，实机
+            # "只找到文档列表信息，没有拿到可总结的正文"）。按 chunk_index 正序
+            # 取文档头部若干分块（与 summarize_document 工具同法）；内容仍是不
+            # 可信输入（见上方安全注记），长度帽照旧。
+            try:
+                from app.core.elasticsearch import ElasticsearchTools
+
+                es_res = await ElasticsearchTools.search_documents({
+                    "size": 3,
+                    "query": {"bool": {"must": [
+                        {"term": {"document_id": did}},
+                        {"term": {"organization_id": str(organization_id)}},
+                    ]}},
+                    "sort": [{"chunk_index": {"order": "asc"}}],
+                    "_source": ["content"],
+                })
+                excerpt = "\n".join(
+                    (h.get("_source", {}).get("content") or "").strip()
+                    for h in es_res.get("hits", {}).get("hits", [])
+                ).strip()
+            except Exception as e:
+                logger.warning("引用文档直读失败 %s: %s", did, log_safe(e))
 
         if not excerpt:
             excerpt = (doc.description or "").strip()
-            if not note_added:
+            # 两条检索路径（query 检索 + 直读）都没拿到正文才降级外发警告；
+            # 直读成功不算降级（不打扰用户）。
+            warnings.append(
+                (retrieval_note + "，仅按标题/描述注入")
+                if retrieval_note
                 # 检索正常但零命中：如实告知降级为标题/描述
-                warnings.append(f"引用文档「{title}」未检索到相关正文，仅按标题/描述注入")
+                else f"引用文档「{title}」未检索到相关正文，仅按标题/描述注入"
+            )
         if len(excerpt) > MAX_EXCERPT_CHARS:
             excerpt = excerpt[:MAX_EXCERPT_CHARS] + "…"
         entries.append({"id": did, "title": title, "excerpt": excerpt})
@@ -137,6 +170,7 @@ async def build_referenced_document_context(
         if e["excerpt"]:
             lines.append(e["excerpt"])
     return "\n".join(lines), warnings
+
 
 
 async def notify_task_terminal(
@@ -318,12 +352,13 @@ class AgentService:
                     event.task_id = task_id
                 yield event
         except GeneratorExit:
-            # 断流（客户端 abort / 生成器被关闭）：尽力落一次快照，status 保持
-            # RUNNING 以便 resume（用户"点停止"≠放弃任务，见设计报告 2.3）。
+            # 断流（客户端 abort / 生成器被关闭）：尽力落一次快照 + 收敛为
+            # FAILED（可恢复的中断态）——修前 status 永停 RUNNING，产品面
+            # 无续跑入口，实机表现为"进行中、无回放"（第四波修复）。
             await self._checkpoint_disconnect(task_id, agent)
             raise
         except asyncio.CancelledError:
-            # 请求被取消（uvicorn 断连取消任务）：同断流语义。
+            # 请求被取消（uvicorn 断连取消任务）：同断流语义（快照 + 收敛）。
             await self._checkpoint_disconnect(task_id, agent)
             raise
         except BaseException as exc:
@@ -496,11 +531,17 @@ class AgentService:
         *,
         release_lease: bool = False,
     ) -> None:
-        """断流兜底（best-effort）：存一份"到此为止"的快照，不动任务状态。
+        """断流兜底（best-effort）：存一份"到此为止"的快照 + 把状态从"正在跑"系
+        收敛为 FAILED（可恢复的中断态）——不动等待审批类挂起态。
 
-        语义 = 与"进程被硬杀"一致（行停在 RUNNING，resume 从最近成功的
-        checkpoint 继续）。await 在被关闭/取消的路径上可能被底层打断——允许
-        它失败：最坏退化 = 恢复点停在上一个 T2，不影响正确性（设计报告 E1）。
+        快照语义 = 与"进程被硬杀"一致（resume 从最近成功的 checkpoint 继续）。
+        状态收敛（第四波实机缺陷修复，见 checkpoint.converge_disconnected）：
+        此前断流只落快照、行永停 RUNNING——产品面无 resume 入口、也无看门狗，
+        实测任务列表永远"进行中、无回放"（id=0a7e5e8ea580 现场）。FAILED 带着
+        既有"重试边"（FAILED→RUNNING），恢复语义不牺牲；绝不写 COMPLETED。
+        await 在被关闭/取消的路径上可能被底层打断——允许它失败：最坏退化 =
+        恢复点停在上一个 T2 + 状态停 RUNNING（与修前一致），不影响正确性
+        （设计报告 E1）。
 
         release_lease（issue #278/m2，评审 R3）：resume 断流时把本次认领的租约
         归还——断流 = 持有者已终止（生成器正在关闭，不可能再写入），重试应当
@@ -508,14 +549,14 @@ class AgentService:
         拒至多 15 分钟。chat 从未认领租约，保持不释放（避免误删并发 resume
         持有的锁）。
 
-        #300/F1（评审 R9 仪器化差分 trace）：save 与 release 必须是**同一个**
-        受保护单元（一个协程里按序做两步）。shield 只保护"已进入的任务"——
-        两者各自 shield 时（修复前），ASGI 取消路径上 anyio 任务组取消的
-        层级触发式重复投递会恰好打在第一个 shield 的**外层 await** 上，函数
+        #300/F1（评审 R9 仪器化差分 trace）：save、converge 与 release 必须是
+        **同一个**受保护单元（一个协程里按序执行）。shield 只保护"已进入的
+        任务"——两者各自 shield 时（修复前），ASGI 取消路径上 anyio 任务组取消
+        的层级触发式重复投递会恰好打在第一个 shield 的**外层 await** 上，函数
         中断、`release` 分支不可达（HTTP 实测：租约悬置至 900s；引擎直连
         aclose 路径无重复投递所以从未暴露）。合入同一单元后：外层 await 无论
-        被打断几次，受保护任务都在后台按"快照先落、还租在后"跑完——取消
-        落点不再决定归还是否开始。
+        被打断几次，受保护任务都在后台按"快照先落、收敛其次、还租在后"跑完
+        ——取消落点不再决定收敛/归还是否开始。
 
         顺序不可反：反向会让新认领者先开跑、迟到的旧快照覆盖它的更新状态；
         且 save 内部还会续租，与"刚释放"打架。
@@ -524,8 +565,8 @@ class AgentService:
             return
 
         async def _save_then_release() -> None:
-            """受保护收尾单元：同一任务里按序执行 save → release（不可拆——
-            拆分会让"取消落点"决定 release 是否开始，见方法注释）。"""
+            """受保护收尾单元：同一任务里按序执行 save → converge → release
+            （不可拆——拆分会让"取消落点"决定收敛/归还是否开始，见方法注释）。"""
             try:
                 await checkpoint.save_from_live(
                     task_id=task_id, live=agent.checkpoint_live, trigger="on_disconnect",
@@ -533,6 +574,16 @@ class AgentService:
             except Exception as e:
                 logger.warning(
                     "checkpoint on_disconnect failed (task=%s): %s",
+                    log_safe(task_id), log_safe(e),
+                )
+            # 状态收敛兜底（第四波实机缺陷修复）：流已死 = 运行已死——不收理会
+            # 永停"进行中"（见 converge_disconnected 长注释）。放进同一受保护
+            # 单元：取消落点不得决定收敛是否发生（#300/F1 纪律同源）。
+            try:
+                await checkpoint.converge_disconnected(task_id)
+            except Exception as e:
+                logger.warning(
+                    "断流收敛兜底失败 (task=%s): %s",
                     log_safe(task_id), log_safe(e),
                 )
             if release_lease:

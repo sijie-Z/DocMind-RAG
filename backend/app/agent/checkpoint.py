@@ -387,6 +387,56 @@ async def mark_terminal(
     return False
 
 
+# ── 断流收敛兜底（第四波实机缺陷修复）──────────────────────────────────────
+
+# 断流收敛的合法起始态：只有"正在跑"系才视为"流死 = 运行死"。等待人工决策的
+# 挂起态（WAITING_APPROVAL / WAITING_PLAN_APPROVAL / WAITING_HUMAN）不在此列
+# ——那是"人回来续跑"的合法入口，断流 ≠ 放弃（HITL 语义）。
+_DISCONNECT_CONVERGE_FROM = frozenset({TaskStatus.RUNNING, TaskStatus.WAITING_TOOL})
+
+
+async def converge_disconnected(
+    task_id: str | None,
+    *,
+    error: str = "客户端断流：运行在完成前中断（可经恢复重试）",
+    error_type: str = "client_disconnect",
+) -> bool:
+    """断流收敛兜底：流已死且无人续跑时，把停在"正在跑"系的任务收敛为 FAILED。
+
+    背景（第四波实机，复验于 e5b5e5b）：断流此前只落快照、状态永停 RUNNING
+    （设计报告 2.3 的"可恢复"意图），但产品面无 resume 入口、也无看门狗——
+    实测任务列表永远"进行中、无回放"（id=0a7e5e8ea580 现场）。本兜底只补
+    收敛观感，不牺牲恢复链：
+
+    - FAILED 是既有"可重试"非终态（FAILED→RUNNING 是既有 retry 边，见
+      begin_resume），resume 语义完整保留；绝不写 COMPLETED（不伪装完成）；
+    - 等待审批类挂起态不动（见 _DISCONNECT_CONVERGE_FROM 注释）；
+    - 不触碰租约：chat 从未持有；resume 断流的归还由 service 侧同一受保护
+      单元里的 release_lease 分支负责（避免误删并发 resume 的锁）；
+    - 不触碰转向缓冲：FAILED 可恢复，缓冲留给 resume 起点 (drain) 消费。
+    失败只记 warning（best-effort，与断流快照同级纪律），返回 False。
+    """
+    if not task_id:
+        return False
+    try:
+        async with AsyncSessionLocal() as db:
+            task = await _load_task_row(db, task_id)
+            if task is None:
+                return False
+            if task.status not in _DISCONNECT_CONVERGE_FROM:
+                return False
+            task.transition(TaskStatus.FAILED)
+            task.last_error = str(error)[:2000]
+            task.last_error_type = error_type[:50]
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.warning(
+            "断流收敛失败（task=%s）：%s", log_safe(task_id), log_safe(e),
+        )
+        return False
+
+
 # ── HITL：审批暂停写路径（approval.py 的暂停回调调用）──────────────────────
 
 

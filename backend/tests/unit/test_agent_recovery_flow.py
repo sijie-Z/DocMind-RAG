@@ -167,7 +167,10 @@ async def test_crash_then_resume_continues_from_checkpoint(db_factory):
 
     assert calls["n"] == 2, "假 LLM 只应被前两步各调用一次"
     task = await _get_task(db_factory, task_id)
-    assert task.status == TaskStatus.RUNNING, "断流不改状态：陈旧 RUNNING = 可恢复"
+    assert task.status == TaskStatus.FAILED, (
+        "断流收敛为 FAILED（可恢复的中断态）——旧语义永停 RUNNING 是第四波实机缺陷"
+    )
+    assert task.last_error_type == "client_disconnect", "收敛留痕：断流来源可鉴别"
 
     _, payload = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
     assert payload is not None, "断流兜底快照必须落盘"
@@ -194,6 +197,63 @@ async def test_crash_then_resume_continues_from_checkpoint(db_factory):
         "completed", "completed", "completed",
     ], "终态快照：计划全步骤完成（on_finish 触发点）"
     assert task.progress == 1.0
+
+
+@pytest.mark.asyncio
+async def test_disconnect_converges_status_and_stays_resumable(db_factory):
+    """第四波实机缺陷回归（红基线）："回答已产出，但任务记录永停进行中、无回放"。
+    断流（客户端中止 / 页面离开）后任务必须收敛为 FAILED（可见的诚实中断态），
+    且 resume 语义完整保留（FAILED→RUNNING 既有重试边）——绝不伪装 COMPLETED。
+
+    变异点：_checkpoint_disconnect 的收敛调用移除 → 状态永停 RUNNING → 红。
+    """
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    events = await _crash_after_n_completed_steps(agen, n=1)
+    task_id = _task_id_of(events)
+    await asyncio.sleep(0.1)  # 受保护收尾单元（快照+收敛）落定
+
+    task = await _get_task(db_factory, task_id)
+    assert task.status == TaskStatus.FAILED, "断流必须收敛，不得永停 RUNNING"
+    assert task.last_error_type == "client_disconnect"
+
+    # 可恢复性不回归：resume 收尾跑完（只跑剩余步），最终 COMPLETED
+    events2 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID)]
+    assert any(e.type == "done" for e in events2)
+    task = await _get_task(db_factory, task_id)
+    assert task.status == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_disconnect_converge_guard_matrix(db_factory):
+    """断流收敛的守卫矩阵（第四波修复）：
+    - RUNNING / WAITING_TOOL（"正在跑"系）→ 收敛 FAILED；
+    - WAITING_APPROVAL（等待人工决策的挂起态）→ 不动——那是"人回来续跑"
+      的合法入口，断流 ≠ 放弃（HITL 语义）。
+
+    变异点：去掉守卫 → 待审批任务被断流误杀为 FAILED → 红。
+    """
+    t_run = await checkpoint.create_task(user_id=USER_ID, organization_id=1, query="q1")
+    t_tool = await checkpoint.create_task(user_id=USER_ID, organization_id=1, query="q2")
+    async with db_factory() as db:
+        row = await db.get(AgentTask, t_tool)
+        row.transition(TaskStatus.WAITING_TOOL)
+        await db.commit()
+    t_appr = await checkpoint.create_task(user_id=USER_ID, organization_id=1, query="q3")
+    assert await checkpoint.mark_waiting_approval(t_appr) is True
+
+    assert await checkpoint.converge_disconnected(t_run) is True
+    assert await checkpoint.converge_disconnected(t_tool) is True
+    assert await checkpoint.converge_disconnected(t_appr) is False
+
+    assert (await _get_task(db_factory, t_run)).status == TaskStatus.FAILED
+    assert (await _get_task(db_factory, t_tool)).status == TaskStatus.FAILED
+    assert (await _get_task(db_factory, t_appr)).status == TaskStatus.WAITING_APPROVAL, (
+        "断流不得吞掉待审批挂起态"
+    )
+    assert (await _get_task(db_factory, t_run)).last_error_type == "client_disconnect"
 
 
 @pytest.mark.asyncio
