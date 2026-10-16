@@ -16,8 +16,8 @@ describe('LANGUAGES 语言清单', () => {
     expect(new Set(labels).size).toBe(labels.length)
   })
 
-  it('Beta 标注只挂在 ja/fr（词条不完备的语言）', () => {
-    expect(LANGUAGES.filter((l) => l.beta).map((l) => l.value)).toEqual(['ja', 'fr'])
+  it('Beta 标注已全撤：四语均词条完备（ja/fr 随 T13 补齐至零缺口，机制保留）', () => {
+    expect(LANGUAGES.filter((l) => l.beta).map((l) => l.value)).toEqual([])
   })
 
   it('兜底语言 en 必须存在且非 Beta（棘轮硬闸的清单侧表达）', () => {

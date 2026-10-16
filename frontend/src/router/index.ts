@@ -16,6 +16,18 @@ declare module 'vue-router' {
   }
 }
 
+/** 路由 meta 扩展（T9 定位三件套）：生效侧栏高亮键 */
+declare module 'vue-router' {
+  interface RouteMeta {
+    /**
+     * 生效高亮键（naive-ui 菜单 key = menu.ts 的 routeName 空间）：
+     * 隐藏页显式声明其菜单面归属（如 KnowledgeGraph → 'Knowledge'）；
+     * 缺省回退 route.name（菜单页自身即键）。契约由 namingConsistency 定位层守护。
+     */
+    activeMenu?: string
+  }
+}
+
 let sessionValidated = false
 let lastValidatedAt = 0
 // admin 路由重新校验角色的时间间隔（毫秒）：超过则重新调用 getUserInfo 刷新角色

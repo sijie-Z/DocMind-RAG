@@ -303,6 +303,7 @@ export default {
     dropFiles: '拖拽文件到此处上传',
     // Export
     exportTitle: '对话导出',
+    exportChat: '导出对话',
     roleUser: '用户',
     roleAssistant: '助手',
     sourceDoc: '文档',

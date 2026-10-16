@@ -163,6 +163,8 @@ const form = reactive({
 // 注册后后端未直接发放 token 的兜底：带着 username + registered=1 回登录页时，
 // 预填用户名并给出「注册成功」提示。/register → /login 复用同一组件实例，
 // 故首挂载（onMounted）与后续路由切换（watch）两个时机都要处理。
+// F 波修复：提示弹毕即从 URL 剥离 registered（router.replace，不新增历史条目），
+// 否则用户每次刷新都会重复弹「注册成功」（跨会话实机两跑一致）。
 const applyLoginQueryHints = () => {
   if (route.name !== 'Login') return
   const { username, registered } = route.query
@@ -171,6 +173,9 @@ const applyLoginQueryHints = () => {
   }
   if (registered === '1') {
     message.success(t('login.registerSuccess'))
+    const query = { ...route.query }
+    delete query.registered
+    router.replace({ path: '/login', query })
   }
 }
 onMounted(applyLoginQueryHints)
@@ -179,7 +184,6 @@ watch(() => route.name, (newName) => {
   isRegister.value = newName === 'Register'
   if (newName === 'Login') applyLoginQueryHints()
 })
-
 const rules = computed(() => ({
   username: [
     { required: true, message: t('login.usernamePlaceholder'), trigger: 'blur' },
