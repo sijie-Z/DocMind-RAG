@@ -17,6 +17,7 @@ import { defineComponent, h } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import naive, { NMessageProvider, NDialogProvider } from 'naive-ui'
+import { createI18n } from 'vue-i18n'
 
 vi.mock('@/api/workflow', () => ({
   getWorkflows: vi.fn(),
@@ -27,6 +28,15 @@ vi.mock('@/api/workflow', () => ({
 
 import WorkflowList from '../index.vue'
 import { getWorkflows, getWorkflow, createWorkflow } from '@/api/workflow'
+
+// T9：列表页主标题改引菜单键（视图接入 useI18n），挂载基座同步补 i18n 插件（空词条即可）。
+const i18n = createI18n({
+  legacy: false,
+  locale: 'zh',
+  missingWarn: false,
+  fallbackWarn: false,
+  messages: { zh: {} },
+})
 
 const LIST_ITEM = {
   id: 3,
@@ -63,7 +73,7 @@ async function mountList() {
   await router.isReady()
   const pinia = createPinia()
   setActivePinia(pinia)
-  const wrapper = mount(Host, { global: { plugins: [naive, pinia, router] } })
+  const wrapper = mount(Host, { global: { plugins: [naive, pinia, router, i18n] } })
   await flushPromises()
   return wrapper
 }
