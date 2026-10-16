@@ -3,6 +3,7 @@ import type { RouteRecordRaw } from 'vue-router'
 import Layout from '@/layouts/index.vue'
 import { useUserStore } from '@/stores/user'
 import { getToken, isTokenExpired, removeToken } from '@/utils/auth'
+import { installChunkLoadRetry } from '@/utils/chunkLoadRetry'
 
 /** 路由 meta 扩展（T9 定位三件套）：生效侧栏高亮键 */
 declare module 'vue-router' {
@@ -301,6 +302,9 @@ const router = createRouter({
   history: createWebHistory(),
   routes
 })
+
+// T8：懒加载 chunk 失败（dev 下偶发/弱网）→ 整页重载一次兜底，避免白屏
+installChunkLoadRetry(router)
 
 router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()
