@@ -376,6 +376,7 @@ export default {
     searchKB: 'Rechercher dans la base',
     totalUsers: 'Total utilisateurs',
     totalSessions: 'Total sessions',
+    lastWeekNoData: 'Aucune donnée la semaine dernière',
     totalDocs: 'Total documents',
     totalOrgs: 'Organisations',
     activeUsers: 'Utilisateurs actifs',

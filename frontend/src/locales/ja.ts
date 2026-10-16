@@ -376,6 +376,7 @@ export default {
     searchKB: 'ナレッジベース検索',
     totalUsers: '総ユーザー数',
     totalSessions: '総セッション数',
+    lastWeekNoData: '先週のデータなし',
     totalDocs: '総ドキュメント数',
     totalOrgs: '組織数',
     activeUsers: 'アクティブユーザー',

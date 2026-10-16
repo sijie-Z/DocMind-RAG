@@ -508,6 +508,7 @@ export default {
     searchKB: 'Search KB',
     totalUsers: 'Total Users',
     totalSessions: 'Total Sessions',
+    lastWeekNoData: 'No data last week',
     totalDocs: 'Total Documents',
     totalOrgs: 'Organizations',
     activeUsers: 'Active Users',

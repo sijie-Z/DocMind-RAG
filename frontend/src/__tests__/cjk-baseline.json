@@ -30,7 +30,7 @@
     "views/chat/composables/useChatSessions.ts": 2,
     "views/chat/index.vue": 2,
     "views/conversations/index.vue": 17,
-    "views/dashboard/admin.vue": 14,
+    "views/dashboard/admin.vue": 13,
     "views/dashboard/user.vue": 23,
     "views/firsthome/index.vue": 38,
     "views/knowledge/components/KnowledgeDetailModals.vue": 14,

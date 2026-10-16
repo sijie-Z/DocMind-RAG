@@ -47,7 +47,7 @@
             <span>{{ sessionTrend >= 0 ? '↑' : '↓' }} {{ sessionTrend >= 0 ? '+' : '' }}{{ sessionTrend }}%</span>
             <span>对比上周</span>
           </template>
-          <span v-else>上周无数据</span>
+          <span v-else>{{ t('dashboard.lastWeekNoData') }}</span>
         </div>
       </div>
 

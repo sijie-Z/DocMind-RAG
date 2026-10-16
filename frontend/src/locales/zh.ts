@@ -510,6 +510,7 @@ export default {
     searchKB: '搜索知识库',
     totalUsers: '总用户数',
     totalSessions: '总会话数',
+    lastWeekNoData: '上周无数据',
     totalDocs: '总文档数',
     totalOrgs: '组织总数',
     activeUsers: '活跃用户',
