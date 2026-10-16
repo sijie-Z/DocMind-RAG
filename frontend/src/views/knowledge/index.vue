@@ -2,12 +2,12 @@
   <div class="knowledge-page h-full min-h-0 flex flex-col bg-gradient-to-b from-slate-50/80 to-slate-100/60 dark:from-gray-950 dark:to-gray-900/80 transition-colors duration-300">
     <div class="flex-1 overflow-y-auto p-5 lg:p-8">
       <div class="max-w-7xl mx-auto space-y-6">
-        
+
         <!-- 页面标题与描述 -->
         <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
             <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
-              {{ t('knowledge.title') }}
+              {{ t('menu.knowledge') }}
             </h1>
             <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm flex items-center gap-2">
               <span class="w-6 h-0.5 bg-blue-500 rounded-full"></span>
@@ -15,9 +15,9 @@
             </p>
           </div>
           <div class="flex items-center gap-3 flex-wrap">
-            <n-button 
+            <n-button
               v-if="selectedIds.length > 0"
-              type="error" 
+              type="error"
               secondary
               round
               @click="handleBatchDelete"
@@ -37,8 +37,8 @@
                 <n-icon class="text-slate-400"><SearchOutline /></n-icon>
               </template>
             </n-input>
-            <n-button 
-              type="primary" 
+            <n-button
+              type="primary"
               round
               size="medium"
               class="shadow-lg shadow-blue-500/25"
@@ -50,8 +50,9 @@
             <n-button secondary circle size="medium" @click="loadKnowledgeBases">
               <template #icon><n-icon><RefreshOutline /></n-icon></template>
             </n-button>
-            <n-button secondary circle size="medium" @click="$router.push('/knowledge/graph')">
+            <n-button secondary size="medium" @click="$router.push('/knowledge/graph')">
               <template #icon><n-icon><GitNetworkOutline /></n-icon></template>
+              {{ t('router.knowledgeGraph') }}
             </n-button>
             <n-button secondary round size="medium" @click="handleRebuildLatestFailedDoc">
               最近失败文档重建

@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="agent-header">
       <div class="header-left">
-        <h1 class="header-title">🤖 DocMind Agent</h1>
+        <h1 class="header-title">{{ t('menu.agent') }}</h1>
         <span class="header-badge">PER 架构</span>
       </div>
       <div class="header-center">

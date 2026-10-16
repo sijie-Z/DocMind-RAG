@@ -1,5 +1,10 @@
 <template>
   <div class="graph-page h-full min-h-0 flex flex-col bg-gray-50 dark:bg-gray-950">
+    <!-- T9 定位三件套：面包屑（DocMind / 知识库 / 知识图谱）+ 返回出口（→ 知识库） -->
+    <div class="border-b border-[var(--c-border)] bg-[var(--c-surface)] px-5 py-2">
+      <PageBreadcrumb :show-back="true" />
+    </div>
+
     <!-- Header -->
     <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
       <div class="flex items-center gap-3">
@@ -7,8 +12,8 @@
           <n-icon size="20" class="text-blue-500"><GitNetworkOutline /></n-icon>
         </div>
         <div>
-          <h1 class="text-base font-semibold text-gray-900 dark:text-white">知识图谱</h1>
-          <p class="text-xs text-gray-500 dark:text-gray-400">知识图谱可视化</p>
+          <h1 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('router.knowledgeGraph') }}</h1>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('knowledge.graph.subtitle') }}</p>
         </div>
       </div>
       <div class="flex items-center gap-3">
@@ -136,6 +141,7 @@ import { NInput, NButton, NIcon, NTag } from 'naive-ui'
 import { GitNetworkOutline, SearchOutline, RefreshOutline, CloseOutline, WarningOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { getKnowledgeGraph, type GraphNode, type GraphEdge } from '@/api/knowledge'
+import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
 
 const { t } = useI18n()
 

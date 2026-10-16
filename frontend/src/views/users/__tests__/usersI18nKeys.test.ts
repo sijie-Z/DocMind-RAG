@@ -51,7 +51,8 @@ const PAGE_REFS = [
   'users.searchPlaceholder',
   'users.selectOrgs',
   'users.subtitle',
-  'users.title',
+  // T9：h1 改用菜单键（users.title 退役）
+  'menu.users',
   'validation.email',
   'validation.passwordLength',
   'validation.passwordMismatch',

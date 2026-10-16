@@ -22,6 +22,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory, type Router } from 'vue-router'
 import { VueFlow } from '@vue-flow/core'
 import naive, { NMessageProvider } from 'naive-ui'
+import { createI18n } from 'vue-i18n'
 
 // jsdom 缺口补齐（仅本文件使用；产品代码合法使用这些浏览器 API）
 if (!('ResizeObserver' in globalThis)) {
@@ -77,6 +78,15 @@ import TransformNode from '../nodes/TransformNode.vue'
 import { useWorkflowStore } from '@/stores/workflow'
 import { getNodeDefinitions, getWorkflow, executeWorkflowStream, createWorkflow } from '@/api/workflow'
 
+// T9：编辑器页接入面包屑（useI18n），挂载基座同步补 i18n 插件（空词条即可）。
+const i18n = createI18n({
+  legacy: false,
+  locale: 'zh',
+  missingWarn: false,
+  fallbackWarn: false,
+  messages: { zh: {} },
+})
+
 const Host = defineComponent({
   setup() {
     // 真实 App 的包裹层：n-message-provider 在根（App.vue），编辑器是其后代
@@ -109,6 +119,8 @@ function makeRouter(): Router {
     history: createMemoryHistory(),
     routes: [
       { path: '/workflow/editor', name: 'WorkflowEditor', component: { template: '<div />' } },
+      // T9：面包屑品牌链指向 Dashboard，补目标路由消歧（与本页断言无关）
+      { path: '/dashboard', name: 'Dashboard', component: { template: '<div />' } },
     ],
   })
 }
@@ -122,7 +134,7 @@ async function mountEditor(
   await router.isReady()
   const wrapper = mount(Host, {
     global: {
-      plugins: [naive, sharedPinia, router],
+      plugins: [naive, sharedPinia, router, i18n],
       stubs: opts.realCanvas
         ? {}
         : {

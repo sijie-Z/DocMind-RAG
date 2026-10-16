@@ -79,9 +79,12 @@ export interface UserMenuItemDef {
 }
 
 /** 头部用户下拉菜单 */
+// T9：用户下拉项 key 与路由键空间统一——有路由的项 actionKey === routeName；
+// 同时让 Notifications 页拥有 menu.ts 键集内的菜单面归属（meta.activeMenu）。
 export const USER_MENU_ITEMS: UserMenuItemDef[] = [
-  { actionKey: 'settings', routeName: 'Profile', i18nKey: 'menu.personalSettings', icon: 'settings' },
-  { actionKey: 'system-help', routeName: 'SystemHelp', i18nKey: 'menu.systemHelp', icon: 'help' },
-  { actionKey: 'system-about', routeName: 'SystemAbout', i18nKey: 'menu.systemAbout', icon: 'info' },
+  { actionKey: 'Profile', routeName: 'Profile', i18nKey: 'menu.personalSettings', icon: 'settings' },
+  { actionKey: 'Notifications', routeName: 'Notifications', i18nKey: 'menu.notifications', icon: 'notifications' },
+  { actionKey: 'SystemHelp', routeName: 'SystemHelp', i18nKey: 'menu.systemHelp', icon: 'help' },
+  { actionKey: 'SystemAbout', routeName: 'SystemAbout', i18nKey: 'menu.systemAbout', icon: 'info' },
   { actionKey: 'logout', routeName: null, i18nKey: 'menu.logout', icon: 'logout' },
 ]

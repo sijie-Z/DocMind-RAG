@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { createI18n } from 'vue-i18n'
 
 import NotificationsView from '../index.vue'
 import { notificationSocket } from '@/utils/notificationSocket'
@@ -27,12 +28,23 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock('@/api/notification', () => apiMocks)
 
+// T9：通知页接入 i18n（useI18n），挂载基座同步补 i18n 插件（空词条即可）。
+const i18n = createI18n({
+  legacy: false,
+  locale: 'zh',
+  missingWarn: false,
+  fallbackWarn: false,
+  messages: { zh: {} },
+})
+
 function makeRouter() {
   return createRouter({
     history: createMemoryHistory(),
     routes: [
       { path: '/', name: 'Home', component: { template: '<div />' } },
       { path: '/notifications', name: 'Notifications', component: { template: '<div />' } },
+      // T9：面包屑品牌链指向 Dashboard，补目标路由消歧
+      { path: '/dashboard', name: 'Dashboard', component: { template: '<div />' } },
     ],
   })
 }
@@ -47,7 +59,7 @@ describe('通知页实时订阅接线', () => {
     const router = makeRouter()
     await router.push('/notifications')
 
-    const wrapper = mount(NotificationsView, { global: { plugins: [router] } })
+    const wrapper = mount(NotificationsView, { global: { plugins: [router, i18n] } })
     await flushPromises()
 
     expect(onSpy).toHaveBeenCalledTimes(1)

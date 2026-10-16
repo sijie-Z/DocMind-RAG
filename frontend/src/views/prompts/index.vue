@@ -5,7 +5,7 @@
       <div class="mb-8">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 class="text-3xl font-bold text-gray-800 dark:text-white">{{ t('prompts.title') }}</h1>
+            <h1 class="text-3xl font-bold text-gray-800 dark:text-white">{{ t('menu.prompts') }}</h1>
             <p class="text-gray-500 dark:text-gray-400 mt-1 text-sm">提示词模板将直接影响AI的回答方式和风格</p>
           </div>
           <div class="flex gap-2">
