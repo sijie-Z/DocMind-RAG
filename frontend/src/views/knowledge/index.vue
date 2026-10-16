@@ -435,8 +435,9 @@ import {
   batchDeleteKnowledgeBases,
   rebuildKnowledgeBase
 } from '@/api/knowledge'
-import type { KnowledgeBase } from '@/api/knowledge'
+import type { KnowledgeBase, KnowledgeBaseListResponse, DocumentDetail, DocumentContent } from '@/api/knowledge'
 import { formatDate } from '@/utils/format'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getRagMetrics, type RagMetrics } from '@/api/rag'
 import { useUserStore } from '@/stores/user'
 import { docIconColor, docStatusLabel, docStatusType, isInProgressDoc, computeDocStats } from './docDisplay'
@@ -656,8 +657,10 @@ const loadKnowledgeBases = async () => {
       metricsUpdatedAt.value = new Date().toLocaleTimeString()
     }
 
-    if (response.data && response.data.data) {
-        const data = response.data.data
+    // T11：宽容解包（口径见 @/types/common.ts）——对现行双层响应与既有
+    // response.data.data 恒等（契约定在 api/__tests__/knowledgeShapeContract.test.ts）
+    const data = apiUnwrap<KnowledgeBaseListResponse>(response)
+    if (data) {
         if (Array.isArray(data.data)) {
             knowledgeBases.value = data.data
             // Start polling if any item is in a non-terminal state
@@ -778,8 +781,9 @@ const viewKnowledge = async (item: KnowledgeBase) => {
       getDocumentDetail(item.id),
       getDocumentContent(item.id)
     ])
-    const detail = detailRes.data?.data || {}
-    const content = contentRes.data?.data || {}
+    // T11：宽容解包（与既有 detailRes/contentRes.data?.data 恒等）
+    const detail = apiUnwrap<DocumentDetail>(detailRes) || {}
+    const content = apiUnwrap<DocumentContent>(contentRes) || {}
     currentDoc.value = {
       ...item,
       ...detail,
