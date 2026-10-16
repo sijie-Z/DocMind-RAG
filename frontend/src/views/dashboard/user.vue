@@ -216,7 +216,7 @@
           <div class="flex items-start gap-3 bg-white/60 dark:bg-gray-800/60 rounded-xl p-4">
             <div class="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">2</div>
             <div>
-              <div class="font-semibold text-sm text-gray-900 dark:text-white">智能搜索</div>
+              <div class="font-semibold text-sm text-gray-900 dark:text-white">语义搜索</div>
               <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">混合检索（关键词 + 语义），自动引用来源文档</div>
             </div>
           </div>

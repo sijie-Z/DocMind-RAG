@@ -5,7 +5,7 @@
       <div class="mb-6">
         <div class="flex items-center justify-between">
           <div>
-            <h1 class="text-2xl font-bold text-gray-800 dark:text-white">{{ t('conversations.title') }}</h1>
+            <h1 class="text-2xl font-bold text-gray-800 dark:text-white">{{ t('menu.conversations') }}</h1>
             <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">查看和管理对话记录</p>
           </div>
           <n-button type="primary" @click="startNewChat">

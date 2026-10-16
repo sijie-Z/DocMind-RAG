@@ -19,6 +19,7 @@ export default {
     actions: '操作'
   },
   profile: {
+    overview: '概要',
     basicInfo: '基本情報',
     username: 'ユーザー名',
     email: 'メールアドレス',

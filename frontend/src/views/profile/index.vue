@@ -97,7 +97,8 @@
           <n-card class="rounded-2xl shadow-xl border-0 min-h-[600px]">
             <n-tabs type="line" animated size="large" pane-class="pt-6">
               <!-- 概览面板 -->
-              <n-tab-pane name="overview" :tab="t('menu.dashboard')">
+              <!-- T5 命名归一：个人概览 tab 不再借用仪表盘页名，改用本页域键 profile.overview -->
+              <n-tab-pane name="overview" :tab="t('profile.overview')">
                 <!-- 统计卡片 -->
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                   <div v-for="stat in statItems" :key="stat.label" 

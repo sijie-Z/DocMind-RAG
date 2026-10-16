@@ -52,7 +52,7 @@ const Host = defineComponent({
 
 const i18n = createI18n({
   legacy: false, locale: 'zh', missingWarn: false, fallbackWarn: false,
-  messages: { zh: { conversations: { title: '会话历史' }, common: {} } },
+  messages: { zh: { conversations: { title: '会话历史' }, menu: { conversations: '历史记录' }, common: {} } },
 })
 
 async function mountPage() {

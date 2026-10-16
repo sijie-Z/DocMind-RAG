@@ -7,7 +7,7 @@
           <n-icon size="28" class="text-emerald-500"><HelpCircleOutline /></n-icon>
         </div>
         <div>
-          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">帮助中心</h1>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('menu.systemHelp') }}</h1>
           <p class="text-sm text-gray-500 dark:text-gray-400">快速上手 DocMind 所需的一切</p>
         </div>
       </div>
@@ -96,10 +96,13 @@
 
 <script setup lang="ts">
 import { NCollapse, NCollapseItem, NIcon } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import {
   HelpCircleOutline, RocketOutline, GridOutline, ChatbubblesOutline, KeyOutline,
   SearchOutline, HardwareChipOutline, LinkOutline, DocumentsOutline
 } from '@vicons/ionicons5'
+
+const { t } = useI18n()
 
 const quickStart = [
   { title: '上传文档', desc: '前往知识库上传 PDF、Word、Excel 或文本文件，系统会自动解析并建立索引。' },
