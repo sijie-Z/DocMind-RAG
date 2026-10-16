@@ -959,16 +959,24 @@ const loadAllData = async () => {
   loadProviders()
 
   // Wait for next tick to ensure DOM is ready for ECharts
-  setTimeout(() => {
+  // （定时器晚到/无 window 环境安全跳过：vitest node 环境赛跑时该回调可能在环境
+  //   拆除后触发，裸碰 window 会抛 Unhandled ReferenceError；见 onUnmounted 的
+  //   clearTimeout + removeEventListener 闭环）
+  resizeTimer = setTimeout(() => {
+    if (typeof window === 'undefined') return
     initCharts()
     window.addEventListener('resize', handleResize)
   }, 100)
 }
 
+/** 延迟挂 resize 监听的定时器句柄（onUnmounted 清理，防环境拆除后触发） */
+let resizeTimer: ReturnType<typeof setTimeout> | undefined
+
 onMounted(loadAllData)
 
 onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
+  if (resizeTimer !== undefined) clearTimeout(resizeTimer)
+  if (typeof window !== 'undefined') window.removeEventListener('resize', handleResize)
   storageChart?.dispose()
   activityChart?.dispose()
 })
