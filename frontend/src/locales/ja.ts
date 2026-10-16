@@ -18,7 +18,8 @@ export default {
     copied: 'コピーしました',
     warning: 'お知らせ',
     copyFailed: 'コピーに失敗しました',
-    actions: '操作'
+    actions: '操作',
+    noDescription: '説明なし',
   },
   profile: {
     overview: '概要',
@@ -97,18 +98,15 @@ export default {
     recentActivity: '最近のアクティビティ'
   },
   users: {
-    title: 'ユーザー管理',
     searchPlaceholder: 'ユーザーを検索...',
     create: '新規ユーザー',
     edit: 'ユーザー編集',
     resetPassword: 'パスワードリセット',
     active: '有効',
     inactive: '無効',
-    remark: '備考',
     organizations: '所属組織',
     roleUser: '一般ユーザー',
     roleAdmin: '管理者',
-    deleteConfirm: 'このユーザーを削除しますか？',
     deleteConfirmWithName: 'ユーザー「{username}」を削除しますか？この操作は取り消せません。',
     subtitle: 'システム内の全ユーザー情報と権限を管理',
     noData: 'ユーザーデータがありません',
@@ -158,16 +156,19 @@ export default {
     memberRemoved: 'メンバーを削除しました',
     roleUpdated: 'ロールを更新しました',
     loadUsersFailed: 'ユーザー一覧の読み込みに失敗しました',
-    memberOpFailed: '操作に失敗しました'
+    memberOpFailed: '操作に失敗しました',
+    overview: '概要',
+    members: 'メンバー',
+    documents: 'ナレッジベース',
+    noData: 'データなし',
+    id: 'ID',
   },
   chat: {
     aiAssistant: 'AIアシスタント',
-    tagline: 'RAGベースのインテリジェントQ&A',
     clearChat: 'チャットをクリア',
     newChat: '新しいチャット',
     welcome: 'こんにちは、DocMind アシスタントです。何かお手伝いしましょうか？',
     welcomeDesc: '質問に答えたり、ドキュメントを分析したり、コードを書いたり、ただおしゃべりしたりできます。',
-    sources: '出典',
     demoData: 'デモデータ',
     inputPlaceholder: 'メッセージを入力（Shift + Enterで改行）...',
     uploadFile: 'ファイルをアップロード（近日公開）',
@@ -177,17 +178,15 @@ export default {
     send: '送信',
     disclaimer: 'AIが生成するコンテンツは不正確な場合があります。',
     connecting: 'サーバーに接続中...',
-    connectionFailed: 'サーバーへの接続に失敗しました',
     sendFailed: 'メッセージの送信に失敗しました',
     networkError: 'ネットワークエラー',
     retrying: 'サーバー混雑のため自動再試行中（{attempt}/{maxRetries} 回目）...',
-    cleared: '対話をクリアしました',
     historyFailed: '履歴の読み込みに失敗しました',
     // F 波补键：导出按钮 tooltip（词族与 exportTitle「対話のエクスポート」一致）
     exportChat: '対話をエクスポート',
     status: {
-      connected: '接続済み',
       connecting: '接続中...',
+      connected: '接続済み',
       disconnected: '未接続',
       error: '接続エラー',
       unknown: '不明な状態'
@@ -195,7 +194,6 @@ export default {
     noHistory: '履歴なし',
     backToBottom: '最新のメッセージに戻る',
     stopGenerating: '生成を停止',
-    stopped: '生成を停止しました',
     suggestions: {
       quantum: '量子コンピュータについて説明して',
       quantumDesc: '基本的な原理を簡単な言葉で説明してください',
@@ -206,22 +204,14 @@ export default {
       travel: '旅行の計画を立てて',
       travelDesc: '京都1週間旅行の旅程を作成してください'
     },
-    previewFailed: 'プレビュー内容を読み込めませんでした',
     sseError: 'SSEエラー',
-    sseRetry: 'SSE接続を再試行中（残り {left} 回）',
     feedbackLiked: '高評価を受け付けました。フィードバックありがとうございます！',
     feedbackDisliked: '低評価を受け付けました。今後も改善に努めます。',
-    feedbackFailed: 'フィードバックに失敗しました：{message}',
     feedbackRetryLater: 'フィードバックに失敗しました。しばらくして再試行してください',
     fileSizeLimit: 'ファイルサイズは 10MB 以下にしてください',
-    uploadFailedWithReason: 'アップロードに失敗しました：{message}',
-    docParsed: 'ドキュメント {name} の解析が完了しました。質問を開始できます',
-    noOriginalFile: '元のファイルを取得できません。ファイルを選択し直してアップロードしてください',
-    retryUploadFailed: '再アップロードに失敗しました',
     waitForUpload: 'ファイルのアップロードが完了するまでお待ちください',
     waitForParsing: 'ファイルは解析中です。解析が完了するまで質問をお待ちください（通常は数秒かかります）',
     removeFailedAttachments: '解析に失敗した添付ファイルがあります。削除または再アップロードしてから質問してください',
-    partialAttachmentsNotReady: '一部の添付ファイルが準備できていないため、テキストメッセージとして送信しました',
     attachmentsNotReady: '添付ファイルの準備ができていません。解析が完了してから使用してください',
     chatCleared: '対話履歴をクリアしました',
     clearFailed: 'クリアに失敗しました',
@@ -242,15 +232,12 @@ export default {
     fileFromChat: 'チャットからのアップロード',
     fileUploadFailed: 'アップロード失敗',
     documentPreview: 'ドキュメントプレビュー',
-    chatUpload: 'チャットアップロード',
     knowledgeUpload: 'ナレッジベースアップロード',
     uploadedAt: 'アップロード日時',
     description: '説明',
     contentSummary: '内容の要約',
     noContent: '内容がありません',
     downloadDocument: 'ドキュメントをダウンロード',
-    liked: '高評価済み',
-    disliked: '低評価済み',
     analyzeFiles: 'アップロードした {n} 個のファイルを分析してください',
     newConversation: '新しいチャット',
     attachmentModeOnly: '添付ファイルのみモード',
@@ -280,7 +267,11 @@ export default {
     promptApplied: 'プロンプトテンプレート「{name}」を適用しました。対話を開始してください',
     promptDefaultName: '無題',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
-    sseWarning: 'サーバーからの通知：今回の回答が不完全な可能性があります'
+    sseWarning: 'サーバーからの通知：今回の回答が不完全な可能性があります',
+    backToConversations: '対話リストに戻る',
+    liked: '高評価済み',
+    disliked: '低評価済み',
+    feedbackFailed: 'フィードバックに失敗しました：{message}',
   },
   validation: {
     required: 'この項目は必須です',
@@ -291,10 +282,8 @@ export default {
     emailInvalid: 'メールアドレスの形式が正しくありません'
   },
   knowledge: {
-    title: 'ナレッジベース管理',
     subtitle: '企業ナレッジドキュメントをアップロード・管理します',
     searchPlaceholder: 'ナレッジベースを検索...',
-    rebuild: 'インデックスを再構築',
     upload: 'アップロード',
     tags: {
       tech: '技術文書',
@@ -315,11 +304,6 @@ export default {
     fileTitle: 'タイトル（任意）',
     addTags: 'タグを追加（Enterで確定）',
     fileDesc: '説明（任意）',
-    cancel: 'キャンセル',
-    confirm: 'アップロードを確定',
-    uploading: 'アップロード中...',
-    success: 'アップロード成功',
-    error: 'アップロード失敗',
     status: {
       uploading: 'アップロード中',
       processing: '解析中',
@@ -329,25 +313,25 @@ export default {
     uploadList: 'タスクリスト',
     noActiveTasks: '実行中のタスクはありません',
     clearFinished: '完了したタスクをクリア',
-    typeError: 'サポートされていないファイル形式です',
-    sizeError: 'ファイルサイズが制限（10MB）を超えています',
     table: {
       name: 'ファイル名',
       size: 'サイズ',
-      type: 'タイプ',
       status: 'ステータス',
       uploadTime: 'アップロード日時',
       actions: '操作',
-      preview: 'プレビュー',
-      delete: '削除',
-      download: 'ダウンロード'
     },
-    actions: '操作',
     deleteConfirm: 'このファイルを削除してもよろしいですか？',
-    view: '「{title}」を表示中'
+    docStatus: {
+      pending: '処理待ち',
+      uploaded: 'アップロード済み',
+      parsing: '解析中',
+      parsed: '解析完了',
+      indexed: 'インデックス済み',
+      failed: '失敗',
+      unknown: '不明'
+    },
   },
   prompts: {
-    title: 'プロンプト管理',
     subtitle: 'AIアシスタントのシステムプロンプトと応答スタイルを管理します',
     addTemplate: 'テンプレート追加',
     editTemplate: 'テンプレート編集',
@@ -355,15 +339,7 @@ export default {
     seed: '初期テンプレートを作成',
     system: 'システム',
     custom: 'カスタム',
-    noDescription: '説明なし',
     confirmDelete: 'このテンプレートを削除しますか？',
-    columns: {
-      name: '名前',
-      category: 'カテゴリ',
-      content: '内容',
-      updatedAt: '更新日時',
-      action: '操作'
-    },
     form: {
       name: 'テンプレート名',
       namePlaceholder: 'テンプレート名を入力',
@@ -423,7 +399,9 @@ export default {
     registerSuccess: '登録に成功しました',
     goToLogin: 'ログインへ',
     goToRegister: '登録へ',
-    demoDesc: 'デモアカウントを使用 (guest / 123456)'
+    demoDesc: 'デモアカウントを使用 (guest / 123456)',
+    loginFailed: 'ログインに失敗しました',
+    registerFailed: '登録に失敗しました',
   },
   menu: {
     home: 'ホーム',
@@ -497,7 +475,6 @@ export default {
     retry: '再試行'
   },
   monitoring: {
-    title: 'システム監視',
     refresh: 'データを更新',
     systemStatus: 'システム状態',
     cpu: 'CPU使用率',
@@ -571,45 +548,15 @@ export default {
     startNewBtn: '新しいチャット',
     untitled: '無題のチャット',
     messages: '件のメッセージ',
-    noMessage: 'メッセージがまだありません',
-    viewDetail: '詳細を表示',
-    delete: 'チャットを削除',
     loadFailed: '対話リストの読み込みに失敗しました'
   },
   workflow: {
-    title: 'Agent ワークフロー',
-    subtitle: 'エンドツーエンドのAgentオーケストレーション',
-    badge: 'Agent Orchestration',
     description: '複雑なAIタスクを段階的なパイプラインに分解し、統一されたメトリクスと状態管理で実行品質を監視します。',
-    stages: 'パイプラインステージ',
-    snapshot: '実行スナップショット',
-    trend7d: '7日間のアクティビティ傾向',
-    stageGoal: '目標理解',
-    stageGoalDesc: 'ユーザー入力を実行可能なタスクに変換し、目標、制約、成功基準を特定します。',
-    stageContext: 'コンテキスト集約',
-    stageContextDesc: '会話履歴、ドキュメント結果、設定を統一コンテキストにリンクします。',
-    stageReasoning: '戦略推論',
-    stageReasoningDesc: 'タスクタイプに応じて応答戦略を選択し、精度、速度、コストのバランスを取ります。',
-    stageCompose: '結果構成',
-    stageComposeDesc: '回答構造、参照情報、次のステップの提案を整理し、実行可能性を高めます。',
-    stageFeedback: 'フィードバックループ',
-    stageFeedbackDesc: 'ログ、メトリクス、ユーザー行動信号を通じてパイプライン設定を最適化します。',
-    statusStable: '安定',
-    statusRunning: '実行中',
-    statusOptimizing: '最適化中',
-    statusHealthy: '健全',
-    statusObserving: '観察中',
-    eventInit: 'ワークフロー初期化完了',
-    eventInitDesc: '基本パイプライン接続完了：入力、検索、推論、出力、監視。',
-    eventSync: 'プロフィールデータ同期',
-    eventSyncDesc: 'アカウントとアクティビティ統計をダッシュボードに書き込み。',
-    eventUpgrade: '実行戦略アップグレード',
-    eventUpgradeDesc: 'コンテキストウィンドウと出力構成戦略をアップグレード。',
-    metricConversations: '会話総数',
-    metricMessages: 'メッセージ総数',
-    metricDocuments: 'ドキュメント',
-    metricRole: '現在の役割'
   },
+  notifications: {
+    markAllRead: 'すべて既読',
+  },
+
   agentReplay: {
     entry: 'リプレイを見る',
     title: '実行リプレイ',
@@ -676,7 +623,6 @@ export default {
     planPendingHint: 'タスクは計画の承認待ちです：まず上の計画カードで承認 / 編集 / 拒否してください（またはタスクをキャンセル）'
   },
   scheduler: {
-    title: '定期タスク',
     subtitle: 'スケジュールで実行される Agent タスクの管理。実行結果は「前回の実行」から確認できます',
     create: '定期タスクを作成',
     noData: '定期タスクがありません',
@@ -790,7 +736,6 @@ export default {
     }
   },
   mcp: {
-    title: 'MCP サーバー',
     subtitle: '動的接続された MCP サーバーの状態とツール登録状況（読み取り専用）',
     readOnlyNotice: '読み取り専用ビュー：有効化/無効化や追加は backend/mcp_servers.json を編集してバックエンドを再起動してください。このページではオンライン書き込みを行いません。',
     notStarted: 'MCP マネージャーはまだ初期化されていません（バックエンドの起動が未完了、または設定が未読み込みの可能性があります）。',

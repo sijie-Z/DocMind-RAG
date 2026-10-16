@@ -14,8 +14,9 @@ import ja from '@/locales/ja'
 import fr from '@/locales/fr'
 
 // 视图 src/views/monitoring/index.vue 实际消费的 monitoring.* 叶子键（平铺部分）
+// G 波：title 退役（h1 归 menu.monitoring，T9），本清单同步移除
 const FLAT_KEYS = [
-  'title', 'refresh', 'systemStatus', 'cpu', 'memory', 'appStatus',
+  'refresh', 'systemStatus', 'cpu', 'memory', 'appStatus',
   'activeConnections', 'totalRequests', 'errors', 'avgResponseTime',
   'kbStatus', 'totalDocs', 'totalChunks', 'indexSize', 'searchRequests',
   'alertStatus', 'activeAlerts', 'critical', 'warning', 'normal', 'info',

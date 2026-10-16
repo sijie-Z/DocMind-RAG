@@ -209,7 +209,7 @@
                   {{ t('menu.notifications') }}
                 </div>
                 <n-button text size="tiny" type="primary" @click="handleMarkAllRead" v-if="unreadCount > 0">
-                  全部已读
+                  {{ t('notifications.markAllRead') }}
                 </n-button>
               </div>
               <!-- 错误态入口（T1 · §7.2③）：拉取失败不再假装"没有通知"，给重试 -->

@@ -7,6 +7,7 @@
  * 变异点：配色表改回 docx/doc/md 死键 → 「真实枚举六值」用例精确红。
  */
 import { describe, it, expect } from 'vitest'
+import i18n from '@/locales'
 import { docIconColor, docStatusLabel, docStatusType, isInProgressDoc, computeDocStats } from '../docDisplay'
 
 describe('docIconColor · 与后端 DocumentType 枚举对齐（B15）', () => {
@@ -106,5 +107,24 @@ describe('文档状态机 · 六值域 + 详情同义词（B16/K1 双词表）',
     expect(docStatusLabel(undefined)).toBe('未知')
     expect(docStatusType(null)).toBe('default')
     expect(docStatusType('weird')).toBe('default')
+  })
+})
+
+describe('G波 · 状态词词条化（knowledge.docStatus.*）', () => {
+  it('en/ja/fr 相位下返回对应译文（改动前恒为硬编码中文）', () => {
+    const prev = i18n.global.locale.value
+    try {
+      i18n.global.locale.value = 'en'
+      expect(docStatusLabel('indexed')).toBe('Indexed')
+      expect(docStatusLabel('pending')).toBe('Pending')
+      expect(docStatusLabel('failed')).toBe('Failed')
+      expect(docStatusLabel(null)).toBe('Unknown')
+      i18n.global.locale.value = 'ja'
+      expect(docStatusLabel('indexed')).toBe('インデックス済み')
+      i18n.global.locale.value = 'fr'
+      expect(docStatusLabel('indexed')).toBe('Indexé')
+    } finally {
+      i18n.global.locale.value = prev
+    }
   })
 })
