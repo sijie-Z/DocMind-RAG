@@ -183,6 +183,8 @@ export default {
     retrying: 'Serveur occupé, nouvelle tentative automatique ({attempt}/{maxRetries})...',
     cleared: 'Conversation effacée',
     historyFailed: 'Échec du chargement de l\'historique',
+    // F 波补键：导出按钮 tooltip（词族与 exportTitle « Export de la conversation » 一致）
+    exportChat: 'Exporter la conversation',
     status: {
       connected: 'Connecté',
       connecting: 'Connexion...',

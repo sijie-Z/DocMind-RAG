@@ -300,6 +300,7 @@ export default {
     dropFiles: 'Drop files here to upload',
     // Export
     exportTitle: 'Chat Export',
+    exportChat: 'Export Chat',
     roleUser: 'User',
     roleAssistant: 'Assistant',
     sourceDoc: 'Document',

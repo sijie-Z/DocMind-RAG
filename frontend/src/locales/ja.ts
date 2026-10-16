@@ -183,6 +183,8 @@ export default {
     retrying: 'サーバー混雑のため自動再試行中（{attempt}/{maxRetries} 回目）...',
     cleared: '対話をクリアしました',
     historyFailed: '履歴の読み込みに失敗しました',
+    // F 波补键：导出按钮 tooltip（词族与 exportTitle「対話のエクスポート」一致）
+    exportChat: '対話をエクスポート',
     status: {
       connected: '接続済み',
       connecting: '接続中...',
