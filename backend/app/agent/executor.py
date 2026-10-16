@@ -119,6 +119,10 @@ class Executor:
         self.approval_degraded: bool = False
         # 审批附加指令（"改指令续跑"）：注入后续步骤提示词（人工指导段）。
         self.human_guidance: str = ""
+        # @引用文档段（体验第四波）：由 execute() 每 run 写入（loop 透传 run
+        # 参数），并入每个步骤的提示词——默认工具模式下 executor 是唯一写
+        # 答案的模型，此前该段落只到 planner（实机"只找到文档列表信息"成因）。
+        self.document_context: str = ""
         # 控制流信号（"approval"/"cancel"）：置位后抛 ApprovalRequired/RunCancelled；
         # loop 据此抑制"条件路由"并区分暂停/取消收尾。每 run 起始处复位。
         self.pending_control: str = ""
@@ -135,6 +139,7 @@ class Executor:
         self.approval_decisions = []
         self.approval_degraded = False
         self.human_guidance = ""
+        self.document_context = ""
         self.pending_control = ""
 
     # ── HITL helpers（approval.py）────────────────────────────────────────────
@@ -272,6 +277,7 @@ class Executor:
         ctx: Any = None,  # ExecutionContext
         on_step_done: Callable[[PlanStep], Awaitable[None]] | None = None,
         human_guidance: str = "",
+        document_context: str = "",
     ) -> AsyncGenerator[AgentEvent, str]:
         """Execute plan steps in dependency order.
 
@@ -282,12 +288,16 @@ class Executor:
                 调用方传 None 即天然关闭。
             human_guidance: HITL"改指令续跑"的人工指导（审批应答附加），注入
                 后续步骤提示词（见 _execute_step_once）。
+            document_context: 用户 @ 引用文档的上下文段（体验第四波）——注入
+                每个步骤的提示词；loop 从 run 参数透传，子代理/裸执行器缺省
+                为空（不注入）。
 
         Yields: tool_call, tool_result, tool_error, thinking, chunk events
         Returns: accumulated final answer string (via generator return)
         """
         if human_guidance:
             self.human_guidance = human_guidance
+        self.document_context = document_context or ""
 
         while not plan.is_complete:
             # ── HITL：协作式取消（步间检查点）──
@@ -894,6 +904,13 @@ class Executor:
                 "\n\n## 人工指导（审批应答时附加，优先级等同用户请求）\n"
                 + self.human_guidance[:2000]
             )
+
+        # @引用（体验第四波缺陷修复）：用户显式引用的知识库文档段必须进步骤
+        # 提示词——此前只注入 planner/toolless，默认工具模式下执行器的答案
+        # 模型全程看不到引用正文（实机："只找到文档列表信息，没有拿到可总结
+        # 的正文"）。与 human_guidance/摘要段同法并入 system 段。
+        if self.document_context:
+            system_prompt += f"\n\n{self.document_context}"
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},

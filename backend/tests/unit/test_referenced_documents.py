@@ -2,16 +2,23 @@
 
 被测契约：
 - build_referenced_document_context：可用引用 → 关键摘要（query 相关分块）
-  进上下文段；不存在 / 跨组织 / 检索失败 / 服务不可用 / 超上限 → 逐条诚实
-  警告（绝不静默）；全部失败 → document_context 为 None（不外发空段）。
+  进上下文段；query 检索零命中 → 按 document_id 直读文档头部 chunk 兜底
+  （第四波实机缺陷修复："总结这份文档"类元问题与正文零词汇重叠，此前
+  零命中后只注入标题）；不存在 / 跨组织 / 检索失败 / 服务不可用 / 超上限
+  → 逐条诚实警告（绝不静默）；全部失败 → document_context 为 None
+  （不外发空段）。
 - loop.run(document_context=...)：并入预规划上下文——planner 的 memory_context
-  可见（与记忆同轨），无引用时不注入（负例）。
+  可见（与记忆同轨），**且 executor 步骤提示词同样可见**（默认工具模式下
+  唯一写答案的模型；实机"只找到文档列表信息，没有拿到可总结的正文"的
+  直接成因之一）；无引用时不注入（负例）。
 - AgentService.chat：把引用解析成上下文段传给 run，警告以 warning 事件先于
   任务事件外发（含 task_id）。
 
 变异点：
 - builder 把「跨组织」分支删掉 → 跨组织用例红（文档泄漏进上下文）；
+- builder 不做直读兜底 → 直读用例红（零命中后只剩标题 + 降级警告）；
 - loop 不拼 document_context → planner 捕获用例红；
+- loop 不把 document_context 传给 executor.execute → executor 捕获用例红；
 - chat 不传 referenced_document_ids → service 传参用例红。
 """
 
@@ -30,6 +37,7 @@ from app.agent.exec_context import ExecutionContext
 from app.agent.loop import PERAgentLoop
 from app.agent.service import AgentService, build_referenced_document_context
 from app.core.database import Base
+from app.core.elasticsearch import ElasticsearchTools
 from app.models.document import Document, DocumentType
 from app.rag.retriever import HybridRetriever
 
@@ -128,6 +136,13 @@ def _hermetic(monkeypatch):
 
     monkeypatch.setattr(ExecutionContext, "save", _save)
     monkeypatch.setattr(HybridRetriever, "get_embedding", AsyncMock(return_value=[]))
+    # 直读兜底（第四波修复）走 ElasticsearchTools：默认桩成"索引无命中"——
+    # 既有用例保持环境封闭（不发起真实 ES 调用）；需要命中/故障形态的用例
+    # 在各自用例体内覆写。
+    monkeypatch.setattr(
+        ElasticsearchTools, "search_documents",
+        AsyncMock(return_value={"hits": {"hits": []}}),
+    )
 
 
 @pytest.fixture
@@ -209,6 +224,50 @@ class TestBuildReferencedDocumentContext:
         assert sum("超出单次上限" in w for w in warnings) == 2
         assert len(warnings) == 12  # 10 条（不存在）+ 2 条（超出）——一条不吞
 
+    async def test_query_empty_falls_back_to_direct_head_chunk_read(self, doc_factory, monkeypatch):
+        """第四波实机缺陷回归（红基线）：“总结这份文档”类元问题与正文零词汇
+        重叠——query 检索（含质量门）零命中后，正文必须按 document_id 直读
+        头部 chunk 兜底，而不是只注入标题（实机："我目前只找到文档列表信息，
+        没有拿到可总结的正文内容"）。
+
+        变异点：删掉直读兜底 → 本用例红（excerpt 空、仅标题 + 降级警告）。
+        """
+        await _add_doc(doc_factory, "d5")
+        monkeypatch.setattr(
+            ElasticsearchTools, "search_documents",
+            AsyncMock(return_value={"hits": {"hits": [
+                {"_source": {"content": "# Contributing to DocMind\n欢迎贡献……"}},
+                {"_source": {"content": "行为准则：Contributor Covenant……"}},
+            ]}}),
+        )
+        pipe = _FakePipeline()  # 检索臂正常执行但零命中（无 texts）
+
+        ctx, warnings = await build_referenced_document_context(
+            ["d5"], "总结这份文档", 1, pipeline=pipe,
+        )
+
+        assert ctx is not None and "欢迎贡献" in ctx, "正文必须经直读进入上下文"
+        assert warnings == [], "直读成功 = 无降级，不得外发误导性警告"
+        assert pipe.calls, "query 检索仍应先执行（相关分块优先，直读是兜底）"
+
+    async def test_direct_read_also_empty_keeps_description_fallback_with_warning(
+        self, doc_factory, monkeypatch,
+    ):
+        """直读兜底同样拿不到正文（ES 故障/未索引）→ 退回既有降级语义：
+        描述兜底 + 诚实警告（绝不静默）。"""
+        await _add_doc(doc_factory, "d6", description="只有描述，没有可读正文")
+        monkeypatch.setattr(
+            ElasticsearchTools, "search_documents",
+            AsyncMock(side_effect=RuntimeError("ES 不可用（替身）")),
+        )
+
+        ctx, warnings = await build_referenced_document_context(
+            ["d6"], "q", 1, pipeline=_FakePipeline(),
+        )
+
+        assert ctx is not None and "只有描述" in ctx
+        assert any("未检索到相关正文" in w for w in warnings)
+
 
 # ── loop 接线 ────────────────────────────────────────────────────────────────
 
@@ -235,6 +294,69 @@ class TestLoopDocumentContextWiring:
         _ = [ev async for ev in loop.run("查预算")]
 
         assert "用户显式引用的知识库文档" not in planner.memory_contexts[0]
+
+    async def test_document_context_reaches_executor_step_prompt(self):
+        """工具模式（默认）下唯一写答案的是 executor 的步骤 LLM——@引用摘要
+        此前只到 planner/toolless，答案模型全程看不到正文（第四波实机
+        “只找到文档列表信息”的直接成因之一）。钉住：步骤提示词必须包含
+        引用段（捕获真实发给 LLM 的 messages）。
+
+        变异点：loop 不把 document_context 传给 executor.execute → 捕获红。
+        """
+        captured: list[list] = []
+
+        async def _create(*, messages=None, tools=None, **kwargs):
+            captured.append(messages)
+            msg = SimpleNamespace(content="结论", tool_calls=None, role="assistant")
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=msg, finish_reason="stop")],
+                usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2),
+            )
+
+        client = MagicMock()
+        client.chat.completions.create = _create
+        loop = PERAgentLoop(client, _loop_cfg(), organization_id=1, user_id=0)
+        loop.memory = _FakeMemory()
+        loop._planner = _CapturingPlanner()
+
+        _ = [ev async for ev in loop.run("查预算", document_context=DOC_CTX)]
+
+        assert captured, "executor 步骤必须发起过 LLM 调用（前置条件）"
+        system_prompts = [
+            m["content"] for msgs in captured if msgs
+            for m in msgs if m.get("role") == "system"
+        ]
+        assert any("用户显式引用的知识库文档" in p for p in system_prompts), (
+            "引用段必须进入 executor 步骤提示词（planner 之外的第二注入点）"
+        )
+
+    async def test_without_document_context_executor_prompt_unaffected(self):
+        captured: list[list] = []
+
+        async def _create(*, messages=None, tools=None, **kwargs):
+            captured.append(messages)
+            msg = SimpleNamespace(content="结论", tool_calls=None, role="assistant")
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=msg, finish_reason="stop")],
+                usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2),
+            )
+
+        client = MagicMock()
+        client.chat.completions.create = _create
+        loop = PERAgentLoop(client, _loop_cfg(), organization_id=1, user_id=0)
+        loop.memory = _FakeMemory()
+        loop._planner = _CapturingPlanner()
+
+        _ = [ev async for ev in loop.run("查预算")]
+
+        system_prompts = [
+            m["content"] for msgs in captured if msgs
+            for m in msgs if m.get("role") == "system"
+        ]
+        assert system_prompts, "executor 步骤必须发起过 LLM 调用（前置条件）"
+        assert not any("用户显式引用的知识库文档" in p for p in system_prompts), (
+            "无引用时不得注入引用段（负例）"
+        )
 
 
 # ── service.chat 接线 ────────────────────────────────────────────────────────

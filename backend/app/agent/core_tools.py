@@ -224,7 +224,15 @@ async def summarize_document(
         # 工具内 LLM 记账（issue #239 minor-2）：此前直连调用不入账，
         # 任务级 total_tokens 不含工具内部用量。
         record_llm_usage(resp, ctx_from_run_context(run_context))
-        summary = resp.choices[0].message.content or "Summary generation failed."
+        summary = (resp.choices[0].message.content or "").strip()
+        if not summary:
+            # 第四波实机诊断（复验于 e5b5e5b）：deepseek-v4-flash 为推理模型——
+            # max_tokens=500 时 reasoning_content 吃满预算、正文为空
+            # （finish_reason=length）。空正文必须走"不可用 → 原文预览"兜底
+            # （与下方异常路径同款），绝不把 "Summary generation failed." 当
+            # 工具结果喂回模型——executor 会据此放弃总结（实机"没有拿到可总结
+            # 的正文"的最后一厘米）。
+            raise RuntimeError("empty summary content (reasoning consumed budget)")
         return f"Document: {filename}\n\n{summary}"
     except Exception as e:
         logger.warning(f"LLM summarization failed for {document_id}: {e}")

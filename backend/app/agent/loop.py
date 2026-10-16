@@ -644,6 +644,10 @@ class PERAgentLoop:
                         on_step_done=self._make_step_checkpoint_callback(),
                         # HITL"改指令续跑"：审批应答附加的人工指导注入后续步骤。
                         human_guidance=self.human_guidance,
+                        # @引用文档段（第四波缺陷修复）：此前只注入 planner——
+                        # 默认工具模式下写答案的 executor 看不到引用正文，实机
+                        # 表现为"只找到文档列表信息，没有拿到可总结的正文"。
+                        document_context=document_context or "",
                     ):
                         yield event
                         if event.type == "chunk":
