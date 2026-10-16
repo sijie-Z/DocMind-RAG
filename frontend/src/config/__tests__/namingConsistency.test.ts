@@ -18,6 +18,10 @@
  *  3) 分类完备层：所有带 menu.* meta.title 的布局子路由必须在
  *     已归一 / 无页名标题 / 待归一（随 T9）三张清单之一，不许漏网；清单亦不得
  *     滞留已不存在的路由（防过期条目）。
+ *  4) 定位层（T9 定位三件套）：全部布局子路由的"生效高亮键"（meta.activeMenu
+ *     ?? route.name）必须落在 menu.ts 键集内——菜单面上不存在的键 = 侧栏
+ *     永不高亮（第一轮 P1-18 的根因）；六个隐藏页必须显式声明 meta.activeMenu，
+ *     声明其菜单面归属；深页必须接入 <PageBreadcrumb />（页内定位/返回出口）。
  */
 import { describe, it, expect } from 'vitest'
 import type { RouteRecordRaw } from 'vue-router'
@@ -61,7 +65,7 @@ const allRoutes = flatten(routes)
 const routeByName = new Map<string, RouteRecordRaw>()
 for (const r of allRoutes) if (r.name) routeByName.set(String(r.name), r)
 
-/** 菜单键全集：侧边栏 + 用户下拉（routeName → 菜单键） */
+/** 菜单键全集：侧边栏 + 尾部项 + 用户下拉（routeName → 菜单键） */
 const menuKeyOf = new Map<string, string>()
 for (const group of SIDEBAR_MENU_GROUPS) {
   for (const item of group.items) menuKeyOf.set(item.routeName, item.i18nKey)
@@ -76,6 +80,17 @@ const NORMALIZED_PAGES: Record<string, string> = {
   Conversations: '../../views/conversations/index.vue',
   AuditLogs: '../../views/admin/audit/index.vue',
   SystemHelp: '../../views/systemHelp/index.vue',
+  // T9 十组页名归一：h1 全部改引菜单键（值以菜单语义为准，裁决依据见 T9 报告）
+  Knowledge: '../../views/knowledge/index.vue',
+  Prompts: '../../views/prompts/index.vue',
+  Users: '../../views/users/index.vue',
+  Organizations: '../../views/organizations/index.vue',
+  Monitoring: '../../views/monitoring/index.vue',
+  McpServers: '../../views/mcp-servers/index.vue',
+  ScheduledTasks: '../../views/scheduled-tasks/index.vue',
+  Notifications: '../../views/notifications/index.vue',
+  Agent: '../../views/agent/index.vue',
+  Workflow: '../../views/workflow/index.vue',
 }
 
 /** 无页名标题页面（主标题是问候语/品牌/动态内容，不承载页名；页名由菜单+顶栏承载） */
@@ -86,22 +101,41 @@ const NO_NAME_HEADING: Record<string, string> = {
   SystemAbout: 'h1 是品牌名 DocMind',
 }
 
-/** 待归一清单（随 T9「定位三件套」一次性收口）：主标题仍用页域键或硬编码，与菜单键不同源 */
-const PENDING_TITLE_UNIFICATION: Record<string, string> = {
-  Knowledge: 'h1 用 knowledge.title，与 menu.knowledge 文案亦不同',
-  Prompts: 'h1 用 prompts.title（同文本异键）',
-  Users: 'h1 用 users.title（同文本异键）',
-  Organizations: 'h1 用 org.title（同文本异键）',
-  Monitoring: 'h1 用 monitoring.title，与 menu.monitoring 文案亦不同',
-  McpServers: 'h1 用 mcp.title（同文本异键）',
-  ScheduledTasks: 'h1 用 scheduler.title（同文本异键）',
-  Notifications: 'h1 用 notifications.title，与 menu.notifications 文案亦不同；通知组术语随 T9',
-  Agent: 'h1 硬编码；Agent 运行组命名随 T9',
-  Workflow: 'h1 硬编码；随 T9',
-}
+/** 待归一清单（T9 已清零：十组页名全部收口；新页面暂无法归一时登记于此） */
+const PENDING_TITLE_UNIFICATION: Record<string, string> = {}
 
 /** T5 本波新增键（同样吃四语存在性守护） */
 const T5_EXTRA_KEYS = ['profile.overview']
+
+/**
+ * 隐藏页（菜单面没有直接项、经页内入口到达的深页）→ 生效高亮键（其菜单面归属）。
+ * 高亮键一律取 menu.ts 的 routeName 空间：侧栏项（Knowledge/Workflow）或
+ * 用户下拉项（SystemHelp/SystemAbout/Notifications——铃铛弹层/头像下拉是其菜单面）。
+ */
+const HIDDEN_PAGES: Record<string, string> = {
+  KnowledgeGraph: 'Knowledge',
+  WorkflowEditor: 'Workflow',
+  AgentMemory: 'Workflow',
+  Notifications: 'Notifications',
+  SystemHelp: 'SystemHelp',
+  SystemAbout: 'SystemAbout',
+}
+
+/** 深页面包屑注册表（T9）：这些页面的视图源码必须接入 <PageBreadcrumb /> */
+const BREADCRUMB_PAGES: Record<string, string> = {
+  KnowledgeGraph: '../../views/knowledge/graph.vue',
+  WorkflowEditor: '../../views/workflow/editor.vue',
+  AgentMemory: '../../views/workflow/memory.vue',
+  Notifications: '../../views/notifications/index.vue',
+  SystemHelp: '../../views/systemHelp/index.vue',
+  SystemAbout: '../../views/systemAbout/index.vue',
+}
+
+/** 深页页头注册表（T9）：h1 必须引用路由 meta.title 键（顶栏/面包屑/h1 同源） */
+const DEEP_PAGE_HEADINGS: Record<string, string> = {
+  KnowledgeGraph: '../../views/knowledge/graph.vue',
+  AgentMemory: '../../views/workflow/memory.vue',
+}
 
 /** 从视图源码提取页面主标题（首个 h1/h2）里的第一个 t('…') 键 */
 function extractHeadingKey(source: string): string | null {
@@ -206,5 +240,76 @@ describe('命名一致性 · 分类完备层（menu.* 路由不许漏网）', ()
       if (!menuRouteNames.has(name)) stale.push(name)
     }
     expect(stale, `清单中存在已不存在/非 menu.* 的路由: ${stale.join(', ')}`).toEqual([])
+  })
+})
+
+describe('命名一致性 · 定位层（activeMenu 单一事实源）', () => {
+  const layoutRoot = routes.find((r) => r.children && r.children.length > 0)
+  const layoutChildren = layoutRoot?.children ?? []
+
+  it('前置条件：布局子路由非空', () => {
+    expect(layoutChildren.length).toBeGreaterThan(0)
+  })
+
+  it('每个布局子路由的生效高亮键（meta.activeMenu ?? name）落在菜单键集内', () => {
+    const broken: string[] = []
+    for (const r of layoutChildren) {
+      const name = String(r.name)
+      const effective = (r.meta?.activeMenu as string | undefined) ?? name
+      if (!menuKeyOf.has(effective)) broken.push(`${name} → ${effective}`)
+    }
+    expect(
+      broken,
+      `生效高亮键不在 menu.ts 键集中（侧栏将永不高亮）: ${broken.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('六个隐藏页显式声明 meta.activeMenu（其菜单面归属）', () => {
+    const wrong: string[] = []
+    for (const [name, expected] of Object.entries(HIDDEN_PAGES)) {
+      const actual = routeByName.get(name)?.meta?.activeMenu
+      if (actual !== expected) wrong.push(`${name}: activeMenu=${String(actual)} ≠ ${expected}`)
+    }
+    expect(wrong, `隐藏页 activeMenu 缺失或错误:\n${wrong.join('\n')}`).toEqual([])
+  })
+})
+
+describe('命名一致性 · 面包屑层（深页接入定位三件套）', () => {
+  for (const [routeName, file] of Object.entries(BREADCRUMB_PAGES)) {
+    it(`${routeName}：${file} 接入 <PageBreadcrumb />`, async () => {
+      const loader = viewRaw[file]
+      expect(loader, `${file} 未在 import.meta.glob 结果中（被移动/删除？）`).toBeTruthy()
+      const source = await loader()
+      expect(source, `${file} 未接入 <PageBreadcrumb />（深页缺面包屑/返回出口）`).toContain(
+        '<PageBreadcrumb',
+      )
+    })
+  }
+
+  for (const [routeName, file] of Object.entries(DEEP_PAGE_HEADINGS)) {
+    it(`${routeName}：${file} 的 h1 引用路由 meta.title 键（页名与顶栏/面包屑同源）`, async () => {
+      const expectedKey = routeByName.get(routeName)?.meta?.title as string | undefined
+      expect(expectedKey, `${routeName} 无 meta.title`).toBeTruthy()
+      const loader = viewRaw[file]
+      expect(loader, `${file} 未在 import.meta.glob 结果中`).toBeTruthy()
+      const source = await loader()
+      const headingKey = extractHeadingKey(source)
+      expect(
+        headingKey,
+        `${file} 主标题未找到 t('…') 键（标题被移除或硬编码回归）`,
+      ).toBe(expectedKey)
+    })
+  }
+
+  it('知识库页图谱入口带词条文字（不再是纯图标钮，P1-18）', async () => {
+    const loader = viewRaw['../../views/knowledge/index.vue']
+    expect(loader, 'knowledge/index.vue 未在 glob 中').toBeTruthy()
+    const source = await loader()
+    const idx = source.indexOf("'/knowledge/graph'")
+    expect(idx, '知识库页应保留图谱入口（→ /knowledge/graph）').toBeGreaterThan(-1)
+    const near = source.slice(Math.max(0, idx - 300), idx + 300)
+    expect(near, '图谱入口未引用词条文字（仍是纯图标钮，用户找不到）').toContain(
+      "t('router.knowledgeGraph')",
+    )
   })
 })

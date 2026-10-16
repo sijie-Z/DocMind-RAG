@@ -4,7 +4,7 @@
     <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
       <div>
         <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
-          {{ t('monitoring.title') }}
+          {{ t('menu.monitoring') }}
         </h1>
         <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm flex items-center gap-2">
           <span class="w-6 h-0.5 bg-blue-500 rounded-full"></span>
@@ -175,7 +175,7 @@
 
     <!-- 审计日志 -->
     <div class="bg-white/90 dark:bg-gray-800/90 backdrop-blur rounded-2xl border border-slate-200/60 dark:border-gray-700/60 p-5 shadow-sm">
-      <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">系统审计日志</h3>
+      <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">{{ t('menu.auditLogs') }}</h3>
       <n-data-table
         remote
         :columns="auditColumns"

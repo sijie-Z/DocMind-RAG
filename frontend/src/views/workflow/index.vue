@@ -4,7 +4,7 @@
       <!-- 头部 -->
       <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-2xl font-bold text-gray-800 dark:text-white">Agent 工作流</h1>
+          <h1 class="text-2xl font-bold text-gray-800 dark:text-white">{{ t('menu.workflow') }}</h1>
           <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">可视化编排 AI 工作流，让多个模型和工具协同工作</p>
         </div>
         <div class="flex gap-2">
@@ -156,6 +156,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { NIcon, NButton, NSpin, NTag, NInput, NDropdown, useDialog, useMessage } from 'naive-ui'
 import {
   AddOutline, CreateOutline, TrashOutline, GitBranchOutline, SearchOutline,
@@ -176,6 +177,7 @@ interface WorkflowItem {
 }
 
 const router = useRouter()
+const { t } = useI18n()
 const dialog = useDialog()
 const message = useMessage()
 

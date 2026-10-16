@@ -1,10 +1,13 @@
 <template>
   <div class="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
     <div class="max-w-6xl mx-auto">
+      <!-- T9 定位三件套：面包屑（DocMind / Agent 工作流 / Agent记忆）+ 返回出口（→ Agent 工作流） -->
+      <PageBreadcrumb :show-back="true" class="mb-4" />
+
       <!-- 头部 -->
       <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-2xl font-bold text-gray-800 dark:text-white">Agent 记忆系统</h1>
+          <h1 class="text-2xl font-bold text-gray-800 dark:text-white">{{ t('router.agentMemory') }}</h1>
           <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">管理 Agent 的短期记忆、长期记忆、工作记忆和反思记忆</p>
         </div>
         <div class="flex gap-2">
@@ -241,6 +244,10 @@ import {
 } from '@vicons/ionicons5'
 import { getAgentMemory, recallMemory, clearMemory } from '@/api/memory'
 import dayjs from 'dayjs'
+import { useI18n } from 'vue-i18n'
+import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
+
+const { t } = useI18n()
 
 interface MemoryItem {
   id: string

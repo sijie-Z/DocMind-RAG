@@ -5,7 +5,7 @@
       <div class="p-6 border-b border-gray-200/50 dark:border-gray-800/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gradient-to-r from-slate-50/30 to-slate-50/30 dark:from-slate-950/10 dark:to-slate-950/10">
         <div>
           <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-blue-600 dark:from-blue-400 dark:to-blue-400">
-            {{ t('mcp.title') }}
+            {{ t('menu.mcpServers') }}
           </h1>
           <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {{ t('mcp.subtitle') }}

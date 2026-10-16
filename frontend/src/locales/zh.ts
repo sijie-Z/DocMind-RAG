@@ -11,6 +11,8 @@ export default {
     warning: '提示',
     copyFailed: '复制失败',
     close: '关闭',
+    // T9 定位三件套：面包屑返回出口文案
+    back: '返回',
     edit: '编辑',
     loading: '加载中...',
     success: '操作成功',
@@ -480,7 +482,6 @@ export default {
   },
   menu: {
     home: '首页',
-    dashboard: '仪表盘',
     chat: '智能对话',
     knowledge: '知识库',
     prompts: '提示词管理',

@@ -11,6 +11,7 @@ export default {
     failed: 'Échec',
     noData: 'Aucune donnée',
     refresh: 'Actualiser',
+    back: 'Retour',
     saveSuccess: 'Enregistré avec succès',
     deleteSuccess: 'Supprimé avec succès',
     copy: 'Copier',
@@ -346,7 +347,6 @@ export default {
   },
   menu: {
     home: 'Accueil',
-    dashboard: 'Tableau de bord',
     chat: 'Chat Intelligent',
     search: 'Recherche Sémantique',
     knowledge: 'Base de connaissances',

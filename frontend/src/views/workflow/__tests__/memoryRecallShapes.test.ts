@@ -14,6 +14,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import naive, { NMessageProvider, NDialogProvider } from 'naive-ui'
+import { createRouter, createMemoryHistory } from 'vue-router'
+import { createI18n } from 'vue-i18n'
 
 vi.mock('@/api/memory', () => ({
   getAgentMemory: vi.fn().mockResolvedValue({ data: { data: null } }),
@@ -44,8 +46,32 @@ const Host = defineComponent({
   },
 })
 
+// T9：记忆页接入面包屑（useRoute/useRouter + useI18n），挂载基座同步补插件
+// （照 realtimeWiring 先例）；空词条下 t() 回显键名，无碍本文件内容断言。
+const DummyRoute = defineComponent({ template: '<div />' })
+const i18n = createI18n({
+  legacy: false,
+  locale: 'zh',
+  missingWarn: false,
+  fallbackWarn: false,
+  messages: { zh: {} },
+})
+
+function makeRouter() {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/workflow/memory', name: 'AgentMemory', component: DummyRoute },
+      { path: '/dashboard', name: 'Dashboard', component: DummyRoute },
+    ],
+  })
+}
+
 async function mountMemory() {
-  const wrapper = mount(Host, { global: { plugins: [naive] } })
+  const router = makeRouter()
+  await router.push('/workflow/memory')
+  await router.isReady()
+  const wrapper = mount(Host, { global: { plugins: [naive, router, i18n] } })
   await flushPromises()
   return wrapper
 }

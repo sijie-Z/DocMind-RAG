@@ -2,12 +2,12 @@
   <div class="users-container h-full p-4 lg:p-6 overflow-y-auto">
     <!-- 现代化毛玻璃卡片容器 -->
     <div class="bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl rounded-3xl border border-white/20 dark:border-gray-800/30 shadow-2xl shadow-blue-500/10 h-full flex flex-col overflow-hidden">
-      
+
       <!-- 页面头部：现代化搜索与操作栏 -->
       <div class="p-6 border-b border-gray-200/50 dark:border-gray-800/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gradient-to-r from-slate-50/30 to-slate-50/30 dark:from-slate-950/10 dark:to-slate-950/10">
         <div>
           <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-blue-600 dark:from-blue-400 dark:to-blue-400">
-            {{ t('users.title') }}
+            {{ t('menu.users') }}
           </h1>
           <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {{ t('users.subtitle', '管理系统内的所有用户信息及其权限') }}

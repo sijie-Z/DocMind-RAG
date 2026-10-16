@@ -1,10 +1,13 @@
 <template>
   <div class="min-h-screen bg-gray-50 dark:bg-gray-950 px-4 sm:px-6 lg:px-8 py-6">
     <div class="max-w-6xl mx-auto space-y-6">
+      <!-- T9 定位三件套：面包屑（DocMind / 消息通知） -->
+      <PageBreadcrumb />
+
       <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">通知中心</h1>
-          <p class="text-sm text-gray-500 dark:text-gray-400">集中查看、筛选与处理系统消息</p>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('menu.notifications') }}</h1>
+          <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('notifications.subtitle') }}</p>
         </div>
         <div class="flex items-center gap-3">
           <n-button type="primary" ghost @click="handleRefresh">刷新</n-button>
@@ -84,12 +87,15 @@
 <script setup lang="ts">
 import { h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { NButton, } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { formatDate } from '@/utils/format'
+import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
 import { batchDeleteNotifications, deleteNotification, getNotificationSummary, getNotifications, markAllAsRead, markAsRead, type Notification, type NotificationSummaryResponse } from '@/api/notification'
 import { notificationSocket, type RealtimeNotificationPayload } from '@/utils/notificationSocket'
 
 const router = useRouter()
+const { t } = useI18n()
 const latestRealtimeId = ref<number | null>(null)
 
 const summary = reactive<NotificationSummaryResponse>({

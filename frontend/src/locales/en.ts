@@ -20,6 +20,7 @@ export default {
     copyFailed: 'Copy failed',
     copied: 'Copied',
     warning: 'Notice',
+    back: 'Back',
     actions: 'Actions'
   },
   profile: {

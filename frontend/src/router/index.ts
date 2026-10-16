@@ -3,7 +3,18 @@ import type { RouteRecordRaw } from 'vue-router'
 import Layout from '@/layouts/index.vue'
 import { useUserStore } from '@/stores/user'
 import { getToken, isTokenExpired, removeToken } from '@/utils/auth'
-import { installChunkLoadRetry } from '@/utils/chunkLoadRetry'
+
+/** 路由 meta 扩展（T9 定位三件套）：生效侧栏高亮键 */
+declare module 'vue-router' {
+  interface RouteMeta {
+    /**
+     * 生效高亮键（naive-ui 菜单 key = menu.ts 的 routeName 空间）：
+     * 隐藏页显式声明其菜单面归属（如 KnowledgeGraph → 'Knowledge'）；
+     * 缺省回退 route.name（菜单页自身即键）。契约由 namingConsistency 定位层守护。
+     */
+    activeMenu?: string
+  }
+}
 
 let sessionValidated = false
 let lastValidatedAt = 0
@@ -52,7 +63,7 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/dashboard/index.vue'),
         meta: {
           // T5 命名归一：本页四处（菜单/顶栏 meta.title/h1）统一引用 menu.home，
-          // 与侧边栏一致（值以菜单语义为准）；menu.dashboard 键自此无 UI 引用。
+          // 与侧边栏一致（值以菜单语义为准）；menu.dashboard 死键已随 T9 删除。
           title: 'menu.home',
           icon: 'home'
         }
@@ -90,6 +101,8 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/knowledge/graph.vue'),
         meta: {
           title: 'router.knowledgeGraph',
+          // T9：图谱 = 知识库子页，侧栏高亮「知识库」（修 P1-18 永不高亮）
+          activeMenu: 'Knowledge',
           icon: 'git-network'
         }
       },
@@ -165,6 +178,8 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/workflow/editor.vue'),
         meta: {
           title: 'router.workflowEditor',
+          // T9：编辑器 = Agent 工作流子页，侧栏高亮「Agent 工作流」
+          activeMenu: 'Workflow',
           icon: 'git-network'
         }
       },
@@ -174,6 +189,8 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/workflow/memory.vue'),
         meta: {
           title: 'router.agentMemory',
+          // T9：记忆 = Agent 工作流子页（入口在工作流页），侧栏高亮「Agent 工作流」
+          activeMenu: 'Workflow',
           icon: 'database'
         }
       },
@@ -201,6 +218,8 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/systemHelp/index.vue'),
         meta: {
           title: 'menu.systemHelp',
+          // T9：菜单面 = 头像下拉项（无侧栏项），高亮键即用户下拉 key 空间
+          activeMenu: 'SystemHelp',
           icon: 'help'
         }
       },
@@ -210,6 +229,8 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/systemAbout/index.vue'),
         meta: {
           title: 'menu.systemAbout',
+          // T9：菜单面 = 头像下拉项（无侧栏项）
+          activeMenu: 'SystemAbout',
           icon: 'information'
         }
       },
@@ -219,6 +240,8 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/notifications/index.vue'),
         meta: {
           title: 'menu.notifications',
+          // T9：菜单面 = 铃铛弹层 + 头像下拉项（本轮新增下拉镜像项）
+          activeMenu: 'Notifications',
           icon: 'notifications'
         }
       },
@@ -278,9 +301,6 @@ const router = createRouter({
   history: createWebHistory(),
   routes
 })
-
-// T8：懒加载 chunk 失败（dev 下偶发/弱网）→ 整页重载一次兜底，避免白屏
-installChunkLoadRetry(router)
 
 router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()

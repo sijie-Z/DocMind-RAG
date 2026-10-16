@@ -1,6 +1,9 @@
 <template>
   <div class="h-full overflow-y-auto p-6 lg:p-8 bg-gray-50 dark:bg-gray-950">
     <div class="max-w-4xl mx-auto space-y-6">
+      <!-- T9 定位三件套：面包屑（DocMind / 系统关于） -->
+      <PageBreadcrumb />
+
       <!-- Header -->
       <div class="flex items-center gap-4 mb-2">
         <div class="w-12 h-12 rounded-2xl bg-emerald-500 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-emerald-500/25">D</div>
@@ -71,6 +74,7 @@
 
 <script setup lang="ts">
 import { NDescriptions, NDescriptionsItem, NTag } from 'naive-ui'
+import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
 import { useAppVersion } from '@/composables/useAppVersion'
 
 // ISS-2 数字对账：版本号动态读取——后端 APP_VERSION 是唯一版本真源，

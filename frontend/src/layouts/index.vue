@@ -16,8 +16,14 @@
         mobileMenuOpen ? 'max-md:translate-x-0' : 'max-md:-translate-x-full',
       ]"
     >
-      <!-- Logo：DocMind 图标 + 名称 -->
-      <div class="h-16 flex items-center px-4 border-b border-gray-100 dark:border-gray-800/50 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm overflow-hidden whitespace-nowrap">
+      <!-- Logo：DocMind 图标 + 名称（T9 起可点回仪表盘/首页） -->
+      <div
+        class="h-16 flex items-center px-4 border-b border-gray-100 dark:border-gray-800/50 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm overflow-hidden whitespace-nowrap cursor-pointer transition-opacity hover:opacity-80"
+        role="link"
+        tabindex="0"
+        @click="router.push({ name: 'Dashboard' })"
+        @keydown.enter="router.push({ name: 'Dashboard' })"
+      >
         <div class="flex items-center space-x-3 min-w-0">
           <div class="flex-shrink-0 w-9 h-9 bg-gradient-to-br from-slate-600 to-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-sm tracking-tight shadow-lg shadow-slate-500/20">
             DM
@@ -471,7 +477,10 @@ const currentRouteTitle = computed(() => {
   if (!metaTitle) return t('menu.systemTitle')
   return t(metaTitle)
 })
-const activeKey = computed(() => route.name as string)
+// T9 定位三件套：生效高亮键 = meta.activeMenu ?? route.name。
+// 隐藏页（图谱/编辑器/记忆/通知/帮助/关于）显式声明 activeMenu 归属其菜单面，
+// 侧栏不再"进去就灭"（修 P1-18 永不高亮）。
+const activeKey = computed(() => route.meta.activeMenu ?? (route.name as string))
 
 /** 菜单图标名 → 组件映射（menu.ts 保持纯数据，映射留在布局层） */
 const MENU_ICONS: Record<string, Component> = {
@@ -493,6 +502,7 @@ const MENU_ICONS: Record<string, Component> = {
   settings: SettingsOutline,
   help: HelpCircleOutline,
   info: InformationCircleOutline,
+  notifications: NotificationsOutline,
   logout: LogOutOutline,
 }
 
@@ -536,20 +546,15 @@ const handleMenuSelect = async (key: string) => {
 }
 
 const handleUserMenuSelect = (key: string) => {
-  switch (key) {
-    case 'settings':
-      router.push({ name: 'Profile' })
-      break
-    case 'system-help':
-      router.push({ name: 'SystemHelp' })
-      break
-    case 'system-about':
-      router.push({ name: 'SystemAbout' })
-      break
-    case 'logout':
-      userStore.logout()
-      router.push({ name: 'Login' })
-      break
+// T9：用户下拉项 key 与路由键空间统一（actionKey === routeName），
+// 处理逻辑从 menu.ts 单一事实源推导（不再硬编码 switch 分支）。
+  const item = USER_MENU_ITEMS.find((i) => i.actionKey === key)
+  if (!item) return
+  if (item.routeName) {
+    router.push({ name: item.routeName })
+  } else if (item.actionKey === 'logout') {
+    userStore.logout()
+    router.push({ name: 'Login' })
   }
 }
 

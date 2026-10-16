@@ -1,6 +1,9 @@
 <template>
   <div class="h-full overflow-y-auto p-6 lg:p-8 bg-gray-50 dark:bg-gray-950">
     <div class="max-w-4xl mx-auto space-y-6">
+      <!-- T9 定位三件套：面包屑（DocMind / 系统帮助） -->
+      <PageBreadcrumb />
+
       <!-- Header -->
       <div class="flex items-center gap-4 mb-2">
         <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center">
@@ -97,6 +100,7 @@
 <script setup lang="ts">
 import { NCollapse, NCollapseItem, NIcon } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
 import {
   HelpCircleOutline, RocketOutline, GridOutline, ChatbubblesOutline, KeyOutline,
   SearchOutline, HardwareChipOutline, LinkOutline, DocumentsOutline

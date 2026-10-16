@@ -11,6 +11,7 @@ export default {
     failed: '失敗',
     noData: 'データなし',
     refresh: '更新',
+    back: '戻る',
     saveSuccess: '保存に成功しました',
     deleteSuccess: '削除に成功しました',
     copy: 'コピー',
@@ -346,7 +347,6 @@ export default {
   },
   menu: {
     home: 'ホーム',
-    dashboard: 'ダッシュボード',
     chat: 'スマート対話',
     search: 'セマンティック検索',
     knowledge: 'ナレッジベース',

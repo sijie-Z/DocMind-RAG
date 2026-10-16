@@ -1,5 +1,11 @@
 <template>
-  <div class="h-full flex">
+  <div class="h-full flex flex-col">
+    <!-- T9 定位三件套：面包屑（DocMind / Agent 工作流 / 工作流编辑器）+ 返回出口（→ Agent 工作流） -->
+    <div class="flex items-center border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5">
+      <PageBreadcrumb :show-back="true" />
+    </div>
+
+    <div class="flex-1 flex min-h-0">
     <!-- 左侧节点面板 -->
     <div class="w-72 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
       <div class="p-4 border-b border-gray-200 dark:border-gray-700">
@@ -670,6 +676,7 @@
         </div>
       </div>
     </div>
+    </div>
 
     <!-- 调试面板抽屉 -->
     <n-drawer v-model:show="showDebugPanel" :width="520" placement="right">
@@ -886,6 +893,7 @@
 
 <script setup lang="ts">
 import { useWorkflowEditor } from './composables/useWorkflowEditor'
+import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
 // 画布根组件（4 个）——必须在本文件 import 注册：
 // 此前 VueFlow/Background/Controls/MiniMap 只存在于 useWorkflowEditor.ts 的
 // 死引用里（未 return、editor.vue 解构不到），模板解析失败 → 整块画布渲染为
