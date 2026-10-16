@@ -21,7 +21,8 @@ export default {
     copied: 'Copied',
     warning: 'Notice',
     back: 'Back',
-    actions: 'Actions'
+    actions: 'Actions',
+    noDescription: 'No description',
   },
   profile: {
     overview: 'Overview',
@@ -105,18 +106,15 @@ export default {
     aiProviderExpDesc: 'Model choice is configured server-side (currently DeepSeek). The selection and API key here do not affect inference; saving is disabled to avoid confusion.',
   },
   users: {
-    title: 'User Management',
     searchPlaceholder: 'Search users...',
     create: 'New User',
     edit: 'Edit User',
     resetPassword: 'Reset Password',
     active: 'Active',
     inactive: 'Inactive',
-    remark: 'Remark',
     organizations: 'Organizations',
     roleUser: 'User',
     roleAdmin: 'Administrator',
-    deleteConfirm: 'Confirm delete this user?',
     deleteConfirmWithName: 'Are you sure you want to delete user {username}? This action cannot be undone.',
     subtitle: 'Manage all users and their permissions',
     noData: 'No user data',
@@ -176,31 +174,32 @@ export default {
     memberRemoved: 'Member removed',
     roleUpdated: 'Role updated',
     loadUsersFailed: 'Failed to load users',
-    memberOpFailed: 'Operation failed'
+    memberOpFailed: 'Operation failed',
+    overview: 'Overview',
+    members: 'Members',
+    documents: 'Knowledge Base',
+    noData: 'No Data',
+    id: 'ID',
   },
   chat: {
     aiAssistant: 'AI Assistant',
-    tagline: 'RAG-based Intelligent Q&A',
     clearChat: 'Clear Chat',
     newChat: 'New Chat',
     welcome: 'Hello, I am DocMind. How can I help you today?',
     welcomeDesc: 'I can help answer questions, analyze documents, write code, or just chat.',
-    sources: 'Sources',
     inputPlaceholder: 'Type your message, Shift + Enter for new line...',
     uploadFile: 'Upload File (Coming Soon)',
     streamResponse: 'Stream Response',
     send: 'Send',
     disclaimer: 'AI-generated content may be inaccurate.',
     connecting: 'Connecting to server...',
-    connectionFailed: 'Failed to connect to server',
     sendFailed: 'Message sending failed',
     networkError: 'Network error',
     retrying: 'Server busy, retrying automatically ({attempt}/{maxRetries})...',
-    cleared: 'Conversation cleared',
     historyFailed: 'Failed to load history',
     status: {
-      connected: 'Connected',
       connecting: 'Connecting...',
+      connected: 'Connected',
       disconnected: 'Disconnected',
       error: 'Connection Error',
       unknown: 'Unknown'
@@ -208,7 +207,6 @@ export default {
     noHistory: 'No history',
     backToBottom: 'Back to latest',
     stopGenerating: 'Stop generating',
-    stopped: 'Generation stopped',
     suggestions: {
       quantum: 'Explain quantum computing',
       quantumDesc: 'Explain the basic principles in simple terms',
@@ -221,23 +219,15 @@ export default {
     },
     defaultTitle: 'New Chat',
     confirmDelete: 'Are you sure you want to delete this conversation?',
-    previewFailed: 'Unable to load preview content',
     sseError: 'SSE Error',
     sseWarning: 'Server notice: this response may be incomplete',
-    sseRetry: 'SSE connection retrying, remaining retries: {left}',
     feedbackLiked: 'Liked, thank you for your feedback!',
     feedbackDisliked: 'Disliked, we will continue to improve.',
-    feedbackFailed: 'Feedback failed: {message}',
     feedbackRetryLater: 'Feedback failed, please try again later',
     fileSizeLimit: 'File size cannot exceed 10MB',
-    uploadFailedWithReason: 'Upload failed: {message}',
-    docParsed: 'Document {name} parsed successfully, you can start asking questions',
-    noOriginalFile: 'Unable to get original file, please select a new file to upload',
-    retryUploadFailed: 'Retry upload failed',
     waitForUpload: 'Please wait for file upload to complete',
     waitForParsing: 'File is being parsed, please wait before asking questions (usually takes a few seconds)',
     removeFailedAttachments: 'Some attachments failed to parse, please remove or re-upload before asking',
-    partialAttachmentsNotReady: 'Some attachments are not ready, sent as plain text message',
     attachmentsNotReady: 'Attachments are not ready, please wait for parsing to complete',
     chatCleared: 'Chat history cleared',
     clearFailed: 'Clear failed',
@@ -260,7 +250,6 @@ export default {
     fileUploadFailed: 'Upload failed',
     // Document preview modal
     documentPreview: 'Document Preview',
-    chatUpload: 'Chat Upload',
     knowledgeUpload: 'Knowledge Base',
     uploadedAt: 'Uploaded at',
     description: 'Description',
@@ -268,8 +257,6 @@ export default {
     noContent: 'No Content',
     downloadDocument: 'Download Document',
     // Feedback
-    liked: 'Liked',
-    disliked: 'Disliked',
     // File analysis
     analyzeFiles: 'Please analyze the uploaded {n} file(s)',
     newConversation: 'New Conversation',
@@ -311,7 +298,11 @@ export default {
     promptApplied: 'Prompt template "{name}" applied, feel free to start the conversation',
     promptTooLong: 'The prompt exceeds the {max}-character limit and was not applied. Please shorten it and try again.',
     sourcePreviewFailed: 'Failed to load the document. Please try again later.',
-    promptDefaultName: 'Unnamed'
+    promptDefaultName: 'Unnamed',
+    backToConversations: 'Back to conversations',
+    liked: 'Liked',
+    disliked: 'Disliked',
+    feedbackFailed: 'Feedback failed: {message}',
   },
   validation: {
     required: 'This field is required',
@@ -322,17 +313,14 @@ export default {
     emailInvalid: 'Invalid email format'
   },
   knowledge: {
-    title: 'Knowledge Base Management',
     subtitle: 'Upload and manage your enterprise knowledge documents',
     searchPlaceholder: 'Search knowledge base...',
-    viewDetail: 'View Details',
     stats: {
       total: 'Total Documents',
       completed: 'Indexed',
       processing: 'Processing',
       failed: 'Failed'
     },
-    rebuild: 'Rebuild index',
     rebuildSuccess: 'Rebuild index job submitted',
     rebuildFailed: 'Failed to rebuild index',
     upload: 'Upload',
@@ -355,11 +343,6 @@ export default {
     fileTitle: 'Title (Optional)',
     addTags: 'Add tags (Enter to confirm)',
     fileDesc: 'Description (Optional)',
-    cancel: 'Cancel',
-    confirm: 'Confirm Upload',
-    uploading: 'Uploading...',
-    success: 'Upload successful',
-    error: 'Upload failed',
     status: {
       uploading: 'Uploading',
       processing: 'Processing',
@@ -369,21 +352,13 @@ export default {
     uploadList: 'Task List',
     noActiveTasks: 'No active tasks',
     clearFinished: 'Clear finished tasks',
-    typeError: 'File type not supported',
-    sizeError: 'File size exceeds limit (10MB)',
     table: {
       name: 'File Name',
       size: 'Size',
-      type: 'Type',
       status: 'Status',
       uploadTime: 'Upload Time',
       actions: 'Actions',
-      preview: 'Preview',
-      delete: 'Delete',
-      download: 'Download'
     },
-    actions: 'Actions',
-    view: 'Viewing "{title}"',
     previewLoadFailed: 'Document details displayed, preview content failed to load',
     noFailedDocs: 'No failed documents',
     rebuildSubmitted: 'Rebuild submitted: {title}',
@@ -396,10 +371,19 @@ export default {
       emptyTitle: 'No graph data yet',
       emptyDesc: 'Upload documents and complete indexing, and the knowledge graph will be built automatically',
       loadFailed: 'Failed to load graph data, please try again later'
-    }
+    },
+    docStatus: {
+      pending: 'Pending',
+      uploaded: 'Uploaded',
+      parsing: 'Parsing',
+      parsed: 'Parsed',
+      indexed: 'Indexed',
+      failed: 'Failed',
+      unknown: 'Unknown'
+    },
+    viewDetail: 'View Details',
   },
   prompts: {
-    title: 'Prompt Management',
     subtitle: 'Manage system prompts and response styles for the AI assistant',
     addTemplate: 'New Template',
     create: 'Create Template',
@@ -408,15 +392,7 @@ export default {
     seed: 'Initialize Defaults',
     system: 'System',
     custom: 'Custom',
-    noDescription: 'No description',
     confirmDelete: 'Are you sure you want to delete this template?',
-    columns: {
-      name: 'Name',
-      category: 'Category',
-      content: 'Content',
-      updatedAt: 'Updated At',
-      action: 'Action'
-    },
     form: {
       name: 'Template Name',
       namePlaceholder: 'Enter template name',
@@ -476,7 +452,9 @@ export default {
     registerSuccess: 'Registration successful',
     goToLogin: 'Go to Login',
     goToRegister: 'Go to Register',
-    demoDesc: 'Use demo account (guest / 123456)'
+    demoDesc: 'Use demo account (guest / 123456)',
+    loginFailed: 'Login failed',
+    registerFailed: 'Registration failed',
   },
   menu: {
     home: 'Home',
@@ -551,7 +529,6 @@ export default {
     retry: 'Retry'
   },
   monitoring: {
-    title: 'System Monitoring',
     refresh: 'Refresh Data',
     systemStatus: 'System Status',
     cpu: 'CPU Usage',
@@ -626,13 +603,9 @@ export default {
     startNewBtn: 'New Chat',
     untitled: 'Untitled Chat',
     messages: 'messages',
-    noMessage: 'No messages yet',
-    viewDetail: 'View Details',
-    delete: 'Delete Chat',
     loadFailed: 'Failed to load conversation list'
   },
   audit: {
-    title: 'Audit Logs',
     searchPlaceholder: 'Search users or actions...',
     actionFilter: 'Action Type',
     search: 'Search',
@@ -653,39 +626,12 @@ export default {
     }
   },
   workflow: {
-    title: 'Agent Workflow',
-    subtitle: 'End-to-end Agent Orchestration & Monitoring',
-    badge: 'Agent Orchestration',
     description: 'Break complex AI tasks into staged pipelines with unified metrics and state management.',
-    stages: 'Pipeline Stages',
-    snapshot: 'Execution Snapshot',
-    trend7d: '7-Day Activity Trend',
-    stageGoal: 'Goal Understanding',
-    stageGoalDesc: 'Transform user input into executable tasks, identify goals, constraints and success criteria.',
-    stageContext: 'Context Aggregation',
-    stageContextDesc: 'Link conversation history, document results and preference configs into unified context.',
-    stageReasoning: 'Strategy Reasoning',
-    stageReasoningDesc: 'Select response strategy by task type, balance accuracy, speed and cost.',
-    stageCompose: 'Result Composition',
-    stageComposeDesc: 'Organize answer structure, references and next-step suggestions for actionability.',
-    stageFeedback: 'Feedback Loop',
-    stageFeedbackDesc: 'Optimize pipeline configuration through logs, metrics and user behavior signals.',
-    statusStable: 'Stable',
-    statusRunning: 'Running',
-    statusOptimizing: 'Optimizing',
-    statusHealthy: 'Healthy',
-    statusObserving: 'Observing',
-    eventInit: 'Workflow initialized',
-    eventInitDesc: 'Basic pipeline connected: input, retrieval, reasoning, output, monitoring.',
-    eventSync: 'Profile data synced',
-    eventSyncDesc: 'Account and activity stats written to dashboard.',
-    eventUpgrade: 'Execution strategy upgraded',
-    eventUpgradeDesc: 'Context window and output composition strategies upgraded.',
-    metricConversations: 'Conversations',
-    metricMessages: 'Messages',
-    metricDocuments: 'Documents',
-    metricRole: 'Current Role'
   },
+  notifications: {
+    markAllRead: 'Mark all read',
+  },
+
   agentReplay: {
     entry: 'View Replay',
     title: 'Run Replay',
@@ -752,7 +698,6 @@ export default {
     planPendingHint: 'The task is awaiting plan approval — approve / edit / reject the plan above first (or cancel the task)'
   },
   scheduler: {
-    title: 'Scheduled Tasks',
     subtitle: 'Manage agent runs triggered on a schedule; results are available from the last run',
     create: 'New Scheduled Task',
     noData: 'No scheduled tasks yet',
@@ -866,7 +811,6 @@ export default {
     }
   },
   mcp: {
-    title: 'MCP Servers',
     subtitle: 'Status of dynamically integrated MCP servers and their registered tools (read-only)',
     readOnlyNotice: 'Read-only view: to enable/disable or add servers, edit backend/mcp_servers.json and restart the backend. No online write operations on this page.',
     notStarted: 'The MCP manager has not been initialized yet (backend may not have finished starting, or no config was loaded).',

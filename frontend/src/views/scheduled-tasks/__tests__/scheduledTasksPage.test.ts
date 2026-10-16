@@ -422,7 +422,6 @@ describe('本地化键完整性（本特性新增键）', () => {
   const keys = [
     'menu.scheduledTasks',
     'menu.mcpServers',
-    'scheduler.title',
     'scheduler.create',
     'scheduler.noData',
     'scheduler.columns.schedule',
@@ -443,7 +442,6 @@ describe('本地化键完整性（本特性新增键）', () => {
     'scheduler.validation.intervalMin',
     'scheduler.result.taskState.rejected',
     'scheduler.result.unavailable',
-    'mcp.title',
     'mcp.readOnlyNotice',
     'mcp.noServers',
     'mcp.toolCount',

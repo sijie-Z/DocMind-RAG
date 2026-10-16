@@ -18,7 +18,8 @@ export default {
     copied: 'Copié',
     warning: 'Avis',
     copyFailed: 'Échec de la copie',
-    actions: 'Actions'
+    actions: 'Actions',
+    noDescription: 'Aucune description',
   },
   profile: {
     overview: 'Aperçu',
@@ -97,18 +98,15 @@ export default {
     recentActivity: 'Activité récente'
   },
   users: {
-    title: 'Gestion des utilisateurs',
     searchPlaceholder: 'Rechercher un utilisateur...',
     create: 'Nouvel utilisateur',
     edit: 'Modifier l\'utilisateur',
     resetPassword: 'Réinitialiser le mot de passe',
     active: 'Actif',
     inactive: 'Inactif',
-    remark: 'Remarque',
     organizations: 'Organisations',
     roleUser: 'Utilisateur',
     roleAdmin: 'Administrateur',
-    deleteConfirm: 'Voulez-vous supprimer cet utilisateur ?',
     deleteConfirmWithName: 'Voulez-vous vraiment supprimer l\'utilisateur {username} ? Cette action est irréversible.',
     subtitle: 'Gérer toutes les informations et permissions des utilisateurs',
     noData: 'Aucune donnée utilisateur',
@@ -158,16 +156,19 @@ export default {
     memberRemoved: 'Membre retiré',
     roleUpdated: 'Rôle mis à jour',
     loadUsersFailed: 'Échec du chargement des utilisateurs',
-    memberOpFailed: "Échec de l'opération"
+    memberOpFailed: "Échec de l'opération",
+    overview: 'Aperçu',
+    members: 'Membres',
+    documents: 'Base de connaissances',
+    noData: 'Aucune donnée',
+    id: 'ID',
   },
   chat: {
     aiAssistant: 'Assistant IA',
-    tagline: 'Q&A intelligent basé sur RAG',
     clearChat: 'Effacer la conversation',
     newChat: 'Nouvelle discussion',
     welcome: 'Bonjour, je suis DocMind. Comment puis-je vous aider ?',
     welcomeDesc: 'Je peux répondre à vos questions, analyser des documents, écrire du code ou simplement discuter.',
-    sources: 'Sources',
     demoData: 'Données de démo',
     inputPlaceholder: 'Posez votre question (Maj + Entrée pour sauter une ligne)...',
     uploadFile: 'Télécharger un fichier (Bientôt disponible)',
@@ -177,17 +178,15 @@ export default {
     send: 'Envoyer',
     disclaimer: 'Le contenu généré par l\'IA peut être inexact.',
     connecting: 'Connexion au serveur...',
-    connectionFailed: 'Impossible de se connecter au serveur',
     sendFailed: 'Échec de l\'envoi du message',
     networkError: 'Erreur réseau',
     retrying: 'Serveur occupé, nouvelle tentative automatique ({attempt}/{maxRetries})...',
-    cleared: 'Conversation effacée',
     historyFailed: 'Échec du chargement de l\'historique',
     // F 波补键：导出按钮 tooltip（词族与 exportTitle « Export de la conversation » 一致）
     exportChat: 'Exporter la conversation',
     status: {
-      connected: 'Connecté',
       connecting: 'Connexion...',
+      connected: 'Connecté',
       disconnected: 'Déconnecté',
       error: 'Erreur de connexion',
       unknown: 'Statut inconnu'
@@ -195,7 +194,6 @@ export default {
     noHistory: 'Aucun historique',
     backToBottom: 'Revenir aux derniers messages',
     stopGenerating: 'Arrêter la génération',
-    stopped: 'Génération arrêtée',
     suggestions: {
       quantum: 'Expliquer l\'informatique quantique',
       quantumDesc: 'Expliquez les principes de base avec des mots simples',
@@ -206,22 +204,14 @@ export default {
       travel: 'Planifier un voyage',
       travelDesc: 'Itinéraire pour une semaine à Kyoto, Japon'
     },
-    previewFailed: 'Impossible de charger le contenu de l\'aperçu',
     sseError: 'Erreur SSE',
-    sseRetry: 'Reconnexion SSE en cours, tentatives restantes : {left}',
     feedbackLiked: 'Merci pour votre retour !',
     feedbackDisliked: 'Bien noté, nous continuerons d\'améliorer.',
-    feedbackFailed: 'Échec de l\'envoi du retour : {message}',
     feedbackRetryLater: 'Échec de l\'envoi du retour, veuillez réessayer plus tard',
     fileSizeLimit: 'La taille du fichier ne peut pas dépasser 10 Mo',
-    uploadFailedWithReason: 'Échec du téléchargement : {message}',
-    docParsed: 'Document {name} analysé avec succès, vous pouvez commencer à poser vos questions',
-    noOriginalFile: 'Impossible d\'obtenir le fichier d\'origine, veuillez sélectionner un nouveau fichier à envoyer',
-    retryUploadFailed: 'Échec de la nouvelle tentative de téléchargement',
     waitForUpload: 'Veuillez attendre la fin du téléchargement du fichier',
     waitForParsing: 'Le fichier est en cours d\'analyse, veuillez attendre la fin de l\'analyse avant de poser vos questions (cela prend généralement quelques secondes)',
     removeFailedAttachments: 'Des pièces jointes ont échoué à l\'analyse, veuillez les retirer ou les envoyer à nouveau avant de poser vos questions',
-    partialAttachmentsNotReady: 'Certaines pièces jointes ne sont pas prêtes, le message a été envoyé en texte brut',
     attachmentsNotReady: 'Les pièces jointes ne sont pas encore prêtes, veuillez attendre la fin de l\'analyse avant de les utiliser',
     chatCleared: 'Historique de conversation effacé',
     clearFailed: 'Échec de l\'effacement',
@@ -242,15 +232,12 @@ export default {
     fileFromChat: 'Envoyé depuis le chat',
     fileUploadFailed: 'Échec du téléchargement',
     documentPreview: 'Aperçu du document',
-    chatUpload: 'Depuis le chat',
     knowledgeUpload: 'Depuis la base de connaissances',
     uploadedAt: 'Téléchargé le',
     description: 'Description',
     contentSummary: 'Résumé du contenu',
     noContent: 'Aucun contenu',
     downloadDocument: 'Télécharger le document',
-    liked: 'Aimé',
-    disliked: 'Pas aimé',
     analyzeFiles: 'Veuillez analyser les {n} fichier(s) téléchargé(s)',
     newConversation: 'Nouvelle conversation',
     attachmentModeOnly: 'Mode pièces jointes uniquement',
@@ -280,7 +267,11 @@ export default {
     promptApplied: 'Modèle de prompt "{name}" appliqué, vous pouvez commencer la conversation',
     promptDefaultName: 'Sans nom',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
-    sseWarning: 'Avis du serveur : cette réponse peut être incomplète'
+    sseWarning: 'Avis du serveur : cette réponse peut être incomplète',
+    backToConversations: 'Revenir aux conversations',
+    liked: 'Aimé',
+    disliked: 'Pas aimé',
+    feedbackFailed: 'Échec de l\'envoi du retour : {message}',
   },
   validation: {
     required: 'Ce champ est obligatoire',
@@ -291,10 +282,8 @@ export default {
     emailInvalid: 'Format d\'e-mail incorrect'
   },
   knowledge: {
-    title: 'Gestion de la base de connaissances',
     subtitle: 'Téléchargez et gérez vos documents de connaissances d\'entreprise',
     searchPlaceholder: 'Rechercher dans la base...',
-    rebuild: 'Reconstruire l\'index',
     upload: 'Télécharger',
     tags: {
       tech: 'Doc Technique',
@@ -315,11 +304,6 @@ export default {
     fileTitle: 'Titre (Optionnel)',
     addTags: 'Ajouter des tags (Entrée pour confirmer)',
     fileDesc: 'Description (Optionnel)',
-    cancel: 'Annuler',
-    confirm: 'Confirmer le téléchargement',
-    uploading: 'Téléchargement...',
-    success: 'Téléchargement réussi',
-    error: 'Échec du téléchargement',
     status: {
       uploading: 'Téléchargement',
       processing: 'Traitement',
@@ -329,25 +313,25 @@ export default {
     uploadList: 'Liste des tâches',
     noActiveTasks: 'Aucune tâche en cours',
     clearFinished: 'Effacer les tâches terminées',
-    typeError: 'Format de fichier non supporté',
-    sizeError: 'Le fichier dépasse la limite (10 Mo)',
     table: {
       name: 'Nom du fichier',
       size: 'Taille',
-      type: 'Type',
       status: 'Statut',
       uploadTime: 'Date d\'ajout',
       actions: 'Actions',
-      preview: 'Aperçu',
-      delete: 'Supprimer',
-      download: 'Télécharger'
     },
-    actions: 'Actions',
     deleteConfirm: 'Voulez-vous vraiment supprimer ce fichier ?',
-    view: 'Affichage de "{title}"'
+    docStatus: {
+      pending: 'En attente de traitement',
+      uploaded: 'Téléchargé',
+      parsing: 'Analyse en cours',
+      parsed: 'Analyse terminée',
+      indexed: 'Indexé',
+      failed: 'Échec',
+      unknown: 'Inconnu'
+    },
   },
   prompts: {
-    title: 'Gestion des prompts',
     subtitle: 'Gérez les prompts système et le style de réponse de l’assistant IA',
     addTemplate: 'Nouveau modèle',
     editTemplate: 'Modifier le modèle',
@@ -355,15 +339,7 @@ export default {
     seed: 'Initialiser les modèles',
     system: 'Système',
     custom: 'Personnalisé',
-    noDescription: 'Aucune description',
     confirmDelete: 'Voulez-vous supprimer ce modèle ?',
-    columns: {
-      name: 'Nom',
-      category: 'Catégorie',
-      content: 'Contenu',
-      updatedAt: 'Mis à jour',
-      action: 'Action'
-    },
     form: {
       name: 'Nom du modèle',
       namePlaceholder: 'Entrez le nom du modèle',
@@ -423,7 +399,9 @@ export default {
     registerSuccess: 'Inscription réussie',
     goToLogin: 'Se connecter',
     goToRegister: 'S\'inscrire',
-    demoDesc: 'Utiliser le compte démo (guest / 123456)'
+    demoDesc: 'Utiliser le compte démo (guest / 123456)',
+    loginFailed: 'Échec de la connexion',
+    registerFailed: 'Échec de l\'inscription',
   },
   menu: {
     home: 'Accueil',
@@ -497,7 +475,6 @@ export default {
     retry: 'Réessayer'
   },
   monitoring: {
-    title: 'Surveillance Système',
     refresh: 'Actualiser les données',
     systemStatus: 'Statut Système',
     cpu: 'Utilisation CPU',
@@ -571,45 +548,15 @@ export default {
     startNewBtn: 'Nouveau chat',
     untitled: 'Chat sans titre',
     messages: 'messages',
-    noMessage: 'Pas encore de messages',
-    viewDetail: 'Voir les détails',
-    delete: 'Supprimer le chat',
     loadFailed: 'Échec du chargement de la liste de conversation'
   },
   workflow: {
-    title: 'Flux de travail Agent',
-    subtitle: 'Orchestration et surveillance Agent de bout en bout',
-    badge: 'Agent Orchestration',
     description: 'Décomposez les tâches IA complexes en pipelines par étapes avec des métriques unifiées et une gestion d\'état.',
-    stages: 'Étapes du Pipeline',
-    snapshot: 'Aperçu de l\'Exécution',
-    trend7d: 'Tendance d\'Activité 7 Jours',
-    stageGoal: 'Compréhension de l\'Objectif',
-    stageGoalDesc: 'Transformez les entrées utilisateur en tâches exécutables, identifiez les objectifs, contraintes et critères de succès.',
-    stageContext: 'Agrégation de Contexte',
-    stageContextDesc: 'Liez l\'historique de conversation, les résultats de documents et les configurations dans un contexte unifié.',
-    stageReasoning: 'Raisonnement Stratégique',
-    stageReasoningDesc: 'Sélectionnez la stratégie de réponse par type de tâche, équilibrez précision, vitesse et coût.',
-    stageCompose: 'Composition des Résultats',
-    stageComposeDesc: 'Organisez la structure des réponses, les références et les suggestions pour l\'actionnabilité.',
-    stageFeedback: 'Boucle de Rétroaction',
-    stageFeedbackDesc: 'Optimisez la configuration du pipeline via les journaux, métriques et signaux comportementaux.',
-    statusStable: 'Stable',
-    statusRunning: 'En Cours',
-    statusOptimizing: 'Optimisation',
-    statusHealthy: 'Sain',
-    statusObserving: 'Observation',
-    eventInit: 'Workflow initialisé',
-    eventInitDesc: 'Pipeline de base connecté: entrée, recherche, raisonnement, sortie, surveillance.',
-    eventSync: 'Données de profil synchronisées',
-    eventSyncDesc: 'Statistiques de compte et d\'activité écrites dans le tableau de bord.',
-    eventUpgrade: 'Stratégie d\'exécution mise à niveau',
-    eventUpgradeDesc: 'Fenêtre de contexte et stratégies de composition de sortie mises à niveau.',
-    metricConversations: 'Conversations',
-    metricMessages: 'Messages',
-    metricDocuments: 'Documents',
-    metricRole: 'Rôle Actuel'
   },
+  notifications: {
+    markAllRead: 'Tout marquer comme lu',
+  },
+
   agentReplay: {
     entry: 'Voir le Replay',
     title: "Replay d'Exécution",
@@ -676,7 +623,6 @@ export default {
     planPendingHint: "La tâche attend l'approbation du plan — approuvez / modifiez / rejetez d'abord le plan ci-dessus (ou annulez la tâche)"
   },
   scheduler: {
-    title: 'Tâches planifiées',
     subtitle: "Gérez les exécutions d'agent planifiées ; les résultats sont consultables depuis la dernière exécution",
     create: 'Nouvelle tâche planifiée',
     noData: 'Aucune tâche planifiée',
@@ -790,7 +736,6 @@ export default {
     }
   },
   mcp: {
-    title: 'Serveurs MCP',
     subtitle: 'État des serveurs MCP intégrés dynamiquement et de leurs outils enregistrés (lecture seule)',
     readOnlyNotice: "Vue en lecture seule : pour activer/désactiver ou ajouter un serveur, modifiez backend/mcp_servers.json puis redémarrez le backend. Aucune écriture en ligne sur cette page.",
     notStarted: "Le gestionnaire MCP n'est pas encore initialisé (le backend n'a peut-être pas fini de démarrer ou aucune configuration n'a été chargée).",

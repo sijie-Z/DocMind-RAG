@@ -62,7 +62,7 @@
       >
         <n-button size="tiny" quaternary @click="toggleSidebar" class="bg-white/90 dark:bg-gray-800/90 shadow-sm rounded-lg">
           <template #icon><n-icon><ArrowBackOutline /></n-icon></template>
-          {{ t('chat.backToConversations') || '返回对话列表' }}
+          {{ t('chat.backToConversations') }}
         </n-button>
       </div>
 

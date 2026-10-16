@@ -5,7 +5,11 @@
  *   DocumentType = pdf / word / excel / ppt / txt / other
  * （knowledge.py:148 输出 .value）。前端此前的 'docx'/'doc'/'md' 分支是虚构值域
  * —— Word 文档永远落进通用图标分支、配色表失配（B15）。
+ *
+ * G 波词条化：状态词不再硬编码中文——状态映射改为 i18n 键（knowledge.docStatus.*），
+ * 经全局 i18n 实例解析（Markdown.vue 同款先例），en/ja/fr 界面不再回落中文。
  */
+import i18n from '@/locales'
 
 /** 文件类型 → 图标配色（按真实枚举重排；未知/空值统一灰） */
 const FILE_TYPE_COLORS: Record<string, string> = {
@@ -32,15 +36,17 @@ export const docIconColor = (fileType: string | null | undefined): string =>
  */
 export type DocStatusType = 'success' | 'warning' | 'error' | 'info' | 'default'
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: '等待处理',
-  uploaded: '已上传',
-  parsing: '解析中',
-  parsed: '已解析',
-  completed: '已索引',
-  indexed: '已索引', // 详情端点同义词（documents.py:296-303）
-  failed: '失败',
+const STATUS_KEYS: Record<string, string> = {
+  pending: 'knowledge.docStatus.pending',
+  uploaded: 'knowledge.docStatus.uploaded',
+  parsing: 'knowledge.docStatus.parsing',
+  parsed: 'knowledge.docStatus.parsed',
+  completed: 'knowledge.docStatus.indexed',
+  indexed: 'knowledge.docStatus.indexed', // 详情端点同义词（documents.py:296-303）
+  failed: 'knowledge.docStatus.failed',
 }
+
+const UNKNOWN_STATUS_KEY = 'knowledge.docStatus.unknown'
 
 const STATUS_TYPES: Record<string, DocStatusType> = {
   pending: 'info',
@@ -53,7 +59,7 @@ const STATUS_TYPES: Record<string, DocStatusType> = {
 }
 
 export const docStatusLabel = (status: string | null | undefined): string =>
-  (status && STATUS_LABELS[status]) || '未知'
+  i18n.global.t((status && STATUS_KEYS[status]) || UNKNOWN_STATUS_KEY)
 
 export const docStatusType = (status: string | null | undefined): DocStatusType =>
   (status && STATUS_TYPES[status]) || 'default'

@@ -44,7 +44,7 @@ export function useChatSessions() {
       }
       convLoadError.value = false
     } catch (error) {
-      message.error(t('common.loadFailed'))
+      message.error(t('chat.loadFailed'))
       convLoadError.value = true
     } finally {
       isListLoading.value = false

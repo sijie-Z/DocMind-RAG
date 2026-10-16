@@ -23,6 +23,7 @@ export default {
     deleteSuccess: '删除成功',
     refresh: '刷新',
     actions: '操作',
+    noDescription: '暂无描述',
   },
   profile: {
     // T5 命名归一：个人设置「概览」tab（此前借用 menu.dashboard，现独立页域键）
@@ -108,18 +109,15 @@ export default {
     aiProviderExpDesc: '模型选择由服务端统一配置（当前为 DeepSeek）；此处的选择与 API Key 暂不参与推理，已禁用保存以免误解。',
   },
   users: {
-    title: '用户管理',
     searchPlaceholder: '搜索用户...',
     create: '新建用户',
     edit: '编辑用户',
     resetPassword: '重置密码',
     active: '激活',
     inactive: '禁用',
-    remark: '备注',
     organizations: '组织标签',
     roleUser: '普通用户',
     roleAdmin: '管理员',
-    deleteConfirm: '确认删除该用户吗？',
     deleteConfirmWithName: '确定要删除用户 {username} 吗？此操作不可撤销。',
     subtitle: '管理系统内的所有用户信息及其权限',
     noData: '暂无用户数据',
@@ -179,11 +177,16 @@ export default {
     memberRemoved: '成员已移除',
     roleUpdated: '角色已更新',
     loadUsersFailed: '用户列表加载失败',
-    memberOpFailed: '操作失败'
+    memberOpFailed: '操作失败',
+    // T5 命名归一：个人设置「概览」tab（此前借用 menu.dashboard，现独立页域键）
+    overview: '概览',
+    members: '成员',
+    documents: '知识库',
+    noData: '暂无数据',
+    id: 'ID',
   },
   chat: {
     aiAssistant: 'AI 助手',
-    tagline: '基于 RAG 的智能问答',
     clearChat: '清空对话',
     newChat: '新对话',
     welcome: '我是 DocMind 助手，很高兴为您服务',
@@ -194,15 +197,13 @@ export default {
     send: '发送',
     disclaimer: 'AI 助手可能会产生错误信息，请核实重要信息。',
     connecting: '正在连接服务器...',
-    connectionFailed: '无法连接到服务器，请刷新重试',
     sendFailed: '消息发送失败',
     networkError: '发送失败，请检查网络',
     retrying: '服务繁忙，正在自动重试（第 {attempt}/{maxRetries} 次）...',
-    cleared: '对话已清空',
     historyFailed: '加载会话历史失败',
     status: {
-      connected: '已连接',
       connecting: '连接中...',
+      connected: '已连接',
       disconnected: '未连接',
       error: '连接错误',
       unknown: '未知状态'
@@ -210,8 +211,6 @@ export default {
     noHistory: '暂无会话历史',
     backToBottom: '回到最新消息',
     stopGenerating: '停止生成',
-    stopped: '已停止生成',
-    sources: '引用来源',
     suggestions: {
       quantum: '解释量子计算',
       quantumDesc: '用简单的语言解释量子计算的基本原理',
@@ -224,23 +223,15 @@ export default {
     },
     defaultTitle: '新对话',
     confirmDelete: '确认删除此对话吗？',
-    previewFailed: '无法加载预览内容',
     sseError: 'SSE错误',
     sseWarning: '服务端提示，本轮回答可能不完整',
-    sseRetry: 'SSE连接重试中，剩余重试次数：{left}',
     feedbackLiked: '已点赞，感谢您的反馈！',
     feedbackDisliked: '已点踩，我们会继续优化。',
-    feedbackFailed: '反馈失败：{message}',
     feedbackRetryLater: '反馈失败，请稍后重试',
     fileSizeLimit: '文件大小不能超过 10MB',
-    uploadFailedWithReason: '上传失败: {message}',
-    docParsed: '文档 {name} 解析完成，可以开始提问了',
-    noOriginalFile: '无法获取原始文件，请重新选择文件上传',
-    retryUploadFailed: '重试上传失败',
     waitForUpload: '请等待文件上传完成',
     waitForParsing: '文件正在解析中，请等待解析完成后再提问（通常需要几秒钟）',
     removeFailedAttachments: '存在解析失败附件，请移除或重新上传后再提问',
-    partialAttachmentsNotReady: '部分附件尚未就绪，已发送纯文本消息',
     attachmentsNotReady: '附件尚未就绪，请等待解析完成后再使用附件',
     chatCleared: '对话记录已清空',
     clearFailed: '清空失败',
@@ -263,7 +254,6 @@ export default {
     fileUploadFailed: '上传失败',
     // Document preview modal
     documentPreview: '文档预览',
-    chatUpload: '聊天上传',
     knowledgeUpload: '知识库上传',
     uploadedAt: '上传于',
     description: '简介',
@@ -271,8 +261,6 @@ export default {
     noContent: '暂无内容',
     downloadDocument: '下载文档',
     // Feedback
-    liked: '已点赞',
-    disliked: '已点踩',
     // File analysis
     analyzeFiles: '请分析上传的 {n} 个文件',
     newConversation: '新对话',
@@ -315,7 +303,11 @@ export default {
     // W2-T7：上限与提示词表单 maxlength 对齐（5000）；超限明确报错不再静默丢弃
     promptTooLong: '提示词超过 {max} 字上限，未应用。请精简后再试。',
     sourcePreviewFailed: '原文加载失败，请稍后重试',
-    promptDefaultName: '未命名'
+    promptDefaultName: '未命名',
+    backToConversations: '返回对话列表',
+    liked: '已点赞',
+    disliked: '已点踩',
+    feedbackFailed: '反馈失败：{message}',
   },
   validation: {
     required: '此项必填',
@@ -326,17 +318,14 @@ export default {
     emailInvalid: '邮箱格式不正确'
   },
   knowledge: {
-    title: '知识库管理',
     subtitle: '上传并管理您的企业知识文档',
     searchPlaceholder: '搜索知识库...',
-    viewDetail: '查看详情', // 👈 补上这一行，消除控制台警告
     stats: {
     total: '文档总数',
     completed: '已索引',
     processing: '解析中',
     failed: '处理失败'
     },
-    rebuild: '重建索引',
     rebuildSuccess: '重建索引任务已提交',
     rebuildFailed: '重建索引失败',
     upload: '上传文件',
@@ -359,11 +348,6 @@ export default {
     fileTitle: '文件标题 (选填，默认为文件名)',
     addTags: '添加标签 (回车确认)',
     fileDesc: '文件描述 (选填)',
-    cancel: '取消',
-    confirm: '确认上传',
-    uploading: '上传中...',
-    success: '上传成功',
-    error: '上传失败',
     status: {
       uploading: '上传中',
       processing: '解析中',
@@ -373,20 +357,13 @@ export default {
     uploadList: '上传任务列表',
     noActiveTasks: '当前没有正在进行的任务',
     clearFinished: '清除已完成任务',
-    typeError: '文件类型不支持',
-    sizeError: '文件大小超过限制 (10MB)',
     table: {
       name: '文件名',
       size: '大小',
-      type: '类型',
       status: '状态',
       uploadTime: '上传时间',
       actions: '操作',
-      preview: '预览',
-      delete: '删除',
-      download: '下载'
     },
-    actions: '操作',
     previewLoadFailed: '文档详情已显示，预览内容加载失败',
     noFailedDocs: '当前没有失败文档',
     rebuildSubmitted: '已提交重建：{title}',
@@ -399,10 +376,20 @@ export default {
       emptyTitle: '暂无图谱数据',
       emptyDesc: '上传文档并完成索引后，系统会自动构建知识图谱',
       loadFailed: '图谱数据加载失败，请稍后重试'
-    }
+    },
+    // G波：文档状态词条化（docDisplay.ts 芯片标签；双词 completed/indexed 同映射 indexed）
+    docStatus: {
+      pending: '等待处理',
+      uploaded: '已上传',
+      parsing: '解析中',
+      parsed: '已解析',
+      indexed: '已索引',
+      failed: '失败',
+      unknown: '未知'
+    },
+    viewDetail: '查看详情', // 👈 补上这一行，消除控制台警告
   },
   prompts: {
-    title: '提示词管理',
     subtitle: '管理 AI 助手的系统提示词与回复风格',
     create: '创建模板',
     addTemplate: '新增模板',
@@ -411,15 +398,7 @@ export default {
     seed: '初始化默认模板',
     system: '系统',
     custom: '自定义',
-    noDescription: '暂无描述',
     confirmDelete: '确定要删除这个模板吗？',
-    columns: {
-      name: '名称',
-      category: '分类',
-      content: '内容摘要',
-      updatedAt: '更新时间',
-      action: '操作'
-    },
     form: {
       name: '模板名称',
       namePlaceholder: '请输入模板名称',
@@ -479,7 +458,9 @@ export default {
     registerSuccess: '注册成功',
     goToLogin: '去登录',
     goToRegister: '去注册',
-    demoDesc: '使用演示账号 (guest / 123456)'
+    demoDesc: '使用演示账号 (guest / 123456)',
+    loginFailed: '登录失败',
+    registerFailed: '注册失败',
   },
   menu: {
     home: '首页',
@@ -553,7 +534,6 @@ export default {
     retry: '重试'
   },
   monitoring: {
-    title: '系统运行监控',
     refresh: '刷新数据',
     systemStatus: '系统状态',
     cpu: 'CPU 使用率',
@@ -628,13 +608,9 @@ export default {
     startNewBtn: '开始新对话',
     untitled: '未命名会话',
     messages: '条消息',
-    noMessage: '暂无消息内容',
-    viewDetail: '查看详情',
-    delete: '删除会话',
     loadFailed: '加载会话列表失败'
   },
   audit: {
-    title: '操作审计日志',
     searchPlaceholder: '搜索用户或操作...',
     actionFilter: '操作类型',
     search: '搜索',
@@ -655,39 +631,12 @@ export default {
     }
   },
   workflow: {
-    title: 'Agent 工作流',
-    subtitle: '全链路 Agent 编排与执行监控',
-    badge: 'Agent Orchestration',
     description: '把复杂 AI 任务拆成阶段化流水线，用统一的指标和状态管理来观察执行质量。',
-    stages: '流程阶段',
-    snapshot: '执行快照',
-    trend7d: '近 7 天活跃趋势',
-    stageGoal: '目标理解',
-    stageGoalDesc: '将用户输入转化为可执行任务，识别目标、约束与成功标准。',
-    stageContext: '上下文聚合',
-    stageContextDesc: '串联对话历史、文档结果与偏好配置，构建统一上下文。',
-    stageReasoning: '策略推理',
-    stageReasoningDesc: '按任务类型选择回复策略，平衡准确率、速度与成本。',
-    stageCompose: '结果编排',
-    stageComposeDesc: '组织答案结构、引用信息和下一步建议，提升可执行性。',
-    stageFeedback: '反馈闭环',
-    stageFeedbackDesc: '通过日志、指标和用户行为信号反向优化流程配置。',
-    statusStable: '稳定',
-    statusRunning: '运行中',
-    statusOptimizing: '持续优化',
-    statusHealthy: '健康',
-    statusObserving: '观察中',
-    eventInit: '工作流初始化完成',
-    eventInitDesc: '基础链路已连通：输入、检索、推理、输出、监控。',
-    eventSync: '个人中心数据同步',
-    eventSyncDesc: '账号与行为统计写入体验看板。',
-    eventUpgrade: '执行策略优化',
-    eventUpgradeDesc: '对话上下文窗口与输出编排策略完成升级。',
-    metricConversations: '会话总量',
-    metricMessages: '消息总量',
-    metricDocuments: '知识文档',
-    metricRole: '当前角色'
   },
+  notifications: {
+    markAllRead: '全部已读',
+  },
+
   agentReplay: {
     entry: '查看回放',
     title: '运行回放',
@@ -754,7 +703,6 @@ export default {
     planPendingHint: '任务正在等待计划审批：请先在上方计划卡中批准 / 编辑 / 拒绝（或取消任务）'
   },
   scheduler: {
-    title: '定时任务',
     subtitle: '管理定时触发的 Agent 任务：到点自动运行，运行结果可在「上次运行」处查看',
     create: '新建定时任务',
     noData: '暂无定时任务',
@@ -868,7 +816,6 @@ export default {
     }
   },
   mcp: {
-    title: 'MCP 服务器',
     subtitle: '动态接入的 MCP 服务器状态与工具注册情况（只读）',
     readOnlyNotice: '只读视图：启用/停用或新增服务器请编辑后端 backend/mcp_servers.json 并重启服务，本页不做在线写操作。',
     notStarted: 'MCP 管理器尚未初始化（后端可能未完成启动或未加载配置）。',
