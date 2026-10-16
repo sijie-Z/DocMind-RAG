@@ -75,8 +75,14 @@
             </n-radio-group>
           </div>
 
-          <!-- 文件类型 -->
-          <div class="space-y-3">
+          <!-- T10 空窗补丁（问题清单第二轮 §三.16）：文件类型筛选后端未消费——
+               勾选后前端虽会发送 file_types，但后端 KnowledgeSearchRequest 静默
+               丢弃该字段（api/search.ts 自认「预存在漂移」）→ 筛选静默空转，
+               勾了没反应，误导用户。完整修复（后端 ES filter + 值域映射
+               docx/xlsx→word/excel）待 #225（search_mode 归一）合入后落地。
+               恢复点=本区块：后端落地后删掉下面的 v-if="false" 即恢复渲染；
+               状态（selectedFileTypes / fileTypes）与传参逻辑原样保留、未删改。 -->
+          <div v-if="false" class="space-y-3">
             <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">{{ t('search.fileType') }}</h3>
             <n-checkbox-group v-model:value="selectedFileTypes">
               <div class="grid grid-cols-2 gap-2">
