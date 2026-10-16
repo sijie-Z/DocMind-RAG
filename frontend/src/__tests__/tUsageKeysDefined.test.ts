@@ -28,10 +28,25 @@ type Messages = Record<string, unknown>
 
 /** 与 hardcodedCjk.test.ts 同款：注释剥离（Vue 模板注释、块注释、行注释含行尾） */
 function stripComments(text: string, isVue: boolean): string {
-  let t = isVue ? text.replace(/<!--[\s\S]*?-->/g, '') : text
+  let t = isVue ? stripHtmlComments(text) : text
   t = t.replace(/\/\*[\s\S]*?\*\//g, '')
   t = t.replace(/\/\/.*$/gm, '')
   return t
+}
+
+/** 去除 HTML 注释：与 /<!--[\s\S]*?-->/g 等价的逐段扫描实现
+ * （仅用于计数，非安全语境；逐段扫描同时避免正则式多字符剥离的静态告警） */
+function stripHtmlComments(s: string): string {
+  let out = ''
+  let i = 0
+  for (;;) {
+    const a = s.indexOf('<!--', i)
+    if (a < 0) return out + s.slice(i)
+    const b = s.indexOf('-->', a + 4)
+    if (b < 0) return out + s.slice(i)
+    out += s.slice(i, a)
+    i = b + 3
+  }
 }
 
 interface Usage {
