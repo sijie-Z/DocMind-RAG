@@ -15,6 +15,7 @@
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -321,13 +322,18 @@ class _StubSampler:
 
 @pytest.mark.asyncio
 async def test_metrics_system_returns_data_envelope(monkeypatch):
-    """/metrics/system → {"data": [...]}，元素为采样点（与 K 支线信封对齐）。"""
+    """/metrics/system → {"data": [...]}，元素为采样点（与 K 支线信封对齐）。
+
+    T8 适配：端点按 time_range 裁剪窗口（默认 1h），样本时间戳改用「近 1 小时」
+    内——旧用例的裸小整数（如 100 = 1970 年）在新语义下会被窗口正确剔除。
+    """
     from app.api.v1.endpoints import monitoring as monitoring_mod
 
-    monkeypatch.setattr(monitoring_mod, "system_metrics_sampler", _StubSampler([_sample(100)]))
+    sample = _sample(int(time.time()) - 100)
+    monkeypatch.setattr(monitoring_mod, "system_metrics_sampler", _StubSampler([sample]))
 
     result = await monitoring_mod.get_metrics("system", "1h", None)
-    assert result == {"data": [_sample(100)]}
+    assert result == {"data": [sample]}
 
 
 @pytest.mark.asyncio
@@ -346,18 +352,22 @@ async def test_metrics_application_branch_unchanged(monkeypatch):
     """回归：application 分支仍走 metrics_collector 历史与 <2 防伪门槛。"""
     from app.api.v1.endpoints import monitoring as monitoring_mod
 
+    # T8 适配：同窗口语义——样本改为「近 1 小时」内时间戳（原裸小整数会被剔除）
+    s1 = _sample(int(time.time()) - 1)
+    s2 = _sample(int(time.time()) - 2)
+
     monkeypatch.setattr(
-        monitoring_mod.metrics_collector, "get_history", AsyncMock(return_value=[_sample(1)])
+        monitoring_mod.metrics_collector, "get_history", AsyncMock(return_value=[s1])
     )
     assert await monitoring_mod.get_metrics("application", "1h", None) == {"data": []}
 
     monkeypatch.setattr(
         monitoring_mod.metrics_collector,
         "get_history",
-        AsyncMock(return_value=[_sample(1), _sample(2)]),
+        AsyncMock(return_value=[s1, s2]),
     )
     assert await monitoring_mod.get_metrics("application", "1h", None) == {
-        "data": [_sample(1), _sample(2)]
+        "data": [s1, s2]
     }
 
 

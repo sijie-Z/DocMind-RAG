@@ -201,6 +201,7 @@ import { RefreshOutline, PulseOutline, GitNetworkOutline, BookOutline, WarningOu
 import echarts from '@/utils/echarts'
 import { getMonitoringDashboard, getMonitoringAlerts, getMetrics } from '@/api/monitoring'
 import request from '@/utils/request'
+import { filterPointsByTimeRange } from './timeRange'
 
 interface SystemMetrics {
   cpu_percent: number
@@ -533,7 +534,9 @@ const updateMetricsCharts = async () => {
 const updateSystemCharts = (
   systemTrend: Array<{ timestamp: number; cpu_percent: number; memory_percent: number }> | undefined
 ) => {
-  const points = Array.isArray(systemTrend) ? systemTrend : []
+  // T8：按时间范围选择器裁剪（dashboard.trends.system 不经 /metrics，后端无法代劳）；
+  // 空数组 → 保持「暂无数据」诚实空态（不画假线）。
+  const points = filterPointsByTimeRange(Array.isArray(systemTrend) ? systemTrend : [], timeRange.value)
 
   if (cpuChart) {
     const cpuData = points.map((item) => [item.timestamp * 1000, item.cpu_percent])

@@ -168,7 +168,16 @@ export default {
     updateSuccess: '更新成功',
     createSuccess: '创建成功',
     saveFailed: '保存失败',
-    deleted: '已删除'
+    deleted: '已删除',
+    addMember: '添加成员',
+    selectUser: '选择用户',
+    removeMember: '移除',
+    removeMemberConfirm: '确定将该成员移出组织？',
+    memberAdded: '成员已加入组织',
+    memberRemoved: '成员已移除',
+    roleUpdated: '角色已更新',
+    loadUsersFailed: '用户列表加载失败',
+    memberOpFailed: '操作失败'
   },
   chat: {
     aiAssistant: 'AI 助手',

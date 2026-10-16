@@ -3,6 +3,7 @@ import type { RouteRecordRaw } from 'vue-router'
 import Layout from '@/layouts/index.vue'
 import { useUserStore } from '@/stores/user'
 import { getToken, isTokenExpired, removeToken } from '@/utils/auth'
+import { installChunkLoadRetry } from '@/utils/chunkLoadRetry'
 
 let sessionValidated = false
 let lastValidatedAt = 0
@@ -277,6 +278,9 @@ const router = createRouter({
   history: createWebHistory(),
   routes
 })
+
+// T8：懒加载 chunk 失败（dev 下偶发/弱网）→ 整页重载一次兜底，避免白屏
+installChunkLoadRetry(router)
 
 router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()

@@ -129,6 +129,11 @@ async def create_user_admin(
         if existing.scalar_one_or_none():
             raise ConflictError("用户名或邮箱已存在")
 
+        # T8：单组织数据模型（User.organization_id 单外键）下的显式拒收——
+        # 旧行为对多值静默取首个（"后端只取首个"复核点），前端已改单选；
+        # 外部调用方传多值时会拿到 400 而非被悄悄截断。
+        if len(body.organization_ids) > 1:
+            raise ValidationError("仅支持分配单一组织")
         org_id = body.organization_ids[0] if body.organization_ids else None
         if org_id is not None and not current_user.is_superuser:
             # S3 安全加固：无组织用户不再兜底到 1 号组织，直接 403
@@ -198,6 +203,9 @@ async def update_user_admin(
             user.role = "admin" if body.role == "admin" else "user"
         if body.status is not None:
             user.is_active = body.status != "inactive"
+        if body.organization_ids and len(body.organization_ids) > 1:
+            # T8：同创建路径——多值显式 400，不再静默取首。
+            raise ValidationError("仅支持分配单一组织")
         if body.organization_ids:
             org_id = body.organization_ids[0]
             # S3 安全加固：无组织用户不再兜底到 1 号组织，直接 403
@@ -337,6 +345,31 @@ async def get_audit_logs(
                 "total": total
             }
         }
+    except Exception as e:
+        return {"success": False, "message": f"获取失败: {str(e)}"}
+
+
+@router.get("/audit-logs/actions", response_model=dict[str, Any], dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+async def get_audit_log_actions(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    审计日志「操作类型」分布（筛选下拉数据源）。
+
+    T8 复核根因：前端下拉此前为 5 项硬编码，部分选项值（如 'delete'）与库内
+    真实动作串（'delete_document'）不一致，且库中不存在的动作照样展示——选中
+    即恒空。改为按真实数据出选项：只返回当前可见范围内确实存在的 action
+    （组织隔离口径与列表接口一致，非超管按同组织过滤）。
+    """
+    try:
+        count_expr = func.count()
+        stmt = select(UserActivityLog.action, count_expr).group_by(UserActivityLog.action)
+        if not current_user.is_superuser:
+            stmt = stmt.join(User).where(User.organization_id == (current_user.organization_id or -1))
+        stmt = stmt.order_by(count_expr.desc(), UserActivityLog.action.asc())
+        rows = (await db.execute(stmt)).all()
+        return {"success": True, "data": [{"action": action, "count": count} for action, count in rows]}
     except Exception as e:
         return {"success": False, "message": f"获取失败: {str(e)}"}
 

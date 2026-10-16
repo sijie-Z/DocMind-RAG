@@ -151,20 +151,48 @@ async def get_monitoring_dashboard(
         "timestamp": int(time.time())
     }
 
+# T8：时间范围窗口真过滤。快照 timestamp 为秒级（core/middleware.py 与
+# core/system_metrics.py 同口径）。未知取值不裁剪（向后兼容旧行为）；窗口内
+# 数据不足时按实有返回（诚实空态，不补造）。
+TIME_RANGE_SECONDS: dict[str, int] = {
+    "1h": 3600,
+    "6h": 21600,
+    "12h": 43200,
+    "24h": 86400,
+    "7d": 604800,
+}
+
+
+def filter_by_time_range(
+    history: list[dict[str, Any]], time_range: str, now: float | None = None
+) -> list[dict[str, Any]]:
+    """按 time_range 窗口裁剪快照历史（cutoff 之前的点剔除）。
+
+    T8 复核根因：端点此前忽略 time_range 查询参数、恒返回全量历史——前端
+    「时间范围选择器」切换后拿到的是同一份数据（实测 1h 与 7d 响应逐字节
+    相同），即 R3-A「选择器无效」。
+    """
+    window = TIME_RANGE_SECONDS.get(time_range)
+    if not window:
+        return history
+    cutoff = int(now if now is not None else time.time()) - window
+    return [point for point in history if int(point.get("timestamp") or 0) >= cutoff]
+
+
 @router.get("/metrics/{metric_type}", response_model=dict, summary="获取趋势指标", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
 async def get_metrics(
     metric_type: str,
     time_range: str = Query("1h"),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取指标趋势数据（需要 VIEW_SYSTEM_HEALTH 权限）"""
+    """获取指标趋势数据（需要 VIEW_SYSTEM_HEALTH 权限；按 time_range 裁剪窗口）"""
 
     if metric_type == "system":
         # 系统指标采样历史（round2/sampling）：信封与下方应用分支一致
         # {"data": [...]}（K 支线已把前端读取对齐到该风格）；无样本 → 空数组
         # （诚实空态，不造假）。单条样本也原样返回——它不是伪造数据，
         # 无需应用分支 <2 的防伪门槛。
-        return {"data": await system_metrics_sampler.get_history()}
+        return {"data": filter_by_time_range(await system_metrics_sampler.get_history(), time_range)}
 
     # 获取性能指标历史
     history = await metrics_collector.get_history()
@@ -173,7 +201,7 @@ async def get_metrics(
     if len(history) < 2:
         return {"data": []}
 
-    return {"data": history}
+    return {"data": filter_by_time_range(history, time_range)}
 
 @router.get("/alerts", response_model=dict, summary="获取系统告警", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
 async def get_alerts(

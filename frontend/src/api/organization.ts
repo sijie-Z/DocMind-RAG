@@ -80,6 +80,24 @@ export const getOrganizationMembers = async (id: number): Promise<AxiosResponse<
   return request.get(`/organizations/${id}/members`)
 }
 
+// ---- T8 成员管理（后端端点已就绪，openapi 实测；此前前端无 UI）----
+export const addOrganizationMember = async (orgId: number, userId: number): Promise<AxiosResponse<{ success: boolean }>> => {
+  return request.post(`/organizations/${orgId}/members/${userId}`)
+}
+
+/** role 为后端 **query** 参数（FastAPI 单标量默认 in=query；放 body 会 422） */
+export const updateOrganizationMemberRole = async (
+  orgId: number,
+  userId: number,
+  role: 'user' | 'admin'
+): Promise<AxiosResponse<{ success: boolean }>> => {
+  return request.patch(`/organizations/${orgId}/members/${userId}/role`, null, { params: { role } })
+}
+
+export const removeOrganizationMember = async (orgId: number, userId: number): Promise<AxiosResponse<{ success: boolean }>> => {
+  return request.delete(`/organizations/${orgId}/members/${userId}`)
+}
+
 export const getOrganizationDocuments = async (id: number): Promise<AxiosResponse<{ data: OrganizationDocument[] }>> => {
   return request.get(`/organizations/${id}/documents`)
 }

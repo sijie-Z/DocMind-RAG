@@ -49,7 +49,7 @@
     "views/search.vue": 8,
     "views/systemAbout/index.vue": 25,
     "views/systemHelp/index.vue": 19,
-    "views/users/index.vue": 12,
+    "views/users/index.vue": 10,
     "views/workflow/composables/useWorkflowEditor.ts": 105,
     "views/workflow/editor.vue": 137,
     "views/workflow/index.vue": 28,
