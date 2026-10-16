@@ -328,12 +328,17 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
-# 4. GZip compression
+# 3. GZip compression
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# 3. Response format wrapper — disabled: BaseHTTPMiddleware conflicts with
-#    SQLAlchemy async sessions. The ASGI metrics/rate-limit middleware below
-#    does not have that problem.
+# 4. Rate-limit + performance metrics (pure ASGI — no BaseHTTPMiddleware).
+#    Deliberately no global success-envelope middleware (T11 / 方案 B): success
+#    payloads keep their per-endpoint shapes (bare / {data} / {data:{data}}),
+#    the frontend unwraps tolerantly (utils/apiUnwrap.ts), and error paths use
+#    the unified envelope from the exception handlers below. The old wrapper
+#    (app/core/response_middleware.py) was never registered and could not have
+#    worked — responses from call_next expose no `.body`, so it always passed
+#    through unchanged — and is removed as dead code.
 if settings.ENABLE_RATE_LIMIT:
     app.add_middleware(RateLimitASGIMiddleware)
 app.add_middleware(PerformanceASGIMiddleware)
