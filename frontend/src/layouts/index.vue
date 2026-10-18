@@ -609,14 +609,8 @@ const toggleTheme = () => {
   overflow: hidden;
 }
 
-/* Mobile sidebar: fixed overlay on small screens */
-@media (max-width: 767px) {
-  .sidebar-fixed {
-    position: fixed;
-    inset: 0;
-    z-index: 50;
-  }
-}
+/* 移动端侧栏由模板上的 max-md:* 工具类承接（fixed/滑入滑出）；
+   原先此处的 767px 断点块在模板中无任何引用，属死 CSS，已移除。 */
 
 /* 页面过渡容器 */
 .page-wrapper {
