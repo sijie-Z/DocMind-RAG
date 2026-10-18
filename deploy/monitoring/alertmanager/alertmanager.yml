@@ -11,6 +11,6 @@ route:
 receivers:
   - name: default-receiver
     webhook_configs:
-      # token 需与后端 ALERT_WEBHOOK_TOKEN 保持一致
-      - url: "http://host.docker.internal:8000/api/v1/monitoring/alerts/webhook?token=dev-alert-token"
+      # token 经环境变量注入（--config.expand-env），需与后端 ALERT_WEBHOOK_TOKEN 保持一致
+      - url: "http://host.docker.internal:8000/api/v1/monitoring/alerts/webhook?token=${ALERT_WEBHOOK_TOKEN}"
         send_resolved: true

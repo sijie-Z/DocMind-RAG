@@ -145,15 +145,18 @@ npm run dev
 
 ### AI 模型配置
 
-当前使用**智谱 AI 全家桶**：
+模型/向量维度默认值以代码真源 `backend/app/core/config/ai.py` 为准：
 
-| 模型 | 用途 | 配置项 |
-|------|------|--------|
-| glm-4-flash | Chat 对话 | `DEEPSEEK_MODEL` |
-| embedding-3 | 向量化 | `EMBEDDING_MODEL`，维度 2048 |
-| rerank | 重排序 | `RERANK_MODEL` |
+| 配置项 | 默认值 | 用途 |
+|--------|--------|------|
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | Chat 对话 |
+| `EMBEDDING_MODEL` | `nomic-embed-text`（本机 Ollama） | 向量化 |
+| `VECTOR_DIMENSION` | `768` | 向量维度 |
 
-三个模型共用同一个 API Key，密钥需自行填入 `.env` / `.env.docker`（模板不含真实密钥）。
+Embedding 默认走本机 Ollama（`EMBEDDING_API_URL=http://localhost:11434/v1`），
+使用云端 Embedding 时 URL / 模型 / 维度三键必须配套修改（例如智谱
+`embedding-3` 为 2048 维）。Rerank 默认使用本地 BGE，无需 API Key。
+Chat API Key 需自行填入 `.env` / `.env.docker`（模板不含真实密钥）。
 
 ---
 

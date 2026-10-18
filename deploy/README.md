@@ -58,24 +58,52 @@ kubectl get pods -n docmind
 kubectl get svc -n docmind
 ```
 
+### Secret 创建方式
+
+`deploy/k8s/02-secrets.yaml` 全部为 `REPLACE_ME_*` 占位符。数据库连接串
+（含口令）、MinIO / Redis 口令与 API Key 只存 Secret；ConfigMap 不含任何凭据。
+以下两种方式任选其一：
+
+```bash
+# 方式 A（推荐）：直接用 kubectl 创建，跳过 02-secrets.yaml
+kubectl create secret generic docmind-secrets -n docmind \
+  --from-literal=SECRET_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')" \
+  --from-literal=JWT_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')" \
+  --from-literal=DATABASE_URL="mysql+aiomysql://docmind:<DB_PASSWORD>@docmind-mysql:3306/docmind" \
+  --from-literal=MYSQL_ROOT_PASSWORD="<ROOT_PASSWORD>" \
+  --from-literal=MINIO_ACCESS_KEY="<ACCESS_KEY>" \
+  --from-literal=MINIO_SECRET_KEY="<SECRET_KEY>" \
+  --from-literal=DEEPSEEK_API_KEY="<API_KEY>" \
+  --from-literal=EMBEDDING_API_KEY="<API_KEY>"
+
+# 方式 B：编辑 02-secrets.yaml 中的 REPLACE_ME_* 后再 apply
+kubectl apply -f deploy/k8s/02-secrets.yaml
+```
+
+> 方式 A 与 02-secrets.yaml 二选一：已用 `kubectl create` 创建的 Secret 不要再用
+> `kubectl apply -f 02-secrets.yaml` 覆盖（会用占位符回写）。backend 与 worker
+> 通过 `envFrom.secretRef` 注入 Secret，ConfigMap 只提供非敏感配置。
+
 ## Option 3: Manual (Development)
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for dev setup instructions.
 
 ## Environment Variables
 
-Key environment variables (set in `.env.docker`):
+Key environment variables (set in `.env.docker` or the k8s Secret):
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | SECRET_KEY | Yes | 32-byte hex key（部署契约：k8s/样例注入 + 启动非空校验；当前未被代码消费，issue #242） |
 | JWT_SECRET_KEY | Yes | 32-byte hex key for JWT signing |
-| DEEPSEEK_API_KEY | Yes | LLM API key (ZhipuAI / OpenAI-compatible) |
-| EMBEDDING_API_KEY | Yes | Embedding model API key |
-| RERANK_API_KEY | Yes | Rerank model API key |
+| DEEPSEEK_API_KEY | Yes | LLM API key (DeepSeek / OpenAI-compatible) |
+| EMBEDDING_API_KEY | No | Embedding API key（默认本机 Ollama，可复用 DEEPSEEK_API_KEY） |
+| RERANK_API_KEY | No | Rerank model API key（默认本地 BGE，无需） |
+| DATABASE_URL | Yes | MySQL 连接串（含口令，仅存 k8s Secret） |
 | MYSQL_ROOT_PASSWORD | Yes | MySQL root password |
 | MINIO_ACCESS_KEY | Yes | MinIO access key |
 | MINIO_SECRET_KEY | Yes | MinIO secret key |
+| REDIS_PASSWORD | No | Redis 口令（启用认证时填入 Secret） |
 
 Generate secure keys:
 ```bash

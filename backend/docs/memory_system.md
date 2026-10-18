@@ -354,12 +354,13 @@ if self.config.enable_experience:
 
 ### Embedding 模型
 
-- **模型**:`EMBEDDING_MODEL`(默认 `embedding-3`,智谱 AI,OpenAI 兼容 API)
-- **维度**:2048
+- **模型**:`EMBEDDING_MODEL`(默认 `nomic-embed-text`,本机 Ollama;代码真源 `app/core/config/ai.py`)
+- **维度**:`VECTOR_DIMENSION`(默认 `768`;未显式设置时按硬件档位自动选择:CPU `bge-m3`/1024、8G 显存 `Qwen3-Embedding-4B`/2048、16G 显存 `Qwen3-Embedding-8B`/4096)
 - **批处理**:支持批量,带 retry
+- **云端 Embedding**:改用云端服务(如智谱 `embedding-3`,2048 维)时,`EMBEDDING_API_URL` / `EMBEDDING_MODEL` / `VECTOR_DIMENSION` 三键必须配套修改
 - **本地 fallback**:`ENABLE_LOCAL_EMBEDDING=true` 时改用 `LOCAL_EMBEDDING_MODEL`(默认 `nomic-embed-text`,Ollama)
   - **注意**:MemoryBridge 通过 RAG pipeline 间接注入 embedding,所以走的也是 `embedding_service.py` 这条分支——本地 / 在线会自动跟当前 `ENABLE_LOCAL_EMBEDDING` 一致
-  - **维度可能不再 2048**——本地模型的输出维度由 `LOCAL_EMBEDDING_MODEL` 决定,需要重新校准 LongTerm 里的存量 embedding(否则 search_semantic 会因为维度不一致抛错)
+  - **维度可能变化**——切换模型后输出维度由所选模型决定,需要重新校准 LongTerm 里的存量 embedding(否则 search_semantic 会因为维度不一致抛错)
 
 ### Token 估算
 
