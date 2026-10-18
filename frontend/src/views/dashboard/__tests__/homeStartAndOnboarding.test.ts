@@ -338,6 +338,23 @@ describe('B5 · 注册后 4 步清单（真实数据推导 + 可恢复 + 跳过�
     expect(push).toHaveBeenCalledWith('/chat')
   })
 
+  it('模型状态在途显示「正在检查」，不提前误报未配置', async () => {
+    let resolveStatus!: (value: unknown) => void
+    vi.mocked(getLLMStatus).mockReturnValue(
+      new Promise((resolve) => { resolveStatus = resolve }) as never,
+    )
+
+    const { wrapper } = mountView(312)
+    await flushPromises()
+
+    const modelStep = () => wrapper.find('[data-testid="onboarding-step-model"]')
+    expect(modelStep().text()).toContain('正在检查')
+
+    resolveStatus(llmStatusFixture(false))
+    await flushPromises()
+    expect(modelStep().text()).toContain('尚未检测到可用模型')
+  })
+
   it('统计降级（degraded=true）时不把全零当作 0/4 展示', async () => {
     // 守卫用例（基线无清单，故不构成红证据）：防止将来把降级数据当真实 0 渲染
     vi.mocked(getUserStats).mockResolvedValue({

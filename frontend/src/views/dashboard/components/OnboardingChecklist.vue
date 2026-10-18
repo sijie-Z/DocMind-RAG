@@ -183,7 +183,8 @@ async function checkModel() {
 
 /** 模型步骤状态文案：检查中 / 检查失败 / 确认未配置，三种状态不混为一谈。 */
 const modelStatusText = computed(() => {
-  if (!llmChecked.value) return t('dashboard.onboarding.steps.model.checking')
+  // 请求在途一律显示「检查中」：重检时不得先闪回上一次的「未配置」文案
+  if (llmLoading.value || !llmChecked.value) return t('dashboard.onboarding.steps.model.checking')
   if (llmError.value) return t('dashboard.onboarding.steps.model.unknown')
   return t('dashboard.onboarding.steps.model.hint')
 })
