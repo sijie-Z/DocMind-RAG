@@ -52,8 +52,9 @@ export const SIDEBAR_MENU_GROUPS: MenuGroupDef[] = [
   {
     groupI18nKey: 'menu.groupConversation',
     items: [
+      // B2（D3 会话入口合并）：独立「历史记录」一级项已移除——会话列表在
+      // 对话页侧栏（ChatSidebar）内提供。
       { routeName: 'Chat', i18nKey: 'menu.chat', icon: 'chat' },
-      { routeName: 'Conversations', i18nKey: 'menu.conversations', icon: 'history' },
     ],
   },
   {
@@ -66,8 +67,9 @@ export const SIDEBAR_MENU_GROUPS: MenuGroupDef[] = [
   {
     groupI18nKey: 'menu.groupAutomation',
     items: [
+      // B2（D3）：独立「智能 Agent」一级项已移除——Agent（PER）入口改为
+      // 对话页内的「深度分析（Agent）」模式开关。
       { routeName: 'Workflow', i18nKey: 'menu.workflow', icon: 'git-network' },
-      { routeName: 'Agent', i18nKey: 'menu.agent', icon: 'chip' },
       { routeName: 'ScheduledTasks', i18nKey: 'menu.scheduledTasks', icon: 'calendar' },
     ],
   },

@@ -20,11 +20,6 @@ exports[`sidebar menu domains > menu tree snapshot 1`] = `
         "icon": "chat",
         "routeName": "Chat",
       },
-      {
-        "i18nKey": "menu.conversations",
-        "icon": "history",
-        "routeName": "Conversations",
-      },
     ],
   },
   {
@@ -49,11 +44,6 @@ exports[`sidebar menu domains > menu tree snapshot 1`] = `
         "i18nKey": "menu.workflow",
         "icon": "git-network",
         "routeName": "Workflow",
-      },
-      {
-        "i18nKey": "menu.agent",
-        "icon": "chip",
-        "routeName": "Agent",
       },
       {
         "i18nKey": "menu.scheduledTasks",

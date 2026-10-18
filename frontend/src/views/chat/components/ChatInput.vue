@@ -148,20 +148,25 @@
               </div>
             </n-popover>
 
-            <!-- Agent mode toggle -->
-            <n-tooltip trigger="hover">
+            <!-- B2（D3 会话入口合并）：快速问答 / 深度分析（Agent）模式开关。
+                 深度分析复用 /agent 的 PER 能力（经 /chat/stream useAgent），
+                 Agent 仅 SSE 可用——开启时锁定 SSE（脚本里 watch 兜底）。 -->
+            <n-radio-group
+              v-model:value="chatMode"
+              size="small"
+              class="chat-mode-switch"
+              :aria-label="t('chat.modeSwitchAria')"
+            >
+              <n-radio-button value="quick">{{ t('chat.modeQuick') }}</n-radio-button>
+              <n-radio-button value="deep">{{ t('chat.modeDeep') }}</n-radio-button>
+            </n-radio-group>
+            <n-tooltip v-if="useAgent" trigger="hover">
               <template #trigger>
-                <n-button
-                  size="tiny"
-                  quaternary
-                  circle
-                  :class="useAgent ? 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20' : 'text-gray-400'"
-                  @click="toggleAgent"
-                >
-                  <template #icon><n-icon size="18"><RocketOutline /></n-icon></template>
-                </n-button>
+                <n-icon size="16" class="text-purple-500 dark:text-purple-400 cursor-help">
+                  <InformationCircleOutline />
+                </n-icon>
               </template>
-              <span>{{ useAgent ? 'Agent 模式已开启 (PER)' : '点击开启 Agent 模式' }}</span>
+              {{ t('chat.modeDeepHint') }}
             </n-tooltip>
           </div>
 
@@ -192,12 +197,13 @@
 </template>
 
 <script setup lang="ts">
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   SendOutline, AttachOutline, FlashOutline, ShieldCheckmarkOutline, RadioButtonOnOutline,
   StopCircleOutline, DocumentTextOutline, DocumentOutline, CloseOutline,
   CloudUploadOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldOutline,
-  RocketOutline
+  InformationCircleOutline
 } from '@vicons/ionicons5'
 import type { AttachedFile } from '@/types/chat'
 
@@ -210,11 +216,22 @@ const useSSE = defineModel<boolean>('useSSE', { default: false })
 const useStream = defineModel<boolean>('useStream', { default: true })
 const useAgent = defineModel<boolean>('useAgent', { default: false })
 
-const toggleAgent = () => {
-  useAgent.value = !useAgent.value
-  // Agent mode requires SSE
-  if (useAgent.value) useSSE.value = true
-}
+// B2（D3）：二选一模式开关。深度分析 = Agent（PER）模式。
+const chatMode = computed({
+  get: () => (useAgent.value ? 'deep' : 'quick'),
+  set: (mode: string) => {
+    useAgent.value = mode === 'deep'
+  },
+})
+
+// Agent（PER）只经 SSE 执行：开启即锁定 SSE；用户再关掉 SSE 时立即拉回，
+// 避免「Agent 开着但传输退回 WS」被静默降级成普通问答。
+watch(useAgent, (on) => {
+  if (on) useSSE.value = true
+}, { immediate: true })
+watch(useSSE, (on) => {
+  if (!on && useAgent.value) useSSE.value = true
+})
 
 defineProps<{
   isLoading: boolean
