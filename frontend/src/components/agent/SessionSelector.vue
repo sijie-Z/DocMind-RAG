@@ -13,8 +13,9 @@
     <button
       v-if="modelValue"
       class="delete-session-btn"
+      :aria-label="t('agent.deleteSessionConfirmTitle')"
+      :title="t('agent.deleteSessionConfirmTitle')"
       @click="$emit('delete', modelValue)"
-      title="删除当前会话"
     >
       🗑
     </button>
@@ -22,7 +23,10 @@
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import type { AgentSession } from '@/types/agent'
+
+const { t } = useI18n()
 
 defineProps<{
   sessions: AgentSession[]

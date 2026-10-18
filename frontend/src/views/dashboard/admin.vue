@@ -564,8 +564,10 @@ const emptyChartSubtext = (data: number[]) => ({
   }
 })
 
-// LLM token 趋势：后端 token_trend_7d 为 7 个日桶 → 保留 7 天标签
-const llmDays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+// LLM token 趋势：后端 token_trend_7d 为 7 个日桶 → 保留 7 天标签。
+// 星期标签走 common.weekdays 词条（周一为首；0=周日 与 Date/cron 口径一致）。
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]
+const llmDays = computed(() => WEEK_ORDER.map((d) => t(`common.weekdays.${d}`)))
 
 /** LLM 面板数据到位后单独初始化（与 RAG 图互不等待） */
 const initLlmChart = () => {
@@ -577,7 +579,7 @@ const initLlmChart = () => {
     ...emptyChartSubtext(llmTrend),
     tooltip: { trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e5e7eb', textStyle: { color: '#374151' } },
     grid: { left: '2%', right: '3%', bottom: '3%', top: '8%', containLabel: true },
-    xAxis: { type: 'category', data: llmDays, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { show: false } },
+    xAxis: { type: 'category', data: llmDays.value, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { show: false } },
     yAxis: { type: 'value', axisLine: { show: false }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
     series: [{
       // 无数据即为空序列（旧实现回退 [1200,1800,…] 伪造曲线——已删）

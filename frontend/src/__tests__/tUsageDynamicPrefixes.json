@@ -4,6 +4,7 @@
     "agentReplay.",
     "agentTasks.",
     "artifacts.kind.",
+    "common.weekdays.",
     "scheduler.cron.months.",
     "scheduler.cron.weekdays.",
     "scheduler.lastStatus.",

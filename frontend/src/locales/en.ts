@@ -23,6 +23,7 @@ export default {
     back: 'Back',
     actions: 'Actions',
     noDescription: 'No description',
+    weekdays: { '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat' },
   },
   profile: {
     overview: 'Overview',
@@ -563,6 +564,7 @@ export default {
     files: 'Files',
     storage: 'Storage',
     recentConversations: 'Recent Conversations',
+    recentConversationsCount: 'Recent conversations: {count}',
     viewAll: 'View All',
     noConversations: 'No conversations yet, start a new one',
     untitled: 'Untitled',
@@ -705,7 +707,7 @@ export default {
     description: 'Break complex AI tasks into staged pipelines with unified metrics and state management.',
     editor: {
       clearConfirmTitle: 'Clear canvas',
-      clearConfirmContent: 'After clearing, auto-save will write the empty canvas back within {n} seconds and overwrite the saved version. Clear the canvas?',
+      clearConfirmContent: 'After clearing, auto-save will be skipped and the saved version will not be overwritten. Clear the canvas?',
       clearConfirmPositive: 'Clear',
       clearConfirmNegative: 'Cancel',
       emptyCanvasAutoSaveBlocked: 'The canvas is empty, so auto-save was skipped to protect the saved version. To save an empty canvas, click "Save" manually.',

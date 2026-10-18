@@ -14,6 +14,7 @@ import AdminDashboard from '../admin.vue'
 import { getLLMStats, getRAGStats, getAdminSummary, getOrgSummary, getMonitoringHealth } from '@/api/monitoring'
 import { getAuditLogs } from '@/api/user'
 import zh from '@/locales/zh'
+import en from '@/locales/en'
 
 const { chartInstances } = vi.hoisted(() => ({
   chartInstances: [] as Array<Record<string, ReturnType<typeof vi.fn>>>,
@@ -48,11 +49,22 @@ const SlotStub = (name: string) =>
   defineComponent({ name, setup(_, { slots }) { return () => h('div', slots.default?.()) } })
 
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
+const i18nEn = createI18n({ legacy: false, locale: 'en', messages: { en } })
 
 function mountView() {
   return mount(AdminDashboard, {
     global: {
       plugins: [i18n],
+      mocks: { $router: { push: vi.fn() } },
+      stubs: { Tag: SlotStub('Tag') },
+    },
+  })
+}
+
+function mountViewEn() {
+  return mount(AdminDashboard, {
+    global: {
+      plugins: [i18nEn],
       mocks: { $router: { push: vi.fn() } },
       stubs: { Tag: SlotStub('Tag') },
     },
@@ -132,6 +144,16 @@ describe('AdminDashboard · 趋势轴标签与诚实空态（B5）', () => {
 
     const llmOpt = chartInstances[0].setOption.mock.calls[0][0] as { xAxis: { data: string[] } }
     expect(llmOpt.xAxis.data).toEqual(['周一', '周二', '周三', '周四', '周五', '周六', '周日'])
+  })
+
+  it('en 语言下 LLM 趋势星期标签为英文（旧实现硬编码中文，先红）', async () => {
+    const wrapper = mountViewEn()
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('Total Users')
+    const llmOpt = chartInstances[0].setOption.mock.calls[0][0] as { xAxis: { data: string[] } }
+    expect(llmOpt.xAxis.data).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
   })
 
   it('趋势为空：不画伪造回退数据（旧 [1200,…] / [0,…,hitRate] 已删），画布写明「暂无数据」', async () => {
