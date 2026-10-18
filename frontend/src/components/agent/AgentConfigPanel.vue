@@ -72,6 +72,16 @@
         </select>
       </div>
 
+      <!-- HITL 审批模式（backend/app/agent/approval.py 枚举：never / risky / always） -->
+      <div class="config-section">
+        <label class="config-label">审批模式</label>
+        <select v-model="localConfig.approval_mode" class="config-select approval-mode-select">
+          <option value="never">不审批</option>
+          <option value="risky">仅高危工具审批（默认）</option>
+          <option value="always">所有工具调用审批</option>
+        </select>
+      </div>
+
       <!-- Tools -->
       <div class="config-section">
         <label class="config-label">工具开关</label>
