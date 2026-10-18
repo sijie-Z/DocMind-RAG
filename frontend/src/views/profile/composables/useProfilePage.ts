@@ -899,8 +899,27 @@ const handleChangePassword = async () => {
   }
 }
 
-// API Key 逻辑
+// API Key 逻辑：生成 / 重生成 / 撤销三个操作均须先经确认弹窗
+const confirmApiKeyAction = (title: string, content: string): Promise<boolean> =>
+  new Promise((resolve) => {
+    dialog.warning({
+      title,
+      content,
+      positiveText: t('common.confirm'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+    })
+  })
+
 const generateApiKey = async () => {
+  const isRegenerate = Boolean(apiKey.value)
+  const confirmed = await confirmApiKeyAction(
+    isRegenerate ? t('profile.regenerateKey') : t('profile.generateKey'),
+    isRegenerate ? t('profile.apiKeyRegenerateConfirm') : t('profile.apiKeyGenerateConfirm'),
+  )
+  if (!confirmed) return
   try {
     generatingApiKey.value = true
     const response = await apiGenerateKey()
@@ -918,6 +937,11 @@ const generateApiKey = async () => {
 }
 
 const revokeApiKey = async () => {
+  const confirmed = await confirmApiKeyAction(
+    t('profile.revokeKey'),
+    t('profile.apiKeyRevokeConfirm'),
+  )
+  if (!confirmed) return
   try {
     revokingApiKey.value = true
     await apiRevokeKey()

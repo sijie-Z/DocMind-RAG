@@ -69,6 +69,9 @@ export default {
     aiProviderExpDesc: "Le choix du modèle est configuré côté serveur (actuellement DeepSeek). La sélection et la clé API ici n'affectent pas l'inférence ; l'enregistrement est désactivé pour éviter toute confusion.",
     providerLoadFailed: "Échec du chargement de la configuration des fournisseurs IA. Les paramètres par défaut ou les derniers paramètres chargés sont affichés.",
     apiKeyGenerateFailed: 'Échec de la génération',
+    apiKeyGenerateConfirm: 'Conservez la clé générée en lieu sûr. Générer une clé ?',
+    apiKeyRegenerateConfirm: "La régénération invalide immédiatement l'ancienne clé ; les appels qui l'utilisent échoueront. Régénérer ?",
+    apiKeyRevokeConfirm: 'La révocation invalide immédiatement cette clé et est irréversible. Révoquer ?',
     validation: {
       nicknameLength: 'Le pseudo doit contenir entre 2 et 50 caractères',
       phoneInvalid: 'Veuillez entrer un numéro de téléphone valide',
