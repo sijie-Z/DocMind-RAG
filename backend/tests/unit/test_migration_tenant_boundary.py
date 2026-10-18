@@ -81,6 +81,22 @@ def test_tenant_org_migration_backfill_and_rollback(tmp_path, monkeypatch):
         VALUES (2, 'u2', 'u2@example.com', 'x', NULL, 'user', 1, 0, datetime('now'), datetime('now'))
     """)
     _exec(db_path, "INSERT INTO user_organization (user_id, organization_id) VALUES (2, 8)")
+    # 用户 3：无主组织，有两条成员关系——按「最早加入」（created_at）应回填组织 8，
+    # 而不是按组织 id 最小的 7（评审 m-2 的排序判别）。
+    _exec(db_path, """
+        INSERT INTO users
+            (id, username, email, hashed_password, organization_id, role, is_active,
+             is_superuser, created_at, updated_at)
+        VALUES (3, 'u3', 'u3@example.com', 'x', NULL, 'user', 1, 0, datetime('now'), datetime('now'))
+    """)
+    _exec(db_path, """
+        INSERT INTO user_organization (user_id, organization_id, created_at)
+        VALUES (3, 8, '2020-01-01 00:00:00')
+    """)
+    _exec(db_path, """
+        INSERT INTO user_organization (user_id, organization_id, created_at)
+        VALUES (3, 7, '2024-01-01 00:00:00')
+    """)
 
     _exec(db_path, """
         INSERT INTO workflows (id, name, is_active, created_by, created_at, updated_at)
@@ -89,6 +105,10 @@ def test_tenant_org_migration_backfill_and_rollback(tmp_path, monkeypatch):
     _exec(db_path, """
         INSERT INTO workflows (id, name, is_active, created_by, created_at, updated_at)
         VALUES (2, 'wf-membership', 1, 2, datetime('now'), datetime('now'))
+    """)
+    _exec(db_path, """
+        INSERT INTO workflows (id, name, is_active, created_by, created_at, updated_at)
+        VALUES (3, 'wf-earliest-membership', 1, 3, datetime('now'), datetime('now'))
     """)
     _exec(db_path, """
         INSERT INTO prompt_templates
@@ -108,6 +128,9 @@ def test_tenant_org_migration_backfill_and_rollback(tmp_path, monkeypatch):
     assert _scalar(db_path, "SELECT organization_id FROM workflows WHERE id = 2") == 8, (
         "主组织为空时必须回退到 user_organization 成员关系"
     )
+    assert _scalar(db_path, "SELECT organization_id FROM workflows WHERE id = 3") == 8, (
+        "多成员关系时必须按 created_at 取最早加入的组织（8 早于 7）"
+    )
     assert _scalar(db_path, "SELECT organization_id FROM prompt_templates WHERE id = 1") == 7
     assert _scalar(db_path, "SELECT organization_id FROM prompt_templates WHERE id = 2") is None, (
         "系统模板必须保持 organization_id = NULL（全组织只读可见）"
@@ -123,7 +146,7 @@ def test_tenant_org_migration_backfill_and_rollback(tmp_path, monkeypatch):
         conn.close()
     assert "organization_id" not in wf_cols
     assert "organization_id" not in prompt_cols
-    assert _scalar(db_path, "SELECT COUNT(*) FROM workflows") == 2
+    assert _scalar(db_path, "SELECT COUNT(*) FROM workflows") == 3
     assert _scalar(db_path, "SELECT COUNT(*) FROM prompt_templates") == 2
 
     command.upgrade(cfg, "head")
