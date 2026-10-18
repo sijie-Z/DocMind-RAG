@@ -50,7 +50,7 @@ def upgrade() -> None:
         sa.Column("tool_name", sa.String(128), nullable=False),
         sa.Column("arguments", sa.Text(), nullable=False),
         sa.Column("source_event_seq", sa.Integer(), nullable=False),
-        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False, index=True),
         sa.Column(
             "created_at", sa.DateTime(timezone=True),
             server_default=sa.func.now(), nullable=False,

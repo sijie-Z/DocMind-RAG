@@ -277,7 +277,6 @@ class Executor:
         self,
         gated_calls: list[tuple[Any, dict[str, Any]]],
         call_id_by_obj: dict[int, str],
-        step: PlanStep,
     ) -> None:
         """先落库：本回合**将实际派发**的调用在任何 dispatch 之前登记。"""
         task_id = self.tool_ledger_task_id
@@ -1129,7 +1128,7 @@ class Executor:
         )
         # C3a：先落库再 dispatch——登记发生在审批预检与任何执行之前；进程若在
         # 预检/派发窗口内死亡，账本留下的是"已登记未派发"（可被合成终态收敛）。
-        await self._ledger_register(gated_calls, call_id_by_obj, step)
+        await self._ledger_register(gated_calls, call_id_by_obj)
         async for gate_event in self._approval_precheck(gated_calls, plan, step):
             yield gate_event
 
@@ -1213,6 +1212,11 @@ class Executor:
                     denial = f"审批服务不可用（暂停状态无法持久化），工具 {func.name} 未执行"
                     error_type = "approval_unavailable"
                 AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
+                # C3a：审批门物化 = 该调用的确定性终态（未派发、无工具结果）；
+                # 以结构化失败先落账再外发事件，账本不得留下悬挂的 REGISTERED。
+                await self._ledger_result(
+                    tool_call_id, success=False, result=denial, error_type=error_type,
+                )
                 yield AgentEvent(
                     type="tool_error",
                     tool_name=func.name,
@@ -1227,11 +1231,6 @@ class Executor:
                     "tool": func.name, "result": denial, "error_type": error_type,
                 })
                 attempt_error_detail = denial
-                # C3a：审批门物化 = 该调用的确定性终态（未派发、无工具结果）；
-                # 以结构化失败落账，账本不得留下悬挂的 REGISTERED。
-                await self._ledger_result(
-                    tool_call_id, success=False, result=denial, error_type=error_type,
-                )
                 continue
 
             # C3a：派发标记先落库（REGISTERED → DISPATCHED），随后才发事件/执行。
@@ -1282,6 +1281,10 @@ class Executor:
                 if not raw_result.success:
                     error_type = raw_result.error.code if raw_result.error else "unknown"
                     AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
+                    # C3a：结果先落账再外发（消费方在 yield 处断流也不丢账）。
+                    await self._ledger_result(
+                        tool_call_id, success=False, result=result, error_type=error_type,
+                    )
                     yield AgentEvent(
                         type="tool_error",
                         tool_name=func.name,
@@ -1295,11 +1298,12 @@ class Executor:
                     )
                     tool_results.append({"tool": func.name, "result": result, "error_type": error_type})
                     attempt_error_detail = result
-                    await self._ledger_result(
-                        tool_call_id, success=False, result=result, error_type=error_type,
-                    )
                 else:
                     AGENT_TOOL_CALLS.labels(tool=func.name, result="success").inc()
+                    # C3a：结果先落账再外发（消费方在 yield 处断流也不丢账）。
+                    await self._ledger_result(
+                        tool_call_id, success=True, result=result,
+                    )
                     yield AgentEvent(
                         type="tool_result",
                         tool_name=func.name,
@@ -1311,9 +1315,6 @@ class Executor:
                         plan_progress=plan.progress,
                     )
                     tool_results.append({"tool": func.name, "result": result})
-                    await self._ledger_result(
-                        tool_call_id, success=True, result=result,
-                    )
                     if ctx:
                         # 显式传 confidence：Finding.confidence 有消费方
                         # （ExecutionContext.to_dict() 会把它序列化进运行记录），
@@ -1327,6 +1328,11 @@ class Executor:
                 AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
                 AGENT_TOOL_LATENCY.observe(elapsed / 1000)
                 logger.error(f"Tool {func.name} failed: {e}")
+                # C3a：异常结果先落账再外发（消费方在 yield 处断流也不丢账）。
+                await self._ledger_result(
+                    tool_call_id, success=False,
+                    result=f"{type(e).__name__}: {e}", error_type=type(e).__name__,
+                )
                 yield AgentEvent(
                     type="tool_error",
                     tool_name=func.name,
@@ -1338,10 +1344,6 @@ class Executor:
                 )
                 tool_results.append({"tool": func.name, "result": f"Exception: {e}"})
                 attempt_error_detail = f"{type(e).__name__}: {e}"
-                await self._ledger_result(
-                    tool_call_id, success=False,
-                    result=f"{type(e).__name__}: {e}", error_type=type(e).__name__,
-                )
 
         # Synthesize tool results into a natural language answer
         if tool_results:

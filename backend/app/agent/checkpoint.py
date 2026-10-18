@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from app.agent import steering, tool_ledger
+from app.agent.tool_pairs import validate_tool_pairs
 from app.core.database import AsyncSessionLocal
 from app.core.log_safety import log_safe
 from app.core.redis import redis_client
@@ -179,12 +180,14 @@ def _cap_history(history: list | None) -> list[dict]:
 
     ``[-HISTORY_CAP:]`` 是盲切：若截断点恰好落在 result 上（其 call 在窗口
     之外），冻结的历史会以孤儿 result 的形式被 resume 消费。这里把窗口头部
-    的孤儿 result 摘掉（其 call 本就不在窗口内），并在返回前再验一次配对。
+    的孤儿 result 摘掉（其 call 本就不在窗口内），并在返回前再验一次配对
+    （损坏的历史显式报错，save_checkpoint 侧 fail-open 并留 warning）。
     """
     raw = [dict(m) for m in (history or [])]
     window = raw[max(0, len(raw) - HISTORY_CAP):]
     while window and window[0].get("role") == "tool":
         window.pop(0)
+    validate_tool_pairs(window)
     return window
 
 
@@ -393,13 +396,14 @@ async def mark_terminal(
                 )
                 continue
             break
-        await release_task(task_id)
-        # C3a：终态落定后收敛未完成工具调用账目——取消按取消语义（登记未派发
+        # C3a：终态落定后先收敛未完成工具调用账目，再释放租约——避免新 resume
+        # 在"已释放、未收敛"的窗口里认领任务。取消按取消语义（登记未派发
         # → ABORTED_BEFORE_DISPATCH），其余终态按中断语义（→ TOOL_NOT_STARTED /
         # TOOL_OUTCOME_UNKNOWN），绝不留悬空 call。失败只记 warning（幂等、可重试）。
         await tool_ledger.synthesize_terminal(
             task_id, reason="cancel" if to == TaskStatus.CANCELLED else "interrupt",
         )
+        await release_task(task_id)
         # A（steering）：终态清转向缓冲——指导不再有任何消费点（下一步边界
         # 永不到来），留在队列里只会误导后续诊断；清失败不影响终态正确性。
         await steering.clear_steers(task_id)
@@ -483,7 +487,10 @@ async def mark_waiting_approval(task_id: str | None) -> bool:
             if task is None:
                 return False
             if task.status == TaskStatus.WAITING_APPROVAL:
-                return True  # 幂等（重入同一暂停点）
+                # 幂等（重入同一暂停点）；顺带补一次账目收敛（上次收尾若在
+                # sweep 前失败，这里兜底——synthesize 幂等）。
+                await tool_ledger.synthesize_terminal(task_id, reason="interrupt")
+                return True
             if task.is_terminal:
                 logger.warning(
                     "mark_waiting_approval 拒绝：任务 %s 已终态 %s",

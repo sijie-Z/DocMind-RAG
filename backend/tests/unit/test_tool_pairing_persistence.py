@@ -166,6 +166,59 @@ async def test_db_unique_constraints_guard_duplicate_rows(db_factory):
             await db.commit()
 
 
+async def test_register_recovers_from_stale_seq_cache(db_factory):
+    """多副本：本进程缓存落后于库内 MAX 时，唯一冲突后刷新重试，登记不丢。"""
+    task_id = await _new_task(db_factory)
+    await tool_ledger.register_calls(task_id, [("call-1", "t", {})])  # seq=1
+    async with db_factory() as db:
+        # 模拟另一进程已占用 seq=2（本进程缓存仍停在 1）。
+        db.add(AgentToolCall(
+            task_id=task_id, call_id="foreign", tool_name="t", arguments="{}",
+            source_event_seq=2, status=tool_ledger.STATUS_REGISTERED,
+        ))
+        await db.commit()
+    tool_ledger._seq_counters[task_id] = 1  # 模拟跨进程过期缓存
+
+    inserted = await tool_ledger.register_calls(task_id, [("call-2", "t", {})])
+
+    assert inserted == 1, "撞号后必须刷新 MAX 重试，不得整批静默丢弃"
+    calls = {c.call_id: c for c in await _calls(db_factory, task_id)}
+    assert "call-2" in calls
+    assert calls["call-2"].source_event_seq > 2
+
+
+async def test_record_result_recovers_from_stale_seq_cache(db_factory):
+    """多副本：result 序号撞车不得被误判为重复 result，刷新后必须落账。"""
+    task_id = await _new_task(db_factory)
+    await tool_ledger.register_calls(task_id, [("call-a", "t", {})])
+    await tool_ledger.mark_dispatched(task_id, "call-a")
+    async with db_factory() as db:
+        # 模拟另一进程：call-b 占 call 表 seq=2，其结果占 result 表 seq=2。
+        foreign = AgentToolCall(
+            task_id=task_id, call_id="call-b", tool_name="t", arguments="{}",
+            source_event_seq=2, status=tool_ledger.STATUS_COMPLETED,
+        )
+        db.add(foreign)
+        await db.flush()
+        db.add(AgentToolResult(
+            task_id=task_id, call_id="call-b", tool_call_pk=foreign.id,
+            source_event_seq=2, status="success", result_summary="other",
+        ))
+        await db.commit()
+    tool_ledger._seq_counters[task_id] = 1  # 模拟跨进程过期缓存
+
+    recorded = await tool_ledger.record_result(
+        task_id, "call-a", success=True, result="真实结果",
+    )
+
+    assert recorded is True, "序号撞车不是重复 result，真实结果不得被丢弃"
+    call = {c.call_id: c for c in await _calls(db_factory, task_id)}["call-a"]
+    assert call.status == tool_ledger.STATUS_COMPLETED
+    results = {r.call_id: r for r in await _results(db_factory, task_id)}
+    assert results["call-a"].result_summary == "真实结果"
+    assert results["call-a"].source_event_seq > 2
+
+
 # ── 3. 孤儿 result：报错不静默 ───────────────────────────────────────────────
 
 
@@ -264,6 +317,29 @@ async def test_mark_terminal_idempotent_repeat_also_sweeps(db_factory):
     assert call.status == tool_ledger.STATUS_TOOL_NOT_STARTED
 
 
+async def test_converge_disconnected_sweeps_dispatched_call(db_factory):
+    """断流收敛：已派发无结果的 call 补写 TOOL_OUTCOME_UNKNOWN。"""
+    task_id = await _new_task(db_factory)
+    await tool_ledger.register_calls(task_id, [("lost", "slow_tool", {})])
+    await tool_ledger.mark_dispatched(task_id, "lost")
+
+    assert await checkpoint.converge_disconnected(task_id) is True
+
+    call = (await _calls(db_factory, task_id))[0]
+    assert call.status == tool_ledger.STATUS_TOOL_OUTCOME_UNKNOWN
+
+
+async def test_mark_waiting_approval_sweeps_registered_calls(db_factory):
+    """审批暂停：本回合已登记未派发的 call 补写 TOOL_NOT_STARTED。"""
+    task_id = await _new_task(db_factory)
+    await tool_ledger.register_calls(task_id, [("queued", "t", {})])
+
+    assert await checkpoint.mark_waiting_approval(task_id) is True
+
+    call = (await _calls(db_factory, task_id))[0]
+    assert call.status == tool_ledger.STATUS_TOOL_NOT_STARTED
+
+
 # ── 5. 执行器接线：先落 call 再 dispatch；结果落账 ───────────────────────────
 
 
@@ -320,11 +396,27 @@ async def test_executor_persists_call_before_dispatch_and_result(db_factory):
     executor = _mk_executor(cfg, _client_with_tool_call("search_knowledge_base"))
     executor.tool_ledger_task_id = task_id
 
+    observed: dict = {}
+
+    async def _execute(*args, **kwargs):
+        # 工具真正开始执行时，账本行必须已经存在且为 DISPATCHED（先落库后执行）。
+        async with db_factory() as db:
+            row = (await db.execute(
+                select(AgentToolCall)
+                .where(AgentToolCall.task_id == task_id)
+                .where(AgentToolCall.call_id == "tc-exec-1")
+            )).scalars().first()
+            observed["status"] = row.status if row else None
+        return _OkResult()
+
     with patch.object(
-        tool_registry, "execute_detailed", new=AsyncMock(return_value=_OkResult()),
+        tool_registry, "execute_detailed", new=AsyncMock(side_effect=_execute),
     ):
         events = await _run_step(executor)
 
+    assert observed["status"] == tool_ledger.STATUS_DISPATCHED, (
+        "先落库后执行：工具执行时 call 记录必须已存在且为派发态"
+    )
     assert [e.type for e in events].count("tool_call") == 1
     calls = await _calls(db_factory, task_id)
     assert len(calls) == 1 and calls[0].call_id == "tc-exec-1"
@@ -420,6 +512,26 @@ def test_truncate_messages_drops_whole_pair_when_budget_short():
     kept = engine._truncate_messages(pair, token_budget=2)
     tool_pairs.validate_tool_pairs(kept)
     assert kept == [] or len(kept) == len(pair), "预算不足时整对丢弃，绝不拆散"
+
+
+def test_truncate_messages_keeps_pair_when_budget_allows():
+    from app.agent.context import ContextEngine
+
+    engine = ContextEngine(max_context_tokens=50, tail_window=1)
+    pair = _pair()
+    kept = engine._truncate_messages(pair, token_budget=50)
+    assert len(kept) == len(pair), "预算充足时必须整对保留（不能只会整对丢弃）"
+    tool_pairs.validate_tool_pairs(kept)
+
+
+def test_checkpoint_history_cap_rejects_orphan_result():
+    """快照边界同样不静默：窗口内残留的孤儿 result 显式报错。"""
+    history = [
+        {"role": "user", "content": "u"},
+        {"role": "tool", "tool_call_id": "ghost", "content": "x"},
+    ]
+    with pytest.raises(tool_pairs.ToolPairingError):
+        checkpoint.build_envelope(ctx=None, plan=None, trigger="test", history=history)
 
 
 def test_checkpoint_history_cap_keeps_pair_together():
