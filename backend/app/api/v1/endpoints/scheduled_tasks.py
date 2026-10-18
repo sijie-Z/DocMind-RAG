@@ -136,6 +136,16 @@ async def _clear_dangling_last_task_ids(
         logger.warning(
             f"last_task_id 悬空引用清理失败（降级保留原值，下次读取重试）: {exc}"
         )
+        # rollback 会过期请求会话内**全部**已加载实例（expire_on_commit=False
+        # 只作用于 commit）。不恢复的话，响应序列化 / 端点后续读取会在同步
+        # 上下文触发惰性加载：列表/详情抛 DetachedInstanceError，pause 等
+        # 抛 MissingGreenlet —— 只读端点照样 500，fail-open 名存实亡。
+        # 逐个 refresh 把已加载行恢复为库内现值（悬空引用保留，下次再试）。
+        for task in tasks:
+            try:
+                await db.refresh(task)
+            except Exception:
+                pass
         return
     # Core UPDATE 不走 ORM 属性同步（updated_at 由库侧 onupdate 生成），
     # 在响应序列化（同步上下文）前异步刷新，避免属性过期触发 MissingGreenlet。

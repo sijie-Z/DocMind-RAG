@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -281,19 +281,33 @@ class TestDanglingLastTaskRef:
         assert row.last_task_id == "at-2"
 
     @pytest.mark.asyncio
-    async def test_reconcile_failure_degrades_open(self):
-        """对账失败 fail-open：只读端点不得因清理失败而 500。"""
-        from app.api.v1.endpoints.scheduled_tasks import (
-            _clear_dangling_last_task_ids,
-        )
+    async def test_reconcile_failure_degrades_open_reads(self, api):
+        """对账失败 fail-open（真实 session）：agent_tasks 缺失时详情/列表
+        仍 200 且保留悬空原值（下次读取重试），不得因清理失败变 500。
 
-        class _BoomSession:
-            async def execute(self, *args, **kwargs):
-                raise RuntimeError("db down")
+        实测判别（修复前 rollback 未恢复已加载实例）：序列化阶段
+        DetachedInstanceError → 500；假 session 测不出端点级行为，
+        故此处用真实 AsyncSession 端点链路。"""
+        await _add_ref_task(api)
+        async with api.factory() as s:
+            await s.execute(text("DROP TABLE agent_tasks"))
+            await s.commit()
+        r = await api.client.get("/api/v1/scheduled-tasks/st1")
+        assert r.status_code == 200, r.text[:500]
+        assert r.json()["last_task_id"] == "at-1"
+        r = await api.client.get("/api/v1/scheduled-tasks/")
+        assert r.status_code == 200, r.text[:500]
+        assert r.json()["items"][0]["last_task_id"] == "at-1"
 
-            async def rollback(self):
-                pass
-
-        stale = SimpleNamespace(id="st1", last_task_id="at-1")
-        # 不抛异常即通过（内部告警并保留原值）
-        await _clear_dangling_last_task_ids(_BoomSession(), [stale])
+    @pytest.mark.asyncio
+    async def test_reconcile_failure_degrades_open_pause(self, api):
+        """pause 走 _get_owned_task 共同入口：对账失败后已加载属性须恢复，
+        端点内读取不得抛 MissingGreenlet。"""
+        await _add_ref_task(api)
+        async with api.factory() as s:
+            await s.execute(text("DROP TABLE agent_tasks"))
+            await s.commit()
+        r = await api.client.post("/api/v1/scheduled-tasks/st1/pause")
+        assert r.status_code == 200, r.text[:500]
+        assert r.json()["last_task_id"] == "at-1"
+        assert r.json()["enabled"] is False
