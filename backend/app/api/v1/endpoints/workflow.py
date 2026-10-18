@@ -13,7 +13,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user, get_user_org_id
+from app.core.security import get_current_user, get_user_org_id, require_organization
 from app.exceptions import AppError, NotFoundError, ValidationError
 from app.models.user import User
 from app.models.workflow import NodeDefinition, Workflow, WorkflowExecution
@@ -27,6 +27,21 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _apply_workflow_scope(stmt, current_user: User, org_id: int):
+    """租户边界（A2 P0）：非超管一律限定在本组织内。
+
+    - 超管：全局可见（调用方不传 org_id）；
+    - 组织 admin：本组织全部工作流；
+    - 普通用户：本组织内仅自己创建的工作流。
+    """
+    if current_user.is_superuser:
+        return stmt
+    stmt = stmt.where(Workflow.organization_id == org_id)
+    if current_user.role != "admin":
+        stmt = stmt.where(Workflow.created_by == current_user.id)
+    return stmt
+
+
 @router.get("/", response_model=dict[str, Any])
 async def list_workflows(
     skip: int = 0,
@@ -36,8 +51,11 @@ async def list_workflows(
 ):
     """获取工作流列表"""
     conditions = [Workflow.is_active]
-    if not current_user.is_superuser and current_user.role != "admin":
-        conditions.append(Workflow.created_by == current_user.id)
+    if not current_user.is_superuser:
+        org_id = await require_organization(current_user, db)
+        conditions.append(Workflow.organization_id == org_id)
+        if current_user.role != "admin":
+            conditions.append(Workflow.created_by == current_user.id)
 
     # 统计总数
     count_stmt = select(func.count(Workflow.id)).where(*conditions)
@@ -80,10 +98,13 @@ async def create_workflow(
     db: AsyncSession = Depends(get_db)
 ):
     """创建工作流"""
+    # 租户边界：创建必须落在调用者的组织（无组织的超管按既有约定回源真实组织）。
+    org_id = await require_organization(current_user, db)
     workflow = Workflow(
         name=workflow_in.name,
         description=workflow_in.description,
         flow_data=workflow_in.flow_data.model_dump() if workflow_in.flow_data else None,
+        organization_id=org_id,
         created_by=current_user.id
     )
     db.add(workflow)
@@ -110,8 +131,9 @@ async def get_workflow(
 ):
     """获取工作流详情"""
     stmt = select(Workflow).where(Workflow.id == workflow_id)
-    if not current_user.is_superuser and current_user.role != "admin":
-        stmt = stmt.where(Workflow.created_by == current_user.id)
+    if not current_user.is_superuser:
+        org_id = await require_organization(current_user, db)
+        stmt = _apply_workflow_scope(stmt, current_user, org_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
@@ -141,8 +163,9 @@ async def update_workflow(
 ):
     """更新工作流"""
     stmt = select(Workflow).where(Workflow.id == workflow_id)
-    if not current_user.is_superuser and current_user.role != "admin":
-        stmt = stmt.where(Workflow.created_by == current_user.id)
+    if not current_user.is_superuser:
+        org_id = await require_organization(current_user, db)
+        stmt = _apply_workflow_scope(stmt, current_user, org_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
@@ -180,8 +203,9 @@ async def delete_workflow(
 ):
     """删除工作流（软删除）"""
     stmt = select(Workflow).where(Workflow.id == workflow_id)
-    if not current_user.is_superuser and current_user.role != "admin":
-        stmt = stmt.where(Workflow.created_by == current_user.id)
+    if not current_user.is_superuser:
+        org_id = await require_organization(current_user, db)
+        stmt = _apply_workflow_scope(stmt, current_user, org_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
@@ -205,8 +229,11 @@ async def execute_workflow(
 ):
     """执行工作流 - 支持流式和非流式两种模式"""
     stmt = select(Workflow).where(Workflow.id == workflow_id, Workflow.is_active)
-    if not current_user.is_superuser and current_user.role != "admin":
-        stmt = stmt.where(Workflow.created_by == current_user.id)
+    if current_user.is_superuser:
+        effective_org_id = get_user_org_id(current_user)
+    else:
+        effective_org_id = await require_organization(current_user, db)
+        stmt = _apply_workflow_scope(stmt, current_user, effective_org_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
@@ -224,7 +251,7 @@ async def execute_workflow(
     # 安全加固（issue #268）：不再 `or 1` 兜底——无组织如实传 None（含 token 组织回退，
     # 与 get_user_org_id 的其它调用方一致）；引擎侧对缺组织的检索节点显式失败，
     # 绝不静默检索 1 号组织。
-    effective_org_id = get_user_org_id(current_user)
+    # A2：非超管走 require_organization（fail-closed），与上面的查询作用域同源。
 
     # 创建执行记录
     execution = WorkflowExecution(
@@ -428,11 +455,19 @@ async def get_execution(
     if not execution:
         raise NotFoundError(detail="执行记录不存在")
 
-    # 权限校验：仅创建者本人或管理员/超管可查看执行记录（防止 IDOR 越权）
-    if not current_user.is_superuser and current_user.role != "admin":
-        workflow_result = await db.execute(select(Workflow).where(Workflow.id == execution.workflow_id))
+    # 权限校验（A2 租户边界）：非超管必须同时满足「工作流属于本组织」
+    # 与「组织管理员或创建者本人」，否则一律 404（不泄露跨组织记录的存在性）。
+    if not current_user.is_superuser:
+        org_id = await require_organization(current_user, db)
+        workflow_stmt = select(Workflow).where(Workflow.id == execution.workflow_id)
+        workflow_stmt = _apply_workflow_scope(workflow_stmt, current_user, org_id)
+        workflow_result = await db.execute(workflow_stmt)
         workflow = workflow_result.scalar_one_or_none()
-        if not workflow or workflow.created_by != current_user.id:
+        if not workflow:
+            raise NotFoundError(detail="执行记录不存在")
+        # SQL 作用域之外再做一次显式属主校验（防御纵深）：非管理员不得查看
+        # 同组织他人工作流的执行记录。
+        if current_user.role != "admin" and workflow.created_by != current_user.id:
             raise NotFoundError(detail="执行记录不存在")
 
     return {
