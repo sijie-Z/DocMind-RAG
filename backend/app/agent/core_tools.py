@@ -147,8 +147,9 @@ async def search_knowledge_base(
             },
             "top_k": {
                 "type": "integer",
-                "description": "Number of results (default 5)",
+                "description": "Number of results (default 5, max 20)",
                 "default": 5,
+                "maximum": 20,
             },
         },
         "required": ["query"],
@@ -161,6 +162,9 @@ async def vector_search(
     organization_id: int = 1,
     **_: Any,
 ) -> str:
+    # T6：与姊妹检索工具一致，钳制到 20 以内，避免 ES 请求被调用方无限放大
+    top_k = min(top_k, 20)
+
     from app.dependencies import get_rag_pipeline
     pipeline = get_rag_pipeline()
     query_vector = await pipeline.get_embedding(query)
