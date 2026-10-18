@@ -20,6 +20,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.security import get_user_org_id
 from app.models import Base
 from app.models.organization import Organization, user_organization
+from app.models.rbac import Role, user_organization_role_association
 from app.models.user import User
 from app.services.auth_service import auth_service
 
@@ -39,9 +40,15 @@ async def _setup():
                  role="admin", organization_id=1, is_active=True),
             User(id=9, username="primary", email="m9@example.com", hashed_password="x",
                  role="user", organization_id=2, is_active=True),
+            Role(id=1, name="test-role"),
         ])
         await s.flush()
         await s.execute(user_organization.insert().values(user_id=7, organization_id=1))
+        await s.execute(
+            user_organization_role_association.insert().values(
+                user_id=7, organization_id=1, role_id=1
+            )
+        )
         await s.commit()
     return engine, factory
 
@@ -122,8 +129,53 @@ async def test_remove_member_endpoint_deletes_membership_row():
                 select(user_organization.c.user_id).where(user_organization.c.user_id == 7)
             )).first()
             assert row is None, "移除成员必须删除 user_organization 成员关系"
+            role_rows = (await s.execute(
+                select(user_organization_role_association.c.user_id)
+            )).all()
+            assert role_rows == [], "移除成员必须清理该组织下的角色关联（评审 m-4）"
             moved = await s.get(User, 7)
             assert moved.organization_id is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ws_handshake_rejects_removed_member_token():
+    """评审 m-3：WS 握手复用同一成员校验，被移出成员的旧 token 不能建连。"""
+    import app.core.ws_auth as ws_auth
+
+    class _FakeWS:
+        def __init__(self, token: str):
+            self.headers = {"sec-websocket-protocol": f"auth.{token}"}
+            self.query_params: dict[str, str] = {}
+            self.closed: tuple[int, str] | None = None
+
+        async def close(self, code: int = 1000, reason: str = ""):
+            self.closed = (code, reason)
+
+    engine, factory = await _setup()
+    try:
+        token = _token(7, 1)
+        with patch.object(auth_service, "is_token_blacklisted", new=AsyncMock(return_value=False)):
+            # 成员在册：握手成功，返回用户状态
+            async with factory() as s:
+                state = await ws_auth.authenticate_ws(_FakeWS(token), s)
+            assert state is not None and state.id == 7
+
+            # 移出组织后：握手立即拒绝（close 4001 + 明确 reason）
+            async with factory() as s:
+                await s.execute(
+                    user_organization.delete().where(
+                        (user_organization.c.user_id == 7)
+                        & (user_organization.c.organization_id == 1)
+                    )
+                )
+                await s.commit()
+            ws = _FakeWS(token)
+            async with factory() as s:
+                state = await ws_auth.authenticate_ws(ws, s)
+            assert state is None
+            assert ws.closed == (4001, ws_auth.WS_REASON_ORG_MEMBERSHIP)
     finally:
         await engine.dispose()
 
