@@ -494,8 +494,8 @@ class TestAgentMemoryNamespaces:
         captured: list[str] = []
         fake_system = SimpleNamespace(_load_from_redis=AsyncMock())
 
-        def _fake_get(namespace: str):
-            captured.append(namespace)
+        def _fake_get(org_id, user_id, agent_id):
+            captured.append(f"{org_id}:{user_id}:{agent_id}")
             return fake_system
 
         with patch.object(
@@ -568,11 +568,11 @@ class TestAgentMemoryNamespaces:
         )
 
         # 反向：不得写进 1 号组织 / 历史 None 的命名空间（bug 形态的落点）
-        bugged_ns = get_memory_system(f"1:77:session:{session_id}")
+        bugged_ns = get_memory_system(1, 77, f"session:{session_id}")
         assert not any(l.get("lesson") == "回答与文档不符" for l in bugged_ns.reflective.lessons), (
             "lesson 不得落入 1 号组织命名空间"
         )
-        legacy_ns = get_memory_system(f"None:77:session:{session_id}")
+        legacy_ns = get_memory_system(None, 77, f"session:{session_id}")
         assert not any(
             l.get("lesson") == "回答与文档不符" for l in legacy_ns.reflective.lessons
         ), "lesson 不得沿用历史会话的 raw org（None）"
@@ -922,7 +922,7 @@ class TestAgentChatSessionOrgSymmetry:
             lesson.get("lesson") == "R2 判别：答案不对"
             for lesson in reader.system.reflective.lessons
         ), "运行侧（resolved org 42）必须能加载 feedback 写入的 lesson（修前静默失效）"
-        bugged_ns = get_memory_system(f"None:77:session:{session_id}")
+        bugged_ns = get_memory_system(None, 77, f"session:{session_id}")
         assert not any(
             lesson.get("lesson") == "R2 判别：答案不对"
             for lesson in bugged_ns.reflective.lessons
@@ -972,7 +972,7 @@ class TestAgentChatSessionOrgSymmetry:
             lesson.get("lesson") == "遗留会话判别"
             for lesson in reader.system.reflective.lessons
         ), "历史会话的 feedback lesson 也必须落在运行侧 resolved org（42）"
-        bugged_ns = get_memory_system(f"None:77:session:{session_id}")
+        bugged_ns = get_memory_system(None, 77, f"session:{session_id}")
         assert not any(
             lesson.get("lesson") == "遗留会话判别"
             for lesson in bugged_ns.reflective.lessons

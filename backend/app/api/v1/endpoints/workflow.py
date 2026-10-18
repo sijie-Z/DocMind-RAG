@@ -287,7 +287,7 @@ async def execute_workflow(
                 from app.schemas.workflow import WorkflowConfig as WConfig
                 config = WConfig(**workflow.flow_data)
 
-                engine = WorkflowEngine(config, organization_id=effective_org_id)
+                engine = WorkflowEngine(config, organization_id=effective_org_id, user_id=current_user.id)
 
                 # 收集所有事件
                 events_queue = asyncio.Queue()
@@ -398,7 +398,7 @@ async def execute_workflow(
         from app.schemas.workflow import WorkflowConfig as WConfig
         config = WConfig(**workflow.flow_data)
 
-        engine = WorkflowEngine(config, organization_id=effective_org_id)
+        engine = WorkflowEngine(config, organization_id=effective_org_id, user_id=current_user.id)
 
         execution.status = "running"
         execution.started_at = datetime.now()

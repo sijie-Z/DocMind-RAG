@@ -68,11 +68,15 @@ class AgentMemoryBridge:
         # 只到 (org, user)，该用户所有会话会共享工作记忆（跨会话串扰）。此时退化为
         # “每次请求独立”的命名空间；需要跨轮记忆的调用方必须传入 session_id 或显式 agent_id。
         if agent_id in ("", "default"):
-            namespace = f"{organization_id}:{user_id}:{agent_id}:{uuid.uuid4().hex[:12]}"
+            scope = f"{agent_id}:{uuid.uuid4().hex[:12]}"
         else:
-            namespace = f"{organization_id}:{user_id}:{agent_id}"
+            scope = agent_id
 
-        self.system: AgentMemorySystem = get_memory_system(namespace)
+        # A1（记忆 IDOR）：命名空间由 memory_service 按显式 (org, user) 租户上下文
+        # 拼装（org:user:scope），本桥不再自行拼接全局 key。
+        self.system: AgentMemorySystem = get_memory_system(
+            organization_id, user_id, scope
+        )
         self.agent_id = agent_id
         self.organization_id = organization_id
         self.user_id = user_id
