@@ -52,6 +52,11 @@ from app.exceptions import (
 from app.models.agent_task import TaskStatus
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.user import User
+from app.services.session_service import (
+    resolve_session_scope,
+    save_session_interaction,
+    session_visibility_conditions,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -1155,21 +1160,19 @@ async def list_sessions(
     db: AsyncSession = Depends(get_db),
 ):
     """List agent sessions for the current user."""
+    # B2 / D3：与 /chat/conversations 共用同一套 org + user 可见范围。
+    # A2 口径：非超管 fail-closed（无组织 403），超管保留旁路（仍限本人）。
+    org_id = await resolve_session_scope(current_user, db)
     try:
         skip = (page - 1) * page_size
+        conditions = session_visibility_conditions(current_user, org_id)
 
-        total_stmt = select(func.count(ChatSession.id)).where(
-            ChatSession.user_id == current_user.id,
-            ChatSession.status != ChatSessionStatus.ENDED,
-        )
+        total_stmt = select(func.count(ChatSession.id)).where(*conditions)
         total = (await db.execute(total_stmt)).scalar() or 0
 
         stmt = (
             select(ChatSession)
-            .where(
-                ChatSession.user_id == current_user.id,
-                ChatSession.status != ChatSessionStatus.ENDED,
-            )
+            .where(*conditions)
             .order_by(desc(ChatSession.updated_at))
             .offset(skip)
             .limit(page_size)
@@ -1455,86 +1458,17 @@ async def _save_session_interaction(
     organization_id: int | None,
     assistant_response: str = "",
 ) -> str | None:
-    """Save the user query and assistant response as messages in the session.
+    """兼容包装：实现已提升为 app.services.session_service.save_session_interaction。
 
-    S6 安全加固：会话归属按 user_id 校验（与 _load_session_messages 一致），
-    绝不允许把消息写进其他用户的会话。
-
-    Returns: the assistant message ID；None 表示"没有需要写的助手文本（空回复）"
-    或"会话不属于调用者（显式拒绝，日志已记录）"。
-
-    Raises: 落库失败（DB 抖动等）时**原样上抛**，由调用方显式处理——issue #301
-    批 D（#22）：修前这里把异常吞成 None，与"空回复/越权拒绝"无法区分，调用方
-    done 照发且无任何提示，用户刷新后本轮问答凭空消失。
+    B2 / D3：/chat 的 Agent 模式与 /agent/chat 必须落同一套库。保留本包装是
+    为了让既有调用方与测试（monkeypatch agent 模块的 ``_save_session_interaction``
+    或 ``AsyncSessionLocal``）行为不变——工厂显式传入，猴子补丁仍然生效。
     """
-    try:
-        async with AsyncSessionLocal() as session:
-            # S6 安全加固：按 id + user_id 校验会话归属（与 _load_session_messages 一致），
-            # 绝不允许把消息写进其他用户的会话
-            stmt = select(ChatSession).where(
-                ChatSession.id == session_id,
-                ChatSession.user_id == user_id,
-            )
-            result = await session.execute(stmt)
-            existing = result.scalar_one_or_none()
-
-            if existing is None:
-                # id 可能已被其他用户的会话占用：确认后拒绝写入（也避免主键冲突）
-                occupied = (
-                    await session.execute(
-                        select(ChatSession.id).where(ChatSession.id == session_id)
-                    )
-                ).scalar_one_or_none()
-                if occupied is not None:
-                    logger.warning(
-                        f"Refusing to save interaction into session {session_id} "
-                        f"not owned by user {user_id}"
-                    )
-                    return None
-                new_session = ChatSession(
-                    id=session_id,
-                    user_id=user_id,
-                    title=query[:80],
-                    status=ChatSessionStatus.ACTIVE,
-                    organization_id=organization_id,
-                )
-                session.add(new_session)
-            elif existing.organization_id is None:
-                # issue #277（评审 or1268 R2 收账）：历史会话自愈——本修复前以 raw
-                # org 落库的会话（token 回退 / 无组织超管用户当时记 None）在本次以
-                # resolved org 运行后收敛为运行 org，落库与运行解析保持对称；
-                # 只补空值，绝不改写已记录的非空组织。
-                existing.organization_id = organization_id
-
-            user_msg = ChatMessage(
-                id=str(uuid.uuid4()),
-                session_id=session_id,
-                content=query,
-                message_type=MessageType.USER,
-            )
-            session.add(user_msg)
-
-            assistant_msg_id = None
-            if assistant_response:
-                assistant_msg_id = str(uuid.uuid4())
-                assistant_msg = ChatMessage(
-                    id=assistant_msg_id,
-                    session_id=session_id,
-                    content=assistant_response,
-                    message_type=MessageType.ASSISTANT,
-                )
-                session.add(assistant_msg)
-
-            # Update session title from first message
-            if existing is not None and (not existing.title or existing.title == "New Agent Session"):
-                existing.title = query[:80]
-                existing.updated_at = func.now()
-
-            await session.commit()
-            return assistant_msg_id
-    except Exception as e:
-        # issue #301 批 D（#22）：记录后**原样上抛**（不再吞成 None）。调用方
-        # （/chat、/resume）拿到异常后负责显式告知：warning 事件 + done.saved=false
-        # + ERROR 日志——落库失败绝不静默。
-        logger.error(f"Failed to save interaction: {e}")
-        raise
+    return await save_session_interaction(
+        session_id,
+        user_id,
+        query,
+        organization_id,
+        assistant_response,
+        session_factory=AsyncSessionLocal,
+    )

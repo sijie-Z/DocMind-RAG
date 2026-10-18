@@ -41,7 +41,8 @@ const expectedDomains = [
   },
   {
     key: 'menu.groupConversation',
-    routes: ['Chat', 'Conversations'],
+    // B2（D3）：独立的「历史记录」入口并入对话页（会话列表在 ChatSidebar）。
+    routes: ['Chat'],
     adminOnly: false,
   },
   {
@@ -51,7 +52,8 @@ const expectedDomains = [
   },
   {
     key: 'menu.groupAutomation',
-    routes: ['Workflow', 'Agent', 'ScheduledTasks'],
+    // B2（D3）：独立的「智能 Agent」入口并入对话页的模式开关。
+    routes: ['Workflow', 'ScheduledTasks'],
     adminOnly: false,
   },
   {
@@ -98,6 +100,14 @@ describe('sidebar menu domains', () => {
       adminOnly: g.adminOnly === true,
     }))
     expect(actual).toEqual(expectedDomains)
+  })
+
+  it('B2（D3）：历史记录与智能 Agent 不再是独立一级菜单项', () => {
+    const routeNames = SIDEBAR_MENU_GROUPS.flatMap((g) => g.items.map((i) => i.routeName))
+    expect(routeNames).not.toContain('Conversations')
+    expect(routeNames).not.toContain('Agent')
+    // 会话入口收敛到对话页：对话域仍保留 Chat（页内已有会话列表 + 模式开关）。
+    expect(routeNames).toContain('Chat')
   })
 
   it('menu tree snapshot', () => {

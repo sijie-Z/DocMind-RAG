@@ -188,6 +188,11 @@ export default {
     id: 'ID',
   },
   chat: {
+    // B2（D3）：对话页「快速问答 / 深度分析（Agent）」模式开关
+    modeSwitchAria: '对话模式',
+    modeQuick: '快速问答',
+    modeDeep: '深度分析',
+    modeDeepHint: '深度分析（Agent）：多步规划、工具调用与反思校正，仅通过 SSE 流式执行',
     aiAssistant: 'AI 助手',
     clearChat: '清空对话',
     newChat: '新对话',

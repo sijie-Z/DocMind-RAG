@@ -197,6 +197,26 @@
               </div>
             </n-popover>
 
+            <!-- B2（D3 会话入口合并）：快速问答 / 深度分析（Agent）模式开关。
+                 深度分析复用 /agent 的 PER 能力（经 /chat/stream useAgent），
+                 Agent 仅 SSE 可用——开启时锁定 SSE（脚本里 watch 兜底）。 -->
+            <n-radio-group
+              v-model:value="chatMode"
+              size="small"
+              class="chat-mode-switch"
+              :aria-label="t('chat.modeSwitchAria')"
+            >
+              <n-radio-button value="quick">{{ t('chat.modeQuick') }}</n-radio-button>
+              <n-radio-button value="deep">{{ t('chat.modeDeep') }}</n-radio-button>
+            </n-radio-group>
+            <n-tooltip v-if="useAgent" trigger="hover">
+              <template #trigger>
+                <n-icon size="16" class="text-purple-500 dark:text-purple-400 cursor-help">
+                  <InformationCircleOutline />
+                </n-icon>
+              </template>
+              {{ t('chat.modeDeepHint') }}
+            </n-tooltip>
             <!-- 锁定态解释常驻可见：策略说明不应藏在悬浮层里。 -->
             <span
               v-if="useAgent"
@@ -212,6 +232,7 @@
             >
               {{ t('chat.orgPrivacyDisabled') }}
             </span>
+
           </div>
 
           <div class="flex items-center gap-3">
@@ -241,11 +262,13 @@
 </template>
 
 <script setup lang="ts">
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   SendOutline, AttachOutline, FlashOutline, ShieldCheckmarkOutline,
   StopCircleOutline, DocumentTextOutline, DocumentOutline, CloseOutline,
   CloudUploadOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldOutline,
+  InformationCircleOutline,
   RocketOutline
 } from '@vicons/ionicons5'
 import type { AttachedFile } from '@/types/chat'
@@ -259,6 +282,22 @@ const useSSE = defineModel<boolean>('useSSE', { default: false })
 const useStream = defineModel<boolean>('useStream', { default: true })
 const useAgent = defineModel<boolean>('useAgent', { default: false })
 
+// B2（D3）：二选一模式开关。深度分析 = Agent（PER）模式。
+const chatMode = computed({
+  get: () => (useAgent.value ? 'deep' : 'quick'),
+  set: (mode: string) => {
+    useAgent.value = mode === 'deep'
+  },
+})
+
+// Agent（PER）只经 SSE 执行：开启即锁定 SSE；用户再关掉 SSE 时立即拉回，
+// 避免「Agent 开着但传输退回 WS」被静默降级成普通问答。
+watch(useAgent, (on) => {
+  if (on) useSSE.value = true
+}, { immediate: true })
+watch(useSSE, (on) => {
+  if (!on && useAgent.value) useSSE.value = true
+})
 const setAgentMode = (value: boolean) => {
   useAgent.value = value
   // Agent 模式依赖 SSE：开启时强制并锁定传输开关（UI 同步置灰 + 解释）

@@ -177,6 +177,17 @@ export function useChatSend(
       isLoading.value = false
       isRetrieving.value = false
       sseStatus.value = 'connected'
+      // B2（D3）：没有 chunk 的冷场回答（空正文/仅终态）也要接管后端生成的
+      // conversationId——否则下一轮会新建会话，上一轮落库的问答成为孤儿。
+      if (data.conversationId && (!chatStore.currentConversation || chatStore.currentConversation.id !== data.conversationId)) {
+        chatStore.setCurrentConversation({
+          id: data.conversationId,
+          title: userMessage.slice(0, 20),
+          userId: userStore.userInfo?.id || 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        })
+      }
       // E3：终态直达——取消挂起的节流落屏，一次性写入最终内容（不丢尾帧、不重复渲染）
       activeStream?.cancel()
       activeStream = null
@@ -429,7 +440,9 @@ export function useChatSend(
       userMessage = `${fileContext}\n\n---\n\n基于以上文件内容，${userMessage}`
     }
 
-    if (useSSE.value) {
+    // B2（D3）：Agent 模式（深度分析）只经 SSE 执行——即使传输开关停在 WS，
+    // 也不得静默降级为普通问答（WS 分支根本不读 useAgent）。
+    if (useSSE.value || useAgent.value) {
       await handleSSESend(userMessage)
       return
     }

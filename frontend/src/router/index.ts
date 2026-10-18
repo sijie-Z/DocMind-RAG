@@ -120,6 +120,8 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/conversations/index.vue'),
         meta: {
           title: 'menu.conversations',
+          // B2（D3）：入口并入对话页（菜单项移除）；保留路由供旧链接/深链。
+          activeMenu: 'Chat',
           icon: 'history'
         }
       },
@@ -248,6 +250,9 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/agent/index.vue'),
         meta: {
           title: 'menu.agent',
+          // B2（D3）：入口并入对话页的模式开关（菜单项移除）；保留路由供
+          // 任务通知/回放等深链（layouts/notifications 的无 target_route 兜底）。
+          activeMenu: 'Chat',
           icon: 'hardware-chip'
         }
       },

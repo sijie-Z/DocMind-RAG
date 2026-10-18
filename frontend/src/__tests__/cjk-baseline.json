@@ -20,7 +20,6 @@
     "utils/websocket.ts": 2,
     "views/agent/index.vue": 34,
     "views/chat/components/ChatHeader.vue": 1,
-    "views/chat/components/ChatInput.vue": 1,
     "views/chat/components/DebugPanel.vue": 5,
     "views/chat/components/DebugSection.vue": 1,
     "views/chat/components/DebugStage.vue": 5,

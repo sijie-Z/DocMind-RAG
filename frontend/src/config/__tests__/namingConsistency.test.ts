@@ -77,7 +77,6 @@ for (const item of USER_MENU_ITEMS) {
 /** 已归一注册表：routeName → 视图文件（glob 键，相对本文件），主标题必须与菜单同键 */
 const NORMALIZED_PAGES: Record<string, string> = {
   Search: '../../views/search.vue',
-  Conversations: '../../views/conversations/index.vue',
   AuditLogs: '../../views/admin/audit/index.vue',
   SystemHelp: '../../views/systemHelp/index.vue',
   // T9 十组页名归一：h1 全部改引菜单键（值以菜单语义为准，裁决依据见 T9 报告）
@@ -90,8 +89,17 @@ const NORMALIZED_PAGES: Record<string, string> = {
   McpServers: '../../views/mcp-servers/index.vue',
   ScheduledTasks: '../../views/scheduled-tasks/index.vue',
   Notifications: '../../views/notifications/index.vue',
-  Agent: '../../views/agent/index.vue',
   Workflow: '../../views/workflow/index.vue',
+}
+
+/**
+ * B2（D3 会话入口合并）：菜单项已并入对话页、但路由保留的入口。
+ * 它们不再拥有菜单键（menuKeyOf 无此 routeName），页内主标题也不作为
+ * 页名真值——故与「已归一」区分登记，分类完备层仍会检查它们没有漏网。
+ */
+const MERGED_INTO_CHAT: Record<string, string> = {
+  Conversations: '会话列表已并入对话页侧栏（ChatSidebar）',
+  Agent: 'Agent（PER）入口已并入对话页「深度分析」模式开关',
 }
 
 /** 无页名标题页面（主标题是问候语/品牌/动态内容，不承载页名；页名由菜单+顶栏承载） */
@@ -120,6 +128,9 @@ const HIDDEN_PAGES: Record<string, string> = {
   Notifications: 'Notifications',
   SystemHelp: 'SystemHelp',
   SystemAbout: 'SystemAbout',
+  // B2（D3）：入口已并入对话页，菜单面无独立项；深链仍保留。
+  Conversations: 'Chat',
+  Agent: 'Chat',
 }
 
 /** 深页面包屑注册表（T9）：这些页面的视图源码必须接入 <PageBreadcrumb /> */
@@ -212,13 +223,14 @@ describe('命名一致性 · 分类完备层（menu.* 路由不许漏网）', ()
     expect(menuRoutes.length).toBeGreaterThan(0)
   })
 
-  it('每个 menu.* 路由都被归类：已归一 / 无页名标题 / 待归一', () => {
+  it('每个 menu.* 路由都被归类：已归一 / 无页名标题 / 已并入对话 / 待归一', () => {
     const unclassified: string[] = []
     for (const r of menuRoutes) {
       const name = String(r.name)
       if (
         !(name in NORMALIZED_PAGES) &&
         !(name in NO_NAME_HEADING) &&
+        !(name in MERGED_INTO_CHAT) &&
         !(name in PENDING_TITLE_UNIFICATION)
       ) {
         unclassified.push(`${name}（meta.title=${String(r.meta?.title)}）`)
@@ -230,12 +242,13 @@ describe('命名一致性 · 分类完备层（menu.* 路由不许漏网）', ()
     ).toEqual([])
   })
 
-  it('三张清单无过期条目（routeName 仍存在于 menu.* 路由中）', () => {
+  it('四张清单无过期条目（routeName 仍存在于 menu.* 路由中）', () => {
     const menuRouteNames = new Set(menuRoutes.map((r) => String(r.name)))
     const stale: string[] = []
     for (const name of [
       ...Object.keys(NORMALIZED_PAGES),
       ...Object.keys(NO_NAME_HEADING),
+      ...Object.keys(MERGED_INTO_CHAT),
       ...Object.keys(PENDING_TITLE_UNIFICATION),
     ]) {
       if (!menuRouteNames.has(name)) stale.push(name)

@@ -5,13 +5,14 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, desc, func, or_, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
-from app.core.security import get_current_user
+from app.core.log_safety import log_safe
+from app.core.security import get_current_user, get_user_org_id
 from app.core.ws_auth import (
     WS_CLOSE_AUTH_FAILED,
     WS_REASON_USER_INVALID,
@@ -27,6 +28,11 @@ from app.models.user import User
 from app.schemas.chat import ChatSessionCreate, ChatStreamRequest, FeedbackRequest
 from app.services.chat_service import RAGEvent, run_rag_pipeline
 from app.services.rag_service import rag_service
+from app.services.session_service import (
+    resolve_session_scope,
+    save_session_interaction,
+    session_visibility_conditions,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -152,21 +158,13 @@ async def get_conversations(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # B2 / D3：与 /agent/sessions 共用同一套 org + user 可见范围（A2 口径：
+    # 非超管 fail-closed（无组织 403），超管保留旁路）。解析放在 try 之外——
+    # AuthorizationError 必须原样 403，不能被下面的 `except Exception` 包装成 400。
+    org_id = await resolve_session_scope(current_user, db)
     try:
         skip = (page - 1) * page_size
-        if current_user.organization_id:
-            org_filter = or_(
-                ChatSession.organization_id == current_user.organization_id,
-                ChatSession.organization_id.is_(None),
-            )
-        else:
-            org_filter = ChatSession.organization_id.is_(None)
-
-        conditions = [
-            ChatSession.user_id == current_user.id,
-            ChatSession.status != ChatSessionStatus.ENDED,
-            org_filter,
-        ]
+        conditions = session_visibility_conditions(current_user, org_id)
         # B30：前端搜索框一直发送 search 参数（A_sweep CONV-2 实测），端点此前
         # 未声明该参数、被 FastAPI 静默忽略 → 列表恒全量。对标题做大小写不敏感
         # LIKE；%/_/\ 转义防止通配注入（escape 字符为反斜杠）。max_length=100 校验。
@@ -761,6 +759,11 @@ async def chat_stream_endpoint(
                 from app.agent.config import AgentConfig
                 from app.agent.service import agent_service
 
+                # B2 / D3：会话入口合并——聊天页的「深度分析（Agent）」与 /agent/chat
+                # 同源：未带 conversationId 时生成并随流回传（刷新后按 id 可寻回），
+                # 走完 PER 后统一落库（与 /agent 同一实现），刷新不丢本轮问答。
+                conversation_id = body.conversationId or str(uuid.uuid4())
+                persist_org_id = get_user_org_id(current_user)
                 config = AgentConfig(
                     enable_tools=True,
                     enable_planning=True,
@@ -780,6 +783,7 @@ async def chat_stream_endpoint(
                         )
                     except Exception as hist_err:
                         logger.warning(f"加载 agent 会话历史失败（继续无历史对话）: {hist_err}")
+                last_event_type = ""
                 async for agent_event in agent_service.chat(
                     query=user_content,
                     history=agent_history,
@@ -787,17 +791,18 @@ async def chat_stream_endpoint(
                     # 1 号组织的 agent 上下文（1 号组织甚至未必存在）。现在如实传
                     # None：休闲对话不受影响，需要组织上下文的工具由注册表 auth
                     # 钩子 fail-closed（与 knowledge.py 检索路径 403 加固同语义）。
-                    organization_id=getattr(current_user, "organization_id", None),
+                    organization_id=persist_org_id,
                     user_id=current_user.id,
-                    session_id=body.conversationId or None,
+                    session_id=conversation_id,
                     config=config,
                 ):
+                    last_event_type = agent_event.type
                     if agent_event.type == "chunk":
                         full_response += agent_event.content
                         yield await sse_event("chunk", {
                             "content": agent_event.content,
-                            "conversationId": body.conversationId,
-                            "messageId": f"agent-{body.conversationId or 'new'}",
+                            "conversationId": conversation_id,
+                            "messageId": f"agent-{conversation_id}",
                         })
                     elif agent_event.type == "thinking":
                         yield await sse_event("thinking", {
@@ -878,10 +883,43 @@ async def chat_stream_endpoint(
                         logger.debug("chat SSE 转发未投影的事件类型: %s", agent_event.type)
                         yield await sse_event(agent_event.type, {"content": agent_event.content})
 
+                # B2 / D3：统一会话落库（与 /agent/chat 同一实现）。HITL 暂停/取消
+                # 不是"完成"——不写半成品回答（真完成由审批/恢复流收尾时补写）。
+                # 落库失败不静默（issue #301 批 D 口径）：warning 事件如实告知，
+                # 回答本身照常完成。
+                save_error: str | None = None
+                if last_event_type not in (
+                    "approval_required",
+                    "run_cancelled",
+                    "plan_approval_required",
+                ):
+                    try:
+                        await save_session_interaction(
+                            conversation_id,
+                            current_user.id,
+                            user_content,
+                            persist_org_id,
+                            full_response,
+                        )
+                    except Exception as save_exc:
+                        save_error = log_safe(save_exc)
+                        logger.error(
+                            "Failed to persist chat agent interaction "
+                            "(session=%s user=%s): %s",
+                            conversation_id,
+                            current_user.id,
+                            save_error,
+                            exc_info=True,
+                        )
+                if save_error is not None:
+                    yield await sse_event("warning", {
+                        "content": "回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见",
+                    })
+
                 yield await sse_event("message", {
                     "content": full_response,
-                    "conversationId": body.conversationId,
-                    "messageId": f"agent-{body.conversationId or 'new'}",
+                    "conversationId": conversation_id,
+                    "messageId": f"agent-{conversation_id}",
                     "sources": agent_sources if agent_sources else None,
                     "is_cached": False,
                 })

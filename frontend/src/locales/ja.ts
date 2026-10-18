@@ -166,6 +166,10 @@ export default {
     id: 'ID',
   },
   chat: {
+    modeSwitchAria: '対話モード',
+    modeQuick: 'クイック回答',
+    modeDeep: '深層分析',
+    modeDeepHint: '深層分析（Agent）：多段階計画・ツール呼び出し・反省的修正。SSE ストリーミング専用',
     aiAssistant: 'AIアシスタント',
     clearChat: 'チャットをクリア',
     newChat: '新しいチャット',

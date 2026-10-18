@@ -166,6 +166,10 @@ export default {
     id: 'ID',
   },
   chat: {
+    modeSwitchAria: 'Mode de conversation',
+    modeQuick: 'Réponse rapide',
+    modeDeep: 'Analyse approfondie',
+    modeDeepHint: "Analyse approfondie (Agent) : planification multi-étapes, outils et réflexion, uniquement en streaming SSE",
     aiAssistant: 'Assistant IA',
     clearChat: 'Effacer la conversation',
     newChat: 'Nouvelle discussion',
