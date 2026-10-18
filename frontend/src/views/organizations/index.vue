@@ -406,7 +406,7 @@ import {
   updateOrganizationMemberRole,
   removeOrganizationMember
 } from '@/api/organization'
-import type { Organization, OrganizationListResponse } from '@/api/organization'
+import type { OrganizationListResponse } from '@/api/organization'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getUsers } from '@/api/user'
 import type { OrganizationMember, OrganizationDocument } from '@/types/api'

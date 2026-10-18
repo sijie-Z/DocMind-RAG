@@ -29,8 +29,9 @@ export function useChatAttachments() {
       try {
         const res = await getKnowledgeBase(docId)
         // 宽容解包：{success, data} 信封 → 业务体；裸形态原样返回。
-        const data = apiUnwrap<Record<string, unknown>>(res) || (res.data as Record<string, unknown>)
-        const status = data.status
+        type DocumentStatusBody = { status?: string; raw_status?: string; parse_error?: string }
+        const data = apiUnwrap<DocumentStatusBody>(res) || (res.data as DocumentStatusBody)
+        const status = data.status || ''
         const rawStatus = data.raw_status || status
 
         // /documents/{id} 的 status/raw_status 值域为六值
