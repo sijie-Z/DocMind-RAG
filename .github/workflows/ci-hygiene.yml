@@ -154,3 +154,28 @@ jobs:
         run: |
           python -m pip install -q pytest
           python -m pytest tests/unit/test_check_except_control_flow.py -q --noconftest
+
+  # A2 P0 租户边界：禁止生产代码把组织上下文硬编码默认到 1 号组织。
+  # `organization_id: int = 1` 会让漏传组织的调用静默读写 1 号租户数据。
+  # 零依赖（仅标准库），只扫 backend/app；测试夹具不在扫描范围。
+  org-defaults:
+    name: Org Defaults Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Scan for hardcoded default organization
+        working-directory: backend
+        run: python scripts/check_org_defaults.py
+
+      - name: Checker discriminating-power tests
+        working-directory: backend
+        run: |
+          python -m pip install -q pytest
+          python -m pytest tests/unit/test_check_org_defaults.py -q --noconftest

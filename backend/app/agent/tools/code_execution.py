@@ -72,7 +72,9 @@ ALLOWED_SQL_COLUMNS: dict[str, set[str]] = {
     "organizations": {"id", "name", "code", "is_active", "max_users",
                        "max_storage_mb", "created_at"},
     "prompt_templates": {"id", "name", "content", "description",
-                          "is_active", "version", "updated_at"},
+                          "is_active", "version", "updated_at",
+                          # A2：组织归属列（SQL 工具按 org 过滤的列白名单）
+                          "organization_id"},
     # 安全加固：移除 email 等敏感列，防止跨租户读取用户联系信息
     "users": {"id", "username", "display_name", "is_active",
                "role", "organization_id", "last_login", "created_at"},

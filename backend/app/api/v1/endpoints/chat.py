@@ -697,7 +697,11 @@ async def chat_parse_upload(
 
         result = await document_service.parse_local_file(
             temp_path,
-            organization_id=str(current_user.organization_id or 1),
+            # A2（评审 m-5）：不再 `or 1` 伪造组织；无组织如实传空串，
+            # 该值仅写入解析结果元数据，不参与任何租户数据访问。
+            organization_id=str(current_user.organization_id)
+            if current_user.organization_id is not None
+            else "",
         )
 
         chunks = result.get("chunks", [])

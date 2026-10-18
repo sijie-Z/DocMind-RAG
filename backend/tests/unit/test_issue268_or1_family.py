@@ -285,15 +285,34 @@ class TestChatRagNoOrgSemantics:
 # 2 · workflow 端点 —— 引擎拿到真实组织（None-able），不是伪造的 1
 # ══════════════════════════════════════════════════════════════════════════
 class TestWorkflowExecuteOrgDerivation:
-    def test_workflow_execute_no_org_passes_none_to_engine(self, client: TestClient):
-        """无组织用户执行工作流：引擎应以 organization_id=None 创建（不伪造 1）。
+    def test_workflow_execute_orgless_non_superuser_fails_closed(self, client: TestClient):
+        """A2 收紧：无组织非超管执行工作流一律 403（不携带 None 进入引擎）。
 
-        引擎侧「缺组织显式失败」在 test_rag_fix_org_scope.py 钉住（评审已证
-        只改端点层无效、须同修）；本用例钉端点的推导值本身。
-
-        变异验证：`effective_org_id = get_user_org_id(...)` 改回 `… or 1` → 本用例红。
+        issue #268 的口径是「不伪造 1 号组织」；A2 租户边界进一步要求工作流
+        必须先有组织上下文（fail-closed），因此无组织非超管在查询/引擎之前就被拒绝。
         """
         user = _orgless_user(user_id=5)
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=AssertionError("db-touched"))
+
+        _cleanup = _override_http(user=user, db=db)
+        try:
+            r = client.post("/api/v1/workflows/7/execute?stream=false", json={})
+        finally:
+            _cleanup()
+
+        assert r.status_code == 403, r.text
+        assert db.execute.call_count == 0, "403 必须发生在任何工作流查询之前"
+
+    def test_workflow_execute_superuser_orgless_passes_none_to_engine(self, client: TestClient):
+        """超管无组织：仍如实以 organization_id=None 创建引擎（绝不伪造 1）。
+
+        这是 issue #268「不 or 1」判据在 A2 之后的存续形态：全局角色允许执行
+        任意工作流，但引擎拿到的组织上下文仍然是诚实的 None。
+        """
+        user = SimpleNamespace(
+            id=5, organization_id=None, is_superuser=True, role="admin", is_active=True
+        )
         workflow = SimpleNamespace(
             id=7,
             name="测试工作流",
@@ -338,7 +357,7 @@ class TestWorkflowExecuteOrgDerivation:
 
         assert r.status_code == 200, r.text
         assert captured.get("organization_id") is None, (
-            "无组织用户的检索范围必须如实为 None（此前被 `or 1` 伪造为 1 号组织）"
+            "超管无组织时引擎组织必须如实为 None（此前被 `or 1` 伪造为 1 号组织）"
         )
 
 
@@ -475,8 +494,8 @@ class TestAgentMemoryNamespaces:
         captured: list[str] = []
         fake_system = SimpleNamespace(_load_from_redis=AsyncMock())
 
-        def _fake_get(namespace: str):
-            captured.append(namespace)
+        def _fake_get(org_id, user_id, agent_id):
+            captured.append(f"{org_id}:{user_id}:{agent_id}")
             return fake_system
 
         with patch.object(
@@ -498,17 +517,20 @@ class TestAgentMemoryNamespaces:
     def test_agent_feedback_lesson_lands_in_agent_visible_namespace(self, client: TestClient):
         """feedback lesson 必须落在 agent 侧读侧同一命名空间（否则 lesson 静默失效）。
 
-        修前：无组织会话写 `1:{user}:session:{sid}`，agent 侧读 `None:{user}:session:{sid}`
+        修前：历史会话写 `1:{user}:session:{sid}`，agent 侧读运行 org 命名空间
         → 自己写的 lesson 自己学不到（功能 bug）。修后写读同键。
 
-        变异验证：`organization_id=session.organization_id` 改回 `… or 1` → 本用例红
-        （读侧在 None 命名空间看不到任何 lesson）。
+        A2 更新：组织上下文改为 require_organization 的 fail-closed 口径——
+        本用例改用「有组织用户 + 历史 org=None 会话」，钉住写入侧按运行 org（42）
+        落库、读侧同键可加载；无组织非超管不再运行 agent（也不再有 None 命名空间）。
         """
         from app.agent.memory_bridge import AgentMemoryBridge
         from app.services.memory_service import get_memory_system
 
         session_id = str(uuid.uuid4())
-        user = _orgless_user(user_id=77)
+        user = SimpleNamespace(
+            id=77, organization_id=42, is_superuser=False, role="user", is_active=True
+        )
         message = MagicMock()
         message.id = "msg-268"
         message.session_id = session_id
@@ -536,20 +558,24 @@ class TestAgentMemoryNamespaces:
 
         assert r.status_code == 200, r.text
 
-        # 读侧 = agent 运行时的同参数桥（/chat/stream useAgent 无组织场景传 None）
+        # 读侧 = agent 运行时的同参数桥（运行 org 42）
         reader = AgentMemoryBridge(
-            agent_id=f"session:{session_id}", organization_id=None, user_id=77
+            agent_id=f"session:{session_id}", organization_id=42, user_id=77
         )
         lessons = reader.system.reflective.lessons
         assert any(l.get("lesson") == "回答与文档不符" for l in lessons), (
             "feedback 写入的 lesson 必须能被 agent 侧同一命名空间加载（修前静默失效）"
         )
 
-        # 反向：不得写进 1 号组织的命名空间（bug 形态的落点）
-        bugged_ns = get_memory_system(f"1:77:session:{session_id}")
+        # 反向：不得写进 1 号组织 / 历史 None 的命名空间（bug 形态的落点）
+        bugged_ns = get_memory_system(1, 77, f"session:{session_id}")
         assert not any(l.get("lesson") == "回答与文档不符" for l in bugged_ns.reflective.lessons), (
             "lesson 不得落入 1 号组织命名空间"
         )
+        legacy_ns = get_memory_system(None, 77, f"session:{session_id}")
+        assert not any(
+            l.get("lesson") == "回答与文档不符" for l in legacy_ns.reflective.lessons
+        ), "lesson 不得沿用历史会话的 raw org（None）"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -896,7 +922,7 @@ class TestAgentChatSessionOrgSymmetry:
             lesson.get("lesson") == "R2 判别：答案不对"
             for lesson in reader.system.reflective.lessons
         ), "运行侧（resolved org 42）必须能加载 feedback 写入的 lesson（修前静默失效）"
-        bugged_ns = get_memory_system(f"None:77:session:{session_id}")
+        bugged_ns = get_memory_system(None, 77, f"session:{session_id}")
         assert not any(
             lesson.get("lesson") == "R2 判别：答案不对"
             for lesson in bugged_ns.reflective.lessons
@@ -946,7 +972,7 @@ class TestAgentChatSessionOrgSymmetry:
             lesson.get("lesson") == "遗留会话判别"
             for lesson in reader.system.reflective.lessons
         ), "历史会话的 feedback lesson 也必须落在运行侧 resolved org（42）"
-        bugged_ns = get_memory_system(f"None:77:session:{session_id}")
+        bugged_ns = get_memory_system(None, 77, f"session:{session_id}")
         assert not any(
             lesson.get("lesson") == "遗留会话判别"
             for lesson in bugged_ns.reflective.lessons

@@ -247,7 +247,7 @@ class AgentService:
         self,
         query: str,
         history: list[dict[str, str]] | None = None,
-        organization_id: int = 1,
+        organization_id: int | None = None,
         user_id: int = 0,
         session_id: str | None = None,
         config: AgentConfig | None = None,
@@ -272,6 +272,12 @@ class AgentService:
         if not self.client:
             yield AgentEvent(type="error", content="LLM 未配置，请检查 DEEPSEEK_API_KEY 环境变量。")
             return
+
+        # A2 P0（fail-closed）：运行上下文必须有真实组织，默认值不再回落到 1 号组织。
+        if organization_id is None:
+            raise ValueError(
+                "AgentService.chat 缺少 organization_id，拒绝在无组织上下文下运行"
+            )
 
         # Load or create config
         agent_config = config or AgentConfig()
@@ -741,7 +747,7 @@ class AgentService:
         self,
         query: str,
         history: list[dict[str, str]] | None = None,
-        organization_id: int = 1,
+        organization_id: int | None = None,
         user_id: int = 0,
         top_k: int = 5,
     ) -> AsyncGenerator[dict[str, Any], None]:
@@ -752,6 +758,12 @@ class AgentService:
         if not self.client:
             yield {"type": "error", "content": "LLM 未配置。"}
             return
+
+        # A2 P0（fail-closed）：检索与运行都必须带真实组织，绝不静默落到 1 号组织。
+        if organization_id is None:
+            raise ValueError(
+                "AgentService.search_and_chat 缺少 organization_id，拒绝在无组织上下文下运行"
+            )
 
         # Step 1: Retrieve context via RAG
         from app.dependencies import get_rag_pipeline

@@ -5,7 +5,7 @@ DocMind AI知识库系统 - 组织管理端点
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.notifications import create_notification
@@ -18,8 +18,8 @@ from app.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from app.models.organization import Organization
-from app.models.rbac import PermissionType
+from app.models.organization import Organization, user_organization
+from app.models.rbac import PermissionType, user_organization_role_association
 from app.models.user import User
 from app.schemas.organization import OrganizationCreate, OrganizationUpdate
 from app.services.audit_service import audit_service
@@ -321,6 +321,9 @@ async def add_organization_member(
     user_obj: Any = user
     old_org_id = user_obj.organization_id
     user_obj.organization_id = org_id
+    # A2 P0：成员表是 token 组织回退的权威依据——加入组织必须同步写入
+    # user_organization 成员关系，否则成员被移出后旧 token 仍会被成员校验放行。
+    await organization_service.add_user_to_organization(db, user_obj, org)
     await db.commit()
 
     await create_notification(
@@ -391,7 +394,29 @@ async def remove_organization_member(
         raise NotFoundError("组织成员不存在")
 
     user_obj: Any = user
-    user_obj.organization_id = None
+    # A2（评审 m-4）：仅当用户的主组织正是被移除的组织时才清空主组织字段；
+    # 用户若同时属于其他组织（主组织指向别处），不得被这次移除连带清空。
+    if user_obj.organization_id == org_id:
+        user_obj.organization_id = None
+    # A2 P0：删除成员关系，使被移出成员的旧 token 组织回退立即失效（403），
+    # 不等待 token 过期。同时清理该用户在本组织的角色关联（重新加入不继承旧角色，
+    # 也避免组织删除时因角色关联外键触发 1451）。
+    await db.execute(
+        delete(user_organization_role_association).where(
+            and_(
+                user_organization_role_association.c.user_id == user_id,
+                user_organization_role_association.c.organization_id == org_id,
+            )
+        )
+    )
+    await db.execute(
+        delete(user_organization).where(
+            and_(
+                user_organization.c.user_id == user_id,
+                user_organization.c.organization_id == org_id,
+            )
+        )
+    )
     await db.commit()
 
     await create_notification(

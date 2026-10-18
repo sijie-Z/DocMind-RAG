@@ -40,7 +40,9 @@ async def _get_user_memory_system(current_user: User, agent_id: str):
     # 标成 1 号组织（仅标签错——键里另有 user_id 段，无跨租户读）。现在用真实的
     # org/user 键：无组织时该段如实为 None，绝不冒充 1 号组织。
     org_id = get_user_org_id(current_user)
-    system = get_memory_system(f"{org_id}:{current_user.id}:{agent_id}")
+    # A1（记忆 IDOR）：命名空间由 get_memory_system 按显式租户上下文拼装，
+    # 端点不再自行拼接全局 key。
+    system = get_memory_system(org_id, current_user.id, agent_id)
     await system._load_from_redis()
     return system
 
