@@ -79,7 +79,7 @@ export default {
     validation: {
       nicknameLength: 'Nickname must be between 2-50 characters',
       phoneInvalid: 'Please enter a valid phone number',
-      passwordLength: 'Password must be between 6-20 characters'
+      passwordLength: 'Password must be between 8-20 characters'
     },
     nickname: 'Nickname',
     placeholder: {
@@ -1065,5 +1065,15 @@ export default {
     knowledgeGraph: 'Knowledge Graph',
     workflowEditor: 'Workflow Editor',
     agentMemory: 'Agent Memory'
+  },
+  legal: {
+    privacy: {
+      title: 'Privacy Policy',
+      description: 'This page is a placeholder for the Privacy Policy. The full text will be published here.'
+    },
+    terms: {
+      title: 'Terms of Service',
+      description: 'This page is a placeholder for the Terms of Service. The full text will be published here.'
+    }
   }
 };

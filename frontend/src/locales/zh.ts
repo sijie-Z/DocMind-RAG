@@ -81,7 +81,7 @@ export default {
     validation: {
       nicknameLength: '昵称长度需在 2-50 个字符之间',
       phoneInvalid: '请输入有效的手机号',
-      passwordLength: '密码长度需在 6-20 个字符之间'
+      passwordLength: '密码长度需在 8-20 个字符之间'
     },
     nickname: '昵称',
     placeholder: {
@@ -1072,5 +1072,15 @@ export default {
     knowledgeGraph: '知识图谱',
     workflowEditor: '工作流编辑器',
     agentMemory: 'Agent记忆'
+  },
+  legal: {
+    privacy: {
+      title: '隐私政策',
+      description: '本页为隐私政策占位页，完整文本将在正式上线时在此发布。'
+    },
+    terms: {
+      title: '服务条款',
+      description: '本页为服务条款占位页，完整条款将在正式上线时在此发布。'
+    }
   }
 };

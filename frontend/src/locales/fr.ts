@@ -77,7 +77,7 @@ export default {
     validation: {
       nicknameLength: 'Le pseudo doit contenir entre 2 et 50 caractères',
       phoneInvalid: 'Veuillez entrer un numéro de téléphone valide',
-      passwordLength: 'Le mot de passe doit contenir entre 6 et 20 caractères'
+      passwordLength: 'Le mot de passe doit contenir entre 8 et 20 caractères'
     },
     nickname: 'Pseudo',
     placeholder: {
@@ -992,5 +992,15 @@ export default {
     knowledgeGraph: 'Graphe de connaissances',
     workflowEditor: 'Éditeur de workflow',
     agentMemory: 'Mémoire de l\'Agent'
+  },
+  legal: {
+    privacy: {
+      title: 'Politique de confidentialité',
+      description: 'Cette page est un espace réservé pour la politique de confidentialité. Le texte complet sera publié ici.'
+    },
+    terms: {
+      title: 'Conditions d’utilisation',
+      description: 'Cette page est un espace réservé pour les conditions d’utilisation. Le texte complet sera publié ici.'
+    }
   }
 };
