@@ -10,6 +10,13 @@ import logging
 
 import tiktoken
 
+from app.agent.tool_pairs import (
+    balance_cut,
+    call_ids_of,
+    result_call_id_of,
+    validate_tool_pairs,
+)
+
 logger = logging.getLogger(__name__)
 
 CHARS_PER_TOKEN = 2.5  # rough approximation: 1 token ≈ 2.5 chars for CJK+EN mixed
@@ -73,6 +80,9 @@ class ContextEngine:
         if not messages:
             return messages
 
+        # C3a：先验配对完整性——孤儿 result / 悬空 call 显式报错（不静默）。
+        validate_tool_pairs(messages)
+
         total_tokens = estimate_messages_tokens(messages)
         if system_prompt:
             total_tokens += estimate_tokens(system_prompt) + 4
@@ -83,8 +93,10 @@ class ContextEngine:
         if len(messages) <= self.tail_window:
             return self._truncate_messages(messages, self.max_context_tokens)
 
-        old_messages = messages[:-self.tail_window]
-        recent_messages = messages[-self.tail_window:]
+        # C3a：压缩切点按配对边界回退——call 与其全部 result 必须同侧。
+        cut = balance_cut(messages, len(messages) - self.tail_window)
+        old_messages = messages[:cut]
+        recent_messages = messages[cut:]
 
         budget_for_old = max(
             200,
@@ -94,7 +106,10 @@ class ContextEngine:
             - 50,
         )
 
-        compressed = self._compress_messages_fast(old_messages, budget_for_old)
+        compressed = (
+            self._compress_messages_fast(old_messages, budget_for_old)
+            if old_messages else []
+        )
         result = compressed + recent_messages
 
         final_tokens = estimate_messages_tokens(result)
@@ -113,6 +128,9 @@ class ContextEngine:
         if not messages:
             return messages
 
+        # C3a：先验配对完整性——孤儿 result / 悬空 call 显式报错（不静默）。
+        validate_tool_pairs(messages)
+
         total_tokens = estimate_messages_tokens(messages)
         if system_prompt:
             total_tokens += estimate_tokens(system_prompt) + 4
@@ -123,8 +141,10 @@ class ContextEngine:
         if len(messages) <= self.tail_window:
             return self._truncate_messages(messages, self.max_context_tokens)
 
-        old_messages = messages[:-self.tail_window]
-        recent_messages = messages[-self.tail_window:]
+        # C3a：压缩切点按配对边界回退——call 与其全部 result 必须同侧。
+        cut = balance_cut(messages, len(messages) - self.tail_window)
+        old_messages = messages[:cut]
+        recent_messages = messages[cut:]
 
         budget_for_old = max(
             200,
@@ -134,7 +154,8 @@ class ContextEngine:
             - 50,
         )
 
-        compressed = await self._compress_messages_async(old_messages, budget_for_old, ctx=ctx)
+        compressed = await self._compress_messages_async(old_messages, budget_for_old, ctx=ctx) \
+            if old_messages else []
         result = compressed + recent_messages
 
         final_tokens = estimate_messages_tokens(result)
@@ -236,28 +257,74 @@ class ContextEngine:
         This is the final guarantee of the class contract, so it measures in the
         same unit as estimate_tokens (real tokens) rather than in characters —
         mixing the two units let the result overshoot the budget on every pass.
+
+        C3a：按配对分组截断——call 与其 result 是不可拆的整体；预算不足时整组
+        丢弃（绝不留下孤儿 result / 悬空 call）。输出前再过一次配对校验。
         """
         result: list[dict[str, str]] = []
         used = 0
-        for msg in messages:
-            remaining = token_budget - used
-            if remaining <= 0:
-                break
-            content = msg.get("content", "")
-            content_tokens = estimate_tokens(content)
-            if content_tokens > remaining:
-                # Cut to the token budget directly; chars ≈ tokens * CHARS_PER_TOKEN
-                # is only a starting guess, so re-encode and trim until it fits.
-                keep = max(1, int(remaining * CHARS_PER_TOKEN))
-                content = content[:keep] + "...[truncated]"
-                while estimate_tokens(content) > remaining and keep > 1:
-                    keep = int(keep * 0.8)
-                    content = content[:keep] + "...[truncated]"
-                if estimate_tokens(content) > remaining:
-                    continue
-            result.append({**msg, "content": content})
-            used += estimate_tokens(content) + 4
+        i = 0
+        n = len(messages)
+        while i < n:
+            msg = messages[i]
+            # 收集配对组：assistant(tool_calls) + 紧随其后的对应 tool 结果。
+            group = [msg]
+            pending_ids = set(call_ids_of(msg))
+            j = i + 1
+            while pending_ids and j < n:
+                rid = result_call_id_of(messages[j])
+                if rid and rid in pending_ids:
+                    group.append(messages[j])
+                    pending_ids.discard(rid)
+                    j += 1
+                else:
+                    break
+            i = j
+
+            fitted_group: list[dict[str, str]] = []
+            group_used = 0
+            over_budget = False
+            for m in group:
+                remaining = token_budget - used - group_used
+                if remaining <= 0:
+                    over_budget = True
+                    break
+                fitted = self._fit_one_message(m, remaining)
+                if fitted is None:
+                    over_budget = True
+                    break
+                fitted_group.append(fitted)
+                group_used += estimate_tokens(fitted.get("content") or "") + 4
+            if over_budget:
+                if len(group) > 1:
+                    # 配对不可拆：整组丢弃；后续消息依赖本组 call 时同样不能留。
+                    break
+                # 单条消息放不下：维持旧行为（跳过该条，继续尝试后续）。
+                continue
+            result.extend(fitted_group)
+            used += group_used
+
+        validate_tool_pairs(result)
         return result
+
+    @staticmethod
+    def _fit_one_message(
+        msg: dict[str, str], remaining: int
+    ) -> dict[str, str] | None:
+        """把单条消息压进 remaining token；放不下 → None（旧语义的 continue）。"""
+        content = msg.get("content") or ""
+        if estimate_tokens(content) <= remaining:
+            return {**msg}
+        # Cut to the token budget directly; chars ≈ tokens * CHARS_PER_TOKEN
+        # is only a starting guess, so re-encode and trim until it fits.
+        keep = max(1, int(remaining * CHARS_PER_TOKEN))
+        content = content[:keep] + "...[truncated]"
+        while estimate_tokens(content) > remaining and keep > 1:
+            keep = int(keep * 0.8)
+            content = content[:keep] + "...[truncated]"
+        if estimate_tokens(content) > remaining:
+            return None
+        return {**msg, "content": content}
 
     def inject_tool_results(
         self,
