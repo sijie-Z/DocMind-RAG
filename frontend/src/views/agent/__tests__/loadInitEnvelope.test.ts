@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
-import { NMessageProvider, NSpin, NButton, NTooltip, NIcon } from 'naive-ui'
+import { NMessageProvider, NDialogProvider, NSpin, NButton, NTooltip, NIcon } from 'naive-ui'
 import { createPinia, setActivePinia } from 'pinia'
 import i18n from '@/locales'
 
@@ -48,7 +48,7 @@ const apiMocks = vi.hoisted(() => ({
 vi.mock('@/api/agent', () => ({ agentApi: apiMocks }))
 
 const Host = defineComponent({
-  render: () => h(NMessageProvider, null, { default: () => h(AgentView) }),
+  render: () => h(NMessageProvider, null, { default: () => h(NDialogProvider, null, { default: () => h(AgentView) }) }),
 })
 
 const stubs = {

@@ -85,7 +85,8 @@
                      assistant 消息的 Markdown 与纯文本副本同时渲染。
                      重排为「assistant → Markdown(+光标) | 否则 → 纯文本」严格互斥。 -->
                 <template v-if="message.messageType === 'assistant'">
-                  <Markdown :content="message.content" />
+                  <!-- E3：最后一条流式消息标记 streaming —— 中间态轻量渲染，终态一次完整 Markdown -->
+                  <Markdown :content="message.content" :streaming="isLoading && index === messages.length - 1" />
                   <span
                     v-if="isLoading && index === messages.length - 1"
                     class="inline-block w-0.5 h-4 bg-slate-500 dark:bg-slate-400 ml-0.5 align-middle animate-blink"

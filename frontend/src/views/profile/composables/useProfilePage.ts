@@ -3,6 +3,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch, h, resolveComponent } from 'vue'
 import { useDialog, NButton } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
+import { useConfirmDangerousAction } from '@/utils/confirm'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -77,6 +78,7 @@ interface UserStats {
 
 const message = useDedupedMessage()
 const dialog = useDialog()
+const confirmDangerousAction = useConfirmDangerousAction()
 const { t, locale } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
@@ -853,6 +855,12 @@ const formatAuditAction = (action?: string) => {
 
 const handleRevokeSession = async (sessionId: number) => {
   if (!sessionId) return
+  // E2：下线设备不可逆（需重新登录），先经统一二次确认；取消零副作用
+  const confirmed = await confirmDangerousAction(
+    t('profile.revokeSession'),
+    t('profile.revokeSessionConfirm'),
+  )
+  if (!confirmed) return
   try {
     await revokeMySession(sessionId)
     message.success(t('profile.sessionRevoked') || '设备已下线')
@@ -907,22 +915,9 @@ const handleChangePassword = async () => {
 }
 
 // API Key 逻辑：生成 / 重生成 / 撤销三个操作均须先经确认弹窗
-const confirmApiKeyAction = (title: string, content: string): Promise<boolean> =>
-  new Promise((resolve) => {
-    dialog.warning({
-      title,
-      content,
-      positiveText: t('common.confirm'),
-      negativeText: t('common.cancel'),
-      onPositiveClick: () => resolve(true),
-      onNegativeClick: () => resolve(false),
-      onClose: () => resolve(false),
-    })
-  })
-
 const generateApiKey = async () => {
   const isRegenerate = Boolean(apiKey.value)
-  const confirmed = await confirmApiKeyAction(
+  const confirmed = await confirmDangerousAction(
     isRegenerate ? t('profile.regenerateKey') : t('profile.generateKey'),
     isRegenerate ? t('profile.apiKeyRegenerateConfirm') : t('profile.apiKeyGenerateConfirm'),
   )
@@ -944,7 +939,7 @@ const generateApiKey = async () => {
 }
 
 const revokeApiKey = async () => {
-  const confirmed = await confirmApiKeyAction(
+  const confirmed = await confirmDangerousAction(
     t('profile.revokeKey'),
     t('profile.apiKeyRevokeConfirm'),
   )
