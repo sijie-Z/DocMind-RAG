@@ -374,7 +374,10 @@ export default {
     graph: {
       emptyTitle: 'No graph data yet',
       emptyDesc: 'Upload documents and complete indexing, and the knowledge graph will be built automatically',
-      loadFailed: 'Failed to load graph data, please try again later'
+      loadFailed: 'Failed to load graph data, please try again later',
+      zoomIn: 'Zoom in',
+      zoomOut: 'Zoom out',
+      fitView: 'Reset view'
     },
     docStatus: {
       pending: 'Pending',
