@@ -21,7 +21,7 @@ import { defineComponent, h, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory, type Router } from 'vue-router'
 import { VueFlow } from '@vue-flow/core'
-import naive, { NMessageProvider } from 'naive-ui'
+import naive, { NMessageProvider, NDialogProvider } from 'naive-ui'
 import { createI18n } from 'vue-i18n'
 
 // jsdom 缺口补齐（仅本文件使用；产品代码合法使用这些浏览器 API）
@@ -89,8 +89,11 @@ const i18n = createI18n({
 
 const Host = defineComponent({
   setup() {
-    // 真实 App 的包裹层：n-message-provider 在根（App.vue），编辑器是其后代
-    return () => h(NMessageProvider, null, { default: () => h(WorkflowEditor) })
+    // 真实 App 的包裹层：n-dialog-provider / n-message-provider 在根（App.vue），
+    // 编辑器是其后代（E1 起清空画布确认框依赖 dialog 注入）
+    return () => h(NDialogProvider, null, {
+      default: () => h(NMessageProvider, null, { default: () => h(WorkflowEditor) }),
+    })
   },
 })
 

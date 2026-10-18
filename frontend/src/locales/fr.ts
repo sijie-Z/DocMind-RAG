@@ -619,6 +619,13 @@ export default {
   },
   workflow: {
     description: 'Décomposez les tâches IA complexes en pipelines par étapes avec des métriques unifiées et une gestion d\'état.',
+    editor: {
+      clearConfirmTitle: 'Vider le canevas',
+      clearConfirmContent: 'Après le vidage, l\'enregistrement automatique réécrira le canevas vide dans les {n} secondes et écrasera la version enregistrée. Vider le canevas ?',
+      clearConfirmPositive: 'Vider',
+      clearConfirmNegative: 'Annuler',
+      emptyCanvasAutoSaveBlocked: 'Le canevas est vide : l\'enregistrement automatique a été ignoré pour protéger la version enregistrée. Pour enregistrer un canevas vide, cliquez manuellement sur « Enregistrer ».',
+    },
   },
   notifications: {
     markAllRead: 'Tout marquer comme lu',
