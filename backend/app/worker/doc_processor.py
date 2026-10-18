@@ -5,9 +5,11 @@ knowledge-base rebuild) should go through ``processor.process()`` so chunk/ES/jo
 stays consistent.
 """
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from datetime import datetime
 
 from sqlalchemy import delete, select
@@ -22,13 +24,43 @@ from app.core.elasticsearch import (
 from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.services.document_parser import document_service
-from app.services.embedding_service import embedding_service
 from app.services.document_status import verify_indexed as _verify_indexed
+from app.services.embedding_service import embedding_service
 
 logger = logging.getLogger(__name__)
 
 # 文档处理并发锁：Redis SETNX + TTL 兜底，防止同一文档被并发重复处理
 _LOCK_TTL_SECONDS = 600
+# 持锁期间每 1/3 TTL 续期一次：大文档解析/向量化/批量索引可能远超 600s，
+# 不续期则锁中途过期、第二个 worker 并发处理同一文档（A3-P0）。
+_LOCK_HEARTBEAT_INTERVAL_SECONDS = max(30, _LOCK_TTL_SECONDS // 3)
+
+# 只续/只删**自己**的锁：值必须等于本 run 的 token。
+# 否则 TTL 过期后新持有者刚拿到的锁会被旧 run 的释放/续期踩掉。
+_LOCK_RENEW_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('expire', KEYS[1], ARGV[2])
+end
+return 0
+"""
+_LOCK_RELEASE_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+end
+return 0
+"""
+
+
+class DeferredOutcome:
+    """第三种终局：消息**未了结**，必须延迟重投（不提交偏移、不记失败）。"""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - 调试辅助
+        return "DEFERRED"
+
+
+DEFERRED = DeferredOutcome()
 
 
 def _noop() -> None:
@@ -40,21 +72,29 @@ class DocumentProcessor:
 
     def __init__(self):
         self.parser = document_service
+        # document_id -> 本次处理 run 的锁 token（续期/释放时校验归属）
+        self._lock_tokens: dict[str, str] = {}
 
     async def _acquire_processing_lock(self, document_id: str) -> bool | None:
-        """Redis SETNX 并发锁。
+        """Redis SETNX 并发锁（值为本次 run 的 token）。
 
         Returns:
             True  — 成功获取锁（处理完成后需释放）；
-            False — 同一文档已有任务在处理，本次应跳过；
+            False — 同一文档已有任务在处理，本次**不得**当成功提交；
             None  — Redis 不可用，降级为不加锁直接处理（与现有容错风格一致）。
         """
         try:
             from app.core.redis import get_redis
             client = await get_redis()
+            token = uuid.uuid4().hex
             acquired = await client.set(
-                f"doc:{document_id}:processing", "1", nx=True, ex=_LOCK_TTL_SECONDS
+                f"doc:{document_id}:processing",
+                token,
+                nx=True,
+                ex=_LOCK_TTL_SECONDS,
             )
+            if acquired:
+                self._lock_tokens[document_id] = token
             return bool(acquired)
         except Exception as e:
             logger.warning(
@@ -62,12 +102,52 @@ class DocumentProcessor:
             )
             return None
 
-    async def _release_processing_lock(self, document_id: str) -> None:
-        """释放并发锁；释放失败时由 TTL 兜底过期。"""
+    async def _renew_processing_lock(self, document_id: str) -> bool:
+        """按 TTL 心跳续期；token 不匹配（锁已被他人接管）返回 False 并留痕。"""
+        token = self._lock_tokens.get(document_id)
+        if not token:
+            return False
         try:
             from app.core.redis import get_redis
             client = await get_redis()
-            await client.delete(f"doc:{document_id}:processing")
+            renewed = await client.eval(
+                _LOCK_RENEW_SCRIPT,
+                1,
+                f"doc:{document_id}:processing",
+                token,
+                str(_LOCK_TTL_SECONDS),
+            )
+            if not renewed:
+                logger.error(
+                    "[DOC_PROC] lock lost during processing document_id=%s: "
+                    "token no longer owns the lock; another worker may take over",
+                    document_id,
+                )
+            return bool(renewed)
+        except Exception as e:
+            logger.warning(
+                "[DOC_PROC] Redis lock renewal failed (TTL will expire): %s", e
+            )
+            return False
+
+    async def _lock_heartbeat_loop(self, document_id: str) -> None:
+        """持锁期间周期续期，直到被 ``process`` 取消。"""
+        while True:
+            await asyncio.sleep(_LOCK_HEARTBEAT_INTERVAL_SECONDS)
+            await self._renew_processing_lock(document_id)
+
+    async def _release_processing_lock(self, document_id: str) -> None:
+        """释放并发锁（token 匹配才删）；释放失败时由 TTL 兜底过期。"""
+        token = self._lock_tokens.pop(document_id, None)
+        try:
+            from app.core.redis import get_redis
+            client = await get_redis()
+            if token:
+                await client.eval(
+                    _LOCK_RELEASE_SCRIPT, 1, f"doc:{document_id}:processing", token
+                )
+            else:  # 兼容旧路径/测试替身：无 token 时按原语义删除键
+                await client.delete(f"doc:{document_id}:processing")
         except Exception as e:
             logger.warning(
                 "[DOC_PROC] Redis lock release failed (TTL will expire): %s", e
@@ -78,7 +158,7 @@ class DocumentProcessor:
         document_id: str,
         job_id: int | None = None,
         on_progress: Callable[[], None] | None = None,
-    ) -> bool:
+    ) -> bool | DeferredOutcome:
         """Run the full document pipeline once.
 
         Old chunks and ES entries are replaced only after a successful parse, so a
@@ -87,29 +167,37 @@ class DocumentProcessor:
         ``on_progress``（可选）在每个阶段边界各调用一次：worker 用它刷新心跳，
         避免单篇大文档的长耗时解析/向量化被健康检查误判为"卡死"（issue #156）。
 
-        返回值契约（issue #301 批 D / #30 起对 consumer 生效，此前 consumer 忽略返回值）：
+        返回值契约（issue #301 批 D / #30 起对 consumer 生效；A3-P0 增加第三种）：
 
         - ``True``——该消息**已了结**：本进程完成索引，或经判断无需（也不应）重投的
-          跳过（另一持锁者正在处理 / 对象已不存在——两处都有响亮日志）。
-          consumer 可以安全提交偏移；
+          跳过（对象已不存在——响亮日志）。consumer 可以安全提交偏移；
         - ``False``——处理**失败**：文档与任务已尽力如实落 ``FAILED``（含原因），
           consumer 必须按"未提交偏移"处理（走受限重投，见 ``worker/consumer.py``
-          的 ``MAX_DELIVERY_ATTEMPTS``），绝不允许当成功提交。
+          的 ``MAX_DELIVERY_ATTEMPTS``），绝不允许当成功提交；
+        - ``DEFERRED``——**未了结**（锁被另一处理者持有）：既不是成功也不是失败。
+          consumer 必须不提交偏移、不计失败预算，把消息回卷做延迟重投——持锁者
+          崩溃时这条投递是文档唯一的恢复路径（A3-P0：修前这里返回 True，
+          偏移被提交后文档永久卡 PARSING）。
         """
         notify = on_progress or _noop
         logger.info("[DOC_PROC] start document_id=%s job_id=%s", document_id, job_id)
         lock_acquired = await self._acquire_processing_lock(document_id)
         if lock_acquired is False:
-            # 重复投递/并发处理中：完成责任在持锁者手中，本消息可以安全提交
-            # （持锁者自己的投递在成功前不会提交偏移，崩溃后其消息会重投——
-            # 至少一次语义由那条投递维系）。
-            logger.info(
-                "[DOC_PROC] skip document_id=%s job_id=%s: already being processed",
+            # A3-P0：锁竞争不得当成功提交。持锁者自己的投递在成功前不会提交偏移，
+            # 本消息保持未提交 → 崩溃/超时后 Kafka 仍能重投，不会留下永久 PARSING。
+            logger.warning(
+                "[DOC_PROC] defer document_id=%s job_id=%s: another worker holds the "
+                "lock; message stays uncommitted for delayed redelivery",
                 document_id,
                 job_id,
             )
-            return True
+            return DEFERRED
         notify()
+        heartbeat_task: asyncio.Task | None = None
+        if lock_acquired is True:
+            heartbeat_task = asyncio.create_task(
+                self._lock_heartbeat_loop(document_id)
+            )
         try:
             doc = await self._load_and_mark_parsing(document_id, job_id)
             if doc is None:
@@ -170,6 +258,10 @@ class DocumentProcessor:
             await self._mark_failed(document_id, str(e), job_id)
             return False
         finally:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await heartbeat_task
             if lock_acquired is True:
                 await self._release_processing_lock(document_id)
 
