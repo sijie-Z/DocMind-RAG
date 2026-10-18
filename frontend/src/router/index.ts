@@ -1,9 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
-import Layout from '@/layouts/index.vue'
+import type { AxiosError } from 'axios'
 import { useUserStore } from '@/stores/user'
 import { getToken, isTokenExpired, removeToken } from '@/utils/auth'
 import { silentRefreshAccessToken } from '@/utils/request'
+import { startRouteProgress, finishRouteProgress } from '@/utils/routeProgress'
 
 /** 路由 meta 扩展（T9 定位三件套）：生效侧栏高亮键 */
 declare module 'vue-router' {
@@ -64,7 +65,10 @@ export const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    component: Layout,
+    // 首屏瘦身（E5）：Layout 改路由级懒加载——未登录首屏（/firsthome、/login）
+    // 不再为后台框架付费；登录后首次进入时拉取。守卫与进度条不受影响：
+    // 组件在导航确认（afterEach 触发）前解析，进度条覆盖其加载窗口。
+    component: () => import('@/layouts/index.vue'),
     redirect: '/firsthome',
     meta: {
       requiresAuth: true
@@ -299,6 +303,16 @@ export const routes: RouteRecordRaw[] = [
     redirect: (to) => ({ path: '/system-about', query: to.query, hash: to.hash })
   },
   {
+    // 服务端不可用（5xx/网络）且无本地缓存的兜底页：保留登录态、可重试
+    path: '/service-unavailable',
+    name: 'ServiceUnavailable',
+    component: () => import('@/views/error/service-unavailable.vue'),
+    meta: {
+      title: 'router.serviceUnavailable',
+      requiresAuth: false
+    }
+  },
+  {
     // 真实 404：未知路径停留在原地址并渲染 404 页（不再静默弹回营销页）
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
@@ -316,6 +330,7 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to, from, next) => {
+  startRouteProgress()
   const userStore = useUserStore()
   let token = getToken()
   const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
@@ -355,17 +370,41 @@ router.beforeEach(async (to, from, next) => {
       // admin 路由：若上次校验已超过 5 分钟，重新拉取用户信息刷新角色
       const adminSessionStale = requiresAdmin && sessionValidated && Date.now() - lastValidatedAt > ADMIN_REVALIDATE_INTERVAL
       if (!sessionValidated || !userStore.userInfo?.id || adminSessionStale) {
-        try {
-          await userStore.getUserInfo()
+        if (userStore.userInfo?.id) {
+          // 首屏优先：本地已有缓存的用户信息时先放行渲染（Layout 尽早挂载），
+          // /users/me 校验转入后台——axios 重试策略照旧，但不阻塞首屏。
+          // 后台 401 由拦截器清号并跳登录；5xx/网络只置“服务不可用”，不再踢登录。
           sessionValidated = true
           lastValidatedAt = Date.now()
-        } catch {
-          removeToken()
-          userStore.logout({ navigate: false })
-          sessionValidated = false
-          lastValidatedAt = 0
-          next({ name: 'Login', query: { redirect: to.fullPath } })
-          return
+          void userStore.getUserInfo().then(
+            () => {
+              sessionValidated = true
+              lastValidatedAt = Date.now()
+            },
+            () => { /* 失败分级已在 store/拦截器内收口（401 清号，5xx 保留会话） */ },
+          )
+        } else {
+          try {
+            await userStore.getUserInfo()
+            sessionValidated = true
+            lastValidatedAt = Date.now()
+          } catch (error) {
+            // 仅 401（或拦截器标记的续期失败）视为会话失效；
+            // 5xx/网络错误保留会话，落到“服务暂时不可用”页（非白屏）。
+            const status = (error as AxiosError)?.response?.status
+            const sessionExpired =
+              status === 401 || (error as { authSessionExpired?: boolean })?.authSessionExpired === true
+            sessionValidated = false
+            lastValidatedAt = 0
+            if (sessionExpired) {
+              removeToken()
+              userStore.logout({ navigate: false })
+              next({ name: 'Login', query: { redirect: to.fullPath } })
+            } else {
+              next({ name: 'ServiceUnavailable', query: { redirect: to.fullPath } })
+            }
+            return
+          }
         }
       }
       if (!userStore.userInfo?.id) {
@@ -385,6 +424,14 @@ router.beforeEach(async (to, from, next) => {
   } else {
     next()
   }
+})
+
+// 全局顶部进度条收尾：导航完成/失败/中断都要复位，避免长驻
+router.afterEach(() => {
+  finishRouteProgress()
+})
+router.onError(() => {
+  finishRouteProgress()
 })
 
 export default router

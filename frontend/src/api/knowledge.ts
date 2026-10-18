@@ -68,42 +68,66 @@ export interface DocumentContent {
   suggested_tags?: string[]
 }
 
+/**
+ * 页面自理错误的静默请求选项（E14/D1）：
+ * 带 `X-Silent-Error: 1` 时响应拦截器不再弹全局 toast，错误文案由调用方
+ * （页面 catch / 页内错误态）唯一呈现，避免同一失败被提示两次。
+ */
+export interface SilentRequestOptions {
+  silent?: boolean
+}
+
+const SILENT_HEADERS = { headers: { 'X-Silent-Error': '1' } } as const
+
 export const getKnowledgeBases = async (params?: {
   page?: number
   page_size?: number
   search?: string
   tags?: string[]
-}): Promise<AxiosResponse<ApiResponse<KnowledgeBaseListResponse>>> => {
+}, options?: SilentRequestOptions): Promise<AxiosResponse<ApiResponse<KnowledgeBaseListResponse>>> => {
   // 添加末尾斜杠以避免 307 重定向导致 Header 丢失
-  return request.get('/knowledge/', { params })
+  return request.get('/knowledge/', { params, ...(options?.silent ? SILENT_HEADERS : {}) })
 }
 
 export const getKnowledgeBase = async (id: string): Promise<AxiosResponse<{ data: KnowledgeBase }>> => {
   return request.get(`/documents/${id}`)
 }
 
-export const getDocumentDetail = async (id: string): Promise<AxiosResponse<{ data: DocumentDetail }>> => {
-  return request.get(`/documents/${id}`)
+export const getDocumentDetail = async (
+  id: string,
+  options?: SilentRequestOptions
+): Promise<AxiosResponse<{ data: DocumentDetail }>> => {
+  return request.get(`/documents/${id}`, options?.silent ? SILENT_HEADERS : undefined)
 }
 
-export const getDocumentContent = async (id: string): Promise<AxiosResponse<{ data: DocumentContent }>> => {
-  return request.get(`/documents/${id}/content`)
+export const getDocumentContent = async (
+  id: string,
+  options?: SilentRequestOptions
+): Promise<AxiosResponse<{ data: DocumentContent }>> => {
+  return request.get(`/documents/${id}/content`, options?.silent ? SILENT_HEADERS : undefined)
 }
 
 export const uploadKnowledgeBase = async (
   data: FormData,
-  onProgress?: (_progressEvent: { loaded: number; total?: number }) => void
+  onProgress?: (_progressEvent: { loaded: number; total?: number }) => void,
+  signal?: AbortSignal
 ): Promise<AxiosResponse<{ data: KnowledgeBase }>> => {
   return request.post('/documents/upload', data, {
     headers: {
-      'Content-Type': undefined // axios sets multipart boundary when Content-Type is undefined
+      'Content-Type': undefined, // axios sets multipart boundary when Content-Type is undefined
+      // 用户主动取消上传时 axios 以「无 response 的 reject」收场，响应拦截器会误报
+      // 「网络连接失败」。上传错误统一由调用方呈现（知识库上传页 / 聊天附件），
+      // 故标记静默，避免取消与真实失败都被全局 toast 抢先误读。
+      'X-Silent-Error': '1'
     },
-    onUploadProgress: onProgress
+    onUploadProgress: onProgress,
+    // E9：上传列表「×」真取消的传输层入口（AbortController 中止请求）
+    signal
   })
 }
 
-export const deleteKnowledgeBase = async (id: string): Promise<void> => {
-  return request.delete(`/knowledge/document/${id}`)
+export const deleteKnowledgeBase = async (id: string, options?: SilentRequestOptions): Promise<void> => {
+  return request.delete(`/knowledge/document/${id}`, options?.silent ? SILENT_HEADERS : undefined)
 }
 
 /**
@@ -126,13 +150,21 @@ export const buildBatchDeletePayload = (
 
 export const batchDeleteKnowledgeBases = async (
   ids: string[],
-  organizationId?: number | null
+  organizationId?: number | null,
+  options?: SilentRequestOptions
 ): Promise<void> => {
-  return request.post('/knowledge/batch-delete', buildBatchDeletePayload(ids, organizationId))
+  return request.post(
+    '/knowledge/batch-delete',
+    buildBatchDeletePayload(ids, organizationId),
+    options?.silent ? SILENT_HEADERS : undefined
+  )
 }
 
-export const rebuildKnowledgeBase = async (id: string): Promise<AxiosResponse<ApiResponse<unknown>>> => {
-  return request.post(`/knowledge/rebuild/${id}`)
+export const rebuildKnowledgeBase = async (
+  id: string,
+  options?: SilentRequestOptions
+): Promise<AxiosResponse<ApiResponse<unknown>>> => {
+  return request.post(`/knowledge/rebuild/${id}`, undefined, options?.silent ? SILENT_HEADERS : undefined)
 }
 
 

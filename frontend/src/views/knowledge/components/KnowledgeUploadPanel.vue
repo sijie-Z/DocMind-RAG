@@ -118,7 +118,14 @@
                 </n-icon>
                 <span class="font-medium truncate text-sm" :title="task.name">{{ task.name }}</span>
               </div>
-              <n-button quaternary circle size="small" @click="emit('removeTask', task.id)">
+              <n-button
+                quaternary
+                circle
+                size="small"
+                :title="removeTaskLabel(task)"
+                :aria-label="removeTaskLabel(task)"
+                @click="emit('removeTask', task.id)"
+              >
                 <template #icon><n-icon><CloseOutline /></n-icon></template>
               </n-button>
             </div>
@@ -238,6 +245,14 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const uploadRef = ref<HTMLElement | null>(null)
+
+/**
+ * 「×」语义（E9/B7）：进行中任务为真取消（视图 abort 请求），终态任务仅从列表
+ * 移除。按钮提示必须如实反映当前语义，避免用户以为取消已完成的「×」会删文档。
+ */
+const isTaskInFlight = (task: UploadTask) => task.status === 'uploading' || task.status === 'processing'
+const removeTaskLabel = (task: UploadTask) =>
+  isTaskInFlight(task) ? t('knowledge.cancelUpload') : t('knowledge.removeFromList')
 
 // uploadForm 是 prop，只能通过 emit 更新（单向数据流）；此处统一收敛字段级修改。
 const updateForm = (patch: Partial<UploadForm>) => {
