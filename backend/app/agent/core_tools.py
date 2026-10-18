@@ -17,6 +17,21 @@ from app.agent.usage import ctx_from_run_context, record_llm_usage
 
 logger = logging.getLogger(__name__)
 
+
+def _missing_organization_result(tool_name: str) -> ToolResult:
+    """A2 P0（fail-closed）：工具缺少组织上下文时拒绝执行。
+
+    这些工具直接以 organization_id 作为 ES / DB 的租户过滤条件；默认值从
+    1 改为 None 后，任何漏传组织的调用必须显式失败，绝不静默落到 1 号组织。
+    """
+    return ToolResult.fail(
+        code="organization_required",
+        message=(
+            f"工具 '{tool_name}' 缺少组织上下文（organization_id），"
+            "已拒绝执行以免跨租户读写。"
+        ),
+    )
+
 # ── 结构化检索结果信封（T4：来源伪造隔离）───────────────────────────────────
 # 检索工具此前把来源行（"[i] (score) filename"）与文档正文拼进**同一个**
 # 字符串，消费端只能对整段输出跑逐行正则——文档正文里构造一行
@@ -93,9 +108,11 @@ async def search_knowledge_base(
     query: str,
     top_k: int = 5,
     document_ids: list[str] | None = None,
-    organization_id: int = 1,
+    organization_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("search_knowledge_base")
     from app.dependencies import get_rag_pipeline
     from app.rag.errors import RetrievalUnavailableError
 
@@ -159,9 +176,11 @@ async def search_knowledge_base(
 async def vector_search(
     query: str,
     top_k: int = 5,
-    organization_id: int = 1,
+    organization_id: int | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("vector_search")
     # T6：与姊妹检索工具一致，钳制到 20 以内，避免 ES 请求被调用方无限放大
     top_k = min(top_k, 20)
 
@@ -225,10 +244,12 @@ async def vector_search(
 )
 async def summarize_document(
     document_id: str,
-    organization_id: int = 1,
+    organization_id: int | None = None,
     run_context: RunContext | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("summarize_document")
     from app.core.elasticsearch import ElasticsearchTools
     from app.dependencies import get_rag_pipeline
 
@@ -415,10 +436,12 @@ async def extract_insights(
     document_id: str,
     aspects: str = "all",
     framework: str = "",
-    organization_id: int = 1,
+    organization_id: int | None = None,
     run_context: RunContext | None = None,
     **_: Any,
 ) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("extract_insights")
     from app.core.config import settings
     from app.core.elasticsearch import ElasticsearchTools
     from app.dependencies import get_rag_pipeline
@@ -571,10 +594,12 @@ async def extract_insights(
 async def cross_document_analysis(
     document_ids: list[str],
     analysis_type: str = "comprehensive",
-    organization_id: int = 1,
+    organization_id: int | None = None,
     run_context: RunContext | None = None,
     **_: Any,
 ) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("cross_document_analysis")
     if not document_ids or len(document_ids) < 2:
         # issue #301 批次 2：历史 {"error": ...} JSON 出口迁移到结构化失败 ——
         # 旧的"正常 JSON"形态对消费端的小写键检查隐身（trustB 评审现场复现：
@@ -887,9 +912,11 @@ def _generate_markdown_fallback(title: str, sections: list) -> str:
 async def list_documents(
     limit: int = 20,
     status: str | None = None,
-    organization_id: int = 1,
+    organization_id: int | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("list_documents")
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal
@@ -934,7 +961,11 @@ async def list_documents(
     },
     tags=["management"],
 )
-async def get_document_info(document_id: str, organization_id: int = 1, **_: Any) -> str | ToolResult:
+async def get_document_info(
+    document_id: str, organization_id: int | None = None, **_: Any
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("get_document_info")
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal
@@ -997,9 +1028,11 @@ async def get_document_info(document_id: str, organization_id: int = 1, **_: Any
 async def list_conversations(
     limit: int = 10,
     user_id: int = 0,
-    organization_id: int = 1,
+    organization_id: int | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("list_conversations")
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal

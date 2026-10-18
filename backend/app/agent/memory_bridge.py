@@ -49,10 +49,16 @@ class AgentMemoryBridge:
     def __init__(
         self,
         agent_id: str = "default",
-        organization_id: int = 1,
+        organization_id: int | None = None,
         user_id: int = 0,
         session_id: str | None = None,
     ):
+        # A2 P0（fail-closed）：记忆命名空间按组织隔离；缺失组织时若继续，
+        # 会生成 "None:…" 命名空间（跨租户/不可回收）。直接拒绝创建。
+        if organization_id is None:
+            raise ValueError(
+                "AgentMemoryBridge 缺少 organization_id，拒绝在无组织上下文下创建记忆命名空间"
+            )
         # 会话级命名空间：显式 session_id 优先，与 service.py 的 "session:<id>" 约定一致
         if session_id:
             agent_id = f"session:{session_id}"
