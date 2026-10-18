@@ -357,8 +357,23 @@ const clearFilters = () => {
 
 const showResultDetail = (r: SearchResult) => { selectedResult.value = r; showDetailModal.value = true }
 
+// E11-① 跨页上下文：q = 文件名 + 用户当前搜索词组句（i18n 四语），context =
+// 所点结果正文片段（截断）。聊天页读取后预填输入框（见 chat/index.vue）——
+// 修前只传占位串 `关于文件 "x"...` + context_id（ES 内部 id，聊天页无法消费），
+// 跨页后「问哪个文件、问什么」全部丢失。
 const askAI = (r: SearchResult) => {
-  router.push({ name: 'Chat', query: { q: `关于文件 "${filenameOf(r)}"...`, context_id: r.id } })
+  const filename = filenameOf(r)
+  const question = searchQuery.value.trim()
+  const q = filename
+    ? question
+      ? t('search.askAIQuestion', { filename, query: question })
+      : t('search.askAIQuestionGeneric', { filename })
+    : question
+  const query: Record<string, string> = {}
+  if (q) query.q = q
+  const snippet = contentOf(r).trim()
+  if (snippet) query.context = snippet.slice(0, 300)
+  router.push({ name: 'Chat', query })
 }
 
 const copyResultContent = async (r: SearchResult | null) => {

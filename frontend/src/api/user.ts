@@ -1,5 +1,5 @@
 import request from '@/utils/request'
-import type { AxiosResponse } from 'axios'
+import type { AxiosRequestConfig, AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
 
 /**
@@ -91,8 +91,8 @@ export const getAuditLogs = async (params?: {
   search?: string
   start_date?: string
   end_date?: string
-}): Promise<AxiosResponse<ApiResponse<{ items: AuditLogEntry[]; total: number }>>> => {
-  return request.get('/users/audit-logs', { params })
+}, config?: AxiosRequestConfig): Promise<AxiosResponse<ApiResponse<{ items: AuditLogEntry[]; total: number }>>> => {
+  return request.get('/users/audit-logs', { params, ...config })
 }
 
 export const createUser = async (data: {
@@ -158,8 +158,8 @@ export interface UserAuditLog {
   created_at?: string
 }
 
-export const getUserStats = async (): Promise<AxiosResponse<UserStats>> => {
-  return request.get('/users/stats')
+export const getUserStats = async (config?: AxiosRequestConfig): Promise<AxiosResponse<UserStats>> => {
+  return request.get('/users/stats', config)
 }
 
 export const getUserActivities = async (): Promise<AxiosResponse<Activity[]>> => {

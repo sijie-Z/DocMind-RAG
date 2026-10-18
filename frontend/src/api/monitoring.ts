@@ -1,4 +1,4 @@
-import request from '@/utils/request'
+import request, { FIRST_SCREEN_REQUEST_CONFIG } from '@/utils/request'
 
 export interface SystemMetrics {
   timestamp: number
@@ -105,7 +105,7 @@ export interface LLMStats {
 }
 
 export const getLLMStats = async (): Promise<{ data: LLMStats }> => {
-  return request.get('/monitoring/llm-stats')
+  return request.get('/monitoring/llm-stats', FIRST_SCREEN_REQUEST_CONFIG)
 }
 
 export interface RAGStats {
@@ -136,15 +136,15 @@ export interface OrgSummary {
 }
 
 export const getAdminSummary = async (): Promise<{ data: AdminSummary }> => {
-  return request.get('/monitoring/admin-summary')
+  return request.get('/monitoring/admin-summary', FIRST_SCREEN_REQUEST_CONFIG)
 }
 
 export const getOrgSummary = async (): Promise<{ data: { organizations: OrgSummary[] } }> => {
-  return request.get('/monitoring/org-summary')
+  return request.get('/monitoring/org-summary', FIRST_SCREEN_REQUEST_CONFIG)
 }
 
 export const getRAGStats = async (): Promise<{ data: RAGStats }> => {
-  return request.get('/knowledge/rag-stats')
+  return request.get('/knowledge/rag-stats', FIRST_SCREEN_REQUEST_CONFIG)
 }
 
 /**
@@ -164,5 +164,5 @@ export interface MonitoringHealth {
 }
 
 export const getMonitoringHealth = async (): Promise<{ data: MonitoringHealth }> => {
-  return request.get('/monitoring/health')
+  return request.get('/monitoring/health', FIRST_SCREEN_REQUEST_CONFIG)
 }
