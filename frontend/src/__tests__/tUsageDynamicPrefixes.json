@@ -1,0 +1,13 @@
+{
+  "$comment": "t() 动态键前缀白名单（src/__tests__/tUsageKeysDefined.test.ts 校验）。以下形态的静态前缀段必须在此显式登记，未登记即红：① 反引号模板 t(`prefix.${expr}`)；② 前缀拼接 t('prefix.' + expr)。登记前缀须指向 zh 中枢存在的对象节点（域名改名/删除后登记失效即红）。新增动态调用请登记并随 PR 评审；条目不再被任何调用引用时测试会给出清理提示。前缀为空的完全动态键（t(`${x}`)）无静态段可护，不在此列。",
+  "prefixes": [
+    "agentReplay.",
+    "agentTasks.",
+    "artifacts.kind.",
+    "scheduler.cron.months.",
+    "scheduler.cron.weekdays.",
+    "scheduler.lastStatus.",
+    "slashCmd.desc.",
+    "slashCmd.tpl."
+  ]
+}
