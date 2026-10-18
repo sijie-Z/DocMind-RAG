@@ -178,17 +178,23 @@ async def test_activation_requires_admin_and_is_audited():
 
 
 @pytest.mark.asyncio
-async def test_creator_can_edit_own_prompt_with_unchanged_is_active():
-    """前端编辑表单会回传未变化的 is_active=True，不得被误判为激活而 403。"""
+async def test_creator_can_edit_own_draft_prompt_with_unchanged_is_active():
+    """前端编辑表单会回传未变化的 is_active，不得被误判为激活而 403。
+
+    B4（评审 B4-02）：组织模板一旦被管理员激活，创建者也不得再改（草稿态才由
+    创建者维护）；因此本用例使用草稿模板 p-A-inactive，验证「未变化的
+    is_active=False」不会触发激活门。
+    """
     engine, factory, ids = await _setup()
     try:
         r = await _call(
             factory, _user(2, 1, role="user"), "PUT",
-            f"/api/v1/prompts/{ids['p-A']}", json={"content": "updated", "is_active": True},
+            f"/api/v1/prompts/{ids['p-A-inactive']}",
+            json={"content": "updated", "is_active": False},
         )
         assert r.status_code == 200, r.text
         async with factory() as s:
-            assert (await s.get(PromptTemplate, ids["p-A"])).content == "updated"
+            assert (await s.get(PromptTemplate, ids["p-A-inactive"])).content == "updated"
     finally:
         await engine.dispose()
 
@@ -237,6 +243,10 @@ async def test_restore_and_version_detail_are_org_scoped():
             s.add(PromptTemplateVersion(
                 prompt_id=ids["p-B"], version=1, name="p-B", content="b1", creator_id=3,
             ))
+            s.add(PromptTemplateVersion(
+                prompt_id=ids["p-A-inactive"], version=1,
+                name="p-A-inactive", content="draft-v1", creator_id=2,
+            ))
             await s.commit()
 
         admin_a = _user(1, 1, role="admin")
@@ -245,10 +255,13 @@ async def test_restore_and_version_detail_are_org_scoped():
         r = await _call(factory, admin_a, "GET", f"/api/v1/prompts/{ids['p-B']}/version/1")
         assert r.status_code == 404, "跨组织版本详情必须 404"
 
-        # 同组织创建者可恢复自己的模板（零回归）
-        r = await _call(factory, _user(2, 1, role="user"), "POST", f"/api/v1/prompts/{ids['p-A']}/restore/1")
+        # 同组织创建者可恢复自己的草稿模板（B4-02：激活态仅管理员可改）
+        r = await _call(
+            factory, _user(2, 1, role="user"), "POST",
+            f"/api/v1/prompts/{ids['p-A-inactive']}/restore/1",
+        )
         assert r.status_code == 200, r.text
-        assert r.json()["content"] == "v1"
+        assert r.json()["content"] == "draft-v1"
     finally:
         await engine.dispose()
 

@@ -7,6 +7,7 @@ from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.models.manual import SystemManual
 from app.models.notification import Notification
 from app.models.organization import Organization, user_organization
+from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
 from app.models.prompt_version import PromptTemplateVersion
 from app.models.rbac import (
@@ -31,6 +32,7 @@ __all__ = [
     "AgentToolResult",
     "ToolCallStatus",
     "Organization",
+    "OrganizationSettings",
     "user_organization",
     "Document",
     "ChatSession",

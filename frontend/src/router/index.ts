@@ -174,6 +174,17 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        // B4（D5）：管理端「组织设置」——生效值 / 来源 / 是否需重启 + 审计。
+        path: 'organization-settings',
+        name: 'OrganizationSettings',
+        component: () => import('@/views/organizations/settings.vue'),
+        meta: {
+          title: 'menu.organizationSettings',
+          icon: 'organization',
+          requiresAdmin: true
+        }
+      },
+      {
         path: 'users',
         name: 'Users',
         component: () => import('@/views/users/index.vue'),

@@ -11,7 +11,6 @@ from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.core.config import settings
 from app.core.prometheus import RAG_RETRIEVAL_UNAVAILABLE
 from app.exceptions import AuthorizationError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
@@ -19,6 +18,9 @@ from app.models.prompt import PromptTemplate
 from app.rag.cache import SemanticCache
 from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError
 from app.services.memory_service import get_memory_system
+from app.services.organization_settings_service import (
+    organization_settings_service,
+)
 from app.services.rag_service import rag_service
 
 logger = logging.getLogger(__name__)
@@ -150,6 +152,7 @@ async def get_system_prompt(
     session: AsyncSession,
     strict_mode: bool,
     organization_id: int | None = None,
+    user_id: int | None = None,
 ) -> str | None:
     """选择 RAG 系统提示词。
 
@@ -158,6 +161,9 @@ async def get_system_prompt(
     - 无组织（如无组织用户的休闲 RAG 路径）：只允许系统内置模板。
     此前是全库按 updated_at 取最新，任意用户都能用自己的私有模板
     污染所有租户的 RAG 系统提示词（跨租户提示词注入）。
+
+    B4（D6）：个人模板只影响创建者本人——``scope='personal'`` 只在
+    ``creator_id == user_id`` 时参与选择，绝不污染同组织其他成员。
     """
     if strict_mode:
         return STRICT_MODE_PROMPT
@@ -169,7 +175,23 @@ async def get_system_prompt(
     if organization_id is None:
         scope = system_template
     else:
-        scope = or_(PromptTemplate.organization_id == organization_id, system_template)
+        if user_id is None:
+            org_visible = and_(
+                PromptTemplate.organization_id == organization_id,
+                PromptTemplate.scope == "organization",
+            )
+        else:
+            org_visible = and_(
+                PromptTemplate.organization_id == organization_id,
+                or_(
+                    PromptTemplate.scope == "organization",
+                    and_(
+                        PromptTemplate.scope == "personal",
+                        PromptTemplate.creator_id == user_id,
+                    ),
+                ),
+            )
+        scope = or_(org_visible, system_template)
 
     result = await session.execute(
         select(PromptTemplate)
@@ -232,6 +254,16 @@ async def run_rag_pipeline(
             conversation_id=conversation_id or "",
         ))
         return
+
+    # B4（D5）：组织级运行设定一次性解析（检索 top_k / 隐私策略 / 默认模型）。
+    # 未设置覆盖时各字段回退既有默认：聊天检索 8（文档绑定）/ 5（通用）、
+    # 隐私开关保持请求值、模型沿用进程级 Settings——不改变既有默认语义。
+    org_policy = await organization_settings_service.get_runtime_policy(
+        session, search_org_id
+    )
+    # 组织策略禁用隐私模式时，客户端 UI 已置灰；服务端仍强制关闭（纵深防御），
+    # 不信任客户端可伪造的 privacyMode=true。
+    privacy_mode = privacy_mode and org_policy.allow_privacy_mode
 
     conversation_id, bound_doc_ids = await get_or_create_session(
         session, conversation_id, user_id, user_content, organization_id,
@@ -307,7 +339,10 @@ async def run_rag_pipeline(
     if active_doc_ids:
         try:
             context_results, debug_info = await rag_service.search_knowledge_base(
-                user_content, search_org_id, 8, document_ids=active_doc_ids, debug=debug,
+                user_content, search_org_id,
+                org_policy.retrieval_top_k
+                if org_policy.retrieval_top_k is not None else 8,
+                document_ids=active_doc_ids, debug=debug,
             )
             if file_ids:
                 await bind_docs_to_session(session, conversation_id, active_doc_ids)
@@ -316,7 +351,10 @@ async def run_rag_pipeline(
     elif not strict_mode:
         try:
             context_results, debug_info = await rag_service.search_knowledge_base(
-                user_content, search_org_id, 5, debug=debug,
+                user_content, search_org_id,
+                org_policy.retrieval_top_k
+                if org_policy.retrieval_top_k is not None else 5,
+                debug=debug,
             )
         except RetrievalUnavailableError as e:
             retrieval_unavailable = e
@@ -365,7 +403,7 @@ async def run_rag_pipeline(
         system_prompt_override = RETRIEVAL_UNAVAILABLE_PROMPT
     else:
         system_prompt_override = await get_system_prompt(
-            session, strict_mode, organization_id=search_org_id
+            session, strict_mode, organization_id=search_org_id, user_id=user_id
         )
 
     memory_context = ""
@@ -399,6 +437,7 @@ async def run_rag_pipeline(
             system_prompt_override=system_prompt_override,
             enable_masking=privacy_mode,
             mask_mapping_sink=mask_mapping,
+            model_override=org_policy.default_model,
         ):
             full_response += chunk
             _emit(RAGEvent(
@@ -451,7 +490,8 @@ async def run_rag_pipeline(
         token_usage = rag_service.get_last_token_usage()
         if token_usage and token_usage[0] > 0:
             from app.api.v1.endpoints.token_usage import record_token_usage
-            model = settings.LOCAL_LLM_MODEL if settings.ENABLE_LOCAL_LLM else settings.DEEPSEEK_MODEL
+            # B4（D5）：用量记录与真实调用模型一致（组织默认模型或平台默认）。
+            model = org_policy.default_model
             await record_token_usage(
                 db=session,
                 user_id=user_id,

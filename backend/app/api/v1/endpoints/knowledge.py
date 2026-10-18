@@ -48,6 +48,9 @@ from app.schemas.knowledge import (
 from app.services.audit_service import audit_service
 from app.services.embedding_service import embedding_service
 from app.services.knowledge_service import knowledge_service
+from app.services.organization_settings_service import (
+    organization_settings_service,
+)
 
 
 async def _diagnose_empty_results(organization_id: int) -> tuple[str, int | None]:
@@ -198,11 +201,20 @@ async def search_knowledge(
 
         # 执行搜索
         _t0 = time.perf_counter()
+        # B4（D5）：top_k 解析优先级 = 显式请求 > 组织设置 > 既有平台默认。
+        # 未设置组织值时回退 settings.TOP_K_RESULTS（10），不改变既有默认语义。
+        if request.top_k is not None:
+            effective_top_k = request.top_k
+        else:
+            effective_top_k = (
+                await organization_settings_service.resolve_retrieval_top_k(
+                    db, effective_org_id, fallback=settings.TOP_K_RESULTS
+                )
+            )
         results = await knowledge_service.search_knowledge(
             query=request.query,
             organization_id=effective_org_id,
-            # 兜底与 schema 默认值同源（issue #242 接线）：默认 10，行为保持
-            top_k=request.top_k or settings.TOP_K_RESULTS,
+            top_k=effective_top_k,
             search_mode=requested_mode
         )
         elapsed = time.perf_counter() - _t0

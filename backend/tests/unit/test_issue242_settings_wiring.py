@@ -131,20 +131,21 @@ class TestChunkSizeWiring:
 
 
 class TestTopKResultsWiring:
-    def test_request_default_follows_settings(self, monkeypatch):
-        """settings.TOP_K_RESULTS 改值 → 搜索请求默认 top_k 跟随（接线前恒为硬编码 10）。"""
+    def test_request_default_is_none_so_org_setting_can_apply(self):
+        """B4/D5：请求默认 top_k 必须是 None。
+
+        此前 default_factory=lambda: settings.TOP_K_RESULTS 把平台默认固化成
+        「用户显式值」，组织设置（organization_settings.retrieval_top_k）永远
+        无法生效。改为 None 后由端点按「组织设置 > 平台默认」解析；未设置组织
+        值时仍回退 settings.TOP_K_RESULTS=10（真实消费断言见
+        tests/api/test_b4_organization_settings_api.py）。
+        """
         from app.schemas.knowledge import KnowledgeSearchRequest
 
-        monkeypatch.setattr(settings, "TOP_K_RESULTS", 17)
-        req = KnowledgeSearchRequest(query="q", organization_id=1)
-        assert req.top_k == 17, (
-            "TOP_K_RESULTS 未接线：搜索请求默认 top_k 仍是硬编码 10（issue #242）"
-        )
+        assert KnowledgeSearchRequest(query="q", organization_id=1).top_k is None
 
-    def test_default_value_unchanged(self):
-        """默认值保持 10（行为保持的锚点；chat 链路默认 5 不归本字段管）。"""
+    def test_platform_default_unchanged(self):
+        """平台默认值保持 10（行为保持的锚点；chat 链路默认 5 不归本字段管）。"""
         from app.core.config.ai import AISettings
-        from app.schemas.knowledge import KnowledgeSearchRequest
 
         assert AISettings.model_fields["TOP_K_RESULTS"].default == 10
-        assert KnowledgeSearchRequest(query="q", organization_id=1).top_k == settings.TOP_K_RESULTS

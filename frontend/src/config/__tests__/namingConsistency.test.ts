@@ -84,6 +84,7 @@ const NORMALIZED_PAGES: Record<string, string> = {
   Prompts: '../../views/prompts/index.vue',
   Users: '../../views/users/index.vue',
   Organizations: '../../views/organizations/index.vue',
+  OrganizationSettings: '../../views/organizations/settings.vue',
   Monitoring: '../../views/monitoring/index.vue',
   McpServers: '../../views/mcp-servers/index.vue',
   ScheduledTasks: '../../views/scheduled-tasks/index.vue',
