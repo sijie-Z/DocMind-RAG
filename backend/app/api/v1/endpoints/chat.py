@@ -525,6 +525,8 @@ async def websocket_endpoint(
                 current_conv_id = msg_data.get("conversationId") or conversation_id
                 file_ids = msg_data.get("fileIds", [])
                 payload_data = msg_data.get("payload", {})
+                # B3：payload.systemPrompt 是历史死字段（后端从未读取，前端已停发）。
+                # 旧客户端若仍携带，继续忽略；勿接线。
                 strict_mode = payload_data.get("strictMode", False)
                 privacy_mode = payload_data.get("privacyMode", True)
 
@@ -745,6 +747,8 @@ async def chat_stream_endpoint(
             user_content = body.content
             file_ids = body.fileIds or []
             payload_data = body.payload or {}
+            # B3：payload.systemPrompt 是历史死字段（后端从未读取，前端已停发）。
+            # 旧客户端若仍携带，继续忽略；勿接线。
             strict_mode = payload_data.get("strictMode", False)
             privacy_mode = payload_data.get("privacyMode", True)
 

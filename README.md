@@ -193,7 +193,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
 | 认证 | `/auth` | 注册、登录、刷新 Token、密码重置、登出 |
-| 用户管理 | `/users` | 用户 CRUD、个人资料、头像、会话管理、审计日志 |
+| 用户管理 | `/users` | 用户 CRUD、个人资料、头像、会话管理、审计日志（个人 API Key 端点已弃用） |
 | 文件管理 | `/files` | 上传/下载/删除，MinIO 存储，分块上传 |
 | 文档管理 | `/documents` | 文档解析、向量化、知识库索引、状态追踪 |
 | 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
@@ -205,7 +205,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | Token 用量 | `/token-usage` | 使用追踪 + 报告 |
 | 操作手册 | `/manuals` | 系统手册管理 |
 | 工作流 | `/workflows` | 工作流 CRUD、执行、调试、节点定义 |
-| LLM 配置 | `/llm-config` | 用户级模型配置 |
+| LLM 配置（已弃用） | `/llm-config` | 工作流全局配置入口已移除；端点标 deprecated，待统一 Provider 层落地后删除 |
 | 技能库 | `/curated-skills` | 技能发现与管理 |
 | Agent 记忆 | `/memory` | 短期/长期/工作记忆 CRUD、语义搜索 |
 | 智能 Agent | `/agent` | PER Agent 对话（SSE 流式）、工具调用、配置 |

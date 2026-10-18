@@ -23,12 +23,21 @@ import { getAuditLogs, getUserStats } from '@/api/user'
 import { getConversations } from '@/api/conversation'
 import { seedDemoData } from '@/api/demo'
 import zh from '@/locales/zh'
+import en from '@/locales/en'
+
+const { chartInstances } = vi.hoisted(() => ({
+  chartInstances: [] as Array<Record<string, ReturnType<typeof vi.fn>>>,
+}))
 
 vi.mock('@/utils/echarts', () => {
   class LinearGradient { constructor() { /* stub */ } }
   return {
     default: {
-      init: vi.fn(() => ({ setOption: vi.fn(), dispose: vi.fn(), resize: vi.fn() })),
+      init: vi.fn(() => {
+        const chart = { setOption: vi.fn(), dispose: vi.fn(), resize: vi.fn() }
+        chartInstances.push(chart)
+        return chart
+      }),
       graphic: { LinearGradient },
     },
   }
@@ -62,6 +71,7 @@ const SlotStub = (name: string) =>
   defineComponent({ name, setup(_, { slots }) { return () => h('div', slots.default?.()) } })
 
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
+const i18nEn = createI18n({ legacy: false, locale: 'en', messages: { en } })
 
 function mountAdmin() {
   return mount(AdminDashboard, {
@@ -77,6 +87,16 @@ function mountUser() {
   return mount(UserDashboard, {
     global: {
       plugins: [i18n],
+      mocks: { $router: { push: vi.fn() } },
+      stubs: { Tag: SlotStub('Tag') },
+    },
+  })
+}
+
+function mountUserEn() {
+  return mount(UserDashboard, {
+    global: {
+      plugins: [i18nEn],
       mocks: { $router: { push: vi.fn() } },
       stubs: { Tag: SlotStub('Tag') },
     },
@@ -112,6 +132,7 @@ enableAutoUnmount(afterEach)
 beforeEach(() => {
   vi.clearAllMocks()
   setActivePinia(createPinia())
+  chartInstances.length = 0
 
   vi.mocked(getAdminSummary).mockResolvedValue({
     data: { total_users: 3, total_sessions: 3, total_documents: 2, total_organizations: 2, active_users_24h: 0 },
@@ -249,5 +270,17 @@ describe('UserDashboard · 分块骨架（E6）', () => {
     expect(getUserStats).toHaveBeenCalledTimes(1)
     expect(getConversations).toHaveBeenCalledTimes(1)
     expect(getRAGStats).toHaveBeenCalledTimes(1)
+  })
+
+  it('en 语言下活动趋势星期为英文、会话计数走词条（旧实现硬编码中文，先红）', async () => {
+    const wrapper = mountUserEn()
+    await flushPromises()
+
+    const opt = chartInstances[chartInstances.length - 1].setOption.mock.calls[0][0] as {
+      xAxis: { data: string[] }
+    }
+    expect(opt.xAxis.data).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
+    expect(wrapper.text()).toContain('Recent conversations: 1')
+    expect(wrapper.text()).not.toContain('最近')
   })
 })

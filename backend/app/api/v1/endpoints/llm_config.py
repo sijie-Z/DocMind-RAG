@@ -6,6 +6,10 @@ Each config has a unique ID (uuid), provider, and optional is_default flag.
 Only one config per provider can be is_default at a time.
 
 Inspired by PaiAgent's llm_global_config database table.
+
+DEPRECATED（B3 死设定清理）：工作流编辑器入口与「使用全局配置」开关已移除，
+且工作流执行引擎从未消费本存储。全部端点保留并标记 deprecated，待 B4 的
+L1 Provider 统一层落地后删除；请勿新增调用方。
 """
 
 import json
@@ -179,7 +183,7 @@ async def _clear_default_for_provider(provider: str, configs: dict[str, dict[str
 # ── Endpoints ───────────────────────────────────────────────────────────
 
 
-@router.get("")
+@router.get("", deprecated=True)
 async def list_configs(
     current_user: User = Depends(get_current_user),
 ):
@@ -199,7 +203,7 @@ async def list_configs(
     }
 
 
-@router.get("/providers")
+@router.get("/providers", deprecated=True)
 async def list_providers(
     current_user: User = Depends(get_current_user),
 ):
@@ -213,7 +217,7 @@ async def list_providers(
     }
 
 
-@router.get("/default/{provider}")
+@router.get("/default/{provider}", deprecated=True)
 async def get_default_config(
     provider: str,
     current_user: User = Depends(get_current_user),
@@ -229,7 +233,7 @@ async def get_default_config(
     raise NotFoundError(f"Provider '{provider}' 没有默认配置")
 
 
-@router.get("/detail/{config_id}")
+@router.get("/detail/{config_id}", deprecated=True)
 async def get_config_detail(
     config_id: str,
     current_user: User = Depends(get_current_user),
@@ -244,7 +248,7 @@ async def get_config_detail(
     return {"success": True, "data": public}
 
 
-@router.post("")
+@router.post("", deprecated=True)
 async def create_config(
     body: LLMConfigCreate,
     current_user: User = Depends(get_current_user),
@@ -276,7 +280,7 @@ async def create_config(
     }
 
 
-@router.put("/{config_id}")
+@router.put("/{config_id}", deprecated=True)
 async def update_config(
     config_id: str,
     body: LLMConfigCreate,
@@ -307,7 +311,7 @@ async def update_config(
     }
 
 
-@router.patch("/{config_id}")
+@router.patch("/{config_id}", deprecated=True)
 async def patch_config(
     config_id: str,
     body: LLMConfigUpdate,
@@ -341,7 +345,7 @@ async def patch_config(
     }
 
 
-@router.delete("/{config_id}")
+@router.delete("/{config_id}", deprecated=True)
 async def delete_config(
     config_id: str,
     current_user: User = Depends(get_current_user),
@@ -368,7 +372,7 @@ async def delete_config(
     }
 
 
-@router.post("/{config_id}/default")
+@router.post("/{config_id}/default", deprecated=True)
 async def set_default_config(
     config_id: str,
     current_user: User = Depends(get_current_user),

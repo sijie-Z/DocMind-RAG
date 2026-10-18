@@ -193,7 +193,7 @@ Query enters
 | Module | Prefix | Description |
 |--------|--------|-------------|
 | Auth | `/auth` | Register, login, refresh token, password reset, logout |
-| Users | `/users` | User CRUD, profiles, avatars, session management, audit logs |
+| Users | `/users` | User CRUD, profiles, avatars, session management, audit logs (personal API-key endpoints deprecated) |
 | Files | `/files` | Upload/download/delete, MinIO storage, chunked upload |
 | Documents | `/documents` | Document parsing, vectorization, knowledge base indexing, status tracking |
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
@@ -205,7 +205,7 @@ Query enters
 | Token Usage | `/token-usage` | Usage tracking + reports |
 | Manuals | `/manuals` | System user guide management |
 | Workflows | `/workflows` | Workflow CRUD, execution, debugging, node definitions |
-| LLM Config | `/llm-config` | Per-user model configuration |
+| LLM Config (deprecated) | `/llm-config` | Global config entry removed from the workflow editor; endpoints marked deprecated pending the unified Provider layer |
 | Skills | `/curated-skills` | Skill discovery & management |
 | Agent Memory | `/memory` | Short/long/working memory CRUD, semantic search |
 | Agent | `/agent` | PER Agent conversations (SSE streaming), tool calls, configuration |

@@ -5,14 +5,13 @@ import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useVueFlow, MarkerType, type Connection } from '@vue-flow/core'
 import {
-  NIcon, NInput, NButton, NInputNumber, NCard, NCollapse, NCollapseItem,
+  NInput, NInputNumber, NCard, NCollapse, NCollapseItem,
   NDivider, NDrawer, NDrawerContent, NTimeline, NTimelineItem, NTag, NSpin, NProgress,
-  NModal, NForm, NGrid, NFormItem, NSelect, NSwitch, NList, NListItem, NEmpty, NPopconfirm, NDataTable, NPopover,
+  NModal, NForm, NGrid, NFormItem, NSelect, NSwitch, NList, NListItem, NEmpty, NPopconfirm, NPopover,
   useDialog,
-  type DataTableColumns
 } from 'naive-ui'
 import {
-  SaveOutline, PlayOutline, TrashOutline, ExpandOutline, SettingsOutline,
+  SaveOutline, PlayOutline, ExpandOutline, SettingsOutline,
   AppsOutline, LocateOutline, CheckmarkCircleOutline, CloseCircleOutline,
   HardwareChipOutline, ChatbubbleEllipsesOutline, SearchOutline, VolumeHighOutline,
   EnterOutline, ExitOutline, GitBranchOutline, CompassOutline, ServerOutline,
@@ -20,7 +19,6 @@ import {
   FolderOpenOutline, AddOutline, CloseOutline
 } from '@vicons/ionicons5'
 import { useWorkflowStore } from '@/stores/workflow'
-import { useLLMConfigStore, type LLMProviderConfig } from '@/stores/llmConfigStore'
 import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflowStream, getWorkflows, getNodeDefinitions, type Workflow, type WorkflowNode, type WorkflowEdge, type WorkflowConfig, type NodeDefinition } from '@/api/workflow'
 import { agentApi } from '@/api/agent'
 import { apiUnwrap } from '@/utils/apiUnwrap'
@@ -46,7 +44,6 @@ let route!: ReturnType<typeof useRoute>
 let router!: ReturnType<typeof useRouter>
 let message!: ReturnType<typeof useDedupedMessage>
 let workflowStore!: ReturnType<typeof useWorkflowStore>
-let llmConfigStore!: ReturnType<typeof useLLMConfigStore>
 let doFitView!: ReturnType<typeof useVueFlow>['fitView']
 let t!: ReturnType<typeof useI18n>['t']
 let dialog!: ReturnType<typeof useDialog>
@@ -191,7 +188,6 @@ const saveStatus = ref<SaveStatus>('unsaved')
 const executing = ref(false)
 const executingNodeId = ref<string | null>(null)
 const showDebugPanel = ref(false)
-const showLLMConfig = ref(false)
 const showLoadModal = ref(false)
 const workflowList = ref<{ id: number; name: string; created_at: string }[]>([])
 const loadingWorkflows = ref(false)
@@ -202,119 +198,6 @@ const engineTypeOptions = [
   { label: 'DAG 引擎', value: 'dag' as const },
   { label: 'LangGraph 引擎', value: 'langgraph' as const },
 ]
-
-// LLM 全局配置（表格式管理）
-const editingConfigId = ref<string | null>(null)
-
-const llmConfigForm = ref({
-  provider: 'deepseek' as string,
-  config_name: '',
-  api_key: '',
-  api_url: '',
-  model: '',
-  temperature: 0.7,
-  is_default: false,
-})
-
-function resetLlmConfigForm() {
-  editingConfigId.value = null
-  llmConfigForm.value = {
-    provider: 'deepseek',
-    config_name: '',
-    api_key: '',
-    api_url: '',
-    model: '',
-    temperature: 0.7,
-    is_default: false,
-  }
-}
-
-// 表格列定义
-const llmConfigColumns: DataTableColumns<LLMProviderConfig> = [
-  { title: '供应商', key: 'provider', width: 90, render: (row) => llmConfigStore.getProviderLabel(row.provider) },
-  { title: '配置名', key: 'config_name', ellipsis: { tooltip: true }, width: 130 },
-  { title: 'API URL', key: 'api_url', ellipsis: { tooltip: true }, width: 160 },
-  { title: '模型', key: 'model', width: 120 },
-  { title: '温度', key: 'temperature', width: 60 },
-  {
-    title: '默认', key: 'is_default', width: 60,
-    render: (row) => row.is_default ? h('span', { style: 'color: #10b981' }, '✓') : ''
-  },
-  {
-    title: '操作', key: 'actions', width: 140,
-    render: (row) => {
-      const buttons: any[] = [
-        h(NButton, { size: 'tiny', quaternary: true, onClick: () => editConfig(row) }, { icon: () => h(NIcon, null, h(SearchOutline as any)) }),
-        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => handleDeleteConfigById(row.id) }, { icon: () => h(NIcon, null, h(TrashOutline as any)) }),
-      ]
-      if (!row.is_default) {
-        buttons.splice(1, 0,
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => handleSetDefault(row.id) }, { default: () => '设默认' })
-        )
-      }
-      return h('div', { style: 'display:flex;gap:4px' }, buttons)
-    },
-  },
-]
-
-function editConfig(config: LLMProviderConfig) {
-  editingConfigId.value = config.id
-  llmConfigForm.value = {
-    provider: config.provider,
-    config_name: config.config_name,
-    api_key: config.api_key,
-    api_url: config.api_url,
-    model: config.model,
-    temperature: config.temperature,
-    is_default: config.is_default,
-  }
-}
-
-async function handleSaveConfig() {
-  if (!llmConfigForm.value.config_name.trim()) {
-    message.error('请输入配置名称')
-    return
-  }
-  if (!llmConfigForm.value.api_key.trim()) {
-    message.error('请输入 API Key')
-    return
-  }
-  try {
-    if (editingConfigId.value) {
-      await llmConfigStore.update(editingConfigId.value, llmConfigForm.value as any)
-      message.success('配置已更新')
-    } else {
-      await llmConfigStore.create(llmConfigForm.value as any)
-      message.success('配置已创建')
-    }
-    resetLlmConfigForm()
-  } catch {
-    message.error('保存失败')
-  }
-}
-
-async function handleDeleteConfigById(configId: string) {
-  try {
-    await llmConfigStore.remove(configId)
-    message.success('配置已删除')
-    if (editingConfigId.value === configId) resetLlmConfigForm()
-  } catch {
-    message.error('删除失败')
-  }
-}
-
-async function handleDeleteConfig() {
-  if (editingConfigId.value) await handleDeleteConfigById(editingConfigId.value)
-}
-
-async function handleSetDefault(configId: string) {
-  try {
-    await llmConfigStore.setDefault(configId)
-    message.success('已设为默认')
-  } catch {
-    message.error('设置失败')
-  }
-}
 
 // ── 自动保存定时器 ──
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
@@ -568,11 +451,16 @@ function getReferenceableParams(): { label: string; value: string }[] {
   return params
 }
 
-function getLlmNodeProvider(node: any): string {
-  // 通用 llm 节点用 node.data.provider；特定 provider 节点从类型推导
-  if (node?.type === 'llm') return node?.data?.provider || 'deepseek'
-  return (node?.type || '').replace('llm_', '')
-}
+// 通用 LLM 节点的供应商选项（B3：全局配置入口移除后不再依赖 /llm-config 端点；
+// 与后端 llm_config.SUPPORTED_PROVIDERS/PROVIDER_LABELS 同口径，排除通用 'llm'）
+const llmProviderOptions = [
+  { label: 'OpenAI', value: 'openai' },
+  { label: 'DeepSeek', value: 'deepseek' },
+  { label: '通义千问', value: 'qwen' },
+  { label: '智谱', value: 'zhipu' },
+  { label: '阶跃星辰', value: 'step' },
+  { label: 'AI平', value: 'ai_ping' },
+]
 
 function getNodeOutputFields(nodeType: string): string[] {
   switch (nodeType) {
@@ -630,8 +518,6 @@ const buildNode = (
     language: 'python', code: '', transformType: 'json_extract',
     inputParams: [], outputParams: [],  // 参数引用系统
     skillName: '', skillId: '',           // Skill 选择器
-    useGlobalConfig: false,               // LLM 全局配置引用
-    configProvider: '',                   // 全局配置的 provider
   }
   return {
     id: `${type}_${Date.now()}`,
@@ -804,7 +690,7 @@ const deleteSelectedNode = () => {
   }
 }
 
-// 自动保存防抖窗口（毫秒）——清空确认文案里的「N 秒」与此同源，避免行为变化后文案失真
+// 自动保存防抖窗口（毫秒）——空画布保护在防抖到点时判定并跳过写回
 const AUTO_SAVE_DELAY_MS = 500
 
 // 已持久化版本（source）的节点数：空画布保护判定「source 非空」的依据。
@@ -818,7 +704,7 @@ const clearCanvas = () => {
   // 只有用户手动点「保存」才会持久化空版本。
   dialog.warning({
     title: t('workflow.editor.clearConfirmTitle'),
-    content: t('workflow.editor.clearConfirmContent', { n: AUTO_SAVE_DELAY_MS / 1000 }),
+    content: t('workflow.editor.clearConfirmContent'),
     positiveText: t('workflow.editor.clearConfirmPositive'),
     negativeText: t('workflow.editor.clearConfirmNegative'),
     onPositiveClick: () => {
@@ -1149,7 +1035,6 @@ export function useWorkflowEditor() {
   router = useRouter()
   message = useDedupedMessage()
   workflowStore = useWorkflowStore()
-  llmConfigStore = useLLMConfigStore()
   doFitView = useVueFlow().fitView
   t = useI18n().t
   dialog = useDialog()
@@ -1241,9 +1126,6 @@ export function useWorkflowEditor() {
     // 并行加载所有初始化数据
     await Promise.all([
       loadNodeDefinitions(),
-      // 全局 LLM 配置加载失败不阻断编辑器主流程（与下方 skills 同策略），
-      // 也避免 onMounted 里留下未处理 rejection 触发全局 ErrorBoundary
-      llmConfigStore.fetchAll().catch(() => {}),
       loadSkills(),
     ])
 
@@ -1295,7 +1177,6 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   message,
   t,
   workflowStore,
-  llmConfigStore,
   doFitView,
   defaultEdgeOptions,
   nodeDefinitions,
@@ -1334,7 +1215,6 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   executing,
   executingNodeId,
   showDebugPanel,
-  showLLMConfig,
   showLoadModal,
   workflowList,
   loadingWorkflows,
@@ -1342,15 +1222,7 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   vueFlowRef,
   engineType,
   engineTypeOptions,
-  editingConfigId,
-  llmConfigForm,
-  resetLlmConfigForm,
-  llmConfigColumns,
-  editConfig,
-  handleSaveConfig,
-  handleDeleteConfigById,
-  handleDeleteConfig,
-  handleSetDefault,
+  llmProviderOptions,
   autoSaveTimer,
   nodes,
   edges,
@@ -1369,7 +1241,6 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   getNodeLabel,
   formatOutput,
   getReferenceableParams,
-  getLlmNodeProvider,
   getNodeOutputFields,
   validateTemplateParams,
   onDragStart,

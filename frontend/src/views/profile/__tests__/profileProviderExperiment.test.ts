@@ -44,8 +44,6 @@ vi.mock('@/api/user', async (importOriginal) => {
     updateUserProfile: vi.fn(),
     updatePassword: vi.fn(),
     uploadAvatar: vi.fn(),
-    generateApiKey: vi.fn(),
-    revokeApiKey: vi.fn(),
     revokeMySession: vi.fn(),
     // T10：providers 加载改走统一客户端，此处隔离真实 axios（原 fetch stub 已失效）
     getUserSettingsProviders: vi.fn().mockResolvedValue({

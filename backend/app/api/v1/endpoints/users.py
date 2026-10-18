@@ -1256,13 +1256,22 @@ async def update_password(
     except Exception as e:
         raise AppError(f"修改密码失败: {str(e)}")
 
-@router.post("/api-key", response_model=dict, summary="生成新的 API Key")
+@router.post(
+    "/api-key",
+    response_model=dict,
+    summary="生成新的 API Key（已弃用）",
+    deprecated=True,
+)
 async def generate_api_key(
     request: Request,
     current_user: User = Depends(auth_service.get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """为当前用户生成新的 API Key (如果已存在则覆盖)"""
+    """为当前用户生成新的 API Key (如果已存在则覆盖)。
+
+    DEPRECATED（B3 死设定清理）：个人 API Key 无任何消费方，Profile UI 入口
+    已移除。端点保留一个 minor 供既有集成迁移，随后删除；请勿新增调用方。
+    """
     try:
         new_key = f"sk-{secrets.token_urlsafe(32)}"
         current_user_obj: Any = current_user
@@ -1293,13 +1302,22 @@ async def generate_api_key(
         await db.rollback()
         raise AppError(f"生成 API Key 失败: {str(e)}")
 
-@router.delete("/api-key", response_model=dict, summary="撤销 API Key")
+@router.delete(
+    "/api-key",
+    response_model=dict,
+    summary="撤销 API Key（已弃用）",
+    deprecated=True,
+)
 async def revoke_api_key(
     request: Request,
     current_user: User = Depends(auth_service.get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """撤销当前用户的 API Key"""
+    """撤销当前用户的 API Key。
+
+    DEPRECATED（B3 死设定清理）：个人 API Key 无任何消费方，Profile UI 入口
+    已移除。端点保留一个 minor 供既有集成迁移，随后删除；请勿新增调用方。
+    """
     try:
         current_user_obj: Any = current_user
         current_user_obj.api_key = None

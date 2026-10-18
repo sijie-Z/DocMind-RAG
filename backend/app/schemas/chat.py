@@ -93,7 +93,13 @@ class ChatStreamRequest(BaseModel):
     content: str = Field(..., min_length=1, description="用户消息")
     conversationId: str | None = Field(None, description="会话 ID")
     fileIds: list[str] | None = Field(None, description="关联文件 ID 列表")
-    payload: dict | None = Field(None, description="额外参数（strict/privacy/sse/stream 等布尔开关）")
+    payload: dict | None = Field(
+        None,
+        description=(
+            "额外参数（strict/privacy/sse/stream 等布尔开关）。"
+            "历史字段 systemPrompt 已弃用（deprecated）：后端从未读取，继续忽略"
+        ),
+    )
     useAgent: bool = Field(False, description="使用 PER Agent 模式（替代默认 RAG 管线）")
     debug: bool = Field(False, description="启用检索调试模式（返回中间检索结果）")
 
