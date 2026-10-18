@@ -262,7 +262,11 @@
       <main class="flex-1 overflow-auto bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
         <router-view v-slot="{ Component, route }">
           <Transition name="page-slide" mode="out-in">
-            <div :key="route.fullPath" class="page-wrapper">
+            <!-- E11-③：key 用 route.name（而非 fullPath）——同一路由仅 query
+                 变化（chat 切会话、prompt/q 消费、agent 回放深链）不再整页
+                 卸载重挂，消除白屏闪烁与输入丢失；跨路由仍按 name 切换重挂。
+                 未命名路由回退 path（不存在 query 重复挂载需求）。 -->
+            <div :key="route.name ?? route.path" class="page-wrapper">
               <Suspense>
                 <component :is="Component" />
                 <template #fallback>
@@ -293,6 +297,7 @@ import type { MenuOption, DropdownOption } from 'naive-ui'
 import { NMenu, NIcon, NInput, NButton, NBadge, NPopover, NList, NListItem, NDropdown, NAvatar } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { SIDEBAR_MENU_GROUPS, USER_MENU_ITEMS, type MenuItemDef } from '@/config/menu'
+import { setLanguage } from '@/locales'
 import { LANGUAGES, isLanguageCode, type LanguageCode } from '@/utils/languages'
 import {
   ChatbubbleEllipsesOutline,
@@ -338,10 +343,15 @@ const languageOptions = LANGUAGES
 
 const currentLang = computed(() => locale.value)
 
-const switchLanguage = (lang: LanguageCode) => {
-  locale.value = lang
-  localStorage.setItem('language', lang)
-  userStore.updateSettings({ language: lang })
+// 语言包按需加载（E5）：先就绪词条包再切 locale——切换瞬间不裸键；
+// 动态 chunk 加载失败时保持当前语言（下次切换重试），不落半截状态。
+const switchLanguage = async (lang: LanguageCode) => {
+  try {
+    await setLanguage(lang)
+    userStore.updateSettings({ language: lang })
+  } catch {
+    // 词条包加载失败：保持当前语言
+  }
 }
 
 const userInfo = computed(() => userStore.userInfo)
@@ -453,11 +463,13 @@ onMounted(async () => {
       if (theme && ['light', 'dark', 'auto'].includes(theme)) {
         appStore.setTheme(theme as 'light' | 'dark' | 'auto')
       }
-      // Apply language from settings（守卫：非法语码不注入 locale）
+      // Apply language from settings（守卫：非法语码不注入 locale；
+      // E5：非默认语言包为动态 chunk，异步就绪后再切，失败保持当前语言）
       const lang = userStore.settings.language
       if (isLanguageCode(lang)) {
-        locale.value = lang
-        localStorage.setItem('language', lang)
+        void setLanguage(lang).catch(() => {
+          // 词条包加载失败：保持当前语言
+        })
       }
     })
   }

@@ -104,6 +104,8 @@ export default {
     recentActivity: 'Recent Activity',
     sessionRevoked: 'Device offline',
     revokeFailed: 'Failed to go offline',
+    revokeSession: 'Revoke device',
+    revokeSessionConfirm: 'Revoke this device? It will be signed out and must sign in again.',
     apiKeyRevokeFailed: 'Failed to revoke API Key',
     aiProviderExpTitle: 'Experimental · Not active yet',
     aiProviderExpDesc: 'Model choice is configured server-side (currently DeepSeek). The selection and API key here do not affect inference; saving is disabled to avoid confusion.',
@@ -163,6 +165,7 @@ export default {
     adjustSuccess: 'Reordered successfully',
     adjustFailed: 'Failed to reorder',
     batchDeleteSuccess: 'Batch deleted successfully',
+    batchDeleteConfirm: 'Delete the selected {count} organizations? This action cannot be undone.',
     deleteFailed: 'Failed to delete',
     loadDetailsFailed: 'Failed to load details',
     loadFailed: 'Failed to load',
@@ -211,6 +214,11 @@ export default {
     noHistory: 'No history',
     backToBottom: 'Back to latest',
     stopGenerating: 'Stop generating',
+    // E7 state visibility: history loading / thinking / stopped
+    loadingHistory: 'Loading conversation history...',
+    thinkingLabel: 'Thinking process',
+    generationStopped: 'Stopped',
+    stoppedHint: 'You can continue asking questions or regenerate the answer',
     suggestions: {
       quantum: 'Explain quantum computing',
       quantumDesc: 'Explain the basic principles in simple terms',
@@ -234,6 +242,7 @@ export default {
     removeFailedAttachments: 'Some attachments failed to parse, please remove or re-upload before asking',
     attachmentsNotReady: 'Attachments are not ready, please wait for parsing to complete',
     chatCleared: 'Chat history cleared',
+    clearConfirm: 'This will clear all messages in the current conversation and cannot be undone. Clear now?',
     clearFailed: 'Clear failed',
     unbindSuccess: 'Document binding removed, now in full knowledge base Q&A mode',
     unbindFailed: 'Failed to remove binding',
@@ -303,6 +312,9 @@ export default {
     promptTooLong: 'The prompt exceeds the {max}-character limit and was not applied. Please shorten it and try again.',
     sourcePreviewFailed: 'Failed to load the document. Please try again later.',
     promptDefaultName: 'Unnamed',
+    currentTemplate: 'Current template: {name}',
+    clearTemplate: 'Clear',
+    promptCleared: 'Prompt template cleared',
     backToConversations: 'Back to conversations',
     liked: 'Liked',
     disliked: 'Disliked',
@@ -356,6 +368,9 @@ export default {
     uploadList: 'Task List',
     noActiveTasks: 'No active tasks',
     clearFinished: 'Clear finished tasks',
+    cancelUpload: 'Cancel upload',
+    removeFromList: 'Remove from list',
+    uploadCancelled: 'Upload canceled',
     table: {
       name: 'File Name',
       size: 'Size',
@@ -438,7 +453,16 @@ export default {
     },
     backToHome: 'Back to Home',
     backToWorkbench: 'Go to Dashboard',
-    back: 'Go Back'
+    back: 'Go Back',
+    serviceUnavailable: {
+      title: 'Service Temporarily Unavailable',
+      subtitle: 'Cannot reach the server. Please try again later. You are still signed in.',
+      retry: 'Retry'
+    },
+    offlineBanner: {
+      message: 'Service temporarily unavailable; showing locally cached data',
+      retry: 'Retry'
+    }
   },
   login: {
     welcomeBack: 'Welcome Back',
@@ -658,7 +682,9 @@ export default {
     noResults: 'No results found',
     noResultsDesc: 'Try different keywords or adjust filters',
     fileContent: 'File Content',
-    searchFailed: 'Search failed'
+    searchFailed: 'Search failed',
+    askAIQuestion: 'About the file "{filename}": {query}',
+    askAIQuestionGeneric: 'Regarding the file "{filename}", please summarize its key points'
   },
   conversations: {
     title: 'Conversation History',
@@ -699,12 +725,33 @@ export default {
       clearConfirmPositive: 'Clear',
       clearConfirmNegative: 'Cancel',
       emptyCanvasAutoSaveBlocked: 'The canvas is empty, so auto-save was skipped to protect the saved version. To save an empty canvas, click "Save" manually.',
+      saveSuccess: 'Workflow saved',
+      saveFailed: 'Save failed',
+      autoSaveFailed: 'Auto-save failed; your changes are not saved. Click the save status to retry.',
+      saveStatusUnsaved: 'Unsaved',
+      saveStatusSaving: 'Saving',
+      saveStatusSaved: 'Saved',
+      saveStatusError: 'Save failed',
+      saveRetry: 'Retry',
+      saveRetryHint: 'Save failed — click to retry',
+      leaveConfirmTitle: 'Leave the editor',
+      leaveConfirmContent: 'This workflow has unsaved changes that will be lost if you leave. Leave anyway?',
+      leaveConfirmPositive: 'Leave',
+      leaveConfirmNegative: 'Cancel',
+      togglePanel: 'Properties panel',
+      clickToAddHint: 'Click or drag to add a node',
     },
   },
   notifications: {
     markAllRead: 'Mark all read',
   },
 
+  agent: {
+    clearConfirmTitle: 'Clear current session messages',
+    clearConfirm: 'This only clears the messages displayed for the current session. Other sessions are not affected. Clear now?',
+    deleteSessionConfirmTitle: 'Delete current session',
+    deleteSessionConfirm: 'Session "{title}" and its chat history will be deleted. This action cannot be undone. Delete now?',
+  },
   agentReplay: {
     entry: 'View Replay',
     title: 'Run Replay',
@@ -873,6 +920,8 @@ export default {
       query: 'Input',
       error: 'Last error',
       unavailable: 'Result unavailable (task missing or not visible to you)',
+      refresh: 'Refresh result',
+      refreshed: 'Result refreshed',
       taskState: {
         pending: 'Pending',
         running: 'Running',
@@ -971,6 +1020,7 @@ export default {
   },
   router: {
     notFound: 'Page Not Found',
+    serviceUnavailable: 'Service Temporarily Unavailable',
     welcome: 'Welcome',
     login: 'Login',
     register: 'Register',

@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
-import { NMessageProvider, NSpin, NButton, NTooltip, NIcon } from 'naive-ui'
+import { NMessageProvider, NDialogProvider, NSpin, NButton, NTooltip, NIcon } from 'naive-ui'
 import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 import zh from '@/locales/zh'
@@ -42,7 +42,7 @@ vi.mock('@/api/agent', () => ({ agentApi: apiMocks }))
 const i18n = createI18n({ legacy: false, locale: 'zh', fallbackLocale: 'zh', messages: { zh } })
 
 const Host = defineComponent({
-  render: () => h(NMessageProvider, null, { default: () => h(AgentView) }),
+  render: () => h(NMessageProvider, null, { default: () => h(NDialogProvider, null, { default: () => h(AgentView) }) }),
 })
 
 const stubs = {

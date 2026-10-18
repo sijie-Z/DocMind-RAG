@@ -176,10 +176,11 @@
 
     <!-- 运行结果（Agent 任务）弹窗 -->
     <n-modal
-      v-model:show="resultModal.show"
+      :show="resultModal.show"
       :title="t('scheduler.result.title')"
       preset="card"
       class="max-w-xl rounded-3xl shadow-2xl"
+      @update:show="onResultShowChange"
     >
       <n-spin :show="resultModal.loading">
         <div v-if="resultModal.error" class="py-4">
@@ -208,12 +209,28 @@
           </n-descriptions-item>
         </n-descriptions>
       </n-spin>
+      <template #footer>
+        <div class="flex justify-end">
+          <n-button
+            round
+            secondary
+            class="result-refresh-btn"
+            :loading="resultModal.refreshing"
+            @click="refreshResult"
+          >
+            <template #icon>
+              <n-icon><refresh-outline /></n-icon>
+            </template>
+            {{ t('scheduler.result.refresh') }}
+          </n-button>
+        </div>
+      </template>
     </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref, type VNode } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, reactive, ref, type VNode } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   NButton,
@@ -466,31 +483,111 @@ function handleDelete(task: ScheduledTask) {
 
 // ── 运行结果（Agent 任务）弹窗 ────────────────────────────────────────
 
+/** 运行中任务的结果自动轮询间隔（关闭弹窗即停、后台标签页跳过）。 */
+const RESULT_POLL_INTERVAL_MS = 3000
+
 const resultModal = reactive({
   show: false,
   loading: false,
+  refreshing: false,
   error: '',
   taskId: '',
   view: null as AgentTaskView | null,
 })
 
+/** 非终止态才值得轮询；完成/失败/取消等都已是终局，不再变化。 */
+function isRunningTaskState(state: AgentTaskState): boolean {
+  return !['completed', 'failed', 'cancelled', 'rejected', 'abandoned'].includes(state)
+}
+
+let resultPollTimer: ReturnType<typeof setInterval> | null = null
+// 请求代际：关闭弹窗 / 新一轮拉取会让在途轮询响应作废，防止旧数据回写
+let resultFetchSeq = 0
+
+function stopResultPolling() {
+  if (resultPollTimer !== null) {
+    clearInterval(resultPollTimer)
+    resultPollTimer = null
+  }
+}
+
+function startResultPolling() {
+  stopResultPolling()
+  resultPollTimer = setInterval(() => {
+    // 后台标签页暂停：不烧请求；回到前台后下一拍自然续上
+    if (document.visibilityState === 'hidden') return
+    void loadResultTask('poll')
+  }, RESULT_POLL_INTERVAL_MS)
+}
+
+type ResultFetchMode = 'initial' | 'manual' | 'poll'
+
+async function loadResultTask(mode: ResultFetchMode): Promise<AgentTaskView | null> {
+  const seq = ++resultFetchSeq
+  if (mode === 'initial') {
+    resultModal.loading = true
+    resultModal.error = ''
+  } else if (mode === 'manual') {
+    resultModal.refreshing = true
+  }
+  try {
+    const res = await agentApi.getTask(resultModal.taskId)
+    if (seq !== resultFetchSeq) return null // 过期响应（弹窗已关或已被更新的一轮取代）
+    // GET /agent/tasks/{id} → {success, data: <AgentTaskView>} → apiUnwrap 解一层
+    const view = apiUnwrap<AgentTaskView>(res)
+    resultModal.view = view
+    resultModal.error = '' // 手动刷新可把"不可用"恢复为正常结果
+    if (!isRunningTaskState(view.state)) stopResultPolling()
+    if (mode === 'manual') message.success(t('scheduler.result.refreshed'))
+    return view
+  } catch (error: unknown) {
+    if (seq !== resultFetchSeq) return null
+    if (mode === 'initial') {
+      // agent 任务端点有独立的 org/归属闸门：读不到就如实说"不可用"
+      resultModal.error = extractApiError(error, t('scheduler.result.unavailable'))
+    } else if (mode === 'manual') {
+      // 手动刷新失败保留旧内容，toast 如实提示
+      message.error(extractApiError(error, t('scheduler.result.unavailable')))
+    }
+    // poll 失败静默：不打断展示，下一拍重试
+    return null
+  } finally {
+    if (seq === resultFetchSeq) {
+      if (mode === 'initial') resultModal.loading = false
+      if (mode === 'manual') resultModal.refreshing = false
+    }
+  }
+}
+
 async function openResult(taskId: string) {
+  stopResultPolling()
   resultModal.show = true
-  resultModal.loading = true
   resultModal.error = ''
   resultModal.taskId = taskId
   resultModal.view = null
-  try {
-    const res = await agentApi.getTask(taskId)
-    // GET /agent/tasks/{id} → {success, data: <AgentTaskView>} → apiUnwrap 解一层
-    resultModal.view = apiUnwrap<AgentTaskView>(res)
-  } catch (error: unknown) {
-    // agent 任务端点有独立的 org/归属闸门：读不到就如实说"不可用"
-    resultModal.error = extractApiError(error, t('scheduler.result.unavailable'))
-  } finally {
-    resultModal.loading = false
+  const view = await loadResultTask('initial')
+  if (resultModal.show && view && isRunningTaskState(view.state)) {
+    startResultPolling()
   }
 }
+
+/** 手动刷新：一次点击只发一轮拉取；loading 期间按钮自身给进行中反馈。 */
+function refreshResult() {
+  void loadResultTask('manual')
+}
+
+/** 弹窗关闭（关闭按钮 / 遮罩 / 程序化）→ 立即停轮询并作废在途响应。 */
+function onResultShowChange(show: boolean) {
+  resultModal.show = show
+  if (!show) {
+    stopResultPolling()
+    resultFetchSeq++
+  }
+}
+
+onBeforeUnmount(() => {
+  stopResultPolling()
+})
 
 function taskStateText(state: AgentTaskState): string {
   const key = `scheduler.result.taskState.${state}`
