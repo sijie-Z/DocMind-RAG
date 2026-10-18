@@ -14,6 +14,32 @@ from app.rag.errors import EvalJudgeUnavailableError
 
 logger = logging.getLogger(__name__)
 
+# Judge prompts are capped so a single oversized retrieval batch cannot blow up
+# prompt cost / latency. Characters, not tokens — no tokenizer dependency here.
+MAX_CONTEXT_CHARS = 1200
+
+
+def _build_context_str(context: list[dict[str, Any]]) -> str:
+    """Join retrieved context into judge-prompt text, capped at MAX_CONTEXT_CHARS.
+
+    When truncation happens, the dropped fraction is logged so prompt-cost
+    incidents stay observable instead of silently degrading evaluation quality.
+    """
+    original = "\n\n".join(
+        f"[{i+1}] {item.get('snippet') or item.get('text', '')}"
+        for i, item in enumerate(context)
+    )
+    if len(original) <= MAX_CONTEXT_CHARS:
+        return original
+    truncated_ratio = round(1.0 - MAX_CONTEXT_CHARS / len(original), 4)
+    logger.info(
+        "RAG eval context truncated: original=%d chars, kept=%d chars, truncated_ratio=%.4f",
+        len(original),
+        MAX_CONTEXT_CHARS,
+        truncated_ratio,
+    )
+    return original[:MAX_CONTEXT_CHARS]
+
 
 @dataclass
 class EvalResult:
@@ -167,10 +193,7 @@ class RAGEvaluator:
         self, question: str, answer: str, context: list[dict[str, Any]]
     ) -> tuple[float, str]:
         """Score whether the answer is faithful to the retrieved context."""
-        context_str = "\n\n".join(
-            f"[{i+1}] {item.get('snippet') or item.get('text', '')}"
-            for i, item in enumerate(context)
-        )
+        context_str = _build_context_str(context)
         prompt = FAITHFULNESS_PROMPT.format(
             context=context_str, question=question, answer=answer
         )
@@ -185,10 +208,7 @@ class RAGEvaluator:
         self, question: str, context: list[dict[str, Any]]
     ) -> tuple[float, str]:
         """Score whether retrieved documents are relevant to the question."""
-        context_str = "\n\n".join(
-            f"[{i+1}] {item.get('snippet') or item.get('text', '')}"
-            for i, item in enumerate(context)
-        )
+        context_str = _build_context_str(context)
         prompt = CONTEXT_PRECISION_PROMPT.format(
             question=question, context=context_str
         )
