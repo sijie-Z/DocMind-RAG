@@ -10,7 +10,7 @@
     "components/agent/ThinkingStream.vue": 4,
     "components/agent/ToolCallCard.vue": 4,
     "components/common/ErrorBoundary.vue": 9,
-    "layouts/index.vue": 3,
+    "layouts/index.vue": 2,
     "stores/user.ts": 3,
     "utils/agentEventLabels.ts": 3,
     "utils/format.ts": 8,
