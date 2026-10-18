@@ -144,8 +144,11 @@ async def _clear_dangling_last_task_ids(
         for task in tasks:
             try:
                 await db.refresh(task)
-            except Exception:
-                pass
+            except Exception as refresh_exc:
+                logger.warning(
+                    f"定时任务 {getattr(task, 'id', '?')} 对账失败后属性恢复失败"
+                    f"（该行响应可能不可序列化）: {refresh_exc}"
+                )
         return
     # Core UPDATE 不走 ORM 属性同步（updated_at 由库侧 onupdate 生成），
     # 在响应序列化（同步上下文）前异步刷新，避免属性过期触发 MissingGreenlet。
