@@ -722,4 +722,77 @@ const features = computed(() => [
   .hero-stats { gap: 20px; }
   .footer-inner { flex-direction: column; gap: 12px; text-align: center; }
 }
+
+/* ===== H5 暗色适配（跟随全站 html.dark；扁平选择器，勿用嵌套块） =====
+   亮色令牌在 .landing 上定义，暗色只重定义令牌变量；
+   顶栏渐变/主按钮/品牌图标等硬编码亮底另行覆盖。 */
+html.dark .landing {
+  --c-bg: #0b1220;
+  --c-surface: #111c2e;
+  --c-border: rgba(148, 163, 184, 0.14);
+  --c-border-hover: rgba(148, 163, 184, 0.3);
+  --c-text: #e2e8f0;
+  --c-text-secondary: #cbd5e1;
+  --c-text-muted: #94a3b8;
+  --c-accent: #60a5fa;
+  --c-accent-light: rgba(96, 165, 250, 0.12);
+  --c-accent-border: rgba(96, 165, 250, 0.32);
+  --c-accent-bg: rgba(96, 165, 250, 0.08);
+  --c-icon-bg: #1e293b;
+  --c-icon-fg: #cbd5e1;
+}
+
+html.dark .nav {
+  background: rgba(11, 18, 32, 0.82);
+}
+
+html.dark .btn-ghost:hover {
+  background: rgba(148, 163, 184, 0.1);
+}
+
+html.dark .brand-icon {
+  background: #2563eb;
+}
+
+html.dark .btn-primary-sm {
+  background: #2563eb;
+}
+
+html.dark .btn-primary {
+  background: #2563eb;
+  box-shadow: 0 4px 24px rgba(37, 99, 235, 0.35);
+}
+
+html.dark .btn-primary:hover {
+  box-shadow: 0 8px 32px rgba(37, 99, 235, 0.45);
+}
+
+html.dark .btn-outline:hover {
+  background: #1e293b;
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+/* 渐变标题：亮色渐变 #1e40af 起笔在深底上过暗，暗色换亮蓝系 */
+html.dark .hero-title-accent {
+  background-image: linear-gradient(135deg, #60a5fa, #93c5fd, #60a5fa);
+  background-size: 200% 200%;
+}
+
+html.dark .hero-grid {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+}
+
+html.dark .section-alt {
+  background: rgba(148, 163, 184, 0.04);
+}
+
+html.dark .step-number {
+  color: rgba(148, 163, 184, 0.1);
+}
+
+html.dark .step-card:hover {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
 </style>

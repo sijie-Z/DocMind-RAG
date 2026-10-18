@@ -3,6 +3,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch, h, resolveComponent } from 'vue'
 import { useDialog, NButton } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
+import { useConfirmDangerousAction } from '@/utils/confirm'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -32,7 +33,8 @@ import {
 import { getUserProfile, getUserStats, updateUserProfile, updatePassword, uploadAvatar, getUserActivities, generateApiKey as apiGenerateKey, revokeApiKey as apiRevokeKey, getMySessions, revokeMySession, getMyActivityLogs, getUserSettingsProviders } from '@/api/user'
 import type { Activity, UserSession, UserAuditLog } from '@/api/user'
 import { formatDate } from '@/utils/format'
-import { LANGUAGES } from '@/utils/languages'
+import { LANGUAGES, isLanguageCode } from '@/utils/languages'
+import { setLanguage } from '@/locales'
 import type { UploadCustomRequestOptions } from 'naive-ui'
 
 export function useProfilePage() {
@@ -76,6 +78,7 @@ interface UserStats {
 
 const message = useDedupedMessage()
 const dialog = useDialog()
+const confirmDangerousAction = useConfirmDangerousAction()
 const { t, locale } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
@@ -425,9 +428,12 @@ const languageOptions = LANGUAGES.map((l) => ({
   value: l.value,
 }))
 
+// E5：语言包按需加载——先就绪词条包再切 locale（非法语码不注入）
 const handleLanguageChange = (val: string) => {
-  localStorage.setItem('language', val)
-  locale.value = val
+  if (!isLanguageCode(val)) return
+  void setLanguage(val).catch(() => {
+    // 词条包加载失败：保持当前语言
+  })
 }
 
 // Settings form
@@ -496,9 +502,12 @@ const handleSaveSettings = async () => {
   try {
     // Apply theme immediately
     appStore.setTheme(settingsForm.theme as 'light' | 'dark' | 'auto')
-    // Apply language immediately
-    locale.value = settingsForm.language
-    localStorage.setItem('language', settingsForm.language)
+    // Apply language immediately（E5：先就绪词条包再切，失败保持当前语言）
+    if (isLanguageCode(settingsForm.language)) {
+      await setLanguage(settingsForm.language).catch(() => {
+        // 词条包加载失败：保持当前语言
+      })
+    }
     // Save to backend
     // W2-T7：不再携带 preferences.ai_provider——后端全局无任何服务消费该字段
     // （推理只走 .env 全局 DeepSeek），且 GET /settings/providers 回读的 api_key
@@ -846,6 +855,12 @@ const formatAuditAction = (action?: string) => {
 
 const handleRevokeSession = async (sessionId: number) => {
   if (!sessionId) return
+  // E2：下线设备不可逆（需重新登录），先经统一二次确认；取消零副作用
+  const confirmed = await confirmDangerousAction(
+    t('profile.revokeSession'),
+    t('profile.revokeSessionConfirm'),
+  )
+  if (!confirmed) return
   try {
     await revokeMySession(sessionId)
     message.success(t('profile.sessionRevoked') || '设备已下线')
@@ -900,22 +915,9 @@ const handleChangePassword = async () => {
 }
 
 // API Key 逻辑：生成 / 重生成 / 撤销三个操作均须先经确认弹窗
-const confirmApiKeyAction = (title: string, content: string): Promise<boolean> =>
-  new Promise((resolve) => {
-    dialog.warning({
-      title,
-      content,
-      positiveText: t('common.confirm'),
-      negativeText: t('common.cancel'),
-      onPositiveClick: () => resolve(true),
-      onNegativeClick: () => resolve(false),
-      onClose: () => resolve(false),
-    })
-  })
-
 const generateApiKey = async () => {
   const isRegenerate = Boolean(apiKey.value)
-  const confirmed = await confirmApiKeyAction(
+  const confirmed = await confirmDangerousAction(
     isRegenerate ? t('profile.regenerateKey') : t('profile.generateKey'),
     isRegenerate ? t('profile.apiKeyRegenerateConfirm') : t('profile.apiKeyGenerateConfirm'),
   )
@@ -937,7 +939,7 @@ const generateApiKey = async () => {
 }
 
 const revokeApiKey = async () => {
-  const confirmed = await confirmApiKeyAction(
+  const confirmed = await confirmDangerousAction(
     t('profile.revokeKey'),
     t('profile.apiKeyRevokeConfirm'),
   )

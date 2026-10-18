@@ -49,10 +49,12 @@ const SlotStub = (name: string) =>
 
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
 
-function mountView() {
+type I18nInstance = ReturnType<typeof createI18n>
+
+function mountView(i18nInstance: I18nInstance = i18n as unknown as I18nInstance) {
   return mount(AdminDashboard, {
     global: {
-      plugins: [i18n],
+      plugins: [i18nInstance],
       mocks: { $router: { push: vi.fn() } },
       stubs: { Tag: SlotStub('Tag') },
     },
@@ -179,8 +181,8 @@ describe('AdminDashboard · 今日请求真实口径（C1）', () => {
   })
 })
 
-describe('AdminDashboard · 健康卡接真实 ES 状态（B6）', () => {
-  it('degraded + ES red → 卡显示「异常」与 ES: red（旧硬编码恒"正常/ok"）', async () => {
+describe('AdminDashboard · 健康卡接真实 ES 状态（B6/J4）', () => {
+  it('degraded + ES red → 卡显示「异常」，ES 状态词条化为中文（不裸露 red）', async () => {
     vi.mocked(getMonitoringHealth).mockResolvedValue({
       data: {
         status: 'degraded',
@@ -193,20 +195,96 @@ describe('AdminDashboard · 健康卡接真实 ES 状态（B6）', () => {
     await flushPromises()
     await nextTick()
 
-    expect(wrapper.text()).toContain('异常')
-    expect(wrapper.text()).toContain('ES: red')
-    expect(wrapper.text()).not.toContain('ES: ok')
-    expect(wrapper.text()).not.toContain('正常')
+    const text = wrapper.text()
+    expect(text).toContain('异常')
+    expect(text).toContain('Elasticsearch: 异常')
+    expect(text).not.toMatch(/\b(green|yellow|red|unknown|disconnected)\b/)
+    expect(text).not.toContain('ES: ok')
+    expect(text).not.toContain('正常')
   })
 
-  it('healthy + ES green →「正常」与 ES: green（真值而非硬编码 ok）', async () => {
+  it('healthy + ES green →「正常」词条（真值而非硬编码 ok）', async () => {
     const wrapper = mountView()
     await flushPromises()
     await nextTick()
 
-    expect(wrapper.text()).toContain('正常')
-    expect(wrapper.text()).toContain('ES: green')
-    expect(wrapper.text()).not.toContain('ES: ok')
+    const text = wrapper.text()
+    expect(text).toContain('Elasticsearch: 正常')
+    expect(text).not.toMatch(/\b(green|red|unknown|disconnected)\b/)
+    expect(text).not.toContain('ES: ok')
+  })
+})
+
+describe('AdminDashboard · J4 状态词走词条 + RAG 卡填充', () => {
+  const sentinelMessages = {
+    zh: {
+      ...zh,
+      dashboard: {
+        ...zh.dashboard,
+        esLabel: '搜索引擎',
+        esHealthYellow: '黄色哨兵',
+        esHealthUnknown: '未知哨兵',
+        esHealthDisconnected: '断开哨兵',
+      },
+    },
+  }
+  const sentinelI18n = createI18n({ legacy: false, locale: 'zh', messages: sentinelMessages })
+
+  it('ES 状态值经 i18n 词条渲染（自定义词条哨兵生效，证明非硬编码映射）', async () => {
+    vi.mocked(getMonitoringHealth).mockResolvedValue({
+      data: {
+        status: 'healthy',
+        timestamp: '',
+        services: { database: 'connected', redis: 'connected', elasticsearch: 'yellow' },
+      },
+    } as never)
+
+    const wrapper = mountView(sentinelI18n as unknown as I18nInstance)
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('搜索引擎: 黄色哨兵')
+  })
+
+  it('真实值域逐一映射：green/yellow/red/unknown/disconnected 均无英文状态词裸露', async () => {
+    const cases: Array<[string, string]> = [
+      ['green', '正常'],
+      ['yellow', '告警'],
+      ['red', '异常'],
+      ['unknown', '未知'],
+      ['disconnected', '未连接'],
+    ]
+    for (const [raw, localized] of cases) {
+      vi.mocked(getMonitoringHealth).mockResolvedValue({
+        data: {
+          status: raw === 'green' ? 'healthy' : 'degraded',
+          timestamp: '',
+          services: { database: 'connected', redis: 'connected', elasticsearch: raw },
+        },
+      } as never)
+
+      const wrapper = mountView()
+      await flushPromises()
+      await nextTick()
+
+      const text = wrapper.text()
+      expect(text).toContain(`Elasticsearch: ${localized}`)
+      expect(text).not.toMatch(/\b(green|yellow|red|unknown|disconnected)\b/)
+    }
+  })
+
+  it('RAG 卡纵向填充：卡片与主体为 flex 列、图区 flex-1（消除等高栅格下的空白块）', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    const card = wrapper.get('[data-testid="rag-card"]')
+    expect(card.classes()).toContain('flex')
+    expect(card.classes()).toContain('flex-col')
+
+    const chart = wrapper.get('[data-testid="rag-chart"]')
+    expect(chart.classes()).toContain('flex-1')
+    expect(chart.classes()).not.toContain('h-28')
   })
 })
 

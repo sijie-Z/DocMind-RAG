@@ -22,6 +22,8 @@ export default {
     saveSuccess: '保存成功',
     deleteSuccess: '删除成功',
     refresh: '刷新',
+    retry: '重试',
+    tryAgain: '请稍后重试',
     actions: '操作',
     noDescription: '暂无描述',
   },
@@ -106,6 +108,8 @@ export default {
     recentActivity: '最近动态',
     sessionRevoked: '设备已下线',
     revokeFailed: '下线失败',
+    revokeSession: '下线设备',
+    revokeSessionConfirm: '确定要下线该设备吗？下线后该设备将退出登录，需要重新登录。',
     apiKeyRevokeFailed: '撤销 API Key 失败',
     // W2-T7：LLM Provider 区块诚实标注（后端无消费方，推理走服务端全局配置）
     aiProviderExpTitle: '实验功能 · 暂不生效',
@@ -166,6 +170,7 @@ export default {
     adjustSuccess: '调整成功',
     adjustFailed: '调整失败',
     batchDeleteSuccess: '批量删除成功',
+    batchDeleteConfirm: '确定要删除选中的 {count} 个组织吗？此操作不可恢复。',
     deleteFailed: '删除失败',
     loadDetailsFailed: '加载详情失败',
     loadFailed: '加载失败',
@@ -215,6 +220,11 @@ export default {
     noHistory: '暂无会话历史',
     backToBottom: '回到最新消息',
     stopGenerating: '停止生成',
+    // E7 三态可见性：历史加载 / thinking 折叠区 / 已停止
+    loadingHistory: '正在加载历史消息...',
+    thinkingLabel: '思考过程',
+    generationStopped: '已停止',
+    stoppedHint: '可继续提问或重新生成',
     suggestions: {
       quantum: '解释量子计算',
       quantumDesc: '用简单的语言解释量子计算的基本原理',
@@ -239,6 +249,7 @@ export default {
     attachmentsNotReady: '附件尚未就绪，请等待解析完成后再使用附件',
     chatCleared: '对话记录已清空',
     clearFailed: '清空失败',
+    clearConfirm: '将清空当前对话的全部消息记录，且不可恢复。确定清空吗？',
     unbindSuccess: '已解除文档绑定，现在是全库问答模式',
     unbindFailed: '解除绑定失败',
     // File upload status labels (shown in ChatInput)
@@ -308,6 +319,10 @@ export default {
     promptTooLong: '提示词超过 {max} 字上限，未应用。请精简后再试。',
     sourcePreviewFailed: '原文加载失败，请稍后重试',
     promptDefaultName: '未命名',
+    // E11-②：已应用提示词模板的常驻标识（聊天头部）
+    currentTemplate: '当前模板：{name}',
+    clearTemplate: '清除',
+    promptCleared: '已清除提示词模板',
     backToConversations: '返回对话列表',
     liked: '已点赞',
     disliked: '已点踩',
@@ -343,6 +358,11 @@ export default {
     uploadFirst: '上传第一个文件',
     empty: '暂无知识库文件',
     emptyDesc: '暂无知识库',
+    loadFailed: '加载知识库失败',
+    loadFailedDesc: '请稍后重试，或检查网络连接',
+    searchEmptyTitle: '未找到匹配的文档',
+    searchEmptyDesc: '没有与「{query}」匹配的文档，换个关键词试试',
+    clearSearch: '清除搜索',
     uploadSuccess: '上传成功',
     uploadFailed: '上传失败',
     confirmUpload: '开始上传',
@@ -361,6 +381,9 @@ export default {
     uploadList: '上传任务列表',
     noActiveTasks: '当前没有正在进行的任务',
     clearFinished: '清除已完成任务',
+    cancelUpload: '取消上传',
+    removeFromList: '从列表移除',
+    uploadCancelled: '已取消上传',
     table: {
       name: '文件名',
       size: '大小',
@@ -379,7 +402,10 @@ export default {
     graph: {
       emptyTitle: '暂无图谱数据',
       emptyDesc: '上传文档并完成索引后，系统会自动构建知识图谱',
-      loadFailed: '图谱数据加载失败，请稍后重试'
+      loadFailed: '图谱数据加载失败，请稍后重试',
+      zoomIn: '放大',
+      zoomOut: '缩小',
+      fitView: '复位视图'
     },
     // G波：文档状态词条化（docDisplay.ts 芯片标签；双词 completed/indexed 同映射 indexed）
     docStatus: {
@@ -399,6 +425,9 @@ export default {
     addTemplate: '新增模板',
     editTemplate: '编辑模板',
     empty: '暂无提示词模板',
+    searchEmpty: '没有匹配的模板',
+    searchEmptyDesc: '当前搜索或分类筛选下没有模板，试试调整条件',
+    clearFilters: '清除筛选',
     seed: '初始化默认模板',
     system: '系统',
     custom: '自定义',
@@ -430,6 +459,8 @@ export default {
       saveFailed: '保存失败',
       deleteSuccess: '删除成功',
       deleteFailed: '删除失败',
+      loadVersionsFailed: '加载版本历史失败',
+      restoreFailed: '回滚失败',
       seedSuccess: '初始化成功',
       seedFailed: '初始化失败'
     }
@@ -441,13 +472,24 @@ export default {
     },
     backToHome: '返回首页',
     backToWorkbench: '进入工作台',
-    back: '返回上一页'
+    back: '返回上一页',
+    serviceUnavailable: {
+      title: '服务暂时不可用',
+      subtitle: '无法连接到服务器，请稍后重试。你的登录状态已保留。',
+      retry: '重试'
+    },
+    offlineBanner: {
+      message: '服务暂时不可用，当前展示本地缓存数据',
+      retry: '重试'
+    }
   },
   login: {
     welcomeBack: '欢迎回来',
     loginDesc: '请输入您的账号和密码进行登录',
     createAccount: '创建账号',
     registerDesc: '填写以下信息注册新账号',
+    brandHeadline: '让知识触手可及',
+    brandSubtitle: '企业级 RAG 知识库，上传文档即可开始智能问答。',
     username: '用户名',
     usernamePlaceholder: '请输入用户名',
     email: '邮箱',
@@ -573,6 +615,10 @@ export default {
     systemStatus: '系统状态',
     healthy: '正常',
     unhealthy: '异常',
+    esLabel: 'Elasticsearch',
+    esHealthYellow: '告警',
+    esHealthUnknown: '未知',
+    esHealthDisconnected: '未连接',
     aiMonitor: 'AI 资源监控',
     tokensToday: '今日 Token 消耗',
     costToday: '今日成本',
@@ -660,7 +706,10 @@ export default {
     noResults: '未找到相关结果',
     noResultsDesc: '尝试更换关键词或调整筛选条件',
     fileContent: '文件内容',
-    searchFailed: '搜索失败'
+    searchFailed: '搜索失败',
+    // E11-①：问问 AI 跨页问题组句（文件名 + 当前搜索词 / 无搜索词时的兜底）
+    askAIQuestion: '关于文件「{filename}」：{query}',
+    askAIQuestionGeneric: '关于文件「{filename}」，请帮我总结主要内容'
   },
   conversations: {
     title: '会话历史',
@@ -695,11 +744,59 @@ export default {
   },
   workflow: {
     description: '把复杂 AI 任务拆成阶段化流水线，用统一的指标和状态管理来观察执行质量。',
+    loadFailed: '加载工作流失败',
+    loadFailedDesc: '请稍后重试，或检查网络连接',
+    empty: '暂无工作流',
+    emptyDesc: '创建工作流，把多步骤 AI 任务编排成可视化流水线',
+    createFirst: '创建第一个工作流',
+    searchEmpty: '没有匹配的工作流',
+    searchEmptyDesc: '没有与「{query}」匹配的工作流，换个关键词试试',
+    clearSearch: '清除搜索',
+    deleteSuccess: '删除成功',
+    deleteFailed: '删除失败',
+    duplicateSuccess: '复制成功',
+    duplicateFailed: '复制失败',
+    confirmDeleteTitle: '确认删除',
+    confirmDeleteContent: '删除后无法恢复，确定要删除此工作流吗？',
+    confirmDeletePositive: '删除',
+    editor: {
+      clearConfirmTitle: '清空画布',
+      clearConfirmContent: '清空后自动保存将在 {n} 秒内把空画布写回，覆盖已保存的版本。确定要清空画布吗？',
+      clearConfirmPositive: '清空',
+      clearConfirmNegative: '取消',
+      emptyCanvasAutoSaveBlocked: '画布为空，已跳过自动保存：已保存的版本未被覆盖。如需保存空画布，请手动点击「保存」。',
+      saveSuccess: '工作流已保存',
+      saveFailed: '保存失败',
+      autoSaveFailed: '自动保存失败，更改尚未保存。点击保存状态可重试。',
+      saveStatusUnsaved: '未保存',
+      saveStatusSaving: '保存中',
+      saveStatusSaved: '已保存',
+      saveStatusError: '保存失败',
+      saveRetry: '重试',
+      saveRetryHint: '保存失败，点击重试',
+      leaveConfirmTitle: '离开编辑器',
+      leaveConfirmContent: '当前工作流有未保存的更改，离开后这些更改将丢失。确定要离开吗？',
+      leaveConfirmPositive: '离开',
+      leaveConfirmNegative: '取消',
+      togglePanel: '属性面板',
+      clickToAddHint: '点击或拖拽添加节点',
+    },
   },
   notifications: {
     markAllRead: '全部已读',
+    loadFailed: '加载通知失败',
+    empty: '暂无通知',
+    deleteSuccess: '删除成功',
+    deleteFailed: '删除失败',
+    batchDeleteFailed: '批量删除失败',
   },
 
+  agent: {
+    clearConfirmTitle: '清空当前会话消息',
+    clearConfirm: '仅清空当前会话在界面中显示的消息，不影响其他会话。确定清空吗？',
+    deleteSessionConfirmTitle: '删除当前会话',
+    deleteSessionConfirm: '将删除当前会话「{title}」及其聊天记录，此操作不可恢复。确定删除吗？',
+  },
   agentReplay: {
     entry: '查看回放',
     title: '运行回放',
@@ -868,6 +965,8 @@ export default {
       query: '输入',
       error: '最近错误',
       unavailable: '结果不可用（任务不存在或不可见）',
+      refresh: '刷新结果',
+      refreshed: '结果已刷新',
       taskState: {
         pending: '排队中',
         running: '运行中',
@@ -966,6 +1065,7 @@ export default {
   },
   router: {
     notFound: '页面不存在',
+    serviceUnavailable: '服务暂时不可用',
     welcome: '欢迎',
     login: '登录',
     register: '注册',

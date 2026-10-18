@@ -9,6 +9,16 @@
       <n-notification-provider>
         <n-message-provider>
           <ErrorBoundary>
+            <!-- 全局顶部进度条：位于 router-view 之外，Layout 挂载前即可见 -->
+            <div
+              v-if="routeProgressActive"
+              class="route-progress"
+              data-testid="route-progress-bar"
+              aria-hidden="true"
+            >
+              <div class="route-progress-inner" />
+            </div>
+            <ServiceUnavailableBanner />
             <router-view />
           </ErrorBoundary>
         </n-message-provider>
@@ -31,6 +41,8 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { lightThemeOverrides, darkThemeOverrides } from '@/theme'
 import ErrorBoundary from '@/components/common/ErrorBoundary.vue'
+import ServiceUnavailableBanner from '@/components/common/ServiceUnavailableBanner.vue'
+import { routeProgressActive } from '@/utils/routeProgress'
 import { FALLBACK_LANGUAGE, isLanguageCode, type LanguageCode } from '@/utils/languages'
 
 const appStore = useAppStore()
@@ -62,5 +74,25 @@ const dateLocaleConfig = computed(() => NAIVE_LOCALES[activeLanguage.value].date
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* 全局顶部进度条（自绘）：不确定态滑块，导航/首屏校验期间持续可见 */
+.route-progress {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 2px;
+  overflow: hidden;
+  z-index: 9999;
+  pointer-events: none;
+}
+.route-progress-inner {
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, #3b82f6, #6366f1);
+  animation: route-progress-move 1.2s ease-in-out infinite;
+}
+@keyframes route-progress-move {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(360%); }
 }
 </style>

@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.notifications import create_notification
@@ -401,19 +401,62 @@ async def rebuild_document_knowledge(
     try:
         doc = await get_document_for_user(db, current_user, document_id)
 
-        # 1. 仅从 ES 删除该文档的索引
-        await knowledge_service.delete_es_by_document_id(document_id)
-
-        # 2. 记录任务并发送 Kafka，由 Worker 重新解析并写 ES
+        # 1. 先落库任务行（commit 拿到自增 id），之后才动 ES：若 job 落库失败，
+        #    ES 尚未删除，INDEXED 文档保持可检索——消除「状态 INDEXED、索引已被
+        #    删除」的不可检索窗口（预审补偿）。
         job = KnowledgeProcessingJob(
             document_id=document_id,
             organization_id=doc.organization_id,
             trigger_type="reprocess",
             status=KnowledgeJobStatus.QUEUED,
             retry_count=0,
+            # A3-P0：先按「本机兜底候选」落库；Kafka 投递确认后清除。
+            # 覆盖「job 已落库、进程在投递/清除之间退出」的孤儿窗口：
+            # 启动对账最多多重跑一次（文档锁互斥、处理幂等）。
+            local_fallback=True,
         )
         db.add(job)
-        await db.flush()
+        await db.commit()
+
+        # 2. 删除 ES 中该文档的旧索引；失败则把 job 条件收敛为 FAILED
+        #    （不覆盖已 SUCCESS 的并发成功 run），文档保持 INDEXED 且旧索引
+        #    仍在——不制造「已索引却搜不到」。
+        try:
+            await knowledge_service.delete_es_by_document_id(document_id)
+        except Exception as es_err:
+            try:
+                await db.execute(
+                    update(KnowledgeProcessingJob)
+                    .where(
+                        KnowledgeProcessingJob.id == job.id,
+                        KnowledgeProcessingJob.status != KnowledgeJobStatus.SUCCESS,
+                    )
+                    .values(
+                        status=KnowledgeJobStatus.FAILED,
+                        error_message=f"删除旧索引失败: {es_err}",
+                        finished_at=datetime.now(),
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                await db.commit()
+            except Exception as mark_err:
+                logger.error(
+                    f"重建失败且任务收敛写入失败: {mark_err}", exc_info=True
+                )
+            raise
+
+        # 3. 条件更新文档状态：已 INDEXED 的文档不因重建请求回退为 PENDING
+        #    （worker 接单后会以 PARSING 接管；此处只禁止覆盖终端态）。
+        await db.execute(
+            update(Document)
+            .where(
+                Document.id == document_id,
+                Document.status != DocumentStatus.INDEXED,
+            )
+            .values(status=DocumentStatus.PENDING, parse_error=None)
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
 
         sent = False
         schedule_local = False
@@ -431,13 +474,15 @@ async def rebuild_document_knowledge(
         except Exception as e:
             logger.warning(f"发送 Kafka 重建任务失败，改为进程内处理: {e}")
 
-        if not sent:
+        if sent:
+            # A3-P0：投递已确认 → 清除本机兜底标记（防止启动对账重复调度
+            # 在途 Kafka 任务）；清除前崩溃则最多多重跑一次，任务不丢。
+            job.local_fallback = False
+            await db.commit()
+        else:
+            # 标记已在任务落库时写入（local_fallback=True），此处只需调度；
+            # 进程在任务完成前退出时由启动对账回收。
             schedule_local = True
-
-        # 3. 将文档状态置为 PENDING，Worker 处理后会更新为 INDEXED/FAILED
-        doc.status = DocumentStatus.PENDING
-        doc.parse_error = None
-        await db.commit()
 
         # 重建时按组织清空 RAG 缓存，避免旧内容仍命中缓存
         from app.rag.cache import RetrievalCache, SemanticCache
@@ -824,7 +869,7 @@ async def get_rag_stats(
 async def get_knowledge_graph(
     query: str | None = None,
     max_nodes: int = Query(default=50, ge=5, le=200),
-    organization_id: int = 1,
+    organization_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):

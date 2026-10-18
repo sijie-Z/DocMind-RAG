@@ -1,21 +1,6 @@
 <template>
   <div class="user-dashboard p-4 md:p-6 space-y-5">
-    <!-- 三态：加载中 / 加载失败（可重试）/ 内容 -->
-    <div v-if="loading" class="flex items-center justify-center py-24">
-      <n-spin size="large" />
-    </div>
-    <n-result
-      v-else-if="loadFailed"
-      status="error"
-      class="py-16"
-      :title="t('dashboard.loadFailed')"
-      :description="t('dashboard.loadFailedDesc')"
-    >
-      <template #footer>
-        <n-button type="primary" @click="loadData">{{ t('dashboard.retry') }}</n-button>
-      </template>
-    </n-result>
-    <template v-else>
+    <!-- 分块加载：KPI 卡 / RAG / 最近会话 / 趋势图各自骨架，哪块数据先到就先替换哪块 -->
     <!-- 欢迎区域 - 渐变背景 -->
     <div class="bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 rounded-2xl p-6 text-white shadow-xl shadow-blue-500/20 relative overflow-hidden">
       <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIj48Y2lyY2xlIGN4PSIzMCIgY3k9IjMwIiByPSIyIi8+PC9nPjwvZz48L3N2Zz4=')] opacity-50"></div>
@@ -25,47 +10,62 @@
       </div>
     </div>
 
-    <!-- 统计卡片 - 4列 -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <div class="group bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-slate-200 dark:hover:border-blue-700 transition-all duration-200 cursor-pointer">
+    <!-- 统计卡片 - 4列（用户统计未到 → 整排骨架） -->
+    <div v-if="statsState === 'loading'" class="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="kpi-skeleton">
+      <div v-for="i in 4" :key="i" class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm min-h-[140px]">
+        <n-skeleton circle width="40px" height="40px" />
+        <n-skeleton text style="width: 55%; margin-top: 14px" />
+        <n-skeleton text style="width: 70%; margin-top: 8px" size="small" />
+      </div>
+    </div>
+    <div
+      v-else-if="statsState === 'error'"
+      class="flex flex-col items-center justify-center gap-3 py-10 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700"
+      data-testid="kpi-error"
+    >
+      <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+      <n-button size="small" @click="loadStats">{{ t('dashboard.retry') }}</n-button>
+    </div>
+    <div v-else class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
         <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-slate-100 dark:bg-slate-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+          <div class="w-10 h-10 bg-slate-100 dark:bg-slate-900/40 rounded-xl flex items-center justify-center">
             <n-icon size="22" class="text-blue-600 dark:text-blue-400"><ChatbubbleEllipsesOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400 group-hover:text-blue-500 transition-colors">对话</span>
+          <span class="text-xs text-gray-400">对话</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.conversation_count.toLocaleString() }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.conversations') }}</p>
       </div>
 
-      <div class="group bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-emerald-200 dark:hover:border-emerald-700 transition-all duration-200 cursor-pointer">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
         <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+          <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl flex items-center justify-center">
             <n-icon size="22" class="text-emerald-600 dark:text-emerald-400"><TextOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400 group-hover:text-emerald-500 transition-colors">消息</span>
+          <span class="text-xs text-gray-400">消息</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.message_count.toLocaleString() }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.messages') }}</p>
       </div>
 
-      <div class="group bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-orange-200 dark:hover:border-orange-700 transition-all duration-200 cursor-pointer">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
         <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-orange-100 dark:bg-orange-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+          <div class="w-10 h-10 bg-orange-100 dark:bg-orange-900/40 rounded-xl flex items-center justify-center">
             <n-icon size="22" class="text-orange-600 dark:text-orange-400"><DocumentOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400 group-hover:text-orange-500 transition-colors">文档</span>
+          <span class="text-xs text-gray-400">文档</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.file_count.toLocaleString() }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.files') }}</p>
       </div>
 
-      <div class="group bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-rose-200 dark:hover:border-rose-700 transition-all duration-200 cursor-pointer">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
         <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-rose-100 dark:bg-rose-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+          <div class="w-10 h-10 bg-rose-100 dark:bg-rose-900/40 rounded-xl flex items-center justify-center">
             <n-icon size="22" class="text-rose-600 dark:text-rose-400"><ServerOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400 group-hover:text-rose-500 transition-colors">存储</span>
+          <span class="text-xs text-gray-400">存储</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ formatSize(stats.storage_used) }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.storage') }}</p>
@@ -91,6 +91,26 @@
         </div>
       </div>
       <div class="p-5">
+        <div v-if="ragState === 'loading'" data-testid="rag-skeleton">
+          <div class="flex items-center gap-5 mb-4">
+            <div class="flex-1">
+              <n-skeleton text style="width: 30%" size="small" />
+              <n-skeleton height="18px" style="margin-top: 12px" />
+            </div>
+            <n-skeleton text style="width: 64px" />
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div v-for="i in 3" :key="i" class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
+              <n-skeleton text style="width: 70%" size="small" />
+              <n-skeleton text style="width: 50%; margin-top: 8px" />
+            </div>
+          </div>
+        </div>
+        <div v-else-if="ragState === 'error'" class="flex flex-col items-center justify-center gap-3 py-8" data-testid="rag-error">
+          <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+          <n-button size="small" @click="loadRag">{{ t('dashboard.retry') }}</n-button>
+        </div>
+        <template v-else>
         <div class="flex items-center gap-5 mb-4">
           <div class="flex-1">
             <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">{{ t('dashboard.hitRate') }}</p>
@@ -123,6 +143,7 @@
             <p class="text-lg font-bold text-gray-900 dark:text-white">{{ ragStats.avgDocs }}</p>
           </div>
         </div>
+        </template>
       </div>
     </div>
 
@@ -137,7 +158,10 @@
             </div>
             <div>
               <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.recentConversations') }}</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">最近 {{ recentConversations.length }} 个会话</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">
+                <template v-if="convState === 'ready'">最近 {{ recentConversations.length }} 个会话</template>
+                <n-skeleton v-else text style="width: 90px" size="small" />
+              </p>
             </div>
           </div>
           <n-button text type="primary" size="small" @click="$router.push('/conversations')">
@@ -146,6 +170,20 @@
           </n-button>
         </div>
         <div class="p-4">
+          <div v-if="convState === 'loading'" class="space-y-3" data-testid="conv-skeleton">
+            <div v-for="i in 4" :key="i" class="flex items-center gap-3 p-3">
+              <n-skeleton circle width="32px" height="32px" />
+              <div class="flex-1 min-w-0">
+                <n-skeleton text style="width: 70%" />
+                <n-skeleton text style="width: 45%; margin-top: 6px" size="small" />
+              </div>
+            </div>
+          </div>
+          <div v-else-if="convState === 'error'" class="flex flex-col items-center justify-center gap-3 py-10" data-testid="conv-error">
+            <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+            <n-button size="small" @click="loadConversations">{{ t('dashboard.retry') }}</n-button>
+          </div>
+          <template v-else>
           <div v-if="recentConversations.length === 0" class="text-center py-10">
             <div class="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-3">
               <n-icon size="32" class="text-gray-400"><ChatbubbleEllipsesOutline /></n-icon>
@@ -174,6 +212,7 @@
               <span class="text-xs text-gray-400 ml-2 flex-shrink-0">{{ formatDate(conv.updated_at) }}</span>
             </div>
           </div>
+          </template>
         </div>
       </div>
 
@@ -191,13 +230,20 @@
           </div>
         </div>
         <div class="p-5 h-64">
-          <div ref="chartRef" class="w-full h-full"></div>
+          <div v-if="statsState === 'loading'" class="w-full h-full flex items-end gap-3" data-testid="chart-skeleton">
+            <n-skeleton v-for="i in 7" :key="i" :height="`${30 + ((i * 37) % 60)}%`" width="100%" />
+          </div>
+          <div v-else-if="statsState === 'error'" class="h-full flex flex-col items-center justify-center gap-3" data-testid="chart-error">
+            <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+            <n-button size="small" @click="loadStats">{{ t('dashboard.retry') }}</n-button>
+          </div>
+          <div v-else ref="chartRef" class="w-full h-full"></div>
         </div>
       </div>
     </div>
 
-    <!-- 新手引导 (空状态时显示) -->
-    <div v-if="stats.file_count === 0" class="bg-gradient-to-br from-blue-50 to-slate-50 dark:from-blue-900/20 dark:to-slate-900/20 rounded-2xl border border-blue-200 dark:border-blue-800/50 p-6 relative overflow-hidden">
+    <!-- 新手引导 (统计数据就绪且为空状态时显示) -->
+    <div v-if="statsState === 'ready' && stats.file_count === 0" class="bg-gradient-to-br from-blue-50 to-slate-50 dark:from-blue-900/20 dark:to-slate-900/20 rounded-2xl border border-blue-200 dark:border-blue-800/50 p-6 relative overflow-hidden">
       <div class="absolute top-0 right-0 w-32 h-32 bg-blue-200/30 dark:bg-blue-700/10 rounded-full -translate-y-1/2 translate-x-1/2"></div>
       <div class="relative z-10">
         <h3 class="text-lg font-bold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-2">
@@ -266,7 +312,6 @@
         </n-button>
       </div>
     </div>
-    </template>
   </div>
 </template>
 
@@ -278,6 +323,7 @@ import { useUserStore } from '@/stores/user'
 import { getUserStats } from '@/api/user'
 import { getConversations, type Conversation } from '@/api/conversation'
 import { getRAGStats } from '@/api/monitoring'
+import { FIRST_SCREEN_REQUEST_CONFIG } from '@/utils/request'
 import { seedDemoData } from '@/api/demo'
 import { formatFileSize, formatDate as formatDateUtil } from '@/utils/format'
 import { CHART_COLORS } from '@/utils/chartTheme'
@@ -314,9 +360,13 @@ const ragStats = ref({
 const recentConversations = ref<Conversation[]>([])
 const chartRef = ref<HTMLElement | null>(null)
 const demoLoading = ref(false)
-const loading = ref(true)
-const loadFailed = ref(false)
 let chart: EChartsType | null = null
+
+/** 分块加载状态：各路请求独立落位（骨架 → 内容 / 错误态 + 重试） */
+type BlockState = 'loading' | 'ready' | 'error'
+const statsState = ref<BlockState>('loading')
+const convState = ref<BlockState>('loading')
+const ragState = ref<BlockState>('loading')
 
 const formatSize = (bytes: number) => formatFileSize(bytes)
 const formatDate = (date: string) => formatDateUtil(date)
@@ -342,6 +392,7 @@ const loadDemoData = async () => {
 
 const initChart = () => {
   if (!chartRef.value) return
+  chart?.dispose()
   chart = echarts.init(chartRef.value)
   updateChart()
 }
@@ -398,51 +449,67 @@ const handleResize = () => chart?.resize()
 
 watch(() => stats.value.activity_trend, updateChart, { deep: true })
 
-const loadData = async () => {
-  loading.value = true
-  loadFailed.value = false
+// ---- 分块加载器：三路请求并行发起，各自落位、各自骨架/错误态 ----
+
+const loadStats = async () => {
+  statsState.value = 'loading'
   try {
-    const [statsRes, convRes, ragRes] = await Promise.all([
-      getUserStats(),
-      getConversations(),
-      getRAGStats()
-    ])
-
-    if (statsRes.data) {
-      stats.value = {
-        conversation_count: statsRes.data.conversation_count || 0,
-        message_count: statsRes.data.message_count || 0,
-        file_count: statsRes.data.file_count || 0,
-        knowledge_count: statsRes.data.knowledge_count || 0,
-        storage_used: statsRes.data.storage_used || 0,
-        activity_trend: statsRes.data.activity_trend || [0, 0, 0, 0, 0, 0, 0]
-      }
+    const statsRes = await getUserStats(FIRST_SCREEN_REQUEST_CONFIG)
+    if (!statsRes.data) throw new Error('empty user-stats payload')
+    stats.value = {
+      conversation_count: statsRes.data.conversation_count || 0,
+      message_count: statsRes.data.message_count || 0,
+      file_count: statsRes.data.file_count || 0,
+      knowledge_count: statsRes.data.knowledge_count || 0,
+      storage_used: statsRes.data.storage_used || 0,
+      activity_trend: statsRes.data.activity_trend || [0, 0, 0, 0, 0, 0, 0]
     }
+    statsState.value = 'ready'
+    // 等本区块内容（含图表容器）渲染后再初始化，不依赖其它区块
+    await nextTick()
+    initChart()
+  } catch {
+    statsState.value = 'error'
+  }
+}
 
+const loadConversations = async () => {
+  convState.value = 'loading'
+  try {
+    const convRes = await getConversations(undefined, FIRST_SCREEN_REQUEST_CONFIG)
     const convData = convRes.data as unknown as Record<string, unknown>
     const convInner = convData?.data as Record<string, unknown> | undefined
     if (convInner?.data && Array.isArray(convInner.data)) {
       recentConversations.value = (convInner.data as Conversation[]).slice(0, 5)
     }
-
-    if (ragRes.data) {
-      ragStats.value = {
-        hitRate: ragRes.data.hit_rate || 0,
-        totalQueries: ragRes.data.total_queries_7d || 0,
-        hits: ragRes.data.hits_with_documents || 0,
-        avgDocs: ragRes.data.avg_documents_retrieved || 0
-      }
-    }
-
-    // 三态收口：先放开内容渲染（v-else），等 DOM 就绪后再初始化图表
-    loading.value = false
-    await nextTick()
-    initChart()
+    convState.value = 'ready'
   } catch {
-    loadFailed.value = true
-  } finally {
-    loading.value = false
+    convState.value = 'error'
   }
+}
+
+const loadRag = async () => {
+  ragState.value = 'loading'
+  try {
+    const ragRes = await getRAGStats()
+    if (!ragRes.data) throw new Error('empty rag-stats payload')
+    ragStats.value = {
+      hitRate: ragRes.data.hit_rate || 0,
+      totalQueries: ragRes.data.total_queries_7d || 0,
+      hits: ragRes.data.hits_with_documents || 0,
+      avgDocs: ragRes.data.avg_documents_retrieved || 0
+    }
+    ragState.value = 'ready'
+  } catch {
+    ragState.value = 'error'
+  }
+}
+
+/** 首屏三路请求一次性并行发出，谁先到谁先替换自己的区块 */
+const loadData = () => {
+  void loadStats()
+  void loadConversations()
+  void loadRag()
 }
 
 onMounted(() => {
