@@ -104,13 +104,6 @@ vi.mock('@/api/agent', () => ({
   agentApi: { listSkills: vi.fn().mockResolvedValue({ data: { data: [] } }) },
 }))
 
-vi.mock('@/api/llmConfig', () => ({
-  llmConfigApi: {
-    list: vi.fn().mockResolvedValue({ data: { data: [] } }),
-    providers: vi.fn().mockResolvedValue({ data: { data: [] } }),
-  },
-}))
-
 import WorkflowEditor from '../editor.vue'
 import { useWorkflowStore } from '@/stores/workflow'
 import { createWorkflow, updateWorkflow } from '@/api/workflow'

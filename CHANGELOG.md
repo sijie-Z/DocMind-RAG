@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **死设定清理**：个人设置页移除「API Key 管理」（个人 API Key 无消费方）；
+  工作流编辑器移除「LLM 配置」入口与「使用全局配置」开关（执行引擎从未消费，
+  节点级 → 引擎配置 → `.env` 的回退行为保持不变）；设备管理移除仅写
+  localStorage 的「信任此设备」假开关；聊天请求不再携带后端从未读取的
+  `payload.systemPrompt` 字段。
+
+### Deprecated
+
+- `POST/DELETE /api/v1/users/api-key`：UI 入口已移除，端点保留一个 minor 后删除。
+- `/api/v1/llm-config` 全部操作：工作流全局配置入口已移除，端点待统一
+  Provider 层落地后删除；期间调用方不应新增依赖。
+
 ### Changed
 
 - **搜索接口 `search_mode` 真正生效（#225）**：`POST /api/v1/knowledge/search` 的

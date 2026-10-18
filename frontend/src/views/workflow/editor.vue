@@ -280,10 +280,6 @@
             <template #icon><n-icon><PlayOutline /></n-icon></template>
             调试运行
           </n-button>
-          <n-button quaternary @click="showLLMConfig = true">
-            <template #icon><n-icon><SettingsOutline /></n-icon></template>
-            LLM配置
-          </n-button>
         </div>
         <div class="flex items-center gap-4 shrink-0">
           <div class="flex items-center gap-2 text-xs text-gray-500">
@@ -432,33 +428,10 @@
               <label class="text-sm font-medium text-gray-600 dark:text-gray-300">选择供应商</label>
               <n-select
                 v-model:value="nodeData.provider"
-                :options="llmConfigStore.providers.filter(p => p.key !== 'llm').map(p => ({ label: p.label, value: p.key }))"
+                :options="llmProviderOptions"
                 placeholder="选择 LLM 供应商..."
                 class="mt-1"
               />
-            </div>
-
-            <!-- 全局配置引用 -->
-            <div class="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-              <div class="flex items-center justify-between mb-2">
-                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">使用全局配置</label>
-                <n-switch v-model:value="nodeData.useGlobalConfig" />
-              </div>
-              <template v-if="nodeData.useGlobalConfig">
-                <n-select
-                  v-model:value="nodeData.configProvider"
-                  :options="llmConfigStore.getOptionsForProvider(getLlmNodeProvider(selectedNode))"
-                  placeholder="选择已保存的配置..."
-                  class="mt-1"
-                  clearable
-                />
-                <div v-if="nodeData.configProvider" class="text-xs text-gray-500 mt-1">
-                  API Key/URL/Model 将从所选全局配置自动加载
-                </div>
-              </template>
-              <template v-else>
-                <div class="text-xs text-orange-500">将使用下方手动填写的 API 信息</div>
-              </template>
             </div>
 
             <!-- Skill 选择器 -->
@@ -917,71 +890,6 @@
         </div>
       </template>
     </n-modal>
-
-    <!-- LLM 全局配置弹窗 (表格式管理，多配置 per provider) -->
-    <n-modal v-model:show="showLLMConfig" preset="card" title="LLM 全局配置" :style="{ width: '800px' }" :mask-closable="false">
-      <!-- 已有配置表格 -->
-      <n-data-table
-        v-if="llmConfigStore.configs.length > 0"
-        :columns="llmConfigColumns"
-        :data="llmConfigStore.configs"
-        :bordered="false"
-        :single-line="false"
-        size="small"
-        class="mb-4"
-      />
-      <n-empty v-else description="暂无配置，请新建" class="py-4" />
-
-      <n-divider />
-
-      <!-- 新建/编辑表单 -->
-      <n-form :model="llmConfigForm" label-placement="left" label-width="80" size="small">
-        <n-grid :cols="2" :x-gap="12">
-          <n-form-item label="配置名称" required>
-            <n-input v-model:value="llmConfigForm.config_name" placeholder="如：公司OpenAI账号" />
-          </n-form-item>
-          <n-form-item label="供应商" :required="!editingConfigId">
-            <n-select
-              v-model:value="llmConfigForm.provider"
-              :options="llmConfigStore.providers.map(p => ({ label: p.label, value: p.key }))"
-              :disabled="!!editingConfigId"
-              placeholder="选择供应商"
-            />
-          </n-form-item>
-          <n-form-item label="API Key" required>
-            <n-input v-model:value="llmConfigForm.api_key" type="password" placeholder="sk-..." show-password-on="click" />
-          </n-form-item>
-          <n-form-item label="API URL">
-            <n-input v-model:value="llmConfigForm.api_url" placeholder="如 https://api.openai.com/v1" />
-          </n-form-item>
-          <n-form-item label="模型">
-            <n-input v-model:value="llmConfigForm.model" placeholder="如 gpt-4o-mini" />
-          </n-form-item>
-          <n-form-item label="温度">
-            <n-input-number v-model:value="llmConfigForm.temperature" :min="0" :max="2" :step="0.1" style="width:100%" />
-          </n-form-item>
-        </n-grid>
-        <n-form-item label="设为默认">
-          <n-switch v-model:value="llmConfigForm.is_default" />
-          <span class="text-xs text-gray-400 ml-2">同一供应商只能有一个默认配置</span>
-        </n-form-item>
-      </n-form>
-
-      <template #footer>
-        <div class="flex justify-between">
-          <n-button type="error" size="small" v-if="editingConfigId" @click="handleDeleteConfig">
-            删除当前配置
-          </n-button>
-          <n-button size="small" v-else @click="editingConfigId = null; resetLlmConfigForm()">重置</n-button>
-          <div class="flex gap-2">
-            <n-button @click="showLLMConfig = false">关闭</n-button>
-            <n-button type="primary" @click="handleSaveConfig">
-              {{ editingConfigId ? '更新配置' : '新建配置' }}
-            </n-button>
-          </div>
-        </div>
-      </template>
-    </n-modal>
   </div>
 </template>
 
@@ -1029,7 +937,6 @@ const {
   message,
   t,
   workflowStore,
-  llmConfigStore,
   doFitView,
   defaultEdgeOptions,
   nodeDefinitions,
@@ -1067,7 +974,6 @@ const {
   executing,
   executingNodeId,
   showDebugPanel,
-  showLLMConfig,
   showLoadModal,
   workflowList,
   loadingWorkflows,
@@ -1075,15 +981,7 @@ const {
   vueFlowRef,
   engineType,
   engineTypeOptions,
-  editingConfigId,
-  llmConfigForm,
-  resetLlmConfigForm,
-  llmConfigColumns,
-  editConfig,
-  handleSaveConfig,
-  handleDeleteConfigById,
-  handleDeleteConfig,
-  handleSetDefault,
+  llmProviderOptions,
   autoSaveTimer,
   nodes,
   edges,
@@ -1102,7 +1000,6 @@ const {
   getNodeLabel,
   formatOutput,
   getReferenceableParams,
-  getLlmNodeProvider,
   getNodeOutputFields,
   validateTemplateParams,
   onDragStart,

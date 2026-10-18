@@ -16,9 +16,6 @@ import {
   CloudUploadOutline,
   BookOutline,
   LockClosedOutline,
-  KeyOutline,
-  CopyOutline,
-  WarningOutline,
   CameraOutline,
   TimeOutline,
   HardwareChipOutline,
@@ -30,7 +27,7 @@ import {
   PhonePortraitOutline,
   TabletPortraitOutline,
 } from '@vicons/ionicons5'
-import { getUserProfile, getUserStats, updateUserProfile, updatePassword, uploadAvatar, getUserActivities, generateApiKey as apiGenerateKey, revokeApiKey as apiRevokeKey, getMySessions, revokeMySession, getMyActivityLogs, getUserSettingsProviders } from '@/api/user'
+import { getUserProfile, getUserStats, updateUserProfile, updatePassword, uploadAvatar, getUserActivities, getMySessions, revokeMySession, getMyActivityLogs, getUserSettingsProviders } from '@/api/user'
 import type { Activity, UserSession, UserAuditLog } from '@/api/user'
 import { formatDate } from '@/utils/format'
 import { LANGUAGES, isLanguageCode } from '@/utils/languages'
@@ -120,7 +117,8 @@ const auditPagination = reactive({
 })
 
 // 设备管理表格列
-const trustedDevices = ref<Set<number>>(new Set())
+// B3：「信任此设备」开关已删除——修前只写 localStorage，后端无任何设备信任
+// 逻辑读取（假开关），未发现可接的真实逻辑，按任务书默认删除。
 
 const sessionColumns = [
   {
@@ -137,15 +135,13 @@ const sessionColumns = [
         DeviceIcon = TabletPortraitOutline
         deviceType = '平板设备'
       }
-      const isTrusted = trustedDevices.value.has(row.id)
       return h('div', { class: 'flex items-center gap-3' }, [
         h('div', { class: 'w-10 h-10 rounded-xl bg-gradient-to-br from-blue-100 to-slate-100 dark:from-blue-900/30 dark:to-slate-900/30 flex items-center justify-center' }, [
           h(resolveComponent('n-icon'), { size: '22', class: 'text-blue-600 dark:text-blue-400' }, { default: () => h(DeviceIcon) })
         ]),
         h('div', {}, [
           h('div', { class: 'flex items-center gap-2' }, [
-            h('span', { class: 'font-medium text-gray-800 dark:text-gray-200' }, row.device_name || deviceType),
-            isTrusted ? h('span', { class: 'text-xs px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' }, '✓ 已信任') : null
+            h('span', { class: 'font-medium text-gray-800 dark:text-gray-200' }, row.device_name || deviceType)
           ]),
           h('div', { class: 'text-xs text-gray-400 mt-0.5' }, ua.split(' ')[0] || '-')
         ])
@@ -192,7 +188,6 @@ const sessionColumns = [
     width: 200,
     render: (row: UserSession) => {
       const buttons = []
-      const isTrusted = trustedDevices.value.has(row.id)
 
       // 详情按钮
       buttons.push(h(NButton, {
@@ -200,14 +195,6 @@ const sessionColumns = [
         quaternary: true,
         onClick: (e: Event) => { e.stopPropagation(); showSessionDetail(row) }
       }, { default: () => '详情' }))
-
-      // 信任/取消信任
-      buttons.push(h(NButton, {
-        size: 'small',
-        quaternary: true,
-        type: isTrusted ? 'warning' : 'success',
-        onClick: (e: Event) => { e.stopPropagation(); toggleTrust(row.id) }
-      }, { default: () => isTrusted ? '取消信任' : '信任' }))
 
       // 下线按钮
       if (row.is_active && row.id) {
@@ -223,19 +210,6 @@ const sessionColumns = [
     }
   }
 ]
-
-// 切换设备信任状态
-const toggleTrust = (sessionId: number) => {
-  if (trustedDevices.value.has(sessionId)) {
-    trustedDevices.value.delete(sessionId)
-    message.success('已取消信任此设备')
-  } else {
-    trustedDevices.value.add(sessionId)
-    message.success('已信任此设备')
-  }
-  // 持久化到 localStorage
-  localStorage.setItem('trustedDevices', JSON.stringify([...trustedDevices.value]))
-}
 
 // 显示会话详情
 const showSessionDetail = (session: UserSession) => {
@@ -647,8 +621,6 @@ const handleResize = () => {
   storageChart?.resize()
   activityChart?.resize()
 }
-const generatingApiKey = ref(false)
-const revokingApiKey = ref(false)
 
 // 表单引用
 const editFormRef = ref()
@@ -666,8 +638,6 @@ const passwordForm = ref({
   newPassword: '',
   confirmPassword: ''
 })
-
-const apiKey = ref('')
 
 // 校验规则
 const editFormRules = {
@@ -764,12 +734,7 @@ const loadUserProfile = async () => {
         nickname: data.nickname || data.full_name || data.username,
         avatar: data.avatar_url ?? undefined
       }
-      
-      // 设置 API Key
-      if (data.api_key) {
-        apiKey.value = data.api_key
-      }
-      
+
       // 初始化编辑表单
       editForm.value = {
         nickname: userInfo.value.nickname || '',
@@ -914,69 +879,12 @@ const handleChangePassword = async () => {
   }
 }
 
-// API Key 逻辑：生成 / 重生成 / 撤销三个操作均须先经确认弹窗
-const generateApiKey = async () => {
-  const isRegenerate = Boolean(apiKey.value)
-  const confirmed = await confirmDangerousAction(
-    isRegenerate ? t('profile.regenerateKey') : t('profile.generateKey'),
-    isRegenerate ? t('profile.apiKeyRegenerateConfirm') : t('profile.apiKeyGenerateConfirm'),
-  )
-  if (!confirmed) return
-  try {
-    generatingApiKey.value = true
-    const response = await apiGenerateKey()
-    const resData = response.data as Record<string, unknown>
-    if (resData?.api_key) {
-      apiKey.value = resData.api_key as string
-      message.success(t('profile.apiKeyGenerated'))
-    }
-  } catch (error: unknown) {
-    const errMsg = getResponseDetail(error) || t('profile.apiKeyGenerateFailed')
-    message.error(errMsg)
-  } finally {
-    generatingApiKey.value = false
-  }
-}
-
-const revokeApiKey = async () => {
-  const confirmed = await confirmDangerousAction(
-    t('profile.revokeKey'),
-    t('profile.apiKeyRevokeConfirm'),
-  )
-  if (!confirmed) return
-  try {
-    revokingApiKey.value = true
-    await apiRevokeKey()
-    apiKey.value = ''
-    message.success(t('profile.apiKeyRevoked'))
-  } catch (error: unknown) {
-    const errMsg = getResponseDetail(error) || t('profile.apiKeyRevokeFailed') || '撤销 API Key 失败'
-    message.error(errMsg)
-  } finally {
-    revokingApiKey.value = false
-  }
-}
-
-const copyApiKey = () => {
-  if (!apiKey.value) return
-  navigator.clipboard.writeText(apiKey.value)
-  message.success(t('common.copySuccess'))
-}
+// API Key 生成/撤销逻辑已随 B3 死设定清理删除（Profile 入口与后端调用通道均移除）。
 
 const loadAllData = async () => {
   loadError.value = false
   loading.value = true
   try {
-    // 加载已信任的设备
-    try {
-      const savedTrusted = localStorage.getItem('trustedDevices')
-      if (savedTrusted) {
-        trustedDevices.value = new Set(JSON.parse(savedTrusted))
-      }
-    } catch (e) {
-      // Failed to load trusted devices
-    }
-
     await loadUserProfile()
     await loadUserStats()
     await loadActivities()
@@ -1021,8 +929,8 @@ onUnmounted(() => {
   message, dialog, t, locale, router, userStore, appStore,
   loading, loadError, loadErrorMsg,
   userInfo, stats, activities, sessions, auditLogs,
-  sessionPagination, auditPagination, trustedDevices,
-  sessionColumns, toggleTrust, showSessionDetail,
+  sessionPagination, auditPagination,
+  sessionColumns, showSessionDetail,
   auditColumns,
   storageUsage, storageUsedBytes, storageLimitBytes, storageMetricsSource,
   formatBytes, statItems, workflowCompletion, quickActions, goToRoute,
@@ -1033,13 +941,12 @@ onUnmounted(() => {
   onProviderChange, loadProviders, settingsChanged, handleSaveSettings,
   updatingProfile, updatingPassword,
   storageChartRef, activityChartRef, initCharts, handleResize,
-  generatingApiKey, revokingApiKey,
-  editFormRef, passwordFormRef, editForm, passwordForm, apiKey,
+  editFormRef, passwordFormRef, editForm, passwordForm,
   editFormRules, passwordFormRules,
   getApiBaseUrl, normalizeAvatarUrl, handleAvatarUpload,
   loadUserProfile, loadUserStats, loadActivities, loadSessions, loadAuditLogs,
   formatAuditAction, handleRevokeSession, handleUpdateProfile,
-  handleChangePassword, generateApiKey, revokeApiKey, copyApiKey, loadAllData,
+  handleChangePassword, loadAllData,
   formatDate,
   };
 }

@@ -228,13 +228,8 @@ export const resetUserPassword = async (id: number, password: string): Promise<A
   })
 }
 
-export const generateApiKey = async (): Promise<AxiosResponse<{ api_key: string }>> => {
-  return request.post('/users/api-key')
-}
-
-export const revokeApiKey = async (): Promise<AxiosResponse<{ message: string }>> => {
-  return request.delete('/users/api-key')
-}
+// 个人 API Key 生成/撤销通道随 B3 死设定清理移除：Profile UI 入口已删，
+// 后端 POST/DELETE /users/api-key 仅保留一个 minor 并标记 deprecated。
 
 // --- User Settings ---
 
