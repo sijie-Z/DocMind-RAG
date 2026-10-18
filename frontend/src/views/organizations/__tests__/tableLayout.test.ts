@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
-import { NMessageProvider } from 'naive-ui'
+import { NMessageProvider, NDialogProvider } from 'naive-ui'
 
 import OrganizationsView from '../index.vue'
 import { getOrganizations, getOrganizationTree } from '@/api/organization'
@@ -65,7 +65,9 @@ const DataTableCapture = defineComponent({
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
 
 const Host = defineComponent({
-  render: () => h(NMessageProvider, null, { default: () => h(OrganizationsView) }),
+  // 组织页 setup 使用 useConfirmDangerousAction()（内部 useDialog），需要外层
+  // DialogProvider；与同目录 t8 成员管理用例的装配口径一致。
+  render: () => h(NMessageProvider, null, { default: () => h(NDialogProvider, null, { default: () => h(OrganizationsView) }) }),
 })
 
 function mountView() {
