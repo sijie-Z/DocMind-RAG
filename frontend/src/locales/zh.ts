@@ -312,7 +312,7 @@ export default {
   validation: {
     required: '此项必填',
     email: '请输入有效的邮箱地址',
-    passwordLength: '密码长度至少为 6 位',
+    passwordLength: '密码长度至少为 8 位',
     passwordMismatch: '两次输入的密码不一致',
     usernameLength: '用户名至少3位',
     emailInvalid: '邮箱格式不正确'

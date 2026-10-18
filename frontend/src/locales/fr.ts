@@ -276,7 +276,7 @@ export default {
   validation: {
     required: 'Ce champ est obligatoire',
     email: 'Veuillez entrer une adresse e-mail valide',
-    passwordLength: 'Le mot de passe doit contenir au moins 6 caractères',
+    passwordLength: 'Le mot de passe doit contenir au moins 8 caractères',
     passwordMismatch: 'Les mots de passe ne correspondent pas',
     usernameLength: 'Le nom d\'utilisateur doit contenir au moins 3 caractères',
     emailInvalid: 'Format d\'e-mail incorrect'

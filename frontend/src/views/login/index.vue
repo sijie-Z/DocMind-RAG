@@ -191,7 +191,7 @@ const rules = computed(() => ({
   ],
   password: [
     { required: true, message: t('login.passwordPlaceholder'), trigger: 'blur' },
-    { min: 6, message: t('validation.passwordLength'), trigger: 'blur' }
+    { min: 8, message: t('validation.passwordLength'), trigger: 'blur' }
   ],
   email: isRegister.value ? [
     { required: true, message: t('login.emailPlaceholder'), trigger: 'blur' },
