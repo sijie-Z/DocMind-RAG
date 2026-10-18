@@ -58,8 +58,9 @@ def test_all_llm_config_endpoints_are_deprecated():
 
 
 def test_chat_payload_schema_tolerates_legacy_system_prompt():
-    """旧客户端仍发送 systemPrompt 时 schema 不得报错（容忍契约；忽略语义在
-    chat.py 的 SSE/WS 消费点注释与前端停发用例中锁定——本用例不证明忽略）。"""
+    """旧客户端仍发送 systemPrompt 时 schema 不得报错（容忍契约）。后端忽略语义
+    目前由 chat.py 消费点注释记录（无运行时守卫）；前端停发由
+    chatSendNoSystemPrompt.test.ts 锁定——本用例不证明忽略。"""
     body = ChatStreamRequest(
         content="hi",
         payload={
