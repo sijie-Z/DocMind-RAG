@@ -53,28 +53,15 @@ export default {
     language: 'Langue',
     languageBeta: 'Bêta — certains contenus s’affichent en anglais',
     theme: 'Thème',
-    apiKey: 'Gestion des clés API',
-    apiKeyDesc: 'Utilisées pour appeler les interfaces API. Gardez-les secrètes.',
-    apiKeyWarning: 'Attention : Une clé API est équivalente à un mot de passe. Ne la partagez pas.',
-    noApiKey: 'Aucune clé API',
-    revokeKey: 'Révoquer',
-    generateKey: 'Générer une clé',
-    regenerateKey: 'Régénérer',
     editProfile: 'Modifier le profil',
     loadUserFailed: 'Échec du chargement de l\'utilisateur',
     updateFailed: 'Échec de la mise à jour',
     passwordChangeSuccess: 'Mot de passe modifié avec succès',
     passwordChangeFailed: 'Échec de la modification du mot de passe',
     passwordMismatch: 'Les mots de passe ne correspondent pas',
-    apiKeyGenerated: 'Clé API générée avec succès',
-    apiKeyRevoked: 'Clé API révoquée',
     aiProviderExpTitle: 'Fonctionnalité expérimentale · inactive',
     aiProviderExpDesc: "Le choix du modèle est configuré côté serveur (actuellement DeepSeek). La sélection et la clé API ici n'affectent pas l'inférence ; l'enregistrement est désactivé pour éviter toute confusion.",
     providerLoadFailed: "Échec du chargement de la configuration des fournisseurs IA. Les paramètres par défaut ou les derniers paramètres chargés sont affichés.",
-    apiKeyGenerateFailed: 'Échec de la génération',
-    apiKeyGenerateConfirm: 'Conservez la clé générée en lieu sûr. Générer une clé ?',
-    apiKeyRegenerateConfirm: "La régénération invalide immédiatement l'ancienne clé ; les appels qui l'utilisent échoueront. Régénérer ?",
-    apiKeyRevokeConfirm: 'La révocation invalide immédiatement cette clé et est irréversible. Révoquer ?',
     validation: {
       nicknameLength: 'Le pseudo doit contenir entre 2 et 50 caractères',
       phoneInvalid: 'Veuillez entrer un numéro de téléphone valide',
@@ -123,6 +110,11 @@ export default {
     initialPassword: 'Mot de passe initial'
   },
   org: {
+    current: 'Organisation actuelle',
+    switchOrganization: 'Changer d\'organisation',
+    switchSuccess: 'Organisation changée',
+    switchFailed: 'Échec du changement d\'organisation',
+    noOrganizations: 'Aucune organisation',
     title: 'Organigramme',
     subtitle: 'Gérer la structure et la hiérarchie du système',
     searchPlaceholder: 'Rechercher une organisation...',
@@ -526,6 +518,12 @@ export default {
     },
   },
   menu: {
+    groupWorkspace: 'Espace de travail',
+    groupConversation: 'Conversation',
+    groupKnowledge: 'Connaissances',
+    groupAutomation: 'Automatisation',
+    groupPrompts: 'Prompts',
+    groupManagement: 'Gestion',
     home: 'Accueil',
     chat: 'Chat Intelligent',
     search: 'Recherche Sémantique',
@@ -600,7 +598,53 @@ export default {
     detail: 'Détail',
     loadFailed: 'Échec du chargement',
     loadFailedDesc: 'Impossible de charger les données du tableau de bord. Veuillez réessayer.',
-    retry: 'Réessayer'
+    retry: 'Réessayer',
+    startTitle: 'Commencez',
+    startDesc: 'Choisissez un point d’entrée et lancez-vous',
+    startNewChat: 'Nouvelle conversation',
+    startNewChatDesc: 'Discutez avec l’assistant IA et obtenez des réponses citées depuis votre base de connaissances',
+    startUpload: 'Importer des documents',
+    startUploadDesc: 'Importez des PDF, Word et plus encore — analysés et indexés automatiquement',
+    startAgent: 'Créer un agent',
+    startAgentDesc: 'Laissez un agent planifier et exécuter des tâches multi-étapes',
+    overview: 'Aperçu',
+    overviewDesc: 'Votre utilisation en un coup d’œil',
+    demoData: 'Charger des données de démo',
+    onboarding: {
+      title: 'Premiers pas',
+      subtitle: 'Suivez ces 4 étapes pour démarrer avec DocMind',
+      progress: 'Terminé {done}/{total}',
+      stepLabel: 'Étape {index}',
+      skip: 'Passer',
+      show: 'Voir la liste',
+      refresh: 'Revérifier',
+      skippedHint: 'Passé — reprenez à tout moment',
+      done: 'Terminé',
+      steps: {
+        model: {
+          title: 'Connecter un modèle',
+          desc: 'Le modèle de la plateforme est prêt pour les questions-réponses',
+          hint: 'Aucun modèle disponible détecté. Demandez à votre administrateur de le configurer, puis cliquez sur « Revérifier ».',
+          checking: 'Vérification du modèle…',
+          unknown: 'Échec de la vérification du modèle. Cliquez sur « Revérifier » plus tard.'
+        },
+        knowledge: {
+          title: 'Créer une base de connaissances',
+          desc: 'Importez votre premier document pour créer votre base de connaissances',
+          action: 'Ouvrir la base'
+        },
+        upload: {
+          title: 'Importer des documents',
+          desc: 'Les documents sont analysés et indexés pour la recherche IA',
+          action: 'Importer'
+        },
+        chat: {
+          title: 'Première question',
+          desc: 'Posez une question et obtenez une réponse avec citations',
+          action: 'Poser une question'
+        }
+      }
+    }
   },
   monitoring: {
     refresh: 'Actualiser les données',

@@ -10,7 +10,138 @@
       </div>
     </div>
 
-    <!-- 统计卡片 - 4列（用户统计未到 → 整排骨架） -->
+    <!-- B5 · 首屏「开始做事」：三个真实入口，替代统计卡占据第一屏 -->
+    <section data-testid="home-quickstart" class="space-y-3">
+      <div>
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white">{{ t('dashboard.startTitle') }}</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.startDesc') }}</p>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <button
+          type="button"
+          data-testid="home-action-chat"
+          class="text-left bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          @click="$router.push('/chat')"
+        >
+          <div class="w-10 h-10 bg-blue-100 dark:bg-blue-900/40 rounded-xl flex items-center justify-center mb-3">
+            <n-icon size="22" class="text-blue-600 dark:text-blue-400"><ChatbubbleEllipsesOutline /></n-icon>
+          </div>
+          <p class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.startNewChat') }}</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.startNewChatDesc') }}</p>
+        </button>
+        <button
+          type="button"
+          data-testid="home-action-upload"
+          class="text-left bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          @click="$router.push('/knowledge')"
+        >
+          <div class="w-10 h-10 bg-orange-100 dark:bg-orange-900/40 rounded-xl flex items-center justify-center mb-3">
+            <n-icon size="22" class="text-orange-600 dark:text-orange-400"><CloudUploadOutline /></n-icon>
+          </div>
+          <p class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.startUpload') }}</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.startUploadDesc') }}</p>
+        </button>
+        <button
+          type="button"
+          data-testid="home-action-agent"
+          class="text-left bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          @click="$router.push('/agent')"
+        >
+          <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl flex items-center justify-center mb-3">
+            <n-icon size="22" class="text-emerald-600 dark:text-emerald-400"><HardwareChipOutline /></n-icon>
+          </div>
+          <p class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.startAgent') }}</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.startAgentDesc') }}</p>
+        </button>
+      </div>
+    </section>
+
+    <!-- B5 · 注册后 4 步清单：真实数据推导完成态；跳过折叠不消失 -->
+    <OnboardingChecklist
+      :stats-ready="statsState === 'ready' && !statsDegraded"
+      :file-count="stats.file_count"
+      :knowledge-count="stats.knowledge_count"
+      :message-count="stats.message_count"
+      :user-id="userInfo?.id"
+      @refresh="loadData"
+    />
+
+    <!-- 最近会话（B5：上移到首屏，统计卡之下） -->
+    <div
+      data-testid="home-recent-conversations"
+      class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden"
+    >
+      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
+            <n-icon class="text-blue-600 dark:text-blue-400"><TimeOutline /></n-icon>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.recentConversations') }}</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400">
+              <template v-if="convState === 'ready'">{{ t('dashboard.recentConversationsCount', { count: recentConversations.length }) }}</template>
+              <n-skeleton v-else text style="width: 90px" size="small" />
+            </p>
+          </div>
+        </div>
+        <n-button text type="primary" size="small" @click="$router.push('/conversations')">
+          {{ t('dashboard.viewAll') }}
+          <template #icon><n-icon size="14"><ChevronForwardOutline /></n-icon></template>
+        </n-button>
+      </div>
+      <div class="p-4">
+        <div v-if="convState === 'loading'" class="space-y-3" data-testid="conv-skeleton">
+          <div v-for="i in 4" :key="i" class="flex items-center gap-3 p-3">
+            <n-skeleton circle width="32px" height="32px" />
+            <div class="flex-1 min-w-0">
+              <n-skeleton text style="width: 70%" />
+              <n-skeleton text style="width: 45%; margin-top: 6px" size="small" />
+            </div>
+          </div>
+        </div>
+        <div v-else-if="convState === 'error'" class="flex flex-col items-center justify-center gap-3 py-10" data-testid="conv-error">
+          <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+          <n-button size="small" @click="loadConversations">{{ t('dashboard.retry') }}</n-button>
+        </div>
+        <template v-else>
+          <div v-if="recentConversations.length === 0" class="text-center py-10">
+            <div class="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-3">
+              <n-icon size="32" class="text-gray-400"><ChatbubbleEllipsesOutline /></n-icon>
+            </div>
+            <p class="text-gray-400 dark:text-gray-500">{{ t('dashboard.noConversations') }}</p>
+            <n-button type="primary" size="small" class="mt-3" @click="$router.push('/chat')">
+              {{ t('dashboard.newChat') }}
+            </n-button>
+          </div>
+          <div v-else class="space-y-2">
+            <div
+              v-for="conv in recentConversations"
+              :key="conv.id"
+              class="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-all duration-150 group"
+              @click="$router.push(`/chat?conversation=${conv.id}`)"
+            >
+              <div class="flex-1 min-w-0 flex items-center gap-3">
+                <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-slate-200 dark:group-hover:bg-slate-800 transition-colors">
+                  <n-icon size="16" class="text-blue-600 dark:text-blue-400"><ChatbubbleEllipsesOutline /></n-icon>
+                </div>
+                <div class="min-w-0">
+                  <p class="font-medium text-gray-900 dark:text-white truncate">{{ conv.title || t('dashboard.untitled') }}</p>
+                  <p class="text-sm text-gray-500 dark:text-gray-400 truncate">{{ conv.last_message || '' }}</p>
+                </div>
+              </div>
+              <span class="text-xs text-gray-400 ml-2 flex-shrink-0">{{ formatDate(conv.updated_at) }}</span>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- 统计卡片 - 4列（B5：下移到开始做事/最近会话之后，不删除） -->
+    <section data-testid="home-stats" class="space-y-3">
+      <div>
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white">{{ t('dashboard.overview') }}</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.overviewDesc') }}</p>
+      </div>
     <div v-if="statsState === 'loading'" class="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="kpi-skeleton">
       <div v-for="i in 4" :key="i" class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm min-h-[140px]">
         <n-skeleton circle width="40px" height="40px" />
@@ -32,7 +163,7 @@
           <div class="w-10 h-10 bg-slate-100 dark:bg-slate-900/40 rounded-xl flex items-center justify-center">
             <n-icon size="22" class="text-blue-600 dark:text-blue-400"><ChatbubbleEllipsesOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400">对话</span>
+          <span class="text-xs text-gray-400">{{ t('dashboard.conversations') }}</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.conversation_count.toLocaleString() }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.conversations') }}</p>
@@ -43,7 +174,7 @@
           <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl flex items-center justify-center">
             <n-icon size="22" class="text-emerald-600 dark:text-emerald-400"><TextOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400">消息</span>
+          <span class="text-xs text-gray-400">{{ t('dashboard.messages') }}</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.message_count.toLocaleString() }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.messages') }}</p>
@@ -54,7 +185,7 @@
           <div class="w-10 h-10 bg-orange-100 dark:bg-orange-900/40 rounded-xl flex items-center justify-center">
             <n-icon size="22" class="text-orange-600 dark:text-orange-400"><DocumentOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400">文档</span>
+          <span class="text-xs text-gray-400">{{ t('dashboard.files') }}</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.file_count.toLocaleString() }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.files') }}</p>
@@ -65,12 +196,13 @@
           <div class="w-10 h-10 bg-rose-100 dark:bg-rose-900/40 rounded-xl flex items-center justify-center">
             <n-icon size="22" class="text-rose-600 dark:text-rose-400"><ServerOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400">存储</span>
+          <span class="text-xs text-gray-400">{{ t('dashboard.storage') }}</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ formatSize(stats.storage_used) }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.storage') }}</p>
       </div>
     </div>
+    </section>
 
     <!-- RAG 命中率模块 -->
     <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
@@ -147,75 +279,8 @@
       </div>
     </div>
 
-    <!-- 两列布局：最近会话 + 活动趋势 -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-      <!-- 最近会话 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-        <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
-              <n-icon class="text-blue-600 dark:text-blue-400"><TimeOutline /></n-icon>
-            </div>
-            <div>
-              <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.recentConversations') }}</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">
-                <template v-if="convState === 'ready'">{{ t('dashboard.recentConversationsCount', { count: recentConversations.length }) }}</template>
-                <n-skeleton v-else text style="width: 90px" size="small" />
-              </p>
-            </div>
-          </div>
-          <n-button text type="primary" size="small" @click="$router.push('/conversations')">
-            {{ t('dashboard.viewAll') }}
-            <template #icon><n-icon size="14"><ChevronForwardOutline /></n-icon></template>
-          </n-button>
-        </div>
-        <div class="p-4">
-          <div v-if="convState === 'loading'" class="space-y-3" data-testid="conv-skeleton">
-            <div v-for="i in 4" :key="i" class="flex items-center gap-3 p-3">
-              <n-skeleton circle width="32px" height="32px" />
-              <div class="flex-1 min-w-0">
-                <n-skeleton text style="width: 70%" />
-                <n-skeleton text style="width: 45%; margin-top: 6px" size="small" />
-              </div>
-            </div>
-          </div>
-          <div v-else-if="convState === 'error'" class="flex flex-col items-center justify-center gap-3 py-10" data-testid="conv-error">
-            <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
-            <n-button size="small" @click="loadConversations">{{ t('dashboard.retry') }}</n-button>
-          </div>
-          <template v-else>
-          <div v-if="recentConversations.length === 0" class="text-center py-10">
-            <div class="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-3">
-              <n-icon size="32" class="text-gray-400"><ChatbubbleEllipsesOutline /></n-icon>
-            </div>
-            <p class="text-gray-400 dark:text-gray-500">{{ t('dashboard.noConversations') }}</p>
-            <n-button type="primary" size="small" class="mt-3" @click="$router.push('/chat')">
-              {{ t('dashboard.newChat') }}
-            </n-button>
-          </div>
-          <div v-else class="space-y-2">
-            <div
-              v-for="conv in recentConversations"
-              :key="conv.id"
-              class="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-all duration-150 group"
-              @click="$router.push(`/chat?conversation=${conv.id}`)"
-            >
-              <div class="flex-1 min-w-0 flex items-center gap-3">
-                <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-slate-200 dark:group-hover:bg-slate-800 transition-colors">
-                  <n-icon size="16" class="text-blue-600 dark:text-blue-400"><ChatbubbleEllipsesOutline /></n-icon>
-                </div>
-                <div class="min-w-0">
-                  <p class="font-medium text-gray-900 dark:text-white truncate">{{ conv.title || t('dashboard.untitled') }}</p>
-                  <p class="text-sm text-gray-500 dark:text-gray-400 truncate">{{ conv.last_message || '' }}</p>
-                </div>
-              </div>
-              <span class="text-xs text-gray-400 ml-2 flex-shrink-0">{{ formatDate(conv.updated_at) }}</span>
-            </div>
-          </div>
-          </template>
-        </div>
-      </div>
-
+    <!-- 活动趋势（B5：最近会话已上移至首屏，此处不再重复） -->
+    <div class="grid grid-cols-1 gap-5">
       <!-- 活动趋势 -->
       <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
         <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
@@ -242,51 +307,6 @@
       </div>
     </div>
 
-    <!-- 新手引导 (统计数据就绪且为空状态时显示) -->
-    <div v-if="statsState === 'ready' && stats.file_count === 0" class="bg-gradient-to-br from-blue-50 to-slate-50 dark:from-blue-900/20 dark:to-slate-900/20 rounded-2xl border border-blue-200 dark:border-blue-800/50 p-6 relative overflow-hidden">
-      <div class="absolute top-0 right-0 w-32 h-32 bg-blue-200/30 dark:bg-blue-700/10 rounded-full -translate-y-1/2 translate-x-1/2"></div>
-      <div class="relative z-10">
-        <h3 class="text-lg font-bold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-2">
-          <n-icon class="text-blue-500"><RocketOutline /></n-icon>
-          开始使用 DocMind
-        </h3>
-        <p class="text-sm text-blue-700 dark:text-blue-300 mb-5">只需 3 步，即可体验 AI 知识库的强大功能</p>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
-          <div class="flex items-start gap-3 bg-white/60 dark:bg-gray-800/60 rounded-xl p-4">
-            <div class="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">1</div>
-            <div>
-              <div class="font-semibold text-sm text-gray-900 dark:text-white">上传文档</div>
-              <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">支持 PDF、Word、TXT 等格式，系统自动解析并建立索引</div>
-            </div>
-          </div>
-          <div class="flex items-start gap-3 bg-white/60 dark:bg-gray-800/60 rounded-xl p-4">
-            <div class="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">2</div>
-            <div>
-              <div class="font-semibold text-sm text-gray-900 dark:text-white">语义搜索</div>
-              <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">混合检索（关键词 + 语义），自动引用来源文档</div>
-            </div>
-          </div>
-          <div class="flex items-start gap-3 bg-white/60 dark:bg-gray-800/60 rounded-xl p-4">
-            <div class="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">3</div>
-            <div>
-              <div class="font-semibold text-sm text-gray-900 dark:text-white">AI 对话</div>
-              <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">基于文档内容回答，附带 [n] 引用标注，支持多轮对话</div>
-            </div>
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-3">
-          <n-button type="primary" @click="$router.push('/knowledge')" class="shadow-lg shadow-blue-500/25">
-            <template #icon><n-icon><CloudUploadOutline /></n-icon></template>
-            上传第一个文档
-          </n-button>
-          <n-button secondary @click="loadDemoData" :loading="demoLoading">
-            <template #icon><n-icon><SparklesOutline /></n-icon></template>
-            加载示例数据
-          </n-button>
-        </div>
-      </div>
-    </div>
-
     <!-- 快捷操作 -->
     <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm p-5">
       <h3 class="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
@@ -294,21 +314,13 @@
         {{ t('dashboard.quickActions') }}
       </h3>
       <div class="flex flex-wrap gap-3">
-        <n-button type="primary" size="large" class="shadow-md hover:shadow-lg transition-shadow" @click="$router.push('/chat')">
-          <template #icon><n-icon><ChatbubbleEllipsesOutline /></n-icon></template>
-          {{ t('dashboard.newChat') }}
-        </n-button>
-        <n-button type="info" size="large" class="shadow-md hover:shadow-lg transition-shadow" @click="$router.push('/knowledge')">
-          <template #icon><n-icon><CloudUploadOutline /></n-icon></template>
-          {{ t('dashboard.uploadDoc') }}
-        </n-button>
         <n-button type="success" size="large" class="shadow-md hover:shadow-lg transition-shadow" @click="$router.push('/search')">
           <template #icon><n-icon><SearchOutline /></n-icon></template>
           {{ t('dashboard.searchKB') }}
         </n-button>
-        <n-button type="warning" size="large" class="shadow-md hover:shadow-lg transition-shadow" @click="$router.push('/agent')">
-          <template #icon><n-icon><HardwareChipOutline /></n-icon></template>
-          Agent 模式
+        <n-button secondary size="large" :loading="demoLoading" @click="loadDemoData">
+          <template #icon><n-icon><SparklesOutline /></n-icon></template>
+          {{ t('dashboard.demoData') }}
         </n-button>
       </div>
     </div>
@@ -331,8 +343,9 @@ import {
   ChatbubbleEllipsesOutline, TextOutline, DocumentOutline,
   ServerOutline, CloudUploadOutline, SearchOutline, TimeOutline,
   ChevronForwardOutline, AnalyticsOutline, TrendingUpOutline, FlashOutline,
-  HardwareChipOutline, RocketOutline, SparklesOutline
+  HardwareChipOutline, SparklesOutline
 } from '@vicons/ionicons5'
+import OnboardingChecklist from './components/OnboardingChecklist.vue'
 import echarts from '@/utils/echarts'
 import type { EChartsType } from 'echarts/core'
 
@@ -367,6 +380,8 @@ type BlockState = 'loading' | 'ready' | 'error'
 const statsState = ref<BlockState>('loading')
 const convState = ref<BlockState>('loading')
 const ragState = ref<BlockState>('loading')
+/** 统计接口降级（issue #301：200 + 全零 + degraded=true）——不得当作真实 0 渲染清单 */
+const statsDegraded = ref(false)
 
 const formatSize = (bytes: number) => formatFileSize(bytes)
 const formatDate = (date: string) => formatDateUtil(date)
@@ -465,6 +480,7 @@ const loadStats = async () => {
       storage_used: statsRes.data.storage_used || 0,
       activity_trend: statsRes.data.activity_trend || [0, 0, 0, 0, 0, 0, 0]
     }
+    statsDegraded.value = statsRes.data.degraded === true
     statsState.value = 'ready'
     // 等本区块内容（含图表容器）渲染后再初始化，不依赖其它区块
     await nextTick()

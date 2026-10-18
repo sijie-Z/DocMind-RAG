@@ -31,6 +31,7 @@ from app.exceptions import (
 )
 from app.models.chat import ChatMessage, ChatSession
 from app.models.document import Document, DocumentStatus
+from app.models.organization import Organization, user_organization
 from app.models.rbac import PermissionType
 from app.models.user import User
 from app.models.user_audit import UserActivityLog, UserLoginSession
@@ -486,6 +487,139 @@ async def get_user_profile(
     except Exception as e:
         logger.exception(f"Error in GET /me: {str(e)}")
         raise AppError(f"Get user profile failed: {str(e)}")
+
+
+def _organization_public_dict(organization: Organization) -> dict[str, Any]:
+    """组织在切换器里的最小公开形状（不含 owner/成员等敏感字段）。"""
+    return {
+        "id": organization.id,
+        "name": organization.name,
+        "description": organization.description,
+        "color": organization.color,
+        "is_private": bool(organization.is_private),
+    }
+
+
+@router.get("/me/organizations", response_model=dict[str, Any], summary="获取当前用户所属组织")
+async def get_my_organizations(
+    current_user: User = Depends(auth_service.get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """当前用户可切换的组织列表 + 当前组织。
+
+    普通用户只看到 `user_organization` 成员关系内的组织；主组织即使缺成员行
+    （历史用户）也一并返回，避免"当前组织不在列表里"。超级管理员保留全局
+    视角（与既有 god-mode 鉴权同口径）。未加入的组织绝不出现在响应里。
+    """
+    try:
+        if current_user.is_superuser:
+            result = await db.execute(select(Organization).order_by(Organization.id))
+            organizations = list(result.scalars().all())
+        else:
+            # 成员关系是唯一授权来源；查询失败直接报错，不静默返回空列表。
+            result = await db.execute(
+                select(Organization)
+                .join(
+                    user_organization,
+                    user_organization.c.organization_id == Organization.id,
+                )
+                .where(user_organization.c.user_id == current_user.id)
+                .order_by(Organization.id)
+            )
+            organizations = list(result.scalars().all())
+
+        payload = [_organization_public_dict(org) for org in organizations]
+        current_org_id = current_user.organization_id
+        if current_org_id is not None and all(
+            org["id"] != current_org_id for org in payload
+        ):
+            primary_org = await db.get(Organization, current_org_id)
+            if primary_org is not None:
+                payload.insert(0, _organization_public_dict(primary_org))
+
+        return {
+            "success": True,
+            "data": {
+                "organizations": payload,
+                "current_organization_id": current_org_id,
+            },
+        }
+    except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
+        raise
+    except Exception as e:
+        logger.exception(f"Error in GET /me/organizations: {str(e)}")
+        raise AppError(f"Get my organizations failed: {str(e)}")
+
+
+@router.post(
+    "/me/organizations/{organization_id:int}/switch",
+    response_model=dict[str, Any],
+    summary="切换当前组织",
+)
+async def switch_my_organization(
+    organization_id: int,
+    request: Request,
+    current_user: User = Depends(auth_service.get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """切换当前组织；多租户 fail-closed —— 非成员一律 403。
+
+    组织上下文以 `users.organization_id`（当前组织）为准：知识库列表、
+    会话列表等既有端点均直接读该字段，因此落库成功后全站数据上下文随新组织
+    生效。超级管理员保留全局切换能力（既有 god-mode 语义）。
+    """
+    try:
+        user = await db.get(User, current_user.id)
+        if user is None:
+            raise NotFoundError("User not found")
+
+        organization = await db.get(Organization, organization_id)
+        if organization is None:
+            raise NotFoundError("组织不存在")
+
+        # fail-closed：只有成员关系（或超管）允许切换。当前组织本身允许
+        # 幂等重选（历史用户可能没有 user_organization 行）。
+        if (
+            not user.is_superuser
+            and user.organization_id != organization_id
+        ):
+            membership = await db.execute(
+                select(user_organization.c.user_id).where(
+                    user_organization.c.user_id == user.id,
+                    user_organization.c.organization_id == organization_id,
+                )
+            )
+            if membership.first() is None:
+                raise AuthorizationError("您不是该组织的成员，无权切换到该组织")
+
+        previous_org_id = user.organization_id
+        organization_payload = _organization_public_dict(organization)
+        user.organization_id = organization_id
+        await _log_user_activity(
+            db,
+            user.id,
+            "switch_organization",
+            request=request,
+            target_type="organization",
+            target_id=str(organization_id),
+            detail=f"organization {previous_org_id} -> {organization_id}",
+        )
+        await db.commit()
+
+        return {
+            "success": True,
+            "message": "组织已切换",
+            "data": {
+                "organization_id": organization_id,
+                "organization": organization_payload,
+            },
+        }
+    except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.exception(f"Error in POST /me/organizations/{organization_id}/switch: {str(e)}")
+        raise AppError(f"Switch organization failed: {str(e)}")
 
 
 @router.get("/me/sessions", response_model=list[UserSessionResponse], summary="获取当前用户登录设备")
@@ -1122,13 +1256,22 @@ async def update_password(
     except Exception as e:
         raise AppError(f"修改密码失败: {str(e)}")
 
-@router.post("/api-key", response_model=dict, summary="生成新的 API Key")
+@router.post(
+    "/api-key",
+    response_model=dict,
+    summary="生成新的 API Key（已弃用）",
+    deprecated=True,
+)
 async def generate_api_key(
     request: Request,
     current_user: User = Depends(auth_service.get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """为当前用户生成新的 API Key (如果已存在则覆盖)"""
+    """为当前用户生成新的 API Key (如果已存在则覆盖)。
+
+    DEPRECATED（B3 死设定清理）：个人 API Key 无任何消费方，Profile UI 入口
+    已移除。端点保留一个 minor 供既有集成迁移，随后删除；请勿新增调用方。
+    """
     try:
         new_key = f"sk-{secrets.token_urlsafe(32)}"
         current_user_obj: Any = current_user
@@ -1159,13 +1302,22 @@ async def generate_api_key(
         await db.rollback()
         raise AppError(f"生成 API Key 失败: {str(e)}")
 
-@router.delete("/api-key", response_model=dict, summary="撤销 API Key")
+@router.delete(
+    "/api-key",
+    response_model=dict,
+    summary="撤销 API Key（已弃用）",
+    deprecated=True,
+)
 async def revoke_api_key(
     request: Request,
     current_user: User = Depends(auth_service.get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """撤销当前用户的 API Key"""
+    """撤销当前用户的 API Key。
+
+    DEPRECATED（B3 死设定清理）：个人 API Key 无任何消费方，Profile UI 入口
+    已移除。端点保留一个 minor 供既有集成迁移，随后删除；请勿新增调用方。
+    """
     try:
         current_user_obj: Any = current_user
         current_user_obj.api_key = None

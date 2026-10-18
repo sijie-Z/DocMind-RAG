@@ -37,13 +37,6 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const executionLogs = ref<string[]>([])
   const finalOutput = ref<Record<string, unknown> | string | null>(null)
 
-  // LLM 配置
-  const llmConfig = ref({
-    openai: { apiKey: '', baseUrl: '', model: 'gpt-4o-mini', temperature: 0.7 },
-    deepseek: { apiKey: '', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash', temperature: 0.7 },
-    qwen: { apiKey: '', model: 'qwen-plus', temperature: 0.7 }
-  })
-
   // Actions
   const setNodes = (newNodes: WorkflowNode[]) => {
     nodes.value = newNodes
@@ -159,7 +152,6 @@ export const useWorkflowStore = defineStore('workflow', () => {
     executionResults,
     executionLogs,
     finalOutput,
-    llmConfig,
 
     // Actions
     setNodes,

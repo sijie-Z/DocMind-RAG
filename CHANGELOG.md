@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **首页首屏「开始做事」与注册后 4 步引导（#416）**：首页第一屏改为
+  「新对话 / 上传文档 / 创建 Agent」三入口 + 最近会话列表，统计卡整体下移
+  （不删除）；新用户首页展示 4 步清单（连模型 → 建知识库 → 传文档 → 首次问答），
+  完成态优先由服务端真实数据推导（新增只读端点
+  `GET /api/v1/monitoring/llm-status`），可跳过且跳过不消失——清单折叠为常驻
+  入口，刷新/重登后仍可再次查看。
+
+### Removed
+
+- **死设定清理**：个人设置页移除「API Key 管理」（个人 API Key 无消费方）；
+  工作流编辑器移除「LLM 配置」入口与「使用全局配置」开关（执行引擎从未消费，
+  节点级 → 引擎配置 → `.env` 的回退行为保持不变）；设备管理移除仅写
+  localStorage 的「信任此设备」假开关；聊天请求不再携带后端从未读取的
+  `payload.systemPrompt` 字段。
+
+### Deprecated
+
+- `POST/DELETE /api/v1/users/api-key`：UI 入口已移除，端点保留一个 minor 后删除。
+- `/api/v1/llm-config` 全部操作：工作流全局配置入口已移除，端点待统一
+  Provider 层落地后删除；期间调用方不应新增依赖。
+
 ### Changed
 
 - **搜索接口 `search_mode` 真正生效（#225）**：`POST /api/v1/knowledge/search` 的

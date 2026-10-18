@@ -58,25 +58,12 @@ export default {
     theme: 'Theme Setting',
     themeSettingDesc: 'Choose interface theme',
     languageSettingDesc: 'Choose display language',
-    apiKey: 'API Key Management',
-    apiKeyDesc: 'Keys used to call API interfaces, please keep them safe',
-    apiKeyWarning: 'Warning: API Key is equivalent to your password, do not leak it.',
-    noApiKey: 'No API Key',
-    revokeKey: 'Revoke Key',
-    generateKey: 'Generate Key',
-    regenerateKey: 'Regenerate',
     editProfile: 'Edit Profile',
     loadUserFailed: 'Failed to load user info',
     updateFailed: 'Update failed',
     passwordChangeSuccess: 'Password changed successfully',
     passwordChangeFailed: 'Failed to change password',
     passwordMismatch: 'Passwords do not match',
-    apiKeyGenerated: 'API Key generated successfully',
-    apiKeyRevoked: 'API Key revoked',
-    apiKeyGenerateFailed: 'Generation failed',
-    apiKeyGenerateConfirm: 'Please keep the generated key safe. Generate a new key?',
-    apiKeyRegenerateConfirm: 'Regenerating immediately invalidates the old key; API calls using it will fail. Regenerate?',
-    apiKeyRevokeConfirm: 'Revoking immediately invalidates this key and cannot be undone. Revoke it?',
     validation: {
       nicknameLength: 'Nickname must be between 2-50 characters',
       phoneInvalid: 'Please enter a valid phone number',
@@ -109,7 +96,6 @@ export default {
     revokeFailed: 'Failed to go offline',
     revokeSession: 'Revoke device',
     revokeSessionConfirm: 'Revoke this device? It will be signed out and must sign in again.',
-    apiKeyRevokeFailed: 'Failed to revoke API Key',
     aiProviderExpTitle: 'Experimental · Not active yet',
     aiProviderExpDesc: 'Model choice is configured server-side (currently DeepSeek). The selection and API key here do not affect inference; saving is disabled to avoid confusion.',
     providerLoadFailed: 'Failed to load AI provider configuration. Showing the default or last successfully loaded settings.',
@@ -131,6 +117,11 @@ export default {
     initialPassword: 'Initial Password'
   },
   org: {
+    current: 'Current organization',
+    switchOrganization: 'Switch organization',
+    switchSuccess: 'Organization switched',
+    switchFailed: 'Failed to switch organization',
+    noOrganizations: 'No organizations',
     title: 'Organization Structure',
     subtitle: 'Manage system organizational structure and hierarchy',
     searchPlaceholder: 'Search organizations...',
@@ -577,6 +568,12 @@ export default {
     },
   },
   menu: {
+    groupWorkspace: 'Workspace',
+    groupConversation: 'Conversation',
+    groupKnowledge: 'Knowledge',
+    groupAutomation: 'Automation',
+    groupPrompts: 'Prompts',
+    groupManagement: 'Management',
     home: 'Home',
     dashboard: 'Dashboard',
     chat: 'Smart Chat',
@@ -652,7 +649,53 @@ export default {
     detail: 'Detail',
     loadFailed: 'Load Failed',
     loadFailedDesc: 'Failed to load dashboard data, please try again.',
-    retry: 'Retry'
+    retry: 'Retry',
+    startTitle: 'Get Started',
+    startDesc: 'Pick an entry point and jump right in',
+    startNewChat: 'New Chat',
+    startNewChatDesc: 'Chat with the AI assistant and get answers with citations from your knowledge base',
+    startUpload: 'Upload Documents',
+    startUploadDesc: 'Upload PDFs, Word files and more — parsed and indexed automatically',
+    startAgent: 'Create Agent',
+    startAgentDesc: 'Let an agent plan and execute multi-step tasks',
+    overview: 'Overview',
+    overviewDesc: 'Your usage at a glance',
+    demoData: 'Load Demo Data',
+    onboarding: {
+      title: 'Getting Started',
+      subtitle: 'Complete these 4 steps to get up and running with DocMind',
+      progress: 'Completed {done}/{total}',
+      stepLabel: 'Step {index}',
+      skip: 'Skip',
+      show: 'View checklist',
+      refresh: 'Re-check',
+      skippedHint: 'Skipped — resume anytime',
+      done: 'Done',
+      steps: {
+        model: {
+          title: 'Connect a model',
+          desc: 'The platform model is ready for Q&A',
+          hint: 'No available model detected. Ask your administrator to configure one, then click "Re-check".',
+          checking: 'Checking model status…',
+          unknown: 'Failed to check model status. Click "Re-check" later.'
+        },
+        knowledge: {
+          title: 'Create a knowledge base',
+          desc: 'Upload your first document to build your knowledge base',
+          action: 'Open knowledge base'
+        },
+        upload: {
+          title: 'Upload documents',
+          desc: 'Documents are parsed and indexed for AI retrieval',
+          action: 'Upload'
+        },
+        chat: {
+          title: 'Ask your first question',
+          desc: 'Ask a question and get an answer with citations',
+          action: 'Ask now'
+        }
+      }
+    }
   },
   monitoring: {
     refresh: 'Refresh Data',

@@ -367,8 +367,6 @@ export function useChatSend(
     sseService.on('reflection', onReflection)
     sseService.on('retry', onRetry)
 
-    const systemPrompt = localStorage.getItem('activeSystemPrompt')
-
     try {
       const sent = await sseService.post('stream', {
         content: userMessage,
@@ -378,8 +376,7 @@ export function useChatSend(
         debug: debugEnabled?.value ?? false,
         payload: {
           strictMode: strictMode.value,
-          privacyMode: privacyMode.value,
-          systemPrompt: systemPrompt || undefined
+          privacyMode: privacyMode.value
         }
       })
 

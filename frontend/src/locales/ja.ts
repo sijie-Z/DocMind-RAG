@@ -53,28 +53,15 @@ export default {
     language: '言語設定',
     languageBeta: 'ベータ版 — 一部のコンテンツは英語で表示されます',
     theme: 'テーマ設定',
-    apiKey: 'APIキー管理',
-    apiKeyDesc: 'API呼び出しに使用するキーです。大切に保管してください。',
-    apiKeyWarning: '警告：APIキーはパスワードと同じです。他人に教えないでください。',
-    noApiKey: 'APIキーがありません',
-    revokeKey: '無効化',
-    generateKey: 'キーを生成',
-    regenerateKey: '再生成',
     editProfile: 'プロフィール編集',
     loadUserFailed: 'ユーザー情報の取得に失敗しました',
     updateFailed: '更新に失敗しました',
     passwordChangeSuccess: 'パスワードを変更しました',
     passwordChangeFailed: 'パスワードの変更に失敗しました',
     passwordMismatch: 'パスワードが一致しません',
-    apiKeyGenerated: 'APIキーを生成しました',
-    apiKeyRevoked: 'APIキーを無効化しました',
     aiProviderExpTitle: '実験機能 · 未反映',
     aiProviderExpDesc: 'モデル選択はサーバー側で統一設定されています（現在は DeepSeek）。ここの選択と API Key は推論に反映されず、誤解を避けるため保存は無効化されています。',
     providerLoadFailed: 'AI Provider 設定の読み込みに失敗しました。デフォルトまたは前回正常に読み込まれた設定を表示しています。',
-    apiKeyGenerateFailed: '生成に失敗しました',
-    apiKeyGenerateConfirm: '生成したキーは大切に保管してください。生成しますか？',
-    apiKeyRegenerateConfirm: '再生成すると旧 Key は直ちに無効になり、旧 Key を使用中の呼び出しはすべて失敗します。再生成しますか？',
-    apiKeyRevokeConfirm: '無効化するとこのキーは直ちに無効になり、復元できません。無効化しますか？',
     validation: {
       nicknameLength: 'ニックネームは2〜50文字以内で入力してください',
       phoneInvalid: '有効な電話番号を入力してください',
@@ -123,6 +110,11 @@ export default {
     initialPassword: '初期パスワード'
   },
   org: {
+    current: '現在の組織',
+    switchOrganization: '組織を切り替え',
+    switchSuccess: '組織を切り替えました',
+    switchFailed: '組織の切り替えに失敗しました',
+    noOrganizations: '組織がありません',
     title: '組織図',
     subtitle: 'システムの組織構造と階層を管理します',
     searchPlaceholder: '組織を検索...',
@@ -526,6 +518,12 @@ export default {
     },
   },
   menu: {
+    groupWorkspace: 'ワークスペース',
+    groupConversation: '会話',
+    groupKnowledge: 'ナレッジ',
+    groupAutomation: '自動化',
+    groupPrompts: 'プロンプト',
+    groupManagement: '管理',
     home: 'ホーム',
     chat: 'スマート対話',
     search: 'セマンティック検索',
@@ -600,7 +598,53 @@ export default {
     detail: '詳細',
     loadFailed: '読み込みに失敗しました',
     loadFailedDesc: 'ダッシュボードデータの読み込みに失敗しました。再試行してください。',
-    retry: '再試行'
+    retry: '再試行',
+    startTitle: 'はじめましょう',
+    startDesc: '入口を選んで、すぐに始められます',
+    startNewChat: '新しい会話',
+    startNewChatDesc: 'AI アシスタントと対話し、ナレッジベースに基づく引用付きの回答を得られます',
+    startUpload: 'ドキュメントをアップロード',
+    startUploadDesc: 'PDF や Word などをアップロードすると、自動で解析・インデックス化されます',
+    startAgent: 'Agent を作成',
+    startAgentDesc: 'Agent に複数ステップのタスクを計画・実行させます',
+    overview: 'データ概要',
+    overviewDesc: '利用状況をひと目で確認',
+    demoData: 'サンプルデータを読み込む',
+    onboarding: {
+      title: 'はじめに',
+      subtitle: '次の 4 ステップで DocMind をすぐに使い始められます',
+      progress: '完了 {done}/{total}',
+      stepLabel: 'ステップ {index}',
+      skip: 'スキップ',
+      show: 'チェックリストを表示',
+      refresh: '再確認',
+      skippedHint: 'スキップ済み — いつでも再開できます',
+      done: '完了',
+      steps: {
+        model: {
+          title: 'モデルを接続',
+          desc: 'プラットフォームのモデルは質問応答に利用できます',
+          hint: '利用可能なモデルが検出されません。管理者に設定を依頼し、「再確認」をクリックしてください。',
+          checking: 'モデル状態を確認中…',
+          unknown: 'モデル状態の確認に失敗しました。しばらくしてから「再確認」をクリックしてください。'
+        },
+        knowledge: {
+          title: 'ナレッジベースを作成',
+          desc: '最初の資料をアップロードして、自分専用のナレッジベースを作成します',
+          action: 'ナレッジベースへ'
+        },
+        upload: {
+          title: 'ドキュメントをアップロード',
+          desc: 'ドキュメントは解析・インデックス化され、AI の検索対象になります',
+          action: 'アップロード'
+        },
+        chat: {
+          title: '最初の質問',
+          desc: '質問をすると、引用付きの回答が得られます',
+          action: '質問する'
+        }
+      }
+    }
   },
   monitoring: {
     refresh: 'データを更新',

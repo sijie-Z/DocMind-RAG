@@ -48,6 +48,11 @@ export interface UserProfileResponse {
   created_at: string | null
   last_login_at: string | null
   preferences?: Record<string, unknown> | null
+  /**
+   * @deprecated 个人 API Key 已下线（B3）：Profile 入口已移除，后端
+   * POST/DELETE /users/api-key 仅保留一个 minor；本字段为服务端返回的掩码值，
+   * 前端不再消费，勿新增读取方。
+   */
   api_key?: string | null
 }
 
@@ -81,6 +86,36 @@ export const getUser = async (id: number): Promise<AxiosResponse<User>> => {
 
 export const getUserProfile = async (): Promise<AxiosResponse<UserProfileResponse>> => {
   return request.get('/users/me')
+}
+
+/** 当前用户所属组织（成员关系 user_organization + 主组织兜底；不含未加入的组织）。 */
+export interface MyOrganization {
+  id: number
+  name: string
+  description?: string | null
+  color?: string | null
+  is_private?: boolean
+}
+
+export interface MyOrganizationsResponse {
+  organizations: MyOrganization[]
+  current_organization_id: number | null
+}
+
+export const getMyOrganizations = async (): Promise<
+  AxiosResponse<ApiResponse<MyOrganizationsResponse>>
+> => {
+  return request.get('/users/me/organizations')
+}
+
+/**
+ * 切换当前组织：服务端先校验成员关系（非成员 403），成功后全站请求
+ * 的组织上下文（文档/会话列表过滤等）随新组织生效。
+ */
+export const switchOrganization = async (
+  organizationId: number,
+): Promise<AxiosResponse<ApiResponse<{ organization_id: number }>>> => {
+  return request.post(`/users/me/organizations/${organizationId}/switch`)
 }
 
 export const getAuditLogs = async (params?: {
@@ -129,6 +164,9 @@ export interface UserStats {
   storage_used: number
   storage_limit?: number
   activity_trend?: number[]
+  /** issue #301：查询失败时的诚实降级标记（200 + 全零），消费方不得当作真实 0 */
+  degraded?: boolean
+  reason?: string
 }
 
 export interface Activity {
@@ -228,13 +266,8 @@ export const resetUserPassword = async (id: number, password: string): Promise<A
   })
 }
 
-export const generateApiKey = async (): Promise<AxiosResponse<{ api_key: string }>> => {
-  return request.post('/users/api-key')
-}
-
-export const revokeApiKey = async (): Promise<AxiosResponse<{ message: string }>> => {
-  return request.delete('/users/api-key')
-}
+// 个人 API Key 生成/撤销通道随 B3 死设定清理移除：Profile UI 入口已删，
+// 后端 POST/DELETE /users/api-key 仅保留一个 minor 并标记 deprecated。
 
 // --- User Settings ---
 

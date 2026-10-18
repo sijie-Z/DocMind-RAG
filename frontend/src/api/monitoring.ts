@@ -108,6 +108,20 @@ export const getLLMStats = async (): Promise<{ data: LLMStats }> => {
   return request.get('/monitoring/llm-stats', FIRST_SCREEN_REQUEST_CONFIG)
 }
 
+/** LLM 配置状态（B5 onboarding「连模型」步骤数据源） */
+export interface LLMStatus {
+  configured: boolean
+  provider: string
+  model: string
+  source: 'server' | 'local' | string
+}
+
+export const getLLMStatus = async (): Promise<{
+  data: { success?: boolean; data: LLMStatus }
+}> => {
+  return request.get('/monitoring/llm-status', FIRST_SCREEN_REQUEST_CONFIG)
+}
+
 export interface RAGStats {
   total_queries_7d: number
   hits_with_documents: number

@@ -128,19 +128,6 @@
               <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                 {{ userInfo?.username }}
               </p>
-              <n-tag
-                v-if="currentOrgId"
-                size="tiny"
-                round
-                :bordered="false"
-                type="info"
-                class="mt-0.5"
-              >
-                <template #icon>
-                  <n-icon size="10"><BusinessOutline /></n-icon>
-                </template>
-                组织 {{ currentOrgId }}
-              </n-tag>
             </div>
           </div>
         </n-dropdown>
@@ -163,6 +150,8 @@
           <h1 class="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
             {{ currentRouteTitle }}
           </h1>
+          <!-- B1：组织切换器（顶栏品牌区）。切换后当前页面按新组织重挂载。 -->
+          <OrgSwitcher class="hidden sm:block" />
         </div>
         
         <div class="flex items-center gap-2 md:gap-4 shrink-0">
@@ -266,8 +255,10 @@
             <!-- E11-③：key 用 route.name（而非 fullPath）——同一路由仅 query
                  变化（chat 切会话、prompt/q 消费、agent 回放深链）不再整页
                  卸载重挂，消除白屏闪烁与输入丢失；跨路由仍按 name 切换重挂。
-                 未命名路由回退 path（不存在 query 重复挂载需求）。 -->
-            <div :key="route.name ?? route.path" class="page-wrapper">
+                 未命名路由回退 path（不存在 query 重复挂载需求）。
+                 B1：追加组织上下文版本号——切换组织后当前页面重挂载，
+                 文档/会话等 onMounted 拉取按新组织重新发起。 -->
+            <div :key="`${String(route.name ?? route.path)}::org-${userStore.organizationVersion}`" class="page-wrapper">
               <Suspense>
                 <component :is="Component" />
                 <template #fallback>
@@ -298,6 +289,7 @@ import type { MenuOption, MenuGroupOption, DropdownOption } from 'naive-ui'
 import { NMenu, NIcon, NInput, NButton, NBadge, NPopover, NList, NListItem, NDropdown, NAvatar } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { SIDEBAR_MENU_GROUPS, USER_MENU_ITEMS, type MenuItemDef } from '@/config/menu'
+import OrgSwitcher from '@/components/layout/OrgSwitcher.vue'
 import { setLanguage } from '@/locales'
 import { LANGUAGES, isLanguageCode, type LanguageCode } from '@/utils/languages'
 import {
@@ -356,7 +348,6 @@ const switchLanguage = async (lang: LanguageCode) => {
 }
 
 const userInfo = computed(() => userStore.userInfo)
-const currentOrgId = computed(() => userStore.currentOrgId)
 const isDark = computed(() => appStore.isDark)
 
 const notificationStore = useNotificationStore()

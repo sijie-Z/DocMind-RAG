@@ -328,49 +328,6 @@
                       </n-grid>
                     </n-form>
                   </div>
-
-                  <n-divider />
-
-                  <!-- API Key 管理 -->
-                  <div>
-                    <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-2 flex items-center gap-2">
-                      <n-icon :component="KeyOutline" class="text-orange-500" />
-                      {{ t('profile.apiKey') }}
-                    </h3>
-                    <p class="text-sm text-gray-500 mb-4">{{ t('profile.apiKeyDesc') }}</p>
-                    
-                    <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <div v-if="apiKey" class="flex items-center gap-2">
-                        <code class="flex-1 bg-white dark:bg-gray-900 px-3 py-2 rounded border border-gray-200 dark:border-gray-700 font-mono text-sm break-all">
-                          {{ apiKey }}
-                        </code>
-                        <n-button circle size="small" @click="copyApiKey">
-                          <template #icon><n-icon :component="CopyOutline" /></template>
-                        </n-button>
-                      </div>
-                      <div v-else class="text-gray-400 text-sm italic mb-3">
-                        {{ t('profile.noApiKey') }}
-                      </div>
-                      
-                      <div class="mt-4 flex gap-3">
-                        <n-button v-if="!apiKey" type="primary" ghost size="small" @click="generateApiKey" :loading="generatingApiKey">
-                          {{ t('profile.generateKey') }}
-                        </n-button>
-                        <template v-else>
-                          <n-button type="warning" ghost size="small" @click="generateApiKey" :loading="generatingApiKey">
-                            {{ t('profile.regenerateKey') }}
-                          </n-button>
-                          <n-button type="error" ghost size="small" @click="revokeApiKey" :loading="revokingApiKey">
-                            {{ t('profile.revokeKey') }}
-                          </n-button>
-                        </template>
-                      </div>
-                    </div>
-                    <p class="text-xs text-orange-500 mt-2 flex items-center gap-1">
-                      <n-icon :component="WarningOutline" />
-                      {{ t('profile.apiKeyWarning') }}
-                    </p>
-                  </div>
                 </div>
               </n-tab-pane>
 
@@ -486,9 +443,6 @@ import {
   CloudUploadOutline,
   BookOutline,
   LockClosedOutline,
-  KeyOutline,
-  CopyOutline,
-  WarningOutline,
   CameraOutline,
   TimeOutline,
   HardwareChipOutline,
@@ -505,7 +459,7 @@ import type { UserSession, UserAuditLog } from '@/api/user'
 const {
   getResponseDetail, message, dialog, t, locale, router, userStore, appStore,
   loading, loadError, loadErrorMsg, userInfo, stats, activities, sessions, auditLogs,
-  sessionPagination, auditPagination, trustedDevices, sessionColumns, toggleTrust,
+  sessionPagination, auditPagination, sessionColumns,
   showSessionDetail, auditColumns, storageUsage, storageUsedBytes, storageLimitBytes,
   storageMetricsSource, formatBytes, statItems, workflowCompletion, quickActions,
   goToRoute, themeOptions, languageOptions, handleLanguageChange, settingsForm,
@@ -513,11 +467,11 @@ const {
   providerOptions, currentProvider, currentModelOptions, currentProviderNeedsKey,
   providersLoadError, onProviderChange, loadProviders, settingsChanged, handleSaveSettings, updatingProfile,
   updatingPassword, storageChartRef, activityChartRef, initCharts, handleResize,
-  generatingApiKey, revokingApiKey, editFormRef, passwordFormRef, editForm, passwordForm,
-  apiKey, editFormRules, passwordFormRules, getApiBaseUrl, normalizeAvatarUrl,
+  editFormRef, passwordFormRef, editForm, passwordForm,
+  editFormRules, passwordFormRules, getApiBaseUrl, normalizeAvatarUrl,
   handleAvatarUpload, loadUserProfile, loadUserStats, loadActivities, loadSessions,
   loadAuditLogs, formatAuditAction, handleRevokeSession, handleUpdateProfile,
-  handleChangePassword, generateApiKey, revokeApiKey, copyApiKey, loadAllData, formatDate,
+  handleChangePassword, loadAllData, formatDate,
 } = useProfilePage()
 </script>
 
