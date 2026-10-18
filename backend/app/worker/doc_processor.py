@@ -373,7 +373,11 @@ class DocumentProcessor:
     async def _mark_success(
         self, document_id: str, chunks_data: list[dict], job_id: int | None
     ) -> None:
-        """条件写入 INDEXED：已 INDEXED 的终态不被过期 run 的元数据覆盖（A3-P0）。"""
+        """条件写入 INDEXED：已 INDEXED 的终态不被过期 run 的元数据覆盖（A3-P0）。
+
+        doc 条件更新与 job 终态在**同一事务**提交：避免「文档已 INDEXED、job 仍
+        QUEUED」的中间态（单次 commit 保证两者要么都写、要么都不写）。
+        """
         now = datetime.now()
         async with AsyncSessionLocal() as session:
             result = await session.execute(
@@ -392,6 +396,12 @@ class DocumentProcessor:
                 )
                 .execution_options(synchronize_session=False)
             )
+            if job_id:
+                job = await session.get(KnowledgeProcessingJob, job_id)
+                if job:
+                    job.status = KnowledgeJobStatus.SUCCESS
+                    job.error_message = None
+                    job.finished_at = datetime.now()
             await session.commit()
             if not getattr(result, "rowcount", 0):
                 # 注意：MySQL 默认返回「实际改变的行数」，值未变化也会是 0 ——
@@ -401,14 +411,6 @@ class DocumentProcessor:
                     "document_id=%s",
                     document_id,
                 )
-        if job_id:
-            async with AsyncSessionLocal() as session:
-                job = await session.get(KnowledgeProcessingJob, job_id)
-                if job:
-                    job.status = KnowledgeJobStatus.SUCCESS
-                    job.error_message = None
-                    job.finished_at = datetime.now()
-                    await session.commit()
 
     async def _mark_failed(
         self, document_id: str, error: str, job_id: int | None
