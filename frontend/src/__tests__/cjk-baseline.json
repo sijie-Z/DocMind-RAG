@@ -2,7 +2,7 @@
   "$comment": "ISS-4 硬编码中文棘轮基线：{ 文件相对路径: 含 CJK 行数 }（已剥离注释，排除 locales/测试）。只防增长——新增硬编码中文（新文件或存量增长）会让 src/__tests__/hardcodedCjk.test.ts 变红；确属合理例外时用 UPDATE_CJK_BASELINE=1 npx vitest run src/__tests__/hardcodedCjk.test.ts 重生成并随 PR 提交。",
   "files": {
     "api/workflow.ts": 1,
-    "components/agent/AgentConfigPanel.vue": 20,
+    "components/agent/AgentConfigPanel.vue": 16,
     "components/agent/AgentInput.vue": 3,
     "components/agent/ApprovalCard.vue": 11,
     "components/agent/PlanTree.vue": 8,

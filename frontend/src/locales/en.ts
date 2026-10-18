@@ -695,7 +695,12 @@ export default {
     planRejectedMessage: 'The plan was rejected again (no re-plan attempts left); the task has been terminated',
     planEditInvalid: 'The edited content is invalid — check step descriptions/dependencies and retry',
     planFailed: 'Failed to submit the plan decision; task state refreshed',
-    planPendingHint: 'The task is awaiting plan approval — approve / edit / reject the plan above first (or cancel the task)'
+    planPendingHint: 'The task is awaiting plan approval — approve / edit / reject the plan above first (or cancel the task)',
+    // HITL approval mode (config panel): never / risky / always
+    approvalMode: 'Approval mode',
+    approvalNever: 'Never require approval',
+    approvalRisky: 'Approve high-risk tools only (default)',
+    approvalAlways: 'Approve all tool calls'
   },
   scheduler: {
     subtitle: 'Manage agent runs triggered on a schedule; results are available from the last run',

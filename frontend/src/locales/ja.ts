@@ -620,7 +620,12 @@ export default {
     planRejectedMessage: '計画が再度拒否されました（再計画の上限に達しました）。タスクは終了しました',
     planEditInvalid: '編集内容が不正です。ステップ（説明/依存）を確認して再試行してください',
     planFailed: '計画承認の送信に失敗しました。タスク状態を更新しました',
-    planPendingHint: 'タスクは計画の承認待ちです：まず上の計画カードで承認 / 編集 / 拒否してください（またはタスクをキャンセル）'
+    planPendingHint: 'タスクは計画の承認待ちです：まず上の計画カードで承認 / 編集 / 拒否してください（またはタスクをキャンセル）',
+    // HITL 承認モード（設定パネル）：never / risky / always
+    approvalMode: '承認モード',
+    approvalNever: '承認なし',
+    approvalRisky: '高リスクツールのみ承認（デフォルト）',
+    approvalAlways: 'すべてのツール呼び出しを承認'
   },
   scheduler: {
     subtitle: 'スケジュールで実行される Agent タスクの管理。実行結果は「前回の実行」から確認できます',

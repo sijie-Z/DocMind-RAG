@@ -17,6 +17,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { createI18n } from 'vue-i18n'
 import type { Mock } from 'vitest'
 
 vi.mock('@/utils/request', () => ({
@@ -32,6 +33,7 @@ import request from '@/utils/request'
 import { agentApi } from '@/api/agent'
 import { useAgentStore } from '@/stores/agent'
 import type { AgentConfig } from '@/types/agent'
+import zh from '@/locales/zh'
 import AgentConfigPanel from '../AgentConfigPanel.vue'
 
 const mocked = request as unknown as {
@@ -39,6 +41,13 @@ const mocked = request as unknown as {
   post: Mock
   put: Mock
   delete: Mock
+}
+
+// 面板文案已词条化（hitl.*）——mount 必须装 i18n 实例（仓内先例：agentInitContract）
+const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
+
+function mountPanel(config: AgentConfig) {
+  return mount(AgentConfigPanel, { props: { config }, global: { plugins: [i18n] } })
 }
 
 /** 内存假服务端：GET/PUT /agent/config 共享一份存储（默认 risky，同后端）。 */
@@ -79,7 +88,7 @@ function installFakeConfigServer(initial: Partial<AgentConfig> = {}) {
 async function mountPanelFromServer() {
   const res = await agentApi.getConfig()
   const config = res.data.data as AgentConfig
-  const w = mount(AgentConfigPanel, { props: { config } })
+  const w = mountPanel(config)
   // 面板默认折叠：展开后才有配置项
   await w.find('.config-header').trigger('click')
   return { w, config }
@@ -133,7 +142,7 @@ describe('AgentConfigPanel · HITL 审批模式', () => {
     expect(saved.approval_mode).toBe('always')
 
     // 回读载荷重挂载：选择器如实显示保存值
-    const w2 = mount(AgentConfigPanel, { props: { config: saved } })
+    const w2 = mountPanel(saved)
     await w2.find('.config-header').trigger('click')
     expect((w2.find('.approval-mode-select').element as HTMLSelectElement).value).toBe('always')
   })
