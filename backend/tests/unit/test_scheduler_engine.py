@@ -17,6 +17,7 @@ import app.models  # noqa: F401  # 注册全部表供 create_all
 from app.core.database import Base
 from app.models.agent_task import AgentTask, TaskStatus
 from app.models.scheduled_task import ScheduledTask, ScheduleType
+from app.models.user import User
 from app.services.scheduler import engine as engine_mod
 from app.services.scheduler.engine import (
     RunOutcome,
@@ -82,7 +83,22 @@ class _RecordingNotifier:
             raise self.exc
 
 
-async def _add_task(factory, **kw) -> str:
+async def _ensure_user(factory, user_id: int, active: bool = True) -> None:
+    """建创建者行：A4 起 due 扫描内连接 users 并核验 is_active，
+    每个调度任务都必须有真实创建者（生产口径；孤儿任务 fail-closed 不触发）。"""
+    async with factory() as db:
+        if await db.get(User, user_id) is None:
+            db.add(User(
+                id=user_id,
+                username=f"u{user_id}",
+                email=f"u{user_id}@example.com",
+                hashed_password="x",
+                is_active=active,
+            ))
+            await db.commit()
+
+
+async def _add_task(factory, creator_active: bool = True, **kw) -> str:
     params = dict(
         id="task1",
         name="日报",
@@ -96,6 +112,7 @@ async def _add_task(factory, **kw) -> str:
         organization_id=1,
     )
     params.update(kw)
+    await _ensure_user(factory, params["created_by"], active=creator_active)
     async with factory() as db:
         db.add(ScheduledTask(**params))
         await db.commit()
@@ -196,6 +213,63 @@ class TestTickDue:
         assert row.next_run_at is None
         assert row.last_status == "success"
         assert await eng.tick_once() == []  # 不再触发
+
+
+# ── A4 生命周期：停用（软删）用户的定时任务不执行 ─────────────────────
+
+
+class TestInactiveCreator:
+    @pytest.mark.asyncio
+    async def test_inactive_creator_task_not_due(self, factory):
+        """停用用户的到点任务不被扫描：不执行、不推进、不计数。"""
+        await _add_task(factory, creator_active=False)
+        ex, no = _RecordingExecutor(), _RecordingNotifier()
+        eng = _engine(factory, _Clock(), ex, no)
+        assert await eng.tick_once() == []
+        assert ex.calls == [] and no.calls == []
+        row = await _row(factory)
+        assert row.run_count == 0
+        assert row.next_run_at == NOW  # 时刻表原样保留，恢复用户后可继续
+        assert row.last_status is None
+
+    @pytest.mark.asyncio
+    async def test_active_creator_still_fires(self, factory):
+        """误伤对照：活跃创建者的任务照常触发。"""
+        await _add_task(factory)
+        ex = _RecordingExecutor()
+        eng = _engine(factory, _Clock(), ex, _RecordingNotifier())
+        assert await eng.tick_once() == ["task1"]
+        await eng.wait_for_idle()
+        assert len(ex.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_trigger_rechecks_creator_between_scan_and_fire(self, factory):
+        """扫描→触发竞态：命中后创建者被停用，触发点二次核验兜住。"""
+        await _add_task(factory)
+        async with factory() as db:
+            user = await db.get(User, 1)
+            user.is_active = False
+            await db.commit()
+        ex = _RecordingExecutor()
+        eng = _engine(factory, _Clock(), ex, _RecordingNotifier())
+        r = await eng._trigger("task1", reason="due", now=NOW)
+        assert r == {"triggered": False, "reason": "creator_inactive"}
+        assert ex.calls == []
+        assert (await _row(factory)).run_count == 0
+
+    @pytest.mark.asyncio
+    async def test_manual_run_allowed_for_inactive_creator(self, factory):
+        """显式 run-now 是授权动作（调用方已过鉴权 + 归属校验），不按创建者
+        状态拦截；自动到点路径才按 is_active 门控（停用用户无法自行登录触发）。"""
+        await _add_task(
+            factory, creator_active=False, next_run_at=NOW + timedelta(hours=1)
+        )
+        ex = _RecordingExecutor()
+        eng = _engine(factory, _Clock(), ex, _RecordingNotifier())
+        r = await eng.run_now("task1")
+        await eng.wait_for_idle()
+        assert r == {"triggered": True, "reason": "manual"}
+        assert len(ex.calls) == 1
 
 
 # ── 重叠策略：skip + 计数 + 推进（不覆盖 last_status）──────────────────

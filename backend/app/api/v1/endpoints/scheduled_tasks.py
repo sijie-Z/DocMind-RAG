@@ -9,14 +9,17 @@
 - run-now 是显式用户动作，不受 ENABLE_SCHEDULER 门控影响（门控只管自动循环）。
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user, require_organization
 from app.exceptions import ConflictError, NotFoundError, ValidationError
+from app.models.agent_task import AgentTask
 from app.models.scheduled_task import ScheduledTask, ScheduleType
 from app.models.user import User
 from app.schemas.scheduled_task import (
@@ -37,6 +40,7 @@ from app.services.scheduler.schedule import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 async def _get_owned_task(
@@ -46,12 +50,17 @@ async def _get_owned_task(
 
     超管是**全权**（读+写）——与仓内 permission_required 的上帝模式口径一致，
     属评审 MINOR-3 记录在案的设计选择。
+
+    A4：取到后先清理 last_task_id 悬空引用——本函数是所有任务回显端点
+    （详情/更新/暂停/恢复及手动触发的归属校验）的共同入口，保证这些
+    响应同样不会带出悬空 id。
     """
     task = await db.get(ScheduledTask, task_id)
     if task is None:
         raise NotFoundError(detail="定时任务不存在")
     if not current_user.is_superuser and task.created_by != current_user.id:
         raise NotFoundError(detail="定时任务不存在")
+    await _clear_dangling_last_task_ids(db, [task])
     return task
 
 
@@ -62,6 +71,90 @@ def _resolve_timezone(raw: str | None) -> str:
     except CronError as exc:
         raise ValidationError(detail=str(exc)) from None
     return name
+
+
+async def _clear_dangling_last_task_ids(
+    db: AsyncSession, tasks: list[ScheduledTask]
+) -> None:
+    """A4 生命周期：清理 last_task_id 悬空引用（指向的 agent 任务已删除时置 NULL）。
+
+    last_task_id 的语义是「最近一次运行对应的 agent_tasks.id（结果链接）」；
+    agent 任务历史被删除/清理（运维保留策略或未来新增的删除入口）后，引用
+    不再可解析。这里选择**置 NULL**，而不是保留 id + 标注「已删除」：
+    - 悬空 id 对消费方没有任何信息量，只会让结果弹层深链到 404；
+    - 运行事实由 last_run_at / last_status / last_error 独立保留，
+      置 NULL 不会丢失「跑过、结果如何」的记录；
+    - 避免为「已删除」标注新增 schema 字段与前端分支（前端对空引用
+      已有「结果不可用」的诚实渲染）。
+
+    实现要点：
+    - **CAS 更新**：仅当库内值仍是本次读到的悬空值时才置 NULL——与引擎
+      `_execute_and_finalize` 并发时，若其刚写入新的有效 last_task_id，
+      CAS 匹配 0 行，不覆盖有效链接；
+    - **fail-open 降级**：对账是读取路径的附属清理，任何失败只告警并保留
+      原值（下次读取重试），绝不把只读请求变成 500；
+    - 读取（列表/详情及其它回显任务的端点）时惰性对账，应用内与外部
+      两类删除路径都被覆盖。
+    """
+    candidates = {t.id: t.last_task_id for t in tasks if t.last_task_id}
+    if not candidates:
+        return
+    try:
+        existing = set(
+            (
+                await db.execute(
+                    select(AgentTask.id).where(
+                        AgentTask.id.in_(set(candidates.values()))
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        dangling = {
+            task_id: ref
+            for task_id, ref in candidates.items()
+            if ref not in existing
+        }
+        if not dangling:
+            return
+        for task_id, ref in dangling.items():
+            await db.execute(
+                update(ScheduledTask)
+                .where(
+                    ScheduledTask.id == task_id,
+                    ScheduledTask.last_task_id == ref,
+                )
+                .values(last_task_id=None)
+            )
+        await db.commit()
+    except Exception as exc:  # 对账失败降级：保留原值，不阻塞读取
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        logger.warning(
+            f"last_task_id 悬空引用清理失败（降级保留原值，下次读取重试）: {exc}"
+        )
+        # rollback 会过期请求会话内**全部**已加载实例（expire_on_commit=False
+        # 只作用于 commit）。不恢复的话，响应序列化 / 端点后续读取会在同步
+        # 上下文触发惰性加载：列表/详情抛 DetachedInstanceError，pause 等
+        # 抛 MissingGreenlet —— 只读端点照样 500，fail-open 名存实亡。
+        # 逐个 refresh 把已加载行恢复为库内现值（悬空引用保留，下次再试）。
+        for task in tasks:
+            try:
+                await db.refresh(task)
+            except Exception as refresh_exc:
+                logger.warning(
+                    f"定时任务 {getattr(task, 'id', '?')} 对账失败后属性恢复失败"
+                    f"（该行响应可能不可序列化）: {refresh_exc}"
+                )
+        return
+    # Core UPDATE 不走 ORM 属性同步（updated_at 由库侧 onupdate 生成），
+    # 在响应序列化（同步上下文）前异步刷新，避免属性过期触发 MissingGreenlet。
+    for task in tasks:
+        if task.id in candidates and candidates[task.id] not in existing:
+            await db.refresh(task)
 
 
 @router.post("/", response_model=ScheduledTaskResponse)
@@ -135,6 +228,7 @@ async def list_scheduled_tasks(
         .scalars()
         .all()
     )
+    await _clear_dangling_last_task_ids(db, list(rows))
     return {"items": rows, "total": total}
 
 

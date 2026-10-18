@@ -34,6 +34,7 @@ from app.models.scheduled_task import (
     ScheduleRunStatus,
     ScheduleType,
 )
+from app.models.user import User
 from app.services.scheduler.schedule import (
     ScheduleSpecError,
     as_naive_utc,
@@ -251,13 +252,22 @@ class SchedulerEngine:
             await asyncio.gather(*runs, return_exceptions=True)
 
     async def _load_due_ids(self, now: datetime) -> list[str]:
+        """扫描到点任务 id；创建者已停用（软删）的任务一律不进入触发队列。
+
+        A4 生命周期：用户删除是软删（users.is_active=False），其定时任务行
+        不会随之改写，因此必须在调度查询侧按创建者状态过滤——否则已删除
+        用户的自动化会继续以该用户身份执行。内连接同时 fail-closed：
+        创建者行缺失（孤儿数据）同样不触发。
+        """
         async with self._session() as db:
             result = await db.execute(
                 select(ScheduledTask.id)
+                .join(User, ScheduledTask.created_by == User.id)
                 .where(
                     ScheduledTask.enabled.is_(True),
                     ScheduledTask.next_run_at.isnot(None),
                     ScheduledTask.next_run_at <= now,
+                    User.is_active.is_(True),
                 )
                 .order_by(ScheduledTask.next_run_at)
             )
@@ -277,6 +287,17 @@ class SchedulerEngine:
                     next_run = as_naive_utc(task.next_run_at)
                     if not task.enabled or next_run is None or next_run > now:
                         return {"triggered": False, "reason": "not_due"}
+                    # A4 生命周期：到点路径在触发点二次核验创建者状态。扫描
+                    # （_load_due_ids）与触发之间存在窗口——扫描命中后用户
+                    # 被停用/删除的竞态由这里兜住，绝不以其身份自动执行。
+                    # 手动 run-now（reason="manual"）是显式授权动作，不受此限。
+                    creator_active = (
+                        await db.execute(
+                            select(User.is_active).where(User.id == task.created_by)
+                        )
+                    ).scalar_one_or_none()
+                    if creator_active is not True:
+                        return {"triggered": False, "reason": "creator_inactive"}
 
                 live = self._in_flight.get(task_id)
                 if live is not None and not live.done():
