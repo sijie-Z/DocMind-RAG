@@ -276,7 +276,7 @@ export default {
   validation: {
     required: 'この項目は必須です',
     email: '有効なメールアドレスを入力してください',
-    passwordLength: 'パスワードは6文字以上で入力してください',
+    passwordLength: 'パスワードは8文字以上で入力してください',
     passwordMismatch: 'パスワードが一致しません',
     usernameLength: 'ユーザー名は3文字以上で入力してください',
     emailInvalid: 'メールアドレスの形式が正しくありません'
