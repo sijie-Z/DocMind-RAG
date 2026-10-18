@@ -65,9 +65,14 @@ def test_a3_migration_single_head_chain_and_stepwise_downgrade(
     )
     cfg = _cfg()
 
-    # 单一 head，且是我们的迁移（A2+A3 合并后不允许出现两个 head）
+    # 单一 head（A2+A3 合并不允许出现多头）；A3 必须仍在主链上——
+    # 允许后续迁移（如 C3a 的 010_agent_tool_calls）接在 A3 之后成为新 head，
+    # 但不允许旁路 A3/A2 形成分叉。
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == [A3_REV]
+    heads = script.get_heads()
+    assert len(heads) == 1, f"迁移必须单头，实际 {heads}"
+    chain = [rev.revision for rev in script.iterate_revisions(heads[0], "base")]
+    assert A3_REV in chain and A2_REV in chain
 
     command.upgrade(cfg, PREV_REV)
     assert "local_fallback" not in _columns(db_path, "knowledge_processing_jobs")
