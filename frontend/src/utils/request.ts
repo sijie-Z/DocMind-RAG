@@ -227,6 +227,23 @@ async function doRefreshAccessToken(): Promise<string> {
   return accessToken
 }
 
+// 共享的单飞续期：路由守卫与 401 拦截器复用同一个进行中的刷新，
+// 并发触发（含刷新期间到达的多个守卫/请求）只发一次 /auth/refresh。
+let refreshPromise: Promise<string> | null = null
+
+/**
+ * 静默续期入口（供路由守卫等非请求链路复用）。
+ * 并发调用共享同一个 Promise；失败时向所有等待方抛出同一错误，结束后复位以便下次重试。
+ */
+export function silentRefreshAccessToken(): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = doRefreshAccessToken().finally(() => {
+      refreshPromise = null
+    })
+  }
+  return refreshPromise
+}
+
 // 响应拦截器
 request.interceptors.response.use(
   (response: AxiosResponse) => {
@@ -290,7 +307,8 @@ request.interceptors.response.use(
               isRefreshing = true
               originalRequest._retry = true
               try {
-                const newToken = await doRefreshAccessToken()
+                // 与路由守卫共用同一续期（单飞）：守卫与 401 同时触发也只发一次刷新
+                const newToken = await silentRefreshAccessToken()
                 request.defaults.headers.common['Authorization'] = `Bearer ${newToken}`
                 const userStore = useUserStore()
                 userStore.token = newToken
