@@ -159,6 +159,56 @@ async def test_mark_failed_writes_document_and_job_failed(monkeypatch):
     assert len(commits) == 2, "doc 与 job 各提交一次（两次独立 session）"
 
 
+@pytest.mark.asyncio
+async def test_mark_success_single_commit_covers_doc_and_job(monkeypatch):
+    """N3（独立对抗评审）：doc 条件写与 job SUCCESS 必须同一次 commit。
+
+    若拆成两个 session/commit，「文档已 INDEXED、job 仍 QUEUED」的中间态
+    会重新出现（启动对账/重投可据此重复处理）。变异点：把 job 写入拆到
+    第二个 session → commits == 2，本用例红。
+    """
+    import app.worker.doc_processor as dp_mod
+    from app.models.knowledge_job import KnowledgeJobStatus
+
+    job = SimpleNamespace(
+        status=KnowledgeJobStatus.PROCESSING,
+        error_message=None,
+        finished_at=None,
+    )
+    commits = []
+
+    class _Result:
+        rowcount = 1
+
+    class _Session:
+        async def execute(self, stmt):
+            return _Result()
+
+        async def get(self, model, pk):
+            return job
+
+        async def commit(self):
+            commits.append(True)
+
+    class _Ctx:
+        async def __aenter__(self):
+            return _Session()
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(dp_mod, "AsyncSessionLocal", lambda: _Ctx())
+
+    chunks = [{"chunk_text": "hello", "chunk_index": 0, "chunk_length": 5}]
+    await DocumentProcessor()._mark_success("doc-1", chunks, job_id=7)
+
+    assert len(commits) == 1, (
+        "doc 与 job 终态必须在同一事务提交；拆成两次 commit 会留下中间态窗口"
+    )
+    assert job.status == KnowledgeJobStatus.SUCCESS
+    assert job.finished_at is not None
+
+
 # ── 图片 OCR 链路（worker 级；仅引擎与边界服务用替身）────────────────
 
 def _make_image_doc(tmp_path, monkeypatch, engine_result):

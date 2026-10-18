@@ -121,6 +121,17 @@ class TestRebuildOrdering:
             "条件更新应把状态写为 PENDING"
         )
 
+        job_obj = next(
+            e[1]
+            for e in events
+            if isinstance(e, tuple)
+            and e[0] == "add"
+            and isinstance(e[1], KnowledgeProcessingJob)
+        )
+        assert job_obj.local_fallback is False, (
+            "N4：Kafka 投递确认后必须清除本机兜底标记（否则重启会重复本地调度）"
+        )
+
     @pytest.mark.asyncio
     async def test_rebuild_fallback_marker_persisted_before_schedule(self, monkeypatch):
         """Kafka 不可用：调度前必须已有「job 带 local_fallback=True」的 commit。"""
@@ -278,4 +289,7 @@ class TestUploadJobPersistedBeforeSend:
         assert job_add_at < send_at, "job 必须在发送前写入"
         assert "commit" in events[job_add_at + 1:send_at], (
             "job 必须在发送前 commit（仅 flush 不算）"
+        )
+        assert jobs[0].local_fallback is False, (
+            "N4：Kafka 投递确认后必须清除本机兜底标记"
         )

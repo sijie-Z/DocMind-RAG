@@ -224,6 +224,75 @@ class TestStaleRedeliveryEndToEnd:
         )
 
     @pytest.mark.asyncio
+    async def test_superseded_failed_job_redelivery_keeps_indexed(
+        self, session_factory, monkeypatch
+    ):
+        """N1：失败 job 的重投，若期间已有更新的 job 成功 → 旧 run 不得再碰文档。
+
+        旧 job 状态是 FAILED（失败重试是设计内路径），因此不能只看 job 状态；
+        必须比较 job 代次：存在更新 job 时，旧消息已被取代。
+        """
+        doc_id = await _seed(session_factory, DocumentStatus.INDEXED)
+        old_job_id = await _seed_job(
+            session_factory, doc_id, KnowledgeJobStatus.FAILED
+        )
+        await _seed_job(session_factory, doc_id, KnowledgeJobStatus.SUCCESS)
+        processor = DocumentProcessor()
+        parsed = []
+
+        async def fake_lock(_document_id):
+            return True
+
+        async def fake_release(_document_id):
+            pass
+
+        async def failing_parse(*_a, **_k):
+            parsed.append(True)
+            raise RuntimeError("embedding service 503")
+
+        monkeypatch.setattr(processor, "_acquire_processing_lock", fake_lock)
+        monkeypatch.setattr(processor, "_release_processing_lock", fake_release)
+        monkeypatch.setattr(processor.parser, "parse_document", failing_parse)
+
+        outcome = await processor.process(doc_id, old_job_id)
+
+        assert outcome is True, "被更新 job 取代的旧消息应视为已了结"
+        assert parsed == [], "被取代的旧 run 不得进入解析"
+        doc = await _load(session_factory, doc_id)
+        assert doc.status == DocumentStatus.INDEXED
+
+    @pytest.mark.asyncio
+    async def test_latest_failed_job_still_retries(
+        self, session_factory, monkeypatch
+    ):
+        """回归对照：没有更新 job 时，FAILED job 的重投必须继续重试（不能一刀切跳过）。"""
+        doc_id = await _seed(session_factory, DocumentStatus.FAILED)
+        job_id = await _seed_job(
+            session_factory, doc_id, KnowledgeJobStatus.FAILED
+        )
+        processor = DocumentProcessor()
+        parsed = []
+
+        async def fake_lock(_document_id):
+            return True
+
+        async def fake_release(_document_id):
+            pass
+
+        async def failing_parse(*_a, **_k):
+            parsed.append(True)
+            raise RuntimeError("retry still failing")
+
+        monkeypatch.setattr(processor, "_acquire_processing_lock", fake_lock)
+        monkeypatch.setattr(processor, "_release_processing_lock", fake_release)
+        monkeypatch.setattr(processor.parser, "parse_document", failing_parse)
+
+        outcome = await processor.process(doc_id, job_id)
+
+        assert outcome is False, "最新 FAILED job 的重投必须真正重试并如实报告失败"
+        assert parsed == [True]
+
+    @pytest.mark.asyncio
     async def test_missing_document_terminalizes_orphan_job(
         self, session_factory, monkeypatch
     ):

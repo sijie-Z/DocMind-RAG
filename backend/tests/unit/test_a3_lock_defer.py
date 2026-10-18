@@ -319,6 +319,58 @@ class TestLockHeartbeat:
         assert events == ["release"], "锁丢失后不得再写成功/失败终态"
 
     @pytest.mark.asyncio
+    async def test_lock_lost_after_success_still_runs_graph_extraction(self, monkeypatch):
+        """N2：成功已提交后锁才丢失，不得返回 DEFERRED 永久跳过图谱抽取。"""
+        processor = _make_processor()
+        events = []
+
+        async def fake_lock(_document_id):
+            return True
+
+        async def fake_load(document_id, _job_id):
+            return SimpleNamespace(
+                file_path="f", organization_id="1", id=document_id
+            )
+
+        async def fake_parse(*_a, **_k):
+            return {
+                "chunks": [{"chunk_text": "hi", "chunk_index": 0, "chunk_length": 2}]
+            }
+
+        async def fake_embeddings(texts):
+            return [[1.0]]
+
+        async def fake_replace(*_a, **_k):
+            pass
+
+        async def fake_success(*_a, **_k):
+            # 模拟心跳在成功写入后才把锁丢失标记写进集合
+            processor._lock_lost.add("doc-1")
+            events.append("success")
+
+        async def fake_graph(*_a, **_k):
+            events.append("graph")
+
+        async def fake_release(_document_id):
+            events.append("release")
+
+        monkeypatch.setattr(processor, "_acquire_processing_lock", fake_lock)
+        monkeypatch.setattr(processor, "_load_and_mark_parsing", fake_load)
+        monkeypatch.setattr(processor.parser, "parse_document", fake_parse)
+        monkeypatch.setattr(processor, "_get_embeddings", fake_embeddings)
+        monkeypatch.setattr(processor, "_replace_document_state", fake_replace)
+        monkeypatch.setattr(processor, "_mark_success", fake_success)
+        monkeypatch.setattr(processor, "_extract_graph_safely", fake_graph)
+        monkeypatch.setattr(processor, "_release_processing_lock", fake_release)
+
+        outcome = await processor.process("doc-1", 7)
+
+        assert outcome is True
+        assert events == ["success", "graph", "release"], (
+            "成功已提交后不得因锁丢失返回 DEFERRED；图谱抽取必须照常执行"
+        )
+
+    @pytest.mark.asyncio
     async def test_process_starts_and_cancels_heartbeat(self, monkeypatch):
         """process 持锁期间必须挂心跳；结束时必须取消（不留后台任务）。"""
         from app.worker.doc_processor import DEFERRED  # noqa: F401 - 契约导出

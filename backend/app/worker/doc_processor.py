@@ -285,7 +285,10 @@ class DocumentProcessor:
             await self._replace_document_state(doc, chunks_data, embeddings)
             self._checkpoint(document_id, notify)
             await self._mark_success(document_id, chunks_data, job_id)
-            self._checkpoint(document_id, notify)
+            # 注意：这里只刷新进度心跳，不再做锁归属检查——INDEXED/job SUCCESS
+            # 已经提交，锁在成功后被接管不影响终态；若在此抛 DEFERRED，会永久
+            # 跳过下面的图谱抽取（重投会因 job SUCCESS 走 STALE_RUN）。
+            notify()
             # 图谱抽取（GraphRAG 写链 a8a3d155）：放在 INDEXED 落库之后、独立
             # try/except 内（见 _extract_graph_safely）——抽取失败/LLM 不可用
             # 不得把已成功的文档拖成 FAILED。
@@ -342,16 +345,39 @@ class DocumentProcessor:
                 return None
 
             job = None
+            latest_job_id = None
             if job_id:
                 job = await session.get(KnowledgeProcessingJob, job_id)
-            if (job is not None and job.status == KnowledgeJobStatus.SUCCESS) or (
-                job is None and doc.status == DocumentStatus.INDEXED
+                # 该文档当前最新 job 的代次：比本消息 job 更新的 job 已存在时，
+                # 本消息属于被取代的旧 run（如失败重投期间用户已重建成功），
+                # 不得再进入 PARSING/FAILED（否则会把 INDEXED 终态打回）。
+                latest_job_id = (
+                    await session.execute(
+                        select(KnowledgeProcessingJob.id)
+                        .where(
+                            KnowledgeProcessingJob.document_id == document_id
+                        )
+                        .order_by(KnowledgeProcessingJob.id.desc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+            superseded = (
+                latest_job_id is not None
+                and job_id is not None
+                and latest_job_id > job_id
+            )
+            if (
+                (job is not None and job.status == KnowledgeJobStatus.SUCCESS)
+                or superseded
+                or (job is None and doc.status == DocumentStatus.INDEXED)
             ):
                 logger.info(
-                    "[DOC_PROC] skip stale run (job SUCCESS or duplicate delivery of "
-                    "INDEXED document) document_id=%s job_id=%s",
+                    "[DOC_PROC] skip stale run (job SUCCESS / superseded by newer job "
+                    "/ duplicate delivery of INDEXED document) document_id=%s "
+                    "job_id=%s latest_job_id=%s",
                     document_id,
                     job_id,
+                    latest_job_id,
                 )
                 return STALE_RUN
 
