@@ -122,6 +122,11 @@ export default {
     initialPassword: 'Mot de passe initial'
   },
   org: {
+    current: 'Organisation actuelle',
+    switchOrganization: 'Changer d\'organisation',
+    switchSuccess: 'Organisation changée',
+    switchFailed: 'Échec du changement d\'organisation',
+    noOrganizations: 'Aucune organisation',
     title: 'Organigramme',
     subtitle: 'Gérer la structure et la hiérarchie du système',
     searchPlaceholder: 'Rechercher une organisation...',
@@ -510,6 +515,12 @@ export default {
     },
   },
   menu: {
+    groupWorkspace: 'Espace de travail',
+    groupConversation: 'Conversation',
+    groupKnowledge: 'Connaissances',
+    groupAutomation: 'Automatisation',
+    groupPrompts: 'Prompts',
+    groupManagement: 'Gestion',
     home: 'Accueil',
     chat: 'Chat Intelligent',
     search: 'Recherche Sémantique',
