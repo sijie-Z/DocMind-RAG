@@ -622,7 +622,51 @@ export default {
     detail: 'Detail',
     loadFailed: 'Load Failed',
     loadFailedDesc: 'Failed to load dashboard data, please try again.',
-    retry: 'Retry'
+    retry: 'Retry',
+    startTitle: 'Get Started',
+    startDesc: 'Pick an entry point and jump right in',
+    startNewChat: 'New Chat',
+    startNewChatDesc: 'Chat with the AI assistant and get answers with citations from your knowledge base',
+    startUpload: 'Upload Documents',
+    startUploadDesc: 'Upload PDFs, Word files and more — parsed and indexed automatically',
+    startAgent: 'Create Agent',
+    startAgentDesc: 'Let an agent plan and execute multi-step tasks',
+    overview: 'Overview',
+    overviewDesc: 'Your usage at a glance',
+    demoData: 'Load Demo Data',
+    onboarding: {
+      title: 'Getting Started',
+      subtitle: 'Complete these 4 steps to get up and running with DocMind',
+      progress: 'Completed {done}/{total}',
+      stepLabel: 'Step {index}',
+      skip: 'Skip',
+      show: 'View checklist',
+      refresh: 'Re-check',
+      skippedHint: 'Skipped — resume anytime',
+      done: 'Done',
+      steps: {
+        model: {
+          title: 'Connect a model',
+          desc: 'The platform model is ready for Q&A',
+          hint: 'No available model detected. Ask your administrator to configure one, then click "Re-check".'
+        },
+        knowledge: {
+          title: 'Create a knowledge base',
+          desc: 'Upload your first document to build your knowledge base',
+          action: 'Open knowledge base'
+        },
+        upload: {
+          title: 'Upload documents',
+          desc: 'Documents are parsed and indexed for AI retrieval',
+          action: 'Upload'
+        },
+        chat: {
+          title: 'Ask your first question',
+          desc: 'Ask a question and get an answer with citations',
+          action: 'Ask now'
+        }
+      }
+    }
   },
   monitoring: {
     refresh: 'Refresh Data',

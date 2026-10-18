@@ -571,7 +571,51 @@ export default {
     detail: '詳細',
     loadFailed: '読み込みに失敗しました',
     loadFailedDesc: 'ダッシュボードデータの読み込みに失敗しました。再試行してください。',
-    retry: '再試行'
+    retry: '再試行',
+    startTitle: 'はじめましょう',
+    startDesc: '入口を選んで、すぐに始められます',
+    startNewChat: '新しい会話',
+    startNewChatDesc: 'AI アシスタントと対話し、ナレッジベースに基づく引用付きの回答を得られます',
+    startUpload: 'ドキュメントをアップロード',
+    startUploadDesc: 'PDF や Word などをアップロードすると、自動で解析・インデックス化されます',
+    startAgent: 'Agent を作成',
+    startAgentDesc: 'Agent に複数ステップのタスクを計画・実行させます',
+    overview: 'データ概要',
+    overviewDesc: '利用状況をひと目で確認',
+    demoData: 'サンプルデータを読み込む',
+    onboarding: {
+      title: 'はじめに',
+      subtitle: '次の 4 ステップで DocMind をすぐに使い始められます',
+      progress: '完了 {done}/{total}',
+      stepLabel: 'ステップ {index}',
+      skip: 'スキップ',
+      show: 'チェックリストを表示',
+      refresh: '再確認',
+      skippedHint: 'スキップ済み — いつでも再開できます',
+      done: '完了',
+      steps: {
+        model: {
+          title: 'モデルを接続',
+          desc: 'プラットフォームのモデルは質問応答に利用できます',
+          hint: '利用可能なモデルが検出されません。管理者に設定を依頼し、「再確認」をクリックしてください。'
+        },
+        knowledge: {
+          title: 'ナレッジベースを作成',
+          desc: '最初の資料をアップロードして、自分専用のナレッジベースを作成します',
+          action: 'ナレッジベースへ'
+        },
+        upload: {
+          title: 'ドキュメントをアップロード',
+          desc: 'ドキュメントは解析・インデックス化され、AI の検索対象になります',
+          action: 'アップロード'
+        },
+        chat: {
+          title: '最初の質問',
+          desc: '質問をすると、引用付きの回答が得られます',
+          action: '質問する'
+        }
+      }
+    }
   },
   monitoring: {
     refresh: 'データを更新',

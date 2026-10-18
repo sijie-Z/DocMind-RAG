@@ -571,7 +571,51 @@ export default {
     detail: 'Détail',
     loadFailed: 'Échec du chargement',
     loadFailedDesc: 'Impossible de charger les données du tableau de bord. Veuillez réessayer.',
-    retry: 'Réessayer'
+    retry: 'Réessayer',
+    startTitle: 'Commencez',
+    startDesc: 'Choisissez un point d’entrée et lancez-vous',
+    startNewChat: 'Nouvelle conversation',
+    startNewChatDesc: 'Discutez avec l’assistant IA et obtenez des réponses citées depuis votre base de connaissances',
+    startUpload: 'Importer des documents',
+    startUploadDesc: 'Importez des PDF, Word et plus encore — analysés et indexés automatiquement',
+    startAgent: 'Créer un agent',
+    startAgentDesc: 'Laissez un agent planifier et exécuter des tâches multi-étapes',
+    overview: 'Aperçu',
+    overviewDesc: 'Votre utilisation en un coup d’œil',
+    demoData: 'Charger des données de démo',
+    onboarding: {
+      title: 'Premiers pas',
+      subtitle: 'Suivez ces 4 étapes pour démarrer avec DocMind',
+      progress: 'Terminé {done}/{total}',
+      stepLabel: 'Étape {index}',
+      skip: 'Passer',
+      show: 'Voir la liste',
+      refresh: 'Revérifier',
+      skippedHint: 'Passé — reprenez à tout moment',
+      done: 'Terminé',
+      steps: {
+        model: {
+          title: 'Connecter un modèle',
+          desc: 'Le modèle de la plateforme est prêt pour les questions-réponses',
+          hint: 'Aucun modèle disponible détecté. Demandez à votre administrateur de le configurer, puis cliquez sur « Revérifier ».'
+        },
+        knowledge: {
+          title: 'Créer une base de connaissances',
+          desc: 'Importez votre premier document pour créer votre base de connaissances',
+          action: 'Ouvrir la base'
+        },
+        upload: {
+          title: 'Importer des documents',
+          desc: 'Les documents sont analysés et indexés pour la recherche IA',
+          action: 'Importer'
+        },
+        chat: {
+          title: 'Première question',
+          desc: 'Posez une question et obtenez une réponse avec citations',
+          action: 'Poser une question'
+        }
+      }
+    }
   },
   monitoring: {
     refresh: 'Actualiser les données',

@@ -134,6 +134,9 @@ export interface UserStats {
   storage_used: number
   storage_limit?: number
   activity_trend?: number[]
+  /** issue #301：查询失败时的诚实降级标记（200 + 全零），消费方不得当作真实 0 */
+  degraded?: boolean
+  reason?: string
 }
 
 export interface Activity {
