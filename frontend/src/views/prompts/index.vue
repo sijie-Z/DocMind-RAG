@@ -131,8 +131,8 @@
               <div class="flex items-start justify-between">
                 <div class="flex-1">
                   <div class="flex items-center gap-2 mb-2">
-                    <n-tag :type="item.is_system ? 'info' : 'success'" size="small" round :bordered="false">
-                      {{ item.is_system ? '系统' : '自定义' }}
+                    <n-tag :type="scopeTagType(item)" size="small" round :bordered="false">
+                      {{ scopeLabel(item) }}
                     </n-tag>
                     <n-tag v-if="item.category" size="small" round type="warning" :bordered="false">
                       {{ getCategoryLabel(item.category) }}
@@ -147,6 +147,20 @@
                 </div>
 
                 <div class="flex flex-col gap-2 ml-4">
+                  <n-tooltip trigger="hover">
+                    <template #trigger>
+                      <div class="flex items-center justify-end gap-2">
+                        <n-switch
+                          :value="item.is_active"
+                          size="small"
+                          :disabled="activationDisabled(item)"
+                          :aria-label="t('prompts.activationToggle')"
+                          @update:value="(value: boolean) => toggleActive(item, value)"
+                        />
+                      </div>
+                    </template>
+                    <span class="text-xs">{{ activationHint(item) }}</span>
+                  </n-tooltip>
                   <n-button type="primary" size="small" @click="handleUse(item)">
                     <template #icon><n-icon><PlayOutline /></n-icon></template>
                     应用到对话
@@ -182,6 +196,17 @@
         <n-form :model="formModel" ref="formRef" :rules="rules" label-placement="top">
           <n-form-item label="模板名称" path="name">
             <n-input v-model:value="formModel.name" placeholder="给模板起个名字" maxlength="50" show-count />
+          </n-form-item>
+          <n-form-item v-if="!editingId" :label="t('prompts.scopeLabel')">
+            <div class="flex flex-col gap-1">
+              <n-radio-group v-model:value="formModel.scope">
+                <n-space>
+                  <n-radio value="organization">{{ t('prompts.scope.organization') }}</n-radio>
+                  <n-radio value="personal">{{ t('prompts.scope.personal') }}</n-radio>
+                </n-space>
+              </n-radio-group>
+              <span class="text-xs text-gray-400">{{ t('prompts.scopeHint') }}</span>
+            </div>
           </n-form-item>
           <n-form-item label="分类" path="category">
             <n-radio-group v-model:value="formModel.category" name="categoryGroup">
@@ -273,11 +298,13 @@ import { getErrorMessage } from '@/utils/apiError'
 import { useI18n } from 'vue-i18n'
 import { AddOutline, TrashOutline, CreateOutline, CopyOutline, SparklesOutline, SearchOutline, DocumentTextOutline, PlayOutline, TimeOutline } from '@vicons/ionicons5'
 import { getPrompts, createPrompt, updatePrompt, deletePrompt, seedDefaultPrompts, getPromptVersions, restorePromptVersion, type PromptTemplate, type PromptTemplateVersion } from '@/api/prompt'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
 const message = useDedupedMessage()
 const dialog = useDialog()
 const { t } = useI18n()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const loadError = ref(false)
@@ -296,14 +323,58 @@ const versionsLoading = ref(false)
 const versions = ref<PromptTemplateVersion[]>([])
 const currentVersion = ref(1)
 
-const formModel = ref({
+type EditablePromptScope = 'organization' | 'personal'
+
+const formModel = ref<{
+  name: string
+  content: string
+  description: string
+  category: string
+  is_active: boolean
+  scope: EditablePromptScope
+  change_note: string
+}>({
   name: '',
   content: '',
   description: '',
   category: 'general',
   is_active: true,
+  scope: 'organization',
   change_note: '',
 })
+
+// B4（D6）：三层模板的展示/激活权限镜像后端语义（后端仍为最终裁决）。
+const scopeLabel = (item: PromptTemplate) => {
+  if (item.is_system || item.scope === 'system') return t('prompts.scope.system')
+  if (item.scope === 'personal') return t('prompts.scope.personal')
+  return t('prompts.scope.organization')
+}
+
+const scopeTagType = (item: PromptTemplate) =>
+  item.is_system || item.scope === 'system' ? 'info' : item.scope === 'personal' ? 'warning' : 'success'
+
+const activationDisabled = (item: PromptTemplate) => {
+  if (item.is_system || item.scope === 'system') return true
+  if (item.scope === 'personal') return false
+  return !userStore.isAdmin
+}
+
+const activationHint = (item: PromptTemplate) => {
+  if (item.is_system || item.scope === 'system') return t('prompts.activationSystemReadonly')
+  if (item.scope === 'personal') return t('prompts.scopeHint')
+  if (!userStore.isAdmin) return t('prompts.activationAdminOnly')
+  return t('prompts.scopeHint')
+}
+
+const toggleActive = async (item: PromptTemplate, value: boolean) => {
+  try {
+    await updatePrompt(item.id, { is_active: value })
+    item.is_active = value
+    message.success(t('prompts.activationSuccess'))
+  } catch (error: unknown) {
+    message.error(getErrorMessage(error, t('prompts.activationFailed')))
+  }
+}
 
 const rules = {
   name: { required: true, message: '请输入模板名称', trigger: 'blur' },
@@ -385,19 +456,19 @@ const loadPrompts = async () => {
 
 const handleAdd = () => {
   editingId.value = null
-  formModel.value = { name: '', content: '', description: '', category: 'general', is_active: true, change_note: '' }
+  formModel.value = { name: '', content: '', description: '', category: 'general', is_active: true, scope: 'organization', change_note: '' }
   showDrawer.value = true
 }
 
 const handleEdit = (item: PromptTemplate) => {
   editingId.value = item.id
-  formModel.value = { name: item.name, content: item.content, description: item.description || '', category: item.category, is_active: item.is_active, change_note: '' }
+  formModel.value = { name: item.name, content: item.content, description: item.description || '', category: item.category, is_active: item.is_active, scope: item.scope === 'personal' ? 'personal' : 'organization', change_note: '' }
   currentVersion.value = item.version || 1
   showDrawer.value = true
 }
 
 const handleCopy = (item: PromptTemplate) => {
-  formModel.value = { name: item.name + ' (副本)', content: item.content, description: item.description || '', category: item.category, is_active: true, change_note: '' }
+  formModel.value = { name: item.name + ' (副本)', content: item.content, description: item.description || '', category: item.category, is_active: true, scope: item.scope === 'personal' ? 'personal' : 'organization', change_note: '' }
   editingId.value = null
   showDrawer.value = true
 }

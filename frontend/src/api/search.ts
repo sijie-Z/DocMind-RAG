@@ -6,8 +6,10 @@ export interface SearchRequest {
   // KnowledgeSearchRequest 的必填字段，缺它请求 100% 422（此前搜索页
   // 即因此全程不可用）。由调用方按「用户当前组织」口径取值组包。
   organization_id: number
-  // 结果条数。schema 字段名为 top_k（ge=1, le=50，默认 settings.TOP_K_RESULTS=10）。
-  // 旧的 limit 从未被 schema 接受（pydantic 静默丢弃），勿再使用。
+  // 结果条数。schema 字段名为 top_k（ge=1, le=50）。
+  // B4（D5）：前端不再固化默认值——缺省交给后端按「组织设置 > 平台默认
+  // settings.TOP_K_RESULTS=10」解析；组织未设置时行为与旧版发送 10 完全一致。
+  // 旧字段名 limit 从未被 schema 接受（pydantic 静默丢弃），勿再使用。
   top_k?: number
   // issue #225：后端字段为 search_mode（hybrid/vector/keyword；缺省=自动路由）。
   // 旧的 search_type 字段从未在请求 schema 里出现过（一直被后端静默丢弃），不再发送。
@@ -17,13 +19,12 @@ export interface SearchRequest {
   file_types?: string[]
 }
 
-// top_k 默认值与后端 schema 对齐（settings.TOP_K_RESULTS=10，schema 上限 le=50）。
-export const SEARCH_TOP_K = 10
-
 export interface SearchPayloadInput {
   query: string
   /** 用户当前组织（必填——后端 schema 层强制） */
   organizationId: number
+  /** 显式指定结果条数；缺省 = 后端组织设置/平台默认（B4/D5） */
+  topK?: number
   /** 'auto'（或缺省）= 不发送 search_mode，走后端自动路由（issue #225 同语义） */
   searchMode?: 'auto' | 'hybrid' | 'vector' | 'keyword'
   /** 已选文件类型；空数组 = 不发送 */
@@ -33,12 +34,16 @@ export interface SearchPayloadInput {
 /**
  * 组包 /knowledge/search 请求体（P1 搜索 422 修复）。
  * 纯函数、无副作用——单测直接断言「与后端 schema 对齐」的全字段组包。
+ *
+ * B4（D5）：top_k 只在调用方显式传入时发送；缺省不发送，由后端解析
+ * 「组织设置 > settings.TOP_K_RESULTS=10」。此前前端恒发 10，会把组织设置
+ * 永久挡在门外（组织管理员改 top_k 对搜索页无效）。
  */
 export function buildSearchPayload(input: SearchPayloadInput): SearchRequest {
   return {
     query: input.query,
     organization_id: input.organizationId,
-    top_k: SEARCH_TOP_K,
+    ...(input.topK !== undefined ? { top_k: input.topK } : {}),
     // 'auto' = 自动路由：不发送该字段（与后端「缺省=自动」同语义）
     ...(input.searchMode && input.searchMode !== 'auto'
       ? { search_mode: input.searchMode }

@@ -126,43 +126,92 @@
 
             <n-popover trigger="hover" placement="top">
               <template #trigger>
-                <n-button size="tiny" quaternary circle :class="privacyMode ? 'text-green-600 dark:text-green-400' : 'text-gray-400'">
-                  <template #icon><n-icon size="18"><ShieldCheckmarkOutline /></n-icon></template>
-                </n-button>
+                <span data-testid="privacy-lock" :data-disabled="String(!orgPrivacyAllowed)">
+                  <n-button
+                    size="tiny"
+                    quaternary
+                    circle
+                    :class="privacyMode && orgPrivacyAllowed ? 'text-green-600 dark:text-green-400' : 'text-gray-400'"
+                  >
+                    <template #icon><n-icon size="18"><ShieldCheckmarkOutline /></n-icon></template>
+                  </n-button>
+                </span>
               </template>
-              <div class="flex items-center gap-2">
-                <n-switch v-model:value="privacyMode" size="small" />
-                <span class="text-xs">{{ t('chat.privacyMode') }}</span>
+              <div class="flex flex-col gap-2">
+                <div class="flex items-center gap-2">
+                  <n-switch
+                    v-model:value="privacyMode"
+                    size="small"
+                    :disabled="!orgPrivacyAllowed"
+                    data-testid="privacy-switch"
+                    :data-disabled="String(!orgPrivacyAllowed)"
+                  />
+                  <span class="text-xs">{{ t('chat.privacyMode') }}</span>
+                </div>
+                <span v-if="!orgPrivacyAllowed" class="text-xs text-gray-400" data-testid="privacy-policy-note">
+                  {{ t('chat.orgPrivacyDisabled') }}
+                </span>
               </div>
             </n-popover>
 
+            <!-- B4：传输（SSE/WS）与 Agent 开关合并为「对话模式」。
+                 Agent 依赖 SSE，开启时传输开关锁定并给出解释。 -->
             <n-popover trigger="hover" placement="top">
               <template #trigger>
-                <n-button size="tiny" quaternary circle :class="useSSE ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'">
-                  <template #icon><n-icon size="18"><RadioButtonOnOutline /></n-icon></template>
-                </n-button>
+                <span data-testid="transport-lock" :data-disabled="String(useAgent)">
+                  <n-button
+                    size="tiny"
+                    quaternary
+                    circle
+                    :class="useAgent ? 'text-purple-600 dark:text-purple-400' : (useSSE ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400')"
+                    data-testid="agent-mode-control"
+                    :data-agent="String(useAgent)"
+                  >
+                    <template #icon><n-icon size="18"><RocketOutline /></n-icon></template>
+                  </n-button>
+                </span>
               </template>
-              <div class="flex items-center gap-2">
-                <n-switch v-model:value="useSSE" size="small" />
-                <span class="text-xs">{{ t('chat.sseMode') }}</span>
+              <div class="flex flex-col gap-2">
+                <div class="flex items-center gap-2">
+                  <n-switch
+                    :value="useAgent"
+                    size="small"
+                    data-testid="agent-mode-switch"
+                    @update:value="setAgentMode"
+                  />
+                  <span class="text-xs">{{ t('chat.agentMode') }}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <n-switch
+                    v-model:value="useSSE"
+                    size="small"
+                    :disabled="useAgent"
+                    data-testid="transport-switch"
+                    :data-disabled="String(useAgent)"
+                  />
+                  <span class="text-xs">{{ t('chat.sseMode') }}</span>
+                </div>
+                <span v-if="useAgent" class="text-xs text-gray-400 max-w-[220px]" data-testid="agent-sse-note">
+                  {{ t('chat.agentRequiresSse') }}
+                </span>
               </div>
             </n-popover>
 
-            <!-- Agent mode toggle -->
-            <n-tooltip trigger="hover">
-              <template #trigger>
-                <n-button
-                  size="tiny"
-                  quaternary
-                  circle
-                  :class="useAgent ? 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20' : 'text-gray-400'"
-                  @click="toggleAgent"
-                >
-                  <template #icon><n-icon size="18"><RocketOutline /></n-icon></template>
-                </n-button>
-              </template>
-              <span>{{ useAgent ? 'Agent 模式已开启 (PER)' : '点击开启 Agent 模式' }}</span>
-            </n-tooltip>
+            <!-- 锁定态解释常驻可见：策略说明不应藏在悬浮层里。 -->
+            <span
+              v-if="useAgent"
+              class="text-[11px] text-purple-500 dark:text-purple-400 max-w-[260px] truncate"
+              data-testid="agent-sse-note-inline"
+            >
+              {{ t('chat.agentRequiresSse') }}
+            </span>
+            <span
+              v-if="!orgPrivacyAllowed"
+              class="text-[11px] text-gray-400 max-w-[260px] truncate"
+              data-testid="privacy-policy-note-inline"
+            >
+              {{ t('chat.orgPrivacyDisabled') }}
+            </span>
           </div>
 
           <div class="flex items-center gap-3">
@@ -194,7 +243,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import {
-  SendOutline, AttachOutline, FlashOutline, ShieldCheckmarkOutline, RadioButtonOnOutline,
+  SendOutline, AttachOutline, FlashOutline, ShieldCheckmarkOutline,
   StopCircleOutline, DocumentTextOutline, DocumentOutline, CloseOutline,
   CloudUploadOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldOutline,
   RocketOutline
@@ -210,19 +259,23 @@ const useSSE = defineModel<boolean>('useSSE', { default: false })
 const useStream = defineModel<boolean>('useStream', { default: true })
 const useAgent = defineModel<boolean>('useAgent', { default: false })
 
-const toggleAgent = () => {
-  useAgent.value = !useAgent.value
-  // Agent mode requires SSE
-  if (useAgent.value) useSSE.value = true
+const setAgentMode = (value: boolean) => {
+  useAgent.value = value
+  // Agent 模式依赖 SSE：开启时强制并锁定传输开关（UI 同步置灰 + 解释）
+  if (value) useSSE.value = true
 }
 
-defineProps<{
+withDefaults(defineProps<{
   isLoading: boolean
   attachedFiles: AttachedFile[]
   attachedFileIds: string[]
   connectionStatus: string
   connectionStatusText: string
-}>()
+  /** 组织策略是否允许隐私模式（B4/D5）；默认允许，保持既有行为 */
+  orgPrivacyAllowed?: boolean
+}>(), {
+  orgPrivacyAllowed: true,
+})
 
 const emit = defineEmits<{
   send: []

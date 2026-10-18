@@ -25,6 +25,16 @@ class PromptTemplate(Base):
     description: Mapped[str | None] = mapped_column(String(255), comment="模板描述")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="是否激活")
     is_system: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否为系统内置")
+    # B4（D6）：模板层级。system=系统内置（org NULL，全组织只读）；
+    # organization=组织模板（组织成员可见，激活需组织管理员）；
+    # personal=个人模板（仅创建者可见/可激活，只影响自己）。
+    # server_default 让存量行在迁移窗口内可读；迁移会把 is_system=1 的行回填为 system。
+    scope: Mapped[str] = mapped_column(
+        String(16),
+        default="organization",
+        server_default="organization",
+        comment="模板层级：system / organization / personal",
+    )
     # 租户边界（A2 P0）：NULL = 系统内置模板（全组织只读可见）；非空 = 该组织私有。
     organization_id: Mapped[int | None] = mapped_column(
         Integer,

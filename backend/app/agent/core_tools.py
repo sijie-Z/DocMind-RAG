@@ -1157,6 +1157,7 @@ async def list_prompt_templates(
     category: str | None = None,
     limit: int = 20,
     organization_id: int | None = None,
+    user_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
     from sqlalchemy import and_, or_, select
@@ -1166,14 +1167,28 @@ async def list_prompt_templates(
 
     # A2 P0（租户边界）：提示词已按组织私有（org=NULL 仅系统模板只读可见），
     # 该工具默认对 Agent 开放，必须同源过滤，否则可枚举其他组织的私有模板。
+    # B4（D6）：个人模板只对创建者可见，不得经 Agent 工具泄露给组织其他成员。
     if organization_id is None:
         return _missing_organization_result("list_prompt_templates")
+
+    org_visible = and_(
+        PromptTemplate.organization_id == organization_id,
+        or_(
+            PromptTemplate.scope == "organization",
+            and_(
+                PromptTemplate.scope == "personal",
+                PromptTemplate.creator_id == user_id,
+            ),
+        )
+        if user_id is not None
+        else PromptTemplate.scope == "organization",
+    )
 
     async with AsyncSessionLocal() as session:
         stmt = select(PromptTemplate).where(
             PromptTemplate.is_active,
             or_(
-                PromptTemplate.organization_id == organization_id,
+                org_visible,
                 and_(
                     PromptTemplate.is_system.is_(True),
                     PromptTemplate.organization_id.is_(None),
@@ -1191,7 +1206,12 @@ async def list_prompt_templates(
 
     output = []
     for tpl in templates:
-        scope = "system" if tpl.is_system else "user"
+        if tpl.is_system:
+            scope = "system"
+        elif tpl.scope == "personal":
+            scope = "personal"
+        else:
+            scope = "organization"
         output.append(f"- [{tpl.category}] {tpl.name} ({scope}) — {tpl.description or 'No description'}")
     return "\n".join(output)
 
@@ -1218,6 +1238,7 @@ async def list_prompt_templates(
 async def get_prompt_template(
     name: str,
     organization_id: int | None = None,
+    user_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
     from sqlalchemy import and_, or_, select
@@ -1226,8 +1247,22 @@ async def get_prompt_template(
     from app.models.prompt import PromptTemplate
 
     # A2 P0（租户边界）：只能读取本组织模板或系统内置模板，禁止跨租户读取全文。
+    # B4（D6）：个人模板仅创建者可读。
     if organization_id is None:
         return _missing_organization_result("get_prompt_template")
+
+    org_visible = and_(
+        PromptTemplate.organization_id == organization_id,
+        or_(
+            PromptTemplate.scope == "organization",
+            and_(
+                PromptTemplate.scope == "personal",
+                PromptTemplate.creator_id == user_id,
+            ),
+        )
+        if user_id is not None
+        else PromptTemplate.scope == "organization",
+    )
 
     async with AsyncSessionLocal() as session:
         stmt = (
@@ -1235,16 +1270,20 @@ async def get_prompt_template(
             .where(
                 PromptTemplate.name == name,
                 or_(
-                    PromptTemplate.organization_id == organization_id,
+                    org_visible,
                     and_(
                         PromptTemplate.is_system.is_(True),
                         PromptTemplate.organization_id.is_(None),
                     ),
                 ),
             )
-            # 同名时优先本组织模板（系统模板作兜底）；limit(1) 防止历史重名触发
-            # MultipleResultsFound（复合唯一约束只保证同一组织内不重名）。
-            .order_by(PromptTemplate.organization_id.is_(None), PromptTemplate.id)
+            # 同名时优先个人模板（最具体）→ 组织模板 → 系统模板；limit(1) 防止
+            # 历史重名触发 MultipleResultsFound（复合唯一约束只保证同组织内不重名）。
+            .order_by(
+                PromptTemplate.organization_id.is_(None),
+                PromptTemplate.scope.desc(),
+                PromptTemplate.id,
+            )
             .limit(1)
         )
         result = await session.execute(stmt)
@@ -1259,6 +1298,7 @@ async def get_prompt_template(
         "description": tpl.description,
         "category": tpl.category,
         "is_system": tpl.is_system,
+        "scope": tpl.scope,
     }, ensure_ascii=False, indent=2)
 
 

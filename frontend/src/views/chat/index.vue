@@ -126,6 +126,7 @@
         :attachedFileIds="attachedFileIds"
         :connectionStatus="effectiveConnectionStatus"
         :connectionStatusText="getConnectionStatusText(effectiveConnectionStatus)"
+        :orgPrivacyAllowed="orgPrivacyAllowed"
         @send="handleSend"
         @stopGeneration="stopGeneration"
         @triggerFileUpload="triggerFileUpload"
@@ -146,6 +147,7 @@ import { useDedupedMessage } from '@/utils/message'
 import { useConfirmDangerousAction } from '@/utils/confirm'
 import { CloudUploadOutline, AlertCircleOutline, ArrowBackOutline } from '@vicons/ionicons5'
 import { getConversationMessages, clearConversationMessages } from '@/api/chat'
+import { getOrganizationSettings } from '@/api/organization'
 import type { Conversation } from '@/api/conversation'
 import { getDocumentDetail, getDocumentContent } from '@/api/knowledge'
 import type { DocumentContent, DocumentDetail } from '@/api/knowledge'
@@ -219,6 +221,27 @@ const useAgent = ref(false)
 const debugEnabled = ref(false)
 const debugData = ref<import('@/types/chat').RetrievalDebugData | null>(null)
 
+// B4（D5）：组织隐私策略。默认允许（保持既有 privacyMode 默认 True 的行为）；
+// 组织显式禁用时置灰开关并给出「组织策略」说明。后端在检索/生成链路仍会强制
+// 关闭（不信任客户端），前端灰化只负责如实呈现策略来源。
+const orgPrivacyAllowed = ref(true)
+
+const loadOrgPrivacyPolicy = async () => {
+  const orgId = userStore.currentOrgId
+  if (!orgId) {
+    orgPrivacyAllowed.value = true
+    return
+  }
+  try {
+    const res = await getOrganizationSettings(orgId)
+    const entry = res.data?.settings?.allow_privacy_mode
+    orgPrivacyAllowed.value = entry ? entry.value !== false : true
+  } catch {
+    // 读取失败不阻塞聊天：保持既有默认；服务端仍按组织策略强制。
+    orgPrivacyAllowed.value = true
+  }
+}
+
 const toggleDebug = () => {
   debugEnabled.value = !debugEnabled.value
   if (!debugEnabled.value) debugData.value = null
@@ -232,6 +255,12 @@ const {
   baseScrollToBottom, fetchConversations,
   isLoading, isRetrieving, sseStatus, useSSE, useAgent, useStream, debugEnabled, debugData,
 )
+
+// B4（D5）：组织策略禁用隐私模式时，强制关闭并持续跟随组织切换。
+watch(orgPrivacyAllowed, (allowed) => {
+  if (!allowed) privacyMode.value = false
+})
+watch(() => userStore.currentOrgId, () => { void loadOrgPrivacyPolicy() })
 
 const handleScroll = baseHandleScroll
 const scrollToBottom = baseScrollToBottom
@@ -547,6 +576,7 @@ onMounted(async () => {
   window.addEventListener('resize', checkScreenSize)
   const handleResize = () => { windowWidth.value = window.innerWidth }
   window.addEventListener('resize', handleResize)
+  void loadOrgPrivacyPolicy()
   await fetchConversations()
   const conversationId = route.query.conversation_id as string
   if (conversationId) await loadConversation(conversationId)
