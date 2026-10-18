@@ -106,6 +106,8 @@ export default {
     recentActivity: '最近动态',
     sessionRevoked: '设备已下线',
     revokeFailed: '下线失败',
+    revokeSession: '下线设备',
+    revokeSessionConfirm: '确定要下线该设备吗？下线后该设备将退出登录，需要重新登录。',
     apiKeyRevokeFailed: '撤销 API Key 失败',
     // W2-T7：LLM Provider 区块诚实标注（后端无消费方，推理走服务端全局配置）
     aiProviderExpTitle: '实验功能 · 暂不生效',
@@ -166,6 +168,7 @@ export default {
     adjustSuccess: '调整成功',
     adjustFailed: '调整失败',
     batchDeleteSuccess: '批量删除成功',
+    batchDeleteConfirm: '确定要删除选中的 {count} 个组织吗？此操作不可恢复。',
     deleteFailed: '删除失败',
     loadDetailsFailed: '加载详情失败',
     loadFailed: '加载失败',
@@ -239,6 +242,7 @@ export default {
     attachmentsNotReady: '附件尚未就绪，请等待解析完成后再使用附件',
     chatCleared: '对话记录已清空',
     clearFailed: '清空失败',
+    clearConfirm: '将清空当前对话的全部消息记录，且不可恢复。确定清空吗？',
     unbindSuccess: '已解除文档绑定，现在是全库问答模式',
     unbindFailed: '解除绑定失败',
     // File upload status labels (shown in ChatInput)
@@ -441,7 +445,16 @@ export default {
     },
     backToHome: '返回首页',
     backToWorkbench: '进入工作台',
-    back: '返回上一页'
+    back: '返回上一页',
+    serviceUnavailable: {
+      title: '服务暂时不可用',
+      subtitle: '无法连接到服务器，请稍后重试。你的登录状态已保留。',
+      retry: '重试'
+    },
+    offlineBanner: {
+      message: '服务暂时不可用，当前展示本地缓存数据',
+      retry: '重试'
+    }
   },
   login: {
     welcomeBack: '欢迎回来',
@@ -695,11 +708,24 @@ export default {
   },
   workflow: {
     description: '把复杂 AI 任务拆成阶段化流水线，用统一的指标和状态管理来观察执行质量。',
+    editor: {
+      clearConfirmTitle: '清空画布',
+      clearConfirmContent: '清空后自动保存将在 {n} 秒内把空画布写回，覆盖已保存的版本。确定要清空画布吗？',
+      clearConfirmPositive: '清空',
+      clearConfirmNegative: '取消',
+      emptyCanvasAutoSaveBlocked: '画布为空，已跳过自动保存：已保存的版本未被覆盖。如需保存空画布，请手动点击「保存」。',
+    },
   },
   notifications: {
     markAllRead: '全部已读',
   },
 
+  agent: {
+    clearConfirmTitle: '清空当前会话消息',
+    clearConfirm: '仅清空当前会话在界面中显示的消息，不影响其他会话。确定清空吗？',
+    deleteSessionConfirmTitle: '删除当前会话',
+    deleteSessionConfirm: '将删除当前会话「{title}」及其聊天记录，此操作不可恢复。确定删除吗？',
+  },
   agentReplay: {
     entry: '查看回放',
     title: '运行回放',
@@ -966,6 +992,7 @@ export default {
   },
   router: {
     notFound: '页面不存在',
+    serviceUnavailable: '服务暂时不可用',
     welcome: '欢迎',
     login: '登录',
     register: '注册',

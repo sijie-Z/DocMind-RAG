@@ -85,7 +85,8 @@
                      assistant 消息的 Markdown 与纯文本副本同时渲染。
                      重排为「assistant → Markdown(+光标) | 否则 → 纯文本」严格互斥。 -->
                 <template v-if="message.messageType === 'assistant'">
-                  <Markdown :content="message.content" />
+                  <!-- E3：最后一条流式消息标记 streaming —— 中间态轻量渲染，终态一次完整 Markdown -->
+                  <Markdown :content="message.content" :streaming="isLoading && index === messages.length - 1" />
                   <span
                     v-if="isLoading && index === messages.length - 1"
                     class="inline-block w-0.5 h-4 bg-slate-500 dark:bg-slate-400 ml-0.5 align-middle animate-blink"
@@ -148,7 +149,7 @@
                           <template #icon>
                             <n-icon size="10" class="mr-0.5"><DocumentTextOutline /></n-icon>
                           </template>
-                          [{{ idx + 1 }}] {{ source.filename || source.title || t('chat.sourceDoc') }}
+                          [{{ Number(idx) + 1 }}] {{ source.filename || source.title || t('chat.sourceDoc') }}
                         </n-tag>
                       </template>
                       <div class="max-w-sm p-2">
@@ -246,6 +247,10 @@
 import { useI18n } from 'vue-i18n'
 import { SparklesOutline, ArrowForwardOutline, ArrowDownOutline, ThumbsUpOutline, ThumbsDownOutline, CopyOutline, DocumentTextOutline, RefreshOutline } from '@vicons/ionicons5'
 import { NPopover } from 'naive-ui'
+// 首屏瘦身（E5）：虚拟滚动只在聊天页使用——从全局注册（main.ts）改为本组件局部引入，
+// 模块与样式随 Chat 路由 chunk 按需加载，不再计入首屏。
+import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import Markdown from '@/components/common/Markdown.vue'
 import PlanTree from '@/components/agent/PlanTree.vue'
 import ReflectionBanner from '@/components/agent/ReflectionBanner.vue'

@@ -329,6 +329,12 @@ request.interceptors.response.use(
                 return request(originalRequest)
               } catch (refreshErr) {
                 rejectQueue(refreshErr)
+                // 标记「会话已被本拦截器判定过期」：续期失败错误可能没有
+                // response.status（如 refresh_token 缺失/续期网络异常），
+                // store 与路由守卫据此仍走清号逻辑，不误判为服务端 5xx。
+                if (refreshErr && typeof refreshErr === 'object') {
+                  ;(refreshErr as { authSessionExpired?: boolean }).authSessionExpired = true
+                }
                 const userStore = useUserStore()
                 // 跳转由本拦截器统一执行；store 只清态与吊销，避免异步跳转竞态
                 userStore.logout({ navigate: false })
