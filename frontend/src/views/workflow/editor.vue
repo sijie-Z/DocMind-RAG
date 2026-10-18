@@ -5,14 +5,15 @@
       <PageBreadcrumb :show-back="true" />
     </div>
 
-    <div class="flex-1 flex min-h-0">
+    <div class="flex-1 flex min-h-0 min-w-0">
     <!-- 左侧节点面板 -->
-    <div class="w-72 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+    <div data-testid="workflow-node-library" class="w-72 shrink-0 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
       <div class="p-4 border-b border-gray-200 dark:border-gray-700">
         <h3 class="font-semibold text-gray-800 dark:text-white flex items-center gap-2">
           <n-icon><AppsOutline /></n-icon>
           节点库
         </h3>
+        <div class="text-xs text-gray-400 mt-1">{{ t('workflow.editor.clickToAddHint') }}</div>
       </div>
       <div class="flex-1 overflow-y-auto p-3">
         <!-- 动态加载节点定义 -->
@@ -27,9 +28,15 @@
                 <div
                   v-for="node in nodeDefsByCategory[cat]"
                   :key="node.node_type"
-                  class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-grab hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-500 transition-all"
+                  :data-testid="`node-card-${node.node_type}`"
+                  class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-500 transition-all"
                   draggable="true"
+                  role="button"
+                  tabindex="0"
+                  :title="t('workflow.editor.clickToAddHint')"
                   @dragstart="onDragStart($event, node)"
+                  @click="addNodeFromLibrary(node)"
+                  @keydown.enter.prevent="addNodeFromLibrary(node)"
                 >
                   <div class="flex items-center gap-2">
                     <n-icon size="20"><component :is="getNodeIconComponent(node.node_type)" /></n-icon>
@@ -53,9 +60,15 @@
               <div
                 v-for="node in llmNodes"
                 :key="node.node_type"
-                class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-grab hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-500 transition-all"
+                :data-testid="`node-card-${node.node_type}`"
+                class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-500 transition-all"
                 draggable="true"
+                role="button"
+                tabindex="0"
+                :title="t('workflow.editor.clickToAddHint')"
                 @dragstart="onDragStart($event, node)"
+                @click="addNodeFromLibrary(node)"
+                @keydown.enter.prevent="addNodeFromLibrary(node)"
               >
                 <div class="flex items-center gap-2">
                   <n-icon size="20"><component :is="getNodeIconComponent(node.node_type)" /></n-icon>
@@ -73,9 +86,15 @@
               <div
                 v-for="node in toolNodes"
                 :key="node.node_type"
-                class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-grab hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-gray-200 dark:border-gray-600 hover:border-amber-300 dark:hover:border-amber-500 transition-all"
+                :data-testid="`node-card-${node.node_type}`"
+                class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-gray-200 dark:border-gray-600 hover:border-amber-300 dark:hover:border-amber-500 transition-all"
                 draggable="true"
+                role="button"
+                tabindex="0"
+                :title="t('workflow.editor.clickToAddHint')"
                 @dragstart="onDragStart($event, node)"
+                @click="addNodeFromLibrary(node)"
+                @keydown.enter.prevent="addNodeFromLibrary(node)"
               >
                 <div class="flex items-center gap-2">
                   <n-icon size="20"><component :is="getNodeIconComponent(node.node_type)" /></n-icon>
@@ -93,9 +112,15 @@
               <div
                 v-for="node in ioNodes"
                 :key="node.node_type"
-                class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-grab hover:bg-emerald-50 dark:hover:bg-emerald-900/20 border border-gray-200 dark:border-gray-600 hover:border-emerald-300 dark:hover:border-emerald-500 transition-all"
+                :data-testid="`node-card-${node.node_type}`"
+                class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-900/20 border border-gray-200 dark:border-gray-600 hover:border-emerald-300 dark:hover:border-emerald-500 transition-all"
                 draggable="true"
+                role="button"
+                tabindex="0"
+                :title="t('workflow.editor.clickToAddHint')"
                 @dragstart="onDragStart($event, node)"
+                @click="addNodeFromLibrary(node)"
+                @keydown.enter.prevent="addNodeFromLibrary(node)"
               >
                 <div class="flex items-center gap-2">
                   <n-icon size="20"><component :is="getNodeIconComponent(node.node_type)" /></n-icon>
@@ -113,9 +138,15 @@
               <div
                 v-for="node in logicNodes"
                 :key="node.node_type"
-                class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-grab hover:bg-cyan-50 dark:hover:bg-cyan-900/20 border border-gray-200 dark:border-gray-600 hover:border-cyan-300 dark:hover:border-cyan-500 transition-all"
+                :data-testid="`node-card-${node.node_type}`"
+                class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer hover:bg-cyan-50 dark:hover:bg-cyan-900/20 border border-gray-200 dark:border-gray-600 hover:border-cyan-300 dark:hover:border-cyan-500 transition-all"
                 draggable="true"
+                role="button"
+                tabindex="0"
+                :title="t('workflow.editor.clickToAddHint')"
                 @dragstart="onDragStart($event, node)"
+                @click="addNodeFromLibrary(node)"
+                @keydown.enter.prevent="addNodeFromLibrary(node)"
               >
                 <div class="flex items-center gap-2">
                   <n-icon size="20"><component :is="getNodeIconComponent(node.node_type)" /></n-icon>
@@ -133,9 +164,15 @@
               <div
                 v-for="node in dataNodes"
                 :key="node.node_type"
-                class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-grab hover:bg-teal-50 dark:hover:bg-teal-900/20 border border-gray-200 dark:border-gray-600 hover:border-teal-300 dark:hover:border-teal-500 transition-all"
+                :data-testid="`node-card-${node.node_type}`"
+                class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer hover:bg-teal-50 dark:hover:bg-teal-900/20 border border-gray-200 dark:border-gray-600 hover:border-teal-300 dark:hover:border-teal-500 transition-all"
                 draggable="true"
+                role="button"
+                tabindex="0"
+                :title="t('workflow.editor.clickToAddHint')"
                 @dragstart="onDragStart($event, node)"
+                @click="addNodeFromLibrary(node)"
+                @keydown.enter.prevent="addNodeFromLibrary(node)"
               >
                 <div class="flex items-center gap-2">
                   <n-icon size="20"><component :is="getNodeIconComponent(node.node_type)" /></n-icon>
@@ -176,10 +213,14 @@
     </div>
 
     <!-- 中间画布区域 -->
-    <div class="flex-1 flex flex-col">
-      <!-- 工具栏 -->
-      <div class="h-14 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
-        <div class="flex items-center gap-3">
+    <div data-testid="workflow-canvas-column" class="flex-1 flex flex-col min-w-0">
+      <!-- 工具栏：允许换行收纳 —— 1440×900 下三栏固定宽度占去 608px，
+           单行不换行的工具栏内容会超出画布列宽造成横向溢出 -->
+      <div
+        data-testid="workflow-toolbar"
+        class="min-h-14 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2"
+      >
+        <div class="flex flex-wrap items-center gap-3 min-w-0">
           <n-input v-model:value="workflowStore.workflowName" placeholder="工作流名称" style="width: 200px" />
           <!-- 引擎选择器暂未接入：后端无 engine_type 字段（B11），禁用并明示，
                不再做出「可保存」的暗示 -->
@@ -190,6 +231,38 @@
               </span>
             </template>
             引擎选择暂未接入后端（无对应字段），当前统一走默认引擎
+          </n-tooltip>
+          <!-- B8 保存状态点：常驻、如实反映最近一次保存结果；失败时点击可重试 -->
+          <n-tooltip trigger="hover">
+            <template #trigger>
+              <button
+                type="button"
+                data-testid="workflow-save-status"
+                :data-status="saveStatus"
+                :aria-disabled="saveStatus !== 'error'"
+                class="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border transition-colors"
+                :class="saveStatus === 'error'
+                  ? 'border-red-300 text-red-500 cursor-pointer hover:bg-red-50 dark:hover:bg-red-900/20'
+                  : saveStatus === 'saved'
+                    ? 'border-green-200 text-green-600 dark:border-green-800 dark:text-green-400'
+                    : 'border-gray-200 text-gray-500 dark:border-gray-600 dark:text-gray-400'"
+                @click="retrySave"
+              >
+                <span
+                  class="inline-block w-2 h-2 rounded-full"
+                  :class="saveStatus === 'error'
+                    ? 'bg-red-500'
+                    : saveStatus === 'saved'
+                      ? 'bg-green-500'
+                      : saveStatus === 'saving'
+                        ? 'bg-blue-400'
+                        : 'bg-gray-400'"
+                ></span>
+                <span>{{ saveStatusText }}</span>
+                <span v-if="saveStatus === 'error'" class="font-medium">· {{ saveRetryText }}</span>
+              </button>
+            </template>
+            {{ saveStatusHint }}
           </n-tooltip>
           <n-button type="primary" @click="saveWorkflow" :loading="saving">
             <template #icon><n-icon><SaveOutline /></n-icon></template>
@@ -212,15 +285,18 @@
             LLM配置
           </n-button>
         </div>
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-4 shrink-0">
           <div class="flex items-center gap-2 text-xs text-gray-500">
             <span>节点: {{ workflowStore.nodes.length }}</span>
             <span>连线: {{ workflowStore.edges.length }}</span>
           </div>
+          <n-button quaternary size="small" data-testid="workflow-panel-toggle" :title="t('workflow.editor.togglePanel')" @click="togglePropertyPanel">
+            <template #icon><n-icon><OptionsOutline /></n-icon></template>
+          </n-button>
           <n-button quaternary size="small" @click="fitView">
             <template #icon><n-icon><ExpandOutline /></n-icon></template>
           </n-button>
-          <n-button quaternary size="small" @click="clearCanvas">
+          <n-button quaternary size="small" data-testid="workflow-clear-canvas" @click="clearCanvas">
             <template #icon><n-icon><TrashOutline /></n-icon></template>
           </n-button>
         </div>
@@ -308,13 +384,31 @@
       </div>
     </div>
 
-    <!-- 右侧属性面板 -->
-    <div class="w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex flex-col">
-      <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+    <!-- 窄屏属性面板背景遮罩：点击即收起覆盖层 -->
+    <div
+      v-if="isNarrow && propertyPanelOpen"
+      data-testid="workflow-panel-backdrop"
+      class="fixed inset-0 z-30 bg-black/30"
+      @click="closePropertyPanel"
+    ></div>
+
+    <!-- 右侧属性面板：≥1280 为第三栏；<1280 默认收起，经工具栏开关以覆盖层展开 -->
+    <div
+      v-show="propertyPanelOpen"
+      data-testid="workflow-property-panel"
+      class="bg-white dark:bg-gray-800 flex flex-col"
+      :class="isNarrow
+        ? 'fixed inset-y-0 right-0 z-40 w-80 max-w-[85vw] border-l border-gray-200 dark:border-gray-700 shadow-2xl'
+        : 'w-80 shrink-0 border-l border-gray-200 dark:border-gray-700'"
+    >
+      <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <h3 class="font-semibold text-gray-800 dark:text-white flex items-center gap-2">
           <n-icon><SettingsOutline /></n-icon>
           节点属性
         </h3>
+        <n-button v-if="isNarrow" quaternary size="small" data-testid="workflow-panel-close" @click="closePropertyPanel">
+          <template #icon><n-icon><CloseOutline /></n-icon></template>
+        </n-button>
       </div>
       <div class="flex-1 overflow-y-auto p-4">
         <div v-if="!selectedNode" class="text-center text-gray-400 py-8">
@@ -910,7 +1004,7 @@ import {
   HardwareChipOutline, ChatbubbleEllipsesOutline, SearchOutline, VolumeHighOutline,
   EnterOutline, ExitOutline, GitBranchOutline, CompassOutline, ServerOutline,
   CodeSlashOutline, GlobeOutline, SyncOutline, RocketOutline, FlashOutline,
-  FolderOpenOutline, AddOutline, CloseOutline
+  FolderOpenOutline, AddOutline, CloseOutline, OptionsOutline
 } from '@vicons/ionicons5'
 // VueFlow 自定义节点组件（9 个）——必须在本文件 import 注册：
 // 此前这 9 个组件只以「未使用 import」的形态躺在 useWorkflowEditor.ts 里，
@@ -933,6 +1027,7 @@ const {
   route,
   router,
   message,
+  t,
   workflowStore,
   llmConfigStore,
   doFitView,
@@ -961,6 +1056,14 @@ const {
   skillsLoaded,
   loadSkills,
   saving,
+  saveStatus,
+  saveStatusText,
+  saveRetryText,
+  saveStatusHint,
+  isNarrow,
+  propertyPanelOpen,
+  togglePropertyPanel,
+  closePropertyPanel,
   executing,
   executingNodeId,
   showDebugPanel,
@@ -1004,6 +1107,7 @@ const {
   validateTemplateParams,
   onDragStart,
   onDrop,
+  addNodeFromLibrary,
   onNodeClick,
   onConnect,
   addLlmInputParam,
@@ -1023,6 +1127,7 @@ const {
   clearCanvas,
   fitView,
   saveWorkflow,
+  retrySave,
   autoSave,
   openDebugPanel,
   executeWorkflow,
