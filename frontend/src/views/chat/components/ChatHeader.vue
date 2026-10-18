@@ -27,21 +27,8 @@
               <n-button text size="tiny" @click="$emit('unbind')" class="ml-2 hover:text-white">{{ t('chat.unbindBtn') }}</n-button>
             </n-tag>
           </div>
-          <!-- E11-②：已应用提示词模板常驻标识（可见、可清除） -->
-          <div v-if="activeTemplateName" class="mt-1">
-            <n-tag size="tiny" round :bordered="false" type="info" class="template-badge">
-              {{ t('chat.currentTemplate', { name: activeTemplateName }) }}
-              <n-button
-                text
-                size="tiny"
-                class="template-clear ml-2"
-                :aria-label="t('chat.clearTemplate')"
-                @click="$emit('clearTemplate')"
-              >
-                × {{ t('chat.clearTemplate') }}
-              </n-button>
-            </n-tag>
-          </div>
+          <!-- E14/P2：B3 后已无 systemPrompt 通道，「当前模板」徽标（宣称已生效）
+               与实际不符，已移除；提示词「应用到对话」改为填入输入框。 -->
         </div>
       </div>
     </div>
@@ -92,8 +79,6 @@ defineProps<{
   hasConversation: boolean
   isBoundMode: boolean
   debugEnabled: boolean
-  /** E11-②：已应用提示词模板名（null/空 = 无模板，不显示标识） */
-  activeTemplateName?: string | null
 }>()
 
 defineEmits<{
@@ -102,6 +87,5 @@ defineEmits<{
   unbind: []
   exportChat: []
   toggleDebug: []
-  clearTemplate: []
 }>()
 </script>

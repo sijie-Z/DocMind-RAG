@@ -58,14 +58,14 @@
       <div class="flex-1 p-6 overflow-hidden">
         <n-spin :show="loading" class="h-full">
           <template #description>
-            <span>加载中...</span>
+            <span>{{ t('common.loading') }}</span>
           </template>
 
           <!-- Error state -->
           <div v-if="loadError" class="flex items-center justify-center h-full">
-            <n-result status="error" title="加载失败" :description="loadErrorMsg">
+            <n-result status="error" :title="t('users.loadFailed')" :description="loadErrorMsg">
               <template #footer>
-                <n-button type="primary" round @click="loadUsers">重试</n-button>
+                <n-button type="primary" round @click="loadUsers">{{ t('common.retry') }}</n-button>
               </template>
             </n-result>
           </div>
@@ -204,11 +204,11 @@ import type { DataTableColumns, FormRules, FormInst } from 'naive-ui'
 import { getUsers, createUser, updateUser, deleteUser, resetUserPassword } from '@/api/user'
 import { getOrganizations, type OrganizationListResponse } from '@/api/organization'
 import { apiUnwrap } from '@/utils/apiUnwrap'
+import { getErrorMessage } from '@/utils/apiError'
 
-/** Safely extract error message from unknown error */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
+// E14/D1：本页自行呈现错误的请求一律带 X-Silent-Error —— 关闭响应拦截器的
+// 全局 toast，避免与页内提示（内联错误态 / 单条 toast）重复。
+const SILENT_CONFIG = { headers: { 'X-Silent-Error': '1' } } as const
 
 // 类型定义 —— 与后端 GET /users/ 列表项真实形状对齐（users.py:784-790）：
 // 没有 nickname（显示名真身是 full_name，可能为 null）、没有 status（真身是布尔
@@ -282,8 +282,11 @@ const loadOrganizationOptions = async () => {
     organizationOptions.value = Array.isArray(rows)
       ? rows.map((org) => ({ label: org.name, value: org.id }))
       : []
-  } catch {
-    // 选项加载失败：下拉留空（不阻塞用户管理主流程），保存时仍可显式跳过组织
+  } catch (err) {
+    // E14/D1：getOrganizations 固定 silent（403 附加提示也已被 silent 收敛），
+    // 调用方必须自己告知失败——否则组织下拉静默为空，用户无法区分
+    //「无组织 / 无权限 / 网络失败」。下拉仍留空，不阻塞用户管理主流程。
+    message.error(getErrorMessage(err, t('users.orgOptionsLoadFailed')))
     organizationOptions.value = []
   }
 }
@@ -415,16 +418,17 @@ const loadUsers = async () => {
       skip: (pagination.page - 1) * pagination.pageSize,
       limit: pagination.pageSize
     }
-    const res = await getUsers(params)
+    const res = await getUsers(params, SILENT_CONFIG)
     // 真实响应为裸扁平形状 {total, skip, limit, users: [...]}（无 success/data 信封）
     const body = res.data
     users.value = Array.isArray(body?.users) ? body.users : []
     pagination.itemCount = body?.total || 0
     loadError.value = false
   } catch (err: unknown) {
-    message.error('加载失败: ' + getErrorMessage(err))
+    // E14/D1：错误如实（5xx/传输层回退 i18n，后端 4xx detail 原文优先）；
+    // 内联错误态（含重试）已是唯一提示表面，不再叠加 toast。
     loadError.value = true
-    loadErrorMsg.value = '加载失败: ' + getErrorMessage(err)
+    loadErrorMsg.value = getErrorMessage(err, t('users.loadFailedDesc'))
   } finally {
     loading.value = false
   }
@@ -462,22 +466,28 @@ const closeCreateModal = () => {
 const saveUser = async () => {
   try {
     await formRef.value?.validate()
-    saving.value = true
+  } catch {
+    // 字段级校验错误由表单自身呈现，不再叠加一条无意义的 toast
+    return
+  }
+  saving.value = true
+  try {
     // T8：单选 organization_id → 包装为后端字段 organization_ids（单组织模型）
     const { organization_id, ...rest } = userForm.value
     const payload = { ...rest, organization_ids: organization_id != null ? [organization_id] : [] }
     if (editingUser.value) {
       const { username: _, password: __, ...updateData } = payload
-      await updateUser(editingUser.value.id, updateData)
+      await updateUser(editingUser.value.id, updateData, SILENT_CONFIG)
       message.success(t('common.success'))
     } else {
-      await createUser(payload)
+      await createUser(payload, SILENT_CONFIG)
       message.success(t('common.success'))
     }
     closeCreateModal()
     loadUsers()
   } catch (err: unknown) {
-    message.error(getErrorMessage(err) || t('common.failed'))
+    // E14/D1：错误文案统一走 getErrorMessage，axios 黑话不上屏
+    message.error(getErrorMessage(err, t('common.failed')))
   } finally {
     saving.value = false
   }
@@ -486,13 +496,17 @@ const saveUser = async () => {
 const resetPassword = async () => {
   try {
     await resetPasswordFormRef.value?.validate()
-    if (!resettingUserId.value) return
-    resettingPassword.value = true
-    await resetUserPassword(resettingUserId.value, resetPasswordForm.value.newPassword)
+  } catch {
+    return
+  }
+  if (!resettingUserId.value) return
+  resettingPassword.value = true
+  try {
+    await resetUserPassword(resettingUserId.value, resetPasswordForm.value.newPassword, SILENT_CONFIG)
     message.success(t('common.success'))
     showResetPasswordModal.value = false
   } catch (err: unknown) {
-    message.error(getErrorMessage(err) || t('common.failed'))
+    message.error(getErrorMessage(err, t('common.failed')))
   } finally {
     resettingPassword.value = false
   }
@@ -506,11 +520,11 @@ const handleDelete = (row: User) => {
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       try {
-        await deleteUser(row.id)
+        await deleteUser(row.id, SILENT_CONFIG)
         message.success(t('common.success'))
         loadUsers()
       } catch (err: unknown) {
-        message.error(getErrorMessage(err) || t('common.failed'))
+        message.error(getErrorMessage(err, t('common.failed')))
       }
     }
   })

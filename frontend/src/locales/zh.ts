@@ -117,6 +117,9 @@ export default {
     deleteConfirmWithName: '确定要删除用户 {username} 吗？此操作不可撤销。',
     subtitle: '管理系统内的所有用户信息及其权限',
     noData: '暂无用户数据',
+    loadFailed: '加载用户失败',
+    loadFailedDesc: '无法加载用户列表，请检查网络或稍后重试',
+    orgOptionsLoadFailed: '无法加载组织选项，请稍后重试',
     selectOrgs: '请选择所属组织',
     initialPassword: '初始密码'
   },
@@ -314,16 +317,12 @@ export default {
     relevanceMatch: '匹配度: {score}%',
     // Error banner
     msgLoadFailed: '加载历史消息失败',
-    // Prompt applied notification
-    promptApplied: '已应用提示词模板"{name}"，请开始对话',
+    // E14/P2：提示词「应用到对话」只填入输入框（B3 后已无 systemPrompt 通道），
+    // 文案不承诺已应用/已发送
+    promptFilled: '已将提示词填入输入框，请确认后发送',
     // W2-T7：上限与提示词表单 maxlength 对齐（5000）；超限明确报错不再静默丢弃
     promptTooLong: '提示词超过 {max} 字上限，未应用。请精简后再试。',
     sourcePreviewFailed: '原文加载失败，请稍后重试',
-    promptDefaultName: '未命名',
-    // E11-②：已应用提示词模板的常驻标识（聊天头部）
-    currentTemplate: '当前模板：{name}',
-    clearTemplate: '清除',
-    promptCleared: '已清除提示词模板',
     backToConversations: '返回对话列表',
     liked: '已点赞',
     disliked: '已点踩',
@@ -422,6 +421,7 @@ export default {
   },
   prompts: {
     subtitle: '管理 AI 助手的系统提示词与回复风格',
+    fillToChat: '填入对话输入框',
     create: '创建模板',
     addTemplate: '新增模板',
     editTemplate: '编辑模板',
@@ -737,6 +737,9 @@ export default {
     responseTrend: '响应时间趋势',
     recentAlerts: '最近告警',
     noData: '暂无数据',
+    loadFailed: '加载监控数据失败',
+    loadFailedDesc: '请检查网络或稍后重试；点击重试重新加载',
+    auditLoadFailed: '获取审计日志失败',
     timeRange: {
       hour1: '最近 1 小时',
       hour6: '最近 6 小时',
@@ -772,6 +775,8 @@ export default {
     relevanceScore: '相关度',
     noResults: '未找到相关结果',
     noResultsDesc: '尝试更换关键词或调整筛选条件',
+    searchErrorDesc: '请检查网络或稍后重试；点击重试重新搜索',
+    noOrganization: '当前账号尚未加入任何组织，无法搜索',
     fileContent: '文件内容',
     searchFailed: '搜索失败',
     // E11-①：问问 AI 跨页问题组句（文件名 + 当前搜索词 / 无搜索词时的兜底）
@@ -859,6 +864,9 @@ export default {
   },
 
   agent: {
+    sessionSelectorLabel: '选择 Agent 会话',
+    newSessionOption: '+ 新建会话',
+    untitledSession: '未命名',
     clearConfirmTitle: '清空当前会话消息',
     clearConfirm: '仅清空当前会话在界面中显示的消息，不影响其他会话。确定清空吗？',
     deleteSessionConfirmTitle: '删除当前会话',

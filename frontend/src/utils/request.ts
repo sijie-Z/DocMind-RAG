@@ -302,6 +302,10 @@ request.interceptors.response.use(
         }
       }
 
+      // 403 分支会先弹一条更可操作的附加提示；此时通用文案不再重复弹
+      // （同一次失败只保留一条全局 toast —— E14/D1 双弹收敛）。
+      let suppressGenericToast = false
+
       switch (status) {
         case 401: {
           const isLoginRequest = originalRequest?.url?.includes?.('auth/login')
@@ -365,12 +369,20 @@ request.interceptors.response.use(
         }
         case 403:
           errorMsg = '无权限访问'
-          try {
-            const userStore = useUserStore()
-            if (userStore.isLoggedIn) {
-              dedupMessage('error', '权限不足，请联系管理员', 5000)
-            }
-          } catch (_) { /* store 未就绪 */ }
+          // E14/D1：X-Silent-Error 的约定是「错误由调用方自行呈现」——
+          // 该分支的附加提示同样必须闭嘴，否则页面级单条提示仍会双弹。
+          if (!silentError) {
+            try {
+              const userStore = useUserStore()
+              if (userStore.isLoggedIn) {
+                // 收敛为一条提示，但保留 Request ID（排障线索不因去重丢失）；
+                // ID 后缀用 ASCII 以免新增一行硬编码中文（CJK 棘轮只缩不涨）
+                const permissionBase = '权限不足，请联系管理员'
+                dedupMessage('error', requestId ? `${permissionBase} [Request ID: ${requestId}]` : permissionBase, 5000)
+                suppressGenericToast = true
+              }
+            } catch (_) { /* store 未就绪 */ }
+          }
           break
         case 429:
           errorMsg = '请求过于频繁，请稍后再试'
@@ -385,7 +397,7 @@ request.interceptors.response.use(
         errorMsg = `${errorMsg}（请求ID: ${requestId}）`
       }
 
-      if (!silentError) {
+      if (!silentError && !suppressGenericToast) {
         dedupMessage('error', errorMsg, 5000)
       }
       emitApiMetricEvent({

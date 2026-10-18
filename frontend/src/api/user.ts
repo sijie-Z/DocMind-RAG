@@ -76,8 +76,8 @@ export interface AuditLogEntry {
 export const getUsers = async (params?: {
   skip?: number
   limit?: number
-}): Promise<AxiosResponse<UserListResponse>> => {
-  return request.get('/users/', { params })
+}, config?: AxiosRequestConfig): Promise<AxiosResponse<UserListResponse>> => {
+  return request.get('/users/', { params, ...config })
 }
 
 export const getUser = async (id: number): Promise<AxiosResponse<User>> => {
@@ -140,8 +140,8 @@ export const createUser = async (data: {
   status: 'active' | 'inactive'
   organization_ids?: number[]
   remark?: string
-}): Promise<AxiosResponse<{ data: User }>> => {
-  return request.post('/users/', data)
+}, config?: AxiosRequestConfig): Promise<AxiosResponse<{ data: User }>> => {
+  return request.post('/users/', data, config)
 }
 
 export const updateUser = async (id: number, data: {
@@ -152,8 +152,8 @@ export const updateUser = async (id: number, data: {
   status?: 'active' | 'inactive'
   organization_ids?: number[]
   remark?: string
-}): Promise<AxiosResponse<{ data: User }>> => {
-  return request.put(`/users/${id}`, data)
+}, config?: AxiosRequestConfig): Promise<AxiosResponse<{ data: User }>> => {
+  return request.put(`/users/${id}`, data, config)
 }
 
 export interface UserStats {
@@ -256,14 +256,14 @@ export const updatePassword = async (data: {
   })
 }
 
-export const deleteUser = async (id: number): Promise<AxiosResponse<ApiResponse<unknown>>> => {
-  return request.delete(`/users/${id}`)
+export const deleteUser = async (id: number, config?: AxiosRequestConfig): Promise<AxiosResponse<ApiResponse<unknown>>> => {
+  return request.delete(`/users/${id}`, config)
 }
 
-export const resetUserPassword = async (id: number, password: string): Promise<AxiosResponse<ApiResponse<unknown>>> => {
+export const resetUserPassword = async (id: number, password: string, config?: AxiosRequestConfig): Promise<AxiosResponse<ApiResponse<unknown>>> => {
   return request.put(`/users/${id}/password`, {
     new_password: password
-  })
+  }, config)
 }
 
 // 个人 API Key 生成/撤销通道随 B3 死设定清理移除：Profile UI 入口已删，

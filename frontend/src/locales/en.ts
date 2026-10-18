@@ -113,6 +113,9 @@ export default {
     deleteConfirmWithName: 'Are you sure you want to delete user {username}? This action cannot be undone.',
     subtitle: 'Manage all users and their permissions',
     noData: 'No user data',
+    loadFailed: 'Failed to load users',
+    loadFailedDesc: 'Unable to load the user list. Please check your network or try again later.',
+    orgOptionsLoadFailed: 'Failed to load organization options. Please try again later.',
     selectOrgs: 'Select organizations',
     initialPassword: 'Initial Password'
   },
@@ -309,13 +312,9 @@ export default {
     // Error banner
     msgLoadFailed: 'Failed to load message history',
     // Prompt applied notification
-    promptApplied: 'Prompt template "{name}" applied, feel free to start the conversation',
+    promptFilled: 'The prompt has been placed in the input box. Review it before sending.',
     promptTooLong: 'The prompt exceeds the {max}-character limit and was not applied. Please shorten it and try again.',
     sourcePreviewFailed: 'Failed to load the document. Please try again later.',
-    promptDefaultName: 'Unnamed',
-    currentTemplate: 'Current template: {name}',
-    clearTemplate: 'Clear',
-    promptCleared: 'Prompt template cleared',
     backToConversations: 'Back to conversations',
     liked: 'Liked',
     disliked: 'Disliked',
@@ -413,6 +412,7 @@ export default {
   },
   prompts: {
     subtitle: 'Manage system prompts and response styles for the AI assistant',
+    fillToChat: 'Fill chat input',
     addTemplate: 'New Template',
     create: 'Create Template',
     editTemplate: 'Edit Template',
@@ -729,6 +729,9 @@ export default {
     responseTrend: 'Response Time Trend',
     recentAlerts: 'Recent Alerts',
     noData: 'No data',
+    loadFailed: 'Failed to load monitoring data',
+    loadFailedDesc: 'Please check your network or try again later; click Retry to reload.',
+    auditLoadFailed: 'Failed to load audit logs',
     timeRange: {
       hour1: 'Last 1 hour',
       hour6: 'Last 6 hours',
@@ -764,6 +767,8 @@ export default {
     relevanceScore: 'Relevance',
     noResults: 'No results found',
     noResultsDesc: 'Try different keywords or adjust filters',
+    searchErrorDesc: 'Please check your network or try again later; click Retry to search again',
+    noOrganization: 'Your account has not joined any organization yet, so search is unavailable.',
     fileContent: 'File Content',
     searchFailed: 'Search failed',
     askAIQuestion: 'About the file "{filename}": {query}',
@@ -850,6 +855,9 @@ export default {
   },
 
   agent: {
+    sessionSelectorLabel: 'Select agent session',
+    newSessionOption: '+ New session',
+    untitledSession: 'Untitled',
     clearConfirmTitle: 'Clear current session messages',
     clearConfirm: 'This only clears the messages displayed for the current session. Other sessions are not affected. Clear now?',
     deleteSessionConfirmTitle: 'Delete current session',
