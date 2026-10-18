@@ -19,8 +19,9 @@ import {
 } from '@vicons/ionicons5'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useLLMConfigStore, type LLMProviderConfig } from '@/stores/llmConfigStore'
-import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflowStream, getWorkflows, getNodeDefinitions, type WorkflowNode, type WorkflowEdge, type WorkflowConfig, type NodeDefinition } from '@/api/workflow'
+import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflowStream, getWorkflows, getNodeDefinitions, type Workflow, type WorkflowNode, type WorkflowEdge, type WorkflowConfig, type NodeDefinition } from '@/api/workflow'
 import { agentApi } from '@/api/agent'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import type { SkillInfo } from '@/types/agent'
 import { useDedupedMessage } from '@/utils/message'
 // 画布根组件（VueFlow/Background/Controls/MiniMap）的 import 归 editor.vue
@@ -161,7 +162,8 @@ async function loadSkills() {
   if (skillsLoaded.value) return
   try {
     const res = await agentApi.listSkills()
-    skills.value = (res as any).data?.data || (res as any).data || []
+    // GET /agent/skills → {success, data: <SkillInfo[]>} → apiUnwrap 解一层
+    skills.value = apiUnwrap<SkillInfo[]>(res) || []
     skillsLoaded.value = true
   } catch {
     // 静默失败，skills 是可选功能
@@ -726,7 +728,7 @@ const saveWorkflow = async () => {
         name: workflowStore.workflowName,
         flow_data: flowData,
       })
-      workflowStore.currentWorkflowId = res.data?.data?.id
+      workflowStore.currentWorkflowId = apiUnwrap<{ id: number }>(res)?.id
       // Update URL without navigation
       if (workflowStore.currentWorkflowId) {
         router.replace({ query: { id: String(workflowStore.currentWorkflowId) } })
@@ -894,7 +896,9 @@ async function openLoadModal() {
   loadingWorkflows.value = true
   try {
     const res = await getWorkflows()
-    workflowList.value = (res.data?.data?.items || res.data?.data || [])
+    // GET /workflows/ → {success, data: {items: [...], total}} → apiUnwrap 归一
+    const page = apiUnwrap<{ items?: { id: number; name: string; created_at: string }[] } | null>(res)
+    workflowList.value = page?.items || []
   } catch {
     message.error('获取工作流列表失败')
   } finally {
@@ -906,7 +910,7 @@ async function loadWorkflowById(id: number) {
   showLoadModal.value = false
   try {
     const res = await getWorkflow(id)
-    const workflow = res.data?.data
+    const workflow = apiUnwrap<Workflow>(res)
     if (workflow) {
       workflowStore.loadWorkflow(workflow)
       // B11：详响应无 engine_type（workflow.py:121-132），旧读点恒 undefined——
@@ -929,7 +933,8 @@ function handleCreateNew() {
 async function loadNodeDefinitions() {
   try {
     const res = await getNodeDefinitions()
-    const defs = res.data?.data
+    // GET /workflows/nodes/definitions → {success, data: <NodeDefinition[]>}
+    const defs = apiUnwrap<NodeDefinition[]>(res)
     if (defs && Array.isArray(defs) && defs.length > 0) {
       nodeDefinitions.value = defs
       nodeDefsLoaded.value = true

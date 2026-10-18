@@ -165,6 +165,7 @@ import {
   CompassOutline, AppsOutline
 } from '@vicons/ionicons5'
 import { getWorkflows, getWorkflow, deleteWorkflow as deleteWorkflowApi, createWorkflow, type WorkflowConfig } from '@/api/workflow'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import dayjs from 'dayjs'
 
 interface WorkflowItem {
@@ -200,7 +201,9 @@ const loadWorkflows = async () => {
   loading.value = true
   try {
     const res = await getWorkflows()
-    workflows.value = res.data?.data?.items || []
+    // GET /workflows/ → {success, data: {items: [...], total}} → apiUnwrap 归一
+    const page = apiUnwrap<{ items?: WorkflowItem[] } | null>(res)
+    workflows.value = page?.items || []
     loadError.value = false
   } catch (error) {
     loadError.value = true
@@ -246,7 +249,7 @@ const duplicateWorkflow = async (item: WorkflowItem) => {
     // 详情接口取真配置，否则副本恒为空壳（旧实现直接传 item.flow_data === undefined，
     // 静默丢数据）
     const res = await getWorkflow(item.id)
-    const detail = res.data?.data as WorkflowItem | undefined
+    const detail = apiUnwrap<WorkflowItem | undefined>(res)
     if (!detail) {
       message.error('复制失败')
       return

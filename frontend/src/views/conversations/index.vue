@@ -119,7 +119,8 @@ import { ref, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { SearchOutline, RefreshOutline, ChatbubblesOutline, TrashOutline, AddOutline } from '@vicons/ionicons5'
-import { getConversations, deleteConversation } from '@/api/conversation'
+import { getConversations, deleteConversation, type ConversationListResponse } from '@/api/conversation'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import dayjs from 'dayjs'
@@ -154,9 +155,11 @@ const loadConversations = async () => {
   try {
     const params = { page: pagination.page, page_size: pagination.pageSize, search: searchText.value }
     const response = await getConversations(params)
-    if (response.data?.data) {
-      conversations.value = Array.isArray(response.data.data.data) ? response.data.data.data : []
-      pagination.itemCount = response.data.data.total || 0
+    // 宽容解包：真实响应为 {success, data: {data: [...], total, page, page_size}}。
+    const page = apiUnwrap<ConversationListResponse | null>(response)
+    if (page) {
+      conversations.value = Array.isArray(page.data) ? page.data : []
+      pagination.itemCount = page.total || 0
     }
     loadError.value = false
   } catch (error) {

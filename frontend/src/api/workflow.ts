@@ -99,7 +99,7 @@ export const deleteWorkflow = async (id: number) => {
 export const executeWorkflow = async (id: number, inputData?: Record<string, unknown>) => {
   // 契约对齐（B8/B9，workflow.py:197-220）：
   //  - stream 是 **query** 参数（旧实现塞进 body → 后端不认 → 默认 True 走 SSE 分支，
-  //    响应体是事件流 → res.data?.data 恒 undefined，面板静默假「执行完成」）；
+  //    响应体是事件流 → 走 JSON 解包路径时业务体恒 undefined，面板静默假「执行完成」）；
   //  - 请求体本身就是 input_data（端点 `input_data = body`，引擎读 input["text"]；
   //    旧实现包成 {workflow_id, input_data, stream} → input["text"] 恒空）。
   return request.post(`/workflows/${id}/execute`, inputData ?? {}, { params: { stream: false } })

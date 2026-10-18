@@ -124,8 +124,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getKnowledgeBases } from '@/api/knowledge'
+import { getKnowledgeBases, type KnowledgeBaseListResponse } from '@/api/knowledge'
 import type { ReferencedDoc } from '@/types/agent'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 
 const props = defineProps<{
   placeholder?: string
@@ -218,7 +219,9 @@ async function doSearch() {
     const res = await getKnowledgeBases({ page: 1, page_size: 8, search: q || undefined })
     // 结果回来时现场已变（关层/换词）→ 丢弃
     if (!pickerOpen.value || pickerQuery.value !== q) return
-    const list = res.data?.data?.data
+    // 真实双层信封 → apiUnwrap 归一为分页体（data 为文件数组）
+    const page = apiUnwrap<KnowledgeBaseListResponse>(res)
+    const list = page?.data
     pickerResults.value = Array.isArray(list) ? list : []
     pickerActive.value = 0
     pickerError.value = false

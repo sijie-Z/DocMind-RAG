@@ -140,7 +140,8 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { NInput, NButton, NIcon, NTag } from 'naive-ui'
 import { GitNetworkOutline, SearchOutline, RefreshOutline, CloseOutline, WarningOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
-import { getKnowledgeGraph, type GraphNode, type GraphEdge } from '@/api/knowledge'
+import { getKnowledgeGraph, type GraphNode, type GraphEdge, type GraphData } from '@/api/knowledge'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
 
 const { t } = useI18n()
@@ -214,7 +215,8 @@ const fetchGraph = async () => {
   loadFailed.value = false
   try {
     const res = await getKnowledgeGraph(searchQuery.value || undefined, 80)
-    const data = res.data?.data || res.data
+    // 该端点为裸结构（{nodes, edges, analytics}）：apiUnwrap 原样透传
+    const data = apiUnwrap<GraphData>(res)
     if (data) {
       graphNodes.value = (data.nodes || []).map((n: GraphNode) => ({
         ...n,

@@ -235,6 +235,7 @@ import {
   TrashOutline,
 } from '@vicons/ionicons5'
 import { agentApi } from '@/api/agent'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import {
   createScheduledTask,
   deleteScheduledTask,
@@ -481,7 +482,8 @@ async function openResult(taskId: string) {
   resultModal.view = null
   try {
     const res = await agentApi.getTask(taskId)
-    resultModal.view = res.data.data
+    // GET /agent/tasks/{id} → {success, data: <AgentTaskView>} → apiUnwrap 解一层
+    resultModal.view = apiUnwrap<AgentTaskView>(res)
   } catch (error: unknown) {
     // agent 任务端点有独立的 org/归属闸门：读不到就如实说"不可用"
     resultModal.error = extractApiError(error, t('scheduler.result.unavailable'))

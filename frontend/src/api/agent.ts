@@ -157,14 +157,15 @@ export const agentApi = {
   /** 任务状态视图（审批现场 / 取消后的权威状态；HITL 恢复入口）。
    *
    * 注意返回形状（F2 教训）：request 的响应拦截器返回**完整 AxiosResponse**
-   * （信封在 `res.data = {success, data}`），消费者必须读 `res.data.data`。
+   * （信封在 `res.data = {success, data}`），消费者统一用 `@/utils/apiUnwrap`
+   * 解一层（apiUnwrap(res) → 业务体）。
    * 类型如实声明 AxiosResponse，杜绝"类型说已解包、运行时没有"的漂移。
    */
   getTask(taskId: string): Promise<AxiosResponse<ApiResponse<AgentTaskView>>> {
     return request.get(`/agent/tasks/${taskId}`)
   },
 
-  // ── 回放消费面（跑完之后的"可带走"体验；信封契约同 getTask：读 res.data.data）──
+  // ── 回放消费面（跑完之后的"可带走"体验；信封契约同 getTask：apiUnwrap(res)）──
 
   /** 最近任务列表：每条带 has_replay（「有回放可看」标记）。 */
   listTasks(params?: {
@@ -328,7 +329,7 @@ export const agentApi = {
     }
   },
 
-  /** List available tools（真载荷 data.data；agent.py:450-472） */
+  /** List available tools（真载荷 apiUnwrap(res)；agent.py:450-472） */
   listTools(): Promise<AxiosResponse<ApiResponse<ToolInfo[]>>> {
     return request.get('/agent/tools')
   },
@@ -340,7 +341,7 @@ export const agentApi = {
 
   // ── Sessions ──
 
-  /** List agent sessions（真载荷 data.data.sessions；agent.py:500-556） */
+  /** List agent sessions（真载荷 apiUnwrap(res).sessions；agent.py:500-556） */
   listSessions(params?: {
     page?: number
     page_size?: number
@@ -348,14 +349,14 @@ export const agentApi = {
     return request.get('/agent/sessions', { params })
   },
 
-  /** Create agent session（后端只回 {id, title}，真载荷 data.data；agent.py:585-591） */
+  /** Create agent session（后端只回 {id, title}，真载荷 apiUnwrap(res)；agent.py:585-591） */
   createSession(
     title: string,
   ): Promise<AxiosResponse<ApiResponse<{ id: string; title: string }>>> {
     return request.post('/agent/sessions', { title })
   },
 
-  /** Get session details（真载荷 data.data.config；agent.py:637-647） */
+  /** Get session details（真载荷 apiUnwrap(res).config；agent.py:637-647） */
   getSession(sessionId: string): Promise<AxiosResponse<ApiResponse<AgentSessionDetail>>> {
     return request.get(`/agent/sessions/${sessionId}`)
   },
@@ -367,7 +368,7 @@ export const agentApi = {
 
   // ── Configuration ──
 
-  /** Get user agent config（真载荷 data.data；agent.py:696-710） */
+  /** Get user agent config（真载荷 apiUnwrap(res)；agent.py:696-710） */
   getConfig(): Promise<AxiosResponse<ApiResponse<AgentConfig>>> {
     return request.get('/agent/config')
   },

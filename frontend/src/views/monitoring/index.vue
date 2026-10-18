@@ -199,8 +199,9 @@ import { useI18n } from 'vue-i18n'
 import { getAuditLogs, type AuditLogEntry } from '@/api/user'
 import { RefreshOutline, PulseOutline, GitNetworkOutline, BookOutline, WarningOutline } from '@vicons/ionicons5'
 import echarts from '@/utils/echarts'
-import { getMonitoringDashboard, getMonitoringAlerts, getMetrics } from '@/api/monitoring'
+import { getMonitoringDashboard, getMonitoringAlerts, getMetrics, type TrendPoint } from '@/api/monitoring'
 import request from '@/utils/request'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import { filterPointsByTimeRange } from './timeRange'
 
 interface SystemMetrics {
@@ -502,7 +503,8 @@ const updateMetricsCharts = async () => {
     // 元素键 timestamp(秒)/request_count/response_time 等（core/middleware.py:129-136）。
     // 旧前端读不存在的 resp.data.metrics → 三图恒不更新。
     const appMetricsResponse = await getMetrics('application', timeRange.value)
-    const points = appMetricsResponse.data?.data || []
+    // GET /monitoring/metrics/{type} 为裸 {data: [...]} 单层体 → apiUnwrap 归一为数组
+    const points = apiUnwrap<TrendPoint[]>(appMetricsResponse) || []
 
     if (requestChart) {
       const requestData = points.map((item) => [item.timestamp * 1000, item.request_count])
