@@ -100,22 +100,16 @@ async def test_mark_failed_writes_document_and_job_failed(monkeypatch):
     #28 端到端「文档 FAILED」与 #30 终局日志「doc/job already marked FAILED」
     都依赖这两次真实状态写入；此前 S7 变异（删 `doc.status=FAILED` 一行）全绿。
 
-    A3-P0 起文档写入改为条件 UPDATE（``WHERE status != 'INDEXED'``）：
-    这里验证语句内容（SET failed + 原因、条件排除 INDEXED）与 job 终态写入。
+    A3-P0 起文档与 job 都改为条件 UPDATE：
+    - 文档：``WHERE status != 'INDEXED'``（终态不回退）；
+    - job：``WHERE status != 'SUCCESS'``（预审建议②：并发成功 run 不被晚到失败覆盖）。
 
-    变异点：去掉 UPDATE 的 ``status != INDEXED`` 条件 / 删掉 job.status 赋值 →
-    对应用例红（条件语句断言 / job 断言）。
+    变异点：去掉任一条件 / 删除任一 UPDATE → 本用例红。
     """
     import app.worker.doc_processor as dp_mod
-    from app.models.document import Document, DocumentStatus
+    from app.models.document import DocumentStatus
     from app.models.knowledge_job import KnowledgeJobStatus
 
-    doc = SimpleNamespace(status=DocumentStatus.PARSING, parse_error=None)
-    job = SimpleNamespace(
-        status=KnowledgeJobStatus.PROCESSING,
-        error_message=None,
-        finished_at=None,
-    )
     commits = []
     executed = []
 
@@ -126,9 +120,6 @@ async def test_mark_failed_writes_document_and_job_failed(monkeypatch):
         async def execute(self, stmt):
             executed.append(stmt)
             return _Result()
-
-        async def get(self, model, pk):
-            return doc if model is Document else job
 
         async def commit(self):
             commits.append(True)
@@ -145,17 +136,22 @@ async def test_mark_failed_writes_document_and_job_failed(monkeypatch):
     processor = DocumentProcessor()
     await processor._mark_failed("doc-1", "boom", job_id=7)
 
-    assert executed, "文档 FAILED 必须经条件 UPDATE 写入"
-    compiled = executed[0].compile()
-    rendered = str(compiled)
-    assert "documents.status !=" in rendered, "FAILED 写入必须带 status != INDEXED 条件"
-    params = compiled.params.values()
-    assert DocumentStatus.FAILED in params
-    assert DocumentStatus.INDEXED in params
-    assert "boom" in params
-    assert job.status == KnowledgeJobStatus.FAILED
-    assert job.error_message == "boom"
-    assert job.finished_at is not None
+    assert len(executed) == 2, "文档与 job 各一条条件 UPDATE"
+    doc_stmt = executed[0].compile()
+    assert "documents.status !=" in str(doc_stmt), (
+        "FAILED 写入必须带 status != INDEXED 条件"
+    )
+    assert DocumentStatus.FAILED in doc_stmt.params.values()
+    assert DocumentStatus.INDEXED in doc_stmt.params.values()
+    assert "boom" in doc_stmt.params.values()
+
+    job_stmt = executed[1].compile()
+    assert "knowledge_processing_jobs.status !=" in str(job_stmt), (
+        "job FAILED 写入必须带 status != SUCCESS 条件（并发成功 run 不回退）"
+    )
+    assert KnowledgeJobStatus.FAILED in job_stmt.params.values()
+    assert KnowledgeJobStatus.SUCCESS in job_stmt.params.values()
+    assert "boom" in job_stmt.params.values()
     assert len(commits) == 2, "doc 与 job 各提交一次（两次独立 session）"
 
 

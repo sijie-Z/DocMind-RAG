@@ -11,7 +11,7 @@ downgrade 删除本列——已被标记为 true 的未完成任务会失去对�
 不损坏（文档/任务行仍在，可经知识库重建端点手动恢复）。
 
 Revision ID: 010_knowledge_job_local_fallback
-Revises: 009_agent_task_plan_approval
+Revises: 010_tenant_boundary_org（A2 租户边界；单 head 链 009→A2→A3）
 """
 
 import sqlalchemy as sa
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "010_knowledge_job_local_fallback"
-down_revision = "009_agent_task_plan_approval"
+down_revision = "010_tenant_boundary_org"
 branch_labels = None
 depends_on = None
 

@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.document import Document, DocumentStatus
-from app.models.knowledge_job import KnowledgeProcessingJob
+from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 
 
 @pytest.fixture
@@ -131,6 +131,101 @@ class TestRebuildOrdering:
         assert job_obj.local_fallback is False, (
             "N4：Kafka 投递确认后必须清除本机兜底标记（否则重启会重复本地调度）"
         )
+
+    @pytest.mark.asyncio
+    async def test_job_commit_failure_happens_before_es_delete(self, monkeypatch):
+        """预审补偿：job 落库失败时 ES 尚未删除——不得留下「INDEXED 但搜不到」。"""
+        import app.api.v1.endpoints.knowledge as knowledge_mod
+        from app.exceptions import AppError
+
+        doc = SimpleNamespace(
+            id="doc-1",
+            filename="report.pdf",
+            title="Report",
+            file_path="1/md5.pdf",
+            file_type=SimpleNamespace(value="pdf"),
+            organization_id=1,
+        )
+        monkeypatch.setattr(
+            knowledge_mod, "get_document_for_user", AsyncMock(return_value=doc)
+        )
+        delete_es = AsyncMock(return_value=None)
+        monkeypatch.setattr(
+            knowledge_mod.knowledge_service, "delete_es_by_document_id", delete_es
+        )
+        monkeypatch.setattr(
+            knowledge_mod, "create_notification", AsyncMock(return_value=None)
+        )
+
+        db = MagicMock()
+        db.add = MagicMock()
+        db.flush = AsyncMock()  # 变异对照：旧顺序（flush→删 ES）也必须能被判别
+        db.commit = AsyncMock(
+            side_effect=RuntimeError("db down at job commit")
+        )
+        db.execute = AsyncMock(return_value=MagicMock())
+
+        with pytest.raises(AppError, match="重建知识库失败"):
+            await knowledge_mod.rebuild_document_knowledge(
+                "doc-1", current_user=SimpleNamespace(id=1), db=db
+            )
+
+        # job 落库失败必须发生在删除 ES 之前；否则 INDEXED 文档会变成不可检索
+        delete_es.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_es_delete_failure_terminalizes_job(self, monkeypatch):
+        """ES 删除失败：job 条件收敛为 FAILED，文档状态不被改写。"""
+        import app.api.v1.endpoints.knowledge as knowledge_mod
+        from app.exceptions import AppError
+
+        doc = SimpleNamespace(
+            id="doc-1",
+            filename="report.pdf",
+            title="Report",
+            file_path="1/md5.pdf",
+            file_type=SimpleNamespace(value="pdf"),
+            organization_id=1,
+        )
+        monkeypatch.setattr(
+            knowledge_mod, "get_document_for_user", AsyncMock(return_value=doc)
+        )
+        monkeypatch.setattr(
+            knowledge_mod.knowledge_service,
+            "delete_es_by_document_id",
+            AsyncMock(side_effect=RuntimeError("ES down")),
+        )
+        monkeypatch.setattr(
+            knowledge_mod, "create_notification", AsyncMock(return_value=None)
+        )
+
+        captured = []
+
+        async def fake_execute(stmt):
+            captured.append(stmt)
+            return MagicMock()
+
+        db = MagicMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        db.execute = AsyncMock(side_effect=fake_execute)
+
+        with pytest.raises(AppError, match="重建知识库失败"):
+            await knowledge_mod.rebuild_document_knowledge(
+                "doc-1", current_user=SimpleNamespace(id=1), db=db
+            )
+
+        job_updates = [
+            stmt for stmt in captured
+            if "knowledge_processing_jobs" in str(stmt.compile())
+        ]
+        assert job_updates, "ES 删除失败必须把 job 条件收敛（不能留下 QUEUED 孤儿）"
+        params = job_updates[0].compile().params.values()
+        assert KnowledgeJobStatus.FAILED in params
+        assert KnowledgeJobStatus.SUCCESS in params, (
+            "收敛写入必须带 status != SUCCESS 条件（不覆盖并发成功 run）"
+        )
+        assert "status" not in vars(doc), "失败路径不得改写文档状态"
 
     @pytest.mark.asyncio
     async def test_rebuild_fallback_marker_persisted_before_schedule(self, monkeypatch):

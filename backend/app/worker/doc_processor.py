@@ -561,12 +561,22 @@ class DocumentProcessor:
 
         if job_id:
             async with AsyncSessionLocal() as session:
-                job = await session.get(KnowledgeProcessingJob, job_id)
-                if job:
-                    job.status = KnowledgeJobStatus.FAILED
-                    job.error_message = error
-                    job.finished_at = datetime.now()
-                    await session.commit()
+                # 条件写：并发成功 run 已把 job 置 SUCCESS 时，晚到的失败
+                # 不得把任务终态回退为 FAILED（预审建议②）。
+                await session.execute(
+                    update(KnowledgeProcessingJob)
+                    .where(
+                        KnowledgeProcessingJob.id == job_id,
+                        KnowledgeProcessingJob.status != KnowledgeJobStatus.SUCCESS,
+                    )
+                    .values(
+                        status=KnowledgeJobStatus.FAILED,
+                        error_message=error,
+                        finished_at=datetime.now(),
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                await session.commit()
 
     async def _extract_graph_safely(self, doc: Document, chunks_data: list[dict]) -> None:
         """索引成功后的知识图谱抽取（非阻塞契约）。

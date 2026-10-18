@@ -401,12 +401,9 @@ async def rebuild_document_knowledge(
     try:
         doc = await get_document_for_user(db, current_user, document_id)
 
-        # 1. 仅从 ES 删除该文档的索引
-        await knowledge_service.delete_es_by_document_id(document_id)
-
-        # 2. 先落库任务行（commit 拿到自增 id），再更新文档状态，最后才发 Kafka：
-        #    消息可见时 job 必已存在；且不存在「worker 先写完 INDEXED、请求末尾
-        #    再把状态覆盖回 PENDING」的窗口（A3-P0 重建竞态）。
+        # 1. 先落库任务行（commit 拿到自增 id），之后才动 ES：若 job 落库失败，
+        #    ES 尚未删除，INDEXED 文档保持可检索——消除「状态 INDEXED、索引已被
+        #    删除」的不可检索窗口（预审补偿）。
         job = KnowledgeProcessingJob(
             document_id=document_id,
             organization_id=doc.organization_id,
@@ -420,6 +417,33 @@ async def rebuild_document_knowledge(
         )
         db.add(job)
         await db.commit()
+
+        # 2. 删除 ES 中该文档的旧索引；失败则把 job 条件收敛为 FAILED
+        #    （不覆盖已 SUCCESS 的并发成功 run），文档保持 INDEXED 且旧索引
+        #    仍在——不制造「已索引却搜不到」。
+        try:
+            await knowledge_service.delete_es_by_document_id(document_id)
+        except Exception as es_err:
+            try:
+                await db.execute(
+                    update(KnowledgeProcessingJob)
+                    .where(
+                        KnowledgeProcessingJob.id == job.id,
+                        KnowledgeProcessingJob.status != KnowledgeJobStatus.SUCCESS,
+                    )
+                    .values(
+                        status=KnowledgeJobStatus.FAILED,
+                        error_message=f"删除旧索引失败: {es_err}",
+                        finished_at=datetime.now(),
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                await db.commit()
+            except Exception as mark_err:
+                logger.error(
+                    f"重建失败且任务收敛写入失败: {mark_err}", exc_info=True
+                )
+            raise
 
         # 3. 条件更新文档状态：已 INDEXED 的文档不因重建请求回退为 PENDING
         #    （worker 接单后会以 PARSING 接管；此处只禁止覆盖终端态）。

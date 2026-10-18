@@ -113,6 +113,24 @@ class TestFailedWriteConditional:
         assert doc.status == DocumentStatus.FAILED
         assert doc.parse_error == "boom"
 
+    @pytest.mark.asyncio
+    async def test_failure_does_not_regress_successful_job(self, session_factory):
+        """预审建议②：job 已 SUCCESS 时，晚到的失败不得把任务终态回退为 FAILED。"""
+        doc_id = await _seed(session_factory, DocumentStatus.PARSING)
+        job_id = await _seed_job(
+            session_factory, doc_id, KnowledgeJobStatus.SUCCESS
+        )
+
+        await DocumentProcessor()._mark_failed(doc_id, "late failure", job_id=job_id)
+
+        doc = await _load(session_factory, doc_id)
+        job = await _load_job(session_factory, job_id)
+        assert doc.status == DocumentStatus.FAILED
+        assert job.status == KnowledgeJobStatus.SUCCESS, (
+            "并发成功 run 的 job 终态被晚到的失败覆盖"
+        )
+        assert job.error_message is None
+
 
 class TestSuccessWriteConditional:
     @pytest.mark.asyncio
