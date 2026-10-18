@@ -615,6 +615,13 @@ export default {
   },
   workflow: {
     description: '複雑なAIタスクを段階的なパイプラインに分解し、統一されたメトリクスと状態管理で実行品質を監視します。',
+    editor: {
+      clearConfirmTitle: 'キャンバスをクリア',
+      clearConfirmContent: 'クリア後、自動保存が {n} 秒以内に空のキャンバスを書き戻し、保存済みのバージョンを上書きします。キャンバスをクリアしますか？',
+      clearConfirmPositive: 'クリア',
+      clearConfirmNegative: 'キャンセル',
+      emptyCanvasAutoSaveBlocked: 'キャンバスが空のため、保存済みバージョンを保護するために自動保存をスキップしました。空のキャンバスを保存するには、手動で「保存」をクリックしてください。',
+    },
   },
   notifications: {
     markAllRead: 'すべて既読',

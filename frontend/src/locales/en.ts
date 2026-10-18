@@ -690,6 +690,13 @@ export default {
   },
   workflow: {
     description: 'Break complex AI tasks into staged pipelines with unified metrics and state management.',
+    editor: {
+      clearConfirmTitle: 'Clear canvas',
+      clearConfirmContent: 'After clearing, auto-save will write the empty canvas back within {n} seconds and overwrite the saved version. Clear the canvas?',
+      clearConfirmPositive: 'Clear',
+      clearConfirmNegative: 'Cancel',
+      emptyCanvasAutoSaveBlocked: 'The canvas is empty, so auto-save was skipped to protect the saved version. To save an empty canvas, click "Save" manually.',
+    },
   },
   notifications: {
     markAllRead: 'Mark all read',
