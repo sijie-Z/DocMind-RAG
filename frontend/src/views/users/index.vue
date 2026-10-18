@@ -202,7 +202,8 @@ import {
 } from '@vicons/ionicons5'
 import type { DataTableColumns, FormRules, FormInst } from 'naive-ui'
 import { getUsers, createUser, updateUser, deleteUser, resetUserPassword } from '@/api/user'
-import { getOrganizations } from '@/api/organization'
+import { getOrganizations, type OrganizationListResponse } from '@/api/organization'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 
 /** Safely extract error message from unknown error */
 function getErrorMessage(error: unknown): string {
@@ -275,7 +276,9 @@ const organizationOptions = ref<Array<{ label: string; value: number }>>([])
 const loadOrganizationOptions = async () => {
   try {
     const res = await getOrganizations({ page: 1, page_size: 100 })
-    const rows = (res.data as unknown as { data?: { data?: Array<{ id: number; name: string }> } })?.data?.data
+    // 组织列表为 {success, data: {data: [...], total, …}} 双层体 → apiUnwrap 归一
+    const page = apiUnwrap<OrganizationListResponse | null>(res)
+    const rows = page?.data
     organizationOptions.value = Array.isArray(rows)
       ? rows.map((org) => ({ label: org.name, value: org.id }))
       : []
