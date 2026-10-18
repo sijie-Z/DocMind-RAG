@@ -81,7 +81,8 @@ const NRadioButtonStub = defineComponent({
 })
 
 function mountInput() {
-  const wrapper: VueWrapper
+  // eslint-disable-next-line prefer-const -- 闭包需在 mount 前引用 wrapper
+  let wrapper: VueWrapper
   const handlers = {
     'onUpdate:useAgent': (v: boolean) => wrapper.setProps({ useAgent: v }),
     'onUpdate:useSSE': (v: boolean) => wrapper.setProps({ useSSE: v }),
