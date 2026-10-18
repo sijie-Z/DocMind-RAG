@@ -308,6 +308,11 @@ export default {
       training: 'Formation',
       other: 'Autre'
     },
+    graph: {
+      zoomIn: 'Zoom avant',
+      zoomOut: 'Zoom arrière',
+      fitView: 'Réinitialiser la vue'
+    },
     uploadFirst: 'Télécharger votre premier fichier',
     empty: 'Aucun document',
     emptyDesc: 'La base de connaissances est vide',

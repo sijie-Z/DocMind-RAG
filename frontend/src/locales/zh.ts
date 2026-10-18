@@ -395,7 +395,10 @@ export default {
     graph: {
       emptyTitle: '暂无图谱数据',
       emptyDesc: '上传文档并完成索引后，系统会自动构建知识图谱',
-      loadFailed: '图谱数据加载失败，请稍后重试'
+      loadFailed: '图谱数据加载失败，请稍后重试',
+      zoomIn: '放大',
+      zoomOut: '缩小',
+      fitView: '复位视图'
     },
     // G波：文档状态词条化（docDisplay.ts 芯片标签；双词 completed/indexed 同映射 indexed）
     docStatus: {

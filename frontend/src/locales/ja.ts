@@ -308,6 +308,11 @@ export default {
       training: '研修資料',
       other: 'その他'
     },
+    graph: {
+      zoomIn: '拡大',
+      zoomOut: '縮小',
+      fitView: '表示をリセット'
+    },
     uploadFirst: '最初のファイルをアップロード',
     empty: 'ドキュメントがありません',
     emptyDesc: 'ナレッジベースは空です',
