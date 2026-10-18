@@ -31,7 +31,7 @@
           ⚙ 配置
         </button>
         <button class="header-btn" @click="handleNewSession">+ 新建</button>
-        <button class="header-btn" @click="agentStore.clearMessages()">清空</button>
+        <button class="header-btn" @click="handleClearMessages">清空</button>
       </div>
     </div>
 
@@ -345,6 +345,7 @@ import { useAgentStore } from '@/stores/agent'
 import { agentApi } from '@/api/agent'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { useDedupedMessage } from '@/utils/message'
+import { useConfirmDangerousAction } from '@/utils/confirm'
 import type {
   AgentEvent,
   AgentChatMessage,
@@ -381,6 +382,7 @@ import Markdown from '@/components/common/Markdown.vue'
 const agentStore = useAgentStore()
 const { t } = useI18n()
 const message = useDedupedMessage()
+const confirmDangerousAction = useConfirmDangerousAction()
 // 深链（?id=<task_id>，通知点击/刷新直达回放）：测试环境可能无 router——全部访问带守卫
 const route = useRoute()
 const router = useRouter()
@@ -987,7 +989,23 @@ async function handleSessionChange(sessionId: string | null) {
   }
 }
 
+/** E2：「清空」仅清空当前会话在界面的消息显示，须二次确认（不删服务端历史） */
+async function handleClearMessages() {
+  const confirmed = await confirmDangerousAction(
+    t('agent.clearConfirmTitle'),
+    t('agent.clearConfirm'),
+  )
+  if (!confirmed) return
+  agentStore.clearMessages()
+}
+
 async function handleSessionDelete(sessionId: string) {
+  const session = agentStore.sessions.find((s) => s.id === sessionId)
+  const confirmed = await confirmDangerousAction(
+    t('agent.deleteSessionConfirmTitle'),
+    t('agent.deleteSessionConfirm', { title: session?.title || sessionId }),
+  )
+  if (!confirmed) return
   try {
     await agentApi.deleteSession(sessionId)
     agentStore.setSessions(agentStore.sessions.filter((s) => s.id !== sessionId))

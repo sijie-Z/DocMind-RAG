@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
-import { NMessageProvider } from 'naive-ui'
+import { NMessageProvider, NDialogProvider } from 'naive-ui'
 
 import OrganizationsView from '../index.vue'
 import { getUsers } from '@/api/user'
@@ -94,7 +94,7 @@ const DataTableStub = defineComponent({
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
 
 const Host = defineComponent({
-  render: () => h(NMessageProvider, null, { default: () => h(OrganizationsView) }),
+  render: () => h(NMessageProvider, null, { default: () => h(NDialogProvider, null, { default: () => h(OrganizationsView) }) }),
 })
 
 function mountView() {
