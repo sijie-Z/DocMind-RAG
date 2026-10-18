@@ -75,7 +75,7 @@ async def api():
 
 async def _add_workflow(api, *, active=True, name="wf") -> int:
     async with api.factory() as s:
-        wf = Workflow(name=name, flow_data=None, created_by=1, is_active=active)
+        wf = Workflow(name=name, flow_data=None, created_by=1, organization_id=1, is_active=active)
         s.add(wf)
         await s.commit()
         return wf.id
