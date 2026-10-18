@@ -47,6 +47,42 @@
           @mouseup="onMouseUp"
           @wheel.prevent="onWheel"
         />
+        <!-- 缩放控件：放大 / 缩小 / 复位（fitView 自动适配） -->
+        <div class="absolute top-4 left-4 flex flex-col gap-1 bg-white/90 dark:bg-gray-800/90 backdrop-blur rounded-xl border border-gray-200 dark:border-gray-700 p-1">
+          <n-button
+            size="tiny"
+            quaternary
+            circle
+            :title="t('knowledge.graph.zoomIn')"
+            :aria-label="t('knowledge.graph.zoomIn')"
+            data-testid="graph-zoom-in"
+            @click="zoomIn"
+          >
+            <template #icon><n-icon><AddOutline /></n-icon></template>
+          </n-button>
+          <n-button
+            size="tiny"
+            quaternary
+            circle
+            :title="t('knowledge.graph.zoomOut')"
+            :aria-label="t('knowledge.graph.zoomOut')"
+            data-testid="graph-zoom-out"
+            @click="zoomOut"
+          >
+            <template #icon><n-icon><RemoveOutline /></n-icon></template>
+          </n-button>
+          <n-button
+            size="tiny"
+            quaternary
+            circle
+            :title="t('knowledge.graph.fitView')"
+            :aria-label="t('knowledge.graph.fitView')"
+            data-testid="graph-fit-view"
+            @click="fitView"
+          >
+            <template #icon><n-icon><ExpandOutline /></n-icon></template>
+          </n-button>
+        </div>
         <!-- Legend -->
         <div class="absolute bottom-4 left-4 bg-white/90 dark:bg-gray-800/90 backdrop-blur rounded-xl border border-gray-200 dark:border-gray-700 p-3 text-xs">
           <div class="font-medium text-gray-700 dark:text-gray-300 mb-2">实体类型</div>
@@ -137,14 +173,16 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
-import { NInput, NButton, NIcon, NTag } from 'naive-ui'
-import { GitNetworkOutline, SearchOutline, RefreshOutline, CloseOutline, WarningOutline } from '@vicons/ionicons5'
+import { NInput, NButton, NIcon, NTag, useThemeVars } from 'naive-ui'
+import { AddOutline, RemoveOutline, ExpandOutline, GitNetworkOutline, SearchOutline, RefreshOutline, CloseOutline, WarningOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { getKnowledgeGraph, type GraphNode, type GraphEdge, type GraphData } from '@/api/knowledge'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
 
 const { t } = useI18n()
+// 画布颜色随 naive 主题（NConfigProvider darkTheme / 主题覆盖）自动切换，不写死色值
+const themeVars = useThemeVars()
 
 const canvas = ref<HTMLCanvasElement>()
 const canvasContainer = ref<HTMLDivElement>()
@@ -197,6 +235,58 @@ let dragNode: (typeof graphNodes.value)[0] | null = null
 let mouseX = 0
 let mouseY = 0
 
+// 视图缩放与 fitView 参数
+const MIN_SCALE = 0.3
+const MAX_SCALE = 3
+const FIT_PADDING = 48 // fitView 时节点包围盒四周留白（px）
+// 标签防叠：缩放低于该阈值时隐藏节点/关系标签（密集时不叠字，缩小看全貌）
+const LABEL_MIN_SCALE = 0.65
+
+const nodeRadius = (node: { occurrences: number }) =>
+  Math.max(8, Math.min(20, 8 + node.occurrences * 2))
+
+/** 自动适配：把全部节点（含半径）框进可视区并居中 */
+const fitView = () => {
+  const nodes = graphNodes.value
+  if (!nodes.length || width <= 0 || height <= 0) {
+    offsetX = 0
+    offsetY = 0
+    scale = 1
+    return
+  }
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const node of nodes) {
+    const r = nodeRadius(node)
+    minX = Math.min(minX, node.x - r)
+    minY = Math.min(minY, node.y - r)
+    maxX = Math.max(maxX, node.x + r)
+    maxY = Math.max(maxY, node.y + r)
+  }
+  const graphWidth = Math.max(maxX - minX, 1)
+  const graphHeight = Math.max(maxY - minY, 1)
+  const fitScale = Math.min(
+    (width - FIT_PADDING * 2) / graphWidth,
+    (height - FIT_PADDING * 2) / graphHeight
+  )
+  scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, fitScale))
+  offsetX = width / 2 - ((minX + maxX) / 2) * scale
+  offsetY = height / 2 - ((minY + maxY) / 2) * scale
+}
+
+/** 以画布内某点为锚点缩放（滚轮与缩放控件共用） */
+const applyZoom = (factor: number, cx = width / 2, cy = height / 2) => {
+  const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * factor))
+  offsetX = cx - (cx - offsetX) * (newScale / scale)
+  offsetY = cy - (cy - offsetY) * (newScale / scale)
+  scale = newScale
+}
+
+const zoomIn = () => applyZoom(1.2)
+const zoomOut = () => applyZoom(1 / 1.2)
+
 const initCanvas = () => {
   if (!canvas.value || !canvasContainer.value) return
   const rect = canvasContainer.value.getBoundingClientRect()
@@ -230,6 +320,8 @@ const fetchGraph = async () => {
       graphNodes.value = []
       graphEdges.value = []
     }
+    // 数据加载后自动适配视图，首屏完整框住节点
+    fitView()
   } catch {
     loadFailed.value = true
   } finally {
@@ -300,6 +392,10 @@ const simulate = () => {
 
 const draw = () => {
   if (!ctx) return
+  // 画布取色全部走主题令牌（naive common vars），亮/暗主题自动切换
+  const vars = themeVars.value
+  // 标签防叠：缩小到阈值下只画图形，不画文字标签
+  const showLabels = scale >= LABEL_MIN_SCALE
   ctx.clearRect(0, 0, width, height)
   ctx.save()
   ctx.translate(offsetX, offsetY)
@@ -316,23 +412,25 @@ const draw = () => {
     ctx.beginPath()
     ctx.moveTo(source.x, source.y)
     ctx.lineTo(target.x, target.y)
-    ctx.strokeStyle = 'rgba(156, 163, 175, 0.3)'
+    ctx.strokeStyle = vars.borderColor
     ctx.lineWidth = 1
     ctx.stroke()
 
     // Edge label
-    const midX = (source.x + target.x) / 2
-    const midY = (source.y + target.y) / 2
-    ctx.font = '10px system-ui'
-    ctx.fillStyle = 'rgba(156, 163, 175, 0.6)'
-    ctx.textAlign = 'center'
-    ctx.fillText(edge.relation, midX, midY - 6)
+    if (showLabels) {
+      const midX = (source.x + target.x) / 2
+      const midY = (source.y + target.y) / 2
+      ctx.font = '10px system-ui'
+      ctx.fillStyle = vars.textColor3
+      ctx.textAlign = 'center'
+      ctx.fillText(edge.relation, midX, midY - 6)
+    }
   }
 
   // Draw nodes
   for (const node of graphNodes.value) {
     const color = typeColors[node.type] || typeColors.UNKNOWN
-    const radius = Math.max(8, Math.min(20, 8 + node.occurrences * 2))
+    const radius = nodeRadius(node)
     const isSelected = selectedNode.value?.id === node.id
 
     // Glow for selected
@@ -348,15 +446,17 @@ const draw = () => {
     ctx.arc(node.x, node.y, radius, 0, Math.PI * 2)
     ctx.fillStyle = color
     ctx.fill()
-    ctx.strokeStyle = isSelected ? '#fff' : color + '80'
+    ctx.strokeStyle = isSelected ? vars.textColor1 : color + '80'
     ctx.lineWidth = isSelected ? 2 : 1
     ctx.stroke()
 
     // Node label
-    ctx.font = '11px system-ui'
-    ctx.fillStyle = '#374151'
-    ctx.textAlign = 'center'
-    ctx.fillText(node.id.slice(0, 12), node.x, node.y + radius + 14)
+    if (showLabels) {
+      ctx.font = '11px system-ui'
+      ctx.fillStyle = vars.textColor2
+      ctx.textAlign = 'center'
+      ctx.fillText(node.id.slice(0, 12), node.x, node.y + radius + 14)
+    }
   }
 
   ctx.restore()
@@ -374,7 +474,7 @@ const getNodeAt = (x: number, y: number) => {
   for (const node of graphNodes.value) {
     const dx = node.x - sx
     const dy = node.y - sy
-    const radius = Math.max(8, Math.min(20, 8 + node.occurrences * 2))
+    const radius = nodeRadius(node)
     if (dx * dx + dy * dy < radius * radius) return node
   }
   return null
@@ -424,11 +524,7 @@ const onWheel = (e: WheelEvent) => {
   if (!rect) return
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
-  const delta = e.deltaY > 0 ? 0.9 : 1.1
-  const newScale = Math.max(0.3, Math.min(3, scale * delta))
-  offsetX = x - (x - offsetX) * (newScale / scale)
-  offsetY = y - (y - offsetY) * (newScale / scale)
-  scale = newScale
+  applyZoom(e.deltaY > 0 ? 0.9 : 1.1, x, y)
 }
 
 onMounted(async () => {
