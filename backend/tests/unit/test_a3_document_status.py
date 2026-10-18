@@ -104,3 +104,61 @@ class TestMarkDocumentFailed:
         assert written is True
         assert doc.status == DocumentStatus.FAILED
         assert doc.parse_error == "boom"
+
+
+class TestDemoSeedVerificationWiring:
+    @pytest.mark.asyncio
+    async def test_demo_seed_marks_failed_when_verification_rejects(self):
+        """demo 成功分支必须真的经过回读校验；校验失败如实 FAILED（集成验证接线）。"""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        import app.api.v1.endpoints.demo as demo_mod
+        from app.models.document import Document
+
+        db = MagicMock()
+        added = []
+        db.add.side_effect = added.append
+        db.commit = AsyncMock()
+        res = MagicMock()
+        res.scalar = MagicMock(return_value=0)
+        db.execute = AsyncMock(return_value=res)
+
+        user = SimpleNamespace(
+            id=1, organization_id=1, is_superuser=False, role="user", is_active=True
+        )
+
+        async def _embeddings_ok(texts):
+            return [[0.1, 0.2] for _ in texts]
+
+        async def _fake_index(doc_id, document):
+            return None
+
+        class _EmptyES:
+            class _Indices:
+                async def refresh(self, index):
+                    pass
+
+            indices = _Indices()
+
+            async def count(self, index=None, query=None):
+                return {"count": 0}  # ES 回读零命中
+
+        async def _fake_get_elasticsearch():
+            return _EmptyES()
+
+        with patch.object(
+            demo_mod.embedding_service, "get_embeddings", _embeddings_ok
+        ), patch.object(
+            demo_mod.ElasticsearchTools, "index_document", _fake_index
+        ), patch(
+            "app.services.document_status.get_elasticsearch",
+            _fake_get_elasticsearch,
+        ):
+            body = await demo_mod.seed_demo_data(current_user=user, db=db)
+
+        docs = [o for o in added if isinstance(o, Document)]
+        assert docs, "应创建示例文档对象"
+        assert all(d.status == DocumentStatus.FAILED for d in docs)
+        assert all("索引校验失败" in (d.parse_error or "") for d in docs)
+        assert body["success"] is False
+        assert body["data"]["documents_created"] == 0

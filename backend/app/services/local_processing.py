@@ -12,8 +12,10 @@ PENDING/PARSING，且没有任何恢复路径。
 3. 任务终局由 ``DocumentProcessor._mark_success/_mark_failed`` 写入，终局任务
    不再被回收。
 
-多进程部署下对账可能重复调度同一任务：``DocumentProcessor`` 的 Redis 锁负责
-互斥，抢锁失败者按 DEFERRED 退出，不会二次处理。
+多进程部署下对账可能重复调度同一任务：Redis 可用时由 ``DocumentProcessor``
+的文档锁互斥，抢锁失败者按 DEFERRED 退出；Redis 不可用时与既有降级语义一致
+（``process`` 不加锁继续处理），此时可能并发重跑——幂等替换保证最终一致。
+对账派发的任务若返回 DEFERRED，保持未终局并在下次启动继续回收（有日志）。
 """
 
 import asyncio
@@ -23,7 +25,7 @@ from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
-from app.worker.doc_processor import processor
+from app.worker.doc_processor import DEFERRED, processor
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,34 @@ ELIGIBLE_JOB_STATUSES = (
 
 # 持有后台任务引用，避免 asyncio 在任务完成前将其当作垃圾回收
 _background_tasks: set[asyncio.Task] = set()
+
+
+async def _run_local_job(process_call, document_id: str, job_id: int) -> None:
+    """执行单个对账任务并如实记录结果（DEFERRED/失败不得静默）。"""
+    try:
+        outcome = await process_call(document_id, job_id)
+    except Exception as e:  # 单任务异常不拖垮其它任务
+        logger.error(
+            "[LOCAL_JOB] 任务异常 document_id=%s job_id=%s: %s",
+            document_id,
+            job_id,
+            e,
+            exc_info=True,
+        )
+        return
+    if outcome is DEFERRED:
+        logger.info(
+            "[LOCAL_JOB] 任务暂缓（另一处理者持锁）document_id=%s job_id=%s；"
+            "保持未终局，待下次启动对账回收",
+            document_id,
+            job_id,
+        )
+    elif outcome is False:
+        logger.warning(
+            "[LOCAL_JOB] 任务失败（文档/任务应已落 FAILED）document_id=%s job_id=%s",
+            document_id,
+            job_id,
+        )
 
 
 async def reconcile_local_jobs(process=None, session_factory=None) -> int:
@@ -60,7 +90,9 @@ async def reconcile_local_jobs(process=None, session_factory=None) -> int:
     recovered = 0
     for job in jobs:
         try:
-            task = asyncio.create_task(process_call(job.document_id, job.id))
+            task = asyncio.create_task(
+                _run_local_job(process_call, job.document_id, job.id)
+            )
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
             recovered += 1

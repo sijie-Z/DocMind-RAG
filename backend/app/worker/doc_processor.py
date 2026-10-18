@@ -63,6 +63,22 @@ class DeferredOutcome:
 DEFERRED = DeferredOutcome()
 
 
+class StaleRunOutcome:
+    """内部哨兵：该消息对应的 job 已完成（SUCCESS）——陈旧重投，不得再触碰文档。"""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - 调试辅助
+        return "STALE_RUN"
+
+
+STALE_RUN = StaleRunOutcome()
+
+
+class LockLostError(Exception):
+    """持锁 run 在阶段边界发现锁已被接管：立即中止，不再写终态/索引。"""
+
+
 def _noop() -> None:
     """默认进度回调（不关心进度的调用方）。"""
 
@@ -74,6 +90,8 @@ class DocumentProcessor:
         self.parser = document_service
         # document_id -> 本次处理 run 的锁 token（续期/释放时校验归属）
         self._lock_tokens: dict[str, str] = {}
+        # 心跳续期发现锁已被接管的 document_id 集合：阶段边界据此中止本 run
+        self._lock_lost: set[str] = set()
 
     async def _acquire_processing_lock(self, document_id: str) -> bool | None:
         """Redis SETNX 并发锁（值为本次 run 的 token）。
@@ -118,9 +136,12 @@ class DocumentProcessor:
                 str(_LOCK_TTL_SECONDS),
             )
             if not renewed:
+                # 锁已过期且被他人接管：本 run 必须尽快中止（阶段边界检查），
+                # 否则两个 run 会交替重写 chunk/ES（最后写入者胜）。
+                self._lock_lost.add(document_id)
                 logger.error(
                     "[DOC_PROC] lock lost during processing document_id=%s: "
-                    "token no longer owns the lock; another worker may take over",
+                    "token no longer owns the lock; aborting at next checkpoint",
                     document_id,
                 )
             return bool(renewed)
@@ -135,6 +156,12 @@ class DocumentProcessor:
         while True:
             await asyncio.sleep(_LOCK_HEARTBEAT_INTERVAL_SECONDS)
             await self._renew_processing_lock(document_id)
+
+    def _checkpoint(self, document_id: str, notify: Callable[[], None]) -> None:
+        """阶段边界：先刷新进度/心跳，再检查锁归属；丢失则中止本 run。"""
+        notify()
+        if document_id in self._lock_lost:
+            raise LockLostError(document_id)
 
     async def _release_processing_lock(self, document_id: str) -> None:
         """释放并发锁（token 匹配才删）；释放失败时由 TTL 兜底过期。"""
@@ -181,6 +208,7 @@ class DocumentProcessor:
         """
         notify = on_progress or _noop
         logger.info("[DOC_PROC] start document_id=%s job_id=%s", document_id, job_id)
+        self._lock_lost.discard(document_id)
         lock_acquired = await self._acquire_processing_lock(document_id)
         if lock_acquired is False:
             # A3-P0：锁竞争不得当成功提交。持锁者自己的投递在成功前不会提交偏移，
@@ -200,18 +228,33 @@ class DocumentProcessor:
             )
         try:
             doc = await self._load_and_mark_parsing(document_id, job_id)
+            if doc is STALE_RUN:
+                # A3-P0：该 job 已 SUCCESS（INDEXED 与 job 成功同事务提交）。
+                # 这是「成功提交后、偏移提交前」崩溃造成的重投：绝不能再进入
+                # PARSING/FAILED，否则一次重投失败就能把 INDEXED 终态打回 FAILED。
+                logger.info(
+                    "[DOC_PROC] stale redelivery of completed job, keeping terminal "
+                    "state document_id=%s job_id=%s",
+                    document_id,
+                    job_id,
+                )
+                return True
             if doc is None:
                 # 对象已不存在：重投永远不会成功——响亮记录后视同"已了结"，
-                # 避免 consumer 对毒消息做无意义的重投/重启循环。
+                # 避免 consumer 对毒消息做无意义的重投/重启循环。同时把 job
+                # 收敛为 FAILED，避免启动对账每次重启都重新调度这个孤儿任务。
                 logger.error(
                     "[DOC_PROC] document not found, message is terminal: %s", document_id
+                )
+                await self._mark_job_failed(
+                    job_id, "文档不存在，任务无法继续（终局）"
                 )
                 return True
 
             parse_result = await self.parser.parse_document(
                 doc.file_path, str(doc.organization_id)
             )
-            notify()
+            self._checkpoint(document_id, notify)
             chunks_data = parse_result.get("chunks", [])
             # issue #301 批 D（#28）：先剔除全空白 chunk 再判空。修前只看"列表非空"，
             # 而扫描件/OCR 缺失时解析链会产出一个**空文本 chunk**（content="" →
@@ -233,16 +276,16 @@ class DocumentProcessor:
             embeddings = await self._get_embeddings(
                 [c["chunk_text"] for c in chunks_data]
             )
-            notify()
+            self._checkpoint(document_id, notify)
             if len(embeddings) != len(chunks_data):
                 raise ValueError(
                     f"向量生成数量与文本块数量不匹配: {len(embeddings)} vs {len(chunks_data)}"
                 )
 
             await self._replace_document_state(doc, chunks_data, embeddings)
-            notify()
+            self._checkpoint(document_id, notify)
             await self._mark_success(document_id, chunks_data, job_id)
-            notify()
+            self._checkpoint(document_id, notify)
             # 图谱抽取（GraphRAG 写链 a8a3d155）：放在 INDEXED 落库之后、独立
             # try/except 内（见 _extract_graph_safely）——抽取失败/LLM 不可用
             # 不得把已成功的文档拖成 FAILED。
@@ -251,6 +294,16 @@ class DocumentProcessor:
                 "[DOC_PROC] done document_id=%s chunks=%d", document_id, len(chunks_data)
             )
             return True
+        except LockLostError:
+            # 锁被接管：不写 FAILED（文档可能由新持有者正常推进），按未了结处理，
+            # 让 consumer 重投；若新持有者已完成，重投会走 STALE_RUN 跳过。
+            logger.warning(
+                "[DOC_PROC] aborting run on lost lock document_id=%s job_id=%s "
+                "(no terminal state written; message must be redelivered)",
+                document_id,
+                job_id,
+            )
+            return DEFERRED
         except Exception as e:
             logger.error(
                 "[DOC_PROC] failed document_id=%s: %s", document_id, e, exc_info=True
@@ -267,7 +320,17 @@ class DocumentProcessor:
 
     async def _load_and_mark_parsing(
         self, document_id: str, job_id: int | None
-    ) -> Document | None:
+    ) -> Document | None | StaleRunOutcome:
+        """加载文档并推进到 PARSING；陈旧重投返回 ``STALE_RUN``（不触碰状态）。
+
+        陈旧判定（A3-P0，独立对抗评审 B2）：该消息携带的 job 已 ``SUCCESS``
+        ——意味着上一 run 已把文档写成 INDEXED（两者同事务提交），本次是
+        「成功提交后、偏移提交前」崩溃造成的重投；或消息没有 job 且文档已
+        INDEXED（无 job 的重复投递）。这两种情况一律跳过，否则重投 run 一旦
+        解析失败，就会把 INDEXED 终态打回 FAILED。
+
+        有意重处理（知识库重建）会创建**新的 QUEUED job**，不命中判定。
+        """
         async with AsyncSessionLocal() as session:
             doc = (
                 await session.execute(
@@ -278,15 +341,47 @@ class DocumentProcessor:
                 logger.error("[DOC_PROC] document not found: %s", document_id)
                 return None
 
-            doc.status = DocumentStatus.PARSING
-            doc.parse_error = None
+            job = None
             if job_id:
                 job = await session.get(KnowledgeProcessingJob, job_id)
-                if job:
-                    job.status = KnowledgeJobStatus.PROCESSING
-                    job.started_at = datetime.now()
+            if (job is not None and job.status == KnowledgeJobStatus.SUCCESS) or (
+                job is None and doc.status == DocumentStatus.INDEXED
+            ):
+                logger.info(
+                    "[DOC_PROC] skip stale run (job SUCCESS or duplicate delivery of "
+                    "INDEXED document) document_id=%s job_id=%s",
+                    document_id,
+                    job_id,
+                )
+                return STALE_RUN
+
+            doc.status = DocumentStatus.PARSING
+            doc.parse_error = None
+            if job:
+                job.status = KnowledgeJobStatus.PROCESSING
+                job.started_at = datetime.now()
             await session.commit()
             return doc
+
+    async def _mark_job_failed(self, job_id: int | None, error: str) -> None:
+        """把孤儿 job 收敛为 FAILED（不覆盖已 SUCCESS 的任务）。"""
+        if not job_id:
+            return
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                update(KnowledgeProcessingJob)
+                .where(
+                    KnowledgeProcessingJob.id == job_id,
+                    KnowledgeProcessingJob.status != KnowledgeJobStatus.SUCCESS,
+                )
+                .values(
+                    status=KnowledgeJobStatus.FAILED,
+                    error_message=error,
+                    finished_at=datetime.now(),
+                )
+                .execution_options(synchronize_session=False)
+            )
+            await session.commit()
 
     async def _replace_document_state(
         self, doc: Document, chunks_data: list[dict], embeddings: list[list[float]]
@@ -359,7 +454,9 @@ class DocumentProcessor:
             refresh=True,
         )
         await ElasticsearchTools.bulk_index_documents(es_docs)
-        # bulk 不抛错不代表写进去了 —— 必须回读确认（issue #181；
+        # 回读确认把「INDEXED ⟹ 可检索」变成可执行断言（issue #181；
+        # bulk 的 raise_on_error 只防部分失败，不能代替这条断言——
+        # 完整说明见 document_status.verify_indexed 的 docstring；
         # 校验范围在 #224 加严：embedding 有效性与 organization_id 一致性）
         await _verify_indexed(
             client, doc.id, len(es_docs), organization_id=str(doc.organization_id)
@@ -404,10 +501,11 @@ class DocumentProcessor:
                     job.finished_at = datetime.now()
             await session.commit()
             if not getattr(result, "rowcount", 0):
-                # 注意：MySQL 默认返回「实际改变的行数」，值未变化也会是 0 ——
-                # 这里只做留痕，不据此判断文档是否存在/是否 INDEXED。
+                # SQLAlchemy 的 MySQL 方言启用 CLIENT.FOUND_ROWS，rowcount 为
+                # 「匹配行数」；0 即没有任何行满足 id + status != INDEXED
+                # （文档不存在或已是 INDEXED 终态）。
                 logger.warning(
-                    "[DOC_PROC] INDEXED 写入未生效（文档不存在/已是终态/值未变化） "
+                    "[DOC_PROC] INDEXED 写入未生效（文档不存在或已是 INDEXED） "
                     "document_id=%s",
                     document_id,
                 )
@@ -429,7 +527,7 @@ class DocumentProcessor:
             await session.commit()
             if not getattr(result, "rowcount", 0):
                 logger.warning(
-                    "[DOC_PROC] FAILED 写入未生效（文档不存在/已 INDEXED/值未变化） "
+                    "[DOC_PROC] FAILED 写入未生效（文档不存在或已是 INDEXED） "
                     "document_id=%s error=%s",
                     document_id,
                     error,

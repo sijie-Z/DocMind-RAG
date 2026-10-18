@@ -413,6 +413,10 @@ async def rebuild_document_knowledge(
             trigger_type="reprocess",
             status=KnowledgeJobStatus.QUEUED,
             retry_count=0,
+            # A3-P0：先按「本机兜底候选」落库；Kafka 投递确认后清除。
+            # 覆盖「job 已落库、进程在投递/清除之间退出」的孤儿窗口：
+            # 启动对账最多多重跑一次（文档锁互斥、处理幂等）。
+            local_fallback=True,
         )
         db.add(job)
         await db.commit()
@@ -446,10 +450,14 @@ async def rebuild_document_knowledge(
         except Exception as e:
             logger.warning(f"发送 Kafka 重建任务失败，改为进程内处理: {e}")
 
-        if not sent:
-            # A3-P0：先落「本机处理」标记再调度；进程重启后由启动对账回收。
-            job.local_fallback = True
+        if sent:
+            # A3-P0：投递已确认 → 清除本机兜底标记（防止启动对账重复调度
+            # 在途 Kafka 任务）；清除前崩溃则最多多重跑一次，任务不丢。
+            job.local_fallback = False
             await db.commit()
+        else:
+            # 标记已在任务落库时写入（local_fallback=True），此处只需调度；
+            # 进程在任务完成前退出时由启动对账回收。
             schedule_local = True
 
         # 重建时按组织清空 RAG 缓存，避免旧内容仍命中缓存

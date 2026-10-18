@@ -88,7 +88,9 @@ async def _defer_message(consumer, msg) -> None:
     if DEFER_RETRY_DELAY_SECONDS > 0:
         await asyncio.sleep(DEFER_RETRY_DELAY_SECONDS)
     tp = TopicPartition(msg.topic, msg.partition)
-    await consumer.seek(tp, msg.offset)
+    # aiokafka 0.14 的 seek() 是同步方法（只更新本地订阅位点，不返回协程）——
+    # 绝不能 await（A3 独立对抗评审 blocker：await 同步 seek 必抛 TypeError）。
+    consumer.seek(tp, msg.offset)
     logger.warning(
         "[CONSUMER] deferred topic=%s partition=%s offset=%s (another worker holds "
         "the document lock); offset NOT committed, will be redelivered",

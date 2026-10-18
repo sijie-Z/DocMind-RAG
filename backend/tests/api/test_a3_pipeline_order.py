@@ -99,7 +99,6 @@ class TestRebuildOrdering:
         # 顺序：job 已 commit，且条件更新已 commit，之后才发 Kafka
         send_at = events.index("send")
         before_send = events[:send_at]
-        assert ("add",) not in before_send
         assert any(
             isinstance(e, tuple) and e[0] == "add"
             and isinstance(e[1], KnowledgeProcessingJob)
@@ -122,6 +121,78 @@ class TestRebuildOrdering:
             "条件更新应把状态写为 PENDING"
         )
 
+    @pytest.mark.asyncio
+    async def test_rebuild_fallback_marker_persisted_before_schedule(self, monkeypatch):
+        """Kafka 不可用：调度前必须已有「job 带 local_fallback=True」的 commit。"""
+        import app.api.v1.endpoints.knowledge as knowledge_mod
+        from app.exceptions import AppError
+
+        doc = SimpleNamespace(
+            id="doc-1",
+            filename="report.pdf",
+            title="Report",
+            file_path="1/md5.pdf",
+            file_type=SimpleNamespace(value="pdf"),
+            organization_id=1,
+        )
+        events = []
+        captured = []
+
+        monkeypatch.setattr(
+            knowledge_mod, "get_document_for_user", AsyncMock(return_value=doc)
+        )
+        monkeypatch.setattr(
+            knowledge_mod.knowledge_service,
+            "delete_es_by_document_id",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            knowledge_mod, "create_notification", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(
+            knowledge_mod.kafka_producer,
+            "send_message",
+            AsyncMock(return_value=False),  # Kafka 不可用
+        )
+
+        db = MagicMock()
+        db.add = MagicMock(
+            side_effect=lambda obj: (events.append(("add", obj)), captured.append(obj))
+        )
+        db.commit = AsyncMock(
+            side_effect=lambda: events.append(
+                (
+                    "commit",
+                    any(
+                        isinstance(o, KnowledgeProcessingJob) and o.local_fallback
+                        for o in captured
+                    ),
+                )
+            )
+        )
+        db.execute = AsyncMock(return_value=MagicMock())
+
+        dispatch = {}
+
+        def _boom(coro):
+            dispatch["events"] = list(events)
+            coro.close()
+            raise RuntimeError("no running event loop")
+
+        monkeypatch.setattr(knowledge_mod.asyncio, "create_task", _boom)
+
+        with pytest.raises(AppError):
+            await knowledge_mod.rebuild_document_knowledge(
+                "doc-1", current_user=SimpleNamespace(id=1), db=db
+            )
+
+        jobs = [o for o in captured if isinstance(o, KnowledgeProcessingJob)]
+        assert len(jobs) == 1
+        assert jobs[0].local_fallback is True
+        assert ("commit", True) in dispatch["events"], (
+            "调度前必须提交过带本机标记的 job（进程重启对账依据）"
+        )
+
 
 class TestUploadJobPersistedBeforeSend:
     def test_upload_commits_job_before_kafka_send(self, client):
@@ -142,7 +213,7 @@ class TestUploadJobPersistedBeforeSend:
         db.add = MagicMock(
             side_effect=lambda obj: (events.append(("add", obj)), captured.append(obj))
         )
-        db.flush = AsyncMock()
+        db.flush = AsyncMock(side_effect=lambda: events.append("flush"))
         db.commit = AsyncMock(side_effect=lambda: events.append("commit"))
         db.refresh = AsyncMock()
         db.rollback = AsyncMock()
@@ -196,10 +267,15 @@ class TestUploadJobPersistedBeforeSend:
         docs = [o for o in captured if isinstance(o, Document)]
         assert len(jobs) == 1 and len(docs) == 1
 
+        # 判别力（独立对抗评审 M1）：必须是 job add 之后、send 之前发生过
+        # commit；修复前是 flush → send → commit，基线代码在本断言下必红。
+        job_add_at = next(
+            i
+            for i, e in enumerate(events)
+            if isinstance(e, tuple) and e[0] == "add" and e[1] is jobs[0]
+        )
         send_at = events.index("send")
-        before_send = events[:send_at]
-        assert any(
-            isinstance(e, tuple) and e[0] == "add" and e[1] is jobs[0]
-            for e in before_send
-        ), "job 必须在发送前写入"
-        assert before_send.count("commit") >= 1, "job 必须在发送前 commit"
+        assert job_add_at < send_at, "job 必须在发送前写入"
+        assert "commit" in events[job_add_at + 1:send_at], (
+            "job 必须在发送前 commit（仅 flush 不算）"
+        )

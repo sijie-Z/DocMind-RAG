@@ -16,9 +16,11 @@ PARSING / job 卡 QUEUED，没有任何重投路径。
 """
 
 import asyncio
+import inspect
 from types import SimpleNamespace
 
 import pytest
+from aiokafka import AIOKafkaConsumer
 from aiokafka.structs import TopicPartition
 
 
@@ -78,7 +80,8 @@ class _FakeConsumer:
     async def commit(self, offsets=None):
         self.commits.append(offsets)
 
-    async def seek(self, tp, offset):
+    def seek(self, tp, offset):
+        # 与 aiokafka 0.14 一致：seek 是同步方法（返回 None，不可 await）。
         self.seeks.append((tp, offset))
 
 
@@ -87,6 +90,34 @@ def _msg(value, offset, topic="topic-0", partition=0):
 
 
 class TestConsumerDeferredRedelivery:
+    @pytest.mark.asyncio
+    async def test_defer_uses_real_aiokafka_sync_seek_contract(self, monkeypatch):
+        """独立对抗评审 blocker：aiokafka 的 seek 是同步方法，await 它会崩。
+
+        这里直接对**真实** aiokafka API 做签名断言，并用同步 seek 替身跑
+        ``_defer_message``；任何重新加回 await 的改动都会在本用例抛 TypeError。
+        """
+        import app.worker.consumer as consumer_mod
+
+        assert inspect.iscoroutinefunction(AIOKafkaConsumer.seek) is False, (
+            "aiokafka 的 seek 是同步方法；若升级后改为协程，此契约测试需同步更新"
+        )
+
+        monkeypatch.setattr(consumer_mod, "DEFER_RETRY_DELAY_SECONDS", 0)
+
+        class _SyncSeekConsumer:
+            def __init__(self):
+                self.seeks = []
+
+            def seek(self, tp, offset):
+                self.seeks.append((tp, offset))
+
+        consumer = _SyncSeekConsumer()
+        await consumer_mod._defer_message(
+            consumer, _msg({"document_id": "doc-1"}, offset=9)
+        )
+        assert consumer.seeks == [(TopicPartition("topic-0", 0), 9)]
+
     @pytest.mark.asyncio
     async def test_deferred_message_not_committed_and_rewound(self, monkeypatch):
         """DEFERRED → 不提交、不记账、不回 halt；回卷到本条偏移待重投。"""
@@ -217,6 +248,75 @@ class TestLockHeartbeat:
             await task
 
         assert renewed and set(renewed) == {"doc-1"}
+
+    @pytest.mark.asyncio
+    async def test_renewal_failure_marks_lock_lost(self, monkeypatch):
+        """续期发现 token 不再持有锁 → 记入 _lock_lost（供阶段边界中止）。"""
+        import app.core.redis as redis_mod
+        import app.worker.doc_processor as dp_mod
+
+        fake = _FakeRedis(renew_result=0)
+
+        async def fake_get_redis():
+            return fake
+
+        monkeypatch.setattr(redis_mod, "get_redis", fake_get_redis)
+
+        processor = dp_mod.DocumentProcessor()
+        assert await processor._acquire_processing_lock("doc-1") is True
+        assert await processor._renew_processing_lock("doc-1") is False
+        assert "doc-1" in processor._lock_lost
+
+    @pytest.mark.asyncio
+    async def test_lock_lost_at_stage_boundary_aborts_without_terminal_writes(
+        self, monkeypatch
+    ):
+        """解析期间锁被接管 → 下一阶段边界中止，返回 DEFERRED，不写终态。"""
+        from app.worker.doc_processor import DEFERRED
+
+        processor = _make_processor()
+        events = []
+
+        async def fake_lock(_document_id):
+            return True
+
+        async def fake_load(document_id, _job_id):
+            return SimpleNamespace(
+                file_path="f", organization_id="1", id=document_id
+            )
+
+        async def fake_parse(*_a, **_k):
+            # 模拟心跳在解析期间续期失败（锁已过期并被新 worker 接管）
+            processor._lock_lost.add("doc-1")
+            return {
+                "chunks": [{"chunk_text": "hi", "chunk_index": 0, "chunk_length": 2}]
+            }
+
+        async def fake_embeddings(texts):  # pragma: no cover - 应在边界中止
+            events.append("embed")
+            return [[1.0]]
+
+        async def fake_success(*_a, **_k):
+            events.append("success")
+
+        async def fake_failed(*_a, **_k):
+            events.append("failed")
+
+        async def fake_release(_document_id):
+            events.append("release")
+
+        monkeypatch.setattr(processor, "_acquire_processing_lock", fake_lock)
+        monkeypatch.setattr(processor, "_load_and_mark_parsing", fake_load)
+        monkeypatch.setattr(processor.parser, "parse_document", fake_parse)
+        monkeypatch.setattr(processor, "_get_embeddings", fake_embeddings)
+        monkeypatch.setattr(processor, "_mark_success", fake_success)
+        monkeypatch.setattr(processor, "_mark_failed", fake_failed)
+        monkeypatch.setattr(processor, "_release_processing_lock", fake_release)
+
+        outcome = await processor.process("doc-1", 7)
+
+        assert outcome is DEFERRED, "锁丢失必须按未了结处理（重投），而不是成功/失败"
+        assert events == ["release"], "锁丢失后不得再写成功/失败终态"
 
     @pytest.mark.asyncio
     async def test_process_starts_and_cancels_heartbeat(self, monkeypatch):

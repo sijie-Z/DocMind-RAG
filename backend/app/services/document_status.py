@@ -10,7 +10,8 @@
 
 worker 主链（``app.worker.doc_processor``）复用 ``verify_indexed``；demo 种子
 路径此前直接赋值 ``doc.status``，现在统一走本模块（``mark_document_indexed`` /
-``mark_document_failed``），不再有绕过校验的旁路。
+``mark_document_failed``）——demo 路径不再有绕过校验的旁路（其它历史路径不在
+本模块收口范围内）。
 """
 
 import logging

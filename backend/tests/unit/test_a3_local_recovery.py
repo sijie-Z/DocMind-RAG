@@ -140,7 +140,20 @@ class TestUploadFallbackMarker:
             side_effect=lambda obj: (events.append(("add", obj)), captured.append(obj))
         )
         db.flush = AsyncMock()
-        db.commit = AsyncMock(side_effect=lambda: events.append("commit"))
+
+        def _commit():
+            # 记录「这次 commit 时，是否已有 local_fallback=True 的 job 被加入」
+            events.append(
+                (
+                    "commit",
+                    any(
+                        isinstance(o, KnowledgeProcessingJob) and o.local_fallback
+                        for o in captured
+                    ),
+                )
+            )
+
+        db.commit = AsyncMock(side_effect=_commit)
         db.refresh = AsyncMock()
         db.rollback = AsyncMock()
         db.close = AsyncMock()
@@ -198,9 +211,57 @@ class TestUploadFallbackMarker:
         assert snapshot["local_fallback"] is True, (
             "调度前必须已把本机处理标记写到 job 上（进程重启对账的依据）"
         )
-        assert "commit" in snapshot["events"], (
-            "标记必须在 create_task 之前 commit 落库"
+        assert ("commit", True) in snapshot["events"], (
+            "必须有一次「job 已带 local_fallback=True」的 commit 发生在 create_task 之前"
+            "（独立对抗评审 M2：只断言‘发生过某次 commit’没有判别力）"
         )
+
+
+class TestLifespanWiring:
+    @pytest.mark.asyncio
+    async def test_lifespan_invokes_startup_reconciliation(self, monkeypatch):
+        """独立对抗评审 M3：启动对账必须真的接在 lifespan 上（删掉调用应红）。"""
+        import app.agent.mcp.manager as mcp_mod
+        import app.dependencies as deps_mod
+        import app.main as main_mod
+        import app.services.local_processing as lp_mod
+        from app.services.permission_service import permission_service
+
+        called = []
+
+        async def fake_reconcile():
+            called.append(True)
+            return 0
+
+        monkeypatch.setattr(lp_mod, "reconcile_local_jobs", fake_reconcile)
+
+        monkeypatch.setattr(main_mod, "resolve_backend_port", lambda: 8000)
+        monkeypatch.setattr(main_mod, "init_db", AsyncMock())
+        monkeypatch.setattr(main_mod, "init_redis", AsyncMock())
+        monkeypatch.setattr(main_mod, "init_elasticsearch", AsyncMock())
+        monkeypatch.setattr(
+            main_mod,
+            "kafka_producer",
+            SimpleNamespace(start=AsyncMock(), stop=AsyncMock()),
+        )
+        monkeypatch.setattr(main_mod, "es_client", None)
+        monkeypatch.setattr(main_mod, "close_redis", AsyncMock())
+        monkeypatch.setattr(main_mod, "close_db", AsyncMock())
+        monkeypatch.setattr(
+            permission_service,
+            "initialize_default_permissions_and_roles",
+            AsyncMock(),
+        )
+        monkeypatch.setattr(
+            deps_mod, "wire_memory_embedding_provider", AsyncMock()
+        )
+        monkeypatch.setattr(mcp_mod.mcp_manager, "initialize", AsyncMock())
+        monkeypatch.setattr(mcp_mod.mcp_manager, "shutdown", AsyncMock())
+
+        async with main_mod.lifespan(main_mod.app):
+            pass
+
+        assert called == [True], "lifespan 必须在启动时调用本机任务对账"
 
 
 class TestFileServiceMarker:
