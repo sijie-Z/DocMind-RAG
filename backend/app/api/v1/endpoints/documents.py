@@ -199,9 +199,15 @@ async def upload_document(
             trigger_type="upload",
             status=KnowledgeJobStatus.QUEUED,
             retry_count=0,
+            # A3-P0：先按「本机兜底候选」落库（与 job 同一次 commit）；
+            # Kafka 投递确认后清除。若进程在投递/清除之间退出，启动对账
+            # 最多多重跑一次（文档锁互斥、处理幂等），任务不会丢。
+            local_fallback=True,
         )
         db.add(job)
-        await db.flush()
+        # A3-P0：先落库 job（拿到自增 id）再发 Kafka——消费端读到消息时
+        # 任务行必已可见，避免「消息先到、job 后到」造成 job 永久 QUEUED。
+        await db.commit()
 
         sent = False
         schedule_local = False
@@ -219,10 +225,15 @@ async def upload_document(
         except Exception as kafka_err:
             logger.warning(f"Kafka send failed, will process in-process: {kafka_err}")
 
-        if not sent:
+        if sent:
+            # A3-P0：投递已确认 → 清除本机兜底标记（防止启动对账重复调度
+            # 在途 Kafka 任务）；清除前崩溃则最多多重跑一次，任务不丢。
+            job.local_fallback = False
+            await db.commit()
+        else:
+            # 标记已在任务落库时写入（local_fallback=True），此处只需调度；
+            # 进程若在任务完成前退出，启动对账按标记回收该任务。
             schedule_local = True
-
-        await db.commit()
 
         if schedule_local:
             try:

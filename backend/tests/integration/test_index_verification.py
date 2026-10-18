@@ -3,7 +3,8 @@
 ## 背景
 
 `DocumentProcessor._replace_document_state` 在 `bulk_index_documents` 之后
-**无条件进入 `_mark_success`**，而 `_mark_success` 又**无条件**把文档状态置成 `INDEXED`。
+调用 `_mark_success`；A3-P0 起 `_mark_success` 为条件写入（已 INDEXED 不覆盖），
+修前它**无条件**把文档状态置成 `INDEXED`。
 
 三条不变式（「状态 = INDEXED ⟹ 文档可被检索到」）：
 1. 至少一条 chunk 落了（#181）；

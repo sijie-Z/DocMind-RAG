@@ -58,7 +58,7 @@ class TestClearMemoryEndpoint:
         """接口清理的必须是 agent 实际写入的会话命名空间。"""
         user = SimpleNamespace(organization_id=2, id=7)
         session_id = str(uuid.uuid4())
-        system = get_memory_system(f"2:7:session:{session_id}")
+        system = get_memory_system(2, 7, f"session:{session_id}")
         system.working.set_result("s1", {"status": "completed", "result": "x"})
 
         result = await clear_memory(

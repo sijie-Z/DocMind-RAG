@@ -13,7 +13,7 @@ import json
 import logging
 from typing import Any
 
-from app.agent.registry import register_tool, tool_registry
+from app.agent.registry import ToolResult, register_tool, tool_registry
 
 logger = logging.getLogger(__name__)
 
@@ -125,11 +125,17 @@ async def _consume_tool_output(
 async def deep_research(
     query: str,
     depth: str = "detailed",
-    organization_id: int = 1,
+    organization_id: int | None = None,
     run_context=None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     """深度研究：搜索 → 知识库检索 → 结构化摘要"""
+    # A2 P0（fail-closed）：技能组合调用下层工具，缺组织即拒绝（不再默认 1 号组织）。
+    if organization_id is None:
+        return ToolResult.fail(
+            code="organization_required",
+            message="deep_research 缺少组织上下文（organization_id），拒绝执行。",
+        )
     parts: list[str] = [f"# 深度研究: {query}\n"]
 
     # Step 1: 搜索外部信息
@@ -210,11 +216,16 @@ async def deep_research(
 async def document_comparison(
     document_ids: list[str],
     focus: str = "comprehensive",
-    organization_id: int = 1,
+    organization_id: int | None = None,
     run_context=None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     """文档对比：分别摘要 → cross_document_analysis"""
+    if organization_id is None:
+        return ToolResult.fail(
+            code="organization_required",
+            message="document_comparison 缺少组织上下文（organization_id），拒绝执行。",
+        )
     if not document_ids or len(document_ids) < 2:
         return "请至少提供2个文档ID进行对比。"
 
@@ -352,11 +363,16 @@ async def knowledge_analysis(
     query: str,
     framework: str = "comprehensive",
     generate_report: bool = True,
-    organization_id: int = 1,
+    organization_id: int | None = None,
     run_context=None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     """知识分析：搜索 → 框架分析 → 报告生成"""
+    if organization_id is None:
+        return ToolResult.fail(
+            code="organization_required",
+            message="knowledge_analysis 缺少组织上下文（organization_id），拒绝执行。",
+        )
     parts: list[str] = [f"# 知识分析: {query}\n"]
 
     # Step 1: 搜索相关文档

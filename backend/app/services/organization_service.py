@@ -5,14 +5,27 @@ DocMind AI知识库系统 - 组织服务
 import logging
 from typing import Any, cast
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.exceptions import AuthenticationError, ServiceUnavailableError
+from app.exceptions import (
+    AppError,
+    AuthenticationError,
+    ConflictError,
+    ServiceUnavailableError,
+)
+from app.models.agent_task import AgentTask
+from app.models.chat import ChatSession
 from app.models.document import Document
+from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.organization import Organization, user_organization
+from app.models.prompt import PromptTemplate
+from app.models.rbac import user_organization_role_association
+from app.models.scheduled_task import ScheduledTask
+from app.models.token_usage import TokenUsageRecord
 from app.models.user import User
+from app.models.workflow import Workflow
 
 logger = logging.getLogger(__name__)
 
@@ -123,11 +136,17 @@ class OrganizationService:
             await self._update_children_levels(db, child)
 
     async def batch_delete_organizations(self, db: AsyncSession, org_ids: list[int]) -> bool:
-        """批量删除组织及其关联数据"""
+        """批量删除组织及其关联数据。
+
+        A2 P0：级联检查（ConflictError → 409）必须向上冒泡，不能被
+        `except Exception` 吞成 False（端点会误报「批量删除失败」的 500/200）。
+        """
         try:
             for org_id in org_ids:
                 await self.delete_organization_thoroughly(db, org_id)
             return True
+        except AppError:
+            raise
         except Exception as e:
             logger.error(f"批量删除组织失败: {str(e)}")
             return False
@@ -206,13 +225,70 @@ class OrganizationService:
             logger.error(f"获取组织统计失败: {str(e)}")
             raise ServiceUnavailableError("组织统计查询失败，请稍后重试") from e
 
+    # 删除组织前必须为空的「工作数据」集合：这些表都以 organization_id 外键
+    # 引用 organizations，裸删会触发 MySQL 1451，也意味着组织里还有未迁走的数据。
+    _ATTACHED_DATA_MODELS: tuple[tuple[str, type], ...] = (
+        ("文档", Document),
+        ("会话", ChatSession),
+        ("Agent 任务", AgentTask),
+        ("定时任务", ScheduledTask),
+        ("知识库处理任务", KnowledgeProcessingJob),
+        ("工作流", Workflow),
+        ("提示词模板", PromptTemplate),
+        ("用量记录", TokenUsageRecord),
+    )
+
+    async def _assert_org_has_no_attached_data(
+        self, db: AsyncSession, org_ids: list[int]
+    ) -> None:
+        """A2 P0：级联检查——存在挂载数据时 409 并提示转移，绝不裸删到 1451。"""
+        attached: list[str] = []
+        for label, model in self._ATTACHED_DATA_MODELS:
+            count = (
+                await db.execute(
+                    select(func.count())
+                    .select_from(model)
+                    .where(model.organization_id.in_(org_ids))
+                )
+            ).scalar() or 0
+            if count:
+                attached.append(f"{label} {count} 条")
+        if attached:
+            raise ConflictError(
+                "组织下仍有未转移的数据（"
+                + "、".join(attached)
+                + "），不能直接删除。请先将这些数据转移到其他组织后再重试。"
+            )
+
     async def delete_organization_thoroughly(self, db: AsyncSession, org_id: int) -> bool:
-        """彻底删除组织及其所有子组织 — 不负责 commit，由调用方管理事务"""
+        """彻底删除组织及其所有子组织 — 不负责 commit，由调用方管理事务。
+
+        A2 P0：先做级联检查（文档/会话/任务等工作数据存在 → 409），
+        再把成员用户的 organization_id 摘除（避免 users 外键 1451），
+        最后删除成员关系与组织行。
+        """
         orgs_to_delete = await self._get_all_children_ids(db, org_id)
         orgs_to_delete.append(org_id)
 
+        await self._assert_org_has_no_attached_data(db, orgs_to_delete)
+
+        # 成员用户不随组织删除：先摘除其主组织引用，否则 users.organization_id
+        # 的外键会让删除组织失败（1451）。
+        await db.execute(
+            update(User)
+            .where(User.organization_id.in_(orgs_to_delete))
+            .values(organization_id=None)
+        )
         await db.execute(
             delete(user_organization).where(user_organization.c.organization_id.in_(orgs_to_delete))
+        )
+        # A2 P0（评审 M-1）：角色关联表在模型里声明 ON DELETE CASCADE，但 alembic
+        # 005 建表 DDL 没有该 ondelete（外键实际是 RESTRICT）。不能依赖 DB 级联：
+        # 显式清理，保证迁移建库与 create_all 建库都不会在删组织时 1451。
+        await db.execute(
+            delete(user_organization_role_association).where(
+                user_organization_role_association.c.organization_id.in_(orgs_to_delete)
+            )
         )
         await db.execute(
             delete(Organization).where(Organization.id.in_(orgs_to_delete))

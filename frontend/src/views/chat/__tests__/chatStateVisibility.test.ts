@@ -44,6 +44,13 @@ vi.mock('@/utils/sseService', () => ({
   },
 }))
 
+// E5 起虚拟滚动为 ChatMessages 局部引入（不再经 main.ts 全局注册），测试侧
+// 与既有 chat 用例统一：把模块替换为共享直通 stub（按 items 逐项渲染 default slot）。
+vi.mock('vue-virtual-scroller', async () => {
+  const stubs = await import('@/test-utils/virtualScroller')
+  return { DynamicScroller: stubs.DynamicScrollerStub, DynamicScrollerItem: stubs.DynamicScrollerItemStub }
+})
+
 vi.mock('@/api/chat', () => ({
   getConversationMessages: vi.fn(),
   clearConversationMessages: vi.fn().mockResolvedValue({ data: { success: true } }),

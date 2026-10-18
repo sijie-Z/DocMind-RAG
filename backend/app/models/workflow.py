@@ -19,6 +19,14 @@ class Workflow(Base):
     description: Mapped[str | None] = mapped_column(Text, comment="工作流描述")
     flow_data: Mapped[Any | None] = mapped_column(JSON, comment="工作流节点和边配置")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="是否启用")
+    # 租户边界（A2 P0）：工作流按组织隔离；NULL = 迁移前的历史遗留行，
+    # 由 010 迁移按 created_by 的用户组织回填，回填前对所有租户不可见。
+    organization_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id"),
+        index=True,
+        comment="所属组织",
+    )
     created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)

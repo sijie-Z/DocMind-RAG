@@ -46,9 +46,14 @@ class Orchestrator:
         self,
         planner: Planner | None = None,
         config: AgentConfig | None = None,
-        organization_id: int = 1,
+        organization_id: int | None = None,
         user_id: int = 0,
     ):
+        # A2 P0（fail-closed）：编排器下的执行器必须有组织上下文。
+        if organization_id is None:
+            raise ValueError(
+                "Orchestrator 缺少 organization_id，拒绝在无组织上下文下运行"
+            )
         self._config = config or AgentConfig()
         self._planner = planner
         self._organization_id = organization_id

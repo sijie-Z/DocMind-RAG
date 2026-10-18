@@ -27,19 +27,23 @@ async def test_graph_persists_and_loads_from_redis(monkeypatch):
     monkeypatch.setattr("app.core.redis.redis_client", fake)
 
     service = GraphRAGService()
-    await service.build_graph_from_entities([
-        {"entity": "DocMind", "type": "PRODUCT", "description": "RAG system", "relations": []}
-    ])
+    await service.build_graph_from_entities(
+        [
+            {"entity": "DocMind", "type": "PRODUCT", "description": "RAG system", "relations": []}
+        ],
+        organization_id=1,
+    )
 
-    # 组织分区后 key 带 org 后缀（默认 org 1）
+    # 组织分区后 key 带 org 后缀（显式 org 1）
     assert "rag:graph:1" in fake.data
 
     restored = GraphRAGService()
-    await restored.load()
+    await restored.load(1)
 
     entity_key = restored._normalize_entity("DocMind")
-    assert restored.graph[entity_key]["entity_name"] == "DocMind"
-    assert restored.graph[entity_key]["entity_type"] == "PRODUCT"
+    org1_graph = restored._graph_for(1)
+    assert org1_graph[entity_key]["entity_name"] == "DocMind"
+    assert org1_graph[entity_key]["entity_type"] == "PRODUCT"
 
     # 组织隔离：org 5 不应看到 org 1 的图谱
     await restored.load(5)
@@ -57,9 +61,12 @@ async def test_search_graph_injects_real_llm_client(monkeypatch):
     monkeypatch.setattr("app.core.redis.redis_client", fake)
 
     service = GraphRAGService()
-    await service.build_graph_from_entities([
-        {"entity": "DocMind", "type": "PRODUCT", "description": "RAG system", "relations": []}
-    ])
+    await service.build_graph_from_entities(
+        [
+            {"entity": "DocMind", "type": "PRODUCT", "description": "RAG system", "relations": []}
+        ],
+        organization_id=1,
+    )
 
     captured = {}
     sentinel = object()

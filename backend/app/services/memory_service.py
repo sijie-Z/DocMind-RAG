@@ -735,8 +735,13 @@ class AgentMemorySystem:
         }
 
     def import_data(self, data: dict[str, Any]) -> None:
-        """导入记忆数据"""
-        self.agent_id = data.get("agent_id", self.agent_id)
+        """导入记忆数据。
+
+        安全（A1 记忆 IDOR）：载荷里的 `agent_id` 一律忽略——记忆系统的命名空间
+        是服务端按 (org, user, agent) 分配的不可变身份。此前这里用
+        `data.get("agent_id")` 重写 `self.agent_id`，导入端点（请求体任意 dict）
+        即可把 `agent:memory:<任意 key>` 指向他人命名空间、跨租户覆写 Redis 记忆。
+        """
         self.interaction_count = data.get("interaction_count", 0)
 
         # 恢复短期记忆
@@ -776,35 +781,58 @@ _MAX_MEMORY_SYSTEMS = 256
 memory_systems: dict[str, AgentMemorySystem] = {}
 
 
-def _evict_memory_system(agent_id: str) -> None:
+def build_memory_namespace(
+    org_id: int | None, user_id: int | None, agent_id: str = "default"
+) -> str:
+    """由本模块统一拼装记忆命名空间 `org:user:agent`（A1 记忆 IDOR 修复）。
+
+    命名空间只能按显式租户上下文拼装：org/user 段固定在前面，agent_id 只是
+    该租户内的子作用域。任何调用方都不得把用户可控的完整命名空间字符串直接
+    当作全局 key——那会绕过租户隔离，读写他人长期记忆。
+    """
+    return f"{org_id}:{user_id}:{agent_id}"
+
+
+def _evict_memory_system(namespace: str) -> None:
     """从缓存中驱逐一个记忆系统
 
     驱逐前尽力把长期/反思记忆写回 Redis：
     - 仅当实例已从 Redis 加载过（否则"空内存"写回会覆盖 Redis 中的已有数据）；
     - 仅在事件循环可用时调度异步保存，避免驱逐静默丢弃 Redis 尚未见过的数据。
     """
-    system = memory_systems.pop(agent_id, None)
+    system = memory_systems.pop(namespace, None)
     if system is None or not system._loaded:
         return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        logger.debug(f"无事件循环，驱逐记忆系统 '{agent_id}' 时跳过持久化")
+        logger.debug(f"无事件循环，驱逐记忆系统 '{namespace}' 时跳过持久化")
         return
     loop.create_task(system._save_to_redis())
 
 
-def get_memory_system(agent_id: str = "default") -> AgentMemorySystem:
-    """获取或创建记忆系统（LRU：缓存上限 _MAX_MEMORY_SYSTEMS）"""
-    system = memory_systems.get(agent_id)
+def get_memory_system(
+    org_id: int | None,
+    user_id: int | None,
+    agent_id: str = "default",
+) -> AgentMemorySystem:
+    """获取或创建记忆系统（LRU：缓存上限 _MAX_MEMORY_SYSTEMS）。
+
+    安全（A1 记忆节点 IDOR）：签名强制调用方显式传租户上下文，命名空间
+    `org_id:user_id:agent_id` 由本函数内部拼装。此前 `get_memory_system(agent_id)`
+    把调用方传入的整串当全局 key，工作流记忆节点可直接传 `org:user:agent`
+    完整三元组，跨 org/user 读写他人记忆——该入口已废除。
+    """
+    namespace = build_memory_namespace(org_id, user_id, agent_id)
+    system = memory_systems.get(namespace)
     if system is not None:
         # 命中即刷新为最近使用
-        memory_systems.pop(agent_id)
-        memory_systems[agent_id] = system
+        memory_systems.pop(namespace)
+        memory_systems[namespace] = system
         return system
 
     while len(memory_systems) >= _MAX_MEMORY_SYSTEMS:
         _evict_memory_system(next(iter(memory_systems)))
 
-    memory_systems[agent_id] = AgentMemorySystem(agent_id)
-    return memory_systems[agent_id]
+    memory_systems[namespace] = AgentMemorySystem(namespace)
+    return memory_systems[namespace]
