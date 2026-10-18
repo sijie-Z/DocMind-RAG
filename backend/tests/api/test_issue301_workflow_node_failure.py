@@ -91,7 +91,7 @@ async def _setup_app(flow_data: dict):
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
 
     async with factory() as s:
-        wf = Workflow(name="issue301-node-fail", flow_data=flow_data, created_by=1)
+        wf = Workflow(name="issue301-node-fail", flow_data=flow_data, created_by=1, organization_id=1)
         s.add(wf)
         await s.commit()
         wf_id = wf.id
