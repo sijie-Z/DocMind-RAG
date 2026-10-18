@@ -100,7 +100,11 @@ async def test_mark_failed_writes_document_and_job_failed(monkeypatch):
     #28 端到端「文档 FAILED」与 #30 终局日志「doc/job already marked FAILED」
     都依赖这两次真实状态写入；此前 S7 变异（删 `doc.status=FAILED` 一行）全绿。
 
-    变异点：删掉 `doc.status = DocumentStatus.FAILED` 一行 → 本用例红。
+    A3-P0 起文档写入改为条件 UPDATE（``WHERE status != 'INDEXED'``）：
+    这里验证语句内容（SET failed + 原因、条件排除 INDEXED）与 job 终态写入。
+
+    变异点：去掉 UPDATE 的 ``status != INDEXED`` 条件 / 删掉 job.status 赋值 →
+    对应用例红（条件语句断言 / job 断言）。
     """
     import app.worker.doc_processor as dp_mod
     from app.models.document import Document, DocumentStatus
@@ -113,8 +117,16 @@ async def test_mark_failed_writes_document_and_job_failed(monkeypatch):
         finished_at=None,
     )
     commits = []
+    executed = []
+
+    class _Result:
+        rowcount = 1
 
     class _Session:
+        async def execute(self, stmt):
+            executed.append(stmt)
+            return _Result()
+
         async def get(self, model, pk):
             return doc if model is Document else job
 
@@ -133,8 +145,14 @@ async def test_mark_failed_writes_document_and_job_failed(monkeypatch):
     processor = DocumentProcessor()
     await processor._mark_failed("doc-1", "boom", job_id=7)
 
-    assert doc.status == DocumentStatus.FAILED
-    assert doc.parse_error == "boom"
+    assert executed, "文档 FAILED 必须经条件 UPDATE 写入"
+    compiled = executed[0].compile()
+    rendered = str(compiled)
+    assert "documents.status !=" in rendered, "FAILED 写入必须带 status != INDEXED 条件"
+    params = compiled.params.values()
+    assert DocumentStatus.FAILED in params
+    assert DocumentStatus.INDEXED in params
+    assert "boom" in params
     assert job.status == KnowledgeJobStatus.FAILED
     assert job.error_message == "boom"
     assert job.finished_at is not None

@@ -12,7 +12,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -373,32 +373,65 @@ class DocumentProcessor:
     async def _mark_success(
         self, document_id: str, chunks_data: list[dict], job_id: int | None
     ) -> None:
+        """条件写入 INDEXED：已 INDEXED 的终态不被过期 run 的元数据覆盖（A3-P0）。"""
+        now = datetime.now()
         async with AsyncSessionLocal() as session:
-            doc = await session.get(Document, document_id)
-            if doc:
-                doc.status = DocumentStatus.INDEXED
-                doc.chunk_count = len(chunks_data)
-                doc.parsed_at = datetime.now()
-                doc.indexed_at = datetime.now()
-                doc.content_length = sum(len(c["chunk_text"]) for c in chunks_data)
-                doc.parse_error = None
-            if job_id:
+            result = await session.execute(
+                update(Document)
+                .where(
+                    Document.id == document_id,
+                    Document.status != DocumentStatus.INDEXED,
+                )
+                .values(
+                    status=DocumentStatus.INDEXED,
+                    chunk_count=len(chunks_data),
+                    parsed_at=now,
+                    indexed_at=now,
+                    content_length=sum(len(c["chunk_text"]) for c in chunks_data),
+                    parse_error=None,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            await session.commit()
+            if not getattr(result, "rowcount", 0):
+                # 注意：MySQL 默认返回「实际改变的行数」，值未变化也会是 0 ——
+                # 这里只做留痕，不据此判断文档是否存在/是否 INDEXED。
+                logger.warning(
+                    "[DOC_PROC] INDEXED 写入未生效（文档不存在/已是终态/值未变化） "
+                    "document_id=%s",
+                    document_id,
+                )
+        if job_id:
+            async with AsyncSessionLocal() as session:
                 job = await session.get(KnowledgeProcessingJob, job_id)
                 if job:
                     job.status = KnowledgeJobStatus.SUCCESS
                     job.error_message = None
                     job.finished_at = datetime.now()
-            await session.commit()
+                    await session.commit()
 
     async def _mark_failed(
         self, document_id: str, error: str, job_id: int | None
     ) -> None:
+        """条件写入 FAILED：**绝不覆盖已 INDEXED 的终态**（A3-P0 终态回退防线）。"""
         async with AsyncSessionLocal() as session:
-            doc = await session.get(Document, document_id)
-            if doc:
-                doc.status = DocumentStatus.FAILED
-                doc.parse_error = error
+            result = await session.execute(
+                update(Document)
+                .where(
+                    Document.id == document_id,
+                    Document.status != DocumentStatus.INDEXED,
+                )
+                .values(status=DocumentStatus.FAILED, parse_error=error)
+                .execution_options(synchronize_session=False)
+            )
             await session.commit()
+            if not getattr(result, "rowcount", 0):
+                logger.warning(
+                    "[DOC_PROC] FAILED 写入未生效（文档不存在/已 INDEXED/值未变化） "
+                    "document_id=%s error=%s",
+                    document_id,
+                    error,
+                )
 
         if job_id:
             async with AsyncSessionLocal() as session:

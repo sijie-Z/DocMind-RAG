@@ -201,7 +201,9 @@ async def upload_document(
             retry_count=0,
         )
         db.add(job)
-        await db.flush()
+        # A3-P0：先落库 job（拿到自增 id）再发 Kafka——消费端读到消息时
+        # 任务行必已可见，避免「消息先到、job 后到」造成 job 永久 QUEUED。
+        await db.commit()
 
         sent = False
         schedule_local = False
@@ -221,8 +223,6 @@ async def upload_document(
 
         if not sent:
             schedule_local = True
-
-        await db.commit()
 
         if schedule_local:
             try:

@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.notifications import create_notification
@@ -404,7 +404,9 @@ async def rebuild_document_knowledge(
         # 1. 仅从 ES 删除该文档的索引
         await knowledge_service.delete_es_by_document_id(document_id)
 
-        # 2. 记录任务并发送 Kafka，由 Worker 重新解析并写 ES
+        # 2. 先落库任务行（commit 拿到自增 id），再更新文档状态，最后才发 Kafka：
+        #    消息可见时 job 必已存在；且不存在「worker 先写完 INDEXED、请求末尾
+        #    再把状态覆盖回 PENDING」的窗口（A3-P0 重建竞态）。
         job = KnowledgeProcessingJob(
             document_id=document_id,
             organization_id=doc.organization_id,
@@ -413,7 +415,20 @@ async def rebuild_document_knowledge(
             retry_count=0,
         )
         db.add(job)
-        await db.flush()
+        await db.commit()
+
+        # 3. 条件更新文档状态：已 INDEXED 的文档不因重建请求回退为 PENDING
+        #    （worker 接单后会以 PARSING 接管；此处只禁止覆盖终端态）。
+        await db.execute(
+            update(Document)
+            .where(
+                Document.id == document_id,
+                Document.status != DocumentStatus.INDEXED,
+            )
+            .values(status=DocumentStatus.PENDING, parse_error=None)
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
 
         sent = False
         schedule_local = False
@@ -433,11 +448,6 @@ async def rebuild_document_knowledge(
 
         if not sent:
             schedule_local = True
-
-        # 3. 将文档状态置为 PENDING，Worker 处理后会更新为 INDEXED/FAILED
-        doc.status = DocumentStatus.PENDING
-        doc.parse_error = None
-        await db.commit()
 
         # 重建时按组织清空 RAG 缓存，避免旧内容仍命中缓存
         from app.rag.cache import RetrievalCache, SemanticCache
