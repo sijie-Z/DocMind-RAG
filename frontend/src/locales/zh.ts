@@ -361,6 +361,9 @@ export default {
     uploadList: '上传任务列表',
     noActiveTasks: '当前没有正在进行的任务',
     clearFinished: '清除已完成任务',
+    cancelUpload: '取消上传',
+    removeFromList: '从列表移除',
+    uploadCancelled: '已取消上传',
     table: {
       name: '文件名',
       size: '大小',
