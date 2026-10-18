@@ -738,6 +738,12 @@ export default {
       saveStatusError: '保存失败',
       saveRetry: '重试',
       saveRetryHint: '保存失败，点击重试',
+      leaveConfirmTitle: '离开编辑器',
+      leaveConfirmContent: '当前工作流有未保存的更改，离开后这些更改将丢失。确定要离开吗？',
+      leaveConfirmPositive: '离开',
+      leaveConfirmNegative: '取消',
+      togglePanel: '属性面板',
+      clickToAddHint: '点击或拖拽添加节点',
     },
   },
   notifications: {

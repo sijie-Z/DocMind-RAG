@@ -656,6 +656,12 @@ export default {
       saveStatusError: 'Échec de l\'enregistrement',
       saveRetry: 'Réessayer',
       saveRetryHint: 'L\'enregistrement a échoué — cliquez pour réessayer',
+      leaveConfirmTitle: 'Quitter l\'éditeur',
+      leaveConfirmContent: 'Ce workflow contient des modifications non enregistrées qui seront perdues si vous quittez. Quitter quand même ?',
+      leaveConfirmPositive: 'Quitter',
+      leaveConfirmNegative: 'Annuler',
+      togglePanel: 'Panneau des propriétés',
+      clickToAddHint: 'Cliquez ou glissez pour ajouter un nœud',
     },
   },
   notifications: {

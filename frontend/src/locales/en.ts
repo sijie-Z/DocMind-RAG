@@ -731,6 +731,12 @@ export default {
       saveStatusError: 'Save failed',
       saveRetry: 'Retry',
       saveRetryHint: 'Save failed — click to retry',
+      leaveConfirmTitle: 'Leave the editor',
+      leaveConfirmContent: 'This workflow has unsaved changes that will be lost if you leave. Leave anyway?',
+      leaveConfirmPositive: 'Leave',
+      leaveConfirmNegative: 'Cancel',
+      togglePanel: 'Properties panel',
+      clickToAddHint: 'Click or drag to add a node',
     },
   },
   notifications: {

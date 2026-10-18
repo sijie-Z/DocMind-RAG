@@ -1,7 +1,7 @@
 {
   "$comment": "i18n 键面快照（基准语 zh，全量叶子键排序固化）。任何键面变化（死键清扫/键改名/新增词条）都必须同步提交本文件 diff：更新方式 UPDATE_I18N_KEY_SNAPSHOT=1 npx vitest run src/locales/__tests__/keySnapshot.test.ts。本快照为全量真值（新增键同样需入快照），确保后续任何删除都能被 keySnapshot.test.ts 点名拦截。",
   "source": "zh",
-  "keyCount": 864,
+  "keyCount": 870,
   "keys": [
     "agent.clearConfirm",
     "agent.clearConfirmTitle",
@@ -858,7 +858,12 @@
     "workflow.editor.clearConfirmNegative",
     "workflow.editor.clearConfirmPositive",
     "workflow.editor.clearConfirmTitle",
+    "workflow.editor.clickToAddHint",
     "workflow.editor.emptyCanvasAutoSaveBlocked",
+    "workflow.editor.leaveConfirmContent",
+    "workflow.editor.leaveConfirmNegative",
+    "workflow.editor.leaveConfirmPositive",
+    "workflow.editor.leaveConfirmTitle",
     "workflow.editor.saveFailed",
     "workflow.editor.saveRetry",
     "workflow.editor.saveRetryHint",
@@ -866,6 +871,7 @@
     "workflow.editor.saveStatusSaved",
     "workflow.editor.saveStatusSaving",
     "workflow.editor.saveStatusUnsaved",
-    "workflow.editor.saveSuccess"
+    "workflow.editor.saveSuccess",
+    "workflow.editor.togglePanel"
   ]
 }
