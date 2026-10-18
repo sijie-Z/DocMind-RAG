@@ -214,6 +214,11 @@ export default {
     noHistory: 'No history',
     backToBottom: 'Back to latest',
     stopGenerating: 'Stop generating',
+    // E7 state visibility: history loading / thinking / stopped
+    loadingHistory: 'Loading conversation history...',
+    thinkingLabel: 'Thinking process',
+    generationStopped: 'Stopped',
+    stoppedHint: 'You can continue asking questions or regenerate the answer',
     suggestions: {
       quantum: 'Explain quantum computing',
       quantumDesc: 'Explain the basic principles in simple terms',
@@ -307,6 +312,9 @@ export default {
     promptTooLong: 'The prompt exceeds the {max}-character limit and was not applied. Please shorten it and try again.',
     sourcePreviewFailed: 'Failed to load the document. Please try again later.',
     promptDefaultName: 'Unnamed',
+    currentTemplate: 'Current template: {name}',
+    clearTemplate: 'Clear',
+    promptCleared: 'Prompt template cleared',
     backToConversations: 'Back to conversations',
     liked: 'Liked',
     disliked: 'Disliked',
@@ -360,6 +368,9 @@ export default {
     uploadList: 'Task List',
     noActiveTasks: 'No active tasks',
     clearFinished: 'Clear finished tasks',
+    cancelUpload: 'Cancel upload',
+    removeFromList: 'Remove from list',
+    uploadCancelled: 'Upload canceled',
     table: {
       name: 'File Name',
       size: 'Size',
@@ -378,7 +389,10 @@ export default {
     graph: {
       emptyTitle: 'No graph data yet',
       emptyDesc: 'Upload documents and complete indexing, and the knowledge graph will be built automatically',
-      loadFailed: 'Failed to load graph data, please try again later'
+      loadFailed: 'Failed to load graph data, please try again later',
+      zoomIn: 'Zoom in',
+      zoomOut: 'Zoom out',
+      fitView: 'Reset view'
     },
     docStatus: {
       pending: 'Pending',
@@ -668,7 +682,9 @@ export default {
     noResults: 'No results found',
     noResultsDesc: 'Try different keywords or adjust filters',
     fileContent: 'File Content',
-    searchFailed: 'Search failed'
+    searchFailed: 'Search failed',
+    askAIQuestion: 'About the file "{filename}": {query}',
+    askAIQuestionGeneric: 'Regarding the file "{filename}", please summarize its key points'
   },
   conversations: {
     title: 'Conversation History',
@@ -709,6 +725,21 @@ export default {
       clearConfirmPositive: 'Clear',
       clearConfirmNegative: 'Cancel',
       emptyCanvasAutoSaveBlocked: 'The canvas is empty, so auto-save was skipped to protect the saved version. To save an empty canvas, click "Save" manually.',
+      saveSuccess: 'Workflow saved',
+      saveFailed: 'Save failed',
+      autoSaveFailed: 'Auto-save failed; your changes are not saved. Click the save status to retry.',
+      saveStatusUnsaved: 'Unsaved',
+      saveStatusSaving: 'Saving',
+      saveStatusSaved: 'Saved',
+      saveStatusError: 'Save failed',
+      saveRetry: 'Retry',
+      saveRetryHint: 'Save failed — click to retry',
+      leaveConfirmTitle: 'Leave the editor',
+      leaveConfirmContent: 'This workflow has unsaved changes that will be lost if you leave. Leave anyway?',
+      leaveConfirmPositive: 'Leave',
+      leaveConfirmNegative: 'Cancel',
+      togglePanel: 'Properties panel',
+      clickToAddHint: 'Click or drag to add a node',
     },
   },
   notifications: {
@@ -889,6 +920,8 @@ export default {
       query: 'Input',
       error: 'Last error',
       unavailable: 'Result unavailable (task missing or not visible to you)',
+      refresh: 'Refresh result',
+      refreshed: 'Result refreshed',
       taskState: {
         pending: 'Pending',
         running: 'Running',

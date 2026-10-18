@@ -201,6 +201,11 @@ export default {
     noHistory: 'Aucun historique',
     backToBottom: 'Revenir aux derniers messages',
     stopGenerating: 'Arrêter la génération',
+    // E7 visibilité des états : chargement d'historique / raisonnement / arrêté
+    loadingHistory: 'Chargement de l\'historique...',
+    thinkingLabel: 'Raisonnement',
+    generationStopped: 'Arrêté',
+    stoppedHint: 'Vous pouvez continuer à poser des questions ou régénérer la réponse',
     suggestions: {
       quantum: 'Expliquer l\'informatique quantique',
       quantumDesc: 'Expliquez les principes de base avec des mots simples',
@@ -274,6 +279,9 @@ export default {
     msgLoadFailed: 'Échec du chargement de l\'historique des messages',
     promptApplied: 'Modèle de prompt "{name}" appliqué, vous pouvez commencer la conversation',
     promptDefaultName: 'Sans nom',
+    currentTemplate: 'Modèle actuel : {name}',
+    clearTemplate: 'Effacer',
+    promptCleared: 'Modèle de prompt effacé',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
     sseWarning: 'Avis du serveur : cette réponse peut être incomplète',
     backToConversations: 'Revenir aux conversations',
@@ -300,6 +308,11 @@ export default {
       training: 'Formation',
       other: 'Autre'
     },
+    graph: {
+      zoomIn: 'Zoom avant',
+      zoomOut: 'Zoom arrière',
+      fitView: 'Réinitialiser la vue'
+    },
     uploadFirst: 'Télécharger votre premier fichier',
     empty: 'Aucun document',
     emptyDesc: 'La base de connaissances est vide',
@@ -321,6 +334,9 @@ export default {
     uploadList: 'Liste des tâches',
     noActiveTasks: 'Aucune tâche en cours',
     clearFinished: 'Effacer les tâches terminées',
+    cancelUpload: 'Annuler le téléchargement',
+    removeFromList: 'Retirer de la liste',
+    uploadCancelled: 'Téléchargement annulé',
     table: {
       name: 'Nom du fichier',
       size: 'Taille',
@@ -614,6 +630,8 @@ export default {
     noResults: 'Aucun résultat trouvé',
     noResultsDesc: 'Essayez d\'autres mots-clés ou ajustez les filtres',
     fileContent: 'Contenu du fichier',
+    askAIQuestion: 'À propos du fichier « {filename} » : {query}',
+    askAIQuestionGeneric: 'À propos du fichier « {filename} », veuillez résumer les points clés',
   },
   conversations: {
     title: 'Historique des conversations',
@@ -634,6 +652,21 @@ export default {
       clearConfirmPositive: 'Vider',
       clearConfirmNegative: 'Annuler',
       emptyCanvasAutoSaveBlocked: 'Le canevas est vide : l\'enregistrement automatique a été ignoré pour protéger la version enregistrée. Pour enregistrer un canevas vide, cliquez manuellement sur « Enregistrer ».',
+      saveSuccess: 'Workflow enregistré',
+      saveFailed: 'Échec de l\'enregistrement',
+      autoSaveFailed: 'L\'enregistrement automatique a échoué ; vos modifications ne sont pas enregistrées. Cliquez sur l\'état d\'enregistrement pour réessayer.',
+      saveStatusUnsaved: 'Non enregistré',
+      saveStatusSaving: 'Enregistrement…',
+      saveStatusSaved: 'Enregistré',
+      saveStatusError: 'Échec de l\'enregistrement',
+      saveRetry: 'Réessayer',
+      saveRetryHint: 'L\'enregistrement a échoué — cliquez pour réessayer',
+      leaveConfirmTitle: 'Quitter l\'éditeur',
+      leaveConfirmContent: 'Ce workflow contient des modifications non enregistrées qui seront perdues si vous quittez. Quitter quand même ?',
+      leaveConfirmPositive: 'Quitter',
+      leaveConfirmNegative: 'Annuler',
+      togglePanel: 'Panneau des propriétés',
+      clickToAddHint: 'Cliquez ou glissez pour ajouter un nœud',
     },
   },
   notifications: {
@@ -814,6 +847,8 @@ export default {
       query: 'Entrée',
       error: 'Dernière erreur',
       unavailable: 'Résultat indisponible (tâche introuvable ou non visible)',
+      refresh: 'Actualiser le résultat',
+      refreshed: 'Résultat actualisé',
       taskState: {
         pending: 'En attente',
         running: 'En cours',

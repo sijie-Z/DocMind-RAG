@@ -1,5 +1,5 @@
 import request from '@/utils/request'
-import type { AxiosResponse } from 'axios'
+import type { AxiosRequestConfig, AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
 import type { ChatMessage } from '@/types/chat'
 
@@ -23,8 +23,8 @@ export const getConversations = async (params?: {
   page?: number
   page_size?: number
   search?: string
-}): Promise<AxiosResponse<ApiResponse<ConversationListResponse>>> => {
-  return request.get('/chat/conversations', { params })
+}, config?: AxiosRequestConfig): Promise<AxiosResponse<ApiResponse<ConversationListResponse>>> => {
+  return request.get('/chat/conversations', { params, ...config })
 }
 
 export const getConversation = async (id: string): Promise<AxiosResponse<{ data: Conversation & { messages: ChatMessage[] } }>> => {

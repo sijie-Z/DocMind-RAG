@@ -218,6 +218,11 @@ export default {
     noHistory: '暂无会话历史',
     backToBottom: '回到最新消息',
     stopGenerating: '停止生成',
+    // E7 三态可见性：历史加载 / thinking 折叠区 / 已停止
+    loadingHistory: '正在加载历史消息...',
+    thinkingLabel: '思考过程',
+    generationStopped: '已停止',
+    stoppedHint: '可继续提问或重新生成',
     suggestions: {
       quantum: '解释量子计算',
       quantumDesc: '用简单的语言解释量子计算的基本原理',
@@ -312,6 +317,10 @@ export default {
     promptTooLong: '提示词超过 {max} 字上限，未应用。请精简后再试。',
     sourcePreviewFailed: '原文加载失败，请稍后重试',
     promptDefaultName: '未命名',
+    // E11-②：已应用提示词模板的常驻标识（聊天头部）
+    currentTemplate: '当前模板：{name}',
+    clearTemplate: '清除',
+    promptCleared: '已清除提示词模板',
     backToConversations: '返回对话列表',
     liked: '已点赞',
     disliked: '已点踩',
@@ -365,6 +374,9 @@ export default {
     uploadList: '上传任务列表',
     noActiveTasks: '当前没有正在进行的任务',
     clearFinished: '清除已完成任务',
+    cancelUpload: '取消上传',
+    removeFromList: '从列表移除',
+    uploadCancelled: '已取消上传',
     table: {
       name: '文件名',
       size: '大小',
@@ -383,7 +395,10 @@ export default {
     graph: {
       emptyTitle: '暂无图谱数据',
       emptyDesc: '上传文档并完成索引后，系统会自动构建知识图谱',
-      loadFailed: '图谱数据加载失败，请稍后重试'
+      loadFailed: '图谱数据加载失败，请稍后重试',
+      zoomIn: '放大',
+      zoomOut: '缩小',
+      fitView: '复位视图'
     },
     // G波：文档状态词条化（docDisplay.ts 芯片标签；双词 completed/indexed 同映射 indexed）
     docStatus: {
@@ -673,7 +688,10 @@ export default {
     noResults: '未找到相关结果',
     noResultsDesc: '尝试更换关键词或调整筛选条件',
     fileContent: '文件内容',
-    searchFailed: '搜索失败'
+    searchFailed: '搜索失败',
+    // E11-①：问问 AI 跨页问题组句（文件名 + 当前搜索词 / 无搜索词时的兜底）
+    askAIQuestion: '关于文件「{filename}」：{query}',
+    askAIQuestionGeneric: '关于文件「{filename}」，请帮我总结主要内容'
   },
   conversations: {
     title: '会话历史',
@@ -714,6 +732,21 @@ export default {
       clearConfirmPositive: '清空',
       clearConfirmNegative: '取消',
       emptyCanvasAutoSaveBlocked: '画布为空，已跳过自动保存：已保存的版本未被覆盖。如需保存空画布，请手动点击「保存」。',
+      saveSuccess: '工作流已保存',
+      saveFailed: '保存失败',
+      autoSaveFailed: '自动保存失败，更改尚未保存。点击保存状态可重试。',
+      saveStatusUnsaved: '未保存',
+      saveStatusSaving: '保存中',
+      saveStatusSaved: '已保存',
+      saveStatusError: '保存失败',
+      saveRetry: '重试',
+      saveRetryHint: '保存失败，点击重试',
+      leaveConfirmTitle: '离开编辑器',
+      leaveConfirmContent: '当前工作流有未保存的更改，离开后这些更改将丢失。确定要离开吗？',
+      leaveConfirmPositive: '离开',
+      leaveConfirmNegative: '取消',
+      togglePanel: '属性面板',
+      clickToAddHint: '点击或拖拽添加节点',
     },
   },
   notifications: {
@@ -894,6 +927,8 @@ export default {
       query: '输入',
       error: '最近错误',
       unavailable: '结果不可用（任务不存在或不可见）',
+      refresh: '刷新结果',
+      refreshed: '结果已刷新',
       taskState: {
         pending: '排队中',
         running: '运行中',

@@ -488,7 +488,29 @@ interface UploadTask {
 
 const activeTasks = ref<UploadTask[]>([])
 
+/**
+ * 进行中上传的 AbortController（taskId → controller）。
+ * 放在响应式状态之外：AbortController 是宿主对象，经 Vue proxy 包裹后调用
+ * abort() 会触发 brand check 异常；任务对象本身保持纯数据，便于渲染与断言。
+ */
+const uploadControllers = new Map<string, AbortController>()
+
+const isTaskInFlight = (task: UploadTask) => task.status === 'uploading' || task.status === 'processing'
+
+/**
+ * 上传列表「×」语义（E9/B7）：
+ * - 进行中（uploading / processing）→ 真取消：AbortController 中止请求，任务移除
+ *   并提示「已取消上传」；传输阶段中止后后端拿不到完整表单，文档不会落库；
+ * - 已终态（completed / error）→ 仅从列表移除（不改动任何请求）。
+ */
 const removeUploadTask = (id: string) => {
+  const task = activeTasks.value.find(t => t.id === id)
+  const controller = uploadControllers.get(id)
+  if (task && isTaskInFlight(task) && controller) {
+    controller.abort()
+    message.info(t('knowledge.uploadCancelled'))
+  }
+  uploadControllers.delete(id)
   activeTasks.value = activeTasks.value.filter(t => t.id !== id)
 }
 
@@ -694,17 +716,19 @@ const handlePageSizeChange = (size: number) => {
 
 const uploadFile = async () => {
   if (!uploadForm.value.file) return
-  
+
   const file = uploadForm.value.file
   const taskId = Math.random().toString(36).substring(7)
-  
+  const controller = new AbortController()
+  uploadControllers.set(taskId, controller)
+
   const newTask: UploadTask = {
     id: taskId,
     name: file.name,
     progress: 0,
     status: 'uploading'
   }
-  
+
   activeTasks.value.unshift(newTask)
   showTaskList.value = true
   showUploadModal.value = false
@@ -717,7 +741,7 @@ const uploadFile = async () => {
     formData.append('tags', JSON.stringify(uploadForm.value.tags))
     formData.append('description', uploadForm.value.description)
     // 移除硬编码的 organization_id，后端会从 Form 默认值或 User Context 获取
-    
+
     const res = await uploadKnowledgeBase(formData, (progressEvent) => {
       const progress = progressEvent.total ? Math.round((progressEvent.loaded * 100) / progressEvent.total) : 0
       const task = activeTasks.value.find(t => t.id === taskId)
@@ -727,7 +751,10 @@ const uploadFile = async () => {
           task.status = 'processing'
         }
       }
-    })
+    }, controller.signal)
+
+    // 取消竞态：用户已点「×」但响应恰好先到 —— 不再报成功、不再刷新列表
+    if (controller.signal.aborted) return
 
     // issue #301 批 D（#23）：后端在「文件已保存、但处理任务启动失败」时返回
     // success=false（doc 同步已标记 failed）。此前无条件 message.success —— 失败
@@ -747,25 +774,30 @@ const uploadFile = async () => {
         task.progress = 100
       }
     }
-    
+
     uploadForm.value = {
       title: '',
       tags: [],
       description: ''
     }
     fileList.value = []
-    
+
     await loadKnowledgeBases()
   } catch (error: unknown) {
-    const errMsg = getErrorMessage(error)
-    const task = activeTasks.value.find(t => t.id === taskId)
-    if (task) {
-      task.status = 'error'
-      task.error = errMsg
+    // 用户主动取消不是失败：任务已由 removeUploadTask 移除并提示，这里不再误报
+    if (!controller.signal.aborted) {
+      const errMsg = getErrorMessage(error)
+      const task = activeTasks.value.find(t => t.id === taskId)
+      if (task) {
+        task.status = 'error'
+        task.error = errMsg
+      }
+      message.error(t('knowledge.uploadFailed') + '：' + errMsg)
     }
-    message.error(t('knowledge.uploadFailed') + '：' + errMsg)
   } finally {
-    uploading.value = false
+    uploadControllers.delete(taskId)
+    // 并发上传：uploading 反映「是否仍有在途任务」，取消 A 不得清掉 B 的进行中状态
+    uploading.value = uploadControllers.size > 0
   }
 }
 
