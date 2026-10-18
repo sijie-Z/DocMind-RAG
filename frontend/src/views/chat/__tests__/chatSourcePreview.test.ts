@@ -90,16 +90,11 @@ const NPopoverStub = defineComponent({
     return () => h('div', [slots.trigger?.(), slots.default?.()])
   },
 })
-const DynamicScroller = defineComponent({
-  props: { items: { type: Array, default: () => [] } },
-  setup(props, { slots }) {
-    return () => h('div', props.items.map((item, index) => slots.default?.({ item, index, active: true })))
-  },
-})
-const DynamicScrollerItem = defineComponent({
-  setup(_, { slots }) {
-    return () => h('div', slots.default?.())
-  },
+// E5 起虚拟滚动为 ChatMessages 局部引入（不再经 main.ts 全局注册），测试侧
+// 用 vi.mock 把模块替换为直通 stub（按 items 逐项渲染 default slot，语义同旧 stub）。
+vi.mock('vue-virtual-scroller', async () => {
+  const stubs = await import('@/test-utils/virtualScroller')
+  return { DynamicScroller: stubs.DynamicScrollerStub, DynamicScrollerItem: stubs.DynamicScrollerItemStub }
 })
 
 const messagesI18n = createI18n({
@@ -127,7 +122,6 @@ describe('W2-T7 · ChatMessages 来源卡冒泡 openSource', () => {
       props: { messages: [msg], isLoading: false, showBackToBottom: false, userAvatar: '', suggestions: [] },
       global: {
         plugins: [messagesI18n],
-        components: { DynamicScroller, DynamicScrollerItem },
         stubs: {
           Markdown: true, 'n-icon': true, 'n-avatar': true, 'n-button': true,
           'n-tooltip': true, 'n-tag': NTagStub, 'n-popover': NPopoverStub,
