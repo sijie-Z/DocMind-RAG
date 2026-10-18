@@ -690,7 +690,7 @@ const deleteSelectedNode = () => {
   }
 }
 
-// 自动保存防抖窗口（毫秒）——清空确认文案里的「N 秒」与此同源，避免行为变化后文案失真
+// 自动保存防抖窗口（毫秒）——空画布保护在防抖到点时判定并跳过写回
 const AUTO_SAVE_DELAY_MS = 500
 
 // 已持久化版本（source）的节点数：空画布保护判定「source 非空」的依据。
@@ -704,7 +704,7 @@ const clearCanvas = () => {
   // 只有用户手动点「保存」才会持久化空版本。
   dialog.warning({
     title: t('workflow.editor.clearConfirmTitle'),
-    content: t('workflow.editor.clearConfirmContent', { n: AUTO_SAVE_DELAY_MS / 1000 }),
+    content: t('workflow.editor.clearConfirmContent'),
     positiveText: t('workflow.editor.clearConfirmPositive'),
     negativeText: t('workflow.editor.clearConfirmNegative'),
     onPositiveClick: () => {

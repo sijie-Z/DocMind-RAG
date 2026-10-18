@@ -22,6 +22,7 @@ export default {
     retry: 'Réessayer',
     tryAgain: 'Veuillez réessayer plus tard',
     noDescription: 'Aucune description',
+    weekdays: { '0': 'dim.', '1': 'lun.', '2': 'mar.', '3': 'mer.', '4': 'jeu.', '5': 'ven.', '6': 'sam.' },
   },
   profile: {
     overview: 'Aperçu',
@@ -526,6 +527,7 @@ export default {
     files: 'Fichiers',
     storage: 'Stockage',
     recentConversations: 'Conversations récentes',
+    recentConversationsCount: 'Conversations récentes : {count}',
     viewAll: 'Voir tout',
     noConversations: 'Pas encore de conversations',
     untitled: 'Sans titre',
@@ -668,7 +670,7 @@ export default {
     confirmDeletePositive: 'Supprimer',
     editor: {
       clearConfirmTitle: 'Vider le canevas',
-      clearConfirmContent: 'Après le vidage, l\'enregistrement automatique réécrira le canevas vide dans les {n} secondes et écrasera la version enregistrée. Vider le canevas ?',
+      clearConfirmContent: 'Après le vidage, l\'enregistrement automatique sera ignoré et la version enregistrée ne sera pas écrasée. Vider le canevas ?',
       clearConfirmPositive: 'Vider',
       clearConfirmNegative: 'Annuler',
       emptyCanvasAutoSaveBlocked: 'Le canevas est vide : l\'enregistrement automatique a été ignoré pour protéger la version enregistrée. Pour enregistrer un canevas vide, cliquez manuellement sur « Enregistrer ».',
