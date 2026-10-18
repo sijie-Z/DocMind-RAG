@@ -32,7 +32,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "010_agent_tool_calls"
-down_revision = "009_agent_task_plan_approval"
+down_revision = "010_knowledge_job_local_fallback"
 branch_labels = None
 depends_on = None
 
