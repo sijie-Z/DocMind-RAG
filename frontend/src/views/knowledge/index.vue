@@ -645,9 +645,10 @@ const loadKnowledgeBases = async () => {
       getRagMetrics(metricWindow.value).catch(() => null)
     ])
 
-    if (metricsResp?.data?.data) {
+    // 宽容解包：GET /chat/metrics 为 {success, data: <RagMetrics>} 信封
+    const m = metricsResp ? apiUnwrap<RagMetrics | null>(metricsResp) : null
+    if (m) {
       // ⚡ 核心修复：如果后端返回的是全 0 数据，且 knowledgeBases 有数据，则不更新 metrics 以免误导
-      const m = metricsResp.data.data
       if (m.retrieval_total > 0 || m.hit_rate > 0 || m.groundedness > 0) {
           ragMetrics.value = m
       } else {
@@ -657,8 +658,8 @@ const loadKnowledgeBases = async () => {
       metricsUpdatedAt.value = new Date().toLocaleTimeString()
     }
 
-    // T11：宽容解包（口径见 @/types/common.ts）——对现行双层响应与既有
-    // response.data.data 恒等（契约定在 api/__tests__/knowledgeShapeContract.test.ts）
+    // T11：宽容解包（口径见 @/types/common.ts）——对现行双层响应与旧手写解包
+    // 恒等（契约定在 api/__tests__/knowledgeShapeContract.test.ts）
     const data = apiUnwrap<KnowledgeBaseListResponse>(response)
     if (data) {
         if (Array.isArray(data.data)) {
@@ -781,7 +782,7 @@ const viewKnowledge = async (item: KnowledgeBase) => {
       getDocumentDetail(item.id),
       getDocumentContent(item.id)
     ])
-    // T11：宽容解包（与既有 detailRes/contentRes.data?.data 恒等）
+    // T11：宽容解包（与既有 detailRes/contentRes 手写解包恒等）
     const detail = apiUnwrap<DocumentDetail>(detailRes) || {}
     const content = apiUnwrap<DocumentContent>(contentRes) || {}
     currentDoc.value = {
