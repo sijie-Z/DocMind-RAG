@@ -71,6 +71,9 @@ export default {
     apiKeyGenerated: 'API Key generated successfully',
     apiKeyRevoked: 'API Key revoked',
     apiKeyGenerateFailed: 'Generation failed',
+    apiKeyGenerateConfirm: 'Please keep the generated key safe. Generate a new key?',
+    apiKeyRegenerateConfirm: 'Regenerating immediately invalidates the old key; API calls using it will fail. Regenerate?',
+    apiKeyRevokeConfirm: 'Revoking immediately invalidates this key and cannot be undone. Revoke it?',
     validation: {
       nicknameLength: 'Nickname must be between 2-50 characters',
       phoneInvalid: 'Please enter a valid phone number',

@@ -73,6 +73,9 @@ export default {
     apiKeyGenerated: 'API Key 生成成功',
     apiKeyRevoked: 'API Key 已撤销',
     apiKeyGenerateFailed: '生成失败',
+    apiKeyGenerateConfirm: '生成后请妥善保管 API Key，确定要生成吗？',
+    apiKeyRegenerateConfirm: '重生成后旧 Key 立即失效，正在使用旧 Key 的调用将全部失败。确定要重生成吗？',
+    apiKeyRevokeConfirm: '撤销后该 Key 立即失效且无法恢复。确定要撤销吗？',
     validation: {
       nicknameLength: '昵称长度需在 2-50 个字符之间',
       phoneInvalid: '请输入有效的手机号',
