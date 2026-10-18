@@ -108,7 +108,7 @@
           </n-tag>
         </div>
         <div class="flex items-center gap-1 mt-2 text-xs text-gray-300">
-          <span>ES: {{ healthState === 'ready' ? esHealth : '—' }}</span>
+          <span>{{ t('dashboard.esLabel') }}: {{ healthState === 'ready' ? esHealthText : '—' }}</span>
           <n-button v-if="healthState === 'error'" text size="tiny" class="text-gray-200" @click="loadHealth">
             {{ t('dashboard.retry') }}
           </n-button>
@@ -200,7 +200,7 @@
       </div>
 
       <!-- RAG 命中率 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col" data-testid="rag-card">
         <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-transparent dark:from-emerald-900/10">
           <div class="flex items-center gap-2">
             <div class="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center">
@@ -239,7 +239,7 @@
             <n-button size="small" data-testid="rag-retry" @click="loadRAG">{{ t('dashboard.retry') }}</n-button>
           </div>
         </div>
-        <div v-else class="p-5">
+        <div v-else class="p-5 flex-1 flex flex-col">
           <!-- 命中率主指标 -->
           <div class="flex items-center gap-4 mb-5">
             <div class="flex-1">
@@ -274,8 +274,8 @@
               <p class="text-lg font-bold text-gray-900 dark:text-white">{{ ragStats.avgDocs }}</p>
             </div>
           </div>
-          <!-- 趋势图 -->
-          <div class="h-28 rounded-xl bg-gray-50 dark:bg-gray-700/30 p-3">
+          <!-- 趋势图（flex-1：与左卡等高时填充剩余空间，消除卡底空白） -->
+          <div class="flex-1 min-h-28 rounded-xl bg-gray-50 dark:bg-gray-700/30 p-3" data-testid="rag-chart">
             <div ref="ragChartRef" class="w-full h-full"></div>
           </div>
         </div>
@@ -455,6 +455,27 @@ const adminStats = ref({
 // 独立于 adminStats，避免两路请求互相覆盖。
 const systemHealthy = ref(false)
 const esHealth = ref('')
+
+/**
+ * J4：ES 健康值词条化 —— 后端值域 green/yellow/red/unknown/disconnected
+ * 不再以英文状态词裸露在中英文界面；green/red 复用 healthy/unhealthy 口径，
+ * yellow/unknown/disconnected 走独立词条。
+ */
+const ES_HEALTH_I18N_KEY: Record<string, string> = {
+  green: 'dashboard.healthy',
+  yellow: 'dashboard.esHealthYellow',
+  red: 'dashboard.unhealthy',
+  unknown: 'dashboard.esHealthUnknown',
+  disconnected: 'dashboard.esHealthDisconnected',
+}
+
+const esHealthText = computed(() => {
+  // E6 分块加载后健康值拆为独立 esHealth ref（healthState 管加载门控），
+  // 此处只负责值域 → 词条映射；空值由渲染侧与这里共同兜底为 '—'。
+  const raw = esHealth.value
+  if (!raw) return '—'
+  return t(ES_HEALTH_I18N_KEY[raw] ?? 'dashboard.esHealthUnknown')
+})
 
 // W2-T7：真实环比 =（本周新增-上周新增）/上周新增；上周为 0/缺（无基线）→ null（渲染"上周无数据"），
 // 不再回退任何写死百分比

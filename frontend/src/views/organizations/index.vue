@@ -143,6 +143,8 @@
                   :pagination="pagination"
                   :row-key="(row) => row.id"
                   :bordered="false"
+                  :single-line="true"
+                  :scroll-x="960"
                   class="modern-table h-full"
                   @update:checked-row-keys="handleSelectionChange"
                   :row-props="(row) => ({
@@ -719,35 +721,38 @@ const pagination = reactive({
 })
 
 // 4. 表格列定义
+// J2：列宽与行高统一 —— 所有数据列显式宽度/最小宽度（不再靠挤压表头），
+// 表格 single-line + scroll-x 兜底，名称/描述长文本单行省略并悬浮全称。
 const columns = computed<DataTableColumns<Organization>>(() => [
   { type: 'selection', width: 50 },
   {
     title: t('org.name'),
     key: 'name',
-    width: 200,
-    render: (row) => h('div', { style: 'display:flex; align-items:center; gap:8px' }, [
-      h('div', { style: `width:12px; height:12px; border-radius:50%; background-color:${row.color}` }),
-      h('span', row.name)
+    width: 220,
+    ellipsis: { tooltip: true },
+    render: (row) => h('div', { style: 'display:flex; align-items:center; gap:8px; min-width:0' }, [
+      h('div', { style: `width:12px; height:12px; border-radius:50%; flex-shrink:0; background-color:${row.color}` }),
+      h('span', { class: 'truncate', title: row.name }, row.name)
     ])
   },
   {
     title: t('org.level'),
     key: 'level',
-    width: 80,
+    width: 90,
     align: 'center',
     render: (row) => {
       const levels = [
-        t('org.level1'), 
-        t('org.level2'), 
-        t('org.level3'), 
-        t('org.level4'), 
+        t('org.level1'),
+        t('org.level2'),
+        t('org.level3'),
+        t('org.level4'),
         t('org.level5')
       ]
       return levels[row.level - 1] || t('org.levelOther')
     }
   },
-  { title: t('org.description'), key: 'description', ellipsis: { tooltip: true } },
-  { title: t('org.sort'), key: 'sort_order', width: 70, align: 'center' },
+  { title: t('org.description'), key: 'description', minWidth: 200, ellipsis: { tooltip: true } },
+  { title: t('org.sort'), key: 'sort_order', width: 80, align: 'center' },
   {
     title: t('org.createdAt'),
     key: 'created_at',
