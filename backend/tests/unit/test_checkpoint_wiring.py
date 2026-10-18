@@ -209,7 +209,7 @@ async def test_executor_invokes_on_step_done_once_per_terminal_step():
         done.append((step.id, step.status))
 
     executor._execute_step_with_retry = _completed_spy([])
-    [e async for e in executor.execute(plan, ctx=ExecutionContext(query="q"),
+    [e async for e in executor.execute(plan, organization_id=1, ctx=ExecutionContext(query="q"),
                                        on_step_done=_on_step_done)]
 
     assert done == [("s1", "completed"), ("s2", "completed")]
@@ -229,7 +229,7 @@ async def test_executor_parallel_path_invokes_on_step_done():
         done.append(step.id)
 
     executor._execute_step_with_retry = _completed_spy([])
-    [e async for e in executor.execute(plan, on_step_done=_on_step_done)]
+    [e async for e in executor.execute(plan, organization_id=1, on_step_done=_on_step_done)]
 
     assert sorted(done) == ["s1", "s2"]
 
