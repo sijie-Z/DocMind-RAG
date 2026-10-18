@@ -30,7 +30,7 @@
     "views/chat/index.vue": 1,
     "views/conversations/index.vue": 17,
     "views/dashboard/admin.vue": 12,
-    "views/dashboard/user.vue": 21,
+    "views/dashboard/user.vue": 6,
     "views/knowledge/components/KnowledgeDetailModals.vue": 14,
     "views/knowledge/components/KnowledgeUploadPanel.vue": 4,
     "views/knowledge/graph.vue": 20,

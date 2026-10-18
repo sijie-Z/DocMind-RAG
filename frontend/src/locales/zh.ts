@@ -640,7 +640,53 @@ export default {
     detail: '详情',
     loadFailed: '加载失败',
     loadFailedDesc: '仪表盘数据加载失败，请重试',
-    retry: '重试'
+    retry: '重试',
+    startTitle: '开始做事',
+    startDesc: '选一个入口，马上开始',
+    startNewChat: '新对话',
+    startNewChatDesc: '与 AI 助手对话，基于知识库获得带引用的回答',
+    startUpload: '上传文档',
+    startUploadDesc: '上传 PDF、Word 等资料，自动解析并建立索引',
+    startAgent: '创建 Agent',
+    startAgentDesc: '让 Agent 规划并执行多步任务',
+    overview: '数据概览',
+    overviewDesc: '你的使用情况一目了然',
+    demoData: '加载示例数据',
+    onboarding: {
+      title: '新手引导',
+      subtitle: '完成以下 4 步，快速上手 DocMind',
+      progress: '已完成 {done}/{total}',
+      stepLabel: '第 {index} 步',
+      skip: '跳过',
+      show: '查看清单',
+      refresh: '重新检查',
+      skippedHint: '已跳过，随时可继续',
+      done: '已完成',
+      steps: {
+        model: {
+          title: '连模型',
+          desc: '平台大模型已就绪，可开始问答',
+          hint: '尚未检测到可用模型，请联系管理员配置后点「重新检查」',
+          checking: '正在检查模型状态…',
+          unknown: '模型状态检查失败，请稍后点「重新检查」'
+        },
+        knowledge: {
+          title: '建知识库',
+          desc: '在知识库中上传第一份资料，建立你的专属知识库',
+          action: '去知识库'
+        },
+        upload: {
+          title: '传文档',
+          desc: '文档完成解析与索引，可被 AI 检索引用',
+          action: '去上传'
+        },
+        chat: {
+          title: '首次问答',
+          desc: '提出第一个问题，获得带引用的回答',
+          action: '去提问'
+        }
+      }
+    }
   },
   monitoring: {
     refresh: '刷新数据',

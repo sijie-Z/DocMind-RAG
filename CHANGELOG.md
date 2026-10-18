@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **首页首屏「开始做事」与注册后 4 步引导（#416）**：首页第一屏改为
+  「新对话 / 上传文档 / 创建 Agent」三入口 + 最近会话列表，统计卡整体下移
+  （不删除）；新用户首页展示 4 步清单（连模型 → 建知识库 → 传文档 → 首次问答），
+  完成态优先由服务端真实数据推导（新增只读端点
+  `GET /api/v1/monitoring/llm-status`），可跳过且跳过不消失——清单折叠为常驻
+  入口，刷新/重登后仍可再次查看。
+
 ### Removed
 
 - **死设定清理**：个人设置页移除「API Key 管理」（个人 API Key 无消费方）；

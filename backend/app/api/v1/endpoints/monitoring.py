@@ -543,6 +543,38 @@ async def health_check(
         "services": services,
     }
 
+@router.get("/llm-status", summary="LLM 配置状态")
+async def get_llm_status(
+    current_user: User = Depends(get_current_user),
+):
+    """返回当前进程实际生效的 LLM 配置状态（B5 onboarding「连模型」数据源）。
+
+    只暴露 provider/model 与是否已配置，不泄露密钥。本地模型
+    （ENABLE_LOCAL_LLM）在不启动 Ollama 的前提下无法探测连通性，此处以开关
+    + 模型名作为「已配置」口径；实际连通性由首次问答的结果兜底。
+    """
+    if settings.ENABLE_LOCAL_LLM:
+        provider = "local"
+        model = settings.LOCAL_LLM_MODEL
+        configured = bool(model)
+        source = "local"
+    else:
+        provider = "deepseek"
+        model = settings.DEEPSEEK_MODEL
+        configured = bool(settings.DEEPSEEK_API_KEY)
+        source = "server"
+
+    return {
+        "success": True,
+        "data": {
+            "configured": configured,
+            "provider": provider,
+            "model": model,
+            "source": source,
+        },
+    }
+
+
 @router.get("/logs", summary="获取系统日志", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
 async def get_system_logs(
     skip: int = 0,
