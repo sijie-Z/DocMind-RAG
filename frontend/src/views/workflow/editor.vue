@@ -191,6 +191,38 @@
             </template>
             引擎选择暂未接入后端（无对应字段），当前统一走默认引擎
           </n-tooltip>
+          <!-- B8 保存状态点：常驻、如实反映最近一次保存结果；失败时点击可重试 -->
+          <n-tooltip trigger="hover">
+            <template #trigger>
+              <button
+                type="button"
+                data-testid="workflow-save-status"
+                :data-status="saveStatus"
+                :aria-disabled="saveStatus !== 'error'"
+                class="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border transition-colors"
+                :class="saveStatus === 'error'
+                  ? 'border-red-300 text-red-500 cursor-pointer hover:bg-red-50 dark:hover:bg-red-900/20'
+                  : saveStatus === 'saved'
+                    ? 'border-green-200 text-green-600 dark:border-green-800 dark:text-green-400'
+                    : 'border-gray-200 text-gray-500 dark:border-gray-600 dark:text-gray-400'"
+                @click="retrySave"
+              >
+                <span
+                  class="inline-block w-2 h-2 rounded-full"
+                  :class="saveStatus === 'error'
+                    ? 'bg-red-500'
+                    : saveStatus === 'saved'
+                      ? 'bg-green-500'
+                      : saveStatus === 'saving'
+                        ? 'bg-blue-400'
+                        : 'bg-gray-400'"
+                ></span>
+                <span>{{ saveStatusText }}</span>
+                <span v-if="saveStatus === 'error'" class="font-medium">· {{ saveRetryText }}</span>
+              </button>
+            </template>
+            {{ saveStatusHint }}
+          </n-tooltip>
           <n-button type="primary" @click="saveWorkflow" :loading="saving">
             <template #icon><n-icon><SaveOutline /></n-icon></template>
             保存
@@ -961,6 +993,10 @@ const {
   skillsLoaded,
   loadSkills,
   saving,
+  saveStatus,
+  saveStatusText,
+  saveRetryText,
+  saveStatusHint,
   executing,
   executingNodeId,
   showDebugPanel,
@@ -1023,6 +1059,7 @@ const {
   clearCanvas,
   fitView,
   saveWorkflow,
+  retrySave,
   autoSave,
   openDebugPanel,
   executeWorkflow,
