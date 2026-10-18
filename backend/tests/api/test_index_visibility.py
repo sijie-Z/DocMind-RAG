@@ -169,6 +169,12 @@ def _post_search(client: TestClient, results: list, diagnose):
             "app.api.v1.endpoints.knowledge._diagnose_empty_results",
             new=AsyncMock(return_value=diagnose),
         ) as mock_diag,
+        # B4：搜索按组织设置解析 top_k；打桩为 None（平台默认），
+        # 避免真实服务 await MagicMock 化的 db。
+        patch(
+            "app.api.v1.endpoints.knowledge.organization_settings_service.resolve_retrieval_top_k",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         mock_ks.search_knowledge = AsyncMock(return_value=results)
         try:

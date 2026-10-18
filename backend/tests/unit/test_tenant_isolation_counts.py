@@ -384,6 +384,12 @@ def test_search_endpoint_diagnose_receives_caller_org(client: TestClient):
                 new=AsyncMock(return_value=fake_es),
             ),
             patch("app.core.elasticsearch.get_index_error", return_value=None),
+            # B4：搜索按组织设置解析 top_k；本用例的 db 是 MagicMock，
+            # 打桩设置服务（None → 平台默认），保持用例焦点在组织诊断上。
+            patch(
+                "app.api.v1.endpoints.knowledge.organization_settings_service.resolve_retrieval_top_k",
+                new=AsyncMock(return_value=None),
+            ),
         ):
             mock_ks.search_knowledge = AsyncMock(return_value=[])
             r = client.post(
