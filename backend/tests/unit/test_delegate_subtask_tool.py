@@ -122,7 +122,7 @@ async def test_concurrency_capped_at_three_and_order_kept(monkeypatch):
 
     monkeypatch.setattr(sa, "delegate_task", fake_delegate)
     results = await sa.run_parallel_subtasks(
-        client=None, tasks=[f"t{i}" for i in range(6)], per_task_timeout=None
+        client=None, tasks=[f"t{i}" for i in range(6)], organization_id=1, per_task_timeout=None
     )
     assert peak <= 3, f"并发上限应为 3，实测峰值 {peak}"
     assert results == [f"t{i}" for i in range(6)]
@@ -139,7 +139,7 @@ async def test_per_task_timeout_marks_without_killing_batch(monkeypatch):
 
     monkeypatch.setattr(sa, "delegate_task", slow_delegate)
     results = await sa.run_parallel_subtasks(
-        client=None, tasks=["slow", "fast"], per_task_timeout=0.05
+        client=None, tasks=["slow", "fast"], organization_id=1, per_task_timeout=0.05
     )
     assert results[0].startswith("[子任务超时"), f"超时子任务应带标注: {results[0]}"
     assert results[1] == "fast", "其余子任务不受拖累"
@@ -156,7 +156,7 @@ async def test_single_task_error_contained(monkeypatch):
 
     monkeypatch.setattr(sa, "delegate_task", flaky_delegate)
     results = await sa.run_parallel_subtasks(
-        client=None, tasks=["boom", "fine"], per_task_timeout=None
+        client=None, tasks=["boom", "fine"], organization_id=1, per_task_timeout=None
     )
     assert results[0].startswith("[Error: RuntimeError"), results[0]
     assert results[1] == "ok:fine"

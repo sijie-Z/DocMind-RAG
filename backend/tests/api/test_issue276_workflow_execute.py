@@ -54,7 +54,7 @@ async def test_execute_minimal_workflow_persists_durations():
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
 
     async with factory() as s:
-        wf = Workflow(name="issue276-min", flow_data=_MIN_FLOW, created_by=1)
+        wf = Workflow(name="issue276-min", flow_data=_MIN_FLOW, created_by=1, organization_id=1)
         s.add(wf)
         await s.commit()
         wf_id = wf.id

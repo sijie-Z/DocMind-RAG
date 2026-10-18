@@ -195,7 +195,7 @@ async def test_orchestrator_review_receives_ctx(monkeypatch):
     monkeypatch.setattr(reviewer_mod, "Reviewer", _ReviewerStub)
 
     planner_stub = type("P", (), {"client": object()})()
-    orch = orch_mod.Orchestrator(planner=planner_stub)
+    orch = orch_mod.Orchestrator(planner=planner_stub, organization_id=1)
     ctx = ExecutionContext(query="q")
 
     issues = await orch._run_review(Plan(id="p1", goal="g", steps=[]), [], ctx)
