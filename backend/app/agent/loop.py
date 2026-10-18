@@ -1139,6 +1139,13 @@ class PERAgentLoop:
         executor.human_guidance = self.human_guidance
         executor.approval_degraded = False
         executor.pending_control = ""
+        # C3a：工具调用配对持久化只在 checkpoint 接线时启用——没有任务行就没有
+        # 账本可落（裸执行器/子代理保持零 DB 依赖）。
+        executor.tool_ledger_task_id = (
+            self._checkpoint_task_id
+            if self._checkpoint_task_id and self.config.enable_checkpoint
+            else None
+        )
 
     async def _consume_steering(
         self, run_state_live: dict[str, Any],
