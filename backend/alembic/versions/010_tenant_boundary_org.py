@@ -22,8 +22,14 @@ Revises: 009_agent_task_plan_approval
 兼容窗口（旧客户端 / 旧数据 / 回滚）：
 - 新列 nullable 且旧应用代码不读它：滚动升级期间旧实例照常读写，不因缺列报错；
 - 新代码把 ``organization_id IS NULL`` 的工作流视为「历史遗留、不可见」——
-  列表/详情/更新/删除均不命中，绝不把无主行错算进任何租户。运维可在窗口内
-  重跑本迁移的 ``upgrade()``（幂等）或手工 ``UPDATE`` 指定组织后再放开；
+  列表/详情/更新/删除均不命中（超管例外：全局可见），绝不把无主行错算进
+  任何租户。运维可在窗口内重跑**回填 UPDATE**（该部分是幂等的），或手工
+  ``UPDATE`` 指定组织后再放开。注意：``upgrade()`` 的 DDL 部分（加列/索引/
+  外键）**不幂等**；若发生非事务 DDL 部分失败、版本行尚未推进，请先用
+  ``alembic stamp`` 对齐版本或人工补齐缺失的 DDL 后再重试，不要盲目重放。
+- 非系统且无法回填归属的历史提示词保持 ``organization_id = NULL``：新代码
+  只把 ``is_system = True`` 的 NULL 行当系统模板全组织只读可见；这类孤儿行
+  仅超管可见（隔离），不会再泄露给所有租户；
 - downgrade 可随时执行：删除的只是本轮新增的归属列，业务表与数据原样保留；
   回滚后旧代码行为恢复（含 admin 跨组织旁路），因此回滚时须同时回退应用版本，
   不建议单独降级本迁移。
@@ -59,7 +65,7 @@ UPDATE {table}
 SET organization_id = (
     SELECT uo.organization_id FROM user_organization uo
     WHERE uo.user_id = {table}.{owner_col}
-    ORDER BY uo.organization_id
+    ORDER BY uo.created_at, uo.organization_id
     LIMIT 1
 )
 WHERE organization_id IS NULL
