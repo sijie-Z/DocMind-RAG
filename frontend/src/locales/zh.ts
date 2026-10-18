@@ -121,6 +121,11 @@ export default {
     initialPassword: '初始密码'
   },
   org: {
+    current: '当前组织',
+    switchOrganization: '切换组织',
+    switchSuccess: '已切换组织',
+    switchFailed: '切换组织失败',
+    noOrganizations: '暂无组织',
     title: '组织架构',
     subtitle: '管理系统内的组织架构及其层级关系',
     searchPlaceholder: '搜索组织...',
@@ -556,6 +561,12 @@ export default {
     },
   },
   menu: {
+    groupWorkspace: '工作台',
+    groupConversation: '对话',
+    groupKnowledge: '知识库',
+    groupAutomation: '自动化',
+    groupPrompts: '提示词',
+    groupManagement: '管理',
     home: '首页',
     chat: '智能对话',
     knowledge: '知识库',

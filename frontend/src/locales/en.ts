@@ -117,6 +117,11 @@ export default {
     initialPassword: 'Initial Password'
   },
   org: {
+    current: 'Current organization',
+    switchOrganization: 'Switch organization',
+    switchSuccess: 'Organization switched',
+    switchFailed: 'Failed to switch organization',
+    noOrganizations: 'No organizations',
     title: 'Organization Structure',
     subtitle: 'Manage system organizational structure and hierarchy',
     searchPlaceholder: 'Search organizations...',
@@ -548,6 +553,12 @@ export default {
     },
   },
   menu: {
+    groupWorkspace: 'Workspace',
+    groupConversation: 'Conversation',
+    groupKnowledge: 'Knowledge',
+    groupAutomation: 'Automation',
+    groupPrompts: 'Prompts',
+    groupManagement: 'Management',
     home: 'Home',
     dashboard: 'Dashboard',
     chat: 'Smart Chat',

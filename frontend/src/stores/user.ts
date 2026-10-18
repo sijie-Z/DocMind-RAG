@@ -5,7 +5,7 @@ import { setToken, setRefreshToken, removeToken, getToken, getRefreshToken } fro
 import type { UserInfo, LoginForm, RegisterForm } from '@/types/user'
 import type { AxiosError } from 'axios'
 import { useAppStore } from './app'
-import { getUserSettings, updateUserSettings, type UserSettings } from '@/api/user'
+import { getUserSettings, updateUserSettings, getMyOrganizations, switchOrganization as switchOrganizationApi, type UserSettings } from '@/api/user'
 
 function _extractErrorMessage(error: unknown, fallback: string): string {
   const axiosErr = error as AxiosError<{ message?: string; detail?: string }>
@@ -28,6 +28,9 @@ export const useUserStore = defineStore('user', () => {
   const userInfo = ref<UserInfo | null>(_loadUserInfo())
   const token = ref<string>(getToken() || '')
   const currentOrganizationId = ref<number | null>(null)
+  // 组织上下文版本号：每次成功切换组织递增。布局层把它并入页面 key，
+  // 使当前页面重挂载，文档/会话等 onMounted 拉取按新组织重新发起。
+  const organizationVersion = ref(0)
   // 服务可用性标记：/users/me 遇 5xx/网络错误时为 true（保留会话，供全局横幅/不可用页消费）
   const authServiceUnavailable = ref(false)
 
@@ -78,6 +81,56 @@ export const useUserStore = defineStore('user', () => {
 
   const setCurrentOrganization = (orgId: number) => {
     currentOrganizationId.value = orgId
+  }
+
+  /**
+   * 切换当前组织（B1）：先由服务端校验成员关系并落库，成功后才更新本地上下文。
+   * 服务端失败时本地状态与版本号保持不变——不制造“前端已切换、服务端未切换”的假成功。
+   * 切到当前组织是幂等空操作，不产生请求。
+   */
+  const switchOrganization = async (orgId: number) => {
+    if (orgId === currentOrgId.value) {
+      return { success: true as const, organizationId: orgId }
+    }
+    const response = await switchOrganizationApi(orgId)
+    const resData = response.data as unknown as Record<string, unknown>
+    const payload = (
+      resData.data && typeof resData.data === 'object' ? resData.data : resData
+    ) as Record<string, unknown>
+    const appliedOrgId = Number(payload.organization_id ?? orgId)
+    currentOrganizationId.value = appliedOrgId
+    if (userInfo.value) {
+      userInfo.value = { ...userInfo.value, organization_id: appliedOrgId }
+    }
+    organizationVersion.value += 1
+    return { success: true as const, organizationId: appliedOrgId }
+  }
+
+  /**
+   * 当前用户可切换的组织列表（成员关系 + 主组织兜底）。
+   * 同时对齐服务端返回的 `current_organization_id`：多设备/多标签页下
+   * 当前组织以服务端为准，避免本地标签短暂漂移。
+   * 拉取失败时返回空数组，由切换器据当前组织状态决定可见性。
+   */
+  const fetchMyOrganizations = async () => {
+    try {
+      const response = await getMyOrganizations()
+      const resData = response.data as unknown as Record<string, unknown>
+      const payload = (
+        resData.data && typeof resData.data === 'object' ? resData.data : resData
+      ) as Record<string, unknown>
+      const organizations = Array.isArray(payload.organizations) ? payload.organizations : []
+      const serverOrgId = payload.current_organization_id
+      if (typeof serverOrgId === 'number' && serverOrgId !== currentOrgId.value) {
+        currentOrganizationId.value = serverOrgId
+        if (userInfo.value) {
+          userInfo.value = { ...userInfo.value, organization_id: serverOrgId }
+        }
+      }
+      return organizations as Array<{ id: number; name: string }>
+    } catch {
+      return [] as Array<{ id: number; name: string }>
+    }
   }
   
   // 方法
@@ -292,6 +345,7 @@ export const useUserStore = defineStore('user', () => {
     userInfo,
     token,
     currentOrganizationId,
+    organizationVersion,
     settings,
     authServiceUnavailable,
 
@@ -307,6 +361,8 @@ export const useUserStore = defineStore('user', () => {
     logout,
     updateUserInfo,
     setCurrentOrganization,
+    switchOrganization,
+    fetchMyOrganizations,
     fetchSettings,
     updateSettings,
   }
