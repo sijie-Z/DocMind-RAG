@@ -3,6 +3,7 @@ import type { RouteRecordRaw } from 'vue-router'
 import Layout from '@/layouts/index.vue'
 import { useUserStore } from '@/stores/user'
 import { getToken, isTokenExpired, removeToken } from '@/utils/auth'
+import { silentRefreshAccessToken } from '@/utils/request'
 
 /** 路由 meta 扩展（T9 定位三件套）：生效侧栏高亮键 */
 declare module 'vue-router' {
@@ -320,13 +321,23 @@ router.beforeEach(async (to, from, next) => {
   const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
   const requiresAdmin = to.matched.some((record) => record.meta.requiresAdmin)
 
-  // token 过期 → 直接清除，当无 token 处理
+  // token 本地判定过期 → 先尝试用 refresh_token 静默续期（与 401 拦截器共享单飞队列），
+  // 续期成功继续原导航（刷新页面不再丢登录态）；续期失败才清号。
+  // 注意：续期过程中不得删除 refresh_token。
   if (token && isTokenExpired()) {
-    removeToken()
-    userStore.logout()
-    token = undefined
-    sessionValidated = false
-    lastValidatedAt = 0
+    try {
+      const newToken = await silentRefreshAccessToken()
+      token = newToken
+      userStore.token = newToken
+      sessionValidated = false
+      lastValidatedAt = 0
+    } catch {
+      removeToken()
+      userStore.logout()
+      token = undefined
+      sessionValidated = false
+      lastValidatedAt = 0
+    }
   }
 
   // 已登录用户访问登录/注册页时，重定向到首页
