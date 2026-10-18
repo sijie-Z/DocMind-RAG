@@ -174,7 +174,7 @@ export const useUserStore = defineStore('user', () => {
       try {
         await apiLogout(refreshToken)
       } catch (error) {
-        console.warn('[user] 服务端登出失败，已继续清除本地凭证', error)
+        console.warn('[logout] server-side revoke failed; local credentials cleared', error)
       }
     }
     userInfo.value = null
