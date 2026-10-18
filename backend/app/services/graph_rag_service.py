@@ -14,14 +14,25 @@ logger = logging.getLogger(__name__)
 # 防止孤儿组织键无限累积，过期后重跑回填脚本即干净重建。
 _TTL_SECONDS = 86400 * 30
 
+
+def _require_org(organization_id: int | None, method: str) -> int:
+    """A2 P0（fail-closed）：图谱按组织分区，缺组织上下文一律拒绝。
+
+    默认值此前为 1：调用方漏传时会把读写静默落到 1 号组织，构成跨租户读写。
+    """
+    if organization_id is None:
+        raise ValueError(
+            f"GraphRAGService.{method} 缺少 organization_id，拒绝跨租户访问"
+        )
+    return organization_id
+
+
 class GraphRAGService:
     def __init__(self):
         self._redis_key = "rag:graph"
         # 安全加固：图谱按组织分区（内存 dict 与 Redis key 均带 organization_id），
         # 防止跨组织读取实体/关系数据。
         self._graphs: dict[int, dict[str, dict[str, Any]]] = {}
-        # 兼容旧引用：默认组织（org 1）的图谱视图
-        self.graph: dict[str, dict[str, Any]] = self._graph_for(1)
         self.entity_types = {
             "PERSON": "人物",
             "ORGANIZATION": "组织/公司",
@@ -49,8 +60,9 @@ class GraphRAGService:
         """已摄入文档的幂等标记集（Set）。"""
         return f"{self._redis_key}:docs:{organization_id}"
 
-    async def load(self, organization_id: int = 1) -> None:
+    async def load(self, organization_id: int | None = None) -> None:
         """Load the graph for an organization from Redis; keeps in-memory state when Redis is unavailable."""
+        organization_id = _require_org(organization_id, "load")
         from app.core.redis import redis_client
 
         if not redis_client:
@@ -65,8 +77,9 @@ class GraphRAGService:
         except Exception as e:
             logger.warning(f"GraphRAG load from Redis failed: {e}")
 
-    async def save(self, organization_id: int = 1) -> None:
+    async def save(self, organization_id: int | None = None) -> None:
         """Persist the graph for an organization to Redis when available."""
+        organization_id = _require_org(organization_id, "save")
         from app.core.redis import redis_client
 
         if not redis_client:
@@ -80,7 +93,7 @@ class GraphRAGService:
         except Exception as e:
             logger.warning(f"GraphRAG save to Redis failed: {e}")
 
-    async def is_document_extracted(self, document_id: str, organization_id: int = 1) -> bool | None:
+    async def is_document_extracted(self, document_id: str, organization_id: int | None = None) -> bool | None:
         """该文档是否已摄入图谱（幂等判据）。
 
         - True —— 已摄入（标记在且图数据键仍存在）；
@@ -88,6 +101,7 @@ class GraphRAGService:
           图键保留态、或 TTL 先于标记到期 —— 此时必须重抽，否则图谱永远重建不起来）；
         - None —— Redis 不可用，判断不了（调用方自行决定，与既有降级风格一致）。
         """
+        organization_id = _require_org(organization_id, "is_document_extracted")
         from app.core.redis import redis_client
 
         if not redis_client:
@@ -104,8 +118,9 @@ class GraphRAGService:
             logger.warning(f"GraphRAG doc marker check failed: {e}")
             return None
 
-    async def mark_document_extracted(self, document_id: str, organization_id: int = 1) -> None:
+    async def mark_document_extracted(self, document_id: str, organization_id: int | None = None) -> None:
         """写入幂等标记；TTL 与图数据键一致，两者同生共死。"""
+        organization_id = _require_org(organization_id, "mark_document_extracted")
         from app.core.redis import redis_client
 
         if not redis_client:
@@ -197,7 +212,8 @@ JSON返回："""
 
         return entities[:20]
 
-    async def build_graph_from_entities(self, entities: list[dict[str, Any]], organization_id: int = 1) -> None:
+    async def build_graph_from_entities(self, entities: list[dict[str, Any]], organization_id: int | None = None) -> None:
+        organization_id = _require_org(organization_id, "build_graph_from_entities")
         graph = self._graph_for(organization_id)
         for ent in entities:
             entity_name = ent.get("entity", "")
@@ -232,7 +248,7 @@ JSON返回："""
         self,
         *,
         document_id: str,
-        organization_id: int = 1,
+        organization_id: int | None = None,
         text: str,
         llm_client: Any = None,
         timeout: float = 60.0,
@@ -248,6 +264,7 @@ JSON返回："""
 
         返回 ``{"status": "skipped"|"extracted", "entities": int}``。
         """
+        organization_id = _require_org(organization_id, "ingest_document")
         already = await self.is_document_extracted(document_id, organization_id)
         if already is True:
             return {"status": "skipped", "entities": 0}
@@ -262,7 +279,8 @@ JSON返回："""
         await self.mark_document_extracted(document_id, organization_id)
         return {"status": "extracted", "entities": len(entities)}
 
-    async def clear(self, organization_id: int = 1) -> None:
+    async def clear(self, organization_id: int | None = None) -> None:
+        organization_id = _require_org(organization_id, "clear")
         self._graph_for(organization_id).clear()
         await self.save(organization_id)
         # 幂等标记描述的是「这份图收进了哪些文档」——图清空后必须同步清标记，
@@ -279,8 +297,9 @@ JSON返回："""
         return hashlib.md5(entity.lower().encode(), usedforsecurity=False).hexdigest()[:16]
 
     async def search_graph(
-        self, query: str, organization_id: int = 1, max_hops: int = 2, llm_client: Any = None
+        self, query: str, organization_id: int | None = None, max_hops: int = 2, llm_client: Any = None
     ) -> list[dict[str, Any]]:
+        organization_id = _require_org(organization_id, "search_graph")
         await self.load(organization_id)
         graph = self._graph_for(organization_id)
         if llm_client is None:
@@ -314,7 +333,8 @@ JSON返回："""
 
         return results
 
-    def get_subgraph_context(self, entities: list[str], organization_id: int = 1, max_hops: int = 1) -> str:
+    def get_subgraph_context(self, entities: list[str], organization_id: int | None = None, max_hops: int = 1) -> str:
+        organization_id = _require_org(organization_id, "get_subgraph_context")
         context_parts = []
         graph = self._graph_for(organization_id)
 
@@ -343,7 +363,8 @@ JSON返回："""
 
         return "\n---\n".join(context_parts[:10])
 
-    async def get_analytics(self, organization_id: int = 1) -> dict[str, Any]:
+    async def get_analytics(self, organization_id: int | None = None) -> dict[str, Any]:
+        organization_id = _require_org(organization_id, "get_analytics")
         await self.load(organization_id)
         graph = self._graph_for(organization_id)
         type_counts = defaultdict(int)
