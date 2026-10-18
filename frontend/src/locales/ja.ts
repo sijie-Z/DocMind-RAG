@@ -274,6 +274,9 @@ export default {
     msgLoadFailed: '履歴メッセージの読み込みに失敗しました',
     promptApplied: 'プロンプトテンプレート「{name}」を適用しました。対話を開始してください',
     promptDefaultName: '無題',
+    currentTemplate: '現在のテンプレート：{name}',
+    clearTemplate: 'クリア',
+    promptCleared: 'プロンプトテンプレートを解除しました',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
     sseWarning: 'サーバーからの通知：今回の回答が不完全な可能性があります',
     backToConversations: '対話リストに戻る',
@@ -605,6 +608,8 @@ export default {
     noResults: '結果が見つかりませんでした',
     noResultsDesc: '別のキーワードを試すか、フィルタを調整してください',
     fileContent: 'ファイル内容',
+    askAIQuestion: 'ファイル「{filename}」について：{query}',
+    askAIQuestionGeneric: 'ファイル「{filename}」の主な内容を要約してください',
   },
   conversations: {
     title: '対話履歴',

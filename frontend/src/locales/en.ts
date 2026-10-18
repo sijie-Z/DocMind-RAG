@@ -307,6 +307,9 @@ export default {
     promptTooLong: 'The prompt exceeds the {max}-character limit and was not applied. Please shorten it and try again.',
     sourcePreviewFailed: 'Failed to load the document. Please try again later.',
     promptDefaultName: 'Unnamed',
+    currentTemplate: 'Current template: {name}',
+    clearTemplate: 'Clear',
+    promptCleared: 'Prompt template cleared',
     backToConversations: 'Back to conversations',
     liked: 'Liked',
     disliked: 'Disliked',
@@ -659,7 +662,9 @@ export default {
     noResults: 'No results found',
     noResultsDesc: 'Try different keywords or adjust filters',
     fileContent: 'File Content',
-    searchFailed: 'Search failed'
+    searchFailed: 'Search failed',
+    askAIQuestion: 'About the file "{filename}": {query}',
+    askAIQuestionGeneric: 'Regarding the file "{filename}", please summarize its key points'
   },
   conversations: {
     title: 'Conversation History',

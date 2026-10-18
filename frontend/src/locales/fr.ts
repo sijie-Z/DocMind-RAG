@@ -274,6 +274,9 @@ export default {
     msgLoadFailed: 'Échec du chargement de l\'historique des messages',
     promptApplied: 'Modèle de prompt "{name}" appliqué, vous pouvez commencer la conversation',
     promptDefaultName: 'Sans nom',
+    currentTemplate: 'Modèle actuel : {name}',
+    clearTemplate: 'Effacer',
+    promptCleared: 'Modèle de prompt effacé',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
     sseWarning: 'Avis du serveur : cette réponse peut être incomplète',
     backToConversations: 'Revenir aux conversations',
@@ -605,6 +608,8 @@ export default {
     noResults: 'Aucun résultat trouvé',
     noResultsDesc: 'Essayez d\'autres mots-clés ou ajustez les filtres',
     fileContent: 'Contenu du fichier',
+    askAIQuestion: 'À propos du fichier « {filename} » : {query}',
+    askAIQuestionGeneric: 'À propos du fichier « {filename} », veuillez résumer les points clés',
   },
   conversations: {
     title: 'Historique des conversations',
