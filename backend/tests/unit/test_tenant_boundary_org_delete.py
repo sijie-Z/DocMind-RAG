@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -164,3 +165,71 @@ async def test_batch_delete_propagates_conflict_instead_of_swallowing():
             assert await s.get(Organization, 10) is not None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_delete_org_on_migration_shaped_fk_with_roles(tmp_path, monkeypatch):
+    """A2 评审 M-1：迁移 005 的角色关联外键没有 ON DELETE CASCADE。
+
+    用与 alembic 迁移同形的 schema（无 CASCADE）+ PRAGMA foreign_keys=ON 复刻
+    生产库形状，证明删除路径**显式清理**角色关联后不会触发 1451。
+    """
+    import sqlite3
+
+    db_path = tmp_path / "migshape.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.executescript("""
+            CREATE TABLE organizations (
+                id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER,
+                owner_id INTEGER
+            );
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY, organization_id INTEGER REFERENCES organizations(id),
+                updated_at DATETIME
+            );
+            CREATE TABLE roles (id INTEGER PRIMARY KEY);
+            CREATE TABLE user_organization (
+                user_id INTEGER,
+                organization_id INTEGER REFERENCES organizations(id),
+                PRIMARY KEY (user_id, organization_id)
+            );
+            CREATE TABLE user_organization_role_association (
+                user_id INTEGER,
+                organization_id INTEGER REFERENCES organizations(id),
+                role_id INTEGER REFERENCES roles(id),
+                PRIMARY KEY (user_id, organization_id, role_id)
+            );
+            INSERT INTO organizations (id, name, parent_id, owner_id) VALUES (30, 'O', NULL, 40);
+            INSERT INTO users (id, organization_id) VALUES (40, 30);
+            INSERT INTO roles (id) VALUES (1);
+            INSERT INTO user_organization (user_id, organization_id) VALUES (40, 30);
+            INSERT INTO user_organization_role_association (user_id, organization_id, role_id)
+                VALUES (40, 30, 1);
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    eng = create_async_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    factory = async_sessionmaker(eng, expire_on_commit=False)
+    # 本用例只校验外键清理路径；工作数据表不在最小 schema 内。
+    monkeypatch.setattr(organization_service, "_ATTACHED_DATA_MODELS", ())
+    try:
+        async with factory() as s:
+            await s.execute(text("PRAGMA foreign_keys=ON"))
+            assert await organization_service.delete_organization_thoroughly(s, 30) is True
+            await s.commit()
+    finally:
+        await eng.dispose()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM organizations WHERE id = 30").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM user_organization_role_association").fetchone()[0] == 0
+        assert conn.execute("SELECT organization_id FROM users WHERE id = 40").fetchone()[0] is None
+    finally:
+        conn.close()

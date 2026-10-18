@@ -19,7 +19,7 @@ from app.exceptions import (
     ValidationError,
 )
 from app.models.organization import Organization, user_organization
-from app.models.rbac import PermissionType
+from app.models.rbac import PermissionType, user_organization_role_association
 from app.models.user import User
 from app.schemas.organization import OrganizationCreate, OrganizationUpdate
 from app.services.audit_service import audit_service
@@ -394,9 +394,21 @@ async def remove_organization_member(
         raise NotFoundError("组织成员不存在")
 
     user_obj: Any = user
-    user_obj.organization_id = None
+    # A2（评审 m-4）：仅当用户的主组织正是被移除的组织时才清空主组织字段；
+    # 用户若同时属于其他组织（主组织指向别处），不得被这次移除连带清空。
+    if user_obj.organization_id == org_id:
+        user_obj.organization_id = None
     # A2 P0：删除成员关系，使被移出成员的旧 token 组织回退立即失效（403），
-    # 不等待 token 过期。
+    # 不等待 token 过期。同时清理该用户在本组织的角色关联（重新加入不继承旧角色，
+    # 也避免组织删除时因角色关联外键触发 1451）。
+    await db.execute(
+        delete(user_organization_role_association).where(
+            and_(
+                user_organization_role_association.c.user_id == user_id,
+                user_organization_role_association.c.organization_id == org_id,
+            )
+        )
+    )
     await db.execute(
         delete(user_organization).where(
             and_(

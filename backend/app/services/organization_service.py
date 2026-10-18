@@ -21,6 +21,7 @@ from app.models.document import Document
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.organization import Organization, user_organization
 from app.models.prompt import PromptTemplate
+from app.models.rbac import user_organization_role_association
 from app.models.scheduled_task import ScheduledTask
 from app.models.token_usage import TokenUsageRecord
 from app.models.user import User
@@ -280,6 +281,14 @@ class OrganizationService:
         )
         await db.execute(
             delete(user_organization).where(user_organization.c.organization_id.in_(orgs_to_delete))
+        )
+        # A2 P0（评审 M-1）：角色关联表在模型里声明 ON DELETE CASCADE，但 alembic
+        # 005 建表 DDL 没有该 ondelete（外键实际是 RESTRICT）。不能依赖 DB 级联：
+        # 显式清理，保证迁移建库与 create_all 建库都不会在删组织时 1451。
+        await db.execute(
+            delete(user_organization_role_association).where(
+                user_organization_role_association.c.organization_id.in_(orgs_to_delete)
+            )
         )
         await db.execute(
             delete(Organization).where(Organization.id.in_(orgs_to_delete))
