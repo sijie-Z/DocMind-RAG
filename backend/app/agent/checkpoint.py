@@ -30,7 +30,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
-from app.agent import steering
+from app.agent import steering, tool_ledger
 from app.core.database import AsyncSessionLocal
 from app.core.log_safety import log_safe
 from app.core.redis import redis_client
@@ -174,6 +174,20 @@ async def _load_task_row(db: AsyncSession, task_id: str) -> AgentTask | None:
 # ── 快照信封：构建 / 解析 ────────────────────────────────────────────────────
 
 
+def _cap_history(history: list | None) -> list[dict]:
+    """HISTORY_CAP 截断（C3a）：切点不得拆散 tool_call/tool_result 配对。
+
+    ``[-HISTORY_CAP:]`` 是盲切：若截断点恰好落在 result 上（其 call 在窗口
+    之外），冻结的历史会以孤儿 result 的形式被 resume 消费。这里把窗口头部
+    的孤儿 result 摘掉（其 call 本就不在窗口内），并在返回前再验一次配对。
+    """
+    raw = [dict(m) for m in (history or [])]
+    window = raw[max(0, len(raw) - HISTORY_CAP):]
+    while window and window[0].get("role") == "tool":
+        window.pop(0)
+    return window
+
+
 def build_envelope(
     *,
     ctx: Any,
@@ -196,7 +210,7 @@ def build_envelope(
         "session_id": session_id or "",
         "ctx": ctx.to_checkpoint_dict() if ctx is not None else None,
         "plan": plan.to_checkpoint_dict() if plan is not None else None,
-        "history": [dict(m) for m in (history or [])][-HISTORY_CAP:],
+        "history": _cap_history(history),
         "config": config.to_dict() if config is not None else {},
         "run": dict(run_state or {}),
         "partial_output": (partial_output or "")[:PARTIAL_OUTPUT_CAP],
@@ -353,7 +367,12 @@ async def mark_terminal(
                 if task is None:
                     return False
                 if task.status == to:
-                    # 幂等成功同样保证"终态 ⇒ 缓冲空"（防带外写入的迟到指导）。
+                    # 幂等成功同样保证"终态 ⇒ 缓冲空/账目闭合"（防带外写入的迟到指导；
+                    # C3a：上次收尾若在 sweep 前失败，这里补一次——synthesize 幂等）。
+                    await tool_ledger.synthesize_terminal(
+                        task_id,
+                        reason="cancel" if to == TaskStatus.CANCELLED else "interrupt",
+                    )
                     await steering.clear_steers(task_id)
                     return True
                 try:
@@ -375,6 +394,12 @@ async def mark_terminal(
                 continue
             break
         await release_task(task_id)
+        # C3a：终态落定后收敛未完成工具调用账目——取消按取消语义（登记未派发
+        # → ABORTED_BEFORE_DISPATCH），其余终态按中断语义（→ TOOL_NOT_STARTED /
+        # TOOL_OUTCOME_UNKNOWN），绝不留悬空 call。失败只记 warning（幂等、可重试）。
+        await tool_ledger.synthesize_terminal(
+            task_id, reason="cancel" if to == TaskStatus.CANCELLED else "interrupt",
+        )
         # A（steering）：终态清转向缓冲——指导不再有任何消费点（下一步边界
         # 永不到来），留在队列里只会误导后续诊断；清失败不影响终态正确性。
         await steering.clear_steers(task_id)
@@ -429,6 +454,8 @@ async def converge_disconnected(
             task.last_error = str(error)[:2000]
             task.last_error_type = error_type[:50]
             await db.commit()
+            # C3a：断流 = 运行中断——未完成 call 补写合成终态（可经 resume 收敛）。
+            await tool_ledger.synthesize_terminal(task_id, reason="interrupt")
             return True
     except Exception as e:
         logger.warning(
@@ -475,6 +502,9 @@ async def mark_waiting_approval(task_id: str | None) -> bool:
     except Exception as e:
         logger.warning("mark_waiting_approval 写入失败 (task=%s): %s", log_safe(task_id), log_safe(e))
         return False
+    # C3a：本 run 在审批点结束——本回合已登记、未派发的调用补写 TOOL_NOT_STARTED
+    # （resume 后模型会以新的 call_id 重新登记；旧账不得悬空）。
+    await tool_ledger.synthesize_terminal(task_id, reason="interrupt")
     await release_task(task_id)
     return True
 
@@ -1139,6 +1169,8 @@ async def begin_resume(task_id: str, lease_seconds: int = LEASE_SECONDS) -> Agen
                     task.last_error = "用户取消（resume 前观察到取消旗）"
                     task.last_error_type = "user_cancelled"
                     await db.commit()
+                    # C3a：取消收敛——未完成 call 按取消语义补写合成终态。
+                    await tool_ledger.synthesize_terminal(task_id, reason="cancel")
                 except ValueError:
                     # 当前状态不可转 cancelled（理论不可达：上面的非终态都已放开边）
                     pass
@@ -1156,6 +1188,9 @@ async def begin_resume(task_id: str, lease_seconds: int = LEASE_SECONDS) -> Agen
                 task.transition(TaskStatus.RUNNING)
             task.retry_count += 1
             await db.commit()
+            # C3a：resume 前收敛上一个 run 的遗留账目——已派发无结果 →
+            # TOOL_OUTCOME_UNKNOWN（执行中失联）；已登记未派发 → TOOL_NOT_STARTED。
+            await tool_ledger.synthesize_terminal(task_id, reason="interrupt")
             return task
     except Exception:
         await release_task(task_id)
