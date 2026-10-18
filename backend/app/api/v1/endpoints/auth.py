@@ -155,6 +155,8 @@ async def login(
             "full_name": getattr(user, "full_name", None) or None,
             "organization_id": getattr(user, "organization_id", None),
             "role": user.role or "user",
+            # 与后端鉴权口径一致（is_superuser or role=="admin"）
+            "is_superuser": bool(getattr(user, "is_superuser", False)),
             "preferences": getattr(user, "preferences", None),
         }
         # 确保 user_info 可 JSON 序列化（响应体防御：存在不可序列化的字段时
@@ -263,6 +265,8 @@ async def login_json(
             "full_name": getattr(user, "full_name", None) or None,
             "organization_id": getattr(user, "organization_id", None),
             "role": getattr(user, "role", None) or "user",
+            # 与 form 登录、/users/me 同一 admin 判定契约
+            "is_superuser": bool(getattr(user, "is_superuser", False)),
             "preferences": getattr(user, "preferences", None),
         }
         # 与 form 登录一致：只验证 user_info 可 JSON 序列化（响应体防御），
@@ -540,6 +544,7 @@ async def get_current_user_info(
         full_name=current_user.full_name,
         organization_id=current_user.organization_id,
         role=current_user.role,
+        is_superuser=current_user.is_superuser,
         is_active=current_user.is_active,
         created_at=current_user.created_at,
         preferences=current_user.preferences

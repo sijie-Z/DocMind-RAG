@@ -73,6 +73,9 @@ export default {
     apiKeyGenerated: 'API Key 生成成功',
     apiKeyRevoked: 'API Key 已撤销',
     apiKeyGenerateFailed: '生成失败',
+    apiKeyGenerateConfirm: '生成后请妥善保管 API Key，确定要生成吗？',
+    apiKeyRegenerateConfirm: '重生成后旧 Key 立即失效，正在使用旧 Key 的调用将全部失败。确定要重生成吗？',
+    apiKeyRevokeConfirm: '撤销后该 Key 立即失效且无法恢复。确定要撤销吗？',
     validation: {
       nicknameLength: '昵称长度需在 2-50 个字符之间',
       phoneInvalid: '请输入有效的手机号',
@@ -107,6 +110,7 @@ export default {
     // W2-T7：LLM Provider 区块诚实标注（后端无消费方，推理走服务端全局配置）
     aiProviderExpTitle: '实验功能 · 暂不生效',
     aiProviderExpDesc: '模型选择由服务端统一配置（当前为 DeepSeek）；此处的选择与 API Key 暂不参与推理，已禁用保存以免误解。',
+    providerLoadFailed: 'AI Provider 配置加载失败，当前显示默认或上次成功加载的配置。',
   },
   users: {
     searchPlaceholder: '搜索用户...',
@@ -312,7 +316,7 @@ export default {
   validation: {
     required: '此项必填',
     email: '请输入有效的邮箱地址',
-    passwordLength: '密码长度至少为 6 位',
+    passwordLength: '密码长度至少为 8 位',
     passwordMismatch: '两次输入的密码不一致',
     usernameLength: '用户名至少3位',
     emailInvalid: '邮箱格式不正确'
@@ -461,6 +465,65 @@ export default {
     demoDesc: '使用演示账号 (guest / 123456)',
     loginFailed: '登录失败',
     registerFailed: '注册失败',
+    privacy: '隐私',
+    terms: '服务条款',
+  },
+  firsthome: {
+    nav: {
+      login: '登录',
+      trial: '免费试用',
+    },
+    enterWorkspace: '进入工作台',
+    hero: {
+      badge: '企业级 AI 知识库平台',
+      titleLine1: '让每一份文档',
+      titleAccent: '都能对话',
+      desc: '功能人人会写；让功能不悄悄变坏才是工程。零容差评测门禁进 CI、32 条静默假成功清零、棘轮只缩不涨。',
+      ctaPrimary: '免费开始使用',
+      ctaLogin: '已有账号？登录',
+    },
+    stats: {
+      clauseHit: "ClauseHit{'@'}3/{'@'}5（实测）",
+      cases: '检索评测用例 · golden set',
+    },
+    steps: {
+      title: '三步构建你的知识库',
+      desc: '从上传文档到智能问答，前所未有的简单',
+      upload: { title: '上传文档', desc: '支持 PDF、Word、Excel、Markdown、CSV 等 13 种格式，拖拽上传。' },
+      index: { title: '智能索引', desc: '文档自动解析分块，向量化存入 Elasticsearch，秒级检索。' },
+      ask: { title: 'AI 问答', desc: '自然语言提问，Agent 多步推理，返回带来源引用的精准答案。' },
+    },
+    features: {
+      title: '不只是搜索，是理解',
+      desc: '企业级 RAG 架构，Agent 驱动的智能推理',
+      hybrid: { title: '混合检索', desc: '关键词 BM25 + 向量语义搜索 + RRF 融合算法，最大化召回精度。' },
+      agent: { title: 'Agent 推理', desc: 'PER 三阶段推理（Plan-Execute-Reflect），多步工具调用，拆解复杂问题逐步求解。' },
+      stream: { title: '流式响应', desc: 'SSE 实时流式输出，边思考边回答，无需等待完整结果。' },
+      api: { title: '开放 API', desc: 'RESTful API + WebSocket 双通道，轻松集成到你的业务系统。' },
+      security: { title: '企业安全', desc: 'JWT 认证、RBAC 权限、组织隔离、完整审计日志。' },
+      tenant: { title: '多租户', desc: '组织级数据隔离，每个团队拥有独立的知识库和权限体系。' },
+    },
+    terminal: {
+      title: 'Agent 自主推理引擎',
+      desc: '多步推理、工具调用、引用溯源 — 实时观察 AI 的思考过程',
+      demo: '演示数据',
+      query: '❯ 2025年Q3的销售数据中，哪个产品线增长最快？',
+      callSearch: '⟳ 正在调用 search_knowledge_base...',
+      result: '✓ 检索到 5 份销售报表',
+      callAnalyze: '⟳ 正在调用 analyze_document...',
+      callCompare: '⟳ 正在调用 compare_data...',
+      answerLabel: '▸ 答案',
+      answer: '企业云服务产品线增长最快，主要驱动来自金融行业客户的私有化部署需求。',
+      sources: '[1] Q3销售报表.xlsx · [2] 行业分析-金融.pdf',
+    },
+    cta: {
+      title: '准备好构建你的知识库了吗？',
+      desc: '免费开始，无需任何配置。上传第一份文档，即刻体验 AI 智能问答。',
+      button: '免费开始',
+    },
+    footer: {
+      copy: '© 2025 DocMind · 企业级 RAG 知识库系统',
+    },
   },
   menu: {
     home: '首页',

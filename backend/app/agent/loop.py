@@ -445,6 +445,14 @@ class PERAgentLoop:
         if task_id:
             ctx.task_id = task_id
 
+        # @引用文档段（T14）：显式入参优先；resume 未显式传入时从快照 ctx 恢复
+        # （快照缺失 / 值级漂移 → 无引用段，不伪造）。写回 ctx 保证本 run 后续
+        # 落下的快照继续携带引用段——二次断流恢复同样不丢。
+        if document_context:
+            ctx.document_context = document_context
+        else:
+            document_context = ctx.document_context or None
+
         # 技能（issue #200）：懒加载已学技能（load 幂等）；失败绝不阻塞主流程
         if self.config.enable_skills:
             try:

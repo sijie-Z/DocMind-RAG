@@ -553,7 +553,8 @@ const handleUserMenuSelect = (key: string) => {
   if (item.routeName) {
     router.push({ name: item.routeName })
   } else if (item.actionKey === 'logout') {
-    userStore.logout()
+    // 导航由本处统一 push；logout 只清态与吊销，避免两处异步跳转互相覆盖
+    userStore.logout({ navigate: false })
     router.push({ name: 'Login' })
   }
 }

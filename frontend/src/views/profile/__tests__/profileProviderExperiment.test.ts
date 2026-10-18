@@ -47,6 +47,16 @@ vi.mock('@/api/user', async (importOriginal) => {
     generateApiKey: vi.fn(),
     revokeApiKey: vi.fn(),
     revokeMySession: vi.fn(),
+    // T10：providers 加载改走统一客户端，此处隔离真实 axios（原 fetch stub 已失效）
+    getUserSettingsProviders: vi.fn().mockResolvedValue({
+      data: {
+        success: true,
+        providers: [
+          { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
+        ],
+        current: { provider: 'deepseek', model: 'deepseek-chat', api_key: 'sk-a...zzzz', base_url: '' },
+      },
+    }),
     getAuditLogs: vi.fn().mockResolvedValue({ data: { success: true, data: { items: [], total: 0 } } }),
   }
 })

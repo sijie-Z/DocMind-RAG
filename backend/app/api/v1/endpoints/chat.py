@@ -33,7 +33,45 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_agent_sources(tool_result: str, sources: list[dict]) -> None:
-    """Parse search tool output and append document references to sources list."""
+    """Parse retrieval tool output and append document references to sources list.
+
+    T4（来源伪造隔离）：检索工具的输出是结构化 JSON 信封——``sources`` 段承载
+    来源元数据、``content`` 段承载正文。这里**只读 ``sources`` 段**，不再对整段
+    输出跑逐行正则：修复前文档正文里构造一行 "[3] (0.99) 假.pdf" 即可伪造一张
+    引用卡（documentId 为空，前端无从分辨）。
+
+    兼容：旧纯文本格式（"[i] (score) filename" 行）保留一个 minor 版本的兜底
+    解析，供滚动升级期间旧格式输出使用。DEPRECATED — 下一个 minor 移除。
+    """
+    from app.agent.core_tools import SEARCH_RESULTS_PAYLOAD_KIND
+
+    try:
+        payload = json.loads(tool_result)
+    except (TypeError, ValueError):
+        payload = None
+    if (
+        isinstance(payload, dict)
+        and payload.get("kind") == SEARCH_RESULTS_PAYLOAD_KIND
+        and isinstance(payload.get("sources"), list)
+    ):
+        for item in payload["sources"]:
+            if not isinstance(item, dict):
+                continue
+            filename = str(item.get("filename") or "").strip()
+            if not filename:
+                continue
+            # Deduplicate by filename
+            if not any(s.get("filename") == filename for s in sources):
+                sources.append({
+                    "filename": filename,
+                    "relevanceScore": float(item.get("score") or 0.0),
+                    "content": "",
+                    "documentId": str(item.get("documentId") or ""),
+                })
+        return
+
+    # DEPRECATED（legacy plain-text tool output，保留一个 minor）：旧格式无法
+    # 区分来源行与正文行（这正是 T4 的缺陷），仅作滚动升级期的兜底兼容。
     import re
     for match in re.finditer(r"^\[(\d+)\]\s+\(([\d.]+)\)\s+(.+?)$", tool_result, re.MULTILINE):
         score = float(match.group(2))

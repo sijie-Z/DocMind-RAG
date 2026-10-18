@@ -1,27 +1,38 @@
 /**
- * 个人设置 providers 路径判别用例（UI 验收 round2 · P1 / A_sweep PROF-1）。
+ * 个人设置 providers 加载判别用例（UI 验收 round2 · P1 / A_sweep PROF-1；T10 错误态）。
  *
  * 真 UI 实测：偏好设置 → AI 模型设置 拉 providers 时
  *   GET /api/v1/settings/providers → 404（缺 /user 前缀）；
  *   GET /api/v1/user/settings/providers → 200（正确路径）。
  * 路由真源：router.py:51 prefix="/user" + user_settings.py:117。
  *
- * 变异点：路径改回缺 /user 前缀 → 本用例精确红。
+ * T10：加载改走 utils/request.ts 统一客户端（api/user.ts getUserSettingsProviders），
+ * 不再裸 fetch；失败时错误态可判别、页面可见，且保留上一次成功值。
+ *
+ * 变异点：
+ * - 退回裸 fetch → 用例 1 红（fetch 不得被调用）；
+ * - 失败静默 / 失败清空旧值 → 用例 3 红；
+ * - 页面不显示错误提示 → 用例 4 红；
+ * - 路径改回缺 /user 前缀 → api/__tests__/userSettingsProviders.test.ts 红。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
-import { NMessageProvider, NDialogProvider } from 'naive-ui'
+import naive, { NMessageProvider, NDialogProvider } from 'naive-ui'
 
 import { useProfilePage } from '../composables/useProfilePage'
+import ProfilePage from '../index.vue'
 import zh from '@/locales/zh'
+
+const { providersMock } = vi.hoisted(() => ({ providersMock: vi.fn() }))
 
 vi.mock('@/api/user', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/user')>()
   return {
     ...actual,
+    getUserSettingsProviders: providersMock,
     getUserProfile: vi.fn().mockResolvedValue({
       data: {
         id: 1, username: 'tester', email: 't@t', nickname: 'tester', full_name: null,
@@ -47,15 +58,24 @@ vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/utils/echarts', () => ({
   default: {
     init: vi.fn(() => ({ setOption: vi.fn(), resize: vi.fn(), dispose: vi.fn() })),
+    graphic: { LinearGradient: class {} },
   },
 }))
 
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
 
-const fetchMock = vi.fn().mockResolvedValue({
-  ok: true,
-  json: async () => ({ providers: ['deepseek', 'ollama'], current: null }),
-})
+const okPayload = {
+  data: {
+    success: true,
+    providers: [
+      { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
+      { id: 'ollama', name: 'Ollama', base_url: 'http://localhost:11434/v1', models: ['llama3'], requires_key: false },
+    ],
+    current: { provider: 'deepseek', model: 'deepseek-chat', api_key: '', base_url: '' },
+  },
+}
+
+const fetchMock = vi.fn()
 
 let capturedApi: ReturnType<typeof useProfilePage>
 
@@ -76,41 +96,90 @@ function mountHarness() {
   return mount(Host, { global: { plugins: [pinia, i18n] } })
 }
 
+function mountPage() {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const Host = defineComponent({
+    render: () =>
+      h(NDialogProvider, null, { default: () => h(NMessageProvider, null, { default: () => h(ProfilePage) }) }),
+  })
+  return mount(Host, { global: { plugins: [pinia, i18n, naive] } })
+}
+
+async function openPreferencesTab(wrapper: ReturnType<typeof mountPage>) {
+  const tab = wrapper.findAll('.n-tabs-tab').find(t => t.text().includes('偏好设置'))
+  expect(tab, '「偏好设置」tab 应在屏（provider 区块宿主）').toBeTruthy()
+  await tab!.trigger('click')
+  await flushPromises()
+}
+
+interface CapturedState {
+  providers: { value: Array<{ id: string }> }
+  providerForm: { provider: string; model: string }
+  providersLoadError: { value: string | null }
+}
+
 beforeEach(() => {
+  providersMock.mockReset()
+  providersMock.mockResolvedValue(okPayload as never)
+  fetchMock.mockReset()
   vi.stubGlobal('fetch', fetchMock)
-  fetchMock.mockClear()
 })
 
-describe('useProfilePage · providers 请求路径（P1）', () => {
-  it('请求 /api/v1/user/settings/providers（旧缺 /user 前缀 404 已修）', async () => {
+describe('useProfilePage · providers 加载走统一客户端（P1）', () => {
+  it('通过 api/user 的 getUserSettingsProviders 加载，不再裸 fetch', async () => {
     mountHarness()
     await flushPromises()
 
-    await capturedApi.loadProviders()
-    await flushPromises()
-
-    const urls = fetchMock.mock.calls.map((c) => String(c[0]))
-    expect(urls).toContain('/api/v1/user/settings/providers')
-    // 缺前缀的旧路径不得再出现
-    expect(urls).not.toContain('/api/v1/settings/providers')
+    expect(providersMock).toHaveBeenCalled()
+    expect(fetchMock, '不得再走裸 fetch（统一客户端负责鉴权/错误提示/刷新）').not.toHaveBeenCalled()
   })
 
   it('响应 providers/current 正常落入页面状态（未静默吞掉 200 直连）', async () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({ providers: ['deepseek', 'ollama'], current: { provider: 'deepseek', model: 'deepseek-chat', api_key: '', base_url: '' } }),
-    } as never)
-
     mountHarness()
     await flushPromises()
     await capturedApi.loadProviders()
     await flushPromises()
 
-    const state = capturedApi as unknown as {
-      providers: { value: string[] }
-      providerForm: { provider: string; model: string }
-    }
-    expect(state.providers.value).toEqual(['deepseek', 'ollama'])
+    const state = capturedApi as unknown as CapturedState
+    expect(state.providers.value.map(p => p.id)).toEqual(['deepseek', 'ollama'])
     expect(state.providerForm.provider).toBe('deepseek')
+    expect(state.providerForm.model).toBe('deepseek-chat')
+    expect(state.providersLoadError.value).toBeNull()
+  })
+})
+
+describe('useProfilePage · providers 加载失败错误态（T10）', () => {
+  it('接口 500 → 显示错误态且不清空上一次成功值', async () => {
+    mountHarness()
+    await flushPromises()
+    await capturedApi.loadProviders()
+    await flushPromises()
+
+    const state = capturedApi as unknown as CapturedState
+    const before = JSON.parse(JSON.stringify(state.providers.value))
+    expect(before.map((p: { id: string }) => p.id)).toEqual(['deepseek', 'ollama'])
+
+    providersMock.mockRejectedValueOnce(
+      Object.assign(new Error('Request failed with status code 500'), { response: { status: 500 } }),
+    )
+    await capturedApi.loadProviders()
+    await flushPromises()
+
+    expect(state.providersLoadError.value, '失败必须可判别（不得静默吞错）').toBeTruthy()
+    expect(state.providers.value, '失败不得清空上一次成功值').toEqual(before)
+    expect(state.providerForm.provider, '失败不得重置已选 provider').toBe('deepseek')
+  })
+
+  it('页面可见错误提示（500 时 Provider 区块出现错误态文案）', async () => {
+    providersMock.mockRejectedValue(
+      Object.assign(new Error('Request failed with status code 500'), { response: { status: 500 } }),
+    )
+    const wrapper = mountPage()
+    await flushPromises()
+    await flushPromises()
+    await openPreferencesTab(wrapper)
+
+    expect(wrapper.text()).toContain('Provider 配置加载失败')
   })
 })

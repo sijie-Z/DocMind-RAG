@@ -22,6 +22,7 @@
 - chat 不传 referenced_document_ids → service 传参用例红。
 """
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -35,6 +36,7 @@ from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.exec_context import ExecutionContext
 from app.agent.loop import PERAgentLoop
+from app.agent.planner import Plan, PlanStep
 from app.agent.service import AgentService, build_referenced_document_context
 from app.core.database import Base
 from app.core.elasticsearch import ElasticsearchTools
@@ -421,3 +423,162 @@ class TestServiceChatWiring:
 
         _ = [ev async for ev in svc.chat("q", organization_id=1, user_id=1, config=cfg)]
         assert _StubLoop.last_kwargs["document_context"] is None
+
+
+# ── resume 链路：断流恢复不丢 @引用上下文（T14）─────────────────────────────
+
+
+def _resume_payload(*, steps, include_plan=True, document_context=None):
+    """模拟断流时落下的快照信封（与 checkpoint.build_envelope 同形）。"""
+    ctx = ExecutionContext(query="原始问题", task_id="t-1")
+    if document_context is not None:
+        ctx.document_context = document_context
+    plan = Plan(id="p1", goal="目标", steps=steps,
+                completed_steps=sum(1 for s in steps if s.status == "completed"))
+    return {
+        "v": 1,
+        "session_id": "sess-1",
+        "ctx": ctx.to_checkpoint_dict(),
+        "plan": plan.to_checkpoint_dict() if include_plan else None,
+        "history": [{"role": "user", "content": "原始问题"}],
+        "config": _loop_cfg().to_dict(),
+        "run": {"execution_mode": "dag", "replan_attempts": 0, "replan_feedback": ""},
+        "partial_output": "",
+    }
+
+
+class _StubResumeLoop:
+    last_kwargs: dict = {}
+
+    def __init__(self, *args, **kwargs):
+        self.cancel_check = None
+        self.paused_for_approval = False
+        self.paused_for_plan_approval = False
+        self.run_cancelled = False
+        self.run_failed = False
+        self.checkpoint_live = None
+
+    def _get_tools(self):
+        return []
+
+    async def run(self, query, *, task_id=None, resume=None, session_id=None,
+                  document_context=None, history=None):
+        _StubResumeLoop.last_kwargs = {
+            "document_context": document_context,
+            "resume": resume,
+            "task_id": task_id,
+        }
+        yield AgentEvent(type="done", content="")
+
+
+class TestResumeDocumentContext:
+    def test_snapshot_roundtrip_carries_document_context(self, caplog):
+        """快照字段：document_context 进 to_checkpoint_dict、from_checkpoint_dict
+        还原；值级漂移（非字符串）降级为空串并留 warning（与既有值级闸门同口径）。
+
+        变异点：快照不序列化该字段 → KeyError / 重建丢失 → 前两条断言红；
+        读侧不做类型闸门 → 坏值进运行态 → 降级断言红。
+        """
+        ctx = ExecutionContext(query="q")
+        ctx.document_context = DOC_CTX
+
+        data = ctx.to_checkpoint_dict()
+        assert data["document_context"] == DOC_CTX
+        assert ExecutionContext.from_checkpoint_dict(data).document_context == DOC_CTX
+
+        data["document_context"] = 123
+        with caplog.at_level(logging.WARNING):
+            degraded = ExecutionContext.from_checkpoint_dict(data)
+        assert degraded.document_context == "", "坏值绝不进入运行态（降级为无引用段）"
+        assert any("值级漂移" in r.message for r in caplog.records), "降级必须留痕"
+
+    async def test_resume_with_plan_delivers_document_context_to_executor(self):
+        """断流（有 plan）后 resume：executor 步骤提示词仍带引用段。
+
+        变异点：resume 链路不恢复/不透传 document_context → executor 系统提示词
+        无引用段 → 红；恢复后的 ctx 不回填 → 下一份快照丢引用段 → 尾断言红。
+        """
+        captured: list[list] = []
+
+        async def _create(*, messages=None, tools=None, **kwargs):
+            captured.append(messages)
+            msg = SimpleNamespace(content="结论", tool_calls=None, role="assistant")
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=msg, finish_reason="stop")],
+                usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2),
+            )
+
+        client = MagicMock()
+        client.chat.completions.create = _create
+        loop = PERAgentLoop(client, _loop_cfg(), organization_id=1, user_id=0)
+        loop.memory = _FakeMemory()
+        steps = [
+            PlanStep(id="s1", description="一", status="completed", result="R1"),
+            PlanStep(id="s2", description="二", dependencies=["s1"]),
+        ]
+        payload = _resume_payload(steps=steps, document_context=DOC_CTX)
+
+        events = [ev async for ev in loop.run("原始问题", task_id="t-1", resume=payload)]
+
+        assert any(ev.type == "done" for ev in events)
+        assert captured, "executor 步骤必须发起过 LLM 调用（前置条件）"
+        system_prompts = [
+            m["content"] for msgs in captured if msgs
+            for m in msgs if m.get("role") == "system"
+        ]
+        assert any("用户显式引用的知识库文档" in p for p in system_prompts), (
+            "断流快照恢复后，executor 步骤提示词必须仍带引用段"
+        )
+        assert loop.checkpoint_live["ctx"].document_context == DOC_CTX, (
+            "恢复后的运行态必须继续携带引用段（下一次快照不得丢失）"
+        )
+
+    async def test_resume_without_plan_delivers_document_context_to_planner(self):
+        """崩溃于规划阶段（快照无 plan）的 resume：planner 仍须看到引用段。
+
+        变异点：resume 的重规划路径不恢复 document_context → planner 的
+        memory_context 无引用段 → 红。
+        """
+        loop = PERAgentLoop(_capturing_client(), _loop_cfg(), organization_id=1, user_id=0)
+        loop.memory = _FakeMemory()
+        planner = _CapturingPlanner()
+        loop._planner = planner
+        payload = _resume_payload(steps=[], include_plan=False, document_context=DOC_CTX)
+
+        events = [ev async for ev in loop.run("原始问题", task_id="t-1", resume=payload)]
+
+        assert any(ev.type == "done" for ev in events)
+        assert planner.memory_contexts, "无 plan 的 resume 必须重跑规划阶段（前置条件）"
+        assert "用户显式引用的知识库文档" in planner.memory_contexts[0], (
+            "resume 重规划时 planner 必须看到引用段"
+        )
+
+    async def test_service_resume_chat_passes_snapshot_context_to_run(self, monkeypatch):
+        """service.resume_chat：从快照 ctx 取回 document_context 并透传给
+        agent.run（签名 + 调用点）。
+
+        变异点：resume_chat 不向 run 传 document_context → 桩记录为 None → 红。
+        """
+        payload = _resume_payload(
+            steps=[PlanStep(id="s1", description="一", status="completed", result="R1")],
+            document_context=DOC_CTX,
+        )
+        task = SimpleNamespace(organization_id=1, user_id=1)
+        monkeypatch.setattr(service_mod, "PERAgentLoop", _StubResumeLoop)
+        monkeypatch.setattr(
+            service_mod.checkpoint, "load_for_resume",
+            AsyncMock(return_value=(task, payload)),
+        )
+        monkeypatch.setattr(
+            service_mod.checkpoint, "mark_terminal", AsyncMock(return_value=True),
+        )
+        monkeypatch.setattr(service_mod, "notify_task_terminal", AsyncMock())
+
+        svc = AgentService(openai_client=MagicMock())
+        events = [ev async for ev in svc.resume_chat("t-1", user_id=1, claim=False)]
+
+        assert any(ev.type == "done" for ev in events)
+        assert _StubResumeLoop.last_kwargs["resume"] is payload
+        assert _StubResumeLoop.last_kwargs["document_context"] == DOC_CTX, (
+            "resume 必须把快照里的引用上下文透传给 agent.run"
+        )

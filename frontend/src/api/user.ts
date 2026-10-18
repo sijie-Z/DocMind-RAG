@@ -43,6 +43,7 @@ export interface UserProfileResponse {
   bio: string | null
   organization_id: number | null
   role: 'admin' | 'user'
+  is_superuser: boolean
   is_active: boolean
   created_at: string | null
   last_login_at: string | null
@@ -257,4 +258,34 @@ export const updateUserSettings = async (data: {
   preferences?: Record<string, unknown>
 }): Promise<AxiosResponse<ApiResponse<UserSettings>>> => {
   return request.put('/user/settings', data)
+}
+
+/** AI Provider 清单项（后端 user_settings.py _AVAILABLE_PROVIDERS 形状） */
+export interface ProviderDef {
+  id: string
+  name: string
+  base_url: string
+  models: string[]
+  requires_key: boolean
+}
+
+export interface ProviderCurrent {
+  provider: string
+  model: string
+  api_key?: string
+  base_url?: string
+}
+
+export interface ProvidersResponse {
+  success?: boolean
+  providers: ProviderDef[]
+  current?: ProviderCurrent | null
+}
+
+/**
+ * GET /user/settings/providers（request baseURL=/api/v1 → 完整路径
+ * /api/v1/user/settings/providers）。统一客户端负责鉴权头、401 刷新与错误提示。
+ */
+export const getUserSettingsProviders = async (): Promise<AxiosResponse<ProvidersResponse>> => {
+  return request.get('/user/settings/providers')
 }

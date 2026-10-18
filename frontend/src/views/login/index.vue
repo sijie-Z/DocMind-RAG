@@ -17,7 +17,10 @@
         </p>
       </div>
       <div class="relative z-10 text-slate-500 text-sm">
-        &copy; DocMind · 隐私 · 服务条款
+        &copy; DocMind ·
+        <a :href="PRIVACY_URL" class="hover:text-slate-300 hover:underline underline-offset-2 transition-colors">{{ t('login.privacy') }}</a>
+        ·
+        <a :href="TERMS_URL" class="hover:text-slate-300 hover:underline underline-offset-2 transition-colors">{{ t('login.terms') }}</a>
       </div>
       <!-- 装饰光晕 -->
       <div class="absolute -bottom-20 -right-20 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
@@ -150,6 +153,10 @@ const userStore = useUserStore()
 const { t } = useI18n()
 const demoMode = import.meta.env.VITE_DEMO_MODE
 
+// T13：法务页面真链接 —— 占位路由；正式法务页上线后仅需在此替换为实际站内路径或外链常量
+const PRIVACY_URL = '/privacy'
+const TERMS_URL = '/terms'
+
 const formRef = ref()
 const loading = ref(false)
 const isRegister = ref(route.name === 'Register')
@@ -191,7 +198,7 @@ const rules = computed(() => ({
   ],
   password: [
     { required: true, message: t('login.passwordPlaceholder'), trigger: 'blur' },
-    { min: 6, message: t('validation.passwordLength'), trigger: 'blur' }
+    { min: 8, message: t('validation.passwordLength'), trigger: 'blur' }
   ],
   email: isRegister.value ? [
     { required: true, message: t('login.emailPlaceholder'), trigger: 'blur' },

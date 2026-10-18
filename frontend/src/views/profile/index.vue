@@ -410,6 +410,9 @@
                         <template #header>{{ t('profile.aiProviderExpTitle') }}</template>
                         {{ t('profile.aiProviderExpDesc') }}
                       </n-alert>
+                      <n-alert v-if="providersLoadError" type="error" :bordered="false" class="text-xs">
+                        {{ t('profile.providerLoadFailed') }}
+                      </n-alert>
                       <div>
                         <div class="text-sm text-gray-500 mb-2">提供商</div>
                         <n-select v-model:value="providerForm.provider" :options="providerOptions" @update:value="onProviderChange" size="small" disabled />
@@ -508,7 +511,7 @@ const {
   goToRoute, themeOptions, languageOptions, handleLanguageChange, settingsForm,
   savingSettings, settingsSaveMessage, settingsSaveSuccess, providers, providerForm,
   providerOptions, currentProvider, currentModelOptions, currentProviderNeedsKey,
-  onProviderChange, loadProviders, settingsChanged, handleSaveSettings, updatingProfile,
+  providersLoadError, onProviderChange, loadProviders, settingsChanged, handleSaveSettings, updatingProfile,
   updatingPassword, storageChartRef, activityChartRef, initCharts, handleResize,
   generatingApiKey, revokingApiKey, editFormRef, passwordFormRef, editForm, passwordForm,
   apiKey, editFormRules, passwordFormRules, getApiBaseUrl, normalizeAvatarUrl,

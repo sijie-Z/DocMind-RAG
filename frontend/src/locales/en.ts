@@ -71,6 +71,9 @@ export default {
     apiKeyGenerated: 'API Key generated successfully',
     apiKeyRevoked: 'API Key revoked',
     apiKeyGenerateFailed: 'Generation failed',
+    apiKeyGenerateConfirm: 'Please keep the generated key safe. Generate a new key?',
+    apiKeyRegenerateConfirm: 'Regenerating immediately invalidates the old key; API calls using it will fail. Regenerate?',
+    apiKeyRevokeConfirm: 'Revoking immediately invalidates this key and cannot be undone. Revoke it?',
     validation: {
       nicknameLength: 'Nickname must be between 2-50 characters',
       phoneInvalid: 'Please enter a valid phone number',
@@ -104,6 +107,7 @@ export default {
     apiKeyRevokeFailed: 'Failed to revoke API Key',
     aiProviderExpTitle: 'Experimental · Not active yet',
     aiProviderExpDesc: 'Model choice is configured server-side (currently DeepSeek). The selection and API key here do not affect inference; saving is disabled to avoid confusion.',
+    providerLoadFailed: 'Failed to load AI provider configuration. Showing the default or last successfully loaded settings.',
   },
   users: {
     searchPlaceholder: 'Search users...',
@@ -307,7 +311,7 @@ export default {
   validation: {
     required: 'This field is required',
     email: 'Please enter a valid email address',
-    passwordLength: 'Password must be at least 6 characters',
+    passwordLength: 'Password must be at least 8 characters',
     passwordMismatch: 'Passwords do not match',
     usernameLength: 'Username must be at least 3 characters',
     emailInvalid: 'Invalid email format'
@@ -455,6 +459,65 @@ export default {
     demoDesc: 'Use demo account (guest / 123456)',
     loginFailed: 'Login failed',
     registerFailed: 'Registration failed',
+    privacy: 'Privacy',
+    terms: 'Terms of Service',
+  },
+  firsthome: {
+    nav: {
+      login: 'Log in',
+      trial: 'Try for Free',
+    },
+    enterWorkspace: 'Enter Workspace',
+    hero: {
+      badge: 'Enterprise AI Knowledge Base Platform',
+      titleLine1: 'Every document',
+      titleAccent: 'can talk',
+      desc: 'Anyone can write features; engineering is keeping them from silently breaking. Zero-tolerance evaluation gates in CI, 32 silent false successes eliminated, ratchets only shrink.',
+      ctaPrimary: 'Get Started Free',
+      ctaLogin: 'Already have an account? Log in',
+    },
+    stats: {
+      clauseHit: "ClauseHit{'@'}3/{'@'}5 (measured)",
+      cases: 'Retrieval evaluation cases · golden set',
+    },
+    steps: {
+      title: 'Build your knowledge base in three steps',
+      desc: 'From document upload to intelligent Q&A, simpler than ever',
+      upload: { title: 'Upload Documents', desc: 'Supports 13 formats including PDF, Word, Excel, Markdown and CSV, with drag-and-drop upload.' },
+      index: { title: 'Smart Indexing', desc: 'Documents are parsed and chunked automatically, vectorized into Elasticsearch, with second-level retrieval.' },
+      ask: { title: 'AI Q&A', desc: 'Ask in natural language; the Agent reasons in multiple steps and returns precise answers with source citations.' },
+    },
+    features: {
+      title: 'More than search — understanding',
+      desc: 'Enterprise-grade RAG architecture with Agent-driven reasoning',
+      hybrid: { title: 'Hybrid Retrieval', desc: 'Keyword BM25 + vector semantic search + RRF fusion to maximize recall precision.' },
+      agent: { title: 'Agent Reasoning', desc: 'PER three-stage reasoning (Plan-Execute-Reflect) with multi-step tool calls to break down complex questions.' },
+      stream: { title: 'Streaming Responses', desc: 'SSE real-time streaming output — answers while thinking, no waiting for the full result.' },
+      api: { title: 'Open API', desc: 'RESTful API + WebSocket dual channels, easy to integrate into your business systems.' },
+      security: { title: 'Enterprise Security', desc: 'JWT authentication, RBAC permissions, organization isolation and complete audit logs.' },
+      tenant: { title: 'Multi-Tenancy', desc: 'Organization-level data isolation: every team gets its own knowledge base and permission system.' },
+    },
+    terminal: {
+      title: 'Agent Autonomous Reasoning Engine',
+      desc: 'Multi-step reasoning, tool calls, citation tracing — watch AI think in real time',
+      demo: 'Demo Data',
+      query: '❯ Which product line grew fastest in the Q3 2025 sales data?',
+      callSearch: '⟳ Calling search_knowledge_base...',
+      result: '✓ Retrieved 5 sales reports',
+      callAnalyze: '⟳ Calling analyze_document...',
+      callCompare: '⟳ Calling compare_data...',
+      answerLabel: '▸ Answer',
+      answer: 'The enterprise cloud services product line grew fastest, driven mainly by private-deployment demand from financial industry customers.',
+      sources: '[1] Q3-sales-report.xlsx · [2] industry-analysis-finance.pdf',
+    },
+    cta: {
+      title: 'Ready to build your knowledge base?',
+      desc: 'Start for free with zero configuration. Upload your first document and experience AI-powered Q&A instantly.',
+      button: 'Get Started Free',
+    },
+    footer: {
+      copy: '© 2025 DocMind · Enterprise RAG Knowledge Base System',
+    },
   },
   menu: {
     home: 'Home',

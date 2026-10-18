@@ -14,6 +14,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import request, { clearDefaultAuth } from '../request'
 
+// 401 刷新失败会触发 userStore.logout()，其内部动态导入 router 做登录页跳转；
+// 本文件只测请求层，用最小桩隔离路由/布局模块装配。
+vi.mock('@/router', () => ({
+  default: { currentRoute: { value: { name: 'Dashboard' } }, push: vi.fn() },
+}))
+
 /** 每次请求看到的 config（按顺序） */
 let seen: Array<Record<string, any>> = []
 /** 让 adapter 按调用次数返回不同结果 */
@@ -114,9 +120,12 @@ describe('401 · 静默刷新与重放', () => {
 
     await expect(request.get('/documents')).rejects.toBeTruthy()
 
-    // 只发了原始那一次，没有重试
-    expect(seen).toHaveLength(1)
-    expect(localStorage.getItem('docmind_token')).toBeFalsy()
+    // 原请求没有重试；登出接线会额外发出一条 POST /auth/logout，本地凭证随后清空
+    await vi.waitFor(() => {
+      expect(seen.filter((entry) => entry.url === '/documents')).toHaveLength(1)
+      expect(seen.some((entry) => entry.url === '/auth/logout')).toBe(true)
+      expect(localStorage.getItem('docmind_token')).toBeFalsy()
+    })
   })
 
   it('刷新期间并发发出的请求会被挂起，刷新完成后一起重放', async () => {

@@ -30,7 +30,7 @@ from app.core.prometheus import (
 from app.rag.cache import RetrievalCache, SemanticCache
 from app.rag.context_compressor import compress_context_list
 from app.rag.context_window import build_rag_messages
-from app.rag.errors import RetrievalUnavailableError, is_timeout_error
+from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError, is_timeout_error
 from app.rag.metrics import RAGMetrics
 from app.rag.query_processor import (
     QueryComplexityClassifier,
@@ -412,8 +412,12 @@ class RAGPipeline:
            调用方可据此还原"引用型"占位符；模型自行新生成的 PII 占位符不还原。
         """
         if not self.openai_client:
-            yield "LLM未配置"
-            return
+            # 配置缺失 = 生成能力不可用，不是回答内容。此前 yield "LLM未配置"
+            # 会被上层当成正文逐字累加、落库并写记忆；改为抛出显式异常，
+            # 由聊天管线以 error 事件返回（不进入内容累加与落库路径）。
+            raise LLMNotConfiguredError(
+                "LLM 服务未配置（未设置 DEEPSEEK_API_KEY 或启用本地模型），无法生成回答"
+            )
 
         masking_enabled = enable_masking and getattr(settings, "ENABLE_PII_MASKING", False)
         from app.services.masking_service import masking_service
