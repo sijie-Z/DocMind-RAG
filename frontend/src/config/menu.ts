@@ -52,6 +52,7 @@ export const SIDEBAR_MENU_GROUPS: MenuGroupDef[] = [
     items: [
       { routeName: 'Users', i18nKey: 'menu.users', icon: 'people' },
       { routeName: 'Organizations', i18nKey: 'menu.organizations', icon: 'business' },
+      { routeName: 'OrganizationSettings', i18nKey: 'menu.organizationSettings', icon: 'settings' },
       { routeName: 'AuditLogs', i18nKey: 'menu.auditLogs', icon: 'document-text' },
       { routeName: 'Monitoring', i18nKey: 'menu.monitoring', icon: 'pulse' },
       { routeName: 'McpServers', i18nKey: 'menu.mcpServers', icon: 'server' },

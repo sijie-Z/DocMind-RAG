@@ -5,7 +5,7 @@ DocMind AI知识库系统 - 组织服务
 import logging
 from typing import Any, cast
 
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,6 +20,7 @@ from app.models.chat import ChatSession
 from app.models.document import Document
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.organization import Organization, user_organization
+from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
 from app.models.rbac import user_organization_role_association
 from app.models.scheduled_task import ScheduledTask
@@ -290,6 +291,29 @@ class OrganizationService:
                 user_organization_role_association.c.organization_id.in_(orgs_to_delete)
             )
         )
+        # B4：组织设置是组织的配置附属，不属于「需转移的工作数据」；显式清理，
+        # 不依赖 FK ondelete（迁移建库与 create_all 建库的 DDL 可能不同）。
+        # 旧 schema 冒烟测试（只建迁移相关表）可能还没有该表——先在同一连接内
+        # 探测再删（不能用 inspect：它会另开连接并回滚未提交事务）。
+        dialect = db.get_bind().dialect.name
+        if dialect == "mysql":
+            _exists_sql = (
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = DATABASE() AND table_name = 'organization_settings'"
+            )
+        elif dialect == "sqlite":
+            _exists_sql = (
+                "SELECT COUNT(*) FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'organization_settings'"
+            )
+        else:
+            _exists_sql = None
+        if _exists_sql and (await db.execute(text(_exists_sql))).scalar():
+            await db.execute(
+                delete(OrganizationSettings).where(
+                    OrganizationSettings.organization_id.in_(orgs_to_delete)
+                )
+            )
         await db.execute(
             delete(Organization).where(Organization.id.in_(orgs_to_delete))
         )

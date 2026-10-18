@@ -262,6 +262,9 @@ export default {
     strictModeTitle: '厳格モード',
     strictModeDesc: 'オンにすると、AI はアップロードしたドキュメントの内容に<span class="text-red-500 font-bold">完全に基づいて</span>回答し、グローバルなナレッジベースやその他の外部知識は<span class="text-red-500 font-bold">一切使用しません</span>。',
     privacyMode: 'プライバシーモード（機密情報を自動マスク）',
+    agentMode: 'Agent モード（詳細分析）',
+    agentRequiresSse: 'Agent モードは SSE ストリーミング固定です（転送スイッチはロック）',
+    orgPrivacyDisabled: '組織ポリシーによりプライバシーモードは無効です',
     sseMode: 'SSEモード（企業ファイアウォール対応）',
     sourcesLabel: '出典：',
     unknownDoc: '不明なドキュメント',
@@ -374,6 +377,18 @@ export default {
     seed: '初期テンプレートを作成',
     system: 'システム',
     custom: 'カスタム',
+    scope: {
+      system: 'システム',
+      organization: '組織',
+      personal: '個人'
+    },
+    scopeLabel: '適用範囲',
+    scopeHint: '組織テンプレートは組織メンバーに表示されます。個人テンプレートは自分のみ表示・自分のみに影響します',
+    activationToggle: '有効状態',
+    activationAdminOnly: '組織テンプレートを有効化できるのは組織管理者のみです',
+    activationSystemReadonly: 'システムテンプレートは読み取り専用です',
+    activationSuccess: '有効状態を更新しました',
+    activationFailed: '有効状態の更新に失敗しました',
     confirmDelete: 'このテンプレートを削除しますか？',
     form: {
       name: 'テンプレート名',
@@ -518,6 +533,7 @@ export default {
     prompts: 'プロンプト管理',
     users: 'ユーザー管理',
     organizations: '組織管理',
+    organizationSettings: '組織設定',
     personalSettings: '設定',
     logout: 'ログアウト',
     conversations: '対話履歴',
@@ -1004,5 +1020,51 @@ export default {
       title: '利用規約',
       description: 'このページは利用規約のプレースホルダーです。正式な全文は公開時にここへ掲載されます。'
     }
+  },
+  orgSettings: {
+    subtitle: '組織レベルの実行ポリシー：有効値・ソース・再起動要否を一覧表示し、変更はすべて監査されます',
+    noOrganization: '現在のアカウントには組織コンテキストがないため、組織設定を管理できません',
+    title: '設定項目',
+    fields: {
+      defaultProvider: 'デフォルト Provider',
+      defaultModel: 'デフォルトモデル',
+      retrievalTopK: '検索 top_k',
+      allowPrivacyMode: 'プライバシーモードを許可',
+      monthlyTokenQuota: '月間 Token クォータ',
+      toolWhitelist: 'ツールホワイトリスト'
+    },
+    providerPlaceholder: '空欄 = プラットフォーム既定値',
+    modelPlaceholder: '空欄 = プラットフォーム既定値',
+    allowPrivacyModeHint: 'オフにするとメンバーのプライバシースイッチが無効になります（組織ポリシー）',
+    toolWhitelistHint: '空欄 = 制限なし。強制適用は C4 SettingsService で実装予定です',
+    runtimeHint: 'Provider 参照・月間クォータ・ツールホワイトリストは保存値として有効値に表示されます。デフォルトモデルは現在 RAG 回答生成に適用されます。強制適用は C4 SettingsService で実装予定です（本ページは適用済みを装いません）。',
+    unlimited: '無制限',
+    reload: '再読み込み',
+    save: '保存',
+    effectiveTitle: '現在の有効値',
+    columns: { setting: '設定項目', value: '有効値', source: 'ソース', restart: '再起動' },
+    settingNames: {
+      defaultProvider: 'デフォルト Provider',
+      defaultModel: 'デフォルトモデル',
+      retrievalTopK: '検索 top_k',
+      allowPrivacyMode: 'プライバシーモード',
+      monthlyTokenQuota: '月間 Token クォータ',
+      toolWhitelist: 'ツールホワイトリスト'
+    },
+    sourceOrganization: '組織設定',
+    sourceDefault: 'プラットフォーム既定値',
+    restartRequired: '再起動が必要',
+    restartNotRequired: '即時反映',
+    notSet: '未設定',
+    enabled: 'オン',
+    disabled: 'オフ',
+    usage: '今月の使用量 {used} tokens；クォータ：{quota}',
+    auditTitle: '変更監査',
+    auditEmpty: '変更記録はありません',
+    auditColumns: { time: '日時', user: '実行者', detail: '変更内容' },
+    loadFailed: '組織設定の読み込みに失敗しました',
+    saveSuccess: '組織設定を保存しました',
+    saveFailed: '組織設定の保存に失敗しました',
+    noChanges: '保存する変更はありません'
   }
 };

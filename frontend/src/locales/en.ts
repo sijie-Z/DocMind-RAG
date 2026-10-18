@@ -284,6 +284,9 @@ export default {
     strictModeDesc: 'When enabled, AI will answer based <span class="text-red-500 font-bold">solely</span> on your uploaded documents, <span class="text-red-500 font-bold">without</span> using the global knowledge base or other external knowledge.',
     // Mode labels
     privacyMode: 'Privacy Mode (auto-mask sensitive info)',
+    agentMode: 'Agent Mode (deep analysis)',
+    agentRequiresSse: 'Agent Mode always uses SSE streaming (transport switch locked)',
+    orgPrivacyDisabled: 'Privacy Mode is disabled by organization policy',
     sseMode: 'SSE Mode (enterprise firewall compatible)',
     // Message sources
     sourcesLabel: 'Sources:',
@@ -425,6 +428,18 @@ export default {
     seed: 'Initialize Defaults',
     system: 'System',
     custom: 'Custom',
+    scope: {
+      system: 'System',
+      organization: 'Organization',
+      personal: 'Personal'
+    },
+    scopeLabel: 'Scope',
+    scopeHint: 'Organization templates are visible to all members; personal templates are visible to you only and affect only you',
+    activationToggle: 'Active',
+    activationAdminOnly: 'Only organization admins can activate organization templates',
+    activationSystemReadonly: 'System templates are read-only',
+    activationSuccess: 'Activation state updated',
+    activationFailed: 'Failed to update activation state',
     confirmDelete: 'Are you sure you want to delete this template?',
     form: {
       name: 'Template Name',
@@ -570,6 +585,7 @@ export default {
     prompts: 'Prompt Management',
     users: 'User Management',
     organizations: 'Organizations',
+    organizationSettings: 'Organization Settings',
     personalSettings: 'Settings',
     logout: 'Logout',
     conversations: 'Conversations',
@@ -1077,5 +1093,51 @@ export default {
       title: 'Terms of Service',
       description: 'This page is a placeholder for the Terms of Service. The full text will be published here.'
     }
+  },
+  orgSettings: {
+    subtitle: 'Organization runtime policy: effective value, source and restart requirement at a glance; every change is audited',
+    noOrganization: 'Your account has no organization context, so organization settings cannot be managed',
+    title: 'Settings',
+    fields: {
+      defaultProvider: 'Default provider',
+      defaultModel: 'Default model',
+      retrievalTopK: 'Retrieval top_k',
+      allowPrivacyMode: 'Allow privacy mode',
+      monthlyTokenQuota: 'Monthly token quota',
+      toolWhitelist: 'Tool whitelist'
+    },
+    providerPlaceholder: 'Empty = platform default',
+    modelPlaceholder: 'Empty = platform default',
+    allowPrivacyModeHint: 'When off, members’ privacy switch is disabled (organization policy)',
+    toolWhitelistHint: 'Empty = unrestricted; enforcement lands with the C4 SettingsService',
+    runtimeHint: 'Provider reference, monthly quota and tool whitelist are stored and shown as effective values; the default model currently applies to RAG chat generation; enforcement lands with the C4 SettingsService (this page does not pretend they are enforced yet).',
+    unlimited: 'Unlimited',
+    reload: 'Reload',
+    save: 'Save',
+    effectiveTitle: 'Effective values',
+    columns: { setting: 'Setting', value: 'Effective value', source: 'Source', restart: 'Restart' },
+    settingNames: {
+      defaultProvider: 'Default provider',
+      defaultModel: 'Default model',
+      retrievalTopK: 'Retrieval top_k',
+      allowPrivacyMode: 'Privacy mode',
+      monthlyTokenQuota: 'Monthly token quota',
+      toolWhitelist: 'Tool whitelist'
+    },
+    sourceOrganization: 'Organization',
+    sourceDefault: 'Platform default',
+    restartRequired: 'Restart required',
+    restartNotRequired: 'Takes effect immediately',
+    notSet: 'Not set',
+    enabled: 'On',
+    disabled: 'Off',
+    usage: '{used} tokens used this month; quota: {quota}',
+    auditTitle: 'Change audit',
+    auditEmpty: 'No changes recorded',
+    auditColumns: { time: 'Time', user: 'Actor', detail: 'Changes' },
+    loadFailed: 'Failed to load organization settings',
+    saveSuccess: 'Organization settings saved',
+    saveFailed: 'Failed to save organization settings',
+    noChanges: 'No changes to save'
   }
 };

@@ -19,6 +19,7 @@ from app.api.v1.endpoints import (
     memory,
     monitoring,
     notifications,
+    organization_settings,
     organizations,
     prompts,
     scheduled_tasks,
@@ -39,6 +40,7 @@ api_router.include_router(documents.router, prefix="/documents", tags=["文档�
 api_router.include_router(chat.router, prefix="/chat", tags=["聊天"])
 api_router.include_router(knowledge.router, prefix="/knowledge", tags=["知识库"])
 api_router.include_router(organizations.router, prefix="/organizations", tags=["组织管理"])
+api_router.include_router(organization_settings.router, prefix="/organizations", tags=["组织设置"])
 api_router.include_router(monitoring.router, prefix="/monitoring", tags=["系统监控"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["通知管理"])
 api_router.include_router(prompts.router, prefix="/prompts", tags=["提示词管理"])

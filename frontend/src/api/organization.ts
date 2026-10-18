@@ -101,3 +101,63 @@ export const removeOrganizationMember = async (orgId: number, userId: number): P
 export const getOrganizationDocuments = async (id: number): Promise<AxiosResponse<{ data: OrganizationDocument[] }>> => {
   return request.get(`/organizations/${id}/documents`)
 }
+
+// ---- B4：组织设置（D5）----
+
+export type OrganizationSettingSource = 'organization' | 'default'
+
+export interface EffectiveOrganizationSetting {
+  value: unknown
+  source: OrganizationSettingSource
+  requires_restart: boolean
+}
+
+export interface OrganizationSettingsUsage {
+  month_tokens: number
+  monthly_token_quota: number | null
+}
+
+export interface OrganizationSettingsResponse {
+  organization_id: number
+  settings: Record<string, EffectiveOrganizationSetting>
+  usage: OrganizationSettingsUsage
+}
+
+export interface OrganizationSettingsUpdatePayload {
+  default_provider?: string | null
+  default_model?: string | null
+  retrieval_top_k?: number | null
+  allow_privacy_mode?: boolean | null
+  monthly_token_quota?: number | null
+  tool_whitelist?: string[] | null
+}
+
+export interface OrganizationSettingsAuditItem {
+  id: number
+  user_id: number
+  username?: string | null
+  action: string
+  target_type?: string | null
+  target_id?: string | null
+  detail?: string | null
+  created_at?: string | null
+}
+
+export const getOrganizationSettings = async (
+  id: number,
+): Promise<AxiosResponse<OrganizationSettingsResponse>> => {
+  return request.get(`/organizations/${id}/settings`)
+}
+
+export const updateOrganizationSettings = async (
+  id: number,
+  data: OrganizationSettingsUpdatePayload,
+): Promise<AxiosResponse<OrganizationSettingsResponse>> => {
+  return request.put(`/organizations/${id}/settings`, data)
+}
+
+export const getOrganizationSettingsAudit = async (
+  id: number,
+): Promise<AxiosResponse<{ items: OrganizationSettingsAuditItem[] }>> => {
+  return request.get(`/organizations/${id}/settings/audit`)
+}

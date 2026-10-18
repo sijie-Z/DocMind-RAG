@@ -402,6 +402,7 @@ class RAGPipeline:
         enable_compression: bool = True,
         enable_masking: bool = True,
         mask_mapping_sink: dict | None = None,
+        model_override: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream LLM response with context compression and optional PII masking.
 
@@ -514,7 +515,11 @@ class RAGPipeline:
 
         llm_start = time.perf_counter()
         try:
-            model = settings.LOCAL_LLM_MODEL if settings.ENABLE_LOCAL_LLM else settings.DEEPSEEK_MODEL
+            # B4（D5）：组织设置的默认模型经 model_override 透传；未设置时保持
+            # 进程级 Settings 的既有选择语义（本地/DeepSeek）。
+            model = model_override or (
+                settings.LOCAL_LLM_MODEL if settings.ENABLE_LOCAL_LLM else settings.DEEPSEEK_MODEL
+            )
             stream = await self.openai_client.chat.completions.create(
                 model=model, messages=messages, stream=True,
                 temperature=0.1, max_tokens=settings.AI_MAX_TOKENS,

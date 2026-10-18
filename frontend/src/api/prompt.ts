@@ -8,6 +8,8 @@ export interface PromptTemplate {
   description?: string
   is_active: boolean
   is_system: boolean
+  // B4（D6）：system / organization / personal
+  scope?: 'system' | 'organization' | 'personal'
   category: string
   version?: number
   created_at: string

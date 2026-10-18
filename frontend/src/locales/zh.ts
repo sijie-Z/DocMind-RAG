@@ -289,6 +289,9 @@ export default {
     strictModeDesc: '开启后，AI 将 <span class="text-red-500 font-bold">完全基于</span> 你上传的文档内容回答，<span class="text-red-500 font-bold">不会</span> 使用全局知识库或其他外部知识。',
     // Mode labels
     privacyMode: '隐私模式 (自动脱敏敏感信息)',
+    agentMode: 'Agent 模式 (深度分析)',
+    agentRequiresSse: 'Agent 模式固定使用 SSE 流式传输（传输开关已锁定）',
+    orgPrivacyDisabled: '组织策略已禁用隐私模式',
     sseMode: 'SSE模式 (企业防火墙兼容)',
     // Message sources
     sourcesLabel: '来源引用：',
@@ -433,6 +436,18 @@ export default {
     seed: '初始化默认模板',
     system: '系统',
     custom: '自定义',
+    scope: {
+      system: '系统',
+      organization: '组织',
+      personal: '个人'
+    },
+    scopeLabel: '适用范围',
+    scopeHint: '组织模板对组织成员可见；个人模板仅自己可见、仅影响自己',
+    activationToggle: '激活状态',
+    activationAdminOnly: '只有组织管理员可以激活组织模板',
+    activationSystemReadonly: '系统模板为只读',
+    activationSuccess: '激活状态已更新',
+    activationFailed: '激活状态更新失败',
     confirmDelete: '确定要删除这个模板吗？',
     form: {
       name: '模板名称',
@@ -576,6 +591,7 @@ export default {
     prompts: '提示词管理',
     search: '语义搜索',
     organizations: '组织架构',
+    organizationSettings: '组织设置',
     conversations: '历史记录',
     users: '用户管理',
     personalSettings: '个人设置',
@@ -1085,5 +1101,51 @@ export default {
       title: '服务条款',
       description: '本页为服务条款占位页，完整条款将在正式上线时在此发布。'
     }
+  },
+  orgSettings: {
+    subtitle: '组织级运行策略：生效值、来源与是否需重启一目了然，变更全部写审计',
+    noOrganization: '当前账号没有组织上下文，无法管理组织设置',
+    title: '设定项',
+    fields: {
+      defaultProvider: '默认 Provider',
+      defaultModel: '默认模型',
+      retrievalTopK: '检索 top_k',
+      allowPrivacyMode: '允许隐私模式',
+      monthlyTokenQuota: '月度 Token 配额',
+      toolWhitelist: '工具白名单'
+    },
+    providerPlaceholder: '留空 = 平台默认',
+    modelPlaceholder: '留空 = 平台默认',
+    allowPrivacyModeHint: '关闭后成员的隐私开关置灰（组织策略）',
+    toolWhitelistHint: '留空 = 不限制；白名单强制执行随 C4 SettingsService 落地',
+    runtimeHint: 'Provider 引用、月度配额与工具白名单当前为存储值并参与生效值展示；默认模型当前作用于 RAG 问答生成；强制执行随 C4 SettingsService 落地（本页不伪装已拦截）。',
+    unlimited: '不限额',
+    reload: '刷新',
+    save: '保存',
+    effectiveTitle: '当前生效值',
+    columns: { setting: '设定项', value: '生效值', source: '来源', restart: '是否需重启' },
+    settingNames: {
+      defaultProvider: '默认 Provider',
+      defaultModel: '默认模型',
+      retrievalTopK: '检索 top_k',
+      allowPrivacyMode: '隐私模式',
+      monthlyTokenQuota: '月度 Token 配额',
+      toolWhitelist: '工具白名单'
+    },
+    sourceOrganization: '组织设置',
+    sourceDefault: '平台默认',
+    restartRequired: '需重启',
+    restartNotRequired: '即时生效',
+    notSet: '未设置',
+    enabled: '开启',
+    disabled: '关闭',
+    usage: '本月已用 {used} tokens；配额：{quota}',
+    auditTitle: '变更审计',
+    auditEmpty: '暂无变更记录',
+    auditColumns: { time: '时间', user: '操作人', detail: '变更' },
+    loadFailed: '加载组织设置失败',
+    saveSuccess: '组织设置已保存',
+    saveFailed: '保存组织设置失败',
+    noChanges: '没有需要保存的变更'
   }
 };

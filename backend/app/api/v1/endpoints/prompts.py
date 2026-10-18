@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_organization
-from app.exceptions import AuthorizationError, ConflictError, NotFoundError
+from app.exceptions import (
+    AuthorizationError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
 from app.models.prompt import PromptTemplate
 from app.models.prompt_version import PromptTemplateVersion
 from app.models.user import User
@@ -30,20 +35,33 @@ async def _resolve_prompt_org(current_user: User, db: AsyncSession) -> int | Non
 
 
 def _scope_prompt_query(stmt, current_user: User, org_id: int | None):
-    """租户边界（A2 P0）：本组织模板 + 系统内置模板（organization_id IS NULL）。
+    """租户边界（A2）+ 三层可见性（B4/D6）。
 
-    只有 **is_system=True** 的 NULL 行才是全组织可见的系统模板。迁移无法回填
-    归属的历史非系统行（organization_id IS NULL, is_system=False）不在此列：
-    它们只对超管可见（隔离），绝不再被所有租户当成系统模板读取。
+    - 系统模板：``is_system=True AND organization_id IS NULL``，全组织只读可见；
+    - 组织模板：``organization_id == 本组织 AND scope='organization'``，成员可见；
+    - 个人模板：``organization_id == 本组织 AND scope='personal'
+      AND creator_id == 当前用户``，仅创建者可见（只影响自己）。
+
+    迁移无法回填归属的历史非系统行（organization_id IS NULL, is_system=False）
+    不在此列：它们只对超管可见（隔离），绝不再被所有租户当成系统模板读取。
     """
     if current_user.is_superuser:
         return stmt
     return stmt.where(
         or_(
-            PromptTemplate.organization_id == org_id,
             and_(
                 PromptTemplate.is_system.is_(True),
                 PromptTemplate.organization_id.is_(None),
+            ),
+            and_(
+                PromptTemplate.organization_id == org_id,
+                or_(
+                    PromptTemplate.scope == "organization",
+                    and_(
+                        PromptTemplate.scope == "personal",
+                        PromptTemplate.creator_id == current_user.id,
+                    ),
+                ),
             ),
         )
     )
@@ -68,17 +86,32 @@ async def _load_prompt_in_scope(
 
 
 def _ensure_prompt_writable(current_user: User, db_prompt: PromptTemplate) -> None:
-    """系统内置模板只读；其余需创建者或组织管理员（组织边界由 _load_prompt_in_scope 保证）。
+    """按层级校验写权限（组织边界由 _load_prompt_in_scope 保证）。
 
-    历史孤儿行（organization_id=NULL 且 is_system=False）只对超管可见：
-    超管可删除/修正，普通用户不可达（读侧已隔离）。
+    - 系统模板：只读；
+    - 个人模板：仅创建者（超管可修正）；
+    - 组织模板：创建者或组织管理员。
     """
-    if db_prompt.is_system:
+    if db_prompt.is_system or db_prompt.scope == "system":
         raise AuthorizationError(detail="系统内置模板为只读，不允许修改或删除")
     if current_user.is_superuser:
         return
     if db_prompt.organization_id is None:
+        # 历史孤儿行（organization_id=NULL 且非系统）：仅超管可达。
         raise AuthorizationError(detail="无权修改此模板")
+    if db_prompt.scope == "personal":
+        if db_prompt.creator_id != current_user.id:
+            raise AuthorizationError(detail="个人模板仅创建者可修改")
+        return
+    # B4（D6 评审 B4-02）：组织模板一旦被管理员激活，就成为全组织运行配置；
+    # 非管理员（即使创建者）不得再改内容/名称/描述或删除/回滚，避免绕过
+    # 「管理员激活」门改动线上提示词。草稿态（is_active=False）仍由创建者维护。
+    if db_prompt.scope == "organization" and db_prompt.is_active:
+        if current_user.role != "admin":
+            raise AuthorizationError(
+                detail="组织模板激活后仅组织管理员可修改、删除或回滚"
+            )
+        return
     if db_prompt.creator_id != current_user.id and current_user.role != "admin":
         raise AuthorizationError(detail="无权修改此模板")
 
@@ -107,8 +140,17 @@ async def create_prompt(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """创建新的提示词模板（落在调用者组织；客户端不得伪造系统模板）"""
+    """创建新的提示词模板（落在调用者组织；客户端不得伪造系统模板）
+
+    B4（D6）：``scope`` 只接受 organization（默认）/ personal；
+    personal 模板仅创建者可见、可激活（只影响自己）。
+    """
     org_id = await require_organization(current_user, db)
+    requested_scope = (prompt_in.scope or "organization").strip().lower()
+    if requested_scope == "system":
+        raise AuthorizationError(detail="系统内置模板只能由系统初始化写入")
+    if requested_scope not in ("organization", "personal"):
+        raise ValidationError("模板层级非法：仅支持 organization / personal")
     # 重名检查按「可见范围」：本组织模板 + 系统内置模板；其他组织的同名模板不冲突。
     existing_prompt = await db.execute(
         select(PromptTemplate).filter(
@@ -124,8 +166,17 @@ async def create_prompt(
 
     data = prompt_in.model_dump()
     # 安全加固（A2）：is_system 只能由 seed 端点（管理员）写入；
-    # 普通创建一律为组织私有模板，防止伪造全组织可见的「系统模板」。
+    # 普通创建一律为组织/个人模板，防止伪造全组织可见的「系统模板」。
     data["is_system"] = False
+    data["scope"] = requested_scope
+    # B4（D6）：组织模板的激活是组织管理员动作。普通创建者若可「创建即激活」，
+    # 就绕过了管理员激活门与审计——统一落草稿（is_active=False），由管理员激活。
+    creator_can_activate_org = (
+        bool(getattr(current_user, "is_superuser", False))
+        or current_user.role == "admin"
+    )
+    if requested_scope == "organization" and not creator_can_activate_org:
+        data["is_active"] = False
     db_prompt = PromptTemplate(
         **data,
         organization_id=org_id,
@@ -149,6 +200,16 @@ async def create_prompt(
     db.add(version)
     await db.commit()
 
+    # 「激活即审计」：管理员创建即激活的组织模板同样是一次激活动作。
+    if requested_scope == "organization" and db_prompt.is_active:
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="activate_prompt",
+            target_type="prompt_template",
+            target_id=str(db_prompt.id),
+            detail=f"创建并激活组织提示词模板《{db_prompt.name}》（organization）",
+        )
+
     return db_prompt
 
 
@@ -166,15 +227,22 @@ async def update_prompt(
 
     update_data = prompt_in.model_dump(exclude_unset=True, exclude={"change_note"})
 
-    # 安全加固（A2）：激活/停用是管理员操作，且必须审计。
+    # 安全加固（A2）+ B4（D6）：激活/停用必须审计；
+    # 组织模板仅组织管理员可切换；个人模板由创建者自己切换（只影响自己）。
     # 前端编辑表单会回传未变化的 is_active，因此只在值真正变化时触发。
     is_active_change = (
         "is_active" in update_data
         and update_data["is_active"] is not None
         and update_data["is_active"] != db_prompt.is_active
     )
-    if is_active_change and not current_user.is_superuser and current_user.role != "admin":
-        raise AuthorizationError(detail="激活或停用提示词模板需要管理员权限")
+    if is_active_change:
+        if current_user.is_superuser:
+            pass
+        elif db_prompt.scope == "personal":
+            if db_prompt.creator_id != current_user.id:
+                raise AuthorizationError(detail="个人模板仅创建者可激活")
+        elif current_user.role != "admin":
+            raise AuthorizationError(detail="激活或停用组织模板需要管理员权限")
 
     # Snapshot current state as a version BEFORE applying changes
     old_version = PromptTemplateVersion(
@@ -206,7 +274,10 @@ async def update_prompt(
             action="activate_prompt" if activated else "deactivate_prompt",
             target_type="prompt_template",
             target_id=str(db_prompt.id),
-            detail=f"{'激活' if activated else '停用'}提示词模板《{db_prompt.name}》",
+            detail=(
+                f"{'激活' if activated else '停用'}提示词模板《{db_prompt.name}》"
+                f"（{db_prompt.scope}）"
+            ),
             db=db,
         )
     return db_prompt
@@ -369,6 +440,7 @@ async def seed_default_prompts(
             db_p = PromptTemplate(
                 **p,
                 organization_id=None,  # 系统内置：全组织只读可见
+                scope="system",  # B4（D6）：三层语义的显式标记
                 creator_id=current_user.id,
                 version=1,
             )

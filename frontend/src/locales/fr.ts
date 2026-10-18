@@ -262,6 +262,9 @@ export default {
     strictModeTitle: 'Mode strict',
     strictModeDesc: 'Une fois activé, l\'IA répond <span class="text-red-500 font-bold">uniquement</span> à partir du contenu de vos documents importés, <span class="text-red-500 font-bold">sans utiliser</span> la base de connaissances globale ni d\'autres connaissances externes.',
     privacyMode: 'Mode confidentialité (masquage automatique des données sensibles)',
+    agentMode: 'Mode Agent (analyse approfondie)',
+    agentRequiresSse: 'Le mode Agent utilise toujours le streaming SSE (transport verrouillé)',
+    orgPrivacyDisabled: 'Le mode confidentialité est désactivé par la politique de l’organisation',
     sseMode: 'Mode SSE (compatible pare-feu d\'entreprise)',
     sourcesLabel: 'Sources :',
     unknownDoc: 'Document inconnu',
@@ -374,6 +377,18 @@ export default {
     seed: 'Initialiser les modèles',
     system: 'Système',
     custom: 'Personnalisé',
+    scope: {
+      system: 'Système',
+      organization: 'Organisation',
+      personal: 'Personnel'
+    },
+    scopeLabel: 'Portée',
+    scopeHint: 'Les modèles d’organisation sont visibles par tous les membres ; les modèles personnels ne sont visibles que par vous et ne vous affectent que vous',
+    activationToggle: 'État d’activation',
+    activationAdminOnly: 'Seuls les administrateurs de l’organisation peuvent activer les modèles d’organisation',
+    activationSystemReadonly: 'Les modèles système sont en lecture seule',
+    activationSuccess: 'État d’activation mis à jour',
+    activationFailed: 'Échec de la mise à jour de l’état d’activation',
     confirmDelete: 'Voulez-vous supprimer ce modèle ?',
     form: {
       name: 'Nom du modèle',
@@ -518,6 +533,7 @@ export default {
     prompts: 'Gestion des prompts',
     users: 'Utilisateurs',
     organizations: 'Organisations',
+    organizationSettings: 'Paramètres de l’organisation',
     personalSettings: 'Paramètres',
     logout: 'Déconnexion',
     conversations: 'Conversations',
@@ -1004,5 +1020,51 @@ export default {
       title: 'Conditions d’utilisation',
       description: 'Cette page est un espace réservé pour les conditions d’utilisation. Le texte complet sera publié ici.'
     }
+  },
+  orgSettings: {
+    subtitle: 'Politique d’exécution de l’organisation : valeur effective, source et besoin de redémarrage en un coup d’œil ; chaque changement est audité',
+    noOrganization: 'Votre compte n’a pas de contexte d’organisation ; les paramètres ne peuvent pas être gérés',
+    title: 'Paramètres',
+    fields: {
+      defaultProvider: 'Fournisseur par défaut',
+      defaultModel: 'Modèle par défaut',
+      retrievalTopK: 'Top_k de recherche',
+      allowPrivacyMode: 'Autoriser le mode confidentialité',
+      monthlyTokenQuota: 'Quota mensuel de tokens',
+      toolWhitelist: 'Liste blanche d’outils'
+    },
+    providerPlaceholder: 'Vide = valeur par défaut de la plateforme',
+    modelPlaceholder: 'Vide = valeur par défaut de la plateforme',
+    allowPrivacyModeHint: 'Si désactivé, le commutateur de confidentialité des membres est grisé (politique de l’organisation)',
+    toolWhitelistHint: 'Vide = sans restriction ; l’application sera assurée par le SettingsService C4',
+    runtimeHint: 'La référence de fournisseur, le quota mensuel et la liste blanche d’outils sont stockés et affichés comme valeurs effectives ; le modèle par défaut s’applique actuellement à la génération RAG ; leur application sera assurée par le SettingsService C4 (cette page ne prétend pas qu’ils sont déjà appliqués).',
+    unlimited: 'Illimité',
+    reload: 'Recharger',
+    save: 'Enregistrer',
+    effectiveTitle: 'Valeurs effectives',
+    columns: { setting: 'Paramètre', value: 'Valeur effective', source: 'Source', restart: 'Redémarrage' },
+    settingNames: {
+      defaultProvider: 'Fournisseur par défaut',
+      defaultModel: 'Modèle par défaut',
+      retrievalTopK: 'Top_k de recherche',
+      allowPrivacyMode: 'Mode confidentialité',
+      monthlyTokenQuota: 'Quota mensuel de tokens',
+      toolWhitelist: 'Liste blanche d’outils'
+    },
+    sourceOrganization: 'Organisation',
+    sourceDefault: 'Défaut plateforme',
+    restartRequired: 'Redémarrage requis',
+    restartNotRequired: 'Effet immédiat',
+    notSet: 'Non défini',
+    enabled: 'Activé',
+    disabled: 'Désactivé',
+    usage: '{used} tokens utilisés ce mois-ci ; quota : {quota}',
+    auditTitle: 'Audit des changements',
+    auditEmpty: 'Aucun changement enregistré',
+    auditColumns: { time: 'Date', user: 'Auteur', detail: 'Changements' },
+    loadFailed: 'Échec du chargement des paramètres de l’organisation',
+    saveSuccess: 'Paramètres de l’organisation enregistrés',
+    saveFailed: 'Échec de l’enregistrement des paramètres',
+    noChanges: 'Aucun changement à enregistrer'
   }
 };

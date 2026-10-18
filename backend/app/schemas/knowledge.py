@@ -7,8 +7,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.core.config import settings
-
 
 class SearchMode(str, Enum):
     """搜索模式（本次请求强制采用的检索臂组合，issue #225）"""
@@ -21,12 +19,14 @@ class KnowledgeSearchRequest(BaseModel):
     """知识库搜索请求"""
     query: str = Field(..., min_length=1, description="搜索查询")
     organization_id: int = Field(..., description="组织ID")
-    # 默认值取自 settings.TOP_K_RESULTS（issue #242 接线：此前 README 承诺
-    # 「默认10」但字段零消费）。默认 10==10，行为保持；chat 链路默认 5 不受影响。
-    top_k: int = Field(
-        default_factory=lambda: settings.TOP_K_RESULTS,
+    # B4（D5）：显式值优先；缺省（None）时由端点解析「组织设置 > 平台默认
+    # settings.TOP_K_RESULTS=10」。此前的 default_factory 把 10 固化成请求
+    # 默认值，组织设置永远无法生效——改为 None 才能区分「用户没说」与
+    # 「用户明确要 10」（不改变既有默认语义：未设置组织值时仍是 10）。
+    top_k: int | None = Field(
+        default=None,
         ge=1, le=50,
-        description="返回结果数量",
+        description="返回结果数量；缺省 = 组织设置，组织未设置时为平台默认 10",
     )
     # issue #225 决策 7A：None = 自动路由（系统按查询复杂度选策略，缺省行为）；
     # 显式取值强制本次请求的检索臂组合（hybrid=两臂融合 / vector=仅向量臂 /
