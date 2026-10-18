@@ -214,6 +214,11 @@ export default {
     noHistory: 'No history',
     backToBottom: 'Back to latest',
     stopGenerating: 'Stop generating',
+    // E7 state visibility: history loading / thinking / stopped
+    loadingHistory: 'Loading conversation history...',
+    thinkingLabel: 'Thinking process',
+    generationStopped: 'Stopped',
+    stoppedHint: 'You can continue asking questions or regenerate the answer',
     suggestions: {
       quantum: 'Explain quantum computing',
       quantumDesc: 'Explain the basic principles in simple terms',
@@ -363,6 +368,9 @@ export default {
     uploadList: 'Task List',
     noActiveTasks: 'No active tasks',
     clearFinished: 'Clear finished tasks',
+    cancelUpload: 'Cancel upload',
+    removeFromList: 'Remove from list',
+    uploadCancelled: 'Upload canceled',
     table: {
       name: 'File Name',
       size: 'Size',
@@ -442,7 +450,16 @@ export default {
     },
     backToHome: 'Back to Home',
     backToWorkbench: 'Go to Dashboard',
-    back: 'Go Back'
+    back: 'Go Back',
+    serviceUnavailable: {
+      title: 'Service Temporarily Unavailable',
+      subtitle: 'Cannot reach the server. Please try again later. You are still signed in.',
+      retry: 'Retry'
+    },
+    offlineBanner: {
+      message: 'Service temporarily unavailable; showing locally cached data',
+      retry: 'Retry'
+    }
   },
   login: {
     welcomeBack: 'Welcome Back',
@@ -699,6 +716,22 @@ export default {
   },
   workflow: {
     description: 'Break complex AI tasks into staged pipelines with unified metrics and state management.',
+    editor: {
+      clearConfirmTitle: 'Clear canvas',
+      clearConfirmContent: 'After clearing, auto-save will write the empty canvas back within {n} seconds and overwrite the saved version. Clear the canvas?',
+      clearConfirmPositive: 'Clear',
+      clearConfirmNegative: 'Cancel',
+      emptyCanvasAutoSaveBlocked: 'The canvas is empty, so auto-save was skipped to protect the saved version. To save an empty canvas, click "Save" manually.',
+      saveSuccess: 'Workflow saved',
+      saveFailed: 'Save failed',
+      autoSaveFailed: 'Auto-save failed; your changes are not saved. Click the save status to retry.',
+      saveStatusUnsaved: 'Unsaved',
+      saveStatusSaving: 'Saving',
+      saveStatusSaved: 'Saved',
+      saveStatusError: 'Save failed',
+      saveRetry: 'Retry',
+      saveRetryHint: 'Save failed — click to retry',
+    },
   },
   notifications: {
     markAllRead: 'Mark all read',
@@ -878,6 +911,8 @@ export default {
       query: 'Input',
       error: 'Last error',
       unavailable: 'Result unavailable (task missing or not visible to you)',
+      refresh: 'Refresh result',
+      refreshed: 'Result refreshed',
       taskState: {
         pending: 'Pending',
         running: 'Running',
@@ -976,6 +1011,7 @@ export default {
   },
   router: {
     notFound: 'Page Not Found',
+    serviceUnavailable: 'Service Temporarily Unavailable',
     welcome: 'Welcome',
     login: 'Login',
     register: 'Register',

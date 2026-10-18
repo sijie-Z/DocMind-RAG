@@ -1,23 +1,23 @@
 <template>
   <div class="admin-dashboard p-4 md:p-6 space-y-5">
-    <!-- 三态：加载中 / 加载失败（可重试）/ 内容 -->
-    <div v-if="loading" class="flex items-center justify-center py-24">
-      <n-spin size="large" />
+    <!-- 分块加载：KPI 卡 / 图表 / 表格各自骨架；哪块数据先到就先替换哪块，互不阻塞 -->
+    <!-- 顶部统计卡片 - 渐变背景（摘要数据未到 → 整排骨架） -->
+    <div v-if="summaryState === 'loading'" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3" data-testid="kpi-skeleton">
+      <div v-for="i in 6" :key="i" class="bg-gray-100 dark:bg-gray-800 rounded-xl p-4 min-h-[108px]">
+        <n-skeleton text style="width: 55%" />
+        <n-skeleton text style="width: 75%; margin-top: 16px" />
+        <n-skeleton text style="width: 45%; margin-top: 8px" />
+      </div>
     </div>
-    <n-result
-      v-else-if="loadFailed"
-      status="error"
-      class="py-16"
-      :title="t('dashboard.loadFailed')"
-      :description="t('dashboard.loadFailedDesc')"
+    <div
+      v-else-if="summaryState === 'error'"
+      class="flex flex-col items-center justify-center gap-3 py-10 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700"
+      data-testid="kpi-error"
     >
-      <template #footer>
-        <n-button type="primary" @click="loadData">{{ t('dashboard.retry') }}</n-button>
-      </template>
-    </n-result>
-    <template v-else>
-    <!-- 顶部统计卡片 - 渐变背景 -->
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+      <n-button size="small" @click="loadSummary">{{ t('dashboard.retry') }}</n-button>
+    </div>
+    <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
       <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg shadow-blue-500/20">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-100">{{ t('dashboard.totalUsers') }}</span>
@@ -84,9 +84,13 @@
             <n-icon size="18" class="text-white"><GitNetworkOutline /></n-icon>
           </div>
         </div>
-        <p class="text-2xl font-bold">{{ adminStats.totalRequests.toLocaleString() }}</p>
+        <p class="text-2xl font-bold">
+          <n-skeleton v-if="llmState === 'loading'" text style="width: 64px" />
+          <template v-else>{{ llmStats.requestCountToday.toLocaleString() }}</template>
+        </p>
         <div class="flex items-center gap-1 mt-1 text-xs text-cyan-200">
-          <span>平均 {{ llmStats.avgLatency || 0 }}ms</span>
+          <n-skeleton v-if="llmState === 'loading'" text style="width: 80px" />
+          <span v-else>平均 {{ llmStats.avgLatency || 0 }}ms</span>
         </div>
       </div>
 
@@ -98,12 +102,16 @@
           </div>
         </div>
         <div class="mt-3">
-          <n-tag :type="!healthLoaded ? 'default' : adminStats.systemHealthy ? 'success' : 'error'" size="small" round>
-            {{ !healthLoaded ? '—' : adminStats.systemHealthy ? t('dashboard.healthy') : t('dashboard.unhealthy') }}
+          <n-skeleton v-if="healthState === 'loading'" text style="width: 48px" />
+          <n-tag v-else :type="healthState === 'ready' ? (systemHealthy ? 'success' : 'error') : 'default'" size="small" round>
+            {{ healthState === 'ready' ? (systemHealthy ? t('dashboard.healthy') : t('dashboard.unhealthy')) : '—' }}
           </n-tag>
         </div>
         <div class="flex items-center gap-1 mt-2 text-xs text-gray-300">
-          <span>ES: {{ adminStats.esHealth || '—' }}</span>
+          <span>ES: {{ healthState === 'ready' ? esHealth : '—' }}</span>
+          <n-button v-if="healthState === 'error'" text size="tiny" class="text-gray-200" @click="loadHealth">
+            {{ t('dashboard.retry') }}
+          </n-button>
         </div>
       </div>
     </div>
@@ -130,7 +138,22 @@
             <span class="text-xs text-gray-400">{{ new Date().toLocaleDateString() }}</span>
           </div>
         </div>
-        <div class="p-5">
+        <div v-if="llmState === 'loading'" class="p-5" data-testid="llm-skeleton">
+          <div class="grid grid-cols-2 gap-4 mb-5">
+            <div v-for="i in 4" :key="i" class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
+              <n-skeleton text style="width: 55%" size="small" />
+              <n-skeleton text style="width: 70%; margin-top: 10px" />
+            </div>
+          </div>
+          <n-skeleton height="176px" />
+        </div>
+        <div v-else-if="llmState === 'error'" class="p-5" data-testid="llm-error">
+          <div class="flex flex-col items-center justify-center gap-3 py-10">
+            <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+            <n-button size="small" @click="loadLLM">{{ t('dashboard.retry') }}</n-button>
+          </div>
+        </div>
+        <div v-else class="p-5">
           <!-- 统计数据 -->
           <div class="grid grid-cols-2 gap-4 mb-5">
             <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
@@ -194,7 +217,29 @@
             </n-tag>
           </div>
         </div>
-        <div class="p-5">
+        <div v-if="ragState === 'loading'" class="p-5" data-testid="rag-skeleton">
+          <div class="flex items-center gap-4 mb-5">
+            <div class="flex-1">
+              <n-skeleton text style="width: 30%" size="small" />
+              <n-skeleton height="20px" style="margin-top: 12px" />
+            </div>
+            <n-skeleton text style="width: 64px" />
+          </div>
+          <div class="grid grid-cols-3 gap-3 mb-5">
+            <div v-for="i in 3" :key="i" class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
+              <n-skeleton text style="width: 70%" size="small" />
+              <n-skeleton text style="width: 50%; margin-top: 8px" />
+            </div>
+          </div>
+          <n-skeleton height="112px" />
+        </div>
+        <div v-else-if="ragState === 'error'" class="p-5" data-testid="rag-error">
+          <div class="flex flex-col items-center justify-center gap-3 py-10">
+            <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+            <n-button size="small" data-testid="rag-retry" @click="loadRAG">{{ t('dashboard.retry') }}</n-button>
+          </div>
+        </div>
+        <div v-else class="p-5">
           <!-- 命中率主指标 -->
           <div class="flex items-center gap-4 mb-5">
             <div class="flex-1">
@@ -255,6 +300,22 @@
         </n-button>
       </div>
       <div class="p-5">
+        <div v-if="orgState === 'loading'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3" data-testid="org-skeleton">
+          <div v-for="i in 4" :key="i" class="p-4 rounded-xl bg-gray-50 dark:bg-gray-700/30">
+            <div class="flex items-center gap-3">
+              <n-skeleton circle width="40px" height="40px" />
+              <div class="flex-1 min-w-0">
+                <n-skeleton text style="width: 70%" />
+                <n-skeleton text style="width: 45%; margin-top: 6px" size="small" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="orgState === 'error'" class="flex flex-col items-center justify-center gap-3 py-10" data-testid="org-error">
+          <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+          <n-button size="small" @click="loadOrg">{{ t('dashboard.retry') }}</n-button>
+        </div>
+        <template v-else>
         <div v-if="orgList.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           <div
             v-for="(org, idx) in orgList"
@@ -286,6 +347,7 @@
           </div>
         </div>
         <n-empty v-else :description="t('common.noData')" />
+        </template>
       </div>
     </div>
 
@@ -307,7 +369,15 @@
         </n-button>
       </div>
       <div class="p-5">
+        <div v-if="auditState === 'loading'" class="space-y-3" data-testid="audit-skeleton">
+          <n-skeleton v-for="i in 6" :key="i" text />
+        </div>
+        <div v-else-if="auditState === 'error'" class="flex flex-col items-center justify-center gap-3 py-10" data-testid="audit-error">
+          <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+          <n-button size="small" @click="loadAudit">{{ t('dashboard.retry') }}</n-button>
+        </div>
         <n-data-table
+          v-else
           :columns="auditColumns"
           :data="recentLogs"
           :bordered="false"
@@ -337,7 +407,6 @@
         {{ t('menu.auditLogs') }}
       </n-button>
     </div>
-    </template>
   </div>
 </template>
 
@@ -347,6 +416,7 @@ import { useI18n } from 'vue-i18n'
 import { NTag } from 'naive-ui'
 import { getAuditLogs, type AuditLogEntry } from '@/api/user'
 import { getLLMStats, getRAGStats, getAdminSummary, getOrgSummary, getMonitoringHealth, type OrgSummary } from '@/api/monitoring'
+import { FIRST_SCREEN_REQUEST_CONFIG } from '@/utils/request'
 import { formatDate } from '@/utils/format'
 import { CHART_COLORS } from '@/utils/chartTheme'
 import {
@@ -359,23 +429,32 @@ import type { EChartsType } from 'echarts/core'
 
 const { t } = useI18n()
 
+/**
+ * 分块加载状态：'loading' 骨架 / 'ready' 内容 / 'error' 区块错误态 + 重试。
+ * 每个区块只依赖自己那路请求 —— 慢接口不会把整屏锁在 spinner 上。
+ */
+type BlockState = 'loading' | 'ready' | 'error'
+const summaryState = ref<BlockState>('loading')
+const healthState = ref<BlockState>('loading')
+const llmState = ref<BlockState>('loading')
+const ragState = ref<BlockState>('loading')
+const orgState = ref<BlockState>('loading')
+const auditState = ref<BlockState>('loading')
+
 const adminStats = ref({
   totalUsers: 0,
   totalSessions: 0,
   totalDocs: 0,
   totalOrgs: 0,
   activeUsers: 0,
-  totalRequests: 0,
-  // 健康值不再默认"绿"：加载前卡显示 '—'（healthLoaded）；
-  // 加载后读 /monitoring/health 真实值（B6：旧 systemHealthy:true/esHealth:'ok'
-  // 是硬编码，ES 真挂也恒绿）。
-  systemHealthy: false,
-  esHealth: '',
   // W2-T7：会话周环比真值（后端 admin-summary 新键；null=无基线/降级态）
   sessionsThisWeek: 0,
   sessionsLastWeek: null as number | null,
 })
-const healthLoaded = ref(false)
+// 健康卡真实值（B6）：/monitoring/health 的 status 与 services.elasticsearch。
+// 独立于 adminStats，避免两路请求互相覆盖。
+const systemHealthy = ref(false)
+const esHealth = ref('')
 
 // W2-T7：真实环比 =（本周新增-上周新增）/上周新增；上周为 0/缺（无基线）→ null（渲染"上周无数据"），
 // 不再回退任何写死百分比
@@ -392,7 +471,9 @@ const llmStats = ref({
   avgLatency: 0,
   p95Latency: 0,
   costWarning: false,
-  trend: [] as number[]
+  trend: [] as number[],
+  // 「今日请求」真实口径（C1）：llm-stats.request_count_today
+  requestCountToday: 0
 })
 
 const ragStats = ref({
@@ -405,8 +486,6 @@ const ragStats = ref({
 
 const orgList = ref<OrgSummary[]>([])
 const recentLogs = ref<AuditLogEntry[]>([])
-const loading = ref(true)
-const loadFailed = ref(false)
 
 const llmChartRef = ref<HTMLElement | null>(null)
 const ragChartRef = ref<HTMLElement | null>(null)
@@ -485,78 +564,77 @@ const emptyChartSubtext = (data: number[]) => ({
   }
 })
 
-const initCharts = () => {
+// LLM token 趋势：后端 token_trend_7d 为 7 个日桶 → 保留 7 天标签
+const llmDays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+/** LLM 面板数据到位后单独初始化（与 RAG 图互不等待） */
+const initLlmChart = () => {
+  if (!llmChartRef.value) return
+  llmChart?.dispose()
+  llmChart = echarts.init(llmChartRef.value)
   const llmTrend = llmStats.value.trend
-  const ragTrend = ragStats.value.trend
-  // LLM token 趋势：后端 token_trend_7d 为 7 个日桶 → 保留 7 天标签
-  const llmDays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
-
-  if (llmChartRef.value) {
-    llmChart = echarts.init(llmChartRef.value)
-    llmChart.setOption({
-      ...emptyChartSubtext(llmTrend),
-      tooltip: { trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e5e7eb', textStyle: { color: '#374151' } },
-      grid: { left: '2%', right: '3%', bottom: '3%', top: '8%', containLabel: true },
-      xAxis: { type: 'category', data: llmDays, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { show: false } },
-      yAxis: { type: 'value', axisLine: { show: false }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
-      series: [{
-        // 无数据即为空序列（旧实现回退 [1200,1800,…] 伪造曲线——已删）
-        data: llmTrend,
-        type: 'line',
-        smooth: 0.4,
-        lineStyle: { width: 2, color: CHART_COLORS.sky },
-        itemStyle: { color: CHART_COLORS.sky },
-        areaStyle: { opacity: 0.15, color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: CHART_COLORS.sky },
-          { offset: 1, color: 'rgba(168,85,247,0.0)' }
-        ]) },
-        symbol: 'circle',
-        symbolSize: 5,
-        showSymbol: false,
-        emphasis: { focus: 'series', itemStyle: { symbolSize: 8 } }
-      }]
-    })
-  }
-
-  if (ragChartRef.value) {
-    ragChart = echarts.init(ragChartRef.value)
-    ragChart.setOption({
-      ...emptyChartSubtext(ragTrend),
-      tooltip: { trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e5e7eb', textStyle: { color: '#374151' } },
-      grid: { left: '2%', right: '3%', bottom: '3%', top: '8%', containLabel: true },
-      xAxis: { type: 'category', data: ragBucketLabels(ragTrend.length), axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { show: false } },
-      yAxis: { type: 'value', min: 0, max: 100, axisLine: { show: false }, axisLabel: { color: '#6b7280', fontSize: 10, formatter: '{value}%' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
-      series: [{
-        // 真实 8 桶数据；空即空（旧实现回退 [0,…,hitRate] 伪造末点——已删）
-        data: ragTrend,
-        type: 'line',
-        smooth: 0.4,
-        lineStyle: { width: 2, color: CHART_COLORS.secondary },
-        itemStyle: { color: CHART_COLORS.secondary },
-        areaStyle: { opacity: 0.15, color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: CHART_COLORS.secondary },
-          { offset: 1, color: 'rgba(16,185,129,0.0)' }
-        ]) },
-        symbol: 'circle',
-        symbolSize: 5,
-        showSymbol: false,
-        emphasis: { focus: 'series', itemStyle: { symbolSize: 8 } }
-      }]
-    })
-  }
+  llmChart.setOption({
+    ...emptyChartSubtext(llmTrend),
+    tooltip: { trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e5e7eb', textStyle: { color: '#374151' } },
+    grid: { left: '2%', right: '3%', bottom: '3%', top: '8%', containLabel: true },
+    xAxis: { type: 'category', data: llmDays, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { show: false } },
+    yAxis: { type: 'value', axisLine: { show: false }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+    series: [{
+      // 无数据即为空序列（旧实现回退 [1200,1800,…] 伪造曲线——已删）
+      data: llmTrend,
+      type: 'line',
+      smooth: 0.4,
+      lineStyle: { width: 2, color: CHART_COLORS.sky },
+      itemStyle: { color: CHART_COLORS.sky },
+      areaStyle: { opacity: 0.15, color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+        { offset: 0, color: CHART_COLORS.sky },
+        { offset: 1, color: 'rgba(168,85,247,0.0)' }
+      ]) },
+      symbol: 'circle',
+      symbolSize: 5,
+      showSymbol: false,
+      emphasis: { focus: 'series', itemStyle: { symbolSize: 8 } }
+    }]
+  })
 }
 
-const loadData = async () => {
-  loading.value = true
-  loadFailed.value = false
-  try {
-    const [adminRes, auditRes, llmRes, healthRes] = await Promise.all([
-      getAdminSummary(),
-      getAuditLogs({ limit: 10 }),
-      getLLMStats(),
-      getMonitoringHealth()
-    ])
+/** RAG 面板数据到位后单独初始化（与 LLM 图互不等待） */
+const initRagChart = () => {
+  if (!ragChartRef.value) return
+  ragChart?.dispose()
+  ragChart = echarts.init(ragChartRef.value)
+  const ragTrend = ragStats.value.trend
+  ragChart.setOption({
+    ...emptyChartSubtext(ragTrend),
+    tooltip: { trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e5e7eb', textStyle: { color: '#374151' } },
+    grid: { left: '2%', right: '3%', bottom: '3%', top: '8%', containLabel: true },
+    xAxis: { type: 'category', data: ragBucketLabels(ragTrend.length), axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { show: false } },
+    yAxis: { type: 'value', min: 0, max: 100, axisLine: { show: false }, axisLabel: { color: '#6b7280', fontSize: 10, formatter: '{value}%' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+    series: [{
+      // 真实 8 桶数据；空即空（旧实现回退 [0,…,hitRate] 伪造末点——已删）
+      data: ragTrend,
+      type: 'line',
+      smooth: 0.4,
+      lineStyle: { width: 2, color: CHART_COLORS.secondary },
+      itemStyle: { color: CHART_COLORS.secondary },
+      areaStyle: { opacity: 0.15, color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+        { offset: 0, color: CHART_COLORS.secondary },
+        { offset: 1, color: 'rgba(16,185,129,0.0)' }
+      ]) },
+      symbol: 'circle',
+      symbolSize: 5,
+      showSymbol: false,
+      emphasis: { focus: 'series', itemStyle: { symbolSize: 8 } }
+    }]
+  })
+}
 
+// ---- 分块加载器：六路请求并行发起，各自落位、各自骨架/错误态 ----
+
+const loadSummary = async () => {
+  summaryState.value = 'loading'
+  try {
+    const adminRes = await getAdminSummary()
     if (adminRes.data) {
       adminStats.value = {
         totalUsers: adminRes.data.total_users || 0,
@@ -564,75 +642,117 @@ const loadData = async () => {
         totalDocs: adminRes.data.total_documents || 0,
         totalOrgs: adminRes.data.total_organizations || 0,
         activeUsers: adminRes.data.active_users_24h || 0,
-        // 「今日请求」不在此填：admin-summary 无请求数口径（monitoring.py:
-        // 801-807 仅 5 键），真实值来自 llm-stats.request_count_today（见下）。
-        // 旧实现用 total_sessions（累计会话数）顶替 —— 静默错义，已改。
-        totalRequests: 0,
-        // 健康字段不在此填（admin-summary 无健康数据）：由 /monitoring/health
-        // 真实值在下方填入（B6）；此处保持中性态，避免被本块重新硬编码成"绿"。
-        systemHealthy: false,
-        esHealth: '',
         // W2-T7：会话周环比真值（后端新键；degraded/缺省 → null → 页面渲染"上周无数据"）
         sessionsThisWeek: adminRes.data.sessions_this_week ?? 0,
         sessionsLastWeek: adminRes.data.sessions_last_week ?? null,
       }
     }
+    summaryState.value = 'ready'
+  } catch {
+    summaryState.value = 'error'
+  }
+}
 
-    if (healthRes.data) {
-      // 健康卡真实口径（B6）：/monitoring/health 的 status（healthy/degraded）
-      // 与 services.elasticsearch（green/yellow/red/unknown/disconnected）。
-      // 旧硬编码 esHealth:'ok' 与真实值域不相交 —— ES 真挂也恒显绿色。
-      adminStats.value.systemHealthy = healthRes.data.status === 'healthy'
-      adminStats.value.esHealth = healthRes.data.services?.elasticsearch || 'unknown'
-      healthLoaded.value = true
+const loadHealth = async () => {
+  healthState.value = 'loading'
+  try {
+    const healthRes = await getMonitoringHealth()
+    // 健康卡真实口径（B6）：/monitoring/health 的 status（healthy/degraded）
+    // 与 services.elasticsearch（green/yellow/red/unknown/disconnected）。
+    if (!healthRes.data) throw new Error('empty health payload')
+    systemHealthy.value = healthRes.data.status === 'healthy'
+    esHealth.value = healthRes.data.services?.elasticsearch || 'unknown'
+    healthState.value = 'ready'
+  } catch {
+    healthState.value = 'error'
+  }
+}
+
+const loadLLM = async () => {
+  llmState.value = 'loading'
+  try {
+    const llmRes = await getLLMStats()
+    if (!llmRes.data) throw new Error('empty llm-stats payload')
+    llmStats.value = {
+      tokensToday: llmRes.data.total_tokens_today || 0,
+      costToday: llmRes.data.cost_today_usd || 0,
+      avgLatency: llmRes.data.avg_latency_ms || 0,
+      p95Latency: llmRes.data.p95_latency_ms || 0,
+      costWarning: llmRes.data.cost_warning || false,
+      trend: llmRes.data.token_trend_7d || [],
+      // 「今日请求」真实口径（C1）：llm-stats.request_count_today 是后端真实
+      // 请求计数（rag_service 24h 滚动窗口检索数，字段名即今日请求）——
+      // 替代此前 total_sessions 顶替的谎言口径。
+      requestCountToday: llmRes.data.request_count_today || 0
     }
+    llmState.value = 'ready'
+    // 等本区块内容（含图表容器）渲染后再初始化，不依赖其它区块是否到齐
+    await nextTick()
+    initLlmChart()
+  } catch {
+    llmState.value = 'error'
+  }
+}
 
+const loadRAG = async () => {
+  ragState.value = 'loading'
+  try {
+    const ragRes = await getRAGStats()
+    if (!ragRes.data) throw new Error('empty rag-stats payload')
+    ragStats.value = {
+      hitRate: ragRes.data.hit_rate || 0,
+      totalQueries: ragRes.data.total_queries_7d || 0,
+      hits: ragRes.data.hits_with_documents || 0,
+      avgDocs: ragRes.data.avg_documents_retrieved || 0,
+      trend: ragRes.data.hit_rate_trend_7d || []
+    }
+    ragState.value = 'ready'
+    await nextTick()
+    initRagChart()
+  } catch {
+    ragState.value = 'error'
+  }
+}
+
+const loadOrg = async () => {
+  orgState.value = 'loading'
+  try {
+    const orgRes = await getOrgSummary()
+    if (orgRes.data?.organizations) {
+      orgList.value = orgRes.data.organizations
+    }
+    orgState.value = 'ready'
+  } catch {
+    orgState.value = 'error'
+  }
+}
+
+const loadAudit = async () => {
+  auditState.value = 'loading'
+  try {
+    const auditRes = await getAuditLogs({ limit: 10 }, FIRST_SCREEN_REQUEST_CONFIG)
     const auditData = auditRes.data as unknown as Record<string, unknown>
     const auditInner = auditData?.data as Record<string, unknown> | undefined
     if (auditInner?.items) {
       recentLogs.value = auditInner.items as AuditLogEntry[]
     }
-
-    if (llmRes.data) {
-      llmStats.value = {
-        tokensToday: llmRes.data.total_tokens_today || 0,
-        costToday: llmRes.data.cost_today_usd || 0,
-        avgLatency: llmRes.data.avg_latency_ms || 0,
-        p95Latency: llmRes.data.p95_latency_ms || 0,
-        costWarning: llmRes.data.cost_warning || false,
-        trend: llmRes.data.token_trend_7d || []
-      }
-      // 「今日请求」真实口径（C1）：llm-stats.request_count_today 是后端真实
-      // 请求计数（rag_service 24h 滚动窗口检索数，字段名即今日请求）——
-      // 替代此前 total_sessions 顶替的谎言口径。
-      adminStats.value.totalRequests = llmRes.data.request_count_today || 0
-    }
-
-    const ragRes = await getRAGStats()
-    if (ragRes.data) {
-      ragStats.value = {
-        hitRate: ragRes.data.hit_rate || 0,
-        totalQueries: ragRes.data.total_queries_7d || 0,
-        hits: ragRes.data.hits_with_documents || 0,
-        avgDocs: ragRes.data.avg_documents_retrieved || 0,
-        trend: ragRes.data.hit_rate_trend_7d || []
-      }
-    }
-
-    const orgRes = await getOrgSummary()
-    if (orgRes.data?.organizations) {
-      orgList.value = orgRes.data.organizations
-    }
-
-    // 三态收口：先放开内容渲染（v-else），等 DOM 就绪后再初始化图表
-    loading.value = false
-    await nextTick()
-    initCharts()
+    auditState.value = 'ready'
   } catch {
-    loadFailed.value = true
-  } finally {
-    loading.value = false
+    auditState.value = 'error'
   }
+}
+
+/**
+ * 首屏加载：六路请求一次性并行发出（旧实现把 RAG/组织概览串行排在
+ * Promise.all 之后 —— 连锁等待；现在谁先到谁先替换自己的区块）。
+ */
+const loadData = () => {
+  void loadSummary()
+  void loadHealth()
+  void loadLLM()
+  void loadRAG()
+  void loadOrg()
+  void loadAudit()
 }
 
 onMounted(() => {

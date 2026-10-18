@@ -218,6 +218,11 @@ export default {
     noHistory: '暂无会话历史',
     backToBottom: '回到最新消息',
     stopGenerating: '停止生成',
+    // E7 三态可见性：历史加载 / thinking 折叠区 / 已停止
+    loadingHistory: '正在加载历史消息...',
+    thinkingLabel: '思考过程',
+    generationStopped: '已停止',
+    stoppedHint: '可继续提问或重新生成',
     suggestions: {
       quantum: '解释量子计算',
       quantumDesc: '用简单的语言解释量子计算的基本原理',
@@ -369,6 +374,9 @@ export default {
     uploadList: '上传任务列表',
     noActiveTasks: '当前没有正在进行的任务',
     clearFinished: '清除已完成任务',
+    cancelUpload: '取消上传',
+    removeFromList: '从列表移除',
+    uploadCancelled: '已取消上传',
     table: {
       name: '文件名',
       size: '大小',
@@ -449,7 +457,16 @@ export default {
     },
     backToHome: '返回首页',
     backToWorkbench: '进入工作台',
-    back: '返回上一页'
+    back: '返回上一页',
+    serviceUnavailable: {
+      title: '服务暂时不可用',
+      subtitle: '无法连接到服务器，请稍后重试。你的登录状态已保留。',
+      retry: '重试'
+    },
+    offlineBanner: {
+      message: '服务暂时不可用，当前展示本地缓存数据',
+      retry: '重试'
+    }
   },
   login: {
     welcomeBack: '欢迎回来',
@@ -706,6 +723,22 @@ export default {
   },
   workflow: {
     description: '把复杂 AI 任务拆成阶段化流水线，用统一的指标和状态管理来观察执行质量。',
+    editor: {
+      clearConfirmTitle: '清空画布',
+      clearConfirmContent: '清空后自动保存将在 {n} 秒内把空画布写回，覆盖已保存的版本。确定要清空画布吗？',
+      clearConfirmPositive: '清空',
+      clearConfirmNegative: '取消',
+      emptyCanvasAutoSaveBlocked: '画布为空，已跳过自动保存：已保存的版本未被覆盖。如需保存空画布，请手动点击「保存」。',
+      saveSuccess: '工作流已保存',
+      saveFailed: '保存失败',
+      autoSaveFailed: '自动保存失败，更改尚未保存。点击保存状态可重试。',
+      saveStatusUnsaved: '未保存',
+      saveStatusSaving: '保存中',
+      saveStatusSaved: '已保存',
+      saveStatusError: '保存失败',
+      saveRetry: '重试',
+      saveRetryHint: '保存失败，点击重试',
+    },
   },
   notifications: {
     markAllRead: '全部已读',
@@ -885,6 +918,8 @@ export default {
       query: '输入',
       error: '最近错误',
       unavailable: '结果不可用（任务不存在或不可见）',
+      refresh: '刷新结果',
+      refreshed: '结果已刷新',
       taskState: {
         pending: '排队中',
         running: '运行中',
@@ -983,6 +1018,7 @@ export default {
   },
   router: {
     notFound: '页面不存在',
+    serviceUnavailable: '服务暂时不可用',
     welcome: '欢迎',
     login: '登录',
     register: '注册',

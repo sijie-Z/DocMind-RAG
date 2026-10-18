@@ -33,7 +33,8 @@ import {
 import { getUserProfile, getUserStats, updateUserProfile, updatePassword, uploadAvatar, getUserActivities, generateApiKey as apiGenerateKey, revokeApiKey as apiRevokeKey, getMySessions, revokeMySession, getMyActivityLogs, getUserSettingsProviders } from '@/api/user'
 import type { Activity, UserSession, UserAuditLog } from '@/api/user'
 import { formatDate } from '@/utils/format'
-import { LANGUAGES } from '@/utils/languages'
+import { LANGUAGES, isLanguageCode } from '@/utils/languages'
+import { setLanguage } from '@/locales'
 import type { UploadCustomRequestOptions } from 'naive-ui'
 
 export function useProfilePage() {
@@ -427,9 +428,12 @@ const languageOptions = LANGUAGES.map((l) => ({
   value: l.value,
 }))
 
+// E5：语言包按需加载——先就绪词条包再切 locale（非法语码不注入）
 const handleLanguageChange = (val: string) => {
-  localStorage.setItem('language', val)
-  locale.value = val
+  if (!isLanguageCode(val)) return
+  void setLanguage(val).catch(() => {
+    // 词条包加载失败：保持当前语言
+  })
 }
 
 // Settings form
@@ -498,9 +502,12 @@ const handleSaveSettings = async () => {
   try {
     // Apply theme immediately
     appStore.setTheme(settingsForm.theme as 'light' | 'dark' | 'auto')
-    // Apply language immediately
-    locale.value = settingsForm.language
-    localStorage.setItem('language', settingsForm.language)
+    // Apply language immediately（E5：先就绪词条包再切，失败保持当前语言）
+    if (isLanguageCode(settingsForm.language)) {
+      await setLanguage(settingsForm.language).catch(() => {
+        // 词条包加载失败：保持当前语言
+      })
+    }
     // Save to backend
     // W2-T7：不再携带 preferences.ai_provider——后端全局无任何服务消费该字段
     // （推理只走 .env 全局 DeepSeek），且 GET /settings/providers 回读的 api_key

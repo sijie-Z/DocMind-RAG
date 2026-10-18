@@ -201,6 +201,11 @@ export default {
     noHistory: 'Aucun historique',
     backToBottom: 'Revenir aux derniers messages',
     stopGenerating: 'Arrêter la génération',
+    // E7 visibilité des états : chargement d'historique / raisonnement / arrêté
+    loadingHistory: 'Chargement de l\'historique...',
+    thinkingLabel: 'Raisonnement',
+    generationStopped: 'Arrêté',
+    stoppedHint: 'Vous pouvez continuer à poser des questions ou régénérer la réponse',
     suggestions: {
       quantum: 'Expliquer l\'informatique quantique',
       quantumDesc: 'Expliquez les principes de base avec des mots simples',
@@ -324,6 +329,9 @@ export default {
     uploadList: 'Liste des tâches',
     noActiveTasks: 'Aucune tâche en cours',
     clearFinished: 'Effacer les tâches terminées',
+    cancelUpload: 'Annuler le téléchargement',
+    removeFromList: 'Retirer de la liste',
+    uploadCancelled: 'Téléchargement annulé',
     table: {
       name: 'Nom du fichier',
       size: 'Taille',
@@ -389,7 +397,16 @@ export default {
     },
     backToHome: "Retour à l'accueil",
     backToWorkbench: 'Aller au tableau de bord',
-    back: 'Retour'
+    back: 'Retour',
+    serviceUnavailable: {
+      title: 'Service temporairement indisponible',
+      subtitle: "Impossible de joindre le serveur. Veuillez réessayer plus tard. Votre session est conservée.",
+      retry: 'Réessayer'
+    },
+    offlineBanner: {
+      message: 'Service temporairement indisponible ; affichage des données en cache local',
+      retry: 'Réessayer'
+    }
   },
   login: {
     welcomeBack: 'Bon retour',
@@ -624,6 +641,22 @@ export default {
   },
   workflow: {
     description: 'Décomposez les tâches IA complexes en pipelines par étapes avec des métriques unifiées et une gestion d\'état.',
+    editor: {
+      clearConfirmTitle: 'Vider le canevas',
+      clearConfirmContent: 'Après le vidage, l\'enregistrement automatique réécrira le canevas vide dans les {n} secondes et écrasera la version enregistrée. Vider le canevas ?',
+      clearConfirmPositive: 'Vider',
+      clearConfirmNegative: 'Annuler',
+      emptyCanvasAutoSaveBlocked: 'Le canevas est vide : l\'enregistrement automatique a été ignoré pour protéger la version enregistrée. Pour enregistrer un canevas vide, cliquez manuellement sur « Enregistrer ».',
+      saveSuccess: 'Workflow enregistré',
+      saveFailed: 'Échec de l\'enregistrement',
+      autoSaveFailed: 'L\'enregistrement automatique a échoué ; vos modifications ne sont pas enregistrées. Cliquez sur l\'état d\'enregistrement pour réessayer.',
+      saveStatusUnsaved: 'Non enregistré',
+      saveStatusSaving: 'Enregistrement…',
+      saveStatusSaved: 'Enregistré',
+      saveStatusError: 'Échec de l\'enregistrement',
+      saveRetry: 'Réessayer',
+      saveRetryHint: 'L\'enregistrement a échoué — cliquez pour réessayer',
+    },
   },
   notifications: {
     markAllRead: 'Tout marquer comme lu',
@@ -803,6 +836,8 @@ export default {
       query: 'Entrée',
       error: 'Dernière erreur',
       unavailable: 'Résultat indisponible (tâche introuvable ou non visible)',
+      refresh: 'Actualiser le résultat',
+      refreshed: 'Résultat actualisé',
       taskState: {
         pending: 'En attente',
         running: 'En cours',
@@ -901,6 +936,7 @@ export default {
   },
   router: {
     notFound: 'Page introuvable',
+    serviceUnavailable: 'Service temporairement indisponible',
     welcome: 'Bienvenue',
     login: 'Connexion',
     register: 'S\'inscrire',

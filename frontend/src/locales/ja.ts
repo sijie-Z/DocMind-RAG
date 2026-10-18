@@ -201,6 +201,11 @@ export default {
     noHistory: '履歴なし',
     backToBottom: '最新のメッセージに戻る',
     stopGenerating: '生成を停止',
+    // E7 三状態の可視性：履歴読み込み / thinking / 停止済み
+    loadingHistory: '履歴を読み込み中...',
+    thinkingLabel: '思考プロセス',
+    generationStopped: '停止しました',
+    stoppedHint: '続けて質問するか、回答を再生成できます',
     suggestions: {
       quantum: '量子コンピュータについて説明して',
       quantumDesc: '基本的な原理を簡単な言葉で説明してください',
@@ -324,6 +329,9 @@ export default {
     uploadList: 'タスクリスト',
     noActiveTasks: '実行中のタスクはありません',
     clearFinished: '完了したタスクをクリア',
+    cancelUpload: 'アップロードをキャンセル',
+    removeFromList: 'リストから削除',
+    uploadCancelled: 'アップロードをキャンセルしました',
     table: {
       name: 'ファイル名',
       size: 'サイズ',
@@ -389,7 +397,16 @@ export default {
     },
     backToHome: 'ホームへ戻る',
     backToWorkbench: 'ワークスペースへ移動',
-    back: '前のページに戻る'
+    back: '前のページに戻る',
+    serviceUnavailable: {
+      title: 'サービスが一時的に利用できません',
+      subtitle: 'サーバーに接続できません。しばらくしてから再試行してください。ログイン状態は保持されています。',
+      retry: '再試行'
+    },
+    offlineBanner: {
+      message: 'サービスが一時的に利用できません。ローカルにキャッシュされたデータを表示しています',
+      retry: '再試行'
+    }
   },
   login: {
     welcomeBack: 'おかえりなさい',
@@ -624,6 +641,22 @@ export default {
   },
   workflow: {
     description: '複雑なAIタスクを段階的なパイプラインに分解し、統一されたメトリクスと状態管理で実行品質を監視します。',
+    editor: {
+      clearConfirmTitle: 'キャンバスをクリア',
+      clearConfirmContent: 'クリア後、自動保存が {n} 秒以内に空のキャンバスを書き戻し、保存済みのバージョンを上書きします。キャンバスをクリアしますか？',
+      clearConfirmPositive: 'クリア',
+      clearConfirmNegative: 'キャンセル',
+      emptyCanvasAutoSaveBlocked: 'キャンバスが空のため、保存済みバージョンを保護するために自動保存をスキップしました。空のキャンバスを保存するには、手動で「保存」をクリックしてください。',
+      saveSuccess: 'ワークフローを保存しました',
+      saveFailed: '保存に失敗しました',
+      autoSaveFailed: '自動保存に失敗しました。変更は保存されていません。保存ステータスをクリックすると再試行できます。',
+      saveStatusUnsaved: '未保存',
+      saveStatusSaving: '保存中',
+      saveStatusSaved: '保存済み',
+      saveStatusError: '保存失敗',
+      saveRetry: '再試行',
+      saveRetryHint: '保存に失敗しました。クリックして再試行',
+    },
   },
   notifications: {
     markAllRead: 'すべて既読',
@@ -803,6 +836,8 @@ export default {
       query: '入力',
       error: '最近のエラー',
       unavailable: '結果を表示できません（タスクが存在しないか、表示権限がありません）',
+      refresh: '結果を更新',
+      refreshed: '結果を更新しました',
       taskState: {
         pending: '待機中',
         running: '実行中',
@@ -901,6 +936,7 @@ export default {
   },
   router: {
     notFound: 'ページが見つかりません',
+    serviceUnavailable: 'サービス一時利用不可',
     welcome: 'ようこそ',
     login: 'ログイン',
     register: '登録',

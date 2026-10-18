@@ -92,13 +92,20 @@ export const getDocumentContent = async (id: string): Promise<AxiosResponse<{ da
 
 export const uploadKnowledgeBase = async (
   data: FormData,
-  onProgress?: (_progressEvent: { loaded: number; total?: number }) => void
+  onProgress?: (_progressEvent: { loaded: number; total?: number }) => void,
+  signal?: AbortSignal
 ): Promise<AxiosResponse<{ data: KnowledgeBase }>> => {
   return request.post('/documents/upload', data, {
     headers: {
-      'Content-Type': undefined // axios sets multipart boundary when Content-Type is undefined
+      'Content-Type': undefined, // axios sets multipart boundary when Content-Type is undefined
+      // 用户主动取消上传时 axios 以「无 response 的 reject」收场，响应拦截器会误报
+      // 「网络连接失败」。上传错误统一由调用方呈现（知识库上传页 / 聊天附件），
+      // 故标记静默，避免取消与真实失败都被全局 toast 抢先误读。
+      'X-Silent-Error': '1'
     },
-    onUploadProgress: onProgress
+    onUploadProgress: onProgress,
+    // E9：上传列表「×」真取消的传输层入口（AbortController 中止请求）
+    signal
   })
 }
 

@@ -72,6 +72,7 @@
         ref="chatMessagesRef"
         :messages="messages"
         :isLoading="isLoading"
+        :isLoadingHistory="isLoadingHistory"
         :showBackToBottom="showBackToBottom"
         :userAvatar="userStore.userInfo?.avatar"
         :suggestions="suggestions"
@@ -205,8 +206,14 @@ const {
 
 const {
   sseStatus, useSSE, useStream, isLoading, isRetrieving,
-  effectiveConnectionStatus, connectWebSocket, stopGeneration
+  effectiveConnectionStatus, connectWebSocket
 } = useChatConnection(messages, baseScrollToBottom, fetchConversations)
+
+// E7：历史加载态与生成态分离 —— 切会话拉历史不再复用 isLoading（修前会误现
+// 「停止生成」按钮、生成 loading 与流式光标）。停止生成统一走 useChatSend 版本
+// （中止 SSE + 冲刷 E3 节流帧 + 落「已停止」标记）；useChatConnection 的旧停止
+// 只发 WS stop，SSE 模式下无法中止传输。
+const isLoadingHistory = ref(false)
 
 const useAgent = ref(false)
 const debugEnabled = ref(false)
@@ -218,7 +225,8 @@ const toggleDebug = () => {
 }
 
 const {
-  inputMessage, strictMode, privacyMode, handleSend: baseHandleSend, regenerateMessage
+  inputMessage, strictMode, privacyMode, handleSend: baseHandleSend, regenerateMessage,
+  stopGeneration
 } = useChatSend(
   messages, attachedFiles, attachedFileIds,
   baseScrollToBottom, fetchConversations,
@@ -232,7 +240,12 @@ const handleFileUpload = async (event: Event) => {
   await baseHandleFileUpload(event)
 }
 
-const handleSend = baseHandleSend
+// E7：历史加载期间不接受发送——旧实现靠 isLoading 挡住，状态分离后需显式守卫，
+// 否则历史回填会覆盖刚发出的消息。
+const handleSend = async () => {
+  if (isLoadingHistory.value) return
+  await baseHandleSend()
+}
 
 // Feature 1: Regenerate last assistant response
 const handleRegenerate = (assistantMsg: ChatMessage) => {
@@ -374,7 +387,8 @@ const handleSelectConversation = async (conv: Conversation) => {
 }
 
 const loadConversation = async (id: string) => {
-  isLoading.value = true
+  // E7：历史加载用独立状态（isLoadingHistory），不再复用生成态 isLoading
+  isLoadingHistory.value = true
   msgLoadError.value = false
   try {
     const res = await getConversationMessages(id)
@@ -409,7 +423,7 @@ const loadConversation = async (id: string) => {
     message.error(t('chat.historyFailed'))
     msgLoadError.value = true
   } finally {
-    isLoading.value = false
+    isLoadingHistory.value = false
     scrollToBottom('auto', true)
   }
 }
