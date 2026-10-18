@@ -91,16 +91,16 @@ build: build-frontend ## Build everything for production
 # === Docker ===
 
 docker-up: ## Start all services with Docker Compose
-	cd $(BACKEND_DIR) && docker compose up -d
+	cd $(BACKEND_DIR) && docker compose --env-file .env.docker up -d
 
 docker-down: ## Stop all Docker services
-	cd $(BACKEND_DIR) && docker compose down
+	cd $(BACKEND_DIR) && docker compose --env-file .env.docker down
 
 docker-logs: ## View Docker logs
-	cd $(BACKEND_DIR) && docker compose logs -f
+	cd $(BACKEND_DIR) && docker compose --env-file .env.docker logs -f
 
 docker-build: ## Build Docker images
-	cd $(BACKEND_DIR) && docker compose build
+	cd $(BACKEND_DIR) && docker compose --env-file .env.docker build
 	cd $(FRONTEND_DIR) && docker build -t docmind-frontend .
 
 docker-restart: docker-down docker-up ## Restart all Docker services

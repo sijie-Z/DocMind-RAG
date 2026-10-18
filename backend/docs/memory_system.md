@@ -354,12 +354,13 @@ if self.config.enable_experience:
 
 ### Embedding 模型
 
-- **模型**:`EMBEDDING_MODEL`(默认 `embedding-3`,智谱 AI,OpenAI 兼容 API)
-- **维度**:2048
+- **模型**:`EMBEDDING_MODEL`(默认 `nomic-embed-text`,本机 Ollama;代码真源 `app/core/config/ai.py`)
+- **维度**:`VECTOR_DIMENSION`(默认 `768`;未显式设置时按硬件档位自动选择:CPU `bge-m3`/1024、8G 显存 `Qwen3-Embedding-4B`/2048、16G 显存 `Qwen3-Embedding-8B`/4096)
 - **批处理**:支持批量,带 retry
+- **云端 Embedding**:改用云端服务(如智谱 `embedding-3`,2048 维)时,`EMBEDDING_API_URL` / `EMBEDDING_MODEL` / `VECTOR_DIMENSION` 三键必须配套修改
 - **本地 fallback**:`ENABLE_LOCAL_EMBEDDING=true` 时改用 `LOCAL_EMBEDDING_MODEL`(默认 `nomic-embed-text`,Ollama)
   - **注意**:MemoryBridge 通过 RAG pipeline 间接注入 embedding,所以走的也是 `embedding_service.py` 这条分支——本地 / 在线会自动跟当前 `ENABLE_LOCAL_EMBEDDING` 一致
-  - **维度可能不再 2048**——本地模型的输出维度由 `LOCAL_EMBEDDING_MODEL` 决定,需要重新校准 LongTerm 里的存量 embedding(否则 search_semantic 会因为维度不一致抛错)
+  - **维度可能变化**——切换模型后输出维度由所选模型决定,需要重新校准 LongTerm 里的存量 embedding(否则 search_semantic 会因为维度不一致抛错)
 
 ### Token 估算
 
@@ -443,7 +444,7 @@ A:WorkingMemory 是单次任务内的中间结果,如果失败要重跑,持久�
 A:`recall()` 默认串行遍历各层,按统一打分公式排序。原因:四层召回量都很小(各 top_k=5),串行开销可控,实现简单。如果未来某层召回量爆炸(比如 long_term 扩到上千条),再考虑每层独立召回 + 并行合并。
 
 **Q6:为什么 LongTerm 用 cosine similarity 而不是 dot product?**
-A:2048 维向量,如果没做 L2 归一化,cosine 比 dot 更稳。代价是要多算一次范数,值得。
+A:向量维度由 `VECTOR_DIMENSION` 决定(默认 768);如果没做 L2 归一化,cosine 比 dot 更稳。代价是要多算一次范数,值得。
 
 **Q7:ContextEngine 压缩策略为什么优先 LLM 摘要?**
 A:截断会丢失语义连贯性,LLM 摘要能保留核心信息。fallback 到截断是因为 LLM 调用本身有成本和延迟,要做兜底。

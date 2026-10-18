@@ -333,7 +333,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
       <table class="data-table">
         <tr><th>组件</th><th>方案</th><th>用途</th></tr>
         <tr><td>LLM</td><td>DeepSeek V4 (Flash/Pro)</td><td>对话推理、深度分析</td></tr>
-        <tr><td>Embedding</td><td>OpenAI 兼容 API</td><td>向量嵌入 (2048 维)</td></tr>
+        <tr><td>Embedding</td><td>OpenAI 兼容 API</td><td>向量嵌入 (VECTOR_DIMENSION，默认 768 维)</td></tr>
         <tr><td>Agent 架构</td><td>PER 三阶段</td><td>规划→执行→反思</td></tr>
         <tr><td>文档解析</td><td>LangChain + PyPDF</td><td>PDF/Word/MD 分块</td></tr>
       </table>
@@ -624,7 +624,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
       <div class="card-title">🔎 Elasticsearch</div>
       <ul style="font-size:.75rem;color:var(--text2);line-height:2;list-style:none;margin-top:6px">
         <li>→ BM25 全文索引</li>
-        <li>→ KNN 向量索引 (2048 维)</li>
+        <li>→ KNN 向量索引 (VECTOR_DIMENSION，默认 768 维)</li>
         <li>→ 混合检索查询</li>
       </ul>
     </div>
@@ -729,7 +729,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
       <div class="card-body show">
         <p style="font-size:.8rem;color:var(--text2);margin-bottom:6px">一键启动所有依赖：MySQL / Redis / ES / Kafka / MinIO + 后端 + 前端</p>
         <pre style="font-size:.72rem;color:var(--text2);background:var(--bg3);padding:10px;border-radius:6px"><code># 基础设施
-cd backend && docker compose up -d
+cd backend && docker compose --env-file .env.docker up -d
 
 # 后端
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

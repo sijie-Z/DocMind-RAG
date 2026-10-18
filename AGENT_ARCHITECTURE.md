@@ -343,7 +343,7 @@ SSE 客户端 (api/agent.ts)
 
 ```python
 AgentConfig(
-    model="deepseek-chat",
+    model="deepseek-v4-flash",
     temperature=0.1,
     enable_planning=True,       # Phase 1
     enable_reflection=True,     # Phase 3
