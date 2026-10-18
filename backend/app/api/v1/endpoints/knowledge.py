@@ -447,6 +447,9 @@ async def rebuild_document_knowledge(
             logger.warning(f"发送 Kafka 重建任务失败，改为进程内处理: {e}")
 
         if not sent:
+            # A3-P0：先落「本机处理」标记再调度；进程重启后由启动对账回收。
+            job.local_fallback = True
+            await db.commit()
             schedule_local = True
 
         # 重建时按组织清空 RAG 缓存，避免旧内容仍命中缓存

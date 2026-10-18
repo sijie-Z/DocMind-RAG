@@ -222,6 +222,10 @@ async def upload_document(
             logger.warning(f"Kafka send failed, will process in-process: {kafka_err}")
 
         if not sent:
+            # A3-P0：先把「本机处理」标记落库再调度——进程若在任务完成前退出，
+            # 启动对账按 local_fallback=True + 非终局状态回收该任务。
+            job.local_fallback = True
+            await db.commit()
             schedule_local = True
 
         if schedule_local:
