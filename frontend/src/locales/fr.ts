@@ -67,6 +67,7 @@ export default {
     apiKeyRevoked: 'Clé API révoquée',
     aiProviderExpTitle: 'Fonctionnalité expérimentale · inactive',
     aiProviderExpDesc: "Le choix du modèle est configuré côté serveur (actuellement DeepSeek). La sélection et la clé API ici n'affectent pas l'inférence ; l'enregistrement est désactivé pour éviter toute confusion.",
+    providerLoadFailed: "Échec du chargement de la configuration des fournisseurs IA. Les paramètres par défaut ou les derniers paramètres chargés sont affichés.",
     apiKeyGenerateFailed: 'Échec de la génération',
     validation: {
       nicknameLength: 'Le pseudo doit contenir entre 2 et 50 caractères',

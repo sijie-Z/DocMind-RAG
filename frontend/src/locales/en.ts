@@ -104,6 +104,7 @@ export default {
     apiKeyRevokeFailed: 'Failed to revoke API Key',
     aiProviderExpTitle: 'Experimental · Not active yet',
     aiProviderExpDesc: 'Model choice is configured server-side (currently DeepSeek). The selection and API key here do not affect inference; saving is disabled to avoid confusion.',
+    providerLoadFailed: 'Failed to load AI provider configuration. Showing the default or last successfully loaded settings.',
   },
   users: {
     searchPlaceholder: 'Search users...',

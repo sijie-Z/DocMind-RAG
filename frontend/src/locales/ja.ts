@@ -67,6 +67,7 @@ export default {
     apiKeyRevoked: 'APIキーを無効化しました',
     aiProviderExpTitle: '実験機能 · 未反映',
     aiProviderExpDesc: 'モデル選択はサーバー側で統一設定されています（現在は DeepSeek）。ここの選択と API Key は推論に反映されず、誤解を避けるため保存は無効化されています。',
+    providerLoadFailed: 'AI Provider 設定の読み込みに失敗しました。デフォルトまたは前回正常に読み込まれた設定を表示しています。',
     apiKeyGenerateFailed: '生成に失敗しました',
     validation: {
       nicknameLength: 'ニックネームは2〜50文字以内で入力してください',
