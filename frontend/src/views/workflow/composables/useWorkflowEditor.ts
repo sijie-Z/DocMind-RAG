@@ -1,6 +1,6 @@
 // Workflow editor composable — extracted from views/workflow/editor.vue
 
-import { ref, computed, onMounted, watch, onUnmounted, h } from 'vue'
+import { ref, computed, onMounted, watch, onUnmounted, h, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useVueFlow, MarkerType, type Connection } from '@vue-flow/core'
@@ -184,6 +184,10 @@ interface ParamDef {
 
 // 状态
 const saving = ref(false)
+// ── 保存状态（B8）：工具栏状态点常驻，永远如实反映最近一次保存结果 ──
+// unsaved=有未落库的改动 / saving=保存请求在途 / saved=服务端已确认 / error=最近一次保存失败
+type SaveStatus = 'unsaved' | 'saving' | 'saved' | 'error'
+const saveStatus = ref<SaveStatus>('unsaved')
 const executing = ref(false)
 const executingNodeId = ref<string | null>(null)
 const showDebugPanel = ref(false)
@@ -315,6 +319,22 @@ async function handleSetDefault(configId: string) {
 // ── 自动保存定时器 ──
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 
+// ── 保存反馈（B8）──
+// 自动保存失败提示节流：同一故障在窗口内只弹一次，避免每次防抖都打扰用户
+const AUTO_SAVE_ERROR_TOAST_THROTTLE_MS = 10_000
+let lastAutoSaveErrorToastAt = 0
+
+// 画布编辑版本号：保存请求在途时用户又改动画布 → 请求完成后不得把状态误标为「已保存」
+let canvasEditVersion = 0
+
+/** 画布发生本地改动：版本号 +1，并把「已保存/保存中」如实降级为「未保存」 */
+function markCanvasDirty() {
+  canvasEditVersion++
+  if (saveStatus.value === 'saved' || saveStatus.value === 'saving') {
+    saveStatus.value = 'unsaved'
+  }
+}
+
 // 本地状态
 const nodes = computed({
   get: () => workflowStore.nodes as any,
@@ -359,6 +379,24 @@ const statusText = computed(() => {
   }
   return map[executionStatus.value] || '未知'
 })
+
+// ── 保存状态点文案（B8，i18n 四语；computed 在渲染期求值，此时 t 已在 setup 内就绪）──
+const saveStatusText = computed(() => {
+  switch (saveStatus.value) {
+    case 'saved': return t('workflow.editor.saveStatusSaved')
+    case 'saving': return t('workflow.editor.saveStatusSaving')
+    case 'error': return t('workflow.editor.saveStatusError')
+    default: return t('workflow.editor.saveStatusUnsaved')
+  }
+})
+
+const saveRetryText = computed(() => t('workflow.editor.saveRetry'))
+
+const saveStatusHint = computed(() =>
+  saveStatus.value === 'error'
+    ? t('workflow.editor.saveRetryHint')
+    : saveStatusText.value
+)
 
 const nodeColor = (node: { type?: string }) => {
   const colorMap: Record<string, string> = {
@@ -737,6 +775,8 @@ const saveWorkflow = async () => {
   }
 
   saving.value = true
+  saveStatus.value = 'saving'
+  const versionAtRequest = canvasEditVersion
   try {
     const flowData = workflowStore.getFlowData() as unknown as WorkflowConfig
 
@@ -761,10 +801,18 @@ const saveWorkflow = async () => {
     }
     // 手动保存是显式动作（允许保存空画布），同步刷新已持久化节点数
     lastPersistedNodeCount = flowData.nodes.length
+    // B8：服务端确认后才置「已保存」；请求在途期间画布又被改动则保持「未保存」
+    if (canvasEditVersion === versionAtRequest) {
+      saveStatus.value = 'saved'
+    }
+    // 手动保存是显式动作 → 成功给一次 toast；自动保存成功不弹（状态点常驻即可）
+    message.success(t('workflow.editor.saveSuccess'))
     return true
   } catch (error: unknown) {
     const err = error as { response?: { data?: { detail?: string } } }
-    message.error(err.response?.data?.detail || '保存失败')
+    // B8：失败不得沉默，状态点不得停在/进入「已保存」
+    saveStatus.value = 'error'
+    message.error(err.response?.data?.detail || t('workflow.editor.saveFailed'))
     return false
   } finally {
     saving.value = false
@@ -783,6 +831,8 @@ const autoSave = () => {
       message.warning(t('workflow.editor.emptyCanvasAutoSaveBlocked'))
       return
     }
+    const versionAtRequest = canvasEditVersion
+    saveStatus.value = 'saving'
     try {
       const flowData = workflowStore.getFlowData() as unknown as WorkflowConfig
       await updateWorkflow(workflowStore.currentWorkflowId, {
@@ -790,11 +840,34 @@ const autoSave = () => {
         flow_data: flowData,
       })
       lastPersistedNodeCount = flowData.nodes.length
+      // B8：只有服务端确认且请求期间画布无新改动，才允许置「已保存」
+      if (canvasEditVersion === versionAtRequest) {
+        saveStatus.value = 'saved'
+      }
       console.log('[auto-save] 工作流已自动保存')
-    } catch {
-      // Auto-save failures are silent
+    } catch (error: unknown) {
+      // B8：自动保存失败不再沉默——状态点置「保存失败」（绝不显示已保存），
+      // 错误提示按节流窗口弹出（同一故障不反复打扰），点击状态点可重试。
+      saveStatus.value = 'error'
+      const now = Date.now()
+      if (now - lastAutoSaveErrorToastAt >= AUTO_SAVE_ERROR_TOAST_THROTTLE_MS) {
+        lastAutoSaveErrorToastAt = now
+        const err = error as { response?: { data?: { detail?: string } } }
+        const detail = err.response?.data?.detail
+        message.error(
+          detail
+            ? `${t('workflow.editor.autoSaveFailed')}: ${detail}`
+            : t('workflow.editor.autoSaveFailed'),
+        )
+      }
     }
   }, AUTO_SAVE_DELAY_MS)
+}
+
+// 自动保存失败后的显式重试入口（点击状态点）：复用手动保存路径（含成功 toast）
+const retrySave = async () => {
+  if (saveStatus.value !== 'error') return
+  await saveWorkflow()
 }
 
 // 监听画布变化 → 触发自动保存：注册在 useWorkflowEditor() 内（见文件头部说明，
@@ -950,6 +1023,10 @@ async function loadWorkflowById(id: number) {
       workflowStore.loadWorkflow(workflow)
       // 记录已持久化版本的节点数：空画布保护的「source 非空」判定依据
       lastPersistedNodeCount = workflow.flow_data?.nodes?.length ?? 0
+      // B8：加载到的就是服务端已保存版本。等深度 watcher 先消化掉加载引发的
+      // 「变更」标记（否则状态点会先被置脏），再把状态点如实置为「已保存」。
+      await nextTick()
+      saveStatus.value = 'saved'
       // B11：详响应无 engine_type（workflow.py:121-132），旧读点恒 undefined——
       // 移除；选择器保留为本地展示态（见模板 disabled 提示）
       router.replace({ query: { id: String(id) } })
@@ -963,6 +1040,8 @@ async function loadWorkflowById(id: number) {
 function handleCreateNew() {
   workflowStore.clearWorkflow()
   lastPersistedNodeCount = 0
+  // B8：新工作流尚无任何版本落库 → 状态点如实显示「未保存」
+  saveStatus.value = 'unsaved'
   router.replace({ query: {} })
   message.info('已创建新工作流')
 }
@@ -998,11 +1077,17 @@ export function useWorkflowEditor() {
   dialog = useDialog()
   // 新编辑器实例：已持久化节点数从未知开始（加载/保存路径会刷新）
   lastPersistedNodeCount = 0
+  // B8：保存状态按新实例重置（模块级单例在测试/复用场景下必须归零）
+  saveStatus.value = 'unsaved'
+  canvasEditVersion = 0
+  lastAutoSaveErrorToastAt = 0
 
   // ── 画布变更 → 自动保存（组件级注册，随组件卸载自动释放）──
   watch(
     () => [workflowStore.nodes, workflowStore.edges, workflowStore.workflowName],
     () => {
+      // B8：本地改动发生 → 状态点如实回退为「未保存」
+      markCanvasDirty()
       if (workflowStore.currentWorkflowId) {
         autoSave()
       }
@@ -1016,6 +1101,7 @@ export function useWorkflowEditor() {
     () => {
       if (selectedNode.value) {
         workflowStore.updateNodeData(selectedNode.value.id, { ...selectedNode.value.data })
+        markCanvasDirty()
         // 同时触发自动保存到后端
         if (workflowStore.currentWorkflowId) {
           autoSave()
@@ -1101,6 +1187,10 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   skillsLoaded,
   loadSkills,
   saving,
+  saveStatus,
+  saveStatusText,
+  saveRetryText,
+  saveStatusHint,
   executing,
   executingNodeId,
   showDebugPanel,
@@ -1163,6 +1253,7 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   clearCanvas,
   fitView,
   saveWorkflow,
+  retrySave,
   autoSave,
   openDebugPanel,
   executeWorkflow,
