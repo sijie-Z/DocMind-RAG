@@ -167,15 +167,20 @@ async def test_db_unique_constraints_guard_duplicate_rows(db_factory):
 
 
 async def test_register_recovers_from_stale_seq_cache(db_factory):
-    """多副本：本进程缓存落后于库内 MAX 时，唯一冲突后刷新重试，登记不丢。"""
+    """多副本：缓存落后且下一号被占时，唯一冲突后刷新 MAX 重试，登记不丢。
+
+    构造 gap≥2：另一进程占用 seq=2 与 seq=4，本进程缓存停在 1。首次分配 2
+    撞车 → 必须重同步到库内 MAX=4 再取号（若只是"重试不重同步"，会拿到 3，
+    断言即失败——本用例对 resync 有判别力）。
+    """
     task_id = await _new_task(db_factory)
     await tool_ledger.register_calls(task_id, [("call-1", "t", {})])  # seq=1
     async with db_factory() as db:
-        # 模拟另一进程已占用 seq=2（本进程缓存仍停在 1）。
-        db.add(AgentToolCall(
-            task_id=task_id, call_id="foreign", tool_name="t", arguments="{}",
-            source_event_seq=2, status=tool_ledger.STATUS_REGISTERED,
-        ))
+        for cid, seq in (("foreign-a", 2), ("foreign-b", 4)):
+            db.add(AgentToolCall(
+                task_id=task_id, call_id=cid, tool_name="t", arguments="{}",
+                source_event_seq=seq, status=tool_ledger.STATUS_REGISTERED,
+            ))
         await db.commit()
     tool_ledger._seq_counters[task_id] = 1  # 模拟跨进程过期缓存
 
@@ -184,7 +189,9 @@ async def test_register_recovers_from_stale_seq_cache(db_factory):
     assert inserted == 1, "撞号后必须刷新 MAX 重试，不得整批静默丢弃"
     calls = {c.call_id: c for c in await _calls(db_factory, task_id)}
     assert "call-2" in calls
-    assert calls["call-2"].source_event_seq > 2
+    assert calls["call-2"].source_event_seq > 4, (
+        "重试必须从库内 MAX 续号（仅重试不重同步会取到 3，仍落后于已占用的 4）"
+    )
 
 
 async def test_record_result_recovers_from_stale_seq_cache(db_factory):
@@ -193,13 +200,16 @@ async def test_record_result_recovers_from_stale_seq_cache(db_factory):
     await tool_ledger.register_calls(task_id, [("call-a", "t", {})])
     await tool_ledger.mark_dispatched(task_id, "call-a")
     async with db_factory() as db:
-        # 模拟另一进程：call-b 占 call 表 seq=2，其结果占 result 表 seq=2。
-        foreign = AgentToolCall(
-            task_id=task_id, call_id="call-b", tool_name="t", arguments="{}",
-            source_event_seq=2, status=tool_ledger.STATUS_COMPLETED,
-        )
-        db.add(foreign)
-        await db.flush()
+        # 模拟另一进程：call 表占 seq=2 与 4，result 表占 seq=2。
+        for cid, seq in (("call-b", 2), ("call-c", 4)):
+            db.add(AgentToolCall(
+                task_id=task_id, call_id=cid, tool_name="t", arguments="{}",
+                source_event_seq=seq, status=tool_ledger.STATUS_COMPLETED,
+            ))
+        await db.commit()
+        foreign = (await db.execute(
+            select(AgentToolCall).where(AgentToolCall.call_id == "call-b")
+        )).scalars().first()
         db.add(AgentToolResult(
             task_id=task_id, call_id="call-b", tool_call_pk=foreign.id,
             source_event_seq=2, status="success", result_summary="other",
@@ -216,7 +226,9 @@ async def test_record_result_recovers_from_stale_seq_cache(db_factory):
     assert call.status == tool_ledger.STATUS_COMPLETED
     results = {r.call_id: r for r in await _results(db_factory, task_id)}
     assert results["call-a"].result_summary == "真实结果"
-    assert results["call-a"].source_event_seq > 2
+    assert results["call-a"].source_event_seq > 4, (
+        "重试必须从库内 MAX 续号（仅重试不重同步会取到 3，仍落后于已占用的 4）"
+    )
 
 
 # ── 3. 孤儿 result：报错不静默 ───────────────────────────────────────────────
@@ -327,6 +339,19 @@ async def test_converge_disconnected_sweeps_dispatched_call(db_factory):
 
     call = (await _calls(db_factory, task_id))[0]
     assert call.status == tool_ledger.STATUS_TOOL_OUTCOME_UNKNOWN
+
+
+async def test_save_checkpoint_fails_open_on_broken_history(db_factory):
+    """快照落盘遇到配对损坏的历史：fail-open（返回 False），绝不打断主流程。"""
+    task_id = await _new_task(db_factory)
+    ok = await checkpoint.save_checkpoint(
+        task_id=task_id, ctx=None, plan=None, trigger="test",
+        history=[
+            {"role": "user", "content": "u"},
+            {"role": "tool", "tool_call_id": "ghost", "content": "x"},
+        ],
+    )
+    assert ok is False, "配对校验失败必须走 fail-open 返回 False，而不是抛出异常"
 
 
 async def test_mark_waiting_approval_sweeps_registered_calls(db_factory):

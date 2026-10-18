@@ -295,11 +295,13 @@ async def save_checkpoint(
     """
     if not task_id:
         return False
-    envelope = build_envelope(
-        ctx=ctx, plan=plan, trigger=trigger, partial_output=partial_output,
-        history=history, config=config, run_state=run_state, session_id=session_id,
-    )
     try:
+        # C3a：build_envelope 里的配对校验（ToolPairingError）也纳入 fail-open
+        # 边界——快照落盘失败只记 warning，绝不因历史损坏打断主流程。
+        envelope = build_envelope(
+            ctx=ctx, plan=plan, trigger=trigger, partial_output=partial_output,
+            history=history, config=config, run_state=run_state, session_id=session_id,
+        )
         async with AsyncSessionLocal() as db:
             task = await _load_task_row(db, task_id)
             if task is None:
