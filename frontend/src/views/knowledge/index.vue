@@ -176,7 +176,7 @@
                     <div class="absolute top-0 left-0 right-0 h-1 bg-gray-100 dark:bg-gray-700 group-hover:bg-blue-500 transition-colors"></div>
 
                     <!-- 选择框 -->
-                    <div class="absolute top-3 right-3 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div class="absolute top-3 right-3 z-10 kb-card-select">
                        <n-checkbox 
                         :checked="selectedIds.includes(item.id)" 
                         @update:checked="(val: boolean) => toggleSelect(item.id, val)"
@@ -235,7 +235,7 @@
                           <span class="text-[10px] text-gray-400">{{ formatFileSize(item.file_size) }}</span>
                         </div>
                         
-                        <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity transform translate-x-2 group-hover:translate-x-0">
+                        <div class="flex gap-1 kb-card-actions">
                            <n-tooltip trigger="hover">
                              <template #trigger>
                                <n-button size="tiny" quaternary circle @click.stop="viewKnowledge(item)">
@@ -334,7 +334,7 @@
                           </div>
                        </td>
                        <td class="p-4 text-right">
-                          <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div class="flex justify-end gap-2 kb-row-actions">
                              <n-button size="tiny" secondary circle @click="viewKnowledge(item)"><template #icon><n-icon><EyeOutline /></n-icon></template></n-button>
                              <n-button v-if="item.status === 'failed'" size="tiny" secondary circle type="primary" @click="handleRebuild(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
                              <n-button size="tiny" secondary circle type="error" @click="deleteKnowledge(item)"><template #icon><n-icon><TrashOutline /></n-icon></template></n-button>
@@ -911,9 +911,56 @@ onUnmounted(() => {
   .knowledge-page .overflow-x-auto {
     -webkit-overflow-scrolling: touch;
   }
-  /* Action buttons: always visible on touch devices */
-  .knowledge-page [class*="opacity-0 group-hover:opacity-100"] {
-    opacity: 1 !important;
+}
+
+/* I1 操作排显隐（键盘 / 触屏可达，鼠标行为不回退，同 ChatMessages T11 模式）：
+   - 默认隐藏，保持界面干净；
+   - 键盘聚焦 :has(:focus-visible) 常显（媒体查询之外，任何设备都生效）；
+     不用 :focus-within——鼠标点击按钮也会聚焦，移开后操作排会滞留；
+   - hover 显隐只在支持 hover 的设备上生效，触屏不依赖它；
+   - 无 hover 能力的设备（触屏）常显，保证操作可点可达；
+   - 语义类替代旧的属性子串选择器（工具类一改即静默失效）。 */
+.kb-card-actions {
+  opacity: 0;
+  transform: translateX(0.5rem);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.kb-card-select {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.kb-row-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.kb-card-actions:has(:focus-visible),
+.kb-card-select:has(:focus-visible),
+.kb-row-actions:has(:focus-visible) {
+  opacity: 1;
+}
+.kb-card-actions:has(:focus-visible) {
+  transform: translateX(0);
+}
+@media (hover: hover) {
+  .group:hover .kb-card-actions,
+  .group:hover .kb-card-select,
+  .group:hover .kb-row-actions {
+    opacity: 1;
+  }
+  .group:hover .kb-card-actions {
+    transform: translateX(0);
+  }
+}
+@media (hover: none) {
+  .kb-card-actions {
+    opacity: 1;
+    transform: none;
+  }
+  .kb-card-select {
+    opacity: 1;
+  }
+  .kb-row-actions {
+    opacity: 1;
   }
 }
 </style>

@@ -88,7 +88,7 @@
               </div>
             </div>
 
-            <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div class="flex items-center gap-2 conv-actions">
               <n-button size="small" quaternary @click.stop="viewConversation(item)">继续</n-button>
               <n-button size="small" quaternary type="error" @click.stop="deleteItem(item)">
                 <template #icon><n-icon><TrashOutline /></n-icon></template>
@@ -219,3 +219,28 @@ onMounted(() => {
   loadConversations()
 })
 </script>
+
+<style scoped>
+/* I1 操作排显隐（键盘 / 触屏可达，鼠标行为不回退，同 ChatMessages T11 模式）：
+   - 默认隐藏；键盘 :has(:focus-visible) 常显（媒体查询之外，任何设备生效）；
+     不用 :focus-within——鼠标点击按钮也会聚焦，移开后操作排会滞留；
+   - hover 显隐只在支持 hover 的设备上生效；
+   - 无 hover 能力的设备（触屏）常显。 */
+.conv-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.conv-actions:has(:focus-visible) {
+  opacity: 1;
+}
+@media (hover: hover) {
+  .group:hover .conv-actions {
+    opacity: 1;
+  }
+}
+@media (hover: none) {
+  .conv-actions {
+    opacity: 1;
+  }
+}
+</style>
