@@ -107,6 +107,7 @@ export default {
     // W2-T7：LLM Provider 区块诚实标注（后端无消费方，推理走服务端全局配置）
     aiProviderExpTitle: '实验功能 · 暂不生效',
     aiProviderExpDesc: '模型选择由服务端统一配置（当前为 DeepSeek）；此处的选择与 API Key 暂不参与推理，已禁用保存以免误解。',
+    providerLoadFailed: 'AI Provider 配置加载失败，当前显示默认或上次成功加载的配置。',
   },
   users: {
     searchPlaceholder: '搜索用户...',

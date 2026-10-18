@@ -29,7 +29,7 @@ import {
   PhonePortraitOutline,
   TabletPortraitOutline,
 } from '@vicons/ionicons5'
-import { getUserProfile, getUserStats, updateUserProfile, updatePassword, uploadAvatar, getUserActivities, generateApiKey as apiGenerateKey, revokeApiKey as apiRevokeKey, getMySessions, revokeMySession, getMyActivityLogs } from '@/api/user'
+import { getUserProfile, getUserStats, updateUserProfile, updatePassword, uploadAvatar, getUserActivities, generateApiKey as apiGenerateKey, revokeApiKey as apiRevokeKey, getMySessions, revokeMySession, getMyActivityLogs, getUserSettingsProviders } from '@/api/user'
 import type { Activity, UserSession, UserAuditLog } from '@/api/user'
 import { formatDate } from '@/utils/format'
 import { LANGUAGES } from '@/utils/languages'
@@ -457,14 +457,17 @@ const onProviderChange = (pid: string) => {
   }
 }
 
+// Provider 配置加载错误态（通知 store 同款：失败可判别；状态只在成功路径复位）
+const providersLoadError = ref<string | null>(null)
+
 const loadProviders = async () => {
   try {
     // 正确路径带 /user 前缀（router.py:51 prefix="/user" + user_settings.py:117
     // @router.get("/settings/providers")）——旧写法 /api/v1/settings/providers
-    // 恒 404（A_sweep PROF-1 实测：缺前缀 404 / 正确路径 200）
-    const res = await fetch('/api/v1/user/settings/providers', { headers: { Authorization: `Bearer ${localStorage.getItem('docmind_token')}` }})
-    if (!res.ok) return
-    const data = await res.json()
+    // 恒 404（A_sweep PROF-1 实测：缺前缀 404 / 正确路径 200）。
+    // T10：改走 utils/request.ts 统一客户端（鉴权头/401 刷新/错误提示统一接管）。
+    const res = await getUserSettingsProviders()
+    const data = res.data
     providers.value = data.providers || []
     const cur = data.current
     if (cur) {
@@ -473,8 +476,11 @@ const loadProviders = async () => {
       providerForm.api_key = cur.api_key || ''
       providerForm.base_url = cur.base_url || ''
     }
-  } catch {
-    // 最佳努力加载：失败时保留默认 provider 配置，不阻塞页面渲染
+    providersLoadError.value = null
+  } catch (error) {
+    // 失败保留上一次成功值（不清空 providers/providerForm），错误态显式上报——
+    // 否则加载失败与"确实没有可选项"不可区分（与通知 store 的 lastError 同口径）。
+    providersLoadError.value = error instanceof Error ? error.message : String(error)
   }
 }
 
@@ -997,7 +1003,7 @@ onUnmounted(() => {
   themeOptions, languageOptions, handleLanguageChange,
   settingsForm, savingSettings, settingsSaveMessage, settingsSaveSuccess,
   providers, providerForm, providerOptions, currentProvider,
-  currentModelOptions, currentProviderNeedsKey,
+  currentModelOptions, currentProviderNeedsKey, providersLoadError,
   onProviderChange, loadProviders, settingsChanged, handleSaveSettings,
   updatingProfile, updatingPassword,
   storageChartRef, activityChartRef, initCharts, handleResize,
