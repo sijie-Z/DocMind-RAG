@@ -252,6 +252,18 @@ async def test_mark_terminal_cancelled_sweeps_with_cancel_semantics(db_factory):
     assert by_id["pending"].status == tool_ledger.STATUS_ABORTED_BEFORE_DISPATCH
 
 
+async def test_mark_terminal_idempotent_repeat_also_sweeps(db_factory):
+    """幂等重复收尾同样收敛账目（上次收尾若在 sweep 前失败，重复收尾兜底）。"""
+    task_id = await _new_task(db_factory)
+    assert await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED) is True
+    # 终态之后才出现的登记行（带外写入/收尾竞态）——重复收尾必须把它收敛掉。
+    await tool_ledger.register_calls(task_id, [("late", "t", {})])
+
+    assert await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED) is True
+    call = (await _calls(db_factory, task_id))[0]
+    assert call.status == tool_ledger.STATUS_TOOL_NOT_STARTED
+
+
 # ── 5. 执行器接线：先落 call 再 dispatch；结果落账 ───────────────────────────
 
 
