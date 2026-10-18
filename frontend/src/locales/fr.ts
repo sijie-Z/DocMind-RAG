@@ -597,7 +597,9 @@ export default {
         model: {
           title: 'Connecter un modèle',
           desc: 'Le modèle de la plateforme est prêt pour les questions-réponses',
-          hint: 'Aucun modèle disponible détecté. Demandez à votre administrateur de le configurer, puis cliquez sur « Revérifier ».'
+          hint: 'Aucun modèle disponible détecté. Demandez à votre administrateur de le configurer, puis cliquez sur « Revérifier ».',
+          checking: 'Vérification du modèle…',
+          unknown: 'Échec de la vérification du modèle. Cliquez sur « Revérifier » plus tard.'
         },
         knowledge: {
           title: 'Créer une base de connaissances',

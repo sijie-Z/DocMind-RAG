@@ -648,7 +648,9 @@ export default {
         model: {
           title: 'Connect a model',
           desc: 'The platform model is ready for Q&A',
-          hint: 'No available model detected. Ask your administrator to configure one, then click "Re-check".'
+          hint: 'No available model detected. Ask your administrator to configure one, then click "Re-check".',
+          checking: 'Checking model status…',
+          unknown: 'Failed to check model status. Click "Re-check" later.'
         },
         knowledge: {
           title: 'Create a knowledge base',

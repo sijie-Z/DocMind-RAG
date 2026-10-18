@@ -86,7 +86,7 @@
             {{ step.action }}
           </n-button>
           <span v-else-if="step.key === 'model' && !step.done" class="text-xs text-amber-600 dark:text-amber-400">
-            {{ t('dashboard.onboarding.steps.model.hint') }}
+            {{ modelStatusText }}
           </span>
           <span v-else-if="step.done" class="text-xs font-medium text-emerald-600 dark:text-emerald-400">
             {{ t('dashboard.onboarding.done') }}
@@ -132,6 +132,8 @@ const emit = defineEmits<{ refresh: [] }>()
 const { t } = useI18n()
 
 const llmConfigured = ref<boolean | null>(null)
+const llmChecked = ref(false)
+const llmError = ref(false)
 const llmLoading = ref(false)
 const collapsed = ref(false)
 
@@ -165,15 +167,26 @@ function expand() {
 
 async function checkModel() {
   llmLoading.value = true
+  llmError.value = false
   try {
     const res = await getLLMStatus()
     llmConfigured.value = res.data?.data?.configured === true
   } catch {
+    // 网络/服务失败 ≠ 未配置：保持 null 并单独提示，避免误报「未检测到模型」
     llmConfigured.value = null
+    llmError.value = true
   } finally {
+    llmChecked.value = true
     llmLoading.value = false
   }
 }
+
+/** 模型步骤状态文案：检查中 / 检查失败 / 确认未配置，三种状态不混为一谈。 */
+const modelStatusText = computed(() => {
+  if (!llmChecked.value) return t('dashboard.onboarding.steps.model.checking')
+  if (llmError.value) return t('dashboard.onboarding.steps.model.unknown')
+  return t('dashboard.onboarding.steps.model.hint')
+})
 
 /** 重新检查：本地模型状态 + 让父级重拉统计/会话（步骤 2-4 的真实数据）。 */
 function refreshAll() {

@@ -294,7 +294,52 @@ describe('B5 · 注册后 4 步清单（真实数据推导 + 可恢复 + 跳过�
     expect(wrapper.find('[data-testid="onboarding-collapsed"]').exists()).toBe(false)
   })
 
+  it('模型状态检查失败与「未配置」区分展示；重新检查成功后打勾', async () => {
+    vi.mocked(getLLMStatus).mockRejectedValueOnce(new Error('network down'))
+
+    const { wrapper } = mountView(309)
+    await flushPromises()
+
+    const modelStep = () =>
+      wrapper.find('[data-testid="onboarding-step-model"]')
+    expect(modelStep().attributes('data-done')).toBe('false')
+    expect(modelStep().text(), '网络失败不应误报为「未检测到模型」').toContain('检查失败')
+
+    vi.mocked(getLLMStatus).mockResolvedValue(llmStatusFixture(true) as never)
+    await wrapper.find('[data-testid="onboarding-refresh"]').trigger('click')
+    await flushPromises()
+
+    expect(modelStep().attributes('data-done')).toBe('true')
+  })
+
+  it('重新检查：重拉模型状态与统计（步骤 2-4 的真实数据）', async () => {
+    const { wrapper } = mountView(310)
+    await flushPromises()
+
+    expect(getLLMStatus).toHaveBeenCalledTimes(1)
+    expect(getUserStats).toHaveBeenCalledTimes(1)
+
+    await wrapper.find('[data-testid="onboarding-refresh"]').trigger('click')
+    await flushPromises()
+
+    expect(getLLMStatus).toHaveBeenCalledTimes(2)
+    expect(getUserStats).toHaveBeenCalledTimes(2)
+  })
+
+  it('清单步骤动作可导航到知识库与对话', async () => {
+    const { wrapper, push } = mountView(311)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="onboarding-action-knowledge"]').trigger('click')
+    expect(push).toHaveBeenCalledWith('/knowledge')
+    await wrapper.find('[data-testid="onboarding-action-upload"]').trigger('click')
+    expect(push).toHaveBeenCalledWith('/knowledge')
+    await wrapper.find('[data-testid="onboarding-action-chat"]').trigger('click')
+    expect(push).toHaveBeenCalledWith('/chat')
+  })
+
   it('统计降级（degraded=true）时不把全零当作 0/4 展示', async () => {
+    // 守卫用例（基线无清单，故不构成红证据）：防止将来把降级数据当真实 0 渲染
     vi.mocked(getUserStats).mockResolvedValue({
       data: {
         ...statsFixture().data,
