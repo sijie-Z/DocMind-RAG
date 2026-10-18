@@ -695,6 +695,13 @@ export default {
   },
   workflow: {
     description: '把复杂 AI 任务拆成阶段化流水线，用统一的指标和状态管理来观察执行质量。',
+    editor: {
+      clearConfirmTitle: '清空画布',
+      clearConfirmContent: '清空后自动保存将在 {n} 秒内把空画布写回，覆盖已保存的版本。确定要清空画布吗？',
+      clearConfirmPositive: '清空',
+      clearConfirmNegative: '取消',
+      emptyCanvasAutoSaveBlocked: '画布为空，已跳过自动保存：已保存的版本未被覆盖。如需保存空画布，请手动点击「保存」。',
+    },
   },
   notifications: {
     markAllRead: '全部已读',
