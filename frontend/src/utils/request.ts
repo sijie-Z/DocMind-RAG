@@ -6,6 +6,17 @@ import { useAppStore } from '@/stores/app'
 import { createDiscreteApi } from 'naive-ui'
 import { getToken, getRefreshToken, setToken, setRefreshToken } from '@/utils/auth'
 
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /**
+     * 每请求重试预算覆盖（默认 MAX_RETRIES=3 → 最多 4 次尝试）。
+     * 首屏聚合请求（仪表盘）传 1：单接口慢/抖动时最多 2 次尝试即报错，
+     * 由所在区块错误态兜底，不把整屏拖进分钟级等待。
+     */
+    __maxRetries?: number
+  }
+}
+
 // 创建独立的 UI API，用于在非组件环境下显示消息
 const { message } = createDiscreteApi(['message'])
 
@@ -318,6 +329,12 @@ request.interceptors.response.use(
                 return request(originalRequest)
               } catch (refreshErr) {
                 rejectQueue(refreshErr)
+                // 标记「会话已被本拦截器判定过期」：续期失败错误可能没有
+                // response.status（如 refresh_token 缺失/续期网络异常），
+                // store 与路由守卫据此仍走清号逻辑，不误判为服务端 5xx。
+                if (refreshErr && typeof refreshErr === 'object') {
+                  ;(refreshErr as { authSessionExpired?: boolean }).authSessionExpired = true
+                }
                 const userStore = useUserStore()
                 // 跳转由本拦截器统一执行；store 只清态与吊销，避免异步跳转竞态
                 userStore.logout({ navigate: false })
@@ -404,6 +421,13 @@ const MAX_RETRIES = 3
 const RETRY_BASE_DELAY_MS = 1000
 const RETRYABLE_STATUS = new Set([502, 503, 504])
 
+/**
+ * 首屏聚合请求配置：重试预算降为 1 次（默认 3 次）。
+ * 用于仪表盘等一屏多请求场景 —— 单接口失败最多 2 次尝试即落到区块错误态，
+ * 避免「30s 超时 × 4 次尝试」把首屏拖到分钟级。
+ */
+export const FIRST_SCREEN_REQUEST_CONFIG = { __maxRetries: 1 } as const
+
 request.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -423,9 +447,14 @@ request.interceptors.response.use(
     const isRetryableStatus = error.response ? RETRYABLE_STATUS.has(error.response.status) : false
     if (!isNetworkError && !isRetryableStatus) return Promise.reject(error)
 
-    // Track retry count
+    // Track retry count（每请求可通过 __maxRetries 覆盖预算，首屏请求传 1）
     const retryCount = (config as ExtendedAxiosConfig & { __retryCount?: number }).__retryCount ?? 0
-    if (retryCount >= MAX_RETRIES) return Promise.reject(error)
+    const configuredMaxRetries = config.__maxRetries
+    const maxRetries =
+      typeof configuredMaxRetries === 'number' && Number.isInteger(configuredMaxRetries) && configuredMaxRetries >= 0
+        ? configuredMaxRetries
+        : MAX_RETRIES
+    if (retryCount >= maxRetries) return Promise.reject(error)
 
     // Exponential backoff with jitter
     const delay = RETRY_BASE_DELAY_MS * Math.pow(2, retryCount) + Math.random() * 500

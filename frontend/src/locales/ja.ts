@@ -101,7 +101,9 @@ export default {
     used: '使用済み',
     available: '利用可能',
     activityTrend: 'アクティビティ推移',
-    recentActivity: '最近のアクティビティ'
+    recentActivity: '最近のアクティビティ',
+    revokeSession: 'デバイスをログアウト',
+    revokeSessionConfirm: 'このデバイスをログアウトしますか？再度ログインが必要になります。'
   },
   users: {
     searchPlaceholder: 'ユーザーを検索...',
@@ -154,6 +156,7 @@ export default {
     level5: 'レベル 5',
     levelOther: 'その他',
     createdAt: '作成日時',
+    batchDeleteConfirm: '選択した {count} 件の組織を削除しますか？この操作は元に戻せません。',
     addMember: 'メンバーを追加',
     selectUser: 'ユーザーを選択',
     removeMember: '削除',
@@ -200,6 +203,11 @@ export default {
     noHistory: '履歴なし',
     backToBottom: '最新のメッセージに戻る',
     stopGenerating: '生成を停止',
+    // E7 三状態の可視性：履歴読み込み / thinking / 停止済み
+    loadingHistory: '履歴を読み込み中...',
+    thinkingLabel: '思考プロセス',
+    generationStopped: '停止しました',
+    stoppedHint: '続けて質問するか、回答を再生成できます',
     suggestions: {
       quantum: '量子コンピュータについて説明して',
       quantumDesc: '基本的な原理を簡単な言葉で説明してください',
@@ -220,6 +228,7 @@ export default {
     removeFailedAttachments: '解析に失敗した添付ファイルがあります。削除または再アップロードしてから質問してください',
     attachmentsNotReady: '添付ファイルの準備ができていません。解析が完了してから使用してください',
     chatCleared: '対話履歴をクリアしました',
+    clearConfirm: '現在の会話のすべてのメッセージを削除します。この操作は元に戻せません。よろしいですか？',
     clearFailed: 'クリアに失敗しました',
     unbindSuccess: 'ドキュメントの紐付けを解除しました。ナレッジベース全体を対象に回答します',
     unbindFailed: '紐付けの解除に失敗しました',
@@ -272,6 +281,9 @@ export default {
     msgLoadFailed: '履歴メッセージの読み込みに失敗しました',
     promptApplied: 'プロンプトテンプレート「{name}」を適用しました。対話を開始してください',
     promptDefaultName: '無題',
+    currentTemplate: '現在のテンプレート：{name}',
+    clearTemplate: 'クリア',
+    promptCleared: 'プロンプトテンプレートを解除しました',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
     sseWarning: 'サーバーからの通知：今回の回答が不完全な可能性があります',
     backToConversations: '対話リストに戻る',
@@ -297,6 +309,11 @@ export default {
       rules: '規程',
       training: '研修資料',
       other: 'その他'
+    },
+    graph: {
+      zoomIn: '拡大',
+      zoomOut: '縮小',
+      fitView: '表示をリセット'
     },
     uploadFirst: '最初のファイルをアップロード',
     empty: 'ドキュメントがありません',
@@ -397,7 +414,16 @@ export default {
     },
     backToHome: 'ホームへ戻る',
     backToWorkbench: 'ワークスペースへ移動',
-    back: '前のページに戻る'
+    back: '前のページに戻る',
+    serviceUnavailable: {
+      title: 'サービスが一時的に利用できません',
+      subtitle: 'サーバーに接続できません。しばらくしてから再試行してください。ログイン状態は保持されています。',
+      retry: '再試行'
+    },
+    offlineBanner: {
+      message: 'サービスが一時的に利用できません。ローカルにキャッシュされたデータを表示しています',
+      retry: '再試行'
+    }
   },
   login: {
     welcomeBack: 'おかえりなさい',
@@ -616,6 +642,8 @@ export default {
     noResults: '結果が見つかりませんでした',
     noResultsDesc: '別のキーワードを試すか、フィルタを調整してください',
     fileContent: 'ファイル内容',
+    askAIQuestion: 'ファイル「{filename}」について：{query}',
+    askAIQuestionGeneric: 'ファイル「{filename}」の主な内容を要約してください',
   },
   conversations: {
     title: '対話履歴',
@@ -651,6 +679,21 @@ export default {
       clearConfirmPositive: 'クリア',
       clearConfirmNegative: 'キャンセル',
       emptyCanvasAutoSaveBlocked: 'キャンバスが空のため、保存済みバージョンを保護するために自動保存をスキップしました。空のキャンバスを保存するには、手動で「保存」をクリックしてください。',
+      saveSuccess: 'ワークフローを保存しました',
+      saveFailed: '保存に失敗しました',
+      autoSaveFailed: '自動保存に失敗しました。変更は保存されていません。保存ステータスをクリックすると再試行できます。',
+      saveStatusUnsaved: '未保存',
+      saveStatusSaving: '保存中',
+      saveStatusSaved: '保存済み',
+      saveStatusError: '保存失敗',
+      saveRetry: '再試行',
+      saveRetryHint: '保存に失敗しました。クリックして再試行',
+      leaveConfirmTitle: 'エディターを離れる',
+      leaveConfirmContent: 'このワークフローには未保存の変更があり、離れると失われます。離れますか？',
+      leaveConfirmPositive: '離れる',
+      leaveConfirmNegative: 'キャンセル',
+      togglePanel: 'プロパティパネル',
+      clickToAddHint: 'クリックまたはドラッグでノードを追加',
     },
   },
   notifications: {
@@ -662,6 +705,12 @@ export default {
     batchDeleteFailed: '一括削除に失敗しました',
   },
 
+  agent: {
+    clearConfirmTitle: '現在のセッションのメッセージをクリア',
+    clearConfirm: '現在のセッションで表示中のメッセージのみをクリアします。他のセッションには影響しません。よろしいですか？',
+    deleteSessionConfirmTitle: '現在のセッションを削除',
+    deleteSessionConfirm: 'セッション「{title}」とそのチャット履歴を削除します。この操作は元に戻せません。削除しますか？',
+  },
   agentReplay: {
     entry: 'リプレイを見る',
     title: '実行リプレイ',
@@ -830,6 +879,8 @@ export default {
       query: '入力',
       error: '最近のエラー',
       unavailable: '結果を表示できません（タスクが存在しないか、表示権限がありません）',
+      refresh: '結果を更新',
+      refreshed: '結果を更新しました',
       taskState: {
         pending: '待機中',
         running: '実行中',
@@ -928,6 +979,7 @@ export default {
   },
   router: {
     notFound: 'ページが見つかりません',
+    serviceUnavailable: 'サービス一時利用不可',
     welcome: 'ようこそ',
     login: 'ログイン',
     register: '登録',
