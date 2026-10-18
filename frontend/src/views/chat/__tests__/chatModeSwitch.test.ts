@@ -138,8 +138,9 @@ describe('B2 · 聊天页「快速问答 / 深度分析（Agent）」模式开�
     group.vm.$emit('update:value', 'deep')
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.props('useAgent')).toBe(true)
-    expect(wrapper.props('useSSE')).toBe(true)
+    const p = wrapper.props() as unknown as Record<string, boolean>
+    expect(p.useAgent).toBe(true)
+    expect(p.useSSE).toBe(true)
   })
 
   it('切回快速问答 → useAgent=false（不再走 PER）', async () => {
@@ -147,7 +148,7 @@ describe('B2 · 聊天页「快速问答 / 深度分析（Agent）」模式开�
     await wrapper.setProps({ useAgent: true, useSSE: true })
     wrapper.findComponent(NRadioGroupStub).vm.$emit('update:value', 'quick')
     await wrapper.vm.$nextTick()
-    expect(wrapper.props('useAgent')).toBe(false)
+    expect((wrapper.props() as unknown as Record<string, boolean>).useAgent).toBe(false)
   })
 })
 
