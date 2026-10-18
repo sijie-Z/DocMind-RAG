@@ -447,6 +447,7 @@ class AgentService:
         *,
         config: AgentConfig | None = None,
         claim: bool = True,
+        document_context: str | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """从 checkpoint 恢复一个未终态任务（issue #201 最小版）。
 
@@ -459,6 +460,10 @@ class AgentService:
 
         claim=False：调用方已先走 prepare_resume（端点预检拿 HTTP 状态码）；
         这里只补读快照，不再重复认领。
+
+        document_context（T14）：@ 引用文档摘要段。显式入参优先；未显式传入时
+        从快照 ctx 取回（断流前那次 run 的引用上下文），透传给 agent.run——
+        恢复后的 planner / executor 与断流前看到同一份引用内容。
         """
         if not self.client:
             yield AgentEvent(type="error", content="LLM 未配置，请检查 DEEPSEEK_API_KEY 环境变量。")
@@ -473,6 +478,11 @@ class AgentService:
             query = (payload.get("ctx") or {}).get("query") or task.query
             agent_config = AgentConfig.from_dict(payload.get("config") or {})
             session_id = payload.get("session_id") or None
+            if document_context is None:
+                snapshot_document_context = (payload.get("ctx") or {}).get("document_context")
+                # 值级闸门（与 loop 读侧同口径）：非字符串绝不透传。
+                if isinstance(snapshot_document_context, str) and snapshot_document_context:
+                    document_context = snapshot_document_context
         else:
             # 快照缺失/损坏：降级为从规划阶段重跑（仍幂等）；规则取调用方传入的配置。
             logger.warning("任务 %s 无可用快照，resume 从规划阶段重新开始", log_safe(task_id))
@@ -494,6 +504,7 @@ class AgentService:
         try:
             async for event in agent.run(
                 query, task_id=task_id, resume=payload, session_id=session_id,
+                document_context=document_context,
             ):
                 event.task_id = task_id
                 yield event

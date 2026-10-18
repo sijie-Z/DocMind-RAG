@@ -197,6 +197,11 @@ class ExecutionContext:
     goal: str = ""
     plan_summary: str = ""
 
+    # ── 用户 @ 引用文档摘要段（T14）──
+    # 随 checkpoint 快照跨断流恢复：resume 后的 planner / executor 仍能看到
+    # 用户显式引用的文档正文（此前只活在发起 run 的内存里，断流即丢）。
+    document_context: str = ""
+
     # ── Execution — step tracking ──
     current_step_id: str | None = None
     completed_steps: list[StepRecord] = field(default_factory=list)
@@ -330,6 +335,8 @@ class ExecutionContext:
         data.update({
             "v": 1,
             "current_step_id": self.current_step_id,
+            # T14：@引用摘要段随快照恢复（键缺失的旧快照 → 读侧默认空串）。
+            "document_context": self.document_context,
             "artifacts": _normalize_artifact_values(self.artifacts, source="snapshot-write"),
         })
         return data
@@ -349,6 +356,17 @@ class ExecutionContext:
         ctx.goal = data.get("goal") or ""
         ctx.plan_summary = data.get("plan_summary") or ""
         ctx.current_step_id = data.get("current_step_id")
+        # T14：@引用摘要段的读侧值级闸门（与 partial_output 同口径）——坏形状
+        # 降级为空串并留 warning，绝不把坏值带进运行态/下一次快照。
+        raw_document_context = data.get("document_context")
+        if isinstance(raw_document_context, str):
+            ctx.document_context = raw_document_context
+        elif raw_document_context is not None:
+            logger.warning(
+                "checkpoint 快照值级漂移（document_context, type=%s）："
+                "按默认降级（无引用上下文）",
+                type(raw_document_context).__name__,
+            )
         ctx.artifacts = _normalize_artifact_values(
             dict(data.get("artifacts") or {}), source="snapshot-read",
         )
