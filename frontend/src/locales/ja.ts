@@ -386,7 +386,16 @@ export default {
     },
     backToHome: 'ホームへ戻る',
     backToWorkbench: 'ワークスペースへ移動',
-    back: '前のページに戻る'
+    back: '前のページに戻る',
+    serviceUnavailable: {
+      title: 'サービスが一時的に利用できません',
+      subtitle: 'サーバーに接続できません。しばらくしてから再試行してください。ログイン状態は保持されています。',
+      retry: '再試行'
+    },
+    offlineBanner: {
+      message: 'サービスが一時的に利用できません。ローカルにキャッシュされたデータを表示しています',
+      retry: '再試行'
+    }
   },
   login: {
     welcomeBack: 'おかえりなさい',
@@ -903,6 +912,7 @@ export default {
   },
   router: {
     notFound: 'ページが見つかりません',
+    serviceUnavailable: 'サービス一時利用不可',
     welcome: 'ようこそ',
     login: 'ログイン',
     register: '登録',

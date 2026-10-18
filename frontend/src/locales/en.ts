@@ -439,7 +439,16 @@ export default {
     },
     backToHome: 'Back to Home',
     backToWorkbench: 'Go to Dashboard',
-    back: 'Go Back'
+    back: 'Go Back',
+    serviceUnavailable: {
+      title: 'Service Temporarily Unavailable',
+      subtitle: 'Cannot reach the server. Please try again later. You are still signed in.',
+      retry: 'Retry'
+    },
+    offlineBanner: {
+      message: 'Service temporarily unavailable; showing locally cached data',
+      retry: 'Retry'
+    }
   },
   login: {
     welcomeBack: 'Welcome Back',
@@ -978,6 +987,7 @@ export default {
   },
   router: {
     notFound: 'Page Not Found',
+    serviceUnavailable: 'Service Temporarily Unavailable',
     welcome: 'Welcome',
     login: 'Login',
     register: 'Register',
