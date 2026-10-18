@@ -365,6 +365,9 @@ export default {
     uploadList: 'Task List',
     noActiveTasks: 'No active tasks',
     clearFinished: 'Clear finished tasks',
+    cancelUpload: 'Cancel upload',
+    removeFromList: 'Remove from list',
+    uploadCancelled: 'Upload canceled',
     table: {
       name: 'File Name',
       size: 'Size',

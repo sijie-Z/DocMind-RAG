@@ -326,6 +326,9 @@ export default {
     uploadList: 'タスクリスト',
     noActiveTasks: '実行中のタスクはありません',
     clearFinished: '完了したタスクをクリア',
+    cancelUpload: 'アップロードをキャンセル',
+    removeFromList: 'リストから削除',
+    uploadCancelled: 'アップロードをキャンセルしました',
     table: {
       name: 'ファイル名',
       size: 'サイズ',

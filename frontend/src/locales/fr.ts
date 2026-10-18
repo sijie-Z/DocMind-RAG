@@ -326,6 +326,9 @@ export default {
     uploadList: 'Liste des tâches',
     noActiveTasks: 'Aucune tâche en cours',
     clearFinished: 'Effacer les tâches terminées',
+    cancelUpload: 'Annuler le téléchargement',
+    removeFromList: 'Retirer de la liste',
+    uploadCancelled: 'Téléchargement annulé',
     table: {
       name: 'Nom du fichier',
       size: 'Taille',
