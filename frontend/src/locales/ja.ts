@@ -201,6 +201,11 @@ export default {
     noHistory: '履歴なし',
     backToBottom: '最新のメッセージに戻る',
     stopGenerating: '生成を停止',
+    // E7 三状態の可視性：履歴読み込み / thinking / 停止済み
+    loadingHistory: '履歴を読み込み中...',
+    thinkingLabel: '思考プロセス',
+    generationStopped: '停止しました',
+    stoppedHint: '続けて質問するか、回答を再生成できます',
     suggestions: {
       quantum: '量子コンピュータについて説明して',
       quantumDesc: '基本的な原理を簡単な言葉で説明してください',

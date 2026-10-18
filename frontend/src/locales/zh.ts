@@ -218,6 +218,11 @@ export default {
     noHistory: '暂无会话历史',
     backToBottom: '回到最新消息',
     stopGenerating: '停止生成',
+    // E7 三态可见性：历史加载 / thinking 折叠区 / 已停止
+    loadingHistory: '正在加载历史消息...',
+    thinkingLabel: '思考过程',
+    generationStopped: '已停止',
+    stoppedHint: '可继续提问或重新生成',
     suggestions: {
       quantum: '解释量子计算',
       quantumDesc: '用简单的语言解释量子计算的基本原理',
