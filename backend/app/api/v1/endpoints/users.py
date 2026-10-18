@@ -470,6 +470,9 @@ async def get_user_profile(
             "bio": bio,
             "organization_id": current_user.organization_id,
             "role": current_user.role,
+            # 与后端鉴权口径一致（is_superuser or role=="admin"）：前端
+            # isAdmin 组合判定依赖此字段，缺失会让超管失去管理入口。
+            "is_superuser": bool(current_user.is_superuser),
             "is_active": current_user.is_active,
             "created_at": current_user.created_at,
             "last_login_at": current_user.last_login_at,

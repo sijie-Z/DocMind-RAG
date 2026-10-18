@@ -43,6 +43,7 @@ export interface UserProfileResponse {
   bio: string | null
   organization_id: number | null
   role: 'admin' | 'user'
+  is_superuser: boolean
   is_active: boolean
   created_at: string | null
   last_login_at: string | null
