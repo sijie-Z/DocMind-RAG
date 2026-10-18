@@ -459,11 +459,11 @@ class TestAgentMemorySystem:
         assert len(ams.reflective.patterns) >= 0  # at minimum doesn't crash
 
     def test_get_memory_system_caches(self):
-        a = get_memory_system("shared-agent")
-        b = get_memory_system("shared-agent")
+        a = get_memory_system(1, 1, "shared-agent")
+        b = get_memory_system(1, 1, "shared-agent")
         assert a is b
 
     def test_get_memory_system_different_agents(self):
-        a = get_memory_system("agent-a")
-        b = get_memory_system("agent-b")
+        a = get_memory_system(1, 1, "agent-a")
+        b = get_memory_system(1, 1, "agent-b")
         assert a is not b
