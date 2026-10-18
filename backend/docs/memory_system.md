@@ -176,7 +176,7 @@ class AgentMemorySystem:
         self.reflective = ReflectiveMemory()
 ```
 
-注:**`namespace` 不在 AgentMemorySystem 上**。冒号拼接的 `org_id:user_id:agent_id` 在 `AgentMemoryBridge.__init__` 里构造,只用来索引 `get_memory_system(namespace)` 的进程内单例字典,**不**参与 Redis 持久化 key。
+注:命名空间 `org_id:user_id:agent_id` 由 `get_memory_system(org_id, user_id, agent_id)` 内部拼装(A1 记忆节点 IDOR 修复后,调用方必须显式传租户上下文,不再自行拼接或传入完整命名空间字符串)。拼装结果既是进程内单例字典 `memory_systems` 的 key,也会作为 `AgentMemorySystem.agent_id` 的值进入 Redis 持久化 key `agent:memory:<namespace>`。
 
 **核心方法**:
 
@@ -464,7 +464,7 @@ A:每个 Experience 维护 `applicable_to`(适用场景)+ `avoid_for`(禁用场�
 | WorkingMemory | `memory_service.py:311` |
 | ReflectiveMemory | `memory_service.py:381` |
 | AgentMemorySystem | `memory_service.py:453` |
-| get_memory_system factory | `memory_service.py:737` |
+| get_memory_system factory | `memory_service.py:809` |
 | MemoryBridge | `backend/app/agent/memory_bridge.py:26` |
 | Phase 0 召回 | `memory_bridge.py:78-121` |
 | Embedding 注入 | `memory_bridge.py:63-74` |

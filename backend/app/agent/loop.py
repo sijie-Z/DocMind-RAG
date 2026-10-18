@@ -143,10 +143,15 @@ class PERAgentLoop:
         self,
         openai_client: AsyncOpenAI,
         config: AgentConfig | None = None,
-        organization_id: int = 1,
+        organization_id: int | None = None,
         user_id: int = 0,
         execution_mode: str = "dag",
     ):
+        # A2 P0（fail-closed）：PER 运行必须有组织上下文；默认值不再回落到 1 号组织。
+        if organization_id is None:
+            raise ValueError(
+                "PERAgentLoop 缺少 organization_id，拒绝在无组织上下文下运行"
+            )
         self.client = openai_client
         self.config = config or AgentConfig()
         self.organization_id = organization_id

@@ -17,6 +17,7 @@ from app.exceptions import AppError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
 from app.models.user import User
+from app.services.document_status import mark_document_failed, mark_document_indexed
 from app.services.embedding_service import embedding_service
 
 router = APIRouter()
@@ -206,8 +207,8 @@ async def seed_demo_data(
                         start_pos=i * 500,
                         end_pos=(i + 1) * 500,
                     ))
-                doc.status = DocumentStatus.FAILED
-                doc.parse_error = f"示例数据向量化失败: {embed_error}"
+                # A3-P0：统一状态写入（FAILED 不覆盖 INDEXED；写入点集中）
+                mark_document_failed(doc, f"示例数据向量化失败: {embed_error}")
                 documents_failed.append({
                     "id": doc_id,
                     "title": doc_data["title"],
@@ -258,8 +259,7 @@ async def seed_demo_data(
             if index_failures >= len(doc_data["chunks"]):
                 # issue #229：一条 chunk 都没进 ES —— 不得写 INDEXED
                 # （「状态 = INDEXED ⟹ 可被检索」不变式的 demo 路径执行者）。
-                doc.status = DocumentStatus.FAILED
-                doc.parse_error = "示例数据 ES 索引全部失败"
+                mark_document_failed(doc, "示例数据 ES 索引全部失败")
                 documents_failed.append({
                     "id": doc_id,
                     "title": doc_data["title"],
@@ -274,8 +274,25 @@ async def seed_demo_data(
                     f"{len(doc_data['chunks'])} chunk(s) failed to index"
                 )
 
-            doc.status = DocumentStatus.INDEXED
-            doc.indexed_at = datetime.now(UTC)
+            # A3-P0：INDEXED 只能在校验通过后写入——统一写入函数先回读 ES
+            # （有 chunk / 带 embedding / 组织一致），不满足则如实 FAILED。
+            try:
+                await mark_document_indexed(
+                    doc,
+                    expected_chunks=len(doc_data["chunks"]),
+                    organization_id=org_id,
+                )
+            except Exception as verify_err:
+                logger.error(
+                    f"Index verification failed for {doc_data['title']}: {verify_err}"
+                )
+                mark_document_failed(doc, f"示例数据索引校验失败: {verify_err}")
+                documents_failed.append({
+                    "id": doc_id,
+                    "title": doc_data["title"],
+                    "error": doc.parse_error,
+                })
+                continue
             created_doc_ids.append(doc_id)
             logger.info(f"Created demo document: {doc_data['title']} ({doc_id})")
 

@@ -9,25 +9,18 @@
  *
  * 变异点：去掉角标渲染 / 去掉 hasDemoSources 判定（恒渲染或恒不渲染）→ 本文件红。
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
 import ChatMessages from '../components/ChatMessages.vue'
 import type { ChatMessage } from '@/types/chat'
 
-const DynamicScroller = defineComponent({
-  props: { items: { type: Array, default: () => [] } },
-  setup(props, { slots }) {
-    return () =>
-      h('div', props.items.map((item, index) => slots.default?.({ item, index, active: true })))
-  },
-})
-
-const DynamicScrollerItem = defineComponent({
-  setup(_, { slots }) {
-    return () => h('div', slots.default?.())
-  },
+// E5 起虚拟滚动为 ChatMessages 局部引入（不再经 main.ts 全局注册），测试侧
+// 用 vi.mock 把模块替换为直通 stub（按 items 逐项渲染 default slot，语义同旧 stub）。
+vi.mock('vue-virtual-scroller', async () => {
+  const stubs = await import('@/test-utils/virtualScroller')
+  return { DynamicScroller: stubs.DynamicScrollerStub, DynamicScrollerItem: stubs.DynamicScrollerItemStub }
 })
 
 const MarkdownStub = defineComponent({
@@ -83,7 +76,6 @@ function mountChat(messages: ChatMessage[]) {
     props: { messages, isLoading: false, showBackToBottom: false, userAvatar: '', suggestions: [] },
     global: {
       plugins: [i18n],
-      components: { DynamicScroller, DynamicScrollerItem },
       stubs: {
         Markdown: MarkdownStub,
         Popover: NPopoverPassthrough,

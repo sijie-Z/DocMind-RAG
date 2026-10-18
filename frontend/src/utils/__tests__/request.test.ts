@@ -159,3 +159,37 @@ describe('401 · 静默刷新与重放', () => {
     expect(replayed.every((h) => h === 'Bearer new-token')).toBe(true)
   })
 })
+
+describe('瞬态失败重试预算 · 首屏请求降级', () => {
+  it('默认 GET：503 最多 4 次尝试（30s 超时 × 4，旧行为不回归）', async () => {
+    vi.useFakeTimers()
+    try {
+      responses = Array.from({ length: 10 }, () => ({ status: 503 }))
+
+      const p = request.get('/monitoring/llm-stats')
+      const assertion = expect(p).rejects.toBeTruthy()
+      await vi.runAllTimersAsync()
+      await assertion
+
+      expect(seen.length).toBe(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('__maxRetries=1：首屏请求最多 2 次尝试即报错（交给区块错误态）', async () => {
+    vi.useFakeTimers()
+    try {
+      responses = Array.from({ length: 10 }, () => ({ status: 503 }))
+
+      const p = request.get('/monitoring/llm-stats', { __maxRetries: 1 })
+      const assertion = expect(p).rejects.toBeTruthy()
+      await vi.runAllTimersAsync()
+      await assertion
+
+      expect(seen.length).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

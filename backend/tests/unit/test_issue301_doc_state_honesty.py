@@ -442,8 +442,22 @@ class TestDemoSeedHonesty:
         async def _fake_index(doc_id, document):
             es_calls.append(doc_id)
 
+        class _VerifyES:
+            class _Indices:
+                async def refresh(self, index):
+                    pass
+
+            indices = _Indices()
+
+            async def count(self, index=None, query=None):
+                return {"count": 1}
+
+        async def _fake_get_elasticsearch():
+            return _VerifyES()
+
         with patch.object(demo_mod.embedding_service, "get_embeddings", _embeddings_ok), \
-             patch.object(demo_mod.ElasticsearchTools, "index_document", _fake_index):
+             patch.object(demo_mod.ElasticsearchTools, "index_document", _fake_index), \
+             patch("app.services.document_status.get_elasticsearch", _fake_get_elasticsearch):
             body = await demo_mod.seed_demo_data(current_user=_demo_user(), db=db)
 
         docs = [o for o in added if isinstance(o, Document)]

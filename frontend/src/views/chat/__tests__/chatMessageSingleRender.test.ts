@@ -9,27 +9,18 @@
  * 变异点：还原「光标 span 插在 Markdown 与 v-else 之间」的劫持结构 →
  * 「完成态恰渲染一份」用例红（内容出现次数 1→2、.whitespace-pre-wrap 出现）。
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
 import ChatMessages from '../components/ChatMessages.vue'
 import type { ChatMessage } from '@/types/chat'
 
-// DynamicScroller 为全局注册（main.ts app.use(VueVirtualScroller)），测试侧用
-// 直通 stub 复现「按 items 逐项渲染 default slot」的行为。
-const DynamicScroller = defineComponent({
-  props: { items: { type: Array, default: () => [] } },
-  setup(props, { slots }) {
-    return () =>
-      h('div', props.items.map((item, index) => slots.default?.({ item, index, active: true })))
-  },
-})
-
-const DynamicScrollerItem = defineComponent({
-  setup(_, { slots }) {
-    return () => h('div', slots.default?.())
-  },
+// E5 起虚拟滚动为 ChatMessages 局部引入（不再经 main.ts 全局注册），测试侧
+// 用 vi.mock 把模块替换为直通 stub（按 items 逐项渲染 default slot，语义同旧 stub）。
+vi.mock('vue-virtual-scroller', async () => {
+  const stubs = await import('@/test-utils/virtualScroller')
+  return { DynamicScroller: stubs.DynamicScrollerStub, DynamicScrollerItem: stubs.DynamicScrollerItemStub }
 })
 
 // Markdown stub：把 content 原样渲染为文本（真实实现走 v-html，文本内容一致）——
@@ -69,7 +60,6 @@ function mountChat(messages: ChatMessage[], isLoading = false) {
     props: { messages, isLoading, showBackToBottom: false, userAvatar: '', suggestions: [] },
     global: {
       plugins: [i18n],
-      components: { DynamicScroller, DynamicScrollerItem },
       stubs: {
         Markdown: MarkdownStub,
         'n-icon': true,

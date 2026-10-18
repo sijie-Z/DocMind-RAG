@@ -11,7 +11,7 @@ from aiokafka import AIOKafkaConsumer, TopicPartition
 from aiokafka.structs import OffsetAndMetadata
 
 from app.core.config import settings
-from app.worker.doc_processor import processor
+from app.worker.doc_processor import DEFERRED, processor
 from app.worker.heartbeat import touch_heartbeat
 
 # 配置日志
@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 # 空闲时也要周期性回到循环里刷新心跳：getmany 即使没有消息也最多阻塞这么久
 POLL_TIMEOUT_MS = 5000
+
+# A3-P0：锁竞争（processor 返回 DEFERRED）时的延迟重投间隔。这类消息既不提交
+# 偏移、也不消耗重试预算；回卷到该条偏移后等一小段时间再拉取，避免热循环。
+DEFER_RETRY_DELAY_SECONDS = 5.0
 
 # issue #301 批 D（#30）：文档级失败的消息允许的投递尝试次数（含首次）。
 # 失败 → 不提交偏移、停住消费（RedeliveryHalt）→ 容器重启后从上次提交点重投；
@@ -75,6 +79,27 @@ async def _record_failed_attempt(job_id: int | None) -> int:
         return 0
 
 
+async def _defer_message(consumer, msg) -> None:
+    """A3-P0：把「未了结」的消息回卷到自身偏移，延迟后重投。
+
+    调用方必须停止处理**本分区**本批的后续消息（它们会随回卷一起重投）；
+    若先处理并提交后续消息，按条提交的位点会越过这条未了结消息，等于把它丢掉。
+    """
+    if DEFER_RETRY_DELAY_SECONDS > 0:
+        await asyncio.sleep(DEFER_RETRY_DELAY_SECONDS)
+    tp = TopicPartition(msg.topic, msg.partition)
+    # aiokafka 0.14 的 seek() 是同步方法（只更新本地订阅位点，不返回协程）——
+    # 绝不能 await（A3 独立对抗评审 blocker：await 同步 seek 必抛 TypeError）。
+    consumer.seek(tp, msg.offset)
+    logger.warning(
+        "[CONSUMER] deferred topic=%s partition=%s offset=%s (another worker holds "
+        "the document lock); offset NOT committed, will be redelivered",
+        msg.topic,
+        msg.partition,
+        msg.offset,
+    )
+
+
 async def run_consume_loop(consumer, process=None, touch=None, record_attempt=None):
     """消费循环：每次 Kafka 轮询返回后刷新心跳（issue #156）。
 
@@ -92,6 +117,9 @@ async def run_consume_loop(consumer, process=None, touch=None, record_attempt=No
     ``RedeliveryHalt`` 停住（重启从最后成功点重投——失败消息与批内未处理消息
     一条不丢），预算耗尽时响亮记录并按条提交（终局/死信语义：文档/任务已 FAILED，
     手动重试入口 = 知识库重建端点）。
+
+    ``DEFERRED``（A3-P0）= 锁被另一处理者持有：**不提交、不记账、不停驻**，回卷
+    到该条偏移延迟重投；本分区本批后续消息一并留给重投（见 ``_defer_message``）。
     """
     process_call = process or processor.process
     beat = touch or touch_heartbeat
@@ -136,6 +164,13 @@ async def run_consume_loop(consumer, process=None, touch=None, record_attempt=No
                         # 绝不允许把异常当成"处理过了"提交偏移，也不允许静默吞掉。
                         processed = False
                         logger.error(f"Error processing message: {e}", exc_info=True)
+
+                    if processed is DEFERRED:
+                        # A3-P0：未了结（锁竞争）——不提交、不记账；回卷该分区
+                        # 偏移做延迟重投。须停止本分区本批后续消息：否则按条
+                        # 提交会越过这条未了结消息，把它永久跳过。
+                        await _defer_message(consumer, msg)
+                        break
 
                     if processed is False:
                         # 文档级失败：不提交该条偏移。重试预算见 _record_failed_attempt。

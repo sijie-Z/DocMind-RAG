@@ -87,14 +87,28 @@
 
         <!-- Error state -->
         <div v-if="!loading && loadError" class="py-20">
-          <n-result status="error" title="加载失败" :description="loadErrorMsg">
+          <n-result status="error" :title="t('prompts.toast.loadFailed')" :description="loadErrorMsg">
             <template #footer>
-              <n-button type="primary" round @click="loadPrompts">重试</n-button>
+              <n-button type="primary" round @click="loadPrompts">{{ t('common.retry') }}</n-button>
             </template>
           </n-result>
         </div>
 
-        <!-- Empty state -->
+        <!-- Empty state：筛选无命中（≠ 空库，不劝创建） -->
+        <div v-else-if="!loadError && filteredPrompts.length === 0 && !loading && hasActiveFilters" class="py-20">
+          <n-empty :description="t('prompts.searchEmpty')">
+            <template #extra>
+              <div class="space-y-3">
+                <p class="text-sm text-gray-400">{{ t('prompts.searchEmptyDesc') }}</p>
+                <n-button type="primary" ghost round @click="clearFilters">
+                  {{ t('prompts.clearFilters') }}
+                </n-button>
+              </div>
+            </template>
+          </n-empty>
+        </div>
+
+        <!-- Empty state：空库 → 创建引导 -->
         <div v-else-if="!loadError && filteredPrompts.length === 0 && !loading" class="py-20">
           <n-empty :description="t('prompts.empty', '暂无提示词模板')">
             <template #extra>
@@ -255,6 +269,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
+import { getErrorMessage } from '@/utils/apiError'
 import { useI18n } from 'vue-i18n'
 import { AddOutline, TrashOutline, CreateOutline, CopyOutline, SparklesOutline, SearchOutline, DocumentTextOutline, PlayOutline, TimeOutline } from '@vicons/ionicons5'
 import { getPrompts, createPrompt, updatePrompt, deletePrompt, seedDefaultPrompts, getPromptVersions, restorePromptVersion, type PromptTemplate, type PromptTemplateVersion } from '@/api/prompt'
@@ -330,6 +345,16 @@ const filteredPrompts = computed(() => {
   return result
 })
 
+/** E14/C1 空态分流：有搜索/分类条件时的空列表 = 筛选无命中，而非空库。 */
+const hasActiveFilters = computed(
+  () => searchQuery.value.trim().length > 0 || activeCategory.value !== null
+)
+
+const clearFilters = () => {
+  searchQuery.value = ''
+  activeCategory.value = null
+}
+
 const getCategoryLabel = (category: string) => {
   const map: Record<string, string> = { general: '通用', rag: 'RAG', translate: '翻译', summary: '摘要', code: '代码' }
   return map[category] || category
@@ -347,10 +372,12 @@ const loadPrompts = async () => {
     const res = await getPrompts()
     prompts.value = res.data || []
     loadError.value = false
+    loadErrorMsg.value = ''
   } catch (error) {
-    message.error('加载失败')
+    // E14/D1+D2：加载失败清空旧列表，仅由页内错误态呈现（不再叠加 toast）
     loadError.value = true
-    loadErrorMsg.value = '加载失败'
+    loadErrorMsg.value = getErrorMessage(error, t('prompts.toast.loadFailed'))
+    prompts.value = []
   } finally {
     loading.value = false
   }
@@ -393,18 +420,17 @@ const handleSubmit = async () => {
     if (editingId.value) {
       const payload: Record<string, unknown> = { ...formModel.value }
       await updatePrompt(editingId.value, payload)
-      message.success('更新成功')
+      message.success(t('prompts.toast.updateSuccess'))
     } else {
       const { change_note, ...createData } = formModel.value
       await createPrompt(createData)
-      message.success('创建成功')
+      message.success(t('prompts.toast.createSuccess'))
     }
     showDrawer.value = false
     loadPrompts()
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error)
-    const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    message.error(detail || msg || '保存失败')
+    // E14/D1：后端 detail 原文优先；axios 英文传输层文案不上屏
+    message.error(getErrorMessage(error, t('prompts.toast.saveFailed')))
   } finally {
     submitting.value = false
   }
@@ -420,8 +446,8 @@ const openVersionHistory = async (promptId: number) => {
     // Refresh current version from prompts list
     const current = prompts.value.find(p => p.id === promptId)
     if (current) currentVersion.value = current.version || 1
-  } catch {
-    message.error('加载版本历史失败')
+  } catch (error) {
+    message.error(getErrorMessage(error, t('prompts.toast.loadVersionsFailed')))
   } finally {
     versionsLoading.value = false
   }
@@ -439,8 +465,8 @@ const restoreVersion = async (ver: PromptTemplateVersion) => {
         message.success(`已回滚到 v${ver.version}`)
         showVersionDrawer.value = false
         loadPrompts()
-      } catch {
-        message.error('回滚失败')
+      } catch (error) {
+        message.error(getErrorMessage(error, t('prompts.toast.restoreFailed')))
       }
     },
   })
@@ -458,7 +484,7 @@ const handleDelete = (id: number) => {
         message.success(t('prompts.toast.deleteSuccess'))
         loadPrompts()
       } catch (error) {
-        message.error(t('prompts.toast.deleteFailed'))
+        message.error(getErrorMessage(error, t('prompts.toast.deleteFailed')))
       }
     },
   })
@@ -468,10 +494,10 @@ const handleSeed = async () => {
   seeding.value = true
   try {
     await seedDefaultPrompts()
-    message.success('初始化成功')
+    message.success(t('prompts.toast.seedSuccess'))
     loadPrompts()
   } catch (error) {
-    message.error('初始化失败')
+    message.error(getErrorMessage(error, t('prompts.toast.seedFailed')))
   } finally {
     seeding.value = false
   }

@@ -14,14 +14,14 @@
           </p>
         </div>
         
-        <div class="flex flex-wrap items-center gap-3">
-          <div class="relative group">
+        <div class="org-header-actions flex flex-wrap items-center gap-3">
+          <div class="org-search-wrap relative group">
             <n-input
               v-model:value="searchText"
               :placeholder="t('org.searchPlaceholder')"
               clearable
               round
-              class="w-64 transition-all duration-300 group-hover:shadow-lg group-hover:shadow-emerald-500/10"
+              class="org-search-input w-64 transition-all duration-300 group-hover:shadow-lg group-hover:shadow-emerald-500/10"
             >
               <template #prefix>
                 <n-icon class="text-emerald-500"><SearchOutline /></n-icon>
@@ -87,9 +87,9 @@
             </n-empty>
           </div>
 
-          <div v-else-if="!permissionDenied && !loadError" class="flex h-full gap-6">
+          <div v-else-if="!permissionDenied && !loadError" class="org-split flex h-full gap-6">
             <!-- 左侧：树形结构 -->
-            <div class="w-1/3 min-w-[300px] flex flex-col bg-white/50 dark:bg-gray-800/30 rounded-2xl border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
+            <div class="org-tree-panel w-1/3 min-w-[300px] flex flex-col bg-white/50 dark:bg-gray-800/30 rounded-2xl border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
               <div class="p-4 border-b border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-900/50">
                 <div class="flex items-center justify-between mb-2">
                   <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ t('org.treeView', '架构树') }}</span>
@@ -127,7 +127,7 @@
             </div>
 
             <!-- 右侧：详细列表 -->
-            <div class="flex-1 flex flex-col bg-white/50 dark:bg-gray-800/30 rounded-2xl border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
+            <div class="org-list-panel flex-1 flex flex-col bg-white/50 dark:bg-gray-800/30 rounded-2xl border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
               <div class="p-4 border-b border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">
                 <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ t('org.detailList', '详细列表') }}</span>
                 <n-space>
@@ -143,6 +143,8 @@
                   :pagination="pagination"
                   :row-key="(row) => row.id"
                   :bordered="false"
+                  :single-line="true"
+                  :scroll-x="960"
                   class="modern-table h-full"
                   @update:checked-row-keys="handleSelectionChange"
                   :row-props="(row) => ({
@@ -719,35 +721,38 @@ const pagination = reactive({
 })
 
 // 4. 表格列定义
+// J2：列宽与行高统一 —— 所有数据列显式宽度/最小宽度（不再靠挤压表头），
+// 表格 single-line + scroll-x 兜底，名称/描述长文本单行省略并悬浮全称。
 const columns = computed<DataTableColumns<Organization>>(() => [
   { type: 'selection', width: 50 },
   {
     title: t('org.name'),
     key: 'name',
-    width: 200,
-    render: (row) => h('div', { style: 'display:flex; align-items:center; gap:8px' }, [
-      h('div', { style: `width:12px; height:12px; border-radius:50%; background-color:${row.color}` }),
-      h('span', row.name)
+    width: 220,
+    ellipsis: { tooltip: true },
+    render: (row) => h('div', { style: 'display:flex; align-items:center; gap:8px; min-width:0' }, [
+      h('div', { style: `width:12px; height:12px; border-radius:50%; flex-shrink:0; background-color:${row.color}` }),
+      h('span', { class: 'truncate', title: row.name }, row.name)
     ])
   },
   {
     title: t('org.level'),
     key: 'level',
-    width: 80,
+    width: 90,
     align: 'center',
     render: (row) => {
       const levels = [
-        t('org.level1'), 
-        t('org.level2'), 
-        t('org.level3'), 
-        t('org.level4'), 
+        t('org.level1'),
+        t('org.level2'),
+        t('org.level3'),
+        t('org.level4'),
         t('org.level5')
       ]
       return levels[row.level - 1] || t('org.levelOther')
     }
   },
-  { title: t('org.description'), key: 'description', ellipsis: { tooltip: true } },
-  { title: t('org.sort'), key: 'sort_order', width: 70, align: 'center' },
+  { title: t('org.description'), key: 'description', minWidth: 200, ellipsis: { tooltip: true } },
+  { title: t('org.sort'), key: 'sort_order', width: 80, align: 'center' },
   {
     title: t('org.createdAt'),
     key: 'created_at',
@@ -906,4 +911,27 @@ onMounted(loadOrganizations)
 <style scoped>
 .organizations-container { padding: 20px; height: 100%; box-sizing: border-box; }
 .organizations-card { height: 100%; }
+
+/* H1：常见宽度断点。旧实现左树恒为 w-1/3 + min-w-[300px]，窄屏无堆叠。 */
+@media (max-width: 1023px) {
+  .org-tree-panel { width: 40%; min-width: 240px; }
+}
+
+@media (max-width: 767px) {
+  .organizations-container { padding: 12px; }
+  .org-header-actions { width: 100%; }
+  .org-search-wrap { width: 100%; }
+  .org-search-input { width: 100%; }
+  .org-split {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .org-tree-panel {
+    width: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
+    max-height: 40%;
+  }
+  .org-list-panel { min-height: 0; }
+}
 </style>

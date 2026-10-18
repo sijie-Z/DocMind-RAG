@@ -248,7 +248,7 @@ async def test_retry_exhausted_step_lands_in_failures_and_report():
         PlanStep(id="s2", description="第二步（必失败）", tool_hint="web_search"),
     ])
 
-    events = [e async for e in executor.execute(plan, ctx=ctx)]
+    events = [e async for e in executor.execute(plan, organization_id=1, ctx=ctx)]
 
     assert plan.steps[1].status == "failed"
     assert ctx.failures, "重试耗尽必须点亮 ctx.failures（修复前恒空）"
@@ -286,7 +286,7 @@ async def test_clean_run_stays_all_green():
     ctx = ExecutionContext(query="q-293-ok")
     plan = Plan(id="p1", goal="g", steps=[PlanStep(id="s1", description="第一步", tool_hint="t")])
 
-    [e async for e in executor.execute(plan, ctx=ctx)]
+    [e async for e in executor.execute(plan, organization_id=1, ctx=ctx)]
 
     assert not ctx.failures
     report = build_run_report(ctx, final_output="答案")
@@ -323,7 +323,7 @@ async def test_tool_always_fails_task_reports_failure_every_dimension(monkeypatc
     step = PlanStep(id="s1", description="搜索外部资料", tool_hint="web_search")
     plan = Plan(id="p1", goal="g", steps=[step])
 
-    events = [e async for e in executor.execute(plan, ctx=ctx)]
+    events = [e async for e in executor.execute(plan, organization_id=1, ctx=ctx)]
 
     types = [e.type for e in events]
     assert "tool_error" in types, f"工具失败必须以 tool_error 暴露: {types}"
@@ -377,7 +377,7 @@ async def test_tool_not_allowed_attempt_records_single_failed_no_fake_completed(
     step = PlanStep(id="s1", description="受限步骤", tool_hint="delegate_subtask")
     plan = Plan(id="p1", goal="g", steps=[step])
 
-    events = [e async for e in executor.execute(plan, ctx=ctx)]
+    events = [e async for e in executor.execute(plan, organization_id=1, ctx=ctx)]
 
     assert any(
         e.type == "tool_error" and e.error_type == "tool_not_allowed" for e in events
