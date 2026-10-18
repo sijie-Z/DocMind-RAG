@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { AttachedFile } from '@/types/chat'
 import { uploadKnowledgeBase, getKnowledgeBase } from '@/api/knowledge'
 import { parseUpload } from '@/api/chat'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 
 export function useChatAttachments() {
   const message = useDedupedMessage()
@@ -27,7 +28,8 @@ export function useChatAttachments() {
       if (pollAborted) return
       try {
         const res = await getKnowledgeBase(docId)
-        const data = res.data?.data || (res.data as Record<string, unknown>)
+        // 宽容解包：{success, data} 信封 → 业务体；裸形态原样返回。
+        const data = apiUnwrap<Record<string, unknown>>(res) || (res.data as Record<string, unknown>)
         const status = data.status
         const rawStatus = data.raw_status || status
 
@@ -130,7 +132,7 @@ export function useChatAttachments() {
         // 标为 failed，success=false）。如实报错，不再进入 parsing 轮询假等待。
         throw new Error(uploadBody.message || t('chat.fileUploadFailed'))
       }
-      const docId = res.data?.data?.id || (res.data as Record<string, unknown>).id
+      const docId = apiUnwrap<{ id?: unknown }>(res)?.id || (res.data as Record<string, unknown>).id
       if (docId) {
         tempFile.id = String(docId)
         tempFile.status = 'parsing'
