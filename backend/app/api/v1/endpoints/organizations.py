@@ -5,7 +5,7 @@ DocMind AI知识库系统 - 组织管理端点
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.notifications import create_notification
@@ -18,7 +18,7 @@ from app.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from app.models.organization import Organization
+from app.models.organization import Organization, user_organization
 from app.models.rbac import PermissionType
 from app.models.user import User
 from app.schemas.organization import OrganizationCreate, OrganizationUpdate
@@ -321,6 +321,9 @@ async def add_organization_member(
     user_obj: Any = user
     old_org_id = user_obj.organization_id
     user_obj.organization_id = org_id
+    # A2 P0：成员表是 token 组织回退的权威依据——加入组织必须同步写入
+    # user_organization 成员关系，否则成员被移出后旧 token 仍会被成员校验放行。
+    await organization_service.add_user_to_organization(db, user_obj, org)
     await db.commit()
 
     await create_notification(
@@ -392,6 +395,16 @@ async def remove_organization_member(
 
     user_obj: Any = user
     user_obj.organization_id = None
+    # A2 P0：删除成员关系，使被移出成员的旧 token 组织回退立即失效（403），
+    # 不等待 token 过期。
+    await db.execute(
+        delete(user_organization).where(
+            and_(
+                user_organization.c.user_id == user_id,
+                user_organization.c.organization_id == org_id,
+            )
+        )
+    )
     await db.commit()
 
     await create_notification(
