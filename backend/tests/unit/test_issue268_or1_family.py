@@ -38,6 +38,7 @@ DB 侧与既有用例同风格：能真跑就真跑（内存 SQLite 真建表）
 「1 号组织数据/缓存零出现」，而不是假对象的善意。
 """
 import asyncio
+import contextlib
 import io
 import uuid
 from types import SimpleNamespace
@@ -364,6 +365,38 @@ class TestWorkflowExecuteOrgDerivation:
 # ══════════════════════════════════════════════════════════════════════════
 # 3 · demo 写路径 —— 归属用户真实组织；无组织显式 403
 # ══════════════════════════════════════════════════════════════════════════
+def _demo_index_verification_patch():
+    """A3 起 demo seed 通过 ``document_status`` 回读 ES 校验后才写 INDEXED。
+
+    本用例只打桩了 ``index_document``，未打桩回读校验用的 ES 客户端：
+    CI 无 ES 时 ``mark_document_indexed`` 抛错 → 所有示例文档判 FAILED →
+    端点 ``success=False``（表现为 ``assert False is True``）。
+
+    A2 分支（A3 合并前）尚无 ``app.services.document_status``，此夹具为 no-op；
+    A3 合并后与它对 ``test_demo_sources_labeled`` / ``test_issue301_doc_state_honesty``
+    的同款夹具保持一致。仅打桩测试环境的外部依赖，不改变任何生产行为。
+    """
+    try:
+        import app.services.document_status  # noqa: F401
+    except ImportError:
+        return contextlib.nullcontext()
+
+    class _VerifyES:
+        class _Indices:
+            async def refresh(self, index):
+                pass
+
+        indices = _Indices()
+
+        async def count(self, index=None, query=None):
+            return {"count": 1}
+
+    async def _fake_get_elasticsearch():
+        return _VerifyES()
+
+    return patch("app.services.document_status.get_elasticsearch", _fake_get_elasticsearch)
+
+
 class TestDemoSeedOrgAttribution:
     def test_demo_seed_orgless_user_forbidden(self, client: TestClient):
         """无组织用户不得加载示例数据（此前固定文本被写进 1 号组织命名空间）。
@@ -422,6 +455,7 @@ class TestDemoSeedOrgAttribution:
                     "index_document",
                     new=AsyncMock(side_effect=_fake_index),
                 ),
+                _demo_index_verification_patch(),
             ):
                 r = client.post("/api/v1/demo/seed")
         finally:

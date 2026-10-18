@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { createI18n } from 'vue-i18n'
+import { defineComponent, h } from 'vue'
+import { NMessageProvider } from 'naive-ui'
 
 import NotificationsView from '../index.vue'
 import { notificationSocket } from '@/utils/notificationSocket'
@@ -59,7 +61,13 @@ describe('通知页实时订阅接线', () => {
     const router = makeRouter()
     await router.push('/notifications')
 
-    const wrapper = mount(NotificationsView, { global: { plugins: [router, i18n] } })
+    const wrapper = mount(
+      defineComponent({
+        // E14：通知页接入 useDedupedMessage（删除失败提示）→ 需要 message provider
+        render: () => h(NMessageProvider, null, { default: () => h(NotificationsView) }),
+      }),
+      { global: { plugins: [router, i18n] } },
+    )
     await flushPromises()
 
     expect(onSpy).toHaveBeenCalledTimes(1)

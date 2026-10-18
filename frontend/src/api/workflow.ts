@@ -76,24 +76,34 @@ export interface ExecutionResult {
 }
 
 // API 函数
-export const getWorkflows = async (params?: { skip?: number; limit?: number }) => {
-  return request.get('/workflows/', { params })
+/** E14/D1：页面自理错误时的静默请求选项（拦截器不再弹全局 toast）。 */
+export interface SilentRequestOptions {
+  silent?: boolean
 }
 
-export const getWorkflow = async (id: number) => {
-  return request.get(`/workflows/${id}`)
+const SILENT_HEADERS = { headers: { 'X-Silent-Error': '1' } } as const
+
+export const getWorkflows = async (params?: { skip?: number; limit?: number }, options?: SilentRequestOptions) => {
+  return request.get('/workflows/', { params, ...(options?.silent ? SILENT_HEADERS : {}) })
 }
 
-export const createWorkflow = async (data: { name: string; description?: string; flow_data?: WorkflowConfig }) => {
-  return request.post('/workflows/', data)
+export const getWorkflow = async (id: number, options?: SilentRequestOptions) => {
+  return request.get(`/workflows/${id}`, options?.silent ? SILENT_HEADERS : undefined)
+}
+
+export const createWorkflow = async (
+  data: { name: string; description?: string; flow_data?: WorkflowConfig },
+  options?: SilentRequestOptions,
+) => {
+  return request.post('/workflows/', data, options?.silent ? SILENT_HEADERS : undefined)
 }
 
 export const updateWorkflow = async (id: number, data: Partial<Workflow>) => {
   return request.put(`/workflows/${id}`, data)
 }
 
-export const deleteWorkflow = async (id: number) => {
-  return request.delete(`/workflows/${id}`)
+export const deleteWorkflow = async (id: number, options?: SilentRequestOptions) => {
+  return request.delete(`/workflows/${id}`, options?.silent ? SILENT_HEADERS : undefined)
 }
 
 export const executeWorkflow = async (id: number, inputData?: Record<string, unknown>) => {
