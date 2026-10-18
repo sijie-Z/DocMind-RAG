@@ -729,7 +729,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
       <div class="card-body show">
         <p style="font-size:.8rem;color:var(--text2);margin-bottom:6px">一键启动所有依赖：MySQL / Redis / ES / Kafka / MinIO + 后端 + 前端</p>
         <pre style="font-size:.72rem;color:var(--text2);background:var(--bg3);padding:10px;border-radius:6px"><code># 基础设施
-cd backend && docker compose up -d
+cd backend && docker compose --env-file .env.docker up -d
 
 # 后端
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
