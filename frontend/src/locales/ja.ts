@@ -630,6 +630,12 @@ export default {
       saveStatusError: '保存失敗',
       saveRetry: '再試行',
       saveRetryHint: '保存に失敗しました。クリックして再試行',
+      leaveConfirmTitle: 'エディターを離れる',
+      leaveConfirmContent: 'このワークフローには未保存の変更があり、離れると失われます。離れますか？',
+      leaveConfirmPositive: '離れる',
+      leaveConfirmNegative: 'キャンセル',
+      togglePanel: 'プロパティパネル',
+      clickToAddHint: 'クリックまたはドラッグでノードを追加',
     },
   },
   notifications: {
