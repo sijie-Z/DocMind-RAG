@@ -18,7 +18,7 @@ import { createPinia, setActivePinia } from 'pinia'
 
 import AdminDashboard from '../admin.vue'
 import UserDashboard from '../user.vue'
-import { getLLMStats, getRAGStats, getAdminSummary, getOrgSummary, getMonitoringHealth } from '@/api/monitoring'
+import { getLLMStats, getRAGStats, getAdminSummary, getOrgSummary, getMonitoringHealth, getLLMStatus } from '@/api/monitoring'
 import { getAuditLogs, getUserStats } from '@/api/user'
 import { getConversations } from '@/api/conversation'
 import { seedDemoData } from '@/api/demo'
@@ -46,6 +46,7 @@ vi.mock('@/api/monitoring', () => ({
   getAdminSummary: vi.fn(),
   getLLMStats: vi.fn(),
   getRAGStats: vi.fn(),
+  getLLMStatus: vi.fn(),
   getOrgSummary: vi.fn(),
   getMonitoringHealth: vi.fn(),
 }))
@@ -143,6 +144,9 @@ beforeEach(() => {
   vi.mocked(getOrgSummary).mockResolvedValue({ data: { organizations: [] } } as never)
   vi.mocked(getMonitoringHealth).mockResolvedValue({
     data: { status: 'healthy', timestamp: '', services: { database: 'connected', redis: 'connected', elasticsearch: 'green' } },
+  } as never)
+  vi.mocked(getLLMStatus).mockResolvedValue({
+    data: { success: true, data: { configured: true, provider: 'deepseek', model: 'deepseek-v4-flash', source: 'server' } },
   } as never)
 
   vi.mocked(getUserStats).mockResolvedValue({

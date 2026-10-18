@@ -22,7 +22,7 @@ import UserDashboard from '../user.vue'
 import userDashboardRaw from '../user.vue?raw'
 import { getUserStats } from '@/api/user'
 import { getConversations } from '@/api/conversation'
-import { getRAGStats } from '@/api/monitoring'
+import { getRAGStats, getLLMStatus } from '@/api/monitoring'
 import { seedDemoData } from '@/api/demo'
 import zh from '@/locales/zh'
 
@@ -34,7 +34,7 @@ vi.mock('@/api/conversation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/conversation')>()
   return { ...actual, getConversations: vi.fn() }
 })
-vi.mock('@/api/monitoring', () => ({ getRAGStats: vi.fn() }))
+vi.mock('@/api/monitoring', () => ({ getRAGStats: vi.fn(), getLLMStatus: vi.fn() }))
 vi.mock('@/api/demo', () => ({ seedDemoData: vi.fn() }))
 vi.mock('@/utils/echarts', () => ({
   default: {
@@ -46,6 +46,7 @@ vi.mock('@/utils/echarts', () => ({
 const mockedGetUserStats = vi.mocked(getUserStats)
 const mockedGetConversations = vi.mocked(getConversations)
 const mockedGetRAGStats = vi.mocked(getRAGStats)
+const mockedGetLLMStatus = vi.mocked(getLLMStatus)
 const mockedSeedDemoData = vi.mocked(seedDemoData)
 
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
@@ -81,6 +82,9 @@ mockedGetConversations.mockImplementation(async () => ({
 }) as never)
 mockedGetRAGStats.mockImplementation(async () => ({
   data: { hit_rate: 50, total_queries_7d: 10, hits_with_documents: 5, avg_documents_retrieved: 2, hit_rate_trend_7d: [] },
+}) as never)
+mockedGetLLMStatus.mockImplementation(async () => ({
+  data: { success: true, data: { configured: true, provider: 'deepseek', model: 'deepseek-v4-flash', source: 'server' } },
 }) as never)
 mockedSeedDemoData.mockResolvedValue({ data: { success: true } } as never)
 
