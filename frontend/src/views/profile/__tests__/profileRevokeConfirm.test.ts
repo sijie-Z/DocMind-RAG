@@ -72,8 +72,6 @@ vi.mock('@/api/user', async (importOriginal) => {
     updateUserProfile: vi.fn(),
     updatePassword: vi.fn(),
     uploadAvatar: vi.fn(),
-    generateApiKey: vi.fn(),
-    revokeApiKey: vi.fn(),
     revokeMySession: apiMocks.revokeSession,
   }
 })
