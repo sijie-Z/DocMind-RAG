@@ -17,7 +17,7 @@ from app.core.security import get_current_user
 from app.models import Base
 from app.models.organization import Organization
 from app.models.user import User
-from app.models.workflow import Workflow
+from app.models.workflow import Workflow, WorkflowExecution
 
 _MIN_FLOW = {
     "nodes": [
@@ -205,5 +205,37 @@ async def test_orgless_non_superuser_fails_closed():
     try:
         r = await _call(factory, _user(50, None, role="user"), "GET", "/api/v1/workflows/")
         assert r.status_code == 403, "无组织用户必须 fail-closed（403），不得落到任何组织"
+    finally:
+        await engine.dispose()
+
+
+async def _seed_executions(factory, ids: dict) -> None:
+    async with factory() as s:
+        s.add_all([
+            WorkflowExecution(id=101, workflow_id=ids["wf_a_admin"], status="completed"),
+            WorkflowExecution(id=102, workflow_id=ids["wf_a_user"], status="completed"),
+            WorkflowExecution(id=103, workflow_id=ids["wf_b"], status="completed"),
+        ])
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_execution_detail_isolated_across_orgs_and_owners():
+    """A2 评审 m-6：执行记录详情的三向矩阵（跨组织 / 同组织他人 / 本人）。"""
+    engine, factory, ids = await _setup()
+    try:
+        await _seed_executions(factory, ids)
+        # 跨组织：org A admin 读 org B 的执行记录 → 404
+        r = await _call(factory, _user(1, 1, role="admin"), "GET", "/api/v1/workflows/executions/103")
+        assert r.status_code == 404, "跨组织执行记录必须 404"
+        # 同组织他人（普通用户读 admin 的）→ 404
+        r = await _call(factory, _user(2, 1, role="user"), "GET", "/api/v1/workflows/executions/101")
+        assert r.status_code == 404, "同组织普通用户不得读他人执行记录"
+        # 本人 → 200
+        r = await _call(factory, _user(2, 1, role="user"), "GET", "/api/v1/workflows/executions/102")
+        assert r.status_code == 200, r.text
+        # 同组织 admin → 200
+        r = await _call(factory, _user(1, 1, role="admin"), "GET", "/api/v1/workflows/executions/101")
+        assert r.status_code == 200, r.text
     finally:
         await engine.dispose()
