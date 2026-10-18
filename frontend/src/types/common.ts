@@ -24,7 +24,7 @@ export interface ApiResponse<T = any> {
   data: T
 }
 
-/** 形态③双层体：data.data 为业务列表/对象，其余并列键（total 等）为其元数据。 */
+/** 形态③双层体：内层 data 为业务列表/对象，其余并列键（total 等）为其元数据。 */
 export interface DoubleDataEnvelope<T = unknown, M = Record<string, unknown>> {
   success?: boolean
   message?: string
