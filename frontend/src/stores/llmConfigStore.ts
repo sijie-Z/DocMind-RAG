@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { llmConfigApi, type LLMProviderConfig, type ProviderOption } from '@/api/llmConfig'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 
 export type { LLMProviderConfig, ProviderOption }
 
@@ -19,8 +20,8 @@ export const useLLMConfigStore = defineStore('llmConfig', () => {
         llmConfigApi.list(),
         llmConfigApi.providers(),
       ])
-      configs.value = configsRes.data?.data || []
-      providers.value = providersRes.data?.data || []
+      configs.value = apiUnwrap<LLMProviderConfig[]>(configsRes) || []
+      providers.value = apiUnwrap<ProviderOption[]>(providersRes) || []
       loaded.value = true
     } finally {
       loading.value = false
@@ -60,7 +61,7 @@ export const useLLMConfigStore = defineStore('llmConfig', () => {
   /** Create a new config */
   async function create(data: Omit<LLMProviderConfig, 'id'>): Promise<LLMProviderConfig> {
     const res = await llmConfigApi.create(data)
-    const created = res.data?.data
+    const created = apiUnwrap<LLMProviderConfig>(res)
     if (created) {
       configs.value.push(created)
     }
@@ -70,7 +71,7 @@ export const useLLMConfigStore = defineStore('llmConfig', () => {
   /** Full update */
   async function update(configId: string, data: Omit<LLMProviderConfig, 'id'>) {
     const res = await llmConfigApi.update(configId, data)
-    const updated = res.data?.data
+    const updated = apiUnwrap<LLMProviderConfig>(res)
     if (updated) {
       const idx = configs.value.findIndex(c => c.id === configId)
       if (idx >= 0) configs.value[idx] = updated
