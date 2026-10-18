@@ -49,7 +49,12 @@ async def optional_current_user(
 
 
 def get_user_org_id(current_user: User) -> int | None:
-    """Resolve the effective organization for the current user."""
+    """Resolve the effective organization for the current user.
+
+    A2 P0：`token_organization_id` 回退并非信任 token 里的任意 claim——
+    auth_service.get_current_user 在挂载该属性前已回源 `user_organization`
+    校验成员关系（成员被移出 → 403）。这里只消费已校验过的回退值。
+    """
     return current_user.organization_id or getattr(
         current_user, "token_organization_id", None
     )

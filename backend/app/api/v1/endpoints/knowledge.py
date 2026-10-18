@@ -824,7 +824,7 @@ async def get_rag_stats(
 async def get_knowledge_graph(
     query: str | None = None,
     max_nodes: int = Query(default=50, ge=5, le=200),
-    organization_id: int = 1,
+    organization_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):

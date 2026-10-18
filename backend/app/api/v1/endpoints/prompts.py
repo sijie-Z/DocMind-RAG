@@ -2,11 +2,11 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import desc, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_organization
 from app.exceptions import AuthorizationError, ConflictError, NotFoundError
 from app.models.prompt import PromptTemplate
 from app.models.prompt_version import PromptTemplateVersion
@@ -17,8 +17,70 @@ from app.schemas.prompt import (
     PromptTemplateUpdateWithNote,
     PromptTemplateVersionResponse,
 )
+from app.services.audit_service import audit_service
 
 router = APIRouter()
+
+
+async def _resolve_prompt_org(current_user: User, db: AsyncSession) -> int | None:
+    """读取侧组织上下文：超管不限组织；其余用户 fail-closed（无组织 403）。"""
+    if current_user.is_superuser:
+        return None
+    return await require_organization(current_user, db)
+
+
+def _scope_prompt_query(stmt, current_user: User, org_id: int | None):
+    """租户边界（A2 P0）：本组织模板 + 系统内置模板（organization_id IS NULL）。
+
+    只有 **is_system=True** 的 NULL 行才是全组织可见的系统模板。迁移无法回填
+    归属的历史非系统行（organization_id IS NULL, is_system=False）不在此列：
+    它们只对超管可见（隔离），绝不再被所有租户当成系统模板读取。
+    """
+    if current_user.is_superuser:
+        return stmt
+    return stmt.where(
+        or_(
+            PromptTemplate.organization_id == org_id,
+            and_(
+                PromptTemplate.is_system.is_(True),
+                PromptTemplate.organization_id.is_(None),
+            ),
+        )
+    )
+
+
+async def _load_prompt_in_scope(
+    db: AsyncSession,
+    current_user: User,
+    prompt_id: int,
+    org_id: int | None,
+) -> PromptTemplate:
+    """按可见范围加载模板；跨组织一律 404（不泄露存在性）。"""
+    stmt = _scope_prompt_query(
+        select(PromptTemplate).where(PromptTemplate.id == prompt_id),
+        current_user,
+        org_id,
+    )
+    db_prompt = (await db.execute(stmt)).scalars().first()
+    if not db_prompt:
+        raise NotFoundError(detail="模板不存在")
+    return db_prompt
+
+
+def _ensure_prompt_writable(current_user: User, db_prompt: PromptTemplate) -> None:
+    """系统内置模板只读；其余需创建者或组织管理员（组织边界由 _load_prompt_in_scope 保证）。
+
+    历史孤儿行（organization_id=NULL 且 is_system=False）只对超管可见：
+    超管可删除/修正，普通用户不可达（读侧已隔离）。
+    """
+    if db_prompt.is_system:
+        raise AuthorizationError(detail="系统内置模板为只读，不允许修改或删除")
+    if current_user.is_superuser:
+        return
+    if db_prompt.organization_id is None:
+        raise AuthorizationError(detail="无权修改此模板")
+    if db_prompt.creator_id != current_user.id and current_user.role != "admin":
+        raise AuthorizationError(detail="无权修改此模板")
 
 
 @router.get("/", response_model=list[PromptTemplateResponse])
@@ -29,8 +91,9 @@ async def list_prompts(
     category: str = None,
     current_user: User = Depends(get_current_user),
 ):
-    """获取提示词模板列表 (所有用户可见)"""
-    stmt = select(PromptTemplate)
+    """获取提示词模板列表（本组织模板 + 系统内置模板）"""
+    org_id = await _resolve_prompt_org(current_user, db)
+    stmt = _scope_prompt_query(select(PromptTemplate), current_user, org_id)
     if category:
         stmt = stmt.filter(PromptTemplate.category == category)
 
@@ -44,15 +107,28 @@ async def create_prompt(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """创建新的提示词模板 (所有用户可创建)"""
+    """创建新的提示词模板（落在调用者组织；客户端不得伪造系统模板）"""
+    org_id = await require_organization(current_user, db)
+    # 重名检查按「可见范围」：本组织模板 + 系统内置模板；其他组织的同名模板不冲突。
     existing_prompt = await db.execute(
-        select(PromptTemplate).filter(PromptTemplate.name == prompt_in.name)
+        select(PromptTemplate).filter(
+            PromptTemplate.name == prompt_in.name,
+            or_(
+                PromptTemplate.organization_id == org_id,
+                PromptTemplate.organization_id.is_(None),
+            ),
+        )
     )
     if existing_prompt.scalars().first():
         raise ConflictError(detail="模板名称已存在")
 
+    data = prompt_in.model_dump()
+    # 安全加固（A2）：is_system 只能由 seed 端点（管理员）写入；
+    # 普通创建一律为组织私有模板，防止伪造全组织可见的「系统模板」。
+    data["is_system"] = False
     db_prompt = PromptTemplate(
-        **prompt_in.model_dump(),
+        **data,
+        organization_id=org_id,
         creator_id=current_user.id,
         version=1,
     )
@@ -83,17 +159,22 @@ async def update_prompt(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """更新提示词模板 — 自动创建版本快照 (创建者或管理员可修改)"""
-    result = await db.execute(
-        select(PromptTemplate).filter(PromptTemplate.id == prompt_id)
-    )
-    db_prompt = result.scalars().first()
-    if not db_prompt:
-        raise NotFoundError(detail="模板不存在")
+    """更新提示词模板 — 自动创建版本快照 (创建者或组织管理员可修改)"""
+    org_id = await _resolve_prompt_org(current_user, db)
+    db_prompt = await _load_prompt_in_scope(db, current_user, prompt_id, org_id)
+    _ensure_prompt_writable(current_user, db_prompt)
 
-    # Permission check
-    if db_prompt.creator_id != current_user.id and current_user.role != "admin":
-        raise AuthorizationError(detail="无权修改此模板")
+    update_data = prompt_in.model_dump(exclude_unset=True, exclude={"change_note"})
+
+    # 安全加固（A2）：激活/停用是管理员操作，且必须审计。
+    # 前端编辑表单会回传未变化的 is_active，因此只在值真正变化时触发。
+    is_active_change = (
+        "is_active" in update_data
+        and update_data["is_active"] is not None
+        and update_data["is_active"] != db_prompt.is_active
+    )
+    if is_active_change and not current_user.is_superuser and current_user.role != "admin":
+        raise AuthorizationError(detail="激活或停用提示词模板需要管理员权限")
 
     # Snapshot current state as a version BEFORE applying changes
     old_version = PromptTemplateVersion(
@@ -108,7 +189,6 @@ async def update_prompt(
     db.add(old_version)
 
     # Apply changes
-    update_data = prompt_in.model_dump(exclude_unset=True, exclude={"change_note"})
     for field, value in update_data.items():
         setattr(db_prompt, field, value)
 
@@ -117,6 +197,18 @@ async def update_prompt(
 
     await db.commit()
     await db.refresh(db_prompt)
+
+    if is_active_change:
+        activated = bool(db_prompt.is_active)
+        # 审计为旁路（独立 session，失败只记日志）：不得回滚已生效的激活状态。
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="activate_prompt" if activated else "deactivate_prompt",
+            target_type="prompt_template",
+            target_id=str(db_prompt.id),
+            detail=f"{'激活' if activated else '停用'}提示词模板《{db_prompt.name}》",
+            db=db,
+        )
     return db_prompt
 
 
@@ -127,6 +219,8 @@ async def get_prompt_versions(
     current_user: User = Depends(get_current_user),
 ):
     """获取模板版本历史"""
+    org_id = await _resolve_prompt_org(current_user, db)
+    await _load_prompt_in_scope(db, current_user, prompt_id, org_id)
     result = await db.execute(
         select(PromptTemplateVersion)
         .filter(PromptTemplateVersion.prompt_id == prompt_id)
@@ -143,15 +237,9 @@ async def restore_prompt_version(
     current_user: User = Depends(get_current_user),
 ):
     """将模板恢复到指定版本"""
-    result = await db.execute(
-        select(PromptTemplate).filter(PromptTemplate.id == prompt_id)
-    )
-    db_prompt = result.scalars().first()
-    if not db_prompt:
-        raise NotFoundError(detail="模板不存在")
-
-    if db_prompt.creator_id != current_user.id and current_user.role != "admin":
-        raise AuthorizationError(detail="无权修改此模板")
+    org_id = await _resolve_prompt_org(current_user, db)
+    db_prompt = await _load_prompt_in_scope(db, current_user, prompt_id, org_id)
+    _ensure_prompt_writable(current_user, db_prompt)
 
     # Find the version to restore
     version_result = await db.execute(
@@ -196,6 +284,8 @@ async def get_prompt_version_detail(
     current_user: User = Depends(get_current_user),
 ):
     """获取指定版本的详情"""
+    org_id = await _resolve_prompt_org(current_user, db)
+    await _load_prompt_in_scope(db, current_user, prompt_id, org_id)
     result = await db.execute(
         select(PromptTemplateVersion).filter(
             PromptTemplateVersion.prompt_id == prompt_id,
@@ -214,16 +304,10 @@ async def delete_prompt(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """删除提示词模板 (创建者或管理员可删除)"""
-    result = await db.execute(
-        select(PromptTemplate).filter(PromptTemplate.id == prompt_id)
-    )
-    db_prompt = result.scalars().first()
-    if not db_prompt:
-        raise NotFoundError(detail="模板不存在")
-
-    if db_prompt.creator_id != current_user.id and current_user.role != "admin":
-        raise AuthorizationError(detail="无权删除此模板")
+    """删除提示词模板 (创建者或组织管理员可删除)"""
+    org_id = await _resolve_prompt_org(current_user, db)
+    db_prompt = await _load_prompt_in_scope(db, current_user, prompt_id, org_id)
+    _ensure_prompt_writable(current_user, db_prompt)
 
     await db.delete(db_prompt)
     await db.commit()
@@ -235,8 +319,8 @@ async def seed_default_prompts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """初始化默认提示词模板 (管理员)"""
-    if current_user.role != "admin":
+    """初始化默认提示词模板 (管理员；写入系统内置模板：organization_id=NULL，只读)"""
+    if not current_user.is_superuser and current_user.role != "admin":
         raise AuthorizationError(detail="需要管理员权限")
 
     default_prompts = [
@@ -282,7 +366,12 @@ async def seed_default_prompts(
             select(PromptTemplate).filter(PromptTemplate.name == p["name"])
         )
         if not existing_prompt.scalars().first():
-            db_p = PromptTemplate(**p, creator_id=current_user.id, version=1)
+            db_p = PromptTemplate(
+                **p,
+                organization_id=None,  # 系统内置：全组织只读可见
+                creator_id=current_user.id,
+                version=1,
+            )
             db.add(db_p)
             await db.flush()
             # Create initial version
