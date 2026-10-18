@@ -10,7 +10,7 @@
  * - run-now 的 triggered=false 当成功 → 语义用例红；
  * - 载荷字段与 schedule_type 错配 → 载荷断言红。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import {
@@ -107,11 +107,23 @@ function makeTask(overrides: Record<string, unknown> = {}) {
   }
 }
 
+// 未显式 unmount 的页面实例统一在用例结束时卸载：残留的打开弹窗会在后续用例里
+// 借 naive-ui 的 z-index 重渲染把旧内容重新挂回 body，污染断言。
+const mountedWrappers: Array<{ exists: () => boolean; unmount: () => void }> = []
+
 async function mountView() {
   const wrapper = mount(Host, { global: { plugins: [i18n], components: naiveComponents } })
+  mountedWrappers.push(wrapper)
   await flushAll()
   return wrapper
 }
+
+afterEach(() => {
+  for (const wrapper of mountedWrappers) {
+    if (wrapper.exists()) wrapper.unmount()
+  }
+  mountedWrappers.length = 0
+})
 
 /** 弹层/消息走 teleport + 过渡：多拍一拍。 */
 async function flushAll() {
@@ -411,6 +423,180 @@ describe('调度任务管理页', () => {
   })
 })
 
+describe('结果弹窗：运行中 3s 轮询 / 关闭销毁 / 后台暂停 / 手动刷新', () => {
+  /** GET /agent/tasks/{id} 的信封响应（apiUnwrap 再解一层）。 */
+  function agentTaskResponse(overrides: Record<string, unknown> = {}) {
+    return {
+      data: {
+        success: true,
+        data: {
+          task_id: 'task-abc',
+          state: 'running',
+          is_recoverable: false,
+          progress: 0.5,
+          completed_steps: 1,
+          total_steps: 2,
+          current_step_id: 'step-1',
+          last_error: null,
+          last_error_type: null,
+          query: '汇总今天的新闻',
+          ...overrides,
+        },
+      },
+    }
+  }
+
+  function setVisibility(state: 'visible' | 'hidden') {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+  }
+
+  beforeEach(() => {
+    apiMocks.listScheduledTasks.mockResolvedValue({ data: { items: [makeTask()], total: 1 } })
+    // 只假 setInterval/clearInterval：页面内的过渡与 flushAll 的 setTimeout 保持真实
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  })
+
+  afterEach(() => {
+    delete (document as { visibilityState?: string }).visibilityState
+    vi.useRealTimers()
+  })
+
+  it('轮询：运行中每 3s 自动拉取并刷新结果，到达终止态即停', async () => {
+    agentMocks.getTask
+      .mockResolvedValueOnce(agentTaskResponse())
+      .mockResolvedValueOnce(agentTaskResponse({ completed_steps: 2 }))
+      .mockResolvedValueOnce(agentTaskResponse({ state: 'completed', completed_steps: 2 }))
+
+    const wrapper = await mountView()
+    wrapper.find('.view-result-btn').trigger('click')
+    await flushAll()
+    expect(agentMocks.getTask).toHaveBeenCalledTimes(1)
+    expect(document.body.textContent).toContain('运行中')
+
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushAll()
+    expect(agentMocks.getTask).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushAll()
+    expect(agentMocks.getTask).toHaveBeenCalledTimes(3)
+    // 弹窗未重开，结果自动更新为终态
+    expect(document.body.textContent).toContain('完成')
+    expect(document.body.textContent).toContain('2 / 2')
+
+    await vi.advanceTimersByTimeAsync(9000)
+    await flushAll()
+    expect(agentMocks.getTask).toHaveBeenCalledTimes(3) // 终止态不再轮询
+    expect(vi.getTimerCount()).toBe(0) // 无遗留定时器
+    wrapper.unmount()
+  })
+
+  it('销毁：关闭弹窗立即停轮询（无泄漏定时器）', async () => {
+    agentMocks.getTask.mockResolvedValue(agentTaskResponse())
+    const wrapper = await mountView()
+    wrapper.find('.view-result-btn').trigger('click')
+    await flushAll()
+    expect(vi.getTimerCount()).toBe(1) // 运行中 → 轮询已启动
+
+    const resultModal = wrapper.findAllComponents(NModal).find((m) => m.props('show') === true)
+    expect(resultModal).toBeTruthy()
+    resultModal!.vm.$emit('update:show', false)
+    await flushAll()
+    expect(vi.getTimerCount()).toBe(0) // 关闭即销毁
+
+    await vi.advanceTimersByTimeAsync(9000)
+    await flushAll()
+    expect(agentMocks.getTask).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('销毁：组件卸载时清理轮询定时器', async () => {
+    agentMocks.getTask.mockResolvedValue(agentTaskResponse())
+    const wrapper = await mountView()
+    wrapper.find('.view-result-btn').trigger('click')
+    await flushAll()
+    expect(vi.getTimerCount()).toBe(1)
+
+    wrapper.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('后台暂停：visibilityState=hidden 时跳过拉取，恢复可见后继续', async () => {
+    agentMocks.getTask.mockResolvedValue(agentTaskResponse())
+    const wrapper = await mountView()
+    wrapper.find('.view-result-btn').trigger('click')
+    await flushAll()
+    expect(agentMocks.getTask).toHaveBeenCalledTimes(1)
+
+    setVisibility('hidden')
+    await vi.advanceTimersByTimeAsync(6000)
+    await flushAll()
+    expect(agentMocks.getTask).toHaveBeenCalledTimes(1) // 后台标签页不烧请求
+
+    setVisibility('visible')
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushAll()
+    expect(agentMocks.getTask).toHaveBeenCalledTimes(2) // 回前台续上
+    wrapper.unmount()
+  })
+
+  it('手动刷新：初次不可用后刷新成功 → 错误态恢复为结果展示', async () => {
+    agentMocks.getTask.mockRejectedValueOnce({
+      response: { data: { detail: '当前用户未加入任何组织' } },
+    })
+    const wrapper = await mountView()
+    wrapper.find('.view-result-btn').trigger('click')
+    await flushAll()
+    expect(document.body.textContent).toContain('结果不可用')
+    expect(document.body.textContent).toContain('当前用户未加入任何组织')
+
+    agentMocks.getTask.mockResolvedValueOnce(agentTaskResponse({ state: 'completed' }))
+    const refreshBtn = document.querySelector('.result-refresh-btn') as HTMLButtonElement
+    expect(refreshBtn).toBeTruthy()
+    refreshBtn.click()
+    await flushAll()
+    expect(agentMocks.getTask).toHaveBeenCalledTimes(2)
+    // 错误态已被成功结果取代（footer 刷新按钮不因初次失败而失效）
+    expect(document.body.textContent).not.toContain('当前用户未加入任何组织')
+    expect(document.body.textContent).toContain('task-abc')
+    expect(document.body.textContent).toContain('完成')
+    wrapper.unmount()
+  })
+
+  it('手动刷新：一次点击触发一次拉取；进行中按钮 loading、完成后 toast 反馈', async () => {
+    agentMocks.getTask.mockResolvedValueOnce(agentTaskResponse({ state: 'completed' }))
+    const wrapper = await mountView()
+    wrapper.find('.view-result-btn').trigger('click')
+    await flushAll()
+    expect(agentMocks.getTask).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0) // 完成态无轮询
+
+    let resolveRefresh!: (value: unknown) => void
+    agentMocks.getTask.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveRefresh = resolve }),
+    )
+    const refreshBtn = document.querySelector('.result-refresh-btn') as HTMLButtonElement
+    expect(refreshBtn).toBeTruthy()
+    refreshBtn.click()
+    await flushAll()
+
+    expect(agentMocks.getTask).toHaveBeenCalledTimes(2) // 一次点击 = 一次拉取
+    expect(
+      (document.querySelector('.result-refresh-btn') as HTMLElement).classList
+        .contains('n-button--loading'),
+    ).toBe(true) // 进行中反馈
+
+    resolveRefresh(agentTaskResponse({ state: 'completed', completed_steps: 2 }))
+    await flushAll()
+    expect(
+      (document.querySelector('.result-refresh-btn') as HTMLElement).classList
+        .contains('n-button--loading'),
+    ).toBe(false) // 完成态：按钮复位
+    expect(document.body.textContent).toContain('结果已刷新')
+    wrapper.unmount()
+  })
+})
+
 describe('本地化键完整性（本特性新增键）', () => {
   const locales: Array<[string, Record<string, unknown>]> = [
     ['zh', zh as unknown as Record<string, unknown>],
@@ -442,6 +628,8 @@ describe('本地化键完整性（本特性新增键）', () => {
     'scheduler.validation.intervalMin',
     'scheduler.result.taskState.rejected',
     'scheduler.result.unavailable',
+    'scheduler.result.refresh',
+    'scheduler.result.refreshed',
     'mcp.readOnlyNotice',
     'mcp.noServers',
     'mcp.toolCount',

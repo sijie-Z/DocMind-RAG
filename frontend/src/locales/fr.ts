@@ -99,7 +99,9 @@ export default {
     used: 'Utilisé',
     available: 'Disponible',
     activityTrend: 'Tendance d\'activité',
-    recentActivity: 'Activité récente'
+    recentActivity: 'Activité récente',
+    revokeSession: 'Déconnecter l\'appareil',
+    revokeSessionConfirm: 'Déconnecter cet appareil ? Il devra se reconnecter.'
   },
   users: {
     searchPlaceholder: 'Rechercher un utilisateur...',
@@ -152,6 +154,7 @@ export default {
     level5: 'Niveau 5',
     levelOther: 'Autres niveaux',
     createdAt: 'Créé le',
+    batchDeleteConfirm: 'Supprimer les {count} organisations sélectionnées ? Cette action est irréversible.',
     addMember: 'Ajouter un membre',
     selectUser: 'Sélectionner un utilisateur',
     removeMember: 'Retirer',
@@ -198,6 +201,11 @@ export default {
     noHistory: 'Aucun historique',
     backToBottom: 'Revenir aux derniers messages',
     stopGenerating: 'Arrêter la génération',
+    // E7 visibilité des états : chargement d'historique / raisonnement / arrêté
+    loadingHistory: 'Chargement de l\'historique...',
+    thinkingLabel: 'Raisonnement',
+    generationStopped: 'Arrêté',
+    stoppedHint: 'Vous pouvez continuer à poser des questions ou régénérer la réponse',
     suggestions: {
       quantum: 'Expliquer l\'informatique quantique',
       quantumDesc: 'Expliquez les principes de base avec des mots simples',
@@ -218,6 +226,7 @@ export default {
     removeFailedAttachments: 'Des pièces jointes ont échoué à l\'analyse, veuillez les retirer ou les envoyer à nouveau avant de poser vos questions',
     attachmentsNotReady: 'Les pièces jointes ne sont pas encore prêtes, veuillez attendre la fin de l\'analyse avant de les utiliser',
     chatCleared: 'Historique de conversation effacé',
+    clearConfirm: 'Tous les messages de la conversation actuelle seront effacés, sans possibilité de restauration. Effacer maintenant ?',
     clearFailed: 'Échec de l\'effacement',
     unbindSuccess: 'Document dissocié, désormais en mode Q&A sur toute la base de connaissances',
     unbindFailed: 'Échec de la dissociation du document',
@@ -317,6 +326,9 @@ export default {
     uploadList: 'Liste des tâches',
     noActiveTasks: 'Aucune tâche en cours',
     clearFinished: 'Effacer les tâches terminées',
+    cancelUpload: 'Annuler le téléchargement',
+    removeFromList: 'Retirer de la liste',
+    uploadCancelled: 'Téléchargement annulé',
     table: {
       name: 'Nom du fichier',
       size: 'Taille',
@@ -382,7 +394,16 @@ export default {
     },
     backToHome: "Retour à l'accueil",
     backToWorkbench: 'Aller au tableau de bord',
-    back: 'Retour'
+    back: 'Retour',
+    serviceUnavailable: {
+      title: 'Service temporairement indisponible',
+      subtitle: "Impossible de joindre le serveur. Veuillez réessayer plus tard. Votre session est conservée.",
+      retry: 'Réessayer'
+    },
+    offlineBanner: {
+      message: 'Service temporairement indisponible ; affichage des données en cache local',
+      retry: 'Réessayer'
+    }
   },
   login: {
     welcomeBack: 'Bon retour',
@@ -636,6 +657,12 @@ export default {
     markAllRead: 'Tout marquer comme lu',
   },
 
+  agent: {
+    clearConfirmTitle: 'Effacer les messages de la session actuelle',
+    clearConfirm: 'Seuls les messages affichés de la session actuelle seront effacés. Les autres sessions ne sont pas affectées. Effacer maintenant ?',
+    deleteSessionConfirmTitle: 'Supprimer la session actuelle',
+    deleteSessionConfirm: "La session « {title} » et son historique de discussion seront supprimés. Cette action est irréversible. Supprimer ?",
+  },
   agentReplay: {
     entry: 'Voir le Replay',
     title: "Replay d'Exécution",
@@ -804,6 +831,8 @@ export default {
       query: 'Entrée',
       error: 'Dernière erreur',
       unavailable: 'Résultat indisponible (tâche introuvable ou non visible)',
+      refresh: 'Actualiser le résultat',
+      refreshed: 'Résultat actualisé',
       taskState: {
         pending: 'En attente',
         running: 'En cours',
@@ -902,6 +931,7 @@ export default {
   },
   router: {
     notFound: 'Page introuvable',
+    serviceUnavailable: 'Service temporairement indisponible',
     welcome: 'Bienvenue',
     login: 'Connexion',
     register: 'S\'inscrire',
