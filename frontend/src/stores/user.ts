@@ -160,23 +160,14 @@ export const useUserStore = defineStore('user', () => {
       _applyValidatedAuth(storedToken, info)
       return response.data
     } catch (error) {
-      logout()
+      // 不在此处导航：调用方（路由守卫/聊天页）自行决定落点；同步清本地即可
+      logout({ navigate: false })
       throw error
     }
   }
 
-  const logout = async () => {
-    const refreshToken = getRefreshToken()
-    // 先请求服务端吊销 access/refresh token，避免登出后旧令牌仍可访问受保护接口。
-    // 服务端失败（5xx/断网）不阻断本地登出：本地凭证照常清空并告警；
-    // 吊销是幂等的，稍后重试登出即可。无本地 access token 时后端必然 401，跳过请求。
-    if (getToken()) {
-      try {
-        await apiLogout(refreshToken)
-      } catch (error) {
-        console.warn('[logout] server-side revoke failed; local credentials cleared', error)
-      }
-    }
+  /** 同步清空本地登录态（不请求服务端、不导航）：供登出与路由守卫的导航链路复用 */
+  const clearAuthState = () => {
     userInfo.value = null
     token.value = ''
     removeToken()
@@ -185,20 +176,43 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('language')
     localStorage.removeItem('theme')
     localStorage.removeItem('activeSystemPrompt')
+  }
+
+  /**
+   * 登出：同步清本地 → （默认）跳登录页 → 服务端吊销令牌。
+   * 服务端失败不阻断本地登出（console.warn 告警，吊销幂等可稍后重试）。
+   * `navigate: false`：路由守卫等自行调用 next() 的导航链路使用，
+   * 避免本方法内的异步跳转覆盖其 redirect 语义。
+   */
+  const logout = async (options?: { navigate?: boolean }) => {
+    const accessToken = getToken()
+    const refreshToken = getRefreshToken()
+    // 先同步收口本地登录态：导航链路（如守卫）在 await 之前即可观察到已登出
+    clearAuthState()
     // 安全加固：清除 axios 默认 Authorization 头，防止登出后旧 token 残留
     // （动态导入避免与 request.ts 的静态循环依赖）
     try {
       const { clearDefaultAuth } = await import('@/utils/request')
       clearDefaultAuth()
     } catch { /* request 模块未就绪时忽略 */ }
-    // 跳转登录页；已在登录页时跳过（调用方可能已自行跳转，避免重复导航）
+    // 跳转登录页；已在登录页时跳过（调用方自行跳转时传 navigate: false）
     // 动态导入避免与 router/index.ts（其静态依赖本 store）形成初始化循环。
-    try {
-      const { default: router } = await import('@/router')
-      if (router.currentRoute.value.name !== 'Login') {
-        await router.push({ name: 'Login' })
+    if (options?.navigate !== false) {
+      try {
+        const { default: router } = await import('@/router')
+        if (router.currentRoute.value.name !== 'Login') {
+          await router.push({ name: 'Login' })
+        }
+      } catch { /* router 未就绪时忽略 */ }
+    }
+    // 服务端吊销：本地已清空，显式携带此前捕获的 access token
+    if (accessToken) {
+      try {
+        await apiLogout(refreshToken, accessToken)
+      } catch (error) {
+        console.warn('[logout] server-side revoke failed; local credentials cleared', error)
       }
-    } catch { /* router 未就绪时忽略 */ }
+    }
   }
   
   // --- 找到 stores/user.ts 中的 updateUserInfo 函数，替换为 ---

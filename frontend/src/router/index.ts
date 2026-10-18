@@ -333,7 +333,8 @@ router.beforeEach(async (to, from, next) => {
       lastValidatedAt = 0
     } catch {
       removeToken()
-      userStore.logout()
+      // 导航由下方 next() 统一完成（带 redirect）；不经过 logout 的异步跳转，避免覆盖 redirect
+      userStore.logout({ navigate: false })
       token = undefined
       sessionValidated = false
       lastValidatedAt = 0
@@ -360,7 +361,7 @@ router.beforeEach(async (to, from, next) => {
           lastValidatedAt = Date.now()
         } catch {
           removeToken()
-          userStore.logout()
+          userStore.logout({ navigate: false })
           sessionValidated = false
           lastValidatedAt = 0
           next({ name: 'Login', query: { redirect: to.fullPath } })
@@ -369,7 +370,7 @@ router.beforeEach(async (to, from, next) => {
       }
       if (!userStore.userInfo?.id) {
         removeToken()
-        userStore.logout()
+        userStore.logout({ navigate: false })
         sessionValidated = false
         lastValidatedAt = 0
         next({ name: 'Login', query: { redirect: to.fullPath } })

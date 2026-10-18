@@ -5,15 +5,18 @@
  * 服务端令牌（access/refresh）仍在有效期内，登出后被窃取的令牌仍可访问受保护接口。
  *
  * 修法约定（本测试钉死）：
- *  1. logout() 先调用 api/auth 的 logout()，并携带本地 refresh token；
- *  2. 服务端 5xx/网络失败不阻断本地登出：本地凭证照常清空、console.warn 告警、
+ *  1. logout() 先同步清空本地，再调用 api/auth 的 logout()（携带 refresh token
+ *     与此前捕获的 access token），服务端失败仅 console.warn；
+ *  2. 服务端 5xx/网络失败不阻断本地登出：本地凭证照常清空、
  *     logout() 正常 resolve（不得产生未处理异常）；
- *  3. 清除完成后跳转登录页；已在登录页时不重复跳转。
+ *  3. 默认跳转登录页（已在登录页时跳过）；导航链路传 navigate: false 时
+ *     不自行跳转，由调用方（守卫/拦截器）统一收口。
  *
  * 变异（预计红）：
  *  - logout() 不调后端 → 用例 1/2 红；
  *  - 后端失败时直接抛出/不继续清本地 → 用例 2 红；
- *  - 清除后不跳登录页 → 用例 1/2 红；无条件重复跳转 → 用例 3 红。
+ *  - 默认路径不跳登录页 → 用例 1/2 红；无条件重复跳转 → 用例 3 红；
+ *  - navigate: false 仍自行跳转 → 用例 4 红。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
@@ -89,7 +92,7 @@ describe('userStore.logout · 服务端登出接线', () => {
     await store.logout()
 
     expect(mockedApiLogout).toHaveBeenCalledTimes(1)
-    expect(mockedApiLogout).toHaveBeenCalledWith('refresh-token-abc')
+    expect(mockedApiLogout).toHaveBeenCalledWith('refresh-token-abc', 'access-token-abc')
     expect(mockedRemoveToken).toHaveBeenCalledTimes(1)
     expect(store.userInfo).toBeNull()
     expect(store.token).toBe('')
@@ -124,6 +127,18 @@ describe('userStore.logout · 服务端登出接线', () => {
 
     await store.logout()
 
+    expect(routerMocks.push).not.toHaveBeenCalled()
+  })
+
+  it('navigate: false 时清态与吊销照常，但不自行跳转（由调用方收口）', async () => {
+    const store = seedLoggedIn()
+
+    await store.logout({ navigate: false })
+
+    expect(mockedApiLogout).toHaveBeenCalledWith('refresh-token-abc', 'access-token-abc')
+    expect(mockedRemoveToken).toHaveBeenCalledTimes(1)
+    expect(store.userInfo).toBeNull()
+    expect(store.token).toBe('')
     expect(routerMocks.push).not.toHaveBeenCalled()
   })
 })

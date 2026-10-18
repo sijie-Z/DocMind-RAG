@@ -319,7 +319,8 @@ request.interceptors.response.use(
               } catch (refreshErr) {
                 rejectQueue(refreshErr)
                 const userStore = useUserStore()
-                userStore.logout()
+                // 跳转由本拦截器统一执行；store 只清态与吊销，避免异步跳转竞态
+                userStore.logout({ navigate: false })
                 if (router) router.push({ name: 'Login' })
                 return Promise.reject(refreshErr)
               } finally {
@@ -337,7 +338,7 @@ request.interceptors.response.use(
             errorMsg = '登录已过期或未登录，请重新登录'
             try {
               const userStore = useUserStore()
-              userStore.logout()
+              userStore.logout({ navigate: false })
               if (router) router.push({ name: 'Login' })
             } catch (_) { /* store/router 可能未就绪 */ }
           } else if (isLoginRequest && errorMsg === '请求失败') {

@@ -46,14 +46,21 @@ export function register(data: RegisterForm) {
  * 用户登出：请求服务端吊销当前 access token（可选附带 refresh token，
  * 防止登出后仍可用 refresh 续期）。
  *
+ * `accessToken`：调用方通常在发请求前已同步清空本地凭证，请求拦截器不再自动
+ * 注入 Authorization，这里显式携带以完成吊销。
+ *
  * `_skipAuthRefresh`：本请求收到 401 时不得再进入刷新/自动登出链，
  * 否则「登出 → 401 → 刷新失败 → 自动登出 → 登出」会互相递归。
  * `X-Silent-Error`：失败提示由调用方（user store）统一处理，
  * 避免拦截器再弹一条全局错误 toast。
  */
-export function logout(refreshToken?: string) {
+export function logout(refreshToken?: string, accessToken?: string) {
+  const headers: Record<string, string> = { 'X-Silent-Error': '1' }
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`
+  }
   const config = {
-    headers: { 'X-Silent-Error': '1' },
+    headers,
     _skipAuthRefresh: true,
   }
   return request.post<ApiResponse>(
