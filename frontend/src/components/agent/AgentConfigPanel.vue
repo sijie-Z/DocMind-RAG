@@ -116,6 +116,7 @@
 import { ref, reactive, watch, onMounted } from 'vue'
 import type { AgentConfig, ToolInfo } from '@/types/agent'
 import { agentApi } from '@/api/agent'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 
 const props = defineProps<{
   config: AgentConfig
@@ -148,9 +149,9 @@ function toggleTool(name: string) {
 onMounted(async () => {
   try {
     const res = await agentApi.listTools()
-    // 真载荷 data.data（{success, data:[...tools], total}，agent.py:458-472）；
+    // 真载荷 apiUnwrap(res)（{success, data:[...tools], total}，agent.py:458-472）；
     // 旧读 res.data（整信封）Array.isArray 恒 false → 工具开关列表恒空（B27）
-    const tools = res.data?.data
+    const tools = apiUnwrap<ToolInfo[]>(res)
     if (Array.isArray(tools)) availableTools.value = tools
   } catch {
     // ignore

@@ -343,12 +343,17 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '@/stores/agent'
 import { agentApi } from '@/api/agent'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import { useDedupedMessage } from '@/utils/message'
 import type {
   AgentEvent,
   AgentChatMessage,
   AgentTaskListItem,
+  AgentTaskView,
   AgentSession,
+  AgentSessionDetail,
+  AgentConfig,
+  ToolInfo,
   PlanStep,
   PlanStepEdit,
   ThinkingType,
@@ -712,7 +717,7 @@ async function handleSteer(text: string) {
   steerBusy.value = true
   try {
     const res = await agentApi.steerTask(taskId, text)
-    const data = res.data?.data
+    const data = apiUnwrap<{ message?: string }>(res)
     agentStore.addSteerSent(text)
     if (data?.message) message.success(data.message)
   } catch (err: unknown) {
@@ -795,7 +800,7 @@ async function refreshTaskState(taskId: string) {
   try {
     const res = await agentApi.getTask(taskId)
     // F2：request 拦截器返回完整 AxiosResponse，信封在 res.data = {success, data}
-    const data = res.data?.data
+    const data = apiUnwrap<AgentTaskView>(res)
     if (!data) return
     agentStore.setTaskState(data.state)
     if (data.state === 'waiting_approval' && data.approval) {
@@ -824,7 +829,7 @@ async function restorePendingApproval() {
     const res = await agentApi.getTask(last)
     // F2：读信封内层（res.data = {success, data}；此前读 res.data 导致
     // data.state 恒 undefined，刷新后审批卡永不恢复——浏览器验收实锤）
-    const data = res.data?.data
+    const data = apiUnwrap<AgentTaskView>(res)
     if (data?.state === 'waiting_approval' && data.approval) {
       agentStore.setTaskId(last)
       agentStore.setTaskState('waiting_approval')
@@ -867,8 +872,8 @@ async function refreshReplayFlag() {
   }
   try {
     const res = await agentApi.getTask(taskId)
-    // SEAM-3：拦截器返回完整 AxiosResponse，信封在 res.data = {success, data} → 读内层
-    lastRunHasReplay.value = !!res.data?.data?.has_replay
+    // SEAM-3：拦截器返回完整 AxiosResponse，信封在 res.data = {success, data} → apiUnwrap 解一层
+    lastRunHasReplay.value = !!apiUnwrap<AgentTaskView>(res)?.has_replay
   } catch {
     lastRunHasReplay.value = null
   }
@@ -904,7 +909,7 @@ async function openReplay(taskId: string) {
   syncRouteTaskId(taskId)
   try {
     const res = await agentApi.getReplay(taskId)
-    replayData.value = res.data?.data || null
+    replayData.value = apiUnwrap<ReplayTimelineData>(res) || null
     if (!replayData.value) replayError.value = 'not_found'
   } catch (e: any) {
     // 404（REPLAY_NOT_FOUND / TASK_NOT_FOUND）→ 诚实空态；其余 → 加载失败
@@ -926,7 +931,7 @@ async function loadRecentTasks() {
   tasksLoading.value = true
   try {
     const res = await agentApi.listTasks({ page: 1, page_size: 10 })
-    recentTasks.value = res.data?.data?.tasks || []
+    recentTasks.value = apiUnwrap<{ tasks: AgentTaskListItem[] }>(res)?.tasks || []
   } catch {
     recentTasks.value = []
     message.error(t('agentTasks.loadFailed'))
@@ -968,9 +973,9 @@ async function handleSessionChange(sessionId: string | null) {
   if (sessionId) {
     try {
       const res = await agentApi.getSession(sessionId)
-      // 真载荷在 data.data.config（agent.py:637-647 的 {success, data:{…,config}}）；
+      // 真载荷在 apiUnwrap(res).config（agent.py:637-647 的 {success, data:{…,config}}）；
       // 旧读 res.data.config 恒 undefined → 会话配置静默 no-op（B25）
-      const detail = res.data?.data
+      const detail = apiUnwrap<AgentSessionDetail>(res)
       if (detail?.config) {
         agentStore.updateConfig(detail.config)
       }
@@ -996,10 +1001,10 @@ async function handleSessionDelete(sessionId: string) {
 async function handleNewSession() {
   try {
     const res = await agentApi.createSession('New Agent Session')
-    // 创建端点只回 {success, data:{id, title}}（agent.py:585-591），真载荷在
-    // data.data；旧实现把整个信封当会话对象 → 幻影「Untitled ()」项（选中即
+    // 创建端点只回 {success, data:{id, title}}（agent.py:585-591），真载荷用
+    // apiUnwrap 解一层；旧实现把整个信封当会话对象 → 幻影「Untitled ()」项（选中即
     // 404）、currentSessionId 失效（B26）
-    const session = res.data?.data
+    const session = apiUnwrap<{ id: string; title: string }>(res)
     if (session?.id) {
       agentStore.setSessions([
         { ...session, message_count: 0, created_at: '', updated_at: '' } as AgentSession,
@@ -1049,13 +1054,13 @@ async function loadInit() {
       agentApi.getConfig(),
     ])
     // 三个端点均为 {success, data} 信封（agent.py:450-472 工具数组在 data、
-    // :500-556 会话在 data.sessions、:696-710 配置在 data）——真载荷在
-    // res.data.data（axios body 再一层 data）。旧实现把信封当载荷 →
+    // :500-556 会话在 data.sessions、:696-710 配置在 data）——统一经
+    // apiUnwrap 解一层。旧实现把信封当载荷 →
     // 工具列表永不下发（「工具: 0/0」）、会话下拉恒空、整信封写入
     // store.config（B22/B23/B24，同族嵌套漂移）
-    const toolsData = toolsRes.data?.data
-    const sessionsData = sessionsRes.data?.data
-    const configData = configRes.data?.data
+    const toolsData = apiUnwrap<ToolInfo[]>(toolsRes)
+    const sessionsData = apiUnwrap<{ sessions: AgentSession[] }>(sessionsRes)
+    const configData = apiUnwrap<AgentConfig>(configRes)
     if (Array.isArray(toolsData)) agentStore.tools = toolsData
     if (Array.isArray(sessionsData?.sessions)) agentStore.setSessions(sessionsData.sessions)
     if (configData && typeof configData === 'object') agentStore.updateConfig(configData)
