@@ -382,7 +382,16 @@ export default {
     },
     backToHome: "Retour à l'accueil",
     backToWorkbench: 'Aller au tableau de bord',
-    back: 'Retour'
+    back: 'Retour',
+    serviceUnavailable: {
+      title: 'Service temporairement indisponible',
+      subtitle: "Impossible de joindre le serveur. Veuillez réessayer plus tard. Votre session est conservée.",
+      retry: 'Réessayer'
+    },
+    offlineBanner: {
+      message: 'Service temporairement indisponible ; affichage des données en cache local',
+      retry: 'Réessayer'
+    }
   },
   login: {
     welcomeBack: 'Bon retour',
@@ -886,6 +895,7 @@ export default {
   },
   router: {
     notFound: 'Page introuvable',
+    serviceUnavailable: 'Service temporairement indisponible',
     welcome: 'Bienvenue',
     login: 'Connexion',
     register: 'S\'inscrire',

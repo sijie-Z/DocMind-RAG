@@ -441,7 +441,16 @@ export default {
     },
     backToHome: '返回首页',
     backToWorkbench: '进入工作台',
-    back: '返回上一页'
+    back: '返回上一页',
+    serviceUnavailable: {
+      title: '服务暂时不可用',
+      subtitle: '无法连接到服务器，请稍后重试。你的登录状态已保留。',
+      retry: '重试'
+    },
+    offlineBanner: {
+      message: '服务暂时不可用，当前展示本地缓存数据',
+      retry: '重试'
+    }
   },
   login: {
     welcomeBack: '欢迎回来',
@@ -966,6 +975,7 @@ export default {
   },
   router: {
     notFound: '页面不存在',
+    serviceUnavailable: '服务暂时不可用',
     welcome: '欢迎',
     login: '登录',
     register: '注册',
