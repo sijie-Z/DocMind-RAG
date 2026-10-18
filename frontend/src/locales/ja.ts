@@ -22,6 +22,7 @@ export default {
     retry: '再試行',
     tryAgain: 'しばらくしてからもう一度お試しください',
     noDescription: '説明なし',
+    weekdays: { '0': '日曜', '1': '月曜', '2': '火曜', '3': '水曜', '4': '木曜', '5': '金曜', '6': '土曜' },
   },
   profile: {
     overview: '概要',
@@ -539,6 +540,7 @@ export default {
     files: 'ファイル数',
     storage: 'ストレージ',
     recentConversations: '最近の対話',
+    recentConversationsCount: '最近の対話: {count} 件',
     viewAll: 'すべて表示',
     noConversations: 'まだ対話がありません',
     untitled: '無題',
@@ -681,7 +683,7 @@ export default {
     confirmDeletePositive: '削除',
     editor: {
       clearConfirmTitle: 'キャンバスをクリア',
-      clearConfirmContent: 'クリア後、自動保存が {n} 秒以内に空のキャンバスを書き戻し、保存済みのバージョンを上書きします。キャンバスをクリアしますか？',
+      clearConfirmContent: 'クリア後、自動保存はスキップされ、保存済みのバージョンは上書きされません。キャンバスをクリアしますか？',
       clearConfirmPositive: 'クリア',
       clearConfirmNegative: 'キャンセル',
       emptyCanvasAutoSaveBlocked: 'キャンバスが空のため、保存済みバージョンを保護するために自動保存をスキップしました。空のキャンバスを保存するには、手動で「保存」をクリックしてください。',

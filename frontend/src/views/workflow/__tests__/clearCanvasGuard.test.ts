@@ -7,7 +7,7 @@
  *
  * 验收口径：
  *  1) 点清空未确认（取消）→ 画布与工作流关联均不变，自动保存不写回；
- *     确认文案必须写明「自动保存 N 秒内写回空画布、覆盖已保存的版本」；
+ *     确认文案必须如实写明「自动保存被跳过、已保存版本不会被覆盖」；
  *  2) 确认清空 → 画布清空，但 500ms 自动保存被空画布保护拦截（节点=0 且
  *     已保存版本非空 → 不静默写回，改为明确提示）；
  *  3) 核心防护回退判别：删除最后一个节点（同一条自动保存路径）也不得写回空版本
@@ -192,7 +192,7 @@ afterEach(() => {
 })
 
 describe('E1 · 清空画布二次确认', () => {
-  it('点清空未确认（取消）→ 画布不变；确认文案写明自动保存 N 秒内覆盖已保存版本（先红）', async () => {
+  it('点清空未确认（取消）→ 画布不变；确认文案如实写明自动保存被跳过、已保存版本不会被覆盖（先红）', async () => {
     const wrapper = await mountEditor()
     const store = await seedSavedWorkflow(wrapper)
     dialogState.decision = 'cancel'
@@ -205,8 +205,11 @@ describe('E1 · 清空画布二次确认', () => {
     // 必须先弹确认框
     expect(dialogWarning).toHaveBeenCalledTimes(1)
     const content = String(dialogState.calls[0]?.content ?? '')
-    expect(content).toContain('0.5') // N 秒与 500ms 防抖同源
-    expect(content).toContain('覆盖已保存的版本')
+    // 文案与实现一致：空画布保护生效时自动保存会被跳过，不会覆盖已保存版本。
+    // 旧文案「N 秒内把空画布写回、覆盖已保存的版本」与实现矛盾，不得回退。
+    expect(content).toContain('自动保存将被跳过')
+    expect(content).toContain('已保存版本不会被覆盖')
+    expect(content).not.toContain('把空画布写回')
 
     // 取消 → 画布与工作流关联原样
     expect(store.nodes).toHaveLength(1)

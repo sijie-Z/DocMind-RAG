@@ -159,7 +159,7 @@
             <div>
               <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.recentConversations') }}</h3>
               <p class="text-xs text-gray-500 dark:text-gray-400">
-                <template v-if="convState === 'ready'">最近 {{ recentConversations.length }} 个会话</template>
+                <template v-if="convState === 'ready'">{{ t('dashboard.recentConversationsCount', { count: recentConversations.length }) }}</template>
                 <n-skeleton v-else text style="width: 90px" size="small" />
               </p>
             </div>
@@ -410,7 +410,8 @@ const updateChart = () => {
     grid: { left: '2%', right: '3%', bottom: '3%', top: '10%', containLabel: true },
     xAxis: {
       type: 'category',
-      data: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+      // 星期标签走 common.weekdays 词条（周一为首；0=周日 与 Date/cron 口径一致）
+      data: [1, 2, 3, 4, 5, 6, 0].map((d) => t(`common.weekdays.${d}`)),
       axisLine: { lineStyle: { color: '#e5e7eb' } },
       axisLabel: { color: '#6b7280', fontSize: 10 },
       splitLine: { show: false }

@@ -26,6 +26,8 @@ export default {
     tryAgain: '请稍后重试',
     actions: '操作',
     noDescription: '暂无描述',
+    // 通用星期词条（0=周日，与 Date/cron 口径一致；展示顺序由使用方决定）
+    weekdays: { '0': '周日', '1': '周一', '2': '周二', '3': '周三', '4': '周四', '5': '周五', '6': '周六' },
   },
   profile: {
     // T5 命名归一：个人设置「概览」tab（此前借用 menu.dashboard，现独立页域键）
@@ -597,6 +599,7 @@ export default {
     files: '上传文件',
     storage: '存储使用',
     recentConversations: '最近会话',
+    recentConversationsCount: '最近 {count} 个会话',
     viewAll: '查看全部',
     noConversations: '暂无会话，开始新对话吧',
     untitled: '未命名会话',
@@ -761,7 +764,7 @@ export default {
     confirmDeletePositive: '删除',
     editor: {
       clearConfirmTitle: '清空画布',
-      clearConfirmContent: '清空后自动保存将在 {n} 秒内把空画布写回，覆盖已保存的版本。确定要清空画布吗？',
+      clearConfirmContent: '清空后自动保存将被跳过，已保存版本不会被覆盖。确定要清空画布吗？',
       clearConfirmPositive: '清空',
       clearConfirmNegative: '取消',
       emptyCanvasAutoSaveBlocked: '画布为空，已跳过自动保存：已保存的版本未被覆盖。如需保存空画布，请手动点击「保存」。',
