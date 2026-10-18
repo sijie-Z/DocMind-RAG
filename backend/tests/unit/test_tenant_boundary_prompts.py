@@ -22,6 +22,7 @@ from app.core.security import get_current_user
 from app.models import Base
 from app.models.organization import Organization
 from app.models.prompt import PromptTemplate
+from app.models.prompt_version import PromptTemplateVersion
 from app.models.user import User
 
 
@@ -57,10 +58,12 @@ async def _setup():
             PromptTemplate(name="p-A", content="a", is_system=False, organization_id=1, creator_id=2),
             PromptTemplate(name="p-B", content="b", is_system=False, organization_id=2, creator_id=3),
             PromptTemplate(name="p-A-inactive", content="i", is_system=False, organization_id=1, creator_id=2, is_active=False),
+            # 迁移无法回填归属的历史非系统行：只允许超管可见，不得当系统模板广播。
+            PromptTemplate(name="legacy-orphan", content="o", is_system=False, organization_id=None, creator_id=None),
         ])
         await s.commit()
         ids = {}
-        for name in ("sys-template", "p-A", "p-B", "p-A-inactive"):
+        for name in ("sys-template", "p-A", "p-B", "p-A-inactive", "legacy-orphan"):
             ids[name] = (await s.execute(select(PromptTemplate.id).where(PromptTemplate.name == name))).scalar_one()
     return engine, factory, ids
 
@@ -91,6 +94,7 @@ async def test_list_filters_by_org_and_keeps_system_templates():
         names = {item["name"] for item in r.json()}
         assert {"p-A", "sys-template", "p-A-inactive"} <= names
         assert "p-B" not in names, "org A 用户不得看到 org B 的模板"
+        assert "legacy-orphan" not in names, "非系统 NULL 孤儿行只允许超管可见"
     finally:
         await engine.dispose()
 
@@ -185,5 +189,51 @@ async def test_creator_can_edit_own_prompt_with_unchanged_is_active():
         assert r.status_code == 200, r.text
         async with factory() as s:
             assert (await s.get(PromptTemplate, ids["p-A"])).content == "updated"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_restore_and_version_detail_are_org_scoped():
+    """A2 评审 m-6：restore / version detail 的跨组织访问必须 404。"""
+    engine, factory, ids = await _setup()
+    try:
+        async with factory() as s:
+            s.add(PromptTemplateVersion(
+                prompt_id=ids["p-A"], version=1, name="p-A", content="v1", creator_id=2,
+            ))
+            s.add(PromptTemplateVersion(
+                prompt_id=ids["p-B"], version=1, name="p-B", content="b1", creator_id=3,
+            ))
+            await s.commit()
+
+        admin_a = _user(1, 1, role="admin")
+        r = await _call(factory, admin_a, "POST", f"/api/v1/prompts/{ids['p-B']}/restore/1")
+        assert r.status_code == 404, "跨组织恢复必须 404"
+        r = await _call(factory, admin_a, "GET", f"/api/v1/prompts/{ids['p-B']}/version/1")
+        assert r.status_code == 404, "跨组织版本详情必须 404"
+
+        # 同组织创建者可恢复自己的模板（零回归）
+        r = await _call(factory, _user(2, 1, role="user"), "POST", f"/api/v1/prompts/{ids['p-A']}/restore/1")
+        assert r.status_code == 200, r.text
+        assert r.json()["content"] == "v1"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_seed_creates_system_templates_with_null_org():
+    """seed 仍限管理员；写入的系统模板必须是 organization_id=NULL 且 is_system=True。"""
+    engine, factory, ids = await _setup()
+    try:
+        superuser = _user(99, None, role="admin", superuser=True)
+        r = await _call(factory, superuser, "POST", "/api/v1/prompts/seed")
+        assert r.status_code == 200, r.text
+        async with factory() as s:
+            seeded = (await s.execute(
+                select(PromptTemplate).where(PromptTemplate.name == "通用助手")
+            )).scalar_one()
+            assert seeded.is_system is True
+            assert seeded.organization_id is None
     finally:
         await engine.dispose()

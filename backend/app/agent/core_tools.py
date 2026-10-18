@@ -1151,19 +1151,35 @@ async def get_conversation_history(
         },
     },
     tags=["prompts"],
+    requires_auth=True,
 )
 async def list_prompt_templates(
     category: str | None = None,
     limit: int = 20,
+    organization_id: int | None = None,
     **_: Any,
-) -> str:
-    from sqlalchemy import select
+) -> str | ToolResult:
+    from sqlalchemy import and_, or_, select
 
     from app.core.database import AsyncSessionLocal
     from app.models.prompt import PromptTemplate
 
+    # A2 P0（租户边界）：提示词已按组织私有（org=NULL 仅系统模板只读可见），
+    # 该工具默认对 Agent 开放，必须同源过滤，否则可枚举其他组织的私有模板。
+    if organization_id is None:
+        return _missing_organization_result("list_prompt_templates")
+
     async with AsyncSessionLocal() as session:
-        stmt = select(PromptTemplate).where(PromptTemplate.is_active)
+        stmt = select(PromptTemplate).where(
+            PromptTemplate.is_active,
+            or_(
+                PromptTemplate.organization_id == organization_id,
+                and_(
+                    PromptTemplate.is_system.is_(True),
+                    PromptTemplate.organization_id.is_(None),
+                ),
+            ),
+        )
         if category:
             stmt = stmt.where(PromptTemplate.category == category)
         stmt = stmt.order_by(PromptTemplate.created_at.desc()).limit(limit)
@@ -1197,15 +1213,33 @@ async def list_prompt_templates(
         "required": ["name"],
     },
     tags=["prompts"],
+    requires_auth=True,
 )
-async def get_prompt_template(name: str, **_: Any) -> str:
-    from sqlalchemy import select
+async def get_prompt_template(
+    name: str,
+    organization_id: int | None = None,
+    **_: Any,
+) -> str | ToolResult:
+    from sqlalchemy import and_, or_, select
 
     from app.core.database import AsyncSessionLocal
     from app.models.prompt import PromptTemplate
 
+    # A2 P0（租户边界）：只能读取本组织模板或系统内置模板，禁止跨租户读取全文。
+    if organization_id is None:
+        return _missing_organization_result("get_prompt_template")
+
     async with AsyncSessionLocal() as session:
-        stmt = select(PromptTemplate).where(PromptTemplate.name == name)
+        stmt = select(PromptTemplate).where(
+            PromptTemplate.name == name,
+            or_(
+                PromptTemplate.organization_id == organization_id,
+                and_(
+                    PromptTemplate.is_system.is_(True),
+                    PromptTemplate.organization_id.is_(None),
+                ),
+            ),
+        )
         result = await session.execute(stmt)
         tpl = result.scalar_one_or_none()
 

@@ -2,7 +2,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import desc, or_, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -30,13 +30,21 @@ async def _resolve_prompt_org(current_user: User, db: AsyncSession) -> int | Non
 
 
 def _scope_prompt_query(stmt, current_user: User, org_id: int | None):
-    """租户边界（A2 P0）：本组织模板 + 系统内置模板（organization_id IS NULL）。"""
+    """租户边界（A2 P0）：本组织模板 + 系统内置模板（organization_id IS NULL）。
+
+    只有 **is_system=True** 的 NULL 行才是全组织可见的系统模板。迁移无法回填
+    归属的历史非系统行（organization_id IS NULL, is_system=False）不在此列：
+    它们只对超管可见（隔离），绝不再被所有租户当成系统模板读取。
+    """
     if current_user.is_superuser:
         return stmt
     return stmt.where(
         or_(
             PromptTemplate.organization_id == org_id,
-            PromptTemplate.organization_id.is_(None),
+            and_(
+                PromptTemplate.is_system.is_(True),
+                PromptTemplate.organization_id.is_(None),
+            ),
         )
     )
 
@@ -60,11 +68,17 @@ async def _load_prompt_in_scope(
 
 
 def _ensure_prompt_writable(current_user: User, db_prompt: PromptTemplate) -> None:
-    """系统内置模板（is_system / organization_id=NULL）只读；其余需创建者或组织管理员。"""
-    if db_prompt.is_system or db_prompt.organization_id is None:
+    """系统内置模板只读；其余需创建者或组织管理员（组织边界由 _load_prompt_in_scope 保证）。
+
+    历史孤儿行（organization_id=NULL 且 is_system=False）只对超管可见：
+    超管可删除/修正，普通用户不可达（读侧已隔离）。
+    """
+    if db_prompt.is_system:
         raise AuthorizationError(detail="系统内置模板为只读，不允许修改或删除")
     if current_user.is_superuser:
         return
+    if db_prompt.organization_id is None:
+        raise AuthorizationError(detail="无权修改此模板")
     if db_prompt.creator_id != current_user.id and current_user.role != "admin":
         raise AuthorizationError(detail="无权修改此模板")
 
