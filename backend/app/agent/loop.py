@@ -143,10 +143,15 @@ class PERAgentLoop:
         self,
         openai_client: AsyncOpenAI,
         config: AgentConfig | None = None,
-        organization_id: int = 1,
+        organization_id: int | None = None,
         user_id: int = 0,
         execution_mode: str = "dag",
     ):
+        # A2 P0（fail-closed）：PER 运行必须有组织上下文；默认值不再回落到 1 号组织。
+        if organization_id is None:
+            raise ValueError(
+                "PERAgentLoop 缺少 organization_id，拒绝在无组织上下文下运行"
+            )
         self.client = openai_client
         self.config = config or AgentConfig()
         self.organization_id = organization_id
@@ -1139,6 +1144,13 @@ class PERAgentLoop:
         executor.human_guidance = self.human_guidance
         executor.approval_degraded = False
         executor.pending_control = ""
+        # C3a：工具调用配对持久化只在 checkpoint 接线时启用——没有任务行就没有
+        # 账本可落（裸执行器/子代理保持零 DB 依赖）。
+        executor.tool_ledger_task_id = (
+            self._checkpoint_task_id
+            if self._checkpoint_task_id and self.config.enable_checkpoint
+            else None
+        )
 
     async def _consume_steering(
         self, run_state_live: dict[str, Any],

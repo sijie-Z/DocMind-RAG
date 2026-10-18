@@ -25,38 +25,38 @@ def isolated_cache():
 class TestBoundedCache:
     def test_cache_never_grows_beyond_cap(self, isolated_cache):
         for i in range(ms._MAX_MEMORY_SYSTEMS + 50):
-            ms.get_memory_system(f"fix-m2-agent-{i}")
+            ms.get_memory_system(0, 0, f"fix-m2-agent-{i}")
         assert len(ms.memory_systems) == ms._MAX_MEMORY_SYSTEMS
 
     def test_lru_hit_does_not_grow_cache(self, isolated_cache):
         for _ in range(100):
-            ms.get_memory_system("fix-m2-same-key")
+            ms.get_memory_system(0, 0, "fix-m2-same-key")
         assert len(ms.memory_systems) == 1
 
     def test_least_recently_used_evicted_first(self, isolated_cache):
         cap = ms._MAX_MEMORY_SYSTEMS
-        oldest = ms.get_memory_system("fix-m2-oldest")
+        oldest = ms.get_memory_system(0, 0, "fix-m2-oldest")
         for i in range(cap):
-            ms.get_memory_system(f"fix-m2-fill-{i}")
+            ms.get_memory_system(0, 0, f"fix-m2-fill-{i}")
 
         # 最老的命名空间已被挤出，重新获取应得到全新实例
-        assert ms.get_memory_system("fix-m2-oldest") is not oldest
+        assert ms.get_memory_system(0, 0, "fix-m2-oldest") is not oldest
 
     def test_recently_used_namespace_survives_eviction(self, isolated_cache):
         cap = ms._MAX_MEMORY_SYSTEMS
         for i in range(cap):
-            ms.get_memory_system(f"fix-m2-slot-{i}")
+            ms.get_memory_system(0, 0, f"fix-m2-slot-{i}")
 
-        kept = ms.get_memory_system("fix-m2-slot-0")  # 触碰 → 变为最近使用
-        ms.get_memory_system("fix-m2-newcomer")       # 触发一次驱逐（应驱逐 slot-1）
+        kept = ms.get_memory_system(0, 0, "fix-m2-slot-0")  # 触碰 → 变为最近使用
+        ms.get_memory_system(0, 0, "fix-m2-newcomer")       # 触发一次驱逐（应驱逐 slot-1）
 
-        assert ms.get_memory_system("fix-m2-slot-0") is kept
+        assert ms.get_memory_system(0, 0, "fix-m2-slot-0") is kept
         assert len(ms.memory_systems) == cap
 
     def test_evict_helper_pops_entry(self, isolated_cache):
-        ms.get_memory_system("fix-m2-direct")
-        ms._evict_memory_system("fix-m2-direct")
-        assert "fix-m2-direct" not in ms.memory_systems
+        ms.get_memory_system(0, 0, "fix-m2-direct")
+        ms._evict_memory_system("0:0:fix-m2-direct")
+        assert "0:0:fix-m2-direct" not in ms.memory_systems
 
 
 class TestEvictionPersistence:
@@ -69,14 +69,14 @@ class TestEvictionPersistence:
 
         monkeypatch.setattr(ms.AgentMemorySystem, "_save_to_redis", fake_save)
 
-        oldest = ms.get_memory_system("fix-m2-flush-oldest")
+        oldest = ms.get_memory_system(0, 0, "fix-m2-flush-oldest")
         oldest._loaded = True  # 模拟已从 Redis 加载过的实例
 
         for i in range(ms._MAX_MEMORY_SYSTEMS):
-            ms.get_memory_system(f"fix-m2-flush-{i}")
+            ms.get_memory_system(0, 0, f"fix-m2-flush-{i}")
 
         await asyncio.sleep(0.05)  # 等待驱逐时调度的持久化任务执行
-        assert "fix-m2-flush-oldest" in saved, \
+        assert "0:0:fix-m2-flush-oldest" in saved, \
             "驱逐前必须把已加载实例的长期/反思记忆写回 Redis"
 
     @pytest.mark.asyncio
@@ -89,9 +89,9 @@ class TestEvictionPersistence:
 
         monkeypatch.setattr(ms.AgentMemorySystem, "_save_to_redis", fake_save)
 
-        ms.get_memory_system("fix-m2-unloaded-oldest")
+        ms.get_memory_system(0, 0, "fix-m2-unloaded-oldest")
         for i in range(ms._MAX_MEMORY_SYSTEMS):
-            ms.get_memory_system(f"fix-m2-unloaded-{i}")
+            ms.get_memory_system(0, 0, f"fix-m2-unloaded-{i}")
 
         await asyncio.sleep(0.05)
-        assert "fix-m2-unloaded-oldest" not in saved
+        assert "0:0:fix-m2-unloaded-oldest" not in saved

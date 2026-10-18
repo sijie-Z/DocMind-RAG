@@ -22,6 +22,8 @@ export default {
     warning: 'Notice',
     back: 'Back',
     actions: 'Actions',
+    retry: 'Retry',
+    tryAgain: 'Please try again later',
     noDescription: 'No description',
     weekdays: { '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat' },
   },
@@ -78,7 +80,7 @@ export default {
     validation: {
       nicknameLength: 'Nickname must be between 2-50 characters',
       phoneInvalid: 'Please enter a valid phone number',
-      passwordLength: 'Password must be between 6-20 characters'
+      passwordLength: 'Password must be between 8-20 characters'
     },
     nickname: 'Nickname',
     placeholder: {
@@ -215,6 +217,11 @@ export default {
     noHistory: 'No history',
     backToBottom: 'Back to latest',
     stopGenerating: 'Stop generating',
+    // E7 state visibility: history loading / thinking / stopped
+    loadingHistory: 'Loading conversation history...',
+    thinkingLabel: 'Thinking process',
+    generationStopped: 'Stopped',
+    stoppedHint: 'You can continue asking questions or regenerate the answer',
     suggestions: {
       quantum: 'Explain quantum computing',
       quantumDesc: 'Explain the basic principles in simple terms',
@@ -308,6 +315,9 @@ export default {
     promptTooLong: 'The prompt exceeds the {max}-character limit and was not applied. Please shorten it and try again.',
     sourcePreviewFailed: 'Failed to load the document. Please try again later.',
     promptDefaultName: 'Unnamed',
+    currentTemplate: 'Current template: {name}',
+    clearTemplate: 'Clear',
+    promptCleared: 'Prompt template cleared',
     backToConversations: 'Back to conversations',
     liked: 'Liked',
     disliked: 'Disliked',
@@ -343,6 +353,11 @@ export default {
     uploadFirst: 'Upload your first file',
     empty: 'No knowledge files',
     emptyDesc: 'Knowledge base is empty',
+    loadFailed: 'Failed to load the knowledge base',
+    loadFailedDesc: 'Please try again later or check your network connection',
+    searchEmptyTitle: 'No matching documents',
+    searchEmptyDesc: 'No documents match "{query}". Try another keyword.',
+    clearSearch: 'Clear search',
     uploadSuccess: 'Upload successful',
     uploadFailed: 'Upload failed',
     confirmUpload: 'Start upload',
@@ -361,6 +376,9 @@ export default {
     uploadList: 'Task List',
     noActiveTasks: 'No active tasks',
     clearFinished: 'Clear finished tasks',
+    cancelUpload: 'Cancel upload',
+    removeFromList: 'Remove from list',
+    uploadCancelled: 'Upload canceled',
     table: {
       name: 'File Name',
       size: 'Size',
@@ -379,7 +397,10 @@ export default {
     graph: {
       emptyTitle: 'No graph data yet',
       emptyDesc: 'Upload documents and complete indexing, and the knowledge graph will be built automatically',
-      loadFailed: 'Failed to load graph data, please try again later'
+      loadFailed: 'Failed to load graph data, please try again later',
+      zoomIn: 'Zoom in',
+      zoomOut: 'Zoom out',
+      fitView: 'Reset view'
     },
     docStatus: {
       pending: 'Pending',
@@ -398,6 +419,9 @@ export default {
     create: 'Create Template',
     editTemplate: 'Edit Template',
     empty: 'No prompt templates',
+    searchEmpty: 'No matching templates',
+    searchEmptyDesc: 'No templates match the current search or category filter. Try adjusting the criteria.',
+    clearFilters: 'Clear filters',
     seed: 'Initialize Defaults',
     system: 'System',
     custom: 'Custom',
@@ -429,6 +453,8 @@ export default {
       saveFailed: 'Failed to save',
       deleteSuccess: 'Deleted successfully',
       deleteFailed: 'Failed to delete',
+      loadVersionsFailed: 'Failed to load version history',
+      restoreFailed: 'Failed to restore version',
       seedSuccess: 'Initialized successfully',
       seedFailed: 'Initialization failed'
     }
@@ -456,6 +482,8 @@ export default {
     loginDesc: 'Please enter your credentials to login',
     createAccount: 'Create Account',
     registerDesc: 'Fill in the information to register',
+    brandHeadline: 'Knowledge at your fingertips',
+    brandSubtitle: 'Enterprise RAG knowledge base — upload documents and start asking questions.',
     username: 'Username',
     usernamePlaceholder: 'Enter username',
     email: 'Email',
@@ -583,6 +611,10 @@ export default {
     systemStatus: 'System Status',
     healthy: 'Healthy',
     unhealthy: 'Unhealthy',
+    esLabel: 'Elasticsearch',
+    esHealthYellow: 'Degraded',
+    esHealthUnknown: 'Unknown',
+    esHealthDisconnected: 'Disconnected',
     aiMonitor: 'AI Resource Monitor',
     tokensToday: 'Tokens Today',
     costToday: 'Cost Today',
@@ -670,7 +702,9 @@ export default {
     noResults: 'No results found',
     noResultsDesc: 'Try different keywords or adjust filters',
     fileContent: 'File Content',
-    searchFailed: 'Search failed'
+    searchFailed: 'Search failed',
+    askAIQuestion: 'About the file "{filename}": {query}',
+    askAIQuestionGeneric: 'Regarding the file "{filename}", please summarize its key points'
   },
   conversations: {
     title: 'Conversation History',
@@ -705,16 +739,51 @@ export default {
   },
   workflow: {
     description: 'Break complex AI tasks into staged pipelines with unified metrics and state management.',
+    loadFailed: 'Failed to load workflows',
+    loadFailedDesc: 'Please try again later or check your network connection',
+    empty: 'No workflows yet',
+    emptyDesc: 'Create a workflow to orchestrate multi-step AI tasks as a visual pipeline',
+    createFirst: 'Create your first workflow',
+    searchEmpty: 'No matching workflows',
+    searchEmptyDesc: 'No workflows match "{query}". Try another keyword.',
+    clearSearch: 'Clear search',
+    deleteSuccess: 'Deleted',
+    deleteFailed: 'Delete failed',
+    duplicateSuccess: 'Duplicated',
+    duplicateFailed: 'Duplicate failed',
+    confirmDeleteTitle: 'Confirm deletion',
+    confirmDeleteContent: 'This cannot be undone. Delete this workflow?',
+    confirmDeletePositive: 'Delete',
     editor: {
       clearConfirmTitle: 'Clear canvas',
       clearConfirmContent: 'After clearing, auto-save will be skipped and the saved version will not be overwritten. Clear the canvas?',
       clearConfirmPositive: 'Clear',
       clearConfirmNegative: 'Cancel',
       emptyCanvasAutoSaveBlocked: 'The canvas is empty, so auto-save was skipped to protect the saved version. To save an empty canvas, click "Save" manually.',
+      saveSuccess: 'Workflow saved',
+      saveFailed: 'Save failed',
+      autoSaveFailed: 'Auto-save failed; your changes are not saved. Click the save status to retry.',
+      saveStatusUnsaved: 'Unsaved',
+      saveStatusSaving: 'Saving',
+      saveStatusSaved: 'Saved',
+      saveStatusError: 'Save failed',
+      saveRetry: 'Retry',
+      saveRetryHint: 'Save failed — click to retry',
+      leaveConfirmTitle: 'Leave the editor',
+      leaveConfirmContent: 'This workflow has unsaved changes that will be lost if you leave. Leave anyway?',
+      leaveConfirmPositive: 'Leave',
+      leaveConfirmNegative: 'Cancel',
+      togglePanel: 'Properties panel',
+      clickToAddHint: 'Click or drag to add a node',
     },
   },
   notifications: {
     markAllRead: 'Mark all read',
+    loadFailed: 'Failed to load notifications',
+    empty: 'No notifications',
+    deleteSuccess: 'Deleted',
+    deleteFailed: 'Delete failed',
+    batchDeleteFailed: 'Batch delete failed',
   },
 
   agent: {
@@ -891,6 +960,8 @@ export default {
       query: 'Input',
       error: 'Last error',
       unavailable: 'Result unavailable (task missing or not visible to you)',
+      refresh: 'Refresh result',
+      refreshed: 'Result refreshed',
       taskState: {
         pending: 'Pending',
         running: 'Running',
@@ -996,5 +1067,15 @@ export default {
     knowledgeGraph: 'Knowledge Graph',
     workflowEditor: 'Workflow Editor',
     agentMemory: 'Agent Memory'
+  },
+  legal: {
+    privacy: {
+      title: 'Privacy Policy',
+      description: 'This page is a placeholder for the Privacy Policy. The full text will be published here.'
+    },
+    terms: {
+      title: 'Terms of Service',
+      description: 'This page is a placeholder for the Terms of Service. The full text will be published here.'
+    }
   }
 };

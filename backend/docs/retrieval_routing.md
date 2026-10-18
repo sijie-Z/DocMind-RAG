@@ -220,7 +220,7 @@ for rew in rewrites:
 
 ```python
 query_emb = await embedding_service.get_embedding(query)
-# 2048 维,智谱 embedding-3
+# 维度由 VECTOR_DIMENSION 决定（默认 768 / nomic-embed-text；云端覆盖时三键配套修改）
 ```
 
 ### 6.2 HyDE(Hypothetical Document Embeddings)
@@ -605,13 +605,16 @@ if document_ids is not None:
       "document_id":   {"type": "keyword"},
       "organization_id":{"type": "keyword"},
       "embedding":     {"type": "dense_vector",
-                         "dims": 2048,
+                         "dims": 768,
                          "index": true,
                          "similarity": "cosine"}
     }
   }
 }
 ```
+
+> `dims` 取自 `settings.VECTOR_DIMENSION`（默认 768）；索引创建时会校验存量维度，
+> 修改维度前需按 elasticsearch.py 的提示迁移数据。
 
 ### 14.2 自适应分词器
 

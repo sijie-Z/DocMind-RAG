@@ -19,6 +19,8 @@ export default {
     warning: 'お知らせ',
     copyFailed: 'コピーに失敗しました',
     actions: '操作',
+    retry: '再試行',
+    tryAgain: 'しばらくしてからもう一度お試しください',
     noDescription: '説明なし',
     weekdays: { '0': '日曜', '1': '月曜', '2': '火曜', '3': '水曜', '4': '木曜', '5': '金曜', '6': '土曜' },
   },
@@ -76,7 +78,7 @@ export default {
     validation: {
       nicknameLength: 'ニックネームは2〜50文字以内で入力してください',
       phoneInvalid: '有効な電話番号を入力してください',
-      passwordLength: 'パスワードは6〜20文字以内で入力してください'
+      passwordLength: 'パスワードは8〜20文字以内で入力してください'
     },
     nickname: 'ニックネーム',
     placeholder: {
@@ -202,6 +204,11 @@ export default {
     noHistory: '履歴なし',
     backToBottom: '最新のメッセージに戻る',
     stopGenerating: '生成を停止',
+    // E7 三状態の可視性：履歴読み込み / thinking / 停止済み
+    loadingHistory: '履歴を読み込み中...',
+    thinkingLabel: '思考プロセス',
+    generationStopped: '停止しました',
+    stoppedHint: '続けて質問するか、回答を再生成できます',
     suggestions: {
       quantum: '量子コンピュータについて説明して',
       quantumDesc: '基本的な原理を簡単な言葉で説明してください',
@@ -275,6 +282,9 @@ export default {
     msgLoadFailed: '履歴メッセージの読み込みに失敗しました',
     promptApplied: 'プロンプトテンプレート「{name}」を適用しました。対話を開始してください',
     promptDefaultName: '無題',
+    currentTemplate: '現在のテンプレート：{name}',
+    clearTemplate: 'クリア',
+    promptCleared: 'プロンプトテンプレートを解除しました',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
     sseWarning: 'サーバーからの通知：今回の回答が不完全な可能性があります',
     backToConversations: '対話リストに戻る',
@@ -301,9 +311,19 @@ export default {
       training: '研修資料',
       other: 'その他'
     },
+    graph: {
+      zoomIn: '拡大',
+      zoomOut: '縮小',
+      fitView: '表示をリセット'
+    },
     uploadFirst: '最初のファイルをアップロード',
     empty: 'ドキュメントがありません',
     emptyDesc: 'ナレッジベースは空です',
+    loadFailed: 'ナレッジベースの読み込みに失敗しました',
+    loadFailedDesc: 'しばらくしてからもう一度お試しください。ネットワーク接続もご確認ください',
+    searchEmptyTitle: '一致するドキュメントがありません',
+    searchEmptyDesc: '「{query}」に一致するドキュメントはありません。別のキーワードをお試しください',
+    clearSearch: '検索をクリア',
     uploadSuccess: 'アップロードに成功しました',
     uploadFailed: 'アップロードに失敗しました',
     confirmUpload: 'アップロードを開始',
@@ -322,6 +342,9 @@ export default {
     uploadList: 'タスクリスト',
     noActiveTasks: '実行中のタスクはありません',
     clearFinished: '完了したタスクをクリア',
+    cancelUpload: 'アップロードをキャンセル',
+    removeFromList: 'リストから削除',
+    uploadCancelled: 'アップロードをキャンセルしました',
     table: {
       name: 'ファイル名',
       size: 'サイズ',
@@ -345,6 +368,9 @@ export default {
     addTemplate: 'テンプレート追加',
     editTemplate: 'テンプレート編集',
     empty: 'プロンプトテンプレートがありません',
+    searchEmpty: '一致するテンプレートがありません',
+    searchEmptyDesc: '現在の検索・カテゴリ条件に一致するテンプレートがありません。条件を調整してください',
+    clearFilters: 'フィルターをクリア',
     seed: '初期テンプレートを作成',
     system: 'システム',
     custom: 'カスタム',
@@ -376,6 +402,8 @@ export default {
       saveFailed: '保存に失敗しました',
       deleteSuccess: '削除しました',
       deleteFailed: '削除に失敗しました',
+      loadVersionsFailed: 'バージョン履歴の読み込みに失敗しました',
+      restoreFailed: 'ロールバックに失敗しました',
       seedSuccess: '初期化に成功しました',
       seedFailed: '初期化に失敗しました'
     }
@@ -403,6 +431,8 @@ export default {
     loginDesc: '認証情報を入力してログインしてください',
     createAccount: 'アカウント作成',
     registerDesc: '情報を入力して登録してください',
+    brandHeadline: '知識を、すぐそばに',
+    brandSubtitle: 'エンタープライズ向け RAG ナレッジベース。ドキュメントをアップロードしてすぐに質問できます。',
     username: 'ユーザー名',
     usernamePlaceholder: 'ユーザー名を入力',
     email: 'メールアドレス',
@@ -529,6 +559,10 @@ export default {
     systemStatus: 'システム状態',
     healthy: '正常',
     unhealthy: '異常',
+    esLabel: 'Elasticsearch',
+    esHealthYellow: '警告',
+    esHealthUnknown: '不明',
+    esHealthDisconnected: '未接続',
     aiMonitor: 'AIリソース監視',
     tokensToday: '本日のToken消費量',
     costToday: '本日のコスト',
@@ -616,6 +650,8 @@ export default {
     noResults: '結果が見つかりませんでした',
     noResultsDesc: '別のキーワードを試すか、フィルタを調整してください',
     fileContent: 'ファイル内容',
+    askAIQuestion: 'ファイル「{filename}」について：{query}',
+    askAIQuestionGeneric: 'ファイル「{filename}」の主な内容を要約してください',
   },
   conversations: {
     title: '対話履歴',
@@ -630,16 +666,51 @@ export default {
   },
   workflow: {
     description: '複雑なAIタスクを段階的なパイプラインに分解し、統一されたメトリクスと状態管理で実行品質を監視します。',
+    loadFailed: 'ワークフローの読み込みに失敗しました',
+    loadFailedDesc: 'しばらくしてからもう一度お試しください。ネットワーク接続もご確認ください',
+    empty: 'ワークフローがありません',
+    emptyDesc: 'ワークフローを作成して、多段階の AI タスクをビジュアルパイプラインに編成しましょう',
+    createFirst: '最初のワークフローを作成',
+    searchEmpty: '一致するワークフローがありません',
+    searchEmptyDesc: '「{query}」に一致するワークフローはありません。別のキーワードをお試しください',
+    clearSearch: '検索をクリア',
+    deleteSuccess: '削除しました',
+    deleteFailed: '削除に失敗しました',
+    duplicateSuccess: '複製しました',
+    duplicateFailed: '複製に失敗しました',
+    confirmDeleteTitle: '削除の確認',
+    confirmDeleteContent: '削除すると復元できません。このワークフローを削除しますか？',
+    confirmDeletePositive: '削除',
     editor: {
       clearConfirmTitle: 'キャンバスをクリア',
       clearConfirmContent: 'クリア後、自動保存はスキップされ、保存済みのバージョンは上書きされません。キャンバスをクリアしますか？',
       clearConfirmPositive: 'クリア',
       clearConfirmNegative: 'キャンセル',
       emptyCanvasAutoSaveBlocked: 'キャンバスが空のため、保存済みバージョンを保護するために自動保存をスキップしました。空のキャンバスを保存するには、手動で「保存」をクリックしてください。',
+      saveSuccess: 'ワークフローを保存しました',
+      saveFailed: '保存に失敗しました',
+      autoSaveFailed: '自動保存に失敗しました。変更は保存されていません。保存ステータスをクリックすると再試行できます。',
+      saveStatusUnsaved: '未保存',
+      saveStatusSaving: '保存中',
+      saveStatusSaved: '保存済み',
+      saveStatusError: '保存失敗',
+      saveRetry: '再試行',
+      saveRetryHint: '保存に失敗しました。クリックして再試行',
+      leaveConfirmTitle: 'エディターを離れる',
+      leaveConfirmContent: 'このワークフローには未保存の変更があり、離れると失われます。離れますか？',
+      leaveConfirmPositive: '離れる',
+      leaveConfirmNegative: 'キャンセル',
+      togglePanel: 'プロパティパネル',
+      clickToAddHint: 'クリックまたはドラッグでノードを追加',
     },
   },
   notifications: {
     markAllRead: 'すべて既読',
+    loadFailed: '通知の読み込みに失敗しました',
+    empty: '通知はありません',
+    deleteSuccess: '削除しました',
+    deleteFailed: '削除に失敗しました',
+    batchDeleteFailed: '一括削除に失敗しました',
   },
 
   agent: {
@@ -816,6 +887,8 @@ export default {
       query: '入力',
       error: '最近のエラー',
       unavailable: '結果を表示できません（タスクが存在しないか、表示権限がありません）',
+      refresh: '結果を更新',
+      refreshed: '結果を更新しました',
       taskState: {
         pending: '待機中',
         running: '実行中',
@@ -921,5 +994,15 @@ export default {
     knowledgeGraph: 'ナレッジグラフ',
     workflowEditor: 'ワークフローエディタ',
     agentMemory: 'Agent メモリ'
+  },
+  legal: {
+    privacy: {
+      title: 'プライバシーポリシー',
+      description: 'このページはプライバシーポリシーのプレースホルダーです。正式な全文は公開時にここへ掲載されます。'
+    },
+    terms: {
+      title: '利用規約',
+      description: 'このページは利用規約のプレースホルダーです。正式な全文は公開時にここへ掲載されます。'
+    }
   }
 };

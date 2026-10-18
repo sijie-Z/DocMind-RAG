@@ -27,45 +27,45 @@
       <n-button size="small" @click="loadStats">{{ t('dashboard.retry') }}</n-button>
     </div>
     <div v-else class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <div class="group bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-slate-200 dark:hover:border-blue-700 transition-all duration-200 cursor-pointer">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
         <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-slate-100 dark:bg-slate-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+          <div class="w-10 h-10 bg-slate-100 dark:bg-slate-900/40 rounded-xl flex items-center justify-center">
             <n-icon size="22" class="text-blue-600 dark:text-blue-400"><ChatbubbleEllipsesOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400 group-hover:text-blue-500 transition-colors">对话</span>
+          <span class="text-xs text-gray-400">对话</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.conversation_count.toLocaleString() }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.conversations') }}</p>
       </div>
 
-      <div class="group bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-emerald-200 dark:hover:border-emerald-700 transition-all duration-200 cursor-pointer">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
         <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+          <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl flex items-center justify-center">
             <n-icon size="22" class="text-emerald-600 dark:text-emerald-400"><TextOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400 group-hover:text-emerald-500 transition-colors">消息</span>
+          <span class="text-xs text-gray-400">消息</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.message_count.toLocaleString() }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.messages') }}</p>
       </div>
 
-      <div class="group bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-orange-200 dark:hover:border-orange-700 transition-all duration-200 cursor-pointer">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
         <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-orange-100 dark:bg-orange-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+          <div class="w-10 h-10 bg-orange-100 dark:bg-orange-900/40 rounded-xl flex items-center justify-center">
             <n-icon size="22" class="text-orange-600 dark:text-orange-400"><DocumentOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400 group-hover:text-orange-500 transition-colors">文档</span>
+          <span class="text-xs text-gray-400">文档</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.file_count.toLocaleString() }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.files') }}</p>
       </div>
 
-      <div class="group bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-rose-200 dark:hover:border-rose-700 transition-all duration-200 cursor-pointer">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
         <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-rose-100 dark:bg-rose-900/40 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+          <div class="w-10 h-10 bg-rose-100 dark:bg-rose-900/40 rounded-xl flex items-center justify-center">
             <n-icon size="22" class="text-rose-600 dark:text-rose-400"><ServerOutline /></n-icon>
           </div>
-          <span class="text-xs text-gray-400 group-hover:text-rose-500 transition-colors">存储</span>
+          <span class="text-xs text-gray-400">存储</span>
         </div>
         <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ formatSize(stats.storage_used) }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.storage') }}</p>

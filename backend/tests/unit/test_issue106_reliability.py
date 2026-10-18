@@ -66,7 +66,7 @@ class _ScriptedExecutor(Executor):
 
 
 async def _run(executor: Executor, plan: Plan) -> list[AgentEvent]:
-    return [e async for e in executor.execute(plan)]
+    return [e async for e in executor.execute(plan, organization_id=1)]
 
 
 # ── §4a：串行模式的两道保护 ─────────────────────────────────────────────

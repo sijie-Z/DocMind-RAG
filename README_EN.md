@@ -293,15 +293,16 @@ cp .env.example .env               # Windows: copy .env.example .env
 cp .env.docker.example .env.docker
 # Edit .env.docker — at minimum fill in LLM API Keys:
 #   DEEPSEEK_API_KEY=sk-xxx
-#   DEEPSEEK_API_URL=https://api.deepseek.com/v1
-#   EMBEDDING_API_KEY=sk-xxx
-#   EMBEDDING_API_URL=https://api.deepseek.com/v1
+#   DEEPSEEK_API_URL=https://api.deepseek.com
+# Embedding defaults to local Ollama (nomic-embed-text / 768 dims); no separate
+# embedding key is needed (DEEPSEEK_API_KEY is reused). Fill EMBEDDING_API_KEY /
+# EMBEDDING_API_URL only when using a cloud embedding API.
 ```
 
 ### 3. Start Infrastructure
 
 ```bash
-cd backend && docker compose up -d mysql redis elasticsearch minio kafka zookeeper
+cd backend && docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
 # Infrastructure containers only (apps keep running on the host — see below); skip this step without Docker and use local services per SETUP.md
 # Full Docker deployment (apps in containers): see the Deployment section
 ```
@@ -348,15 +349,23 @@ Environment variables via `.env` file. Key settings:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DEEPSEEK_API_KEY` | LLM API Key | Required |
-| `DEEPSEEK_API_URL` | LLM API URL | `https://api.deepseek.com/v1` |
-| `EMBEDDING_API_KEY` | Embedding API Key | Required |
-| `EMBEDDING_API_URL` | Embedding API URL | Required |
-| `DATABASE_URL` | MySQL connection string | `mysql+aiomysql://root:...` |
-| `VECTOR_DIMENSION` | Vector dimension | `1536` |
+| `DEEPSEEK_API_URL` | LLM API URL | `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL` | Chat model | `deepseek-v4-flash` |
+| `EMBEDDING_API_KEY` | Embedding API Key | Falls back to `DEEPSEEK_API_KEY` |
+| `EMBEDDING_API_URL` | Embedding API URL | `http://localhost:11434/v1` (local Ollama) |
+| `EMBEDDING_MODEL` | Embedding model | `nomic-embed-text` |
+| `DATABASE_URL` | MySQL connection string | `mysql+aiomysql://...` (required in deployments) |
+| `VECTOR_DIMENSION` | Vector dimension | `768` |
 | `ENABLE_TRACING` | OpenTelemetry toggle | `false` |
-| `ENABLE_DEMO_ACCOUNT` | Enable demo accounts | `true` |
+| `ENABLE_DEMO_ACCOUNT` | Enable demo accounts | `false` |
 | `ENABLE_WORKFLOW_CODE_NODES` | Allow workflow code nodes (security risk; disabled by default) | `false` |
 | `APP_VERSION` | App version | `1.22.1-rc.1` |
+
+> Model / vector-dimension defaults are defined once in
+> `backend/app/core/config/ai.py`. When `EMBEDDING_MODEL` / `VECTOR_DIMENSION` are
+> not set explicitly, hardware tiers auto-select: CPU `bge-m3` / 1024, 8G-GPU
+> `Qwen3-Embedding-4B` / 2048, 16G-GPU `Qwen3-Embedding-8B` / 4096. Explicit
+> values (as in the templates above) take precedence over auto-tiering.
 
 Full configuration reference: `backend/.env.example` and `backend/.env.docker.example`.
 
@@ -489,7 +498,7 @@ cd ../frontend && npm run test
 Prerequisite: create and fill `backend/.env.docker` first (see Quick Start · 2. Configure) — without it, every compose command fails outright.
 
 ```bash
-cd backend && docker compose up -d
+cd backend && docker compose --env-file .env.docker up -d
 # Starts 10 services: backend, worker, mysql, redis, elasticsearch, minio, zookeeper, kafka, prometheus, grafana
 ```
 

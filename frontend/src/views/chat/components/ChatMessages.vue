@@ -5,8 +5,8 @@
     @scroll="$emit('scroll')"
   >
     <div class="max-w-3xl mx-auto space-y-6">
-      <!-- Welcome screen -->
-      <div v-if="messages.length === 0" class="flex flex-col items-center justify-center mt-16 md:mt-24 text-center animate-fade-in">
+      <!-- Welcome screen（E7：历史加载中不显示空态欢迎屏，避免「加载中」与「新会话」混淆） -->
+      <div v-if="messages.length === 0 && !isLoadingHistory" class="flex flex-col items-center justify-center mt-16 md:mt-24 text-center animate-fade-in">
         <div class="relative mb-10">
           <div class="w-28 h-28 bg-gradient-to-br from-slate-500 via-blue-500 to-blue-600 rounded-3xl shadow-2xl shadow-slate-500/30 flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
             <n-icon size="52" class="text-white drop-shadow">
@@ -39,6 +39,15 @@
             </p>
           </button>
         </div>
+      </div>
+
+      <!-- E7：历史加载态 —— 与生成态严格分离（独立指示，不出现停止按钮/生成
+           loading/流式光标；loadConversation 不再复用 isLoading） -->
+      <div v-if="isLoadingHistory" data-testid="history-loading" class="flex items-center gap-3 py-2 text-sm text-gray-500 dark:text-gray-400 animate-pulse">
+        <div class="w-10 h-10 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 flex items-center justify-center shadow-sm">
+          <n-icon size="20" class="text-primary-600 dark:text-primary-400 animate-spin-slow"><SparklesOutline /></n-icon>
+        </div>
+        <span>{{ t('chat.loadingHistory') }}</span>
       </div>
 
       <!-- Message list -->
@@ -85,12 +94,43 @@
                      assistant 消息的 Markdown 与纯文本副本同时渲染。
                      重排为「assistant → Markdown(+光标) | 否则 → 纯文本」严格互斥。 -->
                 <template v-if="message.messageType === 'assistant'">
+                  <!-- E7：thinking 折叠区（SSE thinking 事件 reasoning/planning/correction
+                       已由 useChatSend 落账到 message.thinking，此前聊天页零渲染）——
+                       默认收起，点击展开，避免推理过程长期占屏 -->
+                  <div v-if="message.thinking" class="mb-2" data-testid="thinking-block">
+                    <button
+                      type="button"
+                      data-testid="thinking-toggle"
+                      class="thinking-toggle inline-flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                      :aria-expanded="isThinkingOpen(message, index)"
+                      @click="toggleThinking(message, index)"
+                    >
+                      <n-icon size="12">
+                        <ChevronDownOutline v-if="isThinkingOpen(message, index)" />
+                        <ChevronForwardOutline v-else />
+                      </n-icon>
+                      {{ t('chat.thinkingLabel') }}
+                    </button>
+                    <div
+                      v-if="isThinkingOpen(message, index)"
+                      data-testid="thinking-content"
+                      class="mt-1.5 whitespace-pre-wrap rounded-lg border border-gray-100 dark:border-gray-700/60 bg-gray-50 dark:bg-gray-900/40 px-3 py-2 text-xs leading-relaxed text-gray-500 dark:text-gray-400"
+                    >{{ message.thinking }}</div>
+                  </div>
                   <!-- E3：最后一条流式消息标记 streaming —— 中间态轻量渲染，终态一次完整 Markdown -->
                   <Markdown :content="message.content" :streaming="isLoading && index === messages.length - 1" />
                   <span
                     v-if="isLoading && index === messages.length - 1"
                     class="inline-block w-0.5 h-4 bg-slate-500 dark:bg-slate-400 ml-0.5 align-middle animate-blink"
                   />
+                  <!-- E7：已停止态 —— 停止生成后给该条消息打标，与「完成」明确区分 -->
+                  <div v-if="message.stopped" data-testid="stopped-notice" class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span class="inline-flex items-center gap-1 rounded-full border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400">
+                      <n-icon size="12"><StopCircleOutline /></n-icon>
+                      {{ t('chat.generationStopped') }}
+                    </span>
+                    <span class="text-gray-400 dark:text-gray-500">{{ t('chat.stoppedHint') }}</span>
+                  </div>
                 </template>
                 <div v-else class="whitespace-pre-wrap">{{ message.content }}</div>
 
@@ -211,8 +251,8 @@
         </DynamicScrollerItem>
       </DynamicScroller>
 
-      <!-- Loading indicator -->
-      <div v-if="isLoading" class="flex gap-4 animate-pulse">
+      <!-- Loading indicator（E7：生成态专用，历史加载走上方 history-loading） -->
+      <div v-if="isLoading" data-testid="generation-loading" class="flex gap-4 animate-pulse">
         <div class="w-10 h-10 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 flex items-center justify-center shadow-sm">
           <n-icon size="20" class="text-primary-600 dark:text-primary-400 animate-spin-slow"><SparklesOutline /></n-icon>
         </div>
@@ -244,8 +284,9 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { SparklesOutline, ArrowForwardOutline, ArrowDownOutline, ThumbsUpOutline, ThumbsDownOutline, CopyOutline, DocumentTextOutline, RefreshOutline } from '@vicons/ionicons5'
+import { SparklesOutline, ArrowForwardOutline, ArrowDownOutline, ThumbsUpOutline, ThumbsDownOutline, CopyOutline, DocumentTextOutline, RefreshOutline, ChevronDownOutline, ChevronForwardOutline, StopCircleOutline } from '@vicons/ionicons5'
 import { NPopover } from 'naive-ui'
 // 首屏瘦身（E5）：虚拟滚动只在聊天页使用——从全局注册（main.ts）改为本组件局部引入，
 // 模块与样式随 Chat 路由 chunk 按需加载，不再计入首屏。
@@ -264,10 +305,28 @@ const { t } = useI18n()
 defineProps<{
   messages: ChatMessage[]
   isLoading: boolean
+  /** E7：历史加载态（与生成态 isLoading 分离，二者互斥出现） */
+  isLoadingHistory?: boolean
   showBackToBottom: boolean
   userAvatar?: string
   suggestions: { title: string; desc: string }[]
 }>()
+
+// E7：thinking 折叠区展开状态（按消息 id 记忆；无 id 时回退索引）
+const expandedThinking = ref<Record<string, boolean>>({})
+
+function thinkingKey(message: ChatMessage, index: number): string {
+  return String(message.id ?? index)
+}
+
+function isThinkingOpen(message: ChatMessage, index: number): boolean {
+  return expandedThinking.value[thinkingKey(message, index)] === true
+}
+
+function toggleThinking(message: ChatMessage, index: number): void {
+  const key = thinkingKey(message, index)
+  expandedThinking.value = { ...expandedThinking.value, [key]: !expandedThinking.value[key] }
+}
 
 // issue #289：Agent 模式事件（落账见 useChatSend）的取数与渲染辅助
 function agentEventsOf(message: ChatMessage, type: AgentEvent['type']): AgentEvent[] {

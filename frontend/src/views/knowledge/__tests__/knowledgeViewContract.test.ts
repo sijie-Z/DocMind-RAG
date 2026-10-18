@@ -180,7 +180,8 @@ describe('KnowledgeView · 批删组织组包（A2）', () => {  it('全链路�
     await nextTick()
 
     expect(mockedBatchDelete).toHaveBeenCalledTimes(1)
-    expect(mockedBatchDelete).toHaveBeenCalledWith(['doc-1'], 3)
+    // E14/D1：页面唯一 toast → 请求静默（X-Silent-Error），第三参为静默选项
+    expect(mockedBatchDelete).toHaveBeenCalledWith(['doc-1'], 3, { silent: true })
   })
 
   it('无当前组织（超管场景）：请求仍发出、organization_id 传 null 由 api 层省略', async () => {
@@ -203,7 +204,7 @@ describe('KnowledgeView · 批删组织组包（A2）', () => {  it('全链路�
     confirmBtn!.click()
     await flushPromises()
 
-    expect(mockedBatchDelete).toHaveBeenCalledWith(['doc-1'], null)
+    expect(mockedBatchDelete).toHaveBeenCalledWith(['doc-1'], null, { silent: true })
   })
 })
 

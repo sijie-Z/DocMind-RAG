@@ -12,7 +12,9 @@ services:
       - .env.docker
     environment:
       # Override connection strings for Docker internal networking
-      - DATABASE_URL=mysql+aiomysql://${MYSQL_USER:-docmind}:${MYSQL_PASSWORD:-docmind_db_user_pw_change_me}@docmind-mysql:3306/${MYSQL_DATABASE:-docmind}
+      # 口令必须显式提供（fail-closed）：填写在 .env.docker，并以
+      # docker compose --env-file .env.docker ... 运行（Compose 插值来源）。
+      - DATABASE_URL=mysql+aiomysql://${MYSQL_USER:-docmind}:${MYSQL_PASSWORD:?MYSQL_PASSWORD_required}@docmind-mysql:3306/${MYSQL_DATABASE:-docmind}
       - REDIS_HOST=docmind-redis
       - REDIS_PORT=6379
       - ELASTICSEARCH_HOSTS=["http://docmind-elasticsearch:9200"]
@@ -37,6 +39,9 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./temp_uploads:/app/temp_uploads
+    extra_hosts:
+      # 容器内通过 host.docker.internal 访问宿主机（默认 Embedding 指向宿主机 Ollama）
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
       interval: 30s
@@ -55,7 +60,7 @@ services:
     env_file:
       - .env.docker
     environment:
-      - DATABASE_URL=mysql+aiomysql://${MYSQL_USER:-docmind}:${MYSQL_PASSWORD:-docmind_db_user_pw_change_me}@docmind-mysql:3306/${MYSQL_DATABASE:-docmind}
+      - DATABASE_URL=mysql+aiomysql://${MYSQL_USER:-docmind}:${MYSQL_PASSWORD:?MYSQL_PASSWORD_required}@docmind-mysql:3306/${MYSQL_DATABASE:-docmind}
       - REDIS_HOST=docmind-redis
       - REDIS_PORT=6379
       - ELASTICSEARCH_HOSTS=["http://docmind-elasticsearch:9200"]
@@ -89,6 +94,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    extra_hosts:
+      # 容器内通过 host.docker.internal 访问宿主机（默认 Embedding 指向宿主机 Ollama）
+      - "host.docker.internal:host-gateway"
     networks:
       - docmind-network
     restart: unless-stopped
@@ -99,12 +107,12 @@ services:
     container_name: docmind-mysql
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --bind-address=0.0.0.0
     environment:
-      # 安全：默认值为占位符，部署前务必随机生成并在 .env.docker 中覆盖
+      # 安全：口令必须显式提供（缺省时 compose 直接报错，不再回退到弱默认值），
       # 生成命令: python -c "import secrets; print(secrets.token_hex(24))"（详见 deploy/README.md）
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-docmind_db_root_pw_change_me}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD_required}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-docmind}
       - MYSQL_USER=${MYSQL_USER:-docmind}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-docmind_db_user_pw_change_me}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:?MYSQL_PASSWORD_required}
     ports:
       - "127.0.0.1:3308:3306"
     volumes:
@@ -115,7 +123,8 @@ services:
     networks:
       - docmind-network
     healthcheck:
-      test: "mysqladmin ping -h localhost -u root -p${MYSQL_ROOT_PASSWORD:-docmind_db_root_pw_change_me}"
+      # 容器内复用 MYSQL_ROOT_PASSWORD 环境变量（$$ 转义避免 Compose 提前插值）
+      test: "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD"
       timeout: 20s
       retries: 10
       start_period: 60s
@@ -183,9 +192,9 @@ services:
     image: docker.m.daocloud.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
     container_name: docmind-minio
     environment:
-      # 必填：生成随机凭据并写入 .env.docker（MINIO_SECRET_KEY 至少 8 位），默认值仅为占位
-      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-docmind_minio_user}
-      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-docmind_minio_pw_change_me}
+      # 必填：生成随机凭据并写入 .env.docker（MINIO_SECRET_KEY 至少 8 位），缺省时 compose 直接报错
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY_required}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY_required}
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
@@ -258,9 +267,9 @@ services:
     ports:
       - "127.0.0.1:3001:3000"
     environment:
-      # 默认管理员密码为占位符，生产环境请通过 .env.docker 的 GRAFANA_PASSWORD 覆盖
+      # 管理员口令必须显式提供（缺省时 compose 直接报错），通过 .env.docker 的 GRAFANA_PASSWORD 提供
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-docmind_grafana_pw_change_me}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD_required}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - ./config/grafana/provisioning:/etc/grafana/provisioning:ro

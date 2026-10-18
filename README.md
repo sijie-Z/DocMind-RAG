@@ -293,15 +293,15 @@ cp .env.example .env               # Windows: copy .env.example .env
 cp .env.docker.example .env.docker
 # 编辑 .env.docker，至少填入 LLM API Key：
 #   DEEPSEEK_API_KEY=sk-xxx
-#   DEEPSEEK_API_URL=https://api.deepseek.com/v1
-#   EMBEDDING_API_KEY=sk-xxx
-#   EMBEDDING_API_URL=https://api.deepseek.com/v1
+#   DEEPSEEK_API_URL=https://api.deepseek.com
+# Embedding 默认走本机 Ollama（nomic-embed-text / 768 维），无需单独的 Embedding Key
+# （复用 DEEPSEEK_API_KEY）；使用云端 Embedding 时再填 EMBEDDING_API_KEY / EMBEDDING_API_URL。
 ```
 
 ### 3. 启动基础设施
 
 ```bash
-cd backend && docker compose up -d mysql redis elasticsearch minio kafka zookeeper
+cd backend && docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
 # 只启动基础设施容器（应用继续在宿主机跑，见下）；不用 Docker 的话跳过本步，按 SETUP.md 用本机服务替代
 # 完整 Docker 部署（应用也在容器里）：见「部署」一节
 ```
@@ -451,15 +451,22 @@ DocMind/
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `DEEPSEEK_API_KEY` | LLM API Key | 必填 |
-| `DEEPSEEK_API_URL` | LLM API 地址 | `https://api.deepseek.com/v1` |
-| `EMBEDDING_API_KEY` | Embedding API Key | 必填 |
-| `EMBEDDING_API_URL` | Embedding API 地址 | 必填 |
-| `DATABASE_URL` | MySQL 连接串 | `mysql+aiomysql://root:...` |
-| `VECTOR_DIMENSION` | 向量维度 | `1536` |
+| `DEEPSEEK_API_URL` | LLM API 地址 | `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL` | Chat 模型 | `deepseek-v4-flash` |
+| `EMBEDDING_API_KEY` | Embedding API Key | 留空时复用 `DEEPSEEK_API_KEY` |
+| `EMBEDDING_API_URL` | Embedding API 地址 | `http://localhost:11434/v1`（本机 Ollama） |
+| `EMBEDDING_MODEL` | Embedding 模型 | `nomic-embed-text` |
+| `DATABASE_URL` | MySQL 连接串 | `mysql+aiomysql://...`（部署时必填） |
+| `VECTOR_DIMENSION` | 向量维度 | `768` |
 | `ENABLE_TRACING` | OpenTelemetry 开关 | `false` |
-| `ENABLE_DEMO_ACCOUNT` | 启用演示账号 | `true` |
+| `ENABLE_DEMO_ACCOUNT` | 启用演示账号 | `false` |
 | `ENABLE_WORKFLOW_CODE_NODES` | 允许工作流代码节点（存在安全风险，默认关闭） | `false` |
 | `APP_VERSION` | 应用版本 | `1.22.1-rc.1` |
+
+> 模型/向量维度默认值以代码真源 `backend/app/core/config/ai.py` 为准。未显式设置
+> `EMBEDDING_MODEL` / `VECTOR_DIMENSION` 时还会按硬件档位自动选择：CPU 档
+> `bge-m3` / 1024，8G 显存档 `Qwen3-Embedding-4B` / 2048，16G 显存档
+> `Qwen3-Embedding-8B` / 4096。显式配置（如上述模板）优先于自动档位。
 
 完整配置见 `backend/.env.example` 和 `backend/.env.docker.example`。
 
@@ -489,7 +496,7 @@ cd ../frontend && npm run test
 前置：按「快速开始 · 2. 配置」创建并填写好 `backend/.env.docker`——缺失时 compose 的任意命令都会直接报错。
 
 ```bash
-cd backend && docker compose up -d
+cd backend && docker compose --env-file .env.docker up -d
 # 启动 10 个服务：backend, worker, mysql, redis, elasticsearch, minio, zookeeper, kafka, prometheus, grafana
 ```
 

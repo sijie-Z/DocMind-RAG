@@ -56,10 +56,15 @@ class ExecutorAgent:
     def __init__(
         self,
         config: AgentConfig | None = None,
-        organization_id: int = 1,
+        organization_id: int | None = None,
         user_id: int = 0,
         execution_mode: str = "dag",
     ):
+        # A2 P0（fail-closed）：执行器直接调用工具，必须有组织上下文。
+        if organization_id is None:
+            raise ValueError(
+                "ExecutorAgent 缺少 organization_id，拒绝在无组织上下文下运行"
+            )
         self._config = config or AgentConfig()
         self._organization_id = organization_id
         self._user_id = user_id

@@ -22,7 +22,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from app.agent import approval
+from app.agent import approval, tool_ledger
 from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.memory_bridge import AgentMemoryBridge
@@ -126,6 +126,9 @@ class Executor:
         # 控制流信号（"approval"/"cancel"）：置位后抛 ApprovalRequired/RunCancelled；
         # loop 据此抑制"条件路由"并区分暂停/取消收尾。每 run 起始处复位。
         self.pending_control: str = ""
+        # C3a：工具调用配对持久化的任务 id（loop 在接上 checkpoint 后接线；
+        # 未接线时账本调用全部 no-op——裸执行器/子代理保持零 DB 依赖）。
+        self.tool_ledger_task_id: str | None = None
 
     def reset_for_request(self) -> None:
         """Clear per-request state so a reused Executor doesn't leak across calls."""
@@ -141,6 +144,7 @@ class Executor:
         self.human_guidance = ""
         self.document_context = ""
         self.pending_control = ""
+        self.tool_ledger_task_id = None
 
     # ── HITL helpers（approval.py）────────────────────────────────────────────
 
@@ -267,11 +271,54 @@ class Executor:
             return "unavailable"
         return None
 
+    # ── C3a：工具调用配对持久化（tool_ledger；未接线时全部 no-op）──────────
+
+    async def _ledger_register(
+        self,
+        gated_calls: list[tuple[Any, dict[str, Any]]],
+        call_id_by_obj: dict[int, str],
+    ) -> None:
+        """先落库：本回合**将实际派发**的调用在任何 dispatch 之前登记。"""
+        task_id = self.tool_ledger_task_id
+        if not task_id or not gated_calls:
+            return
+        specs = [
+            (call_id_by_obj[id(tc)], tc.function.name, args)
+            for tc, args in gated_calls
+            if id(tc) in call_id_by_obj
+        ]
+        await tool_ledger.register_calls(task_id, specs)
+
+    async def _ledger_dispatch(self, call_id: str) -> None:
+        """派发标记（REGISTERED → DISPATCHED）；须在 yield tool_call/执行之前。"""
+        if not self.tool_ledger_task_id:
+            return
+        await tool_ledger.mark_dispatched(self.tool_ledger_task_id, call_id)
+
+    async def _ledger_result(
+        self,
+        call_id: str,
+        *,
+        success: bool,
+        result: Any = "",
+        error_type: str | None = None,
+    ) -> None:
+        """结果落账（fail-open；孤儿 result 显式 logger.error——不静默）。"""
+        if not self.tool_ledger_task_id:
+            return
+        try:
+            await tool_ledger.record_result(
+                self.tool_ledger_task_id, call_id,
+                success=success, result=result, error_type=error_type,
+            )
+        except tool_ledger.OrphanToolResultError as e:
+            logger.error("工具调用账目不一致（孤儿 result，call=%s）：%s", call_id, e)
+
     async def execute(
         self,
         plan: Plan,
         history: list[dict[str, str]] | None = None,
-        organization_id: int = 1,
+        organization_id: int | None = None,
         user_id: int = 0,
         enable_thinking: bool = True,
         ctx: Any = None,  # ExecutionContext
@@ -295,6 +342,11 @@ class Executor:
         Yields: tool_call, tool_result, tool_error, thinking, chunk events
         Returns: accumulated final answer string (via generator return)
         """
+        # A2 P0（fail-closed）：工具调用必须携带真实组织，默认值不再回落到 1 号组织。
+        if organization_id is None:
+            raise ValueError(
+                "Executor.execute 缺少 organization_id，拒绝在无组织上下文下运行"
+            )
         if human_guidance:
             self.human_guidance = human_guidance
         self.document_context = document_context or ""
@@ -1056,6 +1108,11 @@ class Executor:
 
         # Process tool calls
         tool_results: list[dict[str, str]] = []
+        turn_calls = message.tool_calls[:self.config.max_tool_calls_per_turn]
+        # C3a：call_id 每回合一次性确定（模型未给 id 时生成一次，登记与派发共用
+        # 同一个值）——否则登记行与派发/结果行的 id 会对不上。
+        call_ids = [tc.id or uuid.uuid4().hex[:16] for tc in turn_calls]
+        call_id_by_obj = {id(tc): cid for tc, cid in zip(turn_calls, call_ids, strict=True)}
         # 受限上下文（如子代理）在**执行层**强制工具白名单（issue #199 评审 B3：
         # 工具列表只是"呈现给 LLM"的 schema 级过滤——执行层此前不校验名单，
         # 受限上下文里的模型凭空发出未列名工具（如 delegate_subtask）照样会被
@@ -1072,18 +1129,21 @@ class Executor:
             self.pending_control = "cancel"
             raise approval.RunCancelled()
         gated_calls = self._filter_executable_calls(
-            message.tool_calls[:self.config.max_tool_calls_per_turn], allowed_tool_names,
+            turn_calls, allowed_tool_names,
         )
+        # C3a：先落库再 dispatch——登记发生在审批预检与任何执行之前；进程若在
+        # 预检/派发窗口内死亡，账本留下的是"已登记未派发"（可被合成终态收敛）。
+        await self._ledger_register(gated_calls, call_id_by_obj)
         async for gate_event in self._approval_precheck(gated_calls, plan, step):
             yield gate_event
 
-        for tc in message.tool_calls[:self.config.max_tool_calls_per_turn]:
+        for idx, tc in enumerate(turn_calls):
             # HITL：协作式取消（逐工具前检查点）——每个调用执行前观察一次。
             if await self._cancel_requested():
                 self.pending_control = "cancel"
                 raise approval.RunCancelled()
             func = tc.function
-            tool_call_id = tc.id or uuid.uuid4().hex[:16]
+            tool_call_id = call_ids[idx]
 
             if allowed_tool_names is not None and func.name not in allowed_tool_names:
                 logger.warning("拒绝执行不在当前上下文工具集内的工具: %s", func.name)
@@ -1157,6 +1217,11 @@ class Executor:
                     denial = f"审批服务不可用（暂停状态无法持久化），工具 {func.name} 未执行"
                     error_type = "approval_unavailable"
                 AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
+                # C3a：审批门物化 = 该调用的确定性终态（未派发、无工具结果）；
+                # 以结构化失败先落账再外发事件，账本不得留下悬挂的 REGISTERED。
+                await self._ledger_result(
+                    tool_call_id, success=False, result=denial, error_type=error_type,
+                )
                 yield AgentEvent(
                     type="tool_error",
                     tool_name=func.name,
@@ -1172,6 +1237,9 @@ class Executor:
                 })
                 attempt_error_detail = denial
                 continue
+
+            # C3a：派发标记先落库（REGISTERED → DISPATCHED），随后才发事件/执行。
+            await self._ledger_dispatch(tool_call_id)
 
             # Yield tool_call event
             yield AgentEvent(
@@ -1218,6 +1286,10 @@ class Executor:
                 if not raw_result.success:
                     error_type = raw_result.error.code if raw_result.error else "unknown"
                     AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
+                    # C3a：结果先落账再外发（消费方在 yield 处断流也不丢账）。
+                    await self._ledger_result(
+                        tool_call_id, success=False, result=result, error_type=error_type,
+                    )
                     yield AgentEvent(
                         type="tool_error",
                         tool_name=func.name,
@@ -1233,6 +1305,10 @@ class Executor:
                     attempt_error_detail = result
                 else:
                     AGENT_TOOL_CALLS.labels(tool=func.name, result="success").inc()
+                    # C3a：结果先落账再外发（消费方在 yield 处断流也不丢账）。
+                    await self._ledger_result(
+                        tool_call_id, success=True, result=result,
+                    )
                     yield AgentEvent(
                         type="tool_result",
                         tool_name=func.name,
@@ -1257,6 +1333,11 @@ class Executor:
                 AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
                 AGENT_TOOL_LATENCY.observe(elapsed / 1000)
                 logger.error(f"Tool {func.name} failed: {e}")
+                # C3a：异常结果先落账再外发（消费方在 yield 处断流也不丢账）。
+                await self._ledger_result(
+                    tool_call_id, success=False,
+                    result=f"{type(e).__name__}: {e}", error_type=type(e).__name__,
+                )
                 yield AgentEvent(
                     type="tool_error",
                     tool_name=func.name,

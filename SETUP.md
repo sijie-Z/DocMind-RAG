@@ -19,15 +19,16 @@ cd backend
 
 # 0) 配置文件先行：缺少 .env.docker 时，compose 的任意命令都会直接报错
 cp .env.docker.example .env.docker    # Windows: copy .env.docker.example .env.docker
-# 至少填写：SECRET_KEY / JWT_SECRET_KEY、DEEPSEEK_API_KEY、EMBEDDING_API_KEY、
-#          MYSQL_ROOT_PASSWORD / MYSQL_PASSWORD
+# 至少填写：SECRET_KEY / JWT_SECRET_KEY、DEEPSEEK_API_KEY（Embedding 默认复用同一 Key）、
+#          MYSQL_ROOT_PASSWORD / MYSQL_PASSWORD、MINIO_ACCESS_KEY / MINIO_SECRET_KEY、
+#          GRAFANA_PASSWORD（后五项缺失时 compose 直接报错，不再回退弱默认值）
 # 密码生成: python -c "import secrets; print(secrets.token_hex(24))"
 
 # 1) 只启动基础设施（后端 / Worker 在宿主机跑，见下文）
-docker compose up -d mysql redis elasticsearch minio kafka zookeeper
+docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
 
 # 2) 等待所有服务健康（约 1-2 分钟）
-docker compose ps
+docker compose --env-file .env.docker ps
 ```
 
 ### 基础设施端口（与 compose 一致）
@@ -145,15 +146,19 @@ npm run dev
 
 ### AI 模型配置
 
-当前使用**智谱 AI 全家桶**：
+模型/向量维度默认值以代码真源 `backend/app/core/config/ai.py` 为准：
 
-| 模型 | 用途 | 配置项 |
-|------|------|--------|
-| glm-4-flash | Chat 对话 | `DEEPSEEK_MODEL` |
-| embedding-3 | 向量化 | `EMBEDDING_MODEL`，维度 2048 |
-| rerank | 重排序 | `RERANK_MODEL` |
+| 配置项 | 默认值 | 用途 |
+|--------|--------|------|
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | Chat 对话 |
+| `EMBEDDING_MODEL` | `nomic-embed-text`（本机 Ollama） | 向量化 |
+| `VECTOR_DIMENSION` | `768` | 向量维度 |
 
-三个模型共用同一个 API Key，密钥需自行填入 `.env` / `.env.docker`（模板不含真实密钥）。
+Embedding 默认走本机 Ollama（`EMBEDDING_API_URL=http://localhost:11434/v1`），
+无需单独的 Embedding Key（复用 `DEEPSEEK_API_KEY`）；使用云端 Embedding 时
+URL / 模型 / 维度三键必须配套修改（例如智谱 `embedding-3` 为 2048 维）。
+Rerank 默认使用本地 BGE，无需 API Key。Chat API Key 需自行填入 `.env` /
+`.env.docker`（模板不含真实密钥）。
 
 ---
 

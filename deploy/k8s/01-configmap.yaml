@@ -4,13 +4,16 @@ metadata:
   name: docmind-config
   namespace: docmind
 data:
-  DATABASE_URL: "mysql+aiomysql://docmind:docmind123@docmind-mysql:3306/docmind"
+  # 数据库连接串含口令，已移入 Secret（docmind-secrets 的 DATABASE_URL 键，
+  # 见 02-secrets.yaml），由 Deployment/Worker 的 envFrom.secretRef 注入。
+  # ConfigMap 只保存非敏感配置，不出现任何凭据。
   REDIS_HOST: "docmind-redis"
   ELASTICSEARCH_HOSTS: '["http://docmind-elasticsearch:9200"]'
   MINIO_ENDPOINT: "docmind-minio:9000"
   KAFKA_BOOTSTRAP_SERVERS: "docmind-kafka:9092"
   DEBUG: "false"
   LOG_LEVEL: "INFO"
-  ENABLE_DEMO_ACCOUNT: "true"
+  # 演示账号默认关闭（与代码默认值和 .env*.example 一致）
+  ENABLE_DEMO_ACCOUNT: "false"
   # issue #207：打开 31 个 Prometheus 指标（此前任何部署配置都没设过，全为 no-op）
   PROMETHEUS_ENABLED: "true"
