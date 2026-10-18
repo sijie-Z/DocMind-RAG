@@ -892,5 +892,15 @@ export default {
     knowledgeGraph: 'ナレッジグラフ',
     workflowEditor: 'ワークフローエディタ',
     agentMemory: 'Agent メモリ'
+  },
+  legal: {
+    privacy: {
+      title: 'プライバシーポリシー',
+      description: 'このページはプライバシーポリシーのプレースホルダーです。正式な全文は公開時にここへ掲載されます。'
+    },
+    terms: {
+      title: '利用規約',
+      description: 'このページは利用規約のプレースホルダーです。正式な全文は公開時にここへ掲載されます。'
+    }
   }
 };

@@ -62,6 +62,26 @@ export const routes: RouteRecordRaw[] = [
       requiresAuth: false
     }
   },
+  // 法务占位页：登录页 /privacy、/terms 链接的真实落点（匿名可访问）。
+  // 正式法务文本上线后，只需替换 views/legal/index.vue 的内容，路由保持稳定。
+  {
+    path: '/privacy',
+    name: 'Privacy',
+    component: () => import('@/views/legal/index.vue'),
+    meta: {
+      title: 'legal.privacy.title',
+      requiresAuth: false
+    }
+  },
+  {
+    path: '/terms',
+    name: 'Terms',
+    component: () => import('@/views/legal/index.vue'),
+    meta: {
+      title: 'legal.terms.title',
+      requiresAuth: false
+    }
+  },
   {
     path: '/',
     component: Layout,

@@ -972,5 +972,15 @@ export default {
     knowledgeGraph: '知识图谱',
     workflowEditor: '工作流编辑器',
     agentMemory: 'Agent记忆'
+  },
+  legal: {
+    privacy: {
+      title: '隐私政策',
+      description: '本页为隐私政策占位页，完整文本将在正式上线时在此发布。'
+    },
+    terms: {
+      title: '服务条款',
+      description: '本页为服务条款占位页，完整条款将在正式上线时在此发布。'
+    }
   }
 };

@@ -967,5 +967,15 @@ export default {
     knowledgeGraph: 'Knowledge Graph',
     workflowEditor: 'Workflow Editor',
     agentMemory: 'Agent Memory'
+  },
+  legal: {
+    privacy: {
+      title: 'Privacy Policy',
+      description: 'This page is a placeholder for the Privacy Policy. The full text will be published here.'
+    },
+    terms: {
+      title: 'Terms of Service',
+      description: 'This page is a placeholder for the Terms of Service. The full text will be published here.'
+    }
   }
 };
