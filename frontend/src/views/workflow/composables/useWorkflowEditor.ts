@@ -1,7 +1,7 @@
 // Workflow editor composable — extracted from views/workflow/editor.vue
 
 import { ref, computed, onMounted, watch, onUnmounted, h, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useVueFlow, MarkerType, type Connection } from '@vue-flow/core'
 import {
@@ -335,6 +335,50 @@ function markCanvasDirty() {
   }
 }
 
+// ── 离开保护（E12）：以「最近一次持久化快照」为 dirty 真值 ──
+// 不能用 saveStatus !== 'saved'：刚进入编辑器（从未保存、也无改动）同样是
+// 'unsaved'，会把「无改动离开」误判为 dirty。这里把落库载荷（getFlowData()
+// 即保存请求体 + 工作流名）序列化后与基线比较：加载 / 手动保存 / 自动保存
+// 成功都会刷新基线，只有相对基线发生实际内容变化才算 dirty。
+const persistedBaseline = ref('')
+
+function persistedSnapshot(): string {
+  return JSON.stringify({
+    name: workflowStore.workflowName,
+    ...workflowStore.getFlowData(),
+  })
+}
+
+const isDirty = computed(() => persistedSnapshot() !== persistedBaseline.value)
+
+// ── 响应式布局（E12）：<1280 收窄时属性面板默认收起，可用开关以覆盖层展开 ──
+// matchMedia 不可用（如旧测试环境未补桩）时按宽屏处理，面板保持可见。
+const isNarrow = ref(false)
+const propertyPanelOpen = ref(true)
+let viewportQuery: MediaQueryList | null = null
+
+function handleViewportChange(event: MediaQueryListEvent) {
+  isNarrow.value = !event.matches
+  // 断点切换跟随默认策略：宽屏展开为第三栏，窄屏收起（覆盖层可随时重开）
+  propertyPanelOpen.value = event.matches
+}
+
+const togglePropertyPanel = () => {
+  propertyPanelOpen.value = !propertyPanelOpen.value
+}
+
+const closePropertyPanel = () => {
+  propertyPanelOpen.value = false
+}
+
+// 关闭/刷新页面保护：dirty 时触发浏览器原生「离开此网站？」确认
+function handleBeforeUnload(event: BeforeUnloadEvent) {
+  if (!isDirty.value) return
+  // 现代浏览器以 preventDefault 为准；旧版 Chromium 需要 returnValue 非空
+  event.preventDefault()
+  event.returnValue = ''
+}
+
 // 本地状态
 const nodes = computed({
   get: () => workflowStore.nodes as any,
@@ -572,17 +616,12 @@ const onDragStart = (event: DragEvent, node: NodeDefinition | Record<string, unk
   }
 }
 
-const onDrop = (event: DragEvent) => {
-  const data = event.dataTransfer?.getData('application/vueflow')
-  if (!data) return
-
-  const nodeType = JSON.parse(data)
-  const rect = (event.target as HTMLElement).getBoundingClientRect()
-  const position = {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top
-  }
-
+// 节点构造（拖拽与点击添加共用）
+const buildNode = (
+  type: string,
+  label: string | undefined,
+  position: { x: number; y: number },
+): WorkflowNode => {
   const defaultData: Record<string, unknown> = {
     systemPrompt: '', temperature: 0.7, maxTokens: 2048,
     prompt: '', topK: 5, scoreThreshold: 0.5, condition: '',
@@ -594,15 +633,42 @@ const onDrop = (event: DragEvent) => {
     useGlobalConfig: false,               // LLM 全局配置引用
     configProvider: '',                   // 全局配置的 provider
   }
-
-  const newNode: WorkflowNode = {
-    id: `${nodeType.type}_${Date.now()}`,
-    type: nodeType.type,
+  return {
+    id: `${type}_${Date.now()}`,
+    type,
     position,
-    data: { label: nodeType.label, type: nodeType.type, ...defaultData }
+    data: { label: label || type, type, ...defaultData }
+  }
+}
+
+const onDrop = (event: DragEvent) => {
+  const data = event.dataTransfer?.getData('application/vueflow')
+  if (!data) return
+
+  const nodeType = JSON.parse(data) as { type?: string; label?: string }
+  if (!nodeType?.type) return
+  const rect = (event.target as HTMLElement).getBoundingClientRect()
+  const position = {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top
   }
 
+  workflowStore.addNode(buildNode(nodeType.type, nodeType.label, position))
+}
+
+// 点击添加（触屏友好）：tap 只产生 click、没有 HTML5 drag 事件，
+// 点节点卡片即以阶梯错位位置添加节点；拖拽路径原样保留。
+// 添加后选中新节点：触屏无 hover，选中即展开属性面板形成明确反馈。
+const CLICK_ADD_CASCADE_STEP = 36
+const addNodeFromLibrary = (node: NodeDefinition | Record<string, unknown>) => {
+  const type = ((node as any).node_type || (node as any).type) as string | undefined
+  if (!type) return
+  const label = ((node as any).name || (node as any).label) as string | undefined
+  const count = workflowStore.nodes.length
+  const offset = (count % 8) * CLICK_ADD_CASCADE_STEP
+  const newNode = buildNode(type, label, { x: 120 + offset, y: 120 + offset })
   workflowStore.addNode(newNode)
+  workflowStore.selectNode(newNode)
 }
 
 const onNodeClick = (event: { node: WorkflowNode }) => {
@@ -779,6 +845,9 @@ const saveWorkflow = async () => {
   const versionAtRequest = canvasEditVersion
   try {
     const flowData = workflowStore.getFlowData() as unknown as WorkflowConfig
+    // 落库载荷快照：成功后作为离开保护的「已保存」基线（请求在途期间的新改动
+    // 仍会与快照不同 → dirty 保持为真，不会因一次在途保存误判干净）
+    const requestSnapshot = JSON.stringify({ name: workflowStore.workflowName, ...flowData })
 
     if (workflowStore.currentWorkflowId) {
       // B11 契约对齐：后端 WorkflowUpdate/Workflow 模型均无 engine_type 字段
@@ -801,6 +870,8 @@ const saveWorkflow = async () => {
     }
     // 手动保存是显式动作（允许保存空画布），同步刷新已持久化节点数
     lastPersistedNodeCount = flowData.nodes.length
+    // 离开保护：服务端已确认的这份载荷成为新的 dirty 基线
+    persistedBaseline.value = requestSnapshot
     // B8：服务端确认后才置「已保存」；请求在途期间画布又被改动则保持「未保存」
     if (canvasEditVersion === versionAtRequest) {
       saveStatus.value = 'saved'
@@ -835,11 +906,14 @@ const autoSave = () => {
     saveStatus.value = 'saving'
     try {
       const flowData = workflowStore.getFlowData() as unknown as WorkflowConfig
+      const requestSnapshot = JSON.stringify({ name: workflowStore.workflowName, ...flowData })
       await updateWorkflow(workflowStore.currentWorkflowId, {
         name: workflowStore.workflowName,
         flow_data: flowData,
       })
       lastPersistedNodeCount = flowData.nodes.length
+      // 离开保护：自动保存成功同样刷新 dirty 基线（已落库即非 dirty）
+      persistedBaseline.value = requestSnapshot
       // B8：只有服务端确认且请求期间画布无新改动，才允许置「已保存」
       if (canvasEditVersion === versionAtRequest) {
         saveStatus.value = 'saved'
@@ -1027,6 +1101,8 @@ async function loadWorkflowById(id: number) {
       // 「变更」标记（否则状态点会先被置脏），再把状态点如实置为「已保存」。
       await nextTick()
       saveStatus.value = 'saved'
+      // 离开保护：加载进来的版本即 dirty 基线（刚加载不应触发离开确认）
+      persistedBaseline.value = persistedSnapshot()
       // B11：详响应无 engine_type（workflow.py:121-132），旧读点恒 undefined——
       // 移除；选择器保留为本地展示态（见模板 disabled 提示）
       router.replace({ query: { id: String(id) } })
@@ -1042,6 +1118,8 @@ function handleCreateNew() {
   lastPersistedNodeCount = 0
   // B8：新工作流尚无任何版本落库 → 状态点如实显示「未保存」
   saveStatus.value = 'unsaved'
+  // 离开保护：新建后画布为空、无改动 → 基线即为空画布（静默放行）
+  persistedBaseline.value = persistedSnapshot()
   router.replace({ query: {} })
   message.info('已创建新工作流')
 }
@@ -1082,6 +1160,16 @@ export function useWorkflowEditor() {
   canvasEditVersion = 0
   lastAutoSaveErrorToastAt = 0
 
+  // E12 离开保护：进入编辑器时的画布内容即 dirty 基线（未改动 → 静默放行）
+  persistedBaseline.value = persistedSnapshot()
+
+  // E12 响应式断点：≥1280 三栏；<1280 属性面板默认收起（覆盖层可重开）
+  viewportQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(min-width: 1280px)')
+    : null
+  isNarrow.value = viewportQuery ? !viewportQuery.matches : false
+  propertyPanelOpen.value = !isNarrow.value
+
   // ── 画布变更 → 自动保存（组件级注册，随组件卸载自动释放）──
   watch(
     () => [workflowStore.nodes, workflowStore.edges, workflowStore.workflowName],
@@ -1100,7 +1188,16 @@ export function useWorkflowEditor() {
     () => selectedNode.value?.data,
     () => {
       if (selectedNode.value) {
-        workflowStore.updateNodeData(selectedNode.value.id, { ...selectedNode.value.data })
+        const selected = selectedNode.value
+        const storeNode = workflowStore.nodes.find((n) => n.id === selected.id)
+        // 递归防护（E12）：点击添加会程序化选中新节点，而选中对象通常就是
+        // store 里的同一引用（属性面板 v-model 直接改的就是它）。此时若再
+        // updateNodeData({ ...selected.data })，每次都会生成新的 data 对象
+        // → 深度 watcher 自触发直至「Maximum recursive updates」上限。
+        // 引用相同说明数据已同步到 store，跳过回写。
+        if (!storeNode || storeNode.data !== selected.data) {
+          workflowStore.updateNodeData(selected.id, { ...selected.data })
+        }
         markCanvasDirty()
         // 同时触发自动保存到后端
         if (workflowStore.currentWorkflowId) {
@@ -1111,8 +1208,36 @@ export function useWorkflowEditor() {
     { deep: true }
   )
 
+  // ── 离开保护（E12）：dirty 时路由离开二次确认；已保存/无改动静默放行 ──
+  // 确认框复用 useDialog（与清空画布同一交互形态）。positive 才放行；
+  // negative / 遮罩关闭都留在编辑器。
+  onBeforeRouteLeave(() => {
+    if (!isDirty.value) return true
+    return new Promise<boolean>((resolve) => {
+      dialog.warning({
+        title: t('workflow.editor.leaveConfirmTitle'),
+        content: t('workflow.editor.leaveConfirmContent'),
+        positiveText: t('workflow.editor.leaveConfirmPositive'),
+        negativeText: t('workflow.editor.leaveConfirmNegative'),
+        onPositiveClick: () => { resolve(true) },
+        onNegativeClick: () => { resolve(false) },
+        onClose: () => { resolve(false) },
+      })
+    })
+  })
+
   // ── 生命周期：初始化加载 + 卸载清理 ──
   onMounted(async () => {
+    // E12：关闭/刷新页面保护 + 断点监听（随组件卸载移除）
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    if (viewportQuery) {
+      if (typeof viewportQuery.addEventListener === 'function') {
+        viewportQuery.addEventListener('change', handleViewportChange)
+      } else if (typeof viewportQuery.addListener === 'function') {
+        viewportQuery.addListener(handleViewportChange)
+      }
+    }
+
     // 并行加载所有初始化数据
     await Promise.all([
       loadNodeDefinitions(),
@@ -1129,6 +1254,15 @@ export function useWorkflowEditor() {
   })
 
   onUnmounted(() => {
+    window.removeEventListener('beforeunload', handleBeforeUnload)
+    if (viewportQuery) {
+      if (typeof viewportQuery.removeEventListener === 'function') {
+        viewportQuery.removeEventListener('change', handleViewportChange)
+      } else if (typeof viewportQuery.removeListener === 'function') {
+        viewportQuery.removeListener(handleViewportChange)
+      }
+      viewportQuery = null
+    }
     if (autoSaveTimer) clearTimeout(autoSaveTimer)
     // 组件卸载时中止在途流式执行（onClose 回调负责收尾 executing 状态）
     stopActiveExecution?.()
@@ -1159,6 +1293,7 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   route,
   router,
   message,
+  t,
   workflowStore,
   llmConfigStore,
   doFitView,
@@ -1191,6 +1326,11 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   saveStatusText,
   saveRetryText,
   saveStatusHint,
+  isDirty,
+  isNarrow,
+  propertyPanelOpen,
+  togglePropertyPanel,
+  closePropertyPanel,
   executing,
   executingNodeId,
   showDebugPanel,
@@ -1234,6 +1374,7 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   validateTemplateParams,
   onDragStart,
   onDrop,
+  addNodeFromLibrary,
   onNodeClick,
   onConnect,
   addLlmInputParam,

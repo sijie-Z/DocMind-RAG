@@ -318,7 +318,7 @@ class Executor:
         self,
         plan: Plan,
         history: list[dict[str, str]] | None = None,
-        organization_id: int = 1,
+        organization_id: int | None = None,
         user_id: int = 0,
         enable_thinking: bool = True,
         ctx: Any = None,  # ExecutionContext
@@ -342,6 +342,11 @@ class Executor:
         Yields: tool_call, tool_result, tool_error, thinking, chunk events
         Returns: accumulated final answer string (via generator return)
         """
+        # A2 P0（fail-closed）：工具调用必须携带真实组织，默认值不再回落到 1 号组织。
+        if organization_id is None:
+            raise ValueError(
+                "Executor.execute 缺少 organization_id，拒绝在无组织上下文下运行"
+            )
         if human_guidance:
             self.human_guidance = human_guidance
         self.document_context = document_context or ""

@@ -42,6 +42,7 @@
           :collapsed-icon-size="22"
           :options="menuOptions"
           :value="activeKey"
+          :node-props="menuNodeProps"
           @update:value="handleMenuSelect"
         />
       </nav>
@@ -262,7 +263,11 @@
       <main class="flex-1 overflow-auto bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
         <router-view v-slot="{ Component, route }">
           <Transition name="page-slide" mode="out-in">
-            <div :key="route.fullPath" class="page-wrapper">
+            <!-- E11-③：key 用 route.name（而非 fullPath）——同一路由仅 query
+                 变化（chat 切会话、prompt/q 消费、agent 回放深链）不再整页
+                 卸载重挂，消除白屏闪烁与输入丢失；跨路由仍按 name 切换重挂。
+                 未命名路由回退 path（不存在 query 重复挂载需求）。 -->
+            <div :key="route.name ?? route.path" class="page-wrapper">
               <Suspense>
                 <component :is="Component" />
                 <template #fallback>
@@ -289,7 +294,7 @@ import { markAsRead, markAllAsRead, deleteNotification, type Notification } from
 import { notificationSocket, type RealtimeNotificationPayload } from '@/utils/notificationSocket'
 import { useNotificationStore } from '@/stores/notification'
 import { formatDate } from '@/utils/format'
-import type { MenuOption, DropdownOption } from 'naive-ui'
+import type { MenuOption, MenuGroupOption, DropdownOption } from 'naive-ui'
 import { NMenu, NIcon, NInput, NButton, NBadge, NPopover, NList, NListItem, NDropdown, NAvatar } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { SIDEBAR_MENU_GROUPS, USER_MENU_ITEMS, type MenuItemDef } from '@/config/menu'
@@ -522,13 +527,37 @@ const toMenuOption = (item: MenuItemDef): MenuOption => ({
   icon: renderIcon(MENU_ICONS[item.icon]),
 })
 
+/**
+ * G2：侧栏分组标题的折叠/截断策略。
+ * 折叠态只有 80px 宽，英文长词（Workspace/Knowledge/Intelligence）没有策略
+ * 会被硬裁成 Works/Knowl/Intellig；折叠时不再渲染标题文本（整行由
+ * menuNodeProps 收起并标记 aria-hidden）。展开态以 truncate 单行省略，
+ * title 悬浮呈现完整词条，不挤压图标列。
+ */
+const renderGroupLabel = (label: string) => () => {
+  if (appStore.sidebarCollapsed) return null
+  return h('span', { class: 'block truncate', title: label }, label)
+}
+
+const menuNodeProps = (option: MenuOption): Record<string, string> => {
+  if ((option as MenuGroupOption).type === 'group' && appStore.sidebarCollapsed) {
+    return { class: 'sidebar-group-title--collapsed', 'aria-hidden': 'true' }
+  }
+  return {}
+}
+
 const menuOptions = computed<MenuOption[]>(() => {
   return SIDEBAR_MENU_GROUPS
     .filter((group) => !group.adminOnly || userStore.isAdmin)
     .flatMap((group): MenuOption[] => {
       const items = group.items.map(toMenuOption)
       return group.groupI18nKey
-        ? [{ type: 'group', label: t(group.groupI18nKey), children: items }]
+        ? [{
+            type: 'group',
+            key: group.groupI18nKey,
+            label: renderGroupLabel(t(group.groupI18nKey)),
+            children: items,
+          }]
         : items
     })
 })
@@ -573,14 +602,15 @@ const toggleTheme = () => {
 </script>
 
 <style scoped>
-/* Mobile sidebar: fixed overlay on small screens */
-@media (max-width: 767px) {
-  .sidebar-fixed {
-    position: fixed;
-    inset: 0;
-    z-index: 50;
-  }
+/* G2：折叠态整行收起分组标题（80px 放不下英文长词；展开态由 label 渲染器 truncate 省略） */
+:deep(.n-menu-item-group-title.sidebar-group-title--collapsed) {
+  height: 0;
+  margin-top: 0;
+  overflow: hidden;
 }
+
+/* 移动端侧栏由模板上的 max-md:* 工具类承接（fixed/滑入滑出）；
+   原先此处的 767px 断点块在模板中无任何引用，属死 CSS，已移除。 */
 
 /* 页面过渡容器 */
 .page-wrapper {

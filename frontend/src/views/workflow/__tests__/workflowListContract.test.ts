@@ -103,11 +103,11 @@ describe('workflow 列表页 · flow_data 契约（B7）', () => {
     await vm.duplicateWorkflow(LIST_ITEM)
     await flushPromises()
 
-    expect(getWorkflow).toHaveBeenCalledWith(3)
+    expect(getWorkflow).toHaveBeenCalledWith(3, { silent: true })
     expect(createWorkflow).toHaveBeenCalledWith({
       name: '流程A (副本)',
       description: '描述',
       flow_data: DETAIL.flow_data,
-    })
+    }, { silent: true })
   })
 })

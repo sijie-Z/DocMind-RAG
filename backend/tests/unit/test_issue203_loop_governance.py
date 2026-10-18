@@ -76,7 +76,7 @@ async def test_iteration_cap_truncates_remaining_steps():
     calls: list[str] = []
     ex._execute_step_with_retry = _completed_spy(calls)
 
-    events = [e async for e in ex.execute(plan, ctx=ctx)]
+    events = [e async for e in ex.execute(plan, organization_id=1, ctx=ctx)]
 
     assert calls == ["s1"], "max_iterations=1 只允许执行 1 步"
     assert plan.steps[1].status == "skipped"
@@ -94,7 +94,7 @@ async def test_iteration_cap_exact_off_by_one():
     calls: list[str] = []
     ex._execute_step_with_retry = _completed_spy(calls)
 
-    [e async for e in ex.execute(plan, ctx=ctx)]
+    [e async for e in ex.execute(plan, organization_id=1, ctx=ctx)]
 
     assert calls == ["s1", "s2"]
     assert plan.steps[2].status == "skipped"
@@ -110,7 +110,7 @@ async def test_iteration_cap_zero_means_unlimited():
     calls: list[str] = []
     ex._execute_step_with_retry = _completed_spy(calls)
 
-    [e async for e in ex.execute(plan, ctx=ctx)]
+    [e async for e in ex.execute(plan, organization_id=1, ctx=ctx)]
 
     assert calls == ["s1", "s2", "s3"]
     assert all(d.action != "iteration_limit" for d in ctx.decisions)
@@ -215,7 +215,7 @@ async def test_budget_exceeded_skips_remaining_dispatch():
 
     ex._execute_step_with_retry = _completed_spy(calls, on_run=_burn)
 
-    events = [e async for e in ex.execute(plan, ctx=ctx)]
+    events = [e async for e in ex.execute(plan, organization_id=1, ctx=ctx)]
 
     assert calls == ["s1"]
     assert plan.steps[1].status == "skipped"

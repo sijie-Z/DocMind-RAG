@@ -182,6 +182,17 @@ async def lifespan(app: FastAPI):
         from app.dependencies import wire_memory_embedding_provider
         await wire_memory_embedding_provider()
 
+        # A3-P0：本机处理任务启动对账——上次进程退出时未完成的本机任务
+        # （local_fallback=true 且非终局）在此重新调度，避免永久 PENDING/PARSING。
+        # 对账失败只告警，不阻塞启动（任务行仍在，下次启动继续回收）。
+        try:
+            from app.services.local_processing import reconcile_local_jobs
+            recovered = await reconcile_local_jobs()
+            if recovered:
+                logger.info("本机处理任务启动对账：已重新调度 %s 个任务", recovered)
+        except Exception as e:
+            logger.warning(f"本机处理任务对账失败（不影响启动）: {e}")
+
         # MCP client（动态外部工具，feat/mcp-client）：配置（backend/mcp_servers.json）
         # 驱动连接 enabled server，把 tools/list 注册为 mcp__<server>__<tool>。
         # 任何 server 起不来只 warning，不阻塞主启动；无配置 = 零行为变化。
