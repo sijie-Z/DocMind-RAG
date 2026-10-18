@@ -50,13 +50,61 @@ def test_spacing_variant_is_red(tmp_path):
     assert checker.find_violations(app_dir), "必须容忍空白差异"
 
 
+def test_optional_annotations_are_red(tmp_path):
+    """`int | None = 1` 与 `Optional[int] = 1` 是同义 fail-open 写法。"""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "bad.py").write_text(
+        "def a(organization_id: int | None = 1):\n    pass\n"
+        "def b(organization_id: Optional[int] = 1):\n    pass\n",
+        encoding="utf-8",
+    )
+    hits = checker.find_violations(app_dir)
+    assert len(hits) == 2
+
+
+def test_default_kwarg_is_red(tmp_path):
+    """`Field(default=1)` / `Query(default=1)` 形态。"""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "bad.py").write_text(
+        "def a(organization_id: int = Field(default=1)):\n    pass\n"
+        "def b(organization_id: int = Query(default=1)):\n    pass\n",
+        encoding="utf-8",
+    )
+    assert len(checker.find_violations(app_dir)) == 2
+
+
+def test_or_one_fallback_is_red(tmp_path):
+    """运行时 `organization_id or 1` 兜底。"""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "bad.py").write_text(
+        "def a(user):\n    return user.organization_id or 1\n", encoding="utf-8"
+    )
+    assert len(checker.find_violations(app_dir)) == 1
+
+
+def test_comment_only_mentions_are_not_flagged(tmp_path):
+    """注释里描述历史缺陷不算违规（避免误伤说明文字）。"""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "ok.py").write_text(
+        "# 历史写法 organization_id: int = 1 与 organization_id or 1 已清除\n"
+        "def a(organization_id: int | None = None):\n    pass\n",
+        encoding="utf-8",
+    )
+    assert checker.find_violations(app_dir) == []
+
+
 def test_non_matching_values_are_not_flagged(tmp_path):
     app_dir = tmp_path / "app"
     app_dir.mkdir()
     (app_dir / "good.py").write_text(
         "def a(organization_id: int = 10):\n    pass\n"
         "def b(organization_id: int | None = None):\n    pass\n"
-        "def c(organization_id: int):\n    pass\n",
+        "def c(organization_id: int):\n    pass\n"
+        "def d(user):\n    return user.organization_id or 10\n",
         encoding="utf-8",
     )
     assert checker.main(["--root", str(app_dir)]) == 0
