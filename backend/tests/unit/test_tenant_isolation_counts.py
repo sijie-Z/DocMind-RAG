@@ -429,6 +429,7 @@ def test_chat_agent_stream_no_org_user_not_forced_into_org1(client: TestClient):
     mock_user = MagicMock()
     mock_user.id = 1
     mock_user.organization_id = None  # 无组织用户
+    mock_user.token_organization_id = None  # MagicMock 未设属性会泄漏成 mock 值
     mock_user.is_active = True
     mock_user.is_superuser = False
 

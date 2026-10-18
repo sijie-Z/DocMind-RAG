@@ -81,7 +81,7 @@ const NRadioButtonStub = defineComponent({
 })
 
 function mountInput() {
-  let wrapper: VueWrapper
+  const wrapper: VueWrapper
   const handlers = {
     'onUpdate:useAgent': (v: boolean) => wrapper.setProps({ useAgent: v }),
     'onUpdate:useSSE': (v: boolean) => wrapper.setProps({ useSSE: v }),
