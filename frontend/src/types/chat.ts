@@ -12,6 +12,8 @@ export interface ChatMessage {
   feedbackNote?: string
   isCached?: boolean
   thinking?: string
+  /** E7：用户在生成中途点了「停止生成」——渲染「已停止」标记与继续提示（瞬态，不落库） */
+  stopped?: boolean
   // ── Agent 模式（useAgent=true）PER 事件落账（issue #289）───────────────
   // 聊天页此前对这 7 型事件（run_report/execution_context/retry_hint/
   // plan_start/plan_step/plan_complete/reflection）传输放行但零消费者，

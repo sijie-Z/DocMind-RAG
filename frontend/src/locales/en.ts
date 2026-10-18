@@ -211,6 +211,11 @@ export default {
     noHistory: 'No history',
     backToBottom: 'Back to latest',
     stopGenerating: 'Stop generating',
+    // E7 state visibility: history loading / thinking / stopped
+    loadingHistory: 'Loading conversation history...',
+    thinkingLabel: 'Thinking process',
+    generationStopped: 'Stopped',
+    stoppedHint: 'You can continue asking questions or regenerate the answer',
     suggestions: {
       quantum: 'Explain quantum computing',
       quantumDesc: 'Explain the basic principles in simple terms',

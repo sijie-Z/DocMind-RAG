@@ -492,6 +492,14 @@ export function useChatSend(
     activeStream = null
     sseService.abort()
     wsService.sendStop()
+    // E7：仅在实际生成中停止时给最后一条 assistant 消息打「已停止」标记
+    // （停止按钮只在加载态可见；guard 防止空闲/历史加载路径误标历史消息）
+    if (isLoading.value || isRetrieving.value) {
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.messageType === 'assistant') {
+        lastMsg.stopped = true
+      }
+    }
     isLoading.value = false
     isRetrieving.value = false
   }

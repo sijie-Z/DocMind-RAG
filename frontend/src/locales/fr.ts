@@ -198,6 +198,11 @@ export default {
     noHistory: 'Aucun historique',
     backToBottom: 'Revenir aux derniers messages',
     stopGenerating: 'Arrêter la génération',
+    // E7 visibilité des états : chargement d'historique / raisonnement / arrêté
+    loadingHistory: 'Chargement de l\'historique...',
+    thinkingLabel: 'Raisonnement',
+    generationStopped: 'Arrêté',
+    stoppedHint: 'Vous pouvez continuer à poser des questions ou régénérer la réponse',
     suggestions: {
       quantum: 'Expliquer l\'informatique quantique',
       quantumDesc: 'Expliquez les principes de base avec des mots simples',
