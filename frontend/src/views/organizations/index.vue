@@ -406,6 +406,8 @@ import {
   updateOrganizationMemberRole,
   removeOrganizationMember
 } from '@/api/organization'
+import type { Organization, OrganizationListResponse } from '@/api/organization'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getUsers } from '@/api/user'
 import type { OrganizationMember, OrganizationDocument } from '@/types/api'
 import { orgDocStatusLabel, orgDocStatusType } from './docStatus'
@@ -607,8 +609,8 @@ const showOrgDetails = async (orgId: number) => {
       getOrganizationMembers(orgId),
       getOrganizationDocuments(orgId)
     ])
-    orgMembers.value = membersRes.data.data
-    orgDocuments.value = docsRes.data.data
+    orgMembers.value = apiUnwrap<OrganizationMember[]>(membersRes) || []
+    orgDocuments.value = apiUnwrap<OrganizationDocument[]>(docsRes) || []
   } catch (err: unknown) {
     message.error(t('org.loadDetailsFailed') + ': ' + getErrorMessage(err))
   } finally {
@@ -631,7 +633,7 @@ const memberRoleOptions = computed(() => [
 const refreshMembers = async () => {
   if (!selectedOrg.value) return
   const res = await getOrganizationMembers(selectedOrg.value.id)
-  orgMembers.value = res.data.data
+  orgMembers.value = apiUnwrap<OrganizationMember[]>(res) || []
 }
 
 const openAddMember = async () => {
@@ -780,15 +782,17 @@ const loadOrganizations = async () => {
       getOrganizationTree()
     ])
 
-    // 处理列表数据
-    if (listRes.data && listRes.data.data) {
-      organizations.value = Array.isArray(listRes.data.data.data) ? listRes.data.data.data : []
-      pagination.itemCount = listRes.data.data.total || 0
+    // 处理列表数据：{success, data: {data: [...], total, page, page_size}} 双层体
+    const list = apiUnwrap<OrganizationListResponse | null>(listRes)
+    if (list) {
+      organizations.value = Array.isArray(list.data) ? list.data : []
+      pagination.itemCount = list.total || 0
     }
 
-    // 处理树结构数据
-    if (treeRes.data && treeRes.data.data) {
-      fullTree.value = treeRes.data.data
+    // 处理树结构数据：{success, data: <Organization[]>} 单层体
+    const tree = apiUnwrap<Organization[] | null>(treeRes)
+    if (tree) {
+      fullTree.value = tree
     }
     loadError.value = false
   } catch (err: unknown) {
