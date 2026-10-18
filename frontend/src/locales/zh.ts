@@ -79,7 +79,7 @@ export default {
     validation: {
       nicknameLength: '昵称长度需在 2-50 个字符之间',
       phoneInvalid: '请输入有效的手机号',
-      passwordLength: '密码长度需在 6-20 个字符之间'
+      passwordLength: '密码长度需在 8-20 个字符之间'
     },
     nickname: '昵称',
     placeholder: {

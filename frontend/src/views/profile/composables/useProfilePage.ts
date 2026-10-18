@@ -677,7 +677,7 @@ const passwordFormRules = {
   ],
   newPassword: [
     { required: true, message: t('profile.placeholder.newPassword'), trigger: 'blur' },
-    { min: 6, max: 20, message: t('profile.validation.passwordLength'), trigger: 'blur' }
+    { min: 8, max: 20, message: t('profile.validation.passwordLength'), trigger: 'blur' }
   ],
   confirmPassword: [
     { required: true, message: t('profile.placeholder.confirmPassword'), trigger: 'blur' },

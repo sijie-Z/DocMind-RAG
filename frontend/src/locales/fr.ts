@@ -75,7 +75,7 @@ export default {
     validation: {
       nicknameLength: 'Le pseudo doit contenir entre 2 et 50 caractères',
       phoneInvalid: 'Veuillez entrer un numéro de téléphone valide',
-      passwordLength: 'Le mot de passe doit contenir entre 6 et 20 caractères'
+      passwordLength: 'Le mot de passe doit contenir entre 8 et 20 caractères'
     },
     nickname: 'Pseudo',
     placeholder: {

@@ -75,7 +75,7 @@ export default {
     validation: {
       nicknameLength: 'ニックネームは2〜50文字以内で入力してください',
       phoneInvalid: '有効な電話番号を入力してください',
-      passwordLength: 'パスワードは6〜20文字以内で入力してください'
+      passwordLength: 'パスワードは8〜20文字以内で入力してください'
     },
     nickname: 'ニックネーム',
     placeholder: {
