@@ -6,8 +6,6 @@
     "chat.feedback.likeSuccess",
     "common.deleteFailed",
     "knowledge.graph.subtitle",
-    "notifications.empty",
-    "notifications.loadFailed",
     "notifications.retry",
     "notifications.subtitle",
     "profile.loadFailed"

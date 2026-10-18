@@ -19,6 +19,8 @@ export default {
     warning: 'Avis',
     copyFailed: 'Échec de la copie',
     actions: 'Actions',
+    retry: 'Réessayer',
+    tryAgain: 'Veuillez réessayer plus tard',
     noDescription: 'Aucune description',
   },
   profile: {
@@ -299,6 +301,11 @@ export default {
     uploadFirst: 'Télécharger votre premier fichier',
     empty: 'Aucun document',
     emptyDesc: 'La base de connaissances est vide',
+    loadFailed: 'Échec du chargement de la base de connaissances',
+    loadFailedDesc: 'Veuillez réessayer plus tard ou vérifier votre connexion réseau',
+    searchEmptyTitle: 'Aucun document correspondant',
+    searchEmptyDesc: 'Aucun document ne correspond à « {query} ». Essayez un autre mot-clé.',
+    clearSearch: 'Effacer la recherche',
     uploadSuccess: 'Téléchargement réussi',
     uploadFailed: 'Échec du téléchargement',
     confirmUpload: 'Démarrer le téléchargement',
@@ -343,6 +350,9 @@ export default {
     addTemplate: 'Nouveau modèle',
     editTemplate: 'Modifier le modèle',
     empty: 'Aucun modèle de prompt',
+    searchEmpty: 'Aucun modèle correspondant',
+    searchEmptyDesc: 'Aucun modèle ne correspond à la recherche ou au filtre de catégorie actuel. Ajustez les critères.',
+    clearFilters: 'Effacer les filtres',
     seed: 'Initialiser les modèles',
     system: 'Système',
     custom: 'Personnalisé',
@@ -374,6 +384,8 @@ export default {
       saveFailed: 'Échec de l’enregistrement',
       deleteSuccess: 'Suppression réussie',
       deleteFailed: 'Échec de la suppression',
+      loadVersionsFailed: 'Échec du chargement de l\'historique des versions',
+      restoreFailed: 'Échec du retour à la version',
       seedSuccess: 'Initialisation réussie',
       seedFailed: 'Échec de l’initialisation'
     }
@@ -618,6 +630,21 @@ export default {
   },
   workflow: {
     description: 'Décomposez les tâches IA complexes en pipelines par étapes avec des métriques unifiées et une gestion d\'état.',
+    loadFailed: 'Échec du chargement des workflows',
+    loadFailedDesc: 'Veuillez réessayer plus tard ou vérifier votre connexion réseau',
+    empty: 'Aucun workflow',
+    emptyDesc: 'Créez un workflow pour orchestrer des tâches IA multi-étapes en pipeline visuel',
+    createFirst: 'Créer votre premier workflow',
+    searchEmpty: 'Aucun workflow correspondant',
+    searchEmptyDesc: 'Aucun workflow ne correspond à « {query} ». Essayez un autre mot-clé.',
+    clearSearch: 'Effacer la recherche',
+    deleteSuccess: 'Supprimé',
+    deleteFailed: 'Échec de la suppression',
+    duplicateSuccess: 'Dupliqué',
+    duplicateFailed: 'Échec de la duplication',
+    confirmDeleteTitle: 'Confirmer la suppression',
+    confirmDeleteContent: 'Cette action est irréversible. Supprimer ce workflow ?',
+    confirmDeletePositive: 'Supprimer',
     editor: {
       clearConfirmTitle: 'Vider le canevas',
       clearConfirmContent: 'Après le vidage, l\'enregistrement automatique réécrira le canevas vide dans les {n} secondes et écrasera la version enregistrée. Vider le canevas ?',
@@ -628,6 +655,11 @@ export default {
   },
   notifications: {
     markAllRead: 'Tout marquer comme lu',
+    loadFailed: 'Échec du chargement des notifications',
+    empty: 'Aucune notification',
+    deleteSuccess: 'Supprimé',
+    deleteFailed: 'Échec de la suppression',
+    batchDeleteFailed: 'Échec de la suppression groupée',
   },
 
   agentReplay: {
