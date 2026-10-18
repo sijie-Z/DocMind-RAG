@@ -34,6 +34,10 @@ export function useChatSend(
   const strictMode = ref(false)
   const privacyMode = ref(true)
 
+  // E3：当前活动流的落屏节流器（同一时刻至多一个流）。stopGeneration 时冲刷
+  // 挂起的一帧，组件卸载时取消，避免尾部内容丢失或在卸载后写入状态。
+  let activeStream: { flush: () => void; cancel: () => void } | null = null
+
   const buildFileContext = (files: AttachedFile[]): string | null => {
     const withContent = files.filter(f => f.parsedContent)
     if (!withContent.length) return null
@@ -104,8 +108,48 @@ export function useChatSend(
     sseService.off('plan_complete')
     sseService.off('reflection')
 
+    // E3 流式渲染性能：chunk 内容只累积进 fullContent，落屏按帧（rAF；无 rAF
+    // 环境回退 33ms）节流合并——每个 chunk 不再触发一次全量 Markdown+DOMPurify
+    // 渲染（原实现累计 O(n²)）。message 终态直达写入最终内容，保证最终一致性。
+    let cancelScheduledFlush: (() => void) | null = null
+
+    const writeStreamContent = () => {
+      cancelScheduledFlush = null
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
+        lastMsg.content = fullContent
+      }
+    }
+
+    const scheduleStreamContent = () => {
+      if (cancelScheduledFlush) return
+      if (typeof requestAnimationFrame === 'function') {
+        const frameId = requestAnimationFrame(writeStreamContent)
+        cancelScheduledFlush = () => {
+          cancelAnimationFrame(frameId)
+          cancelScheduledFlush = null
+        }
+      } else {
+        const timerId = setTimeout(writeStreamContent, 33)
+        cancelScheduledFlush = () => {
+          clearTimeout(timerId)
+          cancelScheduledFlush = null
+        }
+      }
+    }
+
+    const flushStreamContent = () => {
+      cancelScheduledFlush?.()
+      writeStreamContent()
+    }
+
+    activeStream = {
+      flush: flushStreamContent,
+      cancel: () => cancelScheduledFlush?.(),
+    }
+
     // W2-T7 项 4：「流式响应」开关真接线——关闭时只累积 fullContent 不逐字落屏，
-    // 等 message 终态一次性落屏（非流式展示）；开启时维持原逐字渲染（默认行为不回归）。
+    // 等 message 终态一次性落屏（非流式展示）；开启时按帧节流落屏（默认行为不回归）。
     const onChunk = (data: SSEMessage) => {
       sseStatus.value = 'connected'
       if (data.conversationId && (!chatStore.currentConversation || chatStore.currentConversation.id !== data.conversationId)) {
@@ -116,13 +160,14 @@ export function useChatSend(
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         })
-        fetchConversations()
+        // E3：侧栏列表刷新移出 chunk（流式）路径——本地已 setCurrentConversation，
+        // 列表改在流完成（onMessage）或切页时刷新，避免流式期间拉列表干扰渲染。
       }
       isRetrieving.value = false
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
         fullContent += data.content || ''
-        if (useStream.value) lastMsg.content = fullContent
+        if (useStream.value) scheduleStreamContent()
         if (data.sources) lastMsg.sources = data.sources as KnowledgeSource[]
       }
       scrollToBottom()
@@ -132,12 +177,16 @@ export function useChatSend(
       isLoading.value = false
       isRetrieving.value = false
       sseStatus.value = 'connected'
+      // E3：终态直达——取消挂起的节流落屏，一次性写入最终内容（不丢尾帧、不重复渲染）
+      activeStream?.cancel()
+      activeStream = null
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.id === aiMsgId) {
         lastMsg.content = data.content || fullContent
         if (data.sources) lastMsg.sources = data.sources as KnowledgeSource[]
         if (data.is_cached) lastMsg.isCached = true
       }
+      // 侧栏列表在流完成时刷新（chunk 路径不再触发，见 onChunk）
       fetchConversations()
       scrollToBottom()
     }
@@ -159,7 +208,7 @@ export function useChatSend(
       if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
         const stamp = `\n\n> 🔧 正在调用: **${data.toolName || 'tool'}**...\n`
         fullContent += stamp
-        if (useStream.value) lastMsg.content = fullContent
+        if (useStream.value) scheduleStreamContent()
         // 计划步骤状态推进（issue #289：与 Agent 页 store 同款归约）
         if (lastMsg.planSteps) {
           applyPlanStepUpdate(lastMsg.planSteps, { type: 'tool_call', plan_step_id: data.planStepId })
@@ -173,7 +222,7 @@ export function useChatSend(
       if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
         const stamp = `\n> ✅ 工具完成` + (data.toolDurationMs ? ` (${Math.round(data.toolDurationMs)}ms)` : '') + `\n`
         fullContent += stamp
-        if (useStream.value) lastMsg.content = fullContent
+        if (useStream.value) scheduleStreamContent()
         if (lastMsg.planSteps) {
           applyPlanStepUpdate(lastMsg.planSteps, { type: 'tool_result', plan_step_id: data.planStepId })
         }
@@ -188,7 +237,7 @@ export function useChatSend(
       if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
         const stamp = `\n> ⚠️ 工具调用异常: ${data.content || '未知错误'}\n`
         fullContent += stamp
-        if (useStream.value) lastMsg.content = fullContent
+        if (useStream.value) scheduleStreamContent()
       }
     }
 
@@ -196,6 +245,9 @@ export function useChatSend(
       isLoading.value = false
       isRetrieving.value = false
       sseStatus.value = 'error'
+      // E3：出错终止时冲刷挂起的一帧，已到达的部分内容不丢（与旧逐 chunk 落屏观感一致）
+      activeStream?.flush()
+      activeStream = null
       message.error(data.content || t('chat.sseError'))
     }
 
@@ -435,6 +487,9 @@ export function useChatSend(
   }
 
   const stopGeneration = () => {
+    // E3：手动停止时冲刷挂起的一帧（节流窗口内累积的内容不丢），再中止传输
+    activeStream?.flush()
+    activeStream = null
     sseService.abort()
     wsService.sendStop()
     isLoading.value = false
@@ -443,6 +498,9 @@ export function useChatSend(
 
   // 组件卸载时中止进行中的 SSE 流并清理事件处理器，防止请求悬挂与内存泄漏
   onUnmounted(() => {
+    // E3：取消挂起的节流落屏，避免卸载后写状态
+    activeStream?.cancel()
+    activeStream = null
     sseService.abort()
     sseService.off('chunk')
     sseService.off('message')

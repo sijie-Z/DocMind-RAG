@@ -2,11 +2,13 @@
 
 import { ref, computed, onMounted, watch, onUnmounted, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useVueFlow, MarkerType, type Connection } from '@vue-flow/core'
 import {
   NIcon, NInput, NButton, NInputNumber, NCard, NCollapse, NCollapseItem,
   NDivider, NDrawer, NDrawerContent, NTimeline, NTimelineItem, NTag, NSpin, NProgress,
   NModal, NForm, NGrid, NFormItem, NSelect, NSwitch, NList, NListItem, NEmpty, NPopconfirm, NDataTable, NPopover,
+  useDialog,
   type DataTableColumns
 } from 'naive-ui'
 import {
@@ -46,6 +48,8 @@ let message!: ReturnType<typeof useDedupedMessage>
 let workflowStore!: ReturnType<typeof useWorkflowStore>
 let llmConfigStore!: ReturnType<typeof useLLMConfigStore>
 let doFitView!: ReturnType<typeof useVueFlow>['fitView']
+let t!: ReturnType<typeof useI18n>['t']
+let dialog!: ReturnType<typeof useDialog>
 
 // 边的默认配置
 const defaultEdgeOptions = {
@@ -696,8 +700,29 @@ const deleteSelectedNode = () => {
   }
 }
 
+// 自动保存防抖窗口（毫秒）——清空确认文案里的「N 秒」与此同源，避免行为变化后文案失真
+const AUTO_SAVE_DELAY_MS = 500
+
+// 已持久化版本（source）的节点数：空画布保护判定「source 非空」的依据。
+// 在加载 / 手动保存 / 自动保存成功时刷新；useWorkflowEditor() setup 时归零。
+let lastPersistedNodeCount = 0
+
 const clearCanvas = () => {
-  workflowStore.clearWorkflow()
+  // 误点即清空，且画布变更会触发 500ms 防抖自动保存 —— 先二次确认；
+  // 确认后只清节点/连线，保留 currentWorkflowId 与名称：清空的是「当前工作流
+  // 的画布」（丢弃工作流关联走「新建」入口）。空画布不会被自动保存静默写回，
+  // 只有用户手动点「保存」才会持久化空版本。
+  dialog.warning({
+    title: t('workflow.editor.clearConfirmTitle'),
+    content: t('workflow.editor.clearConfirmContent', { n: AUTO_SAVE_DELAY_MS / 1000 }),
+    positiveText: t('workflow.editor.clearConfirmPositive'),
+    negativeText: t('workflow.editor.clearConfirmNegative'),
+    onPositiveClick: () => {
+      workflowStore.setNodes([])
+      workflowStore.setEdges([])
+      workflowStore.selectNode(null)
+    },
+  })
 }
 
 const fitView = () => {
@@ -734,6 +759,8 @@ const saveWorkflow = async () => {
         router.replace({ query: { id: String(workflowStore.currentWorkflowId) } })
       }
     }
+    // 手动保存是显式动作（允许保存空画布），同步刷新已持久化节点数
+    lastPersistedNodeCount = flowData.nodes.length
     return true
   } catch (error: unknown) {
     const err = error as { response?: { data?: { detail?: string } } }
@@ -749,17 +776,25 @@ const autoSave = () => {
   if (autoSaveTimer) clearTimeout(autoSaveTimer)
   autoSaveTimer = setTimeout(async () => {
     if (!workflowStore.currentWorkflowId || !workflowStore.workflowName.trim()) return
+    // 空画布保护：节点=0 且已保存版本非空（source 非空）时不得静默写回——
+    // 误删最后一个节点 / 确认清空画布后，防抖到点会把服务端版本覆盖成空。
+    // 改为明确提示并跳过本次写回；确需保存空画布走手动「保存」（显式动作）。
+    if (workflowStore.nodes.length === 0 && lastPersistedNodeCount > 0) {
+      message.warning(t('workflow.editor.emptyCanvasAutoSaveBlocked'))
+      return
+    }
     try {
       const flowData = workflowStore.getFlowData() as unknown as WorkflowConfig
       await updateWorkflow(workflowStore.currentWorkflowId, {
         name: workflowStore.workflowName,
         flow_data: flowData,
       })
+      lastPersistedNodeCount = flowData.nodes.length
       console.log('[auto-save] 工作流已自动保存')
     } catch {
       // Auto-save failures are silent
     }
-  }, 500)
+  }, AUTO_SAVE_DELAY_MS)
 }
 
 // 监听画布变化 → 触发自动保存：注册在 useWorkflowEditor() 内（见文件头部说明，
@@ -913,6 +948,8 @@ async function loadWorkflowById(id: number) {
     const workflow = apiUnwrap<Workflow>(res)
     if (workflow) {
       workflowStore.loadWorkflow(workflow)
+      // 记录已持久化版本的节点数：空画布保护的「source 非空」判定依据
+      lastPersistedNodeCount = workflow.flow_data?.nodes?.length ?? 0
       // B11：详响应无 engine_type（workflow.py:121-132），旧读点恒 undefined——
       // 移除；选择器保留为本地展示态（见模板 disabled 提示）
       router.replace({ query: { id: String(id) } })
@@ -925,6 +962,7 @@ async function loadWorkflowById(id: number) {
 
 function handleCreateNew() {
   workflowStore.clearWorkflow()
+  lastPersistedNodeCount = 0
   router.replace({ query: {} })
   message.info('已创建新工作流')
 }
@@ -956,6 +994,10 @@ export function useWorkflowEditor() {
   workflowStore = useWorkflowStore()
   llmConfigStore = useLLMConfigStore()
   doFitView = useVueFlow().fitView
+  t = useI18n().t
+  dialog = useDialog()
+  // 新编辑器实例：已持久化节点数从未知开始（加载/保存路径会刷新）
+  lastPersistedNodeCount = 0
 
   // ── 画布变更 → 自动保存（组件级注册，随组件卸载自动释放）──
   watch(

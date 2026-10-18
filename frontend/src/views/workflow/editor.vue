@@ -220,7 +220,7 @@
           <n-button quaternary size="small" @click="fitView">
             <template #icon><n-icon><ExpandOutline /></n-icon></template>
           </n-button>
-          <n-button quaternary size="small" @click="clearCanvas">
+          <n-button quaternary size="small" data-testid="workflow-clear-canvas" @click="clearCanvas">
             <template #icon><n-icon><TrashOutline /></n-icon></template>
           </n-button>
         </div>
