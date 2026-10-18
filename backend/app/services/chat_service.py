@@ -350,7 +350,9 @@ async def run_rag_pipeline(
 
     memory_context = ""
     try:
-        memory_system = get_memory_system(str(user_id))
+        # A1（记忆 IDOR）：租户命名空间由 (org, user, agent) 显式上下文拼装，
+        # 不再用裸 user_id 作全局 key。
+        memory_system = get_memory_system(search_org_id, user_id, "default")
         if memory_system._embedding_provider is None:
             memory_system.set_embedding_provider(rag_service.get_embedding)
         memory_context = await memory_system.get_context(user_content)
@@ -454,7 +456,9 @@ async def run_rag_pipeline(
         )
 
     try:
-        memory_system = get_memory_system(str(user_id))
+        # A1（记忆 IDOR）：租户命名空间由 (org, user, agent) 显式上下文拼装，
+        # 不再用裸 user_id 作全局 key。
+        memory_system = get_memory_system(search_org_id, user_id, "default")
         await memory_system.store_interaction(user_content, full_response)
     except Exception as e:
         logger.warning(f"Memory store failed (non-fatal): {e}")
