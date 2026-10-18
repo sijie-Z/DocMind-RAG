@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import { loginWithJson, register as apiRegister, getUserProfile } from '@/api/auth'
-import { setToken, setRefreshToken, removeToken, getToken } from '@/utils/auth'
+import { loginWithJson, register as apiRegister, getUserProfile, logout as apiLogout } from '@/api/auth'
+import { setToken, setRefreshToken, removeToken, getToken, getRefreshToken } from '@/utils/auth'
 import type { UserInfo, LoginForm, RegisterForm } from '@/types/user'
 import type { AxiosError } from 'axios'
 import { useAppStore } from './app'
@@ -166,6 +166,17 @@ export const useUserStore = defineStore('user', () => {
   }
 
   const logout = async () => {
+    const refreshToken = getRefreshToken()
+    // 先请求服务端吊销 access/refresh token，避免登出后旧令牌仍可访问受保护接口。
+    // 服务端失败（5xx/断网）不阻断本地登出：本地凭证照常清空并告警；
+    // 吊销是幂等的，稍后重试登出即可。无本地 access token 时后端必然 401，跳过请求。
+    if (getToken()) {
+      try {
+        await apiLogout(refreshToken)
+      } catch (error) {
+        console.warn('[user] 服务端登出失败，已继续清除本地凭证', error)
+      }
+    }
     userInfo.value = null
     token.value = ''
     removeToken()
@@ -180,6 +191,14 @@ export const useUserStore = defineStore('user', () => {
       const { clearDefaultAuth } = await import('@/utils/request')
       clearDefaultAuth()
     } catch { /* request 模块未就绪时忽略 */ }
+    // 跳转登录页；已在登录页时跳过（调用方可能已自行跳转，避免重复导航）
+    // 动态导入避免与 router/index.ts（其静态依赖本 store）形成初始化循环。
+    try {
+      const { default: router } = await import('@/router')
+      if (router.currentRoute.value.name !== 'Login') {
+        await router.push({ name: 'Login' })
+      }
+    } catch { /* router 未就绪时忽略 */ }
   }
   
   // --- 找到 stores/user.ts 中的 updateUserInfo 函数，替换为 ---

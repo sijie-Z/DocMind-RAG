@@ -23,6 +23,8 @@ interface ExtendedAxiosConfig extends InternalAxiosRequestConfig {
   ['X-Request-ID']?: string
   ['__request_start_time']?: number
   _retry?: boolean
+  /** 401 时跳过刷新/自动登出链（登出接口专用，避免互相递归） */
+  _skipAuthRefresh?: boolean
 }
 
 // 全局 toast 去重：同一内容 1.5s 内不重复弹出
@@ -276,7 +278,13 @@ request.interceptors.response.use(
         case 401: {
           const isLoginRequest = originalRequest?.url?.includes?.('auth/login')
           const isRefreshRequest = originalRequest?.url?.includes?.('auth/refresh')
-          
+
+          // 登出等显式标记的请求：401 不得进入刷新/自动登出链，
+          // 否则「登出 → 401 → 刷新失败 → 自动登出 → 登出」无限递归。
+          if (originalRequest?._skipAuthRefresh) {
+            break
+          }
+
           if (!isLoginRequest && !isRefreshRequest && !originalRequest?._retry) {
             if (!isRefreshing) {
               isRefreshing = true
