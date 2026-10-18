@@ -12,6 +12,7 @@ import type {
   AgentTaskListItem,
   AgentTaskView,
   ApprovalDecisionInput,
+  ApprovalMode,
   PlanApprovalDecisionInput,
   ReplayTimeline,
 } from '@/types/agent'
@@ -33,6 +34,8 @@ interface ChatOptions {
   temperature?: number
   disabledTools?: string[]
   systemPromptOverride?: string
+  /** HITL：本次运行的审批模式（覆盖已保存配置；不传则沿用服务端已保存值） */
+  approvalMode?: ApprovalMode
   /** 体验第四波 @引用：显式引用的知识库文档 id（后端注入 planner 上下文） */
   referencedDocumentIds?: string[]
   /** External abort signal (e.g. from the caller's AbortController) */
@@ -124,6 +127,8 @@ export const agentApi = {
         temperature: options?.temperature ?? 0.1,
         disabled_tools: options?.disabledTools ?? [],
         system_prompt_override: options?.systemPromptOverride,
+        // HITL：仅在显式传值上送（undefined 被 JSON.stringify 省略 = 沿用保存配置）
+        approval_mode: options?.approvalMode,
         // @引用（体验第四波）：仅在携带时上送（空数组 = 不引用，等价省略）
         referenced_document_ids: options?.referencedDocumentIds?.length
           ? options.referencedDocumentIds

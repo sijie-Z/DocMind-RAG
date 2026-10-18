@@ -31,6 +31,8 @@ export const useAgentStore = defineStore('agent', () => {
     disabled_tools: ['execute_python', 'execute_sql'],
     max_plan_steps: 10,
     max_retries_per_step: 3,
+    // HITL：与后端 AgentConfig 默认一致（backend/app/agent/config.py:204）
+    approval_mode: 'risky',
   })
 
   // ── Sessions ──

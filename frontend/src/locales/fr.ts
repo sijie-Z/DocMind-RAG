@@ -683,7 +683,12 @@ export default {
     planRejectedMessage: 'Le plan a de nouveau été rejeté (plus de replanification possible) ; la tâche est terminée',
     planEditInvalid: 'Le contenu modifié est invalide — vérifiez les descriptions/dépendances puis réessayez',
     planFailed: "Échec de l'envoi de la décision ; état de la tâche actualisé",
-    planPendingHint: "La tâche attend l'approbation du plan — approuvez / modifiez / rejetez d'abord le plan ci-dessus (ou annulez la tâche)"
+    planPendingHint: "La tâche attend l'approbation du plan — approuvez / modifiez / rejetez d'abord le plan ci-dessus (ou annulez la tâche)",
+    // HITL : mode d'approbation (panneau de configuration) — never / risky / always
+    approvalMode: "Mode d'approbation",
+    approvalNever: 'Aucune approbation',
+    approvalRisky: 'Approuver uniquement les outils à haut risque (par défaut)',
+    approvalAlways: "Approuver tous les appels d'outils"
   },
   scheduler: {
     subtitle: "Gérez les exécutions d'agent planifiées ; les résultats sont consultables depuis la dernière exécution",

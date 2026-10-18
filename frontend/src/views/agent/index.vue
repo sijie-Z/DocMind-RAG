@@ -587,6 +587,8 @@ async function handleSend(query: string, refs?: ReferencedDoc[]) {
         temperature: agentStore.config.temperature,
         disabledTools: agentStore.config.disabled_tools,
         systemPromptOverride: agentStore.config.system_prompt_override,
+        // HITL：面板选择的审批模式随运行上送（与保存配置同源）
+        approvalMode: agentStore.config.approval_mode,
         // @引用（体验第四波）：引用文档 id 上送，后端注入 planner 上下文
         referencedDocumentIds: refs?.map((r) => r.id),
       },

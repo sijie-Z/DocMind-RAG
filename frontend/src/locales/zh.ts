@@ -763,7 +763,12 @@ export default {
     planRejectedMessage: '计划已被再次拒绝（重规划机会已用尽），任务已终止',
     planEditInvalid: '编辑内容不合法，请检查步骤（描述/依赖）后重试',
     planFailed: '计划审批提交失败，已刷新任务状态',
-    planPendingHint: '任务正在等待计划审批：请先在上方计划卡中批准 / 编辑 / 拒绝（或取消任务）'
+    planPendingHint: '任务正在等待计划审批：请先在上方计划卡中批准 / 编辑 / 拒绝（或取消任务）',
+    // HITL 审批模式（配置面板）：never / risky / always
+    approvalMode: '审批模式',
+    approvalNever: '不审批',
+    approvalRisky: '仅高危工具审批（默认）',
+    approvalAlways: '所有工具调用审批'
   },
   scheduler: {
     subtitle: '管理定时触发的 Agent 任务：到点自动运行，运行结果可在「上次运行」处查看',

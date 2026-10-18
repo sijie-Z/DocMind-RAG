@@ -72,6 +72,16 @@
         </select>
       </div>
 
+      <!-- HITL approval mode (enum from backend/app/agent/approval.py: never / risky / always) -->
+      <div class="config-section">
+        <label class="config-label">{{ t('hitl.approvalMode') }}</label>
+        <select v-model="localConfig.approval_mode" class="config-select approval-mode-select">
+          <option value="never">{{ t('hitl.approvalNever') }}</option>
+          <option value="risky">{{ t('hitl.approvalRisky') }}</option>
+          <option value="always">{{ t('hitl.approvalAlways') }}</option>
+        </select>
+      </div>
+
       <!-- Tools -->
       <div class="config-section">
         <label class="config-label">工具开关</label>
@@ -114,6 +124,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { AgentConfig, ToolInfo } from '@/types/agent'
 import { agentApi } from '@/api/agent'
 import { apiUnwrap } from '@/utils/apiUnwrap'
@@ -125,6 +136,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   apply: [config: AgentConfig]
 }>()
+
+const { t } = useI18n()
 
 const collapsed = ref(true)
 const availableTools = ref<ToolInfo[]>([])

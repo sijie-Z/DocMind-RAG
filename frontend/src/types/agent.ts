@@ -239,6 +239,9 @@ export interface Plan {
   is_complete: boolean
 }
 
+/** HITL 审批模式（与 backend/app/agent/approval.py:46 ApprovalMode 同源）。 */
+export type ApprovalMode = 'never' | 'risky' | 'always'
+
 export interface AgentConfig {
   model: string
   temperature: number
@@ -253,6 +256,8 @@ export interface AgentConfig {
   system_prompt_override?: string
   max_plan_steps: number
   max_retries_per_step: number
+  /** HITL 审批模式：never=不审批 / risky=高危工具需审批（后端默认）/ always=全部审批 */
+  approval_mode: ApprovalMode
 }
 
 export interface ToolInfo {
