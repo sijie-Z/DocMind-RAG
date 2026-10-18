@@ -10,10 +10,10 @@
       </div>
       <div class="relative z-10 space-y-6 max-w-sm">
         <h1 class="text-4xl font-bold text-white leading-tight">
-          {{ isRegister ? '加入 DocMind' : '欢迎回来' }}
+          {{ t('login.brandHeadline') }}
         </h1>
         <p class="text-slate-400 text-base leading-relaxed">
-          企业级 RAG 知识库，上传文档即可开始智能问答。
+          {{ t('login.brandSubtitle') }}
         </p>
       </div>
       <div class="relative z-10 text-slate-500 text-sm">

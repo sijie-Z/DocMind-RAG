@@ -42,6 +42,7 @@
           :collapsed-icon-size="22"
           :options="menuOptions"
           :value="activeKey"
+          :node-props="menuNodeProps"
           @update:value="handleMenuSelect"
         />
       </nav>
@@ -289,7 +290,7 @@ import { markAsRead, markAllAsRead, deleteNotification, type Notification } from
 import { notificationSocket, type RealtimeNotificationPayload } from '@/utils/notificationSocket'
 import { useNotificationStore } from '@/stores/notification'
 import { formatDate } from '@/utils/format'
-import type { MenuOption, DropdownOption } from 'naive-ui'
+import type { MenuOption, MenuGroupOption, DropdownOption } from 'naive-ui'
 import { NMenu, NIcon, NInput, NButton, NBadge, NPopover, NList, NListItem, NDropdown, NAvatar } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { SIDEBAR_MENU_GROUPS, USER_MENU_ITEMS, type MenuItemDef } from '@/config/menu'
@@ -514,13 +515,37 @@ const toMenuOption = (item: MenuItemDef): MenuOption => ({
   icon: renderIcon(MENU_ICONS[item.icon]),
 })
 
+/**
+ * G2：侧栏分组标题的折叠/截断策略。
+ * 折叠态只有 80px 宽，英文长词（Workspace/Knowledge/Intelligence）没有策略
+ * 会被硬裁成 Works/Knowl/Intellig；折叠时不再渲染标题文本（整行由
+ * menuNodeProps 收起并标记 aria-hidden）。展开态以 truncate 单行省略，
+ * title 悬浮呈现完整词条，不挤压图标列。
+ */
+const renderGroupLabel = (label: string) => () => {
+  if (appStore.sidebarCollapsed) return null
+  return h('span', { class: 'block truncate', title: label }, label)
+}
+
+const menuNodeProps = (option: MenuOption): Record<string, string> => {
+  if ((option as MenuGroupOption).type === 'group' && appStore.sidebarCollapsed) {
+    return { class: 'sidebar-group-title--collapsed', 'aria-hidden': 'true' }
+  }
+  return {}
+}
+
 const menuOptions = computed<MenuOption[]>(() => {
   return SIDEBAR_MENU_GROUPS
     .filter((group) => !group.adminOnly || userStore.isAdmin)
     .flatMap((group): MenuOption[] => {
       const items = group.items.map(toMenuOption)
       return group.groupI18nKey
-        ? [{ type: 'group', label: t(group.groupI18nKey), children: items }]
+        ? [{
+            type: 'group',
+            key: group.groupI18nKey,
+            label: renderGroupLabel(t(group.groupI18nKey)),
+            children: items,
+          }]
         : items
     })
 })
@@ -565,6 +590,13 @@ const toggleTheme = () => {
 </script>
 
 <style scoped>
+/* G2：折叠态整行收起分组标题（80px 放不下英文长词；展开态由 label 渲染器 truncate 省略） */
+:deep(.n-menu-item-group-title.sidebar-group-title--collapsed) {
+  height: 0;
+  margin-top: 0;
+  overflow: hidden;
+}
+
 /* Mobile sidebar: fixed overlay on small screens */
 @media (max-width: 767px) {
   .sidebar-fixed {

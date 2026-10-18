@@ -103,7 +103,7 @@
           </n-tag>
         </div>
         <div class="flex items-center gap-1 mt-2 text-xs text-gray-300">
-          <span>ES: {{ adminStats.esHealth || '—' }}</span>
+          <span>{{ t('dashboard.esLabel') }}: {{ esHealthText }}</span>
         </div>
       </div>
     </div>
@@ -177,7 +177,7 @@
       </div>
 
       <!-- RAG 命中率 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col" data-testid="rag-card">
         <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-transparent dark:from-emerald-900/10">
           <div class="flex items-center gap-2">
             <div class="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center">
@@ -194,7 +194,7 @@
             </n-tag>
           </div>
         </div>
-        <div class="p-5">
+        <div class="p-5 flex-1 flex flex-col">
           <!-- 命中率主指标 -->
           <div class="flex items-center gap-4 mb-5">
             <div class="flex-1">
@@ -229,8 +229,8 @@
               <p class="text-lg font-bold text-gray-900 dark:text-white">{{ ragStats.avgDocs }}</p>
             </div>
           </div>
-          <!-- 趋势图 -->
-          <div class="h-28 rounded-xl bg-gray-50 dark:bg-gray-700/30 p-3">
+          <!-- 趋势图（flex-1：与左卡等高时填充剩余空间，消除卡底空白） -->
+          <div class="flex-1 min-h-28 rounded-xl bg-gray-50 dark:bg-gray-700/30 p-3" data-testid="rag-chart">
             <div ref="ragChartRef" class="w-full h-full"></div>
           </div>
         </div>
@@ -376,6 +376,26 @@ const adminStats = ref({
   sessionsLastWeek: null as number | null,
 })
 const healthLoaded = ref(false)
+
+/**
+ * J4：ES 健康值词条化 —— 后端值域 green/yellow/red/unknown/disconnected
+ * 不再以英文状态词裸露在中英文界面；green/red 复用 healthy/unhealthy 口径，
+ * yellow/unknown/disconnected 走独立词条。
+ */
+const ES_HEALTH_I18N_KEY: Record<string, string> = {
+  green: 'dashboard.healthy',
+  yellow: 'dashboard.esHealthYellow',
+  red: 'dashboard.unhealthy',
+  unknown: 'dashboard.esHealthUnknown',
+  disconnected: 'dashboard.esHealthDisconnected',
+}
+
+const esHealthText = computed(() => {
+  if (!healthLoaded.value) return '—'
+  const raw = adminStats.value.esHealth
+  if (!raw) return '—'
+  return t(ES_HEALTH_I18N_KEY[raw] ?? 'dashboard.esHealthUnknown')
+})
 
 // W2-T7：真实环比 =（本周新增-上周新增）/上周新增；上周为 0/缺（无基线）→ null（渲染"上周无数据"），
 // 不再回退任何写死百分比

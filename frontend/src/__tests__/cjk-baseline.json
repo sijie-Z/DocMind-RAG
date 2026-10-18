@@ -36,7 +36,7 @@
     "views/knowledge/components/KnowledgeUploadPanel.vue": 4,
     "views/knowledge/graph.vue": 20,
     "views/knowledge/index.vue": 40,
-    "views/login/index.vue": 3,
+    "views/login/index.vue": 1,
     "views/monitoring/index.vue": 11,
     "views/notifications/index.vue": 34,
     "views/organizations/index.vue": 18,
