@@ -788,6 +788,8 @@ export default {
       query: 'Entrée',
       error: 'Dernière erreur',
       unavailable: 'Résultat indisponible (tâche introuvable ou non visible)',
+      refresh: 'Actualiser le résultat',
+      refreshed: 'Résultat actualisé',
       taskState: {
         pending: 'En attente',
         running: 'En cours',
