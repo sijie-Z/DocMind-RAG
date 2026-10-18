@@ -17,6 +17,46 @@ from app.agent.usage import ctx_from_run_context, record_llm_usage
 
 logger = logging.getLogger(__name__)
 
+# ── 结构化检索结果信封（T4：来源伪造隔离）───────────────────────────────────
+# 检索工具此前把来源行（"[i] (score) filename"）与文档正文拼进**同一个**
+# 字符串，消费端只能对整段输出跑逐行正则——文档正文里构造一行
+# "[3] (0.99) 假.pdf" 就能伪造一张引用卡（documentId 为空）。
+# 现在来源元数据只经信封的 ``sources`` 段传递，正文一律放进 ``content``
+# 字段（JSON 字符串内部，不可越界成顶层键）；消费端只读 ``sources`` 段。
+# ``kind`` 是信封判别标记，避免把其他工具的合法 JSON 输出误当来源。
+SEARCH_RESULTS_PAYLOAD_KIND = "docmind.search_results/v1"
+
+
+def _build_search_payload(
+    entries: list[tuple[float, str, str, str]],
+) -> str:
+    """把 (score, filename, document_id, snippet) 列表打包为结构化 JSON 信封。
+
+    两个检索工具（search_knowledge_base / vector_search）共用此出口；正文里
+    的任何内容都只能落在 ``content`` 字符串内部，无法伪造 ``sources`` 项。
+    """
+    sources = [
+        {
+            "index": index,
+            "score": score,
+            "filename": filename,
+            "documentId": document_id or "",
+        }
+        for index, (score, filename, document_id, _snippet) in enumerate(entries, 1)
+    ]
+    content = "\n\n".join(
+        f"[{index}] ({score:.2f}) {filename}\n{snippet}"
+        for index, (score, filename, _document_id, snippet) in enumerate(entries, 1)
+    )
+    return json.dumps(
+        {
+            "kind": SEARCH_RESULTS_PAYLOAD_KIND,
+            "sources": sources,
+            "content": content,
+        },
+        ensure_ascii=False,
+    )
+
 
 # ─── Search Tools ────────────────────────────────────────────────────────────
 
@@ -83,13 +123,13 @@ async def search_knowledge_base(
     if not results:
         return "No relevant documents found for this query."
 
-    output = []
-    for i, doc in enumerate(results, 1):
-        score = doc.get("score", 0)
+    entries = []
+    for doc in results:
+        score = float(doc.get("score") or 0.0)
         filename = doc.get("filename", "Unknown")
         snippet = doc.get("snippet", doc.get("text", "")[:300])
-        output.append(f"[{i}] ({score:.2f}) {filename}\n{snippet}")
-    return "\n\n".join(output)
+        entries.append((score, filename, doc.get("document_id", ""), snippet))
+    return _build_search_payload(entries)
 
 
 @register_tool(
@@ -147,12 +187,16 @@ async def vector_search(
     if not hits:
         return "No semantically similar documents found."
 
-    output = []
-    for i, hit in enumerate(hits, 1):
+    entries = []
+    for hit in hits:
         src = hit.get("_source", {})
-        score = hit.get("_score", 0)
-        output.append(f"[{i}] ({score:.2f}) {src.get('filename', '?')}\n{src.get('content', '')[:300]}")
-    return "\n\n".join(output)
+        entries.append((
+            float(hit.get("_score") or 0.0),
+            src.get("filename", "?"),
+            src.get("document_id", ""),
+            (src.get("content") or "")[:300],
+        ))
+    return _build_search_payload(entries)
 
 
 # ─── Analysis Tools ──────────────────────────────────────────────────────────
