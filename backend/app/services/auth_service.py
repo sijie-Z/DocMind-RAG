@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import RedisTools
 from app.exceptions import AccountLockedError, ServiceUnavailableError
+from app.models.organization import user_organization
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -179,7 +180,30 @@ class AuthService:
 
         # 将JWT中的权限信息添加到用户对象
         user.token_role = payload.get("role")
-        user.token_organization_id = payload.get("organization_id")
+        token_org_id = payload.get("organization_id")
+
+        # A2 P0（租户边界）：token 中的 organization_id 只是**回退值**（core/security.py
+        # 的 get_user_org_id 在用户主组织为空时使用它）。回退必须回源成员表校验：
+        # 用户被移出组织后主组织字段清空、成员关系删除，旧 token 里的组织 claim
+        # 立即失效（403），不等待 token 过期。主组织非空时以 DB 为准，不依赖成员表
+        # （历史用户未必都有 user_organization 行，避免过度收紧）。
+        if token_org_id is not None and user.organization_id is None:
+            member_result = await db.execute(
+                select(user_organization.c.user_id).where(
+                    user_organization.c.user_id == user.id,
+                    user_organization.c.organization_id == token_org_id,
+                )
+            )
+            if member_result.first() is None:
+                logger.warning(
+                    f"token_org_membership_missing: 用户 {user_id} 的令牌组织 "
+                    f"{token_org_id} 已无成员关系，拒绝访问"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="您已不在该组织中，请重新登录",
+                )
+        user.token_organization_id = token_org_id
 
         return user
 
