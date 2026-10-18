@@ -11,6 +11,7 @@ route:
 receivers:
   - name: default-receiver
     webhook_configs:
-      # token 经环境变量注入（--config.expand-env），需与后端 ALERT_WEBHOOK_TOKEN 保持一致
-      - url: "http://host.docker.internal:8000/api/v1/monitoring/alerts/webhook?token=${ALERT_WEBHOOK_TOKEN}"
+      # 占位符由 compose 启动时用 sed 渲染到临时配置（Alertmanager v0.26.0 不支持
+      # 配置文件内环境变量展开）；token 需与后端 ALERT_WEBHOOK_TOKEN 保持一致。
+      - url: "http://host.docker.internal:8000/api/v1/monitoring/alerts/webhook?token=__ALERT_WEBHOOK_TOKEN__"
         send_resolved: true

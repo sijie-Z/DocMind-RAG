@@ -444,7 +444,7 @@ A:WorkingMemory 是单次任务内的中间结果,如果失败要重跑,持久�
 A:`recall()` 默认串行遍历各层,按统一打分公式排序。原因:四层召回量都很小(各 top_k=5),串行开销可控,实现简单。如果未来某层召回量爆炸(比如 long_term 扩到上千条),再考虑每层独立召回 + 并行合并。
 
 **Q6:为什么 LongTerm 用 cosine similarity 而不是 dot product?**
-A:2048 维向量,如果没做 L2 归一化,cosine 比 dot 更稳。代价是要多算一次范数,值得。
+A:向量维度由 `VECTOR_DIMENSION` 决定(默认 768);如果没做 L2 归一化,cosine 比 dot 更稳。代价是要多算一次范数,值得。
 
 **Q7:ContextEngine 压缩策略为什么优先 LLM 摘要?**
 A:截断会丢失语义连贯性,LLM 摘要能保留核心信息。fallback 到截断是因为 LLM 调用本身有成本和延迟,要做兜底。

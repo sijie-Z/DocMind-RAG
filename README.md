@@ -294,14 +294,14 @@ cp .env.docker.example .env.docker
 # 编辑 .env.docker，至少填入 LLM API Key：
 #   DEEPSEEK_API_KEY=sk-xxx
 #   DEEPSEEK_API_URL=https://api.deepseek.com
-# Embedding 默认走本机 Ollama（nomic-embed-text / 768 维，无需 Key）；
-# 使用云端 Embedding 时再填 EMBEDDING_API_KEY / EMBEDDING_API_URL。
+# Embedding 默认走本机 Ollama（nomic-embed-text / 768 维），无需单独的 Embedding Key
+# （复用 DEEPSEEK_API_KEY）；使用云端 Embedding 时再填 EMBEDDING_API_KEY / EMBEDDING_API_URL。
 ```
 
 ### 3. 启动基础设施
 
 ```bash
-cd backend && docker compose up -d mysql redis elasticsearch minio kafka zookeeper
+cd backend && docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
 # 只启动基础设施容器（应用继续在宿主机跑，见下）；不用 Docker 的话跳过本步，按 SETUP.md 用本机服务替代
 # 完整 Docker 部署（应用也在容器里）：见「部署」一节
 ```
@@ -496,7 +496,7 @@ cd ../frontend && npm run test
 前置：按「快速开始 · 2. 配置」创建并填写好 `backend/.env.docker`——缺失时 compose 的任意命令都会直接报错。
 
 ```bash
-cd backend && docker compose up -d
+cd backend && docker compose --env-file .env.docker up -d
 # 启动 10 个服务：backend, worker, mysql, redis, elasticsearch, minio, zookeeper, kafka, prometheus, grafana
 ```
 

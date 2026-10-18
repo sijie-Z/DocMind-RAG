@@ -22,14 +22,18 @@ services:
       - "9093:9093"
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    # Alertmanager v0.26.0 不支持配置文件内环境变量展开（无 --config.expand-env）。
+    # 启动时用 sed 把 token 渲染到 /tmp 的临时配置，再 exec 启动；模板不落明文 token。
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - '--config.file=/etc/alertmanager/alertmanager.yml'
-      - '--storage.path=/alertmanager'
-      # 允许配置文件里用 ${VAR} 引用环境变量（token 不落盘）
-      - '--config.expand-env'
+      - 'sed "s|__ALERT_WEBHOOK_TOKEN__|$${ALERT_WEBHOOK_TOKEN}|g" /etc/alertmanager/alertmanager.yml > /tmp/alertmanager.yml && exec /bin/alertmanager --config.file=/tmp/alertmanager.yml --storage.path=/alertmanager'
     environment:
-      # 与后端 ALERT_WEBHOOK_TOKEN 保持一致；未设置时 compose 直接报错（fail-closed）
+      # 与后端 ALERT_WEBHOOK_TOKEN 保持一致；未设置时 compose 直接报错（fail-closed）。
+      # 请使用 URL 安全字符（避免 sed 分隔符 | 与 &）。
       - ALERT_WEBHOOK_TOKEN=${ALERT_WEBHOOK_TOKEN:?ALERT_WEBHOOK_TOKEN_required}
+    extra_hosts:
+      # 容器内通过 host.docker.internal 访问宿主机后端（Linux 需要 host-gateway）
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   grafana:

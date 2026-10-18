@@ -294,14 +294,15 @@ cp .env.docker.example .env.docker
 # Edit .env.docker — at minimum fill in LLM API Keys:
 #   DEEPSEEK_API_KEY=sk-xxx
 #   DEEPSEEK_API_URL=https://api.deepseek.com
-# Embedding defaults to local Ollama (nomic-embed-text / 768 dims, no key needed);
-# fill EMBEDDING_API_KEY / EMBEDDING_API_URL only when using a cloud embedding API.
+# Embedding defaults to local Ollama (nomic-embed-text / 768 dims); no separate
+# embedding key is needed (DEEPSEEK_API_KEY is reused). Fill EMBEDDING_API_KEY /
+# EMBEDDING_API_URL only when using a cloud embedding API.
 ```
 
 ### 3. Start Infrastructure
 
 ```bash
-cd backend && docker compose up -d mysql redis elasticsearch minio kafka zookeeper
+cd backend && docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
 # Infrastructure containers only (apps keep running on the host — see below); skip this step without Docker and use local services per SETUP.md
 # Full Docker deployment (apps in containers): see the Deployment section
 ```
@@ -497,7 +498,7 @@ cd ../frontend && npm run test
 Prerequisite: create and fill `backend/.env.docker` first (see Quick Start · 2. Configure) — without it, every compose command fails outright.
 
 ```bash
-cd backend && docker compose up -d
+cd backend && docker compose --env-file .env.docker up -d
 # Starts 10 services: backend, worker, mysql, redis, elasticsearch, minio, zookeeper, kafka, prometheus, grafana
 ```
 

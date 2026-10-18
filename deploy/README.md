@@ -5,11 +5,12 @@
 ```bash
 # 1. Configure environment
 cp backend/.env.docker.example backend/.env.docker
-# Edit .env.docker with your API keys
+# Edit .env.docker: API keys + middleware passwords
+#   (MYSQL_ROOT_PASSWORD / MYSQL_PASSWORD / MINIO_ACCESS_KEY / MINIO_SECRET_KEY / GRAFANA_PASSWORD)
 
 # 2. Start all services
 cd backend
-docker compose up -d
+docker compose --env-file .env.docker up -d
 
 # 3. Verify
 curl http://localhost:8000/health
@@ -28,41 +29,46 @@ curl http://localhost:8000/health
 | Kafka | 9092 | Internal only |
 | Grafana | 3000 | Internal only — set GRAFANA_PASSWORD (no default credentials) |
 
-> 安全提示（1.20 起）：compose 中所有中间件端口仅绑定 127.0.0.1，默认凭据
-> 已替换为占位符。部署前必须设置：MYSQL_ROOT_PASSWORD、MYSQL_PASSWORD、
-> REDIS_PASSWORD、MINIO_ACCESS_KEY、MINIO_SECRET_KEY、GRAFANA_PASSWORD
-> （可在 docker-compose.yml 中按注释生成随机值）。
+> 安全提示：compose 中所有中间件端口仅绑定 127.0.0.1；口令类变量全部改为
+> `${VAR:?required}` 引用——未在 `.env.docker`（经 `--env-file` 传入）中设置时
+> compose 直接报错，不再回退到已知弱默认值。必填：MYSQL_ROOT_PASSWORD、
+> MYSQL_PASSWORD、MINIO_ACCESS_KEY、MINIO_SECRET_KEY、GRAFANA_PASSWORD；
+> REDIS_PASSWORD 可选（留空时 Redis 无密码，且仅绑定 127.0.0.1）。
 
 ## Option 2: Kubernetes
 
 ```bash
-# 1. Create namespace and configs
+# 1. Create namespace
 kubectl apply -f deploy/k8s/00-namespace.yaml
-kubectl apply -f deploy/k8s/01-configmap.yaml
-kubectl apply -f deploy/k8s/02-secrets.yaml
 
-# 2. Deploy backend + services
+# 2. Create Secret（见下方「Secret 创建方式」，方式 A / B 二选一）
+#    升级既有部署：先更新 Secret（含 DATABASE_URL 键），再 apply ConfigMap，
+#    否则新 Pod 会因缺少 DATABASE_URL 启动失败。
+
+# 3. Apply config and workloads
+kubectl apply -f deploy/k8s/01-configmap.yaml
 kubectl apply -f deploy/k8s/03-backend-deployment.yaml
 kubectl apply -f deploy/k8s/04-backend-service.yaml
 kubectl apply -f deploy/k8s/05-worker.yaml
 
-# 3. Deploy frontend
+# 4. Deploy frontend
 kubectl apply -f deploy/k8s/06-frontend-deployment.yaml
 kubectl apply -f deploy/k8s/07-frontend-service.yaml
 
-# 4. (Optional) Ingress with TLS
+# 5. (Optional) Ingress with TLS
 kubectl apply -f deploy/k8s/08-ingress.yaml
 
-# 5. Verify
+# 6. Verify
 kubectl get pods -n docmind
 kubectl get svc -n docmind
 ```
 
 ### Secret 创建方式
 
-`deploy/k8s/02-secrets.yaml` 全部为 `REPLACE_ME_*` 占位符。数据库连接串
-（含口令）、MinIO / Redis 口令与 API Key 只存 Secret；ConfigMap 不含任何凭据。
-以下两种方式任选其一：
+`deploy/k8s/02-secrets.yaml` 中 `SECRET_KEY` / `JWT_SECRET_KEY` / `DATABASE_URL`
+为空串（未替换则应用启动即失败，fail-closed），其余条目为 `REPLACE_ME_*` 占位符。
+数据库连接串（含口令）、MinIO / Redis 口令与 API Key 只存 Secret；ConfigMap 不含
+任何凭据。以下两种方式任选其一：
 
 ```bash
 # 方式 A（推荐）：直接用 kubectl 创建，跳过 02-secrets.yaml
@@ -76,13 +82,15 @@ kubectl create secret generic docmind-secrets -n docmind \
   --from-literal=DEEPSEEK_API_KEY="<API_KEY>" \
   --from-literal=EMBEDDING_API_KEY="<API_KEY>"
 
-# 方式 B：编辑 02-secrets.yaml 中的 REPLACE_ME_* 后再 apply
+# 方式 B：编辑 02-secrets.yaml 中的空串/占位符后再 apply
 kubectl apply -f deploy/k8s/02-secrets.yaml
 ```
 
 > 方式 A 与 02-secrets.yaml 二选一：已用 `kubectl create` 创建的 Secret 不要再用
-> `kubectl apply -f 02-secrets.yaml` 覆盖（会用占位符回写）。backend 与 worker
+> `kubectl apply -f 02-secrets.yaml` 覆盖（会用空串/占位符回写）。backend 与 worker
 > 通过 `envFrom.secretRef` 注入 Secret，ConfigMap 只提供非敏感配置。
+> 若既有 Secret 中配置过 `RERANK_API_KEY`（云端 Rerank），升级时请保留该键；
+> 模板默认走本地 BGE，不包含该键。
 
 ## Option 3: Manual (Development)
 
@@ -118,6 +126,24 @@ python -c "import secrets; print(secrets.token_urlsafe(24))"   # 数据库/中�
 curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8000/metrics
 ```
 
+### Monitoring stack（可选）
+
+`deploy/monitoring/docker-compose.monitoring.yml` 需要两个环境变量（Compose 插值，
+未设置时直接报错）：
+
+```bash
+cd deploy/monitoring
+GRAFANA_PASSWORD='<强口令>' ALERT_WEBHOOK_TOKEN='<URL 安全随机串>' \
+  docker compose -f docker-compose.monitoring.yml up -d
+```
+
+- `ALERT_WEBHOOK_TOKEN` 必须与后端 `ALERT_WEBHOOK_TOKEN` 一致（后端可在
+  `.env` / `.env.docker` 中设置）；两端不一致时告警会被后端拒绝。
+- Alertmanager v0.26.0 不支持配置文件内环境变量展开：容器启动时用 `sed` 把
+  token 渲染到 `/tmp/alertmanager.yml`，仓库内配置只保留
+  `__ALERT_WEBHOOK_TOKEN__` 占位符（不落明文 token）。
+- `host.docker.internal` 由 compose 的 `extra_hosts: host-gateway` 提供（Linux 可用）。
+
 ### Demo account
 
 默认禁用（ENABLE_DEMO_ACCOUNT=false）。开启后 guest 账号仅在**首次创建**时
@@ -126,7 +152,8 @@ curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8000/metrics
 ## Production Checklist
 
 - [ ] Generate unique SECRET_KEY and JWT_SECRET_KEY
-- [ ] Change all default passwords (MySQL, MinIO, Grafana)
+- [ ] Set all required passwords in `.env.docker` (compose is fail-closed without them)
+- [ ] Set matching ALERT_WEBHOOK_TOKEN on backend and monitoring stack (if alerting)
 - [ ] Set `DEBUG=false` and `EXPOSE_EXCEPTION_DETAIL=false`
 - [ ] Configure HTTPS (TLS certificate)
 - [ ] Set up database backups
