@@ -243,6 +243,7 @@ import {
   BulbOutline, SchoolOutline
 } from '@vicons/ionicons5'
 import { getAgentMemory, recallMemory, clearMemory } from '@/api/memory'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import dayjs from 'dayjs'
 import { useI18n } from 'vue-i18n'
 import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
@@ -346,7 +347,8 @@ const loadMemory = async () => {
   loading.value = true
   try {
     const res = await getAgentMemory()
-    memoryData.value = res.data?.data
+    // GET /memory/{agent_id} → {success, data: <导出记忆>} → apiUnwrap 解一层
+    memoryData.value = apiUnwrap<MemoryData | null>(res)
   } catch (error) {
     message.error('加载记忆失败')
   } finally {
@@ -360,7 +362,8 @@ const searchMemory = async () => {
   searching.value = true
   try {
     const res = await recallMemory('default', searchQuery.value)
-    searchResults.value = res.data?.data?.results || []
+    // POST /memory/{agent_id}/recall → {success, data: {query, results, count}}
+    searchResults.value = apiUnwrap<{ results: RecallItem[] } | null>(res)?.results || []
   } catch (error) {
     message.error('搜索失败')
   } finally {
