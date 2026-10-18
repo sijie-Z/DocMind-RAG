@@ -104,6 +104,8 @@ export default {
     recentActivity: 'Recent Activity',
     sessionRevoked: 'Device offline',
     revokeFailed: 'Failed to go offline',
+    revokeSession: 'Revoke device',
+    revokeSessionConfirm: 'Revoke this device? It will be signed out and must sign in again.',
     apiKeyRevokeFailed: 'Failed to revoke API Key',
     aiProviderExpTitle: 'Experimental · Not active yet',
     aiProviderExpDesc: 'Model choice is configured server-side (currently DeepSeek). The selection and API key here do not affect inference; saving is disabled to avoid confusion.',
@@ -163,6 +165,7 @@ export default {
     adjustSuccess: 'Reordered successfully',
     adjustFailed: 'Failed to reorder',
     batchDeleteSuccess: 'Batch deleted successfully',
+    batchDeleteConfirm: 'Delete the selected {count} organizations? This action cannot be undone.',
     deleteFailed: 'Failed to delete',
     loadDetailsFailed: 'Failed to load details',
     loadFailed: 'Failed to load',
@@ -234,6 +237,7 @@ export default {
     removeFailedAttachments: 'Some attachments failed to parse, please remove or re-upload before asking',
     attachmentsNotReady: 'Attachments are not ready, please wait for parsing to complete',
     chatCleared: 'Chat history cleared',
+    clearConfirm: 'This will clear all messages in the current conversation and cannot be undone. Clear now?',
     clearFailed: 'Clear failed',
     unbindSuccess: 'Document binding removed, now in full knowledge base Q&A mode',
     unbindFailed: 'Failed to remove binding',
@@ -702,6 +706,12 @@ export default {
     markAllRead: 'Mark all read',
   },
 
+  agent: {
+    clearConfirmTitle: 'Clear current session messages',
+    clearConfirm: 'This only clears the messages displayed for the current session. Other sessions are not affected. Clear now?',
+    deleteSessionConfirmTitle: 'Delete current session',
+    deleteSessionConfirm: 'Session "{title}" and its chat history will be deleted. This action cannot be undone. Delete now?',
+  },
   agentReplay: {
     entry: 'View Replay',
     title: 'Run Replay',
