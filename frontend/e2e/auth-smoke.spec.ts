@@ -100,7 +100,7 @@ test('D. 登录成功：提交凭据 → 跳转 /dashboard → token 落盘', as
 
   await page.goto('/login')
   await page.locator('.n-input input[type="text"]').first().fill('guest')
-  await page.locator('.n-input input[type="password"]').fill('123456')
+  await page.locator('.n-input input[type="password"]').fill('12345678')
   await page.locator('button[type="submit"]').click()
 
   await expect(page).toHaveURL(/\/dashboard$/)
@@ -109,7 +109,7 @@ test('D. 登录成功：提交凭据 → 跳转 /dashboard → token 落盘', as
   const loginRequest = requests.find((request) => loginEndpointHit(request))
   expect(loginRequest, '应发出登录请求').toBeDefined()
   expect(loginRequest?.method()).toBe('POST')
-  expect(loginRequest?.postDataJSON()).toEqual({ username: 'guest', password: '123456' })
+  expect(loginRequest?.postDataJSON()).toEqual({ username: 'guest', password: '12345678' })
 
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem('docmind_token')))

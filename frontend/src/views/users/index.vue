@@ -291,12 +291,12 @@ const formRules = computed<FormRules>(() => ({
   email: [{ required: true, type: 'email', message: t('validation.email'), trigger: 'blur' }],
   nickname: [{ required: true, message: t('validation.required'), trigger: 'blur' }],
   ...(editingUser.value ? {} : {
-    password: [{ required: true, min: 6, message: t('validation.passwordLength'), trigger: 'blur' }]
+    password: [{ required: true, min: 8, message: t('validation.passwordLength'), trigger: 'blur' }]
   })
 }))
 
 const resetPasswordRules = computed<FormRules>(() => ({
-  newPassword: [{ required: true, min: 6, message: t('validation.passwordLength'), trigger: 'blur' }],
+  newPassword: [{ required: true, min: 8, message: t('validation.passwordLength'), trigger: 'blur' }],
   confirmPassword: [
     { required: true, message: t('validation.required'), trigger: 'blur' },
     {

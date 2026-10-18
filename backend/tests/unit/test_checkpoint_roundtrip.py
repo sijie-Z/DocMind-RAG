@@ -35,6 +35,7 @@ def _rich_ctx() -> ExecutionContext:
     ctx.goal = "目标"
     ctx.plan_summary = "3 个步骤"
     ctx.current_step_id = "s2"
+    ctx.document_context = "## 用户显式引用的知识库文档\n### [1] 预算报告\nQ3 要点"
     ctx.total_tokens = 987
     ctx.progress = 0.66
     ctx.duration_ms = 1234.5
@@ -62,6 +63,9 @@ def test_execution_context_checkpoint_roundtrip_preserves_everything():
     assert restored.goal == "目标"
     assert restored.plan_summary == "3 个步骤"
     assert restored.current_step_id == "s2"
+    assert restored.document_context == ctx.document_context, (
+        "@引用摘要段（T14）必须随快照往返（resume 后 planner/executor 不丢引用）"
+    )
     assert restored.total_tokens == 987
     assert restored.artifacts == ctx.artifacts, "artifacts（迭代预算/质检/审查）必须随快照往返"
     assert [s.step_id for s in restored.completed_steps] == ["s1", "s2"]
@@ -82,7 +86,9 @@ def test_to_dict_contract_keyset_is_frozen():
     ctx = ExecutionContext(query="q")
     assert set(ctx.to_dict().keys()) == _TO_DICT_KEYS
     extra = set(ctx.to_checkpoint_dict().keys()) - _TO_DICT_KEYS
-    assert extra == {"v", "current_step_id", "artifacts"}, "checkpoint 只允许在 to_dict 之上做加法"
+    assert extra == {"v", "current_step_id", "artifacts", "document_context"}, (
+        "checkpoint 只允许在 to_dict 之上做加法"
+    )
 
 
 def test_plan_checkpoint_roundtrip_preserves_results_and_retry():

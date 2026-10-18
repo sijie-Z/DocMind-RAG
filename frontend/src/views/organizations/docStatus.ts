@@ -8,19 +8,26 @@
  * （知识库列表端点会改写为 'completed'，见 knowledge.py:131-139）。
  * A_sweep 实锤：tag 直出英文 'indexed'，且 `status === 'completed'` 判色落
  * warning(黄) —— 文案与色档双漂移。
+ *
+ * T13：状态文案不再硬编码中文——复用知识库侧既有词条 knowledge.docStatus.*
+ * （经全局 i18n 实例解析，与 knowledge/docDisplay.ts 同一词表），en/ja/fr
+ * 界面不再回落中文。
  */
+import i18n from '@/locales'
 
 export type OrgDocStatusType = 'success' | 'warning' | 'error' | 'info' | 'default'
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: '等待处理',
-  uploaded: '已上传',
-  parsing: '解析中',
-  parsed: '已解析',
-  indexed: '已索引',
-  completed: '已索引', // 与知识库侧词表统一（completed==indexed 同一语义；K1 双词表修复）
-  failed: '失败',
+const STATUS_KEYS: Record<string, string> = {
+  pending: 'knowledge.docStatus.pending',
+  uploaded: 'knowledge.docStatus.uploaded',
+  parsing: 'knowledge.docStatus.parsing',
+  parsed: 'knowledge.docStatus.parsed',
+  indexed: 'knowledge.docStatus.indexed',
+  completed: 'knowledge.docStatus.indexed', // 与知识库侧词表统一（completed==indexed 同一语义；K1 双词表修复）
+  failed: 'knowledge.docStatus.failed',
 }
+
+const UNKNOWN_STATUS_KEY = 'knowledge.docStatus.unknown'
 
 const STATUS_TYPES: Record<string, OrgDocStatusType> = {
   pending: 'info',
@@ -33,7 +40,7 @@ const STATUS_TYPES: Record<string, OrgDocStatusType> = {
 }
 
 export const orgDocStatusLabel = (status: string | null | undefined): string =>
-  (status && STATUS_LABELS[status]) || '未知'
+  i18n.global.t((status && STATUS_KEYS[status]) || UNKNOWN_STATUS_KEY)
 
 export const orgDocStatusType = (status: string | null | undefined): OrgDocStatusType =>
   (status && STATUS_TYPES[status]) || 'default'

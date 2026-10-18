@@ -23,6 +23,8 @@ interface ExtendedAxiosConfig extends InternalAxiosRequestConfig {
   ['X-Request-ID']?: string
   ['__request_start_time']?: number
   _retry?: boolean
+  /** 401 时跳过刷新/自动登出链（登出接口专用，避免互相递归） */
+  _skipAuthRefresh?: boolean
 }
 
 // 全局 toast 去重：同一内容 1.5s 内不重复弹出
@@ -225,6 +227,23 @@ async function doRefreshAccessToken(): Promise<string> {
   return accessToken
 }
 
+// 共享的单飞续期：路由守卫与 401 拦截器复用同一个进行中的刷新，
+// 并发触发（含刷新期间到达的多个守卫/请求）只发一次 /auth/refresh。
+let refreshPromise: Promise<string> | null = null
+
+/**
+ * 静默续期入口（供路由守卫等非请求链路复用）。
+ * 并发调用共享同一个 Promise；失败时向所有等待方抛出同一错误，结束后复位以便下次重试。
+ */
+export function silentRefreshAccessToken(): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = doRefreshAccessToken().finally(() => {
+      refreshPromise = null
+    })
+  }
+  return refreshPromise
+}
+
 // 响应拦截器
 request.interceptors.response.use(
   (response: AxiosResponse) => {
@@ -276,13 +295,20 @@ request.interceptors.response.use(
         case 401: {
           const isLoginRequest = originalRequest?.url?.includes?.('auth/login')
           const isRefreshRequest = originalRequest?.url?.includes?.('auth/refresh')
-          
+
+          // 登出等显式标记的请求：401 不得进入刷新/自动登出链，
+          // 否则「登出 → 401 → 刷新失败 → 自动登出 → 登出」无限递归。
+          if (originalRequest?._skipAuthRefresh) {
+            break
+          }
+
           if (!isLoginRequest && !isRefreshRequest && !originalRequest?._retry) {
             if (!isRefreshing) {
               isRefreshing = true
               originalRequest._retry = true
               try {
-                const newToken = await doRefreshAccessToken()
+                // 与路由守卫共用同一续期（单飞）：守卫与 401 同时触发也只发一次刷新
+                const newToken = await silentRefreshAccessToken()
                 request.defaults.headers.common['Authorization'] = `Bearer ${newToken}`
                 const userStore = useUserStore()
                 userStore.token = newToken
@@ -293,7 +319,8 @@ request.interceptors.response.use(
               } catch (refreshErr) {
                 rejectQueue(refreshErr)
                 const userStore = useUserStore()
-                userStore.logout()
+                // 跳转由本拦截器统一执行；store 只清态与吊销，避免异步跳转竞态
+                userStore.logout({ navigate: false })
                 if (router) router.push({ name: 'Login' })
                 return Promise.reject(refreshErr)
               } finally {
@@ -311,7 +338,7 @@ request.interceptors.response.use(
             errorMsg = '登录已过期或未登录，请重新登录'
             try {
               const userStore = useUserStore()
-              userStore.logout()
+              userStore.logout({ navigate: false })
               if (router) router.push({ name: 'Login' })
             } catch (_) { /* store/router 可能未就绪 */ }
           } else if (isLoginRequest && errorMsg === '请求失败') {

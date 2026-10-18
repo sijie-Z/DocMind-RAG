@@ -295,55 +295,60 @@ class AgentService:
                 query=query,
             )
 
-        # 引用文档（体验第四波 @引用）：解析为 planner 上下文段 + 诚实警告。
-        # 解析失败不阻塞聊天——引用是增强不是前提（fail-open 与 checkpoint 同）。
-        document_context: str | None = None
-        if referenced_document_ids:
-            try:
-                from app.dependencies import get_rag_pipeline
-
-                rag_pipeline = get_rag_pipeline()
-            except Exception as e:
-                logger.warning("引用文档摘要服务获取失败: %s", log_safe(e))
-                rag_pipeline = None
-            document_context, ref_warnings = await build_referenced_document_context(
-                referenced_document_ids,
-                query,
-                organization_id,
-                pipeline=rag_pipeline,
-            )
-            for w in ref_warnings:
-                warn_event = AgentEvent(type="warning", content=w)
-                if task_id:
-                    warn_event.task_id = task_id
-                yield warn_event
-
-        # Create the PER loop
-        agent = PERAgentLoop(
-            openai_client=self.client,
-            config=agent_config,
-            organization_id=organization_id,
-            user_id=user_id,
-        )
-        # HITL 取消：task 级取消旗接线（POST /tasks/{id}/cancel 置旗，run 在
-        # 步间/工具前检查点观察并收敛为 run_cancelled → CANCELLED）。
-        self._wire_cancel(agent, task_id)
-
-        # Emit available tool count in a metadata event
-        tools = agent._get_tools()
-        tool_count = len(tools) if tools else 0
-        meta_event = AgentEvent(
-            type="thinking",
-            content=f"可用工具: {tool_count} 个",
-            thinking_type="reasoning",
-        )
-        if task_id:
-            meta_event.task_id = task_id
-        yield meta_event
-
-        # Run the PER loop（task_id 接通 checkpoint：T1–T4 触发点全部生效；
-        # document_context：@引用文档摘要并入预规划上下文）
+        # T7（断流收敛盲窗）：try 从任务行创建后立即开启——覆盖 @引用解析
+        # （秒级 await）、引用 warning 与工具元信息两处 run 前 yield、以及
+        # agent.run 循环。修复前 try 从 run 才开启：断连/取消落在这些
+        # await / yield 上会直接逃逸（无任何 handler），任务行永停 RUNNING。
+        agent: PERAgentLoop | None = None
         try:
+            # 引用文档（体验第四波 @引用）：解析为 planner 上下文段 + 诚实警告。
+            # 解析失败不阻塞聊天——引用是增强不是前提（fail-open 与 checkpoint 同）。
+            document_context: str | None = None
+            if referenced_document_ids:
+                try:
+                    from app.dependencies import get_rag_pipeline
+
+                    rag_pipeline = get_rag_pipeline()
+                except Exception as e:
+                    logger.warning("引用文档摘要服务获取失败: %s", log_safe(e))
+                    rag_pipeline = None
+                document_context, ref_warnings = await build_referenced_document_context(
+                    referenced_document_ids,
+                    query,
+                    organization_id,
+                    pipeline=rag_pipeline,
+                )
+                for w in ref_warnings:
+                    warn_event = AgentEvent(type="warning", content=w)
+                    if task_id:
+                        warn_event.task_id = task_id
+                    yield warn_event
+
+            # Create the PER loop
+            agent = PERAgentLoop(
+                openai_client=self.client,
+                config=agent_config,
+                organization_id=organization_id,
+                user_id=user_id,
+            )
+            # HITL 取消：task 级取消旗接线（POST /tasks/{id}/cancel 置旗，run 在
+            # 步间/工具前检查点观察并收敛为 run_cancelled → CANCELLED）。
+            self._wire_cancel(agent, task_id)
+
+            # Emit available tool count in a metadata event
+            tools = agent._get_tools()
+            tool_count = len(tools) if tools else 0
+            meta_event = AgentEvent(
+                type="thinking",
+                content=f"可用工具: {tool_count} 个",
+                thinking_type="reasoning",
+            )
+            if task_id:
+                meta_event.task_id = task_id
+            yield meta_event
+
+            # Run the PER loop（task_id 接通 checkpoint：T1–T4 触发点全部生效；
+            # document_context：@引用文档摘要并入预规划上下文）
             async for event in agent.run(
                 query, history=history, task_id=task_id, session_id=session_id,
                 document_context=document_context,
@@ -355,6 +360,9 @@ class AgentService:
             # 断流（客户端 abort / 生成器被关闭）：尽力落一次快照 + 收敛为
             # FAILED（可恢复的中断态）——修前 status 永停 RUNNING，产品面
             # 无续跑入口，实机表现为"进行中、无回放"（第四波修复）。
+            # T7：pre-run 段（@引用解析 await / warning 与 meta yield）同样
+            # 纳入此语义——此时 agent 可能尚未构造：快照无内容可落，
+            # 状态收敛照常执行（任务行不得悬挂）。
             await self._checkpoint_disconnect(task_id, agent)
             raise
         except asyncio.CancelledError:
@@ -439,6 +447,7 @@ class AgentService:
         *,
         config: AgentConfig | None = None,
         claim: bool = True,
+        document_context: str | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """从 checkpoint 恢复一个未终态任务（issue #201 最小版）。
 
@@ -451,6 +460,10 @@ class AgentService:
 
         claim=False：调用方已先走 prepare_resume（端点预检拿 HTTP 状态码）；
         这里只补读快照，不再重复认领。
+
+        document_context（T14）：@ 引用文档摘要段。显式入参优先；未显式传入时
+        从快照 ctx 取回（断流前那次 run 的引用上下文），透传给 agent.run——
+        恢复后的 planner / executor 与断流前看到同一份引用内容。
         """
         if not self.client:
             yield AgentEvent(type="error", content="LLM 未配置，请检查 DEEPSEEK_API_KEY 环境变量。")
@@ -465,6 +478,11 @@ class AgentService:
             query = (payload.get("ctx") or {}).get("query") or task.query
             agent_config = AgentConfig.from_dict(payload.get("config") or {})
             session_id = payload.get("session_id") or None
+            if document_context is None:
+                snapshot_document_context = (payload.get("ctx") or {}).get("document_context")
+                # 值级闸门（与 loop 读侧同口径）：非字符串绝不透传。
+                if isinstance(snapshot_document_context, str) and snapshot_document_context:
+                    document_context = snapshot_document_context
         else:
             # 快照缺失/损坏：降级为从规划阶段重跑（仍幂等）；规则取调用方传入的配置。
             logger.warning("任务 %s 无可用快照，resume 从规划阶段重新开始", log_safe(task_id))
@@ -486,6 +504,7 @@ class AgentService:
         try:
             async for event in agent.run(
                 query, task_id=task_id, resume=payload, session_id=session_id,
+                document_context=document_context,
             ):
                 event.task_id = task_id
                 yield event
@@ -527,12 +546,16 @@ class AgentService:
     async def _checkpoint_disconnect(
         self,
         task_id: str | None,
-        agent: PERAgentLoop,
+        agent: PERAgentLoop | None,
         *,
         release_lease: bool = False,
     ) -> None:
         """断流兜底（best-effort）：存一份"到此为止"的快照 + 把状态从"正在跑"系
         收敛为 FAILED（可恢复的中断态）——不动等待审批类挂起态。
+
+        agent 为 None（T7：断流落在 run 之前的 @引用解析 await / warning
+        yield 上，loop 尚未构造）：没有活状态可落快照，仅执行状态收敛——
+        任务行已存在，绝不能因"还没有 agent"而永停 RUNNING。
 
         快照语义 = 与"进程被硬杀"一致（resume 从最近成功的 checkpoint 继续）。
         状态收敛（第四波实机缺陷修复，见 checkpoint.converge_disconnected）：
@@ -569,7 +592,9 @@ class AgentService:
             （不可拆——拆分会让"取消落点"决定收敛/归还是否开始，见方法注释）。"""
             try:
                 await checkpoint.save_from_live(
-                    task_id=task_id, live=agent.checkpoint_live, trigger="on_disconnect",
+                    task_id=task_id,
+                    live=agent.checkpoint_live if agent is not None else None,
+                    trigger="on_disconnect",
                 )
             except Exception as e:
                 logger.warning(
@@ -608,9 +633,12 @@ class AgentService:
             )
 
     async def _checkpoint_error(
-        self, task_id: str | None, agent: PERAgentLoop, exc: BaseException,
+        self, task_id: str | None, agent: PERAgentLoop | None, exc: BaseException,
     ) -> None:
         """run 内异常：快照 + 标记 FAILED（写 last_error）；从不吞掉原异常。
+
+        agent 为 None（T7：异常发生在 loop 构造之前的 pre-run 段）：没有活
+        状态可落快照，仍按可恢复失败态收尾（同断流语义）。
 
         终态落库成功才发通知（best-effort，旁路绝不影响异常传播与任务状态）。
         """
@@ -618,7 +646,9 @@ class AgentService:
             return
         try:
             await asyncio.shield(checkpoint.save_from_live(
-                task_id=task_id, live=agent.checkpoint_live, trigger="on_error",
+                task_id=task_id,
+                live=agent.checkpoint_live if agent is not None else None,
+                trigger="on_error",
             ))
         except Exception as e:
             logger.warning("checkpoint on_error save failed (task=%s): %s", log_safe(task_id), log_safe(e))

@@ -10,6 +10,7 @@
  * 变异点：删掉 'indexed' 键（还原漂移）→ 第 1 条用例精确红。
  */
 import { describe, it, expect } from 'vitest'
+import i18n from '@/locales'
 import { orgDocStatusLabel, orgDocStatusType } from '../docStatus'
 
 describe('orgDocStatus · 与 organizations 端点裸枚举对齐（B20）', () => {
@@ -48,5 +49,24 @@ describe('orgDocStatus · 与 organizations 端点裸枚举对齐（B20）', () 
     expect(orgDocStatusLabel(undefined)).toBe('未知')
     expect(orgDocStatusType(null)).toBe('default')
     expect(orgDocStatusType('whatever')).toBe('default')
+  })
+})
+
+describe('T13 · 状态词条化（复用 knowledge.docStatus.*）', () => {
+  it('en/ja/fr 相位下返回对应译文（改动前恒为硬编码中文）', () => {
+    const prev = i18n.global.locale.value
+    try {
+      i18n.global.locale.value = 'en'
+      expect(orgDocStatusLabel('indexed')).toBe('Indexed')
+      expect(orgDocStatusLabel('pending')).toBe('Pending')
+      expect(orgDocStatusLabel('failed')).toBe('Failed')
+      expect(orgDocStatusLabel(null)).toBe('Unknown')
+      i18n.global.locale.value = 'ja'
+      expect(orgDocStatusLabel('indexed')).toBe('インデックス済み')
+      i18n.global.locale.value = 'fr'
+      expect(orgDocStatusLabel('indexed')).toBe('Indexé')
+    } finally {
+      i18n.global.locale.value = prev
+    }
   })
 })
