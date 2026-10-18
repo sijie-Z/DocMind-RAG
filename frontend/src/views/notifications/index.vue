@@ -20,16 +20,17 @@
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <n-card class="rounded-2xl" size="small">
           <div class="text-sm text-gray-500">总通知</div>
-          <div class="text-2xl font-bold text-gray-900 dark:text-white">{{ summary.total }}</div>
+          <div class="text-2xl font-bold text-gray-900 dark:text-white">{{ summaryError ? '—' : summary.total }}</div>
         </n-card>
         <n-card class="rounded-2xl" size="small">
           <div class="text-sm text-gray-500">未读</div>
-          <div class="text-2xl font-bold text-orange-500">{{ summary.unread_count }}</div>
+          <div class="text-2xl font-bold text-orange-500">{{ summaryError ? '—' : summary.unread_count }}</div>
         </n-card>
         <n-card class="rounded-2xl" size="small">
           <div class="text-sm text-gray-500">类型分布</div>
           <div class="text-sm text-gray-700 dark:text-gray-300 mt-2">
-            <span v-for="(val, key) in summary.by_type" :key="key" class="inline-block mr-3">
+            <span v-if="summaryError">—</span>
+            <span v-for="(val, key) in summary.by_type" v-else :key="key" class="inline-block mr-3">
               {{ key }}: {{ val }}
             </span>
           </div>
@@ -51,18 +52,18 @@
 
           <!-- Error state -->
           <div v-if="loadError" class="py-16 text-center">
-            <n-result status="error" title="加载失败" :description="loadErrorMsg">
+            <n-result status="error" :title="t('notifications.loadFailed')" :description="loadErrorMsg">
               <template #footer>
-                <n-button type="primary" @click="handleRefresh">重试</n-button>
+                <n-button type="primary" @click="handleRefresh">{{ t('common.retry') }}</n-button>
               </template>
             </n-result>
           </div>
 
           <!-- Empty state -->
           <div v-else-if="!loadError && items.length === 0 && !loading" class="py-16 text-center">
-            <n-empty description="暂无通知">
+            <n-empty :description="t('notifications.empty')">
               <template #extra>
-                <n-button type="primary" ghost @click="handleRefresh">刷新</n-button>
+                <n-button type="primary" ghost @click="handleRefresh">{{ t('common.refresh') }}</n-button>
               </template>
             </n-empty>
           </div>
@@ -90,12 +91,15 @@ import { NButton, } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { formatDate } from '@/utils/format'
+import { useDedupedMessage } from '@/utils/message'
+import { getErrorMessage } from '@/utils/apiError'
 import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
 import { batchDeleteNotifications, deleteNotification, getNotificationSummary, getNotifications, markAllAsRead, markAsRead, type Notification, type NotificationSummaryResponse } from '@/api/notification'
 import { notificationSocket, type RealtimeNotificationPayload } from '@/utils/notificationSocket'
 
 const router = useRouter()
 const { t } = useI18n()
+const message = useDedupedMessage()
 const latestRealtimeId = ref<number | null>(null)
 
 const summary = reactive<NotificationSummaryResponse>({
@@ -109,6 +113,7 @@ const selectedIds = ref<number[]>([])
 const loading = ref(false)
 const loadError = ref(false)
 const loadErrorMsg = ref('')
+const summaryError = ref(false)
 const recentlyReadIds = ref<number[]>([])
 
 const filters = reactive({
@@ -204,11 +209,18 @@ const columns = [
 ]
 
 const fetchSummary = async () => {
-  const res = await getNotificationSummary()
-  if (res.data) {
-    summary.total = res.data.total
-    summary.unread_count = res.data.unread_count
-    summary.by_type = res.data.by_type
+  try {
+    // E14/D1：页面自呈现错误（统计未知用占位符），请求静默
+    const res = await getNotificationSummary({ silent: true })
+    if (res.data) {
+      summary.total = res.data.total
+      summary.unread_count = res.data.unread_count
+      summary.by_type = res.data.by_type
+      summaryError.value = false
+    }
+  } catch {
+    // 汇总失败不阻塞列表；统计以占位符如实表示未知
+    summaryError.value = true
   }
 }
 
@@ -221,15 +233,20 @@ const fetchList = async () => {
       unread_only: filters.unread_only,
       type: filters.type,
       q: filters.q
-    })
+    }, { silent: true })
     if (res.data) {
       items.value = res.data.items
       pagination.itemCount = res.data.total
       loadError.value = false
+      loadErrorMsg.value = ''
     }
   } catch (error: unknown) {
+    // E14/D2：搜索/加载失败清空旧结果，展示错误态与重试
     loadError.value = true
-    loadErrorMsg.value = error instanceof Error ? error.message : '加载通知列表失败'
+    loadErrorMsg.value = getErrorMessage(error, t('notifications.loadFailed'))
+    items.value = []
+    pagination.itemCount = 0
+    selectedIds.value = []
   } finally {
     loading.value = false
   }
@@ -282,18 +299,28 @@ const handleMarkAllRead = async () => {
 
 const handleDelete = async (row: Notification) => {
   try {
-    await deleteNotification(row.id)
+    await deleteNotification(row.id, { silent: true })
+    selectedIds.value = selectedIds.value.filter((id) => id !== row.id)
+    message.success(t('notifications.deleteSuccess'))
     await handleRefresh()
-  } catch (error) {
-    // Failed to delete notification
+  } catch (error: unknown) {
+    // E14/D3：失败必须可见且状态如实——不删行、不刷新，单一 toast 呈现后端语义
+    message.error(t('notifications.deleteFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
   }
 }
 
 const handleBatchDelete = async () => {
   if (!selectedIds.value.length) return
-  await batchDeleteNotifications(selectedIds.value)
-  selectedIds.value = []
-  await handleRefresh()
+  const ids = [...selectedIds.value]
+  try {
+    await batchDeleteNotifications(ids, { silent: true })
+    selectedIds.value = []
+    message.success(t('notifications.deleteSuccess'))
+    await handleRefresh()
+  } catch (error: unknown) {
+    // 批删失败：保留选中状态（不得假装已删），失败可见且只提示一次
+    message.error(t('notifications.batchDeleteFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
+  }
 }
 
 const handleRealtime = async (payload: RealtimeNotificationPayload) => {

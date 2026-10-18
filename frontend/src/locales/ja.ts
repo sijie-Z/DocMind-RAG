@@ -19,6 +19,8 @@ export default {
     warning: 'お知らせ',
     copyFailed: 'コピーに失敗しました',
     actions: '操作',
+    retry: '再試行',
+    tryAgain: 'しばらくしてからもう一度お試しください',
     noDescription: '説明なし',
   },
   profile: {
@@ -316,6 +318,11 @@ export default {
     uploadFirst: '最初のファイルをアップロード',
     empty: 'ドキュメントがありません',
     emptyDesc: 'ナレッジベースは空です',
+    loadFailed: 'ナレッジベースの読み込みに失敗しました',
+    loadFailedDesc: 'しばらくしてからもう一度お試しください。ネットワーク接続もご確認ください',
+    searchEmptyTitle: '一致するドキュメントがありません',
+    searchEmptyDesc: '「{query}」に一致するドキュメントはありません。別のキーワードをお試しください',
+    clearSearch: '検索をクリア',
     uploadSuccess: 'アップロードに成功しました',
     uploadFailed: 'アップロードに失敗しました',
     confirmUpload: 'アップロードを開始',
@@ -360,6 +367,9 @@ export default {
     addTemplate: 'テンプレート追加',
     editTemplate: 'テンプレート編集',
     empty: 'プロンプトテンプレートがありません',
+    searchEmpty: '一致するテンプレートがありません',
+    searchEmptyDesc: '現在の検索・カテゴリ条件に一致するテンプレートがありません。条件を調整してください',
+    clearFilters: 'フィルターをクリア',
     seed: '初期テンプレートを作成',
     system: 'システム',
     custom: 'カスタム',
@@ -391,6 +401,8 @@ export default {
       saveFailed: '保存に失敗しました',
       deleteSuccess: '削除しました',
       deleteFailed: '削除に失敗しました',
+      loadVersionsFailed: 'バージョン履歴の読み込みに失敗しました',
+      restoreFailed: 'ロールバックに失敗しました',
       seedSuccess: '初期化に成功しました',
       seedFailed: '初期化に失敗しました'
     }
@@ -646,6 +658,21 @@ export default {
   },
   workflow: {
     description: '複雑なAIタスクを段階的なパイプラインに分解し、統一されたメトリクスと状態管理で実行品質を監視します。',
+    loadFailed: 'ワークフローの読み込みに失敗しました',
+    loadFailedDesc: 'しばらくしてからもう一度お試しください。ネットワーク接続もご確認ください',
+    empty: 'ワークフローがありません',
+    emptyDesc: 'ワークフローを作成して、多段階の AI タスクをビジュアルパイプラインに編成しましょう',
+    createFirst: '最初のワークフローを作成',
+    searchEmpty: '一致するワークフローがありません',
+    searchEmptyDesc: '「{query}」に一致するワークフローはありません。別のキーワードをお試しください',
+    clearSearch: '検索をクリア',
+    deleteSuccess: '削除しました',
+    deleteFailed: '削除に失敗しました',
+    duplicateSuccess: '複製しました',
+    duplicateFailed: '複製に失敗しました',
+    confirmDeleteTitle: '削除の確認',
+    confirmDeleteContent: '削除すると復元できません。このワークフローを削除しますか？',
+    confirmDeletePositive: '削除',
     editor: {
       clearConfirmTitle: 'キャンバスをクリア',
       clearConfirmContent: 'クリア後、自動保存が {n} 秒以内に空のキャンバスを書き戻し、保存済みのバージョンを上書きします。キャンバスをクリアしますか？',
@@ -671,6 +698,11 @@ export default {
   },
   notifications: {
     markAllRead: 'すべて既読',
+    loadFailed: '通知の読み込みに失敗しました',
+    empty: '通知はありません',
+    deleteSuccess: '削除しました',
+    deleteFailed: '削除に失敗しました',
+    batchDeleteFailed: '一括削除に失敗しました',
   },
 
   agent: {

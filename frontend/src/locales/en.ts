@@ -22,6 +22,8 @@ export default {
     warning: 'Notice',
     back: 'Back',
     actions: 'Actions',
+    retry: 'Retry',
+    tryAgain: 'Please try again later',
     noDescription: 'No description',
   },
   profile: {
@@ -350,6 +352,11 @@ export default {
     uploadFirst: 'Upload your first file',
     empty: 'No knowledge files',
     emptyDesc: 'Knowledge base is empty',
+    loadFailed: 'Failed to load the knowledge base',
+    loadFailedDesc: 'Please try again later or check your network connection',
+    searchEmptyTitle: 'No matching documents',
+    searchEmptyDesc: 'No documents match "{query}". Try another keyword.',
+    clearSearch: 'Clear search',
     uploadSuccess: 'Upload successful',
     uploadFailed: 'Upload failed',
     confirmUpload: 'Start upload',
@@ -411,6 +418,9 @@ export default {
     create: 'Create Template',
     editTemplate: 'Edit Template',
     empty: 'No prompt templates',
+    searchEmpty: 'No matching templates',
+    searchEmptyDesc: 'No templates match the current search or category filter. Try adjusting the criteria.',
+    clearFilters: 'Clear filters',
     seed: 'Initialize Defaults',
     system: 'System',
     custom: 'Custom',
@@ -442,6 +452,8 @@ export default {
       saveFailed: 'Failed to save',
       deleteSuccess: 'Deleted successfully',
       deleteFailed: 'Failed to delete',
+      loadVersionsFailed: 'Failed to load version history',
+      restoreFailed: 'Failed to restore version',
       seedSuccess: 'Initialized successfully',
       seedFailed: 'Initialization failed'
     }
@@ -719,6 +731,21 @@ export default {
   },
   workflow: {
     description: 'Break complex AI tasks into staged pipelines with unified metrics and state management.',
+    loadFailed: 'Failed to load workflows',
+    loadFailedDesc: 'Please try again later or check your network connection',
+    empty: 'No workflows yet',
+    emptyDesc: 'Create a workflow to orchestrate multi-step AI tasks as a visual pipeline',
+    createFirst: 'Create your first workflow',
+    searchEmpty: 'No matching workflows',
+    searchEmptyDesc: 'No workflows match "{query}". Try another keyword.',
+    clearSearch: 'Clear search',
+    deleteSuccess: 'Deleted',
+    deleteFailed: 'Delete failed',
+    duplicateSuccess: 'Duplicated',
+    duplicateFailed: 'Duplicate failed',
+    confirmDeleteTitle: 'Confirm deletion',
+    confirmDeleteContent: 'This cannot be undone. Delete this workflow?',
+    confirmDeletePositive: 'Delete',
     editor: {
       clearConfirmTitle: 'Clear canvas',
       clearConfirmContent: 'After clearing, auto-save will write the empty canvas back within {n} seconds and overwrite the saved version. Clear the canvas?',
@@ -744,6 +771,11 @@ export default {
   },
   notifications: {
     markAllRead: 'Mark all read',
+    loadFailed: 'Failed to load notifications',
+    empty: 'No notifications',
+    deleteSuccess: 'Deleted',
+    deleteFailed: 'Delete failed',
+    batchDeleteFailed: 'Batch delete failed',
   },
 
   agent: {

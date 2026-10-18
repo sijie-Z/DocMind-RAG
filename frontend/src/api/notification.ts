@@ -26,22 +26,34 @@ export interface NotificationSummaryResponse {
   by_type: Record<string, number>
 }
 
+/**
+ * E14/D1：通知页自理错误的静默请求选项（页面唯一 toast / 页内错误态）。
+ * 未要求静默的调用方（布局铃铛、通知 store）保持既有全局拦截器提示。
+ */
+export interface SilentRequestOptions {
+  silent?: boolean
+}
+
+const SILENT_HEADERS = { headers: { 'X-Silent-Error': '1' } } as const
+
 export const getNotifications = async (params?: {
   skip?: number
   limit?: number
   unread_only?: boolean
   type?: string
   q?: string
-}): Promise<AxiosResponse<NotificationListResponse>> => {
-  return request.get('/notifications/', { params })
+}, options?: SilentRequestOptions): Promise<AxiosResponse<NotificationListResponse>> => {
+  return request.get('/notifications/', { params, ...(options?.silent ? SILENT_HEADERS : {}) })
 }
 
 export const getUnreadCount = async (): Promise<AxiosResponse<{ count: number }>> => {
   return request.get('/notifications/unread-count')
 }
 
-export const getNotificationSummary = async (): Promise<AxiosResponse<NotificationSummaryResponse>> => {
-  return request.get('/notifications/summary')
+export const getNotificationSummary = async (
+  options?: SilentRequestOptions
+): Promise<AxiosResponse<NotificationSummaryResponse>> => {
+  return request.get('/notifications/summary', options?.silent ? SILENT_HEADERS : undefined)
 }
 
 export const markAsRead = async (id: number): Promise<AxiosResponse<void>> => {
@@ -52,10 +64,19 @@ export const markAllAsRead = async (): Promise<AxiosResponse<void>> => {
   return request.put('/notifications/read-all')
 }
 
-export const deleteNotification = async (id: number): Promise<AxiosResponse<void>> => {
-  return request.delete(`/notifications/${id}`)
+export const deleteNotification = async (
+  id: number,
+  options?: SilentRequestOptions
+): Promise<AxiosResponse<void>> => {
+  return request.delete(`/notifications/${id}`, options?.silent ? SILENT_HEADERS : undefined)
 }
 
-export const batchDeleteNotifications = async (ids: number[]): Promise<AxiosResponse<void>> => {
-  return request.delete('/notifications/', { data: { ids } })
+export const batchDeleteNotifications = async (
+  ids: number[],
+  options?: SilentRequestOptions
+): Promise<AxiosResponse<void>> => {
+  return request.delete('/notifications/', {
+    data: { ids },
+    ...(options?.silent ? SILENT_HEADERS : {}),
+  })
 }
