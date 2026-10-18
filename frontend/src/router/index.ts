@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import type { AxiosError } from 'axios'
-import Layout from '@/layouts/index.vue'
 import { useUserStore } from '@/stores/user'
 import { getToken, isTokenExpired, removeToken } from '@/utils/auth'
 import { silentRefreshAccessToken } from '@/utils/request'
@@ -66,7 +65,10 @@ export const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    component: Layout,
+    // 首屏瘦身（E5）：Layout 改路由级懒加载——未登录首屏（/firsthome、/login）
+    // 不再为后台框架付费；登录后首次进入时拉取。守卫与进度条不受影响：
+    // 组件在导航确认（afterEach 触发）前解析，进度条覆盖其加载窗口。
+    component: () => import('@/layouts/index.vue'),
     redirect: '/firsthome',
     meta: {
       requiresAuth: true

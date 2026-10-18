@@ -148,7 +148,7 @@
                           <template #icon>
                             <n-icon size="10" class="mr-0.5"><DocumentTextOutline /></n-icon>
                           </template>
-                          [{{ idx + 1 }}] {{ source.filename || source.title || t('chat.sourceDoc') }}
+                          [{{ Number(idx) + 1 }}] {{ source.filename || source.title || t('chat.sourceDoc') }}
                         </n-tag>
                       </template>
                       <div class="max-w-sm p-2">
@@ -246,6 +246,10 @@
 import { useI18n } from 'vue-i18n'
 import { SparklesOutline, ArrowForwardOutline, ArrowDownOutline, ThumbsUpOutline, ThumbsDownOutline, CopyOutline, DocumentTextOutline, RefreshOutline } from '@vicons/ionicons5'
 import { NPopover } from 'naive-ui'
+// 首屏瘦身（E5）：虚拟滚动只在聊天页使用——从全局注册（main.ts）改为本组件局部引入，
+// 模块与样式随 Chat 路由 chunk 按需加载，不再计入首屏。
+import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import Markdown from '@/components/common/Markdown.vue'
 import PlanTree from '@/components/agent/PlanTree.vue'
 import ReflectionBanner from '@/components/agent/ReflectionBanner.vue'
