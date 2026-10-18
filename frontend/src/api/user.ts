@@ -88,6 +88,36 @@ export const getUserProfile = async (): Promise<AxiosResponse<UserProfileRespons
   return request.get('/users/me')
 }
 
+/** 当前用户所属组织（成员关系 user_organization + 主组织兜底；不含未加入的组织）。 */
+export interface MyOrganization {
+  id: number
+  name: string
+  description?: string | null
+  color?: string | null
+  is_private?: boolean
+}
+
+export interface MyOrganizationsResponse {
+  organizations: MyOrganization[]
+  current_organization_id: number | null
+}
+
+export const getMyOrganizations = async (): Promise<
+  AxiosResponse<ApiResponse<MyOrganizationsResponse>>
+> => {
+  return request.get('/users/me/organizations')
+}
+
+/**
+ * 切换当前组织：服务端先校验成员关系（非成员 403），成功后全站请求
+ * 的组织上下文（文档/会话列表过滤等）随新组织生效。
+ */
+export const switchOrganization = async (
+  organizationId: number,
+): Promise<AxiosResponse<ApiResponse<{ organization_id: number }>>> => {
+  return request.post(`/users/me/organizations/${organizationId}/switch`)
+}
+
 export const getAuditLogs = async (params?: {
   skip?: number
   limit?: number

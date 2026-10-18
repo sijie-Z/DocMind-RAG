@@ -28,26 +28,57 @@ export interface MenuItemDef {
 
 /** 侧边栏分组声明 */
 export interface MenuGroupDef {
-  /** 组标题 i18n 键（缺省时不渲染组标题、子项直接平铺——与当前菜单的无分组呈现一致） */
-  groupI18nKey?: string
+  /** 组标题 i18n 键（必填：侧栏按场景域分组，组标题始终渲染） */
+  groupI18nKey: string
   /** 仅管理员可见的分组 */
   adminOnly?: boolean
   items: MenuItemDef[]
 }
 
-/** 侧边栏菜单（顺序即渲染顺序） */
+/**
+ * 侧边栏菜单（顺序即渲染顺序）：六个场景域。
+ *
+ * 工作台 / 对话 / 知识库 / 自动化 / 提示词 面向所有登录用户；
+ * 管理域名下全部是管理端页面，adminOnly 由布局层按 userStore.isAdmin 过滤。
+ * 个人设置等账户级入口在用户下拉菜单（USER_MENU_ITEMS），不占侧栏场景域。
+ */
 export const SIDEBAR_MENU_GROUPS: MenuGroupDef[] = [
   {
+    groupI18nKey: 'menu.groupWorkspace',
     items: [
       { routeName: 'Dashboard', i18nKey: 'menu.home', icon: 'home' },
+    ],
+  },
+  {
+    groupI18nKey: 'menu.groupConversation',
+    items: [
       { routeName: 'Chat', i18nKey: 'menu.chat', icon: 'chat' },
       { routeName: 'Conversations', i18nKey: 'menu.conversations', icon: 'history' },
+    ],
+  },
+  {
+    groupI18nKey: 'menu.groupKnowledge',
+    items: [
       { routeName: 'Knowledge', i18nKey: 'menu.knowledge', icon: 'book' },
-      { routeName: 'Prompts', i18nKey: 'menu.prompts', icon: 'terminal' },
       { routeName: 'Search', i18nKey: 'menu.search', icon: 'search' },
     ],
   },
   {
+    groupI18nKey: 'menu.groupAutomation',
+    items: [
+      { routeName: 'Workflow', i18nKey: 'menu.workflow', icon: 'git-network' },
+      { routeName: 'Agent', i18nKey: 'menu.agent', icon: 'chip' },
+      { routeName: 'ScheduledTasks', i18nKey: 'menu.scheduledTasks', icon: 'calendar' },
+    ],
+  },
+  {
+    groupI18nKey: 'menu.groupPrompts',
+    items: [
+      { routeName: 'Prompts', i18nKey: 'menu.prompts', icon: 'terminal' },
+    ],
+  },
+  {
+    groupI18nKey: 'menu.groupManagement',
     adminOnly: true,
     items: [
       { routeName: 'Users', i18nKey: 'menu.users', icon: 'people' },
@@ -55,14 +86,6 @@ export const SIDEBAR_MENU_GROUPS: MenuGroupDef[] = [
       { routeName: 'AuditLogs', i18nKey: 'menu.auditLogs', icon: 'document-text' },
       { routeName: 'Monitoring', i18nKey: 'menu.monitoring', icon: 'pulse' },
       { routeName: 'McpServers', i18nKey: 'menu.mcpServers', icon: 'server' },
-    ],
-  },
-  {
-    items: [
-      { routeName: 'Profile', i18nKey: 'menu.personalSettings', icon: 'person' },
-      { routeName: 'Workflow', i18nKey: 'menu.workflow', icon: 'git-network' },
-      { routeName: 'Agent', i18nKey: 'menu.agent', icon: 'chip' },
-      { routeName: 'ScheduledTasks', i18nKey: 'menu.scheduledTasks', icon: 'calendar' },
     ],
   },
 ]

@@ -110,6 +110,11 @@ export default {
     initialPassword: '初期パスワード'
   },
   org: {
+    current: '現在の組織',
+    switchOrganization: '組織を切り替え',
+    switchSuccess: '組織を切り替えました',
+    switchFailed: '組織の切り替えに失敗しました',
+    noOrganizations: '組織がありません',
     title: '組織図',
     subtitle: 'システムの組織構造と階層を管理します',
     searchPlaceholder: '組織を検索...',
@@ -498,6 +503,12 @@ export default {
     },
   },
   menu: {
+    groupWorkspace: 'ワークスペース',
+    groupConversation: '会話',
+    groupKnowledge: 'ナレッジ',
+    groupAutomation: '自動化',
+    groupPrompts: 'プロンプト',
+    groupManagement: '管理',
     home: 'ホーム',
     chat: 'スマート対話',
     search: 'セマンティック検索',
