@@ -141,6 +141,7 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 import { useDedupedMessage } from '@/utils/message'
+import { useConfirmDangerousAction } from '@/utils/confirm'
 import { CloudUploadOutline, AlertCircleOutline, ArrowBackOutline } from '@vicons/ionicons5'
 import { getConversationMessages, clearConversationMessages } from '@/api/chat'
 import type { Conversation } from '@/api/conversation'
@@ -154,6 +155,7 @@ import { useChatAttachments, useChatMessages, useChatSessions, useChatConnection
 
 const message = useDedupedMessage()
 const { t } = useI18n()
+const confirmDangerousAction = useConfirmDangerousAction()
 const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
@@ -408,11 +410,17 @@ const loadConversation = async (id: string) => {
 
 const clearChat = async () => {
   if (!currentConversationId.value) return
+  const confirmed = await confirmDangerousAction(t('chat.clearChat'), t('chat.clearConfirm'))
+  if (!confirmed) return
   try {
     const res = await clearConversationMessages(String(currentConversationId.value))
     if (res.data?.success) {
       messages.value = []
       message.success(t('chat.chatCleared'))
+    } else {
+      // E2：success:false（如无权限）此前静默无任何反馈——如实提示服务端 message
+      const serverMsg = (res.data as { message?: string } | undefined)?.message
+      message.error(serverMsg || t('chat.clearFailed'))
     }
   } catch {
     message.error(t('chat.clearFailed'))

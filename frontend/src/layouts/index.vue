@@ -293,6 +293,7 @@ import type { MenuOption, DropdownOption } from 'naive-ui'
 import { NMenu, NIcon, NInput, NButton, NBadge, NPopover, NList, NListItem, NDropdown, NAvatar } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { SIDEBAR_MENU_GROUPS, USER_MENU_ITEMS, type MenuItemDef } from '@/config/menu'
+import { setLanguage } from '@/locales'
 import { LANGUAGES, isLanguageCode, type LanguageCode } from '@/utils/languages'
 import {
   ChatbubbleEllipsesOutline,
@@ -338,10 +339,15 @@ const languageOptions = LANGUAGES
 
 const currentLang = computed(() => locale.value)
 
-const switchLanguage = (lang: LanguageCode) => {
-  locale.value = lang
-  localStorage.setItem('language', lang)
-  userStore.updateSettings({ language: lang })
+// 语言包按需加载（E5）：先就绪词条包再切 locale——切换瞬间不裸键；
+// 动态 chunk 加载失败时保持当前语言（下次切换重试），不落半截状态。
+const switchLanguage = async (lang: LanguageCode) => {
+  try {
+    await setLanguage(lang)
+    userStore.updateSettings({ language: lang })
+  } catch {
+    // 词条包加载失败：保持当前语言
+  }
 }
 
 const userInfo = computed(() => userStore.userInfo)
@@ -453,11 +459,13 @@ onMounted(async () => {
       if (theme && ['light', 'dark', 'auto'].includes(theme)) {
         appStore.setTheme(theme as 'light' | 'dark' | 'auto')
       }
-      // Apply language from settings（守卫：非法语码不注入 locale）
+      // Apply language from settings（守卫：非法语码不注入 locale；
+      // E5：非默认语言包为动态 chunk，异步就绪后再切，失败保持当前语言）
       const lang = userStore.settings.language
       if (isLanguageCode(lang)) {
-        locale.value = lang
-        localStorage.setItem('language', lang)
+        void setLanguage(lang).catch(() => {
+          // 词条包加载失败：保持当前语言
+        })
       }
     })
   }
