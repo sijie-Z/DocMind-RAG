@@ -87,6 +87,11 @@ exports[`sidebar menu domains > menu tree snapshot 1`] = `
         "routeName": "Organizations",
       },
       {
+        "i18nKey": "menu.organizationSettings",
+        "icon": "settings",
+        "routeName": "OrganizationSettings",
+      },
+      {
         "i18nKey": "menu.auditLogs",
         "icon": "document-text",
         "routeName": "AuditLogs",

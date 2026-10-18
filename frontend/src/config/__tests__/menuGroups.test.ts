@@ -61,7 +61,7 @@ const expectedDomains = [
   },
   {
     key: 'menu.groupManagement',
-    routes: ['Users', 'Organizations', 'AuditLogs', 'Monitoring', 'McpServers'],
+    routes: ['Users', 'Organizations', 'OrganizationSettings', 'AuditLogs', 'Monitoring', 'McpServers'],
     adminOnly: true,
   },
 ]
