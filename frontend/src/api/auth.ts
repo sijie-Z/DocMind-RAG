@@ -77,17 +77,3 @@ export function getUserProfile() {
     '/users/me'
   )
 }
-
-// 刷新访问令牌（后端 /auth/refresh 使用 query 参数）
-export function refreshAccessToken(refreshToken: string) {
-  return request.post<ApiResponse<{
-    access_token: string
-    token_type: string
-    expires_in: number
-    refresh_token: string
-    user_info: UserInfo
-  }>>('/auth/refresh', null, {
-    params: { refresh_token: refreshToken },
-    headers: { 'X-Silent-Error': '1' }
-  })
-}
