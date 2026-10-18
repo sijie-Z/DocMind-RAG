@@ -1230,18 +1230,25 @@ async def get_prompt_template(
         return _missing_organization_result("get_prompt_template")
 
     async with AsyncSessionLocal() as session:
-        stmt = select(PromptTemplate).where(
-            PromptTemplate.name == name,
-            or_(
-                PromptTemplate.organization_id == organization_id,
-                and_(
-                    PromptTemplate.is_system.is_(True),
-                    PromptTemplate.organization_id.is_(None),
+        stmt = (
+            select(PromptTemplate)
+            .where(
+                PromptTemplate.name == name,
+                or_(
+                    PromptTemplate.organization_id == organization_id,
+                    and_(
+                        PromptTemplate.is_system.is_(True),
+                        PromptTemplate.organization_id.is_(None),
+                    ),
                 ),
-            ),
+            )
+            # 同名时优先本组织模板（系统模板作兜底）；limit(1) 防止历史重名触发
+            # MultipleResultsFound（复合唯一约束只保证同一组织内不重名）。
+            .order_by(PromptTemplate.organization_id.is_(None), PromptTemplate.id)
+            .limit(1)
         )
         result = await session.execute(stmt)
-        tpl = result.scalar_one_or_none()
+        tpl = result.scalars().first()
 
     if not tpl:
         return f"Prompt template '{name}' not found."

@@ -109,8 +109,15 @@ async def create_prompt(
 ):
     """创建新的提示词模板（落在调用者组织；客户端不得伪造系统模板）"""
     org_id = await require_organization(current_user, db)
+    # 重名检查按「可见范围」：本组织模板 + 系统内置模板；其他组织的同名模板不冲突。
     existing_prompt = await db.execute(
-        select(PromptTemplate).filter(PromptTemplate.name == prompt_in.name)
+        select(PromptTemplate).filter(
+            PromptTemplate.name == prompt_in.name,
+            or_(
+                PromptTemplate.organization_id == org_id,
+                PromptTemplate.organization_id.is_(None),
+            ),
+        )
     )
     if existing_prompt.scalars().first():
         raise ConflictError(detail="模板名称已存在")

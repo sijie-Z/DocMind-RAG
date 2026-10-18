@@ -13,6 +13,7 @@ CI 的 backend-tests 会在 SQLite 上跑 ``alembic upgrade head``；本用例�
 import sqlite3
 from pathlib import Path
 
+import pytest
 from alembic.config import Config
 
 from alembic import command
@@ -151,3 +152,48 @@ def test_tenant_org_migration_backfill_and_rollback(tmp_path, monkeypatch):
 
     command.upgrade(cfg, "head")
     assert _scalar(db_path, "SELECT organization_id FROM workflows WHERE id = 1") == 7
+
+
+def test_prompt_name_uniqueness_is_per_org_and_rolls_back(tmp_path, monkeypatch):
+    """A2 预审建议②：模板名唯一性按 (organization_id, name)。
+
+    - 升级后：跨组织同名允许；同组织重名被复合唯一约束拒绝；
+    - 降级后：复合约束随迁移删除，003 形态（无 name 唯一约束）恢复。
+    """
+    from app.core.config import settings
+
+    db_path = tmp_path / "mig_prompt_unique.db"
+    monkeypatch.setattr(
+        settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}"
+    )
+    cfg = _cfg()
+    command.upgrade(cfg, "head")
+
+    for org_id in (7, 8):
+        _exec(db_path, f"""
+            INSERT INTO organizations
+                (id, name, color, is_private, level, sort_order, owner_id, created_at, updated_at)
+            VALUES ({org_id}, 'Org{org_id}', '#000', 0, 1, 0, 1, datetime('now'), datetime('now'))
+        """)
+
+    def _insert_prompt(pid: int, org_id: int, name: str = "dup") -> None:
+        _exec(db_path, f"""
+            INSERT INTO prompt_templates
+                (id, name, content, is_active, is_system, category, version,
+                 organization_id, created_at)
+            VALUES ({pid}, '{name}', 'c', 1, 0, 'general', 1, {org_id}, datetime('now'))
+        """)
+
+    _insert_prompt(1, 7)
+    _insert_prompt(2, 8)  # 跨组织同名：允许
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_prompt(3, 7)  # 同组织重名：拒绝
+
+    command.downgrade(cfg, PREV_REV)
+    # 003 形态没有 name 唯一约束：同名可再次插入（organization_id 列已删除）
+    _exec(db_path, """
+        INSERT INTO prompt_templates
+            (id, name, content, is_active, is_system, category, version, created_at)
+        VALUES (4, 'dup', 'c', 1, 0, 'general', 1, datetime('now'))
+    """)
+    assert _scalar(db_path, "SELECT COUNT(*) FROM prompt_templates WHERE name = 'dup'") == 3
