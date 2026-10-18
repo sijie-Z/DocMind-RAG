@@ -400,17 +400,52 @@ class TTSNodeExecutor(NodeExecutor):
         }
 
 
+# A1（记忆节点 IDOR）：agentId 来自用户可控的节点配置，只允许作为租户内的
+# 普通作用域标签；冒号是服务端命名空间分隔符（org:user:agent），一律拒绝，
+# 防止配置值把节点指向他人记忆命名空间。
+_MEMORY_AGENT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
 class MemoryNodeExecutor(NodeExecutor):
     """记忆节点执行器 - 集成 Agent 记忆系统"""
+
+    # 安全（A1）：租户上下文由引擎从认证用户推导后注入（请求体/节点配置不可控）。
+    organization_id: int | None = None
+    user_id: int | None = None
 
     async def execute(self, state: WorkflowState) -> dict[str, Any]:
         from app.services.memory_service import get_memory_system
 
         memory_type = self.node.data.get("memoryType", "short_term")
         action = self.node.data.get("action", "store")
-        agent_id = self.node.data.get("agentId", "default")
+        raw_agent_id = self.node.data.get("agentId", "default")
 
-        memory_system = get_memory_system(agent_id)
+        # A1 安全修复（记忆节点 IDOR）：修前 agentId 被直接当作全局记忆字典 key，
+        # 节点配置成 "1:77:victim-agent" 这类完整命名空间即可跨 org/user 读写他人
+        # 长期记忆。现在：① agentId 必须是普通作用域标签（拒绝命名空间注入；
+        # 空值按 memory API 同口径回退为 "default"）；② 记忆系统只能经显式
+        # (org, user) 租户上下文获取，归属不匹配明确报错。
+        if raw_agent_id is None:
+            raw_agent_id = "default"
+        if not isinstance(raw_agent_id, str):
+            raise ValueError(
+                f"记忆节点 agentId 不合法（{raw_agent_id!r}）：必须是字符串，已拒绝执行"
+                "（防止跨租户记忆访问）"
+            )
+        agent_id = raw_agent_id.strip() or "default"
+        if not _MEMORY_AGENT_ID_PATTERN.fullmatch(agent_id):
+            raise ValueError(
+                f"记忆节点 agentId 不合法（{raw_agent_id!r}）：仅允许字母、数字、下划线、"
+                "连字符，长度 1-64；命名空间分隔符（冒号）仅供服务端拼装，已拒绝执行"
+                "（防止跨租户记忆访问）"
+            )
+        if self.organization_id is None or self.user_id is None:
+            raise ValueError(
+                "记忆节点缺少组织/用户上下文（organization_id/user_id 未由引擎注入），"
+                "已拒绝执行（防止跨租户记忆访问）"
+            )
+
+        memory_system = get_memory_system(self.organization_id, self.user_id, agent_id)
         current_memory = state.get("memory", {})
 
         if action == "store":
@@ -749,12 +784,15 @@ class RouterNodeExecutor(NodeExecutor):
 class WorkflowEngine:
     """工作流引擎 - 基于 LangGraph"""
 
-    def __init__(self, workflow_config: WorkflowConfig, llm_config: dict[str, Any] = None, organization_id: int | None = None):
+    def __init__(self, workflow_config: WorkflowConfig, llm_config: dict[str, Any] = None, organization_id: int | None = None, user_id: int | None = None):
         self.config = workflow_config
         self.llm_config = llm_config or {}
         # 安全修复（R0）：调用者所属组织，用于知识库检索的租户隔离。
         # 由 API 层从认证用户推导后注入，客户端请求体不可控。
         self.organization_id = organization_id
+        # 安全修复（A1）：调用者用户 ID，用于记忆节点的租户命名空间
+        # （org:user:agent），同样由 API 层从认证用户推导后注入。
+        self.user_id = user_id
         self.nodes = {node.id: node for node in workflow_config.nodes}
         self.edges = workflow_config.edges
         self.node_results: dict[str, NodeResult] = {}
@@ -802,6 +840,11 @@ class WorkflowEngine:
         # 安全修复（R0）：把引擎级组织范围注入知识库检索节点
         if isinstance(executor, KnowledgeSearchNodeExecutor):
             executor.organization_id = self.organization_id
+        # 安全修复（A1）：记忆节点的租户上下文由引擎注入，节点配置不可控，
+        # 命名空间由 memory_service 按 (org, user, agent) 拼装。
+        if isinstance(executor, MemoryNodeExecutor):
+            executor.organization_id = self.organization_id
+            executor.user_id = self.user_id
         return executor
 
     def build_graph(self) -> StateGraph:

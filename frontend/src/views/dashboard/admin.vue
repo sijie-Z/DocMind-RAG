@@ -470,8 +470,9 @@ const ES_HEALTH_I18N_KEY: Record<string, string> = {
 }
 
 const esHealthText = computed(() => {
-  if (!healthLoaded.value) return '—'
-  const raw = adminStats.value.esHealth
+  // E6 分块加载后健康值拆为独立 esHealth ref（healthState 管加载门控），
+  // 此处只负责值域 → 词条映射；空值由渲染侧与这里共同兜底为 '—'。
+  const raw = esHealth.value
   if (!raw) return '—'
   return t(ES_HEALTH_I18N_KEY[raw] ?? 'dashboard.esHealthUnknown')
 })
