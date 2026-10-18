@@ -48,6 +48,11 @@ export interface UserProfileResponse {
   created_at: string | null
   last_login_at: string | null
   preferences?: Record<string, unknown> | null
+  /**
+   * @deprecated 个人 API Key 已下线（B3）：Profile 入口已移除，后端
+   * POST/DELETE /users/api-key 仅保留一个 minor；本字段为服务端返回的掩码值，
+   * 前端不再消费，勿新增读取方。
+   */
   api_key?: string | null
 }
 

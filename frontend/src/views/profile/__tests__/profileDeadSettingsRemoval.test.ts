@@ -126,6 +126,8 @@ describe('B3 · 个人 API Key 入口移除', () => {
     await openTab(wrapper, '账号安全')
 
     const text = wrapper.text()
+    // 正向控制：安全设置 tab 确实已渲染（否则下面的 not.toContain 会空转通过）
+    expect(text, '安全设置 tab 未渲染，「修改密码」应在屏').toContain('修改密码')
     expect(text, '修前含「API Key 管理」区块').not.toContain('API Key 管理')
     expect(text, '修前含「生成 Key」按钮').not.toContain('生成 Key')
     expect(text, '修前含「重新生成」按钮').not.toContain('重新生成')
@@ -156,15 +158,18 @@ describe('B3 · 「信任此设备」假开关移除', () => {
     expect(text).not.toContain('已信任')
   })
 
-  it('组合式不再导出 trustedDevices/toggleTrust，且加载流程不再读写 localStorage.trustedDevices', async () => {
+  it('组合式不再导出 trustedDevices/toggleTrust，且加载流程不再读取 localStorage.trustedDevices', async () => {
     localStorage.setItem('trustedDevices', JSON.stringify([7]))
+    const getItemSpy = vi.spyOn(Storage.prototype, 'getItem')
     mountComposableHarness()
     await flushPromises()
 
     expect(capturedApi).not.toHaveProperty('trustedDevices')
     expect(capturedApi).not.toHaveProperty('toggleTrust')
-    // 修前 loadAllData 会把 localStorage 里的集合读进状态并原样保留；
-    // 修后该 key 不再被本页消费（清理与否都不影响页面，不做强断言）。
-    expect(capturedApi).not.toHaveProperty('toggleTrust')
+    // 修前 loadAllData 会读取 localStorage.trustedDevices 并恢复出「已信任」状态；
+    // 修后该 key 不再被本页读取（此断言在修前为 1 次读取 → 红）。
+    const trustReads = getItemSpy.mock.calls.filter(([key]) => key === 'trustedDevices')
+    expect(trustReads, '加载流程仍在读取 localStorage.trustedDevices').toHaveLength(0)
+    getItemSpy.mockRestore()
   })
 })

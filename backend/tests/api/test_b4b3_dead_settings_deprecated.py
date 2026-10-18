@@ -57,8 +57,9 @@ def test_all_llm_config_endpoints_are_deprecated():
     assert not missing, f"以下 llm-config 端点未标记 deprecated：{missing}"
 
 
-def test_chat_payload_still_accepts_but_ignores_system_prompt():
-    """activeSystemPrompt 旧客户端若仍发送 systemPrompt：契约上不报错（忽略）。"""
+def test_chat_payload_schema_tolerates_legacy_system_prompt():
+    """旧客户端仍发送 systemPrompt 时 schema 不得报错（容忍契约；忽略语义在
+    chat.py 的 SSE/WS 消费点注释与前端停发用例中锁定——本用例不证明忽略）。"""
     body = ChatStreamRequest(
         content="hi",
         payload={
