@@ -115,6 +115,7 @@ import { useI18n } from 'vue-i18n'
 import { RefreshOutline } from '@vicons/ionicons5'
 import { getMcpServers, type McpServersData, type McpServerState } from '@/api/mcp'
 import { extractApiError } from '@/utils/apiError'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 
 const { t, te } = useI18n()
 
@@ -128,7 +129,8 @@ async function loadServers() {
   loadError.value = false
   try {
     const res = await getMcpServers()
-    data.value = res.data.data
+    // GET /mcp/servers → {success: true, data: {started, servers, registered_tools}}
+    data.value = apiUnwrap<McpServersData>(res)
   } catch (error: unknown) {
     loadError.value = true
     loadErrorMsg.value = extractApiError(error, t('common.failed'))
