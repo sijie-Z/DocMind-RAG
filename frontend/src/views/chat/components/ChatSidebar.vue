@@ -85,7 +85,7 @@
         </div>
 
         <div
-          class="absolute right-2 opacity-0 group-hover:opacity-100 transition-all duration-200 bg-gradient-to-l from-white via-white to-transparent dark:from-gray-800 dark:via-gray-800 pl-4 py-1"
+          class="absolute right-2 sidebar-conv-actions bg-gradient-to-l from-white via-white to-transparent dark:from-gray-800 dark:via-gray-800 pl-4 py-1"
           v-if="currentConversationId !== conv.id"
         >
           <n-popconfirm @positive-click.stop="$emit('deleteConversation', conv.id)">
@@ -140,3 +140,28 @@ const formatDate = (dateStr: string) => {
   try { return format(new Date(dateStr), 'MM-dd HH:mm') } catch { return dateStr }
 }
 </script>
+
+<style scoped>
+/* I1 删除入口显隐（键盘 / 触屏可达，鼠标行为不回退，同 ChatMessages T11 模式）：
+   - 默认隐藏；键盘 :has(:focus-visible) 常显（媒体查询之外，任何设备生效）；
+     不用 :focus-within——鼠标点击按钮也会聚焦，移开后操作排会滞留；
+   - hover 显隐只在支持 hover 的设备上生效；
+   - 无 hover 能力的设备（触屏）常显。 */
+.sidebar-conv-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.sidebar-conv-actions:has(:focus-visible) {
+  opacity: 1;
+}
+@media (hover: hover) {
+  .group:hover .sidebar-conv-actions {
+    opacity: 1;
+  }
+}
+@media (hover: none) {
+  .sidebar-conv-actions {
+    opacity: 1;
+  }
+}
+</style>
