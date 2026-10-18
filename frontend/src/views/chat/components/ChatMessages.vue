@@ -167,7 +167,9 @@
                 </div>
               </div>
 
-              <div v-if="message.messageType === 'assistant'" class="flex items-center gap-1 mt-2 opacity-0 group-hover/bubble:opacity-100 transition-opacity duration-200">
+              <!-- T11：键盘/触屏可达的操作排——hover 显隐只在支持 hover 的设备上生效，
+                   键盘 :focus-visible 与无 hover 设备常显（样式见 scoped CSS） -->
+              <div v-if="message.messageType === 'assistant'" class="msg-actions flex items-center gap-1 mt-2" data-testid="message-actions">
                 <n-tooltip trigger="hover">
                   <template #trigger>
                     <n-button size="tiny" quaternary circle
@@ -296,5 +298,30 @@ defineEmits<{
 }
 .animate-blink {
   animation: blink 0.8s step-end infinite;
+}
+
+/* T11 消息操作排显隐（键盘 / 触屏可达，鼠标行为不回退）：
+   - 默认隐藏，保持界面干净；
+   - 键盘聚焦 :has(:focus-visible) 常显（媒体查询之外，任何设备都生效）；
+     用 :focus-visible 而非 :focus-within——鼠标点击按钮也会聚焦，用后者会
+     在鼠标移开后把操作排滞留（旧 bug）；
+   - hover 显隐只在支持 hover 的设备上生效，触屏不依赖它；
+   - 无 hover 能力的设备（触屏）常显，保证可点可达。 */
+.msg-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.msg-actions:has(:focus-visible) {
+  opacity: 1;
+}
+@media (hover: hover) {
+  .group\/bubble:hover .msg-actions {
+    opacity: 1;
+  }
+}
+@media (hover: none) {
+  .msg-actions {
+    opacity: 1;
+  }
 }
 </style>
