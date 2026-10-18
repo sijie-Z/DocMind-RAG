@@ -797,18 +797,21 @@ async def get_users(
 ):
     """获取用户列表（管理员功能）- 仅显示当前组织下的用户"""
     try:
-        # 组织隔离：只返回同一组织的用户
+        # 组织隔离：只返回同一组织的用户；A4 生命周期：已停用（软删）用户
+        # 不再出现在列表（其 is_active=False，由 delete_user / update_user_admin
+        # 置位），避免删除后仍以「活跃成员」身份被展示与分配。
+        conditions = [User.is_active.is_(True)]
         if current_user.organization_id:
-            base_filter = User.organization_id == current_user.organization_id
+            conditions.append(User.organization_id == current_user.organization_id)
         else:
-            base_filter = User.id == current_user.id
+            conditions.append(User.id == current_user.id)
 
-        total_result = await db.execute(select(func.count(User.id)).where(base_filter))
+        total_result = await db.execute(select(func.count(User.id)).where(*conditions))
         total = total_result.scalar()
 
         result = await db.execute(
             select(User)
-            .where(base_filter)
+            .where(*conditions)
             .offset(skip)
             .limit(limit)
             .order_by(User.created_at.desc())

@@ -109,7 +109,9 @@ async def get_workflow(
     db: AsyncSession = Depends(get_db)
 ):
     """获取工作流详情"""
-    stmt = select(Workflow).where(Workflow.id == workflow_id)
+    # A4 生命周期：软删（is_active=False）后的工作流对详情不可见——与列表/执行
+    # 端点同一口径，统一返回 404（不泄露存在性），避免软删后仍可被读取/深链。
+    stmt = select(Workflow).where(Workflow.id == workflow_id, Workflow.is_active)
     if not current_user.is_superuser and current_user.role != "admin":
         stmt = stmt.where(Workflow.created_by == current_user.id)
     result = await db.execute(stmt)
@@ -140,7 +142,9 @@ async def update_workflow(
     db: AsyncSession = Depends(get_db)
 ):
     """更新工作流"""
-    stmt = select(Workflow).where(Workflow.id == workflow_id)
+    # A4 生命周期：软删后的工作流不可再被 PUT 修改——否则「删除」只是从列表
+    # 消失，仍可被写回（is_active 也可被 update_data 直接翻回 True）。
+    stmt = select(Workflow).where(Workflow.id == workflow_id, Workflow.is_active)
     if not current_user.is_superuser and current_user.role != "admin":
         stmt = stmt.where(Workflow.created_by == current_user.id)
     result = await db.execute(stmt)
