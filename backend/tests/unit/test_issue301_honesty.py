@@ -336,7 +336,7 @@ class TestExtractInsightsHonesty:
             ElasticsearchTools, "search_documents",
             AsyncMock(return_value={"hits": {"hits": []}}),
         )
-        res = await extract_insights("nope")
+        res = await extract_insights("nope", organization_id=1)
 
         assert isinstance(res, ToolResult)
         assert res.success is False
@@ -353,7 +353,7 @@ class TestExtractInsightsHonesty:
             "app.dependencies.get_rag_pipeline",
             lambda: SimpleNamespace(openai_client=None),
         )
-        res = await extract_insights("doc1")
+        res = await extract_insights("doc1", organization_id=1)
 
         assert isinstance(res, ToolResult)
         assert res.success is False
@@ -373,7 +373,7 @@ class TestExtractInsightsHonesty:
             "app.dependencies.get_rag_pipeline",
             lambda: SimpleNamespace(openai_client=client),
         )
-        res = await extract_insights("doc1")
+        res = await extract_insights("doc1", organization_id=1)
 
         assert isinstance(res, ToolResult)
         assert res.success is False
@@ -392,7 +392,7 @@ class TestExtractInsightsHonesty:
             "app.dependencies.get_rag_pipeline",
             lambda: _llm_pipeline(json.dumps({"claims": claims}, ensure_ascii=False)),
         )
-        res = await extract_insights("doc1")
+        res = await extract_insights("doc1", organization_id=1)
 
         assert isinstance(res, str), "成功形态不变：仍是普通字符串"
         payload = json.loads(res)
@@ -435,7 +435,7 @@ class TestSkillConsumersHonesty:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.knowledge_analysis("分析f.md的财务情况")
+        out = await skills.knowledge_analysis("分析f.md的财务情况", organization_id=1)
 
         # 旧行为：小写 "error" 键躲过 `"Error" not in insight` → 原样写进报告。
         assert "Analysis failed" not in out
@@ -461,7 +461,7 @@ class TestSkillConsumersHonesty:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.knowledge_analysis("分析")
+        out = await skills.knowledge_analysis("分析", organization_id=1)
 
         assert "洞察提取失败" in out, "缺结构锚的载荷必须被拒收（不得当分析结果消费）"
         assert "generate_report" not in fake.calls
@@ -480,7 +480,7 @@ class TestSkillConsumersHonesty:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.knowledge_analysis("分析")
+        out = await skills.knowledge_analysis("分析", organization_id=1)
         assert "not found in index" not in out
         assert "洞察提取失败" in out
 
@@ -500,7 +500,7 @@ class TestSkillConsumersHonesty:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.knowledge_analysis("分析")
+        out = await skills.knowledge_analysis("分析", organization_id=1)
         assert "not found in index" not in out
         assert "洞察提取失败" in out
 
@@ -522,7 +522,7 @@ class TestSkillConsumersHonesty:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.knowledge_analysis("对比", generate_report=False)
+        out = await skills.knowledge_analysis("对比", generate_report=False, organization_id=1)
 
         assert "Error rate declined" in out, "合法分析正文不得被误伤丢弃"
         assert "Analysis failed" not in out
@@ -541,7 +541,7 @@ class TestSkillConsumersHonesty:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.document_comparison(["doc1", "doc2"])
+        out = await skills.document_comparison(["doc1", "doc2"], organization_id=1)
 
         assert "Analysis failed" not in out
         assert "洞察提取失败" in out
@@ -591,7 +591,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.deep_research("市场趋势")
+        out = await skills.deep_research("市场趋势", organization_id=1)
         # 旧行为：失败被静默丢弃（`"Error" not in x` 截住后不落节、不标注）。
         assert "Rate limit exceeded" not in out
         assert "搜索服务暂不可用" in out
@@ -608,7 +608,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.deep_research("市场趋势")
+        out = await skills.deep_research("市场趋势", organization_id=1)
         assert "quota exceeded" not in out
         assert "搜索服务暂不可用" in out
 
@@ -624,7 +624,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.deep_research("市场趋势")
+        out = await skills.deep_research("市场趋势", organization_id=1)
         assert "Error rate declined" in out
         assert "Error budget report.md" in out
 
@@ -641,7 +641,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.deep_research("市场趋势")
+        out = await skills.deep_research("市场趋势", organization_id=1)
         assert "kind=connection" not in out
         assert "知识库检索暂不可用" in out
 
@@ -658,7 +658,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.document_comparison(["doc1", "doc2"])
+        out = await skills.document_comparison(["doc1", "doc2"], organization_id=1)
         assert "not found." not in out
         assert "无法获取文档信息: doc1" in out
 
@@ -677,7 +677,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.document_comparison(["doc1", "doc2"])
+        out = await skills.document_comparison(["doc1", "doc2"], organization_id=1)
         assert "why error rate not found in Q3.md" in out
 
     # ── document_comparison Step 3: cross_document_analysis（漏报主账） ──
@@ -699,7 +699,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.document_comparison(["doc1", "doc2"])
+        out = await skills.document_comparison(["doc1", "doc2"], organization_id=1)
         # 旧行为：小写 error 键躲过 `"Error" not in cross` → 原样写进报告。
         assert "ES connection refused" not in out
         assert "分析服务暂不可用" in out
@@ -718,7 +718,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.document_comparison(["doc1", "doc2"])
+        out = await skills.document_comparison(["doc1", "doc2"], organization_id=1)
         assert "LLM boom" not in out
         assert "分析服务暂不可用" in out
 
@@ -735,7 +735,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.document_comparison(["doc1", "doc2"])
+        out = await skills.document_comparison(["doc1", "doc2"], organization_id=1)
         assert "Error rate declined" in out
         assert "分析服务暂不可用" not in out
 
@@ -752,7 +752,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.knowledge_analysis("分析主题")
+        out = await skills.knowledge_analysis("分析主题", organization_id=1)
         assert "kind=connection" not in out
         assert "检索服务暂不可用" in out
         # 检索失败 ≠ "未找到可分析的文档"（另一种事实）
@@ -769,7 +769,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.knowledge_analysis("分析主题")
+        out = await skills.knowledge_analysis("分析主题", organization_id=1)
         assert "Error: file not found in config.txt" in out
 
     # ── knowledge_analysis Step 3: generate_report ──
@@ -787,7 +787,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.knowledge_analysis("分析主题")
+        out = await skills.knowledge_analysis("分析主题", organization_id=1)
         # 旧行为：小写 error 信封躲过 `"Error" not in report` → 漏进报告。
         assert "Invalid sections JSON" not in out
         assert "报告生成失败" in out
@@ -806,7 +806,7 @@ class TestSkillConsumptionGateStructured:
         })
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
-        out = await skills.knowledge_analysis("分析主题")
+        out = await skills.knowledge_analysis("分析主题", organization_id=1)
         assert "报告正文" in out
         assert "报告生成失败" not in out
 

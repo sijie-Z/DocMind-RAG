@@ -316,8 +316,12 @@ class FileUploadService:
                 await session.commit()
                 await session.refresh(document)
 
-            # 异步处理文档解析
-            task = asyncio.create_task(self._process_document_async(document.id))
+            # A3-P0：先落 DB 标记（local_fallback=True 的 QUEUED job），再调度
+            # 进程内任务；进程若在任务完成前退出，启动对账按标记回收。
+            job_id = await self._ensure_local_job(document)
+            task = asyncio.create_task(
+                self._process_document_async(document.id, job_id=job_id)
+            )
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
 
@@ -606,8 +610,43 @@ class FileUploadService:
         }
         return content_type_map.get(file_extension, 'application/octet-stream')
 
-    async def _process_document_async(self, document_id: str) -> None:
+    async def _ensure_local_job(self, document) -> int | None:
+        """先落本机处理标记（A3-P0）：进程重启后启动对账按此回收任务。
+
+        落库失败返回 None（退回由 ``_process_document_async`` 自建 job 的兼容路径）。
+        """
+        from app.models.knowledge_job import (
+            KnowledgeJobStatus,
+            KnowledgeProcessingJob,
+        )
+
+        try:
+            async with AsyncSessionLocal() as session:
+                job = KnowledgeProcessingJob(
+                    document_id=document.id,
+                    organization_id=document.organization_id,
+                    trigger_type="upload",
+                    status=KnowledgeJobStatus.QUEUED,
+                    retry_count=0,
+                    local_fallback=True,
+                )
+                session.add(job)
+                await session.commit()
+                return job.id
+        except Exception as e:
+            logger.error(
+                f"本机处理标记落库失败，退回兼容调度: {document.id}, 错误: {str(e)}",
+                exc_info=True,
+            )
+            return None
+
+    async def _process_document_async(
+        self, document_id: str, job_id: int | None = None
+    ) -> None:
         """异步处理文档解析。
+
+        ``job_id`` 由 ``upload_file`` 预先落库（local_fallback 标记）后传入；
+        缺省时自建 job 并同样标记 ``local_fallback=True``（兼容直接调用/旧路径）。
 
         issue #301 批 D（#29）：此前本壳的 except 只留一条 error 日志——job 创建
         窗口 DB 不可用等异常被静默吞掉后，文档永久卡在 UPLOADED（无 FAILED、无
@@ -622,25 +661,29 @@ class FileUploadService:
                 KnowledgeProcessingJob,
             )
 
-            async with AsyncSessionLocal() as session:
-                doc = await session.get(Document, document_id)
-                if not doc:
-                    logger.error(f"文档不存在，无法创建处理任务: {document_id}")
-                    return
-                job = KnowledgeProcessingJob(
-                    document_id=document_id,
-                    organization_id=doc.organization_id,
-                    trigger_type="upload",
-                    status=KnowledgeJobStatus.QUEUED,
-                )
-                session.add(job)
-                await session.commit()
-                job_id = job.id
+            if job_id is None:
+                async with AsyncSessionLocal() as session:
+                    doc = await session.get(Document, document_id)
+                    if not doc:
+                        logger.error(f"文档不存在，无法创建处理任务: {document_id}")
+                        return
+                    job = KnowledgeProcessingJob(
+                        document_id=document_id,
+                        organization_id=doc.organization_id,
+                        trigger_type="upload",
+                        status=KnowledgeJobStatus.QUEUED,
+                        local_fallback=True,
+                    )
+                    session.add(job)
+                    await session.commit()
+                    job_id = job.id
 
-            from app.worker.doc_processor import processor
+            from app.worker.doc_processor import DEFERRED, processor
 
             success = await processor.process(document_id, job_id)
-            if not success:
+            if success is DEFERRED:
+                logger.info(f"文档处理延后（另一处理者持锁）: {document_id}")
+            elif success is False:
                 logger.error(f"文档解析失败: {document_id}")
             else:
                 logger.info(f"文档全流程处理完成: {document_id}")

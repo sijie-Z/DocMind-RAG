@@ -69,7 +69,7 @@
                 <n-icon size="20" class="text-blue-600 dark:text-blue-400"><DocumentTextOutline /></n-icon>
               </div>
               <div>
-                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ stats.total }}</p>
+                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.total }}</p>
                 <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.total') || '文档总数' }}</p>
               </div>
             </div>
@@ -80,7 +80,7 @@
                 <n-icon size="20" class="text-emerald-600 dark:text-emerald-400"><CheckmarkCircleOutline /></n-icon>
               </div>
               <div>
-                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ stats.completed }}</p>
+                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.completed }}</p>
                 <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.completed') || '已索引' }}</p>
               </div>
             </div>
@@ -91,7 +91,7 @@
                 <n-icon size="20" class="text-amber-600 dark:text-amber-400"><RefreshOutline /></n-icon>
               </div>
               <div>
-                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ stats.processing }}</p>
+                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.processing }}</p>
                 <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.processing') || '处理中' }}</p>
               </div>
             </div>
@@ -102,7 +102,7 @@
                 <n-icon size="20" class="text-red-600 dark:text-red-400"><CloseCircleOutline /></n-icon>
               </div>
               <div>
-                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ stats.failed }}</p>
+                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.failed }}</p>
                 <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.failed') || '失败' }}</p>
               </div>
             </div>
@@ -147,12 +147,12 @@
           <div v-if="loadError" class="flex flex-col items-center justify-center py-20 bg-white/50 dark:bg-gray-900/50 backdrop-blur-md rounded-3xl border border-dashed border-red-300 dark:border-red-900/30">
             <n-result
               status="500"
-              :title="t('common.failed')"
-              :description="t('common.error') || '服务器好像开小差了，请稍后再试'"
+              :title="t('knowledge.loadFailed')"
+              :description="loadErrorMsg || t('knowledge.loadFailedDesc')"
             >
               <template #footer>
                 <n-button type="primary" round @click="loadKnowledgeBases">
-                  {{ t('common.refresh') }}
+                  {{ t('common.retry') }}
                 </n-button>
               </template>
             </n-result>
@@ -359,6 +359,17 @@
             </div>
           </div>
 
+          <div v-else-if="!loading && isSearchEmpty" class="flex flex-col items-center justify-center py-24 px-6 bg-white/80 dark:bg-gray-800/50 backdrop-blur-md rounded-3xl border border-dashed border-slate-200 dark:border-gray-600/50 shadow-inner">
+            <div class="w-24 h-24 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center mb-6 ring-4 ring-slate-100/50 dark:ring-gray-800/30">
+              <n-icon size="48" class="text-slate-400 dark:text-slate-500"><SearchOutline /></n-icon>
+            </div>
+            <h3 class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">{{ t('knowledge.searchEmptyTitle') }}</h3>
+            <p class="text-slate-500 dark:text-slate-400 mb-8 max-w-sm text-center text-sm leading-relaxed">{{ t('knowledge.searchEmptyDesc', { query: searchText.trim() }) }}</p>
+            <n-button round size="large" @click="clearSearch">
+              {{ t('knowledge.clearSearch') }}
+            </n-button>
+          </div>
+
           <div v-else-if="!loading" class="flex flex-col items-center justify-center py-24 px-6 bg-white/80 dark:bg-gray-800/50 backdrop-blur-md rounded-3xl border border-dashed border-slate-200 dark:border-gray-600/50 shadow-inner">
             <div class="w-24 h-24 rounded-2xl bg-gradient-to-br from-blue-100 to-slate-100 dark:from-blue-900/30 dark:to-slate-900/30 flex items-center justify-center mb-6 ring-4 ring-blue-100/50 dark:ring-blue-900/30">
               <n-icon size="48" class="text-blue-500 dark:text-blue-400"><CloudUploadOutline /></n-icon>
@@ -438,16 +449,12 @@ import {
 import type { KnowledgeBase, KnowledgeBaseListResponse, DocumentDetail, DocumentContent } from '@/api/knowledge'
 import { formatDate } from '@/utils/format'
 import { apiUnwrap } from '@/utils/apiUnwrap'
+import { getErrorMessage } from '@/utils/apiError'
 import { getRagMetrics, type RagMetrics } from '@/api/rag'
 import { useUserStore } from '@/stores/user'
 import { docIconColor, docStatusLabel, docStatusType, isInProgressDoc, computeDocStats } from './docDisplay'
 import KnowledgeUploadPanel from './components/KnowledgeUploadPanel.vue'
 import KnowledgeDetailModals from './components/KnowledgeDetailModals.vue'
-
-/** Safely extract error message from unknown error */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
 
 interface UploadForm {
   title: string
@@ -462,6 +469,7 @@ const { t } = useI18n()
 const userStore = useUserStore()
 const loading = ref(false)
 const loadError = ref(false)
+const loadErrorMsg = ref('')
 const uploading = ref(false)
 const searchText = ref('')
 const viewMode = ref<'grid' | 'list'>('grid') // 视图模式
@@ -488,7 +496,29 @@ interface UploadTask {
 
 const activeTasks = ref<UploadTask[]>([])
 
+/**
+ * 进行中上传的 AbortController（taskId → controller）。
+ * 放在响应式状态之外：AbortController 是宿主对象，经 Vue proxy 包裹后调用
+ * abort() 会触发 brand check 异常；任务对象本身保持纯数据，便于渲染与断言。
+ */
+const uploadControllers = new Map<string, AbortController>()
+
+const isTaskInFlight = (task: UploadTask) => task.status === 'uploading' || task.status === 'processing'
+
+/**
+ * 上传列表「×」语义（E9/B7）：
+ * - 进行中（uploading / processing）→ 真取消：AbortController 中止请求，任务移除
+ *   并提示「已取消上传」；传输阶段中止后后端拿不到完整表单，文档不会落库；
+ * - 已终态（completed / error）→ 仅从列表移除（不改动任何请求）。
+ */
 const removeUploadTask = (id: string) => {
+  const task = activeTasks.value.find(t => t.id === id)
+  const controller = uploadControllers.get(id)
+  if (task && isTaskInFlight(task) && controller) {
+    controller.abort()
+    message.info(t('knowledge.uploadCancelled'))
+  }
+  uploadControllers.delete(id)
   activeTasks.value = activeTasks.value.filter(t => t.id !== id)
 }
 
@@ -580,6 +610,11 @@ const tagOptions = computed(() => [
 
 const filteredKnowledgeBases = computed(() => knowledgeBases.value)
 
+/** E14/C1 空态分流：搜索无命中 ≠ 空库（前者给清除搜索，后者才劝上传）。 */
+const isSearchEmpty = computed(
+  () => searchText.value.trim().length > 0 && knowledgeBases.value.length === 0
+)
+
 const stats = computed(() => computeDocStats(knowledgeBases.value))
 
 const isAllSelected = computed(() => {
@@ -616,12 +651,12 @@ const handleBatchDelete = () => {
         // A2：补 organization_id（后端 knowledge.py:642-646 对非超管强校验
         // body.organization_id == 有效组织，缺省必 403）。口径照 search P1-2：
         // 从 user store 取 currentOrgId；无组织时省略，由后端解析（超管语义）。
-        await batchDeleteKnowledgeBases(selectedIds.value, userStore.currentOrgId)
+        await batchDeleteKnowledgeBases(selectedIds.value, userStore.currentOrgId, { silent: true })
         message.success(t('common.deleteSuccess'))
         selectedIds.value = []
         await loadKnowledgeBases()
       } catch (error: unknown) {
-        message.error(t('common.deleteFailed') + '：' + getErrorMessage(error))
+        message.error(t('common.deleteFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
       }
     }
   })
@@ -641,7 +676,8 @@ const loadKnowledgeBases = async () => {
       search: searchText.value
     }
     const [response, metricsResp] = await Promise.all([
-      getKnowledgeBases(params),
+      // E14/D1：页面自呈现错误（页内错误态 + 重试），请求静默，拦截器不再重复 toast
+      getKnowledgeBases(params, { silent: true }),
       getRagMetrics(metricWindow.value).catch(() => null)
     ])
 
@@ -679,8 +715,12 @@ const loadKnowledgeBases = async () => {
         pagination.value.itemCount = 0
     }
   } catch (error: unknown) {
+    // E14/D2：加载/搜索失败必须清空旧结果——陈旧卡片与统计不得继续冒充当前数据
     loadError.value = true
-    // Failed to load knowledge bases
+    loadErrorMsg.value = getErrorMessage(error, t('knowledge.loadFailedDesc'))
+    knowledgeBases.value = []
+    pagination.value.itemCount = 0
+    selectedIds.value = []
   } finally {
     loading.value = false
   }
@@ -694,17 +734,19 @@ const handlePageSizeChange = (size: number) => {
 
 const uploadFile = async () => {
   if (!uploadForm.value.file) return
-  
+
   const file = uploadForm.value.file
   const taskId = Math.random().toString(36).substring(7)
-  
+  const controller = new AbortController()
+  uploadControllers.set(taskId, controller)
+
   const newTask: UploadTask = {
     id: taskId,
     name: file.name,
     progress: 0,
     status: 'uploading'
   }
-  
+
   activeTasks.value.unshift(newTask)
   showTaskList.value = true
   showUploadModal.value = false
@@ -717,7 +759,7 @@ const uploadFile = async () => {
     formData.append('tags', JSON.stringify(uploadForm.value.tags))
     formData.append('description', uploadForm.value.description)
     // 移除硬编码的 organization_id，后端会从 Form 默认值或 User Context 获取
-    
+
     const res = await uploadKnowledgeBase(formData, (progressEvent) => {
       const progress = progressEvent.total ? Math.round((progressEvent.loaded * 100) / progressEvent.total) : 0
       const task = activeTasks.value.find(t => t.id === taskId)
@@ -727,7 +769,10 @@ const uploadFile = async () => {
           task.status = 'processing'
         }
       }
-    })
+    }, controller.signal)
+
+    // 取消竞态：用户已点「×」但响应恰好先到 —— 不再报成功、不再刷新列表
+    if (controller.signal.aborted) return
 
     // issue #301 批 D（#23）：后端在「文件已保存、但处理任务启动失败」时返回
     // success=false（doc 同步已标记 failed）。此前无条件 message.success —— 失败
@@ -747,25 +792,30 @@ const uploadFile = async () => {
         task.progress = 100
       }
     }
-    
+
     uploadForm.value = {
       title: '',
       tags: [],
       description: ''
     }
     fileList.value = []
-    
+
     await loadKnowledgeBases()
   } catch (error: unknown) {
-    const errMsg = getErrorMessage(error)
-    const task = activeTasks.value.find(t => t.id === taskId)
-    if (task) {
-      task.status = 'error'
-      task.error = errMsg
+    // 用户主动取消不是失败：任务已由 removeUploadTask 移除并提示，这里不再误报
+    if (!controller.signal.aborted) {
+      const errMsg = getErrorMessage(error, t('knowledge.unknownError'))
+      const task = activeTasks.value.find(t => t.id === taskId)
+      if (task) {
+        task.status = 'error'
+        task.error = errMsg
+      }
+      message.error(t('knowledge.uploadFailed') + '：' + errMsg)
     }
-    message.error(t('knowledge.uploadFailed') + '：' + errMsg)
   } finally {
-    uploading.value = false
+    uploadControllers.delete(taskId)
+    // 并发上传：uploading 反映「是否仍有在途任务」，取消 A 不得清掉 B 的进行中状态
+    uploading.value = uploadControllers.size > 0
   }
 }
 
@@ -779,8 +829,8 @@ const viewKnowledge = async (item: KnowledgeBase) => {
   showDetailModal.value = true
   try {
     const [detailRes, contentRes] = await Promise.all([
-      getDocumentDetail(item.id),
-      getDocumentContent(item.id)
+      getDocumentDetail(item.id, { silent: true }),
+      getDocumentContent(item.id, { silent: true })
     ])
     // T11：宽容解包（与既有 detailRes/contentRes 手写解包恒等）
     const detail = apiUnwrap<DocumentDetail>(detailRes) || {}
@@ -808,11 +858,11 @@ const showErrorDetail = (errorText: string) => {
 
 const handleRebuild = async (item: KnowledgeBase) => {
   try {
-    await rebuildKnowledgeBase(item.id)
+    await rebuildKnowledgeBase(item.id, { silent: true })
     message.success(t('knowledge.rebuildSuccess') || '开始重新构建索引')
     await loadKnowledgeBases()
   } catch (error: unknown) {
-    message.error((t('knowledge.rebuildFailed') || '重新构建失败') + '：' + getErrorMessage(error))
+    message.error((t('knowledge.rebuildFailed') || '重新构建失败') + '：' + getErrorMessage(error, t('common.tryAgain')))
   }
 }
 
@@ -823,11 +873,11 @@ const handleRebuildLatestFailedDoc = async () => {
     return
   }
   try {
-    await rebuildKnowledgeBase(failed.id)
+    await rebuildKnowledgeBase(failed.id, { silent: true })
     message.success(t('knowledge.rebuildSubmitted', { title: failed.title || failed.file_name }))
     await loadKnowledgeBases()
   } catch (error: unknown) {
-    message.error(t('knowledge.rebuildSubmitFailed') + '：' + (getErrorMessage(error) || t('knowledge.unknownError')))
+    message.error(t('knowledge.rebuildSubmitFailed') + '：' + getErrorMessage(error, t('knowledge.unknownError')))
   }
 }
 
@@ -839,11 +889,11 @@ const deleteKnowledge = (item: KnowledgeBase) => {
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       try {
-        await deleteKnowledgeBase(item.id)
+        await deleteKnowledgeBase(item.id, { silent: true })
         message.success(t('common.deleteSuccess'))
         await loadKnowledgeBases()
       } catch (error: unknown) {
-        message.error(t('knowledge.deleteFailed') + '：' + getErrorMessage(error))
+        message.error(t('knowledge.deleteFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
       }
     }
   })
@@ -877,7 +927,13 @@ onMounted(() => {
 })
 
 let searchTimer: number | null = null
+/** 清除搜索时立即回载，跳过防抖 watcher 的重复触发。 */
+let skipSearchWatch = false
 watch(searchText, () => {
+  if (skipSearchWatch) {
+    skipSearchWatch = false
+    return
+  }
   if (searchTimer) {
     clearTimeout(searchTimer)
   }
@@ -886,6 +942,17 @@ watch(searchText, () => {
     loadKnowledgeBases()
   }, 300)
 })
+
+const clearSearch = () => {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+  skipSearchWatch = true
+  searchText.value = ''
+  pagination.value.page = 1
+  void loadKnowledgeBases()
+}
 
 watch(metricWindow, () => {
   loadKnowledgeBases()

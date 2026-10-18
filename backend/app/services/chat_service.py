@@ -7,7 +7,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import desc, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -149,13 +149,31 @@ async def bind_docs_to_session(
 async def get_system_prompt(
     session: AsyncSession,
     strict_mode: bool,
+    organization_id: int | None = None,
 ) -> str | None:
+    """选择 RAG 系统提示词。
+
+    A2 P0（租户边界）：提示词自本批起按组织私有——
+    - 有组织：仅本组织模板 + 系统内置模板（organization_id NULL 且 is_system）；
+    - 无组织（如无组织用户的休闲 RAG 路径）：只允许系统内置模板。
+    此前是全库按 updated_at 取最新，任意用户都能用自己的私有模板
+    污染所有租户的 RAG 系统提示词（跨租户提示词注入）。
+    """
     if strict_mode:
         return STRICT_MODE_PROMPT
 
+    system_template = and_(
+        PromptTemplate.is_system.is_(True),
+        PromptTemplate.organization_id.is_(None),
+    )
+    if organization_id is None:
+        scope = system_template
+    else:
+        scope = or_(PromptTemplate.organization_id == organization_id, system_template)
+
     result = await session.execute(
         select(PromptTemplate)
-        .where(PromptTemplate.category == "rag", PromptTemplate.is_active)
+        .where(PromptTemplate.category == "rag", PromptTemplate.is_active, scope)
         .order_by(desc(PromptTemplate.updated_at), desc(PromptTemplate.id))
         .limit(1)
     )
@@ -346,11 +364,15 @@ async def run_rag_pipeline(
         # （含用户配置的 rag 模板 —— 模板预设「有参考文档」，故障下同样失真）。
         system_prompt_override = RETRIEVAL_UNAVAILABLE_PROMPT
     else:
-        system_prompt_override = await get_system_prompt(session, strict_mode)
+        system_prompt_override = await get_system_prompt(
+            session, strict_mode, organization_id=search_org_id
+        )
 
     memory_context = ""
     try:
-        memory_system = get_memory_system(str(user_id))
+        # A1（记忆 IDOR）：租户命名空间由 (org, user, agent) 显式上下文拼装，
+        # 不再用裸 user_id 作全局 key。
+        memory_system = get_memory_system(search_org_id, user_id, "default")
         if memory_system._embedding_provider is None:
             memory_system.set_embedding_provider(rag_service.get_embedding)
         memory_context = await memory_system.get_context(user_content)
@@ -454,7 +476,9 @@ async def run_rag_pipeline(
         )
 
     try:
-        memory_system = get_memory_system(str(user_id))
+        # A1（记忆 IDOR）：租户命名空间由 (org, user, agent) 显式上下文拼装，
+        # 不再用裸 user_id 作全局 key。
+        memory_system = get_memory_system(search_org_id, user_id, "default")
         await memory_system.store_interaction(user_content, full_response)
     except Exception as e:
         logger.warning(f"Memory store failed (non-fatal): {e}")

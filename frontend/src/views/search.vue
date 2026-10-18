@@ -1,7 +1,7 @@
 <template>
-  <div class="h-full flex flex-col p-6 space-y-6 overflow-hidden bg-transparent">
+  <div class="search-page h-full flex flex-col p-6 space-y-6 overflow-hidden bg-transparent">
     <!-- 顶部标题区域 -->
-    <div class="flex items-center justify-between">
+    <div class="search-header flex items-center justify-between">
       <div>
         <h1
           class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-blue-700 dark:from-blue-400 dark:to-blue-600">
@@ -12,7 +12,7 @@
         </p>
       </div>
       <!-- 搜索统计 (极简展示) -->
-      <div v-if="searchStats" class="flex space-x-4">
+      <div v-if="searchStats" class="search-stats flex space-x-4">
         <div
           class="px-4 py-2 rounded-2xl bg-white/50 dark:bg-gray-800/50 backdrop-blur-md border border-white/20 dark:border-gray-700/30 shadow-sm">
           <span class="text-xs text-gray-400 block uppercase tracking-wider">{{ t('search.totalFiles') }}</span>
@@ -37,7 +37,7 @@
 
         <!-- 搜索按钮 -->
         <button
-          class="ml-2 px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+          class="search-submit ml-2 px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
           :disabled="!searchQuery.trim() || loading" @click="handleSearch">
           <n-spin v-if="loading" size="small" stroke="white" />
           <span>{{ t('search.button') }}</span>
@@ -57,9 +57,9 @@
     </div>
 
     <!-- 筛选与结果主区域 -->
-    <div class="flex-1 flex space-x-6 overflow-hidden">
+    <div class="search-layout flex-1 flex space-x-6 overflow-hidden">
       <!-- 左侧极简筛选栏 -->
-      <div class="w-72 flex flex-col space-y-4 overflow-y-auto pr-2 custom-scrollbar">
+      <div class="search-filter w-72 flex flex-col space-y-4 overflow-y-auto pr-2 custom-scrollbar">
         <div
           class="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-3xl border border-white/20 dark:border-gray-800/30 p-5 space-y-6">
           <!-- 搜索模式 -->
@@ -107,7 +107,7 @@
       </div>
 
       <!-- 右侧结果列表 -->
-      <div class="flex-1 flex flex-col overflow-hidden">
+      <div class="search-results flex-1 flex flex-col overflow-hidden">
         <!-- 结果状态栏 -->
         <div v-if="searchResults.length > 0" class="mb-4 flex items-center justify-between text-sm text-gray-500">
           <span>{{ t('search.results') }}: <span class="font-bold text-blue-600">{{ searchResults.length
@@ -357,8 +357,23 @@ const clearFilters = () => {
 
 const showResultDetail = (r: SearchResult) => { selectedResult.value = r; showDetailModal.value = true }
 
+// E11-① 跨页上下文：q = 文件名 + 用户当前搜索词组句（i18n 四语），context =
+// 所点结果正文片段（截断）。聊天页读取后预填输入框（见 chat/index.vue）——
+// 修前只传占位串 `关于文件 "x"...` + context_id（ES 内部 id，聊天页无法消费），
+// 跨页后「问哪个文件、问什么」全部丢失。
 const askAI = (r: SearchResult) => {
-  router.push({ name: 'Chat', query: { q: `关于文件 "${filenameOf(r)}"...`, context_id: r.id } })
+  const filename = filenameOf(r)
+  const question = searchQuery.value.trim()
+  const q = filename
+    ? question
+      ? t('search.askAIQuestion', { filename, query: question })
+      : t('search.askAIQuestionGeneric', { filename })
+    : question
+  const query: Record<string, string> = {}
+  if (q) query.q = q
+  const snippet = contentOf(r).trim()
+  if (snippet) query.context = snippet.slice(0, 300)
+  router.push({ name: 'Chat', query })
 }
 
 const copyResultContent = async (r: SearchResult | null) => {
@@ -395,5 +410,28 @@ onMounted(async () => {
   line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* H1：常见宽度断点。旧实现零 @media，w-72 筛选栏在窄屏吃掉大半屏。 */
+@media (max-width: 1023px) {
+  .search-filter { width: 15rem; }
+}
+
+@media (max-width: 767px) {
+  .search-page { padding: 1rem; }
+  .search-header { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+  .search-stats { flex-wrap: wrap; }
+  .search-submit { padding-left: 1rem; padding-right: 1rem; }
+  .search-layout {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .search-filter {
+    width: 100%;
+    flex: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+  .search-results { min-height: 0; }
 }
 </style>

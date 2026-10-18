@@ -3,7 +3,7 @@
 """
 import logging
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, delete, func, select
 
@@ -15,6 +15,9 @@ from app.models.document import Document, DocumentChunk, DocumentStatus, Documen
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.rag.errors import RetrievalUnavailableError
 from app.services.file_service import FileUploadService
+
+if TYPE_CHECKING:
+    from app.worker.doc_processor import DeferredOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +53,12 @@ class KnowledgeService:
         self.index_name = settings.ELASTICSEARCH_INDEX_NAME
         self.file_upload_service = FileUploadService()
 
-    async def build_knowledge_base(self, document_id: str) -> bool:
-        """Build knowledge base through the unified document processor."""
+    async def build_knowledge_base(self, document_id: str) -> "bool | DeferredOutcome":
+        """Build knowledge base through the unified document processor.
+
+        返回 ``processor.process`` 的契约值：True=已了结、False=失败、
+        DEFERRED=锁竞争未了结（A3-P0 第三种终局）。
+        """
         from app.worker.doc_processor import processor
 
         return await processor.process(document_id)

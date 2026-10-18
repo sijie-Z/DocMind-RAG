@@ -205,7 +205,8 @@ async def test_persistence_ttl_is_30_days_and_marker_synced(fake_redis):
     """
     service = GraphRAGService()
     await service.build_graph_from_entities(
-        [{"entity": "DocMind", "type": "PRODUCT", "description": "", "relations": []}]
+        [{"entity": "DocMind", "type": "PRODUCT", "description": "", "relations": []}],
+        organization_id=1,
     )
     assert fake_redis.setex_calls, "保存图必须走 setex（带 TTL）"
     assert fake_redis.setex_calls[-1] == ("rag:graph:1", 86400 * 30)
@@ -314,7 +315,7 @@ async def test_relation_target_gets_display_name(fake_redis):
             "description": "",
             "relations": [{"target": "Acme 公司", "relation": "OWN"}],
         }
-    ])
+    ], organization_id=1)
 
     target_key = service._normalize_entity("Acme 公司")
     raw = json.loads(fake_redis.data["rag:graph:1"])

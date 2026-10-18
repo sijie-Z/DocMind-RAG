@@ -10,7 +10,7 @@
  * 变异点：删掉 'indexed' 键（还原漂移）→ 第 1 条用例精确红。
  */
 import { describe, it, expect } from 'vitest'
-import i18n from '@/locales'
+import i18n, { setLanguage } from '@/locales'
 import { orgDocStatusLabel, orgDocStatusType } from '../docStatus'
 
 describe('orgDocStatus · 与 organizations 端点裸枚举对齐（B20）', () => {
@@ -53,20 +53,21 @@ describe('orgDocStatus · 与 organizations 端点裸枚举对齐（B20）', () 
 })
 
 describe('T13 · 状态词条化（复用 knowledge.docStatus.*）', () => {
-  it('en/ja/fr 相位下返回对应译文（改动前恒为硬编码中文）', () => {
+  it('en/ja/fr 相位下返回对应译文（改动前恒为硬编码中文）', async () => {
     const prev = i18n.global.locale.value
     try {
-      i18n.global.locale.value = 'en'
+      // E5：非默认语言包改为动态 chunk —— 切换统一走 setLanguage（先载包再落 locale）
+      await setLanguage('en')
       expect(orgDocStatusLabel('indexed')).toBe('Indexed')
       expect(orgDocStatusLabel('pending')).toBe('Pending')
       expect(orgDocStatusLabel('failed')).toBe('Failed')
       expect(orgDocStatusLabel(null)).toBe('Unknown')
-      i18n.global.locale.value = 'ja'
+      await setLanguage('ja')
       expect(orgDocStatusLabel('indexed')).toBe('インデックス済み')
-      i18n.global.locale.value = 'fr'
+      await setLanguage('fr')
       expect(orgDocStatusLabel('indexed')).toBe('Indexé')
     } finally {
-      i18n.global.locale.value = prev
+      await setLanguage(prev)
     }
   })
 })
