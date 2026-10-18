@@ -1,7 +1,7 @@
 {
   "$comment": "i18n 键面快照（基准语 zh，全量叶子键排序固化）。任何键面变化（死键清扫/键改名/新增词条）都必须同步提交本文件 diff：更新方式 UPDATE_I18N_KEY_SNAPSHOT=1 npx vitest run src/locales/__tests__/keySnapshot.test.ts。本快照为全量真值（新增键同样需入快照），确保后续任何删除都能被 keySnapshot.test.ts 点名拦截。",
   "source": "zh",
-  "keyCount": 818,
+  "keyCount": 822,
   "keys": [
     "agentReplay.close",
     "agentReplay.decisions",
@@ -296,6 +296,10 @@
     "help.tasks.items.ocr.title",
     "help.tasks.items.replay.desc",
     "help.tasks.items.replay.title",
+    "hitl.approvalAlways",
+    "hitl.approvalMode",
+    "hitl.approvalNever",
+    "hitl.approvalRisky",
     "hitl.cancelled",
     "hitl.planAddStep",
     "hitl.planApprove",
