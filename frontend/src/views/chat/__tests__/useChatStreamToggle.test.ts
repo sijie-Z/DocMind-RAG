@@ -4,9 +4,11 @@
  * 现状（修前）：useStream 仅在 ChatInput 的 UI 上绑定（useChatConnection 定义），
  * 发送链路（useChatSend/WS 渲染）零消费——关掉开关回答照旧逐字上屏。
  * 修复：useStream 透传给渲染路径；关闭时 chunk 只入缓冲不逐字落屏，
- * 待 message 终态一次性落屏（= 非流式展示）；开启时为原流式行为（不回归）。
+ * 待 message 终态一次性落屏（= 非流式展示）；开启时按帧节流合并落屏
+ * （E3 性能批：同一帧内的 chunk 不再逐条触发渲染，内容不回归）。
  *
- * 变异点：onChunk 忽略 useStream 直接渲染 → 「关闭态不逐字落屏」用例精确红。
+ * 变异点：onChunk 忽略 useStream 直接渲染 → 「关闭态不逐字落屏」用例精确红；
+ * E3：去掉节流合并（恢复逐 chunk 同步写）→ 「同一帧不逐条落屏」断言红。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -100,14 +102,22 @@ describe('W2-T7 · 流式响应开关真接线', () => {
     expect(lastContent()).toBe('第一段第二段')
   })
 
-  it('开启流式（默认）：chunk 逐字落屏，行为不回归', async () => {
+  it('开启流式（默认）：chunk 按帧批量化落屏，终态前可见累积内容（行为不回归）', async () => {
     useStreamRef.value = true
     await send()
 
     sseHandlers.chunk({ content: '第一段', messageId: 'm1' })
-    expect(lastContent()).toBe('第一段')
-
+    // E3：同一帧内的 chunk 不逐条落屏（节流合并；修前此处已是 '第一段' → 精确红点）
+    expect(lastContent()).toBe('')
     sseHandlers.chunk({ content: '第二段', messageId: 'm1' })
+    expect(lastContent()).toBe('')
+
+    // 等一帧：累积内容成批落屏（终态前用户可见流式输出）
+    await new Promise((resolve) => setTimeout(resolve, 100))
     expect(lastContent()).toBe('第一段第二段')
+
+    // 终态直达：最终内容一次性落屏
+    sseHandlers.message({ content: '第一段第二段（终态）', messageId: 'm1' })
+    expect(lastContent()).toBe('第一段第二段（终态）')
   })
 })

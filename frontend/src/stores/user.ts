@@ -28,6 +28,8 @@ export const useUserStore = defineStore('user', () => {
   const userInfo = ref<UserInfo | null>(_loadUserInfo())
   const token = ref<string>(getToken() || '')
   const currentOrganizationId = ref<number | null>(null)
+  // 服务可用性标记：/users/me 遇 5xx/网络错误时为 true（保留会话，供全局横幅/不可用页消费）
+  const authServiceUnavailable = ref(false)
 
   // User settings state
   const settings = ref<UserSettings>({
@@ -162,10 +164,21 @@ export const useUserStore = defineStore('user', () => {
         ? resData.data as UserInfo
         : resData as unknown as UserInfo
       _applyValidatedAuth(storedToken, info)
+      authServiceUnavailable.value = false
       return response.data
     } catch (error) {
-      // 不在此处导航：调用方（路由守卫/聊天页）自行决定落点；同步清本地即可
-      logout({ navigate: false })
+      // 仅 401（或拦截器已判定续期失败的标记错误）视为会话失效；
+      // 5xx / 网络错误保留 token 与本地缓存的 userInfo，交由 UI 提示“服务不可用”。
+      const status = (error as AxiosError)?.response?.status
+      const sessionExpired =
+        status === 401 || (error as { authSessionExpired?: boolean })?.authSessionExpired === true
+      if (sessionExpired) {
+        authServiceUnavailable.value = false
+        // 不在此处导航：调用方（路由守卫/聊天页）自行决定落点；同步清本地即可
+        logout({ navigate: false })
+      } else {
+        authServiceUnavailable.value = true
+      }
       throw error
     }
   }
@@ -174,6 +187,7 @@ export const useUserStore = defineStore('user', () => {
   const clearAuthState = () => {
     userInfo.value = null
     token.value = ''
+    authServiceUnavailable.value = false
     removeToken()
     // 清除用户态 localStorage，避免登出后残留敏感/偏好数据
     localStorage.removeItem('user_info')
@@ -279,6 +293,7 @@ export const useUserStore = defineStore('user', () => {
     token,
     currentOrganizationId,
     settings,
+    authServiceUnavailable,
 
     // 计算属性
     isLoggedIn,

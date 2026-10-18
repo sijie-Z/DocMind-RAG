@@ -99,7 +99,9 @@ export default {
     used: '使用済み',
     available: '利用可能',
     activityTrend: 'アクティビティ推移',
-    recentActivity: '最近のアクティビティ'
+    recentActivity: '最近のアクティビティ',
+    revokeSession: 'デバイスをログアウト',
+    revokeSessionConfirm: 'このデバイスをログアウトしますか？再度ログインが必要になります。'
   },
   users: {
     searchPlaceholder: 'ユーザーを検索...',
@@ -152,6 +154,7 @@ export default {
     level5: 'レベル 5',
     levelOther: 'その他',
     createdAt: '作成日時',
+    batchDeleteConfirm: '選択した {count} 件の組織を削除しますか？この操作は元に戻せません。',
     addMember: 'メンバーを追加',
     selectUser: 'ユーザーを選択',
     removeMember: '削除',
@@ -198,6 +201,11 @@ export default {
     noHistory: '履歴なし',
     backToBottom: '最新のメッセージに戻る',
     stopGenerating: '生成を停止',
+    // E7 三状態の可視性：履歴読み込み / thinking / 停止済み
+    loadingHistory: '履歴を読み込み中...',
+    thinkingLabel: '思考プロセス',
+    generationStopped: '停止しました',
+    stoppedHint: '続けて質問するか、回答を再生成できます',
     suggestions: {
       quantum: '量子コンピュータについて説明して',
       quantumDesc: '基本的な原理を簡単な言葉で説明してください',
@@ -218,6 +226,7 @@ export default {
     removeFailedAttachments: '解析に失敗した添付ファイルがあります。削除または再アップロードしてから質問してください',
     attachmentsNotReady: '添付ファイルの準備ができていません。解析が完了してから使用してください',
     chatCleared: '対話履歴をクリアしました',
+    clearConfirm: '現在の会話のすべてのメッセージを削除します。この操作は元に戻せません。よろしいですか？',
     clearFailed: 'クリアに失敗しました',
     unbindSuccess: 'ドキュメントの紐付けを解除しました。ナレッジベース全体を対象に回答します',
     unbindFailed: '紐付けの解除に失敗しました',
@@ -382,7 +391,16 @@ export default {
     },
     backToHome: 'ホームへ戻る',
     backToWorkbench: 'ワークスペースへ移動',
-    back: '前のページに戻る'
+    back: '前のページに戻る',
+    serviceUnavailable: {
+      title: 'サービスが一時的に利用できません',
+      subtitle: 'サーバーに接続できません。しばらくしてから再試行してください。ログイン状態は保持されています。',
+      retry: '再試行'
+    },
+    offlineBanner: {
+      message: 'サービスが一時的に利用できません。ローカルにキャッシュされたデータを表示しています',
+      retry: '再試行'
+    }
   },
   login: {
     welcomeBack: 'おかえりなさい',
@@ -615,11 +633,24 @@ export default {
   },
   workflow: {
     description: '複雑なAIタスクを段階的なパイプラインに分解し、統一されたメトリクスと状態管理で実行品質を監視します。',
+    editor: {
+      clearConfirmTitle: 'キャンバスをクリア',
+      clearConfirmContent: 'クリア後、自動保存が {n} 秒以内に空のキャンバスを書き戻し、保存済みのバージョンを上書きします。キャンバスをクリアしますか？',
+      clearConfirmPositive: 'クリア',
+      clearConfirmNegative: 'キャンセル',
+      emptyCanvasAutoSaveBlocked: 'キャンバスが空のため、保存済みバージョンを保護するために自動保存をスキップしました。空のキャンバスを保存するには、手動で「保存」をクリックしてください。',
+    },
   },
   notifications: {
     markAllRead: 'すべて既読',
   },
 
+  agent: {
+    clearConfirmTitle: '現在のセッションのメッセージをクリア',
+    clearConfirm: '現在のセッションで表示中のメッセージのみをクリアします。他のセッションには影響しません。よろしいですか？',
+    deleteSessionConfirmTitle: '現在のセッションを削除',
+    deleteSessionConfirm: 'セッション「{title}」とそのチャット履歴を削除します。この操作は元に戻せません。削除しますか？',
+  },
   agentReplay: {
     entry: 'リプレイを見る',
     title: '実行リプレイ',
@@ -888,6 +919,7 @@ export default {
   },
   router: {
     notFound: 'ページが見つかりません',
+    serviceUnavailable: 'サービス一時利用不可',
     welcome: 'ようこそ',
     login: 'ログイン',
     register: '登録',
