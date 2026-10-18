@@ -13,6 +13,11 @@ resume 之后，已经派发却永远没有返回的 tool_call 没有账可核�
 MAX 续号）。call 与 result 各占一个序号，"result 序号 > call 序号"即配对
 顺序的可核证据；唯一约束同时把"同一事件重复落账"挡在 DB 层。
 
+多副本部署（同一 task 可能在多个 API 进程间轮转 resume）下，进程内序号缓存
+可能落后于库内 MAX：本模块在唯一冲突时刷新缓存并重试一次，且
+``record_result`` 会区分"同 call 已有 result（真重复）"与"序号撞车（刷新重试）"，
+绝不把真实结果误判成重复而丢弃。
+
 合成终态（崩溃/取消/resume 时对未完成 call 的补写；写入规则）：
 
     REGISTERED + interrupt → TOOL_NOT_STARTED         （已登记未派发：进程死了）
@@ -82,18 +87,29 @@ _seq_counters: dict[str, int] = {}
 _seq_lock = asyncio.Lock()
 
 
+async def _load_db_max_seq(db: Any, task_id: str) -> int:
+    max_call = (await db.execute(
+        select(func.max(AgentToolCall.source_event_seq))
+        .where(AgentToolCall.task_id == task_id)
+    )).scalar()
+    max_result = (await db.execute(
+        select(func.max(AgentToolResult.source_event_seq))
+        .where(AgentToolResult.task_id == task_id)
+    )).scalar()
+    return max(int(max_call or 0), int(max_result or 0))
+
+
+async def _resync_seq(db: Any, task_id: str) -> int:
+    """把进程内序号缓存刷新到库内 MAX（唯一冲突后调用：缓存可能已过期）。"""
+    async with _seq_lock:
+        _seq_counters[task_id] = await _load_db_max_seq(db, task_id)
+        return _seq_counters[task_id]
+
+
 async def _next_seq(db: Any, task_id: str) -> int:
     async with _seq_lock:
         if task_id not in _seq_counters:
-            max_call = (await db.execute(
-                select(func.max(AgentToolCall.source_event_seq))
-                .where(AgentToolCall.task_id == task_id)
-            )).scalar()
-            max_result = (await db.execute(
-                select(func.max(AgentToolResult.source_event_seq))
-                .where(AgentToolResult.task_id == task_id)
-            )).scalar()
-            _seq_counters[task_id] = max(int(max_call or 0), int(max_result or 0))
+            _seq_counters[task_id] = await _load_db_max_seq(db, task_id)
         _seq_counters[task_id] += 1
         return _seq_counters[task_id]
 
@@ -122,42 +138,62 @@ async def register_calls(
     ``calls`` = ``(call_id, tool_name, args)`` 序列。同一 task 内 call_id 已存在
     → 幂等跳过（resume 重放不会二次登记）。返回新登记行数；任何 DB 故障
     fail-open（返回 0，只记 warning）。
+
+    多副本：进程内序号缓存可能落后于库内 MAX → 唯一冲突时刷新缓存重试一次
+    （整批回滚后按库里已有 call_id 去重，不会二次登记）。
     """
     specs = list(calls)
     if not task_id or not specs:
         return 0
-    try:
-        async with AsyncSessionLocal() as db:
-            wanted = [c[0] for c in specs]
-            existing = set((await db.execute(
-                select(AgentToolCall.call_id)
-                .where(AgentToolCall.task_id == task_id)
-                .where(AgentToolCall.call_id.in_(wanted))
-            )).scalars().all())
-            inserted = 0
-            seen: set[str] = set()
-            for call_id, tool_name, args in specs:
-                if not call_id or call_id in existing or call_id in seen:
-                    continue
-                seen.add(call_id)
-                seq = await _next_seq(db, task_id)
-                db.add(AgentToolCall(
-                    task_id=task_id,
-                    call_id=call_id,
-                    tool_name=tool_name,
-                    arguments=_dump_args(args),
-                    source_event_seq=seq,
-                    status=STATUS_REGISTERED,
-                ))
-                inserted += 1
-            if inserted:
-                await db.commit()
-            return inserted
-    except Exception as e:  # noqa: BLE001 — 账本故障不得打断执行
-        logger.warning(
-            "tool ledger register failed (task=%s): %s", log_safe(task_id), log_safe(e),
-        )
-        return 0
+    for attempt in range(2):
+        try:
+            async with AsyncSessionLocal() as db:
+                wanted = [c[0] for c in specs]
+                existing = set((await db.execute(
+                    select(AgentToolCall.call_id)
+                    .where(AgentToolCall.task_id == task_id)
+                    .where(AgentToolCall.call_id.in_(wanted))
+                )).scalars().all())
+                inserted = 0
+                seen: set[str] = set()
+                for call_id, tool_name, args in specs:
+                    if not call_id or call_id in existing or call_id in seen:
+                        continue
+                    seen.add(call_id)
+                    seq = await _next_seq(db, task_id)
+                    db.add(AgentToolCall(
+                        task_id=task_id,
+                        call_id=call_id,
+                        tool_name=tool_name,
+                        arguments=_dump_args(args),
+                        source_event_seq=seq,
+                        status=STATUS_REGISTERED,
+                    ))
+                    inserted += 1
+                if inserted:
+                    await db.commit()
+                return inserted
+        except IntegrityError as e:
+            logger.warning(
+                "tool ledger register 唯一冲突，刷新序号后重试（task=%s, attempt=%d）: %s",
+                log_safe(task_id), attempt + 1, log_safe(e),
+            )
+            try:
+                async with AsyncSessionLocal() as db:
+                    await _resync_seq(db, task_id)
+            except Exception as e2:  # noqa: BLE001 — 刷新失败即放弃本批（fail-open）
+                logger.warning(
+                    "tool ledger register 序号刷新失败（task=%s）: %s",
+                    log_safe(task_id), log_safe(e2),
+                )
+                return 0
+            continue
+        except Exception as e:  # noqa: BLE001 — 账本故障不得打断执行
+            logger.warning(
+                "tool ledger register failed (task=%s): %s", log_safe(task_id), log_safe(e),
+            )
+            return 0
+    return 0
 
 
 async def mark_dispatched(task_id: str | None, call_id: str) -> bool:
@@ -196,56 +232,72 @@ async def record_result(
     - 无对应 call → ``OrphanToolResultError``（显式报错，不静默丢账）；
     - 已落定（COMPLETED/FAILED/合成终态）→ 幂等拦截，返回 False，不覆盖首条账目；
     - 唯一约束 (task_id, call_id) / (task_id, source_event_seq) 兜底防重复入账。
+      冲突时先判"同 call 是否已有 result"：有 → 真重复；无 → 序号缓存过期，
+      刷新 MAX 后重试一次（多副本 resume 的既有部署形态）。
     """
     if not task_id or not call_id:
         return False
-    try:
-        async with AsyncSessionLocal() as db:
-            call = (await db.execute(
-                select(AgentToolCall)
-                .where(AgentToolCall.task_id == task_id)
-                .where(AgentToolCall.call_id == call_id)
-            )).scalars().first()
-            if call is None:
-                raise OrphanToolResultError(
-                    f"task={task_id} call_id={call_id} 没有对应的 call 记录"
-                )
-            if call.status in _TERMINAL_ACCOUNTED:
-                logger.warning(
-                    "重复 tool result 已拦截（task=%s, call=%s, status=%s）",
-                    log_safe(task_id), log_safe(call_id), call.status,
-                )
-                return False
-            seq = await _next_seq(db, task_id)
-            db.add(AgentToolResult(
-                task_id=task_id,
-                call_id=call_id,
-                tool_call_pk=call.id,
-                source_event_seq=seq,
-                status="success" if success else "error",
-                result_summary=_clip_result(result),
-                error_type=(error_type or None),
-            ))
-            call.status = STATUS_COMPLETED if success else STATUS_FAILED
-            call.updated_at = datetime.utcnow()
-            try:
-                await db.commit()
-            except IntegrityError as e:
-                await db.rollback()
-                logger.warning(
-                    "重复 tool result 命中唯一约束（task=%s, call=%s）: %s",
-                    log_safe(task_id), log_safe(call_id), log_safe(e),
-                )
-                return False
-            return True
-    except OrphanToolResultError:
-        raise
-    except Exception as e:  # noqa: BLE001
-        logger.warning(
-            "tool ledger result failed (task=%s, call=%s): %s",
-            log_safe(task_id), log_safe(call_id), log_safe(e),
-        )
-        return False
+    for attempt in range(2):
+        try:
+            async with AsyncSessionLocal() as db:
+                call = (await db.execute(
+                    select(AgentToolCall)
+                    .where(AgentToolCall.task_id == task_id)
+                    .where(AgentToolCall.call_id == call_id)
+                )).scalars().first()
+                if call is None:
+                    raise OrphanToolResultError(
+                        f"task={task_id} call_id={call_id} 没有对应的 call 记录"
+                    )
+                if call.status in _TERMINAL_ACCOUNTED:
+                    logger.warning(
+                        "重复 tool result 已拦截（task=%s, call=%s, status=%s）",
+                        log_safe(task_id), log_safe(call_id), call.status,
+                    )
+                    return False
+                seq = await _next_seq(db, task_id)
+                db.add(AgentToolResult(
+                    task_id=task_id,
+                    call_id=call_id,
+                    tool_call_pk=call.id,
+                    source_event_seq=seq,
+                    status="success" if success else "error",
+                    result_summary=_clip_result(result),
+                    error_type=(error_type or None),
+                ))
+                call.status = STATUS_COMPLETED if success else STATUS_FAILED
+                call.updated_at = datetime.utcnow()
+                try:
+                    await db.commit()
+                except IntegrityError as e:
+                    await db.rollback()
+                    duplicate = (await db.execute(
+                        select(AgentToolResult.id)
+                        .where(AgentToolResult.task_id == task_id)
+                        .where(AgentToolResult.call_id == call_id)
+                    )).scalars().first()
+                    if duplicate is not None:
+                        logger.warning(
+                            "重复 tool result 命中唯一约束（task=%s, call=%s）: %s",
+                            log_safe(task_id), log_safe(call_id), log_safe(e),
+                        )
+                        return False
+                    logger.warning(
+                        "tool ledger result 序号冲突，刷新后重试（task=%s, call=%s, attempt=%d）: %s",
+                        log_safe(task_id), log_safe(call_id), attempt + 1, log_safe(e),
+                    )
+                    await _resync_seq(db, task_id)
+                    continue
+                return True
+        except OrphanToolResultError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "tool ledger result failed (task=%s, call=%s): %s",
+                log_safe(task_id), log_safe(call_id), log_safe(e),
+            )
+            return False
+    return False
 
 
 # ── 合成终态 ─────────────────────────────────────────────────────────────────
@@ -287,6 +339,10 @@ async def synthesize_terminal(task_id: str | None, *, reason: str) -> dict[str, 
                 if changed:
                     counts[target] = counts.get(target, 0) + changed
             await db.commit()
+            # 收敛后释放进程内序号缓存：任务可能跨进程继续 resume，下一次从
+            # 库内 MAX 重新续号（顺带避免长跑进程的缓存条目只增不减）。
+            async with _seq_lock:
+                _seq_counters.pop(task_id, None)
     except Exception as e:  # noqa: BLE001
         logger.warning(
             "tool ledger synthesis failed (task=%s, reason=%s): %s",
