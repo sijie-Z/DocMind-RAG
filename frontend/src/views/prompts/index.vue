@@ -163,7 +163,7 @@
                   </n-tooltip>
                   <n-button type="primary" size="small" @click="handleUse(item)">
                     <template #icon><n-icon><PlayOutline /></n-icon></template>
-                    应用到对话
+                    {{ t('prompts.fillToChat') }}
                   </n-button>
                   <div class="flex gap-1">
                     <n-button size="tiny" quaternary @click="handleEdit(item)">
@@ -473,16 +473,18 @@ const handleCopy = (item: PromptTemplate) => {
   showDrawer.value = true
 }
 
-// 直接应用到对话 - 跳转到聊天页面并带上提示词
-// W2-T7：上限与聊天页（chat/index.vue MAX_SYSTEM_PROMPT_LENGTH）对齐 5000——
+// 填入对话输入框 - 跳转到聊天页面并带上提示词
+// W2-T7：上限与聊天页（chat/index.vue MAX_PROMPT_LENGTH）对齐 5000——
 // 超限在源头即明确报错，不再把词交给聊天页后被静默丢弃（第三轮终检 §2.4）。
+// E14/P2：聊天页把提示词填入输入框（B3 后无 systemPrompt 通道），按钮文案
+// 如实说明动作，不承诺「应用/生效」；不再携带已无消费方的 promptName 参数。
 const MAX_PROMPT_LENGTH = 5000
 const handleUse = (item: PromptTemplate) => {
   if (item.content && item.content.length > MAX_PROMPT_LENGTH) {
     message.error(t('chat.promptTooLong', { max: MAX_PROMPT_LENGTH }))
     return
   }
-  router.push({ name: 'Chat', query: { prompt: item.content, promptName: item.name } })
+  router.push({ name: 'Chat', query: { prompt: item.content } })
 }
 
 const handleSubmit = async () => {

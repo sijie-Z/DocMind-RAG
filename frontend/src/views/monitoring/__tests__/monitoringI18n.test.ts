@@ -21,7 +21,7 @@ const FLAT_KEYS = [
   'kbStatus', 'totalDocs', 'totalChunks', 'indexSize', 'searchRequests',
   'alertStatus', 'activeAlerts', 'critical', 'warning', 'normal', 'info',
   'cpuTrend', 'memoryTrend', 'requestTrend', 'responseTrend', 'recentAlerts',
-  'noData',
+  'noData', 'loadFailed', 'loadFailedDesc', 'auditLoadFailed',
 ]
 
 const NESTED: Array<[string, string[]]> = [

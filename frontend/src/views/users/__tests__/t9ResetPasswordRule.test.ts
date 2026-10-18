@@ -117,6 +117,11 @@ describe('重置密码弹窗最小长度与后端口径对齐（≥8）', () => 
     await openResetAndSubmit('12345678')
 
     expect(mockedResetUserPassword).toHaveBeenCalledTimes(1)
-    expect(mockedResetUserPassword).toHaveBeenCalledWith(2, '12345678')
+    // E14/D1：第三个实参为 silent 请求配置（X-Silent-Error）
+    expect(mockedResetUserPassword).toHaveBeenCalledWith(
+      2,
+      '12345678',
+      expect.objectContaining({ headers: { 'X-Silent-Error': '1' } }),
+    )
   })
 })

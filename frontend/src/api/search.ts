@@ -92,8 +92,12 @@ export interface SearchStats {
 }
 
 // 搜索知识库
+// E14/D2：失败由搜索页的内联错误态（含重试）呈现 —— 带 X-Silent-Error
+// 关闭响应拦截器的全局 toast，避免同一失败出现两个提示表面。
 export const searchKnowledge = async (params: SearchRequest): Promise<SearchResult[]> => {
-  const response = await request.post('/knowledge/search', params)
+  const response = await request.post('/knowledge/search', params, {
+    headers: { 'X-Silent-Error': '1' }
+  })
   return response.data.results || []
 }
 

@@ -106,6 +106,9 @@ export default {
     deleteConfirmWithName: 'ユーザー「{username}」を削除しますか？この操作は取り消せません。',
     subtitle: 'システム内の全ユーザー情報と権限を管理',
     noData: 'ユーザーデータがありません',
+    loadFailed: 'ユーザーの読み込みに失敗しました',
+    loadFailedDesc: 'ユーザー一覧を読み込めませんでした。ネットワークを確認するか、後でもう一度お試しください。',
+    orgOptionsLoadFailed: '組織の選択肢を読み込めませんでした。後でもう一度お試しください。',
     selectOrgs: '所属組織を選択',
     initialPassword: '初期パスワード'
   },
@@ -279,11 +282,7 @@ export default {
     sourceDoc: 'ドキュメント',
     relevanceMatch: '一致度：{score}%',
     msgLoadFailed: '履歴メッセージの読み込みに失敗しました',
-    promptApplied: 'プロンプトテンプレート「{name}」を適用しました。対話を開始してください',
-    promptDefaultName: '無題',
-    currentTemplate: '現在のテンプレート：{name}',
-    clearTemplate: 'クリア',
-    promptCleared: 'プロンプトテンプレートを解除しました',
+    promptFilled: 'プロンプトを入力欄に挿入しました。確認してから送信してください',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
     sseWarning: 'サーバーからの通知：今回の回答が不完全な可能性があります',
     backToConversations: '対話リストに戻る',
@@ -364,6 +363,7 @@ export default {
   },
   prompts: {
     subtitle: 'AIアシスタントのシステムプロンプトと応答スタイルを管理します',
+    fillToChat: '入力欄に挿入',
     addTemplate: 'テンプレート追加',
     editTemplate: 'テンプレート編集',
     empty: 'プロンプトテンプレートがありません',
@@ -678,6 +678,9 @@ export default {
     responseTrend: '応答時間推移',
     recentAlerts: '最近のアラート',
     noData: 'データなし',
+    loadFailed: '監視データの読み込みに失敗しました',
+    loadFailedDesc: 'ネットワークを確認するか、しばらくしてから再試行してください。',
+    auditLoadFailed: '監査ログの取得に失敗しました',
     timeRange: {
       hour1: '直近1時間',
       hour6: '直近6時間',
@@ -713,6 +716,9 @@ export default {
     relevanceScore: '関連度',
     noResults: '結果が見つかりませんでした',
     noResultsDesc: '別のキーワードを試すか、フィルタを調整してください',
+    searchFailed: '検索に失敗しました',
+    searchErrorDesc: 'ネットワークを確認するか、しばらくしてから再試行してください。',
+    noOrganization: 'アカウントがまだどの組織にも所属していないため、検索できません',
     fileContent: 'ファイル内容',
     askAIQuestion: 'ファイル「{filename}」について：{query}',
     askAIQuestionGeneric: 'ファイル「{filename}」の主な内容を要約してください',
@@ -778,6 +784,9 @@ export default {
   },
 
   agent: {
+    sessionSelectorLabel: 'Agent セッションを選択',
+    newSessionOption: '+ 新規セッション',
+    untitledSession: '無題',
     clearConfirmTitle: '現在のセッションのメッセージをクリア',
     clearConfirm: '現在のセッションで表示中のメッセージのみをクリアします。他のセッションには影響しません。よろしいですか？',
     deleteSessionConfirmTitle: '現在のセッションを削除',

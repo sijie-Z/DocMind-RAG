@@ -106,6 +106,9 @@ export default {
     deleteConfirmWithName: 'Voulez-vous vraiment supprimer l\'utilisateur {username} ? Cette action est irréversible.',
     subtitle: 'Gérer toutes les informations et permissions des utilisateurs',
     noData: 'Aucune donnée utilisateur',
+    loadFailed: 'Échec du chargement des utilisateurs',
+    loadFailedDesc: 'Impossible de charger la liste des utilisateurs. Vérifiez votre réseau ou réessayez plus tard.',
+    orgOptionsLoadFailed: 'Impossible de charger les options d\'organisation. Réessayez plus tard.',
     selectOrgs: 'Sélectionnez les organisations',
     initialPassword: 'Mot de passe initial'
   },
@@ -279,11 +282,7 @@ export default {
     sourceDoc: 'Document',
     relevanceMatch: 'Score de correspondance : {score} %',
     msgLoadFailed: 'Échec du chargement de l\'historique des messages',
-    promptApplied: 'Modèle de prompt "{name}" appliqué, vous pouvez commencer la conversation',
-    promptDefaultName: 'Sans nom',
-    currentTemplate: 'Modèle actuel : {name}',
-    clearTemplate: 'Effacer',
-    promptCleared: 'Modèle de prompt effacé',
+    promptFilled: 'Le prompt a été inséré dans le champ de saisie ; vérifiez-le avant de l\'envoyer',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
     sseWarning: 'Avis du serveur : cette réponse peut être incomplète',
     backToConversations: 'Revenir aux conversations',
@@ -364,6 +363,7 @@ export default {
   },
   prompts: {
     subtitle: 'Gérez les prompts système et le style de réponse de l’assistant IA',
+    fillToChat: 'Insérer dans la saisie',
     addTemplate: 'Nouveau modèle',
     editTemplate: 'Modifier le modèle',
     empty: 'Aucun modèle de prompt',
@@ -678,6 +678,9 @@ export default {
     responseTrend: 'Tendance du temps de réponse',
     recentAlerts: 'Alertes récentes',
     noData: 'Aucune donnée',
+    loadFailed: 'Échec du chargement des données de surveillance',
+    loadFailedDesc: 'Vérifiez votre réseau ou réessayez plus tard ; cliquez sur Réessayer pour recharger.',
+    auditLoadFailed: 'Échec de la récupération des journaux d\'audit',
     timeRange: {
       hour1: 'Dernière heure',
       hour6: '6 dernières heures',
@@ -713,6 +716,9 @@ export default {
     relevanceScore: 'Pertinence',
     noResults: 'Aucun résultat trouvé',
     noResultsDesc: 'Essayez d\'autres mots-clés ou ajustez les filtres',
+    searchFailed: 'Échec de la recherche',
+    searchErrorDesc: 'Vérifiez votre réseau ou réessayez plus tard ; cliquez sur Réessayer pour relancer la recherche.',
+    noOrganization: 'Votre compte n\'a encore rejoint aucune organisation ; la recherche est indisponible.',
     fileContent: 'Contenu du fichier',
     askAIQuestion: 'À propos du fichier « {filename} » : {query}',
     askAIQuestionGeneric: 'À propos du fichier « {filename} », veuillez résumer les points clés',
@@ -778,6 +784,9 @@ export default {
   },
 
   agent: {
+    sessionSelectorLabel: 'Sélectionner une session Agent',
+    newSessionOption: '+ Nouvelle session',
+    untitledSession: 'Sans titre',
     clearConfirmTitle: 'Effacer les messages de la session actuelle',
     clearConfirm: 'Seuls les messages affichés de la session actuelle seront effacés. Les autres sessions ne sont pas affectées. Effacer maintenant ?',
     deleteSessionConfirmTitle: 'Supprimer la session actuelle',

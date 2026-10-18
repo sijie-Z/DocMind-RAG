@@ -164,6 +164,22 @@
             </div>
           </div>
 
+          <!-- 失败态（E14/D2）：独立于「无结果」，含重试；失败时旧结果已清空，
+               不把上一次的结果冒充本次结果，也不把失败伪装成空结果 -->
+          <div v-else-if="searchError && !loading"
+            class="search-error h-full flex flex-col items-center justify-center text-center p-12">
+            <div
+              class="w-24 h-24 bg-red-50 dark:bg-red-900/20 rounded-[2.5rem] flex items-center justify-center mb-6">
+              <n-icon size="48" class="text-red-400"><AlertCircleOutline /></n-icon>
+            </div>
+            <h3 class="text-xl font-bold text-gray-700 dark:text-gray-200 mb-2">{{ t('search.searchFailed') }}</h3>
+            <p class="search-error-msg text-gray-500 max-w-md mb-6">{{ searchError }}</p>
+            <n-button v-if="currentOrgId" class="search-retry" type="primary" round @click="handleSearch">
+              <template #icon><n-icon><RefreshOutline /></n-icon></template>
+              {{ t('common.retry') }}
+            </n-button>
+          </div>
+
           <!-- 无结果/初始状态 -->
           <div v-else-if="hasSearched && !loading"
             class="h-full flex flex-col items-center justify-center text-center p-12">
@@ -231,9 +247,10 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useDedupedMessage } from '@/utils/message'
 import { NIcon, NSpin, NRadioGroup, NRadio, NSpace, NCheckboxGroup, NCheckbox, NSelect, NTag, NButton, NModal } from 'naive-ui'
-import { SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline, SparklesOutline, DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline } from '@vicons/ionicons5'
+import { SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline, SparklesOutline, DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline, AlertCircleOutline, RefreshOutline } from '@vicons/ionicons5'
 import { searchKnowledge, getSearchSuggestions, getSearchStats, buildSearchPayload } from '@/api/search'
 import type { SearchResult, SearchStats } from '@/api/search'
+import { getErrorMessage } from '@/utils/apiError'
 import { debounce } from 'lodash-es'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
@@ -260,6 +277,8 @@ const selectedResult = ref<SearchResult | null>(null)
 const showDetailModal = ref(false)
 const loading = ref(false)
 const hasSearched = ref(false)
+// E14/D2：失败态独立于「无结果」——null = 无失败；非空 = 展示错误文案与重试入口
+const searchError = ref<string | null>(null)
 
 // P1 修复：原取值 organizations[0].id 是成员列表首项，多组织用户下未必是
 // 「当前组织」。统一改用 user store 的 currentOrgId 口径（当前组织
@@ -315,19 +334,28 @@ const getFileTypeIcon = (type?: string) => {
   return map[(type ?? '').toLowerCase()] || DocumentOutline
 }
 
+// 请求序号：并发搜索只认最后一次 —— 先发的慢响应迟到返回时不得覆盖后发的
+// 结果/失败态（E14/D2：旧结果不得冒充本次结果）。
+let searchSeq = 0
+
 const handleSearch = async () => {
   if (!searchQuery.value.trim()) return
+  const seq = ++searchSeq
   const orgId = currentOrgId.value
+  searchError.value = null
+  hasSearched.value = true
   if (!orgId) {
     // organization_id 为后端 schema 必填；无当前组织时请求必 422 ——
-    // 显式报错，不把校验失败伪装成「未找到相关结果」。
-    message.error(t('search.searchFailed') || t('common.error'))
+    // 明确失败态（不把校验失败伪装成「未找到相关结果」，也不保留旧结果）。
+    // 文案必须如实：这是组织上下文缺失，不是网络故障（重试前请先切换/加入组织）。
+    searchResults.value = []
+    searchError.value = t('search.noOrganization')
+    loading.value = false
     return
   }
   loading.value = true
-  hasSearched.value = true
   try {
-    searchResults.value = await searchKnowledge(buildSearchPayload({
+    const results = await searchKnowledge(buildSearchPayload({
       query: searchQuery.value,
       organizationId: orgId,
       // 'auto'（自动路由）时 buildSearchPayload 不发送 search_mode ——
@@ -335,10 +363,16 @@ const handleSearch = async () => {
       searchMode: searchType.value,
       fileTypes: selectedFileTypes.value
     }))
-  } catch (e) {
-    message.error(t('search.searchFailed') || t('common.error'))
+    if (seq !== searchSeq) return
+    searchResults.value = results
+  } catch (err) {
+    if (seq !== searchSeq) return
+    // E14/D2：失败 ≠ 空结果。清空上一次结果（不冒充本次结果），置独立错误态；
+    // 文案统一走 getErrorMessage（5xx/传输层回退 i18n，axios 黑话不上屏）。
+    searchResults.value = []
+    searchError.value = getErrorMessage(err, t('search.searchErrorDesc'))
   } finally {
-    loading.value = false
+    if (seq === searchSeq) loading.value = false
   }
 }
 

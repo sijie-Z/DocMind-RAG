@@ -22,6 +22,7 @@ import { getKnowledgeBases, deleteKnowledgeBase, batchDeleteKnowledgeBases, rebu
 import { getWorkflows, deleteWorkflow } from '../workflow'
 import { getPrompts, deletePrompt, createPrompt } from '../prompt'
 import { getNotifications, getNotificationSummary, deleteNotification, batchDeleteNotifications } from '../notification'
+import { getMonitoringDashboard, getMonitoringAlerts } from '../monitoring'
 
 const silentHeader = (config: unknown) =>
   (config as { headers?: Record<string, unknown> } | undefined)?.headers?.['X-Silent-Error']
@@ -102,5 +103,17 @@ describe('通知页：页面管理器错误 → 请求静默', () => {
     // 布局铃铛等未要求静默的调用方仍由全局拦截器兜底提示
     await getNotifications()
     expect(silentHeader(mocks.get.mock.calls[2][1])).toBeUndefined()
+  })
+})
+
+describe('监控页：内联错误态 + 重试 → 主数据请求静默', () => {
+  it('dashboard / alerts 带 X-Silent-Error（否则内联错误态与全局 toast 双提示）', async () => {
+    await getMonitoringDashboard()
+    expect(mocks.get.mock.calls[0][0]).toBe('/monitoring/dashboard')
+    expect(silentHeader(mocks.get.mock.calls[0][1])).toBe('1')
+
+    await getMonitoringAlerts()
+    expect(mocks.get.mock.calls[1][0]).toBe('/monitoring/alerts')
+    expect(silentHeader(mocks.get.mock.calls[1][1])).toBe('1')
   })
 })

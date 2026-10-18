@@ -58,7 +58,11 @@ export interface MonitoringDashboard {
 }
 
 export const getMonitoringDashboard = async (): Promise<{ data: MonitoringDashboard }> => {
-  return request.get('/monitoring/dashboard')
+  // E14/D1：失败由监控页内联错误态（标题/描述/重试）呈现 —— 带 X-Silent-Error
+  // 关闭响应拦截器的全局 toast，避免同一失败出现双提示。
+  return request.get('/monitoring/dashboard', {
+    headers: { 'X-Silent-Error': '1' }
+  })
 }
 
 /**
@@ -89,8 +93,10 @@ export const getMetrics = async (
 }
 
 export const getMonitoringAlerts = async (limit: number = 10): Promise<{ data: { alerts: Alert[]; total: number } }> => {
+  // E14/D1：与 dashboard 同一页面错误面（Promise.all 任一失败 → 内联错误态）
   return request.get('/monitoring/alerts', {
-    params: { limit }
+    params: { limit },
+    headers: { 'X-Silent-Error': '1' }
   })
 }
 

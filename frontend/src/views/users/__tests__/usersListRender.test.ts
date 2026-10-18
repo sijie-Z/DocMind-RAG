@@ -157,7 +157,9 @@ describe('UsersView · 列表契约（A1/B18/B19/B21）', () => {
     const dt = wrapper.findComponent(DataTableStub)
     ;(dt.props('pagination') as { onChange: (p: number) => void }).onChange(2)
     await flushPromises()
-    expect(mockedGetUsers).toHaveBeenLastCalledWith({ skip: 10, limit: 10 })
+    // E14/D1：第二个实参为 silent 请求配置（X-Silent-Error），分页参数仍只含 skip/limit
+    const lastCall = mockedGetUsers.mock.calls[mockedGetUsers.mock.calls.length - 1]
+    expect(lastCall[0] as Record<string, unknown>).toEqual({ skip: 10, limit: 10 })
   })
 
   it('状态列绑定真实 is_active 布尔：false → "禁用"，true → "激活"', async () => {

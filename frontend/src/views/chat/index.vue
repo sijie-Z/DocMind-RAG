@@ -48,13 +48,11 @@
         :hasConversation="!!currentConversationId"
         :isBoundMode="isBoundMode"
         :debugEnabled="debugEnabled"
-        :activeTemplateName="activePromptName"
         @toggleSidebar="toggleSidebar"
         @clearChat="clearChat"
         @unbind="handleUnbind"
         @exportChat="handleExportChat"
         @toggleDebug="toggleDebug"
-        @clearTemplate="clearActivePrompt"
       />
 
       <!-- Mobile back-to-conversations button -->
@@ -170,25 +168,11 @@ const chatMessagesRef = ref()
 const msgLoadError = ref(false)
 const windowWidth = ref(window.innerWidth)
 
-// W2-T7：系统提示词应用上限（与 prompts/index.vue 表单 maxlength 对齐；
-// 改一处必须同步另一处，chatPromptApply.test.ts 钉住边界）
-const MAX_SYSTEM_PROMPT_LENGTH = 5000
-
-// E11-②：提示词模板常驻标识——应用后头部可见、可清除。null = 当前无已应用
-// 模板；名字为空回退「未命名」。真相源仍是 localStorage 双键（useChatSend
-// 发送时读取），本状态只负责头部展示的同步。
-const activePromptName = ref<string | null>(null)
-const syncActivePromptBadge = () => {
-  activePromptName.value = localStorage.getItem('activeSystemPrompt')
-    ? (localStorage.getItem('activeSystemPromptName') || t('chat.promptDefaultName'))
-    : null
-}
-const clearActivePrompt = () => {
-  localStorage.removeItem('activeSystemPrompt')
-  localStorage.removeItem('activeSystemPromptName')
-  activePromptName.value = null
-  message.success(t('chat.promptCleared'))
-}
+// W2-T7：提示词「应用」内容上限（与 prompts/index.vue 表单 maxlength 对齐；
+// 改一处必须同步另一处，chatPromptApply.test.ts 钉住边界）。
+// E14/P2：B3 已删除 activeSystemPrompt 发送通道——本页不再有「当前模板」
+// 状态与头部徽标（旧常驻标识宣称「已生效」与实际不符，已随死通道一并移除）。
+const MAX_PROMPT_LENGTH = 5000
 
 const {
   messages, showBackToBottom,
@@ -570,8 +554,6 @@ const handleOpenSource = async (source: KnowledgeSource) => {
 onMounted(async () => {
   const token = userStore.token || getToken()
   if (!token) { router.push({ name: 'Login' }); return }
-  // E11-②：头部模板标识回读（切页返回 / 刷新后仍可见可清）
-  syncActivePromptBadge()
   checkScreenSize()
   window.addEventListener('resize', checkScreenSize)
   const handleResize = () => { windowWidth.value = window.innerWidth }
@@ -581,11 +563,11 @@ onMounted(async () => {
   const conversationId = route.query.conversation_id as string
   if (conversationId) await loadConversation(conversationId)
 
-  // URL 消费型参数一次性捕获 + 统一清理：prompt/promptName（提示词应用）与
-  // q/context（搜索「问问 AI」跨页上下文）用后即清。分开 replace 会因导航
-  // 异步互相覆盖（后一次 spread 仍读到旧 query），故合并为一次。
+  // URL 消费型参数一次性捕获 + 统一清理：prompt（提示词填入输入框）与
+  // q/context（搜索「问问 AI」跨页上下文）用后即清；promptName 为旧链接
+  // 兼容清理（E14/P2 起不再有消费方）。分开 replace 会因导航异步互相覆盖
+  // （后一次 spread 仍读到旧 query），故合并为一次。
   const promptContent = route.query.prompt as string
-  const promptName = route.query.promptName as string
   const searchQuestion = route.query.q as string
   const searchContext = route.query.context as string
   if (promptContent || searchQuestion) {
@@ -601,18 +583,16 @@ onMounted(async () => {
   }
 
   if (promptContent) {
-    inputMessage.value = ''
     // W2-T7：上限与提示词表单 maxlength（prompts/index.vue）对齐 5000——
     // 修前这里只接受 <=2000 且无 else 分支：2001~5000 字的提示词点「应用」后
     // 静默丢弃（第三轮终检 §2.4）。超限改为明确报错，不再无声失败。
-    if (typeof promptContent === 'string' && promptContent.length <= MAX_SYSTEM_PROMPT_LENGTH) {
-      message.info(t('chat.promptApplied', { name: promptName || t('chat.promptDefaultName') }))
-      localStorage.setItem('activeSystemPrompt', promptContent)
-      localStorage.setItem('activeSystemPromptName', promptName || '')
-      // E11-②：应用后头部立即出现常驻标识
-      syncActivePromptBadge()
+    // E14/P2：B3 后模板不再随消息发送——不写 activeSystemPrompt 死键、
+    // 不声称「已应用」；改为把提示词填入输入框，由用户确认后自行发送。
+    if (typeof promptContent === 'string' && promptContent.length <= MAX_PROMPT_LENGTH) {
+      inputMessage.value = promptContent
+      message.info(t('chat.promptFilled'))
     } else {
-      message.error(t('chat.promptTooLong', { max: MAX_SYSTEM_PROMPT_LENGTH }))
+      message.error(t('chat.promptTooLong', { max: MAX_PROMPT_LENGTH }))
     }
   }
 

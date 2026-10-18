@@ -28,9 +28,9 @@
 
     <!-- Error state -->
     <div v-if="loadError" class="py-16">
-      <n-result status="error" title="加载失败" :description="loadErrorMsg">
+      <n-result status="error" :title="t('monitoring.loadFailed')" :description="loadErrorMsg">
         <template #footer>
-          <n-button type="primary" round @click="refreshData">重试</n-button>
+          <n-button type="primary" round @click="refreshData">{{ t('common.retry') }}</n-button>
         </template>
       </n-result>
     </div>
@@ -202,7 +202,12 @@ import echarts from '@/utils/echarts'
 import { getMonitoringDashboard, getMonitoringAlerts, getMetrics, type TrendPoint } from '@/api/monitoring'
 import request from '@/utils/request'
 import { apiUnwrap } from '@/utils/apiUnwrap'
+import { getErrorMessage } from '@/utils/apiError'
 import { filterPointsByTimeRange } from './timeRange'
+
+// E14/D1：审计日志错误由本页 toast 呈现 —— 带 X-Silent-Error 关闭响应拦截器
+// 的全局 toast，避免同一失败两次弹提示。
+const AUDIT_SILENT_CONFIG = { headers: { 'X-Silent-Error': '1' } } as const
 
 interface SystemMetrics {
   cpu_percent: number
@@ -347,13 +352,19 @@ const auditColumns = [
   }
 ]
 
+// 审计日志请求序号：刷新与翻页可能重叠，旧响应不得覆盖新分页数据，
+// 也不得在新请求成功后补弹旧失败 toast。
+let auditSeq = 0
+
 const fetchAuditLogs = async () => {
+  const seq = ++auditSeq
   auditLoading.value = true
   try {
     const res = await getAuditLogs({
       skip: (auditPagination.page - 1) * auditPagination.pageSize,
       limit: auditPagination.pageSize
-    })
+    }, AUDIT_SILENT_CONFIG)
+    if (seq !== auditSeq) return
     const resData = res.data as unknown as Record<string, unknown>
     const innerData = resData?.data as Record<string, unknown> | undefined
     if (resData?.success && innerData) {
@@ -364,9 +375,11 @@ const fetchAuditLogs = async () => {
       auditPagination.itemCount = resData.total as number
     }
   } catch (err) {
-    message.error('获取审计日志失败')
+    if (seq !== auditSeq) return
+    // E14/D1：错误如实且只有这一条（silent 头已关闭全局 toast）
+    message.error(getErrorMessage(err, t('monitoring.auditLoadFailed')))
   } finally {
-    auditLoading.value = false
+    if (seq === auditSeq) auditLoading.value = false
   }
 }
 
@@ -497,12 +510,15 @@ const initCharts = () => {
   }
 }
 
-const updateMetricsCharts = async () => {
+const updateMetricsCharts = async (seq: number) => {
   try {
     // 趋势真实形状：{"data": [<快照>]}（monitoring.py:151-166；<2 条时 {"data": []}），
     // 元素键 timestamp(秒)/request_count/response_time 等（core/middleware.py:129-136）。
     // 旧前端读不存在的 resp.data.metrics → 三图恒不更新。
     const appMetricsResponse = await getMetrics('application', timeRange.value)
+    // 竞态守卫：请求等待期间可能已有更新的 loadData 启动并完成 —— 迟到的
+    // 图表数据不得覆盖最新结果（旧响应只允许在它仍是最新请求时写状态）。
+    if (seq !== loadSeq) return
     // GET /monitoring/metrics/{type} 为裸 {data: [...]} 单层体 → apiUnwrap 归一为数组
     const points = apiUnwrap<TrendPoint[]>(appMetricsResponse) || []
 
@@ -557,13 +573,19 @@ const updateSystemCharts = (
   }
 }
 
+// 请求序号（E14/D1）：自动刷新（30s）、手动刷新、切时间范围可能重叠——
+// 只认最后一次请求的状态，旧响应（无论成功或失败）不得覆盖最新结果/错误态。
+let loadSeq = 0
+
 const loadData = async () => {
+  const seq = ++loadSeq
   loading.value = true
   try {
     const [dashboardResponse, alertsResponse] = await Promise.all([
       getMonitoringDashboard(),
       getMonitoringAlerts()
     ])
+    if (seq !== loadSeq) return
 
     const dashboardData = dashboardResponse.data
     const alertsData = alertsResponse.data
@@ -591,26 +613,36 @@ const loadData = async () => {
     updateSystemCharts(dashboardData.trends?.system)
 
     // 更新时间范围相关的图表（请求/响应趋势：真实 {data: history[]}）
-    await updateMetricsCharts()
-    
+    await updateMetricsCharts(seq)
+
     // 获取通知服务状态
     try {
       // 单前缀正确路径：axios baseURL 已含 /api/v1（utils/request.ts:140），
       // 旧写法 /api/monitoring/... 实际请求 /api/v1/api/monitoring/... 恒 404
       // （A_sweep A4 实锤 404；真实路由 monitoring.py:403-409）
       const notificationResponse = await request.get('/monitoring/notification/status')
+      // 竞态守卫：迟到响应不得覆盖最新请求的状态
+      if (seq !== loadSeq) return
       notificationStatus.value = notificationResponse.data
     } catch (error) {
       // 获取通知服务状态失败
     }
 
+    // E14/D1：成功路径复位错误态 —— 自动刷新（30s）/切时间范围再次成功时，
+    // 内容必须恢复展示，不能因一次失败永久停留在错误页（直到手动重试）。
+    // 仅最新请求可修改状态（旧请求迟到成功不得清掉新请求刚设置的错误态）。
+    if (seq !== loadSeq) return
+    loadError.value = false
+
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error)
-    message.error('加载监控数据失败：' + msg)
+    if (seq !== loadSeq) return
+    // E14/D1：错误如实（5xx/传输层回退 i18n，不上屏 axios 黑话）。
+    // 内联 n-result（标题/描述/重试）已是唯一提示表面 —— 不再弹 toast；
+    // 页面每 30s 自动刷新，弹 toast 还会造成周期性骚扰。
     loadError.value = true
-    loadErrorMsg.value = '加载监控数据失败：' + msg
+    loadErrorMsg.value = getErrorMessage(error, t('monitoring.loadFailedDesc'))
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
