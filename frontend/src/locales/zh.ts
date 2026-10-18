@@ -899,6 +899,8 @@ export default {
       query: '输入',
       error: '最近错误',
       unavailable: '结果不可用（任务不存在或不可见）',
+      refresh: '刷新结果',
+      refreshed: '结果已刷新',
       taskState: {
         pending: '排队中',
         running: '运行中',

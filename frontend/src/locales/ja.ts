@@ -819,6 +819,8 @@ export default {
       query: '入力',
       error: '最近のエラー',
       unavailable: '結果を表示できません（タスクが存在しないか、表示権限がありません）',
+      refresh: '結果を更新',
+      refreshed: '結果を更新しました',
       taskState: {
         pending: '待機中',
         running: '実行中',

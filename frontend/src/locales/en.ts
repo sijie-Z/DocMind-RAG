@@ -894,6 +894,8 @@ export default {
       query: 'Input',
       error: 'Last error',
       unavailable: 'Result unavailable (task missing or not visible to you)',
+      refresh: 'Refresh result',
+      refreshed: 'Result refreshed',
       taskState: {
         pending: 'Pending',
         running: 'Running',
