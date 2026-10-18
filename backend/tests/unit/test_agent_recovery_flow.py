@@ -758,3 +758,111 @@ async def test_resume_passes_task_org_truthfully_without_or1(db_factory, monkeyp
     assert captured == [None, 42], (
         "resume 必须如实传 task.organization_id（bug 形态：None 被 `or 1` 伪造为 1）"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# T7 断流收敛盲窗：任务行创建之后、agent.run 之前的 await / yield 同样要收敛
+# ══════════════════════════════════════════════════════════════════════════
+
+async def _wait_single_task_status(factory, status, timeout: float = 3.0):
+    """等待库中唯一任务行达到目标状态（shield 收尾单元在后台完成）。"""
+    deadline = time.monotonic() + timeout
+    task = None
+    while True:
+        async with factory() as db:
+            task = (await db.execute(select(AgentTask))).scalars().first()
+        if task is not None and task.status == status:
+            return task
+        if time.monotonic() >= deadline:
+            return task
+        await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+async def test_disconnect_during_referenced_doc_await_converges(db_factory, monkeypatch):
+    """T7 盲窗①：@引用解析（秒级 await）期间客户端断连——取消落在 pre-run
+    await 上，任务行必须收敛为可恢复失败态（FAILED + client_disconnect）。
+
+    修复前 try 从 agent.run 才开启：取消在 await 处直接逃逸，任务行永停
+    RUNNING（产品面无恢复入口）。变异点：把 try 还原到 run 之前 → 本用例红。
+    """
+    entered = asyncio.Event()
+    gate = asyncio.Event()
+
+    async def _gated_build(*args, **kwargs):
+        entered.set()
+        await gate.wait()
+        return None, []
+
+    monkeypatch.setattr(
+        "app.agent.service.build_referenced_document_context", _gated_build
+    )
+
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(
+        QUERY, organization_id=1, user_id=USER_ID, config=_agent_config(),
+        referenced_document_ids=["doc-1"],
+    )
+    consumer = asyncio.create_task(agen.__anext__())
+    await asyncio.wait_for(entered.wait(), timeout=3.0)
+    consumer.cancel()  # 客户端断连 → 取消落在 pre-run await 上
+    with pytest.raises(asyncio.CancelledError):
+        await consumer
+
+    task = await _wait_single_task_status(db_factory, TaskStatus.FAILED)
+    assert task is not None and task.status == TaskStatus.FAILED, (
+        f"pre-run await 期间的断流必须收敛（实测 {getattr(task, 'status', None)}）"
+    )
+    assert task.last_error_type == "client_disconnect"
+
+
+@pytest.mark.asyncio
+async def test_disconnect_at_reference_warning_yield_converges(db_factory, monkeypatch):
+    """T7 盲窗②：@引用 warning 事件（run 之前的 yield）处断流——同样收敛。
+
+    变异点：warning yield 留在 try 之外 → 任务行永停 RUNNING → 本用例红。
+    """
+    async def _warn_build(*args, **kwargs):
+        return None, ["引用文档不可用（不存在），已忽略：doc-x"]
+
+    monkeypatch.setattr(
+        "app.agent.service.build_referenced_document_context", _warn_build
+    )
+
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(
+        QUERY, organization_id=1, user_id=USER_ID, config=_agent_config(),
+        referenced_document_ids=["doc-x"],
+    )
+    event = await agen.__anext__()
+    assert event.type == "warning", "首个事件应为引用文档的诚告警"
+    await agen.aclose()  # 客户端切走：GeneratorExit 落在 yield 上
+
+    task = await _wait_single_task_status(db_factory, TaskStatus.FAILED)
+    assert task is not None and task.status == TaskStatus.FAILED, (
+        f"warning yield 断流必须收敛（实测 {getattr(task, 'status', None)}）"
+    )
+    assert task.last_error_type == "client_disconnect"
+
+
+@pytest.mark.asyncio
+async def test_disconnect_at_pre_run_meta_yield_converges(db_factory):
+    """T7 盲窗③：工具元信息 thinking 事件（run 之前的最后一个 yield）处断流。
+
+    变异点：meta yield 留在 try 之外 → 任务行永停 RUNNING → 本用例红。
+    """
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    event = await agen.__anext__()
+    assert event.type == "thinking", "run 之前应发出工具元信息事件"
+    await agen.aclose()  # 客户端切走：GeneratorExit 落在 yield 上
+
+    task = await _wait_single_task_status(db_factory, TaskStatus.FAILED)
+    assert task is not None and task.status == TaskStatus.FAILED, (
+        f"meta yield 断流必须收敛（实测 {getattr(task, 'status', None)}）"
+    )
+    assert task.last_error_type == "client_disconnect"
+
