@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import time
+from contextlib import suppress
 from datetime import datetime
 from typing import Any
 
@@ -504,22 +505,71 @@ async def rebuild_document_knowledge(
         if schedule_local:
             try:
                 from app.worker.doc_processor import processor
-                task = asyncio.create_task(processor.process(document_id, job.id))
+                # 先建协程再装成 task：create_task 失败时显式 close()，避免
+                # "coroutine was never awaited" 泄漏（与上传路径同款收尾）。
+                coro = processor.process(document_id, job.id)
+                try:
+                    task = asyncio.create_task(coro)
+                except Exception:
+                    coro.close()
+                    raise
                 _background_tasks.add(task)
                 task.add_done_callback(_background_tasks.discard)
                 logger.info("Kafka unavailable; scheduled in-process document rebuild")
             except Exception as proc_err:
+                # A3 窄口：本地调度失败 ≠ 任务终局。此刻 ES 旧索引已删、Kafka
+                # 未送达；若把 job 收敛为 FAILED，它将掉出启动对账的扫描范围
+                # （只扫 local_fallback 且 QUEUED/PROCESSING 的任务），文档就
+                # 可能永久停留在「INDEXED 但检索不到」。
+                # 修复：job 保持落库时的 QUEUED + local_fallback=True，只如实
+                # 记录失败原因；下次进程启动由 reconcile_local_jobs 回收重跑
+                # （文档锁互斥、处理幂等）。复用既有 A3-P0 机制，不新增列。
+                # 通知参数必须在下方可能的 rollback 之前快照：rollback 会过期
+                # session 内全部 ORM 实例（含 current_user/doc），异步上下文里
+                # 的懒加载会抛 MissingGreenlet 并掩盖原始调度错误。
+                notify_user_id = current_user.id
+                doc_label = doc.title or doc.filename
                 logger.error(f"本地重建任务启动失败: {proc_err}")
-                job.status = KnowledgeJobStatus.FAILED
-                job.error_message = f"本地处理任务启动失败: {str(proc_err)}"
-                job.finished_at = datetime.now()
-                await db.commit()
+                try:
+                    await db.execute(
+                        update(KnowledgeProcessingJob)
+                        .where(
+                            KnowledgeProcessingJob.id == job.id,
+                            KnowledgeProcessingJob.status.in_(
+                                [
+                                    KnowledgeJobStatus.QUEUED,
+                                    KnowledgeJobStatus.PROCESSING,
+                                ]
+                            ),
+                        )
+                        .values(
+                            error_message=(
+                                "本地处理任务启动失败（待启动对账重试）: "
+                                f"{proc_err}"
+                            )
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    await db.commit()
+                except Exception as mark_err:
+                    # 任务行已在重建开始时以 QUEUED + local_fallback 落库；
+                    # 原因写入失败不影响对账回收，只留痕。回滚会话，避免后续
+                    # 通知写入被 PendingRollback 状态连带失败、掩盖原始错误。
+                    logger.error(
+                        f"本地重建任务失败原因写入失败（任务仍可被对账回收）: {mark_err}",
+                        exc_info=True,
+                    )
+                    with suppress(Exception):
+                        await db.rollback()
 
                 await create_notification(
                     db,
-                    user_id=current_user.id,
-                    title="知识库重建失败",
-                    content=f"文档《{doc.title or doc.filename}》重建失败：{str(proc_err)}",
+                    user_id=notify_user_id,
+                    title="知识库重建任务暂未启动",
+                    content=(
+                        f"文档《{doc_label}》重建任务启动失败："
+                        f"{str(proc_err)}。任务已留在待回收队列，服务重启后会自动重试。"
+                    ),
                     type="knowledge",
                     target_route="Knowledge",
                     target_id=str(document_id),

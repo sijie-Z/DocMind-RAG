@@ -24,7 +24,7 @@ source_event_seq)。状态列用 String 而非 MySQL ENUM（状态集合会演�
 - SQLite（测试/本地）与 MySQL 语义等价；MySQL 走 InnoDB。
 
 Revision ID: 010_agent_tool_calls
-Revises: 009_agent_task_plan_approval
+Revises: 010_knowledge_job_local_fallback
 """
 
 import sqlalchemy as sa
