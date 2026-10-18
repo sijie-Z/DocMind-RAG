@@ -317,6 +317,10 @@ export default {
     promptTooLong: '提示词超过 {max} 字上限，未应用。请精简后再试。',
     sourcePreviewFailed: '原文加载失败，请稍后重试',
     promptDefaultName: '未命名',
+    // E11-②：已应用提示词模板的常驻标识（聊天头部）
+    currentTemplate: '当前模板：{name}',
+    clearTemplate: '清除',
+    promptCleared: '已清除提示词模板',
     backToConversations: '返回对话列表',
     liked: '已点赞',
     disliked: '已点踩',
@@ -681,7 +685,10 @@ export default {
     noResults: '未找到相关结果',
     noResultsDesc: '尝试更换关键词或调整筛选条件',
     fileContent: '文件内容',
-    searchFailed: '搜索失败'
+    searchFailed: '搜索失败',
+    // E11-①：问问 AI 跨页问题组句（文件名 + 当前搜索词 / 无搜索词时的兜底）
+    askAIQuestion: '关于文件「{filename}」：{query}',
+    askAIQuestionGeneric: '关于文件「{filename}」，请帮我总结主要内容'
   },
   conversations: {
     title: '会话历史',

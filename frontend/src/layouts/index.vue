@@ -262,7 +262,11 @@
       <main class="flex-1 overflow-auto bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
         <router-view v-slot="{ Component, route }">
           <Transition name="page-slide" mode="out-in">
-            <div :key="route.fullPath" class="page-wrapper">
+            <!-- E11-③：key 用 route.name（而非 fullPath）——同一路由仅 query
+                 变化（chat 切会话、prompt/q 消费、agent 回放深链）不再整页
+                 卸载重挂，消除白屏闪烁与输入丢失；跨路由仍按 name 切换重挂。
+                 未命名路由回退 path（不存在 query 重复挂载需求）。 -->
+            <div :key="route.name ?? route.path" class="page-wrapper">
               <Suspense>
                 <component :is="Component" />
                 <template #fallback>

@@ -48,11 +48,13 @@
         :hasConversation="!!currentConversationId"
         :isBoundMode="isBoundMode"
         :debugEnabled="debugEnabled"
+        :activeTemplateName="activePromptName"
         @toggleSidebar="toggleSidebar"
         @clearChat="clearChat"
         @unbind="handleUnbind"
         @exportChat="handleExportChat"
         @toggleDebug="toggleDebug"
+        @clearTemplate="clearActivePrompt"
       />
 
       <!-- Mobile back-to-conversations button -->
@@ -169,6 +171,22 @@ const windowWidth = ref(window.innerWidth)
 // W2-T7：系统提示词应用上限（与 prompts/index.vue 表单 maxlength 对齐；
 // 改一处必须同步另一处，chatPromptApply.test.ts 钉住边界）
 const MAX_SYSTEM_PROMPT_LENGTH = 5000
+
+// E11-②：提示词模板常驻标识——应用后头部可见、可清除。null = 当前无已应用
+// 模板；名字为空回退「未命名」。真相源仍是 localStorage 双键（useChatSend
+// 发送时读取），本状态只负责头部展示的同步。
+const activePromptName = ref<string | null>(null)
+const syncActivePromptBadge = () => {
+  activePromptName.value = localStorage.getItem('activeSystemPrompt')
+    ? (localStorage.getItem('activeSystemPromptName') || t('chat.promptDefaultName'))
+    : null
+}
+const clearActivePrompt = () => {
+  localStorage.removeItem('activeSystemPrompt')
+  localStorage.removeItem('activeSystemPromptName')
+  activePromptName.value = null
+  message.success(t('chat.promptCleared'))
+}
 
 const {
   messages, showBackToBottom,
@@ -361,8 +379,10 @@ const newConversation = () => {
 
 const handleSelectConversation = async (conv: Conversation) => {
   if (currentConversationId.value === conv.id) return
-  router.push({ query: { conversation_id: conv.id } })
-  await loadConversation(conv.id)
+  // E11-③：加载统一由下方 watch(conversation_id) 驱动（布局 key 收敛为
+  // route.name 后同页 query 变化不再整页重挂；此处不再直接调 loadConversation，
+  // 避免一次切换双重拉取）
+  await router.push({ query: { conversation_id: conv.id } })
   if (window.innerWidth < 768) sidebarOpen.value = false
 }
 
@@ -407,6 +427,21 @@ const loadConversation = async (id: string) => {
     scrollToBottom('auto', true)
   }
 }
+
+// E11-③：布局页面包装 key 由 fullPath 收敛为 route.name 后，同页仅 query
+// 变化不再整页重挂载——conversation_id 变化（侧栏切会话、浏览器前进/后退）
+// 由本 watch 接管加载；清空 conversation_id（新对话 / 当前会话被删）回到
+// 空会话态并清空消息，避免旧会话内容挂在新 URL 下。
+watch(() => route.query.conversation_id, (newId) => {
+  const id = typeof newId === 'string' ? newId : ''
+  if (!id) {
+    messages.value = []
+    chatStore.setCurrentConversation(null)
+    return
+  }
+  if (id === chatStore.currentConversation?.id) return
+  void loadConversation(id)
+})
 
 const clearChat = async () => {
   if (!currentConversationId.value) return
@@ -506,6 +541,8 @@ const handleOpenSource = async (source: KnowledgeSource) => {
 onMounted(async () => {
   const token = userStore.token || getToken()
   if (!token) { router.push({ name: 'Login' }); return }
+  // E11-②：头部模板标识回读（切页返回 / 刷新后仍可见可清）
+  syncActivePromptBadge()
   checkScreenSize()
   window.addEventListener('resize', checkScreenSize)
   const handleResize = () => { windowWidth.value = window.innerWidth }
@@ -514,11 +551,26 @@ onMounted(async () => {
   const conversationId = route.query.conversation_id as string
   if (conversationId) await loadConversation(conversationId)
 
+  // URL 消费型参数一次性捕获 + 统一清理：prompt/promptName（提示词应用）与
+  // q/context（搜索「问问 AI」跨页上下文）用后即清。分开 replace 会因导航
+  // 异步互相覆盖（后一次 spread 仍读到旧 query），故合并为一次。
   const promptContent = route.query.prompt as string
   const promptName = route.query.promptName as string
+  const searchQuestion = route.query.q as string
+  const searchContext = route.query.context as string
+  if (promptContent || searchQuestion) {
+    router.replace({
+      query: {
+        ...route.query,
+        prompt: undefined,
+        promptName: undefined,
+        q: undefined,
+        context: undefined,
+      },
+    })
+  }
+
   if (promptContent) {
-    // 用后即从 URL 清除，避免 query 参数残留
-    router.replace({ query: { ...route.query, prompt: undefined, promptName: undefined } })
     inputMessage.value = ''
     // W2-T7：上限与提示词表单 maxlength（prompts/index.vue）对齐 5000——
     // 修前这里只接受 <=2000 且无 else 分支：2001~5000 字的提示词点「应用」后
@@ -527,9 +579,21 @@ onMounted(async () => {
       message.info(t('chat.promptApplied', { name: promptName || t('chat.promptDefaultName') }))
       localStorage.setItem('activeSystemPrompt', promptContent)
       localStorage.setItem('activeSystemPromptName', promptName || '')
+      // E11-②：应用后头部立即出现常驻标识
+      syncActivePromptBadge()
     } else {
       message.error(t('chat.promptTooLong', { max: MAX_SYSTEM_PROMPT_LENGTH }))
     }
+  }
+
+  // E11-①：搜索页「问问 AI」跨页带参——q 预填输入框，context（所点结果正文
+  // 片段）以 Markdown 引用块随行，保留跨页用户意图；参数用后即从 URL 清除，
+  // 刷新不重复预填。选择预填而非自动发送：用户可编辑/确认，避免未经确认
+  // 触发模型调用与计费。
+  if (typeof searchQuestion === 'string' && searchQuestion.trim()) {
+    inputMessage.value = typeof searchContext === 'string' && searchContext.trim()
+      ? `${searchQuestion}\n\n> ${searchContext}`
+      : searchQuestion
   }
 
   // 确保连接 WebSocket（不依赖 watcher 的时序问题）
