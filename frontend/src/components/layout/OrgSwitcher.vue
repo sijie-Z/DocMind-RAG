@@ -6,7 +6,13 @@
       :disabled="switching || organizations.length === 0"
       @select="handleSelect"
     >
-      <n-button quaternary size="small" class="max-w-[13rem]">
+      <n-button
+        quaternary
+        size="small"
+        class="max-w-[13rem]"
+        :title="t('org.current')"
+        :aria-label="t('org.switchOrganization')"
+      >
         <template #icon>
           <n-icon :size="16"><BusinessOutline /></n-icon>
         </template>
@@ -53,7 +59,9 @@ const visible = computed(
 const currentOrgName = computed(() => {
   const found = organizations.value.find((org) => org.id === currentOrgId.value)
   if (found) return found.name
-  return currentOrgId.value != null ? `#${currentOrgId.value}` : t('org.noOrganizations')
+  if (currentOrgId.value != null) return `#${currentOrgId.value}`
+  // 超管等无主组织但可切换的场景：提示可切换而不是误报“暂无组织”。
+  return organizations.value.length > 0 ? t('org.switchOrganization') : t('org.noOrganizations')
 })
 const options = computed(() =>
   organizations.value.map((org) => ({

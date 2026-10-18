@@ -131,4 +131,28 @@ describe('useUserStore · organization switch', () => {
     expect(mockedSwitch).not.toHaveBeenCalled()
     expect(store.organizationVersion).toBe(0)
   })
+
+  it('aligns the local organization with the server current organization', async () => {
+    const store = useUserStore()
+    store.userInfo = makeInfo({ organization_id: 1 })
+    store.currentOrganizationId = 1
+    mockedList.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          organizations: [
+            { id: 1, name: 'Alpha' },
+            { id: 2, name: 'Beta' },
+          ],
+          current_organization_id: 2,
+        },
+      },
+    } as never)
+
+    const organizations = await store.fetchMyOrganizations()
+
+    expect(organizations.map((org) => org.id)).toEqual([1, 2])
+    expect(store.currentOrgId).toBe(2)
+    expect(store.userInfo?.organization_id).toBe(2)
+  })
 })

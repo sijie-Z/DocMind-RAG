@@ -108,7 +108,9 @@ export const useUserStore = defineStore('user', () => {
 
   /**
    * 当前用户可切换的组织列表（成员关系 + 主组织兜底）。
-   * 失败时返回空数组：切换器隐藏而不是猜测一个组织。
+   * 同时对齐服务端返回的 `current_organization_id`：多设备/多标签页下
+   * 当前组织以服务端为准，避免本地标签短暂漂移。
+   * 拉取失败时返回空数组，由切换器据当前组织状态决定可见性。
    */
   const fetchMyOrganizations = async () => {
     try {
@@ -118,6 +120,13 @@ export const useUserStore = defineStore('user', () => {
         resData.data && typeof resData.data === 'object' ? resData.data : resData
       ) as Record<string, unknown>
       const organizations = Array.isArray(payload.organizations) ? payload.organizations : []
+      const serverOrgId = payload.current_organization_id
+      if (typeof serverOrgId === 'number' && serverOrgId !== currentOrgId.value) {
+        currentOrganizationId.value = serverOrgId
+        if (userInfo.value) {
+          userInfo.value = { ...userInfo.value, organization_id: serverOrgId }
+        }
+      }
       return organizations as Array<{ id: number; name: string }>
     } catch {
       return [] as Array<{ id: number; name: string }>
