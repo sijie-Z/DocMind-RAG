@@ -17,7 +17,7 @@ from app.exceptions import AuthorizationError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.prompt import PromptTemplate
 from app.rag.cache import SemanticCache
-from app.rag.errors import RetrievalUnavailableError
+from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError
 from app.services.memory_service import get_memory_system
 from app.services.rag_service import rag_service
 
@@ -50,6 +50,12 @@ RETRIEVAL_UNAVAILABLE_PROMPT = (
     "1. 使用【简体中文】回答。\n"
     "2. 结构化输出，多使用分点列表。\n"
     "3. 严禁声称「知识库中没有相关内容/文档」；如需引用贵司数据，应提示用户稍后重试检索。"
+)
+
+# LLM 未配置时的显式错误文案（与 agent 通道的 error 事件同一语义：配置问题必须
+# 走错误通道，不得作为回答内容流入会话历史）。
+LLM_NOT_CONFIGURED_MESSAGE = (
+    "LLM 服务未配置（未设置 DEEPSEEK_API_KEY），无法生成回答，请联系管理员配置后重试"
 )
 
 
@@ -192,6 +198,19 @@ async def run_rag_pipeline(
         _emit(RAGEvent(
             type="error",
             content="当前用户未加入任何组织，无法进行知识库问答；请先加入组织后重试",
+            conversation_id=conversation_id or "",
+        ))
+        return
+
+    # LLM 配置预检（必须先于会话/消息落库、语义缓存读写、检索与记忆）：
+    # 无 LLM 客户端时以 error 语义返回，绝不进入内容累加与落库路径。
+    # 修前 `chat_stream` 把 "LLM未配置" 当正文 chunk 下发：用户消息与
+    # 「LLM未配置」ASSISTANT 消息双双落库、还写入长期记忆；语义缓存命中
+    # 路径同样会把缓存答案当作正常回答落库。
+    if rag_service.openai_client is None:
+        _emit(RAGEvent(
+            type="error",
+            content=LLM_NOT_CONFIGURED_MESSAGE,
             conversation_id=conversation_id or "",
         ))
         return
@@ -352,17 +371,26 @@ async def run_rag_pipeline(
 
     # 安全加固：接收 PII 掩码的 context/query 占位符映射，流结束后还原"引用型"占位符
     mask_mapping: dict = {}
-    async for chunk in rag_service.chat_stream(
-        user_content, context_results, chat_history,
-        system_prompt_override=system_prompt_override,
-        enable_masking=privacy_mode,
-        mask_mapping_sink=mask_mapping,
-    ):
-        full_response += chunk
+    try:
+        async for chunk in rag_service.chat_stream(
+            user_content, context_results, chat_history,
+            system_prompt_override=system_prompt_override,
+            enable_masking=privacy_mode,
+            mask_mapping_sink=mask_mapping,
+        ):
+            full_response += chunk
+            _emit(RAGEvent(
+                type="chunk", content=chunk,
+                conversation_id=conversation_id, message_id=ai_msg_id,
+            ))
+    except LLMNotConfiguredError:
+        # 竞态兜底：入口预检后客户端消失（如配置热更新失败）同样走错误通道，
+        # 绝不把配置诊断当回答落库/写记忆。
         _emit(RAGEvent(
-            type="chunk", content=chunk,
-            conversation_id=conversation_id, message_id=ai_msg_id,
+            type="error", content=LLM_NOT_CONFIGURED_MESSAGE,
+            conversation_id=conversation_id,
         ))
+        return
 
     # 还原引用型占位符（LLM 引用的 [PHONE_3] 等来自检索上下文/用户提问的真实信息）；
     # 模型自行新生成的 PII 占位符不在映射内，保持掩码状态。

@@ -30,6 +30,7 @@ from app.exceptions import (
     AuthenticationError,
     AuthorizationError,
     ExternalServiceError,
+    ServiceUnavailableError,
     ValidationError,
 )
 from app.models.chat import ChatSession
@@ -937,6 +938,13 @@ async def rag_eval_single(item: EvalItem):
         )
         from app.rag.evaluator import RAGEvaluator
 
+        # 批量/评估路径与聊天链路同一预检：LLM 未配置时如实 503 + 明确文案，
+        # 不得落到 AsyncOpenAI(api_key=None) 的构造异常被兜成 500。
+        if not settings.DEEPSEEK_API_KEY:
+            raise ServiceUnavailableError(
+                "LLM 服务未配置（未设置 DEEPSEEK_API_KEY），RAG 质量评估无法执行",
+                error_code="LLM_NOT_CONFIGURED",
+            )
         client = AsyncOpenAI(
             api_key=settings.DEEPSEEK_API_KEY,
             base_url=settings.DEEPSEEK_API_URL,
@@ -982,6 +990,12 @@ async def rag_eval_batch(body: BatchEvalRequest):
 
         from app.rag.evaluator import RAGEvaluator
 
+        # 与单条评估、聊天链路同一预检（批量路径同样拦截）。
+        if not settings.DEEPSEEK_API_KEY:
+            raise ServiceUnavailableError(
+                "LLM 服务未配置（未设置 DEEPSEEK_API_KEY），RAG 质量评估无法执行",
+                error_code="LLM_NOT_CONFIGURED",
+            )
         client = AsyncOpenAI(
             api_key=settings.DEEPSEEK_API_KEY,
             base_url=settings.DEEPSEEK_API_URL,

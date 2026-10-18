@@ -49,6 +49,16 @@ class EmbeddingUnavailableError(RuntimeError):
     """
 
 
+class LLMNotConfiguredError(RuntimeError):
+    """LLM 客户端未配置 —— 生成能力不可用，绝不伪装成回答内容。
+
+    此前 `RAGPipeline.chat_stream` 在无 client 时 `yield "LLM未配置"`：这句配置
+    诊断被上层当作正文 chunk 逐字累加、作为 ASSISTANT 消息落库并写入长期记忆，
+    会话历史里沉淀下「LLM未配置」这样的垃圾回答。现在改为抛出本异常，由聊天
+    管线在入口预检并以 error 事件语义返回（与 agent 通道的 type="error" 对齐）。
+    """
+
+
 class EvalJudgeUnavailableError(RuntimeError):
     """RAG 评估评委（LLM-as-judge）不可用 —— 分数不可知，绝不等于「0 分」（issue #301）。
 
