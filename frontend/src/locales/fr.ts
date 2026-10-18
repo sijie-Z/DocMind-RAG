@@ -99,7 +99,9 @@ export default {
     used: 'Utilisé',
     available: 'Disponible',
     activityTrend: 'Tendance d\'activité',
-    recentActivity: 'Activité récente'
+    recentActivity: 'Activité récente',
+    revokeSession: 'Déconnecter l\'appareil',
+    revokeSessionConfirm: 'Déconnecter cet appareil ? Il devra se reconnecter.'
   },
   users: {
     searchPlaceholder: 'Rechercher un utilisateur...',
@@ -152,6 +154,7 @@ export default {
     level5: 'Niveau 5',
     levelOther: 'Autres niveaux',
     createdAt: 'Créé le',
+    batchDeleteConfirm: 'Supprimer les {count} organisations sélectionnées ? Cette action est irréversible.',
     addMember: 'Ajouter un membre',
     selectUser: 'Sélectionner un utilisateur',
     removeMember: 'Retirer',
@@ -218,6 +221,7 @@ export default {
     removeFailedAttachments: 'Des pièces jointes ont échoué à l\'analyse, veuillez les retirer ou les envoyer à nouveau avant de poser vos questions',
     attachmentsNotReady: 'Les pièces jointes ne sont pas encore prêtes, veuillez attendre la fin de l\'analyse avant de les utiliser',
     chatCleared: 'Historique de conversation effacé',
+    clearConfirm: 'Tous les messages de la conversation actuelle seront effacés, sans possibilité de restauration. Effacer maintenant ?',
     clearFailed: 'Échec de l\'effacement',
     unbindSuccess: 'Document dissocié, désormais en mode Q&A sur toute la base de connaissances',
     unbindFailed: 'Échec de la dissociation du document',
@@ -620,6 +624,12 @@ export default {
     markAllRead: 'Tout marquer comme lu',
   },
 
+  agent: {
+    clearConfirmTitle: 'Effacer les messages de la session actuelle',
+    clearConfirm: 'Seuls les messages affichés de la session actuelle seront effacés. Les autres sessions ne sont pas affectées. Effacer maintenant ?',
+    deleteSessionConfirmTitle: 'Supprimer la session actuelle',
+    deleteSessionConfirm: "La session « {title} » et son historique de discussion seront supprimés. Cette action est irréversible. Supprimer ?",
+  },
   agentReplay: {
     entry: 'Voir le Replay',
     title: "Replay d'Exécution",

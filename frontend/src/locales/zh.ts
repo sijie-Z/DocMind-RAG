@@ -106,6 +106,8 @@ export default {
     recentActivity: '最近动态',
     sessionRevoked: '设备已下线',
     revokeFailed: '下线失败',
+    revokeSession: '下线设备',
+    revokeSessionConfirm: '确定要下线该设备吗？下线后该设备将退出登录，需要重新登录。',
     apiKeyRevokeFailed: '撤销 API Key 失败',
     // W2-T7：LLM Provider 区块诚实标注（后端无消费方，推理走服务端全局配置）
     aiProviderExpTitle: '实验功能 · 暂不生效',
@@ -166,6 +168,7 @@ export default {
     adjustSuccess: '调整成功',
     adjustFailed: '调整失败',
     batchDeleteSuccess: '批量删除成功',
+    batchDeleteConfirm: '确定要删除选中的 {count} 个组织吗？此操作不可恢复。',
     deleteFailed: '删除失败',
     loadDetailsFailed: '加载详情失败',
     loadFailed: '加载失败',
@@ -239,6 +242,7 @@ export default {
     attachmentsNotReady: '附件尚未就绪，请等待解析完成后再使用附件',
     chatCleared: '对话记录已清空',
     clearFailed: '清空失败',
+    clearConfirm: '将清空当前对话的全部消息记录，且不可恢复。确定清空吗？',
     unbindSuccess: '已解除文档绑定，现在是全库问答模式',
     unbindFailed: '解除绑定失败',
     // File upload status labels (shown in ChatInput)
@@ -700,6 +704,12 @@ export default {
     markAllRead: '全部已读',
   },
 
+  agent: {
+    clearConfirmTitle: '清空当前会话消息',
+    clearConfirm: '仅清空当前会话在界面中显示的消息，不影响其他会话。确定清空吗？',
+    deleteSessionConfirmTitle: '删除当前会话',
+    deleteSessionConfirm: '将删除当前会话「{title}」及其聊天记录，此操作不可恢复。确定删除吗？',
+  },
   agentReplay: {
     entry: '查看回放',
     title: '运行回放',

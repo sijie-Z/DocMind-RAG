@@ -393,6 +393,7 @@ import {
 import type { DataTableColumns, TreeSelectOption, FormInst, TreeOption, TreeDropInfo } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { formatDate } from '@/utils/format'
+import { useConfirmDangerousAction } from '@/utils/confirm'
 import { 
   getOrganizations, 
   createOrganization, 
@@ -452,6 +453,7 @@ interface Organization {
 // 2. 状态变量
 const message = useDedupedMessage()
 const { t } = useI18n()
+const confirmDangerousAction = useConfirmDangerousAction()
 const loading = ref(false)
 const loadError = ref(false)
 const loadErrorMsg = ref('')
@@ -583,6 +585,11 @@ const handleDrop = async ({ node, dragNode, dropPosition }: TreeDropInfo) => {
 
 const handleBatchDelete = async () => {
   if (selectedIds.value.length === 0) return
+  const confirmed = await confirmDangerousAction(
+    t('common.batchDelete'),
+    t('org.batchDeleteConfirm', { count: selectedIds.value.length }),
+  )
+  if (!confirmed) return
   try {
     loading.value = true
     await batchDeleteOrganizations(selectedIds.value)
