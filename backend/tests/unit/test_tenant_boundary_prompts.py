@@ -194,6 +194,38 @@ async def test_creator_can_edit_own_prompt_with_unchanged_is_active():
 
 
 @pytest.mark.asyncio
+async def test_prompt_name_uniqueness_is_per_org():
+    """A2 预审建议②：同名模板允许跨组织存在，同组织内仍冲突（409）。"""
+    engine, factory, ids = await _setup()
+    try:
+        # org B 用与 org A 相同的名字创建 → 允许
+        r = await _call(
+            factory, _user(3, 2, role="admin"), "POST", "/api/v1/prompts/",
+            json={"name": "p-A", "content": "org-b copy"},
+        )
+        assert r.status_code == 200, r.text
+        async with factory() as s:
+            org_b_copy = (await s.execute(
+                select(PromptTemplate).where(
+                    (PromptTemplate.name == "p-A")
+                    & (PromptTemplate.organization_id == 2)
+                )
+            )).scalar_one()
+            assert org_b_copy.content == "org-b copy"
+            # org A 的原模板未被覆盖
+            assert (await s.get(PromptTemplate, ids["p-A"])).content == "a"
+
+        # 同组织内重名 → 409
+        r = await _call(
+            factory, _user(2, 1, role="user"), "POST", "/api/v1/prompts/",
+            json={"name": "p-A", "content": "dup"},
+        )
+        assert r.status_code == 409
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_restore_and_version_detail_are_org_scoped():
     """A2 评审 m-6：restore / version detail 的跨组织访问必须 404。"""
     engine, factory, ids = await _setup()
