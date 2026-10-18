@@ -25,6 +25,7 @@ export interface UserInfo {
   phone?: string
   isAdmin: boolean
   role?: string
+  is_superuser?: boolean // Backend field：true 即管理员（supersedes role）
   organization_id?: number
   createdAt: string
   organizations: Organization[]

@@ -67,7 +67,11 @@ export const useUserStore = defineStore('user', () => {
   
   // 计算属性
   const isLoggedIn = computed(() => !!token.value && !!userInfo.value)
-  const isAdmin = computed(() => userInfo.value?.role === 'admin')
+  // admin 判定与后端鉴权同口径（is_superuser or role == "admin"）：
+  // 菜单过滤（layouts）与路由守卫（router）都消费这同一个计算属性。
+  const isAdmin = computed(
+    () => userInfo.value?.role === 'admin' || userInfo.value?.is_superuser === true
+  )
   const currentOrgId = computed(() => currentOrganizationId.value || userInfo.value?.organization_id || null)
 
   const setCurrentOrganization = (orgId: number) => {
