@@ -286,7 +286,7 @@ export default {
     searchPlaceholder: 'ナレッジベースを検索...',
     upload: 'アップロード',
     tags: {
-      tech: '技術文書',
+      tech: '技術ドキュメント',
       manual: 'マニュアル',
       rules: '規程',
       training: '研修資料',
@@ -402,6 +402,65 @@ export default {
     demoDesc: 'デモアカウントを使用 (guest / 123456)',
     loginFailed: 'ログインに失敗しました',
     registerFailed: '登録に失敗しました',
+    privacy: 'プライバシー',
+    terms: '利用規約',
+  },
+  firsthome: {
+    nav: {
+      login: 'ログイン',
+      trial: '無料トライアル',
+    },
+    enterWorkspace: 'ワークスペースへ',
+    hero: {
+      badge: 'エンタープライズ AI ナレッジベース基盤',
+      titleLine1: 'すべてのドキュメントを',
+      titleAccent: '対話できるように',
+      desc: '機能を作るのは誰でもできる。機能を静かに壊さないことがエンジニアリングです。ゼロトレランスの評価ゲートを CI に導入し、32 件のサイレント偽成功を一掃、ラチェットは縮小のみ。',
+      ctaPrimary: '無料で始める',
+      ctaLogin: 'アカウントをお持ちですか？ログイン',
+    },
+    stats: {
+      clauseHit: "ClauseHit{'@'}3/{'@'}5（実測）",
+      cases: '検索評価ケース · golden set',
+    },
+    steps: {
+      title: '3 ステップでナレッジベースを構築',
+      desc: 'ドキュメントのアップロードからスマート Q&A まで、かつてないほど簡単',
+      upload: { title: 'ドキュメントをアップロード', desc: 'PDF、Word、Excel、Markdown、CSV など 13 形式に対応、ドラッグ＆ドロップでアップロード。' },
+      index: { title: 'スマートインデックス', desc: 'ドキュメントは自動で解析・分割され、ベクトル化して Elasticsearch に保存、秒単位で検索。' },
+      ask: { title: 'AI Q&A', desc: '自然言語で質問すると、Agent が多段推論し、出典付きの正確な回答を返します。' },
+    },
+    features: {
+      title: '検索ではなく、理解',
+      desc: 'エンタープライズ RAG アーキテクチャ、Agent 駆動のインテリジェント推論',
+      hybrid: { title: 'ハイブリッド検索', desc: 'キーワード BM25 + ベクトル意味検索 + RRF 融合アルゴリズムで再現精度を最大化。' },
+      agent: { title: 'Agent 推論', desc: 'PER 三段階推論（Plan-Execute-Reflect）、多段ツール呼び出しで複雑な問題を段階的に解決。' },
+      stream: { title: 'ストリーミング応答', desc: 'SSE によるリアルタイム配信。考えながら回答し、完全な結果を待つ必要はありません。' },
+      api: { title: 'オープン API', desc: 'RESTful API + WebSocket のデュアルチャネルで、ビジネスシステムに簡単に統合。' },
+      security: { title: 'エンタープライズセキュリティ', desc: 'JWT 認証、RBAC 権限、組織分離、完全な監査ログ。' },
+      tenant: { title: 'マルチテナント', desc: '組織レベルのデータ分離。各チームが独立したナレッジベースと権限体系を持ちます。' },
+    },
+    terminal: {
+      title: 'Agent 自律推論エンジン',
+      desc: '多段推論、ツール呼び出し、引用トレース — AI の思考プロセスをリアルタイムで観察',
+      demo: 'デモデータ',
+      query: '❯ 2025年第3四半期の売上データで、最も成長した製品ラインはどれですか？',
+      callSearch: '⟳ search_knowledge_base を呼び出し中...',
+      result: '✓ 営業レポートを 5 件取得',
+      callAnalyze: '⟳ analyze_document を呼び出し中...',
+      callCompare: '⟳ compare_data を呼び出し中...',
+      answerLabel: '▸ 回答',
+      answer: 'エンタープライズクラウドサービス製品ラインが最も速く成長し、主な要因は金融業界顧客のプライベートデプロイ需要です。',
+      sources: '[1] Q3営業レポート.xlsx · [2] 業界分析-金融.pdf',
+    },
+    cta: {
+      title: 'ナレッジベースを構築する準備はできましたか？',
+      desc: '無料で開始、設定は不要。最初のドキュメントをアップロードして、AI スマート Q&A を今すぐ体験。',
+      button: '無料で始める',
+    },
+    footer: {
+      copy: '© 2025 DocMind · エンタープライズ RAG ナレッジベースシステム',
+    },
   },
   menu: {
     home: 'ホーム',
@@ -760,11 +819,11 @@ export default {
     }
   },
   refPicker: {
-    heading: 'ナレッジベース文書を引用',
-    empty: '一致する文書がありません',
-    error: '文書の読み込みに失敗しました。再試行してください',
+    heading: 'ナレッジベースドキュメントを引用',
+    empty: '一致するドキュメントがありません',
+    error: 'ドキュメントの読み込みに失敗しました。再試行してください',
     remove: '引用を解除',
-    inputHint: "Enter で送信 · {'@'} で文書引用 · / でコマンド · Shift+Enter で改行"
+    inputHint: "Enter で送信 · {'@'} でドキュメント引用 · / でコマンド · Shift+Enter で改行"
   },
   slashCmd: {
     heading: 'スラッシュコマンド',
