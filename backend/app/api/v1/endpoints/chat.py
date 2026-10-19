@@ -262,7 +262,10 @@ async def create_conversation(
             user_id=current_user.id,
             title=title,
             status=ChatSessionStatus.ACTIVE,
-            organization_id=current_user.organization_id,
+            # T4：与按 id 访问/<agent/sessions> 同一有效组织口径（含 token
+            # 组织回退），不用裸 organization_id——否则回退用户的新会话落
+            # NULL，随后按「历史会话」规则对任意组织上下文可见。
+            organization_id=get_user_org_id(current_user),
         )
         db.add(new_session)
         await db.commit()

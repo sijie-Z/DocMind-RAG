@@ -1092,6 +1092,12 @@ async def get_conversation_history(
     organization_id: int | None = None,
     **_: Any,
 ) -> str:
+    """返回指定会话的消息历史。
+
+    口径（T4）：按会话的 ``organization_id`` 严格校验（历史 NULL 组织会话
+    属本人，仍可读）。本工具**不随 API 的超管旁路放宽**——与同目录
+    ``list_conversations`` 工具的严格组织口径保持一致。
+    """
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal

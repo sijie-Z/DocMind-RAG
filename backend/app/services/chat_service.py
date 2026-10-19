@@ -140,6 +140,10 @@ async def bind_docs_to_session(
     conversation_id: str,
     doc_ids: list[str],
 ):
+    """前置条件：``conversation_id`` 已由 ``get_or_create_session`` 校验过
+    归属（user + org）。本函数按 id 直查、不再重复校验，新增调用方必须先
+    自行完成归属校验（T4）。
+    """
     conv = (
         await session.execute(
             select(ChatSession).where(ChatSession.id == conversation_id)

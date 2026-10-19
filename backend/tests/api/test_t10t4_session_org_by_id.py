@@ -28,6 +28,8 @@ mock 的调用顺序。
   ``TestWritePathsRefuseCrossOrg`` 红；
 - 超管不再旁路 → ``TestSuperuserBypass`` 红。
 """
+import contextlib
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -185,6 +187,16 @@ async def _count(factory, model, session_id):
 async def _get_session_row(factory, session_id):
     async with factory() as s:
         return await s.get(ChatSession, session_id)
+
+
+def _sse_events(text: str) -> list[dict]:
+    events = []
+    for line in text.splitlines():
+        if not line.startswith("data: "):
+            continue
+        with contextlib.suppress(json.JSONDecodeError):
+            events.append(json.loads(line[len("data: "):]))
+    return events
 
 
 # ── 1. 跨组织按 id 访问必须明确拒绝 ─────────────────────────────────────────
@@ -405,6 +417,35 @@ class TestEffectiveOrgResolution:
             await engine.dispose()
 
     @pytest.mark.asyncio
+    async def test_create_conversation_persists_effective_token_org(self):
+        """新建会话落库用有效组织（token 回退 B），不是裸 organization_id。
+
+        变异点：改回 ``current_user.organization_id`` → 落库 NULL → 本用例红。
+        """
+        engine, factory = await _seeded_factory()
+        try:
+            user = _user(None, token_org=ORG_B)
+            async with _AsyncClientCtx(user, factory) as ac:
+                r = await ac.post(
+                    "/api/v1/chat/conversations", json={"title": "token-org-new"}
+                )
+            assert r.status_code == 200, r.text
+            async with factory() as s:
+                rows = (
+                    await s.execute(
+                        select(ChatSession).where(
+                            ChatSession.title == "token-org-new"
+                        )
+                    )
+                ).scalars().all()
+            assert len(rows) == 1
+            assert rows[0].organization_id == ORG_B, (
+                "新建会话必须落有效组织（token 回退 B），而不是裸 None"
+            )
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
     async def test_orgless_non_superuser_only_reaches_legacy_null(self):
         """无组织非超管：只能读到本人历史 NULL 组织会话，不能触达任何带组织行。"""
         engine, factory = await _seeded_factory()
@@ -425,23 +466,50 @@ class TestEffectiveOrgResolution:
 class TestSuperuserBypass:
     @pytest.mark.asyncio
     async def test_superuser_reads_and_updates_own_sessions_across_orgs(self):
-        """超管保留既有旁路：不按组织过滤（仍限本人），读写均可。"""
+        """超管保留既有旁路：不按组织过滤（仍限本人），读写均可。
+
+        关键：超管无组织时 ``require_organization`` 会回退到库中最小组织（本
+        fixture 为 ORG_A=7）。因此必须用 **ORG_B 的会话** 断言 200——若旁路被
+        删除，回退组织 A 匹配不上 B 组织会话，用例才会变红。
+        """
         engine, factory = await _seeded_factory()
         try:
             user = _user(None, superuser=True)
             async with _AsyncClientCtx(user, factory) as ac:
-                r1 = await ac.get(AGENT_DETAIL.format(sid=SESSION_A))
-                r2 = await ac.get(CHAT_DETAIL.format(sid=SESSION_A))
+                r1 = await ac.get(AGENT_DETAIL.format(sid=SESSION_B))
+                r2 = await ac.get(CHAT_DETAIL.format(sid=SESSION_B))
                 r3 = await ac.put(
-                    CHAT_DETAIL.format(sid=SESSION_A), json={"title": "su-renamed"}
+                    CHAT_DETAIL.format(sid=SESSION_B), json={"title": "su-renamed"}
                 )
                 r4 = await ac.get(AGENT_DETAIL.format(sid=SESSION_FOREIGN))
             assert r1.status_code == 200, r1.text
             assert r2.status_code == 200, r2.text
             assert r3.status_code == 200, r3.text
             assert r4.status_code == 404, "超管旁路也只限本人会话，不得读他人会话"
-            row = await _get_session_row(factory, SESSION_A)
+            row = await _get_session_row(factory, SESSION_B)
             assert row.title == "su-renamed"
+            # 对照：普通用户 org=A 读 B 组织会话必须 404（上面的 200 只可能来自旁路）
+            async with _AsyncClientCtx(_user(ORG_A), factory) as ac2:
+                control = await ac2.get(AGENT_DETAIL.format(sid=SESSION_B))
+            assert control.status_code == 404, control.text
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_superuser_delete_and_clear_across_orgs_allowed(self):
+        """超管旁路覆盖删除/清空（仍限本人）：B 组织删除、A 组织清空均可用。"""
+        engine, factory = await _seeded_factory()
+        try:
+            user = _user(None, superuser=True)
+            async with _AsyncClientCtx(user, factory) as ac:
+                r1 = await ac.delete(CHAT_DETAIL.format(sid=SESSION_B))
+                r2 = await ac.delete(
+                    f"{CHAT_DETAIL.format(sid=SESSION_A)}/clear"
+                )
+            assert r1.status_code == 200, r1.text
+            assert r2.status_code == 200, r2.text
+            assert await _get_session_row(factory, SESSION_B) is None
+            assert await _count(factory, ChatMessage, SESSION_A) == 0
         finally:
             await engine.dispose()
 
@@ -557,7 +625,12 @@ class TestAgentHistoryLoadOrgScope:
     async def test_agent_chat_does_not_load_history_from_other_org(
         self, monkeypatch
     ):
-        """切到 B 后用 A 组织会话 id 发起 /agent/chat：历史必须为空。"""
+        """切到 B 后用 A 组织会话 id 发起 /agent/chat：
+        历史必须为空，且落库必须被明确拒绝（无副作用 + warning + saved=false）。
+
+        变异点：端点层把 ``bypass_org`` 错写成 True / 丢掉 org 校验 →
+        消息会被写进 A 组织会话，本用例红。
+        """
         import app.api.v1.endpoints.agent as agent_module
 
         engine, factory = await _seeded_factory()
@@ -573,6 +646,15 @@ class TestAgentHistoryLoadOrgScope:
             assert r.status_code == 200, r.text
             assert captured["history"] == [], (
                 "不得把 A 组织会话的历史加载进 B 组织的运行上下文"
+            )
+            events = _sse_events(r.text)
+            assert any(e.get("type") == "warning" for e in events), (
+                f"跨组织落库被拒绝必须如实告知（warning）: {events}"
+            )
+            done = [e for e in events if e.get("type") == "done"][-1]
+            assert done.get("saved") is False, f"done.saved 必须为 false: {done}"
+            assert await _count(factory, ChatMessage, SESSION_A) == 1, (
+                "跨组织落库被拒绝后 A 组织会话不得新增任何消息"
             )
         finally:
             await engine.dispose()
@@ -596,6 +678,58 @@ class TestAgentHistoryLoadOrgScope:
             assert captured["history"] == [
                 {"role": "user", "content": "org-a history"}
             ], f"同组织历史应正常加载: {captured['history']}"
+        finally:
+            await engine.dispose()
+
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_agent_mode_refuses_cross_org_persist(
+        self, monkeypatch
+    ):
+        """聊天页 Agent 模式（/chat/stream）同口径：不加载跨组织历史，
+        落库被拒绝时以 warning 如实告知，且目标会话无新增消息。
+
+        变异点：chat.py 的 ``save_session_interaction`` 调用把 ``bypass_org``
+        错写成 True（或不传 org）→ 跨组织消息被写入 A 组织会话，本用例红。
+        """
+        import app.api.v1.endpoints.agent as agent_module
+        import app.services.session_service as session_service_module
+        from app.agent.service import agent_service
+
+        engine, factory = await _seeded_factory()
+        try:
+            captured: dict = {}
+
+            async def _fake_chat(**kwargs):
+                captured["history"] = kwargs.get("history")
+                captured["organization_id"] = kwargs.get("organization_id")
+                yield SimpleNamespace(type="chunk", content="跨组织回答")
+                yield SimpleNamespace(type="done", content="")
+
+            monkeypatch.setattr(agent_service, "chat", _fake_chat)
+            monkeypatch.setattr(agent_module, "AsyncSessionLocal", factory)
+            monkeypatch.setattr(session_service_module, "AsyncSessionLocal", factory)
+
+            async with _AsyncClientCtx(_user(ORG_B), factory) as ac:
+                r = await ac.post(
+                    "/api/v1/chat/stream",
+                    json={
+                        "content": "hi",
+                        "conversationId": SESSION_A,
+                        "useAgent": True,
+                    },
+                )
+
+            assert r.status_code == 200, r.text
+            assert captured["history"] == [], (
+                "聊天页 Agent 模式不得加载其他组织会话的历史"
+            )
+            assert "event: warning" in r.text, (
+                f"跨组织落库被拒绝必须有 warning 事件: {r.text[:800]}"
+            )
+            assert await _count(factory, ChatMessage, SESSION_A) == 1, (
+                "跨组织落库被拒绝后 A 组织会话不得新增任何消息"
+            )
         finally:
             await engine.dispose()
 
