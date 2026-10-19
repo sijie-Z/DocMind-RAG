@@ -121,6 +121,13 @@ async def get_or_create_session(
     else:
         if existing.user_id != user_id:
             raise AuthorizationError("无权访问该会话")
+        # T4：按 id 复用会话必须与本次运行组织一致——多组织用户切到 B 组织后
+        # 不得把消息写进 A 组织的会话行；历史 NULL 组织会话仍可复用（属本人）。
+        if (
+            existing.organization_id is not None
+            and existing.organization_id != organization_id
+        ):
+            raise AuthorizationError("无权访问该会话")
         settings_json = existing.settings or {}
         if isinstance(settings_json, dict):
             bound_doc_ids = settings_json.get("bound_document_ids") or []

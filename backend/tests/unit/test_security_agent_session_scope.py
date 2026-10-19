@@ -59,6 +59,8 @@ async def test_owned_session_gets_messages(monkeypatch):
     owned = MagicMock()
     owned.user_id = 1
     owned.title = "Existing session"
+    # T4：落库新增 org 口径——会话归属组织须与本次有效组织一致。
+    owned.organization_id = 1
     session = _make_session(_result(owned))
     monkeypatch.setattr(agent_module, "AsyncSessionLocal", lambda: _FakeSessionCtx(session))
 

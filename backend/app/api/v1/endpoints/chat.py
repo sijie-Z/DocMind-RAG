@@ -29,8 +29,12 @@ from app.schemas.chat import ChatSessionCreate, ChatStreamRequest, FeedbackReque
 from app.services.chat_service import RAGEvent, run_rag_pipeline
 from app.services.rag_service import rag_service
 from app.services.session_service import (
+    SessionAccessScope,
+    load_accessible_session,
+    resolve_session_access_scope,
     resolve_session_scope,
     save_session_interaction,
+    session_matches_scope,
     session_visibility_conditions,
 )
 
@@ -131,12 +135,10 @@ async def clear_conversation_messages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # T4：按 id 访问与列表同一 org 口径（超管旁路 / 组织 + 历史 NULL）。
+    scope = await resolve_session_access_scope(current_user, db)
     try:
-        stmt = select(ChatSession).where(
-            ChatSession.id == conversation_id,
-            ChatSession.user_id == current_user.id,
-        )
-        session = (await db.execute(stmt)).scalar_one_or_none()
+        session = await load_accessible_session(db, conversation_id, current_user, scope)
         if not session:
             raise NotFoundError("会话不存在")
         delete_stmt = delete(ChatMessage).where(ChatMessage.session_id == conversation_id)
@@ -289,13 +291,10 @@ async def update_conversation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # T4：写路径——跨组织会话明确拒绝（404），不得静默更新。
+    scope = await resolve_session_access_scope(current_user, db)
     try:
-        stmt = select(ChatSession).where(
-            ChatSession.id == conversation_id,
-            ChatSession.user_id == current_user.id,
-        )
-        result = await db.execute(stmt)
-        session = result.scalar_one_or_none()
+        session = await load_accessible_session(db, conversation_id, current_user, scope)
         if not session:
             raise NotFoundError("对话不存在")
 
@@ -317,12 +316,10 @@ async def delete_conversation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # T4：跨组织会话与不存在同样处理（404），不得删除他人组织的数据行。
+    scope = await resolve_session_access_scope(current_user, db)
     try:
-        stmt = select(ChatSession).where(
-            ChatSession.id == conversation_id,
-            ChatSession.user_id == current_user.id,
-        )
-        session = (await db.execute(stmt)).scalar_one_or_none()
+        session = await load_accessible_session(db, conversation_id, current_user, scope)
         if not session:
             raise NotFoundError("会话不存在或无权删除")
         # Delete messages first (FK constraint), then the session
@@ -346,12 +343,12 @@ async def unbind_conversation_docs(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # T4：跨组织会话明确拒绝（403），不得改写他人组织的会话设置。
+    scope = await resolve_session_access_scope(current_user, db)
     try:
-        stmt = select(ChatSession).where(
-            ChatSession.id == conversation_id,
-            ChatSession.user_id == current_user.id,
+        session_obj = await load_accessible_session(
+            db, conversation_id, current_user, scope
         )
-        session_obj = (await db.execute(stmt)).scalar_one_or_none()
         if not session_obj:
             raise AuthorizationError("无权访问该会话")
         settings_json = session_obj.settings or {}
@@ -376,6 +373,10 @@ async def get_conversation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # T4：按 id 读取与列表同一 org 口径。此处先按 id + user 取行，再区分
+    # 「不存在」（保留既有软失败形状）与「跨组织」（显式 404，不得静默返回
+    # 其他组织会话的内容）。
+    scope = await resolve_session_access_scope(current_user, db)
     try:
         stmt = select(ChatSession).where(
             ChatSession.id == conversation_id,
@@ -384,6 +385,8 @@ async def get_conversation(
         session = (await db.execute(stmt)).scalar_one_or_none()
         if not session:
             return {"success": False, "message": "无权访问"}
+        if not session_matches_scope(session, scope):
+            raise NotFoundError("会话不存在或无权访问")
 
         msg_stmt = (
             select(ChatMessage)
@@ -473,6 +476,9 @@ async def get_conversation(
                 "updated_at": session.updated_at.isoformat() if session.updated_at else "",
             },
         }
+    except NotFoundError:
+        # T4：跨组织访问显式 404，不得被下面的宽 except 吞成 200 软失败。
+        raise
     except Exception as e:
         # T3：此前这里静默返回失败文案、服务端零留痕。补上堆栈日志，
         # 避免端点级的编程错误再次无声无息。
@@ -811,8 +817,13 @@ async def chat_stream_endpoint(
                 if body.conversationId:
                     try:
                         from app.api.v1.endpoints.agent import _load_session_messages
+                        # T4：历史加载与落库同一 org 口径（超管保持旁路）。
+                        history_scope = SessionAccessScope(
+                            bypass_org=bool(getattr(current_user, "is_superuser", False)),
+                            org_id=persist_org_id,
+                        )
                         agent_history = await _load_session_messages(
-                            body.conversationId, current_user.id
+                            body.conversationId, current_user.id, history_scope
                         )
                     except Exception as hist_err:
                         logger.warning(f"加载 agent 会话历史失败（继续无历史对话）: {hist_err}")
@@ -933,6 +944,9 @@ async def chat_stream_endpoint(
                             user_content,
                             persist_org_id,
                             full_response,
+                            bypass_org=bool(
+                                getattr(current_user, "is_superuser", False)
+                            ),
                         )
                     except Exception as save_exc:
                         save_error = log_safe(save_exc)

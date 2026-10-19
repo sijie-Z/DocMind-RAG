@@ -53,8 +53,12 @@ from app.models.agent_task import TaskStatus
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.user import User
 from app.services.session_service import (
+    SessionAccessScope,
+    load_accessible_session,
+    resolve_session_access_scope,
     resolve_session_scope,
     save_session_interaction,
+    session_access_conditions,
     session_visibility_conditions,
 )
 
@@ -207,7 +211,15 @@ async def agent_chat(
             # Load history from session if provided
             history = body.history or []
             if body.session_id and not body.history:
-                loaded_history = await _load_session_messages(body.session_id, current_user.id)
+                # T4：历史加载与详情/落库同一 org 口径——不得把其他组织的
+                # 会话历史喂给本轮运行。超管保持旁路（与列表一致）。
+                history_scope = SessionAccessScope(
+                    bypass_org=bool(getattr(current_user, "is_superuser", False)),
+                    org_id=effective_org_id,
+                )
+                loaded_history = await _load_session_messages(
+                    body.session_id, current_user.id, history_scope
+                )
                 if loaded_history:
                     history = loaded_history
 
@@ -245,6 +257,7 @@ async def agent_chat(
                         body.query,
                         effective_org_id,
                         final_answer,
+                        bypass_org=bool(getattr(current_user, "is_superuser", False)),
                     )
                 except Exception as save_exc:
                     # issue #301 批 D（#22）：落库失败不再静默。回答已流给用户，
@@ -490,6 +503,7 @@ async def resume_agent_task(
                         task.query,
                         effective_org_id,
                         final_answer,
+                        bypass_org=bool(getattr(current_user, "is_superuser", False)),
                     )
                 except Exception as save_exc:
                     # issue #301 批 D（#22）：与 /chat 同口径——落库失败显式告知。
@@ -629,6 +643,7 @@ async def decide_agent_task_approval(
                         task.query,
                         effective_org_id,
                         final_answer,
+                        bypass_org=bool(getattr(current_user, "is_superuser", False)),
                     )
                 except Exception as save_exc:
                     save_error = log_safe(save_exc)
@@ -815,6 +830,7 @@ async def decide_agent_task_plan_approval(
                         task.query,
                         effective_org_id,
                         final_answer,
+                        bypass_org=bool(getattr(current_user, "is_superuser", False)),
                     )
                 except Exception as save_exc:
                     save_error = log_safe(save_exc)
@@ -1256,11 +1272,9 @@ async def get_session(
 ):
     """Get an agent session with its messages."""
     try:
-        stmt = select(ChatSession).where(
-            ChatSession.id == session_id,
-            ChatSession.user_id == current_user.id,
-        )
-        session = (await db.execute(stmt)).scalar_one_or_none()
+        # T4：按 id 访问与列表同一 org 口径（超管旁路 / 组织 + 历史 NULL）。
+        scope = await resolve_session_access_scope(current_user, db)
+        session = await load_accessible_session(db, session_id, current_user, scope)
         if not session:
             raise NotFoundError("会话不存在")
 
@@ -1313,11 +1327,9 @@ async def delete_session(
 ):
     """Delete an agent session and its messages."""
     try:
-        stmt = select(ChatSession).where(
-            ChatSession.id == session_id,
-            ChatSession.user_id == current_user.id,
-        )
-        session = (await db.execute(stmt)).scalar_one_or_none()
+        # T4：跨组织的会话与不存在同样处理（404），不得删除他人组织的数据行。
+        scope = await resolve_session_access_scope(current_user, db)
+        session = await load_accessible_session(db, session_id, current_user, scope)
         if not session:
             raise NotFoundError("会话不存在或无权删除")
 
@@ -1419,13 +1431,20 @@ async def update_config(
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-async def _load_session_messages(session_id: str, user_id: int) -> list[dict[str, str]]:
-    """Load session messages as history for the agent."""
+async def _load_session_messages(
+    session_id: str,
+    user_id: int,
+    scope: SessionAccessScope,
+) -> list[dict[str, str]]:
+    """Load session messages as history for the agent.
+
+    T4：历史加载与详情读取同一 org 口径（``scope``）——切到其他组织后，
+    旧组织会话的历史不得进入本轮运行上下文；历史 NULL 组织会话不受影响。
+    """
     try:
         async with AsyncSessionLocal() as session:
             stmt = select(ChatSession).where(
-                ChatSession.id == session_id,
-                ChatSession.user_id == user_id,
+                *session_access_conditions(session_id, user_id, scope)
             )
             result = await session.execute(stmt)
             if not result.scalar_one_or_none():
@@ -1457,12 +1476,15 @@ async def _save_session_interaction(
     query: str,
     organization_id: int | None,
     assistant_response: str = "",
+    *,
+    bypass_org: bool = False,
 ) -> str | None:
     """兼容包装：实现已提升为 app.services.session_service.save_session_interaction。
 
     B2 / D3：/chat 的 Agent 模式与 /agent/chat 必须落同一套库。保留本包装是
     为了让既有调用方与测试（monkeypatch agent 模块的 ``_save_session_interaction``
     或 ``AsyncSessionLocal``）行为不变——工厂显式传入，猴子补丁仍然生效。
+    T4：``bypass_org`` 透传超管旁路（与列表可见范围同口径）。
     """
     return await save_session_interaction(
         session_id,
@@ -1471,4 +1493,5 @@ async def _save_session_interaction(
         organization_id,
         assistant_response,
         session_factory=AsyncSessionLocal,
+        bypass_org=bypass_org,
     )

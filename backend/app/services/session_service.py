@@ -14,16 +14,33 @@
 """
 import logging
 import uuid
+from typing import NamedTuple
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
 from app.core.security import require_organization
+from app.exceptions import AuthorizationError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+
+
+class SessionAccessScope(NamedTuple):
+    """「按 id 访问会话」的组织作用域（列表口径的复用载体）。
+
+    - ``bypass_org=True``：超管旁路——只按 user_id 过滤（与
+      ``session_visibility_conditions`` 的既有 bypass 一致）；
+    - ``bypass_org=False, org_id=<id>``：本组织 + 历史 NULL 组织会话；
+    - ``bypass_org=False, org_id=None``：调用者无组织上下文（非超管）——
+      只允许本人历史 NULL 组织会话（fail-closed：不触达任何带组织标记的行；
+      历史会话本身仍可读，保留 chat 详情既有语义）。
+    """
+
+    bypass_org: bool
+    org_id: int | None
 
 
 async def resolve_session_scope(current_user: User, db: AsyncSession) -> int | None:
@@ -40,6 +57,89 @@ async def resolve_session_scope(current_user: User, db: AsyncSession) -> int | N
     return await require_organization(current_user, db)
 
 
+def session_org_condition(org_id: int | None):
+    """会话组织可见条件：本组织 + 历史 ``organization_id IS NULL``。
+
+    两个列表入口与所有按 id 访问路径共用同一口径（历史 NULL 行属本人，
+    只对本人可见，不构成跨租户读取）。``org_id is None`` 表示超管旁路，
+    返回 None——调用方不附加任何组织条件。
+    """
+    if org_id is None:
+        return None
+    return or_(
+        ChatSession.organization_id == org_id,
+        ChatSession.organization_id.is_(None),
+    )
+
+
+async def resolve_session_access_scope(
+    current_user: User, db: AsyncSession
+) -> SessionAccessScope:
+    """解析「按 id 访问会话」的组织作用域。
+
+    与列表共用 ``require_organization`` 的有效组织解析（含 token 组织回退与
+    无组织超管回源），但无组织非超管不 403：降级为「仅历史 NULL 组织会话」，
+    保留 chat 详情既有语义（本人历史会话本身可读，只是不触达带组织的数据）。
+    """
+    if getattr(current_user, "is_superuser", False):
+        return SessionAccessScope(bypass_org=True, org_id=None)
+    try:
+        org_id = await require_organization(current_user, db)
+    except AuthorizationError:
+        return SessionAccessScope(bypass_org=False, org_id=None)
+    return SessionAccessScope(bypass_org=False, org_id=org_id)
+
+
+def session_access_conditions(
+    session_id: str,
+    user_id: int,
+    scope: SessionAccessScope,
+) -> list:
+    """按 id 访问会话的 WHERE 条件（id + user + org）。
+
+    不包含列表的 ``status != ENDED`` 条件——详情/更新/删除对历史会话保持既有
+    可访问语义（本任务不改历史会话状态语义）。
+    """
+    conditions = [
+        ChatSession.id == session_id,
+        ChatSession.user_id == user_id,
+    ]
+    if scope.bypass_org:
+        return conditions
+    if scope.org_id is None:
+        # 无组织上下文（非超管）：fail-closed 到本人历史 NULL 组织会话
+        conditions.append(ChatSession.organization_id.is_(None))
+    else:
+        conditions.append(session_org_condition(scope.org_id))
+    return conditions
+
+
+def session_matches_scope(session_obj: ChatSession, scope: SessionAccessScope) -> bool:
+    """``session_access_conditions`` 的 Python 侧等价判断。
+
+    供需要区分「不存在」与「跨组织」的端点复用（后者应显式 404/403，
+    而不是静默当作不存在）。
+    """
+    if scope.bypass_org:
+        return True
+    if session_obj.organization_id is None:
+        return True
+    return scope.org_id is not None and session_obj.organization_id == scope.org_id
+
+
+async def load_accessible_session(
+    db: AsyncSession,
+    session_id: str,
+    current_user: User,
+    scope: SessionAccessScope,
+) -> ChatSession | None:
+    """按 id 加载调用者可见的会话；不存在 / 他人 / 跨组织一律 None。"""
+    stmt = select(ChatSession).where(
+        *session_access_conditions(session_id, current_user.id, scope)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
 def session_visibility_conditions(current_user: User, org_id: int | None) -> list:
     """两个会话列表入口共用的 WHERE 条件（org + user）。
 
@@ -52,13 +152,9 @@ def session_visibility_conditions(current_user: User, org_id: int | None) -> lis
         ChatSession.user_id == current_user.id,
         ChatSession.status != ChatSessionStatus.ENDED,
     ]
-    if org_id is not None:
-        conditions.append(
-            or_(
-                ChatSession.organization_id == org_id,
-                ChatSession.organization_id.is_(None),
-            )
-        )
+    org_condition = session_org_condition(org_id)
+    if org_condition is not None:
+        conditions.append(org_condition)
     return conditions
 
 
@@ -70,11 +166,18 @@ async def save_session_interaction(
     assistant_response: str = "",
     *,
     session_factory=None,
+    bypass_org: bool = False,
 ) -> str | None:
     """Save the user query and assistant response as messages in the session.
 
     S6 安全加固：会话归属按 user_id 校验（与 _load_session_messages 一致），
     绝不允许把消息写进其他用户的会话。
+
+    T4 组织口径：目标会话已归属非 NULL 组织且与本次有效组织不一致时，
+    **明确拒绝**（``AuthorizationError``，调用方如实告知），绝不静默写入——
+    多组织用户切到 B 组织后不得把消息落进 A 组织的会话行。``bypass_org``
+    仅供超管旁路（与 ``session_visibility_conditions`` 的 is_superuser 先例
+    一致：超管可见的会话必须同样可写，仍限本人）。
 
     ``session_factory`` 仅作测试缝：默认使用 ``AsyncSessionLocal``；
     agent 端点会显式传入其模块级同名工厂，保持既有测试的 monkeypatch 兼容。
@@ -82,9 +185,11 @@ async def save_session_interaction(
     Returns: the assistant message ID；None 表示"没有需要写的助手文本（空回复）"
     或"会话不属于调用者（显式拒绝，日志已记录）"。
 
-    Raises: 落库失败（DB 抖动等）时**原样上抛**，由调用方显式处理——issue #301
-    批 D（#22）：修前这里把异常吞成 None，与"空回复/越权拒绝"无法区分，调用方
-    done 照发且无任何提示，用户刷新后本轮问答凭空消失。
+    Raises:
+        AuthorizationError: 目标会话属于其他组织（明确拒绝，不写任何消息）。
+        落库失败（DB 抖动等）时**原样上抛**，由调用方显式处理——issue #301
+        批 D（#22）：修前这里把异常吞成 None，与"空回复/越权拒绝"无法区分，调用方
+        done 照发且无任何提示，用户刷新后本轮问答凭空消失。
     """
     factory = session_factory or AsyncSessionLocal
     try:
@@ -119,6 +224,19 @@ async def save_session_interaction(
                     organization_id=organization_id,
                 )
                 session.add(new_session)
+            elif (
+                not bypass_org
+                and existing.organization_id is not None
+                and existing.organization_id != organization_id
+            ):
+                # T4：目标会话已归属其他组织（含本次有效组织无法解析为 None 的
+                # 情形）——明确拒绝，绝不静默写入。
+                logger.warning(
+                    f"Refusing to save interaction into session {session_id} of "
+                    f"organization {existing.organization_id} "
+                    f"from organization {organization_id} (user={user_id})"
+                )
+                raise AuthorizationError("会话不属于当前组织，拒绝写入")
             elif existing.organization_id is None:
                 # issue #277（评审 or1268 R2 收账）：历史会话自愈——本修复前以 raw
                 # org 落库的会话（token 回退 / 无组织超管用户当时记 None）在本次以
@@ -152,6 +270,9 @@ async def save_session_interaction(
 
             await session.commit()
             return assistant_msg_id
+    except AuthorizationError:
+        # T4：跨组织写入的明确拒绝（已记 warning），不按落库失败重复记 ERROR。
+        raise
     except Exception as e:
         # issue #301 批 D（#22）：记录后**原样上抛**（不再吞成 None）。调用方
         # （/chat、/resume）拿到异常后负责显式告知：warning 事件 + done.saved=false

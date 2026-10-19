@@ -204,7 +204,8 @@ def test_resume_saves_session_interaction_with_prefix(client, auth, monkeypatch)
     async def _fake_resume(task_id, user_id, *, config=None, claim=True):
         yield AgentEvent(type="chunk", content="后半")
 
-    async def _save(session_id, user_id, query, organization_id, assistant_response=""):
+    async def _save(session_id, user_id, query, organization_id, assistant_response="",
+                    **kwargs):
         saved.update(session_id=session_id, user_id=user_id, query=query,
                      organization_id=organization_id, answer=assistant_response)
         return "msg-1"
