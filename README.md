@@ -188,7 +188,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-19 个端点模块，统一 `/api/v1` 前缀：
+22 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
@@ -199,16 +199,19 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
 | 知识库 | `/knowledge` | 知识库 CRUD、检索、统计、设置 |
 | 组织管理 | `/organizations` | 组织 CRUD、成员管理、角色分配 |
+| 组织设置 | `/organizations` | 组织级设置读写与审计（与组织管理共用前缀） |
 | 系统监控 | `/monitoring` | 性能指标、健康检查、告警、RAG 质量评估 |
 | 通知 | `/notifications` | 通知 CRUD、已读标记、WebSocket 推送 |
 | 提示词 | `/prompts` | 提示词模板 CRUD + 版本控制 |
 | Token 用量 | `/token-usage` | 使用追踪 + 报告 |
 | 操作手册 | `/manuals` | 系统手册管理 |
 | 工作流 | `/workflows` | 工作流 CRUD、执行、调试、节点定义 |
+| 定时任务 | `/scheduled-tasks` | 定时任务 CRUD、暂停/恢复与手动触发 |
 | LLM 配置（已弃用） | `/llm-config` | 工作流全局配置入口已移除；端点标 deprecated，待统一 Provider 层落地后删除 |
 | 技能库 | `/curated-skills` | 技能发现与管理 |
 | Agent 记忆 | `/memory` | 短期/长期/工作记忆 CRUD、语义搜索 |
 | 智能 Agent | `/agent` | PER Agent 对话（SSE 流式）、工具调用、配置 |
+| MCP 工具 | `/mcp` | MCP 服务器状态（管理员只读） |
 | 用户设置 | `/user` | 个人 UI 偏好 |
 | 示例数据 | `/demo` | 演示文档与数据填充 |
 
@@ -216,7 +219,7 @@ Swagger 文档：`http://localhost:8000/docs`
 
 ### 🖥 前端 (`frontend/src/`)
 
-Vue 3 + TypeScript + Naive UI 单页应用，21 条路由：
+Vue 3 + TypeScript + Naive UI 单页应用，29 条具名路由：
 
 | 页面 | 路由 | 功能 |
 |------|------|------|
@@ -242,7 +245,7 @@ Vue 3 + TypeScript + Naive UI 单页应用，21 条路由：
 | 服务 | 文件 | 功能 |
 |------|------|------|
 | 认证服务 | `auth_service.py` | JWT 创建/验证、bcrypt 哈希、Token 黑名单（jti） |
-| 文档解析 | `document_parser.py` | 解析 PDF/Word/Excel/TXT/MD，文本提取与分块 |
+| 文档解析 | `document_parser.py` | 解析 PDF/Word/Excel/CSV/TXT/MD 与图片（OCR），文本提取与分块 |
 | RAG 服务 | `rag_service.py` | RAG 管线 Facade |
 | 文件服务 | `file_service.py` | 文件存储与检索 |
 | 知识库服务 | `knowledge_service.py` | 知识库业务逻辑 |
@@ -352,8 +355,8 @@ DocMind/
 │   │   ├── dependencies.py          # 依赖注入容器
 │   │   ├── exceptions.py            # 自定义异常层次结构
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 19 个模块）
-│   │   │   └── endpoints/           # 端点实现（19 个文件）
+│   │   │   ├── router.py            # 主路由（注册 22 个模块）
+│   │   │   └── endpoints/           # 端点实现（22 个文件）
 │   │   ├── agent/                   # PER Agent 核心
 │   │   │   ├── loop.py              #   PER 主循环
 │   │   │   ├── planner.py           #   规划器（LLM + 结构化规则）
@@ -418,8 +421,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  上下文压缩
 │   │   │   ├── context_window.py    #   令牌预算管理
 │   │   │   └── evaluator.py         #   质量评估
-│   │   ├── services/                # 业务服务层（14 个服务）
-│   │   ├── models/                  # ORM 模型（14 个实体）
+│   │   ├── services/                # 业务服务层（20 个服务）
+│   │   ├── models/                  # ORM 模型（18 个实体）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者
 │   ├── tests/                       # 2223 个后端测试（前端另有 861 个）
@@ -431,7 +434,7 @@ DocMind/
 │   └── docker-compose.yml           # 10 服务编排
 ├── frontend/
 │   └── src/
-│       ├── views/                   # 页面（19 个模块，21 条路由）
+│       ├── views/                   # 页面（23 个页面模块，29 条具名路由）
 │       ├── components/              # 共享组件
 │       ├── api/                     # Axios API 客户端
 │       ├── stores/                  # Pinia 状态管理

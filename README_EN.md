@@ -188,7 +188,7 @@ Query enters
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-19 endpoint modules under `/api/v1`:
+22 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|
@@ -199,16 +199,19 @@ Query enters
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
 | Knowledge | `/knowledge` | Knowledge base CRUD, retrieval, statistics, settings |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |
+| Organization Settings | `/organizations` | Org-level settings and audit (shared prefix with Organizations) |
 | Monitoring | `/monitoring` | Performance metrics, health checks, alerts, RAG quality scoring |
 | Notifications | `/notifications` | Notification CRUD, read marking, WebSocket push |
 | Prompts | `/prompts` | Prompt template CRUD + versioning |
 | Token Usage | `/token-usage` | Usage tracking + reports |
 | Manuals | `/manuals` | System user guide management |
 | Workflows | `/workflows` | Workflow CRUD, execution, debugging, node definitions |
+| Scheduled Tasks | `/scheduled-tasks` | Scheduled task CRUD, pause/resume, and manual trigger |
 | LLM Config (deprecated) | `/llm-config` | Global config entry removed from the workflow editor; endpoints marked deprecated pending the unified Provider layer |
 | Skills | `/curated-skills` | Skill discovery & management |
 | Agent Memory | `/memory` | Short/long/working memory CRUD, semantic search |
 | Agent | `/agent` | PER Agent conversations (SSE streaming), tool calls, configuration |
+| MCP | `/mcp` | MCP server status (admin, read-only) |
 | User Settings | `/user` | Personal UI preferences |
 | Demo Data | `/demo` | Seed demo documents & data |
 
@@ -216,7 +219,7 @@ Swagger docs: `http://localhost:8000/docs`
 
 ### 🖥 Frontend (`frontend/src/`)
 
-Vue 3 + TypeScript + Naive UI SPA, 21 routes:
+Vue 3 + TypeScript + Naive UI SPA, 29 named routes:
 
 | Page | Route | Description |
 |------|-------|-------------|
@@ -242,7 +245,7 @@ Vue 3 + TypeScript + Naive UI SPA, 21 routes:
 | Service | File | Purpose |
 |---------|------|---------|
 | Auth Service | `auth_service.py` | JWT creation/validation, bcrypt hashing, token blacklist (jti) |
-| Document Parser | `document_parser.py` | Parse PDF/Word/Excel/TXT/MD, text extraction & chunking |
+| Document Parser | `document_parser.py` | Parse PDF/Word/Excel/CSV/TXT/MD and images (OCR), text extraction & chunking |
 | RAG Service | `rag_service.py` | RAG pipeline facade |
 | File Service | `file_service.py` | File storage & retrieval |
 | Knowledge Service | `knowledge_service.py` | Knowledge base business logic |
@@ -382,8 +385,8 @@ DocMind/
 │   │   ├── dependencies.py          # Dependency injection container
 │   │   ├── exceptions.py            # Custom exception hierarchy
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # Main router (19 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (19 files)
+│   │   │   ├── router.py            # Main router (22 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (22 files)
 │   │   ├── agent/                   # PER Agent core
 │   │   │   ├── loop.py              #   PER main loop
 │   │   │   ├── planner.py           #   Planner (LLM + structured rules)
@@ -448,8 +451,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  Context compression
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (14 services)
-│   │   ├── models/                  # ORM models (14 entities)
+│   │   ├── services/                # Business service layer (20 services)
+│   │   ├── models/                  # ORM models (18 entities)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer
 │   ├── tests/                       # 2223 backend tests (plus 861 frontend)
@@ -461,7 +464,7 @@ DocMind/
 │   └── docker-compose.yml           # 10-service orchestration
 ├── frontend/
 │   └── src/
-│       ├── views/                   # Pages (19 modules, 21 routes)
+│       ├── views/                   # Pages (23 page modules, 29 named routes)
 │       ├── components/              # Shared components
 │       ├── api/                     # Axios API clients
 │       ├── stores/                  # Pinia state stores

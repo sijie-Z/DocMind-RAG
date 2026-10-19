@@ -17,6 +17,7 @@
     python -m pytest tests/unit/test_outbound_claims.py -q --noconftest
 """
 
+import ast
 import re
 from pathlib import Path
 
@@ -76,40 +77,57 @@ def test_graph_and_compressor_code_evidence():
     rag_source = "\n".join(
         p.read_text(encoding="utf-8") for p in sorted(rag_dir.glob("*.py"))
     )
-    assert not re.search(r"\bgraph_rag\b|\bsubgraph\b", rag_source, re.IGNORECASE), (
+    assert not re.search(r"graph_rag|subgraph", rag_source, re.IGNORECASE), (
         "backend/app/rag 出现了图谱消费代码；若图谱已接入检索链路，"
         "请同步更新 README 的边界表述与本测试。"
     )
     compressor = _read("backend/app/rag/context_compressor.py")
-    imports = re.findall(r"^(?:from|import)\s+([^\n]+)", compressor, re.MULTILINE)
-    assert not any(re.search(r"llm|openai|anthropic", line, re.IGNORECASE) for line in imports), (
+    tree = ast.parse(compressor)
+    imported: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            imported.append(node.module or "")
+    assert not any(
+        re.search(r"llm|openai|anthropic|langchain", module, re.IGNORECASE)
+        for module in imported
+    ), (
         "context_compressor.py 引入了 LLM 客户端；若改为 LLM 压缩，"
         "请同步更新 README 的表述与本测试。"
     )
-    assert "await " not in compressor, (
-        "context_compressor.py 出现异步调用（LLM 压缩的典型形态）；"
+    assert not any(
+        isinstance(node, (ast.Await, ast.AsyncFunctionDef)) for node in ast.walk(tree)
+    ), (
+        "context_compressor.py 出现异步函数/调用（LLM 压缩的典型形态）；"
         "若改为 LLM 压缩，请同步更新 README 的表述与本测试。"
     )
     assert "extract_query_terms" in compressor, (
         "context_compressor.py 应仍是基于查询关键词的规则式句子抽取。"
     )
+    pipeline = _read("backend/app/rag/pipeline.py")
+    assert "compress_context_list(" in pipeline, (
+        "pipeline.py 不再调用 compress_context_list；README 的 RAG 管线描述需同步复核。"
+    )
 
 
 def test_help_page_steps_match_real_ui():
     """帮助页三条：PPT 支持 / 重试向量化 / 演示口令，必须与真实 UI 一致。"""
-    _assert_absent(_HELP_VIEW, ["PowerPoint", "重试向量化", "guest / 123456", "guest/123456"])
+    help_page = _read(_HELP_VIEW)
+    _assert_absent(_HELP_VIEW, ["重试向量化", "guest / 123456", "guest/123456"])
+    # 正向断言真实支持格式（与上传面板 accept 一致）。
+    _assert_present(_HELP_VIEW, ["PDF", "Word", ".docx", ".xlsx", "Markdown", "CSV", "OCR"])
     # 真实可达的操作入口（知识库页：行内"重新解析" + 工具栏"最近失败文档重建"）。
-    _assert_present(_HELP_VIEW, ["重新解析", "最近失败文档重建"])
+    _assert_present(_HELP_VIEW, ["重新解析", "最近失败文档重建", "红色错误提示条"])
     # 账号获取的真实路径：登录页"去注册"（/register）与管理员"用户管理"。
     _assert_present(_HELP_VIEW, ["去注册", "用户管理"])
 
     parser = _read("backend/app/services/document_parser.py")
     if ".pptx" not in parser and "'.ppt'" not in parser:
-        assert "PowerPoint" not in _read(_HELP_VIEW), (
+        assert "PowerPoint" not in help_page, (
             "解析器不支持 ppt/pptx，帮助页不得声称支持 PowerPoint。"
         )
-    # 帮助页若声称固定演示口令，必须与随机密码实现冲突——由下面 locale 用例兜底。
-    assert "123456" not in _read(_HELP_VIEW)
+    assert "123456" not in help_page
 
 
 def test_locales_do_not_publish_fixed_demo_credentials():
@@ -122,25 +140,32 @@ def test_locales_do_not_publish_fixed_demo_credentials():
 
 def test_product_definition_image_capability_matches_code():
     """产品定义须承认图片 OCR 能力，同时写清不做图像理解/生成。"""
-    _assert_absent("docs/product-definition.md", ["不处理图片"])
-    _assert_present("docs/product-definition.md", ["OCR"])
+    _assert_absent(
+        "docs/product-definition.md",
+        ["不处理图片", "911 个后端测试", "111 个前端测试", "89 个测试文件", "guest 账号自动初始化"],
+    )
+    _assert_present("docs/product-definition.md", ["OCR", "冻结快照", "ENABLE_DEMO_ACCOUNT"])
     parser = _read("backend/app/services/document_parser.py")
     assert "'.png': self._parse_image" in parser, "图片 OCR 解析入口消失，请复核产品定义"
     _assert_present("docs/product-definition.md", ["不做图像理解"])
 
 
 def test_architecture_numbers_match_code():
-    """架构页数字与代码一致：33 个内置工具、22 个路由模块。"""
+    """架构页数字与代码一致：33 个内置工具、22 个路由模块，且不得虚报 Celery。"""
     _assert_absent(
         "docs/architecture.html",
         [
-            "19 个工具实现",
+            "19 个工具",
             "19 个路由模块",
             "19 API 模块",
             "FastAPI · 19 模块",
+            "Celery",
         ],
     )
-    _assert_present("docs/architecture.html", ["33 个工具实现", "22 个路由模块", "22 API 模块"])
+    _assert_present(
+        "docs/architecture.html",
+        ["33 个内置工具", "基础工具（14 个）", "22 API 模块", "22 个路由模块"],
+    )
     # 静态注册数 = @register_tool 装饰器数，防止口径再次漂移。
     tools_source = "\n".join(
         p.read_text(encoding="utf-8")
@@ -152,9 +177,95 @@ def test_architecture_numbers_match_code():
 
 
 def test_index_page_stats_are_current():
-    """docs/index.html 不再使用 v1.2 / 1022 / 17 等过期数字。"""
+    """docs/index.html 不再使用 v1.2 / 1022 / 17 等过期数字，且测试数带快照口径。"""
     _assert_absent("docs/index.html", ["1022", "v1.2 ·", 'stat-num">17<'])
-    _assert_present("docs/index.html", ["v1.22", "3084", 'stat-num">22<'])
+    _assert_present("docs/index.html", ["v1.22", "3084", "冻结快照", 'stat-num">22<'])
+
+
+def test_readme_module_counts_match_code():
+    """README/README_EN 的模块、服务、实体、视图与路由数必须与代码一致。"""
+    endpoints_dir = _REPO_ROOT / "backend" / "app" / "api" / "v1" / "endpoints"
+    endpoints = list(endpoints_dir.glob("*.py"))
+    router_source = _read("backend/app/api/v1/router.py")
+    services = [
+        p
+        for p in (_REPO_ROOT / "backend" / "app" / "services").glob("*.py")
+        if p.name != "__init__.py"
+    ]
+    models = [
+        p
+        for p in (_REPO_ROOT / "backend" / "app" / "models").glob("*.py")
+        if p.name != "__init__.py"
+    ]
+    views = [
+        p
+        for p in (_REPO_ROOT / "frontend" / "src" / "views").iterdir()
+        if (p.is_dir() and p.name != "__tests__") or (p.is_file() and p.suffix == ".vue")
+    ]
+    route_names = re.findall(
+        r"^\s*name: '", _read("frontend/src/router/index.ts"), re.MULTILINE
+    )
+    counts = {
+        "endpoints": len(endpoints),
+        "routers": router_source.count("include_router("),
+        "services": len(services),
+        "models": len(models),
+        "views": len(views),
+        "routes": len(route_names),
+    }
+    assert counts == {
+        "endpoints": 22,
+        "routers": 22,
+        "services": 20,
+        "models": 18,
+        "views": 23,
+        "routes": 29,
+    }, f"代码侧计数已漂移: {counts}；请同步 README 与本测试"
+
+    _assert_absent(
+        "README.md",
+        [
+            "19 个端点模块",
+            "注册 19 个模块",
+            "19 个文件",
+            "14 个服务",
+            "14 个实体",
+            "19 个模块，21 条路由",
+        ],
+    )
+    _assert_present(
+        "README.md",
+        [
+            "22 个端点模块",
+            "注册 22 个模块",
+            "22 个文件",
+            "20 个服务",
+            "18 个实体",
+            "23 个页面模块，29 条具名路由",
+        ],
+    )
+    _assert_absent(
+        "README_EN.md",
+        [
+            "19 endpoint modules",
+            "19 modules registered",
+            "19 files",
+            "14 services",
+            "14 entities",
+            "19 modules, 21 routes",
+        ],
+    )
+    _assert_present(
+        "README_EN.md",
+        [
+            "22 endpoint modules",
+            "22 modules registered",
+            "22 files",
+            "20 services",
+            "18 entities",
+            "23 page modules, 29 named routes",
+        ],
+    )
 
 
 def test_readme_pending_hardening_is_not_stale():
