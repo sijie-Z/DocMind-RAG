@@ -517,7 +517,7 @@ export default {
     registerSuccess: '注册成功',
     goToLogin: '去登录',
     goToRegister: '去注册',
-    demoDesc: '使用演示账号 (guest / 123456)',
+    demoDesc: '演示账号由部署方开启；账号密码请向部署方获取（初始密码随机生成，非固定口令）',
     loginFailed: '登录失败',
     registerFailed: '注册失败',
     privacy: '隐私',

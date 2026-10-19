@@ -21,7 +21,7 @@
 DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execute-Reflect）Agent 架构**构建。支持多格式文档解析、混合检索增强生成（RAG）、可视化工作流编辑、实时 SSE 流式问答，以及完整的可观测性体系。
 
 核心场景：
-- 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV，自动解析、分块、向量化，支持语义搜索
+- 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV 及 PNG/JPG/JPEG/WEBP/BMP 图片（OCR），自动解析、分块、向量化，支持语义搜索
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
 - 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 33 个工具完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
@@ -41,7 +41,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 - 已修复：语义缓存按组织隔离、会话归属校验、知识库搜索/删除/重建的组织隔离、文件上传路径穿越与 MinIO 删除、API Key 掩码、Web 抓取 SSRF 防护、工作流归属隔离、Kafka 不可用时的进程内文档处理、本地启动脚本、敏感产物移出 git 跟踪。
 - 安全加固（1.20）：Agent 沙箱逃逸封堵（下划线属性拦截 + 长度/输出上限）、execute_sql 租户过滤与 UNION/子查询拦截、disabled_tools 服务端强制合并、mcp 子进程环境变量白名单、注册禁自选组织、角色变更同组织校验、登录失败锁定 + 用户枚举时序防护、refresh token 轮换、WS 仅接受 access token、PII 掩码全链路（上下文+流式）、GraphRAG 组织分区、/files 代理归属校验、RAG 缓存按组织失效、Alembic 001 FK 类型修复 + 005 补齐 15 张表、compose 凭据/端口收紧、24 个安全回归测试（446 单测通过）。
 - 架构收敛：文档解析/向量化/ES 索引统一为单一 Processor；聊天核心管线从路由下沉到 `services/chat_service.py`；新增统一文档授权辅助层。
-- 后续加固：Agent 记忆接口按用户隔离、`/files` 代理鉴权、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`。
+- 加固收口（已完成）：Agent 记忆接口按用户隔离、`/files` 代理鉴权（非公开对象需登录 + 组织归属校验）、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`。
 
 已知限制：
 - 工作流代码节点默认关闭，需显式设置 `ENABLE_WORKFLOW_CODE_NODES=true`，且必须通过 Docker 沙箱执行。
@@ -150,7 +150,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
                                 + RRF 倒数排序融合（k=60）
   → MMR 选择                  — 最大边际相关性去重
   → Reranker                  — 交叉编码器重排序（本地 BGE 或 API）
-  → ContextCompressor         — LLM 上下文压缩
+  → ContextCompressor         — 关键词句子抽取压缩（规则式，无 LLM 调用）
   → 缓存检查                  — 精确匹配缓存（TTL 600s）+ 语义缓存
   → LLM 生成                  — 流式 SSE 输出，严格模式可选，PII 掩码
 ```
@@ -162,7 +162,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | `reranker.py` | 交叉编码器重排序（本地 BAAI/bge-reranker-base / API） |
 | `query_processor.py` | HyDE 生成、LLM 查询改写、意图/复杂度分类、查询分解 |
 | `cache.py` | RetrievalCache（精确 TTL）+ SemanticCache（向量余弦相似度） |
-| `context_compressor.py` | 基于 LLM 的检索结果压缩 |
+| `context_compressor.py` | 基于查询关键词的句子抽取压缩（规则式，无 LLM 调用） |
 | `context_window.py` | RAG 聊天的令牌预算消息构建器 |
 | `evaluator.py` / `metrics.py` | RAG 质量指标（基础性、相关性） |
 
@@ -253,7 +253,7 @@ Vue 3 + TypeScript + Naive UI 单页应用，21 条路由：
 | 记忆服务 | `memory_service.py` | Agent 记忆 CRUD |
 | PII 掩码 | `masking_service.py` | 敏感信息脱敏 |
 | 语义分块 | `semantic_chunker.py` | 语义感知的文本分块 |
-| 图 RAG | `graph_rag_service.py` | 知识图谱增强检索 |
+| 图谱服务 | `graph_rag_service.py` | 知识图谱构建、查询与可视化（不参与 RAG 检索链路） |
 
 ### 🔄 异步处理 (`backend/app/worker/`)
 

@@ -458,7 +458,7 @@ export default {
     registerSuccess: '登録に成功しました',
     goToLogin: 'ログインへ',
     goToRegister: '登録へ',
-    demoDesc: 'デモアカウントを使用 (guest / 123456)',
+    demoDesc: 'デモアカウントはデプロイ担当者が有効化します。認証情報はデプロイ担当者から取得してください（初期パスワードはランダム生成で、固定値ではありません）',
     loginFailed: 'ログインに失敗しました',
     registerFailed: '登録に失敗しました',
     privacy: 'プライバシー',

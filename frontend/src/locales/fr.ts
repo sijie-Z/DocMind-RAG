@@ -458,7 +458,7 @@ export default {
     registerSuccess: 'Inscription réussie',
     goToLogin: 'Se connecter',
     goToRegister: 'S\'inscrire',
-    demoDesc: 'Utiliser le compte démo (guest / 123456)',
+    demoDesc: 'L\'accès démo est activé par le déployeur ; demandez-lui les identifiants (le mot de passe initial est généré aléatoirement, pas un mot de passe fixe)',
     loginFailed: 'Échec de la connexion',
     registerFailed: 'Échec de l\'inscription',
     privacy: 'Confidentialité',

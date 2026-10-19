@@ -21,7 +21,7 @@
 DocMind is a full-stack enterprise AI knowledge base system built around the **PER (Plan-Execute-Reflect) Agent architecture**. It provides multi-format document parsing, hybrid retrieval-augmented generation (RAG), visual workflow editing, real-time SSE streaming Q&A, and a comprehensive observability stack.
 
 Core use cases:
-- 📄 **Document KB** — Upload PDF, Word, Excel, TXT, Markdown, and CSV files. Auto-parse, chunk, embed, and semantic search.
+- 📄 **Document KB** — Upload PDF, Word, Excel, TXT, Markdown, CSV, and PNG/JPG/JPEG/WEBP/BMP images (OCR). Auto-parse, chunk, embed, and semantic search.
 - 💬 **Intelligent Q&A** — RAG pipeline: keyword + vector hybrid search, reranking, LLM generation with SSE streaming.
 - 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 33 tools for complex multi-step tasks.
 - 🧩 **Workflow Editor** — Visual DAG design & debugging (Vue Flow). Configurable LLM models, prompts, and execution engines.
@@ -150,7 +150,7 @@ Query enters
                                 + RRF reciprocal rank fusion (k=60)
   → MMR Selection             — Maximal Marginal Relevance deduplication
   → Reranker                  — Cross-encoder rerank (local BGE or API)
-  → ContextCompressor         — LLM context compression
+  → ContextCompressor         — query-term sentence extraction (rule-based, no LLM call)
   → Cache Check               — Exact match cache (TTL 600s) + semantic cache
   → LLM Generation            — Streaming SSE output, strict mode, PII masking
 ```
@@ -162,7 +162,7 @@ Query enters
 | `reranker.py` | Cross-encoder rerank (local BAAI/bge-reranker-base or API) |
 | `query_processor.py` | HyDE generation, LLM query rewrite, intent/complexity classification, decomposition |
 | `cache.py` | RetrievalCache (exact TTL) + SemanticCache (cosine similarity) |
-| `context_compressor.py` | LLM-based context pruning |
+| `context_compressor.py` | Query-term sentence extraction compression (rule-based, no LLM call) |
 | `context_window.py` | Token budget message builder for RAG chat |
 | `evaluator.py` / `metrics.py` | RAG quality scoring (groundedness, relevance) |
 
@@ -253,7 +253,7 @@ Vue 3 + TypeScript + Naive UI SPA, 21 routes:
 | Memory Service | `memory_service.py` | Agent memory CRUD |
 | PII Masking | `masking_service.py` | Sensitive info redaction |
 | Semantic Chunker | `semantic_chunker.py` | Semantic-aware text chunking |
-| Graph RAG | `graph_rag_service.py` | Knowledge graph enhanced retrieval |
+| Graph Service | `graph_rag_service.py` | Knowledge-graph build, query, and visualization (not part of the RAG retrieval path) |
 
 ### 🔄 Async Processing (`backend/app/worker/`)
 
