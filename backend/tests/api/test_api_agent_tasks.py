@@ -371,7 +371,6 @@ async def test_resume_http_cancel_releases_lease_and_immediate_retry_runs(tmp_pa
     from app.agent.planner import Plan, PlanStep
     from app.core.database import Base
     from app.main import app
-    from app.rag.retriever import HybridRetriever
 
     # sqlite 工厂（checkpoint 与端点模块共用）+ 副作用隔离
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'f1lease.db'}")
@@ -424,23 +423,9 @@ async def test_resume_http_cancel_releases_lease_and_immediate_retry_runs(tmp_pa
     fake_client.chat.completions.create = _create
     monkeypatch.setattr(agent_service, "_client", fake_client, raising=False)
 
-    # #416（hermetic 收口）：执行器每步都会做一次记忆回忆
-    # （executor._execute_step_once → AgentMemoryBridge.get_context_for_query），
-    # 回忆链经 RAGPipeline.get_embedding → HybridRetriever.get_embedding 调真实
-    # embedding 客户端，默认地址 http://localhost:11434/v1。CI 无监听 → 连接拒绝
-    # 被 retriever.get_embedding 吞掉、立即返回；部分开发机该地址有进程应答 502
-    # → OpenAI 客户端重试退避，把"首个假 LLM 调用"推到 10s 判据之后——红绿由
-    # 环境应答决定。沿用仓库既有 hermetic 纪律（tests/unit/test_agent_recovery_flow.py
-    # 等用例同款桩）：在 retriever 出口注入进程内固定实现（空向量 = 两环境既有
-    # 降级结果），不改变本用例语义（租约获取→HTTP 取消→租约释放→立即重试），
-    # 只消除环境依赖；计数断言证明桩路径确实被执行到。
-    embedding_calls: list[str] = []
-
-    async def _fake_get_embedding(self, text: str) -> list[float]:
-        embedding_calls.append(text)
-        return []
-
-    monkeypatch.setattr(HybridRetriever, "get_embedding", _fake_get_embedding)
+    # T5（enable_memory 门控）之后：本用例 config 为 enable_memory=False，
+    # 执行器不再做被动记忆回忆 → 原先为消除 11434 依赖而加的 embedding 桩
+    # 已无触发路径，删除（本用例由此在“门控正确”的前提下天然 hermetic）。
 
     app.dependency_overrides[get_current_user] = lambda: _mock_user()
     try:
@@ -481,10 +466,6 @@ async def test_resume_http_cancel_releases_lease_and_immediate_retry_runs(tmp_pa
         app.dependency_overrides.pop(get_current_user, None)
 
     assert calls["n"] == 2, "续跑只应新发起 1 次 LLM 调用（s2 重跑一次）"
-    assert embedding_calls, (
-        "执行器的逐步记忆回忆必须走显式 embedding 桩——断言未触发说明桩不在"
-        "真实执行路径上（或路径被静默跳过），环境依赖可能重新出现"
-    )
     async with factory() as db:
         t = await db.get(AgentTask, task_id)
     assert t.status == TaskStatus.COMPLETED, "重试必须从断点跑完"
