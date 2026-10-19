@@ -59,6 +59,9 @@ class TestSemanticCacheNamespaceIsolation:
     async def test_retrieval_entry_with_empty_answer_not_visible_to_answer_cache(self, monkeypatch):
         fake = _FakeRedis()
         monkeypatch.setattr("app.rag.cache._get_redis", lambda: fake)
+        # issue #195：语义缓存默认关闭，本用例验证的是命名空间隔离——显式开启。
+        monkeypatch.setattr("app.rag.cache.settings.SEMANTIC_CACHE_RETRIEVAL_ENABLED", True)
+        monkeypatch.setattr("app.rag.cache.settings.SEMANTIC_CACHE_ANSWER_ENABLED", True)
         embedding = [0.1, 0.2, 0.3, 0.4] * 8
 
         retrieval_cache = SemanticCache.for_retrieval()
@@ -68,18 +71,18 @@ class TestSemanticCacheNamespaceIsolation:
         await retrieval_cache.set("查询", embedding, "", [{"text": "资料"}], organization_id=3)
 
         # 问答链路绝不能命中 answer 为空的条目（修复前这里会返回空回答）
-        assert await answer_cache.get(embedding, organization_id=3) is None
+        assert await answer_cache.get(embedding, organization_id=3, query="查询") is None
         # 检索链路仍能命中自己的缓存（缓存收益保留）
-        hit = await retrieval_cache.get(embedding, organization_id=3)
+        hit = await retrieval_cache.get(embedding, organization_id=3, query="查询")
         assert hit is not None
         assert hit["sources"] == [{"text": "资料"}]
 
         # 反向：问答缓存的完整回答也不会流入检索缓存
         await answer_cache.set("查询", embedding, "完整回答", [{"text": "资料"}], organization_id=3)
-        retrieval_hit = await retrieval_cache.get(embedding, organization_id=3)
+        retrieval_hit = await retrieval_cache.get(embedding, organization_id=3, query="查询")
         assert retrieval_hit is not None
         assert retrieval_hit["answer"] == ""
-        assert (await answer_cache.get(embedding, organization_id=3))["answer"] == "完整回答"
+        assert (await answer_cache.get(embedding, organization_id=3, query="查询"))["answer"] == "完整回答"
 
     def test_pipeline_uses_retrieval_namespace(self):
         from app.rag.pipeline import RAGPipeline
@@ -94,15 +97,17 @@ class TestSemanticCacheNamespaceIsolation:
         """调用点仍以默认实例清理，检索命名空间也必须被清掉，否则文档更新后命中旧内容。"""
         fake = _FakeRedis()
         monkeypatch.setattr("app.rag.cache._get_redis", lambda: fake)
+        # issue #195：语义缓存默认关闭，清空语义条目需先显式开启写入。
+        monkeypatch.setattr("app.rag.cache.settings.SEMANTIC_CACHE_RETRIEVAL_ENABLED", True)
         embedding = [0.5] * 32
 
         retrieval_cache = SemanticCache.for_retrieval()
         await retrieval_cache.set("查询", embedding, "", [{"text": "旧资料"}], organization_id=5)
-        assert await retrieval_cache.get(embedding, organization_id=5) is not None
+        assert await retrieval_cache.get(embedding, organization_id=5, query="查询") is not None
 
         await SemanticCache().clear_for_org(5)
 
-        assert await retrieval_cache.get(embedding, organization_id=5) is None
+        assert await retrieval_cache.get(embedding, organization_id=5, query="查询") is None
         assert not any("org:5:" in key for key in fake.values)
 
 
