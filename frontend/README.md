@@ -1,204 +1,91 @@
-# DocMind AI知识库系统
+# DocMind 前端
 
-基于RAG架构的企业级AI知识库智能问答平台
+DocMind 企业级 RAG 知识库系统的 Vue 3 前端。后端为 FastAPI 应用，业务接口统一挂在 `/api/v1` 前缀下（根级 `/health`、`/metrics` 除外）。
 
 ## 技术栈
 
-### 后端
-- **框架**: FastAPI + Python 3.8+
-- **数据库**: MySQL 8.0 + SQLAlchemy
-- **缓存**: Redis
-- **搜索引擎**: Elasticsearch 8.10.0
-- **消息队列**: Apache Kafka
-- **文件存储**: MinIO
-- **AI集成**: DeepSeek API + 豆包Embedding
-- **安全认证**: JWT + 密码加密(BCrypt)
+- **框架**：Vue 3 + TypeScript + Vite
+- **UI**：Naive UI + UnoCSS
+- **状态管理 / 路由**：Pinia + Vue Router
+- **可视化 / 编辑器**：ECharts、Vue Flow（工作流 DAG 编辑器）
+- **消息渲染**：markdown-it + KaTeX + highlight.js + DOMPurify
+- **测试**：Vitest（单元）、Playwright（E2E）
 
-### 前端
-- **框架**: Vue 3 + TypeScript
-- **构建工具**: Vite
-- **UI组件**: Naive UI
-- **状态管理**: Pinia
-- **路由**: Vue Router
-- **样式**: UnoCSS + SCSS
-- **图标**: @vicons/ionicons5
+## 环境要求
 
-## 功能特性
+- Node.js 18+
+- 后端（本仓库 `backend/`）：Python 3.11+、MySQL 8、Redis 7、Elasticsearch 8、Kafka、MinIO
 
-### 用户管理模块
-- ✅ 用户注册与登录
-- ✅ JWT身份认证
-- ✅ 基于角色的权限控制
-- ✅ 组织标签管理
-- ✅ 用户信息管理
+## 启动
 
-### 文档上传与处理模块
-- ✅ 大文件分片上传
-- ✅ 断点续传支持
-- ✅ 多种文档格式支持(PDF、Word、Excel、图片等)
-- ✅ 异步文档处理
-- ✅ 文档向量化处理
-- ✅ 组织权限关联
+### 1. 启动后端
 
-### 知识库检索模块
-- ✅ 语义检索(向量搜索)
-- ✅ 关键词检索(BM25)
-- ✅ 混合检索算法
-- ✅ 组织权限过滤
-- ✅ 智能结果重排序
-
-### 对话交互系统
-- ✅ WebSocket实时通信
-- ✅ 多轮对话支持
-- ✅ 上下文记忆
-- ✅ 流式响应
-- ✅ 知识来源标注
-
-## 快速开始
-
-### 环境要求
-- Python 3.8+
-- Node.js 16+
-- MySQL 8.0
-- Redis 6.0+
-- Elasticsearch 8.10.0
-- Apache Kafka
-- MinIO
-
-### 后端启动
 ```bash
-# 安装依赖
-pip install -r requirements.txt
-
-# 启动后端服务
 cd backend
-python main.py
+cp .env.example .env               # Windows: copy .env.example .env
+pip install -r requirements.txt
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-# 启动文件处理服务
-python file_processor.py
+# 文档处理 worker（独立进程，可选）
+python start_worker.py
 ```
 
-### 前端启动
+- API 文档：http://localhost:8000/docs
+- 健康检查：http://localhost:8000/health
+- 业务接口前缀：`/api/v1`
+
+使用 Docker 部署时另需 `backend/.env.docker`（模板：`backend/.env.docker.example`），完整说明见仓库根 `README.md` 与 `SETUP.md`。
+
+### 2. 启动前端
+
 ```bash
-# 安装依赖
 cd frontend
 npm install
-
-# 启动开发服务器
-npm run dev
+npm run dev        # http://localhost:5173
 ```
 
-### 默认账户
-- 用户名: admin
-- 密码: 见 `_试用清单.md`（本地文档，不随仓库分发；部署环境由 `reset_admin.py` 的 `ADMIN_PASSWORD` 指定）
+开发服务器按 `vite.config.mts` 将 `/api`、`/health` 与 WebSocket 代理到后端。
 
-## API文档
+## WebSocket
 
-### 认证接口
-- `POST /api/auth/register` - 用户注册
-- `POST /api/auth/login` - 用户登录
-- `GET /api/user/profile` - 获取用户信息
+- 聊天：`/api/v1/chat/ws`
+- 通知：`/api/v1/notifications/ws`
 
-### 文件接口
-- `POST /api/files/upload/init` - 初始化文件上传
-- `POST /api/files/upload/chunk` - 上传文件分片
-- `GET /api/files` - 获取文件列表
+开发模式下聊天连接走 Vite 代理的 `/ws`（转发到 `/api/v1/chat/ws`），生产构建使用完整路径。
 
-### 聊天接口
-- `POST /api/chat` - 发送消息
-- `WS /ws/chat/{user_id}` - WebSocket聊天
+## 常用脚本
 
-### 组织接口
-- `POST /api/organizations` - 创建组织
-- `GET /api/organizations` - 获取组织列表
+| 命令 | 说明 |
+|------|------|
+| `npm run dev` | 启动开发服务器 |
+| `npm run build` | 类型检查 + 生产构建 |
+| `npm run preview` | 预览构建产物 |
+| `npm run test` | Vitest 单元测试 |
+| `npm run test:watch` | 单元测试 watch 模式 |
+| `npm run test:coverage` | 单元测试覆盖率 |
+| `npm run test:e2e` | Playwright E2E |
+| `npm run type-check` | `vue-tsc --noEmit` |
+| `npm run lint` | ESLint 自动修复 |
 
-## 系统架构
+## 目录结构
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    前端层 (Vue 3 + TypeScript)             │
-├─────────────────────────────────────────────────────────────┤
-│  💬 聊天助手  │  📚 知识库  │  🏢 组织管理  │  👤 用户中心    │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                    接入层 (FastAPI)                        │
-├─────────────────────────────────────────────────────────────┤
-│  🔐 JWT认证  │  📁 文件上传  │  💬 聊天API  │  🔍 搜索API    │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                    业务逻辑层                               │
-├─────────────────────────────────────────────────────────────┤
-│  👥 用户管理  │  📄 文档处理  │  🔍 知识检索  │  🤖 AI集成     │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                    数据存储层                               │
-├─────────────────────────────────────────────────────────────┤
-│  🗄️ MySQL    │  💨 Redis    │  🔍 Elasticsearch │  📦 MinIO   │
-└─────────────────────────────────────────────────────────────┘
+frontend/
+├── src/
+│   ├── api/          # Axios API 客户端（baseURL 默认 /api/v1）
+│   ├── components/   # 共享组件
+│   ├── composables/  # 组合式函数
+│   ├── locales/      # i18n（zh/en/ja/fr）
+│   ├── router/       # Vue Router 配置
+│   ├── stores/       # Pinia 状态
+│   ├── utils/        # 工具函数（含 WebSocket 封装）
+│   └── views/        # 页面模块
+├── public/           # 静态资产（PWA 图标等）
+└── vite.config.mts   # Vite / PWA / 开发代理配置
 ```
 
-## 核心算法
-
-### RAG检索算法
-1. **文档预处理**: 支持 13 种文件格式解析
-2. **文本分块**: 智能文本分割，块大小512字符
-3. **向量生成**: 768维向量嵌入
-4. **混合检索**: 语义检索 + 关键词检索 + 重排序
-5. **上下文构建**: 动态Prompt构建
-
-### 文件处理流程
-1. **分片上传**: 5MB分片，支持并发上传
-2. **异步处理**: Kafka消息队列处理
-3. **文档解析**: Apache Tika集成
-4. **向量化**: 豆包Embedding API
-5. **索引构建**: Elasticsearch存储
-
-## 性能优化
-
-- **缓存策略**: Redis多级缓存
-- **连接池**: 数据库连接池管理
-- **异步处理**: 文件处理异步化
-- **流式响应**: WebSocket实时通信
-- **分页加载**: 大数据分页处理
-
-## 安全特性
-
-- **密码加密**: BCrypt哈希存储
-- **JWT认证**: 无状态身份认证
-- **权限控制**: RBAC权限模型
-- **输入验证**: 参数校验和过滤
-- **HTTPS**: 传输加密
-
-## 监控与运维
-
-- **健康检查**: 系统健康状态监控
-- **日志记录**: 结构化日志输出
-- **性能监控**: API响应时间监控
-- **错误追踪**: 异常捕获和报警
-
-## 扩展功能
-
-- **多语言支持**: 中英文国际化
-- **主题切换**: 深色/浅色主题
-- **响应式设计**: 移动端适配
-- **键盘快捷键**: 快捷操作支持
-
-## 开发计划
-
-- [ ] 更多AI模型集成
-- [ ] 知识图谱构建
-- [ ] 智能推荐系统
-- [ ] 多租户支持
-- [ ] 高级分析报表
-- [ ] 移动端APP
+页面与路由数量等文档数字以仓库根 `docs/facts.json` 为单一事实源（由 `backend/scripts/check_doc_facts.py` 在 CI 校验），本文件不再手写具体数字。
 
 ## 许可证
 
 MIT License
-
-## 联系我们
-
-如有问题或建议，欢迎提交Issue或Pull Request。

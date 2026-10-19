@@ -44,7 +44,7 @@ Current baseline:
 
 Known limitations:
 - Workflow code nodes are disabled by default. Set `ENABLE_WORKFLOW_CODE_NODES=true` to opt in; execution now requires the Docker sandbox.
-- GraphRAG graphs, agent memory, metrics snapshots, and live counters now persist to Redis; live counters are written per instance and aggregated on read for multi-instance deployments.
+- GraphRAG graphs, long-term/reflective agent memory, metrics snapshots, and live counters now persist to Redis (short-term/working memory stays in-process and does not survive a restart); live counters are written per instance and aggregated on read for multi-instance deployments.
 - The knowledge, profile, and workflow editor pages have all been split into components/composables; no 1000-line SFC pages remain.
 
 ---
@@ -210,7 +210,7 @@ Query enters
 | Scheduled Tasks | `/scheduled-tasks` | Scheduled task CRUD, pause/resume, and manual trigger |
 | LLM Config (deprecated) | `/llm-config` | Global config entry removed from the workflow editor; endpoints marked deprecated pending the unified Provider layer |
 | Skills | `/curated-skills` | Skill discovery & management |
-| Agent Memory | `/memory` | Short/long/working memory CRUD, semantic search |
+| Agent Memory | `/memory` | Short/long/working/reflective memory CRUD, semantic search |
 | Agent | `/agent` | PER Agent conversations (SSE streaming), tool calls, configuration |
 | MCP | `/mcp` | MCP server status (admin, read-only) |
 | User Settings | `/user` | Personal UI preferences |

@@ -7,7 +7,7 @@ host = os.getenv("DB_HOST", "localhost")
 port = int(os.getenv("DB_PORT", "3306"))
 user = os.getenv("DB_USER", "root")
 password = os.getenv("DB_PASSWORD", "")
-db_name = os.getenv("DB_NAME", "paicongming_db")
+db_name = os.getenv("DB_NAME", "docmind_db")
 
 try:
     print(f"Connecting to MySQL at {host}:{port} as {user}...")
