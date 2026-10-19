@@ -111,26 +111,42 @@ export const useUserStore = defineStore('user', () => {
    * 同时对齐服务端返回的 `current_organization_id`：多设备/多标签页下
    * 当前组织以服务端为准，避免本地标签短暂漂移。
    * 拉取失败时返回空数组，由切换器据当前组织状态决定可见性。
+   *
+   * T7：列表提升为共享状态 `myOrganizations`——顶栏组织切换器与移动端
+   * 用户菜单同源消费；布局层与切换器同 tick 挂载时，并发请求共享同一次
+   * GET（去重），不重复打接口。
    */
+  const myOrganizations = ref<Array<{ id: number; name: string }>>([])
+  let organizationsRequest: Promise<Array<{ id: number; name: string }>> | null = null
+
   const fetchMyOrganizations = async () => {
-    try {
-      const response = await getMyOrganizations()
-      const resData = response.data as unknown as Record<string, unknown>
-      const payload = (
-        resData.data && typeof resData.data === 'object' ? resData.data : resData
-      ) as Record<string, unknown>
-      const organizations = Array.isArray(payload.organizations) ? payload.organizations : []
-      const serverOrgId = payload.current_organization_id
-      if (typeof serverOrgId === 'number' && serverOrgId !== currentOrgId.value) {
-        currentOrganizationId.value = serverOrgId
-        if (userInfo.value) {
-          userInfo.value = { ...userInfo.value, organization_id: serverOrgId }
+    if (organizationsRequest) return organizationsRequest
+    const request = (async () => {
+      try {
+        const response = await getMyOrganizations()
+        const resData = response.data as unknown as Record<string, unknown>
+        const payload = (
+          resData.data && typeof resData.data === 'object' ? resData.data : resData
+        ) as Record<string, unknown>
+        const organizations = Array.isArray(payload.organizations) ? payload.organizations : []
+        const serverOrgId = payload.current_organization_id
+        if (typeof serverOrgId === 'number' && serverOrgId !== currentOrgId.value) {
+          currentOrganizationId.value = serverOrgId
+          if (userInfo.value) {
+            userInfo.value = { ...userInfo.value, organization_id: serverOrgId }
+          }
         }
+        myOrganizations.value = organizations as Array<{ id: number; name: string }>
+        return organizations as Array<{ id: number; name: string }>
+      } catch {
+        myOrganizations.value = []
+        return [] as Array<{ id: number; name: string }>
+      } finally {
+        organizationsRequest = null
       }
-      return organizations as Array<{ id: number; name: string }>
-    } catch {
-      return [] as Array<{ id: number; name: string }>
-    }
+    })()
+    organizationsRequest = request
+    return request
   }
   
   // 方法
@@ -346,6 +362,7 @@ export const useUserStore = defineStore('user', () => {
     token,
     currentOrganizationId,
     organizationVersion,
+    myOrganizations,
     settings,
     authServiceUnavailable,
 
