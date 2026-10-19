@@ -150,7 +150,10 @@
           <h1 class="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
             {{ currentRouteTitle }}
           </h1>
-          <!-- B1：组织切换器（顶栏品牌区）。切换后当前页面按新组织重挂载。 -->
+          <!-- B1：组织切换器（顶栏品牌区）。切换后当前页面按新组织重挂载。
+               T7：移动端（<640px）入口移入顶栏用户菜单（右侧用户图标下拉）——
+               紧凑顶栏形态会被右侧固定宽度搜索区遮挡并挤压标题；本组件保持
+               桌面端形态，移动端由 userMenuOptions 里的组织分组承接。 -->
           <OrgSwitcher class="hidden sm:block" />
         </div>
         
@@ -279,13 +282,14 @@
 import { computed, ref, h, onMounted, onUnmounted, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useMediaQuery } from '@vueuse/core'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
 import { markAsRead, markAllAsRead, deleteNotification, type Notification } from '@/api/notification'
 import { notificationSocket, type RealtimeNotificationPayload } from '@/utils/notificationSocket'
 import { useNotificationStore } from '@/stores/notification'
 import { formatDate } from '@/utils/format'
-import type { MenuOption, MenuGroupOption, DropdownOption } from 'naive-ui'
+import type { MenuOption, MenuGroupOption, DropdownOption, DropdownGroupOption, DropdownDividerOption } from 'naive-ui'
 import { NMenu, NIcon, NInput, NButton, NBadge, NPopover, NList, NListItem, NDropdown, NAvatar } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { SIDEBAR_MENU_GROUPS, USER_MENU_ITEMS, type MenuItemDef } from '@/config/menu'
@@ -330,6 +334,10 @@ const userStore = useUserStore()
 
 const searchValue = ref('')
 const mobileMenuOpen = ref(false)
+
+// T7：移动端断点与样式口径一致（sm = 640px）。用户菜单的组织切换分组只在
+// <640px 注入——桌面端仍由顶栏 OrgSwitcher 承担，避免重复入口。
+const isMobileViewport = useMediaQuery('(max-width: 639.98px)')
 
 // Language options：单一事实源 utils/languages.ts（beta 字段驱动徽标展示）
 const languageOptions = LANGUAGES
@@ -446,6 +454,9 @@ const handleRealtimeNotification = async (payload: RealtimeNotificationPayload) 
 
 onMounted(async () => {
   if (userStore.token) {
+    // T7：组织列表由顶栏切换器与移动端用户菜单共享（store 内并发去重）。
+    // 先同步发起，避免被下方 await 拆到两个请求窗口。
+    void userStore.fetchMyOrganizations()
     await notificationStore.bootstrap()
     notificationSocket.connect()
     // Load user settings from backend
@@ -553,13 +564,46 @@ const menuOptions = computed<MenuOption[]>(() => {
     })
 })
 
-const userMenuOptions = computed<DropdownOption[]>(() =>
-  USER_MENU_ITEMS.map((item) => ({
+// T7：用户菜单可承载组织切换（移动端入口），故选项类型放宽到分组/分割线。
+type UserMenuOption = DropdownOption | DropdownGroupOption | DropdownDividerOption
+
+const ORG_SWITCH_PREFIX = 'org-switch:'
+
+/**
+ * T7 移动端组织切换入口：<640px 时把组织分组注入既有用户菜单（顶栏右侧
+ * 用户图标下拉 + 侧栏用户菜单同源），不占左侧标题宽度。
+ * - 与顶栏 OrgSwitcher 共享 userStore.myOrganizations（同一份服务端数据）；
+ * - 无可切换目标（单组织且唯一选项即当前组织）时不注入，菜单保持原样；
+ * - 超管无主组织（currentOrgId 为 null）时所有选项可选，保留真实切换动作。
+ */
+const orgMenuOptions = computed<UserMenuOption[]>(() => {
+  if (!isMobileViewport.value) return []
+  const organizations = userStore.myOrganizations
+  if (!organizations.some((org) => org.id !== userStore.currentOrgId)) return []
+  return [
+    {
+      type: 'group',
+      key: 'mobile-org-group',
+      label: t('org.switchOrganization'),
+      children: organizations.map((org) => ({
+        label: org.name,
+        key: `${ORG_SWITCH_PREFIX}${org.id}`,
+        disabled: org.id === userStore.currentOrgId,
+        icon: renderIcon(BusinessOutline),
+      })),
+    },
+    { type: 'divider', key: 'mobile-org-divider' },
+  ]
+})
+
+const userMenuOptions = computed<UserMenuOption[]>(() => [
+  ...orgMenuOptions.value,
+  ...USER_MENU_ITEMS.map((item) => ({
     label: t(item.i18nKey),
     key: item.actionKey,
     icon: () => h(NIcon, null, { default: () => h(MENU_ICONS[item.icon]) }),
   })),
-)
+])
 
 const message = useDedupedMessage()
 
@@ -573,7 +617,24 @@ const handleMenuSelect = async (key: string) => {
   }
 }
 
+// T7：用户菜单里的组织切换动作（key 形如 `org-switch:<id>`）
+const switchOrganizationFromMenu = async (orgId: number) => {
+  if (orgId === userStore.currentOrgId) return
+  try {
+    await userStore.switchOrganization(orgId)
+    message.success(t('org.switchSuccess'))
+  } catch {
+    message.error(t('org.switchFailed'))
+  }
+}
+
 const handleUserMenuSelect = (key: string) => {
+  // T7：移动端组织切换项与既有路由/登出动作共用同一下拉
+  if (key.startsWith(ORG_SWITCH_PREFIX)) {
+    const orgId = Number(key.slice(ORG_SWITCH_PREFIX.length))
+    if (Number.isFinite(orgId)) void switchOrganizationFromMenu(orgId)
+    return
+  }
 // T9：用户下拉项 key 与路由键空间统一（actionKey === routeName），
 // 处理逻辑从 menu.ts 单一事实源推导（不再硬编码 switch 分支）。
   const item = USER_MENU_ITEMS.find((i) => i.actionKey === key)
