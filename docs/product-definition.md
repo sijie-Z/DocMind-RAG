@@ -22,7 +22,7 @@
 
 - ❌ 不是"企业 AI 中台"——不做模型训练、不做模型托管
 - ❌ 不是"工作流编排平台"——工作流编辑是辅助能力，非核心卖点
-- ❌ 不是"多模态"——只有文本能力，不处理图片/音频/视频
+- ❌ 不是"多模态"——不做音频/视频处理；图片仅做 OCR 文字提取（PNG/JPG/JPEG/WEBP/BMP/GIF 首帧），不做图像理解或生成
 
 ---
 
@@ -391,8 +391,8 @@ Agent = 想得透（推理层）
 | 维度 | 状态 |
 |---|---|
 | **代码完整性** | 核心流程全部实现，仅 1 处 TODO（工作流的 TTS 节点） |
-| **测试覆盖** | 911 个后端测试用例 + 111 个前端测试（89 个测试文件）。全量套件（含 MySQL + Redis）只在 Python 3.12 上跑；3.11 跑的是无服务子集（877 passed, 1 skipped） |
-| **Guest 体验** | guest 账号自动初始化（密码随机生成，见启动日志 / `DEMO_PASSWORD`），Demo 数据可一键生成 |
+| **测试覆盖** | 冻结快照 2026-10-15：后端 2223 passed / 51 skipped，前端 861 passed；CI 实时数为准。全量套件（含 MySQL + Redis）在 Python 3.12 上运行 |
+| **Guest 体验** | guest 账号仅在部署方开启 `ENABLE_DEMO_ACCOUNT` 时创建（初始密码随机生成，见启动日志 / `DEMO_PASSWORD`；开发端点 `/auth/ensure-demo` 另由 `ENABLE_ENSURE_DEMO_ENDPOINT` 控制）；Demo 数据可一键生成 |
 | **并发能力** | Kafka 异步处理文档上传，支持多用户 |
 | **多租户** | RBAC + Organization 隔离 |
 | **部署** | Docker Compose 一键部署，K8s 清单就绪 |

@@ -508,7 +508,7 @@ export default {
     registerSuccess: 'Registration successful',
     goToLogin: 'Go to Login',
     goToRegister: 'Go to Register',
-    demoDesc: 'Use demo account (guest / 123456)',
+    demoDesc: 'Demo access is enabled by the deployer; ask them for the credentials (the initial password is randomly generated, not a fixed default)',
     loginFailed: 'Login failed',
     registerFailed: 'Registration failed',
     privacy: 'Privacy',

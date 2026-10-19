@@ -7,9 +7,11 @@ import os
 import time
 
 from app.core.config import settings
+from app.core.request_id import request_id_var
 
-# 请求级上下文变量 — 中间件注入，日志格式化器读取
-request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
+# 请求级上下文变量 — 中间件注入，日志格式化器读取。
+# request_id_var 的唯一归属在 app.core.request_id（RequestIDMiddleware 在那里写入），
+# 这里只 re-export，避免出现两个同名 ContextVar、日志永远读不到值。
 trace_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("trace_id", default=None)
 user_id_var: contextvars.ContextVar[str | int | None] = contextvars.ContextVar("user_id", default=None)
 

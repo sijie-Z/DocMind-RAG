@@ -203,10 +203,29 @@ class KnowledgeService:
                     return True
 
                 if doc.file_path:
-                    try:
-                        await self.file_upload_service.delete_file(doc.file_path)
-                    except Exception as e:
-                        logger.warning(f"从MinIO删除文件失败: {str(e)}")
+                    # md5 去重上传会跨文档共享同一 MinIO 对象（对象名
+                    # `{org}/{md5}.{ext}`，见 documents.upload）——删除前检查是否
+                    # 还有其他文档引用同一 file_path；有引用则只删 DB 记录，
+                    # 防止删一个文档破坏其他文档的下载/重建。与
+                    # file_service.delete_document 的既有保护对齐（#416：/files
+                    # 删除并入本统一链路后不得丢失该保护）。
+                    refs_result = await session.execute(
+                        select(func.count(Document.id)).where(
+                            Document.file_path == doc.file_path,
+                            Document.id != document_id,
+                        )
+                    )
+                    other_refs = refs_result.scalar() or 0
+                    if other_refs == 0:
+                        try:
+                            await self.file_upload_service.delete_file(doc.file_path)
+                        except Exception as e:
+                            logger.warning(f"从MinIO删除文件失败: {str(e)}")
+                    else:
+                        logger.info(
+                            f"文档 {document_id} 的存储对象仍被 {other_refs} 个其他文档"
+                            "引用，跳过物理删除"
+                        )
 
                 # ES 清理是 best-effort：客户端获取失败（如 ES 未连接/不可用）不得挡住删除。
                 # 客户端获取原先在 try 之外，ES 不可用时整个删除在碰 DB 之前就抛 RuntimeError
