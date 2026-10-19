@@ -351,13 +351,20 @@ class TestSeedProtocol:
 
     def test_fake_mode_pins_vector_dimension(self, monkeypatch):
         monkeypatch.setenv("VECTOR_DIMENSION", "1024")
+        # issue #196：fake 模式也固定 EMBEDDING_MODEL（索引 _meta 记录伪嵌入标识，
+        # 不记录宿主真实模型）；monkeypatch 负责用例结束后还原，避免污染
+        # 后续依赖 os.environ 的 hardware/config 用例。
+        monkeypatch.setenv("EMBEDDING_MODEL", "live-model")
         args = build_parser().parse_args(["seed", "--recreate", "--embedding", "fake"])
         _apply_env(args)
         assert os.environ["VECTOR_DIMENSION"] == str(CI_EMBEDDING_DIM)
+        assert os.environ["EMBEDDING_MODEL"] == CI_EMBEDDING_ID
         # live 模式必须原样保留操作者设置（不得覆盖）
         monkeypatch.setenv("VECTOR_DIMENSION", "1024")
+        monkeypatch.setenv("EMBEDDING_MODEL", "live-model")
         _apply_env(build_parser().parse_args(["run"]))
         assert os.environ["VECTOR_DIMENSION"] == "1024"
+        assert os.environ["EMBEDDING_MODEL"] == "live-model"
 
     def test_embedding_choices(self):
         assert build_parser().parse_args(["run"]).embedding == "live"

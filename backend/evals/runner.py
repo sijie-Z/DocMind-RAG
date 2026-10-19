@@ -187,9 +187,20 @@ def _apply_env(args: argparse.Namespace) -> None:
                 f"[evals] fake 嵌入模式：VECTOR_DIMENSION 固定为 {CI_EMBEDDING_DIM}"
                 f"（原环境值 {prev} 已覆盖）"
             )
+        # 索引 mapping 的 _meta.embedding_model 也必须是伪嵌入标识——否则 CI 索引
+        # 会被标记成宿主机的真实模型名，换机器后模型一致性校验会误报（#196）。
+        prev_model = os.environ.get("EMBEDDING_MODEL")
+        os.environ["EMBEDDING_MODEL"] = CI_EMBEDDING_ID
+        if prev_model and prev_model != CI_EMBEDDING_ID:
+            print(
+                f"[evals] fake 嵌入模式：EMBEDDING_MODEL 固定为 {CI_EMBEDDING_ID}"
+                f"（原环境值 {prev_model} 已覆盖）"
+            )
         # 伪嵌入不需要在线 key，但 embedding_service 单例在模块导入时构造
         # （#196 唯一构造点）；补占位 key 以通过构造，绝不会发起真实调用。
-        os.environ.setdefault("EMBEDDING_API_KEY", "eval-fake-placeholder")
+        # 空串同样视为未配置（`setdefault` 不会覆盖空串）。
+        if not os.environ.get("EMBEDDING_API_KEY"):
+            os.environ["EMBEDDING_API_KEY"] = "eval-fake-placeholder"
     # 评估链不碰 DB / JWT，但 Settings 在生产模式下要求这三键非空 ——
     # 缺省时补纯占位值（只过校验，不会有任何连接或签发发生）。
     os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")

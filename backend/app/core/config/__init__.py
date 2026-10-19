@@ -41,7 +41,10 @@ def resolve_embedding_model() -> str:
 try:
     from app.core.config.ai import _auto_tier_defaults
 
-    for _k, _v in _auto_tier_defaults(explicitly_set=settings.model_fields_set).items():
+    for _k, _v in _auto_tier_defaults(
+        explicitly_set=settings.model_fields_set,
+        local_embedding=bool(settings.ENABLE_LOCAL_EMBEDDING),
+    ).items():
         if hasattr(settings, _k):
             object.__setattr__(settings, _k, _v)
 except Exception:
@@ -50,6 +53,7 @@ except Exception:
 __all__ = [
     "Settings",
     "settings",
+    "resolve_embedding_model",
     "BaseAppSettings",
     "DatabaseSettings",
     "AISettings",

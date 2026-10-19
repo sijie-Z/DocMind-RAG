@@ -115,6 +115,19 @@ class RAGPipeline:
         debug_info: dict | None = {"stages": {}} if debug else None
 
         try:
+            # issue #196：索引配置错误（维度/embedding 模型漂移等）时**拒绝检索**。
+            # 写入侧已被 IndexConfigError 拦下，但查询侧若继续用当前模型向量去撞
+            # 旧模型索引，会返回非空但静默错配的结果——正是「漂移不得静默混用」
+            # 要消除的形态。按 #292 的故障语义上抛，由上层显式降级。
+            from app.core.elasticsearch import get_index_error
+
+            index_error = get_index_error()
+            if index_error:
+                RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
+                raise RetrievalUnavailableError(
+                    f"知识库索引配置错误，检索不可用：{index_error}"
+                )
+
             # Exact cache (skip for document-specific queries)
             if not document_ids:
                 cached = await self.cache.get(query, organization_id, top_k, search_mode=search_mode)

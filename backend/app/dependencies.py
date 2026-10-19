@@ -71,8 +71,21 @@ def get_rag_pipeline() -> RAGPipeline:
     ``app.services.embedding_service.embedding_service``（issue #196 单一真源）。
     旧实现此处另建 ``_build_embedding_client()``（忽略 ENABLE_LOCAL_EMBEDDING），
     曾造成索引/查询模型漂移，勿恢复。
+
+    无 embedding 配置（在线模式缺 key 且未启用本地 embedding）时，单例模块
+    导入会抛 ``RuntimeError``——这与基线 ``_build_embedding_client()`` 返回
+    ``None`` 的降级语义对齐：**管线照常构造，仅向量臂关闭**。LLM/关键词能力
+    与只依赖 ``rag_service.openai_client`` 的工具（如图谱回填脚本）不受影响。
     """
-    from app.services.embedding_service import embedding_service
+    try:
+        from app.services.embedding_service import embedding_service
+    except RuntimeError as e:
+        logger.warning(
+            "Embedding 未配置（%s）——RAG 管线以向量臂关闭模式构造；"
+            "关键词检索与 LLM 能力不受影响。",
+            e,
+        )
+        embedding_service = None
 
     return RAGPipeline(
         openai_client=_build_openai_client(),

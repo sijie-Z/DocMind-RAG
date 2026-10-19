@@ -48,7 +48,7 @@ class EmbeddingConfig:
 def resolve_embedding_config() -> EmbeddingConfig:
     """构造 embedding 客户端 —— **全仓唯一构造点**。"""
     dimension = int(settings.VECTOR_DIMENSION)
-    send_dimensions = bool(getattr(settings, "EMBEDDING_SEND_DIMENSIONS", False))
+    send_dimensions = bool(settings.EMBEDDING_SEND_DIMENSIONS)
     # 模型名只经 resolve_embedding_model() 解析（config 单一真源）。
     model = resolve_embedding_model()
 
@@ -220,11 +220,11 @@ async def verify_embedding_consistency(
         EmbeddingProbeUnavailableError: 服务不可达/超时
             —— 调用方应显式告警后继续（离线开发属预期；检索向量臂已有降级信号）。
     """
-    if not bool(getattr(settings, "EMBEDDING_STARTUP_PROBE", True)):
+    if not bool(settings.EMBEDDING_STARTUP_PROBE):
         return {"skipped": True}
 
     svc = service or embedding_service
-    timeout = float(getattr(settings, "EMBEDDING_PROBE_TIMEOUT_SECONDS", 5.0) or 5.0)
+    timeout = float(settings.EMBEDDING_PROBE_TIMEOUT_SECONDS)
     try:
         probed_dimension = await asyncio.wait_for(svc.probe(), timeout=timeout)
     except EmbeddingDimensionMismatchError:

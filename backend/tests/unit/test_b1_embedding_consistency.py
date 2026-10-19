@@ -20,8 +20,8 @@
    旧索引没有 `_meta` 时只告警（无法证明一致，但不能凭空判定不一致）。
 
 变异验证（先提交后变异，见 `_orchestrate/round2/ragb1_*.log`）：
-- 把 `EmbeddingService._validate_dimensions` 改成 no-op → 维度用例必红；
-- 把检索器改回 `settings.EMBEDDING_MODEL` → 单一模型用例必红；
+- 把 `EmbeddingService._ensure_dimensions` 调用改成 no-op → 维度用例必红；
+- 把模型解析改回 `settings.EMBEDDING_MODEL`（模拟本地/在线漂移）→ 单一模型用例必红；
 - 删掉 `_create_index_if_not_exists` 的 `_meta` 模型比较 → 模型漂移用例必红。
 """
 import asyncio
@@ -98,6 +98,39 @@ def test_pipeline_injects_the_same_embedding_service_as_indexing():
         deps.get_rag_pipeline.cache_clear()
 
 
+def test_pipeline_falls_back_when_embedding_is_unconfigured(monkeypatch):
+    """无 embedding 配置时管线仍可构造（向量臂关闭），不得拖垮 LLM-only 工具。
+
+    基线语义：`_build_embedding_client()` 无 key 返回 None，管线照常构造。
+    唯一构造点的单例在 import 期抛 RuntimeError，`get_rag_pipeline()` 必须
+    把它降级为 `embedding_provider=None`（否则 `rag_service.openai_client`
+    这类只读 LLM 的路径会被无关能力拖崩）。
+    """
+    import sys
+    import types
+
+    import app.dependencies as deps
+
+    class _BrokenEmbeddingModule(types.ModuleType):
+        @property
+        def embedding_service(self):
+            raise RuntimeError("Embedding API key is missing")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "app.services.embedding_service",
+        _BrokenEmbeddingModule("app.services.embedding_service"),
+    )
+    deps.get_rag_pipeline.cache_clear()
+    try:
+        pipeline = deps.get_rag_pipeline()
+        assert pipeline.retriever.embedding_provider is None
+        assert pipeline.retriever.embedding_client is None
+        assert pipeline.retriever.get_embedding is not None
+    finally:
+        deps.get_rag_pipeline.cache_clear()
+
+
 def test_retriever_does_not_select_embedding_model_itself():
     from app.rag.retriever import HybridRetriever
 
@@ -153,6 +186,64 @@ def test_local_embedding_mode_uses_one_model_for_index_and_query(monkeypatch):
     assert models == {"nomic-embed-text"}, (
         f"索引与检索必须使用同一模型；实际用过的模型：{models}"
     )
+
+
+def test_local_embedding_mode_does_not_require_online_key(monkeypatch):
+    """本地模式不得因为缺在线 key 而关闭向量臂（#196 已报告的部署形态）。"""
+    monkeypatch.setattr(settings, "ENABLE_LOCAL_EMBEDDING", True)
+    monkeypatch.setattr(settings, "LOCAL_EMBEDDING_MODEL", "nomic-embed-text")
+    monkeypatch.setattr(settings, "EMBEDDING_API_KEY", None)
+    monkeypatch.setattr(settings, "DEEPSEEK_API_KEY", "")
+
+    from app.services.embedding_service import resolve_embedding_config
+
+    config = resolve_embedding_config()
+    assert config.source == "local"
+    assert config.model == "nomic-embed-text"
+    assert config.client is not None
+
+
+def test_lifespan_wires_startup_probe_with_fail_fast():
+    """启动层必须真的接线：维度漂移 → raise（拒绝启动），而非只写日志。"""
+    import re
+    from pathlib import Path
+
+    main_src = (
+        Path(__file__).resolve().parents[2] / "app" / "main.py"
+    ).read_text(encoding="utf-8")
+    assert "verify_embedding_consistency()" in main_src
+    assert re.search(
+        r"except EmbeddingDimensionMismatchError as e:\s*"
+        r'logger\.critical\([^)]*\)\s*raise\b',
+        main_src,
+    ), "lifespan 捕获 EmbeddingDimensionMismatchError 后必须 raise（fail fast）"
+
+
+def test_auto_tier_does_not_apply_hardware_dims_to_local_embedding(monkeypatch):
+    """本地 embedding 模式不得套用在线模型的硬件档维度（#196 升级回归防线）。
+
+    硬件档面向在线模型（bge-m3/1024 等）；本地默认模型 nomic-embed-text 是
+    768 维。若硬件档仍覆盖 VECTOR_DIMENSION，新启动校验会拒绝启动本地部署。
+    """
+    from types import SimpleNamespace
+
+    from app.core import hardware
+    from app.core.config.ai import _auto_tier_defaults
+
+    monkeypatch.setattr(
+        hardware,
+        "detect",
+        lambda: SimpleNamespace(embedding_model="bge-m3", vector_dim=1024),
+    )
+    monkeypatch.delenv("EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("VECTOR_DIMENSION", raising=False)
+
+    assert _auto_tier_defaults(explicitly_set=set(), local_embedding=True) == {}
+    # 对照：在线模式仍然应用硬件档（原行为不变）。
+    assert _auto_tier_defaults(explicitly_set=set(), local_embedding=False) == {
+        "EMBEDDING_MODEL": "bge-m3",
+        "VECTOR_DIMENSION": 1024,
+    }
 
 
 # ── 3. 维度校验 ─────────────────────────────────────────────────────────
@@ -315,3 +406,23 @@ def test_legacy_index_without_model_meta_warns_but_does_not_block(monkeypatch, c
     assert any(
         "embedding" in record.getMessage().lower() for record in caplog.records
     ), "旧索引缺少模型元数据时必须显式告警（无法证明一致）"
+
+
+# ── 6. 索引配置错误时查询侧拒绝检索（漂移不得静默混用）──────────────────
+
+
+@pytest.mark.asyncio
+async def test_search_refuses_when_index_config_is_invalid(monkeypatch):
+    """写入侧被 IndexConfigError 拦下后，查询侧不得继续用新模型撞旧索引。"""
+    from app.rag.errors import RetrievalUnavailableError
+    from app.rag.pipeline import RAGPipeline
+
+    monkeypatch.setattr(
+        "app.core.elasticsearch.get_index_error",
+        lambda: "embedding 模型不匹配：索引 old-model，当前 new-model",
+    )
+    pipeline = RAGPipeline()
+    with pytest.raises(RetrievalUnavailableError) as excinfo:
+        await pipeline.search_knowledge_base("任意查询", organization_id=1)
+    assert excinfo.value.kind == "failed"
+    assert "old-model" in str(excinfo.value)
