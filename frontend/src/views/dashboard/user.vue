@@ -58,7 +58,8 @@
 
     <!-- B5 · 注册后 4 步清单：真实数据推导完成态；跳过折叠不消失 -->
     <OnboardingChecklist
-      :stats-ready="statsState === 'ready' && !statsDegraded"
+      :stats-ready="statsEverReady"
+      :stats-loading="statsState === 'loading'"
       :file-count="stats.file_count"
       :knowledge-count="stats.knowledge_count"
       :message-count="stats.message_count"
@@ -84,7 +85,7 @@
             </p>
           </div>
         </div>
-        <n-button text type="primary" size="small" @click="$router.push('/conversations')">
+        <n-button text type="primary" size="small" data-testid="home-view-all" @click="$router.push('/chat')">
           {{ t('dashboard.viewAll') }}
           <template #icon><n-icon size="14"><ChevronForwardOutline /></n-icon></template>
         </n-button>
@@ -380,8 +381,12 @@ type BlockState = 'loading' | 'ready' | 'error'
 const statsState = ref<BlockState>('loading')
 const convState = ref<BlockState>('loading')
 const ragState = ref<BlockState>('loading')
-/** 统计接口降级（issue #301：200 + 全零 + degraded=true）——不得当作真实 0 渲染清单 */
-const statsDegraded = ref(false)
+/**
+ * 「曾就绪」记忆位（T8）：首次拿到非降级真实统计后置 true，刷新期间不回落。
+ * onboarding 清单据此保持挂载——刷新挂起/失败时不卸载，块内重试入口始终可用；
+ * 首次加载失败/降级（从未 ready）仍不显示清单。
+ */
+const statsEverReady = ref(false)
 
 const formatSize = (bytes: number) => formatFileSize(bytes)
 const formatDate = (date: string) => formatDateUtil(date)
@@ -467,25 +472,36 @@ watch(() => stats.value.activity_trend, updateChart, { deep: true })
 
 // ---- 分块加载器：三路请求并行发起，各自落位、各自骨架/错误态 ----
 
+/** 统计请求序号：并发刷新时只让最新一次请求落位（旧请求成功/失败均丢弃） */
+let statsSeq = 0
+
 const loadStats = async () => {
+  const seq = ++statsSeq
   statsState.value = 'loading'
   try {
     const statsRes = await getUserStats(FIRST_SCREEN_REQUEST_CONFIG)
+    if (seq !== statsSeq) return
     if (!statsRes.data) throw new Error('empty user-stats payload')
-    stats.value = {
-      conversation_count: statsRes.data.conversation_count || 0,
-      message_count: statsRes.data.message_count || 0,
-      file_count: statsRes.data.file_count || 0,
-      knowledge_count: statsRes.data.knowledge_count || 0,
-      storage_used: statsRes.data.storage_used || 0,
-      activity_trend: statsRes.data.activity_trend || [0, 0, 0, 0, 0, 0, 0]
+    const degraded = statsRes.data.degraded === true
+    // issue #301：降级响应（200 + 全零）不得覆盖已展示的真实数据，更不能驱动清单进度；
+    // 只有真实（非降级）统计才点亮「曾就绪」，且此后不再回落
+    if (!degraded) {
+      stats.value = {
+        conversation_count: statsRes.data.conversation_count || 0,
+        message_count: statsRes.data.message_count || 0,
+        file_count: statsRes.data.file_count || 0,
+        knowledge_count: statsRes.data.knowledge_count || 0,
+        storage_used: statsRes.data.storage_used || 0,
+        activity_trend: statsRes.data.activity_trend || [0, 0, 0, 0, 0, 0, 0]
+      }
+      statsEverReady.value = true
     }
-    statsDegraded.value = statsRes.data.degraded === true
     statsState.value = 'ready'
     // 等本区块内容（含图表容器）渲染后再初始化，不依赖其它区块
     await nextTick()
-    initChart()
+    if (seq === statsSeq) initChart()
   } catch {
+    if (seq !== statsSeq) return
     statsState.value = 'error'
   }
 }
