@@ -21,6 +21,7 @@ from app.core.security import (
     get_current_user,
     get_document_for_user,
     permission_required,
+    require_org_admin,
     require_organization,
 )
 from app.exceptions import (
@@ -385,10 +386,10 @@ async def clear_graph_rag(
     """
     清空GraphRAG知识图谱
     """
-    if not current_user.is_superuser and current_user.role != "admin":
-        raise AuthorizationError("需要管理员权限")
-    # 安全加固：管理员只清空自己组织的图谱；S3：无组织用户直接 403
+    # 安全加固：管理员只清空自己组织的图谱；S3：无组织用户直接 403。
+    # W0-1：组织管理员按 per-org 角色判定（超管旁路），role='admin' 不再放行。
     effective_org = await require_organization(current_user, db)
+    await require_org_admin(db, current_user, effective_org)
     try:
         from app.services.graph_rag_service import graph_rag_service
 
@@ -402,7 +403,7 @@ async def clear_graph_rag(
         raise AppError(f"清空知识图谱失败: {str(e)}")
 
 
-@router.post("/rebuild/{document_id}", response_model=KnowledgeBuildResponse, dependencies=[Depends(permission_required([PermissionType.REBUILD_DOCUMENT_INDEX], organization_id_param='document_id'))])
+@router.post("/rebuild/{document_id}", response_model=KnowledgeBuildResponse, dependencies=[Depends(permission_required([PermissionType.REBUILD_DOCUMENT_INDEX]))])
 async def rebuild_document_knowledge(
     document_id: str,
     current_user: User = Depends(get_current_user),
@@ -705,7 +706,7 @@ async def get_document_job_events(
     }
 
 
-@router.delete("/document/{document_id}", response_model=dict, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_DELETE], organization_id_param='document_id'))])
+@router.delete("/document/{document_id}", response_model=dict, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_DELETE]))])
 async def delete_knowledge_document(
     document_id: str,
     current_user: User = Depends(get_current_user),

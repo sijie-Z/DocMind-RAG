@@ -62,9 +62,17 @@ class OrganizationService:
                 # 超管看到完整的树
                 stmt = select(Organization).options(selectinload(Organization.children)).order_by(Organization.level, Organization.sort_order)
             else:
-                # 普通用户只能看到自己所在组织及其下属（简化处理：看到所有非私有组织）
-                # 不能用 `not`：SQLAlchemy 列描述符的 __bool__ 恒为 True，会坍缩成 WHERE false（issue #95）
-                stmt = select(Organization).where(Organization.is_private.is_(False)).options(selectinload(Organization.children)).order_by(Organization.level, Organization.sort_order)
+                # W0-1（ADR-001 D3）：组织树是跨租户信息面——非平台管理员
+                # 只返回自己的组织（单节点），不再枚举其他租户的组织结构；
+                # 无组织用户 fail closed，返回空树（不兜底到任何组织）。
+                own_org_id = getattr(user, "organization_id", None)
+                if own_org_id is None:
+                    return []
+                own_result = await db.execute(
+                    select(Organization).where(Organization.id == own_org_id)
+                )
+                own_org = own_result.scalar_one_or_none()
+                return [self._org_to_dict(own_org)] if own_org else []
 
             result = await db.execute(stmt)
             all_orgs = result.scalars().all()

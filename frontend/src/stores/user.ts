@@ -72,11 +72,14 @@ export const useUserStore = defineStore('user', () => {
   
   // 计算属性
   const isLoggedIn = computed(() => !!token.value && !!userInfo.value)
-  // admin 判定与后端鉴权同口径（is_superuser or role == "admin"）：
+  // W0-1（ADR-001 D3）：admin 判定与后端同口径——
+  //   平台管理员只认显式 is_superuser；
+  //   组织管理员认当前组织的 is_org_admin（per-org 角色，由后端下发）；
+  //   users.role 只是展示标签，不再作为授权信号。
   // 菜单过滤（layouts）与路由守卫（router）都消费这同一个计算属性。
-  const isAdmin = computed(
-    () => userInfo.value?.role === 'admin' || userInfo.value?.is_superuser === true
-  )
+  const isSuperuser = computed(() => userInfo.value?.is_superuser === true)
+  const isOrgAdmin = computed(() => userInfo.value?.is_org_admin === true)
+  const isAdmin = computed(() => isSuperuser.value || isOrgAdmin.value)
   const currentOrgId = computed(() => currentOrganizationId.value || userInfo.value?.organization_id || null)
 
   const setCurrentOrganization = (orgId: number) => {
@@ -100,7 +103,16 @@ export const useUserStore = defineStore('user', () => {
     const appliedOrgId = Number(payload.organization_id ?? orgId)
     currentOrganizationId.value = appliedOrgId
     if (userInfo.value) {
-      userInfo.value = { ...userInfo.value, organization_id: appliedOrgId }
+      // W0-1：服务端随切换结果回传目标组织的 per-org 管理身份；
+      // 立即更新，避免组织管理菜单最长滞后到下次 /users/me（5 分钟）。
+      const targetIsOrgAdmin = payload.is_org_admin
+      userInfo.value = {
+        ...userInfo.value,
+        organization_id: appliedOrgId,
+        ...(typeof targetIsOrgAdmin === 'boolean'
+          ? { is_org_admin: targetIsOrgAdmin }
+          : {}),
+      }
     }
     organizationVersion.value += 1
     return { success: true as const, organizationId: appliedOrgId }
@@ -369,6 +381,8 @@ export const useUserStore = defineStore('user', () => {
     // 计算属性
     isLoggedIn,
     isAdmin,
+    isSuperuser,
+    isOrgAdmin,
     currentOrgId,
 
     // 方法

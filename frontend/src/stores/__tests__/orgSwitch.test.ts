@@ -108,6 +108,34 @@ describe('useUserStore · organization switch', () => {
     expect(store.organizationVersion).toBe(1)
   })
 
+  it('applies per-org is_org_admin from the switch response (W0-1)', async () => {
+    const store = useUserStore()
+    store.userInfo = makeInfo({ organization_id: 1, is_org_admin: false })
+    store.currentOrganizationId = 1
+    mockedSwitch.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: { organization_id: 2, is_org_admin: true },
+      },
+    } as never)
+
+    await store.switchOrganization(2)
+
+    expect(store.userInfo?.is_org_admin).toBe(true)
+    expect(store.isOrgAdmin).toBe(true)
+    expect(store.isAdmin).toBe(true)
+  })
+
+  it('keeps previous admin flag when response omits is_org_admin (old server)', async () => {
+    const store = useUserStore()
+    store.userInfo = makeInfo({ organization_id: 1, is_org_admin: true })
+    store.currentOrganizationId = 1
+
+    await store.switchOrganization(2)
+
+    expect(store.userInfo?.is_org_admin).toBe(true)
+  })
+
   it('keeps state unchanged when the server rejects the switch', async () => {
     const store = useUserStore()
     store.userInfo = makeInfo({ organization_id: 1 })

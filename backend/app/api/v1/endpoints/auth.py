@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, is_org_admin
 from app.exceptions import (
     AppError,
     AuthenticationError,
@@ -155,8 +155,9 @@ async def login(
             "full_name": getattr(user, "full_name", None) or None,
             "organization_id": getattr(user, "organization_id", None),
             "role": user.role or "user",
-            # 与后端鉴权口径一致（is_superuser or role=="admin"）
+            # W0-1：平台管理员只认显式 is_superuser（users.role 不再参与鉴权）
             "is_superuser": bool(getattr(user, "is_superuser", False)),
+            "is_org_admin": await is_org_admin(db, user, user.organization_id),
             "preferences": getattr(user, "preferences", None),
         }
         # 确保 user_info 可 JSON 序列化（响应体防御：存在不可序列化的字段时
@@ -267,6 +268,7 @@ async def login_json(
             "role": getattr(user, "role", None) or "user",
             # 与 form 登录、/users/me 同一 admin 判定契约
             "is_superuser": bool(getattr(user, "is_superuser", False)),
+            "is_org_admin": await is_org_admin(db, user, user.organization_id),
             "preferences": getattr(user, "preferences", None),
         }
         # 与 form 登录一致：只验证 user_info 可 JSON 序列化（响应体防御），
@@ -534,7 +536,8 @@ class UserInfoWrapper(BaseModel):
 
 @router.get("/me", response_model=UserInfoWrapper)
 async def get_current_user_info(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """获取当前用户信息"""
     user_info = UserInfoResponse(
@@ -545,6 +548,9 @@ async def get_current_user_info(
         organization_id=current_user.organization_id,
         role=current_user.role,
         is_superuser=current_user.is_superuser,
+        is_org_admin=await is_org_admin(
+            db, current_user, current_user.organization_id
+        ),
         is_active=current_user.is_active,
         created_at=current_user.created_at,
         preferences=current_user.preferences

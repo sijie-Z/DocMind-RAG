@@ -23,6 +23,7 @@ from app.models import Base
 from app.models.organization import Organization
 from app.models.prompt import PromptTemplate
 from app.models.prompt_version import PromptTemplateVersion
+from app.models.rbac import Role, user_organization_role_association
 from app.models.user import User
 
 
@@ -53,6 +54,19 @@ async def _setup():
             _user(3, 2, role="admin"),
         ])
         await s.flush()
+        # W0-1：组织管理员 = per-org OrgAdmin 角色关联（users.role 不再参与鉴权）
+        org_admin_role = Role(
+            name="OrgAdmin", description="组织管理员", is_system_role=False
+        )
+        s.add(org_admin_role)
+        await s.flush()
+        await s.execute(
+            user_organization_role_association.insert(),
+            [
+                {"user_id": 1, "organization_id": 1, "role_id": org_admin_role.id},
+                {"user_id": 3, "organization_id": 2, "role_id": org_admin_role.id},
+            ],
+        )
         s.add_all([
             PromptTemplate(name="sys-template", content="s", is_system=True, organization_id=None, creator_id=None),
             PromptTemplate(name="p-A", content="a", is_system=False, organization_id=1, creator_id=2),
