@@ -44,6 +44,7 @@ from app.schemas.user import (
     UserUpdateProfile,
 )
 from app.services.auth_service import auth_service
+from app.services.permission_service import permission_service
 
 router = APIRouter()
 
@@ -154,6 +155,13 @@ async def create_user_admin(
         if body.remark:
             user.preferences = json.dumps({"remark": body.remark}, ensure_ascii=False)
 
+        # W0-1：组织管理员权限落到 per-org 角色关联（唯一权威）；users.role
+        # 仅作为展示标签保留。
+        if body.role == "admin" and user.organization_id is not None:
+            await permission_service.set_org_admin(
+                db, user.id, user.organization_id, True
+            )
+
         await _log_user_activity(
             db,
             current_user.id,
@@ -200,19 +208,31 @@ async def update_user_admin(
             user.full_name = body.nickname
         if body.phone is not None:
             user.phone = body.phone
-        if body.role is not None:
-            user.role = "admin" if body.role == "admin" else "user"
         if body.status is not None:
             user.is_active = body.status != "inactive"
         if body.organization_ids and len(body.organization_ids) > 1:
             # T8：同创建路径——多值显式 400，不再静默取首。
             raise ValidationError("仅支持分配单一组织")
+        old_org_id = user.organization_id
         if body.organization_ids:
             org_id = body.organization_ids[0]
             # S3 安全加固：无组织用户不再兜底到 1 号组织，直接 403
             if not current_user.is_superuser and org_id != await require_organization(current_user, db):
                 raise AuthorizationError("无权将用户移动到该组织")
             user.organization_id = org_id
+            # W0-1：调离组织时撤销旧组织的 OrgAdmin 关联，避免遗留跨组织管理权。
+            if old_org_id is not None and old_org_id != org_id:
+                await permission_service.set_org_admin(db, user_id, old_org_id, False)
+                user.role = "user"
+        if body.role is not None:
+            new_role = "admin" if body.role == "admin" else "user"
+            # W0-1：组织管理员权限落到 per-org 角色关联（唯一权威）；
+            # users.role 仅作为展示标签保留。
+            if user.organization_id is not None:
+                await permission_service.set_org_admin(
+                    db, user_id, user.organization_id, new_role == "admin"
+                )
+            user.role = new_role
         if body.remark is not None:
             try:
                 pref = json.loads(user.preferences) if user.preferences else {}
@@ -471,8 +491,8 @@ async def get_user_profile(
             "bio": bio,
             "organization_id": current_user.organization_id,
             "role": current_user.role,
-            # 与后端鉴权口径一致（is_superuser or role=="admin"）：前端
-            # isAdmin 组合判定依赖此字段，缺失会让超管失去管理入口。
+            # W0-1：平台管理员只认显式 is_superuser（users.role 不再参与鉴权）；
+            # 前端 isAdmin 组合判定依赖此字段，缺失会让超管失去管理入口。
             "is_superuser": bool(current_user.is_superuser),
             "is_active": current_user.is_active,
             "created_at": current_user.created_at,
@@ -1047,7 +1067,13 @@ async def update_user_role(
         ):
             raise AuthorizationError("无权修改该用户的角色")
 
-        # 安全加固：角色变更立即对后续请求生效（身份由每次请求回源 DB 决定）
+        # 安全加固：角色变更立即对后续请求生效（身份由每次请求回源 DB 决定）。
+        # W0-1：组织管理员权限写入 per-org 角色关联（唯一权威）；users.role
+        # 仅作为展示标签保留，任何鉴权路径都不读取。
+        if user.organization_id is not None:
+            await permission_service.set_org_admin(
+                db, user_id, user.organization_id, role == "admin"
+            )
         user_obj: Any = user
         user_obj.role = role
         await _log_user_activity(

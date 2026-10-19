@@ -13,7 +13,13 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user, get_user_org_id, require_organization
+from app.core.security import (
+    get_current_user,
+    get_user_org_id,
+    is_org_admin,
+    is_platform_admin,
+    require_organization,
+)
 from app.exceptions import AppError, NotFoundError, ValidationError
 from app.models.user import User
 from app.models.workflow import NodeDefinition, Workflow, WorkflowExecution
@@ -27,17 +33,17 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _apply_workflow_scope(stmt, current_user: User, org_id: int):
-    """租户边界（A2 P0）：非超管一律限定在本组织内。
+async def _apply_workflow_scope(db: AsyncSession, stmt, current_user: User, org_id: int):
+    """租户边界（A2 P0）+ 组织内可见性（W0-1 per-org 管理员）。
 
-    - 超管：全局可见（调用方不传 org_id）；
-    - 组织 admin：本组织全部工作流；
-    - 普通用户：本组织内仅自己创建的工作流。
+    - 平台超管：全局可见（调用方不传 org_id）；
+    - 组织管理员（OrgAdmin 组织角色）：本组织全部工作流；
+    - 普通用户（含仅 users.role='admin' 的账号）：本组织内仅自己创建的工作流。
     """
-    if current_user.is_superuser:
+    if is_platform_admin(current_user):
         return stmt
     stmt = stmt.where(Workflow.organization_id == org_id)
-    if current_user.role != "admin":
+    if not await is_org_admin(db, current_user, org_id):
         stmt = stmt.where(Workflow.created_by == current_user.id)
     return stmt
 
@@ -54,7 +60,7 @@ async def list_workflows(
     if not current_user.is_superuser:
         org_id = await require_organization(current_user, db)
         conditions.append(Workflow.organization_id == org_id)
-        if current_user.role != "admin":
+        if not await is_org_admin(db, current_user, org_id):
             conditions.append(Workflow.created_by == current_user.id)
 
     # 统计总数
@@ -135,7 +141,7 @@ async def get_workflow(
     stmt = select(Workflow).where(Workflow.id == workflow_id, Workflow.is_active)
     if not current_user.is_superuser:
         org_id = await require_organization(current_user, db)
-        stmt = _apply_workflow_scope(stmt, current_user, org_id)
+        stmt = await _apply_workflow_scope(db, stmt, current_user, org_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
@@ -169,7 +175,7 @@ async def update_workflow(
     stmt = select(Workflow).where(Workflow.id == workflow_id, Workflow.is_active)
     if not current_user.is_superuser:
         org_id = await require_organization(current_user, db)
-        stmt = _apply_workflow_scope(stmt, current_user, org_id)
+        stmt = await _apply_workflow_scope(db, stmt, current_user, org_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
@@ -209,7 +215,7 @@ async def delete_workflow(
     stmt = select(Workflow).where(Workflow.id == workflow_id)
     if not current_user.is_superuser:
         org_id = await require_organization(current_user, db)
-        stmt = _apply_workflow_scope(stmt, current_user, org_id)
+        stmt = await _apply_workflow_scope(db, stmt, current_user, org_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
@@ -237,7 +243,7 @@ async def execute_workflow(
         effective_org_id = get_user_org_id(current_user)
     else:
         effective_org_id = await require_organization(current_user, db)
-        stmt = _apply_workflow_scope(stmt, current_user, effective_org_id)
+        stmt = await _apply_workflow_scope(db, stmt, current_user, effective_org_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
@@ -464,14 +470,14 @@ async def get_execution(
     if not current_user.is_superuser:
         org_id = await require_organization(current_user, db)
         workflow_stmt = select(Workflow).where(Workflow.id == execution.workflow_id)
-        workflow_stmt = _apply_workflow_scope(workflow_stmt, current_user, org_id)
+        workflow_stmt = await _apply_workflow_scope(db, workflow_stmt, current_user, org_id)
         workflow_result = await db.execute(workflow_stmt)
         workflow = workflow_result.scalar_one_or_none()
         if not workflow:
             raise NotFoundError(detail="执行记录不存在")
         # SQL 作用域之外再做一次显式属主校验（防御纵深）：非管理员不得查看
         # 同组织他人工作流的执行记录。
-        if current_user.role != "admin" and workflow.created_by != current_user.id:
+        if not await is_org_admin(db, current_user, org_id) and workflow.created_by != current_user.id:
             raise NotFoundError(detail="执行记录不存在")
 
     return {

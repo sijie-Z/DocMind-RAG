@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.notifications import create_notification
 from app.core.database import get_db
-from app.core.security import get_current_user, permission_required
+from app.core.security import get_current_user, is_platform_admin, permission_required
 from app.exceptions import (
     AppError,
     AuthorizationError,
@@ -24,6 +24,7 @@ from app.models.user import User
 from app.schemas.organization import OrganizationCreate, OrganizationUpdate
 from app.services.audit_service import audit_service
 from app.services.organization_service import organization_service
+from app.services.permission_service import permission_service
 
 router = APIRouter()
 
@@ -31,9 +32,8 @@ router = APIRouter()
 def _ensure_org_membership(current_user: User, org_id: int) -> None:
     """S1 安全加固：非超管必须属于目标组织，否则抛出 403。
 
-    permission_required(organization_id_param=...) 只校验调用者是否持有权限，
-    而全局 role=admin 的用户持有整套 SysAdmin 权限（permission_service.py），
-    因此仅靠该依赖无法阻止跨组织访问；组织成员资格必须在这里显式校验。
+    W0-1（ADR-001 D3）：权限依赖按 per-org 角色判定（权限只在该组织内成立），
+    成员资格仍需在这里显式校验，二者缺一不可。
     """
     if getattr(current_user, "is_superuser", False):
         return
@@ -121,6 +121,10 @@ async def get_organizations(
         limit = page_size
 
         conditions = []
+        # W0-1：组织列表是跨租户信息面——平台管理员可看全部；组织管理员/
+        # 普通账号只能看到自己的组织（无组织 fail closed，不做 1 号组织兜底）。
+        if not is_platform_admin(current_user):
+            conditions.append(Organization.id == (current_user.organization_id or -1))
         if search:
             conditions.append(Organization.name.contains(search))
 
@@ -321,6 +325,10 @@ async def add_organization_member(
     user_obj: Any = user
     old_org_id = user_obj.organization_id
     user_obj.organization_id = org_id
+    # W0-1：调离组织时撤销旧组织的 OrgAdmin 关联，避免遗留跨组织管理权。
+    if old_org_id is not None and old_org_id != org_id:
+        await permission_service.set_org_admin(db, user_id, old_org_id, False)
+        user_obj.role = "user"
     # A2 P0：成员表是 token 组织回退的权威依据——加入组织必须同步写入
     # user_organization 成员关系，否则成员被移出后旧 token 仍会被成员校验放行。
     await organization_service.add_user_to_organization(db, user_obj, org)
@@ -366,6 +374,9 @@ async def update_organization_member_role(
         raise NotFoundError("组织成员不存在")
 
     user_obj: Any = user
+    # W0-1：组织管理员权限的唯一权威是 org 角色关联；users.role 仅保留为
+    # 展示标签（鉴权路径不再读取，见 CI 门禁 check_rbac_admin_bypass.py）。
+    await permission_service.set_org_admin(db, user_id, org_id, role == "admin")
     user_obj.role = role
     await db.commit()
 

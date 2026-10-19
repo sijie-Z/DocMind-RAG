@@ -155,7 +155,7 @@ async def login(
             "full_name": getattr(user, "full_name", None) or None,
             "organization_id": getattr(user, "organization_id", None),
             "role": user.role or "user",
-            # 与后端鉴权口径一致（is_superuser or role=="admin"）
+            # W0-1：平台管理员只认显式 is_superuser（users.role 不再参与鉴权）
             "is_superuser": bool(getattr(user, "is_superuser", False)),
             "preferences": getattr(user, "preferences", None),
         }

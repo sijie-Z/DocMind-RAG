@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.redis import redis_client
-from app.core.security import get_current_user
+from app.core.security import get_current_user, is_platform_admin
 from app.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.models.user import User
 
@@ -254,8 +254,8 @@ async def create_config(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new LLM configuration. Returns the created config with ID."""
-    # 写操作仅限管理员
-    if not current_user.is_superuser and current_user.role != "admin":
+    # 写操作仅限平台管理员（W0-1：只认显式 is_superuser，不再看 users.role）
+    if not is_platform_admin(current_user):
         raise AuthorizationError("需要管理员权限")
 
     all_configs = await _load_all()
@@ -287,8 +287,8 @@ async def update_config(
     current_user: User = Depends(get_current_user),
 ):
     """Full update of an existing config."""
-    # 写操作仅限管理员
-    if not current_user.is_superuser and current_user.role != "admin":
+    # 写操作仅限平台管理员（W0-1：只认显式 is_superuser，不再看 users.role）
+    if not is_platform_admin(current_user):
         raise AuthorizationError("需要管理员权限")
 
     all_configs = await _load_all()
@@ -318,8 +318,8 @@ async def patch_config(
     current_user: User = Depends(get_current_user),
 ):
     """Partial update of a config."""
-    # 写操作仅限管理员
-    if not current_user.is_superuser and current_user.role != "admin":
+    # 写操作仅限平台管理员（W0-1：只认显式 is_superuser，不再看 users.role）
+    if not is_platform_admin(current_user):
         raise AuthorizationError("需要管理员权限")
 
     all_configs = await _load_all()
@@ -351,8 +351,8 @@ async def delete_config(
     current_user: User = Depends(get_current_user),
 ):
     """Delete a config by ID."""
-    # 写操作仅限管理员
-    if not current_user.is_superuser and current_user.role != "admin":
+    # 写操作仅限平台管理员（W0-1：只认显式 is_superuser，不再看 users.role）
+    if not is_platform_admin(current_user):
         raise AuthorizationError("需要管理员权限")
 
     if not redis_client:
@@ -378,8 +378,8 @@ async def set_default_config(
     current_user: User = Depends(get_current_user),
 ):
     """Set a config as default for its provider. Unsets other defaults."""
-    # 写操作仅限管理员
-    if not current_user.is_superuser and current_user.role != "admin":
+    # 写操作仅限平台管理员（W0-1：只认显式 is_superuser，不再看 users.role）
+    if not is_platform_admin(current_user):
         raise AuthorizationError("需要管理员权限")
 
     all_configs = await _load_all()

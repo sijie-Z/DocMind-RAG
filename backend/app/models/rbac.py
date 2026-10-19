@@ -57,6 +57,12 @@ class PermissionType(str, Enum):
     VIEW_SYSTEM_HEALTH = "system:health"
     USE_EMBEDDING_SERVICE = "system:use_embedding_service"
 
+
+# W0-1（ADR-001 D3）：组织管理员 = 组织成员角色（per-org），不是 users.role。
+# 唯一权威来源是 user_organization_role_association 中 (user, organization,
+# OrgAdmin) 三元组；同一角色名在不同组织间互不授予权限。
+ORG_ADMIN_ROLE_NAME = "OrgAdmin"
+
 # 角色与权限的关联表
 role_permission_association = Table(
     'role_permission_association',

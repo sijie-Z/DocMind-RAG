@@ -31,7 +31,7 @@ from app.core.minio_client import minio_client
 from app.core.notification_ws import notification_ws_manager
 from app.core.redis import close_redis, init_redis
 from app.core.request_id import RequestIDMiddleware
-from app.core.security import get_user_org_id, optional_current_user
+from app.core.security import get_user_org_id, is_platform_admin, optional_current_user
 from app.core.system_metrics import system_metrics_sampler
 from app.core.tracing import setup_opentelemetry
 from app.exceptions import AppError
@@ -754,7 +754,9 @@ async def get_minio_file(
 
     # 安全加固：按对象名前缀校验组织归属，防止跨租户读取其他组织的文件。
     # 对象命名规范：documents/{org_id}/{uuid}.ext（file_service 路径）或 {org_id}/{md5}.ext（documents 路径）
-    if current_user is not None and not current_user.is_superuser and current_user.role != "admin":
+    # W0-1：跨组织文件旁路只留给显式平台管理员（is_superuser）；组织管理员与
+    # users.role='admin' 一律按本组织前缀校验。
+    if current_user is not None and not is_platform_admin(current_user):
         org_prefix: str | None = None
         if normalized.startswith("documents/"):
             parts = normalized.split("/")

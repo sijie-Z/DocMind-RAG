@@ -16,6 +16,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models import Base
 from app.models.organization import Organization
+from app.models.rbac import Role, user_organization_role_association
 from app.models.user import User
 from app.models.workflow import Workflow, WorkflowExecution
 
@@ -56,6 +57,19 @@ async def _setup():
             _user(99, None, role="admin", superuser=True),  # 全局超管
         ])
         await s.flush()
+        # W0-1：组织管理员 = per-org OrgAdmin 角色关联（users.role 不再参与鉴权）
+        org_admin_role = Role(
+            name="OrgAdmin", description="组织管理员", is_system_role=False
+        )
+        s.add(org_admin_role)
+        await s.flush()
+        await s.execute(
+            user_organization_role_association.insert(),
+            [
+                {"user_id": 1, "organization_id": 1, "role_id": org_admin_role.id},
+                {"user_id": 3, "organization_id": 2, "role_id": org_admin_role.id},
+            ],
+        )
         s.add_all([
             Workflow(name="wf-A-admin", flow_data=_MIN_FLOW, created_by=1, organization_id=1),
             Workflow(name="wf-A-user", flow_data=_MIN_FLOW, created_by=2, organization_id=1),
