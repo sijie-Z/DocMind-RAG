@@ -18,15 +18,21 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.exec_context import ExecutionContext
+from app.core.error_mapping import public_decision_reasoning
 
 
 def _decision_lines(ctx: ExecutionContext, phase: str) -> list[str]:
-    """Pull reasoning for one phase that the run already recorded."""
+    """Pull reasoning for one phase that the run already recorded.
+
+    W0-5：失败态（reflect/review 服务异常等）的 reasoning 可能含任意
+    异常原文——报告会随 SSE 外发，渲染前统一过对外口径（占位/脱敏）。
+    """
     out: list[str] = []
     for d in ctx.decisions:
         if d.phase != phase or not d.reasoning:
             continue
-        out.append(f"[{d.action}] {d.reasoning[:300]}")
+        reasoning = public_decision_reasoning(d.action, d.reasoning)
+        out.append(f"[{d.action}] {str(reasoning)[:300]}")
     return out
 
 

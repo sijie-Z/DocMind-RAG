@@ -8,6 +8,7 @@
 
 每条断言附变异点（把对应接线删回原状，用例必须变红）。
 """
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock  # noqa: F401
 
 import pytest
@@ -161,7 +162,10 @@ async def test_chat_endpoint_wires_stored_config_into_run(redis_store, monkeypat
     monkeypatch.setattr(agent_ep, "require_organization", AsyncMock(return_value=3))
 
     resp = await agent_ep.agent_chat(
-        agent_ep.AgentChatRequest(query="q"), current_user=_fake_user(), db=MagicMock(),
+        agent_ep.AgentChatRequest(query="q"),
+        request=SimpleNamespace(state=SimpleNamespace(request_id="rid-test")),
+        current_user=_fake_user(),
+        db=MagicMock(),
     )
     async for _ in resp.body_iterator:
         break

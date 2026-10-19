@@ -3,7 +3,16 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Query,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +20,13 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
+from app.core.error_mapping import (
+    public_agent_event_content,
+    public_diagnostic_content,
+    public_exception_message,
+    public_rag_error_content,
+    resolve_request_id,
+)
 from app.core.log_safety import log_safe
 from app.core.security import get_current_user, get_user_org_id, require_organization
 from app.core.ws_auth import (
@@ -653,9 +669,10 @@ async def websocket_endpoint(
                                 # issue #268：RAG 链路的显式拒绝（如无组织）经此事件
                                 # 转发。此前无此 case，错误事件会被静默丢弃、客户端
                                 # 只等到一个无回应的空转。
+                                # W0-5：RAG error 内容同样过白名单（与 SSE 同口径）。
                                 await manager.send_personal_message(json.dumps({
                                     "type": "error",
-                                    "content": event.content,
+                                    "content": public_rag_error_content(event.content),
                                     "conversationId": event.conversation_id,
                                 }), websocket)
                         except TimeoutError:
@@ -678,7 +695,7 @@ async def websocket_endpoint(
                                         await manager.send_personal_message(
                                             json.dumps({
                                                 "type": "error",
-                                                "content": event.content,
+                                                "content": public_rag_error_content(event.content),
                                                 "conversationId": event.conversation_id,
                                             }), websocket,
                                         )
@@ -791,12 +808,19 @@ async def sse_event(event_type: str, data: dict) -> str:
 @router.post("/stream")
 async def chat_stream_endpoint(
     body: ChatStreamRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     async def event_generator():
         # 安全加固：跟踪 pipeline 任务，客户端断连（GeneratorExit）时取消，防止孤儿任务继续烧 LLM 费用
         pipeline_task: asyncio.Task | None = None
+        # W0-5 错误脱敏：请求编号优先取 W0-9 的 get_request_id contextvar，
+        # 回退到既有 RequestIDMiddleware 写入的 request.state（不另造中间件）。
+        # 完整异常/堆栈只进日志，客户端只见通用文案。
+        request_id = resolve_request_id(request)
+        # 日志上下文：组织取有效组织（token 回退已校验）的只读快照，绝不影响运行口径。
+        log_org_id = get_user_org_id(current_user)
         try:
             user_content = body.content
             file_ids = body.fileIds or []
@@ -866,8 +890,10 @@ async def chat_stream_endpoint(
                             "messageId": f"agent-{conversation_id}",
                         })
                     elif agent_event.type == "thinking":
+                        # W0-5：thinking 可能承载重试上下文（上一条错误的原文），
+                        # 外发前做内部特征脱敏（traceback/路径/SQL/类名）。
                         yield await sse_event("thinking", {
-                            "content": agent_event.content,
+                            "content": public_diagnostic_content(agent_event.content),
                             "thinkingType": agent_event.thinking_type,
                             "planId": agent_event.plan_id,
                             "planStepId": agent_event.plan_step_id,
@@ -893,9 +919,15 @@ async def chat_stream_endpoint(
                         if agent_event.tool_name in ("search_knowledge_base", "vector_search"):
                             _extract_agent_sources(agent_event.content, agent_sources)
                     elif agent_event.type == "tool_error":
+                        # W0-5：工具失败文本按白名单/映射外发（原始异常与内部
+                        # 类名只进日志；工具名属于可对外上下文）。
                         yield await sse_event("tool_error", {
                             "toolName": agent_event.tool_name,
-                            "content": agent_event.content[:300],
+                            "content": public_agent_event_content(
+                                "tool_error",
+                                agent_event.content,
+                                agent_event.tool_name,
+                            )[:300],
                             "toolCallId": agent_event.tool_call_id,
                         })
                     elif agent_event.type == "plan_start":
@@ -924,13 +956,20 @@ async def chat_stream_endpoint(
                     elif agent_event.type == "done":
                         pass
                     elif agent_event.type == "error":
-                        yield await sse_event("error", {"content": agent_event.content})
+                        # W0-5：error 事件内容过白名单——无组织拒绝等既有诚实
+                        # 文案放行；含原始异常/内部类名的内容降级为通用文案。
+                        yield await sse_event("error", {
+                            "content": public_agent_event_content(
+                                "error", agent_event.content
+                            ),
+                        })
                         return
                     elif agent_event.type == "execution_context":
                         # issue #222：PER 循环收尾时真的会发出它，此前无 case 被静默丢弃。
                         # 该事件带结构性字段，投影风格与上面各分支保持一致。
+                        # W0-5：诊断载荷里的失败/异常片段脱敏后再外发。
                         yield await sse_event("execution_context", {
-                            "content": agent_event.content,
+                            "content": public_diagnostic_content(agent_event.content),
                             "planId": agent_event.plan_id,
                             "planProgress": agent_event.plan_progress if agent_event.plan_progress >= 0 else None,
                         })
@@ -941,8 +980,17 @@ async def chat_stream_endpoint(
                         # 统一原样转发 content，客户端按需忽略（SSE 按 event 名分发，
                         # 没有监听器的类型是安全的）；宁可在流里多一个没人听的事件，
                         # 也不要静默丢数据。
+                        # W0-5：诊断类事件（run_report 等）可能内嵌失败/异常文本，
+                        # 外发前做内部特征脱敏（结构与可观测字段保持不变）。
                         logger.debug("chat SSE 转发未投影的事件类型: %s", agent_event.type)
-                        yield await sse_event(agent_event.type, {"content": agent_event.content})
+                        content = agent_event.content
+                        if agent_event.type in (
+                            "run_report",
+                            "execution_context",
+                            "execution_step_result",
+                        ):
+                            content = public_diagnostic_content(content)
+                        yield await sse_event(agent_event.type, {"content": content})
 
                 # B2 / D3：统一会话落库（与 /agent/chat 同一实现）。HITL 暂停/取消
                 # 不是"完成"——不写半成品回答（真完成由审批/恢复流收尾时补写）。
@@ -1052,8 +1100,10 @@ async def chat_stream_endpoint(
                         elif event.type == "error":
                             # issue #268：RAG 链路的显式拒绝（如无组织）经此事件
                             # 转发（与 WS 路径同一语义）。此前无此 case，错误会被
-                            # 静默丢弃。
-                            yield await sse_event("error", {"content": event.content})
+                            # 静默丢弃。W0-5：内容过 RAG 白名单（白名单外通用文案）。
+                            yield await sse_event("error", {
+                                "content": public_rag_error_content(event.content),
+                            })
                     except TimeoutError:
                         if pipeline_task.done():
                             # Drain remaining events
@@ -1068,14 +1118,29 @@ async def chat_stream_endpoint(
                                         "is_cached": event.is_cached,
                                     })
                                 elif event.type == "error":
-                                    yield await sse_event("error", {"content": event.content})
+                                    yield await sse_event("error", {
+                                        "content": public_rag_error_content(event.content),
+                                    })
                             break
 
                 await pipeline_task
 
         except Exception as e:
-            logger.error(f"SSE error: {e}", exc_info=True)
-            yield await sse_event("error", {"content": f"服务器处理出错: {str(e)}"})
+            # W0-5：完整异常/堆栈只进服务端日志（带 request_id / org / user，
+            # 供排障与审计关联）；客户端只收映射后的用户可读文案——绝不出现
+            # str(e)、文件路径、SQL、堆栈或内部类名。无组织等可预期拒绝映射为
+            # 403 语义文案；其余未预期异常为通用文案 + 请求编号。
+            logger.error(
+                "SSE stream error (request_id=%s org=%s user=%s): %s",
+                log_safe(request_id),
+                log_org_id,
+                current_user.id,
+                log_safe(e),
+                exc_info=True,
+            )
+            yield await sse_event("error", {
+                "content": public_exception_message(e, request_id),
+            })
         finally:
             # 客户端断连（GeneratorExit/CancelledError 属 BaseException，finally 兜底）
             if pipeline_task is not None and not pipeline_task.done():

@@ -32,6 +32,7 @@ from app.agent.retry_policy import compute_backoff, get_policy
 from app.agent.run_context import RunContext
 from app.agent.usage import record_llm_usage
 from app.core.circuit_breaker import CircuitBreaker
+from app.core.log_safety import log_safe
 from app.core.prometheus import (
     AGENT_EXECUTION_STEPS,
     AGENT_TOOL_CALLS,
@@ -702,17 +703,38 @@ class Executor:
                 # ── Classify the last error → lookup policy → jittered backoff ──
                 policy = get_policy(last_error_type)
                 delay = compute_backoff(policy, attempt - 1)
+                # W0-5：重试提示会经 SSE 直达客户端——last_error 是上一条
+                # tool_error/error 的**未脱敏**原文（可能含异常类名/路径/SQL），
+                # 绝不能拼进 thinking/retry_hint。这里只保留受控的错误码
+                # （小写标识符；类名等形态一律不出现），原文只进日志。
+                retry_kind = (
+                    last_error_type
+                    if isinstance(last_error_type, str)
+                    and last_error_type.isidentifier()
+                    and last_error_type.islower()
+                    else ""
+                )
+                if last_error:
+                    logger.warning(
+                        "步骤 %s 重试（第 %d 次，error_type=%s；内部细节仅日志）: %s",
+                        step.id,
+                        attempt,
+                        log_safe(last_error_type),
+                        log_safe(last_error),
+                    )
+                retry_content = (
+                    f"重试步骤 (第 {attempt}/{self.config.max_retries_per_step} 次)"
+                )
+                if retry_kind:
+                    retry_content += f" — {retry_kind}"
                 yield AgentEvent(
                     type="thinking",
-                    content=(
-                        f"重试步骤 (第 {attempt}/{self.config.max_retries_per_step} 次)"
-                        f" — {last_error_type}: {last_error[:100]}"
-                    ),
+                    content=retry_content,
                     thinking_type="correction",
                     plan_id=plan.id,
                     plan_step_id=step.id,
                     retry_attempt=attempt,
-                    retry_hint=last_error[:200],
+                    retry_hint=retry_kind,
                 )
                 if policy.action in ("reset_transport", "refresh_auth"):
                     # Signal intent to executor that request/transport must be rebuilt
@@ -861,11 +883,18 @@ class Executor:
             plan_step_id=step.id,
             retry_attempt=step.retry_count,
         )
-        # Emit a fallback chunk so the caller sees something, not silence
+        # Emit a fallback chunk so the caller sees something, not silence.
+        # W0-5：chunk 会原样流给客户端（并进入会话正文）——异常原文只进日志，
+        # 对外只保留自撰的跳过说明（与 error / tool_error 的脱敏口径一致）。
         if last_error:
+            logger.warning(
+                "步骤 %s 因 API 连接问题跳过（内部细节仅日志）: %s",
+                step.id,
+                log_safe(last_error),
+            )
             yield AgentEvent(
                 type="chunk",
-                content=f"[该步骤因 API 连接问题未能完成，已跳过。问题: {last_error[:100]}]",
+                content="[该步骤因 API 连接问题未能完成，已跳过]",
                 plan_id=plan.id,
                 plan_step_id=step.id,
             )

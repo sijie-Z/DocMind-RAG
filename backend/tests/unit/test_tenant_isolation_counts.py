@@ -11,8 +11,9 @@
 2. **`_diagnose_empty_results`**（knowledge 搜索空结果诊断）：此前全索引 count，
    任何租户搜出空结果都会看到全库 chunk 总量。现在按调用者 org 过滤。
 3. **`or 1` 兜底去伪造**：chat agent 流与 `delegate_subtask` 此前把无组织用户
-   静默放进 1 号组织的上下文（1 号组织甚至未必存在）。现在 chat 如实传 None
-   （休闲对话仍可用，需要 org 的工具由注册表 auth 钩子 fail-closed），
+   静默放进 1 号组织的上下文（1 号组织甚至未必存在）。现在 chat 如实传 None，
+   由 AgentService 入口 fail-closed 拒绝（W0-5：403 语义拒绝帧，不再把内部
+   ValueError 文本外发——见本文件 §3 与 test_w0_5_sse_error_mapping.py），
    delegation 缺 org 直接拒绝。
 
 DB 侧用内存 SQLite **真建表、真插入、真执行查询**（风格照抄
@@ -417,12 +418,17 @@ def test_search_endpoint_diagnose_receives_caller_org(client: TestClient):
 # ══════════════════════════════════════════════════════════════════════
 # 3 · `or 1` 兜底去伪造 —— 无组织用户不得进入 1 号组织上下文
 # ══════════════════════════════════════════════════════════════════════
-def test_chat_agent_stream_no_org_user_not_forced_into_org1(client: TestClient):
-    """无组织用户的 agent 流：org 如实传 None（休闲对话可用），绝不 or 1。
+def test_chat_agent_stream_no_org_user_refused_without_org1_fallback(client: TestClient):
+    """无组织用户的 agent 流：org 如实传 None，随后被显式拒绝（W0-5）。
 
-    变异验证：把 `organization_id=getattr(...)` 改回 `... or 1` → 本用例红。
+    历史口径（#257）是「无组织休闲对话仍可走 agent 模式」；W0-5 收紧为
+    fail-closed：无组织 → 403 语义拒绝帧（用户可读文案），绝不再把
+    ``ValueError("缺少 organization_id")`` 的内部文本原样外发，也绝不 or 1。
+
+    变异验证：把 `organization_id=getattr(...)` 改回 `... or 1` → 送入服务的
+    org 不再是 None → 本用例红；恢复 `f"服务器处理出错: {str(e)}"` → 内部文本
+    外泄断言红。
     """
-    from app.agent.events import AgentEvent
     from app.agent.service import agent_service
     from app.main import app
 
@@ -437,7 +443,11 @@ def test_chat_agent_stream_no_org_user_not_forced_into_org1(client: TestClient):
 
     async def _fake_chat(**kwargs):
         captured.update(kwargs)
-        yield AgentEvent(type="chunk", content="你好")
+        # 复现服务入口的真实拒绝形态（组织上下文缺失 → ValueError）。
+        raise ValueError(
+            "AgentService.chat 缺少 organization_id，拒绝在无组织上下文下运行"
+        )
+        yield  # pragma: no cover — 保持 async generator 形态
 
     async def _db():
         return MagicMock()
@@ -458,7 +468,12 @@ def test_chat_agent_stream_no_org_user_not_forced_into_org1(client: TestClient):
         app.dependency_overrides.pop(get_current_user, None)
 
     assert r.status_code == 200, r.text
-    assert "event: chunk" in r.text, "休闲对话仍应可用（无组织不得被整体拒答）"
+    assert "event: error" in r.text, "无组织 Agent 必须收到显式拒绝帧"
+    assert "当前用户未加入任何组织" in r.text, (
+        "拒绝文案必须是用户可读的 403 语义文案，而不是内部 ValueError 文本"
+    )
+    assert "organization_id" not in r.text, "内部参数名不得外发给客户端"
+    assert "ValueError" not in r.text, "内部类名不得外发给客户端"
     assert captured.get("organization_id") is None, (
         "无组织用户不得被静默放进 1 号组织上下文（此前 `... or 1`）"
     )

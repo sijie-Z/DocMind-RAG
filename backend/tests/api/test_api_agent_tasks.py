@@ -515,7 +515,12 @@ def test_resume_stream_error_is_generic_detail_only_in_server_log(client, auth, 
     lines = [ln for ln in r.text.split("\n\n") if ln.startswith("data: ")]
     payloads = [json.loads(ln[len("data: "):]) for ln in lines]
     errs = [p for p in payloads if p.get("type") == "error"]
-    assert errs and errs[0]["content"] == "Agent 恢复执行出错，请稍后重试"
+    assert errs and errs[0]["content"].startswith("Agent 恢复执行出错，请稍后重试")
+    # W0-5：通用文案带请求编号（客户端可据此报障）；编号与响应头一致。
+    request_id = r.headers.get("x-request-id")
+    assert request_id and request_id in errs[0]["content"], (
+        "错误文案必须携带 X-Request-ID"
+    )
     assert any(
         rec.exc_info and "SECRET-TOKEN-xyz" in str(rec.exc_info[1]) for rec in records
     ), "完整异常/堆栈必须留在服务端日志（exc_info）"

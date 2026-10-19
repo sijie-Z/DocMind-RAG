@@ -981,6 +981,12 @@ class PERAgentLoop:
                 # （error_kind="service_error"）是两种事实，不得合并表述；
                 # 未标注 kind 的自定义调用方按服务异常（保守、与旧文案一致）。
                 reason = str(review.get("error") or "").strip()
+                if reason:
+                    # W0-5：decision reasoning 会进入 run_report/execution_context
+                    # 外发——异常原文只进日志，不插值到对外文本。
+                    logger.warning(
+                        "对抗审查未完成（内部细节仅日志）: %s", log_safe(reason)
+                    )
                 if str(review.get("error_kind") or "") == "no_verdict":
                     unfinished = "对抗审查未完成（模型未给出判定）"
                 else:
@@ -988,8 +994,7 @@ class PERAgentLoop:
                 ctx.record_decision(
                     "review",
                     "error",
-                    unfinished + "，本轮无审查结论"
-                    + (f"：{reason[:150]}" if reason else ""),
+                    unfinished + "，本轮无审查结论",
                 )
                 yield AgentEvent(
                     type="thinking",

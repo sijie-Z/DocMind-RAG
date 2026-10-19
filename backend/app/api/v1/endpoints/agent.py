@@ -27,7 +27,7 @@ import logging
 import uuid
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import desc, func, select
@@ -40,6 +40,11 @@ from app.agent.replay.engine import ReplayEngine
 from app.agent.service import agent_service, notify_task_terminal
 from app.agent.skills import skill_manager
 from app.core.database import AsyncSessionLocal, get_db
+from app.core.error_mapping import (
+    public_agent_event_data,
+    public_exception_message,
+    resolve_request_id,
+)
 from app.core.log_safety import log_safe
 from app.core.prometheus import AGENT_FEEDBACK_TOTAL
 from app.core.security import get_current_user, require_organization
@@ -187,6 +192,7 @@ async def _build_agent_config(body: AgentChatRequest, user_id: int) -> AgentConf
 @router.post("/chat")
 async def agent_chat(
     body: AgentChatRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -236,7 +242,7 @@ async def agent_chat(
                 referenced_document_ids=body.referenced_document_ids,
             ):
                 last_event_type = event.type
-                sse_data = event.to_sse_dict()
+                sse_data = public_agent_event_data(event)
                 yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
                 if event.type == "chunk":
                     final_answer += event.content
@@ -274,10 +280,23 @@ async def agent_chat(
                     )
 
         except Exception as e:
-            # 完整异常/堆栈只进服务端日志；客户端收通用文案（CodeQL 信息暴露修复：
-            # 异常原文此前直出 SSE）。
-            logger.error("Agent chat error: %s", log_safe(e), exc_info=True)
-            error_data = {"type": "error", "content": "Agent 执行出错，请稍后重试"}
+            # W0-5：完整异常/堆栈只进服务端日志（带 request_id/org/user）；
+            # 客户端只收映射后的通用文案（可带请求编号），绝不出现 str(e)。
+            request_id = resolve_request_id(request)
+            logger.error(
+                "Agent chat error (request_id=%s org=%s user=%s): %s",
+                log_safe(request_id),
+                effective_org_id,
+                current_user.id,
+                log_safe(e),
+                exc_info=True,
+            )
+            error_data = {
+                "type": "error",
+                "content": public_exception_message(
+                    e, request_id, generic="Agent 执行出错，请稍后重试"
+                ),
+            }
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
         if save_error is not None:
@@ -446,6 +465,7 @@ async def get_agent_task_replay(
 @router.post("/tasks/{task_id}/resume")
 async def resume_agent_task(
     task_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -484,7 +504,7 @@ async def resume_agent_task(
                 claim=False,  # 已在上方 prepare_resume 认领（HTTP 409 语义在开流前）
             ):
                 last_event_type = event.type
-                sse_data = event.to_sse_dict()
+                sse_data = public_agent_event_data(event)
                 yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
                 if event.type == "chunk":
                     final_answer += event.content
@@ -517,10 +537,22 @@ async def resume_agent_task(
                         exc_info=True,
                     )
         except Exception as e:
-            # 完整异常/堆栈只进服务端日志；客户端收通用文案（CodeQL 信息暴露修复：
-            # 异常原文此前直出 SSE）。
-            logger.error("Agent resume error: %s", log_safe(e), exc_info=True)
-            error_data = {"type": "error", "content": "Agent 恢复执行出错，请稍后重试"}
+            # W0-5：完整异常/堆栈只进服务端日志；客户端收映射后通用文案。
+            request_id = resolve_request_id(request)
+            logger.error(
+                "Agent resume error (request_id=%s org=%s user=%s): %s",
+                log_safe(request_id),
+                effective_org_id,
+                current_user.id,
+                log_safe(e),
+                exc_info=True,
+            )
+            error_data = {
+                "type": "error",
+                "content": public_exception_message(
+                    e, request_id, generic="Agent 恢复执行出错，请稍后重试"
+                ),
+            }
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
         if save_error is not None:
@@ -576,6 +608,7 @@ class TaskApprovalRequest(BaseModel):
 async def decide_agent_task_approval(
     task_id: str,
     body: TaskApprovalRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -630,7 +663,7 @@ async def decide_agent_task_approval(
                 claim=False,  # 已在上方 apply_approval_decision 认领（HTTP 409 在开流前）
             ):
                 last_event_type = event.type
-                sse_data = event.to_sse_dict()
+                sse_data = public_agent_event_data(event)
                 yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
                 if event.type == "chunk":
                     final_answer += event.content
@@ -656,9 +689,22 @@ async def decide_agent_task_approval(
                         exc_info=True,
                     )
         except Exception as e:
-            # 完整异常/堆栈只进服务端日志；客户端收通用文案（同 /chat、/resume）。
-            logger.error("Agent approval resume error: %s", log_safe(e), exc_info=True)
-            error_data = {"type": "error", "content": "Agent 审批续跑出错，请稍后重试"}
+            # W0-5：完整异常/堆栈只进服务端日志；客户端收映射后通用文案。
+            request_id = resolve_request_id(request)
+            logger.error(
+                "Agent approval resume error (request_id=%s org=%s user=%s): %s",
+                log_safe(request_id),
+                effective_org_id,
+                current_user.id,
+                log_safe(e),
+                exc_info=True,
+            )
+            error_data = {
+                "type": "error",
+                "content": public_exception_message(
+                    e, request_id, generic="Agent 审批续跑出错，请稍后重试"
+                ),
+            }
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
         if save_error is not None:
@@ -749,6 +795,7 @@ class TaskPlanApprovalRequest(BaseModel):
 async def decide_agent_task_plan_approval(
     task_id: str,
     body: TaskPlanApprovalRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -815,7 +862,7 @@ async def decide_agent_task_plan_approval(
                 claim=False,  # 已在上方 apply_plan_approval_decision 认领（HTTP 409 在开流前）
             ):
                 last_event_type = event.type
-                sse_data = event.to_sse_dict()
+                sse_data = public_agent_event_data(event)
                 yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
                 if event.type == "chunk":
                     final_answer += event.content
@@ -843,9 +890,22 @@ async def decide_agent_task_plan_approval(
                         exc_info=True,
                     )
         except Exception as e:
-            # 完整异常/堆栈只进服务端日志；客户端收通用文案（同 /chat、/resume）。
-            logger.error("Agent plan-approval resume error: %s", log_safe(e), exc_info=True)
-            error_data = {"type": "error", "content": "Agent 计划审批续跑出错，请稍后重试"}
+            # W0-5：完整异常/堆栈只进服务端日志；客户端收映射后通用文案。
+            request_id = resolve_request_id(request)
+            logger.error(
+                "Agent plan-approval resume error (request_id=%s org=%s user=%s): %s",
+                log_safe(request_id),
+                effective_org_id,
+                current_user.id,
+                log_safe(e),
+                exc_info=True,
+            )
+            error_data = {
+                "type": "error",
+                "content": public_exception_message(
+                    e, request_id, generic="Agent 计划审批续跑出错，请稍后重试"
+                ),
+            }
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
         if save_error is not None:

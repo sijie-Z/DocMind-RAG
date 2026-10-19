@@ -29,6 +29,7 @@ from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.planner import Plan
 from app.agent.usage import record_llm_usage
+from app.core.log_safety import log_safe
 from app.core.prometheus import AGENT_REFLECTION_DECISIONS
 
 logger = logging.getLogger(__name__)
@@ -177,7 +178,9 @@ class Reflector:
             reflection_data = self._extract_json(content)
 
         except Exception as e:
-            logger.error(f"Reflection LLM call failed: {e}")
+            # W0-5：这是异常原文在反思链路的唯一保留点（decision/事件已固定文案），
+            # 日志值过 log_safe（防换行伪造日志行）。
+            logger.error("Reflection LLM call failed: %s", log_safe(e))
             if span:
                 span.end(output=f"error: {e}", level="ERROR")
             # issue #301 #7（三态设计：降级 ≠ 失败但 ≠ 假 pass）：
@@ -189,10 +192,12 @@ class Reflector:
             # achievement/gaps —— 无判定不是通过，也不是失败。
             AGENT_REFLECTION_DECISIONS.labels(decision="unavailable").inc()
             if ctx:
+                # W0-5：决策 reasoning 会进入 run_report/execution_context 外发，
+                # 异常原文只进日志（上方 logger.error 已记录），不得插值。
                 ctx.record_decision(
                     "reflect",
                     "unavailable",
-                    f"反思评估跳过（评估服务异常），本轮未获得完成度判定: {str(e)[:150]}",
+                    "反思评估跳过（评估服务异常），本轮未获得完成度判定",
                 )
             yield AgentEvent(
                 type="reflection",
