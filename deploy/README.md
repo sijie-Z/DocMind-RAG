@@ -13,7 +13,8 @@ cd backend
 docker compose --env-file .env.docker up -d
 
 # 3. Verify
-curl http://localhost:8000/health
+curl http://localhost:8000/readyz   # 就绪（依赖故障 → 503）；/livez 为存活，恒 200
+curl http://localhost:8000/health   # 详细诊断视图（恒 200，含 services/ready/版本）
 ```
 
 ### Service Ports

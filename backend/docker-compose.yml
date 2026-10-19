@@ -43,7 +43,9 @@ services:
       # 容器内通过 host.docker.internal 访问宿主机（默认 Embedding 指向宿主机 Ollama）
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      # 就绪检查而非 /health（后者恒 200，等于永远健康——issue #223）。
+      # /readyz 在 DB/ES/知识库索引不可用时返回 503，urlopen 会抛 HTTPError。
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
