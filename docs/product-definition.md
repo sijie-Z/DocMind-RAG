@@ -392,7 +392,7 @@ Agent = 想得透（推理层）
 |---|---|
 | **代码完整性** | 核心流程全部实现，仅 1 处 TODO（工作流的 TTS 节点） |
 | **测试覆盖** | 冻结快照 2026-10-15：后端 2223 passed / 51 skipped，前端 861 passed；CI 实时数为准。全量套件（含 MySQL + Redis）在 Python 3.12 上运行 |
-| **Guest 体验** | guest 账号仅在部署方开启 `ENABLE_DEMO_ACCOUNT` 时创建（初始密码随机生成，见启动日志 / `DEMO_PASSWORD`）；Demo 数据可一键生成 |
+| **Guest 体验** | guest 账号仅在部署方开启 `ENABLE_DEMO_ACCOUNT` 时创建（初始密码随机生成，见启动日志 / `DEMO_PASSWORD`；开发端点 `/auth/ensure-demo` 另由 `ENABLE_ENSURE_DEMO_ENDPOINT` 控制）；Demo 数据可一键生成 |
 | **并发能力** | Kafka 异步处理文档上传，支持多用户 |
 | **多租户** | RBAC + Organization 隔离 |
 | **部署** | Docker Compose 一键部署，K8s 清单就绪 |

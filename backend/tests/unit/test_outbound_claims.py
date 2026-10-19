@@ -144,7 +144,10 @@ def test_product_definition_image_capability_matches_code():
         "docs/product-definition.md",
         ["不处理图片", "911 个后端测试", "111 个前端测试", "89 个测试文件", "guest 账号自动初始化"],
     )
-    _assert_present("docs/product-definition.md", ["OCR", "冻结快照", "ENABLE_DEMO_ACCOUNT"])
+    _assert_present(
+        "docs/product-definition.md",
+        ["OCR", "冻结快照", "2223", "861", "ENABLE_DEMO_ACCOUNT", "ENABLE_ENSURE_DEMO_ENDPOINT"],
+    )
     parser = _read("backend/app/services/document_parser.py")
     assert "'.png': self._parse_image" in parser, "图片 OCR 解析入口消失，请复核产品定义"
     _assert_present("docs/product-definition.md", ["不做图像理解"])
@@ -202,16 +205,17 @@ def test_readme_module_counts_match_code():
         for p in (_REPO_ROOT / "frontend" / "src" / "views").iterdir()
         if (p.is_dir() and p.name != "__tests__") or (p.is_file() and p.suffix == ".vue")
     ]
-    route_names = re.findall(
-        r"^\s*name: '", _read("frontend/src/router/index.ts"), re.MULTILINE
-    )
+    route_source = _read("frontend/src/router/index.ts")
+    route_records = re.findall(r"^\s*path: '", route_source, re.MULTILINE)
+    route_names = re.findall(r"^\s*name: '", route_source, re.MULTILINE)
     counts = {
         "endpoints": len(endpoints),
         "routers": router_source.count("include_router("),
         "services": len(services),
         "models": len(models),
         "views": len(views),
-        "routes": len(route_names),
+        "route_records": len(route_records),
+        "route_names": len(route_names),
     }
     assert counts == {
         "endpoints": 22,
@@ -219,8 +223,19 @@ def test_readme_module_counts_match_code():
         "services": 20,
         "models": 18,
         "views": 23,
-        "routes": 29,
+        "route_records": 34,
+        "route_names": 29,
     }, f"代码侧计数已漂移: {counts}；请同步 README 与本测试"
+
+    def _api_table_data_rows(rel: str, start: str) -> int:
+        block = _read(rel).split(start, 1)[1].split("Swagger", 1)[0]
+        rows = [line for line in block.splitlines() if line.startswith("|")]
+        return len(rows) - 2  # 去掉表头与分隔行
+
+    assert _api_table_data_rows("README.md", "### 🌐 API 层") == 22, "README API 表行数应为 22"
+    assert _api_table_data_rows("README_EN.md", "### 🌐 API Layer") == 22, (
+        "README_EN API 表行数应为 22"
+    )
 
     _assert_absent(
         "README.md",
@@ -230,6 +245,7 @@ def test_readme_module_counts_match_code():
             "19 个文件",
             "14 个服务",
             "14 个实体",
+            "18 个实体",
             "19 个模块，21 条路由",
         ],
     )
@@ -240,8 +256,9 @@ def test_readme_module_counts_match_code():
             "注册 22 个模块",
             "22 个文件",
             "20 个服务",
-            "18 个实体",
-            "23 个页面模块，29 条具名路由",
+            "18 个模型文件",
+            "23 个页面模块，34 条路由记录 / 29 条具名路由",
+            "34 条路由记录（29 条具名路由",
         ],
     )
     _assert_absent(
@@ -252,6 +269,7 @@ def test_readme_module_counts_match_code():
             "19 files",
             "14 services",
             "14 entities",
+            "18 entities",
             "19 modules, 21 routes",
         ],
     )
@@ -262,10 +280,26 @@ def test_readme_module_counts_match_code():
             "22 modules registered",
             "22 files",
             "20 services",
-            "18 entities",
-            "23 page modules, 29 named routes",
+            "18 model files",
+            "23 page modules, 34 route records / 29 named routes",
+            "34 route records (29 named routes",
         ],
     )
+
+
+def test_sse_event_count_matches_code():
+    """README/EN 的 SSE 事件数必须与 EventType 闭集一致（当前 20）。"""
+    events_source = _read("backend/app/agent/events.py")
+    match = re.search(r"EventType\s*=\s*Literal\[(.*?)\]", events_source, re.DOTALL)
+    assert match, "events.py 中未找到 EventType Literal 定义"
+    event_types = re.findall(r'"([^"]+)"', match.group(1))
+    assert len(event_types) == 20, (
+        f"SSE 事件闭集已变化（{len(event_types)} 个）；请同步 README/README_EN 与本测试"
+    )
+    _assert_absent("README.md", ["12 种 SSE 事件", "SSE 事件类型（12 种）"])
+    _assert_present("README.md", ["20 种 SSE 事件", "SSE 事件类型（20 种）"])
+    _assert_absent("README_EN.md", ["12 SSE event types", "SSE event types (12 types)"])
+    _assert_present("README_EN.md", ["20 SSE event types", "SSE event types (20 types)"])
 
 
 def test_readme_pending_hardening_is_not_stale():

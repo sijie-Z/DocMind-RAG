@@ -25,7 +25,7 @@ Core use cases:
 - 💬 **Intelligent Q&A** — RAG pipeline: keyword + vector hybrid search, reranking, LLM generation with SSE streaming.
 - 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 33 tools for complex multi-step tasks.
 - 🧩 **Workflow Editor** — Visual DAG design & debugging (Vue Flow). Configurable LLM models, prompts, and execution engines.
-- 📊 **Observability** — Prometheus metrics, Langfuse full-trace, 12 SSE event types, RunReport execution summaries.
+- 📊 **Observability** — Prometheus metrics, Langfuse full-trace, 20 SSE event types, RunReport execution summaries.
 - 🔐 **Multi-Tenant + RBAC** — Organization isolation, role-based permissions, JWT authentication.
 
 > Design decisions and experimental data belong in the research repo: [DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
@@ -113,7 +113,7 @@ User instruction
 | Context Engine | `context.py` | Token budget management, message window builder |
 | Config | `config.py` | AgentConfig (model/temperature/max steps/phase toggles) |
 
-**33 Built-In Tools** (`tools/`):
+**33 Built-In Tools** (`core_tools.py` 14 + `tools/` 19):
 
 | Category | Tool | Description |
 |----------|------|-------------|
@@ -219,7 +219,7 @@ Swagger docs: `http://localhost:8000/docs`
 
 ### 🖥 Frontend (`frontend/src/`)
 
-Vue 3 + TypeScript + Naive UI SPA, 29 named routes:
+Vue 3 + TypeScript + Naive UI SPA, 34 route records (29 named routes; the table below lists key pages):
 
 | Page | Route | Description |
 |------|-------|-------------|
@@ -400,10 +400,11 @@ DocMind/
 │   │   │   ├── exec_context.py      #   ExecutionContext
 │   │   │   ├── registry.py          #   Tool registry
 │   │   │   ├── memory_bridge.py     #   Memory bridge
-│   │   │   ├── events.py            #   SSE event types (12 types)
+│   │   │   ├── events.py            #   SSE event types (20 types)
 │   │   │   ├── message.py           #   Agent message bus
 │   │   │   ├── tracing.py           #   Execution trace records (dev-only: eval/offline; not written in production)
-│   │   │   ├── tools/               #   33 tool implementations
+│   │   │   ├── core_tools.py        #   14 base tools
+│   │   │   ├── tools/               #   19 extension tools (33 built-in tools total)
 │   │   │   │   ├── web_search.py    #   Web search
 │   │   │   │   ├── code_execution.py #  Python/SQL sandbox
 │   │   │   │   ├── data_analysis.py #   Data analysis
@@ -452,7 +453,7 @@ DocMind/
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
 │   │   ├── services/                # Business service layer (20 services)
-│   │   ├── models/                  # ORM models (18 entities)
+│   │   ├── models/                  # ORM models (18 model files)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer
 │   ├── tests/                       # 2223 backend tests (plus 861 frontend)
@@ -464,7 +465,7 @@ DocMind/
 │   └── docker-compose.yml           # 10-service orchestration
 ├── frontend/
 │   └── src/
-│       ├── views/                   # Pages (23 page modules, 29 named routes)
+│       ├── views/                   # Pages (23 page modules, 34 route records / 29 named routes)
 │       ├── components/              # Shared components
 │       ├── api/                     # Axios API clients
 │       ├── stores/                  # Pinia state stores

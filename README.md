@@ -25,7 +25,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
 - 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 33 个工具完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
-- 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、12 种 SSE 事件、RunReport 运行摘要
+- 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、20 种 SSE 事件、RunReport 运行摘要
 - 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
 
 > 关于架构决策和实验数据，请参见研究仓库：[DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
@@ -113,7 +113,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 上下文引擎 | `context.py` | 令牌预算管理，消息窗口构建 |
 | 配置 | `config.py` | AgentConfig（模型/温度/最大步骤/阶段开关） |
 
-**33 个内置工具** (`tools/`)：
+**33 个内置工具**（`core_tools.py` 14 个 + `tools/` 19 个）：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -219,7 +219,7 @@ Swagger 文档：`http://localhost:8000/docs`
 
 ### 🖥 前端 (`frontend/src/`)
 
-Vue 3 + TypeScript + Naive UI 单页应用，29 条具名路由：
+Vue 3 + TypeScript + Naive UI 单页应用，34 条路由记录（29 条具名路由；下表为主要页面）：
 
 | 页面 | 路由 | 功能 |
 |------|------|------|
@@ -370,10 +370,11 @@ DocMind/
 │   │   │   ├── exec_context.py      #   ExecutionContext
 │   │   │   ├── registry.py          #   工具注册表
 │   │   │   ├── memory_bridge.py     #   记忆桥接
-│   │   │   ├── events.py            #   SSE 事件类型（12 种）
+│   │   │   ├── events.py            #   SSE 事件类型（20 种）
 │   │   │   ├── message.py           #   Agent 间消息总线
 │   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
-│   │   │   ├── tools/               #   33 个工具实现
+│   │   │   ├── core_tools.py        #   基础工具（14 个）
+│   │   │   ├── tools/               #   扩展工具（19 个；合计 33 个内置工具）
 │   │   │   │   ├── web_search.py    #   网络搜索
 │   │   │   │   ├── code_execution.py #  Python/SQL 沙箱
 │   │   │   │   ├── data_analysis.py #   数据分析
@@ -422,7 +423,7 @@ DocMind/
 │   │   │   ├── context_window.py    #   令牌预算管理
 │   │   │   └── evaluator.py         #   质量评估
 │   │   ├── services/                # 业务服务层（20 个服务）
-│   │   ├── models/                  # ORM 模型（18 个实体）
+│   │   ├── models/                  # ORM 模型（18 个模型文件）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者
 │   ├── tests/                       # 2223 个后端测试（前端另有 861 个）
@@ -434,7 +435,7 @@ DocMind/
 │   └── docker-compose.yml           # 10 服务编排
 ├── frontend/
 │   └── src/
-│       ├── views/                   # 页面（23 个页面模块，29 条具名路由）
+│       ├── views/                   # 页面（23 个页面模块，34 条路由记录 / 29 条具名路由）
 │       ├── components/              # 共享组件
 │       ├── api/                     # Axios API 客户端
 │       ├── stores/                  # Pinia 状态管理
