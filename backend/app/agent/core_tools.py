@@ -1089,8 +1089,15 @@ async def get_conversation_history(
     session_id: str,
     limit: int = 20,
     user_id: int = 0,
+    organization_id: int | None = None,
     **_: Any,
 ) -> str:
+    """返回指定会话的消息历史。
+
+    口径（T4）：按会话的 ``organization_id`` 严格校验（历史 NULL 组织会话
+    属本人，仍可读）。本工具**不随 API 的超管旁路放宽**——与同目录
+    ``list_conversations`` 工具的严格组织口径保持一致。
+    """
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal
@@ -1106,6 +1113,13 @@ async def get_conversation_history(
             return f"Conversation {session_id} not found."
         if chat_session.user_id != user_id:
             return "Access denied: you do not own this conversation."
+        # T4：按 id 读取与列表工具同一组织口径——不得读取其他组织的会话；
+        # 历史 NULL 组织会话属本人，仍可读。
+        if (
+            chat_session.organization_id is not None
+            and chat_session.organization_id != organization_id
+        ):
+            return "Access denied: conversation belongs to another organization."
 
         stmt = (
             select(ChatMessage)
