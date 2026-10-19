@@ -651,6 +651,12 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         r"(\d+) 种 AgentEvent 类型",
         "SSE 事件数（文件索引）",
     ),
+    DocAnchor(
+        "sse_event_types",
+        "AGENT_ARCHITECTURE.md",
+        r"接收 (\d+) 种事件类型",
+        "SSE 事件数（协议说明）",
+    ),
     # ── 其它对外文档 ──
     DocAnchor(
         "registered_tools",
