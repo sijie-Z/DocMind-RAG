@@ -22,7 +22,8 @@ import { getKnowledgeBases, deleteKnowledgeBase, batchDeleteKnowledgeBases, rebu
 import { getWorkflows, deleteWorkflow } from '../workflow'
 import { getPrompts, deletePrompt, createPrompt } from '../prompt'
 import { getNotifications, getNotificationSummary, deleteNotification, batchDeleteNotifications } from '../notification'
-import { getMonitoringDashboard, getMonitoringAlerts } from '../monitoring'
+import { getMonitoringDashboard, getMonitoringAlerts, getMetrics, getNotificationStatus } from '../monitoring'
+import { getOrganizationSettingsAudit, updateOrganizationSettings } from '../organization'
 
 const silentHeader = (config: unknown) =>
   (config as { headers?: Record<string, unknown> } | undefined)?.headers?.['X-Silent-Error']
@@ -115,5 +116,34 @@ describe('监控页：内联错误态 + 重试 → 主数据请求静默', () =>
     await getMonitoringAlerts()
     expect(mocks.get.mock.calls[1][0]).toBe('/monitoring/alerts')
     expect(silentHeader(mocks.get.mock.calls[1][1])).toBe('1')
+  })
+
+  it('metrics 趋势 / 通知服务状态带 X-Silent-Error（失败由页面空态/降级徽标呈现）', async () => {
+    await getMetrics('application', '6h')
+    const [metricsUrl, metricsConfig] = mocks.get.mock.calls[0]
+    expect(metricsUrl).toBe('/monitoring/metrics/application')
+    expect(metricsConfig.params).toEqual({ time_range: '6h' })
+    expect(silentHeader(metricsConfig)).toBe('1')
+
+    await getNotificationStatus()
+    const [statusUrl, statusConfig] = mocks.get.mock.calls[1]
+    expect(statusUrl).toBe('/monitoring/notification/status')
+    expect(silentHeader(statusConfig)).toBe('1')
+  })
+})
+
+describe('组织设置页：保存/审计错误由页面自行呈现 → 请求静默', () => {
+  it('更新设置 PUT 带 X-Silent-Error（页面唯一 toast）', async () => {
+    await updateOrganizationSettings(7, { retrieval_top_k: 3 })
+    const [url, payload, config] = mocks.put.mock.calls[0]
+    expect(url).toBe('/organizations/7/settings')
+    expect(payload).toEqual({ retrieval_top_k: 3 })
+    expect(silentHeader(config)).toBe('1')
+  })
+
+  it('审计拉取 GET 带 X-Silent-Error（审计区内联降级提示）', async () => {
+    await getOrganizationSettingsAudit(7)
+    expect(mocks.get.mock.calls[0][0]).toBe('/organizations/7/settings/audit')
+    expect(silentHeader(mocks.get.mock.calls[0][1])).toBe('1')
   })
 })

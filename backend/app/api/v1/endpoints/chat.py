@@ -12,7 +12,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.log_safety import log_safe
-from app.core.security import get_current_user, get_user_org_id
+from app.core.security import get_current_user, get_user_org_id, require_organization
 from app.core.ws_auth import (
     WS_CLOSE_AUTH_FAILED,
     WS_REASON_USER_INVALID,
@@ -392,6 +392,20 @@ async def get_conversation(
         )
         messages = (await db.execute(msg_stmt)).scalars().all()
 
+        # 安全（T3）：历史附件回填只允许回读调用者**有效组织**内的文档。
+        # effective org 经 require_organization 解析（非超管与列表端点同口径；
+        # 无组织超管回源库中真实存在的组织，并兼容 token_organization_id）。
+        # 无组织上下文时 fail closed：只跳过附件回填，不影响历史消息本身
+        # （会话归属已由 user_id 校验）。
+        try:
+            effective_org_id: int | None = await require_organization(current_user, db)
+        except AuthorizationError:
+            effective_org_id = None
+            logger.warning(
+                "历史附件回填跳过：调用者无组织上下文（user=%s, conversation=%s）",
+                current_user.id, log_safe(conversation_id),
+            )
+
         formatted_messages = []
         for msg in messages:
             msg_dict = {
@@ -407,9 +421,17 @@ async def get_conversation(
                     if msg.message_type == MessageType.USER and "file_ids" in meta:
                         files_info = []
                         file_ids_list = [fid for fid in meta["file_ids"] if fid]
-                        if file_ids_list:
-                            docs_result = await session.execute(
-                                select(Document).where(Document.id.in_(file_ids_list))
+                        if file_ids_list and effective_org_id is not None:
+                            # T3：`session` 是 ChatSession ORM 对象，不是 AsyncSession
+                            # —— 此处必须用 `db`（此前 await session.execute 必抛
+                            # AttributeError，被下方逐消息 except 吞掉，附件回填恒失败）。
+                            # 同时按有效组织过滤：meta.file_ids 是客户端自填值，缺此
+                            # 条件可回读他人组织文档的文件名（跨租户泄露面）。
+                            docs_result = await db.execute(
+                                select(Document).where(
+                                    Document.id.in_(file_ids_list),
+                                    Document.organization_id == effective_org_id,
+                                )
                             )
                             doc_map = {str(doc.id): doc for doc in docs_result.scalars().all()}
                             for fid in meta["file_ids"]:
@@ -425,8 +447,16 @@ async def get_conversation(
                             msg_dict["sources"] = meta["sources"]
                         if "is_cached" in meta:
                             msg_dict["isCached"] = meta["is_cached"]
-                except Exception as parse_e:
-                    logger.warning(f"Error parsing message metadata: {parse_e}")
+                except Exception:
+                    # 单条消息的脏元数据（非 JSON、file_ids 形状异常等）不得拖垮
+                    # 整段历史 —— 保留逐消息隔离。但必须带堆栈留痕：T3 的
+                    # `session.execute` 编程错误正是被此前仅 warning 的宽 except
+                    # 静默吞掉的；logger.exception 让同类回归在日志里可见。
+                    logger.exception(
+                        "解析历史消息元数据失败（message=%s, conversation=%s），"
+                        "该条消息的附件/来源降级为空",
+                        log_safe(msg.id), log_safe(conversation_id),
+                    )
             formatted_messages.append(msg_dict)
 
         return {
@@ -444,6 +474,9 @@ async def get_conversation(
             },
         }
     except Exception as e:
+        # T3：此前这里静默返回失败文案、服务端零留痕。补上堆栈日志，
+        # 避免端点级的编程错误再次无声无息。
+        logger.exception("Get conversation error")
         return {"success": False, "message": f"获取失败: {str(e)}"}
 
 

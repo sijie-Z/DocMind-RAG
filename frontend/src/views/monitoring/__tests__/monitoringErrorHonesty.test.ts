@@ -23,7 +23,7 @@ import { createI18n } from 'vue-i18n'
 import naive from 'naive-ui'
 
 import MonitoringView from '../index.vue'
-import { getMonitoringDashboard, getMonitoringAlerts, getMetrics } from '@/api/monitoring'
+import { getMonitoringDashboard, getMonitoringAlerts, getMetrics, getNotificationStatus } from '@/api/monitoring'
 import { getAuditLogs } from '@/api/user'
 import zh from '@/locales/zh'
 
@@ -48,6 +48,7 @@ vi.mock('@/api/monitoring', () => ({
   getMonitoringDashboard: vi.fn(),
   getMonitoringAlerts: vi.fn(),
   getMetrics: vi.fn(),
+  getNotificationStatus: vi.fn(),
 }))
 
 vi.mock('@/api/user', async (importOriginal) => {
@@ -104,6 +105,9 @@ beforeEach(() => {
   vi.mocked(getMonitoringDashboard).mockResolvedValue(dashboardFixture() as never)
   vi.mocked(getMonitoringAlerts).mockResolvedValue({ data: { alerts: [], total: 0 } } as never)
   vi.mocked(getMetrics).mockResolvedValue({ data: { data: [] } } as never)
+  vi.mocked(getNotificationStatus).mockResolvedValue({
+    data: { status: 'active', enabled_channels: ['email'] },
+  } as never)
   vi.mocked(getAuditLogs).mockResolvedValue({ data: { success: true, data: { items: [], total: 0 } } } as never)
 })
 
@@ -269,5 +273,34 @@ describe('MonitoringView · 加载失败如实且单一表面（E14/D1）', () =
     await nextTick()
 
     expect(requestChart.setOption.mock.calls.length).toBe(callsAfterNew)
+  })
+})
+
+describe('MonitoringView · 通知服务状态降级（T6）', () => {
+  it('通知状态失败：本地降级徽标「通知服务: 未知」可感知，不弹全局 message', async () => {
+    vi.mocked(getNotificationStatus).mockRejectedValueOnce(
+      axiosError(500, 'Request failed with status code 500'),
+    )
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    // 子请求失败不遮主内容
+    expect(wrapper.text()).toContain('系统状态')
+    // 降级提示：可感知但不打扰（静默头由 API 单测钉住，页面亦不自弹 toast）
+    expect(wrapper.text()).toContain('通知服务')
+    expect(wrapper.text()).toContain('未知')
+    expect(messageSpies.error).not.toHaveBeenCalled()
+    expect(messageSpies.warning).not.toHaveBeenCalled()
+  })
+
+  it('通知状态成功：徽标展示真实状态（已启用），不显示未知', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('通知服务')
+    expect(wrapper.text()).toContain('已启用')
+    expect(wrapper.text()).not.toContain('未知')
   })
 })
