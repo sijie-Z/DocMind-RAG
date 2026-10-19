@@ -85,7 +85,7 @@
             </p>
           </div>
         </div>
-        <n-button text type="primary" size="small" @click="$router.push('/conversations')">
+        <n-button text type="primary" size="small" data-testid="home-view-all" @click="$router.push('/chat')">
           {{ t('dashboard.viewAll') }}
           <template #icon><n-icon size="14"><ChevronForwardOutline /></n-icon></template>
         </n-button>

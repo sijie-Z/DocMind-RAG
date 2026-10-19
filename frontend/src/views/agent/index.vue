@@ -3,6 +3,15 @@
     <!-- Header -->
     <div class="agent-header">
       <div class="header-left">
+        <!-- T9：首页/通知深链进入工作台后的清晰返回路径（会话列表在对话页侧栏） -->
+        <button
+          type="button"
+          class="header-btn"
+          data-testid="agent-back-to-chat"
+          @click="backToChat"
+        >
+          ← {{ t('agent.backToChat') }}
+        </button>
         <h1 class="header-title">{{ t('menu.agent') }}</h1>
         <span class="header-badge">PER 架构</span>
       </div>
@@ -386,6 +395,12 @@ const confirmDangerousAction = useConfirmDangerousAction()
 // 深链（?id=<task_id>，通知点击/刷新直达回放）：测试环境可能无 router——全部访问带守卫
 const route = useRoute()
 const router = useRouter()
+
+/** T9：工作台的清晰返回出口——回到对话页（会话列表在 ChatSidebar）。 */
+function backToChat() {
+  if (!router) return
+  void router.push('/chat')
+}
 
 // 当前进行中的 Agent chat 请求控制器（用于停止/卸载时中止）
 let currentChatController: AbortController | null = null
