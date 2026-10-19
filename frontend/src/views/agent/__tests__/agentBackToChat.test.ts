@@ -17,6 +17,9 @@ import { createPinia, setActivePinia } from 'pinia'
 
 import AgentView from '../index.vue'
 import zh from '@/locales/zh'
+import en from '@/locales/en'
+import ja from '@/locales/ja'
+import fr from '@/locales/fr'
 
 const { agentApiMock } = vi.hoisted(() => ({
   agentApiMock: {
@@ -100,5 +103,12 @@ describe('T9 · Agent 工作台返回对话出口', () => {
     await flushPromises()
 
     expect(router.currentRoute.value.path).toBe('/chat')
+  })
+
+  it('「返回对话」词条四语同步', () => {
+    expect(zh.agent.backToChat).toBe('返回对话')
+    expect(en.agent.backToChat).toBe('Back to Chat')
+    expect(ja.agent.backToChat).toBe('チャットに戻る')
+    expect(fr.agent.backToChat).toBe('Retour au chat')
   })
 })

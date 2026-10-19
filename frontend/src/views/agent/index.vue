@@ -10,7 +10,7 @@
           data-testid="agent-back-to-chat"
           @click="backToChat"
         >
-          ← {{ t('agent.backToChat') }}
+          <span aria-hidden="true">←</span> {{ t('agent.backToChat') }}
         </button>
         <h1 class="header-title">{{ t('menu.agent') }}</h1>
         <span class="header-badge">PER 架构</span>

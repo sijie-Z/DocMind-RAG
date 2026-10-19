@@ -3,6 +3,7 @@
   <section
     v-if="statsReady"
     data-testid="onboarding-checklist"
+    :aria-busy="statsLoading"
     class="bg-white dark:bg-gray-800 rounded-2xl border border-blue-100 dark:border-blue-900/40 shadow-sm overflow-hidden"
   >
     <!-- 折叠态（跳过之后）：保留进度与再次查看入口 -->
@@ -45,12 +46,16 @@
             {{ progressText }}
           </span>
           <!-- T8：父级统计刷新在途时局部 loading；块本身保持挂载，重试入口不消失 -->
-          <n-spin
+          <span
             v-if="statsLoading"
             data-testid="onboarding-refreshing"
-            :size="14"
-            :aria-label="t('common.loading')"
-          />
+            role="status"
+            aria-live="polite"
+            class="flex items-center gap-1 text-xs text-gray-400"
+          >
+            <n-spin :size="14" aria-hidden="true" />
+            {{ t('common.loading') }}
+          </span>
           <n-button text size="small" :loading="llmLoading" data-testid="onboarding-refresh" @click="refreshAll">
             {{ t('dashboard.onboarding.refresh') }}
           </n-button>
@@ -175,19 +180,27 @@ function expand() {
   }
 }
 
+/** 模型状态请求序号：并发重检时只认最新一次响应（旧响应成功/失败均丢弃） */
+let modelSeq = 0
+
 async function checkModel() {
+  const seq = ++modelSeq
   llmLoading.value = true
   llmError.value = false
   try {
     const res = await getLLMStatus()
+    if (seq !== modelSeq) return
     llmConfigured.value = res.data?.data?.configured === true
   } catch {
+    if (seq !== modelSeq) return
     // 网络/服务失败 ≠ 未配置：保持 null 并单独提示，避免误报「未检测到模型」
     llmConfigured.value = null
     llmError.value = true
   } finally {
-    llmChecked.value = true
-    llmLoading.value = false
+    if (seq === modelSeq) {
+      llmChecked.value = true
+      llmLoading.value = false
+    }
   }
 }
 

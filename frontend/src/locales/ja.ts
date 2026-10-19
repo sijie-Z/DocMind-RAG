@@ -609,7 +609,7 @@ export default {
     startNewChatDesc: 'AI アシスタントと対話し、ナレッジベースに基づく引用付きの回答を得られます',
     startUpload: 'ドキュメントをアップロード',
     startUploadDesc: 'PDF や Word などをアップロードすると、自動で解析・インデックス化されます',
-    startAgent: 'Agent ワークベンチを開く',
+    startAgent: 'Agent ワークスペースを開く',
     startAgentDesc: 'Agent に複数ステップのタスクを計画・実行させます',
     overview: 'データ概要',
     overviewDesc: '利用状況をひと目で確認',

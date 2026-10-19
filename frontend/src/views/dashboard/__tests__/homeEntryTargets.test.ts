@@ -123,21 +123,15 @@ describe('T9 · 首页入口落点校准', () => {
     const { wrapper, push } = mountView(501)
     await flushPromises()
 
-    // 测试环境未注册 naive-ui 全局组件，n-button 按自定义元素渲染，
-    // 故按标签定位头部第一个按钮（文案同时兜底断言）
     const recent = wrapper.find('[data-testid="home-recent-conversations"]')
     expect(recent.exists()).toBe(true)
-    const viewAll = recent.find('n-button')
+    const viewAll = recent.find('[data-testid="home-view-all"]')
     expect(viewAll.exists(), '缺少「查看全部」入口').toBe(true)
     expect(viewAll.text()).toContain(zh.dashboard.viewAll)
 
     await viewAll.trigger('click')
     expect(push).toHaveBeenCalledWith('/chat')
     expect(push).not.toHaveBeenCalledWith('/conversations')
-    expect(
-      recent.find('[data-testid="home-view-all"]').exists(),
-      '「查看全部」应有稳定测试锚点',
-    ).toBe(true)
   })
 
   it('Agent 入口文案如实（打开工作台，而非创建 Agent），跳转仍指向 /agent 工作台', async () => {
@@ -156,7 +150,7 @@ describe('T9 · 首页入口落点校准', () => {
   it('四语词条同步：不再声称「创建 Agent」，如实描述打开 Agent 工作台', () => {
     expect(zh.dashboard.startAgent).toBe('打开 Agent 工作台')
     expect(en.dashboard.startAgent).toBe('Open Agent Workspace')
-    expect(ja.dashboard.startAgent).toBe('Agent ワークベンチを開く')
+    expect(ja.dashboard.startAgent).toBe('Agent ワークスペースを開く')
     expect(fr.dashboard.startAgent).toBe("Ouvrir l'espace de travail Agent")
   })
 })
