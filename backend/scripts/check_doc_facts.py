@@ -65,6 +65,18 @@ REQUIRED_DOC_FACTS = frozenset(
     {"sse_event_types", "endpoint_modules", "frontend_routes", "registered_tools"}
 )
 
+# 这些文档必然存在于仓库中：其中登记的锚点必须至少命中一次，防止「改写措辞
+# 把数字删掉」让守护静默失效（其余文档的锚点缺失视为该文档没有陈述该数字）。
+REQUIRED_DOC_FILES = frozenset(
+    {
+        "README.md",
+        "README_EN.md",
+        "docs/architecture.html",
+        "docs/index.html",
+        "AGENT_ARCHITECTURE.md",
+    }
+)
+
 _HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "head", "options"})
 _AGENT_MODULE_PREFIX = "app.agent."
 _TOOLS_MODULE_PREFIX = "app.agent.tools"
@@ -525,6 +537,12 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         "tool count (intro)",
     ),
     DocAnchor(
+        "registered_tools",
+        "README_EN.md",
+        r"Tool Registry \((\d+)\)",
+        "tool count (architecture diagram)",
+    ),
+    DocAnchor(
         "registered_tools", "README_EN.md", r"\*\*(\d+) Built-In Tools\*\*", "tool count (catalog)"
     ),
     DocAnchor(
@@ -569,7 +587,26 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         r"endpoints/.*#\s*(\d+) 个路由模块",
         "端点模块数（目录树）",
     ),
+    DocAnchor("endpoint_modules", "docs/architecture.html", r"(\d+) API 模块", "端点模块数（徽标）"),
+    DocAnchor(
+        "endpoint_modules",
+        "docs/architecture.html",
+        r'<div class="big">(\d+)</div><div class="sl">后端 API 模块</div>',
+        "端点模块数（指标卡）",
+    ),
+    DocAnchor(
+        "endpoint_modules",
+        "docs/architecture.html",
+        r"FastAPI · (\d+) 模块",
+        "端点模块数（后端架构标题）",
+    ),
     # ── docs/index.html ──
+    DocAnchor(
+        "endpoint_modules",
+        "docs/index.html",
+        r'<div class="stat-num">(\d+)</div><div class="stat-lbl">API 模块</div>',
+        "端点模块数（统计卡）",
+    ),
     DocAnchor(
         "registered_tools", "docs/index.html", r"(\d+) 个 Agent 工具", "工具数（meta）"
     ),
@@ -602,6 +639,18 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         r"(\d+) 个自注册工具",
         "工具数（对比表）",
     ),
+    DocAnchor(
+        "sse_event_types",
+        "AGENT_ARCHITECTURE.md",
+        r"(\d+) 种 SSE 事件类型",
+        "SSE 事件数（特性表/协议/对比表）",
+    ),
+    DocAnchor(
+        "sse_event_types",
+        "AGENT_ARCHITECTURE.md",
+        r"(\d+) 种 AgentEvent 类型",
+        "SSE 事件数（文件索引）",
+    ),
     # ── 其它对外文档 ──
     DocAnchor(
         "registered_tools",
@@ -619,7 +668,13 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
 def check_doc_anchors(
     root: Path, facts: dict[str, int], anchors: tuple[DocAnchor, ...] | None = None
 ) -> list[str]:
-    """返回文档数字与 facts 不一致的清单；文档/锚点缺失不算失败（没有数字就没有漂移）。"""
+    """返回文档数字与 facts 不一致的清单。
+
+    缺失语义：
+    - 文档文件不存在 → 跳过（测试用的合成仓库）；
+    - 文档存在但锚点一次都没命中 → 只有 ``REQUIRED_DOC_FILES`` 中的必存文档
+      判失败（防止改写措辞把数字删掉后静默放行）；其余文档视为未陈述该数字。
+    """
     root = Path(root)
     problems: list[str] = []
     for anchor in DOC_ANCHORS if anchors is None else anchors:
@@ -630,7 +685,15 @@ def check_doc_anchors(
         if not path.is_file():
             continue
         text = _read_text(path)
-        for match in re.finditer(anchor.pattern, text, re.MULTILINE):
+        matches = list(re.finditer(anchor.pattern, text, re.MULTILINE))
+        if not matches:
+            if anchor.path in REQUIRED_DOC_FILES:
+                problems.append(
+                    f"{anchor.path}: 锚点缺失（{anchor.label}）"
+                    "——必存文档必须保留该数字锚点"
+                )
+            continue
+        for match in matches:
             raw = match.group(1)
             if not raw.isdigit():
                 raise DerivationError(f"{anchor.path}: 锚点 {anchor.label} 捕获到非数字 {raw!r}")

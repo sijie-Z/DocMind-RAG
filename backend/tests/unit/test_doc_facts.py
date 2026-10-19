@@ -91,7 +91,9 @@ def test_runtime_registry_matches_static_tool_derivation():
     derived_names = set(
         checker.derive_registered_tool_names(BACKEND_ROOT / "app" / "agent")
     )
-    runtime_names = set(tool_registry._tools)
+    # MCP 动态工具（mcp__<server>__<tool>）是运行时注册的外部工具，不在
+    # 「内置工具实现数」口径内；过滤后再与静态派生集合比对。
+    runtime_names = {name for name in tool_registry._tools if not name.startswith("mcp__")}
     assert derived_names == runtime_names, (
         "静态派生的工具名与运行时注册表不一致（静态派生漏算/多算模块）:"
         f"\n  static-only={sorted(derived_names - runtime_names)}"
@@ -237,6 +239,43 @@ def test_doc_anchor_mismatch_is_reported(tmp_path):
     assert "README.md" in problems[0] and "12" in problems[0] and "33" in problems[0]
 
 
+def test_required_doc_anchor_missing_is_reported(tmp_path):
+    """必存文档上的锚点被删除/改写时必须红，防「删掉数字」绕过守护。"""
+    (tmp_path / "README.md").write_text("可调用很多工具\n", encoding="utf-8")
+    problems = checker.check_doc_anchors(
+        tmp_path,
+        {
+            "sse_event_types": 20,
+            "endpoint_modules": 22,
+            "frontend_routes": 34,
+            "registered_tools": 33,
+        },
+    )
+    assert any("锚点缺失" in problem for problem in problems)
+
+
+def test_optional_doc_anchor_missing_is_allowed(tmp_path):
+    """非必存文档没有该数字时不算漂移（合成仓库只创建 README）。"""
+    (tmp_path / "README.md").write_text(
+        "文档数字见 docs/facts.json。\n"
+        "可调用 33 个工具。Tool Registry (33)。\n"
+        "**33 个内置工具**。tools/  # 33 个工具实现。\n"
+        "22 个端点模块。注册 22 个模块。端点实现（22 个文件）。\n"
+        "34 条路由。20 种 SSE 事件。SSE 事件类型（20 种）。\n",
+        encoding="utf-8",
+    )
+    problems = checker.check_doc_anchors(
+        tmp_path,
+        {
+            "sse_event_types": 20,
+            "endpoint_modules": 22,
+            "frontend_routes": 34,
+            "registered_tools": 33,
+        },
+    )
+    assert problems == []
+
+
 def _make_mini_repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     backend = root / "backend"
@@ -282,9 +321,15 @@ def _make_mini_repo(tmp_path: Path) -> Path:
     (root / "README.md").write_text(
         "文档数字见 docs/facts.json。\n"
         "可调用 2 个工具。\n"
+        "Tool Registry (2)\n"
+        "**2 个内置工具**\n"
+        "tools/               #   2 个工具实现\n"
         "共 1 个端点模块。\n"
+        "主路由（注册 1 个模块）\n"
+        "端点实现（1 个文件）\n"
         "共 1 条路由。\n"
-        "共 2 种 SSE 事件。\n",
+        "共 2 种 SSE 事件。\n"
+        "SSE 事件类型（2 种）\n",
         encoding="utf-8",
     )
     facts = {

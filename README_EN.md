@@ -220,7 +220,7 @@ Swagger docs: `http://localhost:8000/docs`
 
 ### 🖥 Frontend (`frontend/src/`)
 
-Vue 3 + TypeScript + Naive UI SPA, 34 routes:
+Vue 3 + TypeScript + Naive UI SPA, 34 routes (12 top-level + 22 page child routes):
 
 | Page | Route | Description |
 |------|-------|-------------|

@@ -220,7 +220,7 @@ Swagger 文档：`http://localhost:8000/docs`
 
 ### 🖥 前端 (`frontend/src/`)
 
-Vue 3 + TypeScript + Naive UI 单页应用，34 条路由：
+Vue 3 + TypeScript + Naive UI 单页应用，34 条路由（12 条顶层 + 22 条页面子路由）：
 
 | 页面 | 路由 | 功能 |
 |------|------|------|
