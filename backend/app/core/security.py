@@ -14,7 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.exceptions import AuthorizationError, NotFoundError
 from app.models.organization import Organization
-from app.models.rbac import PermissionType
+from app.models.rbac import (
+    ORG_ADMIN_ROLE_NAME,
+    PermissionType,
+    Role,
+    user_organization_role_association,
+)
 from app.models.user import User
 from app.services.auth_service import auth_service
 from app.services.permission_service import permission_service
@@ -138,6 +143,68 @@ async def get_document_for_user(
     return document
 
 
+def is_platform_admin(user: User) -> bool:
+    """平台级管理员：只认显式 ``is_superuser``。
+
+    W0-1（ADR-001 D3）：``users.role == "admin"`` **不再**映射到全局 SysAdmin，
+    也不得在任何端点里作为平台管理员判据。``PlatformAdminScope`` 抽象留给
+    C1；本波次先收敛到唯一事实来源 ``is_superuser``。
+    """
+    return bool(getattr(user, "is_superuser", False))
+
+
+def coerce_org_id(value: object) -> int | None:
+    """把 path/query/form/JSON 里的组织 ID 归一化为 int；非法值 → None。
+
+    非数字（例如把 ``document_id`` 误当组织参数的路径变量）一律 fail closed：
+    不会带着任意字符串去查组织角色关联。
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+async def is_org_admin(db: AsyncSession, user: User, organization_id: object) -> bool:
+    """调用者是否为 ``organization_id`` 的组织管理员（统一判定入口）。
+
+    - 平台超管旁路（``is_platform_admin``）；
+    - 其余用户只认 ``user_organization_role_association`` 中该组织的
+      ``OrgAdmin`` 角色；``users.role`` 不参与判定；
+    - ``organization_id`` 非法/缺失 → False（fail closed）。
+    """
+    if is_platform_admin(user):
+        return True
+    org_id = coerce_org_id(organization_id)
+    user_id = getattr(user, "id", None)
+    if org_id is None or user_id is None:
+        return False
+    stmt = (
+        select(user_organization_role_association.c.user_id)
+        .join(
+            Role,
+            Role.id == user_organization_role_association.c.role_id,
+        )
+        .where(
+            user_organization_role_association.c.user_id == user_id,
+            user_organization_role_association.c.organization_id == org_id,
+            Role.name == ORG_ADMIN_ROLE_NAME,
+        )
+    )
+    return (await db.execute(stmt)).first() is not None
+
+
+async def require_org_admin(
+    db: AsyncSession, user: User, organization_id: object
+) -> None:
+    """要求调用者是目标组织的管理员；否则 403（超管旁路）。"""
+    if not await is_org_admin(db, user, organization_id):
+        raise AuthorizationError("需要组织管理员权限")
+
+
 def permission_required(required_permissions: list[PermissionType], organization_id_param: str = None):
     async def check_permissions(
         request: Request,
@@ -153,25 +220,42 @@ def permission_required(required_permissions: list[PermissionType], organization
             return True
 
         # 2. 提取组织 ID
+        # W0-1：组织角色权限只对「该组织」生效——参数来自 path/query/form/JSON
+        # 时先归一化为 int；未显式给出组织上下文（如组织列表、用户管理）时，
+        # 回退到调用者已校验过的有效组织，让 per-org 角色在其本组织内生效。
+        # 非法值（如把 document_id 当组织参数）按「缺失」处理并同样回退到
+        # 调用者本组织——绝不把任意字符串当组织 ID 查库；资源归属仍由端点
+        # 自身的 get_document_for_user / _ensure_org_membership 二次校验。
         organization_id = None
         if organization_id_param:
-            organization_id = request.path_params.get(organization_id_param)
-            if organization_id is None:
+            raw_org = request.path_params.get(organization_id_param)
+            if raw_org is None:
                 if request.method == "GET":
-                    organization_id = request.query_params.get(organization_id_param)
+                    raw_org = request.query_params.get(organization_id_param)
                 elif request.method == "POST":
                     try:
                         form = await request.form()
-                        organization_id = form.get(organization_id_param)
+                        raw_org = form.get(organization_id_param)
                     except Exception:
                         pass
-                    if organization_id is None:
+                    if raw_org is None:
                         try:
                             payload = await request.json()
                             if isinstance(payload, dict):
-                                organization_id = payload.get(organization_id_param)
+                                raw_org = payload.get(organization_id_param)
                         except Exception:
                             pass
+            if raw_org is not None:
+                organization_id = coerce_org_id(raw_org)
+                if organization_id is None:
+                    # 显式提供但非法的组织 ID：fail closed，不当作“未提供”回退。
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="组织上下文非法",
+                    )
+
+        if organization_id is None:
+            organization_id = coerce_org_id(get_user_org_id(current_user))
 
         # 3. 获取用户权限集合
         # ✅ 修正：传递 user 对象，而不是 user.id

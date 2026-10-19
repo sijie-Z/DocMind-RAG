@@ -19,6 +19,8 @@
  * - 写失败不弹/弹多条 → 「写失败一条」用例红。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { useUserStore } from '@/stores/user'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
@@ -101,6 +103,17 @@ function mountView() {
 }
 
 beforeEach(() => {
+  // W0-1：删除用户按钮只对平台超管渲染；本文件覆盖删除失败路径，需要超管身份。
+  setActivePinia(createPinia())
+  useUserStore().userInfo = {
+    id: 1,
+    username: 'root',
+    email: 'root@example.com',
+    isAdmin: true,
+    is_superuser: true,
+    createdAt: '',
+    organizations: [],
+  } as never
   vi.clearAllMocks()
   mockedGetUsers.mockReset()
   mockedCreateUser.mockReset()

@@ -22,7 +22,11 @@ from app.core.config import settings
 from app.core.database import Base
 from app.models.organization import Organization
 from app.models.organization_settings import OrganizationSettings
-from app.models.rbac import PermissionType
+from app.models.rbac import (
+    PermissionType,
+    Role,
+    user_organization_role_association,
+)
 from app.models.user_audit import UserActivityLog
 
 ORGS = "/api/v1/organizations"
@@ -60,6 +64,19 @@ async def api():
                 Organization(id=1, name="org-a", owner_id=1),
                 Organization(id=2, name="org-b", owner_id=2),
             ]
+        )
+        await s.flush()
+        # W0-1：组织管理员 = per-org OrgAdmin 角色关联（users.role 不再参与鉴权）
+        org_admin_role = Role(
+            name="OrgAdmin", description="组织管理员", is_system_role=False
+        )
+        s.add(org_admin_role)
+        await s.flush()
+        await s.execute(
+            user_organization_role_association.insert(),
+            # 只授 org 1：跨组织 403 才能证明 per-org 管理员边界，
+            # 而不是被“同一个人也是 org 2 管理员”混淆（W0-1 评审 M2/M5）。
+            [{"user_id": 10, "organization_id": 1, "role_id": org_admin_role.id}],
         )
         await s.commit()
 

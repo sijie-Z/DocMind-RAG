@@ -340,7 +340,16 @@ class TestMeEndpoint:
         async def _override_user():
             return mock_user
 
+        # /auth/me 现在会查一次 per-org OrgAdmin 关联（W0-1）；本用例只测响应形状，
+        # 用不落库的 AsyncMock 会话即可（first() → None = 非组织管理员）。
+        mock_db = AsyncMock()
+        mock_db.execute.return_value.first.return_value = None
+
+        async def _override_db():
+            yield mock_db
+
         app.dependency_overrides[get_current_user] = _override_user
+        app.dependency_overrides[get_db] = _override_db
         try:
             r = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer valid_token"})
             assert r.status_code == 200
@@ -349,6 +358,7 @@ class TestMeEndpoint:
             assert data["data"]["username"] == "testuser"
         finally:
             app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
 
     def test_get_current_user_unauthorized(self, client: TestClient):
         """无 token 应返回 401。"""

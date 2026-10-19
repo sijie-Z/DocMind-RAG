@@ -180,6 +180,32 @@ jobs:
           python -m pip install -q pytest
           python -m pytest tests/unit/test_check_org_defaults.py -q --noconftest
 
+  # W0-1 / ADR-001 D3：禁止 users.role 参与管理员鉴权。
+  # 平台级只认显式 is_superuser（is_platform_admin），组织级只认
+  # user_organization_role_association 的 OrgAdmin 角色（is_org_admin）。
+  # 零依赖（仅标准库 AST），只扫 backend/app；请求体字段校验不在扫描范围。
+  rbac-admin-bypass:
+    name: RBAC Admin Bypass Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Scan for users.role admin authorization
+        working-directory: backend
+        run: python scripts/check_rbac_admin_bypass.py
+
+      - name: Checker discriminating-power tests
+        working-directory: backend
+        run: |
+          python -m pip install -q pytest
+          python -m pytest tests/unit/test_check_rbac_admin_bypass.py -q --noconftest
+
   # W0-8 事实不变量：文档里的关键数字（SSE 事件数 / 端点模块数 / 前端路由数 /
   # 工具数 / @router.* 装饰器数）必须等于源码派生值，且与入库的单一事实源
   # docs/facts.json 一致。脚本零依赖（仅标准库 ast/re/json），与其它 hygiene

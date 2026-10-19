@@ -19,6 +19,9 @@ class UserInfoResponse(BaseModel):
     role: str = "user"
     is_active: bool = True
     is_superuser: bool = False
+    # W0-1：当前组织内的 OrgAdmin 角色（per-org）。与 is_superuser 分开下发：
+    # 前端据此区分「平台管理页」与「组织管理页」；users.role 只是展示标签。
+    is_org_admin: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
     last_login_at: datetime | None = None

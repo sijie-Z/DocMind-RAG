@@ -9,6 +9,7 @@
  * 变异点：去掉 single-line / scroll-x，或描述列不设宽度 → 对应用例红。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
@@ -80,6 +81,7 @@ function mountView() {
 }
 
 beforeEach(() => {
+  setActivePinia(createPinia())
   vi.clearAllMocks()
   vi.mocked(getOrganizations).mockResolvedValue({ data: { data: { data: [ORG], total: 1 } } } as never)
   vi.mocked(getOrganizationTree).mockResolvedValue({ data: { data: [ORG] } } as never)

@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.notifications import create_notification
 from app.core.database import get_db
-from app.core.security import get_current_user, permission_required
+from app.core.security import (
+    get_current_user,
+    get_user_org_id,
+    is_platform_admin,
+    permission_required,
+)
 from app.exceptions import (
     AppError,
     AuthorizationError,
@@ -24,6 +29,7 @@ from app.models.user import User
 from app.schemas.organization import OrganizationCreate, OrganizationUpdate
 from app.services.audit_service import audit_service
 from app.services.organization_service import organization_service
+from app.services.permission_service import permission_service
 
 router = APIRouter()
 
@@ -31,9 +37,8 @@ router = APIRouter()
 def _ensure_org_membership(current_user: User, org_id: int) -> None:
     """S1 安全加固：非超管必须属于目标组织，否则抛出 403。
 
-    permission_required(organization_id_param=...) 只校验调用者是否持有权限，
-    而全局 role=admin 的用户持有整套 SysAdmin 权限（permission_service.py），
-    因此仅靠该依赖无法阻止跨组织访问；组织成员资格必须在这里显式校验。
+    W0-1（ADR-001 D3）：权限依赖按 per-org 角色判定（权限只在该组织内成立），
+    成员资格仍需在这里显式校验，二者缺一不可。
     """
     if getattr(current_user, "is_superuser", False):
         return
@@ -121,6 +126,13 @@ async def get_organizations(
         limit = page_size
 
         conditions = []
+        # W0-1：组织列表是跨租户信息面——平台管理员可看全部；组织管理员/
+        # 普通账号只能看到自己的组织（无组织 fail closed：403，不做任何兜底）。
+        if not is_platform_admin(current_user):
+            org_id = get_user_org_id(current_user)
+            if org_id is None:
+                raise AuthorizationError("当前账号无组织上下文，无法查看组织列表")
+            conditions.append(Organization.id == org_id)
         if search:
             conditions.append(Organization.name.contains(search))
 
@@ -159,6 +171,9 @@ async def get_organizations(
                 "page_size": page_size
             }
         }
+    except AppError:
+        # 放行：上面 fail-closed 的 403（以及其它业务异常）不得被降级为 500。
+        raise
     except Exception as e:
         raise AppError(f"获取组织列表失败: {str(e)}")
 
@@ -190,9 +205,19 @@ async def update_organization(
 ):
     """更新组织信息，包括拖拽引起的父级和排序变更"""
     _ensure_org_membership(current_user, org_id)
+    updates = org_in.model_dump(exclude_unset=True)
+    # W0-1：组织层级（parent_id）是跨租户结构写——组织管理员可改本组织
+    # 展示字段与排序，但不得把组织挂到其他组织下；层级调整仅平台管理员。
+    # 只在「值确实变化」时拒绝：前端编辑/拖拽会回传未变化的 parent_id。
+    if "parent_id" in updates and not is_platform_admin(current_user):
+        current_org = await db.get(Organization, org_id)
+        if current_org is None:
+            raise NotFoundError("组织不存在")
+        if updates["parent_id"] != current_org.parent_id:
+            raise AuthorizationError("仅平台管理员可调整组织层级")
     try:
         updated_org = await organization_service.update_organization(
-            db, org_id, org_in.model_dump(exclude_unset=True)
+            db, org_id, updates
         )
         if not updated_org:
             raise NotFoundError("组织不存在")
@@ -319,8 +344,22 @@ async def add_organization_member(
         raise NotFoundError("用户不存在")
 
     user_obj: Any = user
+    # W0-1（blocker）：非平台管理员不得跨组织拉人，也不得操作平台超管。
+    # 先判跨组织归属（对所有非本组织目标同一响应），再判超管，避免枚举 oracle。
+    if (
+        not current_user.is_superuser
+        and user_obj.organization_id not in (None, org_id)
+    ):
+        raise AuthorizationError("无权将其他组织的用户加入本组织")
+    if user_obj.is_superuser and not current_user.is_superuser:
+        raise AuthorizationError("无权将其他组织的用户加入本组织")
+
     old_org_id = user_obj.organization_id
     user_obj.organization_id = org_id
+    # W0-1：调离组织时撤销旧组织的 OrgAdmin 关联，避免遗留跨组织管理权。
+    if old_org_id is not None and old_org_id != org_id:
+        await permission_service.set_org_admin(db, user_id, old_org_id, False)
+        user_obj.role = "user"
     # A2 P0：成员表是 token 组织回退的权威依据——加入组织必须同步写入
     # user_organization 成员关系，否则成员被移出后旧 token 仍会被成员校验放行。
     await organization_service.add_user_to_organization(db, user_obj, org)
@@ -366,6 +405,12 @@ async def update_organization_member_role(
         raise NotFoundError("组织成员不存在")
 
     user_obj: Any = user
+    # W0-1：非平台管理员不得改动平台超管的组织角色。
+    if user_obj.is_superuser and not current_user.is_superuser:
+        raise AuthorizationError("无权操作平台管理员账号")
+    # W0-1：组织管理员权限的唯一权威是 org 角色关联；users.role 仅保留为
+    # 展示标签（鉴权路径不再读取，见 CI 门禁 check_rbac_admin_bypass.py）。
+    await permission_service.set_org_admin(db, user_id, org_id, role == "admin")
     user_obj.role = role
     await db.commit()
 
@@ -394,6 +439,12 @@ async def remove_organization_member(
         raise NotFoundError("组织成员不存在")
 
     user_obj: Any = user
+    # W0-1：非平台管理员不得移除平台超管（防组织管理员把超管踢出组织）。
+    if user_obj.is_superuser and not current_user.is_superuser:
+        raise AuthorizationError("无权操作平台管理员账号")
+    # W0-1：移除成员即失去该组织的管理身份；users.role 展示标签同步降级
+    # （权限判定只认角色关联，标签不参与鉴权）。
+    user_obj.role = "user"
     # A2（评审 m-4）：仅当用户的主组织正是被移除的组织时才清空主组织字段；
     # 用户若同时属于其他组织（主组织指向别处），不得被这次移除连带清空。
     if user_obj.organization_id == org_id:

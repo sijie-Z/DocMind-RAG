@@ -9,6 +9,8 @@
  * 变异点：去掉 dialog.warning 或不等确认直接删除 → 负相用例红（接口被调用）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { useUserStore } from '@/stores/user'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
@@ -123,6 +125,17 @@ function mountView() {
 }
 
 beforeEach(() => {
+  // W0-1：批量删除按钮只对平台超管渲染（组织管理员不可建删组织）。
+  setActivePinia(createPinia())
+  useUserStore().userInfo = {
+    id: 1,
+    username: 'root',
+    email: 'root@example.com',
+    isAdmin: true,
+    is_superuser: true,
+    createdAt: '',
+    organizations: [],
+  } as never
   vi.clearAllMocks()
   dialogState.decision = 'cancel'
   dialogState.calls.length = 0
