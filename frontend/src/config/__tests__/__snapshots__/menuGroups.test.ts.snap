@@ -84,16 +84,19 @@ exports[`sidebar menu domains > menu tree snapshot 1`] = `
       {
         "i18nKey": "menu.auditLogs",
         "icon": "document-text",
+        "platformOnly": true,
         "routeName": "AuditLogs",
       },
       {
         "i18nKey": "menu.monitoring",
         "icon": "pulse",
+        "platformOnly": true,
         "routeName": "Monitoring",
       },
       {
         "i18nKey": "menu.mcpServers",
         "icon": "server",
+        "platformOnly": true,
         "routeName": "McpServers",
       },
     ],

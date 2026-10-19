@@ -22,10 +22,16 @@ async def main():
         hashed = auth_service.hash_password(new_password)
         
         # 2. 尝试更新
+        # W0-1：平台管理员只认显式 is_superuser；users.role 仅作展示标签。
         result = await conn.execute(
             update(User)
             .where(User.username == "admin")
-            .values(hashed_password=hashed, is_active=True, role="admin")
+            .values(
+                hashed_password=hashed,
+                is_active=True,
+                role="user",
+                is_superuser=True,
+            )
         )
         
         if result.rowcount == 0:
@@ -39,7 +45,7 @@ async def main():
                     username="admin",
                     email="admin@example.com",
                     hashed_password=hashed,
-                    role="admin",
+                    role="user",
                     is_active=True,
                     is_superuser=True,
                     created_at=datetime.utcnow(),

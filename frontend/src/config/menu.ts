@@ -24,6 +24,8 @@ export interface MenuItemDef {
   i18nKey: string
   /** 图标名（layouts 层 MENU_ICONS 映射） */
   icon: string
+  /** 仅平台管理员（is_superuser）可见；组织管理员不可见（W0-1） */
+  platformOnly?: boolean
 }
 
 /** 侧边栏分组声明 */
@@ -86,9 +88,9 @@ export const SIDEBAR_MENU_GROUPS: MenuGroupDef[] = [
       { routeName: 'Users', i18nKey: 'menu.users', icon: 'people' },
       { routeName: 'Organizations', i18nKey: 'menu.organizations', icon: 'business' },
       { routeName: 'OrganizationSettings', i18nKey: 'menu.organizationSettings', icon: 'settings' },
-      { routeName: 'AuditLogs', i18nKey: 'menu.auditLogs', icon: 'document-text' },
-      { routeName: 'Monitoring', i18nKey: 'menu.monitoring', icon: 'pulse' },
-      { routeName: 'McpServers', i18nKey: 'menu.mcpServers', icon: 'server' },
+      { routeName: 'AuditLogs', i18nKey: 'menu.auditLogs', icon: 'document-text', platformOnly: true },
+      { routeName: 'Monitoring', i18nKey: 'menu.monitoring', icon: 'pulse', platformOnly: true },
+      { routeName: 'McpServers', i18nKey: 'menu.mcpServers', icon: 'server', platformOnly: true },
     ],
   },
 ]

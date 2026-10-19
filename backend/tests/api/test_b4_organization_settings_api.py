@@ -74,10 +74,9 @@ async def api():
         await s.flush()
         await s.execute(
             user_organization_role_association.insert(),
-            [
-                {"user_id": 10, "organization_id": 1, "role_id": org_admin_role.id},
-                {"user_id": 10, "organization_id": 2, "role_id": org_admin_role.id},
-            ],
+            # 只授 org 1：跨组织 403 才能证明 per-org 管理员边界，
+            # 而不是被“同一个人也是 org 2 管理员”混淆（W0-1 评审 M2/M5）。
+            [{"user_id": 10, "organization_id": 1, "role_id": org_admin_role.id}],
         )
         await s.commit()
 

@@ -552,7 +552,11 @@ const menuOptions = computed<MenuOption[]>(() => {
   return SIDEBAR_MENU_GROUPS
     .filter((group) => !group.adminOnly || userStore.isAdmin)
     .flatMap((group): MenuOption[] => {
-      const items = group.items.map(toMenuOption)
+      // W0-1：平台级管理页（监控/审计/MCP）只对 is_superuser 可见；
+      // 组织管理页（用户/组织/组织设置）对 isAdmin（平台或 OrgAdmin）可见。
+      const items = group.items
+        .filter((item) => !item.platformOnly || userStore.isSuperuser)
+        .map(toMenuOption)
       return group.groupI18nKey
         ? [{
             type: 'group',

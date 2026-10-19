@@ -194,9 +194,14 @@ async def update_organization(
 ):
     """更新组织信息，包括拖拽引起的父级和排序变更"""
     _ensure_org_membership(current_user, org_id)
+    updates = org_in.model_dump(exclude_unset=True)
+    # W0-1：组织层级（parent_id）是跨租户结构写——组织管理员可改本组织
+    # 展示字段与排序，但不得把组织挂到其他组织下；层级调整仅平台管理员。
+    if "parent_id" in updates and not is_platform_admin(current_user):
+        raise AuthorizationError("仅平台管理员可调整组织层级")
     try:
         updated_org = await organization_service.update_organization(
-            db, org_id, org_in.model_dump(exclude_unset=True)
+            db, org_id, updates
         )
         if not updated_org:
             raise NotFoundError("组织不存在")
@@ -323,6 +328,16 @@ async def add_organization_member(
         raise NotFoundError("用户不存在")
 
     user_obj: Any = user
+    # W0-1（blocker）：非平台管理员不得把平台超管拉入/移出组织，也不得跨组织
+    # 拉人——否则 OrgAdmin 可接管超管账号或对他租户成员做管理面写操作。
+    if user_obj.is_superuser and not current_user.is_superuser:
+        raise AuthorizationError("无权操作平台管理员账号")
+    if (
+        not current_user.is_superuser
+        and user_obj.organization_id not in (None, org_id)
+    ):
+        raise AuthorizationError("无权将其他组织的用户加入本组织")
+
     old_org_id = user_obj.organization_id
     user_obj.organization_id = org_id
     # W0-1：调离组织时撤销旧组织的 OrgAdmin 关联，避免遗留跨组织管理权。
@@ -374,6 +389,9 @@ async def update_organization_member_role(
         raise NotFoundError("组织成员不存在")
 
     user_obj: Any = user
+    # W0-1：非平台管理员不得改动平台超管的组织角色。
+    if user_obj.is_superuser and not current_user.is_superuser:
+        raise AuthorizationError("无权操作平台管理员账号")
     # W0-1：组织管理员权限的唯一权威是 org 角色关联；users.role 仅保留为
     # 展示标签（鉴权路径不再读取，见 CI 门禁 check_rbac_admin_bypass.py）。
     await permission_service.set_org_admin(db, user_id, org_id, role == "admin")
@@ -405,6 +423,12 @@ async def remove_organization_member(
         raise NotFoundError("组织成员不存在")
 
     user_obj: Any = user
+    # W0-1：非平台管理员不得移除平台超管（防组织管理员把超管踢出组织）。
+    if user_obj.is_superuser and not current_user.is_superuser:
+        raise AuthorizationError("无权操作平台管理员账号")
+    # W0-1：移除成员即失去该组织的管理身份；users.role 展示标签同步降级
+    # （权限判定只认角色关联，标签不参与鉴权）。
+    user_obj.role = "user"
     # A2（评审 m-4）：仅当用户的主组织正是被移除的组织时才清空主组织字段；
     # 用户若同时属于其他组织（主组织指向别处），不得被这次移除连带清空。
     if user_obj.organization_id == org_id:

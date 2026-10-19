@@ -28,7 +28,8 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401  # 注册全部表供 create_all
 from app.core.database import Base
 from app.models.manual import SystemManual
-from app.models.organization import Organization
+from app.models.organization import Organization, user_organization
+from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
 from app.models.rbac import (
     Permission,
@@ -84,6 +85,9 @@ def _user(uid: int, org: int | None, *, role: str = "user", superuser: bool = Fa
         username=f"user{uid}",
         email=f"user{uid}@example.com",
         hashed_password="x",
+        full_name=None,
+        preferences=None,
+        created_at=None,
         role=role,
         organization_id=org,
         is_active=True,
@@ -96,6 +100,7 @@ ORG_A_ADMIN = _user(10, 1)
 ORG_B_ADMIN = _user(20, 2)
 ORG_A_MEMBER = _user(11, 1)
 LEGACY_ROLE_ADMIN = _user(12, 1, role="admin")
+CROSS_ORG_ROLE = _user(30, 1)  # 主组织 A，仅持 B 的 OrgAdmin 关联
 
 
 async def _seed_roles(s) -> None:
@@ -149,8 +154,11 @@ async def _setup():
             # 仅 role='admin'：不得获得任何平台/组织管理员权力
             User(id=12, username="legacy-admin", email="legacy@example.com", hashed_password="x",
                  role="admin", organization_id=1, is_active=True, is_superuser=False),
+            # 主组织 A，但只有 B 的 OrgAdmin 关联（per-org 谓词判别靶）
+            User(id=30, username="cross-role", email="cross-role@example.com", hashed_password="x",
+                 role="user", organization_id=1, is_active=True, is_superuser=False),
             User(id=1, username="superuser", email="root@example.com", hashed_password="x",
-                 role="user", organization_id=None, is_active=True, is_superuser=True),
+                 role="user", organization_id=1, is_active=True, is_superuser=True),
         ])
         await s.flush()
         await s.execute(
@@ -158,7 +166,12 @@ async def _setup():
             [
                 {"user_id": 10, "organization_id": 1, "role_id": ROLE_IDS[ORG_ADMIN_ROLE]},
                 {"user_id": 20, "organization_id": 2, "role_id": ROLE_IDS[ORG_ADMIN_ROLE]},
+                # user 30 只是 B 组织的管理员 + 成员，主组织仍是 A
+                {"user_id": 30, "organization_id": 2, "role_id": ROLE_IDS[ORG_ADMIN_ROLE]},
             ],
+        )
+        await s.execute(
+            user_organization.insert().values(user_id=30, organization_id=2)
         )
 
         s.add_all([
@@ -185,6 +198,7 @@ async def api():
     from app.core.database import get_db
     from app.core.security import get_current_user
     from app.main import app
+    from app.services.auth_service import auth_service
 
     engine, factory = await _setup()
     state = SimpleNamespace(user=ORG_A_MEMBER)
@@ -198,6 +212,9 @@ async def api():
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[get_current_user] = _override_user
+    # /users/me 直接依赖 auth_service.get_current_user（绕过 core.security 包装），
+    # 同一测试替身必须同时覆盖这个依赖键。
+    app.dependency_overrides[auth_service.get_current_user] = _override_user
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
         yield SimpleNamespace(client=ac, state=state, factory=factory)
@@ -375,6 +392,16 @@ async def test_organization_settings_scope_matrix(api):
     assert r.status_code == 403, r.text
     r = await _call(api, ORG_A_ADMIN, "GET", f"{base}/2/settings/audit")
     assert r.status_code == 403, r.text
+    # 跨组织写入不得落库（防御「先写后抛」）
+    async with api.factory() as s:
+        row = (
+            await s.execute(
+                select(OrganizationSettings).where(
+                    OrganizationSettings.organization_id == 2
+                )
+            )
+        ).scalar_one_or_none()
+        assert row is None, "跨组织设置写入不得落库"
 
     # 超管：可写任意组织
     r = await _call(api, SUPERUSER, "PUT", f"{base}/2/settings", json={"retrieval_top_k": 9})
@@ -460,6 +487,163 @@ async def test_member_role_assignment_syncs_org_admin_association(api, monkeypat
     r = await _call(api, SUPERUSER, "PUT", "/api/v1/users/11/role", params={"role": "user"})
     assert r.status_code == 200, r.text
     assert not await _has_assoc(11, 1)
+
+
+@pytest.mark.asyncio
+async def test_org_admin_cannot_take_over_platform_accounts(api, monkeypatch):
+    """blocker 回归：组织管理员不得操作同组织超管（改密/停用/拉组织/改角色）。"""
+    from app.services.audit_service import audit_service
+
+    async def _audit(**kwargs):
+        return None
+
+    monkeypatch.setattr(audit_service, "log_activity", _audit)
+
+    # 同组织超管（DB 中 id=1 属于 org 1）
+    cases = [
+        ("PUT", "/api/v1/users/1/password", {"new_password": "HackedPass123!"}),
+        ("PUT", "/api/v1/users/1", {"status": "inactive"}),
+        ("PUT", "/api/v1/users/1/role", None),
+        ("POST", "/api/v1/organizations/1/members/1", None),
+        ("DELETE", "/api/v1/organizations/1/members/1", None),
+        ("PATCH", "/api/v1/organizations/1/members/1/role", None),
+    ]
+    for method, url, payload in cases:
+        params = {"role": "user"} if url.endswith("/role") else None
+        r = await _call(api, ORG_A_ADMIN, method, url, json=payload, params=params)
+        assert r.status_code == 403, f"{method} {url} 应 403，实际 {r.status_code}: {r.text}"
+
+    # 跨组织拉人：OrgAdmin A 不得把 B 组织成员拉进 A（跨租户管理面写）
+    r = await _call(api, ORG_A_ADMIN, "POST", "/api/v1/organizations/1/members/20")
+    assert r.status_code == 403, r.text
+
+    # 正向对照：组织管理员仍可重置本组织普通成员密码（未过度收紧）
+    r = await _call(
+        api, ORG_A_ADMIN, "PUT",
+        "/api/v1/users/11/password", json={"new_password": "NewPass123!"},
+    )
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.asyncio
+async def test_admin_flags_exposed_for_frontend_gating(api):
+    """登录/me 下发 is_superuser 与 per-org is_org_admin，前端据此分页。"""
+    r = await _call(api, ORG_A_ADMIN, "GET", "/api/v1/users/me")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["is_superuser"] is False
+    assert body["is_org_admin"] is True
+
+    r = await _call(api, ORG_A_MEMBER, "GET", "/api/v1/users/me")
+    body = r.json()
+    assert body["is_superuser"] is False
+    assert body["is_org_admin"] is False
+
+    # 仅 role='admin' 标签：两个标志都不成立
+    r = await _call(api, LEGACY_ROLE_ADMIN, "GET", "/api/v1/auth/me")
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["is_superuser"] is False
+    assert data["is_org_admin"] is False
+
+    r = await _call(api, ORG_A_ADMIN, "GET", "/api/v1/auth/me")
+    data = r.json()["data"]
+    assert data["is_superuser"] is False
+    assert data["is_org_admin"] is True
+
+
+@pytest.mark.asyncio
+async def test_org_admin_cannot_reparent_organization(api):
+    """组织层级（parent_id）是平台级结构写，组织管理员只能改展示/排序字段。"""
+    r = await _call(
+        api, ORG_A_ADMIN, "PUT", "/api/v1/organizations/1",
+        json={"parent_id": 2},
+    )
+    assert r.status_code == 403, r.text
+
+    r = await _call(
+        api, ORG_A_ADMIN, "PUT", "/api/v1/organizations/1",
+        json={"description": "renamed-by-org-admin"},
+    )
+    assert r.status_code == 200, r.text
+
+    r = await _call(
+        api, SUPERUSER, "PUT", "/api/v1/organizations/1",
+        json={"parent_id": None},
+    )
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.asyncio
+async def test_per_org_admin_predicate_is_not_global(api):
+    """per-org 谓词判别：OrgAdmin 关联只对关联的组织生效，主组织不自动同等。
+
+    user 30 主组织 A、仅持 B 的 OrgAdmin 关联且是 B 成员：
+    - A 的组织设置写 → 403（A 没有 OrgAdmin 权限）；
+    - B 的组织设置写 → 200（per-org 角色 + 成员资格）；
+    - B 管理员对称：B 工作流全量可见，A 设置写 403。
+    """
+    settings = "/api/v1/organizations"
+
+    r = await _call(api, CROSS_ORG_ROLE, "PUT", f"{settings}/1/settings",
+                    json={"retrieval_top_k": 5})
+    assert r.status_code == 403, r.text
+    r = await _call(api, CROSS_ORG_ROLE, "PUT", f"{settings}/2/settings",
+                    json={"retrieval_top_k": 5})
+    assert r.status_code == 200, r.text
+
+    r = await _call(api, ORG_B_ADMIN, "GET", "/api/v1/workflows/")
+    assert {item["id"] for item in r.json()["data"]["items"]} == {303}
+    r = await _call(api, ORG_B_ADMIN, "PUT", f"{settings}/1/settings",
+                    json={"retrieval_top_k": 5})
+    assert r.status_code == 403, r.text
+
+
+@pytest.mark.asyncio
+async def test_org_admin_permission_dependency_grants_own_org_actions(api, monkeypatch):
+    """permission_required 的组织角色查询 + 本组织回退确有行为价值（防空转）。
+
+    UPDATE_ORGANIZATION / MANAGE_USER_ROLES 只存在于 OrgAdmin 角色（User 系统
+    角色没有），因此这两个 200 必须走组织角色权限；平台健康权限不在集合内 → 403。
+    """
+    from app.services.audit_service import audit_service
+
+    async def _audit(**kwargs):
+        return None
+
+    monkeypatch.setattr(audit_service, "log_activity", _audit)
+
+    r = await _call(
+        api, ORG_A_ADMIN, "PATCH",
+        "/api/v1/organizations/1/members/11/role", params={"role": "user"},
+    )
+    assert r.status_code == 200, r.text
+
+    r = await _call(
+        api, ORG_A_ADMIN, "PUT",
+        "/api/v1/users/11/password", json={"new_password": "NewPass123!"},
+    )
+    assert r.status_code == 200, r.text
+
+    r = await _call(api, ORG_A_ADMIN, "GET", "/api/v1/monitoring/stats")
+    assert r.status_code == 403, r.text
+
+
+@pytest.mark.asyncio
+async def test_org_directory_scoped_for_non_platform_admins(api):
+    """组织列表/树是跨租户信息面：组织管理员只看自己，平台超管看全部。"""
+    r = await _call(api, ORG_A_ADMIN, "GET", "/api/v1/organizations/")
+    assert r.status_code == 200, r.text
+    assert {org["id"] for org in r.json()["data"]["data"]} == {1}
+
+    r = await _call(api, ORG_A_ADMIN, "GET", "/api/v1/organizations/tree")
+    assert r.status_code == 200, r.text
+    assert {node["id"] for node in r.json()["data"]} == {1}
+
+    r = await _call(api, SUPERUSER, "GET", "/api/v1/organizations/")
+    assert {org["id"] for org in r.json()["data"]["data"]} == {1, 2}
+    r = await _call(api, SUPERUSER, "GET", "/api/v1/organizations/tree")
+    assert {node["id"] for node in r.json()["data"]} == {1, 2}
 
 
 @pytest.mark.asyncio

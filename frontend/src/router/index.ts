@@ -201,7 +201,8 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'menu.auditLogs',
           icon: 'document-text',
-          requiresAdmin: true
+          requiresAdmin: true,
+          requiresPlatformAdmin: true
         }
       },
       {
@@ -305,7 +306,8 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'menu.monitoring',
           icon: 'activity',
-          requiresAdmin: true
+          requiresAdmin: true,
+          requiresPlatformAdmin: true
         }
       },
       {
@@ -315,7 +317,8 @@ export const routes: RouteRecordRaw[] = [
         meta: {
           title: 'menu.mcpServers',
           icon: 'server',
-          requiresAdmin: true
+          requiresAdmin: true,
+          requiresPlatformAdmin: true
         }
       }
     ]
@@ -371,6 +374,9 @@ router.beforeEach(async (to, from, next) => {
   let token = getToken()
   const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
   const requiresAdmin = to.matched.some((record) => record.meta.requiresAdmin)
+  // W0-1：平台级页面（监控/审计/MCP）只对显式 is_superuser 开放；
+  // 组织管理员（is_org_admin）只能进入组织管理页。
+  const requiresPlatformAdmin = to.matched.some((record) => record.meta.requiresPlatformAdmin)
 
   // token 本地判定过期 → 先尝试用 refresh_token 静默续期（与 401 拦截器共享单飞队列），
   // 续期成功继续原导航（刷新页面不再丢登录态）；续期失败才清号。
@@ -404,7 +410,7 @@ router.beforeEach(async (to, from, next) => {
     } else {
       // 首次进入需鉴权页面时，验证 token 是否仍然有效
       // admin 路由：若上次校验已超过 5 分钟，重新拉取用户信息刷新角色
-      const adminSessionStale = requiresAdmin && sessionValidated && Date.now() - lastValidatedAt > ADMIN_REVALIDATE_INTERVAL
+      const adminSessionStale = (requiresAdmin || requiresPlatformAdmin) && sessionValidated && Date.now() - lastValidatedAt > ADMIN_REVALIDATE_INTERVAL
       if (!sessionValidated || !userStore.userInfo?.id || adminSessionStale) {
         if (userStore.userInfo?.id) {
           // 首屏优先：本地已有缓存的用户信息时先放行渲染（Layout 尽早挂载），
@@ -451,7 +457,9 @@ router.beforeEach(async (to, from, next) => {
         next({ name: 'Login', query: { redirect: to.fullPath } })
         return
       }
-      if (requiresAdmin && !userStore.isAdmin) {
+      if (requiresPlatformAdmin && !userStore.isSuperuser) {
+        next({ name: 'Dashboard' })
+      } else if (requiresAdmin && !userStore.isAdmin) {
         next({ name: 'Dashboard' })
       } else {
         next()

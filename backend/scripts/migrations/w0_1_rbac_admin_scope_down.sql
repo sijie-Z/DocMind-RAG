@@ -13,6 +13,9 @@
 -- 用法：mysql ... < w0_1_rbac_admin_scope_down.sql
 -- ============================================================================
 
+-- MySQL/SQLite 共同支持的事务起始语法（SQLite 不接受 START TRANSACTION）。
+BEGIN;
+
 -- 1. 恢复平台管理员位
 UPDATE users
 SET is_superuser = (
@@ -43,6 +46,8 @@ WHERE EXISTS (
       AND r.id = user_organization_role_association.role_id
       AND r.name = 'OrgAdmin'
 );
+
+COMMIT;
 
 -- 4. 回滚后审计输出
 SELECT user_id, username, old_role, old_is_superuser, organization_id,

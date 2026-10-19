@@ -223,7 +223,9 @@ def permission_required(required_permissions: list[PermissionType], organization
         # W0-1：组织角色权限只对「该组织」生效——参数来自 path/query/form/JSON
         # 时先归一化为 int；未显式给出组织上下文（如组织列表、用户管理）时，
         # 回退到调用者已校验过的有效组织，让 per-org 角色在其本组织内生效。
-        # 非法值（如把 document_id 当组织参数）不回退到任何字符串查询。
+        # 非法值（如把 document_id 当组织参数）按「缺失」处理并同样回退到
+        # 调用者本组织——绝不把任意字符串当组织 ID 查库；资源归属仍由端点
+        # 自身的 get_document_for_user / _ensure_org_membership 二次校验。
         organization_id = None
         if organization_id_param:
             raw_org = request.path_params.get(organization_id_param)
@@ -243,7 +245,14 @@ def permission_required(required_permissions: list[PermissionType], organization
                                 raw_org = payload.get(organization_id_param)
                         except Exception:
                             pass
-            organization_id = coerce_org_id(raw_org)
+            if raw_org is not None:
+                organization_id = coerce_org_id(raw_org)
+                if organization_id is None:
+                    # 显式提供但非法的组织 ID：fail closed，不当作“未提供”回退。
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="组织上下文非法",
+                    )
 
         if organization_id is None:
             organization_id = coerce_org_id(get_user_org_id(current_user))

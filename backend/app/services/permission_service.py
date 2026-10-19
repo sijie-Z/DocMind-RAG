@@ -103,7 +103,11 @@ class PermissionService:
             ).where(
                 and_(
                     user_organization_role_association.c.user_id == user.id,
-                    user_organization_role_association.c.organization_id == organization_id
+                    user_organization_role_association.c.organization_id == organization_id,
+                    # W0-1：系统级角色（SysAdmin/User）只能作为全局角色解析，
+                    # 绝不允许通过组织角色关联表在某个组织内复活（否则等价于
+                    # 恢复全局管理员）。
+                    Role.is_system_role.is_(False),
                 )
             ).options(selectinload(Role.permissions))
 

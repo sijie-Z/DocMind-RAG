@@ -403,7 +403,7 @@ async def clear_graph_rag(
         raise AppError(f"清空知识图谱失败: {str(e)}")
 
 
-@router.post("/rebuild/{document_id}", response_model=KnowledgeBuildResponse, dependencies=[Depends(permission_required([PermissionType.REBUILD_DOCUMENT_INDEX], organization_id_param='document_id'))])
+@router.post("/rebuild/{document_id}", response_model=KnowledgeBuildResponse, dependencies=[Depends(permission_required([PermissionType.REBUILD_DOCUMENT_INDEX]))])
 async def rebuild_document_knowledge(
     document_id: str,
     current_user: User = Depends(get_current_user),
@@ -706,7 +706,7 @@ async def get_document_job_events(
     }
 
 
-@router.delete("/document/{document_id}", response_model=dict, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_DELETE], organization_id_param='document_id'))])
+@router.delete("/document/{document_id}", response_model=dict, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_DELETE]))])
 async def delete_knowledge_document(
     document_id: str,
     current_user: User = Depends(get_current_user),

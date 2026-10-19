@@ -104,7 +104,7 @@ def build_suggested_tags(content: str) -> list[str]:
             tags.append(tag)
     return tags[:6]
 
-@router.post("/upload", response_model=dict, status_code=status.HTTP_201_CREATED, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_UPLOAD], organization_id_param='organization_id'))])
+@router.post("/upload", response_model=dict, status_code=status.HTTP_201_CREATED, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_UPLOAD]))])
 async def upload_document(
     file: UploadFile = File(...),
     title: str | None = Form(None),

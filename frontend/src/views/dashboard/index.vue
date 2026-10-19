@@ -1,6 +1,6 @@
 <template>
   <div>
-    <AdminDashboard v-if="userStore.isAdmin" />
+    <AdminDashboard v-if="userStore.isSuperuser" />
     <UserDashboard v-else />
   </div>
 </template>

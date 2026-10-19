@@ -60,6 +60,34 @@ def test_identity_role_checks_are_red(tmp_path):
     assert checker.main(["--root", str(app_dir)]) == 1
 
 
+def test_method_chain_alias_and_constant_variants_are_red(tmp_path):
+    """门禁必须覆盖链式字符串方法、别名传播、常量折叠与 SQLAlchemy in_。"""
+    app_dir = _write(
+        tmp_path,
+        "ADMIN = 'Admin'\n"
+        "ADMIN_ROLES = {'admin', 'superuser'}\n"
+        "def a(u):\n"
+        "    return u.role.casefold() == 'admin'\n"
+        "def b(u):\n"
+        "    return (u.role or '').strip().lower() == ADMIN\n"
+        "def c(u):\n"
+        "    alias = u.role\n"
+        "    return alias == 'admin'\n"
+        "def d(role_expr):\n"
+        "    return role_expr.role in ADMIN_ROLES\n"
+        "def e(User):\n"
+        "    return User.role.in_(['admin'])\n"
+        "def f(u):\n"
+        "    return u.role.startswith('admin')\n"
+        "def g(u):\n"
+        "    return 'admin' in (u.role,)\n",
+    )
+    violations = checker.find_violations(app_dir)
+    # a-g 各一处；ADMIN_ROLES 赋值不单独计违规
+    assert len(violations) == 7, violations
+    assert all("role" in message for _, _, _, message in violations)
+
+
 def test_input_field_validation_is_green(tmp_path):
     app_dir = _write(
         tmp_path,
@@ -75,6 +103,13 @@ def test_input_field_validation_is_green(tmp_path):
     )
     assert checker.find_violations(app_dir) == []
     assert checker.main(["--root", str(app_dir)]) == 0
+
+
+def test_syntax_error_fails_closed(tmp_path):
+    app_dir = _write(tmp_path, "def broken(:\n    pass\n")
+    violations = checker.find_violations(app_dir)
+    assert violations and "无法解析" in violations[0][3]
+    assert checker.main(["--root", str(app_dir)]) == 1
 
 
 def test_comments_and_docstrings_are_green(tmp_path):
