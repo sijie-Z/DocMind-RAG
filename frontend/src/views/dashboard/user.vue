@@ -119,7 +119,7 @@
               v-for="conv in recentConversations"
               :key="conv.id"
               class="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-all duration-150 group"
-              @click="$router.push(`/chat?conversation=${conv.id}`)"
+              @click="$router.push(`/chat?conversation_id=${conv.id}`)"
             >
               <div class="flex-1 min-w-0 flex items-center gap-3">
                 <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-slate-200 dark:group-hover:bg-slate-800 transition-colors">

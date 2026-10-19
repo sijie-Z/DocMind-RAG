@@ -653,6 +653,7 @@
     "orgSettings.auditColumns.time",
     "orgSettings.auditColumns.user",
     "orgSettings.auditEmpty",
+    "orgSettings.auditLoadFailed",
     "orgSettings.auditTitle",
     "orgSettings.columns.restart",
     "orgSettings.columns.setting",

@@ -145,19 +145,31 @@ export interface OrganizationSettingsAuditItem {
 
 export const getOrganizationSettings = async (
   id: number,
+  options?: { silent?: boolean },
 ): Promise<AxiosResponse<OrganizationSettingsResponse>> => {
-  return request.get(`/organizations/${id}/settings`)
+  return request.get(
+    `/organizations/${id}/settings`,
+    options?.silent ? { headers: { 'X-Silent-Error': '1' } } : undefined,
+  )
 }
 
 export const updateOrganizationSettings = async (
   id: number,
   data: OrganizationSettingsUpdatePayload,
 ): Promise<AxiosResponse<OrganizationSettingsResponse>> => {
-  return request.put(`/organizations/${id}/settings`, data)
+  return request.put(`/organizations/${id}/settings`, data, {
+    headers: {
+      'X-Silent-Error': '1',
+    },
+  })
 }
 
 export const getOrganizationSettingsAudit = async (
   id: number,
 ): Promise<AxiosResponse<{ items: OrganizationSettingsAuditItem[] }>> => {
-  return request.get(`/organizations/${id}/settings/audit`)
+  return request.get(`/organizations/${id}/settings/audit`, {
+    headers: {
+      'X-Silent-Error': '1',
+    },
+  })
 }
