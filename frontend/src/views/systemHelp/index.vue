@@ -109,7 +109,7 @@ import {
 const { t } = useI18n()
 
 const quickStart = [
-  { title: '上传文档', desc: '前往知识库上传 PDF、Word、Excel 或文本文件，系统会自动解析并建立索引。' },
+  { title: '上传文档', desc: '前往知识库上传 PDF、Word、Excel、文本或图片文件，系统会自动解析并建立索引。' },
   { title: '提问', desc: '打开智能对话，用自然语言提问。系统会搜索您的知识库并生成带引用的答案。' },
   { title: '使用 Agent 模式', desc: '复杂问题请使用 Agent 模式。它会逐步推理、调用多个工具，组织全面的答案。' },
   { title: '检查与改进', desc: '查看来源引用，给答案反馈，上传更多文档以提升知识覆盖范围。' },
@@ -119,14 +119,14 @@ const features = [
   { icon: 'SearchOutline', bg: 'bg-emerald-50 dark:bg-emerald-900/30', title: '混合搜索', desc: '关键词 + 向量搜索 + RRF 融合，最大化召回精度。' },
   { icon: 'HardwareChipOutline', bg: 'bg-blue-50 dark:bg-blue-900/30', title: 'Agent 推理', desc: '多步工具调用循环，规划、搜索、验证答案。' },
   { icon: 'LinkOutline', bg: 'bg-blue-50 dark:bg-blue-900/30', title: '来源引用', desc: '每个答案都包含 [n] 引用标记，链接回源文档。' },
-  { icon: 'DocumentsOutline', bg: 'bg-orange-50 dark:bg-orange-900/30', title: '多格式支持', desc: '支持 PDF、Word、Excel、PowerPoint、纯文本等格式。' },
+  { icon: 'DocumentsOutline', bg: 'bg-orange-50 dark:bg-orange-900/30', title: '多格式支持', desc: '支持 PDF、Word（.docx）、Excel（.xls/.xlsx）、TXT、Markdown、CSV，以及 PNG/JPG/JPEG/WEBP/BMP 图片 OCR 识别。' },
 ]
 
 const faqs = [
   { name: 'q1', q: '为什么答案和我的文档不匹配？', a: '请确保问题足够具体且文档包含相关内容。检查知识库页面确认文档状态为"已索引"。尝试用文档中的关键词重新组织问题。' },
-  { name: 'q2', q: '为什么文档一直处于"解析中"状态？', a: '大文件解析可能需要更长时间，请等待几分钟后刷新。如果状态显示"失败"，请在知识库中点击"重试向量化"按钮。' },
+  { name: 'q2', q: '为什么文档一直处于"解析中"状态？', a: '大文件解析可能需要更长时间，请等待后点击知识库列表上方的刷新按钮。如果状态显示"失败"，将鼠标悬停在该文档的刷新图标上并点击（提示"重新解析"），或点击工具栏的"最近失败文档重建"；系统会重新提交解析与向量化任务。仍失败时，点击红色错误提示条查看解析错误详情。' },
   { name: 'q3', q: 'Agent 模式和普通对话有什么区别？', a: 'Agent 模式使用自主推理循环+工具调用。它可以多次搜索、分析文档、逐步组织答案。普通对话只做单次检索+生成。' },
-  { name: 'q4', q: '演示账号如何使用？', a: '演示账号 (guest / 123456) 可使用对话、知识库、Agent 等全部功能。用户管理、审计日志等管理功能需要管理员账号。' },
+  { name: 'q4', q: '如何注册或获取账号？', a: '在登录页点击"去注册"，填写用户名、邮箱和密码即可创建账号，系统会自动创建个人空间；也可联系管理员在"用户管理"中创建。演示账号仅在部署方开启时存在，账号为 guest，密码由部署方随机生成或通过环境变量指定，请向部署方获取，并非固定口令。' },
 ]
 
 const shortcuts = [
