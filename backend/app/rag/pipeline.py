@@ -123,9 +123,10 @@ class RAGPipeline:
 
             index_error = get_index_error()
             if index_error:
+                # fail-closed：暖缓存也可能来自旧模型索引，一律拒绝；不读写缓存。
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
                 raise RetrievalUnavailableError(
-                    f"知识库索引配置错误，检索不可用：{index_error}"
+                    f"知识库索引不可用，检索已拒绝：{index_error}"
                 )
 
             # Exact cache (skip for document-specific queries)
@@ -298,6 +299,21 @@ class RAGPipeline:
             # 「最终为空」与「知识库确实没有相关内容」不可区分 —— 绝不回落成
             # 「无内容」语义，如实上抛结构化故障，由上层做诚实降级。
             failures: list[tuple[str, BaseException]] = list(failed_sub_queries)
+            # embedding 维度/模型漂移是**配置错误**，不是瞬态故障：即使关键词臂
+            # 有命中，也不能返回「看似正常」的结果（#196：漂移不得静默混用）。
+            config_reasons = [
+                r for r in degraded_reasons if r.startswith("vector_arm_config_error")
+            ]
+            if config_reasons:
+                RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
+                logger.error(
+                    "RAG retrieval refused by embedding config error (org=%s): %s",
+                    organization_id,
+                    config_reasons[0],
+                )
+                raise RetrievalUnavailableError(
+                    f"embedding 配置错误，检索结果不可信：{config_reasons[0]}"
+                )
             if (failures or degraded_reasons) and not result:
                 excs = [e for _, e in failures]
                 kind = "timeout" if excs and all(is_timeout_error(e) for e in excs) else "failed"

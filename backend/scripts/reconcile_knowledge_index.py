@@ -40,8 +40,8 @@
 
 ## 退出码
 
-    0  一致；或 --reindex 后全部恢复
-    1  存在 missing/partial（--reindex 后仍有残留）
+    0  一致；或 --reindex 后复核一致（仅有 DEFERRED 且复核已绿也算 0）
+    1  存在 missing/partial（--reindex 后仍有残留/失败/复核未恢复）
     2  致命错误（DB/ES 不可用、索引配置错误、配置加载失败等）
 """
 
@@ -109,7 +109,12 @@ class ReconcileReport:
         return [s for s in self.states if s.status == "partial"]
 
     @property
+    def extra(self) -> list[DocIndexState]:
+        return [s for s in self.states if s.status == "extra"]
+
+    @property
     def has_issues(self) -> bool:
+        # extra/孤儿不自动处理，也不改变退出码（需人工确认删除/收敛）。
         return bool(self.missing or self.partial)
 
     @property
@@ -335,6 +340,13 @@ def _print_report(report: ReconcileReport, *, organization_id: int | None) -> No
             len(report.missing),
             len(report.partial),
         )
+    elif report.extra or report.orphan_document_ids:
+        logger.warning(
+            "[RECONCILE] 结论：无缺失/部分缺失；存在 %s 个 extra（多余 chunk）与 "
+            "%s 个孤儿 document_id —— 需人工确认，脚本不自动处理",
+            len(report.extra),
+            len(report.orphan_document_ids),
+        )
     else:
         logger.info("[RECONCILE] 结论：documents 标记与 ES 索引逐文档一致")
 
@@ -402,8 +414,25 @@ async def run(args: argparse.Namespace) -> int:
         report_after = build_report(rows_after, counts_after)
         _print_report(report_after, organization_id=args.org)
 
-        if outcome.failed or outcome.deferred:
+        # 复核裁决：process 返回 True 不等于数据真的回来了（例如 job 被更新的任务
+        # 取代时 process 走 STALE_RUN 也返回 True）。以复核结果为准，避免谎报成功。
+        still_broken = {
+            state.document_id
+            for state in report_after.states
+            if state.needs_reindex
+        }
+        unresolved = [
+            doc_id for doc_id in outcome.succeeded if doc_id in still_broken
+        ]
+        if unresolved:
+            logger.error(
+                "[RECONCILE] 以下文档报告成功但复核仍缺失/部分（可能被更新任务取代）：%s",
+                ", ".join(unresolved),
+            )
+        if outcome.failed or unresolved:
             return EXIT_MISMATCH
+        # DEFERRED 只是「锁竞争、稍后回收」：复核已一致时不算失败；
+        # 若仍缺失，report_after.exit_code 会给出 1。
         return report_after.exit_code
     finally:
         await close_elasticsearch()

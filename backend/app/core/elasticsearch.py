@@ -231,11 +231,23 @@ async def _create_index_if_not_exists(client: AsyncElasticsearch):
     if not exists:
         logger.info(f"Creating index: {index_name}")
         mapping = _knowledge_index_mapping()
-        await client.indices.create(
-            index=index_name, mappings=mapping["mappings"], settings=mapping["settings"]
-        )
-        logger.info("Index created")
-        return
+        try:
+            await client.indices.create(
+                index=index_name, mappings=mapping["mappings"], settings=mapping["settings"]
+            )
+        except Exception as e:
+            # 多副本首次启动竞态：另一个进程刚建好同名索引。这不是配置错误，
+            # 不能让 index_error 闩锁把本进程的检索永久拒掉——改走已存在校验。
+            if "resource_already_exists" not in str(e):
+                raise
+            logger.warning(
+                "索引 %s 并发创建竞态（resource_already_exists），改走已存在校验",
+                index_name,
+            )
+        else:
+            logger.info("Index created")
+            _holder.index_error = None
+            return
 
     mapping = await client.indices.get_mapping(index=index_name)
     props = mapping.get(index_name, {}).get("mappings", {}).get("properties", {})
@@ -290,6 +302,9 @@ async def _create_index_if_not_exists(client: AsyncElasticsearch):
             f"scripts/reconcile_knowledge_index.py --reindex 重新索引全部文档。"
         )
 
+    # 校验通过：闩锁反映「最近一次校验结果」——此前的瞬时错误/旧配置错误应被解除，
+    # 否则查询侧 gate 会把一次启动抖动放大成永久拒检（issue #196 评审）。
+    _holder.index_error = None
     logger.info(f"Index exists with matching dims: {index_name} (dims={current_dims})")
 
 
@@ -300,7 +315,13 @@ async def create_index_if_not_exists():
     调用方应捕获它并如实上报，不要吞掉。
     """
     client = await get_elasticsearch()
-    await _create_index_if_not_exists(client)
+    try:
+        await _create_index_if_not_exists(client)
+    except IndexConfigError as e:
+        # 写路径上的漂移也要让查询侧感知：pipeline 的检索 gate 读这个闩锁，
+        # 避免「写入被拒、查询仍用新模型撞旧索引」（issue #196）。
+        _holder.index_error = str(e)
+        raise
 
 
 def get_index_error() -> str | None:

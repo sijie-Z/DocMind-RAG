@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from openai import AsyncOpenAI
 
 from app.core.config import settings
+from app.rag.errors import EmbeddingConfigError
 from app.rag.pipeline import RAGPipeline
 
 logger = logging.getLogger(__name__)
@@ -79,11 +80,12 @@ def get_rag_pipeline() -> RAGPipeline:
     """
     try:
         from app.services.embedding_service import embedding_service
-    except RuntimeError as e:
+    except EmbeddingConfigError as e:
         logger.warning(
             "Embedding 未配置（%s）——RAG 管线以向量臂关闭模式构造；"
             "关键词检索与 LLM 能力不受影响。",
             e,
+            exc_info=True,
         )
         embedding_service = None
 

@@ -110,11 +110,12 @@ def test_pipeline_falls_back_when_embedding_is_unconfigured(monkeypatch):
     import types
 
     import app.dependencies as deps
+    from app.rag.errors import EmbeddingConfigError
 
     class _BrokenEmbeddingModule(types.ModuleType):
         @property
         def embedding_service(self):
-            raise RuntimeError("Embedding API key is missing")
+            raise EmbeddingConfigError("Embedding API key is missing")
 
     monkeypatch.setitem(
         sys.modules,
@@ -426,3 +427,108 @@ async def test_search_refuses_when_index_config_is_invalid(monkeypatch):
         await pipeline.search_knowledge_base("任意查询", organization_id=1)
     assert excinfo.value.kind == "failed"
     assert "old-model" in str(excinfo.value)
+
+
+def test_index_error_latch_clears_after_successful_validation(monkeypatch):
+    """闩锁必须反映最近一次校验结果：瞬时错误恢复后查询 gate 自动解除。"""
+    from app.core import elasticsearch as es_mod
+
+    monkeypatch.setattr(settings, "VECTOR_DIMENSION", 1024)
+    monkeypatch.setattr(es_mod, "resolve_embedding_model", lambda: "same-model")
+    monkeypatch.setattr(es_mod._holder, "index_error", "startup transient failure")
+    client = SimpleNamespace(
+        indices=_FakeIndexMappingIndices(
+            _mapping_for(
+                settings.ELASTICSEARCH_INDEX_NAME,
+                dims=1024,
+                meta={"embedding_model": "same-model", "vector_dimension": 1024},
+            )
+        )
+    )
+
+    _run(es_mod._create_index_if_not_exists(client))
+
+    assert es_mod._holder.index_error is None
+
+
+@pytest.mark.asyncio
+async def test_write_path_drift_sets_query_gate_latch(monkeypatch):
+    """启动后发生的漂移（写路径 IndexConfigError）必须让查询侧 gate 生效。"""
+    from app.core import elasticsearch as es_mod
+
+    monkeypatch.setattr(es_mod._holder, "index_error", None)
+
+    async def _fake_get_es():
+        return object()
+
+    async def _boom(client):
+        raise es_mod.IndexConfigError("embedding 模型不匹配：索引 old-model")
+
+    monkeypatch.setattr(es_mod, "get_elasticsearch", _fake_get_es)
+    monkeypatch.setattr(es_mod, "_create_index_if_not_exists", _boom)
+
+    with pytest.raises(es_mod.IndexConfigError):
+        await es_mod.create_index_if_not_exists()
+    assert es_mod._holder.index_error
+    assert "old-model" in es_mod._holder.index_error
+
+
+@pytest.mark.asyncio
+async def test_search_gate_runs_before_cache(monkeypatch):
+    """fail-closed：闩锁置位时暖缓存也不得返回（可能来自旧模型索引）。"""
+    from unittest.mock import AsyncMock
+
+    from app.rag.errors import RetrievalUnavailableError
+    from app.rag.pipeline import RAGPipeline
+
+    monkeypatch.setattr("app.core.elasticsearch.get_index_error", lambda: "index broken")
+    pipeline = RAGPipeline()
+    cache_get = AsyncMock(return_value=(["stale-result"], None))
+    monkeypatch.setattr(pipeline.cache, "get", cache_get)
+
+    with pytest.raises(RetrievalUnavailableError):
+        await pipeline.search_knowledge_base("任意查询", organization_id=1)
+    cache_get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_vector_arm_marks_dimension_drift_as_config_error():
+    """查询期维度漂移必须标记为配置错误，而不是普通「服务故障」降级。"""
+    from app.rag.retriever import HybridRetriever
+    from app.services.embedding_service import EmbeddingDimensionMismatchError
+
+    class _DriftingProvider:
+        async def embed_query(self, _text):
+            raise EmbeddingDimensionMismatchError("Embedding 维度不一致：7 vs 8")
+
+    retriever = HybridRetriever(embedding_provider=_DriftingProvider())
+    hits, query_vector, reason = await retriever._vector_hits("查询", [], 10)
+
+    assert hits == [] and query_vector == []
+    assert reason is not None and reason.startswith("vector_arm_config_error")
+    assert "维度不一致" in reason
+
+
+@pytest.mark.asyncio
+async def test_pipeline_refuses_results_when_vector_config_error(monkeypatch):
+    """即使关键词臂有命中，embedding 配置错误也不得返回「看似正常」的结果。"""
+    from app.rag.errors import RetrievalUnavailableError
+    from app.rag.pipeline import RAGPipeline
+
+    pipeline = RAGPipeline()
+
+    async def fake_retrieve(*args, **kwargs):
+        return (
+            [{"chunk_id": "c1", "content": "x", "score": 1.0, "filename": "a.txt"}],
+            None,
+            None,
+            ["vector_arm_config_error: Embedding 维度不一致：7 vs 8"],
+        )
+
+    monkeypatch.setattr(pipeline.retriever, "retrieve", fake_retrieve)
+
+    with pytest.raises(RetrievalUnavailableError) as excinfo:
+        await pipeline.search_knowledge_base(
+            "查询", organization_id=1, document_ids=["d1"]
+        )
+    assert "维度不一致" in str(excinfo.value)

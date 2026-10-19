@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from openai import AsyncOpenAI
 
 from app.core.config import resolve_embedding_model, settings
+from app.rag.errors import EmbeddingConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def resolve_embedding_config() -> EmbeddingConfig:
 
     api_key = settings.EMBEDDING_API_KEY or settings.DEEPSEEK_API_KEY
     if not api_key:
-        raise RuntimeError(
+        raise EmbeddingConfigError(
             "Embedding API key is missing. Set EMBEDDING_API_KEY or DEEPSEEK_API_KEY"
         )
 

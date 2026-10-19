@@ -389,6 +389,17 @@ class HybridRetriever:
         except EmbeddingUnavailableError as e:
             # 修复（#292）：向量臂因 embedding 服务故障关闭时如实标记降级，
             # 不再与「没有命中」同形（此前是 #2 假无结果的静默放大器）。
+            # issue #196：维度/模型漂移是**配置错误**而非瞬态故障——用专用 reason
+            # 标记，pipeline 据此 fail-closed（即使关键词臂有命中也不返回）。
+            # 用类名判定避免在检索路径上 import embedding_service（无 key 的
+            # 只读工具不应因构造单例而失败）。
+            cause = e.__cause__
+            if cause is not None and type(cause).__name__ == "EmbeddingDimensionMismatchError":
+                logger.error(
+                    "Vector retrieval arm refused by embedding dimension drift: %s",
+                    cause,
+                )
+                return [], [], f"vector_arm_config_error: {cause}"
             logger.error(f"Vector retrieval arm unavailable, query embedding failed: {e}")
             return [], [], f"vector_arm_unavailable: {e}"
 

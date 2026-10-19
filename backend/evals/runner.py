@@ -189,6 +189,15 @@ def _apply_env(args: argparse.Namespace) -> None:
             )
         # 索引 mapping 的 _meta.embedding_model 也必须是伪嵌入标识——否则 CI 索引
         # 会被标记成宿主机的真实模型名，换机器后模型一致性校验会误报（#196）。
+        # 同时关掉本地 embedding 分支：resolve_embedding_model() 在本地模式下
+        # 优先 LOCAL_EMBEDDING_MODEL，宿主 .env 开启本地模式时同样会记录错模型。
+        prev_local = os.environ.get("ENABLE_LOCAL_EMBEDDING")
+        os.environ["ENABLE_LOCAL_EMBEDDING"] = "false"
+        if prev_local and prev_local.lower() in ("1", "true", "yes", "on"):
+            print(
+                "[evals] fake 嵌入模式：ENABLE_LOCAL_EMBEDDING 已固定为 false"
+                "（保证索引 _meta 记录伪嵌入标识）"
+            )
         prev_model = os.environ.get("EMBEDDING_MODEL")
         os.environ["EMBEDDING_MODEL"] = CI_EMBEDDING_ID
         if prev_model and prev_model != CI_EMBEDDING_ID:
