@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.notifications import create_notification
 from app.core.database import get_db
-from app.core.security import get_current_user, is_platform_admin, permission_required
+from app.core.security import (
+    get_current_user,
+    get_user_org_id,
+    is_platform_admin,
+    permission_required,
+)
 from app.exceptions import (
     AppError,
     AuthorizationError,
@@ -122,9 +127,12 @@ async def get_organizations(
 
         conditions = []
         # W0-1：组织列表是跨租户信息面——平台管理员可看全部；组织管理员/
-        # 普通账号只能看到自己的组织（无组织 fail closed，不做 1 号组织兜底）。
+        # 普通账号只能看到自己的组织（无组织 fail closed：403，不做任何兜底）。
         if not is_platform_admin(current_user):
-            conditions.append(Organization.id == (current_user.organization_id or -1))
+            org_id = get_user_org_id(current_user)
+            if org_id is None:
+                raise AuthorizationError("当前账号无组织上下文，无法查看组织列表")
+            conditions.append(Organization.id == org_id)
         if search:
             conditions.append(Organization.name.contains(search))
 
