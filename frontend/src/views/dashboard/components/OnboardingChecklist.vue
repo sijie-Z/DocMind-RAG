@@ -46,7 +46,7 @@
             {{ progressText }}
           </span>
           <!-- T8：父级统计刷新在途时局部 loading；块本身保持挂载，重试入口不消失 -->
-          <span
+          <div
             v-if="statsLoading"
             data-testid="onboarding-refreshing"
             role="status"
@@ -55,7 +55,7 @@
           >
             <n-spin :size="14" aria-hidden="true" />
             {{ t('common.loading') }}
-          </span>
+          </div>
           <n-button text size="small" :loading="llmLoading" data-testid="onboarding-refresh" @click="refreshAll">
             {{ t('dashboard.onboarding.refresh') }}
           </n-button>
