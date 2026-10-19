@@ -21,6 +21,35 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _coerce_organization_id(organization_id: str | int | None) -> int:
+    """Coerce an explicit organization scope for knowledge retrieval.
+
+    W0-6：此前 ``organization_id is None`` 被静默转成 0（``org_id = ...
+    if organization_id else 0``），无组织调用会落进 0 号组织的共享检索/缓存
+    命名空间。现在组织上下文必填，None / 空串 / 0 / 负数一律显式拒绝。
+    """
+    if organization_id is None:
+        raise ValueError(
+            "search_knowledge 缺少 organization_id，拒绝在无组织上下文下检索"
+        )
+    if isinstance(organization_id, bool):
+        raise ValueError(
+            f"search_knowledge 的 organization_id 非法: {organization_id!r}"
+        )
+    try:
+        org_id = int(organization_id)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"search_knowledge 的 organization_id 非法: {organization_id!r}"
+        ) from None
+    if org_id <= 0:
+        raise ValueError(
+            f"search_knowledge 的 organization_id={organization_id!r} 非法："
+            "必须是正整数组织 ID（0/-1 是历史 fail-open 哨兵，已禁用）"
+        )
+    return org_id
+
 # 引用 documents.id 的子表清单 —— **这个清单是从 information_schema 查出来的，不是凭记忆**：
 #
 #   SELECT kcu.TABLE_NAME, kcu.COLUMN_NAME, rc.DELETE_RULE
@@ -66,7 +95,7 @@ class KnowledgeService:
     async def search_knowledge(
         self,
         query: str,
-        organization_id: str | None = None,
+        organization_id: str | int,
         top_k: int = 5,
         search_mode: str | None = None
     ) -> list[dict[str, Any]]:
@@ -75,12 +104,16 @@ class KnowledgeService:
 
         search_mode（hybrid/vector/keyword）：显式覆盖本次检索臂组合；None = 自动
         路由（issue #225 决策 7A：此前该参数收下即丢弃，三层链路都不生效）。
+
+        W0-6：organization_id 必填，且必须是正整数组织 ID（0/None 不再兜底）。
         """
         from app.services.rag_service import rag_service
-        try:
-            # 转换 organization_id 为 int
-            org_id = int(organization_id) if organization_id else 0
 
+        # 组织校验必须先于 try（下方 broad except 会把业务异常吞成 []，让
+        # 「没有组织」伪装成「没有检索结果」）。
+        org_id = _coerce_organization_id(organization_id)
+
+        try:
             # 使用 RagService 进行高级检索。
             # pipeline 返回 (results, debug_info) 元组，必须解包——issue #219：
             # 这里曾把元组当列表迭代，`isinstance(res, dict)` 把「hits 列表」和

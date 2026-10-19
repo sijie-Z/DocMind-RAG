@@ -57,6 +57,7 @@ Known limitations:
 - **Ratchets only shrink** — a backend coverage floor (`--cov-fail-under=42`) plus four frontend baseline ratchets (hardcoded CJK / i18n completeness / naming consistency / translation-key usage). Growth turns them red; shrinkage is allowed.
 - **Silent false-successes cleared (#301)** — a full audit of ~551 exception handlers; all 32 silent false-success paths closed (fail-closed logout, three-state retrieval, honest document status, degraded-identity stats…), each backed by regression tests.
 - **Red-first + mutation verification** — every fix starts with a failing test; after the fix, injected defects must turn exactly the right tests red, proving the tests can actually detect the bug.
+- **Documented-number invariants** — the SSE event count, endpoint-module count, frontend-route count, and tool count are derived from source; expected values live in `docs/facts.json`. `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ docs on every PR. Frontend routes are recorded in two ways: 34 route records (including top-level and redirect records) / 29 named routes (routes with a name).
 
 ---
 

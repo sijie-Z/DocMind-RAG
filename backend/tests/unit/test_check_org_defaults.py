@@ -85,6 +85,91 @@ def test_or_one_fallback_is_red(tmp_path):
     assert len(checker.find_violations(app_dir)) == 1
 
 
+def test_zero_int_default_is_red(tmp_path):
+    """`organization_id: int = 0` 与 `= -1` 是 0 号组织的同义 fail-open 写法。"""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "bad.py").write_text(
+        "def a(organization_id: int = 0):\n    pass\n"
+        "def b(organization_id: int = -1):\n    pass\n",
+        encoding="utf-8",
+    )
+    assert len(checker.find_violations(app_dir)) == 2
+
+
+def test_zero_string_default_is_red(tmp_path):
+    """`organization_id: str = "0"` / `= '0'` 是同义 fail-open 写法。"""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "bad.py").write_text(
+        "def a(organization_id: str = \"0\"):\n    pass\n"
+        "def b(organization_id: str = '0'):\n    pass\n",
+        encoding="utf-8",
+    )
+    assert len(checker.find_violations(app_dir)) == 2
+
+
+def test_or_zero_and_negative_fallback_are_red(tmp_path):
+    """运行时 `organization_id or 0` / `or -1` 兜底。"""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "bad.py").write_text(
+        "def a(user):\n    return user.organization_id or 0\n"
+        "def b(user):\n    return user.organization_id or -1\n",
+        encoding="utf-8",
+    )
+    assert len(checker.find_violations(app_dir)) == 2
+
+
+def test_getattr_default_one_is_red(tmp_path):
+    """`getattr(obj, "organization_id", 1)` 形态。"""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "bad.py").write_text(
+        "def a(user):\n"
+        "    return getattr(user, \"organization_id\", 1)\n",
+        encoding="utf-8",
+    )
+    assert len(checker.find_violations(app_dir)) == 1
+
+
+def test_zero_patterns_do_not_flag_lookalikes(tmp_path):
+    """`= 10` / `or 10` / `= None` 不得误报。"""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "good.py").write_text(
+        "def a(organization_id: int = 10):\n    pass\n"
+        "def b(organization_id: int | None = None):\n    pass\n"
+        "def c(user):\n    return user.organization_id or 10\n"
+        "def d(user):\n    return getattr(user, \"organization_id\", None)\n",
+        encoding="utf-8",
+    )
+    assert checker.find_violations(app_dir) == []
+
+
+def test_fstring_literal_text_is_masked_but_expressions_still_match(tmp_path):
+    """f-string 的文本段不是可执行代码，不得误报；表达式段照常扫描。
+
+    Python 3.12 起 f-string 文本段是 FSTRING_MIDDLE token（不再是 STRING），
+    必须显式遮蔽；3.11 及更早整段是 STRING，早已被遮蔽。
+    """
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "mixed.py").write_text(
+        'def a(organization_id):\n'
+        '    return f"literal organization_id or 1 text"\n'
+        'def b(organization_id):\n'
+        '    return f"{organization_id or 0}"\n',
+        encoding="utf-8",
+    )
+    hits = checker.find_violations(app_dir)
+    if sys.version_info >= (3, 12):
+        assert len(hits) == 1, hits
+        assert hits[0][1] == 4
+    else:  # pragma: no cover - CI 使用 3.12
+        assert hits == []
+
+
 def test_comment_only_mentions_are_not_flagged(tmp_path):
     """注释里描述历史缺陷不算违规（避免误伤说明文字）。"""
     app_dir = tmp_path / "app"
