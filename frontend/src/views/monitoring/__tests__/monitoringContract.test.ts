@@ -12,7 +12,7 @@ import { createI18n } from 'vue-i18n'
 import { NMessageProvider } from 'naive-ui'
 
 import MonitoringView from '../index.vue'
-import { getMonitoringDashboard, getMonitoringAlerts, getMetrics } from '@/api/monitoring'
+import { getMonitoringDashboard, getMonitoringAlerts, getMetrics, getNotificationStatus } from '@/api/monitoring'
 import { getAuditLogs } from '@/api/user'
 import request from '@/utils/request'
 import zh from '@/locales/zh'
@@ -35,6 +35,7 @@ vi.mock('@/api/monitoring', () => ({
   getMonitoringDashboard: vi.fn(),
   getMonitoringAlerts: vi.fn(),
   getMetrics: vi.fn(),
+  getNotificationStatus: vi.fn(),
 }))
 vi.mock('@/api/user', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/user')>()
@@ -93,6 +94,9 @@ beforeEach(() => {
   vi.mocked(getMonitoringDashboard).mockResolvedValue(dashboardFixture() as never)
   vi.mocked(getMonitoringAlerts).mockResolvedValue({ data: { alerts: [], total: 0 } } as never)
   vi.mocked(getMetrics).mockResolvedValue({ data: { data: [] } } as never)
+  vi.mocked(getNotificationStatus).mockResolvedValue({
+    data: { status: 'active', enabled_channels: ['email', 'system'] },
+  } as never)
   vi.mocked(getAuditLogs).mockResolvedValue({ data: { success: true, data: { items: [], total: 0 } } } as never)
 })
 
@@ -257,15 +261,14 @@ describe('MonitoringView · 趋势数据链与诚实空态（B2/B4）', () => {
   })
 })
 
-describe('MonitoringView · 通知服务状态路径（B1）', () => {
-  it('单前缀正确路径 /monitoring/notification/status（旧双前缀 /api/monitoring/... 恒 404）', async () => {
-    const wrapper = mountView()
+describe('MonitoringView · 通知服务状态接线（B1/T6）', () => {
+  it('通知状态收敛为 @/api/monitoring API 函数（单前缀路径与静默头由 API 单测钉住）', async () => {
+    mountView()
     await flushPromises()
     await nextTick()
 
-    const urls = vi.mocked(request.get).mock.calls.map((c) => String(c[0]))
-    expect(urls).toContain('/monitoring/notification/status')
-    // 不再有任何自带 /api 前缀的原始路径（axios baseURL 已含 /api/v1）
-    expect(urls.some((u) => u.startsWith('/api/'))).toBe(false)
+    expect(vi.mocked(getNotificationStatus)).toHaveBeenCalled()
+    // 页面不再直连 request 发裸请求（路径/静默头收敛在 api/monitoring.ts）
+    expect(request.get).not.toHaveBeenCalled()
   })
 })
