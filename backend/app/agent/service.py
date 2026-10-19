@@ -107,14 +107,14 @@ async def build_referenced_document_context(
         retrieval_note: str | None = None
         if pipeline is not None:
             try:
+                from app.rag.context_compressor import get_prompt_text
                 results, _ = await pipeline.search_knowledge_base(
                     query, organization_id, top_k=3, document_ids=[did],
                 )
-                excerpt = "\n".join(
-                    (r.get("text") or r.get("snippet") or "").strip()
-                    for r in results[:3]
-                    if (r.get("text") or r.get("snippet"))
-                ).strip()
+                # issue #186：引用文档摘要与提示词同源（prompt_text → text → …），
+                # snippet 仅作最后兜底。
+                excerpts = [get_prompt_text(r).strip() for r in results[:3]]
+                excerpt = "\n".join(e for e in excerpts if e).strip()
             except Exception as e:
                 logger.warning("引用文档检索失败 %s: %s", did, log_safe(e))
                 retrieval_note = f"引用文档「{title}」内容检索失败"
