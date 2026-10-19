@@ -95,6 +95,15 @@ async function saveWithTopKChange(wrapper: Awaited<ReturnType<typeof mountPage>>
   await flushPromises()
 }
 
+/** 手动控制 resolve 时机的 Promise，用于构造审计请求乱序返回。 */
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
 describe('organization settings page', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -258,6 +267,36 @@ describe('organization settings page', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('org-8-audit')
     expect(wrapper.text()).not.toContain('org-7-audit')
+    wrapper.unmount()
+  })
+
+  it('同一组织乱序刷新：旧请求晚到不覆盖新结果，加载态只跟随最新请求', async () => {
+    const loadAudit = deferred<unknown>()
+    const saveAudit = deferred<unknown>()
+    mockedAudit.mockReturnValueOnce(loadAudit.promise as never)
+    const wrapper = await mountPage() // 加载触发的审计 A 挂起
+    expect(wrapper.find('[data-testid="audit-loading"]').exists()).toBe(true)
+
+    mockedAudit.mockReturnValueOnce(saveAudit.promise as never)
+    await saveWithTopKChange(wrapper) // 保存触发的审计 B 挂起
+    expect(wrapper.find('[data-testid="audit-loading"]').exists()).toBe(true)
+
+    // 旧请求 A 先返回：结果必须丢弃，且不得提前熄灭最新请求 B 的加载态
+    loadAudit.resolve({
+      data: { items: [{ id: 1, user_id: 7, action: 'settings.update', detail: 'older-audit' }] },
+    })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('older-audit')
+    expect(wrapper.find('[data-testid="audit-loading"]').exists()).toBe(true)
+
+    // 最新请求 B 返回：结果生效，加载态熄灭
+    saveAudit.resolve({
+      data: { items: [{ id: 2, user_id: 7, action: 'settings.update', detail: 'newer-audit' }] },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('newer-audit')
+    expect(wrapper.text()).not.toContain('older-audit')
+    expect(wrapper.find('[data-testid="audit-loading"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })
