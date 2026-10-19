@@ -1122,6 +1122,7 @@ export default {
     usage: '{used} tokens utilisés ce mois-ci ; quota : {quota}',
     auditTitle: 'Audit des changements',
     auditEmpty: 'Aucun changement enregistré',
+    auditLoadFailed: 'Échec du chargement des enregistrements d’audit',
     auditColumns: { time: 'Date', user: 'Auteur', detail: 'Changements' },
     loadFailed: 'Échec du chargement des paramètres de l’organisation',
     saveSuccess: 'Paramètres de l’organisation enregistrés',

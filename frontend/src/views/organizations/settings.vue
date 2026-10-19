@@ -109,8 +109,21 @@
           </n-card>
 
           <n-card :title="t('orgSettings.auditTitle')" :bordered="false">
-            <n-empty v-if="auditItems.length === 0" :description="t('orgSettings.auditEmpty')" />
-            <n-table v-else :bordered="false" :single-line="false">
+            <n-spin v-if="auditLoading" size="small" class="mb-3" data-testid="audit-loading" />
+            <n-alert
+              v-if="auditError"
+              type="warning"
+              class="mb-3"
+              :show-icon="true"
+              data-testid="audit-error"
+            >
+              {{ auditError }}
+            </n-alert>
+            <n-empty
+              v-if="!auditLoading && !auditError && auditItems.length === 0"
+              :description="t('orgSettings.auditEmpty')"
+            />
+            <n-table v-if="auditItems.length > 0" :bordered="false" :single-line="false">
               <thead>
                 <tr>
                   <th>{{ t('orgSettings.auditColumns.time') }}</th>
@@ -138,6 +151,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import { useDedupedMessage } from '@/utils/message'
+import { getErrorMessage } from '@/utils/apiError'
 import {
   getOrganizationSettings,
   getOrganizationSettingsAudit,
@@ -159,6 +173,8 @@ const orgId = computed(() => userStore.currentOrgId)
 const loading = ref(false)
 const saving = ref(false)
 const loadError = ref('')
+const auditError = ref('')
+const auditLoading = ref(false)
 const settings = ref<Record<string, EffectiveOrganizationSetting>>({})
 const usage = ref<OrganizationSettingsUsage>({ month_tokens: 0, monthly_token_quota: null })
 const auditItems = ref<OrganizationSettingsAuditItem[]>([])
@@ -264,20 +280,41 @@ const buildPayload = (): OrganizationSettingsUpdatePayload => {
   return payload
 }
 
+/**
+ * 审计是独立区块：拉取失败只降级审计区（保留旧列表 + 内联提示），
+ * 不得影响设置的加载/保存结论。请求带 X-Silent-Error，由本分支唯一呈现错误。
+ * 序号令牌保证只有最新一次刷新可提交结果（并发的加载/保存刷新、组织切换）。
+ */
+let auditRequestSeq = 0
+const refreshAudit = async (id: number) => {
+  const seq = ++auditRequestSeq
+  auditLoading.value = true
+  try {
+    const auditRes = await getOrganizationSettingsAudit(id)
+    if (orgId.value !== id || seq !== auditRequestSeq) return
+    auditItems.value = auditRes.data?.items || []
+    auditError.value = ''
+  } catch (error) {
+    if (orgId.value !== id || seq !== auditRequestSeq) return
+    auditError.value = getErrorMessage(error, t('orgSettings.auditLoadFailed'))
+  } finally {
+    if (seq === auditRequestSeq) auditLoading.value = false
+  }
+}
+
 const load = async () => {
   const id = orgId.value
   if (!id) return
   loading.value = true
   loadError.value = ''
+  auditError.value = ''
+  // 审计与设置并行拉取；审计失败不会让整页进入错误态。
+  void refreshAudit(id)
   try {
-    const [settingsRes, auditRes] = await Promise.all([
-      getOrganizationSettings(id),
-      getOrganizationSettingsAudit(id),
-    ])
+    const settingsRes = await getOrganizationSettings(id, { silent: true })
     applySettings(settingsRes.data)
-    auditItems.value = auditRes.data?.items || []
   } catch (error) {
-    loadError.value = error instanceof Error ? error.message : t('orgSettings.loadFailed')
+    loadError.value = getErrorMessage(error, t('orgSettings.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -295,11 +332,12 @@ const save = async () => {
   try {
     const res = await updateOrganizationSettings(id, payload)
     applySettings(res.data)
-    const auditRes = await getOrganizationSettingsAudit(id)
-    auditItems.value = auditRes.data?.items || []
     message.success(t('orgSettings.saveSuccess'))
+    // 审计刷新是保存后的独立副作用：失败不回写「保存失败」，
+    // 由审计区内联降级提示呈现。
+    void refreshAudit(id)
   } catch (error) {
-    message.error(error instanceof Error ? error.message : t('orgSettings.saveFailed'))
+    message.error(getErrorMessage(error, t('orgSettings.saveFailed')))
   } finally {
     saving.value = false
   }
@@ -312,6 +350,8 @@ onMounted(() => {
 // 组织切换后重新拉取（B1 会用页面 key 重挂载兜底；此 watcher 保证不重挂时
 // 也不会把旧组织的表单值保存进新组织）。
 watch(orgId, () => {
+  // 切换组织先清空审计列表：不得把旧组织的审计记录展示在新组织下。
+  auditItems.value = []
   void load()
 })
 </script>

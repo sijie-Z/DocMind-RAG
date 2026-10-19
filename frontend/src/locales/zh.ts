@@ -1202,6 +1202,7 @@ export default {
     usage: '本月已用 {used} tokens；配额：{quota}',
     auditTitle: '变更审计',
     auditEmpty: '暂无变更记录',
+    auditLoadFailed: '审计记录加载失败',
     auditColumns: { time: '时间', user: '操作人', detail: '变更' },
     loadFailed: '加载组织设置失败',
     saveSuccess: '组织设置已保存',
