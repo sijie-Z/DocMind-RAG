@@ -187,12 +187,38 @@ else:
 
 # ── Orchestrator ─────────────────────────────────────────────
 
+
+def _resolve_demo_org_id() -> int:
+    """Resolve the explicit demo organization for this dev-only service.
+
+    W0-6：此前 ``int(os.environ.get("AGENT_DEMO_ORG_ID", "0"))`` 在未配置时
+    静默回落到 0 号组织（fail-open 哨兵）。现在必须显式配置正整数组织 ID，
+    否则拒绝请求（503）——不阻塞既有部署的启动，但绝不带缺失组织上下文运行。
+    """
+    raw = (os.environ.get("AGENT_DEMO_ORG_ID") or "").strip()
+    try:
+        org_id = int(raw)
+    except (TypeError, ValueError):
+        org_id = 0
+    if org_id <= 0:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "AGENT_DEMO_ORG_ID 未配置或不是正整数："
+                "agent demo 服务必须显式指定演示组织，拒绝在无组织上下文下运行"
+            ),
+        )
+    return org_id
+
+
 async def run_agent(
     query: str,
     mode: str = "structured",
     expected_keywords: list[str] | None = None,
 ) -> dict:
     """Execute the agent and return structured result."""
+    # W0-6：组织上下文解析先于一切（含 LLM 客户端构造）。
+    organization_id = _resolve_demo_org_id()
     request_id = uuid.uuid4().hex[:12]
     client = AsyncOpenAI(
         api_key=os.environ["DEEPSEEK_API_KEY"],
@@ -214,7 +240,7 @@ async def run_agent(
 
     agent = PERAgentLoop(
         client, config,
-        organization_id=int(os.environ.get("AGENT_DEMO_ORG_ID", "0")),
+        organization_id=organization_id,
         user_id=int(os.environ.get("AGENT_DEMO_USER_ID", "0")),
         execution_mode="dag",
     )
@@ -391,6 +417,10 @@ async def eval_benchmark(mode: str = "structured", layer: str = "l1", _: None = 
                 "errors": len(r["errors"]),
                 "error_types": [e.get("type", "") for e in r["errors"]],
             })
+        except HTTPException:
+            # W0-6：配置缺失（如 AGENT_DEMO_ORG_ID 未设置）是整批前置条件
+            # 不满足，必须作为 503 显式拒绝，不能被逐题吞成 "errors: 1"。
+            raise
         except Exception as e:
             results.append({
                 "id": q["id"], "coverage": 0.0,

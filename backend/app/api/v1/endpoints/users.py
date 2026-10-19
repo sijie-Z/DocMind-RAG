@@ -54,6 +54,19 @@ from app.services.permission_service import permission_service
 router = APIRouter()
 
 
+def _visible_audit_org_id(current_user: User) -> int:
+    """非超管审计日志的组织过滤值（fail-closed，不是 fail-open 兜底）。
+
+    无组织用户没有可见的审计范围：用不存在的 -1 作为过滤值使查询恒空
+    （与导出接口一致）。显式条件表达式而非 ``organization_id or -1``——
+    后者会被 org-defaults 门禁视为运行时组织兜底（W0-6），而这里的语义是
+    「无组织 → 拒绝任何组织数据」，不是「无组织 → 借用某个组织」。
+    """
+    if current_user.organization_id is None:
+        return -1
+    return current_user.organization_id
+
+
 def _mask_api_key(api_key: str | None) -> str | None:
     """安全加固：API Key 只返回掩码（sk-****abcd），完整值仅生成时返回一次。"""
     if not api_key:
@@ -334,7 +347,7 @@ async def get_audit_logs(
         # 安全加固（S2）：无组织用户用不存在的组织 ID（-1）兜底，
         # 防止其看到一个包含所有组织日志的列表（与导出接口保持一致）
         if not current_user.is_superuser:
-            stmt = stmt.join(User).where(User.organization_id == (current_user.organization_id or -1))
+            stmt = stmt.join(User).where(User.organization_id == _visible_audit_org_id(current_user))
 
         if user_id:
             stmt = stmt.where(UserActivityLog.user_id == user_id)
@@ -401,7 +414,7 @@ async def get_audit_log_actions(
         count_expr = func.count()
         stmt = select(UserActivityLog.action, count_expr).group_by(UserActivityLog.action)
         if not current_user.is_superuser:
-            stmt = stmt.join(User).where(User.organization_id == (current_user.organization_id or -1))
+            stmt = stmt.join(User).where(User.organization_id == _visible_audit_org_id(current_user))
         stmt = stmt.order_by(count_expr.desc(), UserActivityLog.action.asc())
         rows = (await db.execute(stmt)).all()
         return {"success": True, "data": [{"action": action, "count": count} for action, count in rows]}
@@ -424,7 +437,7 @@ async def export_audit_logs(
 
         # 安全加固：与 get_audit_logs 列表接口一致，非超管只能导出自己组织的日志
         if not current_user.is_superuser:
-            stmt = stmt.where(User.organization_id == (current_user.organization_id or -1))
+            stmt = stmt.where(User.organization_id == _visible_audit_org_id(current_user))
 
         if user_id:
             stmt = stmt.where(UserActivityLog.user_id == user_id)

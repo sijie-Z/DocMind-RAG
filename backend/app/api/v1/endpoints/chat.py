@@ -721,6 +721,7 @@ async def websocket_endpoint(
 async def chat_parse_upload(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     上传文件并立即解析文本内容，用于聊天上下文。
@@ -731,6 +732,10 @@ async def chat_parse_upload(
     from pathlib import Path
 
     from app.services.document_parser import document_service
+
+    # W0-6：解析结果必须携带真实组织上下文。无组织用户显式 403（与检索链路
+    # 的 require_organization 口径一致），不再把空串 / "0" 传给解析器。
+    org_id = await require_organization(current_user, db)
 
     if not file.filename:
         raise ValidationError("文件名不能为空")
@@ -752,11 +757,7 @@ async def chat_parse_upload(
 
         result = await document_service.parse_local_file(
             temp_path,
-            # A2（评审 m-5）：不再 `or 1` 伪造组织；无组织如实传空串，
-            # 该值仅写入解析结果元数据，不参与任何租户数据访问。
-            organization_id=str(current_user.organization_id)
-            if current_user.organization_id is not None
-            else "",
+            organization_id=str(org_id),
         )
 
         chunks = result.get("chunks", [])

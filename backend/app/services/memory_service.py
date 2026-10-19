@@ -789,8 +789,46 @@ def build_memory_namespace(
     命名空间只能按显式租户上下文拼装：org/user 段固定在前面，agent_id 只是
     该租户内的子作用域。任何调用方都不得把用户可控的完整命名空间字符串直接
     当作全局 key——那会绕过租户隔离，读写他人长期记忆。
+
+    W0-6：org 与 user 都是必填租户维度，缺失（None）一律显式拒绝；此前
+    org=None 会拼出 ``"None:..."`` 命名空间（跨租户 / 不可回收）。org 还必须是
+    正整数——0/-1 是历史 fail-open 哨兵，已禁用。
     """
-    return f"{org_id}:{user_id}:{agent_id}"
+    if org_id is None:
+        raise ValueError(
+            "记忆命名空间缺少 organization_id，拒绝构造"
+            "（会生成 'None:...' 跨租户命名空间）"
+        )
+    if isinstance(org_id, bool):
+        raise ValueError(f"记忆命名空间的 organization_id 非法: {org_id!r}")
+    try:
+        coerced_org_id = int(org_id)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"记忆命名空间的 organization_id 非法: {org_id!r}"
+        ) from None
+    if coerced_org_id <= 0:
+        raise ValueError(
+            f"记忆命名空间的 organization_id={org_id!r} 非法：必须是正整数组织 ID"
+            "（0/-1 是历史 fail-open 哨兵，已禁用）"
+        )
+    if user_id is None:
+        raise ValueError(
+            "记忆命名空间缺少 user_id，拒绝构造（会生成 '...:None:...' 跨用户命名空间）"
+        )
+    if isinstance(user_id, bool):
+        raise ValueError(f"记忆命名空间的 user_id 非法: {user_id!r}")
+    try:
+        coerced_user_id = int(user_id)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"记忆命名空间的 user_id 非法: {user_id!r}"
+        ) from None
+    if coerced_user_id < 0:
+        raise ValueError(
+            f"记忆命名空间的 user_id={user_id!r} 非法：不能为负数"
+        )
+    return f"{coerced_org_id}:{coerced_user_id}:{agent_id}"
 
 
 def _evict_memory_system(namespace: str) -> None:
@@ -822,6 +860,9 @@ def get_memory_system(
     `org_id:user_id:agent_id` 由本函数内部拼装。此前 `get_memory_system(agent_id)`
     把调用方传入的整串当全局 key，工作流记忆节点可直接传 `org:user:agent`
     完整三元组，跨 org/user 读写他人记忆——该入口已废除。
+
+    W0-6：org/user 缺失（None）或 org 非正整数时由 ``build_memory_namespace``
+    显式拒绝，不创建任何命名空间。
     """
     namespace = build_memory_namespace(org_id, user_id, agent_id)
     system = memory_systems.get(namespace)

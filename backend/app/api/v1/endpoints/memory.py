@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from app.core.security import get_current_user, get_user_org_id
-from app.exceptions import ValidationError
+from app.exceptions import AuthorizationError, ValidationError
 from app.models.user import User
 from app.schemas.memory import (
     ExperienceRequest,
@@ -39,7 +39,10 @@ async def _get_user_memory_system(current_user: User, agent_id: str):
     # 安全加固（issue #268）：此前 `organization_id or 1` 把无组织用户的命名空间
     # 标成 1 号组织（仅标签错——键里另有 user_id 段，无跨租户读）。现在用真实的
     # org/user 键：无组织时该段如实为 None，绝不冒充 1 号组织。
+    # W0-6：无组织不再生成 "None:..." 命名空间——显式 403 拒绝（fail-closed）。
     org_id = get_user_org_id(current_user)
+    if org_id is None:
+        raise AuthorizationError("当前用户未加入任何组织，无法访问 Agent 记忆")
     # A1（记忆 IDOR）：命名空间由 get_memory_system 按显式租户上下文拼装，
     # 端点不再自行拼接全局 key。
     system = get_memory_system(org_id, current_user.id, agent_id)

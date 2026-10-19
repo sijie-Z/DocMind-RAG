@@ -51,6 +51,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import get_db
 from app.core.security import get_current_user, optional_current_user
+from app.exceptions import AuthorizationError
 from app.models import Base, Organization, User
 from app.models.chat import ChatMessage, ChatSession, MessageType
 from app.models.document import Document, DocumentType
@@ -519,9 +520,10 @@ class TestFilesProxyOrglessDenied:
 class TestAgentMemoryNamespaces:
     @pytest.mark.asyncio
     async def test_memory_api_namespace_uses_true_org_key_not_fake_1(self):
-        """memory API 的命名空间用真实 org（无组织如实为 None），不再冒充 1 号组织。
+        """memory API 的命名空间用真实 org；无组织显式 403（W0-6 fail-closed）。
 
-        变异验证：`get_user_org_id(...)` 改回 `organization_id or 1` → 无组织用例红。
+        变异验证：`_get_user_memory_system` 去掉 org 判空 → 无组织用例红
+        （会构造出 "None:5:default" 命名空间）。
         """
         import app.api.v1.endpoints.memory as memory_mod
 
@@ -535,11 +537,12 @@ class TestAgentMemoryNamespaces:
         with patch.object(
             memory_mod, "get_memory_system", new=MagicMock(side_effect=_fake_get)
         ):
-            await memory_mod._get_user_memory_system(
-                SimpleNamespace(organization_id=None, id=5), "default"
-            )
-            assert captured == ["None:5:default"], (
-                "无组织用户的命名空间标签必须如实（bug 形态: '1:5:default'）"
+            with pytest.raises(AuthorizationError):
+                await memory_mod._get_user_memory_system(
+                    SimpleNamespace(organization_id=None, id=5), "default"
+                )
+            assert captured == [], (
+                "无组织用户不得取用任何命名空间（bug 形态: '1:5:default' / 'None:5:default'）"
             )
 
             captured.clear()
@@ -601,15 +604,14 @@ class TestAgentMemoryNamespaces:
             "feedback 写入的 lesson 必须能被 agent 侧同一命名空间加载（修前静默失效）"
         )
 
-        # 反向：不得写进 1 号组织 / 历史 None 的命名空间（bug 形态的落点）
+        # 反向：不得写进 1 号组织命名空间；历史 raw org（None）命名空间
+        # 在 W0-6 后已不可构造（get_memory_system 显式拒绝）。
         bugged_ns = get_memory_system(1, 77, f"session:{session_id}")
         assert not any(l.get("lesson") == "回答与文档不符" for l in bugged_ns.reflective.lessons), (
             "lesson 不得落入 1 号组织命名空间"
         )
-        legacy_ns = get_memory_system(None, 77, f"session:{session_id}")
-        assert not any(
-            l.get("lesson") == "回答与文档不符" for l in legacy_ns.reflective.lessons
-        ), "lesson 不得沿用历史会话的 raw org（None）"
+        with pytest.raises(ValueError):
+            get_memory_system(None, 77, f"session:{session_id}")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -956,11 +958,9 @@ class TestAgentChatSessionOrgSymmetry:
             lesson.get("lesson") == "R2 判别：答案不对"
             for lesson in reader.system.reflective.lessons
         ), "运行侧（resolved org 42）必须能加载 feedback 写入的 lesson（修前静默失效）"
-        bugged_ns = get_memory_system(None, 77, f"session:{session_id}")
-        assert not any(
-            lesson.get("lesson") == "R2 判别：答案不对"
-            for lesson in bugged_ns.reflective.lessons
-        ), "lesson 不得落在 raw org（None）命名空间"
+        # W0-6：历史 raw org（None）命名空间已不可构造/读取。
+        with pytest.raises(ValueError):
+            get_memory_system(None, 77, f"session:{session_id}")
 
     def test_feedback_lesson_resolves_run_org_for_legacy_orgless_session(self, client: TestClient):
         """历史会话（落库 org=None）上的 feedback：lesson 仍落在运行侧 resolved org。
@@ -1006,11 +1006,9 @@ class TestAgentChatSessionOrgSymmetry:
             lesson.get("lesson") == "遗留会话判别"
             for lesson in reader.system.reflective.lessons
         ), "历史会话的 feedback lesson 也必须落在运行侧 resolved org（42）"
-        bugged_ns = get_memory_system(None, 77, f"session:{session_id}")
-        assert not any(
-            lesson.get("lesson") == "遗留会话判别"
-            for lesson in bugged_ns.reflective.lessons
-        ), "不得沿用会话落库的 raw org（None）"
+        # W0-6：会话落库的 raw org（None）命名空间已不可构造/读取。
+        with pytest.raises(ValueError):
+            get_memory_system(None, 77, f"session:{session_id}")
 
     @pytest.mark.asyncio
     async def test_save_session_interaction_heals_legacy_none_org(self, monkeypatch):
