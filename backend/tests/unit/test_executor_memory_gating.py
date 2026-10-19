@@ -2,7 +2,7 @@
 
 先红：修复前 `_execute_step_once` 无条件 `await memory.get_context_for_query(...)`
 ——enable_memory=False 的子代理/会话仍每步打 embedding 端点。
-修复后：关闭记忆 → 零回忆调用；开启记忆 → 回忆照常进入提示词构建。
+修复后：关闭记忆 → 零回忆调用且回忆文本不进入提示词；开启记忆 → 照常回忆并进入提示词。
 
 变异点：删除 executor 中的 enable_memory 门 → 关闭态用例红（await_count 变 1）。
 显式引用/@文档（loop 的引用路径）不属于被动回忆，不受此门控；本用例只钉执行器路径。
@@ -16,10 +16,12 @@ from app.agent.executor import Executor
 from app.agent.planner import Plan, PlanStep
 
 
-def _client_that_fails() -> MagicMock:
+def _recording_failing_client(sink: dict) -> MagicMock:
+    """把一次 LLM 调用的 messages 录进 sink，再以异常快速失败（免真网络）。"""
     client = MagicMock()
 
     async def _fail(*, messages, tools=None, **kwargs):
+        sink["messages"] = messages
         raise ConnectionError("provider down")
 
     client.chat.completions.create = _fail
@@ -49,11 +51,16 @@ def _config(enable_memory: bool) -> AgentConfig:
     )
 
 
+def _messages_text(sink: dict) -> str:
+    return "\n".join(str(m.get("content", "")) for m in sink.get("messages", []))
+
+
 @pytest.mark.asyncio
 async def test_memory_disabled_skips_recall_entirely():
     memory = MagicMock()
-    memory.get_context_for_query = AsyncMock(return_value="SHOULD NOT BE USED")
-    ex = Executor(_client_that_fails(), _config(enable_memory=False), memory)
+    memory.get_context_for_query = AsyncMock(return_value="MEMORY-TEXT-SHOULD-NOT-APPEAR")
+    sink: dict = {}
+    ex = Executor(_recording_failing_client(sink), _config(enable_memory=False), memory)
     step = PlanStep(id="s1", description="查一下天气")
     plan = Plan(id="p1", goal="g", steps=[step])
 
@@ -63,13 +70,17 @@ async def test_memory_disabled_skips_recall_entirely():
         "enable_memory=False 时执行器不得调用记忆回忆"
         "（变异：删门控 → 本断言红）"
     )
+    assert "MEMORY-TEXT-SHOULD-NOT-APPEAR" not in _messages_text(sink), (
+        "关闭记忆时回忆文本不得混入提示词（门控要断在调用处，而不是只断指标）"
+    )
 
 
 @pytest.mark.asyncio
 async def test_memory_enabled_calls_recall_once():
     memory = MagicMock()
     memory.get_context_for_query = AsyncMock(return_value="历史经验：先查文档。")
-    ex = Executor(_client_that_fails(), _config(enable_memory=True), memory)
+    sink: dict = {}
+    ex = Executor(_recording_failing_client(sink), _config(enable_memory=True), memory)
     step = PlanStep(id="s1", description="查一下天气")
     plan = Plan(id="p1", goal="g", steps=[step])
 
@@ -77,4 +88,7 @@ async def test_memory_enabled_calls_recall_once():
 
     assert memory.get_context_for_query.await_count == 1, (
         "开启记忆时回忆必须照常调用（误伤对照）"
+    )
+    assert "历史经验：先查文档。" in _messages_text(sink), (
+        "开启记忆时回忆文本必须真正进入提示词构建（任务书口径）"
     )
