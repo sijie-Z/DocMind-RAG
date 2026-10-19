@@ -44,6 +44,13 @@
           <span data-testid="onboarding-progress" class="text-sm font-medium text-blue-600 dark:text-blue-400">
             {{ progressText }}
           </span>
+          <!-- T8：父级统计刷新在途时局部 loading；块本身保持挂载，重试入口不消失 -->
+          <n-spin
+            v-if="statsLoading"
+            data-testid="onboarding-refreshing"
+            :size="14"
+            :aria-label="t('common.loading')"
+          />
           <n-button text size="small" :loading="llmLoading" data-testid="onboarding-refresh" @click="refreshAll">
             {{ t('dashboard.onboarding.refresh') }}
           </n-button>
@@ -120,7 +127,10 @@ import { getLLMStatus } from '@/api/monitoring'
  * （docmind.onboarding.skipped.<userId>），刷新/重登后恢复，换账号互不影响。
  */
 const props = defineProps<{
+  /** 父级「曾就绪」记忆位：首次 ready 后恒为 true，刷新期间清单不卸载 */
   statsReady: boolean
+  /** 父级统计刷新在途：清单内显示局部 loading（不阻塞块内重试） */
+  statsLoading?: boolean
   fileCount: number
   knowledgeCount: number
   messageCount: number

@@ -58,7 +58,8 @@
 
     <!-- B5 · 注册后 4 步清单：真实数据推导完成态；跳过折叠不消失 -->
     <OnboardingChecklist
-      :stats-ready="statsState === 'ready' && !statsDegraded"
+      :stats-ready="statsEverReady"
+      :stats-loading="statsState === 'loading'"
       :file-count="stats.file_count"
       :knowledge-count="stats.knowledge_count"
       :message-count="stats.message_count"
@@ -382,6 +383,12 @@ const convState = ref<BlockState>('loading')
 const ragState = ref<BlockState>('loading')
 /** 统计接口降级（issue #301：200 + 全零 + degraded=true）——不得当作真实 0 渲染清单 */
 const statsDegraded = ref(false)
+/**
+ * 「曾就绪」记忆位（T8）：首次拿到非降级真实统计后置 true，刷新期间不回落。
+ * onboarding 清单据此保持挂载——刷新挂起/失败时不卸载，块内重试入口始终可用；
+ * 首次加载失败/降级（从未 ready）仍不显示清单。
+ */
+const statsEverReady = ref(false)
 
 const formatSize = (bytes: number) => formatFileSize(bytes)
 const formatDate = (date: string) => formatDateUtil(date)
@@ -481,6 +488,8 @@ const loadStats = async () => {
       activity_trend: statsRes.data.activity_trend || [0, 0, 0, 0, 0, 0, 0]
     }
     statsDegraded.value = statsRes.data.degraded === true
+    // 只有真实（非降级）统计才点亮「曾就绪」；刷新失败/降级不回落到未就绪
+    if (!statsDegraded.value) statsEverReady.value = true
     statsState.value = 'ready'
     // 等本区块内容（含图表容器）渲染后再初始化，不依赖其它区块
     await nextTick()
