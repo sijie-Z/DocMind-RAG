@@ -33,6 +33,11 @@
 --      SELECT * FROM w0_1_rbac_admin_backup ORDER BY user_id;
 --
 -- 回滚：w0_1_rbac_admin_scope_down.sql（依据备份表精确恢复；备份表保留备查）。
+-- 补救（分类首次快照冻结）：若首次成功执行后才发现 allowlist 漏登记，
+--   重放不会重分类——先执行 down 脚本恢复，再补登记并重跑 up；或依据
+--   backup 表手工 UPDATE users SET is_superuser=1 后复核。
+-- staging 表（admin_candidates / role_seed / guard）可保留（不影响业务）；
+--   确认迁移完成后可手工 DROP。
 -- 说明：脚本可安全重放——已迁移账号在重放时不再命中 role='admin'；
 --       角色/权限/关联的写入均为「先删目标子集再插入」，不依赖
 --       INSERT...SELECT 对目标表的子查询（规避 MySQL 错误 1093）。

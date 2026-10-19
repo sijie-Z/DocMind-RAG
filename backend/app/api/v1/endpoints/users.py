@@ -195,15 +195,16 @@ async def update_user_admin(
         ).scalar_one_or_none()
         if not user:
             raise NotFoundError("用户不存在")
-        # W0-1：非平台管理员不得操作平台超管账号（状态/资料/密码/角色），
-        # 否则同组织 OrgAdmin 可停用超管或接管其账号（提权链）。
-        if user.is_superuser and not current_user.is_superuser:
-            raise AuthorizationError("无权操作平台管理员账号")
-        # 安全加固：非超管仅能修改同组织成员；无组织用户一律拒绝（fail closed）
+        # 安全加固：非超管仅能修改同组织成员；无组织用户一律拒绝（fail closed）。
+        # 先做归属校验，避免对跨组织目标先暴露「是否平台超管」的枚举 oracle。
         if not current_user.is_superuser and (
             current_user.organization_id is None
             or user.organization_id != current_user.organization_id
         ):
+            raise AuthorizationError("无权修改该用户")
+        # W0-1：非平台管理员不得操作平台超管账号（状态/资料/密码/角色），
+        # 否则同组织 OrgAdmin 可停用超管或接管其账号（提权链）。
+        if user.is_superuser and not current_user.is_superuser:
             raise AuthorizationError("无权修改该用户")
 
         if body.email is not None and body.email != user.email:
@@ -281,14 +282,15 @@ async def reset_user_password_admin(
         ).scalar_one_or_none()
         if not user:
             raise NotFoundError("用户不存在")
-        # W0-1：非平台管理员不得重置平台超管密码（防同组织 OrgAdmin 接管超管）。
-        if user.is_superuser and not current_user.is_superuser:
-            raise AuthorizationError("无权操作平台管理员账号")
-        # 安全加固：非超管仅能重置同组织成员密码；无组织用户一律拒绝（fail closed）
+        # 安全加固：非超管仅能重置同组织成员密码；无组织用户一律拒绝（fail closed）。
+        # 先做归属校验，避免跨组织目标暴露「是否平台超管」的枚举 oracle。
         if not current_user.is_superuser and (
             current_user.organization_id is None
             or user.organization_id != current_user.organization_id
         ):
+            raise AuthorizationError("无权重置该用户密码")
+        # W0-1：非平台管理员不得重置平台超管密码（防同组织 OrgAdmin 接管超管）。
+        if user.is_superuser and not current_user.is_superuser:
             raise AuthorizationError("无权重置该用户密码")
 
         user.hashed_password = auth_service.hash_password(body.new_password)
@@ -631,6 +633,9 @@ async def switch_my_organization(
         previous_org_id = user.organization_id
         organization_payload = _organization_public_dict(organization)
         user.organization_id = organization_id
+        # W0-1：切换后前端需要立即知道目标组织的 per-org 管理身份，
+        # 否则组织管理菜单要等下一次 /users/me 才刷新。
+        is_org_admin_for_target = await is_org_admin(db, user, organization_id)
         await _log_user_activity(
             db,
             user.id,
@@ -648,6 +653,7 @@ async def switch_my_organization(
             "data": {
                 "organization_id": organization_id,
                 "organization": organization_payload,
+                "is_org_admin": is_org_admin_for_target,
             },
         }
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
@@ -1076,15 +1082,16 @@ async def update_user_role(
         if user.id == current_user.id:
             raise ValidationError("不能修改自己的角色")
 
-        # W0-1：非平台管理员不得改动平台超管的角色标签/组织角色关联。
-        if user.is_superuser and not current_user.is_superuser:
-            raise AuthorizationError("无权操作平台管理员账号")
-
-        # 安全加固：非超管仅能修改同组织成员的角色，禁止跨组织提权
+        # 安全加固：非超管仅能修改同组织成员的角色，禁止跨组织提权。
+        # 先做归属校验，避免跨组织目标暴露「是否平台超管」的枚举 oracle。
         if not current_user.is_superuser and (
             user.organization_id != current_user.organization_id
             or current_user.organization_id is None
         ):
+            raise AuthorizationError("无权修改该用户的角色")
+
+        # W0-1：非平台管理员不得改动平台超管的角色标签/组织角色关联。
+        if user.is_superuser and not current_user.is_superuser:
             raise AuthorizationError("无权修改该用户的角色")
 
         # 安全加固：角色变更立即对后续请求生效（身份由每次请求回源 DB 决定）。

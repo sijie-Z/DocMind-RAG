@@ -9,6 +9,7 @@
  * 变异点：还原硬编码数组 → 用例 1 红；还原 multiple → 用例 2 红。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
@@ -110,6 +111,7 @@ function findOrgSelect(wrapper: ReturnType<typeof mountView>) {
 }
 
 beforeEach(() => {
+  setActivePinia(createPinia())
   mockedGetUsers.mockReset()
   mockedGetOrganizations.mockReset()
 })

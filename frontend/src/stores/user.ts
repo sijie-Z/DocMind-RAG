@@ -103,7 +103,16 @@ export const useUserStore = defineStore('user', () => {
     const appliedOrgId = Number(payload.organization_id ?? orgId)
     currentOrganizationId.value = appliedOrgId
     if (userInfo.value) {
-      userInfo.value = { ...userInfo.value, organization_id: appliedOrgId }
+      // W0-1：服务端随切换结果回传目标组织的 per-org 管理身份；
+      // 立即更新，避免组织管理菜单最长滞后到下次 /users/me（5 分钟）。
+      const targetIsOrgAdmin = payload.is_org_admin
+      userInfo.value = {
+        ...userInfo.value,
+        organization_id: appliedOrgId,
+        ...(typeof targetIsOrgAdmin === 'boolean'
+          ? { is_org_admin: targetIsOrgAdmin }
+          : {}),
+      }
     }
     organizationVersion.value += 1
     return { success: true as const, organizationId: appliedOrgId }

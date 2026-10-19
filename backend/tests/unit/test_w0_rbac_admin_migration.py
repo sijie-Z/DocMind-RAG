@@ -1,7 +1,8 @@
 """W0-1 迁移脚本测试：users.role='admin' 分类 / OrgAdmin 回填 / 回滚。
 
 用临时 SQLite 库执行 ``backend/scripts/migrations/w0_1_rbac_admin_scope_*.sql``
-（脚本本身保持 MySQL/SQLite 双兼容的纯 SQL）。覆盖：
+（脚本结构上兼容 MySQL/SQLite；真实 MySQL 8.0.16+ 冒烟属于部署前 gate，
+本机栈停未执行）。覆盖：
 
 - 平台管理员（显式 is_superuser 或 allowlist）→ is_superuser=1；
 - 其余有组织 admin → 回填该组织 OrgAdmin 关联（users.role 降为 'user'）；

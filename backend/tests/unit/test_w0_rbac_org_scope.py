@@ -561,6 +561,13 @@ async def test_org_admin_cannot_reparent_organization(api):
     )
     assert r.status_code == 403, r.text
 
+    # 前端编辑/拖拽会回传未变化的 parent_id —— 值不变时不得误伤
+    r = await _call(
+        api, ORG_A_ADMIN, "PUT", "/api/v1/organizations/1",
+        json={"parent_id": None, "description": "same-parent-edit"},
+    )
+    assert r.status_code == 200, r.text
+
     r = await _call(
         api, ORG_A_ADMIN, "PUT", "/api/v1/organizations/1",
         json={"description": "renamed-by-org-admin"},
@@ -572,6 +579,28 @@ async def test_org_admin_cannot_reparent_organization(api):
         json={"parent_id": None},
     )
     assert r.status_code == 200, r.text
+
+
+@pytest.mark.asyncio
+async def test_system_role_cannot_be_revived_via_org_association(api):
+    """防御纵深：SysAdmin 系统角色不得经组织角色关联表在组织内复活。"""
+    from app.services.permission_service import permission_service
+
+    async with api.factory() as s:
+        sysadmin_role_id = (
+            await s.execute(select(Role.id).where(Role.name == "SysAdmin"))
+        ).scalar_one()
+        await s.execute(
+            user_organization_role_association.insert().values(
+                user_id=11, organization_id=1, role_id=sysadmin_role_id
+            )
+        )
+        await s.commit()
+        perms = await permission_service.get_user_permissions(s, ORG_A_MEMBER, 1)
+
+    assert PermissionType.VIEW_SYSTEM_HEALTH.value not in perms
+    assert PermissionType.MANAGE_SYSTEM_PROMPTS.value not in perms
+    assert PermissionType.DOCUMENT_READ.value in perms
 
 
 @pytest.mark.asyncio

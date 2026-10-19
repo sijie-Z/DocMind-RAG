@@ -16,6 +16,7 @@
  * - 状态列改回 row.status === 'active' → 「is_active」用例红（全员"禁用"）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
@@ -124,6 +125,7 @@ function mountView() {
 }
 
 beforeEach(() => {
+  setActivePinia(createPinia())
   mockedGetUsers.mockReset()
 })
 

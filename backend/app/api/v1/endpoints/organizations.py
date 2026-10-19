@@ -197,8 +197,13 @@ async def update_organization(
     updates = org_in.model_dump(exclude_unset=True)
     # W0-1：组织层级（parent_id）是跨租户结构写——组织管理员可改本组织
     # 展示字段与排序，但不得把组织挂到其他组织下；层级调整仅平台管理员。
+    # 只在「值确实变化」时拒绝：前端编辑/拖拽会回传未变化的 parent_id。
     if "parent_id" in updates and not is_platform_admin(current_user):
-        raise AuthorizationError("仅平台管理员可调整组织层级")
+        current_org = await db.get(Organization, org_id)
+        if current_org is None:
+            raise NotFoundError("组织不存在")
+        if updates["parent_id"] != current_org.parent_id:
+            raise AuthorizationError("仅平台管理员可调整组织层级")
     try:
         updated_org = await organization_service.update_organization(
             db, org_id, updates
@@ -328,14 +333,14 @@ async def add_organization_member(
         raise NotFoundError("用户不存在")
 
     user_obj: Any = user
-    # W0-1（blocker）：非平台管理员不得把平台超管拉入/移出组织，也不得跨组织
-    # 拉人——否则 OrgAdmin 可接管超管账号或对他租户成员做管理面写操作。
-    if user_obj.is_superuser and not current_user.is_superuser:
-        raise AuthorizationError("无权操作平台管理员账号")
+    # W0-1（blocker）：非平台管理员不得跨组织拉人，也不得操作平台超管。
+    # 先判跨组织归属（对所有非本组织目标同一响应），再判超管，避免枚举 oracle。
     if (
         not current_user.is_superuser
         and user_obj.organization_id not in (None, org_id)
     ):
+        raise AuthorizationError("无权将其他组织的用户加入本组织")
+    if user_obj.is_superuser and not current_user.is_superuser:
         raise AuthorizationError("无权将其他组织的用户加入本组织")
 
     old_org_id = user_obj.organization_id

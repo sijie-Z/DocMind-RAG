@@ -23,6 +23,11 @@ SysAdmin，组织资源端点也散落 ``current_user.role != "admin"`` 判定�
   ``role == "admin"``（不是身份属性读取）。
 - 语法损坏的文件按违规处理（fail closed），不静默跳过。
 
+覆盖边界：本门禁针对直接表达式与同模块简单赋值传播；跨函数 helper
+（``def is_admin(r): return r == "admin"; is_admin(u.role)``）、跨模块导入
+常量、f-string/海象等间接形态不在静态可判范围——它是回归护栏，不构成
+「穷尽禁止」的证明。
+
 用法::
 
     python scripts/check_rbac_admin_bypass.py            # 扫描 backend/app
