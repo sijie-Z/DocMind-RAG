@@ -9,6 +9,7 @@
  * 改回 6，本文件「6 位被拦下」断言即红（resetUserPassword 会被调用）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
@@ -94,6 +95,7 @@ async function openResetAndSubmit(password: string) {
 }
 
 beforeEach(() => {
+  setActivePinia(createPinia())
   vi.clearAllMocks()
   mockedGetUsers.mockResolvedValue({ data: { total: 0, skip: 0, limit: 100, users: [] } } as never)
   mockedGetOrganizations.mockResolvedValue({ data: { data: [] } } as never)

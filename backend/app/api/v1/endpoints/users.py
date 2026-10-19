@@ -21,7 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.endpoints.notifications import create_notification
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import get_current_user, permission_required, require_organization
+from app.core.security import (
+    get_current_user,
+    is_org_admin,
+    permission_required,
+    require_organization,
+)
 from app.exceptions import (
     AppError,
     AuthorizationError,
@@ -44,6 +49,7 @@ from app.schemas.user import (
     UserUpdateProfile,
 )
 from app.services.auth_service import auth_service
+from app.services.permission_service import permission_service
 
 router = APIRouter()
 
@@ -167,6 +173,13 @@ async def create_user_admin(
         if body.remark:
             user.preferences = json.dumps({"remark": body.remark}, ensure_ascii=False)
 
+        # W0-1：组织管理员权限落到 per-org 角色关联（唯一权威）；users.role
+        # 仅作为展示标签保留。
+        if body.role == "admin" and user.organization_id is not None:
+            await permission_service.set_org_admin(
+                db, user.id, user.organization_id, True
+            )
+
         await _log_user_activity(
             db,
             current_user.id,
@@ -195,11 +208,16 @@ async def update_user_admin(
         ).scalar_one_or_none()
         if not user:
             raise NotFoundError("用户不存在")
-        # 安全加固：非超管仅能修改同组织成员；无组织用户一律拒绝（fail closed）
+        # 安全加固：非超管仅能修改同组织成员；无组织用户一律拒绝（fail closed）。
+        # 先做归属校验，避免对跨组织目标先暴露「是否平台超管」的枚举 oracle。
         if not current_user.is_superuser and (
             current_user.organization_id is None
             or user.organization_id != current_user.organization_id
         ):
+            raise AuthorizationError("无权修改该用户")
+        # W0-1：非平台管理员不得操作平台超管账号（状态/资料/密码/角色），
+        # 否则同组织 OrgAdmin 可停用超管或接管其账号（提权链）。
+        if user.is_superuser and not current_user.is_superuser:
             raise AuthorizationError("无权修改该用户")
 
         if body.email is not None and body.email != user.email:
@@ -213,19 +231,31 @@ async def update_user_admin(
             user.full_name = body.nickname
         if body.phone is not None:
             user.phone = body.phone
-        if body.role is not None:
-            user.role = "admin" if body.role == "admin" else "user"
         if body.status is not None:
             user.is_active = body.status != "inactive"
         if body.organization_ids and len(body.organization_ids) > 1:
             # T8：同创建路径——多值显式 400，不再静默取首。
             raise ValidationError("仅支持分配单一组织")
+        old_org_id = user.organization_id
         if body.organization_ids:
             org_id = body.organization_ids[0]
             # S3 安全加固：无组织用户不再兜底到 1 号组织，直接 403
             if not current_user.is_superuser and org_id != await require_organization(current_user, db):
                 raise AuthorizationError("无权将用户移动到该组织")
             user.organization_id = org_id
+            # W0-1：调离组织时撤销旧组织的 OrgAdmin 关联，避免遗留跨组织管理权。
+            if old_org_id is not None and old_org_id != org_id:
+                await permission_service.set_org_admin(db, user_id, old_org_id, False)
+                user.role = "user"
+        if body.role is not None:
+            new_role = "admin" if body.role == "admin" else "user"
+            # W0-1：组织管理员权限落到 per-org 角色关联（唯一权威）；
+            # users.role 仅作为展示标签保留。
+            if user.organization_id is not None:
+                await permission_service.set_org_admin(
+                    db, user_id, user.organization_id, new_role == "admin"
+                )
+            user.role = new_role
         if body.remark is not None:
             try:
                 pref = json.loads(user.preferences) if user.preferences else {}
@@ -265,11 +295,15 @@ async def reset_user_password_admin(
         ).scalar_one_or_none()
         if not user:
             raise NotFoundError("用户不存在")
-        # 安全加固：非超管仅能重置同组织成员密码；无组织用户一律拒绝（fail closed）
+        # 安全加固：非超管仅能重置同组织成员密码；无组织用户一律拒绝（fail closed）。
+        # 先做归属校验，避免跨组织目标暴露「是否平台超管」的枚举 oracle。
         if not current_user.is_superuser and (
             current_user.organization_id is None
             or user.organization_id != current_user.organization_id
         ):
+            raise AuthorizationError("无权重置该用户密码")
+        # W0-1：非平台管理员不得重置平台超管密码（防同组织 OrgAdmin 接管超管）。
+        if user.is_superuser and not current_user.is_superuser:
             raise AuthorizationError("无权重置该用户密码")
 
         user.hashed_password = auth_service.hash_password(body.new_password)
@@ -484,9 +518,13 @@ async def get_user_profile(
             "bio": bio,
             "organization_id": current_user.organization_id,
             "role": current_user.role,
-            # 与后端鉴权口径一致（is_superuser or role=="admin"）：前端
-            # isAdmin 组合判定依赖此字段，缺失会让超管失去管理入口。
+            # W0-1：平台管理员只认显式 is_superuser（users.role 不再参与鉴权）；
+            # 前端 isAdmin 组合判定依赖此字段，缺失会让超管失去管理入口。
             "is_superuser": bool(current_user.is_superuser),
+            # W0-1：当前组织的 OrgAdmin 角色（per-org），用于区分组织管理页。
+            "is_org_admin": await is_org_admin(
+                db, current_user, current_user.organization_id
+            ),
             "is_active": current_user.is_active,
             "created_at": current_user.created_at,
             "last_login_at": current_user.last_login_at,
@@ -608,6 +646,9 @@ async def switch_my_organization(
         previous_org_id = user.organization_id
         organization_payload = _organization_public_dict(organization)
         user.organization_id = organization_id
+        # W0-1：切换后前端需要立即知道目标组织的 per-org 管理身份，
+        # 否则组织管理菜单要等下一次 /users/me 才刷新。
+        is_org_admin_for_target = await is_org_admin(db, user, organization_id)
         await _log_user_activity(
             db,
             user.id,
@@ -625,6 +666,7 @@ async def switch_my_organization(
             "data": {
                 "organization_id": organization_id,
                 "organization": organization_payload,
+                "is_org_admin": is_org_admin_for_target,
             },
         }
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
@@ -1053,14 +1095,26 @@ async def update_user_role(
         if user.id == current_user.id:
             raise ValidationError("不能修改自己的角色")
 
-        # 安全加固：非超管仅能修改同组织成员的角色，禁止跨组织提权
+        # 安全加固：非超管仅能修改同组织成员的角色，禁止跨组织提权。
+        # 先做归属校验，避免跨组织目标暴露「是否平台超管」的枚举 oracle。
         if not current_user.is_superuser and (
             user.organization_id != current_user.organization_id
             or current_user.organization_id is None
         ):
             raise AuthorizationError("无权修改该用户的角色")
 
-        # 安全加固：角色变更立即对后续请求生效（身份由每次请求回源 DB 决定）
+        # W0-1：非平台管理员不得改动平台超管的角色标签/组织角色关联。
+        if user.is_superuser and not current_user.is_superuser:
+            raise AuthorizationError("无权修改该用户的角色")
+
+        # 安全加固：角色变更立即对后续请求生效（身份由每次请求回源 DB 决定）。
+        # W0-1：组织管理员权限写入 per-org 角色关联（唯一权威）；users.role
+        # 仅作为展示标签保留，任何鉴权路径都不读取。
+        old_role = user.role
+        if user.organization_id is not None:
+            await permission_service.set_org_admin(
+                db, user_id, user.organization_id, role == "admin"
+            )
         user_obj: Any = user
         user_obj.role = role
         await _log_user_activity(
@@ -1069,7 +1123,7 @@ async def update_user_role(
             action="update_role",
             target_type="user",
             target_id=str(user_id),
-            detail=f"将用户 {user.username} 的角色从 {user.role} 改为 {role}",
+            detail=f"将用户 {user.username} 的角色从 {old_role} 改为 {role}",
         )
         await db.commit()
         return {"message": "用户角色修改成功", "user_id": user_id, "new_role": role}

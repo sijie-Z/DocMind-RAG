@@ -8,6 +8,7 @@
  * 变异点：删「添加成员」按钮 → 用例红；删行内控件 → 用例红。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
@@ -118,6 +119,7 @@ async function openOrgDrawer(wrapper: ReturnType<typeof mountView>) {
 }
 
 beforeEach(() => {
+  setActivePinia(createPinia())
   vi.clearAllMocks()
   mockedGetOrganizations.mockResolvedValue({ data: { data: { data: [ORG], total: 1 } } } as never)
   mockedGetTree.mockResolvedValue({ data: { data: [ORG] } } as never)

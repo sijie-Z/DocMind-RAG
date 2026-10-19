@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user, permission_required
+from app.core.security import get_current_user, is_platform_admin, permission_required
 from app.exceptions import NotFoundError
 from app.models.manual import SystemManual
 from app.models.rbac import PermissionType
@@ -51,8 +51,9 @@ async def get_manuals(
     """获取系统操作手册列表 (所有已登录用户可见)"""
     query = select(SystemManual)
 
-    # 如果不是管理员，只能看发布的
-    if current_user.role != "admin":
+    # 手册是平台级内容（W0-1）：只有显式平台管理员能看到未发布草稿；
+    # users.role='admin' / 组织管理员都按普通用户口径处理。
+    if not is_platform_admin(current_user):
         query = query.where(SystemManual.is_published)
 
     if category:
@@ -71,7 +72,7 @@ async def get_manual(
 ):
     """获取单个手册详情"""
     query = select(SystemManual).where(SystemManual.id == manual_id)
-    if current_user.role != "admin":
+    if not is_platform_admin(current_user):
         query = query.where(SystemManual.is_published)
 
     result = await db.execute(query)

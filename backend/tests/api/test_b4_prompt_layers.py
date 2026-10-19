@@ -20,6 +20,7 @@ import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.organization import Organization
 from app.models.prompt import PromptTemplate
+from app.models.rbac import Role, user_organization_role_association
 
 PROMPTS = "/api/v1/prompts"
 
@@ -55,6 +56,18 @@ async def api():
                 Organization(id=1, name="org-a", owner_id=1),
                 Organization(id=2, name="org-b", owner_id=3),
             ]
+        )
+        await s.flush()
+        # W0-1：组织管理员 = per-org OrgAdmin 角色关联（users.role 不再参与鉴权）
+        org_admin_role = Role(
+            name="OrgAdmin", description="组织管理员", is_system_role=False
+        )
+        s.add(org_admin_role)
+        await s.flush()
+        await s.execute(
+            user_organization_role_association.insert().values(
+                user_id=10, organization_id=1, role_id=org_admin_role.id
+            )
         )
         s.add_all(
             [

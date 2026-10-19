@@ -61,13 +61,14 @@ async def test_non_admin_forbidden(api):
 
 
 @pytest.mark.asyncio
-async def test_admin_role_allowed(api):
+async def test_role_admin_label_is_not_platform_admin(api):
+    """W0-1：users.role='admin' 不再映射为平台管理员（ADR-001 D3）。"""
     from app.agent.mcp.manager import MCPManager
 
     api.state.user = _make_user(role="admin")
     _use_manager(api, MCPManager(configs=[]))
     r = await _get(api)
-    assert r.status_code == 200
+    assert r.status_code == 403
 
 
 @pytest.mark.asyncio

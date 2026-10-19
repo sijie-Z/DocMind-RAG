@@ -1,8 +1,9 @@
 """组织设置（B4 / D5）：生效值查询、管理端更新与审计读取。
 
-鉴权口径（沿用 A2）：
+鉴权口径（W0-1 / ADR-001 D3）：
 - GET（生效值）：组织成员即可读——普通成员的聊天隐私开关需要知道组织策略；
-- PUT / 审计读取：仅组织管理员（``users.role == "admin"``）或超管；
+- PUT / 审计读取：仅**本组织**管理员（``user_organization_role_association``
+  中的 OrgAdmin 角色）或平台超管（显式 ``is_superuser``）；
 - 非超管一律要求目标组织 = 当前组织或 ``user_organization`` 成员关系，
   跨组织 403（不泄露存在性之外的信息）；
 - 所有写入都通过 ``audit_service`` 落 ``user_activity_logs``（action =
@@ -15,7 +16,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_org_admin
 from app.exceptions import AuthorizationError, NotFoundError
 from app.models.organization import Organization, user_organization
 from app.models.user import User
@@ -55,11 +56,11 @@ async def _ensure_membership(
         raise AuthorizationError("无权访问该组织的设置")
 
 
-def _ensure_org_admin(current_user: User) -> None:
-    if getattr(current_user, "is_superuser", False):
-        return
-    if (getattr(current_user, "role", "") or "").lower() != "admin":
-        raise AuthorizationError("需要组织管理员权限")
+async def _ensure_org_admin(
+    db: AsyncSession, current_user: User, organization_id: int
+) -> None:
+    """要求调用者是**该组织**的管理员（超管旁路）；users.role 不参与判定。"""
+    await require_org_admin(db, current_user, organization_id)
 
 
 async def _org_or_404(db: AsyncSession, organization_id: int) -> Organization:
@@ -113,7 +114,7 @@ async def update_organization_settings(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_org_admin(current_user)
+    await _ensure_org_admin(db, current_user, organization_id)
     await _ensure_membership(db, current_user, organization_id)
     await _org_or_404(db, organization_id)
 
@@ -147,7 +148,7 @@ async def get_organization_settings_audit(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_org_admin(current_user)
+    await _ensure_org_admin(db, current_user, organization_id)
     await _ensure_membership(db, current_user, organization_id)
     await _org_or_404(db, organization_id)
 
