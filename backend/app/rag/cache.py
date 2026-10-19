@@ -22,6 +22,31 @@ def _get_redis():
     return redis_client
 
 
+def _require_org_id(organization_id: int | None, where: str) -> int:
+    """Validate an explicit tenant scope before touching a cache namespace.
+
+    W0-6：``SemanticCache.get/set`` 此前以 ``organization_id: int = 0`` 作为
+    默认值——漏传组织的调用会静默读写 ``org:0`` 这一跨租户共享命名空间。
+    现在组织上下文是必填参数，且 0 / -1 / None 一律显式拒绝（fail-closed）。
+    """
+    if organization_id is None:
+        raise ValueError(f"{where} 缺少 organization_id，拒绝在无组织上下文下访问缓存")
+    if isinstance(organization_id, bool):
+        raise ValueError(f"{where} 的 organization_id 非法: {organization_id!r}")
+    try:
+        org_id = int(organization_id)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"{where} 的 organization_id 非法: {organization_id!r}"
+        ) from None
+    if org_id <= 0:
+        raise ValueError(
+            f"{where} 的 organization_id={organization_id!r} 非法："
+            "必须是正整数组织 ID（0/-1 是历史 fail-open 哨兵，已禁用）"
+        )
+    return org_id
+
+
 # 修复（R5）：内存回退缓存必须是进程级共享注册表。
 # 此前每次 clear_for_org 调用都 `RetrievalCache()` 新建实例，清空的是刚创建的空
 # _memory，而真正服务读写的实例是 pipeline 单例持有的那个（dependencies.py），
@@ -214,8 +239,12 @@ class SemanticCache:
         vec_str = ",".join(f"{v:.4f}" for v in embedding[:20])
         return hashlib.md5(vec_str.encode(), usedforsecurity=False).hexdigest()[:16]
 
-    async def get(self, query_embedding: list[float], organization_id: int = 0) -> dict[str, Any] | None:
-        """Find the most similar cached answer using sorted set candidates."""
+    async def get(self, query_embedding: list[float], organization_id: int) -> dict[str, Any] | None:
+        """Find the most similar cached answer using sorted set candidates.
+
+        W0-6：organization_id 必填；非法组织在进入缓存命名空间前显式拒绝。
+        """
+        org_id = _require_org_id(organization_id, "SemanticCache.get")
         if not query_embedding:
             return None
         try:
@@ -223,8 +252,8 @@ class SemanticCache:
             if rc is None:
                 return None
 
-            index_key = f"{self.index_key}:{organization_id}"
-            org_prefix = f"org:{organization_id}:"
+            index_key = f"{self.index_key}:{org_id}"
+            org_prefix = f"org:{org_id}:"
             query_score = self._quantize(query_embedding)
             candidates = await rc.zrangebyscore(
                 index_key,
@@ -261,8 +290,21 @@ class SemanticCache:
             logger.error(f"Semantic cache lookup failed: {e}")
             return None
 
-    async def set(self, query: str, embedding: list[float], answer: str, sources: list[dict] = None, organization_id: int = 0) -> None:
-        """Store a Q&A pair in the semantic cache."""
+    async def set(
+        self,
+        query: str,
+        embedding: list[float],
+        answer: str,
+        sources: list[dict] | None = None,
+        *,
+        organization_id: int,
+    ) -> None:
+        """Store a Q&A pair in the semantic cache.
+
+        W0-6：organization_id 改为必填的 keyword-only 参数（旧默认值 0 已删除），
+        非法组织在写入任何键之前显式拒绝。
+        """
+        org_id = _require_org_id(organization_id, "SemanticCache.set")
         if not embedding:
             return
         try:
@@ -270,8 +312,8 @@ class SemanticCache:
             if rc is None:
                 return
 
-            index_key = f"{self.index_key}:{organization_id}"
-            org_prefix = f"org:{organization_id}:"
+            index_key = f"{self.index_key}:{org_id}"
+            org_prefix = f"org:{org_id}:"
             cache_key = f"{self.prefix}{org_prefix}{self._hash_key(embedding)}"
             data = {
                 "query": query,
