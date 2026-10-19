@@ -19,6 +19,19 @@ vi.mock('@/api/organization', () => ({
   updateOrganizationSettings: vi.fn(),
 }))
 
+// 页面通过 useDedupedMessage 呈现唯一提示；替身直接记录调用，断言「提示数量/文案」。
+const messageMock = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+  info: vi.fn(),
+  loading: vi.fn(),
+}))
+vi.mock('@/utils/message', () => ({
+  useDedupedMessage: () => messageMock,
+  default: () => messageMock,
+}))
+
 import {
   getOrganizationSettings,
   getOrganizationSettingsAudit,
@@ -67,6 +80,19 @@ async function mountPage() {
   const wrapper = mount(Host, { global: { plugins: [pinia, naive, i18n] } })
   await flushPromises()
   return wrapper
+}
+
+/** 改检索 top_k 触发一次真实变更，再点击保存。 */
+async function saveWithTopKChange(wrapper: Awaited<ReturnType<typeof mountPage>>) {
+  const numbers = wrapper.findAllComponents(NInputNumber)
+  numbers[0].vm.$emit('update:value', 3)
+  await nextTick()
+  const saveButton = wrapper
+    .findAllComponents(NButton)
+    .find((button) => button.text().includes(zh.orgSettings.save))
+  expect(saveButton).toBeTruthy()
+  await saveButton!.trigger('click')
+  await flushPromises()
 }
 
 describe('organization settings page', () => {
@@ -118,5 +144,54 @@ describe('organization settings page', () => {
 
     expect(mockedUpdate).toHaveBeenCalledWith(7, { retrieval_top_k: 3 })
     expect(mockedAudit).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('保存成功但审计刷新失败：仍提示保存成功，审计区降级且无失败提示', async () => {
+    mockedAudit.mockResolvedValue({
+      data: { items: [{ id: 1, user_id: 7, action: 'settings.update', detail: 'top_k' }] },
+    } as never)
+    const wrapper = await mountPage()
+    // 首次 audit 是页面加载；保存后的第二次刷新失败。
+    mockedAudit.mockRejectedValueOnce(
+      Object.assign(new Error('Request failed with status code 500'), {
+        isAxiosError: true,
+        response: { status: 500, data: {} },
+      }),
+    )
+
+    await saveWithTopKChange(wrapper)
+
+    expect(messageMock.success).toHaveBeenCalledWith(zh.orgSettings.saveSuccess)
+    expect(messageMock.error).not.toHaveBeenCalled()
+    // 审计区降级：内联提示 + 旧列表保留
+    const auditAlert = wrapper.find('[data-testid="audit-error"]')
+    expect(auditAlert.exists()).toBe(true)
+    expect(auditAlert.text()).toContain(zh.orgSettings.auditLoadFailed)
+    expect(wrapper.text()).toContain('top_k')
+    // 原始 axios 文案不得上屏（既不在提示里，也不在页面里）
+    const allMessageText = messageMock.error.mock.calls.flat().join(' ')
+    expect(allMessageText).not.toContain('Request failed')
+    expect(wrapper.text()).not.toContain('Request failed')
+    wrapper.unmount()
+  })
+
+  it('保存失败：显示本地化文案且仅一条提示，不透出原始 axios 文案', async () => {
+    const wrapper = await mountPage()
+    mockedUpdate.mockRejectedValueOnce(
+      Object.assign(new Error('Request failed with status code 502'), {
+        isAxiosError: true,
+        response: { status: 502, data: {} },
+      }),
+    )
+
+    await saveWithTopKChange(wrapper)
+
+    expect(messageMock.error).toHaveBeenCalledTimes(1)
+    expect(messageMock.error).toHaveBeenCalledWith(zh.orgSettings.saveFailed)
+    expect(messageMock.success).not.toHaveBeenCalled()
+    const allMessageText = messageMock.error.mock.calls.flat().join(' ')
+    expect(allMessageText).not.toContain('Request failed')
+    wrapper.unmount()
   })
 })

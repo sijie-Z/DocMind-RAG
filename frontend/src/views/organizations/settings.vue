@@ -109,6 +109,15 @@
           </n-card>
 
           <n-card :title="t('orgSettings.auditTitle')" :bordered="false">
+            <n-alert
+              v-if="auditError"
+              type="warning"
+              class="mb-3"
+              :show-icon="true"
+              data-testid="audit-error"
+            >
+              {{ auditError }}
+            </n-alert>
             <n-empty v-if="auditItems.length === 0" :description="t('orgSettings.auditEmpty')" />
             <n-table v-else :bordered="false" :single-line="false">
               <thead>
@@ -138,6 +147,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import { useDedupedMessage } from '@/utils/message'
+import { getErrorMessage } from '@/utils/apiError'
 import {
   getOrganizationSettings,
   getOrganizationSettingsAudit,
@@ -159,6 +169,7 @@ const orgId = computed(() => userStore.currentOrgId)
 const loading = ref(false)
 const saving = ref(false)
 const loadError = ref('')
+const auditError = ref('')
 const settings = ref<Record<string, EffectiveOrganizationSetting>>({})
 const usage = ref<OrganizationSettingsUsage>({ month_tokens: 0, monthly_token_quota: null })
 const auditItems = ref<OrganizationSettingsAuditItem[]>([])
@@ -264,20 +275,36 @@ const buildPayload = (): OrganizationSettingsUpdatePayload => {
   return payload
 }
 
+/**
+ * 审计是独立区块：拉取失败只降级审计区（保留旧列表 + 内联提示），
+ * 不得影响设置的加载/保存结论。请求带 X-Silent-Error，由本分支唯一呈现错误。
+ */
+const refreshAudit = async (id: number) => {
+  try {
+    const auditRes = await getOrganizationSettingsAudit(id)
+    // 组织已切换：晚到的旧组织响应不得覆盖当前组织审计区。
+    if (orgId.value !== id) return
+    auditItems.value = auditRes.data?.items || []
+    auditError.value = ''
+  } catch (error) {
+    if (orgId.value !== id) return
+    auditError.value = getErrorMessage(error, t('orgSettings.auditLoadFailed'))
+  }
+}
+
 const load = async () => {
   const id = orgId.value
   if (!id) return
   loading.value = true
   loadError.value = ''
+  auditError.value = ''
+  // 审计与设置并行拉取；审计失败不会让整页进入错误态。
+  void refreshAudit(id)
   try {
-    const [settingsRes, auditRes] = await Promise.all([
-      getOrganizationSettings(id),
-      getOrganizationSettingsAudit(id),
-    ])
+    const settingsRes = await getOrganizationSettings(id)
     applySettings(settingsRes.data)
-    auditItems.value = auditRes.data?.items || []
   } catch (error) {
-    loadError.value = error instanceof Error ? error.message : t('orgSettings.loadFailed')
+    loadError.value = getErrorMessage(error, t('orgSettings.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -295,11 +322,12 @@ const save = async () => {
   try {
     const res = await updateOrganizationSettings(id, payload)
     applySettings(res.data)
-    const auditRes = await getOrganizationSettingsAudit(id)
-    auditItems.value = auditRes.data?.items || []
     message.success(t('orgSettings.saveSuccess'))
+    // 审计刷新是保存后的独立副作用：失败不回写「保存失败」，
+    // 由审计区内联降级提示呈现。
+    void refreshAudit(id)
   } catch (error) {
-    message.error(error instanceof Error ? error.message : t('orgSettings.saveFailed'))
+    message.error(getErrorMessage(error, t('orgSettings.saveFailed')))
   } finally {
     saving.value = false
   }

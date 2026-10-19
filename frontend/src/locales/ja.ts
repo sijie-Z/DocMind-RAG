@@ -1118,6 +1118,7 @@ export default {
     usage: '今月の使用量 {used} tokens；クォータ：{quota}',
     auditTitle: '変更監査',
     auditEmpty: '変更記録はありません',
+    auditLoadFailed: '監査記録の読み込みに失敗しました',
     auditColumns: { time: '日時', user: '実行者', detail: '変更内容' },
     loadFailed: '組織設定の読み込みに失敗しました',
     saveSuccess: '組織設定を保存しました',

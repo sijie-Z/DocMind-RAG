@@ -1189,6 +1189,7 @@ export default {
     usage: '{used} tokens used this month; quota: {quota}',
     auditTitle: 'Change audit',
     auditEmpty: 'No changes recorded',
+    auditLoadFailed: 'Failed to load audit records',
     auditColumns: { time: 'Time', user: 'Actor', detail: 'Changes' },
     loadFailed: 'Failed to load organization settings',
     saveSuccess: 'Organization settings saved',

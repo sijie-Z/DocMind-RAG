@@ -153,11 +153,19 @@ export const updateOrganizationSettings = async (
   id: number,
   data: OrganizationSettingsUpdatePayload,
 ): Promise<AxiosResponse<OrganizationSettingsResponse>> => {
-  return request.put(`/organizations/${id}/settings`, data)
+  return request.put(`/organizations/${id}/settings`, data, {
+    headers: {
+      'X-Silent-Error': '1',
+    },
+  })
 }
 
 export const getOrganizationSettingsAudit = async (
   id: number,
 ): Promise<AxiosResponse<{ items: OrganizationSettingsAuditItem[] }>> => {
-  return request.get(`/organizations/${id}/settings/audit`)
+  return request.get(`/organizations/${id}/settings/audit`, {
+    headers: {
+      'X-Silent-Error': '1',
+    },
+  })
 }
