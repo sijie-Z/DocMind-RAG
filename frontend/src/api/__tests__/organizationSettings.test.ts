@@ -32,7 +32,14 @@ describe('organization settings api', () => {
 
   it('GET 组织生效设置', async () => {
     await getOrganizationSettings(7)
-    expect(mockedGet).toHaveBeenCalledWith('/organizations/7/settings')
+    expect(mockedGet).toHaveBeenCalledWith('/organizations/7/settings', undefined)
+  })
+
+  it('GET 组织生效设置可要求静默（页面内联错误态唯一呈现）', async () => {
+    await getOrganizationSettings(7, { silent: true })
+    expect(mockedGet).toHaveBeenCalledWith('/organizations/7/settings', {
+      headers: { 'X-Silent-Error': '1' },
+    })
   })
 
   it('PUT 组织设置（部分字段、null 表示清除）', async () => {
@@ -42,11 +49,15 @@ describe('organization settings api', () => {
       monthly_token_quota: null,
     }
     await updateOrganizationSettings(7, payload)
-    expect(mockedPut).toHaveBeenCalledWith('/organizations/7/settings', payload)
+    expect(mockedPut).toHaveBeenCalledWith('/organizations/7/settings', payload, {
+      headers: { 'X-Silent-Error': '1' },
+    })
   })
 
   it('GET 组织设置审计', async () => {
     await getOrganizationSettingsAudit(7)
-    expect(mockedGet).toHaveBeenCalledWith('/organizations/7/settings/audit')
+    expect(mockedGet).toHaveBeenCalledWith('/organizations/7/settings/audit', {
+      headers: { 'X-Silent-Error': '1' },
+    })
   })
 })

@@ -105,7 +105,7 @@ describe('organization settings page', () => {
 
   it('展示生效值 / 来源 / 是否需重启', async () => {
     const wrapper = await mountPage()
-    expect(mockedGet).toHaveBeenCalledWith(7)
+    expect(mockedGet).toHaveBeenCalledWith(7, { silent: true })
 
     const topK = wrapper.find('[data-testid="effective-retrieval_top_k"]')
     expect(topK.exists()).toBe(true)
@@ -119,11 +119,11 @@ describe('organization settings page', () => {
 
   it('切换组织后按新组织重新加载', async () => {
     const wrapper = await mountPage()
-    expect(mockedGet).toHaveBeenCalledWith(7)
+    expect(mockedGet).toHaveBeenCalledWith(7, { silent: true })
 
     useUserStore().setCurrentOrganization(8)
     await flushPromises()
-    expect(mockedGet).toHaveBeenCalledWith(8)
+    expect(mockedGet).toHaveBeenCalledWith(8, { silent: true })
     wrapper.unmount()
   })
 
@@ -192,6 +192,72 @@ describe('organization settings page', () => {
     expect(messageMock.success).not.toHaveBeenCalled()
     const allMessageText = messageMock.error.mock.calls.flat().join(' ')
     expect(allMessageText).not.toContain('Request failed')
+    wrapper.unmount()
+  })
+
+  it('加载时审计失败：设置照常展示，仅审计区内联降级，不谎称「暂无变更记录」', async () => {
+    mockedAudit.mockRejectedValueOnce(
+      Object.assign(new Error('Request failed with status code 500'), {
+        isAxiosError: true,
+        response: { status: 500, data: {} },
+      }),
+    )
+    const wrapper = await mountPage()
+
+    // 设置区照常可用
+    expect(wrapper.find('[data-testid="effective-retrieval_top_k"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('10')
+    // 审计区唯一降级呈现
+    const auditAlert = wrapper.find('[data-testid="audit-error"]')
+    expect(auditAlert.exists()).toBe(true)
+    expect(auditAlert.text()).toContain(zh.orgSettings.auditLoadFailed)
+    expect(wrapper.text()).not.toContain(zh.orgSettings.auditEmpty)
+    expect(messageMock.error).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('审计加载中：不提前显示「暂无变更记录」', async () => {
+    let resolveAudit!: (value: unknown) => void
+    mockedAudit.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveAudit = resolve
+      }) as never,
+    )
+    const wrapper = await mountPage()
+
+    expect(wrapper.find('[data-testid="audit-loading"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain(zh.orgSettings.auditEmpty)
+
+    resolveAudit({ data: { items: [] } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="audit-loading"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain(zh.orgSettings.auditEmpty)
+    wrapper.unmount()
+  })
+
+  it('切换组织清空旧审计：旧组织晚到的响应不得覆盖新组织', async () => {
+    let resolveOrg7Audit!: (value: unknown) => void
+    mockedAudit.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveOrg7Audit = resolve
+      }) as never,
+    )
+    const wrapper = await mountPage() // 组织 7 的审计保持挂起
+
+    mockedAudit.mockResolvedValueOnce({
+      data: { items: [{ id: 2, user_id: 8, action: 'settings.update', detail: 'org-8-audit' }] },
+    } as never)
+    useUserStore().setCurrentOrganization(8)
+    await flushPromises()
+    expect(wrapper.text()).toContain('org-8-audit')
+    expect(wrapper.text()).not.toContain('org-7-audit')
+
+    resolveOrg7Audit({
+      data: { items: [{ id: 1, user_id: 7, action: 'settings.update', detail: 'org-7-audit' }] },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('org-8-audit')
+    expect(wrapper.text()).not.toContain('org-7-audit')
     wrapper.unmount()
   })
 })
