@@ -34,6 +34,7 @@ from app.services.session_service import (
     resolve_session_access_scope,
     resolve_session_scope,
     save_session_interaction,
+    session_access_org_conditions,
     session_matches_scope,
     session_visibility_conditions,
 )
@@ -108,10 +109,16 @@ async def update_message_feedback(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # W0-3 / T4 补漏：反馈是**写路径**——按 id 的消息访问必须与详情/删除
+    # 同一 org 口径。多组织用户切到 B 组织后不得改写 A 组织会话里消息的
+    # 反馈；历史 NULL 组织会话仍可反馈（属本人）。组织条件直接进 JOIN：
+    # 跨组织消息视同「不存在」（404），绝不静默写入。
+    scope = await resolve_session_access_scope(current_user, db)
     try:
         stmt = select(ChatMessage).join(ChatSession).where(
             ChatMessage.id == message_id,
             ChatSession.user_id == current_user.id,
+            *session_access_org_conditions(scope),
         )
         message_obj = (await db.execute(stmt)).scalar_one_or_none()
         if not message_obj:
@@ -587,6 +594,12 @@ async def websocket_endpoint(
                     # 安全加固（issue #268）：此前 `or 1` 把无组织用户的检索静默放进
                     # 1 号组织（语义缓存与 RAG 检索双重命中原生组织数据）。现在如实
                     # 传 None，由 run_rag_pipeline 显式拒绝（不检索、不碰缓存）。
+                    # W0-3 注记：WS 逐消息只复查库中用户状态（issue #82），**不**携带
+                    # token 组织回退（与 SSE RAG 分支的 get_user_org_id 有效组织口径
+                    # 有意不同）：无主组织用户在这里保持 fail-closed 显式拒绝，绝不放宽
+                    # 到未在消息级复查成员关系的 token 组织。该差异由
+                    # tests/api/test_w0_3_session_feedback_org.py::TestWebSocketOrgSemantics
+                    # 锁定。
                     search_org_id = user_state.organization_id
                     org_id = user_state.organization_id or None
 
@@ -978,15 +991,17 @@ async def chat_stream_endpoint(
 
             # ── RAG mode (original) ────────────────────────────────────────
             async with AsyncSessionLocal() as session:
-                db_user = await session.get(User, current_user.id)
-                # 安全加固（issue #268）：与 WS 路径同一语义——不再 `else 1`
-                # 兜底到 1 号组织；无组织如实传 None，由 run_rag_pipeline 显式拒绝。
-                search_org_id = (
-                    db_user.organization_id
-                    if (db_user and db_user.organization_id)
-                    else None
-                )
-                org_id = getattr(current_user, "organization_id", None)
+                # 安全加固（issue #268 / W0-3）：会话落库与检索使用**有效组织**
+                # （get_user_org_id 含 token 组织回退）。修前这里用裸
+                # current_user.organization_id 而 search_org_id 取库中主组织：
+                # 对 token 组织回退用户（库中主组织为空）二者皆为 None，RAG 在
+                # run_rag_pipeline 入口即被显式拒绝——本次与 /agent/chat、
+                # create_conversation 的有效组织口径对齐，使这类用户按其已校验的
+                # token 组织正常问答。无组织如实传 None，仍由 run_rag_pipeline
+                # 显式拒绝（不检索、不碰缓存）。
+                effective_org_id = get_user_org_id(current_user)
+                search_org_id = effective_org_id
+                org_id = effective_org_id
 
                 queue: asyncio.Queue = asyncio.Queue()
 
