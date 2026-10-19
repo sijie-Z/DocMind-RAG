@@ -171,6 +171,9 @@ async def get_organizations(
                 "page_size": page_size
             }
         }
+    except AppError:
+        # 放行：上面 fail-closed 的 403（以及其它业务异常）不得被降级为 500。
+        raise
     except Exception as e:
         raise AppError(f"获取组织列表失败: {str(e)}")
 
