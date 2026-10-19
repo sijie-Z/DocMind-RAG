@@ -87,8 +87,11 @@ export const getMetrics = async (
   timeRange: string = '1h'
 ): Promise<{ data: { data: TrendPoint[] } }> => {
   // 旧声明 {metrics, total} 为前端自造形状（后端恒返回 {"data": [...]}，<2 条时 []）
+  // E14/D1：趋势图失败由页面空态兜底（updateMetricsCharts 自吞异常）—— 带
+  // X-Silent-Error，避免拦截器全局 toast 与页面错误面并存时多弹。
   return request.get(`/monitoring/metrics/${metricType}`, {
-    params: { time_range: timeRange }
+    params: { time_range: timeRange },
+    headers: { 'X-Silent-Error': '1' }
   })
 }
 
@@ -96,6 +99,20 @@ export const getMonitoringAlerts = async (limit: number = 10): Promise<{ data: {
   // E14/D1：与 dashboard 同一页面错误面（Promise.all 任一失败 → 内联错误态）
   return request.get('/monitoring/alerts', {
     params: { limit },
+    headers: { 'X-Silent-Error': '1' }
+  })
+}
+
+/** 通知服务状态（监控页降级徽标数据源；后端 monitoring.py:442 恒返回 active） */
+export interface NotificationServiceStatus {
+  status: string
+  enabled_channels: string[]
+}
+
+export const getNotificationStatus = async (): Promise<{ data: NotificationServiceStatus }> => {
+  // T6/E14-D1：失败由监控页降级徽标「未知」呈现 —— 带 X-Silent-Error，
+  // 关闭响应拦截器全局 toast，避免与页内提示双弹。
+  return request.get('/monitoring/notification/status', {
     headers: { 'X-Silent-Error': '1' }
   })
 }

@@ -681,6 +681,10 @@ export default {
     loadFailed: '監視データの読み込みに失敗しました',
     loadFailedDesc: 'ネットワークを確認するか、しばらくしてから再試行してください。',
     auditLoadFailed: '監査ログの取得に失敗しました',
+    notificationService: '通知サービス',
+    notificationActive: '有効',
+    notificationInactive: '未使用',
+    notificationUnknown: '不明',
     timeRange: {
       hour1: '直近1時間',
       hour6: '直近6時間',

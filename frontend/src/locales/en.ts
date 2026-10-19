@@ -732,6 +732,10 @@ export default {
     loadFailed: 'Failed to load monitoring data',
     loadFailedDesc: 'Please check your network or try again later; click Retry to reload.',
     auditLoadFailed: 'Failed to load audit logs',
+    notificationService: 'Notification Service',
+    notificationActive: 'Enabled',
+    notificationInactive: 'Inactive',
+    notificationUnknown: 'Unknown',
     timeRange: {
       hour1: 'Last 1 hour',
       hour6: 'Last 6 hours',

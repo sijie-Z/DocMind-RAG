@@ -22,6 +22,7 @@ const FLAT_KEYS = [
   'alertStatus', 'activeAlerts', 'critical', 'warning', 'normal', 'info',
   'cpuTrend', 'memoryTrend', 'requestTrend', 'responseTrend', 'recentAlerts',
   'noData', 'loadFailed', 'loadFailedDesc', 'auditLoadFailed',
+  'notificationService', 'notificationActive', 'notificationInactive', 'notificationUnknown',
 ]
 
 const NESTED: Array<[string, string[]]> = [
