@@ -512,7 +512,7 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         "registered_tools", "README.md", r"\*\*(\d+) 个内置工具\*\*", "工具数（工具清单）"
     ),
     DocAnchor(
-        "registered_tools", "README.md", r"tools/.*#\s*(\d+) 个工具实现", "工具数（目录树）"
+        "registered_tools", "README.md", r"合计 (\d+) 个内置工具", "工具数（目录树合集）"
     ),
     DocAnchor("endpoint_modules", "README.md", r"(\d+) 个端点模块", "端点模块数（API 层）"),
     DocAnchor(
@@ -548,7 +548,7 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
     DocAnchor(
         "registered_tools",
         "README_EN.md",
-        r"tools/.*#\s*(\d+) tool implementations",
+        r"\((\d+) built-in tools total\)",
         "tool count (tree)",
     ),
     DocAnchor("endpoint_modules", "README_EN.md", r"(\d+) endpoint modules", "endpoint modules"),
@@ -561,7 +561,7 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         r"Endpoint implementations \((\d+) files\)",
         "endpoint files (tree)",
     ),
-    DocAnchor("frontend_routes", "README_EN.md", r"(\d+) routes", "frontend routes"),
+    DocAnchor("frontend_routes", "README_EN.md", r"(\d+) route records", "frontend routes (records)"),
     DocAnchor("sse_event_types", "README_EN.md", r"(\d+) SSE event types", "SSE event types"),
     DocAnchor(
         "sse_event_types", "README_EN.md", r"SSE event types \((\d+) types\)", "SSE event types (tree)"
@@ -578,8 +578,8 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
     DocAnchor(
         "registered_tools",
         "docs/architecture.html",
-        r"tools/.*#\s*(\d+) 个工具实现",
-        "工具数（目录树）",
+        r"合计 (\d+) 个内置工具",
+        "工具数（目录树合集）",
     ),
     DocAnchor(
         "endpoint_modules",
@@ -597,7 +597,7 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
     DocAnchor(
         "endpoint_modules",
         "docs/architecture.html",
-        r"FastAPI · (\d+) 模块",
+        r"FastAPI · (\d+) 路由模块",
         "端点模块数（后端架构标题）",
     ),
     # ── docs/index.html ──

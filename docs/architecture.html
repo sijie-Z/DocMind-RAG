@@ -413,7 +413,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 
 <!-- ═══ 03. 后端架构 ═══ -->
 <div class="sec" id="backend">
-  <div class="sec-head"><span class="sec-num">03</span><h2>后端架构</h2><span class="meta">FastAPI · 22 模块</span></div>
+  <div class="sec-head"><span class="sec-num">03</span><h2>后端架构</h2><span class="meta">FastAPI · 22 路由模块</span></div>
 
   <div class="card">
     <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 📦 模块结构</div>
@@ -427,7 +427,8 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 │   ├── context.py   # 上下文引擎
 │   ├── events.py    # SSE 事件模型
 │   ├── skills.py    # 技能学习
-│   └── tools/       # 33 个工具实现（core_tools 14 + tools 包 19）
+│   ├── core_tools.py # 基础工具（14 个）
+│   └── tools/       # 扩展工具（与 core_tools 合计 33 个内置工具）
 ├── core/            # 基础设施 (config, database, redis, security, tracing)
 ├── models/          # SQLAlchemy ORM 模型
 ├── rag/             # RAG 管道 (retriever, reranker, chunker, evaluator)
@@ -447,7 +448,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
           <tr><td>SQLAlchemy</td><td>2.0</td><td>ORM (async)</td></tr>
           <tr><td>LangChain</td><td>0.3+</td><td>文档解析管道</td></tr>
           <tr><td>DeepSeek</td><td>API</td><td>LLM 对话</td></tr>
-          <tr><td>Celery</td><td>—</td><td>异步任务队列</td></tr>
+          <tr><td>Kafka</td><td>—</td><td>异步任务队列（aiokafka）</td></tr>
         </table>
       </div>
     </div>
@@ -616,7 +617,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
       <ul style="font-size:.75rem;color:var(--text2);line-height:2;list-style:none;margin-top:6px">
         <li>→ 会话缓存 (Token/Session)</li>
         <li>→ 语义缓存 (向量查询)</li>
-        <li>→ Celery 任务队列</li>
+        <li>→ 图谱 / 实时计数持久化</li>
         <li>→ 限流计数器</li>
       </ul>
     </div>

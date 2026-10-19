@@ -259,7 +259,7 @@ def test_optional_doc_anchor_missing_is_allowed(tmp_path):
     (tmp_path / "README.md").write_text(
         "文档数字见 docs/facts.json。\n"
         "可调用 33 个工具。Tool Registry (33)。\n"
-        "**33 个内置工具**。tools/  # 33 个工具实现。\n"
+        "**33 个内置工具**。合计 33 个内置工具。\n"
         "22 个端点模块。注册 22 个模块。端点实现（22 个文件）。\n"
         "34 条路由。20 种 SSE 事件。SSE 事件类型（20 种）。\n",
         encoding="utf-8",
@@ -323,7 +323,7 @@ def _make_mini_repo(tmp_path: Path) -> Path:
         "可调用 2 个工具。\n"
         "Tool Registry (2)\n"
         "**2 个内置工具**\n"
-        "tools/               #   2 个工具实现\n"
+        "tools/               #   扩展工具（2 个；合计 2 个内置工具）\n"
         "共 1 个端点模块。\n"
         "主路由（注册 1 个模块）\n"
         "端点实现（1 个文件）\n"

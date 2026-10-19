@@ -21,7 +21,7 @@
 DocMind is a full-stack enterprise AI knowledge base system built around the **PER (Plan-Execute-Reflect) Agent architecture**. It provides multi-format document parsing, hybrid retrieval-augmented generation (RAG), visual workflow editing, real-time SSE streaming Q&A, and a comprehensive observability stack.
 
 Core use cases:
-- 📄 **Document KB** — Upload PDF, Word, Excel, TXT, Markdown, and CSV files. Auto-parse, chunk, embed, and semantic search.
+- 📄 **Document KB** — Upload PDF, Word, Excel, TXT, Markdown, CSV, and PNG/JPG/JPEG/WEBP/BMP images (OCR). Auto-parse, chunk, embed, and semantic search.
 - 💬 **Intelligent Q&A** — RAG pipeline: keyword + vector hybrid search, reranking, LLM generation with SSE streaming.
 - 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 33 tools for complex multi-step tasks.
 - 🧩 **Workflow Editor** — Visual DAG design & debugging (Vue Flow). Configurable LLM models, prompts, and execution engines.
@@ -57,7 +57,7 @@ Known limitations:
 - **Ratchets only shrink** — a backend coverage floor (`--cov-fail-under=42`) plus four frontend baseline ratchets (hardcoded CJK / i18n completeness / naming consistency / translation-key usage). Growth turns them red; shrinkage is allowed.
 - **Silent false-successes cleared (#301)** — a full audit of ~551 exception handlers; all 32 silent false-success paths closed (fail-closed logout, three-state retrieval, honest document status, degraded-identity stats…), each backed by regression tests.
 - **Red-first + mutation verification** — every fix starts with a failing test; after the fix, injected defects must turn exactly the right tests red, proving the tests can actually detect the bug.
-- **Documented-number invariants** — the SSE event count, endpoint-module count, frontend-route count, and tool count are derived from source; expected values live in `docs/facts.json`. `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ docs on every PR — any drift turns it red.
+- **Documented-number invariants** — the SSE event count, endpoint-module count, frontend-route count, and tool count are derived from source; expected values live in `docs/facts.json`. `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ docs on every PR. Frontend routes are recorded in two ways: 34 route records (including top-level and redirect records) / 29 named routes (routes with a name).
 
 ---
 
@@ -114,7 +114,7 @@ User instruction
 | Context Engine | `context.py` | Token budget management, message window builder |
 | Config | `config.py` | AgentConfig (model/temperature/max steps/phase toggles) |
 
-**33 Built-In Tools** (`tools/`):
+**33 Built-In Tools** (`core_tools.py` 14 + `tools/` 19):
 
 | Category | Tool | Description |
 |----------|------|-------------|
@@ -151,7 +151,7 @@ Query enters
                                 + RRF reciprocal rank fusion (k=60)
   → MMR Selection             — Maximal Marginal Relevance deduplication
   → Reranker                  — Cross-encoder rerank (local BGE or API)
-  → ContextCompressor         — LLM context compression
+  → ContextCompressor         — query-term sentence extraction (rule-based, no LLM call)
   → Cache Check               — Exact match cache (TTL 600s) + semantic cache
   → LLM Generation            — Streaming SSE output, strict mode, PII masking
 ```
@@ -163,7 +163,7 @@ Query enters
 | `reranker.py` | Cross-encoder rerank (local BAAI/bge-reranker-base or API) |
 | `query_processor.py` | HyDE generation, LLM query rewrite, intent/complexity classification, decomposition |
 | `cache.py` | RetrievalCache (exact TTL) + SemanticCache (cosine similarity) |
-| `context_compressor.py` | LLM-based context pruning |
+| `context_compressor.py` | Query-term sentence extraction compression (rule-based, no LLM call) |
 | `context_window.py` | Token budget message builder for RAG chat |
 | `evaluator.py` / `metrics.py` | RAG quality scoring (groundedness, relevance) |
 
@@ -200,19 +200,19 @@ Query enters
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
 | Knowledge | `/knowledge` | Knowledge base CRUD, retrieval, statistics, settings |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |
-| Organization Settings | `/organizations` | Per-organization Agent / retrieval configuration |
+| Organization Settings | `/organizations` | Org-level settings and audit (shared prefix with Organizations) |
 | Monitoring | `/monitoring` | Performance metrics, health checks, alerts, RAG quality scoring |
 | Notifications | `/notifications` | Notification CRUD, read marking, WebSocket push |
 | Prompts | `/prompts` | Prompt template CRUD + versioning |
 | Token Usage | `/token-usage` | Usage tracking + reports |
 | Manuals | `/manuals` | System user guide management |
 | Workflows | `/workflows` | Workflow CRUD, execution, debugging, node definitions |
+| Scheduled Tasks | `/scheduled-tasks` | Scheduled task CRUD, pause/resume, and manual trigger |
 | LLM Config (deprecated) | `/llm-config` | Global config entry removed from the workflow editor; endpoints marked deprecated pending the unified Provider layer |
 | Skills | `/curated-skills` | Skill discovery & management |
 | Agent Memory | `/memory` | Short/long/working memory CRUD, semantic search |
 | Agent | `/agent` | PER Agent conversations (SSE streaming), tool calls, configuration |
-| MCP | `/mcp` | MCP server configuration and dynamic external tools |
-| Scheduled Tasks | `/scheduled-tasks` | Scheduled task CRUD and execution records |
+| MCP | `/mcp` | MCP server status (admin, read-only) |
 | User Settings | `/user` | Personal UI preferences |
 | Demo Data | `/demo` | Seed demo documents & data |
 
@@ -220,7 +220,7 @@ Swagger docs: `http://localhost:8000/docs`
 
 ### 🖥 Frontend (`frontend/src/`)
 
-Vue 3 + TypeScript + Naive UI SPA, 34 routes (12 top-level + 22 page child routes):
+Vue 3 + TypeScript + Naive UI SPA, 34 route records (29 named routes; the table below lists key pages):
 
 | Page | Route | Description |
 |------|-------|-------------|
@@ -246,7 +246,7 @@ Vue 3 + TypeScript + Naive UI SPA, 34 routes (12 top-level + 22 page child route
 | Service | File | Purpose |
 |---------|------|---------|
 | Auth Service | `auth_service.py` | JWT creation/validation, bcrypt hashing, token blacklist (jti) |
-| Document Parser | `document_parser.py` | Parse PDF/Word/Excel/TXT/MD, text extraction & chunking |
+| Document Parser | `document_parser.py` | Parse PDF/Word/Excel/CSV/TXT/MD and images (OCR), text extraction & chunking |
 | RAG Service | `rag_service.py` | RAG pipeline facade |
 | File Service | `file_service.py` | File storage & retrieval |
 | Knowledge Service | `knowledge_service.py` | Knowledge base business logic |
@@ -257,7 +257,7 @@ Vue 3 + TypeScript + Naive UI SPA, 34 routes (12 top-level + 22 page child route
 | Memory Service | `memory_service.py` | Agent memory CRUD |
 | PII Masking | `masking_service.py` | Sensitive info redaction |
 | Semantic Chunker | `semantic_chunker.py` | Semantic-aware text chunking |
-| Graph RAG | `graph_rag_service.py` | Knowledge graph enhanced retrieval |
+| Graph Service | `graph_rag_service.py` | Knowledge-graph build, query, and visualization (not part of the RAG retrieval path) |
 
 ### 🔄 Async Processing (`backend/app/worker/`)
 
@@ -404,7 +404,8 @@ DocMind/
 │   │   │   ├── events.py            #   SSE event types (20 types)
 │   │   │   ├── message.py           #   Agent message bus
 │   │   │   ├── tracing.py           #   Execution trace records (dev-only: eval/offline; not written in production)
-│   │   │   ├── tools/               #   33 tool implementations
+│   │   │   ├── core_tools.py        #   14 base tools
+│   │   │   ├── tools/               #   19 extension tools (33 built-in tools total)
 │   │   │   │   ├── web_search.py    #   Web search
 │   │   │   │   ├── code_execution.py #  Python/SQL sandbox
 │   │   │   │   ├── data_analysis.py #   Data analysis
@@ -452,8 +453,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  Context compression
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (14 services)
-│   │   ├── models/                  # ORM models (14 entities)
+│   │   ├── services/                # Business service layer (20 services)
+│   │   ├── models/                  # ORM models (18 model files)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer
 │   ├── tests/                       # 2223 backend tests (plus 861 frontend)
@@ -465,7 +466,7 @@ DocMind/
 │   └── docker-compose.yml           # 10-service orchestration
 ├── frontend/
 │   └── src/
-│       ├── views/                   # Pages (19 modules, 34 routes)
+│       ├── views/                   # Pages (23 page modules, 34 route records / 29 named routes)
 │       ├── components/              # Shared components
 │       ├── api/                     # Axios API clients
 │       ├── stores/                  # Pinia state stores
