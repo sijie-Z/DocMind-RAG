@@ -21,7 +21,7 @@
 DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execute-Reflect）Agent 架构**构建。支持多格式文档解析、混合检索增强生成（RAG）、可视化工作流编辑、实时 SSE 流式问答，以及完整的可观测性体系。
 
 核心场景：
-- 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV 及 PNG/JPG/JPEG/WEBP/BMP 图片（OCR），自动解析、分块、向量化，支持语义搜索
+- 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV，自动解析、分块、向量化，支持语义搜索
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
 - 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 33 个工具完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
@@ -41,7 +41,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 - 已修复：语义缓存按组织隔离、会话归属校验、知识库搜索/删除/重建的组织隔离、文件上传路径穿越与 MinIO 删除、API Key 掩码、Web 抓取 SSRF 防护、工作流归属隔离、Kafka 不可用时的进程内文档处理、本地启动脚本、敏感产物移出 git 跟踪。
 - 安全加固（1.20）：Agent 沙箱逃逸封堵（下划线属性拦截 + 长度/输出上限）、execute_sql 租户过滤与 UNION/子查询拦截、disabled_tools 服务端强制合并、mcp 子进程环境变量白名单、注册禁自选组织、角色变更同组织校验、登录失败锁定 + 用户枚举时序防护、refresh token 轮换、WS 仅接受 access token、PII 掩码全链路（上下文+流式）、GraphRAG 组织分区、/files 代理归属校验、RAG 缓存按组织失效、Alembic 001 FK 类型修复 + 005 补齐 15 张表、compose 凭据/端口收紧、24 个安全回归测试（446 单测通过）。
 - 架构收敛：文档解析/向量化/ES 索引统一为单一 Processor；聊天核心管线从路由下沉到 `services/chat_service.py`；新增统一文档授权辅助层。
-- 加固收口（已完成）：Agent 记忆接口按用户隔离、`/files` 代理鉴权（非公开对象需登录 + 组织归属校验）、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`。
+- 后续加固：Agent 记忆接口按用户隔离、`/files` 代理鉴权、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`。
 
 已知限制：
 - 工作流代码节点默认关闭，需显式设置 `ENABLE_WORKFLOW_CODE_NODES=true`，且必须通过 Docker 沙箱执行。
@@ -58,6 +58,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 - **棘轮只缩不涨**：后端覆盖率下限 `--cov-fail-under=42`＋前端四道基线棘轮（硬编码中文 / i18n 完备性 / 命名一致 / 用键定义）——只拦下滑、不追高分，新增长即红。
 - **静默假成功清零（#301）**：全仓 ~551 处异常捕获全量审计，32 条静默假成功全部闭环（登出 fail-closed、检索三态、文档状态机诚实化、统计端点降级身份……），修复均带回归测试。
 - **先红后绿＋变异验证**：每笔修复先写失败测试；修复后注入缺陷必须「精确变红」，证明测试真的有判别力。
+- **文档数字不变量**：SSE 事件数、端点模块数、前端路由数、工具数由源码派生，期望值统一存放在 `docs/facts.json`；`backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验「代码 ↔ facts JSON ↔ 文档」三方一致，任一侧漂移即红。
 
 ---
 
@@ -113,7 +114,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 上下文引擎 | `context.py` | 令牌预算管理，消息窗口构建 |
 | 配置 | `config.py` | AgentConfig（模型/温度/最大步骤/阶段开关） |
 
-**33 个内置工具**（`core_tools.py` 14 个 + `tools/` 19 个）：
+**33 个内置工具** (`tools/`)：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -150,7 +151,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
                                 + RRF 倒数排序融合（k=60）
   → MMR 选择                  — 最大边际相关性去重
   → Reranker                  — 交叉编码器重排序（本地 BGE 或 API）
-  → ContextCompressor         — 关键词句子抽取压缩（规则式，无 LLM 调用）
+  → ContextCompressor         — LLM 上下文压缩
   → 缓存检查                  — 精确匹配缓存（TTL 600s）+ 语义缓存
   → LLM 生成                  — 流式 SSE 输出，严格模式可选，PII 掩码
 ```
@@ -162,7 +163,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | `reranker.py` | 交叉编码器重排序（本地 BAAI/bge-reranker-base / API） |
 | `query_processor.py` | HyDE 生成、LLM 查询改写、意图/复杂度分类、查询分解 |
 | `cache.py` | RetrievalCache（精确 TTL）+ SemanticCache（向量余弦相似度） |
-| `context_compressor.py` | 基于查询关键词的句子抽取压缩（规则式，无 LLM 调用） |
+| `context_compressor.py` | 基于 LLM 的检索结果压缩 |
 | `context_window.py` | RAG 聊天的令牌预算消息构建器 |
 | `evaluator.py` / `metrics.py` | RAG 质量指标（基础性、相关性） |
 
@@ -199,19 +200,19 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
 | 知识库 | `/knowledge` | 知识库 CRUD、检索、统计、设置 |
 | 组织管理 | `/organizations` | 组织 CRUD、成员管理、角色分配 |
-| 组织设置 | `/organizations` | 组织级设置读写与审计（与组织管理共用前缀） |
+| 组织设置 | `/organizations` | 组织级 Agent / 检索配置 |
 | 系统监控 | `/monitoring` | 性能指标、健康检查、告警、RAG 质量评估 |
 | 通知 | `/notifications` | 通知 CRUD、已读标记、WebSocket 推送 |
 | 提示词 | `/prompts` | 提示词模板 CRUD + 版本控制 |
 | Token 用量 | `/token-usage` | 使用追踪 + 报告 |
 | 操作手册 | `/manuals` | 系统手册管理 |
 | 工作流 | `/workflows` | 工作流 CRUD、执行、调试、节点定义 |
-| 定时任务 | `/scheduled-tasks` | 定时任务 CRUD、暂停/恢复与手动触发 |
 | LLM 配置（已弃用） | `/llm-config` | 工作流全局配置入口已移除；端点标 deprecated，待统一 Provider 层落地后删除 |
 | 技能库 | `/curated-skills` | 技能发现与管理 |
 | Agent 记忆 | `/memory` | 短期/长期/工作记忆 CRUD、语义搜索 |
 | 智能 Agent | `/agent` | PER Agent 对话（SSE 流式）、工具调用、配置 |
-| MCP 工具 | `/mcp` | MCP 服务器状态（管理员只读） |
+| MCP | `/mcp` | MCP 服务器配置、动态外部工具接入 |
+| 定时任务 | `/scheduled-tasks` | 定时任务 CRUD 与执行记录 |
 | 用户设置 | `/user` | 个人 UI 偏好 |
 | 示例数据 | `/demo` | 演示文档与数据填充 |
 
@@ -219,7 +220,7 @@ Swagger 文档：`http://localhost:8000/docs`
 
 ### 🖥 前端 (`frontend/src/`)
 
-Vue 3 + TypeScript + Naive UI 单页应用，34 条路由记录（29 条具名路由；下表为主要页面）：
+Vue 3 + TypeScript + Naive UI 单页应用，34 条路由：
 
 | 页面 | 路由 | 功能 |
 |------|------|------|
@@ -245,7 +246,7 @@ Vue 3 + TypeScript + Naive UI 单页应用，34 条路由记录（29 条具名�
 | 服务 | 文件 | 功能 |
 |------|------|------|
 | 认证服务 | `auth_service.py` | JWT 创建/验证、bcrypt 哈希、Token 黑名单（jti） |
-| 文档解析 | `document_parser.py` | 解析 PDF/Word/Excel/CSV/TXT/MD 与图片（OCR），文本提取与分块 |
+| 文档解析 | `document_parser.py` | 解析 PDF/Word/Excel/TXT/MD，文本提取与分块 |
 | RAG 服务 | `rag_service.py` | RAG 管线 Facade |
 | 文件服务 | `file_service.py` | 文件存储与检索 |
 | 知识库服务 | `knowledge_service.py` | 知识库业务逻辑 |
@@ -256,7 +257,7 @@ Vue 3 + TypeScript + Naive UI 单页应用，34 条路由记录（29 条具名�
 | 记忆服务 | `memory_service.py` | Agent 记忆 CRUD |
 | PII 掩码 | `masking_service.py` | 敏感信息脱敏 |
 | 语义分块 | `semantic_chunker.py` | 语义感知的文本分块 |
-| 图谱服务 | `graph_rag_service.py` | 知识图谱构建、查询与可视化（不参与 RAG 检索链路） |
+| 图 RAG | `graph_rag_service.py` | 知识图谱增强检索 |
 
 ### 🔄 异步处理 (`backend/app/worker/`)
 
@@ -373,8 +374,7 @@ DocMind/
 │   │   │   ├── events.py            #   SSE 事件类型（20 种）
 │   │   │   ├── message.py           #   Agent 间消息总线
 │   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
-│   │   │   ├── core_tools.py        #   基础工具（14 个）
-│   │   │   ├── tools/               #   扩展工具（19 个；合计 33 个内置工具）
+│   │   │   ├── tools/               #   33 个工具实现
 │   │   │   │   ├── web_search.py    #   网络搜索
 │   │   │   │   ├── code_execution.py #  Python/SQL 沙箱
 │   │   │   │   ├── data_analysis.py #   数据分析
@@ -422,8 +422,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  上下文压缩
 │   │   │   ├── context_window.py    #   令牌预算管理
 │   │   │   └── evaluator.py         #   质量评估
-│   │   ├── services/                # 业务服务层（20 个服务）
-│   │   ├── models/                  # ORM 模型（18 个模型文件）
+│   │   ├── services/                # 业务服务层（14 个服务）
+│   │   ├── models/                  # ORM 模型（14 个实体）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者
 │   ├── tests/                       # 2223 个后端测试（前端另有 861 个）
@@ -435,7 +435,7 @@ DocMind/
 │   └── docker-compose.yml           # 10 服务编排
 ├── frontend/
 │   └── src/
-│       ├── views/                   # 页面（23 个页面模块，34 条路由记录 / 29 条具名路由）
+│       ├── views/                   # 页面（19 个模块，34 条路由）
 │       ├── components/              # 共享组件
 │       ├── api/                     # Axios API 客户端
 │       ├── stores/                  # Pinia 状态管理
