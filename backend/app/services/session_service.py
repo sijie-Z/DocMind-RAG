@@ -90,6 +90,25 @@ async def resolve_session_access_scope(
     return SessionAccessScope(bypass_org=False, org_id=org_id)
 
 
+def session_access_org_conditions(scope: SessionAccessScope) -> list:
+    """``SessionAccessScope`` 的组织条件部分（不含 id / user）。
+
+    硬性前置条件：调用方的查询**必须已 JOIN ``ChatSession``**——本助手只返回
+    ``ChatSession`` 列上的条件；未 join 时 SQLAlchemy 会把它变成隐式笛卡尔积。
+
+    供 join 型按 id 访问复用同一可见范围口径——例如消息反馈：
+    ``select(ChatMessage).join(ChatSession)`` 无法直接套
+    ``session_access_conditions``（那需要先知道 session_id），但同样必须
+    限定在「本组织 + 历史 NULL（超管旁路）」内。
+    """
+    if scope.bypass_org:
+        return []
+    if scope.org_id is None:
+        # 无组织上下文（非超管）：fail-closed 到本人历史 NULL 组织会话
+        return [ChatSession.organization_id.is_(None)]
+    return [session_org_condition(scope.org_id)]
+
+
 def session_access_conditions(
     session_id: str,
     user_id: int,
@@ -100,18 +119,11 @@ def session_access_conditions(
     不包含列表的 ``status != ENDED`` 条件——详情/更新/删除对历史会话保持既有
     可访问语义（本任务不改历史会话状态语义）。
     """
-    conditions = [
+    return [
         ChatSession.id == session_id,
         ChatSession.user_id == user_id,
+        *session_access_org_conditions(scope),
     ]
-    if scope.bypass_org:
-        return conditions
-    if scope.org_id is None:
-        # 无组织上下文（非超管）：fail-closed 到本人历史 NULL 组织会话
-        conditions.append(ChatSession.organization_id.is_(None))
-    else:
-        conditions.append(session_org_condition(scope.org_id))
-    return conditions
 
 
 def session_matches_scope(session_obj: ChatSession, scope: SessionAccessScope) -> bool:

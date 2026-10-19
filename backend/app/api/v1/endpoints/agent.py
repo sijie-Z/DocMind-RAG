@@ -59,6 +59,7 @@ from app.services.session_service import (
     resolve_session_scope,
     save_session_interaction,
     session_access_conditions,
+    session_access_org_conditions,
     session_visibility_conditions,
 )
 
@@ -1053,10 +1054,16 @@ async def agent_feedback(
     Thumbs-down feedback is recorded as a lesson in agent memory
     so the system learns from mistakes.
     """
+    # W0-3 / T4 补漏：反馈是**写路径**——按消息 id 访问必须与详情/删除同一
+    # org 口径（超管旁路 / 本组织 + 历史 NULL）。切到 B 组织后不得改写自己在
+    # A 组织会话里消息的反馈；跨组织消息视同「不存在」（404），且不会触发
+    # 后续 lesson 写入。
+    scope = await resolve_session_access_scope(current_user, db)
     try:
         stmt = select(ChatMessage).join(ChatSession).where(
             ChatMessage.id == body.message_id,
             ChatSession.user_id == current_user.id,
+            *session_access_org_conditions(scope),
         )
         message_obj = (await db.execute(stmt)).scalar_one_or_none()
         if not message_obj:
