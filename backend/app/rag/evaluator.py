@@ -10,6 +10,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from app.rag.context_compressor import get_prompt_text
 from app.rag.errors import EvalJudgeUnavailableError
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ def _build_context_str(context: list[dict[str, Any]]) -> str:
     incidents stay observable instead of silently degrading evaluation quality.
     """
     original = "\n\n".join(
-        f"[{i+1}] {item.get('snippet') or item.get('text', '')}"
+        f"[{i+1}] {get_prompt_text(item)}"
         for i, item in enumerate(context)
     )
     if len(original) <= MAX_CONTEXT_CHARS:

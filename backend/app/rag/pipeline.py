@@ -28,7 +28,7 @@ from app.core.prometheus import (
     RAG_RETRIEVAL_UNAVAILABLE,
 )
 from app.rag.cache import RetrievalCache, SemanticCache
-from app.rag.context_compressor import compress_context_list
+from app.rag.context_compressor import compress, compress_context_list, get_prompt_text
 from app.rag.context_window import build_rag_messages
 from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError, is_timeout_error
 from app.rag.metrics import RAGMetrics
@@ -429,21 +429,24 @@ class RAGPipeline:
         if enable_compression and context:
             compressed = compress_context_list(context, query, max_context_chars=8000)
         else:
-            compressed = context
+            # issue #186：后续 PII 掩码会写回 prompt_text/text；未压缩路径先浅拷贝，
+            # 避免就地修改调用方的 context（来源卡片仍用原始 snippet）。
+            compressed = [dict(item) for item in context]
 
-        # 安全加固：检索上下文中的 PII 在拼入 prompt 前统一掩码
+        # 安全加固：检索上下文中的 PII 在拼入 prompt 前统一掩码。
+        # issue #186：掩码对象随提示词正文来源一起收敛到 prompt_text——snippet
+        # 是展示层字段（来源卡片走原始 context_results），不再参与提示词路径。
         if masking_enabled:
             for item in compressed:
-                raw_snippet = item.get("snippet") or item.get("text", "")
-                if not raw_snippet:
+                raw_content = get_prompt_text(item)
+                if not raw_content:
                     continue
                 masked, m = masking_service.mask_text(
-                    raw_snippet, start_index=len(context_mask_mapping)
+                    raw_content, start_index=len(context_mask_mapping)
                 )
                 context_mask_mapping.update(m)
-                if item.get("snippet") is not None:
-                    item["snippet"] = masked
-                elif item.get("text") is not None:
+                item["prompt_text"] = masked
+                if item.get("text") is not None:
                     item["text"] = masked
 
         # PII masking for query（编号接在 context 之后，避免占位符冲突）
@@ -452,8 +455,14 @@ class RAGPipeline:
                 query, start_index=len(context_mask_mapping)
             )
 
+        # issue #186：提示词正文只读 prompt_text（完整 chunk 正文）——snippet 仅为
+        # 展示层片段，`snippet or text` 的短路会让全文压缩器形同虚设。超过
+        # RAG_PROMPT_TEXT_MAX_CHARS 时走 compress() 的规则式句子抽取（保留开头少量
+        # 上下文 + 查询相关句），不做无差别头部硬切。
+        prompt_max_chars = max(1, int(settings.RAG_PROMPT_TEXT_MAX_CHARS))
         context_str = "\n\n".join([
-            f"资料[{i + 1}] (文件名: {item.get('filename', '未知文档')}):\n{(item.get('snippet') or item.get('text', ''))[:3000]}"
+            f"资料[{i + 1}] (文件名: {item.get('filename', '未知文档')}):\n"
+            f"{compress(get_prompt_text(item), query, max_chars=prompt_max_chars)}"
             for i, item in enumerate(compressed)
         ]) if compressed else "（未找到相关文档）"
 

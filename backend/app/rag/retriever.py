@@ -11,6 +11,7 @@ from datetime import datetime
 from app.core.config import settings
 from app.core.elasticsearch import ElasticsearchTools
 from app.core.prometheus import RAG_ADAPTIVE_STRATEGY, RAG_QUERY_REWRITE_TOTAL
+from app.rag.context_compressor import compress
 from app.rag.errors import EmbeddingUnavailableError
 from app.rag.query_processor import (
     SEARCH_MODE_TO_STRATEGY,
@@ -506,17 +507,27 @@ class HybridRetriever:
         return selected
 
     @staticmethod
-    def _build_snippet(content: str, query: str, max_len: int = 260) -> str:
+    def _build_snippet(content: str, query: str, max_len: int | None = None) -> str:
+        """构建展示用 snippet（issue #186）。
+
+        - 查询字面量命中：取以命中位置为中心的窗口（保留原有语义）；
+        - 未命中：**不再硬切 chunk 头部**，复用 context_compressor 的规则式
+          句子抽取——保留开头少量上下文 + 含查询术语的句子，关键句在 chunk
+          后半段时仍可能展示出来；
+        - 上限可经 `RAG_SNIPPET_MAX_CHARS` 配置（默认 260，与原行为一致）。
+        """
         if not content:
             return ""
+        limit = max_len if max_len is not None else int(settings.RAG_SNIPPET_MAX_CHARS)
+        limit = max(1, limit)
         text = content.replace("\n", " ").strip()
-        if len(text) <= max_len:
+        if len(text) <= limit:
             return text
         idx = text.lower().find(query.strip().lower()) if query else -1
-        if idx < 0:
-            return text[:max_len]
-        start = max(0, idx - max_len // 3)
-        return text[start: min(len(text), start + max_len)]
+        if idx >= 0:
+            start = max(0, idx - limit // 3)
+            return text[start: min(len(text), start + limit)]
+        return compress(text, query, max_chars=limit)
 
     @staticmethod
     def _compute_overlap(text: str, terms: list[str]) -> float:
@@ -552,9 +563,16 @@ class HybridRetriever:
         #208 Phase 2 决策 a（doc 帽保守修法）：帽保持 2/文档，但计数移到质量过滤
         之后——被任一质量闸门（含 0.15/0.10/0.07 终滤档）剔除的块不占帽位、
         也不占 top_k 结果预算（此前计数在质量过滤前，被剔的块也占槽）。
+
+        issue #186 输出契约：每条结果同时携带
+        - `prompt_text` / `text` / `content`：完整 chunk 正文（LLM 输入的唯一来源，
+          由 `context_compressor.get_prompt_text` 读取，压缩器在全文上工作）；
+        - `snippet`：展示用短片段（UI/debug），不得回流进提示词。
         """
 
         documents = []
+        if top_k <= 0:
+            return documents
         seen_docs: dict[str, int] = {}
         # #208 Phase 2 环 C：overlap 口径改用「语料术语表优先 + 上限 16」的术语选择
         # （机制 3 修复点；见 _keyword_arm_terms 与 _CORPUS_GLOSSARY）。
@@ -644,7 +662,11 @@ class HybridRetriever:
                 chunk_id = f"{doc_id or 'unknown'}:{text_hash}"
 
             documents.append({
-                "text": text, "content": text, "filename": source.get("filename", "未知"),
+                "text": text, "content": text,
+                # issue #186：提示词正文单一来源。snippet 只是展示片段，
+                # 不再参与任何提示词组装（见 context_compressor.get_prompt_text）。
+                "prompt_text": text,
+                "filename": source.get("filename", "未知"),
                 "chunk_id": chunk_id,
                 "score": round(final_score, 4), "raw_score": fused_score,
                 "snippet": snippet, "document_id": source.get("document_id"),
@@ -830,13 +852,61 @@ class HybridRetriever:
         # 与「精确定位」目标相斥（实测 clause_arabic_3 的 gold 分数在场却被
         # _mmr_select 从 top5 剔出，post-process 根本没收到它）；此类查询的 RRF 序
         # 直接进入 post-process。非直查查询的 MMR 行为不变。
-        if settings.RAG_ENABLE_MMR and query_vector and not _is_clause_lookup_query(query):
-            mmr_cands = [
+        #
+        # issue #193：修前候选列表把「缺 embedding」的命中直接过滤掉，MMR 结果又
+        # 整表替换 fused——关键词臂召回到、但索引期未写向量的 chunk 会静默消失，
+        # 且 debug 无从判断。现改为：带向量候选参与 MMR 打分；无向量候选按原
+        # fused 序确定性追加在选中项之后（仍保留 keyword 臂信息，由 post-process
+        # 的质量档决定去留），计数写入 debug_info["mmr"]。
+        mmr_debug: dict[str, object]
+        clause_lookup = _is_clause_lookup_query(query)
+        if settings.RAG_ENABLE_MMR and query_vector and not clause_lookup:
+            window = fused[:candidate_size]
+            embedded_cands = [
                 {**h, "_embedding": h.get("_source", {}).get("embedding", [])}
-                for h in fused[:candidate_size] if h.get("_source", {}).get("embedding")
+                for h in window if h.get("_source", {}).get("embedding")
             ]
-            if mmr_cands:
-                fused = self._mmr_select(mmr_cands, query_vector, top_k, max(0, min(1, settings.RAG_MMR_LAMBDA)))
+            no_embedding = [
+                h for h in window if not h.get("_source", {}).get("embedding")
+            ]
+            lambda_mult = max(0, min(1, settings.RAG_MMR_LAMBDA))
+            if embedded_cands and top_k > 0:
+                selected = self._mmr_select(
+                    embedded_cands, query_vector, top_k, lambda_mult
+                )
+                # 追加的无向量候选与选中项一起进入 _post_process 的 min-max
+                # 归一化（有意口径：展示分覆盖本次考虑过的全部候选；去留仍由
+                # 质量档与 doc 帽决定）。debug 的 no_embedding_appended 是
+                # 「追加条数」，不是最终存活数。
+                fused = selected + no_embedding
+                mmr_debug = {
+                    "applied": True,
+                    "lambda": lambda_mult,
+                    "candidates": len(window),
+                    "with_embedding": len(embedded_cands),
+                    "selected": len(selected),
+                    "no_embedding_appended": len(no_embedding),
+                    "not_selected": len(embedded_cands) - len(selected),
+                }
+            else:
+                # 无带向量候选（或 top_k<=0）：MMR 无输入，保持原 fused 序进入
+                # post-process——与修复前同语义，候选同样不丢。
+                mmr_debug = {
+                    "applied": False,
+                    "reason": (
+                        "no_embedded_candidates" if not embedded_cands else "zero_top_k"
+                    ),
+                    "no_embedding_appended": len(no_embedding),
+                }
+        elif settings.RAG_ENABLE_MMR:
+            mmr_debug = {
+                "applied": False,
+                "reason": "clause_lookup" if clause_lookup else "no_query_vector",
+            }
+        else:
+            mmr_debug = {"applied": False, "reason": "disabled"}
+        if debug and debug_info is not None:
+            debug_info["mmr"] = mmr_debug
 
         return self._post_process(query, fused, top_k), query_vector, debug_info, degraded
 
