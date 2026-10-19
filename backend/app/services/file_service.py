@@ -846,72 +846,28 @@ class FileUploadService:
             raise HTTPException(status_code=500, detail=f"获取文档列表失败: {str(e)}")
 
     async def delete_document(self, document_id: str, organization_id: str, user_id: str) -> bool:
+        """删除文档（兼容包装 —— 已并入 knowledge 统一删除链路，#416）。
+
+        旧实现只删 ``documents`` 主表：MySQL 下会被 ``document_tags`` /
+        ``knowledge_processing_jobs`` 的 NO ACTION 外键挡住（1451），且不清
+        ES 索引与 RAG 缓存。现委托
+        ``knowledge_service.delete_knowledge_thoroughly`` —— 与
+        ``DELETE /api/v1/knowledge/document/{id}`` 同一条链路；本签名保留供
+        历史调用方，文档不存在按幂等成功处理（与统一链路一致）。
+
+        ``user_id`` 仅为历史签名保留（旧实现同样未做上传者校验）。
         """
-        删除文档
-        
-        Args:
-            document_id: 文档ID
-            organization_id: 组织ID
-            user_id: 用户ID
-            
-        Returns:
-            是否删除成功
-        """
+        # 局部 import：knowledge_service 在模块顶层 import 本模块的
+        # FileUploadService，顶层互相 import 会成环。
+        from app.services.knowledge_service import knowledge_service
+
         try:
-            async with AsyncSessionLocal() as session:
-                # 获取文档
-                result = await session.execute(
-                    select(Document).where(
-                        and_(
-                            Document.id == document_id,
-                            Document.organization_id == organization_id
-                        )
-                    )
-                )
-                document = result.scalar_one_or_none()
+            org_id: int | None = int(organization_id)
+        except (TypeError, ValueError):
+            # 旧实现的 org 过滤对非法/缺失组织恒不匹配 → 404；保持一致。
+            raise HTTPException(status_code=404, detail="文档不存在") from None
 
-                if not document:
-                    raise HTTPException(status_code=404, detail="文档不存在")
-
-                # 检查权限（只有上传者或管理员可以删除）
-                # 这里简化处理，实际项目中需要更完善的权限检查
-
-                # 安全修复：md5 去重上传会跨文档共享同一 MinIO 对象——
-                # 删除前检查是否还有其他文档引用同一 file_path，有引用则只删 DB 记录，
-                # 防止删一个文档破坏其他文档的下载/重建。
-                from app.core.minio_client import normalize_object_name
-                object_name = normalize_object_name(document.file_path)
-                ref_count = await session.execute(
-                    select(func.count(Document.id)).where(
-                        Document.file_path == document.file_path,
-                        Document.id != document_id,
-                    )
-                )
-                other_refs = (ref_count.scalar() or 0) > 0
-
-                if not other_refs:
-                    # 从 MinIO 删除文件（兼容完整 URL 和裸对象名）
-                    try:
-                        await self.delete_file(object_name)
-                    except Exception as e:
-                        logger.warning(f"从MinIO删除文件失败: {document_id}, 错误: {str(e)}")
-                else:
-                    logger.info(
-                        f"文档 {document_id} 的存储对象仍被 {ref_count.scalar()} 个其他文档引用，跳过物理删除"
-                    )
-
-                # 从数据库删除文档记录（级联删除分块）
-                await session.delete(document)
-                await session.commit()
-
-                logger.info(f"文档删除成功: {document_id}")
-                return True
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"删除文档失败: {document_id}, 错误: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"删除文档失败: {str(e)}")
+        return await knowledge_service.delete_knowledge_thoroughly(document_id, org_id)
 
 
 # 创建服务实例

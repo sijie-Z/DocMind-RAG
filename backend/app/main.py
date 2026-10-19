@@ -30,7 +30,7 @@ from app.core.middleware import (
 from app.core.minio_client import minio_client
 from app.core.notification_ws import notification_ws_manager
 from app.core.redis import close_redis, init_redis
-from app.core.request_id import RequestIDMiddleware
+from app.core.request_id import RequestIDMiddleware, request_id_var
 from app.core.security import get_user_org_id, optional_current_user
 from app.core.system_metrics import system_metrics_sampler
 from app.core.tracing import setup_opentelemetry
@@ -327,7 +327,10 @@ app = FastAPI(
 # Middleware stack (order matters — outermost runs first)
 # ---------------------------------------------------------------------------
 
-# 1. Request ID — runs first so all downstream code has request.state.request_id
+# 1. Request ID — registered first ⇒ innermost of this stack (Starlette 的
+#    add_middleware 插到列表头部、构建时反向包裹，最后注册的最外层)。因此它
+#    在 CORS 之后执行，下游代码都能拿到 request.state.request_id 与
+#    get_request_id()。
 app.add_middleware(RequestIDMiddleware)
 
 # 2. CORS
@@ -443,7 +446,17 @@ async def general_exception_handler(request: Request, exc: Exception):
     import traceback
     err_msg = f"{type(exc).__name__}: {str(exc)}"
     request_id = getattr(getattr(request, "state", None), "request_id", None)
-    logger.error(f"未处理的异常: {err_msg}\n{traceback.format_exc()}")
+
+    # 这条 handler 由 ServerErrorMiddleware（RequestIDMiddleware 外层）调用：
+    # contextvar 此时已被 reset，`get_request_id()` 在这里返回 None。为了 5xx
+    # 日志也能关联请求，只用 state 里的 id 临时绑定，写完立即复位。
+    token = request_id_var.set(request_id) if request_id else None
+    try:
+        logger.error(f"未处理的异常: {err_msg}\n{traceback.format_exc()}")
+    finally:
+        if token is not None:
+            request_id_var.reset(token)
+
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -453,7 +466,10 @@ async def general_exception_handler(request: Request, exc: Exception):
             "detail": err_msg if settings.EXPOSE_EXCEPTION_DETAIL else "internal_server_error",
             "request_id": request_id,
             "data": None
-        }
+        },
+        # 该响应由最外层的 ServerErrorMiddleware 直接发出，不经过
+        # RequestIDMiddleware 的 send_wrapper，故这里显式补响应头。
+        headers={"X-Request-ID": request_id} if request_id else None,
     )
 
 
