@@ -170,8 +170,25 @@ class DocumentParser:
                 with contextlib.suppress(OSError):
                     os.remove(temp_file_path)
 
-    async def parse_local_file(self, file_path: str, organization_id: str = "0") -> dict[str, Any]:
-        """解析本地文件，不经过 MinIO 下载逻辑（用于聊天即时解析）"""
+    async def parse_local_file(self, file_path: str, organization_id: str) -> dict[str, Any]:
+        """解析本地文件，不经过 MinIO 下载逻辑（用于聊天即时解析）。
+
+        W0-6：organization_id 必填，且必须是正整数组织 ID。旧默认值 ``"0"``
+        会把漏传组织的解析结果标成 0 号组织（fail-open 哨兵），已删除。
+        """
+        org_raw = "" if organization_id is None else str(organization_id).strip()
+        try:
+            org_id = int(org_raw)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"parse_local_file 的 organization_id 非法: {organization_id!r}，拒绝解析"
+            ) from None
+        if org_id <= 0:
+            raise ValueError(
+                f"parse_local_file 的 organization_id={organization_id!r} 非法："
+                "必须是正整数组织 ID（0/-1 是历史 fail-open 哨兵，已禁用）"
+            )
+
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"文件不存在: {file_path}")
@@ -185,7 +202,7 @@ class DocumentParser:
         result["file_name"] = path.name
         result["file_size"] = path.stat().st_size
         result["file_extension"] = extension
-        result["organization_id"] = organization_id
+        result["organization_id"] = str(org_id)
 
         return result
 
