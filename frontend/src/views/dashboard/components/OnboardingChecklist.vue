@@ -3,6 +3,7 @@
   <section
     v-if="statsReady"
     data-testid="onboarding-checklist"
+    :aria-busy="statsLoading"
     class="bg-white dark:bg-gray-800 rounded-2xl border border-blue-100 dark:border-blue-900/40 shadow-sm overflow-hidden"
   >
     <!-- 折叠态（跳过之后）：保留进度与再次查看入口 -->
@@ -44,6 +45,17 @@
           <span data-testid="onboarding-progress" class="text-sm font-medium text-blue-600 dark:text-blue-400">
             {{ progressText }}
           </span>
+          <!-- T8：父级统计刷新在途时局部 loading；块本身保持挂载，重试入口不消失 -->
+          <div
+            v-if="statsLoading"
+            data-testid="onboarding-refreshing"
+            role="status"
+            aria-live="polite"
+            class="flex items-center gap-1 text-xs text-gray-400"
+          >
+            <n-spin :size="14" aria-hidden="true" />
+            {{ t('common.loading') }}
+          </div>
           <n-button text size="small" :loading="llmLoading" data-testid="onboarding-refresh" @click="refreshAll">
             {{ t('dashboard.onboarding.refresh') }}
           </n-button>
@@ -120,7 +132,10 @@ import { getLLMStatus } from '@/api/monitoring'
  * （docmind.onboarding.skipped.<userId>），刷新/重登后恢复，换账号互不影响。
  */
 const props = defineProps<{
+  /** 父级「曾就绪」记忆位：首次 ready 后恒为 true，刷新期间清单不卸载 */
   statsReady: boolean
+  /** 父级统计刷新在途：清单内显示局部 loading（不阻塞块内重试） */
+  statsLoading?: boolean
   fileCount: number
   knowledgeCount: number
   messageCount: number
@@ -165,19 +180,27 @@ function expand() {
   }
 }
 
+/** 模型状态请求序号：并发重检时只认最新一次响应（旧响应成功/失败均丢弃） */
+let modelSeq = 0
+
 async function checkModel() {
+  const seq = ++modelSeq
   llmLoading.value = true
   llmError.value = false
   try {
     const res = await getLLMStatus()
+    if (seq !== modelSeq) return
     llmConfigured.value = res.data?.data?.configured === true
   } catch {
+    if (seq !== modelSeq) return
     // 网络/服务失败 ≠ 未配置：保持 null 并单独提示，避免误报「未检测到模型」
     llmConfigured.value = null
     llmError.value = true
   } finally {
-    llmChecked.value = true
-    llmLoading.value = false
+    if (seq === modelSeq) {
+      llmChecked.value = true
+      llmLoading.value = false
+    }
   }
 }
 
