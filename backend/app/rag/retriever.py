@@ -233,9 +233,17 @@ def _is_clause_lookup_query(query: str) -> bool:
 class HybridRetriever:
     """Retrieves documents using keyword search, vector search, and RRF fusion."""
 
-    def __init__(self, openai_client=None, embedding_client=None):
+    def __init__(self, openai_client=None, embedding_provider=None):
         self.openai_client = openai_client
-        self.embedding_client = embedding_client
+        # issue #196：检索期不再自建 embedding 客户端，统一接收
+        # ``app.services.embedding_service.EmbeddingService``（索引期同一实例）。
+        # None = 按设计未配置向量臂（返回 []，不产生降级信号）。
+        self.embedding_provider = embedding_provider
+
+    @property
+    def embedding_client(self):
+        """向后兼容只读视图：provider 底层的 OpenAI 客户端（可能为 None）。"""
+        return getattr(self.embedding_provider, "client", None)
 
     async def get_embedding(self, text: str) -> list[float]:
         try:
@@ -252,15 +260,14 @@ class HybridRetriever:
         「按设计未配置向量臂」（返回 []）与「服务故障」（抛异常），后者由
         retrieve 以结构化降级信号上抛。get_embedding 保持原吞异常语义不变
         （问答链、语义缓存等调用方依赖该契约）。
+
+        issue #196：模型名/维度校验不在检索器里做——provider（embedding_service）
+        与索引期是同一实例，保证「索引用的模型 == 查询用的模型」。
         """
-        if not self.embedding_client:
+        if not self.embedding_provider:
             return []
         try:
-            resp = await self.embedding_client.embeddings.create(
-                input=text.replace("\n", " "),
-                model=settings.EMBEDDING_MODEL,
-            )
-            return resp.data[0].embedding
+            return await self.embedding_provider.embed_query(text)
         except Exception as e:
             raise EmbeddingUnavailableError(f"embedding service call failed: {e}") from e
 

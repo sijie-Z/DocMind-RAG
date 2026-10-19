@@ -169,6 +169,35 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Elasticsearch初始化失败: {e} - 应用将继续启动")
 
+        # issue #196：embedding 模型/维度一致性启动校验。
+        # - 服务可达但返回维度 ≠ VECTOR_DIMENSION → fail fast
+        #   （继续运行只会把错误维度的向量写进索引/查询，数据正确性优先）
+        # - 服务不可达/超时 → 显式告警后继续（离线开发属预期；检索向量臂
+        #   已有结构化降级信号 #292）
+        from app.services.embedding_service import (
+            EmbeddingDimensionMismatchError,
+            verify_embedding_consistency,
+        )
+
+        try:
+            embedding_info = await verify_embedding_consistency()
+            if embedding_info.get("skipped"):
+                logger.info("Embedding 启动校验已跳过（EMBEDDING_STARTUP_PROBE=false）")
+            else:
+                logger.info(
+                    "Embedding 一致性校验通过: model=%s source=%s dimension=%s",
+                    embedding_info.get("model"),
+                    embedding_info.get("source"),
+                    embedding_info.get("dimension"),
+                )
+        except EmbeddingDimensionMismatchError as e:
+            logger.critical("[EMBEDDING] 维度漂移，拒绝启动: %s", e)
+            raise
+        except Exception as e:
+            logger.warning(
+                "[EMBEDDING] 启动探测未完成（服务不可达时属预期，继续启动）: %s", e
+            )
+
         try:
             await kafka_producer.start()
             logger.info("Kafka连接成功")

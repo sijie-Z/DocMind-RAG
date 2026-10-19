@@ -82,6 +82,16 @@ class AISettings(BaseSettings):
     EMBEDDING_API_URL: str = "http://localhost:11434/v1"
     EMBEDDING_MODEL: str = "nomic-embed-text"
 
+    # issue #196：embedding 一致性契约。
+    # - SEND_DIMENSIONS 默认关闭：请求服务端截断会掩盖「VECTOR_DIMENSION 已过期」
+    #   的漂移（截断后维度“恰好”匹配 mapping，但模型已经换了）。只有确认
+    #   provider 支持 dimensions 截断且确实想用截断时才开启。
+    # - 启动 probe：服务可达但返回维度 ≠ VECTOR_DIMENSION → 拒绝启动；
+    #   服务不可达 → 显式告警后继续（离线开发属预期）。
+    EMBEDDING_SEND_DIMENSIONS: bool = False
+    EMBEDDING_STARTUP_PROBE: bool = True
+    EMBEDDING_PROBE_TIMEOUT_SECONDS: float = Field(default=5.0, gt=0.0)
+
     # Vector search
     VECTOR_DIMENSION: int = 768  # nomic-embed-text
     # 注：SIMILARITY_THRESHOLD 曾是 README:108 的承诺（默认 0.7），但实现从未存在

@@ -59,12 +59,16 @@ class RAGPipeline:
     def __init__(
         self,
         openai_client: AsyncOpenAI | None = None,
-        embedding_client: AsyncOpenAI | None = None,
+        embedding_provider=None,
         rerank_client: AsyncOpenAI | None = None,
     ):
         self.openai_client = openai_client
         self.rerank_client = rerank_client
-        self.retriever = HybridRetriever(openai_client=openai_client, embedding_client=embedding_client)
+        # issue #196：embedding_provider 必须是索引期同一实例
+        # （app.services.embedding_service.embedding_service），由依赖注入提供。
+        self.retriever = HybridRetriever(
+            openai_client=openai_client, embedding_provider=embedding_provider
+        )
         self.cache = RetrievalCache()
         # 修复（R4）：检索缓存使用独立命名空间，避免 answer="" 的检索条目
         # 被问答链路（chat_service）按语义相似度命中后返回空回答。

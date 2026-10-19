@@ -187,6 +187,9 @@ def _apply_env(args: argparse.Namespace) -> None:
                 f"[evals] fake 嵌入模式：VECTOR_DIMENSION 固定为 {CI_EMBEDDING_DIM}"
                 f"（原环境值 {prev} 已覆盖）"
             )
+        # 伪嵌入不需要在线 key，但 embedding_service 单例在模块导入时构造
+        # （#196 唯一构造点）；补占位 key 以通过构造，绝不会发起真实调用。
+        os.environ.setdefault("EMBEDDING_API_KEY", "eval-fake-placeholder")
     # 评估链不碰 DB / JWT，但 Settings 在生产模式下要求这三键非空 ——
     # 缺省时补纯占位值（只过校验，不会有任何连接或签发发生）。
     os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
@@ -231,26 +234,48 @@ def _cmd_check(args: argparse.Namespace, golden: GoldenSet) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _require_embedding_client(mode: str):
-    if mode == "fake":
-        print(
-            f"[evals] 嵌入模式：fake（{CI_EMBEDDING_ID}，固定 dim={CI_EMBEDDING_DIM}）"
-            "——确定性伪嵌入，无网络、无 Ollama"
-        )
-        return DeterministicEmbeddingClient()
-    from app.dependencies import _build_embedding_client
+def _require_embedding_service(mode: str):
+    """获取评估用 embedding provider（索引/检索共用同一契约，issue #196）。
 
-    client = _build_embedding_client()
-    if client is None:
+    - fake：确定性伪嵌入（固定 dim，无网络），包装成生产同款
+      ``EmbeddingService``，维度校验/调用面与 live 完全一致；
+    - live：与生产索引/检索共用 ``app.services.embedding_service`` 单例
+      （模型/维度由配置唯一解析）。
+    """
+    try:
+        from app.services.embedding_service import (
+            EmbeddingConfig,
+            EmbeddingService,
+            embedding_service,
+        )
+    except RuntimeError as e:
+        # 单例在模块导入时构造（唯一构造点）；缺 key 时会抛 RuntimeError。
         print(
-            "[evals] 未配置 embedding 客户端：需要 EMBEDDING_API_KEY（或 DEEPSEEK_API_KEY）"
-            " 与 EMBEDDING_API_URL。示例（本地 Ollama）：\n"
+            f"[evals] embedding 配置不可用：{e}\n"
+            "  需要 EMBEDDING_API_KEY（或 DEEPSEEK_API_KEY）与 EMBEDDING_API_URL。"
+            "示例（本地 Ollama）：\n"
             "  export EMBEDDING_API_URL=http://localhost:11434/v1 EMBEDDING_API_KEY=ollama\n"
             "  export EMBEDDING_MODEL=qwen3-embedding:0.6b VECTOR_DIMENSION=1024\n"
             "（或在 CI 模式用 --embedding fake，无需任何嵌入服务）",
             file=sys.stderr,
         )
-    return client
+        return None
+
+    if mode == "fake":
+        print(
+            f"[evals] 嵌入模式：fake（{CI_EMBEDDING_ID}，固定 dim={CI_EMBEDDING_DIM}）"
+            "——确定性伪嵌入，无网络、无 Ollama"
+        )
+        return EmbeddingService(
+            config=EmbeddingConfig(
+                client=DeterministicEmbeddingClient(),
+                model=CI_EMBEDDING_ID,
+                dimension=CI_EMBEDDING_DIM,
+                source="fake",
+            )
+        )
+    # live：唯一真源（与生产索引路径同一实例/同一模型/同一维度契约）。
+    return embedding_service
 
 
 def _recreate_guard(index_name: str) -> str | None:
@@ -275,20 +300,21 @@ def _seed_readback_error(expected: int, actual: int) -> str | None:
     return f"回读不一致（期望 {expected}，得到 {actual}）——先不要跑 run，检查 ES。"
 
 
-async def _embed_texts(client, texts: list[str], model: str) -> list[list[float]]:
-    """批量取向量；批量失败时降级为逐条（本地模型对批量支持不一致）。"""
+async def _embed_texts(embed_service, texts: list[str]) -> list[list[float]]:
+    """批量取向量（走统一 EmbeddingService：同 client/model/维度校验）。
+
+    批量失败时降级为逐条——本地 Ollama 对批量支持不一致。
+    """
     vectors: list[list[float]] = []
     for start in range(0, len(texts), EMBED_BATCH):
         batch = [t.replace("\n", " ") for t in texts[start : start + EMBED_BATCH]]
         try:
-            resp = await client.embeddings.create(input=batch, model=model)
-            vectors.extend([list(d.embedding) for d in resp.data])
+            vectors.extend(await embed_service.get_embeddings(batch))
         except Exception as batch_err:  # noqa: BLE001 — 降级逐条重试
             if len(batch) == 1:
                 raise RuntimeError(f"embedding 调用失败: {batch_err}") from batch_err
             for text in batch:
-                resp = await client.embeddings.create(input=text, model=model)
-                vectors.append(list(resp.data[0].embedding))
+                vectors.extend(await embed_service.get_embeddings([text]))
     return vectors
 
 
@@ -300,7 +326,9 @@ async def _close_clients(embed) -> None:
         await close_elasticsearch()
     except Exception:  # noqa: BLE001 — 关停失败不应再抛
         pass
-    close = getattr(embed, "close", None)
+    # embed 可能是 EmbeddingService（统一契约）或裸客户端；都尝试关底层 client。
+    client = getattr(embed, "client", embed)
+    close = getattr(client, "close", None)
     if close is not None:
         try:
             await close()
@@ -353,7 +381,7 @@ async def _cmd_seed_async(args: argparse.Namespace, golden: GoldenSet) -> int:
     if err:
         print(f"[evals] ES 索引不可用: {err}", file=sys.stderr)
         return 2
-    embed = _require_embedding_client(getattr(args, "embedding", "live"))
+    embed = _require_embedding_service(getattr(args, "embedding", "live"))
     if embed is None:
         return 2
     try:
@@ -377,7 +405,7 @@ async def _cmd_seed_async(args: argparse.Namespace, golden: GoldenSet) -> int:
             text = (golden.corpus_dir / fname).read_text(encoding="utf-8")
             chunks = split_corpus_file(text)
             document_id = f"eval-{Path(fname).stem}"
-            vectors = await _embed_texts(embed, chunks, settings.EMBEDDING_MODEL)
+            vectors = await _embed_texts(embed, chunks)
             for i, (chunk, vec) in enumerate(zip(chunks, vectors, strict=True)):
                 if len(vec) != dim:
                     print(
@@ -474,7 +502,7 @@ async def _cmd_run_async(args: argparse.Namespace, golden: GoldenSet) -> int:
         print(f"[evals] ES 索引不可用: {err}", file=sys.stderr)
         return 2
     mode = getattr(args, "embedding", "live")
-    embed = _require_embedding_client(mode)
+    embed = _require_embedding_service(mode)
     if embed is None:
         return 2
     try:
@@ -496,7 +524,7 @@ async def _cmd_run_async(args: argparse.Namespace, golden: GoldenSet) -> int:
             es_version = None
 
         top_k = args.top_k or golden.top_k
-        retriever = HybridRetriever(openai_client=None, embedding_client=embed)
+        retriever = HybridRetriever(openai_client=None, embedding_provider=embed)
 
         async def retrieve(query: str, k: int) -> RetrievalObservation:
             docs, _qv, debug, degraded = await retriever.retrieve(query, args.org_id, k, debug=True)
