@@ -99,6 +99,13 @@ class AISettings(BaseSettings):
     RAG_MMR_CANDIDATE_MULTIPLIER: int = 4
     RAG_HYDE_WEIGHT: float = 0.3
 
+    # #186：提示词正文上限（字符）与展示 snippet 上限（字符）。
+    # 提示词正文单一来源是 `prompt_text`（完整 chunk）；超过上限时按
+    # context_compressor 的规则式句子抽取截断，不硬切头部。默认值与原硬编码
+    # （3000 / 260）一致，行为只在「超限且关键句不在头部」时改善。
+    RAG_PROMPT_TEXT_MAX_CHARS: int = Field(default=3000, ge=1)
+    RAG_SNIPPET_MAX_CHARS: int = Field(default=260, ge=1)
+
     # Query rewrite (multi-query expansion)
     RAG_ENABLE_QUERY_REWRITE: bool = True
     RAG_QUERY_REWRITE_COUNT: int = 4
