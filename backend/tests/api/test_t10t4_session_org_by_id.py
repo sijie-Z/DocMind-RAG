@@ -29,6 +29,7 @@ mock 的调用顺序。
 - 超管不再旁路 → ``TestSuperuserBypass`` 红。
 """
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -597,3 +598,75 @@ class TestAgentHistoryLoadOrgScope:
             ], f"同组织历史应正常加载: {captured['history']}"
         finally:
             await engine.dispose()
+
+
+# ── 6. Agent 工具 get_conversation_history：同样不得跨组织读取 ─────────────
+
+
+class _FakeToolSession:
+    """会话行 → 消息列表的两段式假库会话（只服务 get_conversation_history）。"""
+
+    def __init__(self, session_row, messages):
+        self._session_row = session_row
+        self._messages = messages
+        self.execute_count = 0
+
+    async def execute(self, stmt):
+        self.execute_count += 1
+        result = MagicMock()
+        if self.execute_count == 1:
+            result.scalar_one_or_none = MagicMock(return_value=self._session_row)
+        else:
+            scalars = MagicMock()
+            scalars.all.return_value = self._messages
+            result.scalars = MagicMock(return_value=scalars)
+        return result
+
+
+class _FakeToolSessionCtx:
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class TestConversationHistoryToolOrgScope:
+    @staticmethod
+    def _install(monkeypatch, session_row, messages=()):
+        import app.core.database as database
+        from app.agent import core_tools
+
+        fake = _FakeToolSession(session_row, list(messages))
+        monkeypatch.setattr(database, "AsyncSessionLocal", lambda: _FakeToolSessionCtx(fake))
+        return core_tools, fake
+
+    @pytest.mark.asyncio
+    async def test_tool_refuses_cross_org_session(self, monkeypatch):
+        """切到 B 组织后，工具按 A 组织会话 id 读取 → 拒绝且不读消息。"""
+        row = SimpleNamespace(
+            id=SESSION_A, user_id=1, organization_id=ORG_A, title="A session"
+        )
+        core_tools, fake = self._install(monkeypatch, row)
+        out = await core_tools.get_conversation_history(
+            SESSION_A, user_id=1, organization_id=ORG_B
+        )
+        assert "denied" in out.lower(), out
+        assert fake.execute_count == 1, "组织校验必须在读取消息之前拒绝"
+
+    @pytest.mark.asyncio
+    async def test_tool_allows_legacy_null_session(self, monkeypatch):
+        """历史 NULL 组织会话属本人：工具读取不受影响（不得误伤）。"""
+        row = SimpleNamespace(
+            id=SESSION_LEGACY, user_id=1, organization_id=None, title="legacy"
+        )
+        msg = SimpleNamespace(message_type=MessageType.USER, content="legacy history")
+        core_tools, _ = self._install(monkeypatch, row, [msg])
+        out = await core_tools.get_conversation_history(
+            SESSION_LEGACY, user_id=1, organization_id=ORG_B
+        )
+        assert "legacy history" in out, out
+

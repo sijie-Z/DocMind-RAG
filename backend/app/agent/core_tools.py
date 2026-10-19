@@ -1089,6 +1089,7 @@ async def get_conversation_history(
     session_id: str,
     limit: int = 20,
     user_id: int = 0,
+    organization_id: int | None = None,
     **_: Any,
 ) -> str:
     from sqlalchemy import select
@@ -1106,6 +1107,13 @@ async def get_conversation_history(
             return f"Conversation {session_id} not found."
         if chat_session.user_id != user_id:
             return "Access denied: you do not own this conversation."
+        # T4：按 id 读取与列表工具同一组织口径——不得读取其他组织的会话；
+        # 历史 NULL 组织会话属本人，仍可读。
+        if (
+            chat_session.organization_id is not None
+            and chat_session.organization_id != organization_id
+        ):
+            return "Access denied: conversation belongs to another organization."
 
         stmt = (
             select(ChatMessage)
