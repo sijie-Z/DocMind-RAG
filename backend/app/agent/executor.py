@@ -910,7 +910,13 @@ class Executor:
             pass
 
         # Build messages for this step
-        memory_context = await self.memory.get_context_for_query(step.description)
+        # T5：被动记忆回忆受 enable_memory 门控——关闭记忆的执行上下文（子代理等）
+        # 不得每步向 embedding 端点发请求（延迟 + 端点异常时退避放大）；
+        # 显式引用/@文档属于 loop 的引用路径，不属于回忆，不受此门控。
+        if self.config.enable_memory:
+            memory_context = await self.memory.get_context_for_query(step.description)
+        else:
+            memory_context = ""
         previous_results = self._get_previous_results(step.dependencies)
 
         if self.config.system_prompt_override:
