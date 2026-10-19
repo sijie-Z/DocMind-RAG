@@ -12,6 +12,9 @@
         </p>
       </div>
       <div class="flex items-center gap-3">
+        <n-tag size="small" round :type="notificationStatusType" :bordered="false">
+          {{ t('monitoring.notificationService') }}: {{ notificationStatusLabel }}
+        </n-tag>
         <n-select
           v-model:value="timeRange"
           :options="timeRangeOptions"
@@ -199,8 +202,7 @@ import { useI18n } from 'vue-i18n'
 import { getAuditLogs, type AuditLogEntry } from '@/api/user'
 import { RefreshOutline, PulseOutline, GitNetworkOutline, BookOutline, WarningOutline } from '@vicons/ionicons5'
 import echarts from '@/utils/echarts'
-import { getMonitoringDashboard, getMonitoringAlerts, getMetrics, type TrendPoint } from '@/api/monitoring'
-import request from '@/utils/request'
+import { getMonitoringDashboard, getMonitoringAlerts, getMetrics, getNotificationStatus, type TrendPoint, type NotificationServiceStatus } from '@/api/monitoring'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
 import { filterPointsByTimeRange } from './timeRange'
@@ -303,9 +305,22 @@ const hasAlerts = computed(() => activeAlerts.value.length > 0)
 const hasCriticalAlerts = computed(() => activeAlerts.value.some(alert => alert.level === 'critical'))
 const hasWarningAlerts = computed(() => activeAlerts.value.some(alert => alert.level === 'warning'))
 
-const notificationStatus = ref({
+// T6：通知服务状态 —— 子请求失败只收敛为本地降级徽标（未知），不弹全局 toast。
+const notificationStatus = ref<NotificationServiceStatus>({
   enabled_channels: [],
-  status: 'inactive'
+  status: 'unknown'
+})
+
+const notificationStatusLabel = computed(() => {
+  if (notificationStatus.value.status === 'active') return t('monitoring.notificationActive')
+  if (notificationStatus.value.status === 'inactive') return t('monitoring.notificationInactive')
+  return t('monitoring.notificationUnknown')
+})
+
+const notificationStatusType = computed<'success' | 'default' | 'warning'>(() => {
+  if (notificationStatus.value.status === 'active') return 'success'
+  if (notificationStatus.value.status === 'inactive') return 'default'
+  return 'warning'
 })
 
 // 审计日志相关
@@ -615,17 +630,19 @@ const loadData = async () => {
     // 更新时间范围相关的图表（请求/响应趋势：真实 {data: history[]}）
     await updateMetricsCharts(seq)
 
-    // 获取通知服务状态
+    // 获取通知服务状态（T6：失败仅更新本地降级状态，不弹全局 toast）
     try {
       // 单前缀正确路径：axios baseURL 已含 /api/v1（utils/request.ts:140），
       // 旧写法 /api/monitoring/... 实际请求 /api/v1/api/monitoring/... 恒 404
-      // （A_sweep A4 实锤 404；真实路由 monitoring.py:403-409）
-      const notificationResponse = await request.get('/monitoring/notification/status')
+      // （A_sweep A4 实锤 404；真实路由 monitoring.py:442）
+      const notificationResponse = await getNotificationStatus()
       // 竞态守卫：迟到响应不得覆盖最新请求的状态
       if (seq !== loadSeq) return
       notificationStatus.value = notificationResponse.data
-    } catch (error) {
-      // 获取通知服务状态失败
+    } catch {
+      // 失败降级：徽标显示「未知」，可感知但不打扰（请求已带 X-Silent-Error）
+      if (seq !== loadSeq) return
+      notificationStatus.value = { enabled_channels: [], status: 'unknown' }
     }
 
     // E14/D1：成功路径复位错误态 —— 自动刷新（30s）/切时间范围再次成功时，

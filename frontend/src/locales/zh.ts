@@ -740,6 +740,10 @@ export default {
     loadFailed: '加载监控数据失败',
     loadFailedDesc: '请检查网络或稍后重试；点击重试重新加载',
     auditLoadFailed: '获取审计日志失败',
+    notificationService: '通知服务',
+    notificationActive: '已启用',
+    notificationInactive: '未启用',
+    notificationUnknown: '未知',
     timeRange: {
       hour1: '最近 1 小时',
       hour6: '最近 6 小时',

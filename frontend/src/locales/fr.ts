@@ -681,6 +681,10 @@ export default {
     loadFailed: 'Échec du chargement des données de surveillance',
     loadFailedDesc: 'Vérifiez votre réseau ou réessayez plus tard ; cliquez sur Réessayer pour recharger.',
     auditLoadFailed: 'Échec de la récupération des journaux d\'audit',
+    notificationService: 'Service de notification',
+    notificationActive: 'Activé',
+    notificationInactive: 'Inactif',
+    notificationUnknown: 'Inconnu',
     timeRange: {
       hour1: 'Dernière heure',
       hour6: '6 dernières heures',
