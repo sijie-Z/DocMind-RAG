@@ -439,7 +439,11 @@ class TestModeScopedCache:
 
         monkeypatch.setattr(
             "app.rag.pipeline.rerank",
-            AsyncMock(side_effect=lambda query, docs, client=None: docs),
+            AsyncMock(side_effect=lambda query, docs, client=None: (
+                docs,
+                {"status": "disabled", "path": "noop", "reason": "test_stub",
+                 "attempts": [], "scores_attached": False, "model": None},
+            )),
         )
         healthy = [
             {"chunk_id": "c1", "content": "报销流程正文", "filename": "p.md", "score": 0.9, "document_id": "d1"}
@@ -475,7 +479,11 @@ class TestModeScopedCache:
         monkeypatch.setattr("app.rag.cache._get_redis", lambda: None)  # 只走内存回退，避免触真 Redis
         monkeypatch.setattr(
             "app.rag.pipeline.rerank",
-            AsyncMock(side_effect=lambda query, docs, client=None: docs),
+            AsyncMock(side_effect=lambda query, docs, client=None: (
+                docs,
+                {"status": "disabled", "path": "noop", "reason": "test_stub",
+                 "attempts": [], "scores_attached": False, "model": None},
+            )),
         )
         probe_q = "分域探针查询-225"
         retrieved = [
@@ -526,7 +534,11 @@ class TestModeScopedCache:
         monkeypatch.setattr(cache_mod.settings, "SEMANTIC_CACHE_RETRIEVAL_ENABLED", True)
         monkeypatch.setattr(
             "app.rag.pipeline.rerank",
-            AsyncMock(side_effect=lambda query, docs, client=None: docs),
+            AsyncMock(side_effect=lambda query, docs, client=None: (
+                docs,
+                {"status": "disabled", "path": "noop", "reason": "test_stub",
+                 "attempts": [], "scores_attached": False, "model": None},
+            )),
         )
 
         forced_hit = [{"chunk_id": "forced_vec_only", "content": "强制向量臂独有命中",
@@ -563,7 +575,11 @@ class TestModeScopedCache:
         monkeypatch.setattr(cache_mod.settings, "SEMANTIC_CACHE_RETRIEVAL_ENABLED", True)
         monkeypatch.setattr(
             "app.rag.pipeline.rerank",
-            AsyncMock(side_effect=lambda query, docs, client=None: docs),
+            AsyncMock(side_effect=lambda query, docs, client=None: (
+                docs,
+                {"status": "disabled", "path": "noop", "reason": "test_stub",
+                 "attempts": [], "scores_attached": False, "model": None},
+            )),
         )
 
         auto_hit = [{"chunk_id": "auto_route_hit", "content": "自动路由命中",

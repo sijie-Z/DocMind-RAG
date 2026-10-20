@@ -41,10 +41,17 @@ def _healthy_doc(chunk_id: str = "c1") -> dict:
 
 
 def _patch_rerank():
-    """rerank 替身：保持输入顺序（避免真模型加载/网络）。"""
+    """rerank 替身：保持输入顺序（避免真模型加载/网络）。
+
+    issue #189：rerank 契约为 (hits, info)，替身必须回传结构化状态。
+    """
     return patch(
         "app.rag.pipeline.rerank",
-        new=AsyncMock(side_effect=lambda query, docs, client=None: docs),
+        new=AsyncMock(side_effect=lambda query, docs, client=None: (
+            docs,
+            {"status": "disabled", "path": "noop", "reason": "test_stub",
+             "attempts": [], "scores_attached": False, "model": None},
+        )),
     )
 
 

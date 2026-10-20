@@ -91,11 +91,13 @@ DEMO_CONVERSATION = {
             "type": MessageType.ASSISTANT,
             "metadata": {
                 # 键名对齐前端读点契约（build_sources_list 的 camelCase：
-                # {filename, relevanceScore, chunkIndex, ...}）——snake 键前端
-                # 恒 undefined，相关度数字静默消失（T4 §7.2④「数字保留」落空）
+                # {filename, relevanceScore, rank, ...}）——snake 键前端
+                # 恒 undefined，相关度数字静默消失（T4 §7.2④「数字保留」落空）。
+                # issue #185：带 rank 标记表示 relevanceScore 是重排绝对分口径；
+                # 无 rank 的旧数据前端只按序位展示。
                 "sources": [
-                    {"filename": "rag_technology.txt", "chunkIndex": 2, "relevanceScore": 0.92, "demo": True},
-                    {"filename": "rag_technology.txt", "chunkIndex": 1, "relevanceScore": 0.85, "demo": True},
+                    {"filename": "rag_technology.txt", "rank": 1, "chunkIndex": 2, "relevanceScore": 0.92, "demo": True},
+                    {"filename": "rag_technology.txt", "rank": 2, "chunkIndex": 1, "relevanceScore": 0.85, "demo": True},
                 ]
             }
         },
@@ -108,10 +110,10 @@ DEMO_CONVERSATION = {
             "type": MessageType.ASSISTANT,
             "metadata": {
                 "sources": [
-                    {"filename": "vue3_composition_api.txt", "chunkIndex": 0, "relevanceScore": 0.95, "demo": True},
-                    {"filename": "vue3_composition_api.txt", "chunkIndex": 1, "relevanceScore": 0.88, "demo": True},
-                    {"filename": "vue3_composition_api.txt", "chunkIndex": 5, "relevanceScore": 0.82, "demo": True},
-                    {"filename": "vue3_composition_api.txt", "chunkIndex": 6, "relevanceScore": 0.79, "demo": True},
+                    {"filename": "vue3_composition_api.txt", "rank": 1, "chunkIndex": 0, "relevanceScore": 0.95, "demo": True},
+                    {"filename": "vue3_composition_api.txt", "rank": 2, "chunkIndex": 1, "relevanceScore": 0.88, "demo": True},
+                    {"filename": "vue3_composition_api.txt", "rank": 3, "chunkIndex": 5, "relevanceScore": 0.82, "demo": True},
+                    {"filename": "vue3_composition_api.txt", "rank": 4, "chunkIndex": 6, "relevanceScore": 0.79, "demo": True},
                 ]
             }
         },

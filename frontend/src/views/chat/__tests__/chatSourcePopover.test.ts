@@ -1,13 +1,15 @@
 /**
  * B32/B33 契约回归：来源弹层读点。
  *
- * 真值（backend/app/services/chat_service.py:67-78 build_sources_list）：
- * 来源对象键为 {filename, relevanceScore, content, documentId, hasKeyword,
- * hasVector, rewriteHits, freshFactor} —— 预览文本在 `content`、相关度在
- * `relevanceScore`。旧模板读 `source.snippet || source.text`（恒 undefined →
- * 弹层恒「无预览」）与 `source.score`（相关度永不显示）。
+ * 真值（backend/app/services/chat_service.py build_sources_list）：
+ * 来源对象键为 {filename, relevanceScore, rankScore, rank, content, documentId,
+ * hasKeyword, hasVector, rewriteHits, freshFactor} —— 预览文本在 `content`、
+ * 重排绝对分在 `relevanceScore`（issue #185：无绝对分时为 null）。
+ * 旧模板读 `source.snippet || source.text`（恒 undefined → 弹层恒「无预览」）
+ * 与 `source.score`（相关度永不显示）。
  *
- * 变异点：读点回退 snippet/text/score → 本文件红。
+ * 变异点：读点回退 snippet/text/score → 本文件红；把 relevanceScore×100 展示
+ * 成「相关度 %」→ issue #185 诚实口径用例红。
  */
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -50,8 +52,9 @@ const i18n = createI18n({
         sourceDoc: '文档',
         unknownDoc: '未知文档',
         noPreview: '无预览',
-        // 与 locales/zh.ts:299 真实口径一致
-        relevanceScore: '相关度: {score}%',
+        // 与 locales/zh.ts 真实口径一致（issue #185：重排绝对分 / 排序序位）
+        rankPosition: '排序 #{rank}',
+        rerankScore: '重排分: {score}',
         useful: '有用',
         notUseful: '没用',
         regenerate: '重新生成',
@@ -66,6 +69,8 @@ const i18n = createI18n({
 const realSource = {
   filename: 'architecture.md',
   relevanceScore: 0.87,
+  rankScore: 0.93,
+  rank: 1,
   content: '架构文档正文片段：FastAPI + Vue3',
   documentId: 1,
   hasKeyword: true,
@@ -101,12 +106,14 @@ function mountChat(messages: ChatMessage[]) {
 }
 
 describe('ChatMessages · 来源弹层读点（B32/B33）', () => {
-  it('预览读真实键 content、相关度读 relevanceScore（旧键 snippet/text/score 恒缺失）', () => {
+  it('预览读真实键 content、重排分读 relevanceScore（旧键 snippet/text/score 恒缺失）', () => {
     const wrapper = mountChat([message])
     const text = wrapper.text()
 
     expect(text).toContain('架构文档正文片段：FastAPI + Vue3')
-    expect(text).toContain('相关度: 87%')
+    // issue #185：重排绝对分原样展示，不做 ×100 的「相关度 %」换算
+    expect(text).toContain('重排分: 0.87')
+    expect(text).not.toContain('相关度')
     expect(text).not.toContain('无预览')
   })
 
@@ -116,10 +123,10 @@ describe('ChatMessages · 来源弹层读点（B32/B33）', () => {
       content: '回答正文2',
       messageType: 'assistant',
       conversationId: 1,
-      sources: [{ filename: 'empty.md', relevanceScore: 0.5, documentId: 2 }],
+      sources: [{ filename: 'empty.md', relevanceScore: 0.5, rank: 2, documentId: 2 }],
     } as unknown as ChatMessage
     const wrapper = mountChat([emptySourceMsg])
     expect(wrapper.text()).toContain('无预览')
-    expect(wrapper.text()).toContain('相关度: 50%')
+    expect(wrapper.text()).toContain('重排分: 0.50')
   })
 })

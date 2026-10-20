@@ -291,7 +291,18 @@ export default {
     demoData: 'Demo data',
     unknownDoc: 'Unknown Document',
     noPreview: 'No Preview Available',
-    relevanceScore: 'Relevance: {score}%',
+    // issue #185: honest score semantics — ranking score is shown as position;
+    // only reranker absolute scores are labelled "rerank score" (never as "% relevance").
+    rankPosition: 'Rank #{rank}',
+    rerankScore: 'Rerank score: {score}',
+    rerankResultTitle: 'Rerank result',
+    rerankPath: 'Path: {path}',
+    rerankStatus: {
+      ok: 'Rerank OK',
+      degraded: 'Rerank degraded (original order)',
+      disabled: 'Rerank disabled',
+      empty: 'No candidates to rerank',
+    },
     // Feedback & action tooltips
     useful: 'Helpful',
     notUseful: 'Not Helpful',
@@ -308,7 +319,6 @@ export default {
     roleUser: 'User',
     roleAssistant: 'Assistant',
     sourceDoc: 'Document',
-    relevanceMatch: 'Relevance: {score}%',
     // Error banner
     msgLoadFailed: 'Failed to load message history',
     // Prompt applied notification
@@ -768,7 +778,8 @@ export default {
     results: 'results found',
     relevance: 'Sort by Relevance',
     name: 'Sort by Name',
-    relevanceScore: 'Relevance',
+    rerankScore: 'Rerank score: {score}',
+    rerankScoreLabel: 'Rerank score',
     noResults: 'No results found',
     noResultsDesc: 'Try different keywords or adjust filters',
     searchErrorDesc: 'Please check your network or try again later; click Retry to search again',

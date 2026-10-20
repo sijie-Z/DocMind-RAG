@@ -25,18 +25,60 @@ CLAUSE_PATTERNS: list[re.Pattern] = [
 PARAGRAPH_SEPARATORS = ['\n\n\n', '\n\n', '\r\n\r\n']
 SENTENCE_SEPARATORS = ['。', '！', '？', '；', '\n']
 
+# #191：标题硬上限与「正文开始」判据（句读/换行即视为正文开始）
+MAX_SECTION_TITLE_CHARS = 50
+_TITLE_TERMINATORS_RE = re.compile(r'[。！？；\n]')
+# 句读后的条款边界只认「第X条/章/节/款」族（CLAUSE_PATTERNS[0]）——
+# 句中的「一、」「1.」列表项不再误开分区。且必须呈**标题形态**（标记后为
+# 空白/分隔符/行尾），引用句（如「第7条另有规定的除外」）不开分区。
+_SENTENCE_END_RE = re.compile(r'[。！？；]')
+_CLAUSE_HEADING_FOLLOW_CHARS = " \t、：:.．）)】。！？；\n"
+
+
+def _is_clause_heading_at(text: str, pos: int) -> bool:
+    """`pos` 起是否为「标题形态」的条款标记（#191 引用句负判）。
+
+    句读后紧跟「第X条」既可能是下一条的开头（标题形态：``第二条 数据定义`` /
+    ``第三条：…``），也可能是**正文引用句**（``……。第7条另有规定的除外。``）。
+    后者若也开分区，该引用句会成为 chunk 首行，被索引侧「行首定义位」计成
+    定义了第 7 条（精确腿误召回的来源）。只接受标记后有空白/分隔符/行尾的形态。
+    """
+    m = CLAUSE_PATTERNS[0].match(text[pos:pos + 80])
+    if not m:
+        return False
+    rest = text[pos + m.end():pos + 80]
+    return (not rest) or rest[0] in _CLAUSE_HEADING_FOLLOW_CHARS
+
+
+def _match_clause_marker(line: str) -> bool:
+    """行首（允许前导空白）是否为条款/章节标记——只判定「是不是」，不做标题截断。
+
+    #191：边界识别与标题提取解耦。修前 `find_clause_boundaries` 依赖
+    `detect_section_title` 的返回值；标题一旦真正限长（长正文行返回 None），
+    条号与正文同行的行就会失去边界。标记判定独立后两者互不牵连。
+    """
+    stripped = line.lstrip(" \t")
+    return any(pat.match(stripped) for pat in CLAUSE_PATTERNS)
+
 
 def detect_section_title(line: str) -> str | None:
-    """检测一行文本是否为章节标题，返回标题文本（去除标记符号），否则返回 None."""
+    """检测一行文本是否为章节标题，返回标题文本（去除标记符号），否则返回 None.
+
+    #191：旧实现先 `stripped[:80]` 再判断 `len(title) <= 80`——护栏恒真，
+    条号与正文同行时「标题」= 正文前 80 字，并随 chunk 元数据落库。现在：
+    - 只取到首个句读（。！？；）或换行之前——标题不吞正文；
+    - 硬上限 `MAX_SECTION_TITLE_CHARS`（50）字；无句读的长行在最近空格处回退截断。
+    """
     stripped = line.strip()
-    for pat in CLAUSE_PATTERNS:
-        m = pat.match(stripped)
-        if m:
-            # 标题字数不超过 50（过长就不是标题了）
-            title = stripped[:80].strip()
-            if len(title) <= 80:
-                return title
-    return None
+    if not stripped or not _match_clause_marker(stripped):
+        return None
+    terminator = _TITLE_TERMINATORS_RE.search(stripped)
+    title = (stripped[:terminator.start()] if terminator else stripped).strip()
+    if len(title) > MAX_SECTION_TITLE_CHARS:
+        window = title[:MAX_SECTION_TITLE_CHARS]
+        space = window.rfind(' ')
+        title = (window[:space] if space > 0 else window).strip()
+    return title or None
 
 
 def smart_truncate(text: str, max_length: int) -> str:
@@ -110,16 +152,32 @@ def _split_overlong_text(text: str, max_length: int) -> list[str]:
 
 
 def find_clause_boundaries(text: str) -> list[int]:
-    """扫描全文，返回所有条款起始位置的字符偏移列表（含 0）。"""
-    boundaries = [0]
-    for m in re.finditer(r'^', text, re.MULTILINE):
-        line_start = m.start()
-        line = text[line_start:line_start + 80]
-        if detect_section_title(line):
-            if line_start not in boundaries:
-                boundaries.append(line_start)
-    boundaries.sort()
-    return boundaries
+    """扫描全文，返回所有条款起始位置的字符偏移列表（含 0）。
+
+    #191：旧实现只认行首条号，且借助 `detect_section_title` 判定——条号不在
+    行首时整篇单一分区（``boundaries == [0]``），整篇交给 p90 语义切分。现在：
+    - 行首扫描允许前导空白，边界落在标记字符本身；
+    - 句读（。！？；）后紧跟「第X条/章/节/款」且呈标题形态（标记后有空白/分隔符/
+      行尾）也作为边界——覆盖中文文档「……。第二条 数据定义」的同段写法；
+      引用句（「……。第7条另有规定的除外。」）不开分区，避免把正文引用
+      变成 chunk 行首定义位；
+    - 只依赖条款标记（`_match_clause_marker` / `_is_clause_heading_at`），
+      不依赖标题截断结果。
+    """
+    boundaries: set[int] = {0}
+    offset = 0
+    for raw_line in text.splitlines(keepends=True):
+        stripped = raw_line.lstrip(" \t")
+        if stripped and _match_clause_marker(stripped):
+            boundaries.add(offset + (len(raw_line) - len(stripped)))
+        offset += len(raw_line)
+    for m in _SENTENCE_END_RE.finditer(text):
+        pos = m.end()
+        while pos < len(text) and text[pos] in " \t":
+            pos += 1
+        if pos < len(text) and _is_clause_heading_at(text, pos):
+            boundaries.add(pos)
+    return sorted(boundaries)
 
 
 def assign_section_titles(chunks: list[dict]) -> list[dict]:
@@ -197,7 +255,7 @@ class SemanticChunker:
         # 3. 每个分区独立做语义切分
         all_chunks: list[dict] = []
         global_idx = 0
-        for start, end, section_title in partitions:
+        for partition_idx, (start, end, section_title) in enumerate(partitions):
             partition_text = text[start:end].strip()
             if not partition_text:
                 continue
@@ -205,10 +263,12 @@ class SemanticChunker:
             for ch in sub_chunks:
                 ch["metadata"]["section_title"] = section_title
                 ch["metadata"]["index"] = global_idx
+                # #191：内部标记——合并只允许发生在同一分区（同一条款/章节）内
+                ch["metadata"]["_partition"] = partition_idx
                 all_chunks.append(ch)
                 global_idx += 1
 
-        # 4. 合并过小的尾块
+        # 4. 合并过小的尾块（只限同一分区内）
         return self._merge_small_tails(all_chunks)
 
     async def _semantic_split(self, text: str) -> list[dict]:
@@ -310,17 +370,33 @@ class SemanticChunker:
         return split_chunks
 
     def _merge_small_tails(self, chunks: list[dict]) -> list[dict]:
-        """把过小的尾块（< 200 字符）合并到前一块。"""
+        """把过小的尾块（< 200 字符）合并到**同一分区**的前一块。
+
+        #191：修前对扁平化后的全部 chunk 无差别合并——短「第二条」会被并进上一条
+        的分区；且只有前块**无标题**时才继承标题，前块有标题时被并正文永久留在
+        前一块的 section_title 下（跨条合并 + 标题错配）。现在只在同一分区
+        （同一条款/章节，即同一次 `split_text` 分区）内合并；跨分区小尾块保留
+        独立——宁可短块，不可错标题。`_partition` 是内部标记，合并后从产物中剔除。
+        """
         if len(chunks) <= 1:
+            for ch in chunks:
+                ch.get("metadata", {}).pop("_partition", None)
             return chunks
-        result = []
+        result: list[dict] = []
         for ch in chunks:
-            if result and len(ch["text"]) < 200:
+            metadata = ch.get("metadata", {}) or {}
+            prev_meta = result[-1].get("metadata", {}) if result else {}
+            same_partition = (
+                bool(result) and prev_meta.get("_partition") == metadata.get("_partition")
+            )
+            if result and len(ch["text"]) < 200 and same_partition:
                 result[-1]["text"] += ch["text"]
-                if ch["metadata"].get("section_title") and not result[-1]["metadata"].get("section_title"):
-                    result[-1]["metadata"]["section_title"] = ch["metadata"]["section_title"]
+                if metadata.get("section_title") and not prev_meta.get("section_title"):
+                    prev_meta["section_title"] = metadata["section_title"]
             else:
                 result.append(ch)
+        for ch in result:
+            ch.get("metadata", {}).pop("_partition", None)
         return result
 
 

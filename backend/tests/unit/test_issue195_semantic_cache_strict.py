@@ -508,7 +508,11 @@ def _make_pipeline(monkeypatch, embedding):
 
     monkeypatch.setattr(
         "app.rag.pipeline.rerank",
-        AsyncMock(side_effect=lambda query, docs, client=None: docs),
+        AsyncMock(side_effect=lambda query, docs, client=None: (
+            docs,
+            {"status": "disabled", "path": "noop", "reason": "test_stub",
+             "attempts": [], "scores_attached": False, "model": None},
+        )),
     )
     p = RAGPipeline()
     p.retriever = MagicMock()

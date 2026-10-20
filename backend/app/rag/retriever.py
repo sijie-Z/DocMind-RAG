@@ -253,7 +253,8 @@ def _numeral_clause_variants(query: str) -> list[str]:
 # ---- #208 Phase 2 决策 e：条号直查类判据（此类查询跳过 MMR） ----
 
 # 章节引用：§X.Y（允许 § 后空格；至少一段小数点，与 evals/clauses 的章节口径一致）。
-_SECTION_REF_RE = re.compile(r"§[ \t]*\d+(?:\.\d+)+")
+# 捕获组（#188）：查询侧结构化精确腿需要 X.Y 原文。
+_SECTION_REF_RE = re.compile(r"§[ \t]*(\d+(?:\.\d+)+)")
 
 
 def _is_clause_lookup_query(query: str) -> bool:
@@ -271,6 +272,119 @@ def _is_clause_lookup_query(query: str) -> bool:
     if not query:
         return False
     return bool(_CLAUSE_NUM_SPAN_RE.search(query) or _SECTION_REF_RE.search(query))
+
+
+# ---- #187：文档级多样性预算（帽从 rerank 之前移到 rerank 之后） ----
+
+# 普通语义查询：2/文档（保持 #208 决策 a 的口径；放开到无帽会 NearMiss 结构性 +8.3pt，
+# 实验数据见 backend/docs/eval-gate-phase2-experiment.md §4）。
+DOC_CAP_DEFAULT = 2
+# 条号直查类查询：4/文档。目标是精确定位某一条；同文档的前言/相邻条与 gold 同属
+# 一份文件，2/文档会在 rerank 之后仍结构性压掉 gold（#208 实验的剩余扼杀环）。
+DOC_CAP_CLAUSE_LOOKUP = 4
+
+
+def clause_lookup_doc_cap(query: str) -> int:
+    """rerank 之后的每文档块数预算（#187）：直查类 4，普通查询 2。"""
+    return DOC_CAP_CLAUSE_LOOKUP if _is_clause_lookup_query(query) else DOC_CAP_DEFAULT
+
+
+def apply_doc_cap(hits: list[dict], doc_cap: int | None) -> list[dict]:
+    """按文档截断命中（保持输入顺序）；``doc_cap=None`` 表示不截断。
+
+    在 pipeline 的 **rerank 之后**调用（#187）：先让 rerank 看到全部候选、按相关度
+    重排，再按文档做多样性截断——帽不再发生在「相关度尚未判定」的候选序上。
+    缺 ``document_id`` 的命中原样保留（无法归组，不因缺字段被静默丢弃）。
+    """
+    if doc_cap is None:
+        return hits
+    counts: dict[str, int] = {}
+    kept: list[dict] = []
+    for hit in hits:
+        doc_id = str(hit.get("document_id") or (hit.get("_source") or {}).get("document_id") or "")
+        if not doc_id:
+            kept.append(hit)
+            continue
+        counts[doc_id] = counts.get(doc_id, 0) + 1
+        if counts[doc_id] <= doc_cap:
+            kept.append(hit)
+    return kept
+
+
+# ---- #188：结构化条款字段（索引侧 doc_processor 写入顶层） ----
+
+# 检索命中需要携带的结构化字段白名单：section_title / clause_no / section_no 是
+# #188 打通的顶层字段；chunk_id / chunk_index 供稳定标识与调试展示。
+_HIT_SOURCE_FIELDS = [
+    "content",
+    "filename",
+    "organization_id",
+    "document_id",
+    "embedding",
+    "upload_time",
+    "chunk_id",
+    "chunk_index",
+    "section_title",
+    "clause_no",
+    "section_no",
+]
+
+
+# 查询侧条号目标的上界：clause_no 是 ES integer 字段（int32），且真实制度文档
+# 不可能有百万条——超界值（如「第99999999999条」）直接跳过结构化精确腿，
+# 避免把非法值打进 terms 查询导致整次检索 400。
+_MAX_CLAUSE_NO = 1_000_000
+# 结构化精确腿的返回条数上限：filter-only 命中的 _score 为 0，若不设界且组织内
+# 定义同一条号的块远超候选窗口，会把带内容词的 BM25 候选整体挤出 `[:candidate_size]`。
+_EXACT_ARM_MAX_SIZE = 20
+
+
+def _query_target_clauses(query: str) -> list[int]:
+    """查询中「第X条」的目标条号（中文/阿拉伯形归一化为整数，去重保序）。"""
+    targets: list[int] = []
+    for m in _CLAUSE_NUM_SPAN_RE.finditer(query or ""):
+        n = _parse_clause_number(m.group(1))
+        if n is not None and 1 <= n <= _MAX_CLAUSE_NO and n not in targets:
+            targets.append(n)
+    return targets
+
+
+def _query_target_sections(query: str) -> list[str]:
+    """查询中「§X.Y」的目标章节编号（如 ``["2.3"]``，去重保序）。"""
+    targets: list[str] = []
+    for m in _SECTION_REF_RE.finditer(query or ""):
+        value = m.group(1)
+        if value and value not in targets:
+            targets.append(value)
+    return targets
+
+
+def _hit_defines_target(
+    hit: dict, target_clauses: set[int], target_sections: set[str]
+) -> bool:
+    """该命中是否**定义了**查询目标的条号/章节（结构化字段来自索引侧定义位）。
+
+    只读顶层 ``clause_no`` / ``section_no``；旧索引没有这些字段时恒 False，
+    排序行为与修前逐字一致（平滑迁移）。
+    """
+    source = hit.get("_source") or {}
+    if target_clauses:
+        raw = source.get("clause_no")
+        values = raw if isinstance(raw, list) else ([] if raw is None else [raw])
+        numbers: set[int] = set()
+        for value in values:
+            try:
+                numbers.add(int(value))
+            except (TypeError, ValueError):
+                continue
+        if numbers & target_clauses:
+            return True
+    if target_sections:
+        raw = source.get("section_no")
+        values = raw if isinstance(raw, list) else ([] if raw is None else [raw])
+        if {str(value) for value in values} & target_sections:
+            return True
+    return False
 
 
 class HybridRetriever:
@@ -324,6 +438,11 @@ class HybridRetriever:
         for variant in _numeral_clause_variants(query):
             if variant not in rewrite_queries:
                 rewrite_queries.append(variant)
+        # #188：条号直查类查询的结构化目标（定义位字段 clause_no / section_no）。
+        target_clauses = _query_target_clauses(query)
+        target_sections = _query_target_sections(query)
+        target_clause_set = set(target_clauses)
+        target_section_set = set(target_sections)
         # 本地站产出条数（含原查询与数形扩展），用于折算存活新增
         base_count = len(rewrite_queries)
         if enable_qr:
@@ -388,13 +507,48 @@ class HybridRetriever:
                     }
                 },
                 "highlight": {"fields": {"content": {"fragment_size": 120, "number_of_fragments": 2}}},
-                "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
+                "_source": _HIT_SOURCE_FIELDS,
+            }
+            res = await ElasticsearchTools.search_documents(es_query)
+            return res.get("hits", {}).get("hits", [])
+
+        async def _es_exact_structured_search():
+            """#188：条号/章节的结构化精确检索腿（与 BM25 平行、并集去重）。
+
+            只用**定义位**字段（clause_no / section_no）做 terms 过滤，不参与 BM25
+            打分竞争：gold 定义块即使被标题/前言洪泛压到低分，也保证进入合并集，
+            并由下方排序键提到 keyword 臂前部。旧索引没有这些字段时本查询返回空、
+            行为与修前一致——精确腿是**并集增强**，不是硬过滤（不会把非目标条号的
+            关键词候选整条剪掉）。
+            """
+            should: list[dict] = []
+            if target_clauses:
+                should.append({"terms": {"clause_no": target_clauses}})
+            if target_sections:
+                should.append({"terms": {"section_no": target_sections}})
+            es_query = {
+                "size": min(candidate_size, _EXACT_ARM_MAX_SIZE),
+                "query": {
+                    "bool": {
+                        "filter": [
+                            *filters,
+                            {"bool": {"should": should, "minimum_should_match": 1}},
+                        ]
+                    }
+                },
+                "_source": _HIT_SOURCE_FIELDS,
             }
             res = await ElasticsearchTools.search_documents(es_query)
             return res.get("hits", {}).get("hits", [])
 
         tasks = [_es_search(rq) for rq in rewrite_queries]
+        has_exact_arm = bool(target_clauses or target_sections)
+        if has_exact_arm:
+            tasks.append(_es_exact_structured_search())
         results = await asyncio.gather(*tasks)
+        exact_hits: list[dict] = []
+        if has_exact_arm:
+            results, exact_hits = results[:-1], results[-1]
 
         merged: dict[str, dict] = {}
         for res in results:
@@ -416,7 +570,32 @@ class HybridRetriever:
                         prev["_source"] = hit.get("_source", {})
                         prev["highlight"] = hit.get("highlight", {})
 
-        return sorted(merged.values(), key=lambda x: x.get("_score", 0), reverse=True)[:candidate_size]
+        # #188：结构化精确腿的命中并入候选集（并集去重，不硬过滤）。
+        # 它们不是「改写变体命中」——不增 _rewrite_hits（该计数只反映变体覆盖数）。
+        for hit in exact_hits:
+            doc_id = str(hit.get("_id") or "")
+            if not doc_id:
+                continue
+            score = float(hit.get("_score") or 0)
+            prev = merged.get(doc_id)
+            if prev is None:
+                m = dict(hit)
+                m["_score"] = score
+                m["_rewrite_hits"] = 1
+                merged[doc_id] = m
+            elif score > float(prev.get("_score", 0)):
+                prev["_score"] = score
+                prev["_source"] = hit.get("_source", {})
+
+        # #188：定义目标条号/章节的命中排到 keyword 臂前部（结构化 boost）。
+        # 依赖索引侧顶层 clause_no/section_no；旧索引无字段 → 全部 False，排序与修前一致。
+        return sorted(
+            merged.values(),
+            key=lambda h: (
+                0 if _hit_defines_target(h, target_clause_set, target_section_set) else 1,
+                -float(h.get("_score") or 0),
+            ),
+        )[:candidate_size]
 
     # ---- Vector search ----
 
@@ -496,7 +675,7 @@ class HybridRetriever:
                     },
                 }
             },
-            "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
+            "_source": _HIT_SOURCE_FIELDS,
         }
         res = await ElasticsearchTools.search_documents(es_query)
         return res.get("hits", {}).get("hits", []), query_vector, None
@@ -627,23 +806,44 @@ class HybridRetriever:
                 return None
         return None
 
-    def _post_process(self, query: str, fused_hits: list[dict], top_k: int) -> list[dict]:
+    def _post_process(
+        self, query: str, fused_hits: list[dict], top_k: int, doc_cap: int | None = DOC_CAP_DEFAULT
+    ) -> list[dict]:
         """Normalize, deduplicate, and filter retrieval results.
 
         #208 Phase 2 决策 a（doc 帽保守修法）：帽保持 2/文档，但计数移到质量过滤
         之后——被任一质量闸门（含 0.15/0.10/0.07 终滤档）剔除的块不占帽位、
         也不占 top_k 结果预算（此前计数在质量过滤前，被剔的块也占槽）。
 
+        #187：``doc_cap=None`` 关闭本函数内的文档截断——pipeline 以它拿到
+        rerank 前的完整候选集（帽移到 rerank 之后，见 ``apply_doc_cap``）。
+        默认值 2 保持未接线 rerank 的旧调用方（eval runner / 单测）行为不变。
+
         issue #186 输出契约：每条结果同时携带
         - `prompt_text` / `text` / `content`：完整 chunk 正文（LLM 输入的唯一来源，
           由 `context_compressor.get_prompt_text` 读取，压缩器在全文上工作）；
         - `snippet`：展示用短片段（UI/debug），不得回流进提示词。
+        #188 输出契约：透传索引侧结构化字段 ``section_title`` / ``clause_no`` /
+        ``section_no`` / ``chunk_index``（旧索引缺字段时为 None/[]）。
+||||||| 8e37a0cd
+
+        issue #185 分数契约：`rank_score`（与旧 `score` 同值）只是**融合阶段的批内
+        min-max 相对分**，用于排序/序位展示——榜首恒 ~1.0 是构造性的，不是相关度。
+        绝对分 `relevance_score` 由 pipeline 在 rerank 之后写入（无重排分则为 None），
+        post-process 绝不伪造。
         """
 
         documents = []
         if top_k <= 0:
             return documents
         seen_docs: dict[str, int] = {}
+        # #188：定义目标条号/章节的块是本类查询的**目标本身**——词面质量闸门
+        # （overlap 档）不得把它误杀。裸「第5条」这类查询的提取术语为空
+        # （CJK 单字不成 bigram），词面 overlap 恒 0；若不放行，结构化精确腿
+        # 召回的 gold 会在 post-process 被整条丢弃（精确腿形同虚设）。
+        target_clause_set = set(_query_target_clauses(query))
+        target_section_set = set(_query_target_sections(query))
+        has_structured_target = bool(target_clause_set or target_section_set)
         # #208 Phase 2 环 C：overlap 口径改用「语料术语表优先 + 上限 16」的术语选择
         # （机制 3 修复点；见 _keyword_arm_terms 与 _CORPUS_GLOSSARY）。
         query_terms = _keyword_arm_terms(query)
@@ -672,34 +872,41 @@ class HybridRetriever:
             rewrite_hits = max(1, int(hit.get("rewrite_hits", 1)))
             kw_match = sum(1 for t in query_terms if t in (text[:1600]).lower())
 
-            # Filter irrelevant results - relaxed when no vector search is available
-            if not has_kw and not has_vec and overlap < 0.005:
-                continue
-            if not has_kw and has_vec and overlap < 0.1 and kw_match < 1:
-                continue
-            if has_kw and overlap < 0.02:
-                continue
-
-            score_range = max(1e-9, score_max - score_min)
-            score_pct = (float(hit.get("_score", 0)) - score_min) / score_range if score_range > 1e-9 else 0
-            if score_pct < 0.3 and overlap < 0.05:
-                continue
-
-            # 终滤质量档（#208 Phase 2 决策 a）：判定式与原「Final quality check」一致，
-            # 仅前移为「先过滤、后计数」——被本档剔除的块同样不占 doc 帽槽位。
-            should_keep = (
-                overlap >= 0.15
-                or (has_kw and overlap >= 0.10)
-                or (has_kw and has_vec and overlap >= 0.07)
+            # #188：定义目标条号/章节的命中跳过词面质量闸门（见函数开头说明）；
+            # 其余命中逐字保持原判定式。
+            defines_target = has_structured_target and _hit_defines_target(
+                hit, target_clause_set, target_section_set
             )
-            if not should_keep:
-                continue
+            if not defines_target:
+                # Filter irrelevant results - relaxed when no vector search is available
+                if not has_kw and not has_vec and overlap < 0.005:
+                    continue
+                if not has_kw and has_vec and overlap < 0.1 and kw_match < 1:
+                    continue
+                if has_kw and overlap < 0.02:
+                    continue
 
-            # doc 帽 2/文档：只对通过质量过滤的块计数（被剔的块不占槽）。
+                score_range = max(1e-9, score_max - score_min)
+                score_pct = (float(hit.get("_score", 0)) - score_min) / score_range if score_range > 1e-9 else 0
+                if score_pct < 0.3 and overlap < 0.05:
+                    continue
+
+                # 终滤质量档（#208 Phase 2 决策 a）：判定式与原「Final quality check」一致，
+                # 仅前移为「先过滤、后计数」——被本档剔除的块同样不占 doc 帽槽位。
+                should_keep = (
+                    overlap >= 0.15
+                    or (has_kw and overlap >= 0.10)
+                    or (has_kw and has_vec and overlap >= 0.07)
+                )
+                if not should_keep:
+                    continue
+
+            # doc 帽（#187：doc_cap=None 时不截断，交由 pipeline 在 rerank 后施加）：
+            # 只对通过质量过滤的块计数（被剔的块不占槽）。
             doc_id = str(source.get("document_id") or "")
-            if doc_id:
+            if doc_id and doc_cap is not None:
                 seen_docs[doc_id] = seen_docs.get(doc_id, 0) + 1
-                if seen_docs[doc_id] > 2:
+                if seen_docs[doc_id] > doc_cap:
                     continue
 
             # Normalize score
@@ -738,8 +945,18 @@ class HybridRetriever:
                 "prompt_text": text,
                 "filename": source.get("filename", "未知"),
                 "chunk_id": chunk_id,
-                "score": round(final_score, 4), "raw_score": fused_score,
+                # issue #185：rank_score 是批内 min-max 相对分（排序/序位用）；
+                # score 保留为同值别名（workflow 阈值/agent 载荷沿用既有语义）。
+                # 绝对相关度 relevance_score 由 pipeline rerank 后写入。
+                "score": round(final_score, 4),
+                "rank_score": round(final_score, 4),
+                "raw_score": fused_score,
                 "snippet": snippet, "document_id": source.get("document_id"),
+                # #188：结构化条款字段透传（旧索引缺字段时为 None/[]）
+                "section_title": source.get("section_title"),
+                "clause_no": source.get("clause_no") or [],
+                "section_no": source.get("section_no") or [],
+                "chunk_index": source.get("chunk_index"),
                 "mmr_score": float(hit.get("_mmr_score", 0)),
                 "overlap_score": overlap, "has_keyword": has_kw, "has_vector": has_vec,
                 "rewrite_hits": rewrite_hits, "fresh_factor": round(fresh_factor, 2),
@@ -761,7 +978,7 @@ class HybridRetriever:
             broad = {
                 "size": top_k * 2, "min_score": 0.5,
                 "query": {"bool": {"must": [{"match": {"content": {"query": query, "operator": "or", "minimum_should_match": "30%"}}}], "filter": filters}},
-                "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
+                "_source": _HIT_SOURCE_FIELDS,
             }
             res = await ElasticsearchTools.search_documents(broad)
             hits = res.get("hits", {}).get("hits", [])
@@ -777,7 +994,7 @@ class HybridRetriever:
             vec_q = {
                 "size": top_k, "min_score": 1.15,
                 "query": {"script_score": {"query": {"bool": {"filter": filters}}, "script": {"source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0", "params": {"query_vector": qv}}}},
-                "_source": ["content", "filename", "organization_id", "document_id", "embedding", "upload_time"],
+                "_source": _HIT_SOURCE_FIELDS,
             }
             res = await ElasticsearchTools.search_documents(vec_q)
             return res.get("hits", {}).get("hits", []), None
@@ -795,6 +1012,7 @@ class HybridRetriever:
         document_ids: list[str] | None = None,
         debug: bool = False,
         search_mode: str | None = None,
+        doc_cap: int | None = DOC_CAP_DEFAULT,
     ) -> tuple[list[dict], list[float], dict | None, list[str]]:
         """Execute adaptive retrieval and return (results, query_vector, debug_info, degraded).
 
@@ -802,6 +1020,10 @@ class HybridRetriever:
         向量臂 / 兜底臂因服务故障未能执行时不得与「确实没有命中」同形；
         keyword 臂失败与兜底臂异常会直接上抛（由 pipeline 归类为故障态）。
         策略为 keyword_only / vector_only 时无另一臂是**按设计**行为，不产生降级信号。
+
+        doc_cap（#187）：本函数内的每文档块数上限。默认 2 = 旧行为逐字不变；
+        pipeline 传入 ``None`` 让 rerank 看到全部候选，再在 rerank 之后用
+        ``clause_lookup_doc_cap(query)`` + ``apply_doc_cap`` 施加多样性截断。
 
         Strategy：显式 `search_mode`（hybrid/vector/keyword）**强制本次请求的检索臂组合**
         （issue #225 决策 7A）；为 None 时按查询复杂度自动路由：
@@ -857,7 +1079,7 @@ class HybridRetriever:
                 debug_info["vector_top"] = []
                 debug_info["rrf_result"] = debug_info["keyword_top"][:top_k]
                 debug_info["rerank_result"] = []
-            documents = self._post_process(query, kw_hits, top_k)
+            documents = self._post_process(query, kw_hits, top_k, doc_cap=doc_cap)
             return documents, [], debug_info, degraded
 
         if strategy == "vector_only":
@@ -881,7 +1103,7 @@ class HybridRetriever:
                 debug_info["vector_top"] = self._debug_format_hits(vec_hits[:10])
                 debug_info["rrf_result"] = debug_info["vector_top"][:top_k]
                 debug_info["rerank_result"] = []
-            documents = self._post_process(query, vec_hits, top_k)
+            documents = self._post_process(query, vec_hits, top_k, doc_cap=doc_cap)
             return documents, query_vector, debug_info, degraded
 
         # Hybrid paths: keyword + vector (parallel)
@@ -927,7 +1149,9 @@ class HybridRetriever:
             fallback, fb_degraded = await self._fallback(query, filters, top_k)
             if fb_degraded:
                 degraded.append(fb_degraded)
-            results = self._post_process(query, fallback, top_k) if fallback else []
+            results = (
+                self._post_process(query, fallback, top_k, doc_cap=doc_cap) if fallback else []
+            )
             if debug and debug_info is not None:
                 debug_info["note"] = "RRF fusion empty, used fallback"
             return results, query_vector, debug_info, degraded
@@ -993,7 +1217,7 @@ class HybridRetriever:
         if debug and debug_info is not None:
             debug_info["mmr"] = mmr_debug
 
-        return self._post_process(query, fused, top_k), query_vector, debug_info, degraded
+        return self._post_process(query, fused, top_k, doc_cap=doc_cap), query_vector, debug_info, degraded
 
     @staticmethod
     def _debug_format_hits(hits: list[dict]) -> list[dict]:
@@ -1012,6 +1236,10 @@ class HybridRetriever:
                 "rewrite_hits": h.get("_rewrite_hits", 1),
                 "has_keyword": h.get("has_keyword", False),
                 "has_vector": h.get("has_vector", False),
+                # #188：结构化条款字段（旧索引为 None/[]）
+                "section_title": src.get("section_title"),
+                "clause_no": src.get("clause_no") or [],
+                "section_no": src.get("section_no") or [],
                 "snippet": (src.get("content", "") or "")[:200],
             })
         return formatted
