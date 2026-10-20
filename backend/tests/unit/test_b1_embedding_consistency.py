@@ -102,8 +102,8 @@ def test_pipeline_falls_back_when_embedding_is_unconfigured(monkeypatch):
     """无 embedding 配置时管线仍可构造（向量臂关闭），不得拖垮 LLM-only 工具。
 
     基线语义：`_build_embedding_client()` 无 key 返回 None，管线照常构造。
-    唯一构造点的单例在 import 期抛 RuntimeError，`get_rag_pipeline()` 必须
-    把它降级为 `embedding_provider=None`（否则 `rag_service.openai_client`
+    唯一构造点的单例在 import 期抛 EmbeddingConfigError，`get_rag_pipeline()`
+    必须把它降级为 `embedding_provider=None`（否则 `rag_service.openai_client`
     这类只读 LLM 的路径会被无关能力拖崩）。
     """
     import sys
@@ -532,3 +532,58 @@ async def test_pipeline_refuses_results_when_vector_config_error(monkeypatch):
             "查询", organization_id=1, document_ids=["d1"]
         )
     assert "维度不一致" in str(excinfo.value)
+
+
+class _RaceIndexIndices:
+    """模拟多副本首启竞态：exists=False，create 报 resource_already_exists。"""
+
+    def __init__(self, mapping: dict):
+        self._mapping = mapping
+
+    async def exists(self, index=None):
+        return False
+
+    async def create(self, index=None, mappings=None, settings=None):
+        raise RuntimeError(
+            "BadRequestError(400, 'resource_already_exists_exception')"
+        )
+
+    async def get_mapping(self, index=None):
+        return self._mapping
+
+
+def test_resource_already_exists_race_falls_through_to_validation(monkeypatch):
+    """并发建索引竞态不是配置错误：改为校验已存在索引并解除闩锁。"""
+    from app.core import elasticsearch as es_mod
+
+    monkeypatch.setattr(settings, "VECTOR_DIMENSION", 1024)
+    monkeypatch.setattr(es_mod, "resolve_embedding_model", lambda: "same-model")
+    monkeypatch.setattr(es_mod._holder, "index_error", "transient startup error")
+    client = SimpleNamespace(
+        indices=_RaceIndexIndices(
+            _mapping_for(
+                settings.ELASTICSEARCH_INDEX_NAME,
+                dims=1024,
+                meta={"embedding_model": "same-model", "vector_dimension": 1024},
+            )
+        )
+    )
+
+    _run(es_mod._create_index_if_not_exists(client))
+
+    assert es_mod._holder.index_error is None
+
+
+def test_resource_already_exists_race_still_rejects_incompatible_index(monkeypatch):
+    """竞态兜底不得掩盖真正的维度漂移。"""
+    from app.core import elasticsearch as es_mod
+
+    monkeypatch.setattr(settings, "VECTOR_DIMENSION", 1024)
+    client = SimpleNamespace(
+        indices=_RaceIndexIndices(
+            _mapping_for(settings.ELASTICSEARCH_INDEX_NAME, dims=2048, meta=None)
+        )
+    )
+
+    with pytest.raises(es_mod.IndexConfigError):
+        _run(es_mod._create_index_if_not_exists(client))

@@ -257,6 +257,26 @@ def test_limit_must_be_positive():
     assert parser.parse_args(["--limit", "2"]).limit == 2
 
 
+def test_find_unresolved_includes_docs_that_left_indexed_state():
+    """复核时已不在 INDEXED 集合（PARSING/FAILED）的文档不能算恢复成功。"""
+    module = _load_script_module()
+    report_after = module.build_report(
+        [("d-ok", "a.txt", 1, 2), ("d-extra", "b.txt", 1, 0)],
+        {"d-ok": 2, "d-extra": 1},
+    )
+    unresolved = module.find_unresolved(
+        ["d-ok", "d-extra", "d-departed"], report_after
+    )
+    assert unresolved == ["d-departed"]
+
+
+def test_find_unresolved_flags_still_broken_docs():
+    module = _load_script_module()
+    report_after = module.build_report([("d1", "a.txt", 1, 5)], {"d1": 0})
+    assert module.find_unresolved(["d1"], report_after) == ["d1"]
+    assert module.find_unresolved([], report_after) == []
+
+
 def test_script_reuses_unified_processor_and_has_no_direct_es_write_path():
     """修复动作必须复用 DocumentProcessor.process()，不得另造写入旁路。"""
     source = SCRIPT_PATH.read_text(encoding="utf-8")

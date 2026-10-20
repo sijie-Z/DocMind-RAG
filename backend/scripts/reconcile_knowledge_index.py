@@ -40,7 +40,8 @@
 
 ## 退出码
 
-    0  一致；或 --reindex 后复核一致（仅有 DEFERRED 且复核已绿也算 0）
+    0  一致；或 --reindex 后复核一致（仅有 DEFERRED 且复核已绿也算 0）。
+       extra / 孤儿只告警，不影响退出码（需人工确认，脚本不自动处理）
     1  存在 missing/partial（--reindex 后仍有残留/失败/复核未恢复）
     2  致命错误（DB/ES 不可用、索引配置错误、配置加载失败等）
 """
@@ -307,6 +308,22 @@ async def reindex_documents(
     return outcome
 
 
+def find_unresolved(
+    succeeded: list[str], report_after: ReconcileReport
+) -> list[str]:
+    """``process`` 返回成功的文档中，复核**未能证明已恢复**的 id。
+
+    「已恢复」= 仍在 INDEXED 基准里且 ES 计数满足 ``chunk_count``（``ok`` 或
+    ``extra`` 都可检索）。文档离开 INDEXED 集合（被并发新任务置为
+    PARSING/FAILED 等）时无法证明恢复，一律视为未解决——否则
+    ``report_after`` 里根本没这行，会被误判成成功（评审发现）。
+    """
+    ok_ids = {
+        state.document_id for state in report_after.states if not state.needs_reindex
+    }
+    return [doc_id for doc_id in succeeded if doc_id not in ok_ids]
+
+
 def _print_report(report: ReconcileReport, *, organization_id: int | None) -> None:
     scope = f"组织 {organization_id}" if organization_id is not None else "全部组织"
     logger.info(
@@ -414,16 +431,10 @@ async def run(args: argparse.Namespace) -> int:
         report_after = build_report(rows_after, counts_after)
         _print_report(report_after, organization_id=args.org)
 
-        # 复核裁决：process 返回 True 不等于数据真的回来了（例如 job 被更新的任务
-        # 取代时 process 走 STALE_RUN 也返回 True）。以复核结果为准，避免谎报成功。
-        still_broken = {
-            state.document_id
-            for state in report_after.states
-            if state.needs_reindex
-        }
-        unresolved = [
-            doc_id for doc_id in outcome.succeeded if doc_id in still_broken
-        ]
+        # 复核裁决：process 返回 True 不等于数据真的回来了（例如 job 被更新的
+        # 任务取代时 process 走 STALE_RUN 也返回 True）。以复核结果为准，避免
+        # 谎报成功；离开 INDEXED 集合的文档无法证明恢复，同样判为未解决。
+        unresolved = find_unresolved(outcome.succeeded, report_after)
         if unresolved:
             logger.error(
                 "[RECONCILE] 以下文档报告成功但复核仍缺失/部分（可能被更新任务取代）：%s",

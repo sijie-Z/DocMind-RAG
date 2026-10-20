@@ -74,9 +74,10 @@ def get_rag_pipeline() -> RAGPipeline:
     曾造成索引/查询模型漂移，勿恢复。
 
     无 embedding 配置（在线模式缺 key 且未启用本地 embedding）时，单例模块
-    导入会抛 ``RuntimeError``——这与基线 ``_build_embedding_client()`` 返回
-    ``None`` 的降级语义对齐：**管线照常构造，仅向量臂关闭**。LLM/关键词能力
-    与只依赖 ``rag_service.openai_client`` 的工具（如图谱回填脚本）不受影响。
+    导入会抛 ``EmbeddingConfigError``（RuntimeError 子类）——这与基线
+    ``_build_embedding_client()`` 返回 ``None`` 的降级语义对齐：**管线照常
+    构造，仅向量臂关闭**。LLM/关键词能力与只依赖 ``rag_service.openai_client``
+    的工具（如图谱回填脚本）不受影响。
     """
     try:
         from app.services.embedding_service import embedding_service
