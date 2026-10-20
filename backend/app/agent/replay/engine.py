@@ -34,7 +34,8 @@ _SAFE_TASK_ID = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # 结构化 timeline 的字段契约：与 ExecutionContext.to_dict()（写侧）逐字对齐。
 # 只投影这些键——改名/增删都会让测试红（见 tests/unit/test_agent_replay_engine.py）。
 # #204：steps 末尾补 started_at / finished_at，decisions 末尾补 ts（嵌套加键；
-# 旧回放文件缺这些键时 .get 返回 None，诚实降级不虚构）。
+# 旧回放文件缺这些键时 .get 返回 None，诚实降级不虚构）。未知时间戳的两种
+# 编码（None 与 epoch 0.0）都不得被消费方当成真实时间展示。
 _TIMELINE_STEP_FIELDS = (
     "step_id", "description", "tool_used", "status",
     "result_summary", "error", "duration_ms", "tokens_used",

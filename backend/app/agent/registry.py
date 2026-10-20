@@ -3,7 +3,7 @@
 Architecture:
     ToolEntry                     — metadata + handler for one tool
     ToolResult / ToolError        — unified return structure
-    pre_hooks / post_hooks        — pluggable pipeline (auth, rate_limit, error mapping)
+    pre_hooks / post_hooks        — pluggable pipeline (auth, error mapping)
 
 Backward compatible:
     @register_tool  decorator    — unchanged signature (new fields are optional)

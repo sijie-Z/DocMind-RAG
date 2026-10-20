@@ -9,8 +9,8 @@
 
 写侧契约（`to_dict()` → checkpoint 超集 → 回放 timeline 三层逐字对齐）：
 
-- `steps` 嵌套新增 `started_at` / `finished_at`（epoch 秒，`None` 表示未完成，
-  只存在于快照而非运行态写入路径）；
+- `steps` 嵌套新增 `started_at` / `finished_at`（epoch 秒；运行态写入路径只会写
+  已知值，`finished_at=None` 仅可能来自旧快照/外部输入）；
 - `decisions` 嵌套新增 `ts`（epoch 秒）；
 - **顶层键集不变**（replay / SSE execution_context 事件的既有契约，见
   `test_checkpoint_roundtrip._TO_DICT_KEYS`）；
@@ -59,6 +59,9 @@ def test_complete_step_stamps_wall_clock_interval():
     回推墙钟起点忽略步骤内的时钟漂移，属可接受近似（docstring 语义）。
     """
     ctx = ExecutionContext(query="q")
+    # 把构造时刻推远：杀死"用 ctx.start_time 代替实时打点"的变异——它在
+    # 1ms 容差内也能过，但距真实调用窗口已 60s。
+    ctx.start_time = time.time() - 60
     before = time.time()
     ctx.complete_step(
         "s1", "检索资料", "search_knowledge_base", "completed",
@@ -95,6 +98,8 @@ def test_record_decision_stamps_ts_and_inherits_current_step():
     """决策打墙钟点；triggered_by 缺省用 current_step_id 填充（M3）。"""
     ctx = ExecutionContext(query="q")
     ctx.current_step_id = "s7"
+    # 同上：构造时刻推远 60s，杀死"用 ctx.start_time 打点"的变异。
+    ctx.start_time = time.time() - 60
     before = time.time()
     ctx.record_decision("execute", "retry_step", "第一次超时")
     after = time.time()
@@ -113,7 +118,7 @@ def test_record_decision_explicit_triggered_by_wins():
 
 
 def test_record_decision_without_current_step_leaves_triggered_by_none():
-    """没有当前步骤（plan 阶段 / 直答收尾）→ None，不编造归属。"""
+    """尚未派发过任何步骤（首轮 plan 之前）→ None，不编造归属。"""
     ctx = ExecutionContext(query="q")
     ctx.record_decision("plan", "structured", "生成计划")
     assert ctx.decisions[0].triggered_by is None

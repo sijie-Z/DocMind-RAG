@@ -159,7 +159,8 @@ class StepRecord:
     取当时的墙钟，`started_at` 按 `duration_ms` 回推（duration 来自
     `time.perf_counter()` 差值，度量的是区间长度；回推忽略步骤内的时钟漂移，
     属可接受近似）。`started_at == 0.0` / `finished_at is None` 表示"未知"——
-    从 issue #204 之前的旧 checkpoint 恢复的步骤没有任何时间戳来源。
+    从 issue #204 之前的旧 checkpoint 恢复的步骤没有任何时间戳来源；回放
+    timeline 对旧数据同样输出 None。
     """
     step_id: str
     description: str
@@ -264,9 +265,12 @@ class ExecutionContext:
     ) -> None:
         """记录一条决策（#204：打墙钟点 + 归属触发步骤）。
 
-        `triggered_by` 缺省取 `current_step_id`（executor 在派发步骤前写入）；
-        调用方显式传入时以显式值为准。两者都没有（plan 阶段 / 直答收尾）→
-        None，不编造归属。变异点：删掉缺省填充 → 归属断言红。
+        `triggered_by` 缺省取**记录时刻**的 `current_step_id`（executor 在串行
+        派发步骤前写入，且该字段不随步骤结束清零）。因此并行批次与运行级决策
+        （review / finalize）可能归到"最近一次串行派发的步骤"——这是
+        `current_step_id` 的既有语义，消费者做归因分析时应知晓该边界。
+        显式传入非 None 值时以显式值为准；`current_step_id` 为 None（尚未派发
+        过任何步骤）→ None，不编造归属。变异点：删掉缺省填充 → 归属断言红。
         """
         self.decisions.append(Decision(
             phase=phase, action=action, reasoning=reasoning,
@@ -288,8 +292,11 @@ class ExecutionContext:
         """记账一个步骤的终态（#204：同时打墙钟区间）。
 
         `finished_at` = 收尾墙钟；`started_at` = finished_at - duration（毫秒）。
-        duration 未知（默认 0）时区间折叠为一点，不编造起点。变异点：删掉任一
-        打点 → test_issue204_trace_timestamps 的区间断言红。
+        duration 是**本次 attempt** 的区间长度（重试步骤每次重新计时），因此
+        `started_at` 是最后一次 attempt 的近似起点，不是步骤首次开始时间。
+        duration 未知（默认 0）时区间折叠为一点——此时的 `started_at` 不可当作
+        真实起点；负值按 0 处理。变异点：删掉任一打点 →
+        test_issue204_trace_timestamps 的区间断言红。
         """
         finished_at = datetime.now().timestamp()
         record = StepRecord(
