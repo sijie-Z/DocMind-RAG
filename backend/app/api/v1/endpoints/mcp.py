@@ -10,7 +10,7 @@
 
 from fastapi import APIRouter, Depends
 
-from app.core.security import get_current_user
+from app.core.security import get_current_user, is_platform_admin
 from app.exceptions import AuthorizationError
 from app.models.user import User
 
@@ -19,8 +19,9 @@ router = APIRouter()
 
 @router.get("/servers")
 async def list_mcp_servers(current_user: User = Depends(get_current_user)):
-    """MCP 服务器状态列表（管理员）。写操作 = 编辑 backend/mcp_servers.json 后重启，无在线启停。"""
-    if not current_user.is_superuser and current_user.role != "admin":
+    """MCP 服务器状态列表（平台管理员）。写操作 = 编辑 backend/mcp_servers.json 后重启，无在线启停。"""
+    # W0-1：MCP 服务器接入属部署级信息 —— 平台级只认显式 is_superuser。
+    if not is_platform_admin(current_user):
         raise AuthorizationError("需要管理员权限")
     from app.agent.mcp.manager import mcp_manager
 

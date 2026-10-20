@@ -1,21 +1,15 @@
 /**
- * T3 判别测试 · admin 判定契约（role 与 is_superuser 组合）
- *
- * 现场：后端鉴权普遍按 `is_superuser or role == "admin"` 判管理员，但登录
- * payload 与 /users/me 只下发 role，前端 stores/user.ts 的 isAdmin 也只认
- * `role === 'admin'` —— superuser 账号（role=user）看不到管理菜单
- * （layouts/index.vue 按 isAdmin 过滤 adminOnly 分组），路由守卫
- * （router/index.ts:367）也会把它重定向回 Dashboard。
+ * T3 判别测试 · admin 判定契约（W0-1 / ADR-001 D3）
  *
  * 契约（本测试钉死）：
- *  - isAdmin = role === 'admin' || is_superuser === true（严格布尔）；
- *  - 登录 payload 与 /users/me 里的 is_superuser 进入 store 后立即生效；
- *  - 菜单过滤与路由守卫消费的都是同一个 isAdmin 计算属性，组合判定
- *    即两处同口径（守卫每次进管理路由前还会重新拉取 /users/me）。
+ *  - 平台管理员只认显式 is_superuser === true（严格布尔）；
+ *  - 组织管理员认当前组织的 is_org_admin === true（per-org 角色，后端下发）；
+ *  - isAdmin = is_superuser || is_org_admin；
+ *  - users.role 只是展示标签，role === 'admin' 单独不再成立。
+ *  - 登录 payload 与 /users/me 里的标志进入 store 后立即生效；
+ *  - 菜单过滤与路由守卫消费同一个 isAdmin / isSuperuser。
  *
- * 变异（预计红）：isAdmin 退回只认 `role === 'admin'`
- * → 「role=user + is_superuser=true」的组合用例、登录回填用例与
- *   getUserInfo（守卫路径）用例全部变红。
+ * 变异（预计红）：isAdmin 退回 `role === 'admin'`，或漏掉 is_org_admin。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
@@ -61,16 +55,25 @@ describe('useUserStore · isAdmin 组合判定', () => {
     vi.clearAllMocks()
   })
 
-  it('role=admin 单独成立（原有行为不回归）', () => {
+  it('role=admin 单独不成立（展示标签不再参与授权）', () => {
     const store = useUserStore()
     store.userInfo = makeInfo({ role: 'admin' })
-    expect(store.isAdmin).toBe(true)
+    expect(store.isAdmin).toBe(false)
   })
 
-  it('role=user + is_superuser=true → isAdmin 成立（superuser 管理菜单可见）', () => {
+  it('role=user + is_superuser=true → isAdmin / isSuperuser 成立', () => {
     const store = useUserStore()
     store.userInfo = makeInfo({ role: 'user', is_superuser: true })
     expect(store.isAdmin).toBe(true)
+    expect(store.isSuperuser).toBe(true)
+  })
+
+  it('role=user + is_org_admin=true → isAdmin 成立（组织管理菜单可见）', () => {
+    const store = useUserStore()
+    store.userInfo = makeInfo({ role: 'user', is_org_admin: true })
+    expect(store.isAdmin).toBe(true)
+    expect(store.isOrgAdmin).toBe(true)
+    expect(store.isSuperuser).toBe(false)
   })
 
   it('role=user + is_superuser=false → isAdmin 不成立', () => {

@@ -2,6 +2,8 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+.coverage
+htmlcov/
 venv/
 .venv/
 .venv-*/
@@ -56,3 +58,12 @@ traces/
 # Logs
 backend/logs/
 frontend/src/views/chat/上下文.txt
+
+# Local orchestration / scratch workspaces (never commit)
+/_orchestrate/
+/_uisweep/
+/logs/
+/uploads/
+/data/
+/.benchmarks/
+/backend/temp_uploads/

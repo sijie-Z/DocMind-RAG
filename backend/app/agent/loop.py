@@ -1620,8 +1620,12 @@ class PERAgentLoop:
             system_prompt += f"\n\n{memory_context}"
 
         if context_docs:
+            # issue #186：参考文档正文取 prompt_text 全文（snippet 仅展示），
+            # 500 字上限按规则式句子抽取，不硬切头部。
+            from app.rag.context_compressor import compress, get_prompt_text
             context_str = "\n\n".join([
-                f"[{i + 1}] {doc.get('filename', 'Unknown')}:\n{doc.get('snippet', doc.get('text', ''))[:500]}"
+                f"[{i + 1}] {doc.get('filename', 'Unknown')}:\n"
+                f"{compress(get_prompt_text(doc), query, max_chars=500)}"
                 for i, doc in enumerate(context_docs[:5])
             ])
             system_prompt += f"\n\n## 已检索到的参考文档\n{context_str}"

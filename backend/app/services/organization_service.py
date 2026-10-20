@@ -9,9 +9,11 @@ from sqlalchemy import and_, delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.security import is_platform_admin
 from app.exceptions import (
     AppError,
     AuthenticationError,
+    AuthorizationError,
     ConflictError,
     ServiceUnavailableError,
 )
@@ -22,7 +24,7 @@ from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.organization import Organization, user_organization
 from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
-from app.models.rbac import user_organization_role_association
+from app.models.rbac import ORG_ADMIN_ROLE_NAME, Role, user_organization_role_association
 from app.models.scheduled_task import ScheduledTask
 from app.models.token_usage import TokenUsageRecord
 from app.models.user import User
@@ -58,13 +60,25 @@ class OrganizationService:
         try:
             # 1. 获取所有组织
             # 这里可以利用刚才设置的超管特权
-            if user.is_superuser:
+            if is_platform_admin(user):
                 # 超管看到完整的树
                 stmt = select(Organization).options(selectinload(Organization.children)).order_by(Organization.level, Organization.sort_order)
             else:
-                # 普通用户只能看到自己所在组织及其下属（简化处理：看到所有非私有组织）
-                # 不能用 `not`：SQLAlchemy 列描述符的 __bool__ 恒为 True，会坍缩成 WHERE false（issue #95）
-                stmt = select(Organization).where(Organization.is_private.is_(False)).options(selectinload(Organization.children)).order_by(Organization.level, Organization.sort_order)
+                # W0-2：组织树是跨租户信息面——非平台管理员的可见集合只能由
+                # **关系**推导（成员表 / 组织角色关联 / 主组织），绝不按
+                # `is_private` 等组织属性枚举其他租户。可见集合为空 = 无组织
+                # 上下文，fail closed（403），不用空树冒充成功。
+                visible_ids = await self.resolve_visible_organization_ids(db, user)
+                if not visible_ids:
+                    raise AuthorizationError("当前账号无组织上下文，无法查看组织树")
+                visible_result = await db.execute(
+                    select(Organization)
+                    .where(Organization.id.in_(sorted(visible_ids)))
+                    .order_by(Organization.level, Organization.sort_order, Organization.id)
+                )
+                # 只在这批可见节点内构建森林：父节点不可见时该节点作为根，
+                # 不向上泄露不可见组织（含其名称）。
+                return self._build_visible_forest(visible_result.scalars().all())
 
             result = await db.execute(stmt)
             all_orgs = result.scalars().all()
@@ -86,6 +100,10 @@ class OrganizationService:
 
             return tree
 
+        except AppError:
+            # W0-2：无组织 403 等业务异常必须原样冒泡，不能被下面的
+            # `except Exception` 降级成 503。
+            raise
         except Exception as e:
             # issue #301（批 C）：查询失败不再回落空树 —— 空树在端点层会被
             # 包装成 {"success": true, "data": []} 的 200，像「组织全被删」。
@@ -94,6 +112,99 @@ class OrganizationService:
             # 与 X-Silent-Error 静默头，正好承接此语义。
             logger.error(f"获取组织树失败: {str(e)}")
             raise ServiceUnavailableError("组织架构查询失败，请稍后重试") from e
+
+    def _build_visible_forest(self, orgs: list[Organization]) -> list[dict]:
+        """W0-2：只在这批可见节点内构建森林。
+
+        父节点不在可见集合时，该节点作为根返回——不得为了“树形完整”把
+        不可见的父组织补进来（那会把其他租户的组织名泄露给调用方）。
+        """
+        org_map = {org.id: self._org_to_dict(org) for org in orgs}
+        tree: list[dict] = []
+        for org in orgs:
+            node = org_map[org.id]
+            parent = org_map.get(org.parent_id)
+            if parent is None:
+                # 父组织不可见：连 parent_id 也不返回——不可见组织的 ID 同样
+                # 属于其元数据；该节点直接作为森林的根。
+                node["parent_id"] = None
+                tree.append(node)
+            else:
+                parent["children"].append(node)
+        return tree
+
+    async def resolve_visible_organization_ids(
+        self, db: AsyncSession, user: User
+    ) -> set[int] | None:
+        """W0-2：返回调用者可见的组织 ID 集合；平台管理员返回 ``None`` 哨兵。
+
+        非平台管理员的可见集合是**关系**的并集，不是组织属性：
+        - ``user_organization`` 成员关系（成员表是权威来源）；
+        - ``user_organization_role_association`` 组织角色关联（per-org 角色，
+          例如 OrgAdmin；即使成员行缺失，被授予组织角色也说明存在关系）；
+        - ``users.organization_id`` 主组织兜底（历史用户可能没有成员行，
+          与 ``GET /users/me/organizations`` 的兼容口径一致；只增不减，
+          不影响“无组织 → 空集合 → 403”的判定）。
+
+        绝不使用 ``Organization.is_private`` 之类的组织属性做人可见性过滤。
+        """
+        if getattr(user, "is_superuser", False):
+            return None
+
+        visible: set[int] = set()
+        user_id = getattr(user, "id", None)
+        if user_id is not None:
+            member_rows = await db.execute(
+                select(user_organization.c.organization_id).where(
+                    user_organization.c.user_id == user_id
+                )
+            )
+            visible.update(
+                int(org_id)
+                for org_id in member_rows.scalars().all()
+                if org_id is not None
+            )
+            role_rows = await db.execute(
+                select(user_organization_role_association.c.organization_id).where(
+                    user_organization_role_association.c.user_id == user_id
+                )
+            )
+            visible.update(
+                int(org_id)
+                for org_id in role_rows.scalars().all()
+                if org_id is not None
+            )
+
+        primary_org_id = getattr(user, "organization_id", None)
+        if primary_org_id is not None:
+            visible.add(int(primary_org_id))
+        return visible
+
+    async def resolve_managed_organization_ids(
+        self, db: AsyncSession, user: User
+    ) -> set[int]:
+        """W0-2：返回调用者以 ``OrgAdmin`` 角色**管理**的组织 ID 集合。
+
+        与可见性集合不同：组织聚合（org-summary）只对管理层开放，普通成员
+        即便可见本组织也不得读取聚合数据（调用方在空集合时 403）。
+        """
+        user_id = getattr(user, "id", None)
+        if user_id is None:
+            return set()
+        rows = await db.execute(
+            select(user_organization_role_association.c.organization_id)
+            .join(
+                Role,
+                Role.id == user_organization_role_association.c.role_id,
+            )
+            .where(
+                user_organization_role_association.c.user_id == user_id,
+                Role.name == ORG_ADMIN_ROLE_NAME,
+            )
+        )
+        return {
+            int(org_id) for org_id in rows.scalars().all() if org_id is not None
+        }
 
     async def update_organization(self, db: AsyncSession, org_id: int, data: dict[str, Any]) -> Organization | None:
         """更新组织信息，自动处理层级变更 — 不负责 commit，由调用方管理事务"""

@@ -205,6 +205,11 @@ import { getUsers, createUser, updateUser, deleteUser, resetUserPassword } from 
 import { getOrganizations, type OrganizationListResponse } from '@/api/organization'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
+import { useUserStore } from '@/stores/user'
+
+// W0-1：删除用户是平台级动作（DELETE_USER 不在 OrgAdmin 权限集），
+// 组织管理员页面不再展示该按钮（后端仍会 403 兜底）。
+const userStore = useUserStore()
 
 // E14/D1：本页自行呈现错误的请求一律带 X-Silent-Error —— 关闭响应拦截器的
 // 全局 toast，避免与页内提示（内联错误态 / 单条 toast）重复。
@@ -398,11 +403,15 @@ const columns: DataTableColumns<User> = [
             { size: 'small', type: 'warning', secondary: true, onClick: () => openResetPwd(row) },
             { default: () => t('users.resetPassword') }
           ),
-          h(
-            NButton,
-            { size: 'small', type: 'error', secondary: true, onClick: () => handleDelete(row) },
-            { default: () => t('common.delete') }
-          )
+          ...(userStore.isSuperuser
+            ? [
+                h(
+                  NButton,
+                  { size: 'small', type: 'error', secondary: true, onClick: () => handleDelete(row) },
+                  { default: () => t('common.delete') }
+                ),
+              ]
+            : [])
         ]
       })
     }

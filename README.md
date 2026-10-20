@@ -45,7 +45,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 
 已知限制：
 - 工作流代码节点默认关闭，需显式设置 `ENABLE_WORKFLOW_CODE_NODES=true`，且必须通过 Docker 沙箱执行。
-- GraphRAG 图谱、Agent 记忆、指标快照与实时计数均已支持 Redis 持久化；实时计数按实例写入并在读取时聚合，适合多实例部署。
+- GraphRAG 图谱、Agent 记忆中的长期/反思记忆、指标快照与实时计数已支持 Redis 持久化（短期/工作记忆为进程内，不跨进程或重启）；实时计数按实例写入并在读取时聚合，适合多实例部署。
 - 前端 `knowledge/index.vue`、`profile/index.vue`、`workflow/editor.vue` 均已拆分到组件/组合式函数，不再有千行级单文件页面。
 
 ---
@@ -210,7 +210,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 定时任务 | `/scheduled-tasks` | 定时任务 CRUD、暂停/恢复与手动触发 |
 | LLM 配置（已弃用） | `/llm-config` | 工作流全局配置入口已移除；端点标 deprecated，待统一 Provider 层落地后删除 |
 | 技能库 | `/curated-skills` | 技能发现与管理 |
-| Agent 记忆 | `/memory` | 短期/长期/工作记忆 CRUD、语义搜索 |
+| Agent 记忆 | `/memory` | 短期/长期/工作/反思记忆 CRUD、语义搜索 |
 | 智能 Agent | `/agent` | PER Agent 对话（SSE 流式）、工具调用、配置 |
 | MCP 工具 | `/mcp` | MCP 服务器状态（管理员只读） |
 | 用户设置 | `/user` | 个人 UI 偏好 |

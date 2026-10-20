@@ -114,6 +114,7 @@ async def search_knowledge_base(
     if organization_id is None:
         return _missing_organization_result("search_knowledge_base")
     from app.dependencies import get_rag_pipeline
+    from app.rag.context_compressor import compress, get_prompt_text
     from app.rag.errors import RetrievalUnavailableError
 
     pipeline = get_rag_pipeline()
@@ -144,7 +145,9 @@ async def search_knowledge_base(
     for doc in results:
         score = float(doc.get("score") or 0.0)
         filename = doc.get("filename", "Unknown")
-        snippet = doc.get("snippet", doc.get("text", "")[:300])
+        # issue #186：正文单一来源 prompt_text（snippet 仅展示）；300 字上限走
+        # context_compressor 的规则式句子抽取，关键句在 chunk 后半段时仍保留。
+        snippet = compress(get_prompt_text(doc), query, max_chars=300)
         entries.append((score, filename, doc.get("document_id", ""), snippet))
     return _build_search_payload(entries)
 
@@ -191,6 +194,7 @@ async def vector_search(
         return "Embedding service unavailable."
 
     from app.core.elasticsearch import ElasticsearchTools
+    from app.rag.context_compressor import compress
     es_query = {
         "size": top_k,
         "min_score": 1.15,
@@ -217,7 +221,8 @@ async def vector_search(
             float(hit.get("_score") or 0.0),
             src.get("filename", "?"),
             src.get("document_id", ""),
-            (src.get("content") or "")[:300],
+            # issue #186：300 字上限按语义句抽取，不硬切 chunk 头部。
+            compress(src.get("content") or "", query, max_chars=300),
         ))
     return _build_search_payload(entries)
 

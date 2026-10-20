@@ -123,6 +123,13 @@ class AISettings(BaseSettings):
     RAG_MMR_CANDIDATE_MULTIPLIER: int = 4
     RAG_HYDE_WEIGHT: float = 0.3
 
+    # #186：提示词正文上限（字符）与展示 snippet 上限（字符）。
+    # 提示词正文单一来源是 `prompt_text`（完整 chunk）；超过上限时按
+    # context_compressor 的规则式句子抽取截断，不硬切头部。默认值与原硬编码
+    # （3000 / 260）一致，行为只在「超限且关键句不在头部」时改善。
+    RAG_PROMPT_TEXT_MAX_CHARS: int = Field(default=3000, ge=1)
+    RAG_SNIPPET_MAX_CHARS: int = Field(default=260, ge=1)
+
     # Query rewrite (multi-query expansion)
     RAG_ENABLE_QUERY_REWRITE: bool = True
     RAG_QUERY_REWRITE_COUNT: int = 4
@@ -167,6 +174,14 @@ class AISettings(BaseSettings):
     # （阈值 [0,1]；TTL ≥0——负值此前可入 Settings，setex 报 invalid expire）。
     SEMANTIC_CACHE_THRESHOLD: float = Field(default=0.92, ge=0.0, le=1.0)
     SEMANTIC_CACHE_TTL_SECONDS: int = Field(default=3600, ge=0)
+    # issue #195：阈值 0.92 只能做粗筛——相邻条款（第七条 vs 第十三条）或
+    # 同句式换实体（北京 vs 上海）的向量余弦也在阈值内，会跨问题返回他人的
+    # sources（检索链）/ 完整答案（问答链）。两个语义缓存命名空间因此默认
+    # 关闭：检索 sources（精确缓存 RetrievalCache 已按 query+org+top_k 足够）
+    # 与问答 answer。显式开启后，命中仍必须通过条号/数字/实体等价判定
+    # （rag/cache.py::queries_equivalent），阈值不是唯一判据。
+    SEMANTIC_CACHE_RETRIEVAL_ENABLED: bool = False
+    SEMANTIC_CACHE_ANSWER_ENABLED: bool = False
 
     # Query decomposition (multi-perspective RAG)
     RAG_ENABLE_QUERY_DECOMPOSITION: bool = True

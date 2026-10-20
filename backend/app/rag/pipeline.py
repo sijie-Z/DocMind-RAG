@@ -28,7 +28,7 @@ from app.core.prometheus import (
     RAG_RETRIEVAL_UNAVAILABLE,
 )
 from app.rag.cache import RetrievalCache, SemanticCache
-from app.rag.context_compressor import compress_context_list
+from app.rag.context_compressor import compress, compress_context_list, get_prompt_text
 from app.rag.context_window import build_rag_messages
 from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError, is_timeout_error
 from app.rag.metrics import RAGMetrics
@@ -101,6 +101,11 @@ class RAGPipeline:
         自动路由——显式模式承诺「本次确实按所选臂执行」，不让同义查询把别的
         模式的结果借位返回）。
 
+        issue #195：检索 sources 的语义缓存默认关闭
+        （``SEMANTIC_CACHE_RETRIEVAL_ENABLED=False``）——精确缓存已足够，且
+        0.92 阈值会把相邻条款/换实体的查询当成同一问题。显式开启后，命中
+        仍要求查询文本通过条号/数字/实体等价判定（``cache.queries_equivalent``）。
+
         Raises:
             RetrievalUnavailableError: 检索后端服务故障或超时（issue #292）。
                 此时结果**不可知**，调用方不得把它当「知识库无相关内容」处理；
@@ -149,17 +154,47 @@ class RAGPipeline:
                     if debug and debug_info is not None:
                         debug_info["cache_hit"] = True
                         debug_info["cache_type"] = "exact"
+                        # issue #195：键摘要（不含明文 query），便于排查「是不是缓存导致的」。
+                        debug_info["cache"] = {
+                            "cache_type": "exact",
+                            "hit": True,
+                            **self.cache.describe_key(
+                                query, organization_id, top_k, search_mode
+                            ),
+                        }
                     return cached, debug_info
                 RAG_CACHE_MISSES.inc()
 
             # Semantic cache
             # issue #225 决策 7A：显式 search_mode 请求跳过语义缓存（读与写）——
             # 见方法 docstring 的「缓存按模式分域」说明；自动路由路径不变。
+            # issue #195：语义缓存默认关闭（SEMANTIC_CACHE_RETRIEVAL_ENABLED）；
+            # 显式开启后，命中还须通过条号/数字/实体等价判定（cache 层强制）。
+            # 精确缓存（上方）已按 query+org+top_k 给足收益，跨问题返回他人
+            # sources 的代价不可接受，故默认路径不再计算语义缓存用的 embedding。
+            semantic_cache_enabled = bool(getattr(self.semantic_cache, "enabled", True))
             query_vector = None
-            if not document_ids and not search_mode:
+            if document_ids or search_mode or not semantic_cache_enabled:
+                if debug and debug_info is not None:
+                    debug_info["cache"] = {
+                        "cache_type": "semantic",
+                        "hit": False,
+                        "enabled": semantic_cache_enabled,
+                        "skipped": (
+                            "document_scoped"
+                            if document_ids
+                            else "explicit_search_mode"
+                            if search_mode
+                            else "namespace_disabled"
+                        ),
+                    }
+            else:
                 query_vector = await self.get_embedding(query)
                 if query_vector:
-                    sem_cached = await self.semantic_cache.get(query_vector, organization_id)
+                    sem_meta: dict | None = {} if debug else None
+                    sem_cached = await self.semantic_cache.get(
+                        query_vector, organization_id, query=query, hit_info=sem_meta,
+                    )
                     if sem_cached:
                         RAG_CACHE_HITS.labels(cache_type="semantic").inc()
                         self.metrics.inc("semantic_cache_hit")
@@ -179,7 +214,19 @@ class RAGPipeline:
                         if debug and debug_info is not None:
                             debug_info["cache_hit"] = True
                             debug_info["cache_type"] = "semantic"
+                            debug_info["cache"] = dict(sem_meta or {})
                         return sem_cached.get("sources", []), debug_info
+                    if debug and debug_info is not None:
+                        # 未命中也要可解释：阈值内被条号/实体等价判定拒绝时，
+                        # rejected_reason/similarity/cached_query 直接暴露原因。
+                        debug_info["cache"] = dict(sem_meta or {})
+                elif debug and debug_info is not None:
+                    debug_info["cache"] = {
+                        "cache_type": "semantic",
+                        "hit": False,
+                        "enabled": semantic_cache_enabled,
+                        "rejected_reason": "empty_embedding",
+                    }
 
                 # Query decomposition for complex queries
             # （issue #225 边界注记：分解属查询理解层，不感知 search_mode——显式模式只
@@ -365,7 +412,16 @@ class RAGPipeline:
             # 范围），同 query 的后续无范围请求会命中并吃到被裁剪过的结果
             # （泄漏形态；Redis 可用时成立）。守卫位置/原则与上一行精确缓存
             # 写入一致。
-            if query_vector and result and cache_safe and not search_mode and not document_ids:
+            # issue #195：语义缓存命名空间关闭时绝不写入（读侧已跳过；
+            # 此处防 `qv` 回填 query_vector 后绕过读侧守卫）。
+            if (
+                semantic_cache_enabled
+                and query_vector
+                and result
+                and cache_safe
+                and not search_mode
+                and not document_ids
+            ):
                 # 检索缓存条目 answer 为空（仅 sources），写入检索专用命名空间（R4）
                 await self.semantic_cache.set(
                     query, query_vector, "", result, organization_id=organization_id
@@ -462,21 +518,24 @@ class RAGPipeline:
         if enable_compression and context:
             compressed = compress_context_list(context, query, max_context_chars=8000)
         else:
-            compressed = context
+            # issue #186：后续 PII 掩码会写回 prompt_text/text；未压缩路径先浅拷贝，
+            # 避免就地修改调用方的 context（来源卡片仍用原始 snippet）。
+            compressed = [dict(item) for item in context]
 
-        # 安全加固：检索上下文中的 PII 在拼入 prompt 前统一掩码
+        # 安全加固：检索上下文中的 PII 在拼入 prompt 前统一掩码。
+        # issue #186：掩码对象随提示词正文来源一起收敛到 prompt_text——snippet
+        # 是展示层字段（来源卡片走原始 context_results），不再参与提示词路径。
         if masking_enabled:
             for item in compressed:
-                raw_snippet = item.get("snippet") or item.get("text", "")
-                if not raw_snippet:
+                raw_content = get_prompt_text(item)
+                if not raw_content:
                     continue
                 masked, m = masking_service.mask_text(
-                    raw_snippet, start_index=len(context_mask_mapping)
+                    raw_content, start_index=len(context_mask_mapping)
                 )
                 context_mask_mapping.update(m)
-                if item.get("snippet") is not None:
-                    item["snippet"] = masked
-                elif item.get("text") is not None:
+                item["prompt_text"] = masked
+                if item.get("text") is not None:
                     item["text"] = masked
 
         # PII masking for query（编号接在 context 之后，避免占位符冲突）
@@ -485,8 +544,14 @@ class RAGPipeline:
                 query, start_index=len(context_mask_mapping)
             )
 
+        # issue #186：提示词正文只读 prompt_text（完整 chunk 正文）——snippet 仅为
+        # 展示层片段，`snippet or text` 的短路会让全文压缩器形同虚设。超过
+        # RAG_PROMPT_TEXT_MAX_CHARS 时走 compress() 的规则式句子抽取（保留开头少量
+        # 上下文 + 查询相关句），不做无差别头部硬切。
+        prompt_max_chars = max(1, int(settings.RAG_PROMPT_TEXT_MAX_CHARS))
         context_str = "\n\n".join([
-            f"资料[{i + 1}] (文件名: {item.get('filename', '未知文档')}):\n{(item.get('snippet') or item.get('text', ''))[:3000]}"
+            f"资料[{i + 1}] (文件名: {item.get('filename', '未知文档')}):\n"
+            f"{compress(get_prompt_text(item), query, max_chars=prompt_max_chars)}"
             for i, item in enumerate(compressed)
         ]) if compressed else "（未找到相关文档）"
 

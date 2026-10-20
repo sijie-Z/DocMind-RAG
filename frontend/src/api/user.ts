@@ -114,7 +114,15 @@ export const getMyOrganizations = async (): Promise<
  */
 export const switchOrganization = async (
   organizationId: number,
-): Promise<AxiosResponse<ApiResponse<{ organization_id: number }>>> => {
+): Promise<
+  AxiosResponse<
+    ApiResponse<{
+      organization_id: number
+      is_org_admin?: boolean
+      organization?: Record<string, unknown>
+    }>
+  >
+> => {
   return request.post(`/users/me/organizations/${organizationId}/switch`)
 }
 

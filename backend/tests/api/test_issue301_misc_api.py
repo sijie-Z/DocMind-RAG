@@ -101,7 +101,9 @@ class TestLlmConfigCorruptVisibility:
             llm_config_module, "redis_client",
             _FakeConfigRedis({"good00000001": good, "bad000000002": _BAD_RAW}),
         )
-        user = SimpleNamespace(id=1, is_superuser=False, role="user")
+        # W0-2：llm_config 读端点在过渡期只允许平台管理员；本用例验证的是
+        # 「坏值可见性」，因此以平台管理员身份读取。
+        user = SimpleNamespace(id=1, is_superuser=True, role="user")
 
         async def _override_user():
             return user

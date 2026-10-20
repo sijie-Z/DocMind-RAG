@@ -572,6 +572,12 @@ query_emb = await embedding(query)
 similar_results = await semantic_cache.search(query_emb, threshold=0.95)
 ```
 
+> **issue #195 起**：Layer 2 语义缓存**默认关闭**（`SEMANTIC_CACHE_RETRIEVAL_ENABLED` /
+> `SEMANTIC_CACHE_ANSWER_ENABLED` 均为 `false`）——0.92 阈值会把相邻条款（第七条/第十三条）
+> 或换实体的查询当成同一问题，跨问题返回他人 sources / 完整答案。显式开启后，候选仍须通过
+> 条号/数字/实体等价判定（`rag/cache.py::queries_equivalent`）才会命中。Layer 1 精确缓存
+> （query+org+top_k）不受影响。
+
 ### 13.2 TTL 和容量
 
 ```python

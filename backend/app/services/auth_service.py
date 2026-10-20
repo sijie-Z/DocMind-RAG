@@ -312,16 +312,22 @@ class AuthService:
 
     def require_role(self, required_role: str) -> Callable[..., Any]:
         """
-        RBAC角色权限检查装饰器
-        
-        Args:
-            required_role: 需要的角色 ('admin', 'user')
-            
-        Returns:
-            依赖函数，用于FastAPI的Depends
+        RBAC角色权限检查装饰器（遗留 API）。
+
+        W0-1（ADR-001 D3）：``admin`` 不再映射到 ``users.role`` —— 平台管理员
+        只认显式 ``is_superuser``；组织管理员应使用 ``core.security`` 的
+        ``require_org_admin``（per-org 组织角色）。保留本方法仅为兼容既有
+        调用方与测试，不得再用它构建新的管理员门禁。
         """
         async def role_checker(current_user: User = Depends(self.get_current_user)):
-            if current_user.role != required_role:
+            if required_role == "admin":
+                if not bool(getattr(current_user, "is_superuser", False)):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="需要平台管理员权限",
+                    )
+                return current_user
+            if (current_user.role or "") != required_role:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"需要{required_role}权限"

@@ -29,9 +29,9 @@
             </n-input>
           </div>
           
-          <n-button 
-            v-if="!permissionDenied"
-            type="primary" 
+          <n-button
+            v-if="!permissionDenied && userStore.isSuperuser"
+            type="primary"
             round 
             class="shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 transition-all duration-300"
             @click="showCreateModal = true"
@@ -82,7 +82,7 @@
           <div v-else-if="!loadError && !permissionDenied && filteredOrganizations.length === 0 && !loading" class="h-full flex items-center justify-center">
             <n-empty :description="t('org.noData', '暂无组织数据')">
               <template #extra>
-                <n-button v-if="!permissionDenied" type="primary" round @click="showCreateModal = true">{{ t('org.create') }}</n-button>
+                <n-button v-if="!permissionDenied && userStore.isSuperuser" type="primary" round @click="showCreateModal = true">{{ t('org.create') }}</n-button>
               </template>
             </n-empty>
           </div>
@@ -131,7 +131,7 @@
               <div class="p-4 border-b border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">
                 <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ t('org.detailList', '详细列表') }}</span>
                 <n-space>
-                  <n-button v-if="selectedIds.length > 0" size="small" type="error" ghost @click="handleBatchDelete">
+                  <n-button v-if="selectedIds.length > 0 && userStore.isSuperuser" size="small" type="error" ghost @click="handleBatchDelete">
                     {{ t('common.batchDelete', '批量删除') }}
                   </n-button>
                 </n-space>
@@ -396,6 +396,10 @@ import type { DataTableColumns, TreeSelectOption, FormInst, TreeOption, TreeDrop
 import { useI18n } from 'vue-i18n'
 import { formatDate } from '@/utils/format'
 import { useConfirmDangerousAction } from '@/utils/confirm'
+import { useUserStore } from '@/stores/user'
+
+// W0-1：建/删组织是平台级动作；组织管理员仍可编辑本组织资料与排序。
+const userStore = useUserStore()
 import { 
   getOrganizations, 
   createOrganization, 
@@ -769,12 +773,16 @@ const columns = computed<DataTableColumns<Organization>>(() => [
         h(NButton, { size: 'small', quaternary: true, type: 'primary', onClick: () => handleEdit(row) }, {
           icon: () => h(NIcon, null, { default: () => h(CreateOutline) })
         }),
-        h(NPopconfirm, { onPositiveClick: () => handleDelete(row.id) }, {
-          trigger: () => h(NButton, { size: 'small', quaternary: true, type: 'error' }, {
-            icon: () => h(NIcon, null, { default: () => h(TrashOutline) })
-          }),
-          default: () => t('org.deleteConfirm')
-        })
+        ...(userStore.isSuperuser
+          ? [
+              h(NPopconfirm, { onPositiveClick: () => handleDelete(row.id) }, {
+                trigger: () => h(NButton, { size: 'small', quaternary: true, type: 'error' }, {
+                  icon: () => h(NIcon, null, { default: () => h(TrashOutline) })
+                }),
+                default: () => t('org.deleteConfirm')
+              }),
+            ]
+          : [])
       ]
     })
   }
