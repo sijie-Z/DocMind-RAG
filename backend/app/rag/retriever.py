@@ -103,6 +103,48 @@ def _keyword_arm_terms(query: str) -> list[str]:
     return (in_glossary + rest)[:_KEYWORD_TERM_CAP]
 
 
+# ---- issue #192：wildcard 子句术语（只保留拉丁/数字词；CJK 不生成通配项） ----
+
+# AND 连接的通配项上限：控制 wildcard 查询代价与该子句的满足难度
+# （它是可选 should，项数不影响整体召回下限）。
+_WILDCARD_TERM_CAP = 8
+
+# 术语白名单（= extract_query_terms 拉丁支路的产出域 [a-z0-9]），
+# 同时保证引号/冒号/通配符等 query_string 语法不会进入查询体。
+_WILDCARD_SAFE_TERM_RE = re.compile(r"[a-z0-9]+")
+
+
+def _wildcard_terms(query: str) -> list[str]:
+    """keyword 臂 wildcard should 子句的术语列表（issue #192）。
+
+    旧实现 ``[f"*{t}*" for t in q_text.split() if len(t) < 20]``：中文没有空格，
+    ``split()`` 对中文查询只产出**一个** token（整句），``*《…》第七条是什么*``
+    永不命中任何索引词项——wildcard 子句对中文恒空转，还让排查者误以为
+    「查询做了额外匹配」。现复用既有 ``extract_query_terms``（与应用在 keyword
+    臂 overlap 的口径同源，不新增解析器），但只保留拉丁/数字词：
+
+    - 中文召回由 multi_match 的 bigram + minimum_should_match 负责
+      （#208 Phase 2 决策 b）。默认 cjk 分析器把中文切成 unigram+bigram，
+      ``*bigram*`` 与词项匹配等价，不增加召回；且自然语言查询里的跨词
+      bigram（如「条是」「是什」）会让 AND 通配子句整体落空。（该等价结论
+      在 IK 分析器下只是近似——IK 词项可能更长；但 AND 里的跨词 bigram
+      在 IK 下同样不是词项，净召回增量约为 0。IK 部署待栈恢复后复测。）
+    - 拉丁词通配（``*config*``）提供词项匹配之外的子串召回
+      （configuration 等），这是该分支唯一有增益的场景。
+    - 术语仅含 [a-z0-9]（``extract_query_terms`` 产出域），再用
+      ``_WILDCARD_SAFE_TERM_RE`` 兜底；沿用旧实现的 len<20 边界，并以
+      ``_WILDCARD_TERM_CAP`` 限制 AND 项数。
+    """
+    terms: list[str] = []
+    for term in extract_query_terms(query, limit=None):
+        if len(term) >= 20 or not _WILDCARD_SAFE_TERM_RE.fullmatch(term):
+            continue
+        terms.append(f"*{term}*")
+        if len(terms) >= _WILDCARD_TERM_CAP:
+            break
+    return terms
+
+
 # ---- #208 Phase 2 决策 c：`第X条` 数形互为扩展（查询侧同义扩展；不动索引/种子） ----
 
 # 「第X条」跨度（X = 阿拉伯数字或中文数词；允许「第 9 条」空格写法）。
@@ -437,7 +479,9 @@ class HybridRetriever:
 
         async def _es_search(q_text: str):
             # Build query - try exact match first, fall back to wildcard for substrings
-            wildcard_terms = [f"*{t}*" for t in q_text.split() if len(t) < 20]
+            # #192：通配项来自 extract_query_terms 的拉丁词（中文为 []，不再产出
+            # 「*整句*」死项）；见 _wildcard_terms。
+            wildcard_terms = _wildcard_terms(q_text)
             should_clauses = [
                 {"multi_match": {
                     "query": q_text, "fields": boost_fields,
@@ -563,6 +607,14 @@ class HybridRetriever:
 
         degraded_reason 非 None 表示向量臂因服务故障未能执行（issue #292）——
         上层据此区分「确实没有向量命中」与「根本没查成」，不得静默关臂。
+
+        issue #192：关键词臂的多改写变体（本地改写 + LLM 改写 + 条号数形扩展）
+        不进入本臂；向量臂仍按既有策略 embed **原查询**（``hybrid_hyde`` 下
+        另含 HyDE 伪文档融合，与本边界无关）——这是当前的**有意边界**（改写
+        收益只在关键词臂）。把变体并行 embed 并按最高分合并属于检索质量变更，
+        需在栈恢复后用 backend/evals 校准延迟/质量后再接线；hybrid 检索的
+        ``debug_info["query_rewrite"]`` 会如实标出这一点，避免再被误读为
+        「改写对向量臂也生效」。
         """
         intent = QueryIntentClassifier.classify(query)
         try:
@@ -1072,6 +1124,21 @@ class HybridRetriever:
             degraded.append(vec_degraded)
 
         if debug and debug_info is not None:
+            # issue #192：把「改写变体只进关键词臂」的现状边界写进 debug——
+            # rewrite_hits 只出现在关键词臂命中上，向量臂用的是原查询向量。
+            # llm_rewrite_enabled 只反映 LLM 改写开关；本地改写与条号数形扩展
+            # 无条件执行。vector_hyde_enabled 是**策略级**标记（hybrid_hyde 路由
+            # 会尝试 HyDE），不代表本次真的发生了融合——无 LLM client、生成
+            # 失败/超时、embedding 不可用或返回空向量时均不会融合；避免
+            # 「只 embed 原查询」被绝对化误读。
+            debug_info["query_rewrite"] = {
+                "llm_rewrite_enabled": bool(
+                    getattr(settings, "RAG_ENABLE_QUERY_REWRITE", True)
+                ),
+                "keyword_arm": "rewritten_variants",
+                "vector_arm": "original_query_only",
+                "vector_hyde_enabled": strategy == "hybrid_hyde",
+            }
             debug_info["keyword_top"] = self._debug_format_hits(kw_hits[:10])
             debug_info["vector_top"] = self._debug_format_hits(vec_hits[:10])
 
