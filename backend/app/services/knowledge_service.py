@@ -139,6 +139,9 @@ class KnowledgeService:
                     "id": res.get("document_id"),
                     "text": res.get("text"),
                     "score": res.get("score"),
+                    # issue #185：相对排序分（score）与重排绝对分分开透传；
+                    # 无重排分时保持 None，绝不拿 score 回填。
+                    "relevance_score": res.get("relevance_score"),
                     "metadata": {
                         "filename": res.get("filename"),
                         "snippet": res.get("snippet"),

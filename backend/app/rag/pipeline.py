@@ -303,15 +303,41 @@ class RAGPipeline:
                     result.append(hit)
 
             # Rerank: cross-encoder / LLM reorder, then trim to top_k
+            rerank_info: dict | None = None
             if result:
-                pre_rerank = list(result) if debug else None
-                result = await rerank(query, result, self.rerank_client)
-                if debug and debug_info is not None and pre_rerank:
+                result, rerank_info = await rerank(query, result, self.rerank_client)
+                # issue #185/#190：显式拆分两种分数——
+                # - rank_score：融合阶段的批内 min-max 相对分（只用于排序/序位，榜首恒 ~1.0）；
+                # - relevance_score：重排器的绝对分（local CE logit / zhipu relevance_score），
+                #   无重排分时为 None —— 绝不以 rank_score 冒充相关度。
+                for hit in result:
+                    rerank_score = hit.get("rerank_score")
+                    hit["relevance_score"] = (
+                        float(rerank_score) if rerank_score is not None else None
+                    )
+                    if "rank_score" not in hit:
+                        hit["rank_score"] = hit.get("score")
+                # issue #189：降级绝静默——日志（非 debug 也可判定）+ debug 结构化状态。
+                if rerank_info.get("status") == "degraded":
+                    logger.warning(
+                        "RAG rerank degraded (org=%s): path=%s reason=%s attempts=%s",
+                        organization_id,
+                        rerank_info.get("path"),
+                        rerank_info.get("reason"),
+                        rerank_info.get("attempts"),
+                    )
+                if debug and debug_info is not None:
+                    debug_info["rerank"] = rerank_info
                     debug_info["rerank_result"] = [
                         {
                             "id": r.get("chunk_id") or r.get("_id"),
                             "filename": r.get("filename") or _source_filename(r),
-                            "score": round(float(r.get("score") if r.get("score") is not None else r.get("_score", 0)), 4),
+                            "score": round(float(r.get("rank_score") if r.get("rank_score") is not None else r.get("score", r.get("_score", 0))), 4),
+                            "rank_score": round(float(r.get("rank_score") if r.get("rank_score") is not None else r.get("score", r.get("_score", 0))), 4),
+                            "rerank_score": (
+                                round(float(r["rerank_score"]), 4)
+                                if r.get("rerank_score") is not None else None
+                            ),
                             "snippet": (r.get("content") or r.get("snippet") or _source_content(r))[:200],
                         }
                         for r in result[:top_k]
@@ -322,6 +348,12 @@ class RAGPipeline:
                         for r in result[:top_k]
                     ]
                 result = result[:top_k]
+            elif debug and debug_info is not None:
+                # 无结果时同样如实记录：不是「重排 ok」，而是没有候选可重排（#189）。
+                debug_info["rerank"] = {
+                    "status": "empty", "path": "noop", "reason": "no_results",
+                    "attempts": [], "scores_attached": False, "model": None,
+                }
 
             # ── 故障语义判定（issue #292）────────────────────────────────────
             # 三态：正常空结果 / 服务故障（异常）/ 超时。故障或臂级降级发生时，
@@ -364,7 +396,12 @@ class RAGPipeline:
             # - 故障/降级：不写 —— 毒化路径必须断；
             # - 正常空结果：不写 —— 负缓存把「一次未命中」放大成 TTL 窗口内的持续
             #   假无结果（如索引/分析器瞬时状态），而重算成本远小于毒化成本。
-            cache_safe = not failures and not degraded_reasons
+            # issue #189：重排降级（原始顺序）同样不得冻结进缓存——后续同查询
+            # 命中会短路 rerank，且 debug 只剩 cache_hit，降级状态不可见。
+            rerank_degraded = bool(
+                rerank_info is not None and rerank_info.get("status") == "degraded"
+            )
+            cache_safe = not failures and not degraded_reasons and not rerank_degraded
             if not document_ids and result and cache_safe:
                 # issue #225 决策 7A：精确缓存键带模式段（None=自动路由，键与修前逐字节相同）。
                 await self.cache.set(query, organization_id, top_k, result, search_mode=search_mode)

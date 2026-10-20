@@ -23,8 +23,8 @@
             <span class="text-gray-400 mr-1">#{{ i + 1 }}</span>
             {{ hit.filename }}
           </span>
-          <span class="text-xs font-mono tabular-nums" :class="scoreColorClass(hit.score)">
-            {{ scoreLabel }}: {{ hit.score }}
+          <span class="text-xs font-mono tabular-nums" :class="scoreColorClass(displayedScore(hit))">
+            {{ scoreLabel }}: {{ displayedScore(hit) }}
           </span>
         </div>
 
@@ -52,13 +52,22 @@
 import { ref } from 'vue'
 import type { DebugHit } from '@/types/chat'
 
-defineProps<{
+const props = defineProps<{
   title: string
   hits: DebugHit[]
   scoreLabel: string
+  /** issue #190：重排节展示 rerank_score（绝对分）；缺失时回退 rank/融合分。 */
+  scoreKey?: 'score' | 'rank_score' | 'rerank_score'
 }>()
 
 const open = ref(true)
+
+/** 按 score-key 取展示分：目标字段缺失（如降级/LLM 路径无 rerank_score）时回退。 */
+const displayedScore = (hit: DebugHit): number => {
+  const value = props.scoreKey ? hit[props.scoreKey] : undefined
+  if (typeof value === 'number') return value
+  return hit.score
+}
 
 const scoreColorClass = (score: number): string => {
   if (score >= 2.0) return 'text-green-600 dark:text-green-400 font-bold'

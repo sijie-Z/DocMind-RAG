@@ -76,7 +76,10 @@ export interface SearchResultMetadata {
 export interface SearchResult {
   id: string
   text: string
+  /** 相对排序分（融合阶段；只用于排序，不是相关度 —— issue #185） */
   score: number
+  /** issue #185：重排绝对分；null/缺省 = 无重排分，UI 只按序位展示 */
+  relevance_score?: number | null
   metadata?: SearchResultMetadata
   source?: SearchResultSource
   has_keyword?: boolean | null

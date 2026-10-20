@@ -4,6 +4,7 @@
     "agentReplay.",
     "agentTasks.",
     "artifacts.kind.",
+    "chat.rerankStatus.",
     "common.weekdays.",
     "scheduler.cron.months.",
     "scheduler.cron.weekdays.",

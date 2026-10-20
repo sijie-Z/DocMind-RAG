@@ -50,7 +50,8 @@ const i18n = createI18n({
         sourceDoc: '文档',
         unknownDoc: '未知文档',
         noPreview: '无预览',
-        relevanceScore: '相关度: {score}%',
+        rankPosition: '排序 #{rank}',
+        rerankScore: '重排分: {score}',
         demoData: '演示数据',
         useful: '有用',
         notUseful: '没用',
@@ -93,17 +94,18 @@ describe('ChatMessages · demo 来源「演示数据」角标（T4 §7.2④）',
   it('source 带 demo:true → 渲染角标；相关度数字保留', () => {
     const wrapper = mountChat([
       makeMessage([
-        { filename: 'rag_technology.txt', relevanceScore: 0.92, demo: true },
-        { filename: 'rag_technology.txt', relevanceScore: 0.85, demo: true },
+        { filename: 'rag_technology.txt', rank: 1, relevanceScore: 0.92, demo: true },
+        { filename: 'rag_technology.txt', rank: 2, relevanceScore: 0.85, demo: true },
       ]),
     ])
 
     const badge = wrapper.find('[data-testid="demo-source-badge"]')
     expect(badge.exists()).toBe(true)
     expect(badge.text()).toBe('演示数据')
-    // 数字保留（体验价值）：角标只是标注，不遮蔽来源区与相关度
+    // 数字保留（体验价值）：角标只是标注，不遮蔽来源区与分数（issue #185：
+    // demo 数据带 rank 标记，数字以「重排分」诚实口径展示，不再 ×100）。
     expect(wrapper.text()).toContain('来源引用：')
-    expect(wrapper.text()).toContain('相关度: 92%')
+    expect(wrapper.text()).toContain('重排分: 0.92')
   })
 
   it('source 不带 demo（真实检索结果）→ 不渲染角标（不得误标）', () => {

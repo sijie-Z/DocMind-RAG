@@ -568,6 +568,11 @@ class HybridRetriever:
         - `prompt_text` / `text` / `content`：完整 chunk 正文（LLM 输入的唯一来源，
           由 `context_compressor.get_prompt_text` 读取，压缩器在全文上工作）；
         - `snippet`：展示用短片段（UI/debug），不得回流进提示词。
+
+        issue #185 分数契约：`rank_score`（与旧 `score` 同值）只是**融合阶段的批内
+        min-max 相对分**，用于排序/序位展示——榜首恒 ~1.0 是构造性的，不是相关度。
+        绝对分 `relevance_score` 由 pipeline 在 rerank 之后写入（无重排分则为 None），
+        post-process 绝不伪造。
         """
 
         documents = []
@@ -668,7 +673,12 @@ class HybridRetriever:
                 "prompt_text": text,
                 "filename": source.get("filename", "未知"),
                 "chunk_id": chunk_id,
-                "score": round(final_score, 4), "raw_score": fused_score,
+                # issue #185：rank_score 是批内 min-max 相对分（排序/序位用）；
+                # score 保留为同值别名（workflow 阈值/agent 载荷沿用既有语义）。
+                # 绝对相关度 relevance_score 由 pipeline rerank 后写入。
+                "score": round(final_score, 4),
+                "rank_score": round(final_score, 4),
+                "raw_score": fused_score,
                 "snippet": snippet, "document_id": source.get("document_id"),
                 "mmr_score": float(hit.get("_mmr_score", 0)),
                 "overlap_score": overlap, "has_keyword": has_kw, "has_vector": has_vec,

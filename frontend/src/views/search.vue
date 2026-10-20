@@ -139,9 +139,11 @@
                   </div>
                 </div>
                 <div class="flex items-center space-x-2">
-                  <n-tag v-if="scorePctOf(result)" :bordered="false" type="success" size="small" round
+                  <!-- issue #185：只展示重排绝对分；无重排分时不展示任何分数，
+                       列表顺序即排序序位——不再把 min-max 排序分 ×100 当「相关度 %」 -->
+                  <n-tag v-if="rerankScoreOf(result)" :bordered="false" type="success" size="small" round
                     class="bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600">
-                    {{ scorePctOf(result) }}% {{ t('search.relevanceScore') }}
+                    {{ t('search.rerankScore', { score: rerankScoreOf(result) }) }}
                   </n-tag>
                 </div>
               </div>
@@ -206,16 +208,16 @@
     <n-modal v-model:show="showDetailModal" preset="card" style="width: min(800px, 90vw); border-radius: 2rem;"
       class="backdrop-blur-2xl bg-white/80 dark:bg-gray-900/80" :title="selectedResult ? filenameOf(selectedResult) : ''">
       <div v-if="selectedResult" class="space-y-6 p-2">
-        <!-- P1-3：仅保留可推导的两个信息格（类型←文件名、匹配度←score）；
-             大小/日期真实响应无对应字段（不可推导）→ 不渲染 -->
+        <!-- P1-3/issue #185：仅保留可推导的两个信息格（类型←文件名、
+             重排分←relevance_score）；大小/日期真实响应无对应字段（不可推导）→ 不渲染 -->
         <div class="grid grid-cols-2 gap-4">
           <div class="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50">
             <span class="text-xs text-gray-400 block mb-1">{{ t('search.fileType') }}</span>
             <span class="font-bold text-gray-700 dark:text-gray-200">{{ fileTypeOf(selectedResult).toUpperCase() || '—' }}</span>
           </div>
           <div class="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50">
-            <span class="text-xs text-gray-400 block mb-1">匹配度</span>
-            <span class="font-bold text-emerald-600">{{ scoreLabelOf(selectedResult) }}</span>
+            <span class="text-xs text-gray-400 block mb-1">{{ t('search.rerankScoreLabel') }}</span>
+            <span class="font-bold text-emerald-600">{{ rerankScoreOf(selectedResult) ?? '—' }}</span>
           </div>
         </div>
 
@@ -309,12 +311,10 @@ const fileTypes = [
 // toLowerCase / 数值格式化 / Date。
 const filenameOf = (r: SearchResult): string => r.source?.filename ?? r.metadata?.filename ?? ''
 const contentOf = (r: SearchResult): string => r.text ?? r.metadata?.snippet ?? ''
-const scorePctOf = (r: SearchResult): string | null =>
-  Number.isFinite(r.score) ? (r.score * 100).toFixed(1) : null
-const scoreLabelOf = (r: SearchResult): string => {
-  const pct = scorePctOf(r)
-  return pct === null ? '—' : pct + '%'
-}
+// issue #185：诚实分数口径——score 是相对排序分（只用于排序），界面只展示
+// 重排绝对分（后端 relevance_score）；无重排分时返回 null，不伪造百分比相关度。
+const rerankScoreOf = (r: SearchResult): string | null =>
+  typeof r.relevance_score === 'number' ? r.relevance_score.toFixed(2) : null
 const fileTypeOf = (r: SearchResult): string => {
   const name = filenameOf(r)
   const dot = name.lastIndexOf('.')
@@ -323,7 +323,9 @@ const fileTypeOf = (r: SearchResult): string => {
 
 const sortedResults = computed(() => {
   const results = [...searchResults.value]
-  if (sortBy.value === 'relevance') return results.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0))
+  // issue #185：relevance 档不在前端重排——后端已按重排绝对分（或融合序）
+  // 返回；再用相对排序分 score 重排会打乱 rerank 结果，且两套分数尺度混用。
+  if (sortBy.value === 'relevance') return results
   if (sortBy.value === 'name') return results.sort((a, b) => filenameOf(a).localeCompare(filenameOf(b)))
   return results
 })
