@@ -378,7 +378,7 @@ class TestRerankStatus:
 
 def _stub_retrieve(monkeypatch, pipeline: RAGPipeline, hits: list[dict]):
     async def fake_retrieve(query, organization_id, top_k, document_ids=None,
-                            debug=False, search_mode=None):
+                            debug=False, search_mode=None, doc_cap=None):
         return [dict(h) for h in hits], [], None, []
 
     monkeypatch.setattr(pipeline.retriever, "retrieve", fake_retrieve)

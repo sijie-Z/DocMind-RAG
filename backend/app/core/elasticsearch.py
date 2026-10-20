@@ -171,6 +171,11 @@ def _knowledge_index_mapping() -> dict:
                 "chunk_id": {"type": "keyword"},
                 "chunk_index": {"type": "integer"},
                 "section_title": {"type": "text"},
+                # #188：结构化条款字段（doc_processor 从定义位抽取后写入顶层）。
+                # clause_no 为整型数组：一个 chunk 可定义多条（数组字段合法）；
+                # section_no 为 X.Y 章节编号（keyword，精确 term 查询用）。
+                "clause_no": {"type": "integer"},
+                "section_no": {"type": "keyword"},
                 "document_id": {"type": "keyword"},
                 "filename": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
                 "file_type": {"type": "keyword"},
@@ -306,6 +311,19 @@ async def _create_index_if_not_exists(client: AsyncElasticsearch):
     # 否则查询侧 gate 会把一次启动抖动放大成永久拒检（issue #196 评审）。
     _holder.index_error = None
     logger.info(f"Index exists with matching dims: {index_name} (dims={current_dims})")
+
+    # #188：结构化条款字段是后加字段——旧索引不会自动拥有它们。缺字段时不阻断
+    # （写入照旧、查询侧精确腿自然无命中），但必须给出可执行的迁移提示，
+    # 否则「条号精确检索没效果」会表现成沉默的质量问题。
+    missing_structured = [f for f in ("clause_no", "section_no") if f not in props]
+    if missing_structured:
+        logger.warning(
+            "索引 %s 缺少结构化条款字段 %s —— 条号/章节精确检索腿不会生效。"
+            "迁移方式：确认可重建后调用 recreate_knowledge_index(confirm=True)，"
+            "并重新索引全部文档（文档处理链会写入这些字段）。",
+            index_name,
+            missing_structured,
+        )
 
 
 async def create_index_if_not_exists():

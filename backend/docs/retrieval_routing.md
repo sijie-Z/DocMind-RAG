@@ -437,14 +437,15 @@ final_score = base_score * (0.7 + 0.3 * freshness_boost)
 
 新文档**有轻微加分**,老文档不直接降权——只用作微调。
 
-### 10.4 同文档去重(每文档最多 2 个块)
+### 10.4 同文档去重(rerank 之后按查询类型定预算)
 
 ```python
-def per_doc_limit(candidates, limit=2):
-    """防止单一文档垄断 Top-K"""
+def per_doc_limit(candidates, limit):
+    """防止单一文档垄断 Top-K；在 rerank 之后施加，重排先看到全部候选。
+    limit：普通语义查询 2/文档；条号直查类查询（第X条 / §X.Y）4/文档。"""
     counts = defaultdict(int)
     result = []
-    for c in sorted(candidates, key=lambda x: -x["score"]):
+    for c in candidates:  # 保持 rerank 相关性序
         doc_id = c["document_id"]
         if counts[doc_id] >= limit:
             continue
@@ -712,7 +713,7 @@ RAG_GROUNDED_TOTAL.labels(grounded=True).inc()  # 答案是否引证
 
 ### Q7:"怎么防止同一文档垄断 Top-K?"
 
-> "后处理阶段做了两件事:1) 同文档去重,每文档最多 2 个块;2) MMR 多样性选择,惩罚与已选 doc 相似度高的候选。"
+> "两处:1) rerank 之后按文档截断——普通语义查询每文档最多 2 个块,条号直查类查询(第X条 / §X.Y)放宽到 4 个;帽不早于 rerank,避免同文档第 3 个相关块在重排看到它之前就被截掉;2) MMR 多样性选择,惩罚与已选候选相似度高的片段(条号直查类查询跳过 MMR,多样性惩罚与精确定位相斥)。"
 
 ### Q8:"查询改写有什么用,不会引入噪声吗?"
 
