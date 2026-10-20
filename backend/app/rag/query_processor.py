@@ -104,6 +104,26 @@ def effective_search_mode(query: str, search_mode: str | None = None) -> str:
     return STRATEGY_TO_SEARCH_MODE[QueryComplexityClassifier.get_strategy(query)]
 
 
+# ── issue #194：boost 字段单一事实源（只允许 ES mapping 中真实存在的字段） ──
+# 历史配置给 9 个 mapping / 索引写入都不存在的意图字段加权（title /
+# list_content / definition / comparison / pros_cons / reason / result /
+# summary / conclusion）：multi_match 对未映射字段的加权恒为 0，是「看起来
+# 按意图调权、实际全部空气」的死配置，还误导排查者反复去调这些不存在的权重。
+# 白名单收敛为 mapping（app/core/elasticsearch.py::_knowledge_index_mapping）
+# 中真实存在、且索引期有/将有写入方的字段：
+#   content / chunk_text / filename —— 索引期已在写（doc_processor）；
+#   section_title —— mapping 已就绪，顶层写入由 #188（并行批次）落地，
+#   落地前该项仍为 0 分，保留是为了 #188 合入后无需再改本表。注意其
+#   mapping 当前是裸 text（standard 分析器）：#188 写入中文标题时应评估
+#   切到 cjk，否则中文标题会按单字匹配，1.8 权重可能引入噪声。
+# 不变式：每个意图的 boost 字段 ⊆ BOOSTABLE_FIELDS ⊆ mapping.properties，
+# 由 tests/unit/test_issue194_boost_fields.py 钉住（只能保证「字段存在且
+# 有加权」，不能证明索引期确有写入方——写侧覆盖随 #188 的验收补齐）。
+BOOSTABLE_FIELDS: frozenset[str] = frozenset(
+    {"content", "chunk_text", "filename", "section_title"}
+)
+
+
 class QueryIntentClassifier:
     """Classifies query intent to optimize retrieval strategy."""
 
@@ -129,19 +149,49 @@ class QueryIntentClassifier:
             return "other"
         return max(scores, key=scores.get)
 
+    # issue #194：意图 → 字段加权。字段必须存在于 ES mapping 且被索引期写入，
+    # 否则就是「加权空气」——新增字段前先确认写入方并同步 BOOSTABLE_FIELDS。
+    _INTENT_BOOST_FIELDS: dict[QueryIntent, list[str]] = {
+        "factual": ["chunk_text^2", "content^2"],
+        "procedural": ["chunk_text^2", "content^2", "section_title^1.8"],
+        "list": ["chunk_text^1.5", "content^1.5"],
+        "definition": ["chunk_text^2", "content^2"],
+        "comparison": ["chunk_text^2", "content^2"],
+        "causal": ["chunk_text^2", "content^2"],
+        "summary": ["chunk_text^1.5", "content^1.5"],
+        "other": ["chunk_text^2", "content^2", "filename^1.2"],
+    }
+
     @classmethod
     def get_boost_fields(cls, intent: QueryIntent) -> list[str]:
-        field_boosts = {
-            "factual": ["chunk_text^2", "content^2", "title^1.5"],
-            "procedural": ["chunk_text^2", "content^2", "section_title^1.8"],
-            "list": ["chunk_text^1.5", "content^1.5", "list_content^2"],
-            "definition": ["chunk_text^2", "content^2", "title^1.5", "definition^2.5"],
-            "comparison": ["chunk_text^2", "content^2", "comparison^2", "pros_cons^2"],
-            "causal": ["chunk_text^2", "content^2", "reason^2", "result^2"],
-            "summary": ["chunk_text^1.5", "content^1.5", "summary^2", "conclusion^2"],
-            "other": ["chunk_text^2", "content^2", "filename^1.2"],
-        }
-        return field_boosts.get(intent, ["chunk_text^2", "content^2", "filename^1.2"])
+        """按意图返回 multi_match 的字段加权；字段必须是 mapping 的真实属性。
+
+        #194：只使用 ``BOOSTABLE_FIELDS`` 中的字段。历史实现里的 9 个意图
+        字段（title/definition/comparison/...）在 mapping 与索引写入中都不
+        存在，ES 对它们的加权恒为 0——那是死配置，不是「按意图调权」。
+
+        运行时守卫：意图表若被改出白名单，宁可不加权也不下发未映射字段
+        （同时告警，便于在测试之外也暴露配置漂移）。若某意图的字段**全部**
+        被守卫剔除，回落到安全默认字段——multi_match 的 ``fields`` 不能为空
+        （ES 侧会拒绝空字段列表）。
+        """
+        specs = cls._INTENT_BOOST_FIELDS.get(intent, cls._INTENT_BOOST_FIELDS["other"])
+        fields: list[str] = []
+        for spec in specs:
+            name = spec.split("^", 1)[0]
+            if name in BOOSTABLE_FIELDS:
+                fields.append(spec)
+            else:
+                logger.warning(
+                    "#194: boost 字段 %r 不在 BOOSTABLE_FIELDS 中，已忽略（检查 ES mapping/索引写入）",
+                    name,
+                )
+        if not fields:
+            logger.warning(
+                "#194: intent=%r 的 boost 字段全部不在白名单，回落到默认字段", intent
+            )
+            fields = ["chunk_text^2", "content^2"]
+        return fields
 
 
 def extract_query_terms(query: str, limit: int | None = 12) -> list[str]:
