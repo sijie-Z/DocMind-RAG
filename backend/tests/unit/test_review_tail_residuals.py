@@ -391,10 +391,17 @@ def _doc(chunk_id: str, filename: str) -> dict:
 
 
 def _no_rerank(monkeypatch):
-    """rerank 替身：保持输入顺序（避免真模型加载/网络）。"""
+    """rerank 替身：保持输入顺序（避免真模型加载/网络）。
+
+    issue #189：rerank 契约为 (hits, info)，替身必须回传结构化状态。
+    """
     monkeypatch.setattr(
         "app.rag.pipeline.rerank",
-        AsyncMock(side_effect=lambda query, docs, client=None: docs),
+        AsyncMock(side_effect=lambda query, docs, client=None: (
+            docs,
+            {"status": "disabled", "path": "noop", "reason": "test_stub",
+             "attempts": [], "scores_attached": False, "model": None},
+        )),
     )
 
 

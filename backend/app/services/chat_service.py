@@ -73,19 +73,31 @@ class RAGEvent:
 
 
 def build_sources_list(context_results: list[dict]) -> list[dict]:
-    return [
-        {
+    """把检索结果转为前端来源卡片契约。
+
+    issue #185：分数必须**可证伪**——
+    - ``relevanceScore``：重排器绝对分（local CE logit / zhipu relevance_score）；
+      无重排分时为 None。绝不回填 rank 分（修前把它乘 100 当「相关度 %」展示，
+      而它是批内 min-max，榜首恒 ~1.0）。
+    - ``rankScore``：融合阶段相对排序分（只用于排序/序位，不是相关度）。
+    - ``rank``：最终顺序的 1-based 序位（UI 展示「排序 #N」）。
+    """
+    sources = []
+    for idx, r in enumerate(context_results, 1):
+        relevance = r.get("relevance_score")
+        sources.append({
             "filename": r.get("filename", "未知文档"),
-            "relevanceScore": r.get("score", 0.0),
+            "relevanceScore": float(relevance) if relevance is not None else None,
+            "rankScore": r.get("rank_score", r.get("score")),
+            "rank": idx,
             "content": r.get("snippet") or (r.get("text", "")[:240]),
             "documentId": r.get("document_id"),
             "hasKeyword": r.get("has_keyword", False),
             "hasVector": r.get("has_vector", False),
             "rewriteHits": r.get("rewrite_hits", 1),
             "freshFactor": r.get("fresh_factor", 1.0),
-        }
-        for r in context_results
-    ]
+        })
+    return sources
 
 
 async def get_or_create_session(

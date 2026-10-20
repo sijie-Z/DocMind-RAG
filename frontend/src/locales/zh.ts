@@ -297,7 +297,18 @@ export default {
     demoData: '演示数据',
     unknownDoc: '未知文档',
     noPreview: '无预览',
-    relevanceScore: '相关度: {score}%',
+    // issue #185：诚实分数口径——相对排序分只报序位；重排绝对分才叫「重排分」，
+    // 不再以「相关度 %」展示构造性的 min-max 分。
+    rankPosition: '排序 #{rank}',
+    rerankScore: '重排分: {score}',
+    rerankResultTitle: '重排结果',
+    rerankPath: '路径: {path}',
+    rerankStatus: {
+      ok: '重排正常',
+      degraded: '重排已降级（原始顺序）',
+      disabled: '重排未启用',
+      empty: '无候选可重排',
+    },
     // Feedback & action tooltips
     useful: '有用',
     notUseful: '没用',
@@ -314,7 +325,6 @@ export default {
     roleUser: '用户',
     roleAssistant: '助手',
     sourceDoc: '文档',
-    relevanceMatch: '匹配度: {score}%',
     // Error banner
     msgLoadFailed: '加载历史消息失败',
     // E14/P2：提示词「应用到对话」只填入输入框（B3 后已无 systemPrompt 通道），
@@ -776,7 +786,8 @@ export default {
     results: '找到',
     relevance: '相关度排序',
     name: '名称排序',
-    relevanceScore: '相关度',
+    rerankScore: '重排分: {score}',
+    rerankScoreLabel: '重排分',
     noResults: '未找到相关结果',
     noResultsDesc: '尝试更换关键词或调整筛选条件',
     searchErrorDesc: '请检查网络或稍后重试；点击重试重新搜索',

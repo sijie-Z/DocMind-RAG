@@ -135,7 +135,17 @@ def _wire_pipeline(monkeypatch, hits, rerank_order):
     async def fake_rerank(query, candidates, client=None):
         seen["rerank_ids"] = [c["chunk_id"] for c in candidates]
         order = {cid: i for i, cid in enumerate(rerank_order)}
-        return sorted(candidates, key=lambda c: order.get(c["chunk_id"], len(order)))
+        ordered = sorted(candidates, key=lambda c: order.get(c["chunk_id"], len(order)))
+        # issue #189 契约：rerank 返回 (hits, info)，本替身固定 ok 路径。
+        info = {
+            "status": "ok",
+            "path": "stub",
+            "reason": None,
+            "attempts": 1,
+            "scores_attached": False,
+            "model": None,
+        }
+        return ordered, info
 
     monkeypatch.setattr(pipeline.retriever, "retrieve", fake_retrieve)
     monkeypatch.setattr(pipeline_mod, "rerank", fake_rerank)

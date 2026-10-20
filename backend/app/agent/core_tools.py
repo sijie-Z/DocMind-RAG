@@ -43,25 +43,30 @@ SEARCH_RESULTS_PAYLOAD_KIND = "docmind.search_results/v1"
 
 
 def _build_search_payload(
-    entries: list[tuple[float, str, str, str]],
+    entries: list[tuple[float, float | None, str, str, str]],
 ) -> str:
-    """把 (score, filename, document_id, snippet) 列表打包为结构化 JSON 信封。
+    """把 (score, relevance, filename, document_id, snippet) 列表打包为结构化 JSON 信封。
 
     两个检索工具（search_knowledge_base / vector_search）共用此出口；正文里
     的任何内容都只能落在 ``content`` 字符串内部，无法伪造 ``sources`` 项。
+
+    issue #185 分数契约：``score`` 是相对排序分（rank），``relevanceScore`` 是
+    重排绝对分（可能为 None，绝不拿 rank 分冒充）；前端来源卡片据此区分
+    「排序序位」与「重排分」。
     """
     sources = [
         {
             "index": index,
             "score": score,
+            "relevanceScore": relevance_score,
             "filename": filename,
             "documentId": document_id or "",
         }
-        for index, (score, filename, document_id, _snippet) in enumerate(entries, 1)
+        for index, (score, relevance_score, filename, document_id, _snippet) in enumerate(entries, 1)
     ]
     content = "\n\n".join(
         f"[{index}] ({score:.2f}) {filename}\n{snippet}"
-        for index, (score, filename, _document_id, snippet) in enumerate(entries, 1)
+        for index, (score, _relevance_score, filename, _document_id, snippet) in enumerate(entries, 1)
     )
     return json.dumps(
         {
@@ -144,11 +149,18 @@ async def search_knowledge_base(
     entries = []
     for doc in results:
         score = float(doc.get("score") or 0.0)
+        relevance = doc.get("relevance_score")
         filename = doc.get("filename", "Unknown")
         # issue #186：正文单一来源 prompt_text（snippet 仅展示）；300 字上限走
         # context_compressor 的规则式句子抽取，关键句在 chunk 后半段时仍保留。
         snippet = compress(get_prompt_text(doc), query, max_chars=300)
-        entries.append((score, filename, doc.get("document_id", ""), snippet))
+        entries.append((
+            score,
+            float(relevance) if relevance is not None else None,
+            filename,
+            doc.get("document_id", ""),
+            snippet,
+        ))
     return _build_search_payload(entries)
 
 
@@ -219,6 +231,9 @@ async def vector_search(
         src = hit.get("_source", {})
         entries.append((
             float(hit.get("_score") or 0.0),
+            # 纯向量臂的分数是 ES script_score（cosine+1），与重排分不同尺度；
+            # 不冒充 relevance，来源卡片按序位展示。
+            None,
             src.get("filename", "?"),
             src.get("document_id", ""),
             # issue #186：300 字上限按语义句抽取，不硬切 chunk 头部。

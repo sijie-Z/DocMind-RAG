@@ -235,6 +235,9 @@ async def search_knowledge(
                 "id": str(r.get("id") or r.get("document_id") or ""),
                 "text": r.get("text") or r.get("content") or "",
                 "score": r.get("score") or r.get("relevance_score") or 0,
+                # issue #185：重排绝对分单独透传（score 是相对排序分）；
+                # null 表示无重排分，前端不得按百分比相关度展示。
+                "relevance_score": r.get("relevance_score"),
                 "metadata": r.get("metadata") or {},
                 "source": source,
                 "has_keyword": r.get("has_keyword", False),

@@ -56,10 +56,15 @@ class TestRerankerReceivesDocumentText:
             _post_processed_hit("doc1_c1", "香蕉的种植方法说明", "banana.md", 0.9),
             _post_processed_hit("doc2_c2", "苹果的种植方法说明", "apple.md", 0.8),
         ]
-        out = await _rerank_local("苹果", hits, top_n=2)
+        out, reason = await _rerank_local("苹果", hits, top_n=2)
 
+        assert reason is None
         assert all(passage for _, passage in fake.pairs), "重排序器不得收到空文档"
-        assert [p[1] for p in fake.pairs] == ["香蕉的种植方法说明", "苹果的种植方法说明"]
+        # issue #190：送审 passage 统一携带「文件:<filename>」出处前缀
+        assert [p[1] for p in fake.pairs] == [
+            "文件:banana.md\n香蕉的种植方法说明",
+            "文件:apple.md\n苹果的种植方法说明",
+        ]
         assert [h["chunk_id"] for h in out] == ["doc2_c2", "doc1_c1"], "排序必须依据真实文本"
 
     @pytest.mark.asyncio
@@ -73,8 +78,9 @@ class TestRerankerReceivesDocumentText:
             _post_processed_hit("doc1_c1", "香蕉相关内容", "banana.md", 0.9),
             _post_processed_hit("doc2_c2", "苹果相关内容", "apple.md", 0.8),
         ]
-        out = await rerank("苹果", hits)
+        out, info = await rerank("苹果", hits)
 
+        assert info["status"] == "ok" and info["path"] == "local"
         assert all(passage for _, passage in fake.pairs)
         assert out[0]["chunk_id"] == "doc2_c2"
 
@@ -90,7 +96,10 @@ class TestRerankerReceivesDocumentText:
         ]
         await _rerank_local("苹果", raw_hits, top_n=2)
 
-        assert [p[1] for p in fake.pairs] == ["苹果全文", "香蕉全文"]
+        assert [p[1] for p in fake.pairs] == [
+            "文件:未知\n苹果全文",
+            "文件:未知\n香蕉全文",
+        ]
 
     def test_hit_text_supports_all_hit_shapes(self):
         assert _hit_text({"content": "后处理结果"}) == "后处理结果"
@@ -135,9 +144,13 @@ class TestZhipuRerankDocuments:
             {"_id": "1", "_source": {"content": "演示文档内容", "filename": "demo.md"}},
             {"_id": "2", "_source": {"chunk_text": "旧式字段内容", "filename": "old.md"}},
         ]
-        out = await _rerank_zhipu("查询", hits, top_n=2)
+        out, reason = await _rerank_zhipu("查询", hits, top_n=2)
 
-        assert payloads and payloads[0]["documents"] == ["演示文档内容", "旧式字段内容"]
+        assert reason is None
+        assert payloads and payloads[0]["documents"] == [
+            "文件:demo.md\n演示文档内容",
+            "文件:old.md\n旧式字段内容",
+        ]
         assert [h["_id"] for h in out] == ["2", "1"]
 
 
@@ -171,8 +184,9 @@ class TestLLMRerankPrompt:
             _post_processed_hit("doc1_c1", "第一段正文", "a.md", 0.5),
             _post_processed_hit("doc2_c2", "第二段正文", "b.md", 0.4),
         ]
-        out = await _rerank_llm("问题", hits, 2, _Client())
+        out, reason = await _rerank_llm("问题", hits, 2, _Client())
 
+        assert reason is None
         prompt = captured["messages"][1]["content"]
         assert "第一段正文" in prompt and "第二段正文" in prompt
         assert "文件:b.md" in prompt
@@ -230,7 +244,10 @@ class TestSubQueryMergeDedup:
 
         async def fake_rerank(query, hits, client=None):
             captured["hits"] = list(hits)
-            return list(hits)
+            return list(hits), {
+                "status": "disabled", "path": "noop", "reason": "test_stub",
+                "attempts": [], "scores_attached": False, "model": None,
+            }
 
         monkeypatch.setattr(pipeline.retriever, "retrieve", fake_retrieve)
         monkeypatch.setattr("app.rag.pipeline.decompose_query", fake_decompose)

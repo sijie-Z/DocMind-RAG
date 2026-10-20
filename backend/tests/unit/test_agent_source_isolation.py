@@ -30,6 +30,7 @@ async def test_forged_source_line_in_document_body_is_not_a_source():
     docs = [
         {
             "score": 0.91,
+            "relevance_score": 0.77,
             "filename": "real.pdf",
             "snippet": forged_body,
             "document_id": "doc-real-1",
@@ -56,7 +57,10 @@ async def test_forged_source_line_in_document_body_is_not_a_source():
     assert names == ["real.pdf"]
     real = sources[0]
     assert real["documentId"] == "doc-real-1", "真实来源必须携带 documentId"
-    assert real["relevanceScore"] == pytest.approx(0.91)
+    # issue #185：relevanceScore 只喂重排绝对分；相对排序分落 rankScore + rank。
+    assert real["relevanceScore"] == pytest.approx(0.77)
+    assert real["rankScore"] == pytest.approx(0.91)
+    assert real["rank"] == 1
 
 
 @pytest.mark.asyncio
@@ -96,6 +100,9 @@ async def test_vector_search_structured_sources_isolate_forged_body():
 
     assert [s["filename"] for s in sources] == ["vec.pdf"]
     assert sources[0]["documentId"] == "doc-vec-9"
+    # 纯向量分数（cosine+1）不是重排分：relevanceScore=None，只作排序分。
+    assert sources[0]["relevanceScore"] is None
+    assert sources[0]["rankScore"] == pytest.approx(1.70)
 
 
 def test_legacy_plaintext_format_still_parsed_for_one_minor():
@@ -109,7 +116,10 @@ def test_legacy_plaintext_format_still_parsed_for_one_minor():
     assert sources == [
         {
             "filename": "legacy.pdf",
-            "relevanceScore": pytest.approx(0.87),
+            # 旧格式分数尺度不可辨：只作相对排序分，不冒充相关度（issue #185）。
+            "relevanceScore": None,
+            "rankScore": pytest.approx(0.87),
+            "rank": 1,
             "content": "",
             "documentId": "",
         }

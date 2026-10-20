@@ -147,7 +147,11 @@ def _build_metrics() -> dict[str, Any]:
     m["RAG_GROUNDED_HITS"] = Counter("rag_grounded_hits", "Responses with source citations")
     m["RAG_RERANK_LATENCY"] = Histogram("rag_rerank_latency_seconds", "Reranker latency",
                                           buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0])
-    m["RAG_RERANK_TOTAL"] = Counter("rag_rerank_total", "Total rerank operations")
+    # issue #189：path/outcome 标签让「走了哪条重排路径 / 是否降级」可直接聚合查询
+    # （修前只有裸计数，降级与正常无从区分）。
+    m["RAG_RERANK_TOTAL"] = Counter(
+        "rag_rerank_total", "Total rerank operations", ["path", "outcome"]
+    )
     m["RAG_QUERY_INTENT"] = Counter("rag_query_intent_total", "Query intent classifications", ["intent"])
     m["RAG_QUERY_REWRITE_TOTAL"] = Counter("rag_query_rewrite_total", "Query rewrite operations")
     m["RAG_ADAPTIVE_STRATEGY"] = Counter("rag_adaptive_strategy_total", "Adaptive RAG strategy", ["strategy"])

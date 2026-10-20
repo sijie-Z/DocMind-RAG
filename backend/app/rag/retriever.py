@@ -773,6 +773,12 @@ class HybridRetriever:
         - `snippet`：展示用短片段（UI/debug），不得回流进提示词。
         #188 输出契约：透传索引侧结构化字段 ``section_title`` / ``clause_no`` /
         ``section_no`` / ``chunk_index``（旧索引缺字段时为 None/[]）。
+||||||| 8e37a0cd
+
+        issue #185 分数契约：`rank_score`（与旧 `score` 同值）只是**融合阶段的批内
+        min-max 相对分**，用于排序/序位展示——榜首恒 ~1.0 是构造性的，不是相关度。
+        绝对分 `relevance_score` 由 pipeline 在 rerank 之后写入（无重排分则为 None），
+        post-process 绝不伪造。
         """
 
         documents = []
@@ -887,7 +893,12 @@ class HybridRetriever:
                 "prompt_text": text,
                 "filename": source.get("filename", "未知"),
                 "chunk_id": chunk_id,
-                "score": round(final_score, 4), "raw_score": fused_score,
+                # issue #185：rank_score 是批内 min-max 相对分（排序/序位用）；
+                # score 保留为同值别名（workflow 阈值/agent 载荷沿用既有语义）。
+                # 绝对相关度 relevance_score 由 pipeline rerank 后写入。
+                "score": round(final_score, 4),
+                "rank_score": round(final_score, 4),
+                "raw_score": fused_score,
                 "snippet": snippet, "document_id": source.get("document_id"),
                 # #188：结构化条款字段透传（旧索引缺字段时为 None/[]）
                 "section_title": source.get("section_title"),
