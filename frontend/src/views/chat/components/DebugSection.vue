@@ -23,7 +23,11 @@
             <span class="text-gray-400 mr-1">#{{ i + 1 }}</span>
             {{ hit.filename }}
           </span>
-          <span class="text-xs font-mono tabular-nums" :class="scoreColorClass(displayedScore(hit))">
+          <span
+            class="text-xs font-mono tabular-nums"
+            :class="scoreColorClass(displayedScore(hit), i)"
+            data-testid="hit-score"
+          >
             {{ scoreLabel }}: {{ displayedScore(hit) }}
           </span>
         </div>
@@ -58,6 +62,13 @@ const props = defineProps<{
   scoreLabel: string
   /** issue #190：重排节展示 rerank_score（绝对分）；缺失时回退 rank/融合分。 */
   scoreKey?: 'score' | 'rank_score' | 'rerank_score'
+  /**
+   * issue #198 ②：分数着色口径。
+   * - 'absolute'（默认）：按绝对分值分档——适用于 BM25/向量等量纲可比的分数；
+   * - 'rrf'：按列表名次着色——RRF 分值域上限 2/(k+1) ≈ 0.033，与
+   *   2.0/1.0/0.3 的绝对阈值毫不相干，修前所有 RRF 行都渲染成最低档灰色。
+   */
+  scoreMode?: 'absolute' | 'rrf'
 }>()
 
 const open = ref(true)
@@ -69,7 +80,15 @@ const displayedScore = (hit: DebugHit): number => {
   return hit.score
 }
 
-const scoreColorClass = (score: number): string => {
+/** RRF 名次分档：top3 绿 / 4-10 蓝 / 其余灰（与分值域无关，不会因量纲失真）。 */
+const rrfRankColorClass = (index: number): string => {
+  if (index < 3) return 'text-green-600 dark:text-green-400 font-bold'
+  if (index < 10) return 'text-blue-600 dark:text-blue-400'
+  return 'text-gray-400'
+}
+
+const scoreColorClass = (score: number, index: number): string => {
+  if (props.scoreMode === 'rrf') return rrfRankColorClass(index)
   if (score >= 2.0) return 'text-green-600 dark:text-green-400 font-bold'
   if (score >= 1.0) return 'text-blue-600 dark:text-blue-400'
   if (score >= 0.3) return 'text-yellow-600 dark:text-yellow-400'

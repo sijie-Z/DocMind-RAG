@@ -213,6 +213,9 @@ class DocumentParser:
         try:
             text_content = ""
             metadata: dict[str, Any] = {"pages":[], "tables_count": 0, "ocr_used": False}
+            # #197：拼接 text_content 时记录每页的字符区间，供切分器把
+            # chunk 的起始位置映射成页码（页信息不再只停在文档级 metadata）。
+            page_ranges: list[tuple[int, int, int]] = []
 
             with pdfplumber.open(file_path) as pdf:
                 for page_num, page in enumerate(pdf.pages, 1):
@@ -257,7 +260,10 @@ class DocumentParser:
                     for t_md in table_mds:
                         combined_text += t_md
 
+                    # #197：记录本页在 text_content 中的字符区间（含页尾分隔符）
+                    page_start = len(text_content)
                     text_content += combined_text + "\n\n"
+                    page_ranges.append((page_num, page_start, len(text_content)))
 
                     metadata["pages"].append({
                         "page_number": page_num,
@@ -278,7 +284,9 @@ class DocumentParser:
                 "content": text_content.strip(),
                 "content_length": len(text_content),
                 "metadata": metadata,
-                "chunks": await self._create_contextual_chunks(text_content, metadata)
+                "chunks": await self._create_contextual_chunks(
+                    text_content, page_ranges=page_ranges
+                )
             }
         except Exception as e:
             logger.error(f"PDF 解析失败: {str(e)}")
@@ -359,7 +367,7 @@ class DocumentParser:
             "content": text_content.strip(),
             "content_length": len(text_content),
             "metadata": metadata,
-            "chunks": await self._create_contextual_chunks(text_content, metadata)
+            "chunks": await self._create_contextual_chunks(text_content)
         }
 
     def _extract_docx_text_from_xml(self, file_path: str) -> str:
@@ -422,7 +430,7 @@ class DocumentParser:
                 "content": text_content.strip(),
                 "content_length": len(text_content),
                 "metadata": metadata,
-                "chunks": await self._create_contextual_chunks(text_content, metadata)
+                "chunks": await self._create_contextual_chunks(text_content)
             }
 
         except Exception as e:
@@ -458,7 +466,7 @@ class DocumentParser:
                 "content": text_content.strip(),
                 "content_length": len(text_content),
                 "metadata": metadata,
-                "chunks": await self._create_contextual_chunks(text_content, metadata)
+                "chunks": await self._create_contextual_chunks(text_content)
             }
 
         except Exception as e:
@@ -512,7 +520,7 @@ class DocumentParser:
                 "content": text_content,
                 "content_length": len(text_content),
                 "metadata": metadata,
-                "chunks": await self._create_contextual_chunks(text_content, metadata),
+                "chunks": await self._create_contextual_chunks(text_content),
             }
         except Exception as e:
             logger.error(f"图片 OCR 解析失败: {str(e)}")
@@ -636,14 +644,28 @@ class DocumentParser:
             logger.warning(f"Summary generation failed: {e}")
             return ""
 
-    async def _create_contextual_chunks(self, text_content: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
-        """实现上下文增强分块 (Contextual Retrieval)，融合条款感知切分。"""
+    async def _create_contextual_chunks(
+        self,
+        text_content: str,
+        page_ranges: list[tuple[int, int, int]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """实现上下文增强分块 (Contextual Retrieval)，融合条款感知切分。
+
+        #197：旧签名里的 ``metadata`` 形参从未被使用（页信息只停在文档级
+        ``metadata["pages"]``，chunk 永远拿不到页码）——已删除；PDF 解析期
+        记录的页偏移改由显式 ``page_ranges``（``(页码, 起偏移, 止偏移)``）
+        传入，切分器据此为每个 chunk 产出 ``start_pos``/``end_pos`` 并映射
+        ``page_number``。其它格式没有页概念 → 传 None（页码保持 None，不伪造）。
+        """
         # 1. 生成文档级摘要
         summary = await self._generate_summary(text_content)
 
-        # 2. 执行语义分块（返回 list[dict]，每个含 text + metadata.section_title）
+        # 2. 执行语义分块（返回 list[dict]，每个含 text + metadata：
+        #    section_title / start_pos / end_pos / page_number）
         from app.services.semantic_chunker import semantic_chunker
-        semantic_chunks = await semantic_chunker.split_text(text_content)
+        semantic_chunks = await semantic_chunker.split_text(
+            text_content, page_ranges=page_ranges
+        )
 
         chunks = []
         for i, ch in enumerate(semantic_chunks):
@@ -662,10 +684,15 @@ class DocumentParser:
                 "chunk_text": enhanced_text,
                 "original_text": chunk_text,
                 "chunk_length": len(enhanced_text),
+                # #197：块在原文中的字符区间（document_chunks.start_pos/end_pos）
+                "start_pos": chunk_meta.get("start_pos"),
+                "end_pos": chunk_meta.get("end_pos"),
                 "metadata": {
                     "type": "contextual_semantic_split",
                     "has_summary": bool(summary),
                     "section_title": section_title or chunk_meta.get("section_title"),
+                    # #197：PDF 页码；非 PDF 为 None
+                    "page_number": chunk_meta.get("page_number"),
                 }
             })
         return chunks

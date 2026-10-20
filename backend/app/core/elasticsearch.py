@@ -171,6 +171,9 @@ def _knowledge_index_mapping() -> dict:
                 "chunk_id": {"type": "keyword"},
                 "chunk_index": {"type": "integer"},
                 "section_title": {"type": "text"},
+                # #197：PDF 页码提升为顶层整型字段（可检索/可按页过滤）；
+                # 非 PDF 格式写入 None（ES 视为缺省，不占索引值）。
+                "page_number": {"type": "integer"},
                 # #188：结构化条款字段（doc_processor 从定义位抽取后写入顶层）。
                 # clause_no 为整型数组：一个 chunk 可定义多条（数组字段合法）；
                 # section_no 为 X.Y 章节编号（keyword，精确 term 查询用）。

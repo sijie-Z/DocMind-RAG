@@ -272,6 +272,8 @@ export default {
     // du reranker est libellé « score de rerank » (jamais « pertinence % »).
     rankPosition: 'Rang n°{rank}',
     rerankScore: 'Score de rerank : {score}',
+    // issue #197 : numéro de page de la source (PDF)
+    sourcePage: 'Page {page}',
     rerankResultTitle: 'Résultat du rerank',
     rerankPath: 'Chemin : {path}',
     rerankStatus: {

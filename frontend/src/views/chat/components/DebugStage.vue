@@ -76,8 +76,14 @@
     <!-- Vector Top -->
     <DebugSection v-if="debugData.vector_top?.length" title="🧠 向量相似度检索" :hits="debugData.vector_top" :score-label="'score'" />
 
-    <!-- RRF Result -->
-    <DebugSection v-if="debugData.rrf_result?.length" title="🔀 RRF 融合结果" :hits="debugData.rrf_result" :score-label="'score'">
+    <!-- RRF Result：分值域 ≈ 2/(k+1) ≤ 0.033，按名次着色（issue #198 ②） -->
+    <DebugSection
+      v-if="debugData.rrf_result?.length"
+      title="🔀 RRF 融合结果"
+      :hits="debugData.rrf_result"
+      :score-label="'score'"
+      score-mode="rrf"
+    >
       <template #header-extra>
         <span class="text-gray-400">(k=60)</span>
       </template>

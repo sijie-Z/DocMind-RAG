@@ -272,6 +272,8 @@ export default {
     // 「リランクスコア」と表記する（「関連度 %」の主張はしない）。
     rankPosition: '順位 #{rank}',
     rerankScore: 'リランクスコア: {score}',
+    // issue #197: 出典のページ番号（PDF）
+    sourcePage: '{page}ページ',
     rerankResultTitle: 'リランク結果',
     rerankPath: 'パス: {path}',
     rerankStatus: {

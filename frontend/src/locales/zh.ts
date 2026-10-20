@@ -301,6 +301,8 @@ export default {
     // 不再以「相关度 %」展示构造性的 min-max 分。
     rankPosition: '排序 #{rank}',
     rerankScore: '重排分: {score}',
+    // issue #197：来源页码（PDF）
+    sourcePage: '第 {page} 页',
     rerankResultTitle: '重排结果',
     rerankPath: '路径: {path}',
     rerankStatus: {

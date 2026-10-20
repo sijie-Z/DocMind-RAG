@@ -199,6 +199,14 @@
                         <div class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed line-clamp-6">
                           {{ source.content || t('chat.noPreview') }}
                         </div>
+                        <!-- issue #197：PDF 来源展示页码（后端 pageNumber 真值；非 PDF 不渲染） -->
+                        <div
+                          v-if="typeof source.pageNumber === 'number'"
+                          class="mt-1 text-[10px] text-gray-400"
+                          data-testid="source-page"
+                        >
+                          {{ t('chat.sourcePage', { page: source.pageNumber }) }}
+                        </div>
                         <!-- issue #185：诚实分数口径——有重排绝对分才显示「重排分」，
                              否则只报排序序位；不再把 min-max 相对分当「相关度 %」 -->
                         <div class="mt-1.5 text-[10px] text-gray-400">

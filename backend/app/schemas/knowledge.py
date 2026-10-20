@@ -51,6 +51,8 @@ class SearchResult(BaseModel):
     has_vector: bool | None = Field(None, description="是否命中向量")
     rewrite_hits: int | None = Field(None, description="命中改写查询次数")
     fresh_factor: float | None = Field(None, description="新鲜度提升因子")
+    # issue #197：PDF 来源页码（解析期页偏移 → chunk → ES 顶层字段逐层透传）
+    page_number: int | None = Field(None, description="PDF 来源页码；非 PDF/旧索引为 null")
 
 
 class KnowledgeSearchResponse(BaseModel):

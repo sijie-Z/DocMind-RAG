@@ -69,6 +69,8 @@ export interface KnowledgeSource {
   hasVector?: boolean
   rewriteHits?: number
   freshFactor?: number
+  /** issue #197：PDF 来源页码（后端 build_sources_list 真返回）；非 PDF 为 null */
+  pageNumber?: number | null
   cited?: boolean
   /** T4（第二轮 §7.2④）：示例对话的写死来源（假分数）逐条标注，前端渲染「演示数据」角标 */
   demo?: boolean

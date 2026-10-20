@@ -134,21 +134,33 @@ def _find_split_point(text: str, max_length: int) -> int:
     return max_length
 
 
+def _split_overlong_with_spans(text: str, max_length: int) -> list[tuple[str, int, int]]:
+    """把超长文本切成连续片段，并返回每段在输入文本中的 ``(起, 止)``。
+
+    #197：切分器必须能回答「这个块在原文的哪一段」，超长块二次切分不能把
+    位置信息丢掉。分割点算法与 ``_split_overlong_text`` 完全相同（段落 >
+    句子 > 空格 > 硬切），这里只是额外携带偏移。
+    """
+    pieces: list[tuple[str, int, int]] = []
+    remaining = text
+    pos = 0
+    while len(remaining) > max_length:
+        cut = _find_split_point(remaining, max_length)
+        pieces.append((remaining[:cut], pos, pos + cut))
+        pos += cut
+        remaining = remaining[cut:]
+    if remaining:
+        pieces.append((remaining, pos, pos + len(remaining)))
+    return pieces
+
+
 def _split_overlong_text(text: str, max_length: int) -> list[str]:
     """把超长文本切成多个连续片段（每段 <= max_length，内容零丢失）。
 
     修复（R3）：此前超长块走 smart_truncate 直接截断，当语义切分未产生
     断点时（重复文本/表格/列表等），整个分区会被截掉一大半且无任何报错。
     """
-    pieces: list[str] = []
-    remaining = text
-    while len(remaining) > max_length:
-        cut = _find_split_point(remaining, max_length)
-        pieces.append(remaining[:cut])
-        remaining = remaining[cut:]
-    if remaining:
-        pieces.append(remaining)
-    return pieces
+    return [piece for piece, _start, _end in _split_overlong_with_spans(text, max_length)]
 
 
 def find_clause_boundaries(text: str) -> list[int]:
@@ -219,12 +231,20 @@ class SemanticChunker:
         self.threshold_percentile = threshold_percentile
         self.chunk_max_chars = chunk_max_chars
 
-    async def split_text(self, text: str) -> list[dict]:
+    async def split_text(
+        self,
+        text: str,
+        page_ranges: list[tuple[int, int, int]] | None = None,
+    ) -> list[dict]:
         """返回带元数据的 chunks 列表，每个元素为 {"text": str, "metadata": dict}.
 
         metadata 包含:
         - section_title: 所属章节/条款标题（如有）
         - index: 块序号
+        - start_pos / end_pos: 块在输入文本（未 strip 的原文）中的字符区间（#197）
+        - page_number: 块起始位置所在页码；仅当调用方提供 ``page_ranges``
+          （PDF 解析期记录的 ``(页码, 起偏移, 止偏移)``）时写入，其余格式
+          保持 None——没有页概念就不伪造页码（#197）。
         """
         if not text or not text.strip():
             # issue #301 批 D（#28）：空/全空白文本返回**零个** chunk。修前返回
@@ -234,7 +254,19 @@ class SemanticChunker:
         if len(text) < 500:
             # 短文本不做语义切分，但仍尝试提取条款标题
             title = detect_section_title(text.strip()[:80]) if text else None
-            return [{"text": text, "metadata": {"index": 0, "section_title": title}}]
+            lead = len(text) - len(text.lstrip())
+            return self._assign_page_numbers(
+                [{
+                    "text": text,
+                    "metadata": {
+                        "index": 0,
+                        "section_title": title,
+                        "start_pos": lead,
+                        "end_pos": len(text.rstrip()),
+                    },
+                }],
+                page_ranges,
+            )
 
         # 1. 检测条款边界
         clause_boundaries = find_clause_boundaries(text)
@@ -256,10 +288,15 @@ class SemanticChunker:
         all_chunks: list[dict] = []
         global_idx = 0
         for partition_idx, (start, end, section_title) in enumerate(partitions):
-            partition_text = text[start:end].strip()
+            raw_partition = text[start:end]
+            partition_text = raw_partition.strip()
             if not partition_text:
                 continue
-            sub_chunks = await self._semantic_split(partition_text)
+            # #197：strip 会挪动起点，基偏移必须补上前导空白，否则 span 错位
+            lead = len(raw_partition) - len(raw_partition.lstrip())
+            sub_chunks = await self._semantic_split(
+                partition_text, base_offset=start + lead
+            )
             for ch in sub_chunks:
                 ch["metadata"]["section_title"] = section_title
                 ch["metadata"]["index"] = global_idx
@@ -268,24 +305,98 @@ class SemanticChunker:
                 all_chunks.append(ch)
                 global_idx += 1
 
-        # 4. 合并过小的尾块（只限同一分区内）
-        return self._merge_small_tails(all_chunks)
+        # 4. 合并过小的尾块（只限同一分区内），再映射页码（#197）
+        return self._assign_page_numbers(self._merge_small_tails(all_chunks), page_ranges)
 
-    async def _semantic_split(self, text: str) -> list[dict]:
-        """对一段文本做基于 Embedding 余弦距离的语义切分。"""
-        # 1. 按句子初步切分
-        sentences = re.split(r'(?<=[。！？；\?！\n])', text)
-        sentences = [s.strip() for s in sentences if s.strip()]
+    @staticmethod
+    def _sentence_spans(text: str) -> list[tuple[str, int, int]]:
+        """按既有断句口径返回 ``[(句子, 源起, 源止)]``（源偏移追踪，#197）。
+
+        口径与历史实现逐字等价：``re.split(r'(?<=[。！？；\\?！\\n])', text)``
+        后逐句 strip、丢空句。这里是同一规则的**定位版本**——每个终止符之后
+        断开、句首尾空白剔除——不改变任何切分行为，只多记录每句在原文中的
+        区间，供 chunk 的 start_pos/end_pos 与页码映射使用。
+        """
+        spans: list[tuple[str, int, int]] = []
+        cursor = 0
+        for match in re.finditer(r'[。！？；\?！\n]', text):
+            raw = text[cursor:match.end()]
+            sentence = raw.strip()
+            if sentence:
+                lead = len(raw) - len(raw.lstrip())
+                start = cursor + lead
+                spans.append((sentence, start, start + len(sentence)))
+            cursor = match.end()
+        raw = text[cursor:]
+        sentence = raw.strip()
+        if sentence:
+            lead = len(raw) - len(raw.lstrip())
+            start = cursor + lead
+            spans.append((sentence, start, start + len(sentence)))
+        return spans
+
+    @staticmethod
+    def _chunk_from_sentences(
+        sentences: list[tuple[str, int, int]], first: int, last: int
+    ) -> dict | None:
+        """由句子区间构造 chunk，并记录「拼接文本 → 源文」的段表（#197）。
+
+        ``_segments`` 为 ``(拼接起, 拼接止, 源起, 源止)`` 列表：块文本是各句
+        strip 后的直接拼接（句间空白被丢弃），线性偏移不能直接当源偏移用；
+        段表让超长块二次切分后的每一片仍能精确投影回原文。
+
+        区间为空（provider 返回的向量数多于窗口数时，split index 可能越界）
+        返回 None——与旧实现「切片为空串 → 跳过」等价，不得抛 IndexError。
+        """
+        parts = sentences[first:last + 1]
+        if not parts:
+            return None
+        segments: list[tuple[int, int, int, int]] = []
+        cursor = 0
+        for sentence, s_start, s_end in parts:
+            segments.append((cursor, cursor + len(sentence), s_start, s_end))
+            cursor += len(sentence)
+        return {
+            "text": "".join(sentence for sentence, _s, _e in parts),
+            "metadata": {
+                "start_pos": segments[0][2],
+                "end_pos": segments[-1][3],
+                "_segments": segments,
+            },
+        }
+
+    @staticmethod
+    def _map_concat_offset(segments: list[tuple[int, int, int, int]], offset: int) -> int:
+        """拼接文本偏移 → 源文偏移；恰在段边界时归入后一段。"""
+        for c_start, c_end, s_start, _s_end in segments:
+            if c_start <= offset < c_end:
+                return s_start + (offset - c_start)
+        return segments[-1][3] if segments else offset
+
+    async def _semantic_split(self, text: str, base_offset: int = 0) -> list[dict]:
+        """对一段文本做基于 Embedding 余弦距离的语义切分。
+
+        ``base_offset``：该段文本首字符在整篇原文中的偏移（#197）。返回的
+        每个 chunk 都带 ``start_pos``/``end_pos``（整篇坐标）。
+        """
+        # 1. 按句子初步切分（带源偏移）
+        sentences = self._sentence_spans(text)
 
         if len(sentences) < 5:
-            return [{"text": text, "metadata": {}}]
+            return [{
+                "text": text,
+                "metadata": {
+                    "start_pos": base_offset,
+                    "end_pos": base_offset + len(text),
+                },
+            }]
 
         # 2. 构造滑动窗口
         combined_sentences = []
         for i in range(len(sentences)):
             start = max(0, i - self.buffer_size)
             end = min(len(sentences), i + self.buffer_size + 1)
-            combined_sentences.append(" ".join(sentences[start:end]))
+            combined_sentences.append(" ".join(sentences[j][0] for j in range(start, end)))
 
         # 性能加固：限制单段 embedding 预算，防止万句级文档产生上千次
         # embedding 请求拖垮解析链路（超预算时按长度切分回退）。
@@ -298,20 +409,47 @@ class SemanticChunker:
             # 按近似字符数均分
             mid = len(text) // 2
             left = text[:mid].rstrip()
-            right = text[mid:].lstrip()
+            right_raw = text[mid:]
+            right = right_raw.lstrip()
             out = []
             if left:
-                out.append({"text": left, "metadata": {}})
+                out.append({
+                    "text": left,
+                    "metadata": {
+                        "start_pos": base_offset,
+                        "end_pos": base_offset + len(left),
+                    },
+                })
             if right:
-                out.append({"text": right, "metadata": {}})
-            return out or [{"text": text, "metadata": {}}]
+                lead = len(right_raw) - len(right)
+                right_start = mid + lead
+                out.append({
+                    "text": right,
+                    "metadata": {
+                        "start_pos": base_offset + right_start,
+                        "end_pos": base_offset + right_start + len(right),
+                    },
+                })
+            return out or [{
+                "text": text,
+                "metadata": {
+                    "start_pos": base_offset,
+                    "end_pos": base_offset + len(text),
+                },
+            }]
 
         # 3. 获取 Embedding
         try:
             embeddings = await embedding_service.get_embeddings(combined_sentences)
         except Exception as e:
             logger.error(f"Semantic chunking embedding 获取失败: {e}")
-            return [{"text": text, "metadata": {}}]
+            return [{
+                "text": text,
+                "metadata": {
+                    "start_pos": base_offset,
+                    "end_pos": base_offset + len(text),
+                },
+            }]
 
         # 4. 计算相邻窗口余弦距离
         distances = []
@@ -322,52 +460,122 @@ class SemanticChunker:
             distances.append(1 - sim)
 
         if not distances:
-            return [{"text": text, "metadata": {}}]
+            return [{
+                "text": text,
+                "metadata": {
+                    "start_pos": base_offset,
+                    "end_pos": base_offset + len(text),
+                },
+            }]
 
         # 5. 找语义断点
         threshold = np.percentile(distances, self.threshold_percentile * 100)
         split_indices = [i for i, d in enumerate(distances) if d > threshold]
 
-        # 6. 执行切分
+        # 6. 执行切分（记录句子区间与源偏移）
         raw_chunks: list[dict] = []
         start_idx = 0
         for idx in split_indices:
-            chunk_text = "".join(sentences[start_idx: idx + 1])
-            if len(chunk_text) > 100:
-                raw_chunks.append({"text": chunk_text, "metadata": {}})
+            candidate = self._chunk_from_sentences(sentences, start_idx, idx)
+            # None：split index 越界（provider 向量数多于窗口数）——跳过，
+            # 与旧实现的空切片行为一致。
+            if candidate is not None and len(candidate["text"]) > 100:
+                raw_chunks.append(candidate)
                 start_idx = idx + 1
 
-        remaining = "".join(sentences[start_idx:])
-        if remaining:
-            raw_chunks.append({"text": remaining, "metadata": {}})
+        if start_idx < len(sentences):
+            raw_chunks.append(
+                self._chunk_from_sentences(sentences, start_idx, len(sentences) - 1)
+            )
 
         if not raw_chunks:
-            return [{"text": text, "metadata": {}}]
+            return [{
+                "text": text,
+                "metadata": {
+                    "start_pos": base_offset,
+                    "end_pos": base_offset + len(text),
+                },
+            }]
 
-        # 7. 二次合并过小的块
+        # 7. 二次合并过小的块（段表随合并平移，保全偏移信息）
         merged_chunks: list[dict] = []
-        current_text = ""
+        current: dict | None = None
         for ch in raw_chunks:
-            if len(current_text) + len(ch["text"]) < self.chunk_max_chars:
-                current_text += ch["text"]
+            if (
+                current is not None
+                and len(current["text"]) + len(ch["text"]) < self.chunk_max_chars
+            ):
+                offset = len(current["text"])
+                current["text"] += ch["text"]
+                current["metadata"]["end_pos"] = ch["metadata"]["end_pos"]
+                current["metadata"]["_segments"].extend(
+                    (c_start + offset, c_end + offset, s_start, s_end)
+                    for c_start, c_end, s_start, s_end
+                    in ch["metadata"]["_segments"]
+                )
             else:
-                if current_text:
-                    merged_chunks.append({"text": current_text, "metadata": {}})
-                current_text = ch["text"]
-        if current_text:
-            merged_chunks.append({"text": current_text, "metadata": {}})
+                if current is not None:
+                    merged_chunks.append(current)
+                current = ch
+        if current is not None:
+            merged_chunks.append(current)
 
         # 8. 超长块连续切分（修复 R3：不再截断；保证内容不丢失）
+        #    #197：每一片按段表投影回源文偏移，start_pos/end_pos 不得丢失。
         split_chunks: list[dict] = []
         for ch in merged_chunks:
             if len(ch["text"]) <= self.chunk_max_chars:
-                split_chunks.append(ch)
+                split_chunks.append({
+                    "text": ch["text"],
+                    "metadata": {
+                        "start_pos": base_offset + ch["metadata"]["start_pos"],
+                        "end_pos": base_offset + ch["metadata"]["end_pos"],
+                    },
+                })
                 continue
-            metadata = ch.get("metadata", {})
-            for piece in _split_overlong_text(ch["text"], self.chunk_max_chars):
-                split_chunks.append({"text": piece, "metadata": dict(metadata)})
+            segments = ch["metadata"]["_segments"]
+            for piece, piece_start, piece_end in _split_overlong_with_spans(
+                ch["text"], self.chunk_max_chars
+            ):
+                src_start = self._map_concat_offset(segments, piece_start)
+                src_end = self._map_concat_offset(segments, piece_end - 1) + 1
+                split_chunks.append({
+                    "text": piece,
+                    "metadata": {
+                        "start_pos": base_offset + src_start,
+                        "end_pos": base_offset + src_end,
+                    },
+                })
 
         return split_chunks
+
+    @staticmethod
+    def _assign_page_numbers(
+        chunks: list[dict], page_ranges: list[tuple[int, int, int]] | None
+    ) -> list[dict]:
+        """按 chunk 起始偏移映射页码（#197）；未提供页信息时保持 None。
+
+        ``page_ranges`` 为 ``(页码, 起偏移, 止偏移)``（解析期按页拼接顺序记录，
+        区间连续）；页码取起始位置所在页（跨页块归起始页）。偏移超出所有区间
+        （调用方传入不完整/非连续页信息）时回退到最近的前一页，否则为 None。
+        """
+        if not page_ranges or not chunks:
+            return chunks
+        ranges = sorted(page_ranges, key=lambda item: item[1])
+        for ch in chunks:
+            metadata = ch.setdefault("metadata", {})
+            start = metadata.get("start_pos")
+            if start is None:
+                continue
+            page: int | None = None
+            for page_no, p_start, p_end in ranges:
+                if p_start > start:
+                    break
+                page = page_no
+                if start < p_end:
+                    break
+            metadata["page_number"] = page
+        return chunks
 
     def _merge_small_tails(self, chunks: list[dict]) -> list[dict]:
         """把过小的尾块（< 200 字符）合并到**同一分区**的前一块。
@@ -377,6 +585,9 @@ class SemanticChunker:
         前一块的 section_title 下（跨条合并 + 标题错配）。现在只在同一分区
         （同一条款/章节，即同一次 `split_text` 分区）内合并；跨分区小尾块保留
         独立——宁可短块，不可错标题。`_partition` 是内部标记，合并后从产物中剔除。
+
+        #197：合并后前块的 ``end_pos`` 必须延伸到尾块末尾——否则该块的源文
+        区间会少掉被并进来的正文。
         """
         if len(chunks) <= 1:
             for ch in chunks:
@@ -391,6 +602,8 @@ class SemanticChunker:
             )
             if result and len(ch["text"]) < 200 and same_partition:
                 result[-1]["text"] += ch["text"]
+                if metadata.get("end_pos") is not None:
+                    prev_meta["end_pos"] = metadata["end_pos"]
                 if metadata.get("section_title") and not prev_meta.get("section_title"):
                     prev_meta["section_title"] = metadata["section_title"]
             else:

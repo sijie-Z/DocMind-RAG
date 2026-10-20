@@ -425,6 +425,10 @@ class DocumentProcessor:
         条号从 ``original_text``（未加【文档背景】摘要前缀的原文）抽取——
         摘要行不得参与「行首定义位」判定，否则上下文增强会污染条号字段。
 
+        #197：``page_number`` 提升为顶层整型字段（mapping 已就绪）。旧实现只写
+        ``metadata.page_number``（``metadata.enabled=false``，存而不索引），而
+        上游一直取不到的 None 值也让它无从救起；解析/切分侧产出页码后才真正生效。
+
         ``embedding`` 由调用方注入（本 helper 不关心向量来源，便于单测）。
         """
         metadata = chunk_data.get("metadata", {}) or {}
@@ -449,6 +453,8 @@ class DocumentProcessor:
             "chunk_id": chunk_id,
             "chunk_index": chunk_index,
             "section_title": metadata.get("section_title"),
+            # #197：顶层页码（可检索/可过滤）；非 PDF 格式为 None
+            "page_number": metadata.get("page_number"),
             "clause_no": clause_fields["clause_no"],
             "section_no": clause_fields["section_no"],
             "metadata": {
