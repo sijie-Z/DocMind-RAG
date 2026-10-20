@@ -59,12 +59,16 @@ class RAGPipeline:
     def __init__(
         self,
         openai_client: AsyncOpenAI | None = None,
-        embedding_client: AsyncOpenAI | None = None,
+        embedding_provider=None,
         rerank_client: AsyncOpenAI | None = None,
     ):
         self.openai_client = openai_client
         self.rerank_client = rerank_client
-        self.retriever = HybridRetriever(openai_client=openai_client, embedding_client=embedding_client)
+        # issue #196：embedding_provider 必须是索引期同一实例
+        # （app.services.embedding_service.embedding_service），由依赖注入提供。
+        self.retriever = HybridRetriever(
+            openai_client=openai_client, embedding_provider=embedding_provider
+        )
         self.cache = RetrievalCache()
         # 修复（R4）：检索缓存使用独立命名空间，避免 answer="" 的检索条目
         # 被问答链路（chat_service）按语义相似度命中后返回空回答。
@@ -116,6 +120,20 @@ class RAGPipeline:
         debug_info: dict | None = {"stages": {}} if debug else None
 
         try:
+            # issue #196：索引配置错误（维度/embedding 模型漂移等）时**拒绝检索**。
+            # 写入侧已被 IndexConfigError 拦下，但查询侧若继续用当前模型向量去撞
+            # 旧模型索引，会返回非空但静默错配的结果——正是「漂移不得静默混用」
+            # 要消除的形态。按 #292 的故障语义上抛，由上层显式降级。
+            from app.core.elasticsearch import get_index_error
+
+            index_error = get_index_error()
+            if index_error:
+                # fail-closed：暖缓存也可能来自旧模型索引，一律拒绝；不读写缓存。
+                RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
+                raise RetrievalUnavailableError(
+                    f"知识库索引不可用，检索已拒绝：{index_error}"
+                )
+
             # Exact cache (skip for document-specific queries)
             if not document_ids:
                 cached = await self.cache.get(query, organization_id, top_k, search_mode=search_mode)
@@ -328,6 +346,21 @@ class RAGPipeline:
             # 「最终为空」与「知识库确实没有相关内容」不可区分 —— 绝不回落成
             # 「无内容」语义，如实上抛结构化故障，由上层做诚实降级。
             failures: list[tuple[str, BaseException]] = list(failed_sub_queries)
+            # embedding 维度/模型漂移是**配置错误**，不是瞬态故障：即使关键词臂
+            # 有命中，也不能返回「看似正常」的结果（#196：漂移不得静默混用）。
+            config_reasons = [
+                r for r in degraded_reasons if r.startswith("vector_arm_config_error")
+            ]
+            if config_reasons:
+                RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
+                logger.error(
+                    "RAG retrieval refused by embedding config error (org=%s): %s",
+                    organization_id,
+                    config_reasons[0],
+                )
+                raise RetrievalUnavailableError(
+                    f"embedding 配置错误，检索结果不可信：{config_reasons[0]}"
+                )
             if (failures or degraded_reasons) and not result:
                 excs = [e for _, e in failures]
                 kind = "timeout" if excs and all(is_timeout_error(e) for e in excs) else "failed"

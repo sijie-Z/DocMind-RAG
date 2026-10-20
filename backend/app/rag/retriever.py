@@ -234,9 +234,17 @@ def _is_clause_lookup_query(query: str) -> bool:
 class HybridRetriever:
     """Retrieves documents using keyword search, vector search, and RRF fusion."""
 
-    def __init__(self, openai_client=None, embedding_client=None):
+    def __init__(self, openai_client=None, embedding_provider=None):
         self.openai_client = openai_client
-        self.embedding_client = embedding_client
+        # issue #196：检索期不再自建 embedding 客户端，统一接收
+        # ``app.services.embedding_service.EmbeddingService``（索引期同一实例）。
+        # None = 按设计未配置向量臂（返回 []，不产生降级信号）。
+        self.embedding_provider = embedding_provider
+
+    @property
+    def embedding_client(self):
+        """向后兼容只读视图：provider 底层的 OpenAI 客户端（可能为 None）。"""
+        return getattr(self.embedding_provider, "client", None)
 
     async def get_embedding(self, text: str) -> list[float]:
         try:
@@ -253,15 +261,14 @@ class HybridRetriever:
         「按设计未配置向量臂」（返回 []）与「服务故障」（抛异常），后者由
         retrieve 以结构化降级信号上抛。get_embedding 保持原吞异常语义不变
         （问答链、语义缓存等调用方依赖该契约）。
+
+        issue #196：模型名/维度校验不在检索器里做——provider（embedding_service）
+        与索引期是同一实例，保证「索引用的模型 == 查询用的模型」。
         """
-        if not self.embedding_client:
+        if not self.embedding_provider:
             return []
         try:
-            resp = await self.embedding_client.embeddings.create(
-                input=text.replace("\n", " "),
-                model=settings.EMBEDDING_MODEL,
-            )
-            return resp.data[0].embedding
+            return await self.embedding_provider.embed_query(text)
         except Exception as e:
             raise EmbeddingUnavailableError(f"embedding service call failed: {e}") from e
 
@@ -383,6 +390,17 @@ class HybridRetriever:
         except EmbeddingUnavailableError as e:
             # 修复（#292）：向量臂因 embedding 服务故障关闭时如实标记降级，
             # 不再与「没有命中」同形（此前是 #2 假无结果的静默放大器）。
+            # issue #196：维度/模型漂移是**配置错误**而非瞬态故障——用专用 reason
+            # 标记，pipeline 据此 fail-closed（即使关键词臂有命中也不返回）。
+            # 用类名判定避免在检索路径上 import embedding_service（无 key 的
+            # 只读工具不应因构造单例而失败）。
+            cause = e.__cause__
+            if cause is not None and type(cause).__name__ == "EmbeddingDimensionMismatchError":
+                logger.error(
+                    "Vector retrieval arm refused by embedding dimension drift: %s",
+                    cause,
+                )
+                return [], [], f"vector_arm_config_error: {cause}"
             logger.error(f"Vector retrieval arm unavailable, query embedding failed: {e}")
             return [], [], f"vector_arm_unavailable: {e}"
 

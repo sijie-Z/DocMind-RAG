@@ -197,7 +197,7 @@ class TestDegradedArmSemantics:
         from app.rag.retriever import HybridRetriever
 
         failing = MagicMock()
-        failing.embeddings.create = AsyncMock(side_effect=ConnectionError("embedding down"))
+        failing.embed_query = AsyncMock(side_effect=ConnectionError("embedding down"))
 
         with (
             patch(
@@ -206,7 +206,7 @@ class TestDegradedArmSemantics:
             ),
             patch.object(QueryComplexityClassifier, "get_strategy", staticmethod(lambda q: "hybrid")),
         ):
-            retriever = HybridRetriever(openai_client=None, embedding_client=failing)
+            retriever = HybridRetriever(openai_client=None, embedding_provider=failing)
             results, _qv, _dbg, degraded = await retriever.retrieve("向量层故障查询", 1, top_k=5)
 
         assert results == []
@@ -221,7 +221,7 @@ class TestDegradedArmSemantics:
         from app.rag.retriever import HybridRetriever
 
         failing = MagicMock()
-        failing.embeddings.create = AsyncMock(side_effect=ConnectionError("embedding down"))
+        failing.embed_query = AsyncMock(side_effect=ConnectionError("embedding down"))
 
         with (
             patch(
@@ -230,7 +230,7 @@ class TestDegradedArmSemantics:
             ),
             patch.object(QueryComplexityClassifier, "get_strategy", staticmethod(lambda q: "keyword_only")),
         ):
-            retriever = HybridRetriever(openai_client=None, embedding_client=failing)
+            retriever = HybridRetriever(openai_client=None, embedding_provider=failing)
             results, _qv, _dbg, degraded = await retriever.retrieve("短查询", 1, top_k=5)
 
         assert results == [] and degraded == [], "按设计缺省不等于故障"
