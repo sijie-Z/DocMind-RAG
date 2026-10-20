@@ -336,7 +336,12 @@ const handleExportChat = () => {
     if (msg.sources && msg.sources.length > 0) {
       md += '**来源：**\n\n'
       msg.sources.forEach((s, i) => {
-        md += `- [${i + 1}] ${s.filename || t('chat.sourceDoc')}${s.relevanceScore ? ` (${t('chat.relevanceMatch', { score: (s.relevanceScore * 100).toFixed(0) })})` : ''}\n`
+        // issue #185：导出与来源卡片同一诚实口径——有重排绝对分写「重排分」，
+        // 否则只写排序序位；不再输出构造性的「相关度 %」。
+        const scoreText = typeof s.relevanceScore === 'number' && s.rank != null
+          ? t('chat.rerankScore', { score: s.relevanceScore.toFixed(2) })
+          : t('chat.rankPosition', { rank: s.rank ?? i + 1 })
+        md += `- [${i + 1}] ${s.filename || t('chat.sourceDoc')} (${scoreText})\n`
       })
       md += '\n'
     }

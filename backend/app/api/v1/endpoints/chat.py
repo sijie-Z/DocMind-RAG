@@ -89,9 +89,15 @@ def _extract_agent_sources(tool_result: str, sources: list[dict]) -> None:
                 continue
             # Deduplicate by filename
             if not any(s.get("filename") == filename for s in sources):
+                # issue #185：relevanceScore 只喂重排绝对分（可能为 None）；
+                # 工具信封里的 score 是相对排序分，落到 rankScore。
+                relevance = item.get("relevanceScore")
+                score = item.get("score")
                 sources.append({
                     "filename": filename,
-                    "relevanceScore": float(item.get("score") or 0.0),
+                    "relevanceScore": float(relevance) if relevance is not None else None,
+                    "rankScore": float(score) if score is not None else None,
+                    "rank": len(sources) + 1,
                     "content": "",
                     "documentId": str(item.get("documentId") or ""),
                 })
@@ -105,9 +111,12 @@ def _extract_agent_sources(tool_result: str, sources: list[dict]) -> None:
         filename = match.group(3).strip()
         # Deduplicate by filename
         if not any(s.get("filename") == filename for s in sources):
+            # 旧格式的分数不可辨尺度：只作为相对排序分，不冒充相关度（#185）。
             sources.append({
                 "filename": filename,
-                "relevanceScore": score,
+                "relevanceScore": None,
+                "rankScore": score,
+                "rank": len(sources) + 1,
                 "content": "",
                 "documentId": "",
             })

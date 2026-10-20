@@ -268,7 +268,18 @@ export default {
     sourcesLabel: '出典：',
     unknownDoc: '不明なドキュメント',
     noPreview: 'プレビューなし',
-    relevanceScore: '関連度：{score}%',
+    // issue #185：相対順位スコアは順位で表示し、リランクの絶対スコアのみ
+    // 「リランクスコア」と表記する（「関連度 %」の主張はしない）。
+    rankPosition: '順位 #{rank}',
+    rerankScore: 'リランクスコア: {score}',
+    rerankResultTitle: 'リランク結果',
+    rerankPath: 'パス: {path}',
+    rerankStatus: {
+      ok: 'リランク正常',
+      degraded: 'リランク降格（元の順序）',
+      disabled: 'リランク無効',
+      empty: 'リランク対象なし',
+    },
     useful: '役に立った',
     notUseful: '役に立たなかった',
     regenerate: '再生成',
@@ -280,7 +291,6 @@ export default {
     roleUser: 'ユーザー',
     roleAssistant: 'アシスタント',
     sourceDoc: 'ドキュメント',
-    relevanceMatch: '一致度：{score}%',
     msgLoadFailed: '履歴メッセージの読み込みに失敗しました',
     promptFilled: 'プロンプトを入力欄に挿入しました。確認してから送信してください',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
@@ -717,7 +727,8 @@ export default {
     results: '件の結果が見つかりました',
     relevance: '関連度順',
     name: '名前順',
-    relevanceScore: '関連度',
+    rerankScore: 'リランクスコア: {score}',
+    rerankScoreLabel: 'リランクスコア',
     noResults: '結果が見つかりませんでした',
     noResultsDesc: '別のキーワードを試すか、フィルタを調整してください',
     searchFailed: '検索に失敗しました',

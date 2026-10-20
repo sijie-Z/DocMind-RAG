@@ -151,7 +151,10 @@ class AISettings(BaseSettings):
     # Reranker API fallback — None = disabled, only use local BGE
     RERANK_API_KEY: str | None = None
     RERANK_API_URL: str | None = None
-    RERANK_MODEL: str = "rerank"
+    # issue #190：默认值移到 reranker 的解析器（RERANK_MODEL → legacy
+    # RAG_RERANK_MODEL → 协议默认 "rerank"）。此处保留 None 才能让
+    # legacy 别名在未显式设置 RERANK_MODEL 时真正生效。
+    RERANK_MODEL: str | None = None
 
     # Legacy reranker env var aliases
     RAG_RERANK_MODEL: str | None = None

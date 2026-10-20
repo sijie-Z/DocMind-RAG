@@ -40,7 +40,11 @@ class SearchResult(BaseModel):
     """搜索结果项"""
     id: str = Field(..., description="结果ID")
     text: str = Field(..., description="匹配文本内容")
-    score: float = Field(..., description="匹配得分")
+    score: float = Field(..., description="相对排序分（融合阶段，仅用于排序/序位，不是相关度）")
+    # issue #185：重排绝对分（local CE logit / zhipu relevance_score）；无重排分时为 null。
+    relevance_score: float | None = Field(
+        None, description="重排绝对分；无重排分时为 null（不得用 score 回填）"
+    )
     metadata: dict[str, Any] = Field(..., description="元数据")
     source: dict[str, Any] = Field(..., description="来源信息")
     has_keyword: bool | None = Field(None, description="是否命中关键词")

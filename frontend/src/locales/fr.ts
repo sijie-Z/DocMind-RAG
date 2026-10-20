@@ -268,7 +268,18 @@ export default {
     sourcesLabel: 'Sources :',
     unknownDoc: 'Document inconnu',
     noPreview: 'Aperçu indisponible',
-    relevanceScore: 'Pertinence : {score} %',
+    // issue #185 : score de classement affiché en position ; seul le score absolu
+    // du reranker est libellé « score de rerank » (jamais « pertinence % »).
+    rankPosition: 'Rang n°{rank}',
+    rerankScore: 'Score de rerank : {score}',
+    rerankResultTitle: 'Résultat du rerank',
+    rerankPath: 'Chemin : {path}',
+    rerankStatus: {
+      ok: 'Rerank OK',
+      degraded: 'Rerank dégradé (ordre d’origine)',
+      disabled: 'Rerank désactivé',
+      empty: 'Aucun candidat à reranker',
+    },
     useful: 'Utile',
     notUseful: 'Pas utile',
     regenerate: 'Régénérer',
@@ -280,7 +291,6 @@ export default {
     roleUser: 'Utilisateur',
     roleAssistant: 'Assistant',
     sourceDoc: 'Document',
-    relevanceMatch: 'Score de correspondance : {score} %',
     msgLoadFailed: 'Échec du chargement de l\'historique des messages',
     promptFilled: 'Le prompt a été inséré dans le champ de saisie ; vérifiez-le avant de l\'envoyer',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
@@ -717,7 +727,8 @@ export default {
     results: 'résultats trouvés',
     relevance: 'Trier par pertinence',
     name: 'Trier par nom',
-    relevanceScore: 'Pertinence',
+    rerankScore: 'Score de rerank : {score}',
+    rerankScoreLabel: 'Score de rerank',
     noResults: 'Aucun résultat trouvé',
     noResultsDesc: 'Essayez d\'autres mots-clés ou ajustez les filtres',
     searchFailed: 'Échec de la recherche',

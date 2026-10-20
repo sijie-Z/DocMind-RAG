@@ -162,7 +162,7 @@
                   <div class="flex items-center gap-1.5 mb-1.5">
                     <span class="text-xs text-gray-500 dark:text-gray-400 font-medium">{{ t('chat.sourcesLabel') }}</span>
                     <!-- T4（第二轮 §7.2④）：示例对话来源是写死的假分数（demo 标记），
-                         角标如实标注「演示数据」；相关度数字保留（体验价值），只标注不隐藏 -->
+                         角标如实标注「演示数据」；分数数字保留（体验价值），只标注不隐藏 -->
                     <span
                       v-if="hasDemoSources(message)"
                       data-testid="demo-source-badge"
@@ -199,8 +199,10 @@
                         <div class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed line-clamp-6">
                           {{ source.content || t('chat.noPreview') }}
                         </div>
-                        <div v-if="source.relevanceScore" class="mt-1.5 text-[10px] text-gray-400">
-                          {{ t('chat.relevanceScore', { score: (source.relevanceScore * 100).toFixed(0) }) }}
+                        <!-- issue #185：诚实分数口径——有重排绝对分才显示「重排分」，
+                             否则只报排序序位；不再把 min-max 相对分当「相关度 %」 -->
+                        <div class="mt-1.5 text-[10px] text-gray-400">
+                          {{ sourceScoreText(source, idx) }}
                         </div>
                       </div>
                     </n-popover>
@@ -342,6 +344,16 @@ function totalTokensOf(message: ChatMessage): number | undefined {
 // 真实检索结果不带该键、不得误标
 function hasDemoSources(message: ChatMessage): boolean {
   return (message.sources || []).some((s) => s.demo === true)
+}
+
+// issue #185：分数展示契约——
+// - relevanceScore 是重排器绝对分（仅新契约数据带 rank 标记时展示为「重排分」）；
+// - 拿不到绝对分时只报排序序位（rank / 列表位置），不以 rankScore×100 冒充相关度。
+function sourceScoreText(source: KnowledgeSource, index: number | string): string {
+  if (typeof source.relevanceScore === 'number' && source.rank != null) {
+    return t('chat.rerankScore', { score: source.relevanceScore.toFixed(2) })
+  }
+  return t('chat.rankPosition', { rank: source.rank ?? Number(index) + 1 })
 }
 
 defineEmits<{
