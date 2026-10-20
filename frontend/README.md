@@ -1,6 +1,6 @@
 # DocMind 前端
 
-DocMind 企业级 RAG 知识库系统的 Vue 3 前端。后端为 FastAPI 应用，业务接口统一挂在 `/api/v1` 前缀下（根级 `/health`、`/metrics` 除外）。
+DocMind 企业级 RAG 知识库系统的 Vue 3 前端。后端为 FastAPI 应用，业务接口统一挂在 `/api/v1` 前缀下；根级另有 `/health`、`/info`、`/metrics` 与 `/files`、`/static` 等辅助路由。
 
 ## 技术栈
 
@@ -13,7 +13,7 @@ DocMind 企业级 RAG 知识库系统的 Vue 3 前端。后端为 FastAPI 应用
 
 ## 环境要求
 
-- Node.js 18+
+- Node.js 22+（与 `frontend/Dockerfile` 及 CI 一致）
 - 后端（本仓库 `backend/`）：Python 3.11+、MySQL 8、Redis 7、Elasticsearch 8、Kafka、MinIO
 
 ## 启动
