@@ -191,7 +191,12 @@ async def list_configs(
 
     Query params:
         provider: filter by provider (optional)
+
+    W0-2：C5 删除前的过渡期，配置读端点只允许平台管理员（显式
+    ``is_superuser``）；其余账号 403。拒绝必须发生在读取 Redis 之前。
     """
+    if not is_platform_admin(current_user):
+        raise AuthorizationError("需要管理员权限")
 
     all_configs = await _load_all()
     configs = [_public_config(v) for v in all_configs.values()]
@@ -222,7 +227,13 @@ async def get_default_config(
     provider: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Get the default config for a provider. Returns 404 if none."""
+    """Get the default config for a provider. Returns 404 if none.
+
+    W0-2：过渡期只允许平台管理员（见 ``list_configs``）。
+    """
+    if not is_platform_admin(current_user):
+        raise AuthorizationError("需要管理员权限")
+
     provider = provider.strip().lower()
     all_configs = await _load_all()
     for cid, data in all_configs.items():
@@ -238,7 +249,13 @@ async def get_config_detail(
     config_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Get a single config by ID."""
+    """Get a single config by ID.
+
+    W0-2：过渡期只允许平台管理员（见 ``list_configs``）。
+    """
+    if not is_platform_admin(current_user):
+        raise AuthorizationError("需要管理员权限")
+
     all_configs = await _load_all()
     if config_id not in all_configs:
         raise NotFoundError(f"配置 '{config_id}' 不存在")
