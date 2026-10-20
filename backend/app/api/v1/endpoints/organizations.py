@@ -12,7 +12,6 @@ from app.api.v1.endpoints.notifications import create_notification
 from app.core.database import get_db
 from app.core.security import (
     get_current_user,
-    get_user_org_id,
     is_platform_admin,
     permission_required,
 )
@@ -45,12 +44,17 @@ def _ensure_org_membership(current_user: User, org_id: int) -> None:
     if current_user.organization_id != org_id:
         raise AuthorizationError("无权访问该组织的数据")
 
-@router.get("/tree", response_model=dict, summary="获取组织架构树", dependencies=[Depends(permission_required([PermissionType.VIEW_ORGANIZATION]))])
+@router.get("/tree", response_model=dict, summary="获取组织架构树")
 async def get_organization_tree(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取组织架构树，包含层级关系和基础信息"""
+    """获取组织架构树，包含层级关系和基础信息
+
+    W0-2：不再挂 ``VIEW_ORGANIZATION`` 权限门——普通成员也应看到**自己所属**
+    的组织树（数据范围由 service 按成员关系收口）；平台管理员看完整树。
+    无组织用户由 service 抛 403。
+    """
     try:
         # ✅ 修复：直接传整个 current_user 对象进去
         tree = await organization_service.get_organization_tree(db, current_user)
@@ -112,7 +116,7 @@ async def get_organization_stats(
         "data": stats
     }
 
-@router.get("/", response_model=dict, summary="获取组织列表", dependencies=[Depends(permission_required([PermissionType.VIEW_ORGANIZATION]))])
+@router.get("/", response_model=dict, summary="获取组织列表")
 async def get_organizations(
     page: int = 1,
     page_size: int = 10,
@@ -120,19 +124,27 @@ async def get_organizations(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取组织列表"""
+    """获取组织列表
+
+    W0-2：不再挂 ``VIEW_ORGANIZATION`` 权限门——普通成员应看到**自己所属的
+    全部组织**（成员表 / 组织角色关联 / 主组织），而不是只看 primary 单组织；
+    平台管理员看全部；无组织用户 403。
+    """
     try:
         skip = (page - 1) * page_size
         limit = page_size
 
         conditions = []
-        # W0-1：组织列表是跨租户信息面——平台管理员可看全部；组织管理员/
-        # 普通账号只能看到自己的组织（无组织 fail closed：403，不做任何兜底）。
-        if not is_platform_admin(current_user):
-            org_id = get_user_org_id(current_user)
-            if org_id is None:
+        # W0-2：组织列表是跨租户信息面——平台管理员可看全部；其余账号
+        # 只看与自己有关系的组织（成员表 ∪ 组织角色关联 ∪ 主组织）。
+        # 无组织 fail closed：403，不返回空列表冒充成功。
+        visible_ids = await organization_service.resolve_visible_organization_ids(
+            db, current_user
+        )
+        if visible_ids is not None:
+            if not visible_ids:
                 raise AuthorizationError("当前账号无组织上下文，无法查看组织列表")
-            conditions.append(Organization.id == org_id)
+            conditions.append(Organization.id.in_(sorted(visible_ids)))
         if search:
             conditions.append(Organization.name.contains(search))
 
@@ -148,13 +160,19 @@ async def get_organizations(
 
         org_list = []
         for org in organizations:
+            # W0-2：非平台管理员看到的是可见子集——父组织不在可见集时，
+            # parent_id 一并清空，避免把不可见组织的 ID 泄露给调用方
+            # （该值对调用方也无法用于任何合法操作）。
+            parent_id = org.parent_id
+            if visible_ids is not None and parent_id not in visible_ids:
+                parent_id = None
             org_list.append({
                 "id": org.id,
                 "name": org.name,
                 "description": org.description,
                 "color": org.color,
                 "is_private": org.is_private,
-                "parent_id": org.parent_id,
+                "parent_id": parent_id,
                 "level": org.level,
                 "sort_order": org.sort_order,
                 "owner_id": org.owner_id,

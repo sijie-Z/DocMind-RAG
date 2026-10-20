@@ -12,13 +12,16 @@ issue #95 缺陷本身：`Organization.is_private` 是 SQLAlchemy 的
 
 W0-1（ADR-001 D3）语义变更：组织树是跨租户信息面——
 - 平台超管（显式 is_superuser）看到完整树；
-- 非超管只返回**自己所属组织**的单节点（含私有组织，因为那是本租户）；
-- 无组织用户 fail closed，返回空树（不再枚举任何公开组织）。
+- 非超管只返回与自己有关系的组织（沿革：W0-1 为“自己所属组织”单节点，
+  W0-2 细化为成员表 / 组织角色关联 / 主组织的并集，且只在这些可见节点内
+  构建森林）；
+- 无组织用户 fail closed：W0-2 起为 403（不再用空树冒充成功）。
 """
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.exceptions import AuthorizationError
 from app.models import Base, Organization, User
 from app.services.organization_service import organization_service
 
@@ -65,14 +68,15 @@ async def test_non_superuser_sees_only_own_org():
 
 
 @pytest.mark.asyncio
-async def test_orgless_non_superuser_sees_empty_tree():
-    """无组织非超管 fail closed：不再返回任何公开组织（W0-1）。"""
+async def test_orgless_non_superuser_gets_403():
+    """无组织非超管 fail closed：W0-2 起为 403，不再返回空树。"""
     engine, session, _public, _private = await _make_seeded_session()
     try:
-        tree = await organization_service.get_organization_tree(
-            session, User(is_superuser=False, organization_id=None)
-        )
-        assert tree == []
+        with pytest.raises(AuthorizationError) as exc_info:
+            await organization_service.get_organization_tree(
+                session, User(is_superuser=False, organization_id=None)
+            )
+        assert exc_info.value.status_code == 403
     finally:
         await session.close()
         await engine.dispose()

@@ -130,6 +130,8 @@ class TestSemanticCacheOrgRequired:
 
     @pytest.mark.asyncio
     async def test_valid_org_behavior_unchanged(self, monkeypatch):
+        # issue #195：语义缓存默认关闭，合法组织行为用例显式开启并传查询原文。
+        monkeypatch.setattr("app.rag.cache.settings.SEMANTIC_CACHE_ANSWER_ENABLED", True)
         cache = SemanticCache()
         store = _FakeRedisStore()
         monkeypatch.setattr("app.rag.cache._get_redis", lambda: store)
@@ -137,9 +139,9 @@ class TestSemanticCacheOrgRequired:
 
         await cache.set("query", embedding, "answer", [], organization_id=7)
         assert any(key.startswith("rag:sem:org:7:") for key in store.values)
-        hit = await cache.get(embedding, organization_id=7)
+        hit = await cache.get(embedding, organization_id=7, query="query")
         assert hit is not None and hit["answer"] == "answer"
-        assert await cache.get(embedding, organization_id=8) is None
+        assert await cache.get(embedding, organization_id=8, query="query") is None
 
 
 # ── 2. DocumentParser.parse_local_file ───────────────────────────────

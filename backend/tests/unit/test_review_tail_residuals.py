@@ -466,6 +466,8 @@ class TestSemanticCacheScopedCausal:
 
         fake = _FakeRedis()
         monkeypatch.setattr(cache_mod, "_get_redis", lambda: fake)
+        # issue #195：语义缓存默认关闭；本因果链以真实的语义读写为前提。
+        monkeypatch.setattr(cache_mod.settings, "SEMANTIC_CACHE_RETRIEVAL_ENABLED", True)
         _no_rerank(monkeypatch)
         q = f"resTail-因果探针-{uuid.uuid4().hex}"
 
@@ -502,6 +504,8 @@ class TestSemanticCacheScopedCausal:
 
         fake = _FakeRedis()
         monkeypatch.setattr(cache_mod, "_get_redis", lambda: fake)
+        # issue #195：语义缓存默认关闭；本对照用例以真实的语义写读为前提。
+        monkeypatch.setattr(cache_mod.settings, "SEMANTIC_CACHE_RETRIEVAL_ENABLED", True)
         _no_rerank(monkeypatch)
         q = f"resTail-对照因果-{uuid.uuid4().hex}"
 

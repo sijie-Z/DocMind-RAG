@@ -476,6 +476,17 @@ async def general_exception_handler(request: Request, exc: Exception):
 # ── Application start time for health check uptime ──────────────
 _APP_START_TIME: float = time.time()
 
+# 知识库对账阈值（issue #223）：索引 chunk 覆盖率低于该值判 unhealthy；
+# [阈值, 1.0) 判 degraded（部分 chunk 缺失，尚可服务但需告警）。
+_KB_COVERAGE_THRESHOLD: float = 0.95
+
+# ES cardinality 在 precision_threshold（见下方查询，取 ES 允许的最大值 40000）
+# 以内近似精确；超过后是 HLL 估计值（p=16，标准误约 0.4%）。大库按 2%（约 5σ）
+# 容差判断「文档数变少」，且估计值对同一索引快照是确定性的 —— 容差放窄会让
+# 一次 bad draw 持续摘流直到索引数据变化，而不是靠 failureThreshold 自愈。
+_KB_DOC_CARDINALITY_EXACT_LIMIT: int = 40000
+_KB_DOC_COUNT_TOLERANCE: float = 0.98
+
 
 async def _knowledge_base_health() -> tuple[str, dict]:
     """检查知识库**索引的内容**，而不只是 ES 进程活着。
@@ -484,11 +495,26 @@ async def _knowledge_base_health() -> tuple[str, dict]:
     healthy**，所以它对「索引里一篇都没有」完全沉默。issue #183 就是这个缺口：
     文档表里 10 篇标着 INDEXED、ES 里 0 篇，而 `/health` 五项全绿。
 
-    返回 `(状态, 细节)`。能抓出三种情况：
+    issue #223 起按**内容对账**，能抓出四类不一致：
 
     1. 索引配置错误（维度不匹配等，见 `get_index_error`）→ `unhealthy`
-    2. **有文档声称已索引，但索引里一篇都没有** → `unhealthy` ← 正是 #183 的「假状态」
-    3. 索引为空且没有文档声称已索引 → `healthy`（全新部署，合法）
+    2. 有文档声称已索引，但索引里一条 chunk 都没有 → `unhealthy`（#183 的「假状态」）
+    3. **部分丢失**：索引里出现的去重 document_id 数 < 文档表声称 INDEXED 的文档数
+       → `unhealthy`（旧口径 `indexed_chunks == 0` 对「10 篇只进 1 篇」完全沉默）
+    4. **chunk 覆盖率不足**：ES chunk 总数 / 文档表 `SUM(chunk_count)` < 0.95
+       → `unhealthy`；0.95–1.0 → `degraded`（可服务，但要告警）
+
+    索引为空且没有文档声称已索引 → `healthy`（全新部署，合法）。
+
+    对账基线**排除有未终局处理任务（QUEUED/PROCESSING）的文档**：重建接口会先删
+    ES 旧 chunk、但让文档保持 INDEXED 直到 worker 接单（见 `/knowledge/rebuild`
+    与 worker 的 PARSING 接管）。不排除的话，一次正常的单文档重建就会让所有副本
+    `/readyz` 摘流（worker 积压时窗口无上界）。
+
+    `details` 暴露 `indexed_chunks` / `indexed_documents` / `documents_marked_indexed` /
+    `expected_chunks` / `coverage_ratio` / `document_coverage_ratio` / `mismatch`；
+    索引中多出的陈旧/在途文档与 chunk（`extra_documents` / `extra_chunks`）会虚增
+    统计、可能掩盖部分丢失，一并暴露便于诊断。
 
     抽成模块级函数是为了能独立测试 —— 埋在 `/health` 的闭包里就只能整端点测。
     """
@@ -501,36 +527,307 @@ async def _knowledge_base_health() -> tuple[str, dict]:
         details["index_error"] = cfg_err
         return "unhealthy", details
 
+    # 一次 ES 查询同时取 chunk 总数与去重 document_id 数。只看 count 不够 ——
+    # 1 条 chunk 也能让「10 篇声称 INDEXED」看起来有数据（#223）。
     client = await get_elasticsearch()
     res = await asyncio.wait_for(
-        client.count(index=settings.ELASTICSEARCH_INDEX_NAME), timeout=3
+        client.search(
+            index=settings.ELASTICSEARCH_INDEX_NAME,
+            size=0,
+            track_total_hits=True,
+            aggs={
+                "documents": {
+                    # 精度阈值设高：对账要的是「文档数是否变少」，近似误差会误报。
+                    "cardinality": {
+                        "field": "document_id",
+                        "precision_threshold": _KB_DOC_CARDINALITY_EXACT_LIMIT,
+                    }
+                }
+            },
+        ),
+        timeout=3,
     )
-    indexed_chunks = int(res.get("count", 0))
+    hits_total = (res.get("hits") or {}).get("total") or {}
+    documents_agg = (res.get("aggregations") or {}).get("documents") or {}
+    indexed_chunks = int(hits_total.get("value") or 0)
+    indexed_docs = int(documents_agg.get("value") or 0)
     details["indexed_chunks"] = indexed_chunks
+    details["indexed_documents"] = indexed_docs
 
-    # 与数据库对账：有多少文档**声称**已索引
+    # 与数据库对账：有多少文档**声称**已索引、按 chunk_count 应有多少 chunk。
+    # 有未终局处理任务的文档从基线中排除（重建窗口：ES chunk 已删、状态仍 INDEXED，
+    # 直到 worker 接单才变 PARSING —— 见 `/knowledge/rebuild`）。
     from sqlalchemy import func, select
 
     # 局部导入是**有意的**（勿"顺手清理"）：测试以 patch("app.core.database.AsyncSessionLocal")
     # 替换会话工厂，需在调用时重新解析；模块级绑定会绕过 patch（见 test_index_visibility）。
     from app.core.database import AsyncSessionLocal
     from app.models.document import Document, DocumentStatus
+    from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
+
+    # 只排除**最新**处理任务未终局的文档：更早的 task 可能永远停在 QUEUED
+    # （STALE_RUN 不回写旧 job），若按「存在任一未终局 job」排除，该文档会永久
+    # 退出对账基线，后续真实丢失就再也发现不了。
+    latest_job_id = (
+        select(func.max(KnowledgeProcessingJob.id))
+        .where(KnowledgeProcessingJob.document_id == Document.id)
+        .correlate(Document)
+        .scalar_subquery()
+    )
+    active_job = (
+        select(KnowledgeProcessingJob.id)
+        .where(
+            KnowledgeProcessingJob.id == latest_job_id,
+            KnowledgeProcessingJob.status.in_(
+                [KnowledgeJobStatus.QUEUED, KnowledgeJobStatus.PROCESSING]
+            ),
+        )
+        .exists()
+    )
 
     async with AsyncSessionLocal() as sess:
         q = await sess.execute(
-            select(func.count())
+            select(
+                func.count(),
+                func.coalesce(func.sum(Document.chunk_count), 0),
+            )
             .select_from(Document)
             .where(Document.status == DocumentStatus.INDEXED)
+            .where(~active_job)
         )
-        claimed = int(q.scalar() or 0)
+        claimed, expected_chunks = q.one()
+    claimed = int(claimed or 0)
+    expected_chunks = int(expected_chunks or 0)
     details["documents_marked_indexed"] = claimed
+    details["expected_chunks"] = expected_chunks
+    # 索引中不属于对账基线的多余文档/chunk（失败任务残留、在途文档、陈旧数据）
+    # 会虚增统计并可能掩盖部分丢失 —— 暴露出来，便于定位「为何覆盖率看起来是满的」。
+    details["extra_documents"] = max(0, indexed_docs - claimed)
+    if expected_chunks > 0:
+        details["extra_chunks"] = max(0, indexed_chunks - expected_chunks)
 
-    if indexed_chunks == 0 and claimed > 0:
-        # 状态在撒谎 —— 这正是「检索恒返回 0 条却没人在意」的根源
+    if claimed == 0:
+        # 全新部署（或索引里只有未被声称的陈旧数据）：没有「状态 vs 现实」矛盾。
+        return "healthy", details
+
+    if indexed_chunks == 0:
+        # 状态在撒谎 —— 这正是「检索恒返回 0 条却没人在意」的根源（#183）
         details["mismatch"] = f"{claimed} 篇文档状态为 INDEXED，但索引里一篇都没有"
         return "unhealthy", details
 
+    # 按 document_id 去重数对账：部分文档整篇丢失时，chunk 总数可能仍然"够"（#223）。
+    # cardinality 在 precision_threshold 以内近似精确；超过后允许 2% 的 HLL 估计误差。
+    # 用 max(claimed, indexed_docs) 判定是否进入近似区间 —— 多余/在途文档可能让
+    # 真实基数超过阈值，而 claimed 本身还在阈值以内。
+    doc_coverage_ratio = min(indexed_docs / claimed, 1.0)
+    details["document_coverage_ratio"] = round(doc_coverage_ratio, 4)
+    if max(claimed, indexed_docs) > _KB_DOC_CARDINALITY_EXACT_LIMIT:
+        doc_shortfall = indexed_docs < claimed * _KB_DOC_COUNT_TOLERANCE
+    else:
+        doc_shortfall = indexed_docs < claimed
+
+    if doc_shortfall:
+        details["mismatch"] = (
+            f"{claimed} 篇文档状态为 INDEXED，索引中只找到 {indexed_docs} 篇的 chunk —— "
+            f"{claimed - indexed_docs} 篇文档完全检索不到"
+        )
+        return "unhealthy", details
+
+    # chunk 覆盖率：ES chunk 总数 / 文档表 chunk_count 之和。
+    # 历史数据未回填 chunk_count（expected_chunks == 0）时退回文档覆盖率。
+    if expected_chunks > 0:
+        coverage_ratio = indexed_chunks / expected_chunks
+    else:
+        coverage_ratio = min(indexed_docs / claimed, 1.0)
+    details["coverage_ratio"] = round(coverage_ratio, 4)
+
+    if coverage_ratio < _KB_COVERAGE_THRESHOLD:
+        details["mismatch"] = (
+            f"索引 chunk 覆盖率 {coverage_ratio:.1%} 低于阈值 {_KB_COVERAGE_THRESHOLD:.0%}"
+            f"（文档表声称 {expected_chunks} 个 chunk，索引中 {indexed_chunks} 个）"
+        )
+        return "unhealthy", details
+
+    if coverage_ratio < 1.0:
+        details["mismatch"] = (
+            f"索引 chunk 覆盖率 {coverage_ratio:.1%}"
+            f"（文档表声称 {expected_chunks} 个 chunk，索引中 {indexed_chunks} 个）—— "
+            f"部分 chunk 未入索引"
+        )
+        return "degraded", details
+
     return "healthy", details
+
+
+# ── 探针检查项（issue #223：从 /health 闭包里抽出来，供 /health 与 /readyz 复用）──
+# 每个函数返回状态字符串；知识库检查额外返回细节 dict。
+# 函数内**局部导入**依赖是有意的：测试通过 patch("app.core.database.AsyncSessionLocal")
+# 等目标替换全局对象，模块级绑定会绕过 patch。
+async def _check_database() -> str:
+    try:
+        from app.core.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as sess:
+            from sqlalchemy import text
+            await sess.execute(text("SELECT 1"))
+        return "healthy"
+    except Exception as e:
+        logger.warning("Health check — database: %s", e)
+        return "unhealthy"
+
+
+async def _check_redis() -> str:
+    try:
+        from app.core.redis import redis_client as _rc
+        if _rc:
+            await asyncio.wait_for(_rc.ping(), timeout=2)
+            return "healthy"
+        return "disabled"
+    except TimeoutError:
+        return "degraded"
+    except Exception as e:
+        logger.debug("Health check — redis: %s", e)
+        return "degraded"
+
+
+async def _check_elasticsearch() -> str:
+    try:
+        from app.core.elasticsearch import es_client as _ec
+        if _ec:
+            health = await asyncio.wait_for(_ec.cluster.health(), timeout=3)
+            es_status = health.get("status", "unknown")
+            return "healthy" if es_status in ("green", "yellow") else "unhealthy"
+        return "disabled"
+    except TimeoutError:
+        return "degraded"
+    except Exception as e:
+        logger.debug("Health check — elasticsearch: %s", e)
+        return "degraded"
+
+
+async def _check_minio() -> str:
+    try:
+        from app.core.minio_client import minio_client as _mc
+        if _mc and _mc.client:
+            bucket = _mc.bucket_name
+            exists = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, _mc.client.bucket_exists, bucket),
+                timeout=3,
+            )
+            return "healthy" if exists else "degraded"
+        return "disabled"
+    except TimeoutError:
+        return "degraded"
+    except Exception as e:
+        logger.debug("Health check — minio: %s", e)
+        return "degraded"
+
+
+async def _check_kafka() -> str:
+    try:
+        from app.core.kafka_client import kafka_producer as _kp
+        if _kp and _kp.producer:
+            # Kafka producer doesn't have a great liveness check without sending,
+            # just report if it was started successfully
+            return "healthy"
+        return "disabled"
+    except Exception as e:
+        logger.debug("Health check — kafka: %s", e)
+        return "degraded"
+
+
+async def _check_knowledge_base() -> tuple[str, dict]:
+    """薄封装 —— 真正的判断在模块级 `_knowledge_base_health()` 里（便于单测）。"""
+    from elasticsearch import ApiError, NotFoundError
+
+    try:
+        return await _knowledge_base_health()
+    except TimeoutError:
+        # 瞬时超时：保留告警语义（/health degraded），不因此摘流。
+        return "degraded", {}
+    except NotFoundError as e:
+        # 索引被带外删除 / 别名丢失：不是抖动，检索已完全不可用 → unhealthy。
+        # 若吞成 degraded，/readyz 会在检索全挂时仍返回 200（fail-open）。
+        return "unhealthy", {"index_error": f"知识库索引不存在或不可读: {e}"}
+    except ApiError as e:
+        # 确定性客户端错误（mapping 400、鉴权 401/403、索引 404）不是抖动，
+        # 同样 fail-closed；429/5xx 等瞬时错误留给 degraded。
+        if e.status_code in (400, 401, 403, 404):
+            return "unhealthy", {
+                "index_error": f"知识库索引查询失败（HTTP {e.status_code}）: {e}"
+            }
+        logger.debug("Health check — knowledge_base: %s", e)
+        return "degraded", {}
+    except Exception as e:
+        logger.debug("Health check — knowledge_base: %s", e)
+        return "degraded", {}
+
+
+async def _collect_checks(checks: dict) -> tuple[dict, dict]:
+    """并发执行一组检查并归一化结果（异常不拖垮整个端点）。
+
+    检查返回 ``str`` 或 ``(str, dict)``；意外异常按 fail-closed 记为 ``unhealthy``。
+    """
+    names = list(checks)
+    results = await asyncio.gather(*checks.values(), return_exceptions=True)
+    services: dict[str, str] = {}
+    details: dict = {}
+    for name, result in zip(names, results, strict=True):
+        if isinstance(result, BaseException):
+            services[name] = "unhealthy"
+            logger.warning("Health check — %s: %s", name, result)
+        elif isinstance(result, tuple):
+            status, extra = result
+            services[name] = status
+            details.update(extra or {})
+        else:
+            services[name] = result
+    return services, details
+
+
+async def _run_health_checks() -> tuple[dict, dict]:
+    """`/health` 的六项依赖检查（含 redis/minio/kafka 等非关键项）。"""
+    return await _collect_checks({
+        "database": _check_database(),
+        "redis": _check_redis(),
+        "elasticsearch": _check_elasticsearch(),
+        "minio": _check_minio(),
+        "kafka": _check_kafka(),
+        "knowledge_base": _check_knowledge_base(),
+    })
+
+
+async def _run_readiness_checks() -> tuple[dict, dict]:
+    """`/readyz` 的三项就绪检查：DB SELECT 1 + ES 集群健康 + 知识库对账。"""
+    return await _collect_checks({
+        "database": _check_database(),
+        "elasticsearch": _check_elasticsearch(),
+        "knowledge_base": _check_knowledge_base(),
+    })
+
+
+def _is_ready(services: dict) -> bool:
+    """就绪口径（issue #223）：DB 与 ES 必须 healthy，知识库对账不得为 unhealthy。
+
+    ES 的 ``disabled``（客户端不存在）与 ``degraded``（连接失败/超时）都视为不可用 ——
+    检索依赖 ES，不能把流量导给一个搜不到东西的实例。
+    KB 的 ``degraded``（如 95%–100% 的 chunk 覆盖率）只告警、不摘流：索引抖动时
+    整批 Pod 被摘流的代价大于少量 chunk 暂时缺失。
+    """
+    if services.get("database") != "healthy":
+        return False
+    if services.get("elasticsearch") != "healthy":
+        return False
+    return services.get("knowledge_base") != "unhealthy"
+
+
+def _overall_status(services: dict) -> str:
+    """Overall status: all healthy -> healthy, any unhealthy -> unhealthy, else degraded."""
+    status_values = list(services.values())
+    if all(v == "healthy" for v in status_values):
+        return "healthy"
+    if any(v == "unhealthy" for v in status_values):
+        return "unhealthy"
+    return "degraded"
 
 
 # 健康检查端点 — enhanced with per-service dependency checks
@@ -538,131 +835,55 @@ async def _knowledge_base_health() -> tuple[str, dict]:
 async def health_check():
     """Enhanced health check with per-service dependency status.
 
-    Returns overall status, individual service health, version, and uptime.
-    Each service check has a short timeout and does not block the full check
-    on a single failure.
+    **诊断视图，恒 200** —— 编排探针请用 `/livez`（存活）与 `/readyz`（就绪）：
+    让 200/503 决定摘流，而不是让「能返回一份 JSON」被误当成「一切正常」（#223）。
+
+    Returns overall status, readiness flag, individual service health, version,
+    and uptime. Each service check has a short timeout and does not block the
+    full check on a single failure.
     """
-    services: dict = {}
-    # 知识库检查的细节（索引里有几篇、文档表声称几篇）——
-    # 这些数字让「为什么 unhealthy」一眼可见，而不是只给一个状态词（issue #183）
-    kb_details: dict = {}
-
-    async def _check_db():
-        try:
-            from app.core.database import AsyncSessionLocal
-            async with AsyncSessionLocal() as sess:
-                from sqlalchemy import text
-                await sess.execute(text("SELECT 1"))
-            services["database"] = "healthy"
-        except Exception as e:
-            services["database"] = "unhealthy"
-            logger.warning("Health check — database: %s", e)
-
-    async def _check_redis():
-        try:
-            from app.core.redis import redis_client as _rc
-            if _rc:
-                await asyncio.wait_for(_rc.ping(), timeout=2)
-                services["redis"] = "healthy"
-            else:
-                services["redis"] = "disabled"
-        except TimeoutError:
-            services["redis"] = "degraded"
-        except Exception as e:
-            services["redis"] = "degraded"
-            logger.debug("Health check — redis: %s", e)
-
-    async def _check_elasticsearch():
-        try:
-            from app.core.elasticsearch import es_client as _ec
-            if _ec:
-                health = await asyncio.wait_for(_ec.cluster.health(), timeout=3)
-                es_status = health.get("status", "unknown")
-                if es_status in ("green", "yellow"):
-                    services["elasticsearch"] = "healthy"
-                else:
-                    services["elasticsearch"] = "unhealthy"
-            else:
-                services["elasticsearch"] = "disabled"
-        except TimeoutError:
-            services["elasticsearch"] = "degraded"
-        except Exception as e:
-            services["elasticsearch"] = "degraded"
-            logger.debug("Health check — elasticsearch: %s", e)
-
-    async def _check_minio():
-        try:
-            from app.core.minio_client import minio_client as _mc
-            if _mc and _mc.client:
-                bucket = _mc.bucket_name
-                exists = await asyncio.wait_for(
-                    asyncio.get_event_loop().run_in_executor(None, _mc.client.bucket_exists, bucket),
-                    timeout=3,
-                )
-                services["minio"] = "healthy" if exists else "degraded"
-            else:
-                services["minio"] = "disabled"
-        except TimeoutError:
-            services["minio"] = "degraded"
-        except Exception as e:
-            services["minio"] = "degraded"
-            logger.debug("Health check — minio: %s", e)
-
-    async def _check_kafka():
-        try:
-            from app.core.kafka_client import kafka_producer as _kp
-            if _kp and _kp.producer:
-                # Kafka producer doesn't have a great liveness check without sending,
-                # just report if it was started successfully
-                services["kafka"] = "healthy"
-            else:
-                services["kafka"] = "disabled"
-        except Exception as e:
-            services["kafka"] = "degraded"
-            logger.debug("Health check — kafka: %s", e)
-
-    async def _check_knowledge_base():
-        """薄封装 —— 真正的判断在模块级 `_knowledge_base_health()` 里（便于单测）。"""
-        try:
-            status, details = await _knowledge_base_health()
-            services["knowledge_base"] = status
-            kb_details.update(details)
-        except TimeoutError:
-            services["knowledge_base"] = "degraded"
-        except Exception as e:
-            services["knowledge_base"] = "degraded"
-            logger.debug("Health check — knowledge_base: %s", e)
-
-    # Run all checks concurrently
-    await asyncio.gather(
-        _check_db(),
-        _check_redis(),
-        _check_elasticsearch(),
-        _check_minio(),
-        _check_kafka(),
-        _check_knowledge_base(),
-        return_exceptions=True,
-    )
-
-    # Overall status: all healthy -> healthy, any unhealthy -> unhealthy, else degraded
-    status_values = list(services.values())
-    if all(v == "healthy" for v in status_values):
-        overall_status = "healthy"
-    elif any(v == "unhealthy" for v in status_values):
-        overall_status = "unhealthy"
-    else:
-        overall_status = "degraded"
+    services, kb_details = await _run_health_checks()
 
     uptime = time.time() - _APP_START_TIME if _APP_START_TIME > 0 else 0
 
     return {
-        "status": overall_status,
+        "status": _overall_status(services),
+        # 与 /readyz 同口径；老调用方（前端 api/health.ts）继续读 status/version。
+        "ready": _is_ready(services),
         "version": settings.APP_VERSION,
         "services": services,
         "uptime_seconds": round(uptime, 1),
         # 仅在有内容时出现，避免给老调用方增加噪音
         **({"knowledge_base": kb_details} if kb_details else {}),
     }
+
+
+@app.get("/livez")
+async def liveness_check():
+    """K8s liveness：只证明进程/事件循环还活着，**恒 200**。
+
+    不要在这里检查 DB/ES —— 依赖故障应摘流（readiness），而不是重启 Pod（#223）。
+    """
+    return {"status": "alive"}
+
+
+@app.get("/readyz")
+async def readiness_check():
+    """K8s readiness / compose healthcheck：依赖不可用 → 503。
+
+    检查 DB `SELECT 1`、ES 集群健康与知识库索引对账（与 `/health` 同一套收集函数）。
+    只有明确的不可用（unhealthy / disabled / degraded 的 ES，见 `_is_ready`）才摘流；
+    知识库的 degraded（≥95% 覆盖率的部分缺失）只告警。
+    """
+    services, kb_details = await _run_readiness_checks()
+    ready = _is_ready(services)
+    payload = {
+        "ready": ready,
+        "status": "ready" if ready else "not_ready",
+        "services": services,
+        **({"knowledge_base": kb_details} if kb_details else {}),
+    }
+    return JSONResponse(status_code=200 if ready else 503, content=payload)
 
 
 # 系统信息端点

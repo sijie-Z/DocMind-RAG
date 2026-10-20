@@ -521,6 +521,9 @@ class TestModeScopedCache:
 
         fake = _FakeRedis()
         monkeypatch.setattr(cache_mod, "_get_redis", lambda: fake)
+        # issue #195：语义缓存默认关闭；本用例验证显式模式的读写隔离，
+        # 必须显式开启检索语义缓存，否则「零写入」断言会退化为空转。
+        monkeypatch.setattr(cache_mod.settings, "SEMANTIC_CACHE_RETRIEVAL_ENABLED", True)
         monkeypatch.setattr(
             "app.rag.pipeline.rerank",
             AsyncMock(side_effect=lambda query, docs, client=None: docs),
@@ -555,6 +558,9 @@ class TestModeScopedCache:
 
         fake = _FakeRedis()
         monkeypatch.setattr(cache_mod, "_get_redis", lambda: fake)
+        # issue #195：语义缓存默认关闭；本用例的因果链以「自动路由确实写入
+        # 语义缓存」为前提，显式开启检索语义缓存。
+        monkeypatch.setattr(cache_mod.settings, "SEMANTIC_CACHE_RETRIEVAL_ENABLED", True)
         monkeypatch.setattr(
             "app.rag.pipeline.rerank",
             AsyncMock(side_effect=lambda query, docs, client=None: docs),

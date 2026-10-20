@@ -312,10 +312,19 @@ async def run_rag_pipeline(
     active_doc_ids = [str(fid) for fid in file_ids if fid] if file_ids else bound_doc_ids
 
     query_vector = None
-    if not active_doc_ids and not strict_mode:
+    # issue #195：问答语义缓存默认关闭（SEMANTIC_CACHE_ANSWER_ENABLED=False）——
+    # 0.92 阈值会把「第十三条」的提问命中成「第七条」的答案。显式开启后，
+    # get 仍要求查询文本通过条号/数字/实体等价判定；关闭时连 embedding 都不算。
+    # 测试替身（_ExplodingSemanticCache / _RecordingSemanticCache）无 enabled
+    # 属性 → 按原有行为参与（getattr 默认 True）。
+    sem_cache_active = bool(getattr(_semantic_cache, "enabled", True))
+    if not active_doc_ids and not strict_mode and sem_cache_active:
         query_vector = await rag_service.get_embedding(user_content)
         if query_vector:
-            cached_res = await _semantic_cache.get(query_vector, search_org_id)
+            cache_meta: dict = {}
+            cached_res = await _semantic_cache.get(
+                query_vector, search_org_id, query=user_content, hit_info=cache_meta,
+            )
             if cached_res:
                 full_response = cached_res.get("answer", "")
                 sources_list = cached_res.get("sources", [])
@@ -326,6 +335,18 @@ async def run_rag_pipeline(
                     conversation_id=conversation_id, message_id=ai_msg_id,
                     sources=sources_list, is_cached=True,
                 ))
+                if debug:
+                    # issue #195：命中必须可证伪——cache_type/相似度/键摘要/缓存原文。
+                    _emit(RAGEvent(
+                        type="debug",
+                        debug_data={
+                            "cache_hit": True,
+                            "cache_type": "semantic",
+                            "cache": cache_meta,
+                            "is_cached": True,
+                        },
+                        conversation_id=conversation_id or "",
+                    ))
 
                 ai_msg = ChatMessage(
                     id=ai_msg_id, session_id=conversation_id,

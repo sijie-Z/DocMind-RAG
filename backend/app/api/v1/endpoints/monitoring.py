@@ -23,7 +23,12 @@ from app.core.elasticsearch import get_elasticsearch
 from app.core.logging import sanitize_log_value
 from app.core.middleware import metrics_collector
 from app.core.redis import redis_client
-from app.core.security import get_current_user, get_user_org_id, permission_required
+from app.core.security import (
+    get_current_user,
+    get_user_org_id,
+    is_platform_admin,
+    permission_required,
+)
 from app.core.system_metrics import system_metrics_sampler
 from app.exceptions import (
     AppError,
@@ -39,6 +44,7 @@ from app.models.organization import Organization
 from app.models.rbac import PermissionType
 from app.models.user import User
 from app.rag.errors import EvalJudgeUnavailableError
+from app.services.organization_service import organization_service
 
 router = APIRouter()
 _recent_external_alerts: deque = deque(maxlen=max(50, int(settings.ALERT_RECENT_BUFFER_SIZE)))
@@ -679,8 +685,9 @@ async def get_performance_metrics(
     "/llm-stats",
     summary="获取LLM资源消耗统计",
     # 安全加固（issue #277，评审 or1268 R3 收账）：此前仅登录门——全局 token/
-    # 成本/延迟聚合任意登录用户可见；与同文件 /stats、/org-summary、/admin-summary
-    # 等相邻端点对齐，升级为 VIEW_SYSTEM_HEALTH 门槛。前端唯一消费方
+    # 成本/延迟聚合任意登录用户可见；与同文件 /stats、/admin-summary 等相邻
+    # 平台级端点对齐，升级为 VIEW_SYSTEM_HEALTH 门槛。（W0-2 起 /org-summary
+    # 改为组织范围聚合，不再使用该平台级权限门，故不在此列。）前端唯一消费方
     # dashboard/admin.vue 仅对 role=admin 渲染（admin 走 SysAdmin 角色持有该权限），
     # 普通用户 UI 不受影响。
     dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
@@ -781,21 +788,54 @@ async def get_llm_stats(
         }
 
 
-@router.get("/org-summary", summary="获取组织概览统计", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+@router.get("/org-summary", summary="获取组织概览统计")
 async def get_org_summary(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """获取各组织的用户数、文档数统计"""
+    """获取各组织的用户数、文档数统计
+
+    W0-2：数据范围按角色收口——
+    - 平台管理员（显式 ``is_superuser``）：全量组织；
+    - 组织管理员（``user_organization_role_association`` 的 OrgAdmin）：
+      只返回自己管理的组织的聚合；
+    - 普通成员 / 无组织用户：403（普通成员对本组织的成员数、文档数聚合
+      也无读取权，避免组织级运营数据外泄）。
+
+    原先这里只有 ``VIEW_SYSTEM_HEALTH`` 平台级权限门：组织管理员会被挡在
+    门外，而放宽权限又会把其他监控面一起放开。因此改为端点内的显式分支。
+    授权判定必须放在 ``try`` 之前——否则会被下面的降级 ``except`` 吞成 200。
+    """
+    if is_platform_admin(current_user):
+        scoped_org_ids: set[int] | None = None
+    else:
+        scoped_org_ids = await organization_service.resolve_managed_organization_ids(
+            db, current_user
+        )
+        if not scoped_org_ids:
+            raise AuthorizationError("需要组织管理员或平台管理员权限")
+
     try:
-        org_users = await db.execute(
+        org_users_query = (
             select(Organization.id, Organization.name, func.count(User.id).label("user_count"))
             .outerjoin(User, User.organization_id == Organization.id)
             .group_by(Organization.id, Organization.name)
         )
-        org_docs = await db.execute(
+        if scoped_org_ids is not None:
+            org_users_query = org_users_query.where(
+                Organization.id.in_(sorted(scoped_org_ids))
+            )
+        org_users = await db.execute(org_users_query)
+
+        org_docs_query = (
             select(Document.organization_id, func.count(Document.id).label("doc_count"))
             .group_by(Document.organization_id)
         )
+        if scoped_org_ids is not None:
+            org_docs_query = org_docs_query.where(
+                Document.organization_id.in_(sorted(scoped_org_ids))
+            )
+        org_docs = await db.execute(org_docs_query)
         doc_map = {row[0]: row[1] for row in org_docs.all()}
 
         result = []
