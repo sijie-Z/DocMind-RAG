@@ -81,6 +81,7 @@ def build_sources_list(context_results: list[dict]) -> list[dict]:
       而它是批内 min-max，榜首恒 ~1.0）。
     - ``rankScore``：融合阶段相对排序分（只用于排序/序位，不是相关度）。
     - ``rank``：最终顺序的 1-based 序位（UI 展示「排序 #N」）。
+    - ``pageNumber``：PDF 来源的页码；非 PDF / 旧索引为 None（issue #197）。
     """
     sources = []
     for idx, r in enumerate(context_results, 1):
@@ -96,6 +97,7 @@ def build_sources_list(context_results: list[dict]) -> list[dict]:
             "hasVector": r.get("has_vector", False),
             "rewriteHits": r.get("rewrite_hits", 1),
             "freshFactor": r.get("fresh_factor", 1.0),
+            "pageNumber": r.get("page_number"),
         })
     return sources
 

@@ -295,6 +295,8 @@ export default {
     // only reranker absolute scores are labelled "rerank score" (never as "% relevance").
     rankPosition: 'Rank #{rank}',
     rerankScore: 'Rerank score: {score}',
+    // issue #197: source page number (PDF)
+    sourcePage: 'Page {page}',
     rerankResultTitle: 'Rerank result',
     rerankPath: 'Path: {path}',
     rerankStatus: {

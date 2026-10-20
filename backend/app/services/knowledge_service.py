@@ -142,6 +142,9 @@ class KnowledgeService:
                     # issue #185：相对排序分（score）与重排绝对分分开透传；
                     # 无重排分时保持 None，绝不拿 score 回填。
                     "relevance_score": res.get("relevance_score"),
+                    # issue #197：PDF 页码必须在本层重建结果时继续搬运——
+                    # 端点读的是本层输出，漏搬会让 /search 恒返回 null。
+                    "page_number": res.get("page_number"),
                     "metadata": {
                         "filename": res.get("filename"),
                         "snippet": res.get("snippet"),

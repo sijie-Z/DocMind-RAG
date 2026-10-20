@@ -244,6 +244,8 @@ async def search_knowledge(
                 "has_vector": r.get("has_vector", False),
                 "rewrite_hits": r.get("rewrite_hits", 1),
                 "fresh_factor": r.get("fresh_factor", 1.0),
+                # issue #197：PDF 来源页码透传（非 PDF / 旧索引为 null）
+                "page_number": r.get("page_number"),
             })
 
         # 结果为空时，必须能区分「没匹配到」与「你所在组织没有任何已索引内容」——

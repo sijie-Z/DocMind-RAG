@@ -285,6 +285,7 @@ _HIT_SOURCE_FIELDS = [
     "section_title",
     "clause_no",
     "section_no",
+    "page_number",
 ]
 
 
@@ -773,7 +774,7 @@ class HybridRetriever:
         - `snippet`：展示用短片段（UI/debug），不得回流进提示词。
         #188 输出契约：透传索引侧结构化字段 ``section_title`` / ``clause_no`` /
         ``section_no`` / ``chunk_index``（旧索引缺字段时为 None/[]）。
-||||||| 8e37a0cd
+        #197 输出契约：透传顶层 ``page_number``（PDF 页码；非 PDF / 旧索引为 None）。
 
         issue #185 分数契约：`rank_score`（与旧 `score` 同值）只是**融合阶段的批内
         min-max 相对分**，用于排序/序位展示——榜首恒 ~1.0 是构造性的，不是相关度。
@@ -905,6 +906,8 @@ class HybridRetriever:
                 "clause_no": source.get("clause_no") or [],
                 "section_no": source.get("section_no") or [],
                 "chunk_index": source.get("chunk_index"),
+                # #197：PDF 页码透传（非 PDF / 旧索引为 None）
+                "page_number": source.get("page_number"),
                 "mmr_score": float(hit.get("_mmr_score", 0)),
                 "overlap_score": overlap, "has_keyword": has_kw, "has_vector": has_vec,
                 "rewrite_hits": rewrite_hits, "fresh_factor": round(fresh_factor, 2),
