@@ -40,6 +40,16 @@ class RetrievalUnavailableError(RuntimeError):
         return self.kind == "timeout"
 
 
+class EmbeddingConfigError(RuntimeError):
+    """embedding 配置不完整（在线模式缺 API key 等）。
+
+    与「服务瞬态故障」区分：这是**配置错误**，调用方可以显式降级为
+    「向量臂关闭」而不是崩溃（issue #196 单一构造点在 import 期构造单例，
+    无 key 时抛本异常；`get_rag_pipeline()` 据此恢复基线的 provider=None 语义）。
+    定义在 `app.rag.errors`（无导入副作用）以便依赖方安全 import。
+    """
+
+
 class EmbeddingUnavailableError(RuntimeError):
     """embedding 服务调用失败（retriever 内部信号）。
 

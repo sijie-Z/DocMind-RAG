@@ -214,14 +214,24 @@ def _pin_external_services(monkeypatch):
             self.chat = _UnreachableChat()
             self.embeddings = _UnreachableEmbeddings()
 
-    # 单例 pipeline 对客户端的引用有两处：pipeline 自身（含 rerank 调用点；它不存
-    # embedding_client，那个只在 retriever 上）与 retriever。
+    class _UnreachableEmbeddingProvider:
+        """issue #196：检索期 embedding 走 provider（索引期同一 embedding_service）。"""
+
+        async def embed_query(self, *args, **kwargs):
+            raise ConnectionError(
+                "Embedding API unreachable — pinned by API surface scan"
+            )
+
+    # 单例 pipeline 对客户端的引用有两处：pipeline 自身（含 rerank 调用点）与
+    # retriever（openai_client / embedding_provider）。
     pipeline = get_rag_pipeline()
     unreachable_llm = _UnreachableOpenAI()
     monkeypatch.setattr(pipeline, "openai_client", unreachable_llm)
     monkeypatch.setattr(pipeline, "rerank_client", unreachable_llm)
     monkeypatch.setattr(pipeline.retriever, "openai_client", unreachable_llm)
-    monkeypatch.setattr(pipeline.retriever, "embedding_client", unreachable_llm)
+    monkeypatch.setattr(
+        pipeline.retriever, "embedding_provider", _UnreachableEmbeddingProvider()
+    )
 
 
 @pytest_asyncio.fixture(autouse=True)
