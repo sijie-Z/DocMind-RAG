@@ -94,6 +94,10 @@ def _cfg(**overrides) -> AgentConfig:
     base = dict(
         enable_reflection=False, enable_memory=False, enable_skills=False,
         enable_experience=False, enable_thinking=False,
+        # issue #206：生产默认禁用 execute_python（DEFAULT_DISABLED_TOOLS），派发层
+        # 会以 tool_disabled 拒绝。本文件以 execute_python 作为**已显式启用**的
+        # 高危工具样本来验证审批门，因此清空禁用清单。
+        disabled_tools=[],
     )
     base.update(overrides)
     return AgentConfig(**base)
@@ -320,6 +324,30 @@ class TestExecutorApprovalGate:
         assert errors and errors[0].error_type == "approval_denied"
         assert "approval_denied" in errors[0].content
         assert "生产环境禁止明令" in errors[0].content, "拒绝备注应喂给反思上下文"
+
+    @pytest.mark.asyncio
+    async def test_disabled_tool_does_not_pause_for_approval(self):
+        """issue #206：禁用清单中的工具在派发层被拒，不得先触发审批暂停。
+
+        变异点：禁用调用仍参与审批预检 → 为注定不执行的调用暂停等人 → 红。
+        """
+        executor = _mk_executor(
+            _cfg(approval_mode="risky", disabled_tools=["execute_python"]),
+            _client_with_tool_calls([("execute_python", '{"code": "print(1)"}', "c1")]),
+        )
+        requests: list = []
+        _arm(executor, outcome="paused", calls=requests)
+
+        spy = AsyncMock(return_value=ToolResult.ok(data="x"))
+        with patch.object(tool_registry, "execute_detailed", new=spy):
+            (events, exc), _, _ = await _run_step_once(executor)
+
+        assert exc is None, "禁用工具不得触发审批暂停"
+        assert requests == [], "禁用工具不应进入审批预检"
+        assert spy.await_count == 0
+        assert any(
+            e.type == "tool_error" and e.error_type == "tool_disabled" for e in events
+        )
 
     @pytest.mark.asyncio
     async def test_decision_bound_to_args_fingerprint(self):

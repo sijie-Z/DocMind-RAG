@@ -41,6 +41,8 @@ export interface AgentEvent {
   tool_args?: Record<string, any>
   tool_call_id?: string
   tool_duration_ms?: number
+  // issue #206：代码执行类工具实际使用的沙箱（'ast' / 'docker'）
+  sandbox?: 'ast' | 'docker'
   // Plan
   plan_id?: string
   plan_goal?: string

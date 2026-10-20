@@ -57,12 +57,15 @@ logger = logging.getLogger(__name__)
 class ToolError:
     """Structured error information returned by a tool.
 
-    code: one of 26 ToolErrorType literals (§13.3 agent-reliability-design.md)
+    code: one of 27 ToolErrorType literals (§13.3 agent-reliability-design.md)
     """
 
     # ── Union of all known error types ──────────────────────────────────
     ToolErrorType = Literal[
         "timeout",
+        # issue #206：配置的沙箱不可用（auto/docker 而 Docker 不可达）——fail-closed，
+        # 绝不静默降级为进程内执行。
+        "sandbox_unavailable",
         "rate_limited",
         "api_error",
         "connection_error",
@@ -105,10 +108,21 @@ class ToolMeta:
     latency_ms: float = 0.0
     tool_name: str = ""
     retry_count: int = 0
+    # issue #206：代码执行类工具的 resolved sandbox（"ast" / "docker"）。
+    # 由工具自行写入（execute_python），executor 原样透传到 SSE tool_result 的
+    # `sandbox` 字段——部署侧可据此确认实际执行面。
+    sandbox: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"latency_ms": round(self.latency_ms, 1), "tool_name": self.tool_name, "retry_count": self.retry_count}
+        d: dict[str, Any] = {
+            "latency_ms": round(self.latency_ms, 1),
+            "tool_name": self.tool_name,
+            "retry_count": self.retry_count,
+        }
+        if self.sandbox:
+            d["sandbox"] = self.sandbox
+        return d
 
 
 @dataclass
@@ -703,7 +717,7 @@ class ToolRegistry:
             )
 
     async def _builtin_error_mapper_hook(self, result: ToolResult, ctx: HookContext) -> None:
-        """Post-hook: map raw exception types to 26 standardised ToolErrorType codes.
+        """Post-hook: map raw exception types to 27 standardised ToolErrorType codes.
 
         Classifies into retryable (timeout/rate/unreachable/interrupted),
         non-retryable (not_found/perm/validation/empty/payload...),

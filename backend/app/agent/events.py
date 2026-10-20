@@ -78,6 +78,9 @@ class AgentEvent:
     tool_args: dict[str, Any] = field(default_factory=dict)
     tool_call_id: str = ""
     tool_duration_ms: float = 0.0
+    # issue #206：代码执行类工具实际使用的沙箱（"ast" / "docker"）。
+    # 空串 = 该工具不涉及沙箱（事件瘦身：非空才序列化）。
+    sandbox: str = ""
 
     # Failure classification — read by Executor's retry loop to pick a RetryPolicy.
     # Distinct from `reflection_result`, which is a pass/retry/replan/escalate verdict.
@@ -132,6 +135,9 @@ class AgentEvent:
             d["tool_call_id"] = self.tool_call_id
         if self.tool_duration_ms:
             d["tool_duration_ms"] = round(self.tool_duration_ms, 1)
+        # issue #206：resolved sandbox 随 tool_result/tool_error 暴露（非空才带）
+        if self.sandbox:
+            d["sandbox"] = self.sandbox
 
         if self.plan_id:
             d["plan_id"] = self.plan_id
