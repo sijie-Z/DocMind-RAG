@@ -153,15 +153,24 @@ def _replay_file_for(task_id: str | None) -> Path | None:
 
 @dataclass
 class StepRecord:
-    """Record of a single plan step execution attempt."""
+    """Record of a single plan step execution attempt.
+
+    #204：墙钟锚点（epoch 秒）。`complete_step()` 在收尾时刻打点：`finished_at`
+    取当时的墙钟，`started_at` 按 `duration_ms` 回推（duration 来自
+    `time.perf_counter()` 差值，度量的是区间长度；回推忽略步骤内的时钟漂移，
+    属可接受近似）。`started_at == 0.0` / `finished_at is None` 表示"未知"——
+    从 issue #204 之前的旧 checkpoint 恢复的步骤没有任何时间戳来源。
+    """
     step_id: str
     description: str
     tool_used: str | None
     status: str                      # pending / running / completed / failed / skipped
+    started_at: float                       # epoch 秒；0.0 = 未知（旧快照恢复）
     result_summary: str | None = None
     error: str | None = None
     duration_ms: float = 0.0
     tokens_used: int = 0
+    finished_at: float | None = None        # epoch 秒；None = 未完成/未知
 
     @property
     def is_success(self) -> bool:
@@ -183,7 +192,8 @@ class Decision:
     phase: str                       # plan / execute / reflect
     action: str                      # choose_tool / retry_step / skip_step / skill_match / finalize
     reasoning: str
-    triggered_by: str | None = None
+    ts: float                        # epoch 秒；0.0 = 未知（旧快照恢复）
+    triggered_by: str | None = None  # 触发该决策的 step_id（缺省取 current_step_id）
 
 
 @dataclass
@@ -245,9 +255,23 @@ class ExecutionContext:
             confidence=confidence,
         ))
 
-    def record_decision(self, phase: str, action: str, reasoning: str) -> None:
+    def record_decision(
+        self,
+        phase: str,
+        action: str,
+        reasoning: str,
+        triggered_by: str | None = None,
+    ) -> None:
+        """记录一条决策（#204：打墙钟点 + 归属触发步骤）。
+
+        `triggered_by` 缺省取 `current_step_id`（executor 在派发步骤前写入）；
+        调用方显式传入时以显式值为准。两者都没有（plan 阶段 / 直答收尾）→
+        None，不编造归属。变异点：删掉缺省填充 → 归属断言红。
+        """
         self.decisions.append(Decision(
             phase=phase, action=action, reasoning=reasoning,
+            ts=datetime.now().timestamp(),
+            triggered_by=triggered_by if triggered_by is not None else self.current_step_id,
         ))
 
     def complete_step(
@@ -261,15 +285,24 @@ class ExecutionContext:
         duration: float = 0.0,
         tokens: int = 0,
     ) -> None:
+        """记账一个步骤的终态（#204：同时打墙钟区间）。
+
+        `finished_at` = 收尾墙钟；`started_at` = finished_at - duration（毫秒）。
+        duration 未知（默认 0）时区间折叠为一点，不编造起点。变异点：删掉任一
+        打点 → test_issue204_trace_timestamps 的区间断言红。
+        """
+        finished_at = datetime.now().timestamp()
         record = StepRecord(
             step_id=step_id,
             description=description,
             tool_used=tool,
             status=status,
+            started_at=finished_at - max(duration, 0.0) / 1000.0,
             result_summary=(result or "")[:300],
             error=error,
             duration_ms=duration,
             tokens_used=tokens,
+            finished_at=finished_at,
         )
         self.completed_steps.append(record)
         if status == "failed":
@@ -297,6 +330,9 @@ class ExecutionContext:
                     "error": s.error,
                     "duration_ms": round(s.duration_ms, 1),
                     "tokens_used": s.tokens_used,
+                    # #204：墙钟锚点（嵌套加键，顶层键集不动）
+                    "started_at": s.started_at,
+                    "finished_at": s.finished_at,
                 }
                 for s in self.completed_steps
             ],
@@ -307,7 +343,8 @@ class ExecutionContext:
             ],
             "decisions": [
                 {"phase": d.phase, "action": d.action,
-                 "reasoning": d.reasoning[:200], "triggered_by": d.triggered_by}
+                 "reasoning": d.reasoning[:200], "triggered_by": d.triggered_by,
+                 "ts": d.ts}
                 for d in self.decisions
             ],
             "failures": self.failures[:10],
@@ -377,15 +414,21 @@ class ExecutionContext:
             ctx.start_time = float(data["start_time"])
         ctx.failures = [str(f) for f in (data.get("failures") or [])]
         for s in data.get("steps") or []:
+            # #204：旧快照无 started_at / finished_at 二键 → 未知哨兵
+            # （0.0 / None）——绝不用当前时间伪造历史。变异点：直取
+            # s["started_at"] → 旧 checkpoint 解析 KeyError。
+            raw_finished_at = s.get("finished_at")
             ctx.completed_steps.append(StepRecord(
                 step_id=s.get("step_id", ""),
                 description=s.get("description", ""),
                 tool_used=s.get("tool_used"),
                 status=s.get("status", ""),
+                started_at=float(s.get("started_at") or 0.0),
                 result_summary=s.get("result_summary"),
                 error=s.get("error"),
                 duration_ms=float(s.get("duration_ms") or 0.0),
                 tokens_used=int(s.get("tokens_used") or 0),
+                finished_at=float(raw_finished_at) if raw_finished_at is not None else None,
             ))
         for f in data.get("findings") or []:
             ctx.findings.append(Finding(
@@ -399,6 +442,8 @@ class ExecutionContext:
                 phase=d.get("phase", ""),
                 action=d.get("action", ""),
                 reasoning=d.get("reasoning", ""),
+                # #204：旧快照无 ts → 0.0 未知哨兵（同上，不得编造）。
+                ts=float(d.get("ts") or 0.0),
                 triggered_by=d.get("triggered_by"),
             ))
         return ctx
