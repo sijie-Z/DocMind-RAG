@@ -33,17 +33,22 @@ spec:
             - secretRef:
                 name: docmind-secrets
           livenessProbe:
+            # 存活只看进程（恒 200）：依赖故障摘流，不重启 Pod（issue #223）。
             httpGet:
-              path: /health
+              path: /livez
               port: 8000
             initialDelaySeconds: 30
             periodSeconds: 15
           readinessProbe:
+            # 就绪：DB + ES 集群 + 知识库索引对账；不可用 → 503 摘流（issue #223）。
             httpGet:
-              path: /health
+              path: /readyz
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
+            # 检查内部每个依赖最多等 3s；默认 1s 会比检查本身先超时。
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             requests:
               cpu: "500m"

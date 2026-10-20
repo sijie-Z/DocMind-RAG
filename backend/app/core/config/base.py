@@ -77,6 +77,9 @@ class BaseAppSettings(BaseSettings):
     RATE_LIMIT_WINDOW_SECONDS: int = 60
     RATE_LIMIT_EXCLUDE_PATHS: list[str] = [
         "/health",
+        # issue #223：探针端点必须免限流（k8s 每 10–15s 打一次，且不带业务身份）
+        "/livez",
+        "/readyz",
         "/metrics",
         "/docs",
         "/openapi.json",
