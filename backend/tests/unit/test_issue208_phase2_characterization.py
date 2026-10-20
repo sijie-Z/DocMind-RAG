@@ -7,7 +7,12 @@
 1. `_post_process` 的 doc 帽：同一文档至多 2 个 chunk（即使 top_k 尚有余量）。
    —— 2026-10-09 决策 a 落地（本 PR）：帽保留，但计数移到质量过滤之后，
    被任一质量闸门剔除的块不占帽位（旧行为「先占槽后剔除」已被换下，见
-   `TestPostProcessDocCap` 的旧/新锁对照注释）；
+   `TestPostProcessDocCap` 的旧/新锁对照注释）。
+   —— #187 换锁（2026-10-20）：**产品链路**不再在 retrieve 内部截断——pipeline
+   以 `retrieve(..., doc_cap=None)` 让 rerank 看到全部候选，再在 rerank 之后按
+   查询类型截断（普通 2/文档、条号直查 4/文档）。`_post_process` 的默认
+   `doc_cap=2` 保留为**未接线 rerank 的旧调用方**（eval runner / 单测）的函数级
+   语义，本类断言不变；产品新锁见 `test_issue187_doc_cap_after_rerank.py`；
 2. keyword_only 路径的命中此前不带 `has_keyword` 标记（该键只由 `_rrf_fuse` 写）
    → 终滤按最严的 `ov >= 0.15` 档；同一 chunk 在 hybrid 序里带标记（0.10 档）
    就能通过。实测 gold overlap = 0.1167 恰好落在两档之间。
@@ -472,11 +477,14 @@ class TestKeywordArmMsmCaliber:
         monkeypatch.setattr(settings, "RAG_QUERY_REWRITE_COUNT", 4)
 
         def _msms():
+            # #188：条号直查查询还会发一条**无 multi_match** 的结构化精确腿
+            # （clause_no terms）；口径断言只看 BM25 多匹配臂。
             return [
                 q["query"]["bool"]["must"][0]["bool"]["should"][0]["multi_match"][
                     "minimum_should_match"
                 ]
                 for q in captured
+                if "must" in q["query"]["bool"]
             ]
 
         retriever = HybridRetriever(openai_client=None)
@@ -559,9 +567,10 @@ class TestNumeralClauseNormalization:
         captured: list[str] = []
 
         async def fake_search(es_query):
-            captured.append(
-                es_query["query"]["bool"]["must"][0]["bool"]["should"][0]["multi_match"]["query"]
-            )
+            # #188：条号直查查询另有结构化精确腿（无 multi_match）；变体口径只数 BM25 臂。
+            must = es_query["query"]["bool"].get("must")
+            if must:
+                captured.append(must[0]["bool"]["should"][0]["multi_match"]["query"])
             return {"hits": {"hits": []}}
 
         monkeypatch.setattr(retriever_mod.ElasticsearchTools, "search_documents", fake_search)

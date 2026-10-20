@@ -38,7 +38,12 @@ from app.rag.query_processor import (
     decompose_query,
 )
 from app.rag.reranker import rerank
-from app.rag.retriever import HybridRetriever
+from app.rag.retriever import (
+    HybridRetriever,
+    _is_clause_lookup_query,
+    apply_doc_cap,
+    clause_lookup_doc_cap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +106,10 @@ class RAGPipeline:
         （``SEMANTIC_CACHE_RETRIEVAL_ENABLED=False``）——精确缓存已足够，且
         0.92 阈值会把相邻条款/换实体的查询当成同一问题。显式开启后，命中
         仍要求查询文本通过条号/数字/实体等价判定（``cache.queries_equivalent``）。
+
+        issue #187：文档级多样性截断在 **rerank 之后**施加（检索层以
+        ``doc_cap=None`` 交出完整候选）：普通查询 2/文档，条号直查类 4/文档；
+        截断统计见 debug_info["diversity"]。
 
         Raises:
             RetrievalUnavailableError: 检索后端服务故障或超时（issue #292）。
@@ -262,6 +271,9 @@ class RAGPipeline:
                             document_ids,
                             debug=debug,
                             search_mode=search_mode,
+                            # #187：帽不早于 rerank——检索层给完整候选，rerank 之后
+                            # 再由下方 diversity 截断（条号直查 4/文档、普通 2/文档）。
+                            doc_cap=None,
                         )
                         if sq_degraded:
                             degraded_reasons.extend(sq_degraded)
@@ -306,6 +318,24 @@ class RAGPipeline:
             if result:
                 pre_rerank = list(result) if debug else None
                 result = await rerank(query, result, self.rerank_client)
+
+                # #187：文档级多样性截断放在 rerank **之后**——先让 rerank 看到全部
+                # 候选（含同文档第 3+ 块）按相关度重排，再按文档计数截断。预算按查询
+                # 类型分档：条号直查 4/文档（精确定位，同文档前言/相邻条不再结构性
+                # 压掉 gold），普通语义查询 2/文档（避免 NearMiss 结构性上升）。
+                doc_cap = clause_lookup_doc_cap(query)
+                capped = apply_doc_cap(result, doc_cap)
+                if debug and debug_info is not None:
+                    debug_info["diversity"] = {
+                        "stage": "post_rerank",
+                        "clause_lookup": _is_clause_lookup_query(query),
+                        "per_document_cap": doc_cap,
+                        "before": len(result),
+                        "after": len(capped),
+                        "dropped": len(result) - len(capped),
+                    }
+                result = capped
+
                 if debug and debug_info is not None and pre_rerank:
                     debug_info["rerank_result"] = [
                         {

@@ -23,6 +23,7 @@ from app.core.elasticsearch import (
 )
 from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
+from app.services.clause_refs import extract_clause_fields
 from app.services.document_parser import document_service
 from app.services.document_status import verify_indexed as _verify_indexed
 from app.services.embedding_service import embedding_service
@@ -409,6 +410,55 @@ class DocumentProcessor:
             )
             await session.commit()
 
+    @staticmethod
+    def _build_es_source(
+        doc: Document, chunk_id: str, chunk_index: int, chunk_data: dict
+    ) -> dict:
+        """构造写入 ES 的单条 chunk ``_source``（#188：顶层结构化字段）。
+
+        收口 #188 的三重断链：``section_title`` / ``chunk_index`` / ``chunk_id``
+        此前只存在于 ``metadata``（mapping ``enabled=false``，存而不索引）或缺失，
+        结构检索/boost 永远命中空气。此处把 mapping 已就绪的字段提升到顶层，
+        并新增 ``clause_no`` / ``section_no``（由 ``evals/clauses.py`` 的定义位
+        口径抽取，见 ``app/services/clause_refs.py``）。
+
+        条号从 ``original_text``（未加【文档背景】摘要前缀的原文）抽取——
+        摘要行不得参与「行首定义位」判定，否则上下文增强会污染条号字段。
+
+        ``embedding`` 由调用方注入（本 helper 不关心向量来源，便于单测）。
+        """
+        metadata = chunk_data.get("metadata", {}) or {}
+        original_text = chunk_data.get("original_text") or chunk_data["chunk_text"]
+        clause_fields = extract_clause_fields(original_text)
+        return {
+            "content": chunk_data["chunk_text"],
+            "chunk_text": chunk_data["chunk_text"],
+            "organization_id": str(doc.organization_id),
+            "document_id": doc.id,
+            "filename": doc.filename,
+            "file_type": (
+                doc.file_type.value
+                if hasattr(doc.file_type, "value")
+                else str(doc.file_type)
+            ),
+            "file_size": doc.file_size or 0,
+            "upload_time": (
+                doc.created_at.isoformat() if doc.created_at else None
+            ),
+            "user_id": str(doc.uploaded_by),
+            "chunk_id": chunk_id,
+            "chunk_index": chunk_index,
+            "section_title": metadata.get("section_title"),
+            "clause_no": clause_fields["clause_no"],
+            "section_no": clause_fields["section_no"],
+            "metadata": {
+                "chunk_index": chunk_index,
+                "chunk_id": chunk_id,
+                "page_number": metadata.get("page_number"),
+                "section_title": metadata.get("section_title"),
+            },
+        }
+
     async def _replace_document_state(
         self, doc: Document, chunks_data: list[dict], embeddings: list[list[float]]
     ) -> None:
@@ -420,11 +470,12 @@ class DocumentProcessor:
         ):
             chunk_id = str(uuid.uuid4())
             metadata = chunk_data.get("metadata", {}) or {}
+            chunk_index = chunk_data.get("chunk_index", i)
             chunk_rows.append(
                 DocumentChunk(
                     id=chunk_id,
                     document_id=doc.id,
-                    chunk_index=chunk_data["chunk_index"],
+                    chunk_index=chunk_index,
                     chunk_text=chunk_data["chunk_text"],
                     chunk_length=chunk_data["chunk_length"],
                     start_pos=chunk_data.get("start_pos"),
@@ -434,34 +485,13 @@ class DocumentProcessor:
                     meta_data=metadata,
                 )
             )
+            source = self._build_es_source(doc, chunk_id, chunk_index, chunk_data)
+            source["embedding"] = embedding
             es_docs.append(
                 {
                     "_index": settings.ELASTICSEARCH_INDEX_NAME,
                     "_id": f"{doc.id}_{chunk_id}",
-                    "_source": {
-                        "content": chunk_data["chunk_text"],
-                        "chunk_text": chunk_data["chunk_text"],
-                        "embedding": embedding,
-                        "organization_id": str(doc.organization_id),
-                        "document_id": doc.id,
-                        "filename": doc.filename,
-                        "file_type": (
-                            doc.file_type.value
-                            if hasattr(doc.file_type, "value")
-                            else str(doc.file_type)
-                        ),
-                        "file_size": doc.file_size or 0,
-                        "upload_time": (
-                            doc.created_at.isoformat() if doc.created_at else None
-                        ),
-                        "user_id": str(doc.uploaded_by),
-                        "metadata": {
-                            "chunk_index": i,
-                            "chunk_id": chunk_id,
-                            "page_number": metadata.get("page_number"),
-                            "section_title": metadata.get("section_title"),
-                        },
-                    },
+                    "_source": source,
                 }
             )
 
