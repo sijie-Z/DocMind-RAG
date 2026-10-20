@@ -80,6 +80,8 @@ class RagServiceFacade:
 
     @property
     def embedding_client(self):
+        # issue #196：检索期不再持有独立客户端；底层客户端来自
+        # embedding_provider（索引期同一 embedding_service 实例）。
         return self._pipeline.retriever.embedding_client
 
 

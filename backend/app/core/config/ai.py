@@ -4,7 +4,11 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _auto_tier_defaults(*, explicitly_set: set[str] | frozenset[str] | None = None) -> dict[str, object]:
+def _auto_tier_defaults(
+    *,
+    explicitly_set: set[str] | frozenset[str] | None = None,
+    local_embedding: bool = False,
+) -> dict[str, object]:
     """Apply hardware-detected defaults for fields the user did NOT set anywhere.
 
     ``explicitly_set`` 应传 pydantic 的 ``settings.model_fields_set`` —— 它包含
@@ -13,6 +17,14 @@ def _auto_tier_defaults(*, explicitly_set: set[str] | frozenset[str] | None = No
     配置的字段静默覆盖成硬件档位默认值（issue #232：`.env` 写
     `EMBEDDING_MODEL=qwen3-embedding:0.6b`，运行时被覆盖成 `bge-m3`，
     worker 报 `404 model not found`，排查代价极高）。
+
+    ``local_embedding=True``（``ENABLE_LOCAL_EMBEDDING``）时**不套用硬件档**：
+    本地 embedding 的模型由 ``LOCAL_EMBEDDING_MODEL`` 决定（默认
+    ``nomic-embed-text`` = 768 维），而硬件档面向的是在线模型
+    （bge-m3/1024、Qwen3/2048+）。混用会制造「模型 nomic、维度 1024」的固有
+    冲突（issue #196 的启动维度校验会拒绝启动）。此时保留字段默认值
+    （768），用户换了本地模型时须显式设置 ``VECTOR_DIMENSION``——启动校验会
+    给出可读错误，而不是静默写坏数据。
 
     **不要在这里对返回值做 `str()`。** 调用方（`app/core/config/__init__.py`）用
     `object.__setattr__` 写进 settings，**绕过 pydantic 的类型校验与转换** ——
@@ -24,6 +36,8 @@ def _auto_tier_defaults(*, explicitly_set: set[str] | frozenset[str] | None = No
     **在没把 VECTOR_DIMENSION 写进环境变量的机器上（即全新部署的默认路径），
     索引根本建不出来。**
     """
+    if local_embedding:
+        return {}
     try:
         from app.core.hardware import detect as _detect
 
@@ -81,6 +95,16 @@ class AISettings(BaseSettings):
     EMBEDDING_API_KEY: str | None = None
     EMBEDDING_API_URL: str = "http://localhost:11434/v1"
     EMBEDDING_MODEL: str = "nomic-embed-text"
+
+    # issue #196：embedding 一致性契约。
+    # - SEND_DIMENSIONS 默认关闭：请求服务端截断会掩盖「VECTOR_DIMENSION 已过期」
+    #   的漂移（截断后维度“恰好”匹配 mapping，但模型已经换了）。只有确认
+    #   provider 支持 dimensions 截断且确实想用截断时才开启。
+    # - 启动 probe：服务可达但返回维度 ≠ VECTOR_DIMENSION → 拒绝启动；
+    #   服务不可达 → 显式告警后继续（离线开发属预期）。
+    EMBEDDING_SEND_DIMENSIONS: bool = False
+    EMBEDDING_STARTUP_PROBE: bool = True
+    EMBEDDING_PROBE_TIMEOUT_SECONDS: float = Field(default=5.0, gt=0.0)
 
     # Vector search
     VECTOR_DIMENSION: int = 768  # nomic-embed-text

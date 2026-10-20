@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from openai import AsyncOpenAI
 
 from app.core.config import settings
+from app.rag.errors import EmbeddingConfigError
 from app.rag.pipeline import RAGPipeline
 
 logger = logging.getLogger(__name__)
@@ -50,22 +51,6 @@ def _build_openai_client() -> AsyncOpenAI | None:
 
 
 @lru_cache
-def _build_embedding_client() -> AsyncOpenAI | None:
-    key = settings.EMBEDDING_API_KEY or settings.DEEPSEEK_API_KEY
-    if not key:
-        return None
-    try:
-        base_url = _normalize_base_url(
-            settings.EMBEDDING_API_URL or "https://api.openai.com/v1",
-            strip_suffixes=["/embeddings", "/v1/embeddings"],
-        )
-    except ValueError as e:
-        logger.error(f"Invalid EMBEDDING_API_URL: {e}")
-        return None
-    return AsyncOpenAI(api_key=key, base_url=base_url)
-
-
-@lru_cache
 def _build_rerank_client() -> AsyncOpenAI | None:
     key = settings.RERANK_API_KEY or settings.RAG_RERANK_API_KEY or settings.DEEPSEEK_API_KEY
     url = settings.RERANK_API_URL or settings.RAG_RERANK_API_URL or settings.DEEPSEEK_API_URL
@@ -81,10 +66,33 @@ def _build_rerank_client() -> AsyncOpenAI | None:
 
 @lru_cache
 def get_rag_pipeline() -> RAGPipeline:
-    """Singleton RAG pipeline instance."""
+    """Singleton RAG pipeline instance.
+
+    embedding 客户端**不在这里构造**：检索与索引共用
+    ``app.services.embedding_service.embedding_service``（issue #196 单一真源）。
+    旧实现此处另建 ``_build_embedding_client()``（忽略 ENABLE_LOCAL_EMBEDDING），
+    曾造成索引/查询模型漂移，勿恢复。
+
+    无 embedding 配置（在线模式缺 key 且未启用本地 embedding）时，单例模块
+    导入会抛 ``EmbeddingConfigError``（RuntimeError 子类）——这与基线
+    ``_build_embedding_client()`` 返回 ``None`` 的降级语义对齐：**管线照常
+    构造，仅向量臂关闭**。LLM/关键词能力与只依赖 ``rag_service.openai_client``
+    的工具（如图谱回填脚本）不受影响。
+    """
+    try:
+        from app.services.embedding_service import embedding_service
+    except EmbeddingConfigError as e:
+        logger.warning(
+            "Embedding 未配置（%s）——RAG 管线以向量臂关闭模式构造；"
+            "关键词检索与 LLM 能力不受影响。",
+            e,
+            exc_info=True,
+        )
+        embedding_service = None
+
     return RAGPipeline(
         openai_client=_build_openai_client(),
-        embedding_client=_build_embedding_client(),
+        embedding_provider=embedding_service,
         rerank_client=_build_rerank_client(),
     )
 
