@@ -1,10 +1,9 @@
-"""Tool Registry v2 — self-registering tool system with hooks, unified results, and structured logging.
+"""Tool Registry v2 — self-registering tool system with hooks and unified results.
 
 Architecture:
     ToolEntry                     — metadata + handler for one tool
     ToolResult / ToolError        — unified return structure
-    pre_hooks / post_hooks        — pluggable pipeline (auth, rate_limit, logging, error mapping)
-    structured log                — every execution recorded for debug / observability
+    pre_hooks / post_hooks        — pluggable pipeline (auth, error mapping)
 
 Backward compatible:
     @register_tool  decorator    — unchanged signature (new fields are optional)
@@ -40,7 +39,6 @@ import logging
 import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any, Literal
 
 from app.agent.schema_validation import validate_against_schema
@@ -306,10 +304,13 @@ class ToolRegistry:
     """Central registry of all available tools with pluggable hook pipeline.
 
     Built-in hooks (registered by default):
-        - structured_logging: logs every execution to self._log
-        - error_mapper:       maps common exception types to ToolError codes
+        - auth:          enforces `requires_auth` declarations
+        - error_mapper:  maps common exception types to ToolError codes
 
     Additional hooks can be added via register_pre_hook / register_post_hook.
+
+    #204：进程内 5000 条 ring buffer 已删除。它没有任何读者，耐久性由
+    `tool_ledger`（DB 持久化，PR #422）承担——不做第二套持久化。
     """
 
     def __init__(self):
@@ -317,13 +318,9 @@ class ToolRegistry:
         # Hook pipelines
         self._pre_hooks: list[PreHook] = []
         self._post_hooks: list[PostHook] = []
-        # Structured call log (in-memory ring buffer, newest first)
-        self._log: list[dict[str, Any]] = []
-        self._max_log_entries = 5000
 
         # Register built-in hooks
         self._pre_hooks.append(self._builtin_auth_hook)
-        self._post_hooks.append(self._builtin_logging_hook)
         self._post_hooks.append(self._builtin_error_mapper_hook)
 
     # ── Registration ──────────────────────────────────────────────────────
@@ -644,50 +641,7 @@ class ToolRegistry:
             except Exception as e:
                 logger.warning("Post-hook %s failed: %s", getattr(hook, "__name__", "?"), e)
 
-    # ── Structured Log Access ─────────────────────────────────────────────
-
-    @property
-    def call_log(self) -> list[dict[str, Any]]:
-        """Recent tool call log (newest first)."""
-        return self._log[:]
-
-    def clear_log(self) -> None:
-        self._log.clear()
-
-    def get_call_stats(self, tool_name: str | None = None) -> dict[str, Any]:
-        """Aggregate statistics for one tool or all tools."""
-        entries = self._log if tool_name is None else [e for e in self._log if e.get("tool") == tool_name]
-        if not entries:
-            return {"total": 0, "success": 0, "failure": 0, "avg_latency_ms": 0.0}
-
-        success = sum(1 for e in entries if e.get("status") == "success")
-        latencies = [e.get("latency", 0) for e in entries if e.get("latency")]
-        return {
-            "total": len(entries),
-            "success": success,
-            "failure": len(entries) - success,
-            "avg_latency_ms": round(sum(latencies) / len(latencies), 1) if latencies else 0.0,
-        }
-
     # ── Built-in Hooks ────────────────────────────────────────────────────
-
-    async def _builtin_logging_hook(self, result: ToolResult, ctx: HookContext) -> None:
-        """Record every tool call in the structured log (post-hook)."""
-        entry: dict[str, Any] = {
-            "tool": ctx.tool_name,
-            "input": _truncate_dict(ctx.arguments, max_val_len=500),
-            "latency": round(result.meta.latency_ms, 1),
-            "status": "success" if result.success else "error",
-            "timestamp": datetime.now().isoformat(),
-        }
-        if result.success:
-            entry["output"] = _truncate_value(result.data, max_len=1000)
-        else:
-            entry["error"] = result.error.to_dict() if result.error else {"code": "unknown", "message": "?"}
-
-        self._log.insert(0, entry)
-        if len(self._log) > self._max_log_entries:
-            self._log.pop()
 
     async def _builtin_auth_hook(self, ctx: HookContext) -> None:
         """Pre-hook enforcing `requires_auth`（此前只 logger.debug，从不阻断）。
@@ -937,19 +891,3 @@ def register_tool(
         )
         return func
     return decorator
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 6.  Utilities
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def _truncate_value(val: Any, max_len: int = 1000) -> str:
-    """Truncate a value for logging."""
-    s = str(val)
-    return s[:max_len] + "..." if len(s) > max_len else s
-
-
-def _truncate_dict(d: dict[str, Any], max_val_len: int = 500) -> dict[str, Any]:
-    """Truncate all values in a dict for logging."""
-    return {k: _truncate_value(v, max_val_len) for k, v in d.items()}
