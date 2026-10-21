@@ -52,7 +52,7 @@ def _patch_rerank():
     return patch(
         "app.rag.pipeline.rerank",
         new=AsyncMock(
-            side_effect=lambda query, docs, client=None: (
+            side_effect=lambda query, docs, client=None, **kwargs: (
                 docs,
                 {
                     "status": "disabled",
