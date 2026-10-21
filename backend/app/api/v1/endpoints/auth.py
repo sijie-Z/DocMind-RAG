@@ -60,6 +60,7 @@ class RegisterRequest(BaseModel):
         if len(str(v)) > 100:
             raise ValueError("邮箱长度不能超过100位")
         return v
+
     # 安全加固：禁止注册时自选组织（防越权加入任意组织读取文档）。
     # 注册成功后由服务端自动创建个人组织（owner=本人，见 /register 端点），
     # 不并入任何既有组织。
