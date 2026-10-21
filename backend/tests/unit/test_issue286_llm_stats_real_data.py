@@ -19,6 +19,7 @@
 - `agent_samples = []`（agent 侧丢账）→ total 少 150 → 红；
 - 延迟键名还原为 `avg_response_time_ms` → avg_latency_ms 恒 0 ≠ 200 → 红。
 """
+
 from collections import deque
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -96,10 +97,15 @@ def test_llm_stats_returns_real_known_usage(client: TestClient):
     before_rag_out = int(rag_before.get("total_output_tokens", 0))
 
     # ── 播已知用量：agent 120/30（=150）、RAG 200/50（=250） ──
-    assert record_llm_usage(SimpleNamespace(
-        usage=SimpleNamespace(prompt_tokens=120, completion_tokens=30),
-        model="deepseek-chat",
-    )) == 150
+    assert (
+        record_llm_usage(
+            SimpleNamespace(
+                usage=SimpleNamespace(prompt_tokens=120, completion_tokens=30),
+                model="deepseek-chat",
+            )
+        )
+        == 150
+    )
     rag_service.report_tokens(200, 50)
 
     saved = _seed_latency_state()
@@ -134,7 +140,10 @@ def test_llm_stats_returns_real_known_usage(client: TestClient):
     # 1) 已知用量必须精确流到响应（修前：恒零 + 200）
     assert data["agent_tokens_today"] == before_agent_total + 150, data
     assert data["rag_tokens_today"] == before_rag_in + before_rag_out + 250, data
-    assert data["total_tokens_today"] == before_agent_total + 150 + before_rag_in + before_rag_out + 250, data
+    assert (
+        data["total_tokens_today"]
+        == before_agent_total + 150 + before_rag_in + before_rag_out + 250
+    ), data
     assert data["input_tokens_today"] == before_rag_in + 200 + before_agent_in + 120, data
     assert data["output_tokens_today"] == before_rag_out + 50 + before_agent_out + 30, data
     assert data["total_tokens_today"] == data["input_tokens_today"] + data["output_tokens_today"]
@@ -149,9 +158,17 @@ def test_llm_stats_returns_real_known_usage(client: TestClient):
     assert data["avg_latency_ms"] == 200, data
     assert data["p95_latency_ms"] == 100, data
 
-    # 4) 派生字段与合计一致（成本按前端标注的 GPT-4o-mini 费率）
+    # 4) 派生字段与合计一致（W2-T7：成本按 token_usage 费率真源——deepseek 每 1K
+    #    $0.0005/$0.002；修前按 GPT-4o-mini 费率（$0.15/$0.60 per 1M）估算，
+    #    与实际 DeepSeek 推理栈不符——该旧口径正是本批清除的"假费率"之一）
+    from app.api.v1.endpoints.token_usage import _estimate_cost
+    from app.core.config import settings as _settings
+
     assert data["cost_today_usd"] == round(
-        data["input_tokens_today"] * 0.00000015 + data["output_tokens_today"] * 0.0000006, 4
+        _estimate_cost(
+            _settings.DEEPSEEK_MODEL, data["input_tokens_today"], data["output_tokens_today"]
+        ),
+        4,
     )
     assert len(data["token_trend_7d"]) == 7
     assert all(v > 0 for v in data["token_trend_7d"]), "有真实用量时趋势不得全零"

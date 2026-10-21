@@ -6,6 +6,17 @@ import { useAppStore } from '@/stores/app'
 import { createDiscreteApi } from 'naive-ui'
 import { getToken, getRefreshToken, setToken, setRefreshToken } from '@/utils/auth'
 
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /**
+     * 每请求重试预算覆盖（默认 MAX_RETRIES=3 → 最多 4 次尝试）。
+     * 首屏聚合请求（仪表盘）传 1：单接口慢/抖动时最多 2 次尝试即报错，
+     * 由所在区块错误态兜底，不把整屏拖进分钟级等待。
+     */
+    __maxRetries?: number
+  }
+}
+
 // 创建独立的 UI API，用于在非组件环境下显示消息
 const { message } = createDiscreteApi(['message'])
 
@@ -23,6 +34,8 @@ interface ExtendedAxiosConfig extends InternalAxiosRequestConfig {
   ['X-Request-ID']?: string
   ['__request_start_time']?: number
   _retry?: boolean
+  /** 401 时跳过刷新/自动登出链（登出接口专用，避免互相递归） */
+  _skipAuthRefresh?: boolean
 }
 
 // 全局 toast 去重：同一内容 1.5s 内不重复弹出
@@ -225,6 +238,23 @@ async function doRefreshAccessToken(): Promise<string> {
   return accessToken
 }
 
+// 共享的单飞续期：路由守卫与 401 拦截器复用同一个进行中的刷新，
+// 并发触发（含刷新期间到达的多个守卫/请求）只发一次 /auth/refresh。
+let refreshPromise: Promise<string> | null = null
+
+/**
+ * 静默续期入口（供路由守卫等非请求链路复用）。
+ * 并发调用共享同一个 Promise；失败时向所有等待方抛出同一错误，结束后复位以便下次重试。
+ */
+export function silentRefreshAccessToken(): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = doRefreshAccessToken().finally(() => {
+      refreshPromise = null
+    })
+  }
+  return refreshPromise
+}
+
 // 响应拦截器
 request.interceptors.response.use(
   (response: AxiosResponse) => {
@@ -272,17 +302,28 @@ request.interceptors.response.use(
         }
       }
 
+      // 403 分支会先弹一条更可操作的附加提示；此时通用文案不再重复弹
+      // （同一次失败只保留一条全局 toast —— E14/D1 双弹收敛）。
+      let suppressGenericToast = false
+
       switch (status) {
         case 401: {
           const isLoginRequest = originalRequest?.url?.includes?.('auth/login')
           const isRefreshRequest = originalRequest?.url?.includes?.('auth/refresh')
-          
+
+          // 登出等显式标记的请求：401 不得进入刷新/自动登出链，
+          // 否则「登出 → 401 → 刷新失败 → 自动登出 → 登出」无限递归。
+          if (originalRequest?._skipAuthRefresh) {
+            break
+          }
+
           if (!isLoginRequest && !isRefreshRequest && !originalRequest?._retry) {
             if (!isRefreshing) {
               isRefreshing = true
               originalRequest._retry = true
               try {
-                const newToken = await doRefreshAccessToken()
+                // 与路由守卫共用同一续期（单飞）：守卫与 401 同时触发也只发一次刷新
+                const newToken = await silentRefreshAccessToken()
                 request.defaults.headers.common['Authorization'] = `Bearer ${newToken}`
                 const userStore = useUserStore()
                 userStore.token = newToken
@@ -292,8 +333,15 @@ request.interceptors.response.use(
                 return request(originalRequest)
               } catch (refreshErr) {
                 rejectQueue(refreshErr)
+                // 标记「会话已被本拦截器判定过期」：续期失败错误可能没有
+                // response.status（如 refresh_token 缺失/续期网络异常），
+                // store 与路由守卫据此仍走清号逻辑，不误判为服务端 5xx。
+                if (refreshErr && typeof refreshErr === 'object') {
+                  ;(refreshErr as { authSessionExpired?: boolean }).authSessionExpired = true
+                }
                 const userStore = useUserStore()
-                userStore.logout()
+                // 跳转由本拦截器统一执行；store 只清态与吊销，避免异步跳转竞态
+                userStore.logout({ navigate: false })
                 if (router) router.push({ name: 'Login' })
                 return Promise.reject(refreshErr)
               } finally {
@@ -311,7 +359,7 @@ request.interceptors.response.use(
             errorMsg = '登录已过期或未登录，请重新登录'
             try {
               const userStore = useUserStore()
-              userStore.logout()
+              userStore.logout({ navigate: false })
               if (router) router.push({ name: 'Login' })
             } catch (_) { /* store/router 可能未就绪 */ }
           } else if (isLoginRequest && errorMsg === '请求失败') {
@@ -321,12 +369,20 @@ request.interceptors.response.use(
         }
         case 403:
           errorMsg = '无权限访问'
-          try {
-            const userStore = useUserStore()
-            if (userStore.isLoggedIn) {
-              dedupMessage('error', '权限不足，请联系管理员', 5000)
-            }
-          } catch (_) { /* store 未就绪 */ }
+          // E14/D1：X-Silent-Error 的约定是「错误由调用方自行呈现」——
+          // 该分支的附加提示同样必须闭嘴，否则页面级单条提示仍会双弹。
+          if (!silentError) {
+            try {
+              const userStore = useUserStore()
+              if (userStore.isLoggedIn) {
+                // 收敛为一条提示，但保留 Request ID（排障线索不因去重丢失）；
+                // ID 后缀用 ASCII 以免新增一行硬编码中文（CJK 棘轮只缩不涨）
+                const permissionBase = '权限不足，请联系管理员'
+                dedupMessage('error', requestId ? `${permissionBase} [Request ID: ${requestId}]` : permissionBase, 5000)
+                suppressGenericToast = true
+              }
+            } catch (_) { /* store 未就绪 */ }
+          }
           break
         case 429:
           errorMsg = '请求过于频繁，请稍后再试'
@@ -341,7 +397,7 @@ request.interceptors.response.use(
         errorMsg = `${errorMsg}（请求ID: ${requestId}）`
       }
 
-      if (!silentError) {
+      if (!silentError && !suppressGenericToast) {
         dedupMessage('error', errorMsg, 5000)
       }
       emitApiMetricEvent({
@@ -377,6 +433,13 @@ const MAX_RETRIES = 3
 const RETRY_BASE_DELAY_MS = 1000
 const RETRYABLE_STATUS = new Set([502, 503, 504])
 
+/**
+ * 首屏聚合请求配置：重试预算降为 1 次（默认 3 次）。
+ * 用于仪表盘等一屏多请求场景 —— 单接口失败最多 2 次尝试即落到区块错误态，
+ * 避免「30s 超时 × 4 次尝试」把首屏拖到分钟级。
+ */
+export const FIRST_SCREEN_REQUEST_CONFIG = { __maxRetries: 1 } as const
+
 request.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -396,9 +459,14 @@ request.interceptors.response.use(
     const isRetryableStatus = error.response ? RETRYABLE_STATUS.has(error.response.status) : false
     if (!isNetworkError && !isRetryableStatus) return Promise.reject(error)
 
-    // Track retry count
+    // Track retry count（每请求可通过 __maxRetries 覆盖预算，首屏请求传 1）
     const retryCount = (config as ExtendedAxiosConfig & { __retryCount?: number }).__retryCount ?? 0
-    if (retryCount >= MAX_RETRIES) return Promise.reject(error)
+    const configuredMaxRetries = config.__maxRetries
+    const maxRetries =
+      typeof configuredMaxRetries === 'number' && Number.isInteger(configuredMaxRetries) && configuredMaxRetries >= 0
+        ? configuredMaxRetries
+        : MAX_RETRIES
+    if (retryCount >= maxRetries) return Promise.reject(error)
 
     // Exponential backoff with jitter
     const delay = RETRY_BASE_DELAY_MS * Math.pow(2, retryCount) + Math.random() * 500

@@ -9,6 +9,7 @@
   「合并 → 截断 → 计数」路径的覆盖，并顺带钉住"实际执行的检索次数 =
   截断后的最终条数"这一现场事实。
 """
+
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -64,7 +65,9 @@ async def test_llm_rewrite_counted_after_truncation(monkeypatch):
 
     await retriever._keyword_hits(QUERY, [], candidate_size=10)
 
-    assert search.await_count == 4, f"实际执行的检索次数应为截断后的 4 次，实际 {search.await_count}"
+    assert search.await_count == 4, (
+        f"实际执行的检索次数应为截断后的 4 次，实际 {search.await_count}"
+    )
     assert spy.inc.call_args_list == [((2,), {})], (
         f"只应计入存活的新增变体 2 条（5 条候选被截到 4），实际调用 {spy.inc.call_args_list}"
     )

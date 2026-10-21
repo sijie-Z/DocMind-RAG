@@ -16,6 +16,7 @@ hasattr 命中类方法 → setattr 到实例）→ 单例被永久 shadow，类
 import 每次取模块属性）对实例 shadow 免疫；源头泄漏已在
 tests/unit/test_rag_fix_org_scope.py 一并修复。
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -29,6 +30,7 @@ from app.rag.errors import RetrievalUnavailableError
 @pytest.fixture
 def client():
     from app.main import app
+
     return TestClient(app)
 
 

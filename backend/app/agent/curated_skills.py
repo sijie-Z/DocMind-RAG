@@ -55,7 +55,12 @@ class CuratedSkill:
 
     def get_summary(self) -> str:
         """Full prompt-ready summary including description and body."""
-        parts = [f"# 技能: {self.name}\n", f"{self.description}\n", "---\n", f"## 技能指南\n\n{self.content}\n"]
+        parts = [
+            f"# 技能: {self.name}\n",
+            f"{self.description}\n",
+            "---\n",
+            f"## 技能指南\n\n{self.content}\n",
+        ]
         if self.references:
             parts.append("## 可用参考文档\n")
             parts.append("调用 load_skill_reference 函数获取：\n")
@@ -70,7 +75,12 @@ class CuratedSkill:
             reference_contents: {ref_name: content} mapping. If empty/None,
                                references are listed but not embedded.
         """
-        parts = [f"# 技能: {self.name}\n", f"{self.description}\n", "---\n", f"## 技能指南\n\n{self.content}\n"]
+        parts = [
+            f"# 技能: {self.name}\n",
+            f"{self.description}\n",
+            "---\n",
+            f"## 技能指南\n\n{self.content}\n",
+        ]
         if reference_contents:
             parts.append("## 参考文档\n")
             for ref_name, ref_body in reference_contents.items():
@@ -126,7 +136,9 @@ class CuratedSkillRegistry:
                 skill = self._load_one(skill_dir, skill_file)
                 self._skills[skill.name] = skill
                 count += 1
-                logger.info("Loaded curated skill: %s (%d references)", skill.name, len(skill.references))
+                logger.info(
+                    "Loaded curated skill: %s (%d references)", skill.name, len(skill.references)
+                )
             except Exception as e:
                 logger.warning("Failed to load skill from %s: %s", skill_dir, e)
 

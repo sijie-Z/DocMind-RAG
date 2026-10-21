@@ -8,6 +8,7 @@ Inspired by hermes-agent's Curator and skill management system.
 
 Storage: Redis hash with TTL for auto-expiry of stale skills.
 """
+
 import hashlib
 import json
 import logging
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Skill:
     """A learned tool-use pattern."""
+
     id: str
     name: str
     description: str
@@ -72,6 +74,7 @@ class SkillManager:
             return
         try:
             from app.core.redis import redis_client
+
             if redis_client is None:
                 self._loaded = True
                 return
@@ -92,6 +95,7 @@ class SkillManager:
         """Persist skills to Redis."""
         try:
             from app.core.redis import redis_client
+
             if redis_client is None:
                 return
             data = [s.to_dict() for s in self._skills.values()]
@@ -120,7 +124,7 @@ class SkillManager:
                 if pattern.lower() in query_lower:
                     score += 1.0
             # Weight by success rate
-            score *= (0.5 + 0.5 * skill.success_rate)
+            score *= 0.5 + 0.5 * skill.success_rate
             if score > best_score:
                 best_score = score
                 best_skill = skill
@@ -135,9 +139,9 @@ class SkillManager:
         tool_sequence: list[dict[str, Any]],
     ) -> Skill:
         """Create a new skill from a successful tool sequence."""
-        skill_id = hashlib.md5(
-            f"{name}:{time.time()}".encode(), usedforsecurity=False
-        ).hexdigest()[:12]
+        skill_id = hashlib.md5(f"{name}:{time.time()}".encode(), usedforsecurity=False).hexdigest()[
+            :12
+        ]
         skill = Skill(
             id=skill_id,
             name=name,
@@ -197,8 +201,14 @@ class SkillManager:
 
         # Extract keywords as trigger patterns
         import re
-        keywords = re.findall(r'[一-鿿]{2,}', query)  # Chinese bigrams
+
+        keywords = re.findall(r"[一-鿿]{2,}", query)  # Chinese bigrams
         keywords += [w.lower() for w in query.split() if len(w) > 3 and w.isalpha()]
+        # 保序去重止血——纯中文查询同一串被上面两行各记一次触发词
+        # （findall 提整段汉字串 + split 循环 isalpha 再记一遍），冷启动单模式会
+        # 2×0.5=1.0 恰好踩线命中；去重后单串 0.5<1.0（未验证技能不凭一个词命中）。
+        # 只去重，不做分词、不动阈值与其它学习逻辑。
+        keywords = list(dict.fromkeys(keywords))
         keywords = keywords[:5]
 
         # 无触发词的技能永远匹配不上：不制造注定无用的记录（评审 B2 配套）。
@@ -216,10 +226,13 @@ class SkillManager:
             name=f"Auto: {query[:50]}",
             description=f"Learned from: {query[:80]}",
             trigger_patterns=keywords,
-            tool_sequence=[{
-                "tool_name": s.get("tool_hint", ""),
-                "description": s.get("description", ""),
-            } for s in tool_steps],
+            tool_sequence=[
+                {
+                    "tool_name": s.get("tool_hint", ""),
+                    "description": s.get("description", ""),
+                }
+                for s in tool_steps
+            ],
         )
 
 

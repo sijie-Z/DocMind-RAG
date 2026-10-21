@@ -1,4 +1,5 @@
 """User response schemas — single source of truth for User serialization."""
+
 from datetime import datetime
 from typing import Any
 
@@ -7,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 class UserInfoResponse(BaseModel):
     """Canonical User response schema used across all endpoints."""
+
     id: int
     username: str
     email: str
@@ -19,6 +21,9 @@ class UserInfoResponse(BaseModel):
     role: str = "user"
     is_active: bool = True
     is_superuser: bool = False
+    # W0-1：当前组织内的 OrgAdmin 角色（per-org）。与 is_superuser 分开下发：
+    # 前端据此区分「平台管理页」与「组织管理页」；users.role 只是展示标签。
+    is_org_admin: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
     last_login_at: datetime | None = None
@@ -38,6 +43,11 @@ class UserStatsResponse(BaseModel):
     storage_used: int = 0
     storage_limit: int = 0
     activity_trend: list[int] = []
+    # issue #301（批 C）：统计查询失败时不再把「全零」伪装成真实数据 ——
+    # 降级形态带身份（degraded=True + reason 说明）。既有键语义不变，
+    # 前端（dashboard/user.vue、profile 页）可按需展示「数据暂不可用」。
+    degraded: bool = False
+    reason: str | None = None
 
 
 class UserUpdateProfile(BaseModel):

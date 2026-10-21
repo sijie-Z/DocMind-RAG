@@ -1,7 +1,7 @@
 # Dev / CI tooling — not part of runtime deps.
 # Pin to avoid surprise rule changes breaking CI.
 
-ruff>=0.16.6,<1.0
+ruff==0.16.10
 bandit>=1.9.4
 aiosqlite>=0.22.1
 alembic>=1.20.0

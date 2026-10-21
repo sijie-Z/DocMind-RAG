@@ -1,14 +1,14 @@
 # DocMind 本地启动指南
 
+> 基础设施的端口 / 账号 / 库名以 `backend/docker-compose.yml` 为**唯一真源**，本文只做引述；
+> 调整端口或凭据请改 compose 与 `.env.docker`，不要把本文当成第二套配置源。
+
 ## 前置依赖
 
-- Python 3.10+
-- Node.js 18+
-- MySQL 8
-- Redis
-- Elasticsearch 8
-- MinIO
-- Kafka + Zookeeper
+- Python 3.11+
+- Node.js 20.19+
+- Docker Desktop（推荐，用于启动基础设施），或本机安装：
+  MySQL 8 · Redis 7 · Elasticsearch 8 · MinIO · Kafka
 
 ---
 
@@ -17,47 +17,61 @@
 ```bash
 cd backend
 
-# 只启动基础设施（MySQL、Redis、ES、MinIO、Kafka）
-docker-compose up -d mysql redis elasticsearch minio kafka zookeeper
+# 0) 配置文件先行：缺少 .env.docker 时，compose 的任意命令都会直接报错
+cp .env.docker.example .env.docker    # Windows: copy .env.docker.example .env.docker
+# 至少填写：SECRET_KEY / JWT_SECRET_KEY、DEEPSEEK_API_KEY（Embedding 默认复用同一 Key）、
+#          MYSQL_ROOT_PASSWORD / MYSQL_PASSWORD、MINIO_ACCESS_KEY / MINIO_SECRET_KEY、
+#          GRAFANA_PASSWORD（后五项缺失时 compose 直接报错，不再回退弱默认值）
+# 密码生成: python -c "import secrets; print(secrets.token_hex(24))"
 
-# 等待所有服务健康（约 1-2 分钟）
-docker-compose ps
+# 1) 只启动基础设施（后端 / Worker 在宿主机跑，见下文）
+docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
+
+# 2) 等待所有服务健康（约 1-2 分钟）
+docker compose --env-file .env.docker ps
 ```
 
-### Docker 服务端口映射
+### 基础设施端口（与 compose 一致）
 
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| MySQL | 3308 | 宿主机 3308 → 容器 3306 |
-| Redis | 6379 | 默认端口 |
-| Elasticsearch | 9200 | 默认端口 |
-| MinIO API | 9000 | 对象存储 |
-| MinIO Console | 9001 | Web 管理界面 |
-| Kafka | 9092 | 消息队列 |
+| 服务 | 宿主机 | 容器内 | 说明 |
+|------|--------|--------|------|
+| MySQL | 3308 | 3306 | 库 `docmind`、用户 `docmind` 由 compose 自动创建 |
+| Redis | 6390 | 6379 | 可用 `REDIS_PASSWORD` 启用密码（默认无密码、仅绑定 127.0.0.1） |
+| Elasticsearch | 9200 | 9200 | 单节点、关闭安全 |
+| MinIO API / Console | 9000 / 9001 | 9000 / 9001 | 控制台 :9001 |
+| Kafka | 9092 | 29092 | 宿主机应用连 localhost:9092 |
+| Prometheus / Grafana | 9090 / 3001 | — | 完整 compose（10 服务）启动时才拉起 |
 
-### 创建数据库
+### 数据库连接（无需手动建库）
 
-```sql
--- 连接 MySQL（端口 3308）
-mysql -h 127.0.0.1 -P 3308 -u root -pchangeme_root_pw
+compose 依据 `.env.docker` 的 `MYSQL_DATABASE` / `MYSQL_USER` / `MYSQL_PASSWORD`
+自动创建库与账号。用本机工具连接：
 
--- 创建数据库
-CREATE DATABASE docmind_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```bash
+mysql -h 127.0.0.1 -P 3308 -u docmind -p    # 密码 = .env.docker 中的 MYSQL_PASSWORD
+```
+
+宿主机应用侧的连接串（写进 `backend/.env`）：
+
+```
+DATABASE_URL=mysql+aiomysql://docmind:<MYSQL_PASSWORD>@localhost:3308/docmind
 ```
 
 ---
 
-## 方式二：本地服务
+## 方式二：本机服务
 
-如果本地已安装这些服务，确保以下配置对应：
+MySQL / Redis / ES / MinIO / Kafka 都装在本机时，不需要 Docker：
+把 `backend/.env` 里的地址指向本机实例即可（端口以你的本机安装为准）。
+对应配置键：
 
-| 服务 | 默认连接 |
-|------|----------|
-| MySQL | `root:root@localhost:3306/docmind_db` |
-| Redis | `localhost:6379` |
-| Elasticsearch | `http://localhost:9200` |
-| MinIO | `localhost:9000` (minioadmin/minioadmin) |
-| Kafka | `localhost:9092` |
+| 服务 | 配置键 |
+|------|--------|
+| MySQL | `DATABASE_URL` |
+| Redis | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` |
+| Elasticsearch | `ELASTICSEARCH_HOSTS` |
+| MinIO | `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` |
+| Kafka | `KAFKA_BOOTSTRAP_SERVERS` |
 
 ---
 
@@ -66,7 +80,10 @@ CREATE DATABASE docmind_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```bash
 cd backend
 
-# 激活虚拟环境
+# 首次：创建本地环境文件（SECRET_KEY / JWT_SECRET_KEY 必填，留空服务无法启动）
+cp .env.example .env    # Windows: copy .env.example .env
+
+# 激活虚拟环境（首次需先 python -m venv venv）
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # Linux/Mac
 
@@ -123,28 +140,32 @@ npm run dev
 
 | 文件 | 用途 |
 |------|------|
-| `backend/.env` | 本地开发环境配置 |
-| `backend/.env.docker` | Docker 部署配置 |
-| `backend/.env.example` | 配置模板（参考） |
+| `backend/.env` | 本地开发环境配置（宿主机跑后端 / Worker） |
+| `backend/.env.docker` | Docker 部署配置（compose 的 env_file；基础设施凭据同此来源） |
+| `backend/.env.example` / `.env.docker.example` | 配置模板（仓库不含真实密钥） |
 
 ### AI 模型配置
 
-当前使用**智谱 AI 全家桶**：
+模型/向量维度默认值以代码真源 `backend/app/core/config/ai.py` 为准：
 
-| 模型 | 用途 | 配置项 |
-|------|------|--------|
-| glm-4-flash | Chat 对话 | `DEEPSEEK_MODEL` |
-| embedding-3 | 向量化 | `EMBEDDING_MODEL`，维度 2048 |
-| rerank | 重排序 | `RERANK_MODEL` |
+| 配置项 | 默认值 | 用途 |
+|--------|--------|------|
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | Chat 对话 |
+| `EMBEDDING_MODEL` | `nomic-embed-text`（本机 Ollama） | 向量化 |
+| `VECTOR_DIMENSION` | `768` | 向量维度 |
 
-三个模型共用同一个 API Key，已配置在 `.env` 中。
+Embedding 默认走本机 Ollama（`EMBEDDING_API_URL=http://localhost:11434/v1`），
+无需单独的 Embedding Key（复用 `DEEPSEEK_API_KEY`）；使用云端 Embedding 时
+URL / 模型 / 维度三键必须配套修改（例如智谱 `embedding-3` 为 2048 维）。
+Rerank 默认使用本地 BGE，无需 API Key。Chat API Key 需自行填入 `.env` /
+`.env.docker`（模板不含真实密钥）。
 
 ---
 
 ## 常见问题
 
 ### 1. MySQL 连接失败
-确认 MySQL 已启动，数据库已创建。Docker 模式下端口是 3308 不是 3306。
+确认 MySQL 已启动；Docker 基础设施模式下端口是 **3308**（不是 3306），库 `docmind` 与用户 `docmind` 由 compose 自动创建，无需手动建库。
 
 ### 2. Elasticsearch 连接失败
 ES 启动较慢，等待 30 秒后重试。
@@ -167,4 +188,4 @@ Kafka 仅用于异步文档处理。如果 Kafka 未启动，文档上传后需�
 start_windows.bat
 ```
 
-会自动启动后端、Worker 和前端，打开三个命令行窗口。
+会依次清理端口并启动**后端与前端两个窗口**（Worker 需按上文单独启动）。

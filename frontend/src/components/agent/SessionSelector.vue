@@ -2,19 +2,21 @@
   <div class="session-selector">
     <select
       :value="modelValue"
+      :aria-label="t('agent.sessionSelectorLabel')"
       @change="$emit('update:modelValue', ($event.target as HTMLSelectElement).value)"
       class="session-select"
     >
-      <option value="">+ 新建会话</option>
+      <option value="">{{ t('agent.newSessionOption') }}</option>
       <option v-for="s in sessions" :key="s.id" :value="s.id">
-        {{ s.title || 'Untitled' }} ({{ s.message_count }})
+        {{ s.title || t('agent.untitledSession') }} ({{ s.message_count }})
       </option>
     </select>
     <button
       v-if="modelValue"
       class="delete-session-btn"
+      :aria-label="t('agent.deleteSessionConfirmTitle')"
+      :title="t('agent.deleteSessionConfirmTitle')"
       @click="$emit('delete', modelValue)"
-      title="删除当前会话"
     >
       🗑
     </button>
@@ -22,7 +24,10 @@
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import type { AgentSession } from '@/types/agent'
+
+const { t } = useI18n()
 
 defineProps<{
   sessions: AgentSession[]

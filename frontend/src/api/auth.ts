@@ -42,24 +42,38 @@ export function register(data: RegisterForm) {
   )
 }
 
+/**
+ * 用户登出：请求服务端吊销当前 access token（可选附带 refresh token，
+ * 防止登出后仍可用 refresh 续期）。
+ *
+ * `accessToken`：调用方通常在发请求前已同步清空本地凭证，请求拦截器不再自动
+ * 注入 Authorization，这里显式携带以完成吊销。
+ *
+ * `_skipAuthRefresh`：本请求收到 401 时不得再进入刷新/自动登出链，
+ * 否则「登出 → 401 → 刷新失败 → 自动登出 → 登出」会互相递归。
+ * `X-Silent-Error`：失败提示由调用方（user store）统一处理，
+ * 避免拦截器再弹一条全局错误 toast。
+ */
+export function logout(refreshToken?: string, accessToken?: string) {
+  const headers: Record<string, string> = { 'X-Silent-Error': '1' }
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`
+  }
+  const config = {
+    headers,
+    _skipAuthRefresh: true,
+  }
+  return request.post<ApiResponse>(
+    '/auth/logout',
+    refreshToken ? { refresh_token: refreshToken } : null,
+    config
+  )
+}
+
 // 获取用户信息
 export function getUserProfile() {
   // 使用 /users/me 接口，因为它包含更完整的用户信息处理（如 bio/preferences 解析）
   return request.get<ApiResponse<UserInfo>>(
     '/users/me'
   )
-}
-
-// 刷新访问令牌（后端 /auth/refresh 使用 query 参数）
-export function refreshAccessToken(refreshToken: string) {
-  return request.post<ApiResponse<{
-    access_token: string
-    token_type: string
-    expires_in: number
-    refresh_token: string
-    user_info: UserInfo
-  }>>('/auth/refresh', null, {
-    params: { refresh_token: refreshToken },
-    headers: { 'X-Silent-Error': '1' }
-  })
 }

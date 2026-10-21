@@ -24,6 +24,7 @@ async def seed():
         if not user:
             print(f"Creating user {username}...")
             # Create user without org first
+            # W0-1：平台管理员只认显式 is_superuser；users.role 仅作展示标签。
             user = await auth_service.create_user(
                 db,
                 username=username,
@@ -31,11 +32,18 @@ async def seed():
                 password="password123",
                 full_name="Administrator",
                 organization_id=None,
-                role="admin",
+                role="user",
             )
+            user.is_superuser = True
             print(f"User {username} created. ID: {user.id}")
         else:
+            # 修复既有账号：role=admin 标签不再产生平台权限。
+            user.is_superuser = True
             print(f"User {username} exists. ID: {user.id}")
+
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
 
         # 2. Check/Create Organization
         print("Checking organization...")

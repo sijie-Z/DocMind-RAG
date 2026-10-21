@@ -15,6 +15,7 @@ TestClient 只记录 ``accepted_subprotocol``、从不校验它与客户端请�
 JWT 签名，Redis 黑名单查询固定为 False —— 本文件被测点是"回显"，黑名单语义由
 其它测试覆盖。
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -33,9 +34,7 @@ NOTIFY_WS = "/api/v1/notifications/ws"
 
 
 def _mint_token(user_id: int = 1) -> str:
-    return auth_service.create_access_token(
-        {"sub": "subecho", "user_id": user_id, "role": "user"}
-    )
+    return auth_service.create_access_token({"sub": "subecho", "user_id": user_id, "role": "user"})
 
 
 def _mock_db(user_id: int = 1, is_active: bool = True, organization_id: int = 1) -> MagicMock:
@@ -43,7 +42,9 @@ def _mock_db(user_id: int = 1, is_active: bool = True, organization_id: int = 1)
     db = MagicMock()
     result = MagicMock()
     result.first = MagicMock(
-        return_value=SimpleNamespace(id=user_id, is_active=is_active, organization_id=organization_id)
+        return_value=SimpleNamespace(
+            id=user_id, is_active=is_active, organization_id=organization_id
+        )
     )
     db.execute = AsyncMock(return_value=result)
     db.close = AsyncMock()

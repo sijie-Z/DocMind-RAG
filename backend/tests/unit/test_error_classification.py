@@ -30,7 +30,15 @@ def test_timeout_classification(raw_text, expected_code):
     from app.agent.registry import tool_registry
 
     async def apply():
-        ctx = type("ctx", (), {"tool_name": "test", "arguments": {}, "entry": type("e", (), {"requires_auth": False})()})()
+        ctx = type(
+            "ctx",
+            (),
+            {
+                "tool_name": "test",
+                "arguments": {},
+                "entry": type("e", (), {"requires_auth": False})(),
+            },
+        )()
         await tool_registry._builtin_error_mapper_hook(result, ctx)
 
     asyncio.run(apply())
@@ -60,7 +68,15 @@ def test_connection_classification(raw_text, expected_code):
     from app.agent.registry import tool_registry
 
     async def apply():
-        ctx = type("ctx", (), {"tool_name": "test", "arguments": {}, "entry": type("e", (), {"requires_auth": False})()})()
+        ctx = type(
+            "ctx",
+            (),
+            {
+                "tool_name": "test",
+                "arguments": {},
+                "entry": type("e", (), {"requires_auth": False})(),
+            },
+        )()
         await tool_registry._builtin_error_mapper_hook(result, ctx)
 
     asyncio.run(apply())
@@ -77,7 +93,15 @@ def test_rate_limit():
     from app.agent.registry import tool_registry
 
     async def apply():
-        ctx = type("ctx", (), {"tool_name": "test", "arguments": {}, "entry": type("e", (), {"requires_auth": False})()})()
+        ctx = type(
+            "ctx",
+            (),
+            {
+                "tool_name": "test",
+                "arguments": {},
+                "entry": type("e", (), {"requires_auth": False})(),
+            },
+        )()
         await tool_registry._builtin_error_mapper_hook(result, ctx)
 
     asyncio.run(apply())
@@ -102,7 +126,15 @@ def test_auth_classification(raw_text, expected_code):
     from app.agent.registry import tool_registry
 
     async def apply():
-        ctx = type("ctx", (), {"tool_name": "test", "arguments": {}, "entry": type("e", (), {"requires_auth": False})()})()
+        ctx = type(
+            "ctx",
+            (),
+            {
+                "tool_name": "test",
+                "arguments": {},
+                "entry": type("e", (), {"requires_auth": False})(),
+            },
+        )()
         await tool_registry._builtin_error_mapper_hook(result, ctx)
 
     asyncio.run(apply())
@@ -127,7 +159,15 @@ def test_payload_context_classification(raw_text, expected_code):
     from app.agent.registry import tool_registry
 
     async def apply():
-        ctx = type("ctx", (), {"tool_name": "test", "arguments": {}, "entry": type("e", (), {"requires_auth": False})()})()
+        ctx = type(
+            "ctx",
+            (),
+            {
+                "tool_name": "test",
+                "arguments": {},
+                "entry": type("e", (), {"requires_auth": False})(),
+            },
+        )()
         await tool_registry._builtin_error_mapper_hook(result, ctx)
 
     asyncio.run(apply())
@@ -153,7 +193,15 @@ def test_serialization_empty_classification(raw_text, expected_code):
     from app.agent.registry import tool_registry
 
     async def apply():
-        ctx = type("ctx", (), {"tool_name": "test", "arguments": {}, "entry": type("e", (), {"requires_auth": False})()})()
+        ctx = type(
+            "ctx",
+            (),
+            {
+                "tool_name": "test",
+                "arguments": {},
+                "entry": type("e", (), {"requires_auth": False})(),
+            },
+        )()
         await tool_registry._builtin_error_mapper_hook(result, ctx)
 
     asyncio.run(apply())
@@ -164,13 +212,23 @@ def test_serialization_empty_classification(raw_text, expected_code):
 
 
 def test_doom_loop_detected():
-    result = ToolResult.fail("unknown", "stuck", raw=FakeException("repetitive identical response detected"))
+    result = ToolResult.fail(
+        "unknown", "stuck", raw=FakeException("repetitive identical response detected")
+    )
     import asyncio
 
     from app.agent.registry import tool_registry
 
     async def apply():
-        ctx = type("ctx", (), {"tool_name": "test", "arguments": {}, "entry": type("e", (), {"requires_auth": False})()})()
+        ctx = type(
+            "ctx",
+            (),
+            {
+                "tool_name": "test",
+                "arguments": {},
+                "entry": type("e", (), {"requires_auth": False})(),
+            },
+        )()
         await tool_registry._builtin_error_mapper_hook(result, ctx)
 
     asyncio.run(apply())
@@ -204,7 +262,15 @@ def test_remaining_classification(raw_text, expected_code):
     from app.agent.registry import tool_registry
 
     async def apply():
-        ctx = type("ctx", (), {"tool_name": "test", "arguments": {}, "entry": type("e", (), {"requires_auth": False})()})()
+        ctx = type(
+            "ctx",
+            (),
+            {
+                "tool_name": "test",
+                "arguments": {},
+                "entry": type("e", (), {"requires_auth": False})(),
+            },
+        )()
         await tool_registry._builtin_error_mapper_hook(result, ctx)
 
     asyncio.run(apply())
@@ -222,7 +288,15 @@ def test_no_raw_leaves_original_code():
     from app.agent.registry import tool_registry
 
     async def apply():
-        ctx = type("ctx", (), {"tool_name": "test", "arguments": {}, "entry": type("e", (), {"requires_auth": False})()})()
+        ctx = type(
+            "ctx",
+            (),
+            {
+                "tool_name": "test",
+                "arguments": {},
+                "entry": type("e", (), {"requires_auth": False})(),
+            },
+        )()
         await tool_registry._builtin_error_mapper_hook(result, ctx)
 
     asyncio.run(apply())

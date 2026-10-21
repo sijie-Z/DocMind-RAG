@@ -13,6 +13,24 @@ COPY requirements.txt .
 ARG PIP_INDEX_URL
 RUN pip install --no-cache-dir ${PIP_INDEX_URL:+-i "$PIP_INDEX_URL"} --prefix=/install -r requirements.txt
 
+# ---------------------------------------------------------------------------
+# 图片 OCR 依赖链换 headless（评审阻塞项修复，2026-10-10）：
+# rapidocr-onnxruntime 的元数据强拉 GUI 版 opencv-python
+# （Requires-Dist: opencv-python>=4.5.1.48）。GUI 版 Linux wheel 实测在
+# python:3.11-slim 内 `import cv2` 直接失败：ImportError libxcb.so.1
+# （wheel 自带 opencv_python.libs/ 捆绑的 Qt5/X11/xcb 链还缺核心 xcb 库），
+# → 图片 OCR 在 docker/k8s 部署目标全量不可用。纯 CPU 文字检测/识别不需要
+# 任何 GUI 能力，换同版本 headless 即可（实测零缺库导入）。
+# 为什么按路径删除而不是 pip uninstall：--prefix=/install 的安装不在当前
+# 解释器的 sys.path 里，pip uninstall 找不到它。GUI 版顶层产物就三项：
+# cv2/、opencv_python-*.dist-info/、opencv_python.libs/（与 headless 的
+# opencv_python_headless-*.dist-info 前缀不同，不会误伤）。
+# ---------------------------------------------------------------------------
+RUN SITE=/install/lib/python3.11/site-packages \
+    && rm -rf "$SITE"/cv2 "$SITE"/opencv_python-*.dist-info "$SITE"/opencv_python.libs \
+    && pip install --no-cache-dir ${PIP_INDEX_URL:+-i "$PIP_INDEX_URL"} \
+       --prefix=/install --no-deps opencv-python-headless==5.0.0.93
+
 # ---- Runtime stage ----
 FROM python:3.11-slim
 
@@ -28,6 +46,11 @@ RUN useradd -r -s /bin/false -d /app appuser
 
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
+
+# OCR 链导入自检：GUI 版 opencv 混入（或 headless 缺库）在无 X/GL 的 runtime
+# import 即炸（libxcb.so.1 类错误）—— 把这类坏镜像挡在构建期，而不是部署后才
+# 暴露（docker-build.yml 此前只 build 不 run，缺这类 smoke）。
+RUN python -c "import cv2, rapidocr_onnxruntime; print('ocr chain ok:', cv2.__version__)"
 
 # Copy application code
 COPY . .
@@ -63,7 +86,7 @@ EXPOSE 8000
 
 USER appuser
 
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/readyz || exit 1
 
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

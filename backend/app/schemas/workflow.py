@@ -1,6 +1,7 @@
 """
 Agent 工作流 Pydantic Schemas
 """
+
 from datetime import datetime
 from typing import Any
 
@@ -10,9 +11,15 @@ from pydantic import BaseModel, ConfigDict, Field
 # --- 工作流节点定义 ---
 class WorkflowNode(BaseModel):
     """工作流节点"""
+
     id: str = Field(..., description="节点唯一ID")
-    type: str = Field(..., description="节点类型: llm_openai, llm_deepseek, llm_qwen, input, output, condition, tool_tts, tool_search")
-    position: dict[str, float] = Field(default_factory=lambda: {"x": 0, "y": 0}, description="节点位置")
+    type: str = Field(
+        ...,
+        description="节点类型: llm_openai, llm_deepseek, llm_qwen, input, output, condition, tool_tts, tool_search",
+    )
+    position: dict[str, float] = Field(
+        default_factory=lambda: {"x": 0, "y": 0}, description="节点位置"
+    )
     data: dict[str, Any] = Field(default_factory=dict, description="节点配置数据")
 
     model_config = ConfigDict(extra="allow")
@@ -20,6 +27,7 @@ class WorkflowNode(BaseModel):
 
 class WorkflowEdge(BaseModel):
     """工作流边（连接线）"""
+
     id: str = Field(..., description="边唯一ID")
     source: str = Field(..., description="源节点ID")
     target: str = Field(..., description="目标节点ID")
@@ -30,6 +38,7 @@ class WorkflowEdge(BaseModel):
 
 class WorkflowConfig(BaseModel):
     """完整工作流配置"""
+
     nodes: list[WorkflowNode] = Field(default_factory=list, description="节点列表")
     edges: list[WorkflowEdge] = Field(default_factory=list, description="边列表")
 
@@ -37,6 +46,7 @@ class WorkflowConfig(BaseModel):
 # --- API 请求/响应 ---
 class WorkflowCreate(BaseModel):
     """创建工作流"""
+
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = None
     flow_data: WorkflowConfig | None = None
@@ -44,6 +54,7 @@ class WorkflowCreate(BaseModel):
 
 class WorkflowUpdate(BaseModel):
     """更新工作流"""
+
     name: str | None = Field(None, min_length=1, max_length=100)
     description: str | None = None
     flow_data: WorkflowConfig | None = None
@@ -52,6 +63,7 @@ class WorkflowUpdate(BaseModel):
 
 class WorkflowResponse(BaseModel):
     """工作流响应"""
+
     id: int
     name: str
     description: str | None
@@ -66,6 +78,7 @@ class WorkflowResponse(BaseModel):
 
 class WorkflowExecuteRequest(BaseModel):
     """执行工作流请求"""
+
     workflow_id: int
     input_data: dict[str, Any] | None = None
     stream: bool = Field(default=True, description="是否流式输出")
@@ -73,6 +86,7 @@ class WorkflowExecuteRequest(BaseModel):
 
 class NodeResult(BaseModel):
     """节点执行结果"""
+
     node_id: str
     node_type: str
     status: str  # pending, running, completed, failed
@@ -88,6 +102,7 @@ class NodeResult(BaseModel):
 
 class ExecutionResponse(BaseModel):
     """执行响应"""
+
     execution_id: int
     workflow_id: int
     status: str
@@ -104,6 +119,7 @@ class ExecutionResponse(BaseModel):
 
 class NodeDefinitionResponse(BaseModel):
     """节点定义响应"""
+
     id: int
     node_type: str
     name: str

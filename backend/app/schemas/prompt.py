@@ -11,8 +11,14 @@ class PromptTemplateBase(BaseModel):
     is_system: bool = Field(False, description="是否为系统内置")
     category: str = Field("general", description="分类")
 
+
 class PromptTemplateCreate(PromptTemplateBase):
-    pass
+    # B4（D6）：创建时的模板层级。默认 organization（保持既有创建语义）；
+    # personal 仅创建者可见/可激活。system 由 seed 端点独占，客户端传入会被拒。
+    scope: str = Field(
+        "organization", description="模板层级：organization / personal（system 保留）"
+    )
+
 
 class PromptTemplateUpdate(BaseModel):
     name: str | None = None
@@ -21,16 +27,20 @@ class PromptTemplateUpdate(BaseModel):
     is_active: bool | None = None
     category: str | None = None
 
+
 class PromptTemplateUpdateWithNote(PromptTemplateUpdate):
     change_note: str | None = Field(None, description="变更说明")
 
+
 class PromptTemplateResponse(PromptTemplateBase):
     id: int
+    scope: str = Field("organization", description="模板层级：system / organization / personal")
     created_at: datetime
     updated_at: datetime | None = None
     creator_id: int | None = None
     version: int = Field(1, description="当前版本号")
     model_config = ConfigDict(from_attributes=True)
+
 
 class PromptTemplateVersionResponse(BaseModel):
     id: int

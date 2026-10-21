@@ -75,8 +75,12 @@ class TestDetectEdgeCases:
 class TestHardwareProfile:
     def test_dataclass_fields(self):
         hw = HardwareProfile(
-            tier="cpu", gpu_name="", vram_mb=0,
-            embedding_model="bge-m3", reranker_model="BGE-base", vector_dim=1024,
+            tier="cpu",
+            gpu_name="",
+            vram_mb=0,
+            embedding_model="bge-m3",
+            reranker_model="BGE-base",
+            vector_dim=1024,
         )
         assert hw.tier == "cpu"
         assert hw.embedding_model == "bge-m3"

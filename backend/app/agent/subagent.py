@@ -28,7 +28,7 @@ async def delegate_task(
     parent_context: str = "",
     model: str = "deepseek-v4-flash",
     max_iterations: int = 5,
-    organization_id: int = 1,
+    organization_id: int | None = None,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Delegate a subtask to a child PER agent.
 
@@ -45,6 +45,9 @@ async def delegate_task(
         max_iterations: Maximum iterations.
         organization_id: Organization scope.
     """
+    # A2 P0（fail-closed）：子代理继承父代理的组织边界；缺失即拒绝派发。
+    if organization_id is None:
+        raise ValueError("delegate_task 缺少 organization_id，拒绝在无组织上下文下派发子任务")
     child_config = AgentConfig(
         model=model,
         max_iterations=max_iterations,
@@ -79,7 +82,7 @@ async def run_parallel_subtasks(
     client: AsyncOpenAI,
     tasks: list[str],
     model: str = "deepseek-v4-flash",
-    organization_id: int = 1,
+    organization_id: int | None = None,
     parent_context: str = "",
     per_task_timeout: float | None = 300.0,
 ) -> list[str]:
@@ -91,6 +94,11 @@ async def run_parallel_subtasks(
 
     `per_task_timeout`：单个子任务墙钟上限（秒）；None 表示不设。
     """
+    # A2 P0（fail-closed）：并行子任务同样必须带组织上下文。
+    if organization_id is None:
+        raise ValueError(
+            "run_parallel_subtasks 缺少 organization_id，拒绝在无组织上下文下派发子任务"
+        )
 
     async def _collect_events(task: str) -> list[str]:
         parts: list[str] = []
@@ -110,9 +118,7 @@ async def run_parallel_subtasks(
     async def _run_one(task: str) -> str:
         try:
             if per_task_timeout:
-                parts = await asyncio.wait_for(
-                    _collect_events(task), timeout=per_task_timeout
-                )
+                parts = await asyncio.wait_for(_collect_events(task), timeout=per_task_timeout)
             else:
                 parts = await _collect_events(task)
         except TimeoutError:

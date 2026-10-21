@@ -60,12 +60,20 @@ export function useChatConnection(
       if (data.conversationId && (!chatStore.currentConversation || chatStore.currentConversation.id !== data.conversationId)) {
         chatStore.setCurrentConversation({
           id: data.conversationId,
-          title: data.title || (messages.value.find(m => m.messageType === 'user')?.content?.slice(0, 20) || t('chat.newConversation')),
+          // chat WS 三类载荷（chunk/message/error，chat.py:520-545）均无 title 键——
+          // 旧读点 data.title 恒 undefined（B41）；直接用首条用户消息回退命名
+          title: messages.value.find(m => m.messageType === 'user')?.content?.slice(0, 20) || t('chat.newConversation'),
           userId: userId!,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         })
         fetchConversations()
+      }
+      // W2-T7 项 4：流式开关关闭时 chunk 不逐字上屏，等待 'message' 终态一次性落屏
+      // （WS 与 SSE 两条传送带同一开关语义）。
+      if (!useStream.value) {
+        scrollToBottom()
+        return
       }
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === data.messageId) {

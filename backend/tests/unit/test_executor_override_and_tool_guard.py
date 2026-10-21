@@ -10,6 +10,7 @@
 
 驱动方式：假 LLM 的 `chat.completions.create` + 直接驱动 `Executor._execute_step_once`。
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,10 +20,12 @@ from app.agent.config import AgentConfig
 from app.agent.executor import Executor
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, PlanStep
-from app.agent.registry import tool_registry
+from app.agent.registry import ToolMeta, ToolResult, tool_registry
 
 
-def _client_with_tool_call(tool_name: str, raw_arguments: str | None = "{}", capture: dict | None = None):
+def _client_with_tool_call(
+    tool_name: str, raw_arguments: str | None = "{}", capture: dict | None = None
+):
     client = MagicMock()
 
     async def _create(*, messages, tools=None, **kwargs):
@@ -246,3 +249,56 @@ async def test_synthesis_uses_structural_truncation():
         "list 分支应保留前 15 行、丢弃第 16 行起的条目"
     )
     assert "... and 45 more items" in synth_user, "应带计数标记（裸切不会产生）"
+
+
+# ── issue #206：执行层禁用清单 + sandbox 元数据随 SSE 暴露 ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_config_disabled_tool_rejected_at_dispatch_layer():
+    """#206（可选加固）：服务端强制合并的 disabled_tools 必须在**执行层**生效。
+
+    工具 schema 过滤（_get_step_tools）只影响呈现给 LLM 的列表；模型凭空发出的
+    禁用工具此前仍会被执行。变异点：删掉派发前的 disabled_tools 判定 → 本用例红
+    （execute_detailed 被调用、无 tool_disabled 事件）。
+    """
+    client = _client_with_tool_call("execute_python", '{"code": "print(1)"}')
+    cfg = AgentConfig(
+        enable_planning=False,
+        enable_reflection=False,
+        disabled_tools=["execute_python"],
+        max_tool_calls_per_turn=3,
+    )
+
+    with patch.object(tool_registry, "execute_detailed", new=AsyncMock()) as spy:
+        events = await _run(_mk_executor(cfg, client))
+
+    assert spy.await_count == 0, "禁用工具绝不能触达 registry"
+    errs = [e for e in events if e.type == "tool_error"]
+    assert errs, "应发出显式 tool_error"
+    assert errs[0].error_type == "tool_disabled"
+    assert "execute_python" in errs[0].content
+
+
+@pytest.mark.asyncio
+async def test_tool_result_event_carries_sandbox_meta():
+    """#206：resolved sandbox（ToolMeta.sandbox）必须随 SSE tool_result 暴露。
+
+    变异点：executor 不透传 meta.sandbox → 事件与 SSE 载荷都没有 sandbox 字段 → 红。
+    """
+    client = _client_with_tool_call("execute_python", '{"code": "print(1)"}')
+    cfg = AgentConfig(
+        enable_planning=False,
+        enable_reflection=False,
+        disabled_tools=[],  # 本用例聚焦元数据透传，显式启用该工具
+        max_tool_calls_per_turn=3,
+    )
+    spy = AsyncMock(return_value=ToolResult.ok(data="45", meta=ToolMeta(sandbox="ast")))
+
+    with patch.object(tool_registry, "execute_detailed", new=spy):
+        events = await _run(_mk_executor(cfg, client))
+
+    results = [e for e in events if e.type == "tool_result"]
+    assert results, "应发出 tool_result"
+    assert results[0].sandbox == "ast"
+    assert results[0].to_sse_dict()["sandbox"] == "ast"

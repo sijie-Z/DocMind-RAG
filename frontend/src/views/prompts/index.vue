@@ -5,7 +5,7 @@
       <div class="mb-8">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 class="text-3xl font-bold text-gray-800 dark:text-white">{{ t('prompts.title') }}</h1>
+            <h1 class="text-3xl font-bold text-gray-800 dark:text-white">{{ t('menu.prompts') }}</h1>
             <p class="text-gray-500 dark:text-gray-400 mt-1 text-sm">提示词模板将直接影响AI的回答方式和风格</p>
           </div>
           <div class="flex gap-2">
@@ -87,14 +87,28 @@
 
         <!-- Error state -->
         <div v-if="!loading && loadError" class="py-20">
-          <n-result status="error" title="加载失败" :description="loadErrorMsg">
+          <n-result status="error" :title="t('prompts.toast.loadFailed')" :description="loadErrorMsg">
             <template #footer>
-              <n-button type="primary" round @click="loadPrompts">重试</n-button>
+              <n-button type="primary" round @click="loadPrompts">{{ t('common.retry') }}</n-button>
             </template>
           </n-result>
         </div>
 
-        <!-- Empty state -->
+        <!-- Empty state：筛选无命中（≠ 空库，不劝创建） -->
+        <div v-else-if="!loadError && filteredPrompts.length === 0 && !loading && hasActiveFilters" class="py-20">
+          <n-empty :description="t('prompts.searchEmpty')">
+            <template #extra>
+              <div class="space-y-3">
+                <p class="text-sm text-gray-400">{{ t('prompts.searchEmptyDesc') }}</p>
+                <n-button type="primary" ghost round @click="clearFilters">
+                  {{ t('prompts.clearFilters') }}
+                </n-button>
+              </div>
+            </template>
+          </n-empty>
+        </div>
+
+        <!-- Empty state：空库 → 创建引导 -->
         <div v-else-if="!loadError && filteredPrompts.length === 0 && !loading" class="py-20">
           <n-empty :description="t('prompts.empty', '暂无提示词模板')">
             <template #extra>
@@ -117,8 +131,8 @@
               <div class="flex items-start justify-between">
                 <div class="flex-1">
                   <div class="flex items-center gap-2 mb-2">
-                    <n-tag :type="item.is_system ? 'info' : 'success'" size="small" round :bordered="false">
-                      {{ item.is_system ? '系统' : '自定义' }}
+                    <n-tag :type="scopeTagType(item)" size="small" round :bordered="false">
+                      {{ scopeLabel(item) }}
                     </n-tag>
                     <n-tag v-if="item.category" size="small" round type="warning" :bordered="false">
                       {{ getCategoryLabel(item.category) }}
@@ -133,9 +147,23 @@
                 </div>
 
                 <div class="flex flex-col gap-2 ml-4">
+                  <n-tooltip trigger="hover">
+                    <template #trigger>
+                      <div class="flex items-center justify-end gap-2">
+                        <n-switch
+                          :value="item.is_active"
+                          size="small"
+                          :disabled="activationDisabled(item)"
+                          :aria-label="t('prompts.activationToggle')"
+                          @update:value="(value: boolean) => toggleActive(item, value)"
+                        />
+                      </div>
+                    </template>
+                    <span class="text-xs">{{ activationHint(item) }}</span>
+                  </n-tooltip>
                   <n-button type="primary" size="small" @click="handleUse(item)">
                     <template #icon><n-icon><PlayOutline /></n-icon></template>
-                    应用到对话
+                    {{ t('prompts.fillToChat') }}
                   </n-button>
                   <div class="flex gap-1">
                     <n-button size="tiny" quaternary @click="handleEdit(item)">
@@ -168,6 +196,17 @@
         <n-form :model="formModel" ref="formRef" :rules="rules" label-placement="top">
           <n-form-item label="模板名称" path="name">
             <n-input v-model:value="formModel.name" placeholder="给模板起个名字" maxlength="50" show-count />
+          </n-form-item>
+          <n-form-item v-if="!editingId" :label="t('prompts.scopeLabel')">
+            <div class="flex flex-col gap-1">
+              <n-radio-group v-model:value="formModel.scope">
+                <n-space>
+                  <n-radio value="organization">{{ t('prompts.scope.organization') }}</n-radio>
+                  <n-radio value="personal">{{ t('prompts.scope.personal') }}</n-radio>
+                </n-space>
+              </n-radio-group>
+              <span class="text-xs text-gray-400">{{ t('prompts.scopeHint') }}</span>
+            </div>
           </n-form-item>
           <n-form-item label="分类" path="category">
             <n-radio-group v-model:value="formModel.category" name="categoryGroup">
@@ -255,14 +294,17 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
+import { getErrorMessage } from '@/utils/apiError'
 import { useI18n } from 'vue-i18n'
 import { AddOutline, TrashOutline, CreateOutline, CopyOutline, SparklesOutline, SearchOutline, DocumentTextOutline, PlayOutline, TimeOutline } from '@vicons/ionicons5'
 import { getPrompts, createPrompt, updatePrompt, deletePrompt, seedDefaultPrompts, getPromptVersions, restorePromptVersion, type PromptTemplate, type PromptTemplateVersion } from '@/api/prompt'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
 const message = useDedupedMessage()
 const dialog = useDialog()
 const { t } = useI18n()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const loadError = ref(false)
@@ -281,14 +323,58 @@ const versionsLoading = ref(false)
 const versions = ref<PromptTemplateVersion[]>([])
 const currentVersion = ref(1)
 
-const formModel = ref({
+type EditablePromptScope = 'organization' | 'personal'
+
+const formModel = ref<{
+  name: string
+  content: string
+  description: string
+  category: string
+  is_active: boolean
+  scope: EditablePromptScope
+  change_note: string
+}>({
   name: '',
   content: '',
   description: '',
   category: 'general',
   is_active: true,
+  scope: 'organization',
   change_note: '',
 })
+
+// B4（D6）：三层模板的展示/激活权限镜像后端语义（后端仍为最终裁决）。
+const scopeLabel = (item: PromptTemplate) => {
+  if (item.is_system || item.scope === 'system') return t('prompts.scope.system')
+  if (item.scope === 'personal') return t('prompts.scope.personal')
+  return t('prompts.scope.organization')
+}
+
+const scopeTagType = (item: PromptTemplate) =>
+  item.is_system || item.scope === 'system' ? 'info' : item.scope === 'personal' ? 'warning' : 'success'
+
+const activationDisabled = (item: PromptTemplate) => {
+  if (item.is_system || item.scope === 'system') return true
+  if (item.scope === 'personal') return false
+  return !userStore.isAdmin
+}
+
+const activationHint = (item: PromptTemplate) => {
+  if (item.is_system || item.scope === 'system') return t('prompts.activationSystemReadonly')
+  if (item.scope === 'personal') return t('prompts.scopeHint')
+  if (!userStore.isAdmin) return t('prompts.activationAdminOnly')
+  return t('prompts.scopeHint')
+}
+
+const toggleActive = async (item: PromptTemplate, value: boolean) => {
+  try {
+    await updatePrompt(item.id, { is_active: value })
+    item.is_active = value
+    message.success(t('prompts.activationSuccess'))
+  } catch (error: unknown) {
+    message.error(getErrorMessage(error, t('prompts.activationFailed')))
+  }
+}
 
 const rules = {
   name: { required: true, message: '请输入模板名称', trigger: 'blur' },
@@ -330,6 +416,16 @@ const filteredPrompts = computed(() => {
   return result
 })
 
+/** E14/C1 空态分流：有搜索/分类条件时的空列表 = 筛选无命中，而非空库。 */
+const hasActiveFilters = computed(
+  () => searchQuery.value.trim().length > 0 || activeCategory.value !== null
+)
+
+const clearFilters = () => {
+  searchQuery.value = ''
+  activeCategory.value = null
+}
+
 const getCategoryLabel = (category: string) => {
   const map: Record<string, string> = { general: '通用', rag: 'RAG', translate: '翻译', summary: '摘要', code: '代码' }
   return map[category] || category
@@ -347,10 +443,12 @@ const loadPrompts = async () => {
     const res = await getPrompts()
     prompts.value = res.data || []
     loadError.value = false
+    loadErrorMsg.value = ''
   } catch (error) {
-    message.error('加载失败')
+    // E14/D1+D2：加载失败清空旧列表，仅由页内错误态呈现（不再叠加 toast）
     loadError.value = true
-    loadErrorMsg.value = '加载失败'
+    loadErrorMsg.value = getErrorMessage(error, t('prompts.toast.loadFailed'))
+    prompts.value = []
   } finally {
     loading.value = false
   }
@@ -358,26 +456,35 @@ const loadPrompts = async () => {
 
 const handleAdd = () => {
   editingId.value = null
-  formModel.value = { name: '', content: '', description: '', category: 'general', is_active: true, change_note: '' }
+  formModel.value = { name: '', content: '', description: '', category: 'general', is_active: true, scope: 'organization', change_note: '' }
   showDrawer.value = true
 }
 
 const handleEdit = (item: PromptTemplate) => {
   editingId.value = item.id
-  formModel.value = { name: item.name, content: item.content, description: item.description || '', category: item.category, is_active: item.is_active, change_note: '' }
+  formModel.value = { name: item.name, content: item.content, description: item.description || '', category: item.category, is_active: item.is_active, scope: item.scope === 'personal' ? 'personal' : 'organization', change_note: '' }
   currentVersion.value = item.version || 1
   showDrawer.value = true
 }
 
 const handleCopy = (item: PromptTemplate) => {
-  formModel.value = { name: item.name + ' (副本)', content: item.content, description: item.description || '', category: item.category, is_active: true, change_note: '' }
+  formModel.value = { name: item.name + ' (副本)', content: item.content, description: item.description || '', category: item.category, is_active: true, scope: item.scope === 'personal' ? 'personal' : 'organization', change_note: '' }
   editingId.value = null
   showDrawer.value = true
 }
 
-// 直接应用到对话 - 跳转到聊天页面并带上提示词
+// 填入对话输入框 - 跳转到聊天页面并带上提示词
+// W2-T7：上限与聊天页（chat/index.vue MAX_PROMPT_LENGTH）对齐 5000——
+// 超限在源头即明确报错，不再把词交给聊天页后被静默丢弃（第三轮终检 §2.4）。
+// E14/P2：聊天页把提示词填入输入框（B3 后无 systemPrompt 通道），按钮文案
+// 如实说明动作，不承诺「应用/生效」；不再携带已无消费方的 promptName 参数。
+const MAX_PROMPT_LENGTH = 5000
 const handleUse = (item: PromptTemplate) => {
-  router.push({ name: 'Chat', query: { prompt: item.content, promptName: item.name } })
+  if (item.content && item.content.length > MAX_PROMPT_LENGTH) {
+    message.error(t('chat.promptTooLong', { max: MAX_PROMPT_LENGTH }))
+    return
+  }
+  router.push({ name: 'Chat', query: { prompt: item.content } })
 }
 
 const handleSubmit = async () => {
@@ -386,18 +493,17 @@ const handleSubmit = async () => {
     if (editingId.value) {
       const payload: Record<string, unknown> = { ...formModel.value }
       await updatePrompt(editingId.value, payload)
-      message.success('更新成功')
+      message.success(t('prompts.toast.updateSuccess'))
     } else {
       const { change_note, ...createData } = formModel.value
       await createPrompt(createData)
-      message.success('创建成功')
+      message.success(t('prompts.toast.createSuccess'))
     }
     showDrawer.value = false
     loadPrompts()
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error)
-    const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    message.error(detail || msg || '保存失败')
+    // E14/D1：后端 detail 原文优先；axios 英文传输层文案不上屏
+    message.error(getErrorMessage(error, t('prompts.toast.saveFailed')))
   } finally {
     submitting.value = false
   }
@@ -413,8 +519,8 @@ const openVersionHistory = async (promptId: number) => {
     // Refresh current version from prompts list
     const current = prompts.value.find(p => p.id === promptId)
     if (current) currentVersion.value = current.version || 1
-  } catch {
-    message.error('加载版本历史失败')
+  } catch (error) {
+    message.error(getErrorMessage(error, t('prompts.toast.loadVersionsFailed')))
   } finally {
     versionsLoading.value = false
   }
@@ -432,8 +538,8 @@ const restoreVersion = async (ver: PromptTemplateVersion) => {
         message.success(`已回滚到 v${ver.version}`)
         showVersionDrawer.value = false
         loadPrompts()
-      } catch {
-        message.error('回滚失败')
+      } catch (error) {
+        message.error(getErrorMessage(error, t('prompts.toast.restoreFailed')))
       }
     },
   })
@@ -451,7 +557,7 @@ const handleDelete = (id: number) => {
         message.success(t('prompts.toast.deleteSuccess'))
         loadPrompts()
       } catch (error) {
-        message.error(t('prompts.toast.deleteFailed'))
+        message.error(getErrorMessage(error, t('prompts.toast.deleteFailed')))
       }
     },
   })
@@ -461,10 +567,10 @@ const handleSeed = async () => {
   seeding.value = true
   try {
     await seedDefaultPrompts()
-    message.success('初始化成功')
+    message.success(t('prompts.toast.seedSuccess'))
     loadPrompts()
   } catch (error) {
-    message.error('初始化失败')
+    message.error(getErrorMessage(error, t('prompts.toast.seedFailed')))
   } finally {
     seeding.value = false
   }

@@ -25,6 +25,8 @@ export interface UserInfo {
   phone?: string
   isAdmin: boolean
   role?: string
+  is_superuser?: boolean // Backend field：true 即平台管理员（users.role 只是展示标签）
+  is_org_admin?: boolean // Backend field：当前组织的 OrgAdmin 角色（per-org）
   organization_id?: number
   createdAt: string
   organizations: Organization[]

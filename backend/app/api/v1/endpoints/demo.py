@@ -1,6 +1,8 @@
 """
 示例数据端点 - 为新用户提供首次体验
 """
+
+import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -16,6 +18,7 @@ from app.exceptions import AppError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
 from app.models.user import User
+from app.services.document_status import mark_document_failed, mark_document_indexed
 from app.services.embedding_service import embedding_service
 
 router = APIRouter()
@@ -39,7 +42,7 @@ DEMO_DOCUMENTS = [
             "后台任务：FastAPI 支持后台任务处理，使用 BackgroundTasks 参数。适用于发送邮件、处理文件等不需要同步等待的操作。例如 def send_email(email: str, message: str): ... @app.post('/send-notification/') async def send_notification(background_tasks: BackgroundTasks): background_tasks.add_task(send_email, ...)。",
             "WebSocket 支持：FastAPI 原生支持 WebSocket 连接。使用 @app.websocket('/ws') 装饰器定义 WebSocket 端点，通过 websocket.receive_text() 和 websocket.send_text() 进行双向通信。适合实时聊天、通知推送等场景。",
             "安全和认证：FastAPI 提供了 OAuth2、JWT Token、API Key 等多种认证方式。使用 OAuth2PasswordBearer 声明安全方案，结合 passlib 和 python-jose 实现完整的用户认证流程。密码使用 bcrypt 加密存储。",
-        ]
+        ],
     },
     {
         "title": "Vue 3 组合式 API 完全指南",
@@ -56,7 +59,7 @@ DEMO_DOCUMENTS = [
             "组合式函数（Composables）：将可复用的逻辑提取为以 use 开头的函数，如 useMouse、useFetch。组合式函数可以使用所有 Vue 响应式 API，并在多个组件中复用。这是 Vue 3 生态中最强大的代码复用模式。",
             "TypeScript 集成：Vue 3 使用 TypeScript 重写，提供了一流的类型支持。使用泛型定义 Props 类型，如 const props = defineProps<{ title: string; count?: number }>()。defineModel() 宏简化了 v-model 的类型声明。",
             "性能优化：使用 shallowRef() 和 shallowReactive() 减少深层响应式开销。v-memo 指令缓存模板片段。defineAsyncComponent() 实现组件懒加载。合理使用 v-once 和 v-memo 避免不必要的重新渲染。",
-        ]
+        ],
     },
     {
         "title": "RAG 检索增强生成技术详解",
@@ -73,7 +76,7 @@ DEMO_DOCUMENTS = [
             "引用溯源：RAG 系统需要在回答中标注信息来源。实现方式是在 Prompt 中要求 LLM 使用 [n] 格式引用文档，并在前端渲染为可点击的引用卡片。这增强了回答的可信度和可验证性。",
             "质量评估：RAG 系统的核心指标包括：命中率（有检索结果的查询比例）、引用率（回答中有引用的比例）、相关性分数。通过 RAGAS 等框架可以自动化评估 Faithfulness、Answer Relevancy、Context Precision 等维度。",
             "Agent 增强：将 RAG 与 Agent 结合，可以实现更复杂的任务。Agent 可以自主决定何时检索、检索什么、是否需要多轮检索。通过 ReAct 模式（Reasoning + Acting），Agent 能够分解复杂问题，逐步获取信息并综合回答。",
-        ]
+        ],
     },
 ]
 
@@ -85,14 +88,31 @@ DEMO_CONVERSATION = {
             "type": MessageType.USER,
         },
         {
-            "content": "RAG 系统中的混合检索是一种将多种检索策略结合的技术方案，主要有以下几个关键点：\n\n**1. 双通道检索**\n混合检索同时执行两种检索方式：\n- **BM25 关键词检索**：基于词频和文档频率的经典算法，擅长精确匹配专业术语和专有名词\n- **向量语义检索**：通过 Embedding 模型将文本转为向量，计算余弦相似度，擅长理解语义相近的表达 [1]\n\n**2. 结果融合（RRF）**\n两种检索结果通过 RRF（Reciprocal Rank Fusion）算法进行融合。RRF 不直接比较分数，而是基于排名位置计算权重，避免了不同检索方式分数尺度不一致的问题 [2]\n\n**3. 效果提升**\n实验数据表明，混合检索策略比单一检索方式的效果提升 15-30%。它既保证了关键词的精确匹配（如搜索 \"FastAPI\" 不会被 \"Flask\" 干扰），又支持语义理解（如搜索 \"Web框架\" 能匹配到 \"FastAPI\"）[2]\n\n**4. 典型实现**\n```\n# 伪代码示例\nbm25_results = bm25_search(query, top_k=20)\nvector_results = vector_search(query_embedding, top_k=20)\nfinal_results = rrf_fusion(bm25_results, vector_results, k=60)\n```\n\n这种混合策略是现代 RAG 系统（包括 DocMind）的核心检索架构 [1][2]",
+            "content": 'RAG 系统中的混合检索是一种将多种检索策略结合的技术方案，主要有以下几个关键点：\n\n**1. 双通道检索**\n混合检索同时执行两种检索方式：\n- **BM25 关键词检索**：基于词频和文档频率的经典算法，擅长精确匹配专业术语和专有名词\n- **向量语义检索**：通过 Embedding 模型将文本转为向量，计算余弦相似度，擅长理解语义相近的表达 [1]\n\n**2. 结果融合（RRF）**\n两种检索结果通过 RRF（Reciprocal Rank Fusion）算法进行融合。RRF 不直接比较分数，而是基于排名位置计算权重，避免了不同检索方式分数尺度不一致的问题 [2]\n\n**3. 效果提升**\n实验数据表明，混合检索策略比单一检索方式的效果提升 15-30%。它既保证了关键词的精确匹配（如搜索 "FastAPI" 不会被 "Flask" 干扰），又支持语义理解（如搜索 "Web框架" 能匹配到 "FastAPI"）[2]\n\n**4. 典型实现**\n```\n# 伪代码示例\nbm25_results = bm25_search(query, top_k=20)\nvector_results = vector_search(query_embedding, top_k=20)\nfinal_results = rrf_fusion(bm25_results, vector_results, k=60)\n```\n\n这种混合策略是现代 RAG 系统（包括 DocMind）的核心检索架构 [1][2]',
             "type": MessageType.ASSISTANT,
             "metadata": {
+                # 键名对齐前端读点契约（build_sources_list 的 camelCase：
+                # {filename, relevanceScore, rank, ...}）——snake 键前端
+                # 恒 undefined，相关度数字静默消失（T4 §7.2④「数字保留」落空）。
+                # issue #185：带 rank 标记表示 relevanceScore 是重排绝对分口径；
+                # 无 rank 的旧数据前端只按序位展示。
                 "sources": [
-                    {"filename": "rag_technology.txt", "chunk_index": 2, "relevance_score": 0.92},
-                    {"filename": "rag_technology.txt", "chunk_index": 1, "relevance_score": 0.85},
+                    {
+                        "filename": "rag_technology.txt",
+                        "rank": 1,
+                        "chunkIndex": 2,
+                        "relevanceScore": 0.92,
+                        "demo": True,
+                    },
+                    {
+                        "filename": "rag_technology.txt",
+                        "rank": 2,
+                        "chunkIndex": 1,
+                        "relevanceScore": 0.85,
+                        "demo": True,
+                    },
                 ]
-            }
+            },
         },
         {
             "content": "Vue 3 的组合式 API 和选项式 API 有什么区别？",
@@ -103,21 +123,44 @@ DEMO_CONVERSATION = {
             "type": MessageType.ASSISTANT,
             "metadata": {
                 "sources": [
-                    {"filename": "vue3_composition_api.txt", "chunk_index": 0, "relevance_score": 0.95},
-                    {"filename": "vue3_composition_api.txt", "chunk_index": 1, "relevance_score": 0.88},
-                    {"filename": "vue3_composition_api.txt", "chunk_index": 5, "relevance_score": 0.82},
-                    {"filename": "vue3_composition_api.txt", "chunk_index": 6, "relevance_score": 0.79},
+                    {
+                        "filename": "vue3_composition_api.txt",
+                        "rank": 1,
+                        "chunkIndex": 0,
+                        "relevanceScore": 0.95,
+                        "demo": True,
+                    },
+                    {
+                        "filename": "vue3_composition_api.txt",
+                        "rank": 2,
+                        "chunkIndex": 1,
+                        "relevanceScore": 0.88,
+                        "demo": True,
+                    },
+                    {
+                        "filename": "vue3_composition_api.txt",
+                        "rank": 3,
+                        "chunkIndex": 5,
+                        "relevanceScore": 0.82,
+                        "demo": True,
+                    },
+                    {
+                        "filename": "vue3_composition_api.txt",
+                        "rank": 4,
+                        "chunkIndex": 6,
+                        "relevanceScore": 0.79,
+                        "demo": True,
+                    },
                 ]
-            }
+            },
         },
-    ]
+    ],
 }
 
 
 @router.post("/seed", response_model=dict)
 async def seed_demo_data(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """
     为当前用户创建示例数据：3 篇文档 + 索引 + 1 个示例对话。
@@ -136,13 +179,14 @@ async def seed_demo_data(
         existing = await db.execute(
             select(func.count(Document.id)).where(
                 Document.uploaded_by == current_user.id,
-                Document.description == "示例数据 - DocMind 首次体验"
+                Document.description == "示例数据 - DocMind 首次体验",
             )
         )
         if existing.scalar() and existing.scalar() > 0:
             return {"success": True, "message": "示例数据已存在", "skipped": True}
 
         created_doc_ids = []
+        documents_failed: list[dict] = []
 
         # 1. 创建文档记录并索引到 ES
         for doc_data in DEMO_DOCUMENTS:
@@ -155,7 +199,11 @@ async def seed_demo_data(
                 file_path=f"demo/{doc_data['filename']}",
                 file_size=len(full_content.encode("utf-8")),
                 file_type=doc_data["file_type"],
-                status=DocumentStatus.INDEXED,
+                # issue #229（#301 批 D 收口）：创建时**不预写 INDEXED** ——
+                # INDEXED 只能在确认「真的进了 ES」之后写（见下方成功分支）。
+                # 修前创建即 INDEXED、embedding 失败仅 warning 跳过 ES：
+                # 「DB 说 INDEXED，ES 里什么都没有」。
+                status=DocumentStatus.PENDING,
                 title=doc_data["title"],
                 description="示例数据 - DocMind 首次体验",
                 keywords=doc_data["keywords"],
@@ -164,33 +212,56 @@ async def seed_demo_data(
                 organization_id=org_id,
                 uploaded_by=current_user.id,
                 parsed_at=datetime.now(UTC),
-                indexed_at=datetime.now(UTC),
             )
             db.add(doc)
 
             # 2. 生成 embedding 并索引到 ES
+            embed_error = None
             try:
                 embeddings = await embedding_service.get_embeddings(doc_data["chunks"])
             except Exception as e:
-                # 安全修复：不再写零向量（会污染向量检索），改为跳过该文档的 ES 索引
-                logger.warning(f"Embedding failed for {doc_data['title']}: {e}, skipping ES indexing")
+                # 安全修复：不再写零向量（会污染向量检索）；#229：状态如实失败。
+                logger.error(f"Embedding failed for {doc_data['title']}: {e}")
+                embed_error = str(e)
+                embeddings = None
+
+            if embeddings is not None and len(embeddings) != len(doc_data["chunks"]):
+                embed_error = (
+                    f"向量数量与文本块数量不匹配: {len(embeddings)} vs {len(doc_data['chunks'])}"
+                )
+                logger.error(f"Embedding length mismatch for {doc_data['title']}: {embed_error}")
                 embeddings = None
 
             if embeddings is None:
-                # embedding 失败：跳过 ES 索引，仅保留 DB 记录
+                # issue #229：embedding 失败 → 不索引 ES，且状态如实写 FAILED（带原因），
+                # 绝不 INDEXED；失败文档明确记账（不再悄然少 1 仍报「加载成功」）。
                 for i, chunk_text in enumerate(doc_data["chunks"]):
-                    db.add(DocumentChunk(
-                        id=str(uuid.uuid4()),
-                        document_id=doc_id,
-                        chunk_index=i,
-                        chunk_text=chunk_text,
-                        chunk_length=len(chunk_text),
-                        start_pos=i * 500,
-                        end_pos=(i + 1) * 500,
-                    ))
+                    db.add(
+                        DocumentChunk(
+                            id=str(uuid.uuid4()),
+                            document_id=doc_id,
+                            chunk_index=i,
+                            chunk_text=chunk_text,
+                            chunk_length=len(chunk_text),
+                            start_pos=i * 500,
+                            end_pos=(i + 1) * 500,
+                        )
+                    )
+                # A3-P0：统一状态写入（FAILED 不覆盖 INDEXED；写入点集中）
+                mark_document_failed(doc, f"示例数据向量化失败: {embed_error}")
+                documents_failed.append(
+                    {
+                        "id": doc_id,
+                        "title": doc_data["title"],
+                        "error": doc.parse_error,
+                    }
+                )
                 continue
 
-            for i, (chunk_text, embedding) in enumerate(zip(doc_data["chunks"], embeddings, strict=False)):
+            index_failures = 0
+            for i, (chunk_text, embedding) in enumerate(
+                zip(doc_data["chunks"], embeddings, strict=False)
+            ):
                 # 保存 chunk 到数据库
                 chunk = DocumentChunk(
                     id=str(uuid.uuid4()),
@@ -219,15 +290,53 @@ async def seed_demo_data(
                         "chunk_index": i,
                         "title": doc_data["title"],
                         "description": doc_data["description"],
-                    }
+                    },
                 }
                 try:
-                    await ElasticsearchTools.index_document(
-                        doc_id=f"{doc_id}_{i}", document=es_doc
-                    )
+                    await ElasticsearchTools.index_document(doc_id=f"{doc_id}_{i}", document=es_doc)
                 except Exception as e:
+                    index_failures += 1
                     logger.warning(f"ES index failed for chunk {i}: {e}")
 
+            if index_failures >= len(doc_data["chunks"]):
+                # issue #229：一条 chunk 都没进 ES —— 不得写 INDEXED
+                # （「状态 = INDEXED ⟹ 可被检索」不变式的 demo 路径执行者）。
+                mark_document_failed(doc, "示例数据 ES 索引全部失败")
+                documents_failed.append(
+                    {
+                        "id": doc_id,
+                        "title": doc_data["title"],
+                        "error": doc.parse_error,
+                    }
+                )
+                continue
+            if index_failures:
+                # 部分失败与主链路的 #224 部分索引语义对齐：文档整体可被检索，
+                # 留痕但不阻断（demo 数据静态、可重试重建）。
+                logger.warning(
+                    f"Demo doc {doc_data['title']}: {index_failures}/"
+                    f"{len(doc_data['chunks'])} chunk(s) failed to index"
+                )
+
+            # A3-P0：INDEXED 只能在校验通过后写入——统一写入函数先回读 ES
+            # （有 chunk / 带 embedding / 组织一致），不满足则如实 FAILED。
+            try:
+                await mark_document_indexed(
+                    doc,
+                    expected_chunks=len(doc_data["chunks"]),
+                    organization_id=org_id,
+                )
+            except Exception as verify_err:
+                logger.error(f"Index verification failed for {doc_data['title']}: {verify_err}")
+                mark_document_failed(doc, f"示例数据索引校验失败: {verify_err}")
+                documents_failed.append(
+                    {
+                        "id": doc_id,
+                        "title": doc_data["title"],
+                        "error": doc.parse_error,
+                    }
+                )
+                continue
             created_doc_ids.append(doc_id)
             logger.info(f"Created demo document: {doc_data['title']} ({doc_id})")
 
@@ -247,26 +356,50 @@ async def seed_demo_data(
         db.add(session)
 
         for i, msg_data in enumerate(DEMO_CONVERSATION["messages"]):
+            # 真链路实测（T4）：meta_data 列是 SQLAlchemy JSON，但读路径
+            # （chat.py get_conversation）用 json.loads(msg.meta_data) —— 必须写
+            # JSON 字符串（同 chat_service/agent 惯例）。修前写裸 dict → 读侧
+            # json.loads(dict) 抛 TypeError 被静默吞掉，sources 恒空、前端
+            # 来源区/角标/相关度全部落空。
             msg = ChatMessage(
                 id=str(uuid.uuid4()),
                 session_id=session_id,
                 content=msg_data["content"],
                 message_type=msg_data["type"],
-                meta_data=msg_data.get("metadata"),
+                meta_data=(
+                    json.dumps(msg_data["metadata"], ensure_ascii=False)
+                    if msg_data.get("metadata")
+                    else None
+                ),
                 created_at=now + timedelta(seconds=i * 30),
             )
             db.add(msg)
 
         await db.commit()
 
+        documents_failed_count = len(documents_failed)
+        if documents_failed_count == 0:
+            message = "示例数据加载成功"
+        elif not created_doc_ids:
+            message = "示例数据加载失败：全部文档未能完成索引（文档状态已如实标记为失败）"
+        else:
+            message = (
+                f"示例数据部分加载：{documents_failed_count}/{len(DEMO_DOCUMENTS)} "
+                f"篇文档未能完成索引（已标记为失败）"
+            )
+
+        # issue #229：响应如实 —— 有失败文档就 success=False 且明确报数，
+        # 不再「documents_created 悄然少 1 仍报加载成功」。
         return {
-            "success": True,
-            "message": "示例数据加载成功",
+            "success": documents_failed_count == 0,
+            "message": message,
             "data": {
                 "documents_created": len(created_doc_ids),
+                "documents_failed": documents_failed_count,
+                "failed_documents": documents_failed,
                 "conversation_id": session_id,
                 "conversation_title": DEMO_CONVERSATION["title"],
-            }
+            },
         }
 
     except Exception as e:
@@ -276,8 +409,7 @@ async def seed_demo_data(
 
 @router.delete("/seed", response_model=dict)
 async def clear_demo_data(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """清除当前用户的示例数据。"""
     try:
@@ -285,7 +417,7 @@ async def clear_demo_data(
         result = await db.execute(
             select(Document).where(
                 Document.uploaded_by == current_user.id,
-                Document.description == "示例数据 - DocMind 首次体验"
+                Document.description == "示例数据 - DocMind 首次体验",
             )
         )
         docs = result.scalars().all()
@@ -309,7 +441,7 @@ async def clear_demo_data(
         sessions_result = await db.execute(
             select(ChatSession).where(
                 ChatSession.user_id == current_user.id,
-                ChatSession.title == DEMO_CONVERSATION["title"]
+                ChatSession.title == DEMO_CONVERSATION["title"],
             )
         )
         for session in sessions_result.scalars().all():

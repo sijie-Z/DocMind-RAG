@@ -12,7 +12,7 @@ from app.models.manual import SystemManual
 
 def update_schema():
     print("开始更新数据库结构...")
-    
+
     # 1. 为 users 表添加 api_key 字段
     try:
         with sync_engine.connect() as conn:
@@ -20,7 +20,9 @@ def update_schema():
             result = conn.execute(text("SHOW COLUMNS FROM users LIKE 'api_key'"))
             if not result.fetchone():
                 print("正在添加 api_key 字段到 users 表...")
-                conn.execute(text("ALTER TABLE users ADD COLUMN api_key VARCHAR(100) UNIQUE DEFAULT NULL"))
+                conn.execute(
+                    text("ALTER TABLE users ADD COLUMN api_key VARCHAR(100) UNIQUE DEFAULT NULL")
+                )
                 conn.commit()
                 print("api_key 字段添加成功！")
             else:
@@ -37,6 +39,7 @@ def update_schema():
         print(f"创建 system_manuals 表失败: {e}")
 
     print("数据库结构更新完成！")
+
 
 if __name__ == "__main__":
     update_schema()

@@ -13,6 +13,7 @@
 逐列相等」这一 issue #150 的核心不变式；integration 套件本身已经是「真实服务」
 层，代价可接受。
 """
+
 import os
 from pathlib import Path
 

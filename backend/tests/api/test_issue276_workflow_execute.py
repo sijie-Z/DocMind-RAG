@@ -12,6 +12,7 @@
 - 端点还原 model_dump()（python 模式）→ 提交阶段 StatementError → 本用例 500 红；
 - 删除 NodeResult.duration → in1 崩溃为 failed、output.success=False → 断言红。
 """
+
 import httpx
 import pytest
 from sqlalchemy import select
@@ -20,7 +21,12 @@ from sqlalchemy.pool import StaticPool
 
 _MIN_FLOW = {
     "nodes": [
-        {"id": "in1", "type": "input", "data": {"prompt": "{{input}}"}, "position": {"x": 0, "y": 0}},
+        {
+            "id": "in1",
+            "type": "input",
+            "data": {"prompt": "{{input}}"},
+            "position": {"x": 0, "y": 0},
+        },
         {"id": "out1", "type": "output", "data": {}, "position": {"x": 1, "y": 0}},
     ],
     "edges": [{"id": "e1", "source": "in1", "target": "out1"}],
@@ -54,7 +60,7 @@ async def test_execute_minimal_workflow_persists_durations():
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
 
     async with factory() as s:
-        wf = Workflow(name="issue276-min", flow_data=_MIN_FLOW, created_by=1)
+        wf = Workflow(name="issue276-min", flow_data=_MIN_FLOW, created_by=1, organization_id=1)
         s.add(wf)
         await s.commit()
         wf_id = wf.id

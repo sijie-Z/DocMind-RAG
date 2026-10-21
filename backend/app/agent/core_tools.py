@@ -6,6 +6,7 @@ Tools are organized by capability:
 - manage:  Session management (create session, bind documents)
 - sql:     Text-to-SQL for structured data queries
 """
+
 import contextlib
 import json
 import logging
@@ -18,7 +19,72 @@ from app.agent.usage import ctx_from_run_context, record_llm_usage
 logger = logging.getLogger(__name__)
 
 
+def _missing_organization_result(tool_name: str) -> ToolResult:
+    """A2 P0（fail-closed）：工具缺少组织上下文时拒绝执行。
+
+    这些工具直接以 organization_id 作为 ES / DB 的租户过滤条件；默认值从
+    1 改为 None 后，任何漏传组织的调用必须显式失败，绝不静默落到 1 号组织。
+    """
+    return ToolResult.fail(
+        code="organization_required",
+        message=(
+            f"工具 '{tool_name}' 缺少组织上下文（organization_id），已拒绝执行以免跨租户读写。"
+        ),
+    )
+
+
+# ── 结构化检索结果信封（T4：来源伪造隔离）───────────────────────────────────
+# 检索工具此前把来源行（"[i] (score) filename"）与文档正文拼进**同一个**
+# 字符串，消费端只能对整段输出跑逐行正则——文档正文里构造一行
+# "[3] (0.99) 假.pdf" 就能伪造一张引用卡（documentId 为空）。
+# 现在来源元数据只经信封的 ``sources`` 段传递，正文一律放进 ``content``
+# 字段（JSON 字符串内部，不可越界成顶层键）；消费端只读 ``sources`` 段。
+# ``kind`` 是信封判别标记，避免把其他工具的合法 JSON 输出误当来源。
+SEARCH_RESULTS_PAYLOAD_KIND = "docmind.search_results/v1"
+
+
+def _build_search_payload(
+    entries: list[tuple[float, float | None, str, str, str]],
+) -> str:
+    """把 (score, relevance, filename, document_id, snippet) 列表打包为结构化 JSON 信封。
+
+    两个检索工具（search_knowledge_base / vector_search）共用此出口；正文里
+    的任何内容都只能落在 ``content`` 字符串内部，无法伪造 ``sources`` 项。
+
+    issue #185 分数契约：``score`` 是相对排序分（rank），``relevanceScore`` 是
+    重排绝对分（可能为 None，绝不拿 rank 分冒充）；前端来源卡片据此区分
+    「排序序位」与「重排分」。
+    """
+    sources = [
+        {
+            "index": index,
+            "score": score,
+            "relevanceScore": relevance_score,
+            "filename": filename,
+            "documentId": document_id or "",
+        }
+        for index, (score, relevance_score, filename, document_id, _snippet) in enumerate(
+            entries, 1
+        )
+    ]
+    content = "\n\n".join(
+        f"[{index}] ({score:.2f}) {filename}\n{snippet}"
+        for index, (score, _relevance_score, filename, _document_id, snippet) in enumerate(
+            entries, 1
+        )
+    )
+    return json.dumps(
+        {
+            "kind": SEARCH_RESULTS_PAYLOAD_KIND,
+            "sources": sources,
+            "content": content,
+        },
+        ensure_ascii=False,
+    )
+
+
 # ─── Search Tools ────────────────────────────────────────────────────────────
+
 
 @register_tool(
     name="search_knowledge_base",
@@ -53,10 +119,13 @@ async def search_knowledge_base(
     query: str,
     top_k: int = 5,
     document_ids: list[str] | None = None,
-    organization_id: int = 1,
+    organization_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("search_knowledge_base")
     from app.dependencies import get_rag_pipeline
+    from app.rag.context_compressor import compress, get_prompt_text
     from app.rag.errors import RetrievalUnavailableError
 
     pipeline = get_rag_pipeline()
@@ -83,13 +152,24 @@ async def search_knowledge_base(
     if not results:
         return "No relevant documents found for this query."
 
-    output = []
-    for i, doc in enumerate(results, 1):
-        score = doc.get("score", 0)
+    entries = []
+    for doc in results:
+        score = float(doc.get("score") or 0.0)
+        relevance = doc.get("relevance_score")
         filename = doc.get("filename", "Unknown")
-        snippet = doc.get("snippet", doc.get("text", "")[:300])
-        output.append(f"[{i}] ({score:.2f}) {filename}\n{snippet}")
-    return "\n\n".join(output)
+        # issue #186：正文单一来源 prompt_text（snippet 仅展示）；300 字上限走
+        # context_compressor 的规则式句子抽取，关键句在 chunk 后半段时仍保留。
+        snippet = compress(get_prompt_text(doc), query, max_chars=300)
+        entries.append(
+            (
+                score,
+                float(relevance) if relevance is not None else None,
+                filename,
+                doc.get("document_id", ""),
+                snippet,
+            )
+        )
+    return _build_search_payload(entries)
 
 
 @register_tool(
@@ -107,8 +187,9 @@ async def search_knowledge_base(
             },
             "top_k": {
                 "type": "integer",
-                "description": "Number of results (default 5)",
+                "description": "Number of results (default 5, max 20)",
                 "default": 5,
+                "maximum": 20,
             },
         },
         "required": ["query"],
@@ -118,22 +199,32 @@ async def search_knowledge_base(
 async def vector_search(
     query: str,
     top_k: int = 5,
-    organization_id: int = 1,
+    organization_id: int | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("vector_search")
+    # T6：与姊妹检索工具一致，钳制到 20 以内，避免 ES 请求被调用方无限放大
+    top_k = min(top_k, 20)
+
     from app.dependencies import get_rag_pipeline
+
     pipeline = get_rag_pipeline()
     query_vector = await pipeline.get_embedding(query)
     if not query_vector:
         return "Embedding service unavailable."
 
     from app.core.elasticsearch import ElasticsearchTools
+    from app.rag.context_compressor import compress
+
     es_query = {
         "size": top_k,
         "min_score": 1.15,
         "query": {
             "script_score": {
-                "query": {"bool": {"filter": [{"term": {"organization_id": str(organization_id)}}]}},
+                "query": {
+                    "bool": {"filter": [{"term": {"organization_id": str(organization_id)}}]}
+                },
                 "script": {
                     "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
                     "params": {"query_vector": query_vector},
@@ -147,15 +238,26 @@ async def vector_search(
     if not hits:
         return "No semantically similar documents found."
 
-    output = []
-    for i, hit in enumerate(hits, 1):
+    entries = []
+    for hit in hits:
         src = hit.get("_source", {})
-        score = hit.get("_score", 0)
-        output.append(f"[{i}] ({score:.2f}) {src.get('filename', '?')}\n{src.get('content', '')[:300]}")
-    return "\n\n".join(output)
+        entries.append(
+            (
+                float(hit.get("_score") or 0.0),
+                # 纯向量臂的分数是 ES script_score（cosine+1），与重排分不同尺度；
+                # 不冒充 relevance，来源卡片按序位展示。
+                None,
+                src.get("filename", "?"),
+                src.get("document_id", ""),
+                # issue #186：300 字上限按语义句抽取，不硬切 chunk 头部。
+                compress(src.get("content") or "", query, max_chars=300),
+            )
+        )
+    return _build_search_payload(entries)
 
 
 # ─── Analysis Tools ──────────────────────────────────────────────────────────
+
 
 @register_tool(
     name="summarize_document",
@@ -177,10 +279,12 @@ async def vector_search(
 )
 async def summarize_document(
     document_id: str,
-    organization_id: int = 1,
+    organization_id: int | None = None,
     run_context: RunContext | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("summarize_document")
     from app.core.elasticsearch import ElasticsearchTools
     from app.dependencies import get_rag_pipeline
 
@@ -212,11 +316,15 @@ async def summarize_document(
 
     try:
         from app.core.config import settings
+
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
                 {"role": "system", "content": "你是文档摘要专家。请用中文生成结构化摘要。"},
-                {"role": "user", "content": f"请为以下文档生成摘要，包含：1)主题 2)关键要点(3-5条) 3)结论\n\n文档：{full_text[:6000]}"},
+                {
+                    "role": "user",
+                    "content": f"请为以下文档生成摘要，包含：1)主题 2)关键要点(3-5条) 3)结论\n\n文档：{full_text[:6000]}",
+                },
             ],
             temperature=0.1,
             max_tokens=500,
@@ -224,7 +332,15 @@ async def summarize_document(
         # 工具内 LLM 记账（issue #239 minor-2）：此前直连调用不入账，
         # 任务级 total_tokens 不含工具内部用量。
         record_llm_usage(resp, ctx_from_run_context(run_context))
-        summary = resp.choices[0].message.content or "Summary generation failed."
+        summary = (resp.choices[0].message.content or "").strip()
+        if not summary:
+            # 第四波实机诊断（复验于 e5b5e5b）：deepseek-v4-flash 为推理模型——
+            # max_tokens=500 时 reasoning_content 吃满预算、正文为空
+            # （finish_reason=length）。空正文必须走"不可用 → 原文预览"兜底
+            # （与下方异常路径同款），绝不把 "Summary generation failed." 当
+            # 工具结果喂回模型——executor 会据此放弃总结（实机"没有拿到可总结
+            # 的正文"的最后一厘米）。
+            raise RuntimeError("empty summary content (reasoning consumed budget)")
         return f"Document: {filename}\n\n{summary}"
     except Exception as e:
         logger.warning(f"LLM summarization failed for {document_id}: {e}")
@@ -258,6 +374,7 @@ async def summarize_document(
 )
 async def extract_keywords(text: str, max_keywords: int = 10, **_: Any) -> str:
     from app.rag.query_processor import extract_query_terms
+
     terms = extract_query_terms(text)
     return json.dumps(terms[:max_keywords], ensure_ascii=False)
 
@@ -347,7 +464,7 @@ ANALYSIS_FRAMEWORKS: dict[str, str] = {
             "framework": {
                 "type": "string",
                 "description": "Optional domain analysis framework: "
-                               "dupont, swot, pest, risk_assessment, financial_health, contract_risk",
+                "dupont, swot, pest, risk_assessment, financial_health, contract_risk",
                 "default": "",
             },
         },
@@ -359,10 +476,12 @@ async def extract_insights(
     document_id: str,
     aspects: str = "all",
     framework: str = "",
-    organization_id: int = 1,
+    organization_id: int | None = None,
     run_context: RunContext | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("extract_insights")
     from app.core.config import settings
     from app.core.elasticsearch import ElasticsearchTools
     from app.dependencies import get_rag_pipeline
@@ -383,22 +502,32 @@ async def extract_insights(
     res = await ElasticsearchTools.search_documents(es_query)
     hits = res.get("hits", {}).get("hits", [])
     if not hits:
-        return json.dumps({"error": f"Document {document_id} not found in index."}, ensure_ascii=False)
+        # issue #301 #12：失败必须结构化（#293 契约）—— 旧行为返回
+        # {"error": ...} 的"正常"JSON 字符串，消费端（skills.py）大小写不匹配
+        # 漏检后把它当"分析结果"写进报告。
+        return ToolResult.fail(
+            code="document_not_found",
+            message=f"Document {document_id} not found in index.",
+        )
 
     filename = hits[0].get("_source", {}).get("filename", "Unknown")
-    full_text = "\n".join(
-        h.get("_source", {}).get("content", "") for h in hits
-    )
+    full_text = "\n".join(h.get("_source", {}).get("content", "") for h in hits)
     text_sample = full_text[:8000]
 
     pipeline = get_rag_pipeline()
     if not pipeline.openai_client:
-        return json.dumps({
-            "filename": filename,
-            "document_id": document_id,
-            "insights": {"error": "LLM unavailable"},
-            "raw_preview": text_sample[:2000],
-        }, ensure_ascii=False)
+        # issue #301 #12：无 LLM 就没有洞察——这是工具失败，不是结果。
+        # 旧行为返回 insights={"error": "LLM unavailable"} 的正常 JSON，
+        # 会被消费端原样写进报告（"分析结果"里出现 error 载荷）。
+        return ToolResult.fail(
+            code="llm_unavailable",
+            message="LLM unavailable",
+            raw={
+                "filename": filename,
+                "document_id": document_id,
+                "raw_preview": text_sample[:2000],
+            },
+        )
 
     aspect_instructions = {
         "entities": "提取文档中的关键实体：人物、组织、地点、日期、专有名词。",
@@ -412,8 +541,7 @@ async def extract_insights(
     if framework_key in ANALYSIS_FRAMEWORKS:
         instructions = ANALYSIS_FRAMEWORKS[framework_key]
         system_prompt = (
-            f"你是{framework_key}分析专家。严格按照提供的框架进行分析，"
-            "输出结构化 JSON 格式。"
+            f"你是{framework_key}分析专家。严格按照提供的框架进行分析，输出结构化 JSON 格式。"
         )
         logger.info("Using domain framework '%s' for document analysis", framework_key)
     else:
@@ -421,26 +549,29 @@ async def extract_insights(
         if "all" in selected:
             instructions = "\n".join(aspect_instructions.values())
         else:
-            instructions = "\n".join(
-                v for k, v in aspect_instructions.items() if k in selected
-            )
-        system_prompt = "你是文档分析专家。分析文档内容，提取结构化信息。只返回 JSON，不要包含任何解释。"
+            instructions = "\n".join(v for k, v in aspect_instructions.items() if k in selected)
+        system_prompt = (
+            "你是文档分析专家。分析文档内容，提取结构化信息。只返回 JSON，不要包含任何解释。"
+        )
 
     try:
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": (
-                    f"分析以下文档，{instructions}\n\n"
-                    f"文档：{filename}\n\n"
-                    f"内容：{text_sample}\n\n"
-                    "返回 JSON 格式：\n"
-                    '{"entities": {"people": [], "organizations": [], "locations": [], "dates": []}, '
-                    '"metrics": [{"name": "...", "value": "..."}], '
-                    '"claims": [{"claim": "...", "confidence": "high/medium/low"}], '
-                    '"structure": [{"level": 1, "heading": "..."}]}'
-                )},
+                {
+                    "role": "user",
+                    "content": (
+                        f"分析以下文档，{instructions}\n\n"
+                        f"文档：{filename}\n\n"
+                        f"内容：{text_sample}\n\n"
+                        "返回 JSON 格式：\n"
+                        '{"entities": {"people": [], "organizations": [], "locations": [], "dates": []}, '
+                        '"metrics": [{"name": "...", "value": "..."}], '
+                        '"claims": [{"claim": "...", "confidence": "high/medium/low"}], '
+                        '"structure": [{"level": 1, "heading": "..."}]}'
+                    ),
+                },
             ],
             temperature=0.1,
             max_tokens=1500,
@@ -454,20 +585,29 @@ async def extract_insights(
         except json.JSONDecodeError:
             insights = {"raw": insights_raw}
 
-        return json.dumps({
-            "filename": filename,
-            "document_id": document_id,
-            "chunk_count": len(hits),
-            "content_length": len(full_text),
-            "insights": insights,
-        }, ensure_ascii=False, indent=2)
+        return json.dumps(
+            {
+                "filename": filename,
+                "document_id": document_id,
+                "chunk_count": len(hits),
+                "content_length": len(full_text),
+                "insights": insights,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
     except Exception as e:
-        return json.dumps({
-            "filename": filename,
-            "document_id": document_id,
-            "error": f"Analysis failed: {e}",
-            "raw_preview": text_sample[:2000],
-        }, ensure_ascii=False, indent=2)
+        # issue #301 #12：抽取失败的错误 JSON 不得再伪装成"分析结果"——
+        # 旧形态 {"error": ...} 被复合技能漏检后原样写进报告。结构化失败传播。
+        return ToolResult.fail(
+            code="analysis_failed",
+            message=f"Analysis failed: {e}",
+            raw={
+                "filename": filename,
+                "document_id": document_id,
+                "raw_preview": text_sample[:2000],
+            },
+        )
 
 
 @register_tool(
@@ -498,14 +638,25 @@ async def extract_insights(
 async def cross_document_analysis(
     document_ids: list[str],
     analysis_type: str = "comprehensive",
-    organization_id: int = 1,
+    organization_id: int | None = None,
     run_context: RunContext | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("cross_document_analysis")
     if not document_ids or len(document_ids) < 2:
-        return json.dumps({"error": "Please provide at least 2 document IDs."}, ensure_ascii=False)
+        # issue #301 批次 2：历史 {"error": ...} JSON 出口迁移到结构化失败 ——
+        # 旧的"正常 JSON"形态对消费端的小写键检查隐身（trustB 评审现场复现：
+        # 错误载荷经 document_comparison Step 3 漏进报告）。
+        return ToolResult.fail(
+            code="validation_error",
+            message="Please provide at least 2 document IDs.",
+        )
     if len(document_ids) > 10:
-        return json.dumps({"error": "Maximum 10 documents allowed."}, ensure_ascii=False)
+        return ToolResult.fail(
+            code="validation_error",
+            message="Maximum 10 documents allowed.",
+        )
 
     from app.core.config import settings
     from app.core.elasticsearch import ElasticsearchTools
@@ -545,17 +696,16 @@ async def cross_document_analysis(
                 res = await ElasticsearchTools.search_documents(fallback_query)
                 hits = res.get("hits", {}).get("hits", [])
             if hits:
-                text = " ".join(
-                    h.get("_source", {}).get("content", "")[:500]
-                    for h in hits[:10]
-                )
+                text = " ".join(h.get("_source", {}).get("content", "")[:500] for h in hits[:10])
                 real_id = hits[0].get("_source", {}).get("document_id", doc_id)
-                docs_data.append({
-                    "id": real_id,
-                    "filename": hits[0].get("_source", {}).get("filename", doc_id),
-                    "text": text[:3000],
-                    "chunks": len(hits),
-                })
+                docs_data.append(
+                    {
+                        "id": real_id,
+                        "filename": hits[0].get("_source", {}).get("filename", doc_id),
+                        "text": text[:3000],
+                        "chunks": len(hits),
+                    }
+                )
             else:
                 docs_data.append({"id": doc_id, "filename": "Not found", "text": "", "chunks": 0})
         except Exception as e:
@@ -563,11 +713,24 @@ async def cross_document_analysis(
 
     pipeline = get_rag_pipeline()
     if not pipeline.openai_client:
-        return json.dumps({"documents": docs_data, "analysis": "LLM unavailable"}, ensure_ascii=False)
+        # issue #301 批次 2：无 LLM 就没有跨文档分析 —— 这是工具失败，不是结果。
+        # 旧行为返回 {"documents": ..., "analysis": "LLM unavailable"} 的正常
+        # JSON，消费端会把它当分析结果消费。
+        return ToolResult.fail(
+            code="llm_unavailable",
+            message="LLM unavailable",
+            raw={
+                "documents": [
+                    {"id": d["id"], "filename": d["filename"], "chunks": d["chunks"]}
+                    for d in docs_data
+                ],
+            },
+        )
 
     doc_list_text = "\n\n".join(
-        f"--- 文档 {i+1}: {d['filename']} ---\n{d['text']}"
-        for i, d in enumerate(docs_data) if d['text']
+        f"--- 文档 {i + 1}: {d['filename']} ---\n{d['text']}"
+        for i, d in enumerate(docs_data)
+        if d["text"]
     )
 
     analysis_prompts = {
@@ -581,18 +744,24 @@ async def cross_document_analysis(
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
-                {"role": "system", "content": "你是跨文档分析专家。分析多个文档之间的关系和模式。只返回 JSON。"},
-                {"role": "user", "content": (
-                    f"{analysis_prompts.get(analysis_type, analysis_prompts['comprehensive'])}\n\n"
-                    f"文档列表：\n{doc_list_text[:10000]}\n\n"
-                    "返回 JSON 格式：\n"
-                    '{"summary": "整体分析总结", '
-                    '"common_themes": [{"theme": "...", "evidence": ["...", "..."], "documents": [0, 1]}], '
-                    '"unique_findings": [{"document_index": 0, "finding": "..."}], '
-                    '"contradictions": [{"description": "...", "between": [0, 2]}], '
-                    '"complementary_info": [{"description": "..."}], '
-                    '"conclusion": "综合分析结论"}'
-                )},
+                {
+                    "role": "system",
+                    "content": "你是跨文档分析专家。分析多个文档之间的关系和模式。只返回 JSON。",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"{analysis_prompts.get(analysis_type, analysis_prompts['comprehensive'])}\n\n"
+                        f"文档列表：\n{doc_list_text[:10000]}\n\n"
+                        "返回 JSON 格式：\n"
+                        '{"summary": "整体分析总结", '
+                        '"common_themes": [{"theme": "...", "evidence": ["...", "..."], "documents": [0, 1]}], '
+                        '"unique_findings": [{"document_index": 0, "finding": "..."}], '
+                        '"contradictions": [{"description": "...", "between": [0, 2]}], '
+                        '"complementary_info": [{"description": "..."}], '
+                        '"conclusion": "综合分析结论"}'
+                    ),
+                },
             ],
             temperature=0.1,
             max_tokens=2000,
@@ -605,18 +774,29 @@ async def cross_document_analysis(
         except json.JSONDecodeError:
             analysis = {"raw": analysis_raw}
 
-        return json.dumps({
-            "document_count": len(docs_data),
-            "analysis_type": analysis_type,
-            "documents": [{"id": d["id"], "filename": d["filename"], "chunks": d["chunks"]} for d in docs_data],
-            "analysis": analysis,
-        }, ensure_ascii=False, indent=2)
+        return json.dumps(
+            {
+                "document_count": len(docs_data),
+                "analysis_type": analysis_type,
+                "documents": [
+                    {"id": d["id"], "filename": d["filename"], "chunks": d["chunks"]}
+                    for d in docs_data
+                ],
+                "analysis": analysis,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
     except Exception as e:
-        return json.dumps({
-            "document_count": len(docs_data),
-            "error": f"Analysis failed: {e}",
-            "documents": [{"filename": d["filename"]} for d in docs_data],
-        }, ensure_ascii=False, indent=2)
+        # issue #301 批次 2：异常不再包成 {"error": ...} 的"正常" JSON 返回 ——
+        # 结构化失败传播（判别权在工具内部，#297/#293 契约）。
+        return ToolResult.fail(
+            code="analysis_failed",
+            message=f"Analysis failed: {e}",
+            raw={
+                "documents": [{"filename": d["filename"]} for d in docs_data],
+            },
+        )
 
 
 @register_tool(
@@ -657,7 +837,7 @@ async def generate_report(
     format: str = "markdown",
     run_context: RunContext | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
     from app.core.config import settings
     from app.dependencies import get_rag_pipeline
 
@@ -665,16 +845,28 @@ async def generate_report(
     try:
         parsed_sections = json.loads(sections)
         if not isinstance(parsed_sections, list):
-            return json.dumps({"error": "sections must be a JSON array"}, ensure_ascii=False)
+            # issue #301 批次 2：入参校验失败 = 工具失败，旧 {"error": ...} 出口
+            # 迁移到结构化失败（消费端曾漏检小写键）。
+            return ToolResult.fail(
+                code="validation_error",
+                message="sections must be a JSON array",
+            )
     except json.JSONDecodeError as e:
-        return json.dumps({"error": f"Invalid sections JSON: {e}"}, ensure_ascii=False)
+        return ToolResult.fail(
+            code="validation_error",
+            message=f"Invalid sections JSON: {e}",
+        )
 
     if format == "json":
-        return json.dumps({
-            "title": title,
-            "sections": parsed_sections,
-            "generated_at": __import__("datetime").datetime.now().isoformat(),
-        }, ensure_ascii=False, indent=2)
+        return json.dumps(
+            {
+                "title": title,
+                "sections": parsed_sections,
+                "generated_at": __import__("datetime").datetime.now().isoformat(),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     # Use LLM to generate a polished markdown report
     pipeline = get_rag_pipeline()
@@ -682,8 +874,7 @@ async def generate_report(
         return _generate_markdown_fallback(title, parsed_sections)
 
     sections_text = "\n\n".join(
-        f"## {s.get('heading', 'Section ' + str(i+1))}\n"
-        f"{s.get('content', '')}"
+        f"## {s.get('heading', 'Section ' + str(i + 1))}\n{s.get('content', '')}"
         for i, s in enumerate(parsed_sections)
     )
 
@@ -691,16 +882,22 @@ async def generate_report(
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
-                {"role": "system", "content": "你是报告生成专家。根据提供的内容生成结构清晰、专业的 Markdown 报告。"},
-                {"role": "user", "content": (
-                    f"请根据以下内容生成一份专业的分析报告。使用 Markdown 格式，包含：\n"
-                    f"1. 标题和元数据\n"
-                    f"2. 执行摘要\n"
-                    f"3. 详细分析（用表格、列表、引用等丰富格式）\n"
-                    f"4. 结论与建议\n\n"
-                    f"报告标题：{title}\n\n"
-                    f"内容：\n{sections_text[:8000]}"
-                )},
+                {
+                    "role": "system",
+                    "content": "你是报告生成专家。根据提供的内容生成结构清晰、专业的 Markdown 报告。",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"请根据以下内容生成一份专业的分析报告。使用 Markdown 格式，包含：\n"
+                        f"1. 标题和元数据\n"
+                        f"2. 执行摘要\n"
+                        f"3. 详细分析（用表格、列表、引用等丰富格式）\n"
+                        f"4. 结论与建议\n\n"
+                        f"报告标题：{title}\n\n"
+                        f"内容：\n{sections_text[:8000]}"
+                    ),
+                },
             ],
             temperature=0.2,
             max_tokens=3000,
@@ -719,6 +916,7 @@ async def generate_report(
 def _generate_markdown_fallback(title: str, sections: list) -> str:
     """Fallback: generate a clean markdown report without LLM."""
     from datetime import datetime
+
     lines = [
         f"# {title}",
         f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
@@ -755,6 +953,7 @@ def _generate_markdown_fallback(title: str, sections: list) -> str:
 
 # ─── Document Management Tools ───────────────────────────────────────────────
 
+
 @register_tool(
     name="list_documents",
     description=(
@@ -781,9 +980,11 @@ def _generate_markdown_fallback(title: str, sections: list) -> str:
 async def list_documents(
     limit: int = 20,
     status: str | None = None,
-    organization_id: int = 1,
+    organization_id: int | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("list_documents")
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal
@@ -804,9 +1005,11 @@ async def list_documents(
     output = []
     for doc in docs:
         status_val = doc.status.value if hasattr(doc.status, "value") else str(doc.status)
-        created = doc.created_at.strftime('%Y-%m-%d') if doc.created_at else '?'
+        created = doc.created_at.strftime("%Y-%m-%d") if doc.created_at else "?"
         title = doc.title or doc.filename
-        output.append(f"- ID: {doc.id} | 文件名: {doc.filename} | 标题: {title} | 状态: {status_val} | 创建: {created}")
+        output.append(
+            f"- ID: {doc.id} | 文件名: {doc.filename} | 标题: {title} | 状态: {status_val} | 创建: {created}"
+        )
     return "\n".join(output)
 
 
@@ -828,7 +1031,11 @@ async def list_documents(
     },
     tags=["management"],
 )
-async def get_document_info(document_id: str, organization_id: int = 1, **_: Any) -> str:
+async def get_document_info(
+    document_id: str, organization_id: int | None = None, **_: Any
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("get_document_info")
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal
@@ -843,25 +1050,36 @@ async def get_document_info(document_id: str, organization_id: int = 1, **_: Any
         doc = result.scalar_one_or_none()
 
     if not doc:
-        return f"Document {document_id} not found."
+        # issue #301 批次 2：文档不存在 = 工具失败。旧行为返回 "Document ... not
+        # found." 普通字符串，消费端只能靠 `"not found" not in info` 内容启发式
+        # 判断（既漏又可能误伤含该词的合法文件名/字段）。
+        return ToolResult.fail(
+            code="not_found",
+            message=f"Document {document_id} not found.",
+        )
 
     status_val = doc.status.value if hasattr(doc.status, "value") else str(doc.status)
-    return json.dumps({
-        "id": doc.id,
-        "filename": doc.filename,
-        "title": doc.title,
-        "status": status_val,
-        "file_size": doc.file_size,
-        "chunk_count": doc.chunk_count,
-        "description": doc.description,
-        "keywords": doc.keywords or [],
-        "created_at": doc.created_at.isoformat() if doc.created_at else None,
-        "parsed_at": doc.parsed_at.isoformat() if doc.parsed_at else None,
-        "indexed_at": doc.indexed_at.isoformat() if doc.indexed_at else None,
-    }, ensure_ascii=False, indent=2)
+    return json.dumps(
+        {
+            "id": doc.id,
+            "filename": doc.filename,
+            "title": doc.title,
+            "status": status_val,
+            "file_size": doc.file_size,
+            "chunk_count": doc.chunk_count,
+            "description": doc.description,
+            "keywords": doc.keywords or [],
+            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            "parsed_at": doc.parsed_at.isoformat() if doc.parsed_at else None,
+            "indexed_at": doc.indexed_at.isoformat() if doc.indexed_at else None,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 # ─── Conversation Management Tools ──────────────────────────────────────────
+
 
 @register_tool(
     name="list_conversations",
@@ -885,9 +1103,11 @@ async def get_document_info(document_id: str, organization_id: int = 1, **_: Any
 async def list_conversations(
     limit: int = 10,
     user_id: int = 0,
-    organization_id: int = 1,
+    organization_id: int | None = None,
     **_: Any,
-) -> str:
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("list_conversations")
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal
@@ -944,8 +1164,15 @@ async def get_conversation_history(
     session_id: str,
     limit: int = 20,
     user_id: int = 0,
+    organization_id: int | None = None,
     **_: Any,
 ) -> str:
+    """返回指定会话的消息历史。
+
+    口径（T4）：按会话的 ``organization_id`` 严格校验（历史 NULL 组织会话
+    属本人，仍可读）。本工具**不随 API 的超管旁路放宽**——与同目录
+    ``list_conversations`` 工具的严格组织口径保持一致。
+    """
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal
@@ -961,6 +1188,13 @@ async def get_conversation_history(
             return f"Conversation {session_id} not found."
         if chat_session.user_id != user_id:
             return "Access denied: you do not own this conversation."
+        # T4：按 id 读取与列表工具同一组织口径——不得读取其他组织的会话；
+        # 历史 NULL 组织会话属本人，仍可读。
+        if (
+            chat_session.organization_id is not None
+            and chat_session.organization_id != organization_id
+        ):
+            return "Access denied: conversation belongs to another organization."
 
         stmt = (
             select(ChatMessage)
@@ -976,13 +1210,16 @@ async def get_conversation_history(
 
     output = []
     for msg in messages:
-        role = msg.message_type.value if hasattr(msg.message_type, "value") else str(msg.message_type)
+        role = (
+            msg.message_type.value if hasattr(msg.message_type, "value") else str(msg.message_type)
+        )
         content = msg.content[:500] if msg.content else ""
         output.append(f"[{role}] {content}")
     return "\n\n".join(output)
 
 
 # ─── Prompt Template Tools ──────────────────────────────────────────────────
+
 
 @register_tool(
     name="list_prompt_templates",
@@ -1006,19 +1243,50 @@ async def get_conversation_history(
         },
     },
     tags=["prompts"],
+    requires_auth=True,
 )
 async def list_prompt_templates(
     category: str | None = None,
     limit: int = 20,
+    organization_id: int | None = None,
+    user_id: int | None = None,
     **_: Any,
-) -> str:
-    from sqlalchemy import select
+) -> str | ToolResult:
+    from sqlalchemy import and_, or_, select
 
     from app.core.database import AsyncSessionLocal
     from app.models.prompt import PromptTemplate
 
+    # A2 P0（租户边界）：提示词已按组织私有（org=NULL 仅系统模板只读可见），
+    # 该工具默认对 Agent 开放，必须同源过滤，否则可枚举其他组织的私有模板。
+    # B4（D6）：个人模板只对创建者可见，不得经 Agent 工具泄露给组织其他成员。
+    if organization_id is None:
+        return _missing_organization_result("list_prompt_templates")
+
+    org_visible = and_(
+        PromptTemplate.organization_id == organization_id,
+        or_(
+            PromptTemplate.scope == "organization",
+            and_(
+                PromptTemplate.scope == "personal",
+                PromptTemplate.creator_id == user_id,
+            ),
+        )
+        if user_id is not None
+        else PromptTemplate.scope == "organization",
+    )
+
     async with AsyncSessionLocal() as session:
-        stmt = select(PromptTemplate).where(PromptTemplate.is_active)
+        stmt = select(PromptTemplate).where(
+            PromptTemplate.is_active,
+            or_(
+                org_visible,
+                and_(
+                    PromptTemplate.is_system.is_(True),
+                    PromptTemplate.organization_id.is_(None),
+                ),
+            ),
+        )
         if category:
             stmt = stmt.where(PromptTemplate.category == category)
         stmt = stmt.order_by(PromptTemplate.created_at.desc()).limit(limit)
@@ -1030,8 +1298,15 @@ async def list_prompt_templates(
 
     output = []
     for tpl in templates:
-        scope = "system" if tpl.is_system else "user"
-        output.append(f"- [{tpl.category}] {tpl.name} ({scope}) — {tpl.description or 'No description'}")
+        if tpl.is_system:
+            scope = "system"
+        elif tpl.scope == "personal":
+            scope = "personal"
+        else:
+            scope = "organization"
+        output.append(
+            f"- [{tpl.category}] {tpl.name} ({scope}) — {tpl.description or 'No description'}"
+        )
     return "\n".join(output)
 
 
@@ -1052,31 +1327,81 @@ async def list_prompt_templates(
         "required": ["name"],
     },
     tags=["prompts"],
+    requires_auth=True,
 )
-async def get_prompt_template(name: str, **_: Any) -> str:
-    from sqlalchemy import select
+async def get_prompt_template(
+    name: str,
+    organization_id: int | None = None,
+    user_id: int | None = None,
+    **_: Any,
+) -> str | ToolResult:
+    from sqlalchemy import and_, or_, select
 
     from app.core.database import AsyncSessionLocal
     from app.models.prompt import PromptTemplate
 
+    # A2 P0（租户边界）：只能读取本组织模板或系统内置模板，禁止跨租户读取全文。
+    # B4（D6）：个人模板仅创建者可读。
+    if organization_id is None:
+        return _missing_organization_result("get_prompt_template")
+
+    org_visible = and_(
+        PromptTemplate.organization_id == organization_id,
+        or_(
+            PromptTemplate.scope == "organization",
+            and_(
+                PromptTemplate.scope == "personal",
+                PromptTemplate.creator_id == user_id,
+            ),
+        )
+        if user_id is not None
+        else PromptTemplate.scope == "organization",
+    )
+
     async with AsyncSessionLocal() as session:
-        stmt = select(PromptTemplate).where(PromptTemplate.name == name)
+        stmt = (
+            select(PromptTemplate)
+            .where(
+                PromptTemplate.name == name,
+                or_(
+                    org_visible,
+                    and_(
+                        PromptTemplate.is_system.is_(True),
+                        PromptTemplate.organization_id.is_(None),
+                    ),
+                ),
+            )
+            # 同名时优先个人模板（最具体）→ 组织模板 → 系统模板；limit(1) 防止
+            # 历史重名触发 MultipleResultsFound（复合唯一约束只保证同组织内不重名）。
+            .order_by(
+                PromptTemplate.organization_id.is_(None),
+                PromptTemplate.scope.desc(),
+                PromptTemplate.id,
+            )
+            .limit(1)
+        )
         result = await session.execute(stmt)
-        tpl = result.scalar_one_or_none()
+        tpl = result.scalars().first()
 
     if not tpl:
         return f"Prompt template '{name}' not found."
 
-    return json.dumps({
-        "name": tpl.name,
-        "content": tpl.content,
-        "description": tpl.description,
-        "category": tpl.category,
-        "is_system": tpl.is_system,
-    }, ensure_ascii=False, indent=2)
+    return json.dumps(
+        {
+            "name": tpl.name,
+            "content": tpl.content,
+            "description": tpl.description,
+            "category": tpl.category,
+            "is_system": tpl.is_system,
+            "scope": tpl.scope,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 # ─── Utility Tools ───────────────────────────────────────────────────────────
+
 
 @register_tool(
     name="get_current_time",
@@ -1086,6 +1411,7 @@ async def get_prompt_template(name: str, **_: Any) -> str:
 )
 async def get_current_time(**_: Any) -> str:
     from datetime import datetime
+
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 

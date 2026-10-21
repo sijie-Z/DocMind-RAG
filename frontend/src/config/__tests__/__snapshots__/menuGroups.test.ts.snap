@@ -1,0 +1,105 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`sidebar menu domains > menu tree snapshot 1`] = `
+[
+  {
+    "groupI18nKey": "menu.groupWorkspace",
+    "items": [
+      {
+        "i18nKey": "menu.home",
+        "icon": "home",
+        "routeName": "Dashboard",
+      },
+    ],
+  },
+  {
+    "groupI18nKey": "menu.groupConversation",
+    "items": [
+      {
+        "i18nKey": "menu.chat",
+        "icon": "chat",
+        "routeName": "Chat",
+      },
+    ],
+  },
+  {
+    "groupI18nKey": "menu.groupKnowledge",
+    "items": [
+      {
+        "i18nKey": "menu.knowledge",
+        "icon": "book",
+        "routeName": "Knowledge",
+      },
+      {
+        "i18nKey": "menu.search",
+        "icon": "search",
+        "routeName": "Search",
+      },
+    ],
+  },
+  {
+    "groupI18nKey": "menu.groupAutomation",
+    "items": [
+      {
+        "i18nKey": "menu.workflow",
+        "icon": "git-network",
+        "routeName": "Workflow",
+      },
+      {
+        "i18nKey": "menu.scheduledTasks",
+        "icon": "calendar",
+        "routeName": "ScheduledTasks",
+      },
+    ],
+  },
+  {
+    "groupI18nKey": "menu.groupPrompts",
+    "items": [
+      {
+        "i18nKey": "menu.prompts",
+        "icon": "terminal",
+        "routeName": "Prompts",
+      },
+    ],
+  },
+  {
+    "adminOnly": true,
+    "groupI18nKey": "menu.groupManagement",
+    "items": [
+      {
+        "i18nKey": "menu.users",
+        "icon": "people",
+        "routeName": "Users",
+      },
+      {
+        "i18nKey": "menu.organizations",
+        "icon": "business",
+        "routeName": "Organizations",
+      },
+      {
+        "i18nKey": "menu.organizationSettings",
+        "icon": "settings",
+        "routeName": "OrganizationSettings",
+      },
+      {
+        "i18nKey": "menu.auditLogs",
+        "icon": "document-text",
+        "platformOnly": true,
+        "routeName": "AuditLogs",
+      },
+      {
+        "i18nKey": "menu.monitoring",
+        "icon": "pulse",
+        "platformOnly": true,
+        "routeName": "Monitoring",
+      },
+      {
+        "i18nKey": "menu.mcpServers",
+        "icon": "server",
+        "platformOnly": true,
+        "routeName": "McpServers",
+      },
+    ],
+  },
+]
+`;

@@ -1,6 +1,7 @@
 """
 文件相关的Pydantic模型
 """
+
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -8,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class FileStatus(str, Enum):
     """文件状态"""
+
     PENDING = "pending"
     UPLOADED = "uploaded"
     PARSING = "parsing"
@@ -18,6 +20,7 @@ class FileStatus(str, Enum):
 
 class FileType(str, Enum):
     """文件类型"""
+
     PDF = "pdf"
     WORD = "word"
     EXCEL = "excel"
@@ -28,6 +31,7 @@ class FileType(str, Enum):
 
 class FileUploadResponse(BaseModel):
     """文件上传响应"""
+
     document_id: str = Field(..., description="文档ID")
     filename: str = Field(..., description="文件名")
     file_size: int = Field(..., description="文件大小（字节）")
@@ -38,6 +42,7 @@ class FileUploadResponse(BaseModel):
 
 class FileChunkUploadResponse(BaseModel):
     """文件分块上传响应"""
+
     status: str = Field(..., description="上传状态：chunk_uploaded 或 completed")
     chunk_index: int | None = Field(None, description="分块序号")
     document_id: str | None = Field(None, description="文档ID（上传完成时返回）")
@@ -46,6 +51,7 @@ class FileChunkUploadResponse(BaseModel):
 
 class FileListItem(BaseModel):
     """文档列表项"""
+
     id: str = Field(..., description="文档ID")
     filename: str = Field(..., description="文件名")
     file_size: int = Field(..., description="文件大小（字节）")
@@ -61,6 +67,7 @@ class FileListItem(BaseModel):
 
 class FileListResponse(BaseModel):
     """文档列表响应"""
+
     total: int = Field(..., description="总文档数量")
     documents: list[FileListItem] = Field(..., description="文档列表")
     skip: int = Field(..., description="跳过的数量")
@@ -69,12 +76,14 @@ class FileListResponse(BaseModel):
 
 class FileDeleteResponse(BaseModel):
     """文件删除响应"""
+
     success: bool = Field(..., description="是否删除成功")
     message: str = Field(..., description="提示信息")
 
 
 class FileUploadStatus(BaseModel):
     """文件上传状态"""
+
     status: str = Field(..., description="上传状态：not_started, in_progress, completed, error")
     uploaded_chunks: int = Field(0, description="已上传的分块数量")
     total_chunks: int | None = Field(None, description="总分块数量")
@@ -83,6 +92,7 @@ class FileUploadStatus(BaseModel):
 
 class DocumentProcessResponse(BaseModel):
     """文档处理响应"""
+
     success: bool = Field(..., description="是否处理成功")
     message: str = Field(..., description="提示信息")
     document_id: str = Field(..., description="文档ID")

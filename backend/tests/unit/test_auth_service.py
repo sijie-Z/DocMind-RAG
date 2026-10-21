@@ -1,4 +1,5 @@
 """AuthService 单元测试 — 不依赖外部服务。"""
+
 import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -25,6 +26,7 @@ def auth_service():
 
 
 # ── 密码哈希 ──────────────────────────────────────────────
+
 
 class TestPasswordHashing:
     def test_hash_password_returns_string(self, auth_service: AuthService):
@@ -59,6 +61,7 @@ class TestPasswordHashing:
 
 
 # ── JWT Token 创建与验证 ──────────────────────────────────
+
 
 class TestTokenCreation:
     def test_create_access_token_contains_claims(self, auth_service: AuthService):
@@ -128,6 +131,7 @@ class TestTokenVerification:
 
 # ── Token 黑名单 ──────────────────────────────────────────
 
+
 class TestTokenBlacklist:
     @pytest.mark.asyncio
     async def test_blacklist_and_check(self, auth_service: AuthService):
@@ -187,6 +191,7 @@ class TestTokenBlacklist:
 
 # ── RBAC ──────────────────────────────────────────────────
 
+
 class TestRBAC:
     def test_require_role_returns_dependency(self, auth_service: AuthService):
         dep = auth_service.require_role("admin")
@@ -198,6 +203,7 @@ class TestRBAC:
 
 
 # ── 身份权威：DB（issue #82 / PR B）────────────────────────
+
 
 class TestDbIsTheOnlyIdentityAuthority:
     """`get_current_user` 不再读 `user:{id}` 缓存，身份每次请求回源 DB。

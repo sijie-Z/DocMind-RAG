@@ -63,8 +63,7 @@ class TestLongTermKeywordScoring:
         results = ltm.search("今天 天气 北京", top_k=5)
         assert len(results) == 2
         assert "晴朗" in results[0].content, (
-            "高重叠项应排前面,"
-            f" 但实际第一项是 {results[0].content}"
+            f"高重叠项应排前面, 但实际第一项是 {results[0].content}"
         )
 
     def test_access_count_bonus_capped_at_10(self):

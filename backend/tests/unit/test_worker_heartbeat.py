@@ -63,9 +63,7 @@ def test_check_healthy_when_fresh_and_unhealthy_when_stale(tmp_path):
 
 
 def test_check_missing_file_is_unhealthy(tmp_path):
-    code, message = worker_healthcheck.check(
-        path=str(tmp_path / "missing"), max_age=90.0, now=0.0
-    )
+    code, message = worker_healthcheck.check(path=str(tmp_path / "missing"), max_age=90.0, now=0.0)
     assert code == 1
     assert "no heartbeat" in message
 

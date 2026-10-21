@@ -37,7 +37,9 @@ DB 侧与既有用例同风格：能真跑就真跑（内存 SQLite 真建表）
 检索、ES、MinIO、embedding）用「触碰即炸 / 记录调用」的假对象 —— 断言的是
 「1 号组织数据/缓存零出现」，而不是假对象的善意。
 """
+
 import asyncio
+import contextlib
 import io
 import uuid
 from types import SimpleNamespace
@@ -50,6 +52,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import get_db
 from app.core.security import get_current_user, optional_current_user
+from app.exceptions import AuthorizationError
 from app.models import Base, Organization, User
 from app.models.chat import ChatMessage, ChatSession, MessageType
 from app.models.document import Document, DocumentType
@@ -191,7 +194,9 @@ class TestChatRagNoOrgSemantics:
         _cleanup = _override_http(user=user)
         try:
             with (
-                patch("app.api.v1.endpoints.chat.AsyncSessionLocal", new=lambda: _AsyncCtx(session)),
+                patch(
+                    "app.api.v1.endpoints.chat.AsyncSessionLocal", new=lambda: _AsyncCtx(session)
+                ),
                 patch(
                     "app.services.chat_service._semantic_cache",
                     new=_ExplodingSemanticCache(),
@@ -227,9 +232,7 @@ class TestChatRagNoOrgSemantics:
             "app.core.ws_auth.auth_service.is_token_blacklisted",
             AsyncMock(return_value=False),
         )
-        token = auth_service.create_access_token(
-            {"sub": "or1268", "user_id": 1, "role": "user"}
-        )
+        token = auth_service.create_access_token({"sub": "or1268", "user_id": 1, "role": "user"})
 
         # 握手阶段的假会话：_load_user_state 的 db.execute(...).first() 命中一行（无组织）
         handshake_db = MagicMock()
@@ -253,7 +256,9 @@ class TestChatRagNoOrgSemantics:
                         return_value=SimpleNamespace(id=1, is_active=True, organization_id=None)
                     ),
                 ),
-                patch("app.api.v1.endpoints.chat.AsyncSessionLocal", new=lambda: _AsyncCtx(session)),
+                patch(
+                    "app.api.v1.endpoints.chat.AsyncSessionLocal", new=lambda: _AsyncCtx(session)
+                ),
                 patch(
                     "app.services.chat_service._semantic_cache",
                     new=_ExplodingSemanticCache(),
@@ -266,9 +271,7 @@ class TestChatRagNoOrgSemantics:
                     "app.services.chat_service.rag_service.search_knowledge_base",
                     new=AsyncMock(side_effect=AssertionError("kb-search-touched")),
                 ),
-                client.websocket_connect(
-                    "/api/v1/chat/ws", subprotocols=[f"auth.{token}"]
-                ) as ws,
+                client.websocket_connect("/api/v1/chat/ws", subprotocols=[f"auth.{token}"]) as ws,
             ):
                 ws.send_json({"content": "你好"})
                 payload = ws.receive_json()
@@ -285,15 +288,34 @@ class TestChatRagNoOrgSemantics:
 # 2 · workflow 端点 —— 引擎拿到真实组织（None-able），不是伪造的 1
 # ══════════════════════════════════════════════════════════════════════════
 class TestWorkflowExecuteOrgDerivation:
-    def test_workflow_execute_no_org_passes_none_to_engine(self, client: TestClient):
-        """无组织用户执行工作流：引擎应以 organization_id=None 创建（不伪造 1）。
+    def test_workflow_execute_orgless_non_superuser_fails_closed(self, client: TestClient):
+        """A2 收紧：无组织非超管执行工作流一律 403（不携带 None 进入引擎）。
 
-        引擎侧「缺组织显式失败」在 test_rag_fix_org_scope.py 钉住（评审已证
-        只改端点层无效、须同修）；本用例钉端点的推导值本身。
-
-        变异验证：`effective_org_id = get_user_org_id(...)` 改回 `… or 1` → 本用例红。
+        issue #268 的口径是「不伪造 1 号组织」；A2 租户边界进一步要求工作流
+        必须先有组织上下文（fail-closed），因此无组织非超管在查询/引擎之前就被拒绝。
         """
         user = _orgless_user(user_id=5)
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=AssertionError("db-touched"))
+
+        _cleanup = _override_http(user=user, db=db)
+        try:
+            r = client.post("/api/v1/workflows/7/execute?stream=false", json={})
+        finally:
+            _cleanup()
+
+        assert r.status_code == 403, r.text
+        assert db.execute.call_count == 0, "403 必须发生在任何工作流查询之前"
+
+    def test_workflow_execute_superuser_orgless_passes_none_to_engine(self, client: TestClient):
+        """超管无组织：仍如实以 organization_id=None 创建引擎（绝不伪造 1）。
+
+        这是 issue #268「不 or 1」判据在 A2 之后的存续形态：全局角色允许执行
+        任意工作流，但引擎拿到的组织上下文仍然是诚实的 None。
+        """
+        user = SimpleNamespace(
+            id=5, organization_id=None, is_superuser=True, role="admin", is_active=True
+        )
         workflow = SimpleNamespace(
             id=7,
             name="测试工作流",
@@ -338,13 +360,45 @@ class TestWorkflowExecuteOrgDerivation:
 
         assert r.status_code == 200, r.text
         assert captured.get("organization_id") is None, (
-            "无组织用户的检索范围必须如实为 None（此前被 `or 1` 伪造为 1 号组织）"
+            "超管无组织时引擎组织必须如实为 None（此前被 `or 1` 伪造为 1 号组织）"
         )
 
 
 # ══════════════════════════════════════════════════════════════════════════
 # 3 · demo 写路径 —— 归属用户真实组织；无组织显式 403
 # ══════════════════════════════════════════════════════════════════════════
+def _demo_index_verification_patch():
+    """A3 起 demo seed 通过 ``document_status`` 回读 ES 校验后才写 INDEXED。
+
+    本用例只打桩了 ``index_document``，未打桩回读校验用的 ES 客户端：
+    CI 无 ES 时 ``mark_document_indexed`` 抛错 → 所有示例文档判 FAILED →
+    端点 ``success=False``（表现为 ``assert False is True``）。
+
+    A2 分支（A3 合并前）尚无 ``app.services.document_status``，此夹具为 no-op；
+    A3 合并后与它对 ``test_demo_sources_labeled`` / ``test_issue301_doc_state_honesty``
+    的同款夹具保持一致。仅打桩测试环境的外部依赖，不改变任何生产行为。
+    """
+    try:
+        import app.services.document_status  # noqa: F401
+    except ImportError:
+        return contextlib.nullcontext()
+
+    class _VerifyES:
+        class _Indices:
+            async def refresh(self, index):
+                pass
+
+        indices = _Indices()
+
+        async def count(self, index=None, query=None):
+            return {"count": 1}
+
+    async def _fake_get_elasticsearch():
+        return _VerifyES()
+
+    return patch("app.services.document_status.get_elasticsearch", _fake_get_elasticsearch)
+
+
 class TestDemoSeedOrgAttribution:
     def test_demo_seed_orgless_user_forbidden(self, client: TestClient):
         """无组织用户不得加载示例数据（此前固定文本被写进 1 号组织命名空间）。
@@ -403,6 +457,7 @@ class TestDemoSeedOrgAttribution:
                     "index_document",
                     new=AsyncMock(side_effect=_fake_index),
                 ),
+                _demo_index_verification_patch(),
             ):
                 r = client.post("/api/v1/demo/seed")
         finally:
@@ -466,27 +521,27 @@ class TestFilesProxyOrglessDenied:
 class TestAgentMemoryNamespaces:
     @pytest.mark.asyncio
     async def test_memory_api_namespace_uses_true_org_key_not_fake_1(self):
-        """memory API 的命名空间用真实 org（无组织如实为 None），不再冒充 1 号组织。
+        """memory API 的命名空间用真实 org；无组织显式 403（W0-6 fail-closed）。
 
-        变异验证：`get_user_org_id(...)` 改回 `organization_id or 1` → 无组织用例红。
+        变异验证：`_get_user_memory_system` 去掉 org 判空 → 无组织用例红
+        （会构造出 "None:5:default" 命名空间）。
         """
         import app.api.v1.endpoints.memory as memory_mod
 
         captured: list[str] = []
         fake_system = SimpleNamespace(_load_from_redis=AsyncMock())
 
-        def _fake_get(namespace: str):
-            captured.append(namespace)
+        def _fake_get(org_id, user_id, agent_id):
+            captured.append(f"{org_id}:{user_id}:{agent_id}")
             return fake_system
 
-        with patch.object(
-            memory_mod, "get_memory_system", new=MagicMock(side_effect=_fake_get)
-        ):
-            await memory_mod._get_user_memory_system(
-                SimpleNamespace(organization_id=None, id=5), "default"
-            )
-            assert captured == ["None:5:default"], (
-                "无组织用户的命名空间标签必须如实（bug 形态: '1:5:default'）"
+        with patch.object(memory_mod, "get_memory_system", new=MagicMock(side_effect=_fake_get)):
+            with pytest.raises(AuthorizationError):
+                await memory_mod._get_user_memory_system(
+                    SimpleNamespace(organization_id=None, id=5), "default"
+                )
+            assert captured == [], (
+                "无组织用户不得取用任何命名空间（bug 形态: '1:5:default' / 'None:5:default'）"
             )
 
             captured.clear()
@@ -498,17 +553,20 @@ class TestAgentMemoryNamespaces:
     def test_agent_feedback_lesson_lands_in_agent_visible_namespace(self, client: TestClient):
         """feedback lesson 必须落在 agent 侧读侧同一命名空间（否则 lesson 静默失效）。
 
-        修前：无组织会话写 `1:{user}:session:{sid}`，agent 侧读 `None:{user}:session:{sid}`
+        修前：历史会话写 `1:{user}:session:{sid}`，agent 侧读运行 org 命名空间
         → 自己写的 lesson 自己学不到（功能 bug）。修后写读同键。
 
-        变异验证：`organization_id=session.organization_id` 改回 `… or 1` → 本用例红
-        （读侧在 None 命名空间看不到任何 lesson）。
+        A2 更新：组织上下文改为 require_organization 的 fail-closed 口径——
+        本用例改用「有组织用户 + 历史 org=None 会话」，钉住写入侧按运行 org（42）
+        落库、读侧同键可加载；无组织非超管不再运行 agent（也不再有 None 命名空间）。
         """
         from app.agent.memory_bridge import AgentMemoryBridge
         from app.services.memory_service import get_memory_system
 
         session_id = str(uuid.uuid4())
-        user = _orgless_user(user_id=77)
+        user = SimpleNamespace(
+            id=77, organization_id=42, is_superuser=False, role="user", is_active=True
+        )
         message = MagicMock()
         message.id = "msg-268"
         message.session_id = session_id
@@ -536,20 +594,21 @@ class TestAgentMemoryNamespaces:
 
         assert r.status_code == 200, r.text
 
-        # 读侧 = agent 运行时的同参数桥（/chat/stream useAgent 无组织场景传 None）
-        reader = AgentMemoryBridge(
-            agent_id=f"session:{session_id}", organization_id=None, user_id=77
-        )
+        # 读侧 = agent 运行时的同参数桥（运行 org 42）
+        reader = AgentMemoryBridge(agent_id=f"session:{session_id}", organization_id=42, user_id=77)
         lessons = reader.system.reflective.lessons
         assert any(l.get("lesson") == "回答与文档不符" for l in lessons), (
             "feedback 写入的 lesson 必须能被 agent 侧同一命名空间加载（修前静默失效）"
         )
 
-        # 反向：不得写进 1 号组织的命名空间（bug 形态的落点）
-        bugged_ns = get_memory_system(f"1:77:session:{session_id}")
+        # 反向：不得写进 1 号组织命名空间；历史 raw org（None）命名空间
+        # 在 W0-6 后已不可构造（get_memory_system 显式拒绝）。
+        bugged_ns = get_memory_system(1, 77, f"session:{session_id}")
         assert not any(l.get("lesson") == "回答与文档不符" for l in bugged_ns.reflective.lessons), (
             "lesson 不得落入 1 号组织命名空间"
         )
+        with pytest.raises(ValueError):
+            get_memory_system(None, 77, f"session:{session_id}")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -561,7 +620,9 @@ def _allow_permissions(perms: set[str] | None = None):
 
     return patch(
         "app.services.permission_service.permission_service.get_user_permissions",
-        new=AsyncMock(return_value=perms if perms is not None else {p.value for p in PermissionType}),
+        new=AsyncMock(
+            return_value=perms if perms is not None else {p.value for p in PermissionType}
+        ),
     )
 
 
@@ -628,40 +689,76 @@ class TestAdminSummaryHole:
         factory = async_sessionmaker(engine, expire_on_commit=False)
 
         async with factory() as s:
-            s.add_all([
-                Organization(id=55, name="Org55", owner_id=0),
-                Organization(id=66, name="Org66", owner_id=0),
-            ])
+            s.add_all(
+                [
+                    Organization(id=55, name="Org55", owner_id=0),
+                    Organization(id=66, name="Org66", owner_id=0),
+                ]
+            )
             users_55 = [
-                User(username=f"u55-{i}", email=f"u55-{i}@e.com", hashed_password="x",
-                     organization_id=55)
+                User(
+                    username=f"u55-{i}",
+                    email=f"u55-{i}@e.com",
+                    hashed_password="x",
+                    organization_id=55,
+                )
                 for i in range(2)
             ]
             users_66 = [
-                User(username=f"u66-{i}", email=f"u66-{i}@e.com", hashed_password="x",
-                     organization_id=66)
+                User(
+                    username=f"u66-{i}",
+                    email=f"u66-{i}@e.com",
+                    hashed_password="x",
+                    organization_id=66,
+                )
                 for i in range(3)
             ]
             s.add_all(users_55 + users_66)
             await s.flush()
-            s.add_all([
-                Document(id=f"d55-{i}", filename=f"d55-{i}.pdf", file_path=f"/tmp/d55-{i}.pdf",
-                         file_size=1, file_type=DocumentType.PDF, organization_id=55,
-                         uploaded_by=users_55[0].id)
-                for i in range(2)
-            ] + [
-                Document(id="d66-0", filename="d66-0.pdf", file_path="/tmp/d66-0.pdf",
-                         file_size=1, file_type=DocumentType.PDF, organization_id=66,
-                         uploaded_by=users_66[0].id)
-            ])
-            s.add_all([
-                ChatSession(id=str(uuid.uuid4()), user_id=users_55[0].id, organization_id=55,
-                            title="s55")
-                for _ in range(4)
-            ] + [
-                ChatSession(id=str(uuid.uuid4()), user_id=users_66[0].id, organization_id=66,
-                            title="s66")
-            ])
+            s.add_all(
+                [
+                    Document(
+                        id=f"d55-{i}",
+                        filename=f"d55-{i}.pdf",
+                        file_path=f"/tmp/d55-{i}.pdf",
+                        file_size=1,
+                        file_type=DocumentType.PDF,
+                        organization_id=55,
+                        uploaded_by=users_55[0].id,
+                    )
+                    for i in range(2)
+                ]
+                + [
+                    Document(
+                        id="d66-0",
+                        filename="d66-0.pdf",
+                        file_path="/tmp/d66-0.pdf",
+                        file_size=1,
+                        file_type=DocumentType.PDF,
+                        organization_id=66,
+                        uploaded_by=users_66[0].id,
+                    )
+                ]
+            )
+            s.add_all(
+                [
+                    ChatSession(
+                        id=str(uuid.uuid4()),
+                        user_id=users_55[0].id,
+                        organization_id=55,
+                        title="s55",
+                    )
+                    for _ in range(4)
+                ]
+                + [
+                    ChatSession(
+                        id=str(uuid.uuid4()),
+                        user_id=users_66[0].id,
+                        organization_id=66,
+                        title="s66",
+                    )
+                ]
+            )
             await s.commit()
 
         user = SimpleNamespace(
@@ -676,6 +773,7 @@ class TestAdminSummaryHole:
                 yield session
 
         from app.main import app
+
         app.dependency_overrides[get_db] = _db_gen
         app.dependency_overrides[get_current_user] = _ref
         try:
@@ -689,11 +787,15 @@ class TestAdminSummaryHole:
         assert r.status_code == 200, r.text
         data = r.json()
         assert data == {
-            "total_users": 2,          # org 66 的 3 个不得计入
-            "total_documents": 2,      # org 66 的 1 篇不得计入
-            "total_sessions": 4,       # org 66 的 1 个不得计入
+            "total_users": 2,  # org 66 的 3 个不得计入
+            "total_documents": 2,  # org 66 的 1 篇不得计入
+            "total_sessions": 4,  # org 66 的 1 个不得计入
             "active_users_24h": 0,
             "total_organizations": 1,  # 组织作用域视图：自己所属的 1 个（≠全局 2）
+            # W2-T7 契约扩展：会话周环比真值——本 fixture 的 4 个会话均为
+            # 插入时刻 NOW（server_default），无显式 created_at → 全落本周（4/0）。
+            "sessions_this_week": 4,
+            "sessions_last_week": 0,
         }, f"计数必须全部按调用者组织口径: {data}"
 
     @pytest.mark.asyncio
@@ -708,12 +810,14 @@ class TestAdminSummaryHole:
             await conn.run_sync(Base.metadata.create_all)
         factory = async_sessionmaker(engine, expire_on_commit=False)
         async with factory() as s:
-            s.add_all([
-                Organization(id=1, name="First", owner_id=0),
-                Organization(id=3, name="Third", owner_id=0),
-                User(username="a", email="a@e.com", hashed_password="x", organization_id=1),
-                User(username="b", email="b@e.com", hashed_password="x", organization_id=3),
-            ])
+            s.add_all(
+                [
+                    Organization(id=1, name="First", owner_id=0),
+                    Organization(id=3, name="Third", owner_id=0),
+                    User(username="a", email="a@e.com", hashed_password="x", organization_id=1),
+                    User(username="b", email="b@e.com", hashed_password="x", organization_id=3),
+                ]
+            )
             await s.commit()
 
         user = SimpleNamespace(
@@ -728,6 +832,7 @@ class TestAdminSummaryHole:
                 yield session
 
         from app.main import app
+
         app.dependency_overrides[get_db] = _db_gen
         app.dependency_overrides[get_current_user] = _ref
         try:
@@ -787,9 +892,7 @@ class TestAgentChatSessionOrgSymmetry:
         fake_db = MagicMock()
         fake_db.add = MagicMock(side_effect=captured.append)
         fake_db.commit = AsyncMock()
-        monkeypatch.setattr(
-            "app.core.database.AsyncSessionLocal", lambda: _AsyncCtx(fake_db)
-        )
+        monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _AsyncCtx(fake_db))
 
         _cleanup = _override_http(user=user)
         try:
@@ -885,18 +988,14 @@ class TestAgentChatSessionOrgSymmetry:
             _cleanup()
 
         assert r.status_code == 200, r.text
-        reader = AgentMemoryBridge(
-            agent_id=f"session:{session_id}", organization_id=42, user_id=77
-        )
+        reader = AgentMemoryBridge(agent_id=f"session:{session_id}", organization_id=42, user_id=77)
         assert any(
             lesson.get("lesson") == "R2 判别：答案不对"
             for lesson in reader.system.reflective.lessons
         ), "运行侧（resolved org 42）必须能加载 feedback 写入的 lesson（修前静默失效）"
-        bugged_ns = get_memory_system(f"None:77:session:{session_id}")
-        assert not any(
-            lesson.get("lesson") == "R2 判别：答案不对"
-            for lesson in bugged_ns.reflective.lessons
-        ), "lesson 不得落在 raw org（None）命名空间"
+        # W0-6：历史 raw org（None）命名空间已不可构造/读取。
+        with pytest.raises(ValueError):
+            get_memory_system(None, 77, f"session:{session_id}")
 
     def test_feedback_lesson_resolves_run_org_for_legacy_orgless_session(self, client: TestClient):
         """历史会话（落库 org=None）上的 feedback：lesson 仍落在运行侧 resolved org。
@@ -935,18 +1034,13 @@ class TestAgentChatSessionOrgSymmetry:
             _cleanup()
 
         assert r.status_code == 200, r.text
-        reader = AgentMemoryBridge(
-            agent_id=f"session:{session_id}", organization_id=42, user_id=77
-        )
+        reader = AgentMemoryBridge(agent_id=f"session:{session_id}", organization_id=42, user_id=77)
         assert any(
-            lesson.get("lesson") == "遗留会话判别"
-            for lesson in reader.system.reflective.lessons
+            lesson.get("lesson") == "遗留会话判别" for lesson in reader.system.reflective.lessons
         ), "历史会话的 feedback lesson 也必须落在运行侧 resolved org（42）"
-        bugged_ns = get_memory_system(f"None:77:session:{session_id}")
-        assert not any(
-            lesson.get("lesson") == "遗留会话判别"
-            for lesson in bugged_ns.reflective.lessons
-        ), "不得沿用会话落库的 raw org（None）"
+        # W0-6：会话落库的 raw org（None）命名空间已不可构造/读取。
+        with pytest.raises(ValueError):
+            get_memory_system(None, 77, f"session:{session_id}")
 
     @pytest.mark.asyncio
     async def test_save_session_interaction_heals_legacy_none_org(self, monkeypatch):

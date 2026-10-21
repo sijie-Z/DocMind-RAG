@@ -29,9 +29,9 @@ _UNSAFE_IDS = [
     "..",
     ".",
     "",
-    "a" * 100,   # 超长
-    "a:b",       # Windows 盘符/ADS
-    "a b",       # 空格
+    "a" * 100,  # 超长
+    "a:b",  # Windows 盘符/ADS
+    "a b",  # 空格
 ]
 
 
@@ -74,7 +74,10 @@ def force_redis_available(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_id", _UNSAFE_IDS)
 async def test_local_fallback_rejects_unsafe_task_id_without_writing_anything(
-    tmp_path, monkeypatch, force_local_fallback, bad_id,
+    tmp_path,
+    monkeypatch,
+    force_local_fallback,
+    bad_id,
 ):
     monkeypatch.chdir(tmp_path)
     ctx = ExecutionContext(query="q")
@@ -89,7 +92,9 @@ async def test_local_fallback_rejects_unsafe_task_id_without_writing_anything(
 
 @pytest.mark.asyncio
 async def test_local_fallback_writes_inside_replay_dir_for_safe_task_id(
-    tmp_path, monkeypatch, force_local_fallback,
+    tmp_path,
+    monkeypatch,
+    force_local_fallback,
 ):
     monkeypatch.chdir(tmp_path)
     ctx = ExecutionContext(query="q")
@@ -117,7 +122,9 @@ async def test_save_local_default_path_rejects_unsafe_task_id(tmp_path, monkeypa
 
 @pytest.mark.asyncio
 async def test_save_with_redis_available_never_touches_disk(
-    tmp_path, monkeypatch, force_redis_available,
+    tmp_path,
+    monkeypatch,
+    force_redis_available,
 ):
     """语义钉住（双后端自洽）：Redis 可用时 save() 走 Redis——非法 task_id 也返回
     True（键无路径语义）且不触磁盘；合法 id 同样不落盘。stub 让该用例在真实有

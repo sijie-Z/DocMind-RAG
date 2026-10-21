@@ -72,7 +72,15 @@ jobs:
 
       - name: Lint with ruff
         working-directory: backend
-        run: ruff check app/ tests/ scripts/
+        # evals/ 从 #208 第⑤步起是 CI 门禁本体（Eval Gate 跑的就是它），一并纳入 lint 口径。
+        run: ruff check app/ tests/ scripts/ evals/
+
+      # issue #216：格式门禁与 pre-commit/requirements 同版本锁定（ruff==0.16.10）。
+      # 之前仓库三处意图信号（pre-commit hook / pyproject [tool.ruff.format] / E501 注释）
+      # 与 CI 实际脱节，导致 366/432 文件未格式化且无人发现。
+      - name: Format check with ruff
+        working-directory: backend
+        run: ruff format --check app/ tests/ scripts/ evals/
 
       # 静态安全扫描前置到 PR：此前只在 nightly 跑，而 nightly 已连续红 ≥11 天，
       # 等于这条门禁事实上不存在。bandit 已在 requirements-dev.txt，无需额外安装。
@@ -342,6 +350,70 @@ jobs:
           flags: backend,integration
           fail_ci_if_error: false
 
+  # Eval Gate（#208 第⑤步）：把检索评估从「本地工具」固化成 CI 门禁。
+  #
+  # 回归类型：现有 job 全都不测「真实 ES 上的检索质量」——unit/api 用 fake 检索、
+  # integration 只测索引读写行为。检索臂（关键词/向量/RRF/MMR/后处理）的行为回归
+  # 此前没有任何门禁能拦（#208 的五步计划正因一次真实的质量漂移而立）。
+  #
+  # 与 integration 的差异（有意的）：
+  # - 触发同整个 workflow（每个 PR + main/develop push），不采用 integration 的
+  #   develop 限定——评估门禁的语义就是「拦住任何一次合入」，且本 job 无 needs、
+  #   与 Backend Tests 并行起步，不进关键路径；
+  # - 因此它是一个**无条件** job，可以直接接进 CI Pass 汇聚（CI Pass 是分支保护
+  #   要求的必需检查；不接进去的话红点没有任何东西消费它 = 孤儿检查）。
+  #
+  # 确定性设计（消除了「不同 seed 物理状态间 NearMiss 摆动」的评审警告）：
+  # 每次从零「先删后建」专用评估索引 docmind_knowledge_eval_ci_v1、refresh 到
+  # visible、回读 count 断言；嵌入走 evals/deterministic_embedding.py 的确定性
+  # 伪嵌入（无 Ollama/无网络）。跑分与基线比对细节见 backend/docs/eval-gate-phase1.md
+  # 的「CI 门禁」一节；`make eval-ci` 三步任一步非零 = 门禁红。
+  eval-gate:
+    name: Eval Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      elasticsearch:
+        # 与 integration / docker-compose 同版本（8.11.0）——CI 要验的是与
+        # 本地基线相同的行为，换版本等于测一个不存在的组合。
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: 'false'
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd="curl -sf http://localhost:9200/_cluster/health"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: 'backend/requirements*.txt'
+
+      # 只要 runtime 依赖：评估链不 import tests / scripts 侧的东西。
+      - name: Install dependencies
+        working-directory: backend
+        run: uv pip install --system -r requirements.txt
+
+      # 三步：seed --recreate（先删后建 + 回读断言）→ run（伪嵌入）→ compare
+      # （floor/cap 比对，非零退出码即红）。数字全部打进本 step 的 CI 日志。
+      - name: Eval gate (seed → run → compare)
+        run: make eval-ci
+
   frontend-tests:
     name: Frontend Tests
     runs-on: ubuntu-latest
@@ -459,7 +531,9 @@ jobs:
   ci-pass:
     name: CI Pass
     if: always()
-    needs: [backend-tests, migration-mysql, frontend-tests, frontend-e2e, workflow-lint]
+    # eval-gate 是无条件 job（每个 PR 都跑），因此直接进汇聚：
+    # 红 = CI Pass 红 = 分支保护拦下（不是孤儿检查）。
+    needs: [backend-tests, migration-mysql, eval-gate, frontend-tests, frontend-e2e, workflow-lint]
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs
@@ -468,6 +542,7 @@ jobs:
           for r in \
             "backend-tests=${{ needs.backend-tests.result }}" \
             "migration-mysql=${{ needs.migration-mysql.result }}" \
+            "eval-gate=${{ needs.eval-gate.result }}" \
             "frontend-tests=${{ needs.frontend-tests.result }}" \
             "frontend-e2e=${{ needs.frontend-e2e.result }}" \
             "workflow-lint=${{ needs.workflow-lint.result }}"; do

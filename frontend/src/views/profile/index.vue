@@ -97,7 +97,8 @@
           <n-card class="rounded-2xl shadow-xl border-0 min-h-[600px]">
             <n-tabs type="line" animated size="large" pane-class="pt-6">
               <!-- 概览面板 -->
-              <n-tab-pane name="overview" :tab="t('menu.dashboard')">
+              <!-- T5 命名归一：个人概览 tab 不再借用仪表盘页名，改用本页域键 profile.overview -->
+              <n-tab-pane name="overview" :tab="t('profile.overview')">
                 <!-- 统计卡片 -->
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                   <div v-for="stat in statItems" :key="stat.label" 
@@ -327,49 +328,6 @@
                       </n-grid>
                     </n-form>
                   </div>
-
-                  <n-divider />
-
-                  <!-- API Key 管理 -->
-                  <div>
-                    <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-2 flex items-center gap-2">
-                      <n-icon :component="KeyOutline" class="text-orange-500" />
-                      {{ t('profile.apiKey') }}
-                    </h3>
-                    <p class="text-sm text-gray-500 mb-4">{{ t('profile.apiKeyDesc') }}</p>
-                    
-                    <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <div v-if="apiKey" class="flex items-center gap-2">
-                        <code class="flex-1 bg-white dark:bg-gray-900 px-3 py-2 rounded border border-gray-200 dark:border-gray-700 font-mono text-sm break-all">
-                          {{ apiKey }}
-                        </code>
-                        <n-button circle size="small" @click="copyApiKey">
-                          <template #icon><n-icon :component="CopyOutline" /></template>
-                        </n-button>
-                      </div>
-                      <div v-else class="text-gray-400 text-sm italic mb-3">
-                        {{ t('profile.noApiKey') }}
-                      </div>
-                      
-                      <div class="mt-4 flex gap-3">
-                        <n-button v-if="!apiKey" type="primary" ghost size="small" @click="generateApiKey" :loading="generatingApiKey">
-                          {{ t('profile.generateKey') }}
-                        </n-button>
-                        <template v-else>
-                          <n-button type="warning" ghost size="small" @click="generateApiKey" :loading="generatingApiKey">
-                            {{ t('profile.regenerateKey') }}
-                          </n-button>
-                          <n-button type="error" ghost size="small" @click="revokeApiKey" :loading="revokingApiKey">
-                            {{ t('profile.revokeKey') }}
-                          </n-button>
-                        </template>
-                      </div>
-                    </div>
-                    <p class="text-xs text-orange-500 mt-2 flex items-center gap-1">
-                      <n-icon :component="WarningOutline" />
-                      {{ t('profile.apiKeyWarning') }}
-                    </p>
-                  </div>
                 </div>
               </n-tab-pane>
 
@@ -401,24 +359,32 @@
                       />
                     </div>
 
-                    <!-- AI Provider 设置 -->
+                    <!-- AI Provider 设置（W2-T7：实验功能·暂不生效——后端无消费方，
+                         推理只走服务端全局配置；禁用编辑避免"配置了却没反应"陷阱） -->
                     <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-4 mt-4">
                       <div class="font-medium text-gray-800 dark:text-white">AI 模型设置</div>
+                      <n-alert type="warning" :bordered="false" class="text-xs">
+                        <template #header>{{ t('profile.aiProviderExpTitle') }}</template>
+                        {{ t('profile.aiProviderExpDesc') }}
+                      </n-alert>
+                      <n-alert v-if="providersLoadError" type="error" :bordered="false" class="text-xs">
+                        {{ t('profile.providerLoadFailed') }}
+                      </n-alert>
                       <div>
                         <div class="text-sm text-gray-500 mb-2">提供商</div>
-                        <n-select v-model:value="providerForm.provider" :options="providerOptions" @update:value="onProviderChange" size="small" />
+                        <n-select v-model:value="providerForm.provider" :options="providerOptions" @update:value="onProviderChange" size="small" disabled />
                       </div>
                       <div>
                         <div class="text-sm text-gray-500 mb-2">模型</div>
-                        <n-select v-model:value="providerForm.model" :options="currentModelOptions" :allow-input="providerForm.provider === 'custom'" filterable size="small" />
+                        <n-select v-model:value="providerForm.model" :options="currentModelOptions" :allow-input="providerForm.provider === 'custom'" filterable size="small" disabled />
                       </div>
                       <div v-if="currentProviderNeedsKey">
                         <div class="text-sm text-gray-500 mb-2">API Key</div>
-                        <n-input v-model:value="providerForm.api_key" type="password" show-password-on="click" placeholder="sk-..." size="small" />
+                        <n-input v-model:value="providerForm.api_key" type="password" show-password-on="click" placeholder="sk-..." size="small" disabled />
                       </div>
                       <div v-if="providerForm.provider === 'custom'">
                         <div class="text-sm text-gray-500 mb-2">Base URL</div>
-                        <n-input v-model:value="providerForm.base_url" placeholder="https://api.example.com/v1" size="small" />
+                        <n-input v-model:value="providerForm.base_url" placeholder="https://api.example.com/v1" size="small" disabled />
                       </div>
                     </div>
 
@@ -477,9 +443,6 @@ import {
   CloudUploadOutline,
   BookOutline,
   LockClosedOutline,
-  KeyOutline,
-  CopyOutline,
-  WarningOutline,
   CameraOutline,
   TimeOutline,
   HardwareChipOutline,
@@ -496,19 +459,19 @@ import type { UserSession, UserAuditLog } from '@/api/user'
 const {
   getResponseDetail, message, dialog, t, locale, router, userStore, appStore,
   loading, loadError, loadErrorMsg, userInfo, stats, activities, sessions, auditLogs,
-  sessionPagination, auditPagination, trustedDevices, sessionColumns, toggleTrust,
+  sessionPagination, auditPagination, sessionColumns,
   showSessionDetail, auditColumns, storageUsage, storageUsedBytes, storageLimitBytes,
   storageMetricsSource, formatBytes, statItems, workflowCompletion, quickActions,
   goToRoute, themeOptions, languageOptions, handleLanguageChange, settingsForm,
   savingSettings, settingsSaveMessage, settingsSaveSuccess, providers, providerForm,
   providerOptions, currentProvider, currentModelOptions, currentProviderNeedsKey,
-  onProviderChange, loadProviders, settingsChanged, handleSaveSettings, updatingProfile,
+  providersLoadError, onProviderChange, loadProviders, settingsChanged, handleSaveSettings, updatingProfile,
   updatingPassword, storageChartRef, activityChartRef, initCharts, handleResize,
-  generatingApiKey, revokingApiKey, editFormRef, passwordFormRef, editForm, passwordForm,
-  apiKey, editFormRules, passwordFormRules, getApiBaseUrl, normalizeAvatarUrl,
+  editFormRef, passwordFormRef, editForm, passwordForm,
+  editFormRules, passwordFormRules, getApiBaseUrl, normalizeAvatarUrl,
   handleAvatarUpload, loadUserProfile, loadUserStats, loadActivities, loadSessions,
   loadAuditLogs, formatAuditAction, handleRevokeSession, handleUpdateProfile,
-  handleChangePassword, generateApiKey, revokeApiKey, copyApiKey, loadAllData, formatDate,
+  handleChangePassword, loadAllData, formatDate,
 } = useProfilePage()
 </script>
 

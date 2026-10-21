@@ -1,4 +1,5 @@
 """Agent memory system unit tests."""
+
 import asyncio
 from datetime import datetime, timedelta
 
@@ -17,6 +18,7 @@ from app.services.memory_service import (
 # ---------------------------------------------------------------------------
 # MemoryItem
 # ---------------------------------------------------------------------------
+
 
 class TestMemoryItem:
     def test_create_and_to_dict(self):
@@ -67,6 +69,7 @@ class TestMemoryItem:
 # ShortTermMemory
 # ---------------------------------------------------------------------------
 
+
 class TestShortTermMemory:
     def test_add_and_get_recent(self):
         stm = ShortTermMemory(max_size=10)
@@ -110,12 +113,31 @@ class TestShortTermMemory:
 # LongTermMemory
 # ---------------------------------------------------------------------------
 
+
 class TestLongTermMemory:
     def test_add_and_search_keyword(self):
         ltm = LongTermMemory()
-        ltm.add(MemoryItem(content="expense report requires invoice submission", memory_type="episode", importance=0.8))
-        ltm.add(MemoryItem(content="leave request needs manager approval", memory_type="episode", importance=0.5))
-        ltm.add(MemoryItem(content="travel allowance standard per day 300", memory_type="semantic", importance=0.7))
+        ltm.add(
+            MemoryItem(
+                content="expense report requires invoice submission",
+                memory_type="episode",
+                importance=0.8,
+            )
+        )
+        ltm.add(
+            MemoryItem(
+                content="leave request needs manager approval",
+                memory_type="episode",
+                importance=0.5,
+            )
+        )
+        ltm.add(
+            MemoryItem(
+                content="travel allowance standard per day 300",
+                memory_type="semantic",
+                importance=0.7,
+            )
+        )
 
         results = ltm.search("expense invoice", top_k=5)
         assert len(results) >= 1
@@ -167,24 +189,30 @@ class TestLongTermMemory:
 
     def test_search_semantic(self):
         ltm = LongTermMemory()
-        ltm.add(MemoryItem(
-            content="报销流程需要提交发票申请",
-            embedding=[1.0, 0.0, 0.0],
-            memory_type="episode",
-            importance=1.0,
-        ))
-        ltm.add(MemoryItem(
-            content="请假流程需要主管审批",
-            embedding=[0.0, 1.0, 0.0],
-            memory_type="episode",
-            importance=1.0,
-        ))
-        ltm.add(MemoryItem(
-            content="差旅标准每天300元",
-            embedding=[0.0, 0.0, 1.0],
-            memory_type="semantic",
-            importance=1.0,
-        ))
+        ltm.add(
+            MemoryItem(
+                content="报销流程需要提交发票申请",
+                embedding=[1.0, 0.0, 0.0],
+                memory_type="episode",
+                importance=1.0,
+            )
+        )
+        ltm.add(
+            MemoryItem(
+                content="请假流程需要主管审批",
+                embedding=[0.0, 1.0, 0.0],
+                memory_type="episode",
+                importance=1.0,
+            )
+        )
+        ltm.add(
+            MemoryItem(
+                content="差旅标准每天300元",
+                embedding=[0.0, 0.0, 1.0],
+                memory_type="semantic",
+                importance=1.0,
+            )
+        )
 
         results = ltm.search_semantic([0.9, 0.1, 0.0], top_k=2)
         assert len(results) >= 1
@@ -204,7 +232,9 @@ class TestLongTermMemory:
         assert len(results) == 1
 
     def test_cosine_similarity_perfect(self):
-        assert LongTermMemory._cosine_similarity([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]) == pytest.approx(1.0)
+        assert LongTermMemory._cosine_similarity([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]) == pytest.approx(
+            1.0
+        )
 
     def test_cosine_similarity_orthogonal(self):
         assert LongTermMemory._cosine_similarity([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
@@ -244,6 +274,7 @@ class TestLongTermMemory:
 # ---------------------------------------------------------------------------
 # WorkingMemory
 # ---------------------------------------------------------------------------
+
 
 class TestWorkingMemory:
     def test_state_set_get(self):
@@ -293,6 +324,7 @@ class TestWorkingMemory:
 # ---------------------------------------------------------------------------
 # ReflectiveMemory
 # ---------------------------------------------------------------------------
+
 
 class TestReflectiveMemory:
     def test_add_and_get_insights(self):
@@ -344,6 +376,7 @@ class TestReflectiveMemory:
 # AgentMemorySystem (integration)
 # ---------------------------------------------------------------------------
 
+
 class TestAgentMemorySystem:
     def test_remember_short_term(self):
         ams = AgentMemorySystem(agent_id="test-1")
@@ -357,7 +390,9 @@ class TestAgentMemorySystem:
         ams = AgentMemorySystem(agent_id="test-2")
         ams._loaded = True
         # _save_to_redis will fail silently (no Redis), but the memory should still be stored
-        item = asyncio.run(ams.remember("long-term memory", memory_type="long_term", importance=0.9))
+        item = asyncio.run(
+            ams.remember("long-term memory", memory_type="long_term", importance=0.9)
+        )
         assert item.memory_type == "long_term"
         assert len(ams.long_term.memories["long_term"]) == 1
         assert item.importance == 0.9
@@ -375,8 +410,14 @@ class TestAgentMemorySystem:
     def test_get_context_returns_formatted_string(self):
         ams = AgentMemorySystem(agent_id="test-4")
         ams._loaded = True
-        asyncio.run(ams.remember("user prefers concise answer style", memory_type="long_term", importance=0.8))
-        asyncio.run(ams.remember("user likes markdown formatting", memory_type="long_term", importance=0.7))
+        asyncio.run(
+            ams.remember(
+                "user prefers concise answer style", memory_type="long_term", importance=0.8
+            )
+        )
+        asyncio.run(
+            ams.remember("user likes markdown formatting", memory_type="long_term", importance=0.7)
+        )
         context = asyncio.run(ams.get_context("concise style"))
         assert "concise" in context.lower()
 
@@ -389,17 +430,19 @@ class TestAgentMemorySystem:
     def test_store_experience_success(self):
         ams = AgentMemorySystem(agent_id="test-6")
         ams._loaded = True
-        asyncio.run(ams.store_experience(
-            success=True, action="search", result="找到3条结果", context="test"
-        ))
+        asyncio.run(
+            ams.store_experience(
+                success=True, action="search", result="找到3条结果", context="test"
+            )
+        )
         assert len(ams.long_term.memories) > 0
 
     def test_store_experience_failure_adds_lesson(self):
         ams = AgentMemorySystem(agent_id="test-7")
         ams._loaded = True
-        asyncio.run(ams.store_experience(
-            success=False, action="ES query", result="超时", context="test"
-        ))
+        asyncio.run(
+            ams.store_experience(success=False, action="ES query", result="超时", context="test")
+        )
         # Failure should add a lesson
         assert len(ams.reflective.lessons) >= 1
 
@@ -459,11 +502,11 @@ class TestAgentMemorySystem:
         assert len(ams.reflective.patterns) >= 0  # at minimum doesn't crash
 
     def test_get_memory_system_caches(self):
-        a = get_memory_system("shared-agent")
-        b = get_memory_system("shared-agent")
+        a = get_memory_system(1, 1, "shared-agent")
+        b = get_memory_system(1, 1, "shared-agent")
         assert a is b
 
     def test_get_memory_system_different_agents(self):
-        a = get_memory_system("agent-a")
-        b = get_memory_system("agent-b")
+        a = get_memory_system(1, 1, "agent-a")
+        b = get_memory_system(1, 1, "agent-b")
         assert a is not b

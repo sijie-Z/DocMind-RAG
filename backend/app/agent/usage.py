@@ -16,6 +16,7 @@ reflector / loop 无工具分支 / reviewer / 工具内直连调用）此前要�
 - `model` 标签取 `response.model`（真实 OpenAI 兼容响应均携带）；流式包的
   `SimpleNamespace(usage=...)`、测试替身等取不到时回退为 `"unknown"`。
 """
+
 from app.core.prometheus import AGENT_TOKENS
 
 

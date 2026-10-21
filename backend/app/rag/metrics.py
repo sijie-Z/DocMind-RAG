@@ -1,4 +1,5 @@
 """RAG performance metrics — standalone, no business logic coupling."""
+
 import time
 from collections import defaultdict
 from typing import Any

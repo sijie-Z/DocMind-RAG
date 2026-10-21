@@ -4,6 +4,7 @@
 一块，第 8 步 smart_truncate 直接截断到 chunk_max_chars，分区里约 95% 的
 内容被无报错丢弃（Document.status 仍为 INDEXED）。
 """
+
 from unittest.mock import AsyncMock, patch
 
 import numpy as np
@@ -34,7 +35,9 @@ class TestOverlongChunkNotTruncated:
         assert len(texts) > 1, "超长块必须被切成多块而不是截断"
         assert joined == text, "切分不得丢失任何内容（含顺序）"
         assert joined.endswith(text[-200:]), "输出必须包含输入尾部（修复前此处丢失约 19k 字符）"
-        assert max(len(t) for t in texts) <= chunker.chunk_max_chars + 200, "单块不得远超上限（尾块合并容差）"
+        assert max(len(t) for t in texts) <= chunker.chunk_max_chars + 200, (
+            "单块不得远超上限（尾块合并容差）"
+        )
 
     @pytest.mark.asyncio
     async def test_uniform_text_with_clause_partition_keeps_tail(self):

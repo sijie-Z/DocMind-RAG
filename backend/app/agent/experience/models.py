@@ -93,12 +93,8 @@ class Experience:
     tags: list[str] = field(default_factory=list)
     """Arbitrary tags for filtering: ['auto_extracted', 'llm_extracted', 'manual']."""
 
-    created_at: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds")
-    )
-    updated_at: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds")
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
+    updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
 
     # ── Serialization ──
 
@@ -113,6 +109,23 @@ class Experience:
 
     # ── Lifecycle ──
 
+    def content_key(self) -> tuple[str, str, str]:
+        """Deterministic content identity — what the lesson *says*, regardless
+        of transport metadata (id / timestamps / confidence / verification
+        counters / source trace).
+
+        Used by ExperienceStore.add for content-level dedup (round2 卫生修复①):
+        extraction mints a fresh random ``id`` per call, so only the content can
+        tell whether two experiences are the same lesson. Normalization: strip,
+        collapse inner whitespace, casefold — formatting-only differences do
+        not create a new entry.
+        """
+
+        def _norm(value: str) -> str:
+            return " ".join(value.split()).casefold()
+
+        return (_norm(self.scenario), _norm(self.symptom), _norm(self.lesson))
+
     def record_verification(self, success: bool) -> None:
         """Update confidence based on whether the lesson helped."""
         if success:
@@ -124,8 +137,11 @@ class Experience:
         self.updated_at = datetime.now(UTC).isoformat(timespec="seconds")
         logger.info(
             "Experience %s verified=%s confidence=%.2f (vc=%d fc=%d)",
-            self.id[:8], success, self.confidence,
-            self.verified_count, self.fail_count,
+            self.id[:8],
+            success,
+            self.confidence,
+            self.verified_count,
+            self.fail_count,
         )
 
     def is_reliable(self, threshold: float = 0.6) -> bool:

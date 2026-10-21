@@ -43,15 +43,16 @@ class AgentMessage:
     Every message carries a trace_id linking it to one user request,
     enabling the Orchestrator to reconstruct the full conversation.
     """
+
     msg_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
-    msg_type: str = ""                     # plan_request | plan | execute | result | review | verdict | error | abort
-    sender: str = ""                       # planner | executor | reviewer | orchestrator
-    target: str = ""                       # planner | executor | reviewer | orchestrator
+    msg_type: str = ""  # plan_request | plan | execute | result | review | verdict | error | abort
+    sender: str = ""  # planner | executor | reviewer | orchestrator
+    target: str = ""  # planner | executor | reviewer | orchestrator
     payload: dict[str, Any] = field(default_factory=dict)
-    trace_id: str = ""                     # links all messages for one user request
-    parent_msg_id: str | None = None       # for threading / causal chains
+    trace_id: str = ""  # links all messages for one user request
+    parent_msg_id: str | None = None  # for threading / causal chains
     created_at: float = field(default_factory=lambda: datetime.now().timestamp())
-    error: str | None = None               # set when msg_type == "error"
+    error: str | None = None  # set when msg_type == "error"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -68,26 +69,48 @@ class AgentMessage:
 
     @classmethod
     def plan_request(cls, trace_id: str, query: str, context: dict | None = None) -> "AgentMessage":
-        return cls(msg_type="plan_request", sender="orchestrator", target="planner",
-                    trace_id=trace_id, payload={"query": query, "context": context or {}})
+        return cls(
+            msg_type="plan_request",
+            sender="orchestrator",
+            target="planner",
+            trace_id=trace_id,
+            payload={"query": query, "context": context or {}},
+        )
 
     @classmethod
     def execute_request(cls, trace_id: str, plan: dict, parent_id: str) -> "AgentMessage":
-        return cls(msg_type="execute", sender="orchestrator", target="executor",
-                    trace_id=trace_id, payload={"plan": plan}, parent_msg_id=parent_id)
+        return cls(
+            msg_type="execute",
+            sender="orchestrator",
+            target="executor",
+            trace_id=trace_id,
+            payload={"plan": plan},
+            parent_msg_id=parent_id,
+        )
 
     @classmethod
-    def review_request(cls, trace_id: str, plan: dict, results: list[dict],
-                        parent_id: str) -> "AgentMessage":
-        return cls(msg_type="review", sender="orchestrator", target="reviewer",
-                    trace_id=trace_id, payload={"plan": plan, "results": results},
-                    parent_msg_id=parent_id)
+    def review_request(
+        cls, trace_id: str, plan: dict, results: list[dict], parent_id: str
+    ) -> "AgentMessage":
+        return cls(
+            msg_type="review",
+            sender="orchestrator",
+            target="reviewer",
+            trace_id=trace_id,
+            payload={"plan": plan, "results": results},
+            parent_msg_id=parent_id,
+        )
 
     @classmethod
     def error_msg(cls, trace_id: str, sender: str, message: str) -> "AgentMessage":
-        return cls(msg_type="error", sender=sender, target="orchestrator",
-                    trace_id=trace_id, error=message,
-                    payload={"message": message})
+        return cls(
+            msg_type="error",
+            sender=sender,
+            target="orchestrator",
+            trace_id=trace_id,
+            error=message,
+            payload={"message": message},
+        )
 
 
 class MessageBus:
@@ -132,6 +155,7 @@ class MessageBus:
         this returns the first matching message or None after timeout.
         """
         import time
+
         deadline = time.time() + timeout
         while time.time() < deadline:
             msgs = self.poll(target, trace_id)

@@ -13,12 +13,12 @@ the old AgentLoop plus new event types (thinking, plan_*, reflection).
 
 import logging
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
 from openai import AsyncOpenAI
 
-from app.agent import checkpoint
+from app.agent import approval, checkpoint, steering
 from app.agent.config import AgentConfig
 from app.agent.context import ContextEngine
 from app.agent.events import AgentEvent
@@ -74,7 +74,9 @@ def _smart_truncate(result: str, tool_name: str) -> str:
     if tool_name in ("search_knowledge_base", "vector_search", "web_search"):
         sections = result.split("\n\n")
         if len(sections) > 3:
-            return "\n\n".join(sections[:3]) + f"\n\n... and {len(sections) - 3} more results omitted"
+            return (
+                "\n\n".join(sections[:3]) + f"\n\n... and {len(sections) - 3} more results omitted"
+            )
         return result
 
     if tool_name in ("summarize_document", "get_conversation_history", "fetch_webpage"):
@@ -82,7 +84,20 @@ def _smart_truncate(result: str, tool_name: str) -> str:
         tail = result[-500:]
         return f"{head}\n\n... [middle omitted] ...\n\n{tail}"
 
-    return result[:MAX_RESULT_TOKENS * 2] + "\n...[result truncated]"
+    return result[: MAX_RESULT_TOKENS * 2] + "\n...[result truncated]"
+
+
+def _plan_steps_payload(plan: Plan) -> list[dict[str, Any]]:
+    """B：计划审批载荷的结构化步骤（人类决策所需字段的子集）。"""
+    return [
+        {
+            "id": s.id,
+            "description": s.description,
+            "dependencies": list(s.dependencies),
+            "tool_hint": s.tool_hint,
+        }
+        for s in plan.steps
+    ]
 
 
 DEFAULT_SYSTEM_PROMPT = """你是 DocMind 智能助手，一个基于企业知识库的 AI Agent。
@@ -130,10 +145,13 @@ class PERAgentLoop:
         self,
         openai_client: AsyncOpenAI,
         config: AgentConfig | None = None,
-        organization_id: int = 1,
+        organization_id: int | None = None,
         user_id: int = 0,
         execution_mode: str = "dag",
     ):
+        # A2 P0（fail-closed）：PER 运行必须有组织上下文；默认值不再回落到 1 号组织。
+        if organization_id is None:
+            raise ValueError("PERAgentLoop 缺少 organization_id，拒绝在无组织上下文下运行")
         self.client = openai_client
         self.config = config or AgentConfig()
         self.organization_id = organization_id
@@ -146,6 +164,28 @@ class PERAgentLoop:
         # 这里只是类型占位——loop 实例可能被复用，不得泄露上一轮的状态。
         self._checkpoint_task_id: str | None = None
         self.checkpoint_live: dict[str, Any] | None = None
+
+        # 运行级失败标志（issue #301 批 A #11）：无工具模式下直接回答的 LLM
+        # 调用失败 = 本次 run 零产出，service 收尾据此置 FAILED 而不是
+        # COMPLETED。run() 起始处重置（loop 实例可能被复用）。
+        self.run_failed: bool = False
+        self.run_failure: str | None = None
+
+        # ── HITL（app/agent/approval.py）────────────────────────────────
+        # cancel_check 由 service 接线（task 级取消旗查询）；审批暂停回调是
+        # loop 自身方法（需要 checkpoint_live）。run() 起始处重置暂停/取消标志：
+        #   paused_for_approval     — 本 run 因工具审批暂停（service 据此绝不置终态）；
+        #   paused_for_plan_approval— 本 run 因计划审批暂停（B；同上语义）；
+        #   run_cancelled           — 本 run 经协作式取消收敛（service 据此置 CANCELLED）；
+        #   approval_decisions      — resume 从快照回填的粘滞决定账本；
+        #   human_guidance          — "改指令续跑"/运行中转向的人工指导（注入步骤提示词）。
+        self.cancel_check: Callable[[], Awaitable[bool]] | None = None
+        self.approval_decisions: list[dict[str, Any]] = []
+        self.human_guidance: str = ""
+        self.paused_for_approval: bool = False
+        self.paused_for_plan_approval: bool = False
+        self.pending_approval: dict[str, Any] | None = None
+        self.run_cancelled: bool = False
 
         # Context engine with LLM-based summarization
         self.context_engine = ContextEngine(
@@ -177,7 +217,9 @@ class PERAgentLoop:
     @property
     def executor(self) -> Executor:
         if self._executor is None:
-            self._executor = Executor(self.client, self.config, self.memory, execution_mode=self._execution_mode)
+            self._executor = Executor(
+                self.client, self.config, self.memory, execution_mode=self._execution_mode
+            )
         return self._executor
 
     @property
@@ -215,10 +257,18 @@ class PERAgentLoop:
 
         # If the output contains SQL results or search results with clear answers,
         # and remaining steps don't add new tools, we can skip
-        has_data = any(marker in final_output for marker in [
-            '"rows":', '"data":', "找到", "根据",
-            "综上所述", "结论", "建议",
-        ])
+        has_data = any(
+            marker in final_output
+            for marker in [
+                '"rows":',
+                '"data":',
+                "找到",
+                "根据",
+                "综上所述",
+                "结论",
+                "建议",
+            ]
+        )
 
         # If we have substantial output AND the next steps are just more of the same
         # (no new tool types), skip to avoid redundancy
@@ -234,6 +284,7 @@ class PERAgentLoop:
         task_id: str | None = None,
         resume: dict[str, Any] | None = None,
         session_id: str | None = None,
+        document_context: str | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Execute the PER agent loop, yielding events as they happen.
 
@@ -246,6 +297,9 @@ class PERAgentLoop:
                 有 plan 时跳过 Phase 0/1、回灌 WorkingMemory 后从断点续跑；
                 无 plan（崩溃于规划阶段）则从 Phase 1 重跑，仍幂等。
             session_id: 会话 id（仅为快照信封记录 provenance）。
+            document_context: 用户 @ 引用文档的摘要段（体验第四波）——与记忆
+                上下文同轨并入预规划上下文：planner 与答案合成都能看到。
+                有 plan 的 resume 跳过规划，该参数自然不生效（如实）。
 
         Yields:
             AgentEvent objects for thinking, plan, tool calls, chunks, etc.
@@ -263,6 +317,17 @@ class PERAgentLoop:
         # service 读这份引用做兜底快照（见 checkpoint.save_from_live）。
         self._checkpoint_task_id = task_id
         self.checkpoint_live: dict[str, Any] | None = None
+        # 运行级失败标志（issue #301 批 A #11）每 run 重置。
+        self.run_failed = False
+        self.run_failure = None
+        # HITL 每 run 重置（cancel_check 由 service 预先接线，不在此清）；
+        # resume 分支会用快照 run_state 回填决定账本与人工指导。
+        self.approval_decisions = []
+        self.human_guidance = ""
+        self.paused_for_approval = False
+        self.paused_for_plan_approval = False
+        self.pending_approval = None
+        self.run_cancelled = False
 
         # ── Execution Context (per-request state) ────────────────────────
         # resume：从快照重建 ctx（含 artifacts/total_tokens/current_step_id ——
@@ -272,6 +337,14 @@ class PERAgentLoop:
         partial_prefix = ""
         replan_feedback = ""
         replan_attempts = 0
+        # B：计划审批的 resume 语义载体——未决计划（应重挂起）与拒绝重规划理由。
+        pending_plan_approval: dict[str, Any] | None = None
+        force_replan_feedback = ""
+        # HITL（S4 修复）：resume 信封的 run_state 里承载着跨暂停周期的状态
+        # （approval_decisions / steering 等，见下方 run_state_live 的合并写）。
+        # 仅当快照重建**成功**时回填——重建失败走"损坏即无快照"干净重跑语义，
+        # 不携带任何旧值（与 parse_snapshot 顶层损坏同口径）。
+        prior_run_state: dict[str, Any] = {}
         if resume:
             # 重建段整体兜底（issue #278/R1）：parse_snapshot 只校验信封顶层，
             # "合法 JSON、深结构坏形状"（如 plan.steps 非列表 / ctx.artifacts
@@ -284,8 +357,43 @@ class PERAgentLoop:
                 run_state = resume.get("run") or {}
                 rebuilt_replans = int(run_state.get("replan_attempts", 0) or 0)
                 rebuilt_feedback = run_state.get("replan_feedback") or ""
-                rebuilt_partial = resume.get("partial_output") or ""
+                # 值级校验（issue #287/R1，与 ctx.artifacts 同族）：partial/output
+                # 与 history 的"合法 JSON、类型漂移"坏值此前会炸在收尾拼接
+                # （`partial_prefix + pass_output` TypeError）或元素访问
+                # （`msg.get` AttributeError）上，且错误兜底回写会让坏值自续
+                # （build_envelope 对非 str 的 partial 直接抛）。坏值降级为
+                # 默认（无前缀 / 无冻结历史）并留 warning；结构级/其他字段的
+                # 损坏仍走下方整体降级（与 parse_snapshot 同语义）。
+                rebuilt_partial = resume.get("partial_output")
+                if not isinstance(rebuilt_partial, str):
+                    if rebuilt_partial is not None:
+                        logger.warning(
+                            "checkpoint 快照值级漂移（partial_output, type=%s, task=%s）："
+                            "按默认降级（空前缀）",
+                            type(rebuilt_partial).__name__,
+                            log_safe(task_id),
+                        )
+                    rebuilt_partial = ""
                 frozen_history = resume.get("history")
+                if isinstance(frozen_history, list):
+                    clean_history = [m for m in frozen_history if isinstance(m, dict)]
+                    if len(clean_history) != len(frozen_history):
+                        logger.warning(
+                            "checkpoint 快照值级漂移（history 含非映射元素, task=%s）："
+                            "坏元素丢弃（%d/%d 保留）",
+                            log_safe(task_id),
+                            len(clean_history),
+                            len(frozen_history),
+                        )
+                    frozen_history = clean_history
+                elif frozen_history is not None:
+                    logger.warning(
+                        "checkpoint 快照值级漂移（history, type=%s, task=%s）："
+                        "按默认降级（无冻结历史）",
+                        type(frozen_history).__name__,
+                        log_safe(task_id),
+                    )
+                    frozen_history = None
                 plan_data = resume.get("plan")
                 rebuilt_plan: Plan | None = None
                 if plan_data:
@@ -314,6 +422,33 @@ class PERAgentLoop:
                 replan_feedback = rebuilt_feedback
                 partial_prefix = rebuilt_partial
                 resume_plan = rebuilt_plan
+                prior_run_state = run_state if isinstance(run_state, dict) else {}
+                # ── B：计划审批的 resume 语义 ──
+                # 1) 未决计划（pending_plan_approval 仍在 = 人类尚未决定）：绝不
+                #    执行——由下方 run 起点重挂起（深度防御，正确入口是
+                #    plan-approval 端点，prepare_resume 已对等待态 409）；
+                # 2) 拒绝重规划标记：被拒计划放弃执行（resume 语义 = 带理由
+                #    重规划一次），理由进 replan_feedback 供 _plan_once 消费。
+                raw_pending_plan = run_state.get("pending_plan_approval")
+                if isinstance(raw_pending_plan, dict):
+                    pending_plan_approval = raw_pending_plan
+                raw_force_replan = run_state.get("plan_reject_replan")
+                if isinstance(raw_force_replan, dict):
+                    force_replan_feedback = str(raw_force_replan.get("feedback") or "").strip()
+                    resume_plan = None
+                # HITL：审批决定账本（粘滞 approve/deny）+ 人工指导（steering）
+                # 从快照 run_state 回填——resume 的审批门用同一份账本，已批准/
+                # 已拒绝的 (tool, args) 不会再次打扰（类型级防漂移：坏元素丢弃）。
+                raw_decisions = run_state.get("approval_decisions")
+                if isinstance(raw_decisions, list):
+                    self.approval_decisions = [d for d in raw_decisions if isinstance(d, dict)]
+                raw_steering = run_state.get("steering")
+                if isinstance(raw_steering, list):
+                    # 保序 + 保最新（compose_guidance）：多暂停周期/多轮转向下
+                    # 超限时舍弃最旧的整条，绝不半句截断、绝不丢最新一句。
+                    self.human_guidance = steering.compose_guidance(
+                        [s.strip() for s in raw_steering if isinstance(s, str) and s.strip()]
+                    )
                 if frozen_history is not None:
                     # history 在首快照时冻结：resume 不重读会话新消息（否则等于换上下文续跑）。
                     history = frozen_history
@@ -321,6 +456,14 @@ class PERAgentLoop:
             ctx = ExecutionContext(query=query)
         if task_id:
             ctx.task_id = task_id
+
+        # @引用文档段（T14）：显式入参优先；resume 未显式传入时从快照 ctx 恢复
+        # （快照缺失 / 值级漂移 → 无引用段，不伪造）。写回 ctx 保证本 run 后续
+        # 落下的快照继续携带引用段——二次断流恢复同样不丢。
+        if document_context:
+            ctx.document_context = document_context
+        else:
+            document_context = ctx.document_context or None
 
         # 技能（issue #200）：懒加载已学技能（load 幂等）；失败绝不阻塞主流程
         if self.config.enable_skills:
@@ -358,12 +501,57 @@ class PERAgentLoop:
                 except Exception as e:
                     logger.warning(f"Memory recall failed: {e}")
 
+            # 引用文档（体验第四波 @引用）：用户显式引用的文档摘要段与记忆
+            # 上下文同轨并入——planner 的 system 段与执行合成的用户消息都会
+            # 带上；不依赖 enable_memory（引用是用户显式意图，不是回忆）。
+            # ⚠️ 安全注记（评审 F3）：该段内容来自知识库文档（不可信输入），
+            # 注入姿态与既有 RAG context_docs 直拼一致；防护（spotlight/指令
+            # 隔离）为后续独立演进项，详见 service.build_referenced_document_context。
+            if document_context:
+                memory_context = (
+                    f"{memory_context}\n\n{document_context}"
+                    if memory_context
+                    else document_context
+                )
+
         # 快照活引用（fitted history 之后建立，冻结进快照的是实际被消费的那份）。
-        run_state_live: dict[str, Any] = {
-            "execution_mode": self._execution_mode,
-            "replan_attempts": replan_attempts,
-            "replan_feedback": replan_feedback,
-        }
+        # HITL（S4 修复，浏览器验收 F1）：run_state 是"多暂停周期间不丢"的载体
+        # ——apply_approval_decision 往信封的 run_state 追加 approval_decisions /
+        # steering，loop 读取后必须**原样带回**。此前这里只写三个运行期键，
+        # resume 后的第一次快照（如下一轮 before_approval）就把上一轮 apply 写入
+        # 的决定/指导整份覆盖掉——多审批周期下已批指纹重新弹卡、改指令只活一轮。
+        # 现在以既有 run_state 为基底**合并写**；HITL 两个键做值级规整（#319
+        # 同族：坏形状绝不落回快照，清空即删键）。
+        run_state_live: dict[str, Any] = dict(prior_run_state)
+        raw_decisions = prior_run_state.get("approval_decisions")
+        cleaned_decisions = (
+            [d for d in raw_decisions if isinstance(d, dict)]
+            if isinstance(raw_decisions, list)
+            else []
+        )
+        if cleaned_decisions:
+            run_state_live["approval_decisions"] = cleaned_decisions
+        else:
+            run_state_live.pop("approval_decisions", None)
+        raw_steering = prior_run_state.get("steering")
+        cleaned_steering = (
+            [s for s in raw_steering if isinstance(s, str) and s.strip()]
+            if isinstance(raw_steering, list)
+            else []
+        )
+        if cleaned_steering:
+            # 快照只保留最近若干条（注入用全量 compose；历史只为 resume 保真）。
+            run_state_live["steering"] = cleaned_steering[-steering.STEERING_HISTORY_CAP :]
+        else:
+            run_state_live.pop("steering", None)
+        # B：拒绝重规划标记一次性消费——理由并入本次 replan_feedback（下方
+        # run_state_live["replan_feedback"] 落盘），标记本身出快照（不复发）。
+        run_state_live.pop("plan_reject_replan", None)
+        if force_replan_feedback:
+            replan_feedback = force_replan_feedback
+        run_state_live["execution_mode"] = self._execution_mode
+        run_state_live["replan_attempts"] = replan_attempts
+        run_state_live["replan_feedback"] = replan_feedback
         if task_id and self.config.enable_checkpoint:
             self.checkpoint_live = {
                 "ctx": ctx,
@@ -374,6 +562,28 @@ class PERAgentLoop:
                 "run_state": run_state_live,
                 "session_id": session_id or "",
             }
+            # resume：先把快照里的计划挂上活引用——run 起点消费转向消息会落一次
+            # 快照，plan 仍为 None 会把既有计划从快照里抹掉（静默降级为"从规划
+            # 阶段重跑"）。首轮 while 里同样会挂（此处提前，幂等）。
+            if resume_plan is not None:
+                self.checkpoint_live["plan"] = resume_plan
+
+        # ── A: 运行中转向（steering）—— run 起点并入等待中的指导 ─────────────
+        # resume（含审批暂停/计划审批后恢复）时把暂停期间暂存于队列的 steer 并入
+        # 注入引导；与 modified_instruction 的 run_state["steering"] 通道在此合流。
+        # chat 起点通常为空（队列无消息 → 零产出）。
+        async for steer_event in self._consume_steering(run_state_live):
+            yield steer_event
+
+        # ── B：未获批准的计划绝不被 resume 执行（深度防御）──────────────────
+        # 快照仍带 pending_plan_approval = 人类尚未决定：原地重新挂起（重呈现
+        # 审批卡），绝不进入执行。正确入口是 plan-approval 端点（prepare_resume
+        # 对等待计划审批的任务已 409 拦截）；这条是绕过端点时的最后闸门。
+        if pending_plan_approval is not None and resume_plan is not None:
+            async for plan_event in self._pause_for_plan_approval(resume_plan, run_state_live):
+                yield plan_event
+            if self.paused_for_plan_approval:
+                return
 
         # ── Phase 1–3: 规划 → 执行 → 反思（含有界重新规划）────────────────
         # issue #106 §5a：reflector 的 "replan" 判定此前只被记录、从不执行
@@ -384,6 +594,14 @@ class PERAgentLoop:
         final_output = ""
 
         while True:
+            # ── HITL：协作式取消（阶段间检查点）——规划/重规划之前观察取消旗 ──
+            cancel_event = await self._cancel_event()
+            if cancel_event is not None:
+                yield cancel_event
+                await self._save_checkpoint("cancelled")
+                self.run_cancelled = True
+                return
+
             # ── Phase 1: Planning ────────────────────────────────────────
             matched_skill_id: str | None = None
             if resume_plan is not None:
@@ -420,11 +638,21 @@ class PERAgentLoop:
                     self.checkpoint_live["plan"] = plan
                     await self._save_checkpoint("after_planning")
 
+                # ── B：计划审批暂停点（plan_approval_mode=always）──────────────
+                # 本分支 = 新鲜规划（首轮 / replan / 无快照重规划）——always 模式下
+                # 每版新计划都先经人类确认；resume（携带既批准计划）不经过这里，
+                # 获批计划不会被二次打扰。
+                async for plan_event in self._pause_for_plan_approval(plan, run_state_live):
+                    yield plan_event
+                if self.paused_for_plan_approval:
+                    return
+
             # ── Phase 2: Execution ───────────────────────────────────────────
             pass_output = ""
 
             if self.config.enable_tools:
                 self.executor.reset_for_request()
+                self._arm_executor_hitl()
                 execution_output = ""
                 try:
                     async for event in self.executor.execute(
@@ -437,6 +665,12 @@ class PERAgentLoop:
                         # T2 checkpoint（issue #201）：每个步骤终态后的落盘回调；
                         # 未接 checkpoint（task_id 缺省）时为 None。
                         on_step_done=self._make_step_checkpoint_callback(),
+                        # HITL"改指令续跑"：审批应答附加的人工指导注入后续步骤。
+                        human_guidance=self.human_guidance,
+                        # @引用文档段（第四波缺陷修复）：此前只注入 planner——
+                        # 默认工具模式下写答案的 executor 看不到引用正文，实机
+                        # 表现为"只找到文档列表信息，没有拿到可总结的正文"。
+                        document_context=document_context or "",
                     ):
                         yield event
                         if event.type == "chunk":
@@ -444,27 +678,66 @@ class PERAgentLoop:
                             execution_output += event.content
                             if self.checkpoint_live is not None:
                                 # 快照冻结"已产出的答案前缀"：resume 收尾时拼回完整回复。
-                                self.checkpoint_live["partial_output"] = partial_prefix + pass_output
+                                self.checkpoint_live["partial_output"] = (
+                                    partial_prefix + pass_output
+                                )
                         elif event.type == "execution_step_result" and event.content:
                             execution_output += event.content
+                        elif event.type == "thinking" and event.plan_step_status in (
+                            "completed",
+                            "failed",
+                        ):
+                            # ── A: 步边界消费转向消息（下一步生效）──────────────
+                            # 本循环体在消费者请求下一事件时先于 executor 的下一
+                            # __anext__ 恢复——这里写入 executor.human_guidance
+                            # 必然被下一步的提示词构建读到；暂停/取消（pending_control
+                            # 置位）时 executor 已抛出，走不到本分支。
+                            async for steer_event in self._consume_steering(run_state_live):
+                                yield steer_event
+                except approval.ApprovalRequired as req:
+                    # 审批暂停：快照与任务态已由审批回调持久化（waiting_approval）；
+                    # 本 run 平静结束——绝不给 service 任何"完成"信号，也不置终态。
+                    self.paused_for_approval = True
+                    self.pending_approval = req.request.to_dict()
+                    return
+                except approval.RunCancelled:
+                    # 协作式取消：如实发 run_cancelled（不伪装完成），落一次快照
+                    # 留现场，标志交 service 收敛为 CANCELLED 终态。
+                    yield AgentEvent(
+                        type="run_cancelled",
+                        content="任务已被用户取消",
+                        task_id=self._checkpoint_task_id or "",
+                    )
+                    await self._save_checkpoint("cancelled")
+                    self.run_cancelled = True
+                    return
                 finally:
                     # Conditional routing belongs in a finally so it still runs when the
                     # consumer stops early (client disconnect), and it reads everything
                     # the executor produced rather than only the bare "chunk" events.
-                    remaining_steps = [s for s in plan.steps if s.status == "pending"]
-                    if remaining_steps and not self._should_continue_execution(execution_output, plan, remaining_steps):
-                        skipped = [s for s in remaining_steps if s.status == "pending"]
-                        for s in skipped:
-                            s.status = "skipped"
-                        if skipped:
-                            yield AgentEvent(
-                                type="thinking",
-                                content=f"已有充分信息，跳过 {len(skipped)} 个剩余步骤",
-                                thinking_type="evaluation",
-                                plan_id=plan.id,
-                                plan_progress=plan.progress,
-                            )
-                            logger.info("Conditional routing: %d steps skipped (sufficient info)", len(skipped))
+                    # HITL：暂停/取消（pending_control 置位）时抑制条件路由——那是
+                    # "本 run 正常收尾"的决策，不该在暂停点上擅自 skip 剩余步骤
+                    # （resume 后按原计划继续）。
+                    if self.executor.pending_control == "":
+                        remaining_steps = [s for s in plan.steps if s.status == "pending"]
+                        if remaining_steps and not self._should_continue_execution(
+                            execution_output, plan, remaining_steps
+                        ):
+                            skipped = [s for s in remaining_steps if s.status == "pending"]
+                            for s in skipped:
+                                s.status = "skipped"
+                            if skipped:
+                                yield AgentEvent(
+                                    type="thinking",
+                                    content=f"已有充分信息，跳过 {len(skipped)} 个剩余步骤",
+                                    thinking_type="evaluation",
+                                    plan_id=plan.id,
+                                    plan_progress=plan.progress,
+                                )
+                                logger.info(
+                                    "Conditional routing: %d steps skipped (sufficient info)",
+                                    len(skipped),
+                                )
             else:
                 # Tool-less mode: single LLM call
                 messages = self._build_messages(query, history, context_docs, memory_context)
@@ -484,6 +757,20 @@ class PERAgentLoop:
                         if self.checkpoint_live is not None:
                             self.checkpoint_live["partial_output"] = partial_prefix + pass_output
                 except Exception as e:
+                    # issue #301（批 A #11）：直接回答的 LLM 调用失败 = 本次 run
+                    # 零产出，不得再走"COMPLETED + clean_success=true"假成功链：
+                    # 失败进 ctx.failures（对齐 #293 范式：complete_step 是唯一
+                    # 写者 → run_report clean_success=False），并置 run_failed 标志
+                    # （service 收尾据此置任务 FAILED 而不是 COMPLETED）。
+                    self.run_failed = True
+                    self.run_failure = f"LLM Error: {e}"
+                    ctx.complete_step(
+                        step_id="direct_llm",
+                        description="直接回答（无工具模式）",
+                        tool=None,
+                        status="failed",
+                        error=self.run_failure,
+                    )
                     yield AgentEvent(type="error", content=f"LLM Error: {e}")
 
             # 最终答案以最后一版计划的执行产出为准：replan 后旧计划的产出
@@ -501,6 +788,7 @@ class PERAgentLoop:
             # ── Phase 2b: Quality Gate ────────────────────────────────────────
             if plan.steps:
                 from app.agent.quality_gate import quality_gate_check
+
                 step_results = self.memory.get_all_results()
                 qg_result = quality_gate_check(step_results)
                 # §5b：质检结论落成结构化状态（每轮覆盖，防止 replan 后残留
@@ -533,7 +821,8 @@ class PERAgentLoop:
                             content=warnings[:500],
                             thinking_type="evaluation",
                         )
-                    logger.info("Quality gate: %d passed, %d concerns, %d failed",
+                    logger.info(
+                        "Quality gate: %d passed, %d concerns, %d failed",
                         sum(1 for g, _ in qg_result["grades"].values() if g == "A"),
                         sum(1 for g, _ in qg_result["grades"].values() if g == "C"),
                         sum(1 for g, _ in qg_result["grades"].values() if g == "F"),
@@ -581,12 +870,25 @@ class PERAgentLoop:
                         replan_requested = True
                         if event.content:
                             feedback_parts.append(event.content)
+                    elif event.type == "reflection" and event.reflection_result in (
+                        "unavailable",
+                        "unparsed",
+                    ):
+                        # issue #301 #7/#8 三态：反思降级（评估服务异常 / 输出
+                        # 无法解析）= 本轮没有判定可依 —— 不重试、不重规划
+                        # （降级 ≠ 失败，好 run 不因评估缺席被打坏），也不改写
+                        # 用户可见的答案正文。曝光由事件本身 + reflector 写入的
+                        # ctx 决策承担（run report 的 reflect_decisions 会显现）：
+                        # 绝不静默按 pass 通过（旧行为即此假绿）。
+                        pass
 
                 if replan_requested:
                     if not self.config.enable_planning:
                         # 规划被禁用时 replan 无从执行，只记录原因（无副作用）。
                         ctx.record_decision(
-                            "plan", "replan_unavailable", "规划已禁用，无法重新规划",
+                            "plan",
+                            "replan_unavailable",
+                            "规划已禁用，无法重新规划",
                         )
                     elif replan_attempts >= MAX_REPLANS_PER_RUN:
                         # 有界性：达到上限后不再重新规划，按当前结果收尾。
@@ -656,6 +958,14 @@ class PERAgentLoop:
             break
 
         # ── Phase 3b: Adversarial Review ────────────────────────────────
+        # HITL：协作式取消（反思/审查之前再观察一次——审查会发起新的 LLM 调用，
+        # 取消的 run 不该再为它花钱）。
+        cancel_event = await self._cancel_event()
+        if cancel_event is not None:
+            yield cancel_event
+            await self._save_checkpoint("cancelled")
+            self.run_cancelled = True
+            return
         # 预算已尽则跳过对抗审查（同 Phase 3，issue #203 ②）。
         if self.config.enable_reflection and plan.steps and not self.config.over_budget(ctx):
             results = self.memory.get_all_results()
@@ -669,12 +979,19 @@ class PERAgentLoop:
             issues = review.get("issues_found", [])
             high_issues = [i for i in issues if i.get("severity") == "high"]
             # §5c：消费 recommendation（此前全仓零读取者）。取值收敛到
-            # pass/revise/reject，未识别值按 pass 处理（不制造噪音）。
+            # pass/revise/reject/error；issue #301 #9 起 "error"（审查未完成、
+            # 无结论）不得被并进 pass —— 无结论 ≠ 通过。其余未识别值仍按
+            # pass 处理（不制造噪音：模型写"通过"等表述时应视为通过）。
             raw_recommendation = str(review.get("recommendation") or "pass").strip().lower()
             if raw_recommendation.startswith("reject"):
                 recommendation = "reject"
             elif raw_recommendation.startswith("revise"):
                 recommendation = "revise"
+            elif raw_recommendation.startswith("error") or raw_recommendation in (
+                "skipped",
+                "unavailable",
+            ):
+                recommendation = "error"
             else:
                 recommendation = "pass"
             # 结构化记录：run report 读取；SSE 侧另经 decision 携带。
@@ -683,7 +1000,36 @@ class PERAgentLoop:
                 "issue_count": len(issues),
                 "high_severity_count": len(high_issues),
             }
-            if recommendation != "pass":
+            if recommendation == "error":
+                # 审查崩溃/无结论（issue #301 #9）：如实记录 + 暴露；不按
+                # 结论重试/阻断，也不改用户可见的答案正文（保守原则同
+                # revise/reject）。clean_success 不翻转：没有证据说 run 坏，
+                # 只是本轮质量覆盖有缺口 —— 但绝不静默（旧行为即静默 pass）。
+                #
+                # 文案细分（issue #301 家族尾巴）：「模型没给判定」
+                # （error_kind="no_verdict"）与「审查服务崩了」
+                # （error_kind="service_error"）是两种事实，不得合并表述；
+                # 未标注 kind 的自定义调用方按服务异常（保守、与旧文案一致）。
+                reason = str(review.get("error") or "").strip()
+                if reason:
+                    # W0-5：decision reasoning 会进入 run_report/execution_context
+                    # 外发——异常原文只进日志，不插值到对外文本。
+                    logger.warning("对抗审查未完成（内部细节仅日志）: %s", log_safe(reason))
+                if str(review.get("error_kind") or "") == "no_verdict":
+                    unfinished = "对抗审查未完成（模型未给出判定）"
+                else:
+                    unfinished = "对抗审查未完成（审查服务异常）"
+                ctx.record_decision(
+                    "review",
+                    "error",
+                    unfinished + "，本轮无审查结论",
+                )
+                yield AgentEvent(
+                    type="thinking",
+                    content=unfinished + "，本轮结果未经过对抗质检",
+                    thinking_type="evaluation",
+                )
+            elif recommendation != "pass":
                 # reject/revise 的后果 = 被记录（结构化决策）+ 被暴露（SSE 事件）。
                 # 保守原则：不据此重试/阻断，也不改用户可见的答案正文。
                 verdict = "结果不可接受" if recommendation == "reject" else "结果需要修改"
@@ -703,7 +1049,9 @@ class PERAgentLoop:
                 )
             if issues:
                 if high_issues:
-                    logger.info("Adversarial review found %d high-severity issues", len(high_issues))
+                    logger.info(
+                        "Adversarial review found %d high-severity issues", len(high_issues)
+                    )
                     for issue in high_issues:
                         final_output += (
                             f"\n\n⚠️ **审查发现**: {issue.get('description', '')}\n"
@@ -781,29 +1129,236 @@ class PERAgentLoop:
 
         return _on_step_done
 
-    async def _save_checkpoint(self, trigger: str) -> None:
+    async def _save_checkpoint(self, trigger: str) -> bool:
         """把当前 run 的快照写进 AgentTask（T1–T4 触发点统一入口）。
 
-        - 未接任务（task_id 缺省）或 kill-switch（enable_checkpoint=False）→ no-op；
-        - 任何失败只记 warning、绝不阻塞主流程（与 ctx.save() 同风格）。
+        - 未接任务（task_id 缺省）或 kill-switch（enable_checkpoint=False）→
+          no-op 且返回 False；
+        - 任何失败只记 warning、绝不阻塞主流程（与 ctx.save() 同风格），但**返回
+          False**——审批暂停回调凭这个返回值决定"能不能暂停"（快照落不下 = 没有
+        回来的路），因此不能静默吞。
         """
         live = self.checkpoint_live
         if live is None or not self.config.enable_checkpoint:
-            return
+            return False
         try:
-            await checkpoint.save_checkpoint(
-                task_id=self._checkpoint_task_id,
-                ctx=live["ctx"],
-                plan=live["plan"],
-                trigger=trigger,
-                partial_output=live["partial_output"],
-                history=live["history"],
-                config=live["config"],
-                run_state=live["run_state"],
-                session_id=live["session_id"],
+            return bool(
+                await checkpoint.save_checkpoint(
+                    task_id=self._checkpoint_task_id,
+                    ctx=live["ctx"],
+                    plan=live["plan"],
+                    trigger=trigger,
+                    partial_output=live["partial_output"],
+                    history=live["history"],
+                    config=live["config"],
+                    run_state=live["run_state"],
+                    session_id=live["session_id"],
+                )
             )
         except Exception as e:
-            logger.warning("checkpoint save failed (trigger=%s): %s", log_safe(trigger), log_safe(e))
+            logger.warning(
+                "checkpoint save failed (trigger=%s): %s", log_safe(trigger), log_safe(e)
+            )
+            return False
+
+    # ── HITL helpers（approval.py 的接线与回调）────────────────────────────
+
+    def _arm_executor_hitl(self) -> None:
+        """每轮执行前把 task 级 HITL 接线到执行器（replan 轮同样重新接线）。
+
+        - 审批门只在 task_id + checkpoint 接线时启用：暂停必须可持久化，
+          否则审批没有"回来的路"——不可用即不启用（执行如常，不制造假暂停）。
+        - cancel 同样 task 级（取消旗以 task_id 为键）；service 在开跑前接线
+          self.cancel_check，此处转发给执行器。
+        - 决定账本/人工指导跨 replan 轮保持（从 self.* 复制，不因 reset 丢）。
+        """
+        executor = self.executor
+        if self._checkpoint_task_id and self.config.enable_checkpoint:
+            executor.approval_check = self._on_approval_required
+            executor.cancel_check = self.cancel_check
+        else:
+            executor.approval_check = None
+            executor.cancel_check = None
+        executor.approval_decisions = list(self.approval_decisions)
+        executor.human_guidance = self.human_guidance
+        executor.approval_degraded = False
+        executor.pending_control = ""
+        # C3a：工具调用配对持久化只在 checkpoint 接线时启用——没有任务行就没有
+        # 账本可落（裸执行器/子代理保持零 DB 依赖）。
+        executor.tool_ledger_task_id = (
+            self._checkpoint_task_id
+            if self._checkpoint_task_id and self.config.enable_checkpoint
+            else None
+        )
+
+    async def _consume_steering(
+        self,
+        run_state_live: dict[str, Any],
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """消费队列中的转向消息（run 起点 / 步边界调用；见 steering.py）。
+
+        - 未接 checkpoint（无队列可写）或通道不可用 / 无消息 → 零产出，绝不打扰执行；
+        - 有消息：并入注入引导（保序、保最新、总量有界）→ 追加进快照
+          run_state["steering"] 活引用 → **落一次快照**——drain 已把消息从队列
+          取走，不落盘会在崩溃时造成"已消费但未生效"的静默丢失；
+        - 每条消息发一个 steer_applied 事件（content = 消息摘要，保序）。
+        """
+        if self.checkpoint_live is None:
+            return
+        messages = await steering.drain_steers(self._checkpoint_task_id or "")
+        if not messages:
+            return
+        history = run_state_live.get("steering")
+        cleaned = (
+            [s for s in history if isinstance(s, str) and s.strip()]
+            if isinstance(history, list)
+            else []
+        )
+        cleaned = (cleaned + messages)[-steering.STEERING_HISTORY_CAP :]
+        run_state_live["steering"] = cleaned
+        self.human_guidance = steering.compose_guidance(cleaned)
+        if self._executor is not None:
+            # 执行期步边界：下一步的提示词构建立即读到新引导。
+            self._executor.human_guidance = self.human_guidance
+        await self._save_checkpoint("after_steer")
+        for message in messages:
+            yield AgentEvent(
+                type="steer_applied",
+                content=message,
+                task_id=self._checkpoint_task_id or "",
+            )
+
+    async def _is_cancelled(self) -> bool:
+        """取消旗查询；通道故障按"未取消"处理（取消通道打不坏正常执行）。"""
+        if self.cancel_check is None:
+            return False
+        try:
+            return bool(await self.cancel_check())
+        except Exception as e:
+            logger.warning("cancel check failed: %s", log_safe(e))
+            return False
+
+    async def _cancel_event(self) -> AgentEvent | None:
+        """取消检查点：已请求取消 → 构造 run_cancelled 事件；否则 None。"""
+        if not await self._is_cancelled():
+            return None
+        return AgentEvent(
+            type="run_cancelled",
+            content="任务已被用户取消",
+            task_id=self._checkpoint_task_id or "",
+        )
+
+    async def _on_approval_required(self, request: approval.ApprovalRequest) -> str:
+        """审批暂停回调（执行器在暂停点调用）：持久化整份暂停状态。
+
+        顺序与语义（任一失败 → 不暂停，返回 "unavailable" 交执行器降级）：
+            1. 取消旗优先：正在取消的 run 不该进暂停 → "cancelled"；
+            2. 快照落盘：run_state.pending_approval（冻结待审批行动）+
+               ctx/plan/partial/history（复用既有 checkpoint 全量保存）；
+            3. 任务态 RUNNING → WAITING_APPROVAL（诚实状态，进状态 API）。
+        失败补偿：快照已落但状态没翻 → 撤回 pending_approval（尽力再存一次），
+        绝不留下"快照说在等审批、任务态说在跑"的悬空现场。
+        """
+        if await self._is_cancelled():
+            return "cancelled"
+        live = self.checkpoint_live
+        if live is None or not self.config.enable_checkpoint:
+            return "unavailable"
+        ttl = int(getattr(self.config, "approval_timeout_seconds", 0) or 0)
+        if ttl > 0 and request.expires_at is None:
+            request.expires_at = time.time() + ttl
+        run_state = live.get("run_state")
+        if not isinstance(run_state, dict):  # pragma: no cover — live 由本类自建
+            return "unavailable"
+        run_state["pending_approval"] = request.to_dict()
+        if not await self._save_checkpoint("before_approval"):
+            run_state.pop("pending_approval", None)
+            return "unavailable"
+        if not await checkpoint.mark_waiting_approval(self._checkpoint_task_id):
+            run_state.pop("pending_approval", None)
+            await self._save_checkpoint("approval_rollback")
+            return "unavailable"
+        return "paused"
+
+    async def _pause_for_plan_approval(
+        self,
+        plan: Plan,
+        run_state_live: dict[str, Any],
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """B：计划审批暂停（plan_approval_mode=always 时才生效；产出事件）。
+
+        失败降级纪律（镜像 _on_approval_required）：暂停必须可持久化——快照
+        或任务态任一步失败都撤回 pending 并**如实放行执行**（附一条 thinking
+        事件说明），绝不制造"看起来停了、其实没有回来的路"的假暂停。
+
+        成功：run_state.pending_plan_approval 冻结结构化步骤 + 任务态
+        RUNNING→WAITING_PLAN_APPROVAL + plan_approval_required 事件（计划
+        payload 自足携带步骤——resume 流不回放 plan_step 事件）。
+        调用方据 self.paused_for_plan_approval 决定是否结束本 run。
+        """
+        if getattr(self.config, "plan_approval_mode", "never") != "always":
+            return
+        # 取消旗优先：正在取消的 run 不进暂停（与审批门同纪律）——执行阶段的
+        # 检查点会立即观察旗并收敛为 run_cancelled。
+        if await self._is_cancelled():
+            return
+        live = self.checkpoint_live
+        if live is None or not self.config.enable_checkpoint:
+            yield AgentEvent(
+                type="thinking",
+                content=(
+                    "计划审批已启用（plan_approval_mode=always），但检查点不可用"
+                    "（暂停无法持久化）——本 run 按无审批继续执行"
+                ),
+                thinking_type="evaluation",
+                plan_id=plan.id,
+            )
+            return
+        run_state = live.get("run_state")
+        if not isinstance(run_state, dict):  # pragma: no cover — live 由本类自建
+            return
+        existing = run_state.get("pending_plan_approval")
+        requested_at = time.time()
+        if isinstance(existing, dict) and isinstance(existing.get("requested_at"), (int, float)):
+            # 重挂起（bare resume 兜底路径）保留原始等待起点：等多久了要说真话。
+            requested_at = float(existing["requested_at"])
+        run_state["pending_plan_approval"] = {
+            "plan_id": plan.id,
+            "goal": plan.goal,
+            "steps": _plan_steps_payload(plan),
+            "requested_at": requested_at,
+        }
+        if not await self._save_checkpoint("before_plan_approval"):
+            run_state.pop("pending_plan_approval", None)
+            yield AgentEvent(
+                type="thinking",
+                content="计划审批暂停落盘失败（快照不可写）——本 run 按无审批继续执行",
+                thinking_type="evaluation",
+                plan_id=plan.id,
+            )
+            return
+        if not await checkpoint.mark_waiting_plan_approval(self._checkpoint_task_id):
+            run_state.pop("pending_plan_approval", None)
+            await self._save_checkpoint("plan_approval_rollback")
+            yield AgentEvent(
+                type="thinking",
+                content="计划审批暂停落盘失败（任务态不可写）——本 run 按无审批继续执行",
+                thinking_type="evaluation",
+                plan_id=plan.id,
+            )
+            return
+        self.paused_for_plan_approval = True
+        yield AgentEvent(
+            type="plan_approval_required",
+            content=(
+                f"计划已生成（{len(plan.steps)} 个步骤），等待审批："
+                f"批准 / 编辑步骤后批准 / 拒绝（附理由）"
+            ),
+            plan_id=plan.id,
+            plan_goal=plan.goal,
+            plan_steps=_plan_steps_payload(plan),
+            task_id=self._checkpoint_task_id or "",
+        )
 
     def _seed_working_from_plan(self, plan: Plan) -> None:
         """resume 时把已完成步骤的结果回灌 WorkingMemory。
@@ -815,11 +1370,14 @@ class PERAgentLoop:
         """
         for step in plan.steps:
             if step.status == "completed" and step.result:
-                self.memory.store_step_result(step.id, {
-                    "description": step.description,
-                    "status": step.status,
-                    "result": step.result,
-                })
+                self.memory.store_step_result(
+                    step.id,
+                    {
+                        "description": step.description,
+                        "status": step.status,
+                        "result": step.result,
+                    },
+                )
 
     async def _plan_once(
         self,
@@ -858,16 +1416,18 @@ class PERAgentLoop:
                 if event.type == "plan_start":
                     plan_id = event.plan_id
                 elif event.type == "plan_step" and event.plan_step_id:
-                    plan_steps.append(PlanStep(
-                        id=event.plan_step_id,
-                        description=event.content,
-                        dependencies=event.dependencies or [],
-                        tool_hint=event.tool_hint or None,
-                        parallel_group=event.parallel_group,
-                        risk_level=event.risk_level or "low",
-                        retry_strategy=event.retry_strategy or "auto_retry",
-                        fallback_tool=event.fallback_tool,
-                    ))
+                    plan_steps.append(
+                        PlanStep(
+                            id=event.plan_step_id,
+                            description=event.content,
+                            dependencies=event.dependencies or [],
+                            tool_hint=event.tool_hint or None,
+                            parallel_group=event.parallel_group,
+                            risk_level=event.risk_level or "low",
+                            retry_strategy=event.retry_strategy or "auto_retry",
+                            fallback_tool=event.fallback_tool,
+                        )
+                    )
                 elif event.type == "plan_complete":
                     # Carry the planner's own goal; never fall back to the plan id.
                     if event.plan_goal:
@@ -926,7 +1486,9 @@ class PERAgentLoop:
             if step.retry_count >= self.config.max_retries_per_step:
                 logger.warning(
                     "Reflection retry for step %s skipped: retry_count %d already at limit %d",
-                    step_id, step.retry_count, self.config.max_retries_per_step,
+                    step_id,
+                    step.retry_count,
+                    self.config.max_retries_per_step,
                 )
                 return
             step.status = "pending"
@@ -972,9 +1534,7 @@ class PERAgentLoop:
         # 可见工具预校验（#245 第 5/6 条，与 _get_tools 的呈现过滤同源）：
         # hint 进提示词会诱导模型调用一个当前看不见、甚至被执行层拒绝的工具。
         # toolless（enable_tools=False）时可见集为空 → 一条都不应用。
-        visible = {
-            t.get("function", {}).get("name") for t in (self._get_tools() or [])
-        }
+        visible = {t.get("function", {}).get("name") for t in (self._get_tools() or [])}
         applied = 0
         i = 0
         for step in plan.steps:
@@ -990,13 +1550,16 @@ class PERAgentLoop:
             elif hint:
                 logger.info(
                     "Skill hint skipped（跨会话工具漂移）: %s 不在当前可见工具集（技能 %s）",
-                    hint, skill.id,
+                    hint,
+                    skill.id,
                 )
             i += 1
         if applied:
             logger.info(
                 "Skill hints applied: %d/%d 个步骤（来自技能 %s）",
-                applied, len(plan.steps), skill.id,
+                applied,
+                len(plan.steps),
+                skill.id,
             )
             return skill.id
         return None
@@ -1011,9 +1574,7 @@ class PERAgentLoop:
         grades = (qg_result or {}).get("grades") or {}
         if not grades or not all(g == "A" for g, _ in grades.values()):
             return
-        steps = [
-            {"tool_hint": s.tool_hint, "description": s.description} for s in plan.steps
-        ]
+        steps = [{"tool_hint": s.tool_hint, "description": s.description} for s in plan.steps]
         learned = await self.skill_manager.learn_from_plan_success(
             query=ctx.query or plan.goal, plan_steps=steps
         )
@@ -1045,7 +1606,14 @@ class PERAgentLoop:
         而唯一的质量判据是质检的等级。放在执行器里只能拿到"步骤成功/失败"，分不出
         "成功但平庸"和"成功且优秀"——而把平庸路径记成"有效模式"会污染后续规划
         （这些经验会被注入 planner 的 system prompt）。
+
+        写侧与读侧（planner.py）同门控（round2 卫生修复①）：此前写侧不受
+        enable_experience 管辖——agent_api.py 显式 enable_experience=False 的
+        路径仍会写库。开关关 = 经验回路整体关（既不注入也不落库）。
         """
+        if not self.config.enable_experience:
+            return
+
         from app.agent.experience import get_experience_store
         from app.agent.experience.extractor import (
             extract_from_runtime_error,
@@ -1096,10 +1664,17 @@ class PERAgentLoop:
             system_prompt += f"\n\n{memory_context}"
 
         if context_docs:
-            context_str = "\n\n".join([
-                f"[{i + 1}] {doc.get('filename', 'Unknown')}:\n{doc.get('snippet', doc.get('text', ''))[:500]}"
-                for i, doc in enumerate(context_docs[:5])
-            ])
+            # issue #186：参考文档正文取 prompt_text 全文（snippet 仅展示），
+            # 500 字上限按规则式句子抽取，不硬切头部。
+            from app.rag.context_compressor import compress, get_prompt_text
+
+            context_str = "\n\n".join(
+                [
+                    f"[{i + 1}] {doc.get('filename', 'Unknown')}:\n"
+                    f"{compress(get_prompt_text(doc), query, max_chars=500)}"
+                    for i, doc in enumerate(context_docs[:5])
+                ]
+            )
             system_prompt += f"\n\n## 已检索到的参考文档\n{context_str}"
 
         # Personality injection
@@ -1108,7 +1683,9 @@ class PERAgentLoop:
             "creative": "请给出富有洞察力的回答，可以适度发散思考。",
             "balanced": "请给出结构化、全面的回答，兼顾准确性和可读性。",
         }
-        system_prompt += f"\n\n{personality_guide.get(self.config.personality, personality_guide['balanced'])}"
+        system_prompt += (
+            f"\n\n{personality_guide.get(self.config.personality, personality_guide['balanced'])}"
+        )
 
         # 技能索引进提示词（issue #200）：SKILL.md 此前从不进任何提示词。
         # 受限工具上下文（tool_tags 非空，如子代理）不得注入：技能工具在其白名单外，
@@ -1116,11 +1693,7 @@ class PERAgentLoop:
         # toolless（enable_tools=False）同样不得注入（#245 第 1/3 条）：该模式下的
         # 单次 LLM 调用不带 tools 参数，索引文案（"用 load_skill_reference 工具加载"）
         # 是悬挂引用——与 B1 同理，不承诺一个不可达的工具。
-        if (
-            self.config.enable_skills
-            and self.config.enable_tools
-            and not self.config.tool_tags
-        ):
+        if self.config.enable_skills and self.config.enable_tools and not self.config.tool_tags:
             skills_index = build_skills_index()
             if skills_index:
                 system_prompt += f"\n\n{skills_index}"
@@ -1147,10 +1720,12 @@ class PERAgentLoop:
         tools = tool_registry.to_openai_tools(self.config.tool_tags)
         if self.config.disabled_tools and tools:
             tools = [
-                t for t in tools
+                t
+                for t in tools
                 if t.get("function", {}).get("name") not in self.config.disabled_tools
             ]
         return tools if tools else None
+
 
 # ── Backward compatibility alias ──
 AgentLoop = PERAgentLoop
@@ -1159,4 +1734,5 @@ AgentLoop = PERAgentLoop
 async def _yield_control():
     """Yield control to the event loop for SSE flushing."""
     import asyncio
+
     await asyncio.sleep(0.005)

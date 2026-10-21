@@ -1,4 +1,5 @@
 """Query processing — intent classification, query rewrite, HyDE generation."""
+
 import json
 import logging
 import re
@@ -9,9 +10,11 @@ from app.core.prometheus import RAG_QUERY_REWRITE_TOTAL
 
 logger = logging.getLogger(__name__)
 
-QueryIntent = Literal["factual", "procedural", "list", "definition", "comparison", "causal", "summary", "other"]
+QueryIntent = Literal[
+    "factual", "procedural", "list", "definition", "comparison", "causal", "summary", "other"
+]
 QueryComplexity = Literal["simple", "medium", "complex"]
-RetrievalStrategy = Literal["keyword_only", "hybrid", "hybrid_hyde"]
+RetrievalStrategy = Literal["keyword_only", "hybrid", "hybrid_hyde", "vector_only"]
 
 
 class QueryComplexityClassifier:
@@ -23,11 +26,42 @@ class QueryComplexityClassifier:
     """
 
     COMPLEXITY_SIGNALS = {
-        "high": ["对比", "比较", "区别", "优缺点", "分析", "评估", "综合", "总结",
-                  "为什么", "原因", "影响", "趋势", "策略", "方案", "建议",
-                  "compare", "analyze", "evaluate", "synthesize", "trade-off"],
-        "medium": ["如何", "怎么", "步骤", "流程", "有哪些", "列出", "解释",
-                    "how", "explain", "list", "describe", "define"],
+        "high": [
+            "对比",
+            "比较",
+            "区别",
+            "优缺点",
+            "分析",
+            "评估",
+            "综合",
+            "总结",
+            "为什么",
+            "原因",
+            "影响",
+            "趋势",
+            "策略",
+            "方案",
+            "建议",
+            "compare",
+            "analyze",
+            "evaluate",
+            "synthesize",
+            "trade-off",
+        ],
+        "medium": [
+            "如何",
+            "怎么",
+            "步骤",
+            "流程",
+            "有哪些",
+            "列出",
+            "解释",
+            "how",
+            "explain",
+            "list",
+            "describe",
+            "define",
+        ],
     }
 
     @classmethod
@@ -60,11 +94,83 @@ class QueryComplexityClassifier:
         }[complexity]
 
 
+# ── issue #225（决策文档第 7 条・默认 A）：search_mode 显式覆盖自动路由 ─────────
+# 公开模式名（API 字段 SearchMode 的取值）⇄ 内部策略名的单一事实源。
+# 此前 REST 端点接受 search_mode 却从不传到检索层（knowledge_service 与
+# rag_service 门面两处静默丢弃），「换个模式再试」是无效动作——本映射把
+# 显式模式变成对本次请求检索臂组合的强制覆盖；None/缺省保持自动路由。
+SEARCH_MODE_TO_STRATEGY: dict[str, RetrievalStrategy] = {
+    "keyword": "keyword_only",
+    "vector": "vector_only",  # 仅向量臂；与显式 hybrid 一致不跑 HyDE（enable_hyde=False）
+    "hybrid": "hybrid",  # 显式 hybrid = 两臂 + RRF（不含 HyDE；HyDE 是自动路由给复杂查询的增强）
+}
+STRATEGY_TO_SEARCH_MODE: dict[str, str] = {
+    "keyword_only": "keyword",
+    "vector_only": "vector",
+    "hybrid": "hybrid",
+    "hybrid_hyde": "hybrid",  # 公开粒度：hybrid_hyde 仍是「混合搜索（+可选 HyDE 增强）」
+}
+
+
+def resolve_retrieval_strategy(query: str, search_mode: str | None = None) -> RetrievalStrategy:
+    """本次检索实际采用的策略：显式 search_mode 覆盖自动路由；None 走分类器。
+
+    未知字符串按「未提供」处理（回落自动路由）——API 边界由 SearchMode 枚举
+    校验（非法值 422），此处只是内部调用方的防御口径，不引入第二套校验。
+    """
+    if search_mode:
+        forced = SEARCH_MODE_TO_STRATEGY.get(search_mode)
+        if forced is not None:
+            return forced
+    return QueryComplexityClassifier.get_strategy(query)
+
+
+def effective_search_mode(query: str, search_mode: str | None = None) -> str:
+    """本次请求实际生效的公开模式名（响应回显口径 = 生效语义，issue #225）。
+
+    - 显式模式：即所传值；
+    - 自动路由：按顶层查询的路由结果映射（simple→keyword；medium/complex→hybrid）。
+      注意：复合查询分解后各子查询独立路由，公开粒度均为上述三值之一，回显取
+      顶层查询的路由档位。
+    """
+    if search_mode in SEARCH_MODE_TO_STRATEGY:
+        return search_mode
+    return STRATEGY_TO_SEARCH_MODE[QueryComplexityClassifier.get_strategy(query)]
+
+
+# ── issue #194：boost 字段单一事实源（只允许 ES mapping 中真实存在的字段） ──
+# 历史配置给 9 个 mapping / 索引写入都不存在的意图字段加权（title /
+# list_content / definition / comparison / pros_cons / reason / result /
+# summary / conclusion）：multi_match 对未映射字段的加权恒为 0，是「看起来
+# 按意图调权、实际全部空气」的死配置，还误导排查者反复去调这些不存在的权重。
+# 白名单收敛为 mapping（app/core/elasticsearch.py::_knowledge_index_mapping）
+# 中真实存在、且索引期有/将有写入方的字段：
+#   content / chunk_text / filename —— 索引期已在写（doc_processor）；
+#   section_title —— mapping 已就绪，顶层写入由 #188（并行批次）落地，
+#   落地前该项仍为 0 分，保留是为了 #188 合入后无需再改本表。注意其
+#   mapping 当前是裸 text（standard 分析器）：#188 写入中文标题时应评估
+#   切到 cjk，否则中文标题会按单字匹配，1.8 权重可能引入噪声。
+# 不变式：每个意图的 boost 字段 ⊆ BOOSTABLE_FIELDS ⊆ mapping.properties，
+# 由 tests/unit/test_issue194_boost_fields.py 钉住（只能保证「字段存在且
+# 有加权」，不能证明索引期确有写入方——写侧覆盖随 #188 的验收补齐）。
+BOOSTABLE_FIELDS: frozenset[str] = frozenset({"content", "chunk_text", "filename", "section_title"})
+
+
 class QueryIntentClassifier:
     """Classifies query intent to optimize retrieval strategy."""
 
     INTENT_PATTERNS: dict[QueryIntent, list[str]] = {
-        "factual": ["是谁", "是什么", "在哪", "什么时候", "第几", "多少时间", "长度", "面积", "人口"],
+        "factual": [
+            "是谁",
+            "是什么",
+            "在哪",
+            "什么时候",
+            "第几",
+            "多少时间",
+            "长度",
+            "面积",
+            "人口",
+        ],
         "procedural": ["如何", "怎么", "怎样", "步骤", "流程", "操作", "方法", "过程", "操作步骤"],
         "list": ["有哪些", "有什么", "列出", "哪些", "名单", "列表", "罗列"],
         "definition": ["什么是", "定义", "含义", "意思", "概念", "解释"],
@@ -85,23 +191,56 @@ class QueryIntentClassifier:
             return "other"
         return max(scores, key=scores.get)
 
+    # issue #194：意图 → 字段加权。字段必须存在于 ES mapping 且被索引期写入，
+    # 否则就是「加权空气」——新增字段前先确认写入方并同步 BOOSTABLE_FIELDS。
+    _INTENT_BOOST_FIELDS: dict[QueryIntent, list[str]] = {
+        "factual": ["chunk_text^2", "content^2"],
+        "procedural": ["chunk_text^2", "content^2", "section_title^1.8"],
+        "list": ["chunk_text^1.5", "content^1.5"],
+        "definition": ["chunk_text^2", "content^2"],
+        "comparison": ["chunk_text^2", "content^2"],
+        "causal": ["chunk_text^2", "content^2"],
+        "summary": ["chunk_text^1.5", "content^1.5"],
+        "other": ["chunk_text^2", "content^2", "filename^1.2"],
+    }
+
     @classmethod
     def get_boost_fields(cls, intent: QueryIntent) -> list[str]:
-        field_boosts = {
-            "factual": ["chunk_text^2", "content^2", "title^1.5"],
-            "procedural": ["chunk_text^2", "content^2", "section_title^1.8"],
-            "list": ["chunk_text^1.5", "content^1.5", "list_content^2"],
-            "definition": ["chunk_text^2", "content^2", "title^1.5", "definition^2.5"],
-            "comparison": ["chunk_text^2", "content^2", "comparison^2", "pros_cons^2"],
-            "causal": ["chunk_text^2", "content^2", "reason^2", "result^2"],
-            "summary": ["chunk_text^1.5", "content^1.5", "summary^2", "conclusion^2"],
-            "other": ["chunk_text^2", "content^2", "filename^1.2"],
-        }
-        return field_boosts.get(intent, ["chunk_text^2", "content^2", "filename^1.2"])
+        """按意图返回 multi_match 的字段加权；字段必须是 mapping 的真实属性。
+
+        #194：只使用 ``BOOSTABLE_FIELDS`` 中的字段。历史实现里的 9 个意图
+        字段（title/definition/comparison/...）在 mapping 与索引写入中都不
+        存在，ES 对它们的加权恒为 0——那是死配置，不是「按意图调权」。
+
+        运行时守卫：意图表若被改出白名单，宁可不加权也不下发未映射字段
+        （同时告警，便于在测试之外也暴露配置漂移）。若某意图的字段**全部**
+        被守卫剔除，回落到安全默认字段——multi_match 的 ``fields`` 不能为空
+        （ES 侧会拒绝空字段列表）。
+        """
+        specs = cls._INTENT_BOOST_FIELDS.get(intent, cls._INTENT_BOOST_FIELDS["other"])
+        fields: list[str] = []
+        for spec in specs:
+            name = spec.split("^", 1)[0]
+            if name in BOOSTABLE_FIELDS:
+                fields.append(spec)
+            else:
+                logger.warning(
+                    "#194: boost 字段 %r 不在 BOOSTABLE_FIELDS 中，已忽略（检查 ES mapping/索引写入）",
+                    name,
+                )
+        if not fields:
+            logger.warning("#194: intent=%r 的 boost 字段全部不在白名单，回落到默认字段", intent)
+            fields = ["chunk_text^2", "content^2"]
+        return fields
 
 
-def extract_query_terms(query: str) -> list[str]:
-    """Extract meaningful terms from query (bigrams for CJK, words for Latin)."""
+def extract_query_terms(query: str, limit: int | None = 12) -> list[str]:
+    """Extract meaningful terms from query (bigrams for CJK, words for Latin).
+
+    limit：返回上限（默认 12，既有调用方行为不变）；``None`` = 不截断。
+    #208 Phase 2 环 C：keyword 臂的语料术语表选择需要「先拿到全部候选项、
+    再按术语表成员优先取舍」，因此提供不截断出口（`retriever._keyword_arm_terms`）。
+    """
     q = (query or "").strip().lower()
     if not q:
         return []
@@ -109,7 +248,7 @@ def extract_query_terms(query: str) -> list[str]:
     raw_terms = []
     for seg in cjk_segments:
         for i in range(len(seg) - 1):
-            gram = seg[i:i + 2]
+            gram = seg[i : i + 2]
             if gram not in raw_terms:
                 raw_terms.append(gram)
     en_terms = re.findall(r"[a-z0-9]{2,}", q)
@@ -117,12 +256,49 @@ def extract_query_terms(query: str) -> list[str]:
         if t not in raw_terms:
             raw_terms.append(t)
     stop_words = {
-        "请", "帮我", "一下", "关于", "如何", "怎么", "什么", "是什么", "可以", "这个", "那个",
-        "因为", "所以", "如果", "但是", "而且", "或者", "也是", "还是", "并且",
-        "the", "and", "for", "with", "from", "that", "this", "is", "are", "was",
-        "be", "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "请",
+        "帮我",
+        "一下",
+        "关于",
+        "如何",
+        "怎么",
+        "什么",
+        "是什么",
+        "可以",
+        "这个",
+        "那个",
+        "因为",
+        "所以",
+        "如果",
+        "但是",
+        "而且",
+        "或者",
+        "也是",
+        "还是",
+        "并且",
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "that",
+        "this",
+        "is",
+        "are",
+        "was",
+        "be",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
     }
-    return [t for t in raw_terms if t.strip() and len(t) >= 2 and t not in stop_words][:12]
+    terms = [t for t in raw_terms if t.strip() and len(t) >= 2 and t not in stop_words]
+    return terms if limit is None else terms[:limit]
 
 
 def rewrite_query_candidates(query: str) -> list[str]:
@@ -198,7 +374,9 @@ async def rewrite_query_llm(query: str, openai_client, model: str) -> list[str]:
         return [query]
 
 
-async def decompose_query(query: str, openai_client, model: str, max_subqueries: int = 4) -> list[str]:
+async def decompose_query(
+    query: str, openai_client, model: str, max_subqueries: int = 4
+) -> list[str]:
     """Decompose a complex query into focused sub-questions for multi-perspective RAG.
 
     Uses json_object response mode to avoid regex fragility.
@@ -225,10 +403,7 @@ async def decompose_query(query: str, openai_client, model: str, max_subqueries:
         content = resp.choices[0].message.content or ""
         parsed = json.loads(content)
         subqueries = (
-            parsed.get("sub_questions")
-            or parsed.get("subquestions")
-            or parsed.get("queries")
-            or []
+            parsed.get("sub_questions") or parsed.get("subquestions") or parsed.get("queries") or []
         )
         if isinstance(subqueries, list) and len(subqueries) >= 1:
             seen = {query.lower().strip()}

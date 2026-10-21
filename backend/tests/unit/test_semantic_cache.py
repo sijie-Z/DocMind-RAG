@@ -1,4 +1,5 @@
 """SemanticCache 纯函数测试（不依赖 Redis）。"""
+
 import pytest
 
 from app.rag.cache import SemanticCache
@@ -41,6 +42,7 @@ class TestCosineSimilarity:
     def test_large_dimension_vectors(self, cache: SemanticCache):
         """Verify with higher-dimensional vectors."""
         import random
+
         random.seed(42)
         v1 = [random.random() for _ in range(128)]
         v2 = [random.random() for _ in range(128)]

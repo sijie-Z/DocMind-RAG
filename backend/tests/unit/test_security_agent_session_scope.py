@@ -5,6 +5,7 @@
 已按 user_id 过滤）。修复后会话查找按 id + user_id 限定；若 id 已属于他人，
 拒绝写入而不是占用该 id 新建会话。
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -59,6 +60,8 @@ async def test_owned_session_gets_messages(monkeypatch):
     owned = MagicMock()
     owned.user_id = 1
     owned.title = "Existing session"
+    # T4：落库新增 org 口径——会话归属组织须与本次有效组织一致。
+    owned.organization_id = 1
     session = _make_session(_result(owned))
     monkeypatch.setattr(agent_module, "AsyncSessionLocal", lambda: _FakeSessionCtx(session))
 

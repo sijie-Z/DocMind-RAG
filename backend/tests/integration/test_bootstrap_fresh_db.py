@@ -6,6 +6,7 @@
 修复前的行为（本用例必红）：先建 `owner_id=1` 的组织 → 空库外键 IntegrityError
 （1452）→ 异常被吞 → users/organizations 两表为 0。
 """
+
 import os
 import socket
 import uuid
