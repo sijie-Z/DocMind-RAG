@@ -97,6 +97,9 @@ def _cfg(**overrides) -> AgentConfig:
         enable_planning=False,  # 单步计划，不耗规划 LLM（结构化模板也不走）
         enable_reflection=False, enable_memory=False, enable_skills=False,
         enable_experience=False, enable_thinking=False,
+        # issue #206：生产默认禁用 execute_python，派发层会以 tool_disabled 拒绝；
+        # 本文件以它作为已显式启用的高危工具样本验证审批/续跑链路。
+        disabled_tools=[],
     )
     base.update(overrides)
     return AgentConfig(**base)

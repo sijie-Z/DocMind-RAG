@@ -8,7 +8,9 @@ from app.agent.tools.code_execution import execute_python
 
 
 def run(code: str) -> str:
-    return asyncio.run(execute_python(code=code))
+    # issue #206：execute_python 现在返回 ToolResult（携带 sandbox 元数据）；
+    # str() 保持旧的纯文本输出契约（ToolResult.__str__ 对 str data 原样透传）。
+    return str(asyncio.run(execute_python(code=code)))
 
 
 class TestASTSandbox:

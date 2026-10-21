@@ -18,7 +18,8 @@ BYPASS_SNIPPET = (
 
 
 def _run(code: str) -> str:
-    return asyncio.run(execute_python(code=code))
+    # issue #206：execute_python 返回 ToolResult；str() 维持纯文本契约。
+    return str(asyncio.run(execute_python(code=code)))
 
 
 class TestFormatterEscape:

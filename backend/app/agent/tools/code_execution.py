@@ -4,12 +4,14 @@ SAFETY: These tools are tagged "code" and DISABLED BY DEFAULT.
 Users must explicitly enable them in AgentConfig.
 """
 
+import asyncio
 import contextlib
 import logging
 import re
+import sys
 from typing import Any
 
-from app.agent.registry import register_tool
+from app.agent.registry import ToolMeta, ToolResult, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +264,120 @@ def _ast_safety_check(code: str) -> tuple[bool, str]:
     return True, ""
 
 
+# ── AST sandbox: child-process executor (issue #206) ─────────────────
+#
+# 旧实现 ``await asyncio.wait_for(loop.run_in_executor(None, _run), timeout)``
+# 只是放弃等待：超时后线程继续自旋（Python 无杀线程 API）、进程级
+# ``redirect_stdout`` 的 StringIO 永久挂在 sys.stdout 上、``asyncio.run()`` 还会在
+# ``shutdown_default_executor()`` 永久阻塞。改为子进程后超时可被真正杀死，
+# stdout/stderr 是管道，不再需要（也不可能）做进程级重定向。
+#
+# 安全边界不变：父进程的 ``_ast_safety_check`` 仍是唯一的准入闸门；子进程与父
+# 进程同解释器、同用户，只负责"可杀 + 输出隔离"，不是权限边界。
+
+# AST 子进程执行的墙钟超时（秒）。模块级常量便于测试钳小；生产 10s 与旧契约一致。
+_AST_EXEC_TIMEOUT_SECONDS = 10.0
+
+# 子进程启动引导：经 ``-I -c`` 运行，用户代码经 stdin 传入（避免 argv 长度/转义
+# 问题）。-I 会忽略 PYTHONIOENCODING 等环境变量，因此三路标准流显式 reconfigure
+# 为 UTF-8（Windows 管道默认本地编码，中文输出会乱码或解码失败）。
+_CHILD_BOOTSTRAP = """\
+import builtins as _b
+import sys as _sys
+
+_sys.stdin.reconfigure(encoding="utf-8")
+_sys.stdout.reconfigure(encoding="utf-8")
+_sys.stderr.reconfigure(encoding="utf-8")
+
+_code = _sys.stdin.read()
+
+_names = {safe_builtins!r}
+_mods = {safe_modules!r}
+
+_g = {{"__builtins__": {{_n: getattr(_b, _n, None) for _n in _names}}}}
+for _m in _mods:
+    try:
+        _g[_m] = __import__(_m)
+    except ImportError:
+        pass
+
+try:
+    exec(compile(_code, "<sandbox>", "exec"), _g, {{}})
+except BaseException as _e:
+    print(f"{{type(_e).__name__}}: {{_e}}", file=_sys.stderr, flush=True)
+    _sys.exit(1)
+"""
+
+
+def _build_child_wrapper() -> str:
+    """Render the child bootstrap with the safe-builtins/module whitelists."""
+    return _CHILD_BOOTSTRAP.format(
+        safe_builtins=sorted(SAFE_BUILTINS),
+        safe_modules=list(SAFE_MODULES),
+    )
+
+
+async def _run_ast_subprocess(
+    code: str, *, timeout: float = _AST_EXEC_TIMEOUT_SECONDS,
+) -> str:
+    """Execute AST-validated code in a child interpreter; return captured output.
+
+    ``sys.executable -I -c <bootstrap>`` with the user code on stdin. On
+    timeout the child is killed and reaped (``proc.kill(); await proc.wait()``),
+    so no execution keeps burning CPU after the call returns.
+
+    Raises:
+        TimeoutError: child exceeded ``timeout`` seconds and was killed.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-I", "-c", _build_child_wrapper(),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except NotImplementedError as e:
+        # 评审 M3：Windows + SelectorEventLoop（uvicorn >= 0.36 在 --reload /
+        # workers>1 时即选它）不支持 create_subprocess_exec。给出可操作提示，
+        # 而不是让 NotImplementedError 以 "unknown" 失败或裸冒泡。
+        from app.agent.tools.docker_sandbox import SandboxUnavailableError
+
+        raise SandboxUnavailableError(
+            "当前事件循环不支持子进程执行（Windows 下 uvicorn --reload / workers>1 "
+            "会使用 SelectorEventLoop）。请以单 worker 方式运行后端（ProactorEventLoop），"
+            "或在 Linux/WSL 上运行。"
+        ) from e
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(code.encode("utf-8")), timeout=timeout,
+        )
+    except BaseException:
+        # 超时、任务取消（客户端断连 / 服务端关停）或 spawn 后的任意异常：
+        # 子进程必须一并 kill + reap。否则死循环子进程会在后台永久燃烧 CPU，
+        # 与超时未杀死线程是同一症状（评审 M1）。kill 是同步调用；取消路径上
+        # 外层 task 处于 cancelling 状态，await 会立刻再次抛出，故用 shield 把
+        # reap 放后台尽力完成，再把原异常原样抛出。
+        if proc.returncode is None:
+            # kill 与"进程恰好退出"存在竞态：Handle 已关闭时 Windows 可能抛
+            # ProcessLookupError。此时进程已死，抑制即可，不能替换原始异常
+            #（评审复核 minor ①）。
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(proc.wait())
+        raise
+
+    out = stdout.decode("utf-8", errors="replace").strip()
+    err = stderr.decode("utf-8", errors="replace").strip()
+    if proc.returncode != 0:
+        return f"Error: {err or f'exit code {proc.returncode}'}"
+    # 与旧契约一致：无 stdout 但有 stderr 时按错误返回（真实异常已由引导脚本
+    # 以非零退出码覆盖，这里多覆盖解释器级 warning 等场景）。
+    if err and not out:
+        return f"Error:\n{err}"
+    return out
+
+
 @register_tool(
     name="execute_python",
     description=(
@@ -285,83 +401,89 @@ def _ast_safety_check(code: str) -> tuple[bool, str]:
     # HITL：宿主进程内执行任意代码 —— 声明高危，审批门（approval.py）据此判定。
     risk_level="high",
 )
-async def execute_python(code: str, **_: Any) -> str:
-    # ── Resolve sandbox mode ──────────────────────────────────────
+async def execute_python(code: str, **_: Any) -> str | ToolResult:
+    from app.agent.tools.docker_sandbox import (
+        DockerSandboxError,
+        DockerSandboxTimeout,
+        DockerSandboxUnavailable,
+        SandboxUnavailableError,
+        resolve_sandbox_mode,
+        run_in_docker,
+    )
     from app.core.config import settings
 
-    mode = getattr(settings, "SANDBOX_MODE", "ast")
-    if mode == "auto":
-        from app.agent.tools.docker_sandbox import _docker_available
-        mode = "docker" if _docker_available() else "ast"
+    # ── Resolve sandbox mode (issue #206: fail-closed) ────────────
+    # 只有显式 SANDBOX_MODE=ast 允许进程内（子进程）执行；auto/docker 在 Docker
+    # 不可用时返回结构化失败，绝不静默降级到更弱的沙箱。
+    try:
+        mode = resolve_sandbox_mode()
+    except SandboxUnavailableError as e:
+        logger.error("execute_python refused (sandbox unavailable): %s", e)
+        return ToolResult.fail(code="sandbox_unavailable", message=str(e))
 
     if mode == "docker":
         try:
-            from app.agent.tools.docker_sandbox import run_in_docker
-
-            return await run_in_docker(
+            output = await run_in_docker(
                 code,
                 image=getattr(settings, "SANDBOX_DOCKER_IMAGE", "python:3.11-slim"),
                 memory_mb=getattr(settings, "SANDBOX_DOCKER_MEMORY_MB", 256),
                 network=getattr(settings, "SANDBOX_DOCKER_NETWORK", "none"),
                 timeout=getattr(settings, "SANDBOX_DOCKER_TIMEOUT_SECONDS", 30),
+                # 结构化失败（评审 M2）：错误串会被 registry 包成 success=True，
+                # 因此 Docker 运行时失败也以 ToolResult.fail 呈现（不落进程内、
+                # 也不伪装成功）。默认字符串契约保留给 workflow 节点。
+                raise_on_error=True,
             )
-        except Exception as e:
-            logger.warning(f"Docker sandbox failed, falling back to AST: {e}")
+        except DockerSandboxTimeout as e:
+            return ToolResult.fail(
+                code="timeout", message=str(e), meta=ToolMeta(sandbox="docker"),
+            )
+        except DockerSandboxUnavailable as e:
+            return ToolResult.fail(
+                code="sandbox_unavailable", message=str(e), meta=ToolMeta(sandbox="docker"),
+            )
+        except DockerSandboxError as e:
+            return ToolResult.fail(
+                code=e.code, message=str(e), meta=ToolMeta(sandbox="docker"),
+            )
+        return ToolResult.ok(data=output, meta=ToolMeta(sandbox="docker"))
 
-    # ── AST-level safety check ────────────────────────────────────
+    # ── Explicit "ast": parent-side AST gate, child-process execution ─
     ok, reason = _ast_safety_check(code)
     if not ok:
+        # 保持旧契约：AST 拒绝与子进程内的运行时错误一样，都是内容型错误串
+        #（#293 明确 execute_python 的 stdout 是任意文本、分类权留在工具内部；
+        # 改结构化失败会改变既有反思/重试语义，不在 #206 范围内）。
         return f"Error: {reason}"
 
-    # Build safe globals — no __builtins__ escape hatch
-    safe_globals = {"__builtins__": {}}
-    for name in SAFE_BUILTINS:
-        safe_globals["__builtins__"][name] = __builtins__.get(name) if isinstance(__builtins__, dict) else getattr(__builtins__, name, None)
-    # Always include print
-    safe_globals["__builtins__"]["print"] = print
-
-    for mod_name in SAFE_MODULES:
-        with contextlib.suppress(ImportError):
-            safe_globals[mod_name] = __import__(mod_name)
-
     try:
-        import asyncio
-        import io
-        from contextlib import redirect_stderr, redirect_stdout
-
-        f_out = io.StringIO()
-        f_err = io.StringIO()
-
-        def _run():
-            with redirect_stdout(f_out), redirect_stderr(f_err):
-                exec(code, safe_globals, {})  # nosec B102 - 本工具的用途即沙箱执行，已做 AST 拦截
-
-        # Run in a thread with timeout
-        loop = asyncio.get_event_loop()
-        await asyncio.wait_for(
-            loop.run_in_executor(None, _run),
-            timeout=10.0,
+        output = await _run_ast_subprocess(code, timeout=_AST_EXEC_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return ToolResult.fail(
+            code="timeout",
+            message=f"Code execution timed out ({_AST_EXEC_TIMEOUT_SECONDS:g} second limit).",
+            meta=ToolMeta(sandbox="ast"),
+        )
+    except SandboxUnavailableError as e:
+        return ToolResult.fail(
+            code="sandbox_unavailable", message=str(e), meta=ToolMeta(sandbox="ast"),
+        )
+    except Exception as e:
+        return ToolResult.fail(
+            code="unknown",
+            message=f"{type(e).__name__}: {e}",
+            meta=ToolMeta(sandbox="ast"),
         )
 
-        output = f_out.getvalue()
-        errors = f_err.getvalue()
-
-        # 安全加固：限制输出长度，防止内存/响应膨胀
-        if len(output) > 10000:
-            output = output[:10000] + "\n...[output truncated]"
-        if len(errors) > 4000:
-            errors = errors[:4000] + "\n...[error truncated]"
-
-        if errors and not output:
-            return f"Error:\n{errors.strip()}"
-        if output:
-            return output.strip()
-        return "(Code executed successfully with no output)"
-
-    except TimeoutError:
-        return "Error: Code execution timed out (10 second limit)."
-    except Exception as e:
-        return f"Error: {type(e).__name__}: {e}"
+    # 安全加固：限制输出长度，防止内存/响应膨胀
+    if len(output) > 10000:
+        output = output[:10000] + "\n...[output truncated]"
+    if not output:
+        return ToolResult.ok(
+            data="(Code executed successfully with no output)",
+            meta=ToolMeta(sandbox="ast"),
+        )
+    return ToolResult.ok(data=output, meta=ToolMeta(sandbox="ast"))
 
 
 def _inject_org_filter(query: str, org_id: int) -> str:

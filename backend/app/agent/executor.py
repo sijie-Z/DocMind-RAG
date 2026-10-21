@@ -166,13 +166,18 @@ class Executor:
     ) -> list[tuple[Any, dict[str, Any]]]:
         """本回合**将实际执行**的调用（白名单通过 + 参数可解析）——审批预检扫描域。
 
-        与主循环的过滤条件保持一致：不在白名单 / JSON 非法的调用在执行前会被
-        各自的结构化失败分支拦下（不执行），因此不参与审批预检。
+        与主循环的过滤条件保持一致：不在白名单 / 在配置禁用清单 / JSON 非法的调用
+        在执行前会被各自的结构化失败分支拦下（不执行），因此不参与审批预检。
         """
         executable: list[tuple[Any, dict[str, Any]]] = []
+        # issue #206：配置禁用清单里的工具在主循环会被结构化拒绝（tool_disabled），
+        # 不参与审批预检/账本登记——否则会为一个注定不执行的调用暂停审批。
+        disabled_tools = set(getattr(self.config, "disabled_tools", None) or [])
         for tc in tool_calls:
             name = tc.function.name
             if allowed_tool_names is not None and name not in allowed_tool_names:
+                continue
+            if name in disabled_tools:
                 continue
             try:
                 args = json.loads(tc.function.arguments) if tc.function.arguments else {}
@@ -1204,6 +1209,32 @@ class Executor:
                 attempt_error_detail = f"工具 {func.name} 不在当前上下文允许的工具集内，已拒绝执行"
                 continue
 
+            # issue #206：配置禁用清单在执行层兜底。工具 schema 过滤只影响
+            # "呈现给 LLM 的列表"；模型凭空发出（幻觉）的禁用工具此前仍会执行。
+            # 服务端强制合并（api/v1/endpoints/agent.py::_merge_disabled_tools）
+            # 的保证因此落到真正的派发点。
+            if func.name in (getattr(self.config, "disabled_tools", None) or []):
+                logger.warning("拒绝执行配置禁用清单中的工具: %s", func.name)
+                AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
+                yield AgentEvent(
+                    type="tool_error",
+                    tool_name=func.name,
+                    tool_call_id=tool_call_id,
+                    content=f"工具 {func.name} 在禁用清单（disabled_tools）中，已拒绝执行",
+                    plan_id=plan.id,
+                    plan_step_id=step.id,
+                    error_type="tool_disabled",
+                )
+                tool_results.append({
+                    "tool": func.name,
+                    "result": "工具在禁用清单中（未执行）",
+                    "error_type": "tool_disabled",
+                })
+                attempt_error_detail = (
+                    f"工具 {func.name} 在禁用清单（disabled_tools）中，已拒绝执行"
+                )
+                continue
+
             # Parse arguments
             # 区分两种形态（issue #205）：
             #   空/None arguments —— 无参工具的合法形态，继续按 {} 执行；
@@ -1317,6 +1348,9 @@ class Executor:
 
                 # raw_result is ToolResult (execute_detailed always returns ToolResult)
                 result: str = str(raw_result)
+                # issue #206：工具声明的 resolved sandbox（如 execute_python 的
+                # "ast"/"docker"），随 tool_result/tool_error 事件暴露。
+                sandbox = getattr(getattr(raw_result, "meta", None), "sandbox", "")
 
                 if not raw_result.success:
                     error_type = raw_result.error.code if raw_result.error else "unknown"
@@ -1331,6 +1365,7 @@ class Executor:
                         tool_call_id=tool_call_id,
                         content=result,
                         tool_duration_ms=elapsed,
+                        sandbox=sandbox,
                         plan_id=plan.id,
                         plan_step_id=step.id,
                         retry_attempt=getattr(step, "retry_count", 0),
@@ -1350,6 +1385,7 @@ class Executor:
                         tool_call_id=tool_call_id,
                         content=result,
                         tool_duration_ms=elapsed,
+                        sandbox=sandbox,
                         plan_id=plan.id,
                         plan_step_id=step.id,
                         plan_progress=plan.progress,

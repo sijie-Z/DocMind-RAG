@@ -1,5 +1,7 @@
 """AI and RAG settings — LLM, embedding, reranker, vector search, caching."""
 
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -193,8 +195,13 @@ class AISettings(BaseSettings):
     # Privacy & security
     ENABLE_PII_MASKING: bool = True
 
-    # Code execution sandbox — "docker" (container-level isolation) or "ast" (in-process)
-    SANDBOX_MODE: str = "auto"
+    # Code execution sandbox — issue #206：闭集校验 + fail-closed 语义。
+    #   "auto"   — Docker 可用时走容器，不可用时**拒绝执行**（不再静默回落进程内）；
+    #   "docker" — 仅容器，Docker 不可用即拒绝；
+    #   "ast"    — 显式选择进程内 AST 沙箱（子进程执行，仅 AST 白名单约束）。
+    # 未知值在配置加载期即 ValidationError；auto/docker 的拒绝发生在执行侧
+    # （见 docker_sandbox.resolve_sandbox_mode）。
+    SANDBOX_MODE: Literal["auto", "docker", "ast"] = "auto"
     SANDBOX_DOCKER_IMAGE: str = "python:3.11-slim"
     SANDBOX_DOCKER_MEMORY_MB: int = 256
     SANDBOX_DOCKER_NETWORK: str = "none"
