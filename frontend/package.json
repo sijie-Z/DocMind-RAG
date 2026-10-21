@@ -31,7 +31,7 @@
     "js-cookie": "^3.0.8",
     "katex": "^0.19.0",
     "lodash-es": "^4.17.21",
-    "markdown-it": "^15.0.2",
+    "markdown-it": "^15.0.3",
     "markdown-it-highlightjs": "^4.3.0",
     "naive-ui": "^2.45.3",
     "nprogress": "^0.2.0",
