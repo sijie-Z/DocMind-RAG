@@ -90,11 +90,24 @@ def test_format_timeline_fields_align_with_write_side():
     assert [list(s) for s in tl["steps"]] == [list(s) for s in d["steps"]], (
         "步骤子键顺序与键集必须与写侧一致"
     )
+    assert [list(f) for f in tl["findings"]] == [list(f) for f in d["findings"]], (
+        "发现子键顺序与键集必须与写侧一致"
+    )
+    assert [list(x) for x in tl["decisions"]] == [list(x) for x in d["decisions"]], (
+        "决策子键顺序与键集必须与写侧一致（#204 起含 ts）"
+    )
     assert tl["steps"][0]["tokens_used"] == 42, "tokens 逐字透传"
     assert tl["steps"][0]["duration_ms"] == 125.5
+    assert tl["steps"][0]["started_at"] == d["steps"][0]["started_at"], (
+        "步骤墙钟锚点逐字透传（#204）"
+    )
+    assert tl["steps"][0]["finished_at"] == d["steps"][0]["finished_at"]
     assert tl["steps"][1]["status"] == "failed" and tl["steps"][1]["error"] == "boom"
     assert tl["findings"][0]["source_step"] == "s1"
     assert tl["decisions"][0]["action"] == "retry_step"
+    assert tl["decisions"][0]["ts"] == d["decisions"][0]["ts"] > 0, (
+        "决策墙钟时间戳逐字透传（#204）"
+    )
     assert tl["failures"], "失败的步骤必须在 failures 里留痕（run 级失败列表）"
     # 失败轨迹在顶层 failures 中有记录（写侧 complete_step 的既有语义）
     assert any("boom" in f for f in tl["failures"])
@@ -113,6 +126,9 @@ def test_format_timeline_drops_malformed_rows_without_fabricating():
     assert len(tl["steps"]) == 1, "非 dict 坏行必须丢弃"
     assert tl["steps"][0]["step_id"] == "s1"
     assert tl["steps"][0]["tokens_used"] is None, "缺键 → None（不虚构 0/占位）"
+    assert tl["steps"][0]["started_at"] is None and tl["steps"][0]["finished_at"] is None, (
+        "旧回放缺时间戳 → None（#204：不得补 0.0 冒充 1970 真实时间）"
+    )
     assert tl["findings"] == [] and tl["decisions"] == []
     assert tl["steps_completed"] == 1, "steps_completed 缺失时按实际步数回退（派生而非虚构）"
 
