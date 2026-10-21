@@ -17,6 +17,7 @@ error 摘要）；端点按 result["success"] 如实落 status（failed + error_
 - M5b 端点非流式还原无条件 `completed` + `"success": True` → 用例 1 红；
 - M5c 端点流式 workflow_result 分支还原无条件 completed → 用例 2 红。
 """
+
 import json
 
 import httpx
@@ -28,9 +29,12 @@ from sqlalchemy.pool import StaticPool
 # n0 确定性失败（ftp 协议被 SSRF 守卫拒绝，毫秒级、无网络）；out1 正常收尾。
 _FAIL_NODE_FLOW = {
     "nodes": [
-        {"id": "n0", "type": "api_call",
-         "data": {"url": "ftp://example.com/data", "method": "GET"},
-         "position": {"x": 0, "y": 0}},
+        {
+            "id": "n0",
+            "type": "api_call",
+            "data": {"url": "ftp://example.com/data", "method": "GET"},
+            "position": {"x": 0, "y": 0},
+        },
         {"id": "out1", "type": "output", "data": {}, "position": {"x": 1, "y": 0}},
     ],
     "edges": [{"id": "e1", "source": "n0", "target": "out1"}],
@@ -40,8 +44,12 @@ _FAIL_NODE_FLOW = {
 # 两模式都不得把全成功图误报为失败/落 failed）。
 _OK_NODE_FLOW = {
     "nodes": [
-        {"id": "in1", "type": "input", "data": {"prompt": "{{input}}"},
-         "position": {"x": 0, "y": 0}},
+        {
+            "id": "in1",
+            "type": "input",
+            "data": {"prompt": "{{input}}"},
+            "position": {"x": 0, "y": 0},
+        },
         {"id": "out1", "type": "output", "data": {}, "position": {"x": 1, "y": 0}},
     ],
     "edges": [{"id": "e1", "source": "in1", "target": "out1"}],
@@ -70,9 +78,9 @@ def _parse_sse_events(body: str) -> list[tuple[str, dict]]:
         event_type, data = None, None
         for line in block.split("\n"):
             if line.startswith("event: "):
-                event_type = line[len("event: "):]
+                event_type = line[len("event: ") :]
             elif line.startswith("data: "):
-                data = json.loads(line[len("data: "):])
+                data = json.loads(line[len("data: ") :])
         if event_type is not None:
             events.append((event_type, data))
     return events
@@ -91,7 +99,9 @@ async def _setup_app(flow_data: dict):
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
 
     async with factory() as s:
-        wf = Workflow(name="issue301-node-fail", flow_data=flow_data, created_by=1, organization_id=1)
+        wf = Workflow(
+            name="issue301-node-fail", flow_data=flow_data, created_by=1, organization_id=1
+        )
         s.add(wf)
         await s.commit()
         wf_id = wf.id

@@ -57,8 +57,7 @@ class ExperienceStore:
         """
         await self._ensure_loaded()
         if exp.id not in self._experiences and any(
-            existing.content_key() == exp.content_key()
-            for existing in self._experiences.values()
+            existing.content_key() == exp.content_key() for existing in self._experiences.values()
         ):
             logger.debug(
                 "Experience content already stored, skipping duplicate: %s",
@@ -102,30 +101,68 @@ class ExperienceStore:
     # Used to filter out experiences that cause Negative Transfer.
     _QUERY_SCENARIOS: dict[str, list[str]] = {
         "multi_step_analysis": [
-            "分析", "趋势", "总结", "近三年", "逐年",
-            "深入", "拆分", "拆解", "综合", "全流程",
+            "分析",
+            "趋势",
+            "总结",
+            "近三年",
+            "逐年",
+            "深入",
+            "拆分",
+            "拆解",
+            "综合",
+            "全流程",
         ],
         "framework_analysis": [
-            "swot", "pest", "杜邦", "框架", "五力",
-            "pestel", "波士顿", "矩阵",
+            "swot",
+            "pest",
+            "杜邦",
+            "框架",
+            "五力",
+            "pestel",
+            "波士顿",
+            "矩阵",
         ],
         "cross_document": [
-            "比较", "对比", "两家", "多家", "差异",
-            "高于", "低于", "优劣", "区别",
+            "比较",
+            "对比",
+            "两家",
+            "多家",
+            "差异",
+            "高于",
+            "低于",
+            "优劣",
+            "区别",
         ],
         "single_document": [
-            "找一份", "提取", "列出", "找出",
+            "找一份",
+            "提取",
+            "列出",
+            "找出",
         ],
         "web_search": [
-            "最新", "新闻", "融资", "搜索", "查询",
-            "最近", "今天", "实时",
+            "最新",
+            "新闻",
+            "融资",
+            "搜索",
+            "查询",
+            "最近",
+            "今天",
+            "实时",
         ],
         "tool_recovery": [
-            "不存在", "找不到", "没找到", "错误",
-            "fake", "404", "失败",
+            "不存在",
+            "找不到",
+            "没找到",
+            "错误",
+            "fake",
+            "404",
+            "失败",
         ],
         "edge_case_simple": [
-            "知识库", "有什么", "有哪些", "多少文档",
+            "知识库",
+            "有什么",
+            "有哪些",
+            "多少文档",
         ],
         "ambiguity": [],  # detected by length < 8 chars
     }
@@ -220,14 +257,16 @@ class ExperienceStore:
 
         # Chinese character bigram overlap (enables "比较" ↔ "对比" matching)
         if len(query_lower) > 1:
-            query_bigrams = {query_lower[i:i+2] for i in range(len(query_lower) - 1)}
+            query_bigrams = {query_lower[i : i + 2] for i in range(len(query_lower) - 1)}
             # Filter to only CJK bigrams
-            query_bigrams = {bg for bg in query_bigrams if all('一' <= c <= '鿿' or '　' <= c <= '〿' for c in bg)}
+            query_bigrams = {
+                bg for bg in query_bigrams if all("一" <= c <= "鿿" or "　" <= c <= "〿" for c in bg)
+            }
             if query_bigrams:
                 haystack_bigrams: set[str] = set()
                 for i in range(len(haystack) - 1):
-                    bg = haystack[i:i+2]
-                    if all('一' <= c <= '鿿' or '　' <= c <= '〿' for c in bg):
+                    bg = haystack[i : i + 2]
+                    if all("一" <= c <= "鿿" or "　" <= c <= "〿" for c in bg):
                         haystack_bigrams.add(bg)
                 if haystack_bigrams:
                     overlap = len(query_bigrams & haystack_bigrams)
@@ -307,7 +346,8 @@ class ExperienceStore:
             self._loaded = True
             logger.info(
                 "ExperienceStore loaded: %d experiences (source: %s)",
-                len(self._experiences), source,
+                len(self._experiences),
+                source,
             )
         elif from_redis is False and from_local is False:
             self._loaded = True
@@ -316,7 +356,8 @@ class ExperienceStore:
             logger.debug(
                 "ExperienceStore: load inconclusive (redis=%s, local=%s); "
                 "will retry on next access",
-                from_redis, from_local,
+                from_redis,
+                from_local,
             )
 
     async def _load_from_redis(self) -> bool | None:
@@ -329,6 +370,7 @@ class ExperienceStore:
         """
         try:
             from app.core.redis import redis_client
+
             if not redis_client:
                 logger.debug("ExperienceStore: Redis not configured; skipping Redis load")
                 return None
@@ -372,9 +414,11 @@ class ExperienceStore:
     async def _save_to_redis(self, data: list[dict]) -> bool:
         try:
             from app.core.redis import redis_client
+
             if redis_client:
                 await redis_client.setex(
-                    REDIS_KEY, 86400 * 30,
+                    REDIS_KEY,
+                    86400 * 30,
                     json.dumps(data, ensure_ascii=False),
                 )
                 return True

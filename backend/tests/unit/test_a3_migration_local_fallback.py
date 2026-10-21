@@ -54,15 +54,11 @@ def _columns(db_path, table: str) -> set[str]:
         conn.close()
 
 
-def test_a3_migration_single_head_chain_and_stepwise_downgrade(
-    tmp_path, monkeypatch
-):
+def test_a3_migration_single_head_chain_and_stepwise_downgrade(tmp_path, monkeypatch):
     from app.core.config import settings
 
     db_path = tmp_path / "mig_a3.db"
-    monkeypatch.setattr(
-        settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}"
-    )
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
     cfg = _cfg()
 
     # 单一 head（A2+A3 合并不允许出现多头）；A3 必须仍在主链上——

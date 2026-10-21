@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
 
+
 def setup_opentelemetry(app: FastAPI, service_name: str = "rag_backend"):
     """
     配置并启动 OpenTelemetry 链路追踪

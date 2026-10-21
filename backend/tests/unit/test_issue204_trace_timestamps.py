@@ -42,9 +42,19 @@ _CLOCK_EPS = 1e-3
 # to_dict() 的既有顶层键集（与 test_checkpoint_roundtrip._TO_DICT_KEYS 同源）：
 # 本 issue 只允许在嵌套层加键，顶层一个都不许动。
 _TO_DICT_TOP_LEVEL_KEYS = {
-    "task_id", "query", "goal", "plan_summary", "steps_completed", "steps",
-    "findings", "decisions", "failures", "duration_ms", "total_tokens",
-    "progress", "start_time",
+    "task_id",
+    "query",
+    "goal",
+    "plan_summary",
+    "steps_completed",
+    "steps",
+    "findings",
+    "decisions",
+    "failures",
+    "duration_ms",
+    "total_tokens",
+    "progress",
+    "start_time",
 }
 
 
@@ -64,8 +74,12 @@ def test_complete_step_stamps_wall_clock_interval():
     ctx.start_time = time.time() - 60
     before = time.time()
     ctx.complete_step(
-        "s1", "检索资料", "search_knowledge_base", "completed",
-        result="ok", duration=1250.0,
+        "s1",
+        "检索资料",
+        "search_knowledge_base",
+        "completed",
+        result="ok",
+        duration=1250.0,
     )
     after = time.time()
 
@@ -172,14 +186,23 @@ def test_legacy_checkpoint_without_nested_timestamps_parses_with_unknown_sentine
         "query": "q",
         "steps": [
             {
-                "step_id": "s1", "description": "旧步骤", "tool_used": None,
-                "status": "completed", "result_summary": "ok", "error": None,
-                "duration_ms": 10.0, "tokens_used": 1,
+                "step_id": "s1",
+                "description": "旧步骤",
+                "tool_used": None,
+                "status": "completed",
+                "result_summary": "ok",
+                "error": None,
+                "duration_ms": 10.0,
+                "tokens_used": 1,
             },
         ],
         "decisions": [
-            {"phase": "execute", "action": "begin_step", "reasoning": "旧决策",
-             "triggered_by": None},
+            {
+                "phase": "execute",
+                "action": "begin_step",
+                "reasoning": "旧决策",
+                "triggered_by": None,
+            },
         ],
     }
 

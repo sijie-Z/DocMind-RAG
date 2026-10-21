@@ -62,9 +62,7 @@ class ExecutorAgent:
     ):
         # A2 P0（fail-closed）：执行器直接调用工具，必须有组织上下文。
         if organization_id is None:
-            raise ValueError(
-                "ExecutorAgent 缺少 organization_id，拒绝在无组织上下文下运行"
-            )
+            raise ValueError("ExecutorAgent 缺少 organization_id，拒绝在无组织上下文下运行")
         self._config = config or AgentConfig()
         self._organization_id = organization_id
         self._user_id = user_id
@@ -90,9 +88,13 @@ class ExecutorAgent:
         msg = message_bus.poll_one("executor", trace_id, timeout=_POLL_TIMEOUT)
         if msg is None:
             yield AgentEvent(type="error", content="Executor Agent: 等待执行消息超时")
-            message_bus.send(AgentMessage.error_msg(
-                trace_id, "executor", "等待执行消息超时",
-            ))
+            message_bus.send(
+                AgentMessage.error_msg(
+                    trace_id,
+                    "executor",
+                    "等待执行消息超时",
+                )
+            )
             return
 
         if msg.msg_type == "abort":
@@ -114,16 +116,18 @@ class ExecutorAgent:
         # Parse steps into PlanStep objects
         steps = []
         for s in steps_data:
-            steps.append(PlanStep(
-                id=s.get("id", "s?"),
-                description=s.get("description", ""),
-                dependencies=s.get("dependencies", []),
-                tool_hint=s.get("tool_hint"),
-                parallel_group=s.get("parallel_group"),
-                risk_level=s.get("risk_level", "low"),
-                retry_strategy=s.get("retry_strategy", "auto_retry"),
-                fallback_tool=s.get("fallback_tool"),
-            ))
+            steps.append(
+                PlanStep(
+                    id=s.get("id", "s?"),
+                    description=s.get("description", ""),
+                    dependencies=s.get("dependencies", []),
+                    tool_hint=s.get("tool_hint"),
+                    parallel_group=s.get("parallel_group"),
+                    risk_level=s.get("risk_level", "low"),
+                    retry_strategy=s.get("retry_strategy", "auto_retry"),
+                    fallback_tool=s.get("fallback_tool"),
+                )
+            )
 
         # Execute steps
         completed: dict[str, str] = {}  # step_id → result summary
@@ -140,15 +144,17 @@ class ExecutorAgent:
                 for event in self._emit_step_events(step, result):
                     yield event
                 completed[step.id] = str(result.data)[:200] if result.success else ""
-                step_results.append({
-                    "step_id": step.id,
-                    "description": step.description,
-                    "status": "completed" if result.success else "failed",
-                    "result": str(result.data)[:2000] if result.success else None,
-                    "error": result.error.to_dict() if result.error else None,
-                    "latency_ms": result.meta.latency_ms,
-                    "tool_hint": step.tool_hint,
-                })
+                step_results.append(
+                    {
+                        "step_id": step.id,
+                        "description": step.description,
+                        "status": "completed" if result.success else "failed",
+                        "result": str(result.data)[:2000] if result.success else None,
+                        "error": result.error.to_dict() if result.error else None,
+                        "latency_ms": result.meta.latency_ms,
+                        "tool_hint": step.tool_hint,
+                    }
+                )
                 if result.success:
                     done += 1
         else:
@@ -167,14 +173,16 @@ class ExecutorAgent:
                     remaining = [s for s in steps if s.status == "pending"]
                     for s in remaining:
                         s.status = "skipped"
-                        step_results.append({
-                            "step_id": s.id,
-                            "description": s.description,
-                            "status": "skipped",
-                            "result": None,
-                            "error": "依赖条件无法满足（死锁）",
-                            "tool_hint": s.tool_hint,
-                        })
+                        step_results.append(
+                            {
+                                "step_id": s.id,
+                                "description": s.description,
+                                "status": "skipped",
+                                "result": None,
+                                "error": "依赖条件无法满足（死锁）",
+                                "tool_hint": s.tool_hint,
+                            }
+                        )
                     break
 
                 # Group by parallel_group for concurrent execution
@@ -189,24 +197,23 @@ class ExecutorAgent:
                 for group_id, group_steps in groups.items():
                     if len(group_steps) > 1 and group_id is not None:
                         # Parallel execution
-                        tasks = [
-                            self._execute_one_step(s, ctx)
-                            for s in group_steps
-                        ]
+                        tasks = [self._execute_one_step(s, ctx) for s in group_steps]
                         results = await asyncio.gather(*tasks)
                         for step, result in zip(group_steps, results, strict=False):
                             for event in self._emit_step_events(step, result):
                                 yield event
                             completed[step.id] = str(result.data)[:200] if result.success else ""
-                            step_results.append({
-                                "step_id": step.id,
-                                "description": step.description,
-                                "status": "completed" if result.success else "failed",
-                                "result": str(result.data)[:2000] if result.success else None,
-                                "error": result.error.to_dict() if result.error else None,
-                                "latency_ms": result.meta.latency_ms,
-                                "tool_hint": step.tool_hint,
-                            })
+                            step_results.append(
+                                {
+                                    "step_id": step.id,
+                                    "description": step.description,
+                                    "status": "completed" if result.success else "failed",
+                                    "result": str(result.data)[:2000] if result.success else None,
+                                    "error": result.error.to_dict() if result.error else None,
+                                    "latency_ms": result.meta.latency_ms,
+                                    "tool_hint": step.tool_hint,
+                                }
+                            )
                             if result.success:
                                 done += 1
                     else:
@@ -216,21 +223,25 @@ class ExecutorAgent:
                             for event in self._emit_step_events(step, result):
                                 yield event
                             completed[step.id] = str(result.data)[:200] if result.success else ""
-                            step_results.append({
-                                "step_id": step.id,
-                                "description": step.description,
-                                "status": "completed" if result.success else "failed",
-                                "result": str(result.data)[:2000] if result.success else None,
-                                "error": result.error.to_dict() if result.error else None,
-                                "latency_ms": result.meta.latency_ms,
-                                "tool_hint": step.tool_hint,
-                            })
+                            step_results.append(
+                                {
+                                    "step_id": step.id,
+                                    "description": step.description,
+                                    "status": "completed" if result.success else "failed",
+                                    "result": str(result.data)[:2000] if result.success else None,
+                                    "error": result.error.to_dict() if result.error else None,
+                                    "latency_ms": result.meta.latency_ms,
+                                    "tool_hint": step.tool_hint,
+                                }
+                            )
                             if result.success:
                                 done += 1
 
         # Yield step results back to Orchestrator (JSON-serialized)
         for sr in step_results:
-            yield AgentEvent(type="execution_step_result", content=json.dumps(sr, ensure_ascii=False))
+            yield AgentEvent(
+                type="execution_step_result", content=json.dumps(sr, ensure_ascii=False)
+            )
 
         yield AgentEvent(
             type="thinking",
@@ -284,8 +295,15 @@ class ExecutorAgent:
             if result.success:
                 step_duration = (time.perf_counter() - step_start) * 1000
                 # Record the step with all tool calls
-                self._record_step_trace(trace_store, step, tool_calls,
-                                         fallback_used, total_retries, step_duration, success=True)
+                self._record_step_trace(
+                    trace_store,
+                    step,
+                    tool_calls,
+                    fallback_used,
+                    total_retries,
+                    step_duration,
+                    success=True,
+                )
                 return result
 
             last_error = result
@@ -297,7 +315,8 @@ class ExecutorAgent:
         if last_error and step.fallback_tool and step.retry_strategy != "skip":
             logger.info(
                 "Step %s: retries exhausted, trying fallback tool '%s'",
-                step.id, step.fallback_tool,
+                step.id,
+                step.fallback_tool,
             )
             fallback_used = True
             fallback_step = PlanStep(
@@ -315,14 +334,28 @@ class ExecutorAgent:
             tool_calls.append(tc_record)
             if result.success:
                 step_duration = (time.perf_counter() - step_start) * 1000
-                self._record_step_trace(trace_store, step, tool_calls,
-                                         fallback_used, total_retries, step_duration, success=True)
+                self._record_step_trace(
+                    trace_store,
+                    step,
+                    tool_calls,
+                    fallback_used,
+                    total_retries,
+                    step_duration,
+                    success=True,
+                )
                 return result
 
         step.status = "failed"
         step_duration = (time.perf_counter() - step_start) * 1000
-        self._record_step_trace(trace_store, step, tool_calls,
-                                 fallback_used, total_retries, step_duration, success=False)
+        self._record_step_trace(
+            trace_store,
+            step,
+            tool_calls,
+            fallback_used,
+            total_retries,
+            step_duration,
+            success=False,
+        )
         return last_error or ToolResult.fail(
             code="execution_failed",
             message=f"步骤 {step.id} 执行失败（已重试）",
@@ -340,6 +373,7 @@ class ExecutorAgent:
     ) -> None:
         """Record a StepExecutionRecord for the current step."""
         from app.agent.tracing import StepExecutionRecord
+
         trace_store._pending_step = StepExecutionRecord(
             step_id=step.id,
             description=step.description,
@@ -388,7 +422,9 @@ class ExecutorAgent:
             )
         return arguments, None
 
-    async def _call_tool(self, step: PlanStep, retry: bool = False) -> tuple[ToolResult, ToolCallRecord]:
+    async def _call_tool(
+        self, step: PlanStep, retry: bool = False
+    ) -> tuple[ToolResult, ToolCallRecord]:
         """Call the actual tool via ToolRegistry.
 
         Returns:
@@ -397,25 +433,35 @@ class ExecutorAgent:
         if not step.tool_hint:
             tr = ToolResult.fail(code="no_tool", message=f"步骤 {step.id} 未指定工具")
             return tr, ToolCallRecord(
-                tool_name="(none)", args_summary="", success=False,
-                error_code="no_tool", error_message=tr.error.message,
+                tool_name="(none)",
+                args_summary="",
+                success=False,
+                error_code="no_tool",
+                error_message=tr.error.message,
             )
 
         from app.agent.registry import tool_registry as registry
+
         entry = registry.get(step.tool_hint)
         if not entry:
             tr = ToolResult.fail(code="not_found", message=f"未知工具 '{step.tool_hint}'")
             return tr, ToolCallRecord(
-                tool_name=step.tool_hint, args_summary="", success=False,
-                error_code="not_found", error_message=tr.error.message,
+                tool_name=step.tool_hint,
+                args_summary="",
+                success=False,
+                error_code="not_found",
+                error_message=tr.error.message,
             )
 
         arguments, arg_error = self._resolve_tool_arguments(step, entry)
         if arg_error:
             tr = ToolResult.fail(code="validation_error", message=arg_error)
             return tr, ToolCallRecord(
-                tool_name=step.tool_hint, args_summary="", success=False,
-                error_code="validation_error", error_message=arg_error,
+                tool_name=step.tool_hint,
+                args_summary="",
+                success=False,
+                error_code="validation_error",
+                error_message=arg_error,
             )
 
         start = time.perf_counter()
@@ -445,29 +491,35 @@ class ExecutorAgent:
 
         if result.success:
             step.status = "completed"
-            events.append(AgentEvent(
-                type="thinking",
-                content=f"  ✅ {step.description}",
-                thinking_type="evaluation",
-                plan_step_id=step.id,
-                plan_step_status="completed",
-            ))
+            events.append(
+                AgentEvent(
+                    type="thinking",
+                    content=f"  ✅ {step.description}",
+                    thinking_type="evaluation",
+                    plan_step_id=step.id,
+                    plan_step_status="completed",
+                )
+            )
             # Yield tool result as chunk
             data_str = str(result.data)[:500] if result.data else ""
             if data_str:
-                events.append(AgentEvent(
-                    type="chunk",
-                    content=data_str,
-                    plan_step_id=step.id,
-                ))
+                events.append(
+                    AgentEvent(
+                        type="chunk",
+                        content=data_str,
+                        plan_step_id=step.id,
+                    )
+                )
         else:
             step.status = "failed"
             error_str = result.error.message if result.error else "未知错误"
-            events.append(AgentEvent(
-                type="tool_error",
-                tool_name=step.tool_hint or "unknown",
-                content=f"  ❌ {step.description}: {error_str}",
-                plan_step_id=step.id,
-            ))
+            events.append(
+                AgentEvent(
+                    type="tool_error",
+                    tool_name=step.tool_hint or "unknown",
+                    content=f"  ❌ {step.description}: {error_str}",
+                    plan_step_id=step.id,
+                )
+            )
 
         return events

@@ -45,10 +45,13 @@ ORG_ADMIN_PERMISSION_NAMES = [
     PermissionType.DELETE_PROMPT.value,
 ]
 
+
 class PermissionService:
     """权限服务类 - 提供RBAC核心逻辑"""
 
-    async def get_user_permissions(self, db: AsyncSession, user: User, organization_id: int | None = None) -> set[str]:
+    async def get_user_permissions(
+        self, db: AsyncSession, user: User, organization_id: int | None = None
+    ) -> set[str]:
         """获取用户拥有的所有权限名称集合"""
         # 确保传入的是对象而不是ID
         if isinstance(user, int):
@@ -78,12 +81,11 @@ class PermissionService:
         # 映射。平台管理员只认显式 is_superuser（上面的特权分支）；其他用户
         # 一律只有 User 系统角色，额外的管理权限只能来自 per-org 角色关联。
         system_role_names = ["User"]
-        system_roles_query = select(Role).where(
-            and_(
-                Role.is_system_role,
-                Role.name.in_(system_role_names)
-            )
-        ).options(selectinload(Role.permissions))
+        system_roles_query = (
+            select(Role)
+            .where(and_(Role.is_system_role, Role.name.in_(system_role_names)))
+            .options(selectinload(Role.permissions))
+        )
         system_roles_result = await db.execute(system_roles_query)
         for role in system_roles_result.scalars().all():
             for perm in role.permissions:
@@ -98,18 +100,24 @@ class PermissionService:
             except (TypeError, ValueError):
                 organization_id = None
         if organization_id is not None:
-            user_org_roles_query = select(Role).join(
-                user_organization_role_association, Role.id == user_organization_role_association.c.role_id
-            ).where(
-                and_(
-                    user_organization_role_association.c.user_id == user.id,
-                    user_organization_role_association.c.organization_id == organization_id,
-                    # W0-1：系统级角色（SysAdmin/User）只能作为全局角色解析，
-                    # 绝不允许通过组织角色关联表在某个组织内复活（否则等价于
-                    # 恢复全局管理员）。
-                    Role.is_system_role.is_(False),
+            user_org_roles_query = (
+                select(Role)
+                .join(
+                    user_organization_role_association,
+                    Role.id == user_organization_role_association.c.role_id,
                 )
-            ).options(selectinload(Role.permissions))
+                .where(
+                    and_(
+                        user_organization_role_association.c.user_id == user.id,
+                        user_organization_role_association.c.organization_id == organization_id,
+                        # W0-1：系统级角色（SysAdmin/User）只能作为全局角色解析，
+                        # 绝不允许通过组织角色关联表在某个组织内复活（否则等价于
+                        # 恢复全局管理员）。
+                        Role.is_system_role.is_(False),
+                    )
+                )
+                .options(selectinload(Role.permissions))
+            )
 
             user_org_roles_result = await db.execute(user_org_roles_query)
             for role in user_org_roles_result.scalars().all():
@@ -143,9 +151,7 @@ class PermissionService:
         current = {perm.name for perm in role.permissions}
         missing = [name for name in ORG_ADMIN_PERMISSION_NAMES if name not in current]
         if missing:
-            perms_result = await db.execute(
-                select(Permission).where(Permission.name.in_(missing))
-            )
+            perms_result = await db.execute(select(Permission).where(Permission.name.in_(missing)))
             for perm in perms_result.scalars().all():
                 role.permissions.append(perm)
         await db.flush()
@@ -214,7 +220,10 @@ class PermissionService:
             {"name": PermissionType.CREATE_ORGANIZATION.value, "description": "创建组织"},
             {"name": PermissionType.UPDATE_ORGANIZATION.value, "description": "更新组织"},
             {"name": PermissionType.DELETE_ORGANIZATION.value, "description": "删除组织"},
-            {"name": PermissionType.MANAGE_ORGANIZATION_MEMBERS.value, "description": "管理组织成员"},
+            {
+                "name": PermissionType.MANAGE_ORGANIZATION_MEMBERS.value,
+                "description": "管理组织成员",
+            },
             {"name": PermissionType.DOCUMENT_UPLOAD.value, "description": "上传文档"},
             {"name": PermissionType.DOCUMENT_READ.value, "description": "查看文档"},
             {"name": PermissionType.DOCUMENT_UPDATE.value, "description": "更新文档"},
@@ -229,7 +238,7 @@ class PermissionService:
             {"name": PermissionType.DELETE_PROMPT.value, "description": "删除提示词"},
             {"name": PermissionType.MANAGE_SYSTEM_PROMPTS.value, "description": "管理系统提示词"},
             {"name": PermissionType.VIEW_SYSTEM_HEALTH.value, "description": "查看系统健康"},
-            {"name": PermissionType.USE_EMBEDDING_SERVICE.value, "description": "使用向量服务"}
+            {"name": PermissionType.USE_EMBEDDING_SERVICE.value, "description": "使用向量服务"},
         ]
 
         # 写入权限表
@@ -246,24 +255,29 @@ class PermissionService:
         # 2. 定义角色及其拥有的权限
         default_roles_data = [
             {
-                "name": "SysAdmin", "description": "系统管理员", "is_system_role": True,
-                "permissions": list(all_perms_map.keys()) # 拥有所有权限
+                "name": "SysAdmin",
+                "description": "系统管理员",
+                "is_system_role": True,
+                "permissions": list(all_perms_map.keys()),  # 拥有所有权限
             },
             {
-                "name": "User", "description": "普通用户", "is_system_role": True,
+                "name": "User",
+                "description": "普通用户",
+                "is_system_role": True,
                 "permissions": [
                     PermissionType.DOCUMENT_READ.value,
                     PermissionType.DOCUMENT_UPLOAD.value,
                     PermissionType.DOCUMENT_DELETE.value,
                     PermissionType.VIEW_KNOWLEDGE_BASE.value,
                     PermissionType.SEARCH_KNOWLEDGE_BASE.value,
-                    PermissionType.VIEW_PROMPT.value
-                ]
+                    PermissionType.VIEW_PROMPT.value,
+                ],
             },
             # W0-1（ADR-001 D3）：组织管理员是 per-org 角色——只有
             # user_organization_role_association 关联成立时、且只在该组织内生效。
             {
-                "name": ORG_ADMIN_ROLE_NAME, "description": "组织管理员（组织级，仅限本组织）",
+                "name": ORG_ADMIN_ROLE_NAME,
+                "description": "组织管理员（组织级，仅限本组织）",
                 "is_system_role": False,
                 "permissions": [
                     name for name in ORG_ADMIN_PERMISSION_NAMES if name in all_perms_map
@@ -273,12 +287,20 @@ class PermissionService:
 
         # 写入角色并关联权限
         for r_data in default_roles_data:
-            stmt = select(Role).where(Role.name == r_data["name"]).options(selectinload(Role.permissions))
+            stmt = (
+                select(Role)
+                .where(Role.name == r_data["name"])
+                .options(selectinload(Role.permissions))
+            )
             result = await db.execute(stmt)
             role = result.scalar_one_or_none()
 
             if not role:
-                role = Role(name=r_data["name"], description=r_data["description"], is_system_role=r_data["is_system_role"])
+                role = Role(
+                    name=r_data["name"],
+                    description=r_data["description"],
+                    is_system_role=r_data["is_system_role"],
+                )
                 db.add(role)
                 await db.flush()
 
@@ -292,5 +314,6 @@ class PermissionService:
 
         await db.commit()
         logger.info("默认权限和角色初始化完成。")
+
 
 permission_service = PermissionService()

@@ -18,6 +18,7 @@
 变异自检（tools/mutate.py）：还原任一环 fail-open（`exists`/`set_cache` 吞成
 False、`blacklist_token` 吞异常、`logout` 忽略失败）→ 对应断言精确变红。
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -163,9 +164,7 @@ class TestLogoutDoesNotLieUnderRedisOutage:
         refresh = real_auth_service.create_refresh_token({"user_id": 1, "sub": "issue291"})
 
         with patch("app.services.auth_service.RedisTools", fake):
-            r = client.post(
-                _LOGOUT, json={"refresh_token": refresh}, headers=_auth_header(token)
-            )
+            r = client.post(_LOGOUT, json={"refresh_token": refresh}, headers=_auth_header(token))
 
         assert r.status_code == 503, (
             "refresh 吊销失败被吞成了成功——refresh token 仍可换新 access token。"
@@ -246,8 +245,7 @@ class TestNormalPathPreserved:
             after = client.get(_ME, headers=_auth_header(token))
 
         assert after.status_code == 401, (
-            "登出后同一 token 仍被接受——吊销没有生效。"
-            f"实际响应: {after.status_code} {after.text}"
+            f"登出后同一 token 仍被接受——吊销没有生效。实际响应: {after.status_code} {after.text}"
         )
         assert store, "吊销键根本没有写入（用例前提不成立）"
 

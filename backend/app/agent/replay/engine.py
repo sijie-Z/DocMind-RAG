@@ -37,9 +37,16 @@ _SAFE_TASK_ID = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # 旧回放文件缺这些键时 .get 返回 None，诚实降级不虚构）。未知时间戳的两种
 # 编码（None 与 epoch 0.0）都不得被消费方当成真实时间展示。
 _TIMELINE_STEP_FIELDS = (
-    "step_id", "description", "tool_used", "status",
-    "result_summary", "error", "duration_ms", "tokens_used",
-    "started_at", "finished_at",
+    "step_id",
+    "description",
+    "tool_used",
+    "status",
+    "result_summary",
+    "error",
+    "duration_ms",
+    "tokens_used",
+    "started_at",
+    "finished_at",
 )
 _TIMELINE_FINDING_FIELDS = ("source_step", "content", "source_tool", "confidence")
 _TIMELINE_DECISION_FIELDS = ("phase", "action", "reasoning", "triggered_by", "ts")
@@ -104,6 +111,7 @@ class ReplayEngine:
         # Try Redis
         try:
             from app.agent.exec_context import ExecutionContext
+
             ctx = await ExecutionContext.load(task_id)
             if ctx is not None:
                 if self._is_valid_replay_ctx(ctx):
@@ -137,7 +145,9 @@ class ReplayEngine:
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
         except Exception as e:
-            logger.warning("本地回放文件读取失败（按无数据降级）: %s: %s", log_safe(str(p)), log_safe(e))
+            logger.warning(
+                "本地回放文件读取失败（按无数据降级）: %s: %s", log_safe(str(p)), log_safe(e)
+            )
             return None
         if not ReplayEngine._is_valid_replay_ctx(data):
             logger.warning(
@@ -162,6 +172,7 @@ class ReplayEngine:
             # 调用时导入（与 exec_context.load 同款）：测试/进程内替换
             # app.core.redis.redis_client 后即刻生效。
             from app.core.redis import redis_client
+
             if redis_client:
                 raw = await redis_client.get(f"agent:replay:{task_id}")
                 if raw:
@@ -312,7 +323,9 @@ class ReplayEngine:
         """Side-by-side comparison of two execution contexts."""
         lines: list[str] = []
         lines.append("=" * 70)
-        lines.append(f"  Execution Diff: {ctx_a.get('task_id', 'A')[:8]} vs {ctx_b.get('task_id', 'B')[:8]}")
+        lines.append(
+            f"  Execution Diff: {ctx_a.get('task_id', 'A')[:8]} vs {ctx_b.get('task_id', 'B')[:8]}"
+        )
         lines.append("=" * 70)
 
         # Overall comparison
@@ -326,7 +339,7 @@ class ReplayEngine:
         find_b = len(ctx_b.get("findings", []))
 
         lines.append(f"  {'Metric':<20} {'Run A':<15} {'Run B':<15} {'Delta':<10}")
-        lines.append(f"  {'-'*20} {'-'*15} {'-'*15} {'-'*10}")
+        lines.append(f"  {'-' * 20} {'-' * 15} {'-' * 15} {'-' * 10}")
         lines.append(f"  {'Duration':<20} {dur_a:<14.1f}s {dur_b:<14.1f}s {dur_b - dur_a:+8.1f}s")
         lines.append(f"  {'Steps':<20} {steps_a:<15d} {steps_b:<15d} {steps_b - steps_a:+8d}")
         lines.append(f"  {'Findings':<20} {find_a:<15d} {find_b:<15d} {find_b - find_a:+8d}")
@@ -351,7 +364,7 @@ class ReplayEngine:
 
             marker = "  " if step_a and step_b else " ←" if step_b else " →"
             lines.append(
-                f"  Step {i+1}: {status_a} {label_a:<35s} {dur_a_s:>7s}  |  "
+                f"  Step {i + 1}: {status_a} {label_a:<35s} {dur_a_s:>7s}  |  "
                 f"{status_b} {label_b:<35s} {dur_b_s:>7s}{marker}"
             )
 
@@ -380,7 +393,9 @@ class ReplayEngine:
         result = (step.get("result_summary") or "")[:100]
         error = step.get("error")
 
-        icon = {"completed": "✅", "failed": "❌", "skipped": "⏭️", "pending": "⏳"}.get(status, "❓")
+        icon = {"completed": "✅", "failed": "❌", "skipped": "⏭️", "pending": "⏳"}.get(
+            status, "❓"
+        )
         duration_sec = duration / 1000.0
         line = f"  {icon} Step {i}: {step.get('description', '?')[:50]}"
         line += f"\n      Tool: {tool:<20s} Status: {status:<10s} Time: {duration_sec:.1f}s"

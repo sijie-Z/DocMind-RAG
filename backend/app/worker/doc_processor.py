@@ -104,6 +104,7 @@ class DocumentProcessor:
         """
         try:
             from app.core.redis import get_redis
+
             client = await get_redis()
             token = uuid.uuid4().hex
             acquired = await client.set(
@@ -116,9 +117,7 @@ class DocumentProcessor:
                 self._lock_tokens[document_id] = token
             return bool(acquired)
         except Exception as e:
-            logger.warning(
-                "[DOC_PROC] Redis unavailable, processing without lock: %s", e
-            )
+            logger.warning("[DOC_PROC] Redis unavailable, processing without lock: %s", e)
             return None
 
     async def _renew_processing_lock(self, document_id: str) -> bool:
@@ -128,6 +127,7 @@ class DocumentProcessor:
             return False
         try:
             from app.core.redis import get_redis
+
             client = await get_redis()
             renewed = await client.eval(
                 _LOCK_RENEW_SCRIPT,
@@ -147,9 +147,7 @@ class DocumentProcessor:
                 )
             return bool(renewed)
         except Exception as e:
-            logger.warning(
-                "[DOC_PROC] Redis lock renewal failed (TTL will expire): %s", e
-            )
+            logger.warning("[DOC_PROC] Redis lock renewal failed (TTL will expire): %s", e)
             return False
 
     async def _lock_heartbeat_loop(self, document_id: str) -> None:
@@ -169,17 +167,14 @@ class DocumentProcessor:
         token = self._lock_tokens.pop(document_id, None)
         try:
             from app.core.redis import get_redis
+
             client = await get_redis()
             if token:
-                await client.eval(
-                    _LOCK_RELEASE_SCRIPT, 1, f"doc:{document_id}:processing", token
-                )
+                await client.eval(_LOCK_RELEASE_SCRIPT, 1, f"doc:{document_id}:processing", token)
             else:  # 兼容旧路径/测试替身：无 token 时按原语义删除键
                 await client.delete(f"doc:{document_id}:processing")
         except Exception as e:
-            logger.warning(
-                "[DOC_PROC] Redis lock release failed (TTL will expire): %s", e
-            )
+            logger.warning("[DOC_PROC] Redis lock release failed (TTL will expire): %s", e)
 
     async def process(
         self,
@@ -224,9 +219,7 @@ class DocumentProcessor:
         notify()
         heartbeat_task: asyncio.Task | None = None
         if lock_acquired is True:
-            heartbeat_task = asyncio.create_task(
-                self._lock_heartbeat_loop(document_id)
-            )
+            heartbeat_task = asyncio.create_task(self._lock_heartbeat_loop(document_id))
         try:
             doc = await self._load_and_mark_parsing(document_id, job_id)
             if doc is STALE_RUN:
@@ -244,17 +237,11 @@ class DocumentProcessor:
                 # 对象已不存在：重投永远不会成功——响亮记录后视同"已了结"，
                 # 避免 consumer 对毒消息做无意义的重投/重启循环。同时把 job
                 # 收敛为 FAILED，避免启动对账每次重启都重新调度这个孤儿任务。
-                logger.error(
-                    "[DOC_PROC] document not found, message is terminal: %s", document_id
-                )
-                await self._mark_job_failed(
-                    job_id, "文档不存在，任务无法继续（终局）"
-                )
+                logger.error("[DOC_PROC] document not found, message is terminal: %s", document_id)
+                await self._mark_job_failed(job_id, "文档不存在，任务无法继续（终局）")
                 return True
 
-            parse_result = await self.parser.parse_document(
-                doc.file_path, str(doc.organization_id)
-            )
+            parse_result = await self.parser.parse_document(doc.file_path, str(doc.organization_id))
             self._checkpoint(document_id, notify)
             chunks_data = parse_result.get("chunks", [])
             # issue #301 批 D（#28）：先剔除全空白 chunk 再判空。修前只看"列表非空"，
@@ -274,9 +261,7 @@ class DocumentProcessor:
                     "文件解析后无有效文本内容：可能为空文件、扫描件（OCR 依赖不可用）或解析失败。"
                 )
 
-            embeddings = await self._get_embeddings(
-                [c["chunk_text"] for c in chunks_data]
-            )
+            embeddings = await self._get_embeddings([c["chunk_text"] for c in chunks_data])
             self._checkpoint(document_id, notify)
             if len(embeddings) != len(chunks_data):
                 raise ValueError(
@@ -294,9 +279,7 @@ class DocumentProcessor:
             # try/except 内（见 _extract_graph_safely）——抽取失败/LLM 不可用
             # 不得把已成功的文档拖成 FAILED。
             await self._extract_graph_safely(doc, chunks_data)
-            logger.info(
-                "[DOC_PROC] done document_id=%s chunks=%d", document_id, len(chunks_data)
-            )
+            logger.info("[DOC_PROC] done document_id=%s chunks=%d", document_id, len(chunks_data))
             return True
         except LockLostError:
             # 锁被接管：不写 FAILED（文档可能由新持有者正常推进），按未了结处理，
@@ -309,9 +292,7 @@ class DocumentProcessor:
             )
             return DEFERRED
         except Exception as e:
-            logger.error(
-                "[DOC_PROC] failed document_id=%s: %s", document_id, e, exc_info=True
-            )
+            logger.error("[DOC_PROC] failed document_id=%s: %s", document_id, e, exc_info=True)
             await self._mark_failed(document_id, str(e), job_id)
             return False
         finally:
@@ -337,9 +318,7 @@ class DocumentProcessor:
         """
         async with AsyncSessionLocal() as session:
             doc = (
-                await session.execute(
-                    select(Document).where(Document.id == document_id)
-                )
+                await session.execute(select(Document).where(Document.id == document_id))
             ).scalar_one_or_none()
             if not doc:
                 logger.error("[DOC_PROC] document not found: %s", document_id)
@@ -355,18 +334,12 @@ class DocumentProcessor:
                 latest_job_id = (
                     await session.execute(
                         select(KnowledgeProcessingJob.id)
-                        .where(
-                            KnowledgeProcessingJob.document_id == document_id
-                        )
+                        .where(KnowledgeProcessingJob.document_id == document_id)
                         .order_by(KnowledgeProcessingJob.id.desc())
                         .limit(1)
                     )
                 ).scalar_one_or_none()
-            superseded = (
-                latest_job_id is not None
-                and job_id is not None
-                and latest_job_id > job_id
-            )
+            superseded = latest_job_id is not None and job_id is not None and latest_job_id > job_id
             if (
                 (job is not None and job.status == KnowledgeJobStatus.SUCCESS)
                 or superseded
@@ -411,9 +384,7 @@ class DocumentProcessor:
             await session.commit()
 
     @staticmethod
-    def _build_es_source(
-        doc: Document, chunk_id: str, chunk_index: int, chunk_data: dict
-    ) -> dict:
+    def _build_es_source(doc: Document, chunk_id: str, chunk_index: int, chunk_data: dict) -> dict:
         """构造写入 ES 的单条 chunk ``_source``（#188：顶层结构化字段）。
 
         收口 #188 的三重断链：``section_title`` / ``chunk_index`` / ``chunk_id``
@@ -441,14 +412,10 @@ class DocumentProcessor:
             "document_id": doc.id,
             "filename": doc.filename,
             "file_type": (
-                doc.file_type.value
-                if hasattr(doc.file_type, "value")
-                else str(doc.file_type)
+                doc.file_type.value if hasattr(doc.file_type, "value") else str(doc.file_type)
             ),
             "file_size": doc.file_size or 0,
-            "upload_time": (
-                doc.created_at.isoformat() if doc.created_at else None
-            ),
+            "upload_time": (doc.created_at.isoformat() if doc.created_at else None),
             "user_id": str(doc.uploaded_by),
             "chunk_id": chunk_id,
             "chunk_index": chunk_index,
@@ -471,9 +438,7 @@ class DocumentProcessor:
         chunk_rows: list[DocumentChunk] = []
         es_docs: list[dict] = []
 
-        for i, (chunk_data, embedding) in enumerate(
-            zip(chunks_data, embeddings, strict=False)
-        ):
+        for i, (chunk_data, embedding) in enumerate(zip(chunks_data, embeddings, strict=False)):
             chunk_id = str(uuid.uuid4())
             metadata = chunk_data.get("metadata", {}) or {}
             chunk_index = chunk_data.get("chunk_index", i)
@@ -502,9 +467,7 @@ class DocumentProcessor:
             )
 
         async with AsyncSessionLocal() as session:
-            await session.execute(
-                delete(DocumentChunk).where(DocumentChunk.document_id == doc.id)
-            )
+            await session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == doc.id))
             session.add_all(chunk_rows)
             await session.commit()
 
@@ -526,6 +489,7 @@ class DocumentProcessor:
 
         # 替换成功后按组织清空 RAG 缓存，避免旧内容仍命中缓存
         from app.rag.cache import RetrievalCache, SemanticCache
+
         await RetrievalCache().clear_for_org(doc.organization_id)
         await SemanticCache().clear_for_org(doc.organization_id)
 
@@ -567,14 +531,11 @@ class DocumentProcessor:
                 # 「匹配行数」；0 即没有任何行满足 id + status != INDEXED
                 # （文档不存在或已是 INDEXED 终态）。
                 logger.warning(
-                    "[DOC_PROC] INDEXED 写入未生效（文档不存在或已是 INDEXED） "
-                    "document_id=%s",
+                    "[DOC_PROC] INDEXED 写入未生效（文档不存在或已是 INDEXED） document_id=%s",
                     document_id,
                 )
 
-    async def _mark_failed(
-        self, document_id: str, error: str, job_id: int | None
-    ) -> None:
+    async def _mark_failed(self, document_id: str, error: str, job_id: int | None) -> None:
         """条件写入 FAILED：**绝不覆盖已 INDEXED 的终态**（A3-P0 终态回退防线）。"""
         async with AsyncSessionLocal() as session:
             result = await session.execute(
@@ -635,9 +596,7 @@ class DocumentProcessor:
                 llm_client=rag_service.openai_client,
             )
             if result["status"] == "skipped":
-                logger.info(
-                    "[DOC_PROC] graph skipped (already ingested) document_id=%s", doc.id
-                )
+                logger.info("[DOC_PROC] graph skipped (already ingested) document_id=%s", doc.id)
             else:
                 logger.info(
                     "[DOC_PROC] graph extracted document_id=%s entities=%d",
@@ -653,9 +612,7 @@ class DocumentProcessor:
 
     async def _get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Batch embedding with stable length; empty text becomes a placeholder."""
-        cleaned = [
-            t.replace("\n", " ") if t and t.strip() else " " for t in texts
-        ]
+        cleaned = [t.replace("\n", " ") if t and t.strip() else " " for t in texts]
         return await embedding_service.get_embeddings(cleaned)
 
 

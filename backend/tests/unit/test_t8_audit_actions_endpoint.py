@@ -43,18 +43,22 @@ async def actions_db(tmp_path):
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        session.add_all([
-            _mk_user(uid=1, org=2, superuser=False),
-            _mk_user(uid=2, org=3, superuser=False),
-            _mk_user(uid=3, org=None, superuser=False),
-        ])
+        session.add_all(
+            [
+                _mk_user(uid=1, org=2, superuser=False),
+                _mk_user(uid=2, org=3, superuser=False),
+                _mk_user(uid=3, org=None, superuser=False),
+            ]
+        )
         await session.flush()
-        session.add_all([
-            UserActivityLog(user_id=1, action="login"),
-            UserActivityLog(user_id=1, action="login"),
-            UserActivityLog(user_id=2, action="delete_document"),
-            UserActivityLog(user_id=3, action="profile_updated"),
-        ])
+        session.add_all(
+            [
+                UserActivityLog(user_id=1, action="login"),
+                UserActivityLog(user_id=1, action="login"),
+                UserActivityLog(user_id=2, action="delete_document"),
+                UserActivityLog(user_id=3, action="profile_updated"),
+            ]
+        )
         await session.commit()
         yield session
     await engine.dispose()

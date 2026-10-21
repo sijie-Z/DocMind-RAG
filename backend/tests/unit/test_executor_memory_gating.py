@@ -7,6 +7,7 @@
 变异点：删除 executor 中的 enable_memory 门 → 关闭态用例红（await_count 变 1）。
 显式引用/@文档（loop 的引用路径）不属于被动回忆，不受此门控；本用例只钉执行器路径。
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -67,8 +68,7 @@ async def test_memory_disabled_skips_recall_entirely():
     await _run_once(ex, step, plan)
 
     assert memory.get_context_for_query.await_count == 0, (
-        "enable_memory=False 时执行器不得调用记忆回忆"
-        "（变异：删门控 → 本断言红）"
+        "enable_memory=False 时执行器不得调用记忆回忆（变异：删门控 → 本断言红）"
     )
     assert "MEMORY-TEXT-SHOULD-NOT-APPEAR" not in _messages_text(sink), (
         "关闭记忆时回忆文本不得混入提示词（门控要断在调用处，而不是只断指标）"
@@ -86,9 +86,7 @@ async def test_memory_enabled_calls_recall_once():
 
     await _run_once(ex, step, plan)
 
-    assert memory.get_context_for_query.await_count == 1, (
-        "开启记忆时回忆必须照常调用（误伤对照）"
-    )
+    assert memory.get_context_for_query.await_count == 1, "开启记忆时回忆必须照常调用（误伤对照）"
     assert "历史经验：先查文档。" in _messages_text(sink), (
         "开启记忆时回忆文本必须真正进入提示词构建（任务书口径）"
     )

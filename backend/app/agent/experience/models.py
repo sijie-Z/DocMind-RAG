@@ -93,12 +93,8 @@ class Experience:
     tags: list[str] = field(default_factory=list)
     """Arbitrary tags for filtering: ['auto_extracted', 'llm_extracted', 'manual']."""
 
-    created_at: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds")
-    )
-    updated_at: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds")
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
+    updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
 
     # ── Serialization ──
 
@@ -124,6 +120,7 @@ class Experience:
         collapse inner whitespace, casefold — formatting-only differences do
         not create a new entry.
         """
+
         def _norm(value: str) -> str:
             return " ".join(value.split()).casefold()
 
@@ -140,8 +137,11 @@ class Experience:
         self.updated_at = datetime.now(UTC).isoformat(timespec="seconds")
         logger.info(
             "Experience %s verified=%s confidence=%.2f (vc=%d fc=%d)",
-            self.id[:8], success, self.confidence,
-            self.verified_count, self.fail_count,
+            self.id[:8],
+            success,
+            self.confidence,
+            self.verified_count,
+            self.fail_count,
         )
 
     def is_reliable(self, threshold: float = 0.6) -> bool:

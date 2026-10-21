@@ -59,6 +59,7 @@ def _mock_user():
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch):
     """与 HITL 全环同款隔离：回放落盘不写真文件、经验写库替身。"""
+
     async def _save(self, ttl=86400 * 7):
         return False
 
@@ -96,8 +97,10 @@ def _fake_client(text: str = "任务完成。"):
 async def _notifications(factory):
     async with factory() as session:
         rows = (
-            await session.execute(select(Notification).where(Notification.user_id == 1))
-        ).scalars().all()
+            (await session.execute(select(Notification).where(Notification.user_id == 1)))
+            .scalars()
+            .all()
+        )
     return list(rows)
 
 
@@ -111,7 +114,7 @@ async def _run_chat(c) -> tuple[list[dict], str]:
     r = await c.post("/api/v1/agent/chat", json=_CHAT_BODY)
     assert r.status_code == 200
     payloads = [
-        json.loads(ln[len("data: "):]) for ln in r.text.splitlines() if ln.startswith("data: ")
+        json.loads(ln[len("data: ") :]) for ln in r.text.splitlines() if ln.startswith("data: ")
     ]
     task_ids = {p.get("task_id") for p in payloads if p.get("task_id")}
     assert len(task_ids) == 1, f"整条流必须只对应一个 task_id，实际 {task_ids}"
@@ -130,9 +133,7 @@ async def test_completed_run_notifies_with_agent_link(db, monkeypatch):
     monkeypatch.setattr(agent_service, "_client", _fake_client(), raising=False)
     app.dependency_overrides[get_current_user] = lambda: _mock_user()
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://notify"
-        ) as c:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://notify") as c:
             payloads, task_id = await _run_chat(c)
     finally:
         app.dependency_overrides.pop(get_current_user, None)
@@ -218,9 +219,7 @@ async def test_cancel_endpoint_waiting_approval_notifies(db):
 
     app.dependency_overrides[get_current_user] = lambda: _mock_user()
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://notify2"
-        ) as c:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://notify2") as c:
             r = await c.post(f"/api/v1/agent/tasks/{task_id}/cancel")
     finally:
         app.dependency_overrides.pop(get_current_user, None)
@@ -251,16 +250,12 @@ async def test_notification_failure_does_not_rollback_task_or_stream(db, monkeyp
 
     app.dependency_overrides[get_current_user] = lambda: _mock_user()
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://notify3"
-        ) as c:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://notify3") as c:
             payloads, task_id = await _run_chat(c)
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 
-    assert await _task_status(db, task_id) == TaskStatus.COMPLETED, (
-        "通知失败绝不影响已落的任务终态"
-    )
+    assert await _task_status(db, task_id) == TaskStatus.COMPLETED, "通知失败绝不影响已落的任务终态"
     assert not any(p.get("type") == "error" for p in payloads), (
         "通知失败不得把错误冒泡进用户的 SSE 流"
     )

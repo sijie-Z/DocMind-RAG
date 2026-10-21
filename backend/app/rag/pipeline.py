@@ -1,4 +1,5 @@
 """RAG pipeline — orchestrates retrieval, reranking, compression, and LLM generation."""
+
 import asyncio
 import contextvars
 import logging
@@ -139,13 +140,13 @@ class RAGPipeline:
             if index_error:
                 # fail-closed：暖缓存也可能来自旧模型索引，一律拒绝；不读写缓存。
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
-                raise RetrievalUnavailableError(
-                    f"知识库索引不可用，检索已拒绝：{index_error}"
-                )
+                raise RetrievalUnavailableError(f"知识库索引不可用，检索已拒绝：{index_error}")
 
             # Exact cache (skip for document-specific queries)
             if not document_ids:
-                cached = await self.cache.get(query, organization_id, top_k, search_mode=search_mode)
+                cached = await self.cache.get(
+                    query, organization_id, top_k, search_mode=search_mode
+                )
                 if cached is not None:
                     RAG_CACHE_HITS.labels(cache_type="exact").inc()
                     self.metrics.inc("cache_hit")
@@ -167,9 +168,7 @@ class RAGPipeline:
                         debug_info["cache"] = {
                             "cache_type": "exact",
                             "hit": True,
-                            **self.cache.describe_key(
-                                query, organization_id, top_k, search_mode
-                            ),
+                            **self.cache.describe_key(query, organization_id, top_k, search_mode),
                         }
                     return cached, debug_info
                 RAG_CACHE_MISSES.inc()
@@ -202,7 +201,10 @@ class RAGPipeline:
                 if query_vector:
                     sem_meta: dict | None = {} if debug else None
                     sem_cached = await self.semantic_cache.get(
-                        query_vector, organization_id, query=query, hit_info=sem_meta,
+                        query_vector,
+                        organization_id,
+                        query=query,
+                        hit_info=sem_meta,
                     )
                     if sem_cached:
                         RAG_CACHE_HITS.labels(cache_type="semantic").inc()
@@ -217,7 +219,10 @@ class RAGPipeline:
                         self.metrics.record_event("latency", elapsed)
                         if not document_ids and sem_cached.get("sources"):
                             await self.cache.set(
-                                query, organization_id, top_k, sem_cached["sources"],
+                                query,
+                                organization_id,
+                                top_k,
+                                sem_cached["sources"],
                                 search_mode=search_mode,
                             )
                         if debug and debug_info is not None:
@@ -250,7 +255,11 @@ class RAGPipeline:
                 and complexity == "complex"
             ):
                 max_sq = max(1, int(getattr(settings, "RAG_DECOMPOSITION_MAX_SUBQUERIES", 4) or 4))
-                model = settings.LOCAL_LLM_MODEL if settings.ENABLE_LOCAL_LLM else settings.DEEPSEEK_MODEL
+                model = (
+                    settings.LOCAL_LLM_MODEL
+                    if settings.ENABLE_LOCAL_LLM
+                    else settings.DEEPSEEK_MODEL
+                )
                 # 安全修复：分解调用加超时，LLM 慢时降级为原始查询，防止整个检索链路挂起
                 try:
                     decomposed = await asyncio.wait_for(
@@ -258,13 +267,16 @@ class RAGPipeline:
                         timeout=max(5.0, float(getattr(settings, "AI_STREAM_TIMEOUT", 120) * 0.25)),
                     )
                 except (TimeoutError, Exception) as dec_err:
-                    logger.warning(f"Query decomposition timed out/failed, using original query: {dec_err}")
+                    logger.warning(
+                        f"Query decomposition timed out/failed, using original query: {dec_err}"
+                    )
                     decomposed = [query]
                 if len(decomposed) > 1:
                     sub_queries = decomposed
                     logger.info(
                         "Query decomposition: %s → %s",
-                        query, sub_queries,
+                        query,
+                        sub_queries,
                     )
 
             # Retrieve (single or parallel per sub-query)
@@ -284,7 +296,8 @@ class RAGPipeline:
                             # 修复：窗口模式读 window_sum("retry")，此前从未记录事件导致重试数恒 0
                             self.metrics.record_event("retry", 1)
                         sq_result, qv, dbg, sq_degraded = await self.retriever.retrieve(
-                            sq, organization_id,
+                            sq,
+                            organization_id,
                             max(top_k, int(settings.RAG_RERANK_TOP_N or 20)),
                             document_ids,
                             debug=debug,
@@ -306,10 +319,13 @@ class RAGPipeline:
                         RAG_RETRIEVAL_ERRORS.inc()
                         logger.warning(
                             "Retrieval attempt %d/%d for sub-query %r failed: %s",
-                            attempt + 1, retries + 1, sq, e,
+                            attempt + 1,
+                            retries + 1,
+                            sq,
+                            e,
                         )
                         if attempt < retries:
-                            await asyncio.sleep(min(1.5, 0.3 * (2 ** attempt)))
+                            await asyncio.sleep(min(1.5, 0.3 * (2**attempt)))
                 if sq_result:
                     all_results.append(sq_result)
                 elif sq_error is not None:
@@ -379,27 +395,50 @@ class RAGPipeline:
                         {
                             "id": r.get("chunk_id") or r.get("_id"),
                             "filename": r.get("filename") or _source_filename(r),
-                            "score": round(float(r.get("rank_score") if r.get("rank_score") is not None else r.get("score", r.get("_score", 0))), 4),
-                            "rank_score": round(float(r.get("rank_score") if r.get("rank_score") is not None else r.get("score", r.get("_score", 0))), 4),
+                            "score": round(
+                                float(
+                                    r.get("rank_score")
+                                    if r.get("rank_score") is not None
+                                    else r.get("score", r.get("_score", 0))
+                                ),
+                                4,
+                            ),
+                            "rank_score": round(
+                                float(
+                                    r.get("rank_score")
+                                    if r.get("rank_score") is not None
+                                    else r.get("score", r.get("_score", 0))
+                                ),
+                                4,
+                            ),
                             "rerank_score": (
                                 round(float(r["rerank_score"]), 4)
-                                if r.get("rerank_score") is not None else None
+                                if r.get("rerank_score") is not None
+                                else None
                             ),
-                            "snippet": (r.get("content") or r.get("snippet") or _source_content(r))[:200],
+                            "snippet": (r.get("content") or r.get("snippet") or _source_content(r))[
+                                :200
+                            ],
                         }
                         for r in result[:top_k]
                     ]
                     debug_info["rerank_reorder"] = [
-                        {"id": r.get("chunk_id") or r.get("_id"),
-                         "filename": r.get("filename") or _source_filename(r)}
+                        {
+                            "id": r.get("chunk_id") or r.get("_id"),
+                            "filename": r.get("filename") or _source_filename(r),
+                        }
                         for r in result[:top_k]
                     ]
                 result = result[:top_k]
             elif debug and debug_info is not None:
                 # 无结果时同样如实记录：不是「重排 ok」，而是没有候选可重排（#189）。
                 debug_info["rerank"] = {
-                    "status": "empty", "path": "noop", "reason": "no_results",
-                    "attempts": [], "scores_attached": False, "model": None,
+                    "status": "empty",
+                    "path": "noop",
+                    "reason": "no_results",
+                    "attempts": [],
+                    "scores_attached": False,
+                    "model": None,
                 }
 
             # ── 故障语义判定（issue #292）────────────────────────────────────
@@ -430,7 +469,10 @@ class RAGPipeline:
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state=kind).inc()
                 logger.error(
                     "RAG retrieval unavailable (kind=%s, org=%s, failed_sub_queries=%d, degraded_arms=%d): %s",
-                    kind, organization_id, len(failures), len(degraded_reasons),
+                    kind,
+                    organization_id,
+                    len(failures),
+                    len(degraded_reasons),
                     "; ".join(reasons) or "no details",
                 )
                 raise RetrievalUnavailableError(
@@ -577,6 +619,7 @@ class RAGPipeline:
 
         masking_enabled = enable_masking and getattr(settings, "ENABLE_PII_MASKING", False)
         from app.services.masking_service import masking_service
+
         context_mask_mapping: dict[str, str] = {}
         query_mask_mapping: dict[str, str] = {}
 
@@ -615,11 +658,17 @@ class RAGPipeline:
         # RAG_PROMPT_TEXT_MAX_CHARS 时走 compress() 的规则式句子抽取（保留开头少量
         # 上下文 + 查询相关句），不做无差别头部硬切。
         prompt_max_chars = max(1, int(settings.RAG_PROMPT_TEXT_MAX_CHARS))
-        context_str = "\n\n".join([
-            f"资料[{i + 1}] (文件名: {item.get('filename', '未知文档')}):\n"
-            f"{compress(get_prompt_text(item), query, max_chars=prompt_max_chars)}"
-            for i, item in enumerate(compressed)
-        ]) if compressed else "（未找到相关文档）"
+        context_str = (
+            "\n\n".join(
+                [
+                    f"资料[{i + 1}] (文件名: {item.get('filename', '未知文档')}):\n"
+                    f"{compress(get_prompt_text(item), query, max_chars=prompt_max_chars)}"
+                    for i, item in enumerate(compressed)
+                ]
+            )
+            if compressed
+            else "（未找到相关文档）"
+        )
 
         # Intent-based guidance
         intent = QueryIntentClassifier.classify(query)
@@ -685,8 +734,11 @@ class RAGPipeline:
                 settings.LOCAL_LLM_MODEL if settings.ENABLE_LOCAL_LLM else settings.DEEPSEEK_MODEL
             )
             stream = await self.openai_client.chat.completions.create(
-                model=model, messages=messages, stream=True,
-                temperature=0.1, max_tokens=settings.AI_MAX_TOKENS,
+                model=model,
+                messages=messages,
+                stream=True,
+                temperature=0.1,
+                max_tokens=settings.AI_MAX_TOKENS,
                 timeout=settings.AI_STREAM_TIMEOUT,
             )
             full_response = ""
@@ -717,7 +769,9 @@ class RAGPipeline:
 
             # Token estimation
             input_text = "".join(str(m.get("content", "")) for m in messages if m.get("content"))
-            self.report_tokens(max(1, int(len(input_text) / 1.5)), max(1, int(len(full_response) / 1.5)))
+            self.report_tokens(
+                max(1, int(len(input_text) / 1.5)), max(1, int(len(full_response) / 1.5))
+            )
 
             # 将 context/query 占位符映射交给调用方（供最终消息还原"引用型"占位符）
             if mask_mapping_sink is not None:

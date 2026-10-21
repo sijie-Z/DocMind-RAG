@@ -25,6 +25,7 @@
 真 SQLite（``Base.metadata.create_all``）+ ``httpx.ASGITransport``，不连
 MySQL/Redis/ES。
 """
+
 from types import SimpleNamespace
 
 import httpx
@@ -84,7 +85,9 @@ SYSTEM_ROLE_PERMISSIONS = {
 ROLE_IDS: dict[str, int] = {}
 
 
-def _user(uid: int, org: int | None, *, role: str = "user", superuser: bool = False) -> SimpleNamespace:
+def _user(
+    uid: int, org: int | None, *, role: str = "user", superuser: bool = False
+) -> SimpleNamespace:
     return SimpleNamespace(
         id=uid,
         username=f"user{uid}",
@@ -109,11 +112,11 @@ ORG_B_ADMIN = _user(20, ORG_B)
 ORG_A_MEMBER = _user(11, ORG_A)
 ORGLESS = _user(12, None)
 LEGACY_ROLE_ADMIN = _user(13, ORG_A, role="admin")
-MULTI_MEMBER = _user(14, ORG_A)          # user_organization: A + B
-CROSS_ORG_ROLE = _user(15, ORG_A)        # 主组织 A；成员 + OrgAdmin 关联在 B
-CHILD_MEMBER = _user(16, ORG_A_CHILD)    # 仅子组织 3 成员
-ROLE_ONLY_ADMIN = _user(17, None)        # 无主组织/成员行，仅 B 的 OrgAdmin 关联
-MEMBERSHIP_ONLY = _user(18, None)        # 无主组织，仅 A 的成员行
+MULTI_MEMBER = _user(14, ORG_A)  # user_organization: A + B
+CROSS_ORG_ROLE = _user(15, ORG_A)  # 主组织 A；成员 + OrgAdmin 关联在 B
+CHILD_MEMBER = _user(16, ORG_A_CHILD)  # 仅子组织 3 成员
+ROLE_ONLY_ADMIN = _user(17, None)  # 无主组织/成员行，仅 B 的 OrgAdmin 关联
+MEMBERSHIP_ONLY = _user(18, None)  # 无主组织，仅 A 的成员行
 
 
 async def _seed_roles(s) -> None:
@@ -150,46 +153,142 @@ async def _setup():
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with factory() as s:
-        s.add_all([
-            Organization(id=ORG_A, name="org-a", owner_id=10),
-            Organization(id=ORG_B, name="org-b", owner_id=20),
-            Organization(id=ORG_A_CHILD, name="org-a-child", owner_id=10, parent_id=ORG_A, level=2),
-            Organization(id=ORG_B_CHILD, name="org-b-child", owner_id=20, parent_id=ORG_B, level=2),
-            Organization(id=ORG_PRIVATE, name="private-org", owner_id=1, is_private=True),
-        ])
+        s.add_all(
+            [
+                Organization(id=ORG_A, name="org-a", owner_id=10),
+                Organization(id=ORG_B, name="org-b", owner_id=20),
+                Organization(
+                    id=ORG_A_CHILD, name="org-a-child", owner_id=10, parent_id=ORG_A, level=2
+                ),
+                Organization(
+                    id=ORG_B_CHILD, name="org-b-child", owner_id=20, parent_id=ORG_B, level=2
+                ),
+                Organization(id=ORG_PRIVATE, name="private-org", owner_id=1, is_private=True),
+            ]
+        )
         await s.flush()
         await _seed_roles(s)
 
-        s.add_all([
-            User(id=10, username="a-admin", email="a-admin@example.com", hashed_password="x",
-                 role="user", organization_id=ORG_A, is_active=True, is_superuser=False),
-            User(id=20, username="b-admin", email="b-admin@example.com", hashed_password="x",
-                 role="user", organization_id=ORG_B, is_active=True, is_superuser=False),
-            User(id=11, username="a-member", email="a-member@example.com", hashed_password="x",
-                 role="user", organization_id=ORG_A, is_active=True, is_superuser=False),
-            User(id=12, username="orgless", email="orgless@example.com", hashed_password="x",
-                 role="user", organization_id=None, is_active=True, is_superuser=False),
-            # 仅 users.role='admin' 标签：不得获得任何平台级读取
-            User(id=13, username="legacy-admin", email="legacy@example.com", hashed_password="x",
-                 role="admin", organization_id=ORG_A, is_active=True, is_superuser=False),
-            # 主组织 A，但成员关系覆盖 A+B（W0-2 核心增量：全部成员组织）
-            User(id=14, username="multi-member", email="multi@example.com", hashed_password="x",
-                 role="user", organization_id=ORG_A, is_active=True, is_superuser=False),
-            # 主组织 A，成员关系 + OrgAdmin 关联只在 B（per-org 判别靶）
-            User(id=15, username="cross-role", email="cross@example.com", hashed_password="x",
-                 role="user", organization_id=ORG_A, is_active=True, is_superuser=False),
-            # 仅子组织 3 成员：父组织 1 不可见，树必须把 3 作为根且不泄露 1
-            User(id=16, username="child-member", email="child@example.com", hashed_password="x",
-                 role="user", organization_id=ORG_A_CHILD, is_active=True, is_superuser=False),
-            # 无主组织/无成员行，仅 B 的 OrgAdmin 关联：角色关联是可见性来源
-            User(id=17, username="role-only-admin", email="roleonly@example.com", hashed_password="x",
-                 role="user", organization_id=None, is_active=True, is_superuser=False),
-            # 无主组织，仅 A 的成员行：成员表同样单独构成可见性来源
-            User(id=18, username="membership-only", email="membershiponly@example.com", hashed_password="x",
-                 role="user", organization_id=None, is_active=True, is_superuser=False),
-            User(id=1, username="superuser", email="root@example.com", hashed_password="x",
-                 role="user", organization_id=None, is_active=True, is_superuser=True),
-        ])
+        s.add_all(
+            [
+                User(
+                    id=10,
+                    username="a-admin",
+                    email="a-admin@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=ORG_A,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                User(
+                    id=20,
+                    username="b-admin",
+                    email="b-admin@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=ORG_B,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                User(
+                    id=11,
+                    username="a-member",
+                    email="a-member@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=ORG_A,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                User(
+                    id=12,
+                    username="orgless",
+                    email="orgless@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=None,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                # 仅 users.role='admin' 标签：不得获得任何平台级读取
+                User(
+                    id=13,
+                    username="legacy-admin",
+                    email="legacy@example.com",
+                    hashed_password="x",
+                    role="admin",
+                    organization_id=ORG_A,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                # 主组织 A，但成员关系覆盖 A+B（W0-2 核心增量：全部成员组织）
+                User(
+                    id=14,
+                    username="multi-member",
+                    email="multi@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=ORG_A,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                # 主组织 A，成员关系 + OrgAdmin 关联只在 B（per-org 判别靶）
+                User(
+                    id=15,
+                    username="cross-role",
+                    email="cross@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=ORG_A,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                # 仅子组织 3 成员：父组织 1 不可见，树必须把 3 作为根且不泄露 1
+                User(
+                    id=16,
+                    username="child-member",
+                    email="child@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=ORG_A_CHILD,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                # 无主组织/无成员行，仅 B 的 OrgAdmin 关联：角色关联是可见性来源
+                User(
+                    id=17,
+                    username="role-only-admin",
+                    email="roleonly@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=None,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                # 无主组织，仅 A 的成员行：成员表同样单独构成可见性来源
+                User(
+                    id=18,
+                    username="membership-only",
+                    email="membershiponly@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=None,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                User(
+                    id=1,
+                    username="superuser",
+                    email="root@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=None,
+                    is_active=True,
+                    is_superuser=True,
+                ),
+            ]
+        )
         await s.flush()
 
         await s.execute(
@@ -215,17 +314,40 @@ async def _setup():
             ],
         )
 
-        s.add_all([
-            Document(id="doc-a-1", filename="a1.pdf", file_path="documents/1/a1.pdf",
-                     file_size=1, file_type=DocumentType.PDF, organization_id=ORG_A,
-                     uploaded_by=10, status=DocumentStatus.INDEXED),
-            Document(id="doc-a-2", filename="a2.pdf", file_path="documents/1/a2.pdf",
-                     file_size=1, file_type=DocumentType.PDF, organization_id=ORG_A,
-                     uploaded_by=10, status=DocumentStatus.INDEXED),
-            Document(id="doc-b-1", filename="b1.pdf", file_path="documents/2/b1.pdf",
-                     file_size=1, file_type=DocumentType.PDF, organization_id=ORG_B,
-                     uploaded_by=20, status=DocumentStatus.INDEXED),
-        ])
+        s.add_all(
+            [
+                Document(
+                    id="doc-a-1",
+                    filename="a1.pdf",
+                    file_path="documents/1/a1.pdf",
+                    file_size=1,
+                    file_type=DocumentType.PDF,
+                    organization_id=ORG_A,
+                    uploaded_by=10,
+                    status=DocumentStatus.INDEXED,
+                ),
+                Document(
+                    id="doc-a-2",
+                    filename="a2.pdf",
+                    file_path="documents/1/a2.pdf",
+                    file_size=1,
+                    file_type=DocumentType.PDF,
+                    organization_id=ORG_A,
+                    uploaded_by=10,
+                    status=DocumentStatus.INDEXED,
+                ),
+                Document(
+                    id="doc-b-1",
+                    filename="b1.pdf",
+                    file_path="documents/2/b1.pdf",
+                    file_size=1,
+                    file_type=DocumentType.PDF,
+                    organization_id=ORG_B,
+                    uploaded_by=20,
+                    status=DocumentStatus.INDEXED,
+                ),
+            ]
+        )
         await s.commit()
 
     return engine, factory

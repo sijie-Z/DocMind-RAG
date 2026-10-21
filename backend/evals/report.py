@@ -146,7 +146,9 @@ def render_markdown(report: dict) -> str:
         f"{'，错误 ' + str(counts['errors']) if counts['errors'] else ''}）"
     )
     lines.append(f"- 生成时间：{meta['generated_at']}　检索器：{meta['retriever']}")
-    lines.append(f"- 嵌入模式：{meta.get('embedding_mode', 'live')}　说明：{meta['phase_note']}；LLM 辅助（改写/HyDE）关闭以保证可复现")
+    lines.append(
+        f"- 嵌入模式：{meta.get('embedding_mode', 'live')}　说明：{meta['phase_note']}；LLM 辅助（改写/HyDE）关闭以保证可复现"
+    )
     lines.append("")
     lines.append("## 汇总")
     lines.append("")

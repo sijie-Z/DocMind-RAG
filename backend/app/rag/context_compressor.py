@@ -1,4 +1,5 @@
 """Context compression — truncate and compress retrieved context for LLM input."""
+
 import re
 from typing import Any
 
@@ -42,7 +43,7 @@ def compress(text: str, query: str, max_chars: int = 800) -> str:
     if not terms:
         return text[:max_chars]
 
-    sentences = re.split(r'[。！？\n]', text)
+    sentences = re.split(r"[。！？\n]", text)
     parts = []
     current_len = 0
     any_relevant = False

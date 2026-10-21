@@ -1,4 +1,5 @@
 """Context window management tests."""
+
 from app.rag.context_window import (
     ChatContextWindow,
     build_rag_messages,

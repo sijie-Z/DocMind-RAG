@@ -54,9 +54,9 @@ def test_memory_persistence_statements_match_code():
     assert "self.reflective = ReflectiveMemory()" in service, (
         "memory_service.py 不再包含反思记忆层，请复核 README 的四层记忆表述。"
     )
-    persist_block = service.split("async def _save_to_redis", 1)[1].split(
-        "async def remember", 1
-    )[0]
+    persist_block = service.split("async def _save_to_redis", 1)[1].split("async def remember", 1)[
+        0
+    ]
     assert '"long_term"' in persist_block and '"reflective"' in persist_block, (
         "memory_service._save_to_redis 不再持久化长期/反思记忆，请复核 README。"
     )
@@ -112,8 +112,7 @@ def test_db_bootstrap_scripts_default_to_current_database_name():
         match = re.search(r'os\.getenv\("DB_NAME",\s*"([^"]+)"\)', text)
         assert match, f'{rel} 中未找到 os.getenv("DB_NAME", "...") 默认值'
         assert match.group(1) == db_name, (
-            f"{rel} 默认库名 {match.group(1)!r} 与 backend/.env.example "
-            f"中的库名 {db_name!r} 不一致"
+            f"{rel} 默认库名 {match.group(1)!r} 与 backend/.env.example 中的库名 {db_name!r} 不一致"
         )
         assert "paicongming" not in text.lower(), f"{rel} 仍含旧品牌库名残留"
 
@@ -125,7 +124,7 @@ def test_favicon_points_to_existing_public_asset():
     html = _read("frontend/index.html")
     tags = re.findall(r"<link\b[^>]*>", html)
     icon_tags = [tag for tag in tags if re.search(r'\brel="icon"', tag)]
-    assert icon_tags, "frontend/index.html 缺少 <link rel=\"icon\"> 声明"
+    assert icon_tags, 'frontend/index.html 缺少 <link rel="icon"> 声明'
     for tag in icon_tags:
         href_match = re.search(r'href="([^"]+)"', tag)
         assert href_match, f"favicon link 缺少 href: {tag}"

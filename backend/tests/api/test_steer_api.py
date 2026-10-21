@@ -114,7 +114,7 @@ def _sse_payloads(text: str) -> list[dict]:
     import json as _json
 
     lines = [ln for ln in text.split("\n\n") if ln.startswith("data: ")]
-    return [_json.loads(ln[len("data: "):]) for ln in lines]
+    return [_json.loads(ln[len("data: ") :]) for ln in lines]
 
 
 @pytest.fixture(autouse=True)
@@ -168,7 +168,9 @@ def _fake_client(captured: list | None = None):
         if captured is not None:
             captured.append(messages)
         if tools:
-            tc = SimpleNamespace(id="tc-1", function=SimpleNamespace(name=_TASK_KW, arguments='{"target": "prod"}'))
+            tc = SimpleNamespace(
+                id="tc-1", function=SimpleNamespace(name=_TASK_KW, arguments='{"target": "prod"}')
+            )
             msg = SimpleNamespace(content="", tool_calls=[tc], role="assistant")
         else:
             msg = SimpleNamespace(content="已完成安全验证。", tool_calls=None, role="assistant")
@@ -226,9 +228,7 @@ async def test_steer_running_task_queued_in_order(db_factory, fake_redis, client
     assert fake_redis.lists[f"agent:task:steer:{tid}"] == ["第一条", "第二条"]
 
 
-async def test_steer_waiting_approval_queued_with_honest_message(
-    db_factory, fake_redis, client
-):
+async def test_steer_waiting_approval_queued_with_honest_message(db_factory, fake_redis, client):
     tid = await checkpoint.create_task(user_id=USER_ID, organization_id=1, query="q")
     assert await checkpoint.mark_waiting_approval(tid) is True
 
@@ -309,9 +309,7 @@ async def test_full_ring_steer_during_waiting_approval_merges_into_resume(
     app.dependency_overrides[get_current_user] = lambda: _mock_user()
     monkeypatch.setattr(agent_service, "_client", _fake_client(captured), raising=False)
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://steer"
-        ) as c:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://steer") as c:
             spy = AsyncMock(return_value=ToolResult.ok(data="假工具结果"))
             with patch.object(tool_registry, "execute_detailed", new=spy):
                 r = await c.post("/api/v1/agent/chat", json=_CHAT_BODY)

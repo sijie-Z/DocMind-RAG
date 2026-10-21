@@ -112,6 +112,7 @@ class UserResetPasswordAdmin(BaseModel):
 def _client_ip(request: Request) -> str | None:
     # 安全加固：与 audit_service 统一，不信任客户端可伪造的 X-Forwarded-For
     from app.services.audit_service import extract_client_ip
+
     return extract_client_ip(request)
 
 
@@ -136,7 +137,12 @@ async def _log_user_activity(
     db.add(log)
 
 
-@router.post("/", response_model=dict, summary="创建用户", dependencies=[Depends(permission_required([PermissionType.MANAGE_USER_ROLES]))])
+@router.post(
+    "/",
+    response_model=dict,
+    summary="创建用户",
+    dependencies=[Depends(permission_required([PermissionType.MANAGE_USER_ROLES]))],
+)
 async def create_user_admin(
     body: UserCreateAdmin,
     current_user: User = Depends(get_current_user),
@@ -176,9 +182,7 @@ async def create_user_admin(
         # W0-1：组织管理员权限落到 per-org 角色关联（唯一权威）；users.role
         # 仅作为展示标签保留。
         if body.role == "admin" and user.organization_id is not None:
-            await permission_service.set_org_admin(
-                db, user.id, user.organization_id, True
-            )
+            await permission_service.set_org_admin(db, user.id, user.organization_id, True)
 
         await _log_user_activity(
             db,
@@ -195,7 +199,12 @@ async def create_user_admin(
         raise AppError(f"创建用户失败: {str(e)}")
 
 
-@router.put("/{user_id:int}", response_model=dict, summary="更新用户", dependencies=[Depends(permission_required([PermissionType.MANAGE_USER_ROLES]))])
+@router.put(
+    "/{user_id:int}",
+    response_model=dict,
+    summary="更新用户",
+    dependencies=[Depends(permission_required([PermissionType.MANAGE_USER_ROLES]))],
+)
 async def update_user_admin(
     user_id: int,
     body: UserUpdateAdmin,
@@ -203,9 +212,7 @@ async def update_user_admin(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        user = (
-            await db.execute(select(User).where(User.id == user_id))
-        ).scalar_one_or_none()
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
         if not user:
             raise NotFoundError("用户不存在")
         # 安全加固：非超管仅能修改同组织成员；无组织用户一律拒绝（fail closed）。
@@ -240,7 +247,9 @@ async def update_user_admin(
         if body.organization_ids:
             org_id = body.organization_ids[0]
             # S3 安全加固：无组织用户不再兜底到 1 号组织，直接 403
-            if not current_user.is_superuser and org_id != await require_organization(current_user, db):
+            if not current_user.is_superuser and org_id != await require_organization(
+                current_user, db
+            ):
                 raise AuthorizationError("无权将用户移动到该组织")
             user.organization_id = org_id
             # W0-1：调离组织时撤销旧组织的 OrgAdmin 关联，避免遗留跨组织管理权。
@@ -282,7 +291,12 @@ async def update_user_admin(
         raise AppError(f"更新用户失败: {str(e)}")
 
 
-@router.put("/{user_id:int}/password", response_model=dict, summary="重置用户密码", dependencies=[Depends(permission_required([PermissionType.MANAGE_USER_ROLES]))])
+@router.put(
+    "/{user_id:int}/password",
+    response_model=dict,
+    summary="重置用户密码",
+    dependencies=[Depends(permission_required([PermissionType.MANAGE_USER_ROLES]))],
+)
 async def reset_user_password_admin(
     user_id: int,
     body: UserResetPasswordAdmin,
@@ -290,9 +304,7 @@ async def reset_user_password_admin(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        user = (
-            await db.execute(select(User).where(User.id == user_id))
-        ).scalar_one_or_none()
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
         if not user:
             raise NotFoundError("用户不存在")
         # 安全加固：非超管仅能重置同组织成员密码；无组织用户一律拒绝（fail closed）。
@@ -325,7 +337,12 @@ async def reset_user_password_admin(
 
 # --- Endpoints ---
 
-@router.get("/audit-logs", response_model=dict[str, Any], dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+
+@router.get(
+    "/audit-logs",
+    response_model=dict[str, Any],
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def get_audit_logs(
     skip: int = 0,
     limit: int = 50,
@@ -335,7 +352,7 @@ async def get_audit_logs(
     start_date: str | None = None,
     end_date: str | None = None,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     获取审计日志列表（仅管理员）- 支持组织隔离
@@ -347,7 +364,9 @@ async def get_audit_logs(
         # 安全加固（S2）：无组织用户用不存在的组织 ID（-1）兜底，
         # 防止其看到一个包含所有组织日志的列表（与导出接口保持一致）
         if not current_user.is_superuser:
-            stmt = stmt.join(User).where(User.organization_id == _visible_audit_org_id(current_user))
+            stmt = stmt.join(User).where(
+                User.organization_id == _visible_audit_org_id(current_user)
+            )
 
         if user_id:
             stmt = stmt.where(UserActivityLog.user_id == user_id)
@@ -357,7 +376,7 @@ async def get_audit_logs(
             stmt = stmt.where(
                 or_(
                     UserActivityLog.action.ilike(f"%{search}%"),
-                    UserActivityLog.detail.ilike(f"%{search}%")
+                    UserActivityLog.detail.ilike(f"%{search}%"),
                 )
             )
         if start_date:
@@ -387,20 +406,24 @@ async def get_audit_logs(
                         "target_id": log.target_id,
                         "detail": log.detail,
                         "ip_address": log.ip_address,
-                        "created_at": log.created_at.isoformat()
-                    } for log in logs
+                        "created_at": log.created_at.isoformat(),
+                    }
+                    for log in logs
                 ],
-                "total": total
-            }
+                "total": total,
+            },
         }
     except Exception as e:
         return {"success": False, "message": f"获取失败: {str(e)}"}
 
 
-@router.get("/audit-logs/actions", response_model=dict[str, Any], dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+@router.get(
+    "/audit-logs/actions",
+    response_model=dict[str, Any],
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def get_audit_log_actions(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """
     审计日志「操作类型」分布（筛选下拉数据源）。
@@ -414,22 +437,30 @@ async def get_audit_log_actions(
         count_expr = func.count()
         stmt = select(UserActivityLog.action, count_expr).group_by(UserActivityLog.action)
         if not current_user.is_superuser:
-            stmt = stmt.join(User).where(User.organization_id == _visible_audit_org_id(current_user))
+            stmt = stmt.join(User).where(
+                User.organization_id == _visible_audit_org_id(current_user)
+            )
         stmt = stmt.order_by(count_expr.desc(), UserActivityLog.action.asc())
         rows = (await db.execute(stmt)).all()
-        return {"success": True, "data": [{"action": action, "count": count} for action, count in rows]}
+        return {
+            "success": True,
+            "data": [{"action": action, "count": count} for action, count in rows],
+        }
     except Exception as e:
         return {"success": False, "message": f"获取失败: {str(e)}"}
 
 
-@router.get("/audit-logs/export", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+@router.get(
+    "/audit-logs/export",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def export_audit_logs(
     user_id: int | None = None,
     action: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """导出审计日志为 CSV 文件"""
     try:
@@ -454,19 +485,32 @@ async def export_audit_logs(
 
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(['Time', 'User ID', 'Username', 'Action', 'Target Type', 'Target ID', 'Detail', 'IP Address'])
+        writer.writerow(
+            [
+                "Time",
+                "User ID",
+                "Username",
+                "Action",
+                "Target Type",
+                "Target ID",
+                "Detail",
+                "IP Address",
+            ]
+        )
 
         for log in logs:
-            writer.writerow([
-                log.created_at.isoformat() if log.created_at else '',
-                log.user_id,
-                log.user.username if log.user else 'Unknown',
-                log.action or '',
-                log.target_type or '',
-                log.target_id or '',
-                log.detail or '',
-                log.ip_address or ''
-            ])
+            writer.writerow(
+                [
+                    log.created_at.isoformat() if log.created_at else "",
+                    log.user_id,
+                    log.user.username if log.user else "Unknown",
+                    log.action or "",
+                    log.target_type or "",
+                    log.target_id or "",
+                    log.detail or "",
+                    log.ip_address or "",
+                ]
+            )
 
         output.seek(0)
         filename = f"audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -474,15 +518,15 @@ async def export_audit_logs(
         return StreamingResponse(
             iter([output.getvalue()]),
             media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
     except Exception as e:
         raise AppError(f"Export failed: {str(e)}")
 
+
 @router.get("/me", response_model=dict[str, Any], summary="获取当前用户信息")
 async def get_user_profile(
-    current_user: User = Depends(auth_service.get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(auth_service.get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """获取当前登录用户信息"""
     try:
@@ -497,10 +541,10 @@ async def get_user_profile(
         if current_user.preferences:
             try:
                 pref_str = current_user.preferences.strip()
-                if pref_str.startswith('{') or pref_str.startswith('['):
+                if pref_str.startswith("{") or pref_str.startswith("["):
                     pref_json = json.loads(pref_str)
                     if isinstance(pref_json, dict):
-                        bio = pref_json.get('bio', '')
+                        bio = pref_json.get("bio", "")
                 else:
                     bio = pref_str
             except Exception:
@@ -522,15 +566,13 @@ async def get_user_profile(
             # 前端 isAdmin 组合判定依赖此字段，缺失会让超管失去管理入口。
             "is_superuser": bool(current_user.is_superuser),
             # W0-1：当前组织的 OrgAdmin 角色（per-org），用于区分组织管理页。
-            "is_org_admin": await is_org_admin(
-                db, current_user, current_user.organization_id
-            ),
+            "is_org_admin": await is_org_admin(db, current_user, current_user.organization_id),
             "is_active": current_user.is_active,
             "created_at": current_user.created_at,
             "last_login_at": current_user.last_login_at,
             "preferences": current_user.preferences,
             # 安全加固：只返回掩码，不泄露完整 API Key
-            "api_key": _mask_api_key(current_user.api_key)
+            "api_key": _mask_api_key(current_user.api_key),
         }
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
         # issue #98：NotFoundError 自带 404，先放行，避免被下面的 except Exception 降级为 500。
@@ -581,9 +623,7 @@ async def get_my_organizations(
 
         payload = [_organization_public_dict(org) for org in organizations]
         current_org_id = current_user.organization_id
-        if current_org_id is not None and all(
-            org["id"] != current_org_id for org in payload
-        ):
+        if current_org_id is not None and all(org["id"] != current_org_id for org in payload):
             primary_org = await db.get(Organization, current_org_id)
             if primary_org is not None:
                 payload.insert(0, _organization_public_dict(primary_org))
@@ -630,10 +670,7 @@ async def switch_my_organization(
 
         # fail-closed：只有成员关系（或超管）允许切换。当前组织本身允许
         # 幂等重选（历史用户可能没有 user_organization 行）。
-        if (
-            not user.is_superuser
-            and user.organization_id != organization_id
-        ):
+        if not user.is_superuser and user.organization_id != organization_id:
             membership = await db.execute(
                 select(user_organization.c.user_id).where(
                     user_organization.c.user_id == user.id,
@@ -677,11 +714,13 @@ async def switch_my_organization(
         raise AppError(f"Switch organization failed: {str(e)}")
 
 
-@router.get("/me/sessions", response_model=list[UserSessionResponse], summary="获取当前用户登录设备")
+@router.get(
+    "/me/sessions", response_model=list[UserSessionResponse], summary="获取当前用户登录设备"
+)
 async def get_my_sessions(
     request: Request,
     current_user: User = Depends(auth_service.get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
         select(UserLoginSession)
@@ -705,15 +744,20 @@ async def get_my_sessions(
     ]
 
     if not data:
-        data.append({
-            "id": 0,
-            "device_name": request.headers.get("sec-ch-ua-platform") or "当前设备",
-            "ip_address": (request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)),
-            "user_agent": request.headers.get("user-agent"),
-            "is_active": True,
-            "last_seen_at": current_user.last_login_at,
-            "created_at": current_user.last_login_at,
-        })
+        data.append(
+            {
+                "id": 0,
+                "device_name": request.headers.get("sec-ch-ua-platform") or "当前设备",
+                "ip_address": (
+                    request.headers.get("x-forwarded-for")
+                    or (request.client.host if request.client else None)
+                ),
+                "user_agent": request.headers.get("user-agent"),
+                "is_active": True,
+                "last_seen_at": current_user.last_login_at,
+                "created_at": current_user.last_login_at,
+            }
+        )
 
     return data
 
@@ -753,7 +797,9 @@ async def revoke_my_session(
     return {"message": "设备已下线"}
 
 
-@router.get("/me/activity-logs", response_model=list[UserAuditLogResponse], summary="获取用户操作审计日志")
+@router.get(
+    "/me/activity-logs", response_model=list[UserAuditLogResponse], summary="获取用户操作审计日志"
+)
 async def get_my_activity_logs(
     current_user: User = Depends(auth_service.get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -781,73 +827,90 @@ async def get_my_activity_logs(
 
 @router.get("/activities", response_model=list[ActivityResponse], summary="获取用户最近动态")
 async def get_user_activities(
-    current_user: User = Depends(auth_service.get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(auth_service.get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """获取用户最近动态（聚合）"""
-    activities =[]
+    activities = []
 
     # 1. 登录活动
     if current_user.last_login_at:
-        activities.append({
-            "id": "login_1",
-            "type": "login",
-            "content": "登录系统",
-            "time": current_user.last_login_at,
-            "timestamp": current_user.last_login_at.timestamp()
-        })
+        activities.append(
+            {
+                "id": "login_1",
+                "type": "login",
+                "content": "登录系统",
+                "time": current_user.last_login_at,
+                "timestamp": current_user.last_login_at.timestamp(),
+            }
+        )
 
     # 2. 文档上传活动
-    doc_query = select(Document).where(
-        Document.uploaded_by == current_user.id
-    ).order_by(Document.created_at.desc()).limit(5)
+    doc_query = (
+        select(Document)
+        .where(Document.uploaded_by == current_user.id)
+        .order_by(Document.created_at.desc())
+        .limit(5)
+    )
     doc_result = await db.execute(doc_query)
     docs = doc_result.scalars().all()
 
     for doc in docs:
-        activities.append({
-            "id": f"doc_{doc.id}",
-            "type": "upload",
-            "content": f"上传了文档 \"{doc.filename}\"",
-            "time": doc.created_at,
-            "timestamp": doc.created_at.timestamp()
-        })
+        activities.append(
+            {
+                "id": f"doc_{doc.id}",
+                "type": "upload",
+                "content": f'上传了文档 "{doc.filename}"',
+                "time": doc.created_at,
+                "timestamp": doc.created_at.timestamp(),
+            }
+        )
 
     # 3. 聊天活动
-    chat_query = select(ChatSession).where(
-        ChatSession.user_id == current_user.id
-    ).order_by(ChatSession.created_at.desc()).limit(5)
+    chat_query = (
+        select(ChatSession)
+        .where(ChatSession.user_id == current_user.id)
+        .order_by(ChatSession.created_at.desc())
+        .limit(5)
+    )
     chat_result = await db.execute(chat_query)
     chats = chat_result.scalars().all()
 
     for chat in chats:
-        activities.append({
-            "id": f"chat_{chat.id}",
-            "type": "chat",
-            "content": f"创建了新的对话 \"{chat.title[:20]}\"",
-            "time": chat.created_at,
-            "timestamp": chat.created_at.timestamp()
-        })
+        activities.append(
+            {
+                "id": f"chat_{chat.id}",
+                "type": "chat",
+                "content": f'创建了新的对话 "{chat.title[:20]}"',
+                "time": chat.created_at,
+                "timestamp": chat.created_at.timestamp(),
+            }
+        )
 
     # 排序并取前10
     activities.sort(key=lambda x: x["timestamp"], reverse=True)
     activities = activities[:10]
 
-    return[
+    return [
         {
             "id": item["id"],
             "type": item["type"],
             "content": item["content"],
-            "time": item["time"].isoformat() if isinstance(item["time"], datetime) else str(item["time"])
+            "time": item["time"].isoformat()
+            if isinstance(item["time"], datetime)
+            else str(item["time"]),
         }
         for item in activities
     ]
 
-@router.get("/db-health", response_model=dict, summary="用户相关数据库健康自检",
-            dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+
+@router.get(
+    "/db-health",
+    response_model=dict,
+    summary="用户相关数据库健康自检",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def user_db_health_check(
-    current_user: User = Depends(auth_service.get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(auth_service.get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """检查用户模块关键表与字段是否可用，便于排查头像/会话/审计问题。"""
     checks = {
@@ -890,18 +953,23 @@ async def user_db_health_check(
 
 @router.get("/stats", response_model=UserStatsResponse, summary="获取用户统计信息")
 async def get_user_stats(
-    current_user: User = Depends(auth_service.get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(auth_service.get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """获取用户统计数据 (✅ 已修复知识库状态为 INDEXED 和消息总数统计)"""
     try:
         # 1. 会话数量
-        conv_query = select(func.count(ChatSession.id)).where(ChatSession.user_id == current_user.id)
+        conv_query = select(func.count(ChatSession.id)).where(
+            ChatSession.user_id == current_user.id
+        )
         conv_result = await db.execute(conv_query)
         conversation_count = conv_result.scalar() or 0
 
         # 2. 消息总数 (✅ 修复：通过关联 ChatMessage 直接统计真实消息数)
-        msg_query = select(func.count(ChatMessage.id)).join(ChatSession).where(ChatSession.user_id == current_user.id)
+        msg_query = (
+            select(func.count(ChatMessage.id))
+            .join(ChatSession)
+            .where(ChatSession.user_id == current_user.id)
+        )
         msg_result = await db.execute(msg_query)
         message_count = msg_result.scalar() or 0
 
@@ -912,41 +980,44 @@ async def get_user_stats(
 
         # 4. 知识库数量 (✅ 修复：状态由 COMPLETED 改为 INDEXED)
         kb_query = select(func.count(Document.id)).where(
-            Document.uploaded_by == current_user.id,
-            Document.status == DocumentStatus.INDEXED
+            Document.uploaded_by == current_user.id, Document.status == DocumentStatus.INDEXED
         )
         kb_result = await db.execute(kb_query)
         knowledge_count = kb_result.scalar() or 0
 
         # 5. 存储使用量 (Bytes)
-        storage_query = select(func.sum(Document.file_size)).where(Document.uploaded_by == current_user.id)
+        storage_query = select(func.sum(Document.file_size)).where(
+            Document.uploaded_by == current_user.id
+        )
         storage_result = await db.execute(storage_query)
         storage_used = storage_result.scalar() or 0
 
         # 6. 获取最近7天的活动趋势 (保持不变)
         seven_days_ago = datetime.now() - timedelta(days=7)
 
-        doc_trend_query = select(
-            cast(Document.created_at, Date).label('date'),
-            func.count(Document.id).label('total')
-        ).where(
-            Document.uploaded_by == current_user.id,
-            Document.created_at >= seven_days_ago
-        ).group_by(cast(Document.created_at, Date))
+        doc_trend_query = (
+            select(
+                cast(Document.created_at, Date).label("date"),
+                func.count(Document.id).label("total"),
+            )
+            .where(Document.uploaded_by == current_user.id, Document.created_at >= seven_days_ago)
+            .group_by(cast(Document.created_at, Date))
+        )
         doc_trend_result = await db.execute(doc_trend_query)
         doc_counts = {row.date: int(row.total) for row in doc_trend_result}
 
-        chat_trend_query = select(
-            cast(ChatSession.created_at, Date).label('date'),
-            func.count(ChatSession.id).label('total')
-        ).where(
-            ChatSession.user_id == current_user.id,
-            ChatSession.created_at >= seven_days_ago
-        ).group_by(cast(ChatSession.created_at, Date))
+        chat_trend_query = (
+            select(
+                cast(ChatSession.created_at, Date).label("date"),
+                func.count(ChatSession.id).label("total"),
+            )
+            .where(ChatSession.user_id == current_user.id, ChatSession.created_at >= seven_days_ago)
+            .group_by(cast(ChatSession.created_at, Date))
+        )
         chat_trend_result = await db.execute(chat_trend_query)
         chat_counts = {row.date: int(row.total) for row in chat_trend_result}
 
-        activity_trend =[]
+        activity_trend = []
         for i in range(6, -1, -1):
             day = (datetime.now() - timedelta(days=i)).date()
             count = doc_counts.get(day, 0) + chat_counts.get(day, 0)
@@ -959,7 +1030,7 @@ async def get_user_stats(
             "knowledge_count": knowledge_count,
             "storage_used": int(storage_used),
             "storage_limit": int(settings.USER_STORAGE_LIMIT_BYTES),
-            "activity_trend": activity_trend
+            "activity_trend": activity_trend,
         }
     except Exception as e:
         logger.exception(f"Error in get_user_stats: {str(e)}")
@@ -968,13 +1039,17 @@ async def get_user_stats(
         # profile 页只读各自字段，加字段不破坏契约）；degraded/reason
         # 供消费方区分「查不了」与「新用户真的都是 0」。
         return {
-            "conversation_count": 0, "message_count": 0, "file_count": 0,
-            "knowledge_count": 0, "storage_used": 0,
+            "conversation_count": 0,
+            "message_count": 0,
+            "file_count": 0,
+            "knowledge_count": 0,
+            "storage_used": 0,
             "storage_limit": int(settings.USER_STORAGE_LIMIT_BYTES),
             "activity_trend": [0] * 7,
             "degraded": True,
             "reason": "个人统计查询失败，数据暂不可用",
         }
+
 
 @router.get("/", response_model=dict, summary="获取用户列表")
 async def get_users(
@@ -982,7 +1057,7 @@ async def get_users(
     limit: int = 100,
     current_user: User = Depends(get_current_user),
     has_permission: bool = Depends(permission_required([PermissionType.VIEW_USER_DETAIL])),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """获取用户列表（管理员功能）- 仅显示当前组织下的用户"""
     try:
@@ -1007,29 +1082,34 @@ async def get_users(
         )
         users = result.scalars().all()
 
-        user_list =[]
+        user_list = []
         for user in users:
-            user_list.append({
-                "id": user.id, "username": user.username, "email": user.email,
-                "full_name": user.full_name, "organization_id": user.organization_id,
-                "role": user.role, "is_active": user.is_active,
-                "created_at": user.created_at.isoformat() if user.created_at else None,
-                "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None
-            })
+            user_list.append(
+                {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "full_name": user.full_name,
+                    "organization_id": user.organization_id,
+                    "role": user.role,
+                    "is_active": user.is_active,
+                    "created_at": user.created_at.isoformat() if user.created_at else None,
+                    "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+                }
+            )
 
-        return {
-            "total": total, "skip": skip, "limit": limit, "users": user_list
-        }
+        return {"total": total, "skip": skip, "limit": limit, "users": user_list}
 
     except Exception as e:
         raise AppError(f"获取用户列表失败: {str(e)}")
+
 
 @router.get("/{user_id}", response_model=dict, summary="获取用户信息")
 async def get_user(
     user_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    has_permission: bool = Depends(permission_required([PermissionType.VIEW_USER_DETAIL]))
+    has_permission: bool = Depends(permission_required([PermissionType.VIEW_USER_DETAIL])),
 ):
     """获取用户信息 - 仅允许查看同组织用户"""
     result = await db.execute(select(User).where(User.id == user_id))
@@ -1052,7 +1132,7 @@ async def get_user(
     if user.preferences:
         try:
             pref = json.loads(user.preferences)
-            bio_val = pref.get('bio', '') if isinstance(pref, dict) else ""
+            bio_val = pref.get("bio", "") if isinstance(pref, dict) else ""
         except (json.JSONDecodeError, TypeError):
             bio_val = ""
 
@@ -1070,8 +1150,9 @@ async def get_user(
         "is_active": user.is_active,
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
-        "preferences": user.preferences
+        "preferences": user.preferences,
     }
+
 
 @router.put("/{user_id}/role", response_model=dict, summary="修改用户角色")
 async def update_user_role(
@@ -1079,7 +1160,7 @@ async def update_user_role(
     role: str,
     current_user: User = Depends(get_current_user),
     has_permission: bool = Depends(permission_required([PermissionType.MANAGE_USER_ROLES])),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """修改用户角色（管理员功能）"""
     try:
@@ -1132,12 +1213,13 @@ async def update_user_role(
     except Exception as e:
         raise AppError(f"修改用户角色失败: {str(e)}")
 
+
 @router.delete("/{user_id}", response_model=dict, summary="删除用户")
 async def delete_user(
     user_id: int,
     current_user: User = Depends(get_current_user),
     has_permission: bool = Depends(permission_required([PermissionType.DELETE_USER])),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """删除用户（管理员功能）"""
     try:
@@ -1175,17 +1257,18 @@ async def delete_user(
     except Exception as e:
         raise AppError(f"删除用户失败: {str(e)}")
 
+
 @router.put("/me", response_model=UserInfoResponse, summary="更新个人信息")
 async def update_user_profile(
     user_in: UserUpdateProfile,
     request: Request,
     current_user: User = Depends(auth_service.get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """更新当前登录用户信息 (✅ 修复了页面刷新导致无限发送通知的Bug)"""
     try:
         current_user = await db.merge(current_user)
-        has_changed = False # 标志位：是否真正发生了数据变更
+        has_changed = False  # 标志位：是否真正发生了数据变更
 
         # 对比字段变化
         current_user_obj: Any = current_user
@@ -1214,10 +1297,12 @@ async def update_user_profile(
         current_pref_str = current_user.preferences
         pref_dict = {}
         try:
-            if current_pref_str and (current_pref_str.strip().startswith('{') or current_pref_str.strip().startswith('[')):
+            if current_pref_str and (
+                current_pref_str.strip().startswith("{") or current_pref_str.strip().startswith("[")
+            ):
                 pref_dict = json.loads(current_pref_str)
                 if not isinstance(pref_dict, dict):
-                     pref_dict = {"bio": current_pref_str}
+                    pref_dict = {"bio": current_pref_str}
             elif current_pref_str:
                 pref_dict = {"bio": current_pref_str}
         except (json.JSONDecodeError, TypeError):
@@ -1231,7 +1316,7 @@ async def update_user_profile(
         if user_in.preferences is not None:
             # 简单校验是否有新键值对（排除主题变更，主题变更不触发通知）
             for k, v in user_in.preferences.items():
-                if k == 'theme':
+                if k == "theme":
                     # 主题变更只更新，不计入 has_changed
                     pref_dict[k] = v
                 elif pref_dict.get(k) != v:
@@ -1262,28 +1347,37 @@ async def update_user_profile(
         await db.commit()
         await db.refresh(current_user)
 
-        bio_response = pref_dict.get('bio', '')
+        bio_response = pref_dict.get("bio", "")
 
         return {
-            "id": current_user.id, "username": current_user.username, "email": current_user.email,
-            "full_name": current_user.full_name, "phone": current_user.phone, "avatar_url": current_user.avatar_url,
-            "bio": bio_response, "organization_id": current_user.organization_id, "role": current_user.role,
-            "is_active": current_user.is_active, "created_at": current_user.created_at,
-            "last_login_at": current_user.last_login_at, "preferences": current_user.preferences,
+            "id": current_user.id,
+            "username": current_user.username,
+            "email": current_user.email,
+            "full_name": current_user.full_name,
+            "phone": current_user.phone,
+            "avatar_url": current_user.avatar_url,
+            "bio": bio_response,
+            "organization_id": current_user.organization_id,
+            "role": current_user.role,
+            "is_active": current_user.is_active,
+            "created_at": current_user.created_at,
+            "last_login_at": current_user.last_login_at,
+            "preferences": current_user.preferences,
             # 安全加固：只返回掩码，不泄露完整 API Key
-            "api_key": _mask_api_key(current_user.api_key)
+            "api_key": _mask_api_key(current_user.api_key),
         }
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
         raise
     except Exception as e:
         raise AppError(f"更新个人信息失败: {str(e)}")
 
+
 @router.put("/password", response_model=dict, summary="修改密码")
 async def update_password(
     password_in: UserUpdatePassword,
     request: Request,
     current_user: User = Depends(auth_service.get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """修改当前用户密码"""
     try:
@@ -1323,6 +1417,7 @@ async def update_password(
     except Exception as e:
         raise AppError(f"修改密码失败: {str(e)}")
 
+
 @router.post(
     "/api-key",
     response_model=dict,
@@ -1332,7 +1427,7 @@ async def update_password(
 async def generate_api_key(
     request: Request,
     current_user: User = Depends(auth_service.get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """为当前用户生成新的 API Key (如果已存在则覆盖)。
 
@@ -1369,6 +1464,7 @@ async def generate_api_key(
         await db.rollback()
         raise AppError(f"生成 API Key 失败: {str(e)}")
 
+
 @router.delete(
     "/api-key",
     response_model=dict,
@@ -1378,7 +1474,7 @@ async def generate_api_key(
 async def revoke_api_key(
     request: Request,
     current_user: User = Depends(auth_service.get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """撤销当前用户的 API Key。
 

@@ -15,6 +15,7 @@
 - 非超管无组织 → 403（fail-closed）；
 - 超管跨组织 → 200（既有旁路，与知识删除端点一致）。
 """
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -51,55 +52,61 @@ async def _seeded_factory():
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with factory() as s:
-        s.add_all([
-            Organization(id=ORG_A, name="Org A", owner_id=0),
-            Organization(id=ORG_B, name="Org B", owner_id=0),
-        ])
+        s.add_all(
+            [
+                Organization(id=ORG_A, name="Org A", owner_id=0),
+                Organization(id=ORG_B, name="Org B", owner_id=0),
+            ]
+        )
         # 默认系统角色带 document:delete —— 让权限依赖放行，401/403 的分歧只可能
         # 来自归属校验（get_document_for_user），测试才判别得到目标行为。
         role = Role(name="User", is_system_role=True)
         role.permissions.append(Permission(name=PermissionType.DOCUMENT_DELETE.value))
         s.add(role)
-        s.add_all([
-            User(
-                id=1,
-                username="w04-user-a",
-                email="w04-user-a@example.com",
-                hashed_password="x",
-                organization_id=ORG_A,
-                role="user",
-                is_active=True,
-            ),
-            User(
-                id=2,
-                username="w04-user-no-org",
-                email="w04-user-no-org@example.com",
-                hashed_password="x",
-                organization_id=None,
-                role="user",
-                is_active=True,
-            ),
-        ])
-        s.add_all([
-            Document(
-                id=DOC_A,
-                filename="a.pdf",
-                file_path="7/a.pdf",
-                file_size=1,
-                file_type=DocumentType.PDF,
-                organization_id=ORG_A,
-                uploaded_by=1,
-            ),
-            Document(
-                id=DOC_B,
-                filename="b.pdf",
-                file_path="8/b.pdf",
-                file_size=1,
-                file_type=DocumentType.PDF,
-                organization_id=ORG_B,
-                uploaded_by=1,
-            ),
-        ])
+        s.add_all(
+            [
+                User(
+                    id=1,
+                    username="w04-user-a",
+                    email="w04-user-a@example.com",
+                    hashed_password="x",
+                    organization_id=ORG_A,
+                    role="user",
+                    is_active=True,
+                ),
+                User(
+                    id=2,
+                    username="w04-user-no-org",
+                    email="w04-user-no-org@example.com",
+                    hashed_password="x",
+                    organization_id=None,
+                    role="user",
+                    is_active=True,
+                ),
+            ]
+        )
+        s.add_all(
+            [
+                Document(
+                    id=DOC_A,
+                    filename="a.pdf",
+                    file_path="7/a.pdf",
+                    file_size=1,
+                    file_type=DocumentType.PDF,
+                    organization_id=ORG_A,
+                    uploaded_by=1,
+                ),
+                Document(
+                    id=DOC_B,
+                    filename="b.pdf",
+                    file_path="8/b.pdf",
+                    file_size=1,
+                    file_type=DocumentType.PDF,
+                    organization_id=ORG_B,
+                    uploaded_by=1,
+                ),
+            ]
+        )
         await s.commit()
     return engine, factory
 
@@ -136,9 +143,7 @@ class _ApiCtx:
         app.dependency_overrides[get_current_user] = _current_user
         app.dependency_overrides[get_db] = _db
         self._app = app
-        self._client = AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://w0del"
-        )
+        self._client = AsyncClient(transport=ASGITransport(app=app), base_url="http://w0del")
         return self._client
 
     async def __aexit__(self, exc_type, exc, tb):

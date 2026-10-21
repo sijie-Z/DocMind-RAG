@@ -21,9 +21,9 @@ from app.core.middleware import metrics_collector
 def _points() -> list[dict]:
     now = int(time.time())
     return [
-        {"timestamp": now - 60, "request_count": 1},      # 1 分钟前：1h 内
-        {"timestamp": now - 1200, "request_count": 2},    # 20 分钟前：1h 内
-        {"timestamp": now - 7200, "request_count": 3},    # 2 小时前：1h 外 / 6h 内
+        {"timestamp": now - 60, "request_count": 1},  # 1 分钟前：1h 内
+        {"timestamp": now - 1200, "request_count": 2},  # 20 分钟前：1h 内
+        {"timestamp": now - 7200, "request_count": 3},  # 2 小时前：1h 外 / 6h 内
         {"timestamp": now - 100000, "request_count": 4},  # ~27.8 小时前：24h 外 / 7d 内
     ]
 

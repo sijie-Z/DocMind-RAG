@@ -153,7 +153,9 @@ async def _plant_stale_snapshot(user: User, payload: str | None = None) -> str:
     """往 Redis 里放一个陈旧快照，返回键名。"""
     key = f"user:{user.id}"
     redis = await get_redis()
-    await redis.setex(key, 3600, payload if payload is not None else _snapshot_as_written_by_login(user))
+    await redis.setex(
+        key, 3600, payload if payload is not None else _snapshot_as_written_by_login(user)
+    )
     return key
 
 

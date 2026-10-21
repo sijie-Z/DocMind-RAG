@@ -92,8 +92,11 @@ def _mk_executor(config: AgentConfig, client) -> Executor:
 
 def _cfg(**overrides) -> AgentConfig:
     base = dict(
-        enable_reflection=False, enable_memory=False, enable_skills=False,
-        enable_experience=False, enable_thinking=False,
+        enable_reflection=False,
+        enable_memory=False,
+        enable_skills=False,
+        enable_experience=False,
+        enable_thinking=False,
         # issue #206：生产默认禁用 execute_python（DEFAULT_DISABLED_TOOLS），派发层
         # 会以 tool_disabled 拒绝。本文件以 execute_python 作为**已显式启用**的
         # 高危工具样本来验证审批门，因此清空禁用清单。
@@ -126,10 +129,20 @@ def _arm(executor: Executor, *, outcome: str = "paused", calls: list | None = No
 async def _run_step_once(executor: Executor, *, step_id: str = "s1"):
     step = PlanStep(id=step_id, description="执行子任务")
     plan = Plan(id="p1", goal="g", steps=[step])
-    return await _drive(executor._execute_step_once(
-        step=step, plan=plan, history=None, organization_id=2, user_id=0,
-        enable_thinking=False,
-    )), step, plan
+    return (
+        await _drive(
+            executor._execute_step_once(
+                step=step,
+                plan=plan,
+                history=None,
+                organization_id=2,
+                user_id=0,
+                enable_thinking=False,
+            )
+        ),
+        step,
+        plan,
+    )
 
 
 # ── 判定表 / 纯函数（模块级契约）──────────────────────────────────────────────
@@ -221,20 +234,28 @@ class TestApprovalModule:
         from app.agent.events import AgentEvent
 
         low = AgentEvent(
-            type="approval_required", content="r", tool_name="calculate",
-            tool_args={"expression": "1+1"}, risk_level="low",
+            type="approval_required",
+            content="r",
+            tool_name="calculate",
+            tool_args={"expression": "1+1"},
+            risk_level="low",
         )
         assert low.to_sse_dict()["risk_level"] == "low"
 
         high = AgentEvent(
-            type="approval_required", content="r", tool_name="execute_python",
+            type="approval_required",
+            content="r",
+            tool_name="execute_python",
             risk_level="high",
         )
         assert high.to_sse_dict()["risk_level"] == "high"
 
         # 非审批事件：low 仍被省略（载荷瘦身契约不变）
         assert "risk_level" not in AgentEvent(type="tool_call", risk_level="low").to_sse_dict()
-        assert AgentEvent(type="tool_call", risk_level="medium").to_sse_dict()["risk_level"] == "medium"
+        assert (
+            AgentEvent(type="tool_call", risk_level="medium").to_sse_dict()["risk_level"]
+            == "medium"
+        )
 
 
 # ── 执行器级行为 ─────────────────────────────────────────────────────────────
@@ -250,10 +271,12 @@ class TestExecutorApprovalGate:
         """
         executor = _mk_executor(
             _cfg(approval_mode="risky"),
-            _client_with_tool_calls([
-                ("search_knowledge_base", '{"query": "q"}', "c1"),
-                ("execute_python", '{"code": "print(1)"}', "c2"),
-            ]),
+            _client_with_tool_calls(
+                [
+                    ("search_knowledge_base", '{"query": "q"}', "c1"),
+                    ("execute_python", '{"code": "print(1)"}', "c2"),
+                ]
+            ),
         )
         requests: list = []
         _arm(executor, outcome="paused", calls=requests)
@@ -281,11 +304,13 @@ class TestExecutorApprovalGate:
         )
         requests: list = []
         _arm(executor, outcome="paused", calls=requests)
-        executor.approval_decisions = [{
-            "tool_name": "execute_python",
-            "args_hash": approval.args_fingerprint({"code": "print(1)"}),
-            "decision": "approve",
-        }]
+        executor.approval_decisions = [
+            {
+                "tool_name": "execute_python",
+                "args_hash": approval.args_fingerprint({"code": "print(1)"}),
+                "decision": "approve",
+            }
+        ]
         spy = AsyncMock(return_value=ToolResult.ok(data="假执行结果"))
         with patch.object(tool_registry, "execute_detailed", new=spy):
             (events, exc), _, _ = await _run_step_once(executor)
@@ -303,12 +328,14 @@ class TestExecutorApprovalGate:
             _cfg(approval_mode="risky"),
             _client_with_tool_calls([("execute_python", '{"code": "print(1)"}', "c1")]),
         )
-        executor.approval_decisions = [{
-            "tool_name": "execute_python",
-            "args_hash": approval.args_fingerprint({"code": "print(1)"}),
-            "decision": "deny",
-            "note": "生产环境禁止明令",
-        }]
+        executor.approval_decisions = [
+            {
+                "tool_name": "execute_python",
+                "args_hash": approval.args_fingerprint({"code": "print(1)"}),
+                "decision": "deny",
+                "note": "生产环境禁止明令",
+            }
+        ]
 
         async def _boom(_req):
             raise AssertionError("已有 deny 决定，审批回调不得触发")
@@ -345,9 +372,7 @@ class TestExecutorApprovalGate:
         assert exc is None, "禁用工具不得触发审批暂停"
         assert requests == [], "禁用工具不应进入审批预检"
         assert spy.await_count == 0
-        assert any(
-            e.type == "tool_error" and e.error_type == "tool_disabled" for e in events
-        )
+        assert any(e.type == "tool_error" and e.error_type == "tool_disabled" for e in events)
 
     @pytest.mark.asyncio
     async def test_decision_bound_to_args_fingerprint(self):
@@ -357,11 +382,13 @@ class TestExecutorApprovalGate:
             _cfg(approval_mode="risky"),
             _client_with_tool_calls([("execute_python", '{"code": "print(2)"}', "c1")]),
         )
-        executor.approval_decisions = [{
-            "tool_name": "execute_python",
-            "args_hash": approval.args_fingerprint({"code": "print(1)"}),  # 批准的是别的参数
-            "decision": "approve",
-        }]
+        executor.approval_decisions = [
+            {
+                "tool_name": "execute_python",
+                "args_hash": approval.args_fingerprint({"code": "print(1)"}),  # 批准的是别的参数
+                "decision": "approve",
+            }
+        ]
         requests: list = []
         _arm(executor, outcome="paused", calls=requests)
         spy = AsyncMock(return_value=ToolResult.ok(data="x"))
@@ -508,10 +535,16 @@ class TestExecutorCancelChecks:
         async def _on_step_done(_step):
             flags["cancel"] = True
 
-        events, exc = await _drive(executor.execute(
-            plan=plan, history=None, organization_id=2, user_id=0,
-            enable_thinking=False, on_step_done=_on_step_done,
-        ))
+        events, exc = await _drive(
+            executor.execute(
+                plan=plan,
+                history=None,
+                organization_id=2,
+                user_id=0,
+                enable_thinking=False,
+                on_step_done=_on_step_done,
+            )
+        )
 
         assert isinstance(exc, approval.RunCancelled)
         assert calls["n"] == 1, "s2 不得再发起 LLM 调用"
@@ -522,6 +555,7 @@ class TestExecutorCancelChecks:
     @pytest.mark.asyncio
     async def test_cancel_channel_failure_is_not_cancel(self):
         """取消通道故障按"未取消"处理：打不坏正常执行。"""
+
         async def _broken():
             raise RuntimeError("redis down")
 

@@ -1,4 +1,5 @@
 """Prometheus metrics registry tests."""
+
 import os
 
 # Enable prometheus BEFORE importing the module
@@ -90,12 +91,14 @@ class TestPrometheusMetrics:
         """agent 侧独立口径（#239 minor-9）：model + direction 双标签。"""
         AGENT_TOKENS.labels(model="deepseek-chat", direction="input").inc(200)
         AGENT_TOKENS.labels(model="deepseek-chat", direction="output").inc(80)
-        assert _counter_value_labelled(
-            AGENT_TOKENS, {"model": "deepseek-chat", "direction": "input"}
-        ) >= 200
-        assert _counter_value_labelled(
-            AGENT_TOKENS, {"model": "deepseek-chat", "direction": "output"}
-        ) >= 80
+        assert (
+            _counter_value_labelled(AGENT_TOKENS, {"model": "deepseek-chat", "direction": "input"})
+            >= 200
+        )
+        assert (
+            _counter_value_labelled(AGENT_TOKENS, {"model": "deepseek-chat", "direction": "output"})
+            >= 80
+        )
         data = get_prometheus_metrics().decode("utf-8")
         assert "agent_tokens_total" in data
 
@@ -150,12 +153,18 @@ class TestAgentPrometheusMetrics:
     def test_tool_calls_labels(self):
         AGENT_TOOL_CALLS.labels(tool="search_knowledge_base", result="success").inc()
         AGENT_TOOL_CALLS.labels(tool="search_knowledge_base", result="error").inc()
-        assert _counter_value_labelled(
-            AGENT_TOOL_CALLS, {"tool": "search_knowledge_base", "result": "success"}
-        ) >= 1
-        assert _counter_value_labelled(
-            AGENT_TOOL_CALLS, {"tool": "search_knowledge_base", "result": "error"}
-        ) >= 1
+        assert (
+            _counter_value_labelled(
+                AGENT_TOOL_CALLS, {"tool": "search_knowledge_base", "result": "success"}
+            )
+            >= 1
+        )
+        assert (
+            _counter_value_labelled(
+                AGENT_TOOL_CALLS, {"tool": "search_knowledge_base", "result": "error"}
+            )
+            >= 1
+        )
 
     def test_tool_latency_observe(self):
         AGENT_TOOL_LATENCY.observe(0.1)
@@ -165,16 +174,12 @@ class TestAgentPrometheusMetrics:
     def test_reflection_decisions_labels(self):
         AGENT_REFLECTION_DECISIONS.labels(decision="pass").inc()
         AGENT_REFLECTION_DECISIONS.labels(decision="retry").inc()
-        assert _counter_value_labelled(
-            AGENT_REFLECTION_DECISIONS, {"decision": "pass"}
-        ) >= 1
+        assert _counter_value_labelled(AGENT_REFLECTION_DECISIONS, {"decision": "pass"}) >= 1
 
     def test_memory_recalls_labels(self):
         AGENT_MEMORY_RECALLS.labels(result="hit").inc()
         AGENT_MEMORY_RECALLS.labels(result="miss").inc()
-        assert _counter_value_labelled(
-            AGENT_MEMORY_RECALLS, {"result": "hit"}
-        ) >= 1
+        assert _counter_value_labelled(AGENT_MEMORY_RECALLS, {"result": "hit"}) >= 1
 
     def test_agent_metrics_in_export(self):
         """Agent metrics should appear in the exported Prometheus output."""

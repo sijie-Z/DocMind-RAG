@@ -65,6 +65,7 @@ def _public_config(data: dict[str, Any]) -> dict[str, Any]:
 
 class LLMConfigCreate(BaseModel):
     """Create a new LLM configuration."""
+
     provider: str = Field(..., description="Provider identifier")
     config_name: str = Field(..., max_length=100, description="Human-readable alias")
     api_key: str = Field(..., description="API key")
@@ -78,12 +79,15 @@ class LLMConfigCreate(BaseModel):
     def validate_provider(cls, v: str) -> str:
         v = v.strip().lower()
         if v not in SUPPORTED_PROVIDERS:
-            raise ValueError(f"不支持的 provider: {v}. 支持: {', '.join(sorted(SUPPORTED_PROVIDERS))}")
+            raise ValueError(
+                f"不支持的 provider: {v}. 支持: {', '.join(sorted(SUPPORTED_PROVIDERS))}"
+            )
         return v
 
 
 class LLMConfigUpdate(BaseModel):
     """Partial update for an existing config."""
+
     config_name: str | None = None
     api_key: str | None = None
     api_url: str | None = None
@@ -149,7 +153,8 @@ async def _load_all() -> dict[str, dict[str, Any]]:
         if reason is not None:
             logger.warning(
                 "LLM 配置 '%s' 的值损坏（%s）——保留占位条目（invalid=true），不静默丢弃",
-                k, reason,
+                k,
+                reason,
             )
             result[k] = _corrupt_placeholder(k, raw_text, reason)
         elif data is not None:
@@ -216,8 +221,7 @@ async def list_providers(
     return {
         "success": True,
         "data": [
-            {"key": k, "label": PROVIDER_LABELS.get(k, k)}
-            for k in sorted(SUPPORTED_PROVIDERS)
+            {"key": k, "label": PROVIDER_LABELS.get(k, k)} for k in sorted(SUPPORTED_PROVIDERS)
         ],
     }
 
@@ -287,8 +291,13 @@ async def create_config(
 
     all_configs[config_id] = data
     await _save_all(all_configs)
-    logger.info("LLM config '%s' created by user %d (provider=%s, id=%s)",
-                data["config_name"], current_user.id, data["provider"], config_id)
+    logger.info(
+        "LLM config '%s' created by user %d (provider=%s, id=%s)",
+        data["config_name"],
+        current_user.id,
+        data["provider"],
+        config_id,
+    )
 
     return {
         "success": True,

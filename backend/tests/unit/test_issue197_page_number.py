@@ -118,9 +118,7 @@ class TestChunkerPositions:
             assert isinstance(meta.get("start_pos"), int), (
                 f"chunk 必须携带 start_pos（#197 修前完全缺失），实际 {meta}"
             )
-            assert isinstance(meta.get("end_pos"), int), (
-                f"chunk 必须携带 end_pos，实际 {meta}"
-            )
+            assert isinstance(meta.get("end_pos"), int), f"chunk 必须携带 end_pos，实际 {meta}"
             assert meta["start_pos"] < meta["end_pos"]
 
         # 第一块从文首起，页码 1；第二块从「第二条」行首起，页码 2
@@ -136,9 +134,7 @@ class TestChunkerPositions:
 
         # 偏移必须真的指向源文：第二块文本与源文切片逐字一致
         s, e = c2["metadata"]["start_pos"], c2["metadata"]["end_pos"]
-        assert text[s:e] == c2["text"], (
-            "start_pos/end_pos 必须精确指向该 chunk 在原文中的位置"
-        )
+        assert text[s:e] == c2["text"], "start_pos/end_pos 必须精确指向该 chunk 在原文中的位置"
 
     @pytest.mark.asyncio
     async def test_overlong_split_pieces_keep_exact_spans(self):
@@ -198,9 +194,7 @@ class TestChunkerPositions:
         assert len(chunks) == 1
         meta = chunks[0]["metadata"]
         assert meta["start_pos"] == 0
-        assert meta["page_number"] == 1, (
-            "跨页的单 chunk 必须归起始页（#197 约定）"
-        )
+        assert meta["page_number"] == 1, "跨页的单 chunk 必须归起始页（#197 约定）"
         assert meta["end_pos"] == len(text)
 
     @pytest.mark.asyncio
@@ -221,9 +215,7 @@ class TestChunkerPositions:
         assert len(chunks) == 2, "回退路径按长度二分"
         assert chunks[0]["metadata"]["start_pos"] == 0
         assert chunks[0]["metadata"]["page_number"] == 1
-        assert chunks[1]["metadata"]["start_pos"] >= boundary, (
-            "右半段的起始偏移必须落在第二页"
-        )
+        assert chunks[1]["metadata"]["start_pos"] >= boundary, "右半段的起始偏移必须落在第二页"
         assert chunks[1]["metadata"]["page_number"] == 2
         for ch in chunks:
             s, e = ch["metadata"]["start_pos"], ch["metadata"]["end_pos"]
@@ -236,9 +228,7 @@ class TestChunkerPositions:
         text = "".join(f"这是第{i}句普通的说明文字。" for i in range(60))
         with patch("app.services.semantic_chunker.embedding_service") as mock_emb:
             mock_emb.get_embeddings = AsyncMock(side_effect=Exception("API down"))
-            chunks = await chunker.split_text(
-                text, page_ranges=[(1, 0, len(text))]
-            )
+            chunks = await chunker.split_text(text, page_ranges=[(1, 0, len(text))])
         assert len(chunks) == 1
         meta = chunks[0]["metadata"]
         assert (meta["start_pos"], meta["end_pos"]) == (0, len(text))
@@ -271,14 +261,24 @@ class TestChunkerPositions:
     def test_merge_tail_extends_end_pos(self):
         chunker = SemanticChunker()
         chunks = [
-            {"text": "A" * 250, "metadata": {
-                "section_title": "第一条 总则", "_partition": 0,
-                "start_pos": 0, "end_pos": 250,
-            }},
-            {"text": "短尾块", "metadata": {
-                "section_title": "第一条 总则", "_partition": 0,
-                "start_pos": 300, "end_pos": 303,
-            }},
+            {
+                "text": "A" * 250,
+                "metadata": {
+                    "section_title": "第一条 总则",
+                    "_partition": 0,
+                    "start_pos": 0,
+                    "end_pos": 250,
+                },
+            },
+            {
+                "text": "短尾块",
+                "metadata": {
+                    "section_title": "第一条 总则",
+                    "_partition": 0,
+                    "start_pos": 300,
+                    "end_pos": 303,
+                },
+            },
         ]
         out = chunker._merge_small_tails(chunks)
         assert len(out) == 1
@@ -461,9 +461,7 @@ class TestDocumentProcessorPageNumber:
         await processor._replace_document_state(_doc(), [_chunk_with_page(7)], [[0.1, 0.2]])
 
         row = captured["rows"][0]
-        assert row.page_number == 7, (
-            "document_chunks.page_number 必须落库 7（#197 修前恒 NULL）"
-        )
+        assert row.page_number == 7, "document_chunks.page_number 必须落库 7（#197 修前恒 NULL）"
         assert row.start_pos == 120 and row.end_pos == 145, (
             "start_pos/end_pos 也必须随 chunk 落库（修前同样取不到）"
         )
@@ -520,12 +518,16 @@ class TestRetrievalPassthrough:
     def test_build_sources_list_exposes_page_number(self):
         from app.services.chat_service import build_sources_list
 
-        sources = build_sources_list([{
-            "filename": "policy.pdf",
-            "page_number": 42,
-            "document_id": "doc01",
-            "text": "正文",
-        }])
+        sources = build_sources_list(
+            [
+                {
+                    "filename": "policy.pdf",
+                    "page_number": 42,
+                    "document_id": "doc01",
+                    "text": "正文",
+                }
+            ]
+        )
         assert sources[0]["pageNumber"] == 42, (
             "来源卡片必须携带 pageNumber（前端「第 N 页」的真实数据来源）"
         )
@@ -533,14 +535,16 @@ class TestRetrievalPassthrough:
     def test_build_sources_list_page_number_none_when_absent(self):
         from app.services.chat_service import build_sources_list
 
-        sources = build_sources_list([{
-            "filename": "notes.txt",
-            "document_id": "doc02",
-            "text": "正文",
-        }])
-        assert sources[0]["pageNumber"] is None, (
-            "无页概念的文档必须如实返回 None，不得伪造页码"
+        sources = build_sources_list(
+            [
+                {
+                    "filename": "notes.txt",
+                    "document_id": "doc02",
+                    "text": "正文",
+                }
+            ]
         )
+        assert sources[0]["pageNumber"] is None, "无页概念的文档必须如实返回 None，不得伪造页码"
 
     def test_search_response_schema_exposes_page_number(self):
         """/knowledge/search 的响应契约也要携带页码（检索字段贯通）。"""
@@ -549,9 +553,7 @@ class TestRetrievalPassthrough:
         with_page = SearchResult(
             id="c1", text="正文", score=0.5, metadata={}, source={}, page_number=9
         )
-        without_page = SearchResult(
-            id="c2", text="正文", score=0.5, metadata={}, source={}
-        )
+        without_page = SearchResult(id="c2", text="正文", score=0.5, metadata={}, source={})
         assert with_page.page_number == 9
         assert without_page.page_number is None
 
@@ -574,22 +576,27 @@ class TestKnowledgeServicePassthrough:
         from app.services.knowledge_service import KnowledgeService
 
         fake = MagicMock()
-        fake.search_knowledge_base = AsyncMock(return_value=([{
-            "document_id": "doc01",
-            "text": "数据安全分级正文",
-            "score": 0.5,
-            "relevance_score": None,
-            "filename": "policy.pdf",
-            "snippet": "数据安全分级正文",
-            "overlap_score": 0.3,
-            "mmr_score": 0.0,
-            "page_number": 6,
-        }], None))
+        fake.search_knowledge_base = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "document_id": "doc01",
+                        "text": "数据安全分级正文",
+                        "score": 0.5,
+                        "relevance_score": None,
+                        "filename": "policy.pdf",
+                        "snippet": "数据安全分级正文",
+                        "overlap_score": 0.3,
+                        "mmr_score": 0.0,
+                        "page_number": 6,
+                    }
+                ],
+                None,
+            )
+        )
         monkeypatch.setattr(rag_service_mod, "rag_service", fake)
 
-        out = await KnowledgeService().search_knowledge(
-            "数据安全分级", 1, top_k=5
-        )
+        out = await KnowledgeService().search_knowledge("数据安全分级", 1, top_k=5)
         assert out[0]["page_number"] == 6, (
             "knowledge_service 重建结果时丢弃 page_number —— /search 端点将恒返回 null"
         )

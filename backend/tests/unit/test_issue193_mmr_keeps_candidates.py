@@ -26,6 +26,7 @@
 - 全部候选都无向量时不再保留原 fused 序 →
   ``test_all_candidates_without_embedding_keep_fused_order``。
 """
+
 import pytest
 
 from app.core.config import settings
@@ -35,8 +36,9 @@ from app.rag.retriever import HybridRetriever
 TERM_QUERY = "报销流程说明"  # 非条号直查；查询术语与三条正文都强匹配
 
 
-def _hit(chunk_id: str, text: str, score: float, embedding: list[float] | None,
-         doc_id: str) -> dict:
+def _hit(
+    chunk_id: str, text: str, score: float, embedding: list[float] | None, doc_id: str
+) -> dict:
     source = {"content": text, "filename": f"{chunk_id}.pdf", "document_id": doc_id}
     if embedding is not None:
         source["embedding"] = embedding
@@ -85,9 +87,7 @@ async def test_embeddingless_candidate_survives_mmr(monkeypatch):
     docs, _qv, _dbg, _deg = await retriever.retrieve(TERM_QUERY, 1, top_k=3)
 
     chunk_ids = [d["chunk_id"] for d in docs]
-    assert "c2" in chunk_ids, (
-        f"无向量候选被 MMR 静默剔除（当前 {chunk_ids}）；应作为确定性回退保留"
-    )
+    assert "c2" in chunk_ids, f"无向量候选被 MMR 静默剔除（当前 {chunk_ids}）；应作为确定性回退保留"
 
 
 @pytest.mark.asyncio
@@ -126,8 +126,7 @@ async def test_mmr_debug_counts(monkeypatch):
 async def test_all_candidates_without_embedding_keep_fused_order(monkeypatch):
     """全部候选都无向量：MMR 无输入，保持原 fused 序（与修复前一致）。"""
     retriever = HybridRetriever()
-    _wire_hybrid(monkeypatch, retriever, _three_hits(mode="none"),
-                 [1.0, 0.0, 0.0, 0.0])
+    _wire_hybrid(monkeypatch, retriever, _three_hits(mode="none"), [1.0, 0.0, 0.0, 0.0])
 
     docs, _qv, dbg, _deg = await retriever.retrieve(TERM_QUERY, 1, top_k=3, debug=True)
 

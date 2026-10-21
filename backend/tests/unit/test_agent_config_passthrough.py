@@ -8,6 +8,7 @@
 
 每条断言附变异点（把对应接线删回原状，用例必须变红）。
 """
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock  # noqa: F401
 
@@ -45,7 +46,9 @@ def redis_store(monkeypatch):
 async def test_config_update_persists_agent_knobs(redis_store):
     """变异点：删去 PUT 处理里的 max_plan_steps 等赋值 → 本用例红。"""
     body = agent_ep.AgentConfigUpdate(
-        max_tokens=2048, max_plan_steps=7, max_retries_per_step=1,
+        max_tokens=2048,
+        max_plan_steps=7,
+        max_retries_per_step=1,
     )
     resp = await agent_ep.update_config(body, current_user=_fake_user())
 

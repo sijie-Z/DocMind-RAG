@@ -26,6 +26,7 @@ from app.agent.planner import Plan, PlanStep
 @pytest.fixture(autouse=True)
 def _no_ctx_persistence(monkeypatch):
     """ExecutionContext.save() 在测试里不应写 Redis / benchmark 目录。"""
+
     async def _save(self, ttl=86400 * 7):
         return False
 
@@ -44,16 +45,15 @@ def _chain(*descriptions: str) -> Plan:
     prev: str | None = None
     for i, desc in enumerate(descriptions, start=1):
         sid = f"s{i}"
-        steps.append(PlanStep(id=sid, description=desc,
-                              dependencies=[prev] if prev else []))
+        steps.append(PlanStep(id=sid, description=desc, dependencies=[prev] if prev else []))
         prev = sid
     return Plan(id="p1", goal="g", steps=steps)
 
 
 def _completed_spy(calls: list[str], on_run=None):
     """替身 _execute_step_with_retry：记录被执行的 step、标记完成、yield 一个 chunk。"""
-    async def _spy(*, step, plan, history, organization_id, user_id,
-                   enable_thinking, ctx=None):
+
+    async def _spy(*, step, plan, history, organization_id, user_id, enable_thinking, ctx=None):
         calls.append(step.id)
         step.status = "completed"
         if on_run is not None:
@@ -131,18 +131,40 @@ async def test_budget_blocks_fallback_tool_calls():
 
     calls: list[str] = []
 
-    async def _spy(*, step, plan, history, organization_id, user_id, enable_thinking,
-                   error_context="", ctx=None):
+    async def _spy(
+        *,
+        step,
+        plan,
+        history,
+        organization_id,
+        user_id,
+        enable_thinking,
+        error_context="",
+        ctx=None,
+    ):
         calls.append(error_context or "main")
         ctx.total_tokens = 100  # 主调用期间耗尽预算
-        yield AgentEvent(type="tool_error", content="boom", error_type="budget_exceeded",
-                         plan_id=plan.id, plan_step_id=step.id)
+        yield AgentEvent(
+            type="tool_error",
+            content="boom",
+            error_type="budget_exceeded",
+            plan_id=plan.id,
+            plan_step_id=step.id,
+        )
 
     ex._execute_step_once = _spy
-    events = [e async for e in ex._execute_step_with_retry(
-        step=step, plan=plan, history=None, organization_id=1, user_id=0,
-        enable_thinking=False, ctx=ctx,
-    )]
+    events = [
+        e
+        async for e in ex._execute_step_with_retry(
+            step=step,
+            plan=plan,
+            history=None,
+            organization_id=1,
+            user_id=0,
+            enable_thinking=False,
+            ctx=ctx,
+        )
+    ]
 
     assert calls == ["main"], "预算已尽不得再发起 fallback 调用"
     assert step.status == "failed"
@@ -187,10 +209,18 @@ async def test_budget_exceeded_blocks_new_llm_calls():
     ctx = ExecutionContext(query="q")
     ctx.total_tokens = 100  # 已达上限
 
-    events = [e async for e in ex._execute_step_with_retry(
-        step=step, plan=plan, history=None, organization_id=1, user_id=0,
-        enable_thinking=False, ctx=ctx,
-    )]
+    events = [
+        e
+        async for e in ex._execute_step_with_retry(
+            step=step,
+            plan=plan,
+            history=None,
+            organization_id=1,
+            user_id=0,
+            enable_thinking=False,
+            ctx=ctx,
+        )
+    ]
 
     assert client.chat.completions.create.call_count == 0, "预算已尽不得发起任何 LLM 调用"
     assert step.status == "failed"
@@ -247,13 +277,18 @@ class _FakeMemory:
 
 
 class _OneStepPlanner:
-    async def plan(self, query, history=None, memory_context="", ctx=None,
-                   replan_feedback=""):
+    async def plan(self, query, history=None, memory_context="", ctx=None, replan_feedback=""):
         yield AgentEvent(type="plan_start", plan_id="plan-1", content="制定计划...")
-        yield AgentEvent(type="plan_step", plan_id="plan-1", plan_step_id="s1",
-                         content="唯一一步", tool_hint="search_knowledge_base")
-        yield AgentEvent(type="plan_complete", plan_id="plan-1", plan_goal="目标",
-                         content="计划完成")
+        yield AgentEvent(
+            type="plan_step",
+            plan_id="plan-1",
+            plan_step_id="s1",
+            content="唯一一步",
+            tool_hint="search_knowledge_base",
+        )
+        yield AgentEvent(
+            type="plan_complete", plan_id="plan-1", plan_goal="目标", content="计划完成"
+        )
 
 
 class _BudgetBurningExecutor:
@@ -265,14 +300,24 @@ class _BudgetBurningExecutor:
     def reset_for_request(self):
         pass
 
-    async def execute(self, plan, history=None, organization_id=1, user_id=0,
-                      enable_thinking=True, ctx=None, on_step_done=None,
-                      human_guidance="", document_context=""):
+    async def execute(
+        self,
+        plan,
+        history=None,
+        organization_id=1,
+        user_id=0,
+        enable_thinking=True,
+        ctx=None,
+        on_step_done=None,
+        human_guidance="",
+        document_context="",
+    ):
         for s in plan.steps:
             s.status = "completed"
             plan.completed_steps += 1
             self.memory.store_step_result(
-                s.id, {"description": s.description, "status": "completed", "result": "结果"},
+                s.id,
+                {"description": s.description, "status": "completed", "result": "结果"},
             )
         if ctx is not None:
             ctx.total_tokens = 999
@@ -285,8 +330,7 @@ class _CountingReflector:
 
     async def reflect(self, plan, results, ctx=None):
         self.calls += 1
-        yield AgentEvent(type="reflection", reflection_result="pass",
-                         content="", plan_id=plan.id)
+        yield AgentEvent(type="reflection", reflection_result="pass", content="", plan_id=plan.id)
 
 
 class _CountingReviewer:
@@ -303,9 +347,14 @@ async def test_budget_gate_skips_reflection_and_review():
     """变异点：删去 loop 反思门/审查门的 over_budget 条件 → 两器被调用 → 本测试红。"""
     loop = PERAgentLoop(
         MagicMock(),
-        AgentConfig(enable_memory=False, enable_thinking=False, enable_experience=False,
-                    max_total_tokens=100),
-        organization_id=1, user_id=0,
+        AgentConfig(
+            enable_memory=False,
+            enable_thinking=False,
+            enable_experience=False,
+            max_total_tokens=100,
+        ),
+        organization_id=1,
+        user_id=0,
     )
     memory = _FakeMemory()
     loop.memory = memory
@@ -317,7 +366,8 @@ async def test_budget_gate_skips_reflection_and_review():
     loop._write_experiences = AsyncMock()
 
     events = await asyncio.wait_for(
-        _collect(loop), timeout=15.0,
+        _collect(loop),
+        timeout=15.0,
     )
 
     assert reflector.calls == 0, "预算已尽不得再发起反思调用"
@@ -349,7 +399,7 @@ def test_max_total_tokens_roundtrip():
 def test_over_budget_helper_semantics():
     unlimited = AgentConfig()  # max_total_tokens=0
     ctx = ExecutionContext(query="q")
-    ctx.total_tokens = 10 ** 9
+    ctx.total_tokens = 10**9
     assert unlimited.over_budget(ctx) is False
     assert unlimited.over_budget(None) is False
 

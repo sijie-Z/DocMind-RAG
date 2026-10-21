@@ -1,6 +1,7 @@
 """
 提示词模板模型
 """
+
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -12,6 +13,7 @@ from app.core.database import Base
 
 class PromptTemplate(Base):
     """提示词模板模型"""
+
     __tablename__ = "prompt_templates"
     # A2：模板名唯一性按组织划分（系统模板 org=NULL，不受此约束；
     # 系统模板的重名由 seed / create 的可见性冲突检查兜底）。
@@ -44,6 +46,12 @@ class PromptTemplate(Base):
     )
     category: Mapped[str] = mapped_column(String(50), default="general", comment="分类")
     version: Mapped[int] = mapped_column(Integer, default=1, comment="当前版本号")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now(), comment="更新时间")
-    creator_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), comment="创建者ID")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), comment="创建时间"
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now(), comment="更新时间"
+    )
+    creator_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), comment="创建者ID"
+    )

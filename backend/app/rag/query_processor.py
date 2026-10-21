@@ -1,4 +1,5 @@
 """Query processing — intent classification, query rewrite, HyDE generation."""
+
 import json
 import logging
 import re
@@ -9,7 +10,9 @@ from app.core.prometheus import RAG_QUERY_REWRITE_TOTAL
 
 logger = logging.getLogger(__name__)
 
-QueryIntent = Literal["factual", "procedural", "list", "definition", "comparison", "causal", "summary", "other"]
+QueryIntent = Literal[
+    "factual", "procedural", "list", "definition", "comparison", "causal", "summary", "other"
+]
 QueryComplexity = Literal["simple", "medium", "complex"]
 RetrievalStrategy = Literal["keyword_only", "hybrid", "hybrid_hyde", "vector_only"]
 
@@ -23,11 +26,42 @@ class QueryComplexityClassifier:
     """
 
     COMPLEXITY_SIGNALS = {
-        "high": ["对比", "比较", "区别", "优缺点", "分析", "评估", "综合", "总结",
-                  "为什么", "原因", "影响", "趋势", "策略", "方案", "建议",
-                  "compare", "analyze", "evaluate", "synthesize", "trade-off"],
-        "medium": ["如何", "怎么", "步骤", "流程", "有哪些", "列出", "解释",
-                    "how", "explain", "list", "describe", "define"],
+        "high": [
+            "对比",
+            "比较",
+            "区别",
+            "优缺点",
+            "分析",
+            "评估",
+            "综合",
+            "总结",
+            "为什么",
+            "原因",
+            "影响",
+            "趋势",
+            "策略",
+            "方案",
+            "建议",
+            "compare",
+            "analyze",
+            "evaluate",
+            "synthesize",
+            "trade-off",
+        ],
+        "medium": [
+            "如何",
+            "怎么",
+            "步骤",
+            "流程",
+            "有哪些",
+            "列出",
+            "解释",
+            "how",
+            "explain",
+            "list",
+            "describe",
+            "define",
+        ],
     }
 
     @classmethod
@@ -119,16 +153,24 @@ def effective_search_mode(query: str, search_mode: str | None = None) -> str:
 # 不变式：每个意图的 boost 字段 ⊆ BOOSTABLE_FIELDS ⊆ mapping.properties，
 # 由 tests/unit/test_issue194_boost_fields.py 钉住（只能保证「字段存在且
 # 有加权」，不能证明索引期确有写入方——写侧覆盖随 #188 的验收补齐）。
-BOOSTABLE_FIELDS: frozenset[str] = frozenset(
-    {"content", "chunk_text", "filename", "section_title"}
-)
+BOOSTABLE_FIELDS: frozenset[str] = frozenset({"content", "chunk_text", "filename", "section_title"})
 
 
 class QueryIntentClassifier:
     """Classifies query intent to optimize retrieval strategy."""
 
     INTENT_PATTERNS: dict[QueryIntent, list[str]] = {
-        "factual": ["是谁", "是什么", "在哪", "什么时候", "第几", "多少时间", "长度", "面积", "人口"],
+        "factual": [
+            "是谁",
+            "是什么",
+            "在哪",
+            "什么时候",
+            "第几",
+            "多少时间",
+            "长度",
+            "面积",
+            "人口",
+        ],
         "procedural": ["如何", "怎么", "怎样", "步骤", "流程", "操作", "方法", "过程", "操作步骤"],
         "list": ["有哪些", "有什么", "列出", "哪些", "名单", "列表", "罗列"],
         "definition": ["什么是", "定义", "含义", "意思", "概念", "解释"],
@@ -187,9 +229,7 @@ class QueryIntentClassifier:
                     name,
                 )
         if not fields:
-            logger.warning(
-                "#194: intent=%r 的 boost 字段全部不在白名单，回落到默认字段", intent
-            )
+            logger.warning("#194: intent=%r 的 boost 字段全部不在白名单，回落到默认字段", intent)
             fields = ["chunk_text^2", "content^2"]
         return fields
 
@@ -208,7 +248,7 @@ def extract_query_terms(query: str, limit: int | None = 12) -> list[str]:
     raw_terms = []
     for seg in cjk_segments:
         for i in range(len(seg) - 1):
-            gram = seg[i:i + 2]
+            gram = seg[i : i + 2]
             if gram not in raw_terms:
                 raw_terms.append(gram)
     en_terms = re.findall(r"[a-z0-9]{2,}", q)
@@ -216,10 +256,46 @@ def extract_query_terms(query: str, limit: int | None = 12) -> list[str]:
         if t not in raw_terms:
             raw_terms.append(t)
     stop_words = {
-        "请", "帮我", "一下", "关于", "如何", "怎么", "什么", "是什么", "可以", "这个", "那个",
-        "因为", "所以", "如果", "但是", "而且", "或者", "也是", "还是", "并且",
-        "the", "and", "for", "with", "from", "that", "this", "is", "are", "was",
-        "be", "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "请",
+        "帮我",
+        "一下",
+        "关于",
+        "如何",
+        "怎么",
+        "什么",
+        "是什么",
+        "可以",
+        "这个",
+        "那个",
+        "因为",
+        "所以",
+        "如果",
+        "但是",
+        "而且",
+        "或者",
+        "也是",
+        "还是",
+        "并且",
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "that",
+        "this",
+        "is",
+        "are",
+        "was",
+        "be",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
     }
     terms = [t for t in raw_terms if t.strip() and len(t) >= 2 and t not in stop_words]
     return terms if limit is None else terms[:limit]
@@ -298,7 +374,9 @@ async def rewrite_query_llm(query: str, openai_client, model: str) -> list[str]:
         return [query]
 
 
-async def decompose_query(query: str, openai_client, model: str, max_subqueries: int = 4) -> list[str]:
+async def decompose_query(
+    query: str, openai_client, model: str, max_subqueries: int = 4
+) -> list[str]:
     """Decompose a complex query into focused sub-questions for multi-perspective RAG.
 
     Uses json_object response mode to avoid regex fragility.
@@ -325,10 +403,7 @@ async def decompose_query(query: str, openai_client, model: str, max_subqueries:
         content = resp.choices[0].message.content or ""
         parsed = json.loads(content)
         subqueries = (
-            parsed.get("sub_questions")
-            or parsed.get("subquestions")
-            or parsed.get("queries")
-            or []
+            parsed.get("sub_questions") or parsed.get("subquestions") or parsed.get("queries") or []
         )
         if isinstance(subqueries, list) and len(subqueries) >= 1:
             seen = {query.lower().strip()}

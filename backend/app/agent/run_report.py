@@ -53,15 +53,17 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
     # be narrative, not observation.
     tool_calls = []
     for step in ctx.completed_steps:
-        tool_calls.append({
-            "step_id": step.step_id,
-            "description": step.description,
-            "tool": step.tool_used,
-            "status": step.status,
-            "duration_ms": round(step.duration_ms, 1),
-            "error": step.error,
-            "result_preview": step.result_summary[:200] if step.result_summary else "",
-        })
+        tool_calls.append(
+            {
+                "step_id": step.step_id,
+                "description": step.description,
+                "tool": step.tool_used,
+                "status": step.status,
+                "duration_ms": round(step.duration_ms, 1),
+                "error": step.error,
+                "result_preview": step.result_summary[:200] if step.result_summary else "",
+            }
+        )
 
     # Evaluation outcome — reflected in the reflect-phase decision the
     # run already recorded (pass / retry / replan). pass/retry are surfaced
@@ -91,11 +93,7 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
     fatal_raw = qg_artifact.get("fatal_issues")
     fatal_issues = list(fatal_raw) if isinstance(fatal_raw, list) else []
     review_recommendation = review_artifact.get("recommendation")
-    clean_success = (
-        not fatal_issues
-        and review_recommendation != "reject"
-        and not ctx.failures
-    )
+    clean_success = not fatal_issues and review_recommendation != "reject" and not ctx.failures
 
     evaluation = {
         "reflect_decisions": reflect_reasons or ["(no reflection recorded)"],
@@ -158,7 +156,9 @@ def render_run_report_text(report: dict[str, Any]) -> str:
     lines.append("")
     lines.append("## Steps")
     for s in report["steps"]:
-        lines.append(f"  - [{s['status']}] {s['description']} (tool={s['tool']}, {s['duration_ms']}ms)")
+        lines.append(
+            f"  - [{s['status']}] {s['description']} (tool={s['tool']}, {s['duration_ms']}ms)"
+        )
     lines.append("")
     lines.append("## Tool calls")
     for t in report["tool_calls"]:

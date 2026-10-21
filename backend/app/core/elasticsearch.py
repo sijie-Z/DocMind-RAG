@@ -51,11 +51,15 @@ class _ESHolder:
                 request_timeout=5,
             )
             info = await self._client.info()
-            logger.info(f"Elasticsearch connected, version: {info.get('version', {}).get('number', 'unknown')}")
+            logger.info(
+                f"Elasticsearch connected, version: {info.get('version', {}).get('number', 'unknown')}"
+            )
 
             # Detect IK analyzer at init time — store on holder, not settings
             try:
-                await self._client.indices.analyze(body={"analyzer": "ik_smart", "text": "你好世界"})
+                await self._client.indices.analyze(
+                    body={"analyzer": "ik_smart", "text": "你好世界"}
+                )
                 logger.info("IK analyzer detected — using ik_smart/ik_max_word")
                 self.es_analyzer = "ik_smart"
                 self.es_search_analyzer = "ik_max_word"
@@ -195,7 +199,7 @@ def _knowledge_index_mapping() -> dict:
                     "similarity": "cosine",
                 },
                 "metadata": {"type": "object", "enabled": False},
-            }
+            },
         },
         # 安全修复：副本数由配置控制（生产建议 ≥1，避免节点故障丢数据）
         "settings": {
@@ -283,9 +287,7 @@ async def _create_index_if_not_exists(client: AsyncElasticsearch):
     # issue #196：模型一致性——维度相同不代表向量空间相同。
     # 索引 _meta 记录了建索引时的模型；与当前解析出的模型不一致时拒绝使用该索引
     # （绝不自动重建：删除必须由人显式发起，见 recreate_knowledge_index）。
-    index_meta = (
-        mapping.get(index_name, {}).get("mappings", {}).get("_meta") or {}
-    )
+    index_meta = mapping.get(index_name, {}).get("mappings", {}).get("_meta") or {}
     index_model = index_meta.get("embedding_model")
     current_model = resolve_embedding_model()
     if index_model is None:
@@ -423,9 +425,7 @@ class ElasticsearchTools:
     @staticmethod
     async def update_document(doc_id: str, document: dict):
         client = await get_elasticsearch()
-        return await client.update(
-            index=settings.ELASTICSEARCH_INDEX_NAME, id=doc_id, doc=document
-        )
+        return await client.update(index=settings.ELASTICSEARCH_INDEX_NAME, id=doc_id, doc=document)
 
     @staticmethod
     async def delete_document(doc_id: str):
@@ -440,8 +440,15 @@ class ElasticsearchTools:
             "query": query.get("query", {"match_all": {}}),
         }
         for key in [
-            "size", "from", "sort", "_source", "highlight",
-            "min_score", "aggs", "post_filter", "runtime_mappings",
+            "size",
+            "from",
+            "sort",
+            "_source",
+            "highlight",
+            "min_score",
+            "aggs",
+            "post_filter",
+            "runtime_mappings",
         ]:
             if key in query:
                 search_params[key] = query[key]

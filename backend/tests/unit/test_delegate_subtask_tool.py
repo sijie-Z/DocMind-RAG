@@ -6,6 +6,7 @@
 驱动方式：假 LLM（MagicMock 的 `chat.completions.create`）——子代理 PERAgentLoop
 在工具循环里拿到的就是它；不触达任何外部 API。
 """
+
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -74,8 +75,7 @@ def test_tool_registered_with_delegation_tag_only_for_parent():
     names_all = {t["function"]["name"] for t in tool_registry.to_openai_tools()}
     assert "delegate_subtask" in names_all
     names_child = {
-        t["function"]["name"]
-        for t in tool_registry.to_openai_tools(["search", "analysis"])
+        t["function"]["name"] for t in tool_registry.to_openai_tools(["search", "analysis"])
     }
     assert "delegate_subtask" not in names_child, "递归防护的静态面：tag 过滤"
 

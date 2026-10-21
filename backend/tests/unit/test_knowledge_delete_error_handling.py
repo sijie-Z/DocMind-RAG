@@ -10,6 +10,7 @@ fail_count 后原因同样无处可见。修复后：
 
 不依赖数据库：会话工厂/服务方法按用例替换。
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -126,14 +127,17 @@ async def test_endpoint_surfaces_service_failure_reason(monkeypatch):
     doc.filename = "x.txt"
     monkeypatch.setattr(knowledge_api, "get_document_for_user", AsyncMock(return_value=doc))
     monkeypatch.setattr(
-        knowledge_api.knowledge_service, "delete_knowledge",
+        knowledge_api.knowledge_service,
+        "delete_knowledge",
         AsyncMock(side_effect=AppError("删除文档失败: IntegrityError: (1451, 'foreign key')")),
     )
     audit = AsyncMock()
     monkeypatch.setattr(knowledge_api.audit_service, "log_activity", audit)
 
     with pytest.raises(AppError) as exc_info:
-        await knowledge_api.delete_knowledge_document("doc-1", current_user=MagicMock(), db=MagicMock())
+        await knowledge_api.delete_knowledge_document(
+            "doc-1", current_user=MagicMock(), db=MagicMock()
+        )
 
     assert exc_info.value.status_code == 500
     # 不再被吞成笼统的「删除失败」：消息里能定位到原因
@@ -149,11 +153,15 @@ async def test_endpoint_delete_success_returns_success_payload(monkeypatch):
     doc.organization_id = 1
     doc.filename = "x.txt"
     monkeypatch.setattr(knowledge_api, "get_document_for_user", AsyncMock(return_value=doc))
-    monkeypatch.setattr(knowledge_api.knowledge_service, "delete_knowledge", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        knowledge_api.knowledge_service, "delete_knowledge", AsyncMock(return_value=True)
+    )
     audit = AsyncMock()
     monkeypatch.setattr(knowledge_api.audit_service, "log_activity", audit)
 
-    result = await knowledge_api.delete_knowledge_document("doc-1", current_user=MagicMock(), db=MagicMock())
+    result = await knowledge_api.delete_knowledge_document(
+        "doc-1", current_user=MagicMock(), db=MagicMock()
+    )
 
     assert result == {"success": True, "message": "删除成功"}
     audit.assert_awaited_once()
@@ -164,11 +172,14 @@ async def test_endpoint_keeps_404_for_missing_document(monkeypatch):
     from app.api.v1.endpoints import knowledge as knowledge_api
 
     monkeypatch.setattr(
-        knowledge_api, "get_document_for_user",
+        knowledge_api,
+        "get_document_for_user",
         AsyncMock(side_effect=NotFoundError("文档不存在")),
     )
 
     with pytest.raises(NotFoundError) as exc_info:
-        await knowledge_api.delete_knowledge_document("missing", current_user=MagicMock(), db=MagicMock())
+        await knowledge_api.delete_knowledge_document(
+            "missing", current_user=MagicMock(), db=MagicMock()
+        )
 
     assert exc_info.value.status_code == 404

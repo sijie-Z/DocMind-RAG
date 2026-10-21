@@ -7,6 +7,7 @@
   `_learn_skills` 质检全 A 才学；使用结果反馈（B2）；过期清理（B2）；同 query 去重（m3）；
   触发词重复记账去重。
 """
+
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -50,9 +51,7 @@ def test_skill_tools_absent_from_child_toolset():
 
 @pytest.mark.asyncio
 async def test_load_skill_reference_guide_and_reference():
-    listed = await tool_registry.execute_detailed(
-        "list_skills", {}, organization_id=1, user_id=0
-    )
+    listed = await tool_registry.execute_detailed("list_skills", {}, organization_id=1, user_id=0)
     assert listed.success and "ai-podcast" in listed.data
 
     guide = await tool_registry.execute_detailed(
@@ -141,8 +140,9 @@ async def test_executor_prompt_injects_skills_index_per_switch():
     # 评审 B1：受限工具上下文（tool_tags 非空，如子代理）看不到技能工具（schema 过滤 +
     # 执行层白名单），提示词同样不得注入索引——不能承诺一个必被拒绝的工具。
     msgs_child = await _run_with(
-        AgentConfig(enable_planning=False, enable_reflection=False,
-                    tool_tags=["search", "analysis"])
+        AgentConfig(
+            enable_planning=False, enable_reflection=False, tool_tags=["search", "analysis"]
+        )
     )
     sys_child = [m for m in msgs_child if m.get("role") == "system"][0]["content"]
     assert "## 可用技能" not in sys_child, "受限上下文不得注入技能索引（B1）"
@@ -223,9 +223,7 @@ async def test_apply_skill_hints_respects_disabled_tools():
     """
     from app.agent.loop import PERAgentLoop
 
-    loop = PERAgentLoop(
-        MagicMock(), AgentConfig(disabled_tools=["web_search"]), organization_id=1
-    )
+    loop = PERAgentLoop(MagicMock(), AgentConfig(disabled_tools=["web_search"]), organization_id=1)
     loop.skill_manager = MagicMock()
     loop.skill_manager.match.return_value = SimpleNamespace(
         id="sk-11",
@@ -336,7 +334,7 @@ async def test_skill_outcome_feedback_success_failure_and_no_evidence():
 
     loop.skill_manager.record_success.reset_mock()
     await loop._record_skill_outcome(None, {"grades": {"s1": ("A", "")}})  # 未命中
-    await loop._record_skill_outcome("sk-1", {})                           # 无证据
+    await loop._record_skill_outcome("sk-1", {})  # 无证据
     assert loop.skill_manager.record_success.await_count == 0
 
 
@@ -351,7 +349,8 @@ async def test_skill_feedback_strengthens_matching_and_refreshes():
 
     mgr = SkillManager()
     skill = await mgr.create_skill(
-        name="Auto: t", description="d",
+        name="Auto: t",
+        description="d",
         trigger_patterns=["帮我生成播客脚本", "并配上开场音乐"],
         tool_sequence=[{"tool_name": "search_knowledge_base", "description": "x"}],
     )
@@ -379,8 +378,10 @@ async def test_prune_stale_removes_aged_skills():
 
     mgr = SkillManager()
     skill = await mgr.create_skill(
-        name="Auto: t", description="d",
-        trigger_patterns=["abc"], tool_sequence=[{"tool_name": "x"}],
+        name="Auto: t",
+        description="d",
+        trigger_patterns=["abc"],
+        tool_sequence=[{"tool_name": "x"}],
     )
     skill.last_used_at = _time.time() - 8 * 24 * 3600
     assert await mgr.prune_stale() == 1
@@ -439,7 +440,8 @@ async def test_dedup_keeps_existing_patterns_and_strengthened_match_intact():
 
     mgr = SkillManager()
     legacy = await mgr.create_skill(
-        name="Auto: 存量", description="d",
+        name="Auto: 存量",
+        description="d",
         trigger_patterns=["帮我生成播客脚本", "帮我生成播客脚本"],  # 修复前学习侧产物
         tool_sequence=[{"tool_name": "search_knowledge_base", "description": "x"}],
     )
@@ -477,7 +479,11 @@ async def test_dedup_keeps_first_occurrence_order_before_cap5():
 
     assert skill is not None
     assert skill.trigger_patterns == [
-        "汇总季度财务报告", "alpha", "bravo", "charlie", "delta",
+        "汇总季度财务报告",
+        "alpha",
+        "bravo",
+        "charlie",
+        "delta",
     ], "先去重后截 5 且保首现序：重复不得占帽位（否则只剩 4 唯一词）、顺序不得漂移"
 
 
@@ -504,13 +510,18 @@ class _FakeMemory:
 class _FakePlanner:
     """产出一个没有 tool_hint 的步骤：技能读侧应把命中技能的工具补上。"""
 
-    async def plan(self, query, history=None, memory_context="", ctx=None,
-                   replan_feedback=""):
+    async def plan(self, query, history=None, memory_context="", ctx=None, replan_feedback=""):
         yield AgentEvent(type="plan_start", plan_id="plan-1", content="制定计划...")
-        yield AgentEvent(type="plan_step", plan_id="plan-1", plan_step_id="s1",
-                         content="唯一步骤", tool_hint=None)
-        yield AgentEvent(type="plan_complete", plan_id="plan-1", plan_goal="目标",
-                         content="计划完成")
+        yield AgentEvent(
+            type="plan_step",
+            plan_id="plan-1",
+            plan_step_id="s1",
+            content="唯一步骤",
+            tool_hint=None,
+        )
+        yield AgentEvent(
+            type="plan_complete", plan_id="plan-1", plan_goal="目标", content="计划完成"
+        )
 
 
 class _FakeExecutor:
@@ -521,26 +532,38 @@ class _FakeExecutor:
     def reset_for_request(self):
         pass
 
-    async def execute(self, plan, history=None, organization_id=1, user_id=0,
-                      enable_thinking=True, ctx=None, on_step_done=None,
-                      human_guidance="", document_context=""):
+    async def execute(
+        self,
+        plan,
+        history=None,
+        organization_id=1,
+        user_id=0,
+        enable_thinking=True,
+        ctx=None,
+        on_step_done=None,
+        human_guidance="",
+        document_context="",
+    ):
         for s in plan.steps:
             self.seen_tool_hints.append(s.tool_hint)
             s.status = "completed"
             plan.completed_steps += 1
-            self.memory.store_step_result(s.id, {
-                "description": s.description,
-                "status": "completed",
-                "result": "这是一段足够完整的执行结果内容，包含具体事实与结论，用于质检评级。" * 5,
-                "tool_hint": s.tool_hint,
-            })
+            self.memory.store_step_result(
+                s.id,
+                {
+                    "description": s.description,
+                    "status": "completed",
+                    "result": "这是一段足够完整的执行结果内容，包含具体事实与结论，用于质检评级。"
+                    * 5,
+                    "tool_hint": s.tool_hint,
+                },
+            )
         yield AgentEvent(type="chunk", content="答案")
 
 
 class _FakeReflector:
     async def reflect(self, plan, results, ctx=None):
-        yield AgentEvent(type="reflection", reflection_result="pass",
-                         content="", plan_id=plan.id)
+        yield AgentEvent(type="reflection", reflection_result="pass", content="", plan_id=plan.id)
 
 
 class _FakeReviewer:
@@ -562,7 +585,8 @@ async def test_run_records_skill_feedback_and_prunes(monkeypatch):
     loop = PERAgentLoop(
         MagicMock(),
         AgentConfig(enable_memory=False, enable_thinking=False, enable_experience=False),
-        organization_id=1, user_id=0,
+        organization_id=1,
+        user_id=0,
     )
     memory = _FakeMemory()
     loop.memory = memory
@@ -585,7 +609,8 @@ async def test_run_records_skill_feedback_and_prunes(monkeypatch):
     loop.skill_manager = mgr
 
     events = await asyncio.wait_for(
-        _collect(loop), timeout=15.0,
+        _collect(loop),
+        timeout=15.0,
     )
 
     assert mgr.load.await_count == 1, "run 开头应懒加载技能"

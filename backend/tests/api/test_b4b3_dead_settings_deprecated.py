@@ -21,11 +21,7 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 
 
 def _operations(schema: dict, path: str) -> dict:
-    return {
-        method: op
-        for method, op in schema["paths"][path].items()
-        if method in _HTTP_METHODS
-    }
+    return {method: op for method, op in schema["paths"][path].items() if method in _HTTP_METHODS}
 
 
 def test_personal_api_key_endpoints_are_deprecated():

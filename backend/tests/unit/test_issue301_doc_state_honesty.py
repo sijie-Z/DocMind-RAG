@@ -24,6 +24,7 @@
 - 去掉 #29 的 `_mark_document_failed_best_effort` 调用 → #29 用例红；
 - demo 创建时恢复 INDEXED / 去掉 embedding 失败置 FAILED → #229 用例红。
 """
+
 import io
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -37,6 +38,7 @@ from app.worker.doc_processor import DocumentProcessor
 # ══════════════════════════════════════════════════════════════════════════
 # #28 — 扫描件 / 空内容绝不 INDEXED
 # ══════════════════════════════════════════════════════════════════════════
+
 
 def make_blank_pdf() -> bytes:
     """纯 stdlib 构造一页无任何文字的合法 PDF（扫描件的文本形态）。"""
@@ -182,7 +184,7 @@ class TestProcessorBlankContentFails:
                     {"chunk_text": "有效内容", "chunk_index": 0, "chunk_length": 4},
                     {"chunk_text": "   ", "chunk_index": 1, "chunk_length": 3},
                 ]
-            }
+            },
         )
         ok = await processor.process("doc-mixed", 7)
         assert ok is True
@@ -193,7 +195,7 @@ class TestProcessorBlankContentFails:
         """解析层抛错（如空白 PDF）→ 文档 FAILED、绝不 INDEXED。"""
         processor, events = _processor_with_fakes(
             monkeypatch,
-            parse_error=Exception("PDF 解析失败: 未提取到有效文本内容（可能是扫描件...）")
+            parse_error=Exception("PDF 解析失败: 未提取到有效文本内容（可能是扫描件...）"),
         )
         ok = await processor.process("doc-scan", 7)
         assert ok is False
@@ -205,6 +207,7 @@ class TestProcessorBlankContentFails:
 # ══════════════════════════════════════════════════════════════════════════
 # #29 — file_service 异步壳：异常必显形 + 状态推进（FAILED）
 # ══════════════════════════════════════════════════════════════════════════
+
 
 class _Ctx:
     def __init__(self, obj):
@@ -240,7 +243,9 @@ class TestFileServiceAsyncShell:
         from app.models.document import DocumentStatus
 
         doc = SimpleNamespace(
-            id="doc-1", status=DocumentStatus.UPLOADED, parse_error=None,
+            id="doc-1",
+            status=DocumentStatus.UPLOADED,
+            parse_error=None,
             organization_id=1,
         )
         mark_session = MagicMock()
@@ -272,7 +277,8 @@ class TestFileServiceAsyncShell:
         import app.services.file_service as fs_mod
 
         monkeypatch.setattr(
-            fs_mod, "AsyncSessionLocal",
+            fs_mod,
+            "AsyncSessionLocal",
             lambda: _BoomCtx(RuntimeError("db totally down")),
         )
 
@@ -292,7 +298,9 @@ class TestFileServiceAsyncShell:
         from app.models.document import DocumentStatus
 
         doc = SimpleNamespace(
-            id="doc-1", status=DocumentStatus.INDEXED, parse_error=None,
+            id="doc-1",
+            status=DocumentStatus.INDEXED,
+            parse_error=None,
             organization_id=1,
         )
         mark_session = MagicMock()
@@ -320,10 +328,9 @@ class TestFileServiceAsyncShell:
 # #229 — demo 端点：embedding 失败 → 绝不 INDEXED + 响应如实
 # ══════════════════════════════════════════════════════════════════════════
 
+
 def _demo_user():
-    return SimpleNamespace(
-        id=1, organization_id=1, is_superuser=False, role="user", is_active=True
-    )
+    return SimpleNamespace(id=1, organization_id=1, is_superuser=False, role="user", is_active=True)
 
 
 def _demo_db():
@@ -363,8 +370,10 @@ class TestDemoSeedHonesty:
         async def _fake_index(doc_id, document):
             es_calls.append(doc_id)
 
-        with patch.object(demo_mod.embedding_service, "get_embeddings", _embedding_down), \
-             patch.object(demo_mod.ElasticsearchTools, "index_document", _fake_index):
+        with (
+            patch.object(demo_mod.embedding_service, "get_embeddings", _embedding_down),
+            patch.object(demo_mod.ElasticsearchTools, "index_document", _fake_index),
+        ):
             body = await demo_mod.seed_demo_data(current_user=_demo_user(), db=db)
 
         docs = [o for o in added if isinstance(o, Document)]
@@ -393,8 +402,10 @@ class TestDemoSeedHonesty:
         async def _es_down(doc_id, document):
             raise RuntimeError("ES unreachable")
 
-        with patch.object(demo_mod.embedding_service, "get_embeddings", _embeddings_ok), \
-             patch.object(demo_mod.ElasticsearchTools, "index_document", _es_down):
+        with (
+            patch.object(demo_mod.embedding_service, "get_embeddings", _embeddings_ok),
+            patch.object(demo_mod.ElasticsearchTools, "index_document", _es_down),
+        ):
             body = await demo_mod.seed_demo_data(current_user=_demo_user(), db=db)
 
         docs = [o for o in added if isinstance(o, Document)]
@@ -418,8 +429,10 @@ class TestDemoSeedHonesty:
         async def _fake_index(doc_id, document):  # pragma: no cover - 不应被调用
             raise AssertionError("mismatch 时不得索引 ES")
 
-        with patch.object(demo_mod.embedding_service, "get_embeddings", _embeddings_short), \
-             patch.object(demo_mod.ElasticsearchTools, "index_document", _fake_index):
+        with (
+            patch.object(demo_mod.embedding_service, "get_embeddings", _embeddings_short),
+            patch.object(demo_mod.ElasticsearchTools, "index_document", _fake_index),
+        ):
             body = await demo_mod.seed_demo_data(current_user=_demo_user(), db=db)
 
         docs = [o for o in added if isinstance(o, Document)]
@@ -455,9 +468,11 @@ class TestDemoSeedHonesty:
         async def _fake_get_elasticsearch():
             return _VerifyES()
 
-        with patch.object(demo_mod.embedding_service, "get_embeddings", _embeddings_ok), \
-             patch.object(demo_mod.ElasticsearchTools, "index_document", _fake_index), \
-             patch("app.services.document_status.get_elasticsearch", _fake_get_elasticsearch):
+        with (
+            patch.object(demo_mod.embedding_service, "get_embeddings", _embeddings_ok),
+            patch.object(demo_mod.ElasticsearchTools, "index_document", _fake_index),
+            patch("app.services.document_status.get_elasticsearch", _fake_get_elasticsearch),
+        ):
             body = await demo_mod.seed_demo_data(current_user=_demo_user(), db=db)
 
         docs = [o for o in added if isinstance(o, Document)]

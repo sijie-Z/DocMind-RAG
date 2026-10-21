@@ -12,6 +12,7 @@
 - 端点还原 model_dump()（python 模式）→ 提交阶段 StatementError → 本用例 500 红；
 - 删除 NodeResult.duration → in1 崩溃为 failed、output.success=False → 断言红。
 """
+
 import httpx
 import pytest
 from sqlalchemy import select
@@ -20,7 +21,12 @@ from sqlalchemy.pool import StaticPool
 
 _MIN_FLOW = {
     "nodes": [
-        {"id": "in1", "type": "input", "data": {"prompt": "{{input}}"}, "position": {"x": 0, "y": 0}},
+        {
+            "id": "in1",
+            "type": "input",
+            "data": {"prompt": "{{input}}"},
+            "position": {"x": 0, "y": 0},
+        },
         {"id": "out1", "type": "output", "data": {}, "position": {"x": 1, "y": 0}},
     ],
     "edges": [{"id": "e1", "source": "in1", "target": "out1"}],

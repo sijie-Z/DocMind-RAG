@@ -3,6 +3,7 @@
 This module exists for backward compatibility. New code should import
 from `app.rag.pipeline` or use `app.dependencies.get_rag_pipeline()`.
 """
+
 import logging
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -36,7 +37,11 @@ class RagServiceFacade:
         # issue #225 决策 7A：search_mode 此前收下即丢弃（门面静默吞参）——
         # 现在如实透传给 pipeline；None = 自动路由（行为不变）。
         return await self._pipeline.search_knowledge_base(
-            query, organization_id, top_k, document_ids, debug=debug,
+            query,
+            organization_id,
+            top_k,
+            document_ids,
+            debug=debug,
             search_mode=search_mode,
         )
 
@@ -64,8 +69,13 @@ class RagServiceFacade:
         model_override: str | None = None,
     ) -> AsyncGenerator[str, None]:
         async for chunk in self._pipeline.chat_stream(
-            query, context, history, system_prompt_override,
-            enable_compression, enable_masking, mask_mapping_sink,
+            query,
+            context,
+            history,
+            system_prompt_override,
+            enable_compression,
+            enable_masking,
+            mask_mapping_sink,
             model_override=model_override,
         ):
             yield chunk

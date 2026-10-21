@@ -16,6 +16,7 @@
 ``default_model`` 由 B4 接线；配额展示与工具白名单的强制执行由后续
 SettingsService（C4）承接。
 """
+
 from datetime import datetime
 
 from sqlalchemy import (
@@ -37,9 +38,7 @@ class OrganizationSettings(Base):
     """组织设定覆盖集（每个组织至多一行）。"""
 
     __tablename__ = "organization_settings"
-    __table_args__ = (
-        UniqueConstraint("organization_id", name="uq_organization_settings_org"),
-    )
+    __table_args__ = (UniqueConstraint("organization_id", name="uq_organization_settings_org"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(
@@ -65,9 +64,7 @@ class OrganizationSettings(Base):
     tool_whitelist: Mapped[str | None] = mapped_column(
         Text, comment="工具白名单 JSON 数组；NULL=不限制"
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), onupdate=func.now()
     )

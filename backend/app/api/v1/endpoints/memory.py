@@ -1,4 +1,5 @@
 """Agent 记忆系统 API 端点"""
+
 import re
 from typing import Any
 
@@ -52,8 +53,7 @@ async def _get_user_memory_system(current_user: User, agent_id: str):
 
 @router.get("/{agent_id}", response_model=dict[str, Any])
 async def get_agent_memory(
-    agent_id: str = "default",
-    current_user: User = Depends(get_current_user)
+    agent_id: str = "default", current_user: User = Depends(get_current_user)
 ):
     """获取 Agent 的完整记忆"""
     agent_id = _normalize_agent_id(agent_id)
@@ -63,9 +63,7 @@ async def get_agent_memory(
 
 @router.post("/{agent_id}/remember", response_model=dict[str, Any])
 async def store_memory(
-    agent_id: str,
-    body: RememberRequest,
-    current_user: User = Depends(get_current_user)
+    agent_id: str, body: RememberRequest, current_user: User = Depends(get_current_user)
 ):
     """存储记忆"""
     agent_id = _normalize_agent_id(agent_id)
@@ -74,7 +72,7 @@ async def store_memory(
         content=body.content,
         memory_type=body.memory_type,
         importance=body.importance,
-        metadata=body.metadata
+        metadata=body.metadata,
     )
     return {
         "success": True,
@@ -82,36 +80,30 @@ async def store_memory(
             "id": item.id,
             "content": item.content,
             "memory_type": item.memory_type,
-            "importance": item.importance
-        }
+            "importance": item.importance,
+        },
     }
 
 
 @router.post("/{agent_id}/recall", response_model=dict[str, Any])
 async def recall_memory(
-    agent_id: str,
-    body: RecallRequest,
-    current_user: User = Depends(get_current_user)
+    agent_id: str, body: RecallRequest, current_user: User = Depends(get_current_user)
 ):
     """检索记忆"""
     agent_id = _normalize_agent_id(agent_id)
     memory_system = await _get_user_memory_system(current_user, agent_id)
     results = await memory_system.recall(
-        query=body.query,
-        memory_types=body.memory_types,
-        top_k=body.top_k
+        query=body.query, memory_types=body.memory_types, top_k=body.top_k
     )
     return {
         "success": True,
-        "data": {"query": body.query, "results": results, "count": len(results)}
+        "data": {"query": body.query, "results": results, "count": len(results)},
     }
 
 
 @router.post("/{agent_id}/interaction", response_model=dict[str, Any])
 async def store_interaction(
-    agent_id: str,
-    body: InteractionRequest,
-    current_user: User = Depends(get_current_user)
+    agent_id: str, body: InteractionRequest, current_user: User = Depends(get_current_user)
 ):
     """存储交互记录"""
     agent_id = _normalize_agent_id(agent_id)
@@ -122,27 +114,20 @@ async def store_interaction(
 
 @router.post("/{agent_id}/experience", response_model=dict[str, Any])
 async def store_experience(
-    agent_id: str,
-    body: ExperienceRequest,
-    current_user: User = Depends(get_current_user)
+    agent_id: str, body: ExperienceRequest, current_user: User = Depends(get_current_user)
 ):
     """存储经验"""
     agent_id = _normalize_agent_id(agent_id)
     memory_system = await _get_user_memory_system(current_user, agent_id)
     await memory_system.store_experience(
-        success=body.success,
-        action=body.action,
-        result=body.result,
-        context=body.context or ""
+        success=body.success, action=body.action, result=body.result, context=body.context or ""
     )
     return {"success": True, "message": "经验已存储"}
 
 
 @router.get("/{agent_id}/context", response_model=dict[str, Any])
 async def get_memory_context(
-    agent_id: str,
-    query: str,
-    current_user: User = Depends(get_current_user)
+    agent_id: str, query: str, current_user: User = Depends(get_current_user)
 ):
     """获取记忆上下文（用于LLM输入）"""
     agent_id = _normalize_agent_id(agent_id)
@@ -153,9 +138,7 @@ async def get_memory_context(
 
 @router.delete("/{agent_id}", response_model=dict[str, Any])
 async def clear_memory(
-    agent_id: str,
-    memory_type: str | None = None,
-    current_user: User = Depends(get_current_user)
+    agent_id: str, memory_type: str | None = None, current_user: User = Depends(get_current_user)
 ):
     """清空记忆"""
     agent_id = _normalize_agent_id(agent_id)
@@ -185,9 +168,7 @@ async def clear_memory(
 
 @router.post("/{agent_id}/import", response_model=dict[str, Any])
 async def import_memory(
-    agent_id: str,
-    body: ImportMemoriesRequest,
-    current_user: User = Depends(get_current_user)
+    agent_id: str, body: ImportMemoriesRequest, current_user: User = Depends(get_current_user)
 ):
     """导入记忆数据"""
     agent_id = _normalize_agent_id(agent_id)
@@ -202,7 +183,7 @@ async def get_insights(
     agent_id: str,
     context: str | None = None,
     top_k: int = 10,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """获取洞察"""
     agent_id = _normalize_agent_id(agent_id)
@@ -216,9 +197,7 @@ async def get_insights(
 
 @router.get("/{agent_id}/lessons", response_model=dict[str, Any])
 async def get_lessons(
-    agent_id: str,
-    situation: str | None = None,
-    current_user: User = Depends(get_current_user)
+    agent_id: str, situation: str | None = None, current_user: User = Depends(get_current_user)
 ):
     """获取经验教训"""
     agent_id = _normalize_agent_id(agent_id)

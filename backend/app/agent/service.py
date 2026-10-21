@@ -87,9 +87,7 @@ async def build_referenced_document_context(
         try:
             async with AsyncSessionLocal() as db:
                 doc = (
-                    (await db.execute(select(Document).where(Document.id == did)))
-                    .scalars()
-                    .first()
+                    (await db.execute(select(Document).where(Document.id == did))).scalars().first()
                 )
         except Exception as e:
             logger.warning("引用文档查询失败 %s: %s", did, log_safe(e))
@@ -108,8 +106,12 @@ async def build_referenced_document_context(
         if pipeline is not None:
             try:
                 from app.rag.context_compressor import get_prompt_text
+
                 results, _ = await pipeline.search_knowledge_base(
-                    query, organization_id, top_k=3, document_ids=[did],
+                    query,
+                    organization_id,
+                    top_k=3,
+                    document_ids=[did],
                 )
                 # issue #186：引用文档摘要与提示词同源（prompt_text → text → …），
                 # snippet 仅作最后兜底。
@@ -131,15 +133,21 @@ async def build_referenced_document_context(
             try:
                 from app.core.elasticsearch import ElasticsearchTools
 
-                es_res = await ElasticsearchTools.search_documents({
-                    "size": 3,
-                    "query": {"bool": {"must": [
-                        {"term": {"document_id": did}},
-                        {"term": {"organization_id": str(organization_id)}},
-                    ]}},
-                    "sort": [{"chunk_index": {"order": "asc"}}],
-                    "_source": ["content"],
-                })
+                es_res = await ElasticsearchTools.search_documents(
+                    {
+                        "size": 3,
+                        "query": {
+                            "bool": {
+                                "must": [
+                                    {"term": {"document_id": did}},
+                                    {"term": {"organization_id": str(organization_id)}},
+                                ]
+                            }
+                        },
+                        "sort": [{"chunk_index": {"order": "asc"}}],
+                        "_source": ["content"],
+                    }
+                )
                 excerpt = "\n".join(
                     (h.get("_source", {}).get("content") or "").strip()
                     for h in es_res.get("hits", {}).get("hits", [])
@@ -170,7 +178,6 @@ async def build_referenced_document_context(
         if e["excerpt"]:
             lines.append(e["excerpt"])
     return "\n".join(lines), warnings
-
 
 
 async def notify_task_terminal(
@@ -233,6 +240,7 @@ class AgentService:
     def client(self) -> AsyncOpenAI | None:
         if self._client is None:
             from app.dependencies import get_rag_pipeline
+
             pipeline = get_rag_pipeline()
             self._client = pipeline.openai_client
         return self._client
@@ -275,9 +283,7 @@ class AgentService:
 
         # A2 P0（fail-closed）：运行上下文必须有真实组织，默认值不再回落到 1 号组织。
         if organization_id is None:
-            raise ValueError(
-                "AgentService.chat 缺少 organization_id，拒绝在无组织上下文下运行"
-            )
+            raise ValueError("AgentService.chat 缺少 organization_id，拒绝在无组织上下文下运行")
 
         # Load or create config
         agent_config = config or AgentConfig()
@@ -356,7 +362,10 @@ class AgentService:
             # Run the PER loop（task_id 接通 checkpoint：T1–T4 触发点全部生效；
             # document_context：@引用文档摘要并入预规划上下文）
             async for event in agent.run(
-                query, history=history, task_id=task_id, session_id=session_id,
+                query,
+                history=history,
+                task_id=task_id,
+                session_id=session_id,
                 document_context=document_context,
             ):
                 if task_id:
@@ -428,7 +437,9 @@ class AgentService:
         - 成功 = 已拿租约并把状态推进到 RUNNING（retry_count += 1），返回 (task, payload)。
         """
         task, payload = await checkpoint.load_for_resume(
-            task_id=task_id, user_id=user_id, organization_id=organization_id,
+            task_id=task_id,
+            user_id=user_id,
+            organization_id=organization_id,
         )
         if task.is_terminal:
             raise checkpoint.TaskNotResumableError(
@@ -509,7 +520,10 @@ class AgentService:
         self._wire_cancel(agent, task_id)
         try:
             async for event in agent.run(
-                query, task_id=task_id, resume=payload, session_id=session_id,
+                query,
+                task_id=task_id,
+                resume=payload,
+                session_id=session_id,
                 document_context=document_context,
             ):
                 event.task_id = task_id
@@ -605,7 +619,8 @@ class AgentService:
             except Exception as e:
                 logger.warning(
                     "checkpoint on_disconnect failed (task=%s): %s",
-                    log_safe(task_id), log_safe(e),
+                    log_safe(task_id),
+                    log_safe(e),
                 )
             # 状态收敛兜底（第四波实机缺陷修复）：流已死 = 运行已死——不收理会
             # 永停"进行中"（见 converge_disconnected 长注释）。放进同一受保护
@@ -615,7 +630,8 @@ class AgentService:
             except Exception as e:
                 logger.warning(
                     "断流收敛兜底失败 (task=%s): %s",
-                    log_safe(task_id), log_safe(e),
+                    log_safe(task_id),
+                    log_safe(e),
                 )
             if release_lease:
                 try:
@@ -635,11 +651,15 @@ class AgentService:
             # 非取消类的意外故障。
             logger.warning(
                 "checkpoint on_disconnect interrupted (task=%s): %s",
-                log_safe(task_id), log_safe(e),
+                log_safe(task_id),
+                log_safe(e),
             )
 
     async def _checkpoint_error(
-        self, task_id: str | None, agent: PERAgentLoop | None, exc: BaseException,
+        self,
+        task_id: str | None,
+        agent: PERAgentLoop | None,
+        exc: BaseException,
     ) -> None:
         """run 内异常：快照 + 标记 FAILED（写 last_error）；从不吞掉原异常。
 
@@ -651,13 +671,17 @@ class AgentService:
         if not task_id:
             return
         try:
-            await asyncio.shield(checkpoint.save_from_live(
-                task_id=task_id,
-                live=agent.checkpoint_live if agent is not None else None,
-                trigger="on_error",
-            ))
+            await asyncio.shield(
+                checkpoint.save_from_live(
+                    task_id=task_id,
+                    live=agent.checkpoint_live if agent is not None else None,
+                    trigger="on_error",
+                )
+            )
         except Exception as e:
-            logger.warning("checkpoint on_error save failed (task=%s): %s", log_safe(task_id), log_safe(e))
+            logger.warning(
+                "checkpoint on_error save failed (task=%s): %s", log_safe(task_id), log_safe(e)
+            )
         failure_text = f"{type(exc).__name__}: {exc}"
         ok = await checkpoint.mark_terminal(
             task_id,
@@ -782,7 +806,9 @@ class AgentService:
             from app.core.prometheus import RAG_RETRIEVAL_UNAVAILABLE
 
             RAG_RETRIEVAL_UNAVAILABLE.labels(state=e.kind).inc()
-            logger.warning("search_and_chat: knowledge retrieval unavailable (kind=%s): %s", e.kind, e)
+            logger.warning(
+                "search_and_chat: knowledge retrieval unavailable (kind=%s): %s", e.kind, e
+            )
             context_docs = []
             yield {
                 "type": "warning",
@@ -844,10 +870,12 @@ class AgentService:
         state = bridge.export_state()
         try:
             from app.core.redis import redis_client
+
             if redis_client:
                 key = f"agent:session_state:{session_id}"
                 await redis_client.setex(
-                    key, 86400 * 7,
+                    key,
+                    86400 * 7,
                     json.dumps(state, ensure_ascii=False, default=str),
                 )
                 logger.info("Agent session state saved: %s", log_safe(session_id))
@@ -863,6 +891,7 @@ class AgentService:
         """Load agent session state from Redis."""
         try:
             from app.core.redis import redis_client
+
             if not redis_client:
                 return None
             key = f"agent:session_state:{session_id}"

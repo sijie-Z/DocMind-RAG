@@ -90,9 +90,7 @@ async def reconcile_local_jobs(process=None, session_factory=None) -> int:
     recovered = 0
     for job in jobs:
         try:
-            task = asyncio.create_task(
-                _run_local_job(process_call, job.document_id, job.id)
-            )
+            task = asyncio.create_task(_run_local_job(process_call, job.document_id, job.id))
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
             recovered += 1

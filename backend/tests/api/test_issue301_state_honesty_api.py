@@ -13,6 +13,7 @@
 - #22 把 _save_session_interaction 的异常恢复成「吞掉 return None」→ 失败用例红；
 - #23 去掉调度失败分支里对 doc 的 FAILED 赋值/如实响应 → 对应用例红。
 """
+
 import io
 import json
 from types import SimpleNamespace
@@ -27,9 +28,7 @@ from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 
 
 def _user():
-    return SimpleNamespace(
-        id=1, organization_id=1, is_superuser=False, role="user", is_active=True
-    )
+    return SimpleNamespace(id=1, organization_id=1, is_superuser=False, role="user", is_active=True)
 
 
 def _mock_user_for_permission():
@@ -113,6 +112,7 @@ def _fake_chat(agent_mod):
 # #22 — /agent/chat 落库失败必须显式信号
 # ══════════════════════════════════════════════════════════════════════════
 
+
 class TestAgentChatSaveFailureSignals:
     def test_save_failure_emits_warning_and_done_saved_false(self, client: TestClient, monkeypatch):
         """修前（复现 22）：done 照发、无 message_id、无任何失败信号。
@@ -193,6 +193,7 @@ class TestAgentChatSaveFailureSignals:
 # #23 — 上传：本地处理调度失败 → doc 状态与响应如实
 # ══════════════════════════════════════════════════════════════════════════
 
+
 class TestUploadScheduleFailureHonesty:
     def test_schedule_failure_marks_doc_failed_and_response_honest(self, client: TestClient):
         """修前（复现 23）：job=FAILED 但 doc 卡 pending、响应 success:true「上传成功」。
@@ -228,9 +229,11 @@ class TestUploadScheduleFailureHonesty:
             raise RuntimeError("no running event loop")
 
         try:
-            with patch("app.api.v1.endpoints.documents.minio_client") as mock_minio, \
-                 patch("app.api.v1.endpoints.documents.kafka_producer") as mock_kafka, \
-                 patch("app.api.v1.endpoints.documents.asyncio.create_task", _boom):
+            with (
+                patch("app.api.v1.endpoints.documents.minio_client") as mock_minio,
+                patch("app.api.v1.endpoints.documents.kafka_producer") as mock_kafka,
+                patch("app.api.v1.endpoints.documents.asyncio.create_task", _boom),
+            ):
                 mock_minio.stat_object.side_effect = Exception("not found")
                 mock_minio.put_object = MagicMock()
                 mock_kafka.send_message = AsyncMock(return_value=None)  # Kafka 不可用

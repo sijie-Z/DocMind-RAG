@@ -7,6 +7,7 @@
 - #25 `llm_config.py`：坏配置值不得凭空消失——保留 invalid 占位条目 + warning；
 - #32 `core/prometheus.py`：指标构建失败须 ERROR 留痕（恰一次）+ /metrics 自曝不可用。
 """
+
 import datetime
 import json
 import logging
@@ -61,8 +62,13 @@ class _ScriptedSession:
 
 async def _call_list(db):
     return await get_notifications(
-        skip=0, limit=20, unread_only=False, type=None, q=None,
-        current_user=SimpleNamespace(id=7), db=db,
+        skip=0,
+        limit=20,
+        unread_only=False,
+        type=None,
+        q=None,
+        current_user=SimpleNamespace(id=7),
+        db=db,
     )
 
 
@@ -116,7 +122,12 @@ VALUES (7, 'hello', 'world', 'system', 0, 'Knowledge', '2026-01-01 00:00:00');
 
 
 async def _capture_real_endpoint_error(
-    tmp_path, *, legacy: bool, lock: bool, user_id: int, q: str | None,
+    tmp_path,
+    *,
+    legacy: bool,
+    lock: bool,
+    user_id: int,
+    q: str | None,
     schema: str | None = None,
 ):
     """在真 sqlite 上跑端点同款查询（count 子查询 + 列表查询），捕获真实 SQLAlchemy 异常。
@@ -146,9 +157,7 @@ async def _capture_real_endpoint_error(
 
     from app.models.notification import Notification
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{dbf}", connect_args={"timeout": 0.05}
-    )
+    engine = create_async_engine(f"sqlite+aiosqlite:///{dbf}", connect_args={"timeout": 0.05})
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with sessionmaker() as session:
@@ -156,8 +165,7 @@ async def _capture_real_endpoint_error(
             if q:
                 keyword = f"%{q}%"
                 base_query = base_query.where(
-                    (Notification.title.like(keyword))
-                    | (Notification.content.like(keyword))
+                    (Notification.title.like(keyword)) | (Notification.content.like(keyword))
                 )
             total_result = await session.execute(
                 select(func.count()).select_from(base_query.subquery())
@@ -220,7 +228,10 @@ class TestLegacyColumnDetectionB1:
     async def test_forged_phrase_in_params_is_not_legacy(self, tmp_path):
         """参数值里塞完整伪造短语（unknown column 'target_route'）也不得误诊。"""
         exc = await _capture_real_endpoint_error(
-            tmp_path, legacy=False, lock=True, user_id=7,
+            tmp_path,
+            legacy=False,
+            lock=True,
+            user_id=7,
             q="unknown column 'target_route'",
         )
         assert exc is not None
@@ -231,7 +242,10 @@ class TestLegacyColumnDetectionB1:
     async def test_forged_phrase_without_orig_via_stripped_body_is_not_legacy(self, tmp_path):
         """无 .orig 的回退路径：剥段后伪造短语同样不可见。"""
         exc = await _capture_real_endpoint_error(
-            tmp_path, legacy=False, lock=True, user_id=7,
+            tmp_path,
+            legacy=False,
+            lock=True,
+            user_id=7,
             q="unknown column 'target_route'",
         )
         rendered_without_orig = Exception(str(exc))
@@ -242,9 +256,7 @@ class TestLegacyColumnDetectionB1:
         exc = ProgrammingError(
             "SELECT notifications.target_route FROM notifications WHERE user_id = 1054",
             {"q": "%1054%"},
-            Exception(
-                "(1054, \"Unknown column 'notifications.target_route' in 'field list'\")"
-            ),
+            Exception("(1054, \"Unknown column 'notifications.target_route' in 'field list'\")"),
         )
         assert _is_legacy_missing_route_columns(exc) is True
 
@@ -316,10 +328,7 @@ class TestNotificationsFallbackHonesty:
         assert out["total"] == 1
         assert out["items"][0]["target_route"] is None
         assert out["items"][0]["target_id"] is None
-        warnings = [
-            r for r in caplog.records
-            if r.name == _NOTE and r.levelno == logging.WARNING
-        ]
+        warnings = [r for r in caplog.records if r.name == _NOTE and r.levelno == logging.WARNING]
         assert len(warnings) == 1, "缺列回退必须恰留一条 warning（原 bug 为零留痕）"
         assert "target_route" in warnings[0].getMessage()
 
@@ -331,7 +340,11 @@ class TestNotificationsFallbackHonesty:
         「target_id 半边」——实现本身正确，缺的只是判别用例。
         """
         exc = await _capture_real_endpoint_error(
-            tmp_path, legacy=True, lock=False, user_id=7, q=None,
+            tmp_path,
+            legacy=True,
+            lock=False,
+            user_id=7,
+            q=None,
             schema=_NO_TARGET_ID_SCHEMA,
         )
         assert exc is not None
@@ -348,18 +361,20 @@ class TestNotificationsFallbackHonesty:
 
         assert out["total"] == 1
         assert out["items"][0]["target_route"] is None
-        warnings = [
-            r for r in caplog.records
-            if r.name == _NOTE and r.levelno == logging.WARNING
-        ]
+        warnings = [r for r in caplog.records if r.name == _NOTE and r.levelno == logging.WARNING]
         assert len(warnings) == 1, "缺列回退必须恰留一条 warning"
 
     @pytest.mark.asyncio
     async def test_normal_path_keeps_route_fields(self):
         """回归：正常库路径不受影响，target_route/target_id 原样透出。"""
         n = SimpleNamespace(
-            id=1, title="t", content="c", type="document", is_read=False,
-            target_route="Knowledge", target_id="42",
+            id=1,
+            title="t",
+            content="c",
+            type="document",
+            is_read=False,
+            target_route="Knowledge",
+            target_id="42",
             created_at=datetime.datetime(2026, 1, 1),
         )
         db = _ScriptedSession(
@@ -379,10 +394,14 @@ class _FakeRedis:
         return self._mapping
 
 
-_GOOD_JSON = json.dumps({
-    "id": "good00000001", "provider": "deepseek",
-    "config_name": "ok", "api_key": "sk-abcdefghijklmnop",
-})
+_GOOD_JSON = json.dumps(
+    {
+        "id": "good00000001",
+        "provider": "deepseek",
+        "config_name": "ok",
+        "api_key": "sk-abcdefghijklmnop",
+    }
+)
 _BAD_RAW = '{"provider": "deepseek", "api_key": "sk-SECRET-halfwritten'
 
 
@@ -392,13 +411,16 @@ class TestLlmConfigCorruptValue:
     @pytest.mark.asyncio
     async def test_corrupt_value_kept_and_marked(self, monkeypatch, caplog):
         monkeypatch.setattr(
-            llm_config_module, "redis_client",
+            llm_config_module,
+            "redis_client",
             _FakeRedis({"good00000001": _GOOD_JSON, "bad000000002": _BAD_RAW}),
         )
         with caplog.at_level(logging.WARNING, logger="app.api.v1.endpoints.llm_config"):
             result = await llm_config_module._load_all()
 
-        assert set(result) == {"good00000001", "bad000000002"}, "坏条目不得凭空消失（原 bug：少 1 条）"
+        assert set(result) == {"good00000001", "bad000000002"}, (
+            "坏条目不得凭空消失（原 bug：少 1 条）"
+        )
         bad = result["bad000000002"]
         assert bad["invalid"] is True
         assert bad["invalid_reason"], "必须带可观测的损坏原因"
@@ -406,7 +428,8 @@ class TestLlmConfigCorruptValue:
         assert result["good00000001"]["provider"] == "deepseek", "好条目不受影响"
 
         warnings = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.name == "app.api.v1.endpoints.llm_config" and r.levelno >= logging.WARNING
         ]
         assert len(warnings) == 1, "坏值必须 warning 留痕（原 bug 为零留痕）"
@@ -415,7 +438,8 @@ class TestLlmConfigCorruptValue:
     async def test_corrupt_public_view_never_leaks_raw(self, monkeypatch):
         """公共视图必须剥离原始值（可能含半写的 api_key），且好条目密钥继续脱敏。"""
         monkeypatch.setattr(
-            llm_config_module, "redis_client",
+            llm_config_module,
+            "redis_client",
             _FakeRedis({"good00000001": _GOOD_JSON, "bad000000002": _BAD_RAW}),
         )
         result = await llm_config_module._load_all()
@@ -432,7 +456,9 @@ class TestLlmConfigCorruptValue:
     async def test_non_object_json_value_is_invalid(self, monkeypatch):
         """合法 JSON 但非对象（如数组）同样按损坏处理，不再静默丢。"""
         monkeypatch.setattr(
-            llm_config_module, "redis_client", _FakeRedis({"list00000001": "[1, 2, 3]"}),
+            llm_config_module,
+            "redis_client",
+            _FakeRedis({"list00000001": "[1, 2, 3]"}),
         )
         result = await llm_config_module._load_all()
         assert result["list00000001"]["invalid"] is True
@@ -464,7 +490,8 @@ class TestPrometheusBuildFailureIsExplicit:
             text = p.get_prometheus_metrics()
 
         errors = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.name == "app.core.prometheus" and r.levelno >= logging.ERROR
         ]
         assert len(errors) == 1, "构建失败必须 ERROR 留痕且每进程只打一次"

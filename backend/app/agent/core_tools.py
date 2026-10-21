@@ -6,6 +6,7 @@ Tools are organized by capability:
 - manage:  Session management (create session, bind documents)
 - sql:     Text-to-SQL for structured data queries
 """
+
 import contextlib
 import json
 import logging
@@ -27,10 +28,10 @@ def _missing_organization_result(tool_name: str) -> ToolResult:
     return ToolResult.fail(
         code="organization_required",
         message=(
-            f"工具 '{tool_name}' 缺少组织上下文（organization_id），"
-            "已拒绝执行以免跨租户读写。"
+            f"工具 '{tool_name}' 缺少组织上下文（organization_id），已拒绝执行以免跨租户读写。"
         ),
     )
+
 
 # ── 结构化检索结果信封（T4：来源伪造隔离）───────────────────────────────────
 # 检索工具此前把来源行（"[i] (score) filename"）与文档正文拼进**同一个**
@@ -62,11 +63,15 @@ def _build_search_payload(
             "filename": filename,
             "documentId": document_id or "",
         }
-        for index, (score, relevance_score, filename, document_id, _snippet) in enumerate(entries, 1)
+        for index, (score, relevance_score, filename, document_id, _snippet) in enumerate(
+            entries, 1
+        )
     ]
     content = "\n\n".join(
         f"[{index}] ({score:.2f}) {filename}\n{snippet}"
-        for index, (score, _relevance_score, filename, _document_id, snippet) in enumerate(entries, 1)
+        for index, (score, _relevance_score, filename, _document_id, snippet) in enumerate(
+            entries, 1
+        )
     )
     return json.dumps(
         {
@@ -79,6 +84,7 @@ def _build_search_payload(
 
 
 # ─── Search Tools ────────────────────────────────────────────────────────────
+
 
 @register_tool(
     name="search_knowledge_base",
@@ -154,13 +160,15 @@ async def search_knowledge_base(
         # issue #186：正文单一来源 prompt_text（snippet 仅展示）；300 字上限走
         # context_compressor 的规则式句子抽取，关键句在 chunk 后半段时仍保留。
         snippet = compress(get_prompt_text(doc), query, max_chars=300)
-        entries.append((
-            score,
-            float(relevance) if relevance is not None else None,
-            filename,
-            doc.get("document_id", ""),
-            snippet,
-        ))
+        entries.append(
+            (
+                score,
+                float(relevance) if relevance is not None else None,
+                filename,
+                doc.get("document_id", ""),
+                snippet,
+            )
+        )
     return _build_search_payload(entries)
 
 
@@ -200,6 +208,7 @@ async def vector_search(
     top_k = min(top_k, 20)
 
     from app.dependencies import get_rag_pipeline
+
     pipeline = get_rag_pipeline()
     query_vector = await pipeline.get_embedding(query)
     if not query_vector:
@@ -207,12 +216,15 @@ async def vector_search(
 
     from app.core.elasticsearch import ElasticsearchTools
     from app.rag.context_compressor import compress
+
     es_query = {
         "size": top_k,
         "min_score": 1.15,
         "query": {
             "script_score": {
-                "query": {"bool": {"filter": [{"term": {"organization_id": str(organization_id)}}]}},
+                "query": {
+                    "bool": {"filter": [{"term": {"organization_id": str(organization_id)}}]}
+                },
                 "script": {
                     "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
                     "params": {"query_vector": query_vector},
@@ -229,20 +241,23 @@ async def vector_search(
     entries = []
     for hit in hits:
         src = hit.get("_source", {})
-        entries.append((
-            float(hit.get("_score") or 0.0),
-            # 纯向量臂的分数是 ES script_score（cosine+1），与重排分不同尺度；
-            # 不冒充 relevance，来源卡片按序位展示。
-            None,
-            src.get("filename", "?"),
-            src.get("document_id", ""),
-            # issue #186：300 字上限按语义句抽取，不硬切 chunk 头部。
-            compress(src.get("content") or "", query, max_chars=300),
-        ))
+        entries.append(
+            (
+                float(hit.get("_score") or 0.0),
+                # 纯向量臂的分数是 ES script_score（cosine+1），与重排分不同尺度；
+                # 不冒充 relevance，来源卡片按序位展示。
+                None,
+                src.get("filename", "?"),
+                src.get("document_id", ""),
+                # issue #186：300 字上限按语义句抽取，不硬切 chunk 头部。
+                compress(src.get("content") or "", query, max_chars=300),
+            )
+        )
     return _build_search_payload(entries)
 
 
 # ─── Analysis Tools ──────────────────────────────────────────────────────────
+
 
 @register_tool(
     name="summarize_document",
@@ -301,11 +316,15 @@ async def summarize_document(
 
     try:
         from app.core.config import settings
+
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
                 {"role": "system", "content": "你是文档摘要专家。请用中文生成结构化摘要。"},
-                {"role": "user", "content": f"请为以下文档生成摘要，包含：1)主题 2)关键要点(3-5条) 3)结论\n\n文档：{full_text[:6000]}"},
+                {
+                    "role": "user",
+                    "content": f"请为以下文档生成摘要，包含：1)主题 2)关键要点(3-5条) 3)结论\n\n文档：{full_text[:6000]}",
+                },
             ],
             temperature=0.1,
             max_tokens=500,
@@ -355,6 +374,7 @@ async def summarize_document(
 )
 async def extract_keywords(text: str, max_keywords: int = 10, **_: Any) -> str:
     from app.rag.query_processor import extract_query_terms
+
     terms = extract_query_terms(text)
     return json.dumps(terms[:max_keywords], ensure_ascii=False)
 
@@ -444,7 +464,7 @@ ANALYSIS_FRAMEWORKS: dict[str, str] = {
             "framework": {
                 "type": "string",
                 "description": "Optional domain analysis framework: "
-                               "dupont, swot, pest, risk_assessment, financial_health, contract_risk",
+                "dupont, swot, pest, risk_assessment, financial_health, contract_risk",
                 "default": "",
             },
         },
@@ -491,9 +511,7 @@ async def extract_insights(
         )
 
     filename = hits[0].get("_source", {}).get("filename", "Unknown")
-    full_text = "\n".join(
-        h.get("_source", {}).get("content", "") for h in hits
-    )
+    full_text = "\n".join(h.get("_source", {}).get("content", "") for h in hits)
     text_sample = full_text[:8000]
 
     pipeline = get_rag_pipeline()
@@ -523,8 +541,7 @@ async def extract_insights(
     if framework_key in ANALYSIS_FRAMEWORKS:
         instructions = ANALYSIS_FRAMEWORKS[framework_key]
         system_prompt = (
-            f"你是{framework_key}分析专家。严格按照提供的框架进行分析，"
-            "输出结构化 JSON 格式。"
+            f"你是{framework_key}分析专家。严格按照提供的框架进行分析，输出结构化 JSON 格式。"
         )
         logger.info("Using domain framework '%s' for document analysis", framework_key)
     else:
@@ -532,26 +549,29 @@ async def extract_insights(
         if "all" in selected:
             instructions = "\n".join(aspect_instructions.values())
         else:
-            instructions = "\n".join(
-                v for k, v in aspect_instructions.items() if k in selected
-            )
-        system_prompt = "你是文档分析专家。分析文档内容，提取结构化信息。只返回 JSON，不要包含任何解释。"
+            instructions = "\n".join(v for k, v in aspect_instructions.items() if k in selected)
+        system_prompt = (
+            "你是文档分析专家。分析文档内容，提取结构化信息。只返回 JSON，不要包含任何解释。"
+        )
 
     try:
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": (
-                    f"分析以下文档，{instructions}\n\n"
-                    f"文档：{filename}\n\n"
-                    f"内容：{text_sample}\n\n"
-                    "返回 JSON 格式：\n"
-                    '{"entities": {"people": [], "organizations": [], "locations": [], "dates": []}, '
-                    '"metrics": [{"name": "...", "value": "..."}], '
-                    '"claims": [{"claim": "...", "confidence": "high/medium/low"}], '
-                    '"structure": [{"level": 1, "heading": "..."}]}'
-                )},
+                {
+                    "role": "user",
+                    "content": (
+                        f"分析以下文档，{instructions}\n\n"
+                        f"文档：{filename}\n\n"
+                        f"内容：{text_sample}\n\n"
+                        "返回 JSON 格式：\n"
+                        '{"entities": {"people": [], "organizations": [], "locations": [], "dates": []}, '
+                        '"metrics": [{"name": "...", "value": "..."}], '
+                        '"claims": [{"claim": "...", "confidence": "high/medium/low"}], '
+                        '"structure": [{"level": 1, "heading": "..."}]}'
+                    ),
+                },
             ],
             temperature=0.1,
             max_tokens=1500,
@@ -565,13 +585,17 @@ async def extract_insights(
         except json.JSONDecodeError:
             insights = {"raw": insights_raw}
 
-        return json.dumps({
-            "filename": filename,
-            "document_id": document_id,
-            "chunk_count": len(hits),
-            "content_length": len(full_text),
-            "insights": insights,
-        }, ensure_ascii=False, indent=2)
+        return json.dumps(
+            {
+                "filename": filename,
+                "document_id": document_id,
+                "chunk_count": len(hits),
+                "content_length": len(full_text),
+                "insights": insights,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
     except Exception as e:
         # issue #301 #12：抽取失败的错误 JSON 不得再伪装成"分析结果"——
         # 旧形态 {"error": ...} 被复合技能漏检后原样写进报告。结构化失败传播。
@@ -672,17 +696,16 @@ async def cross_document_analysis(
                 res = await ElasticsearchTools.search_documents(fallback_query)
                 hits = res.get("hits", {}).get("hits", [])
             if hits:
-                text = " ".join(
-                    h.get("_source", {}).get("content", "")[:500]
-                    for h in hits[:10]
-                )
+                text = " ".join(h.get("_source", {}).get("content", "")[:500] for h in hits[:10])
                 real_id = hits[0].get("_source", {}).get("document_id", doc_id)
-                docs_data.append({
-                    "id": real_id,
-                    "filename": hits[0].get("_source", {}).get("filename", doc_id),
-                    "text": text[:3000],
-                    "chunks": len(hits),
-                })
+                docs_data.append(
+                    {
+                        "id": real_id,
+                        "filename": hits[0].get("_source", {}).get("filename", doc_id),
+                        "text": text[:3000],
+                        "chunks": len(hits),
+                    }
+                )
             else:
                 docs_data.append({"id": doc_id, "filename": "Not found", "text": "", "chunks": 0})
         except Exception as e:
@@ -705,8 +728,9 @@ async def cross_document_analysis(
         )
 
     doc_list_text = "\n\n".join(
-        f"--- 文档 {i+1}: {d['filename']} ---\n{d['text']}"
-        for i, d in enumerate(docs_data) if d['text']
+        f"--- 文档 {i + 1}: {d['filename']} ---\n{d['text']}"
+        for i, d in enumerate(docs_data)
+        if d["text"]
     )
 
     analysis_prompts = {
@@ -720,18 +744,24 @@ async def cross_document_analysis(
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
-                {"role": "system", "content": "你是跨文档分析专家。分析多个文档之间的关系和模式。只返回 JSON。"},
-                {"role": "user", "content": (
-                    f"{analysis_prompts.get(analysis_type, analysis_prompts['comprehensive'])}\n\n"
-                    f"文档列表：\n{doc_list_text[:10000]}\n\n"
-                    "返回 JSON 格式：\n"
-                    '{"summary": "整体分析总结", '
-                    '"common_themes": [{"theme": "...", "evidence": ["...", "..."], "documents": [0, 1]}], '
-                    '"unique_findings": [{"document_index": 0, "finding": "..."}], '
-                    '"contradictions": [{"description": "...", "between": [0, 2]}], '
-                    '"complementary_info": [{"description": "..."}], '
-                    '"conclusion": "综合分析结论"}'
-                )},
+                {
+                    "role": "system",
+                    "content": "你是跨文档分析专家。分析多个文档之间的关系和模式。只返回 JSON。",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"{analysis_prompts.get(analysis_type, analysis_prompts['comprehensive'])}\n\n"
+                        f"文档列表：\n{doc_list_text[:10000]}\n\n"
+                        "返回 JSON 格式：\n"
+                        '{"summary": "整体分析总结", '
+                        '"common_themes": [{"theme": "...", "evidence": ["...", "..."], "documents": [0, 1]}], '
+                        '"unique_findings": [{"document_index": 0, "finding": "..."}], '
+                        '"contradictions": [{"description": "...", "between": [0, 2]}], '
+                        '"complementary_info": [{"description": "..."}], '
+                        '"conclusion": "综合分析结论"}'
+                    ),
+                },
             ],
             temperature=0.1,
             max_tokens=2000,
@@ -744,12 +774,19 @@ async def cross_document_analysis(
         except json.JSONDecodeError:
             analysis = {"raw": analysis_raw}
 
-        return json.dumps({
-            "document_count": len(docs_data),
-            "analysis_type": analysis_type,
-            "documents": [{"id": d["id"], "filename": d["filename"], "chunks": d["chunks"]} for d in docs_data],
-            "analysis": analysis,
-        }, ensure_ascii=False, indent=2)
+        return json.dumps(
+            {
+                "document_count": len(docs_data),
+                "analysis_type": analysis_type,
+                "documents": [
+                    {"id": d["id"], "filename": d["filename"], "chunks": d["chunks"]}
+                    for d in docs_data
+                ],
+                "analysis": analysis,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
     except Exception as e:
         # issue #301 批次 2：异常不再包成 {"error": ...} 的"正常" JSON 返回 ——
         # 结构化失败传播（判别权在工具内部，#297/#293 契约）。
@@ -821,11 +858,15 @@ async def generate_report(
         )
 
     if format == "json":
-        return json.dumps({
-            "title": title,
-            "sections": parsed_sections,
-            "generated_at": __import__("datetime").datetime.now().isoformat(),
-        }, ensure_ascii=False, indent=2)
+        return json.dumps(
+            {
+                "title": title,
+                "sections": parsed_sections,
+                "generated_at": __import__("datetime").datetime.now().isoformat(),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     # Use LLM to generate a polished markdown report
     pipeline = get_rag_pipeline()
@@ -833,8 +874,7 @@ async def generate_report(
         return _generate_markdown_fallback(title, parsed_sections)
 
     sections_text = "\n\n".join(
-        f"## {s.get('heading', 'Section ' + str(i+1))}\n"
-        f"{s.get('content', '')}"
+        f"## {s.get('heading', 'Section ' + str(i + 1))}\n{s.get('content', '')}"
         for i, s in enumerate(parsed_sections)
     )
 
@@ -842,16 +882,22 @@ async def generate_report(
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
-                {"role": "system", "content": "你是报告生成专家。根据提供的内容生成结构清晰、专业的 Markdown 报告。"},
-                {"role": "user", "content": (
-                    f"请根据以下内容生成一份专业的分析报告。使用 Markdown 格式，包含：\n"
-                    f"1. 标题和元数据\n"
-                    f"2. 执行摘要\n"
-                    f"3. 详细分析（用表格、列表、引用等丰富格式）\n"
-                    f"4. 结论与建议\n\n"
-                    f"报告标题：{title}\n\n"
-                    f"内容：\n{sections_text[:8000]}"
-                )},
+                {
+                    "role": "system",
+                    "content": "你是报告生成专家。根据提供的内容生成结构清晰、专业的 Markdown 报告。",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"请根据以下内容生成一份专业的分析报告。使用 Markdown 格式，包含：\n"
+                        f"1. 标题和元数据\n"
+                        f"2. 执行摘要\n"
+                        f"3. 详细分析（用表格、列表、引用等丰富格式）\n"
+                        f"4. 结论与建议\n\n"
+                        f"报告标题：{title}\n\n"
+                        f"内容：\n{sections_text[:8000]}"
+                    ),
+                },
             ],
             temperature=0.2,
             max_tokens=3000,
@@ -870,6 +916,7 @@ async def generate_report(
 def _generate_markdown_fallback(title: str, sections: list) -> str:
     """Fallback: generate a clean markdown report without LLM."""
     from datetime import datetime
+
     lines = [
         f"# {title}",
         f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
@@ -905,6 +952,7 @@ def _generate_markdown_fallback(title: str, sections: list) -> str:
 
 
 # ─── Document Management Tools ───────────────────────────────────────────────
+
 
 @register_tool(
     name="list_documents",
@@ -957,9 +1005,11 @@ async def list_documents(
     output = []
     for doc in docs:
         status_val = doc.status.value if hasattr(doc.status, "value") else str(doc.status)
-        created = doc.created_at.strftime('%Y-%m-%d') if doc.created_at else '?'
+        created = doc.created_at.strftime("%Y-%m-%d") if doc.created_at else "?"
         title = doc.title or doc.filename
-        output.append(f"- ID: {doc.id} | 文件名: {doc.filename} | 标题: {title} | 状态: {status_val} | 创建: {created}")
+        output.append(
+            f"- ID: {doc.id} | 文件名: {doc.filename} | 标题: {title} | 状态: {status_val} | 创建: {created}"
+        )
     return "\n".join(output)
 
 
@@ -1009,22 +1059,27 @@ async def get_document_info(
         )
 
     status_val = doc.status.value if hasattr(doc.status, "value") else str(doc.status)
-    return json.dumps({
-        "id": doc.id,
-        "filename": doc.filename,
-        "title": doc.title,
-        "status": status_val,
-        "file_size": doc.file_size,
-        "chunk_count": doc.chunk_count,
-        "description": doc.description,
-        "keywords": doc.keywords or [],
-        "created_at": doc.created_at.isoformat() if doc.created_at else None,
-        "parsed_at": doc.parsed_at.isoformat() if doc.parsed_at else None,
-        "indexed_at": doc.indexed_at.isoformat() if doc.indexed_at else None,
-    }, ensure_ascii=False, indent=2)
+    return json.dumps(
+        {
+            "id": doc.id,
+            "filename": doc.filename,
+            "title": doc.title,
+            "status": status_val,
+            "file_size": doc.file_size,
+            "chunk_count": doc.chunk_count,
+            "description": doc.description,
+            "keywords": doc.keywords or [],
+            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            "parsed_at": doc.parsed_at.isoformat() if doc.parsed_at else None,
+            "indexed_at": doc.indexed_at.isoformat() if doc.indexed_at else None,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 # ─── Conversation Management Tools ──────────────────────────────────────────
+
 
 @register_tool(
     name="list_conversations",
@@ -1155,13 +1210,16 @@ async def get_conversation_history(
 
     output = []
     for msg in messages:
-        role = msg.message_type.value if hasattr(msg.message_type, "value") else str(msg.message_type)
+        role = (
+            msg.message_type.value if hasattr(msg.message_type, "value") else str(msg.message_type)
+        )
         content = msg.content[:500] if msg.content else ""
         output.append(f"[{role}] {content}")
     return "\n\n".join(output)
 
 
 # ─── Prompt Template Tools ──────────────────────────────────────────────────
+
 
 @register_tool(
     name="list_prompt_templates",
@@ -1246,7 +1304,9 @@ async def list_prompt_templates(
             scope = "personal"
         else:
             scope = "organization"
-        output.append(f"- [{tpl.category}] {tpl.name} ({scope}) — {tpl.description or 'No description'}")
+        output.append(
+            f"- [{tpl.category}] {tpl.name} ({scope}) — {tpl.description or 'No description'}"
+        )
     return "\n".join(output)
 
 
@@ -1326,17 +1386,22 @@ async def get_prompt_template(
     if not tpl:
         return f"Prompt template '{name}' not found."
 
-    return json.dumps({
-        "name": tpl.name,
-        "content": tpl.content,
-        "description": tpl.description,
-        "category": tpl.category,
-        "is_system": tpl.is_system,
-        "scope": tpl.scope,
-    }, ensure_ascii=False, indent=2)
+    return json.dumps(
+        {
+            "name": tpl.name,
+            "content": tpl.content,
+            "description": tpl.description,
+            "category": tpl.category,
+            "is_system": tpl.is_system,
+            "scope": tpl.scope,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 # ─── Utility Tools ───────────────────────────────────────────────────────────
+
 
 @register_tool(
     name="get_current_time",
@@ -1346,6 +1411,7 @@ async def get_prompt_template(
 )
 async def get_current_time(**_: Any) -> str:
     from datetime import datetime
+
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 

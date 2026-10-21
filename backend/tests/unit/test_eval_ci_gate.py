@@ -281,7 +281,9 @@ class TestCompareCli:
 
     def test_failclosed_missing_report(self, tmp_path):
         _, bp = self._write(tmp_path, "{}", _stamped_baseline())
-        assert main(["compare", "--report", str(tmp_path / "nope.json"), "--baseline", str(bp)]) == 2
+        assert (
+            main(["compare", "--report", str(tmp_path / "nope.json"), "--baseline", str(bp)]) == 2
+        )
 
     def test_failclosed_corrupt_report(self, tmp_path):
         rp, bp = self._write(tmp_path, "not json at all", _stamped_baseline())

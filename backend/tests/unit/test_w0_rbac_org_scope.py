@@ -17,6 +17,7 @@
 真 SQLite（``Base.metadata.create_all``）+ ``httpx.ASGITransport``，不连
 MySQL/Redis/ES；manuals/MCP/llm-config 属平台级，组织管理员一律 403。
 """
+
 from types import SimpleNamespace
 
 import httpx
@@ -79,7 +80,9 @@ SYSTEM_ROLE_PERMISSIONS = {
 ROLE_IDS: dict[str, int] = {}
 
 
-def _user(uid: int, org: int | None, *, role: str = "user", superuser: bool = False) -> SimpleNamespace:
+def _user(
+    uid: int, org: int | None, *, role: str = "user", superuser: bool = False
+) -> SimpleNamespace:
     return SimpleNamespace(
         id=uid,
         username=f"user{uid}",
@@ -137,29 +140,81 @@ async def _setup():
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with factory() as s:
-        s.add_all([
-            Organization(id=1, name="org-a", owner_id=10),
-            Organization(id=2, name="org-b", owner_id=20),
-        ])
+        s.add_all(
+            [
+                Organization(id=1, name="org-a", owner_id=10),
+                Organization(id=2, name="org-b", owner_id=20),
+            ]
+        )
         await s.flush()
         await _seed_roles(s)
 
-        s.add_all([
-            User(id=10, username="a-admin", email="a-admin@example.com", hashed_password="x",
-                 role="user", organization_id=1, is_active=True, is_superuser=False),
-            User(id=20, username="b-admin", email="b-admin@example.com", hashed_password="x",
-                 role="user", organization_id=2, is_active=True, is_superuser=False),
-            User(id=11, username="a-member", email="a-member@example.com", hashed_password="x",
-                 role="user", organization_id=1, is_active=True, is_superuser=False),
-            # 仅 role='admin'：不得获得任何平台/组织管理员权力
-            User(id=12, username="legacy-admin", email="legacy@example.com", hashed_password="x",
-                 role="admin", organization_id=1, is_active=True, is_superuser=False),
-            # 主组织 A，但只有 B 的 OrgAdmin 关联（per-org 谓词判别靶）
-            User(id=30, username="cross-role", email="cross-role@example.com", hashed_password="x",
-                 role="user", organization_id=1, is_active=True, is_superuser=False),
-            User(id=1, username="superuser", email="root@example.com", hashed_password="x",
-                 role="user", organization_id=1, is_active=True, is_superuser=True),
-        ])
+        s.add_all(
+            [
+                User(
+                    id=10,
+                    username="a-admin",
+                    email="a-admin@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=1,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                User(
+                    id=20,
+                    username="b-admin",
+                    email="b-admin@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=2,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                User(
+                    id=11,
+                    username="a-member",
+                    email="a-member@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=1,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                # 仅 role='admin'：不得获得任何平台/组织管理员权力
+                User(
+                    id=12,
+                    username="legacy-admin",
+                    email="legacy@example.com",
+                    hashed_password="x",
+                    role="admin",
+                    organization_id=1,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                # 主组织 A，但只有 B 的 OrgAdmin 关联（per-org 谓词判别靶）
+                User(
+                    id=30,
+                    username="cross-role",
+                    email="cross-role@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=1,
+                    is_active=True,
+                    is_superuser=False,
+                ),
+                User(
+                    id=1,
+                    username="superuser",
+                    email="root@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=1,
+                    is_active=True,
+                    is_superuser=True,
+                ),
+            ]
+        )
         await s.flush()
         await s.execute(
             user_organization_role_association.insert(),
@@ -170,24 +225,46 @@ async def _setup():
                 {"user_id": 30, "organization_id": 2, "role_id": ROLE_IDS[ORG_ADMIN_ROLE]},
             ],
         )
-        await s.execute(
-            user_organization.insert().values(user_id=30, organization_id=2)
-        )
+        await s.execute(user_organization.insert().values(user_id=30, organization_id=2))
 
-        s.add_all([
-            PromptTemplate(id=101, name="prompt-a", content="a", is_system=False,
-                           organization_id=1, scope="organization", creator_id=11,
-                           version=1, is_active=True),
-            PromptTemplate(id=201, name="prompt-b", content="b", is_system=False,
-                           organization_id=2, scope="organization", creator_id=20,
-                           version=1, is_active=True),
-            Workflow(id=301, name="wf-a-admin", organization_id=1, created_by=10, is_active=True),
-            Workflow(id=302, name="wf-a-member", organization_id=1, created_by=11, is_active=True),
-            Workflow(id=303, name="wf-b", organization_id=2, created_by=20, is_active=True),
-            Workflow(id=304, name="wf-legacy", organization_id=1, created_by=12, is_active=True),
-            SystemManual(id=401, title="published", content="ok", is_published=True),
-            SystemManual(id=402, title="draft", content="hidden", is_published=False),
-        ])
+        s.add_all(
+            [
+                PromptTemplate(
+                    id=101,
+                    name="prompt-a",
+                    content="a",
+                    is_system=False,
+                    organization_id=1,
+                    scope="organization",
+                    creator_id=11,
+                    version=1,
+                    is_active=True,
+                ),
+                PromptTemplate(
+                    id=201,
+                    name="prompt-b",
+                    content="b",
+                    is_system=False,
+                    organization_id=2,
+                    scope="organization",
+                    creator_id=20,
+                    version=1,
+                    is_active=True,
+                ),
+                Workflow(
+                    id=301, name="wf-a-admin", organization_id=1, created_by=10, is_active=True
+                ),
+                Workflow(
+                    id=302, name="wf-a-member", organization_id=1, created_by=11, is_active=True
+                ),
+                Workflow(id=303, name="wf-b", organization_id=2, created_by=20, is_active=True),
+                Workflow(
+                    id=304, name="wf-legacy", organization_id=1, created_by=12, is_active=True
+                ),
+                SystemManual(id=401, title="published", content="ok", is_published=True),
+                SystemManual(id=402, title="draft", content="hidden", is_published=False),
+            ]
+        )
         await s.commit()
 
     return engine, factory
@@ -238,18 +315,22 @@ async def test_legacy_role_admin_cannot_reach_platform_endpoints(api, monkeypatc
     """
     from app.agent.mcp.manager import MCPManager
 
-    monkeypatch.setattr(
-        "app.agent.mcp.manager.mcp_manager", MCPManager(configs=[])
-    )
+    monkeypatch.setattr("app.agent.mcp.manager.mcp_manager", MCPManager(configs=[]))
 
     cases = [
         ("GET", "/api/v1/mcp/servers", None),
         ("POST", "/api/v1/prompts/seed", None),
         ("POST", "/api/v1/manuals/", {"title": "x", "content": "y"}),
         ("POST", "/api/v1/organizations/", {"name": "evil-org"}),
-        ("POST", "/api/v1/llm-config", {
-            "provider": "deepseek", "config_name": "x", "api_key": "sk-x",
-        }),
+        (
+            "POST",
+            "/api/v1/llm-config",
+            {
+                "provider": "deepseek",
+                "config_name": "x",
+                "api_key": "sk-x",
+            },
+        ),
     ]
     for method, url, payload in cases:
         r = await _call(api, LEGACY_ROLE_ADMIN, method, url, json=payload)
@@ -261,16 +342,20 @@ async def test_org_admin_cannot_reach_platform_endpoints(api, monkeypatch):
     """组织管理员同样不是平台管理员：MCP / 手册写 / llm-config 写 / 建组织 403。"""
     from app.agent.mcp.manager import MCPManager
 
-    monkeypatch.setattr(
-        "app.agent.mcp.manager.mcp_manager", MCPManager(configs=[])
-    )
+    monkeypatch.setattr("app.agent.mcp.manager.mcp_manager", MCPManager(configs=[]))
     cases = [
         ("GET", "/api/v1/mcp/servers", None),
         ("POST", "/api/v1/manuals/", {"title": "x", "content": "y"}),
         ("POST", "/api/v1/organizations/", {"name": "evil-org"}),
-        ("POST", "/api/v1/llm-config", {
-            "provider": "deepseek", "config_name": "x", "api_key": "sk-x",
-        }),
+        (
+            "POST",
+            "/api/v1/llm-config",
+            {
+                "provider": "deepseek",
+                "config_name": "x",
+                "api_key": "sk-x",
+            },
+        ),
     ]
     for method, url, payload in cases:
         r = await _call(api, ORG_A_ADMIN, method, url, json=payload)
@@ -282,16 +367,14 @@ async def test_platform_superuser_keeps_platform_access(api, monkeypatch):
     """超管旁路保留：MCP / 手册写 / 建组织 / seed 正常。"""
     from app.agent.mcp.manager import MCPManager
 
-    monkeypatch.setattr(
-        "app.agent.mcp.manager.mcp_manager", MCPManager(configs=[])
-    )
+    monkeypatch.setattr("app.agent.mcp.manager.mcp_manager", MCPManager(configs=[]))
     r = await _call(api, SUPERUSER, "GET", "/api/v1/mcp/servers")
     assert r.status_code == 200, r.text
-    r = await _call(api, SUPERUSER, "POST", "/api/v1/manuals/",
-                    json={"title": "by-root", "content": "ok"})
+    r = await _call(
+        api, SUPERUSER, "POST", "/api/v1/manuals/", json={"title": "by-root", "content": "ok"}
+    )
     assert r.status_code == 200, r.text
-    r = await _call(api, SUPERUSER, "POST", "/api/v1/organizations/",
-                    json={"name": "new-org"})
+    r = await _call(api, SUPERUSER, "POST", "/api/v1/organizations/", json={"name": "new-org"})
     assert r.status_code == 200, r.text
     r = await _call(api, SUPERUSER, "POST", "/api/v1/prompts/seed")
     assert r.status_code == 200, r.text
@@ -327,13 +410,23 @@ async def test_prompt_org_scope_matrix(api, monkeypatch):
         assert b_prompt.is_active is True, "跨组织提示词写入不得落库"
 
     # 创建组织模板：组织管理员可直接激活；普通成员只能落草稿
-    r = await _call(api, ORG_A_ADMIN, "POST", "/api/v1/prompts/",
-                    json={"name": "admin-made", "content": "x", "scope": "organization"})
+    r = await _call(
+        api,
+        ORG_A_ADMIN,
+        "POST",
+        "/api/v1/prompts/",
+        json={"name": "admin-made", "content": "x", "scope": "organization"},
+    )
     assert r.status_code == 200, r.text
     assert r.json()["is_active"] is True
 
-    r = await _call(api, ORG_A_MEMBER, "POST", "/api/v1/prompts/",
-                    json={"name": "member-made", "content": "x", "scope": "organization"})
+    r = await _call(
+        api,
+        ORG_A_MEMBER,
+        "POST",
+        "/api/v1/prompts/",
+        json={"name": "member-made", "content": "x", "scope": "organization"},
+    )
     assert r.status_code == 200, r.text
     assert r.json()["is_active"] is False, "普通成员创建的模板必须落草稿"
 
@@ -396,9 +489,7 @@ async def test_organization_settings_scope_matrix(api):
     async with api.factory() as s:
         row = (
             await s.execute(
-                select(OrganizationSettings).where(
-                    OrganizationSettings.organization_id == 2
-                )
+                select(OrganizationSettings).where(OrganizationSettings.organization_id == 2)
             )
         ).scalar_one_or_none()
         assert row is None, "跨组织设置写入不得落库"
@@ -462,8 +553,11 @@ async def test_member_role_assignment_syncs_org_admin_association(api, monkeypat
     # 超管把 org A 的成员提升为组织管理员 → 关联建立，立刻可管理本组织
     assert not await _has_assoc(11, 1)
     r = await _call(
-        api, SUPERUSER, "PATCH",
-        "/api/v1/organizations/1/members/11/role", params={"role": "admin"},
+        api,
+        SUPERUSER,
+        "PATCH",
+        "/api/v1/organizations/1/members/11/role",
+        params={"role": "admin"},
     )
     assert r.status_code == 200, r.text
     assert await _has_assoc(11, 1)
@@ -472,8 +566,11 @@ async def test_member_role_assignment_syncs_org_admin_association(api, monkeypat
 
     # 撤销后立即失效
     r = await _call(
-        api, SUPERUSER, "PATCH",
-        "/api/v1/organizations/1/members/11/role", params={"role": "user"},
+        api,
+        SUPERUSER,
+        "PATCH",
+        "/api/v1/organizations/1/members/11/role",
+        params={"role": "user"},
     )
     assert r.status_code == 200, r.text
     assert not await _has_assoc(11, 1)
@@ -519,8 +616,11 @@ async def test_org_admin_cannot_take_over_platform_accounts(api, monkeypatch):
 
     # 正向对照：组织管理员仍可重置本组织普通成员密码（未过度收紧）
     r = await _call(
-        api, ORG_A_ADMIN, "PUT",
-        "/api/v1/users/11/password", json={"new_password": "NewPass123!"},
+        api,
+        ORG_A_ADMIN,
+        "PUT",
+        "/api/v1/users/11/password",
+        json={"new_password": "NewPass123!"},
     )
     assert r.status_code == 200, r.text
 
@@ -556,26 +656,38 @@ async def test_admin_flags_exposed_for_frontend_gating(api):
 async def test_org_admin_cannot_reparent_organization(api):
     """组织层级（parent_id）是平台级结构写，组织管理员只能改展示/排序字段。"""
     r = await _call(
-        api, ORG_A_ADMIN, "PUT", "/api/v1/organizations/1",
+        api,
+        ORG_A_ADMIN,
+        "PUT",
+        "/api/v1/organizations/1",
         json={"parent_id": 2},
     )
     assert r.status_code == 403, r.text
 
     # 前端编辑/拖拽会回传未变化的 parent_id —— 值不变时不得误伤
     r = await _call(
-        api, ORG_A_ADMIN, "PUT", "/api/v1/organizations/1",
+        api,
+        ORG_A_ADMIN,
+        "PUT",
+        "/api/v1/organizations/1",
         json={"parent_id": None, "description": "same-parent-edit"},
     )
     assert r.status_code == 200, r.text
 
     r = await _call(
-        api, ORG_A_ADMIN, "PUT", "/api/v1/organizations/1",
+        api,
+        ORG_A_ADMIN,
+        "PUT",
+        "/api/v1/organizations/1",
         json={"description": "renamed-by-org-admin"},
     )
     assert r.status_code == 200, r.text
 
     r = await _call(
-        api, SUPERUSER, "PUT", "/api/v1/organizations/1",
+        api,
+        SUPERUSER,
+        "PUT",
+        "/api/v1/organizations/1",
         json={"parent_id": None},
     )
     assert r.status_code == 200, r.text
@@ -614,17 +726,18 @@ async def test_per_org_admin_predicate_is_not_global(api):
     """
     settings = "/api/v1/organizations"
 
-    r = await _call(api, CROSS_ORG_ROLE, "PUT", f"{settings}/1/settings",
-                    json={"retrieval_top_k": 5})
+    r = await _call(
+        api, CROSS_ORG_ROLE, "PUT", f"{settings}/1/settings", json={"retrieval_top_k": 5}
+    )
     assert r.status_code == 403, r.text
-    r = await _call(api, CROSS_ORG_ROLE, "PUT", f"{settings}/2/settings",
-                    json={"retrieval_top_k": 5})
+    r = await _call(
+        api, CROSS_ORG_ROLE, "PUT", f"{settings}/2/settings", json={"retrieval_top_k": 5}
+    )
     assert r.status_code == 200, r.text
 
     r = await _call(api, ORG_B_ADMIN, "GET", "/api/v1/workflows/")
     assert {item["id"] for item in r.json()["data"]["items"]} == {303}
-    r = await _call(api, ORG_B_ADMIN, "PUT", f"{settings}/1/settings",
-                    json={"retrieval_top_k": 5})
+    r = await _call(api, ORG_B_ADMIN, "PUT", f"{settings}/1/settings", json={"retrieval_top_k": 5})
     assert r.status_code == 403, r.text
 
 
@@ -643,14 +756,20 @@ async def test_org_admin_permission_dependency_grants_own_org_actions(api, monke
     monkeypatch.setattr(audit_service, "log_activity", _audit)
 
     r = await _call(
-        api, ORG_A_ADMIN, "PATCH",
-        "/api/v1/organizations/1/members/11/role", params={"role": "user"},
+        api,
+        ORG_A_ADMIN,
+        "PATCH",
+        "/api/v1/organizations/1/members/11/role",
+        params={"role": "user"},
     )
     assert r.status_code == 200, r.text
 
     r = await _call(
-        api, ORG_A_ADMIN, "PUT",
-        "/api/v1/users/11/password", json={"new_password": "NewPass123!"},
+        api,
+        ORG_A_ADMIN,
+        "PUT",
+        "/api/v1/users/11/password",
+        json={"new_password": "NewPass123!"},
     )
     assert r.status_code == 200, r.text
 

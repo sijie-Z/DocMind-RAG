@@ -129,9 +129,18 @@ def test_context_compressor():
 
 def test_context_compressor_list():
     contexts = [
-        {"text": "报销需要提供发票，发票内容要与实际消费一致，发票日期必须在30天内。", "filename": "policy1.md"},
-        {"text": "请假流程：员工在系统中提交请假申请，主管审批后生效，年假最短单位为半天。", "filename": "policy2.md"},
-        {"text": "差旅费标准：国内出差每天补助150元，住宿费上限300元，交通费实报实销。", "filename": "policy3.md"},
+        {
+            "text": "报销需要提供发票，发票内容要与实际消费一致，发票日期必须在30天内。",
+            "filename": "policy1.md",
+        },
+        {
+            "text": "请假流程：员工在系统中提交请假申请，主管审批后生效，年假最短单位为半天。",
+            "filename": "policy2.md",
+        },
+        {
+            "text": "差旅费标准：国内出差每天补助150元，住宿费上限300元，交通费实报实销。",
+            "filename": "policy3.md",
+        },
     ]
 
     query = "报销 发货"
@@ -141,7 +150,9 @@ def test_context_compressor_list():
     print(f"Compressed contexts: {len(compressed)}")
 
     for ctx in compressed:
-        print(f"  - {ctx['filename']}: {len(ctx['text'])} chars (compressed: {ctx.get('is_compressed', False)})")
+        print(
+            f"  - {ctx['filename']}: {len(ctx['text'])} chars (compressed: {ctx.get('is_compressed', False)})"
+        )
 
 
 def test_complexity_classifier_simple():

@@ -9,6 +9,7 @@
 - 激活动作必须写审计（activate_prompt / deactivate_prompt）；
 - 创建不接受客户端伪造系统模板。
 """
+
 from types import SimpleNamespace
 
 import httpx
@@ -59,9 +60,7 @@ async def api():
         )
         await s.flush()
         # W0-1：组织管理员 = per-org OrgAdmin 角色关联（users.role 不再参与鉴权）
-        org_admin_role = Role(
-            name="OrgAdmin", description="组织管理员", is_system_role=False
-        )
+        org_admin_role = Role(name="OrgAdmin", description="组织管理员", is_system_role=False)
         s.add(org_admin_role)
         await s.flush()
         await s.execute(
@@ -143,8 +142,10 @@ async def _id_by_name(api, name: str) -> int:
         from sqlalchemy import select
 
         row = (
-            await s.execute(select(PromptTemplate).where(PromptTemplate.name == name))
-        ).scalars().one()
+            (await s.execute(select(PromptTemplate).where(PromptTemplate.name == name)))
+            .scalars()
+            .one()
+        )
         return row.id
 
 
@@ -248,9 +249,7 @@ async def test_create_scope_personal_and_reject_system(api):
     assert r.json()["scope"] == "personal"
 
     # 默认创建仍是组织模板（保持既有语义）
-    r = await api.client.post(
-        f"{PROMPTS}/", json={"name": "team-shared", "content": "team"}
-    )
+    r = await api.client.post(f"{PROMPTS}/", json={"name": "team-shared", "content": "team"})
     assert r.status_code == 200, r.text
     assert r.json()["scope"] == "organization"
 
@@ -299,8 +298,7 @@ async def test_org_create_is_draft_for_non_admin_and_admin_create_is_audited(api
     assert r.status_code == 200, r.text
     assert r.json()["is_active"] is True
     assert any(
-        c["action"] == "activate_prompt" and "live-org" in (c["detail"] or "")
-        for c in calls
+        c["action"] == "activate_prompt" and "live-org" in (c["detail"] or "") for c in calls
     )
 
     # 个人模板不受限：普通用户创建即可激活（只影响自己）
@@ -336,9 +334,7 @@ async def test_active_org_template_content_edits_require_admin(api):
 
     # 草稿态（未激活）组织模板仍由创建者维护
     api.state.user = _make_user(uid=1, org=1)
-    r = await api.client.post(
-        f"{PROMPTS}/", json={"name": "draft-editable", "content": "draft"}
-    )
+    r = await api.client.post(f"{PROMPTS}/", json={"name": "draft-editable", "content": "draft"})
     assert r.status_code == 200, r.text
     assert r.json()["is_active"] is False
     draft_id = r.json()["id"]

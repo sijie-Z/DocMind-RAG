@@ -22,6 +22,7 @@
 - kind 恒为 "failed" → 超时用例红；
 - chat 链路恢复「暂无相关文档」话术/恢复写缓存 → TestChatHonestDegradation 红。
 """
+
 import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -35,8 +36,11 @@ from app.services.knowledge_service import KnowledgeService
 
 def _healthy_doc(chunk_id: str = "c1") -> dict:
     return {
-        "chunk_id": chunk_id, "content": "真实文档内容", "filename": "真实.pdf",
-        "score": 0.9, "document_id": "d1",
+        "chunk_id": chunk_id,
+        "content": "真实文档内容",
+        "filename": "真实.pdf",
+        "score": 0.9,
+        "document_id": "d1",
     }
 
 
@@ -47,11 +51,19 @@ def _patch_rerank():
     """
     return patch(
         "app.rag.pipeline.rerank",
-        new=AsyncMock(side_effect=lambda query, docs, client=None: (
-            docs,
-            {"status": "disabled", "path": "noop", "reason": "test_stub",
-             "attempts": [], "scores_attached": False, "model": None},
-        )),
+        new=AsyncMock(
+            side_effect=lambda query, docs, client=None: (
+                docs,
+                {
+                    "status": "disabled",
+                    "path": "noop",
+                    "reason": "test_stub",
+                    "attempts": [],
+                    "scores_attached": False,
+                    "model": None,
+                },
+            )
+        ),
     )
 
 
@@ -71,7 +83,9 @@ class _RecordingCache:
 def _make_pipeline(retrieve: AsyncMock, embedding: list | None = None) -> RAGPipeline:
     pipeline = RAGPipeline()
     pipeline.retriever = MagicMock()
-    pipeline.retriever.get_embedding = AsyncMock(return_value=embedding if embedding is not None else [])
+    pipeline.retriever.get_embedding = AsyncMock(
+        return_value=embedding if embedding is not None else []
+    )
     pipeline.retriever.retrieve = retrieve
     pipeline.cache = _RecordingCache()
     pipeline.semantic_cache = _RecordingCache()
@@ -187,7 +201,9 @@ class TestRecoveryNotPoisoned:
             results, _ = await pipeline.search_knowledge_base(q, 1, top_k=5)
 
         assert results and results[0]["chunk_id"] == "c1", "恢复后同一措辞必须拿到真实结果"
-        assert pipeline.retriever.retrieve.await_count == 1, "恢复后必须真正重试检索（修前这里不会发生）"
+        assert pipeline.retriever.retrieve.await_count == 1, (
+            "恢复后必须真正重试检索（修前这里不会发生）"
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -211,7 +227,9 @@ class TestDegradedArmSemantics:
                 "app.rag.retriever.ElasticsearchTools.search_documents",
                 new=AsyncMock(return_value={"hits": {"hits": []}}),
             ),
-            patch.object(QueryComplexityClassifier, "get_strategy", staticmethod(lambda q: "hybrid")),
+            patch.object(
+                QueryComplexityClassifier, "get_strategy", staticmethod(lambda q: "hybrid")
+            ),
         ):
             retriever = HybridRetriever(openai_client=None, embedding_provider=failing)
             results, _qv, _dbg, degraded = await retriever.retrieve("向量层故障查询", 1, top_k=5)
@@ -235,7 +253,9 @@ class TestDegradedArmSemantics:
                 "app.rag.retriever.ElasticsearchTools.search_documents",
                 new=AsyncMock(return_value={"hits": {"hits": []}}),
             ),
-            patch.object(QueryComplexityClassifier, "get_strategy", staticmethod(lambda q: "keyword_only")),
+            patch.object(
+                QueryComplexityClassifier, "get_strategy", staticmethod(lambda q: "keyword_only")
+            ),
         ):
             retriever = HybridRetriever(openai_client=None, embedding_provider=failing)
             results, _qv, _dbg, degraded = await retriever.retrieve("短查询", 1, top_k=5)
@@ -248,7 +268,9 @@ class TestDegradedArmSemantics:
 
         变异验证：故障判定条件去掉 `degraded_reasons`（只看子查询异常）→ 红。
         """
-        retrieve = AsyncMock(return_value=([], [], None, ["vector_arm_unavailable: embedding down"]))
+        retrieve = AsyncMock(
+            return_value=([], [], None, ["vector_arm_unavailable: embedding down"])
+        )
         pipeline = _make_pipeline(retrieve)
 
         with pytest.raises(RetrievalUnavailableError) as ei:
@@ -310,7 +332,9 @@ class TestDegradedArmSemantics:
 # ══════════════════════════════════════════════════════════════════════════
 class TestNormalEmptyAndHitRegression:
     @pytest.mark.asyncio
-    async def test_normal_empty_returns_empty_without_exception_and_no_negative_cache(self, monkeypatch):
+    async def test_normal_empty_returns_empty_without_exception_and_no_negative_cache(
+        self, monkeypatch
+    ):
         """全臂正常、确实无命中：仍是正常空结果（不抛异常），但不写负缓存。
 
         决策（issue #292）：空结果不写缓存。负缓存把「一次未命中」放大成
@@ -340,7 +364,9 @@ class TestNormalEmptyAndHitRegression:
         pipeline = RAGPipeline()
         pipeline.retriever = MagicMock()
         pipeline.retriever.get_embedding = AsyncMock(return_value=[0.1] * 4)
-        pipeline.retriever.retrieve = AsyncMock(return_value=([_healthy_doc()], [0.1] * 4, None, []))
+        pipeline.retriever.retrieve = AsyncMock(
+            return_value=([_healthy_doc()], [0.1] * 4, None, [])
+        )
 
         with _patch_rerank():
             first, _ = await pipeline.search_knowledge_base(q, 1, top_k=5)
@@ -348,7 +374,9 @@ class TestNormalEmptyAndHitRegression:
 
         assert first and first[0]["chunk_id"] == "c1"
         assert second and second[0]["chunk_id"] == "c1"
-        assert pipeline.retriever.retrieve.await_count == 1, "第二次必须命中精确缓存（正常行为不变）"
+        assert pipeline.retriever.retrieve.await_count == 1, (
+            "第二次必须命中精确缓存（正常行为不变）"
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -424,9 +452,7 @@ class TestChatHonestDegradation:
         queue: asyncio.Queue = asyncio.Queue()
         sem_cache = _RecordingSemanticCache()
         captured: dict = {}
-        fake_rag = _fake_rag_stack(
-            RetrievalUnavailableError("ES down", kind="failed"), captured
-        )
+        fake_rag = _fake_rag_stack(RetrievalUnavailableError("ES down", kind="failed"), captured)
 
         with (
             patch("app.services.chat_service.rag_service", new=fake_rag),
@@ -437,9 +463,16 @@ class TestChatHonestDegradation:
             ),
         ):
             await run_rag_pipeline(
-                session=session, user_content="报销流程是什么", user_id=1,
-                search_org_id=1, organization_id=1, conversation_id=None, file_ids=[],
-                strict_mode=False, privacy_mode=False, event_queue=queue,
+                session=session,
+                user_content="报销流程是什么",
+                user_id=1,
+                search_org_id=1,
+                organization_id=1,
+                conversation_id=None,
+                file_ids=[],
+                strict_mode=False,
+                privacy_mode=False,
+                event_queue=queue,
             )
 
         events = _drain(queue)
@@ -448,10 +481,14 @@ class TestChatHonestDegradation:
 
         prompt = captured.get("system_prompt_override") or ""
         assert "检索服务暂时不可用" in prompt, "故障必须使用诚实降级提示词"
-        assert "暂无相关文档" not in prompt, "不得复用「知识库中暂无相关文档」话术（把故障说成没找到）"
+        assert "暂无相关文档" not in prompt, (
+            "不得复用「知识库中暂无相关文档」话术（把故障说成没找到）"
+        )
 
         assert sem_cache.set_calls == [], "故障态答案不得写问答缓存（否则故障形态被固化 3600s）"
-        assert fake_rag.report_grounded.call_count == 0, "故障不是「未命中来源」，不得污染 groundedness 口径"
+        assert fake_rag.report_grounded.call_count == 0, (
+            "故障不是「未命中来源」，不得污染 groundedness 口径"
+        )
 
     @pytest.mark.asyncio
     async def test_strict_mode_failure_refuses_explicitly_without_llm_call(self):
@@ -476,13 +513,22 @@ class TestChatHonestDegradation:
             ),
         ):
             await run_rag_pipeline(
-                session=session, user_content="报销流程是什么", user_id=1,
-                search_org_id=1, organization_id=1, conversation_id=None,
-                file_ids=["doc-1"], strict_mode=True, privacy_mode=False, event_queue=queue,
+                session=session,
+                user_content="报销流程是什么",
+                user_id=1,
+                search_org_id=1,
+                organization_id=1,
+                conversation_id=None,
+                file_ids=["doc-1"],
+                strict_mode=True,
+                privacy_mode=False,
+                event_queue=queue,
             )
 
         events = _drain(queue)
-        assert [e.type for e in events] == ["error"], f"严格模式故障必须显式拒答: {[e.type for e in events]}"
+        assert [e.type for e in events] == ["error"], (
+            f"严格模式故障必须显式拒答: {[e.type for e in events]}"
+        )
         assert "检索服务暂不可用" in events[0].content
         assert captured.get("chat_stream_calls", 0) == 0, "拒答路径不得调用 LLM"
 
@@ -505,9 +551,16 @@ class TestChatHonestDegradation:
             ),
         ):
             await run_rag_pipeline(
-                session=session, user_content="报销流程是什么", user_id=1,
-                search_org_id=1, organization_id=1, conversation_id=None, file_ids=[],
-                strict_mode=False, privacy_mode=False, event_queue=queue,
+                session=session,
+                user_content="报销流程是什么",
+                user_id=1,
+                search_org_id=1,
+                organization_id=1,
+                conversation_id=None,
+                file_ids=[],
+                strict_mode=False,
+                privacy_mode=False,
+                event_queue=queue,
             )
 
         events = _drain(queue)

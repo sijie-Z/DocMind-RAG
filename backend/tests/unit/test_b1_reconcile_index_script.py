@@ -17,21 +17,18 @@
   chunk_count，含 chunk_count=0 却有 chunk 的异常形态）/ ok；只有
   missing/partial 触发重索引。
 """
+
 import importlib.util
 from pathlib import Path
 
 import pytest
 
-SCRIPT_PATH = (
-    Path(__file__).resolve().parents[2] / "scripts" / "reconcile_knowledge_index.py"
-)
+SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "reconcile_knowledge_index.py"
 
 
 def _load_script_module():
     assert SCRIPT_PATH.exists(), f"缺少运维脚本：{SCRIPT_PATH.name}（#180 收尾）"
-    spec = importlib.util.spec_from_file_location(
-        "reconcile_knowledge_index", SCRIPT_PATH
-    )
+    spec = importlib.util.spec_from_file_location("reconcile_knowledge_index", SCRIPT_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -221,13 +218,9 @@ async def test_fetch_indexed_chunk_counts_uses_composite_pagination():
     assert first["index"] == "knowledge-index"
     assert first["size"] == 0
     composite = first["aggs"]["by_document"]["composite"]
-    assert composite["sources"] == [
-        {"document_id": {"terms": {"field": "document_id"}}}
-    ]
+    assert composite["sources"] == [{"document_id": {"terms": {"field": "document_id"}}}]
     assert "after" not in composite
-    assert client.calls[1]["aggs"]["by_document"]["composite"]["after"] == {
-        "document_id": "d2"
-    }
+    assert client.calls[1]["aggs"]["by_document"]["composite"]["after"] == {"document_id": "d2"}
 
 
 def test_org_filter_is_applied_to_es_query():
@@ -243,9 +236,7 @@ def test_org_filter_is_applied_to_es_query():
             return {"aggregations": {"by_document": {"buckets": []}}}
 
     client = _FakeClient()
-    asyncio.run(
-        module.fetch_indexed_chunk_counts(client, "idx", organization_id=3)
-    )
+    asyncio.run(module.fetch_indexed_chunk_counts(client, "idx", organization_id=3))
     assert client.calls[0]["query"] == {"term": {"organization_id": "3"}}
 
 
@@ -264,9 +255,7 @@ def test_find_unresolved_includes_docs_that_left_indexed_state():
         [("d-ok", "a.txt", 1, 2), ("d-extra", "b.txt", 1, 0)],
         {"d-ok": 2, "d-extra": 1},
     )
-    unresolved = module.find_unresolved(
-        ["d-ok", "d-extra", "d-departed"], report_after
-    )
+    unresolved = module.find_unresolved(["d-ok", "d-extra", "d-departed"], report_after)
     assert unresolved == ["d-departed"]
 
 

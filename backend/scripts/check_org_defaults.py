@@ -44,9 +44,7 @@ DEFAULT_ROOT = BACKEND_DIR / "app"
 # 拦 1（A2 历史形态）与 0/-1（W0-6: 0 号组织哨兵）。字符串 "0" 在扫描前
 # 归一化为 0（见 _STRING_LITERAL_ALIASES），因此同样由本正则命中。
 # `(?![0-9])` 排除 10、11 等（只拦真正等于 1/0/-1 的默认值）。
-ASSIGN_DEFAULT_RE = re.compile(
-    r"organization_id\s*(?::[^=\n]*)?=\s*(?:1|0|-1)(?![0-9])"
-)
+ASSIGN_DEFAULT_RE = re.compile(r"organization_id\s*(?::[^=\n]*)?=\s*(?:1|0|-1)(?![0-9])")
 # 2) Field(default=1/0/-1) / Query(default=0) 等参数默认（同行需出现 organization_id）。
 DEFAULT_KW_RE = re.compile(r"\bdefault\s*=\s*(?:1|0|-1)(?![0-9])")
 # 3) `organization_id or 1/0/-1` 运行时兜底。
@@ -100,11 +98,7 @@ def _code_only(source: str) -> list[str]:
         if tok.type not in mask_types:
             continue
         (start_row, start_col), (end_row, end_col) = tok.start, tok.end
-        alias = (
-            _STRING_LITERAL_ALIASES.get(tok.string)
-            if tok.type == tokenize.STRING
-            else None
-        )
+        alias = _STRING_LITERAL_ALIASES.get(tok.string) if tok.type == tokenize.STRING else None
         if alias is not None and start_row == end_row:
             idx = start_row - 1
             if 0 <= idx < len(masked):

@@ -12,6 +12,7 @@
 
 数据模型合并（Conversation/Run）留到 C3，本模块不引入新表。
 """
+
 import logging
 import uuid
 from typing import NamedTuple
@@ -72,9 +73,7 @@ def session_org_condition(org_id: int | None):
     )
 
 
-async def resolve_session_access_scope(
-    current_user: User, db: AsyncSession
-) -> SessionAccessScope:
+async def resolve_session_access_scope(current_user: User, db: AsyncSession) -> SessionAccessScope:
     """解析「按 id 访问会话」的组织作用域。
 
     与列表共用 ``require_organization`` 的有效组织解析（含 token 组织回退与
@@ -146,9 +145,7 @@ async def load_accessible_session(
     scope: SessionAccessScope,
 ) -> ChatSession | None:
     """按 id 加载调用者可见的会话；不存在 / 他人 / 跨组织一律 None。"""
-    stmt = select(ChatSession).where(
-        *session_access_conditions(session_id, current_user.id, scope)
-    )
+    stmt = select(ChatSession).where(*session_access_conditions(session_id, current_user.id, scope))
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
@@ -276,7 +273,9 @@ async def save_session_interaction(
                 session.add(assistant_msg)
 
             # Update session title from first message
-            if existing is not None and (not existing.title or existing.title == "New Agent Session"):
+            if existing is not None and (
+                not existing.title or existing.title == "New Agent Session"
+            ):
                 existing.title = query[:80]
                 existing.updated_at = func.now()
 

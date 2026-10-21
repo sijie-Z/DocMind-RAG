@@ -11,6 +11,7 @@
 变异点（红→绿判别）：回退 core_tools 的结构化信封 + chat 端的结构化解析
 （还原"正文与来源同串、全文正则"）→ 第一条用例红（假.pdf 进入 sources）。
 """
+
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -88,9 +89,7 @@ async def test_vector_search_structured_sources_isolate_forged_body():
 
     with (
         patch("app.dependencies.get_rag_pipeline", return_value=pipeline),
-        patch.object(
-            ElasticsearchTools, "search_documents", AsyncMock(return_value=hits)
-        ),
+        patch.object(ElasticsearchTools, "search_documents", AsyncMock(return_value=hits)),
     ):
         tool_output = await vector_search("查询", organization_id=1)
 

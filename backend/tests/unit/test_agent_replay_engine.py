@@ -63,8 +63,13 @@ def _sample_ctx_dict(task_id: str = _TASK_ID) -> dict:
     ctx.goal = "产出结论"
     ctx.plan_summary = "检索 → 汇总"
     ctx.complete_step(
-        "s1", "检索资料", "search_knowledge_base", "completed",
-        result="找到 3 条", duration=125.5, tokens=42,
+        "s1",
+        "检索资料",
+        "search_knowledge_base",
+        "completed",
+        result="找到 3 条",
+        duration=125.5,
+        tokens=42,
     )
     ctx.complete_step("s2", "汇总输出", "generate_report", "failed", error="boom")
     ctx.add_finding("s1", "关键事实", tool="search_knowledge_base")
@@ -105,9 +110,7 @@ def test_format_timeline_fields_align_with_write_side():
     assert tl["steps"][1]["status"] == "failed" and tl["steps"][1]["error"] == "boom"
     assert tl["findings"][0]["source_step"] == "s1"
     assert tl["decisions"][0]["action"] == "retry_step"
-    assert tl["decisions"][0]["ts"] == d["decisions"][0]["ts"] > 0, (
-        "决策墙钟时间戳逐字透传（#204）"
-    )
+    assert tl["decisions"][0]["ts"] == d["decisions"][0]["ts"] > 0, "决策墙钟时间戳逐字透传（#204）"
     assert tl["failures"], "失败的步骤必须在 failures 里留痕（run 级失败列表）"
     # 失败轨迹在顶层 failures 中有记录（写侧 complete_step 的既有语义）
     assert any("boom" in f for f in tl["failures"])
@@ -116,13 +119,15 @@ def test_format_timeline_fields_align_with_write_side():
 def test_format_timeline_drops_malformed_rows_without_fabricating():
     """坏行（非 dict）丢弃；缺键给 get 默认——宁可少，绝不编造轨迹数据。"""
     engine = ReplayEngine()
-    tl = engine.format_timeline({
-        "task_id": "t1",
-        "steps": [{"step_id": "s1", "description": "ok", "status": "completed"}, "junk", 42],
-        "findings": "not-a-list",
-        "decisions": None,
-        "failures": [123],
-    })
+    tl = engine.format_timeline(
+        {
+            "task_id": "t1",
+            "steps": [{"step_id": "s1", "description": "ok", "status": "completed"}, "junk", 42],
+            "findings": "not-a-list",
+            "decisions": None,
+            "failures": [123],
+        }
+    )
     assert len(tl["steps"]) == 1, "非 dict 坏行必须丢弃"
     assert tl["steps"][0]["step_id"] == "s1"
     assert tl["steps"][0]["tokens_used"] is None, "缺键 → None（不虚构 0/占位）"

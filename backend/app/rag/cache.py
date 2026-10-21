@@ -3,6 +3,7 @@
 Semantic cache uses Redis Sorted Sets for O(log n) similarity search.
 Memory fallback uses bounded LRU eviction to prevent unbounded growth.
 """
+
 import hashlib
 import json
 import logging
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 def _get_redis():
     """Lazy import to avoid circular dependencies."""
     from app.core.redis import redis_client
+
     return redis_client
 
 
@@ -39,9 +41,7 @@ def _require_org_id(organization_id: int | None, where: str) -> int:
     try:
         org_id = int(organization_id)
     except (TypeError, ValueError):
-        raise ValueError(
-            f"{where} 的 organization_id 非法: {organization_id!r}"
-        ) from None
+        raise ValueError(f"{where} 的 organization_id 非法: {organization_id!r}") from None
     if org_id <= 0:
         raise ValueError(
             f"{where} 的 organization_id={organization_id!r} 非法："
@@ -79,7 +79,15 @@ _QUERY_STOP_CHARS = frozenset("的了吗呢吧啊呀嘛哦是什么怎这那哪"
 # 问句短语先整体剔除：字符级剔除不了「如何」的如/何、「多少」的多/少，
 # 直接剥字符又会伤到「如下」「多数」等实体词。
 _QUESTION_PHRASES = (
-    "为什么", "怎么样", "怎样", "如何", "多少", "哪些", "哪个", "是什么", "是多少",
+    "为什么",
+    "怎么样",
+    "怎样",
+    "如何",
+    "多少",
+    "哪些",
+    "哪个",
+    "是什么",
+    "是多少",
 )
 # 否定字：计数必须一致——"含税价格" 与 "不含税价格" 是相反问题。
 _NEGATION_CHARS = frozenset("不无未非没否勿免")
@@ -157,9 +165,7 @@ def _query_equivalence_signature(query: str) -> dict[str, Any]:
             sub_refs.append(("项", n))
         for i in range(m.start(), m.end()):
             masked[i] = " "
-    section_refs = sorted(
-        {re.sub(r"\s+", "", m.group(0)) for m in _SECTION_REF_RE.finditer(q)}
-    )
+    section_refs = sorted({re.sub(r"\s+", "", m.group(0)) for m in _SECTION_REF_RE.finditer(q)})
     for m in _SECTION_REF_RE.finditer(q):
         for i in range(m.start(), m.end()):
             masked[i] = " "
@@ -186,14 +192,11 @@ def _query_equivalence_signature(query: str) -> dict[str, Any]:
     # extract_query_terms 的拉丁词要求 ≥2 字符（会丢「方案 A/B」这类单字母
     # 选项标签），这里补独立单字母；其余复用同一抽取口径。
     latin_terms = {
-        t for t in extract_query_terms(q, limit=None)
-        if re.fullmatch(r"[a-z][a-z0-9_]*", t)
+        t for t in extract_query_terms(q, limit=None) if re.fullmatch(r"[a-z][a-z0-9_]*", t)
     }
     latin_terms.update(re.findall(r"(?<![a-z0-9_])[a-z](?![a-z0-9_])", q))
 
-    intents = frozenset(
-        name for name, markers in _QUESTION_INTENTS if any(m in q for m in markers)
-    )
+    intents = frozenset(name for name, markers in _QUESTION_INTENTS if any(m in q for m in markers))
 
     return {
         "clause_numbers": sorted(clause_numbers),
@@ -225,8 +228,12 @@ def queries_equivalent(query: str, cached_query: str) -> tuple[bool, str]:
     a = _query_equivalence_signature(query)
     b = _query_equivalence_signature(cached_query)
     anchored = bool(
-        a["clause_numbers"] or a["sub_refs"] or a["section_refs"]
-        or b["clause_numbers"] or b["sub_refs"] or b["section_refs"]
+        a["clause_numbers"]
+        or a["sub_refs"]
+        or a["section_refs"]
+        or b["clause_numbers"]
+        or b["sub_refs"]
+        or b["section_refs"]
     )
     # 没有任何内容/术语/条款信号 → 无法证明同一问题，fail-closed。
     if not a["runs"] and not a["latin_terms"] and not anchored:
@@ -289,6 +296,7 @@ class BoundedLRUCache:
         if len(self._cache) > self._max_size:
             # 指标补埋（issue #242 第 10 条）：内存回退缓存的淘汰此前从未计数。
             from app.core.prometheus import RAG_CACHE_EVICTIONS
+
             while len(self._cache) > self._max_size:
                 self._cache.popitem(last=False)
                 RAG_CACHE_EVICTIONS.labels(cache_type="memory").inc()
@@ -319,7 +327,9 @@ class RetrievalCache:
         # clear_for_org 都能清理到实际服务读写的 pipeline 单例缓存数据。
         self._memory = _get_shared_memory()
 
-    def _key(self, query: str, organization_id: int, top_k: int, search_mode: str | None = None) -> str:
+    def _key(
+        self, query: str, organization_id: int, top_k: int, search_mode: str | None = None
+    ) -> str:
         # issue #225 决策 7A：显式 search_mode 的结果按模式分域——显式模式与自动
         # 路由互不可见（既不让覆盖请求命中/复用自动路由的结果，也防止显式模式的
         # 结果被后续自动路由请求当作自己的结果返回）。search_mode=None 时键与

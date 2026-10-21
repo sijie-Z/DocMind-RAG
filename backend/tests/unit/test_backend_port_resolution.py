@@ -10,6 +10,7 @@
 真正起服务、断言「文件内容 == 实际监听端口」的用例在
 ``tests/integration/test_backend_port_file.py``。
 """
+
 import sys
 
 import pytest
@@ -23,7 +24,10 @@ from app.main import _parse_cli_port, _port_from_env, resolve_backend_port
     [
         (["prog", "app.main:app", "--port", "8123", "--reload"], 8123),
         (["prog", "--port=8123"], 8123),
-        (["prog", "--port", "8000", "--host", "0.0.0.0", "--port", "9000"], 9000),  # 重复取最后（click 语义）
+        (
+            ["prog", "--port", "8000", "--host", "0.0.0.0", "--port", "9000"],
+            9000,
+        ),  # 重复取最后（click 语义）
         (["prog", "app.main:app", "--reload"], None),  # 没传 --port
         (["prog", "--port"], None),  # 缺值
         (["prog", "--port", "abc"], None),  # 非法值

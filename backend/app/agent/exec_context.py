@@ -162,16 +162,17 @@ class StepRecord:
     从 issue #204 之前的旧 checkpoint 恢复的步骤没有任何时间戳来源；回放
     timeline 对旧数据同样输出 None。
     """
+
     step_id: str
     description: str
     tool_used: str | None
-    status: str                      # pending / running / completed / failed / skipped
-    started_at: float                       # epoch 秒；0.0 = 未知（旧快照恢复）
+    status: str  # pending / running / completed / failed / skipped
+    started_at: float  # epoch 秒；0.0 = 未知（旧快照恢复）
     result_summary: str | None = None
     error: str | None = None
     duration_ms: float = 0.0
     tokens_used: int = 0
-    finished_at: float | None = None        # epoch 秒；None = 未完成/未知
+    finished_at: float | None = None  # epoch 秒；None = 未完成/未知
 
     @property
     def is_success(self) -> bool:
@@ -181,19 +182,21 @@ class StepRecord:
 @dataclass
 class Finding:
     """A piece of information discovered during execution."""
+
     source_step: str
     content: str
     source_tool: str | None = None
-    confidence: str = "medium"       # high / medium / low
+    confidence: str = "medium"  # high / medium / low
 
 
 @dataclass
 class Decision:
     """A key decision made during any phase."""
-    phase: str                       # plan / execute / reflect
-    action: str                      # choose_tool / retry_step / skip_step / skill_match / finalize
+
+    phase: str  # plan / execute / reflect
+    action: str  # choose_tool / retry_step / skip_step / skill_match / finalize
     reasoning: str
-    ts: float                        # epoch 秒；0.0 = 未知（旧快照恢复）
+    ts: float  # epoch 秒；0.0 = 未知（旧快照恢复）
     triggered_by: str | None = None  # 触发该决策的 step_id（缺省取 current_step_id）
 
 
@@ -249,12 +252,14 @@ class ExecutionContext:
         tool: str | None = None,
         confidence: str = "medium",
     ) -> None:
-        self.findings.append(Finding(
-            source_step=step_id,
-            content=content[:500],
-            source_tool=tool,
-            confidence=confidence,
-        ))
+        self.findings.append(
+            Finding(
+                source_step=step_id,
+                content=content[:500],
+                source_tool=tool,
+                confidence=confidence,
+            )
+        )
 
     def record_decision(
         self,
@@ -272,11 +277,15 @@ class ExecutionContext:
         显式传入非 None 值时以显式值为准；`current_step_id` 为 None（尚未派发
         过任何步骤）→ None，不编造归属。变异点：删掉缺省填充 → 归属断言红。
         """
-        self.decisions.append(Decision(
-            phase=phase, action=action, reasoning=reasoning,
-            ts=datetime.now().timestamp(),
-            triggered_by=triggered_by if triggered_by is not None else self.current_step_id,
-        ))
+        self.decisions.append(
+            Decision(
+                phase=phase,
+                action=action,
+                reasoning=reasoning,
+                ts=datetime.now().timestamp(),
+                triggered_by=triggered_by if triggered_by is not None else self.current_step_id,
+            )
+        )
 
     def complete_step(
         self,
@@ -344,14 +353,22 @@ class ExecutionContext:
                 for s in self.completed_steps
             ],
             "findings": [
-                {"source_step": f.source_step, "content": f.content[:300],
-                 "source_tool": f.source_tool, "confidence": f.confidence}
+                {
+                    "source_step": f.source_step,
+                    "content": f.content[:300],
+                    "source_tool": f.source_tool,
+                    "confidence": f.confidence,
+                }
                 for f in self.findings
             ],
             "decisions": [
-                {"phase": d.phase, "action": d.action,
-                 "reasoning": d.reasoning[:200], "triggered_by": d.triggered_by,
-                 "ts": d.ts}
+                {
+                    "phase": d.phase,
+                    "action": d.action,
+                    "reasoning": d.reasoning[:200],
+                    "triggered_by": d.triggered_by,
+                    "ts": d.ts,
+                }
                 for d in self.decisions
             ],
             "failures": self.failures[:10],
@@ -376,13 +393,15 @@ class ExecutionContext:
         resume）。
         """
         data = self.to_dict()
-        data.update({
-            "v": 1,
-            "current_step_id": self.current_step_id,
-            # T14：@引用摘要段随快照恢复（键缺失的旧快照 → 读侧默认空串）。
-            "document_context": self.document_context,
-            "artifacts": _normalize_artifact_values(self.artifacts, source="snapshot-write"),
-        })
+        data.update(
+            {
+                "v": 1,
+                "current_step_id": self.current_step_id,
+                # T14：@引用摘要段随快照恢复（键缺失的旧快照 → 读侧默认空串）。
+                "document_context": self.document_context,
+                "artifacts": _normalize_artifact_values(self.artifacts, source="snapshot-write"),
+            }
+        )
         return data
 
     @classmethod
@@ -407,12 +426,12 @@ class ExecutionContext:
             ctx.document_context = raw_document_context
         elif raw_document_context is not None:
             logger.warning(
-                "checkpoint 快照值级漂移（document_context, type=%s）："
-                "按默认降级（无引用上下文）",
+                "checkpoint 快照值级漂移（document_context, type=%s）：按默认降级（无引用上下文）",
                 type(raw_document_context).__name__,
             )
         ctx.artifacts = _normalize_artifact_values(
-            dict(data.get("artifacts") or {}), source="snapshot-read",
+            dict(data.get("artifacts") or {}),
+            source="snapshot-read",
         )
         ctx.total_tokens = int(data.get("total_tokens") or 0)
         ctx.progress = float(data.get("progress") or 0.0)
@@ -425,34 +444,40 @@ class ExecutionContext:
             # （0.0 / None）——绝不用当前时间伪造历史。变异点：直取
             # s["started_at"] → 旧 checkpoint 解析 KeyError。
             raw_finished_at = s.get("finished_at")
-            ctx.completed_steps.append(StepRecord(
-                step_id=s.get("step_id", ""),
-                description=s.get("description", ""),
-                tool_used=s.get("tool_used"),
-                status=s.get("status", ""),
-                started_at=float(s.get("started_at") or 0.0),
-                result_summary=s.get("result_summary"),
-                error=s.get("error"),
-                duration_ms=float(s.get("duration_ms") or 0.0),
-                tokens_used=int(s.get("tokens_used") or 0),
-                finished_at=float(raw_finished_at) if raw_finished_at is not None else None,
-            ))
+            ctx.completed_steps.append(
+                StepRecord(
+                    step_id=s.get("step_id", ""),
+                    description=s.get("description", ""),
+                    tool_used=s.get("tool_used"),
+                    status=s.get("status", ""),
+                    started_at=float(s.get("started_at") or 0.0),
+                    result_summary=s.get("result_summary"),
+                    error=s.get("error"),
+                    duration_ms=float(s.get("duration_ms") or 0.0),
+                    tokens_used=int(s.get("tokens_used") or 0),
+                    finished_at=float(raw_finished_at) if raw_finished_at is not None else None,
+                )
+            )
         for f in data.get("findings") or []:
-            ctx.findings.append(Finding(
-                source_step=f.get("source_step", ""),
-                content=f.get("content", ""),
-                source_tool=f.get("source_tool"),
-                confidence=f.get("confidence", "medium"),
-            ))
+            ctx.findings.append(
+                Finding(
+                    source_step=f.get("source_step", ""),
+                    content=f.get("content", ""),
+                    source_tool=f.get("source_tool"),
+                    confidence=f.get("confidence", "medium"),
+                )
+            )
         for d in data.get("decisions") or []:
-            ctx.decisions.append(Decision(
-                phase=d.get("phase", ""),
-                action=d.get("action", ""),
-                reasoning=d.get("reasoning", ""),
-                # #204：旧快照无 ts → 0.0 未知哨兵（同上，不得编造）。
-                ts=float(d.get("ts") or 0.0),
-                triggered_by=d.get("triggered_by"),
-            ))
+            ctx.decisions.append(
+                Decision(
+                    phase=d.get("phase", ""),
+                    action=d.get("action", ""),
+                    reasoning=d.get("reasoning", ""),
+                    # #204：旧快照无 ts → 0.0 未知哨兵（同上，不得编造）。
+                    ts=float(d.get("ts") or 0.0),
+                    triggered_by=d.get("triggered_by"),
+                )
+            )
         return ctx
 
     def to_summary_dict(self) -> dict[str, Any]:
@@ -492,6 +517,7 @@ class ExecutionContext:
         # Try Redis
         try:
             from app.core.redis import redis_client
+
             if redis_client:
                 key = f"agent:replay:{self.task_id}"
                 await redis_client.setex(key, ttl, json.dumps(data, ensure_ascii=False))
@@ -526,6 +552,7 @@ class ExecutionContext:
         """
         try:
             from app.core.redis import redis_client
+
             if redis_client:
                 raw = await redis_client.get(f"agent:replay:{task_id}")
                 if raw:
@@ -539,6 +566,7 @@ class ExecutionContext:
         """Load a saved execution context from a local JSON file."""
         try:
             from pathlib import Path
+
             p = Path(path)
             if p.exists():
                 return json.loads(p.read_text(encoding="utf-8"))

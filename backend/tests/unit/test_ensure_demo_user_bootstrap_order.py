@@ -5,6 +5,7 @@
 旧顺序（先建 owner_id=1 的组织）在空库上外键必然失败，且异常被吞——
 全新部署表现为"登录不了"，而非"种子失败"。
 """
+
 import contextlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock

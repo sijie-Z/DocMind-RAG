@@ -74,9 +74,7 @@ class AgentMemoryBridge:
 
         # A1（记忆 IDOR）：命名空间由 memory_service 按显式 (org, user) 租户上下文
         # 拼装（org:user:scope），本桥不再自行拼接全局 key。
-        self.system: AgentMemorySystem = get_memory_system(
-            organization_id, user_id, scope
-        )
+        self.system: AgentMemorySystem = get_memory_system(organization_id, user_id, scope)
         self.agent_id = agent_id
         self.organization_id = organization_id
         self.user_id = user_id
@@ -97,6 +95,7 @@ class AgentMemoryBridge:
             return
         try:
             from app.dependencies import get_rag_pipeline
+
             pipeline = get_rag_pipeline()
             self.system.set_embedding_provider(pipeline.get_embedding)
             self._embedding_ready = True
@@ -115,6 +114,7 @@ class AgentMemoryBridge:
         span = None
         try:
             from app.agent.observability import get_langfuse
+
             lf_obj = get_langfuse()
             if lf_obj:
                 span = lf_obj.span(name="memory:recall", input={"query": query, "top_k": top_k})
@@ -154,7 +154,9 @@ class AgentMemoryBridge:
 
     # ── Working memory (Phase 2: Execution) ──
 
-    def store_step_result(self, step_id: str, result: dict[str, Any], run_id: str | None = None) -> None:
+    def store_step_result(
+        self, step_id: str, result: dict[str, Any], run_id: str | None = None
+    ) -> None:
         """Store a completed plan step result in WorkingMemory (current run)."""
         self.system.working.set_result(
             step_id, result, run_id=run_id if run_id is not None else self._run_id

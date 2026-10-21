@@ -32,6 +32,7 @@ from app.models.workflow import Workflow
 
 logger = logging.getLogger(__name__)
 
+
 class OrganizationService:
     """组织服务类 - 提供企业级组织架构管理功能"""
 
@@ -62,7 +63,11 @@ class OrganizationService:
             # 这里可以利用刚才设置的超管特权
             if is_platform_admin(user):
                 # 超管看到完整的树
-                stmt = select(Organization).options(selectinload(Organization.children)).order_by(Organization.level, Organization.sort_order)
+                stmt = (
+                    select(Organization)
+                    .options(selectinload(Organization.children))
+                    .order_by(Organization.level, Organization.sort_order)
+                )
             else:
                 # W0-2：组织树是跨租户信息面——非平台管理员的可见集合只能由
                 # **关系**推导（成员表 / 组织角色关联 / 主组织），绝不按
@@ -94,9 +99,9 @@ class OrganizationService:
                 else:
                     parent = org_map.get(org.parent_id)
                     if parent:
-                        if 'children' not in parent:
-                            parent['children'] = []
-                        parent['children'].append(org_dict)
+                        if "children" not in parent:
+                            parent["children"] = []
+                        parent["children"].append(org_dict)
 
             return tree
 
@@ -160,9 +165,7 @@ class OrganizationService:
                 )
             )
             visible.update(
-                int(org_id)
-                for org_id in member_rows.scalars().all()
-                if org_id is not None
+                int(org_id) for org_id in member_rows.scalars().all() if org_id is not None
             )
             role_rows = await db.execute(
                 select(user_organization_role_association.c.organization_id).where(
@@ -170,9 +173,7 @@ class OrganizationService:
                 )
             )
             visible.update(
-                int(org_id)
-                for org_id in role_rows.scalars().all()
-                if org_id is not None
+                int(org_id) for org_id in role_rows.scalars().all() if org_id is not None
             )
 
         primary_org_id = getattr(user, "organization_id", None)
@@ -180,9 +181,7 @@ class OrganizationService:
             visible.add(int(primary_org_id))
         return visible
 
-    async def resolve_managed_organization_ids(
-        self, db: AsyncSession, user: User
-    ) -> set[int]:
+    async def resolve_managed_organization_ids(self, db: AsyncSession, user: User) -> set[int]:
         """W0-2：返回调用者以 ``OrgAdmin`` 角色**管理**的组织 ID 集合。
 
         与可见性集合不同：组织聚合（org-summary）只对管理层开放，普通成员
@@ -202,11 +201,11 @@ class OrganizationService:
                 Role.name == ORG_ADMIN_ROLE_NAME,
             )
         )
-        return {
-            int(org_id) for org_id in rows.scalars().all() if org_id is not None
-        }
+        return {int(org_id) for org_id in rows.scalars().all() if org_id is not None}
 
-    async def update_organization(self, db: AsyncSession, org_id: int, data: dict[str, Any]) -> Organization | None:
+    async def update_organization(
+        self, db: AsyncSession, org_id: int, data: dict[str, Any]
+    ) -> Organization | None:
         """更新组织信息，自动处理层级变更 — 不负责 commit，由调用方管理事务"""
         result = await db.execute(select(Organization).where(Organization.id == org_id))
         org = result.scalar_one_or_none()
@@ -222,7 +221,9 @@ class OrganizationService:
 
             level: int = 1
             if new_parent_id:
-                parent_result = await db.execute(select(Organization).where(Organization.id == new_parent_id))
+                parent_result = await db.execute(
+                    select(Organization).where(Organization.id == new_parent_id)
+                )
                 parent = parent_result.scalar_one_or_none()
                 if parent:
                     level = int(cast(int, parent.level)) + 1
@@ -240,7 +241,9 @@ class OrganizationService:
 
     async def _update_children_levels(self, db: AsyncSession, parent_org: Organization):
         """递归更新子组织的层级"""
-        result = await db.execute(select(Organization).where(Organization.parent_id == parent_org.id))
+        result = await db.execute(
+            select(Organization).where(Organization.parent_id == parent_org.id)
+        )
         children = result.scalars().all()
 
         for child in children:
@@ -275,14 +278,18 @@ class OrganizationService:
             "level": org.level,
             "sort_order": org.sort_order,
             "created_at": org.created_at.isoformat() if org.created_at else None,
-            "children": []
+            "children": [],
         }
 
-    async def create_organization(self, db: AsyncSession, data: dict, owner_id: int) -> Organization:
+    async def create_organization(
+        self, db: AsyncSession, data: dict, owner_id: int
+    ) -> Organization:
         """创建新组织 — 不负责 commit，由调用方管理事务"""
         level = 1
         if data.get("parent_id"):
-            parent_result = await db.execute(select(Organization).where(Organization.id == data["parent_id"]))
+            parent_result = await db.execute(
+                select(Organization).where(Organization.id == data["parent_id"])
+            )
             parent = parent_result.scalar_one_or_none()
             if parent:
                 level = int(cast(int, parent.level)) + 1
@@ -295,7 +302,7 @@ class OrganizationService:
             level=level,
             sort_order=data.get("sort_order", 0),
             owner_id=owner_id,
-            is_private=data.get("is_private", False)
+            is_private=data.get("is_private", False),
         )
 
         db.add(organization)
@@ -315,22 +322,19 @@ class OrganizationService:
         try:
             # 统计成员数
             member_count_result = await db.execute(
-                select(func.count(user_organization.c.user_id))
-                .where(user_organization.c.organization_id == org_id)
+                select(func.count(user_organization.c.user_id)).where(
+                    user_organization.c.organization_id == org_id
+                )
             )
             member_count = member_count_result.scalar() or 0
 
             # 统计文档数
             doc_count_result = await db.execute(
-                select(func.count(Document.id))
-                .where(Document.organization_id == org_id)
+                select(func.count(Document.id)).where(Document.organization_id == org_id)
             )
             doc_count = doc_count_result.scalar() or 0
 
-            return {
-                "member_count": member_count,
-                "document_count": doc_count
-            }
+            return {"member_count": member_count, "document_count": doc_count}
         except Exception as e:
             # issue #301（批 C）：逐一组织统计失败不再回落 0/0 —— 「0 成员 0 文档」
             # 是对一个具体组织的具体事实陈述，与「查不了」必须可分。
@@ -350,9 +354,7 @@ class OrganizationService:
         ("用量记录", TokenUsageRecord),
     )
 
-    async def _assert_org_has_no_attached_data(
-        self, db: AsyncSession, org_ids: list[int]
-    ) -> None:
+    async def _assert_org_has_no_attached_data(self, db: AsyncSession, org_ids: list[int]) -> None:
         """A2 P0：级联检查——存在挂载数据时 409 并提示转移，绝不裸删到 1451。"""
         attached: list[str] = []
         for label, model in self._ATTACHED_DATA_MODELS:
@@ -425,15 +427,15 @@ class OrganizationService:
                     OrganizationSettings.organization_id.in_(orgs_to_delete)
                 )
             )
-        await db.execute(
-            delete(Organization).where(Organization.id.in_(orgs_to_delete))
-        )
+        await db.execute(delete(Organization).where(Organization.id.in_(orgs_to_delete)))
         await db.flush()
         return True
 
     async def _get_all_children_ids(self, db: AsyncSession, parent_id: int) -> list[int]:
         """递归获取所有子组织ID"""
-        result = await db.execute(select(Organization.id).where(Organization.parent_id == parent_id))
+        result = await db.execute(
+            select(Organization.id).where(Organization.parent_id == parent_id)
+        )
         children_ids = list(result.scalars().all())
 
         all_ids = []
@@ -456,7 +458,7 @@ class OrganizationService:
             name=org_name,
             description=f"{user.username} 的私有组织",
             is_private=True,
-            owner_id=user.id
+            owner_id=user.id,
         )
 
         db.add(organization)
@@ -477,23 +479,23 @@ class OrganizationService:
             logger.error(f"根据名称获取组织失败: {str(e)}")
             return None
 
-    async def add_user_to_organization(self, db: AsyncSession, user: User, organization: Organization) -> bool:
+    async def add_user_to_organization(
+        self, db: AsyncSession, user: User, organization: Organization
+    ) -> bool:
         """添加用户到组织 — 不负责 commit，由调用方管理事务"""
         result = await db.execute(
-            select(user_organization)
-            .where(and_(
-                user_organization.c.user_id == user.id,
-                user_organization.c.organization_id == organization.id
-            ))
+            select(user_organization).where(
+                and_(
+                    user_organization.c.user_id == user.id,
+                    user_organization.c.organization_id == organization.id,
+                )
+            )
         )
         if result.scalar_one_or_none():
             return False
 
         await db.execute(
-            user_organization.insert().values(
-                user_id=user.id,
-                organization_id=organization.id
-            )
+            user_organization.insert().values(user_id=user.id, organization_id=organization.id)
         )
         await db.flush()
         logger.info(f"将用户 {user.username} 添加到组织 {organization.name}")
@@ -525,6 +527,7 @@ class OrganizationService:
         except Exception as e:
             logger.error(f"获取组织成员失败: {str(e)}")
             return []
+
 
 # 创建服务实例
 organization_service = OrganizationService()

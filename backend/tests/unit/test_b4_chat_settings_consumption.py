@@ -7,6 +7,7 @@
   （enable_masking=False，不信任客户端）；
 - ``default_model`` → 透传给 ``chat_stream(model_override=...)``。
 """
+
 import asyncio
 
 import pytest
@@ -31,8 +32,13 @@ class FakeRag:
         return None
 
     async def search_knowledge_base(
-        self, query, organization_id, top_k, document_ids=None,
-        search_mode=None, debug=False,
+        self,
+        query,
+        organization_id,
+        top_k,
+        document_ids=None,
+        search_mode=None,
+        debug=False,
     ):
         self.search_calls.append(
             {
@@ -101,9 +107,7 @@ async def _run(session, fake_rag) -> None:
 async def test_chat_consumes_org_settings(db_session, monkeypatch):
     fake_rag = FakeRag()
     monkeypatch.setattr(chat_service, "rag_service", fake_rag)
-    monkeypatch.setattr(
-        chat_service, "get_memory_system", lambda *_a, **_k: FakeMemory()
-    )
+    monkeypatch.setattr(chat_service, "get_memory_system", lambda *_a, **_k: FakeMemory())
 
     db_session.add(
         OrganizationSettings(
@@ -128,9 +132,7 @@ async def test_chat_consumes_org_settings(db_session, monkeypatch):
 async def test_chat_falls_back_to_existing_defaults(db_session, monkeypatch):
     fake_rag = FakeRag()
     monkeypatch.setattr(chat_service, "rag_service", fake_rag)
-    monkeypatch.setattr(
-        chat_service, "get_memory_system", lambda *_a, **_k: FakeMemory()
-    )
+    monkeypatch.setattr(chat_service, "get_memory_system", lambda *_a, **_k: FakeMemory())
 
     await _run(db_session, fake_rag)
 

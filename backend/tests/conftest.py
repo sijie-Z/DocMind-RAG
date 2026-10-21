@@ -1,4 +1,5 @@
 """Pytest 配置与公共 fixture。"""
+
 import os
 import sys
 
@@ -67,4 +68,5 @@ def _reset_llm_breaker():
 def client():
     """创建 FastAPI TestClient（session 级别复用）。"""
     from app.main import app
+
     return TestClient(app)

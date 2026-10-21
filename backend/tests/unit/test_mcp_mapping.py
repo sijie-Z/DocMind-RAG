@@ -47,8 +47,9 @@ class TestRender:
 
 class TestContentToData:
     def test_text_joined(self):
-        r = MCPCallResult(is_error=False, content=[
-            {"type": "text", "text": "a"}, {"type": "text", "text": "b"}])
+        r = MCPCallResult(
+            is_error=False, content=[{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]
+        )
         assert content_to_data(r) == "a\nb"
 
     def test_empty_result_placeholder(self):
@@ -59,25 +60,31 @@ class TestContentToData:
         assert content_to_data(r) == {"k": 1}
 
     def test_text_plus_structured(self):
-        r = MCPCallResult(is_error=False, content=[{"type": "text", "text": "t"}], structured={"k": 1})
+        r = MCPCallResult(
+            is_error=False, content=[{"type": "text", "text": "t"}], structured={"k": 1}
+        )
         assert content_to_data(r) == {"text": "t", "structured_content": {"k": 1}}
 
     def test_text_clipped(self):
         big = "x" * 200_000
-        out = content_to_data(MCPCallResult(is_error=False, content=[{"type": "text", "text": big}]))
+        out = content_to_data(
+            MCPCallResult(is_error=False, content=[{"type": "text", "text": big}])
+        )
         assert len(out) < 200_000 and "截断" in out
 
 
 class TestCallResultToToolResult:
     def test_success(self):
         r = call_result_to_tool_result(
-            MCPCallResult(is_error=False, content=[{"type": "text", "text": "ok"}]), "srv", "t")
+            MCPCallResult(is_error=False, content=[{"type": "text", "text": "ok"}]), "srv", "t"
+        )
         assert r.success and r.data == "ok"
 
     def test_is_error_never_faked_as_success(self):
         """诚实原则核心断言：服务器 is_error → ToolResult.fail。"""
         r = call_result_to_tool_result(
-            MCPCallResult(is_error=True, content=[{"type": "text", "text": "boom"}]), "srv", "t")
+            MCPCallResult(is_error=True, content=[{"type": "text", "text": "boom"}]), "srv", "t"
+        )
         assert r.success is False
         assert r.error is not None and r.error.code == "api_error"
         assert "boom" in r.error.message

@@ -22,6 +22,7 @@ upload-chunk）逐层放行 (HTTPException, AppError)；未识别的其余异常
 - 去掉 files.py 头像端点的 (AppError, HTTPException) 放行 →
   test_avatar_endpoint_* 精确红。
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -43,7 +44,9 @@ def svc():
     return FileUploadService()
 
 
-def _make_upload_file(filename: str, content: bytes, content_type: str = "application/octet-stream"):
+def _make_upload_file(
+    filename: str, content: bytes, content_type: str = "application/octet-stream"
+):
     f = MagicMock()
     f.filename = filename
     f.content_type = content_type
@@ -178,8 +181,12 @@ class TestEndpointLayer:
 
         with pytest.raises(HTTPException) as exc:
             await files_ep.upload_file(
-                background_tasks=MagicMock(), file=MagicMock(), description=None,
-                tags=None, current_user=MagicMock(), db=db,
+                background_tasks=MagicMock(),
+                file=MagicMock(),
+                description=None,
+                tags=None,
+                current_user=MagicMock(),
+                db=db,
             )
         assert exc.value.status_code == 400
 
@@ -197,8 +204,12 @@ class TestEndpointLayer:
 
         with pytest.raises(HTTPException) as exc:
             await files_ep.upload_file_chunk(
-                chunk_data=b"", chunk_index=0, total_chunks=1,
-                file_name="f.pdf", file_hash="a" * 64,
-                current_user=MagicMock(), db=db,
+                chunk_data=b"",
+                chunk_index=0,
+                total_chunks=1,
+                file_name="f.pdf",
+                file_hash="a" * 64,
+                current_user=MagicMock(),
+                db=db,
             )
         assert exc.value.status_code == 400

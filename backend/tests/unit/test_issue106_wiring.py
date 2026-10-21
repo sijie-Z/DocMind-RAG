@@ -25,7 +25,9 @@ def isolated_store(tmp_path, monkeypatch):
     yield store_mod.get_experience_store()
     store_mod.reset_experience_store()
 
+
 # ── #106 §2.6：requires_auth 此前只 logger.debug，从不阻断 ────────────────
+
 
 class TestRequiresAuthEnforced:
     """要求：声明了 requires_auth 的工具，在缺少调用者身份时必须被拦下。"""
@@ -73,6 +75,7 @@ class TestRequiresAuthEnforced:
 
 # ── #106 §2.1：经验回路的写入侧此前完全没接 ─────────────────────────────
 
+
 class TestExperienceWriteBack:
     """要求：runtime 真的会往 ExperienceStore 写，而不只是 planner 读。"""
 
@@ -88,12 +91,18 @@ class TestExperienceWriteBack:
 
         loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=1, user_id=0)
         ctx = ExecutionContext(query="查询营收数据")
-        plan = Plan(id="p1", goal="查询营收数据", steps=[
-            PlanStep(
-                id="s1", description="调用外部 API",
-                status="failed", error_context="connection refused",
-            ),
-        ])
+        plan = Plan(
+            id="p1",
+            goal="查询营收数据",
+            steps=[
+                PlanStep(
+                    id="s1",
+                    description="调用外部 API",
+                    status="failed",
+                    error_context="connection refused",
+                ),
+            ],
+        )
 
         await loop._write_experiences(ctx, plan, None)
 
@@ -115,9 +124,15 @@ class TestExperienceWriteBack:
 
         loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=1, user_id=0)
         ctx = ExecutionContext(query="q")
-        plan = Plan(id="p1", goal="q", steps=[
-            PlanStep(id="s1", description="d", status="completed", tool_hint="search_knowledge_base"),
-        ])
+        plan = Plan(
+            id="p1",
+            goal="q",
+            steps=[
+                PlanStep(
+                    id="s1", description="d", status="completed", tool_hint="search_knowledge_base"
+                ),
+            ],
+        )
         qg_result = {"grades": {"s1": ("C", "质量一般")}}
 
         await loop._write_experiences(ctx, plan, qg_result)

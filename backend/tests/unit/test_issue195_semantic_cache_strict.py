@@ -56,6 +56,7 @@ SEMANTIC_CACHE_THRESHOLD（默认 0.92）」，不比对查询文本。相邻条
   `TestCrossQuestionRejection::test_document_title_prefix_does_not_hit` /
   `test_one_sided_qualifier_does_not_hit` 红（跨文件/限定语命中复活）。
 """
+
 import asyncio
 import json
 import math
@@ -69,6 +70,7 @@ from app.core.config.ai import AISettings
 from app.rag.cache import RetrievalCache, SemanticCache, queries_equivalent
 
 # ── 测试替身 ─────────────────────────────────────────────────────────
+
 
 class _FakeRedis:
     """最小内存 Redis 替身（覆盖 SemanticCache / RetrievalCache 用到的接口）。"""
@@ -124,8 +126,11 @@ def _enable(monkeypatch, *, answer: bool | None = None, retrieval: bool | None =
 
 async def _seed(cache: SemanticCache, query: str, embedding=None, org: int = 1, answer: str = "A"):
     await cache.set(
-        query, list(embedding or _VEC_A), answer,
-        [{"chunk_id": "cached_chunk"}], organization_id=org,
+        query,
+        list(embedding or _VEC_A),
+        answer,
+        [{"chunk_id": "cached_chunk"}],
+        organization_id=org,
     )
 
 
@@ -136,6 +141,7 @@ def _fake_redis(monkeypatch) -> _FakeRedis:
 
 
 # ── 跨问题命中必须被拒绝 ─────────────────────────────────────────────
+
 
 class TestCrossQuestionRejection:
     @pytest.mark.asyncio
@@ -148,15 +154,19 @@ class TestCrossQuestionRejection:
 
         meta: dict = {}
         hit = await cache.get(
-            _VEC_NEAR, 1,
-            query="《劳动合同法》第十三条是什么", hit_info=meta,
+            _VEC_NEAR,
+            1,
+            query="《劳动合同法》第十三条是什么",
+            hit_info=meta,
         )
 
         assert hit is None, "条号不同（第七 vs 第十三）仍命中——跨问题命中复活"
         assert meta["hit"] is False
         assert meta["rejected_reason"] == "clause_mismatch"
         assert meta["similarity"] >= 0.92, "前提：候选余弦在阈值内（不是靠低相似度拒绝）"
-        assert meta["cached_query"] == "《劳动合同法》第七条是什么", "debug 必须指出命中了哪条缓存查询"
+        assert meta["cached_query"] == "《劳动合同法》第七条是什么", (
+            "debug 必须指出命中了哪条缓存查询"
+        )
 
     @pytest.mark.asyncio
     async def test_multi_clause_query_does_not_hit_single_clause(self, monkeypatch):
@@ -375,6 +385,7 @@ class TestQueriesEquivalentUnit:
 
 # ── 精确/同义命中不得被误伤 ───────────────────────────────────────────
 
+
 class TestPositiveHits:
     @pytest.mark.asyncio
     async def test_identical_query_hits(self, monkeypatch):
@@ -426,6 +437,7 @@ class TestPositiveHits:
 
 
 # ── 默认关闭 / fail-closed / 配置独立性 ──────────────────────────────
+
 
 class TestDefaultsAndSafety:
     def test_namespaces_default_disabled(self):
@@ -503,16 +515,25 @@ class TestDefaultsAndSafety:
 
 # ── pipeline debug_info：命中与否都可解释 ────────────────────────────
 
+
 def _make_pipeline(monkeypatch, embedding):
     from app.rag.pipeline import RAGPipeline
 
     monkeypatch.setattr(
         "app.rag.pipeline.rerank",
-        AsyncMock(side_effect=lambda query, docs, client=None: (
-            docs,
-            {"status": "disabled", "path": "noop", "reason": "test_stub",
-             "attempts": [], "scores_attached": False, "model": None},
-        )),
+        AsyncMock(
+            side_effect=lambda query, docs, client=None: (
+                docs,
+                {
+                    "status": "disabled",
+                    "path": "noop",
+                    "reason": "test_stub",
+                    "attempts": [],
+                    "scores_attached": False,
+                    "model": None,
+                },
+            )
+        ),
     )
     p = RAGPipeline()
     p.retriever = MagicMock()
@@ -590,6 +611,7 @@ class TestPipelineDebug:
 
 # ── 问答链消费者：跨条不得短路，同问仍可服务 ─────────────────────────
 
+
 def _mock_chat_session() -> MagicMock:
     session = MagicMock()
     session.add = MagicMock()
@@ -645,9 +667,17 @@ async def _run_chat(session, fake_rag, sem_cache, user_content: str, debug: bool
         ),
     ):
         await run_rag_pipeline(
-            session=session, user_content=user_content, user_id=1,
-            search_org_id=1, organization_id=1, conversation_id=None, file_ids=[],
-            strict_mode=False, privacy_mode=False, event_queue=queue, debug=debug,
+            session=session,
+            user_content=user_content,
+            user_id=1,
+            search_org_id=1,
+            organization_id=1,
+            conversation_id=None,
+            file_ids=[],
+            strict_mode=False,
+            privacy_mode=False,
+            event_queue=queue,
+            debug=debug,
         )
     return _drain(queue)
 
@@ -703,6 +733,7 @@ class TestAnswerCacheConsumer:
 
 
 # ── 纯函数锚点（防止等价判定被悄悄放宽）────────────────────────────
+
 
 def test_cosine_anchor_matches_triage_repro():
     """三分类复现用的向量对余弦 ≈ 0.9817（阈值 0.92 内），作为判别前提锚点。"""

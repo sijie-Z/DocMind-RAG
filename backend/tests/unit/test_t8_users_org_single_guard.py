@@ -47,7 +47,9 @@ async def test_create_user_multi_org_rejected(monkeypatch):
     """创建传 2 个组织 → 400 ValidationError（不再静默取首个）。"""
     db = _mock_db(first_result=None)  # 用户名/邮箱不存在
     body = users_module.UserCreateAdmin(
-        username="newbie", email="newbie@example.com", password="ValidPass123!",
+        username="newbie",
+        email="newbie@example.com",
+        password="ValidPass123!",
         organization_ids=[2, 3],
     )
     with pytest.raises(ValidationError):
@@ -64,7 +66,9 @@ async def test_create_user_single_org_kept(monkeypatch):
     monkeypatch.setattr(users_module.auth_service, "create_user", create_mock)
     db = _mock_db(first_result=None)
     body = users_module.UserCreateAdmin(
-        username="newbie", email="newbie@example.com", password="ValidPass123!",
+        username="newbie",
+        email="newbie@example.com",
+        password="ValidPass123!",
         organization_ids=[2],
     )
     r = await users_module.create_user_admin(

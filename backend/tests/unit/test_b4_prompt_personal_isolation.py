@@ -3,6 +3,7 @@
 个人模板只影响自己：同组织其他成员（含组织管理员）既不能通过 RAG 系统提示词
 命中它，也不能通过 Agent 的 list/get 工具看到它。
 """
+
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 

@@ -37,6 +37,7 @@ _FEISHU_TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_toke
 @dataclass
 class TokenCache:
     """进程级 token 缓存。分布式环境应替换为 Redis。"""
+
     token: str = ""
     expires_at: float = 0.0  # unix timestamp
 
@@ -119,9 +120,7 @@ class FeishuTenantAuthHandler:
     async def _refresh_token(self) -> str:
         """向飞书请求新的 tenant_access_token。"""
         if not self._app_id or not self._app_secret:
-            raise FeishuAuthError(
-                "FEISHU_APP_ID 或 FEISHU_APP_SECRET 未配置。请在环境变量中设置。"
-            )
+            raise FeishuAuthError("FEISHU_APP_ID 或 FEISHU_APP_SECRET 未配置。请在环境变量中设置。")
 
         client = await self._get_client()
         try:
@@ -172,4 +171,5 @@ class FeishuTenantAuthHandler:
 
 class FeishuAuthError(Exception):
     """飞书认证相关错误。"""
+
     pass

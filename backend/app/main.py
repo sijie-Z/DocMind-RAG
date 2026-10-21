@@ -1,6 +1,7 @@
 """
 DocMind AI Agent System - Main Application Entry (PER Architecture)
 """
+
 import asyncio
 import logging
 import os
@@ -70,9 +71,11 @@ async def scheduled_tasks_loop():
 
     await scheduler_engine.run_loop()
 
+
 # 设置日志
 setup_logging()
 logger = logging.getLogger(__name__)
+
 
 def _parse_cli_port(argv: list[str]) -> int | None:
     """从命令行参数中提取 ``--port``（支持 ``--port 8000`` 与 ``--port=8000``）。
@@ -194,9 +197,7 @@ async def lifespan(app: FastAPI):
             logger.critical("[EMBEDDING] 维度漂移，拒绝启动: %s", e)
             raise
         except Exception as e:
-            logger.warning(
-                "[EMBEDDING] 启动探测未完成（服务不可达时属预期，继续启动）: %s", e
-            )
+            logger.warning("[EMBEDDING] 启动探测未完成（服务不可达时属预期，继续启动）: %s", e)
 
         try:
             await kafka_producer.start()
@@ -205,10 +206,12 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Kafka初始化失败: {e} - 应用将继续启动")
 
         from app.services.permission_service import permission_service
+
         await permission_service.initialize_default_permissions_and_roles()
 
         # Wire embedding provider for agent memory system
         from app.dependencies import wire_memory_embedding_provider
+
         await wire_memory_embedding_provider()
 
         # A3-P0：本机处理任务启动对账——上次进程退出时未完成的本机任务
@@ -216,6 +219,7 @@ async def lifespan(app: FastAPI):
         # 对账失败只告警，不阻塞启动（任务行仍在，下次启动继续回收）。
         try:
             from app.services.local_processing import reconcile_local_jobs
+
             recovered = await reconcile_local_jobs()
             if recovered:
                 logger.info("本机处理任务启动对账：已重新调度 %s 个任务", recovered)
@@ -227,6 +231,7 @@ async def lifespan(app: FastAPI):
         # 任何 server 起不来只 warning，不阻塞主启动；无配置 = 零行为变化。
         try:
             from app.agent.mcp.manager import mcp_manager
+
             await mcp_manager.initialize()
         except Exception as e:
             logger.warning(f"MCP 初始化失败（不影响启动）: {e}")
@@ -237,6 +242,7 @@ async def lifespan(app: FastAPI):
         # 启动路径不得再产生登录尝试；任何自检都必须不阻塞启动。
         if settings.ENABLE_DEMO_ACCOUNT:
             from app.core.ensure_demo_user import ensure_demo_user
+
             await ensure_demo_user()
 
         # 启动指标监控快照任务（issue #242：ENABLE_MONITORING 此前被静默忽略——
@@ -272,6 +278,7 @@ async def lifespan(app: FastAPI):
     # 先摘 MCP：注销动态工具 + 关闭常驻子进程/会话（内部自兜异常）
     try:
         from app.agent.mcp.manager import mcp_manager
+
         await mcp_manager.shutdown()
     except Exception as e:
         logger.warning(f"MCP 关闭失败: {e}")
@@ -421,7 +428,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             "message": exc.detail if isinstance(exc.detail, str) else str(exc.detail),
             "detail": exc.detail,
             "request_id": request_id,
-            "data": None
+            "data": None,
         },
         # 必须透传：RFC 9110 规定 401 MUST 携带 `WWW-Authenticate`。
         # 原先没传这一项，导致 auth_service 里显式设置的 `WWW-Authenticate: Bearer`
@@ -449,7 +456,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             if isinstance(v, Exception):
                 safe_error[k] = str(v)
             elif isinstance(v, dict):
-                safe_error[k] = {kk: str(vv) if isinstance(vv, Exception) else vv for kk, vv in v.items()}
+                safe_error[k] = {
+                    kk: str(vv) if isinstance(vv, Exception) else vv for kk, vv in v.items()
+                }
             else:
                 safe_error[k] = v
         safe_errors.append(safe_error)
@@ -464,8 +473,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "message": f"参数校验失败: {error_msg}",
             "detail": safe_errors,
             "request_id": request_id,
-            "data": None
-        }
+            "data": None,
+        },
     )
 
 
@@ -473,6 +482,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def general_exception_handler(request: Request, exc: Exception):
     """通用异常处理"""
     import traceback
+
     err_msg = f"{type(exc).__name__}: {str(exc)}"
     request_id = getattr(getattr(request, "state", None), "request_id", None)
 
@@ -494,7 +504,7 @@ async def general_exception_handler(request: Request, exc: Exception):
             "message": "服务器内部错误，请稍后重试或联系管理员",
             "detail": err_msg if settings.EXPOSE_EXCEPTION_DETAIL else "internal_server_error",
             "request_id": request_id,
-            "data": None
+            "data": None,
         },
         # 该响应由最外层的 ServerErrorMiddleware 直接发出，不经过
         # RequestIDMiddleware 的 send_wrapper，故这里显式补响应头。
@@ -695,8 +705,10 @@ async def _knowledge_base_health() -> tuple[str, dict]:
 async def _check_database() -> str:
     try:
         from app.core.database import AsyncSessionLocal
+
         async with AsyncSessionLocal() as sess:
             from sqlalchemy import text
+
             await sess.execute(text("SELECT 1"))
         return "healthy"
     except Exception as e:
@@ -707,6 +719,7 @@ async def _check_database() -> str:
 async def _check_redis() -> str:
     try:
         from app.core.redis import redis_client as _rc
+
         if _rc:
             await asyncio.wait_for(_rc.ping(), timeout=2)
             return "healthy"
@@ -721,6 +734,7 @@ async def _check_redis() -> str:
 async def _check_elasticsearch() -> str:
     try:
         from app.core.elasticsearch import es_client as _ec
+
         if _ec:
             health = await asyncio.wait_for(_ec.cluster.health(), timeout=3)
             es_status = health.get("status", "unknown")
@@ -736,6 +750,7 @@ async def _check_elasticsearch() -> str:
 async def _check_minio() -> str:
     try:
         from app.core.minio_client import minio_client as _mc
+
         if _mc and _mc.client:
             bucket = _mc.bucket_name
             exists = await asyncio.wait_for(
@@ -754,6 +769,7 @@ async def _check_minio() -> str:
 async def _check_kafka() -> str:
     try:
         from app.core.kafka_client import kafka_producer as _kp
+
         if _kp and _kp.producer:
             # Kafka producer doesn't have a great liveness check without sending,
             # just report if it was started successfully
@@ -781,9 +797,7 @@ async def _check_knowledge_base() -> tuple[str, dict]:
         # 确定性客户端错误（mapping 400、鉴权 401/403、索引 404）不是抖动，
         # 同样 fail-closed；429/5xx 等瞬时错误留给 degraded。
         if e.status_code in (400, 401, 403, 404):
-            return "unhealthy", {
-                "index_error": f"知识库索引查询失败（HTTP {e.status_code}）: {e}"
-            }
+            return "unhealthy", {"index_error": f"知识库索引查询失败（HTTP {e.status_code}）: {e}"}
         logger.debug("Health check — knowledge_base: %s", e)
         return "degraded", {}
     except Exception as e:
@@ -815,23 +829,27 @@ async def _collect_checks(checks: dict) -> tuple[dict, dict]:
 
 async def _run_health_checks() -> tuple[dict, dict]:
     """`/health` 的六项依赖检查（含 redis/minio/kafka 等非关键项）。"""
-    return await _collect_checks({
-        "database": _check_database(),
-        "redis": _check_redis(),
-        "elasticsearch": _check_elasticsearch(),
-        "minio": _check_minio(),
-        "kafka": _check_kafka(),
-        "knowledge_base": _check_knowledge_base(),
-    })
+    return await _collect_checks(
+        {
+            "database": _check_database(),
+            "redis": _check_redis(),
+            "elasticsearch": _check_elasticsearch(),
+            "minio": _check_minio(),
+            "kafka": _check_kafka(),
+            "knowledge_base": _check_knowledge_base(),
+        }
+    )
 
 
 async def _run_readiness_checks() -> tuple[dict, dict]:
     """`/readyz` 的三项就绪检查：DB SELECT 1 + ES 集群健康 + 知识库对账。"""
-    return await _collect_checks({
-        "database": _check_database(),
-        "elasticsearch": _check_elasticsearch(),
-        "knowledge_base": _check_knowledge_base(),
-    })
+    return await _collect_checks(
+        {
+            "database": _check_database(),
+            "elasticsearch": _check_elasticsearch(),
+            "knowledge_base": _check_knowledge_base(),
+        }
+    )
 
 
 def _is_ready(services: dict) -> bool:
@@ -931,8 +949,8 @@ async def system_info():
             "知识问答",
             "多轮对话",
             "TextToSQL",
-            "WebSocket实时通信"
-        ]
+            "WebSocket实时通信",
+        ],
     }
 
 
@@ -974,6 +992,7 @@ async def prometheus_metrics(request: Request):
 
     # RAG pipeline metrics (prometheus_client registry)
     from app.core.prometheus import get_prometheus_metrics
+
     rag_metrics = get_prometheus_metrics().decode("utf-8")
 
     return http_metrics + "\n" + "\n".join(ws_lines) + "\n" + rag_metrics
@@ -995,6 +1014,7 @@ try:
 except Exception as e:
     logger.warning(f"静态文件挂载失败: {e}")
 
+
 @app.get("/files/{file_path:path}")
 async def get_minio_file(
     file_path: str,
@@ -1007,6 +1027,7 @@ async def get_minio_file(
     # 路径穿越防护
     import os
     from urllib.parse import unquote
+
     file_path = unquote(file_path)
     if file_path.startswith("/"):
         raise HTTPException(status_code=400, detail="无效的文件路径")
@@ -1050,13 +1071,17 @@ async def get_minio_file(
             raise HTTPException(status_code=404, detail="文件不存在") from exc
         logger.error(
             "MinIO 读取对象失败（存储故障，非对象缺失）: object=%s code=%s message=%s",
-            normalized, exc.code, exc.message,
+            normalized,
+            exc.code,
+            exc.message,
         )
         raise HTTPException(status_code=503, detail="文件存储暂不可用，请稍后重试") from exc
     except Exception as exc:
         logger.error(
             "MinIO 读取对象异常（存储故障）: object=%s %s: %s",
-            normalized, type(exc).__name__, exc,
+            normalized,
+            type(exc).__name__,
+            exc,
         )
         raise HTTPException(status_code=503, detail="文件存储暂不可用，请稍后重试") from exc
 
@@ -1075,12 +1100,14 @@ async def get_minio_file(
         headers["Content-Disposition"] = "attachment"
     return StreamingResponse(response, media_type=media_type, headers=headers)
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "main:app",
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG,
-        log_level=settings.LOG_LEVEL.lower()
+        log_level=settings.LOG_LEVEL.lower(),
     )

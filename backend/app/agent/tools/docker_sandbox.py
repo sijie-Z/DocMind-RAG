@@ -38,7 +38,9 @@ def _docker_available() -> bool:
 
         result = subprocess.run(
             ["docker", "info", "--format", "{{.ServerVersion}}"],
-            capture_output=True, timeout=3, text=True,
+            capture_output=True,
+            timeout=3,
+            text=True,
         )
         return result.returncode == 0 and result.stdout.strip() != ""
     except Exception:
@@ -81,7 +83,8 @@ def resolve_sandbox_mode() -> str:
             _resolve_logged = True
             logger.warning(
                 "Sandbox mode resolved to unavailable (configured=%r is not one of "
-                "auto/docker/ast); code execution will fail closed.", configured,
+                "auto/docker/ast); code execution will fail closed.",
+                configured,
             )
         raise SandboxUnavailableError(
             f"SANDBOX_MODE={configured!r} 不是受支持的模式（auto/docker/ast），已拒绝执行代码。"
@@ -101,11 +104,14 @@ def resolve_sandbox_mode() -> str:
                 "Sandbox mode resolved to unavailable (configured=%s, "
                 "docker_available=False); code execution will fail closed. "
                 "Set SANDBOX_MODE=ast to allow the in-process AST sandbox, or "
-                "make Docker reachable.", configured,
+                "make Docker reachable.",
+                configured,
             )
         else:
             logger.warning(
-                "Sandbox mode resolved: %s (configured=%s)", resolved, configured,
+                "Sandbox mode resolved: %s (configured=%s)",
+                resolved,
+                configured,
             )
 
     if resolved == "unavailable":
@@ -153,22 +159,30 @@ async def _execute_in_docker(
 ) -> str:
     """Run code in a container; raise DockerSandboxError on any failure."""
     with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", encoding="utf-8", delete=False,
+        mode="w",
+        suffix=".py",
+        encoding="utf-8",
+        delete=False,
     ) as f:
         f.write(code)
         script_path = f.name
 
     try:
         cmd = [
-            "docker", "run",
+            "docker",
+            "run",
             "--rm",
-            "--network", network,
+            "--network",
+            network,
             f"--memory={memory_mb}m",
             "--cpus=1",
             "--security-opt=no-new-privileges",
-            "-v", f"{script_path}:/code/user_script.py:ro",
+            "-v",
+            f"{script_path}:/code/user_script.py:ro",
             image,
-            "python", "-u", "/code/user_script.py",
+            "python",
+            "-u",
+            "/code/user_script.py",
         ]
         if read_only:
             cmd.insert(5, "--read-only")
@@ -194,7 +208,8 @@ async def _execute_in_docker(
             ) from e
         try:
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout,
+                proc.communicate(),
+                timeout=timeout,
             )
         except TimeoutError:
             if proc.returncode is None:
@@ -208,7 +223,7 @@ async def _execute_in_docker(
             ) from None
         except BaseException:
             # 任务取消（客户端断连/关停）或任意异常：docker CLI 必须被回收
-            #（评审 M1 同源）。kill 同步发出，reap 放后台尽力完成。
+            # （评审 M1 同源）。kill 同步发出，reap 放后台尽力完成。
             if proc.returncode is None:
                 with contextlib.suppress(ProcessLookupError):
                     proc.kill()

@@ -17,6 +17,7 @@ upload_avatar 传 is_avatar=True；文档白名单原样不动。
 变异点：upload_avatar 的校验回退共用文档表（去掉 is_avatar=True）
 → 本文件「真 PNG / 真 JPEG」用例精确红（ValidationError: image/png is not allowed）。
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

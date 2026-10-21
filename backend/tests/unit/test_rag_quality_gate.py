@@ -4,6 +4,7 @@ This is a lightweight test that requires no external services (no LLM, no ES).
 It verifies that the evaluation dataset is well-formed and that context snippets
 contain sufficient keyword overlap with expected answers.
 """
+
 import json
 import os
 from collections import defaultdict
@@ -24,6 +25,7 @@ _RECALL_THRESHOLD = 0.6
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _load_dataset(path: str) -> list[dict]:
     """Load JSONL eval dataset, one JSON object per line."""
     entries: list[dict] = []
@@ -35,9 +37,7 @@ def _load_dataset(path: str) -> list[dict]:
             try:
                 entry = json.loads(line)
             except json.JSONDecodeError as e:
-                raise AssertionError(
-                    f"Invalid JSON on line {lineno}: {e}"
-                ) from e
+                raise AssertionError(f"Invalid JSON on line {lineno}: {e}") from e
             entries.append(entry)
     return entries
 
@@ -67,6 +67,7 @@ def _compute_recall(keywords: list[str], context: str) -> tuple[float, int, int]
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestRAGQualityGate:
     """Quality gate for the RAG evaluation dataset."""
 
@@ -79,17 +80,13 @@ class TestRAGQualityGate:
     # -- Schema validation --------------------------------------------------
 
     def test_dataset_not_empty(self, dataset: list[dict]):
-        assert len(dataset) >= 20, (
-            f"Expected at least 20 eval entries, got {len(dataset)}"
-        )
+        assert len(dataset) >= 20, f"Expected at least 20 eval entries, got {len(dataset)}"
 
     def test_required_fields_present(self, dataset: list[dict]):
         required = {"question", "expected_answer", "context", "category"}
         for i, entry in enumerate(dataset):
             missing = required - set(entry.keys())
-            assert not missing, (
-                f"Entry {i} missing fields: {missing}"
-            )
+            assert not missing, f"Entry {i} missing fields: {missing}"
 
     def test_fields_are_non_empty_strings(self, dataset: list[dict]):
         for i, entry in enumerate(dataset):
@@ -127,9 +124,7 @@ class TestRAGQualityGate:
         for e in dataset:
             counts[e["category"]] += 1
         for cat, count in counts.items():
-            assert count >= 3, (
-                f"Category '{cat}' has only {count} entries, expected >= 3"
-            )
+            assert count >= 3, f"Category '{cat}' has only {count} entries, expected >= 3"
 
     # -- Keyword recall (core quality metric) -------------------------------
 
@@ -168,17 +163,14 @@ class TestRAGQualityGate:
                 continue
             recall = hits / total
             status = "PASS" if recall >= _RECALL_THRESHOLD else "FAIL"
-            line = (
-                f"  {cat}: {recall:.2%} ({hits}/{total}) [{status}]"
-            )
+            line = f"  {cat}: {recall:.2%} ({hits}/{total}) [{status}]"
             if recall < _RECALL_THRESHOLD:
                 failures.append(line)
             # Always print for visibility
             print(line)
 
-        assert not failures, (
-            f"Categories below {_RECALL_THRESHOLD:.0%} recall:\n"
-            + "\n".join(failures)
+        assert not failures, f"Categories below {_RECALL_THRESHOLD:.0%} recall:\n" + "\n".join(
+            failures
         )
 
     def test_no_entry_has_zero_keyword_recall(self, dataset: list[dict]):

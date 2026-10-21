@@ -10,6 +10,7 @@
 先红证据：修复前运行本文件，详情/更新软删工作流返回 200、停用用户出现在
 列表、悬空 last_task_id 原样返回——对应断言红；修复后全绿。
 """
+
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -128,12 +129,26 @@ class TestUserListLifecycle:
     async def test_inactive_user_absent_from_list(self, api):
         api.state.user = _make_user(uid=99, org=1, superuser=True)
         async with api.factory() as s:
-            s.add_all([
-                User(id=1, username="active1", email="a1@example.com",
-                     hashed_password="x", organization_id=1, is_active=True),
-                User(id=2, username="deleted1", email="d1@example.com",
-                     hashed_password="x", organization_id=1, is_active=False),
-            ])
+            s.add_all(
+                [
+                    User(
+                        id=1,
+                        username="active1",
+                        email="a1@example.com",
+                        hashed_password="x",
+                        organization_id=1,
+                        is_active=True,
+                    ),
+                    User(
+                        id=2,
+                        username="deleted1",
+                        email="d1@example.com",
+                        hashed_password="x",
+                        organization_id=1,
+                        is_active=False,
+                    ),
+                ]
+            )
             await s.commit()
         r = await api.client.get("/api/v1/users/")
         assert r.status_code == 200, r.text
@@ -146,12 +161,26 @@ class TestUserListLifecycle:
         """误伤对照：全部活跃时列表与总数口径不变。"""
         api.state.user = _make_user(uid=99, org=1, superuser=True)
         async with api.factory() as s:
-            s.add_all([
-                User(id=1, username="a", email="a@example.com",
-                     hashed_password="x", organization_id=1, is_active=True),
-                User(id=2, username="b", email="b@example.com",
-                     hashed_password="x", organization_id=1, is_active=True),
-            ])
+            s.add_all(
+                [
+                    User(
+                        id=1,
+                        username="a",
+                        email="a@example.com",
+                        hashed_password="x",
+                        organization_id=1,
+                        is_active=True,
+                    ),
+                    User(
+                        id=2,
+                        username="b",
+                        email="b@example.com",
+                        hashed_password="x",
+                        organization_id=1,
+                        is_active=True,
+                    ),
+                ]
+            )
             await s.commit()
         r = await api.client.get("/api/v1/users/")
         assert r.json()["total"] == 2
@@ -163,22 +192,24 @@ class TestUserListLifecycle:
 
 async def _add_ref_task(api, *, last_task_id="at-1") -> str:
     async with api.factory() as s:
-        s.add(ScheduledTask(
-            id="st1",
-            name="日报",
-            prompt="写日报",
-            schedule_type=ScheduleType.CRON,
-            cron_expr="0 9 * * *",
-            timezone="UTC",
-            enabled=True,
-            next_run_at=datetime(2030, 1, 1),
-            created_by=1,
-            organization_id=1,
-            last_task_id=last_task_id,
-            last_run_at=datetime(2026, 10, 10, 12, 0),
-            last_status="success",
-            run_count=1,
-        ))
+        s.add(
+            ScheduledTask(
+                id="st1",
+                name="日报",
+                prompt="写日报",
+                schedule_type=ScheduleType.CRON,
+                cron_expr="0 9 * * *",
+                timezone="UTC",
+                enabled=True,
+                next_run_at=datetime(2030, 1, 1),
+                created_by=1,
+                organization_id=1,
+                last_task_id=last_task_id,
+                last_run_at=datetime(2026, 10, 10, 12, 0),
+                last_status="success",
+                run_count=1,
+            )
+        )
         await s.commit()
     return "st1"
 
@@ -237,9 +268,7 @@ class TestDanglingLastTaskRef:
     async def test_patch_response_has_no_dangling_reference(self, api):
         """更新响应同样走对账入口（_get_owned_task 共同前置）。"""
         await _add_ref_task(api)
-        r = await api.client.patch(
-            "/api/v1/scheduled-tasks/st1", json={"name": "改名"}
-        )
+        r = await api.client.patch("/api/v1/scheduled-tasks/st1", json={"name": "改名"})
         assert r.status_code == 200
         assert r.json()["last_task_id"] is None
         assert r.json()["name"] == "改名"

@@ -74,7 +74,9 @@ def _smart_truncate(result: str, tool_name: str) -> str:
     if tool_name in ("search_knowledge_base", "vector_search", "web_search"):
         sections = result.split("\n\n")
         if len(sections) > 3:
-            return "\n\n".join(sections[:3]) + f"\n\n... and {len(sections) - 3} more results omitted"
+            return (
+                "\n\n".join(sections[:3]) + f"\n\n... and {len(sections) - 3} more results omitted"
+            )
         return result
 
     if tool_name in ("summarize_document", "get_conversation_history", "fetch_webpage"):
@@ -82,7 +84,7 @@ def _smart_truncate(result: str, tool_name: str) -> str:
         tail = result[-500:]
         return f"{head}\n\n... [middle omitted] ...\n\n{tail}"
 
-    return result[:MAX_RESULT_TOKENS * 2] + "\n...[result truncated]"
+    return result[: MAX_RESULT_TOKENS * 2] + "\n...[result truncated]"
 
 
 def _plan_steps_payload(plan: Plan) -> list[dict[str, Any]]:
@@ -149,9 +151,7 @@ class PERAgentLoop:
     ):
         # A2 P0（fail-closed）：PER 运行必须有组织上下文；默认值不再回落到 1 号组织。
         if organization_id is None:
-            raise ValueError(
-                "PERAgentLoop 缺少 organization_id，拒绝在无组织上下文下运行"
-            )
+            raise ValueError("PERAgentLoop 缺少 organization_id，拒绝在无组织上下文下运行")
         self.client = openai_client
         self.config = config or AgentConfig()
         self.organization_id = organization_id
@@ -217,7 +217,9 @@ class PERAgentLoop:
     @property
     def executor(self) -> Executor:
         if self._executor is None:
-            self._executor = Executor(self.client, self.config, self.memory, execution_mode=self._execution_mode)
+            self._executor = Executor(
+                self.client, self.config, self.memory, execution_mode=self._execution_mode
+            )
         return self._executor
 
     @property
@@ -255,10 +257,18 @@ class PERAgentLoop:
 
         # If the output contains SQL results or search results with clear answers,
         # and remaining steps don't add new tools, we can skip
-        has_data = any(marker in final_output for marker in [
-            '"rows":', '"data":', "找到", "根据",
-            "综上所述", "结论", "建议",
-        ])
+        has_data = any(
+            marker in final_output
+            for marker in [
+                '"rows":',
+                '"data":',
+                "找到",
+                "根据",
+                "综上所述",
+                "结论",
+                "建议",
+            ]
+        )
 
         # If we have substantial output AND the next steps are just more of the same
         # (no new tool types), skip to avoid redundancy
@@ -431,16 +441,13 @@ class PERAgentLoop:
                 # 已拒绝的 (tool, args) 不会再次打扰（类型级防漂移：坏元素丢弃）。
                 raw_decisions = run_state.get("approval_decisions")
                 if isinstance(raw_decisions, list):
-                    self.approval_decisions = [
-                        d for d in raw_decisions if isinstance(d, dict)
-                    ]
+                    self.approval_decisions = [d for d in raw_decisions if isinstance(d, dict)]
                 raw_steering = run_state.get("steering")
                 if isinstance(raw_steering, list):
                     # 保序 + 保最新（compose_guidance）：多暂停周期/多轮转向下
                     # 超限时舍弃最旧的整条，绝不半句截断、绝不丢最新一句。
                     self.human_guidance = steering.compose_guidance(
-                        [s.strip() for s in raw_steering
-                         if isinstance(s, str) and s.strip()]
+                        [s.strip() for s in raw_steering if isinstance(s, str) and s.strip()]
                     )
                 if frozen_history is not None:
                     # history 在首快照时冻结：resume 不重读会话新消息（否则等于换上下文续跑）。
@@ -503,7 +510,8 @@ class PERAgentLoop:
             if document_context:
                 memory_context = (
                     f"{memory_context}\n\n{document_context}"
-                    if memory_context else document_context
+                    if memory_context
+                    else document_context
                 )
 
         # 快照活引用（fitted history 之后建立，冻结进快照的是实际被消费的那份）。
@@ -518,7 +526,8 @@ class PERAgentLoop:
         raw_decisions = prior_run_state.get("approval_decisions")
         cleaned_decisions = (
             [d for d in raw_decisions if isinstance(d, dict)]
-            if isinstance(raw_decisions, list) else []
+            if isinstance(raw_decisions, list)
+            else []
         )
         if cleaned_decisions:
             run_state_live["approval_decisions"] = cleaned_decisions
@@ -527,11 +536,12 @@ class PERAgentLoop:
         raw_steering = prior_run_state.get("steering")
         cleaned_steering = (
             [s for s in raw_steering if isinstance(s, str) and s.strip()]
-            if isinstance(raw_steering, list) else []
+            if isinstance(raw_steering, list)
+            else []
         )
         if cleaned_steering:
             # 快照只保留最近若干条（注入用全量 compose；历史只为 resume 保真）。
-            run_state_live["steering"] = cleaned_steering[-steering.STEERING_HISTORY_CAP:]
+            run_state_live["steering"] = cleaned_steering[-steering.STEERING_HISTORY_CAP :]
         else:
             run_state_live.pop("steering", None)
         # B：拒绝重规划标记一次性消费——理由并入本次 replan_feedback（下方
@@ -668,10 +678,15 @@ class PERAgentLoop:
                             execution_output += event.content
                             if self.checkpoint_live is not None:
                                 # 快照冻结"已产出的答案前缀"：resume 收尾时拼回完整回复。
-                                self.checkpoint_live["partial_output"] = partial_prefix + pass_output
+                                self.checkpoint_live["partial_output"] = (
+                                    partial_prefix + pass_output
+                                )
                         elif event.type == "execution_step_result" and event.content:
                             execution_output += event.content
-                        elif event.type == "thinking" and event.plan_step_status in ("completed", "failed"):
+                        elif event.type == "thinking" and event.plan_step_status in (
+                            "completed",
+                            "failed",
+                        ):
                             # ── A: 步边界消费转向消息（下一步生效）──────────────
                             # 本循环体在消费者请求下一事件时先于 executor 的下一
                             # __anext__ 恢复——这里写入 executor.human_guidance
@@ -705,7 +720,9 @@ class PERAgentLoop:
                     # （resume 后按原计划继续）。
                     if self.executor.pending_control == "":
                         remaining_steps = [s for s in plan.steps if s.status == "pending"]
-                        if remaining_steps and not self._should_continue_execution(execution_output, plan, remaining_steps):
+                        if remaining_steps and not self._should_continue_execution(
+                            execution_output, plan, remaining_steps
+                        ):
                             skipped = [s for s in remaining_steps if s.status == "pending"]
                             for s in skipped:
                                 s.status = "skipped"
@@ -717,7 +734,10 @@ class PERAgentLoop:
                                     plan_id=plan.id,
                                     plan_progress=plan.progress,
                                 )
-                                logger.info("Conditional routing: %d steps skipped (sufficient info)", len(skipped))
+                                logger.info(
+                                    "Conditional routing: %d steps skipped (sufficient info)",
+                                    len(skipped),
+                                )
             else:
                 # Tool-less mode: single LLM call
                 messages = self._build_messages(query, history, context_docs, memory_context)
@@ -768,6 +788,7 @@ class PERAgentLoop:
             # ── Phase 2b: Quality Gate ────────────────────────────────────────
             if plan.steps:
                 from app.agent.quality_gate import quality_gate_check
+
                 step_results = self.memory.get_all_results()
                 qg_result = quality_gate_check(step_results)
                 # §5b：质检结论落成结构化状态（每轮覆盖，防止 replan 后残留
@@ -800,7 +821,8 @@ class PERAgentLoop:
                             content=warnings[:500],
                             thinking_type="evaluation",
                         )
-                    logger.info("Quality gate: %d passed, %d concerns, %d failed",
+                    logger.info(
+                        "Quality gate: %d passed, %d concerns, %d failed",
                         sum(1 for g, _ in qg_result["grades"].values() if g == "A"),
                         sum(1 for g, _ in qg_result["grades"].values() if g == "C"),
                         sum(1 for g, _ in qg_result["grades"].values() if g == "F"),
@@ -848,7 +870,10 @@ class PERAgentLoop:
                         replan_requested = True
                         if event.content:
                             feedback_parts.append(event.content)
-                    elif event.type == "reflection" and event.reflection_result in ("unavailable", "unparsed"):
+                    elif event.type == "reflection" and event.reflection_result in (
+                        "unavailable",
+                        "unparsed",
+                    ):
                         # issue #301 #7/#8 三态：反思降级（评估服务异常 / 输出
                         # 无法解析）= 本轮没有判定可依 —— 不重试、不重规划
                         # （降级 ≠ 失败，好 run 不因评估缺席被打坏），也不改写
@@ -861,7 +886,9 @@ class PERAgentLoop:
                     if not self.config.enable_planning:
                         # 规划被禁用时 replan 无从执行，只记录原因（无副作用）。
                         ctx.record_decision(
-                            "plan", "replan_unavailable", "规划已禁用，无法重新规划",
+                            "plan",
+                            "replan_unavailable",
+                            "规划已禁用，无法重新规划",
                         )
                     elif replan_attempts >= MAX_REPLANS_PER_RUN:
                         # 有界性：达到上限后不再重新规划，按当前结果收尾。
@@ -960,7 +987,10 @@ class PERAgentLoop:
                 recommendation = "reject"
             elif raw_recommendation.startswith("revise"):
                 recommendation = "revise"
-            elif raw_recommendation.startswith("error") or raw_recommendation in ("skipped", "unavailable"):
+            elif raw_recommendation.startswith("error") or raw_recommendation in (
+                "skipped",
+                "unavailable",
+            ):
                 recommendation = "error"
             else:
                 recommendation = "pass"
@@ -984,9 +1014,7 @@ class PERAgentLoop:
                 if reason:
                     # W0-5：decision reasoning 会进入 run_report/execution_context
                     # 外发——异常原文只进日志，不插值到对外文本。
-                    logger.warning(
-                        "对抗审查未完成（内部细节仅日志）: %s", log_safe(reason)
-                    )
+                    logger.warning("对抗审查未完成（内部细节仅日志）: %s", log_safe(reason))
                 if str(review.get("error_kind") or "") == "no_verdict":
                     unfinished = "对抗审查未完成（模型未给出判定）"
                 else:
@@ -1021,7 +1049,9 @@ class PERAgentLoop:
                 )
             if issues:
                 if high_issues:
-                    logger.info("Adversarial review found %d high-severity issues", len(high_issues))
+                    logger.info(
+                        "Adversarial review found %d high-severity issues", len(high_issues)
+                    )
                     for issue in high_issues:
                         final_output += (
                             f"\n\n⚠️ **审查发现**: {issue.get('description', '')}\n"
@@ -1112,19 +1142,23 @@ class PERAgentLoop:
         if live is None or not self.config.enable_checkpoint:
             return False
         try:
-            return bool(await checkpoint.save_checkpoint(
-                task_id=self._checkpoint_task_id,
-                ctx=live["ctx"],
-                plan=live["plan"],
-                trigger=trigger,
-                partial_output=live["partial_output"],
-                history=live["history"],
-                config=live["config"],
-                run_state=live["run_state"],
-                session_id=live["session_id"],
-            ))
+            return bool(
+                await checkpoint.save_checkpoint(
+                    task_id=self._checkpoint_task_id,
+                    ctx=live["ctx"],
+                    plan=live["plan"],
+                    trigger=trigger,
+                    partial_output=live["partial_output"],
+                    history=live["history"],
+                    config=live["config"],
+                    run_state=live["run_state"],
+                    session_id=live["session_id"],
+                )
+            )
         except Exception as e:
-            logger.warning("checkpoint save failed (trigger=%s): %s", log_safe(trigger), log_safe(e))
+            logger.warning(
+                "checkpoint save failed (trigger=%s): %s", log_safe(trigger), log_safe(e)
+            )
             return False
 
     # ── HITL helpers（approval.py 的接线与回调）────────────────────────────
@@ -1158,7 +1192,8 @@ class PERAgentLoop:
         )
 
     async def _consume_steering(
-        self, run_state_live: dict[str, Any],
+        self,
+        run_state_live: dict[str, Any],
     ) -> AsyncGenerator[AgentEvent, None]:
         """消费队列中的转向消息（run 起点 / 步边界调用；见 steering.py）。
 
@@ -1176,9 +1211,10 @@ class PERAgentLoop:
         history = run_state_live.get("steering")
         cleaned = (
             [s for s in history if isinstance(s, str) and s.strip()]
-            if isinstance(history, list) else []
+            if isinstance(history, list)
+            else []
         )
-        cleaned = (cleaned + messages)[-steering.STEERING_HISTORY_CAP:]
+        cleaned = (cleaned + messages)[-steering.STEERING_HISTORY_CAP :]
         run_state_live["steering"] = cleaned
         self.human_guidance = steering.compose_guidance(cleaned)
         if self._executor is not None:
@@ -1245,7 +1281,9 @@ class PERAgentLoop:
         return "paused"
 
     async def _pause_for_plan_approval(
-        self, plan: Plan, run_state_live: dict[str, Any],
+        self,
+        plan: Plan,
+        run_state_live: dict[str, Any],
     ) -> AsyncGenerator[AgentEvent, None]:
         """B：计划审批暂停（plan_approval_mode=always 时才生效；产出事件）。
 
@@ -1332,11 +1370,14 @@ class PERAgentLoop:
         """
         for step in plan.steps:
             if step.status == "completed" and step.result:
-                self.memory.store_step_result(step.id, {
-                    "description": step.description,
-                    "status": step.status,
-                    "result": step.result,
-                })
+                self.memory.store_step_result(
+                    step.id,
+                    {
+                        "description": step.description,
+                        "status": step.status,
+                        "result": step.result,
+                    },
+                )
 
     async def _plan_once(
         self,
@@ -1375,16 +1416,18 @@ class PERAgentLoop:
                 if event.type == "plan_start":
                     plan_id = event.plan_id
                 elif event.type == "plan_step" and event.plan_step_id:
-                    plan_steps.append(PlanStep(
-                        id=event.plan_step_id,
-                        description=event.content,
-                        dependencies=event.dependencies or [],
-                        tool_hint=event.tool_hint or None,
-                        parallel_group=event.parallel_group,
-                        risk_level=event.risk_level or "low",
-                        retry_strategy=event.retry_strategy or "auto_retry",
-                        fallback_tool=event.fallback_tool,
-                    ))
+                    plan_steps.append(
+                        PlanStep(
+                            id=event.plan_step_id,
+                            description=event.content,
+                            dependencies=event.dependencies or [],
+                            tool_hint=event.tool_hint or None,
+                            parallel_group=event.parallel_group,
+                            risk_level=event.risk_level or "low",
+                            retry_strategy=event.retry_strategy or "auto_retry",
+                            fallback_tool=event.fallback_tool,
+                        )
+                    )
                 elif event.type == "plan_complete":
                     # Carry the planner's own goal; never fall back to the plan id.
                     if event.plan_goal:
@@ -1443,7 +1486,9 @@ class PERAgentLoop:
             if step.retry_count >= self.config.max_retries_per_step:
                 logger.warning(
                     "Reflection retry for step %s skipped: retry_count %d already at limit %d",
-                    step_id, step.retry_count, self.config.max_retries_per_step,
+                    step_id,
+                    step.retry_count,
+                    self.config.max_retries_per_step,
                 )
                 return
             step.status = "pending"
@@ -1489,9 +1534,7 @@ class PERAgentLoop:
         # 可见工具预校验（#245 第 5/6 条，与 _get_tools 的呈现过滤同源）：
         # hint 进提示词会诱导模型调用一个当前看不见、甚至被执行层拒绝的工具。
         # toolless（enable_tools=False）时可见集为空 → 一条都不应用。
-        visible = {
-            t.get("function", {}).get("name") for t in (self._get_tools() or [])
-        }
+        visible = {t.get("function", {}).get("name") for t in (self._get_tools() or [])}
         applied = 0
         i = 0
         for step in plan.steps:
@@ -1507,13 +1550,16 @@ class PERAgentLoop:
             elif hint:
                 logger.info(
                     "Skill hint skipped（跨会话工具漂移）: %s 不在当前可见工具集（技能 %s）",
-                    hint, skill.id,
+                    hint,
+                    skill.id,
                 )
             i += 1
         if applied:
             logger.info(
                 "Skill hints applied: %d/%d 个步骤（来自技能 %s）",
-                applied, len(plan.steps), skill.id,
+                applied,
+                len(plan.steps),
+                skill.id,
             )
             return skill.id
         return None
@@ -1528,9 +1574,7 @@ class PERAgentLoop:
         grades = (qg_result or {}).get("grades") or {}
         if not grades or not all(g == "A" for g, _ in grades.values()):
             return
-        steps = [
-            {"tool_hint": s.tool_hint, "description": s.description} for s in plan.steps
-        ]
+        steps = [{"tool_hint": s.tool_hint, "description": s.description} for s in plan.steps]
         learned = await self.skill_manager.learn_from_plan_success(
             query=ctx.query or plan.goal, plan_steps=steps
         )
@@ -1623,11 +1667,14 @@ class PERAgentLoop:
             # issue #186：参考文档正文取 prompt_text 全文（snippet 仅展示），
             # 500 字上限按规则式句子抽取，不硬切头部。
             from app.rag.context_compressor import compress, get_prompt_text
-            context_str = "\n\n".join([
-                f"[{i + 1}] {doc.get('filename', 'Unknown')}:\n"
-                f"{compress(get_prompt_text(doc), query, max_chars=500)}"
-                for i, doc in enumerate(context_docs[:5])
-            ])
+
+            context_str = "\n\n".join(
+                [
+                    f"[{i + 1}] {doc.get('filename', 'Unknown')}:\n"
+                    f"{compress(get_prompt_text(doc), query, max_chars=500)}"
+                    for i, doc in enumerate(context_docs[:5])
+                ]
+            )
             system_prompt += f"\n\n## 已检索到的参考文档\n{context_str}"
 
         # Personality injection
@@ -1636,7 +1683,9 @@ class PERAgentLoop:
             "creative": "请给出富有洞察力的回答，可以适度发散思考。",
             "balanced": "请给出结构化、全面的回答，兼顾准确性和可读性。",
         }
-        system_prompt += f"\n\n{personality_guide.get(self.config.personality, personality_guide['balanced'])}"
+        system_prompt += (
+            f"\n\n{personality_guide.get(self.config.personality, personality_guide['balanced'])}"
+        )
 
         # 技能索引进提示词（issue #200）：SKILL.md 此前从不进任何提示词。
         # 受限工具上下文（tool_tags 非空，如子代理）不得注入：技能工具在其白名单外，
@@ -1644,11 +1693,7 @@ class PERAgentLoop:
         # toolless（enable_tools=False）同样不得注入（#245 第 1/3 条）：该模式下的
         # 单次 LLM 调用不带 tools 参数，索引文案（"用 load_skill_reference 工具加载"）
         # 是悬挂引用——与 B1 同理，不承诺一个不可达的工具。
-        if (
-            self.config.enable_skills
-            and self.config.enable_tools
-            and not self.config.tool_tags
-        ):
+        if self.config.enable_skills and self.config.enable_tools and not self.config.tool_tags:
             skills_index = build_skills_index()
             if skills_index:
                 system_prompt += f"\n\n{skills_index}"
@@ -1675,10 +1720,12 @@ class PERAgentLoop:
         tools = tool_registry.to_openai_tools(self.config.tool_tags)
         if self.config.disabled_tools and tools:
             tools = [
-                t for t in tools
+                t
+                for t in tools
                 if t.get("function", {}).get("name") not in self.config.disabled_tools
             ]
         return tools if tools else None
+
 
 # ── Backward compatibility alias ──
 AgentLoop = PERAgentLoop
@@ -1687,4 +1734,5 @@ AgentLoop = PERAgentLoop
 async def _yield_control():
     """Yield control to the event loop for SSE flushing."""
     import asyncio
+
     await asyncio.sleep(0.005)

@@ -33,6 +33,7 @@ CI 的 integration job 只提供 MySQL+Redis（Kafka/ES/MinIO 无服务），而
 （仓库约定：``RUN_INTEGRATION=1`` 且 ``DATABASE_URL`` 指向测试库；CI 的
 integration-mysql job 两者都提供）。
 """
+
 import contextlib
 import os
 import random
@@ -212,7 +213,8 @@ def test_port_file_records_cli_port_not_configured_port():
 def test_port_file_records_cli_port_with_reload():
     """README 教的是 --reload 形态：spawn 出的子进程（跑 lifespan）也要拿到 --port。"""
     cli_port = _free_port()
-    with _running_backend(
-        ["--port", str(cli_port), "--reload"], configured_port=cli_port + 1
-    ) as (proc, log_path):
+    with _running_backend(["--port", str(cli_port), "--reload"], configured_port=cli_port + 1) as (
+        proc,
+        log_path,
+    ):
         _assert_port_file_matches(cli_port, cli_port + 1, proc, log_path)

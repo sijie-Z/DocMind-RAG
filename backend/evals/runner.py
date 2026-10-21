@@ -568,9 +568,7 @@ async def _cmd_run_async(args: argparse.Namespace, golden: GoldenSet) -> int:
         for fname in golden.corpus_files
     }
     if mode == "fake":
-        retriever_label = (
-            f"HybridRetriever.retrieve (CI 确定性伪嵌入 {CI_EMBEDDING_ID}, LLM off)"
-        )
+        retriever_label = f"HybridRetriever.retrieve (CI 确定性伪嵌入 {CI_EMBEDDING_ID}, LLM off)"
     else:
         retriever_label = "HybridRetriever.retrieve (live, LLM off)"
     report = build_report(

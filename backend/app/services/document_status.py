@@ -24,9 +24,7 @@ from app.models.document import Document, DocumentStatus
 logger = logging.getLogger(__name__)
 
 
-async def verify_indexed(
-    client, document_id: str, expected: int, *, organization_id: str
-) -> int:
+async def verify_indexed(client, document_id: str, expected: int, *, organization_id: str) -> int:
     """确认该文档的 chunk **真的**能被检索到；不能就抛错。
 
     三条不变式（issue #181 / #224）——「状态 = INDEXED」必须意味着文档可被检索：
@@ -57,9 +55,7 @@ async def verify_indexed(
     index_name = settings.ELASTICSEARCH_INDEX_NAME
     await client.indices.refresh(index=index_name)
 
-    res = await client.count(
-        index=index_name, query={"term": {"document_id": document_id}}
-    )
+    res = await client.count(index=index_name, query={"term": {"document_id": document_id}})
     indexed = int(res.get("count", 0))
 
     if indexed == 0:

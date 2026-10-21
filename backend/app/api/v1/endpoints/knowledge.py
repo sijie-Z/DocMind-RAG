@@ -1,6 +1,7 @@
 """
 知识库API端点
 """
+
 import asyncio
 import logging
 import time
@@ -97,13 +98,17 @@ logger = logging.getLogger(__name__)
 _background_tasks: set[asyncio.Task] = set()
 
 
-@router.get("/", response_model=dict[str, Any], dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))])
+@router.get(
+    "/",
+    response_model=dict[str, Any],
+    dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))],
+)
 async def list_knowledge_bases(
     page: int = 1,
     page_size: int = 10,
     search: str | None = None,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     获取知识库列表 (真实数据)
@@ -112,9 +117,9 @@ async def list_knowledge_bases(
         # 1. 构建查询条件
         # 如果用户属于某个组织，查询组织下的所有文档；否则查询自己上传的文档
         if current_user.organization_id:
-             conditions = [Document.organization_id == current_user.organization_id]
+            conditions = [Document.organization_id == current_user.organization_id]
         else:
-             conditions = [Document.uploaded_by == current_user.id]
+            conditions = [Document.uploaded_by == current_user.id]
 
         if search:
             conditions.append(Document.title.contains(search))
@@ -126,7 +131,13 @@ async def list_knowledge_bases(
 
         # 3. 查询分页数据
         skip = (page - 1) * page_size
-        query = select(Document).where(*conditions).order_by(desc(Document.created_at)).offset(skip).limit(page_size)
+        query = (
+            select(Document)
+            .where(*conditions)
+            .order_by(desc(Document.created_at))
+            .offset(skip)
+            .limit(page_size)
+        )
         result = await db.execute(query)
         documents = result.scalars().all()
 
@@ -141,7 +152,7 @@ async def list_knowledge_bases(
                 DocumentStatus.PARSING: "parsing",
                 DocumentStatus.PARSED: "parsed",
                 DocumentStatus.INDEXED: "indexed",
-                DocumentStatus.FAILED: "failed"
+                DocumentStatus.FAILED: "failed",
             }
 
             # 声明 doc_status 为 Any 类型，以避免 pyright 中 status_map.get 方法对于 SQLAlchemy Column 参数的匹配报错
@@ -149,40 +160,43 @@ async def list_knowledge_bases(
             # raw_status 冗余携带原词（与详情端点同构），供前端双词容忍兼容层消费
             raw_status = doc.status.value if hasattr(doc.status, "value") else str(doc.status)
 
-            data.append({
-                "id": doc.id,
-                "title": doc.title or doc.filename,
-                "file_name": doc.filename,
-                "file_type": doc.file_type.value if hasattr(doc.file_type, 'value') else str(doc.file_type),
-                "file_size": doc.file_size,
-                "tags": doc.keywords if doc.keywords else[],
-                "description": doc.description,
-                "parse_error": doc.parse_error,
-                "created_at": doc.created_at.isoformat() if doc.created_at else "",
-                "updated_at": doc.updated_at.isoformat() if doc.updated_at else "",
-                "status": status_map.get(doc_status, "failed"),
-                "raw_status": raw_status
-            })
+            data.append(
+                {
+                    "id": doc.id,
+                    "title": doc.title or doc.filename,
+                    "file_name": doc.filename,
+                    "file_type": doc.file_type.value
+                    if hasattr(doc.file_type, "value")
+                    else str(doc.file_type),
+                    "file_size": doc.file_size,
+                    "tags": doc.keywords if doc.keywords else [],
+                    "description": doc.description,
+                    "parse_error": doc.parse_error,
+                    "created_at": doc.created_at.isoformat() if doc.created_at else "",
+                    "updated_at": doc.updated_at.isoformat() if doc.updated_at else "",
+                    "status": status_map.get(doc_status, "failed"),
+                    "raw_status": raw_status,
+                }
+            )
 
         return {
             "success": True,
             "message": "获取成功",
-            "data": {
-                "data": data,
-                "total": total,
-                "page": page,
-                "page_size": page_size
-            }
+            "data": {"data": data, "total": total, "page": page, "page_size": page_size},
         }
     except Exception as e:
         raise AppError(f"获取知识库列表失败: {str(e)}")
 
 
-@router.post("/search", response_model=KnowledgeSearchResponse, dependencies=[Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE]))])
+@router.post(
+    "/search",
+    response_model=KnowledgeSearchResponse,
+    dependencies=[Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE]))],
+)
 async def search_knowledge(
     request: KnowledgeSearchRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     搜索知识库
@@ -208,21 +222,19 @@ async def search_knowledge(
         if request.top_k is not None:
             effective_top_k = request.top_k
         else:
-            effective_top_k = (
-                await organization_settings_service.resolve_retrieval_top_k(
-                    db, effective_org_id, fallback=settings.TOP_K_RESULTS
-                )
+            effective_top_k = await organization_settings_service.resolve_retrieval_top_k(
+                db, effective_org_id, fallback=settings.TOP_K_RESULTS
             )
         results = await knowledge_service.search_knowledge(
             query=request.query,
             organization_id=effective_org_id,
             top_k=effective_top_k,
-            search_mode=requested_mode
+            search_mode=requested_mode,
         )
         elapsed = time.perf_counter() - _t0
 
         # 转换为前端期待的格式
-        formatted_results =[]
+        formatted_results = []
         for r in results:
             # Safety check for empty results
             if not r:
@@ -231,22 +243,24 @@ async def search_knowledge(
             source = r.get("source") or {}
             if not source.get("filename"):
                 source["filename"] = r.get("filename", "未知文件")
-            formatted_results.append({
-                "id": str(r.get("id") or r.get("document_id") or ""),
-                "text": r.get("text") or r.get("content") or "",
-                "score": r.get("score") or r.get("relevance_score") or 0,
-                # issue #185：重排绝对分单独透传（score 是相对排序分）；
-                # null 表示无重排分，前端不得按百分比相关度展示。
-                "relevance_score": r.get("relevance_score"),
-                "metadata": r.get("metadata") or {},
-                "source": source,
-                "has_keyword": r.get("has_keyword", False),
-                "has_vector": r.get("has_vector", False),
-                "rewrite_hits": r.get("rewrite_hits", 1),
-                "fresh_factor": r.get("fresh_factor", 1.0),
-                # issue #197：PDF 来源页码透传（非 PDF / 旧索引为 null）
-                "page_number": r.get("page_number"),
-            })
+            formatted_results.append(
+                {
+                    "id": str(r.get("id") or r.get("document_id") or ""),
+                    "text": r.get("text") or r.get("content") or "",
+                    "score": r.get("score") or r.get("relevance_score") or 0,
+                    # issue #185：重排绝对分单独透传（score 是相对排序分）；
+                    # null 表示无重排分，前端不得按百分比相关度展示。
+                    "relevance_score": r.get("relevance_score"),
+                    "metadata": r.get("metadata") or {},
+                    "source": source,
+                    "has_keyword": r.get("has_keyword", False),
+                    "has_vector": r.get("has_vector", False),
+                    "rewrite_hits": r.get("rewrite_hits", 1),
+                    "fresh_factor": r.get("fresh_factor", 1.0),
+                    # issue #197：PDF 来源页码透传（非 PDF / 旧索引为 null）
+                    "page_number": r.get("page_number"),
+                }
+            )
 
         # 结果为空时，必须能区分「没匹配到」与「你所在组织没有任何已索引内容」——
         # 两者在响应里同形（都是 results: []），但后者是严重故障。
@@ -284,13 +298,23 @@ async def search_knowledge(
         raise AppError(f"搜索知识库失败: {str(e)}")
 
 
-@router.get("/suggestions", response_model=SearchSuggestionResponse, dependencies=[Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE], organization_id_param='organization_id'))])
+@router.get(
+    "/suggestions",
+    response_model=SearchSuggestionResponse,
+    dependencies=[
+        Depends(
+            permission_required(
+                [PermissionType.SEARCH_KNOWLEDGE_BASE], organization_id_param="organization_id"
+            )
+        )
+    ],
+)
 async def get_search_suggestions(
     q: str = Query(..., min_length=2, description="搜索查询"),
     organization_id: int = Query(..., description="组织ID"),
     limit: int = Query(5, ge=1, le=10, description="建议数量"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     获取搜索建议
@@ -303,9 +327,7 @@ async def get_search_suggestions(
 
     try:
         suggestions = await knowledge_service.get_search_suggestions(
-            query=q,
-            organization_id=effective_org_id,
-            limit=limit
+            query=q, organization_id=effective_org_id, limit=limit
         )
 
         return {
@@ -313,18 +335,28 @@ async def get_search_suggestions(
             # `SearchSuggestionResponse.query` 是必填字段（描述即「原始查询」），
             # 缺了它响应模型校验必然失败 —— 即本端点不可能返回 200（issue #91）。
             "query": q,
-            "suggestions": suggestions
+            "suggestions": suggestions,
         }
 
     except Exception as e:
         raise AppError(f"获取搜索建议失败: {str(e)}")
 
 
-@router.get("/stats/{organization_id}", response_model=dict, dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE], organization_id_param='organization_id'))])
+@router.get(
+    "/stats/{organization_id}",
+    response_model=dict,
+    dependencies=[
+        Depends(
+            permission_required(
+                [PermissionType.VIEW_KNOWLEDGE_BASE], organization_id_param="organization_id"
+            )
+        )
+    ],
+)
 async def get_knowledge_stats(
     organization_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     获取知识库统计信息
@@ -342,19 +374,22 @@ async def get_knowledge_stats(
             "success": True,
             "stats": {
                 "total_files": stats["total_documents"],
-                "file_types": {}, # 可以进一步实现
-                "recent_searches":[]
-            }
+                "file_types": {},  # 可以进一步实现
+                "recent_searches": [],
+            },
         }
 
     except Exception as e:
         raise AppError(f"获取知识库统计失败: {str(e)}")
 
 
-@router.get("/graph/stats", response_model=dict, dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))])
+@router.get(
+    "/graph/stats",
+    response_model=dict,
+    dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))],
+)
 async def get_graph_rag_stats(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """
     获取GraphRAG知识图谱统计信息
@@ -374,19 +409,20 @@ async def get_graph_rag_stats(
                 "total_entities": analytics["total_entities"],
                 "type_distribution": analytics["type_distribution"],
                 "entity_types": analytics["entity_types"],
-                "entity_type_labels_cn": {
-                    k: v for k, v in analytics["entity_types"].items()
-                }
-            }
+                "entity_type_labels_cn": {k: v for k, v in analytics["entity_types"].items()},
+            },
         }
     except Exception as e:
         raise AppError(f"获取知识图谱统计失败: {str(e)}")
 
 
-@router.delete("/graph/clear", response_model=dict, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_DELETE]))])
+@router.delete(
+    "/graph/clear",
+    response_model=dict,
+    dependencies=[Depends(permission_required([PermissionType.DOCUMENT_DELETE]))],
+)
 async def clear_graph_rag(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """
     清空GraphRAG知识图谱
@@ -400,19 +436,20 @@ async def clear_graph_rag(
 
         await graph_rag_service.clear(effective_org)
 
-        return {
-            "success": True,
-            "message": "知识图谱已清空"
-        }
+        return {"success": True, "message": "知识图谱已清空"}
     except Exception as e:
         raise AppError(f"清空知识图谱失败: {str(e)}")
 
 
-@router.post("/rebuild/{document_id}", response_model=KnowledgeBuildResponse, dependencies=[Depends(permission_required([PermissionType.REBUILD_DOCUMENT_INDEX]))])
+@router.post(
+    "/rebuild/{document_id}",
+    response_model=KnowledgeBuildResponse,
+    dependencies=[Depends(permission_required([PermissionType.REBUILD_DOCUMENT_INDEX]))],
+)
 async def rebuild_document_knowledge(
     document_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     重建单个文档的知识库索引：删除 ES 中该文档的索引后，重新发送 Kafka 任务由 Worker 解析并写 ES。
@@ -459,9 +496,7 @@ async def rebuild_document_knowledge(
                 )
                 await db.commit()
             except Exception as mark_err:
-                logger.error(
-                    f"重建失败且任务收敛写入失败: {mark_err}", exc_info=True
-                )
+                logger.error(f"重建失败且任务收敛写入失败: {mark_err}", exc_info=True)
             raise
 
         # 3. 条件更新文档状态：已 INDEXED 的文档不因重建请求回退为 PENDING
@@ -486,7 +521,9 @@ async def rebuild_document_knowledge(
                 "job_id": job.id,
                 "file_path": doc.file_path,
                 "filename": doc.filename,
-                "file_type": doc.file_type.value if hasattr(doc.file_type, "value") else str(doc.file_type),
+                "file_type": doc.file_type.value
+                if hasattr(doc.file_type, "value")
+                else str(doc.file_type),
                 "action": "process",
             }
             sent = await kafka_producer.send_message(settings.KAFKA_FILE_PROCESSING_TOPIC, message)
@@ -505,12 +542,14 @@ async def rebuild_document_knowledge(
 
         # 重建时按组织清空 RAG 缓存，避免旧内容仍命中缓存
         from app.rag.cache import RetrievalCache, SemanticCache
+
         await RetrievalCache().clear_for_org(doc.organization_id)
         await SemanticCache().clear_for_org(doc.organization_id)
 
         if schedule_local:
             try:
                 from app.worker.doc_processor import processor
+
                 # 先建协程再装成 task：create_task 失败时显式 close()，避免
                 # "coroutine was never awaited" 泄漏（与上传路径同款收尾）。
                 coro = processor.process(document_id, job.id)
@@ -549,10 +588,7 @@ async def rebuild_document_knowledge(
                             ),
                         )
                         .values(
-                            error_message=(
-                                "本地处理任务启动失败（待启动对账重试）: "
-                                f"{proc_err}"
-                            )
+                            error_message=(f"本地处理任务启动失败（待启动对账重试）: {proc_err}")
                         )
                         .execution_options(synchronize_session=False)
                     )
@@ -601,7 +637,7 @@ async def rebuild_document_knowledge(
             success=True,
             document_id=document_id,
             message="已提交重建任务，请等待 Worker 处理完成",
-            build_time=0.0
+            build_time=0.0,
         )
 
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
@@ -611,13 +647,17 @@ async def rebuild_document_knowledge(
         raise AppError(f"重建知识库失败: {str(e)}")
 
 
-@router.get("/jobs", response_model=dict, dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))])
+@router.get(
+    "/jobs",
+    response_model=dict,
+    dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))],
+)
 async def list_knowledge_jobs(
     status: str | None = None,
     page: int = 1,
     page_size: int = 20,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     conditions = []
     if current_user.organization_id:
@@ -632,7 +672,9 @@ async def list_knowledge_jobs(
         except Exception:
             raise ValidationError("无效的任务状态")
 
-    total_result = await db.execute(select(func.count(KnowledgeProcessingJob.id)).where(*conditions))
+    total_result = await db.execute(
+        select(func.count(KnowledgeProcessingJob.id)).where(*conditions)
+    )
     total = total_result.scalar() or 0
 
     query = (
@@ -647,18 +689,20 @@ async def list_knowledge_jobs(
 
     data = []
     for job in jobs:
-        data.append({
-            "id": job.id,
-            "document_id": job.document_id,
-            "organization_id": job.organization_id,
-            "trigger_type": job.trigger_type,
-            "status": job.status.value if hasattr(job.status, "value") else str(job.status),
-            "retry_count": job.retry_count,
-            "error_message": job.error_message,
-            "started_at": job.started_at.isoformat() if job.started_at else None,
-            "finished_at": job.finished_at.isoformat() if job.finished_at else None,
-            "created_at": job.created_at.isoformat() if job.created_at else None,
-        })
+        data.append(
+            {
+                "id": job.id,
+                "document_id": job.document_id,
+                "organization_id": job.organization_id,
+                "trigger_type": job.trigger_type,
+                "status": job.status.value if hasattr(job.status, "value") else str(job.status),
+                "retry_count": job.retry_count,
+                "error_message": job.error_message,
+                "started_at": job.started_at.isoformat() if job.started_at else None,
+                "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+                "created_at": job.created_at.isoformat() if job.created_at else None,
+            }
+        )
 
     return {
         "success": True,
@@ -668,22 +712,25 @@ async def list_knowledge_jobs(
             "total": total,
             "page": page,
             "page_size": page_size,
-        }
+        },
     }
 
 
-@router.get("/{document_id}/events", response_model=dict, dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))])
+@router.get(
+    "/{document_id}/events",
+    response_model=dict,
+    dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))],
+)
 async def get_document_job_events(
     document_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     conditions = [KnowledgeProcessingJob.document_id == document_id]
     if not current_user.is_superuser:
         # S3 安全加固：无组织用户直接 403，不再兜底到 1 号组织
         conditions.append(
-            KnowledgeProcessingJob.organization_id
-            == await require_organization(current_user, db)
+            KnowledgeProcessingJob.organization_id == await require_organization(current_user, db)
         )
     result = await db.execute(
         select(KnowledgeProcessingJob)
@@ -707,15 +754,19 @@ async def get_document_job_events(
                 "created_at": job.created_at.isoformat() if job.created_at else None,
             }
             for job in jobs
-        ]
+        ],
     }
 
 
-@router.delete("/document/{document_id}", response_model=dict, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_DELETE]))])
+@router.delete(
+    "/document/{document_id}",
+    response_model=dict,
+    dependencies=[Depends(permission_required([PermissionType.DOCUMENT_DELETE]))],
+)
 async def delete_knowledge_document(
     document_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     删除知识库文档（彻底删除）
@@ -735,7 +786,7 @@ async def delete_knowledge_document(
             target_type="document",
             target_id=str(document_id),
             detail=f"删除知识库文档: {doc.filename}",
-            db=db
+            db=db,
         )
 
         return {"success": True, "message": "删除成功"}
@@ -746,11 +797,15 @@ async def delete_knowledge_document(
         raise AppError(f"删除失败: {str(e)}")
 
 
-@router.post("/batch-delete", response_model=dict, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_DELETE]))])
+@router.post(
+    "/batch-delete",
+    response_model=dict,
+    dependencies=[Depends(permission_required([PermissionType.DOCUMENT_DELETE]))],
+)
 async def batch_delete_documents(
     request: BatchDeleteRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     批量删除知识库文档
@@ -763,8 +818,7 @@ async def batch_delete_documents(
             raise AuthorizationError("无权删除该组织的文档")
 
         results = await knowledge_service.batch_delete_knowledge(
-            request.document_ids,
-            effective_org_id
+            request.document_ids, effective_org_id
         )
 
         await audit_service.log_activity(
@@ -773,7 +827,7 @@ async def batch_delete_documents(
             target_type="document",
             target_id=",".join(request.document_ids),
             detail=f"批量删除 {len(request.document_ids)} 个知识库文档",
-            db=db
+            db=db,
         )
 
         return results
@@ -784,16 +838,20 @@ async def batch_delete_documents(
         raise AppError(f"批量删除失败: {str(e)}")
 
 
-@router.post("/similarity", response_model=SimilarityResponse, dependencies=[Depends(permission_required([PermissionType.USE_EMBEDDING_SERVICE]))])
+@router.post(
+    "/similarity",
+    response_model=SimilarityResponse,
+    dependencies=[Depends(permission_required([PermissionType.USE_EMBEDDING_SERVICE]))],
+)
 async def calculate_text_similarity(
     text1: str = Query(..., description="文本1"),
     text2: str = Query(..., description="文本2"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     计算两个文本的相似度（用于测试和调试）
-    
+
     - **text1**: 文本1
     - **text2**: 文本2
     """
@@ -817,7 +875,7 @@ async def calculate_text_similarity(
             "text1": text1,
             "text2": text2,
             "similarity": float(cosine_similarity),
-            "similarity_percentage": float(cosine_similarity * 100)
+            "similarity_percentage": float(cosine_similarity * 100),
         }
 
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
@@ -827,10 +885,13 @@ async def calculate_text_similarity(
         raise AppError(f"计算文本相似度失败: {str(e)}")
 
 
-@router.get("/health", response_model=dict, dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+@router.get(
+    "/health",
+    response_model=dict,
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def check_knowledge_base_health(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """
     检查知识库健康状态
@@ -847,25 +908,24 @@ async def check_knowledge_base_health(
             "status": "healthy" if es_health and embedding_health else "unhealthy",
             "elasticsearch_connected": es_health,
             "embedding_service_available": embedding_health,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
     except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
+        return {"status": "unhealthy", "error": str(e), "timestamp": datetime.now().isoformat()}
 
 
-@router.get("/rag-stats", response_model=dict, summary="获取RAG检索统计", dependencies=[Depends(get_current_user)])
+@router.get(
+    "/rag-stats",
+    response_model=dict,
+    summary="获取RAG检索统计",
+    dependencies=[Depends(get_current_user)],
+)
 async def get_rag_stats(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """获取 RAG 命中率等检索效果统计 - 基于真实指标"""
     try:
-
         from app.services.rag_service import rag_service
 
         # 从 rag_service 获取真实指标
@@ -888,6 +948,7 @@ async def get_rag_stats(
         # 修复：趋势基于真实事件数据（事件保留 24h，按 3 小时聚合成 8 个真实采样点，
         # 覆盖最近 24 小时）；不再重复同一窗口 7 次，不再返回硬编码兜底数组。
         import time as _time
+
         _metrics_obj = getattr(rag_service, "_pipeline", None)
         _metrics_obj = getattr(_metrics_obj, "metrics", None) if _metrics_obj else None
         trend = []
@@ -933,13 +994,17 @@ async def get_rag_stats(
         }
 
 
-@router.get("/graph", response_model=dict, dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))])
+@router.get(
+    "/graph",
+    response_model=dict,
+    dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))],
+)
 async def get_knowledge_graph(
     query: str | None = None,
     max_nodes: int = Query(default=50, ge=5, le=200),
     organization_id: int | None = None,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """获取知识图谱数据，用于前端可视化。"""
     from app.services.graph_rag_service import graph_rag_service
@@ -961,13 +1026,15 @@ async def get_knowledge_graph(
             # Return all entities (up to max_nodes)
             results = []
             for key, node in list(graph.items())[:max_nodes]:
-                results.append({
-                    "entity": node.get("entity_name", key),
-                    "type": node.get("entity_type", "UNKNOWN"),
-                    "description": node.get("description", ""),
-                    "occurrences": node.get("occurrences", 0),
-                    "relationships": node.get("relationships", [])[:10],
-                })
+                results.append(
+                    {
+                        "entity": node.get("entity_name", key),
+                        "type": node.get("entity_type", "UNKNOWN"),
+                        "description": node.get("description", ""),
+                        "occurrences": node.get("occurrences", 0),
+                        "relationships": node.get("relationships", [])[:10],
+                    }
+                )
 
         # Build graph data for visualization
         # 两遍处理（写链打通后数据一有就现形的漂移修复）：真实实体（带
@@ -983,12 +1050,14 @@ async def get_knowledge_graph(
             if not entity_name or entity_name in node_ids:
                 continue
             node_ids.add(entity_name)
-            nodes.append({
-                "id": entity_name,
-                "type": ent.get("type", "UNKNOWN"),
-                "description": ent.get("description", ""),
-                "occurrences": ent.get("occurrences", 1),
-            })
+            nodes.append(
+                {
+                    "id": entity_name,
+                    "type": ent.get("type", "UNKNOWN"),
+                    "description": ent.get("description", ""),
+                    "occurrences": ent.get("occurrences", 1),
+                }
+            )
 
         for ent in results:
             entity_name = ent.get("entity", "")
@@ -1005,18 +1074,22 @@ async def get_knowledge_graph(
                 if target_name and target_name not in node_ids:
                     # 仅真实实体之外的目标才落 UNKNOWN 补位
                     node_ids.add(target_name)
-                    nodes.append({
-                        "id": target_name,
-                        "type": "UNKNOWN",
-                        "description": "",
-                        "occurrences": 1,
-                    })
+                    nodes.append(
+                        {
+                            "id": target_name,
+                            "type": "UNKNOWN",
+                            "description": "",
+                            "occurrences": 1,
+                        }
+                    )
                 if target_name:
-                    edges.append({
-                        "source": entity_name,
-                        "target": target_name,
-                        "relation": rel.get("relation", "RELATED_TO"),
-                    })
+                    edges.append(
+                        {
+                            "source": entity_name,
+                            "target": target_name,
+                            "relation": rel.get("relation", "RELATED_TO"),
+                        }
+                    )
 
         analytics = await graph_rag_service.get_analytics(effective_org)
 

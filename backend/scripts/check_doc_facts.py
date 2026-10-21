@@ -112,7 +112,9 @@ def _parse_python(path: Path) -> ast.Module:
 
 def _literal_string_members(value: ast.expr, where: str) -> list[str]:
     if not isinstance(value, ast.Subscript):
-        raise DerivationError(f"{where}: EventType 必须是 Literal[...]，实际是 {type(value).__name__}")
+        raise DerivationError(
+            f"{where}: EventType 必须是 Literal[...]，实际是 {type(value).__name__}"
+        )
     base = value.value
     base_name = base.id if isinstance(base, ast.Name) else getattr(base, "attr", None)
     if base_name != "Literal":
@@ -214,7 +216,9 @@ def _tokenize_ts(source: str) -> list[tuple[str, str]]:
             continue
         if char == "/" and nxt == "*":
             index += 2
-            while index < length and not (source[index] == "*" and index + 1 < length and source[index + 1] == "/"):
+            while index < length and not (
+                source[index] == "*" and index + 1 < length and source[index + 1] == "/"
+            ):
                 index += 1
             index += 2
             continue
@@ -362,7 +366,7 @@ def derive_frontend_routes(router_ts_path: Path) -> list[str]:
 def _resolve_agent_module(module: str, agent_dir: Path) -> Path | None:
     if not module.startswith(_AGENT_MODULE_PREFIX):
         return None
-    relative = module[len(_AGENT_MODULE_PREFIX):]
+    relative = module[len(_AGENT_MODULE_PREFIX) :]
     if not relative:
         return None
     file_path = agent_dir / (relative.replace(".", "/") + ".py")
@@ -481,8 +485,12 @@ def derive_all(root: Path = REPO_ROOT) -> dict[str, int]:
     http, websocket = derive_route_decorators(backend / "app" / "api" / "v1" / "endpoints")
     return {
         "sse_event_types": len(derive_sse_event_types(backend / "app" / "agent" / "events.py")),
-        "endpoint_modules": len(derive_endpoint_modules(backend / "app" / "api" / "v1" / "router.py")),
-        "frontend_routes": len(derive_frontend_routes(root / "frontend" / "src" / "router" / "index.ts")),
+        "endpoint_modules": len(
+            derive_endpoint_modules(backend / "app" / "api" / "v1" / "router.py")
+        ),
+        "frontend_routes": len(
+            derive_frontend_routes(root / "frontend" / "src" / "router" / "index.ts")
+        ),
         "registered_tools": len(derive_registered_tool_names(backend / "app" / "agent")),
         "http_route_decorators": len(http),
         "websocket_route_decorators": len(websocket),
@@ -508,12 +516,8 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
     # ── README.md ──
     DocAnchor("registered_tools", "README.md", r"可调用 (\d+) 个工具", "工具数（简介）"),
     DocAnchor("registered_tools", "README.md", r"Tool Registry \((\d+)\)", "工具数（架构图）"),
-    DocAnchor(
-        "registered_tools", "README.md", r"\*\*(\d+) 个内置工具\*\*", "工具数（工具清单）"
-    ),
-    DocAnchor(
-        "registered_tools", "README.md", r"合计 (\d+) 个内置工具", "工具数（目录树合集）"
-    ),
+    DocAnchor("registered_tools", "README.md", r"\*\*(\d+) 个内置工具\*\*", "工具数（工具清单）"),
+    DocAnchor("registered_tools", "README.md", r"合计 (\d+) 个内置工具", "工具数（目录树合集）"),
     DocAnchor("endpoint_modules", "README.md", r"(\d+) 个端点模块", "端点模块数（API 层）"),
     DocAnchor(
         "endpoint_modules", "README.md", r"注册 (\d+) 个模块", "端点模块数（目录树 router.py）"
@@ -526,9 +530,7 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
     ),
     DocAnchor("frontend_routes", "README.md", r"(\d+) 条路由", "前端路由数"),
     DocAnchor("sse_event_types", "README.md", r"(\d+) 种 SSE 事件", "SSE 事件数（简介）"),
-    DocAnchor(
-        "sse_event_types", "README.md", r"SSE 事件类型（(\d+) 种）", "SSE 事件数（目录树）"
-    ),
+    DocAnchor("sse_event_types", "README.md", r"SSE 事件类型（(\d+) 种）", "SSE 事件数（目录树）"),
     # ── README_EN.md ──
     DocAnchor(
         "registered_tools",
@@ -553,7 +555,10 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
     ),
     DocAnchor("endpoint_modules", "README_EN.md", r"(\d+) endpoint modules", "endpoint modules"),
     DocAnchor(
-        "endpoint_modules", "README_EN.md", r"\((\d+) modules registered\)", "endpoint modules (tree)"
+        "endpoint_modules",
+        "README_EN.md",
+        r"\((\d+) modules registered\)",
+        "endpoint modules (tree)",
     ),
     DocAnchor(
         "endpoint_modules",
@@ -561,10 +566,15 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         r"Endpoint implementations \((\d+) files\)",
         "endpoint files (tree)",
     ),
-    DocAnchor("frontend_routes", "README_EN.md", r"(\d+) route records", "frontend routes (records)"),
+    DocAnchor(
+        "frontend_routes", "README_EN.md", r"(\d+) route records", "frontend routes (records)"
+    ),
     DocAnchor("sse_event_types", "README_EN.md", r"(\d+) SSE event types", "SSE event types"),
     DocAnchor(
-        "sse_event_types", "README_EN.md", r"SSE event types \((\d+) types\)", "SSE event types (tree)"
+        "sse_event_types",
+        "README_EN.md",
+        r"SSE event types \((\d+) types\)",
+        "SSE event types (tree)",
     ),
     # ── docs/architecture.html ──
     DocAnchor("registered_tools", "docs/architecture.html", r"(\d+) Agent 工具", "工具数（徽标）"),
@@ -587,7 +597,9 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         r"endpoints/.*#\s*(\d+) 个路由模块",
         "端点模块数（目录树）",
     ),
-    DocAnchor("endpoint_modules", "docs/architecture.html", r"(\d+) API 模块", "端点模块数（徽标）"),
+    DocAnchor(
+        "endpoint_modules", "docs/architecture.html", r"(\d+) API 模块", "端点模块数（徽标）"
+    ),
     DocAnchor(
         "endpoint_modules",
         "docs/architecture.html",
@@ -607,9 +619,7 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         r'<div class="stat-num">(\d+)</div><div class="stat-lbl">API 模块</div>',
         "端点模块数（统计卡）",
     ),
-    DocAnchor(
-        "registered_tools", "docs/index.html", r"(\d+) 个 Agent 工具", "工具数（meta）"
-    ),
+    DocAnchor("registered_tools", "docs/index.html", r"(\d+) 个 Agent 工具", "工具数（meta）"),
     DocAnchor("registered_tools", "docs/index.html", r"(\d+) 个内置工具", "工具数（首屏）"),
     DocAnchor(
         "registered_tools",
@@ -617,9 +627,7 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         r'<div class="stat-num">(\d+)</div><div class="stat-lbl">Agent 工具</div>',
         "工具数（统计卡）",
     ),
-    DocAnchor(
-        "registered_tools", "docs/index.html", r"内置 (\d+) 个专业工具", "工具数（工具区）"
-    ),
+    DocAnchor("registered_tools", "docs/index.html", r"内置 (\d+) 个专业工具", "工具数（工具区）"),
     # ── AGENT_ARCHITECTURE.md ──
     DocAnchor(
         "registered_tools",
@@ -686,7 +694,9 @@ def check_doc_anchors(
     for anchor in DOC_ANCHORS if anchors is None else anchors:
         expected = facts.get(anchor.fact)
         if expected is None:
-            raise DerivationError(f"锚点 {anchor.label} 引用了 facts 中不存在的事实 {anchor.fact!r}")
+            raise DerivationError(
+                f"锚点 {anchor.label} 引用了 facts 中不存在的事实 {anchor.fact!r}"
+            )
         path = root / anchor.path
         if not path.is_file():
             continue
@@ -695,8 +705,7 @@ def check_doc_anchors(
         if not matches:
             if anchor.path in REQUIRED_DOC_FILES:
                 problems.append(
-                    f"{anchor.path}: 锚点缺失（{anchor.label}）"
-                    "——必存文档必须保留该数字锚点"
+                    f"{anchor.path}: 锚点缺失（{anchor.label}）——必存文档必须保留该数字锚点"
                 )
             continue
         for match in matches:
@@ -761,7 +770,9 @@ def main(argv: list[str] | None = None) -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help="仓库根目录（默认自动定位）")
-    parser.add_argument("--facts", type=Path, default=None, help="facts JSON 路径（默认 <root>/docs/facts.json）")
+    parser.add_argument(
+        "--facts", type=Path, default=None, help="facts JSON 路径（默认 <root>/docs/facts.json）"
+    )
     parser.add_argument(
         "--print-derived", action="store_true", help="只打印源码派生值（JSON），不校验"
     )
@@ -802,15 +813,14 @@ def main(argv: list[str] | None = None) -> int:
         problems.append("README.md 未引用 docs/facts.json（事实单一事实源入口）")
 
     if problems:
-        print("FAIL: 事实不变量被破坏（代码 / facts JSON / 文档数字必须三方一致）:", file=sys.stderr)
+        print(
+            "FAIL: 事实不变量被破坏（代码 / facts JSON / 文档数字必须三方一致）:", file=sys.stderr
+        )
         for problem in problems:
             print(f"  - {problem}", file=sys.stderr)
         return 1
 
-    print(
-        f"OK: 事实不变量成立（{len(FACT_KEYS)} 项事实；"
-        f"派生值与 {facts_path} 及文档数字一致）"
-    )
+    print(f"OK: 事实不变量成立（{len(FACT_KEYS)} 项事实；派生值与 {facts_path} 及文档数字一致）")
     return 0
 
 

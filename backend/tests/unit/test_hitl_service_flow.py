@@ -95,8 +95,11 @@ def fake_redis(monkeypatch):
 def _cfg(**overrides) -> AgentConfig:
     base = dict(
         enable_planning=False,  # 单步计划，不耗规划 LLM（结构化模板也不走）
-        enable_reflection=False, enable_memory=False, enable_skills=False,
-        enable_experience=False, enable_thinking=False,
+        enable_reflection=False,
+        enable_memory=False,
+        enable_skills=False,
+        enable_experience=False,
+        enable_thinking=False,
         # issue #206：生产默认禁用 execute_python，派发层会以 tool_disabled 拒绝；
         # 本文件以它作为已显式启用的高危工具样本验证审批/续跑链路。
         disabled_tools=[],
@@ -153,7 +156,8 @@ def _client_multi_tool(
             counters["tools"] += 1
             tcs = [
                 SimpleNamespace(
-                    id=cid, function=SimpleNamespace(name=name, arguments=args),
+                    id=cid,
+                    function=SimpleNamespace(name=name, arguments=args),
                 )
                 for name, args, cid in calls_spec
             ]
@@ -191,7 +195,9 @@ async def test_pause_keeps_waiting_approval_and_resume_approve_completes(db_fact
 
     with patch.object(tool_registry, "execute_detailed", new=spy):
         # ── 第一段：跑到审批点暂停 ──
-        events = [e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_cfg())]
+        events = [
+            e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_cfg())
+        ]
 
         approval_events = [e for e in events if e.type == "approval_required"]
         assert approval_events, "必须发出 approval_required"
@@ -213,12 +219,13 @@ async def test_pause_keeps_waiting_approval_and_resume_approve_completes(db_fact
 
         # ── 第二段：人类批准 → 续跑（与端点同序：记账+认领 → resume_chat(claim=False)）──
         task_row, payload, record = await checkpoint.apply_approval_decision(
-            task_id=task_id, user_id=USER_ID, organization_id=1, decision="approve",
+            task_id=task_id,
+            user_id=USER_ID,
+            organization_id=1,
+            decision="approve",
         )
         assert record["decision"] == "approve"
-        events2 = [
-            e async for e in svc.resume_chat(task_id, user_id=USER_ID, claim=False)
-        ]
+        events2 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID, claim=False)]
 
     assert spy.await_count == 1, "批准后恰好执行一次（粘滞决定：不再打扰）"
     called_name, called_args = spy.await_args.args[0], spy.await_args.args[1]
@@ -264,7 +271,9 @@ async def test_live_cancel_before_tool_execution_converges_cancelled(db_factory,
     assert any(e.type == "run_cancelled" for e in events)
     assert not any(e.type == "approval_required" for e in events), "正在取消的 run 不该进暂停"
     task = await _get_task(db_factory, task_id)
-    assert task.status == TaskStatus.CANCELLED, "诚实终态 cancelled（变异点：按 COMPLETED 收尾 → 红）"
+    assert task.status == TaskStatus.CANCELLED, (
+        "诚实终态 cancelled（变异点：按 COMPLETED 收尾 → 红）"
+    )
     assert task.last_error_type == "user_cancelled"
 
 
@@ -281,14 +290,10 @@ async def test_cancel_before_run_starts_converges_at_phase_checkpoint(db_factory
 
     spy = AsyncMock(return_value=ToolResult.ok(data="x"))
     with patch.object(tool_registry, "execute_detailed", new=spy):
-        events = [
-            e async for e in svc.resume_chat(task_id, user_id=USER_ID, claim=False)
-        ]
+        events = [e async for e in svc.resume_chat(task_id, user_id=USER_ID, claim=False)]
 
     assert any(e.type == "run_cancelled" for e in events)
-    assert counters["tools"] == 0 and counters["plain"] == 0, (
-        "阶段检查点在任何 LLM 调用之前收敛"
-    )
+    assert counters["tools"] == 0 and counters["plain"] == 0, "阶段检查点在任何 LLM 调用之前收敛"
     task = await _get_task(db_factory, task_id)
     assert task.status == TaskStatus.CANCELLED
     assert spy.await_count == 0
@@ -301,7 +306,9 @@ async def test_low_risk_tool_no_pause_no_regression(db_factory, fake_redis):
     spy = AsyncMock(return_value=ToolResult.ok(data="检索结果"))
 
     with patch.object(tool_registry, "execute_detailed", new=spy):
-        events = [e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_cfg())]
+        events = [
+            e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_cfg())
+        ]
 
     assert not any(e.type == "approval_required" for e in events), (
         "risky 模式默认只拦 high：低风险工具不得产生审批暂停"
@@ -322,8 +329,11 @@ async def test_pause_uses_ttl_from_config(db_factory, fake_redis):
 
     with patch.object(tool_registry, "execute_detailed", new=spy):
         events = [
-            e async for e in svc.chat(
-                QUERY, organization_id=1, user_id=USER_ID,
+            e
+            async for e in svc.chat(
+                QUERY,
+                organization_id=1,
+                user_id=USER_ID,
                 config=_cfg(approval_timeout_seconds=600),
             )
         ]
@@ -350,8 +360,10 @@ async def test_multi_pause_cycles_keep_ledger_and_steering(db_factory, fake_redi
     c2_args = {"code": "print(999)"}
     capture: dict = {}
     client, counters = _client_multi_tool(
-        [("execute_python", '{"code": "print(123*456)"}', "c1"),
-         ("execute_python", '{"code": "print(999)"}', "c2")],
+        [
+            ("execute_python", '{"code": "print(123*456)"}', "c1"),
+            ("execute_python", '{"code": "print(999)"}', "c2"),
+        ],
         capture=capture,
     )
     svc = AgentService(openai_client=client)
@@ -360,7 +372,9 @@ async def test_multi_pause_cycles_keep_ledger_and_steering(db_factory, fake_redi
 
     with patch.object(tool_registry, "execute_detailed", new=spy):
         # ── 周期 0：chat 跑到第一个审批点（c1 先弹；两调用都未执行）──
-        events1 = [e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_cfg())]
+        events1 = [
+            e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_cfg())
+        ]
         first = [e for e in events1 if e.type == "approval_required"]
         assert len(first) == 1 and first[0].tool_args == c1_args
         task_id = first[0].task_id
@@ -368,8 +382,11 @@ async def test_multi_pause_cycles_keep_ledger_and_steering(db_factory, fake_redi
 
         # ── 周期 1：批准 c1 + 改指令 → resume#1 只应弹 c2 ──
         await checkpoint.apply_approval_decision(
-            task_id=task_id, user_id=USER_ID, organization_id=1,
-            decision="approve", modified_instruction=steer,
+            task_id=task_id,
+            user_id=USER_ID,
+            organization_id=1,
+            decision="approve",
+            modified_instruction=steer,
         )
         events2 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID, claim=False)]
         second = [e for e in events2 if e.type == "approval_required"]
@@ -381,14 +398,17 @@ async def test_multi_pause_cycles_keep_ledger_and_steering(db_factory, fake_redi
         # 快照层复核（合并写）：账本是 [c1]，指导仍在——不是从空列表重建
         _, payload_mid = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
         run_mid = payload_mid["run"]
-        assert run_mid["approval_decisions"][0]["args_hash"] == approval.args_fingerprint(c1_args), (
-            "周期 1 的暂停快照必须原样带回已批决定（窄覆盖=此断言红）"
-        )
+        assert run_mid["approval_decisions"][0]["args_hash"] == approval.args_fingerprint(
+            c1_args
+        ), "周期 1 的暂停快照必须原样带回已批决定（窄覆盖=此断言红）"
         assert run_mid["steering"] == [steer], "改指令必须跨暂停周期存活"
 
         # ── 周期 2：批准 c2 → 两调用全放行、run 收尾，无第三张卡 ──
         await checkpoint.apply_approval_decision(
-            task_id=task_id, user_id=USER_ID, organization_id=1, decision="approve",
+            task_id=task_id,
+            user_id=USER_ID,
+            organization_id=1,
+            decision="approve",
         )
         events3 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID, claim=False)]
 

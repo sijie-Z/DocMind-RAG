@@ -1,4 +1,5 @@
 """Token usage Pydantic schemas."""
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -29,6 +30,7 @@ class TokenUsageResponse(BaseModel):
 
 class TokenUsageSummary(BaseModel):
     """Summary of token usage for dashboards."""
+
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_cost_usd: float = 0.0

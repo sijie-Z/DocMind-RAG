@@ -30,12 +30,17 @@ class FakeStreamableHTTP:
 
     # ── 工具面 ──
     def _tools(self) -> list[dict[str, Any]]:
-        return [{
-            "name": "remote_echo",
-            "description": "HTTP 端回显",
-            "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}},
-                            "required": ["text"]},
-        }]
+        return [
+            {
+                "name": "remote_echo",
+                "description": "HTTP 端回显",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                },
+            }
+        ]
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         headers = {k.lower(): str(v) for k, v in request.headers.items()}
@@ -47,11 +52,13 @@ class FakeStreamableHTTP:
 
         body = json.loads(request.content) if request.content else None
         method = body.get("method") if isinstance(body, dict) else None
-        self.seen.append({
-            "method": method,
-            "session": headers.get("mcp-session-id"),
-            "protocol": headers.get("mcp-protocol-version"),
-        })
+        self.seen.append(
+            {
+                "method": method,
+                "session": headers.get("mcp-session-id"),
+                "protocol": headers.get("mcp-protocol-version"),
+            }
+        )
 
         if method == "initialize":
             if self.fail_initialize:
@@ -60,10 +67,15 @@ class FakeStreamableHTTP:
             return httpx2.Response(
                 200,
                 headers={"content-type": "application/json", "mcp-session-id": SESSION_ID},
-                json={"jsonrpc": "2.0", "id": body["id"], "result": {
-                    "protocolVersion": body["params"]["protocolVersion"],
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "fake-http", "version": "0.1"}}},
+                json={
+                    "jsonrpc": "2.0",
+                    "id": body["id"],
+                    "result": {
+                        "protocolVersion": body["params"]["protocolVersion"],
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "fake-http", "version": "0.1"},
+                    },
+                },
             )
         if method == "notifications/initialized":
             return httpx2.Response(202)
@@ -73,26 +85,47 @@ class FakeStreamableHTTP:
             # 有意走 SSE 分支：验证客户端对 text/event-stream 的解析
             sse = "event: message\ndata: " + json.dumps(payload) + "\n\n"
             return httpx2.Response(
-                200, headers={"content-type": "text/event-stream"}, content=sse.encode())
+                200, headers={"content-type": "text/event-stream"}, content=sse.encode()
+            )
         if method == "tools/call":
             params = body.get("params") or {}
             if params.get("name") == "remote_echo":
                 args = params.get("arguments") or {}
-                return httpx2.Response(200, headers={"content-type": "application/json"}, json={
-                    "jsonrpc": "2.0", "id": body["id"], "result": {
-                        "content": [{"type": "text", "text": "remote:" + str(args.get("text", ""))}]}})
-            return httpx2.Response(200, headers={"content-type": "application/json"}, json={
-                "jsonrpc": "2.0", "id": body["id"],
-                "error": {"code": -32602, "message": "Unknown tool"}})
+                return httpx2.Response(
+                    200,
+                    headers={"content-type": "application/json"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": body["id"],
+                        "result": {
+                            "content": [
+                                {"type": "text", "text": "remote:" + str(args.get("text", ""))}
+                            ]
+                        },
+                    },
+                )
+            return httpx2.Response(
+                200,
+                headers={"content-type": "application/json"},
+                json={
+                    "jsonrpc": "2.0",
+                    "id": body["id"],
+                    "error": {"code": -32602, "message": "Unknown tool"},
+                },
+            )
         if method == "ping":
-            return httpx2.Response(200, headers={"content-type": "application/json"},
-                                   json={"jsonrpc": "2.0", "id": body["id"], "result": {}})
+            return httpx2.Response(
+                200,
+                headers={"content-type": "application/json"},
+                json={"jsonrpc": "2.0", "id": body["id"], "result": {}},
+            )
         return httpx2.Response(400, json={"error": f"unknown method {method}"})
 
 
 def make_factory(fake: FakeStreamableHTTP):
     def factory() -> httpx2.AsyncClient:
         return httpx2.AsyncClient(transport=httpx2.MockTransport(fake))
+
     return factory
 
 

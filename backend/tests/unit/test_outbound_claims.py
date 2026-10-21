@@ -74,9 +74,7 @@ def test_readme_graph_and_compressor_claims_match_code():
 def test_graph_and_compressor_code_evidence():
     """口径依据本身也守住：RAG 模块不消费图谱；压缩器不调用 LLM。"""
     rag_dir = _REPO_ROOT / "backend" / "app" / "rag"
-    rag_source = "\n".join(
-        p.read_text(encoding="utf-8") for p in sorted(rag_dir.glob("*.py"))
-    )
+    rag_source = "\n".join(p.read_text(encoding="utf-8") for p in sorted(rag_dir.glob("*.py")))
     assert not re.search(r"graph_rag|subgraph", rag_source, re.IGNORECASE), (
         "backend/app/rag 出现了图谱消费代码；若图谱已接入检索链路，"
         "请同步更新 README 的边界表述与本测试。"
@@ -90,8 +88,7 @@ def test_graph_and_compressor_code_evidence():
         elif isinstance(node, ast.ImportFrom):
             imported.append(node.module or "")
     assert not any(
-        re.search(r"llm|openai|anthropic|langchain", module, re.IGNORECASE)
-        for module in imported
+        re.search(r"llm|openai|anthropic|langchain", module, re.IGNORECASE) for module in imported
     ), (
         "context_compressor.py 引入了 LLM 客户端；若改为 LLM 压缩，"
         "请同步更新 README 的表述与本测试。"
@@ -149,7 +146,10 @@ def test_product_definition_image_capability_matches_code():
         ["OCR", "冻结快照", "2223", "861", "ENABLE_DEMO_ACCOUNT", "ENABLE_ENSURE_DEMO_ENDPOINT"],
     )
     parser = _read("backend/app/services/document_parser.py")
-    assert "'.png': self._parse_image" in parser, "图片 OCR 解析入口消失，请复核产品定义"
+    # 引号风格随 ruff format 归一（#216），断言按 AST 语义容忍单双引号。
+    assert re.search(r"['\"]\.png['\"]\s*:\s*self\._parse_image", parser), (
+        "图片 OCR 解析入口消失，请复核产品定义"
+    )
     _assert_present("docs/product-definition.md", ["不做图像理解"])
 
 

@@ -308,9 +308,7 @@ async def reindex_documents(
     return outcome
 
 
-def find_unresolved(
-    succeeded: list[str], report_after: ReconcileReport
-) -> list[str]:
+def find_unresolved(succeeded: list[str], report_after: ReconcileReport) -> list[str]:
     """``process`` 返回成功的文档中，复核**未能证明已恢复**的 id。
 
     「已恢复」= 仍在 INDEXED 基准里且 ES 计数满足 ``chunk_count``（``ok`` 或
@@ -318,9 +316,7 @@ def find_unresolved(
     PARSING/FAILED 等）时无法证明恢复，一律视为未解决——否则
     ``report_after`` 里根本没这行，会被误判成成功（评审发现）。
     """
-    ok_ids = {
-        state.document_id for state in report_after.states if not state.needs_reindex
-    }
+    ok_ids = {state.document_id for state in report_after.states if not state.needs_reindex}
     return [doc_id for doc_id in succeeded if doc_id not in ok_ids]
 
 
@@ -385,15 +381,11 @@ async def run(args: argparse.Namespace) -> int:
     try:
         await init_elasticsearch()
         if get_index_error():
-            logger.error(
-                "[RECONCILE] 索引配置错误，无法对账：%s", get_index_error()
-            )
+            logger.error("[RECONCILE] 索引配置错误，无法对账：%s", get_index_error())
             return EXIT_FATAL
 
         client = await get_elasticsearch()
-        counts = await fetch_indexed_chunk_counts(
-            client, index_name, organization_id=args.org
-        )
+        counts = await fetch_indexed_chunk_counts(client, index_name, organization_id=args.org)
         async with AsyncSessionLocal() as session:
             rows = await fetch_indexed_documents(session, organization_id=args.org)
 
@@ -425,9 +417,7 @@ async def run(args: argparse.Namespace) -> int:
             client, index_name, organization_id=args.org
         )
         async with AsyncSessionLocal() as session:
-            rows_after = await fetch_indexed_documents(
-                session, organization_id=args.org
-            )
+            rows_after = await fetch_indexed_documents(session, organization_id=args.org)
         report_after = build_report(rows_after, counts_after)
         _print_report(report_after, organization_id=args.org)
 
@@ -481,9 +471,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = build_arg_parser().parse_args(argv)
     try:
         return asyncio.run(run(args))

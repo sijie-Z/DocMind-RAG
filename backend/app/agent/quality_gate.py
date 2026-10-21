@@ -136,7 +136,11 @@ def quality_gate_check(
     ]
     for step_id, (grade, detail) in grades.items():
         icon = {"A": "✅", "C": "⚠️", "F": "❌"}.get(grade, "❓")
-        desc = step_results.get(step_id, {}).get("description", step_id) if isinstance(step_results.get(step_id), dict) else step_id
+        desc = (
+            step_results.get(step_id, {}).get("description", step_id)
+            if isinstance(step_results.get(step_id), dict)
+            else step_id
+        )
         summary_lines.append(f"- {icon} **{desc}**: [{grade}] {detail}")
 
     return {

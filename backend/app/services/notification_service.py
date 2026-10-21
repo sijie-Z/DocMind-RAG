@@ -36,13 +36,15 @@ async def create_notification(
     cutoff = datetime.now(UTC) - timedelta(minutes=1)
     existing = (
         await db.execute(
-            select(Notification).where(
+            select(Notification)
+            .where(
                 and_(
                     Notification.user_id == user_id,
                     Notification.title == title,
                     Notification.created_at >= cutoff,
                 )
-            ).limit(1)
+            )
+            .limit(1)
         )
     ).scalar_one_or_none()
 
@@ -61,15 +63,18 @@ async def create_notification(
     await db.commit()
     await db.refresh(notification)
 
-    await notification_ws_manager.push(user_id, {
-        "id": notification.id,
-        "title": notification.title,
-        "content": notification.content,
-        "type": notification.type,
-        "is_read": notification.is_read,
-        "created_at": notification.created_at.isoformat() if notification.created_at else None,
-        "target_route": target_route,
-        "target_id": target_id,
-    })
+    await notification_ws_manager.push(
+        user_id,
+        {
+            "id": notification.id,
+            "title": notification.title,
+            "content": notification.content,
+            "type": notification.type,
+            "is_read": notification.is_read,
+            "created_at": notification.created_at.isoformat() if notification.created_at else None,
+            "target_route": target_route,
+            "target_id": target_id,
+        },
+    )
 
     return notification

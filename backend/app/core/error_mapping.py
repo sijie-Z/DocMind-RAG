@@ -43,9 +43,7 @@ _ORG_ERROR_MARKERS = ("缺少 organization_id", "无组织上下文", "未加入
 
 
 def _is_missing_org_error(exc: BaseException) -> bool:
-    return isinstance(exc, ValueError) and any(
-        marker in str(exc) for marker in _ORG_ERROR_MARKERS
-    )
+    return isinstance(exc, ValueError) and any(marker in str(exc) for marker in _ORG_ERROR_MARKERS)
 
 
 # 请求编号会进客户端文案与日志——只接受安全字符集/长度（防回显放大与日志注入；
@@ -81,9 +79,7 @@ def resolve_request_id(request: Any) -> str | None:
         safe_id = _safe_request_id(request_id)
         if safe_id:
             return safe_id
-    return _safe_request_id(
-        getattr(getattr(request, "state", None), "request_id", None)
-    )
+    return _safe_request_id(getattr(getattr(request, "state", None), "request_id", None))
 
 
 def public_exception_message(
@@ -171,9 +167,7 @@ def _tool_generic(tool_name: str) -> str:
     return f"工具 {name} 执行失败，请稍后重试" if name else GENERIC_TOOL_ERROR
 
 
-def public_agent_event_content(
-    event_type: str, content: Any, tool_name: str = ""
-) -> Any:
+def public_agent_event_content(event_type: str, content: Any, tool_name: str = "") -> Any:
     """AgentEvent → SSE 前的内容口径。
 
     - ``error``：白名单外一律降级为通用文案（可含原始异常/内部类名，无法逐条
@@ -233,16 +227,12 @@ def public_rag_error_content(content: Any) -> str:
 # ── 诊断载荷脱敏（run_report / execution_context / thinking）────────────────
 # 真实 traceback 以 "Traceback (most recent call last):" 开头；按空行截断，
 # 避免把后面的报告正文一起吞掉。
-_TRACEBACK_BLOCK = re.compile(
-    r"Traceback \(most recent call last\):?(?:\r?\n(?!\r?\n)[^\n]*)+"
-)
+_TRACEBACK_BLOCK = re.compile(r"Traceback \(most recent call last\):?(?:\r?\n(?!\r?\n)[^\n]*)+")
 # 供应商/驱动异常原文的常见形态（不带 "XxxError:" 前缀，前面几个正则接不住）。
 _PROVIDER_ERROR_DETAIL = re.compile(
     r"(?:Error code:\s*\d+[^\n]*|\bRequest timed out\.|\bConnection error\.)"
 )
-_EXCEPTION_DETAIL = re.compile(
-    r"\b[A-Za-z_][\w.]*(?:Error|Exception|Timeout)\b\s*:[^\n]*"
-)
+_EXCEPTION_DETAIL = re.compile(r"\b[A-Za-z_][\w.]*(?:Error|Exception|Timeout)\b\s*:[^\n]*")
 _CLASS_REPR = re.compile(r"<class '[^']+'>")
 _FILE_PATH = re.compile(
     r"[A-Za-z]:\\[^\s\"'<>]+"
@@ -310,9 +300,7 @@ def _public_decision(item: Any) -> Any:
     if not isinstance(item, dict):
         return public_diagnostic_content(item)
     out = dict(item)
-    out["reasoning"] = public_decision_reasoning(
-        out.get("action"), out.get("reasoning")
-    )
+    out["reasoning"] = public_decision_reasoning(out.get("action"), out.get("reasoning"))
     return out
 
 

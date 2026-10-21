@@ -89,8 +89,7 @@ def _override(user: SimpleNamespace, db: object | None = None):
 
 # 同时携带内网路径 / SQL / 内部类名形态的异常原文：修前会整段进 SSE。
 LEAKY_EXCEPTION = (
-    f"{SECRET} at C:\\Users\\lenovo\\secret.py: "
-    "ValueError: SELECT * FROM users WHERE token = 'x'"
+    f"{SECRET} at C:\\Users\\lenovo\\secret.py: ValueError: SELECT * FROM users WHERE token = 'x'"
 )
 
 
@@ -102,9 +101,7 @@ async def _raising_agent(**kwargs):
 
 async def _orgless_agent(**kwargs):
     """agent_service.chat 替身：复现无组织入口的 ValueError 文本。"""
-    raise ValueError(
-        "AgentService.chat 缺少 organization_id，拒绝在无组织上下文下运行"
-    )
+    raise ValueError("AgentService.chat 缺少 organization_id，拒绝在无组织上下文下运行")
     yield  # pragma: no cover
 
 
@@ -354,9 +351,7 @@ class TestAgentEventErrorContent:
         """HITL 审批拒绝文案（含人工备注）必须保留——白名单不得误伤安全可读信息。"""
         from app.agent.service import agent_service
 
-        denial = (
-            "人工审批拒绝执行工具 execute_sql（approval_denied）：生产环境禁止操作"
-        )
+        denial = "人工审批拒绝执行工具 execute_sql（approval_denied）：生产环境禁止操作"
 
         async def _fake_chat(**kwargs):
             yield AgentEvent(
@@ -544,10 +539,7 @@ class TestMappingUnits:
         assert public_rag_error_content(f"ValueError: {SECRET}") == GENERIC_RAG_ERROR
 
     def test_authorization_message_passes_but_other_4xx_does_not(self):
-        assert (
-            public_exception_message(AuthorizationError("无权访问该会话"))
-            == "无权访问该会话"
-        )
+        assert public_exception_message(AuthorizationError("无权访问该会话")) == "无权访问该会话"
         leaked = public_exception_message(ValidationError(f"bad {SECRET}"))
         assert SECRET not in leaked
         assert leaked == "服务器处理出错，请稍后重试"
@@ -564,9 +556,7 @@ class TestMappingUnits:
             == "服务器处理出错，请稍后重试"
         )
         assert (
-            public_agent_event_content(
-                "error", "Executor Agent: 等待执行消息超时"
-            )
+            public_agent_event_content("error", "Executor Agent: 等待执行消息超时")
             == "Executor Agent: 等待执行消息超时"
         )
 
@@ -577,9 +567,7 @@ class TestMappingUnits:
 
         raw = "peer closed connection without sending complete message body"
         ctx = ExecutionContext(query="q")
-        ctx.record_decision(
-            "reflect", "unavailable", f"反思评估跳过（评估服务异常）: {raw}"
-        )
+        ctx.record_decision("reflect", "unavailable", f"反思评估跳过（评估服务异常）: {raw}")
         ctx.record_decision("review", "error", f"对抗审查未完成（审查服务异常）：{raw}")
 
         text = render_run_report_text(build_run_report(ctx, "answer"))
@@ -641,9 +629,7 @@ async def test_retry_thinking_and_retry_hint_do_not_embed_raw_error(monkeypatch)
     executor = _LeakyRetryExecutor(
         openai_client=MagicMock(),
         config=AgentConfig(max_retries_per_step=1),
-        memory_bridge=AgentMemoryBridge(
-            agent_id="w0-5-retry", organization_id=1, user_id=0
-        ),
+        memory_bridge=AgentMemoryBridge(agent_id="w0-5-retry", organization_id=1, user_id=0),
     )
     plan = Plan(id="p1", goal="g", steps=[PlanStep(id="s1", description="step")])
 
@@ -666,6 +652,4 @@ async def test_retry_thinking_and_retry_hint_do_not_embed_raw_error(monkeypatch)
     assert "timeout" in content, "受控错误码应保留"
     assert SECRET not in content, f"thinking 外泄异常原文: {content}"
     assert "RuntimeError" not in content
-    assert SECRET not in hint and "RuntimeError" not in hint, (
-        f"retry_hint 外泄异常原文: {hint}"
-    )
+    assert SECRET not in hint and "RuntimeError" not in hint, f"retry_hint 外泄异常原文: {hint}"

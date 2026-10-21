@@ -56,7 +56,12 @@ class _FakePipeline:
         self.calls: list[dict] = []
 
     async def search_knowledge_base(
-        self, query, organization_id, top_k=5, document_ids=None, debug=False,
+        self,
+        query,
+        organization_id,
+        top_k=5,
+        document_ids=None,
+        debug=False,
     ):
         self.calls.append({"query": query, "document_ids": document_ids, "org": organization_id})
         if self.fail:
@@ -105,10 +110,15 @@ class _CapturingPlanner:
         self.memory_contexts.append(memory_context)
         yield AgentEvent(type="plan_start", plan_id="plan-1", content="制定计划...")
         yield AgentEvent(
-            type="plan_step", plan_id="plan-1", plan_step_id="s1",
-            content="第1步", dependencies=[],
+            type="plan_step",
+            plan_id="plan-1",
+            plan_step_id="s1",
+            content="第1步",
+            dependencies=[],
         )
-        yield AgentEvent(type="plan_complete", plan_id="plan-1", plan_goal="目标", content="计划完成")
+        yield AgentEvent(
+            type="plan_complete", plan_id="plan-1", plan_goal="目标", content="计划完成"
+        )
 
 
 def _capturing_client():
@@ -126,8 +136,12 @@ def _capturing_client():
 
 def _loop_cfg() -> AgentConfig:
     return AgentConfig(
-        enable_memory=False, enable_reflection=False, enable_skills=False,
-        enable_experience=False, enable_thinking=False, enable_planning=True,
+        enable_memory=False,
+        enable_reflection=False,
+        enable_skills=False,
+        enable_experience=False,
+        enable_thinking=False,
+        enable_planning=True,
     )
 
 
@@ -142,7 +156,8 @@ def _hermetic(monkeypatch):
     # 既有用例保持环境封闭（不发起真实 ES 调用）；需要命中/故障形态的用例
     # 在各自用例体内覆写。
     monkeypatch.setattr(
-        ElasticsearchTools, "search_documents",
+        ElasticsearchTools,
+        "search_documents",
         AsyncMock(return_value={"hits": {"hits": []}}),
     )
 
@@ -161,19 +176,23 @@ async def doc_factory(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-async def _add_doc(factory, doc_id: str, *, org: int = 1, title: str = "预算报告", description=None):
+async def _add_doc(
+    factory, doc_id: str, *, org: int = 1, title: str = "预算报告", description=None
+):
     async with factory() as db:
-        db.add(Document(
-            id=doc_id,
-            filename=f"{doc_id}.pdf",
-            file_path=f"/tmp/{doc_id}.pdf",
-            file_size=10,
-            file_type=DocumentType.PDF,
-            title=title,
-            description=description,
-            organization_id=org,
-            uploaded_by=1,
-        ))
+        db.add(
+            Document(
+                id=doc_id,
+                filename=f"{doc_id}.pdf",
+                file_path=f"/tmp/{doc_id}.pdf",
+                file_size=10,
+                file_type=DocumentType.PDF,
+                title=title,
+                description=description,
+                organization_id=org,
+                uploaded_by=1,
+            )
+        )
         await db.commit()
 
 
@@ -195,20 +214,27 @@ class TestBuildReferencedDocumentContext:
         assert pipe.calls[0]["document_ids"] == ["d1"]
 
     async def test_missing_doc_warns_and_no_empty_section(self, doc_factory):
-        ctx, warnings = await build_referenced_document_context(["ghost"], "q", 1, pipeline=_FakePipeline())
+        ctx, warnings = await build_referenced_document_context(
+            ["ghost"], "q", 1, pipeline=_FakePipeline()
+        )
         assert ctx is None
         assert len(warnings) == 1 and "不存在" in warnings[0]
 
     async def test_cross_org_doc_warns_not_leaked(self, doc_factory):
         await _add_doc(doc_factory, "d2", org=2)
-        ctx, warnings = await build_referenced_document_context(["d2"], "q", 1, pipeline=_FakePipeline())
+        ctx, warnings = await build_referenced_document_context(
+            ["d2"], "q", 1, pipeline=_FakePipeline()
+        )
         assert ctx is None
         assert len(warnings) == 1 and "无权访问" in warnings[0]
 
     async def test_retrieval_failure_falls_back_to_description_with_warning(self, doc_factory):
         await _add_doc(doc_factory, "d3", description="涵盖 Q3 预算编制口径")
         ctx, warnings = await build_referenced_document_context(
-            ["d3"], "q", 1, pipeline=_FakePipeline(fail=True),
+            ["d3"],
+            "q",
+            1,
+            pipeline=_FakePipeline(fail=True),
         )
         assert ctx is not None and "涵盖 Q3 预算编制口径" in ctx
         assert any("检索失败" in w for w in warnings)
@@ -221,7 +247,9 @@ class TestBuildReferencedDocumentContext:
 
     async def test_over_cap_ids_warned_not_silent(self, doc_factory):
         ids = [f"missing-{i}" for i in range(12)]
-        ctx, warnings = await build_referenced_document_context(ids, "q", 1, pipeline=_FakePipeline())
+        ctx, warnings = await build_referenced_document_context(
+            ids, "q", 1, pipeline=_FakePipeline()
+        )
         assert ctx is None
         assert sum("超出单次上限" in w for w in warnings) == 2
         assert len(warnings) == 12  # 10 条（不存在）+ 2 条（超出）——一条不吞
@@ -236,16 +264,26 @@ class TestBuildReferencedDocumentContext:
         """
         await _add_doc(doc_factory, "d5")
         monkeypatch.setattr(
-            ElasticsearchTools, "search_documents",
-            AsyncMock(return_value={"hits": {"hits": [
-                {"_source": {"content": "# Contributing to DocMind\n欢迎贡献……"}},
-                {"_source": {"content": "行为准则：Contributor Covenant……"}},
-            ]}}),
+            ElasticsearchTools,
+            "search_documents",
+            AsyncMock(
+                return_value={
+                    "hits": {
+                        "hits": [
+                            {"_source": {"content": "# Contributing to DocMind\n欢迎贡献……"}},
+                            {"_source": {"content": "行为准则：Contributor Covenant……"}},
+                        ]
+                    }
+                }
+            ),
         )
         pipe = _FakePipeline()  # 检索臂正常执行但零命中（无 texts）
 
         ctx, warnings = await build_referenced_document_context(
-            ["d5"], "总结这份文档", 1, pipeline=pipe,
+            ["d5"],
+            "总结这份文档",
+            1,
+            pipeline=pipe,
         )
 
         assert ctx is not None and "欢迎贡献" in ctx, "正文必须经直读进入上下文"
@@ -253,18 +291,24 @@ class TestBuildReferencedDocumentContext:
         assert pipe.calls, "query 检索仍应先执行（相关分块优先，直读是兜底）"
 
     async def test_direct_read_also_empty_keeps_description_fallback_with_warning(
-        self, doc_factory, monkeypatch,
+        self,
+        doc_factory,
+        monkeypatch,
     ):
         """直读兜底同样拿不到正文（ES 故障/未索引）→ 退回既有降级语义：
         描述兜底 + 诚实警告（绝不静默）。"""
         await _add_doc(doc_factory, "d6", description="只有描述，没有可读正文")
         monkeypatch.setattr(
-            ElasticsearchTools, "search_documents",
+            ElasticsearchTools,
+            "search_documents",
             AsyncMock(side_effect=RuntimeError("ES 不可用（替身）")),
         )
 
         ctx, warnings = await build_referenced_document_context(
-            ["d6"], "q", 1, pipeline=_FakePipeline(),
+            ["d6"],
+            "q",
+            1,
+            pipeline=_FakePipeline(),
         )
 
         assert ctx is not None and "只有描述" in ctx
@@ -325,8 +369,7 @@ class TestLoopDocumentContextWiring:
 
         assert captured, "executor 步骤必须发起过 LLM 调用（前置条件）"
         system_prompts = [
-            m["content"] for msgs in captured if msgs
-            for m in msgs if m.get("role") == "system"
+            m["content"] for msgs in captured if msgs for m in msgs if m.get("role") == "system"
         ]
         assert any("用户显式引用的知识库文档" in p for p in system_prompts), (
             "引用段必须进入 executor 步骤提示词（planner 之外的第二注入点）"
@@ -352,8 +395,7 @@ class TestLoopDocumentContextWiring:
         _ = [ev async for ev in loop.run("查预算")]
 
         system_prompts = [
-            m["content"] for msgs in captured if msgs
-            for m in msgs if m.get("role") == "system"
+            m["content"] for msgs in captured if msgs for m in msgs if m.get("role") == "system"
         ]
         assert system_prompts, "executor 步骤必须发起过 LLM 调用（前置条件）"
         assert not any("用户显式引用的知识库文档" in p for p in system_prompts), (
@@ -398,8 +440,12 @@ class TestServiceChatWiring:
         cfg.enable_checkpoint = True
 
         events = [
-            ev async for ev in svc.chat(
-                "查预算", organization_id=1, user_id=1, config=cfg,
+            ev
+            async for ev in svc.chat(
+                "查预算",
+                organization_id=1,
+                user_id=1,
+                config=cfg,
                 referenced_document_ids=["d9", "ghost"],
             )
         ]
@@ -433,8 +479,12 @@ def _resume_payload(*, steps, include_plan=True, document_context=None):
     ctx = ExecutionContext(query="原始问题", task_id="t-1")
     if document_context is not None:
         ctx.document_context = document_context
-    plan = Plan(id="p1", goal="目标", steps=steps,
-                completed_steps=sum(1 for s in steps if s.status == "completed"))
+    plan = Plan(
+        id="p1",
+        goal="目标",
+        steps=steps,
+        completed_steps=sum(1 for s in steps if s.status == "completed"),
+    )
     return {
         "v": 1,
         "session_id": "sess-1",
@@ -461,8 +511,16 @@ class _StubResumeLoop:
     def _get_tools(self):
         return []
 
-    async def run(self, query, *, task_id=None, resume=None, session_id=None,
-                  document_context=None, history=None):
+    async def run(
+        self,
+        query,
+        *,
+        task_id=None,
+        resume=None,
+        session_id=None,
+        document_context=None,
+        history=None,
+    ):
         _StubResumeLoop.last_kwargs = {
             "document_context": document_context,
             "resume": resume,
@@ -523,8 +581,7 @@ class TestResumeDocumentContext:
         assert any(ev.type == "done" for ev in events)
         assert captured, "executor 步骤必须发起过 LLM 调用（前置条件）"
         system_prompts = [
-            m["content"] for msgs in captured if msgs
-            for m in msgs if m.get("role") == "system"
+            m["content"] for msgs in captured if msgs for m in msgs if m.get("role") == "system"
         ]
         assert any("用户显式引用的知识库文档" in p for p in system_prompts), (
             "断流快照恢复后，executor 步骤提示词必须仍带引用段"
@@ -566,11 +623,14 @@ class TestResumeDocumentContext:
         task = SimpleNamespace(organization_id=1, user_id=1)
         monkeypatch.setattr(service_mod, "PERAgentLoop", _StubResumeLoop)
         monkeypatch.setattr(
-            service_mod.checkpoint, "load_for_resume",
+            service_mod.checkpoint,
+            "load_for_resume",
             AsyncMock(return_value=(task, payload)),
         )
         monkeypatch.setattr(
-            service_mod.checkpoint, "mark_terminal", AsyncMock(return_value=True),
+            service_mod.checkpoint,
+            "mark_terminal",
+            AsyncMock(return_value=True),
         )
         monkeypatch.setattr(service_mod, "notify_task_terminal", AsyncMock())
 

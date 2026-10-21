@@ -64,6 +64,7 @@ async def main():
     if local_path.exists():
         data = local_path.read_text(encoding="utf-8")
         import json
+
         parsed = json.loads(data)
         print(f"  ✅ Local JSON: {len(parsed)} experiences → {local_path}")
     else:

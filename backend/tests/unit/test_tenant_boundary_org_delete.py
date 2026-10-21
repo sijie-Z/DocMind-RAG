@@ -7,6 +7,7 @@
 
 真 SQLite（``Base.metadata.create_all``），不依赖外部服务。
 """
+
 from types import SimpleNamespace
 
 import httpx
@@ -33,28 +34,46 @@ async def _setup():
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as s:
-        s.add_all([
-            Organization(id=10, name="BusyOrg", owner_id=20),
-            Organization(id=11, name="EmptyOrg", owner_id=20),
-            Organization(id=12, name="ChildOrg", owner_id=20, parent_id=10, level=2),
-            User(id=20, username="owner", email="o@example.com", hashed_password="x",
-                 role="admin", organization_id=10, is_active=True),
-        ])
+        s.add_all(
+            [
+                Organization(id=10, name="BusyOrg", owner_id=20),
+                Organization(id=11, name="EmptyOrg", owner_id=20),
+                Organization(id=12, name="ChildOrg", owner_id=20, parent_id=10, level=2),
+                User(
+                    id=20,
+                    username="owner",
+                    email="o@example.com",
+                    hashed_password="x",
+                    role="admin",
+                    organization_id=10,
+                    is_active=True,
+                ),
+            ]
+        )
         await s.commit()
     return engine, factory
 
 
 def _doc(doc_id: str, org_id: int) -> Document:
     return Document(
-        id=doc_id, filename=f"{doc_id}.txt", file_path=f"/tmp/{doc_id}.txt",
-        file_size=1, file_type=DocumentType.TXT, organization_id=org_id, uploaded_by=20,
+        id=doc_id,
+        filename=f"{doc_id}.txt",
+        file_path=f"/tmp/{doc_id}.txt",
+        file_size=1,
+        file_type=DocumentType.TXT,
+        organization_id=org_id,
+        uploaded_by=20,
     )
 
 
 def _superuser() -> SimpleNamespace:
     return SimpleNamespace(
-        id=999, username="root", organization_id=None, role="admin",
-        is_superuser=True, is_active=True,
+        id=999,
+        username="root",
+        organization_id=None,
+        role="admin",
+        is_superuser=True,
+        is_active=True,
     )
 
 
@@ -229,7 +248,10 @@ async def test_delete_org_on_migration_shaped_fk_with_roles(tmp_path, monkeypatc
     conn = sqlite3.connect(db_path)
     try:
         assert conn.execute("SELECT COUNT(*) FROM organizations WHERE id = 30").fetchone()[0] == 0
-        assert conn.execute("SELECT COUNT(*) FROM user_organization_role_association").fetchone()[0] == 0
+        assert (
+            conn.execute("SELECT COUNT(*) FROM user_organization_role_association").fetchone()[0]
+            == 0
+        )
         assert conn.execute("SELECT organization_id FROM users WHERE id = 40").fetchone()[0] is None
     finally:
         conn.close()

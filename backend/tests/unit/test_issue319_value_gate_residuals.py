@@ -32,9 +32,7 @@ def test_config_field_specs_cover_all_dataclass_fields():
 def test_config_to_dict_keyset_frozen():
     """冻结：to_dict 键集 = 全字段 − {planning_mode}（planning_mode 不进
     to_dict 是既有形态——实验字段，快照/Redis 都不持久化它；不许随手增删）。"""
-    assert set(AgentConfig().to_dict()) == set(AgentConfig.__dataclass_fields__) - {
-        "planning_mode"
-    }
+    assert set(AgentConfig().to_dict()) == set(AgentConfig.__dataclass_fields__) - {"planning_mode"}
 
 
 def test_config_read_gate_degrades_drifted_values(caplog):
@@ -46,14 +44,16 @@ def test_config_read_gate_degrades_drifted_values(caplog):
     直接 AttributeError（chain B'）。
     """
     with caplog.at_level(logging.WARNING):
-        cfg = AgentConfig.from_dict({
-            "max_iterations": "很多",
-            "temperature": "热",
-            "enable_tools": "yes",
-            "tool_tags": ["a", 3],
-            "model": 7,
-            "max_total_tokens": "无限",
-        })
+        cfg = AgentConfig.from_dict(
+            {
+                "max_iterations": "很多",
+                "temperature": "热",
+                "enable_tools": "yes",
+                "tool_tags": ["a", 3],
+                "model": 7,
+                "max_total_tokens": "无限",
+            }
+        )
     assert cfg.max_iterations == 20 and isinstance(cfg.max_iterations, int)
     assert cfg.temperature == 0.1
     assert cfg.enable_tools is True
@@ -80,8 +80,8 @@ def test_config_write_gate_never_persists_drifted_values(caplog):
     变异点：to_dict 退回裸 dump → 坏值原样落盘 → 本用例红。
     """
     cfg = AgentConfig()
-    cfg.max_iterations = "很多"          # type: ignore[assignment] — 模拟运行态漂移
-    cfg.enable_reflection = "nope"       # type: ignore[assignment]
+    cfg.max_iterations = "很多"  # type: ignore[assignment] — 模拟运行态漂移
+    cfg.enable_reflection = "nope"  # type: ignore[assignment]
     with caplog.at_level(logging.WARNING):
         dumped = cfg.to_dict()
     assert dumped.get("max_iterations") != "很多"
@@ -97,8 +97,8 @@ def test_config_gate_legal_values_pass_through_byte_for_byte():
     逐字节透传——闸门只看类型不看域，不做值改写。"""
     legit = {
         "model": "m",
-        "temperature": 0,          # int 0 是合法 number（非 bool）
-        "max_iterations": -3,      # 域外但类型合法：透传（0/负值 = 不限制语义）
+        "temperature": 0,  # int 0 是合法 number（非 bool）
+        "max_iterations": -3,  # 域外但类型合法：透传（0/负值 = 不限制语义）
         "enable_skills": False,
         "tool_tags": ["kb", "web"],
         "system_prompt_override": None,

@@ -1,6 +1,7 @@
 """
 通知模型
 """
+
 from datetime import datetime
 from typing import Optional
 
@@ -13,6 +14,7 @@ from app.core.database import Base
 
 class Notification(Base):
     """系统通知模型"""
+
     __tablename__ = "notifications"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True, autoincrement=True)
@@ -37,5 +39,5 @@ class Notification(Base):
             "is_read": self.is_read,
             "target_route": self.target_route,
             "target_id": self.target_id,
-            "created_at": self.created_at.isoformat() if self.created_at else None
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }

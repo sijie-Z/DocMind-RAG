@@ -6,6 +6,7 @@
 - 失败的步骤不会被 executor 写入，于是第 1 轮同名步骤的"成功"结果
   会被当作本轮结果注入下游步骤的提示词（静默假阴性）。
 """
+
 import uuid
 from unittest.mock import MagicMock
 
@@ -32,11 +33,14 @@ class TestRunScopedStepResults:
         """run A 写入的 "s1" 不得被同一会话的 run B 读到（修复前会读到）。"""
         namespace = f"fix-m1-{uuid.uuid4().hex[:8]}"
         run_a = _bridge(namespace)
-        run_a.store_step_result("s1", {
-            "description": "查询财务数据",
-            "status": "completed",
-            "result": "run A 的成功结果",
-        })
+        run_a.store_step_result(
+            "s1",
+            {
+                "description": "查询财务数据",
+                "status": "completed",
+                "result": "run A 的成功结果",
+            },
+        )
 
         run_b = _bridge(namespace)
         assert run_b.get_all_results() == {}, "新 run 不得看到上一轮的中间结果"
@@ -46,11 +50,14 @@ class TestRunScopedStepResults:
         """本轮 "s1" 失败（executor 不写入）时，下游步骤不得收到上一轮同名成功结果。"""
         namespace = f"fix-m1-{uuid.uuid4().hex[:8]}"
         run_a = _bridge(namespace)
-        run_a.store_step_result("s1", {
-            "description": "查询销售额",
-            "status": "completed",
-            "result": "旧一轮的成功数据",
-        })
+        run_a.store_step_result(
+            "s1",
+            {
+                "description": "查询销售额",
+                "status": "completed",
+                "result": "旧一轮的成功数据",
+            },
+        )
 
         # run B：模拟执行器在步骤失败时不调用 store_step_result，直接构造下游提示词
         run_b = _bridge(namespace)
@@ -63,11 +70,14 @@ class TestRunScopedStepResults:
     def test_same_run_dependency_injection_still_works(self):
         """回归保护：同一 run 内的前置步骤结果仍要注入下游提示词。"""
         bridge = _bridge()
-        bridge.store_step_result("s1", {
-            "description": "查询销售额",
-            "status": "completed",
-            "result": "本轮销售数据",
-        })
+        bridge.store_step_result(
+            "s1",
+            {
+                "description": "查询销售额",
+                "status": "completed",
+                "result": "本轮销售数据",
+            },
+        )
         executor = Executor(MagicMock(), AgentConfig(), bridge)
         injected = executor._get_previous_results(["s1"])
         assert "本轮销售数据" in injected

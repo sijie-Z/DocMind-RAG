@@ -18,10 +18,19 @@ import pytest
 from app.agent import core_tools
 from app.core.elasticsearch import ElasticsearchTools
 
-HITS = {"hits": {"hits": [
-    {"_source": {"content": "# 贡献指南正文第一段", "filename": "CONTRIBUTING.md"}},
-    {"_source": {"content": "## 行为准则：Contributor Covenant", "filename": "CONTRIBUTING.md"}},
-]}}
+HITS = {
+    "hits": {
+        "hits": [
+            {"_source": {"content": "# 贡献指南正文第一段", "filename": "CONTRIBUTING.md"}},
+            {
+                "_source": {
+                    "content": "## 行为准则：Contributor Covenant",
+                    "filename": "CONTRIBUTING.md",
+                }
+            },
+        ]
+    }
+}
 
 
 @pytest.fixture(autouse=True)
@@ -31,10 +40,12 @@ def _stub_es(monkeypatch):
 
 def _pipeline_with(content: str, finish_reason: str = "stop"):
     resp = SimpleNamespace(
-        choices=[SimpleNamespace(
-            message=SimpleNamespace(content=content, reasoning_content="推理……"),
-            finish_reason=finish_reason,
-        )],
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=content, reasoning_content="推理……"),
+                finish_reason=finish_reason,
+            )
+        ],
         usage=SimpleNamespace(prompt_tokens=100, completion_tokens=500),
     )
     pipeline = MagicMock()
@@ -51,7 +62,9 @@ async def test_empty_llm_content_falls_back_to_raw_preview(monkeypatch):
     import app.dependencies as deps
 
     monkeypatch.setattr(
-        deps, "get_rag_pipeline", lambda: _pipeline_with("", finish_reason="length"),
+        deps,
+        "get_rag_pipeline",
+        lambda: _pipeline_with("", finish_reason="length"),
     )
 
     out = await core_tools.summarize_document(document_id="d-x", organization_id=1)
@@ -66,7 +79,9 @@ async def test_normal_summary_returned(monkeypatch):
     import app.dependencies as deps
 
     monkeypatch.setattr(
-        deps, "get_rag_pipeline", lambda: _pipeline_with("主题：贡献指南；要点：行为准则。"),
+        deps,
+        "get_rag_pipeline",
+        lambda: _pipeline_with("主题：贡献指南；要点：行为准则。"),
     )
 
     out = await core_tools.summarize_document(document_id="d-x", organization_id=1)

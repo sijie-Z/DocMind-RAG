@@ -1,4 +1,5 @@
 """API endpoints for prompt template management with version history."""
+
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
@@ -115,13 +116,10 @@ async def _ensure_prompt_writable(
     # 「管理员激活」门改动线上提示词。草稿态（is_active=False）仍由创建者维护。
     if db_prompt.scope == "organization" and db_prompt.is_active:
         if not await is_org_admin(db, current_user, db_prompt.organization_id):
-            raise AuthorizationError(
-                detail="组织模板激活后仅组织管理员可修改、删除或回滚"
-            )
+            raise AuthorizationError(detail="组织模板激活后仅组织管理员可修改、删除或回滚")
         return
-    if (
-        db_prompt.creator_id != current_user.id
-        and not await is_org_admin(db, current_user, db_prompt.organization_id)
+    if db_prompt.creator_id != current_user.id and not await is_org_admin(
+        db, current_user, db_prompt.organization_id
     ):
         raise AuthorizationError(detail="无权修改此模板")
 

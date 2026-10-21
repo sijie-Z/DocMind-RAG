@@ -26,6 +26,7 @@
 确有写入方（这正是 #194 的根因类别）；``section_title`` 的写侧覆盖随 #188
 的验收补齐。
 """
+
 from typing import get_args
 
 from app.core.elasticsearch import _knowledge_index_mapping
@@ -90,7 +91,9 @@ def test_dead_intent_fields_removed():
         assert not (names & DEAD_FIELDS), f"{intent} 仍引用死字段: {sorted(names & DEAD_FIELDS)}"
     for intent in ALL_INTENTS:
         names = _field_names(QueryIntentClassifier.get_boost_fields(intent))
-        assert not (names & DEAD_FIELDS), f"{intent} 出口仍引用死字段: {sorted(names & DEAD_FIELDS)}"
+        assert not (names & DEAD_FIELDS), (
+            f"{intent} 出口仍引用死字段: {sorted(names & DEAD_FIELDS)}"
+        )
 
 
 def test_boostable_fields_have_no_dead_members():
@@ -123,9 +126,7 @@ def test_guard_drops_unlisted_fields(monkeypatch):
 
 def test_guard_falls_back_when_all_fields_invalid(monkeypatch):
     """全部字段被守卫剔除时回落安全默认——multi_match 的 fields 不能为空。"""
-    monkeypatch.setitem(
-        QueryIntentClassifier._INTENT_BOOST_FIELDS, "factual", ["title^1.5"]
-    )
+    monkeypatch.setitem(QueryIntentClassifier._INTENT_BOOST_FIELDS, "factual", ["title^1.5"])
     assert QueryIntentClassifier.get_boost_fields("factual") == ["chunk_text^2", "content^2"]
 
 

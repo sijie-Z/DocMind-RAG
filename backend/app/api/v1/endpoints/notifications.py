@@ -20,6 +20,7 @@ from app.models.user import User
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+
 # --- Schemas ---
 class NotificationResponse(BaseModel):
     id: int
@@ -32,6 +33,7 @@ class NotificationResponse(BaseModel):
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
+
 class NotificationListResponse(BaseModel):
     items: list[NotificationResponse]
     total: int
@@ -39,20 +41,25 @@ class NotificationListResponse(BaseModel):
     skip: int
     limit: int
 
+
 class NotificationSummaryResponse(BaseModel):
     total: int
     unread_count: int
     by_type: dict
 
+
 class NotificationBatchDeleteRequest(BaseModel):
     ids: list[int]
+
 
 class NotificationCreate(BaseModel):
     title: str
     content: str
     type: str = "system"
 
+
 # --- Endpoints ---
+
 
 @router.websocket("/ws")
 async def notification_ws(
@@ -85,6 +92,7 @@ async def notification_ws(
         pass
     finally:
         notification_ws_manager.disconnect(user_id, websocket)
+
 
 _LEGACY_ROUTE_COLUMN = r"(?:[a-z_]+\.)?(?:target_route|target_id)"
 _MISSING_COLUMN_PATTERNS = (
@@ -135,7 +143,7 @@ async def get_notifications(
     type: str | None = None,
     q: str | None = None,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """获取当前用户的通知列表（支持筛选、搜索、分页）"""
     try:
@@ -147,20 +155,23 @@ async def get_notifications(
             base_query = base_query.where(Notification.type == type)
         if q:
             keyword = f"%{q}%"
-            base_query = base_query.where((Notification.title.like(keyword)) | (Notification.content.like(keyword)))
+            base_query = base_query.where(
+                (Notification.title.like(keyword)) | (Notification.content.like(keyword))
+            )
 
         total_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
         total = int(total_result.scalar() or 0)
 
         unread_result = await db.execute(
             select(func.count(Notification.id)).where(
-                Notification.user_id == current_user.id,
-                Notification.is_read.is_(False)
+                Notification.user_id == current_user.id, Notification.is_read.is_(False)
             )
         )
         unread_count = int(unread_result.scalar() or 0)
 
-        result = await db.execute(base_query.order_by(desc(Notification.created_at)).offset(skip).limit(limit))
+        result = await db.execute(
+            base_query.order_by(desc(Notification.created_at)).offset(skip).limit(limit)
+        )
         notifications = result.scalars().all()
 
         return {
@@ -186,9 +197,14 @@ async def get_notifications(
             exc,
         )
         # Fallback for legacy DB without target_route/target_id columns
-        base_query = select(Notification.id, Notification.title, Notification.content,
-                            Notification.type, Notification.is_read, Notification.created_at
-                            ).where(Notification.user_id == current_user.id)
+        base_query = select(
+            Notification.id,
+            Notification.title,
+            Notification.content,
+            Notification.type,
+            Notification.is_read,
+            Notification.created_at,
+        ).where(Notification.user_id == current_user.id)
         if unread_only:
             base_query = base_query.where(Notification.is_read.is_(False))
         if type:
@@ -200,50 +216,66 @@ async def get_notifications(
             )
         count_query = select(func.count()).select_from(base_query.subquery())
         total = int((await db.execute(count_query)).scalar() or 0)
-        unread_count = int((await db.execute(
-            select(func.count(Notification.id)).where(
-                Notification.user_id == current_user.id, Notification.is_read.is_(False)
+        unread_count = int(
+            (
+                await db.execute(
+                    select(func.count(Notification.id)).where(
+                        Notification.user_id == current_user.id, Notification.is_read.is_(False)
+                    )
+                )
+            ).scalar()
+            or 0
+        )
+        rows = (
+            await db.execute(
+                base_query.order_by(desc(Notification.created_at)).offset(skip).limit(limit)
             )
-        )).scalar() or 0)
-        rows = (await db.execute(
-            base_query.order_by(desc(Notification.created_at)).offset(skip).limit(limit)
-        )).all()
-        items = [{
-            "id": int(r[0]), "title": r[1], "content": r[2], "type": r[3],
-            "is_read": bool(r[4]), "target_route": None, "target_id": None,
-            "created_at": r[5],
-        } for r in rows]
+        ).all()
+        items = [
+            {
+                "id": int(r[0]),
+                "title": r[1],
+                "content": r[2],
+                "type": r[3],
+                "is_read": bool(r[4]),
+                "target_route": None,
+                "target_id": None,
+                "created_at": r[5],
+            }
+            for r in rows
+        ]
         return {
-            "items": items, "total": total, "unread_count": unread_count,
-            "skip": skip, "limit": limit,
+            "items": items,
+            "total": total,
+            "unread_count": unread_count,
+            "skip": skip,
+            "limit": limit,
         }
+
 
 @router.get("/unread-count", response_model=dict, summary="获取未读通知数量")
 async def get_unread_count(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """获取未读通知数量"""
     query = select(func.count(Notification.id)).where(
-        Notification.user_id == current_user.id,
-        Notification.is_read.is_(False)
+        Notification.user_id == current_user.id, Notification.is_read.is_(False)
     )
     result = await db.execute(query)
     count = result.scalar() or 0
     return {"count": count}
 
+
 @router.get("/summary", response_model=NotificationSummaryResponse, summary="通知摘要统计")
 async def get_notification_summary(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     total_result = await db.execute(
         select(func.count(Notification.id)).where(Notification.user_id == current_user.id)
     )
     unread_result = await db.execute(
         select(func.count(Notification.id)).where(
-            Notification.user_id == current_user.id,
-            Notification.is_read.is_(False)
+            Notification.user_id == current_user.id, Notification.is_read.is_(False)
         )
     )
     type_result = await db.execute(
@@ -260,18 +292,18 @@ async def get_notification_summary(
         "by_type": by_type,
     }
 
+
 @router.put("/{notification_id}/read", response_model=dict, summary="标记通知为已读")
 async def mark_as_read(
     notification_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """标记单条通知为已读"""
     # 验证通知是否存在且属于当前用户
     result = await db.execute(
         select(Notification).where(
-            Notification.id == notification_id,
-            Notification.user_id == current_user.id
+            Notification.id == notification_id, Notification.user_id == current_user.id
         )
     )
     notification = result.scalar_one_or_none()
@@ -281,42 +313,36 @@ async def mark_as_read(
 
     await db.execute(
         update(Notification)
-        .where(
-            Notification.id == notification_id,
-            Notification.user_id == current_user.id
-        )
+        .where(Notification.id == notification_id, Notification.user_id == current_user.id)
         .values(is_read=True)
     )
     await db.commit()
     return {"message": "标记成功"}
 
+
 @router.put("/read-all", response_model=dict, summary="全部标记为已读")
 async def mark_all_as_read(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """将所有未读通知标记为已读"""
     result = await db.execute(
         update(Notification)
-        .where(
-            Notification.user_id == current_user.id,
-            Notification.is_read.is_(False)
-        )
+        .where(Notification.user_id == current_user.id, Notification.is_read.is_(False))
         .values(is_read=True)
     )
     await db.commit()
     return {"message": "全部已读", "updated": int(result.rowcount or 0)}
 
+
 @router.delete("/{notification_id}", response_model=dict, summary="删除单条通知")
 async def delete_notification(
     notification_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
         delete(Notification).where(
-            Notification.id == notification_id,
-            Notification.user_id == current_user.id
+            Notification.id == notification_id, Notification.user_id == current_user.id
         )
     )
     if not result.rowcount:
@@ -324,11 +350,12 @@ async def delete_notification(
     await db.commit()
     return {"message": "删除成功"}
 
+
 @router.delete("/", response_model=dict, summary="批量删除通知")
 async def batch_delete_notifications(
     payload: NotificationBatchDeleteRequest = Body(...),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     ids = payload.ids
     if not ids:
@@ -336,12 +363,12 @@ async def batch_delete_notifications(
 
     result = await db.execute(
         delete(Notification).where(
-            Notification.user_id == current_user.id,
-            Notification.id.in_(ids)
+            Notification.user_id == current_user.id, Notification.id.in_(ids)
         )
     )
     await db.commit()
     return {"message": "批量删除成功", "deleted": int(result.rowcount or 0)}
+
 
 # --- Internal Helpers ---
 # create_notification 已下沉到 app/services/notification_service.py（agent 运行侧

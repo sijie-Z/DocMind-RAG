@@ -86,19 +86,21 @@ def build_sources_list(context_results: list[dict]) -> list[dict]:
     sources = []
     for idx, r in enumerate(context_results, 1):
         relevance = r.get("relevance_score")
-        sources.append({
-            "filename": r.get("filename", "未知文档"),
-            "relevanceScore": float(relevance) if relevance is not None else None,
-            "rankScore": r.get("rank_score", r.get("score")),
-            "rank": idx,
-            "content": r.get("snippet") or (r.get("text", "")[:240]),
-            "documentId": r.get("document_id"),
-            "hasKeyword": r.get("has_keyword", False),
-            "hasVector": r.get("has_vector", False),
-            "rewriteHits": r.get("rewrite_hits", 1),
-            "freshFactor": r.get("fresh_factor", 1.0),
-            "pageNumber": r.get("page_number"),
-        })
+        sources.append(
+            {
+                "filename": r.get("filename", "未知文档"),
+                "relevanceScore": float(relevance) if relevance is not None else None,
+                "rankScore": r.get("rank_score", r.get("score")),
+                "rank": idx,
+                "content": r.get("snippet") or (r.get("text", "")[:240]),
+                "documentId": r.get("document_id"),
+                "hasKeyword": r.get("has_keyword", False),
+                "hasVector": r.get("has_vector", False),
+                "rewriteHits": r.get("rewrite_hits", 1),
+                "freshFactor": r.get("fresh_factor", 1.0),
+                "pageNumber": r.get("page_number"),
+            }
+        )
     return sources
 
 
@@ -114,33 +116,36 @@ async def get_or_create_session(
 
     if not conversation_id:
         new_session = ChatSession(
-            id=str(uuid.uuid4()), user_id=user_id, title=title[:20],
-            status=ChatSessionStatus.ACTIVE, organization_id=organization_id,
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            title=title[:20],
+            status=ChatSessionStatus.ACTIVE,
+            organization_id=organization_id,
         )
         session.add(new_session)
         await session.flush()
         return new_session.id, bound_doc_ids
 
     existing = (
-        await session.execute(
-            select(ChatSession).where(ChatSession.id == conversation_id)
-        )
+        await session.execute(select(ChatSession).where(ChatSession.id == conversation_id))
     ).scalar_one_or_none()
 
     if not existing:
-        session.add(ChatSession(
-            id=conversation_id, user_id=user_id, title=title[:20],
-            status=ChatSessionStatus.ACTIVE, organization_id=organization_id,
-        ))
+        session.add(
+            ChatSession(
+                id=conversation_id,
+                user_id=user_id,
+                title=title[:20],
+                status=ChatSessionStatus.ACTIVE,
+                organization_id=organization_id,
+            )
+        )
     else:
         if existing.user_id != user_id:
             raise AuthorizationError("无权访问该会话")
         # T4：按 id 复用会话必须与本次运行组织一致——多组织用户切到 B 组织后
         # 不得把消息写进 A 组织的会话行；历史 NULL 组织会话仍可复用（属本人）。
-        if (
-            existing.organization_id is not None
-            and existing.organization_id != organization_id
-        ):
+        if existing.organization_id is not None and existing.organization_id != organization_id:
             raise AuthorizationError("无权访问该会话")
         settings_json = existing.settings or {}
         if isinstance(settings_json, dict):
@@ -159,9 +164,7 @@ async def bind_docs_to_session(
     自行完成归属校验（T4）。
     """
     conv = (
-        await session.execute(
-            select(ChatSession).where(ChatSession.id == conversation_id)
-        )
+        await session.execute(select(ChatSession).where(ChatSession.id == conversation_id))
     ).scalar_one_or_none()
     if conv:
         existing = conv.settings or {}
@@ -260,11 +263,13 @@ async def run_rag_pipeline(
     # 组织操作：不检索任何组织、不读写任何（含 org 1 的）缓存命名空间、不落任何
     # 组织归属为空的会话与消息。无组织用户的休闲对话仍可走 agent 模式（#257 语义）。
     if search_org_id is None:
-        _emit(RAGEvent(
-            type="error",
-            content="当前用户未加入任何组织，无法进行知识库问答；请先加入组织后重试",
-            conversation_id=conversation_id or "",
-        ))
+        _emit(
+            RAGEvent(
+                type="error",
+                content="当前用户未加入任何组织，无法进行知识库问答；请先加入组织后重试",
+                conversation_id=conversation_id or "",
+            )
+        )
         return
 
     # LLM 配置预检（必须先于会话/消息落库、语义缓存读写、检索与记忆）：
@@ -273,35 +278,43 @@ async def run_rag_pipeline(
     # 「LLM未配置」ASSISTANT 消息双双落库、还写入长期记忆；语义缓存命中
     # 路径同样会把缓存答案当作正常回答落库。
     if rag_service.openai_client is None:
-        _emit(RAGEvent(
-            type="error",
-            content=LLM_NOT_CONFIGURED_MESSAGE,
-            conversation_id=conversation_id or "",
-        ))
+        _emit(
+            RAGEvent(
+                type="error",
+                content=LLM_NOT_CONFIGURED_MESSAGE,
+                conversation_id=conversation_id or "",
+            )
+        )
         return
 
     # B4（D5）：组织级运行设定一次性解析（检索 top_k / 隐私策略 / 默认模型）。
     # 未设置覆盖时各字段回退既有默认：聊天检索 8（文档绑定）/ 5（通用）、
     # 隐私开关保持请求值、模型沿用进程级 Settings——不改变既有默认语义。
-    org_policy = await organization_settings_service.get_runtime_policy(
-        session, search_org_id
-    )
+    org_policy = await organization_settings_service.get_runtime_policy(session, search_org_id)
     # 组织策略禁用隐私模式时，客户端 UI 已置灰；服务端仍强制关闭（纵深防御），
     # 不信任客户端可伪造的 privacyMode=true。
     privacy_mode = privacy_mode and org_policy.allow_privacy_mode
 
     conversation_id, bound_doc_ids = await get_or_create_session(
-        session, conversation_id, user_id, user_content, organization_id,
+        session,
+        conversation_id,
+        user_id,
+        user_content,
+        organization_id,
     )
 
     history_msgs = (
-        await session.execute(
-            select(ChatMessage)
-            .where(ChatMessage.session_id == conversation_id)
-            .order_by(ChatMessage.created_at.desc())
-            .limit(10)
+        (
+            await session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == conversation_id)
+                .order_by(ChatMessage.created_at.desc())
+                .limit(10)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     chat_history = [
         {
             "role": "user" if h.message_type == MessageType.USER else "assistant",
@@ -337,34 +350,46 @@ async def run_rag_pipeline(
         if query_vector:
             cache_meta: dict = {}
             cached_res = await _semantic_cache.get(
-                query_vector, search_org_id, query=user_content, hit_info=cache_meta,
+                query_vector,
+                search_org_id,
+                query=user_content,
+                hit_info=cache_meta,
             )
             if cached_res:
                 full_response = cached_res.get("answer", "")
                 sources_list = cached_res.get("sources", [])
                 ai_msg_id = str(uuid.uuid4())
 
-                _emit(RAGEvent(
-                    type="message", content=full_response,
-                    conversation_id=conversation_id, message_id=ai_msg_id,
-                    sources=sources_list, is_cached=True,
-                ))
+                _emit(
+                    RAGEvent(
+                        type="message",
+                        content=full_response,
+                        conversation_id=conversation_id,
+                        message_id=ai_msg_id,
+                        sources=sources_list,
+                        is_cached=True,
+                    )
+                )
                 if debug:
                     # issue #195：命中必须可证伪——cache_type/相似度/键摘要/缓存原文。
-                    _emit(RAGEvent(
-                        type="debug",
-                        debug_data={
-                            "cache_hit": True,
-                            "cache_type": "semantic",
-                            "cache": cache_meta,
-                            "is_cached": True,
-                        },
-                        conversation_id=conversation_id or "",
-                    ))
+                    _emit(
+                        RAGEvent(
+                            type="debug",
+                            debug_data={
+                                "cache_hit": True,
+                                "cache_type": "semantic",
+                                "cache": cache_meta,
+                                "is_cached": True,
+                            },
+                            conversation_id=conversation_id or "",
+                        )
+                    )
 
                 ai_msg = ChatMessage(
-                    id=ai_msg_id, session_id=conversation_id,
-                    content=full_response, message_type=MessageType.ASSISTANT,
+                    id=ai_msg_id,
+                    session_id=conversation_id,
+                    content=full_response,
+                    message_type=MessageType.ASSISTANT,
                     meta_data=json.dumps(
                         {"sources": sources_list, "is_cached": True},
                         ensure_ascii=False,
@@ -385,10 +410,11 @@ async def run_rag_pipeline(
     if active_doc_ids:
         try:
             context_results, debug_info = await rag_service.search_knowledge_base(
-                user_content, search_org_id,
-                org_policy.retrieval_top_k
-                if org_policy.retrieval_top_k is not None else 8,
-                document_ids=active_doc_ids, debug=debug,
+                user_content,
+                search_org_id,
+                org_policy.retrieval_top_k if org_policy.retrieval_top_k is not None else 8,
+                document_ids=active_doc_ids,
+                debug=debug,
             )
             if file_ids:
                 await bind_docs_to_session(session, conversation_id, active_doc_ids)
@@ -397,9 +423,9 @@ async def run_rag_pipeline(
     elif not strict_mode:
         try:
             context_results, debug_info = await rag_service.search_knowledge_base(
-                user_content, search_org_id,
-                org_policy.retrieval_top_k
-                if org_policy.retrieval_top_k is not None else 5,
+                user_content,
+                search_org_id,
+                org_policy.retrieval_top_k if org_policy.retrieval_top_k is not None else 5,
                 debug=debug,
             )
         except RetrievalUnavailableError as e:
@@ -410,32 +436,41 @@ async def run_rag_pipeline(
         RAG_RETRIEVAL_UNAVAILABLE.labels(state=retrieval_unavailable.kind).inc()
         logger.warning(
             "RAG retrieval unavailable (kind=%s, org=%s): %s",
-            retrieval_unavailable.kind, search_org_id, retrieval_unavailable,
+            retrieval_unavailable.kind,
+            search_org_id,
+            retrieval_unavailable,
         )
         if strict_mode:
             # 严格模式承诺「只根据文档作答」，检索不可用即无法兑现——如实拒答
             # （与 issue #268 的无组织拒绝同一显式风格），不伪装成「文档里没有」。
-            _emit(RAGEvent(
-                type="error",
-                content="知识库检索服务暂不可用（故障/超时），严格模式无法在没有文档依据的情况下作答；请稍后重试",
-                conversation_id=conversation_id or "",
-            ))
+            _emit(
+                RAGEvent(
+                    type="error",
+                    content="知识库检索服务暂不可用（故障/超时），严格模式无法在没有文档依据的情况下作答；请稍后重试",
+                    conversation_id=conversation_id or "",
+                )
+            )
             return
 
     if debug and debug_info:
         final_context_items = []
         for i, item in enumerate(context_results[:5], 1):
-            final_context_items.append({
-                "rank": i,
-                "filename": item.get("filename", "未知"),
-                "score": item.get("score", 0),
-                "content": (item.get("snippet") or item.get("text", ""))[:300],
-            })
+            final_context_items.append(
+                {
+                    "rank": i,
+                    "filename": item.get("filename", "未知"),
+                    "score": item.get("score", 0),
+                    "content": (item.get("snippet") or item.get("text", ""))[:300],
+                }
+            )
         debug_info["final_context"] = final_context_items
-        _emit(RAGEvent(
-            type="debug", debug_data=debug_info,
-            conversation_id=conversation_id,
-        ))
+        _emit(
+            RAGEvent(
+                type="debug",
+                debug_data=debug_info,
+                conversation_id=conversation_id,
+            )
+        )
 
     sources_list = build_sources_list(context_results)
     if retrieval_unavailable is None:
@@ -469,34 +504,47 @@ async def run_rag_pipeline(
     full_response = ""
     ai_msg_id = str(uuid.uuid4())
 
-    _emit(RAGEvent(
-        type="chunk", content="",
-        conversation_id=conversation_id, message_id=ai_msg_id,
-        sources=sources_list,
-    ))
+    _emit(
+        RAGEvent(
+            type="chunk",
+            content="",
+            conversation_id=conversation_id,
+            message_id=ai_msg_id,
+            sources=sources_list,
+        )
+    )
 
     # 安全加固：接收 PII 掩码的 context/query 占位符映射，流结束后还原"引用型"占位符
     mask_mapping: dict = {}
     try:
         async for chunk in rag_service.chat_stream(
-            user_content, context_results, chat_history,
+            user_content,
+            context_results,
+            chat_history,
             system_prompt_override=system_prompt_override,
             enable_masking=privacy_mode,
             mask_mapping_sink=mask_mapping,
             model_override=org_policy.default_model,
         ):
             full_response += chunk
-            _emit(RAGEvent(
-                type="chunk", content=chunk,
-                conversation_id=conversation_id, message_id=ai_msg_id,
-            ))
+            _emit(
+                RAGEvent(
+                    type="chunk",
+                    content=chunk,
+                    conversation_id=conversation_id,
+                    message_id=ai_msg_id,
+                )
+            )
     except LLMNotConfiguredError:
         # 竞态兜底：入口预检后客户端消失（如配置热更新失败）同样走错误通道，
         # 绝不把配置诊断当回答落库/写记忆。
-        _emit(RAGEvent(
-            type="error", content=LLM_NOT_CONFIGURED_MESSAGE,
-            conversation_id=conversation_id,
-        ))
+        _emit(
+            RAGEvent(
+                type="error",
+                content=LLM_NOT_CONFIGURED_MESSAGE,
+                conversation_id=conversation_id,
+            )
+        )
         return
 
     # 还原引用型占位符（LLM 引用的 [PHONE_3] 等来自检索上下文/用户提问的真实信息）；
@@ -504,26 +552,34 @@ async def run_rag_pipeline(
     if mask_mapping:
         try:
             from app.services.masking_service import masking_service
+
             full_response = masking_service.unmask_text(full_response, mask_mapping)
         except Exception as e:
             logger.warning(f"PII unmask failed (non-fatal): {e}")
 
     cited_indices = set(int(m) for m in re.findall(r"\[(\d+)\]", full_response))
-    cited_sources = [
-        {**src, "cited": True}
-        for i, src in enumerate(sources_list, 1)
-        if i in cited_indices
-    ] if cited_indices else sources_list[:3]
+    cited_sources = (
+        [{**src, "cited": True} for i, src in enumerate(sources_list, 1) if i in cited_indices]
+        if cited_indices
+        else sources_list[:3]
+    )
 
-    _emit(RAGEvent(
-        type="message", content=full_response,
-        conversation_id=conversation_id, message_id=ai_msg_id,
-        sources=cited_sources, is_cached=False,
-    ))
+    _emit(
+        RAGEvent(
+            type="message",
+            content=full_response,
+            conversation_id=conversation_id,
+            message_id=ai_msg_id,
+            sources=cited_sources,
+            is_cached=False,
+        )
+    )
 
     ai_msg = ChatMessage(
-        id=ai_msg_id, session_id=conversation_id,
-        content=full_response, message_type=MessageType.ASSISTANT,
+        id=ai_msg_id,
+        session_id=conversation_id,
+        content=full_response,
+        message_type=MessageType.ASSISTANT,
         meta_data=json.dumps(
             {"sources": cited_sources, "citations_used": sorted(cited_indices)},
             ensure_ascii=False,
@@ -536,6 +592,7 @@ async def run_rag_pipeline(
         token_usage = rag_service.get_last_token_usage()
         if token_usage and token_usage[0] > 0:
             from app.api.v1.endpoints.token_usage import record_token_usage
+
             # B4（D5）：用量记录与真实调用模型一致（组织默认模型或平台默认）。
             model = org_policy.default_model
             await record_token_usage(
@@ -543,21 +600,25 @@ async def run_rag_pipeline(
                 user_id=user_id,
                 organization_id=organization_id,
                 model=model,
-                source='rag_chat',
+                source="rag_chat",
                 input_tokens=token_usage[0],
                 output_tokens=token_usage[1],
             )
     except Exception as e:
-        logger.warning(f'Token usage recording failed (non-fatal): {e}')
+        logger.warning(f"Token usage recording failed (non-fatal): {e}")
 
     if (
-        not active_doc_ids and not strict_mode
+        not active_doc_ids
+        and not strict_mode
         and query_vector is not None
-        and retrieval_unavailable is None  # issue #292：故障态答案绝不写问答缓存（否则故障形态被固化 3600s）
+        and retrieval_unavailable
+        is None  # issue #292：故障态答案绝不写问答缓存（否则故障形态被固化 3600s）
     ):
         await _semantic_cache.set(
-            query=user_content, embedding=query_vector,
-            answer=full_response, sources=sources_list,
+            query=user_content,
+            embedding=query_vector,
+            answer=full_response,
+            sources=sources_list,
             organization_id=search_org_id,
         )
 

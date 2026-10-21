@@ -10,6 +10,7 @@
 
 tag 为 "skill"：主代理可见；子代理（search/analysis 工具集）看不到 ✓。
 """
+
 import logging
 
 from app.agent.curated_skills import curated_skill_registry

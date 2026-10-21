@@ -292,9 +292,7 @@ class SchedulerEngine:
                     # 被停用/删除的竞态由这里兜住，绝不以其身份自动执行。
                     # 手动 run-now（reason="manual"）是显式授权动作，不受此限。
                     creator_active = (
-                        await db.execute(
-                            select(User.is_active).where(User.id == task.created_by)
-                        )
+                        await db.execute(select(User.is_active).where(User.id == task.created_by))
                     ).scalar_one_or_none()
                     if creator_active is not True:
                         return {"triggered": False, "reason": "creator_inactive"}
@@ -331,9 +329,7 @@ class SchedulerEngine:
                 self._in_flight[task_id] = run_task
                 run_task.add_done_callback(
                     lambda t, tid=task_id: (
-                        self._in_flight.pop(tid, None)
-                        if self._in_flight.get(tid) is t
-                        else None
+                        self._in_flight.pop(tid, None) if self._in_flight.get(tid) is t else None
                     )
                 )
                 return {"triggered": True, "reason": reason}
@@ -384,9 +380,7 @@ class SchedulerEngine:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning(
-                    f"定时任务 {request.id} 完成通知发送失败（任务状态不受影响）: {exc}"
-                )
+                logger.warning(f"定时任务 {request.id} 完成通知发送失败（任务状态不受影响）: {exc}")
         except asyncio.CancelledError:
             raise
         except Exception:

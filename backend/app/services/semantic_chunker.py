@@ -1,4 +1,5 @@
 """语义分块器：使用 Embedding 相似度在语义断点处切分文本，融合条款感知切分策略。"""
+
 import logging
 import re
 
@@ -11,27 +12,27 @@ logger = logging.getLogger(__name__)
 
 # ── 中文政策/法规/制度文档的常见条款标记 ──────────────────────────
 CLAUSE_PATTERNS: list[re.Pattern] = [
-    re.compile(r'^第[一二三四五六七八九十百\d]+[条章节款]'),   # 第一条 / 第二章 / 第三节 / 第X款
-    re.compile(r'^[一二三四五六七八九十百]+[、．\.]'),          # 一、 / 二． / 三、
-    re.compile(r'^\（[一二三四五六七八九十百]+\）'),            # （一）（二）
-    re.compile(r'^\([一二三四五六七八九十百]+\)'),              # (一)(二)
-    re.compile(r'^\d+[、．\.]'),                                # 1. 2、 3．
-    re.compile(r'^\(\d+\)'),                                    # (1) (2)
-    re.compile(r'^【.*?】'),                                    # 【通知】【办法】
-    re.compile(r'^[A-Z]\.'),                                    # A. B.
+    re.compile(r"^第[一二三四五六七八九十百\d]+[条章节款]"),  # 第一条 / 第二章 / 第三节 / 第X款
+    re.compile(r"^[一二三四五六七八九十百]+[、．\.]"),  # 一、 / 二． / 三、
+    re.compile(r"^\（[一二三四五六七八九十百]+\）"),  # （一）（二）
+    re.compile(r"^\([一二三四五六七八九十百]+\)"),  # (一)(二)
+    re.compile(r"^\d+[、．\.]"),  # 1. 2、 3．
+    re.compile(r"^\(\d+\)"),  # (1) (2)
+    re.compile(r"^【.*?】"),  # 【通知】【办法】
+    re.compile(r"^[A-Z]\."),  # A. B.
 ]
 
 # 段落分隔符（按优先级）
-PARAGRAPH_SEPARATORS = ['\n\n\n', '\n\n', '\r\n\r\n']
-SENTENCE_SEPARATORS = ['。', '！', '？', '；', '\n']
+PARAGRAPH_SEPARATORS = ["\n\n\n", "\n\n", "\r\n\r\n"]
+SENTENCE_SEPARATORS = ["。", "！", "？", "；", "\n"]
 
 # #191：标题硬上限与「正文开始」判据（句读/换行即视为正文开始）
 MAX_SECTION_TITLE_CHARS = 50
-_TITLE_TERMINATORS_RE = re.compile(r'[。！？；\n]')
+_TITLE_TERMINATORS_RE = re.compile(r"[。！？；\n]")
 # 句读后的条款边界只认「第X条/章/节/款」族（CLAUSE_PATTERNS[0]）——
 # 句中的「一、」「1.」列表项不再误开分区。且必须呈**标题形态**（标记后为
 # 空白/分隔符/行尾），引用句（如「第7条另有规定的除外」）不开分区。
-_SENTENCE_END_RE = re.compile(r'[。！？；]')
+_SENTENCE_END_RE = re.compile(r"[。！？；]")
 _CLAUSE_HEADING_FOLLOW_CHARS = " \t、：:.．）)】。！？；\n"
 
 
@@ -43,10 +44,10 @@ def _is_clause_heading_at(text: str, pos: int) -> bool:
     后者若也开分区，该引用句会成为 chunk 首行，被索引侧「行首定义位」计成
     定义了第 7 条（精确腿误召回的来源）。只接受标记后有空白/分隔符/行尾的形态。
     """
-    m = CLAUSE_PATTERNS[0].match(text[pos:pos + 80])
+    m = CLAUSE_PATTERNS[0].match(text[pos : pos + 80])
     if not m:
         return False
-    rest = text[pos + m.end():pos + 80]
+    rest = text[pos + m.end() : pos + 80]
     return (not rest) or rest[0] in _CLAUSE_HEADING_FOLLOW_CHARS
 
 
@@ -73,10 +74,10 @@ def detect_section_title(line: str) -> str | None:
     if not stripped or not _match_clause_marker(stripped):
         return None
     terminator = _TITLE_TERMINATORS_RE.search(stripped)
-    title = (stripped[:terminator.start()] if terminator else stripped).strip()
+    title = (stripped[: terminator.start()] if terminator else stripped).strip()
     if len(title) > MAX_SECTION_TITLE_CHARS:
         window = title[:MAX_SECTION_TITLE_CHARS]
-        space = window.rfind(' ')
+        space = window.rfind(" ")
         title = (window[:space] if space > 0 else window).strip()
     return title or None
 
@@ -102,7 +103,7 @@ def smart_truncate(text: str, max_length: int) -> str:
             candidates.append((pos + len(sep), 2))
 
     # 优先级 3: 空格
-    pos = truncated.rfind(' ')
+    pos = truncated.rfind(" ")
     if pos > max_length * 0.7:
         candidates.append((pos + 1, 3))
 
@@ -128,7 +129,7 @@ def _find_split_point(text: str, max_length: int) -> int:
         pos = window.rfind(sep)
         if pos > max_length * 0.5:
             return pos + len(sep)
-    pos = window.rfind(' ')
+    pos = window.rfind(" ")
     if pos > max_length * 0.7:
         return pos + 1
     return max_length
@@ -226,7 +227,9 @@ class SemanticChunker:
     - 语义切分：在条款内使用 Embedding 余弦距离检测语义断点
     """
 
-    def __init__(self, buffer_size: int = 1, threshold_percentile: float = 0.9, chunk_max_chars: int = 1200):
+    def __init__(
+        self, buffer_size: int = 1, threshold_percentile: float = 0.9, chunk_max_chars: int = 1200
+    ):
         self.buffer_size = buffer_size
         self.threshold_percentile = threshold_percentile
         self.chunk_max_chars = chunk_max_chars
@@ -256,15 +259,17 @@ class SemanticChunker:
             title = detect_section_title(text.strip()[:80]) if text else None
             lead = len(text) - len(text.lstrip())
             return self._assign_page_numbers(
-                [{
-                    "text": text,
-                    "metadata": {
-                        "index": 0,
-                        "section_title": title,
-                        "start_pos": lead,
-                        "end_pos": len(text.rstrip()),
-                    },
-                }],
+                [
+                    {
+                        "text": text,
+                        "metadata": {
+                            "index": 0,
+                            "section_title": title,
+                            "start_pos": lead,
+                            "end_pos": len(text.rstrip()),
+                        },
+                    }
+                ],
                 page_ranges,
             )
 
@@ -277,7 +282,7 @@ class SemanticChunker:
             sorted_bounds.insert(0, 0)
         for idx, start in enumerate(sorted_bounds):
             end = sorted_bounds[idx + 1] if idx + 1 < len(sorted_bounds) else len(text)
-            line = text[start:start + 80]
+            line = text[start : start + 80]
             title = detect_section_title(line)
             partitions.append((start, end, title))
 
@@ -294,9 +299,7 @@ class SemanticChunker:
                 continue
             # #197：strip 会挪动起点，基偏移必须补上前导空白，否则 span 错位
             lead = len(raw_partition) - len(raw_partition.lstrip())
-            sub_chunks = await self._semantic_split(
-                partition_text, base_offset=start + lead
-            )
+            sub_chunks = await self._semantic_split(partition_text, base_offset=start + lead)
             for ch in sub_chunks:
                 ch["metadata"]["section_title"] = section_title
                 ch["metadata"]["index"] = global_idx
@@ -319,8 +322,8 @@ class SemanticChunker:
         """
         spans: list[tuple[str, int, int]] = []
         cursor = 0
-        for match in re.finditer(r'[。！？；\?！\n]', text):
-            raw = text[cursor:match.end()]
+        for match in re.finditer(r"[。！？；\?！\n]", text):
+            raw = text[cursor : match.end()]
             sentence = raw.strip()
             if sentence:
                 lead = len(raw) - len(raw.lstrip())
@@ -348,7 +351,7 @@ class SemanticChunker:
         区间为空（provider 返回的向量数多于窗口数时，split index 可能越界）
         返回 None——与旧实现「切片为空串 → 跳过」等价，不得抛 IndexError。
         """
-        parts = sentences[first:last + 1]
+        parts = sentences[first : last + 1]
         if not parts:
             return None
         segments: list[tuple[int, int, int, int]] = []
@@ -383,13 +386,15 @@ class SemanticChunker:
         sentences = self._sentence_spans(text)
 
         if len(sentences) < 5:
-            return [{
-                "text": text,
-                "metadata": {
-                    "start_pos": base_offset,
-                    "end_pos": base_offset + len(text),
-                },
-            }]
+            return [
+                {
+                    "text": text,
+                    "metadata": {
+                        "start_pos": base_offset,
+                        "end_pos": base_offset + len(text),
+                    },
+                }
+            ]
 
         # 2. 构造滑动窗口
         combined_sentences = []
@@ -413,43 +418,51 @@ class SemanticChunker:
             right = right_raw.lstrip()
             out = []
             if left:
-                out.append({
-                    "text": left,
-                    "metadata": {
-                        "start_pos": base_offset,
-                        "end_pos": base_offset + len(left),
-                    },
-                })
+                out.append(
+                    {
+                        "text": left,
+                        "metadata": {
+                            "start_pos": base_offset,
+                            "end_pos": base_offset + len(left),
+                        },
+                    }
+                )
             if right:
                 lead = len(right_raw) - len(right)
                 right_start = mid + lead
-                out.append({
-                    "text": right,
+                out.append(
+                    {
+                        "text": right,
+                        "metadata": {
+                            "start_pos": base_offset + right_start,
+                            "end_pos": base_offset + right_start + len(right),
+                        },
+                    }
+                )
+            return out or [
+                {
+                    "text": text,
                     "metadata": {
-                        "start_pos": base_offset + right_start,
-                        "end_pos": base_offset + right_start + len(right),
+                        "start_pos": base_offset,
+                        "end_pos": base_offset + len(text),
                     },
-                })
-            return out or [{
-                "text": text,
-                "metadata": {
-                    "start_pos": base_offset,
-                    "end_pos": base_offset + len(text),
-                },
-            }]
+                }
+            ]
 
         # 3. 获取 Embedding
         try:
             embeddings = await embedding_service.get_embeddings(combined_sentences)
         except Exception as e:
             logger.error(f"Semantic chunking embedding 获取失败: {e}")
-            return [{
-                "text": text,
-                "metadata": {
-                    "start_pos": base_offset,
-                    "end_pos": base_offset + len(text),
-                },
-            }]
+            return [
+                {
+                    "text": text,
+                    "metadata": {
+                        "start_pos": base_offset,
+                        "end_pos": base_offset + len(text),
+                    },
+                }
+            ]
 
         # 4. 计算相邻窗口余弦距离
         distances = []
@@ -460,13 +473,15 @@ class SemanticChunker:
             distances.append(1 - sim)
 
         if not distances:
-            return [{
-                "text": text,
-                "metadata": {
-                    "start_pos": base_offset,
-                    "end_pos": base_offset + len(text),
-                },
-            }]
+            return [
+                {
+                    "text": text,
+                    "metadata": {
+                        "start_pos": base_offset,
+                        "end_pos": base_offset + len(text),
+                    },
+                }
+            ]
 
         # 5. 找语义断点
         threshold = np.percentile(distances, self.threshold_percentile * 100)
@@ -484,18 +499,18 @@ class SemanticChunker:
                 start_idx = idx + 1
 
         if start_idx < len(sentences):
-            raw_chunks.append(
-                self._chunk_from_sentences(sentences, start_idx, len(sentences) - 1)
-            )
+            raw_chunks.append(self._chunk_from_sentences(sentences, start_idx, len(sentences) - 1))
 
         if not raw_chunks:
-            return [{
-                "text": text,
-                "metadata": {
-                    "start_pos": base_offset,
-                    "end_pos": base_offset + len(text),
-                },
-            }]
+            return [
+                {
+                    "text": text,
+                    "metadata": {
+                        "start_pos": base_offset,
+                        "end_pos": base_offset + len(text),
+                    },
+                }
+            ]
 
         # 7. 二次合并过小的块（段表随合并平移，保全偏移信息）
         merged_chunks: list[dict] = []
@@ -510,8 +525,7 @@ class SemanticChunker:
                 current["metadata"]["end_pos"] = ch["metadata"]["end_pos"]
                 current["metadata"]["_segments"].extend(
                     (c_start + offset, c_end + offset, s_start, s_end)
-                    for c_start, c_end, s_start, s_end
-                    in ch["metadata"]["_segments"]
+                    for c_start, c_end, s_start, s_end in ch["metadata"]["_segments"]
                 )
             else:
                 if current is not None:
@@ -525,13 +539,15 @@ class SemanticChunker:
         split_chunks: list[dict] = []
         for ch in merged_chunks:
             if len(ch["text"]) <= self.chunk_max_chars:
-                split_chunks.append({
-                    "text": ch["text"],
-                    "metadata": {
-                        "start_pos": base_offset + ch["metadata"]["start_pos"],
-                        "end_pos": base_offset + ch["metadata"]["end_pos"],
-                    },
-                })
+                split_chunks.append(
+                    {
+                        "text": ch["text"],
+                        "metadata": {
+                            "start_pos": base_offset + ch["metadata"]["start_pos"],
+                            "end_pos": base_offset + ch["metadata"]["end_pos"],
+                        },
+                    }
+                )
                 continue
             segments = ch["metadata"]["_segments"]
             for piece, piece_start, piece_end in _split_overlong_with_spans(
@@ -539,13 +555,15 @@ class SemanticChunker:
             ):
                 src_start = self._map_concat_offset(segments, piece_start)
                 src_end = self._map_concat_offset(segments, piece_end - 1) + 1
-                split_chunks.append({
-                    "text": piece,
-                    "metadata": {
-                        "start_pos": base_offset + src_start,
-                        "end_pos": base_offset + src_end,
-                    },
-                })
+                split_chunks.append(
+                    {
+                        "text": piece,
+                        "metadata": {
+                            "start_pos": base_offset + src_start,
+                            "end_pos": base_offset + src_end,
+                        },
+                    }
+                )
 
         return split_chunks
 
@@ -597,8 +615,8 @@ class SemanticChunker:
         for ch in chunks:
             metadata = ch.get("metadata", {}) or {}
             prev_meta = result[-1].get("metadata", {}) if result else {}
-            same_partition = (
-                bool(result) and prev_meta.get("_partition") == metadata.get("_partition")
+            same_partition = bool(result) and prev_meta.get("_partition") == metadata.get(
+                "_partition"
             )
             if result and len(ch["text"]) < 200 and same_partition:
                 result[-1]["text"] += ch["text"]

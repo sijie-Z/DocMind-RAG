@@ -79,21 +79,33 @@ async def _new_task(factory, query: str = "问题") -> str:
 
 async def _calls(factory, task_id: str) -> list[AgentToolCall]:
     async with factory() as db:
-        rows = (await db.execute(
-            select(AgentToolCall)
-            .where(AgentToolCall.task_id == task_id)
-            .order_by(AgentToolCall.source_event_seq)
-        )).scalars().all()
+        rows = (
+            (
+                await db.execute(
+                    select(AgentToolCall)
+                    .where(AgentToolCall.task_id == task_id)
+                    .order_by(AgentToolCall.source_event_seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
         return list(rows)
 
 
 async def _results(factory, task_id: str) -> list[AgentToolResult]:
     async with factory() as db:
-        rows = (await db.execute(
-            select(AgentToolResult)
-            .where(AgentToolResult.task_id == task_id)
-            .order_by(AgentToolResult.source_event_seq)
-        )).scalars().all()
+        rows = (
+            (
+                await db.execute(
+                    select(AgentToolResult)
+                    .where(AgentToolResult.task_id == task_id)
+                    .order_by(AgentToolResult.source_event_seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
         return list(rows)
 
 
@@ -103,13 +115,23 @@ async def _results(factory, task_id: str) -> list[AgentToolResult]:
 async def test_normal_path_registers_dispatches_and_records_pair(db_factory):
     task_id = await _new_task(db_factory)
 
-    assert await tool_ledger.register_calls(
-        task_id, [("call-1", "search_knowledge_base", {"query": "x"})],
-    ) == 1
+    assert (
+        await tool_ledger.register_calls(
+            task_id,
+            [("call-1", "search_knowledge_base", {"query": "x"})],
+        )
+        == 1
+    )
     assert await tool_ledger.mark_dispatched(task_id, "call-1") is True
-    assert await tool_ledger.record_result(
-        task_id, "call-1", success=True, result="命中文档 3 条",
-    ) is True
+    assert (
+        await tool_ledger.record_result(
+            task_id,
+            "call-1",
+            success=True,
+            result="命中文档 3 条",
+        )
+        is True
+    )
 
     calls = await _calls(db_factory, task_id)
     results = await _results(db_factory, task_id)
@@ -134,12 +156,21 @@ async def test_duplicate_result_blocked_idempotently(db_factory):
     task_id = await _new_task(db_factory)
     await tool_ledger.register_calls(task_id, [("call-1", "t", {})])
     await tool_ledger.mark_dispatched(task_id, "call-1")
-    assert await tool_ledger.record_result(
-        task_id, "call-1", success=True, result="第一次结果",
-    ) is True
+    assert (
+        await tool_ledger.record_result(
+            task_id,
+            "call-1",
+            success=True,
+            result="第一次结果",
+        )
+        is True
+    )
 
     dup = await tool_ledger.record_result(
-        task_id, "call-1", success=True, result="第二次结果",
+        task_id,
+        "call-1",
+        success=True,
+        result="第二次结果",
     )
     assert dup is False, "重复 result 必须被幂等拦截（不得二次落账）"
 
@@ -155,13 +186,21 @@ async def test_db_unique_constraints_guard_duplicate_rows(db_factory):
     await tool_ledger.record_result(task_id, "call-1", success=True, result="ok")
 
     async with db_factory() as db:
-        call = (await db.execute(
-            select(AgentToolCall).where(AgentToolCall.task_id == task_id)
-        )).scalars().first()
-        db.add(AgentToolResult(
-            task_id=task_id, call_id=call.call_id, tool_call_pk=call.id,
-            source_event_seq=999, status="success", result_summary="repeat",
-        ))
+        call = (
+            (await db.execute(select(AgentToolCall).where(AgentToolCall.task_id == task_id)))
+            .scalars()
+            .first()
+        )
+        db.add(
+            AgentToolResult(
+                task_id=task_id,
+                call_id=call.call_id,
+                tool_call_pk=call.id,
+                source_event_seq=999,
+                status="success",
+                result_summary="repeat",
+            )
+        )
         with pytest.raises(IntegrityError):
             await db.commit()
 
@@ -177,10 +216,16 @@ async def test_register_recovers_from_stale_seq_cache(db_factory):
     await tool_ledger.register_calls(task_id, [("call-1", "t", {})])  # seq=1
     async with db_factory() as db:
         for cid, seq in (("foreign-a", 2), ("foreign-b", 4)):
-            db.add(AgentToolCall(
-                task_id=task_id, call_id=cid, tool_name="t", arguments="{}",
-                source_event_seq=seq, status=tool_ledger.STATUS_REGISTERED,
-            ))
+            db.add(
+                AgentToolCall(
+                    task_id=task_id,
+                    call_id=cid,
+                    tool_name="t",
+                    arguments="{}",
+                    source_event_seq=seq,
+                    status=tool_ledger.STATUS_REGISTERED,
+                )
+            )
         await db.commit()
     tool_ledger._seq_counters[task_id] = 1  # 模拟跨进程过期缓存
 
@@ -202,23 +247,40 @@ async def test_record_result_recovers_from_stale_seq_cache(db_factory):
     async with db_factory() as db:
         # 模拟另一进程：call 表占 seq=2 与 4，result 表占 seq=2。
         for cid, seq in (("call-b", 2), ("call-c", 4)):
-            db.add(AgentToolCall(
-                task_id=task_id, call_id=cid, tool_name="t", arguments="{}",
-                source_event_seq=seq, status=tool_ledger.STATUS_COMPLETED,
-            ))
+            db.add(
+                AgentToolCall(
+                    task_id=task_id,
+                    call_id=cid,
+                    tool_name="t",
+                    arguments="{}",
+                    source_event_seq=seq,
+                    status=tool_ledger.STATUS_COMPLETED,
+                )
+            )
         await db.commit()
-        foreign = (await db.execute(
-            select(AgentToolCall).where(AgentToolCall.call_id == "call-b")
-        )).scalars().first()
-        db.add(AgentToolResult(
-            task_id=task_id, call_id="call-b", tool_call_pk=foreign.id,
-            source_event_seq=2, status="success", result_summary="other",
-        ))
+        foreign = (
+            (await db.execute(select(AgentToolCall).where(AgentToolCall.call_id == "call-b")))
+            .scalars()
+            .first()
+        )
+        db.add(
+            AgentToolResult(
+                task_id=task_id,
+                call_id="call-b",
+                tool_call_pk=foreign.id,
+                source_event_seq=2,
+                status="success",
+                result_summary="other",
+            )
+        )
         await db.commit()
     tool_ledger._seq_counters[task_id] = 1  # 模拟跨进程过期缓存
 
     recorded = await tool_ledger.record_result(
-        task_id, "call-a", success=True, result="真实结果",
+        task_id,
+        "call-a",
+        success=True,
+        result="真实结果",
     )
 
     assert recorded is True, "序号撞车不是重复 result，真实结果不得被丢弃"
@@ -271,9 +333,13 @@ async def test_interrupt_before_dispatch_marks_not_started(db_factory):
 
 async def test_cancel_marks_aborted_before_dispatch_and_outcome_unknown(db_factory):
     task_id = await _new_task(db_factory)
-    await tool_ledger.register_calls(task_id, [
-        ("call-a", "t", {}), ("call-b", "t", {}),
-    ])
+    await tool_ledger.register_calls(
+        task_id,
+        [
+            ("call-a", "t", {}),
+            ("call-b", "t", {}),
+        ],
+    )
     await tool_ledger.mark_dispatched(task_id, "call-a")
 
     await tool_ledger.synthesize_terminal(task_id, reason="cancel")
@@ -290,9 +356,13 @@ async def test_cancel_marks_aborted_before_dispatch_and_outcome_unknown(db_facto
 async def test_begin_resume_sweeps_previous_run_leftovers(db_factory):
     """resume 接线：恢复旧 run 前，未完成 call 必须补写合成终态。"""
     task_id = await _new_task(db_factory)
-    await tool_ledger.register_calls(task_id, [
-        ("lost", "slow_tool", {}), ("queued", "t", {}),
-    ])
+    await tool_ledger.register_calls(
+        task_id,
+        [
+            ("lost", "slow_tool", {}),
+            ("queued", "t", {}),
+        ],
+    )
     await tool_ledger.mark_dispatched(task_id, "lost")
 
     await checkpoint.begin_resume(task_id)
@@ -305,9 +375,13 @@ async def test_begin_resume_sweeps_previous_run_leftovers(db_factory):
 async def test_mark_terminal_cancelled_sweeps_with_cancel_semantics(db_factory):
     """取消接线：CANCELLED 终态落定时按取消语义补写合成终态。"""
     task_id = await _new_task(db_factory)
-    await tool_ledger.register_calls(task_id, [
-        ("running", "slow_tool", {}), ("pending", "t", {}),
-    ])
+    await tool_ledger.register_calls(
+        task_id,
+        [
+            ("running", "slow_tool", {}),
+            ("pending", "t", {}),
+        ],
+    )
     await tool_ledger.mark_dispatched(task_id, "running")
 
     assert await checkpoint.mark_terminal(task_id, TaskStatus.CANCELLED) is True
@@ -345,7 +419,10 @@ async def test_save_checkpoint_fails_open_on_broken_history(db_factory):
     """快照落盘遇到配对损坏的历史：fail-open（返回 False），绝不打断主流程。"""
     task_id = await _new_task(db_factory)
     ok = await checkpoint.save_checkpoint(
-        task_id=task_id, ctx=None, plan=None, trigger="test",
+        task_id=task_id,
+        ctx=None,
+        plan=None,
+        trigger="test",
         history=[
             {"role": "user", "content": "u"},
             {"role": "tool", "tool_call_id": "ghost", "content": "x"},
@@ -400,7 +477,11 @@ async def _run_step(executor):
     plan = Plan(id="p1", goal="g", steps=[step])
     events = []
     async for ev in executor._execute_step_once(
-        step=step, plan=plan, history=None, organization_id=2, user_id=0,
+        step=step,
+        plan=plan,
+        history=None,
+        organization_id=2,
+        user_id=0,
         enable_thinking=False,
     ):
         events.append(ev)
@@ -426,16 +507,24 @@ async def test_executor_persists_call_before_dispatch_and_result(db_factory):
     async def _execute(*args, **kwargs):
         # 工具真正开始执行时，账本行必须已经存在且为 DISPATCHED（先落库后执行）。
         async with db_factory() as db:
-            row = (await db.execute(
-                select(AgentToolCall)
-                .where(AgentToolCall.task_id == task_id)
-                .where(AgentToolCall.call_id == "tc-exec-1")
-            )).scalars().first()
+            row = (
+                (
+                    await db.execute(
+                        select(AgentToolCall)
+                        .where(AgentToolCall.task_id == task_id)
+                        .where(AgentToolCall.call_id == "tc-exec-1")
+                    )
+                )
+                .scalars()
+                .first()
+            )
             observed["status"] = row.status if row else None
         return _OkResult()
 
     with patch.object(
-        tool_registry, "execute_detailed", new=AsyncMock(side_effect=_execute),
+        tool_registry,
+        "execute_detailed",
+        new=AsyncMock(side_effect=_execute),
     ):
         events = await _run_step(executor)
 
@@ -489,7 +578,9 @@ def _pair(ids=("t1",)):
     assistant = {
         "role": "assistant",
         "content": "",
-        "tool_calls": [{"id": i, "type": "function", "function": {"name": "f", "arguments": "{}"}} for i in ids],
+        "tool_calls": [
+            {"id": i, "type": "function", "function": {"name": "f", "arguments": "{}"}} for i in ids
+        ],
     }
     results = [{"role": "tool", "tool_call_id": i, "content": "结果"} for i in ids]
     return [assistant] + results
@@ -565,7 +656,10 @@ def test_checkpoint_history_cap_keeps_pair_together():
     history += [{"role": "user", "content": f"v{i}"} for i in range(49)]
 
     envelope = checkpoint.build_envelope(
-        ctx=None, plan=None, trigger="test", history=history,
+        ctx=None,
+        plan=None,
+        trigger="test",
+        history=history,
     )
     frozen = envelope["history"]
     tool_pairs.validate_tool_pairs(frozen)

@@ -59,12 +59,14 @@ STEERING_HISTORY_CAP = 20
 
 class TaskNotSteerableError(ConflictError):
     """任务不在可接收转向的状态（仅 running / waiting_approval）。"""
+
     error_code = "TASK_NOT_STEERABLE"
     message = "任务当前状态不能接收运行中指导"
 
 
 class SteerBufferFullError(RateLimitError):
     """转向缓冲已满（等 agent 消费后再发；绝不静默丢弃/顶掉旧消息）。"""
+
     error_code = "STEER_BUFFER_FULL"
     message = "转向缓冲已满，请等待 agent 消费后再发送"
 

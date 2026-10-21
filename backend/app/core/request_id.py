@@ -106,9 +106,7 @@ class RequestIDMiddleware:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
                 # Only add if not already present
-                has_header = any(
-                    h[0].lower() == self._header_name_bytes for h in headers
-                )
+                has_header = any(h[0].lower() == self._header_name_bytes for h in headers)
                 if not has_header:
                     headers.append((self._header_name_bytes, request_id.encode("ascii")))
                 message["headers"] = headers

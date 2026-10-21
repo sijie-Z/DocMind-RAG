@@ -4,6 +4,7 @@
 - ENABLE_SCHEDULER=true（默认）→ 调度循环启动；
 - 默认值锚点（钉类默认，防运行时 monkeypatch 用例全绿但部署静默关闭）。
 """
+
 import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock

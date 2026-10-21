@@ -45,6 +45,7 @@
 - agent loop 还原 snippet 优先 → ``test_agent_loop_context_prefers_prompt_text``；
 - evaluator 还原 snippet 优先 → ``test_evaluator_context_prefers_prompt_text``。
 """
+
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -73,9 +74,7 @@ class _FakeCompletions:
         self.captured.append(kwargs)
 
         async def _stream():
-            yield SimpleNamespace(
-                choices=[SimpleNamespace(delta=SimpleNamespace(content="回答"))]
-            )
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="回答"))])
 
         return _stream()
 
@@ -85,9 +84,15 @@ class _FakeClient:
         self.chat = SimpleNamespace(completions=_FakeCompletions(captured))
 
 
-def _run_chat_stream(context: list[dict], *, monkeypatch, max_chars: int | None = None,
-                     enable_compression: bool = True, enable_masking: bool = False,
-                     mask_sink: dict | None = None) -> str:
+def _run_chat_stream(
+    context: list[dict],
+    *,
+    monkeypatch,
+    max_chars: int | None = None,
+    enable_compression: bool = True,
+    enable_masking: bool = False,
+    mask_sink: dict | None = None,
+) -> str:
     """跑一次 chat_stream，返回实际送给 LLM 的 user message 文本。"""
     if max_chars is not None:
         monkeypatch.setattr(settings, "RAG_PROMPT_TEXT_MAX_CHARS", max_chars, raising=False)
@@ -96,10 +101,16 @@ def _run_chat_stream(context: list[dict], *, monkeypatch, max_chars: int | None 
     import asyncio
 
     async def _consume():
-        return [chunk async for chunk in pipeline.chat_stream(
-            QUERY, context, enable_compression=enable_compression,
-            enable_masking=enable_masking, mask_mapping_sink=mask_sink,
-        )]
+        return [
+            chunk
+            async for chunk in pipeline.chat_stream(
+                QUERY,
+                context,
+                enable_compression=enable_compression,
+                enable_masking=enable_masking,
+                mask_mapping_sink=mask_sink,
+            )
+        ]
 
     asyncio.run(_consume())
     assert captured, "chat_stream 必须调用 LLM"
@@ -163,13 +174,15 @@ def test_get_prompt_text_single_source():
 def test_chat_stream_prompt_uses_prompt_text_not_snippet(monkeypatch):
     """snippet 非空不得短路全文：提示词必须包含 prompt_text 里的关键句。"""
     text = KEY + "。" + FILLER * 10
-    context = [{
-        "filename": "f.pdf",
-        "text": text,
-        "prompt_text": text,
-        "snippet": "SNIPPET-ONLY-MARKER",
-        "score": 0.9,
-    }]
+    context = [
+        {
+            "filename": "f.pdf",
+            "text": text,
+            "prompt_text": text,
+            "snippet": "SNIPPET-ONLY-MARKER",
+            "score": 0.9,
+        }
+    ]
 
     user_content = _run_chat_stream(context, monkeypatch=monkeypatch)
 
@@ -191,13 +204,15 @@ def test_prompt_cap_is_configurable_and_sentence_aware(monkeypatch):
     mid_marker = "中段唯一标记甲乙丙丁。"
     text = FILLER * 17 + mid_marker + FILLER * 93 + KEY  # KEY 位置 > 3000
     assert len(text) > 3000
-    context = [{
-        "filename": "f.pdf",
-        "text": text,
-        "prompt_text": text,
-        "snippet": "HEAD-ONLY-MARKER",
-        "score": 0.9,
-    }]
+    context = [
+        {
+            "filename": "f.pdf",
+            "text": text,
+            "prompt_text": text,
+            "snippet": "HEAD-ONLY-MARKER",
+            "score": 0.9,
+        }
+    ]
 
     user_content = _run_chat_stream(
         context, monkeypatch=monkeypatch, max_chars=200, enable_compression=False
@@ -249,17 +264,22 @@ def test_chat_stream_masks_prompt_text(monkeypatch, enable_compression):
     monkeypatch.setattr(settings, "ENABLE_PII_MASKING", True, raising=False)
     phone = "13812345678"
     text = f"审计日志的保留期限为五年。联系人手机号 {phone}。"
-    context = [{
-        "filename": "f.pdf",
-        "text": text,
-        "prompt_text": text,
-        "snippet": text,
-        "score": 0.9,
-    }]
+    context = [
+        {
+            "filename": "f.pdf",
+            "text": text,
+            "prompt_text": text,
+            "snippet": text,
+            "score": 0.9,
+        }
+    ]
     sink: dict = {}
 
     user_content = _run_chat_stream(
-        context, monkeypatch=monkeypatch, enable_masking=True, mask_sink=sink,
+        context,
+        monkeypatch=monkeypatch,
+        enable_masking=True,
+        mask_sink=sink,
         enable_compression=enable_compression,
     )
 
@@ -300,14 +320,16 @@ async def test_agent_tool_prefers_prompt_text():
     from app.agent.core_tools import search_knowledge_base
 
     full = FILLER * 20 + KEY
-    docs = [{
-        "score": 0.9,
-        "filename": "real.pdf",
-        "snippet": "SNIPPET-ONLY",
-        "text": full,
-        "prompt_text": full,
-        "document_id": "d1",
-    }]
+    docs = [
+        {
+            "score": 0.9,
+            "filename": "real.pdf",
+            "snippet": "SNIPPET-ONLY",
+            "text": full,
+            "prompt_text": full,
+            "document_id": "d1",
+        }
+    ]
     pipeline = MagicMock()
     pipeline.search_knowledge_base = AsyncMock(return_value=(docs, None))
 
@@ -327,12 +349,18 @@ def test_agent_loop_context_prefers_prompt_text():
     full = FILLER * 20 + KEY
     loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=1, user_id=0)
 
-    messages = loop._build_messages(QUERY, None, [{
-        "filename": "f.pdf",
-        "snippet": "SNIPPET-ONLY",
-        "text": full,
-        "prompt_text": full,
-    }])
+    messages = loop._build_messages(
+        QUERY,
+        None,
+        [
+            {
+                "filename": "f.pdf",
+                "snippet": "SNIPPET-ONLY",
+                "text": full,
+                "prompt_text": full,
+            }
+        ],
+    )
 
     system = messages[0]["content"]
     assert "五年" in system, "agent 初始上下文必须包含全文关键句"

@@ -138,9 +138,7 @@ async def test_mark_failed_writes_document_and_job_failed(monkeypatch):
 
     assert len(executed) == 2, "文档与 job 各一条条件 UPDATE"
     doc_stmt = executed[0].compile()
-    assert "documents.status !=" in str(doc_stmt), (
-        "FAILED 写入必须带 status != INDEXED 条件"
-    )
+    assert "documents.status !=" in str(doc_stmt), "FAILED 写入必须带 status != INDEXED 条件"
     assert DocumentStatus.FAILED in doc_stmt.params.values()
     assert DocumentStatus.INDEXED in doc_stmt.params.values()
     assert "boom" in doc_stmt.params.values()
@@ -198,14 +196,13 @@ async def test_mark_success_single_commit_covers_doc_and_job(monkeypatch):
     chunks = [{"chunk_text": "hello", "chunk_index": 0, "chunk_length": 5}]
     await DocumentProcessor()._mark_success("doc-1", chunks, job_id=7)
 
-    assert len(commits) == 1, (
-        "doc 与 job 终态必须在同一事务提交；拆成两次 commit 会留下中间态窗口"
-    )
+    assert len(commits) == 1, "doc 与 job 终态必须在同一事务提交；拆成两次 commit 会留下中间态窗口"
     assert job.status == KnowledgeJobStatus.SUCCESS
     assert job.finished_at is not None
 
 
 # ── 图片 OCR 链路（worker 级；仅引擎与边界服务用替身）────────────────
+
 
 def _make_image_doc(tmp_path, monkeypatch, engine_result):
     """搭好图片链路：本地 PNG + 引擎替身 + MinIO 下载替身。

@@ -83,8 +83,11 @@ class MetricsCollector:
         parts = path.split("/")
         out = []
         for part in parts:
-            if part.isdigit() or len(part) == 36 and part.count("-") == 4 and all(
-                c in "0123456789abcdefABCDEF-" for c in part
+            if (
+                part.isdigit()
+                or len(part) == 36
+                and part.count("-") == 4
+                and all(c in "0123456789abcdefABCDEF-" for c in part)
             ):
                 out.append("{id}")
             else:
@@ -136,14 +139,18 @@ class MetricsCollector:
         await self._persist_snapshot(stats)
 
     async def _get_stats_internal(self) -> dict[str, Any]:
-        avg_time = (self.total_response_time / self.request_count * 1000) if self.request_count > 0 else 0
+        avg_time = (
+            (self.total_response_time / self.request_count * 1000) if self.request_count > 0 else 0
+        )
         return {
             "request_count": self.request_count,
             "error_count": self.error_count,
             "response_time": round(avg_time, 2),
             "active_connections": self.active_connections,
             "slow_request_count": self.slow_request_count,
-            "error_rate_percent": round((self.error_count / self.request_count * 100), 2) if self.request_count > 0 else 0.0,
+            "error_rate_percent": round((self.error_count / self.request_count * 100), 2)
+            if self.request_count > 0
+            else 0.0,
             "p95_response_time_ms": round(_calc_percentile(list(self.duration_samples), 95), 2),
             "p99_response_time_ms": round(_calc_percentile(list(self.duration_samples), 99), 2),
         }
@@ -168,9 +175,7 @@ class MetricsCollector:
         if not redis_client:
             return
         try:
-            await redis_client.lpush(
-                "metrics:snapshots", json.dumps(stats, ensure_ascii=False)
-            )
+            await redis_client.lpush("metrics:snapshots", json.dumps(stats, ensure_ascii=False))
             await redis_client.ltrim(
                 "metrics:snapshots",
                 0,
@@ -275,13 +280,16 @@ class MetricsCollector:
             return
         try:
             async with self.lock:
-                payload = json.dumps({
-                    "request_count": self.request_count,
-                    "error_count": self.error_count,
-                    "slow_request_count": self.slow_request_count,
-                    "total_response_time": self.total_response_time,
-                    "status_counts": dict(self.status_counts),
-                }, ensure_ascii=False)
+                payload = json.dumps(
+                    {
+                        "request_count": self.request_count,
+                        "error_count": self.error_count,
+                        "slow_request_count": self.slow_request_count,
+                        "total_response_time": self.total_response_time,
+                        "status_counts": dict(self.status_counts),
+                    },
+                    ensure_ascii=False,
+                )
             await redis_client.setex(self._live_key, 3600, payload)
         except Exception as e:
             logger.warning(f"Metrics live persist failed: {e}")
@@ -325,6 +333,7 @@ class MetricsCollector:
                     self.status_counts.update(status_totals)
         except Exception as e:
             logger.warning(f"Metrics live load failed: {e}")
+
 
 # 全局单例
 metrics_collector = MetricsCollector()
@@ -377,8 +386,7 @@ class RateLimitASGIMiddleware:
 
     def _get_identifier(self, scope) -> str:
         headers = {
-            k.decode("latin-1").lower(): v.decode("latin-1")
-            for k, v in scope.get("headers", [])
+            k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])
         }
         forwarded = headers.get("x-forwarded-for", "")
         if forwarded:
@@ -447,4 +455,3 @@ class RateLimitASGIMiddleware:
             return
 
         await self.app(scope, receive, send)
-

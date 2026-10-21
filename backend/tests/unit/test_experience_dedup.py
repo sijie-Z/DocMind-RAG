@@ -48,10 +48,15 @@ def isolated_store(tmp_path, monkeypatch):
 def _success_plan():
     from app.agent.planner import Plan, PlanStep
 
-    return Plan(id="p1", goal="查询营收数据", steps=[
-        PlanStep(id="s1", description="检索", status="completed",
-                 tool_hint="search_knowledge_base"),
-    ])
+    return Plan(
+        id="p1",
+        goal="查询营收数据",
+        steps=[
+            PlanStep(
+                id="s1", description="检索", status="completed", tool_hint="search_knowledge_base"
+            ),
+        ],
+    )
 
 
 def _loop(enable_experience: bool):
@@ -69,14 +74,14 @@ class TestStoreContentDedup:
     async def test_same_content_different_id_added_once(self, isolated_store):
         store = isolated_store
         for _ in range(3):
-            await store.add(Experience(
-                scenario="tool_reliability",
-                symptom="api_connection_failure",
-                lesson="API 连接失败时，自动启用指数退避重试（最多 3 次），并降级到备用工具。",
-            ))
-        assert await store.count() == 1, (
-            "同一条经验抽三次应按内容去重为 1 条（随机 id 不构成身份）"
-        )
+            await store.add(
+                Experience(
+                    scenario="tool_reliability",
+                    symptom="api_connection_failure",
+                    lesson="API 连接失败时，自动启用指数退避重试（最多 3 次），并降级到备用工具。",
+                )
+            )
+        assert await store.count() == 1, "同一条经验抽三次应按内容去重为 1 条（随机 id 不构成身份）"
 
     @pytest.mark.asyncio
     async def test_whitespace_and_case_normalized(self, isolated_store):
@@ -98,14 +103,16 @@ class TestStoreContentDedup:
         exp = Experience(scenario="a", symptom="s", lesson="lesson", confidence=0.5)
         await store.add(exp)
         updated = Experience(
-            id=exp.id, scenario="a", symptom="s", lesson="lesson", confidence=0.9,
+            id=exp.id,
+            scenario="a",
+            symptom="s",
+            lesson="lesson",
+            confidence=0.9,
         )
         await store.add(updated)
         stored = await store.get(exp.id)
         assert stored is updated
-        assert await store.count() == 1, (
-            "同 id 的 add 必须保持原地更新语义（不被内容去重逻辑误伤）"
-        )
+        assert await store.count() == 1, "同 id 的 add 必须保持原地更新语义（不被内容去重逻辑误伤）"
 
 
 class TestWriteSideGate:
@@ -151,13 +158,20 @@ class TestWriteSideGate:
         # 成功腿（全 A）
         await loop._write_experiences(ctx, _success_plan(), {"grades": {"s1": ("A", "ok")}})
         # 失败腿（可识别错误模板）
-        failed_plan = Plan(id="p2", goal="查询营收数据", steps=[
-            PlanStep(id="s2", description="调用外部 API", status="failed",
-                     error_context="connection refused"),
-        ])
+        failed_plan = Plan(
+            id="p2",
+            goal="查询营收数据",
+            steps=[
+                PlanStep(
+                    id="s2",
+                    description="调用外部 API",
+                    status="failed",
+                    error_context="connection refused",
+                ),
+            ],
+        )
         await loop._write_experiences(ctx, failed_plan, None)
 
         assert await store.count() == 0, (
-            "enable_experience=False 时写侧必须整体关闭"
-            "（agent_api.py 显式关闭的路径不得写库）"
+            "enable_experience=False 时写侧必须整体关闭（agent_api.py 显式关闭的路径不得写库）"
         )

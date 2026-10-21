@@ -21,9 +21,7 @@ def _require_org(organization_id: int | None, method: str) -> int:
     默认值此前为 1：调用方漏传时会把读写静默落到 1 号组织，构成跨租户读写。
     """
     if organization_id is None:
-        raise ValueError(
-            f"GraphRAGService.{method} 缺少 organization_id，拒绝跨租户访问"
-        )
+        raise ValueError(f"GraphRAGService.{method} 缺少 organization_id，拒绝跨租户访问")
     return organization_id
 
 
@@ -45,12 +43,14 @@ class GraphRAGService:
 
     def _graph_for(self, organization_id: int) -> dict[str, dict[str, Any]]:
         if organization_id not in self._graphs:
-            self._graphs[organization_id] = defaultdict(lambda: {
-                "entity_type": "UNKNOWN",
-                "description": "",
-                "relationships": [],
-                "occurrences": 0
-            })
+            self._graphs[organization_id] = defaultdict(
+                lambda: {
+                    "entity_type": "UNKNOWN",
+                    "description": "",
+                    "relationships": [],
+                    "occurrences": 0,
+                }
+            )
         return self._graphs[organization_id]
 
     def _redis_key_for(self, organization_id: int) -> str:
@@ -93,7 +93,9 @@ class GraphRAGService:
         except Exception as e:
             logger.warning(f"GraphRAG save to Redis failed: {e}")
 
-    async def is_document_extracted(self, document_id: str, organization_id: int | None = None) -> bool | None:
+    async def is_document_extracted(
+        self, document_id: str, organization_id: int | None = None
+    ) -> bool | None:
         """该文档是否已摄入图谱（幂等判据）。
 
         - True —— 已摄入（标记在且图数据键仍存在）；
@@ -107,9 +109,7 @@ class GraphRAGService:
         if not redis_client:
             return None
         try:
-            marked = await redis_client.sismember(
-                self._docs_key_for(organization_id), document_id
-            )
+            marked = await redis_client.sismember(self._docs_key_for(organization_id), document_id)
             if not marked:
                 return False
             raw = await redis_client.get(self._redis_key_for(organization_id))
@@ -118,7 +118,9 @@ class GraphRAGService:
             logger.warning(f"GraphRAG doc marker check failed: {e}")
             return None
 
-    async def mark_document_extracted(self, document_id: str, organization_id: int | None = None) -> None:
+    async def mark_document_extracted(
+        self, document_id: str, organization_id: int | None = None
+    ) -> None:
         """写入幂等标记；TTL 与图数据键一致，两者同生共死。"""
         organization_id = _require_org(organization_id, "mark_document_extracted")
         from app.core.redis import redis_client
@@ -132,7 +134,9 @@ class GraphRAGService:
         except Exception as e:
             logger.warning(f"GraphRAG doc marker save failed: {e}")
 
-    async def extract_entities_with_llm(self, text: str, llm_client: Any = None) -> list[dict[str, Any]]:
+    async def extract_entities_with_llm(
+        self, text: str, llm_client: Any = None
+    ) -> list[dict[str, Any]]:
         if not text or len(text) < 50:
             return []
 
@@ -151,21 +155,20 @@ JSON返回："""
         try:
             if llm_client:
                 from app.core.config import settings
+
                 # 修复：AsyncOpenAI 的调用必须 await——此前访问 coroutine.choices 必然抛错，实体提取永远静默回退
                 response = await llm_client.chat.completions.create(
                     model=settings.DEEPSEEK_MODEL,
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1
+                    temperature=0.1,
                 )
                 content = response.choices[0].message.content
-                content = content.strip().strip('```json').strip('```').strip()
+                content = content.strip().strip("```json").strip("```").strip()
                 parsed = json.loads(content)
                 # LLM 偶尔以 {"entities": [...]} 包裹或混入非对象元素：直接放行会在
                 # build_graph_from_entities 里炸 AttributeError。形状不对 → 抛错走
                 # 下方 except 的规则回退（写链不断）。
-                if not isinstance(parsed, list) or any(
-                    not isinstance(e, dict) for e in parsed
-                ):
+                if not isinstance(parsed, list) or any(not isinstance(e, dict) for e in parsed):
                     raise ValueError("LLM 提取结果不是实体对象数组")
                 return parsed
         except Exception as e:
@@ -176,43 +179,36 @@ JSON返回："""
     def _rule_based_extraction(self, text: str) -> list[dict[str, Any]]:
         entities = []
 
-        person_pattern = r'([A-Z\u4e00-\u9fa5][a-z\u4e00-\u9fa5]{1,20}(?:\s+[A-Z\u4e00-\u9fa5][a-z\u4e00-\u9fa5]{1,20})*(?:\s+(?:先生|女士|博士|教授|总监|经理|CEO|CTO|CFO|董事长|总裁|总经理))?)'
-        org_pattern = r'([A-Z\u4e00-\u9fa5](?:[A-Za-z\u4e00-\u9fa5·]{1,30}(?:公司|集团|大学|研究所|中心|机构|组织|银行|酒店))?)'
-        location_pattern = r'([A-Z\u4e00-\u9fa5](?:[A-Za-z\u4e00-\u9fa5]{1,20}(?:市|省|区|县|镇|街|路|大厦|中心|楼))?)'
+        person_pattern = r"([A-Z\u4e00-\u9fa5][a-z\u4e00-\u9fa5]{1,20}(?:\s+[A-Z\u4e00-\u9fa5][a-z\u4e00-\u9fa5]{1,20})*(?:\s+(?:先生|女士|博士|教授|总监|经理|CEO|CTO|CFO|董事长|总裁|总经理))?)"
+        org_pattern = r"([A-Z\u4e00-\u9fa5](?:[A-Za-z\u4e00-\u9fa5·]{1,30}(?:公司|集团|大学|研究所|中心|机构|组织|银行|酒店))?)"
+        location_pattern = r"([A-Z\u4e00-\u9fa5](?:[A-Za-z\u4e00-\u9fa5]{1,20}(?:市|省|区|县|镇|街|路|大厦|中心|楼))?)"
 
         for match in re.finditer(person_pattern, text):
             entity = match.group(1).strip()
             if entity and len(entity) > 1:
-                entities.append({
-                    "entity": entity,
-                    "type": "PERSON",
-                    "description": "",
-                    "relations": []
-                })
+                entities.append(
+                    {"entity": entity, "type": "PERSON", "description": "", "relations": []}
+                )
 
         for match in re.finditer(org_pattern, text):
             entity = match.group(1).strip()
             if entity and len(entity) > 2:
-                entities.append({
-                    "entity": entity,
-                    "type": "ORGANIZATION",
-                    "description": "",
-                    "relations": []
-                })
+                entities.append(
+                    {"entity": entity, "type": "ORGANIZATION", "description": "", "relations": []}
+                )
 
         for match in re.finditer(location_pattern, text):
             entity = match.group(1).strip()
             if entity and len(entity) > 2:
-                entities.append({
-                    "entity": entity,
-                    "type": "LOCATION",
-                    "description": "",
-                    "relations": []
-                })
+                entities.append(
+                    {"entity": entity, "type": "LOCATION", "description": "", "relations": []}
+                )
 
         return entities[:20]
 
-    async def build_graph_from_entities(self, entities: list[dict[str, Any]], organization_id: int | None = None) -> None:
+    async def build_graph_from_entities(
+        self, entities: list[dict[str, Any]], organization_id: int | None = None
+    ) -> None:
         organization_id = _require_org(organization_id, "build_graph_from_entities")
         graph = self._graph_for(organization_id)
         for ent in entities:
@@ -230,14 +226,12 @@ JSON返回："""
                 target = rel.get("target", "")
                 if target:
                     target_key = self._normalize_entity(target)
-                    graph[entity_key]["relationships"].append({
-                        "target": target_key,
-                        "relation": rel.get("relation", "RELATED_TO")
-                    })
-                    graph[target_key]["relationships"].append({
-                        "target": entity_key,
-                        "relation": rel.get("relation", "RELATED_TO")
-                    })
+                    graph[entity_key]["relationships"].append(
+                        {"target": target_key, "relation": rel.get("relation", "RELATED_TO")}
+                    )
+                    graph[target_key]["relationships"].append(
+                        {"target": entity_key, "relation": rel.get("relation", "RELATED_TO")}
+                    )
                     # 目标未被单独抽成实体时也补上显示名——否则读 API 只能把
                     # md5 键当节点 id 展示（读侧 entity_name 回退的丑态）。
                     if not graph[target_key].get("entity_name"):
@@ -297,7 +291,11 @@ JSON返回："""
         return hashlib.md5(entity.lower().encode(), usedforsecurity=False).hexdigest()[:16]
 
     async def search_graph(
-        self, query: str, organization_id: int | None = None, max_hops: int = 2, llm_client: Any = None
+        self,
+        query: str,
+        organization_id: int | None = None,
+        max_hops: int = 2,
+        llm_client: Any = None,
     ) -> list[dict[str, Any]]:
         organization_id = _require_org(organization_id, "search_graph")
         await self.load(organization_id)
@@ -323,17 +321,21 @@ JSON返回："""
 
             if entity_key in graph:
                 node_data = graph[entity_key]
-                results.append({
-                    "entity": entity_name,
-                    "type": node_data.get("entity_type", "UNKNOWN"),
-                    "description": node_data.get("description", ""),
-                    "occurrences": node_data.get("occurrences", 0),
-                    "relationships": node_data.get("relationships", [])[:10]
-                })
+                results.append(
+                    {
+                        "entity": entity_name,
+                        "type": node_data.get("entity_type", "UNKNOWN"),
+                        "description": node_data.get("description", ""),
+                        "occurrences": node_data.get("occurrences", 0),
+                        "relationships": node_data.get("relationships", [])[:10],
+                    }
+                )
 
         return results
 
-    def get_subgraph_context(self, entities: list[str], organization_id: int | None = None, max_hops: int = 1) -> str:
+    def get_subgraph_context(
+        self, entities: list[str], organization_id: int | None = None, max_hops: int = 1
+    ) -> str:
         organization_id = _require_org(organization_id, "get_subgraph_context")
         context_parts = []
         graph = self._graph_for(organization_id)
@@ -356,9 +358,7 @@ JSON返回："""
             rel_str = ", ".join(rels) if rels else "无直接关系"
 
             context_parts.append(
-                f"实体：{node.get('entity_name', ent)}\n"
-                f"类型：{type_name}\n"
-                f"关系：{rel_str}"
+                f"实体：{node.get('entity_name', ent)}\n类型：{type_name}\n关系：{rel_str}"
             )
 
         return "\n---\n".join(context_parts[:10])
@@ -374,7 +374,7 @@ JSON返回："""
         return {
             "total_entities": len(graph),
             "type_distribution": dict(type_counts),
-            "entity_types": self.entity_types
+            "entity_types": self.entity_types,
         }
 
 

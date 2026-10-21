@@ -141,7 +141,8 @@ class Reviewer:
             # 模型有响应但输出不是 JSON —— 模型侧没给出判定（不是服务崩了）。
             logger.warning(
                 "Adversarial review: unparseable model output recorded as error "
-                "(error_kind=no_verdict): %s", str(e)[:120]
+                "(error_kind=no_verdict): %s",
+                str(e)[:120],
             )
             return {
                 "overall_assessment": "质检未完成（模型未给出判定）",
@@ -156,7 +157,8 @@ class Reviewer:
             # JSON 合法但不是对象（如列表/标量）→ 同样没有可用的判定。
             logger.warning(
                 "Adversarial review: model output is not a JSON object recorded as error "
-                "(error_kind=no_verdict): %s", type(review_data).__name__
+                "(error_kind=no_verdict): %s",
+                type(review_data).__name__,
             )
             return {
                 "overall_assessment": "质检未完成（模型未给出判定）",
@@ -181,7 +183,8 @@ class Reviewer:
             review_data["error"] = "模型返回的 JSON 缺少 recommendation 判定"
             logger.warning(
                 "Adversarial review: model output missing recommendation recorded as error "
-                "(error_kind=no_verdict), goal=%s", plan.goal[:40]
+                "(error_kind=no_verdict), goal=%s",
+                plan.goal[:40],
             )
 
         # issue #301 #9（评审 m3 尾款）：判定必须是**可用的非空字符串**。
@@ -201,13 +204,16 @@ class Reviewer:
             logger.warning(
                 "Adversarial review: model gave no usable recommendation "
                 "(error_kind=no_verdict, type=%s), goal=%s",
-                type(recommendation_value).__name__, plan.goal[:40],
+                type(recommendation_value).__name__,
+                plan.goal[:40],
             )
 
         issues_high = sum(1 for i in review_data["issues_found"] if i.get("severity") == "high")
         logger.info(
             "Review complete: %s, %d issues (%d high), recommendation=%s",
-            plan.goal[:40], len(review_data["issues_found"]), issues_high,
+            plan.goal[:40],
+            len(review_data["issues_found"]),
+            issues_high,
             review_data["recommendation"],
         )
         return review_data

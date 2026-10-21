@@ -32,6 +32,7 @@ _TASK_ID = "task00000001"
 @pytest.fixture
 def client():
     from app.main import app
+
     return TestClient(app)
 
 
@@ -39,6 +40,7 @@ def client():
 def auth():
     """登录态替身（依赖注入覆盖）；用完即撤，避免污染同进程其它 api 用例。"""
     from app.main import app
+
     user = _mock_user()
     app.dependency_overrides[get_current_user] = lambda: user
     yield user
@@ -183,7 +185,7 @@ def test_resume_streams_sse_contract_and_passes_claim_false(client, auth, monkey
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/event-stream")
     lines = [ln for ln in r.text.split("\n\n") if ln.startswith("data: ")]
-    payloads = [json.loads(ln[len("data: "):]) for ln in lines]
+    payloads = [json.loads(ln[len("data: ") :]) for ln in lines]
     assert payloads[0]["type"] == "thinking"
     assert any(p["type"] == "chunk" and p["content"] == "后续产出" for p in payloads)
     assert payloads[-1] == {"type": "done", "content": "", "task_id": _TASK_ID}
@@ -204,10 +206,14 @@ def test_resume_saves_session_interaction_with_prefix(client, auth, monkeypatch)
     async def _fake_resume(task_id, user_id, *, config=None, claim=True):
         yield AgentEvent(type="chunk", content="后半")
 
-    async def _save(session_id, user_id, query, organization_id, assistant_response="",
-                    **kwargs):
-        saved.update(session_id=session_id, user_id=user_id, query=query,
-                     organization_id=organization_id, answer=assistant_response)
+    async def _save(session_id, user_id, query, organization_id, assistant_response="", **kwargs):
+        saved.update(
+            session_id=session_id,
+            user_id=user_id,
+            query=query,
+            organization_id=organization_id,
+            answer=assistant_response,
+        )
         return "msg-1"
 
     monkeypatch.setattr(agent_service, "prepare_resume", _prepare)
@@ -218,13 +224,17 @@ def test_resume_saves_session_interaction_with_prefix(client, auth, monkeypatch)
 
     assert r.status_code == 200
     assert saved == {
-        "session_id": "sess-9", "user_id": 1, "query": "原问题",
-        "organization_id": 1, "answer": "前半后半",
+        "session_id": "sess-9",
+        "user_id": 1,
+        "query": "原问题",
+        "organization_id": 1,
+        "answer": "前半后半",
     }
-    assert json.loads(r.text.strip().split("\n\n")[-1][len("data: "):])["message_id"] == "msg-1"
+    assert json.loads(r.text.strip().split("\n\n")[-1][len("data: ") :])["message_id"] == "msg-1"
 
 
 # ── 无组织用户 fail-closed（评审 B1：真实链路判别用例）───────────────────────
+
 
 class _FakeRedisLock:
     """断言"零认领"用的最小租约替身（SET NX EX 语义）。"""
@@ -292,12 +302,21 @@ async def test_no_org_user_is_rejected_fail_closed_on_both_endpoints(tmp_path, m
     # 若 fail-open，resume 会 200 开流并在 org=1 上下文里再执行一步。
     task_id = await checkpoint.create_task(user_id=1, organization_id=1, query="原问题")
     ctx = ExecutionContext(query="原问题", task_id=task_id)
-    plan = Plan(id="p1", goal="g", steps=[
-        PlanStep(id="s1", description="一", status="completed", result="R1"),
-        PlanStep(id="s2", description="二", dependencies=["s1"]),
-    ], completed_steps=1)
+    plan = Plan(
+        id="p1",
+        goal="g",
+        steps=[
+            PlanStep(id="s1", description="一", status="completed", result="R1"),
+            PlanStep(id="s2", description="二", dependencies=["s1"]),
+        ],
+        completed_steps=1,
+    )
     assert await checkpoint.save_checkpoint(
-        task_id=task_id, ctx=ctx, plan=plan, trigger="after_each_step", partial_output="R1",
+        task_id=task_id,
+        ctx=ctx,
+        plan=plan,
+        trigger="after_each_step",
+        partial_output="R1",
     )
 
     calls = {"n": 0}
@@ -317,9 +336,7 @@ async def test_no_org_user_is_rejected_fail_closed_on_both_endpoints(tmp_path, m
     # 鉴权替身：无组织用户（org=None）——require_organization 对其真实生效
     app.dependency_overrides[get_current_user] = lambda: _mock_user(org_id=None)
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://noorg"
-        ) as c:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://noorg") as c:
             r = await c.get(f"/api/v1/agent/tasks/{task_id}")
             assert r.status_code == 403, (
                 f"无组织用户 GET 必须 fail-closed（与 /chat 一致），实际 {r.status_code}"
@@ -392,18 +409,31 @@ async def test_resume_http_cancel_releases_lease_and_immediate_retry_runs(tmp_pa
     # 种一个"真实可续跑"的任务：org=1、s1 已完成、s2 pending（断点续跑一步）；
     # config 钉死各增强开关，保证 LLM 调用数可精确断言
     resume_cfg = AgentConfig(
-        enable_reflection=False, enable_memory=False, enable_skills=False,
-        enable_experience=False, enable_thinking=False,
+        enable_reflection=False,
+        enable_memory=False,
+        enable_skills=False,
+        enable_experience=False,
+        enable_thinking=False,
     )
     task_id = await checkpoint.create_task(user_id=1, organization_id=1, query="原问题")
     ctx = ExecutionContext(query="原问题", task_id=task_id)
-    plan = Plan(id="p1", goal="g", steps=[
-        PlanStep(id="s1", description="一", status="completed", result="R1"),
-        PlanStep(id="s2", description="二", dependencies=["s1"]),
-    ], completed_steps=1)
+    plan = Plan(
+        id="p1",
+        goal="g",
+        steps=[
+            PlanStep(id="s1", description="一", status="completed", result="R1"),
+            PlanStep(id="s2", description="二", dependencies=["s1"]),
+        ],
+        completed_steps=1,
+    )
     assert await checkpoint.save_checkpoint(
-        task_id=task_id, ctx=ctx, plan=plan, trigger="after_each_step",
-        partial_output="R1", config=resume_cfg, session_id="",
+        task_id=task_id,
+        ctx=ctx,
+        plan=plan,
+        trigger="after_each_step",
+        partial_output="R1",
+        config=resume_cfg,
+        session_id="",
     )
 
     calls = {"n": 0}
@@ -430,9 +460,7 @@ async def test_resume_http_cancel_releases_lease_and_immediate_retry_runs(tmp_pa
 
     app.dependency_overrides[get_current_user] = lambda: _mock_user()
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://f1lease"
-        ) as c:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://f1lease") as c:
             req = asyncio.create_task(c.post(f"/api/v1/agent/tasks/{task_id}/resume"))
             assert await asyncio.wait_for(started.wait(), timeout=10), (
                 "resume 流未在期限内进入执行（假 LLM 未被调用）"
@@ -444,8 +472,7 @@ async def test_resume_http_cancel_releases_lease_and_immediate_retry_runs(tmp_pa
             # 断流兜底（受保护单元）在后台完成：租约必须归还
             lock_key = checkpoint._lock_key(task_id)
             assert await _wait_until(lambda: lock_key not in fake_redis.store, timeout=5), (
-                "HTTP 取消路径必须归还租约（修复前：release 分支不可达，"
-                "被兜底快照续到 900s）"
+                "HTTP 取消路径必须归还租约（修复前：release 分支不可达，被兜底快照续到 900s）"
             )
 
             # 断流收敛（第四波修复）：任务从"正在跑"系收敛为 FAILED（可恢复的
@@ -513,14 +540,12 @@ def test_resume_stream_error_is_generic_detail_only_in_server_log(client, auth, 
     assert r.status_code == 200, "SSE 已开流：错误只能作为流内事件表达"
     assert "SECRET-TOKEN-xyz" not in r.text, "异常原文不得出现在 SSE 输出里"
     lines = [ln for ln in r.text.split("\n\n") if ln.startswith("data: ")]
-    payloads = [json.loads(ln[len("data: "):]) for ln in lines]
+    payloads = [json.loads(ln[len("data: ") :]) for ln in lines]
     errs = [p for p in payloads if p.get("type") == "error"]
     assert errs and errs[0]["content"].startswith("Agent 恢复执行出错，请稍后重试")
     # W0-5：通用文案带请求编号（客户端可据此报障）；编号与响应头一致。
     request_id = r.headers.get("x-request-id")
-    assert request_id and request_id in errs[0]["content"], (
-        "错误文案必须携带 X-Request-ID"
+    assert request_id and request_id in errs[0]["content"], "错误文案必须携带 X-Request-ID"
+    assert any(rec.exc_info and "SECRET-TOKEN-xyz" in str(rec.exc_info[1]) for rec in records), (
+        "完整异常/堆栈必须留在服务端日志（exc_info）"
     )
-    assert any(
-        rec.exc_info and "SECRET-TOKEN-xyz" in str(rec.exc_info[1]) for rec in records
-    ), "完整异常/堆栈必须留在服务端日志（exc_info）"

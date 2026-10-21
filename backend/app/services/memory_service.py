@@ -2,6 +2,7 @@
 Agent 记忆系统服务
 支持短期记忆、长期记忆、工作记忆和反思记忆
 """
+
 import asyncio
 import json
 import logging
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class MemoryItem:
     """记忆项"""
+
     def __init__(
         self,
         content: str,
@@ -53,6 +55,7 @@ class MemoryItem:
     def _generate_id(self) -> str:
         """生成唯一ID"""
         import uuid
+
         return uuid.uuid4().hex[:12]
 
     def access(self) -> None:
@@ -141,16 +144,16 @@ class LongTermMemory:
         # CJK bigrams for Chinese text without spaces
         cjk_run = ""
         for ch in lower:
-            if '一' <= ch <= '鿿' or '㐀' <= ch <= '䶿':
+            if "一" <= ch <= "鿿" or "㐀" <= ch <= "䶿":
                 cjk_run += ch
             else:
                 if len(cjk_run) >= 2:
                     for i in range(len(cjk_run) - 1):
-                        tokens.add(cjk_run[i:i + 2])
+                        tokens.add(cjk_run[i : i + 2])
                 cjk_run = ""
         if len(cjk_run) >= 2:
             for i in range(len(cjk_run) - 1):
-                tokens.add(cjk_run[i:i + 2])
+                tokens.add(cjk_run[i : i + 2])
         return tokens
 
     def add(self, item: MemoryItem) -> None:
@@ -168,7 +171,7 @@ class LongTermMemory:
         memory_type: str = None,
         top_k: int = 10,
         min_importance: float = 0.0,
-        use_decay: bool = True
+        use_decay: bool = True,
     ) -> list[MemoryItem]:
         """搜索记忆"""
         candidates = []
@@ -198,7 +201,9 @@ class LongTermMemory:
             # 综合分数
             relevance = overlap / max(len(query_tokens), 1)
             decay_score = item.get_decay_score() if use_decay else item.importance
-            final_score = 0.5 * relevance + 0.3 * decay_score + 0.2 * min(item.access_count / 10, 1.0)
+            final_score = (
+                0.5 * relevance + 0.3 * decay_score + 0.2 * min(item.access_count / 10, 1.0)
+            )
 
             results.append((final_score, item))
 
@@ -212,10 +217,7 @@ class LongTermMemory:
         return [item for _, item in results[:top_k]]
 
     def get_by_time_range(
-        self,
-        start_time: datetime,
-        end_time: datetime,
-        memory_type: str = None
+        self, start_time: datetime, end_time: datetime, memory_type: str = None
     ) -> list[MemoryItem]:
         """按时间范围获取记忆"""
         results = []
@@ -331,10 +333,7 @@ class WorkingMemory:
 
     def push_task(self, task: dict[str, Any]) -> None:
         """推入任务"""
-        self.task_stack.append({
-            "task": task,
-            "started_at": datetime.now().isoformat()
-        })
+        self.task_stack.append({"task": task, "started_at": datetime.now().isoformat()})
 
     def pop_task(self) -> dict[str, Any] | None:
         """弹出任务"""
@@ -400,7 +399,7 @@ class WorkingMemory:
             "state": self.state,
             "task_stack": self.task_stack,
             "intermediate_results": self.intermediate_results,
-            "variables": self.variables
+            "variables": self.variables,
         }
 
 
@@ -414,28 +413,32 @@ class ReflectiveMemory:
 
     def add_insight(self, insight: str, context: dict[str, Any] | None = None) -> None:
         """添加洞察"""
-        self.insights.append({
-            "content": insight,
-            "context": context or {},
-            "created_at": datetime.now().isoformat()
-        })
+        self.insights.append(
+            {"content": insight, "context": context or {}, "created_at": datetime.now().isoformat()}
+        )
 
     def add_pattern(self, pattern: str, examples: list[str] | None = None) -> None:
         """添加模式"""
-        self.patterns.append({
-            "pattern": pattern,
-            "examples": examples or [],
-            "created_at": datetime.now().isoformat()
-        })
+        self.patterns.append(
+            {
+                "pattern": pattern,
+                "examples": examples or [],
+                "created_at": datetime.now().isoformat(),
+            }
+        )
 
-    def add_lesson(self, lesson: str, trigger: str | None = None, solution: str | None = None) -> None:
+    def add_lesson(
+        self, lesson: str, trigger: str | None = None, solution: str | None = None
+    ) -> None:
         """添加经验教训"""
-        self.lessons.append({
-            "lesson": lesson,
-            "trigger": trigger,
-            "solution": solution,
-            "created_at": datetime.now().isoformat()
-        })
+        self.lessons.append(
+            {
+                "lesson": lesson,
+                "trigger": trigger,
+                "solution": solution,
+                "created_at": datetime.now().isoformat(),
+            }
+        )
 
     def get_relevant_insights(self, context: str, top_k: int = 5) -> list[str]:
         """获取相关洞察"""
@@ -469,11 +472,7 @@ class ReflectiveMemory:
 
     def to_dict(self) -> dict:
         """转换为字典"""
-        return {
-            "insights": self.insights,
-            "patterns": self.patterns,
-            "lessons": self.lessons
-        }
+        return {"insights": self.insights, "patterns": self.patterns, "lessons": self.lessons}
 
 
 class AgentMemorySystem:
@@ -517,6 +516,7 @@ class AgentMemorySystem:
         """获取 Redis 客户端（可能为 None）"""
         try:
             from app.core.redis import redis_client
+
             return redis_client
         except Exception:
             return None
@@ -563,7 +563,7 @@ class AgentMemorySystem:
             await r.setex(
                 self._persist_key,
                 86400 * 7,  # 7 天过期
-                json.dumps(persist_data, ensure_ascii=False, default=str)
+                json.dumps(persist_data, ensure_ascii=False, default=str),
             )
         except Exception as e:
             logger.warning(f"保存记忆到 Redis 失败: {e}")
@@ -573,7 +573,7 @@ class AgentMemorySystem:
         content: str,
         memory_type: str = "short_term",
         importance: float = 0.5,
-        metadata: dict[str, Any] = None
+        metadata: dict[str, Any] = None,
     ) -> MemoryItem:
         """存储记忆"""
         if not self._loaded:
@@ -603,16 +603,16 @@ class AgentMemorySystem:
 
         # 检查是否需要反思
         self.interaction_count += 1
-        if self.config["auto_reflect"] and self.interaction_count % self.config["reflect_interval"] == 0:
+        if (
+            self.config["auto_reflect"]
+            and self.interaction_count % self.config["reflect_interval"] == 0
+        ):
             await self._auto_reflect()
 
         return item
 
     async def recall(
-        self,
-        query: str,
-        memory_types: list[str] = None,
-        top_k: int = 10
+        self, query: str, memory_types: list[str] = None, top_k: int = 10
     ) -> list[dict[str, Any]]:
         """检索记忆。如果配置了 embedding provider，优先使用语义搜索。"""
         if not self._loaded:
@@ -636,16 +636,29 @@ class AgentMemorySystem:
                         results.extend([item.to_dict() for item in semantic_results])
                     else:
                         # Fall back to keyword search
-                        results.extend([item.to_dict() for item in self.long_term.search(query, top_k=top_k)])
+                        results.extend(
+                            [item.to_dict() for item in self.long_term.search(query, top_k=top_k)]
+                        )
                 except Exception as e:
                     logger.warning(f"Semantic search failed, falling back to keyword: {e}")
-                    results.extend([item.to_dict() for item in self.long_term.search(query, top_k=top_k)])
+                    results.extend(
+                        [item.to_dict() for item in self.long_term.search(query, top_k=top_k)]
+                    )
             else:
-                results.extend([item.to_dict() for item in self.long_term.search(query, top_k=top_k)])
+                results.extend(
+                    [item.to_dict() for item in self.long_term.search(query, top_k=top_k)]
+                )
 
         if "reflective" in memory_types:
-            results.extend([{"type": "insight", "content": i} for i in self.reflective.get_relevant_insights(query)])
-            results.extend([{"type": "lesson", **l} for l in self.reflective.get_lessons_for_situation(query)])
+            results.extend(
+                [
+                    {"type": "insight", "content": i}
+                    for i in self.reflective.get_relevant_insights(query)
+                ]
+            )
+            results.extend(
+                [{"type": "lesson", **l} for l in self.reflective.get_lessons_for_situation(query)]
+            )
 
         return results[:top_k]
 
@@ -693,32 +706,23 @@ class AgentMemorySystem:
 
     async def store_interaction(self, user_input: str, assistant_response: str) -> None:
         """存储交互"""
-        await self.remember(
-            f"用户: {user_input}",
-            memory_type="short_term",
-            importance=0.6
-        )
-        await self.remember(
-            f"助手: {assistant_response}",
-            memory_type="short_term",
-            importance=0.5
-        )
+        await self.remember(f"用户: {user_input}", memory_type="short_term", importance=0.6)
+        await self.remember(f"助手: {assistant_response}", memory_type="short_term", importance=0.5)
 
-    async def store_experience(self, success: bool, action: str, result: str, context: str = "") -> None:
+    async def store_experience(
+        self, success: bool, action: str, result: str, context: str = ""
+    ) -> None:
         """存储经验"""
         importance = 0.8 if not success else 0.6
         await self.remember(
             f"{'成功' if success else '失败'}: {action} -> {result}",
             memory_type="long_term",
             importance=importance,
-            metadata={"context": context}
+            metadata={"context": context},
         )
 
         if not success:
-            self.reflective.add_lesson(
-                lesson=result,
-                trigger=action
-            )
+            self.reflective.add_lesson(lesson=result, trigger=action)
             # remember() 的保存发生在这条反思经验写入之前，需补一次落盘，
             # 否则驱逐/重启会丢失 Redis 尚未见过的数据
             await self._save_to_redis()
@@ -731,7 +735,7 @@ class AgentMemorySystem:
             "long_term": self.long_term.to_dict(),
             "working": self.working.to_dict(),
             "reflective": self.reflective.to_dict(),
-            "interaction_count": self.interaction_count
+            "interaction_count": self.interaction_count,
         }
 
     def import_data(self, data: dict[str, Any]) -> None:
@@ -796,17 +800,14 @@ def build_memory_namespace(
     """
     if org_id is None:
         raise ValueError(
-            "记忆命名空间缺少 organization_id，拒绝构造"
-            "（会生成 'None:...' 跨租户命名空间）"
+            "记忆命名空间缺少 organization_id，拒绝构造（会生成 'None:...' 跨租户命名空间）"
         )
     if isinstance(org_id, bool):
         raise ValueError(f"记忆命名空间的 organization_id 非法: {org_id!r}")
     try:
         coerced_org_id = int(org_id)
     except (TypeError, ValueError):
-        raise ValueError(
-            f"记忆命名空间的 organization_id 非法: {org_id!r}"
-        ) from None
+        raise ValueError(f"记忆命名空间的 organization_id 非法: {org_id!r}") from None
     if coerced_org_id <= 0:
         raise ValueError(
             f"记忆命名空间的 organization_id={org_id!r} 非法：必须是正整数组织 ID"
@@ -821,13 +822,9 @@ def build_memory_namespace(
     try:
         coerced_user_id = int(user_id)
     except (TypeError, ValueError):
-        raise ValueError(
-            f"记忆命名空间的 user_id 非法: {user_id!r}"
-        ) from None
+        raise ValueError(f"记忆命名空间的 user_id 非法: {user_id!r}") from None
     if coerced_user_id < 0:
-        raise ValueError(
-            f"记忆命名空间的 user_id={user_id!r} 非法：不能为负数"
-        )
+        raise ValueError(f"记忆命名空间的 user_id={user_id!r} 非法：不能为负数")
     return f"{coerced_org_id}:{coerced_user_id}:{agent_id}"
 
 

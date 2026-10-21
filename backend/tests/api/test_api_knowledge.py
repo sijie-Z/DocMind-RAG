@@ -1,4 +1,5 @@
 """Knowledge Base API 集成测试 — 知识库查询与统计。"""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,11 +15,13 @@ from app.schemas.knowledge import SearchSuggestionResponse
 @pytest.fixture
 def client():
     from app.main import app
+
     return TestClient(app)
 
 
 class _AsyncCtxMgr:
     """支持 async with 的 mock 上下文管理器。"""
+
     def __init__(self, db):
         self._db = db
 
@@ -124,6 +127,7 @@ class TestKnowledgeList:
     def test_list_knowledge_bases(self, client: TestClient):
         """GET /knowledge/ 应返回文档列表。"""
         from app.main import app
+
         # 本用例只关心列表主流程，权限门禁用超管主体一次性通过
         mock_user = _make_mock_user(is_superuser=True)
         doc = _make_mock_document()
@@ -146,10 +150,7 @@ class TestKnowledgeList:
         app.dependency_overrides[get_current_user] = _override_user
 
         try:
-            r = client.get(
-                "/api/v1/knowledge/",
-                headers={"Authorization": "Bearer test_token"}
-            )
+            r = client.get("/api/v1/knowledge/", headers={"Authorization": "Bearer test_token"})
             assert r.status_code == 200
             data = r.json()
             assert data["success"] is True
@@ -161,6 +162,7 @@ class TestKnowledgeList:
     def test_list_knowledge_bases_pagination(self, client: TestClient):
         """分页参数应正确返回。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
         doc1 = _make_mock_document(doc_id="doc-1")
         doc2 = _make_mock_document(doc_id="doc-2", filename="budget.xlsx")
@@ -185,7 +187,7 @@ class TestKnowledgeList:
         try:
             r = client.get(
                 "/api/v1/knowledge/?page=1&page_size=10",
-                headers={"Authorization": "Bearer test_token"}
+                headers={"Authorization": "Bearer test_token"},
             )
             assert r.status_code == 200
             data = r.json()
@@ -199,6 +201,7 @@ class TestKnowledgeList:
     def test_list_knowledge_bases_empty(self, client: TestClient):
         """无文档时应返回空列表。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
@@ -219,10 +222,7 @@ class TestKnowledgeList:
         app.dependency_overrides[get_current_user] = _override_user
 
         try:
-            r = client.get(
-                "/api/v1/knowledge/",
-                headers={"Authorization": "Bearer test_token"}
-            )
+            r = client.get("/api/v1/knowledge/", headers={"Authorization": "Bearer test_token"})
             assert r.status_code == 200
             assert r.json()["data"]["total"] == 0
         finally:
@@ -275,15 +275,13 @@ class TestStatusVocabularyConsistent:
 
         try:
             r_list = client.get(
-                "/api/v1/knowledge/",
-                headers={"Authorization": "Bearer test_token"}
+                "/api/v1/knowledge/", headers={"Authorization": "Bearer test_token"}
             )
             assert r_list.status_code == 200
             item = r_list.json()["data"]["data"][0]
 
             r_detail = client.get(
-                "/api/v1/documents/doc-vocab-1",
-                headers={"Authorization": "Bearer test_token"}
+                "/api/v1/documents/doc-vocab-1", headers={"Authorization": "Bearer test_token"}
             )
             assert r_detail.status_code == 200
             detail = r_detail.json()["data"]
@@ -307,6 +305,7 @@ class TestKnowledgeStats:
     def test_get_stats_success(self, client: TestClient):
         """GET /knowledge/stats/{org_id} 应返回统计信息。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         # permission_required 不看注入的 current_user，而是用 `db.get(User, ...)` 重查
@@ -321,15 +320,16 @@ class TestKnowledgeStats:
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
-            mock_ks.get_knowledge_stats = AsyncMock(return_value={
-                "total_documents": 42,
-                "total_chunks": 1500,
-                "document_types": {"pdf": 20, "docx": 22},
-            })
+            mock_ks.get_knowledge_stats = AsyncMock(
+                return_value={
+                    "total_documents": 42,
+                    "total_chunks": 1500,
+                    "document_types": {"pdf": 20, "docx": 22},
+                }
+            )
             try:
                 r = client.get(
-                    "/api/v1/knowledge/stats/1",
-                    headers={"Authorization": "Bearer test_token"}
+                    "/api/v1/knowledge/stats/1", headers={"Authorization": "Bearer test_token"}
                 )
                 assert r.status_code == 200
                 data = r.json()
@@ -349,6 +349,7 @@ class TestKnowledgeSearch:
     def test_search_success(self, client: TestClient):
         """POST /knowledge/search 应返回搜索结果。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
@@ -360,24 +361,26 @@ class TestKnowledgeSearch:
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
-            mock_ks.search_knowledge = AsyncMock(return_value=[
-                {
-                    "id": "chunk-1",
-                    "text": "Annual report content about revenue",
-                    "score": 0.95,
-                    "source": {"filename": "report.pdf"},
-                    "metadata": {"document_id": "doc-1"},
-                    "has_keyword": True,
-                    "has_vector": True,
-                    "rewrite_hits": 2,
-                    "fresh_factor": 1.0,
-                }
-            ])
+            mock_ks.search_knowledge = AsyncMock(
+                return_value=[
+                    {
+                        "id": "chunk-1",
+                        "text": "Annual report content about revenue",
+                        "score": 0.95,
+                        "source": {"filename": "report.pdf"},
+                        "metadata": {"document_id": "doc-1"},
+                        "has_keyword": True,
+                        "has_vector": True,
+                        "rewrite_hits": 2,
+                        "fresh_factor": 1.0,
+                    }
+                ]
+            )
             try:
                 r = client.post(
                     "/api/v1/knowledge/search",
                     json={"query": "annual report", "top_k": 5, "organization_id": 1},
-                    headers={"Authorization": "Bearer test_token"}
+                    headers={"Authorization": "Bearer test_token"},
                 )
                 assert r.status_code == 200
                 data = r.json()
@@ -390,6 +393,7 @@ class TestKnowledgeSearch:
     def test_search_no_results(self, client: TestClient):
         """无匹配结果应返回空列表。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
@@ -406,7 +410,7 @@ class TestKnowledgeSearch:
                 r = client.post(
                     "/api/v1/knowledge/search",
                     json={"query": "nonexistent term", "organization_id": 1},
-                    headers={"Authorization": "Bearer test_token"}
+                    headers={"Authorization": "Bearer test_token"},
                 )
                 assert r.status_code == 200
                 data = r.json()
@@ -419,6 +423,7 @@ class TestKnowledgeSearch:
     def test_search_missing_query(self, client: TestClient):
         """缺少查询参数应返回 422。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
@@ -431,9 +436,7 @@ class TestKnowledgeSearch:
 
         try:
             r = client.post(
-                "/api/v1/knowledge/search",
-                json={},
-                headers={"Authorization": "Bearer test_token"}
+                "/api/v1/knowledge/search", json={}, headers={"Authorization": "Bearer test_token"}
             )
             assert r.status_code == 422
         finally:
@@ -447,6 +450,7 @@ class TestKnowledgeSearchModeContract:
     @staticmethod
     def _post_search(client: TestClient, payload: dict):
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
         override_func, _mock_db = _override_get_db()
 
@@ -485,14 +489,18 @@ class TestKnowledgeSearchModeContract:
         # simple → keyword_only：回显公开模式名 keyword（修前恒回显 hybrid，与生效语义不符）
         assert r.json()["search_mode"] == "keyword"
 
-        r2, mock_ks2 = self._post_search(client, {"query": "如何提交报销申请？", "organization_id": 1})
+        r2, mock_ks2 = self._post_search(
+            client, {"query": "如何提交报销申请？", "organization_id": 1}
+        )
         assert mock_ks2.search_knowledge.await_args.kwargs["search_mode"] is None
         assert r2.json()["search_mode"] == "hybrid"  # medium → hybrid
 
     def test_invalid_mode_value_is_422(self, client: TestClient):
         """非法值（含前端旧字段值 'semantic'、大写 'VECTOR'）→ 422，不静默降级。"""
         for bad in ("semantic", "fuzzy", "VECTOR"):
-            r, _ = self._post_search(client, {"query": "x", "organization_id": 1, "search_mode": bad})
+            r, _ = self._post_search(
+                client, {"query": "x", "organization_id": 1, "search_mode": bad}
+            )
             assert r.status_code == 422, f"search_mode={bad!r} 必须 422"
 
 
@@ -500,6 +508,7 @@ class TestKnowledgeSuggestions:
     def test_get_suggestions(self, client: TestClient):
         """GET /knowledge/suggestions 应返回建议列表。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         # 必须连 get_db 一起 mock：`permission_required` 依赖会 `await db.get(User, ...)`
@@ -507,6 +516,7 @@ class TestKnowledgeSuggestions:
         # 于是 `db.get` 落回真库、返回 None，请求在依赖阶段就炸了，根本到不了 handler
         # —— 这个用例因此一直红着，且与它想验证的东西无关（issue #83 的 mock 装配类问题）。
         override_db, _mock_db = _override_get_db()
+
         async def _override_user():
             return mock_user
 
@@ -514,13 +524,13 @@ class TestKnowledgeSuggestions:
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
-            mock_ks.get_search_suggestions = AsyncMock(return_value=[
-                "annual report", "annual budget", "annual review"
-            ])
+            mock_ks.get_search_suggestions = AsyncMock(
+                return_value=["annual report", "annual budget", "annual review"]
+            )
             try:
                 r = client.get(
                     "/api/v1/knowledge/suggestions?q=annual&organization_id=1",
-                    headers={"Authorization": "Bearer test_token"}
+                    headers={"Authorization": "Bearer test_token"},
                 )
                 assert r.status_code == 200
                 data = r.json()
@@ -537,6 +547,7 @@ class TestKnowledgeSuggestions:
         校验响应体，缺字段会以 ValidationError 的形式当场暴露。
         """
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         override_db, _mock_db = _override_get_db()
@@ -552,7 +563,7 @@ class TestKnowledgeSuggestions:
             try:
                 r = client.get(
                     "/api/v1/knowledge/suggestions?q=annual&organization_id=1",
-                    headers={"Authorization": "Bearer test_token"}
+                    headers={"Authorization": "Bearer test_token"},
                 )
                 assert r.status_code == 200
                 data = r.json()
@@ -575,6 +586,7 @@ class TestKnowledgeRebuild:
     def test_rebuild_success(self, client: TestClient):
         """POST /knowledge/rebuild/{id} 应提交重建任务。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         doc = MagicMock()
@@ -608,7 +620,7 @@ class TestKnowledgeRebuild:
                 try:
                     r = client.post(
                         "/api/v1/knowledge/rebuild/doc-1",
-                        headers={"Authorization": "Bearer test_token"}
+                        headers={"Authorization": "Bearer test_token"},
                     )
                     assert r.status_code == 200
                     data = r.json()
@@ -643,19 +655,23 @@ class TestKnowledgeGraphNodeAttribution:
         graph.clear()
         hub_key = graph_rag_service._normalize_entity("Hub")
         layer_key = graph_rag_service._normalize_entity("数据层")
-        graph[hub_key].update({
-            "entity_name": "Hub",
-            "entity_type": "PRODUCT",
-            "description": "中枢实体",
-            "occurrences": 1,
-        })
+        graph[hub_key].update(
+            {
+                "entity_name": "Hub",
+                "entity_type": "PRODUCT",
+                "description": "中枢实体",
+                "occurrences": 1,
+            }
+        )
         graph[hub_key]["relationships"].append({"target": layer_key, "relation": "PART_OF"})
-        graph[layer_key].update({
-            "entity_name": "数据层",
-            "entity_type": "CONCEPT",
-            "description": "存储层描述",
-            "occurrences": 1,
-        })
+        graph[layer_key].update(
+            {
+                "entity_name": "数据层",
+                "entity_type": "CONCEPT",
+                "description": "存储层描述",
+                "occurrences": 1,
+            }
+        )
 
         mock_user = _make_mock_user(is_superuser=True)
         mock_user.organization_id = org
@@ -679,9 +695,7 @@ class TestKnowledgeGraphNodeAttribution:
         assert r.status_code == 200, r.text
         body = r.json()
         nodes = {n["id"]: n for n in body["nodes"]}
-        assert nodes["数据层"]["type"] == "CONCEPT", (
-            f"真实实体类型被关系目标占位吞掉: {nodes}"
-        )
+        assert nodes["数据层"]["type"] == "CONCEPT", f"真实实体类型被关系目标占位吞掉: {nodes}"
         assert nodes["数据层"]["description"] == "存储层描述"
         assert nodes["Hub"]["type"] == "PRODUCT"
         assert any(

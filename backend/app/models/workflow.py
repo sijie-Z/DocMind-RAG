@@ -1,6 +1,7 @@
 """
 Agent 工作流数据库模型
 """
+
 from datetime import datetime
 from typing import Any, Optional
 
@@ -12,6 +13,7 @@ from app.core.database import Base
 
 class Workflow(Base):
     """工作流定义"""
+
     __tablename__ = "workflows"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -29,18 +31,25 @@ class Workflow(Base):
     )
     created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, onupdate=datetime.now
+    )
 
-    executions: Mapped[list["WorkflowExecution"]] = relationship("WorkflowExecution", back_populates="workflow", lazy="dynamic")
+    executions: Mapped[list["WorkflowExecution"]] = relationship(
+        "WorkflowExecution", back_populates="workflow", lazy="dynamic"
+    )
 
 
 class WorkflowExecution(Base):
     """工作流执行记录"""
+
     __tablename__ = "workflow_executions"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     workflow_id: Mapped[int] = mapped_column(Integer, ForeignKey("workflows.id"))
-    status: Mapped[str] = mapped_column(String(20), default="pending", comment="执行状态: pending, running, completed, failed")
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", comment="执行状态: pending, running, completed, failed"
+    )
     input_data: Mapped[Any | None] = mapped_column(JSON, comment="输入数据")
     output_data: Mapped[Any | None] = mapped_column(JSON, comment="输出结果")
     node_results: Mapped[Any | None] = mapped_column(JSON, comment="各节点执行结果")
@@ -54,12 +63,15 @@ class WorkflowExecution(Base):
 
 class NodeDefinition(Base):
     """节点定义"""
+
     __tablename__ = "node_definitions"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     node_type: Mapped[str] = mapped_column(String(50), unique=True, comment="节点类型标识")
     name: Mapped[str] = mapped_column(String(100), comment="节点显示名称")
-    category: Mapped[str] = mapped_column(String(50), default="llm", comment="节点分类: llm, tool, io, logic")
+    category: Mapped[str] = mapped_column(
+        String(50), default="llm", comment="节点分类: llm, tool, io, logic"
+    )
     description: Mapped[str | None] = mapped_column(Text, comment="节点描述")
     default_config: Mapped[Any | None] = mapped_column(JSON, comment="默认配置")
     input_schema: Mapped[Any | None] = mapped_column(JSON, comment="输入参数定义")

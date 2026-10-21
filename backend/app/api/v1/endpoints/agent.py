@@ -85,6 +85,7 @@ def _merge_disabled_tools(client_disabled: list[str] | None) -> list[str]:
 
 # ── Request/Response models ──────────────────────────────────────────────────
 
+
 class AgentChatRequest(BaseModel):
     query: str = Field(..., min_length=1, description="User query")
     session_id: str | None = Field(None, description="Agent session ID for persistence")
@@ -139,7 +140,9 @@ class AgentConfigUpdate(BaseModel):
         None, description="HITL 审批模式：never / risky / always"
     )
     approval_timeout_seconds: int | None = Field(
-        None, ge=0, le=86400,
+        None,
+        ge=0,
+        le=86400,
         description="审批等待时限（秒）；0=无限等待（默认，绝不伪造超时拒绝）",
     )
     plan_approval_mode: Literal["never", "always"] | None = Field(
@@ -188,6 +191,7 @@ async def _build_agent_config(body: AgentChatRequest, user_id: int) -> AgentConf
 
 
 # ── Agent Chat (SSE) ─────────────────────────────────────────────────────────
+
 
 @router.post("/chat")
 async def agent_chat(
@@ -251,7 +255,11 @@ async def agent_chat(
             # HITL：暂停（approval_required）/取消（run_cancelled）不是"完成"——
             # 不落库半成品回答：真完成由 approval/resume 流收尾时补写，
             # 避免同一轮问答落成两条消息。
-            if body.session_id and last_event_type not in ("approval_required", "run_cancelled", "plan_approval_required"):
+            if body.session_id and last_event_type not in (
+                "approval_required",
+                "run_cancelled",
+                "plan_approval_required",
+            ):
                 # issue #277（评审 or1268 R2 收账）：会话落库 org 必须与运行读侧
                 # 同一来源（resolved org）——此前传 raw current_user.organization_id，
                 # 凡 org 来自 token_organization_id 回退（或走无组织超管回源）的用户，
@@ -337,6 +345,7 @@ async def agent_chat(
 
 # ── Checkpoint / Resume（issue #201 最小版）───────────────────────────────────
 
+
 async def _fallback_resume_config(user_id: int) -> AgentConfig:
     """快照缺失/损坏（安全降级路径）时 resume 用的规则：用户已保存配置为基底，
     并强制合并服务端禁用清单（与 _build_agent_config 同一安全保证）。"""
@@ -366,9 +375,7 @@ async def list_agent_tasks(
         limit=page_size,
     )
 
-    flags = await asyncio.gather(
-        *(_replay_engine.has_replay(t.id) for t in rows)
-    ) if rows else []
+    flags = await asyncio.gather(*(_replay_engine.has_replay(t.id) for t in rows)) if rows else []
     data = [
         {**checkpoint.task_to_status_dict(t), "has_replay": has_replay}
         for t, has_replay in zip(rows, flags, strict=True)
@@ -516,7 +523,11 @@ async def resume_agent_task(
             # org 与 /chat 同链（issue #277/R2 对齐）：传 resolved org
             # （effective_org_id，含 token 组织回退 / 无组织超管回源），
             # 不传 raw current_user.organization_id——两者对回退用户不相等。
-            if session_id and last_event_type not in ("approval_required", "run_cancelled", "plan_approval_required"):
+            if session_id and last_event_type not in (
+                "approval_required",
+                "run_cancelled",
+                "plan_approval_required",
+            ):
                 try:
                     assistant_message_id = await _save_session_interaction(
                         session_id,
@@ -596,7 +607,8 @@ class TaskApprovalRequest(BaseModel):
         ..., description="审批决定：approve=批准执行 / deny=拒绝（结构化失败喂给反思链路）"
     )
     modified_instruction: str | None = Field(
-        None, max_length=2000,
+        None,
+        max_length=2000,
         description="改指令续跑（仅 approve 生效）：附加人工指导，注入后续步骤提示词",
     )
     note: str | None = Field(
@@ -646,8 +658,10 @@ async def decide_agent_task_approval(
     fallback_config = await _fallback_resume_config(current_user.id)
     logger.info(
         "审批应答 (task=%s, decision=%s, tool=%s, by=%s)",
-        log_safe(task_id), decision_record.get("decision"),
-        log_safe(str(decision_record.get("tool_name"))), current_user.id,
+        log_safe(task_id),
+        decision_record.get("decision"),
+        log_safe(str(decision_record.get("tool_name"))),
+        current_user.id,
     )
 
     async def event_stream():
@@ -669,7 +683,11 @@ async def decide_agent_task_approval(
                     final_answer += event.content
 
             # 会话补写：只在 run 真正完成时（再次暂停/取消不写半成品，同 /chat 口径）。
-            if session_id and last_event_type not in ("approval_required", "run_cancelled", "plan_approval_required"):
+            if session_id and last_event_type not in (
+                "approval_required",
+                "run_cancelled",
+                "plan_approval_required",
+            ):
                 try:
                     assistant_message_id = await _save_session_interaction(
                         session_id,
@@ -715,7 +733,9 @@ async def decide_agent_task_approval(
             yield f"data: {json.dumps(warning_data, ensure_ascii=False)}\n\n"
 
         done_data: dict[str, Any] = {
-            "type": "done", "content": "", "task_id": task_id,
+            "type": "done",
+            "content": "",
+            "task_id": task_id,
             "decision": decision_record.get("decision"),
         }
         if session_id:
@@ -764,7 +784,8 @@ class TaskPlanApprovalRequest(BaseModel):
         None, max_length=50, description="edit 必填：整体替换计划的步骤列表（1..50）"
     )
     note: str | None = Field(
-        None, max_length=500,
+        None,
+        max_length=500,
         description="拒绝理由（透传为重规划反馈）；edit/approve 时忽略",
     )
 
@@ -781,9 +802,7 @@ class TaskPlanApprovalRequest(BaseModel):
             for s in self.edited_steps:
                 unknown = [d for d in s.dependencies if d not in id_set]
                 if unknown:
-                    raise ValueError(
-                        f"步骤 {s.id} 的 dependencies 引用了不存在的步骤: {unknown}"
-                    )
+                    raise ValueError(f"步骤 {s.id} 的 dependencies 引用了不存在的步骤: {unknown}")
                 if s.id in s.dependencies:
                     raise ValueError(f"步骤 {s.id} 不能依赖自身")
         elif self.edited_steps:
@@ -822,14 +841,17 @@ async def decide_agent_task_plan_approval(
         decision=body.decision,
         edited_steps=(
             [s.model_dump() for s in body.edited_steps]
-            if body.decision == "edit" and body.edited_steps else None
+            if body.decision == "edit" and body.edited_steps
+            else None
         ),
         note=body.note,
     )
     logger.info(
         "计划审批应答 (task=%s, decision=%s, rejections=%s, by=%s)",
-        log_safe(task_id), record.get("decision"),
-        record.get("rejections"), current_user.id,
+        log_safe(task_id),
+        record.get("decision"),
+        record.get("rejections"),
+        current_user.id,
     )
 
     # 终态拒绝（reject#2）：决定已被受理并导致终态——JSON 回执（无流可续）。
@@ -869,7 +891,9 @@ async def decide_agent_task_plan_approval(
 
             # 会话补写：只在 run 真正完成时（再次暂停/取消不写半成品，同 /chat 口径）。
             if session_id and last_event_type not in (
-                "approval_required", "run_cancelled", "plan_approval_required"
+                "approval_required",
+                "run_cancelled",
+                "plan_approval_required",
             ):
                 try:
                     assistant_message_id = await _save_session_interaction(
@@ -916,7 +940,9 @@ async def decide_agent_task_plan_approval(
             yield f"data: {json.dumps(warning_data, ensure_ascii=False)}\n\n"
 
         done_data: dict[str, Any] = {
-            "type": "done", "content": "", "task_id": task_id,
+            "type": "done",
+            "content": "",
+            "task_id": task_id,
             "decision": record.get("decision"),
         }
         if session_id:
@@ -980,8 +1006,7 @@ async def cancel_agent_task(
     if task.status in (TaskStatus.WAITING_APPROVAL, TaskStatus.WAITING_PLAN_APPROVAL):
         # 无活跃流：DB 态权威收敛 + 取消旗围栏（拦并发应答/恢复的竞态窗口）。
         waiting_label = (
-            "计划审批等待中" if task.status == TaskStatus.WAITING_PLAN_APPROVAL
-            else "审批等待中"
+            "计划审批等待中" if task.status == TaskStatus.WAITING_PLAN_APPROVAL else "审批等待中"
         )
         ok = await checkpoint.mark_terminal(
             task_id,
@@ -997,9 +1022,7 @@ async def cancel_agent_task(
         return {"success": True, "data": {"task_id": task_id, "state": "cancelled"}}
     # 活跃运行期：置旗，等 run 在检查点收敛（202 = 已受理，未完成）。
     if not await checkpoint.request_cancel(task_id):
-        raise ServiceUnavailableError(
-            "取消通道暂不可用（协调存储不可达），请稍后重试"
-        )
+        raise ServiceUnavailableError("取消通道暂不可用（协调存储不可达），请稍后重试")
     return JSONResponse(
         status_code=202,
         content={
@@ -1018,7 +1041,9 @@ async def cancel_agent_task(
 
 class TaskSteerRequest(BaseModel):
     message: str = Field(
-        ..., min_length=1, max_length=2000,
+        ...,
+        min_length=1,
+        max_length=2000,
         description="运行中指导：下一个步边界注入后续步骤提示词（不打断当前步骤）",
     )
 
@@ -1073,8 +1098,7 @@ async def steer_agent_task(
         raise ServiceUnavailableError("转向通道暂不可用（协调存储不可达），请稍后重试")
     if pending < 0:
         raise steering.SteerBufferFullError(
-            f"转向缓冲已满（上限 {steering.MAX_STEER_QUEUE} 条），"
-            f"请等待 agent 消费后再发送",
+            f"转向缓冲已满（上限 {steering.MAX_STEER_QUEUE} 条），请等待 agent 消费后再发送",
             detail={"task_id": task_id, "pending": steering.MAX_STEER_QUEUE},
         )
     if task.status == TaskStatus.WAITING_APPROVAL:
@@ -1083,7 +1107,10 @@ async def steer_agent_task(
         note = "指导已入队；将在下一个步边界生效"
     logger.info(
         "转向入队 (task=%s, by=%s, pending=%d, state=%s)",
-        log_safe(task_id), current_user.id, pending, task.status.value,
+        log_safe(task_id),
+        current_user.id,
+        pending,
+        task.status.value,
     )
     return {
         "success": True,
@@ -1120,10 +1147,14 @@ async def agent_feedback(
     # 后续 lesson 写入。
     scope = await resolve_session_access_scope(current_user, db)
     try:
-        stmt = select(ChatMessage).join(ChatSession).where(
-            ChatMessage.id == body.message_id,
-            ChatSession.user_id == current_user.id,
-            *session_access_org_conditions(scope),
+        stmt = (
+            select(ChatMessage)
+            .join(ChatSession)
+            .where(
+                ChatMessage.id == body.message_id,
+                ChatSession.user_id == current_user.id,
+                *session_access_org_conditions(scope),
+            )
         )
         message_obj = (await db.execute(stmt)).scalar_one_or_none()
         if not message_obj:
@@ -1135,7 +1166,11 @@ async def agent_feedback(
         await db.commit()
 
         # Record Prometheus metric
-        fb_type = "thumbs_up" if body.feedback == 1 else ("thumbs_down" if body.feedback == -1 else "neutral")
+        fb_type = (
+            "thumbs_up"
+            if body.feedback == 1
+            else ("thumbs_down" if body.feedback == -1 else "neutral")
+        )
         AGENT_FEEDBACK_TOTAL.labels(feedback_type=fb_type).inc()
 
         # On negative feedback, record a lesson in agent memory so the
@@ -1143,6 +1178,7 @@ async def agent_feedback(
         if body.feedback == -1:
             try:
                 from app.agent.memory_bridge import AgentMemoryBridge
+
                 # Derive the agent_id from the session
                 session_stmt = select(ChatSession).where(ChatSession.id == message_obj.session_id)
                 session_result = await db.execute(session_stmt)
@@ -1184,6 +1220,7 @@ async def agent_feedback(
 
 
 # ── Tools & Skills ───────────────────────────────────────────────────────────
+
 
 @router.get("/tools")
 async def list_tools(
@@ -1235,6 +1272,7 @@ async def list_skills(
 
 # ── Session Management ──────────────────────────────────────────────────────
 
+
 @router.get("/sessions")
 async def list_sessions(
     page: int = Query(1, ge=1),
@@ -1270,13 +1308,15 @@ async def list_sessions(
             )
             msg_count = (await db.execute(msg_count_stmt)).scalar() or 0
 
-            data.append({
-                "id": s.id,
-                "title": s.title or "Untitled",
-                "message_count": msg_count,
-                "created_at": s.created_at.isoformat() if s.created_at else "",
-                "updated_at": s.updated_at.isoformat() if s.updated_at else "",
-            })
+            data.append(
+                {
+                    "id": s.id,
+                    "title": s.title or "Untitled",
+                    "message_count": msg_count,
+                    "created_at": s.created_at.isoformat() if s.created_at else "",
+                    "updated_at": s.updated_at.isoformat() if s.updated_at else "",
+                }
+            )
 
         return {
             "success": True,
@@ -1305,6 +1345,7 @@ async def create_session(
     # 建出的会话记 None，与随后 chat 的运行 org 不对称（feedback lesson 失效）。
     org_id = await require_organization(current_user, db)
     from app.core.database import AsyncSessionLocal
+
     async with AsyncSessionLocal() as session:
         try:
             session_id = str(uuid.uuid4())
@@ -1357,7 +1398,9 @@ async def get_session(
             msg_dict = {
                 "id": msg.id,
                 "content": msg.content,
-                "message_type": msg.message_type.value if hasattr(msg.message_type, "value") else str(msg.message_type),
+                "message_type": msg.message_type.value
+                if hasattr(msg.message_type, "value")
+                else str(msg.message_type),
                 "created_at": msg.created_at.isoformat() if msg.created_at else "",
             }
             if msg.meta_data:
@@ -1401,6 +1444,7 @@ async def delete_session(
             raise NotFoundError("会话不存在或无权删除")
 
         from sqlalchemy import delete as sql_delete
+
         await db.execute(sql_delete(ChatMessage).where(ChatMessage.session_id == session_id))
         await db.delete(session)
         await db.commit()
@@ -1408,6 +1452,7 @@ async def delete_session(
         # Clean up Redis keys
         try:
             from app.core.redis import redis_client
+
             if redis_client:
                 await redis_client.delete(f"agent:config:{session_id}")
                 await redis_client.delete(f"agent:session_state:{session_id}")
@@ -1424,6 +1469,7 @@ async def delete_session(
 
 
 # ── Agent Configuration ─────────────────────────────────────────────────────
+
 
 @router.get("/config")
 async def get_config(
@@ -1498,6 +1544,7 @@ async def update_config(
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+
 async def _load_session_messages(
     session_id: str,
     user_id: int,
@@ -1510,9 +1557,7 @@ async def _load_session_messages(
     """
     try:
         async with AsyncSessionLocal() as session:
-            stmt = select(ChatSession).where(
-                *session_access_conditions(session_id, user_id, scope)
-            )
+            stmt = select(ChatSession).where(*session_access_conditions(session_id, user_id, scope))
             result = await session.execute(stmt)
             if not result.scalar_one_or_none():
                 return []

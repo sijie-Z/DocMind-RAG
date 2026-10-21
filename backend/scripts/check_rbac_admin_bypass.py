@@ -203,9 +203,7 @@ def _collect_symbols(tree: ast.AST) -> tuple[set[str], set[str]]:
     return role_aliases, admin_names
 
 
-def _check_tree(
-    tree: ast.AST, path: Path
-) -> list[tuple[str, int, int, str]]:
+def _check_tree(tree: ast.AST, path: Path) -> list[tuple[str, int, int, str]]:
     violations: list[tuple[str, int, int, str]] = []
     role_aliases, admin_names = _collect_symbols(tree)
 
@@ -222,9 +220,7 @@ def _check_tree(
     for node in ast.walk(tree):
         if isinstance(node, ast.Compare):
             comparands = [node.left, *node.comparators]
-            if not any(
-                _contains_admin_literal(item, admin_names) for item in comparands
-            ):
+            if not any(_contains_admin_literal(item, admin_names) for item in comparands):
                 continue
             roots: set[str] = set()
             for item in comparands:
@@ -237,7 +233,7 @@ def _check_tree(
             if offending:
                 _add(
                     node,
-                    "role 属性与 \"admin\" 比较（身份判定）："
+                    'role 属性与 "admin" 比较（身份判定）：'
                     + ", ".join(offending)
                     + "；平台管理员用 is_platform_admin()，"
                     "组织管理员用 is_org_admin()/require_org_admin()",
@@ -251,14 +247,13 @@ def _check_tree(
             roots = _role_roots(func.value, role_aliases)
             if not roots:
                 continue
-            arg_has_admin = any(
-                _contains_admin_literal(arg, admin_names) for arg in node.args
-            )
+            arg_has_admin = any(_contains_admin_literal(arg, admin_names) for arg in node.args)
             # in_/notin_ 是 SQLAlchemy 的身份查询；startswith/endswith/contains
             # 等字符串方法一旦与 admin 字面量组合，同样是在按角色名做鉴权。
             if arg_has_admin and (
                 func.attr in ("in_", "notin_")
-                or func.attr in (
+                or func.attr
+                in (
                     "startswith",
                     "endswith",
                     "contains",
@@ -271,8 +266,7 @@ def _check_tree(
                 if offending:
                     _add(
                         node,
-                        f"role.{func.attr}(...) 包含 \"admin\"（身份判定）："
-                        + ", ".join(offending),
+                        f'role.{func.attr}(...) 包含 "admin"（身份判定）：' + ", ".join(offending),
                     )
     return violations
 
@@ -316,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
 
     violations = find_violations(root)
     if not violations:
-        print(f"[rbac-admin-bypass] OK：{root} 未发现 role 与 \"admin\" 的鉴权比较")
+        print(f'[rbac-admin-bypass] OK：{root} 未发现 role 与 "admin" 的鉴权比较')
         return 0
     for file_path, lineno, col, message in violations:
         print(f"{file_path}:{lineno}:{col}: {message}", file=sys.stderr)

@@ -24,6 +24,7 @@
 - 把模型解析改回 `settings.EMBEDDING_MODEL`（模拟本地/在线漂移）→ 单一模型用例必红；
 - 删掉 `_create_index_if_not_exists` 的 `_meta` 模型比较 → 模型漂移用例必红。
 """
+
 import asyncio
 import inspect
 from types import SimpleNamespace
@@ -49,9 +50,7 @@ class _FakeEmbeddingClient:
         inputs = kwargs.get("input")
         if isinstance(inputs, str):
             inputs = [inputs]
-        return SimpleNamespace(
-            data=[SimpleNamespace(embedding=[0.1] * self.dims) for _ in inputs]
-        )
+        return SimpleNamespace(data=[SimpleNamespace(embedding=[0.1] * self.dims) for _ in inputs])
 
 
 def _run(coro):
@@ -184,9 +183,7 @@ def test_local_embedding_mode_uses_one_model_for_index_and_query(monkeypatch):
 
     _run(_both_paths())
     models = {call["model"] for call in client.calls}
-    assert models == {"nomic-embed-text"}, (
-        f"索引与检索必须使用同一模型；实际用过的模型：{models}"
-    )
+    assert models == {"nomic-embed-text"}, f"索引与检索必须使用同一模型；实际用过的模型：{models}"
 
 
 def test_local_embedding_mode_does_not_require_online_key(monkeypatch):
@@ -209,13 +206,11 @@ def test_lifespan_wires_startup_probe_with_fail_fast():
     import re
     from pathlib import Path
 
-    main_src = (
-        Path(__file__).resolve().parents[2] / "app" / "main.py"
-    ).read_text(encoding="utf-8")
+    main_src = (Path(__file__).resolve().parents[2] / "app" / "main.py").read_text(encoding="utf-8")
     assert "verify_embedding_consistency()" in main_src
     assert re.search(
         r"except EmbeddingDimensionMismatchError as e:\s*"
-        r'logger\.critical\([^)]*\)\s*raise\b',
+        r"logger\.critical\([^)]*\)\s*raise\b",
         main_src,
     ), "lifespan 捕获 EmbeddingDimensionMismatchError 后必须 raise（fail fast）"
 
@@ -303,9 +298,7 @@ def test_startup_probe_unreachable_is_explicit_unavailable_error():
 
     client = _FakeEmbeddingClient(fail_with=ConnectionError("connection refused"))
     service = EmbeddingService(
-        config=EmbeddingConfig(
-            client=client, model="m", dimension=8, source="online"
-        )
+        config=EmbeddingConfig(client=client, model="m", dimension=8, source="online")
     )
     with pytest.raises(EmbeddingProbeUnavailableError):
         _run(verify_embedding_consistency(service=service))
@@ -321,9 +314,7 @@ def test_startup_probe_can_be_disabled(monkeypatch):
     monkeypatch.setattr(settings, "EMBEDDING_STARTUP_PROBE", False)
     client = _FakeEmbeddingClient(fail_with=ConnectionError("should not be called"))
     service = EmbeddingService(
-        config=EmbeddingConfig(
-            client=client, model="m", dimension=8, source="online"
-        )
+        config=EmbeddingConfig(client=client, model="m", dimension=8, source="online")
     )
     info = _run(verify_embedding_consistency(service=service))
     assert info["skipped"] is True
@@ -404,9 +395,9 @@ def test_legacy_index_without_model_meta_warns_but_does_not_block(monkeypatch, c
     with caplog.at_level("WARNING", logger=es_mod.logger.name):
         _run(es_mod._create_index_if_not_exists(client))  # 不抛错
 
-    assert any(
-        "embedding" in record.getMessage().lower() for record in caplog.records
-    ), "旧索引缺少模型元数据时必须显式告警（无法证明一致）"
+    assert any("embedding" in record.getMessage().lower() for record in caplog.records), (
+        "旧索引缺少模型元数据时必须显式告警（无法证明一致）"
+    )
 
 
 # ── 6. 索引配置错误时查询侧拒绝检索（漂移不得静默混用）──────────────────
@@ -528,9 +519,7 @@ async def test_pipeline_refuses_results_when_vector_config_error(monkeypatch):
     monkeypatch.setattr(pipeline.retriever, "retrieve", fake_retrieve)
 
     with pytest.raises(RetrievalUnavailableError) as excinfo:
-        await pipeline.search_knowledge_base(
-            "查询", organization_id=1, document_ids=["d1"]
-        )
+        await pipeline.search_knowledge_base("查询", organization_id=1, document_ids=["d1"])
     assert "维度不一致" in str(excinfo.value)
 
 
@@ -544,9 +533,7 @@ class _RaceIndexIndices:
         return False
 
     async def create(self, index=None, mappings=None, settings=None):
-        raise RuntimeError(
-            "BadRequestError(400, 'resource_already_exists_exception')"
-        )
+        raise RuntimeError("BadRequestError(400, 'resource_already_exists_exception')")
 
     async def get_mapping(self, index=None):
         return self._mapping

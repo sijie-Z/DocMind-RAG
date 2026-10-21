@@ -33,21 +33,45 @@ class TestLoad:
 
     def test_flat_mapping_tolerated(self, tmp_path):
         # 顶层直接是 {name: {...}} 的容错形态
-        cfg = load_servers_config(_write_config(tmp_path, {
-            "solo": {"transport": "stdio", "command": "python"},
-        }))
+        cfg = load_servers_config(
+            _write_config(
+                tmp_path,
+                {
+                    "solo": {"transport": "stdio", "command": "python"},
+                },
+            )
+        )
         assert [c.name for c in cfg] == ["solo"]
 
     def test_parses_stdio_fields(self, tmp_path):
-        path = _write_config(tmp_path, {"servers": {"fs": {
-            "transport": "stdio", "command": "npx", "args": ["-y", "pkg"],
-            "env": {"K": "V"}, "cwd": "C:/tmp", "enabled": True,
-            "description": "d", "timeout": 60,
-        }}})
+        path = _write_config(
+            tmp_path,
+            {
+                "servers": {
+                    "fs": {
+                        "transport": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "pkg"],
+                        "env": {"K": "V"},
+                        "cwd": "C:/tmp",
+                        "enabled": True,
+                        "description": "d",
+                        "timeout": 60,
+                    }
+                }
+            },
+        )
         [cfg] = load_servers_config(path)
         assert cfg == MCPServerConfig(
-            name="fs", transport="stdio", enabled=True, description="d", timeout=60.0,
-            command="npx", args=["-y", "pkg"], env={"K": "V"}, cwd="C:/tmp",
+            name="fs",
+            transport="stdio",
+            enabled=True,
+            description="d",
+            timeout=60.0,
+            command="npx",
+            args=["-y", "pkg"],
+            env={"K": "V"},
+            cwd="C:/tmp",
         )
 
     def test_default_enabled_is_false(self, tmp_path):
@@ -56,9 +80,17 @@ class TestLoad:
         assert cfg.enabled is False  # 配置存在 ≠ 主动接入
 
     def test_transport_alias_streamable_http(self, tmp_path):
-        path = _write_config(tmp_path, {"servers": {"s": {
-            "transport": "streamable-http", "url": "https://x/mcp",
-        }}})
+        path = _write_config(
+            tmp_path,
+            {
+                "servers": {
+                    "s": {
+                        "transport": "streamable-http",
+                        "url": "https://x/mcp",
+                    }
+                }
+            },
+        )
         [cfg] = load_servers_config(path)
         assert cfg.transport == "http"
 
@@ -71,10 +103,15 @@ class TestLoad:
         assert load_servers_config(path) == []
 
     def test_unknown_transport_skipped(self, tmp_path):
-        path = _write_config(tmp_path, {"servers": {
-            "bad": {"transport": "carrier-pigeon", "command": "x"},
-            "good": {"command": "python"},
-        }})
+        path = _write_config(
+            tmp_path,
+            {
+                "servers": {
+                    "bad": {"transport": "carrier-pigeon", "command": "x"},
+                    "good": {"command": "python"},
+                }
+            },
+        )
         assert [c.name for c in load_servers_config(path)] == ["good"]
 
     def test_non_dict_entry_skipped(self, tmp_path):
@@ -88,19 +125,35 @@ class TestLoad:
 
     def test_env_expansion(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MCP_TEST_TOKEN", "sekrit")
-        path = _write_config(tmp_path, {"servers": {"s": {
-            "transport": "http", "url": "https://x/${MCP_TEST_TOKEN}",
-            "headers": {"Authorization": "Bearer ${MCP_TEST_TOKEN}"},
-        }}})
+        path = _write_config(
+            tmp_path,
+            {
+                "servers": {
+                    "s": {
+                        "transport": "http",
+                        "url": "https://x/${MCP_TEST_TOKEN}",
+                        "headers": {"Authorization": "Bearer ${MCP_TEST_TOKEN}"},
+                    }
+                }
+            },
+        )
         [cfg] = load_servers_config(path)
         assert cfg.url == "https://x/sekrit"
         assert cfg.headers == {"Authorization": "Bearer sekrit"}
 
     def test_env_expansion_missing_var_becomes_empty(self, tmp_path, monkeypatch, caplog):
         monkeypatch.delenv("MCP_TEST_ABSENT", raising=False)
-        path = _write_config(tmp_path, {"servers": {"s": {
-            "command": "python", "args": ["${MCP_TEST_ABSENT}"],
-        }}})
+        path = _write_config(
+            tmp_path,
+            {
+                "servers": {
+                    "s": {
+                        "command": "python",
+                        "args": ["${MCP_TEST_ABSENT}"],
+                    }
+                }
+            },
+        )
         with caplog.at_level("WARNING"):
             [cfg] = load_servers_config(path)
         assert cfg.args == [""]

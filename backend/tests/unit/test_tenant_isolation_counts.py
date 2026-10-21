@@ -19,6 +19,7 @@
 DB 侧用内存 SQLite **真建表、真插入、真执行查询**（风格照抄
 `test_issue95_org_tree_visibility.py`）；ES 侧用按 org term 真实过滤的假 client。
 """
+
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -130,10 +131,12 @@ async def _make_tenant_db():
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as s:
-        s.add_all([
-            Organization(id=ORG_A, name="TenantA", owner_id=0),
-            Organization(id=ORG_B, name="TenantB", owner_id=0),
-        ])
+        s.add_all(
+            [
+                Organization(id=ORG_A, name="TenantA", owner_id=0),
+                Organization(id=ORG_B, name="TenantB", owner_id=0),
+            ]
+        )
         users = [
             User(
                 username=f"user-a{i}",
@@ -145,18 +148,20 @@ async def _make_tenant_db():
         ]
         s.add_all(users)
         await s.flush()
-        s.add_all([
-            Document(
-                id=f"doc-a{i}",
-                filename=f"a{i}.pdf",
-                file_path=f"/tmp/a{i}.pdf",
-                file_size=1024,
-                file_type=DocumentType.PDF,
-                organization_id=ORG_A,
-                uploaded_by=users[0].id,
-            )
-            for i in range(A_DOCS)
-        ])
+        s.add_all(
+            [
+                Document(
+                    id=f"doc-a{i}",
+                    filename=f"a{i}.pdf",
+                    file_path=f"/tmp/a{i}.pdf",
+                    file_size=1024,
+                    file_type=DocumentType.PDF,
+                    organization_id=ORG_A,
+                    uploaded_by=users[0].id,
+                )
+                for i in range(A_DOCS)
+            ]
+        )
         await s.commit()
     return engine, factory
 
@@ -444,9 +449,7 @@ def test_chat_agent_stream_no_org_user_refused_without_org1_fallback(client: Tes
     async def _fake_chat(**kwargs):
         captured.update(kwargs)
         # 复现服务入口的真实拒绝形态（组织上下文缺失 → ValueError）。
-        raise ValueError(
-            "AgentService.chat 缺少 organization_id，拒绝在无组织上下文下运行"
-        )
+        raise ValueError("AgentService.chat 缺少 organization_id，拒绝在无组织上下文下运行")
         yield  # pragma: no cover — 保持 async generator 形态
 
     async def _db():

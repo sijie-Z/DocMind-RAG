@@ -6,14 +6,14 @@ get_field 会在字符串内部对对象执行 getattr/getitem，因此
 从而绕过 _ast_safety_check。修复后 format/format_map/Formatter/get_field/vformat
 一律禁用，字符串字面量中的 dunder 标记同样拒绝。
 """
+
 import asyncio
 
 from app.agent.tools.code_execution import _ast_safety_check, execute_python
 
 # 已验证的逃逸片段：旧检查完全放行
 BYPASS_SNIPPET = (
-    'string.Formatter().get_field("0.__globals__[__builtins__][__import__]", '
-    "(json.dumps,), {})"
+    'string.Formatter().get_field("0.__globals__[__builtins__][__import__]", (json.dumps,), {})'
 )
 
 

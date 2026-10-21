@@ -5,6 +5,7 @@
 - #25：Redis 里的坏配置值在 GET /llm-config 仍可见（invalid 标记），
   total 不减、原始值不出网。
 """
+
 import json
 import logging
 from types import SimpleNamespace
@@ -56,9 +57,7 @@ class TestFilesProxyStorageErrors:
         with caplog.at_level(logging.ERROR, logger="app.main"):
             resp = client.get("/files/avatars/1.png")
         assert resp.status_code == 503, "桶缺失不得伪装 404「文件不存在」"
-        assert any(
-            r.name == "app.main" and r.levelno >= logging.ERROR for r in caplog.records
-        )
+        assert any(r.name == "app.main" and r.levelno >= logging.ERROR for r in caplog.records)
 
     def test_internal_error_is_503_not_404(self, client, monkeypatch, caplog):
         _pin_minio_failure(monkeypatch, _s3_error("InternalError"))
@@ -66,9 +65,9 @@ class TestFilesProxyStorageErrors:
             resp = client.get("/files/avatars/1.png")
         assert resp.status_code == 503, "存储故障必须如实 503，不得伪装 404"
         assert resp.json()["code"] == 503
-        assert any(
-            r.name == "app.main" and r.levelno >= logging.ERROR for r in caplog.records
-        ), "503 分流必须留 error 日志（原先零留痕）"
+        assert any(r.name == "app.main" and r.levelno >= logging.ERROR for r in caplog.records), (
+            "503 分流必须留 error 日志（原先零留痕）"
+        )
 
     def test_unreachable_storage_is_503_not_404(self, client, monkeypatch):
         _pin_minio_failure(monkeypatch, ConnectionError("MinIO unreachable"))
@@ -93,12 +92,17 @@ class TestLlmConfigCorruptVisibility:
     def test_corrupt_entry_listed_with_marker(self, client, monkeypatch, caplog):
         import app.api.v1.endpoints.llm_config as llm_config_module
 
-        good = json.dumps({
-            "id": "good00000001", "provider": "deepseek",
-            "config_name": "正常的", "api_key": "sk-abcdefghijklmnop",
-        })
+        good = json.dumps(
+            {
+                "id": "good00000001",
+                "provider": "deepseek",
+                "config_name": "正常的",
+                "api_key": "sk-abcdefghijklmnop",
+            }
+        )
         monkeypatch.setattr(
-            llm_config_module, "redis_client",
+            llm_config_module,
+            "redis_client",
             _FakeConfigRedis({"good00000001": good, "bad000000002": _BAD_RAW}),
         )
         # W0-2：llm_config 读端点在过渡期只允许平台管理员；本用例验证的是

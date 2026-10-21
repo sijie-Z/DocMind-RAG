@@ -18,6 +18,7 @@
 - 去掉事件泵 except 里的 failed 收尾 → 用例 2 的"落库 failed"断言红（卡 running）；
 - 去掉任一失败出口的 done → 对应用例红。
 """
+
 import json
 
 import httpx
@@ -28,7 +29,12 @@ from sqlalchemy.pool import StaticPool
 
 _MIN_FLOW = {
     "nodes": [
-        {"id": "in1", "type": "input", "data": {"prompt": "{{input}}"}, "position": {"x": 0, "y": 0}},
+        {
+            "id": "in1",
+            "type": "input",
+            "data": {"prompt": "{{input}}"},
+            "position": {"x": 0, "y": 0},
+        },
         {"id": "out1", "type": "output", "data": {}, "position": {"x": 1, "y": 0}},
     ],
     "edges": [{"id": "e1", "source": "in1", "target": "out1"}],
@@ -70,9 +76,9 @@ def _parse_sse_events(body: str) -> list[tuple[str, dict]]:
         event_type, data = None, None
         for line in block.split("\n"):
             if line.startswith("event: "):
-                event_type = line[len("event: "):]
+                event_type = line[len("event: ") :]
             elif line.startswith("data: "):
-                data = json.loads(line[len("data: "):])
+                data = json.loads(line[len("data: ") :])
         if event_type is not None:
             events.append((event_type, data))
     return events
@@ -146,7 +152,8 @@ async def test_stream_minimal_flow_completes_and_persists_node_results():
 
         # 实时 node_complete（引擎 emit，无 status 字段）：消息以忠实 dict 形态出现
         in1_live = next(
-            d for t, d in events
+            d
+            for t, d in events
             if t == "node_complete" and d.get("node_id") == "in1" and "status" not in d
         )
         msg = in1_live["output"]["messages"][0]

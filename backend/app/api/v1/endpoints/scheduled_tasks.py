@@ -43,9 +43,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-async def _get_owned_task(
-    db: AsyncSession, task_id: str, current_user: User
-) -> ScheduledTask:
+async def _get_owned_task(db: AsyncSession, task_id: str, current_user: User) -> ScheduledTask:
     """取任务并做归属校验：非创建者（且非超管）一律 404。
 
     超管是**全权**（读+写）——与仓内 permission_required 的上帝模式口径一致，
@@ -73,9 +71,7 @@ def _resolve_timezone(raw: str | None) -> str:
     return name
 
 
-async def _clear_dangling_last_task_ids(
-    db: AsyncSession, tasks: list[ScheduledTask]
-) -> None:
+async def _clear_dangling_last_task_ids(db: AsyncSession, tasks: list[ScheduledTask]) -> None:
     """A4 生命周期：清理 last_task_id 悬空引用（指向的 agent 任务已删除时置 NULL）。
 
     last_task_id 的语义是「最近一次运行对应的 agent_tasks.id（结果链接）」；
@@ -103,19 +99,13 @@ async def _clear_dangling_last_task_ids(
         existing = set(
             (
                 await db.execute(
-                    select(AgentTask.id).where(
-                        AgentTask.id.in_(set(candidates.values()))
-                    )
+                    select(AgentTask.id).where(AgentTask.id.in_(set(candidates.values())))
                 )
             )
             .scalars()
             .all()
         )
-        dangling = {
-            task_id: ref
-            for task_id, ref in candidates.items()
-            if ref not in existing
-        }
+        dangling = {task_id: ref for task_id, ref in candidates.items() if ref not in existing}
         if not dangling:
             return
         for task_id, ref in dangling.items():
@@ -133,9 +123,7 @@ async def _clear_dangling_last_task_ids(
             await db.rollback()
         except Exception:
             pass
-        logger.warning(
-            f"last_task_id 悬空引用清理失败（降级保留原值，下次读取重试）: {exc}"
-        )
+        logger.warning(f"last_task_id 悬空引用清理失败（降级保留原值，下次读取重试）: {exc}")
         # rollback 会过期请求会话内**全部**已加载实例（expire_on_commit=False
         # 只作用于 commit）。不恢复的话，响应序列化 / 端点后续读取会在同步
         # 上下文触发惰性加载：列表/详情抛 DetachedInstanceError，pause 等
@@ -214,9 +202,7 @@ async def list_scheduled_tasks(
     if enabled is not None:
         base = base.where(ScheduledTask.enabled == enabled)
 
-    total = (
-        await db.execute(select(func.count()).select_from(base.subquery()))
-    ).scalar_one()
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
     rows = (
         (
             await db.execute(
@@ -322,9 +308,7 @@ async def resume_scheduled_task(
     立即补跑一次；已运行完成的单次任务 409——需先更新 once_at 重新武装）。"""
     task = await _get_owned_task(db, task_id, current_user)
     if task.is_completed_once:
-        raise ConflictError(
-            detail="单次任务已运行完成，不能恢复；如需重跑请更新 once_at 重新武装"
-        )
+        raise ConflictError(detail="单次任务已运行完成，不能恢复；如需重跑请更新 once_at 重新武装")
     task.enabled = True
     try:
         task.next_run_at = next_on_resume(task, utcnow_naive())

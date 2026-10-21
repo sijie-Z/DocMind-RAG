@@ -88,9 +88,7 @@ def test_runtime_registry_matches_static_tool_derivation():
     except ImportError as exc:  # pragma: no cover - 轻量 hygiene job 路径
         pytest.skip(f"backend dependencies unavailable: {exc}")
 
-    derived_names = set(
-        checker.derive_registered_tool_names(BACKEND_ROOT / "app" / "agent")
-    )
+    derived_names = set(checker.derive_registered_tool_names(BACKEND_ROOT / "app" / "agent"))
     # MCP 动态工具（mcp__<server>__<tool>）是运行时注册的外部工具，不在
     # 「内置工具实现数」口径内；过滤后再与静态派生集合比对。
     runtime_names = {name for name in tool_registry._tools if not name.startswith("mcp__")}
@@ -171,9 +169,7 @@ def test_tool_derivation_follows_import_graph_only(tmp_path):
         "async def core_one(**ctx): ...\n",
         encoding="utf-8",
     )
-    (tools / "__init__.py").write_text(
-        "from app.agent.tools import one, pkg\n", encoding="utf-8"
-    )
+    (tools / "__init__.py").write_text("from app.agent.tools import one, pkg\n", encoding="utf-8")
     (tools / "one.py").write_text(
         "from app.agent.registry import register_tool\n"
         "@register_tool(name='tool_one')\n"
@@ -232,9 +228,7 @@ def test_doc_anchor_mismatch_is_reported(tmp_path):
             label="工具数",
         )
     ]
-    problems = checker.check_doc_anchors(
-        tmp_path, {"registered_tools": 33}, anchors=anchors
-    )
+    problems = checker.check_doc_anchors(tmp_path, {"registered_tools": 33}, anchors=anchors)
     assert len(problems) == 1
     assert "README.md" in problems[0] and "12" in problems[0] and "33" in problems[0]
 
@@ -306,18 +300,14 @@ def _make_mini_repo(tmp_path: Path) -> Path:
         "async def core_one(**ctx): ...\n",
         encoding="utf-8",
     )
-    (tools / "__init__.py").write_text(
-        "from app.agent.tools import one\n", encoding="utf-8"
-    )
+    (tools / "__init__.py").write_text("from app.agent.tools import one\n", encoding="utf-8")
     (tools / "one.py").write_text(
         "from app.agent.registry import register_tool\n"
         "@register_tool(name='tool_one')\n"
         "async def tool_one(**ctx): ...\n",
         encoding="utf-8",
     )
-    (frontend / "index.ts").write_text(
-        "export const routes = [{ path: '/a' }]\n", encoding="utf-8"
-    )
+    (frontend / "index.ts").write_text("export const routes = [{ path: '/a' }]\n", encoding="utf-8")
     (root / "README.md").write_text(
         "文档数字见 docs/facts.json。\n"
         "可调用 2 个工具。\n"

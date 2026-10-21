@@ -8,6 +8,7 @@
 - **空文档边界**：零/过短文本的已索引文档不崩、计入 empty、写标记避免反复重排；
 - **dry-run**：只列计划（已摄入=skipped，待摄入=planned），不写任何数据。
 """
+
 import importlib.util
 import json
 from pathlib import Path
@@ -61,7 +62,7 @@ class _FakeRedis:
 
 TEXTS = {
     "doc-a": "DOC-A 段落：DocMind 系统由 Planner、Executor、Reflector 三个核心模块组成，"
-             "通过工具注册表协同工作。" * 3,
+    "通过工具注册表协同工作。" * 3,
     "doc-b": "DOC-B 段落：检索层使用 Elasticsearch 与向量混合召回，并以 RRF 融合排序。" * 3,
     "doc-empty": "",
 }
@@ -69,18 +70,22 @@ TEXTS = {
 
 def _entities_for(text: str):
     if "DOC-A" in text:
-        return [{
-            "entity": "DocMind",
-            "type": "PRODUCT",
-            "description": "AI Agent 系统",
-            "relations": [{"target": "Planner", "relation": "PART_OF"}],
-        }]
-    return [{
-        "entity": "Elasticsearch",
-        "type": "TECHNOLOGY",
-        "description": "检索引擎",
-        "relations": [],
-    }]
+        return [
+            {
+                "entity": "DocMind",
+                "type": "PRODUCT",
+                "description": "AI Agent 系统",
+                "relations": [{"target": "Planner", "relation": "PART_OF"}],
+            }
+        ]
+    return [
+        {
+            "entity": "Elasticsearch",
+            "type": "TECHNOLOGY",
+            "description": "检索引擎",
+            "relations": [],
+        }
+    ]
 
 
 async def _stub_extract(service, monkeypatch):

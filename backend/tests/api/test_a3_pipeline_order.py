@@ -61,17 +61,13 @@ class TestRebuildOrdering:
             "delete_es_by_document_id",
             fake_delete_es,
         )
-        monkeypatch.setattr(
-            knowledge_mod, "create_notification", AsyncMock(return_value=None)
-        )
+        monkeypatch.setattr(knowledge_mod, "create_notification", AsyncMock(return_value=None))
 
         async def fake_send(topic, message):
             events.append("send")
             return True
 
-        monkeypatch.setattr(
-            knowledge_mod.kafka_producer, "send_message", fake_send
-        )
+        monkeypatch.setattr(knowledge_mod.kafka_producer, "send_message", fake_send)
 
         db = MagicMock()
         db.add = MagicMock(side_effect=lambda obj: events.append(("add", obj)))
@@ -92,16 +88,13 @@ class TestRebuildOrdering:
         )
 
         assert result.success is True
-        assert "status" not in vars(doc), (
-            "重建不得直接赋值 doc.status（会覆盖 worker 的新终态）"
-        )
+        assert "status" not in vars(doc), "重建不得直接赋值 doc.status（会覆盖 worker 的新终态）"
 
         # 顺序：job 已 commit，且条件更新已 commit，之后才发 Kafka
         send_at = events.index("send")
         before_send = events[:send_at]
         assert any(
-            isinstance(e, tuple) and e[0] == "add"
-            and isinstance(e[1], KnowledgeProcessingJob)
+            isinstance(e, tuple) and e[0] == "add" and isinstance(e[1], KnowledgeProcessingJob)
             for e in before_send
         ), "job 必须已在发送前写入"
         assert before_send.count("commit") >= 2, (
@@ -114,19 +107,13 @@ class TestRebuildOrdering:
         compiled = captured_statements[0].compile()
         rendered = str(compiled)
         assert "documents.status !=" in rendered, rendered
-        assert DocumentStatus.INDEXED in compiled.params.values(), (
-            "条件必须是 status != INDEXED"
-        )
-        assert DocumentStatus.PENDING in compiled.params.values(), (
-            "条件更新应把状态写为 PENDING"
-        )
+        assert DocumentStatus.INDEXED in compiled.params.values(), "条件必须是 status != INDEXED"
+        assert DocumentStatus.PENDING in compiled.params.values(), "条件更新应把状态写为 PENDING"
 
         job_obj = next(
             e[1]
             for e in events
-            if isinstance(e, tuple)
-            and e[0] == "add"
-            and isinstance(e[1], KnowledgeProcessingJob)
+            if isinstance(e, tuple) and e[0] == "add" and isinstance(e[1], KnowledgeProcessingJob)
         )
         assert job_obj.local_fallback is False, (
             "N4：Kafka 投递确认后必须清除本机兜底标记（否则重启会重复本地调度）"
@@ -146,23 +133,15 @@ class TestRebuildOrdering:
             file_type=SimpleNamespace(value="pdf"),
             organization_id=1,
         )
-        monkeypatch.setattr(
-            knowledge_mod, "get_document_for_user", AsyncMock(return_value=doc)
-        )
+        monkeypatch.setattr(knowledge_mod, "get_document_for_user", AsyncMock(return_value=doc))
         delete_es = AsyncMock(return_value=None)
-        monkeypatch.setattr(
-            knowledge_mod.knowledge_service, "delete_es_by_document_id", delete_es
-        )
-        monkeypatch.setattr(
-            knowledge_mod, "create_notification", AsyncMock(return_value=None)
-        )
+        monkeypatch.setattr(knowledge_mod.knowledge_service, "delete_es_by_document_id", delete_es)
+        monkeypatch.setattr(knowledge_mod, "create_notification", AsyncMock(return_value=None))
 
         db = MagicMock()
         db.add = MagicMock()
         db.flush = AsyncMock()  # 变异对照：旧顺序（flush→删 ES）也必须能被判别
-        db.commit = AsyncMock(
-            side_effect=RuntimeError("db down at job commit")
-        )
+        db.commit = AsyncMock(side_effect=RuntimeError("db down at job commit"))
         db.execute = AsyncMock(return_value=MagicMock())
 
         with pytest.raises(AppError, match="重建知识库失败"):
@@ -187,17 +166,13 @@ class TestRebuildOrdering:
             file_type=SimpleNamespace(value="pdf"),
             organization_id=1,
         )
-        monkeypatch.setattr(
-            knowledge_mod, "get_document_for_user", AsyncMock(return_value=doc)
-        )
+        monkeypatch.setattr(knowledge_mod, "get_document_for_user", AsyncMock(return_value=doc))
         monkeypatch.setattr(
             knowledge_mod.knowledge_service,
             "delete_es_by_document_id",
             AsyncMock(side_effect=RuntimeError("ES down")),
         )
-        monkeypatch.setattr(
-            knowledge_mod, "create_notification", AsyncMock(return_value=None)
-        )
+        monkeypatch.setattr(knowledge_mod, "create_notification", AsyncMock(return_value=None))
 
         captured = []
 
@@ -216,8 +191,7 @@ class TestRebuildOrdering:
             )
 
         job_updates = [
-            stmt for stmt in captured
-            if "knowledge_processing_jobs" in str(stmt.compile())
+            stmt for stmt in captured if "knowledge_processing_jobs" in str(stmt.compile())
         ]
         assert job_updates, "ES 删除失败必须把 job 条件收敛（不能留下 QUEUED 孤儿）"
         params = job_updates[0].compile().params.values()
@@ -244,17 +218,13 @@ class TestRebuildOrdering:
         events = []
         captured = []
 
-        monkeypatch.setattr(
-            knowledge_mod, "get_document_for_user", AsyncMock(return_value=doc)
-        )
+        monkeypatch.setattr(knowledge_mod, "get_document_for_user", AsyncMock(return_value=doc))
         monkeypatch.setattr(
             knowledge_mod.knowledge_service,
             "delete_es_by_document_id",
             AsyncMock(return_value=None),
         )
-        monkeypatch.setattr(
-            knowledge_mod, "create_notification", AsyncMock(return_value=None)
-        )
+        monkeypatch.setattr(knowledge_mod, "create_notification", AsyncMock(return_value=None))
         monkeypatch.setattr(
             knowledge_mod.kafka_producer,
             "send_message",
@@ -270,8 +240,7 @@ class TestRebuildOrdering:
                 (
                     "commit",
                     any(
-                        isinstance(o, KnowledgeProcessingJob) and o.local_fallback
-                        for o in captured
+                        isinstance(o, KnowledgeProcessingJob) and o.local_fallback for o in captured
                     ),
                 )
             )
@@ -342,11 +311,13 @@ class TestUploadJobPersistedBeforeSend:
         app.dependency_overrides[get_current_user] = _user
 
         try:
-            with patch("app.api.v1.endpoints.documents.minio_client") as mock_minio, \
-                 patch(
-                     "app.api.v1.endpoints.documents.kafka_producer.send_message",
-                     fake_send,
-                 ):
+            with (
+                patch("app.api.v1.endpoints.documents.minio_client") as mock_minio,
+                patch(
+                    "app.api.v1.endpoints.documents.kafka_producer.send_message",
+                    fake_send,
+                ),
+            ):
                 mock_minio.stat_object.side_effect = Exception("not found")
                 mock_minio.put_object = MagicMock()
 
@@ -382,9 +353,7 @@ class TestUploadJobPersistedBeforeSend:
         )
         send_at = events.index("send")
         assert job_add_at < send_at, "job 必须在发送前写入"
-        assert "commit" in events[job_add_at + 1:send_at], (
+        assert "commit" in events[job_add_at + 1 : send_at], (
             "job 必须在发送前 commit（仅 flush 不算）"
         )
-        assert jobs[0].local_fallback is False, (
-            "N4：Kafka 投递确认后必须清除本机兜底标记"
-        )
+        assert jobs[0].local_fallback is False, "N4：Kafka 投递确认后必须清除本机兜底标记"

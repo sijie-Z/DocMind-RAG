@@ -3,6 +3,7 @@
 修复前：缓存无上限、无驱逐，每个命名空间都常驻内存（长期记忆 + embedding），
 且 remember() 每次都会把整份长期记忆写一遍 Redis。
 """
+
 import asyncio
 
 import pytest
@@ -48,7 +49,7 @@ class TestBoundedCache:
             ms.get_memory_system(1, 0, f"fix-m2-slot-{i}")
 
         kept = ms.get_memory_system(1, 0, "fix-m2-slot-0")  # 触碰 → 变为最近使用
-        ms.get_memory_system(1, 0, "fix-m2-newcomer")       # 触发一次驱逐（应驱逐 slot-1）
+        ms.get_memory_system(1, 0, "fix-m2-newcomer")  # 触发一次驱逐（应驱逐 slot-1）
 
         assert ms.get_memory_system(1, 0, "fix-m2-slot-0") is kept
         assert len(ms.memory_systems) == cap
@@ -76,8 +77,7 @@ class TestEvictionPersistence:
             ms.get_memory_system(1, 0, f"fix-m2-flush-{i}")
 
         await asyncio.sleep(0.05)  # 等待驱逐时调度的持久化任务执行
-        assert "1:0:fix-m2-flush-oldest" in saved, \
-            "驱逐前必须把已加载实例的长期/反思记忆写回 Redis"
+        assert "1:0:fix-m2-flush-oldest" in saved, "驱逐前必须把已加载实例的长期/反思记忆写回 Redis"
 
     @pytest.mark.asyncio
     async def test_unloaded_system_not_written_on_eviction(self, isolated_cache, monkeypatch):

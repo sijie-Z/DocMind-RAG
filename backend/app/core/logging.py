@@ -1,4 +1,5 @@
 """结构化日志配置模块"""
+
 import contextvars
 import json
 import logging
@@ -13,7 +14,9 @@ from app.core.request_id import request_id_var
 # request_id_var 的唯一归属在 app.core.request_id（RequestIDMiddleware 在那里写入），
 # 这里只 re-export，避免出现两个同名 ContextVar、日志永远读不到值。
 trace_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("trace_id", default=None)
-user_id_var: contextvars.ContextVar[str | int | None] = contextvars.ContextVar("user_id", default=None)
+user_id_var: contextvars.ContextVar[str | int | None] = contextvars.ContextVar(
+    "user_id", default=None
+)
 
 
 def sanitize_log_value(value: object) -> str:
@@ -69,11 +72,31 @@ class JsonFormatter(logging.Formatter):
         # Include extra fields passed via extra={} in log calls
         for key, value in record.__dict__.items():
             if key not in (
-                "args", "asctime", "created", "exc_info", "exc_text",
-                "filename", "funcName", "levelname", "levelno", "lineno",
-                "message", "module", "msecs", "msg", "name", "pathname",
-                "process", "processName", "relativeCreated", "stack_info",
-                "thread", "threadName", "service", "request_id", "trace_id",
+                "args",
+                "asctime",
+                "created",
+                "exc_info",
+                "exc_text",
+                "filename",
+                "funcName",
+                "levelname",
+                "levelno",
+                "lineno",
+                "message",
+                "module",
+                "msecs",
+                "msg",
+                "name",
+                "pathname",
+                "process",
+                "processName",
+                "relativeCreated",
+                "stack_info",
+                "thread",
+                "threadName",
+                "service",
+                "request_id",
+                "trace_id",
                 "user_id",
             ) and (isinstance(value, (str, int, float, bool, list, dict)) or value is None):
                 payload[key] = value

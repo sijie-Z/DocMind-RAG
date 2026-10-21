@@ -107,7 +107,7 @@ def _sse_payloads(text: str) -> list[dict]:
     import json as _json
 
     lines = [ln for ln in text.split("\n\n") if ln.startswith("data: ")]
-    return [_json.loads(ln[len("data: "):]) for ln in lines]
+    return [_json.loads(ln[len("data: ") :]) for ln in lines]
 
 
 @pytest.fixture(autouse=True)
@@ -151,12 +151,18 @@ def _scripted_planner(monkeypatch, script: list[list[str]]) -> list[dict]:
         prev = None
         for i, desc in enumerate(steps, start=1):
             yield AgentEvent(
-                type="plan_step", plan_id="plan-1", plan_step_id=f"s{i}",
-                content=desc, dependencies=[prev] if prev else [],
+                type="plan_step",
+                plan_id="plan-1",
+                plan_step_id=f"s{i}",
+                content=desc,
+                dependencies=[prev] if prev else [],
             )
             prev = f"s{i}"
         yield AgentEvent(
-            type="plan_complete", plan_id="plan-1", plan_goal="目标", content="计划完成",
+            type="plan_complete",
+            plan_id="plan-1",
+            plan_goal="目标",
+            content="计划完成",
         )
 
     monkeypatch.setattr(Planner, "plan", _plan)
@@ -168,10 +174,14 @@ def _fake_client(captured: list | None = None, tool_name: str = _TASK_KW):
         if captured is not None:
             captured.append(messages)
         if tools:
-            tc = SimpleNamespace(id="tc-1", function=SimpleNamespace(name=tool_name, arguments='{"query": "q"}'))
+            tc = SimpleNamespace(
+                id="tc-1", function=SimpleNamespace(name=tool_name, arguments='{"query": "q"}')
+            )
             msg = SimpleNamespace(content="", tool_calls=[tc], role="assistant")
         else:
-            msg = SimpleNamespace(content="根据检索结果：这是答案。", tool_calls=None, role="assistant")
+            msg = SimpleNamespace(
+                content="根据检索结果：这是答案。", tool_calls=None, role="assistant"
+            )
         return SimpleNamespace(
             choices=[SimpleNamespace(message=msg, finish_reason="stop")],
             usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2),
@@ -232,7 +242,8 @@ async def test_pause_then_approve_executes(db_factory, fake_redis, monkeypatch, 
         assert data["state"] == "waiting_plan_approval"
         assert data["is_recoverable"] is True
         assert [s["description"] for s in data["plan_approval"]["steps"]] == [
-            "第一步：检索", "第二步：综合",
+            "第一步：检索",
+            "第二步：综合",
         ]
 
         # 批准 → SSE 续跑 → 执行
@@ -261,9 +272,7 @@ async def test_edit_replaces_steps_then_executes_edited(db_factory, fake_redis, 
     app.dependency_overrides[get_current_user] = lambda: _mock_user()
     monkeypatch.setattr(agent_service, "_client", _fake_client(captured), raising=False)
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://plan"
-        ) as c:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://plan") as c:
             _scripted_planner(monkeypatch, [["原始第一步"]])
             spy = AsyncMock(return_value=ToolResult.ok(data="x"))
             with patch.object(tool_registry, "execute_detailed", new=spy):
@@ -274,8 +283,12 @@ async def test_edit_replaces_steps_then_executes_edited(db_factory, fake_redis, 
                     json={
                         "decision": "edit",
                         "edited_steps": [
-                            {"id": "s9", "description": "人类编辑后的唯一步骤",
-                             "dependencies": [], "tool_hint": None},
+                            {
+                                "id": "s9",
+                                "description": "人类编辑后的唯一步骤",
+                                "dependencies": [],
+                                "tool_hint": None,
+                            },
                         ],
                     },
                 )
@@ -295,7 +308,9 @@ async def test_edit_replaces_steps_then_executes_edited(db_factory, fake_redis, 
 
 
 @pytest.mark.asyncio
-async def test_edit_invalid_inputs_are_422_and_site_intact(db_factory, fake_redis, monkeypatch, client):
+async def test_edit_invalid_inputs_are_422_and_site_intact(
+    db_factory, fake_redis, monkeypatch, client
+):
     _scripted_planner(monkeypatch, [["第一步", "第二步"]])
     spy = AsyncMock(return_value=ToolResult.ok(data="x"))
     with patch.object(tool_registry, "execute_detailed", new=spy):
@@ -304,20 +319,28 @@ async def test_edit_invalid_inputs_are_422_and_site_intact(db_factory, fake_redi
         bad_payloads = [
             {"decision": "edit"},  # 缺 edited_steps
             {"decision": "edit", "edited_steps": []},  # 空列表
-            {"decision": "edit", "edited_steps": [
-                {"id": "s1", "description": "x", "dependencies": ["s9"]}]},  # 依赖不存在
-            {"decision": "edit", "edited_steps": [
-                {"id": "s1", "description": "x"},
-                {"id": "s1", "description": "y"}]},  # id 重复
-            {"decision": "edit", "edited_steps": [
-                {"id": "s1", "description": "x", "dependencies": ["s1"]}]},  # 自依赖
-            {"decision": "approve", "edited_steps": [
-                {"id": "s1", "description": "x"}]},  # 非 edit 携带 edited_steps
+            {
+                "decision": "edit",
+                "edited_steps": [{"id": "s1", "description": "x", "dependencies": ["s9"]}],
+            },  # 依赖不存在
+            {
+                "decision": "edit",
+                "edited_steps": [
+                    {"id": "s1", "description": "x"},
+                    {"id": "s1", "description": "y"},
+                ],
+            },  # id 重复
+            {
+                "decision": "edit",
+                "edited_steps": [{"id": "s1", "description": "x", "dependencies": ["s1"]}],
+            },  # 自依赖
+            {
+                "decision": "approve",
+                "edited_steps": [{"id": "s1", "description": "x"}],
+            },  # 非 edit 携带 edited_steps
         ]
         for bad in bad_payloads:
-            r = await client.post(
-                f"/api/v1/agent/tasks/{tid}/plan-approval", json=bad
-            )
+            r = await client.post(f"/api/v1/agent/tasks/{tid}/plan-approval", json=bad)
             assert r.status_code == 422, f"{bad} 应为 422"
 
         # 现场不破坏：仍在等待审批，可正常批准
@@ -396,9 +419,7 @@ async def test_waiting_plan_approval_guard_rails(db_factory, fake_redis, monkeyp
         assert r.json()["error_code"] == "TASK_WAITING_PLAN_APPROVAL"
 
         # 转向端点：等待计划审批不在可转向状态（409 诚实文案）
-        r_steer = await client.post(
-            f"/api/v1/agent/tasks/{tid}/steer", json={"message": "m"}
-        )
+        r_steer = await client.post(f"/api/v1/agent/tasks/{tid}/steer", json={"message": "m"})
         assert r_steer.status_code == 409
         assert r_steer.json()["error_code"] == "TASK_NOT_STEERABLE"
         assert "waiting_plan_approval" in r_steer.json()["message"]

@@ -15,7 +15,6 @@
   的判别用例在 tests/unit/test_hitl_service_flow.py）。
 """
 
-
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -83,7 +82,7 @@ def _sse_payloads(text: str) -> list[dict]:
     lines = [ln for ln in text.split("\n\n") if ln.startswith("data: ")]
     import json as _json
 
-    return [_json.loads(ln[len("data: "):]) for ln in lines]
+    return [_json.loads(ln[len("data: ") :]) for ln in lines]
 
 
 @pytest.fixture(autouse=True)
@@ -136,7 +135,9 @@ def fake_danger_tool():
 def _fake_client(tool_name: str = _TASK_KW, args: str = '{"target": "prod"}'):
     async def _create(*, messages, tools=None, **kwargs):
         if tools:
-            tc = SimpleNamespace(id="tc-1", function=SimpleNamespace(name=tool_name, arguments=args))
+            tc = SimpleNamespace(
+                id="tc-1", function=SimpleNamespace(name=tool_name, arguments=args)
+            )
             msg = SimpleNamespace(content="", tool_calls=[tc], role="assistant")
         else:
             msg = SimpleNamespace(content="已完成安全验证。", tool_calls=None, role="assistant")
@@ -240,8 +241,11 @@ async def test_full_ring_deny_feeds_structured_failure_without_execution(
         )
         assert r2.status_code == 200
         p2 = _sse_payloads(r2.text)
-        denials = [p for p in p2 if p.get("type") == "tool_error"
-                   and p.get("error_type") == "approval_denied"]
+        denials = [
+            p
+            for p in p2
+            if p.get("type") == "tool_error" and p.get("error_type") == "approval_denied"
+        ]
         assert denials, "拒绝必须以结构化失败 approval_denied 喂给反思链路"
         assert "生产环境禁止操作" in denials[0]["content"]
         assert spy.await_count == 0, "被拒绝的调用绝不执行"
@@ -290,9 +294,7 @@ async def test_cancel_active_task_returns_202_and_sets_flag(db_factory, fake_red
 
     app.dependency_overrides[get_current_user] = lambda: _mock_user()
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://hitl"
-        ) as c:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://hitl") as c:
             r = await c.post(f"/api/v1/agent/tasks/{task_id}/cancel")
     finally:
         app.dependency_overrides.pop(get_current_user, None)
@@ -312,9 +314,7 @@ async def test_approval_409_when_not_waiting_approval(db_factory, fake_redis):
 
     app.dependency_overrides[get_current_user] = lambda: _mock_user()
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://hitl"
-        ) as c:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://hitl") as c:
             r = await c.post(
                 f"/api/v1/agent/tasks/{task_id}/approval", json={"decision": "approve"}
             )

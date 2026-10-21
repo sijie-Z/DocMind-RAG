@@ -63,12 +63,12 @@ def test_registry_error_codes_have_policies():
     test fails if a code emitted by the registry loses its policy.
     """
     registry_codes = {
-        "not_found",         # unknown tool
-        "hook_error",        # pre-hook raised
-        "rate_limited",      # tool rate limit tripped
+        "not_found",  # unknown tool
+        "hook_error",  # pre-hook raised
+        "rate_limited",  # tool rate limit tripped
         "validation_error",  # output schema mismatch
-        "timeout",           # asyncio.TimeoutError in the handler
-        "unknown",           # unclassified handler exception
+        "timeout",  # asyncio.TimeoutError in the handler
+        "unknown",  # unclassified handler exception
     }
     missing = registry_codes - set(RETRY_POLICIES)
     assert not missing, f"registry error codes without a policy: {sorted(missing)}"
@@ -93,7 +93,9 @@ def test_jitter_is_nonzero():
     random.seed(0)
     values = [compute_backoff(policy, 0) for _ in range(1000)]
     base = 0.5
-    assert all(base * 0.8 <= v <= base * 1.2 for v in values), f"range violation: min={min(values):.3f} max={max(values):.3f}"
+    assert all(base * 0.8 <= v <= base * 1.2 for v in values), (
+        f"range violation: min={min(values):.3f} max={max(values):.3f}"
+    )
     assert len(set(round(v, 6) for v in values)) > 1, "jitter is always 0 — deterministic backoff"
 
 
@@ -109,8 +111,11 @@ def test_jitter_is_bounded():
 
 def test_max_delay_hard_caps():
     policy = RetryPolicy(
-        retryable=True, action="repeat", max_retries=3,
-        backoff=lambda n: 1000.0, max_delay_seconds=30.0,
+        retryable=True,
+        action="repeat",
+        max_retries=3,
+        backoff=lambda n: 1000.0,
+        max_delay_seconds=30.0,
     )
     for _ in range(100):
         v = compute_backoff(policy, 5)
@@ -118,6 +123,7 @@ def test_max_delay_hard_caps():
 
 
 # ── Backward compatibility (legacy fallback_tool) ───────────────────────
+
 
 def test_fallback_tool_still_works():
     """If step only has fallback_tool (not chain), fallback_chain is empty list by default.
@@ -127,6 +133,7 @@ def test_fallback_tool_still_works():
     assert isinstance(getattr(RetryPolicy, "fallback_chain", None), type(None))
     # Legacy property still on PlanStep
     from app.agent.planner import PlanStep
+
     step = PlanStep(id="s1", description="test", dependencies=[])
     step.fallback_tool = "search_knowledge_base"
     assert getattr(step, "fallback_chain", None) is None

@@ -17,6 +17,7 @@
 3. 去掉 ``_WILDCARD_TERM_CAP`` 上限 → 上限用例红；
 4. ``retrieve()`` 的 debug 不再输出 ``query_rewrite.vector_arm`` → 臂边界用例红。
 """
+
 import json
 import re
 from unittest.mock import AsyncMock

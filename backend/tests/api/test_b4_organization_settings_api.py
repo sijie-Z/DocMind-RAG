@@ -8,6 +8,7 @@
 - 检索 top_k 真实消费：组织设置 > 显式请求 > 既有默认（settings.TOP_K_RESULTS）；
 - chat 检索的 top_k 解析助手：有组织设置用设置值，否则回退调用方既有默认。
 """
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -67,9 +68,7 @@ async def api():
         )
         await s.flush()
         # W0-1：组织管理员 = per-org OrgAdmin 角色关联（users.role 不再参与鉴权）
-        org_admin_role = Role(
-            name="OrgAdmin", description="组织管理员", is_system_role=False
-        )
+        org_admin_role = Role(name="OrgAdmin", description="组织管理员", is_system_role=False)
         s.add(org_admin_role)
         await s.flush()
         await s.execute(
@@ -178,12 +177,14 @@ async def test_put_by_admin_persists_and_audits(api, monkeypatch):
 
     async with api.factory() as s:
         row = (
-            await s.execute(
-                select(OrganizationSettings).where(
-                    OrganizationSettings.organization_id == 1
+            (
+                await s.execute(
+                    select(OrganizationSettings).where(OrganizationSettings.organization_id == 1)
                 )
             )
-        ).scalars().one()
+            .scalars()
+            .one()
+        )
         assert row.retrieval_top_k == 3
         assert row.allow_privacy_mode is False
         assert row.monthly_token_quota == 100000
@@ -296,9 +297,7 @@ async def test_search_top_k_uses_org_setting(api):
             new=AsyncMock(return_value=_fake_search_result()),
         ) as mocked,
     ):
-        r = await api.client.post(
-            SEARCH, json={"query": "报销", "organization_id": 1}
-        )
+        r = await api.client.post(SEARCH, json={"query": "报销", "organization_id": 1})
     assert r.status_code == 200, r.text
     assert mocked.await_args.kwargs["top_k"] == 3
 
@@ -312,9 +311,7 @@ async def test_search_top_k_falls_back_to_existing_default(api):
             new=AsyncMock(return_value=_fake_search_result()),
         ) as mocked,
     ):
-        r = await api.client.post(
-            SEARCH, json={"query": "报销", "organization_id": 1}
-        )
+        r = await api.client.post(SEARCH, json={"query": "报销", "organization_id": 1})
     assert r.status_code == 200, r.text
     # 未设置组织值时不得改变既有默认语义：仍为 settings.TOP_K_RESULTS（10）
     assert mocked.await_args.kwargs["top_k"] == settings.TOP_K_RESULTS
@@ -332,9 +329,7 @@ async def test_search_explicit_top_k_wins_over_org_setting(api):
             new=AsyncMock(return_value=_fake_search_result()),
         ) as mocked,
     ):
-        r = await api.client.post(
-            SEARCH, json={"query": "报销", "organization_id": 1, "top_k": 7}
-        )
+        r = await api.client.post(SEARCH, json={"query": "报销", "organization_id": 1, "top_k": 7})
     assert r.status_code == 200, r.text
     assert mocked.await_args.kwargs["top_k"] == 7
 
@@ -354,39 +349,26 @@ async def test_chat_retrieval_top_k_helper(api):
 
     async with api.factory() as s:
         # 组织有设置：使用组织值，覆盖调用方既有默认（chat 文档 8 / 通用 5）
-        assert (
-            await organization_settings_service.resolve_retrieval_top_k(s, 1, fallback=8)
-            == 3
-        )
+        assert await organization_settings_service.resolve_retrieval_top_k(s, 1, fallback=8) == 3
         # 组织无设置：回退调用方既有默认，不得改变默认语义
-        assert (
-            await organization_settings_service.resolve_retrieval_top_k(s, 2, fallback=5)
-            == 5
-        )
+        assert await organization_settings_service.resolve_retrieval_top_k(s, 2, fallback=5) == 5
         # 无组织上下文：回退既有默认
-        assert (
-            await organization_settings_service.resolve_retrieval_top_k(
-                s, None, fallback=5
-            )
-            == 5
-        )
+        assert await organization_settings_service.resolve_retrieval_top_k(s, None, fallback=5) == 5
 
         # 隐私策略：未设置 = 允许（保持既有默认）；显式关闭 = False
-        assert (
-            await organization_settings_service.allow_privacy_mode(s, 1) is True
-        )
+        assert await organization_settings_service.allow_privacy_mode(s, 1) is True
         row = (
-            await s.execute(
-                select(OrganizationSettings).where(
-                    OrganizationSettings.organization_id == 1
+            (
+                await s.execute(
+                    select(OrganizationSettings).where(OrganizationSettings.organization_id == 1)
                 )
             )
-        ).scalars().one()
+            .scalars()
+            .one()
+        )
         row.allow_privacy_mode = False
         await s.commit()
-        assert (
-            await organization_settings_service.allow_privacy_mode(s, 1) is False
-        )
+        assert await organization_settings_service.allow_privacy_mode(s, 1) is False
 
 
 async def test_org_delete_cleans_settings(api):
@@ -427,10 +409,12 @@ async def test_put_explicit_null_clears_existing_override(api):
     assert entry["value"] == settings.TOP_K_RESULTS
     async with api.factory() as s:
         row = (
-            await s.execute(
-                select(OrganizationSettings).where(
-                    OrganizationSettings.organization_id == 1
+            (
+                await s.execute(
+                    select(OrganizationSettings).where(OrganizationSettings.organization_id == 1)
                 )
             )
-        ).scalars().one()
+            .scalars()
+            .one()
+        )
         assert row.retrieval_top_k is None

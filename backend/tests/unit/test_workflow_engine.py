@@ -1,4 +1,5 @@
 """Workflow engine unit tests — node executors, conditions, transforms, routing."""
+
 from unittest.mock import AsyncMock
 
 import pytest
@@ -23,6 +24,7 @@ from app.services.workflow_engine import (
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+
 def _make_node(node_id: str = "n1", node_type: str = "input", data: dict = None) -> WorkflowNode:
     return WorkflowNode(id=node_id, type=node_type, data=data or {}, position={"x": 0, "y": 0})
 
@@ -44,6 +46,7 @@ def _make_state(**overrides) -> WorkflowState:
 
 
 # ── Pure functions ───────────────────────────────────────────────────
+
 
 class TestMergeFunctions:
     def test_merge_dicts_prefers_right(self):
@@ -68,6 +71,7 @@ class TestExecutionStatus:
 
 
 # ── InputNodeExecutor ────────────────────────────────────────────────
+
 
 class TestInputNodeExecutor:
     @pytest.mark.asyncio
@@ -95,6 +99,7 @@ class TestInputNodeExecutor:
 
 # ── OutputNodeExecutor ──────────────────────────────────────────────
 
+
 class TestOutputNodeExecutor:
     @pytest.mark.asyncio
     async def test_prefers_final_output_from_context(self):
@@ -119,6 +124,7 @@ class TestOutputNodeExecutor:
 
 
 # ── ConditionNodeExecutor ────────────────────────────────────────────
+
 
 class TestConditionNodeExecutor:
     @pytest.mark.asyncio
@@ -159,15 +165,13 @@ class TestConditionNodeExecutor:
     @pytest.mark.asyncio
     async def test_uses_last_message_content(self):
         node = _make_node(data={"condition": "auto"})
-        state = _make_state(
-            input={"text": ""},
-            messages=[HumanMessage(content="请分析这个数据")]
-        )
+        state = _make_state(input={"text": ""}, messages=[HumanMessage(content="请分析这个数据")])
         result = await ConditionNodeExecutor(node).execute(state)
         assert result["context"]["condition_result"] == "analyze"
 
 
 # ── TTSNodeExecutor ──────────────────────────────────────────────────
+
 
 class TestTTSNodeExecutor:
     @pytest.mark.asyncio
@@ -197,69 +201,77 @@ class TestTTSNodeExecutor:
     @pytest.mark.asyncio
     async def test_uses_context_final_output(self):
         node = _make_node(data={}, node_type="tool_tts")
-        state = _make_state(
-            messages=[],
-            context={"final_output": "来自上下文的文本"}
-        )
+        state = _make_state(messages=[], context={"final_output": "来自上下文的文本"})
         result = await TTSNodeExecutor(node).execute(state)
         assert "来自上下文" in result["node_outputs"]["n1"]["text"]
 
 
 # ── TransformNodeExecutor ────────────────────────────────────────────
 
+
 class TestTransformNodeExecutor:
     @pytest.mark.asyncio
     async def test_json_extract(self):
-        node = _make_node(data={
-            "transformType": "json_extract",
-            "jsonPath": "$.name",
-            "inputSource": "last",
-        })
+        node = _make_node(
+            data={
+                "transformType": "json_extract",
+                "jsonPath": "$.name",
+                "inputSource": "last",
+            }
+        )
         state = _make_state(context={"last_response": '{"name": "Alice", "age": 30}'})
         result = await TransformNodeExecutor(node).execute(state)
         assert result["context"]["transformed_data"] == "Alice"
 
     @pytest.mark.asyncio
     async def test_json_extract_nested(self):
-        node = _make_node(data={
-            "transformType": "json_extract",
-            "jsonPath": "$.user.city",
-            "inputSource": "last",
-        })
+        node = _make_node(
+            data={
+                "transformType": "json_extract",
+                "jsonPath": "$.user.city",
+                "inputSource": "last",
+            }
+        )
         state = _make_state(context={"last_response": '{"user": {"city": "Beijing"}}'})
         result = await TransformNodeExecutor(node).execute(state)
         assert result["context"]["transformed_data"] == "Beijing"
 
     @pytest.mark.asyncio
     async def test_text_slice(self):
-        node = _make_node(data={
-            "transformType": "text_slice",
-            "startIndex": 0,
-            "endIndex": 5,
-            "inputSource": "last",
-        })
+        node = _make_node(
+            data={
+                "transformType": "text_slice",
+                "startIndex": 0,
+                "endIndex": 5,
+                "inputSource": "last",
+            }
+        )
         state = _make_state(context={"last_response": "Hello World"})
         result = await TransformNodeExecutor(node).execute(state)
         assert result["context"]["transformed_data"] == "Hello"
 
     @pytest.mark.asyncio
     async def test_regex_extract(self):
-        node = _make_node(data={
-            "transformType": "regex_extract",
-            "pattern": r"\d+",
-            "inputSource": "last",
-        })
+        node = _make_node(
+            data={
+                "transformType": "regex_extract",
+                "pattern": r"\d+",
+                "inputSource": "last",
+            }
+        )
         state = _make_state(context={"last_response": "Order 12345 confirmed"})
         result = await TransformNodeExecutor(node).execute(state)
         assert result["context"]["transformed_data"] == "12345"
 
     @pytest.mark.asyncio
     async def test_json_extract_invalid_json(self):
-        node = _make_node(data={
-            "transformType": "json_extract",
-            "jsonPath": "$.key",
-            "inputSource": "last",
-        })
+        node = _make_node(
+            data={
+                "transformType": "json_extract",
+                "jsonPath": "$.key",
+                "inputSource": "last",
+            }
+        )
         state = _make_state(context={"last_response": "not json"})
         result = await TransformNodeExecutor(node).execute(state)
         assert "error" in result["context"]["transformed_data"]
@@ -267,36 +279,39 @@ class TestTransformNodeExecutor:
 
 # ── RouterNodeExecutor ──────────────────────────────────────────────
 
+
 class TestRouterNodeExecutor:
     @pytest.mark.asyncio
     async def test_matches_first_route(self):
-        node = _make_node(data={
-            "routes": [
-                {"keywords": ["翻译", "translate"], "target": "translate_node"},
-                {"keywords": ["总结"], "target": "summary_node"},
-            ]
-        })
+        node = _make_node(
+            data={
+                "routes": [
+                    {"keywords": ["翻译", "translate"], "target": "translate_node"},
+                    {"keywords": ["总结"], "target": "summary_node"},
+                ]
+            }
+        )
         state = _make_state(input={"text": "帮我翻译一下"})
         result = await RouterNodeExecutor(node).execute(state)
         assert result["node_outputs"]["n1"]["matched_route"] == "translate_node"
 
     @pytest.mark.asyncio
     async def test_matches_second_route(self):
-        node = _make_node(data={
-            "routes": [
-                {"keywords": ["翻译"], "target": "translate_node"},
-                {"keywords": ["总结", "摘要"], "target": "summary_node"},
-            ]
-        })
+        node = _make_node(
+            data={
+                "routes": [
+                    {"keywords": ["翻译"], "target": "translate_node"},
+                    {"keywords": ["总结", "摘要"], "target": "summary_node"},
+                ]
+            }
+        )
         state = _make_state(input={"text": "帮我摘要"})
         result = await RouterNodeExecutor(node).execute(state)
         assert result["node_outputs"]["n1"]["matched_route"] == "summary_node"
 
     @pytest.mark.asyncio
     async def test_default_when_no_match(self):
-        node = _make_node(data={
-            "routes": [{"keywords": ["翻译"], "target": "t"}]
-        })
+        node = _make_node(data={"routes": [{"keywords": ["翻译"], "target": "t"}]})
         state = _make_state(input={"text": "今天天气怎么样"})
         result = await RouterNodeExecutor(node).execute(state)
         assert result["node_outputs"]["n1"]["matched_route"] == "default"
@@ -311,6 +326,7 @@ class TestRouterNodeExecutor:
 
 # ── CodeExecuteNodeExecutor ──────────────────────────────────────────
 
+
 class TestCodeExecuteNodeExecutor:
     @pytest.mark.asyncio
     async def test_code_node_disabled_by_default(self):
@@ -322,9 +338,7 @@ class TestCodeExecuteNodeExecutor:
     @pytest.mark.asyncio
     async def test_code_node_requires_docker(self, monkeypatch):
         monkeypatch.setattr(settings, "ENABLE_WORKFLOW_CODE_NODES", True)
-        monkeypatch.setattr(
-            "app.services.workflow_engine._docker_available", lambda: False
-        )
+        monkeypatch.setattr("app.services.workflow_engine._docker_available", lambda: False)
         node = _make_node(data={"code": "result = 2 + 3", "language": "python"})
         state = _make_state()
         with pytest.raises(ValueError, match="需要 Docker 沙箱"):
@@ -334,16 +348,12 @@ class TestCodeExecuteNodeExecutor:
     async def test_simple_code_runs_in_docker(self, monkeypatch):
         monkeypatch.setattr(settings, "ENABLE_WORKFLOW_CODE_NODES", True)
         monkeypatch.setattr(settings, "SANDBOX_MODE", "auto")
-        monkeypatch.setattr(
-            "app.services.workflow_engine._docker_available", lambda: True
-        )
+        monkeypatch.setattr("app.services.workflow_engine._docker_available", lambda: True)
 
         async def fake_run_in_docker(code, **_kwargs):
             return "5"
 
-        monkeypatch.setattr(
-            "app.services.workflow_engine.run_in_docker", fake_run_in_docker
-        )
+        monkeypatch.setattr("app.services.workflow_engine.run_in_docker", fake_run_in_docker)
         node = _make_node(data={"code": "result = 2 + 3", "language": "python"})
         state = _make_state()
         result = await CodeExecuteNodeExecutor(node).execute(state)
@@ -389,26 +399,25 @@ class TestCodeExecuteNodeExecutor:
     async def test_access_to_state_context_in_docker(self, monkeypatch):
         monkeypatch.setattr(settings, "ENABLE_WORKFLOW_CODE_NODES", True)
         monkeypatch.setattr(settings, "SANDBOX_MODE", "auto")
-        monkeypatch.setattr(
-            "app.services.workflow_engine._docker_available", lambda: True
-        )
+        monkeypatch.setattr("app.services.workflow_engine._docker_available", lambda: True)
 
         async def fake_run_in_docker(code, **_kwargs):
             return "15"
 
-        monkeypatch.setattr(
-            "app.services.workflow_engine.run_in_docker", fake_run_in_docker
+        monkeypatch.setattr("app.services.workflow_engine.run_in_docker", fake_run_in_docker)
+        node = _make_node(
+            data={
+                "code": "result = context.get('x', 0) + 10",
+                "language": "python",
+            }
         )
-        node = _make_node(data={
-            "code": "result = context.get('x', 0) + 10",
-            "language": "python",
-        })
         state = _make_state(context={"x": 5})
         result = await CodeExecuteNodeExecutor(node).execute(state)
         assert result["node_outputs"]["n1"]["result"] == "15"
 
 
 # ── NodeExecutor retry ──────────────────────────────────────────────
+
 
 class TestNodeExecutorRetry:
     @pytest.mark.asyncio
@@ -423,32 +432,40 @@ class TestNodeExecutorRetry:
     async def test_raises_not_implemented_for_base_class(self):
         node = _make_node()
         from app.services.workflow_engine import NodeExecutor
+
         with pytest.raises(NotImplementedError):
             await NodeExecutor(node).execute(_make_state())
 
 
 # ── WorkflowEngine ───────────────────────────────────────────────────
 
+
 class TestWorkflowEngine:
     def test_get_executor_known_types(self):
-        config = WorkflowConfig(nodes=[
-            _make_node("n1", "input"),
-            _make_node("n2", "output"),
-            _make_node("n3", "condition"),
-            _make_node("n4", "tool_tts"),
-            _make_node("n5", "code"),
-            _make_node("n6", "transform"),
-            _make_node("n7", "router"),
-        ], edges=[])
+        config = WorkflowConfig(
+            nodes=[
+                _make_node("n1", "input"),
+                _make_node("n2", "output"),
+                _make_node("n3", "condition"),
+                _make_node("n4", "tool_tts"),
+                _make_node("n5", "code"),
+                _make_node("n6", "transform"),
+                _make_node("n7", "router"),
+            ],
+            edges=[],
+        )
         engine = WorkflowEngine(config)
         for node in config.nodes:
             executor = engine.get_executor(node)
             assert executor is not None
 
     def test_get_executor_unknown_type_raises(self):
-        config = WorkflowConfig(nodes=[
-            _make_node("n1", "nonexistent"),
-        ], edges=[])
+        config = WorkflowConfig(
+            nodes=[
+                _make_node("n1", "nonexistent"),
+            ],
+            edges=[],
+        )
         engine = WorkflowEngine(config)
         with pytest.raises(ValueError, match="Unknown node type"):
             engine.get_executor(config.nodes[0])

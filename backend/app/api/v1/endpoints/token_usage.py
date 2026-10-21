@@ -1,4 +1,5 @@
 """API endpoints for token usage tracking and cost analytics."""
+
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
@@ -84,9 +85,13 @@ async def create_token_record(
     if not current_user.is_superuser:
         raise AuthorizationError(detail="需要管理员权限")
     await record_token_usage(
-        db, data.user_id, data.organization_id,
-        data.model, data.source,
-        data.input_tokens, data.output_tokens,
+        db,
+        data.user_id,
+        data.organization_id,
+        data.model,
+        data.source,
+        data.input_tokens,
+        data.output_tokens,
     )
     return {"success": True}
 

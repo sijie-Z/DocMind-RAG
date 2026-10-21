@@ -9,6 +9,7 @@ issue #268 补充：注入值本身不再 `or 1` 兜底——API 层如实传调
 None）；引擎/节点对缺组织**显式失败**（此前 `else 1` 会把缺组织的检索静默放进
 1 号组织，而检索结果随执行输出返回 = 跨租户泄漏）。
 """
+
 import pytest
 
 from app.schemas.workflow import WorkflowConfig, WorkflowNode
@@ -19,7 +20,9 @@ from app.services.workflow_engine import (
 )
 
 
-def _make_node(node_id: str = "n1", node_type: str = "tool_search", data: dict | None = None) -> WorkflowNode:
+def _make_node(
+    node_id: str = "n1", node_type: str = "tool_search", data: dict | None = None
+) -> WorkflowNode:
     return WorkflowNode(id=node_id, type=node_type, data=data or {}, position={"x": 0, "y": 0})
 
 

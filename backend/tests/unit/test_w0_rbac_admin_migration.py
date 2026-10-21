@@ -12,6 +12,7 @@
 - 回滚依据备份表精确恢复，且只删除迁移回填的关联（迁移前已有的保留）；
 - 升级/回滚均可重放（幂等）。
 """
+
 import sqlite3
 from pathlib import Path
 
@@ -66,12 +67,12 @@ CREATE TABLE w0_1_rbac_platform_allowlist (
 
 USERS = [
     # id, username, role, is_superuser, organization_id
-    (1, "platform-pending", "admin", 0, None),   # allowlist → platform_admin
-    (2, "platform-existing", "admin", 1, 1),     # 已是超管 → platform_admin
-    (3, "org-admin-a", "admin", 0, 1),           # 回填关联（已有同关联）
-    (4, "org-admin-b", "admin", 0, 2),           # 回填关联（新建）
-    (5, "normal-user", "user", 0, 1),            # 不在迁移范围
-    (6, "orgless-admin", "admin", 0, None),      # 未登记 → demoted
+    (1, "platform-pending", "admin", 0, None),  # allowlist → platform_admin
+    (2, "platform-existing", "admin", 1, 1),  # 已是超管 → platform_admin
+    (3, "org-admin-a", "admin", 0, 1),  # 回填关联（已有同关联）
+    (4, "org-admin-b", "admin", 0, 2),  # 回填关联（新建）
+    (5, "normal-user", "user", 0, 1),  # 不在迁移范围
+    (6, "orgless-admin", "admin", 0, None),  # 未登记 → demoted
 ]
 
 
@@ -107,18 +108,16 @@ def _make_db(tmp_path: Path, *, seed_org_admin_role: bool = True) -> Path:
         )
         # 迁移前已存在的 OrgAdmin 关联（回滚时必须保留）
         if seed_org_admin_role:
-            org_admin_id = conn.execute(
-                "SELECT id FROM roles WHERE name = 'OrgAdmin'"
-            ).fetchone()[0]
+            org_admin_id = conn.execute("SELECT id FROM roles WHERE name = 'OrgAdmin'").fetchone()[
+                0
+            ]
             conn.execute(
                 "INSERT INTO user_organization_role_association "
                 "(user_id, organization_id, role_id) VALUES (3, 1, ?)",
                 (org_admin_id,),
             )
         # 历史遗留的非法授权：系统级角色出现在组织角色关联表（up 必须清理）
-        sysadmin_id = conn.execute(
-            "SELECT id FROM roles WHERE name = 'SysAdmin'"
-        ).fetchone()[0]
+        sysadmin_id = conn.execute("SELECT id FROM roles WHERE name = 'SysAdmin'").fetchone()[0]
         conn.execute(
             "INSERT INTO user_organization_role_association "
             "(user_id, organization_id, role_id) VALUES (5, 1, ?)",
