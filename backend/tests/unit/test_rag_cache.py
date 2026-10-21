@@ -1,4 +1,5 @@
 """Tests for RAG cache modules (RetrievalCache, SemanticCache)."""
+
 import pytest
 
 from app.rag.cache import RetrievalCache, SemanticCache
@@ -116,6 +117,8 @@ class _FakeRedis:
 class TestSemanticCacheOrgIsolation:
     @pytest.mark.asyncio
     async def test_org_isolation(self, monkeypatch):
+        # issue #195：语义缓存默认关闭，命名空间隔离用例显式开启并传查询原文。
+        monkeypatch.setattr("app.rag.cache.settings.SEMANTIC_CACHE_ANSWER_ENABLED", True)
         cache = SemanticCache()
         fake = _FakeRedis()
         monkeypatch.setattr("app.rag.cache._get_redis", lambda: fake)
@@ -123,15 +126,16 @@ class TestSemanticCacheOrgIsolation:
 
         await cache.set("query", embedding, "answer", [], organization_id=1)
 
-        hit = await cache.get(embedding, organization_id=1)
+        hit = await cache.get(embedding, organization_id=1, query="query")
         assert hit is not None
         assert hit["answer"] == "answer"
 
-        miss = await cache.get(embedding, organization_id=2)
+        miss = await cache.get(embedding, organization_id=2, query="query")
         assert miss is None
 
     @pytest.mark.asyncio
     async def test_org_scoped_keys(self, monkeypatch):
+        monkeypatch.setattr("app.rag.cache.settings.SEMANTIC_CACHE_ANSWER_ENABLED", True)
         cache = SemanticCache()
         fake = _FakeRedis()
         monkeypatch.setattr("app.rag.cache._get_redis", lambda: fake)

@@ -1,4 +1,5 @@
 """Tests for RAG metrics."""
+
 from app.rag.metrics import RAGMetrics
 
 

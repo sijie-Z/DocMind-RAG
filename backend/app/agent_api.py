@@ -15,6 +15,7 @@ Usage:
       -H "Content-Type: application/json" \
       -d '{"query": "对比星辰科技和远方创新的财务表现", "mode": "structured"}'
 """
+
 import json
 import logging
 import os
@@ -66,6 +67,7 @@ _trace_exporter = TraceExporter(output_dir="traces")
 _request_log_path = Path("logs/agent_requests.jsonl")
 _request_log_path.parent.mkdir(parents=True, exist_ok=True)
 
+
 def _log_request(
     request_id: str,
     endpoint: str,
@@ -97,7 +99,9 @@ def _log_request(
     except Exception:
         pass
 
+
 # ── Pydantic schemas ─────────────────────────────────────────
+
 
 class AgentRequest(BaseModel):
     query: str = Field(..., description="User query")
@@ -187,12 +191,38 @@ else:
 
 # ── Orchestrator ─────────────────────────────────────────────
 
+
+def _resolve_demo_org_id() -> int:
+    """Resolve the explicit demo organization for this dev-only service.
+
+    W0-6：此前 ``int(os.environ.get("AGENT_DEMO_ORG_ID", "0"))`` 在未配置时
+    静默回落到 0 号组织（fail-open 哨兵）。现在必须显式配置正整数组织 ID，
+    否则拒绝请求（503）——不阻塞既有部署的启动，但绝不带缺失组织上下文运行。
+    """
+    raw = (os.environ.get("AGENT_DEMO_ORG_ID") or "").strip()
+    try:
+        org_id = int(raw)
+    except (TypeError, ValueError):
+        org_id = 0
+    if org_id <= 0:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "AGENT_DEMO_ORG_ID 未配置或不是正整数："
+                "agent demo 服务必须显式指定演示组织，拒绝在无组织上下文下运行"
+            ),
+        )
+    return org_id
+
+
 async def run_agent(
     query: str,
     mode: str = "structured",
     expected_keywords: list[str] | None = None,
 ) -> dict:
     """Execute the agent and return structured result."""
+    # W0-6：组织上下文解析先于一切（含 LLM 客户端构造）。
+    organization_id = _resolve_demo_org_id()
     request_id = uuid.uuid4().hex[:12]
     client = AsyncOpenAI(
         api_key=os.environ["DEEPSEEK_API_KEY"],
@@ -213,8 +243,9 @@ async def run_agent(
     )
 
     agent = PERAgentLoop(
-        client, config,
-        organization_id=int(os.environ.get("AGENT_DEMO_ORG_ID", "0")),
+        client,
+        config,
+        organization_id=organization_id,
         user_id=int(os.environ.get("AGENT_DEMO_USER_ID", "0")),
         execution_mode="dag",
     )
@@ -235,13 +266,15 @@ async def run_agent(
             if event.type == "plan_start":
                 pass
             elif event.type == "plan_step":
-                plan_steps.append({
-                    "id": event.plan_step_id,
-                    "description": event.content,
-                    "dependencies": event.dependencies or [],
-                    "tool_hint": event.tool_hint or "",
-                    "status": "ready",
-                })
+                plan_steps.append(
+                    {
+                        "id": event.plan_step_id,
+                        "description": event.content,
+                        "dependencies": event.dependencies or [],
+                        "tool_hint": event.tool_hint or "",
+                        "status": "ready",
+                    }
+                )
                 tracer.log_step(
                     step_id=event.plan_step_id,
                     step_type="planner",
@@ -255,14 +288,16 @@ async def run_agent(
                     for dep in step.get("dependencies", []):
                         tracer.add_dag_edge(dep, step["id"])
             elif event.type == "tool_call":
-                tool_calls.append({
-                    "step_id": event.plan_step_id,
-                    "tool_name": event.tool_name,
-                    "args": event.tool_args,
-                    "result": "",
-                    "duration_ms": 0.0,
-                    "status": "running",
-                })
+                tool_calls.append(
+                    {
+                        "step_id": event.plan_step_id,
+                        "tool_name": event.tool_name,
+                        "args": event.tool_args,
+                        "result": "",
+                        "duration_ms": 0.0,
+                        "status": "running",
+                    }
+                )
                 tracer.log_tool_call(event.plan_step_id, event.tool_name)
                 if event.tool_name in ("search_knowledge_base", "vector_search", "web_search"):
                     tracer.start_phase("retrieval")
@@ -274,7 +309,9 @@ async def run_agent(
                     tc["status"] = "success"
                     tracer.log_step(
                         step_id=tc["step_id"],
-                        step_type="retrieval" if tc["tool_name"] in ("search_knowledge_base", "vector_search") else "tool",
+                        step_type="retrieval"
+                        if tc["tool_name"] in ("search_knowledge_base", "vector_search")
+                        else "tool",
                         description=tc["tool_name"],
                         latency=event.tool_duration_ms / 1000,
                         status="success",
@@ -283,13 +320,17 @@ async def run_agent(
                 if event.tool_name in ("search_knowledge_base", "vector_search", "web_search"):
                     tracer.end_phase("retrieval")
             elif event.type == "tool_error":
-                step_errors.append({
-                    "step_id": event.plan_step_id,
-                    "type": f"tool_error:{event.tool_name}",
-                    "message": event.content[:200],
-                    "recoverable": True,
-                })
-                tracer.log_error(event.plan_step_id, f"tool_error:{event.tool_name}", event.content[:200])
+                step_errors.append(
+                    {
+                        "step_id": event.plan_step_id,
+                        "type": f"tool_error:{event.tool_name}",
+                        "message": event.content[:200],
+                        "recoverable": True,
+                    }
+                )
+                tracer.log_error(
+                    event.plan_step_id, f"tool_error:{event.tool_name}", event.content[:200]
+                )
                 if tool_calls:
                     tool_calls[-1]["status"] = "error"
                     tool_calls[-1]["result"] = event.content[:200]
@@ -304,12 +345,14 @@ async def run_agent(
     duration = time.perf_counter() - start
 
     if not result.success and not chunks:
-        errors.append({
-            "step_id": request_id,
-            "type": result.error_type or "agent_failure",
-            "message": result.error or "Agent execution failed",
-            "recoverable": result.recoverable,
-        })
+        errors.append(
+            {
+                "step_id": request_id,
+                "type": result.error_type or "agent_failure",
+                "message": result.error or "Agent execution failed",
+                "recoverable": result.recoverable,
+            }
+        )
         answer = f"[System error: {result.error}]"
     else:
         answer = "".join(chunks) or "(no answer)"
@@ -348,13 +391,16 @@ async def run_agent(
 
 # ── Endpoints ────────────────────────────────────────────────
 
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "docmind-agent"}
 
 
 @app.post("/eval")
-async def eval_benchmark(mode: str = "structured", layer: str = "l1", _: None = Depends(verify_agent_api_key)):
+async def eval_benchmark(
+    mode: str = "structured", layer: str = "l1", _: None = Depends(verify_agent_api_key)
+):
     """Run benchmark evaluation, return aggregated metrics.
 
     Args:
@@ -383,20 +429,31 @@ async def eval_benchmark(mode: str = "structured", layer: str = "l1", _: None = 
                 mode=mode,
                 expected_keywords=q.get("expected_keywords", []),
             )
-            results.append({
-                "id": q["id"],
-                "coverage": r["coverage"],
-                "latency": r["latency_seconds"],
-                "steps": r["steps"],
-                "errors": len(r["errors"]),
-                "error_types": [e.get("type", "") for e in r["errors"]],
-            })
+            results.append(
+                {
+                    "id": q["id"],
+                    "coverage": r["coverage"],
+                    "latency": r["latency_seconds"],
+                    "steps": r["steps"],
+                    "errors": len(r["errors"]),
+                    "error_types": [e.get("type", "") for e in r["errors"]],
+                }
+            )
+        except HTTPException:
+            # W0-6：配置缺失（如 AGENT_DEMO_ORG_ID 未设置）是整批前置条件
+            # 不满足，必须作为 503 显式拒绝，不能被逐题吞成 "errors: 1"。
+            raise
         except Exception as e:
-            results.append({
-                "id": q["id"], "coverage": 0.0,
-                "latency": 0, "steps": 0,
-                "errors": 1, "error_types": [str(e)[:80]],
-            })
+            results.append(
+                {
+                    "id": q["id"],
+                    "coverage": 0.0,
+                    "latency": 0,
+                    "steps": 0,
+                    "errors": 1,
+                    "error_types": [str(e)[:80]],
+                }
+            )
 
     duration = time.perf_counter() - start
     coverages = [r["coverage"] for r in results]
@@ -428,9 +485,12 @@ async def eval_benchmark(mode: str = "structured", layer: str = "l1", _: None = 
             report["error_distribution"][et] = report["error_distribution"].get(et, 0) + 1
 
     _log_request(
-        request_id=eval_id, endpoint="/eval",
-        query=f"benchmark:{layer}/{mode}", latency=duration,
-        status="ok", coverage=report["avg_coverage"],
+        request_id=eval_id,
+        endpoint="/eval",
+        query=f"benchmark:{layer}/{mode}",
+        latency=duration,
+        status="ok",
+        coverage=report["avg_coverage"],
     )
     return report
 
@@ -444,18 +504,19 @@ async def chat(req: AgentRequest, _: None = Depends(verify_agent_api_key)):
         expected_keywords=req.expected_keywords,
     )
     _log_request(
-        request_id=result["request_id"], endpoint="/chat",
-        query=req.query, latency=result["latency_seconds"],
+        request_id=result["request_id"],
+        endpoint="/chat",
+        query=req.query,
+        latency=result["latency_seconds"],
         status="ok" if not result["errors"] else "partial",
-        errors=result["errors"], coverage=result.get("coverage", 0),
-        steps=result.get("steps", 0), tool_calls=result.get("tool_calls", 0),
+        errors=result["errors"],
+        coverage=result.get("coverage", 0),
+        steps=result.get("steps", 0),
+        tool_calls=result.get("tool_calls", 0),
     )
     # Strip execution details for /chat (keep summary)
     result.pop("execution", None)
-    result["plan"] = [
-        {"id": s["id"], "description": s["description"]}
-        for s in result["plan"]
-    ]
+    result["plan"] = [{"id": s["id"], "description": s["description"]} for s in result["plan"]]
     return result
 
 
@@ -468,11 +529,15 @@ async def trace(req: AgentRequest, _: None = Depends(verify_agent_api_key)):
         expected_keywords=req.expected_keywords,
     )
     _log_request(
-        request_id=result["request_id"], endpoint="/trace",
-        query=req.query, latency=result["latency_seconds"],
+        request_id=result["request_id"],
+        endpoint="/trace",
+        query=req.query,
+        latency=result["latency_seconds"],
         status="ok" if not result["errors"] else "partial",
-        errors=result["errors"], coverage=result.get("coverage", 0),
-        steps=result.get("steps", 0), tool_calls=result.get("tool_calls", 0),
+        errors=result["errors"],
+        coverage=result.get("coverage", 0),
+        steps=result.get("steps", 0),
+        tool_calls=result.get("tool_calls", 0),
     )
     return result
 
@@ -498,4 +563,5 @@ async def plan(req: AgentRequest, _: None = Depends(verify_agent_api_key)):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8010)  # nosec B104 - 容器内需绑定全部网卡

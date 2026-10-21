@@ -8,6 +8,7 @@ executor 主调 / executor 合成 / reflector / loop 无工具分支 / reviewer 
 
 此前 `total_tokens` 全仓零赋值——系统答不出"这次任务花了多少 token"。
 """
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -84,9 +85,7 @@ async def test_executor_step_records_usage_into_ctx_and_step():
 
     client.chat.completions.create = _create
     memory = AgentMemoryBridge(agent_id="t", organization_id=1, user_id=0)
-    executor = Executor(
-        client, AgentConfig(enable_planning=False, enable_reflection=False), memory
-    )
+    executor = Executor(client, AgentConfig(enable_planning=False, enable_reflection=False), memory)
 
     class _Ok:
         success = True
@@ -309,9 +308,7 @@ async def test_executor_mounts_exec_ctx_for_tool_internal_accounting():
     tool_pipeline = _fake_pipeline_with_llm("你好，世界", _usage(300, 100))
 
     memory = AgentMemoryBridge(agent_id="t", organization_id=1, user_id=0)
-    executor = Executor(
-        client, AgentConfig(enable_planning=False, enable_reflection=False), memory
-    )
+    executor = Executor(client, AgentConfig(enable_planning=False, enable_reflection=False), memory)
 
     ctx = ExecutionContext(query="t")
     step = PlanStep(id="s1", description="d")

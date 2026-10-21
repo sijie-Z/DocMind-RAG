@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user, permission_required
+from app.core.security import get_current_user, is_platform_admin, permission_required
 from app.exceptions import NotFoundError
 from app.models.manual import SystemManual
 from app.models.rbac import PermissionType
@@ -16,6 +16,7 @@ from app.services.auth_service import AuthService
 router = APIRouter()
 auth_service = AuthService()
 
+
 # --- Schemas ---
 class ManualBase(BaseModel):
     title: str
@@ -24,8 +25,10 @@ class ManualBase(BaseModel):
     sort_order: int = 0
     is_published: bool = True
 
+
 class ManualCreate(ManualBase):
     pass
+
 
 class ManualUpdate(BaseModel):
     title: str | None = None
@@ -34,25 +37,29 @@ class ManualUpdate(BaseModel):
     sort_order: int | None = None
     is_published: bool | None = None
 
+
 class ManualResponse(ManualBase):
     id: int
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
+
 # --- Endpoints ---
+
 
 @router.get("/", response_model=list[ManualResponse], summary="获取手册列表")
 async def get_manuals(
     category: str | None = None,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """获取系统操作手册列表 (所有已登录用户可见)"""
     query = select(SystemManual)
 
-    # 如果不是管理员，只能看发布的
-    if current_user.role != "admin":
+    # 手册是平台级内容（W0-1）：只有显式平台管理员能看到未发布草稿；
+    # users.role='admin' / 组织管理员都按普通用户口径处理。
+    if not is_platform_admin(current_user):
         query = query.where(SystemManual.is_published)
 
     if category:
@@ -63,15 +70,16 @@ async def get_manuals(
     result = await db.execute(query)
     return result.scalars().all()
 
+
 @router.get("/{manual_id}", response_model=ManualResponse, summary="获取手册详情")
 async def get_manual(
     manual_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """获取单个手册详情"""
     query = select(SystemManual).where(SystemManual.id == manual_id)
-    if current_user.role != "admin":
+    if not is_platform_admin(current_user):
         query = query.where(SystemManual.is_published)
 
     result = await db.execute(query)
@@ -82,11 +90,17 @@ async def get_manual(
 
     return manual
 
-@router.post("/", response_model=ManualResponse, summary="创建手册", dependencies=[Depends(permission_required([PermissionType.MANAGE_SYSTEM_PROMPTS]))])
+
+@router.post(
+    "/",
+    response_model=ManualResponse,
+    summary="创建手册",
+    dependencies=[Depends(permission_required([PermissionType.MANAGE_SYSTEM_PROMPTS]))],
+)
 async def create_manual(
     manual_in: ManualCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """创建新的操作手册 (需要系统管理权限)"""
     manual = SystemManual(**manual_in.dict())
@@ -95,12 +109,18 @@ async def create_manual(
     await db.refresh(manual)
     return manual
 
-@router.put("/{manual_id}", response_model=ManualResponse, summary="更新手册", dependencies=[Depends(permission_required([PermissionType.MANAGE_SYSTEM_PROMPTS]))])
+
+@router.put(
+    "/{manual_id}",
+    response_model=ManualResponse,
+    summary="更新手册",
+    dependencies=[Depends(permission_required([PermissionType.MANAGE_SYSTEM_PROMPTS]))],
+)
 async def update_manual(
     manual_id: int,
     manual_in: ManualUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """更新操作手册 (需要系统管理权限)"""
     result = await db.execute(select(SystemManual).where(SystemManual.id == manual_id))
@@ -117,11 +137,17 @@ async def update_manual(
     await db.refresh(manual)
     return manual
 
-@router.delete("/{manual_id}", response_model=dict, summary="删除手册", dependencies=[Depends(permission_required([PermissionType.MANAGE_SYSTEM_PROMPTS]))])
+
+@router.delete(
+    "/{manual_id}",
+    response_model=dict,
+    summary="删除手册",
+    dependencies=[Depends(permission_required([PermissionType.MANAGE_SYSTEM_PROMPTS]))],
+)
 async def delete_manual(
     manual_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """删除操作手册 (需要系统管理权限)"""
     result = await db.execute(select(SystemManual).where(SystemManual.id == manual_id))

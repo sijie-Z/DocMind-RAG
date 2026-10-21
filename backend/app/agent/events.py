@@ -33,10 +33,33 @@ EventType = Literal[
     "error",
     "execution_step_result",
     "run_report",
+    # 评审 F4：补两枚实际在发但 Literal 未列的既有事件——
+    #   warning           — 非致命提醒（#301 落库失败 / 体验第四波 @引用
+    #                       失效、无权限、检索降级），前端有琥珀时间线分支；
+    #   execution_context — 终态运行上下文（exec_context.to_dict()：total_tokens
+    #                       / duration_ms 等），前端计时与成本的数据源。
+    "warning",
+    "execution_context",
+    # HITL（人在环）：
+    #   approval_required — 执行器停在审批点（工具未执行），本流随后结束，
+    #     任务态为 waiting_approval；人类经 POST /tasks/{id}/approval 应答。
+    #   run_cancelled — 协作式取消在检查点被观察到；本 run 收敛为 cancelled。
+    #   steer_applied — 运行中转向（steering）消息在步边界被消费并注入后续
+    #     步骤提示词；content 为消息摘要。见 app/agent/steering.py。
+    #   plan_approval_required — 计划审批挂起（plan_approval_mode=always）：
+    #     planner 产出计划后暂停，任务态 waiting_plan_approval；plan_steps
+    #     携带结构化步骤（resume 流不回放 plan_step 事件，卡片数据必须自足）。
+    "approval_required",
+    "run_cancelled",
+    "steer_applied",
+    "plan_approval_required",
 ]
 
 ThinkingType = Literal["reasoning", "planning", "evaluation", "correction"]
-ReflectionResult = Literal["pass", "retry", "replan", "escalate"]
+# issue #301 #7/#8：反思降级三态中的第三态（无判定）——"unavailable" = 评估
+# 服务不可用；"unparsed" = 模型输出不含可用判定。两者都不是 "pass"（假成
+# 功），也都不是 run 失败（好 run 不因评估缺席被打坏）。
+ReflectionResult = Literal["pass", "retry", "replan", "escalate", "unavailable", "unparsed"]
 
 
 @dataclass
@@ -55,6 +78,9 @@ class AgentEvent:
     tool_args: dict[str, Any] = field(default_factory=dict)
     tool_call_id: str = ""
     tool_duration_ms: float = 0.0
+    # issue #206：代码执行类工具实际使用的沙箱（"ast" / "docker"）。
+    # 空串 = 该工具不涉及沙箱（事件瘦身：非空才序列化）。
+    sandbox: str = ""
 
     # Failure classification — read by Executor's retry loop to pick a RetryPolicy.
     # Distinct from `reflection_result`, which is a pass/retry/replan/escalate verdict.
@@ -68,6 +94,9 @@ class AgentEvent:
     dependencies: list[str] = field(default_factory=list)
     tool_hint: str = ""
     plan_step_status: str = ""
+    # B（计划审批）：plan_approval_required 的结构化步骤载荷
+    # （[{id, description, dependencies, tool_hint}…]；其余事件类型空）。
+    plan_steps: list[dict[str, Any]] = field(default_factory=list)
 
     # Semantic fields (v1 — must survive event round-trip)
     parallel_group: int | None = None
@@ -106,6 +135,9 @@ class AgentEvent:
             d["tool_call_id"] = self.tool_call_id
         if self.tool_duration_ms:
             d["tool_duration_ms"] = round(self.tool_duration_ms, 1)
+        # issue #206：resolved sandbox 随 tool_result/tool_error 暴露（非空才带）
+        if self.sandbox:
+            d["sandbox"] = self.sandbox
 
         if self.plan_id:
             d["plan_id"] = self.plan_id
@@ -121,10 +153,15 @@ class AgentEvent:
             d["tool_hint"] = self.tool_hint
         if self.plan_step_status:
             d["plan_step_status"] = self.plan_step_status
+        if self.plan_steps:
+            d["plan_steps"] = self.plan_steps
 
         if self.parallel_group is not None:
             d["parallel_group"] = self.parallel_group
-        if self.risk_level != "low":
+        # HITL：approval_required 的 risk_level 是安全关键信息——即使 low 也必须
+        # 显式在线上（缺字段曾让前端徽标兜底成"高风险"，并与卡片理由自相矛盾；
+        # 浏览器验收 F3）。其余事件类型维持"非默认值才带"的瘦身契约。
+        if self.risk_level != "low" or self.type == "approval_required":
             d["risk_level"] = self.risk_level
         if self.retry_strategy != "auto_retry":
             d["retry_strategy"] = self.retry_strategy

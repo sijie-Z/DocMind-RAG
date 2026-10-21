@@ -16,6 +16,7 @@
 变异点：删注册端点里的 organization_service.create_organization 调用（回到
 organization_id=None）→ 本文件用例红。
 """
+
 import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -30,6 +31,7 @@ from sqlalchemy.pool import StaticPool
 @pytest.fixture
 def client():
     from app.main import app
+
     return TestClient(app)
 
 
@@ -75,8 +77,10 @@ def _register(client, mock_user, org_service):
         captured["owner_id"] = owner_id
         return _Org()
 
-    with patch("app.api.v1.endpoints.auth.auth_service") as mas, \
-            patch("app.services.organization_service.organization_service", new=org_service):
+    with (
+        patch("app.api.v1.endpoints.auth.auth_service") as mas,
+        patch("app.services.organization_service.organization_service", new=org_service),
+    ):
         mas.get_user_by_username = AsyncMock(return_value=None)
         mas.get_user_by_email = AsyncMock(return_value=None)
         mas.create_user = AsyncMock(return_value=mock_user)
@@ -87,12 +91,15 @@ def _register(client, mock_user, org_service):
 
         app.dependency_overrides[get_db] = override_func
         try:
-            r = client.post("/api/v1/auth/register", json={
-                "username": "newbie",
-                "email": "newbie@example.com",
-                "password": "ValidPass123!",
-                "full_name": "Newbie",
-            })
+            r = client.post(
+                "/api/v1/auth/register",
+                json={
+                    "username": "newbie",
+                    "email": "newbie@example.com",
+                    "password": "ValidPass123!",
+                    "full_name": "Newbie",
+                },
+            )
         finally:
             app.dependency_overrides.pop(get_db, None)
 
@@ -154,8 +161,9 @@ def test_register_random_suffix_when_both_names_taken(client):
     r, captured, _ = _register(client, user, org_service)
 
     assert r.status_code == 200, f"二次重名不得导致注册失败: {r.text[:200]}"
-    assert re.fullmatch(r"newbie-42-[0-9a-f]{8} 的空间", captured["data"]["name"]), \
-        captured["data"]["name"]
+    assert re.fullmatch(r"newbie-42-[0-9a-f]{8} 的空间", captured["data"]["name"]), captured[
+        "data"
+    ]["name"]
     assert user.organization_id == 7
 
 
@@ -185,6 +193,7 @@ def _real_db_override(factory):
     async def _override():
         async with factory() as session:
             yield session
+
     return _override
 
 
@@ -213,20 +222,20 @@ async def test_register_real_db_creates_org_member_and_backfill():
     engine, factory = await _make_real_db()
     app.dependency_overrides[get_db] = _real_db_override(factory)
     try:
-        r = await _post_register({
-            "username": "realnewbie",
-            "email": "realnewbie@example.com",
-            "password": "ValidPass123!",
-            "full_name": "Real Newbie",
-        })
+        r = await _post_register(
+            {
+                "username": "realnewbie",
+                "email": "realnewbie@example.com",
+                "password": "ValidPass123!",
+                "full_name": "Real Newbie",
+            }
+        )
         assert r.status_code == 200, f"register failed: {r.text[:300]}"
         org_id = r.json()["data"]["user_info"]["organization_id"]
         assert org_id is not None, "#252 契约：注册成功必有个人组织且回填"
 
         async with factory() as s:
-            user = (await s.execute(
-                select(User).where(User.username == "realnewbie")
-            )).scalar_one()
+            user = (await s.execute(select(User).where(User.username == "realnewbie"))).scalar_one()
             assert user.organization_id == org_id
 
             orgs = (await s.execute(select(Organization))).scalars().all()
@@ -240,10 +249,13 @@ async def test_register_real_db_creates_org_member_and_backfill():
             member_rows = (await s.execute(select(user_organization))).all()
             assert [(m.user_id, m.organization_id) for m in member_rows] == [(user.id, org_id)]
 
-            notif_count = (await s.execute(
-                select(func.count()).select_from(Notification)
-                .where(Notification.user_id == user.id)
-            )).scalar()
+            notif_count = (
+                await s.execute(
+                    select(func.count())
+                    .select_from(Notification)
+                    .where(Notification.user_id == user.id)
+                )
+            ).scalar()
             assert notif_count == 1, "欢迎通知与用户/组织同一事务落盘"
     finally:
         app.dependency_overrides.pop(get_db, None)
@@ -267,19 +279,23 @@ async def test_register_real_db_crash_before_commit_leaves_no_partial_rows():
     engine, factory = await _make_real_db()
     app.dependency_overrides[get_db] = _real_db_override(factory)
     try:
-        with patch("app.api.v1.endpoints.auth.Notification",
-                   side_effect=RuntimeError("注入崩溃：回填后、commit 前")):
-            r = await _post_register({
-                "username": "crashbaby",
-                "email": "crashbaby@example.com",
-                "password": "ValidPass123!",
-            })
+        with patch(
+            "app.api.v1.endpoints.auth.Notification",
+            side_effect=RuntimeError("注入崩溃：回填后、commit 前"),
+        ):
+            r = await _post_register(
+                {
+                    "username": "crashbaby",
+                    "email": "crashbaby@example.com",
+                    "password": "ValidPass123!",
+                }
+            )
         assert r.status_code == 500, f"注入崩溃应表现为 500，实得 {r.status_code}"
 
         async with factory() as s:
-            leftover = (await s.execute(
-                select(User).where(User.username == "crashbaby")
-            )).scalar_one_or_none()
+            leftover = (
+                await s.execute(select(User).where(User.username == "crashbaby"))
+            ).scalar_one_or_none()
             assert leftover is None, "崩溃后用户行不得残留"
             for model in (Organization, user_organization, Notification):
                 count = (await s.execute(select(func.count()).select_from(model))).scalar()
@@ -304,35 +320,38 @@ async def test_register_real_db_second_collision_uses_random_suffix():
 
     engine, factory = await _make_real_db()
     async with factory() as s:
-        squatter = User(username="squatter", email="squatter@example.com",
-                        hashed_password="x", is_active=True)
+        squatter = User(
+            username="squatter", email="squatter@example.com", hashed_password="x", is_active=True
+        )
         s.add(squatter)
         await s.flush()
         assert squatter.id == 1  # 前置自检：注册者将确定性拿到 id=2
-        s.add_all([
-            Organization(name="newbie 的空间", is_private=True, owner_id=squatter.id),
-            Organization(name="newbie-2 的空间", is_private=True, owner_id=squatter.id),
-        ])
+        s.add_all(
+            [
+                Organization(name="newbie 的空间", is_private=True, owner_id=squatter.id),
+                Organization(name="newbie-2 的空间", is_private=True, owner_id=squatter.id),
+            ]
+        )
         await s.commit()
 
     app.dependency_overrides[get_db] = _real_db_override(factory)
     try:
-        r = await _post_register({
-            "username": "newbie",
-            "email": "newbie@example.com",
-            "password": "ValidPass123!",
-        })
+        r = await _post_register(
+            {
+                "username": "newbie",
+                "email": "newbie@example.com",
+                "password": "ValidPass123!",
+            }
+        )
         assert r.status_code == 200, f"预构造重名不得使注册 500: {r.text[:300]}"
         org_id = r.json()["data"]["user_info"]["organization_id"]
 
         async with factory() as s:
-            user = (await s.execute(
-                select(User).where(User.username == "newbie")
-            )).scalar_one()
+            user = (await s.execute(select(User).where(User.username == "newbie"))).scalar_one()
             assert user.id == 2  # 前提成立性自检（前置构造依赖此 id）
-            org = (await s.execute(
-                select(Organization).where(Organization.id == org_id)
-            )).scalar_one()
+            org = (
+                await s.execute(select(Organization).where(Organization.id == org_id))
+            ).scalar_one()
             assert re.fullmatch(r"newbie-2-[0-9a-f]{8} 的空间", org.name), org.name
             assert user.organization_id == org_id
     finally:

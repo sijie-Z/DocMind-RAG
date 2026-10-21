@@ -4,7 +4,7 @@
       <!-- 头部 -->
       <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-2xl font-bold text-gray-800 dark:text-white">Agent 工作流</h1>
+          <h1 class="text-2xl font-bold text-gray-800 dark:text-white">{{ t('menu.workflow') }}</h1>
           <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">可视化编排 AI 工作流，让多个模型和工具协同工作</p>
         </div>
         <div class="flex gap-2">
@@ -60,18 +60,30 @@
 
         <!-- Error state -->
         <div v-if="!loading && loadError" class="py-16 text-center">
-          <n-result status="error" title="加载失败" :description="loadErrorMsg">
+          <n-result status="error" :title="t('workflow.loadFailed')" :description="loadErrorMsg">
             <template #footer>
-              <n-button type="primary" @click="loadWorkflows">重试</n-button>
+              <n-button type="primary" @click="loadWorkflows">{{ t('common.retry') }}</n-button>
             </template>
           </n-result>
         </div>
 
-        <!-- Empty state -->
-        <div v-else-if="!loadError && filteredWorkflows.length === 0 && !loading" class="py-16 text-center">
-          <n-empty description="暂无工作流">
+        <!-- Empty state：搜索无命中（≠ 空库，不劝创建） -->
+        <div v-else-if="!loadError && !loading && filteredWorkflows.length === 0 && hasActiveSearch" class="py-16 text-center">
+          <n-empty :description="t('workflow.searchEmpty')">
             <template #extra>
-              <n-button v-if="!searchKeyword" type="primary" @click="createNewWorkflow">创建第一个工作流</n-button>
+              <div class="space-y-3">
+                <p class="text-sm text-gray-400">{{ t('workflow.searchEmptyDesc', { query: searchKeyword.trim() }) }}</p>
+                <n-button type="primary" ghost @click="clearSearch">{{ t('workflow.clearSearch') }}</n-button>
+              </div>
+            </template>
+          </n-empty>
+        </div>
+
+        <!-- Empty state：空库 → 创建引导 -->
+        <div v-else-if="!loadError && filteredWorkflows.length === 0 && !loading" class="py-16 text-center">
+          <n-empty :description="t('workflow.empty')">
+            <template #extra>
+              <n-button type="primary" @click="createNewWorkflow">{{ t('workflow.createFirst') }}</n-button>
             </template>
           </n-empty>
         </div>
@@ -82,23 +94,25 @@
             :key="item.id"
             class="group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500 hover:shadow-lg transition-all overflow-hidden"
           >
-            <!-- 节点预览 -->
-            <div class="h-24 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center gap-2 overflow-hidden px-4">
-              <template v-if="item.flow_data?.nodes?.length">
-                <div
-                  v-for="node in item.flow_data.nodes.slice(0, 5)"
-                  :key="node.id"
-                  class="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
-                  :class="getNodePreviewClass(node.type)"
-                >
-                  <n-icon size="18"><component :is="getNodeIcon(node.type)" /></n-icon>
-                </div>
-                <div v-if="item.flow_data.nodes.length > 5" class="text-gray-400 text-sm">
-                  +{{ item.flow_data.nodes.length - 5 }}
-                </div>
-              </template>
-              <div v-else class="text-gray-400 text-sm">空白工作流</div>
-            </div>
+              <!-- 节点预览：列表响应不含 flow_data（workflow.py:57-72，B7），
+                   无从推导节点构成 → 不渲染任何节点/空态断言（旧文案「空白工作流」
+                   对非空工作流是谎报），只保留中性占位图标 -->
+              <div class="h-24 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center gap-2 overflow-hidden px-4">
+                <template v-if="item.flow_data?.nodes?.length">
+                  <div
+                    v-for="node in item.flow_data.nodes.slice(0, 5)"
+                    :key="node.id"
+                    class="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
+                    :class="getNodePreviewClass(node.type)"
+                  >
+                    <n-icon size="18"><component :is="getNodeIcon(node.type)" /></n-icon>
+                  </div>
+                  <div v-if="item.flow_data.nodes.length > 5" class="text-gray-400 text-sm">
+                    +{{ item.flow_data.nodes.length - 5 }}
+                  </div>
+                </template>
+                <n-icon v-else size="28" class="text-gray-300 dark:text-gray-600"><AppsOutline /></n-icon>
+              </div>
 
             <!-- 内容 -->
             <div class="p-4">
@@ -154,14 +168,18 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
 import { useRouter } from 'vue-router'
-import { NIcon, NButton, NSpin, NTag, NInput, NDropdown, useDialog, useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
+import { NIcon, NButton, NSpin, NTag, NInput, NDropdown, useDialog } from 'naive-ui'
+import { useDedupedMessage } from '@/utils/message'
+import { getErrorMessage } from '@/utils/apiError'
 import {
   AddOutline, CreateOutline, TrashOutline, GitBranchOutline, SearchOutline,
   TimeOutline, GitNetworkOutline, CheckmarkCircleOutline, EllipsisVertical, CopyOutline, ServerOutline,
   HardwareChipOutline, ChatbubbleEllipsesOutline, VolumeHighOutline, EnterOutline, ExitOutline,
   CompassOutline, AppsOutline
 } from '@vicons/ionicons5'
-import { getWorkflows, deleteWorkflow as deleteWorkflowApi, createWorkflow, type WorkflowConfig } from '@/api/workflow'
+import { getWorkflows, getWorkflow, deleteWorkflow as deleteWorkflowApi, createWorkflow, type WorkflowConfig } from '@/api/workflow'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import dayjs from 'dayjs'
 
 interface WorkflowItem {
@@ -174,8 +192,9 @@ interface WorkflowItem {
 }
 
 const router = useRouter()
+const { t } = useI18n()
 const dialog = useDialog()
-const message = useMessage()
+const message = useDedupedMessage()
 
 const loading = ref(false)
 const loadError = ref(false)
@@ -192,15 +211,28 @@ const filteredWorkflows = computed(() => {
   )
 })
 
+/** E14/C1 空态分流：有关键词时的空列表 = 搜索无命中，而非空库。 */
+const hasActiveSearch = computed(() => searchKeyword.value.trim().length > 0)
+
+const clearSearch = () => {
+  searchKeyword.value = ''
+}
+
 const loadWorkflows = async () => {
   loading.value = true
   try {
-    const res = await getWorkflows()
-    workflows.value = res.data?.data?.items || []
+    // E14/D1：页面自呈现错误（错误态 + 重试），请求静默，避免拦截器重复 toast
+    const res = await getWorkflows(undefined, { silent: true })
+    // GET /workflows/ → {success, data: {items: [...], total}} → apiUnwrap 归一
+    const page = apiUnwrap<{ items?: WorkflowItem[] } | null>(res)
+    workflows.value = page?.items || []
     loadError.value = false
+    loadErrorMsg.value = ''
   } catch (error) {
+    // E14/D2：失败清空旧结果，不让陈旧列表冒充当前数据
     loadError.value = true
-    loadErrorMsg.value = '加载失败，请稍后重试'
+    loadErrorMsg.value = getErrorMessage(error, t('workflow.loadFailedDesc'))
+    workflows.value = []
   } finally {
     loading.value = false
   }
@@ -220,17 +252,17 @@ const openEditor = (id: number) => {
 
 const deleteWorkflow = async (id: number) => {
   dialog.warning({
-    title: '确认删除',
-    content: '删除后无法恢复，确定要删除此工作流吗？',
-    positiveText: '删除',
-    negativeText: '取消',
+    title: t('workflow.confirmDeleteTitle'),
+    content: t('workflow.confirmDeleteContent'),
+    positiveText: t('workflow.confirmDeletePositive'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       try {
-        await deleteWorkflowApi(id)
-        message.success('删除成功')
+        await deleteWorkflowApi(id, { silent: true })
+        message.success(t('workflow.deleteSuccess'))
         loadWorkflows()
-      } catch (error) {
-        message.error('删除失败')
+      } catch (error: unknown) {
+        message.error(t('workflow.deleteFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
       }
     }
   })
@@ -238,15 +270,24 @@ const deleteWorkflow = async (id: number) => {
 
 const duplicateWorkflow = async (item: WorkflowItem) => {
   try {
+    // 列表响应只有 6 键、不含 flow_data（workflow.py:57-72，B7）——复制必须走
+    // 详情接口取真配置，否则副本恒为空壳（旧实现直接传 item.flow_data === undefined，
+    // 静默丢数据）
+    const res = await getWorkflow(item.id, { silent: true })
+    const detail = apiUnwrap<WorkflowItem | undefined>(res)
+    if (!detail) {
+      message.error(t('workflow.duplicateFailed'))
+      return
+    }
     await createWorkflow({
       name: `${item.name} (副本)`,
       description: item.description,
-      flow_data: item.flow_data!
-    })
-    message.success('复制成功')
+      flow_data: detail.flow_data
+    }, { silent: true })
+    message.success(t('workflow.duplicateSuccess'))
     loadWorkflows()
-  } catch (error) {
-    message.error('复制失败')
+  } catch (error: unknown) {
+    message.error(t('workflow.duplicateFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
   }
 }
 

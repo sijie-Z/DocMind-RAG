@@ -35,10 +35,7 @@ def log_safe(value: Any, max_len: int = _MAX_LEN) -> str:
         .replace("\t", "\\t")
     )
     # 其余控制字符（C0 / DEL）转义为可见形态
-    text = "".join(
-        ch if ord(ch) >= 32 and ord(ch) != 127 else f"\\x{ord(ch):02x}"
-        for ch in text
-    )
+    text = "".join(ch if ord(ch) >= 32 and ord(ch) != 127 else f"\\x{ord(ch):02x}" for ch in text)
     if len(text) > max_len:
         text = text[:max_len] + "...[truncated]"
     return text

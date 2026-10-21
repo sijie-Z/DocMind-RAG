@@ -2,6 +2,7 @@
 
 Uses LLM-as-judge for scoring. Each metric returns a float in [0, 1].
 """
+
 import json
 import logging
 import re
@@ -10,12 +11,39 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from app.rag.context_compressor import get_prompt_text
+from app.rag.errors import EvalJudgeUnavailableError
+
 logger = logging.getLogger(__name__)
+
+# Judge prompts are capped so a single oversized retrieval batch cannot blow up
+# prompt cost / latency. Characters, not tokens — no tokenizer dependency here.
+MAX_CONTEXT_CHARS = 1200
+
+
+def _build_context_str(context: list[dict[str, Any]]) -> str:
+    """Join retrieved context into judge-prompt text, capped at MAX_CONTEXT_CHARS.
+
+    When truncation happens, the dropped fraction is logged so prompt-cost
+    incidents stay observable instead of silently degrading evaluation quality.
+    """
+    original = "\n\n".join(f"[{i + 1}] {get_prompt_text(item)}" for i, item in enumerate(context))
+    if len(original) <= MAX_CONTEXT_CHARS:
+        return original
+    truncated_ratio = round(1.0 - MAX_CONTEXT_CHARS / len(original), 4)
+    logger.info(
+        "RAG eval context truncated: original=%d chars, kept=%d chars, truncated_ratio=%.4f",
+        len(original),
+        MAX_CONTEXT_CHARS,
+        truncated_ratio,
+    )
+    return original[:MAX_CONTEXT_CHARS]
 
 
 @dataclass
 class EvalResult:
     """Single evaluation result."""
+
     faithfulness: float = 0.0
     relevancy: float = 0.0
     context_precision: float = 0.0
@@ -24,12 +52,20 @@ class EvalResult:
 
 @dataclass
 class BatchEvalResult:
-    """Aggregated evaluation over multiple queries."""
+    """Aggregated evaluation over multiple queries.
+
+    issue #301：`count` 只计**真正评出分**的条目（不再是含故障条目的总数）；
+    `failed_count` / `failures` 标注因评委不可用而被剔除的条目（含原始下标），
+    均值仅对 `results` 计算 —— 故障条目不得以 0 分混入均值。
+    """
+
     count: int = 0
     avg_faithfulness: float = 0.0
     avg_relevancy: float = 0.0
     avg_context_precision: float = 0.0
     results: list[EvalResult] = field(default_factory=list)
+    failed_count: int = 0
+    failures: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _extract_score(text: str) -> float:
@@ -46,22 +82,22 @@ def _extract_score(text: str) -> float:
 
     # Try regex — order matters: specific patterns first, generic last
     # "8/10" style
-    m = re.search(r'(\d*\.?\d+)\s*/\s*10\b', text)
+    m = re.search(r"(\d*\.?\d+)\s*/\s*10\b", text)
     if m:
         return max(0.0, min(1.0, float(m.group(1)) / 10.0))
     # "Score: 0.8" style
-    m = re.search(r'[Ss]core[:\s]*(\d*\.?\d+)', text)
+    m = re.search(r"[Ss]core[:\s]*(\d*\.?\d+)", text)
     if m:
         val = float(m.group(1))
         if val > 1:
             val = val / 100.0 if val <= 100 else val / 10.0
         return max(0.0, min(1.0, val))
     # "85%" style
-    m = re.search(r'(\d+)%', text)
+    m = re.search(r"(\d+)%", text)
     if m:
         return max(0.0, min(1.0, float(m.group(1)) / 100.0))
     # Bare float "0.85"
-    m = re.search(r'(\d\.\d+)', text)
+    m = re.search(r"(\d\.\d+)", text)
     if m:
         return max(0.0, min(1.0, float(m.group(1))))
     return 0.0
@@ -130,9 +166,13 @@ class RAGEvaluator:
         self.model = model
 
     async def _score(self, prompt: str) -> tuple[float, str]:
-        """Call LLM to score, return (score, raw_response)."""
+        """Call LLM to score, return (score, raw_response).
+
+        issue #301：评委调用失败抛 `EvalJudgeUnavailableError`，不再吞成
+        `(0.0, err)` —— 把「测量失败」伪装成「真实 0 分」正是本族要收的病。
+        """
         if not self.client:
-            return 0.0, "LLM client not configured"
+            raise EvalJudgeUnavailableError("LLM judge client not configured")
 
         try:
             response = await self.client.chat.completions.create(
@@ -146,19 +186,16 @@ class RAGEvaluator:
             return _extract_score(text), text
         except Exception as e:
             logger.warning(f"RAG eval LLM call failed: {e}")
-            return 0.0, str(e)
+            raise EvalJudgeUnavailableError(
+                f"RAG eval judge call failed: {type(e).__name__}"
+            ) from e
 
     async def evaluate_faithfulness(
         self, question: str, answer: str, context: list[dict[str, Any]]
     ) -> tuple[float, str]:
         """Score whether the answer is faithful to the retrieved context."""
-        context_str = "\n\n".join(
-            f"[{i+1}] {item.get('snippet') or item.get('text', '')}"
-            for i, item in enumerate(context)
-        )
-        prompt = FAITHFULNESS_PROMPT.format(
-            context=context_str, question=question, answer=answer
-        )
+        context_str = _build_context_str(context)
+        prompt = FAITHFULNESS_PROMPT.format(context=context_str, question=question, answer=answer)
         return await self._score(prompt)
 
     async def evaluate_relevancy(self, question: str, answer: str) -> tuple[float, str]:
@@ -170,13 +207,8 @@ class RAGEvaluator:
         self, question: str, context: list[dict[str, Any]]
     ) -> tuple[float, str]:
         """Score whether retrieved documents are relevant to the question."""
-        context_str = "\n\n".join(
-            f"[{i+1}] {item.get('snippet') or item.get('text', '')}"
-            for i, item in enumerate(context)
-        )
-        prompt = CONTEXT_PRECISION_PROMPT.format(
-            question=question, context=context_str
-        )
+        context_str = _build_context_str(context)
+        prompt = CONTEXT_PRECISION_PROMPT.format(question=question, context=context_str)
         return await self._score(prompt)
 
     async def evaluate(
@@ -208,15 +240,28 @@ class RAGEvaluator:
         """Evaluate multiple queries and return aggregated results.
 
         Each item: {"question": str, "answer": str, "context": list}
+
+        issue #301：单条评委不可用 → 记入 `failures`（含原始下标）并从均值
+        剔除，不再以 0 分混入；全部条目失败 → 抛 `EvalJudgeUnavailableError`，
+        由端点映射为 5xx，绝不返回 count/avg 全零的「成功」。
         """
-        results = []
-        for item in items:
-            r = await self.evaluate(
-                question=item["question"],
-                answer=item["answer"],
-                context=item.get("context", []),
-            )
+        results: list[EvalResult] = []
+        failures: list[dict[str, Any]] = []
+        for index, item in enumerate(items):
+            try:
+                r = await self.evaluate(
+                    question=item["question"],
+                    answer=item["answer"],
+                    context=item.get("context", []),
+                )
+            except EvalJudgeUnavailableError as e:
+                logger.warning(f"RAG batch eval item {index} skipped (judge unavailable): {e}")
+                failures.append({"index": index, "error": "judge_unavailable"})
+                continue
             results.append(r)
+
+        if not results:
+            raise EvalJudgeUnavailableError("批量评估全部条目的评委调用均不可用，评价结果不可知")
 
         n = max(1, len(results))
         return BatchEvalResult(
@@ -225,4 +270,6 @@ class RAGEvaluator:
             avg_relevancy=round(sum(r.relevancy for r in results) / n, 4),
             avg_context_precision=round(sum(r.context_precision for r in results) / n, 4),
             results=results,
+            failed_count=len(failures),
+            failures=failures,
         )

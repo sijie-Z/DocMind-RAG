@@ -36,22 +36,42 @@ async def calculate(expression: str, **_: Any) -> str:
 
     # Safe math functions and constants
     safe_dict = {
-        "sqrt": math.sqrt, "sin": math.sin, "cos": math.cos,
-        "tan": math.tan, "asin": math.asin, "acos": math.acos,
-        "atan": math.atan, "atan2": math.atan2, "log": math.log,
-        "log2": math.log2, "log10": math.log10, "exp": math.exp,
-        "abs": abs, "ceil": math.ceil, "floor": math.floor,
-        "factorial": math.factorial, "gcd": math.gcd,
-        "pi": math.pi, "e": math.e, "tau": math.tau,
-        "degrees": math.degrees, "radians": math.radians,
-        "sinh": math.sinh, "cosh": math.cosh, "tanh": math.tanh,
+        "sqrt": math.sqrt,
+        "sin": math.sin,
+        "cos": math.cos,
+        "tan": math.tan,
+        "asin": math.asin,
+        "acos": math.acos,
+        "atan": math.atan,
+        "atan2": math.atan2,
+        "log": math.log,
+        "log2": math.log2,
+        "log10": math.log10,
+        "exp": math.exp,
+        "abs": abs,
+        "ceil": math.ceil,
+        "floor": math.floor,
+        "factorial": math.factorial,
+        "gcd": math.gcd,
+        "pi": math.pi,
+        "e": math.e,
+        "tau": math.tau,
+        "degrees": math.degrees,
+        "radians": math.radians,
+        "sinh": math.sinh,
+        "cosh": math.cosh,
+        "tanh": math.tanh,
     }
 
     bin_ops = {
-        ast.Add: operator.add, ast.Sub: operator.sub,
-        ast.Mult: operator.mul, ast.Div: operator.truediv,
-        ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod,
-        ast.Pow: operator.pow, ast.USub: operator.neg,
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
     }
 
     def _eval(node):
@@ -152,6 +172,7 @@ async def format_converter(
         if output_fmt == "yaml":
             try:
                 import yaml
+
                 return yaml.dump(parsed, allow_unicode=True, default_flow_style=False)
             except ImportError:
                 return "YAML output unavailable: pyyaml not installed."
@@ -176,6 +197,7 @@ def _auto_parse(data: str):
     # YAML
     try:
         import yaml
+
         result = yaml.safe_load(data)
         if isinstance(result, (dict, list)):
             return result, "yaml"
@@ -185,6 +207,7 @@ def _auto_parse(data: str):
     try:
         import csv
         import io
+
         reader = csv.reader(io.StringIO(data))
         rows = list(reader)
         if len(rows) > 1:
@@ -275,6 +298,7 @@ async def get_system_status(organization_id: int | None = None, **_: Any) -> str
     try:
         from app.core.config import settings
         from app.core.elasticsearch import es_client
+
         if es_client:
             res = await es_client.count(
                 index=settings.ELASTICSEARCH_INDEX_NAME,
@@ -291,6 +315,7 @@ async def get_system_status(organization_id: int | None = None, **_: Any) -> str
     # Redis status —— 进程级聚合（内存/连接数/uptime），不含租户数据归属，保持原样
     try:
         from app.core.redis import redis_client
+
         if redis_client:
             info = await redis_client.info("memory")
             status["redis"] = {
@@ -321,9 +346,7 @@ async def get_system_status(organization_id: int | None = None, **_: Any) -> str
             ).scalar() or 0
             user_count = (
                 await session.execute(
-                    select(func.count(User.id)).where(
-                        User.organization_id == organization_id
-                    )
+                    select(func.count(User.id)).where(User.organization_id == organization_id)
                 )
             ).scalar() or 0
             status["database"] = {

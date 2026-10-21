@@ -6,6 +6,14 @@ the task was truly completed. It can decide to:
 - retry: A specific step needs to be retried
 - replan: The plan was wrong, needs regeneration
 - escalate: The task is beyond current capabilities
+
+Degraded states (issue #301 #7/#8) — the evaluator itself is what failed,
+so no verdict exists:
+- unavailable: the reflection LLM call failed (service down/timeout)
+- unparsed: the LLM answered, but its output carried no usable decision
+Neither may be reported as "pass" (fake success), and neither may be
+reported as a run failure (a good run must not be downgraded because the
+evaluator was absent). See ``reflect()`` for the three-state handling.
 """
 
 import json
@@ -21,6 +29,7 @@ from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.planner import Plan
 from app.agent.usage import record_llm_usage
+from app.core.log_safety import log_safe
 from app.core.prometheus import AGENT_REFLECTION_DECISIONS
 
 logger = logging.getLogger(__name__)
@@ -41,6 +50,7 @@ def reset_reflection_stats() -> None:
     """Reset reflection statistics (e.g. between benchmark runs)."""
     _reflection_stats["quick_pass_count"] = 0
     _reflection_stats["llm_reflection_count"] = 0
+
 
 REFLECTION_SYSTEM_PROMPT = """你是一个质量评估专家。你需要评估 Agent 的任务执行结果。
 
@@ -81,10 +91,11 @@ REFLECTION_SYSTEM_PROMPT = """你是一个质量评估专家。你需要评估 A
 @dataclass
 class ReflectionResult:
     """The result of a reflection pass."""
-    achievement: int = 0  # 0-100
+
+    achievement: int | None = None  # 0-100；None = 无判定（降级态），不是 0 分
     gaps: list[str] = field(default_factory=list)
     quality_issues: list[str] = field(default_factory=list)
-    decision: str = "pass"  # pass, retry, replan
+    decision: str = "pass"  # pass, retry, replan, escalate, unavailable, unparsed
     retry_step_id: str | None = None
     reasoning: str = ""
 
@@ -119,14 +130,18 @@ class Reflector:
         span = None
         try:
             from app.agent.observability import get_langfuse
+
             lf = get_langfuse()
             if lf:
-                span = lf.span(name="reflection", input={
-                "plan_goal": plan.goal,
-                "step_count": len(plan.steps),
-                "completed": plan.completed_steps,
-                "failed": plan.failed_steps,
-            })
+                span = lf.span(
+                    name="reflection",
+                    input={
+                        "plan_goal": plan.goal,
+                        "step_count": len(plan.steps),
+                        "completed": plan.completed_steps,
+                        "failed": plan.failed_steps,
+                    },
+                )
         except Exception:
             pass
 
@@ -136,9 +151,14 @@ class Reflector:
             if span:
                 span.end(output="quick_pass")
             await self._record_reflection(plan, "pass", "All steps completed successfully")
-            yield self._summary_event(plan, ReflectionResult(
-                achievement=100, decision="pass", reasoning="All steps completed successfully",
-            ))
+            yield self._summary_event(
+                plan,
+                ReflectionResult(
+                    achievement=100,
+                    decision="pass",
+                    reasoning="All steps completed successfully",
+                ),
+            )
             return
 
         # Build reflection prompt
@@ -169,23 +189,65 @@ class Reflector:
             reflection_data = self._extract_json(content)
 
         except Exception as e:
-            logger.error(f"Reflection LLM call failed: {e}")
+            # W0-5：这是异常原文在反思链路的唯一保留点（decision/事件已固定文案），
+            # 日志值过 log_safe（防换行伪造日志行）。
+            logger.error("Reflection LLM call failed: %s", log_safe(e))
             if span:
                 span.end(output=f"error: {e}", level="ERROR")
-            # Default to pass on error (don't block the user)
+            # issue #301 #7（三态设计：降级 ≠ 失败但 ≠ 假 pass）：
+            # 反思服务不可用时【判定无法做出】。旧行为判 pass 并捏造
+            # achievement=80，把"没评估"伪装成"评估通过"；反向若判失败，
+            # 又会基于"什么都没观察到"把好 run 打成坏 run（触发重试/重规划）。
+            # 正解是第三态 unavailable：run 照常收尾（不阻断、不重试），但
+            # 结构化面（事件 + ctx 决策记录 + 指标）如实标注，且不填任何
+            # achievement/gaps —— 无判定不是通过，也不是失败。
+            AGENT_REFLECTION_DECISIONS.labels(decision="unavailable").inc()
+            if ctx:
+                # W0-5：决策 reasoning 会进入 run_report/execution_context 外发，
+                # 异常原文只进日志（上方 logger.error 已记录），不得插值。
+                ctx.record_decision(
+                    "reflect",
+                    "unavailable",
+                    "反思评估跳过（评估服务异常），本轮未获得完成度判定",
+                )
             yield AgentEvent(
                 type="reflection",
-                reflection_result="pass",
-                content="反思评估跳过（评估服务异常）",
+                reflection_result="unavailable",
+                content="反思评估跳过（评估服务异常），本轮未获得完成度判定",
                 plan_id=plan.id,
                 plan_progress=plan.progress,
             )
-            yield self._summary_event(plan, ReflectionResult(
-                achievement=80, decision="pass", reasoning="Reflection skipped due to error",
-            ))
             return
 
-        decision = reflection_data.get("decision", "pass")
+        decision = self._normalize_decision(reflection_data)
+        if decision is None:
+            # issue #301 #8：解析失败 / 未知 decision 不再"宽容"地一律 pass。
+            # 旧行为把「我觉得还不错」这类非 JSON 文本（或未知 decision 值）
+            # 直接当 pass 决策，还以 success=True 写入经验库。历史里没有注释
+            # 或用例承诺这种宽容是有意的（唯一的宽容注释在 LLM 不可用路径，
+            # 已被 #7 推翻）——模型答了，但输出的不是判定，与 unavailable
+            # 同列为第三态 unparsed：不判 pass（假绿）、不判失败（好 run 不
+            # 因评估缺席被打坏），只如实记录。
+            raw_preview = str(content)[:200]
+            logger.warning("Reflection output carried no usable decision: %r", raw_preview)
+            if span:
+                span.end(output=f"unparsed: {raw_preview[:120]}", level="WARNING")
+            AGENT_REFLECTION_DECISIONS.labels(decision="unparsed").inc()
+            if ctx:
+                ctx.record_decision(
+                    "reflect",
+                    "unparsed",
+                    "反思输出无法解析（模型输出格式漂移或截断），本轮未获得完成度判定",
+                )
+            yield AgentEvent(
+                type="reflection",
+                reflection_result="unparsed",
+                content="反思输出无法解析（模型输出格式漂移或截断），本轮未获得完成度判定",
+                plan_id=plan.id,
+                plan_progress=plan.progress,
+            )
+            return
+
         reasoning = reflection_data.get("reasoning", "")
         AGENT_REFLECTION_DECISIONS.labels(decision=decision).inc()
 
@@ -206,16 +268,22 @@ class Reflector:
         await self._record_reflection(plan, decision, reasoning)
 
         if span:
-            span.end(output=f"decision={decision}, achievement={reflection_data.get('achievement', '?')}")
+            span.end(
+                output=f"decision={decision}, achievement={reflection_data.get('achievement', '?')}"
+            )
 
-        yield self._summary_event(plan, ReflectionResult(
-            achievement=reflection_data.get("achievement", 85),
-            gaps=reflection_data.get("gaps", []),
-            quality_issues=reflection_data.get("quality_issues", []),
-            decision=decision,
-            retry_step_id=reflection_data.get("retry_step_id"),
-            reasoning=reasoning,
-        ))
+        yield self._summary_event(
+            plan,
+            ReflectionResult(
+                # 模型没给 achievement 就留 None —— 不再回退到编造的 85（#301 #7）。
+                achievement=reflection_data.get("achievement"),
+                gaps=reflection_data.get("gaps", []),
+                quality_issues=reflection_data.get("quality_issues", []),
+                decision=decision,
+                retry_step_id=reflection_data.get("retry_step_id"),
+                reasoning=reasoning,
+            ),
+        )
 
     def _summary_event(self, plan: Plan, result: ReflectionResult) -> AgentEvent:
         """Render the structured reflection verdict as an event.
@@ -229,12 +297,18 @@ class Reflector:
             parts.append("发现的缺口:\n" + "\n".join(f"- {g}" for g in result.gaps))
         if result.quality_issues:
             parts.append("质量问题:\n" + "\n".join(f"- {q}" for q in result.quality_issues))
-        content = f"完成度 {result.achievement}" if parts else ""
+        content = ""
         if parts:
-            content += "\n" + "\n".join(parts)
+            if result.achievement is not None:
+                content = f"完成度 {result.achievement}\n"
+            content += "\n".join(parts)
         return AgentEvent(
             type="reflection",
-            reflection_result=result.decision if result.decision in ("pass", "retry", "replan", "escalate") else "pass",
+            # issue #301 #8：未知 decision 不得再被静默改写为 "pass"（假绿兜底）。
+            # 正常路径只会传入已验证的判定；此处兜底降级为 "unparsed"（无判定）。
+            reflection_result=result.decision
+            if result.decision in ("pass", "retry", "replan", "escalate")
+            else "unparsed",
             content=content,
             plan_id=plan.id,
             plan_progress=plan.progress,
@@ -250,7 +324,13 @@ class Reflector:
     def _build_plan_summary(self, plan: Plan) -> str:
         lines = []
         for step in plan.steps:
-            icon = {"completed": "✅", "failed": "❌", "skipped": "⬜", "pending": "⏳", "running": "🔄"}
+            icon = {
+                "completed": "✅",
+                "failed": "❌",
+                "skipped": "⬜",
+                "pending": "⏳",
+                "running": "🔄",
+            }
             icon_str = icon.get(step.status, "❓")
             lines.append(f"{icon_str} {step.id}: {step.description}")
         return "\n".join(lines)
@@ -268,9 +348,15 @@ class Reflector:
                 lines.append(f"- [{step_id}]: {str(data)[:300]}")
         return "\n".join(lines) if lines else "(无执行结果)"
 
-    def _extract_json(self, text: str) -> dict[str, Any]:
-        """Extract JSON from LLM response."""
-        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+    def _extract_json(self, text: str) -> dict[str, Any] | None:
+        """Extract JSON from LLM response. None = 没有任何可解析的 JSON 对象。
+
+        issue #301 #8：旧行为在全部解析尝试失败后返回
+        `{"decision": "pass"}` 兜底 —— 输出格式漂移被静默翻译成"评估通过"
+        （还会以 success=True 进经验库）。解析失败就是没有判定，由调用方按
+        unparsed 第三态处理。
+        """
+        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
         if json_match:
             try:
                 return json.loads(json_match.group(1))
@@ -281,12 +367,28 @@ class Reflector:
         except json.JSONDecodeError:
             pass
         try:
-            brace_match = re.search(r'\{[\s\S]*\}', text)
+            brace_match = re.search(r"\{[\s\S]*\}", text)
             if brace_match:
                 return json.loads(brace_match.group(0))
         except json.JSONDecodeError:
             pass
-        return {"decision": "pass", "reasoning": text[:200]}
+        return None
+
+    @staticmethod
+    def _normalize_decision(data: dict[str, Any] | None) -> str | None:
+        """Validated decision from parsed reflection output.
+
+        Returns the decision only when it names one of the real verdicts;
+        None for unparseable output or unknown/missing decision values —
+        the caller then treats it as the degraded "unparsed" state
+        (issue #301 #8: no silent pass).
+        """
+        if not isinstance(data, dict):
+            return None
+        decision = str(data.get("decision") or "").strip().lower()
+        if decision in ("pass", "retry", "replan", "escalate"):
+            return decision
+        return None
 
     async def _record_reflection(self, plan: Plan, decision: str, reasoning: str) -> None:
         """Record reflection outcome in memory."""

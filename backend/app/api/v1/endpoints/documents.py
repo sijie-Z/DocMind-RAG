@@ -34,19 +34,21 @@ logger = logging.getLogger(__name__)
 # 持有后台任务引用，避免 asyncio 在任务完成前将其当作垃圾回收
 _background_tasks: set[asyncio.Task] = set()
 
+
 def get_document_type(filename: str) -> DocumentType:
-    ext = filename.split('.')[-1].lower() if '.' in filename else ''
-    if ext == 'pdf':
+    ext = filename.split(".")[-1].lower() if "." in filename else ""
+    if ext == "pdf":
         return DocumentType.PDF
-    if ext in ['doc', 'docx']:
+    if ext in ["doc", "docx"]:
         return DocumentType.WORD
-    if ext in ['xls', 'xlsx']:
+    if ext in ["xls", "xlsx"]:
         return DocumentType.EXCEL
-    if ext in ['ppt', 'pptx']:
+    if ext in ["ppt", "pptx"]:
         return DocumentType.PPT
-    if ext == 'txt':
+    if ext == "txt":
         return DocumentType.TXT
     return DocumentType.OTHER
+
 
 async def calculate_md5(file: UploadFile) -> str:
     md5_hash = hashlib.md5(usedforsecurity=False)
@@ -54,6 +56,7 @@ async def calculate_md5(file: UploadFile) -> str:
         md5_hash.update(chunk)
     await file.seek(0)
     return md5_hash.hexdigest()
+
 
 def build_brief_summary(content: str) -> str:
     parts = [line.strip() for line in content.splitlines() if line.strip()]
@@ -104,14 +107,20 @@ def build_suggested_tags(content: str) -> list[str]:
             tags.append(tag)
     return tags[:6]
 
-@router.post("/upload", response_model=dict, status_code=status.HTTP_201_CREATED, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_UPLOAD], organization_id_param='organization_id'))])
+
+@router.post(
+    "/upload",
+    response_model=dict,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(permission_required([PermissionType.DOCUMENT_UPLOAD]))],
+)
 async def upload_document(
     file: UploadFile = File(...),
     title: str | None = Form(None),
     description: str | None = Form(None),
     tags: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
     上传文档并存入 MinIO 和 数据库
@@ -168,7 +177,7 @@ async def upload_document(
                 object_name=object_name,
                 data=file.file,
                 length=file_size,
-                content_type=file.content_type or "application/octet-stream"
+                content_type=file.content_type or "application/octet-stream",
             )
 
         # 6. 写入数据库 (核心修复点：tags -> keywords)
@@ -185,7 +194,7 @@ async def upload_document(
             uploaded_by=current_user.id,
             title=title or file.filename,
             description=description,
-            keywords=keywords_list  # ✅ 已修正字段名！
+            keywords=keywords_list,  # ✅ 已修正字段名！
         )
 
         db.add(new_doc)
@@ -199,9 +208,15 @@ async def upload_document(
             trigger_type="upload",
             status=KnowledgeJobStatus.QUEUED,
             retry_count=0,
+            # A3-P0：先按「本机兜底候选」落库（与 job 同一次 commit）；
+            # Kafka 投递确认后清除。若进程在投递/清除之间退出，启动对账
+            # 最多多重跑一次（文档锁互斥、处理幂等），任务不会丢。
+            local_fallback=True,
         )
         db.add(job)
-        await db.flush()
+        # A3-P0：先落库 job（拿到自增 id）再发 Kafka——消费端读到消息时
+        # 任务行必已可见，避免「消息先到、job 后到」造成 job 永久 QUEUED。
+        await db.commit()
 
         sent = False
         schedule_local = False
@@ -212,31 +227,65 @@ async def upload_document(
                 "job_id": job.id,
                 "file_path": object_name,
                 "filename": file.filename,
-                "file_type": new_doc.file_type.value if hasattr(new_doc.file_type, "value") else str(new_doc.file_type),
-                "action": "process"
+                "file_type": new_doc.file_type.value
+                if hasattr(new_doc.file_type, "value")
+                else str(new_doc.file_type),
+                "action": "process",
             }
             sent = await kafka_producer.send_message(settings.KAFKA_FILE_PROCESSING_TOPIC, message)
         except Exception as kafka_err:
             logger.warning(f"Kafka send failed, will process in-process: {kafka_err}")
 
-        if not sent:
+        if sent:
+            # A3-P0：投递已确认 → 清除本机兜底标记（防止启动对账重复调度
+            # 在途 Kafka 任务）；清除前崩溃则最多多重跑一次，任务不丢。
+            job.local_fallback = False
+            await db.commit()
+        else:
+            # 标记已在任务落库时写入（local_fallback=True），此处只需调度；
+            # 进程若在任务完成前退出，启动对账按标记回收该任务。
             schedule_local = True
-
-        await db.commit()
 
         if schedule_local:
             try:
                 from app.worker.doc_processor import processor
-                task = asyncio.create_task(processor.process(doc_id, job.id))
+
+                # 先建协程再装成 task：create_task 失败时显式 close()，避免
+                # "coroutine was never awaited" 泄漏（失败分支的干净收尾）。
+                coro = processor.process(doc_id, job.id)
+                try:
+                    task = asyncio.create_task(coro)
+                except Exception:
+                    coro.close()
+                    raise
                 _background_tasks.add(task)
                 task.add_done_callback(_background_tasks.discard)
                 logger.info("Kafka unavailable; scheduled in-process document processing")
             except Exception as proc_err:
+                # issue #301 批 D（#23）：此前只把 job 置 FAILED——doc 永远卡 PENDING、
+                # 响应仍是 success:true「上传成功」，状态机与事实脱节（没有消费者会再
+                # 推进这件事）。现在 doc 同步置 FAILED（带原因），响应如实返回
+                # success:false + 失败语义，客户端可见（文件本身已保存，故仍为 201）。
                 logger.error(f"In-process processing setup failed: {proc_err}")
                 job.status = KnowledgeJobStatus.FAILED
                 job.error_message = f"本地处理任务启动失败: {str(proc_err)}"
                 job.finished_at = datetime.now()
+                new_doc.status = DocumentStatus.FAILED
+                new_doc.parse_error = f"本地处理任务启动失败: {str(proc_err)}"
                 await db.commit()
+                return {
+                    "success": False,
+                    "message": "文件已保存，但文档处理任务启动失败（文档已标记为失败，可稍后重建）",
+                    "data": {
+                        "id": new_doc.id,
+                        "filename": new_doc.filename,
+                        "title": new_doc.title,
+                        "status": new_doc.status.value
+                        if hasattr(new_doc.status, "value")
+                        else str(new_doc.status),
+                        "parse_error": new_doc.parse_error,
+                    },
+                }
 
         # 8. 返回，防止 refresh 导致的懒加载报错，使用 to_dict
         return {
@@ -246,8 +295,10 @@ async def upload_document(
                 "id": new_doc.id,
                 "filename": new_doc.filename,
                 "title": new_doc.title,
-                "status": new_doc.status.value if hasattr(new_doc.status, 'value') else str(new_doc.status)
-            }
+                "status": new_doc.status.value
+                if hasattr(new_doc.status, "value")
+                else str(new_doc.status),
+            },
         }
 
     except AppError:
@@ -256,11 +307,12 @@ async def upload_document(
         logger.error(f"Upload failed trace: {str(e)}", exc_info=True)
         raise AppError(f"上传失败: {str(e)}" if settings.EXPOSE_EXCEPTION_DETAIL else "上传失败")
 
+
 @router.get("/{document_id}", response_model=dict, dependencies=[Depends(get_current_user)])
 async def get_document_status(
     document_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
     获取单个文档状态及详情
@@ -275,10 +327,14 @@ async def get_document_status(
             DocumentStatus.PARSING: "parsing",
             DocumentStatus.PARSED: "parsed",
             DocumentStatus.INDEXED: "indexed",
-            DocumentStatus.FAILED: "failed"
+            DocumentStatus.FAILED: "failed",
         }
-        raw_status = doc.status.value if hasattr(doc.status, 'value') else str(doc.status)
-        display_status = status_map.get(doc.status, raw_status) if isinstance(doc.status, str) else status_map.get(raw_status, raw_status)
+        raw_status = doc.status.value if hasattr(doc.status, "value") else str(doc.status)
+        display_status = (
+            status_map.get(doc.status, raw_status)
+            if isinstance(doc.status, str)
+            else status_map.get(raw_status, raw_status)
+        )
 
         return {
             "success": True,
@@ -287,7 +343,9 @@ async def get_document_status(
                 "title": doc.title or doc.filename,
                 "filename": doc.filename,
                 "file_size": doc.file_size,
-                "file_type": doc.file_type.value if hasattr(doc.file_type, 'value') else str(doc.file_type),
+                "file_type": doc.file_type.value
+                if hasattr(doc.file_type, "value")
+                else str(doc.file_type),
                 "status": display_status,
                 "raw_status": raw_status,
                 "parse_error": doc.parse_error,
@@ -298,8 +356,16 @@ async def get_document_status(
                 "chunk_count": doc.chunk_count,
                 "description": doc.description,
                 "keywords": doc.keywords or [],
-                "upload_source": "聊天上传" if (doc.description and ("来自聊天" in doc.description or "uploaded from chat" in doc.description.lower())) else "知识库上传"
-            }
+                "upload_source": "聊天上传"
+                if (
+                    doc.description
+                    and (
+                        "来自聊天" in doc.description
+                        or "uploaded from chat" in doc.description.lower()
+                    )
+                )
+                else "知识库上传",
+            },
         }
     except (NotFoundError, AuthorizationError):
         raise
@@ -307,11 +373,12 @@ async def get_document_status(
         logger.error(f"Get document failed: {str(e)}")
         raise AppError("获取文档状态失败")
 
+
 @router.get("/{document_id}/content", response_model=dict, dependencies=[Depends(get_current_user)])
 async def get_document_full_content(
     document_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
     获取文档全文内容（用于预览）
@@ -323,10 +390,9 @@ async def get_document_full_content(
         # 修复：metadata 字段在 mapping 中是 enabled:false（不可排序），
         # 原 sort 语句必然报错导致预览恒 500；chunk_index 从 _source.metadata 读取。
         from app.core.elasticsearch import ElasticsearchTools
+
         query = {
-            "query": {
-                "term": {"document_id": document_id}
-            },
+            "query": {"term": {"document_id": document_id}},
             "size": 1000,
         }
         res = await ElasticsearchTools.search_documents(query)
@@ -343,7 +409,12 @@ async def get_document_full_content(
         # 如果 ES 没找到，尝试从数据库 chunks 表找 (备用)
         if not full_text:
             from app.models.document import DocumentChunk
-            stmt = select(DocumentChunk).where(DocumentChunk.document_id == document_id).order_by(DocumentChunk.chunk_index.asc())
+
+            stmt = (
+                select(DocumentChunk)
+                .where(DocumentChunk.document_id == document_id)
+                .order_by(DocumentChunk.chunk_index.asc())
+            )
             chunks = (await db.execute(stmt)).scalars().all()
             full_text = "\n".join([c.chunk_text for c in chunks])
 
@@ -355,7 +426,7 @@ async def get_document_full_content(
                 "content": full_text,
                 "summary": build_brief_summary(full_text),
                 "suggested_tags": build_suggested_tags(full_text),
-            }
+            },
         }
     except (NotFoundError, AuthorizationError):
         raise
@@ -363,16 +434,18 @@ async def get_document_full_content(
         logger.error(f"Get document content failed: {str(e)}")
         raise AppError("获取文档内容失败")
 
+
 @router.get("/{document_id}/download", dependencies=[Depends(get_current_user)])
 async def download_document(
     document_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     try:
         doc = await get_document_for_user(db, current_user, document_id)
 
         from app.core.minio_client import normalize_object_name
+
         url = minio_client.get_presigned_url(normalize_object_name(doc.file_path))
         return RedirectResponse(url=url)
     except (NotFoundError, AuthorizationError):

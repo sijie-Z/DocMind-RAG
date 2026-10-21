@@ -7,18 +7,20 @@ import re
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import desc, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.core.config import settings
 from app.core.prometheus import RAG_RETRIEVAL_UNAVAILABLE
 from app.exceptions import AuthorizationError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.prompt import PromptTemplate
 from app.rag.cache import SemanticCache
-from app.rag.errors import RetrievalUnavailableError
+from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError
 from app.services.memory_service import get_memory_system
+from app.services.organization_settings_service import (
+    organization_settings_service,
+)
 from app.services.rag_service import rag_service
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,12 @@ RETRIEVAL_UNAVAILABLE_PROMPT = (
     "3. 严禁声称「知识库中没有相关内容/文档」；如需引用贵司数据，应提示用户稍后重试检索。"
 )
 
+# LLM 未配置时的显式错误文案（与 agent 通道的 error 事件同一语义：配置问题必须
+# 走错误通道，不得作为回答内容流入会话历史）。
+LLM_NOT_CONFIGURED_MESSAGE = (
+    "LLM 服务未配置（未设置 DEEPSEEK_API_KEY），无法生成回答，请联系管理员配置后重试"
+)
+
 
 @dataclass
 class RAGEvent:
@@ -65,19 +73,35 @@ class RAGEvent:
 
 
 def build_sources_list(context_results: list[dict]) -> list[dict]:
-    return [
-        {
-            "filename": r.get("filename", "未知文档"),
-            "relevanceScore": r.get("score", 0.0),
-            "content": r.get("snippet") or (r.get("text", "")[:240]),
-            "documentId": r.get("document_id"),
-            "hasKeyword": r.get("has_keyword", False),
-            "hasVector": r.get("has_vector", False),
-            "rewriteHits": r.get("rewrite_hits", 1),
-            "freshFactor": r.get("fresh_factor", 1.0),
-        }
-        for r in context_results
-    ]
+    """把检索结果转为前端来源卡片契约。
+
+    issue #185：分数必须**可证伪**——
+    - ``relevanceScore``：重排器绝对分（local CE logit / zhipu relevance_score）；
+      无重排分时为 None。绝不回填 rank 分（修前把它乘 100 当「相关度 %」展示，
+      而它是批内 min-max，榜首恒 ~1.0）。
+    - ``rankScore``：融合阶段相对排序分（只用于排序/序位，不是相关度）。
+    - ``rank``：最终顺序的 1-based 序位（UI 展示「排序 #N」）。
+    - ``pageNumber``：PDF 来源的页码；非 PDF / 旧索引为 None（issue #197）。
+    """
+    sources = []
+    for idx, r in enumerate(context_results, 1):
+        relevance = r.get("relevance_score")
+        sources.append(
+            {
+                "filename": r.get("filename", "未知文档"),
+                "relevanceScore": float(relevance) if relevance is not None else None,
+                "rankScore": r.get("rank_score", r.get("score")),
+                "rank": idx,
+                "content": r.get("snippet") or (r.get("text", "")[:240]),
+                "documentId": r.get("document_id"),
+                "hasKeyword": r.get("has_keyword", False),
+                "hasVector": r.get("has_vector", False),
+                "rewriteHits": r.get("rewrite_hits", 1),
+                "freshFactor": r.get("fresh_factor", 1.0),
+                "pageNumber": r.get("page_number"),
+            }
+        )
+    return sources
 
 
 async def get_or_create_session(
@@ -92,26 +116,36 @@ async def get_or_create_session(
 
     if not conversation_id:
         new_session = ChatSession(
-            id=str(uuid.uuid4()), user_id=user_id, title=title[:20],
-            status=ChatSessionStatus.ACTIVE, organization_id=organization_id,
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            title=title[:20],
+            status=ChatSessionStatus.ACTIVE,
+            organization_id=organization_id,
         )
         session.add(new_session)
         await session.flush()
         return new_session.id, bound_doc_ids
 
     existing = (
-        await session.execute(
-            select(ChatSession).where(ChatSession.id == conversation_id)
-        )
+        await session.execute(select(ChatSession).where(ChatSession.id == conversation_id))
     ).scalar_one_or_none()
 
     if not existing:
-        session.add(ChatSession(
-            id=conversation_id, user_id=user_id, title=title[:20],
-            status=ChatSessionStatus.ACTIVE, organization_id=organization_id,
-        ))
+        session.add(
+            ChatSession(
+                id=conversation_id,
+                user_id=user_id,
+                title=title[:20],
+                status=ChatSessionStatus.ACTIVE,
+                organization_id=organization_id,
+            )
+        )
     else:
         if existing.user_id != user_id:
+            raise AuthorizationError("无权访问该会话")
+        # T4：按 id 复用会话必须与本次运行组织一致——多组织用户切到 B 组织后
+        # 不得把消息写进 A 组织的会话行；历史 NULL 组织会话仍可复用（属本人）。
+        if existing.organization_id is not None and existing.organization_id != organization_id:
             raise AuthorizationError("无权访问该会话")
         settings_json = existing.settings or {}
         if isinstance(settings_json, dict):
@@ -125,10 +159,12 @@ async def bind_docs_to_session(
     conversation_id: str,
     doc_ids: list[str],
 ):
+    """前置条件：``conversation_id`` 已由 ``get_or_create_session`` 校验过
+    归属（user + org）。本函数按 id 直查、不再重复校验，新增调用方必须先
+    自行完成归属校验（T4）。
+    """
     conv = (
-        await session.execute(
-            select(ChatSession).where(ChatSession.id == conversation_id)
-        )
+        await session.execute(select(ChatSession).where(ChatSession.id == conversation_id))
     ).scalar_one_or_none()
     if conv:
         existing = conv.settings or {}
@@ -143,13 +179,51 @@ async def bind_docs_to_session(
 async def get_system_prompt(
     session: AsyncSession,
     strict_mode: bool,
+    organization_id: int | None = None,
+    user_id: int | None = None,
 ) -> str | None:
+    """选择 RAG 系统提示词。
+
+    A2 P0（租户边界）：提示词自本批起按组织私有——
+    - 有组织：仅本组织模板 + 系统内置模板（organization_id NULL 且 is_system）；
+    - 无组织（如无组织用户的休闲 RAG 路径）：只允许系统内置模板。
+    此前是全库按 updated_at 取最新，任意用户都能用自己的私有模板
+    污染所有租户的 RAG 系统提示词（跨租户提示词注入）。
+
+    B4（D6）：个人模板只影响创建者本人——``scope='personal'`` 只在
+    ``creator_id == user_id`` 时参与选择，绝不污染同组织其他成员。
+    """
     if strict_mode:
         return STRICT_MODE_PROMPT
 
+    system_template = and_(
+        PromptTemplate.is_system.is_(True),
+        PromptTemplate.organization_id.is_(None),
+    )
+    if organization_id is None:
+        scope = system_template
+    else:
+        if user_id is None:
+            org_visible = and_(
+                PromptTemplate.organization_id == organization_id,
+                PromptTemplate.scope == "organization",
+            )
+        else:
+            org_visible = and_(
+                PromptTemplate.organization_id == organization_id,
+                or_(
+                    PromptTemplate.scope == "organization",
+                    and_(
+                        PromptTemplate.scope == "personal",
+                        PromptTemplate.creator_id == user_id,
+                    ),
+                ),
+            )
+        scope = or_(org_visible, system_template)
+
     result = await session.execute(
         select(PromptTemplate)
-        .where(PromptTemplate.category == "rag", PromptTemplate.is_active)
+        .where(PromptTemplate.category == "rag", PromptTemplate.is_active, scope)
         .order_by(desc(PromptTemplate.updated_at), desc(PromptTemplate.id))
         .limit(1)
     )
@@ -189,25 +263,58 @@ async def run_rag_pipeline(
     # 组织操作：不检索任何组织、不读写任何（含 org 1 的）缓存命名空间、不落任何
     # 组织归属为空的会话与消息。无组织用户的休闲对话仍可走 agent 模式（#257 语义）。
     if search_org_id is None:
-        _emit(RAGEvent(
-            type="error",
-            content="当前用户未加入任何组织，无法进行知识库问答；请先加入组织后重试",
-            conversation_id=conversation_id or "",
-        ))
+        _emit(
+            RAGEvent(
+                type="error",
+                content="当前用户未加入任何组织，无法进行知识库问答；请先加入组织后重试",
+                conversation_id=conversation_id or "",
+            )
+        )
         return
 
+    # LLM 配置预检（必须先于会话/消息落库、语义缓存读写、检索与记忆）：
+    # 无 LLM 客户端时以 error 语义返回，绝不进入内容累加与落库路径。
+    # 修前 `chat_stream` 把 "LLM未配置" 当正文 chunk 下发：用户消息与
+    # 「LLM未配置」ASSISTANT 消息双双落库、还写入长期记忆；语义缓存命中
+    # 路径同样会把缓存答案当作正常回答落库。
+    if rag_service.openai_client is None:
+        _emit(
+            RAGEvent(
+                type="error",
+                content=LLM_NOT_CONFIGURED_MESSAGE,
+                conversation_id=conversation_id or "",
+            )
+        )
+        return
+
+    # B4（D5）：组织级运行设定一次性解析（检索 top_k / 隐私策略 / 默认模型）。
+    # 未设置覆盖时各字段回退既有默认：聊天检索 8（文档绑定）/ 5（通用）、
+    # 隐私开关保持请求值、模型沿用进程级 Settings——不改变既有默认语义。
+    org_policy = await organization_settings_service.get_runtime_policy(session, search_org_id)
+    # 组织策略禁用隐私模式时，客户端 UI 已置灰；服务端仍强制关闭（纵深防御），
+    # 不信任客户端可伪造的 privacyMode=true。
+    privacy_mode = privacy_mode and org_policy.allow_privacy_mode
+
     conversation_id, bound_doc_ids = await get_or_create_session(
-        session, conversation_id, user_id, user_content, organization_id,
+        session,
+        conversation_id,
+        user_id,
+        user_content,
+        organization_id,
     )
 
     history_msgs = (
-        await session.execute(
-            select(ChatMessage)
-            .where(ChatMessage.session_id == conversation_id)
-            .order_by(ChatMessage.created_at.desc())
-            .limit(10)
+        (
+            await session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == conversation_id)
+                .order_by(ChatMessage.created_at.desc())
+                .limit(10)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     chat_history = [
         {
             "role": "user" if h.message_type == MessageType.USER else "assistant",
@@ -232,24 +339,57 @@ async def run_rag_pipeline(
     active_doc_ids = [str(fid) for fid in file_ids if fid] if file_ids else bound_doc_ids
 
     query_vector = None
-    if not active_doc_ids and not strict_mode:
+    # issue #195：问答语义缓存默认关闭（SEMANTIC_CACHE_ANSWER_ENABLED=False）——
+    # 0.92 阈值会把「第十三条」的提问命中成「第七条」的答案。显式开启后，
+    # get 仍要求查询文本通过条号/数字/实体等价判定；关闭时连 embedding 都不算。
+    # 测试替身（_ExplodingSemanticCache / _RecordingSemanticCache）无 enabled
+    # 属性 → 按原有行为参与（getattr 默认 True）。
+    sem_cache_active = bool(getattr(_semantic_cache, "enabled", True))
+    if not active_doc_ids and not strict_mode and sem_cache_active:
         query_vector = await rag_service.get_embedding(user_content)
         if query_vector:
-            cached_res = await _semantic_cache.get(query_vector, search_org_id)
+            cache_meta: dict = {}
+            cached_res = await _semantic_cache.get(
+                query_vector,
+                search_org_id,
+                query=user_content,
+                hit_info=cache_meta,
+            )
             if cached_res:
                 full_response = cached_res.get("answer", "")
                 sources_list = cached_res.get("sources", [])
                 ai_msg_id = str(uuid.uuid4())
 
-                _emit(RAGEvent(
-                    type="message", content=full_response,
-                    conversation_id=conversation_id, message_id=ai_msg_id,
-                    sources=sources_list, is_cached=True,
-                ))
+                _emit(
+                    RAGEvent(
+                        type="message",
+                        content=full_response,
+                        conversation_id=conversation_id,
+                        message_id=ai_msg_id,
+                        sources=sources_list,
+                        is_cached=True,
+                    )
+                )
+                if debug:
+                    # issue #195：命中必须可证伪——cache_type/相似度/键摘要/缓存原文。
+                    _emit(
+                        RAGEvent(
+                            type="debug",
+                            debug_data={
+                                "cache_hit": True,
+                                "cache_type": "semantic",
+                                "cache": cache_meta,
+                                "is_cached": True,
+                            },
+                            conversation_id=conversation_id or "",
+                        )
+                    )
 
                 ai_msg = ChatMessage(
-                    id=ai_msg_id, session_id=conversation_id,
-                    content=full_response, message_type=MessageType.ASSISTANT,
+                    id=ai_msg_id,
+                    session_id=conversation_id,
+                    content=full_response,
+                    message_type=MessageType.ASSISTANT,
                     meta_data=json.dumps(
                         {"sources": sources_list, "is_cached": True},
                         ensure_ascii=False,
@@ -270,7 +410,11 @@ async def run_rag_pipeline(
     if active_doc_ids:
         try:
             context_results, debug_info = await rag_service.search_knowledge_base(
-                user_content, search_org_id, 8, document_ids=active_doc_ids, debug=debug,
+                user_content,
+                search_org_id,
+                org_policy.retrieval_top_k if org_policy.retrieval_top_k is not None else 8,
+                document_ids=active_doc_ids,
+                debug=debug,
             )
             if file_ids:
                 await bind_docs_to_session(session, conversation_id, active_doc_ids)
@@ -279,7 +423,10 @@ async def run_rag_pipeline(
     elif not strict_mode:
         try:
             context_results, debug_info = await rag_service.search_knowledge_base(
-                user_content, search_org_id, 5, debug=debug,
+                user_content,
+                search_org_id,
+                org_policy.retrieval_top_k if org_policy.retrieval_top_k is not None else 5,
+                debug=debug,
             )
         except RetrievalUnavailableError as e:
             retrieval_unavailable = e
@@ -289,32 +436,41 @@ async def run_rag_pipeline(
         RAG_RETRIEVAL_UNAVAILABLE.labels(state=retrieval_unavailable.kind).inc()
         logger.warning(
             "RAG retrieval unavailable (kind=%s, org=%s): %s",
-            retrieval_unavailable.kind, search_org_id, retrieval_unavailable,
+            retrieval_unavailable.kind,
+            search_org_id,
+            retrieval_unavailable,
         )
         if strict_mode:
             # 严格模式承诺「只根据文档作答」，检索不可用即无法兑现——如实拒答
             # （与 issue #268 的无组织拒绝同一显式风格），不伪装成「文档里没有」。
-            _emit(RAGEvent(
-                type="error",
-                content="知识库检索服务暂不可用（故障/超时），严格模式无法在没有文档依据的情况下作答；请稍后重试",
-                conversation_id=conversation_id or "",
-            ))
+            _emit(
+                RAGEvent(
+                    type="error",
+                    content="知识库检索服务暂不可用（故障/超时），严格模式无法在没有文档依据的情况下作答；请稍后重试",
+                    conversation_id=conversation_id or "",
+                )
+            )
             return
 
     if debug and debug_info:
         final_context_items = []
         for i, item in enumerate(context_results[:5], 1):
-            final_context_items.append({
-                "rank": i,
-                "filename": item.get("filename", "未知"),
-                "score": item.get("score", 0),
-                "content": (item.get("snippet") or item.get("text", ""))[:300],
-            })
+            final_context_items.append(
+                {
+                    "rank": i,
+                    "filename": item.get("filename", "未知"),
+                    "score": item.get("score", 0),
+                    "content": (item.get("snippet") or item.get("text", ""))[:300],
+                }
+            )
         debug_info["final_context"] = final_context_items
-        _emit(RAGEvent(
-            type="debug", debug_data=debug_info,
-            conversation_id=conversation_id,
-        ))
+        _emit(
+            RAGEvent(
+                type="debug",
+                debug_data=debug_info,
+                conversation_id=conversation_id,
+            )
+        )
 
     sources_list = build_sources_list(context_results)
     if retrieval_unavailable is None:
@@ -327,11 +483,15 @@ async def run_rag_pipeline(
         # （含用户配置的 rag 模板 —— 模板预设「有参考文档」，故障下同样失真）。
         system_prompt_override = RETRIEVAL_UNAVAILABLE_PROMPT
     else:
-        system_prompt_override = await get_system_prompt(session, strict_mode)
+        system_prompt_override = await get_system_prompt(
+            session, strict_mode, organization_id=search_org_id, user_id=user_id
+        )
 
     memory_context = ""
     try:
-        memory_system = get_memory_system(str(user_id))
+        # A1（记忆 IDOR）：租户命名空间由 (org, user, agent) 显式上下文拼装，
+        # 不再用裸 user_id 作全局 key。
+        memory_system = get_memory_system(search_org_id, user_id, "default")
         if memory_system._embedding_provider is None:
             memory_system.set_embedding_provider(rag_service.get_embedding)
         memory_context = await memory_system.get_context(user_content)
@@ -344,51 +504,82 @@ async def run_rag_pipeline(
     full_response = ""
     ai_msg_id = str(uuid.uuid4())
 
-    _emit(RAGEvent(
-        type="chunk", content="",
-        conversation_id=conversation_id, message_id=ai_msg_id,
-        sources=sources_list,
-    ))
+    _emit(
+        RAGEvent(
+            type="chunk",
+            content="",
+            conversation_id=conversation_id,
+            message_id=ai_msg_id,
+            sources=sources_list,
+        )
+    )
 
     # 安全加固：接收 PII 掩码的 context/query 占位符映射，流结束后还原"引用型"占位符
     mask_mapping: dict = {}
-    async for chunk in rag_service.chat_stream(
-        user_content, context_results, chat_history,
-        system_prompt_override=system_prompt_override,
-        enable_masking=privacy_mode,
-        mask_mapping_sink=mask_mapping,
-    ):
-        full_response += chunk
-        _emit(RAGEvent(
-            type="chunk", content=chunk,
-            conversation_id=conversation_id, message_id=ai_msg_id,
-        ))
+    try:
+        async for chunk in rag_service.chat_stream(
+            user_content,
+            context_results,
+            chat_history,
+            system_prompt_override=system_prompt_override,
+            enable_masking=privacy_mode,
+            mask_mapping_sink=mask_mapping,
+            model_override=org_policy.default_model,
+        ):
+            full_response += chunk
+            _emit(
+                RAGEvent(
+                    type="chunk",
+                    content=chunk,
+                    conversation_id=conversation_id,
+                    message_id=ai_msg_id,
+                )
+            )
+    except LLMNotConfiguredError:
+        # 竞态兜底：入口预检后客户端消失（如配置热更新失败）同样走错误通道，
+        # 绝不把配置诊断当回答落库/写记忆。
+        _emit(
+            RAGEvent(
+                type="error",
+                content=LLM_NOT_CONFIGURED_MESSAGE,
+                conversation_id=conversation_id,
+            )
+        )
+        return
 
     # 还原引用型占位符（LLM 引用的 [PHONE_3] 等来自检索上下文/用户提问的真实信息）；
     # 模型自行新生成的 PII 占位符不在映射内，保持掩码状态。
     if mask_mapping:
         try:
             from app.services.masking_service import masking_service
+
             full_response = masking_service.unmask_text(full_response, mask_mapping)
         except Exception as e:
             logger.warning(f"PII unmask failed (non-fatal): {e}")
 
     cited_indices = set(int(m) for m in re.findall(r"\[(\d+)\]", full_response))
-    cited_sources = [
-        {**src, "cited": True}
-        for i, src in enumerate(sources_list, 1)
-        if i in cited_indices
-    ] if cited_indices else sources_list[:3]
+    cited_sources = (
+        [{**src, "cited": True} for i, src in enumerate(sources_list, 1) if i in cited_indices]
+        if cited_indices
+        else sources_list[:3]
+    )
 
-    _emit(RAGEvent(
-        type="message", content=full_response,
-        conversation_id=conversation_id, message_id=ai_msg_id,
-        sources=cited_sources, is_cached=False,
-    ))
+    _emit(
+        RAGEvent(
+            type="message",
+            content=full_response,
+            conversation_id=conversation_id,
+            message_id=ai_msg_id,
+            sources=cited_sources,
+            is_cached=False,
+        )
+    )
 
     ai_msg = ChatMessage(
-        id=ai_msg_id, session_id=conversation_id,
-        content=full_response, message_type=MessageType.ASSISTANT,
+        id=ai_msg_id,
+        session_id=conversation_id,
+        content=full_response,
+        message_type=MessageType.ASSISTANT,
         meta_data=json.dumps(
             {"sources": cited_sources, "citations_used": sorted(cited_indices)},
             ensure_ascii=False,
@@ -401,32 +592,40 @@ async def run_rag_pipeline(
         token_usage = rag_service.get_last_token_usage()
         if token_usage and token_usage[0] > 0:
             from app.api.v1.endpoints.token_usage import record_token_usage
-            model = settings.LOCAL_LLM_MODEL if settings.ENABLE_LOCAL_LLM else settings.DEEPSEEK_MODEL
+
+            # B4（D5）：用量记录与真实调用模型一致（组织默认模型或平台默认）。
+            model = org_policy.default_model
             await record_token_usage(
                 db=session,
                 user_id=user_id,
                 organization_id=organization_id,
                 model=model,
-                source='rag_chat',
+                source="rag_chat",
                 input_tokens=token_usage[0],
                 output_tokens=token_usage[1],
             )
     except Exception as e:
-        logger.warning(f'Token usage recording failed (non-fatal): {e}')
+        logger.warning(f"Token usage recording failed (non-fatal): {e}")
 
     if (
-        not active_doc_ids and not strict_mode
+        not active_doc_ids
+        and not strict_mode
         and query_vector is not None
-        and retrieval_unavailable is None  # issue #292：故障态答案绝不写问答缓存（否则故障形态被固化 3600s）
+        and retrieval_unavailable
+        is None  # issue #292：故障态答案绝不写问答缓存（否则故障形态被固化 3600s）
     ):
         await _semantic_cache.set(
-            query=user_content, embedding=query_vector,
-            answer=full_response, sources=sources_list,
+            query=user_content,
+            embedding=query_vector,
+            answer=full_response,
+            sources=sources_list,
             organization_id=search_org_id,
         )
 
     try:
-        memory_system = get_memory_system(str(user_id))
+        # A1（记忆 IDOR）：租户命名空间由 (org, user, agent) 显式上下文拼装，
+        # 不再用裸 user_id 作全局 key。
+        memory_system = get_memory_system(search_org_id, user_id, "default")
         await memory_system.store_interaction(user_content, full_response)
     except Exception as e:
         logger.warning(f"Memory store failed (non-fatal): {e}")

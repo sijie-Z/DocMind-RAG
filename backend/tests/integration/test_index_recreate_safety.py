@@ -25,6 +25,7 @@
 
 用**独立索引名**（`docmind_test_idx_<uuid>`）跑，绝不碰真实索引。
 """
+
 import os
 import uuid
 
@@ -181,10 +182,9 @@ async def test_recreate_with_confirm_actually_recreates(isolated_index):
 
     assert await client.indices.exists(index=index_name)
     mapping = await client.indices.get_mapping(index=index_name)
-    assert (
-        mapping[index_name]["mappings"]["properties"]["embedding"]["dims"]
-        == _WRONG_DIMS + 1
-    ), "重建后维度应等于配置值"
+    assert mapping[index_name]["mappings"]["properties"]["embedding"]["dims"] == _WRONG_DIMS + 1, (
+        "重建后维度应等于配置值"
+    )
     assert (await client.count(index=index_name))["count"] == 0, "重建后不该有旧数据残留"
 
 
@@ -239,9 +239,7 @@ async def test_initialize_keeps_client_when_index_creation_fails(isolated_index,
     monkeypatch.setattr(
         "app.core.elasticsearch._knowledge_index_mapping",
         lambda: {
-            "mappings": {
-                "properties": {"embedding": {"type": "dense_vector", "dims": "1024"}}
-            },
+            "mappings": {"properties": {"embedding": {"type": "dense_vector", "dims": "1024"}}},
             "settings": {"number_of_shards": 1, "number_of_replicas": 0},
         },
     )

@@ -1,4 +1,5 @@
 """Document API 集成测试 — 文档上传、查询、删除流程。"""
+
 import io
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,11 +15,13 @@ from app.models.user import User
 @pytest.fixture
 def client():
     from app.main import app
+
     return TestClient(app)
 
 
 class _AsyncCtxMgr:
     """支持 async with 的 mock 上下文管理器。"""
+
     def __init__(self, db):
         self._db = db
 
@@ -130,6 +133,7 @@ class TestDocumentUpload:
     def test_upload_success(self, client: TestClient):
         """上传有效文件应返回 201 或 200。"""
         from app.main import app
+
         # 本用例只关心上传主流程，权限门禁用超管主体一次性通过
         mock_user = _make_mock_user(is_superuser=True)
         override_func, mock_db = _override_get_db()
@@ -156,11 +160,19 @@ class TestDocumentUpload:
                     test_file_content = b"%PDF-1.4 fake pdf content"
                     r = client.post(
                         "/api/v1/documents/upload",
-                        files={"file": ("test.pdf", io.BytesIO(test_file_content), "application/pdf")},
-                        data={"title": "Test Doc", "description": "A test document", "tags": '["test","doc"]'},
-                        headers={"Authorization": "Bearer test_token"}
+                        files={
+                            "file": ("test.pdf", io.BytesIO(test_file_content), "application/pdf")
+                        },
+                        data={
+                            "title": "Test Doc",
+                            "description": "A test document",
+                            "tags": '["test","doc"]',
+                        },
+                        headers={"Authorization": "Bearer test_token"},
                     )
-                    assert r.status_code in (200, 201, 422), f"Upload failed: {r.status_code} - {r.json()}"
+                    assert r.status_code in (200, 201, 422), (
+                        f"Upload failed: {r.status_code} - {r.json()}"
+                    )
                     if r.status_code == 201:
                         assert r.json()["success"] is True
                 finally:
@@ -170,6 +182,7 @@ class TestDocumentUpload:
     def test_upload_no_permission(self, client: TestClient):
         """无上传权限应返回 403。"""
         from app.main import app
+
         mock_user = _make_mock_user()
 
         override_func, mock_db = _override_get_db()
@@ -189,7 +202,7 @@ class TestDocumentUpload:
             r = client.post(
                 "/api/v1/documents/upload",
                 files={"file": ("test.pdf", io.BytesIO(b"content"), "application/pdf")},
-                headers={"Authorization": "Bearer test_token"}
+                headers={"Authorization": "Bearer test_token"},
             )
             assert r.status_code == 403
         finally:
@@ -199,6 +212,7 @@ class TestDocumentUpload:
     def test_upload_no_file(self, client: TestClient):
         """不传文件应返回 422。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         # 默认 _override_get_db() 的 db.get 返回超管 -> 权限放行，才会走到缺 file 的 422。
@@ -212,8 +226,7 @@ class TestDocumentUpload:
 
         try:
             r = client.post(
-                "/api/v1/documents/upload",
-                headers={"Authorization": "Bearer test_token"}
+                "/api/v1/documents/upload", headers={"Authorization": "Bearer test_token"}
             )
             assert r.status_code == 422
         finally:
@@ -224,7 +237,7 @@ class TestDocumentUpload:
         """未认证上传应返回 401/403。"""
         r = client.post(
             "/api/v1/documents/upload",
-            files={"file": ("test.pdf", io.BytesIO(b"content"), "application/pdf")}
+            files={"file": ("test.pdf", io.BytesIO(b"content"), "application/pdf")},
         )
         assert r.status_code in (401, 403)
 
@@ -233,6 +246,7 @@ class TestDocumentGet:
     def test_get_document_found(self, client: TestClient):
         """存在的文档应返回文档详情。"""
         from app.main import app
+
         mock_user = _make_mock_user()
         doc = _make_mock_document()
 
@@ -247,8 +261,7 @@ class TestDocumentGet:
 
         try:
             r = client.get(
-                "/api/v1/documents/doc-123",
-                headers={"Authorization": "Bearer test_token"}
+                "/api/v1/documents/doc-123", headers={"Authorization": "Bearer test_token"}
             )
             assert r.status_code == 200
             data = r.json()
@@ -261,6 +274,7 @@ class TestDocumentGet:
     def test_get_document_not_found(self, client: TestClient):
         """不存在的文档应返回 404。"""
         from app.main import app
+
         mock_user = _make_mock_user()
 
         override_func, mock_db = _override_get_db()
@@ -274,8 +288,7 @@ class TestDocumentGet:
 
         try:
             r = client.get(
-                "/api/v1/documents/nonexistent",
-                headers={"Authorization": "Bearer test_token"}
+                "/api/v1/documents/nonexistent", headers={"Authorization": "Bearer test_token"}
             )
             assert r.status_code == 404
         finally:
@@ -285,6 +298,7 @@ class TestDocumentGet:
     def test_get_document_unauthorized_org(self, client: TestClient):
         """不同组织用户无权查看文档。"""
         from app.main import app
+
         mock_user = _make_mock_user(org_id=2)  # Different org
 
         doc = _make_mock_document()
@@ -302,8 +316,7 @@ class TestDocumentGet:
 
         try:
             r = client.get(
-                "/api/v1/documents/doc-123",
-                headers={"Authorization": "Bearer test_token"}
+                "/api/v1/documents/doc-123", headers={"Authorization": "Bearer test_token"}
             )
             assert r.status_code == 403
         finally:
@@ -320,6 +333,7 @@ class TestDocumentContent:
     def test_get_content_success(self, client: TestClient):
         """文档内容应返回全文。"""
         from app.main import app
+
         mock_user = _make_mock_user()
         doc = _make_mock_document()
 
@@ -336,30 +350,32 @@ class TestDocumentContent:
             # 索引侧同时写 `content` 与 `chunk_text` 两个字段（app/worker/doc_processor.py:174-175），
             # 而端点读的是 `chunk_text`（app/api/v1/endpoints/documents.py:351）。
             # 原 mock 只给 `content`，于是每个 hit 都取到空串，join 出 "\n"。
-            mock_es.search_documents = AsyncMock(return_value={
-                "hits": {
-                    "hits": [
-                        {
-                            "_source": {
-                                "content": "This is chunk 1.",
-                                "chunk_text": "This is chunk 1.",
-                                "metadata": {"chunk_index": 0},
-                            }
-                        },
-                        {
-                            "_source": {
-                                "content": "This is chunk 2.",
-                                "chunk_text": "This is chunk 2.",
-                                "metadata": {"chunk_index": 1},
-                            }
-                        },
-                    ]
+            mock_es.search_documents = AsyncMock(
+                return_value={
+                    "hits": {
+                        "hits": [
+                            {
+                                "_source": {
+                                    "content": "This is chunk 1.",
+                                    "chunk_text": "This is chunk 1.",
+                                    "metadata": {"chunk_index": 0},
+                                }
+                            },
+                            {
+                                "_source": {
+                                    "content": "This is chunk 2.",
+                                    "chunk_text": "This is chunk 2.",
+                                    "metadata": {"chunk_index": 1},
+                                }
+                            },
+                        ]
+                    }
                 }
-            })
+            )
             try:
                 r = client.get(
                     "/api/v1/documents/doc-123/content",
-                    headers={"Authorization": "Bearer test_token"}
+                    headers={"Authorization": "Bearer test_token"},
                 )
                 assert r.status_code == 200
                 data = r.json()
@@ -379,6 +395,7 @@ class TestDocumentDelete:
     def test_delete_document_success(self, client: TestClient):
         """删除文档应返回成功。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
         doc = _make_mock_document()
 
@@ -399,7 +416,7 @@ class TestDocumentDelete:
             try:
                 r = client.delete(
                     "/api/v1/knowledge/document/doc-123",
-                    headers={"Authorization": "Bearer test_token"}
+                    headers={"Authorization": "Bearer test_token"},
                 )
                 assert r.status_code == 200
                 data = r.json()
@@ -411,6 +428,7 @@ class TestDocumentDelete:
     def test_delete_document_not_found(self, client: TestClient):
         """不存在的文档删除应返回 404。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
@@ -426,7 +444,7 @@ class TestDocumentDelete:
         try:
             r = client.delete(
                 "/api/v1/knowledge/document/nonexistent",
-                headers={"Authorization": "Bearer test_token"}
+                headers={"Authorization": "Bearer test_token"},
             )
             assert r.status_code == 404
         finally:

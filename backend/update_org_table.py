@@ -9,7 +9,7 @@ def update_db():
         host=os.getenv("DB_HOST", "localhost"),
         user=os.getenv("DB_USER", "root"),
         password=os.getenv("DB_PASSWORD", ""),
-        db=os.getenv("DB_NAME", "paicongming_db")
+        db=os.getenv("DB_NAME", "docmind_db")
     )
     try:
         with connection.cursor() as cursor:

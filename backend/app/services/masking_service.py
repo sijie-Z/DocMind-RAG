@@ -3,6 +3,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
+
 class MaskingService:
     """
     敏感信息脱敏服务 (PII Masking)
@@ -19,7 +20,7 @@ class MaskingService:
         # 旧版 15 位 / 17 位+X 一并覆盖；严格结构保证不会误吞 16-19 位银行卡号。
         "id_card": r"(?<!\d)(?:\d{6}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]|\d{15}(?:\d{2}[0-9xX])?)(?!\d)",
         "bank_card": r"(?<!\d)\d{16,19}(?!\d)",
-        "ip_address": r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"
+        "ip_address": r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b",
     }
 
     def mask_text(self, text: str, start_index: int = 0) -> tuple[str, dict[str, str]]:
@@ -63,5 +64,6 @@ class MaskingService:
             unmasked_text = unmasked_text.replace(placeholder, original_value)
 
         return unmasked_text
+
 
 masking_service = MaskingService()

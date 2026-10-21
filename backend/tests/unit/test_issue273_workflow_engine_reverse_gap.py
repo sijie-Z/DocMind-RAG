@@ -25,6 +25,7 @@
    全仓扫描口径常驻：app/ 下所有 `getattr(settings, "KEY")` 的字面 KEY 必须是
    Settings 真字段，单双引号两口径同扫（把两轮漏检的形态钉死）。
 """
+
 import json
 import os
 import pathlib
@@ -219,9 +220,7 @@ class TestAipingDeadPath:
             engine.get_executor(node)
 
     def test_engine_source_has_no_aiping_leftovers(self):
-        src = (BACKEND_DIR / "app" / "services" / "workflow_engine.py").read_text(
-            encoding="utf-8"
-        )
+        src = (BACKEND_DIR / "app" / "services" / "workflow_engine.py").read_text(encoding="utf-8")
         assert "aiping" not in src.lower(), "aiping 死分支残留（issue #273 已裁定删除）"
         assert "AIPING_BASE_URL" not in AISettings.model_fields, (
             "AIPING_BASE_URL 不应作为字段补入（无真实消费通道）"
@@ -245,7 +244,9 @@ def test_app_has_no_getattr_settings_reverse_gaps():
             for m in _GETATTR_KEY_RE.finditer(line):
                 if m.group(2) not in fields:
                     holes.append(f"{path.relative_to(BACKEND_DIR)}:{lineno} {m.group(2)}")
-    assert not holes, "getattr(settings, …) 反向缺口（键不在 Settings 字段表中）: " + "; ".join(holes)
+    assert not holes, "getattr(settings, …) 反向缺口（键不在 Settings 字段表中）: " + "; ".join(
+        holes
+    )
 
 
 class TestBoundsForIssue259Fields:

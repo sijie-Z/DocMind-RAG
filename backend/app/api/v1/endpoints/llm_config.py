@@ -6,6 +6,10 @@ Each config has a unique ID (uuid), provider, and optional is_default flag.
 Only one config per provider can be is_default at a time.
 
 Inspired by PaiAgent's llm_global_config database table.
+
+DEPRECATED（B3 死设定清理）：工作流编辑器入口与「使用全局配置」开关已移除，
+且工作流执行引擎从未消费本存储。全部端点保留并标记 deprecated，待 B4 的
+L1 Provider 统一层落地后删除；请勿新增调用方。
 """
 
 import json
@@ -17,7 +21,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.redis import redis_client
-from app.core.security import get_current_user
+from app.core.security import get_current_user, is_platform_admin
 from app.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.models.user import User
 
@@ -49,6 +53,8 @@ def _mask_secret(value: str) -> str:
 def _public_config(data: dict[str, Any]) -> dict[str, Any]:
     """Return a config with the API key masked for client responses."""
     out = dict(data)
+    # 损坏配置的原始值仅留在服务端存储（可能含半写的 api_key），绝不出网（#301）。
+    out.pop("_raw_value", None)
     if out.get("api_key"):
         out["api_key"] = _mask_secret(str(out["api_key"]))
     return out
@@ -59,6 +65,7 @@ def _public_config(data: dict[str, Any]) -> dict[str, Any]:
 
 class LLMConfigCreate(BaseModel):
     """Create a new LLM configuration."""
+
     provider: str = Field(..., description="Provider identifier")
     config_name: str = Field(..., max_length=100, description="Human-readable alias")
     api_key: str = Field(..., description="API key")
@@ -72,12 +79,15 @@ class LLMConfigCreate(BaseModel):
     def validate_provider(cls, v: str) -> str:
         v = v.strip().lower()
         if v not in SUPPORTED_PROVIDERS:
-            raise ValueError(f"不支持的 provider: {v}. 支持: {', '.join(sorted(SUPPORTED_PROVIDERS))}")
+            raise ValueError(
+                f"不支持的 provider: {v}. 支持: {', '.join(sorted(SUPPORTED_PROVIDERS))}"
+            )
         return v
 
 
 class LLMConfigUpdate(BaseModel):
     """Partial update for an existing config."""
+
     config_name: str | None = None
     api_key: str | None = None
     api_url: str | None = None
@@ -90,8 +100,34 @@ class LLMConfigUpdate(BaseModel):
 # ── Redis helpers ───────────────────────────────────────────────────────
 
 
+def _corrupt_placeholder(config_id: str, raw: str | None, reason: str) -> dict[str, Any]:
+    """损坏配置的占位条目（issue #301）：条目不消失、显式标记 invalid。
+
+    此前坏值被 `except json.JSONDecodeError: continue` 静默丢弃——条目凭空
+    消失、total 少 1、零日志。现在保留占位条目：列表里可见（invalid=true）、
+    可被删除或 **PUT 全量重写**修复（评审 m1：PATCH 部分更新不清除
+    invalid/invalid_reason 标记，不构成修复路径）；原始值仅存服务端字段
+    `_raw_value`（`_public_config` 永不外发），供运维排查。
+    """
+    entry: dict[str, Any] = {
+        "id": config_id,
+        "config_name": f"[损坏] {config_id}",
+        "provider": None,
+        "api_key": "",
+        "invalid": True,
+        "invalid_reason": reason,
+    }
+    if raw is not None:
+        entry["_raw_value"] = raw
+    return entry
+
+
 async def _load_all() -> dict[str, dict[str, Any]]:
-    """Load all configs from Redis hash. Returns {config_id: data}."""
+    """Load all configs from Redis hash. Returns {config_id: data}.
+
+    损坏的值（非 UTF-8 / 非 JSON / 非对象）不再静默丢弃：保留占位条目并
+    warning 留痕（issue #301），使故障可观测、可修复。
+    """
     if not redis_client:
         return {}
     raw = await redis_client.hgetall(REDIS_KEY)
@@ -101,12 +137,28 @@ async def _load_all() -> dict[str, dict[str, Any]]:
     for k, v in raw.items():
         if isinstance(k, bytes):
             k = k.decode("utf-8")
-        if isinstance(v, bytes):
-            v = v.decode("utf-8")
+        reason: str | None = None
+        data: dict[str, Any] | None = None
+        raw_text: str | None = None
         try:
-            result[k] = json.loads(v)
-        except json.JSONDecodeError:
-            continue
+            if isinstance(v, bytes):
+                v = v.decode("utf-8")
+            raw_text = v
+            parsed = json.loads(v)
+            if not isinstance(parsed, dict):
+                raise ValueError(f"值为 JSON {type(parsed).__name__}，不是配置对象")
+            data = parsed
+        except (UnicodeDecodeError, ValueError) as exc:
+            reason = f"{type(exc).__name__}: {exc}"
+        if reason is not None:
+            logger.warning(
+                "LLM 配置 '%s' 的值损坏（%s）——保留占位条目（invalid=true），不静默丢弃",
+                k,
+                reason,
+            )
+            result[k] = _corrupt_placeholder(k, raw_text, reason)
+        elif data is not None:
+            result[k] = data
     return result
 
 
@@ -136,7 +188,7 @@ async def _clear_default_for_provider(provider: str, configs: dict[str, dict[str
 # ── Endpoints ───────────────────────────────────────────────────────────
 
 
-@router.get("")
+@router.get("", deprecated=True)
 async def list_configs(
     current_user: User = Depends(get_current_user),
 ):
@@ -144,7 +196,12 @@ async def list_configs(
 
     Query params:
         provider: filter by provider (optional)
+
+    W0-2：C5 删除前的过渡期，配置读端点只允许平台管理员（显式
+    ``is_superuser``）；其余账号 403。拒绝必须发生在读取 Redis 之前。
     """
+    if not is_platform_admin(current_user):
+        raise AuthorizationError("需要管理员权限")
 
     all_configs = await _load_all()
     configs = [_public_config(v) for v in all_configs.values()]
@@ -156,7 +213,7 @@ async def list_configs(
     }
 
 
-@router.get("/providers")
+@router.get("/providers", deprecated=True)
 async def list_providers(
     current_user: User = Depends(get_current_user),
 ):
@@ -164,18 +221,23 @@ async def list_providers(
     return {
         "success": True,
         "data": [
-            {"key": k, "label": PROVIDER_LABELS.get(k, k)}
-            for k in sorted(SUPPORTED_PROVIDERS)
+            {"key": k, "label": PROVIDER_LABELS.get(k, k)} for k in sorted(SUPPORTED_PROVIDERS)
         ],
     }
 
 
-@router.get("/default/{provider}")
+@router.get("/default/{provider}", deprecated=True)
 async def get_default_config(
     provider: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Get the default config for a provider. Returns 404 if none."""
+    """Get the default config for a provider. Returns 404 if none.
+
+    W0-2：过渡期只允许平台管理员（见 ``list_configs``）。
+    """
+    if not is_platform_admin(current_user):
+        raise AuthorizationError("需要管理员权限")
+
     provider = provider.strip().lower()
     all_configs = await _load_all()
     for cid, data in all_configs.items():
@@ -186,12 +248,18 @@ async def get_default_config(
     raise NotFoundError(f"Provider '{provider}' 没有默认配置")
 
 
-@router.get("/detail/{config_id}")
+@router.get("/detail/{config_id}", deprecated=True)
 async def get_config_detail(
     config_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Get a single config by ID."""
+    """Get a single config by ID.
+
+    W0-2：过渡期只允许平台管理员（见 ``list_configs``）。
+    """
+    if not is_platform_admin(current_user):
+        raise AuthorizationError("需要管理员权限")
+
     all_configs = await _load_all()
     if config_id not in all_configs:
         raise NotFoundError(f"配置 '{config_id}' 不存在")
@@ -201,14 +269,14 @@ async def get_config_detail(
     return {"success": True, "data": public}
 
 
-@router.post("")
+@router.post("", deprecated=True)
 async def create_config(
     body: LLMConfigCreate,
     current_user: User = Depends(get_current_user),
 ):
     """Create a new LLM configuration. Returns the created config with ID."""
-    # 写操作仅限管理员
-    if not current_user.is_superuser and current_user.role != "admin":
+    # 写操作仅限平台管理员（W0-1：只认显式 is_superuser，不再看 users.role）
+    if not is_platform_admin(current_user):
         raise AuthorizationError("需要管理员权限")
 
     all_configs = await _load_all()
@@ -223,8 +291,13 @@ async def create_config(
 
     all_configs[config_id] = data
     await _save_all(all_configs)
-    logger.info("LLM config '%s' created by user %d (provider=%s, id=%s)",
-                data["config_name"], current_user.id, data["provider"], config_id)
+    logger.info(
+        "LLM config '%s' created by user %d (provider=%s, id=%s)",
+        data["config_name"],
+        current_user.id,
+        data["provider"],
+        config_id,
+    )
 
     return {
         "success": True,
@@ -233,15 +306,15 @@ async def create_config(
     }
 
 
-@router.put("/{config_id}")
+@router.put("/{config_id}", deprecated=True)
 async def update_config(
     config_id: str,
     body: LLMConfigCreate,
     current_user: User = Depends(get_current_user),
 ):
     """Full update of an existing config."""
-    # 写操作仅限管理员
-    if not current_user.is_superuser and current_user.role != "admin":
+    # 写操作仅限平台管理员（W0-1：只认显式 is_superuser，不再看 users.role）
+    if not is_platform_admin(current_user):
         raise AuthorizationError("需要管理员权限")
 
     all_configs = await _load_all()
@@ -264,15 +337,15 @@ async def update_config(
     }
 
 
-@router.patch("/{config_id}")
+@router.patch("/{config_id}", deprecated=True)
 async def patch_config(
     config_id: str,
     body: LLMConfigUpdate,
     current_user: User = Depends(get_current_user),
 ):
     """Partial update of a config."""
-    # 写操作仅限管理员
-    if not current_user.is_superuser and current_user.role != "admin":
+    # 写操作仅限平台管理员（W0-1：只认显式 is_superuser，不再看 users.role）
+    if not is_platform_admin(current_user):
         raise AuthorizationError("需要管理员权限")
 
     all_configs = await _load_all()
@@ -298,14 +371,14 @@ async def patch_config(
     }
 
 
-@router.delete("/{config_id}")
+@router.delete("/{config_id}", deprecated=True)
 async def delete_config(
     config_id: str,
     current_user: User = Depends(get_current_user),
 ):
     """Delete a config by ID."""
-    # 写操作仅限管理员
-    if not current_user.is_superuser and current_user.role != "admin":
+    # 写操作仅限平台管理员（W0-1：只认显式 is_superuser，不再看 users.role）
+    if not is_platform_admin(current_user):
         raise AuthorizationError("需要管理员权限")
 
     if not redis_client:
@@ -325,14 +398,14 @@ async def delete_config(
     }
 
 
-@router.post("/{config_id}/default")
+@router.post("/{config_id}/default", deprecated=True)
 async def set_default_config(
     config_id: str,
     current_user: User = Depends(get_current_user),
 ):
     """Set a config as default for its provider. Unsets other defaults."""
-    # 写操作仅限管理员
-    if not current_user.is_superuser and current_user.role != "admin":
+    # 写操作仅限平台管理员（W0-1：只认显式 is_superuser，不再看 users.role）
+    if not is_platform_admin(current_user):
         raise AuthorizationError("需要管理员权限")
 
     all_configs = await _load_all()

@@ -5,7 +5,13 @@ import { useI18n } from 'vue-i18n'
 import { useDialog } from 'naive-ui'
 import { useChatStore } from '@/stores/chat'
 import { useAppStore } from '@/stores/app'
-import { getConversations, deleteConversation, type Conversation } from '@/api/conversation'
+import {
+  getConversations,
+  deleteConversation,
+  type Conversation,
+  type ConversationListResponse,
+} from '@/api/conversation'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 
 export function useChatSessions() {
   const router = useRouter()
@@ -31,8 +37,11 @@ export function useChatSessions() {
     isListLoading.value = true
     try {
       const res = await getConversations({ page: currentPage.value, page_size: 50 })
-      if (res.data.data && Array.isArray(res.data.data.data)) {
-        const items = res.data.data.data
+      // 宽容解包（口径见 @/types/common.ts）：真实响应为
+      // {success, data: {data: [...], total, page, page_size}} 双层体。
+      const page = apiUnwrap<ConversationListResponse | null>(res)
+      if (page && Array.isArray(page.data)) {
+        const items = page.data
         if (currentPage.value === 1) {
           conversations.value = items
         } else {
@@ -44,7 +53,7 @@ export function useChatSessions() {
       }
       convLoadError.value = false
     } catch (error) {
-      message.error(t('common.loadFailed'))
+      message.error(t('chat.loadFailed'))
       convLoadError.value = true
     } finally {
       isListLoading.value = false

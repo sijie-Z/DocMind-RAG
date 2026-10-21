@@ -11,7 +11,7 @@
 
 <div align="center">
   <h1>🤖 DocMind</h1>
-  <p><strong>Enterprise AI Agent Knowledge Base — PER Architecture · Hybrid RAG · Observable · Self-Improving</strong></p>
+  <p><strong>Enterprise RAG×Agent platform — eval gates in CI, fake-successes cleared, ratchets that only shrink. Quality can't silently regress.</strong></p>
 </div>
 
 ---
@@ -21,11 +21,11 @@
 DocMind is a full-stack enterprise AI knowledge base system built around the **PER (Plan-Execute-Reflect) Agent architecture**. It provides multi-format document parsing, hybrid retrieval-augmented generation (RAG), visual workflow editing, real-time SSE streaming Q&A, and a comprehensive observability stack.
 
 Core use cases:
-- 📄 **Document KB** — Upload PDF, Word, Excel, TXT, Markdown, and CSV files. Auto-parse, chunk, embed, and semantic search.
+- 📄 **Document KB** — Upload PDF, Word, Excel, TXT, Markdown, CSV, and PNG/JPG/JPEG/WEBP/BMP images (OCR). Auto-parse, chunk, embed, and semantic search.
 - 💬 **Intelligent Q&A** — RAG pipeline: keyword + vector hybrid search, reranking, LLM generation with SSE streaming.
-- 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 30 tools for complex multi-step tasks.
+- 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 33 tools for complex multi-step tasks.
 - 🧩 **Workflow Editor** — Visual DAG design & debugging (Vue Flow). Configurable LLM models, prompts, and execution engines.
-- 📊 **Observability** — Prometheus metrics, Langfuse full-trace, 12 SSE event types, RunReport execution summaries.
+- 📊 **Observability** — Prometheus metrics, Langfuse full-trace, 20 SSE event types, RunReport execution summaries.
 - 🔐 **Multi-Tenant + RBAC** — Organization isolation, role-based permissions, JWT authentication.
 
 > Design decisions and experimental data belong in the research repo: [DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
@@ -34,18 +34,30 @@ Core use cases:
 
 ## Project Status
 
-> Current positioning: **public project / immature product**. Feature completeness is higher than production stability. It is suitable for learning, secondary development, and local demos; harden security and operations before deploying publicly.
+> Positioning: **public project / immature product** — feature completeness runs ahead of stability; suitable for learning, secondary development, and local demos; harden security and operations before deploying publicly. The product can still be maturing while engineering discipline leads: **numbers carry their method, fixes carry evidence, regressions are stopped before merge** (see Quality & Gates).
 
 Current baseline:
-- Backend `pytest tests/`: 911 passed (CI, MySQL + Redis). Frontend: 111 tests passed; `vue-tsc --noEmit` passes.
+- Test baseline (frozen snapshot, 2026-10-15): backend `pytest tests/` **2223 passed / 51 skipped** (0 failed); frontend **861 passed** (128 test files) + `vue-tsc --noEmit` 0 errors. Numbers evolve with CI in real time — CI is the single source of truth; this page keeps a frozen snapshot.
 - Recent fixes: org-scoped semantic cache, conversation ownership checks, org isolation for knowledge search/delete/rebuild, upload path traversal and MinIO deletion fixes, API key masking, web-fetch SSRF protection, workflow ownership isolation, in-process document processing when Kafka is unavailable, local startup scripts, and removal of sensitive artifacts from git tracking.
 - Architecture: document parsing/embedding/ES indexing is unified in a single processor, the chat pipeline moved into `services/chat_service.py`, and a shared document authorization helper was added.
 - Hardening: agent memory endpoints are user-scoped, the `/files` proxy requires auth for non-public objects, pure-ASGI metrics and rate-limit middleware are enabled, and the legacy `ci.yml` was removed.
 
 Known limitations:
 - Workflow code nodes are disabled by default. Set `ENABLE_WORKFLOW_CODE_NODES=true` to opt in; execution now requires the Docker sandbox.
-- GraphRAG graphs, agent memory, metrics snapshots, and live counters now persist to Redis; live counters are written per instance and aggregated on read for multi-instance deployments.
+- GraphRAG graphs, long-term/reflective agent memory, metrics snapshots, and live counters now persist to Redis (short-term/working memory stays in-process and does not survive a restart); live counters are written per instance and aggregated on read for multi-instance deployments.
 - The knowledge, profile, and workflow editor pages have all been split into components/composables; no 1000-line SFC pages remain.
+
+---
+
+## Quality & Gates
+
+"Never silently regress" is not a slogan — it is a set of checkable mechanisms:
+
+- **Eval gate in CI (`Eval Gate`)** — retrieval quality is guarded per PR by a zero-tolerance gate: 28 golden-set items (25 positive / 3 negative) and seven metrics (ClauseHit@1/@3/@5, MRR, EmptyAcc, NearMiss@5, errors) with zero tolerance — any drop turns the build red (fail-closed). `ClauseHit@3/@5` measures 88% (CI baseline 84% as the floor). Updating the baseline is an explicit PR action (rules in `backend/docs/eval-gate-phase1.md`).
+- **Ratchets only shrink** — a backend coverage floor (`--cov-fail-under=42`) plus four frontend baseline ratchets (hardcoded CJK / i18n completeness / naming consistency / translation-key usage). Growth turns them red; shrinkage is allowed.
+- **Silent false-successes cleared (#301)** — a full audit of ~551 exception handlers; all 32 silent false-success paths closed (fail-closed logout, three-state retrieval, honest document status, degraded-identity stats…), each backed by regression tests.
+- **Red-first + mutation verification** — every fix starts with a failing test; after the fix, injected defects must turn exactly the right tests red, proving the tests can actually detect the bug.
+- **Documented-number invariants** — the SSE event count, endpoint-module count, frontend-route count, and tool count are derived from source; expected values live in `docs/facts.json`. `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ docs on every PR. Frontend routes are recorded in two ways: 34 route records (including top-level and redirect records) / 29 named routes (routes with a name).
 
 ---
 
@@ -60,7 +72,7 @@ Known limitations:
 │  WebSocket Push · Request ID Tracking        │
 ├── AI Agent Core ─────────────────────────────┤
 │  PER Loop (Planner → Executor → Reflector)   │
-│  Tool Registry (30) · RunReport · Reviewer  │
+│  Tool Registry (33) · RunReport · Reviewer  │
 │  Experience Memory · Replay · Pattern Mining │
 ├── RAG Pipeline ──────────────────────────────┤
 │  HybridRetriever (BM25 + Vector + RRF fusion)│
@@ -102,7 +114,7 @@ User instruction
 | Context Engine | `context.py` | Token budget management, message window builder |
 | Config | `config.py` | AgentConfig (model/temperature/max steps/phase toggles) |
 
-**30 Built-In Tools** (`tools/`):
+**33 Built-In Tools** (`core_tools.py` 14 + `tools/` 19):
 
 | Category | Tool | Description |
 |----------|------|-------------|
@@ -139,7 +151,7 @@ Query enters
                                 + RRF reciprocal rank fusion (k=60)
   → MMR Selection             — Maximal Marginal Relevance deduplication
   → Reranker                  — Cross-encoder rerank (local BGE or API)
-  → ContextCompressor         — LLM context compression
+  → ContextCompressor         — query-term sentence extraction (rule-based, no LLM call)
   → Cache Check               — Exact match cache (TTL 600s) + semantic cache
   → LLM Generation            — Streaming SSE output, strict mode, PII masking
 ```
@@ -151,7 +163,7 @@ Query enters
 | `reranker.py` | Cross-encoder rerank (local BAAI/bge-reranker-base or API) |
 | `query_processor.py` | HyDE generation, LLM query rewrite, intent/complexity classification, decomposition |
 | `cache.py` | RetrievalCache (exact TTL) + SemanticCache (cosine similarity) |
-| `context_compressor.py` | LLM-based context pruning |
+| `context_compressor.py` | Query-term sentence extraction compression (rule-based, no LLM call) |
 | `context_window.py` | Token budget message builder for RAG chat |
 | `evaluator.py` / `metrics.py` | RAG quality scoring (groundedness, relevance) |
 
@@ -177,27 +189,30 @@ Query enters
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-19 endpoint modules under `/api/v1`:
+22 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|
 | Auth | `/auth` | Register, login, refresh token, password reset, logout |
-| Users | `/users` | User CRUD, profiles, avatars, session management, audit logs |
+| Users | `/users` | User CRUD, profiles, avatars, session management, audit logs (personal API-key endpoints deprecated) |
 | Files | `/files` | Upload/download/delete, MinIO storage, chunked upload |
 | Documents | `/documents` | Document parsing, vectorization, knowledge base indexing, status tracking |
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
 | Knowledge | `/knowledge` | Knowledge base CRUD, retrieval, statistics, settings |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |
+| Organization Settings | `/organizations` | Org-level settings and audit (shared prefix with Organizations) |
 | Monitoring | `/monitoring` | Performance metrics, health checks, alerts, RAG quality scoring |
 | Notifications | `/notifications` | Notification CRUD, read marking, WebSocket push |
 | Prompts | `/prompts` | Prompt template CRUD + versioning |
 | Token Usage | `/token-usage` | Usage tracking + reports |
 | Manuals | `/manuals` | System user guide management |
 | Workflows | `/workflows` | Workflow CRUD, execution, debugging, node definitions |
-| LLM Config | `/llm-config` | Per-user model configuration |
+| Scheduled Tasks | `/scheduled-tasks` | Scheduled task CRUD, pause/resume, and manual trigger |
+| LLM Config (deprecated) | `/llm-config` | Global config entry removed from the workflow editor; endpoints marked deprecated pending the unified Provider layer |
 | Skills | `/curated-skills` | Skill discovery & management |
-| Agent Memory | `/memory` | Short/long/working memory CRUD, semantic search |
+| Agent Memory | `/memory` | Short/long/working/reflective memory CRUD, semantic search |
 | Agent | `/agent` | PER Agent conversations (SSE streaming), tool calls, configuration |
+| MCP | `/mcp` | MCP server status (admin, read-only) |
 | User Settings | `/user` | Personal UI preferences |
 | Demo Data | `/demo` | Seed demo documents & data |
 
@@ -205,7 +220,7 @@ Swagger docs: `http://localhost:8000/docs`
 
 ### 🖥 Frontend (`frontend/src/`)
 
-Vue 3 + TypeScript + Naive UI SPA, 21 routes:
+Vue 3 + TypeScript + Naive UI SPA, 34 route records (29 named routes; the table below lists key pages):
 
 | Page | Route | Description |
 |------|-------|-------------|
@@ -231,7 +246,7 @@ Vue 3 + TypeScript + Naive UI SPA, 21 routes:
 | Service | File | Purpose |
 |---------|------|---------|
 | Auth Service | `auth_service.py` | JWT creation/validation, bcrypt hashing, token blacklist (jti) |
-| Document Parser | `document_parser.py` | Parse PDF/Word/Excel/TXT/MD, text extraction & chunking |
+| Document Parser | `document_parser.py` | Parse PDF/Word/Excel/CSV/TXT/MD and images (OCR), text extraction & chunking |
 | RAG Service | `rag_service.py` | RAG pipeline facade |
 | File Service | `file_service.py` | File storage & retrieval |
 | Knowledge Service | `knowledge_service.py` | Knowledge base business logic |
@@ -242,7 +257,7 @@ Vue 3 + TypeScript + Naive UI SPA, 21 routes:
 | Memory Service | `memory_service.py` | Agent memory CRUD |
 | PII Masking | `masking_service.py` | Sensitive info redaction |
 | Semantic Chunker | `semantic_chunker.py` | Semantic-aware text chunking |
-| Graph RAG | `graph_rag_service.py` | Knowledge graph enhanced retrieval |
+| Graph Service | `graph_rag_service.py` | Knowledge-graph build, query, and visualization (not part of the RAG retrieval path) |
 
 ### 🔄 Async Processing (`backend/app/worker/`)
 
@@ -266,21 +281,34 @@ git clone https://github.com/sijie-Z/DocMind-RAG.git
 cd DocMind-RAG
 ```
 
-### 2. Start Infrastructure
+### 2. Configure
+
+Create the environment files **before starting anything** — without `backend/.env.docker`, every compose command fails outright.
 
 ```bash
-cd backend && docker compose up -d    # MySQL / Redis / ES / Kafka / MinIO
-```
+cd backend
 
-### 3. Configure
+# Local development (apps run on the host — steps 4/5 below)
+cp .env.example .env               # Windows: copy .env.example .env
+# Required: SECRET_KEY / JWT_SECRET_KEY (generate: python -c "import secrets; print(secrets.token_hex(32))")
+# Fill in DEEPSEEK_API_KEY / EMBEDDING_API_KEY as needed (LLM / Embedding credentials)
 
-```bash
+# Any Docker use (including infrastructure-only in step 3) requires this file — compose fails without it:
 cp .env.docker.example .env.docker
 # Edit .env.docker — at minimum fill in LLM API Keys:
 #   DEEPSEEK_API_KEY=sk-xxx
-#   DEEPSEEK_API_URL=https://api.deepseek.com/v1
-#   EMBEDDING_API_KEY=sk-xxx
-#   EMBEDDING_API_URL=https://api.deepseek.com/v1
+#   DEEPSEEK_API_URL=https://api.deepseek.com
+# Embedding defaults to local Ollama (nomic-embed-text / 768 dims); no separate
+# embedding key is needed (DEEPSEEK_API_KEY is reused). Fill EMBEDDING_API_KEY /
+# EMBEDDING_API_URL only when using a cloud embedding API.
+```
+
+### 3. Start Infrastructure
+
+```bash
+cd backend && docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
+# Infrastructure containers only (apps keep running on the host — see below); skip this step without Docker and use local services per SETUP.md
+# Full Docker deployment (apps in containers): see the Deployment section
 ```
 
 ### 4. Start Backend
@@ -325,15 +353,23 @@ Environment variables via `.env` file. Key settings:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DEEPSEEK_API_KEY` | LLM API Key | Required |
-| `DEEPSEEK_API_URL` | LLM API URL | `https://api.deepseek.com/v1` |
-| `EMBEDDING_API_KEY` | Embedding API Key | Required |
-| `EMBEDDING_API_URL` | Embedding API URL | Required |
-| `DATABASE_URL` | MySQL connection string | `mysql+aiomysql://root:...` |
-| `VECTOR_DIMENSION` | Vector dimension | `1536` |
+| `DEEPSEEK_API_URL` | LLM API URL | `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL` | Chat model | `deepseek-v4-flash` |
+| `EMBEDDING_API_KEY` | Embedding API Key | Falls back to `DEEPSEEK_API_KEY` |
+| `EMBEDDING_API_URL` | Embedding API URL | `http://localhost:11434/v1` (local Ollama) |
+| `EMBEDDING_MODEL` | Embedding model | `nomic-embed-text` |
+| `DATABASE_URL` | MySQL connection string | `mysql+aiomysql://...` (required in deployments) |
+| `VECTOR_DIMENSION` | Vector dimension | `768` |
 | `ENABLE_TRACING` | OpenTelemetry toggle | `false` |
-| `ENABLE_DEMO_ACCOUNT` | Enable demo accounts | `true` |
+| `ENABLE_DEMO_ACCOUNT` | Enable demo accounts | `false` |
 | `ENABLE_WORKFLOW_CODE_NODES` | Allow workflow code nodes (security risk; disabled by default) | `false` |
-| `APP_VERSION` | App version | `1.21.0` |
+| `APP_VERSION` | App version | `1.22.1-rc.1` |
+
+> Model / vector-dimension defaults are defined once in
+> `backend/app/core/config/ai.py`. When `EMBEDDING_MODEL` / `VECTOR_DIMENSION` are
+> not set explicitly, hardware tiers auto-select: CPU `bge-m3` / 1024, 8G-GPU
+> `Qwen3-Embedding-4B` / 2048, 16G-GPU `Qwen3-Embedding-8B` / 4096. Explicit
+> values (as in the templates above) take precedence over auto-tiering.
 
 Full configuration reference: `backend/.env.example` and `backend/.env.docker.example`.
 
@@ -350,8 +386,8 @@ DocMind/
 │   │   ├── dependencies.py          # Dependency injection container
 │   │   ├── exceptions.py            # Custom exception hierarchy
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # Main router (19 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (19 files)
+│   │   │   ├── router.py            # Main router (22 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (22 files)
 │   │   ├── agent/                   # PER Agent core
 │   │   │   ├── loop.py              #   PER main loop
 │   │   │   ├── planner.py           #   Planner (LLM + structured rules)
@@ -365,10 +401,11 @@ DocMind/
 │   │   │   ├── exec_context.py      #   ExecutionContext
 │   │   │   ├── registry.py          #   Tool registry
 │   │   │   ├── memory_bridge.py     #   Memory bridge
-│   │   │   ├── events.py            #   SSE event types (12 types)
+│   │   │   ├── events.py            #   SSE event types (20 types)
 │   │   │   ├── message.py           #   Agent message bus
 │   │   │   ├── tracing.py           #   Execution trace records (dev-only: eval/offline; not written in production)
-│   │   │   ├── tools/               #   30 tool implementations
+│   │   │   ├── core_tools.py        #   14 base tools
+│   │   │   ├── tools/               #   19 extension tools (33 built-in tools total)
 │   │   │   │   ├── web_search.py    #   Web search
 │   │   │   │   ├── code_execution.py #  Python/SQL sandbox
 │   │   │   │   ├── data_analysis.py #   Data analysis
@@ -381,7 +418,7 @@ DocMind/
 │   │   │   │   ├── extractor.py     #   Experience extractor
 │   │   │   │   ├── store.py         #   Experience store
 │   │   │   │   ├── models.py        #   Data models
-│   │   │   │   └── run_extract.py   #   Run-level extraction
+│   │   │   │   └── run_extract.py   #   Experience bootstrap (dev-only; manual run after benchmarks)
 │   │   │   ├── replay/              #   Execution replay
 │   │   │   │   └── engine.py        #   Replay engine
 │   │   │   └── mining/              #   Pattern mining
@@ -416,11 +453,11 @@ DocMind/
 │   │   │   ├── context_compressor.py #  Context compression
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (14 services)
-│   │   ├── models/                  # ORM models (14 entities)
+│   │   ├── services/                # Business service layer (21 services)
+│   │   ├── models/                  # ORM models (18 model files)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer
-│   ├── tests/                       # 911 backend test cases (plus 111 frontend)
+│   ├── tests/                       # 2223 backend tests (plus 861 frontend)
 │   ├── benchmark/                   # Benchmark framework
 │   ├── alembic/                     # DB migrations
 │   ├── scripts/                     # Utility scripts
@@ -429,7 +466,7 @@ DocMind/
 │   └── docker-compose.yml           # 10-service orchestration
 ├── frontend/
 │   └── src/
-│       ├── views/                   # Pages (19 modules, 21 routes)
+│       ├── views/                   # Pages (23 page modules, 34 route records / 29 named routes)
 │       ├── components/              # Shared components
 │       ├── api/                     # Axios API clients
 │       ├── stores/                  # Pinia state stores
@@ -463,8 +500,10 @@ cd ../frontend && npm run test
 
 ### Docker Compose
 
+Prerequisite: create and fill `backend/.env.docker` first (see Quick Start · 2. Configure) — without it, every compose command fails outright.
+
 ```bash
-cd backend && docker compose up -d
+cd backend && docker compose --env-file .env.docker up -d
 # Starts 10 services: backend, worker, mysql, redis, elasticsearch, minio, zookeeper, kafka, prometheus, grafana
 ```
 

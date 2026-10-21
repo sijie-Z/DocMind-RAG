@@ -24,7 +24,9 @@ from app.agent.tools.feishu.auth import FeishuTenantAuthHandler
 logger = logging.getLogger(__name__)
 
 # 飞书多维表格 API 基础路径
-BITABLE_BASE = "https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records"
+BITABLE_BASE = (
+    "https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records"
+)
 
 # 飞书错误码 → 标准化 error code 映射
 # 供 Tool 层直接使用（也可作为 error_mapper hook 的补充）
@@ -36,7 +38,7 @@ FEISHU_ERROR_MAP: dict[int, tuple[str, str]] = {
     99991401: ("invalid_param", "请求体格式错误"),
     99991402: ("invalid_param", "app_token 或 table_id 不存在"),
     99991403: ("permission_denied", "无权限操作该资源"),
-    10001:    ("token_expired", "飞书 token 已失效，请重新授权"),
+    10001: ("token_expired", "飞书 token 已失效，请重新授权"),
 }
 
 
@@ -161,5 +163,7 @@ async def _get_client() -> httpx.AsyncClient:
     """获取共享的 httpx 客户端实例。"""
     global _shared_client
     if _shared_client is None:
-        _shared_client = httpx.AsyncClient(timeout=15.0, limits=httpx.Limits(max_keepalive_connections=5))
+        _shared_client = httpx.AsyncClient(
+            timeout=15.0, limits=httpx.Limits(max_keepalive_connections=5)
+        )
     return _shared_client

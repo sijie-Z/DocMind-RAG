@@ -13,6 +13,7 @@ WS 握手没有 HTTP 状态码，认证失败的契约统一为 **close code + r
 握手必须查库：访问令牌有效期默认 24 小时，只验签意味着已删除/已禁用的用户仍能
 建连并持续消耗 LLM 与检索资源。长连接的每一条消息同样要复查用户状态。
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,6 +23,7 @@ from fastapi import WebSocket
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.organization import user_organization
 from app.models.user import User
 from app.services.auth_service import auth_service
 
@@ -37,6 +39,9 @@ WS_REASON_MISSING_USER_ID = "Missing user id"
 WS_REASON_INVALID_TOKEN = "Invalid token"
 WS_REASON_INVALID_TOKEN_TYPE = "Invalid token type"
 WS_REASON_TOKEN_REVOKED = "Token revoked"
+# A2 P0：被移出组织的成员（令牌组织已无成员关系）在 WS 握手层即拒绝，
+# 与 HTTP 侧 auth_service.get_current_user 的 403 同语义（close code 4001）。
+WS_REASON_ORG_MEMBERSHIP = "Organization membership invalid"
 
 # 用户已删除 / 已禁用 / 令牌无效 共用这一组 code+reason（不可区分）
 WS_REASON_USER_INVALID = WS_REASON_INVALID_TOKEN
@@ -172,6 +177,25 @@ async def _authenticate_ws(websocket: WebSocket, db: AsyncSession) -> WsUserStat
         logger.warning("WebSocket 认证失败：用户 %s 不存在或已被禁用", user_id)
         await close_ws(websocket, WS_CLOSE_AUTH_FAILED, WS_REASON_USER_INVALID)
         return None
+
+    # A2 P0（评审 m-3）：与 HTTP 侧同一成员校验——token 组织回退必须回源
+    # user_organization；被移出成员的旧 token 在 WS 握手层即时失效。
+    token_org_id = payload.get("organization_id")
+    if token_org_id is not None and user.organization_id is None:
+        membership = await db.execute(
+            select(user_organization.c.user_id).where(
+                user_organization.c.user_id == user.id,
+                user_organization.c.organization_id == token_org_id,
+            )
+        )
+        if membership.first() is None:
+            logger.warning(
+                "WebSocket 认证失败：用户 %s 的令牌组织 %s 已无成员关系",
+                user_id,
+                token_org_id,
+            )
+            await close_ws(websocket, WS_CLOSE_AUTH_FAILED, WS_REASON_ORG_MEMBERSHIP)
+            return None
 
     return user
 

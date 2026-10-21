@@ -4,6 +4,7 @@ Manages the token budget across system prompt, retrieved context, and
 conversation history. When the budget is exceeded, older messages are
 compressed or dropped to make room for new interactions.
 """
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 # 因此与 app/agent/context.py 对齐，捕获 Exception 并降级为启发式计数。
 try:
     import tiktoken
+
     _ENCODER = tiktoken.get_encoding("cl100k_base")
     logger.info("tiktoken cl100k_base encoder initialized (token counting: exact)")
 except Exception as e:
@@ -81,15 +83,15 @@ class ChatContextWindow:
             remaining_budget = 200
 
         # Cap history
-        capped_history = history[-self.max_history_messages:]
+        capped_history = history[-self.max_history_messages :]
 
         # Split into old (compressible) and recent (pinned)
         if len(capped_history) <= self.tail_window:
             # All messages fit in the tail window
             fitted = self._fit_tail(capped_history, remaining_budget)
         else:
-            old_msgs = capped_history[:-self.tail_window]
-            recent_msgs = capped_history[-self.tail_window:]
+            old_msgs = capped_history[: -self.tail_window]
+            recent_msgs = capped_history[-self.tail_window :]
 
             # Compress old messages
             compressed = self._compress_old(old_msgs)
@@ -107,9 +109,7 @@ class ChatContextWindow:
 
         return fitted
 
-    def _fit_tail(
-        self, messages: list[dict[str, str]], budget: int
-    ) -> list[dict[str, str]]:
+    def _fit_tail(self, messages: list[dict[str, str]], budget: int) -> list[dict[str, str]]:
         """Fit as many recent messages as possible within budget (newest first)."""
         result = []
         used = 0
@@ -162,7 +162,9 @@ class ChatContextWindow:
                     topics.append(snippet)
             if not topics:
                 return None
-            summary = f"[Earlier conversation: {len(messages)} messages. Topics: {'; '.join(topics[:5])}]"
+            summary = (
+                f"[Earlier conversation: {len(messages)} messages. Topics: {'; '.join(topics[:5])}]"
+            )
             return {"role": "system", "content": summary}
 
         # Layer 2: Build structured summary from Q&A pairs
@@ -216,5 +218,7 @@ def build_rag_messages(
         {"role": "system", "content": system_prompt},
     ]
     messages.extend(fitted_history)
-    messages.append({"role": "user", "content": f"【参考文档】：\n{context_docs}\n\n【问题】：{user_query}"})
+    messages.append(
+        {"role": "user", "content": f"【参考文档】：\n{context_docs}\n\n【问题】：{user_query}"}
+    )
     return messages

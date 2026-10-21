@@ -60,10 +60,7 @@ logger = logging.getLogger(__name__)
             },
             "filter": {
                 "type": "string",
-                "description": (
-                    "筛选条件，使用飞书公式语法。"
-                    '示例: `CurrentValue.[状态]="待审批"`'
-                ),
+                "description": ('筛选条件，使用飞书公式语法。示例: `CurrentValue.[状态]="待审批"`'),
             },
         },
         "required": ["app_token", "table_id"],

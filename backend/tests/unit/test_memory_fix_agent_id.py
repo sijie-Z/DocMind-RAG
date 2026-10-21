@@ -4,6 +4,7 @@
 而 agent 的会话命名空间字面量就是 `session:<session_id>`（service.py 约定），
 操作员因此无法用清空接口清理单个会话的记忆。
 """
+
 import uuid
 from types import SimpleNamespace
 
@@ -24,17 +25,20 @@ class TestAgentIdValidation:
         assert _normalize_agent_id("my-agent_01") == "my-agent_01"
         assert _normalize_agent_id("") == "default"
 
-    @pytest.mark.parametrize("hostile", [
-        "../../etc",                 # 路径穿越
-        "..\\..\\windows\\system32",
-        "..",
-        "a/b",
-        "a\\b",
-        "foo bar",                   # 空白
-        "session:ab cd",             # 冒号不能成为空白后门
-        "a\x00b",                    # NUL
-        "x" * 65,                    # 超长
-    ])
+    @pytest.mark.parametrize(
+        "hostile",
+        [
+            "../../etc",  # 路径穿越
+            "..\\..\\windows\\system32",
+            "..",
+            "a/b",
+            "a\\b",
+            "foo bar",  # 空白
+            "session:ab cd",  # 冒号不能成为空白后门
+            "a\x00b",  # NUL
+            "x" * 65,  # 超长
+        ],
+    )
     def test_hostile_ids_rejected(self, hostile):
         with pytest.raises(ValidationError):
             _normalize_agent_id(hostile)
@@ -58,7 +62,7 @@ class TestClearMemoryEndpoint:
         """接口清理的必须是 agent 实际写入的会话命名空间。"""
         user = SimpleNamespace(organization_id=2, id=7)
         session_id = str(uuid.uuid4())
-        system = get_memory_system(f"2:7:session:{session_id}")
+        system = get_memory_system(2, 7, f"session:{session_id}")
         system.working.set_result("s1", {"status": "completed", "result": "x"})
 
         result = await clear_memory(

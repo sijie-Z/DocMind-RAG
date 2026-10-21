@@ -1,56 +1,42 @@
 <template>
-  <div class="markdown-body prose dark:prose-invert max-w-none text-sm leading-relaxed" v-html="renderedContent"></div>
+  <div
+    ref="rootEl"
+    class="markdown-body prose dark:prose-invert max-w-none text-sm leading-relaxed"
+    :class="{ 'whitespace-pre-wrap': streaming }"
+    v-html="renderedContent"
+  ></div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, nextTick, watch } from 'vue'
-import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js/lib/common'
-import DOMPurify from 'dompurify'
-import mdKatex from '@vscode/markdown-it-katex'
+import { computed, onMounted, nextTick, watch, ref } from 'vue'
+import { renderMarkdownFull, renderMarkdownStreaming } from '@/utils/markdownRenderer'
 import 'highlight.js/styles/github-dark.css'
 import 'katex/dist/katex.min.css'
+import i18n from '@/locales'
 
 interface Props {
   content: string
+  /** 流式生成中：中间态走纯文本轻量渲染，终态再一次性做完整 Markdown+DOMPurify（E3） */
+  streaming?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { streaming: false })
 
-// markdown-it 15 起，默认导出是 `MarkdownItCallable`（一个 const，兼容不带 new 的旧写法），
-// 它只有「值」没有「类型」含义 —— 因此不能再拿默认导入当类型标注。
-// 这里去掉显式标注，让 TS 从 `new` 的构造签名推断出 MarkdownIt 实例类型。
-const md = new MarkdownIt({
-  html: false,
-  linkify: true,
-  typographer: true,
-  highlight: (str: string, lang: string): string => {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return `<pre class="hljs"><code>${
-          hljs.highlight(str, { language: lang, ignoreIllegals: true }).value
-        }</code></pre>`
-      } catch { /* lang not available, fall through */ }
-    }
-    return `<pre class="hljs"><code>${md.utils.escapeHtml(str)}</code></pre>`
-  }
-})
-
-md.use(mdKatex)
+// 组件根节点：代码块复制按钮的定位范围（替代原全文档 querySelectorAll 扫描）
+const rootEl = ref<HTMLElement | null>(null)
 
 const contentCache = new Map<string, string>()
 const MAX_CACHE_SIZE = 200
 
 const renderedContent = computed(() => {
   if (!props.content) return ''
+  // E3：流式中间态轻量渲染（纯文本）——原实现每个 chunk 对全量累积内容跑一次
+  // Markdown+hljs+DOMPurify，累计 O(n²)；完整渲染改到终态一次（streaming=false）。
+  if (props.streaming) return renderMarkdownStreaming(props.content)
   const cached = contentCache.get(props.content)
   if (cached) return cached
 
-  const raw = md.render(props.content)
-  const sanitized = DOMPurify.sanitize(raw, {
-    ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'mfrac'],
-    ADD_ATTR: ['xmlns', 'mathvariant'],
-  })
+  const sanitized = renderMarkdownFull(props.content)
 
   if (contentCache.size >= MAX_CACHE_SIZE) {
     const firstKey = contentCache.keys().next().value
@@ -61,8 +47,13 @@ const renderedContent = computed(() => {
 })
 
 // 为代码块添加复制按钮的逻辑
+// （体验第四波：按钮文案改走全局 i18n 单例——动态创建的 DOM 无法注入 useI18n；
+//   按钮在内容变化时重建，语言切换后在下次内容更新时取到新文案）
 const addCopyButtons = () => {
-  const blocks = document.querySelectorAll('pre.hljs')
+  // E3：只在组件根节点内定位代码块（原 document.querySelectorAll 全文档扫描：
+  // 聊天页消息数越多、每次内容变化扫描成本越高）
+  const blocks = rootEl.value?.querySelectorAll('pre.hljs')
+  if (!blocks) return
   blocks.forEach((block) => {
     // 如果已经有按钮了就不再添加
     if (block.querySelector('.copy-btn')) return
@@ -70,15 +61,15 @@ const addCopyButtons = () => {
     const button = document.createElement('button')
     button.className = 'copy-btn'
     button.setAttribute('data-state', 'idle')
-    button.textContent = '复制'
+    button.textContent = i18n.global.t('common.copy')
     button.onclick = () => {
       const code = block.querySelector('code')?.innerText || ''
       navigator.clipboard.writeText(code).then(() => {
         button.setAttribute('data-state', 'copied')
-        button.textContent = '已复制！'
+        button.textContent = i18n.global.t('common.copied')
         setTimeout(() => {
           button.setAttribute('data-state', 'idle')
-          button.textContent = '复制'
+          button.textContent = i18n.global.t('common.copy')
         }, 2000)
       })
     }

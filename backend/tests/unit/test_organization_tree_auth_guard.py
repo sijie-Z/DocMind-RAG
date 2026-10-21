@@ -11,6 +11,7 @@
 - 与 issue #82 的 PR A 已统一的 401 契约一致（`_auth_failed()` 的
   「用户不存在 / 账号被禁用 / **主体无法建立**」共用同一响应）。
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest

@@ -46,9 +46,12 @@ class Orchestrator:
         self,
         planner: Planner | None = None,
         config: AgentConfig | None = None,
-        organization_id: int = 1,
+        organization_id: int | None = None,
         user_id: int = 0,
     ):
+        # A2 P0（fail-closed）：编排器下的执行器必须有组织上下文。
+        if organization_id is None:
+            raise ValueError("Orchestrator 缺少 organization_id，拒绝在无组织上下文下运行")
         self._config = config or AgentConfig()
         self._planner = planner
         self._organization_id = organization_id
@@ -100,17 +103,24 @@ class Orchestrator:
 
         # 1b. Send plan result message
         plan_msg = AgentMessage(
-            msg_type="plan", sender="planner", target="orchestrator",
-            trace_id=trace_id, payload={
+            msg_type="plan",
+            sender="planner",
+            target="orchestrator",
+            trace_id=trace_id,
+            payload={
                 "goal": plan.goal,
                 "reasoning": plan.reasoning,
                 "steps": [
-                    {"id": s.id, "description": s.description,
-                     "dependencies": s.dependencies, "tool_hint": s.tool_hint,
-                     "parallel_group": s.parallel_group,
-                     "risk_level": s.risk_level,
-                     "retry_strategy": s.retry_strategy,
-                     "fallback_tool": s.fallback_tool}
+                    {
+                        "id": s.id,
+                        "description": s.description,
+                        "dependencies": s.dependencies,
+                        "tool_hint": s.tool_hint,
+                        "parallel_group": s.parallel_group,
+                        "risk_level": s.risk_level,
+                        "retry_strategy": s.retry_strategy,
+                        "fallback_tool": s.fallback_tool,
+                    }
                     for s in plan.steps
                 ],
             },
@@ -155,7 +165,10 @@ class Orchestrator:
 
         # ── Step 3: Send review → Reviewer ───────────────────────────
         review_msg = AgentMessage.review_request(
-            trace_id, plan_msg.payload, step_results, exec_msg.msg_id,
+            trace_id,
+            plan_msg.payload,
+            step_results,
+            exec_msg.msg_id,
         )
         message_bus.send(review_msg)
 
@@ -169,7 +182,9 @@ class Orchestrator:
                 )
 
         verdict_msg = AgentMessage(
-            msg_type="verdict", sender="reviewer", target="orchestrator",
+            msg_type="verdict",
+            sender="reviewer",
+            target="orchestrator",
             trace_id=trace_id,
             payload={"passed": len(issues) == 0, "issues": issues},
             parent_msg_id=review_msg.msg_id,
@@ -191,6 +206,7 @@ class Orchestrator:
         try:
             # Build StepExecutionRecord list from step_results
             from app.agent.tracing import StepExecutionRecord, ToolCallRecord
+
             trace_steps = []
             tools_used = set()
             total_tool_calls = 0
@@ -226,7 +242,9 @@ class Orchestrator:
                         args_summary="",
                         success=(status == "completed"),
                         error_code=error_info.get("code") if isinstance(error_info, dict) else None,
-                        error_message=error_info.get("message") if isinstance(error_info, dict) else str(error_info),
+                        error_message=error_info.get("message")
+                        if isinstance(error_info, dict)
+                        else str(error_info),
                         latency_ms=sr.get("latency_ms", 0.0),
                     )
                     ser.tool_calls.append(tcr)
@@ -255,7 +273,8 @@ class Orchestrator:
 
         logger.info(
             "Orchestrator completed trace=%s in %.0fms | steps=%d/%d | output=%d chars",
-            trace_id, elapsed,
+            trace_id,
+            elapsed,
             plan.completed_steps if plan else 0,
             plan.total_steps if plan else 0,
             len(final_output),
@@ -285,12 +304,14 @@ class Orchestrator:
 
         async for event in self._planner.plan(query=query, history=history, ctx=ctx):
             if event.type == "plan_step" and event.plan_step_id:
-                plan_steps.append(PlanStep(
-                    id=event.plan_step_id,
-                    description=event.content,
-                    dependencies=event.dependencies or [],
-                    tool_hint=event.tool_hint or None,
-                ))
+                plan_steps.append(
+                    PlanStep(
+                        id=event.plan_step_id,
+                        description=event.content,
+                        dependencies=event.dependencies or [],
+                        tool_hint=event.tool_hint or None,
+                    )
+                )
 
         if not plan_steps:
             plan_steps = [PlanStep(id="s1", description=query)]

@@ -1,4 +1,5 @@
 """Knowledge Base API 集成测试 — 知识库查询与统计。"""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -6,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.document import Document
+from app.models.document import Document, DocumentStatus
 from app.models.user import User
 from app.schemas.knowledge import SearchSuggestionResponse
 
@@ -14,11 +15,13 @@ from app.schemas.knowledge import SearchSuggestionResponse
 @pytest.fixture
 def client():
     from app.main import app
+
     return TestClient(app)
 
 
 class _AsyncCtxMgr:
     """支持 async with 的 mock 上下文管理器。"""
+
     def __init__(self, db):
         self._db = db
 
@@ -124,6 +127,7 @@ class TestKnowledgeList:
     def test_list_knowledge_bases(self, client: TestClient):
         """GET /knowledge/ 应返回文档列表。"""
         from app.main import app
+
         # 本用例只关心列表主流程，权限门禁用超管主体一次性通过
         mock_user = _make_mock_user(is_superuser=True)
         doc = _make_mock_document()
@@ -146,10 +150,7 @@ class TestKnowledgeList:
         app.dependency_overrides[get_current_user] = _override_user
 
         try:
-            r = client.get(
-                "/api/v1/knowledge/",
-                headers={"Authorization": "Bearer test_token"}
-            )
+            r = client.get("/api/v1/knowledge/", headers={"Authorization": "Bearer test_token"})
             assert r.status_code == 200
             data = r.json()
             assert data["success"] is True
@@ -161,6 +162,7 @@ class TestKnowledgeList:
     def test_list_knowledge_bases_pagination(self, client: TestClient):
         """分页参数应正确返回。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
         doc1 = _make_mock_document(doc_id="doc-1")
         doc2 = _make_mock_document(doc_id="doc-2", filename="budget.xlsx")
@@ -185,7 +187,7 @@ class TestKnowledgeList:
         try:
             r = client.get(
                 "/api/v1/knowledge/?page=1&page_size=10",
-                headers={"Authorization": "Bearer test_token"}
+                headers={"Authorization": "Bearer test_token"},
             )
             assert r.status_code == 200
             data = r.json()
@@ -199,6 +201,7 @@ class TestKnowledgeList:
     def test_list_knowledge_bases_empty(self, client: TestClient):
         """无文档时应返回空列表。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
@@ -219,10 +222,7 @@ class TestKnowledgeList:
         app.dependency_overrides[get_current_user] = _override_user
 
         try:
-            r = client.get(
-                "/api/v1/knowledge/",
-                headers={"Authorization": "Bearer test_token"}
-            )
+            r = client.get("/api/v1/knowledge/", headers={"Authorization": "Bearer test_token"})
             assert r.status_code == 200
             assert r.json()["data"]["total"] == 0
         finally:
@@ -235,10 +235,77 @@ class TestKnowledgeList:
         assert r.status_code in (401, 403)
 
 
+class TestStatusVocabularyConsistent:
+    """第二轮 7.2⑤ 词表收敛契约：同一文档在列表接口与详情接口的 status 必须一致。
+
+    先红实证（本波分支前）：列表 status_map 把 INDEXED 改写为 'completed'
+    （knowledge.py status_map），详情端点原样输出 'indexed'（documents.py）——
+    同一文档两种词表。唯一词表定为 DB 枚举原词 'indexed'
+    （models/document.py DocumentStatus.INDEXED = "indexed"）。
+    """
+
+    def test_status_vocabulary_consistent(self, client: TestClient):
+        from app.main import app
+
+        mock_user = _make_mock_user(is_superuser=True)
+        doc = _make_mock_document(doc_id="doc-vocab-1")
+        # 必须用真枚举成员：MagicMock 状态会让 status_map.get 永远 miss，
+        # 测不到「列表把 INDEXED 改写为 completed」的真实路径
+        doc.status = DocumentStatus.INDEXED
+        doc.parsed_at = None
+        doc.indexed_at = None
+        doc.chunk_count = 0
+
+        override_func, mock_db = _override_get_db()
+
+        # 列表端点经 execute（count + scalars），详情端点经 db.get(Document, id)
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [doc]
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 1
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.get = AsyncMock(return_value=doc)
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+
+        try:
+            r_list = client.get(
+                "/api/v1/knowledge/", headers={"Authorization": "Bearer test_token"}
+            )
+            assert r_list.status_code == 200
+            item = r_list.json()["data"]["data"][0]
+
+            r_detail = client.get(
+                "/api/v1/documents/doc-vocab-1", headers={"Authorization": "Bearer test_token"}
+            )
+            assert r_detail.status_code == 200
+            detail = r_detail.json()["data"]
+
+            # 主断言（先红点）：列表 == 详情
+            assert item["status"] == detail["status"], (
+                f"词表漂移：列表={item['status']!r} vs 详情={detail['status']!r}"
+            )
+            # 唯一词表 = DB 枚举原词
+            assert item["status"] == "indexed"
+            assert detail["status"] == "indexed"
+            # raw_status 冗余携带原词（列表本波补上；详情已有）
+            assert item["raw_status"] == "indexed"
+            assert detail["raw_status"] == "indexed"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
+
 class TestKnowledgeStats:
     def test_get_stats_success(self, client: TestClient):
         """GET /knowledge/stats/{org_id} 应返回统计信息。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         # permission_required 不看注入的 current_user，而是用 `db.get(User, ...)` 重查
@@ -253,15 +320,16 @@ class TestKnowledgeStats:
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
-            mock_ks.get_knowledge_stats = AsyncMock(return_value={
-                "total_documents": 42,
-                "total_chunks": 1500,
-                "document_types": {"pdf": 20, "docx": 22},
-            })
+            mock_ks.get_knowledge_stats = AsyncMock(
+                return_value={
+                    "total_documents": 42,
+                    "total_chunks": 1500,
+                    "document_types": {"pdf": 20, "docx": 22},
+                }
+            )
             try:
                 r = client.get(
-                    "/api/v1/knowledge/stats/1",
-                    headers={"Authorization": "Bearer test_token"}
+                    "/api/v1/knowledge/stats/1", headers={"Authorization": "Bearer test_token"}
                 )
                 assert r.status_code == 200
                 data = r.json()
@@ -281,6 +349,7 @@ class TestKnowledgeSearch:
     def test_search_success(self, client: TestClient):
         """POST /knowledge/search 应返回搜索结果。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
@@ -292,24 +361,26 @@ class TestKnowledgeSearch:
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
-            mock_ks.search_knowledge = AsyncMock(return_value=[
-                {
-                    "id": "chunk-1",
-                    "text": "Annual report content about revenue",
-                    "score": 0.95,
-                    "source": {"filename": "report.pdf"},
-                    "metadata": {"document_id": "doc-1"},
-                    "has_keyword": True,
-                    "has_vector": True,
-                    "rewrite_hits": 2,
-                    "fresh_factor": 1.0,
-                }
-            ])
+            mock_ks.search_knowledge = AsyncMock(
+                return_value=[
+                    {
+                        "id": "chunk-1",
+                        "text": "Annual report content about revenue",
+                        "score": 0.95,
+                        "source": {"filename": "report.pdf"},
+                        "metadata": {"document_id": "doc-1"},
+                        "has_keyword": True,
+                        "has_vector": True,
+                        "rewrite_hits": 2,
+                        "fresh_factor": 1.0,
+                    }
+                ]
+            )
             try:
                 r = client.post(
                     "/api/v1/knowledge/search",
                     json={"query": "annual report", "top_k": 5, "organization_id": 1},
-                    headers={"Authorization": "Bearer test_token"}
+                    headers={"Authorization": "Bearer test_token"},
                 )
                 assert r.status_code == 200
                 data = r.json()
@@ -322,6 +393,7 @@ class TestKnowledgeSearch:
     def test_search_no_results(self, client: TestClient):
         """无匹配结果应返回空列表。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
@@ -338,7 +410,7 @@ class TestKnowledgeSearch:
                 r = client.post(
                     "/api/v1/knowledge/search",
                     json={"query": "nonexistent term", "organization_id": 1},
-                    headers={"Authorization": "Bearer test_token"}
+                    headers={"Authorization": "Bearer test_token"},
                 )
                 assert r.status_code == 200
                 data = r.json()
@@ -351,6 +423,7 @@ class TestKnowledgeSearch:
     def test_search_missing_query(self, client: TestClient):
         """缺少查询参数应返回 422。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         override_func, mock_db = _override_get_db()
@@ -363,9 +436,7 @@ class TestKnowledgeSearch:
 
         try:
             r = client.post(
-                "/api/v1/knowledge/search",
-                json={},
-                headers={"Authorization": "Bearer test_token"}
+                "/api/v1/knowledge/search", json={}, headers={"Authorization": "Bearer test_token"}
             )
             assert r.status_code == 422
         finally:
@@ -373,10 +444,71 @@ class TestKnowledgeSearch:
             app.dependency_overrides.pop(get_current_user, None)
 
 
+class TestKnowledgeSearchModeContract:
+    """issue #225：search_mode 真正生效（送达 service）+ 回显一致 + 非法值 422。"""
+
+    @staticmethod
+    def _post_search(client: TestClient, payload: dict):
+        from app.main import app
+
+        mock_user = _make_mock_user(is_superuser=True)
+        override_func, _mock_db = _override_get_db()
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+        try:
+            with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
+                mock_ks.search_knowledge = AsyncMock(return_value=[])
+                r = client.post(
+                    "/api/v1/knowledge/search",
+                    json=payload,
+                    headers={"Authorization": "Bearer test_token"},
+                )
+            return r, mock_ks
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_forced_mode_reaches_service_and_echoes(self, client: TestClient):
+        """显式 search_mode 必须传到 service（修前被链路丢弃），且回显同一值。"""
+        r, mock_ks = self._post_search(
+            client, {"query": "annual report", "organization_id": 1, "search_mode": "keyword"}
+        )
+        assert r.status_code == 200
+        assert mock_ks.search_knowledge.await_args.kwargs["search_mode"] == "keyword"
+        assert r.json()["search_mode"] == "keyword"
+
+    def test_omitted_mode_runs_auto_and_echoes_effective_mode(self, client: TestClient):
+        """缺省 → 自动路由（service 收到 None）；回显 = 实际生效档位，不再恒为 'hybrid'。"""
+        r, mock_ks = self._post_search(client, {"query": "报销流程", "organization_id": 1})
+        assert r.status_code == 200
+        assert mock_ks.search_knowledge.await_args.kwargs["search_mode"] is None
+        # simple → keyword_only：回显公开模式名 keyword（修前恒回显 hybrid，与生效语义不符）
+        assert r.json()["search_mode"] == "keyword"
+
+        r2, mock_ks2 = self._post_search(
+            client, {"query": "如何提交报销申请？", "organization_id": 1}
+        )
+        assert mock_ks2.search_knowledge.await_args.kwargs["search_mode"] is None
+        assert r2.json()["search_mode"] == "hybrid"  # medium → hybrid
+
+    def test_invalid_mode_value_is_422(self, client: TestClient):
+        """非法值（含前端旧字段值 'semantic'、大写 'VECTOR'）→ 422，不静默降级。"""
+        for bad in ("semantic", "fuzzy", "VECTOR"):
+            r, _ = self._post_search(
+                client, {"query": "x", "organization_id": 1, "search_mode": bad}
+            )
+            assert r.status_code == 422, f"search_mode={bad!r} 必须 422"
+
+
 class TestKnowledgeSuggestions:
     def test_get_suggestions(self, client: TestClient):
         """GET /knowledge/suggestions 应返回建议列表。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         # 必须连 get_db 一起 mock：`permission_required` 依赖会 `await db.get(User, ...)`
@@ -384,6 +516,7 @@ class TestKnowledgeSuggestions:
         # 于是 `db.get` 落回真库、返回 None，请求在依赖阶段就炸了，根本到不了 handler
         # —— 这个用例因此一直红着，且与它想验证的东西无关（issue #83 的 mock 装配类问题）。
         override_db, _mock_db = _override_get_db()
+
         async def _override_user():
             return mock_user
 
@@ -391,13 +524,13 @@ class TestKnowledgeSuggestions:
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
-            mock_ks.get_search_suggestions = AsyncMock(return_value=[
-                "annual report", "annual budget", "annual review"
-            ])
+            mock_ks.get_search_suggestions = AsyncMock(
+                return_value=["annual report", "annual budget", "annual review"]
+            )
             try:
                 r = client.get(
                     "/api/v1/knowledge/suggestions?q=annual&organization_id=1",
-                    headers={"Authorization": "Bearer test_token"}
+                    headers={"Authorization": "Bearer test_token"},
                 )
                 assert r.status_code == 200
                 data = r.json()
@@ -414,6 +547,7 @@ class TestKnowledgeSuggestions:
         校验响应体，缺字段会以 ValidationError 的形式当场暴露。
         """
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         override_db, _mock_db = _override_get_db()
@@ -429,7 +563,7 @@ class TestKnowledgeSuggestions:
             try:
                 r = client.get(
                     "/api/v1/knowledge/suggestions?q=annual&organization_id=1",
-                    headers={"Authorization": "Bearer test_token"}
+                    headers={"Authorization": "Bearer test_token"},
                 )
                 assert r.status_code == 200
                 data = r.json()
@@ -452,6 +586,7 @@ class TestKnowledgeRebuild:
     def test_rebuild_success(self, client: TestClient):
         """POST /knowledge/rebuild/{id} 应提交重建任务。"""
         from app.main import app
+
         mock_user = _make_mock_user(is_superuser=True)
 
         doc = MagicMock()
@@ -485,7 +620,7 @@ class TestKnowledgeRebuild:
                 try:
                     r = client.post(
                         "/api/v1/knowledge/rebuild/doc-1",
-                        headers={"Authorization": "Bearer test_token"}
+                        headers={"Authorization": "Bearer test_token"},
                     )
                     assert r.status_code == 200
                     data = r.json()
@@ -498,3 +633,72 @@ class TestKnowledgeRebuild:
         """未认证重建请求应返回 401/403。"""
         r = client.post("/api/v1/knowledge/rebuild/doc-1")
         assert r.status_code in (401, 403)
+
+
+class TestKnowledgeGraphNodeAttribution:
+    """GET /knowledge/graph —— 真实实体的 type/description 不得被关系目标占位吞掉。
+
+    背景（a8a3d155 写链打通后数据一有就现形）：旧实现的单遍循环里，先被处理的
+    实体先把它的关系目标以 UNKNOWN 占位插入 nodes；等循环走到那个目标自己的
+    实体条目时，又因按名去重被 continue 跳过——真实类型/描述永久丢失（实测
+    56 实体中 13 个被吞）。修复：两遍处理，真实实体先占位，目标解析只补空位。
+    变异点：还原单遍循环 → 本用例红（数据层 type 变成 UNKNOWN）。
+    """
+
+    def test_entity_type_survives_relation_target_prebinding(self, client: TestClient):
+        from app.main import app
+        from app.services.auth_service import auth_service
+        from app.services.graph_rag_service import graph_rag_service
+
+        org = 5
+        graph = graph_rag_service._graph_for(org)
+        graph.clear()
+        hub_key = graph_rag_service._normalize_entity("Hub")
+        layer_key = graph_rag_service._normalize_entity("数据层")
+        graph[hub_key].update(
+            {
+                "entity_name": "Hub",
+                "entity_type": "PRODUCT",
+                "description": "中枢实体",
+                "occurrences": 1,
+            }
+        )
+        graph[hub_key]["relationships"].append({"target": layer_key, "relation": "PART_OF"})
+        graph[layer_key].update(
+            {
+                "entity_name": "数据层",
+                "entity_type": "CONCEPT",
+                "description": "存储层描述",
+                "occurrences": 1,
+            }
+        )
+
+        mock_user = _make_mock_user(is_superuser=True)
+        mock_user.organization_id = org
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_current_user] = _override_user
+        app.dependency_overrides[auth_service.get_current_user] = _override_user
+
+        try:
+            r = client.get(
+                "/api/v1/knowledge/graph",
+                headers={"Authorization": "Bearer test_token"},
+            )
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(auth_service.get_current_user, None)
+            graph.clear()
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        nodes = {n["id"]: n for n in body["nodes"]}
+        assert nodes["数据层"]["type"] == "CONCEPT", f"真实实体类型被关系目标占位吞掉: {nodes}"
+        assert nodes["数据层"]["description"] == "存储层描述"
+        assert nodes["Hub"]["type"] == "PRODUCT"
+        assert any(
+            e["source"] == "Hub" and e["target"] == "数据层" and e["relation"] == "PART_OF"
+            for e in body["edges"]
+        ), "边不得因修复丢失"

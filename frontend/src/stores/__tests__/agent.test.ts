@@ -64,6 +64,27 @@ describe('useAgentStore · SSE 可见性事件落账', () => {
     expect(msg.events[0].content).toBe('retry_action=reset_transport')
   })
 
+  it('warning 落进事件列表（#301 批 D：会话落库失败的唯一可见信号，此前会丢）', () => {
+    const store = seedAssistantMessage()
+    store.processEvent({
+      type: 'warning',
+      content: '回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见',
+    } as any)
+    const msg = store.messages[store.messages.length - 1]
+    expect(msg.events.length).toBe(1)
+    expect(msg.events[0].type).toBe('warning')
+    expect(msg.events[0].content).toContain('会话记录保存失败')
+  })
+
+  it('done(saved=false) 不被丢弃、不影响既有落账（#301 批 D）', () => {
+    const store = seedAssistantMessage()
+    store.processEvent({ type: 'done', content: '', saved: false } as any)
+    const msg = store.messages[store.messages.length - 1]
+    expect(msg.loading).toBe(false)
+    // 无 message_id：不得臆造
+    expect(msg.messageId).toBeUndefined()
+  })
+
   it('未知事件类型不抛错、不影响既有消息', () => {
     const store = seedAssistantMessage()
     const before = { ...store.messages[store.messages.length - 1] }
@@ -72,5 +93,123 @@ describe('useAgentStore · SSE 可见性事件落账', () => {
     expect(msg.runReport).toBeUndefined()
     expect(msg.executionContext).toBeUndefined()
     expect(msg.content).toBe(before.content)
+  })
+})
+
+/**
+ * issue #289 残余（G1/G3/G6/G7）：store 侧归约的钉桩。
+ *
+ * 变异点：删 stores/agent.ts thinking case 的 msg.events.push(event) → G1 用例红；
+ * 删 applyPlanStepUpdate 调用或 utils/agentPlan.ts 中 retry_attempt/plan_step_status
+ * 分支 → 对应用例红。
+ */
+describe('useAgentStore · #289 残余事件归约（thinking 落账 / 计划步骤）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  function seedAssistantMessage() {
+    const store = useAgentStore()
+    store.addMessage({
+      role: 'assistant',
+      content: '',
+      events: [],
+      loading: true,
+      currentTool: '',
+      thinkingText: '',
+      planSteps: [],
+      planId: '',
+      progress: 0,
+    })
+    return store
+  }
+
+  function seedPlanStep(store: ReturnType<typeof useAgentStore>, id = 's1') {
+    store.processEvent({
+      type: 'plan_step',
+      plan_id: 'p1',
+      plan_step_id: id,
+      content: '搜索资料',
+      tool_hint: 'search',
+    } as any)
+  }
+
+  it('G1：thinking 事件落进 msg.events（视图思考类型标签的数据源）', () => {
+    const store = seedAssistantMessage()
+    store.processEvent({ type: 'thinking', content: '先规划任务', thinking_type: 'planning' } as any)
+
+    const msg = store.messages[store.messages.length - 1]
+    expect(msg.thinkingText).toContain('先规划任务')
+    expect(msg.events).toHaveLength(1)
+    expect(msg.events[0].type).toBe('thinking')
+    expect(msg.events[0].thinking_type).toBe('planning')
+  })
+
+  it('G7：plan_step 的语义字段落账到 PlanStep（PlanTree 徽标数据源）', () => {
+    const store = seedAssistantMessage()
+    store.processEvent({
+      type: 'plan_step',
+      plan_id: 'p1',
+      plan_step_id: 's1',
+      content: '删除旧数据',
+      tool_hint: 'delete_docs',
+      parallel_group: 2,
+      risk_level: 'high',
+      retry_strategy: 'skip',
+      fallback_tool: 'web_search',
+    } as any)
+
+    const step = store.planSteps[0]
+    expect(step.parallel_group).toBe(2)
+    expect(step.risk_level).toBe('high')
+    expect(step.retry_strategy).toBe('skip')
+    expect(step.fallback_tool).toBe('web_search')
+  })
+
+  it('G3：tool_error 的 retry_attempt 抬升 step.retry_count（PlanTree 重试徽标数据源）', () => {
+    const store = seedAssistantMessage()
+    seedPlanStep(store)
+    store.processEvent({
+      type: 'tool_error', plan_step_id: 's1', content: '失败', retry_attempt: 2,
+    } as any)
+
+    expect(store.planSteps[0].retry_count).toBe(2)
+    expect(store.planSteps[0].status).toBe('failed')
+  })
+
+  it('G3：thinking/retry_hint 的 retry_attempt 同样归约（重试轮的真实进度）', () => {
+    const store = seedAssistantMessage()
+    seedPlanStep(store)
+    store.processEvent({
+      type: 'thinking', plan_step_id: 's1', content: '重试步骤', thinking_type: 'correction', retry_attempt: 1,
+    } as any)
+    expect(store.planSteps[0].retry_count).toBe(1)
+
+    store.processEvent({
+      type: 'retry_hint', plan_step_id: 's1', content: 'retry_action=reset_transport', retry_attempt: 3,
+    } as any)
+    expect(store.planSteps[0].retry_count).toBe(3)
+  })
+
+  it('G6：plan_step_status 为状态终态权威值（thinking evaluation「步骤完成」）', () => {
+    const store = seedAssistantMessage()
+    seedPlanStep(store)
+    store.processEvent({
+      type: 'thinking',
+      plan_step_id: 's1',
+      content: '✅ 步骤完成: 搜索资料',
+      thinking_type: 'evaluation',
+      plan_step_status: 'completed',
+    } as any)
+
+    expect(store.planSteps[0].status).toBe('completed')
+  })
+
+  it('G3 负例：无 retry_attempt 的事件不改变 retry_count', () => {
+    const store = seedAssistantMessage()
+    seedPlanStep(store)
+    store.processEvent({ type: 'tool_result', plan_step_id: 's1', content: '完成' } as any)
+    expect(store.planSteps[0].retry_count).toBe(0)
+    expect(store.planSteps[0].status).toBe('completed')
   })
 })

@@ -19,6 +19,7 @@ knowledge_processing_jobs，外键均**无 ON DELETE CASCADE**）——每次上
 以及从上传到删除的完整 HTTP 链路（upload → delete，pin 掉 MinIO/Kafka/文档处理/
 ES/Redis 缓存等外部依赖，DB 是唯一真实写入面）。
 """
+
 import os
 import uuid
 
@@ -79,6 +80,7 @@ async def _nullpool_app_sessions(monkeypatch):
     yield
     await eng.dispose()
 
+
 # information_schema：谁引用了 documents（就是 issue #174 用来列清单的那条查询）
 _REFERENCING_TABLES_SQL = text(
     "SELECT kcu.TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE kcu "
@@ -88,31 +90,44 @@ _REFERENCING_TABLES_SQL = text(
 
 
 async def _documents_table_exists(session: AsyncSession) -> bool:
-    return bool((await session.execute(text(
-        "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_schema = DATABASE() AND table_name = 'documents'"
-    ))).scalar())
+    return bool(
+        (
+            await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                    "WHERE table_schema = DATABASE() AND table_name = 'documents'"
+                )
+            )
+        ).scalar()
+    )
 
 
 async def _counts(doc_id: str) -> dict[str, int]:
     """数 4 张表里引用该文档的行数。"""
     async with _Session() as db:
+
         async def n(model):
-            return (await db.execute(
-                select(func.count()).select_from(model).where(model.document_id == doc_id)
-            )).scalar()
+            return (
+                await db.execute(
+                    select(func.count()).select_from(model).where(model.document_id == doc_id)
+                )
+            ).scalar()
 
         return {
-            "documents": (await db.execute(
-                select(func.count()).select_from(Document).where(Document.id == doc_id)
-            )).scalar(),
+            "documents": (
+                await db.execute(
+                    select(func.count()).select_from(Document).where(Document.id == doc_id)
+                )
+            ).scalar(),
             "document_chunks": await n(DocumentChunk),
             "document_tags": await n(DocumentTag),
             "knowledge_processing_jobs": await n(KnowledgeProcessingJob),
         }
 
 
-async def _cleanup_document_graph(doc_id: str, org_id: int, user_id: int, tag_id: str | None = None) -> None:
+async def _cleanup_document_graph(
+    doc_id: str, org_id: int, user_id: int, tag_id: str | None = None
+) -> None:
     """按依赖序兜底清理（测试中途失败也不留残留）。
 
     users 与 organizations 互为外键（user.organization_id / org.owner_id）：
@@ -121,7 +136,9 @@ async def _cleanup_document_graph(doc_id: str, org_id: int, user_id: int, tag_id
     async with _Session() as db:
         await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == doc_id))
         await db.execute(delete(DocumentTag).where(DocumentTag.document_id == doc_id))
-        await db.execute(delete(KnowledgeProcessingJob).where(KnowledgeProcessingJob.document_id == doc_id))
+        await db.execute(
+            delete(KnowledgeProcessingJob).where(KnowledgeProcessingJob.document_id == doc_id)
+        )
         await db.execute(delete(Document).where(Document.id == doc_id))
         if tag_id:
             await db.execute(delete(Tag).where(Tag.id == tag_id))
@@ -174,13 +191,21 @@ async def seeded_document():
         tag = Tag(id=tag_id, name=f"ws174_children_tag_{suffix}", color="#123456")
         db.add_all([doc, tag])
         await db.flush()
-        db.add_all([
-            DocumentChunk(id=str(uuid.uuid4()), document_id=doc_id, chunk_index=0,
-                          chunk_text="content", chunk_length=7),
-            DocumentTag(id=str(uuid.uuid4()), document_id=doc_id, tag_id=tag.id),
-            KnowledgeProcessingJob(document_id=doc_id, organization_id=org.id,
-                                   trigger_type="upload"),
-        ])
+        db.add_all(
+            [
+                DocumentChunk(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    chunk_index=0,
+                    chunk_text="content",
+                    chunk_length=7,
+                ),
+                DocumentTag(id=str(uuid.uuid4()), document_id=doc_id, tag_id=tag.id),
+                KnowledgeProcessingJob(
+                    document_id=doc_id, organization_id=org.id, trigger_type="upload"
+                ),
+            ]
+        )
         await db.commit()
 
     yield {"doc_id": doc_id, "tag_id": tag_id, "org_id": org.id, "user_id": user.id}
@@ -312,6 +337,7 @@ def _pinned_externals(monkeypatch):
     monkeypatch.setattr(processor, "process", _fake_process)
 
     import app.rag.cache as cache_mod
+
     monkeypatch.setattr(cache_mod, "_get_redis", lambda: None)
 
 

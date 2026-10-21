@@ -85,7 +85,7 @@
         </div>
 
         <div
-          class="absolute right-2 opacity-0 group-hover:opacity-100 transition-all duration-200 bg-gradient-to-l from-white via-white to-transparent dark:from-gray-800 dark:via-gray-800 pl-4 py-1"
+          class="absolute right-2 sidebar-conv-actions bg-gradient-to-l from-white via-white to-transparent dark:from-gray-800 dark:via-gray-800 pl-4 py-1"
           v-if="currentConversationId !== conv.id"
         >
           <n-popconfirm @positive-click.stop="$emit('deleteConversation', conv.id)">
@@ -101,7 +101,7 @@
     </div>
 
     <div class="p-4 border-t border-gray-100 dark:border-gray-800 text-xs text-center text-gray-400 dark:text-gray-600">
-      {{ t('chat.version') }}
+      {{ appVersion ? `DocMind v${appVersion}` : 'DocMind' }}
     </div>
   </aside>
 </template>
@@ -110,11 +110,15 @@
 import { useI18n } from 'vue-i18n'
 import type { Conversation } from '@/api/conversation'
 import { format } from 'date-fns'
+import { useAppVersion } from '@/composables/useAppVersion'
 import {
   AddOutline, RefreshOutline, ChatboxOutline, ChatboxEllipsesOutline, TrashOutline
 } from '@vicons/ionicons5'
 
 const { t } = useI18n()
+
+// ISS-2 数字对账：侧栏版本动态读取（后端 APP_VERSION 唯一真源，经 /health）
+const appVersion = useAppVersion()
 
 defineProps<{
   sidebarOpen: boolean
@@ -136,3 +140,28 @@ const formatDate = (dateStr: string) => {
   try { return format(new Date(dateStr), 'MM-dd HH:mm') } catch { return dateStr }
 }
 </script>
+
+<style scoped>
+/* I1 删除入口显隐（键盘 / 触屏可达，鼠标行为不回退，同 ChatMessages T11 模式）：
+   - 默认隐藏；键盘 :has(:focus-visible) 常显（媒体查询之外，任何设备生效）；
+     不用 :focus-within——鼠标点击按钮也会聚焦，移开后操作排会滞留；
+   - hover 显隐只在支持 hover 的设备上生效；
+   - 无 hover 能力的设备（触屏）常显。 */
+.sidebar-conv-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.sidebar-conv-actions:has(:focus-visible) {
+  opacity: 1;
+}
+@media (hover: hover) {
+  .group:hover .sidebar-conv-actions {
+    opacity: 1;
+  }
+}
+@media (hover: none) {
+  .sidebar-conv-actions {
+    opacity: 1;
+  }
+}
+</style>

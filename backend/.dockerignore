@@ -9,7 +9,9 @@ __pycache__/
 .git/
 .gitignore
 .env
+.env.*
 !.env.example
+!.env.docker.example
 logs/
 temp_uploads/
 uploads/
