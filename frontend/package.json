@@ -68,7 +68,7 @@
     "typescript": "^5.3.3",
     "unocss": "^66.10.5",
     "vite": "^8.3.2",
-    "vite-plugin-pwa": "^1.2.0",
+    "vite-plugin-pwa": "^2.0.0",
     "vitest": "^5.0.3",
     "vue-eslint-parser": "^10.3.0",
     "vue-tsc": "^3.3.11",
