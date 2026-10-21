@@ -1,18 +1,18 @@
 <template>
-  <div class="h-full flex flex-col p-6 space-y-6 overflow-hidden bg-transparent">
+  <div class="search-page h-full flex flex-col p-6 space-y-6 overflow-hidden bg-transparent">
     <!-- 顶部标题区域 -->
-    <div class="flex items-center justify-between">
+    <div class="search-header flex items-center justify-between">
       <div>
         <h1
           class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-blue-700 dark:from-blue-400 dark:to-blue-600">
-          {{ t('search.title') }}
+          {{ t('menu.search') }}
         </h1>
         <p class="text-gray-500 dark:text-gray-400 mt-1">
           {{ t('search.subtitle') }}
         </p>
       </div>
       <!-- 搜索统计 (极简展示) -->
-      <div v-if="searchStats" class="flex space-x-4">
+      <div v-if="searchStats" class="search-stats flex space-x-4">
         <div
           class="px-4 py-2 rounded-2xl bg-white/50 dark:bg-gray-800/50 backdrop-blur-md border border-white/20 dark:border-gray-700/30 shadow-sm">
           <span class="text-xs text-gray-400 block uppercase tracking-wider">{{ t('search.totalFiles') }}</span>
@@ -37,7 +37,7 @@
 
         <!-- 搜索按钮 -->
         <button
-          class="ml-2 px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+          class="search-submit ml-2 px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
           :disabled="!searchQuery.trim() || loading" @click="handleSearch">
           <n-spin v-if="loading" size="small" stroke="white" />
           <span>{{ t('search.button') }}</span>
@@ -47,7 +47,7 @@
         <div v-if="suggestions.length > 0"
           class="absolute top-full left-0 right-0 mt-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-2xl border border-white/20 dark:border-gray-800/50 shadow-2xl z-50 overflow-hidden">
           <div v-for="suggestion in suggestions" :key="suggestion"
-            class="px-6 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/30 cursor-pointer transition-colors text-gray-600 dark:text-gray-300 flex items-center space-x-3"
+            class="px-6 py-3 hover:bg-gray-50 dark:hover:bg-gray-900/30 cursor-pointer transition-colors text-gray-600 dark:text-gray-300 flex items-center space-x-3"
             @click="selectSuggestion(suggestion)">
             <n-icon class="text-gray-400"><time-outline /></n-icon>
             <span>{{ suggestion }}</span>
@@ -57,9 +57,9 @@
     </div>
 
     <!-- 筛选与结果主区域 -->
-    <div class="flex-1 flex space-x-6 overflow-hidden">
+    <div class="search-layout flex-1 flex space-x-6 overflow-hidden">
       <!-- 左侧极简筛选栏 -->
-      <div class="w-72 flex flex-col space-y-4 overflow-y-auto pr-2 custom-scrollbar">
+      <div class="search-filter w-72 flex flex-col space-y-4 overflow-y-auto pr-2 custom-scrollbar">
         <div
           class="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-3xl border border-white/20 dark:border-gray-800/30 p-5 space-y-6">
           <!-- 搜索模式 -->
@@ -67,15 +67,22 @@
             <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">{{ t('search.type') }}</h3>
             <n-radio-group v-model:value="searchType" name="searchType" class="w-full">
               <n-space vertical>
+                <n-radio value="auto">{{ t('search.auto') }}</n-radio>
                 <n-radio value="hybrid">{{ t('search.hybrid') }}</n-radio>
-                <n-radio value="semantic">{{ t('search.semantic') }}</n-radio>
+                <n-radio value="vector">{{ t('search.semantic') }}</n-radio>
                 <n-radio value="keyword">{{ t('search.keyword') }}</n-radio>
               </n-space>
             </n-radio-group>
           </div>
 
-          <!-- 文件类型 -->
-          <div class="space-y-3">
+          <!-- T10 空窗补丁（问题清单第二轮 §三.16）：文件类型筛选后端未消费——
+               勾选后前端虽会发送 file_types，但后端 KnowledgeSearchRequest 静默
+               丢弃该字段（api/search.ts 自认「预存在漂移」）→ 筛选静默空转，
+               勾了没反应，误导用户。完整修复（后端 ES filter + 值域映射
+               docx/xlsx→word/excel）待 #225（search_mode 归一）合入后落地。
+               恢复点=本区块：后端落地后删掉下面的 v-if="false" 即恢复渲染；
+               状态（selectedFileTypes / fileTypes）与传参逻辑原样保留、未删改。 -->
+          <div v-if="false" class="space-y-3">
             <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">{{ t('search.fileType') }}</h3>
             <n-checkbox-group v-model:value="selectedFileTypes">
               <div class="grid grid-cols-2 gap-2">
@@ -100,7 +107,7 @@
       </div>
 
       <!-- 右侧结果列表 -->
-      <div class="flex-1 flex flex-col overflow-hidden">
+      <div class="search-results flex-1 flex flex-col overflow-hidden">
         <!-- 结果状态栏 -->
         <div v-if="searchResults.length > 0" class="mb-4 flex items-center justify-between text-sm text-gray-500">
           <span>{{ t('search.results') }}: <span class="font-bold text-blue-600">{{ searchResults.length
@@ -116,33 +123,33 @@
               <div class="flex justify-between items-start mb-3">
                 <div class="flex items-center space-x-3">
                   <div
-                    class="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-900/30 flex items-center justify-center">
-                    <n-icon size="22" class="text-slate-500 dark:text-slate-400">
-                      <component :is="getFileTypeIcon(result.file_type)" />
+                    class="w-10 h-10 rounded-xl bg-gray-50 dark:bg-gray-900/30 flex items-center justify-center">
+                    <n-icon size="22" class="text-gray-500 dark:text-gray-400">
+                      <component :is="getFileTypeIcon(fileTypeOf(result))" />
                     </n-icon>
                   </div>
                   <div>
                     <h3
                       class="font-bold text-gray-800 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                      {{ result.filename }}
+                      {{ filenameOf(result) }}
                     </h3>
-                    <div class="flex items-center space-x-3 text-xs text-gray-400">
-                      <span>{{ formatFileSize(result.file_size) }}</span>
-                      <span>•</span>
-                      <span>{{ formatDate(result.upload_time) }}</span>
-                    </div>
+                    <!-- P1-3：大小/日期不可推导（真实响应无对应字段）→ 不渲染；
+                         原先 formatFileSize(undefined)→"NaN undefined" /
+                         formatDate(undefined)→"Invalid Date" 畸形显示随之消除 -->
                   </div>
                 </div>
                 <div class="flex items-center space-x-2">
-                  <n-tag :bordered="false" type="success" size="small" round
+                  <!-- issue #185：只展示重排绝对分；无重排分时不展示任何分数，
+                       列表顺序即排序序位——不再把 min-max 排序分 ×100 当「相关度 %」 -->
+                  <n-tag v-if="rerankScoreOf(result)" :bordered="false" type="success" size="small" round
                     class="bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600">
-                    {{ (result.relevance_score * 100).toFixed(1) }}% {{ t('search.relevanceScore') }}
+                    {{ t('search.rerankScore', { score: rerankScoreOf(result) }) }}
                   </n-tag>
                 </div>
               </div>
 
               <div class="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed mb-3">
-                {{ result.content }}
+                {{ contentOf(result) }}
               </div>
 
               <div class="flex items-center justify-between mt-4 pt-4 border-t border-gray-100 dark:border-gray-800/50">
@@ -157,6 +164,22 @@
                 </n-button>
               </div>
             </div>
+          </div>
+
+          <!-- 失败态（E14/D2）：独立于「无结果」，含重试；失败时旧结果已清空，
+               不把上一次的结果冒充本次结果，也不把失败伪装成空结果 -->
+          <div v-else-if="searchError && !loading"
+            class="search-error h-full flex flex-col items-center justify-center text-center p-12">
+            <div
+              class="w-24 h-24 bg-red-50 dark:bg-red-900/20 rounded-[2.5rem] flex items-center justify-center mb-6">
+              <n-icon size="48" class="text-red-400"><AlertCircleOutline /></n-icon>
+            </div>
+            <h3 class="text-xl font-bold text-gray-700 dark:text-gray-200 mb-2">{{ t('search.searchFailed') }}</h3>
+            <p class="search-error-msg text-gray-500 max-w-md mb-6">{{ searchError }}</p>
+            <n-button v-if="currentOrgId" class="search-retry" type="primary" round @click="handleSearch">
+              <template #icon><n-icon><RefreshOutline /></n-icon></template>
+              {{ t('common.retry') }}
+            </n-button>
           </div>
 
           <!-- 无结果/初始状态 -->
@@ -183,26 +206,18 @@
 
     <!-- 结果详情模态框 (现代风格) -->
     <n-modal v-model:show="showDetailModal" preset="card" style="width: min(800px, 90vw); border-radius: 2rem;"
-      class="backdrop-blur-2xl bg-white/80 dark:bg-gray-900/80" :title="selectedResult?.filename">
+      class="backdrop-blur-2xl bg-white/80 dark:bg-gray-900/80" :title="selectedResult ? filenameOf(selectedResult) : ''">
       <div v-if="selectedResult" class="space-y-6 p-2">
-        <div class="grid grid-cols-4 gap-4">
+        <!-- P1-3/issue #185：仅保留可推导的两个信息格（类型←文件名、
+             重排分←relevance_score）；大小/日期真实响应无对应字段（不可推导）→ 不渲染 -->
+        <div class="grid grid-cols-2 gap-4">
           <div class="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50">
             <span class="text-xs text-gray-400 block mb-1">{{ t('search.fileType') }}</span>
-            <span class="font-bold text-gray-700 dark:text-gray-200">{{ selectedResult.file_type.toUpperCase() }}</span>
+            <span class="font-bold text-gray-700 dark:text-gray-200">{{ fileTypeOf(selectedResult).toUpperCase() || '—' }}</span>
           </div>
           <div class="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50">
-            <span class="text-xs text-gray-400 block mb-1">{{ t('search.fileSize') }}</span>
-            <span class="font-bold text-gray-700 dark:text-gray-200">{{ formatFileSize(selectedResult.file_size)
-            }}</span>
-          </div>
-          <div class="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50">
-            <span class="text-xs text-gray-400 block mb-1">匹配度</span>
-            <span class="font-bold text-emerald-600">{{ (selectedResult.relevance_score * 100).toFixed(1) }}%</span>
-          </div>
-          <div class="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50">
-            <span class="text-xs text-gray-400 block mb-1">日期</span>
-            <span class="font-bold text-gray-700 dark:text-gray-200">{{ formatDate(selectedResult.upload_time).split('')[0]
-            }}</span>
+            <span class="text-xs text-gray-400 block mb-1">{{ t('search.rerankScoreLabel') }}</span>
+            <span class="font-bold text-emerald-600">{{ rerankScoreOf(selectedResult) ?? '—' }}</span>
           </div>
         </div>
 
@@ -210,7 +225,7 @@
           <h4 class="text-sm font-bold text-gray-400 uppercase tracking-widest">{{ t('search.fileContent') }}</h4>
           <div
             class="p-6 rounded-3xl bg-gray-50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 leading-loose whitespace-pre-wrap max-h-96 overflow-y-auto custom-scrollbar border border-gray-100 dark:border-gray-700/30">
-            {{ selectedResult.content }}
+            {{ contentOf(selectedResult) }}
           </div>
         </div>
 
@@ -230,13 +245,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useDedupedMessage } from '@/utils/message'
 import { NIcon, NSpin, NRadioGroup, NRadio, NSpace, NCheckboxGroup, NCheckbox, NSelect, NTag, NButton, NModal } from 'naive-ui'
-import { SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline, SparklesOutline, DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline } from '@vicons/ionicons5'
-import { searchKnowledge, getSearchSuggestions, getSearchStats } from '@/api/search'
+import { SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline, SparklesOutline, DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline, AlertCircleOutline, RefreshOutline } from '@vicons/ionicons5'
+import { searchKnowledge, getSearchSuggestions, getSearchStats, buildSearchPayload } from '@/api/search'
 import type { SearchResult, SearchStats } from '@/api/search'
+import { getErrorMessage } from '@/utils/apiError'
 import { debounce } from 'lodash-es'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
@@ -244,13 +260,16 @@ import { useUserStore } from '@/stores/user'
 const { t } = useI18n()
 const userStore = useUserStore()
 const router = useRouter()
+const route = useRoute()
 const message = useDedupedMessage()
 
 // 搜索状态
+// issue #225：searchType 取值与后端 search_mode 同语义（vector 即后端"语义搜索"），
+// 'auto' = 不发送该字段（走后端自动路由，缺省行为与修复前一致）。
 const searchQuery = ref('')
-const searchType = ref<'semantic' | 'keyword' | 'hybrid'>('hybrid')
+const searchType = ref<'auto' | 'vector' | 'keyword' | 'hybrid'>('auto')
 const selectedFileTypes = ref<string[]>([])
-const sortBy = ref<'relevance' | 'date' | 'name'>('relevance')
+const sortBy = ref<'relevance' | 'name'>('relevance')
 
 // 结果状态
 const searchResults = ref<SearchResult[]>([])
@@ -260,12 +279,16 @@ const selectedResult = ref<SearchResult | null>(null)
 const showDetailModal = ref(false)
 const loading = ref(false)
 const hasSearched = ref(false)
+// E14/D2：失败态独立于「无结果」——null = 无失败；非空 = 展示错误文案与重试入口
+const searchError = ref<string | null>(null)
 
-const currentOrgId = computed(() => userStore.userInfo?.organizations?.[0]?.id)
+// P1 修复：原取值 organizations[0].id 是成员列表首项，多组织用户下未必是
+// 「当前组织」。统一改用 user store 的 currentOrgId 口径（当前组织
+// currentOrganizationId → user.organization_id 兜底）。
+const currentOrgId = computed(() => userStore.currentOrgId)
 
 const sortOptions = [
   { label: t('search.relevance'), value: 'relevance' },
-  { label: t('search.date'), value: 'date' },
   { label: t('search.name'), value: 'name' }
 ]
 
@@ -277,42 +300,81 @@ const fileTypes = [
   { value: 'md', label: 'Markdown' }
 ]
 
+// ── P1-3 修复（UI 复验 round2）：真实响应字段访问器 ─────────────────────
+// 后端 results 项真实 shape = {id, text, score, metadata, source, ...}（见
+// api/search.ts SearchResult）；旧模板读的 file_type/filename/content/
+// file_size/upload_time/relevance_score 平铺字段不存在——首个渲染即崩
+// （getFileTypeIcon 对 undefined 调 toLowerCase），即便不崩也会显示
+// "NaN undefined" / "Invalid Date"。展示层读值一律收敛到以下访问器：能
+// 推导的推导（类型←文件名扩展名、得分←score、正文←text、文件名←source/
+// metadata），推导不出的（大小/日期）不渲染；兜底不允许 undefined 进入
+// toLowerCase / 数值格式化 / Date。
+const filenameOf = (r: SearchResult): string => r.source?.filename ?? r.metadata?.filename ?? ''
+const contentOf = (r: SearchResult): string => r.text ?? r.metadata?.snippet ?? ''
+// issue #185：诚实分数口径——score 是相对排序分（只用于排序），界面只展示
+// 重排绝对分（后端 relevance_score）；无重排分时返回 null，不伪造百分比相关度。
+const rerankScoreOf = (r: SearchResult): string | null =>
+  typeof r.relevance_score === 'number' ? r.relevance_score.toFixed(2) : null
+const fileTypeOf = (r: SearchResult): string => {
+  const name = filenameOf(r)
+  const dot = name.lastIndexOf('.')
+  return dot > -1 ? name.slice(dot + 1).toLowerCase() : ''
+}
+
 const sortedResults = computed(() => {
   const results = [...searchResults.value]
-  if (sortBy.value === 'relevance') return results.sort((a, b) => b.relevance_score - a.relevance_score)
-  if (sortBy.value === 'date') return results.sort((a, b) => new Date(b.upload_time).getTime() - new Date(a.upload_time).getTime())
-  if (sortBy.value === 'name') return results.sort((a, b) => a.filename.localeCompare(b.filename))
+  // issue #185：relevance 档不在前端重排——后端已按重排绝对分（或融合序）
+  // 返回；再用相对排序分 score 重排会打乱 rerank 结果，且两套分数尺度混用。
+  if (sortBy.value === 'relevance') return results
+  if (sortBy.value === 'name') return results.sort((a, b) => filenameOf(a).localeCompare(filenameOf(b)))
   return results
 })
 
-const getFileTypeIcon = (type: string) => {
+const getFileTypeIcon = (type?: string) => {
   const map: Record<string, unknown> = { pdf: DocumentOutline, docx: DocumentTextOutline, xlsx: GridOutline, txt: DocumentTextOutline, md: NewspaperOutline }
-  return map[type.toLowerCase()] || DocumentOutline
+  // P1-3：空/未知一律 DocumentOutline 兜底，永不 toLowerCase undefined
+  return map[(type ?? '').toLowerCase()] || DocumentOutline
 }
 
-const formatFileSize = (bytes: number) => {
-  if (bytes === 0) return '0 B'
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + ['B', 'KB', 'MB', 'GB'][i]
-}
-
-const formatDate = (ds: string) => new Date(ds).toLocaleString('zh-CN')
+// 请求序号：并发搜索只认最后一次 —— 先发的慢响应迟到返回时不得覆盖后发的
+// 结果/失败态（E14/D2：旧结果不得冒充本次结果）。
+let searchSeq = 0
 
 const handleSearch = async () => {
   if (!searchQuery.value.trim()) return
-  loading.value = true
+  const seq = ++searchSeq
+  const orgId = currentOrgId.value
+  searchError.value = null
   hasSearched.value = true
-  try {
-    searchResults.value = await searchKnowledge({
-      query: searchQuery.value,
-      search_type: searchType.value,
-      file_types: selectedFileTypes.value.length ? selectedFileTypes.value : undefined,
-      limit: 50
-    })
-  } catch (e) {
-    message.error(t('search.searchFailed') || t('common.error'))
-  } finally {
+  if (!orgId) {
+    // organization_id 为后端 schema 必填；无当前组织时请求必 422 ——
+    // 明确失败态（不把校验失败伪装成「未找到相关结果」，也不保留旧结果）。
+    // 文案必须如实：这是组织上下文缺失，不是网络故障（重试前请先切换/加入组织）。
+    searchResults.value = []
+    searchError.value = t('search.noOrganization')
     loading.value = false
+    return
+  }
+  loading.value = true
+  try {
+    const results = await searchKnowledge(buildSearchPayload({
+      query: searchQuery.value,
+      organizationId: orgId,
+      // 'auto'（自动路由）时 buildSearchPayload 不发送 search_mode ——
+      // 与后端"缺省=自动"同语义（issue #225）
+      searchMode: searchType.value,
+      fileTypes: selectedFileTypes.value
+    }))
+    if (seq !== searchSeq) return
+    searchResults.value = results
+  } catch (err) {
+    if (seq !== searchSeq) return
+    // E14/D2：失败 ≠ 空结果。清空上一次结果（不冒充本次结果），置独立错误态；
+    // 文案统一走 getErrorMessage（5xx/传输层回退 i18n，axios 黑话不上屏）。
+    searchResults.value = []
+    searchError.value = getErrorMessage(err, t('search.searchErrorDesc'))
+  } finally {
+    if (seq === searchSeq) loading.value = false
   }
 }
 
@@ -324,25 +386,54 @@ const handleInputChange = debounce(async () => {
 const selectSuggestion = (s: string) => { searchQuery.value = s; suggestions.value = []; handleSearch() }
 
 const clearFilters = () => {
-  searchType.value = 'hybrid'
+  searchType.value = 'auto'
   selectedFileTypes.value = []
   sortBy.value = 'relevance'
 }
 
 const showResultDetail = (r: SearchResult) => { selectedResult.value = r; showDetailModal.value = true }
 
+// E11-① 跨页上下文：q = 文件名 + 用户当前搜索词组句（i18n 四语），context =
+// 所点结果正文片段（截断）。聊天页读取后预填输入框（见 chat/index.vue）——
+// 修前只传占位串 `关于文件 "x"...` + context_id（ES 内部 id，聊天页无法消费），
+// 跨页后「问哪个文件、问什么」全部丢失。
 const askAI = (r: SearchResult) => {
-  router.push({ name: 'Chat', query: { q: `关于文件 "${r.filename}"...`, context_id: r.id } })
+  const filename = filenameOf(r)
+  const question = searchQuery.value.trim()
+  const q = filename
+    ? question
+      ? t('search.askAIQuestion', { filename, query: question })
+      : t('search.askAIQuestionGeneric', { filename })
+    : question
+  const query: Record<string, string> = {}
+  if (q) query.q = q
+  const snippet = contentOf(r).trim()
+  if (snippet) query.context = snippet.slice(0, 300)
+  router.push({ name: 'Chat', query })
 }
 
 const copyResultContent = async (r: SearchResult | null) => {
   if (!r) return
-  await navigator.clipboard.writeText(r.content)
+  await navigator.clipboard.writeText(contentOf(r))
   message.success(t('common.copySuccess'))
 }
 
+// W2-T7 项 3：顶栏搜索/Ctrl+K/深链 `?q=` 回填并自动发起搜索（第三轮终检 §2.4：
+// 布局 handleGlobalSearch 确实 push 了 { name:'Search', query:{ q } }，但本页此前
+// 不读 route.query —— 搜索词直接丢）。同页再次提交（q 变化）经 watch 重跑。
+const applyQueryFromRoute = () => {
+  const q = route.query.q
+  if (typeof q !== 'string' || !q.trim()) return
+  if (q === searchQuery.value && hasSearched.value) return
+  searchQuery.value = q
+  handleSearch()
+}
+
+watch(() => route.query.q, applyQueryFromRoute)
+
 onMounted(async () => {
   if (currentOrgId.value) searchStats.value = await getSearchStats(currentOrgId.value)
+  applyQueryFromRoute()
 })
 </script>
 
@@ -355,5 +446,28 @@ onMounted(async () => {
   line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* H1：常见宽度断点。旧实现零 @media，w-72 筛选栏在窄屏吃掉大半屏。 */
+@media (max-width: 1023px) {
+  .search-filter { width: 15rem; }
+}
+
+@media (max-width: 767px) {
+  .search-page { padding: 1rem; }
+  .search-header { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+  .search-stats { flex-wrap: wrap; }
+  .search-submit { padding-left: 1rem; padding-right: 1rem; }
+  .search-layout {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .search-filter {
+    width: 100%;
+    flex: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+  .search-results { min-height: 0; }
 }
 </style>

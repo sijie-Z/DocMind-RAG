@@ -9,7 +9,7 @@ import logging
 from elasticsearch import AsyncElasticsearch, NotFoundError
 from elasticsearch.helpers import async_bulk
 
-from app.core.config import settings
+from app.core.config import resolve_embedding_model, settings
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +51,15 @@ class _ESHolder:
                 request_timeout=5,
             )
             info = await self._client.info()
-            logger.info(f"Elasticsearch connected, version: {info.get('version', {}).get('number', 'unknown')}")
+            logger.info(
+                f"Elasticsearch connected, version: {info.get('version', {}).get('number', 'unknown')}"
+            )
 
             # Detect IK analyzer at init time — store on holder, not settings
             try:
-                await self._client.indices.analyze(body={"analyzer": "ik_smart", "text": "你好世界"})
+                await self._client.indices.analyze(
+                    body={"analyzer": "ik_smart", "text": "你好世界"}
+                )
                 logger.info("IK analyzer detected — using ik_smart/ik_max_word")
                 self.es_analyzer = "ik_smart"
                 self.es_search_analyzer = "ik_max_word"
@@ -151,6 +155,12 @@ def _knowledge_index_mapping() -> dict:
     search_analyzer = _holder.es_search_analyzer
     return {
         "mappings": {
+            # issue #196：把 embedding 模型写进索引元数据。维度相同但模型不同的
+            # 向量空间同样不可混用；没有这条元数据，换模型后检索会静默失真。
+            "_meta": {
+                "embedding_model": resolve_embedding_model(),
+                "vector_dimension": settings.VECTOR_DIMENSION,
+            },
             "properties": {
                 "content": {
                     "type": "text",
@@ -165,6 +175,14 @@ def _knowledge_index_mapping() -> dict:
                 "chunk_id": {"type": "keyword"},
                 "chunk_index": {"type": "integer"},
                 "section_title": {"type": "text"},
+                # #197：PDF 页码提升为顶层整型字段（可检索/可按页过滤）；
+                # 非 PDF 格式写入 None（ES 视为缺省，不占索引值）。
+                "page_number": {"type": "integer"},
+                # #188：结构化条款字段（doc_processor 从定义位抽取后写入顶层）。
+                # clause_no 为整型数组：一个 chunk 可定义多条（数组字段合法）；
+                # section_no 为 X.Y 章节编号（keyword，精确 term 查询用）。
+                "clause_no": {"type": "integer"},
+                "section_no": {"type": "keyword"},
                 "document_id": {"type": "keyword"},
                 "filename": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
                 "file_type": {"type": "keyword"},
@@ -181,7 +199,7 @@ def _knowledge_index_mapping() -> dict:
                     "similarity": "cosine",
                 },
                 "metadata": {"type": "object", "enabled": False},
-            }
+            },
         },
         # 安全修复：副本数由配置控制（生产建议 ≥1，避免节点故障丢数据）
         "settings": {
@@ -225,11 +243,23 @@ async def _create_index_if_not_exists(client: AsyncElasticsearch):
     if not exists:
         logger.info(f"Creating index: {index_name}")
         mapping = _knowledge_index_mapping()
-        await client.indices.create(
-            index=index_name, mappings=mapping["mappings"], settings=mapping["settings"]
-        )
-        logger.info("Index created")
-        return
+        try:
+            await client.indices.create(
+                index=index_name, mappings=mapping["mappings"], settings=mapping["settings"]
+            )
+        except Exception as e:
+            # 多副本首次启动竞态：另一个进程刚建好同名索引。这不是配置错误，
+            # 不能让 index_error 闩锁把本进程的检索永久拒掉——改走已存在校验。
+            if "resource_already_exists" not in str(e):
+                raise
+            logger.warning(
+                "索引 %s 并发创建竞态（resource_already_exists），改走已存在校验",
+                index_name,
+            )
+        else:
+            logger.info("Index created")
+            _holder.index_error = None
+            return
 
     mapping = await client.indices.get_mapping(index=index_name)
     props = mapping.get(index_name, {}).get("mappings", {}).get("properties", {})
@@ -254,7 +284,51 @@ async def _create_index_if_not_exists(client: AsyncElasticsearch):
             f"recreate_knowledge_index(confirm=True)，**并重新索引全部文档**。"
         )
 
+    # issue #196：模型一致性——维度相同不代表向量空间相同。
+    # 索引 _meta 记录了建索引时的模型；与当前解析出的模型不一致时拒绝使用该索引
+    # （绝不自动重建：删除必须由人显式发起，见 recreate_knowledge_index）。
+    index_meta = mapping.get(index_name, {}).get("mappings", {}).get("_meta") or {}
+    index_model = index_meta.get("embedding_model")
+    current_model = resolve_embedding_model()
+    if index_model is None:
+        # 旧索引没有模型元数据：无法证明一致，也不能凭空判定不一致。
+        # 显式告警，让「索引可能建于另一个模型」这件事可被发现。
+        logger.warning(
+            f"索引 {index_name} 未记录 embedding 模型（旧索引），"
+            f"无法验证与当前模型 {current_model!r} 的一致性。"
+            f"若曾更换 embedding 模型，请重建索引并重新索引全部文档"
+            f"（recreate_knowledge_index + scripts/reconcile_knowledge_index.py --reindex）。"
+        )
+    elif index_model != current_model:
+        doc_count = await _count_index_docs(client, index_name)
+        raise IndexConfigError(
+            f"embedding 模型不匹配：索引 {index_name} 建于模型 {index_model!r}，"
+            f"当前配置解析为 {current_model!r}。不同模型的向量空间不可混用"
+            f"（即使维度相同，检索结果也会失真）。索引现有 {doc_count} 篇文档，"
+            f"**不自动重建**。处理方式二选一："
+            f"① 把 embedding 配置改回 {index_model!r} —— 不动数据，立刻恢复；"
+            f"② 确认可以丢弃这 {doc_count} 篇索引后，显式调用 "
+            f"recreate_knowledge_index(confirm=True)，并运行 "
+            f"scripts/reconcile_knowledge_index.py --reindex 重新索引全部文档。"
+        )
+
+    # 校验通过：闩锁反映「最近一次校验结果」——此前的瞬时错误/旧配置错误应被解除，
+    # 否则查询侧 gate 会把一次启动抖动放大成永久拒检（issue #196 评审）。
+    _holder.index_error = None
     logger.info(f"Index exists with matching dims: {index_name} (dims={current_dims})")
+
+    # #188：结构化条款字段是后加字段——旧索引不会自动拥有它们。缺字段时不阻断
+    # （写入照旧、查询侧精确腿自然无命中），但必须给出可执行的迁移提示，
+    # 否则「条号精确检索没效果」会表现成沉默的质量问题。
+    missing_structured = [f for f in ("clause_no", "section_no") if f not in props]
+    if missing_structured:
+        logger.warning(
+            "索引 %s 缺少结构化条款字段 %s —— 条号/章节精确检索腿不会生效。"
+            "迁移方式：确认可重建后调用 recreate_knowledge_index(confirm=True)，"
+            "并重新索引全部文档（文档处理链会写入这些字段）。",
+            index_name,
+            missing_structured,
+        )
 
 
 async def create_index_if_not_exists():
@@ -264,7 +338,13 @@ async def create_index_if_not_exists():
     调用方应捕获它并如实上报，不要吞掉。
     """
     client = await get_elasticsearch()
-    await _create_index_if_not_exists(client)
+    try:
+        await _create_index_if_not_exists(client)
+    except IndexConfigError as e:
+        # 写路径上的漂移也要让查询侧感知：pipeline 的检索 gate 读这个闩锁，
+        # 避免「写入被拒、查询仍用新模型撞旧索引」（issue #196）。
+        _holder.index_error = str(e)
+        raise
 
 
 def get_index_error() -> str | None:
@@ -345,9 +425,7 @@ class ElasticsearchTools:
     @staticmethod
     async def update_document(doc_id: str, document: dict):
         client = await get_elasticsearch()
-        return await client.update(
-            index=settings.ELASTICSEARCH_INDEX_NAME, id=doc_id, doc=document
-        )
+        return await client.update(index=settings.ELASTICSEARCH_INDEX_NAME, id=doc_id, doc=document)
 
     @staticmethod
     async def delete_document(doc_id: str):
@@ -362,8 +440,15 @@ class ElasticsearchTools:
             "query": query.get("query", {"match_all": {}}),
         }
         for key in [
-            "size", "from", "sort", "_source", "highlight",
-            "min_score", "aggs", "post_filter", "runtime_mappings",
+            "size",
+            "from",
+            "sort",
+            "_source",
+            "highlight",
+            "min_score",
+            "aggs",
+            "post_filter",
+            "runtime_mappings",
         ]:
             if key in query:
                 search_params[key] = query[key]

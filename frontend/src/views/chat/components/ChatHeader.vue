@@ -27,6 +27,8 @@
               <n-button text size="tiny" @click="$emit('unbind')" class="ml-2 hover:text-white">{{ t('chat.unbindBtn') }}</n-button>
             </n-tag>
           </div>
+          <!-- E14/P2：B3 后已无 systemPrompt 通道，「当前模板」徽标（宣称已生效）
+               与实际不符，已移除；提示词「应用到对话」改为填入输入框。 -->
         </div>
       </div>
     </div>

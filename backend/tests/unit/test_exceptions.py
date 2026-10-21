@@ -1,4 +1,5 @@
 """Tests for the unified exception hierarchy."""
+
 from app.exceptions import (
     AccountLockedError,
     AppError,

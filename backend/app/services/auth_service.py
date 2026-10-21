@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 认证服务
+DocMind AI知识库系统 - 认证服务
 """
 
 import logging
@@ -19,13 +19,14 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import RedisTools
 from app.exceptions import AccountLockedError, ServiceUnavailableError
+from app.models.organization import user_organization
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
 # ── 登录暴力破解防护 ─────────────────────────────────────────────
-MAX_LOGIN_FAILURES = 5          # 连续失败次数阈值
-LOGIN_LOCKOUT_SECONDS = 900     # 锁定窗口（15 分钟）
+MAX_LOGIN_FAILURES = 5  # 连续失败次数阈值
+LOGIN_LOCKOUT_SECONDS = 900  # 锁定窗口（15 分钟）
 # 预计算一个 dummy bcrypt 哈希：用户不存在时也执行一次真实 bcrypt 校验，
 # 消除"用户不存在 vs 密码错误"的时序差异，防止用户枚举。
 _DUMMY_HASH = bcrypt.hashpw(b"dummy-password-for-timing", bcrypt.gensalt()).decode("utf-8")
@@ -73,12 +74,14 @@ class AuthService:
             expire = datetime.now(UTC) + expires_delta
         else:
             expire = datetime.now(UTC) + timedelta(minutes=self.access_token_expire_minutes)
-        to_encode.update({
-            "exp": expire,
-            "type": "access",
-            "iat": datetime.now(UTC),
-            "jti": uuid.uuid4().hex,
-        })
+        to_encode.update(
+            {
+                "exp": expire,
+                "type": "access",
+                "iat": datetime.now(UTC),
+                "jti": uuid.uuid4().hex,
+            }
+        )
         return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
 
     def create_refresh_token(self, data: dict, expires_delta: timedelta | None = None) -> str:
@@ -88,12 +91,14 @@ class AuthService:
             expire = datetime.now(UTC) + expires_delta
         else:
             expire = datetime.now(UTC) + timedelta(minutes=self.refresh_token_expire_minutes)
-        to_encode.update({
-            "exp": expire,
-            "type": "refresh",
-            "iat": datetime.now(UTC),
-            "jti": uuid.uuid4().hex,
-        })
+        to_encode.update(
+            {
+                "exp": expire,
+                "type": "refresh",
+                "iat": datetime.now(UTC),
+                "jti": uuid.uuid4().hex,
+            }
+        )
         return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
 
     def verify_token(self, token: str) -> dict[str, Any] | None:
@@ -113,7 +118,7 @@ class AuthService:
     async def get_current_user(
         self,
         credentials: HTTPAuthorizationCredentials = Depends(security),
-        db: AsyncSession = Depends(get_db)
+        db: AsyncSession = Depends(get_db),
     ) -> User:
         """获取当前用户"""
         token = credentials.credentials
@@ -179,7 +184,30 @@ class AuthService:
 
         # 将JWT中的权限信息添加到用户对象
         user.token_role = payload.get("role")
-        user.token_organization_id = payload.get("organization_id")
+        token_org_id = payload.get("organization_id")
+
+        # A2 P0（租户边界）：token 中的 organization_id 只是**回退值**（core/security.py
+        # 的 get_user_org_id 在用户主组织为空时使用它）。回退必须回源成员表校验：
+        # 用户被移出组织后主组织字段清空、成员关系删除，旧 token 里的组织 claim
+        # 立即失效（403），不等待 token 过期。主组织非空时以 DB 为准，不依赖成员表
+        # （历史用户未必都有 user_organization 行，避免过度收紧）。
+        if token_org_id is not None and user.organization_id is None:
+            member_result = await db.execute(
+                select(user_organization.c.user_id).where(
+                    user_organization.c.user_id == user.id,
+                    user_organization.c.organization_id == token_org_id,
+                )
+            )
+            if member_result.first() is None:
+                logger.warning(
+                    f"token_org_membership_missing: 用户 {user_id} 的令牌组织 "
+                    f"{token_org_id} 已无成员关系，拒绝访问"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="您已不在该组织中，请重新登录",
+                )
+        user.token_organization_id = token_org_id
 
         return user
 
@@ -187,6 +215,7 @@ class AuthService:
         """检查登录失败锁定状态；Redis 不可用时跳过（全局限流仍在）。"""
         try:
             from app.core.redis import redis_client
+
             if not redis_client:
                 return
             key = f"login:fail:{username}"
@@ -204,6 +233,7 @@ class AuthService:
         """记录一次登录失败；达到阈值后抛出 AccountLockedError。"""
         try:
             from app.core.redis import redis_client
+
             if not redis_client:
                 return
             key = f"login:fail:{username}"
@@ -223,12 +253,15 @@ class AuthService:
         """登录成功后清除失败计数。"""
         try:
             from app.core.redis import redis_client
+
             if redis_client:
                 await redis_client.delete(f"login:fail:{username}")
         except Exception as e:
             logger.warning(f"Clear login failures failed (skip): {e}")
 
-    async def authenticate_user(self, db: AsyncSession, username: str, password: str) -> User | None:
+    async def authenticate_user(
+        self, db: AsyncSession, username: str, password: str
+    ) -> User | None:
         """验证用户凭据（含失败锁定与时序侧信道防护）"""
         try:
             # 安全加固：失败锁定检查
@@ -288,19 +321,25 @@ class AuthService:
 
     def require_role(self, required_role: str) -> Callable[..., Any]:
         """
-        RBAC角色权限检查装饰器
-        
-        Args:
-            required_role: 需要的角色 ('admin', 'user')
-            
-        Returns:
-            依赖函数，用于FastAPI的Depends
+        RBAC角色权限检查装饰器（遗留 API）。
+
+        W0-1（ADR-001 D3）：``admin`` 不再映射到 ``users.role`` —— 平台管理员
+        只认显式 ``is_superuser``；组织管理员应使用 ``core.security`` 的
+        ``require_org_admin``（per-org 组织角色）。保留本方法仅为兼容既有
+        调用方与测试，不得再用它构建新的管理员门禁。
         """
+
         async def role_checker(current_user: User = Depends(self.get_current_user)):
-            if current_user.role != required_role:
+            if required_role == "admin":
+                if not bool(getattr(current_user, "is_superuser", False)):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="需要平台管理员权限",
+                    )
+                return current_user
+            if (current_user.role or "") != required_role:
                 raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"需要{required_role}权限"
+                    status_code=status.HTTP_403_FORBIDDEN, detail=f"需要{required_role}权限"
                 )
             return current_user
 
@@ -318,8 +357,8 @@ class AuthService:
         """哈希密码"""
         try:
             salt = bcrypt.gensalt()
-            hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-            return hashed.decode('utf-8')
+            hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
+            return hashed.decode("utf-8")
         except Exception as e:
             logger.error(f"密码哈希失败: {str(e)}")
             raise
@@ -423,7 +462,7 @@ class AuthService:
         password: str,
         full_name: str | None = None,
         organization_id: int | None = None,
-        role: str = "user"
+        role: str = "user",
     ) -> User:
         """创建用户 — 不负责 commit，由调用方管理事务"""
         hashed_password = self.hash_password(password)
@@ -435,7 +474,7 @@ class AuthService:
             full_name=full_name,
             organization_id=organization_id,
             role=role,
-            is_active=True
+            is_active=True,
         )
 
         db.add(user)
@@ -452,7 +491,7 @@ class AuthService:
         username: str | None = None,
         email: str | None = None,
         full_name: str | None = None,
-        organization_id: int | None = None
+        organization_id: int | None = None,
     ) -> User:
         """更新用户信息 — 不负责 commit，由调用方管理事务"""
         result = await db.execute(select(User).where(User.id == user_id))
@@ -495,6 +534,7 @@ class AuthService:
 
         logger.info(f"用户密码更新成功: {user.username}")
         return user
+
 
 # 👇👇👇 关键：创建单例实例
 auth_service = AuthService()

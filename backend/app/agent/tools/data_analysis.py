@@ -38,7 +38,9 @@ async def analyze_data(data: str, **_: Any) -> str | ToolResult:
         )
 
     if not isinstance(values, list) or not values:
-        return ToolResult.fail(code="validation_error", message="Please provide a non-empty JSON array.")
+        return ToolResult.fail(
+            code="validation_error", message="Please provide a non-empty JSON array."
+        )
 
     # Handle [label, value] pairs
     if isinstance(values[0], list) and len(values[0]) == 2:
@@ -67,8 +69,8 @@ async def analyze_data(data: str, **_: Any) -> str | ToolResult:
         mean = statistics.mean(numbers)
         median = statistics.median(numbers)
         sorted_nums = sorted(numbers)
-        q1 = statistics.median(sorted_nums[:n // 2])
-        q3 = statistics.median(sorted_nums[(n + 1) // 2:])
+        q1 = statistics.median(sorted_nums[: n // 2])
+        q3 = statistics.median(sorted_nums[(n + 1) // 2 :])
 
         result = {
             "count": n,
@@ -89,8 +91,8 @@ async def analyze_data(data: str, **_: Any) -> str | ToolResult:
 
         # Trend detection
         if n >= 3:
-            first_half = statistics.mean(numbers[:n // 2])
-            second_half = statistics.mean(numbers[n // 2:])
+            first_half = statistics.mean(numbers[: n // 2])
+            second_half = statistics.mean(numbers[n // 2 :])
             if second_half > first_half * 1.05:
                 result["trend"] = "上升 ↗"
             elif second_half < first_half * 0.95:
@@ -176,26 +178,32 @@ async def compare_documents(
             if hits:
                 filename = hits[0].get("_source", {}).get("filename", doc_id)
                 text = " ".join(h.get("_source", {}).get("chunk_text", "")[:500] for h in hits[:10])
-                summaries.append({
-                    "id": doc_id,
-                    "filename": filename,
-                    "text": text[:2000],
-                    "chunk_count": len(hits),
-                })
+                summaries.append(
+                    {
+                        "id": doc_id,
+                        "filename": filename,
+                        "text": text[:2000],
+                        "chunk_count": len(hits),
+                    }
+                )
             else:
-                summaries.append({
+                summaries.append(
+                    {
+                        "id": doc_id,
+                        "filename": "Not found",
+                        "text": "",
+                        "chunk_count": 0,
+                    }
+                )
+        except Exception as e:
+            summaries.append(
+                {
                     "id": doc_id,
-                    "filename": "Not found",
+                    "filename": f"Error: {e}",
                     "text": "",
                     "chunk_count": 0,
-                })
-        except Exception as e:
-            summaries.append({
-                "id": doc_id,
-                "filename": f"Error: {e}",
-                "text": "",
-                "chunk_count": 0,
-            })
+                }
+            )
 
     # Build comparison output
     aspect_prompts = {
@@ -211,9 +219,11 @@ async def compare_documents(
     ]
 
     for s in summaries:
-        output_parts.append(f"\n### {s['filename']} ({s['id'][:8]}...)\n"
-                          f"Chunks: {s['chunk_count']}\n"
-                          f"Preview: {s['text'][:300]}...")
+        output_parts.append(
+            f"\n### {s['filename']} ({s['id'][:8]}...)\n"
+            f"Chunks: {s['chunk_count']}\n"
+            f"Preview: {s['text'][:300]}..."
+        )
 
     output_parts.append("\n---")
     output_parts.append(

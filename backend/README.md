@@ -5,7 +5,7 @@
 ## 🚀 功能特性
 
 ### 📄 文档管理
-- **多格式支持**: PDF、Word、Excel、PPT、TXT、Markdown、CSV
+- **多格式支持**: PDF、Word、Excel、TXT、Markdown、CSV、图片（OCR）
 - **大文件上传**: 支持分块上传和断点续传，最大支持100MB文件
 - **智能解析**: 自动提取文本内容，支持表格和结构化数据
 - **文档分块**: 智能文本分块，支持上下文重叠
@@ -53,7 +53,7 @@
 ### 1. 克隆项目
 ```bash
 git clone <repository-url>
-cd paicongming/backend
+cd DocMind/backend
 ```
 
 ### 2. 安装依赖
@@ -82,7 +82,18 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```bash
 python reset_admin.py
 ```
-会将 `admin` 用户密码重置为 `123456`（若不存在则创建）。然后使用 **admin / 123456** 登录。
+需先设置环境变量 `ADMIN_PASSWORD`（至少 8 位，安全加固后不再有弱口令默认值），它会把 `admin` 用户密码重置为该值（若不存在则创建）。然后使用 **admin / 该密码** 登录（本地现役口令见 `_试用清单.md`）。
+
+> W0-1 起平台管理员只认显式 `users.is_superuser`；`reset_admin.py` 会同时置位该字段。
+
+### 6.1 per-org RBAC 数据迁移（W0-1）
+先发布本版本代码，再按 `scripts/migrations/w0_1_rbac_admin_scope_up.sql` 头部说明执行：
+可先运行 `scripts/migrations/w0_1_rbac_admin_scope_prep.sql` 建立
+`w0_1_rbac_platform_allowlist` 并登记平台管理员用户名（或直接编辑主脚本中的示例
+INSERT），再执行主脚本；执行后复核 `w0_1_rbac_admin_backup` 分类清单。回滚使用
+`scripts/migrations/w0_1_rbac_admin_scope_down.sql`（依据备份表精确恢复）。
+主脚本自带安全阀：存在 `role='admin'` 却没有平台管理员候选时会在事务中中止。
+脚本要求 MySQL 8.0.16+（CHECK 约束生效），执行时不要使用 `--force`。
 
 ### 7. Docker部署（推荐）
 ```bash

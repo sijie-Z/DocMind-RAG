@@ -1,10 +1,13 @@
 <template>
   <div class="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
     <div class="max-w-6xl mx-auto">
+      <!-- T9 定位三件套：面包屑（DocMind / Agent 工作流 / Agent记忆）+ 返回出口（→ Agent 工作流） -->
+      <PageBreadcrumb :show-back="true" class="mb-4" />
+
       <!-- 头部 -->
       <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-2xl font-bold text-gray-800 dark:text-white">Agent 记忆系统</h1>
+          <h1 class="text-2xl font-bold text-gray-800 dark:text-white">{{ t('router.agentMemory') }}</h1>
           <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">管理 Agent 的短期记忆、长期记忆、工作记忆和反思记忆</p>
         </div>
         <div class="flex gap-2">
@@ -206,16 +209,19 @@
             <div v-if="searchResults.length" class="space-y-2">
               <div class="text-sm text-gray-500 mb-2">找到 {{ searchResults.length }} 条相关记忆</div>
               <div
-                v-for="item in searchResults"
-                :key="item.id"
+                v-for="(item, index) in searchResults"
+                :key="item.id ?? 'r-' + index"
                 class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border-l-4 border-blue-400"
               >
-                <div class="text-sm">{{ item.content }}</div>
+                <div class="text-sm">{{ item.content || item.lesson }}</div>
+                <div v-if="item.trigger" class="text-xs text-gray-500 mt-1">触发: {{ item.trigger }}</div>
+                <div v-if="item.solution" class="text-xs text-green-600 mt-1">解决: {{ item.solution }}</div>
                 <div class="text-xs text-gray-400 mt-1 flex justify-between">
-                  <n-tag size="small" :type="item.memory_type === 'short_term' ? 'info' : 'success'">
-                    {{ item.memory_type === 'short_term' ? '短期' : '长期' }}
+                  <n-tag v-if="resultLabel(item)" size="small" :type="resultTagType(item)">
+                    {{ resultLabel(item) }}
                   </n-tag>
-                  <span>重要性: {{ item.importance?.toFixed(2) }}</span>
+                  <span v-else></span>
+                  <span v-if="typeof item.importance === 'number'">重要性: {{ item.importance.toFixed(2) }}</span>
                 </div>
               </div>
             </div>
@@ -237,7 +243,12 @@ import {
   BulbOutline, SchoolOutline
 } from '@vicons/ionicons5'
 import { getAgentMemory, recallMemory, clearMemory } from '@/api/memory'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import dayjs from 'dayjs'
+import { useI18n } from 'vue-i18n'
+import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
+
+const { t } = useI18n()
 
 interface MemoryItem {
   id: string
@@ -267,6 +278,27 @@ interface LessonItem {
   [key: string]: unknown
 }
 
+/**
+ * 记忆检索（recall）结果 —— 后端三种形状混装（memory_service.py:604-641）：
+ *  - short_term / long_term：to_dict 全字段 {id,content,memory_type,importance,…}
+ *  - reflective insight：{type:'insight', content}
+ *  - reflective lesson：{type:'lesson', lesson, trigger, solution, created_at}
+ * 旧渲染按 short/long 单一形状读（item.content / memory_type 二元标签 /
+ * item.importance?.toFixed），lesson 项内容空白、标签误标「长期」、
+ * 重要性行半空（B14 形状漂移）。
+ */
+interface RecallItem {
+  id?: string
+  content?: string
+  memory_type?: string
+  importance?: number
+  type?: string
+  lesson?: string
+  trigger?: string
+  solution?: string
+  created_at?: string
+}
+
 interface MemoryData {
   agent_id: string
   short_term: MemoryItem[]
@@ -286,8 +318,25 @@ const message = useMessage()
 const loading = ref(false)
 const searching = ref(false)
 const searchQuery = ref('')
-const searchResults = ref<MemoryItem[]>([])
+const searchResults = ref<RecallItem[]>([])
 const memoryData = ref<MemoryData | null>(null)
+
+// recall 结果按真实形状打中文标签（见 RecallItem 注释）；无从推导时返回 ''
+const resultLabel = (item: RecallItem): string => {
+  if (item.memory_type === 'short_term') return '短期'
+  if (item.memory_type === 'long_term') return '长期'
+  if (item.type === 'insight') return '洞察'
+  if (item.type === 'lesson') return '经验'
+  return ''
+}
+
+const resultTagType = (item: RecallItem): 'default' | 'info' | 'success' | 'warning' | 'error' => {
+  if (item.memory_type === 'short_term') return 'info'
+  if (item.memory_type === 'long_term') return 'success'
+  if (item.type === 'insight') return 'warning'
+  if (item.type === 'lesson') return 'error'
+  return 'default'
+}
 
 const longTermCount = computed(() => {
   if (!memoryData.value?.long_term) return 0
@@ -298,7 +347,8 @@ const loadMemory = async () => {
   loading.value = true
   try {
     const res = await getAgentMemory()
-    memoryData.value = res.data?.data
+    // GET /memory/{agent_id} → {success, data: <导出记忆>} → apiUnwrap 解一层
+    memoryData.value = apiUnwrap<MemoryData | null>(res)
   } catch (error) {
     message.error('加载记忆失败')
   } finally {
@@ -312,7 +362,8 @@ const searchMemory = async () => {
   searching.value = true
   try {
     const res = await recallMemory('default', searchQuery.value)
-    searchResults.value = res.data?.data?.results || []
+    // POST /memory/{agent_id}/recall → {success, data: {query, results, count}}
+    searchResults.value = apiUnwrap<{ results: RecallItem[] } | null>(res)?.results || []
   } catch (error) {
     message.error('搜索失败')
   } finally {

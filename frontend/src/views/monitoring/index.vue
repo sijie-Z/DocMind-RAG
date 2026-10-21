@@ -4,7 +4,7 @@
     <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
       <div>
         <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
-          {{ t('monitoring.title') }}
+          {{ t('menu.monitoring') }}
         </h1>
         <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm flex items-center gap-2">
           <span class="w-6 h-0.5 bg-blue-500 rounded-full"></span>
@@ -12,6 +12,9 @@
         </p>
       </div>
       <div class="flex items-center gap-3">
+        <n-tag size="small" round :type="notificationStatusType" :bordered="false">
+          {{ t('monitoring.notificationService') }}: {{ notificationStatusLabel }}
+        </n-tag>
         <n-select
           v-model:value="timeRange"
           :options="timeRangeOptions"
@@ -28,9 +31,9 @@
 
     <!-- Error state -->
     <div v-if="loadError" class="py-16">
-      <n-result status="error" title="加载失败" :description="loadErrorMsg">
+      <n-result status="error" :title="t('monitoring.loadFailed')" :description="loadErrorMsg">
         <template #footer>
-          <n-button type="primary" round @click="refreshData">重试</n-button>
+          <n-button type="primary" round @click="refreshData">{{ t('common.retry') }}</n-button>
         </template>
       </n-result>
     </div>
@@ -175,7 +178,7 @@
 
     <!-- 审计日志 -->
     <div class="bg-white/90 dark:bg-gray-800/90 backdrop-blur rounded-2xl border border-slate-200/60 dark:border-gray-700/60 p-5 shadow-sm">
-      <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">系统审计日志</h3>
+      <h3 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">{{ t('menu.auditLogs') }}</h3>
       <n-data-table
         remote
         :columns="auditColumns"
@@ -199,8 +202,14 @@ import { useI18n } from 'vue-i18n'
 import { getAuditLogs, type AuditLogEntry } from '@/api/user'
 import { RefreshOutline, PulseOutline, GitNetworkOutline, BookOutline, WarningOutline } from '@vicons/ionicons5'
 import echarts from '@/utils/echarts'
-import { getMonitoringDashboard, getMonitoringAlerts, getMetrics } from '@/api/monitoring'
-import request from '@/utils/request'
+import { getMonitoringDashboard, getMonitoringAlerts, getMetrics, getNotificationStatus, type TrendPoint, type NotificationServiceStatus } from '@/api/monitoring'
+import { apiUnwrap } from '@/utils/apiUnwrap'
+import { getErrorMessage } from '@/utils/apiError'
+import { filterPointsByTimeRange } from './timeRange'
+
+// E14/D1：审计日志错误由本页 toast 呈现 —— 带 X-Silent-Error 关闭响应拦截器
+// 的全局 toast，避免同一失败两次弹提示。
+const AUDIT_SILENT_CONFIG = { headers: { 'X-Silent-Error': '1' } } as const
 
 interface SystemMetrics {
   cpu_percent: number
@@ -288,14 +297,30 @@ const kbMetrics = reactive<KnowledgeBaseMetrics>({
 })
 
 const recentAlerts = ref<Alert[]>([])
-const activeAlerts = computed(() => recentAlerts.value.filter(alert => alert.timestamp > Date.now() - 3600000))
+// 后端 alerts 的 timestamp 是秒级 int(time.time())（monitoring.py:175-184；
+// 表格列同样按秒处理 *1000），此前直接与毫秒 Date.now() 比较 → 恒 false →
+// 「活动告警」卡恒 0 且恒「正常」，与下方表格 active 行同屏矛盾。统一按毫秒换算。
+const activeAlerts = computed(() => recentAlerts.value.filter(alert => alert.timestamp * 1000 > Date.now() - 3600000))
 const hasAlerts = computed(() => activeAlerts.value.length > 0)
 const hasCriticalAlerts = computed(() => activeAlerts.value.some(alert => alert.level === 'critical'))
 const hasWarningAlerts = computed(() => activeAlerts.value.some(alert => alert.level === 'warning'))
 
-const notificationStatus = ref({
+// T6：通知服务状态 —— 子请求失败只收敛为本地降级徽标（未知），不弹全局 toast。
+const notificationStatus = ref<NotificationServiceStatus>({
   enabled_channels: [],
-  status: 'inactive'
+  status: 'unknown'
+})
+
+const notificationStatusLabel = computed(() => {
+  if (notificationStatus.value.status === 'active') return t('monitoring.notificationActive')
+  if (notificationStatus.value.status === 'inactive') return t('monitoring.notificationInactive')
+  return t('monitoring.notificationUnknown')
+})
+
+const notificationStatusType = computed<'success' | 'default' | 'warning'>(() => {
+  if (notificationStatus.value.status === 'active') return 'success'
+  if (notificationStatus.value.status === 'inactive') return 'default'
+  return 'warning'
 })
 
 // 审计日志相关
@@ -342,13 +367,19 @@ const auditColumns = [
   }
 ]
 
+// 审计日志请求序号：刷新与翻页可能重叠，旧响应不得覆盖新分页数据，
+// 也不得在新请求成功后补弹旧失败 toast。
+let auditSeq = 0
+
 const fetchAuditLogs = async () => {
+  const seq = ++auditSeq
   auditLoading.value = true
   try {
     const res = await getAuditLogs({
       skip: (auditPagination.page - 1) * auditPagination.pageSize,
       limit: auditPagination.pageSize
-    })
+    }, AUDIT_SILENT_CONFIG)
+    if (seq !== auditSeq) return
     const resData = res.data as unknown as Record<string, unknown>
     const innerData = resData?.data as Record<string, unknown> | undefined
     if (resData?.success && innerData) {
@@ -359,9 +390,11 @@ const fetchAuditLogs = async () => {
       auditPagination.itemCount = resData.total as number
     }
   } catch (err) {
-    message.error('获取审计日志失败')
+    if (seq !== auditSeq) return
+    // E14/D1：错误如实且只有这一条（silent 头已关闭全局 toast）
+    message.error(getErrorMessage(err, t('monitoring.auditLoadFailed')))
   } finally {
-    auditLoading.value = false
+    if (seq === auditSeq) auditLoading.value = false
   }
 }
 
@@ -408,18 +441,25 @@ const cpuChartRef = ref<HTMLElement>()
 const memoryChartRef = ref<HTMLElement>()
 const requestChartRef = ref<HTMLElement>()
 const responseTimeChartRef = ref<HTMLElement>()
-const documentChartRef = ref<HTMLElement>()
 let cpuChart: echarts.ECharts | null = null
 let memoryChart: echarts.ECharts | null = null
 let requestChart: echarts.ECharts | null = null
 let responseTimeChart: echarts.ECharts | null = null
-let documentChart: echarts.ECharts | null = null
 
+// 图表 title.subtext 承载诚实空态文案（无数据时画布写明「暂无数据」而非白板）
+const emptySubtext = () => t('monitoring.noData')
+const subtextStyle = { color: '#9ca3af', fontSize: 12 }
+
+// CPU/内存趋势：后端系统指标采样已落地（fix/system-metrics-sampling @ af42e32）
+// ——dashboard.trends.system 与 /monitoring/metrics/system 现返回真实采样点
+// {timestamp(秒), cpu_percent, memory_percent}（ENABLE_MONITORING 门控）。
+// 由 loadData → updateSystemCharts 接线；采样未启用或暂无样本时为空数组，
+// 保持「暂无数据」诚实空态（不画假线）。
 const initCharts = () => {
   if (cpuChartRef.value) {
     cpuChart = echarts.init(cpuChartRef.value)
     cpuChart.setOption({
-      title: { text: t('monitoring.cpu') + ' (%)', left: 'center' },
+      title: { text: t('monitoring.cpu') + ' (%)', subtext: emptySubtext(), subtextStyle, left: 'center' },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'time' },
       yAxis: { type: 'value', min: 0, max: 100 },
@@ -436,7 +476,7 @@ const initCharts = () => {
   if (memoryChartRef.value) {
     memoryChart = echarts.init(memoryChartRef.value)
     memoryChart.setOption({
-      title: { text: t('monitoring.memory') + ' (%)', left: 'center' },
+      title: { text: t('monitoring.memory') + ' (%)', subtext: emptySubtext(), subtextStyle, left: 'center' },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'time' },
       yAxis: { type: 'value', min: 0, max: 100 },
@@ -453,7 +493,7 @@ const initCharts = () => {
   if (requestChartRef.value) {
     requestChart = echarts.init(requestChartRef.value)
     requestChart.setOption({
-      title: { text: t('monitoring.requestTrend'), left: 'center' },
+      title: { text: t('monitoring.requestTrend'), subtext: emptySubtext(), subtextStyle, left: 'center' },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'time' },
       yAxis: { type: 'value' },
@@ -470,7 +510,7 @@ const initCharts = () => {
   if (responseTimeChartRef.value) {
     responseTimeChart = echarts.init(responseTimeChartRef.value)
     responseTimeChart.setOption({
-      title: { text: t('monitoring.responseTrend') + ' (ms)', left: 'center' },
+      title: { text: t('monitoring.responseTrend') + ' (ms)', subtext: emptySubtext(), subtextStyle, left: 'center' },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'time' },
       yAxis: { type: 'value' },
@@ -483,94 +523,84 @@ const initCharts = () => {
       }]
     })
   }
+}
 
-  if (documentChartRef.value) {
-    documentChart = echarts.init(documentChartRef.value)
-    documentChart.setOption({
-      title: { text: t('monitoring.docTrend'), left: 'center' },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'time' },
-      yAxis: { type: 'value' },
-      series: [{
-        name: t('monitoring.totalDocs'),
-        type: 'line',
-        data: [],
-        smooth: true,
-        lineStyle: { color: '#73c0de' }
-      }]
+const updateMetricsCharts = async (seq: number) => {
+  try {
+    // 趋势真实形状：{"data": [<快照>]}（monitoring.py:151-166；<2 条时 {"data": []}），
+    // 元素键 timestamp(秒)/request_count/response_time 等（core/middleware.py:129-136）。
+    // 旧前端读不存在的 resp.data.metrics → 三图恒不更新。
+    const appMetricsResponse = await getMetrics('application', timeRange.value)
+    // 竞态守卫：请求等待期间可能已有更新的 loadData 启动并完成 —— 迟到的
+    // 图表数据不得覆盖最新结果（旧响应只允许在它仍是最新请求时写状态）。
+    if (seq !== loadSeq) return
+    // GET /monitoring/metrics/{type} 为裸 {data: [...]} 单层体 → apiUnwrap 归一为数组
+    const points = apiUnwrap<TrendPoint[]>(appMetricsResponse) || []
+
+    if (requestChart) {
+      const requestData = points.map((item) => [item.timestamp * 1000, item.request_count])
+      requestChart.setOption({
+        title: { subtext: points.length ? '' : emptySubtext() },
+        series: [{ data: requestData }]
+      })
+    }
+
+    if (responseTimeChart) {
+      const responseTimeData = points.map((item) => [item.timestamp * 1000, item.response_time])
+      responseTimeChart.setOption({
+        title: { subtext: points.length ? '' : emptySubtext() },
+        series: [{ data: responseTimeData }]
+      })
+    }
+  } catch (error) {
+    // 更新指标图表失败：保持空态（subtext 已在初始化写明「暂无数据」）
+  }
+}
+
+/**
+ * 系统指标趋势（CPU/内存）接线：数据源 dashboard.trends.system —— 采样点
+ * {timestamp(秒), cpu_percent, memory_percent}（af42e32 实现报告逐字核对；
+ * 与 /metrics/system 同一信封但本图走 dashboard 既有响应，零额外请求）。
+ * timestamp×1000 转毫秒与前端时间轴既有约定一致；空数组 → 保持
+ * 「暂无数据」诚实空态（不画假线）。
+ */
+const updateSystemCharts = (
+  systemTrend: Array<{ timestamp: number; cpu_percent: number; memory_percent: number }> | undefined
+) => {
+  // T8：按时间范围选择器裁剪（dashboard.trends.system 不经 /metrics，后端无法代劳）；
+  // 空数组 → 保持「暂无数据」诚实空态（不画假线）。
+  const points = filterPointsByTimeRange(Array.isArray(systemTrend) ? systemTrend : [], timeRange.value)
+
+  if (cpuChart) {
+    const cpuData = points.map((item) => [item.timestamp * 1000, item.cpu_percent])
+    cpuChart.setOption({
+      title: { subtext: points.length ? '' : emptySubtext() },
+      series: [{ data: cpuData }]
+    })
+  }
+
+  if (memoryChart) {
+    const memoryData = points.map((item) => [item.timestamp * 1000, item.memory_percent])
+    memoryChart.setOption({
+      title: { subtext: points.length ? '' : emptySubtext() },
+      series: [{ data: memoryData }]
     })
   }
 }
 
-const updateCharts = (data: Record<string, unknown>) => {
-  const trends = data.trends as Record<string, unknown> | undefined
-  if (trends?.system) {
-    const systemTrend = trends.system as Array<Record<string, number>>
-    if (cpuChart && systemTrend.length > 0) {
-      const cpuData = systemTrend.map((item) => [item.timestamp * 1000, item.cpu_percent])
-      cpuChart.setOption({
-        series: [{ data: cpuData }]
-      })
-    }
-    if (memoryChart && systemTrend.length > 0) {
-      const memoryData = systemTrend.map((item) => [item.timestamp * 1000, item.memory_percent])
-      memoryChart.setOption({
-        series: [{ data: memoryData }]
-      })
-    }
-  }
-}
-
-const updateMetricsCharts = async () => {
-  try {
-    // 获取应用指标趋势
-    const appMetricsResponse = await getMetrics('application', timeRange.value)
-    const appMetricsData = appMetricsResponse.data?.metrics || []
-
-    if (appMetricsData.length > 0) {
-      // 更新请求数趋势图
-      if (requestChart) {
-        const requestData = (appMetricsData as unknown as Array<Record<string, number>>).map((item) => [item.timestamp * 1000, item.request_count])
-        requestChart.setOption({
-          series: [{ data: requestData }]
-        })
-      }
-      
-      // 更新响应时间趋势图
-      if (responseTimeChart) {
-        const responseTimeData = (appMetricsData as unknown as Array<Record<string, number>>).map((item) => [item.timestamp * 1000, item.response_time])
-        responseTimeChart.setOption({
-          series: [{ data: responseTimeData }]
-        })
-      }
-    }
-    
-    // 获取知识库指标趋势
-    const kbMetricsResponse = await getMetrics('knowledge_base', timeRange.value)
-    const kbMetricsData = kbMetricsResponse.data?.metrics || []
-
-    if (kbMetricsData.length > 0) {
-      // 更新文档数趋势图
-      if (documentChart) {
-        const documentData = (kbMetricsData as unknown as Array<Record<string, number>>).map((item) => [item.timestamp * 1000, item.total_documents])
-        documentChart.setOption({
-          series: [{ data: documentData }]
-        })
-      }
-    }
-    
-  } catch (error) {
-    // 更新指标图表失败
-  }
-}
+// 请求序号（E14/D1）：自动刷新（30s）、手动刷新、切时间范围可能重叠——
+// 只认最后一次请求的状态，旧响应（无论成功或失败）不得覆盖最新结果/错误态。
+let loadSeq = 0
 
 const loadData = async () => {
+  const seq = ++loadSeq
   loading.value = true
   try {
     const [dashboardResponse, alertsResponse] = await Promise.all([
       getMonitoringDashboard(),
       getMonitoringAlerts()
     ])
+    if (seq !== loadSeq) return
 
     const dashboardData = dashboardResponse.data
     const alertsData = alertsResponse.data
@@ -593,27 +623,43 @@ const loadData = async () => {
     // 更新告警
     recentAlerts.value = alertsData.alerts || []
 
-    // 更新图表
-    updateCharts(dashboardData as unknown as Record<string, unknown>)
-    
-    // 更新时间范围相关的图表
-    await updateMetricsCharts()
-    
-    // 获取通知服务状态
+    // 系统指标趋势（CPU/内存）：dashboard.trends.system 真实采样点
+    // （fix/system-metrics-sampling @ af42e32；空数组 → 诚实空态）
+    updateSystemCharts(dashboardData.trends?.system)
+
+    // 更新时间范围相关的图表（请求/响应趋势：真实 {data: history[]}）
+    await updateMetricsCharts(seq)
+
+    // 获取通知服务状态（T6：失败仅更新本地降级状态，不弹全局 toast）
     try {
-      const notificationResponse = await request.get('/api/monitoring/notification/status')
+      // 单前缀正确路径：axios baseURL 已含 /api/v1（utils/request.ts:140），
+      // 旧写法 /api/monitoring/... 实际请求 /api/v1/api/monitoring/... 恒 404
+      // （A_sweep A4 实锤 404；真实路由 monitoring.py:442）
+      const notificationResponse = await getNotificationStatus()
+      // 竞态守卫：迟到响应不得覆盖最新请求的状态
+      if (seq !== loadSeq) return
       notificationStatus.value = notificationResponse.data
-    } catch (error) {
-      // 获取通知服务状态失败
+    } catch {
+      // 失败降级：徽标显示「未知」，可感知但不打扰（请求已带 X-Silent-Error）
+      if (seq !== loadSeq) return
+      notificationStatus.value = { enabled_channels: [], status: 'unknown' }
     }
 
+    // E14/D1：成功路径复位错误态 —— 自动刷新（30s）/切时间范围再次成功时，
+    // 内容必须恢复展示，不能因一次失败永久停留在错误页（直到手动重试）。
+    // 仅最新请求可修改状态（旧请求迟到成功不得清掉新请求刚设置的错误态）。
+    if (seq !== loadSeq) return
+    loadError.value = false
+
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error)
-    message.error('加载监控数据失败：' + msg)
+    if (seq !== loadSeq) return
+    // E14/D1：错误如实（5xx/传输层回退 i18n，不上屏 axios 黑话）。
+    // 内联 n-result（标题/描述/重试）已是唯一提示表面 —— 不再弹 toast；
+    // 页面每 30s 自动刷新，弹 toast 还会造成周期性骚扰。
     loadError.value = true
-    loadErrorMsg.value = '加载监控数据失败：' + msg
+    loadErrorMsg.value = getErrorMessage(error, t('monitoring.loadFailedDesc'))
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -653,9 +699,6 @@ onUnmounted(() => {
   }
   if (responseTimeChart) {
     responseTimeChart.dispose()
-  }
-  if (documentChart) {
-    documentChart.dispose()
   }
 })
 </script>

@@ -6,6 +6,7 @@
 驱动方式：假 LLM（MagicMock 的 `chat.completions.create`）——子代理 PERAgentLoop
 在工具循环里拿到的就是它；不触达任何外部 API。
 """
+
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -74,8 +75,7 @@ def test_tool_registered_with_delegation_tag_only_for_parent():
     names_all = {t["function"]["name"] for t in tool_registry.to_openai_tools()}
     assert "delegate_subtask" in names_all
     names_child = {
-        t["function"]["name"]
-        for t in tool_registry.to_openai_tools(["search", "analysis"])
+        t["function"]["name"] for t in tool_registry.to_openai_tools(["search", "analysis"])
     }
     assert "delegate_subtask" not in names_child, "递归防护的静态面：tag 过滤"
 
@@ -122,7 +122,7 @@ async def test_concurrency_capped_at_three_and_order_kept(monkeypatch):
 
     monkeypatch.setattr(sa, "delegate_task", fake_delegate)
     results = await sa.run_parallel_subtasks(
-        client=None, tasks=[f"t{i}" for i in range(6)], per_task_timeout=None
+        client=None, tasks=[f"t{i}" for i in range(6)], organization_id=1, per_task_timeout=None
     )
     assert peak <= 3, f"并发上限应为 3，实测峰值 {peak}"
     assert results == [f"t{i}" for i in range(6)]
@@ -139,7 +139,7 @@ async def test_per_task_timeout_marks_without_killing_batch(monkeypatch):
 
     monkeypatch.setattr(sa, "delegate_task", slow_delegate)
     results = await sa.run_parallel_subtasks(
-        client=None, tasks=["slow", "fast"], per_task_timeout=0.05
+        client=None, tasks=["slow", "fast"], organization_id=1, per_task_timeout=0.05
     )
     assert results[0].startswith("[子任务超时"), f"超时子任务应带标注: {results[0]}"
     assert results[1] == "fast", "其余子任务不受拖累"
@@ -156,7 +156,7 @@ async def test_single_task_error_contained(monkeypatch):
 
     monkeypatch.setattr(sa, "delegate_task", flaky_delegate)
     results = await sa.run_parallel_subtasks(
-        client=None, tasks=["boom", "fine"], per_task_timeout=None
+        client=None, tasks=["boom", "fine"], organization_id=1, per_task_timeout=None
     )
     assert results[0].startswith("[Error: RuntimeError"), results[0]
     assert results[1] == "ok:fine"

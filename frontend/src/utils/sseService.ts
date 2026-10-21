@@ -1,43 +1,40 @@
 import { getToken } from '@/utils/auth'
+import type { SSEMessage } from '@/types/api'
 
 interface RetryOptions {
   maxRetries?: number
   retryDelay?: number
 }
 
-interface SSESource {
-  fileId?: number
-  filename?: string
-  relevanceScore?: number
-  snippet?: string
-  content?: string
-}
+// issue #289 G8：SSEEventType 类型别名此前漏了 run_report / execution_context /
+// retry_hint（运行时白名单有、TS 类型没有），且 emit()/post() 两处运行时白名单
+// 与类型别名三处各自维护、口径漂移。收敛为单一 const 数组 + 派生类型：
+// 类型层与两处运行时校验同源，新增事件只改一处。
+const SSE_EVENT_TYPES = [
+  'chunk',
+  'message',
+  'error',
+  // ISS-3：后端 warning 事件（#301 批 D 落库失败可见 / Agent 侧降级提示，载荷
+  // type+content，agent.py 出口经 chat.py 转发）此前不在白名单被静默丢弃 →
+  // 聊天页无任何提示。此处放行后 emit()/post() 两处同源校验随之生效。
+  'warning',
+  'retry',
+  'thinking',
+  'tool_call',
+  'tool_result',
+  'tool_error',
+  'plan_start',
+  'plan_step',
+  'plan_complete',
+  'reflection',
+  'done',
+  'run_report',
+  'execution_context',
+  'retry_hint',
+  'debug',
+] as const
 
-interface SSEMessage {
-  type: string
-  content?: string
-  conversationId?: number | string
-  messageId?: string
-  sources?: SSESource[]
-  is_cached?: boolean
-  attempt?: number
-  maxRetries?: number
-  waitTime?: number
-  rateLimit?: { limit?: number; remaining?: number; reset?: number }
-  toolName?: string
-  toolArgs?: Record<string, unknown>
-  toolCallId?: string
-  toolDurationMs?: number
-  planId?: string
-  planStepId?: string
-  planProgress?: number
-  toolHint?: string
-  dependencies?: string[]
-  thinkingType?: string
-  result?: string
-}
-
-type SSEEventType = 'chunk' | 'message' | 'error' | 'retry' | 'thinking' | 'tool_call' | 'tool_result' | 'tool_error' | 'plan_start' | 'plan_step' | 'plan_complete' | 'reflection' | 'done' | 'debug'
+type SSEEventType = (typeof SSE_EVENT_TYPES)[number]
 
 type SSEEventHandler = (_data: SSEMessage) => void
 type SSEStatusHandler = (_status: 'connecting' | 'connected' | 'disconnected' | 'error') => void
@@ -93,7 +90,7 @@ class SSEService {
   }
 
   private emit(event: string, data?: unknown) {
-    if (['chunk', 'message', 'error', 'retry', 'thinking', 'tool_call', 'tool_result', 'tool_error', 'plan_start', 'plan_step', 'plan_complete', 'reflection', 'done', 'run_report', 'execution_context', 'retry_hint', 'debug'].includes(event)) {
+    if ((SSE_EVENT_TYPES as readonly string[]).includes(event)) {
       const handler = this.messageHandlers.get(event)
       if (handler) handler(data as SSEMessage)
     } else if (event === 'connect' || event === 'disconnect') {
@@ -201,13 +198,12 @@ class SSEService {
                 const resolvedType = (eventTypeSet ? currentEventType : parsed.type || currentEventType) as SSEMessage['type']
                 eventTypeSet = false
                 const data = { ...parsed, type: resolvedType } as SSEMessage
-                if (data.type === 'chunk' || data.type === 'thinking' || data.type === 'tool_call' || data.type === 'tool_result' || data.type === 'tool_error' || data.type === 'plan_start' || data.type === 'plan_step' || data.type === 'plan_complete' || data.type === 'reflection' || data.type === 'done' || data.type === 'run_report' || data.type === 'execution_context' || data.type === 'retry_hint' || data.type === 'retry' || data.type === 'debug') {
+                // issue #289 G8：与 emit()/类型别名同源（SSE_EVENT_TYPES），
+                // message/error 与其余类型统一按类型查 handler（emit 的
+                // 白名单分支此前对这两型做等价转发，收敛后行为一致）。
+                if ((SSE_EVENT_TYPES as readonly string[]).includes(data.type)) {
                   const handler = this.messageHandlers.get(data.type)
                   if (handler) handler(data as SSEMessage)
-                } else if (data.type === 'message') {
-                  this.emit('message', data)
-                } else if (data.type === 'error') {
-                  this.emit('error', data)
                 }
               } catch {
                 // SSE Parse error

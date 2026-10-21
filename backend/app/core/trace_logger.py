@@ -29,6 +29,7 @@ Schema:
         "timestamp": str,
     }
 """
+
 import json
 import logging
 import time
@@ -42,15 +43,17 @@ logger = logging.getLogger(__name__)
 
 # ── Step-level trace ─────────────────────────────────────────
 
+
 @dataclass
 class StepTrace:
     """Single step execution record."""
+
     step_id: str
-    type: str = "unknown"             # planner, retrieval, execution, tool
+    type: str = "unknown"  # planner, retrieval, execution, tool
     description: str = ""
     latency: float = 0.0
     retry_count: int = 0
-    status: str = "pending"            # pending, running, success, error, skipped
+    status: str = "pending"  # pending, running, success, error, skipped
     tool_name: str = ""
     input_size: int = 0
     output_size: int = 0
@@ -60,15 +63,22 @@ class StepTrace:
 
 # ── Full agent trace ─────────────────────────────────────────
 
+
 @dataclass
 class AgentTrace:
     """Complete execution trace for one agent run."""
+
     request_id: str
     query: str
     mode: str
-    timing: dict[str, float] = field(default_factory=lambda: {
-        "total": 0.0, "planner": 0.0, "retrieval": 0.0, "execution": 0.0,
-    })
+    timing: dict[str, float] = field(
+        default_factory=lambda: {
+            "total": 0.0,
+            "planner": 0.0,
+            "retrieval": 0.0,
+            "execution": 0.0,
+        }
+    )
     steps: list[dict] = field(default_factory=list)
     dag_edges: list[list[str]] = field(default_factory=list)
     errors: list[dict] = field(default_factory=list)
@@ -86,6 +96,7 @@ class AgentTrace:
 
 # ── Tracer ───────────────────────────────────────────────────
 
+
 class AgentTracer:
     """Collects execution trace data for one agent run."""
 
@@ -96,7 +107,12 @@ class AgentTracer:
         self._steps: list[StepTrace] = []
         self._errors: list[dict] = []
         self._dag_edges: list[list[str]] = []
-        self._timing: dict[str, float] = {"total": 0.0, "planner": 0.0, "retrieval": 0.0, "execution": 0.0}
+        self._timing: dict[str, float] = {
+            "total": 0.0,
+            "planner": 0.0,
+            "retrieval": 0.0,
+            "execution": 0.0,
+        }
         self._tool_call_count: int = 0
         self._start_time: float = time.perf_counter()
         self._phase_starts: dict[str, float] = {}
@@ -125,28 +141,32 @@ class AgentTracer:
         error: str | None = None,
         error_type: str = "",
     ):
-        self._steps.append(StepTrace(
-            step_id=step_id,
-            type=step_type,
-            description=description,
-            latency=latency,
-            retry_count=retry_count,
-            status=status,
-            tool_name=tool_name,
-            error=error,
-            error_type=error_type,
-        ))
+        self._steps.append(
+            StepTrace(
+                step_id=step_id,
+                type=step_type,
+                description=description,
+                latency=latency,
+                retry_count=retry_count,
+                status=status,
+                tool_name=tool_name,
+                error=error,
+                error_type=error_type,
+            )
+        )
 
     def log_tool_call(self, step_id: str, tool_name: str):
         self._tool_call_count += 1
 
     def log_error(self, step_id: str, error_type: str, message: str, recoverable: bool = True):
-        self._errors.append({
-            "step_id": step_id,
-            "type": error_type,
-            "message": message[:300],
-            "recoverable": recoverable,
-        })
+        self._errors.append(
+            {
+                "step_id": step_id,
+                "type": error_type,
+                "message": message[:300],
+                "recoverable": recoverable,
+            }
+        )
 
     def add_dag_edge(self, source: str, target: str):
         self._dag_edges.append([source, target])
@@ -171,6 +191,7 @@ class AgentTracer:
 
 
 # ── Exporter ────────────────────────────────────────────────
+
 
 class TraceExporter:
     """Persists traces to disk as JSONL."""

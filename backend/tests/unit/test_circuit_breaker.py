@@ -1,4 +1,5 @@
 """CircuitBreaker 纯逻辑测试。"""
+
 import time
 
 import pytest

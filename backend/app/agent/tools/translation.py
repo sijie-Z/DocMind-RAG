@@ -11,12 +11,26 @@ from app.agent.usage import ctx_from_run_context, record_llm_usage
 logger = logging.getLogger(__name__)
 
 LANG_NAMES = {
-    "zh": "中文", "en": "English", "ja": "日本語", "ko": "한국어",
-    "fr": "Français", "de": "Deutsch", "es": "Español", "pt": "Português",
-    "ru": "Русский", "ar": "العربية", "hi": "हिन्दी", "th": "ไทย",
-    "vi": "Tiếng Việt", "it": "Italiano", "nl": "Nederlands",
-    "pl": "Polski", "tr": "Türkçe", "id": "Bahasa Indonesia",
-    "ms": "Bahasa Melayu", "fil": "Filipino",
+    "zh": "中文",
+    "en": "English",
+    "ja": "日本語",
+    "ko": "한국어",
+    "fr": "Français",
+    "de": "Deutsch",
+    "es": "Español",
+    "pt": "Português",
+    "ru": "Русский",
+    "ar": "العربية",
+    "hi": "हिन्दी",
+    "th": "ไทย",
+    "vi": "Tiếng Việt",
+    "it": "Italiano",
+    "nl": "Nederlands",
+    "pl": "Polski",
+    "tr": "Türkçe",
+    "id": "Bahasa Indonesia",
+    "ms": "Bahasa Melayu",
+    "fil": "Filipino",
 }
 
 
@@ -73,7 +87,9 @@ async def translate_text(
                 code="invalid_configuration", message="Translation unavailable: LLM not configured."
             )
 
-        source_hint = "" if source_lang == "auto" else f" from {LANG_NAMES.get(source_lang, source_lang)}"
+        source_hint = (
+            "" if source_lang == "auto" else f" from {LANG_NAMES.get(source_lang, source_lang)}"
+        )
         target_name = LANG_NAMES.get(target_lang, target_lang)
 
         resp = await pipeline.openai_client.chat.completions.create(
@@ -134,6 +150,7 @@ async def detect_language(text: str, **_: Any) -> str | ToolResult:
         # Try using langdetect library
         try:
             from langdetect import DetectorFactory, detect_langs
+
             DetectorFactory.seed = 0
             results = detect_langs(text[:500])
             langs = []
@@ -171,10 +188,17 @@ def _normalize_lang(lang: str) -> str:
 
     # Common aliases
     aliases = {
-        "chinese": "zh", "english": "en", "japanese": "ja",
-        "korean": "ko", "french": "fr", "german": "de",
-        "spanish": "es", "portuguese": "pt", "russian": "ru",
-        "arabic": "ar", "hindi": "hi",
+        "chinese": "zh",
+        "english": "en",
+        "japanese": "ja",
+        "korean": "ko",
+        "french": "fr",
+        "german": "de",
+        "spanish": "es",
+        "portuguese": "pt",
+        "russian": "ru",
+        "arabic": "ar",
+        "hindi": "hi",
     }
     if lang_lower in aliases:
         return aliases[lang_lower]
@@ -184,10 +208,10 @@ def _normalize_lang(lang: str) -> str:
 
 def _heuristic_detect(text: str) -> str:
     """Simple heuristic language detection based on character ranges."""
-    cjk_count = sum(1 for c in text if '一' <= c <= '鿿' or '㐀' <= c <= '䶿')
-    hiragana_count = sum(1 for c in text if '぀' <= c <= 'ゟ')
-    katakana_count = sum(1 for c in text if '゠' <= c <= 'ヿ')
-    hangul_count = sum(1 for c in text if '가' <= c <= '힯')
+    cjk_count = sum(1 for c in text if "一" <= c <= "鿿" or "㐀" <= c <= "䶿")
+    hiragana_count = sum(1 for c in text if "぀" <= c <= "ゟ")
+    katakana_count = sum(1 for c in text if "゠" <= c <= "ヿ")
+    hangul_count = sum(1 for c in text if "가" <= c <= "힯")
     latin_count = sum(1 for c in text if c.isascii() and c.isalpha())
 
     total = len(text)

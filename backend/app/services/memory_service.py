@@ -2,6 +2,7 @@
 Agent 记忆系统服务
 支持短期记忆、长期记忆、工作记忆和反思记忆
 """
+
 import asyncio
 import json
 import logging
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class MemoryItem:
     """记忆项"""
+
     def __init__(
         self,
         content: str,
@@ -53,6 +55,7 @@ class MemoryItem:
     def _generate_id(self) -> str:
         """生成唯一ID"""
         import uuid
+
         return uuid.uuid4().hex[:12]
 
     def access(self) -> None:
@@ -141,16 +144,16 @@ class LongTermMemory:
         # CJK bigrams for Chinese text without spaces
         cjk_run = ""
         for ch in lower:
-            if '一' <= ch <= '鿿' or '㐀' <= ch <= '䶿':
+            if "一" <= ch <= "鿿" or "㐀" <= ch <= "䶿":
                 cjk_run += ch
             else:
                 if len(cjk_run) >= 2:
                     for i in range(len(cjk_run) - 1):
-                        tokens.add(cjk_run[i:i + 2])
+                        tokens.add(cjk_run[i : i + 2])
                 cjk_run = ""
         if len(cjk_run) >= 2:
             for i in range(len(cjk_run) - 1):
-                tokens.add(cjk_run[i:i + 2])
+                tokens.add(cjk_run[i : i + 2])
         return tokens
 
     def add(self, item: MemoryItem) -> None:
@@ -168,7 +171,7 @@ class LongTermMemory:
         memory_type: str = None,
         top_k: int = 10,
         min_importance: float = 0.0,
-        use_decay: bool = True
+        use_decay: bool = True,
     ) -> list[MemoryItem]:
         """搜索记忆"""
         candidates = []
@@ -198,7 +201,9 @@ class LongTermMemory:
             # 综合分数
             relevance = overlap / max(len(query_tokens), 1)
             decay_score = item.get_decay_score() if use_decay else item.importance
-            final_score = 0.5 * relevance + 0.3 * decay_score + 0.2 * min(item.access_count / 10, 1.0)
+            final_score = (
+                0.5 * relevance + 0.3 * decay_score + 0.2 * min(item.access_count / 10, 1.0)
+            )
 
             results.append((final_score, item))
 
@@ -212,10 +217,7 @@ class LongTermMemory:
         return [item for _, item in results[:top_k]]
 
     def get_by_time_range(
-        self,
-        start_time: datetime,
-        end_time: datetime,
-        memory_type: str = None
+        self, start_time: datetime, end_time: datetime, memory_type: str = None
     ) -> list[MemoryItem]:
         """按时间范围获取记忆"""
         results = []
@@ -331,10 +333,7 @@ class WorkingMemory:
 
     def push_task(self, task: dict[str, Any]) -> None:
         """推入任务"""
-        self.task_stack.append({
-            "task": task,
-            "started_at": datetime.now().isoformat()
-        })
+        self.task_stack.append({"task": task, "started_at": datetime.now().isoformat()})
 
     def pop_task(self) -> dict[str, Any] | None:
         """弹出任务"""
@@ -400,7 +399,7 @@ class WorkingMemory:
             "state": self.state,
             "task_stack": self.task_stack,
             "intermediate_results": self.intermediate_results,
-            "variables": self.variables
+            "variables": self.variables,
         }
 
 
@@ -414,28 +413,32 @@ class ReflectiveMemory:
 
     def add_insight(self, insight: str, context: dict[str, Any] | None = None) -> None:
         """添加洞察"""
-        self.insights.append({
-            "content": insight,
-            "context": context or {},
-            "created_at": datetime.now().isoformat()
-        })
+        self.insights.append(
+            {"content": insight, "context": context or {}, "created_at": datetime.now().isoformat()}
+        )
 
     def add_pattern(self, pattern: str, examples: list[str] | None = None) -> None:
         """添加模式"""
-        self.patterns.append({
-            "pattern": pattern,
-            "examples": examples or [],
-            "created_at": datetime.now().isoformat()
-        })
+        self.patterns.append(
+            {
+                "pattern": pattern,
+                "examples": examples or [],
+                "created_at": datetime.now().isoformat(),
+            }
+        )
 
-    def add_lesson(self, lesson: str, trigger: str | None = None, solution: str | None = None) -> None:
+    def add_lesson(
+        self, lesson: str, trigger: str | None = None, solution: str | None = None
+    ) -> None:
         """添加经验教训"""
-        self.lessons.append({
-            "lesson": lesson,
-            "trigger": trigger,
-            "solution": solution,
-            "created_at": datetime.now().isoformat()
-        })
+        self.lessons.append(
+            {
+                "lesson": lesson,
+                "trigger": trigger,
+                "solution": solution,
+                "created_at": datetime.now().isoformat(),
+            }
+        )
 
     def get_relevant_insights(self, context: str, top_k: int = 5) -> list[str]:
         """获取相关洞察"""
@@ -469,11 +472,7 @@ class ReflectiveMemory:
 
     def to_dict(self) -> dict:
         """转换为字典"""
-        return {
-            "insights": self.insights,
-            "patterns": self.patterns,
-            "lessons": self.lessons
-        }
+        return {"insights": self.insights, "patterns": self.patterns, "lessons": self.lessons}
 
 
 class AgentMemorySystem:
@@ -517,12 +516,20 @@ class AgentMemorySystem:
         """获取 Redis 客户端（可能为 None）"""
         try:
             from app.core.redis import redis_client
+
             return redis_client
         except Exception:
             return None
 
     async def _load_from_redis(self):
-        """从 Redis 加载长期记忆和反思记忆"""
+        """从 Redis 加载长期记忆和反思记忆。
+
+        issue #301 家族尾巴（#13 同族）：加载失败不得置 ``_loaded`` ——
+        旧 ``finally`` 无条件置位会把"读不出来"冒充成"已加载完毕"，
+        本进程从此不再重试（恒空，重启才恢复）。只有"Redis 明确答复无数据"
+        （确定性空库）或导入成功才是可置位的确定性事实；未配置 Redis 的
+        情况同样不置位（随后配置可用时可恢复）。
+        """
         if self._loaded:
             return
         try:
@@ -531,14 +538,16 @@ class AgentMemorySystem:
                 return
             data_raw = await r.get(self._persist_key)
             if not data_raw:
+                # Redis 明确答复"没有数据" → 确定性空库，可以置位。
+                self._loaded = True
                 return
             data = json.loads(data_raw)
             self.import_data(data)
+            self._loaded = True
             logger.info(f"Agent '{self.agent_id}' 记忆已从 Redis 恢复")
         except Exception as e:
+            # 加载失败不是"确定性空库"：不置位，下次访问可重试。
             logger.warning(f"从 Redis 加载记忆失败: {e}")
-        finally:
-            self._loaded = True
 
     async def _save_to_redis(self):
         """保存长期记忆和反思记忆到 Redis"""
@@ -554,7 +563,7 @@ class AgentMemorySystem:
             await r.setex(
                 self._persist_key,
                 86400 * 7,  # 7 天过期
-                json.dumps(persist_data, ensure_ascii=False, default=str)
+                json.dumps(persist_data, ensure_ascii=False, default=str),
             )
         except Exception as e:
             logger.warning(f"保存记忆到 Redis 失败: {e}")
@@ -564,7 +573,7 @@ class AgentMemorySystem:
         content: str,
         memory_type: str = "short_term",
         importance: float = 0.5,
-        metadata: dict[str, Any] = None
+        metadata: dict[str, Any] = None,
     ) -> MemoryItem:
         """存储记忆"""
         if not self._loaded:
@@ -594,16 +603,16 @@ class AgentMemorySystem:
 
         # 检查是否需要反思
         self.interaction_count += 1
-        if self.config["auto_reflect"] and self.interaction_count % self.config["reflect_interval"] == 0:
+        if (
+            self.config["auto_reflect"]
+            and self.interaction_count % self.config["reflect_interval"] == 0
+        ):
             await self._auto_reflect()
 
         return item
 
     async def recall(
-        self,
-        query: str,
-        memory_types: list[str] = None,
-        top_k: int = 10
+        self, query: str, memory_types: list[str] = None, top_k: int = 10
     ) -> list[dict[str, Any]]:
         """检索记忆。如果配置了 embedding provider，优先使用语义搜索。"""
         if not self._loaded:
@@ -627,16 +636,29 @@ class AgentMemorySystem:
                         results.extend([item.to_dict() for item in semantic_results])
                     else:
                         # Fall back to keyword search
-                        results.extend([item.to_dict() for item in self.long_term.search(query, top_k=top_k)])
+                        results.extend(
+                            [item.to_dict() for item in self.long_term.search(query, top_k=top_k)]
+                        )
                 except Exception as e:
                     logger.warning(f"Semantic search failed, falling back to keyword: {e}")
-                    results.extend([item.to_dict() for item in self.long_term.search(query, top_k=top_k)])
+                    results.extend(
+                        [item.to_dict() for item in self.long_term.search(query, top_k=top_k)]
+                    )
             else:
-                results.extend([item.to_dict() for item in self.long_term.search(query, top_k=top_k)])
+                results.extend(
+                    [item.to_dict() for item in self.long_term.search(query, top_k=top_k)]
+                )
 
         if "reflective" in memory_types:
-            results.extend([{"type": "insight", "content": i} for i in self.reflective.get_relevant_insights(query)])
-            results.extend([{"type": "lesson", **l} for l in self.reflective.get_lessons_for_situation(query)])
+            results.extend(
+                [
+                    {"type": "insight", "content": i}
+                    for i in self.reflective.get_relevant_insights(query)
+                ]
+            )
+            results.extend(
+                [{"type": "lesson", **l} for l in self.reflective.get_lessons_for_situation(query)]
+            )
 
         return results[:top_k]
 
@@ -684,32 +706,23 @@ class AgentMemorySystem:
 
     async def store_interaction(self, user_input: str, assistant_response: str) -> None:
         """存储交互"""
-        await self.remember(
-            f"用户: {user_input}",
-            memory_type="short_term",
-            importance=0.6
-        )
-        await self.remember(
-            f"助手: {assistant_response}",
-            memory_type="short_term",
-            importance=0.5
-        )
+        await self.remember(f"用户: {user_input}", memory_type="short_term", importance=0.6)
+        await self.remember(f"助手: {assistant_response}", memory_type="short_term", importance=0.5)
 
-    async def store_experience(self, success: bool, action: str, result: str, context: str = "") -> None:
+    async def store_experience(
+        self, success: bool, action: str, result: str, context: str = ""
+    ) -> None:
         """存储经验"""
         importance = 0.8 if not success else 0.6
         await self.remember(
             f"{'成功' if success else '失败'}: {action} -> {result}",
             memory_type="long_term",
             importance=importance,
-            metadata={"context": context}
+            metadata={"context": context},
         )
 
         if not success:
-            self.reflective.add_lesson(
-                lesson=result,
-                trigger=action
-            )
+            self.reflective.add_lesson(lesson=result, trigger=action)
             # remember() 的保存发生在这条反思经验写入之前，需补一次落盘，
             # 否则驱逐/重启会丢失 Redis 尚未见过的数据
             await self._save_to_redis()
@@ -722,12 +735,17 @@ class AgentMemorySystem:
             "long_term": self.long_term.to_dict(),
             "working": self.working.to_dict(),
             "reflective": self.reflective.to_dict(),
-            "interaction_count": self.interaction_count
+            "interaction_count": self.interaction_count,
         }
 
     def import_data(self, data: dict[str, Any]) -> None:
-        """导入记忆数据"""
-        self.agent_id = data.get("agent_id", self.agent_id)
+        """导入记忆数据。
+
+        安全（A1 记忆 IDOR）：载荷里的 `agent_id` 一律忽略——记忆系统的命名空间
+        是服务端按 (org, user, agent) 分配的不可变身份。此前这里用
+        `data.get("agent_id")` 重写 `self.agent_id`，导入端点（请求体任意 dict）
+        即可把 `agent:memory:<任意 key>` 指向他人命名空间、跨租户覆写 Redis 记忆。
+        """
         self.interaction_count = data.get("interaction_count", 0)
 
         # 恢复短期记忆
@@ -767,35 +785,92 @@ _MAX_MEMORY_SYSTEMS = 256
 memory_systems: dict[str, AgentMemorySystem] = {}
 
 
-def _evict_memory_system(agent_id: str) -> None:
+def build_memory_namespace(
+    org_id: int | None, user_id: int | None, agent_id: str = "default"
+) -> str:
+    """由本模块统一拼装记忆命名空间 `org:user:agent`（A1 记忆 IDOR 修复）。
+
+    命名空间只能按显式租户上下文拼装：org/user 段固定在前面，agent_id 只是
+    该租户内的子作用域。任何调用方都不得把用户可控的完整命名空间字符串直接
+    当作全局 key——那会绕过租户隔离，读写他人长期记忆。
+
+    W0-6：org 与 user 都是必填租户维度，缺失（None）一律显式拒绝；此前
+    org=None 会拼出 ``"None:..."`` 命名空间（跨租户 / 不可回收）。org 还必须是
+    正整数——0/-1 是历史 fail-open 哨兵，已禁用。
+    """
+    if org_id is None:
+        raise ValueError(
+            "记忆命名空间缺少 organization_id，拒绝构造（会生成 'None:...' 跨租户命名空间）"
+        )
+    if isinstance(org_id, bool):
+        raise ValueError(f"记忆命名空间的 organization_id 非法: {org_id!r}")
+    try:
+        coerced_org_id = int(org_id)
+    except (TypeError, ValueError):
+        raise ValueError(f"记忆命名空间的 organization_id 非法: {org_id!r}") from None
+    if coerced_org_id <= 0:
+        raise ValueError(
+            f"记忆命名空间的 organization_id={org_id!r} 非法：必须是正整数组织 ID"
+            "（0/-1 是历史 fail-open 哨兵，已禁用）"
+        )
+    if user_id is None:
+        raise ValueError(
+            "记忆命名空间缺少 user_id，拒绝构造（会生成 '...:None:...' 跨用户命名空间）"
+        )
+    if isinstance(user_id, bool):
+        raise ValueError(f"记忆命名空间的 user_id 非法: {user_id!r}")
+    try:
+        coerced_user_id = int(user_id)
+    except (TypeError, ValueError):
+        raise ValueError(f"记忆命名空间的 user_id 非法: {user_id!r}") from None
+    if coerced_user_id < 0:
+        raise ValueError(f"记忆命名空间的 user_id={user_id!r} 非法：不能为负数")
+    return f"{coerced_org_id}:{coerced_user_id}:{agent_id}"
+
+
+def _evict_memory_system(namespace: str) -> None:
     """从缓存中驱逐一个记忆系统
 
     驱逐前尽力把长期/反思记忆写回 Redis：
     - 仅当实例已从 Redis 加载过（否则"空内存"写回会覆盖 Redis 中的已有数据）；
     - 仅在事件循环可用时调度异步保存，避免驱逐静默丢弃 Redis 尚未见过的数据。
     """
-    system = memory_systems.pop(agent_id, None)
+    system = memory_systems.pop(namespace, None)
     if system is None or not system._loaded:
         return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        logger.debug(f"无事件循环，驱逐记忆系统 '{agent_id}' 时跳过持久化")
+        logger.debug(f"无事件循环，驱逐记忆系统 '{namespace}' 时跳过持久化")
         return
     loop.create_task(system._save_to_redis())
 
 
-def get_memory_system(agent_id: str = "default") -> AgentMemorySystem:
-    """获取或创建记忆系统（LRU：缓存上限 _MAX_MEMORY_SYSTEMS）"""
-    system = memory_systems.get(agent_id)
+def get_memory_system(
+    org_id: int | None,
+    user_id: int | None,
+    agent_id: str = "default",
+) -> AgentMemorySystem:
+    """获取或创建记忆系统（LRU：缓存上限 _MAX_MEMORY_SYSTEMS）。
+
+    安全（A1 记忆节点 IDOR）：签名强制调用方显式传租户上下文，命名空间
+    `org_id:user_id:agent_id` 由本函数内部拼装。此前 `get_memory_system(agent_id)`
+    把调用方传入的整串当全局 key，工作流记忆节点可直接传 `org:user:agent`
+    完整三元组，跨 org/user 读写他人记忆——该入口已废除。
+
+    W0-6：org/user 缺失（None）或 org 非正整数时由 ``build_memory_namespace``
+    显式拒绝，不创建任何命名空间。
+    """
+    namespace = build_memory_namespace(org_id, user_id, agent_id)
+    system = memory_systems.get(namespace)
     if system is not None:
         # 命中即刷新为最近使用
-        memory_systems.pop(agent_id)
-        memory_systems[agent_id] = system
+        memory_systems.pop(namespace)
+        memory_systems[namespace] = system
         return system
 
     while len(memory_systems) >= _MAX_MEMORY_SYSTEMS:
         _evict_memory_system(next(iter(memory_systems)))
 
-    memory_systems[agent_id] = AgentMemorySystem(agent_id)
-    return memory_systems[agent_id]
+    memory_systems[namespace] = AgentMemorySystem(namespace)
+    return memory_systems[namespace]

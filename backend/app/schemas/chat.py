@@ -1,6 +1,7 @@
 """
 聊天相关的Pydantic模型
 """
+
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -10,13 +11,15 @@ from pydantic import BaseModel, Field
 
 class ChatType(str, Enum):
     """聊天类型"""
+
     KNOWLEDGE = "knowledge"  # 知识问答
-    TEXT2SQL = "text2sql"     # TextToSQL
-    GENERAL = "general"       # 通用对话
+    TEXT2SQL = "text2sql"  # TextToSQL
+    GENERAL = "general"  # 通用对话
 
 
 class MessageType(str, Enum):
     """消息类型"""
+
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
@@ -24,11 +27,13 @@ class MessageType(str, Enum):
 
 class ChatSessionSettings(BaseModel):
     """会话设置模型"""
+
     bound_document_ids: list[str] | None = Field(None, description="绑定的文档ID列表")
 
 
 class ChatRequest(BaseModel):
     """聊天请求"""
+
     message: str = Field(..., min_length=1, description="用户消息")
     session_id: str | None = Field(None, description="会话ID（用于多轮对话）")
     organization_id: str | None = Field(None, description="组织ID（用于知识库问答）")
@@ -39,6 +44,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     """聊天响应"""
+
     message: str = Field(..., description="AI回答")
     session_id: str | None = Field(None, description="会话ID")
     chat_type: str = Field(..., description="对话类型")
@@ -47,12 +53,14 @@ class ChatResponse(BaseModel):
 
 class ChatSessionCreate(BaseModel):
     """创建聊天会话请求"""
+
     title: str | None = Field(None, description="会话标题")
     organization_id: str | None = Field(None, description="组织ID")
 
 
 class ChatSessionResponse(BaseModel):
     """聊天会话响应"""
+
     session_id: str = Field(..., description="会话ID")
     title: str | None = Field(None, description="会话标题")
     user_id: str = Field(..., description="用户ID")
@@ -66,6 +74,7 @@ class ChatSessionResponse(BaseModel):
 
 class ChatMessageResponse(BaseModel):
     """聊天消息响应"""
+
     id: str = Field(..., description="消息ID")
     session_id: str = Field(..., description="会话ID")
     content: str = Field(..., description="消息内容")
@@ -76,6 +85,7 @@ class ChatMessageResponse(BaseModel):
 
 class ChatHistoryResponse(BaseModel):
     """聊天历史响应"""
+
     session_id: str = Field(..., description="会话ID")
     messages: list[ChatMessageResponse] = Field(..., description="消息列表")
     total_count: int = Field(..., description="消息总数")
@@ -83,6 +93,7 @@ class ChatHistoryResponse(BaseModel):
 
 class ChatStreamChunk(BaseModel):
     """聊天流式数据块"""
+
     type: str = Field(..., description="数据类型：chunk, end, error")
     content: str = Field(..., description="内容")
     timestamp: float = Field(..., description="时间戳")
@@ -90,15 +101,23 @@ class ChatStreamChunk(BaseModel):
 
 class ChatStreamRequest(BaseModel):
     """SSE 流式聊天请求"""
+
     content: str = Field(..., min_length=1, description="用户消息")
     conversationId: str | None = Field(None, description="会话 ID")
     fileIds: list[str] | None = Field(None, description="关联文件 ID 列表")
-    payload: dict | None = Field(None, description="额外参数（strict/privacy/sse/stream 等布尔开关）")
+    payload: dict | None = Field(
+        None,
+        description=(
+            "额外参数（strict/privacy/sse/stream 等布尔开关）。"
+            "历史字段 systemPrompt 已弃用（deprecated）：后端从未读取，继续忽略"
+        ),
+    )
     useAgent: bool = Field(False, description="使用 PER Agent 模式（替代默认 RAG 管线）")
     debug: bool = Field(False, description="启用检索调试模式（返回中间检索结果）")
 
 
 class FeedbackRequest(BaseModel):
     """消息反馈请求"""
+
     feedback: int = Field(..., ge=-1, le=1, description="反馈值：1=点赞, 0=取消, -1=点踩")
     note: str | None = Field(None, max_length=500, description="反馈备注")

@@ -20,7 +20,9 @@
     M3  删 executor 终态 ctx.complete_step 记账 → 用例 5 / 7 红；
     M4  run_report 恢复 `clean_success = not fatal and review != "reject"` → 用例 5 / 7 红；
     M5  _execute_step_once 尾部恢复无条件 completed 记录 → 用例 7 红（假 completed 复发）；
-    M6  删 mcp_bridge 未知 server 的结构化失败 → 用例 2 红。
+    M6  删 mcp_bridge 未知 server 的结构化失败 → 用例 2 红；
+    M7  删 tool_not_allowed 分支的 attempt_error_detail 赋值（#293 评审 R1 复现）→
+        用例 8 红（同一 attempt 出现 completed+failed 双记录）。
 """
 
 import sys
@@ -44,9 +46,13 @@ from app.agent.run_report import build_run_report, render_run_report_text
 # ── 假件 ────────────────────────────────────────────────────────────────────
 
 
-def _failing_ddgs(exc: Exception):
-    """假 duckduckgo_search：进入上下文管理器即抛异常（模拟上游故障）。"""
-    mod = types.ModuleType("duckduckgo_search")
+def _failing_ddgs(exc: Exception) -> list[tuple[str, types.ModuleType]]:
+    """假搜索后端：进入上下文管理器即抛异常（模拟上游故障）。
+
+    web_search 现为「新名 ddgs 优先、旧名 duckduckgo_search 兜底」两段 import
+    （harness 审计·web 依赖补齐）——同一假件同时注入两个模块名，
+    无论代码走到哪段 import 都命中。
+    """
 
     class DDGS:
         def __enter__(self):
@@ -55,8 +61,12 @@ def _failing_ddgs(exc: Exception):
         def __exit__(self, *a):
             return False
 
-    mod.DDGS = DDGS
-    return mod
+    out: list[tuple[str, types.ModuleType]] = []
+    for name in ("ddgs", "duckduckgo_search"):
+        mod = types.ModuleType(name)
+        mod.DDGS = DDGS
+        out.append((name, mod))
+    return out
 
 
 def _fake_llm_toolclient(tool_name: str, args_json: str, synthesis: str = "合成答案"):
@@ -93,7 +103,8 @@ def _memory() -> AgentMemoryBridge:
 
 
 def _failing_web_search_env(monkeypatch, exc: Exception):
-    monkeypatch.setitem(sys.modules, "duckduckgo_search", _failing_ddgs(exc))
+    for name, mod in _failing_ddgs(exc):
+        monkeypatch.setitem(sys.modules, name, mod)
     monkeypatch.setattr(ws_mod, "_check_rate_limit", AsyncMock(return_value=True))
 
 
@@ -118,7 +129,8 @@ async def test_mcp_unknown_server_is_structured_failure():
     """mcp_bridge 未知 server 此前返回 'Error: unknown MCP server ...' 字符串
     （M6：还原为字符串 → 本用例红）。"""
     result = await tool_registry.execute_detailed(
-        "mcp_call", {"server": "nope", "tool": "t"},
+        "mcp_call",
+        {"server": "nope", "tool": "t"},
     )
     assert result.success is False
     assert result.error is not None and result.error.code == "validation_error"
@@ -129,7 +141,8 @@ async def test_translate_short_text_is_structured_failure():
     """translate_text 校验守卫此前返回 'Error: Text too short to translate.'
     （M2：还原为字符串 → 本用例红）。"""
     result = await tool_registry.execute_detailed(
-        "translate_text", {"text": "x", "target_language": "en"},
+        "translate_text",
+        {"text": "x", "target_language": "en"},
     )
     assert result.success is False
     assert result.error is not None and result.error.code == "validation_error"
@@ -147,7 +160,8 @@ async def test_analyze_data_invalid_input_is_structured_failure():
 async def test_compare_documents_missing_org_fails_closed_structured():
     """compare_documents 缺组织上下文此前返回 'Error: 无法确定组织范围...' 字符串。"""
     result = await tool_registry.execute_detailed(
-        "compare_documents", {"document_ids": ["a", "b"]},
+        "compare_documents",
+        {"document_ids": ["a", "b"]},
     )
     assert result.success is False
     assert result.error is not None and result.error.code == "auth_required"
@@ -176,7 +190,8 @@ async def test_translation_output_that_looks_like_error_stays_success(monkeypatc
     monkeypatch.setattr("app.dependencies.get_rag_pipeline", lambda: pipeline)
 
     result = await tool_registry.execute_detailed(
-        "translate_text", {"text": "错误：文件未找到", "target_language": "en"},
+        "translate_text",
+        {"text": "错误：文件未找到", "target_language": "en"},
     )
 
     assert result.success is True, f"合法译文被误判为失败: {result.to_dict()}"
@@ -205,17 +220,30 @@ class _ScriptedExecutor(Executor):
     """s1 正常完成（照真实路径写 completed 记录）；s2 恒 timeout（可重试）。"""
 
     async def _execute_step_once(
-        self, step, plan, history, organization_id, user_id, enable_thinking,
-        error_context="", ctx=None,
+        self,
+        step,
+        plan,
+        history,
+        organization_id,
+        user_id,
+        enable_thinking,
+        error_context="",
+        ctx=None,
     ):
         if step.id == "s1":
             if ctx is not None:
-                ctx.complete_step(step.id, step.description, step.tool_hint, "completed", result="结果一")
+                ctx.complete_step(
+                    step.id, step.description, step.tool_hint, "completed", result="结果一"
+                )
             yield AgentEvent(type="chunk", content="结果一", plan_id=plan.id, plan_step_id=step.id)
         else:
             yield AgentEvent(
-                type="tool_error", tool_name="fake_tool", content="tools timed out",
-                error_type="timeout", plan_id=plan.id, plan_step_id=step.id,
+                type="tool_error",
+                tool_name="fake_tool",
+                content="tools timed out",
+                error_type="timeout",
+                plan_id=plan.id,
+                plan_step_id=step.id,
             )
 
 
@@ -227,24 +255,28 @@ async def test_retry_exhausted_step_lands_in_failures_and_report():
     M4：run_report 不看 ctx.failures → clean_success True → 红。
     """
     cfg = AgentConfig(
-        enable_planning=False, enable_reflection=False,
+        enable_planning=False,
+        enable_reflection=False,
         max_retries_per_step=1,  # 2 次 attempt 后耗尽
     )
     executor = _ScriptedExecutor(MagicMock(), cfg, _memory(), execution_mode="serial")
     ctx = ExecutionContext(query="q-293")
-    plan = Plan(id="p1", goal="g", steps=[
-        PlanStep(id="s1", description="第一步", tool_hint="search_knowledge_base"),
-        PlanStep(id="s2", description="第二步（必失败）", tool_hint="web_search"),
-    ])
+    plan = Plan(
+        id="p1",
+        goal="g",
+        steps=[
+            PlanStep(id="s1", description="第一步", tool_hint="search_knowledge_base"),
+            PlanStep(id="s2", description="第二步（必失败）", tool_hint="web_search"),
+        ],
+    )
 
-    events = [e async for e in executor.execute(plan, ctx=ctx)]
+    events = [e async for e in executor.execute(plan, organization_id=1, ctx=ctx)]
 
     assert plan.steps[1].status == "failed"
     assert ctx.failures, "重试耗尽必须点亮 ctx.failures（修复前恒空）"
     assert any("s2" in f and "timed out" in f for f in ctx.failures), ctx.failures
     assert any(
-        r.step_id == "s2" and r.status == "failed" and r.error
-        for r in ctx.completed_steps
+        r.step_id == "s2" and r.status == "failed" and r.error for r in ctx.completed_steps
     ), "终态失败必须落一条 failed StepRecord 供 run_report 展示"
     assert any(e.type == "tool_error" and "步骤失败" in e.content for e in events)
 
@@ -261,13 +293,23 @@ async def test_clean_run_stays_all_green():
 
     变异：把 clean_success 改成恒定 False（或 grade_hint 恒 has-failures）→ 红。
     """
+
     class _OkExecutor(Executor):
         async def _execute_step_once(
-            self, step, plan, history, organization_id, user_id, enable_thinking,
-            error_context="", ctx=None,
+            self,
+            step,
+            plan,
+            history,
+            organization_id,
+            user_id,
+            enable_thinking,
+            error_context="",
+            ctx=None,
         ):
             if ctx is not None:
-                ctx.complete_step(step.id, step.description, step.tool_hint, "completed", result="ok")
+                ctx.complete_step(
+                    step.id, step.description, step.tool_hint, "completed", result="ok"
+                )
             yield AgentEvent(type="chunk", content="ok", plan_id=plan.id, plan_step_id=step.id)
 
     cfg = AgentConfig(enable_planning=False, enable_reflection=False)
@@ -275,7 +317,7 @@ async def test_clean_run_stays_all_green():
     ctx = ExecutionContext(query="q-293-ok")
     plan = Plan(id="p1", goal="g", steps=[PlanStep(id="s1", description="第一步", tool_hint="t")])
 
-    [e async for e in executor.execute(plan, ctx=ctx)]
+    [e async for e in executor.execute(plan, organization_id=1, ctx=ctx)]
 
     assert not ctx.failures
     report = build_run_report(ctx, final_output="答案")
@@ -312,7 +354,7 @@ async def test_tool_always_fails_task_reports_failure_every_dimension(monkeypatc
     step = PlanStep(id="s1", description="搜索外部资料", tool_hint="web_search")
     plan = Plan(id="p1", goal="g", steps=[step])
 
-    events = [e async for e in executor.execute(plan, ctx=ctx)]
+    events = [e async for e in executor.execute(plan, organization_id=1, ctx=ctx)]
 
     types = [e.type for e in events]
     assert "tool_error" in types, f"工具失败必须以 tool_error 暴露: {types}"
@@ -337,3 +379,45 @@ async def test_tool_always_fails_task_reports_failure_every_dimension(monkeypatc
     assert report["tool_calls"][0]["error"], "tool_calls 必须携带错误文本"
     text = render_run_report_text(report)
     assert "FAILURE:" in text and "[failed]" in text
+
+
+# ── ⑤ R1（#293 评审核实残余，一行级）：tool_not_allowed attempt 不得写假 completed ──
+
+
+@pytest.mark.asyncio
+async def test_tool_not_allowed_attempt_records_single_failed_no_fake_completed():
+    """R1：受限上下文（tool_tags）里模型发出未列名工具——执行层拒绝并如实发
+    tool_error（fatal 分类，不重试），但该分支此前未设 attempt_error_detail →
+    _execute_step_once 尾部照写一条"completed"假记录：同一 attempt 出现
+    completed+failed 双记录，报告自相矛盾。
+
+    修复：分支补 attempt_error_detail（对齐 serialization_error / ToolResult
+    失败 / 异常三条既有分支）→ 该 attempt 只留重试尽头的终态 failed 一条。
+
+    变异 M7（删 tool_not_allowed 分支的 attempt_error_detail 赋值）→
+    记录变 ["completed", "failed"] → 本用例红。
+    """
+    cfg = AgentConfig(
+        enable_planning=False,
+        enable_reflection=False,
+        tool_tags=["search", "analysis"],  # delegate_subtask 不在白名单
+        max_tool_calls_per_turn=3,
+    )
+    client = _fake_llm_toolclient("delegate_subtask", "{}")
+    executor = Executor(client, cfg, _memory(), execution_mode="serial")
+    ctx = ExecutionContext(query="q-293-r1")
+    step = PlanStep(id="s1", description="受限步骤", tool_hint="delegate_subtask")
+    plan = Plan(id="p1", goal="g", steps=[step])
+
+    events = [e async for e in executor.execute(plan, organization_id=1, ctx=ctx)]
+
+    assert any(e.type == "tool_error" and e.error_type == "tool_not_allowed" for e in events), (
+        f"拒绝执行必须如实发 tool_error: {[e.type for e in events]}"
+    )
+
+    records = [r for r in ctx.completed_steps if r.step_id == "s1"]
+    assert [r.status for r in records] == ["failed"], (
+        f"同一 attempt 不得出现 completed+failed 双记录，实际 {[r.status for r in records]}"
+    )
+    assert step.status == "failed"
+    assert ctx.failures and "不在当前上下文允许的工具集内" in ctx.failures[0], ctx.failures

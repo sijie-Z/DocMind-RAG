@@ -25,7 +25,7 @@ def normalize_object_name(file_path: str) -> str:
         parts = file_path.split("/")
         try:
             bucket_index = parts.index(settings.MINIO_BUCKET_NAME)
-            return "/".join(parts[bucket_index + 1:])
+            return "/".join(parts[bucket_index + 1 :])
         except ValueError:
             # bucket 名不在路径中：退化为取最后一段之后的全部（兼容旧格式）
             return "/".join(parts[4:]) if len(parts) > 4 else parts[-1]
@@ -72,12 +72,23 @@ class MinioClient:
         except Exception as e:
             logger.warning(f"MinIO bucket check failed (non-blocking, will retry): {e}")
 
-    def put_object(self, object_name: str, data: BinaryIO, length: int, content_type: str = "application/octet-stream", **kwargs):
+    def put_object(
+        self,
+        object_name: str,
+        data: BinaryIO,
+        length: int,
+        content_type: str = "application/octet-stream",
+        **kwargs,
+    ):
         self._ensure_bucket_exists()
         try:
             target_bucket = kwargs.get("bucket_name") or kwargs.get("bucket") or self.bucket_name
-            self.client.put_object(target_bucket, object_name, data, length, content_type=content_type)
-            logger.info(f"Uploaded {sanitize_log_value(object_name)} to {sanitize_log_value(target_bucket)}")
+            self.client.put_object(
+                target_bucket, object_name, data, length, content_type=content_type
+            )
+            logger.info(
+                f"Uploaded {sanitize_log_value(object_name)} to {sanitize_log_value(target_bucket)}"
+            )
             return object_name
         except S3Error as e:
             logger.error(f"Error uploading object: {e}")
@@ -101,7 +112,9 @@ class MinioClient:
 
     def get_presigned_url(self, object_name: str, expires: timedelta = timedelta(hours=1)):
         try:
-            return self.client.get_presigned_url("GET", self.bucket_name, object_name, expires=expires)
+            return self.client.get_presigned_url(
+                "GET", self.bucket_name, object_name, expires=expires
+            )
         except S3Error as e:
             logger.error(f"Error getting presigned URL: {e}")
             raise

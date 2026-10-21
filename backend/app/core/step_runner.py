@@ -4,6 +4,7 @@ This is the core abstraction for the Reliability Layer. Every step in the
 agent execution (LLM calls, tool executions, retrieval) should go through
 StepRunner to ensure bounded execution time and predictable failure behavior.
 """
+
 import asyncio
 import builtins
 import logging
@@ -18,8 +19,10 @@ logger = logging.getLogger(__name__)
 
 # ── Error types ──────────────────────────────────────────────
 
+
 class StepError(Exception):
     """Base error for step execution failures."""
+
     def __init__(self, message: str, error_type: str = "step_error", recoverable: bool = False):
         super().__init__(message)
         self.error_type = error_type
@@ -48,9 +51,11 @@ class ResourceExhaustedError(StepError):
 
 # ── Results ──────────────────────────────────────────────────
 
+
 @dataclass
 class StepResult:
     """Result of a single step execution after timeout/retry/fallback."""
+
     success: bool
     output: Any = None
     error: str | None = None
@@ -72,6 +77,7 @@ class StepResult:
 
 
 # ── StepRunner ───────────────────────────────────────────────
+
 
 class StepRunner:
     """Wraps an async callable with timeout, retry, and fallback.
@@ -132,19 +138,33 @@ class StepRunner:
                 last_error = StepTimeoutError(
                     f"Step timed out after {self.timeout}s (attempt {attempt + 1}/{self.max_retries + 1})"
                 )
-                logger.warning("[%s] timeout on attempt %d/%d", self.step_id, attempt + 1, self.max_retries + 1)
+                logger.warning(
+                    "[%s] timeout on attempt %d/%d", self.step_id, attempt + 1, self.max_retries + 1
+                )
                 continue
 
             except StepError as e:
                 last_error = e
                 if not e.recoverable:
                     break  # non-recoverable → no retry
-                logger.warning("[%s] %s (attempt %d/%d)", self.step_id, e.error_type, attempt + 1, self.max_retries + 1)
+                logger.warning(
+                    "[%s] %s (attempt %d/%d)",
+                    self.step_id,
+                    e.error_type,
+                    attempt + 1,
+                    self.max_retries + 1,
+                )
                 continue
 
             except Exception as e:
                 last_error = StepError(str(e)[:200], error_type="unexpected", recoverable=True)
-                logger.warning("[%s] unexpected error: %s (attempt %d/%d)", self.step_id, str(e)[:80], attempt + 1, self.max_retries + 1)
+                logger.warning(
+                    "[%s] unexpected error: %s (attempt %d/%d)",
+                    self.step_id,
+                    str(e)[:80],
+                    attempt + 1,
+                    self.max_retries + 1,
+                )
                 continue
 
         # ── Retries exhausted — try fallback ──
@@ -182,6 +202,7 @@ class StepRunner:
 
 
 # ── Convenience wrapper ──────────────────────────────────────
+
 
 async def safe_run(
     fn: Callable[..., Awaitable[Any]],

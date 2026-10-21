@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 数据库连接模块
+DocMind AI知识库系统 - 数据库连接模块
 """
 
 import logging
@@ -27,21 +27,22 @@ _is_sqlite = "sqlite" in settings.DATABASE_URL.lower()
 
 engine = create_async_engine(
     settings.DATABASE_URL,
-    **({} if _is_sqlite else {
-        "pool_size": settings.DATABASE_POOL_SIZE,
-        "max_overflow": settings.DATABASE_MAX_OVERFLOW,
-        "pool_pre_ping": True,
-        "pool_recycle": 3600,
-    }),
-    echo=settings.DEBUG
+    **(
+        {}
+        if _is_sqlite
+        else {
+            "pool_size": settings.DATABASE_POOL_SIZE,
+            "max_overflow": settings.DATABASE_MAX_OVERFLOW,
+            "pool_pre_ping": True,
+            "pool_recycle": 3600,
+        }
+    ),
+    echo=settings.DEBUG,
 )
 
 # 会话工厂
-AsyncSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
 
 async def _warn_if_collation_differs() -> None:
     """MySQL 上若数据库默认 collation 与项目约定不符，打一条明确的告警。
@@ -76,29 +77,44 @@ async def _database_state(conn) -> tuple[int, int | None]:
     表不存在时不会去查行数，避免抛异常。
     """
     if conn.dialect.name == "mysql":
-        table_count = (await conn.execute(text(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = DATABASE()"
-        ))).scalar() or 0
-        has_alembic_version = bool((await conn.execute(text(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = DATABASE() AND table_name = 'alembic_version'"
-        ))).scalar())
+        table_count = (
+            await conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()"
+                )
+            )
+        ).scalar() or 0
+        has_alembic_version = bool(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM information_schema.tables "
+                        "WHERE table_schema = DATABASE() AND table_name = 'alembic_version'"
+                    )
+                )
+            ).scalar()
+        )
     else:
-        table_count = (await conn.execute(text(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
-        ))).scalar() or 0
-        has_alembic_version = bool((await conn.execute(text(
-            "SELECT COUNT(*) FROM sqlite_master "
-            "WHERE type = 'table' AND name = 'alembic_version'"
-        ))).scalar())
+        table_count = (
+            await conn.execute(text("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"))
+        ).scalar() or 0
+        has_alembic_version = bool(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM sqlite_master "
+                        "WHERE type = 'table' AND name = 'alembic_version'"
+                    )
+                )
+            ).scalar()
+        )
 
     if not has_alembic_version:
         return int(table_count), None
 
-    revision_count = (await conn.execute(text(
-        "SELECT COUNT(*) FROM alembic_version"
-    ))).scalar() or 0
+    revision_count = (
+        await conn.execute(text("SELECT COUNT(*) FROM alembic_version"))
+    ).scalar() or 0
     return int(table_count), int(revision_count)
 
 
@@ -124,6 +140,7 @@ async def init_db():
     """
     try:
         import os
+
         use_alembic = os.getenv("USE_ALEMBIC", "").lower() in ("1", "true", "yes")
 
         await _warn_if_collation_differs()
@@ -171,6 +188,7 @@ async def init_db():
         logger.error(f"数据库初始化失败: {str(e)}")
         raise
 
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """获取数据库会话"""
     async with AsyncSessionLocal() as session:
@@ -183,6 +201,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
+
 async def close_db():
     """关闭数据库连接"""
     try:
@@ -191,18 +210,24 @@ async def close_db():
     except Exception as e:
         logger.error(f"关闭数据库连接失败: {str(e)}")
 
+
 # 同步数据库引擎（用于某些需要同步操作的场景）
 sync_engine = create_engine(
     settings.DATABASE_URL.replace("+aiomysql", "+pymysql").replace("+aiosqlite", ""),
-    **({} if _is_sqlite else {
-        "pool_size": settings.DATABASE_POOL_SIZE,
-        "max_overflow": settings.DATABASE_MAX_OVERFLOW,
-        "pool_pre_ping": True,
-        "pool_recycle": 3600,
-    })
+    **(
+        {}
+        if _is_sqlite
+        else {
+            "pool_size": settings.DATABASE_POOL_SIZE,
+            "max_overflow": settings.DATABASE_MAX_OVERFLOW,
+            "pool_pre_ping": True,
+            "pool_recycle": 3600,
+        }
+    ),
 )
 
 SyncSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
+
 
 def get_sync_db():
     """获取同步数据库会话"""

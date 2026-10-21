@@ -33,6 +33,10 @@ class ExperienceStore:
     """Persistent experience store. Thread-safe for single-process usage.
 
     Loads lazily on first access. Always prefers Redis; falls back to local JSON.
+    A load only counts as "loaded" when a backend actually answered (data, or
+    an authoritative "no data"); an unreachable backend leaves the store
+    unloaded so the next access retries (issue #301 #13) instead of freezing
+    an empty view for the process lifetime.
     """
 
     def __init__(self) -> None:
@@ -42,8 +46,24 @@ class ExperienceStore:
     # ── CRUD ──
 
     async def add(self, exp: Experience) -> None:
-        """Insert or update an experience."""
+        """Insert or update an experience.
+
+        Insert 走内容级去重（round2 卫生修复①）：抽取器每次调用都铸造新
+        ``id``（models.py 的 default_factory），同一模板经验重新抽到时此前会
+        按新 id 无限重复入库——现实库 47 条里 19 条逐字相同。现在：同内容
+        （归一化 scenario/symptom/lesson）不同 id = 同一条经验，已存记录
+        （含累积的 confidence/verified_count，见 record_verification 生命周期）
+        胜出，新记录不落库。同 id 的再 add 仍按原语义原地更新。
+        """
         await self._ensure_loaded()
+        if exp.id not in self._experiences and any(
+            existing.content_key() == exp.content_key() for existing in self._experiences.values()
+        ):
+            logger.debug(
+                "Experience content already stored, skipping duplicate: %s",
+                exp.short_summary(),
+            )
+            return
         self._experiences[exp.id] = exp
         await self._save()
         logger.debug("Experience stored: %s", exp.short_summary())
@@ -81,30 +101,68 @@ class ExperienceStore:
     # Used to filter out experiences that cause Negative Transfer.
     _QUERY_SCENARIOS: dict[str, list[str]] = {
         "multi_step_analysis": [
-            "分析", "趋势", "总结", "近三年", "逐年",
-            "深入", "拆分", "拆解", "综合", "全流程",
+            "分析",
+            "趋势",
+            "总结",
+            "近三年",
+            "逐年",
+            "深入",
+            "拆分",
+            "拆解",
+            "综合",
+            "全流程",
         ],
         "framework_analysis": [
-            "swot", "pest", "杜邦", "框架", "五力",
-            "pestel", "波士顿", "矩阵",
+            "swot",
+            "pest",
+            "杜邦",
+            "框架",
+            "五力",
+            "pestel",
+            "波士顿",
+            "矩阵",
         ],
         "cross_document": [
-            "比较", "对比", "两家", "多家", "差异",
-            "高于", "低于", "优劣", "区别",
+            "比较",
+            "对比",
+            "两家",
+            "多家",
+            "差异",
+            "高于",
+            "低于",
+            "优劣",
+            "区别",
         ],
         "single_document": [
-            "找一份", "提取", "列出", "找出",
+            "找一份",
+            "提取",
+            "列出",
+            "找出",
         ],
         "web_search": [
-            "最新", "新闻", "融资", "搜索", "查询",
-            "最近", "今天", "实时",
+            "最新",
+            "新闻",
+            "融资",
+            "搜索",
+            "查询",
+            "最近",
+            "今天",
+            "实时",
         ],
         "tool_recovery": [
-            "不存在", "找不到", "没找到", "错误",
-            "fake", "404", "失败",
+            "不存在",
+            "找不到",
+            "没找到",
+            "错误",
+            "fake",
+            "404",
+            "失败",
         ],
         "edge_case_simple": [
-            "知识库", "有什么", "有哪些", "多少文档",
+            "知识库",
+            "有什么",
+            "有哪些",
+            "多少文档",
         ],
         "ambiguity": [],  # detected by length < 8 chars
     }
@@ -199,14 +257,16 @@ class ExperienceStore:
 
         # Chinese character bigram overlap (enables "比较" ↔ "对比" matching)
         if len(query_lower) > 1:
-            query_bigrams = {query_lower[i:i+2] for i in range(len(query_lower) - 1)}
+            query_bigrams = {query_lower[i : i + 2] for i in range(len(query_lower) - 1)}
             # Filter to only CJK bigrams
-            query_bigrams = {bg for bg in query_bigrams if all('一' <= c <= '鿿' or '　' <= c <= '〿' for c in bg)}
+            query_bigrams = {
+                bg for bg in query_bigrams if all("一" <= c <= "鿿" or "　" <= c <= "〿" for c in bg)
+            }
             if query_bigrams:
                 haystack_bigrams: set[str] = set()
                 for i in range(len(haystack) - 1):
-                    bg = haystack[i:i+2]
-                    if all('一' <= c <= '鿿' or '　' <= c <= '〿' for c in bg):
+                    bg = haystack[i : i + 2]
+                    if all("一" <= c <= "鿿" or "　" <= c <= "〿" for c in bg):
                         haystack_bigrams.add(bg)
                 if haystack_bigrams:
                     overlap = len(query_bigrams & haystack_bigrams)
@@ -263,23 +323,57 @@ class ExperienceStore:
     # ── Persistence ──
 
     async def _ensure_loaded(self) -> None:
+        """Load once — but only after a backend actually answered (#301 #13).
+
+        旧行为无条件置 ``_loaded=True``：Redis 瞬断 + 本地无文件时，两个后端
+        都没答上来却宣布"加载完成（空）"，本进程经验库恒空、重启才恢复。
+        新语义（对齐 agent/skills.py 的评审 m2 修法：失败不置位）：
+          - 任一后端载入数据（True）→ 已加载；
+          - 两个后端都明确答复"没有数据"（False/False）→ 空库是确定性事实，
+            置位、不再重试；
+          - 其余（至少一个后端"答不出来"：Redis 不可用 / 本地文件读不了）→
+            不置位，下次访问重试（load 幂等，重复加载只是 merge）。
+        """
         if self._loaded:
             return
-        loaded = await self._load_from_redis()
-        if not loaded:
-            loaded = self._load_from_local()
-        self._loaded = True
-        logger.info(
-            "ExperienceStore loaded: %d experiences (source: %s)",
-            len(self._experiences),
-            "redis" if loaded else "local" if loaded is not None else "empty",
-        )
+        from_redis = await self._load_from_redis()
+        from_local: bool | None = None
+        if from_redis is not True:
+            from_local = self._load_from_local()
 
-    async def _load_from_redis(self) -> bool:
+        if from_redis is True or from_local is True:
+            source = "redis" if from_redis else "local"
+            self._loaded = True
+            logger.info(
+                "ExperienceStore loaded: %d experiences (source: %s)",
+                len(self._experiences),
+                source,
+            )
+        elif from_redis is False and from_local is False:
+            self._loaded = True
+            logger.info("ExperienceStore loaded: 0 experiences (source: empty)")
+        else:
+            logger.debug(
+                "ExperienceStore: load inconclusive (redis=%s, local=%s); "
+                "will retry on next access",
+                from_redis,
+                from_local,
+            )
+
+    async def _load_from_redis(self) -> bool | None:
+        """Tri-state Redis load（issue #301 #13）。
+
+        True  = 载入数据；
+        False = Redis 明确答复"没有数据"（键为空）——确定性；
+        None  = Redis 不可用（未配置 / 连接异常）——"查不了"，不得与
+                "确实没有数据"同形，否则瞬断会被当成空库加载。
+        """
         try:
             from app.core.redis import redis_client
+
             if not redis_client:
-                return False
+                logger.debug("ExperienceStore: Redis not configured; skipping Redis load")
+                return None
             raw = await redis_client.get(REDIS_KEY)
             if not raw:
                 return False
@@ -289,20 +383,26 @@ class ExperienceStore:
                 self._experiences[exp.id] = exp
             return True
         except Exception as e:
-            logger.debug("ExperienceStore: Redis load failed: %s", e)
-            return False
+            logger.warning("ExperienceStore: Redis load failed: %s", e)
+            return None
 
     def _load_from_local(self) -> bool | None:
+        """Tri-state local load（issue #301 #13）。
+
+        True  = 载入数据；False = 文件不存在（确定性"没有数据"）；
+        None  = 文件存在但读取/解析失败——"答不出来"，下次重试。
+        """
         try:
-            if LOCAL_PATH.exists():
-                data = json.loads(LOCAL_PATH.read_text(encoding="utf-8"))
-                for item in data:
-                    exp = Experience.from_dict(item)
-                    self._experiences[exp.id] = exp
-                return True
+            if not LOCAL_PATH.exists():
+                return False
+            data = json.loads(LOCAL_PATH.read_text(encoding="utf-8"))
+            for item in data:
+                exp = Experience.from_dict(item)
+                self._experiences[exp.id] = exp
+            return True
         except Exception as e:
-            logger.debug("ExperienceStore: local load failed: %s", e)
-        return None
+            logger.warning("ExperienceStore: local load failed: %s", e)
+            return None
 
     async def _save(self) -> None:
         data = [exp.to_dict() for exp in self._experiences.values()]
@@ -314,9 +414,11 @@ class ExperienceStore:
     async def _save_to_redis(self, data: list[dict]) -> bool:
         try:
             from app.core.redis import redis_client
+
             if redis_client:
                 await redis_client.setex(
-                    REDIS_KEY, 86400 * 30,
+                    REDIS_KEY,
+                    86400 * 30,
                     json.dumps(data, ensure_ascii=False),
                 )
                 return True

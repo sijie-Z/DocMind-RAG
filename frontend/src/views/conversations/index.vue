@@ -5,7 +5,7 @@
       <div class="mb-6">
         <div class="flex items-center justify-between">
           <div>
-            <h1 class="text-2xl font-bold text-gray-800 dark:text-white">{{ t('conversations.title') }}</h1>
+            <h1 class="text-2xl font-bold text-gray-800 dark:text-white">{{ t('menu.conversations') }}</h1>
             <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">查看和管理对话记录</p>
           </div>
           <n-button type="primary" @click="startNewChat">
@@ -80,13 +80,15 @@
               <div class="flex-1 min-w-0">
                 <h3 class="font-medium text-gray-800 dark:text-gray-100 truncate">{{ item.title || '未命名对话' }}</h3>
                 <div class="flex items-center gap-3 text-xs text-gray-400 mt-1">
-                  <span>{{ formatDate(item.updated_at) }}</span>
+                  <!-- updated_at 可为空串（chat.py:191 `isoformat() if s.updated_at else ""`），
+                       dayjs('') → "Invalid Date"——空串/非法值不渲染时间（B31） -->
+                  <span v-if="formatDate(item.updated_at)">{{ formatDate(item.updated_at) }}</span>
                   <span>{{ item.message_count || 0 }} 条消息</span>
                 </div>
               </div>
             </div>
 
-            <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div class="flex items-center gap-2 conv-actions">
               <n-button size="small" quaternary @click.stop="viewConversation(item)">继续</n-button>
               <n-button size="small" quaternary type="error" @click.stop="deleteItem(item)">
                 <template #icon><n-icon><TrashOutline /></n-icon></template>
@@ -117,7 +119,8 @@ import { ref, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { SearchOutline, RefreshOutline, ChatbubblesOutline, TrashOutline, AddOutline } from '@vicons/ionicons5'
-import { getConversations, deleteConversation } from '@/api/conversation'
+import { getConversations, deleteConversation, type ConversationListResponse } from '@/api/conversation'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import dayjs from 'dayjs'
@@ -152,9 +155,11 @@ const loadConversations = async () => {
   try {
     const params = { page: pagination.page, page_size: pagination.pageSize, search: searchText.value }
     const response = await getConversations(params)
-    if (response.data?.data) {
-      conversations.value = Array.isArray(response.data.data.data) ? response.data.data.data : []
-      pagination.itemCount = response.data.data.total || 0
+    // 宽容解包：真实响应为 {success, data: {data: [...], total, page, page_size}}。
+    const page = apiUnwrap<ConversationListResponse | null>(response)
+    if (page) {
+      conversations.value = Array.isArray(page.data) ? page.data : []
+      pagination.itemCount = page.total || 0
     }
     loadError.value = false
   } catch (error) {
@@ -203,11 +208,39 @@ const deleteItem = (item: Conversation) => {
   })
 }
 
+// updated_at 后端可为空串（chat.py:191）；空串/非法值返回 ''，由模板 v-if 决定不渲染
 const formatDate = (date: string) => {
-  return dayjs(date).format('MM-DD HH:mm')
+  if (!date) return ''
+  const d = dayjs(date)
+  return d.isValid() ? d.format('MM-DD HH:mm') : ''
 }
 
 onMounted(() => {
   loadConversations()
 })
 </script>
+
+<style scoped>
+/* I1 操作排显隐（键盘 / 触屏可达，鼠标行为不回退，同 ChatMessages T11 模式）：
+   - 默认隐藏；键盘 :has(:focus-visible) 常显（媒体查询之外，任何设备生效）；
+     不用 :focus-within——鼠标点击按钮也会聚焦，移开后操作排会滞留；
+   - hover 显隐只在支持 hover 的设备上生效；
+   - 无 hover 能力的设备（触屏）常显。 */
+.conv-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.conv-actions:has(:focus-visible) {
+  opacity: 1;
+}
+@media (hover: hover) {
+  .group:hover .conv-actions {
+    opacity: 1;
+  }
+}
+@media (hover: none) {
+  .conv-actions {
+    opacity: 1;
+  }
+}
+</style>

@@ -18,6 +18,7 @@ CI 的 schema 门禁用它在真实数据库上做断言：
 
 退出码 0 = 通过，1 = 失败。数据库地址取 ``DATABASE_URL``（与 alembic 同源）。
 """
+
 from __future__ import annotations
 
 import os
@@ -66,13 +67,12 @@ def check_alembic_revision(engine) -> list[str]:
         return [f"迁移出现分叉，存在多个 head: {sorted(heads)}（需要先 merge）"]
 
     too_long = [
-        rev.revision for rev in script.walk_revisions()
+        rev.revision
+        for rev in script.walk_revisions()
         if len(rev.revision) > ALEMBIC_VERSION_NUM_MAX
     ]
     if too_long:
-        return [
-            f"revision id 超过 {ALEMBIC_VERSION_NUM_MAX} 字符，MySQL 上会报 1406: {too_long}"
-        ]
+        return [f"revision id 超过 {ALEMBIC_VERSION_NUM_MAX} 字符，MySQL 上会报 1406: {too_long}"]
 
     with engine.connect() as conn:
         exists = conn.execute(
@@ -81,9 +81,7 @@ def check_alembic_revision(engine) -> list[str]:
                 "WHERE table_schema = DATABASE() AND table_name = :t"
             )
             if engine.dialect.name == "mysql"
-            else text(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = :t"
-            ),
+            else text("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = :t"),
             {"t": ALEMBIC_VERSION_TABLE},
         ).scalar()
 
@@ -126,6 +124,7 @@ def check_tables_match(engine) -> list[str]:
 # ── 列级定义比对（issue #150）──────────────────────────────────────────────
 # 只对 MySQL 生效：走 information_schema，并把模型声明渲染成 MySQL 方言的
 # 期望形态。两者各自归一化后逐字段比较（见下面每个 _normalize_* 的说明）。
+
 
 def _normalize_mysql_type(ddl_type: str) -> str:
     """归一化列类型文本，只做「同义类型名」的折叠，不折叠值本身。
@@ -255,7 +254,7 @@ def check_column_definitions(engine) -> list[str]:
                 )
                 errors.append(f"{table_name}.{column.name}: {delta}")
         model_columns = {c.name for c in table.columns}
-        for (t, c) in sorted(actual):
+        for t, c in sorted(actual):
             if t == table_name and c not in model_columns:
                 errors.append(f"{t}.{c}: 库里有但模型没有这一列")
 
@@ -287,9 +286,7 @@ def check_collation(engine) -> list[str]:
             {"v": ALEMBIC_VERSION_TABLE},
         ).all()
 
-    bad = sorted(
-        f"{name}({coll})" for name, coll in rows if coll != CANONICAL_MYSQL_COLLATION
-    )
+    bad = sorted(f"{name}({coll})" for name, coll in rows if coll != CANONICAL_MYSQL_COLLATION)
     if bad:
         return [
             f"以下表的 collation 不是 {CANONICAL_MYSQL_COLLATION}，"
@@ -339,9 +336,7 @@ def main() -> int:
     engine = create_engine(_sync_url(url), pool_pre_ping=True)
     try:
         errors = (
-            check_tables_match(engine)
-            + check_column_definitions(engine)
-            + check_collation(engine)
+            check_tables_match(engine) + check_column_definitions(engine) + check_collation(engine)
         )
         if not create_all_mode:
             errors = check_alembic_revision(engine) + errors

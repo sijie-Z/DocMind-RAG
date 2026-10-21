@@ -1,0 +1,21 @@
+{
+  "servers": {
+    "filesystem": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${DOCMIND_MCP_FS_ROOT}"],
+      "enabled": false,
+      "description": "本地文件系统读写（官方 filesystem server）。启用前确认 npx 可用、且已把 DOCMIND_MCP_FS_ROOT 设为允许 agent 访问的目录。"
+    },
+    "github": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "enabled": false,
+      "description": "GitHub API（issues / PR / 仓库检索）。需要 GITHUB_TOKEN 环境变量。"
+    }
+  }
+}

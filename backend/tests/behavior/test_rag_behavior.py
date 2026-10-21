@@ -11,7 +11,6 @@ DocMind testing-strategy.md §"必须保证":
   - RAG retrieval fusion, rerank, compression behavior is stable
 """
 
-
 from app.rag.context_compressor import compress
 from app.rag.query_processor import (
     QueryComplexityClassifier,
@@ -27,14 +26,12 @@ class TestQueryIntentClassifier:
     def test_comparison_query_returns_comparison(self):
         c = QueryIntentClassifier()
         labels = c.classify("对比星辰科技和远方创新的财务表现")
-        assert labels == "comparison", \
-            f"对比 query should classify as comparison, got {labels}"
+        assert labels == "comparison", f"对比 query should classify as comparison, got {labels}"
 
     def test_definition_query_returns_definition(self):
         c = QueryIntentClassifier()
         labels = c.classify("什么是Kubernetes?")
-        assert labels == "definition", \
-            f"'什么是' query should classify as definition, got {labels}"
+        assert labels == "definition", f"'什么是' query should classify as definition, got {labels}"
 
 
 # ── Query classification — complexity ────────────────────────────────────────
@@ -51,8 +48,9 @@ class TestQueryComplexityClassifier:
         c = QueryComplexityClassifier()
         result = c.classify("对比一下星辰科技最近三个季度的财报数据,并分析毛利率变化趋势")
         # Should be "medium" or "complex", not "simple"
-        assert result in ("medium", "complex"), \
+        assert result in ("medium", "complex"), (
             f"long multi-topic query should not be simple, got {result}"
+        )
 
 
 # ── Context compression ──────────────────────────────────────────────────────
@@ -65,8 +63,9 @@ class TestContextCompression:
         text = "公司采用Kubernetes集群管理服务。K8s版本为1.28。\n办公室位于北京朝阳区。\n部署使用Helm Chart。"
         query = "Kubernetes架构"
         result = compress(text, query, max_chars=800)
-        assert "Kubernetes" in result or "K8s" in result, \
+        assert "Kubernetes" in result or "K8s" in result, (
             f"compress should keep K8s-related lines, got: {result[:80]}"
+        )
 
     def test_compress_short_text_is_unchanged(self):
         text = "short text"
@@ -77,8 +76,7 @@ class TestContextCompression:
         text = "A" * 2000
         query = "unrelated query"
         result = compress(text, query, max_chars=800)
-        assert len(result) <= 800, \
-            f"compress should respect max_chars, got {len(result)} chars"
+        assert len(result) <= 800, f"compress should respect max_chars, got {len(result)} chars"
 
     def test_compress_empty_text_returns_empty(self):
         assert compress("", "query", max_chars=800) == ""
@@ -122,9 +120,15 @@ class TestEventStreamOrdering:
     def _sorted_by_type(events):
         """Reorder events in the canonical RAG-stream order for testing."""
         order = [
-            "thinking", "plan_start", "plan_step", "plan_complete",
-            "tool_call", "tool_result",
-            "chunk", "done", "error",
+            "thinking",
+            "plan_start",
+            "plan_step",
+            "plan_complete",
+            "tool_call",
+            "tool_result",
+            "chunk",
+            "done",
+            "error",
         ]
         typed = {t: [] for t in order}
         for e in events:
@@ -145,5 +149,9 @@ class TestEventStreamOrdering:
         ]
         canonical = self._sorted_by_type(events)
         assert canonical == [
-            "plan_start", "plan_step", "tool_call", "tool_result", "done",
+            "plan_start",
+            "plan_step",
+            "tool_call",
+            "tool_result",
+            "done",
         ], f"canonical order mismatch: {canonical}"

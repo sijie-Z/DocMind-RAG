@@ -14,6 +14,7 @@ MySQL**：本次修复的核心就是"握手要查库"，把 DB mock 掉等于�
 
     RUN_INTEGRATION=1 pytest tests/integration/test_ws_auth_lifecycle.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -87,9 +88,7 @@ def _create_user(*, is_active: bool = True) -> tuple[int, str]:
 def _set_active(user_id: int, active: bool) -> None:
     async def _go() -> None:
         async with _Session() as session:
-            await session.execute(
-                update(User).where(User.id == user_id).values(is_active=active)
-            )
+            await session.execute(update(User).where(User.id == user_id).values(is_active=active))
             await session.commit()
 
     _run(_go())
@@ -105,9 +104,7 @@ def _delete_user(user_id: int) -> None:
 
 
 def _mint_token(user_id: int, username: str) -> str:
-    return auth_service.create_access_token(
-        {"sub": username, "user_id": user_id, "role": "user"}
-    )
+    return auth_service.create_access_token({"sub": username, "user_id": user_id, "role": "user"})
 
 
 def _connect(client: TestClient, url: str, token: str) -> tuple[int, str] | None:
@@ -285,22 +282,16 @@ class TestSubprotocolEcho:
     """
 
     def test_chat_ws_echoes_auth_subprotocol(self, client, ws_user):
-        with client.websocket_connect(
-            CHAT_WS, subprotocols=[f"auth.{ws_user['token']}"]
-        ) as ws:
+        with client.websocket_connect(CHAT_WS, subprotocols=[f"auth.{ws_user['token']}"]) as ws:
             assert ws.accepted_subprotocol == f"auth.{ws_user['token']}"
 
     def test_notification_ws_echoes_auth_subprotocol(self, client, ws_user):
-        with client.websocket_connect(
-            NOTIFY_WS, subprotocols=[f"auth.{ws_user['token']}"]
-        ) as ws:
+        with client.websocket_connect(NOTIFY_WS, subprotocols=[f"auth.{ws_user['token']}"]) as ws:
             assert ws.accepted_subprotocol == f"auth.{ws_user['token']}"
 
     def test_query_token_handshake_echoes_nothing(self, client, ws_user):
         # 兼容回退路径：无请求子协议 → 无回显，与裸 accept() 语义一致
-        with client.websocket_connect(
-            f"{NOTIFY_WS}?token={ws_user['token']}"
-        ) as ws:
+        with client.websocket_connect(f"{NOTIFY_WS}?token={ws_user['token']}") as ws:
             assert ws.accepted_subprotocol is None
 
 

@@ -2,26 +2,26 @@
   <div class="organizations-container h-full p-4 lg:p-6 overflow-y-auto">
     <!-- 现代化毛玻璃卡片容器 -->
     <div class="bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl rounded-3xl border border-white/20 dark:border-gray-800/30 shadow-2xl shadow-emerald-500/10 h-full flex flex-col overflow-hidden">
-      
+
       <!-- 页面头部：现代化搜索与操作栏 -->
       <div class="p-6 border-b border-gray-200/50 dark:border-gray-800/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gradient-to-r from-emerald-50/30 to-teal-50/30 dark:from-emerald-950/10 dark:to-teal-950/10">
         <div>
           <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-600 to-teal-600 dark:from-emerald-400 dark:to-teal-400">
-            {{ t('org.title') }}
+            {{ t('menu.organizations') }}
           </h1>
           <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {{ t('org.subtitle', '管理系统内的组织架构及其层级关系') }}
           </p>
         </div>
         
-        <div class="flex flex-wrap items-center gap-3">
-          <div class="relative group">
+        <div class="org-header-actions flex flex-wrap items-center gap-3">
+          <div class="org-search-wrap relative group">
             <n-input
               v-model:value="searchText"
               :placeholder="t('org.searchPlaceholder')"
               clearable
               round
-              class="w-64 transition-all duration-300 group-hover:shadow-lg group-hover:shadow-emerald-500/10"
+              class="org-search-input w-64 transition-all duration-300 group-hover:shadow-lg group-hover:shadow-emerald-500/10"
             >
               <template #prefix>
                 <n-icon class="text-emerald-500"><SearchOutline /></n-icon>
@@ -29,9 +29,9 @@
             </n-input>
           </div>
           
-          <n-button 
-            v-if="!permissionDenied"
-            type="primary" 
+          <n-button
+            v-if="!permissionDenied && userStore.isSuperuser"
+            type="primary"
             round 
             class="shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 transition-all duration-300"
             @click="showCreateModal = true"
@@ -82,14 +82,14 @@
           <div v-else-if="!loadError && !permissionDenied && filteredOrganizations.length === 0 && !loading" class="h-full flex items-center justify-center">
             <n-empty :description="t('org.noData', '暂无组织数据')">
               <template #extra>
-                <n-button v-if="!permissionDenied" type="primary" round @click="showCreateModal = true">{{ t('org.create') }}</n-button>
+                <n-button v-if="!permissionDenied && userStore.isSuperuser" type="primary" round @click="showCreateModal = true">{{ t('org.create') }}</n-button>
               </template>
             </n-empty>
           </div>
 
-          <div v-else-if="!permissionDenied && !loadError" class="flex h-full gap-6">
+          <div v-else-if="!permissionDenied && !loadError" class="org-split flex h-full gap-6">
             <!-- 左侧：树形结构 -->
-            <div class="w-1/3 min-w-[300px] flex flex-col bg-white/50 dark:bg-gray-800/30 rounded-2xl border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
+            <div class="org-tree-panel w-1/3 min-w-[300px] flex flex-col bg-white/50 dark:bg-gray-800/30 rounded-2xl border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
               <div class="p-4 border-b border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-900/50">
                 <div class="flex items-center justify-between mb-2">
                   <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ t('org.treeView', '架构树') }}</span>
@@ -127,11 +127,11 @@
             </div>
 
             <!-- 右侧：详细列表 -->
-            <div class="flex-1 flex flex-col bg-white/50 dark:bg-gray-800/30 rounded-2xl border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
+            <div class="org-list-panel flex-1 flex flex-col bg-white/50 dark:bg-gray-800/30 rounded-2xl border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
               <div class="p-4 border-b border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">
                 <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ t('org.detailList', '详细列表') }}</span>
                 <n-space>
-                  <n-button v-if="selectedIds.length > 0" size="small" type="error" ghost @click="handleBatchDelete">
+                  <n-button v-if="selectedIds.length > 0 && userStore.isSuperuser" size="small" type="error" ghost @click="handleBatchDelete">
                     {{ t('common.batchDelete', '批量删除') }}
                   </n-button>
                 </n-space>
@@ -143,6 +143,8 @@
                   :pagination="pagination"
                   :row-key="(row) => row.id"
                   :bordered="false"
+                  :single-line="true"
+                  :scroll-x="960"
                   class="modern-table h-full"
                   @update:checked-row-keys="handleSelectionChange"
                   :row-props="(row) => ({
@@ -258,10 +260,16 @@
               </div>
             </n-tab-pane>
 
-            <!-- 成员 -->
+            <!-- 成员（T8：补最小管理 UI —— 添加/改角色/移除，接线后端既有端点） -->
             <n-tab-pane name="members" :tab="`${t('org.members', '成员')} (${orgMembers.length})`">
-              <div class="py-4">
-                <n-list hoverable clickable>
+              <div class="py-4 space-y-3">
+                <div class="flex justify-end">
+                  <n-button size="small" type="primary" @click="openAddMember">
+                    <template #icon><n-icon><PersonAddOutline /></n-icon></template>
+                    {{ t('org.addMember') }}
+                  </n-button>
+                </div>
+                <n-list hoverable>
                   <n-list-item v-for="member in orgMembers" :key="member.id">
                     <template #prefix>
                       <n-avatar round size="small" :style="{ backgroundColor: selectedOrg?.color }">
@@ -278,6 +286,23 @@
                         </n-space>
                       </template>
                     </n-thing>
+                    <template #suffix>
+                      <n-space size="small" align="center">
+                        <n-select
+                          size="tiny"
+                          style="width: 108px"
+                          :value="member.role"
+                          :options="memberRoleOptions"
+                          @update:value="(v: string) => handleMemberRoleChange(member, v)"
+                        />
+                        <n-popconfirm @positive-click="() => handleRemoveMember(member)">
+                          <template #trigger>
+                            <n-button size="tiny" quaternary type="error">{{ t('org.removeMember') }}</n-button>
+                          </template>
+                          {{ t('org.removeMemberConfirm') }}
+                        </n-popconfirm>
+                      </n-space>
+                    </template>
                   </n-list-item>
                   <div v-if="orgMembers.length === 0" class="py-10 text-center text-gray-400">
                     {{ t('common.noData', '暂无成员') }}
@@ -300,8 +325,8 @@
                     <n-thing :title="doc.title">
                       <template #description>
                         <n-space size="small">
-                          <n-tag size="tiny" :type="doc.status === 'completed' ? 'success' : 'warning'">
-                            {{ doc.status }}
+                          <n-tag size="tiny" :type="orgDocStatusType(doc.status)">
+                            {{ orgDocStatusLabel(doc.status) }}
                           </n-tag>
                           <span class="text-xs text-gray-400">{{ formatDate(doc.created_at) }}</span>
                         </n-space>
@@ -318,6 +343,35 @@
         </n-spin>
       </n-drawer-content>
     </n-drawer>
+
+    <!-- 添加成员弹窗（T8） -->
+    <n-modal
+      v-model:show="showAddMemberModal"
+      preset="card"
+      :title="t('org.addMember')"
+      class="max-w-md"
+    >
+      <n-spin :show="loadingMemberOptions">
+        <n-form label-placement="top" class="mt-2">
+          <n-form-item :label="t('org.selectUser')">
+            <n-select
+              v-model:value="memberToAdd"
+              filterable
+              :options="candidateUsers"
+              :placeholder="t('org.selectUser')"
+            />
+          </n-form-item>
+        </n-form>
+      </n-spin>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <n-button @click="showAddMemberModal = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :disabled="memberToAdd == null" :loading="addingMember" @click="confirmAddMember">
+            {{ t('common.confirm') }}
+          </n-button>
+        </div>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -329,17 +383,23 @@ import {
   NModal, NForm, NFormItem, NColorPicker, NTreeSelect, NInputNumber,
   NPopconfirm, NTooltip, NTree, NDrawer, NDrawerContent,
   NTabs, NTabPane, NDescriptions, NDescriptionsItem, NList, NListItem,
-  NAvatar, NThing, NTag, NResult
+  NAvatar, NThing, NTag, NResult, NSelect
 } from 'naive-ui'
 import {
   SearchOutline, RefreshOutline, CreateOutline,
   TrashOutline, AddCircleOutline, HelpCircleOutline,
   DocumentTextOutline,
-  DocumentOutline
+  DocumentOutline,
+  PersonAddOutline
 } from '@vicons/ionicons5'
 import type { DataTableColumns, TreeSelectOption, FormInst, TreeOption, TreeDropInfo } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { formatDate } from '@/utils/format'
+import { useConfirmDangerousAction } from '@/utils/confirm'
+import { useUserStore } from '@/stores/user'
+
+// W0-1：建/删组织是平台级动作；组织管理员仍可编辑本组织资料与排序。
+const userStore = useUserStore()
 import { 
   getOrganizations, 
   createOrganization, 
@@ -348,9 +408,16 @@ import {
   batchDeleteOrganizations,
   getOrganizationTree,
   getOrganizationMembers,
-  getOrganizationDocuments
+  getOrganizationDocuments,
+  addOrganizationMember,
+  updateOrganizationMemberRole,
+  removeOrganizationMember
 } from '@/api/organization'
+import type { OrganizationListResponse } from '@/api/organization'
+import { apiUnwrap } from '@/utils/apiUnwrap'
+import { getUsers } from '@/api/user'
 import type { OrganizationMember, OrganizationDocument } from '@/types/api'
+import { orgDocStatusLabel, orgDocStatusType } from './docStatus'
 
 /** Safely extract error message from unknown error */
 function getErrorMessage(error: unknown): string {
@@ -392,6 +459,7 @@ interface Organization {
 // 2. 状态变量
 const message = useDedupedMessage()
 const { t } = useI18n()
+const confirmDangerousAction = useConfirmDangerousAction()
 const loading = ref(false)
 const loadError = ref(false)
 const loadErrorMsg = ref('')
@@ -523,6 +591,11 @@ const handleDrop = async ({ node, dragNode, dropPosition }: TreeDropInfo) => {
 
 const handleBatchDelete = async () => {
   if (selectedIds.value.length === 0) return
+  const confirmed = await confirmDangerousAction(
+    t('common.batchDelete'),
+    t('org.batchDeleteConfirm', { count: selectedIds.value.length }),
+  )
+  if (!confirmed) return
   try {
     loading.value = true
     await batchDeleteOrganizations(selectedIds.value)
@@ -549,12 +622,87 @@ const showOrgDetails = async (orgId: number) => {
       getOrganizationMembers(orgId),
       getOrganizationDocuments(orgId)
     ])
-    orgMembers.value = membersRes.data.data
-    orgDocuments.value = docsRes.data.data
+    orgMembers.value = apiUnwrap<OrganizationMember[]>(membersRes) || []
+    orgDocuments.value = apiUnwrap<OrganizationDocument[]>(docsRes) || []
   } catch (err: unknown) {
     message.error(t('org.loadDetailsFailed') + ': ' + getErrorMessage(err))
   } finally {
     loadingDetails.value = false
+  }
+}
+
+// ---- T8 成员管理最小 UI（后端端点既有：POST 添加 / PATCH 改角色 / DELETE 移除）----
+const showAddMemberModal = ref(false)
+const memberToAdd = ref<number | null>(null)
+const candidateUsers = ref<Array<{ label: string; value: number }>>([])
+const loadingMemberOptions = ref(false)
+const addingMember = ref(false)
+
+const memberRoleOptions = computed(() => [
+  { label: t('users.roleUser'), value: 'user' },
+  { label: t('users.roleAdmin'), value: 'admin' }
+])
+
+const refreshMembers = async () => {
+  if (!selectedOrg.value) return
+  const res = await getOrganizationMembers(selectedOrg.value.id)
+  orgMembers.value = apiUnwrap<OrganizationMember[]>(res) || []
+}
+
+const openAddMember = async () => {
+  memberToAdd.value = null
+  candidateUsers.value = []
+  showAddMemberModal.value = true
+  loadingMemberOptions.value = true
+  try {
+    const res = await getUsers({ skip: 0, limit: 100 })
+    const body = (res as unknown as { data?: { users?: Array<{ id: number; username: string }> } }).data
+    const users = Array.isArray(body?.users) ? body.users : []
+    const memberIds = new Set(orgMembers.value.map((m) => m.id))
+    candidateUsers.value = users
+      .filter((u) => !memberIds.has(u.id))
+      .map((u) => ({ label: u.username, value: u.id }))
+  } catch (err: unknown) {
+    message.error(t('org.loadUsersFailed') + ': ' + getErrorMessage(err))
+  } finally {
+    loadingMemberOptions.value = false
+  }
+}
+
+const confirmAddMember = async () => {
+  if (!selectedOrg.value || memberToAdd.value == null) return
+  addingMember.value = true
+  try {
+    await addOrganizationMember(selectedOrg.value.id, memberToAdd.value)
+    message.success(t('org.memberAdded'))
+    showAddMemberModal.value = false
+    await refreshMembers()
+  } catch (err: unknown) {
+    message.error(t('org.memberOpFailed') + ': ' + (getResponseDetail(err) || getErrorMessage(err)))
+  } finally {
+    addingMember.value = false
+  }
+}
+
+const handleMemberRoleChange = async (member: OrganizationMember, role: string) => {
+  if (!selectedOrg.value || role === member.role) return
+  try {
+    await updateOrganizationMemberRole(selectedOrg.value.id, member.id, role as 'user' | 'admin')
+    message.success(t('org.roleUpdated'))
+    await refreshMembers()
+  } catch (err: unknown) {
+    message.error(t('org.memberOpFailed') + ': ' + (getResponseDetail(err) || getErrorMessage(err)))
+  }
+}
+
+const handleRemoveMember = async (member: OrganizationMember) => {
+  if (!selectedOrg.value) return
+  try {
+    await removeOrganizationMember(selectedOrg.value.id, member.id)
+    message.success(t('org.memberRemoved'))
+    await refreshMembers()
+  } catch (err: unknown) {
+    message.error(t('org.memberOpFailed') + ': ' + (getResponseDetail(err) || getErrorMessage(err)))
   }
 }
 
@@ -577,35 +725,38 @@ const pagination = reactive({
 })
 
 // 4. 表格列定义
+// J2：列宽与行高统一 —— 所有数据列显式宽度/最小宽度（不再靠挤压表头），
+// 表格 single-line + scroll-x 兜底，名称/描述长文本单行省略并悬浮全称。
 const columns = computed<DataTableColumns<Organization>>(() => [
   { type: 'selection', width: 50 },
   {
     title: t('org.name'),
     key: 'name',
-    width: 200,
-    render: (row) => h('div', { style: 'display:flex; align-items:center; gap:8px' }, [
-      h('div', { style: `width:12px; height:12px; border-radius:50%; background-color:${row.color}` }),
-      h('span', row.name)
+    width: 220,
+    ellipsis: { tooltip: true },
+    render: (row) => h('div', { style: 'display:flex; align-items:center; gap:8px; min-width:0' }, [
+      h('div', { style: `width:12px; height:12px; border-radius:50%; flex-shrink:0; background-color:${row.color}` }),
+      h('span', { class: 'truncate', title: row.name }, row.name)
     ])
   },
   {
     title: t('org.level'),
     key: 'level',
-    width: 80,
+    width: 90,
     align: 'center',
     render: (row) => {
       const levels = [
-        t('org.level1'), 
-        t('org.level2'), 
-        t('org.level3'), 
-        t('org.level4'), 
+        t('org.level1'),
+        t('org.level2'),
+        t('org.level3'),
+        t('org.level4'),
         t('org.level5')
       ]
       return levels[row.level - 1] || t('org.levelOther')
     }
   },
-  { title: t('org.description'), key: 'description', ellipsis: { tooltip: true } },
-  { title: t('org.sort'), key: 'sort_order', width: 70, align: 'center' },
+  { title: t('org.description'), key: 'description', minWidth: 200, ellipsis: { tooltip: true } },
+  { title: t('org.sort'), key: 'sort_order', width: 80, align: 'center' },
   {
     title: t('org.createdAt'),
     key: 'created_at',
@@ -622,12 +773,16 @@ const columns = computed<DataTableColumns<Organization>>(() => [
         h(NButton, { size: 'small', quaternary: true, type: 'primary', onClick: () => handleEdit(row) }, {
           icon: () => h(NIcon, null, { default: () => h(CreateOutline) })
         }),
-        h(NPopconfirm, { onPositiveClick: () => handleDelete(row.id) }, {
-          trigger: () => h(NButton, { size: 'small', quaternary: true, type: 'error' }, {
-            icon: () => h(NIcon, null, { default: () => h(TrashOutline) })
-          }),
-          default: () => t('org.deleteConfirm')
-        })
+        ...(userStore.isSuperuser
+          ? [
+              h(NPopconfirm, { onPositiveClick: () => handleDelete(row.id) }, {
+                trigger: () => h(NButton, { size: 'small', quaternary: true, type: 'error' }, {
+                  icon: () => h(NIcon, null, { default: () => h(TrashOutline) })
+                }),
+                default: () => t('org.deleteConfirm')
+              }),
+            ]
+          : [])
       ]
     })
   }
@@ -647,15 +802,17 @@ const loadOrganizations = async () => {
       getOrganizationTree()
     ])
 
-    // 处理列表数据
-    if (listRes.data && listRes.data.data) {
-      organizations.value = Array.isArray(listRes.data.data.data) ? listRes.data.data.data : []
-      pagination.itemCount = listRes.data.data.total || 0
+    // 处理列表数据：{success, data: {data: [...], total, page, page_size}} 双层体
+    const list = apiUnwrap<OrganizationListResponse | null>(listRes)
+    if (list) {
+      organizations.value = Array.isArray(list.data) ? list.data : []
+      pagination.itemCount = list.total || 0
     }
 
-    // 处理树结构数据
-    if (treeRes.data && treeRes.data.data) {
-      fullTree.value = treeRes.data.data
+    // 处理树结构数据：{success, data: <Organization[]>} 单层体
+    const tree = apiUnwrap<Organization[] | null>(treeRes)
+    if (tree) {
+      fullTree.value = tree
     }
     loadError.value = false
   } catch (err: unknown) {
@@ -762,4 +919,27 @@ onMounted(loadOrganizations)
 <style scoped>
 .organizations-container { padding: 20px; height: 100%; box-sizing: border-box; }
 .organizations-card { height: 100%; }
+
+/* H1：常见宽度断点。旧实现左树恒为 w-1/3 + min-w-[300px]，窄屏无堆叠。 */
+@media (max-width: 1023px) {
+  .org-tree-panel { width: 40%; min-width: 240px; }
+}
+
+@media (max-width: 767px) {
+  .organizations-container { padding: 12px; }
+  .org-header-actions { width: 100%; }
+  .org-search-wrap { width: 100%; }
+  .org-search-input { width: 100%; }
+  .org-split {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .org-tree-panel {
+    width: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
+    max-height: 40%;
+  }
+  .org-list-panel { min-height: 0; }
+}
 </style>

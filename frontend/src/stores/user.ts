@@ -1,11 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import { loginWithJson, register as apiRegister, getUserProfile } from '@/api/auth'
-import { setToken, setRefreshToken, removeToken, getToken } from '@/utils/auth'
+import { loginWithJson, register as apiRegister, getUserProfile, logout as apiLogout } from '@/api/auth'
+import { setToken, setRefreshToken, removeToken, getToken, getRefreshToken } from '@/utils/auth'
 import type { UserInfo, LoginForm, RegisterForm } from '@/types/user'
 import type { AxiosError } from 'axios'
 import { useAppStore } from './app'
-import { getUserSettings, updateUserSettings, type UserSettings } from '@/api/user'
+import { getUserSettings, updateUserSettings, getMyOrganizations, switchOrganization as switchOrganizationApi, type UserSettings } from '@/api/user'
 
 function _extractErrorMessage(error: unknown, fallback: string): string {
   const axiosErr = error as AxiosError<{ message?: string; detail?: string }>
@@ -28,6 +28,11 @@ export const useUserStore = defineStore('user', () => {
   const userInfo = ref<UserInfo | null>(_loadUserInfo())
   const token = ref<string>(getToken() || '')
   const currentOrganizationId = ref<number | null>(null)
+  // 组织上下文版本号：每次成功切换组织递增。布局层把它并入页面 key，
+  // 使当前页面重挂载，文档/会话等 onMounted 拉取按新组织重新发起。
+  const organizationVersion = ref(0)
+  // 服务可用性标记：/users/me 遇 5xx/网络错误时为 true（保留会话，供全局横幅/不可用页消费）
+  const authServiceUnavailable = ref(false)
 
   // User settings state
   const settings = ref<UserSettings>({
@@ -67,11 +72,93 @@ export const useUserStore = defineStore('user', () => {
   
   // 计算属性
   const isLoggedIn = computed(() => !!token.value && !!userInfo.value)
-  const isAdmin = computed(() => userInfo.value?.role === 'admin')
+  // W0-1（ADR-001 D3）：admin 判定与后端同口径——
+  //   平台管理员只认显式 is_superuser；
+  //   组织管理员认当前组织的 is_org_admin（per-org 角色，由后端下发）；
+  //   users.role 只是展示标签，不再作为授权信号。
+  // 菜单过滤（layouts）与路由守卫（router）都消费这同一个计算属性。
+  const isSuperuser = computed(() => userInfo.value?.is_superuser === true)
+  const isOrgAdmin = computed(() => userInfo.value?.is_org_admin === true)
+  const isAdmin = computed(() => isSuperuser.value || isOrgAdmin.value)
   const currentOrgId = computed(() => currentOrganizationId.value || userInfo.value?.organization_id || null)
 
   const setCurrentOrganization = (orgId: number) => {
     currentOrganizationId.value = orgId
+  }
+
+  /**
+   * 切换当前组织（B1）：先由服务端校验成员关系并落库，成功后才更新本地上下文。
+   * 服务端失败时本地状态与版本号保持不变——不制造“前端已切换、服务端未切换”的假成功。
+   * 切到当前组织是幂等空操作，不产生请求。
+   */
+  const switchOrganization = async (orgId: number) => {
+    if (orgId === currentOrgId.value) {
+      return { success: true as const, organizationId: orgId }
+    }
+    const response = await switchOrganizationApi(orgId)
+    const resData = response.data as unknown as Record<string, unknown>
+    const payload = (
+      resData.data && typeof resData.data === 'object' ? resData.data : resData
+    ) as Record<string, unknown>
+    const appliedOrgId = Number(payload.organization_id ?? orgId)
+    currentOrganizationId.value = appliedOrgId
+    if (userInfo.value) {
+      // W0-1：服务端随切换结果回传目标组织的 per-org 管理身份；
+      // 立即更新，避免组织管理菜单最长滞后到下次 /users/me（5 分钟）。
+      const targetIsOrgAdmin = payload.is_org_admin
+      userInfo.value = {
+        ...userInfo.value,
+        organization_id: appliedOrgId,
+        ...(typeof targetIsOrgAdmin === 'boolean'
+          ? { is_org_admin: targetIsOrgAdmin }
+          : {}),
+      }
+    }
+    organizationVersion.value += 1
+    return { success: true as const, organizationId: appliedOrgId }
+  }
+
+  /**
+   * 当前用户可切换的组织列表（成员关系 + 主组织兜底）。
+   * 同时对齐服务端返回的 `current_organization_id`：多设备/多标签页下
+   * 当前组织以服务端为准，避免本地标签短暂漂移。
+   * 拉取失败时返回空数组，由切换器据当前组织状态决定可见性。
+   *
+   * T7：列表提升为共享状态 `myOrganizations`——顶栏组织切换器与移动端
+   * 用户菜单同源消费；布局层与切换器同 tick 挂载时，并发请求共享同一次
+   * GET（去重），不重复打接口。
+   */
+  const myOrganizations = ref<Array<{ id: number; name: string }>>([])
+  let organizationsRequest: Promise<Array<{ id: number; name: string }>> | null = null
+
+  const fetchMyOrganizations = async () => {
+    if (organizationsRequest) return organizationsRequest
+    const request = (async () => {
+      try {
+        const response = await getMyOrganizations()
+        const resData = response.data as unknown as Record<string, unknown>
+        const payload = (
+          resData.data && typeof resData.data === 'object' ? resData.data : resData
+        ) as Record<string, unknown>
+        const organizations = Array.isArray(payload.organizations) ? payload.organizations : []
+        const serverOrgId = payload.current_organization_id
+        if (typeof serverOrgId === 'number' && serverOrgId !== currentOrgId.value) {
+          currentOrganizationId.value = serverOrgId
+          if (userInfo.value) {
+            userInfo.value = { ...userInfo.value, organization_id: serverOrgId }
+          }
+        }
+        myOrganizations.value = organizations as Array<{ id: number; name: string }>
+        return organizations as Array<{ id: number; name: string }>
+      } catch {
+        myOrganizations.value = []
+        return [] as Array<{ id: number; name: string }>
+      } finally {
+        organizationsRequest = null
+      }
+    })()
+    organizationsRequest = request
+    return request
   }
   
   // 方法
@@ -111,17 +198,31 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  const register = async (form: RegisterForm) => {
+  const register = async (
+    form: RegisterForm
+  ): Promise<{ success: true; tokenIssued: boolean } | { success: false; message: string }> => {
     try {
       const response = await apiRegister(form)
       const raw = response.data as unknown as Record<string, unknown>
-      const payload = (raw?.data as Record<string, unknown>) ?? raw
-      if (payload?.access_token) {
-        setToken(payload.access_token as string, (payload.expires_in as number) ?? 86400)
-        if (payload.refresh_token) setRefreshToken(payload.refresh_token as string)
-        _applyValidatedAuth(payload.access_token as string, payload.user_info as UserInfo | undefined)
+      // 后端返回形态双兼容：token 可能在 data 包装里，也可能平铺在根上
+      const asRecord = (v: unknown): Record<string, unknown> | null =>
+        v && typeof v === 'object' ? (v as Record<string, unknown>) : null
+      const root = asRecord(raw)
+      const wrapped = asRecord(root?.data)
+      const accessToken = (wrapped?.access_token ?? root?.access_token ?? wrapped?.token ?? root?.token) as
+        | string
+        | undefined
+
+      if (accessToken) {
+        const expiresIn = (wrapped?.expires_in ?? root?.expires_in ?? 86400) as number
+        setToken(accessToken, expiresIn)
+        const refreshToken = (wrapped?.refresh_token ?? root?.refresh_token) as string | undefined
+        if (refreshToken) setRefreshToken(refreshToken)
+        _applyValidatedAuth(accessToken, (wrapped?.user_info ?? root?.user_info) as UserInfo | undefined)
       }
-      return { success: true }
+      // tokenIssued 供调用方分流：拿到 token → 按认证后落点跳转；
+      // 未拿到（后端未直接发放）→ 回登录页预填用户名并提示
+      return { success: true, tokenIssued: !!accessToken }
     } catch (error: unknown) {
       return {
         success: false,
@@ -144,28 +245,73 @@ export const useUserStore = defineStore('user', () => {
         ? resData.data as UserInfo
         : resData as unknown as UserInfo
       _applyValidatedAuth(storedToken, info)
+      authServiceUnavailable.value = false
       return response.data
     } catch (error) {
-      logout()
+      // 仅 401（或拦截器已判定续期失败的标记错误）视为会话失效；
+      // 5xx / 网络错误保留 token 与本地缓存的 userInfo，交由 UI 提示“服务不可用”。
+      const status = (error as AxiosError)?.response?.status
+      const sessionExpired =
+        status === 401 || (error as { authSessionExpired?: boolean })?.authSessionExpired === true
+      if (sessionExpired) {
+        authServiceUnavailable.value = false
+        // 不在此处导航：调用方（路由守卫/聊天页）自行决定落点；同步清本地即可
+        logout({ navigate: false })
+      } else {
+        authServiceUnavailable.value = true
+      }
       throw error
     }
   }
 
-  const logout = async () => {
+  /** 同步清空本地登录态（不请求服务端、不导航）：供登出与路由守卫的导航链路复用 */
+  const clearAuthState = () => {
     userInfo.value = null
     token.value = ''
+    authServiceUnavailable.value = false
     removeToken()
     // 清除用户态 localStorage，避免登出后残留敏感/偏好数据
     localStorage.removeItem('user_info')
     localStorage.removeItem('language')
     localStorage.removeItem('theme')
     localStorage.removeItem('activeSystemPrompt')
+  }
+
+  /**
+   * 登出：同步清本地 → （默认）跳登录页 → 服务端吊销令牌。
+   * 服务端失败不阻断本地登出（console.warn 告警，吊销幂等可稍后重试）。
+   * `navigate: false`：路由守卫等自行调用 next() 的导航链路使用，
+   * 避免本方法内的异步跳转覆盖其 redirect 语义。
+   */
+  const logout = async (options?: { navigate?: boolean }) => {
+    const accessToken = getToken()
+    const refreshToken = getRefreshToken()
+    // 先同步收口本地登录态：导航链路（如守卫）在 await 之前即可观察到已登出
+    clearAuthState()
     // 安全加固：清除 axios 默认 Authorization 头，防止登出后旧 token 残留
     // （动态导入避免与 request.ts 的静态循环依赖）
     try {
       const { clearDefaultAuth } = await import('@/utils/request')
       clearDefaultAuth()
     } catch { /* request 模块未就绪时忽略 */ }
+    // 跳转登录页；已在登录页时跳过（调用方自行跳转时传 navigate: false）
+    // 动态导入避免与 router/index.ts（其静态依赖本 store）形成初始化循环。
+    if (options?.navigate !== false) {
+      try {
+        const { default: router } = await import('@/router')
+        if (router.currentRoute.value.name !== 'Login') {
+          await router.push({ name: 'Login' })
+        }
+      } catch { /* router 未就绪时忽略 */ }
+    }
+    // 服务端吊销：本地已清空，显式携带此前捕获的 access token
+    if (accessToken) {
+      try {
+        await apiLogout(refreshToken, accessToken)
+      } catch (error) {
+        console.warn('[logout] server-side revoke failed; local credentials cleared', error)
+      }
+    }
   }
   
   // --- 找到 stores/user.ts 中的 updateUserInfo 函数，替换为 ---
@@ -227,11 +373,16 @@ export const useUserStore = defineStore('user', () => {
     userInfo,
     token,
     currentOrganizationId,
+    organizationVersion,
+    myOrganizations,
     settings,
+    authServiceUnavailable,
 
     // 计算属性
     isLoggedIn,
     isAdmin,
+    isSuperuser,
+    isOrgAdmin,
     currentOrgId,
 
     // 方法
@@ -241,6 +392,8 @@ export const useUserStore = defineStore('user', () => {
     logout,
     updateUserInfo,
     setCurrentOrganization,
+    switchOrganization,
+    fetchMyOrganizations,
     fetchSettings,
     updateSettings,
   }

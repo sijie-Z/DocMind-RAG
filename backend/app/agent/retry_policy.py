@@ -51,117 +51,161 @@ def compute_backoff(policy: RetryPolicy, attempt: int) -> float:
 RETRY_POLICIES: dict[str, RetryPolicy] = {
     # ── retryable: repeat ──
     "timeout": RetryPolicy(
-        retryable=True, max_retries=3,
+        retryable=True,
+        max_retries=3,
         backoff=lambda n: 0.5 * (2**n),
     ),
     "rate_limited": RetryPolicy(
-        retryable=True, max_retries=2,
+        retryable=True,
+        max_retries=2,
         backoff=lambda n: min(60 + 30 * n, 300),
     ),
     "api_error": RetryPolicy(
-        retryable=True, max_retries=3,
+        retryable=True,
+        max_retries=3,
         backoff=lambda n: 1.0 * (2**n),
     ),
     "idle_timeout": RetryPolicy(
-        retryable=True, max_retries=2,
+        retryable=True,
+        max_retries=2,
         backoff=lambda n: 2.0 * (2**n),
     ),
-
     # ── retryable: reset_transport ──
     "unreachable": RetryPolicy(
-        retryable=True, action="reset_transport", max_retries=5,
+        retryable=True,
+        action="reset_transport",
+        max_retries=5,
         backoff=lambda n: 2.0 * (2**n),
     ),
     "interrupted": RetryPolicy(
-        retryable=True, action="reset_transport", max_retries=3,
+        retryable=True,
+        action="reset_transport",
+        max_retries=3,
         backoff=lambda n: 1.0 * (2**n),
     ),
     "connection_error": RetryPolicy(
-        retryable=True, action="reset_transport", max_retries=5,
+        retryable=True,
+        action="reset_transport",
+        max_retries=5,
         backoff=lambda n: 2.0 * (2**n),
     ),
-
     # ── retryable: adapt_request ──
     "payload_too_large": RetryPolicy(
-        retryable=True, action="adapt_request", max_retries=2,
+        retryable=True,
+        action="adapt_request",
+        max_retries=2,
     ),
     "context_length_exceeded": RetryPolicy(
-        retryable=True, action="adapt_request", max_retries=2,
+        retryable=True,
+        action="adapt_request",
+        max_retries=2,
     ),
     "image_processing_error": RetryPolicy(
-        retryable=True, action="adapt_request", max_retries=2,
+        retryable=True,
+        action="adapt_request",
+        max_retries=2,
     ),
-
     # ── retryable: refresh_auth ──
     "auth_expired_refreshable": RetryPolicy(
-        retryable=True, action="refresh_auth", max_retries=2,
+        retryable=True,
+        action="refresh_auth",
+        max_retries=2,
         backoff=lambda n: 1.0 * (2**n),
     ),
-
     # ── fatal (never retry) ──
     "not_found": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     "hook_error": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     "permission_denied": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     # 工具声明了 requires_auth 但调用方没带组织上下文 —— 重试不会让它变好
     "auth_required": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     "validation_error": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     "auth_expired": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     "budget_exceeded": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     "ambiguous_input": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     "permanent_transport_error": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     "empty_response": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     "serialization_error": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     "max_tokens_truncation": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     "invalid_configuration": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     "doom_loop_detected": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     # LLM 跨请求熔断开启（issue #242 第 7 条）：OPEN 期内本步重试必然被门拒绝——
     # 重试只是白付探测成本；fatal → executor 直接走既有降级/fallback 路径。
     "circuit_open": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
+    ),
+    # HITL：人工拒绝（approval_denied）不是"执行失败"——粘滞拒绝下重试同一
+    # (tool, args) 毫无意义；fatal → 走既有 fallback/降级链路，结构化失败喂给
+    # 反思器继续/收敛（见 app/agent/approval.py）。
+    "approval_denied": RetryPolicy(
+        retryable=False,
+        action="fatal",
+    ),
+    # 审批服务不可用（暂停无法持久化 → 需审批调用一律未执行）：重试同样不会
+    # 变好，fatal 同 deny。
+    "approval_unavailable": RetryPolicy(
+        retryable=False,
+        action="fatal",
     ),
     # Registry fallback for an unclassified handler exception. Declared explicitly
     # (same shape as the get_policy fallback) so the registry's own codes are all
     # visible in this table rather than resolving silently through the default.
     "unknown": RetryPolicy(
-        retryable=False, action="fatal",
+        retryable=False,
+        action="fatal",
     ),
     # Alias: the registry emits "rate_limited"; this spelling appeared in an
     # earlier contract. Keep both so a mismatch cannot silently become fatal.
     "rate_limit": RetryPolicy(
-        retryable=True, action="repeat", max_retries=2,
+        retryable=True,
+        action="repeat",
+        max_retries=2,
     ),
 }
 
 
 def get_policy(error_type: str) -> RetryPolicy:
     """Lookup with unknown-fallback."""
-    return RETRY_POLICIES.get(error_type,
-                              RetryPolicy(retryable=False, action="fatal"))
+    return RETRY_POLICIES.get(error_type, RetryPolicy(retryable=False, action="fatal"))

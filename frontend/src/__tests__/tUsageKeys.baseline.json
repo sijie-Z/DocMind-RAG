@@ -1,0 +1,13 @@
+{
+  "$comment": "F波 t() 使用键棘轮基线（存量“已使用但 zh 中枢未定义”键，只缩不涨）。chat.exportChat 已由 F 波四语补齐、不入单；其余 10 处为在案存量：5 处会直显裸键（common.loadFailed / chat.backToConversations（|| 兜底无效：t() 缺键返回键名本身）/ login.loginFailed / login.registerFailed / org.id），5 处 t(key, 默认文案) 中文兜底（org.noData / org.overview / org.members / org.documents / common.noDescription）。新增未定义键会让 tUsageKeysDefined.test.ts 变红；收敛后重生成：UPDATE_T_USAGE_BASELINE=1 npx vitest run src/__tests__/tUsageKeysDefined.test.ts\n\nCW1 链并记档（并树后新增 10 键，逐条）：chat.feedback.likeSuccess / dislikeSuccess / failed（当场反馈族，未发货）；common.deleteFailed（存量清理误伤面：两处消费点仍在引，无主）；knowledge.graph.subtitle（承载面待核）；notifications.loadFailed / retry / empty（通知扩展件，未发货）；notifications.subtitle（同上）；profile.loadFailed（个人中心件，未发货）。待各件合入后随收官再同步收缩（只缩不涨）。",
+  "toleratedUndefinedKeys": [
+    "chat.feedback.dislikeSuccess",
+    "chat.feedback.failed",
+    "chat.feedback.likeSuccess",
+    "common.deleteFailed",
+    "knowledge.graph.subtitle",
+    "notifications.retry",
+    "notifications.subtitle",
+    "profile.loadFailed"
+  ]
+}

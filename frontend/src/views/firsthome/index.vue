@@ -10,8 +10,8 @@
           <span class="brand-text">DocMind</span>
         </div>
         <div class="nav-links">
-          <button @click="goToLogin" class="btn-ghost">登录</button>
-          <button @click="goToRegister" class="btn-primary-sm">免费试用</button>
+          <button @click="goToLogin" class="btn-ghost">{{ t('firsthome.nav.login') }}</button>
+          <button @click="handlePrimaryCta" class="btn-primary-sm">{{ ctaLabel(t('firsthome.nav.trial')) }}</button>
         </div>
       </div>
     </nav>
@@ -26,38 +26,38 @@
       <div class="hero-content">
         <div class="hero-badge">
           <span class="badge-dot"></span>
-          企业级 AI 知识库平台
+          {{ t('firsthome.hero.badge') }}
         </div>
         <h1 class="hero-title">
-          让每一份文档<br>
-          <span class="hero-title-accent">都能对话</span>
+          {{ t('firsthome.hero.titleLine1') }}<br>
+          <span class="hero-title-accent">{{ t('firsthome.hero.titleAccent') }}</span>
         </h1>
         <p class="hero-desc">
-          上传文档，用自然语言提问。AI Agent 自动检索、推理、引用来源 — 不只是搜索，而是理解。
+          {{ t('firsthome.hero.desc') }}
         </p>
         <div class="hero-actions">
-          <button @click="goToRegister" class="btn-primary">
-            免费开始使用
+          <button @click="handlePrimaryCta" class="btn-primary">
+            {{ ctaLabel(t('firsthome.hero.ctaPrimary')) }}
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
           </button>
           <button @click="goToLogin" class="btn-outline">
-            已有账号？登录
+            {{ t('firsthome.hero.ctaLogin') }}
           </button>
         </div>
         <div class="hero-stats">
           <div class="stat-item">
-            <span class="stat-value">99.7%</span>
-            <span class="stat-label">检索准确率</span>
+            <span class="stat-value">88%</span>
+            <span class="stat-label">{{ t('firsthome.stats.clauseHit') }}</span>
           </div>
           <div class="stat-divider"></div>
           <div class="stat-item">
-            <span class="stat-value">&lt;1.2s</span>
-            <span class="stat-label">平均响应</span>
+            <span class="stat-value">28</span>
+            <span class="stat-label">{{ t('firsthome.stats.cases') }}</span>
           </div>
           <div class="stat-divider"></div>
           <div class="stat-item">
-            <span class="stat-value">50+</span>
-            <span class="stat-label">支持文档格式</span>
+            <span class="stat-value">4</span>
+            <span class="stat-label">zh / en / ja / fr</span>
           </div>
         </div>
       </div>
@@ -66,8 +66,8 @@
     <!-- How it works -->
     <section class="section">
       <div class="section-header">
-        <h2 class="section-title">三步构建你的知识库</h2>
-        <p class="section-desc">从上传文档到智能问答，前所未有的简单</p>
+        <h2 class="section-title">{{ t('firsthome.steps.title') }}</h2>
+        <p class="section-desc">{{ t('firsthome.steps.desc') }}</p>
       </div>
       <div class="steps-grid">
         <div v-for="(step, i) in steps" :key="i" class="step-card">
@@ -84,8 +84,8 @@
     <!-- Capabilities -->
     <section class="section section-alt">
       <div class="section-header">
-        <h2 class="section-title">不只是搜索，是理解</h2>
-        <p class="section-desc">企业级 RAG 架构，Agent 驱动的智能推理</p>
+        <h2 class="section-title">{{ t('firsthome.features.title') }}</h2>
+        <p class="section-desc">{{ t('firsthome.features.desc') }}</p>
       </div>
       <div class="features-grid">
         <div v-for="f in features" :key="f.title" class="feature-card">
@@ -101,8 +101,8 @@
     <!-- Agent demo terminal -->
     <section class="section">
       <div class="section-header">
-        <h2 class="section-title">Agent 自主推理引擎</h2>
-        <p class="section-desc">多步推理、工具调用、引用溯源 — 实时观察 AI 的思考过程</p>
+        <h2 class="section-title">{{ t('firsthome.terminal.title') }}</h2>
+        <p class="section-desc">{{ t('firsthome.terminal.desc') }}</p>
       </div>
       <div class="terminal-wrap">
         <div class="terminal">
@@ -111,16 +111,17 @@
               <span></span><span></span><span></span>
             </div>
             <span class="terminal-title">Agent Terminal</span>
+            <span class="terminal-demo">{{ t('firsthome.terminal.demo') }}</span>
           </div>
           <div class="terminal-body">
-            <div class="terminal-line query">❯ 2025年Q3的销售数据中，哪个产品线增长最快？</div>
-            <div class="terminal-line think">⟳ 正在调用 search_knowledge_base...</div>
-            <div class="terminal-line result">✓ 检索到 5 份销售报表 (相似度: 0.94)</div>
-            <div class="terminal-line think">⟳ 正在调用 analyze_document...</div>
-            <div class="terminal-line think">⟳ 正在调用 compare_data...</div>
+            <div class="terminal-line query">{{ t('firsthome.terminal.query') }}</div>
+            <div class="terminal-line think">{{ t('firsthome.terminal.callSearch') }}</div>
+            <div class="terminal-line result">{{ t('firsthome.terminal.result') }}</div>
+            <div class="terminal-line think">{{ t('firsthome.terminal.callAnalyze') }}</div>
+            <div class="terminal-line think">{{ t('firsthome.terminal.callCompare') }}</div>
             <div class="terminal-line answer">
-              <span class="answer-label">▸ 答案</span>
-              <span>企业云服务产品线增长最快，Q3 环比增长 34.2%，主要驱动来自金融行业客户的私有化部署需求。<br><br><span class="source-ref">[1] Q3销售报表.xlsx · [2] 行业分析-金融.pdf</span></span>
+              <span class="answer-label">{{ t('firsthome.terminal.answerLabel') }}</span>
+              <span>{{ t('firsthome.terminal.answer') }}<br><br><span class="source-ref">{{ t('firsthome.terminal.sources') }}</span></span>
             </div>
           </div>
         </div>
@@ -130,10 +131,10 @@
     <!-- CTA -->
     <section class="cta">
       <div class="cta-glow"></div>
-      <h2 class="cta-title">准备好构建你的知识库了吗？</h2>
-      <p class="cta-desc">免费开始，无需任何配置。上传第一份文档，即刻体验 AI 智能问答。</p>
-      <button @click="goToRegister" class="btn-lg">
-        免费开始
+      <h2 class="cta-title">{{ t('firsthome.cta.title') }}</h2>
+      <p class="cta-desc">{{ t('firsthome.cta.desc') }}</p>
+      <button @click="handlePrimaryCta" class="btn-lg">
+        {{ ctaLabel(t('firsthome.cta.button')) }}
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
       </button>
     </section>
@@ -145,19 +146,28 @@
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
           <span>DocMind</span>
         </div>
-        <span class="footer-copy">&copy; 2025 DocMind · 企业级 RAG 知识库系统</span>
+        <span class="footer-copy">{{ t('firsthome.footer.copy') }}</span>
       </div>
     </footer>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed, h } from 'vue'
 import { useRouter } from 'vue-router'
-import { h } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
+const { t } = useI18n()
+
+// ISS-1：登录态感知 —— 已登录访客的主 CTA 变为「进入工作台」直通 /dashboard，
+// 未登录维持注册引导（已登录时 /register 会被守卫弹回工作台，CTA 不应再引向注册）
+const isLoggedIn = computed(() => userStore.isLoggedIn)
+const ctaLabel = (guestLabel: string) => (isLoggedIn.value ? t('firsthome.enterWorkspace') : guestLabel)
+const handlePrimaryCta = () => router.push(isLoggedIn.value ? '/dashboard' : '/register')
 const goToLogin = () => router.push('/login')
-const goToRegister = () => router.push('/register')
 
 // Inline SVG icons
 const UploadIcon = { render: () => h('svg', { width: 24, height: 24, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [h('path', { d: 'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4' }), h('path', { d: 'M17 8l-5-5-5 5' }), h('path', { d: 'M12 3v12' })]) }
@@ -168,20 +178,20 @@ const ZapIcon = { render: () => h('svg', { width: 24, height: 24, viewBox: '0 0 
 const LayersIcon = { render: () => h('svg', { width: 24, height: 24, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [h('polygon', { points: '12 2 22 8.5 12 15 2 8.5 12 2' }), h('polyline', { points: '2 15.5 12 22 22 15.5' })]) }
 const CodeIcon = { render: () => h('svg', { width: 24, height: 24, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [h('polyline', { points: '16 18 22 12 16 6' }), h('polyline', { points: '8 6 2 12 8 18' })]) }
 
-const steps = [
-  { icon: UploadIcon, title: '上传文档', desc: '支持 PDF、Word、Excel、PPT、Markdown 等 50+ 格式，拖拽上传。' },
-  { icon: SearchIcon, title: '智能索引', desc: '文档自动解析分块，向量化存入 Elasticsearch，秒级检索。' },
-  { icon: BrainIcon, title: 'AI 问答', desc: '自然语言提问，Agent 多步推理，返回带来源引用的精准答案。' },
-]
+const steps = computed(() => [
+  { icon: UploadIcon, title: t('firsthome.steps.upload.title'), desc: t('firsthome.steps.upload.desc') },
+  { icon: SearchIcon, title: t('firsthome.steps.index.title'), desc: t('firsthome.steps.index.desc') },
+  { icon: BrainIcon, title: t('firsthome.steps.ask.title'), desc: t('firsthome.steps.ask.desc') },
+])
 
-const features = [
-  { icon: LayersIcon, title: '混合检索', desc: '关键词 BM25 + 向量语义搜索 + RRF 融合算法，最大化召回精度。' },
-  { icon: BrainIcon, title: 'Agent 推理', desc: 'PER 三阶段推理（Plan-Execute-Reflect），多步工具调用，拆解复杂问题逐步求解。' },
-  { icon: ZapIcon, title: '流式响应', desc: 'SSE 实时流式输出，边思考边回答，无需等待完整结果。' },
-  { icon: CodeIcon, title: '开放 API', desc: 'RESTful API + WebSocket 双通道，轻松集成到你的业务系统。' },
-  { icon: ShieldIcon, title: '企业安全', desc: 'JWT 认证、RBAC 权限、组织隔离、完整审计日志。' },
-  { icon: UploadIcon, title: '多租户', desc: '组织级数据隔离，每个团队拥有独立的知识库和权限体系。' },
-]
+const features = computed(() => [
+  { icon: LayersIcon, title: t('firsthome.features.hybrid.title'), desc: t('firsthome.features.hybrid.desc') },
+  { icon: BrainIcon, title: t('firsthome.features.agent.title'), desc: t('firsthome.features.agent.desc') },
+  { icon: ZapIcon, title: t('firsthome.features.stream.title'), desc: t('firsthome.features.stream.desc') },
+  { icon: CodeIcon, title: t('firsthome.features.api.title'), desc: t('firsthome.features.api.desc') },
+  { icon: ShieldIcon, title: t('firsthome.features.security.title'), desc: t('firsthome.features.security.desc') },
+  { icon: UploadIcon, title: t('firsthome.features.tenant.title'), desc: t('firsthome.features.tenant.desc') },
+])
 </script>
 
 <style scoped>
@@ -592,6 +602,15 @@ const features = [
   color: #64748b;
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
+.terminal-demo {
+  margin-left: auto;
+  font-size: 11px;
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 999px;
+  padding: 2px 10px;
+  letter-spacing: 0.5px;
+}
 .terminal-body {
   padding: 20px 22px;
   display: flex;
@@ -702,5 +721,78 @@ const features = [
   .steps-grid, .features-grid { grid-template-columns: 1fr; }
   .hero-stats { gap: 20px; }
   .footer-inner { flex-direction: column; gap: 12px; text-align: center; }
+}
+
+/* ===== H5 暗色适配（跟随全站 html.dark；扁平选择器，勿用嵌套块） =====
+   亮色令牌在 .landing 上定义，暗色只重定义令牌变量；
+   顶栏渐变/主按钮/品牌图标等硬编码亮底另行覆盖。 */
+html.dark .landing {
+  --c-bg: #0b1220;
+  --c-surface: #111c2e;
+  --c-border: rgba(148, 163, 184, 0.14);
+  --c-border-hover: rgba(148, 163, 184, 0.3);
+  --c-text: #e2e8f0;
+  --c-text-secondary: #cbd5e1;
+  --c-text-muted: #94a3b8;
+  --c-accent: #60a5fa;
+  --c-accent-light: rgba(96, 165, 250, 0.12);
+  --c-accent-border: rgba(96, 165, 250, 0.32);
+  --c-accent-bg: rgba(96, 165, 250, 0.08);
+  --c-icon-bg: #1e293b;
+  --c-icon-fg: #cbd5e1;
+}
+
+html.dark .nav {
+  background: rgba(11, 18, 32, 0.82);
+}
+
+html.dark .btn-ghost:hover {
+  background: rgba(148, 163, 184, 0.1);
+}
+
+html.dark .brand-icon {
+  background: #2563eb;
+}
+
+html.dark .btn-primary-sm {
+  background: #2563eb;
+}
+
+html.dark .btn-primary {
+  background: #2563eb;
+  box-shadow: 0 4px 24px rgba(37, 99, 235, 0.35);
+}
+
+html.dark .btn-primary:hover {
+  box-shadow: 0 8px 32px rgba(37, 99, 235, 0.45);
+}
+
+html.dark .btn-outline:hover {
+  background: #1e293b;
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+/* 渐变标题：亮色渐变 #1e40af 起笔在深底上过暗，暗色换亮蓝系 */
+html.dark .hero-title-accent {
+  background-image: linear-gradient(135deg, #60a5fa, #93c5fd, #60a5fa);
+  background-size: 200% 200%;
+}
+
+html.dark .hero-grid {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+}
+
+html.dark .section-alt {
+  background: rgba(148, 163, 184, 0.04);
+}
+
+html.dark .step-number {
+  color: rgba(148, 163, 184, 0.1);
+}
+
+html.dark .step-card:hover {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 }
 </style>

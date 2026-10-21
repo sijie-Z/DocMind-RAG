@@ -1,4 +1,4 @@
-import request from '@/utils/request'
+import request, { FIRST_SCREEN_REQUEST_CONFIG } from '@/utils/request'
 
 export interface SystemMetrics {
   timestamp: number
@@ -58,21 +58,62 @@ export interface MonitoringDashboard {
 }
 
 export const getMonitoringDashboard = async (): Promise<{ data: MonitoringDashboard }> => {
-  return request.get('/monitoring/dashboard')
+  // E14/D1：失败由监控页内联错误态（标题/描述/重试）呈现 —— 带 X-Silent-Error
+  // 关闭响应拦截器的全局 toast，避免同一失败出现双提示。
+  return request.get('/monitoring/dashboard', {
+    headers: { 'X-Silent-Error': '1' }
+  })
+}
+
+/**
+ * 趋势快照元素 —— 真实形状（core/middleware.py:129-136 take_snapshot）：
+ * HTTP 管道累计计数器快照，timestamp 为秒级。注意：metric_type 与 time_range
+ * 在后端函数体内未被使用（任意 type 返回同一份快照历史，monitoring.py:151-166）。
+ */
+export interface TrendPoint {
+  timestamp: number
+  request_count: number
+  error_count: number
+  response_time: number
+  active_connections: number
+  slow_request_count: number
+  error_rate_percent: number
+  p95_response_time_ms: number
+  p99_response_time_ms: number
 }
 
 export const getMetrics = async (
   metricType: 'system' | 'application' | 'knowledge_base',
   timeRange: string = '1h'
-): Promise<{ data: { metrics: (SystemMetrics | ApplicationMetrics | KnowledgeBaseMetrics)[]; total: number } }> => {
+): Promise<{ data: { data: TrendPoint[] } }> => {
+  // 旧声明 {metrics, total} 为前端自造形状（后端恒返回 {"data": [...]}，<2 条时 []）
+  // E14/D1：趋势图失败由页面空态兜底（updateMetricsCharts 自吞异常）—— 带
+  // X-Silent-Error，避免拦截器全局 toast 与页面错误面并存时多弹。
   return request.get(`/monitoring/metrics/${metricType}`, {
-    params: { time_range: timeRange }
+    params: { time_range: timeRange },
+    headers: { 'X-Silent-Error': '1' }
   })
 }
 
 export const getMonitoringAlerts = async (limit: number = 10): Promise<{ data: { alerts: Alert[]; total: number } }> => {
+  // E14/D1：与 dashboard 同一页面错误面（Promise.all 任一失败 → 内联错误态）
   return request.get('/monitoring/alerts', {
-    params: { limit }
+    params: { limit },
+    headers: { 'X-Silent-Error': '1' }
+  })
+}
+
+/** 通知服务状态（监控页降级徽标数据源；后端 monitoring.py:442 恒返回 active） */
+export interface NotificationServiceStatus {
+  status: string
+  enabled_channels: string[]
+}
+
+export const getNotificationStatus = async (): Promise<{ data: NotificationServiceStatus }> => {
+  // T6/E14-D1：失败由监控页降级徽标「未知」呈现 —— 带 X-Silent-Error，
+  // 关闭响应拦截器全局 toast，避免与页内提示双弹。
+  return request.get('/monitoring/notification/status', {
+    headers: { 'X-Silent-Error': '1' }
   })
 }
 
@@ -87,7 +128,21 @@ export interface LLMStats {
 }
 
 export const getLLMStats = async (): Promise<{ data: LLMStats }> => {
-  return request.get('/monitoring/llm-stats')
+  return request.get('/monitoring/llm-stats', FIRST_SCREEN_REQUEST_CONFIG)
+}
+
+/** LLM 配置状态（B5 onboarding「连模型」步骤数据源） */
+export interface LLMStatus {
+  configured: boolean
+  provider: string
+  model: string
+  source: 'server' | 'local' | string
+}
+
+export const getLLMStatus = async (): Promise<{
+  data: { success?: boolean; data: LLMStatus }
+}> => {
+  return request.get('/monitoring/llm-status', FIRST_SCREEN_REQUEST_CONFIG)
 }
 
 export interface RAGStats {
@@ -105,6 +160,9 @@ export interface AdminSummary {
   total_sessions: number
   active_users_24h: number
   total_organizations: number
+  // W2-T7：会话周环比真值（近 7 日/前 7 日新增；降级态为 null）
+  sessions_this_week?: number | null
+  sessions_last_week?: number | null
 }
 
 export interface OrgSummary {
@@ -115,13 +173,33 @@ export interface OrgSummary {
 }
 
 export const getAdminSummary = async (): Promise<{ data: AdminSummary }> => {
-  return request.get('/monitoring/admin-summary')
+  return request.get('/monitoring/admin-summary', FIRST_SCREEN_REQUEST_CONFIG)
 }
 
 export const getOrgSummary = async (): Promise<{ data: { organizations: OrgSummary[] } }> => {
-  return request.get('/monitoring/org-summary')
+  return request.get('/monitoring/org-summary', FIRST_SCREEN_REQUEST_CONFIG)
 }
 
 export const getRAGStats = async (): Promise<{ data: RAGStats }> => {
-  return request.get('/knowledge/rag-stats')
+  return request.get('/knowledge/rag-stats', FIRST_SCREEN_REQUEST_CONFIG)
+}
+
+/**
+ * 系统健康检查（monitoring.py:461-505，无需认证）。
+ * status: 'healthy'（各服务非 disconnected）/ 'degraded'（任一 disconnected）；
+ * services.elasticsearch 取值域：'green'|'yellow'|'red'|'unknown'|'disconnected'
+ * （与 dashboard 的 elasticsearch_health 同源，无 'ok'/'error'）。
+ */
+export interface MonitoringHealth {
+  status: 'healthy' | 'degraded'
+  timestamp: string
+  services: {
+    database: string
+    redis: string
+    elasticsearch: string
+  }
+}
+
+export const getMonitoringHealth = async (): Promise<{ data: MonitoringHealth }> => {
+  return request.get('/monitoring/health', FIRST_SCREEN_REQUEST_CONFIG)
 }

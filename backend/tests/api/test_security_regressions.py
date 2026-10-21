@@ -3,6 +3,7 @@
 Uses FastAPI TestClient with mocked DB/Redis/auth dependencies, following
 the existing tests/integration/test_api_auth.py pattern.
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -86,17 +87,44 @@ class TestLlmConfigAuthorization:
         app_.dependency_overrides[get_db] = _override_get_db(db)
         app_.dependency_overrides[get_current_user] = _override_auth(user)
         try:
-            resp = client.post("/api/v1/llm-config", json={
-                "config_name": "t", "provider": "deepseek",
-                "api_key": "sk-test", "base_url": "https://api.deepseek.com",
-                "model": "deepseek-v4-flash",
-            })
+            resp = client.post(
+                "/api/v1/llm-config",
+                json={
+                    "config_name": "t",
+                    "provider": "deepseek",
+                    "api_key": "sk-test",
+                    "base_url": "https://api.deepseek.com",
+                    "model": "deepseek-v4-flash",
+                },
+            )
             assert resp.status_code == 403
         finally:
             app_.dependency_overrides.clear()
 
-    def test_create_allowed_for_admin(self, client):
+    def test_create_forbidden_for_role_admin_label(self, client):
+        """W0-1：仅 users.role='admin'（无 is_superuser）不再获得平台写权限。"""
         user = _make_user(is_superuser=False, role="admin")
+        db = _mock_db(user)
+        app_ = client.app
+        app_.dependency_overrides[get_db] = _override_get_db(db)
+        app_.dependency_overrides[get_current_user] = _override_auth(user)
+        try:
+            resp = client.post(
+                "/api/v1/llm-config",
+                json={
+                    "config_name": "t",
+                    "provider": "deepseek",
+                    "api_key": "sk-test",
+                    "base_url": "https://api.deepseek.com",
+                    "model": "deepseek-v4-flash",
+                },
+            )
+            assert resp.status_code == 403
+        finally:
+            app_.dependency_overrides.clear()
+
+    def test_create_allowed_for_platform_superuser(self, client):
+        user = _make_user(is_superuser=True, role="user")
         db = _mock_db(user)
         app_ = client.app
         app_.dependency_overrides[get_db] = _override_get_db(db)
@@ -104,11 +132,16 @@ class TestLlmConfigAuthorization:
         # Redis unavailable -> endpoints fail closed with 500/400 (no crash)
         with patch("app.api.v1.endpoints.llm_config.redis_client", None):
             try:
-                resp = client.post("/api/v1/llm-config", json={
-                    "config_name": "t", "provider": "deepseek",
-                    "api_key": "sk-test", "base_url": "https://api.deepseek.com",
-                    "model": "deepseek-v4-flash",
-                })
+                resp = client.post(
+                    "/api/v1/llm-config",
+                    json={
+                        "config_name": "t",
+                        "provider": "deepseek",
+                        "api_key": "sk-test",
+                        "base_url": "https://api.deepseek.com",
+                        "model": "deepseek-v4-flash",
+                    },
+                )
                 # Not 403: authorization passed; Redis missing raises ValidationError (400)
                 assert resp.status_code != 403
             finally:
@@ -130,6 +163,8 @@ class TestWorkflowExecutionIdor:
         fake_workflow.created_by = 999  # owned by another user
         result = MagicMock()
         result.scalar_one_or_none = MagicMock(side_effect=[fake_execution, fake_workflow])
+        # W0-1：is_org_admin 会查一次组织角色关联；该用户未持有 OrgAdmin → 非管理员。
+        result.first = MagicMock(return_value=None)
         db.execute = AsyncMock(return_value=result)
 
         app_ = client.app
@@ -157,17 +192,27 @@ class TestRegisterOrgPolicy:
         app_.dependency_overrides[get_db] = _override_get_db(db)
         try:
             with patch("app.api.v1.endpoints.auth.auth_service.create_user", new=AsyncMock()) as m:
-                with patch("app.api.v1.endpoints.auth.auth_service.create_access_token", return_value="a"):
-                    with patch("app.api.v1.endpoints.auth.auth_service.create_refresh_token", return_value="r"):
-                        resp = client.post("/api/v1/auth/register", json={
-                            "username": "newuser",
-                            "email": "new@example.com",
-                            "password": "password123",
-                            "organization_id": 5,
-                        })
+                with patch(
+                    "app.api.v1.endpoints.auth.auth_service.create_access_token", return_value="a"
+                ):
+                    with patch(
+                        "app.api.v1.endpoints.auth.auth_service.create_refresh_token",
+                        return_value="r",
+                    ):
+                        resp = client.post(
+                            "/api/v1/auth/register",
+                            json={
+                                "username": "newuser",
+                                "email": "new@example.com",
+                                "password": "password123",
+                                "organization_id": 5,
+                            },
+                        )
                         assert resp.status_code == 200
                         kwargs = m.call_args.kwargs
-                        assert kwargs.get("organization_id") is None, "client org_id must be ignored"
+                        assert kwargs.get("organization_id") is None, (
+                            "client org_id must be ignored"
+                        )
         finally:
             app_.dependency_overrides.clear()
 

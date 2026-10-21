@@ -1,10 +1,16 @@
 """AI and RAG settings — LLM, embedding, reranker, vector search, caching."""
 
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _auto_tier_defaults(*, explicitly_set: set[str] | frozenset[str] | None = None) -> dict[str, object]:
+def _auto_tier_defaults(
+    *,
+    explicitly_set: set[str] | frozenset[str] | None = None,
+    local_embedding: bool = False,
+) -> dict[str, object]:
     """Apply hardware-detected defaults for fields the user did NOT set anywhere.
 
     ``explicitly_set`` 应传 pydantic 的 ``settings.model_fields_set`` —— 它包含
@@ -13,6 +19,14 @@ def _auto_tier_defaults(*, explicitly_set: set[str] | frozenset[str] | None = No
     配置的字段静默覆盖成硬件档位默认值（issue #232：`.env` 写
     `EMBEDDING_MODEL=qwen3-embedding:0.6b`，运行时被覆盖成 `bge-m3`，
     worker 报 `404 model not found`，排查代价极高）。
+
+    ``local_embedding=True``（``ENABLE_LOCAL_EMBEDDING``）时**不套用硬件档**：
+    本地 embedding 的模型由 ``LOCAL_EMBEDDING_MODEL`` 决定（默认
+    ``nomic-embed-text`` = 768 维），而硬件档面向的是在线模型
+    （bge-m3/1024、Qwen3/2048+）。混用会制造「模型 nomic、维度 1024」的固有
+    冲突（issue #196 的启动维度校验会拒绝启动）。此时保留字段默认值
+    （768），用户换了本地模型时须显式设置 ``VECTOR_DIMENSION``——启动校验会
+    给出可读错误，而不是静默写坏数据。
 
     **不要在这里对返回值做 `str()`。** 调用方（`app/core/config/__init__.py`）用
     `object.__setattr__` 写进 settings，**绕过 pydantic 的类型校验与转换** ——
@@ -24,6 +38,8 @@ def _auto_tier_defaults(*, explicitly_set: set[str] | frozenset[str] | None = No
     **在没把 VECTOR_DIMENSION 写进环境变量的机器上（即全新部署的默认路径），
     索引根本建不出来。**
     """
+    if local_embedding:
+        return {}
     try:
         from app.core.hardware import detect as _detect
 
@@ -82,6 +98,16 @@ class AISettings(BaseSettings):
     EMBEDDING_API_URL: str = "http://localhost:11434/v1"
     EMBEDDING_MODEL: str = "nomic-embed-text"
 
+    # issue #196：embedding 一致性契约。
+    # - SEND_DIMENSIONS 默认关闭：请求服务端截断会掩盖「VECTOR_DIMENSION 已过期」
+    #   的漂移（截断后维度“恰好”匹配 mapping，但模型已经换了）。只有确认
+    #   provider 支持 dimensions 截断且确实想用截断时才开启。
+    # - 启动 probe：服务可达但返回维度 ≠ VECTOR_DIMENSION → 拒绝启动；
+    #   服务不可达 → 显式告警后继续（离线开发属预期）。
+    EMBEDDING_SEND_DIMENSIONS: bool = False
+    EMBEDDING_STARTUP_PROBE: bool = True
+    EMBEDDING_PROBE_TIMEOUT_SECONDS: float = Field(default=5.0, gt=0.0)
+
     # Vector search
     VECTOR_DIMENSION: int = 768  # nomic-embed-text
     # 注：SIMILARITY_THRESHOLD 曾是 README:108 的承诺（默认 0.7），但实现从未存在
@@ -98,6 +124,13 @@ class AISettings(BaseSettings):
     RAG_MMR_LAMBDA: float = 0.65
     RAG_MMR_CANDIDATE_MULTIPLIER: int = 4
     RAG_HYDE_WEIGHT: float = 0.3
+
+    # #186：提示词正文上限（字符）与展示 snippet 上限（字符）。
+    # 提示词正文单一来源是 `prompt_text`（完整 chunk）；超过上限时按
+    # context_compressor 的规则式句子抽取截断，不硬切头部。默认值与原硬编码
+    # （3000 / 260）一致，行为只在「超限且关键句不在头部」时改善。
+    RAG_PROMPT_TEXT_MAX_CHARS: int = Field(default=3000, ge=1)
+    RAG_SNIPPET_MAX_CHARS: int = Field(default=260, ge=1)
 
     # Query rewrite (multi-query expansion)
     RAG_ENABLE_QUERY_REWRITE: bool = True
@@ -120,7 +153,10 @@ class AISettings(BaseSettings):
     # Reranker API fallback — None = disabled, only use local BGE
     RERANK_API_KEY: str | None = None
     RERANK_API_URL: str | None = None
-    RERANK_MODEL: str = "rerank"
+    # issue #190：默认值移到 reranker 的解析器（RERANK_MODEL → legacy
+    # RAG_RERANK_MODEL → 协议默认 "rerank"）。此处保留 None 才能让
+    # legacy 别名在未显式设置 RERANK_MODEL 时真正生效。
+    RERANK_MODEL: str | None = None
 
     # Legacy reranker env var aliases
     RAG_RERANK_MODEL: str | None = None
@@ -143,6 +179,14 @@ class AISettings(BaseSettings):
     # （阈值 [0,1]；TTL ≥0——负值此前可入 Settings，setex 报 invalid expire）。
     SEMANTIC_CACHE_THRESHOLD: float = Field(default=0.92, ge=0.0, le=1.0)
     SEMANTIC_CACHE_TTL_SECONDS: int = Field(default=3600, ge=0)
+    # issue #195：阈值 0.92 只能做粗筛——相邻条款（第七条 vs 第十三条）或
+    # 同句式换实体（北京 vs 上海）的向量余弦也在阈值内，会跨问题返回他人的
+    # sources（检索链）/ 完整答案（问答链）。两个语义缓存命名空间因此默认
+    # 关闭：检索 sources（精确缓存 RetrievalCache 已按 query+org+top_k 足够）
+    # 与问答 answer。显式开启后，命中仍必须通过条号/数字/实体等价判定
+    # （rag/cache.py::queries_equivalent），阈值不是唯一判据。
+    SEMANTIC_CACHE_RETRIEVAL_ENABLED: bool = False
+    SEMANTIC_CACHE_ANSWER_ENABLED: bool = False
 
     # Query decomposition (multi-perspective RAG)
     RAG_ENABLE_QUERY_DECOMPOSITION: bool = True
@@ -151,8 +195,13 @@ class AISettings(BaseSettings):
     # Privacy & security
     ENABLE_PII_MASKING: bool = True
 
-    # Code execution sandbox — "docker" (container-level isolation) or "ast" (in-process)
-    SANDBOX_MODE: str = "auto"
+    # Code execution sandbox — issue #206：闭集校验 + fail-closed 语义。
+    #   "auto"   — Docker 可用时走容器，不可用时**拒绝执行**（不再静默回落进程内）；
+    #   "docker" — 仅容器，Docker 不可用即拒绝；
+    #   "ast"    — 显式选择进程内 AST 沙箱（子进程执行，仅 AST 白名单约束）。
+    # 未知值在配置加载期即 ValidationError；auto/docker 的拒绝发生在执行侧
+    # （见 docker_sandbox.resolve_sandbox_mode）。
+    SANDBOX_MODE: Literal["auto", "docker", "ast"] = "auto"
     SANDBOX_DOCKER_IMAGE: str = "python:3.11-slim"
     SANDBOX_DOCKER_MEMORY_MB: int = 256
     SANDBOX_DOCKER_NETWORK: str = "none"

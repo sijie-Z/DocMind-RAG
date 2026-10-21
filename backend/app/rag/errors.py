@@ -40,12 +40,44 @@ class RetrievalUnavailableError(RuntimeError):
         return self.kind == "timeout"
 
 
+class EmbeddingConfigError(RuntimeError):
+    """embedding 配置不完整（在线模式缺 API key 等）。
+
+    与「服务瞬态故障」区分：这是**配置错误**，调用方可以显式降级为
+    「向量臂关闭」而不是崩溃（issue #196 单一构造点在 import 期构造单例，
+    无 key 时抛本异常；`get_rag_pipeline()` 据此恢复基线的 provider=None 语义）。
+    定义在 `app.rag.errors`（无导入副作用）以便依赖方安全 import。
+    """
+
+
 class EmbeddingUnavailableError(RuntimeError):
     """embedding 服务调用失败（retriever 内部信号）。
 
     此前 `get_embedding` 把一切失败吞成 `[]`，向量臂被静默关闭、整体呈
     「无结果」——本异常让 retriever 能区分「按设计未配置向量臂」与「服务故障」，
     再由 pipeline 聚合为面向调用方的 `RetrievalUnavailableError`。
+    """
+
+
+class LLMNotConfiguredError(RuntimeError):
+    """LLM 客户端未配置 —— 生成能力不可用，绝不伪装成回答内容。
+
+    此前 `RAGPipeline.chat_stream` 在无 client 时 `yield "LLM未配置"`：这句配置
+    诊断被上层当作正文 chunk 逐字累加、作为 ASSISTANT 消息落库并写入长期记忆，
+    会话历史里沉淀下「LLM未配置」这样的垃圾回答。现在改为抛出本异常，由聊天
+    管线在入口预检并以 error 事件语义返回（与 agent 通道的 type="error" 对齐）。
+    """
+
+
+class EvalJudgeUnavailableError(RuntimeError):
+    """RAG 评估评委（LLM-as-judge）不可用 —— 分数不可知，绝不等于「0 分」（issue #301）。
+
+    此前 `RAGEvaluator._score` 把一切评委调用失败吞成 `(0.0, err)`：
+    - 单条评估：0/0/0 的 200 与「真实评了 0 分」不可区分（details.error 是唯一线索）；
+    - 批量评估：故障条目的 0 分还被计入均值，污染整批统计。
+
+    调用方契约：端点映射为 5xx（评委是外部 LLM 服务 → 502 语义），
+    批量评估对单条失败条目标注 `failures` 并从均值剔除，全部失败则上抛。
     """
 
 

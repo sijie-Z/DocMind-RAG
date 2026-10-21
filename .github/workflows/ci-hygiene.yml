@@ -71,6 +71,59 @@ jobs:
           fi
           echo "未发现冲突标记"
 
+  # 根目录内部工作报告（.ci-*.md / .e2e-*.md，如第一轮问题清单的排查产物）
+  # 不得再提交：它们是会话过程的个人备忘与临时结论，不属于产品文档。
+  # 六个文件已随 chore/repo-hygiene 从历史中 git rm 并加入 .gitignore；本 job
+  # 是防再提交的兜底——.gitignore 只挡 `git add`，挡不住 `git add -f` 与回填。
+  internal-reports:
+    name: Internal Reports Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fail if internal work reports exist at repo root
+        run: |
+          matches=$(find . -maxdepth 1 -type f \( -name '.ci-*.md' -o -name '.e2e-*.md' \) -print)
+          if [ -n "$matches" ]; then
+            echo "::error::内部工作报告不得提交到仓库根目录:"
+            echo "$matches"
+            exit 1
+          fi
+          echo "OK: 根目录无内部工作报告"
+
+  # 发布纪律：CHANGELOG 顶部版本标题与 APP_VERSION 必须同 PR bump（第二轮
+  # §7.2⑦ / §三.15——1.22.0 与 1.22.1-rc.1 两次发布只改了 CHANGELOG，线上
+  # /health 仍报 1.21.0）。diff 驱动：仅当本 PR 动了发布版本才比对，普通
+  # PR 在 [Unreleased] 加条目不误红；rc 写法归一与日期无关等规则见脚本
+  # docstring（R1~R4，逐条有鉴别力测试）。
+  release-sync:
+    name: Release Sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # 与 conflict-markers 同款两点 diff 口径：base tip ↔ PR merge 提交。
+      - name: Fetch base branch
+        run: |
+          git fetch --no-tags --depth=1 origin \
+            "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+
+      - name: Check CHANGELOG / APP_VERSION same-PR bump
+        working-directory: backend
+        run: python scripts/check_release_sync.py --base "origin/${{ github.base_ref }}"
+
+      - name: Checker discriminating-power tests
+        working-directory: backend
+        run: |
+          python -m pip install -q pytest
+          python -m pytest tests/unit/test_check_release_sync.py -q --noconftest
+
   # issue #98：`try` 体内**直接** raise 的控制流异常（AppError 及其子类、
   # fastapi.HTTPException）不得被同层 `except Exception` 降级成 500 / 200 错误
   # 字典。这一缺陷模式已复发多次（issue #82 / #90 / #98），加静态门禁防止第 8 次。
@@ -101,3 +154,80 @@ jobs:
         run: |
           python -m pip install -q pytest
           python -m pytest tests/unit/test_check_except_control_flow.py -q --noconftest
+
+  # A2 P0 租户边界：禁止生产代码把组织上下文硬编码默认到 1 号组织。
+  # `organization_id: int = 1` 会让漏传组织的调用静默读写 1 号租户数据。
+  # 零依赖（仅标准库），只扫 backend/app；测试夹具不在扫描范围。
+  org-defaults:
+    name: Org Defaults Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Scan for hardcoded default organization
+        working-directory: backend
+        run: python scripts/check_org_defaults.py
+
+      - name: Checker discriminating-power tests
+        working-directory: backend
+        run: |
+          python -m pip install -q pytest
+          python -m pytest tests/unit/test_check_org_defaults.py -q --noconftest
+
+  # W0-1 / ADR-001 D3：禁止 users.role 参与管理员鉴权。
+  # 平台级只认显式 is_superuser（is_platform_admin），组织级只认
+  # user_organization_role_association 的 OrgAdmin 角色（is_org_admin）。
+  # 零依赖（仅标准库 AST），只扫 backend/app；请求体字段校验不在扫描范围。
+  rbac-admin-bypass:
+    name: RBAC Admin Bypass Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Scan for users.role admin authorization
+        working-directory: backend
+        run: python scripts/check_rbac_admin_bypass.py
+
+      - name: Checker discriminating-power tests
+        working-directory: backend
+        run: |
+          python -m pip install -q pytest
+          python -m pytest tests/unit/test_check_rbac_admin_bypass.py -q --noconftest
+
+  # W0-8 事实不变量：文档里的关键数字（SSE 事件数 / 端点模块数 / 前端路由数 /
+  # 工具数 / @router.* 装饰器数）必须等于源码派生值，且与入库的单一事实源
+  # docs/facts.json 一致。脚本零依赖（仅标准库 ast/re/json），与其它 hygiene
+  # 门禁同款：先跑检查器本体，再用 --noconftest 跑鉴别力测试（不装后端依赖栈）。
+  doc-facts:
+    name: Doc Facts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Check doc facts vs source-derived values
+        working-directory: backend
+        run: python scripts/check_doc_facts.py
+
+      - name: Checker discriminating-power tests
+        working-directory: backend
+        run: |
+          python -m pip install -q pytest
+          python -m pytest tests/unit/test_doc_facts.py -q --noconftest

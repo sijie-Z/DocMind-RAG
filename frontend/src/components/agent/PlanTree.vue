@@ -28,6 +28,19 @@
         <div class="step-content">
           <span class="step-description">{{ step.description }}</span>
           <span v-if="step.tool_hint" class="step-tool-hint">🔧 {{ step.tool_hint }}</span>
+          <!-- 计划语义徽标（issue #289 G7）：plan_step 事件真实携带这些字段
+               （planner 发射、默认值不随载荷带出），此前前端未声明未读。 -->
+          <span v-if="step.parallel_group != null" class="step-parallel">∥ 并行组 {{ step.parallel_group }}</span>
+          <span v-if="step.risk_level === 'high' || step.risk_level === 'medium'" class="step-risk">
+            ⚠ {{ step.risk_level === 'high' ? '高风险' : '中风险' }}
+          </span>
+          <span
+            v-if="step.retry_strategy && step.retry_strategy !== 'auto_retry'"
+            class="step-retry-strategy"
+          >
+            {{ retryStrategyLabel(step.retry_strategy) }}
+          </span>
+          <span v-if="step.fallback_tool" class="step-fallback">备用: {{ step.fallback_tool }}</span>
           <span v-if="step.retry_count > 0" class="step-retry">重试 {{ step.retry_count }} 次</span>
         </div>
       </div>
@@ -53,6 +66,16 @@ const progressPercent = computed(() => {
   if (props.steps.length === 0) return 0
   return Math.round((completedCount.value / props.steps.length) * 100)
 })
+
+// G7 徽标文案：非 auto_retry 的重试策略（默认值不展示）
+const RETRY_STRATEGY_LABELS: Record<string, string> = {
+  skip: '失败时跳过',
+  ask_user: '失败时询问',
+}
+
+function retryStrategyLabel(strategy: string): string {
+  return RETRY_STRATEGY_LABELS[strategy] || strategy
+}
 </script>
 
 <style scoped>
@@ -184,6 +207,29 @@ const progressPercent = computed(() => {
 .step-tool-hint {
   font-size: 10px;
   color: var(--text-tertiary, #9ca3af);
+  font-family: monospace;
+}
+
+/* 计划语义徽标（issue #289 G7） */
+.step-parallel {
+  font-size: 10px;
+  color: #6366f1;
+}
+
+.step-risk {
+  font-size: 10px;
+  color: #d97706;
+  font-weight: 500;
+}
+
+.step-retry-strategy {
+  font-size: 10px;
+  color: #0891b2;
+}
+
+.step-fallback {
+  font-size: 10px;
+  color: #64748b;
   font-family: monospace;
 }
 

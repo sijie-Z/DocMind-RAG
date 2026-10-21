@@ -13,10 +13,24 @@ export type AgentEventType =
   | 'run_report'
   | 'execution_context'
   | 'retry_hint'
+  | 'warning'
   | 'error'
+  // HITL（人在环）：执行器停在审批点 / 协作式取消收敛（见后端 approval.py）
+  | 'approval_required'
+  | 'run_cancelled'
+  // A：运行中转向（见后端 steering.py）
+  //   steer_applied — 指导在步边界被消费并注入后续步骤（content=消息摘要）；
+  //   steer_sent    — **前端本地事件**（乐观落账，后端无此类型）：指导已提交成功。
+  | 'steer_applied'
+  | 'steer_sent'
+  // B：计划审批（plan_approval_mode=always）：planner 出计划后暂停，等人类决策
+  // （plan_steps 携带结构化步骤——resume 流不回放 plan_step，卡片数据自足）。
+  | 'plan_approval_required'
 
 export type ThinkingType = 'reasoning' | 'planning' | 'evaluation' | 'correction'
-export type ReflectionResult = 'pass' | 'retry' | 'replan' | 'escalate'
+// 六态真源：backend/app/agent/events.py:39-42（unavailable=评估服务不可用；
+// unparsed=模型输出不含可用判定——两者都不是 pass（假成功），也不是 run 失败）
+export type ReflectionResult = 'pass' | 'retry' | 'replan' | 'escalate' | 'unavailable' | 'unparsed'
 export type PlanStepStatus = 'pending' | 'ready' | 'running' | 'completed' | 'failed' | 'skipped'
 
 export interface AgentEvent {
@@ -27,13 +41,22 @@ export interface AgentEvent {
   tool_args?: Record<string, any>
   tool_call_id?: string
   tool_duration_ms?: number
+  // issue #206：代码执行类工具实际使用的沙箱（'ast' / 'docker'）
+  sandbox?: 'ast' | 'docker'
   // Plan
   plan_id?: string
+  plan_goal?: string
   plan_step_id?: string
   plan_progress?: number
   plan_step_status?: PlanStepStatus
   dependencies?: string[]
   tool_hint?: string
+  // Plan 语义字段（issue #289 G7：后端 to_sse_dict 已发射，前端此前未声明；
+  // 默认值分别为 low / auto_retry / None，非默认时才会出现在载荷里）
+  parallel_group?: number | null
+  risk_level?: string
+  retry_strategy?: string
+  fallback_tool?: string | null
   // Thinking
   thinking_type?: ThinkingType
   // Reflection
@@ -45,6 +68,149 @@ export interface AgentEvent {
   iteration?: number
   timestamp?: number
   message_id?: string      // from done event for feedback
+  saved?: boolean          // done 事件：本轮会话落库是否成功（issue #301 批 D）
+  task_id?: string         // 任务级 checkpoint 关联 id（HITL：取消/审批/恢复的钥匙）
+  // HITL：done 事件如实盖章任务态（waiting_approval / cancelled 时出现）
+  task_state?: AgentTaskState
+  // B：plan_approval_required 的结构化步骤（[{id, description, dependencies, tool_hint}]）
+  plan_steps?: PlanStepEdit[]
+}
+
+// ── HITL（人在环）─────────────────────────────────────────────────────────
+
+export type AgentTaskState =
+  | 'pending'
+  | 'running'
+  | 'waiting_tool'
+  | 'waiting_approval'
+  | 'waiting_plan_approval'
+  | 'waiting_human'
+  | 'failed'
+  | 'completed'
+  | 'abandoned'
+  | 'cancelled'
+  | 'rejected'
+
+/** 待审批请求（GET /tasks/{id} 的 data.approval；approval_required 事件同形）。 */
+export interface PendingApproval {
+  tool_name: string
+  tool_args?: Record<string, any>
+  tool_call_id?: string
+  args_hash?: string
+  risk_level?: string
+  reason?: string
+  step_id?: string
+  plan_id?: string
+  requested_at?: number
+  expires_at?: number | null
+  more_pending?: number
+}
+
+// ── B：计划审批 ──────────────────────────────────────────────────────────
+
+/** 待审批计划的结构化步骤（plan_approval_required 事件 / GET 状态视图同形）。 */
+export interface PlanStepEdit {
+  id: string
+  description: string
+  dependencies: string[]
+  tool_hint: string | null
+}
+
+/** 待审批计划（GET /tasks/{id} 的 data.plan_approval）。 */
+export interface PendingPlanApproval {
+  plan_id: string
+  goal: string
+  steps: PlanStepEdit[]
+  requested_at?: number
+}
+
+/** 计划审批应答（POST /agent/tasks/{id}/plan-approval）。 */
+export interface PlanApprovalDecisionInput {
+  decision: 'approve' | 'edit' | 'reject'
+  /** edit：整体替换计划的步骤列表（白名单字段；非法输入后端 422）。 */
+  edited_steps?: PlanStepEdit[]
+  /** reject：拒绝理由（透传为重规划反馈）。 */
+  note?: string
+}
+
+/** 任务状态视图（GET /agent/tasks/{id}）。 */
+export interface AgentTaskView {
+  task_id: string
+  state: AgentTaskState
+  is_recoverable: boolean
+  progress: number
+  completed_steps: number
+  total_steps: number | null
+  current_step_id: string | null
+  last_error: string | null
+  last_error_type: string | null
+  query: string
+  approval?: PendingApproval
+  approval_expired?: boolean
+  plan_approval?: PendingPlanApproval
+  /** 是否有可回放数据（后端按 Redis → 本地文件如实判定，绝无虚标）。 */
+  has_replay?: boolean
+}
+
+/** 任务列表项（GET /agent/tasks）：状态视图 + 有回放可看标记。 */
+export interface AgentTaskListItem extends AgentTaskView {
+  has_replay: boolean
+  created_at: string
+  updated_at: string
+}
+
+// ── 回放（GET /agent/tasks/{id}/replay）──────────────────────────────────
+// 字段与执行写侧 ExecutionContext.to_dict() 逐字对齐（后端 format_timeline
+// 契约；禁止在这里改名/换口径）。
+
+export interface ReplayStep {
+  step_id: string
+  description: string
+  tool_used: string | null
+  status: string // completed / failed / skipped / pending / running
+  result_summary: string | null
+  error: string | null
+  duration_ms: number
+  tokens_used: number
+}
+
+export interface ReplayFinding {
+  source_step: string
+  content: string
+  source_tool: string | null
+  confidence: string
+}
+
+export interface ReplayDecision {
+  phase: string
+  action: string
+  reasoning: string
+  triggered_by: string | null
+}
+
+export interface ReplayTimeline {
+  task_id: string
+  query: string
+  goal: string
+  plan_summary: string
+  steps_completed: number
+  steps: ReplayStep[]
+  findings: ReplayFinding[]
+  decisions: ReplayDecision[]
+  failures: string[]
+  duration_ms: number
+  total_tokens: number
+  progress: number
+  start_time: number
+}
+
+/** 审批应答（POST /agent/tasks/{id}/approval）。 */
+export interface ApprovalDecisionInput {
+  decision: 'approve' | 'deny'
+  /** 改指令续跑（仅 approve）：批准时附加的人工指导，注入后续步骤提示词。 */
+  modified_instruction?: string
+  /** 备注（拒绝理由等）。 */
+  note?: string
 }
 
 export interface PlanStep {
@@ -56,6 +222,11 @@ export interface PlanStep {
   result?: string
   error_context?: string
   retry_count: number
+  // 计划语义字段（issue #289 G7：由 plan_step 事件落账，PlanTree 按非默认值出徽标）
+  parallel_group?: number | null
+  risk_level?: string
+  retry_strategy?: string
+  fallback_tool?: string | null
 }
 
 export interface Plan {
@@ -69,6 +240,9 @@ export interface Plan {
   progress: number
   is_complete: boolean
 }
+
+/** HITL 审批模式（与 backend/app/agent/approval.py:46 ApprovalMode 同源）。 */
+export type ApprovalMode = 'never' | 'risky' | 'always'
 
 export interface AgentConfig {
   model: string
@@ -84,6 +258,8 @@ export interface AgentConfig {
   system_prompt_override?: string
   max_plan_steps: number
   max_retries_per_step: number
+  /** HITL 审批模式：never=不审批 / risky=高危工具需审批（后端默认）/ always=全部审批 */
+  approval_mode: ApprovalMode
 }
 
 export interface ToolInfo {
@@ -141,4 +317,15 @@ export interface AgentChatMessage {
   executionContext?: Record<string, any>  // 运行上下文（execution_context 事件，含 total_tokens）
   feedback?: number        // 1=thumbs_up, -1=thumbs_down, 0=none
   feedbackNote?: string
+  /** 体验第四波 @引用：用户消息携带的引用文档（渲染 chips 供回溯） */
+  references?: ReferencedDoc[]
+  /** 体验第四波 计时：本轮运行开始/终态时间戳（毫秒）——RunStats 数据源 */
+  startedAt?: number
+  endedAt?: number
+}
+
+/** 用户 @ 引用的知识库文档（id 上送后端 referenced_document_ids）。 */
+export interface ReferencedDoc {
+  id: string
+  title: string
 }

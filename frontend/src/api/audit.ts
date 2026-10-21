@@ -32,6 +32,16 @@ export const getAuditLogs = async (params?: {
   return request.get('/users/audit-logs', { params })
 }
 
+/** 审计「操作类型」分布（T8：筛选下拉数据源——只列真实存在的动作，杜绝恒空选项） */
+export interface AuditActionCount {
+  action: string
+  count: number
+}
+
+export const getAuditActions = async (): Promise<AxiosResponse<ApiResponse<AuditActionCount[]>>> => {
+  return request.get('/users/audit-logs/actions')
+}
+
 export const exportAuditLogs = async (params?: {
   user_id?: number
   action?: string

@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 
 // Re-export conversation functions for backward compatibility
 export {
@@ -20,5 +21,10 @@ export async function parseUpload(file: File): Promise<{
   const res = await request.post('/chat/parse-upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
-  return res.data?.data || res.data
+  return apiUnwrap<{
+    filename: string
+    content: string
+    chunk_count: number
+    file_size: number
+  }>(res)
 }

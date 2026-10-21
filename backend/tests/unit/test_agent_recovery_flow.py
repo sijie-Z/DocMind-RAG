@@ -10,6 +10,9 @@ resume_chat，断言：
     resume 只能从头重跑全部步骤（"不接 checkpoint 会丢"的判别性证明）。
 """
 
+import asyncio
+import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -40,6 +43,7 @@ def _hermetic(monkeypatch):
     打真 Ollama：本机可达时实测 404、CI 不可达时连接失败——环境应答不同）。桩成
     "无网络、空向量" = 两环境既有的降级结果，用例对环境封闭、结果稳定。
     """
+
     async def _save(self, ttl=86400 * 7):
         return False
 
@@ -99,27 +103,43 @@ def _fake_openai_client():
 
 def _agent_config(**overrides) -> AgentConfig:
     base = dict(
-        enable_reflection=False, enable_memory=False, enable_skills=False,
-        enable_experience=False, enable_thinking=False,
+        enable_reflection=False,
+        enable_memory=False,
+        enable_skills=False,
+        enable_experience=False,
+        enable_thinking=False,
     )
     base.update(overrides)
     return AgentConfig(**base)
 
 
-async def _crash_after_n_completed_steps(agen, n: int = 2, max_events: int = 200):
-    """消费事件流，在第 n 个"步骤完成"事件后停止并 aclose（= 客户端中断/进程死亡）。"""
+async def _consume_until_n_completed(agen, n: int = 1, max_events: int = 200):
+    """消费到第 n 个"步骤完成"事件即停，**不关闭**生成器（= 活跃执行期快照）。"""
     events = []
     async for ev in agen:
         events.append(ev)
-        done = sum(
-            1 for e in events
-            if e.type == "thinking" and e.plan_step_status == "completed"
-        )
+        done = sum(1 for e in events if e.type == "thinking" and e.plan_step_status == "completed")
         if done >= n:
             break
         assert len(events) < max_events, "未等到足够的步骤完成事件"
+    return events
+
+
+async def _crash_after_n_completed_steps(agen, n: int = 2, max_events: int = 200):
+    """消费事件流，在第 n 个"步骤完成"事件后停止并 aclose（= 客户端中断/进程死亡）。"""
+    events = await _consume_until_n_completed(agen, n, max_events)
     await agen.aclose()
     return events
+
+
+async def _wait_until(pred, timeout: float = 3.0) -> bool:
+    """轮询等待（本文件跨任务时序断言用；窗口小、代价低）。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pred():
+            return True
+        await asyncio.sleep(0.01)
+    return pred()
 
 
 async def _get_task(factory, task_id: str) -> AgentTask | None:
@@ -148,12 +168,17 @@ async def test_crash_then_resume_continues_from_checkpoint(db_factory):
 
     assert calls["n"] == 2, "假 LLM 只应被前两步各调用一次"
     task = await _get_task(db_factory, task_id)
-    assert task.status == TaskStatus.RUNNING, "断流不改状态：陈旧 RUNNING = 可恢复"
+    assert task.status == TaskStatus.FAILED, (
+        "断流收敛为 FAILED（可恢复的中断态）——旧语义永停 RUNNING 是第四波实机缺陷"
+    )
+    assert task.last_error_type == "client_disconnect", "收敛留痕：断流来源可鉴别"
 
     _, payload = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
     assert payload is not None, "断流兜底快照必须落盘"
     assert [s["status"] for s in payload["plan"]["steps"]] == [
-        "completed", "completed", "pending",
+        "completed",
+        "completed",
+        "pending",
     ], "断点保真：前两步 completed、第三步 pending"
     assert payload["partial_output"] == "步骤结果1步骤结果2", "已产出答案前缀被冻结"
     assert payload["ctx"]["artifacts"]["iterations_used"] == 2, "迭代预算随快照延续"
@@ -172,9 +197,68 @@ async def test_crash_then_resume_continues_from_checkpoint(db_factory):
     assert task.retry_count == 1, "一次 resume = 一次重试计数"
     _, final_payload = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
     assert [s["status"] for s in final_payload["plan"]["steps"]] == [
-        "completed", "completed", "completed",
+        "completed",
+        "completed",
+        "completed",
     ], "终态快照：计划全步骤完成（on_finish 触发点）"
     assert task.progress == 1.0
+
+
+@pytest.mark.asyncio
+async def test_disconnect_converges_status_and_stays_resumable(db_factory):
+    """第四波实机缺陷回归（红基线）："回答已产出，但任务记录永停进行中、无回放"。
+    断流（客户端中止 / 页面离开）后任务必须收敛为 FAILED（可见的诚实中断态），
+    且 resume 语义完整保留（FAILED→RUNNING 既有重试边）——绝不伪装 COMPLETED。
+
+    变异点：_checkpoint_disconnect 的收敛调用移除 → 状态永停 RUNNING → 红。
+    """
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    events = await _crash_after_n_completed_steps(agen, n=1)
+    task_id = _task_id_of(events)
+    await asyncio.sleep(0.1)  # 受保护收尾单元（快照+收敛）落定
+
+    task = await _get_task(db_factory, task_id)
+    assert task.status == TaskStatus.FAILED, "断流必须收敛，不得永停 RUNNING"
+    assert task.last_error_type == "client_disconnect"
+
+    # 可恢复性不回归：resume 收尾跑完（只跑剩余步），最终 COMPLETED
+    events2 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID)]
+    assert any(e.type == "done" for e in events2)
+    task = await _get_task(db_factory, task_id)
+    assert task.status == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_disconnect_converge_guard_matrix(db_factory):
+    """断流收敛的守卫矩阵（第四波修复）：
+    - RUNNING / WAITING_TOOL（"正在跑"系）→ 收敛 FAILED；
+    - WAITING_APPROVAL（等待人工决策的挂起态）→ 不动——那是"人回来续跑"
+      的合法入口，断流 ≠ 放弃（HITL 语义）。
+
+    变异点：去掉守卫 → 待审批任务被断流误杀为 FAILED → 红。
+    """
+    t_run = await checkpoint.create_task(user_id=USER_ID, organization_id=1, query="q1")
+    t_tool = await checkpoint.create_task(user_id=USER_ID, organization_id=1, query="q2")
+    async with db_factory() as db:
+        row = await db.get(AgentTask, t_tool)
+        row.transition(TaskStatus.WAITING_TOOL)
+        await db.commit()
+    t_appr = await checkpoint.create_task(user_id=USER_ID, organization_id=1, query="q3")
+    assert await checkpoint.mark_waiting_approval(t_appr) is True
+
+    assert await checkpoint.converge_disconnected(t_run) is True
+    assert await checkpoint.converge_disconnected(t_tool) is True
+    assert await checkpoint.converge_disconnected(t_appr) is False
+
+    assert (await _get_task(db_factory, t_run)).status == TaskStatus.FAILED
+    assert (await _get_task(db_factory, t_tool)).status == TaskStatus.FAILED
+    assert (await _get_task(db_factory, t_appr)).status == TaskStatus.WAITING_APPROVAL, (
+        "断流不得吞掉待审批挂起态"
+    )
+    assert (await _get_task(db_factory, t_run)).last_error_type == "client_disconnect"
 
 
 @pytest.mark.asyncio
@@ -318,6 +402,135 @@ async def test_truncated_json_snapshot_resume_degrades_and_heals(db_factory):
     assert healed is not None and healed["plan"], "首轮新快照已覆盖坏数据：读路径自愈"
 
 
+@pytest.mark.parametrize(
+    "edit, healed_ok",
+    [
+        (
+            lambda snap: snap["ctx"]["artifacts"].__setitem__("iterations_used", "很多"),
+            lambda healed: isinstance(healed["ctx"]["artifacts"].get("iterations_used"), int),
+        ),
+        (
+            lambda snap: snap.__setitem__("history", "boom"),
+            lambda healed: (
+                healed["history"] is None or all(isinstance(m, dict) for m in healed["history"])
+            ),
+        ),
+        # ── #319（F-CRIT-1 残族 + chain B）────────────────────────────────
+        (
+            lambda snap: snap["ctx"]["artifacts"].__setitem__("review", "boom"),
+            lambda healed: "review" not in healed["ctx"]["artifacts"],
+        ),
+        (
+            lambda snap: snap["config"].__setitem__("max_iterations", "很多"),
+            lambda healed: isinstance(healed["config"].get("max_iterations"), int),
+        ),
+    ],
+    ids=[
+        "artifacts-iterations-not-int",
+        "history-not-list",
+        "artifacts-review-not-mapping",
+        "config-value-drift",
+    ],
+)
+@pytest.mark.asyncio
+async def test_value_drift_snapshot_resume_degrades_and_heals(edit, healed_ok, db_factory):
+    """#287/R1 值级漂移全链：带外把快照改成"合法 JSON、值类型坏"——resume
+    不得炸（修复前：iterations_used="很多" → executor `"很多" >= max_iterations`
+    TypeError；history="boom" → 真实 executor 的消息构建 `msg.get` AttributeError
+    ——且错误兜底把坏值原样回写快照、此后每次 resume 复炸 = 毒丸），按降级语义
+    续跑剩余步骤，新快照里坏值被修复（规整后的形态）——读侧闸门 + 写侧"以
+    校验后值为准"两半同时闭合。
+
+    #319 增补（F-CRIT-1 / chain B 全链）：
+    - review="boom"：修前 resume 收尾 run_report `"boom".get` AttributeError
+      （评审全链实证），错误兜底原样回写、复炸；修后读侧闸门整键删。
+    - config.max_iterations="很多"：修前 executor 比较 TypeError、错误兜底把坏
+      config 原样回写、复炸；修后 config 读写闸门降级为默认（int）。
+    （config 容器级漂移单列于 test_config_container_drift_resume_degrades —
+    整取默认配置会改变后续调用面，不适配本参数组的等调用数断言。）
+
+    变异点：修前（读写两侧闸门皆无）→ resume 抛对应异常 / 坏值复炸 → 红
+    （红基线在案）。修后单侧拆除由各自专门的断言面钉住（读侧判别在
+    test_resume_engine / roundtrip 的 shape 断言；写侧在 roundtrip /
+    test_issue319 的写侧断言）；本组钉的是端到端不变量——两侧闸门任一在位，
+    healed 快照即无坏值（artifacts 组两层互为"不落回快照"的冗余保证）；
+    config 组单侧即可判别（读侧失控 → executor 比较处 TypeError 先于任何
+    回写，写侧闸门无从介入）。
+    """
+    client, calls = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    events = await _crash_after_n_completed_steps(agen, n=2)
+    task_id = _task_id_of(events)
+    assert calls["n"] == 2
+
+    # 带外写库（绕过回写路径）：合法 JSON 快照 + 值类型漂移
+    async with db_factory() as db:
+        row = await db.get(AgentTask, task_id)
+        snap = row.context_snapshot
+        edit(snap)
+        await db.execute(
+            text("UPDATE agent_tasks SET context_snapshot = :s WHERE id = :tid"),
+            {"s": json.dumps(snap, ensure_ascii=False), "tid": task_id},
+        )
+        await db.commit()
+
+    # resume：不得炸（修复前 TypeError/AttributeError）、只续跑剩余 1 步、COMPLETED
+    events2 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID)]
+
+    assert any(e.type == "done" for e in events2)
+    assert calls["n"] == 3, "坏值降级为默认：只续跑剩余 1 步（绝不重跑/崩溃）"
+    task = await _get_task(db_factory, task_id)
+    assert task.status == TaskStatus.COMPLETED, "收尾不得被值级坏数据卡死"
+
+    # 快照被修复：坏值不再存在（写回的是规整后的形态）
+    _, healed = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
+    assert healed_ok(healed), (
+        f"新快照必须已修复坏值（实际 {healed.get('ctx', {}).get('artifacts')} / history={healed.get('history')!r}）"
+    )
+
+
+@pytest.mark.asyncio
+async def test_config_container_drift_resume_degrades_to_defaults(db_factory):
+    """#319 chain B'（容器级）：快照 config 被带外改成非映射（"boom"）——
+    修前 resume 读取点 `from_dict("boom")` `.items()` AttributeError（未经
+    try 包裹，先于认领后的 agent.run；每次 resume 必崩，租约还被悬持）；
+    修后整取默认配置继续跑，收尾新快照把 config 修复为合法映射（自愈）。
+
+    本用例不与值级参数组共用等调用数断言：容器级降级 = **全部**字段回默认，
+    enable_reflection 等开关随之打开，resume 会多出反思/审查的假 LLM 调用
+    （调用数不再固定为 3）——这里只钉"不炸 + 跑完 + 快照自愈"三件事。
+
+    变异点：去掉 from_dict 的容器级闸门 → AttributeError → 红。
+    """
+    client, calls = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    events = await _crash_after_n_completed_steps(agen, n=2)
+    task_id = _task_id_of(events)
+    assert calls["n"] == 2
+
+    async with db_factory() as db:
+        row = await db.get(AgentTask, task_id)
+        snap = row.context_snapshot
+        snap["config"] = "boom"
+        await db.execute(
+            text("UPDATE agent_tasks SET context_snapshot = :s WHERE id = :tid"),
+            {"s": json.dumps(snap, ensure_ascii=False), "tid": task_id},
+        )
+        await db.commit()
+
+    events2 = [e async for e in svc.resume_chat(task_id, user_id=USER_ID)]
+
+    assert any(e.type == "done" for e in events2), "坏容器不得炸 resume"
+    assert calls["n"] >= 3, "三步产物至少都产出了（额外反思/审查调用不在此处钉）"
+    task = await _get_task(db_factory, task_id)
+    assert task.status == TaskStatus.COMPLETED, "收尾不得被坏容器卡死"
+    _, healed = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
+    assert isinstance(healed["config"], dict), "新快照 config 已修复为合法映射"
+    assert healed["config"].get("max_iterations") == 20, "降级 = 数据类默认值（读侧取默认）"
+
+
 @pytest.mark.asyncio
 async def test_resume_stream_events_all_carry_task_id_stamp(db_factory):
     """m5/R6（#278）：resume 流的**每一个**事件都必须盖章 task_id（chat 路径已
@@ -369,6 +582,156 @@ async def test_resume_disconnect_releases_lease_for_immediate_retry(db_factory, 
 
 
 @pytest.mark.asyncio
+async def test_disconnect_finalize_order_snapshot_before_lease_release(db_factory, monkeypatch):
+    """#287 项2（顺序不变量，评审 S-1 反转变异 30 全绿 → 本用例钉死）：
+    resume 断流收尾时，兜底快照必须先落盘**完成**，租约归还只能发生在其后。
+    顺序不可反：反向会让新认领者先拿到锁开跑，迟到的旧快照随后覆盖它的更新
+    状态（resume 语义破坏窗口）；且 save 内部还会续租，与"刚释放"打架。
+
+    变异点：把收尾单元内两步顺序反转（release→save）→ 实测序列
+    ["release", "save-done"] ≠ 期望 → 红。
+    """
+    fake = _FakeRedisLock()
+    monkeypatch.setattr(checkpoint, "redis_client", fake)
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    events = await _crash_after_n_completed_steps(agen, n=2)
+    task_id = _task_id_of(events)
+
+    # 探针在初始 chat 断流之后安装：只观察这一次 resume 断流的收尾序列
+    order: list[str] = []
+    orig_save = checkpoint.save_from_live
+    orig_release = checkpoint.release_task
+
+    async def spy_save(**kwargs):
+        result = await orig_save(**kwargs)
+        order.append("save-done")
+        return result
+
+    async def spy_release(tid):
+        order.append("release")
+        return await orig_release(tid)
+
+    monkeypatch.setattr(checkpoint, "save_from_live", spy_save)
+    monkeypatch.setattr(checkpoint, "release_task", spy_release)
+
+    # resume 消费到 1 个步骤完成后断流（= 客户端中断）
+    agen2 = svc.resume_chat(task_id, user_id=USER_ID)
+    await _crash_after_n_completed_steps(agen2, n=1)
+
+    assert order == ["save-done", "release"], (
+        "断流收尾顺序不变量：快照先落（完成）→ 租约后还；实测 " + str(order)
+    )
+    assert checkpoint._lock_key(task_id) not in fake.store, "顺序对 + 租约确已归还"
+
+
+@pytest.mark.asyncio
+async def test_chat_disconnect_never_releases_and_active_run_keeps_lease(db_factory, monkeypatch):
+    """#287 项3（release_lease 守卫，评审 S-3 无条件还租变异 30 全绿 → 本用例钉死）：
+    - 活跃执行期（生成器仍在产事件、未断流）不误还租——锁在位、release 零调用；
+    - chat 断流绝不还租（从未认领；无条件归还只会误删并发 resume 持有的锁）；
+    - 只有 resume 断流才恰好归还一次。
+
+    变异点：守卫 `if release_lease:` 无条件化（chat 也还租）→ chat 段 release
+    调用数 ≠ 0 → 红。
+    """
+    fake = _FakeRedisLock()
+    monkeypatch.setattr(checkpoint, "redis_client", fake)
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+
+    released: list[str | None] = []
+    orig_release = checkpoint.release_task
+
+    async def spy_release(tid):
+        released.append(tid)
+        return await orig_release(tid)
+
+    monkeypatch.setattr(checkpoint, "release_task", spy_release)
+
+    # ── chat 路径：活跃期 + 断流后，零归还 ──
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    events = await _consume_until_n_completed(agen, n=1)
+    task_id = _task_id_of(events)
+    assert released == [], "活跃执行期不得误还租（chat 从未持锁）"
+    await agen.aclose()
+    await asyncio.sleep(0.1)
+    assert released == [], "chat 断流不得归还（无认领；无条件归还会误删并发锁）"
+
+    # ── resume 路径：活跃期零归还（锁在位）；断流恰好归还一次 ──
+    agen2 = svc.resume_chat(task_id, user_id=USER_ID)
+    await _consume_until_n_completed(agen2, n=1)
+    assert checkpoint._lock_key(task_id) in fake.store, "resume 持有期锁必须在位"
+    assert released == [], "resume 活跃执行期不得提前还租"
+    await agen2.aclose()
+    assert await _wait_until(lambda: len(released) == 1), "断流必须恰好归还一次"
+    assert released == [task_id], "只归还本任务的租约（不多不少）"
+    assert checkpoint._lock_key(task_id) not in fake.store
+
+
+@pytest.mark.asyncio
+async def test_disconnect_finalize_unit_survives_cancel_on_outer_await(db_factory, monkeypatch):
+    """#287 项4（shield 语义边界，按 #300/F1 修复后的实际语义钉）+
+    #300 F1 引擎级判别：取消落在收尾单元 shield 的**外层 await** 上
+    （ASGI 取消路径的实测形态：anyio 任务组层级触发式重复投递恰好打断
+    "尚未完成的外层 await"）——受保护单元（save→release 同一任务）不受影响，
+    在后台完整执行：租约仍归还、顺序仍"快照先落、还租在后"。
+
+    变异点：拆回两个独立 shield（修复前形态）→ 取消打断首个外层 await →
+    release 分支不可达 → 锁仍在、order 缺 "release" → 红。
+    """
+    fake = _FakeRedisLock()
+    monkeypatch.setattr(checkpoint, "redis_client", fake)
+    task_id = await checkpoint.create_task(user_id=USER_ID, organization_id=1, query=QUERY)
+    assert await checkpoint.claim_task(task_id) is True, "认领租约（模拟 resume 持有）"
+
+    gate = asyncio.Event()
+    order: list[str] = []
+    orig_save = checkpoint.save_from_live
+    orig_release = checkpoint.release_task
+
+    async def gated_save(**kwargs):
+        await gate.wait()  # 挡住 save：确保取消时任务停进 shield 外层 await
+        result = await orig_save(**kwargs)
+        order.append("save")
+        return result
+
+    async def spy_release(tid):
+        order.append("release")
+        return await orig_release(tid)
+
+    monkeypatch.setattr(checkpoint, "save_from_live", gated_save)
+    monkeypatch.setattr(checkpoint, "release_task", spy_release)
+
+    class _Agent:
+        checkpoint_live = {
+            "ctx": ExecutionContext(query=QUERY, task_id=task_id),
+            "plan": None,
+            "partial_output": "",
+            "history": None,
+            "config": _agent_config(),
+        }
+
+    svc = AgentService(openai_client=MagicMock())
+    t = asyncio.create_task(svc._checkpoint_disconnect(task_id, _Agent(), release_lease=True))
+    await asyncio.sleep(0.05)  # 让任务停到 shield 外层 await（save 挂在 gate 上）
+    assert order == [], "收尾单元应被 gate 挡住（前置条件）"
+
+    t.cancel()  # 取消落点 = shield 外层 await（ASGI 路径同点）
+    with pytest.raises(asyncio.CancelledError):
+        await t
+    assert order == [], "外层 await 被取消，但受保护单元未被打断（还在 gate 上）"
+
+    gate.set()  # 放行受保护单元（模拟后台完成）
+    assert await _wait_until(lambda: len(order) == 2), (
+        f"受保护单元必须后台完整执行（save→release），实测 {order}"
+    )
+    assert order == ["save", "release"], "顺序不变量在取消路径上同样成立"
+    assert checkpoint._lock_key(task_id) not in fake.store, "租约必须归还（#300 核心断言）"
+
+
+@pytest.mark.asyncio
 async def test_resume_passes_task_org_truthfully_without_or1(db_factory, monkeypatch):
     """m3（#278，#168/#268 禁模式）：resume 构造 PERAgentLoop 时如实传任务归属
     组织——org=None 如实为 None（绝不 `or 1` 伪造落入 1 号组织）；org=42 如实
@@ -393,10 +756,123 @@ async def test_resume_passes_task_org_truthfully_without_or1(db_factory, monkeyp
 
     for org in (None, 42):
         task_id = await checkpoint.create_task(user_id=USER_ID, organization_id=org, query=QUERY)
-        events = [e async for e in svc.resume_chat(task_id, user_id=USER_ID, config=_agent_config())]
+        events = [
+            e async for e in svc.resume_chat(task_id, user_id=USER_ID, config=_agent_config())
+        ]
         assert events == [], "假 loop 不产事件（本用例只钉构造参数）"
         assert (await _get_task(db_factory, task_id)).status == TaskStatus.COMPLETED
 
     assert captured == [None, 42], (
         "resume 必须如实传 task.organization_id（bug 形态：None 被 `or 1` 伪造为 1）"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# T7 断流收敛盲窗：任务行创建之后、agent.run 之前的 await / yield 同样要收敛
+# ══════════════════════════════════════════════════════════════════════════
+
+
+async def _wait_single_task_status(factory, status, timeout: float = 3.0):
+    """等待库中唯一任务行达到目标状态（shield 收尾单元在后台完成）。"""
+    deadline = time.monotonic() + timeout
+    task = None
+    while True:
+        async with factory() as db:
+            task = (await db.execute(select(AgentTask))).scalars().first()
+        if task is not None and task.status == status:
+            return task
+        if time.monotonic() >= deadline:
+            return task
+        await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+async def test_disconnect_during_referenced_doc_await_converges(db_factory, monkeypatch):
+    """T7 盲窗①：@引用解析（秒级 await）期间客户端断连——取消落在 pre-run
+    await 上，任务行必须收敛为可恢复失败态（FAILED + client_disconnect）。
+
+    修复前 try 从 agent.run 才开启：取消在 await 处直接逃逸，任务行永停
+    RUNNING（产品面无恢复入口）。变异点：把 try 还原到 run 之前 → 本用例红。
+    """
+    entered = asyncio.Event()
+    gate = asyncio.Event()
+
+    async def _gated_build(*args, **kwargs):
+        entered.set()
+        await gate.wait()
+        return None, []
+
+    monkeypatch.setattr("app.agent.service.build_referenced_document_context", _gated_build)
+
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(
+        QUERY,
+        organization_id=1,
+        user_id=USER_ID,
+        config=_agent_config(),
+        referenced_document_ids=["doc-1"],
+    )
+    consumer = asyncio.create_task(agen.__anext__())
+    await asyncio.wait_for(entered.wait(), timeout=3.0)
+    consumer.cancel()  # 客户端断连 → 取消落在 pre-run await 上
+    with pytest.raises(asyncio.CancelledError):
+        await consumer
+
+    task = await _wait_single_task_status(db_factory, TaskStatus.FAILED)
+    assert task is not None and task.status == TaskStatus.FAILED, (
+        f"pre-run await 期间的断流必须收敛（实测 {getattr(task, 'status', None)}）"
+    )
+    assert task.last_error_type == "client_disconnect"
+
+
+@pytest.mark.asyncio
+async def test_disconnect_at_reference_warning_yield_converges(db_factory, monkeypatch):
+    """T7 盲窗②：@引用 warning 事件（run 之前的 yield）处断流——同样收敛。
+
+    变异点：warning yield 留在 try 之外 → 任务行永停 RUNNING → 本用例红。
+    """
+
+    async def _warn_build(*args, **kwargs):
+        return None, ["引用文档不可用（不存在），已忽略：doc-x"]
+
+    monkeypatch.setattr("app.agent.service.build_referenced_document_context", _warn_build)
+
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(
+        QUERY,
+        organization_id=1,
+        user_id=USER_ID,
+        config=_agent_config(),
+        referenced_document_ids=["doc-x"],
+    )
+    event = await agen.__anext__()
+    assert event.type == "warning", "首个事件应为引用文档的诚告警"
+    await agen.aclose()  # 客户端切走：GeneratorExit 落在 yield 上
+
+    task = await _wait_single_task_status(db_factory, TaskStatus.FAILED)
+    assert task is not None and task.status == TaskStatus.FAILED, (
+        f"warning yield 断流必须收敛（实测 {getattr(task, 'status', None)}）"
+    )
+    assert task.last_error_type == "client_disconnect"
+
+
+@pytest.mark.asyncio
+async def test_disconnect_at_pre_run_meta_yield_converges(db_factory):
+    """T7 盲窗③：工具元信息 thinking 事件（run 之前的最后一个 yield）处断流。
+
+    变异点：meta yield 留在 try 之外 → 任务行永停 RUNNING → 本用例红。
+    """
+    client, _ = _fake_openai_client()
+    svc = AgentService(openai_client=client)
+    agen = svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=_agent_config())
+    event = await agen.__anext__()
+    assert event.type == "thinking", "run 之前应发出工具元信息事件"
+    await agen.aclose()  # 客户端切走：GeneratorExit 落在 yield 上
+
+    task = await _wait_single_task_status(db_factory, TaskStatus.FAILED)
+    assert task is not None and task.status == TaskStatus.FAILED, (
+        f"meta yield 断流必须收敛（实测 {getattr(task, 'status', None)}）"
+    )
+    assert task.last_error_type == "client_disconnect"

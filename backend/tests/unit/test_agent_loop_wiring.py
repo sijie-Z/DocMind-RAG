@@ -17,6 +17,7 @@ APP_DIR = BACKEND_DIR / "app"
 
 # ── AgentEvent construction ────────────────────────────────────────────────
 
+
 class TestAgentEventConstruction:
     """A typo'd keyword raised TypeError at runtime and was swallowed by the
     surrounding except, so it surfaced to the LLM as a bogus tool error."""
@@ -60,11 +61,14 @@ class TestAgentEventConstruction:
                     continue
                 for kw in node.keywords:
                     if kw.arg and kw.arg not in valid:
-                        offenders.append(f"{path.relative_to(BACKEND_DIR)}:{node.lineno} -> {kw.arg}")
+                        offenders.append(
+                            f"{path.relative_to(BACKEND_DIR)}:{node.lineno} -> {kw.arg}"
+                        )
         assert not offenders, "AgentEvent constructed with unknown kwargs: " + "; ".join(offenders)
 
 
 # ── Retry policy coverage ──────────────────────────────────────────────────
+
 
 class TestRetryPolicyReachability:
     """The retry loop can only pick a policy for error codes the registry emits."""
@@ -90,6 +94,7 @@ class TestRetryPolicyReachability:
 
 # ── Planner → loop goal handoff ────────────────────────────────────────────
 
+
 class TestPlanGoalPropagation:
     """loop.py used to overwrite the plan goal with the plan id, so every
     goal-aware LLM call (freshness, relevance, reflection) judged a hex id."""
@@ -109,6 +114,7 @@ class TestPlanGoalPropagation:
 
 # ── Reflection result delivery ─────────────────────────────────────────────
 
+
 class TestReflectionDelivery:
     """An async generator cannot `return` a value, so the structured verdict is
     delivered as the content of a final reflection event."""
@@ -122,9 +128,13 @@ class TestReflectionDelivery:
         from app.agent.reflector import Reflector
 
         reflector = Reflector(MagicMock(), AgentConfig())
-        plan = Plan(id="p1", goal="g", steps=[
-            PlanStep(id="s1", description="s1", status="completed"),
-        ])
+        plan = Plan(
+            id="p1",
+            goal="g",
+            steps=[
+                PlanStep(id="s1", description="s1", status="completed"),
+            ],
+        )
         events = [e async for e in reflector.reflect(plan, {"s1": {"result": "ok"}})]
 
         assert events, "reflect() produced no events at all"
@@ -142,6 +152,7 @@ class TestReflectionDelivery:
 
 
 # ── Context engine wiring ──────────────────────────────────────────────────
+
 
 class TestContextEngineWiring:
     """loop.py built a ContextEngine and never called fit()/fit_async()."""
@@ -171,6 +182,7 @@ class TestContextEngineWiring:
 
 
 # ── Conditional routing ────────────────────────────────────────────────────
+
 
 class TestConditionalRouting:
     """The route decision ran after an `async for` that could exit early, and it
@@ -215,7 +227,10 @@ class TestConditionalRouting:
         plan = Plan(id="p", goal="g", steps=[PlanStep(id="s2", description="d")])
         pending = [s for s in plan.steps if s.status == "pending"]
 
-        assert loop._should_continue_execution({"result": "x" * 500}, plan, pending) in (True, False)
+        assert loop._should_continue_execution({"result": "x" * 500}, plan, pending) in (
+            True,
+            False,
+        )
 
     def test_routing_runs_inside_a_finally(self):
         """It must still decide when the consumer stops iterating (disconnect)."""

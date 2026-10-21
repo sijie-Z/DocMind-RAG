@@ -1,37 +1,59 @@
 import request from '@/utils/request'
-import type { AxiosResponse } from 'axios'
+import type { AxiosRequestConfig, AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
 
+/**
+ * 用户列表项 —— 与后端 GET /users/ 的实际返回逐字对齐
+ * （backend/app/api/v1/endpoints/users.py:784-790）。
+ * 注意：列表接口返回裸扁平结构 {total, skip, limit, users}（无 success/data 信封），
+ * 且没有 nickname/status/phone/updated_at 字段（status 的真身是布尔 is_active）。
+ */
 export interface User {
   id: number
   username: string
   email: string
-  nickname: string
-  full_name?: string
-  phone?: string
-  avatar?: string
-  avatar_url?: string
+  full_name: string | null
+  organization_id: number | null
   role: 'admin' | 'user'
-  status: 'active' | 'inactive'
-  organization_ids: number[]
-  organizations?: Array<{ id: number; name: string; color: string }>
-  last_login_at?: string
-  created_at: string
-  updated_at: string
-  remark?: string
+  is_active: boolean
+  created_at: string | null
+  last_login_at: string | null
 }
 
 export interface UserListResponse {
-  data: User[]
   total: number
-  page: number
-  page_size: number
+  skip: number
+  limit: number
+  users: User[]
 }
 
-export interface UserProfileResponse extends User {
-  bio?: string
-  preferences?: Record<string, unknown>
-  api_key?: string
+/**
+ * GET /users/me 的真实形状（users.py:429-446）：含 nickname/avatar_url/bio/
+ * api_key/preferences，无 status（真身 is_active 布尔）；与列表 item 形状不同，
+ * 不继承列表的 User。
+ */
+export interface UserProfileResponse {
+  id: number
+  username: string
+  email: string
+  full_name: string | null
+  nickname: string | null
+  phone: string | null
+  avatar_url: string | null
+  bio: string | null
+  organization_id: number | null
+  role: 'admin' | 'user'
+  is_superuser: boolean
+  is_active: boolean
+  created_at: string | null
+  last_login_at: string | null
+  preferences?: Record<string, unknown> | null
+  /**
+   * @deprecated 个人 API Key 已下线（B3）：Profile 入口已移除，后端
+   * POST/DELETE /users/api-key 仅保留一个 minor；本字段为服务端返回的掩码值，
+   * 前端不再消费，勿新增读取方。
+   */
+  api_key?: string | null
 }
 
 export interface AuditLogEntry {
@@ -46,14 +68,16 @@ export interface AuditLogEntry {
   created_at: string
 }
 
+/**
+ * 用户列表。后端端点仅声明 skip/limit 两个查询参数
+ * （users.py:755-761），不存在的 page/page_size/search 会被 FastAPI 静默忽略
+ * —— 不发送装样子的假参数；服务端搜索当前不可用（见 users 视图内注释）。
+ */
 export const getUsers = async (params?: {
-  page?: number
-  page_size?: number
-  search?: string
-  role?: string
-  status?: string
-}): Promise<AxiosResponse<ApiResponse<UserListResponse>>> => {
-  return request.get('/users/', { params })
+  skip?: number
+  limit?: number
+}, config?: AxiosRequestConfig): Promise<AxiosResponse<UserListResponse>> => {
+  return request.get('/users/', { params, ...config })
 }
 
 export const getUser = async (id: number): Promise<AxiosResponse<User>> => {
@@ -64,6 +88,44 @@ export const getUserProfile = async (): Promise<AxiosResponse<UserProfileRespons
   return request.get('/users/me')
 }
 
+/** 当前用户所属组织（成员关系 user_organization + 主组织兜底；不含未加入的组织）。 */
+export interface MyOrganization {
+  id: number
+  name: string
+  description?: string | null
+  color?: string | null
+  is_private?: boolean
+}
+
+export interface MyOrganizationsResponse {
+  organizations: MyOrganization[]
+  current_organization_id: number | null
+}
+
+export const getMyOrganizations = async (): Promise<
+  AxiosResponse<ApiResponse<MyOrganizationsResponse>>
+> => {
+  return request.get('/users/me/organizations')
+}
+
+/**
+ * 切换当前组织：服务端先校验成员关系（非成员 403），成功后全站请求
+ * 的组织上下文（文档/会话列表过滤等）随新组织生效。
+ */
+export const switchOrganization = async (
+  organizationId: number,
+): Promise<
+  AxiosResponse<
+    ApiResponse<{
+      organization_id: number
+      is_org_admin?: boolean
+      organization?: Record<string, unknown>
+    }>
+  >
+> => {
+  return request.post(`/users/me/organizations/${organizationId}/switch`)
+}
+
 export const getAuditLogs = async (params?: {
   skip?: number
   limit?: number
@@ -72,8 +134,8 @@ export const getAuditLogs = async (params?: {
   search?: string
   start_date?: string
   end_date?: string
-}): Promise<AxiosResponse<ApiResponse<{ items: AuditLogEntry[]; total: number }>>> => {
-  return request.get('/users/audit-logs', { params })
+}, config?: AxiosRequestConfig): Promise<AxiosResponse<ApiResponse<{ items: AuditLogEntry[]; total: number }>>> => {
+  return request.get('/users/audit-logs', { params, ...config })
 }
 
 export const createUser = async (data: {
@@ -86,8 +148,8 @@ export const createUser = async (data: {
   status: 'active' | 'inactive'
   organization_ids?: number[]
   remark?: string
-}): Promise<AxiosResponse<{ data: User }>> => {
-  return request.post('/users/', data)
+}, config?: AxiosRequestConfig): Promise<AxiosResponse<{ data: User }>> => {
+  return request.post('/users/', data, config)
 }
 
 export const updateUser = async (id: number, data: {
@@ -98,8 +160,8 @@ export const updateUser = async (id: number, data: {
   status?: 'active' | 'inactive'
   organization_ids?: number[]
   remark?: string
-}): Promise<AxiosResponse<{ data: User }>> => {
-  return request.put(`/users/${id}`, data)
+}, config?: AxiosRequestConfig): Promise<AxiosResponse<{ data: User }>> => {
+  return request.put(`/users/${id}`, data, config)
 }
 
 export interface UserStats {
@@ -110,6 +172,9 @@ export interface UserStats {
   storage_used: number
   storage_limit?: number
   activity_trend?: number[]
+  /** issue #301：查询失败时的诚实降级标记（200 + 全零），消费方不得当作真实 0 */
+  degraded?: boolean
+  reason?: string
 }
 
 export interface Activity {
@@ -139,8 +204,8 @@ export interface UserAuditLog {
   created_at?: string
 }
 
-export const getUserStats = async (): Promise<AxiosResponse<UserStats>> => {
-  return request.get('/users/stats')
+export const getUserStats = async (config?: AxiosRequestConfig): Promise<AxiosResponse<UserStats>> => {
+  return request.get('/users/stats', config)
 }
 
 export const getUserActivities = async (): Promise<AxiosResponse<Activity[]>> => {
@@ -199,23 +264,18 @@ export const updatePassword = async (data: {
   })
 }
 
-export const deleteUser = async (id: number): Promise<AxiosResponse<ApiResponse<unknown>>> => {
-  return request.delete(`/users/${id}`)
+export const deleteUser = async (id: number, config?: AxiosRequestConfig): Promise<AxiosResponse<ApiResponse<unknown>>> => {
+  return request.delete(`/users/${id}`, config)
 }
 
-export const resetUserPassword = async (id: number, password: string): Promise<AxiosResponse<ApiResponse<unknown>>> => {
+export const resetUserPassword = async (id: number, password: string, config?: AxiosRequestConfig): Promise<AxiosResponse<ApiResponse<unknown>>> => {
   return request.put(`/users/${id}/password`, {
     new_password: password
-  })
+  }, config)
 }
 
-export const generateApiKey = async (): Promise<AxiosResponse<{ api_key: string }>> => {
-  return request.post('/users/api-key')
-}
-
-export const revokeApiKey = async (): Promise<AxiosResponse<{ message: string }>> => {
-  return request.delete('/users/api-key')
-}
+// 个人 API Key 生成/撤销通道随 B3 死设定清理移除：Profile UI 入口已删，
+// 后端 POST/DELETE /users/api-key 仅保留一个 minor 并标记 deprecated。
 
 // --- User Settings ---
 
@@ -239,4 +299,34 @@ export const updateUserSettings = async (data: {
   preferences?: Record<string, unknown>
 }): Promise<AxiosResponse<ApiResponse<UserSettings>>> => {
   return request.put('/user/settings', data)
+}
+
+/** AI Provider 清单项（后端 user_settings.py _AVAILABLE_PROVIDERS 形状） */
+export interface ProviderDef {
+  id: string
+  name: string
+  base_url: string
+  models: string[]
+  requires_key: boolean
+}
+
+export interface ProviderCurrent {
+  provider: string
+  model: string
+  api_key?: string
+  base_url?: string
+}
+
+export interface ProvidersResponse {
+  success?: boolean
+  providers: ProviderDef[]
+  current?: ProviderCurrent | null
+}
+
+/**
+ * GET /user/settings/providers（request baseURL=/api/v1 → 完整路径
+ * /api/v1/user/settings/providers）。统一客户端负责鉴权头、401 刷新与错误提示。
+ */
+export const getUserSettingsProviders = async (): Promise<AxiosResponse<ProvidersResponse>> => {
+  return request.get('/user/settings/providers')
 }
