@@ -142,6 +142,12 @@ class KnowledgeService:
                         # issue #197：PDF 页码必须在本层重建结果时继续搬运——
                         # 端点读的是本层输出，漏搬会让 /search 恒返回 null。
                         "page_number": res.get("page_number"),
+                        # 同族缺陷：检索链路已计算的命中标记与改写计数也须搬运，
+                        # 否则端点 `.get(..., False)` 恒读默认值（has_keyword 恒 false）。
+                        "has_keyword": res.get("has_keyword"),
+                        "has_vector": res.get("has_vector"),
+                        "rewrite_hits": res.get("rewrite_hits"),
+                        "fresh_factor": res.get("fresh_factor"),
                         "metadata": {
                             "filename": res.get("filename"),
                             "snippet": res.get("snippet"),
