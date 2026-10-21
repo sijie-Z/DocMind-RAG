@@ -16,6 +16,7 @@
 默认模型（RAG 聊天）。配额与工具白名单的强制执行由 C4 的 SettingsService
 承接，本服务先把「生效值 / 来源 / 是否需重启」如实暴露给管理端。
 """
+
 import json
 import logging
 from dataclasses import dataclass
@@ -54,9 +55,7 @@ SETTING_SPECS: dict[str, SettingSpec] = {
     "default_provider": SettingSpec("default_provider", _platform_provider, True),
     # 默认模型按请求读取并透传给 LLM 调用，无需重启。
     "default_model": SettingSpec("default_model", _platform_model, False),
-    "retrieval_top_k": SettingSpec(
-        "retrieval_top_k", lambda: settings.TOP_K_RESULTS, False
-    ),
+    "retrieval_top_k": SettingSpec("retrieval_top_k", lambda: settings.TOP_K_RESULTS, False),
     "allow_privacy_mode": SettingSpec("allow_privacy_mode", lambda: True, False),
     "monthly_token_quota": SettingSpec("monthly_token_quota", lambda: None, False),
     "tool_whitelist": SettingSpec("tool_whitelist", lambda: None, False),
@@ -122,18 +121,14 @@ class OrganizationSettingsService:
             return int(fallback)
         return max(1, min(int(value), 50))
 
-    async def allow_privacy_mode(
-        self, db: AsyncSession, organization_id: int | None
-    ) -> bool:
+    async def allow_privacy_mode(self, db: AsyncSession, organization_id: int | None) -> bool:
         """组织是否允许成员开启隐私模式；未设置 = 允许（保持既有默认）。"""
         row = await self.get_row(db, organization_id)
         if row is None or row.allow_privacy_mode is None:
             return True
         return bool(row.allow_privacy_mode)
 
-    async def get_effective_model(
-        self, db: AsyncSession, organization_id: int | None
-    ) -> str:
+    async def get_effective_model(self, db: AsyncSession, organization_id: int | None) -> str:
         row = await self.get_row(db, organization_id)
         if row is not None and row.default_model:
             return row.default_model
@@ -146,33 +141,23 @@ class OrganizationSettingsService:
         row = await self.get_row(db, organization_id)
         top_k = getattr(row, "retrieval_top_k", None) if row is not None else None
         privacy = (
-            True
-            if row is None or row.allow_privacy_mode is None
-            else bool(row.allow_privacy_mode)
+            True if row is None or row.allow_privacy_mode is None else bool(row.allow_privacy_mode)
         )
         model = row.default_model if row is not None and row.default_model else _platform_model()
         return RuntimePolicy(
-            retrieval_top_k=(
-                max(1, min(int(top_k), 50)) if top_k is not None else None
-            ),
+            retrieval_top_k=(max(1, min(int(top_k), 50)) if top_k is not None else None),
             allow_privacy_mode=privacy,
             default_model=model,
         )
 
-    async def get_monthly_usage(
-        self, db: AsyncSession, organization_id: int | None
-    ) -> int:
+    async def get_monthly_usage(self, db: AsyncSession, organization_id: int | None) -> int:
         """本月已用 token（input + output）；仅用于管理端展示配额进度。"""
         if organization_id is None:
             return 0
-        month_start = datetime.now(UTC).replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        )
+        month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         stmt = select(
             func.coalesce(
-                func.sum(
-                    TokenUsageRecord.input_tokens + TokenUsageRecord.output_tokens
-                ),
+                func.sum(TokenUsageRecord.input_tokens + TokenUsageRecord.output_tokens),
                 0,
             )
         ).where(
@@ -216,9 +201,7 @@ class OrganizationSettingsService:
         值语义：``None`` = 清除覆盖（回退平台默认），``[]`` = 显式「无工具」
         （区别于未设置）。空更新不会创建空行。
         """
-        known_updates = {
-            key: value for key, value in updates.items() if key in SETTING_SPECS
-        }
+        known_updates = {key: value for key, value in updates.items() if key in SETTING_SPECS}
         if not known_updates:
             return await self.get_row(db, organization_id), {}
 

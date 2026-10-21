@@ -3,6 +3,7 @@
 planner 流式采集与 loop 无工具直答分支此前无自动化测试（评审实测可用但无保护）。
 两处各一条判别性用例：删掉对应 `record_llm_usage(...)` 调用，用例必须变红。
 """
+
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -157,10 +158,15 @@ async def test_toolless_run_accounts_usage_into_execution_context(monkeypatch):
     loop = PERAgentLoop(
         client,
         AgentConfig(
-            enable_planning=False, enable_tools=False, enable_reflection=False,
-            enable_memory=False, enable_thinking=False, enable_experience=False,
+            enable_planning=False,
+            enable_tools=False,
+            enable_reflection=False,
+            enable_memory=False,
+            enable_thinking=False,
+            enable_experience=False,
         ),
-        organization_id=1, user_id=0,
+        organization_id=1,
+        user_id=0,
     )
     loop.memory = _FakeMemory()
     loop._write_experiences = AsyncMock()

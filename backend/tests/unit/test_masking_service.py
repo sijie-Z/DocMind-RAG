@@ -1,4 +1,5 @@
 """MaskingService (PII 脱敏) 单元测试。"""
+
 import pytest
 
 from app.services.masking_service import MaskingService

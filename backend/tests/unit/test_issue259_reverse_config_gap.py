@@ -16,6 +16,7 @@ SemanticCache）与 `RAG_QUERY_REWRITE_TIMEOUT_SECONDS`（rag/retriever.py 的
 2. 删 SEMANTIC_CACHE_TTL_SECONDS 字段 → ttl 断言红；
 3. 删 RAG_QUERY_REWRITE_TIMEOUT_SECONDS 字段 → 消费方直接读取 AttributeError / 超时断言红。
 """
+
 import json
 import os
 import pathlib

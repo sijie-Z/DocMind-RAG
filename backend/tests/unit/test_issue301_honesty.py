@@ -32,18 +32,24 @@ from app.agent.registry import ToolResult
 
 def _plan_with_failed_step() -> Plan:
     """非 quick-pass 的计划（有失败步）→ reflect() 必然走 LLM 路径。"""
-    return Plan(id="p1", goal="分析营收", steps=[
-        PlanStep(id="s1", description="s1", status="failed"),
-    ])
+    return Plan(
+        id="p1",
+        goal="分析营收",
+        steps=[
+            PlanStep(id="s1", description="s1", status="failed"),
+        ],
+    )
 
 
 def _client_returning(content: str) -> MagicMock:
     client = MagicMock()
-    client.chat.completions.create = AsyncMock(return_value=SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
-        usage=None,
-        model="mock-model",
-    ))
+    client.chat.completions.create = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+            usage=None,
+            model="mock-model",
+        )
+    )
     return client
 
 
@@ -96,7 +102,9 @@ class TestReflectionUnavailable:
         from app.agent.reflector import Reflector
 
         mem = _mem_stub()
-        reflector = Reflector(_failing_client(RuntimeError("down")), AgentConfig(), memory_bridge=mem)
+        reflector = Reflector(
+            _failing_client(RuntimeError("down")), AgentConfig(), memory_bridge=mem
+        )
         await _reflect_events(reflector)
 
         # 无判定不写经验库：既不冒充成功（旧行为把非 JSON 判 pass 记 success），
@@ -115,7 +123,9 @@ class TestReflectionUnparsed:
 
         ctx = MagicMock()
         mem = _mem_stub()
-        reflector = Reflector(_client_returning("我觉得还不错，应该没问题"), AgentConfig(), memory_bridge=mem)
+        reflector = Reflector(
+            _client_returning("我觉得还不错，应该没问题"), AgentConfig(), memory_bridge=mem
+        )
         events = await _reflect_events(reflector, ctx=ctx)
 
         assert all(e.reflection_result == "unparsed" for e in events)
@@ -156,7 +166,9 @@ class TestReflectionUnparsed:
 
         mem = _mem_stub()
         reflector = Reflector(
-            _client_returning('{"decision": "pass", "achievement": 90, "reasoning": "ok", "gaps": ["缺 X"]}'),
+            _client_returning(
+                '{"decision": "pass", "achievement": 90, "reasoning": "ok", "gaps": ["缺 X"]}'
+            ),
             AgentConfig(),
             memory_bridge=mem,
         )
@@ -192,7 +204,9 @@ class TestReflectionUnparsed:
         from app.agent.reflector import ReflectionResult, Reflector
 
         reflector = Reflector(MagicMock(), AgentConfig())
-        event = reflector._summary_event(_plan_with_failed_step(), ReflectionResult(decision="banana"))
+        event = reflector._summary_event(
+            _plan_with_failed_step(), ReflectionResult(decision="banana")
+        )
         assert event.reflection_result == "unparsed"
 
     def test_extract_json_none_on_unparseable_dict_on_valid(self):
@@ -315,11 +329,13 @@ class TestReviewerDegradation:
 
 def _llm_pipeline(content: str) -> SimpleNamespace:
     client = MagicMock()
-    client.chat.completions.create = AsyncMock(return_value=SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
-        usage=None,
-        model="mock-model",
-    ))
+    client.chat.completions.create = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+            usage=None,
+            model="mock-model",
+        )
+    )
     return SimpleNamespace(openai_client=client)
 
 
@@ -333,7 +349,8 @@ class TestExtractInsightsHonesty:
         from app.core.elasticsearch import ElasticsearchTools
 
         monkeypatch.setattr(
-            ElasticsearchTools, "search_documents",
+            ElasticsearchTools,
+            "search_documents",
             AsyncMock(return_value={"hits": {"hits": []}}),
         )
         res = await extract_insights("nope", organization_id=1)
@@ -424,15 +441,21 @@ class TestSkillConsumersHonesty:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        error_json = json.dumps({
-            "filename": "f.md", "document_id": "doc1",
-            "error": "Analysis failed: ES connection refused",
-        }, ensure_ascii=False)
-        fake = _FakeExecuteRecorder({
-            "search_knowledge_base": "- ID: doc1 | 文件名: f.md\n- ID: doc2 | 文件名: g.md",
-            "extract_insights": error_json,
-            "generate_report": "报告已生成",
-        })
+        error_json = json.dumps(
+            {
+                "filename": "f.md",
+                "document_id": "doc1",
+                "error": "Analysis failed: ES connection refused",
+            },
+            ensure_ascii=False,
+        )
+        fake = _FakeExecuteRecorder(
+            {
+                "search_knowledge_base": "- ID: doc1 | 文件名: f.md\n- ID: doc2 | 文件名: g.md",
+                "extract_insights": error_json,
+                "generate_report": "报告已生成",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("分析f.md的财务情况", organization_id=1)
@@ -454,11 +477,13 @@ class TestSkillConsumersHonesty:
         from app.agent.tools import skills
 
         no_anchor = json.dumps({"filename": "x.md", "document_id": "doc1"})
-        fake = _FakeExecuteRecorder({
-            "search_knowledge_base": "- ID: doc1 | 文件名: x.md",
-            "extract_insights": no_anchor,
-            "generate_report": "报告已生成",
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "search_knowledge_base": "- ID: doc1 | 文件名: x.md",
+                "extract_insights": no_anchor,
+                "generate_report": "报告已生成",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("分析", organization_id=1)
@@ -472,12 +497,14 @@ class TestSkillConsumersHonesty:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "search_knowledge_base": "- ID: doc1 | 文件名: f.md",
-            "extract_insights": ToolResult.fail(
-                "document_not_found", "Document doc1 not found in index."
-            ),
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "search_knowledge_base": "- ID: doc1 | 文件名: f.md",
+                "extract_insights": ToolResult.fail(
+                    "document_not_found", "Document doc1 not found in index."
+                ),
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("分析", organization_id=1)
@@ -494,10 +521,12 @@ class TestSkillConsumersHonesty:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "search_knowledge_base": "- ID: doc1 | 文件名: f.md",
-            "extract_insights": "Error: [document_not_found] Document doc1 not found in index.",
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "search_knowledge_base": "- ID: doc1 | 文件名: f.md",
+                "extract_insights": "Error: [document_not_found] Document doc1 not found in index.",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("分析", organization_id=1)
@@ -510,16 +539,26 @@ class TestSkillConsumersHonesty:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        ok_payload = json.dumps({
-            "filename": "a.md", "document_id": "doc1", "chunk_count": 3, "content_length": 100,
-            "insights": {"claims": [{"claim": "Error rate declined", "confidence": "high"}]},
-        }, ensure_ascii=False)
+        ok_payload = json.dumps(
+            {
+                "filename": "a.md",
+                "document_id": "doc1",
+                "chunk_count": 3,
+                "content_length": 100,
+                "insights": {"claims": [{"claim": "Error rate declined", "confidence": "high"}]},
+            },
+            ensure_ascii=False,
+        )
         error_json = json.dumps({"filename": "b.md", "error": "Analysis failed: timeout"})
-        fake = _FakeExecuteRecorder({
-            "search_knowledge_base": "- ID: doc1 | 文件名: a.md\n- ID: doc2 | 文件名: b.md",
-            "extract_insights": lambda args: ok_payload if args["document_id"] == "doc1" else error_json,
-            "generate_report": "报告已生成",
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "search_knowledge_base": "- ID: doc1 | 文件名: a.md\n- ID: doc2 | 文件名: b.md",
+                "extract_insights": lambda args: (
+                    ok_payload if args["document_id"] == "doc1" else error_json
+                ),
+                "generate_report": "报告已生成",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("对比", generate_report=False, organization_id=1)
@@ -534,11 +573,13 @@ class TestSkillConsumersHonesty:
         from app.agent.tools import skills
 
         error_json = json.dumps({"filename": "f.md", "error": "Analysis failed: ES down"})
-        fake = _FakeExecuteRecorder({
-            "get_document_info": "文档信息: f.md",
-            "extract_insights": error_json,
-            "cross_document_analysis": "跨文档分析正文",
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "get_document_info": "文档信息: f.md",
+                "extract_insights": error_json,
+                "cross_document_analysis": "跨文档分析正文",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.document_comparison(["doc1", "doc2"], organization_id=1)
@@ -557,9 +598,12 @@ class TestLegacyErrorEnvelopeHelper:
         from app.agent.tools.skills import _legacy_error_envelope
 
         assert _legacy_error_envelope('{"error": "boom"}') is True
-        assert _legacy_error_envelope(
-            '  \n{"document_count": 2, "error": "Analysis failed: ES down", "documents": []}'
-        ) is True
+        assert (
+            _legacy_error_envelope(
+                '  \n{"document_count": 2, "error": "Analysis failed: ES down", "documents": []}'
+            )
+            is True
+        )
 
     def test_non_envelopes_pass(self):
         from app.agent.tools.skills import _legacy_error_envelope
@@ -567,10 +611,13 @@ class TestLegacyErrorEnvelopeHelper:
         # 空串 error 不是失败标记
         assert _legacy_error_envelope('{"error": ""}') is False
         # 合法分析载荷（error 词只在嵌套正文）不受影响
-        assert _legacy_error_envelope('{"insights": {"claims": [{"claim": "Error rate declined"}]}}') is False
+        assert (
+            _legacy_error_envelope('{"insights": {"claims": [{"claim": "Error rate declined"}]}}')
+            is False
+        )
         # 纯文本 / 前缀串 / 数组形态都不在此拒收（#297：不做内容启发式）
         assert _legacy_error_envelope("Error: file not found (translated)") is False
-        assert _legacy_error_envelope('Error: [not_found] Document x not found.') is False
+        assert _legacy_error_envelope("Error: [not_found] Document x not found.") is False
         assert _legacy_error_envelope('[{"error": 1}]') is False
         assert _legacy_error_envelope(None) is False
         assert _legacy_error_envelope("") is False
@@ -585,10 +632,12 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "web_search": ToolResult.fail("rate_limited", "Rate limit exceeded."),
-            "search_knowledge_base": "[1] (0.9) f.md\n知识库正文",
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "web_search": ToolResult.fail("rate_limited", "Rate limit exceeded."),
+                "search_knowledge_base": "[1] (0.9) f.md\n知识库正文",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.deep_research("市场趋势", organization_id=1)
@@ -602,10 +651,12 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "web_search": json.dumps({"error": "quota exceeded"}),
-            "search_knowledge_base": "[1] (0.9) f.md\n知识库正文",
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "web_search": json.dumps({"error": "quota exceeded"}),
+                "search_knowledge_base": "[1] (0.9) f.md\n知识库正文",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.deep_research("市场趋势", organization_id=1)
@@ -618,10 +669,12 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "web_search": "Web search results for: x\n[1] T\n    Error rate declined in 2025",
-            "search_knowledge_base": "[1] (0.9) Error budget report.md\n正文",
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "web_search": "Web search results for: x\n[1] T\n    Error rate declined in 2025",
+                "search_knowledge_base": "[1] (0.9) Error budget report.md\n正文",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.deep_research("市场趋势", organization_id=1)
@@ -633,12 +686,14 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "web_search": "Web search results for: x\n[1] T",
-            "search_knowledge_base": ToolResult.fail(
-                "knowledge_base_unavailable", "知识库检索服务暂不可用（kind=connection）"
-            ),
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "web_search": "Web search results for: x\n[1] T",
+                "search_knowledge_base": ToolResult.fail(
+                    "knowledge_base_unavailable", "知识库检索服务暂不可用（kind=connection）"
+                ),
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.deep_research("市场趋势", organization_id=1)
@@ -651,11 +706,13 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "get_document_info": ToolResult.fail("not_found", "Document doc1 not found."),
-            "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
-            "cross_document_analysis": "跨文档分析正文",
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "get_document_info": ToolResult.fail("not_found", "Document doc1 not found."),
+                "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
+                "cross_document_analysis": "跨文档分析正文",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.document_comparison(["doc1", "doc2"], organization_id=1)
@@ -668,13 +725,15 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "get_document_info": json.dumps(
-                {"id": "doc1", "filename": "why error rate not found in Q3.md"}
-            ),
-            "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
-            "cross_document_analysis": "跨文档分析正文",
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "get_document_info": json.dumps(
+                    {"id": "doc1", "filename": "why error rate not found in Q3.md"}
+                ),
+                "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
+                "cross_document_analysis": "跨文档分析正文",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.document_comparison(["doc1", "doc2"], organization_id=1)
@@ -687,16 +746,21 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        cross_err = json.dumps({
-            "document_count": 2,
-            "error": "Analysis failed: ES connection refused",
-            "documents": [{"filename": "a.md"}],
-        }, ensure_ascii=False)
-        fake = _FakeExecuteRecorder({
-            "get_document_info": json.dumps({"id": "doc1", "filename": "a.md"}),
-            "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
-            "cross_document_analysis": cross_err,
-        })
+        cross_err = json.dumps(
+            {
+                "document_count": 2,
+                "error": "Analysis failed: ES connection refused",
+                "documents": [{"filename": "a.md"}],
+            },
+            ensure_ascii=False,
+        )
+        fake = _FakeExecuteRecorder(
+            {
+                "get_document_info": json.dumps({"id": "doc1", "filename": "a.md"}),
+                "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
+                "cross_document_analysis": cross_err,
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.document_comparison(["doc1", "doc2"], organization_id=1)
@@ -709,13 +773,15 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "get_document_info": json.dumps({"id": "doc1", "filename": "a.md"}),
-            "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
-            "cross_document_analysis": ToolResult.fail(
-                "analysis_failed", "Analysis failed: LLM boom"
-            ),
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "get_document_info": json.dumps({"id": "doc1", "filename": "a.md"}),
+                "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
+                "cross_document_analysis": ToolResult.fail(
+                    "analysis_failed", "Analysis failed: LLM boom"
+                ),
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.document_comparison(["doc1", "doc2"], organization_id=1)
@@ -728,11 +794,13 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "get_document_info": json.dumps({"id": "doc1", "filename": "a.md"}),
-            "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
-            "cross_document_analysis": "跨文档分析：两份文档均提到 Error rate declined",
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "get_document_info": json.dumps({"id": "doc1", "filename": "a.md"}),
+                "extract_insights": json.dumps({"filename": "a.md", "insights": {"claims": []}}),
+                "cross_document_analysis": "跨文档分析：两份文档均提到 Error rate declined",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.document_comparison(["doc1", "doc2"], organization_id=1)
@@ -745,11 +813,13 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "search_knowledge_base": ToolResult.fail(
-                "knowledge_base_unavailable", "知识库检索服务暂不可用（kind=connection）"
-            ),
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "search_knowledge_base": ToolResult.fail(
+                    "knowledge_base_unavailable", "知识库检索服务暂不可用（kind=connection）"
+                ),
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("分析主题", organization_id=1)
@@ -764,9 +834,11 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "search_knowledge_base": "Error: file not found in config.txt（文档原文片段）",
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "search_knowledge_base": "Error: file not found in config.txt（文档原文片段）",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("分析主题", organization_id=1)
@@ -778,13 +850,15 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "search_knowledge_base": "- ID: doc1 | 文件名: f.md",
-            "extract_insights": json.dumps(
-                {"filename": "f.md", "insights": {"claims": [{"claim": "c"}]}}
-            ),
-            "generate_report": json.dumps({"error": "Invalid sections JSON: boom"}),
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "search_knowledge_base": "- ID: doc1 | 文件名: f.md",
+                "extract_insights": json.dumps(
+                    {"filename": "f.md", "insights": {"claims": [{"claim": "c"}]}}
+                ),
+                "generate_report": json.dumps({"error": "Invalid sections JSON: boom"}),
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("分析主题", organization_id=1)
@@ -797,13 +871,15 @@ class TestSkillConsumptionGateStructured:
         from app.agent.registry import tool_registry
         from app.agent.tools import skills
 
-        fake = _FakeExecuteRecorder({
-            "search_knowledge_base": "- ID: doc1 | 文件名: f.md",
-            "extract_insights": json.dumps(
-                {"filename": "f.md", "insights": {"claims": [{"claim": "c"}]}}
-            ),
-            "generate_report": "# 报告正文：Error rate declined",
-        })
+        fake = _FakeExecuteRecorder(
+            {
+                "search_knowledge_base": "- ID: doc1 | 文件名: f.md",
+                "extract_insights": json.dumps(
+                    {"filename": "f.md", "insights": {"claims": [{"claim": "c"}]}}
+                ),
+                "generate_report": "# 报告正文：Error rate declined",
+            }
+        )
         monkeypatch.setattr(tool_registry, "execute_detailed", fake)
 
         out = await skills.knowledge_analysis("分析主题", organization_id=1)
@@ -868,12 +944,14 @@ class TestReviewWordingDifferentiation:
 
     @pytest.mark.asyncio
     async def test_no_verdict_wording_distinct(self):
-        reviewer = StubReviewer({
-            "issues_found": [],
-            "recommendation": "error",
-            "error_kind": "no_verdict",
-            "error": "模型返回的 JSON 缺少 recommendation 判定",
-        })
+        reviewer = StubReviewer(
+            {
+                "issues_found": [],
+                "recommendation": "error",
+                "error_kind": "no_verdict",
+                "error": "模型返回的 JSON 缺少 recommendation 判定",
+            }
+        )
         loop = make_loop(ScriptedReflector(["pass"]), reviewer=reviewer)
         events = await drive(loop)
 
@@ -882,20 +960,21 @@ class TestReviewWordingDifferentiation:
         assert not any("审查服务异常" in c for c in contents)
         decisions = decisions_of(events)
         reasoning = next(
-            d["reasoning"] for d in decisions
-            if d["phase"] == "review" and d["action"] == "error"
+            d["reasoning"] for d in decisions if d["phase"] == "review" and d["action"] == "error"
         )
         assert "模型未给出判定" in reasoning
         assert "审查服务异常" not in reasoning
 
     @pytest.mark.asyncio
     async def test_service_error_wording_distinct(self):
-        reviewer = StubReviewer({
-            "issues_found": [],
-            "recommendation": "error",
-            "error_kind": "service_error",
-            "error": "review model down",
-        })
+        reviewer = StubReviewer(
+            {
+                "issues_found": [],
+                "recommendation": "error",
+                "error_kind": "service_error",
+                "error": "review model down",
+            }
+        )
         loop = make_loop(ScriptedReflector(["pass"]), reviewer=reviewer)
         events = await drive(loop)
 
@@ -906,9 +985,13 @@ class TestReviewWordingDifferentiation:
     @pytest.mark.asyncio
     async def test_unclassified_error_defaults_to_service_wording(self):
         """未标注 error_kind 的自定义调用方按服务异常（保守、与旧文案一致）。"""
-        reviewer = StubReviewer({
-            "issues_found": [], "recommendation": "error", "error": "legacy caller",
-        })
+        reviewer = StubReviewer(
+            {
+                "issues_found": [],
+                "recommendation": "error",
+                "error": "legacy caller",
+            }
+        )
         loop = make_loop(ScriptedReflector(["pass"]), reviewer=reviewer)
         events = await drive(loop)
 
@@ -925,15 +1008,27 @@ class TestReviewWordingDifferentiation:
         assert not any("对抗审查未完成" in c for c in contents)
 
 
-_AMS_PAYLOAD = json.dumps({
-    "agent_id": "m6-src",
-    "interaction_count": 1,
-    "long_term": {"long_term": [{
-        "id": "m1", "content": "长期记忆一条", "memory_type": "long_term",
-        "importance": 0.9, "metadata": {}, "created_at": None,
-        "last_accessed": None, "access_count": 0,
-    }]},
-}, ensure_ascii=False)
+_AMS_PAYLOAD = json.dumps(
+    {
+        "agent_id": "m6-src",
+        "interaction_count": 1,
+        "long_term": {
+            "long_term": [
+                {
+                    "id": "m1",
+                    "content": "长期记忆一条",
+                    "memory_type": "long_term",
+                    "importance": 0.9,
+                    "metadata": {},
+                    "created_at": None,
+                    "last_accessed": None,
+                    "access_count": 0,
+                }
+            ]
+        },
+    },
+    ensure_ascii=False,
+)
 
 
 class TestAgentMemoryLoadRetry:
@@ -1005,10 +1100,17 @@ class _FakeRedis:
         return self.behavior
 
 
-_EXP_JSON = json.dumps([{
-    "id": "e1", "scenario": "cross_document", "symptom": "only_one_doc",
-    "lesson": "对比要逐文档取证", "confidence": 0.8,
-}])
+_EXP_JSON = json.dumps(
+    [
+        {
+            "id": "e1",
+            "scenario": "cross_document",
+            "symptom": "only_one_doc",
+            "lesson": "对比要逐文档取证",
+            "confidence": 0.8,
+        }
+    ]
+)
 
 
 class TestExperienceStoreLoadRetry:
@@ -1020,7 +1122,9 @@ class TestExperienceStoreLoadRetry:
         return store
 
     @pytest.mark.asyncio
-    async def test_redis_outage_not_loaded_then_recovers_without_restart(self, monkeypatch, tmp_path):
+    async def test_redis_outage_not_loaded_then_recovers_without_restart(
+        self, monkeypatch, tmp_path
+    ):
         store = self._new_store(monkeypatch, tmp_path)
         monkeypatch.setattr("app.core.redis.redis_client", _FakeRedis(ConnectionError("transient")))
 
@@ -1099,10 +1203,15 @@ class _RecordingPlanner:
         self.calls.append({"query": query, "replan_feedback": replan_feedback})
         yield AgentEvent(type="plan_start", plan_id="plan-1", content="制定计划...")
         yield AgentEvent(
-            type="plan_step", plan_id="plan-1", plan_step_id="s1",
-            content="步骤", tool_hint="search_knowledge_base",
+            type="plan_step",
+            plan_id="plan-1",
+            plan_step_id="s1",
+            content="步骤",
+            tool_hint="search_knowledge_base",
         )
-        yield AgentEvent(type="plan_complete", plan_id="plan-1", plan_goal="目标", content="计划完成")
+        yield AgentEvent(
+            type="plan_complete", plan_id="plan-1", plan_goal="目标", content="计划完成"
+        )
 
 
 class _RecordingExecutor:
@@ -1115,16 +1224,29 @@ class _RecordingExecutor:
         pass
 
     async def execute(
-        self, plan, history=None, organization_id=1, user_id=0, enable_thinking=True,
-        ctx=None, on_step_done=None, human_guidance="", document_context="",
+        self,
+        plan,
+        history=None,
+        organization_id=1,
+        user_id=0,
+        enable_thinking=True,
+        ctx=None,
+        on_step_done=None,
+        human_guidance="",
+        document_context="",
     ):
         for s in plan.steps:
             s.status = "completed"
             plan.completed_steps += 1
-            self.memory.store_step_result(s.id, {
-                "description": s.description, "status": "completed",
-                "result": self.result_text, "tool_hint": s.tool_hint,
-            })
+            self.memory.store_step_result(
+                s.id,
+                {
+                    "description": s.description,
+                    "status": "completed",
+                    "result": self.result_text,
+                    "tool_hint": s.tool_hint,
+                },
+            )
         yield AgentEvent(type="chunk", content=f"答案-{plan.id}")
 
     async def _execute_step_with_retry(
@@ -1142,12 +1264,16 @@ class ScriptedReflector:
     async def reflect(self, plan, results, ctx=None):
         decision = self.decisions[min(self.calls, len(self.decisions) - 1)]
         self.calls += 1
-        yield AgentEvent(type="reflection", reflection_result=decision, content="评估理由", plan_id=plan.id)
+        yield AgentEvent(
+            type="reflection", reflection_result=decision, content="评估理由", plan_id=plan.id
+        )
 
 
 class StubReviewer:
     def __init__(self, result=None):
-        self.result = result if result is not None else {"issues_found": [], "recommendation": "pass"}
+        self.result = (
+            result if result is not None else {"issues_found": [], "recommendation": "pass"}
+        )
 
     async def review(self, plan, results, ctx=None):
         return self.result

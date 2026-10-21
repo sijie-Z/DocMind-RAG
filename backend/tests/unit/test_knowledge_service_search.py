@@ -9,6 +9,7 @@
 本文件不依赖 ES / DB / LLM：只替换 `RagServiceFacade.search_knowledge_base`，
 其余（解包 → 格式化 → 返回）走真实代码路径。
 """
+
 from unittest.mock import AsyncMock, patch
 
 import pytest

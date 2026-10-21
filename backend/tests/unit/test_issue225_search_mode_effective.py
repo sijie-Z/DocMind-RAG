@@ -19,6 +19,7 @@
   → TestChainWiring 对应用例红；
 - 精确缓存键去掉模式段 → TestModeScopedCache 红。
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -177,14 +178,18 @@ class TestForcedArmSelection:
     @pytest.mark.asyncio
     async def test_forced_keyword_never_calls_vector_arm(self, monkeypatch):
         """①强制 keyword → 仅关键词臂：vector 臂零调用（连分类器都不咨询）。"""
-        assert QueryComplexityClassifier.get_strategy(MEDIUM_Q) == "hybrid", "前提：自动路由本会跑两臂"
+        assert QueryComplexityClassifier.get_strategy(MEDIUM_Q) == "hybrid", (
+            "前提：自动路由本会跑两臂"
+        )
         retriever = HybridRetriever()
         kw_hits = [_kw_hit("doc_kw", "如何提交报销申请正文")]
         vec_hits = [_vec_hit("doc_vec", "如何提交报销申请 另一份内容")]
         kw_calls, vec_calls, _ = _wire_arms(monkeypatch, retriever, kw_hits, vec_hits)
         clf_calls = _spy_classifier(monkeypatch)
 
-        docs, qv, dbg, _deg = await retriever.retrieve(MEDIUM_Q, 1, top_k=5, debug=True, search_mode="keyword")
+        docs, qv, dbg, _deg = await retriever.retrieve(
+            MEDIUM_Q, 1, top_k=5, debug=True, search_mode="keyword"
+        )
 
         assert vec_calls == [], "强制 keyword 时 vector 臂不得被调用（零调用断言）"
         assert clf_calls == [], "显式模式不得咨询分类器（覆盖 = 跳过自动路由）"
@@ -198,14 +203,18 @@ class TestForcedArmSelection:
     @pytest.mark.asyncio
     async def test_forced_vector_never_calls_keyword_arm(self, monkeypatch):
         """②强制 vector → 仅向量臂：keyword 臂零调用（连分类器都不咨询）。"""
-        assert QueryComplexityClassifier.get_strategy(MEDIUM_Q) == "hybrid", "前提：自动路由本会跑两臂"
+        assert QueryComplexityClassifier.get_strategy(MEDIUM_Q) == "hybrid", (
+            "前提：自动路由本会跑两臂"
+        )
         retriever = HybridRetriever()
         kw_hits = [_kw_hit("doc_kw", "如何提交报销申请正文")]
         vec_hits = [_vec_hit("doc_vec", "如何提交报销申请 另一份内容")]
         kw_calls, vec_calls, vec_hyde_flags = _wire_arms(monkeypatch, retriever, kw_hits, vec_hits)
         clf_calls = _spy_classifier(monkeypatch)
 
-        docs, qv, dbg, _deg = await retriever.retrieve(MEDIUM_Q, 1, top_k=5, debug=True, search_mode="vector")
+        docs, qv, dbg, _deg = await retriever.retrieve(
+            MEDIUM_Q, 1, top_k=5, debug=True, search_mode="vector"
+        )
 
         assert kw_calls == [], "强制 vector 时 keyword 臂不得被调用（零调用断言）"
         assert clf_calls == [], "显式模式不得咨询分类器（覆盖 = 跳过自动路由）"
@@ -224,7 +233,9 @@ class TestForcedArmSelection:
         用 SIMPLE_Q（自动路由 keyword_only）：若覆盖失效，vector 臂零调用、
         融合不发生——本用例双断言（调用计数 + 融合产物含向量臂独有命中）。
         """
-        assert QueryComplexityClassifier.get_strategy(SIMPLE_Q) == "keyword_only", "前提：自动路由不会跑向量臂"
+        assert QueryComplexityClassifier.get_strategy(SIMPLE_Q) == "keyword_only", (
+            "前提：自动路由不会跑向量臂"
+        )
         retriever = HybridRetriever()
         kw_hits = [_kw_hit("doc_kw", "报销流程审批说明")]
         vec_hits = [_vec_hit("doc_vec", "报销流程 另一份内容")]
@@ -240,11 +251,15 @@ class TestForcedArmSelection:
 
         monkeypatch.setattr(HybridRetriever, "_rrf_fuse", staticmethod(spy_fuse))
 
-        docs, _qv, dbg, _deg = await retriever.retrieve(SIMPLE_Q, 1, top_k=5, debug=True, search_mode="hybrid")
+        docs, _qv, dbg, _deg = await retriever.retrieve(
+            SIMPLE_Q, 1, top_k=5, debug=True, search_mode="hybrid"
+        )
 
         assert kw_calls == [SIMPLE_Q] and vec_calls == [SIMPLE_Q], "两臂都必须被调用"
         assert clf_calls == [], "显式模式不得咨询分类器（覆盖 = 跳过自动路由）"
-        assert vec_hyde_flags == [False], "显式 hybrid 不含 HyDE（enable_hyde=False，与自动 hybrid 档一致）"
+        assert vec_hyde_flags == [False], (
+            "显式 hybrid 不含 HyDE（enable_hyde=False，与自动 hybrid 档一致）"
+        )
         assert fuse_calls == [(1, 1)], "RRF 融合路径必须被执行"
         ids = [d["chunk_id"] for d in docs]
         assert "doc_kw" in ids and "doc_vec" in ids, f"两臂命中都应进入融合结果，实际 {ids}"
@@ -258,14 +273,18 @@ class TestForcedArmSelection:
 
         async def spy_fallback(query, filters, top_k):
             fb_calls.append(query)
-            return [{"_id": "fb", "_score": 1.0, "_source": {"content": "兜底", "document_id": "fb"}}], None
+            return [
+                {"_id": "fb", "_score": 1.0, "_source": {"content": "兜底", "document_id": "fb"}}
+            ], None
 
         _, vec_calls, _ = _wire_arms(monkeypatch, retriever, [_kw_hit("doc_kw", "x")], [])
         monkeypatch.setattr(retriever, "_fallback", spy_fallback)
 
         docs, _qv, _dbg, deg = await retriever.retrieve(MEDIUM_Q, 1, top_k=5, search_mode="vector")
 
-        assert docs == [] and fb_calls == [], "显式 vector 空结果不得走 keyword 兜底（否则模式说了不算）"
+        assert docs == [] and fb_calls == [], (
+            "显式 vector 空结果不得走 keyword 兜底（否则模式说了不算）"
+        )
         assert vec_calls == [MEDIUM_Q] and deg == []
 
 
@@ -285,7 +304,10 @@ class TestAutoRouteUnchanged:
     async def test_auto_simple_query_still_keyword_only(self, monkeypatch):
         retriever = HybridRetriever()
         kw_calls, vec_calls, _ = _wire_arms(
-            monkeypatch, retriever, [_kw_hit("doc_kw", "报销流程审批说明")], [_vec_hit("doc_vec", "报销流程")]
+            monkeypatch,
+            retriever,
+            [_kw_hit("doc_kw", "报销流程审批说明")],
+            [_vec_hit("doc_vec", "报销流程")],
         )
         docs, _qv, dbg, _deg = await retriever.retrieve(SIMPLE_Q, 1, top_k=5, debug=True)
         assert kw_calls == [SIMPLE_Q] and vec_calls == [], "缺省时 simple 仍不跑向量臂"
@@ -397,7 +419,9 @@ class TestModeScopedCache:
         assert cache._key("Q", 2, 10, None) == "org=2|topk=10|q=q"
         # 显式模式分域且互不相同
         assert cache._key("Q", 2, 10, "vector") == "org=2|topk=10|mode=vector|q=q"
-        keys = {cache._key("Q", 2, 10, m) for m in ("vector", "keyword", "hybrid")} | {cache._key("Q", 2, 10)}
+        keys = {cache._key("Q", 2, 10, m) for m in ("vector", "keyword", "hybrid")} | {
+            cache._key("Q", 2, 10)
+        }
         assert len(keys) == 4, "自动路由与三种显式模式的缓存键必须两两不同"
 
     @pytest.mark.asyncio
@@ -411,7 +435,9 @@ class TestModeScopedCache:
         pipeline.semantic_cache = _RecordingCache()
 
         await pipeline.search_knowledge_base("报销流程", 1, top_k=5, search_mode="keyword")
-        assert pipeline.cache.get_calls[0][1]["search_mode"] == "keyword", "精确缓存读必须带模式分域"
+        assert pipeline.cache.get_calls[0][1]["search_mode"] == "keyword", (
+            "精确缓存读必须带模式分域"
+        )
         assert pipeline.semantic_cache.get_calls == [], "显式模式跳过语义缓存读"
 
         # 自动路由（对照）：读不带模式段、语义缓存照常参与
@@ -439,28 +465,48 @@ class TestModeScopedCache:
 
         monkeypatch.setattr(
             "app.rag.pipeline.rerank",
-            AsyncMock(side_effect=lambda query, docs, client=None: (
-                docs,
-                {"status": "disabled", "path": "noop", "reason": "test_stub",
-                 "attempts": [], "scores_attached": False, "model": None},
-            )),
+            AsyncMock(
+                side_effect=lambda query, docs, client=None: (
+                    docs,
+                    {
+                        "status": "disabled",
+                        "path": "noop",
+                        "reason": "test_stub",
+                        "attempts": [],
+                        "scores_attached": False,
+                        "model": None,
+                    },
+                )
+            ),
         )
         healthy = [
-            {"chunk_id": "c1", "content": "报销流程正文", "filename": "p.md", "score": 0.9, "document_id": "d1"}
+            {
+                "chunk_id": "c1",
+                "content": "报销流程正文",
+                "filename": "p.md",
+                "score": 0.9,
+                "document_id": "d1",
+            }
         ]
 
         pipeline = RAGPipeline()
         pipeline.retriever = MagicMock()
         pipeline.retriever.get_embedding = AsyncMock(return_value=[0.1, 0.2])
-        pipeline.retriever.retrieve = AsyncMock(return_value=(healthy, [0.1, 0.2, 0.3, 0.4], None, []))
+        pipeline.retriever.retrieve = AsyncMock(
+            return_value=(healthy, [0.1, 0.2, 0.3, 0.4], None, [])
+        )
         pipeline.cache = _RecordingCache()
         pipeline.semantic_cache = _RecordingCache()
 
         await pipeline.search_knowledge_base("报销流程", 1, top_k=5, search_mode=mode)
 
-        assert pipeline.semantic_cache.get_calls == [], "显式模式不得读语义缓存（防借位其它模式的结果）"
+        assert pipeline.semantic_cache.get_calls == [], (
+            "显式模式不得读语义缓存（防借位其它模式的结果）"
+        )
         assert pipeline.semantic_cache.set_calls == [], "显式模式结果不得写语义缓存（B1 写侧守卫）"
-        assert pipeline.retriever.get_embedding.await_count == 0, "显式模式请求不应产生查询 embedding 计算"
+        assert pipeline.retriever.get_embedding.await_count == 0, (
+            "显式模式请求不应产生查询 embedding 计算"
+        )
         assert pipeline.cache.set_calls and pipeline.cache.set_calls[0][1]["search_mode"] == mode, (
             "结果照常写自己的模式分域"
         )
@@ -476,19 +522,34 @@ class TestModeScopedCache:
         from app.rag.pipeline import RAGPipeline
 
         monkeypatch.setattr("app.rag.cache.settings.RAG_ENABLE_CACHE", True)
-        monkeypatch.setattr("app.rag.cache._get_redis", lambda: None)  # 只走内存回退，避免触真 Redis
+        monkeypatch.setattr(
+            "app.rag.cache._get_redis", lambda: None
+        )  # 只走内存回退，避免触真 Redis
         monkeypatch.setattr(
             "app.rag.pipeline.rerank",
-            AsyncMock(side_effect=lambda query, docs, client=None: (
-                docs,
-                {"status": "disabled", "path": "noop", "reason": "test_stub",
-                 "attempts": [], "scores_attached": False, "model": None},
-            )),
+            AsyncMock(
+                side_effect=lambda query, docs, client=None: (
+                    docs,
+                    {
+                        "status": "disabled",
+                        "path": "noop",
+                        "reason": "test_stub",
+                        "attempts": [],
+                        "scores_attached": False,
+                        "model": None,
+                    },
+                )
+            ),
         )
         probe_q = "分域探针查询-225"
         retrieved = [
-            {"chunk_id": "kw_only", "content": "分域探针查询正文", "filename": "p.md",
-             "score": 0.9, "document_id": "d1"}
+            {
+                "chunk_id": "kw_only",
+                "content": "分域探针查询正文",
+                "filename": "p.md",
+                "score": 0.9,
+                "document_id": "d1",
+            }
         ]
 
         def _make_pipeline(retrieve_mock):
@@ -506,7 +567,9 @@ class TestModeScopedCache:
         # 缺省请求：不得命中强制模式的写入 → 必须真正执行检索
         p2 = _make_pipeline(AsyncMock(return_value=([], [], None, [])))
         await p2.search_knowledge_base(probe_q, 1, top_k=5)
-        assert p2.retriever.retrieve.await_count == 1, "缺省请求必须真正执行检索（强制模式缓存对其不可见）"
+        assert p2.retriever.retrieve.await_count == 1, (
+            "缺省请求必须真正执行检索（强制模式缓存对其不可见）"
+        )
 
         # 同模式重复：命中自己分域的精确缓存 → 不执行检索
         p3 = _make_pipeline(AsyncMock(return_value=([], [], None, [])))
@@ -534,29 +597,55 @@ class TestModeScopedCache:
         monkeypatch.setattr(cache_mod.settings, "SEMANTIC_CACHE_RETRIEVAL_ENABLED", True)
         monkeypatch.setattr(
             "app.rag.pipeline.rerank",
-            AsyncMock(side_effect=lambda query, docs, client=None: (
-                docs,
-                {"status": "disabled", "path": "noop", "reason": "test_stub",
-                 "attempts": [], "scores_attached": False, "model": None},
-            )),
+            AsyncMock(
+                side_effect=lambda query, docs, client=None: (
+                    docs,
+                    {
+                        "status": "disabled",
+                        "path": "noop",
+                        "reason": "test_stub",
+                        "attempts": [],
+                        "scores_attached": False,
+                        "model": None,
+                    },
+                )
+            ),
         )
 
-        forced_hit = [{"chunk_id": "forced_vec_only", "content": "强制向量臂独有命中",
-                       "filename": "f.md", "score": 0.9, "document_id": "d1"}]
-        auto_hit = [{"chunk_id": "auto_route_hit", "content": "自动路由命中",
-                     "filename": "a.md", "score": 0.8, "document_id": "d2"}]
+        forced_hit = [
+            {
+                "chunk_id": "forced_vec_only",
+                "content": "强制向量臂独有命中",
+                "filename": "f.md",
+                "score": 0.9,
+                "document_id": "d1",
+            }
+        ]
+        auto_hit = [
+            {
+                "chunk_id": "auto_route_hit",
+                "content": "自动路由命中",
+                "filename": "a.md",
+                "score": 0.8,
+                "document_id": "d2",
+            }
+        ]
         q = "语义写侧泄漏探针-225"
 
         p1 = _make_sem_pipeline(AsyncMock(return_value=(forced_hit, list(_SEM_VEC), None, [])))
         await p1.search_knowledge_base(q, 1, top_k=5, search_mode="vector")
         sem_keys = [k for k in fake.kv if "rag:sem:retrieval:" in k]
         assert sem_keys == [], f"显式 vector 不得写语义缓存（B1 写侧守卫），实际写了 {sem_keys}"
-        assert not fake.z.get("rag:semantic_index:retrieval:1"), "语义索引 zset 亦不得出现强制模式条目"
+        assert not fake.z.get("rag:semantic_index:retrieval:1"), (
+            "语义索引 zset 亦不得出现强制模式条目"
+        )
 
         p2 = _make_sem_pipeline(AsyncMock(return_value=(auto_hit, list(_SEM_VEC), None, [])))
         res2, _ = await p2.search_knowledge_base(q, 1, top_k=5)  # 自动路由（同 query、同向量）
         ids2 = [h.get("chunk_id") for h in res2]
-        assert p2.retriever.retrieve.await_count == 1, "自动路由必须执行自己的检索（强制 vector 的写入对其不可见）"
+        assert p2.retriever.retrieve.await_count == 1, (
+            "自动路由必须执行自己的检索（强制 vector 的写入对其不可见）"
+        )
         assert ids2 == ["auto_route_hit"], f"自动路由不得吃到强制向量臂结果，实际 {ids2}"
 
     @pytest.mark.asyncio
@@ -575,17 +664,39 @@ class TestModeScopedCache:
         monkeypatch.setattr(cache_mod.settings, "SEMANTIC_CACHE_RETRIEVAL_ENABLED", True)
         monkeypatch.setattr(
             "app.rag.pipeline.rerank",
-            AsyncMock(side_effect=lambda query, docs, client=None: (
-                docs,
-                {"status": "disabled", "path": "noop", "reason": "test_stub",
-                 "attempts": [], "scores_attached": False, "model": None},
-            )),
+            AsyncMock(
+                side_effect=lambda query, docs, client=None: (
+                    docs,
+                    {
+                        "status": "disabled",
+                        "path": "noop",
+                        "reason": "test_stub",
+                        "attempts": [],
+                        "scores_attached": False,
+                        "model": None,
+                    },
+                )
+            ),
         )
 
-        auto_hit = [{"chunk_id": "auto_route_hit", "content": "自动路由命中",
-                     "filename": "a.md", "score": 0.8, "document_id": "d2"}]
-        forced_hit = [{"chunk_id": "forced_vec_only", "content": "强制向量臂独有命中",
-                       "filename": "f.md", "score": 0.9, "document_id": "d1"}]
+        auto_hit = [
+            {
+                "chunk_id": "auto_route_hit",
+                "content": "自动路由命中",
+                "filename": "a.md",
+                "score": 0.8,
+                "document_id": "d2",
+            }
+        ]
+        forced_hit = [
+            {
+                "chunk_id": "forced_vec_only",
+                "content": "强制向量臂独有命中",
+                "filename": "f.md",
+                "score": 0.9,
+                "document_id": "d1",
+            }
+        ]
         q = "语义读侧借位探针-225"
 
         p1 = _make_sem_pipeline(AsyncMock(return_value=(auto_hit, list(_SEM_VEC), None, [])))
@@ -595,5 +706,7 @@ class TestModeScopedCache:
         p2 = _make_sem_pipeline(AsyncMock(return_value=(forced_hit, list(_SEM_VEC), None, [])))
         res2, _ = await p2.search_knowledge_base(q, 1, top_k=5, search_mode="vector")
         ids2 = [h.get("chunk_id") for h in res2]
-        assert p2.retriever.retrieve.await_count == 1, "显式 vector 必须执行自己的检索（不得借位自动路由的语义缓存）"
+        assert p2.retriever.retrieve.await_count == 1, (
+            "显式 vector 必须执行自己的检索（不得借位自动路由的语义缓存）"
+        )
         assert ids2 == ["forced_vec_only"], f"应返回向量臂自己的结果，实际 {ids2}"

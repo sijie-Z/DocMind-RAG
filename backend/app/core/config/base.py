@@ -1,6 +1,5 @@
 """Core application settings — app metadata, logging, monitoring, rate limiting."""
 
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 

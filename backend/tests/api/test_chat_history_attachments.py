@@ -38,6 +38,7 @@ AsyncSession 只回答本端点用到的三类 SELECT，其中 Document 查询�
   把无组织超管的回退组织写死为 1 号组织（issue #168 旧行为）→ 红
   （1 号组织的文档混入响应）。
 """
+
 import json
 import logging
 from unittest.mock import MagicMock
@@ -248,9 +249,7 @@ class TestHistoryAttachmentBackfill:
         assert [f["id"] for f in files] == ["doc-own"], f"跨组织文档被回显: {files}"
         assert "other-tenant-secret.pdf" not in resp.text
 
-    def test_metadata_parse_failure_is_logged_with_traceback(
-        self, client: TestClient, caplog
-    ):
+    def test_metadata_parse_failure_is_logged_with_traceback(self, client: TestClient, caplog):
         """坏元数据只降级单条消息，但必须留下 ERROR 级堆栈（不得静默）。
 
         变异点：逐消息 ``logger.exception`` 改回 ``logger.warning`` →
@@ -322,12 +321,8 @@ class TestHistoryAttachmentBackfill:
         message = _make_message(
             message_id="msg-1", meta_data={"file_ids": ["doc-token", "doc-other"]}
         )
-        token_doc = _make_document(
-            doc_id="doc-token", filename="token-org.pdf", organization_id=42
-        )
-        other_doc = _make_document(
-            doc_id="doc-other", filename="other-org.pdf", organization_id=1
-        )
+        token_doc = _make_document(doc_id="doc-token", filename="token-org.pdf", organization_id=42)
+        other_doc = _make_document(doc_id="doc-other", filename="other-org.pdf", organization_id=1)
         db = _FakeDb(session=session, messages=[message], documents=[token_doc, other_doc])
 
         resp = _get_conversation(client, db, user)
@@ -351,9 +346,7 @@ class TestHistoryAttachmentBackfill:
         message = _make_message(
             message_id="msg-1", meta_data={"file_ids": ["doc-real", "doc-org1"]}
         )
-        real_doc = _make_document(
-            doc_id="doc-real", filename="real-org.pdf", organization_id=3
-        )
+        real_doc = _make_document(doc_id="doc-real", filename="real-org.pdf", organization_id=3)
         org1_doc = _make_document(doc_id="doc-org1", filename="org-1.pdf", organization_id=1)
         db = _FakeDb(
             session=session,

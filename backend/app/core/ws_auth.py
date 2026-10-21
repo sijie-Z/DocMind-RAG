@@ -13,6 +13,7 @@ WS 握手没有 HTTP 状态码，认证失败的契约统一为 **close code + r
 握手必须查库：访问令牌有效期默认 24 小时，只验签意味着已删除/已禁用的用户仍能
 建连并持续消耗 LLM 与检索资源。长连接的每一条消息同样要复查用户状态。
 """
+
 from __future__ import annotations
 
 import logging
@@ -193,9 +194,7 @@ async def _authenticate_ws(websocket: WebSocket, db: AsyncSession) -> WsUserStat
                 user_id,
                 token_org_id,
             )
-            await close_ws(
-                websocket, WS_CLOSE_AUTH_FAILED, WS_REASON_ORG_MEMBERSHIP
-            )
+            await close_ws(websocket, WS_CLOSE_AUTH_FAILED, WS_REASON_ORG_MEMBERSHIP)
             return None
 
     return user

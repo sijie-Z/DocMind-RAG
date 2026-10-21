@@ -8,6 +8,7 @@ S2: DELETE /users/{user_id} 缺少兄弟端点的组织校验；审计日志列�
 
 测试通过 TestClient 覆盖真实 HTTP 状态码，同时直接调用辅助函数断言抛错行为。
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

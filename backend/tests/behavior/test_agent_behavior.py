@@ -67,12 +67,20 @@ def _make_fake_llm():
             # Planner phase — return plan text
             msg.tool_calls = None
 
-        msg.content = json.dumps({
-            "goal": f"Answer the query: {last_user}",
-            "steps": [
-                {"id": "s1", "description": "Search for relevant documents", "dependencies": [], "tool_hint": tool_name},
-            ],
-        }, ensure_ascii=False)
+        msg.content = json.dumps(
+            {
+                "goal": f"Answer the query: {last_user}",
+                "steps": [
+                    {
+                        "id": "s1",
+                        "description": "Search for relevant documents",
+                        "dependencies": [],
+                        "tool_hint": tool_name,
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        )
         msg.role = "assistant"
         choice.message = msg
         resp.choices = [choice]
@@ -166,8 +174,9 @@ class TestAgentBehavior:
         # The agent may hit ES/Redis connection errors in test env (no
         # external services running).  What we lock is: it doesn't crash
         # and either completes or gracefully surfaces the infra error.
-        assert len([e for e in errors if e.type == "error"]) == 0, \
+        assert len([e for e in errors if e.type == "error"]) == 0, (
             f"Simple query should not crash, got: {[e.type for e in errors]}"
+        )
 
 
 # ── Executor behavior ───────────────────────────────────────────────────────
@@ -193,13 +202,18 @@ class TestExecutorBehavior:
 
         events = []
         async for event in executor._execute_step_once(
-            step=step, plan=plan, history=None,
-            organization_id=1, user_id=0, enable_thinking=True,
+            step=step,
+            plan=plan,
+            history=None,
+            organization_id=1,
+            user_id=0,
+            enable_thinking=True,
         ):
             events.append(event)
 
-        assert any(e.type == "tool_error" for e in events), \
+        assert any(e.type == "tool_error" for e in events), (
             "LLM failure should produce tool_error event"
+        )
 
     @staticmethod
     def _client_with_tool_call(tool_name: str, raw_arguments):
@@ -232,7 +246,8 @@ class TestExecutorBehavior:
         from app.agent.executor import Executor
 
         client = self._client_with_tool_call(
-            "search_knowledge_base", '{"query": "缺右括号"',
+            "search_knowledge_base",
+            '{"query": "缺右括号"',
         )
         memory = AgentMemoryBridge(agent_id="test_bad_args", organization_id=1, user_id=0)
         executor = Executor(client, AgentConfig(), memory)
@@ -256,8 +271,12 @@ class TestExecutorBehavior:
             events = []
             with patch.object(executor, "_synthesize_tool_results", new=_fake_synth):
                 async for event in executor._execute_step_once(
-                    step=step, plan=plan, history=None,
-                    organization_id=1, user_id=0, enable_thinking=False,
+                    step=step,
+                    plan=plan,
+                    history=None,
+                    organization_id=1,
+                    user_id=0,
+                    enable_thinking=False,
                 ):
                     events.append(event)
         finally:
@@ -266,13 +285,15 @@ class TestExecutorBehavior:
         assert executed == [], f"非法 JSON 时工具不得执行，实际: {executed}"
         errs = [e for e in events if e.type == "tool_error"]
         assert errs, f"应发出显式 tool_error，实际事件: {[e.type for e in events]}"
-        assert errs[0].error_type == "serialization_error", \
+        assert errs[0].error_type == "serialization_error", (
             f"错误码应对齐 retry_policy 的 serialization_error，实际: {errs[0].error_type}"
+        )
         # 失败原因必须记入 tool_results，由 synthesis 呈现给用户/模型（对抗评审 minor-1：
         # 一个"发了事件但不记录"的半吊子修复必须也被这条钉死）。
         recorded = captured.get("tool_results") or []
-        assert recorded and recorded[0].get("error_type") == "serialization_error", \
+        assert recorded and recorded[0].get("error_type") == "serialization_error", (
             f"失败原因必须记入 tool_results 供 synthesis 呈现，实际: {recorded}"
+        )
 
     @pytest.mark.asyncio
     async def test_empty_arguments_remain_legal_no_arg_call(self):
@@ -304,17 +325,23 @@ class TestExecutorBehavior:
             plan = Plan(id="p1", goal="test", steps=[step])
             events = []
             async for event in executor._execute_step_once(
-                step=step, plan=plan, history=None,
-                organization_id=1, user_id=0, enable_thinking=False,
+                step=step,
+                plan=plan,
+                history=None,
+                organization_id=1,
+                user_id=0,
+                enable_thinking=False,
             ):
                 events.append(event)
         finally:
             tool_registry.execute_detailed = original
 
-        assert executed == [("search_knowledge_base", {})], \
+        assert executed == [("search_knowledge_base", {})], (
             f"空参数应作为无参调用继续执行，实际: {executed}"
-        assert any(e.type == "tool_result" for e in events), \
+        )
+        assert any(e.type == "tool_result" for e in events), (
             f"空参数调用应产出 tool_result，实际事件: {[e.type for e in events]}"
+        )
 
 
 # ── Experience recording behavior ───────────────────────────────────────────
@@ -328,13 +355,17 @@ class TestExperienceRecording:
         """After a tool error in an agent run, experience is recorded."""
 
         bridge = AgentMemoryBridge(agent_id="test_experience", organization_id=1, user_id=0)
-        await bridge.record_experience(success=False, action="search_knowledge_base",
-                                        result="Connection timeout: retry exhausted")
+        await bridge.record_experience(
+            success=False,
+            action="search_knowledge_base",
+            result="Connection timeout: retry exhausted",
+        )
 
         # Should write to long_term
         long_items = sum(len(v) for v in bridge.system.long_term.memories.values())
         assert long_items >= 1, "Failed experience should write to long_term"
 
         # Should add a reflective lesson
-        assert len(bridge.system.reflective.lessons) >= 1, \
+        assert len(bridge.system.reflective.lessons) >= 1, (
             "Failed experience should add a reflective lesson"
+        )

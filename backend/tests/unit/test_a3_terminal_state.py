@@ -26,14 +26,10 @@ from app.worker.doc_processor import DocumentProcessor
 async def session_factory(monkeypatch):
     import app.worker.doc_processor as dp_mod
 
-    engine = create_async_engine(
-        "sqlite+aiosqlite://", poolclass=StaticPool
-    )
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
     tables = [Document.__table__, KnowledgeProcessingJob.__table__]
     async with engine.begin() as conn:
-        await conn.run_sync(
-            lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables)
-        )
+        await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables))
     factory = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(dp_mod, "AsyncSessionLocal", factory)
     yield factory
@@ -117,18 +113,14 @@ class TestFailedWriteConditional:
     async def test_failure_does_not_regress_successful_job(self, session_factory):
         """预审建议②：job 已 SUCCESS 时，晚到的失败不得把任务终态回退为 FAILED。"""
         doc_id = await _seed(session_factory, DocumentStatus.PARSING)
-        job_id = await _seed_job(
-            session_factory, doc_id, KnowledgeJobStatus.SUCCESS
-        )
+        job_id = await _seed_job(session_factory, doc_id, KnowledgeJobStatus.SUCCESS)
 
         await DocumentProcessor()._mark_failed(doc_id, "late failure", job_id=job_id)
 
         doc = await _load(session_factory, doc_id)
         job = await _load_job(session_factory, job_id)
         assert doc.status == DocumentStatus.FAILED
-        assert job.status == KnowledgeJobStatus.SUCCESS, (
-            "并发成功 run 的 job 终态被晚到的失败覆盖"
-        )
+        assert job.status == KnowledgeJobStatus.SUCCESS, "并发成功 run 的 job 终态被晚到的失败覆盖"
         assert job.error_message is None
 
 
@@ -166,22 +158,19 @@ class TestSuccessWriteConditional:
 # 端到端重投回归（独立对抗评审 B2 / M4 / M7）
 # ══════════════════════════════════════════════════════════════════════════
 
+
 class TestStaleRedeliveryEndToEnd:
     """别只测 _mark_failed——真实重投会先经过 _load_and_mark_parsing。"""
 
     @pytest.mark.asyncio
-    async def test_stale_redelivery_after_success_keeps_indexed(
-        self, session_factory, monkeypatch
-    ):
+    async def test_stale_redelivery_after_success_keeps_indexed(self, session_factory, monkeypatch):
         """job 已 SUCCESS 的重投：不得进入 PARSING，更不得被打成 FAILED。
 
         复现评审 B2：成功提交后、偏移提交前崩溃 → 消息重投 → 重投 run 若
         解析失败，修前会把 INDEXED 覆盖为 FAILED（因为 PARSING 已无条件写入）。
         """
         doc_id = await _seed(session_factory, DocumentStatus.INDEXED)
-        job_id = await _seed_job(
-            session_factory, doc_id, KnowledgeJobStatus.SUCCESS
-        )
+        job_id = await _seed_job(session_factory, doc_id, KnowledgeJobStatus.SUCCESS)
         processor = DocumentProcessor()
         parsed = []
 
@@ -204,20 +193,14 @@ class TestStaleRedeliveryEndToEnd:
         assert outcome is True, "已完成 job 的重投应视为已了结（可提交偏移）"
         assert parsed == [], "陈旧重投必须在进入 PARSING/解析之前被识别并跳过"
         doc = await _load(session_factory, doc_id)
-        assert doc.status == DocumentStatus.INDEXED, (
-            "陈旧重投把 INDEXED 终态打回了非索引状态"
-        )
+        assert doc.status == DocumentStatus.INDEXED, "陈旧重投把 INDEXED 终态打回了非索引状态"
         assert doc.parse_error is None
 
     @pytest.mark.asyncio
-    async def test_new_job_reprocess_may_fail_intentionally(
-        self, session_factory, monkeypatch
-    ):
+    async def test_new_job_reprocess_may_fail_intentionally(self, session_factory, monkeypatch):
         """回归对照：重建创建的新 QUEUED job 不受陈旧判定影响，失败如实 FAILED。"""
         doc_id = await _seed(session_factory, DocumentStatus.INDEXED)
-        job_id = await _seed_job(
-            session_factory, doc_id, KnowledgeJobStatus.QUEUED
-        )
+        job_id = await _seed_job(session_factory, doc_id, KnowledgeJobStatus.QUEUED)
         processor = DocumentProcessor()
 
         async def fake_lock(_document_id):
@@ -251,9 +234,7 @@ class TestStaleRedeliveryEndToEnd:
         必须比较 job 代次：存在更新 job 时，旧消息已被取代。
         """
         doc_id = await _seed(session_factory, DocumentStatus.INDEXED)
-        old_job_id = await _seed_job(
-            session_factory, doc_id, KnowledgeJobStatus.FAILED
-        )
+        old_job_id = await _seed_job(session_factory, doc_id, KnowledgeJobStatus.FAILED)
         await _seed_job(session_factory, doc_id, KnowledgeJobStatus.SUCCESS)
         processor = DocumentProcessor()
         parsed = []
@@ -280,14 +261,10 @@ class TestStaleRedeliveryEndToEnd:
         assert doc.status == DocumentStatus.INDEXED
 
     @pytest.mark.asyncio
-    async def test_latest_failed_job_still_retries(
-        self, session_factory, monkeypatch
-    ):
+    async def test_latest_failed_job_still_retries(self, session_factory, monkeypatch):
         """回归对照：没有更新 job 时，FAILED job 的重投必须继续重试（不能一刀切跳过）。"""
         doc_id = await _seed(session_factory, DocumentStatus.FAILED)
-        job_id = await _seed_job(
-            session_factory, doc_id, KnowledgeJobStatus.FAILED
-        )
+        job_id = await _seed_job(session_factory, doc_id, KnowledgeJobStatus.FAILED)
         processor = DocumentProcessor()
         parsed = []
 
@@ -311,13 +288,9 @@ class TestStaleRedeliveryEndToEnd:
         assert parsed == [True]
 
     @pytest.mark.asyncio
-    async def test_missing_document_terminalizes_orphan_job(
-        self, session_factory, monkeypatch
-    ):
+    async def test_missing_document_terminalizes_orphan_job(self, session_factory, monkeypatch):
         """文档不存在：消息终局提交，同时把孤儿 job 收敛为 FAILED（不再每次启动重调）。"""
-        job_id = await _seed_job(
-            session_factory, "doc-missing", KnowledgeJobStatus.QUEUED
-        )
+        job_id = await _seed_job(session_factory, "doc-missing", KnowledgeJobStatus.QUEUED)
         processor = DocumentProcessor()
 
         async def fake_lock(_document_id):
@@ -341,9 +314,7 @@ class TestSuccessJobWrite:
     async def test_mark_success_marks_job_success(self, session_factory):
         """`_mark_success` 必须同时把 job 收敛为 SUCCESS（e68f500 的原子性改动）。"""
         doc_id = await _seed(session_factory, DocumentStatus.PARSING)
-        job_id = await _seed_job(
-            session_factory, doc_id, KnowledgeJobStatus.PROCESSING
-        )
+        job_id = await _seed_job(session_factory, doc_id, KnowledgeJobStatus.PROCESSING)
 
         await DocumentProcessor()._mark_success(doc_id, CHUNKS, job_id=job_id)
 

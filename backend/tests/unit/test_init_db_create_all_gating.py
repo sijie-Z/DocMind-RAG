@@ -17,6 +17,7 @@ handler（同相位内 caplog 的 handler 被摘）；② alembic 在进程内�
 ``command.upgrade`` 即触发）。改为在目标 logger 上自挂收集 handler，并在
 fixture 里显式恢复 level / disabled，观测结果与进程的全局日志污染无关。
 """
+
 import logging
 from collections.abc import Iterator
 
@@ -36,16 +37,23 @@ async def sqlite_engine(tmp_path):
 
 async def _sqlite_table_count(engine) -> int:
     async with engine.connect() as conn:
-        return (await conn.execute(text(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
-        ))).scalar()
+        return (
+            await conn.execute(text("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"))
+        ).scalar()
 
 
 async def _sqlite_has_table(engine, name: str) -> bool:
     async with engine.connect() as conn:
-        return bool((await conn.execute(text(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = :name"
-        ), {"name": name})).scalar())
+        return bool(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = :name"
+                    ),
+                    {"name": name},
+                )
+            ).scalar()
+        )
 
 
 class _DbLogCollector(logging.Handler):
@@ -94,8 +102,7 @@ def db_log_records() -> Iterator[_DbLogCollector]:
 
 def _db_log_records(collector: _DbLogCollector, min_level: int) -> list[logging.LogRecord]:
     return [
-        r for r in collector.records
-        if r.name == "app.core.database" and r.levelno >= min_level
+        r for r in collector.records if r.name == "app.core.database" and r.levelno >= min_level
     ]
 
 
@@ -119,19 +126,20 @@ async def test_create_all_skipped_on_non_empty_database(sqlite_engine, monkeypat
     await database_module.init_db()  # 非空 → 应跳过
 
     async with sqlite_engine.connect() as conn:
-        recreated = (await conn.execute(text(
-            "SELECT COUNT(*) FROM sqlite_master "
-            "WHERE type = 'table' AND name = 'chat_messages'"
-        ))).scalar()
+        recreated = (
+            await conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'chat_messages'"
+                )
+            )
+        ).scalar()
     assert recreated == 0, "非空库上 init_db 不应运行 create_all（缺失的表不被静默重建）"
 
 
 # ── issue #154：判据 = alembic_version 里有没有 revision 行 ─────────────────
 
-ALEMBIC_VERSION_DDL = (
-    "CREATE TABLE alembic_version "
-    "(version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
-)
+ALEMBIC_VERSION_DDL = "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
 
 
 async def test_warns_when_alembic_version_table_exists_but_has_zero_rows(
@@ -172,9 +180,9 @@ async def test_info_without_warning_when_alembic_version_has_revision(
 
     async with sqlite_engine.begin() as conn:
         await conn.execute(text(ALEMBIC_VERSION_DDL))
-        await conn.execute(text(
-            "INSERT INTO alembic_version (version_num) VALUES ('beefbeef0000')"
-        ))
+        await conn.execute(
+            text("INSERT INTO alembic_version (version_num) VALUES ('beefbeef0000')")
+        )
         await conn.execute(text("DROP TABLE chat_messages"))
 
     db_log_records.clear()
@@ -230,4 +238,3 @@ async def test_no_exception_and_warns_when_alembic_version_structure_changed(
     warnings = _db_log_records(db_log_records, logging.WARNING)
     assert warnings, "结构被改过但 0 行：仍必须打漂移告警"
     assert "没有 revision 记录" in "".join(r.getMessage() for r in warnings)
-

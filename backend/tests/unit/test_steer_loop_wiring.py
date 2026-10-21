@@ -136,12 +136,18 @@ class _ChainPlanner:
         prev = None
         for i in range(1, self.n + 1):
             yield AgentEvent(
-                type="plan_step", plan_id="plan-1", plan_step_id=f"s{i}",
-                content=f"第{i}步", dependencies=[prev] if prev else [],
+                type="plan_step",
+                plan_id="plan-1",
+                plan_step_id=f"s{i}",
+                content=f"第{i}步",
+                dependencies=[prev] if prev else [],
             )
             prev = f"s{i}"
         yield AgentEvent(
-            type="plan_complete", plan_id="plan-1", plan_goal="目标", content="计划完成",
+            type="plan_complete",
+            plan_id="plan-1",
+            plan_goal="目标",
+            content="计划完成",
         )
 
 
@@ -163,8 +169,12 @@ def _capturing_client(captured: list):
 
 def _cfg() -> AgentConfig:
     return AgentConfig(
-        enable_memory=False, enable_reflection=False, enable_skills=False,
-        enable_experience=False, enable_thinking=False, enable_planning=True,
+        enable_memory=False,
+        enable_reflection=False,
+        enable_skills=False,
+        enable_experience=False,
+        enable_thinking=False,
+        enable_planning=True,
     )
 
 
@@ -226,7 +236,9 @@ def _is_step_done(ev, step_id: str) -> bool:
 
 
 def _is_step_start(ev, step_id: str) -> bool:
-    return ev.type == "thinking" and ev.plan_step_id == step_id and ev.content.startswith("执行步骤:")
+    return (
+        ev.type == "thinking" and ev.plan_step_id == step_id and ev.content.startswith("执行步骤:")
+    )
 
 
 async def _snapshot(engine_factory, task_id: str):
@@ -261,13 +273,9 @@ async def test_mid_run_steer_applies_at_next_boundary_not_current_step(fake_redi
 
     types_steps = [(i, e) for i, e in enumerate(all_events)]
     idx_done1 = next(i for i, e in types_steps if _is_step_done(e, "s1"))
-    idx_steer = next(
-        i for i, e in types_steps if e.type == "steer_applied"
-    )
+    idx_steer = next(i for i, e in types_steps if e.type == "steer_applied")
     idx_next = next(i for i, e in types_steps if _is_step_start(e, "s2"))
-    assert idx_done1 < idx_steer < idx_next, (
-        "steer_applied 必须紧跟步边界、先于下一步开始"
-    )
+    assert idx_done1 < idx_steer < idx_next, "steer_applied 必须紧跟步边界、先于下一步开始"
     applied = all_events[idx_steer]
     assert applied.content == STEER, "事件含消息摘要（原文）"
     assert applied.task_id == tid
@@ -320,13 +328,19 @@ async def test_steer_while_waiting_approval_merges_into_resume(fake_redis, db_fa
     """
     tid = await checkpoint.create_task(user_id=1, organization_id=1, query="q")
     # 暂停前的快照：s1 已完成（不再重跑），s2 待执行——审批暂停恢复的等价形态
-    plan = Plan(id="p1", goal="g", steps=[
-        PlanStep(id="s1", description="一", status="completed", result="旧结果"),
-        PlanStep(id="s2", description="二", dependencies=["s1"]),
-    ])
+    plan = Plan(
+        id="p1",
+        goal="g",
+        steps=[
+            PlanStep(id="s1", description="一", status="completed", result="旧结果"),
+            PlanStep(id="s2", description="二", dependencies=["s1"]),
+        ],
+    )
     plan.completed_steps = 1
     payload = checkpoint.build_envelope(
-        ctx=ExecutionContext(query="q"), plan=plan, trigger="before_approval",
+        ctx=ExecutionContext(query="q"),
+        plan=plan,
+        trigger="before_approval",
         run_state={"pending_approval": {"tool_name": "fake_danger", "args_hash": "h"}},
     )
     assert await checkpoint.mark_waiting_approval(tid) is True
@@ -354,13 +368,19 @@ async def test_resume_keeps_existing_snapshot_plan_when_steering_consumed(fake_r
     """run 起点消费 steer 会落一次快照——快照里的计划必须保留（变异点：
     checkpoint_live["plan"] 未提前挂 resume 计划 → 本用例红：计划被抹成 null）。"""
     tid = await checkpoint.create_task(user_id=1, organization_id=1, query="q")
-    plan = Plan(id="p1", goal="恢复目标", steps=[
-        PlanStep(id="s1", description="一", status="completed", result="旧结果"),
-        PlanStep(id="s2", description="二", dependencies=["s1"]),
-    ])
+    plan = Plan(
+        id="p1",
+        goal="恢复目标",
+        steps=[
+            PlanStep(id="s1", description="一", status="completed", result="旧结果"),
+            PlanStep(id="s2", description="二", dependencies=["s1"]),
+        ],
+    )
     plan.completed_steps = 1
     payload = checkpoint.build_envelope(
-        ctx=ExecutionContext(query="q"), plan=plan, trigger="on_disconnect",
+        ctx=ExecutionContext(query="q"),
+        plan=plan,
+        trigger="on_disconnect",
         run_state={},
     )
     assert await steering.push_steer(tid, "并入的指导") == 1

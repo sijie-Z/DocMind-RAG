@@ -44,9 +44,7 @@ def test_violation_sample_is_red(tmp_path):
 def test_spacing_variant_is_red(tmp_path):
     app_dir = tmp_path / "app"
     app_dir.mkdir()
-    (app_dir / "bad.py").write_text(
-        "def f(organization_id:int=1):\n    pass\n", encoding="utf-8"
-    )
+    (app_dir / "bad.py").write_text("def f(organization_id:int=1):\n    pass\n", encoding="utf-8")
     assert checker.find_violations(app_dir), "必须容忍空白差异"
 
 
@@ -90,8 +88,7 @@ def test_zero_int_default_is_red(tmp_path):
     app_dir = tmp_path / "app"
     app_dir.mkdir()
     (app_dir / "bad.py").write_text(
-        "def a(organization_id: int = 0):\n    pass\n"
-        "def b(organization_id: int = -1):\n    pass\n",
+        "def a(organization_id: int = 0):\n    pass\ndef b(organization_id: int = -1):\n    pass\n",
         encoding="utf-8",
     )
     assert len(checker.find_violations(app_dir)) == 2
@@ -102,7 +99,7 @@ def test_zero_string_default_is_red(tmp_path):
     app_dir = tmp_path / "app"
     app_dir.mkdir()
     (app_dir / "bad.py").write_text(
-        "def a(organization_id: str = \"0\"):\n    pass\n"
+        'def a(organization_id: str = "0"):\n    pass\n'
         "def b(organization_id: str = '0'):\n    pass\n",
         encoding="utf-8",
     )
@@ -126,8 +123,7 @@ def test_getattr_default_one_is_red(tmp_path):
     app_dir = tmp_path / "app"
     app_dir.mkdir()
     (app_dir / "bad.py").write_text(
-        "def a(user):\n"
-        "    return getattr(user, \"organization_id\", 1)\n",
+        'def a(user):\n    return getattr(user, "organization_id", 1)\n',
         encoding="utf-8",
     )
     assert len(checker.find_violations(app_dir)) == 1
@@ -141,7 +137,7 @@ def test_zero_patterns_do_not_flag_lookalikes(tmp_path):
         "def a(organization_id: int = 10):\n    pass\n"
         "def b(organization_id: int | None = None):\n    pass\n"
         "def c(user):\n    return user.organization_id or 10\n"
-        "def d(user):\n    return getattr(user, \"organization_id\", None)\n",
+        'def d(user):\n    return getattr(user, "organization_id", None)\n',
         encoding="utf-8",
     )
     assert checker.find_violations(app_dir) == []
@@ -156,9 +152,9 @@ def test_fstring_literal_text_is_masked_but_expressions_still_match(tmp_path):
     app_dir = tmp_path / "app"
     app_dir.mkdir()
     (app_dir / "mixed.py").write_text(
-        'def a(organization_id):\n'
+        "def a(organization_id):\n"
         '    return f"literal organization_id or 1 text"\n'
-        'def b(organization_id):\n'
+        "def b(organization_id):\n"
         '    return f"{organization_id or 0}"\n',
         encoding="utf-8",
     )

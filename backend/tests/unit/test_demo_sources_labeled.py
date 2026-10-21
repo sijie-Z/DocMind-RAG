@@ -9,6 +9,7 @@ DEMO_CONVERSATION 的 sources 是写死的假检索结果（relevance_score 0.79
 
 变异点：去掉任一 source 的 `"demo": True`（或 seed 落库时剥掉该键）→ 本文件红。
 """
+
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,9 +20,7 @@ from app.models.chat import ChatMessage, MessageType
 
 
 def _demo_user():
-    return SimpleNamespace(
-        id=1, organization_id=1, is_superuser=False, role="user", is_active=True
-    )
+    return SimpleNamespace(id=1, organization_id=1, is_superuser=False, role="user", is_active=True)
 
 
 def _demo_db():
@@ -65,9 +64,11 @@ async def _seed_and_capture():
     async def _fake_get_elasticsearch():
         return _VerifyES()
 
-    with patch.object(demo_mod.embedding_service, "get_embeddings", _embeddings_ok), \
-         patch.object(demo_mod.ElasticsearchTools, "index_document", _fake_index), \
-         patch("app.services.document_status.get_elasticsearch", _fake_get_elasticsearch):
+    with (
+        patch.object(demo_mod.embedding_service, "get_embeddings", _embeddings_ok),
+        patch.object(demo_mod.ElasticsearchTools, "index_document", _fake_index),
+        patch("app.services.document_status.get_elasticsearch", _fake_get_elasticsearch),
+    ):
         body = await demo_mod.seed_demo_data(current_user=_demo_user(), db=db)
     return added, body
 
@@ -115,17 +116,14 @@ class TestDemoSourcesLabeled:
         assert msgs, "seed 必须落库消息"
 
         assistant_msgs = [
-            m for m in msgs
-            if m.meta_data and m.message_type == MessageType.ASSISTANT
+            m for m in msgs if m.meta_data and m.message_type == MessageType.ASSISTANT
         ]
         assert assistant_msgs, "示例对话应至少有一条带 meta 的助手消息"
         for m in assistant_msgs:
             # 非 str 在此 TypeError（json.loads(dict)）——先红点，对齐 chat.py:486
             meta = json.loads(m.meta_data)
             for src in meta["sources"]:
-                assert src.get("demo") is True, (
-                    "落库 sources 缺 demo 标记 —— 前端角标会漏渲染"
-                )
+                assert src.get("demo") is True, "落库 sources 缺 demo 标记 —— 前端角标会漏渲染"
                 assert isinstance(src.get("relevanceScore"), (int, float)), (
                     "落库数字必须用前端读点键 relevanceScore（camelCase）"
                 )

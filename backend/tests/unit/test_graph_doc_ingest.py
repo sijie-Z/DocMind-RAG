@@ -15,6 +15,7 @@ worker 索引成功后不做任何抽取，图数据源恒空。本文件钉住�
 - **Redis 不可用降级**：判不了 → None；摄入照常返回 extracted、不崩溃（与既有
   容错风格一致）。
 """
+
 import asyncio
 import json
 
@@ -87,6 +88,7 @@ ENTITY_JSON = (
 
 def _stub_extract(monkeypatch, service, entities):
     """替换实例的抽取方法：本文件测的是写侧（标记/合并/幂等），不测提示词。"""
+
     async def fake(text, llm_client=None):
         return list(entities)
 
@@ -275,9 +277,11 @@ async def test_llm_non_array_json_falls_back_not_crash(fake_redis):
     class _Completions:
         async def create(self, **kwargs):
             return SimpleNamespace(
-                choices=[SimpleNamespace(
-                    message=SimpleNamespace(content='{"entities": [{"entity": "X"}]}')
-                )]
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content='{"entities": [{"entity": "X"}]}')
+                    )
+                ]
             )
 
     class _Client:
@@ -296,9 +300,7 @@ async def test_llm_non_array_json_falls_back_not_crash(fake_redis):
     assert isinstance(r, dict)
     raw = json.loads(fake_redis.data["rag:graph:1"])
     names = {v.get("entity_name") for v in raw.values()}
-    assert any(n and n.startswith("张三") for n in names), (
-        f"应回退到规则抽取而非崩溃: {names}"
-    )
+    assert any(n and n.startswith("张三") for n in names), f"应回退到规则抽取而非崩溃: {names}"
 
 
 async def test_relation_target_gets_display_name(fake_redis):
@@ -308,14 +310,17 @@ async def test_relation_target_gets_display_name(fake_redis):
     变异点：去掉 build_graph_from_entities 的目标补名 → 本用例红。
     """
     service = GraphRAGService()
-    await service.build_graph_from_entities([
-        {
-            "entity": "DocMind",
-            "type": "PRODUCT",
-            "description": "",
-            "relations": [{"target": "Acme 公司", "relation": "OWN"}],
-        }
-    ], organization_id=1)
+    await service.build_graph_from_entities(
+        [
+            {
+                "entity": "DocMind",
+                "type": "PRODUCT",
+                "description": "",
+                "relations": [{"target": "Acme 公司", "relation": "OWN"}],
+            }
+        ],
+        organization_id=1,
+    )
 
     target_key = service._normalize_entity("Acme 公司")
     raw = json.loads(fake_redis.data["rag:graph:1"])

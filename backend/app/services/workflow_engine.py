@@ -3,6 +3,7 @@ Agent 工作流引擎
 基于 LangGraph 实现的状态图工作流引擎
 支持：多LLM、工具调用、条件分支、循环、记忆系统、错误重试
 """
+
 import asyncio
 import ipaddress
 import logging
@@ -43,15 +44,16 @@ class ExecutionStatus(str, Enum):
 
 class WorkflowState(TypedDict):
     """工作流状态 - 完整版"""
-    input: dict[str, Any]           # 用户输入
-    messages: list[Any]             # 对话消息历史
-    current_node: str | None     # 当前执行节点
-    node_outputs: dict[str, Any]    # 各节点输出结果
-    context: dict[str, Any]         # 共享上下文（用于节点间传递数据）
-    errors: list[str]               # 错误列表
-    memory: dict[str, Any]          # Agent 短期记忆
-    iteration_count: int            # 迭代计数（用于循环控制）
-    tool_results: list[dict]        # 工具调用结果历史
+
+    input: dict[str, Any]  # 用户输入
+    messages: list[Any]  # 对话消息历史
+    current_node: str | None  # 当前执行节点
+    node_outputs: dict[str, Any]  # 各节点输出结果
+    context: dict[str, Any]  # 共享上下文（用于节点间传递数据）
+    errors: list[str]  # 错误列表
+    memory: dict[str, Any]  # Agent 短期记忆
+    iteration_count: int  # 迭代计数（用于循环控制）
+    tool_results: list[dict]  # 工具调用结果历史
 
 
 def merge_dicts(left: dict, right: dict) -> dict:
@@ -130,9 +132,11 @@ class NodeExecutor:
                 raise
             except Exception as e:
                 last_error = e
-                logger.warning(f"节点 {self.node.id} 执行失败 (尝试 {attempt + 1}/{self.max_retries}): {str(e)}")
+                logger.warning(
+                    f"节点 {self.node.id} 执行失败 (尝试 {attempt + 1}/{self.max_retries}): {str(e)}"
+                )
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(self.retry_delay * (2 ** attempt))  # 指数退避
+                    await asyncio.sleep(self.retry_delay * (2**attempt))  # 指数退避
 
         # max_retries <= 0 时循环体一次都不执行，last_error 仍为 None；
         # 直接 raise None 会抛 TypeError: exceptions must derive from BaseException，
@@ -173,14 +177,15 @@ class NodeExecutor:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 api_key=api_key,
-                base_url=base_url
+                base_url=base_url,
             )
         if model_type == "qwen":
             # 通义千问。issue #273：DASHSCOPE_API_KEY 现为 Settings 真字段，直读。
             from langchain_community.chat_models import ChatTongyi
+
             return ChatTongyi(
                 model=node_data.get("model") or llm_settings.get("model", "qwen-plus"),
-                dashscope_api_key=llm_settings.get("api_key") or settings.DASHSCOPE_API_KEY
+                dashscope_api_key=llm_settings.get("api_key") or settings.DASHSCOPE_API_KEY,
             )
 
         return None
@@ -197,11 +202,13 @@ class InputNodeExecutor(NodeExecutor):
         if "{{input}}" in prompt_template:
             prompt = prompt_template.replace("{{input}}", user_input)
         else:
-            prompt = f"{prompt_template}\n\n用户输入: {user_input}" if prompt_template else user_input
+            prompt = (
+                f"{prompt_template}\n\n用户输入: {user_input}" if prompt_template else user_input
+            )
 
         return {
             "messages": [HumanMessage(content=prompt)],
-            "context": {"input_prompt": prompt, "original_input": user_input}
+            "context": {"input_prompt": prompt, "original_input": user_input},
         }
 
 
@@ -239,7 +246,7 @@ class LLMNodeExecutor(NodeExecutor):
         return {
             "messages": [response],
             "node_outputs": {self.node.id: {"content": response.content, "model": model_type}},
-            "context": {"last_response": response.content}
+            "context": {"last_response": response.content},
         }
 
 
@@ -261,11 +268,13 @@ class KnowledgeSearchNodeExecutor(NodeExecutor):
             messages = state.get("messages", [])
             if messages:
                 last_msg = messages[-1]
-                query = last_msg.content if hasattr(last_msg, 'content') else str(last_msg)
+                query = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
 
         # 获取配置
         top_k = self.node.data.get("topK", self.node.data.get("top_k", 5))
-        score_threshold = self.node.data.get("scoreThreshold", self.node.data.get("score_threshold", 0.5))
+        score_threshold = self.node.data.get(
+            "scoreThreshold", self.node.data.get("score_threshold", 0.5)
+        )
 
         # 搜索知识库（安全修复：检索范围取服务端注入的 organization_id，
         # 忽略输入中客户端可控的同名字段）。
@@ -277,7 +286,9 @@ class KnowledgeSearchNodeExecutor(NodeExecutor):
             raise ValueError(
                 "知识库检索缺少组织上下文（organization_id=None），已拒绝执行检索（issue #268）"
             )
-        docs, _ = await rag_service.search_knowledge_base(query, organization_id=organization_id, top_k=top_k)
+        docs, _ = await rag_service.search_knowledge_base(
+            query, organization_id=organization_id, top_k=top_k
+        )
 
         # 过滤低相关性结果
         filtered_docs = [d for d in docs if d.get("score", 0) >= score_threshold]
@@ -286,11 +297,13 @@ class KnowledgeSearchNodeExecutor(NodeExecutor):
         context = "\n\n".join([doc.get("content", "") for doc in filtered_docs[:3]])
 
         # 构建来源信息
-        sources = [{"title": d.get("title", "未知"), "score": d.get("score", 0)} for d in filtered_docs]
+        sources = [
+            {"title": d.get("title", "未知"), "score": d.get("score", 0)} for d in filtered_docs
+        ]
 
         return {
             "context": {"knowledge_context": context, "knowledge_sources": sources},
-            "messages": [HumanMessage(content=f"找到 {len(filtered_docs)} 条相关参考资料")]
+            "messages": [HumanMessage(content=f"找到 {len(filtered_docs)} 条相关参考资料")],
         }
 
 
@@ -306,20 +319,18 @@ class ConditionNodeExecutor(NodeExecutor):
         # 获取最后一条消息
         last_message = ""
         for msg in reversed(messages):
-            if hasattr(msg, 'content'):
+            if hasattr(msg, "content"):
                 last_message = msg.content
                 break
 
         # 条件判断逻辑
-        result = self._evaluate_condition(condition, {
-            "text": input_text,
-            "last_message": last_message,
-            "context": context
-        })
+        result = self._evaluate_condition(
+            condition, {"text": input_text, "last_message": last_message, "context": context}
+        )
 
         return {
             "context": {"condition_result": result},
-            "node_outputs": {self.node.id: {"condition_result": result}}
+            "node_outputs": {self.node.id: {"condition_result": result}},
         }
 
     def _evaluate_condition(self, condition: str, variables: dict[str, Any]) -> str:
@@ -365,7 +376,7 @@ class OutputNodeExecutor(NodeExecutor):
 
         return {
             "node_outputs": {self.node.id: {"output": output}},
-            "context": {"final_output": output}
+            "context": {"final_output": output},
         }
 
 
@@ -466,25 +477,25 @@ class MemoryNodeExecutor(NodeExecutor):
             if user_msg or assistant_msg:
                 if user_msg:
                     await memory_system.remember(
-                        f"用户: {user_msg}",
-                        memory_type="short_term",
-                        importance=importance
+                        f"用户: {user_msg}", memory_type="short_term", importance=importance
                     )
                 if assistant_msg:
                     await memory_system.remember(
                         f"助手: {assistant_msg}",
                         memory_type="short_term",
-                        importance=importance * 0.8
+                        importance=importance * 0.8,
                     )
 
             # 更新工作记忆
             if memory_type not in current_memory:
                 current_memory[memory_type] = []
-            current_memory[memory_type].append({
-                "user": user_msg,
-                "assistant": assistant_msg,
-                "timestamp": datetime.now().isoformat()
-            })
+            current_memory[memory_type].append(
+                {
+                    "user": user_msg,
+                    "assistant": assistant_msg,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
             # 保留最近20条
             current_memory[memory_type] = current_memory[memory_type][-20:]
 
@@ -494,39 +505,37 @@ class MemoryNodeExecutor(NodeExecutor):
             top_k = self.node.data.get("topK", 5)
 
             memories = await memory_system.recall(
-                query,
-                memory_types=[memory_type] if memory_type != "all" else None,
-                top_k=top_k
+                query, memory_types=[memory_type] if memory_type != "all" else None, top_k=top_k
             )
 
             # 构建记忆上下文
             if memories:
-                context_text = "相关历史记忆：\n" + "\n".join([
-                    f"- {m.get('content', m.get('lesson', str(m)))}"
-                    for m in memories[:5]
-                ])
+                context_text = "相关历史记忆：\n" + "\n".join(
+                    [f"- {m.get('content', m.get('lesson', str(m)))}" for m in memories[:5]]
+                )
             else:
                 context_text = ""
 
             return {
                 "context": {"retrieved_memories": memories, "memory_context": context_text},
                 "memory": current_memory,
-                "node_outputs": {self.node.id: {"memories": memories, "context": context_text}}
+                "node_outputs": {self.node.id: {"memories": memories, "context": context_text}},
             }
 
         elif action == "reflect":
             # 反思操作 - 提取洞察
             await memory_system._auto_reflect()
             insights = memory_system.reflective.get_relevant_insights(
-                state.get("input", {}).get("text", ""),
-                top_k=5
+                state.get("input", {}).get("text", ""), top_k=5
             )
-            lessons = memory_system.reflective.lessons[-5:] if memory_system.reflective.lessons else []
+            lessons = (
+                memory_system.reflective.lessons[-5:] if memory_system.reflective.lessons else []
+            )
 
             return {
                 "context": {"insights": insights, "lessons": lessons},
                 "memory": current_memory,
-                "node_outputs": {self.node.id: {"insights": insights, "lessons": lessons}}
+                "node_outputs": {self.node.id: {"insights": insights, "lessons": lessons}},
             }
 
         elif action == "clear":
@@ -552,17 +561,39 @@ class CodeExecuteNodeExecutor(NodeExecutor):
 
         # AST 层面禁止 import、exec、eval 等危险节点
         import ast
+
         try:
             tree = ast.parse(code)
         except SyntaxError as e:
             raise ValueError(f"代码语法错误: {e}")
 
         _FORBIDDEN_NODES = (ast.Import, ast.ImportFrom)
-        _FORBIDDEN_NAMES = {"exec", "eval", "compile", "__import__", "open", "globals", "locals", "vars", "dir", "getattr", "setattr", "delattr", "breakpoint", "input", "exit", "quit"}
+        _FORBIDDEN_NAMES = {
+            "exec",
+            "eval",
+            "compile",
+            "__import__",
+            "open",
+            "globals",
+            "locals",
+            "vars",
+            "dir",
+            "getattr",
+            "setattr",
+            "delattr",
+            "breakpoint",
+            "input",
+            "exit",
+            "quit",
+        }
         for node in ast.walk(tree):
             if isinstance(node, _FORBIDDEN_NODES):
                 raise ValueError("安全限制：不允许 import 语句")
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _FORBIDDEN_NAMES:
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in _FORBIDDEN_NAMES
+            ):
                 raise ValueError(f"安全限制：不允许调用 {node.func.id}()")
             if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
                 raise ValueError(f"安全限制：不允许访问私有属性 .{node.attr}")
@@ -590,9 +621,7 @@ class CodeExecuteNodeExecutor(NodeExecutor):
             "result = None\n"
         )
         docker_code = (
-            preamble
-            + code
-            + '\nprint(result if result is not None else "执行完成，无返回结果")'
+            preamble + code + '\nprint(result if result is not None else "执行完成，无返回结果")'
         )
         output = await run_in_docker(
             docker_code,
@@ -691,14 +720,17 @@ class APICallNodeExecutor(NodeExecutor):
                 else:  # DELETE（其余方法已在上方放行前拦下）
                     response = await client.delete(url, headers=headers)
 
-                result = response.json() if response.headers.get("content-type", "").startswith("application/json") else response.text
+                result = (
+                    response.json()
+                    if response.headers.get("content-type", "").startswith("application/json")
+                    else response.text
+                )
 
                 return {
-                    "node_outputs": {self.node.id: {
-                        "status_code": response.status_code,
-                        "response": result
-                    }},
-                    "context": {"api_result": result}
+                    "node_outputs": {
+                        self.node.id: {"status_code": response.status_code, "response": result}
+                    },
+                    "context": {"api_result": result},
                 }
         except Exception as e:
             # 网络/上游瞬时故障：包裹为 TransientNodeError 以保留重试（#277 R4）
@@ -724,6 +756,7 @@ class TransformNodeExecutor(NodeExecutor):
                 json_path = self.node.data.get("jsonPath", "$")
                 try:
                     import json
+
                     data = json.loads(source_data) if isinstance(source_data, str) else source_data
                     # 简单路径解析
                     for key in json_path.split(".")[1:]:
@@ -757,7 +790,7 @@ class TransformNodeExecutor(NodeExecutor):
 
         return {
             "context": {"transformed_data": result},
-            "node_outputs": {self.node.id: {"result": result}}
+            "node_outputs": {self.node.id: {"result": result}},
         }
 
 
@@ -777,14 +810,20 @@ class RouterNodeExecutor(NodeExecutor):
 
         return {
             "context": {"route_result": matched_route},
-            "node_outputs": {self.node.id: {"matched_route": matched_route}}
+            "node_outputs": {self.node.id: {"matched_route": matched_route}},
         }
 
 
 class WorkflowEngine:
     """工作流引擎 - 基于 LangGraph"""
 
-    def __init__(self, workflow_config: WorkflowConfig, llm_config: dict[str, Any] = None, organization_id: int | None = None, user_id: int | None = None):
+    def __init__(
+        self,
+        workflow_config: WorkflowConfig,
+        llm_config: dict[str, Any] = None,
+        organization_id: int | None = None,
+        user_id: int | None = None,
+    ):
         self.config = workflow_config
         self.llm_config = llm_config or {}
         # 安全修复（R0）：调用者所属组织，用于知识库检索的租户隔离。
@@ -853,22 +892,23 @@ class WorkflowEngine:
 
         # 添加节点
         for node_id, node in self.nodes.items():
+
             async def node_func(state: WorkflowState, _node=node) -> dict[str, Any]:
                 executor = self.get_executor(_node)
 
                 # 记录开始
                 started_at = datetime.now()
                 self.node_results[_node.id] = NodeResult(
-                    node_id=_node.id,
-                    node_type=_node.type,
-                    status="running",
-                    started_at=started_at
+                    node_id=_node.id, node_type=_node.type, status="running", started_at=started_at
                 )
-                await self.emit_event("node_start", {
-                    "node_id": _node.id,
-                    "node_type": _node.type,
-                    "timestamp": started_at.isoformat()
-                })
+                await self.emit_event(
+                    "node_start",
+                    {
+                        "node_id": _node.id,
+                        "node_type": _node.type,
+                        "timestamp": started_at.isoformat(),
+                    },
+                )
 
                 try:
                     result = await executor.execute_with_retry(state)
@@ -880,7 +920,10 @@ class WorkflowEngine:
                     if "messages" in result:
                         state_updates["messages"] = result["messages"]
                     if "node_outputs" in result:
-                        state_updates["node_outputs"] = {**state.get("node_outputs", {}), **result["node_outputs"]}
+                        state_updates["node_outputs"] = {
+                            **state.get("node_outputs", {}),
+                            **result["node_outputs"],
+                        }
                     if "context" in result:
                         state_updates["context"] = {**state.get("context", {}), **result["context"]}
                     if "memory" in result:
@@ -899,13 +942,16 @@ class WorkflowEngine:
                     self.node_results[_node.id].completed_at = completed_at
                     self.node_results[_node.id].duration = duration
 
-                    await self.emit_event("node_complete", {
-                        "node_id": _node.id,
-                        "node_type": _node.type,
-                        "output": jsonable_output,
-                        "duration": duration,
-                        "timestamp": completed_at.isoformat()
-                    })
+                    await self.emit_event(
+                        "node_complete",
+                        {
+                            "node_id": _node.id,
+                            "node_type": _node.type,
+                            "output": jsonable_output,
+                            "duration": duration,
+                            "timestamp": completed_at.isoformat(),
+                        },
+                    )
 
                     return state_updates
 
@@ -918,12 +964,15 @@ class WorkflowEngine:
                     self.node_results[_node.id].completed_at = completed_at
                     self.node_results[_node.id].duration = duration
 
-                    await self.emit_event("node_error", {
-                        "node_id": _node.id,
-                        "error": str(e),
-                        "traceback": traceback.format_exc(),
-                        "timestamp": completed_at.isoformat()
-                    })
+                    await self.emit_event(
+                        "node_error",
+                        {
+                            "node_id": _node.id,
+                            "error": str(e),
+                            "traceback": traceback.format_exc(),
+                            "timestamp": completed_at.isoformat(),
+                        },
+                    )
 
                     return {"errors": [str(e)]}
 
@@ -934,11 +983,9 @@ class WorkflowEngine:
         for edge in self.edges:
             if edge.source not in edge_map:
                 edge_map[edge.source] = []
-            edge_map[edge.source].append({
-                "target": edge.target,
-                "label": edge.label,
-                "sourceHandle": edge.sourceHandle
-            })
+            edge_map[edge.source].append(
+                {"target": edge.target, "label": edge.label, "sourceHandle": edge.sourceHandle}
+            )
 
         # 设置入口点（input 节点或第一个节点）
         entry_node = None
@@ -962,7 +1009,9 @@ class WorkflowEngine:
                 # 多目标：条件分支
                 def make_router(src: str, tgts: list[dict]):
                     async def router(state: WorkflowState) -> str:
-                        condition_result = state.get("context", {}).get("condition_result", "default")
+                        condition_result = state.get("context", {}).get(
+                            "condition_result", "default"
+                        )
                         route_result = state.get("context", {}).get("route_result", "default")
 
                         # 优先使用路由结果
@@ -973,7 +1022,10 @@ class WorkflowEngine:
 
                         # 使用条件结果
                         for edge in tgts:
-                            if edge.get("label") and edge["label"].lower() == condition_result.lower():
+                            if (
+                                edge.get("label")
+                                and edge["label"].lower() == condition_result.lower()
+                            ):
                                 return edge["target"]
 
                         # 默认返回第一个目标
@@ -1002,7 +1054,7 @@ class WorkflowEngine:
             "errors": [],
             "memory": {},
             "iteration_count": 0,
-            "tool_results": []
+            "tool_results": [],
         }
 
         # 构建图
@@ -1011,11 +1063,14 @@ class WorkflowEngine:
         # 编译并执行
         app = graph.compile()
 
-        await self.emit_event("workflow_start", {
-            "workflow_id": self.config.id if hasattr(self.config, 'id') else None,
-            "timestamp": datetime.now().isoformat(),
-            "input": input_data
-        })
+        await self.emit_event(
+            "workflow_start",
+            {
+                "workflow_id": self.config.id if hasattr(self.config, "id") else None,
+                "timestamp": datetime.now().isoformat(),
+                "input": input_data,
+            },
+        )
 
         try:
             result = await app.ainvoke(initial_state)
@@ -1034,14 +1089,19 @@ class WorkflowEngine:
                     f"节点 {r.node_id} 执行失败: {r.error}" for r in failed_nodes
                 )
 
-            await self.emit_event("workflow_complete", {
-                "output": final_output,
-                "node_count": len(self.node_results),
-                "success_count": sum(1 for r in self.node_results.values() if r.status == "completed"),
-                "success": success,
-                "failed_count": len(failed_nodes),
-                "timestamp": datetime.now().isoformat()
-            })
+            await self.emit_event(
+                "workflow_complete",
+                {
+                    "output": final_output,
+                    "node_count": len(self.node_results),
+                    "success_count": sum(
+                        1 for r in self.node_results.values() if r.status == "completed"
+                    ),
+                    "success": success,
+                    "failed_count": len(failed_nodes),
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
 
             # #281：返回值会被端点原样 JSON 化（workflow_result 事件载荷 +
             # workflow_executions.output_data JSON 列 + 非流式响应），与事件出口
@@ -1051,24 +1111,23 @@ class WorkflowEngine:
                 "output": final_output,
                 "node_outputs": result.get("node_outputs", {}),
                 "context": result.get("context", {}),
-                "memory": result.get("memory", {})
+                "memory": result.get("memory", {}),
             }
             if not success:
                 payload["error"] = error_summary
             return _to_jsonable(payload)
 
         except Exception as e:
-            await self.emit_event("workflow_error", {
-                "error": str(e),
-                "traceback": traceback.format_exc(),
-                "timestamp": datetime.now().isoformat()
-            })
+            await self.emit_event(
+                "workflow_error",
+                {
+                    "error": str(e),
+                    "traceback": traceback.format_exc(),
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
 
-            return {
-                "success": False,
-                "error": str(e),
-                "node_outputs": {}
-            }
+            return {"success": False, "error": str(e), "node_outputs": {}}
 
     def get_node_results(self) -> list[NodeResult]:
         """获取所有节点执行结果"""

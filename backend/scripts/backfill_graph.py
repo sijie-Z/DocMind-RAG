@@ -16,6 +16,7 @@
 
 退出码：0 全部成功；1 存在单文档失败（其余照常）；2 致命（Redis/DB 不可用等）。
 """
+
 import argparse
 import asyncio
 import os
@@ -39,9 +40,7 @@ EXIT_FATAL = 2
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="回填已索引文档的知识图谱数据（幂等）")
     parser.add_argument("--org", type=int, default=None, help="只处理该组织 id（默认全部）")
-    parser.add_argument(
-        "--document-id", default=None, help="只处理该文档 id（默认全部已索引文档）"
-    )
+    parser.add_argument("--document-id", default=None, help="只处理该文档 id（默认全部已索引文档）")
     parser.add_argument("--dry-run", action="store_true", help="只列出计划，不写任何数据")
     return parser
 
@@ -147,9 +146,7 @@ async def main(argv: list[str] | None = None) -> int:
         async with AsyncSessionLocal() as session:
             return await fetch_document_text(session, doc_id)
 
-    report = await backfill(
-        docs, _text_loader, llm_client=llm_client, dry_run=args.dry_run
-    )
+    report = await backfill(docs, _text_loader, llm_client=llm_client, dry_run=args.dry_run)
 
     # 写后读回核验：有文档被真抽取过，对应组织的图键必须真实存在
     if report["extracted"]:

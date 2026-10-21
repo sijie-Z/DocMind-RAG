@@ -4,6 +4,7 @@
 `load_skill_reference` 工具渐进加载。这与 curated_skills 模块的设计意图一致：
 避免把全部技能正文一次性塞进 prompt 造成 token 爆炸。
 """
+
 from app.agent.curated_skills import curated_skill_registry
 
 

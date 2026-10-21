@@ -28,6 +28,7 @@ mock 的调用顺序。
   ``TestWritePathsRefuseCrossOrg`` 红；
 - 超管不再旁路 → ``TestSuperuserBypass`` 红。
 """
+
 import contextlib
 import json
 from types import SimpleNamespace
@@ -76,55 +77,86 @@ async def _seeded_factory():
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with factory() as s:
-        s.add_all([
-            Organization(id=ORG_A, name="Org A", owner_id=0),
-            Organization(id=ORG_B, name="Org B", owner_id=0),
-        ])
-        s.add_all([
-            ChatSession(
-                id=SESSION_A, user_id=1, organization_id=ORG_A,
-                title="A session", status=ChatSessionStatus.ACTIVE,
-                settings={"bound_document_ids": ["doc-1"]},
-            ),
-            ChatSession(
-                id=SESSION_B, user_id=1, organization_id=ORG_B,
-                title="B session", status=ChatSessionStatus.ACTIVE,
-            ),
-            ChatSession(
-                id=SESSION_LEGACY, user_id=1, organization_id=None,
-                title="Legacy session", status=ChatSessionStatus.ACTIVE,
-            ),
-            ChatSession(
-                id=SESSION_FOREIGN, user_id=2, organization_id=ORG_A,
-                title="Other user's session", status=ChatSessionStatus.ACTIVE,
-            ),
-            ChatSession(
-                id=SESSION_ENDED, user_id=1, organization_id=ORG_A,
-                title="Ended session", status=ChatSessionStatus.ENDED,
-            ),
-        ])
-        s.add_all([
-            ChatMessage(
-                id="msg-a-1", session_id=SESSION_A,
-                content="org-a history", message_type=MessageType.USER,
-            ),
-            ChatMessage(
-                id="msg-b-1", session_id=SESSION_B,
-                content="org-b history", message_type=MessageType.USER,
-            ),
-            ChatMessage(
-                id="msg-legacy-1", session_id=SESSION_LEGACY,
-                content="legacy history", message_type=MessageType.USER,
-            ),
-            ChatMessage(
-                id="msg-foreign-1", session_id=SESSION_FOREIGN,
-                content="foreign history", message_type=MessageType.USER,
-            ),
-            ChatMessage(
-                id="msg-ended-1", session_id=SESSION_ENDED,
-                content="ended history", message_type=MessageType.USER,
-            ),
-        ])
+        s.add_all(
+            [
+                Organization(id=ORG_A, name="Org A", owner_id=0),
+                Organization(id=ORG_B, name="Org B", owner_id=0),
+            ]
+        )
+        s.add_all(
+            [
+                ChatSession(
+                    id=SESSION_A,
+                    user_id=1,
+                    organization_id=ORG_A,
+                    title="A session",
+                    status=ChatSessionStatus.ACTIVE,
+                    settings={"bound_document_ids": ["doc-1"]},
+                ),
+                ChatSession(
+                    id=SESSION_B,
+                    user_id=1,
+                    organization_id=ORG_B,
+                    title="B session",
+                    status=ChatSessionStatus.ACTIVE,
+                ),
+                ChatSession(
+                    id=SESSION_LEGACY,
+                    user_id=1,
+                    organization_id=None,
+                    title="Legacy session",
+                    status=ChatSessionStatus.ACTIVE,
+                ),
+                ChatSession(
+                    id=SESSION_FOREIGN,
+                    user_id=2,
+                    organization_id=ORG_A,
+                    title="Other user's session",
+                    status=ChatSessionStatus.ACTIVE,
+                ),
+                ChatSession(
+                    id=SESSION_ENDED,
+                    user_id=1,
+                    organization_id=ORG_A,
+                    title="Ended session",
+                    status=ChatSessionStatus.ENDED,
+                ),
+            ]
+        )
+        s.add_all(
+            [
+                ChatMessage(
+                    id="msg-a-1",
+                    session_id=SESSION_A,
+                    content="org-a history",
+                    message_type=MessageType.USER,
+                ),
+                ChatMessage(
+                    id="msg-b-1",
+                    session_id=SESSION_B,
+                    content="org-b history",
+                    message_type=MessageType.USER,
+                ),
+                ChatMessage(
+                    id="msg-legacy-1",
+                    session_id=SESSION_LEGACY,
+                    content="legacy history",
+                    message_type=MessageType.USER,
+                ),
+                ChatMessage(
+                    id="msg-foreign-1",
+                    session_id=SESSION_FOREIGN,
+                    content="foreign history",
+                    message_type=MessageType.USER,
+                ),
+                ChatMessage(
+                    id="msg-ended-1",
+                    session_id=SESSION_ENDED,
+                    content="ended history",
+                    message_type=MessageType.USER,
+                ),
+            ]
+        )
         await s.commit()
 
     return engine, factory
@@ -162,9 +194,7 @@ class _AsyncClientCtx:
         app.dependency_overrides[get_current_user] = _current_user
         app.dependency_overrides[get_db] = _db
         self._app = app
-        self._client = AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://t10t4"
-        )
+        self._client = AsyncClient(transport=ASGITransport(app=app), base_url="http://t10t4")
         return self._client
 
     async def __aexit__(self, exc_type, exc, tb):
@@ -195,7 +225,7 @@ def _sse_events(text: str) -> list[dict]:
         if not line.startswith("data: "):
             continue
         with contextlib.suppress(json.JSONDecodeError):
-            events.append(json.loads(line[len("data: "):]))
+            events.append(json.loads(line[len("data: ") :]))
     return events
 
 
@@ -248,9 +278,7 @@ class TestCrossOrgByIdDenied:
         engine, factory = await _seeded_factory()
         try:
             async with _AsyncClientCtx(_user(ORG_B), factory) as ac:
-                r = await ac.put(
-                    CHAT_DETAIL.format(sid=SESSION_A), json={"title": "hijacked"}
-                )
+                r = await ac.put(CHAT_DETAIL.format(sid=SESSION_A), json={"title": "hijacked"})
             assert r.status_code == 404, r.text
             row = await _get_session_row(factory, SESSION_A)
             assert row is not None and row.title == "A session", (
@@ -265,9 +293,7 @@ class TestCrossOrgByIdDenied:
         engine, factory = await _seeded_factory()
         try:
             async with _AsyncClientCtx(_user(ORG_B), factory) as ac:
-                r = await ac.delete(
-                    f"{CHAT_DETAIL.format(sid=SESSION_A)}/clear"
-                )
+                r = await ac.delete(f"{CHAT_DETAIL.format(sid=SESSION_A)}/clear")
             assert r.status_code == 404, r.text
             assert await _count(factory, ChatMessage, SESSION_A) == 1
         finally:
@@ -292,9 +318,7 @@ class TestCrossOrgByIdDenied:
         engine, factory = await _seeded_factory()
         try:
             async with _AsyncClientCtx(_user(ORG_B), factory) as ac:
-                r = await ac.post(
-                    f"{CHAT_DETAIL.format(sid=SESSION_A)}/unbind-docs"
-                )
+                r = await ac.post(f"{CHAT_DETAIL.format(sid=SESSION_A)}/unbind-docs")
             assert r.status_code == 403, r.text
             row = await _get_session_row(factory, SESSION_A)
             assert row.settings.get("bound_document_ids") == ["doc-1"]
@@ -314,9 +338,7 @@ class TestAllowedAccess:
             async with _AsyncClientCtx(_user(ORG_A), factory) as ac:
                 r1 = await ac.get(AGENT_DETAIL.format(sid=SESSION_A))
                 r2 = await ac.get(CHAT_DETAIL.format(sid=SESSION_A))
-                r3 = await ac.put(
-                    CHAT_DETAIL.format(sid=SESSION_A), json={"title": "renamed"}
-                )
+                r3 = await ac.put(CHAT_DETAIL.format(sid=SESSION_A), json={"title": "renamed"})
             assert r1.status_code == 200, r1.text
             assert r2.status_code == 200, r2.text
             assert r3.status_code == 200, r3.text
@@ -379,12 +401,8 @@ class TestAllowedAccess:
                 r_chat_list = await ac.get("/api/v1/chat/conversations")
                 assert r_agent_list.status_code == 200, r_agent_list.text
                 assert r_chat_list.status_code == 200, r_chat_list.text
-                agent_ids = {
-                    s["id"] for s in r_agent_list.json()["data"]["sessions"]
-                }
-                chat_ids = {
-                    s["id"] for s in r_chat_list.json()["data"]["data"]
-                }
+                agent_ids = {s["id"] for s in r_agent_list.json()["data"]["sessions"]}
+                chat_ids = {s["id"] for s in r_chat_list.json()["data"]["data"]}
                 assert agent_ids == chat_ids == {SESSION_B, SESSION_LEGACY}
 
                 visible = await ac.get(AGENT_DETAIL.format(sid=SESSION_B))
@@ -426,18 +444,18 @@ class TestEffectiveOrgResolution:
         try:
             user = _user(None, token_org=ORG_B)
             async with _AsyncClientCtx(user, factory) as ac:
-                r = await ac.post(
-                    "/api/v1/chat/conversations", json={"title": "token-org-new"}
-                )
+                r = await ac.post("/api/v1/chat/conversations", json={"title": "token-org-new"})
             assert r.status_code == 200, r.text
             async with factory() as s:
                 rows = (
-                    await s.execute(
-                        select(ChatSession).where(
-                            ChatSession.title == "token-org-new"
+                    (
+                        await s.execute(
+                            select(ChatSession).where(ChatSession.title == "token-org-new")
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             assert len(rows) == 1
             assert rows[0].organization_id == ORG_B, (
                 "新建会话必须落有效组织（token 回退 B），而不是裸 None"
@@ -478,9 +496,7 @@ class TestSuperuserBypass:
             async with _AsyncClientCtx(user, factory) as ac:
                 r1 = await ac.get(AGENT_DETAIL.format(sid=SESSION_B))
                 r2 = await ac.get(CHAT_DETAIL.format(sid=SESSION_B))
-                r3 = await ac.put(
-                    CHAT_DETAIL.format(sid=SESSION_B), json={"title": "su-renamed"}
-                )
+                r3 = await ac.put(CHAT_DETAIL.format(sid=SESSION_B), json={"title": "su-renamed"})
                 r4 = await ac.get(AGENT_DETAIL.format(sid=SESSION_FOREIGN))
             assert r1.status_code == 200, r1.text
             assert r2.status_code == 200, r2.text
@@ -503,9 +519,7 @@ class TestSuperuserBypass:
             user = _user(None, superuser=True)
             async with _AsyncClientCtx(user, factory) as ac:
                 r1 = await ac.delete(CHAT_DETAIL.format(sid=SESSION_B))
-                r2 = await ac.delete(
-                    f"{CHAT_DETAIL.format(sid=SESSION_A)}/clear"
-                )
+                r2 = await ac.delete(f"{CHAT_DETAIL.format(sid=SESSION_A)}/clear")
             assert r1.status_code == 200, r1.text
             assert r2.status_code == 200, r2.text
             assert await _get_session_row(factory, SESSION_B) is None
@@ -519,8 +533,13 @@ class TestSuperuserBypass:
         engine, factory = await _seeded_factory()
         try:
             out = await save_session_interaction(
-                SESSION_A, 1, "q", ORG_B, "answer",
-                session_factory=factory, bypass_org=True,
+                SESSION_A,
+                1,
+                "q",
+                ORG_B,
+                "answer",
+                session_factory=factory,
+                bypass_org=True,
             )
             assert out is not None, "超管旁路下不得因组织不一致拒绝落库"
             assert await _count(factory, ChatMessage, SESSION_A) == 3  # 原 1 + 新 2
@@ -615,16 +634,15 @@ class TestAgentHistoryLoadOrgScope:
         async def _chat(**kwargs):
             captured["history"] = kwargs.get("history")
             yield SimpleNamespace(
-                type="done", content="",
+                type="done",
+                content="",
                 to_sse_dict=lambda: {"type": "done", "content": ""},
             )
 
         monkeypatch.setattr(agent_service, "chat", _chat)
 
     @pytest.mark.asyncio
-    async def test_agent_chat_does_not_load_history_from_other_org(
-        self, monkeypatch
-    ):
+    async def test_agent_chat_does_not_load_history_from_other_org(self, monkeypatch):
         """切到 B 后用 A 组织会话 id 发起 /agent/chat：
         历史必须为空，且落库必须被明确拒绝（无副作用 + warning + saved=false）。
 
@@ -644,9 +662,7 @@ class TestAgentHistoryLoadOrgScope:
                     json={"query": "hi", "session_id": SESSION_A},
                 )
             assert r.status_code == 200, r.text
-            assert captured["history"] == [], (
-                "不得把 A 组织会话的历史加载进 B 组织的运行上下文"
-            )
+            assert captured["history"] == [], "不得把 A 组织会话的历史加载进 B 组织的运行上下文"
             events = _sse_events(r.text)
             assert any(e.get("type") == "warning" for e in events), (
                 f"跨组织落库被拒绝必须如实告知（warning）: {events}"
@@ -675,17 +691,14 @@ class TestAgentHistoryLoadOrgScope:
                     json={"query": "hi", "session_id": SESSION_A},
                 )
             assert r.status_code == 200, r.text
-            assert captured["history"] == [
-                {"role": "user", "content": "org-a history"}
-            ], f"同组织历史应正常加载: {captured['history']}"
+            assert captured["history"] == [{"role": "user", "content": "org-a history"}], (
+                f"同组织历史应正常加载: {captured['history']}"
+            )
         finally:
             await engine.dispose()
 
-
     @pytest.mark.asyncio
-    async def test_chat_stream_agent_mode_refuses_cross_org_persist(
-        self, monkeypatch
-    ):
+    async def test_chat_stream_agent_mode_refuses_cross_org_persist(self, monkeypatch):
         """聊天页 Agent 模式（/chat/stream）同口径：不加载跨组织历史，
         落库被拒绝时以 warning 如实告知，且目标会话无新增消息。
 
@@ -721,9 +734,7 @@ class TestAgentHistoryLoadOrgScope:
                 )
 
             assert r.status_code == 200, r.text
-            assert captured["history"] == [], (
-                "聊天页 Agent 模式不得加载其他组织会话的历史"
-            )
+            assert captured["history"] == [], "聊天页 Agent 模式不得加载其他组织会话的历史"
             assert "event: warning" in r.text, (
                 f"跨组织落库被拒绝必须有 warning 事件: {r.text[:800]}"
             )
@@ -781,26 +792,19 @@ class TestConversationHistoryToolOrgScope:
     @pytest.mark.asyncio
     async def test_tool_refuses_cross_org_session(self, monkeypatch):
         """切到 B 组织后，工具按 A 组织会话 id 读取 → 拒绝且不读消息。"""
-        row = SimpleNamespace(
-            id=SESSION_A, user_id=1, organization_id=ORG_A, title="A session"
-        )
+        row = SimpleNamespace(id=SESSION_A, user_id=1, organization_id=ORG_A, title="A session")
         core_tools, fake = self._install(monkeypatch, row)
-        out = await core_tools.get_conversation_history(
-            SESSION_A, user_id=1, organization_id=ORG_B
-        )
+        out = await core_tools.get_conversation_history(SESSION_A, user_id=1, organization_id=ORG_B)
         assert "denied" in out.lower(), out
         assert fake.execute_count == 1, "组织校验必须在读取消息之前拒绝"
 
     @pytest.mark.asyncio
     async def test_tool_allows_legacy_null_session(self, monkeypatch):
         """历史 NULL 组织会话属本人：工具读取不受影响（不得误伤）。"""
-        row = SimpleNamespace(
-            id=SESSION_LEGACY, user_id=1, organization_id=None, title="legacy"
-        )
+        row = SimpleNamespace(id=SESSION_LEGACY, user_id=1, organization_id=None, title="legacy")
         msg = SimpleNamespace(message_type=MessageType.USER, content="legacy history")
         core_tools, _ = self._install(monkeypatch, row, [msg])
         out = await core_tools.get_conversation_history(
             SESSION_LEGACY, user_id=1, organization_id=ORG_B
         )
         assert "legacy history" in out, out
-

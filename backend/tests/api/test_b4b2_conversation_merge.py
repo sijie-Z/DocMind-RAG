@@ -25,6 +25,7 @@
 - 删掉 chat.py 的 save_session_interaction 调用 → 持久化用例红；
 - 去掉「无 conversationId 时生成 uuid 并回传」→ 新会话用例红。
 """
+
 import contextlib
 import json
 import uuid
@@ -118,18 +119,43 @@ def _seeded_sqlite():
     ChatMessage.__table__.create(engine)
     rows = [
         # 当前用户（id=1）：org 7 / org 8 / 历史 NULL
-        {"id": "own-org7", "user_id": 1, "organization_id": 7,
-         "title": "own org7", "status": ChatSessionStatus.ACTIVE},
-        {"id": "own-org8", "user_id": 1, "organization_id": 8,
-         "title": "own org8", "status": ChatSessionStatus.ACTIVE},
-        {"id": "own-null", "user_id": 1, "organization_id": None,
-         "title": "own legacy", "status": ChatSessionStatus.ACTIVE},
+        {
+            "id": "own-org7",
+            "user_id": 1,
+            "organization_id": 7,
+            "title": "own org7",
+            "status": ChatSessionStatus.ACTIVE,
+        },
+        {
+            "id": "own-org8",
+            "user_id": 1,
+            "organization_id": 8,
+            "title": "own org8",
+            "status": ChatSessionStatus.ACTIVE,
+        },
+        {
+            "id": "own-null",
+            "user_id": 1,
+            "organization_id": None,
+            "title": "own legacy",
+            "status": ChatSessionStatus.ACTIVE,
+        },
         # 同组织其他用户：必须被 user 条件排除
-        {"id": "other-org7", "user_id": 2, "organization_id": 7,
-         "title": "other org7", "status": ChatSessionStatus.ACTIVE},
+        {
+            "id": "other-org7",
+            "user_id": 2,
+            "organization_id": 7,
+            "title": "other org7",
+            "status": ChatSessionStatus.ACTIVE,
+        },
         # 本人已结束会话：两入口都以 status != ENDED 排除
-        {"id": "own-ended", "user_id": 1, "organization_id": 7,
-         "title": "ended", "status": ChatSessionStatus.ENDED},
+        {
+            "id": "own-ended",
+            "user_id": 1,
+            "organization_id": 7,
+            "title": "ended",
+            "status": ChatSessionStatus.ENDED,
+        },
     ]
     with engine.begin() as conn:
         conn.execute(ChatSession.__table__.insert(), rows)
@@ -228,7 +254,7 @@ def _sse_events(text: str) -> list[dict]:
         if not line.startswith("data: "):
             continue
         with contextlib.suppress(json.JSONDecodeError):
-            events.append(json.loads(line[len("data: "):]))
+            events.append(json.loads(line[len("data: ") :]))
     return events
 
 
@@ -261,15 +287,18 @@ class TestChatAgentModePersistence:
         _install_fake_agent(monkeypatch, ["你好", "，世界"])
         calls = []
 
-        async def _fake_save(session_id, user_id, query, organization_id,
-                             assistant_response="", **kwargs):
-            calls.append({
-                "session_id": session_id,
-                "user_id": user_id,
-                "query": query,
-                "organization_id": organization_id,
-                "assistant_response": assistant_response,
-            })
+        async def _fake_save(
+            session_id, user_id, query, organization_id, assistant_response="", **kwargs
+        ):
+            calls.append(
+                {
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "query": query,
+                    "organization_id": organization_id,
+                    "assistant_response": assistant_response,
+                }
+            )
             return "assistant-msg-id"
 
         monkeypatch.setattr(chat_module, "save_session_interaction", _fake_save, raising=False)
@@ -281,13 +310,15 @@ class TestChatAgentModePersistence:
         )
         assert resp.status_code == 200, resp.text
         assert "event: message" in resp.text
-        assert calls == [{
-            "session_id": "conv-b4b2",
-            "user_id": 1,
-            "query": "帮我分析",
-            "organization_id": 7,
-            "assistant_response": "你好，世界",
-        }], "聊天 Agent 模式没有把本轮问答交给统一落库服务"
+        assert calls == [
+            {
+                "session_id": "conv-b4b2",
+                "user_id": 1,
+                "query": "帮我分析",
+                "organization_id": 7,
+                "assistant_response": "你好，世界",
+            }
+        ], "聊天 Agent 模式没有把本轮问答交给统一落库服务"
 
     def test_new_conversation_id_is_generated_and_echoed(self, client, app_overrides, monkeypatch):
         """未带 conversationId：生成 uuid、随流回传、并用同一 id 落库。"""
@@ -296,8 +327,9 @@ class TestChatAgentModePersistence:
         _install_fake_agent(monkeypatch, ["答"])
         calls = []
 
-        async def _fake_save(session_id, user_id, query, organization_id,
-                             assistant_response="", **kwargs):
+        async def _fake_save(
+            session_id, user_id, query, organization_id, assistant_response="", **kwargs
+        ):
             calls.append(session_id)
             return
 
@@ -307,16 +339,16 @@ class TestChatAgentModePersistence:
         resp = client.post(SSE_URL, json={"content": "新问题", "useAgent": True})
         assert resp.status_code == 200, resp.text
         events = _sse_events(resp.text)
-        echoed = {
-            e.get("conversationId") for e in events if e.get("conversationId")
-        }
+        echoed = {e.get("conversationId") for e in events if e.get("conversationId")}
         assert echoed, f"新会话必须把生成的 conversationId 回传给前端: {events}"
         assert len(echoed) == 1
         generated = next(iter(echoed))
         uuid.UUID(str(generated))  # 必须是合法 uuid，刷新后可直接按 id 取会话
         assert calls == [generated], "落库使用的会话 id 必须与回传前端的一致"
 
-    def test_save_failure_is_reported_but_stream_completes(self, client, app_overrides, monkeypatch):
+    def test_save_failure_is_reported_but_stream_completes(
+        self, client, app_overrides, monkeypatch
+    ):
         """落库失败不得吞掉：回答照常完成 + warning 事件如实告知（与 /agent 同口径）。"""
         import app.api.v1.endpoints.chat as chat_module
 
@@ -341,7 +373,9 @@ class TestChatAgentModePersistence:
         assert "event: message" in resp.text, "回答本身必须照常完成"
 
     @pytest.mark.asyncio
-    async def test_persisted_messages_survive_reload_through_service(self, client, app_overrides, monkeypatch):
+    async def test_persisted_messages_survive_reload_through_service(
+        self, client, app_overrides, monkeypatch
+    ):
         """端到端语义：把端点落库参数交给真实统一服务写库，随后可读回两条消息。
 
         用假 AsyncSession 复现真实服务对 chat_sessions/chat_messages 的读写，
@@ -353,15 +387,18 @@ class TestChatAgentModePersistence:
         _install_fake_agent(monkeypatch, ["回答正文"])
         captured = {}
 
-        async def _fake_save(session_id, user_id, query, organization_id,
-                             assistant_response="", **kwargs):
-            captured.update({
-                "session_id": session_id,
-                "user_id": user_id,
-                "query": query,
-                "organization_id": organization_id,
-                "assistant_response": assistant_response,
-            })
+        async def _fake_save(
+            session_id, user_id, query, organization_id, assistant_response="", **kwargs
+        ):
+            captured.update(
+                {
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "query": query,
+                    "organization_id": organization_id,
+                    "assistant_response": assistant_response,
+                }
+            )
             return "mid"
 
         monkeypatch.setattr(chat_module, "save_session_interaction", _fake_save, raising=False)

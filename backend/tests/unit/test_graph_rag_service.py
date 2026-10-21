@@ -28,9 +28,7 @@ async def test_graph_persists_and_loads_from_redis(monkeypatch):
 
     service = GraphRAGService()
     await service.build_graph_from_entities(
-        [
-            {"entity": "DocMind", "type": "PRODUCT", "description": "RAG system", "relations": []}
-        ],
+        [{"entity": "DocMind", "type": "PRODUCT", "description": "RAG system", "relations": []}],
         organization_id=1,
     )
 
@@ -62,9 +60,7 @@ async def test_search_graph_injects_real_llm_client(monkeypatch):
 
     service = GraphRAGService()
     await service.build_graph_from_entities(
-        [
-            {"entity": "DocMind", "type": "PRODUCT", "description": "RAG system", "relations": []}
-        ],
+        [{"entity": "DocMind", "type": "PRODUCT", "description": "RAG system", "relations": []}],
         organization_id=1,
     )
 

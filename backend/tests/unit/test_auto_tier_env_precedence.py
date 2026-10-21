@@ -7,6 +7,7 @@ settings 应用硬件档位），所以诚实的测法是子进程：给它一�
 修复前（只查 `os.environ`，.env 的值不在其中）：
 `EMBEDDING_MODEL` 被覆盖成硬件档默认（cpu 档 = bge-m3）→ 本用例红。
 """
+
 import json
 import os
 import pathlib
@@ -54,6 +55,4 @@ def test_dotenv_values_survive_auto_tier(tmp_path):
     assert got["m"] == "qwen3-embedding:0.6b", (
         f".env 的 EMBEDDING_MODEL 被自动档位覆盖了（issue #232）：实际 {got['m']!r}"
     )
-    assert got["d"] == 1024, (
-        f".env 的 VECTOR_DIMENSION 被动了（issue #232）：实际 {got['d']!r}"
-    )
+    assert got["d"] == 1024, f".env 的 VECTOR_DIMENSION 被动了（issue #232）：实际 {got['d']!r}"

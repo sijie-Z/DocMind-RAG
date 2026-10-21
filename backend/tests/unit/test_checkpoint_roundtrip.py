@@ -24,9 +24,19 @@ from app.agent.planner import Plan, PlanStep
 
 # to_dict() 的既有键集（replay / SSE 的消费面）：refactor 时不许增删。
 _TO_DICT_KEYS = {
-    "task_id", "query", "goal", "plan_summary", "steps_completed", "steps",
-    "findings", "decisions", "failures", "duration_ms", "total_tokens",
-    "progress", "start_time",
+    "task_id",
+    "query",
+    "goal",
+    "plan_summary",
+    "steps_completed",
+    "steps",
+    "findings",
+    "decisions",
+    "failures",
+    "duration_ms",
+    "total_tokens",
+    "progress",
+    "start_time",
 }
 
 
@@ -44,8 +54,15 @@ def _rich_ctx() -> ExecutionContext:
     ctx.artifacts["review"] = {"recommendation": "revise", "issue_count": 1}
     ctx.add_finding("s1", "找到了 X", tool="search_knowledge_base", confidence="high")
     ctx.record_decision("execute", "begin_step", "开始执行 s1")
-    ctx.complete_step("s1", "第一步", "search_knowledge_base", "completed",
-                      result="结果正文", duration=42.0, tokens=321)
+    ctx.complete_step(
+        "s1",
+        "第一步",
+        "search_knowledge_base",
+        "completed",
+        result="结果正文",
+        duration=42.0,
+        tokens=321,
+    )
     ctx.complete_step("s2", "第二步", None, "failed", error="boom")
     return ctx
 
@@ -94,13 +111,22 @@ def test_to_dict_contract_keyset_is_frozen():
 def test_plan_checkpoint_roundtrip_preserves_results_and_retry():
     """变异点：to_checkpoint_dict 退回 _save_plan 的 payload（不含 result/
     error_context/retry_count）→ result 断言红（resume 不知哪些步已完成）。"""
-    plan = Plan(id="p9", goal="g", reasoning="r",
-                completed_steps=1, failed_steps=1, created_at=111.5)
+    plan = Plan(
+        id="p9", goal="g", reasoning="r", completed_steps=1, failed_steps=1, created_at=111.5
+    )
     plan.steps = [
-        PlanStep(id="s1", description="一", status="completed", result="R1",
-                 retry_count=1, parallel_group=1, fallback_tool="fb"),
-        PlanStep(id="s2", description="二", status="failed", error_context="err",
-                 dependencies=["s1"]),
+        PlanStep(
+            id="s1",
+            description="一",
+            status="completed",
+            result="R1",
+            retry_count=1,
+            parallel_group=1,
+            fallback_tool="fb",
+        ),
+        PlanStep(
+            id="s2", description="二", status="failed", error_context="err", dependencies=["s1"]
+        ),
         PlanStep(id="s3", description="三", dependencies=["s2"], tool_hint="t"),
     ]
     restored = Plan.from_checkpoint_dict(plan.to_checkpoint_dict())
@@ -123,10 +149,14 @@ def test_envelope_carries_session_and_caps_partial_and_history():
     history = [{"role": "user", "content": f"m{i}"} for i in range(HISTORY_CAP + 10)]
 
     env = build_envelope(
-        ctx=ctx, plan=plan, trigger="after_planning",
+        ctx=ctx,
+        plan=plan,
+        trigger="after_planning",
         partial_output="汉" * (PARTIAL_OUTPUT_CAP + 5),
-        history=history, config=AgentConfig(),
-        run_state={"replan_attempts": 1}, session_id="sess-1",
+        history=history,
+        config=AgentConfig(),
+        run_state={"replan_attempts": 1},
+        session_id="sess-1",
     )
 
     assert env["v"] == CHECKPOINT_VERSION
@@ -168,10 +198,12 @@ def test_value_level_drift_is_normalized_on_read_and_write():
     坏值原样进快照 dict）。
     """
     # 读侧：快照里值类型漂移 → 降级；无关键原样保留
-    restored = ExecutionContext.from_checkpoint_dict({
-        "query": "q",
-        "artifacts": {"iterations_used": "很多", "quality_gate": {"passed": True}},
-    })
+    restored = ExecutionContext.from_checkpoint_dict(
+        {
+            "query": "q",
+            "artifacts": {"iterations_used": "很多", "quality_gate": {"passed": True}},
+        }
+    )
     assert "iterations_used" not in restored.artifacts, (
         "坏值不得进运行态（降级为默认：消费方 .get(k, 0)）"
     )
@@ -191,9 +223,12 @@ def test_value_level_drift_is_normalized_on_read_and_write():
     ctx_ok = ExecutionContext(query="q")
     ctx_ok.artifacts["iterations_used"] = 3
     assert ctx_ok.to_checkpoint_dict()["artifacts"]["iterations_used"] == 3
-    assert ExecutionContext.from_checkpoint_dict(
-        {"query": "q", "artifacts": {"iterations_used": 3}}
-    ).artifacts["iterations_used"] == 3
+    assert (
+        ExecutionContext.from_checkpoint_dict(
+            {"query": "q", "artifacts": {"iterations_used": 3}}
+        ).artifacts["iterations_used"]
+        == 3
+    )
 
 
 def test_artifact_consumer_key_shape_gate_read_and_write(caplog):
@@ -215,14 +250,16 @@ def test_artifact_consumer_key_shape_gate_read_and_write(caplog):
     """
     with caplog.at_level(logging.WARNING):
         # 读侧：映射键非映射 → 整键删；子键坏 → 删子键；bool → 删键
-        restored = ExecutionContext.from_checkpoint_dict({
-            "query": "q",
-            "artifacts": {
-                "review": "boom",
-                "quality_gate": {"passed": True, "fatal_issues": 123},
-                "iterations_used": True,
-            },
-        })
+        restored = ExecutionContext.from_checkpoint_dict(
+            {
+                "query": "q",
+                "artifacts": {
+                    "review": "boom",
+                    "quality_gate": {"passed": True, "fatal_issues": 123},
+                    "iterations_used": True,
+                },
+            }
+        )
     assert "review" not in restored.artifacts, "非映射 review = F-CRIT-1 毒丸形态（整键删）"
     assert restored.artifacts["quality_gate"] == {"passed": True}, (
         "fatal_issues 非列表 → 删子键；零消费点的 passed 原样保留"
@@ -248,9 +285,9 @@ def test_artifact_consumer_key_shape_gate_read_and_write(caplog):
     ctx_ok = ExecutionContext(query="q")
     ctx_ok.artifacts.update(legit)
     assert ctx_ok.to_checkpoint_dict()["artifacts"] == legit
-    assert ExecutionContext.from_checkpoint_dict(
-        {"query": "q", "artifacts": legit}
-    ).artifacts == legit
+    assert (
+        ExecutionContext.from_checkpoint_dict({"query": "q", "artifacts": legit}).artifacts == legit
+    )
     assert any("值级漂移" in r.message for r in caplog.records), "降级必须留痕"
 
 
@@ -267,12 +304,14 @@ def test_review_recommendation_subkey_shape_contract(caplog):
     （坏值原样进运行态/落回快照）。
     """
     with caplog.at_level(logging.WARNING):
-        restored = ExecutionContext.from_checkpoint_dict({
-            "query": "q",
-            "artifacts": {
-                "review": {"recommendation": 123, "issue_count": 1, "high_severity_count": 0},
-            },
-        })
+        restored = ExecutionContext.from_checkpoint_dict(
+            {
+                "query": "q",
+                "artifacts": {
+                    "review": {"recommendation": 123, "issue_count": 1, "high_severity_count": 0},
+                },
+            }
+        )
     assert restored.artifacts["review"] == {"issue_count": 1, "high_severity_count": 0}, (
         "坏 recommendation 删子键；零消费点计数原样保留（不整键删、不陪葬）"
     )
@@ -284,14 +323,18 @@ def test_review_recommendation_subkey_shape_contract(caplog):
 
     # 误伤对照：合法 str 逐字节透传（含域外串——闸门只看类型不看域，
     # 域值由 run_report 的消费逻辑容忍）
-    ok = ExecutionContext.from_checkpoint_dict({
-        "query": "q",
-        "artifacts": {"review": {"recommendation": "revise", "issue_count": 1}},
-    })
+    ok = ExecutionContext.from_checkpoint_dict(
+        {
+            "query": "q",
+            "artifacts": {"review": {"recommendation": "revise", "issue_count": 1}},
+        }
+    )
     assert ok.artifacts["review"]["recommendation"] == "revise"
-    ok_domain = ExecutionContext.from_checkpoint_dict({
-        "query": "q",
-        "artifacts": {"review": {"recommendation": "通过"}},
-    })
+    ok_domain = ExecutionContext.from_checkpoint_dict(
+        {
+            "query": "q",
+            "artifacts": {"review": {"recommendation": "通过"}},
+        }
+    )
     assert ok_domain.artifacts["review"]["recommendation"] == "通过", "域外 str 透传"
     assert any("值级漂移" in r.message for r in caplog.records), "降级必须留痕"

@@ -5,6 +5,7 @@ ONCE 耗尽 / 失败如实落库与通知 / 通知失败不回滚 / run-now 语�
 重叠跳过、不存在的任务）/ run_loop 接线（注入 sleeper，不真 sleep）/
 默认执行器 execute_agent_run 的终态映射（#301 诚实原则）。
 """
+
 import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -88,13 +89,15 @@ async def _ensure_user(factory, user_id: int, active: bool = True) -> None:
     每个调度任务都必须有真实创建者（生产口径；孤儿任务 fail-closed 不触发）。"""
     async with factory() as db:
         if await db.get(User, user_id) is None:
-            db.add(User(
-                id=user_id,
-                username=f"u{user_id}",
-                email=f"u{user_id}@example.com",
-                hashed_password="x",
-                is_active=active,
-            ))
+            db.add(
+                User(
+                    id=user_id,
+                    username=f"u{user_id}",
+                    email=f"u{user_id}@example.com",
+                    hashed_password="x",
+                    is_active=active,
+                )
+            )
             await db.commit()
 
 
@@ -261,9 +264,7 @@ class TestInactiveCreator:
     async def test_manual_run_allowed_for_inactive_creator(self, factory):
         """显式 run-now 是授权动作（调用方已过鉴权 + 归属校验），不按创建者
         状态拦截；自动到点路径才按 is_active 门控（停用用户无法自行登录触发）。"""
-        await _add_task(
-            factory, creator_active=False, next_run_at=NOW + timedelta(hours=1)
-        )
+        await _add_task(factory, creator_active=False, next_run_at=NOW + timedelta(hours=1))
         ex = _RecordingExecutor()
         eng = _engine(factory, _Clock(), ex, _RecordingNotifier())
         r = await eng.run_now("task1")
@@ -603,17 +604,26 @@ class TestDefaultNotifier:
         monkeypatch.setattr(engine_mod, "AsyncSessionLocal", factory)
         captured = {}
 
-        async def fake_create_notification(db, user_id, title, content, type, target_route, target_id):
+        async def fake_create_notification(
+            db, user_id, title, content, type, target_route, target_id
+        ):
             captured.update(
-                user_id=user_id, title=title, content=content, type=type,
-                target_route=target_route, target_id=target_id,
+                user_id=user_id,
+                title=title,
+                content=content,
+                type=type,
+                target_route=target_route,
+                target_id=target_id,
             )
 
         monkeypatch.setattr(
             "app.api.v1.endpoints.notifications.create_notification", fake_create_notification
         )
         task = SimpleNamespace(
-            id="task1", name="日报", run_count=3, created_by=7,
+            id="task1",
+            name="日报",
+            run_count=3,
+            created_by=7,
             last_run_at=NOW,
         )
         outcome = RunOutcome("success", agent_task_id="at-9")

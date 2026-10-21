@@ -9,6 +9,7 @@
   ES 索引与 RAG 缓存后再删文档行。
 /files/upload/avatar 不在弃用范围：它是头像上传的唯一入口，前端仍在调用。
 """
+
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -44,14 +45,20 @@ from app.services.knowledge_service import knowledge_service
 
 router = APIRouter()
 
-@router.post("/upload", response_model=FileUploadResponse, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_UPLOAD]))], deprecated=True)
+
+@router.post(
+    "/upload",
+    response_model=FileUploadResponse,
+    dependencies=[Depends(permission_required([PermissionType.DOCUMENT_UPLOAD]))],
+    deprecated=True,
+)
 async def upload_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     description: str | None = Form(None),
     tags: str | None = Form(None),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     try:
         current_user = await db.merge(current_user)
@@ -60,15 +67,18 @@ async def upload_file(
         organization_id = str(await require_organization(current_user, db))
 
         result = await file_service.upload_file(
-            file=file, organization_id=organization_id,
-            user_id=current_user.id, description=description, tags=tag_list
+            file=file,
+            organization_id=organization_id,
+            user_id=current_user.id,
+            description=description,
+            tags=tag_list,
         )
 
         notification = Notification(
             user_id=current_user.id,
             title="文件上传成功",
-            content=f"文件 \"{file.filename}\" 已成功上传。",
-            type="file"
+            content=f'文件 "{file.filename}" 已成功上传。',
+            type="file",
         )
         db.add(notification)
         await db.commit()
@@ -80,13 +90,14 @@ async def upload_file(
     except Exception as e:
         raise AppError(str(e))
 
+
 # 头像上传不在 /files 文档管理弃用范围内：它是当前唯一的头像上传入口，
 # 前端 src/api/user.ts 仍在调用。
 @router.post("/upload/avatar", response_model=dict)
 async def upload_avatar(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     上传用户头像 - 修复了重复定义和Session绑定问题
@@ -106,7 +117,7 @@ async def upload_avatar(
             user_id=current_user.id,
             title="头像更新成功",
             content="您的个人头像已成功更新。",
-            type="account"
+            type="account",
         )
         db.add(notification)
 
@@ -125,6 +136,7 @@ async def upload_avatar(
         await db.rollback()
         raise AppError(f"头像上传失败: {str(e)}")
 
+
 @router.post("/upload-chunk", response_model=FileChunkUploadResponse, deprecated=True)
 async def upload_file_chunk(
     chunk_data: bytes = File(...),
@@ -133,14 +145,19 @@ async def upload_file_chunk(
     file_name: str = Form(...),
     file_hash: str = Form(...),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     try:
         # S3 安全加固：无组织用户直接 403，不再兜底到 "1"
         organization_id = str(await require_organization(current_user, db))
         result = await file_service.upload_chunk(
-            chunk_data=chunk_data, chunk_index=chunk_index, total_chunks=total_chunks,
-            file_name=file_name, file_hash=file_hash, organization_id=organization_id, user_id=current_user.id
+            chunk_data=chunk_data,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            file_name=file_name,
+            file_hash=file_hash,
+            organization_id=organization_id,
+            user_id=current_user.id,
         )
         return FileChunkUploadResponse(**result)
     except (AppError, HTTPException):
@@ -149,6 +166,7 @@ async def upload_file_chunk(
     except Exception as e:
         raise AppError(str(e))
 
+
 @router.get("/list", response_model=FileListResponse, deprecated=True)
 async def get_document_list(
     user_id: str | None = None,
@@ -156,7 +174,7 @@ async def get_document_list(
     skip: int = 0,
     limit: int = 20,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     try:
         # S3 安全加固：无组织用户直接 403，不再兜底到 "1"
@@ -170,12 +188,18 @@ async def get_document_list(
     except Exception as e:
         raise AppError(str(e))
 
-@router.delete("/{document_id}", response_model=FileDeleteResponse, dependencies=[Depends(permission_required([PermissionType.DOCUMENT_DELETE]))], deprecated=True)
+
+@router.delete(
+    "/{document_id}",
+    response_model=FileDeleteResponse,
+    dependencies=[Depends(permission_required([PermissionType.DOCUMENT_DELETE]))],
+    deprecated=True,
+)
 async def delete_document(
     request: Request,
     document_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     删除文档（兼容端点；规范入口为 DELETE /api/v1/knowledge/document/{id}）。
@@ -195,9 +219,7 @@ async def delete_document(
         # —— 与 DELETE /api/v1/knowledge/document/{id} 完全同一条链路。
         # 返回 False 的分支当前不可达（service 只会返回 True 或抛 AppError），
         # 但保留对返回值的消费，避免将来出现 False 时响应谎报成功。
-        success = await knowledge_service.delete_knowledge(
-            document_id, doc.organization_id
-        )
+        success = await knowledge_service.delete_knowledge(document_id, doc.organization_id)
 
         if success:
             await audit_service.log_activity(
@@ -206,13 +228,10 @@ async def delete_document(
                 target_type="document",
                 target_id=document_id,
                 detail=f"用户删除了文档 {document_id}",
-                request=request
+                request=request,
             )
-        return FileDeleteResponse(
-            success=success, message="删除成功" if success else "删除失败"
-        )
+        return FileDeleteResponse(success=success, message="删除成功" if success else "删除失败")
     except AppError:
         raise
     except Exception as e:
         raise AppError(str(e))
-

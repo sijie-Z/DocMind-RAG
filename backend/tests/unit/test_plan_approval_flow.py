@@ -132,12 +132,18 @@ class _ScriptedPlanner:
         prev = None
         for i, desc in enumerate(steps, start=1):
             yield AgentEvent(
-                type="plan_step", plan_id="plan-1", plan_step_id=f"s{i}",
-                content=desc, dependencies=[prev] if prev else [],
+                type="plan_step",
+                plan_id="plan-1",
+                plan_step_id=f"s{i}",
+                content=desc,
+                dependencies=[prev] if prev else [],
             )
             prev = f"s{i}"
         yield AgentEvent(
-            type="plan_complete", plan_id="plan-1", plan_goal="目标", content="计划完成",
+            type="plan_complete",
+            plan_id="plan-1",
+            plan_goal="目标",
+            content="计划完成",
         )
 
 
@@ -157,8 +163,12 @@ def _client(captured: list):
 
 def _cfg(**overrides) -> AgentConfig:
     base = dict(
-        enable_memory=False, enable_reflection=False, enable_skills=False,
-        enable_experience=False, enable_thinking=False, enable_planning=True,
+        enable_memory=False,
+        enable_reflection=False,
+        enable_skills=False,
+        enable_experience=False,
+        enable_thinking=False,
+        enable_planning=True,
         plan_approval_mode="always",
     )
     base.update(overrides)
@@ -289,7 +299,10 @@ async def test_approve_pops_pending_and_resumes_execution(db_factory, fake_redis
     await _seed_waiting_plan_task(db_factory, fake_redis, tid)
 
     task, envelope, record = await checkpoint.apply_plan_approval_decision(
-        task_id=tid, user_id=1, organization_id=1, decision="approve",
+        task_id=tid,
+        user_id=1,
+        organization_id=1,
+        decision="approve",
     )
     assert task.status == TaskStatus.RUNNING
     assert record["decision"] == "approve"
@@ -309,7 +322,10 @@ async def test_edit_replaces_steps_and_executes_edited(db_factory, fake_redis):
     await _seed_waiting_plan_task(db_factory, fake_redis, tid)
 
     _task, envelope, record = await checkpoint.apply_plan_approval_decision(
-        task_id=tid, user_id=1, organization_id=1, decision="edit",
+        task_id=tid,
+        user_id=1,
+        organization_id=1,
+        decision="edit",
         edited_steps=[
             {"id": "s1", "description": "人类改过的第一步", "dependencies": [], "tool_hint": None},
         ],
@@ -341,7 +357,10 @@ async def test_edit_validation_rejects_invalid_steps(db_factory, fake_redis):
     ):
         with pytest.raises(ValueError):
             await checkpoint.apply_plan_approval_decision(
-                task_id=tid, user_id=1, organization_id=1, decision="edit",
+                task_id=tid,
+                user_id=1,
+                organization_id=1,
+                decision="edit",
                 edited_steps=bad,
             )
     # 任务仍停在等待态（失败不破坏现场）
@@ -356,7 +375,10 @@ async def test_reject_once_replans_with_reason_then_repause(db_factory, fake_red
     await _seed_waiting_plan_task(db_factory, fake_redis, tid)
 
     _task, envelope, record = await checkpoint.apply_plan_approval_decision(
-        task_id=tid, user_id=1, organization_id=1, decision="reject",
+        task_id=tid,
+        user_id=1,
+        organization_id=1,
+        decision="reject",
         note="不要逐个查，请合并为一次检索",
     )
     assert record.get("replan") is True and record["rejections"] == 1
@@ -383,7 +405,11 @@ async def test_reject_once_replans_with_reason_then_repause(db_factory, fake_red
 
     # 第二次拒绝 → 终态 REJECTED + 理由入 last_error；无流可续
     task, _env2, record2 = await checkpoint.apply_plan_approval_decision(
-        task_id=tid, user_id=1, organization_id=1, decision="reject", note="还是不行",
+        task_id=tid,
+        user_id=1,
+        organization_id=1,
+        decision="reject",
+        note="还是不行",
     )
     assert record2.get("terminal") is True
     assert task.status == TaskStatus.REJECTED
@@ -422,19 +448,28 @@ async def test_409_semantics_of_decision_endpoint(db_factory, fake_redis):
     # 非等待计划审批状态 → TASK_NOT_WAITING_PLAN_APPROVAL
     with pytest.raises(checkpoint.TaskNotWaitingPlanApprovalError):
         await checkpoint.apply_plan_approval_decision(
-            task_id=tid, user_id=1, organization_id=1, decision="approve",
+            task_id=tid,
+            user_id=1,
+            organization_id=1,
+            decision="approve",
         )
     # 终态 → TASK_NOT_RESUMABLE
     await checkpoint.mark_terminal(tid, TaskStatus.COMPLETED)
     with pytest.raises(checkpoint.TaskNotResumableError):
         await checkpoint.apply_plan_approval_decision(
-            task_id=tid, user_id=1, organization_id=1, decision="approve",
+            task_id=tid,
+            user_id=1,
+            organization_id=1,
+            decision="approve",
         )
     # 非本人 → 404 语义
     tid2 = await checkpoint.create_task(user_id=9, organization_id=1, query="q")
     with pytest.raises(checkpoint.TaskNotFoundError):
         await checkpoint.apply_plan_approval_decision(
-            task_id=tid2, user_id=1, organization_id=1, decision="approve",
+            task_id=tid2,
+            user_id=1,
+            organization_id=1,
+            decision="approve",
         )
 
 

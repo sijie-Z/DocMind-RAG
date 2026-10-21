@@ -86,6 +86,7 @@ async def _raise_for_disabled_user(auth_service: AuthService) -> HTTPException:
 
 # ── 核心契约：两者不可区分 ──────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_deleted_and_disabled_are_indistinguishable(auth_service: AuthService):
     deleted = await _raise_for_deleted_user(auth_service)
@@ -130,9 +131,7 @@ def _planted_stale_snapshot(mock_redis, *, is_active: bool) -> None:
     """让 `RedisTools.get_cache` 返回一个「陈旧快照」。"""
     mock_redis.exists = AsyncMock(return_value=False)  # 未在黑名单
     mock_redis.get_cache = AsyncMock(
-        return_value=json.dumps(
-            {"id": 1, "username": "u", "role": "user", "is_active": is_active}
-        )
+        return_value=json.dumps({"id": 1, "username": "u", "role": "user", "is_active": is_active})
     )
     mock_redis.delete_cache = AsyncMock()
 
@@ -199,15 +198,14 @@ async def test_auth_does_not_write_user_cache(auth_service: AuthService):
 
 # ── handler 是否把响应头透传给客户端 ────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_http_exception_handler_forwards_www_authenticate_header():
     """回归：handler 原先构造 `JSONResponse` 时没传 `headers=exc.headers`，
     导致 `auth_service` 里显式设置的 `WWW-Authenticate` 全部到不了客户端。"""
     from app.main import http_exception_handler
 
-    exc = HTTPException(
-        status_code=401, detail="认证失败", headers={"WWW-Authenticate": "Bearer"}
-    )
+    exc = HTTPException(status_code=401, detail="认证失败", headers={"WWW-Authenticate": "Bearer"})
     request = SimpleNamespace(state=SimpleNamespace(request_id="test-request-id"))
 
     response = await http_exception_handler(request, exc)
@@ -260,6 +258,7 @@ async def test_app_error_handler_leaves_non_401_alone():
 
 
 # ── refresh 端点：同一个 oracle 的另一处 ────────────────────
+
 
 def _refresh_response(user_obj):
     """以给定的「查到的用户」调用 /auth/refresh，返回响应。"""

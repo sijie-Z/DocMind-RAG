@@ -29,6 +29,7 @@ M6 build_sources_list 把 score 回填 relevanceScore → TestSourcesContract �
 M7 _post_process 不产出 rank_score → TestPostProcessRankScore 红；
 M8 重排降级仍写缓存 → TestPipelineScoreContract 的降级用例红。
 """
+
 import logging
 import sys
 import types
@@ -48,6 +49,7 @@ from app.rag.retriever import HybridRetriever
 from app.services.chat_service import build_sources_list
 
 # ── 替身 ──────────────────────────────────────────────────────────
+
 
 class _KwCrossEncoder:
     """按 passage 是否含关键词打分（模拟 CrossEncoder 的绝对 logit）。"""
@@ -70,9 +72,14 @@ class _KwCrossEncoder:
 def _hit(chunk_id: str, text: str, filename: str, score: float = 0.9) -> dict:
     """pipeline 合并后 / _post_process 形状的命中。"""
     return {
-        "text": text, "content": text, "prompt_text": text,
-        "filename": filename, "chunk_id": chunk_id,
-        "score": score, "snippet": text[:40], "document_id": chunk_id.split("_")[0],
+        "text": text,
+        "content": text,
+        "prompt_text": text,
+        "filename": filename,
+        "chunk_id": chunk_id,
+        "score": score,
+        "snippet": text[:40],
+        "document_id": chunk_id.split("_")[0],
     }
 
 
@@ -121,6 +128,7 @@ def _zhipu_payload(*pairs: tuple[int, float]) -> dict:
 
 
 # ── #190：模型配置单一真源 ────────────────────────────────────────
+
 
 class TestRerankModelSingleSource:
     @pytest.mark.asyncio
@@ -191,9 +199,7 @@ class TestRerankModelSingleSource:
 
                 return _Rsp()
 
-        client = types.SimpleNamespace(
-            chat=types.SimpleNamespace(completions=_Completions())
-        )
+        client = types.SimpleNamespace(chat=types.SimpleNamespace(completions=_Completions()))
         monkeypatch.setattr(settings, "RERANK_MODEL", "custom-reranker-model")
         monkeypatch.setattr(settings, "ENABLE_LOCAL_LLM", False)
         monkeypatch.setattr(settings, "DEEPSEEK_MODEL", "deepseek-chat-test")
@@ -205,6 +211,7 @@ class TestRerankModelSingleSource:
 
 
 # ── #190：绝对分回传 ─────────────────────────────────────────────
+
 
 class TestRerankAbsoluteScores:
     @pytest.mark.asyncio
@@ -242,6 +249,7 @@ class TestRerankAbsoluteScores:
 
 # ── #190：送审 passage 带出处 ────────────────────────────────────
 
+
 class TestRerankPassageProvenance:
     @pytest.mark.asyncio
     async def test_local_passages_carry_filename(self, monkeypatch):
@@ -274,6 +282,7 @@ class TestRerankPassageProvenance:
 
 
 # ── #189：路径状态与失败信号 ─────────────────────────────────────
+
 
 def _degrade_all_paths(monkeypatch, caplog):
     """禁用本地模型、无 API key、无 LLM 客户端 —— 全链不可用。"""
@@ -376,9 +385,17 @@ class TestRerankStatus:
 
 # ── #185/#189：pipeline 契约 ─────────────────────────────────────
 
+
 def _stub_retrieve(monkeypatch, pipeline: RAGPipeline, hits: list[dict]):
-    async def fake_retrieve(query, organization_id, top_k, document_ids=None,
-                            debug=False, search_mode=None, doc_cap=None):
+    async def fake_retrieve(
+        query,
+        organization_id,
+        top_k,
+        document_ids=None,
+        debug=False,
+        search_mode=None,
+        doc_cap=None,
+    ):
         return [dict(h) for h in hits], [], None, []
 
     monkeypatch.setattr(pipeline.retriever, "retrieve", fake_retrieve)
@@ -388,23 +405,32 @@ class TestPipelineScoreContract:
     @pytest.mark.asyncio
     async def test_pipeline_attaches_relevance_score_and_debug_rerank(self, monkeypatch):
         pipeline = RAGPipeline()
-        _stub_retrieve(monkeypatch, pipeline, [_hit("d1_c1", "正文一", "a.md", 1.0),
-                                               _hit("d2_c2", "正文二", "b.md", 0.8)])
+        _stub_retrieve(
+            monkeypatch,
+            pipeline,
+            [_hit("d1_c1", "正文一", "a.md", 1.0), _hit("d2_c2", "正文二", "b.md", 0.8)],
+        )
 
         async def fake_rerank(query, docs, client=None):
             out = [dict(docs[1]), dict(docs[0])]
             out[0]["rerank_score"] = 6.5
             out[1]["rerank_score"] = -1.25
             return out, {
-                "status": "ok", "path": "local", "reason": None,
+                "status": "ok",
+                "path": "local",
+                "reason": None,
                 "attempts": [{"path": "local", "ok": True, "reason": None}],
-                "scores_attached": True, "model": "BAAI/bge-reranker-base",
+                "scores_attached": True,
+                "model": "BAAI/bge-reranker-base",
             }
 
         monkeypatch.setattr("app.rag.pipeline.rerank", fake_rerank)
 
         results, debug_info = await pipeline.search_knowledge_base(
-            "契约查询-190-ok", 1, top_k=2, debug=True,
+            "契约查询-190-ok",
+            1,
+            top_k=2,
+            debug=True,
         )
 
         assert [r["chunk_id"] for r in results] == ["d2_c2", "d1_c1"]
@@ -417,9 +443,7 @@ class TestPipelineScoreContract:
         assert debug_info["rerank_result"][0]["rerank_score"] == pytest.approx(6.5)
 
     @pytest.mark.asyncio
-    async def test_pipeline_degraded_is_visible_and_never_fabricates_relevance(
-        self, monkeypatch
-    ):
+    async def test_pipeline_degraded_is_visible_and_never_fabricates_relevance(self, monkeypatch):
         pipeline = RAGPipeline()
         _stub_retrieve(monkeypatch, pipeline, [_hit("d1_c1", "正文一", "a.md", 1.0)])
 
@@ -441,20 +465,25 @@ class TestPipelineScoreContract:
 
         async def fake_rerank(query, docs, client=None):
             return list(docs), {
-                "status": "degraded", "path": "noop",
+                "status": "degraded",
+                "path": "noop",
                 "reason": "all_rerank_paths_failed",
                 "attempts": [
                     {"path": "local", "ok": False, "reason": "local_model_unavailable"},
                     {"path": "zhipu", "ok": False, "reason": "no_api_key"},
                     {"path": "llm", "ok": False, "reason": "no_llm_client"},
                 ],
-                "scores_attached": False, "model": None,
+                "scores_attached": False,
+                "model": None,
             }
 
         monkeypatch.setattr("app.rag.pipeline.rerank", fake_rerank)
 
         results, debug_info = await pipeline.search_knowledge_base(
-            "契约查询-190-degraded", 1, top_k=2, debug=True,
+            "契约查询-190-degraded",
+            1,
+            top_k=2,
+            debug=True,
         )
 
         assert results, "降级不得吞掉已召回的结果"
@@ -470,13 +499,24 @@ class TestPipelineScoreContract:
 
 # ── #185：来源契约（不把 rank 分冒充相关度） ─────────────────────
 
+
 class TestSourcesContract:
     def test_rank_score_never_mapped_to_relevance_score(self):
         items = [
-            {"filename": "a.md", "score": 1.0, "rank_score": 1.0,
-             "relevance_score": None, "snippet": "片一"},
-            {"filename": "b.md", "score": 0.8, "rank_score": 0.8,
-             "relevance_score": -2.5, "snippet": "片二"},
+            {
+                "filename": "a.md",
+                "score": 1.0,
+                "rank_score": 1.0,
+                "relevance_score": None,
+                "snippet": "片一",
+            },
+            {
+                "filename": "b.md",
+                "score": 0.8,
+                "rank_score": 0.8,
+                "relevance_score": -2.5,
+                "snippet": "片二",
+            },
         ]
 
         sources = build_sources_list(items)

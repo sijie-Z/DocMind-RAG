@@ -8,6 +8,7 @@ B-2：``chat_service.get_system_prompt`` 此前全库取最新激活 rag 模板�
 
 真 SQLite；工具内部使用 ``AsyncSessionLocal``，测试以 monkeypatch 注入同库会话。
 """
+
 import json
 from datetime import datetime
 from unittest.mock import patch
@@ -28,35 +29,65 @@ async def _setup():
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as s:
-        s.add_all([
-            Organization(id=1, name="OrgA", owner_id=1),
-            Organization(id=2, name="OrgB", owner_id=3),
-            User(id=1, username="u1", email="u1@example.com", hashed_password="x",
-                 role="admin", organization_id=1, is_active=True),
-        ])
+        s.add_all(
+            [
+                Organization(id=1, name="OrgA", owner_id=1),
+                Organization(id=2, name="OrgB", owner_id=3),
+                User(
+                    id=1,
+                    username="u1",
+                    email="u1@example.com",
+                    hashed_password="x",
+                    role="admin",
+                    organization_id=1,
+                    is_active=True,
+                ),
+            ]
+        )
         await s.flush()
-        s.add_all([
-            PromptTemplate(
-                name="org1-secret", content="TOP SECRET org1 prompt",
-                is_system=False, organization_id=1, creator_id=1,
-                category="rag", is_active=True, updated_at=datetime(2025, 5, 1),
-            ),
-            PromptTemplate(
-                name="org2-rag", content="org2 rag prompt",
-                is_system=False, organization_id=2, creator_id=3,
-                category="rag", is_active=True, updated_at=datetime(2025, 4, 1),
-            ),
-            PromptTemplate(
-                name="sys-rag", content="system rag prompt",
-                is_system=True, organization_id=None,
-                category="rag", is_active=True, updated_at=datetime(2025, 3, 1),
-            ),
-            PromptTemplate(
-                name="legacy-orphan", content="orphan content",
-                is_system=False, organization_id=None, creator_id=None,
-                category="rag", is_active=True, updated_at=datetime(2025, 6, 1),
-            ),
-        ])
+        s.add_all(
+            [
+                PromptTemplate(
+                    name="org1-secret",
+                    content="TOP SECRET org1 prompt",
+                    is_system=False,
+                    organization_id=1,
+                    creator_id=1,
+                    category="rag",
+                    is_active=True,
+                    updated_at=datetime(2025, 5, 1),
+                ),
+                PromptTemplate(
+                    name="org2-rag",
+                    content="org2 rag prompt",
+                    is_system=False,
+                    organization_id=2,
+                    creator_id=3,
+                    category="rag",
+                    is_active=True,
+                    updated_at=datetime(2025, 4, 1),
+                ),
+                PromptTemplate(
+                    name="sys-rag",
+                    content="system rag prompt",
+                    is_system=True,
+                    organization_id=None,
+                    category="rag",
+                    is_active=True,
+                    updated_at=datetime(2025, 3, 1),
+                ),
+                PromptTemplate(
+                    name="legacy-orphan",
+                    content="orphan content",
+                    is_system=False,
+                    organization_id=None,
+                    creator_id=None,
+                    category="rag",
+                    is_active=True,
+                    updated_at=datetime(2025, 6, 1),
+                ),
+            ]
+        )
         await s.commit()
     return engine, factory
 

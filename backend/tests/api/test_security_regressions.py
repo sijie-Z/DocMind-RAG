@@ -3,6 +3,7 @@
 Uses FastAPI TestClient with mocked DB/Redis/auth dependencies, following
 the existing tests/integration/test_api_auth.py pattern.
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -86,11 +87,16 @@ class TestLlmConfigAuthorization:
         app_.dependency_overrides[get_db] = _override_get_db(db)
         app_.dependency_overrides[get_current_user] = _override_auth(user)
         try:
-            resp = client.post("/api/v1/llm-config", json={
-                "config_name": "t", "provider": "deepseek",
-                "api_key": "sk-test", "base_url": "https://api.deepseek.com",
-                "model": "deepseek-v4-flash",
-            })
+            resp = client.post(
+                "/api/v1/llm-config",
+                json={
+                    "config_name": "t",
+                    "provider": "deepseek",
+                    "api_key": "sk-test",
+                    "base_url": "https://api.deepseek.com",
+                    "model": "deepseek-v4-flash",
+                },
+            )
             assert resp.status_code == 403
         finally:
             app_.dependency_overrides.clear()
@@ -103,11 +109,16 @@ class TestLlmConfigAuthorization:
         app_.dependency_overrides[get_db] = _override_get_db(db)
         app_.dependency_overrides[get_current_user] = _override_auth(user)
         try:
-            resp = client.post("/api/v1/llm-config", json={
-                "config_name": "t", "provider": "deepseek",
-                "api_key": "sk-test", "base_url": "https://api.deepseek.com",
-                "model": "deepseek-v4-flash",
-            })
+            resp = client.post(
+                "/api/v1/llm-config",
+                json={
+                    "config_name": "t",
+                    "provider": "deepseek",
+                    "api_key": "sk-test",
+                    "base_url": "https://api.deepseek.com",
+                    "model": "deepseek-v4-flash",
+                },
+            )
             assert resp.status_code == 403
         finally:
             app_.dependency_overrides.clear()
@@ -121,11 +132,16 @@ class TestLlmConfigAuthorization:
         # Redis unavailable -> endpoints fail closed with 500/400 (no crash)
         with patch("app.api.v1.endpoints.llm_config.redis_client", None):
             try:
-                resp = client.post("/api/v1/llm-config", json={
-                    "config_name": "t", "provider": "deepseek",
-                    "api_key": "sk-test", "base_url": "https://api.deepseek.com",
-                    "model": "deepseek-v4-flash",
-                })
+                resp = client.post(
+                    "/api/v1/llm-config",
+                    json={
+                        "config_name": "t",
+                        "provider": "deepseek",
+                        "api_key": "sk-test",
+                        "base_url": "https://api.deepseek.com",
+                        "model": "deepseek-v4-flash",
+                    },
+                )
                 # Not 403: authorization passed; Redis missing raises ValidationError (400)
                 assert resp.status_code != 403
             finally:
@@ -176,17 +192,27 @@ class TestRegisterOrgPolicy:
         app_.dependency_overrides[get_db] = _override_get_db(db)
         try:
             with patch("app.api.v1.endpoints.auth.auth_service.create_user", new=AsyncMock()) as m:
-                with patch("app.api.v1.endpoints.auth.auth_service.create_access_token", return_value="a"):
-                    with patch("app.api.v1.endpoints.auth.auth_service.create_refresh_token", return_value="r"):
-                        resp = client.post("/api/v1/auth/register", json={
-                            "username": "newuser",
-                            "email": "new@example.com",
-                            "password": "password123",
-                            "organization_id": 5,
-                        })
+                with patch(
+                    "app.api.v1.endpoints.auth.auth_service.create_access_token", return_value="a"
+                ):
+                    with patch(
+                        "app.api.v1.endpoints.auth.auth_service.create_refresh_token",
+                        return_value="r",
+                    ):
+                        resp = client.post(
+                            "/api/v1/auth/register",
+                            json={
+                                "username": "newuser",
+                                "email": "new@example.com",
+                                "password": "password123",
+                                "organization_id": 5,
+                            },
+                        )
                         assert resp.status_code == 200
                         kwargs = m.call_args.kwargs
-                        assert kwargs.get("organization_id") is None, "client org_id must be ignored"
+                        assert kwargs.get("organization_id") is None, (
+                            "client org_id must be ignored"
+                        )
         finally:
             app_.dependency_overrides.clear()
 

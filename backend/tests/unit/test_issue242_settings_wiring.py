@@ -15,6 +15,7 @@
    `5 * 1024 * 1024` → chunk_size 用例对 settings 改值无感、红；
 3. `schemas/knowledge.py` 的 `default_factory` 还原成 `Field(10, ...)` → top_k 用例红。
 """
+
 import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock

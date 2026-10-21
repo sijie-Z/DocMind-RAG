@@ -113,9 +113,7 @@ async def test_bounded_reject_when_full_and_no_silent_drop(fake_redis):
         assert await steering.push_steer("t1", f"m{i}") == i + 1
 
     assert await steering.push_steer("t1", "overflow") == -1
-    assert fake_redis.lists[_key("t1")] == [f"m{i}" for i in range(5)], (
-        "拒绝不得顶掉任何已入队消息"
-    )
+    assert fake_redis.lists[_key("t1")] == [f"m{i}" for i in range(5)], "拒绝不得顶掉任何已入队消息"
     drained = await steering.drain_steers("t1")
     assert drained == [f"m{i}" for i in range(5)], "drain 保序"
 
@@ -204,7 +202,7 @@ def test_compose_keeps_chronological_order():
 
 
 def test_compose_keeps_newest_whole_messages_on_overflow():
-    old = "旧" * 1200   # 2400 字符，单独就超限
+    old = "旧" * 1200  # 2400 字符，单独就超限
     new = "新指示"
     composed = steering.compose_guidance([old, new])
     assert new in composed, "最近一句必须保住（方向盘语义）"

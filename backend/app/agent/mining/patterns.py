@@ -18,6 +18,7 @@ class ToolSequence:
 
     Example: ["search_knowledge_base", "extract_insights", "cross_document_analysis"]
     """
+
     tools: list[str]
     """Ordered tool names (excluding None/skipped steps)."""
 
@@ -62,6 +63,7 @@ class PatternStats:
     This is the output of Pattern Mining — one PatternStats per unique
     tool sequence observed across all replay files.
     """
+
     pattern_id: str = ""
     """Unique identifier (hash of tool tuple)."""
 
@@ -131,7 +133,7 @@ class PatternStats:
         return (
             f"{tools}\n"
             f"    count={self.count} success_rate={self.success_rate:.0%} "
-            f"avg_coverage={self.avg_coverage:.0%} avg_time={self.avg_duration_ms/1000:.1f}s"
+            f"avg_coverage={self.avg_coverage:.0%} avg_time={self.avg_duration_ms / 1000:.1f}s"
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -150,6 +152,7 @@ class SuggestedSkill:
     When a pattern meets the quality bar, it becomes a SuggestedSkill that
     can be either auto-registered or presented to the user for approval.
     """
+
     name: str = ""
     """Human-readable skill name (e.g. 'document_comparison')."""
 
@@ -177,9 +180,7 @@ class SuggestedSkill:
     status: str = "suggested"
     """suggested → accepted → registered → active"""
 
-    created_at: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds")
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

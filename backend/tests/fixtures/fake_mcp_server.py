@@ -58,7 +58,10 @@ def _tool_def(name: str) -> dict[str, Any]:
     elif name == "slow":
         schema = {"type": "object", "properties": {"seconds": {"type": "number"}}}
     elif name == "set_tools":
-        schema = {"type": "object", "properties": {"name": {"type": "string"}, "enabled": {"type": "boolean"}}}
+        schema = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "enabled": {"type": "boolean"}},
+        }
     else:
         schema = {"type": "object", "properties": {}}
     return {"name": name, "description": description, "inputSchema": schema}
@@ -71,24 +74,30 @@ def _handle(msg: dict[str, Any]) -> None:
     if method == "initialize":
         if SILENT:
             return  # 永不响应 → 客户端 connect 超时路径
-        _send({
-            "jsonrpc": "2.0", "id": mid,
-            "result": {
-                "protocolVersion": msg["params"]["protocolVersion"],
-                "capabilities": {"tools": {"listChanged": True}},
-                "serverInfo": {"name": "docmind-fake-mcp", "version": "0.0.1"},
-            },
-        })
+        _send(
+            {
+                "jsonrpc": "2.0",
+                "id": mid,
+                "result": {
+                    "protocolVersion": msg["params"]["protocolVersion"],
+                    "capabilities": {"tools": {"listChanged": True}},
+                    "serverInfo": {"name": "docmind-fake-mcp", "version": "0.0.1"},
+                },
+            }
+        )
         return
 
     if method == "notifications/initialized":
         return
 
     if method == "tools/list":
-        _send({
-            "jsonrpc": "2.0", "id": mid,
-            "result": {"tools": [_tool_def(n) for n, on in _ACTIVE.items() if on]},
-        })
+        _send(
+            {
+                "jsonrpc": "2.0",
+                "id": mid,
+                "result": {"tools": [_tool_def(n) for n, on in _ACTIVE.items() if on]},
+            }
+        )
         return
 
     if method == "tools/call":
@@ -96,14 +105,33 @@ def _handle(msg: dict[str, Any]) -> None:
         name = params.get("name")
         args = params.get("arguments") or {}
         if name == "echo":
-            _send({"jsonrpc": "2.0", "id": mid, "result": {
-                "content": [{"type": "text", "text": "echo:" + str(args.get("text", ""))}]}})
+            _send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": mid,
+                    "result": {
+                        "content": [{"type": "text", "text": "echo:" + str(args.get("text", ""))}]
+                    },
+                }
+            )
         elif name == "echo2":
-            _send({"jsonrpc": "2.0", "id": mid, "result": {
-                "content": [{"type": "text", "text": "echo2:" + str(args.get("value", ""))}]}})
+            _send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": mid,
+                    "result": {
+                        "content": [{"type": "text", "text": "echo2:" + str(args.get("value", ""))}]
+                    },
+                }
+            )
         elif name == "fail":
-            _send({"jsonrpc": "2.0", "id": mid, "result": {
-                "content": [{"type": "text", "text": "boom"}], "isError": True}})
+            _send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": mid,
+                    "result": {"content": [{"type": "text", "text": "boom"}], "isError": True},
+                }
+            )
         elif name == "slow":
             # 后台线程执行，不阻塞读取循环（真实 MCP server 均为并发语义；
             # 否则一次 slow 调用会把后续所有请求卡在队里，超时语义失真）。
@@ -111,13 +139,23 @@ def _handle(msg: dict[str, Any]) -> None:
 
             def _later() -> None:
                 time.sleep(delay)
-                _send({"jsonrpc": "2.0", "id": mid, "result": {
-                    "content": [{"type": "text", "text": "slept"}]}})
+                _send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": mid,
+                        "result": {"content": [{"type": "text", "text": "slept"}]},
+                    }
+                )
 
             threading.Thread(target=_later, daemon=True).start()
         elif name == "die":
-            _send({"jsonrpc": "2.0", "id": mid, "result": {
-                "content": [{"type": "text", "text": "dying"}]}})
+            _send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": mid,
+                    "result": {"content": [{"type": "text", "text": "dying"}]},
+                }
+            )
             sys.stdout.flush()
             os._exit(3)
         elif name == "set_tools":
@@ -125,14 +163,33 @@ def _handle(msg: dict[str, Any]) -> None:
             if target in _ACTIVE:
                 _ACTIVE[target] = bool(args.get("enabled", True))
                 _send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
-                _send({"jsonrpc": "2.0", "id": mid, "result": {
-                    "content": [{"type": "text", "text": f"set_tools:{target}={_ACTIVE[target]}"}]}})
+                _send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": mid,
+                        "result": {
+                            "content": [
+                                {"type": "text", "text": f"set_tools:{target}={_ACTIVE[target]}"}
+                            ]
+                        },
+                    }
+                )
             else:
-                _send({"jsonrpc": "2.0", "id": mid, "error": {
-                    "code": -32602, "message": f"Unknown tool name: {target}"}})
+                _send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": mid,
+                        "error": {"code": -32602, "message": f"Unknown tool name: {target}"},
+                    }
+                )
         else:
-            _send({"jsonrpc": "2.0", "id": mid, "error": {
-                "code": -32602, "message": f"Unknown tool: {name}"}})
+            _send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": mid,
+                    "error": {"code": -32602, "message": f"Unknown tool: {name}"},
+                }
+            )
         return
 
     if method == "ping":
@@ -140,8 +197,13 @@ def _handle(msg: dict[str, Any]) -> None:
         return
 
     if mid is not None:
-        _send({"jsonrpc": "2.0", "id": mid, "error": {
-            "code": -32601, "message": f"Method not found: {method}"}})
+        _send(
+            {
+                "jsonrpc": "2.0",
+                "id": mid,
+                "error": {"code": -32601, "message": f"Method not found: {method}"},
+            }
+        )
 
 
 def main() -> None:

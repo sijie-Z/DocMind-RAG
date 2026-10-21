@@ -25,6 +25,7 @@
 - M3 条件改为真值判定 `if not recommendation_value`（漏掉 truthy 非字符串）
   → 值形态矩阵的 True/空白串参数位精确红。
 """
+
 import asyncio
 import json
 import uuid
@@ -44,29 +45,41 @@ from app.agent.loop import PERAgentLoop
 
 def _client_returning(content: str) -> MagicMock:
     client = MagicMock()
-    client.chat.completions.create = AsyncMock(return_value=SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
-        usage=None,
-        model="mock-model",
-    ))
+    client.chat.completions.create = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+            usage=None,
+            model="mock-model",
+        )
+    )
     return client
 
 
 def _plan_with_failed_step():
     from app.agent.planner import Plan, PlanStep
 
-    return Plan(id="p1", goal="分析营收", steps=[
-        PlanStep(id="s1", description="s1", status="failed"),
-    ])
+    return Plan(
+        id="p1",
+        goal="分析营收",
+        steps=[
+            PlanStep(id="s1", description="s1", status="failed"),
+        ],
+    )
 
 
 async def _review_with_recommendation(value) -> dict:
     from app.agent.reviewer import Reviewer
 
     reviewer = Reviewer(
-        _client_returning(json.dumps({
-            "overall_assessment": "看起来还行", "issues_found": [], "recommendation": value,
-        })),
+        _client_returning(
+            json.dumps(
+                {
+                    "overall_assessment": "看起来还行",
+                    "issues_found": [],
+                    "recommendation": value,
+                }
+            )
+        ),
         AgentConfig(),
     )
     return await reviewer.review(_plan_with_failed_step(), {})
@@ -84,7 +97,16 @@ class TestRecommendationValueShape:
     @pytest.mark.parametrize(
         "value",
         [None, "", "   ", 0, {}, [], True, False],
-        ids=["null", "empty-str", "blank-str", "int-0", "empty-dict", "empty-list", "true", "false"],
+        ids=[
+            "null",
+            "empty-str",
+            "blank-str",
+            "int-0",
+            "empty-dict",
+            "empty-list",
+            "true",
+            "false",
+        ],
     )
     @pytest.mark.asyncio
     async def test_unusable_values_are_no_verdict_error(self, value):
@@ -94,11 +116,14 @@ class TestRecommendationValueShape:
         assert review["recommendation"] == "error", (
             f"recommendation={value!r} 不是可用判定，必须与缺键同列 error（不得落 pass）"
         )
-        assert review["error_kind"] == "no_verdict", "三态归类：无判定 ⇒ no_verdict（非 service_error）"
+        assert review["error_kind"] == "no_verdict", (
+            "三态归类：无判定 ⇒ no_verdict（非 service_error）"
+        )
         assert "未给出可用判定" in str(review.get("error", "")), "错误说明必须如实（诊断用）"
 
     @pytest.mark.parametrize(
-        "value", ["pass", "revise", "reject", "error", "通过", "  PASS  "],
+        "value",
+        ["pass", "revise", "reject", "error", "通过", "  PASS  "],
         ids=["pass", "revise", "reject", "error", "zh-pass", "padded-pass"],
     )
     @pytest.mark.asyncio
@@ -160,10 +185,15 @@ class _RecordingPlanner:
     async def plan(self, query, history=None, memory_context="", ctx=None, replan_feedback=""):
         yield AgentEvent(type="plan_start", plan_id="plan-1", content="制定计划...")
         yield AgentEvent(
-            type="plan_step", plan_id="plan-1", plan_step_id="s1",
-            content="步骤", tool_hint="search_knowledge_base",
+            type="plan_step",
+            plan_id="plan-1",
+            plan_step_id="s1",
+            content="步骤",
+            tool_hint="search_knowledge_base",
         )
-        yield AgentEvent(type="plan_complete", plan_id="plan-1", plan_goal="目标", content="计划完成")
+        yield AgentEvent(
+            type="plan_complete", plan_id="plan-1", plan_goal="目标", content="计划完成"
+        )
 
 
 class _RecordingExecutor:
@@ -179,20 +209,35 @@ class _RecordingExecutor:
     # kwarg（本替身先于 HITL 落地，合入顺序下两态都须成立；缺省 None 不改本分支基线行为）。
     # document_context：同款前向兼容——第四波 @引用修复在 loop→executor 接缝
     # 新增该 kwarg（缺省 None 不改本分支基线行为）。
-    async def execute(self, plan, history=None, organization_id=1, user_id=0,
-                      enable_thinking=True, ctx=None, on_step_done=None,
-                      human_guidance=None, document_context=None):
+    async def execute(
+        self,
+        plan,
+        history=None,
+        organization_id=1,
+        user_id=0,
+        enable_thinking=True,
+        ctx=None,
+        on_step_done=None,
+        human_guidance=None,
+        document_context=None,
+    ):
         for s in plan.steps:
             s.status = "completed"
             plan.completed_steps += 1
-            self.memory.store_step_result(s.id, {
-                "description": s.description, "status": "completed",
-                "result": self.result_text, "tool_hint": s.tool_hint,
-            })
+            self.memory.store_step_result(
+                s.id,
+                {
+                    "description": s.description,
+                    "status": "completed",
+                    "result": self.result_text,
+                    "tool_hint": s.tool_hint,
+                },
+            )
         yield AgentEvent(type="chunk", content=f"答案-{plan.id}")
 
-    async def _execute_step_with_retry(self, step, plan, history, organization_id,
-                                       user_id, enable_thinking, ctx=None):
+    async def _execute_step_with_retry(
+        self, step, plan, history, organization_id, user_id, enable_thinking, ctx=None
+    ):
         self.retry_calls += 1
         yield None
 
@@ -205,7 +250,9 @@ class _ScriptedReflector:
     async def reflect(self, plan, results, ctx=None):
         decision = self.decisions[min(self.calls, len(self.decisions) - 1)]
         self.calls += 1
-        yield AgentEvent(type="reflection", reflection_result=decision, content="评估理由", plan_id=plan.id)
+        yield AgentEvent(
+            type="reflection", reflection_result=decision, content="评估理由", plan_id=plan.id
+        )
 
 
 def _make_loop(reviewer):
@@ -292,7 +339,9 @@ class TestLoopNullRecommendationCausal:
         from app.agent.reviewer import Reviewer
 
         reviewer = Reviewer(
-            _client_returning('{"overall_assessment": "x", "issues_found": [], "recommendation": "pass"}'),
+            _client_returning(
+                '{"overall_assessment": "x", "issues_found": [], "recommendation": "pass"}'
+            ),
             AgentConfig(),
         )
         loop = _make_loop(reviewer)
@@ -302,7 +351,9 @@ class TestLoopNullRecommendationCausal:
         assert not any(d.get("phase") == "review" and d.get("action") == "error" for d in decisions)
         text = _run_report_text(events)
         assert "review_recommendation: pass" in text
-        assert not any(e.type == "thinking" and "对抗审查未完成" in (e.content or "") for e in events)
+        assert not any(
+            e.type == "thinking" and "对抗审查未完成" in (e.content or "") for e in events
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -386,8 +437,13 @@ _SEM_VEC = [0.5, 0.5, 0.5, 0.5]
 
 
 def _doc(chunk_id: str, filename: str) -> dict:
-    return {"chunk_id": chunk_id, "content": f"{chunk_id} 正文", "filename": filename,
-            "score": 0.9, "document_id": chunk_id}
+    return {
+        "chunk_id": chunk_id,
+        "content": f"{chunk_id} 正文",
+        "filename": filename,
+        "score": 0.9,
+        "document_id": chunk_id,
+    }
 
 
 def _no_rerank(monkeypatch):
@@ -397,11 +453,19 @@ def _no_rerank(monkeypatch):
     """
     monkeypatch.setattr(
         "app.rag.pipeline.rerank",
-        AsyncMock(side_effect=lambda query, docs, client=None: (
-            docs,
-            {"status": "disabled", "path": "noop", "reason": "test_stub",
-             "attempts": [], "scores_attached": False, "model": None},
-        )),
+        AsyncMock(
+            side_effect=lambda query, docs, client=None: (
+                docs,
+                {
+                    "status": "disabled",
+                    "path": "noop",
+                    "reason": "test_stub",
+                    "attempts": [],
+                    "scores_attached": False,
+                    "model": None,
+                },
+            )
+        ),
     )
 
 
@@ -433,7 +497,9 @@ class TestSemanticCacheWriteScope:
     async def test_scoped_query_writes_no_org_level_cache(self, monkeypatch):
         """带 document_ids：精确缓存（既有守卫）与语义缓存（本批补守卫）零写入。"""
         _no_rerank(monkeypatch)
-        retrieve = AsyncMock(return_value=([_doc("scoped_only", "scoped.md")], list(_SEM_VEC), None, []))
+        retrieve = AsyncMock(
+            return_value=([_doc("scoped_only", "scoped.md")], list(_SEM_VEC), None, [])
+        )
         p = _make_pipeline(retrieve, recording=True)
 
         results, _ = await p.search_knowledge_base(
@@ -450,7 +516,9 @@ class TestSemanticCacheWriteScope:
     async def test_unscoped_query_still_writes_semantic_cache(self, monkeypatch):
         """对照（防过收紧）：无范围查询照常写语义缓存，读写路径不变。"""
         _no_rerank(monkeypatch)
-        retrieve = AsyncMock(return_value=([_doc("unscoped_hit", "unscoped.md")], list(_SEM_VEC), None, []))
+        retrieve = AsyncMock(
+            return_value=([_doc("unscoped_hit", "unscoped.md")], list(_SEM_VEC), None, [])
+        )
         p = _make_pipeline(retrieve, recording=True)
 
         await p.search_knowledge_base(f"resTail-对照探针-{uuid.uuid4().hex}", 1, top_k=5)
@@ -490,12 +558,16 @@ class TestSemanticCacheScopedCausal:
         # 第二跳：无范围同 query（同向量、相似度 1.0）。修前：命中第一跳的
         # 条目、retrieve=0、返回被裁剪过的限定结果（污染成立）。
         p2 = _make_pipeline(
-            AsyncMock(return_value=([_doc("unscoped_hit", "unscoped.md")], list(_SEM_VEC), None, [])),
+            AsyncMock(
+                return_value=([_doc("unscoped_hit", "unscoped.md")], list(_SEM_VEC), None, [])
+            ),
             recording=False,
         )
         results, _ = await p2.search_knowledge_base(q, 1, top_k=5)
 
-        assert p2.retriever.retrieve.await_count == 1, "无范围查询必须执行自己的检索（不得借位限定查询的写入）"
+        assert p2.retriever.retrieve.await_count == 1, (
+            "无范围查询必须执行自己的检索（不得借位限定查询的写入）"
+        )
         assert [h["chunk_id"] for h in results] == ["unscoped_hit"], (
             f"无范围查询必须拿到自己的结果，实际 {[h['chunk_id'] for h in results]}"
         )
@@ -517,7 +589,9 @@ class TestSemanticCacheScopedCausal:
         q = f"resTail-对照因果-{uuid.uuid4().hex}"
 
         p1 = _make_pipeline(
-            AsyncMock(return_value=([_doc("unscoped_hit", "unscoped.md")], list(_SEM_VEC), None, [])),
+            AsyncMock(
+                return_value=([_doc("unscoped_hit", "unscoped.md")], list(_SEM_VEC), None, [])
+            ),
             recording=False,
         )
         await p1.search_knowledge_base(q, 1, top_k=5)

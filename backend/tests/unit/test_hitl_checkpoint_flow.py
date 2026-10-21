@@ -74,22 +74,34 @@ def fake_redis(monkeypatch):
 def _pending(tool: str = "execute_python", args: dict | None = None, **extra) -> dict:
     args = args if args is not None else {"code": "print(1)"}
     request = approval.ApprovalRequest(
-        tool_name=tool, tool_args=args, tool_call_id="tc-1",
-        risk_level="high", reason="高风险工具执行前需人工审批",
-        step_id="s1", plan_id="p1", **extra,
+        tool_name=tool,
+        tool_args=args,
+        tool_call_id="tc-1",
+        risk_level="high",
+        reason="高风险工具执行前需人工审批",
+        step_id="s1",
+        plan_id="p1",
+        **extra,
     )
     return request.to_dict()
 
 
-async def _seed_waiting_task(db_factory, *, pending: dict | None) -> tuple[str, ExecutionContext, Plan]:
+async def _seed_waiting_task(
+    db_factory, *, pending: dict | None
+) -> tuple[str, ExecutionContext, Plan]:
     """种一个"审批门挂起"的现场：RUNNING 任务 + 快照（含 pending_approval）。"""
     task_id = await checkpoint.create_task(user_id=7, organization_id=1, query="跑个脚本")
     ctx = ExecutionContext(query="跑个脚本", task_id=task_id)
     plan = Plan(id="p1", goal="g", steps=[PlanStep(id="s1", description="一")])
     run_state = {"pending_approval": pending} if pending is not None else {}
     assert await checkpoint.save_checkpoint(
-        task_id=task_id, ctx=ctx, plan=plan, trigger="before_approval",
-        config=AgentConfig(), run_state=run_state, session_id="sess-1",
+        task_id=task_id,
+        ctx=ctx,
+        plan=plan,
+        trigger="before_approval",
+        config=AgentConfig(),
+        run_state=run_state,
+        session_id="sess-1",
     )
     assert await checkpoint.mark_waiting_approval(task_id)
     return task_id, ctx, plan
@@ -111,8 +123,13 @@ class TestTransitions:
         assert can_transition(TaskStatus.WAITING_APPROVAL, TaskStatus.FAILED)
 
     def test_cancelled_edges_and_terminal(self):
-        for src in (TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.WAITING_TOOL,
-                    TaskStatus.WAITING_HUMAN, TaskStatus.FAILED):
+        for src in (
+            TaskStatus.PENDING,
+            TaskStatus.RUNNING,
+            TaskStatus.WAITING_TOOL,
+            TaskStatus.WAITING_HUMAN,
+            TaskStatus.FAILED,
+        ):
             assert can_transition(src, TaskStatus.CANCELLED), src
         assert not can_transition(TaskStatus.CANCELLED, TaskStatus.RUNNING)
         assert not can_transition(TaskStatus.COMPLETED, TaskStatus.CANCELLED)
@@ -170,8 +187,12 @@ class TestApplyApprovalDecision:
         task_id, _, _ = await _seed_waiting_task(db_factory, pending=_pending())
 
         task, envelope, record = await checkpoint.apply_approval_decision(
-            task_id=task_id, user_id=7, organization_id=1,
-            decision="approve", modified_instruction="只允许查 2024 年数据", note="看过了",
+            task_id=task_id,
+            user_id=7,
+            organization_id=1,
+            decision="approve",
+            modified_instruction="只允许查 2024 年数据",
+            note="看过了",
         )
 
         assert task.status == TaskStatus.RUNNING
@@ -192,8 +213,12 @@ class TestApplyApprovalDecision:
     async def test_deny_is_sticky_but_no_steering(self, db_factory, fake_redis):
         task_id, _, _ = await _seed_waiting_task(db_factory, pending=_pending())
         _, envelope, record = await checkpoint.apply_approval_decision(
-            task_id=task_id, user_id=7, organization_id=1,
-            decision="deny", modified_instruction="不该被采纳", note="生产环境禁用",
+            task_id=task_id,
+            user_id=7,
+            organization_id=1,
+            decision="deny",
+            modified_instruction="不该被采纳",
+            note="生产环境禁用",
         )
         assert record["decision"] == "deny"
         assert record["modified_instruction"] is None, "deny 不携带改指令（语义只属 approve）"
@@ -206,7 +231,10 @@ class TestApplyApprovalDecision:
         task_id = await checkpoint.create_task(user_id=7, organization_id=1, query="q")
         with pytest.raises(checkpoint.TaskNotWaitingApprovalError):
             await checkpoint.apply_approval_decision(
-                task_id=task_id, user_id=7, organization_id=1, decision="approve",
+                task_id=task_id,
+                user_id=7,
+                organization_id=1,
+                decision="approve",
             )
         # 失败路径释放租约（可立即重试）
         assert checkpoint._lock_key(task_id) not in fake_redis.store
@@ -216,7 +244,10 @@ class TestApplyApprovalDecision:
         task_id, _, _ = await _seed_waiting_task(db_factory, pending=None)
         with pytest.raises(checkpoint.TaskNotWaitingApprovalError):
             await checkpoint.apply_approval_decision(
-                task_id=task_id, user_id=7, organization_id=1, decision="approve",
+                task_id=task_id,
+                user_id=7,
+                organization_id=1,
+                decision="approve",
             )
 
     @pytest.mark.asyncio
@@ -225,7 +256,10 @@ class TestApplyApprovalDecision:
         assert await checkpoint.mark_terminal(task_id, TaskStatus.CANCELLED) is True
         with pytest.raises(checkpoint.TaskNotResumableError):
             await checkpoint.apply_approval_decision(
-                task_id=task_id, user_id=7, organization_id=1, decision="approve",
+                task_id=task_id,
+                user_id=7,
+                organization_id=1,
+                decision="approve",
             )
 
     @pytest.mark.asyncio
@@ -233,7 +267,10 @@ class TestApplyApprovalDecision:
         task_id, _, _ = await _seed_waiting_task(db_factory, pending=_pending())
         with pytest.raises(checkpoint.TaskNotFoundError):
             await checkpoint.apply_approval_decision(
-                task_id=task_id, user_id=999, organization_id=1, decision="approve",
+                task_id=task_id,
+                user_id=999,
+                organization_id=1,
+                decision="approve",
             )
 
     @pytest.mark.asyncio
@@ -245,7 +282,10 @@ class TestApplyApprovalDecision:
 
         with pytest.raises(checkpoint.TaskNotWaitingApprovalError) as ei:
             await checkpoint.apply_approval_decision(
-                task_id=task_id, user_id=7, organization_id=1, decision="approve",
+                task_id=task_id,
+                user_id=7,
+                organization_id=1,
+                decision="approve",
             )
         assert ei.value.detail.get("error_type") == "approval_timeout"
         task = await _get_task(db_factory, task_id)
@@ -262,7 +302,10 @@ class TestApplyApprovalDecision:
         assert await checkpoint.claim_task(task_id) is True  # 模拟并发中的另一个应答
         with pytest.raises(checkpoint.TaskBusyError):
             await checkpoint.apply_approval_decision(
-                task_id=task_id, user_id=7, organization_id=1, decision="approve",
+                task_id=task_id,
+                user_id=7,
+                organization_id=1,
+                decision="approve",
             )
 
 

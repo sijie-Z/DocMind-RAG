@@ -43,6 +43,7 @@ def _hermetic(monkeypatch):
     打真 Ollama：本机可达时实测 404、CI 不可达时连接失败——环境应答不同）。桩成
     "无网络、空向量" = 两环境既有的降级结果，用例对环境封闭、结果稳定。
     """
+
     async def _save(self, ttl=86400 * 7):
         return False
 
@@ -102,8 +103,11 @@ def _fake_openai_client():
 
 def _agent_config(**overrides) -> AgentConfig:
     base = dict(
-        enable_reflection=False, enable_memory=False, enable_skills=False,
-        enable_experience=False, enable_thinking=False,
+        enable_reflection=False,
+        enable_memory=False,
+        enable_skills=False,
+        enable_experience=False,
+        enable_thinking=False,
     )
     base.update(overrides)
     return AgentConfig(**base)
@@ -114,10 +118,7 @@ async def _consume_until_n_completed(agen, n: int = 1, max_events: int = 200):
     events = []
     async for ev in agen:
         events.append(ev)
-        done = sum(
-            1 for e in events
-            if e.type == "thinking" and e.plan_step_status == "completed"
-        )
+        done = sum(1 for e in events if e.type == "thinking" and e.plan_step_status == "completed")
         if done >= n:
             break
         assert len(events) < max_events, "未等到足够的步骤完成事件"
@@ -175,7 +176,9 @@ async def test_crash_then_resume_continues_from_checkpoint(db_factory):
     _, payload = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
     assert payload is not None, "断流兜底快照必须落盘"
     assert [s["status"] for s in payload["plan"]["steps"]] == [
-        "completed", "completed", "pending",
+        "completed",
+        "completed",
+        "pending",
     ], "断点保真：前两步 completed、第三步 pending"
     assert payload["partial_output"] == "步骤结果1步骤结果2", "已产出答案前缀被冻结"
     assert payload["ctx"]["artifacts"]["iterations_used"] == 2, "迭代预算随快照延续"
@@ -194,7 +197,9 @@ async def test_crash_then_resume_continues_from_checkpoint(db_factory):
     assert task.retry_count == 1, "一次 resume = 一次重试计数"
     _, final_payload = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
     assert [s["status"] for s in final_payload["plan"]["steps"]] == [
-        "completed", "completed", "completed",
+        "completed",
+        "completed",
+        "completed",
     ], "终态快照：计划全步骤完成（on_finish 触发点）"
     assert task.progress == 1.0
 
@@ -406,8 +411,8 @@ async def test_truncated_json_snapshot_resume_degrades_and_heals(db_factory):
         ),
         (
             lambda snap: snap.__setitem__("history", "boom"),
-            lambda healed: healed["history"] is None or all(
-                isinstance(m, dict) for m in healed["history"]
+            lambda healed: (
+                healed["history"] is None or all(isinstance(m, dict) for m in healed["history"])
             ),
         ),
         # ── #319（F-CRIT-1 残族 + chain B）────────────────────────────────
@@ -480,7 +485,9 @@ async def test_value_drift_snapshot_resume_degrades_and_heals(edit, healed_ok, d
 
     # 快照被修复：坏值不再存在（写回的是规整后的形态）
     _, healed = await checkpoint.load_for_resume(task_id=task_id, user_id=USER_ID)
-    assert healed_ok(healed), f"新快照必须已修复坏值（实际 {healed.get('ctx', {}).get('artifacts')} / history={healed.get('history')!r}）"
+    assert healed_ok(healed), (
+        f"新快照必须已修复坏值（实际 {healed.get('ctx', {}).get('artifacts')} / history={healed.get('history')!r}）"
+    )
 
 
 @pytest.mark.asyncio
@@ -707,9 +714,7 @@ async def test_disconnect_finalize_unit_survives_cancel_on_outer_await(db_factor
         }
 
     svc = AgentService(openai_client=MagicMock())
-    t = asyncio.create_task(
-        svc._checkpoint_disconnect(task_id, _Agent(), release_lease=True)
-    )
+    t = asyncio.create_task(svc._checkpoint_disconnect(task_id, _Agent(), release_lease=True))
     await asyncio.sleep(0.05)  # 让任务停到 shield 外层 await（save 挂在 gate 上）
     assert order == [], "收尾单元应被 gate 挡住（前置条件）"
 
@@ -751,7 +756,9 @@ async def test_resume_passes_task_org_truthfully_without_or1(db_factory, monkeyp
 
     for org in (None, 42):
         task_id = await checkpoint.create_task(user_id=USER_ID, organization_id=org, query=QUERY)
-        events = [e async for e in svc.resume_chat(task_id, user_id=USER_ID, config=_agent_config())]
+        events = [
+            e async for e in svc.resume_chat(task_id, user_id=USER_ID, config=_agent_config())
+        ]
         assert events == [], "假 loop 不产事件（本用例只钉构造参数）"
         assert (await _get_task(db_factory, task_id)).status == TaskStatus.COMPLETED
 
@@ -763,6 +770,7 @@ async def test_resume_passes_task_org_truthfully_without_or1(db_factory, monkeyp
 # ══════════════════════════════════════════════════════════════════════════
 # T7 断流收敛盲窗：任务行创建之后、agent.run 之前的 await / yield 同样要收敛
 # ══════════════════════════════════════════════════════════════════════════
+
 
 async def _wait_single_task_status(factory, status, timeout: float = 3.0):
     """等待库中唯一任务行达到目标状态（shield 收尾单元在后台完成）。"""
@@ -794,14 +802,15 @@ async def test_disconnect_during_referenced_doc_await_converges(db_factory, monk
         await gate.wait()
         return None, []
 
-    monkeypatch.setattr(
-        "app.agent.service.build_referenced_document_context", _gated_build
-    )
+    monkeypatch.setattr("app.agent.service.build_referenced_document_context", _gated_build)
 
     client, _ = _fake_openai_client()
     svc = AgentService(openai_client=client)
     agen = svc.chat(
-        QUERY, organization_id=1, user_id=USER_ID, config=_agent_config(),
+        QUERY,
+        organization_id=1,
+        user_id=USER_ID,
+        config=_agent_config(),
         referenced_document_ids=["doc-1"],
     )
     consumer = asyncio.create_task(agen.__anext__())
@@ -823,17 +832,19 @@ async def test_disconnect_at_reference_warning_yield_converges(db_factory, monke
 
     变异点：warning yield 留在 try 之外 → 任务行永停 RUNNING → 本用例红。
     """
+
     async def _warn_build(*args, **kwargs):
         return None, ["引用文档不可用（不存在），已忽略：doc-x"]
 
-    monkeypatch.setattr(
-        "app.agent.service.build_referenced_document_context", _warn_build
-    )
+    monkeypatch.setattr("app.agent.service.build_referenced_document_context", _warn_build)
 
     client, _ = _fake_openai_client()
     svc = AgentService(openai_client=client)
     agen = svc.chat(
-        QUERY, organization_id=1, user_id=USER_ID, config=_agent_config(),
+        QUERY,
+        organization_id=1,
+        user_id=USER_ID,
+        config=_agent_config(),
         referenced_document_ids=["doc-x"],
     )
     event = await agen.__anext__()
@@ -865,4 +876,3 @@ async def test_disconnect_at_pre_run_meta_yield_converges(db_factory):
         f"meta yield 断流必须收敛（实测 {getattr(task, 'status', None)}）"
     )
     assert task.last_error_type == "client_disconnect"
-

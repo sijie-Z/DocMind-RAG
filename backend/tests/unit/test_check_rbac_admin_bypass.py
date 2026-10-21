@@ -20,9 +20,7 @@ SCRIPT_PATH = BACKEND_ROOT / "scripts" / "check_rbac_admin_bypass.py"
 
 
 def _load_checker():
-    spec = importlib.util.spec_from_file_location(
-        "check_rbac_admin_bypass", SCRIPT_PATH
-    )
+    spec = importlib.util.spec_from_file_location("check_rbac_admin_bypass", SCRIPT_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

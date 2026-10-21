@@ -12,8 +12,8 @@
  * - 不渲染重试按钮 / 重试不重新发起请求 → 「重试」用例红；
  * - 失败时仍弹 toast（与内联错误态双表面）→ 「单一表面」用例红。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { createI18n } from 'vue-i18n'
@@ -22,6 +22,10 @@ import SearchView from '../../search.vue'
 import { searchKnowledge } from '@/api/search'
 import { useUserStore } from '@/stores/user'
 import zh from '@/locales/zh'
+
+// 每个用例后自动卸载，防止悬挂的响应式副作用在 jsdom 拆除后触碰 document
+// （CI 上出现过 Unhandled ReferenceError: document is not defined 的时序性假红）。
+enableAutoUnmount(afterEach)
 
 const { messageSpies } = vi.hoisted(() => ({
   messageSpies: { error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn(), loading: vi.fn() },

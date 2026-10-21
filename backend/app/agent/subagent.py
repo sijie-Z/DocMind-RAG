@@ -47,9 +47,7 @@ async def delegate_task(
     """
     # A2 P0（fail-closed）：子代理继承父代理的组织边界；缺失即拒绝派发。
     if organization_id is None:
-        raise ValueError(
-            "delegate_task 缺少 organization_id，拒绝在无组织上下文下派发子任务"
-        )
+        raise ValueError("delegate_task 缺少 organization_id，拒绝在无组织上下文下派发子任务")
     child_config = AgentConfig(
         model=model,
         max_iterations=max_iterations,
@@ -120,9 +118,7 @@ async def run_parallel_subtasks(
     async def _run_one(task: str) -> str:
         try:
             if per_task_timeout:
-                parts = await asyncio.wait_for(
-                    _collect_events(task), timeout=per_task_timeout
-                )
+                parts = await asyncio.wait_for(_collect_events(task), timeout=per_task_timeout)
             else:
                 parts = await _collect_events(task)
         except TimeoutError:

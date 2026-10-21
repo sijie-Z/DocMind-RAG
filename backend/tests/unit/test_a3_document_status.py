@@ -146,13 +146,13 @@ class TestDemoSeedVerificationWiring:
         async def _fake_get_elasticsearch():
             return _EmptyES()
 
-        with patch.object(
-            demo_mod.embedding_service, "get_embeddings", _embeddings_ok
-        ), patch.object(
-            demo_mod.ElasticsearchTools, "index_document", _fake_index
-        ), patch(
-            "app.services.document_status.get_elasticsearch",
-            _fake_get_elasticsearch,
+        with (
+            patch.object(demo_mod.embedding_service, "get_embeddings", _embeddings_ok),
+            patch.object(demo_mod.ElasticsearchTools, "index_document", _fake_index),
+            patch(
+                "app.services.document_status.get_elasticsearch",
+                _fake_get_elasticsearch,
+            ),
         ):
             body = await demo_mod.seed_demo_data(current_user=user, db=db)
 

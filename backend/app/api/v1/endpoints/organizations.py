@@ -44,10 +44,10 @@ def _ensure_org_membership(current_user: User, org_id: int) -> None:
     if current_user.organization_id != org_id:
         raise AuthorizationError("无权访问该组织的数据")
 
+
 @router.get("/tree", response_model=dict, summary="获取组织架构树")
 async def get_organization_tree(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """获取组织架构树，包含层级关系和基础信息
 
@@ -58,11 +58,7 @@ async def get_organization_tree(
     try:
         # ✅ 修复：直接传整个 current_user 对象进去
         tree = await organization_service.get_organization_tree(db, current_user)
-        return {
-            "success": True,
-            "message": "获取成功",
-            "data": tree
-        }
+        return {"success": True, "message": "获取成功", "data": tree}
     except AppError:
         # 领域异常自带正确的状态码（如 AuthenticationError → 401，issue #82）。
         # 不先放行的话，它会被下面的 `except Exception` 重新包装成 500 —— 与
@@ -71,11 +67,17 @@ async def get_organization_tree(
     except Exception as e:
         raise AppError(f"获取组织架构树失败: {str(e)}")
 
-@router.post("/", response_model=dict, summary="创建组织", dependencies=[Depends(permission_required([PermissionType.CREATE_ORGANIZATION]))])
+
+@router.post(
+    "/",
+    response_model=dict,
+    summary="创建组织",
+    dependencies=[Depends(permission_required([PermissionType.CREATE_ORGANIZATION]))],
+)
 async def create_organization(
     org_in: OrganizationCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """创建新的组织或部门"""
     try:
@@ -92,29 +94,32 @@ async def create_organization(
         return {
             "success": True,
             "message": "创建成功",
-            "data": {
-                "id": new_org.id,
-                "name": new_org.name
-            }
+            "data": {"id": new_org.id, "name": new_org.name},
         }
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
         raise
     except Exception as e:
         raise AppError(f"创建组织失败: {str(e)}")
 
-@router.get("/{org_id}/stats", response_model=dict, summary="获取组织统计信息", dependencies=[Depends(permission_required([PermissionType.VIEW_ORGANIZATION], organization_id_param='org_id'))])
+
+@router.get(
+    "/{org_id}/stats",
+    response_model=dict,
+    summary="获取组织统计信息",
+    dependencies=[
+        Depends(
+            permission_required([PermissionType.VIEW_ORGANIZATION], organization_id_param="org_id")
+        )
+    ],
+)
 async def get_organization_stats(
-    org_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    org_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """获取组织的成员数、文档数等统计数据"""
     _ensure_org_membership(current_user, org_id)
     stats = await organization_service.get_org_stats(db, org_id)
-    return {
-        "success": True,
-        "data": stats
-    }
+    return {"success": True, "data": stats}
+
 
 @router.get("/", response_model=dict, summary="获取组织列表")
 async def get_organizations(
@@ -122,7 +127,7 @@ async def get_organizations(
     page_size: int = 10,
     search: str | None = None,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """获取组织列表
 
@@ -138,9 +143,7 @@ async def get_organizations(
         # W0-2：组织列表是跨租户信息面——平台管理员可看全部；其余账号
         # 只看与自己有关系的组织（成员表 ∪ 组织角色关联 ∪ 主组织）。
         # 无组织 fail closed：403，不返回空列表冒充成功。
-        visible_ids = await organization_service.resolve_visible_organization_ids(
-            db, current_user
-        )
+        visible_ids = await organization_service.resolve_visible_organization_ids(db, current_user)
         if visible_ids is not None:
             if not visible_ids:
                 raise AuthorizationError("当前账号无组织上下文，无法查看组织列表")
@@ -154,7 +157,13 @@ async def get_organizations(
         total = total_result.scalar() or 0
 
         # 查询分页数据
-        query = select(Organization).where(*conditions).order_by(Organization.sort_order.asc()).offset(skip).limit(limit)
+        query = (
+            select(Organization)
+            .where(*conditions)
+            .order_by(Organization.sort_order.asc())
+            .offset(skip)
+            .limit(limit)
+        )
         result = await db.execute(query)
         organizations = result.scalars().all()
 
@@ -166,28 +175,25 @@ async def get_organizations(
             parent_id = org.parent_id
             if visible_ids is not None and parent_id not in visible_ids:
                 parent_id = None
-            org_list.append({
-                "id": org.id,
-                "name": org.name,
-                "description": org.description,
-                "color": org.color,
-                "is_private": org.is_private,
-                "parent_id": parent_id,
-                "level": org.level,
-                "sort_order": org.sort_order,
-                "owner_id": org.owner_id,
-                "created_at": org.created_at.isoformat() if org.created_at else None
-            })
+            org_list.append(
+                {
+                    "id": org.id,
+                    "name": org.name,
+                    "description": org.description,
+                    "color": org.color,
+                    "is_private": org.is_private,
+                    "parent_id": parent_id,
+                    "level": org.level,
+                    "sort_order": org.sort_order,
+                    "owner_id": org.owner_id,
+                    "created_at": org.created_at.isoformat() if org.created_at else None,
+                }
+            )
 
         return {
             "success": True,
             "message": "获取成功",
-            "data": {
-                "data": org_list,
-                "total": total,
-                "page": page,
-                "page_size": page_size
-            }
+            "data": {"data": org_list, "total": total, "page": page, "page_size": page_size},
         }
     except AppError:
         # 放行：上面 fail-closed 的 403（以及其它业务异常）不得被降级为 500。
@@ -195,11 +201,19 @@ async def get_organizations(
     except Exception as e:
         raise AppError(f"获取组织列表失败: {str(e)}")
 
-@router.get("/{org_id}", response_model=dict, summary="获取组织信息", dependencies=[Depends(permission_required([PermissionType.VIEW_ORGANIZATION], organization_id_param='org_id'))])
+
+@router.get(
+    "/{org_id}",
+    response_model=dict,
+    summary="获取组织信息",
+    dependencies=[
+        Depends(
+            permission_required([PermissionType.VIEW_ORGANIZATION], organization_id_param="org_id")
+        )
+    ],
+)
 async def get_organization(
-    org_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    org_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """获取组织信息"""
     _ensure_org_membership(current_user, org_id)
@@ -214,12 +228,24 @@ async def get_organization(
     # 不顺带把 ORM 全字段（owner_id / updated_at 等）倒给调用方。
     return {"success": True, "data": organization_service._org_to_dict(org)}
 
-@router.put("/{org_id}", response_model=dict, summary="更新组织信息", dependencies=[Depends(permission_required([PermissionType.UPDATE_ORGANIZATION], organization_id_param='org_id'))])
+
+@router.put(
+    "/{org_id}",
+    response_model=dict,
+    summary="更新组织信息",
+    dependencies=[
+        Depends(
+            permission_required(
+                [PermissionType.UPDATE_ORGANIZATION], organization_id_param="org_id"
+            )
+        )
+    ],
+)
 async def update_organization(
     org_id: int,
     org_in: OrganizationUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """更新组织信息，包括拖拽引起的父级和排序变更"""
     _ensure_org_membership(current_user, org_id)
@@ -234,9 +260,7 @@ async def update_organization(
         if updates["parent_id"] != current_org.parent_id:
             raise AuthorizationError("仅平台管理员可调整组织层级")
     try:
-        updated_org = await organization_service.update_organization(
-            db, org_id, updates
-        )
+        updated_org = await organization_service.update_organization(db, org_id, updates)
         if not updated_org:
             raise NotFoundError("组织不存在")
 
@@ -251,11 +275,15 @@ async def update_organization(
     except Exception as e:
         raise AppError(f"更新失败: {str(e)}")
 
-@router.delete("/batch", response_model=dict, summary="批量删除组织", dependencies=[Depends(permission_required([PermissionType.DELETE_ORGANIZATION]))])
+
+@router.delete(
+    "/batch",
+    response_model=dict,
+    summary="批量删除组织",
+    dependencies=[Depends(permission_required([PermissionType.DELETE_ORGANIZATION]))],
+)
 async def batch_delete_organizations(
-    data: dict,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    data: dict, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """批量删除选中的组织及其子组织"""
     ids = data.get("ids", [])
@@ -278,17 +306,27 @@ async def batch_delete_organizations(
             target_type="organization",
             target_id=",".join(str(i) for i in ids),
             detail=f"批量删除 {len(ids)} 个组织",
-            db=db
+            db=db,
         )
         await db.commit()
         return {"success": True, "message": f"成功删除 {len(ids)} 个组织"}
     raise AppError("批量删除失败")
 
-@router.delete("/{org_id}", response_model=dict, summary="删除组织", dependencies=[Depends(permission_required([PermissionType.DELETE_ORGANIZATION], organization_id_param='org_id'))])
+
+@router.delete(
+    "/{org_id}",
+    response_model=dict,
+    summary="删除组织",
+    dependencies=[
+        Depends(
+            permission_required(
+                [PermissionType.DELETE_ORGANIZATION], organization_id_param="org_id"
+            )
+        )
+    ],
+)
 async def delete_organization(
-    org_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    org_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """彻底删除组织及其所有子组织"""
     _ensure_org_membership(current_user, org_id)
@@ -300,17 +338,25 @@ async def delete_organization(
             target_type="organization",
             target_id=str(org_id),
             detail=f"删除组织 ID={org_id}",
-            db=db
+            db=db,
         )
         await db.commit()
         return {"success": True, "message": "删除成功"}
     raise AppError("删除组织失败")
 
-@router.get("/{org_id}/members", response_model=dict, summary="获取组织成员列表", dependencies=[Depends(permission_required([PermissionType.VIEW_ORGANIZATION], organization_id_param='org_id'))])
+
+@router.get(
+    "/{org_id}/members",
+    response_model=dict,
+    summary="获取组织成员列表",
+    dependencies=[
+        Depends(
+            permission_required([PermissionType.VIEW_ORGANIZATION], organization_id_param="org_id")
+        )
+    ],
+)
 async def get_organization_members(
-    org_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    org_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """获取组织成员列表"""
     _ensure_org_membership(current_user, org_id)
@@ -328,15 +374,17 @@ async def get_organization_members(
 
         member_list = []
         for user in users:
-            member_list.append({
-                "id": user.id,
-                "username": user.username,
-                "nickname": user.full_name or user.username,
-                "email": user.email,
-                "role": user.role,
-                "is_active": user.is_active,
-                "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None
-            })
+            member_list.append(
+                {
+                    "id": user.id,
+                    "username": user.username,
+                    "nickname": user.full_name or user.username,
+                    "email": user.email,
+                    "role": user.role,
+                    "is_active": user.is_active,
+                    "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+                }
+            )
 
         return {"success": True, "data": member_list}
     except AppError:
@@ -345,15 +393,29 @@ async def get_organization_members(
     except Exception as e:
         raise AppError(f"获取成员列表失败: {str(e)}")
 
-@router.post("/{org_id}/members/{user_id}", response_model=dict, summary="添加成员到组织", dependencies=[Depends(permission_required([PermissionType.UPDATE_ORGANIZATION], organization_id_param='org_id'))])
+
+@router.post(
+    "/{org_id}/members/{user_id}",
+    response_model=dict,
+    summary="添加成员到组织",
+    dependencies=[
+        Depends(
+            permission_required(
+                [PermissionType.UPDATE_ORGANIZATION], organization_id_param="org_id"
+            )
+        )
+    ],
+)
 async def add_organization_member(
     org_id: int,
     user_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     _ensure_org_membership(current_user, org_id)
-    org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalar_one_or_none()
+    org = (
+        await db.execute(select(Organization).where(Organization.id == org_id))
+    ).scalar_one_or_none()
     if not org:
         raise NotFoundError("组织不存在")
 
@@ -364,10 +426,7 @@ async def add_organization_member(
     user_obj: Any = user
     # W0-1（blocker）：非平台管理员不得跨组织拉人，也不得操作平台超管。
     # 先判跨组织归属（对所有非本组织目标同一响应），再判超管，避免枚举 oracle。
-    if (
-        not current_user.is_superuser
-        and user_obj.organization_id not in (None, org_id)
-    ):
+    if not current_user.is_superuser and user_obj.organization_id not in (None, org_id):
         raise AuthorizationError("无权将其他组织的用户加入本组织")
     if user_obj.is_superuser and not current_user.is_superuser:
         raise AuthorizationError("无权将其他组织的用户加入本组织")
@@ -406,19 +465,33 @@ async def add_organization_member(
 
     return {"success": True, "message": "成员已加入组织"}
 
-@router.patch("/{org_id}/members/{user_id}/role", response_model=dict, summary="更新组织成员角色", dependencies=[Depends(permission_required([PermissionType.UPDATE_ORGANIZATION], organization_id_param='org_id'))])
+
+@router.patch(
+    "/{org_id}/members/{user_id}/role",
+    response_model=dict,
+    summary="更新组织成员角色",
+    dependencies=[
+        Depends(
+            permission_required(
+                [PermissionType.UPDATE_ORGANIZATION], organization_id_param="org_id"
+            )
+        )
+    ],
+)
 async def update_organization_member_role(
     org_id: int,
     user_id: int,
     role: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     _ensure_org_membership(current_user, org_id)
     if role not in ["user", "admin"]:
         raise ValidationError("无效角色")
 
-    user = (await db.execute(select(User).where(User.id == user_id, User.organization_id == org_id))).scalar_one_or_none()
+    user = (
+        await db.execute(select(User).where(User.id == user_id, User.organization_id == org_id))
+    ).scalar_one_or_none()
     if not user:
         raise NotFoundError("组织成员不存在")
 
@@ -444,15 +517,29 @@ async def update_organization_member_role(
 
     return {"success": True, "message": "角色更新成功"}
 
-@router.delete("/{org_id}/members/{user_id}", response_model=dict, summary="移除组织成员", dependencies=[Depends(permission_required([PermissionType.UPDATE_ORGANIZATION], organization_id_param='org_id'))])
+
+@router.delete(
+    "/{org_id}/members/{user_id}",
+    response_model=dict,
+    summary="移除组织成员",
+    dependencies=[
+        Depends(
+            permission_required(
+                [PermissionType.UPDATE_ORGANIZATION], organization_id_param="org_id"
+            )
+        )
+    ],
+)
 async def remove_organization_member(
     org_id: int,
     user_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     _ensure_org_membership(current_user, org_id)
-    user = (await db.execute(select(User).where(User.id == user_id, User.organization_id == org_id))).scalar_one_or_none()
+    user = (
+        await db.execute(select(User).where(User.id == user_id, User.organization_id == org_id))
+    ).scalar_one_or_none()
     if not user:
         raise NotFoundError("组织成员不存在")
 
@@ -500,31 +587,41 @@ async def remove_organization_member(
 
     return {"success": True, "message": "成员已移除"}
 
-@router.get("/{org_id}/documents", response_model=dict, summary="获取组织关联文档", dependencies=[Depends(permission_required([PermissionType.VIEW_ORGANIZATION], organization_id_param='org_id'))])
+
+@router.get(
+    "/{org_id}/documents",
+    response_model=dict,
+    summary="获取组织关联文档",
+    dependencies=[
+        Depends(
+            permission_required([PermissionType.VIEW_ORGANIZATION], organization_id_param="org_id")
+        )
+    ],
+)
 async def get_organization_documents(
-    org_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    org_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """获取组织关联的知识库文档"""
     _ensure_org_membership(current_user, org_id)
     try:
         from app.models.document import Document
+
         query = select(Document).where(Document.organization_id == org_id)
         result = await db.execute(query)
         documents = result.scalars().all()
 
         doc_list = []
         for doc in documents:
-            doc_list.append({
-                "id": doc.id,
-                "title": doc.title,
-                "file_type": doc.file_type,
-                "status": doc.status,
-                "created_at": doc.created_at.isoformat() if doc.created_at else None
-            })
+            doc_list.append(
+                {
+                    "id": doc.id,
+                    "title": doc.title,
+                    "file_type": doc.file_type,
+                    "status": doc.status,
+                    "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                }
+            )
 
         return {"success": True, "data": doc_list}
     except Exception as e:
         raise AppError(f"获取关联文档失败: {str(e)}")
-

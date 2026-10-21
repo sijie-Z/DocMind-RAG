@@ -50,9 +50,7 @@ async def factory(tmp_path, monkeypatch):
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     # 端点内局部 import 的 RAG 缓存清理是 Redis 操作，测试中打桩
-    monkeypatch.setattr(
-        RetrievalCache, "clear_for_org", AsyncMock(return_value=None)
-    )
+    monkeypatch.setattr(RetrievalCache, "clear_for_org", AsyncMock(return_value=None))
     monkeypatch.setattr(SemanticCache, "clear_for_org", AsyncMock(return_value=None))
     yield session_factory
     await engine.dispose()
@@ -85,9 +83,7 @@ class TestRebuildDispatchFailureKeepsJobRecoverable:
         await _seed_indexed_document(factory)
 
         es_delete = AsyncMock(return_value=None)
-        monkeypatch.setattr(
-            knowledge_mod.knowledge_service, "delete_es_by_document_id", es_delete
-        )
+        monkeypatch.setattr(knowledge_mod.knowledge_service, "delete_es_by_document_id", es_delete)
         monkeypatch.setattr(
             knowledge_mod.kafka_producer,
             "send_message",
@@ -131,11 +127,7 @@ class TestRebuildDispatchFailureKeepsJobRecoverable:
         es_delete.assert_awaited_once_with("doc-a3")
 
         async with factory() as session:
-            jobs = (
-                (await session.execute(select(KnowledgeProcessingJob)))
-                .scalars()
-                .all()
-            )
+            jobs = (await session.execute(select(KnowledgeProcessingJob))).scalars().all()
         assert len(jobs) == 1, "重建只允许落一个 job"
         job = jobs[0]
 
@@ -143,9 +135,7 @@ class TestRebuildDispatchFailureKeepsJobRecoverable:
             "本地调度失败不是任务终局：job 必须保持 QUEUED 留在启动对账扫描范围"
             "（恢复为 FAILED 会让 ES 已删的重建任务永久失联）"
         )
-        assert job.local_fallback is True, (
-            "job 必须保留本机兜底标记（启动对账的扫描条件）"
-        )
+        assert job.local_fallback is True, "job 必须保留本机兜底标记（启动对账的扫描条件）"
         assert job.finished_at is None, "非终局任务不得写 finished_at"
         assert job.error_message and "本地处理任务启动失败" in job.error_message, (
             "调度失败原因必须如实落库"
@@ -154,8 +144,7 @@ class TestRebuildDispatchFailureKeepsJobRecoverable:
         async with factory() as session:
             doc = await session.get(Document, "doc-a3")
         assert doc.status == DocumentStatus.INDEXED, (
-            "修复不改写已 INDEXED 终态（并发成功的 run 可能已重新索引；"
-            "回收重跑会以 PARSING 接管）"
+            "修复不改写已 INDEXED 终态（并发成功的 run 可能已重新索引；回收重跑会以 PARSING 接管）"
         )
 
         # 对账回收：真实查询 + 真实派发，fake_process 记录是否真被调用
@@ -165,22 +154,16 @@ class TestRebuildDispatchFailureKeepsJobRecoverable:
             processed.append((document_id, job_id))
             return True
 
-        recovered = await reconcile_local_jobs(
-            process=fake_process, session_factory=factory
-        )
+        recovered = await reconcile_local_jobs(process=fake_process, session_factory=factory)
         await asyncio.sleep(0)  # 让 create_task 派发的协程真正执行
 
-        assert recovered == 1, (
-            "启动对账必须命中该 job 并重新派发（修前 job=FAILED 掉出扫描范围）"
-        )
+        assert recovered == 1, "启动对账必须命中该 job 并重新派发（修前 job=FAILED 掉出扫描范围）"
         assert processed == [("doc-a3", job.id)], (
             "对账必须把文档与 job 一起重新送进统一处理链（唯一恢复路径）"
         )
 
     @pytest.mark.asyncio
-    async def test_reason_write_failure_does_not_block_reconciliation(
-        self, factory, monkeypatch
-    ):
+    async def test_reason_write_failure_does_not_block_reconciliation(self, factory, monkeypatch):
         """真实 DB 层失败下：原始调度错误与通知都不得被掩盖，任务可回收。
 
         失败注入必须在事务内执行一条**真正失败的 SQL**：若在触碰 DB 之前用
@@ -224,9 +207,7 @@ class TestRebuildDispatchFailureKeepsJobRecoverable:
                 # 只打断 job 失败原因的 UPDATE；在事务内执行一条真实失败 SQL，
                 # 让 rollback 真正发生并过期 session 内的 ORM 实例。
                 if "knowledge_processing_jobs" in str(stmt):
-                    return await original_execute(
-                        text("SELECT * FROM no_such_table")
-                    )
+                    return await original_execute(text("SELECT * FROM no_such_table"))
                 return await original_execute(stmt, *args, **kwargs)
 
             monkeypatch.setattr(session, "execute", flaky_execute)
@@ -250,11 +231,7 @@ class TestRebuildDispatchFailureKeepsJobRecoverable:
         assert "A3 报告" in notify.await_args.kwargs["content"]
 
         async with factory() as session:
-            job = (
-                (await session.execute(select(KnowledgeProcessingJob)))
-                .scalars()
-                .one()
-            )
+            job = (await session.execute(select(KnowledgeProcessingJob))).scalars().one()
         assert job.status == KnowledgeJobStatus.QUEUED
         assert job.local_fallback is True
         assert job.error_message is None, "原因写入失败时不得伪造成功文案"
@@ -265,9 +242,7 @@ class TestRebuildDispatchFailureKeepsJobRecoverable:
             processed.append((document_id, job_id))
             return True
 
-        recovered = await reconcile_local_jobs(
-            process=fake_process, session_factory=factory
-        )
+        recovered = await reconcile_local_jobs(process=fake_process, session_factory=factory)
         await asyncio.sleep(0)
 
         assert recovered == 1, "原因写入失败的任务仍必须被启动对账回收"

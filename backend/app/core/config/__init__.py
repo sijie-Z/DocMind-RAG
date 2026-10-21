@@ -13,6 +13,7 @@ from app.core.config.security import SecuritySettings
 
 class Settings(BaseAppSettings, DatabaseSettings, AISettings, SecuritySettings):
     """Combined application settings — inherits all config sections."""
+
     pass
 
 

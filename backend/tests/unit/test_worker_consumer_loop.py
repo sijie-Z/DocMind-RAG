@@ -125,9 +125,7 @@ async def test_non_dict_message_skipped_and_committed():
     async def fake_process(document_id, job_id):
         processed.append(document_id)
 
-    consumer = PositionFakeConsumer(
-        [{"topic-0": [_msg(["not", "a", "dict"], offset=5)]}]
-    )
+    consumer = PositionFakeConsumer([{"topic-0": [_msg(["not", "a", "dict"], offset=5)]}])
 
     with pytest.raises(_Stop):
         await run_consume_loop(consumer, process=fake_process, touch=lambda: None)
@@ -144,9 +142,7 @@ async def test_missing_document_id_committed_without_processing():
     async def fake_process(document_id, job_id):
         processed.append(document_id)
 
-    consumer = PositionFakeConsumer(
-        [{"topic-0": [_msg({"job_id": 1}, offset=5)]}]
-    )
+    consumer = PositionFakeConsumer([{"topic-0": [_msg({"job_id": 1}, offset=5)]}])
 
     with pytest.raises(_Stop):
         await run_consume_loop(consumer, process=fake_process, touch=lambda: None)
@@ -335,9 +331,7 @@ async def test_multi_message_batch_failure_redelivers_failed_and_tail():
         resumed_calls.append(document_id)
         return True
 
-    restarted = PositionFakeConsumer(
-        [{"topic-0": redelivered}], start_offset=resume_from
-    )
+    restarted = PositionFakeConsumer([{"topic-0": redelivered}], start_offset=resume_from)
     with pytest.raises(_Stop):
         await run_consume_loop(restarted, process=ok_process, touch=lambda: None)
 
@@ -348,9 +342,7 @@ async def test_multi_message_batch_failure_redelivers_failed_and_tail():
 @pytest.mark.asyncio
 async def test_success_returns_commit_explicitly():
     """回归对照：正常 True 返回按条显式提交（不触发任何失败路径）。"""
-    consumer = PositionFakeConsumer(
-        [{"topic-0": [_msg({"document_id": "doc-1"}, offset=5)]}]
-    )
+    consumer = PositionFakeConsumer([{"topic-0": [_msg({"document_id": "doc-1"}, offset=5)]}])
 
     async def fake_process(document_id, job_id):
         return True

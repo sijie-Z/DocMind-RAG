@@ -93,33 +93,38 @@ def _extract_agent_sources(tool_result: str, sources: list[dict]) -> None:
                 # 工具信封里的 score 是相对排序分，落到 rankScore。
                 relevance = item.get("relevanceScore")
                 score = item.get("score")
-                sources.append({
-                    "filename": filename,
-                    "relevanceScore": float(relevance) if relevance is not None else None,
-                    "rankScore": float(score) if score is not None else None,
-                    "rank": len(sources) + 1,
-                    "content": "",
-                    "documentId": str(item.get("documentId") or ""),
-                })
+                sources.append(
+                    {
+                        "filename": filename,
+                        "relevanceScore": float(relevance) if relevance is not None else None,
+                        "rankScore": float(score) if score is not None else None,
+                        "rank": len(sources) + 1,
+                        "content": "",
+                        "documentId": str(item.get("documentId") or ""),
+                    }
+                )
         return
 
     # DEPRECATED（legacy plain-text tool output，保留一个 minor）：旧格式无法
     # 区分来源行与正文行（这正是 T4 的缺陷），仅作滚动升级期的兜底兼容。
     import re
+
     for match in re.finditer(r"^\[(\d+)\]\s+\(([\d.]+)\)\s+(.+?)$", tool_result, re.MULTILINE):
         score = float(match.group(2))
         filename = match.group(3).strip()
         # Deduplicate by filename
         if not any(s.get("filename") == filename for s in sources):
             # 旧格式的分数不可辨尺度：只作为相对排序分，不冒充相关度（#185）。
-            sources.append({
-                "filename": filename,
-                "relevanceScore": None,
-                "rankScore": score,
-                "rank": len(sources) + 1,
-                "content": "",
-                "documentId": "",
-            })
+            sources.append(
+                {
+                    "filename": filename,
+                    "relevanceScore": None,
+                    "rankScore": score,
+                    "rank": len(sources) + 1,
+                    "content": "",
+                    "documentId": "",
+                }
+            )
 
 
 # ============================================================
@@ -127,7 +132,9 @@ def _extract_agent_sources(tool_result: str, sources: list[dict]) -> None:
 # ============================================================
 
 
-@router.post("/messages/{message_id}/feedback", response_model=dict, dependencies=[Depends(get_current_user)])
+@router.post(
+    "/messages/{message_id}/feedback", response_model=dict, dependencies=[Depends(get_current_user)]
+)
 async def update_message_feedback(
     message_id: str,
     body: FeedbackRequest,
@@ -140,10 +147,14 @@ async def update_message_feedback(
     # 跨组织消息视同「不存在」（404），绝不静默写入。
     scope = await resolve_session_access_scope(current_user, db)
     try:
-        stmt = select(ChatMessage).join(ChatSession).where(
-            ChatMessage.id == message_id,
-            ChatSession.user_id == current_user.id,
-            *session_access_org_conditions(scope),
+        stmt = (
+            select(ChatMessage)
+            .join(ChatSession)
+            .where(
+                ChatMessage.id == message_id,
+                ChatSession.user_id == current_user.id,
+                *session_access_org_conditions(scope),
+            )
         )
         message_obj = (await db.execute(stmt)).scalar_one_or_none()
         if not message_obj:
@@ -161,7 +172,11 @@ async def update_message_feedback(
         raise ValidationError(f"操作失败: {str(e)}")
 
 
-@router.delete("/conversations/{conversation_id}/clear", response_model=dict, dependencies=[Depends(get_current_user)])
+@router.delete(
+    "/conversations/{conversation_id}/clear",
+    response_model=dict,
+    dependencies=[Depends(get_current_user)],
+)
 async def clear_conversation_messages(
     conversation_id: str,
     current_user: User = Depends(get_current_user),
@@ -187,7 +202,8 @@ async def clear_conversation_messages(
 
 @router.get("/conversations", response_model=dict, dependencies=[Depends(get_current_user)])
 async def get_conversations(
-    page: int = 1, page_size: int = 20,
+    page: int = 1,
+    page_size: int = 20,
     search: str | None = Query(None, max_length=100, description="按标题模糊过滤"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -203,12 +219,7 @@ async def get_conversations(
         # 未声明该参数、被 FastAPI 静默忽略 → 列表恒全量。对标题做大小写不敏感
         # LIKE；%/_/\ 转义防止通配注入（escape 字符为反斜杠）。max_length=100 校验。
         if search and search.strip():
-            pattern = (
-                search.strip()
-                .replace("\\", "\\\\")
-                .replace("%", "\\%")
-                .replace("_", "\\_")
-            )
+            pattern = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             conditions.append(ChatSession.title.ilike(f"%{pattern}%", escape="\\"))
 
         total_query = select(func.count(ChatSession.id)).where(*conditions)
@@ -264,15 +275,22 @@ async def get_conversations(
                     if len(last_msg.content) > 50
                     else last_msg.content
                 )
-            data.append({
-                "id": s.id, "title": s.title, "uuid": s.id, "isEdit": False,
-                "message_count": msg_count, "last_message": last_msg_content,
-                "created_at": s.created_at.isoformat() if s.created_at else "",
-                "updated_at": s.updated_at.isoformat() if s.updated_at else "",
-            })
+            data.append(
+                {
+                    "id": s.id,
+                    "title": s.title,
+                    "uuid": s.id,
+                    "isEdit": False,
+                    "message_count": msg_count,
+                    "last_message": last_msg_content,
+                    "created_at": s.created_at.isoformat() if s.created_at else "",
+                    "updated_at": s.updated_at.isoformat() if s.updated_at else "",
+                }
+            )
 
         return {
-            "success": True, "message": "获取成功",
+            "success": True,
+            "message": "获取成功",
             "data": {"data": data, "total": total, "page": page, "page_size": page_size},
         }
     except Exception as e:
@@ -309,8 +327,12 @@ async def create_conversation(
             "data": {
                 "id": new_session.id,
                 "title": new_session.title,
-                "created_at": new_session.created_at.isoformat() if new_session.created_at else None,
-                "updated_at": new_session.updated_at.isoformat() if new_session.updated_at else None,
+                "created_at": new_session.created_at.isoformat()
+                if new_session.created_at
+                else None,
+                "updated_at": new_session.updated_at.isoformat()
+                if new_session.updated_at
+                else None,
                 "message_count": 0,
             },
         }
@@ -319,7 +341,11 @@ async def create_conversation(
         raise ValidationError(f"创建失败: {str(e)}")
 
 
-@router.put("/conversations/{conversation_id}", response_model=dict, dependencies=[Depends(get_current_user)])
+@router.put(
+    "/conversations/{conversation_id}",
+    response_model=dict,
+    dependencies=[Depends(get_current_user)],
+)
 async def update_conversation(
     conversation_id: str,
     data: ChatSessionCreate,
@@ -337,7 +363,11 @@ async def update_conversation(
             session.title = data.title[:80]
         await db.commit()
 
-        return {"success": True, "message": "更新成功", "data": {"id": session.id, "title": session.title}}
+        return {
+            "success": True,
+            "message": "更新成功",
+            "data": {"id": session.id, "title": session.title},
+        }
     except NotFoundError:
         raise
     except Exception as e:
@@ -345,7 +375,11 @@ async def update_conversation(
         raise ValidationError(f"更新失败: {str(e)}")
 
 
-@router.delete("/conversations/{conversation_id}", response_model=dict, dependencies=[Depends(get_current_user)])
+@router.delete(
+    "/conversations/{conversation_id}",
+    response_model=dict,
+    dependencies=[Depends(get_current_user)],
+)
 async def delete_conversation(
     conversation_id: str,
     current_user: User = Depends(get_current_user),
@@ -358,9 +392,7 @@ async def delete_conversation(
         if not session:
             raise NotFoundError("会话不存在或无权删除")
         # Delete messages first (FK constraint), then the session
-        await db.execute(
-            delete(ChatMessage).where(ChatMessage.session_id == conversation_id)
-        )
+        await db.execute(delete(ChatMessage).where(ChatMessage.session_id == conversation_id))
         await db.delete(session)
         await db.commit()
         return {"success": True, "message": "会话删除成功"}
@@ -372,7 +404,11 @@ async def delete_conversation(
         raise ValidationError(f"删除失败: {str(e)}")
 
 
-@router.post("/conversations/{conversation_id}/unbind-docs", response_model=dict, dependencies=[Depends(get_current_user)])
+@router.post(
+    "/conversations/{conversation_id}/unbind-docs",
+    response_model=dict,
+    dependencies=[Depends(get_current_user)],
+)
 async def unbind_conversation_docs(
     conversation_id: str,
     current_user: User = Depends(get_current_user),
@@ -381,9 +417,7 @@ async def unbind_conversation_docs(
     # T4：跨组织会话明确拒绝（403），不得改写他人组织的会话设置。
     scope = await resolve_session_access_scope(current_user, db)
     try:
-        session_obj = await load_accessible_session(
-            db, conversation_id, current_user, scope
-        )
+        session_obj = await load_accessible_session(db, conversation_id, current_user, scope)
         if not session_obj:
             raise AuthorizationError("无权访问该会话")
         settings_json = session_obj.settings or {}
@@ -402,7 +436,11 @@ async def unbind_conversation_docs(
         raise ValidationError(f"操作失败: {str(e)}")
 
 
-@router.get("/conversations/{conversation_id}", response_model=dict, dependencies=[Depends(get_current_user)])
+@router.get(
+    "/conversations/{conversation_id}",
+    response_model=dict,
+    dependencies=[Depends(get_current_user)],
+)
 async def get_conversation(
     conversation_id: str,
     current_user: User = Depends(get_current_user),
@@ -441,16 +479,19 @@ async def get_conversation(
             effective_org_id = None
             logger.warning(
                 "历史附件回填跳过：调用者无组织上下文（user=%s, conversation=%s）",
-                current_user.id, log_safe(conversation_id),
+                current_user.id,
+                log_safe(conversation_id),
             )
 
         formatted_messages = []
         for msg in messages:
             msg_dict = {
-                "id": msg.id, "content": msg.content,
+                "id": msg.id,
+                "content": msg.content,
                 "messageType": msg.message_type.value,
                 "createdAt": msg.created_at.isoformat() if msg.created_at else "",
-                "sources": [], "feedback": msg.feedback,
+                "sources": [],
+                "feedback": msg.feedback,
                 "feedbackNote": msg.feedback_note,
             }
             if msg.meta_data:
@@ -475,10 +516,13 @@ async def get_conversation(
                             for fid in meta["file_ids"]:
                                 doc = doc_map.get(str(fid))
                                 if doc:
-                                    files_info.append({
-                                        "id": str(doc.id), "name": doc.filename,
-                                        "status": "done",
-                                    })
+                                    files_info.append(
+                                        {
+                                            "id": str(doc.id),
+                                            "name": doc.filename,
+                                            "status": "done",
+                                        }
+                                    )
                         msg_dict["files"] = files_info
                     elif msg.message_type == MessageType.ASSISTANT:
                         if "sources" in meta:
@@ -493,14 +537,17 @@ async def get_conversation(
                     logger.exception(
                         "解析历史消息元数据失败（message=%s, conversation=%s），"
                         "该条消息的附件/来源降级为空",
-                        log_safe(msg.id), log_safe(conversation_id),
+                        log_safe(msg.id),
+                        log_safe(conversation_id),
                     )
             formatted_messages.append(msg_dict)
 
         return {
-            "success": True, "message": "获取成功",
+            "success": True,
+            "message": "获取成功",
             "data": {
-                "id": session.id, "title": session.title,
+                "id": session.id,
+                "title": session.title,
                 "messages": formatted_messages,
                 # 文档绑定真值存于 ChatSession.settings（chat_service.bind_docs_to_session
                 # 写 bound_document_ids、get_or_create_session 读回；B35）。此前会话响应
@@ -610,9 +657,7 @@ async def websocket_endpoint(
                     # 或禁用时，既不回退组织继续跑 RAG，也不静默降级，直接断开。
                     user_state = await load_active_ws_user(session, user_id)
                     if user_state is None:
-                        logger.warning(
-                            f"WebSocket 用户 {user_id} 已被删除或禁用，关闭连接"
-                        )
+                        logger.warning(f"WebSocket 用户 {user_id} 已被删除或禁用，关闭连接")
                         await close_ws(websocket, WS_CLOSE_AUTH_FAILED, WS_REASON_USER_INVALID)
                         return
 
@@ -650,9 +695,7 @@ async def websocket_endpoint(
                     # Drain events and send via WebSocket
                     while True:
                         try:
-                            event: RAGEvent = await asyncio.wait_for(
-                                queue.get(), timeout=0.1
-                            )
+                            event: RAGEvent = await asyncio.wait_for(queue.get(), timeout=0.1)
                             if event.type in ("chunk",):
                                 payload = {
                                     "type": event.type,
@@ -663,27 +706,38 @@ async def websocket_endpoint(
                                 if event.sources:
                                     payload["sources"] = event.sources
                                 await manager.send_personal_message(
-                                    json.dumps(payload), websocket,
+                                    json.dumps(payload),
+                                    websocket,
                                 )
                             elif event.type == "message":
-                                await manager.send_personal_message(json.dumps({
-                                    "type": "message",
-                                    "content": event.content,
-                                    "conversationId": event.conversation_id,
-                                    "messageId": event.message_id,
-                                    "sources": event.sources,
-                                    "is_cached": event.is_cached,
-                                }), websocket)
+                                await manager.send_personal_message(
+                                    json.dumps(
+                                        {
+                                            "type": "message",
+                                            "content": event.content,
+                                            "conversationId": event.conversation_id,
+                                            "messageId": event.message_id,
+                                            "sources": event.sources,
+                                            "is_cached": event.is_cached,
+                                        }
+                                    ),
+                                    websocket,
+                                )
                             elif event.type == "error":
                                 # issue #268：RAG 链路的显式拒绝（如无组织）经此事件
                                 # 转发。此前无此 case，错误事件会被静默丢弃、客户端
                                 # 只等到一个无回应的空转。
                                 # W0-5：RAG error 内容同样过白名单（与 SSE 同口径）。
-                                await manager.send_personal_message(json.dumps({
-                                    "type": "error",
-                                    "content": public_rag_error_content(event.content),
-                                    "conversationId": event.conversation_id,
-                                }), websocket)
+                                await manager.send_personal_message(
+                                    json.dumps(
+                                        {
+                                            "type": "error",
+                                            "content": public_rag_error_content(event.content),
+                                            "conversationId": event.conversation_id,
+                                        }
+                                    ),
+                                    websocket,
+                                )
                         except TimeoutError:
                             if pipeline_task.done():
                                 # Drain remaining events
@@ -691,22 +745,30 @@ async def websocket_endpoint(
                                     event = queue.get_nowait()
                                     if event.type == "message":
                                         await manager.send_personal_message(
-                                            json.dumps({
-                                                "type": "message",
-                                                "content": event.content,
-                                                "conversationId": event.conversation_id,
-                                                "messageId": event.message_id,
-                                                "sources": event.sources,
-                                                "is_cached": event.is_cached,
-                                            }), websocket,
+                                            json.dumps(
+                                                {
+                                                    "type": "message",
+                                                    "content": event.content,
+                                                    "conversationId": event.conversation_id,
+                                                    "messageId": event.message_id,
+                                                    "sources": event.sources,
+                                                    "is_cached": event.is_cached,
+                                                }
+                                            ),
+                                            websocket,
                                         )
                                     elif event.type == "error":
                                         await manager.send_personal_message(
-                                            json.dumps({
-                                                "type": "error",
-                                                "content": public_rag_error_content(event.content),
-                                                "conversationId": event.conversation_id,
-                                            }), websocket,
+                                            json.dumps(
+                                                {
+                                                    "type": "error",
+                                                    "content": public_rag_error_content(
+                                                        event.content
+                                                    ),
+                                                    "conversationId": event.conversation_id,
+                                                }
+                                            ),
+                                            websocket,
                                         )
                                 break
 
@@ -787,7 +849,9 @@ async def chat_parse_upload(
         )
 
         chunks = result.get("chunks", [])
-        full_text = "\n".join(c["chunk_text"] for c in chunks) if chunks else result.get("content", "")
+        full_text = (
+            "\n".join(c["chunk_text"] for c in chunks) if chunks else result.get("content", "")
+        )
 
         return {
             "success": True,
@@ -796,7 +860,7 @@ async def chat_parse_upload(
                 "content": full_text,
                 "chunk_count": len(chunks),
                 "file_size": result.get("file_size", 0),
-            }
+            },
         }
     except AppError:
         # issue #98：ValidationError（如文件过大 → 400）等控制流异常自带正确状态码，
@@ -867,6 +931,7 @@ async def chat_stream_endpoint(
                 if body.conversationId:
                     try:
                         from app.api.v1.endpoints.agent import _load_session_messages
+
                         # T4：历史加载与落库同一 org 口径（超管保持旁路）。
                         history_scope = SessionAccessScope(
                             bypass_org=bool(getattr(current_user, "is_superuser", False)),
@@ -893,95 +958,132 @@ async def chat_stream_endpoint(
                     last_event_type = agent_event.type
                     if agent_event.type == "chunk":
                         full_response += agent_event.content
-                        yield await sse_event("chunk", {
-                            "content": agent_event.content,
-                            "conversationId": conversation_id,
-                            "messageId": f"agent-{conversation_id}",
-                        })
+                        yield await sse_event(
+                            "chunk",
+                            {
+                                "content": agent_event.content,
+                                "conversationId": conversation_id,
+                                "messageId": f"agent-{conversation_id}",
+                            },
+                        )
                     elif agent_event.type == "thinking":
                         # W0-5：thinking 可能承载重试上下文（上一条错误的原文），
                         # 外发前做内部特征脱敏（traceback/路径/SQL/类名）。
-                        yield await sse_event("thinking", {
-                            "content": public_diagnostic_content(agent_event.content),
-                            "thinkingType": agent_event.thinking_type,
-                            "planId": agent_event.plan_id,
-                            "planStepId": agent_event.plan_step_id,
-                            "planProgress": agent_event.plan_progress if agent_event.plan_progress >= 0 else None,
-                        })
+                        yield await sse_event(
+                            "thinking",
+                            {
+                                "content": public_diagnostic_content(agent_event.content),
+                                "thinkingType": agent_event.thinking_type,
+                                "planId": agent_event.plan_id,
+                                "planStepId": agent_event.plan_step_id,
+                                "planProgress": agent_event.plan_progress
+                                if agent_event.plan_progress >= 0
+                                else None,
+                            },
+                        )
                     elif agent_event.type == "tool_call":
-                        yield await sse_event("tool_call", {
-                            "toolName": agent_event.tool_name,
-                            "toolArgs": agent_event.tool_args,
-                            "toolCallId": agent_event.tool_call_id,
-                            "planId": agent_event.plan_id,
-                            "planStepId": agent_event.plan_step_id,
-                        })
+                        yield await sse_event(
+                            "tool_call",
+                            {
+                                "toolName": agent_event.tool_name,
+                                "toolArgs": agent_event.tool_args,
+                                "toolCallId": agent_event.tool_call_id,
+                                "planId": agent_event.plan_id,
+                                "planStepId": agent_event.plan_step_id,
+                            },
+                        )
                     elif agent_event.type == "tool_result":
-                        yield await sse_event("tool_result", {
-                            "toolName": agent_event.tool_name,
-                            "toolCallId": agent_event.tool_call_id,
-                            "content": agent_event.content[:500],
-                            "toolDurationMs": agent_event.tool_duration_ms,
-                            "planStepId": agent_event.plan_step_id,
-                            "planProgress": agent_event.plan_progress if agent_event.plan_progress >= 0 else None,
-                        })
+                        yield await sse_event(
+                            "tool_result",
+                            {
+                                "toolName": agent_event.tool_name,
+                                "toolCallId": agent_event.tool_call_id,
+                                "content": agent_event.content[:500],
+                                "toolDurationMs": agent_event.tool_duration_ms,
+                                "planStepId": agent_event.plan_step_id,
+                                "planProgress": agent_event.plan_progress
+                                if agent_event.plan_progress >= 0
+                                else None,
+                            },
+                        )
                         if agent_event.tool_name in ("search_knowledge_base", "vector_search"):
                             _extract_agent_sources(agent_event.content, agent_sources)
                     elif agent_event.type == "tool_error":
                         # W0-5：工具失败文本按白名单/映射外发（原始异常与内部
                         # 类名只进日志；工具名属于可对外上下文）。
-                        yield await sse_event("tool_error", {
-                            "toolName": agent_event.tool_name,
-                            "content": public_agent_event_content(
-                                "tool_error",
-                                agent_event.content,
-                                agent_event.tool_name,
-                            )[:300],
-                            "toolCallId": agent_event.tool_call_id,
-                        })
+                        yield await sse_event(
+                            "tool_error",
+                            {
+                                "toolName": agent_event.tool_name,
+                                "content": public_agent_event_content(
+                                    "tool_error",
+                                    agent_event.content,
+                                    agent_event.tool_name,
+                                )[:300],
+                                "toolCallId": agent_event.tool_call_id,
+                            },
+                        )
                     elif agent_event.type == "plan_start":
-                        yield await sse_event("plan_start", {
-                            "planId": agent_event.plan_id,
-                            "content": agent_event.content,
-                        })
+                        yield await sse_event(
+                            "plan_start",
+                            {
+                                "planId": agent_event.plan_id,
+                                "content": agent_event.content,
+                            },
+                        )
                     elif agent_event.type == "plan_step":
-                        yield await sse_event("plan_step", {
-                            "planId": agent_event.plan_id,
-                            "planStepId": agent_event.plan_step_id,
-                            "content": agent_event.content,
-                            "toolHint": agent_event.tool_hint,
-                            "dependencies": agent_event.dependencies,
-                        })
+                        yield await sse_event(
+                            "plan_step",
+                            {
+                                "planId": agent_event.plan_id,
+                                "planStepId": agent_event.plan_step_id,
+                                "content": agent_event.content,
+                                "toolHint": agent_event.tool_hint,
+                                "dependencies": agent_event.dependencies,
+                            },
+                        )
                     elif agent_event.type == "plan_complete":
-                        yield await sse_event("plan_complete", {
-                            "planId": agent_event.plan_id,
-                            "content": agent_event.content,
-                        })
+                        yield await sse_event(
+                            "plan_complete",
+                            {
+                                "planId": agent_event.plan_id,
+                                "content": agent_event.content,
+                            },
+                        )
                     elif agent_event.type == "reflection":
-                        yield await sse_event("reflection", {
-                            "content": agent_event.content,
-                            "result": agent_event.reflection_result,
-                        })
+                        yield await sse_event(
+                            "reflection",
+                            {
+                                "content": agent_event.content,
+                                "result": agent_event.reflection_result,
+                            },
+                        )
                     elif agent_event.type == "done":
                         pass
                     elif agent_event.type == "error":
                         # W0-5：error 事件内容过白名单——无组织拒绝等既有诚实
                         # 文案放行；含原始异常/内部类名的内容降级为通用文案。
-                        yield await sse_event("error", {
-                            "content": public_agent_event_content(
-                                "error", agent_event.content
-                            ),
-                        })
+                        yield await sse_event(
+                            "error",
+                            {
+                                "content": public_agent_event_content("error", agent_event.content),
+                            },
+                        )
                         return
                     elif agent_event.type == "execution_context":
                         # issue #222：PER 循环收尾时真的会发出它，此前无 case 被静默丢弃。
                         # 该事件带结构性字段，投影风格与上面各分支保持一致。
                         # W0-5：诊断载荷里的失败/异常片段脱敏后再外发。
-                        yield await sse_event("execution_context", {
-                            "content": public_diagnostic_content(agent_event.content),
-                            "planId": agent_event.plan_id,
-                            "planProgress": agent_event.plan_progress if agent_event.plan_progress >= 0 else None,
-                        })
+                        yield await sse_event(
+                            "execution_context",
+                            {
+                                "content": public_diagnostic_content(agent_event.content),
+                                "planId": agent_event.plan_id,
+                                "planProgress": agent_event.plan_progress
+                                if agent_event.plan_progress >= 0
+                                else None,
+                            },
+                        )
                     else:
                         # issue #222：这里是白名单式 if/elif，缺 case 的事件（如
                         # run_report——PER 循环真的会发出）会**静默消失**，而 /agent 出口
@@ -1018,32 +1120,35 @@ async def chat_stream_endpoint(
                             user_content,
                             persist_org_id,
                             full_response,
-                            bypass_org=bool(
-                                getattr(current_user, "is_superuser", False)
-                            ),
+                            bypass_org=bool(getattr(current_user, "is_superuser", False)),
                         )
                     except Exception as save_exc:
                         save_error = log_safe(save_exc)
                         logger.error(
-                            "Failed to persist chat agent interaction "
-                            "(session=%s user=%s): %s",
+                            "Failed to persist chat agent interaction (session=%s user=%s): %s",
                             conversation_id,
                             current_user.id,
                             save_error,
                             exc_info=True,
                         )
                 if save_error is not None:
-                    yield await sse_event("warning", {
-                        "content": "回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见",
-                    })
+                    yield await sse_event(
+                        "warning",
+                        {
+                            "content": "回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见",
+                        },
+                    )
 
-                yield await sse_event("message", {
-                    "content": full_response,
-                    "conversationId": conversation_id,
-                    "messageId": f"agent-{conversation_id}",
-                    "sources": agent_sources if agent_sources else None,
-                    "is_cached": False,
-                })
+                yield await sse_event(
+                    "message",
+                    {
+                        "content": full_response,
+                        "conversationId": conversation_id,
+                        "messageId": f"agent-{conversation_id}",
+                        "sources": agent_sources if agent_sources else None,
+                        "is_cached": False,
+                    },
+                )
                 return
 
             # ── RAG mode (original) ────────────────────────────────────────
@@ -1081,14 +1186,15 @@ async def chat_stream_endpoint(
                 # Drain events and convert to SSE
                 while True:
                     try:
-                        event: RAGEvent = await asyncio.wait_for(
-                            queue.get(), timeout=0.1
-                        )
+                        event: RAGEvent = await asyncio.wait_for(queue.get(), timeout=0.1)
                         if event.type == "debug" and event.debug_data:
-                            yield await sse_event("debug", {
-                                "data": event.debug_data,
-                                "conversationId": event.conversation_id,
-                            })
+                            yield await sse_event(
+                                "debug",
+                                {
+                                    "data": event.debug_data,
+                                    "conversationId": event.conversation_id,
+                                },
+                            )
                         elif event.type == "chunk":
                             sse_data: dict = {
                                 "content": event.content,
@@ -1099,37 +1205,49 @@ async def chat_stream_endpoint(
                                 sse_data["sources"] = event.sources
                             yield await sse_event("chunk", sse_data)
                         elif event.type == "message":
-                            yield await sse_event("message", {
-                                "content": event.content,
-                                "conversationId": event.conversation_id,
-                                "messageId": event.message_id,
-                                "sources": event.sources,
-                                "is_cached": event.is_cached,
-                            })
+                            yield await sse_event(
+                                "message",
+                                {
+                                    "content": event.content,
+                                    "conversationId": event.conversation_id,
+                                    "messageId": event.message_id,
+                                    "sources": event.sources,
+                                    "is_cached": event.is_cached,
+                                },
+                            )
                         elif event.type == "error":
                             # issue #268：RAG 链路的显式拒绝（如无组织）经此事件
                             # 转发（与 WS 路径同一语义）。此前无此 case，错误会被
                             # 静默丢弃。W0-5：内容过 RAG 白名单（白名单外通用文案）。
-                            yield await sse_event("error", {
-                                "content": public_rag_error_content(event.content),
-                            })
+                            yield await sse_event(
+                                "error",
+                                {
+                                    "content": public_rag_error_content(event.content),
+                                },
+                            )
                     except TimeoutError:
                         if pipeline_task.done():
                             # Drain remaining events
                             while not queue.empty():
                                 event = queue.get_nowait()
                                 if event.type == "message":
-                                    yield await sse_event("message", {
-                                        "content": event.content,
-                                        "conversationId": event.conversation_id,
-                                        "messageId": event.message_id,
-                                        "sources": event.sources,
-                                        "is_cached": event.is_cached,
-                                    })
+                                    yield await sse_event(
+                                        "message",
+                                        {
+                                            "content": event.content,
+                                            "conversationId": event.conversation_id,
+                                            "messageId": event.message_id,
+                                            "sources": event.sources,
+                                            "is_cached": event.is_cached,
+                                        },
+                                    )
                                 elif event.type == "error":
-                                    yield await sse_event("error", {
-                                        "content": public_rag_error_content(event.content),
-                                    })
+                                    yield await sse_event(
+                                        "error",
+                                        {
+                                            "content": public_rag_error_content(event.content),
+                                        },
+                                    )
                             break
 
                 await pipeline_task
@@ -1147,9 +1265,12 @@ async def chat_stream_endpoint(
                 log_safe(e),
                 exc_info=True,
             )
-            yield await sse_event("error", {
-                "content": public_exception_message(e, request_id),
-            })
+            yield await sse_event(
+                "error",
+                {
+                    "content": public_exception_message(e, request_id),
+                },
+            )
         finally:
             # 客户端断连（GeneratorExit/CancelledError 属 BaseException，finally 兜底）
             if pipeline_task is not None and not pipeline_task.done():

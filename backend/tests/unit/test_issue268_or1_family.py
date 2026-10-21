@@ -37,6 +37,7 @@ DB 侧与既有用例同风格：能真跑就真跑（内存 SQLite 真建表）
 检索、ES、MinIO、embedding）用「触碰即炸 / 记录调用」的假对象 —— 断言的是
 「1 号组织数据/缓存零出现」，而不是假对象的善意。
 """
+
 import asyncio
 import contextlib
 import io
@@ -193,7 +194,9 @@ class TestChatRagNoOrgSemantics:
         _cleanup = _override_http(user=user)
         try:
             with (
-                patch("app.api.v1.endpoints.chat.AsyncSessionLocal", new=lambda: _AsyncCtx(session)),
+                patch(
+                    "app.api.v1.endpoints.chat.AsyncSessionLocal", new=lambda: _AsyncCtx(session)
+                ),
                 patch(
                     "app.services.chat_service._semantic_cache",
                     new=_ExplodingSemanticCache(),
@@ -229,9 +232,7 @@ class TestChatRagNoOrgSemantics:
             "app.core.ws_auth.auth_service.is_token_blacklisted",
             AsyncMock(return_value=False),
         )
-        token = auth_service.create_access_token(
-            {"sub": "or1268", "user_id": 1, "role": "user"}
-        )
+        token = auth_service.create_access_token({"sub": "or1268", "user_id": 1, "role": "user"})
 
         # 握手阶段的假会话：_load_user_state 的 db.execute(...).first() 命中一行（无组织）
         handshake_db = MagicMock()
@@ -255,7 +256,9 @@ class TestChatRagNoOrgSemantics:
                         return_value=SimpleNamespace(id=1, is_active=True, organization_id=None)
                     ),
                 ),
-                patch("app.api.v1.endpoints.chat.AsyncSessionLocal", new=lambda: _AsyncCtx(session)),
+                patch(
+                    "app.api.v1.endpoints.chat.AsyncSessionLocal", new=lambda: _AsyncCtx(session)
+                ),
                 patch(
                     "app.services.chat_service._semantic_cache",
                     new=_ExplodingSemanticCache(),
@@ -268,9 +271,7 @@ class TestChatRagNoOrgSemantics:
                     "app.services.chat_service.rag_service.search_knowledge_base",
                     new=AsyncMock(side_effect=AssertionError("kb-search-touched")),
                 ),
-                client.websocket_connect(
-                    "/api/v1/chat/ws", subprotocols=[f"auth.{token}"]
-                ) as ws,
+                client.websocket_connect("/api/v1/chat/ws", subprotocols=[f"auth.{token}"]) as ws,
             ):
                 ws.send_json({"content": "你好"})
                 payload = ws.receive_json()
@@ -534,9 +535,7 @@ class TestAgentMemoryNamespaces:
             captured.append(f"{org_id}:{user_id}:{agent_id}")
             return fake_system
 
-        with patch.object(
-            memory_mod, "get_memory_system", new=MagicMock(side_effect=_fake_get)
-        ):
+        with patch.object(memory_mod, "get_memory_system", new=MagicMock(side_effect=_fake_get)):
             with pytest.raises(AuthorizationError):
                 await memory_mod._get_user_memory_system(
                     SimpleNamespace(organization_id=None, id=5), "default"
@@ -596,9 +595,7 @@ class TestAgentMemoryNamespaces:
         assert r.status_code == 200, r.text
 
         # 读侧 = agent 运行时的同参数桥（运行 org 42）
-        reader = AgentMemoryBridge(
-            agent_id=f"session:{session_id}", organization_id=42, user_id=77
-        )
+        reader = AgentMemoryBridge(agent_id=f"session:{session_id}", organization_id=42, user_id=77)
         lessons = reader.system.reflective.lessons
         assert any(l.get("lesson") == "回答与文档不符" for l in lessons), (
             "feedback 写入的 lesson 必须能被 agent 侧同一命名空间加载（修前静默失效）"
@@ -623,7 +620,9 @@ def _allow_permissions(perms: set[str] | None = None):
 
     return patch(
         "app.services.permission_service.permission_service.get_user_permissions",
-        new=AsyncMock(return_value=perms if perms is not None else {p.value for p in PermissionType}),
+        new=AsyncMock(
+            return_value=perms if perms is not None else {p.value for p in PermissionType}
+        ),
     )
 
 
@@ -690,40 +689,76 @@ class TestAdminSummaryHole:
         factory = async_sessionmaker(engine, expire_on_commit=False)
 
         async with factory() as s:
-            s.add_all([
-                Organization(id=55, name="Org55", owner_id=0),
-                Organization(id=66, name="Org66", owner_id=0),
-            ])
+            s.add_all(
+                [
+                    Organization(id=55, name="Org55", owner_id=0),
+                    Organization(id=66, name="Org66", owner_id=0),
+                ]
+            )
             users_55 = [
-                User(username=f"u55-{i}", email=f"u55-{i}@e.com", hashed_password="x",
-                     organization_id=55)
+                User(
+                    username=f"u55-{i}",
+                    email=f"u55-{i}@e.com",
+                    hashed_password="x",
+                    organization_id=55,
+                )
                 for i in range(2)
             ]
             users_66 = [
-                User(username=f"u66-{i}", email=f"u66-{i}@e.com", hashed_password="x",
-                     organization_id=66)
+                User(
+                    username=f"u66-{i}",
+                    email=f"u66-{i}@e.com",
+                    hashed_password="x",
+                    organization_id=66,
+                )
                 for i in range(3)
             ]
             s.add_all(users_55 + users_66)
             await s.flush()
-            s.add_all([
-                Document(id=f"d55-{i}", filename=f"d55-{i}.pdf", file_path=f"/tmp/d55-{i}.pdf",
-                         file_size=1, file_type=DocumentType.PDF, organization_id=55,
-                         uploaded_by=users_55[0].id)
-                for i in range(2)
-            ] + [
-                Document(id="d66-0", filename="d66-0.pdf", file_path="/tmp/d66-0.pdf",
-                         file_size=1, file_type=DocumentType.PDF, organization_id=66,
-                         uploaded_by=users_66[0].id)
-            ])
-            s.add_all([
-                ChatSession(id=str(uuid.uuid4()), user_id=users_55[0].id, organization_id=55,
-                            title="s55")
-                for _ in range(4)
-            ] + [
-                ChatSession(id=str(uuid.uuid4()), user_id=users_66[0].id, organization_id=66,
-                            title="s66")
-            ])
+            s.add_all(
+                [
+                    Document(
+                        id=f"d55-{i}",
+                        filename=f"d55-{i}.pdf",
+                        file_path=f"/tmp/d55-{i}.pdf",
+                        file_size=1,
+                        file_type=DocumentType.PDF,
+                        organization_id=55,
+                        uploaded_by=users_55[0].id,
+                    )
+                    for i in range(2)
+                ]
+                + [
+                    Document(
+                        id="d66-0",
+                        filename="d66-0.pdf",
+                        file_path="/tmp/d66-0.pdf",
+                        file_size=1,
+                        file_type=DocumentType.PDF,
+                        organization_id=66,
+                        uploaded_by=users_66[0].id,
+                    )
+                ]
+            )
+            s.add_all(
+                [
+                    ChatSession(
+                        id=str(uuid.uuid4()),
+                        user_id=users_55[0].id,
+                        organization_id=55,
+                        title="s55",
+                    )
+                    for _ in range(4)
+                ]
+                + [
+                    ChatSession(
+                        id=str(uuid.uuid4()),
+                        user_id=users_66[0].id,
+                        organization_id=66,
+                        title="s66",
+                    )
+                ]
+            )
             await s.commit()
 
         user = SimpleNamespace(
@@ -738,6 +773,7 @@ class TestAdminSummaryHole:
                 yield session
 
         from app.main import app
+
         app.dependency_overrides[get_db] = _db_gen
         app.dependency_overrides[get_current_user] = _ref
         try:
@@ -751,9 +787,9 @@ class TestAdminSummaryHole:
         assert r.status_code == 200, r.text
         data = r.json()
         assert data == {
-            "total_users": 2,          # org 66 的 3 个不得计入
-            "total_documents": 2,      # org 66 的 1 篇不得计入
-            "total_sessions": 4,       # org 66 的 1 个不得计入
+            "total_users": 2,  # org 66 的 3 个不得计入
+            "total_documents": 2,  # org 66 的 1 篇不得计入
+            "total_sessions": 4,  # org 66 的 1 个不得计入
             "active_users_24h": 0,
             "total_organizations": 1,  # 组织作用域视图：自己所属的 1 个（≠全局 2）
             # W2-T7 契约扩展：会话周环比真值——本 fixture 的 4 个会话均为
@@ -774,12 +810,14 @@ class TestAdminSummaryHole:
             await conn.run_sync(Base.metadata.create_all)
         factory = async_sessionmaker(engine, expire_on_commit=False)
         async with factory() as s:
-            s.add_all([
-                Organization(id=1, name="First", owner_id=0),
-                Organization(id=3, name="Third", owner_id=0),
-                User(username="a", email="a@e.com", hashed_password="x", organization_id=1),
-                User(username="b", email="b@e.com", hashed_password="x", organization_id=3),
-            ])
+            s.add_all(
+                [
+                    Organization(id=1, name="First", owner_id=0),
+                    Organization(id=3, name="Third", owner_id=0),
+                    User(username="a", email="a@e.com", hashed_password="x", organization_id=1),
+                    User(username="b", email="b@e.com", hashed_password="x", organization_id=3),
+                ]
+            )
             await s.commit()
 
         user = SimpleNamespace(
@@ -794,6 +832,7 @@ class TestAdminSummaryHole:
                 yield session
 
         from app.main import app
+
         app.dependency_overrides[get_db] = _db_gen
         app.dependency_overrides[get_current_user] = _ref
         try:
@@ -853,9 +892,7 @@ class TestAgentChatSessionOrgSymmetry:
         fake_db = MagicMock()
         fake_db.add = MagicMock(side_effect=captured.append)
         fake_db.commit = AsyncMock()
-        monkeypatch.setattr(
-            "app.core.database.AsyncSessionLocal", lambda: _AsyncCtx(fake_db)
-        )
+        monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _AsyncCtx(fake_db))
 
         _cleanup = _override_http(user=user)
         try:
@@ -951,9 +988,7 @@ class TestAgentChatSessionOrgSymmetry:
             _cleanup()
 
         assert r.status_code == 200, r.text
-        reader = AgentMemoryBridge(
-            agent_id=f"session:{session_id}", organization_id=42, user_id=77
-        )
+        reader = AgentMemoryBridge(agent_id=f"session:{session_id}", organization_id=42, user_id=77)
         assert any(
             lesson.get("lesson") == "R2 判别：答案不对"
             for lesson in reader.system.reflective.lessons
@@ -999,12 +1034,9 @@ class TestAgentChatSessionOrgSymmetry:
             _cleanup()
 
         assert r.status_code == 200, r.text
-        reader = AgentMemoryBridge(
-            agent_id=f"session:{session_id}", organization_id=42, user_id=77
-        )
+        reader = AgentMemoryBridge(agent_id=f"session:{session_id}", organization_id=42, user_id=77)
         assert any(
-            lesson.get("lesson") == "遗留会话判别"
-            for lesson in reader.system.reflective.lessons
+            lesson.get("lesson") == "遗留会话判别" for lesson in reader.system.reflective.lessons
         ), "历史会话的 feedback lesson 也必须落在运行侧 resolved org（42）"
         # W0-6：会话落库的 raw org（None）命名空间已不可构造/读取。
         with pytest.raises(ValueError):

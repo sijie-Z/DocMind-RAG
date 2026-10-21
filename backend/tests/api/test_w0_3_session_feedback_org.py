@@ -37,6 +37,7 @@ T4（#438）把按 id 的会话详情/更新/删除/清空/解绑统一到
 - 超管不再旁路 → ``TestSuperuserFeedbackBypass`` 红；
 - WS 被改成 token 组织回退 → ``TestWebSocketOrgSemantics`` 红（锁定严格口径）。
 """
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -86,46 +87,72 @@ async def _seeded_factory():
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with factory() as s:
-        s.add_all([
-            Organization(id=ORG_A, name="W03 Org A", owner_id=0),
-            Organization(id=ORG_B, name="W03 Org B", owner_id=0),
-        ])
-        s.add_all([
-            ChatSession(
-                id=SESSION_A, user_id=1, organization_id=ORG_A,
-                title="A session", status=ChatSessionStatus.ACTIVE,
-            ),
-            ChatSession(
-                id=SESSION_B, user_id=1, organization_id=ORG_B,
-                title="B session", status=ChatSessionStatus.ACTIVE,
-            ),
-            ChatSession(
-                id=SESSION_LEGACY, user_id=1, organization_id=None,
-                title="Legacy session", status=ChatSessionStatus.ACTIVE,
-            ),
-            ChatSession(
-                id=SESSION_FOREIGN, user_id=2, organization_id=ORG_A,
-                title="Other user's session", status=ChatSessionStatus.ACTIVE,
-            ),
-        ])
-        s.add_all([
-            ChatMessage(
-                id=MSG_A, session_id=SESSION_A,
-                content="org-a answer", message_type=MessageType.ASSISTANT,
-            ),
-            ChatMessage(
-                id=MSG_B, session_id=SESSION_B,
-                content="org-b answer", message_type=MessageType.ASSISTANT,
-            ),
-            ChatMessage(
-                id=MSG_LEGACY, session_id=SESSION_LEGACY,
-                content="legacy answer", message_type=MessageType.ASSISTANT,
-            ),
-            ChatMessage(
-                id=MSG_FOREIGN, session_id=SESSION_FOREIGN,
-                content="foreign answer", message_type=MessageType.ASSISTANT,
-            ),
-        ])
+        s.add_all(
+            [
+                Organization(id=ORG_A, name="W03 Org A", owner_id=0),
+                Organization(id=ORG_B, name="W03 Org B", owner_id=0),
+            ]
+        )
+        s.add_all(
+            [
+                ChatSession(
+                    id=SESSION_A,
+                    user_id=1,
+                    organization_id=ORG_A,
+                    title="A session",
+                    status=ChatSessionStatus.ACTIVE,
+                ),
+                ChatSession(
+                    id=SESSION_B,
+                    user_id=1,
+                    organization_id=ORG_B,
+                    title="B session",
+                    status=ChatSessionStatus.ACTIVE,
+                ),
+                ChatSession(
+                    id=SESSION_LEGACY,
+                    user_id=1,
+                    organization_id=None,
+                    title="Legacy session",
+                    status=ChatSessionStatus.ACTIVE,
+                ),
+                ChatSession(
+                    id=SESSION_FOREIGN,
+                    user_id=2,
+                    organization_id=ORG_A,
+                    title="Other user's session",
+                    status=ChatSessionStatus.ACTIVE,
+                ),
+            ]
+        )
+        s.add_all(
+            [
+                ChatMessage(
+                    id=MSG_A,
+                    session_id=SESSION_A,
+                    content="org-a answer",
+                    message_type=MessageType.ASSISTANT,
+                ),
+                ChatMessage(
+                    id=MSG_B,
+                    session_id=SESSION_B,
+                    content="org-b answer",
+                    message_type=MessageType.ASSISTANT,
+                ),
+                ChatMessage(
+                    id=MSG_LEGACY,
+                    session_id=SESSION_LEGACY,
+                    content="legacy answer",
+                    message_type=MessageType.ASSISTANT,
+                ),
+                ChatMessage(
+                    id=MSG_FOREIGN,
+                    session_id=SESSION_FOREIGN,
+                    content="foreign answer",
+                    message_type=MessageType.ASSISTANT,
+                ),
+            ]
+        )
         await s.commit()
 
     return engine, factory
@@ -163,9 +190,7 @@ class _AsyncClientCtx:
         app.dependency_overrides[get_current_user] = _current_user
         app.dependency_overrides[get_db] = _db
         self._app = app
-        self._client = AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://w03"
-        )
+        self._client = AsyncClient(transport=ASGITransport(app=app), base_url="http://w03")
         return self._client
 
     async def __aexit__(self, exc_type, exc, tb):
@@ -260,12 +285,8 @@ class TestChatFeedbackOrgScope:
         try:
             before = await _feedback_state(factory, MSG_A)
             async with _AsyncClientCtx(_user(None), factory) as ac:
-                legacy = await ac.post(
-                    CHAT_FEEDBACK.format(mid=MSG_LEGACY), json={"feedback": 1}
-                )
-                tagged = await ac.post(
-                    CHAT_FEEDBACK.format(mid=MSG_A), json={"feedback": 1}
-                )
+                legacy = await ac.post(CHAT_FEEDBACK.format(mid=MSG_LEGACY), json={"feedback": 1})
+                tagged = await ac.post(CHAT_FEEDBACK.format(mid=MSG_A), json={"feedback": 1})
             assert legacy.status_code == 200, legacy.text
             assert tagged.status_code == 404, tagged.text
             assert await _feedback_state(factory, MSG_A) == before
@@ -283,12 +304,8 @@ class TestChatFeedbackOrgScope:
         try:
             before = await _feedback_state(factory, MSG_A)
             async with _AsyncClientCtx(_user(None, token_org=ORG_B), factory) as ac:
-                denied = await ac.post(
-                    CHAT_FEEDBACK.format(mid=MSG_A), json={"feedback": 1}
-                )
-                allowed = await ac.post(
-                    CHAT_FEEDBACK.format(mid=MSG_B), json={"feedback": 1}
-                )
+                denied = await ac.post(CHAT_FEEDBACK.format(mid=MSG_A), json={"feedback": 1})
+                allowed = await ac.post(CHAT_FEEDBACK.format(mid=MSG_B), json={"feedback": 1})
             assert denied.status_code == 404, denied.text
             assert allowed.status_code == 200, allowed.text
             assert await _feedback_state(factory, MSG_A) == before
@@ -303,9 +320,7 @@ class TestChatFeedbackOrgScope:
         try:
             before = await _feedback_state(factory, MSG_FOREIGN)
             async with _AsyncClientCtx(_user(ORG_A), factory) as ac:
-                r = await ac.post(
-                    CHAT_FEEDBACK.format(mid=MSG_FOREIGN), json={"feedback": 1}
-                )
+                r = await ac.post(CHAT_FEEDBACK.format(mid=MSG_FOREIGN), json={"feedback": 1})
             assert r.status_code == 404, r.text
             assert await _feedback_state(factory, MSG_FOREIGN) == before
         finally:
@@ -399,9 +414,7 @@ class TestAgentFeedbackOrgScope:
                     json={"message_id": MSG_A, "feedback": -1, "note": "cross-org"},
                 )
             assert r.status_code == 404, r.text
-            assert calls == [], (
-                f"跨组织点踩不得写入任何 lesson（bridge 被实例化: {calls}）"
-            )
+            assert calls == [], f"跨组织点踩不得写入任何 lesson（bridge 被实例化: {calls}）"
         finally:
             await engine.dispose()
 
@@ -461,16 +474,12 @@ class TestSuperuserFeedbackBypass:
         try:
             before = await _feedback_state(factory, MSG_FOREIGN)
             async with _AsyncClientCtx(_user(None, superuser=True), factory) as ac:
-                chat = await ac.post(
-                    CHAT_FEEDBACK.format(mid=MSG_B), json={"feedback": 1}
-                )
+                chat = await ac.post(CHAT_FEEDBACK.format(mid=MSG_B), json={"feedback": 1})
                 agent = await ac.post(
                     AGENT_FEEDBACK,
                     json={"message_id": MSG_LEGACY, "feedback": 1},
                 )
-                foreign = await ac.post(
-                    CHAT_FEEDBACK.format(mid=MSG_FOREIGN), json={"feedback": 1}
-                )
+                foreign = await ac.post(CHAT_FEEDBACK.format(mid=MSG_FOREIGN), json={"feedback": 1})
             assert chat.status_code == 200, chat.text
             assert agent.status_code == 200, agent.text
             assert foreign.status_code == 404, foreign.text
@@ -507,12 +516,8 @@ class TestDoubleOrgAcceptanceMatrix:
                     f"/api/v1/chat/conversations/{SESSION_A}",
                     json={"title": "hijacked"},
                 )
-                clear = await ac.delete(
-                    f"/api/v1/chat/conversations/{SESSION_A}/clear"
-                )
-                feedback = await ac.post(
-                    CHAT_FEEDBACK.format(mid=MSG_A), json={"feedback": -1}
-                )
+                clear = await ac.delete(f"/api/v1/chat/conversations/{SESSION_A}/clear")
+                feedback = await ac.post(CHAT_FEEDBACK.format(mid=MSG_A), json={"feedback": -1})
             assert detail_agent.status_code == 404, detail_agent.text
             assert detail_chat.status_code == 404, detail_chat.text
             assert delete_agent.status_code == 404, delete_agent.text
@@ -557,20 +562,14 @@ class TestRagStreamEffectiveOrg:
             monkeypatch.setattr(chat_module, "run_rag_pipeline", _fake_pipeline)
             monkeypatch.setattr(chat_module, "AsyncSessionLocal", factory)
 
-            async with _AsyncClientCtx(
-                _user(None, token_org=ORG_B), factory
-            ) as ac:
-                r = await ac.post(
-                    "/api/v1/chat/stream", json={"content": "你好"}
-                )
+            async with _AsyncClientCtx(_user(None, token_org=ORG_B), factory) as ac:
+                r = await ac.post("/api/v1/chat/stream", json={"content": "你好"})
             assert r.status_code == 200, r.text
             assert captured.get("organization_id") == ORG_B, (
-                f"会话组织必须用有效组织（token 回退 B），实际: "
-                f"{captured.get('organization_id')!r}"
+                f"会话组织必须用有效组织（token 回退 B），实际: {captured.get('organization_id')!r}"
             )
             assert captured.get("search_org_id") == ORG_B, (
-                f"检索组织必须用有效组织（token 回退 B），实际: "
-                f"{captured.get('search_org_id')!r}"
+                f"检索组织必须用有效组织（token 回退 B），实际: {captured.get('search_org_id')!r}"
             )
         finally:
             await engine.dispose()
@@ -586,9 +585,7 @@ class TestRagStreamEffectiveOrg:
             monkeypatch.setattr(chat_module, "AsyncSessionLocal", factory)
             from app.dependencies import get_rag_pipeline
 
-            monkeypatch.setattr(
-                get_rag_pipeline(), "openai_client", object()
-            )
+            monkeypatch.setattr(get_rag_pipeline(), "openai_client", object())
 
             async def _policy(_db, _org_id):
                 return SimpleNamespace(retrieval_top_k=None, allow_privacy_mode=True)
@@ -605,9 +602,7 @@ class TestRagStreamEffectiveOrg:
                     json={"content": "hi", "conversationId": SESSION_A},
                 )
             assert r.status_code == 200, r.text
-            assert "event: error" in r.text, (
-                f"跨组织复用会话必须拒绝并如实告知: {r.text[:500]}"
-            )
+            assert "event: error" in r.text, f"跨组织复用会话必须拒绝并如实告知: {r.text[:500]}"
             assert "无权访问该会话" in r.text, (
                 "错误必须来自 get_or_create_session 的组织拒绝，"
                 f"而不是前置预检（LLM/策略）: {r.text[:500]}"
@@ -649,9 +644,7 @@ class TestWebSocketOrgSemantics:
         handshake_db = MagicMock()
         handshake_result = MagicMock()
         handshake_result.first = MagicMock(
-            return_value=SimpleNamespace(
-                id=1, is_active=True, organization_id=None
-            )
+            return_value=SimpleNamespace(id=1, is_active=True, organization_id=None)
         )
         handshake_db.execute = AsyncMock(return_value=handshake_result)
         handshake_db.close = AsyncMock()
@@ -680,9 +673,7 @@ class TestWebSocketOrgSemantics:
                 patch(
                     "app.api.v1.endpoints.chat.load_active_ws_user",
                     new=AsyncMock(
-                        return_value=SimpleNamespace(
-                            id=1, is_active=True, organization_id=None
-                        )
+                        return_value=SimpleNamespace(id=1, is_active=True, organization_id=None)
                     ),
                 ),
                 patch(
@@ -693,9 +684,7 @@ class TestWebSocketOrgSemantics:
                     "app.api.v1.endpoints.chat.run_rag_pipeline",
                     new=_fake_pipeline,
                 ),
-                client.websocket_connect(
-                    "/api/v1/chat/ws", subprotocols=[f"auth.{token}"]
-                ) as ws,
+                client.websocket_connect("/api/v1/chat/ws", subprotocols=[f"auth.{token}"]) as ws,
             ):
                 ws.send_json({"content": "你好"})
                 payload = ws.receive_json()

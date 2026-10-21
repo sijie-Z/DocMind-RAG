@@ -3,6 +3,7 @@
 issue #223：`/health` 保留为**恒 200 的详细视图**（诊断用途，不参与编排），
 探针拆分为 `/livez`（存活，恒 200）与 `/readyz`（就绪，依赖故障 → 503）。
 """
+
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient

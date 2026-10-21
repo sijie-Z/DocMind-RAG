@@ -16,6 +16,7 @@
 - llm-stats 成本改回 GPT-4o-mini 费率公式 → 用例 2 红（与真源不齐 + 恰等于
   旧 0.75 值双断言）。
 """
+
 import uuid
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -38,7 +39,9 @@ def _allow_permissions(perms: set[str] | None = None):
     """桩掉权限解析（返回给定权限集，默认全部）。与 issue268 用例同款。"""
     return patch(
         "app.services.permission_service.permission_service.get_user_permissions",
-        new=AsyncMock(return_value=perms if perms is not None else {p.value for p in PermissionType}),
+        new=AsyncMock(
+            return_value=perms if perms is not None else {p.value for p in PermissionType}
+        ),
     )
 
 
@@ -70,26 +73,32 @@ async def test_admin_summary_session_week_over_week(client: TestClient):
         )
 
     async with factory() as s:
-        s.add_all([
-            Organization(id=55, name="Org55", owner_id=0),
-            Organization(id=66, name="Org66", owner_id=0),
-        ])
+        s.add_all(
+            [
+                Organization(id=55, name="Org55", owner_id=0),
+                Organization(id=66, name="Org66", owner_id=0),
+            ]
+        )
         u55 = User(username="u55", email="u55@e.com", hashed_password="x", organization_id=55)
         u66 = User(username="u66", email="u66@e.com", hashed_password="x", organization_id=66)
         s.add_all([u55, u66])
         await s.flush()
-        s.add_all([
-            _session(u55.id, 55, 2, "this-a"),
-            _session(u55.id, 55, 2.5, "this-b"),
-            _session(u55.id, 55, 9, "last"),
-            _session(u55.id, 55, 30, "old-a"),
-            _session(u55.id, 55, 60, "old-b"),
-            _session(u55.id, 55, 90, "old-c"),
-            _session(u66.id, 66, 1, "other-org"),  # 他组织：不得计入
-        ])
+        s.add_all(
+            [
+                _session(u55.id, 55, 2, "this-a"),
+                _session(u55.id, 55, 2.5, "this-b"),
+                _session(u55.id, 55, 9, "last"),
+                _session(u55.id, 55, 30, "old-a"),
+                _session(u55.id, 55, 60, "old-b"),
+                _session(u55.id, 55, 90, "old-c"),
+                _session(u66.id, 66, 1, "other-org"),  # 他组织：不得计入
+            ]
+        )
         await s.commit()
 
-    user = SimpleNamespace(id=550, organization_id=55, is_superuser=False, role="admin", is_active=True)
+    user = SimpleNamespace(
+        id=550, organization_id=55, is_superuser=False, role="admin", is_active=True
+    )
 
     async def _ref():
         return user
@@ -99,6 +108,7 @@ async def test_admin_summary_session_week_over_week(client: TestClient):
             yield session
 
     from app.main import app
+
     app.dependency_overrides[get_db] = _db_gen
     app.dependency_overrides[get_current_user] = _ref
     try:

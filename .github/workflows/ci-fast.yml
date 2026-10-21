@@ -75,6 +75,13 @@ jobs:
         # evals/ 从 #208 第⑤步起是 CI 门禁本体（Eval Gate 跑的就是它），一并纳入 lint 口径。
         run: ruff check app/ tests/ scripts/ evals/
 
+      # issue #216：格式门禁与 pre-commit/requirements 同版本锁定（ruff==0.16.10）。
+      # 之前仓库三处意图信号（pre-commit hook / pyproject [tool.ruff.format] / E501 注释）
+      # 与 CI 实际脱节，导致 366/432 文件未格式化且无人发现。
+      - name: Format check with ruff
+        working-directory: backend
+        run: ruff format --check app/ tests/ scripts/ evals/
+
       # 静态安全扫描前置到 PR：此前只在 nightly 跑，而 nightly 已连续红 ≥11 天，
       # 等于这条门禁事实上不存在。bandit 已在 requirements-dev.txt，无需额外安装。
       # 只阻断 medium+；low 档留给 nightly 仅报告。

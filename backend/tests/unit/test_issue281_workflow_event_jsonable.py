@@ -18,6 +18,7 @@
 - 还原 `node_func` 的 output 规整 → `NodeResult.output` 回到消息对象、事件/落库形态
   漂移 → 全图用例红。
 """
+
 import json
 from datetime import datetime
 
@@ -32,7 +33,9 @@ def _minimal_config() -> WorkflowConfig:
     """input → output 最小图：不触达 LLM/知识库等外部依赖。"""
     return WorkflowConfig(
         nodes=[
-            WorkflowNode(id="in1", type="input", data={"prompt": "{{input}}"}, position={"x": 0, "y": 0}),
+            WorkflowNode(
+                id="in1", type="input", data={"prompt": "{{input}}"}, position={"x": 0, "y": 0}
+            ),
             WorkflowNode(id="out1", type="output", data={}, position={"x": 1, "y": 0}),
         ],
         edges=[WorkflowEdge(id="e1", source="in1", target="out1")],
@@ -83,10 +86,13 @@ class TestEngineEventsJsonSerializable:
         collector = _Collector()
         engine.set_event_callback(collector)
 
-        await engine.emit_event("custom_event", {
-            "message": HumanMessage(content="边界载荷"),
-            "obj": object(),
-        })
+        await engine.emit_event(
+            "custom_event",
+            {
+                "message": HumanMessage(content="边界载荷"),
+                "obj": object(),
+            },
+        )
 
         (event_type, data) = collector.events[0]
         assert event_type == "custom_event"
@@ -115,7 +121,8 @@ class TestEngineEventsJsonSerializable:
         assert {"workflow_start", "node_start", "node_complete", "workflow_complete"} <= by_type
 
         in1 = next(
-            data for event_type, data in collector.events
+            data
+            for event_type, data in collector.events
             if event_type == "node_complete" and data["node_id"] == "in1"
         )
         msg = in1["output"]["messages"][0]
@@ -151,7 +158,9 @@ class TestEngineEventsJsonSerializable:
         # ── node_error ──
         node_error_config = WorkflowConfig(
             nodes=[
-                WorkflowNode(id="in1", type="input", data={"prompt": "{{input}}"}, position={"x": 0, "y": 0}),
+                WorkflowNode(
+                    id="in1", type="input", data={"prompt": "{{input}}"}, position={"x": 0, "y": 0}
+                ),
                 WorkflowNode(id="code1", type="code", data={"code": ""}, position={"x": 1, "y": 0}),
                 WorkflowNode(id="out1", type="output", data={}, position={"x": 2, "y": 0}),
             ],

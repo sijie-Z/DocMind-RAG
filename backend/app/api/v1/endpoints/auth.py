@@ -45,6 +45,7 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+
 class RegisterRequest(BaseModel):
     username: str
     email: EmailStr
@@ -54,17 +55,19 @@ class RegisterRequest(BaseModel):
     # 注册成功后由服务端自动创建个人组织（owner=本人，见 /register 端点），
     # 不并入任何既有组织。
 
-    @field_validator('password')
+    @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
         if len(v) < 8:
-            raise ValueError('密码长度不能少于8位')
+            raise ValueError("密码长度不能少于8位")
         if len(v) > 128:
-            raise ValueError('密码长度不能超过128位')
+            raise ValueError("密码长度不能超过128位")
         return v
+
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
 
 class TokenData(BaseModel):
     access_token: str
@@ -73,10 +76,12 @@ class TokenData(BaseModel):
     refresh_token: str | None = None
     user_info: dict
 
+
 class TokenResponse(BaseModel):
     success: bool = True
     message: str = "操作成功"
     data: TokenData
+
 
 from app.schemas.user import UserInfoResponse
 
@@ -87,6 +92,7 @@ async def ensure_demo():
     if not settings.ENABLE_ENSURE_DEMO_ENDPOINT:
         raise NotFoundError()
     from app.core.ensure_demo_user import ensure_demo_user
+
     await ensure_demo_user()
     return {"success": True, "message": "演示账号已就绪"}
 
@@ -95,14 +101,14 @@ async def ensure_demo():
 async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """用户登录 (form-data)"""
     try:
-        logger.info(f"Login attempt - username: {form_data.username!r}, ip: {request.client.host if request.client else 'unknown'}")
-        user = await auth_service.authenticate_user(
-            db, form_data.username, form_data.password
+        logger.info(
+            f"Login attempt - username: {form_data.username!r}, ip: {request.client.host if request.client else 'unknown'}"
         )
+        user = await auth_service.authenticate_user(db, form_data.username, form_data.password)
 
         if not user:
             raise AuthenticationError("用户名或密码错误")
@@ -128,7 +134,10 @@ async def login(
                 user_id=user.id,
                 token_hash=token_hash,
                 device_name=request.headers.get("sec-ch-ua-platform") or "Web",
-                ip_address=(request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)),
+                ip_address=(
+                    request.headers.get("x-forwarded-for")
+                    or (request.client.host if request.client else None)
+                ),
                 user_agent=request.headers.get("user-agent"),
                 is_active=True,
             )
@@ -170,7 +179,11 @@ async def login(
             logger.info("user_info JSON serialization successful.")
         except Exception as ser_err:
             logger.warning(f"user_info 序列化失败，使用简化结构: {ser_err}")
-            user_info = {k: v for k, v in user_info.items() if v is not None or k in ("id", "username", "email", "role")}
+            user_info = {
+                k: v
+                for k, v in user_info.items()
+                if v is not None or k in ("id", "username", "email", "role")
+            }
             user_info.setdefault("full_name", None)
             user_info.setdefault("organization_id", None)
             user_info.setdefault("preferences", None)
@@ -186,7 +199,7 @@ async def login(
                 target_id=str(user.id),
                 detail="用户登录成功",
                 request=request,
-                db=db
+                db=db,
             )
             await db.commit()
         except Exception as db_err:
@@ -204,8 +217,8 @@ async def login(
                 "token_type": "bearer",
                 "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
                 "refresh_token": refresh_token,
-                "user_info": user_info
-            }
+                "user_info": user_info,
+            },
         }
 
     except (AuthenticationError, RateLimitError):
@@ -213,6 +226,7 @@ async def login(
     except Exception as e:
         logger.exception("登录过程异常")
         raise AppError("登录失败", detail=str(e) if settings.EXPOSE_EXCEPTION_DETAIL else None)
+
 
 from app.models.notification import Notification
 
@@ -245,7 +259,10 @@ async def login_json(
                 user_id=user.id,
                 token_hash=token_hash,
                 device_name=request.headers.get("sec-ch-ua-platform") or "Web",
-                ip_address=(request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)),
+                ip_address=(
+                    request.headers.get("x-forwarded-for")
+                    or (request.client.host if request.client else None)
+                ),
                 user_agent=request.headers.get("user-agent"),
                 is_active=True,
             )
@@ -276,7 +293,11 @@ async def login_json(
         try:
             json.dumps(jsonable_encoder(user_info))
         except Exception:
-            user_info = {k: v for k, v in user_info.items() if k in ("id", "username", "email", "role") or v is not None}
+            user_info = {
+                k: v
+                for k, v in user_info.items()
+                if k in ("id", "username", "email", "role") or v is not None
+            }
             json.dumps(user_info)
         return {
             "success": True,
@@ -297,24 +318,17 @@ async def login_json(
 
 
 @router.post("/register", response_model=TokenResponse)
-async def register(
-    register_data: RegisterRequest,
-    db: AsyncSession = Depends(get_db)
-):
+async def register(register_data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """用户注册"""
     try:
         # 检查用户名是否已存在
-        existing_user = await auth_service.get_user_by_username(
-            db, register_data.username
-        )
+        existing_user = await auth_service.get_user_by_username(db, register_data.username)
 
         if existing_user:
             raise ConflictError("用户名已存在")
 
         # 检查邮箱是否已存在
-        existing_email = await auth_service.get_user_by_email(
-            db, register_data.email
-        )
+        existing_email = await auth_service.get_user_by_email(db, register_data.email)
 
         if existing_email:
             raise ConflictError("邮箱已被使用")
@@ -328,7 +342,7 @@ async def register(
                 email=register_data.email,
                 password=register_data.password,
                 full_name=register_data.full_name,
-                organization_id=None  # 先置空，个人组织建好后回填（同 ensure_demo_user 的自举顺序）
+                organization_id=None,  # 先置空，个人组织建好后回填（同 ensure_demo_user 的自举顺序）
             )
 
             # issue #242 收尾（用户面洞口）：开放注册却无任何组织 → 所有组织域功能一律
@@ -336,6 +350,7 @@ async def register(
             # "不自动并入既有组织"（防跨租户数据泄漏），保持不变；改为注册时自动创建
             # **个人组织**（owner=本人，服务层自动加成员），注册即可用、隔离仍成立。
             from app.services.organization_service import organization_service
+
             org_name = f"{user.username} 的空间"
             if await organization_service.get_organization_by_name(db, org_name):
                 # 同名兜底——该分支真实可达，勿按"不可达"删除：持有建组织权限者
@@ -358,7 +373,7 @@ async def register(
                 user_id=user.id,
                 title="欢迎加入 DocMind 知识库",
                 content=f"亲爱的 {user.full_name or user.username}，欢迎使用 DocMind 企业级 RAG 知识库。您可以上传文档、构建知识库并开始智能问答。",
-                is_read=False
+                is_read=False,
             )
             db.add(welcome_notification)
 
@@ -372,7 +387,7 @@ async def register(
                 "role": user.role,
                 "organization_id": user.organization_id,
                 "username": user.username,
-                "email": user.email
+                "email": user.email,
             }
         )
 
@@ -382,7 +397,7 @@ async def register(
                 "sub": user.username,
                 "user_id": user.id,
                 "role": user.role,
-                "organization_id": user.organization_id
+                "organization_id": user.organization_id,
             }
         )
 
@@ -400,9 +415,9 @@ async def register(
                     "email": user.email,
                     "full_name": user.full_name,
                     "organization_id": user.organization_id,
-                    "role": user.role
-                }
-            }
+                    "role": user.role,
+                },
+            },
         }
 
     except ConflictError:
@@ -411,11 +426,9 @@ async def register(
         logger.error(f"注册失败: {e}", exc_info=True)
         raise AppError("注册失败", detail=str(e) if settings.EXPOSE_EXCEPTION_DETAIL else None)
 
+
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(
-    body: RefreshRequest,
-    db: AsyncSession = Depends(get_db)
-):
+async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     """刷新访问令牌（含轮换与吊销校验）"""
     try:
         # 验证刷新令牌
@@ -486,9 +499,9 @@ async def refresh_token(
                     "email": user.email,
                     "full_name": user.full_name,
                     "organization_id": user.organization_id,
-                    "role": user.role
-                }
-            }
+                    "role": user.role,
+                },
+            },
         }
 
     except AuthenticationError:
@@ -506,6 +519,7 @@ async def refresh_token(
         raise
     except Exception as e:
         raise AppError("刷新令牌失败", detail=str(e) if settings.EXPOSE_EXCEPTION_DETAIL else None)
+
 
 class LogoutRequest(BaseModel):
     refresh_token: str | None = None
@@ -529,10 +543,12 @@ async def logout(
         await auth_service.blacklist_token(body.refresh_token)
     return {"message": "登出成功"}
 
+
 class UserInfoWrapper(BaseModel):
     success: bool = True
     message: str = "获取成功"
     data: UserInfoResponse
+
 
 @router.get("/me", response_model=UserInfoWrapper)
 async def get_current_user_info(
@@ -548,28 +564,24 @@ async def get_current_user_info(
         organization_id=current_user.organization_id,
         role=current_user.role,
         is_superuser=current_user.is_superuser,
-        is_org_admin=await is_org_admin(
-            db, current_user, current_user.organization_id
-        ),
+        is_org_admin=await is_org_admin(db, current_user, current_user.organization_id),
         is_active=current_user.is_active,
         created_at=current_user.created_at,
-        preferences=current_user.preferences
+        preferences=current_user.preferences,
     )
     return UserInfoWrapper(data=user_info)
+
 
 @router.put("/me", response_model=UserInfoWrapper)
 async def update_current_user(
     body: UpdateProfileRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """更新当前用户信息"""
     try:
         updated_user = await auth_service.update_user(
-            db,
-            current_user.id,
-            full_name=body.full_name,
-            email=body.email
+            db, current_user.id, full_name=body.full_name, email=body.email
         )
         await db.commit()
 
@@ -578,13 +590,16 @@ async def update_current_user(
 
     except Exception as e:
         logger.error(f"更新用户信息失败: {e}", exc_info=True)
-        raise AppError("更新用户信息失败", detail=str(e) if settings.EXPOSE_EXCEPTION_DETAIL else None)
+        raise AppError(
+            "更新用户信息失败", detail=str(e) if settings.EXPOSE_EXCEPTION_DETAIL else None
+        )
+
 
 @router.post("/change-password", response_model=dict)
 async def change_password(
     body: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """修改密码"""
     try:
@@ -597,11 +612,7 @@ async def change_password(
             raise ValidationError("旧密码错误")
 
         # 更新密码
-        await auth_service.update_user_password(
-            db,
-            current_user.id,
-            body.new_password
-        )
+        await auth_service.update_user_password(db, current_user.id, body.new_password)
         # 安全加固：改密后立即对后续请求生效（身份由每次请求回源 DB 决定）
         await db.commit()
 
@@ -612,4 +623,3 @@ async def change_password(
     except Exception as e:
         logger.error(f"修改密码失败: {e}", exc_info=True)
         raise AppError("修改密码失败", detail=str(e) if settings.EXPOSE_EXCEPTION_DETAIL else None)
-

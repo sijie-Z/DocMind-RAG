@@ -33,6 +33,7 @@ _TASK_ID = "task00000001"
 @pytest.fixture
 def client():
     from app.main import app
+
     return TestClient(app)
 
 
@@ -88,8 +89,13 @@ def _ctx_dict(task_id: str = _TASK_ID) -> dict:
     ctx.goal = "产出结论"
     ctx.plan_summary = "检索 → 汇总"
     ctx.complete_step(
-        "s1", "检索资料", "search_knowledge_base", "completed",
-        result="找到 3 条", duration=125.5, tokens=42,
+        "s1",
+        "检索资料",
+        "search_knowledge_base",
+        "completed",
+        result="找到 3 条",
+        duration=125.5,
+        tokens=42,
     )
     ctx.complete_step("s2", "汇总输出", "generate_report", "failed", error="boom")
     ctx.total_tokens = 42
@@ -134,6 +140,7 @@ def test_tasks_list_requires_auth(client):
 
 def test_replay_404_when_task_missing_or_foreign(client, auth, monkeypatch, replay_dir, no_redis):
     """归属闸门先行：任务不存在/非本人/组织不一致 → 404 TASK_NOT_FOUND。"""
+
     async def _raise(**kwargs):
         raise checkpoint.TaskNotFoundError("任务不存在或无权访问")
 
@@ -212,7 +219,9 @@ def test_replay_404_replay_not_found_when_no_data(client, auth, monkeypatch, rep
     assert not body.get("data"), "404 响应不得夹带编造的轨迹数据"
 
 
-def test_replay_exact_binding_never_leaks_other_task(client, auth, monkeypatch, replay_dir, no_redis):
+def test_replay_exact_binding_never_leaks_other_task(
+    client, auth, monkeypatch, replay_dir, no_redis
+):
     """前缀命中他任务文件 → 仍必须 404：按 task_id 的归属校验不可被前缀旁路。
 
     变异点：端点 load 传 exact=False → 本用例红（200 拿到他任务回放）。
@@ -261,9 +270,7 @@ def test_replay_malformed_redis_payload_is_honest_404_not_500(
         assert r.json()["error_code"] == "REPLAY_NOT_FOUND"
 
 
-def test_get_task_has_replay_false_for_malformed_payload(
-    client, auth, monkeypatch, replay_dir
-):
+def test_get_task_has_replay_false_for_malformed_payload(client, auth, monkeypatch, replay_dir):
     """F3 判别：损坏内容不得标 has_replay=True（损坏 = 如实视为无回放）。"""
     _mock_task_loaded(monkeypatch)
     monkeypatch.setattr(
@@ -315,8 +322,7 @@ async def test_tasks_list_has_replay_flags_and_scope(tmp_path, monkeypatch, repl
     t_other_user = await checkpoint.create_task(user_id=2, organization_id=1, query="他人任务")
     t_other_org = await checkpoint.create_task(user_id=1, organization_id=2, query="他组织任务")
     async with factory() as db:
-        for tid, ts in ((t_a, datetime(2026, 1, 1, 0, 0, 0)),
-                        (t_b, datetime(2026, 1, 2, 0, 0, 0))):
+        for tid, ts in ((t_a, datetime(2026, 1, 1, 0, 0, 0)), (t_b, datetime(2026, 1, 2, 0, 0, 0))):
             row = await db.get(AgentTask, tid)
             row.created_at = ts
         await db.commit()
@@ -328,9 +334,7 @@ async def test_tasks_list_has_replay_flags_and_scope(tmp_path, monkeypatch, repl
 
     app.dependency_overrides[get_current_user] = lambda: _User()
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://tlist"
-        ) as c:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://tlist") as c:
             # 无回放数据时：全部 False
             r = await c.get("/api/v1/agent/tasks")
             assert r.status_code == 200

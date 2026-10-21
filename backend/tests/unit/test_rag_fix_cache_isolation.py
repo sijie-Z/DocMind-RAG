@@ -5,6 +5,7 @@ answer="" 条目会被下一个相似问题命中，返回空助手消息。
 R5：doc_processor/knowledge_service/knowledge.py 以 `RetrievalCache()` 新建实例调用
 clear_for_org，清的是自己的空 _memory，而 pipeline 单例的内存缓存不受影响。
 """
+
 import fnmatch
 
 import pytest
@@ -82,7 +83,9 @@ class TestSemanticCacheNamespaceIsolation:
         retrieval_hit = await retrieval_cache.get(embedding, organization_id=3, query="查询")
         assert retrieval_hit is not None
         assert retrieval_hit["answer"] == ""
-        assert (await answer_cache.get(embedding, organization_id=3, query="查询"))["answer"] == "完整回答"
+        assert (await answer_cache.get(embedding, organization_id=3, query="查询"))[
+            "answer"
+        ] == "完整回答"
 
     def test_pipeline_uses_retrieval_namespace(self):
         from app.rag.pipeline import RAGPipeline

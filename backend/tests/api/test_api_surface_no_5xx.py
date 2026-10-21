@@ -43,6 +43,7 @@ Embedding/LLM → ConnectionError → retriever/reranker 内已有的 except 兜
 **跳过清单**：只有两条，理由见 `_SKIP_PATHS`；清单本身有防呆断言
 （跳过的路径必须仍存在于 OpenAPI、总数 ≤ 5 —— 防止有人用跳过把问题绕过去）。
 """
+
 import re
 import uuid
 
@@ -130,6 +131,7 @@ _MIN_SCANNED_ENDPOINTS = 75  # 表面规模防呆：低于此值说明路由收�
 
 def _concrete_path(template: str, param_values: dict[str, str]) -> str:
     """把 /a/{x}/b/{y} 替换成具体路径；未知参数一律 '1'（合法整型形态）。"""
+
     def _sub(match: re.Match) -> str:
         return param_values.get(match.group(1), "1")
 
@@ -218,9 +220,7 @@ def _pin_external_services(monkeypatch):
         """issue #196：检索期 embedding 走 provider（索引期同一 embedding_service）。"""
 
         async def embed_query(self, *args, **kwargs):
-            raise ConnectionError(
-                "Embedding API unreachable — pinned by API surface scan"
-            )
+            raise ConnectionError("Embedding API unreachable — pinned by API surface scan")
 
     # 单例 pipeline 对客户端的引用有两处：pipeline 自身（含 rerank 调用点）与
     # retriever（openai_client / embedding_provider）。
@@ -229,9 +229,7 @@ def _pin_external_services(monkeypatch):
     monkeypatch.setattr(pipeline, "openai_client", unreachable_llm)
     monkeypatch.setattr(pipeline, "rerank_client", unreachable_llm)
     monkeypatch.setattr(pipeline.retriever, "openai_client", unreachable_llm)
-    monkeypatch.setattr(
-        pipeline.retriever, "embedding_provider", _UnreachableEmbeddingProvider()
-    )
+    monkeypatch.setattr(pipeline.retriever, "embedding_provider", _UnreachableEmbeddingProvider())
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -298,6 +296,7 @@ async def seeded_identity():
     yield user_id, org_id
 
     import app.models  # noqa: F401  — 确保全部模型已注册进 Base.metadata
+
     async with AsyncSessionLocal() as db:
         # 不用 sorted_tables：organizations/users 互为外键（owner_id / organization_id），
         # 排序会告警且本就不需要顺序 —— 先把所有引用行删空，最后删两个主体即可。
@@ -315,6 +314,7 @@ async def seeded_identity():
 
 def _user_override(user_id: int):
     """返回真表里的超管行（不是 MagicMock）—— /users/me 等端点会序列化它的字段。"""
+
     async def _get_user():
         async with AsyncSessionLocal() as db:
             user = await db.get(User, user_id)
@@ -350,11 +350,13 @@ async def test_all_get_endpoints_do_not_return_5xx(seeded_identity):
             )
 
         param_values = dict(_PATH_PARAM_VALUES)
-        param_values.update({
-            "org_id": str(org_id),
-            "organization_id": str(org_id),
-            "user_id": str(user_id),
-        })
+        param_values.update(
+            {
+                "org_id": str(org_id),
+                "organization_id": str(org_id),
+                "user_id": str(user_id),
+            }
+        )
 
         scanned = [p for p in all_get_paths if p not in _SKIP_PATHS]
         # 防呆 2：表面规模不得静默缩水（路由收集异常会让"全绿"变得毫无意义）。
@@ -391,17 +393,14 @@ async def test_all_get_endpoints_do_not_return_5xx(seeded_identity):
         return isinstance(code, int) and _EXPECTED_DEPENDENCY_5XX.get(raw) == code
 
     failures = [
-        r for r in results
-        if (not isinstance(r[2], int) or r[2] >= 500) and not _exempt(r[0], r[2])
+        r for r in results if (not isinstance(r[2], int) or r[2] >= 500) and not _exempt(r[0], r[2])
     ]
     if failures:
         lines = "\n".join(
             f"  [{status}] {raw}\n      请求: {concrete}\n      响应: {body}"
             for raw, concrete, status, body in failures
         )
-        pytest.fail(
-            f"API 表面扫描发现 {len(failures)} 个 5xx/连接层失败的 GET 端点：\n{lines}"
-        )
+        pytest.fail(f"API 表面扫描发现 {len(failures)} 个 5xx/连接层失败的 GET 端点：\n{lines}")
 
     # 断言 1b：豁免不得空转 —— /files 在 MinIO 不可达时必须真的走 503 分支
     # （没命中 = #301 的故障分流被回退/改形，先重审豁免再放行）。
@@ -413,10 +412,7 @@ async def test_all_get_endpoints_do_not_return_5xx(seeded_identity):
 
     # 断言 2：鉴权必须真的打通（防「静默 401 缩水」——处理器没被执行时扫描是空转）。
     by_raw = {raw: status for raw, _, status, _ in results}
-    unauthenticated = [
-        p for p in _AUTH_DEPENDENT_PATHS
-        if p in by_raw and by_raw[p] in (401, 403)
-    ]
+    unauthenticated = [p for p in _AUTH_DEPENDENT_PATHS if p in by_raw and by_raw[p] in (401, 403)]
     assert not unauthenticated, (
         f"以下端点未通过鉴权（处理器未被执行，扫描面静默缩水）：{unauthenticated}\n"
         "检查三个鉴权 override key 是否仍覆盖仓库里的全部鉴权风格"

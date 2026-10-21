@@ -32,6 +32,7 @@
 - evaluate_batch 去掉条目级标注 → partial 用例红；
 - rag-stats 趋势还原 7 桶 → 形状对拍用例红。
 """
+
 import asyncio
 import builtins
 import io
@@ -57,6 +58,7 @@ from app.services.auth_service import auth_service
 
 # ── 公共夹具 ──────────────────────────────────────────────────────
 
+
 def _boom_db() -> MagicMock:
     """一切查询即炸的 fake 会话（故障注入的最小形态）。"""
     db = MagicMock()
@@ -68,8 +70,12 @@ def _boom_db() -> MagicMock:
 
 def _superuser(org=5) -> SimpleNamespace:
     return SimpleNamespace(
-        id=1, organization_id=org, is_superuser=True, role="admin",
-        is_active=True, username="stats301",
+        id=1,
+        organization_id=org,
+        is_superuser=True,
+        role="admin",
+        is_active=True,
+        username="stats301",
     )
 
 
@@ -115,6 +121,7 @@ class _FailOpenAI:
 # ① 面板类统计（org-summary / admin-summary / rag-stats / users stats）
 #    降级形态：200 + degraded=true + reason，既有键不变
 # ════════════════════════════════════════════════════════════════════
+
 
 class TestDegradedPanels:
     def test_org_summary_query_failure_is_degraded_not_fake_empty(self, client: TestClient):
@@ -177,7 +184,9 @@ class TestDegradedPanels:
         assert j["degraded"] is True, f"面板全零必须带身份: {j}"
         assert j["reason"]
 
-    def test_rag_stats_failure_is_degraded_and_trend_shape_matches_success(self, client: TestClient):
+    def test_rag_stats_failure_is_degraded_and_trend_shape_matches_success(
+        self, client: TestClient
+    ):
         """#19：rag-stats 异常 → 降级身份 + 趋势桶数与成功路径同形（8 桶，修前 7）。
 
         选①：admin.vue 与 user.vue 都消费本端点（user.vue 在 Promise.all 里）。
@@ -188,13 +197,26 @@ class TestDegradedPanels:
         now = _time.time()
         ok_stub = SimpleNamespace(
             get_metrics=lambda **k: {
-                "retrieval_total": 4, "retrieval_hit": 2, "grounded_total": 2,
-                "grounded_hit": 1, "avg_latency_ms": 12.5, "avg_docs_per_query": 3.0,
+                "retrieval_total": 4,
+                "retrieval_hit": 2,
+                "grounded_total": 2,
+                "grounded_hit": 1,
+                "avg_latency_ms": 12.5,
+                "avg_docs_per_query": 3.0,
             },
-            _pipeline=SimpleNamespace(metrics=SimpleNamespace(_events={
-                "retrieval": [(now - 60, 1), (now - 120, 1), (now - 180, 1), (now - 240, 1)],
-                "retrieval_hit": [(now - 60, 1), (now - 120, 1)],
-            })),
+            _pipeline=SimpleNamespace(
+                metrics=SimpleNamespace(
+                    _events={
+                        "retrieval": [
+                            (now - 60, 1),
+                            (now - 120, 1),
+                            (now - 180, 1),
+                            (now - 240, 1),
+                        ],
+                        "retrieval_hit": [(now - 60, 1), (now - 120, 1)],
+                    }
+                )
+            ),
         )
 
         class _FailMetrics:
@@ -233,13 +255,18 @@ class TestDegradedPanels:
 # ② 显式 5xx 族（logs / rag-eval / rag-eval-batch / graph / org tree / org stats）
 # ════════════════════════════════════════════════════════════════════
 
+
 def _log_file_path() -> str:
     from app.api.v1.endpoints import monitoring as mon
     from app.core.config import settings
 
     src = mon.__file__
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(src))))
-    return settings.LOG_FILE if os.path.isabs(settings.LOG_FILE) else os.path.join(root, settings.LOG_FILE)
+    return (
+        settings.LOG_FILE
+        if os.path.isabs(settings.LOG_FILE)
+        else os.path.join(root, settings.LOG_FILE)
+    )
 
 
 class TestLogsHonesty:
@@ -259,7 +286,9 @@ class TestLogsHonesty:
                 return io.StringIO(content or "")
             return real_open(file, *a, **k)
 
-        return patch.object(os.path, "exists", fake_exists), patch.object(builtins, "open", fake_open)
+        return patch.object(os.path, "exists", fake_exists), patch.object(
+            builtins, "open", fake_open
+        )
 
     def test_logs_read_failure_is_500_not_fake_zero(self, client: TestClient):
         """#16：读文件失败 → 显式 500（LOG_READ_FAILED），不再是假「零日志」。
@@ -276,7 +305,9 @@ class TestLogsHonesty:
         finally:
             _cleanup()
 
-        assert r.status_code == 500, f"读失败必须显式报错（修前 200 空列表）: {r.status_code} {r.text[:200]}"
+        assert r.status_code == 500, (
+            f"读失败必须显式报错（修前 200 空列表）: {r.status_code} {r.text[:200]}"
+        )
         j = r.json()
         assert j.get("error_code") == "LOG_READ_FAILED", j
 
@@ -305,7 +336,9 @@ class TestLogsHonesty:
         real_exists = os.path.exists
         _cleanup = _override_http(_superuser(), MagicMock())
         try:
-            with patch.object(os.path, "exists", lambda p: False if str(p) == str(target) else real_exists(p)):
+            with patch.object(
+                os.path, "exists", lambda p: False if str(p) == str(target) else real_exists(p)
+            ):
                 r = client.get("/api/v1/monitoring/logs")
         finally:
             _cleanup()
@@ -340,12 +373,16 @@ class TestRagEvalHonesty:
         _cleanup = _override_http(_superuser(), MagicMock())
         try:
             with patch("openai.AsyncOpenAI", _FailOpenAI):
-                r = client.post("/api/v1/monitoring/rag-eval",
-                                json={"question": "q", "answer": "a", "context": []})
+                r = client.post(
+                    "/api/v1/monitoring/rag-eval",
+                    json={"question": "q", "answer": "a", "context": []},
+                )
         finally:
             _cleanup()
 
-        assert r.status_code == 502, f"评委不可用不得呈现为分数（修前 200+0/0/0）: {r.status_code} {r.text[:200]}"
+        assert r.status_code == 502, (
+            f"评委不可用不得呈现为分数（修前 200+0/0/0）: {r.status_code} {r.text[:200]}"
+        )
         j = r.json()
         assert j.get("error_code") == "RAG_EVAL_UNAVAILABLE", j
         assert "faithfulness" not in j, "故障响应里不得出现冒充分数的字段"
@@ -363,7 +400,11 @@ class TestRagEvalHonesty:
                         val = [scores["f"], scores["r"], scores["c"]][calls["n"]]
                         calls["n"] += 1
                         return SimpleNamespace(
-                            choices=[SimpleNamespace(message=SimpleNamespace(content=f'{{"score": {val}}}'))]
+                            choices=[
+                                SimpleNamespace(
+                                    message=SimpleNamespace(content=f'{{"score": {val}}}')
+                                )
+                            ]
                         )
 
                 self.chat = SimpleNamespace(completions=_C())
@@ -371,8 +412,10 @@ class TestRagEvalHonesty:
         _cleanup = _override_http(_superuser(), MagicMock())
         try:
             with patch("openai.AsyncOpenAI", _OkOpenAI):
-                r = client.post("/api/v1/monitoring/rag-eval",
-                                json={"question": "q", "answer": "a", "context": [{"text": "ctx"}]})
+                r = client.post(
+                    "/api/v1/monitoring/rag-eval",
+                    json={"question": "q", "answer": "a", "context": [{"text": "ctx"}]},
+                )
         finally:
             _cleanup()
 
@@ -388,14 +431,21 @@ class TestRagEvalHonesty:
         _cleanup = _override_http(_superuser(), MagicMock())
         try:
             with patch("openai.AsyncOpenAI", _FailOpenAI):
-                r = client.post("/api/v1/monitoring/rag-eval-batch", json={"items": [
-                    {"question": "q1", "answer": "a1", "context": []},
-                    {"question": "q2", "answer": "a2", "context": []},
-                ]})
+                r = client.post(
+                    "/api/v1/monitoring/rag-eval-batch",
+                    json={
+                        "items": [
+                            {"question": "q1", "answer": "a1", "context": []},
+                            {"question": "q2", "answer": "a2", "context": []},
+                        ]
+                    },
+                )
         finally:
             _cleanup()
 
-        assert r.status_code == 502, f"全批失败不得呈现为「全零成功」: {r.status_code} {r.text[:200]}"
+        assert r.status_code == 502, (
+            f"全批失败不得呈现为「全零成功」: {r.status_code} {r.text[:200]}"
+        )
         assert r.json().get("error_code") == "RAG_EVAL_UNAVAILABLE"
 
     def test_rag_eval_batch_partial_failure_marks_and_excludes_from_mean(self, client: TestClient):
@@ -418,7 +468,11 @@ class TestRagEvalHonesty:
                         except StopIteration:
                             raise ConnectionError("301c: judge LLM unreachable (item 2)") from None
                         return SimpleNamespace(
-                            choices=[SimpleNamespace(message=SimpleNamespace(content=f'{{"score": {val}}}'))]
+                            choices=[
+                                SimpleNamespace(
+                                    message=SimpleNamespace(content=f'{{"score": {val}}}')
+                                )
+                            ]
                         )
 
                 self.chat = SimpleNamespace(completions=_C())
@@ -426,10 +480,15 @@ class TestRagEvalHonesty:
         _cleanup = _override_http(_superuser(), MagicMock())
         try:
             with patch("openai.AsyncOpenAI", _PartialOpenAI):
-                r = client.post("/api/v1/monitoring/rag-eval-batch", json={"items": [
-                    {"question": "q1", "answer": "a1", "context": []},
-                    {"question": "q2", "answer": "a2", "context": []},
-                ]})
+                r = client.post(
+                    "/api/v1/monitoring/rag-eval-batch",
+                    json={
+                        "items": [
+                            {"question": "q1", "answer": "a1", "context": []},
+                            {"question": "q2", "answer": "a2", "context": []},
+                        ]
+                    },
+                )
         finally:
             _cleanup()
 
@@ -537,6 +596,7 @@ class TestOrganizationEndpointsHonesty:
 # 正常路径回归对照（真实 SQLite 建表造数：数值必须如实）
 # ════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
 async def test_normal_paths_reflect_real_counts(client: TestClient):
     """有数据时数值如实（org-summary / admin-summary / users stats / tree / org stats）。
@@ -554,54 +614,108 @@ async def test_normal_paths_reflect_real_counts(client: TestClient):
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with factory() as s:
-        s.add_all([
-            Organization(id=55, name="Org55", owner_id=0),
-            Organization(id=66, name="Org66", owner_id=0, parent_id=55, level=2),
-        ])
-        u55 = [User(username=f"u55-{i}", email=f"u55-{i}@e.com", hashed_password="x",
-                    organization_id=55) for i in range(2)]
-        u66 = [User(username=f"u66-{i}", email=f"u66-{i}@e.com", hashed_password="x",
-                    organization_id=66) for i in range(3)]
+        s.add_all(
+            [
+                Organization(id=55, name="Org55", owner_id=0),
+                Organization(id=66, name="Org66", owner_id=0, parent_id=55, level=2),
+            ]
+        )
+        u55 = [
+            User(
+                username=f"u55-{i}", email=f"u55-{i}@e.com", hashed_password="x", organization_id=55
+            )
+            for i in range(2)
+        ]
+        u66 = [
+            User(
+                username=f"u66-{i}", email=f"u66-{i}@e.com", hashed_password="x", organization_id=66
+            )
+            for i in range(3)
+        ]
         s.add_all(u55 + u66)
         await s.flush()
         # member_count 口径来自 user_organization 关联表（非 User.organization_id）
-        await s.execute(user_organization.insert(), [
-            {"user_id": u55[0].id, "organization_id": 55},
-            {"user_id": u55[1].id, "organization_id": 55},
-        ])
+        await s.execute(
+            user_organization.insert(),
+            [
+                {"user_id": u55[0].id, "organization_id": 55},
+                {"user_id": u55[1].id, "organization_id": 55},
+            ],
+        )
         # 趋势窗口外的时间戳：users/stats 的 trend 查询用 cast(created_at, Date)，
         # sqlite 的 CAST AS DATE 返回整数（NUMERIC 亲和性）会让处理器炸——那是
         # 测试库方言产物（MySQL 无此问题）。旧时间戳让趋势查询匹配零行，
         # 计数类查询不受影响，正常路径对照仍是真表真数。
         old = datetime.now() - timedelta(days=30)
-        s.add_all([
-            Document(id="d55-0", filename="a.pdf", file_path="/tmp/a.pdf", file_size=10,
-                     file_type=DocumentType.PDF, organization_id=55, uploaded_by=u55[0].id,
-                     status=DocumentStatus.INDEXED, created_at=old),
-            Document(id="d55-1", filename="b.pdf", file_path="/tmp/b.pdf", file_size=20,
-                     file_type=DocumentType.PDF, organization_id=55, uploaded_by=u55[0].id,
-                     created_at=old),
-            Document(id="d66-0", filename="c.pdf", file_path="/tmp/c.pdf", file_size=30,
-                     file_type=DocumentType.PDF, organization_id=66, uploaded_by=u66[0].id,
-                     created_at=old),
-        ])
+        s.add_all(
+            [
+                Document(
+                    id="d55-0",
+                    filename="a.pdf",
+                    file_path="/tmp/a.pdf",
+                    file_size=10,
+                    file_type=DocumentType.PDF,
+                    organization_id=55,
+                    uploaded_by=u55[0].id,
+                    status=DocumentStatus.INDEXED,
+                    created_at=old,
+                ),
+                Document(
+                    id="d55-1",
+                    filename="b.pdf",
+                    file_path="/tmp/b.pdf",
+                    file_size=20,
+                    file_type=DocumentType.PDF,
+                    organization_id=55,
+                    uploaded_by=u55[0].id,
+                    created_at=old,
+                ),
+                Document(
+                    id="d66-0",
+                    filename="c.pdf",
+                    file_path="/tmp/c.pdf",
+                    file_size=30,
+                    file_type=DocumentType.PDF,
+                    organization_id=66,
+                    uploaded_by=u66[0].id,
+                    created_at=old,
+                ),
+            ]
+        )
         sess55 = [
-            ChatSession(id=str(uuid.uuid4()), user_id=u55[0].id, organization_id=55,
-                        title=f"s{i}", created_at=old)
+            ChatSession(
+                id=str(uuid.uuid4()),
+                user_id=u55[0].id,
+                organization_id=55,
+                title=f"s{i}",
+                created_at=old,
+            )
             for i in range(2)
         ]
         s.add_all(sess55)
         await s.flush()
-        s.add_all([
-            ChatMessage(id=str(uuid.uuid4()), session_id=sess55[0].id, content=f"m{i}",
-                        message_type=MessageType.USER)
-            for i in range(3)
-        ])
+        s.add_all(
+            [
+                ChatMessage(
+                    id=str(uuid.uuid4()),
+                    session_id=sess55[0].id,
+                    content=f"m{i}",
+                    message_type=MessageType.USER,
+                )
+                for i in range(3)
+            ]
+        )
         await s.commit()
         user55_id = u55[0].id
 
-    user = SimpleNamespace(id=user55_id, organization_id=55, is_superuser=True,
-                           role="admin", is_active=True, username="stats301b")
+    user = SimpleNamespace(
+        id=user55_id,
+        organization_id=55,
+        is_superuser=True,
+        role="admin",
+        is_active=True,
+        username="stats301b",
+    )
 
     async def _ref():
         return user
@@ -611,6 +725,7 @@ async def test_normal_paths_reflect_real_counts(client: TestClient):
             yield session
 
     from app.main import app
+
     app.dependency_overrides[get_db] = _db_gen
     app.dependency_overrides[get_current_user] = _ref
     app.dependency_overrides[auth_service.get_current_user] = _ref

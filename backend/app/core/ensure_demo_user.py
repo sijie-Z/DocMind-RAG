@@ -1,4 +1,5 @@
 """应用启动时确保演示账号和默认组织存在。"""
+
 import logging
 import os
 
@@ -21,6 +22,7 @@ def _demo_password() -> str:
     if configured and configured != "123456":
         return configured
     import secrets
+
     return secrets.token_urlsafe(12)
 
 

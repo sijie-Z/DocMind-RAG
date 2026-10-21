@@ -10,6 +10,7 @@
 - downgrade 回 ``010_agent_tool_calls``：新表与新列都被删除，业务数据原样保留；
 - 再 upgrade 到 head：双级往返可重放。
 """
+
 import sqlite3
 from pathlib import Path
 
@@ -59,8 +60,7 @@ def _columns(db_path: Path, table: str) -> dict[str, dict]:
         rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     # cid, name, type, notnull, dflt_value, pk
     return {
-        r[1]: {"type": r[2], "notnull": bool(r[3]), "default": r[4], "pk": bool(r[5])}
-        for r in rows
+        r[1]: {"type": r[2], "notnull": bool(r[3]), "default": r[4], "pk": bool(r[5])} for r in rows
     }
 
 
@@ -89,19 +89,14 @@ def _foreign_keys(db_path: Path, table: str) -> dict[str, dict]:
     with sqlite3.connect(str(db_path)) as conn:
         rows = conn.execute(f"PRAGMA foreign_key_list({table})").fetchall()
     # id, seq, table, from, to, on_update, on_delete, match
-    return {
-        r[3]: {"table": r[2], "to": r[4], "on_delete": (r[6] or "").upper()}
-        for r in rows
-    }
+    return {r[3]: {"table": r[2], "to": r[4], "on_delete": (r[6] or "").upper()} for r in rows}
 
 
 def test_b4_migration_single_head_and_two_way_round_trip(tmp_path, monkeypatch):
     from app.core.config import settings
 
     db_path = tmp_path / "mig_b4.db"
-    monkeypatch.setattr(
-        settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}"
-    )
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
     cfg = _cfg()
 
     # ── 1. 迁移链：单头 + 新 revision 在链上且接在 010_agent_tool_calls 之后 ──

@@ -15,6 +15,7 @@
 4. agent_api 的 AGENT_DEMO_ORG_ID 未设置或非正整数 → 503 拒绝请求；
 5. 有合法 org 时行为不变（下游拿到同一个正整数组织）。
 """
+
 from __future__ import annotations
 
 import io
@@ -281,9 +282,7 @@ class TestOrglessCallersFailClosed:
             captured["organization_id"] = organization_id
             return {"content": "hello", "chunks": [], "file_size": 5}
 
-        monkeypatch.setattr(
-            doc_parser_mod.document_service, "parse_local_file", _fake_parse
-        )
+        monkeypatch.setattr(doc_parser_mod.document_service, "parse_local_file", _fake_parse)
 
         upload = UploadFile(file=io.BytesIO(b"hello"), filename="a.txt")
         user = SimpleNamespace(organization_id=42, id=5, is_superuser=False)

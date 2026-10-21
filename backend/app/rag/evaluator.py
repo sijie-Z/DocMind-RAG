@@ -2,6 +2,7 @@
 
 Uses LLM-as-judge for scoring. Each metric returns a float in [0, 1].
 """
+
 import json
 import logging
 import re
@@ -26,10 +27,7 @@ def _build_context_str(context: list[dict[str, Any]]) -> str:
     When truncation happens, the dropped fraction is logged so prompt-cost
     incidents stay observable instead of silently degrading evaluation quality.
     """
-    original = "\n\n".join(
-        f"[{i+1}] {get_prompt_text(item)}"
-        for i, item in enumerate(context)
-    )
+    original = "\n\n".join(f"[{i + 1}] {get_prompt_text(item)}" for i, item in enumerate(context))
     if len(original) <= MAX_CONTEXT_CHARS:
         return original
     truncated_ratio = round(1.0 - MAX_CONTEXT_CHARS / len(original), 4)
@@ -45,6 +43,7 @@ def _build_context_str(context: list[dict[str, Any]]) -> str:
 @dataclass
 class EvalResult:
     """Single evaluation result."""
+
     faithfulness: float = 0.0
     relevancy: float = 0.0
     context_precision: float = 0.0
@@ -59,6 +58,7 @@ class BatchEvalResult:
     `failed_count` / `failures` 标注因评委不可用而被剔除的条目（含原始下标），
     均值仅对 `results` 计算 —— 故障条目不得以 0 分混入均值。
     """
+
     count: int = 0
     avg_faithfulness: float = 0.0
     avg_relevancy: float = 0.0
@@ -82,22 +82,22 @@ def _extract_score(text: str) -> float:
 
     # Try regex — order matters: specific patterns first, generic last
     # "8/10" style
-    m = re.search(r'(\d*\.?\d+)\s*/\s*10\b', text)
+    m = re.search(r"(\d*\.?\d+)\s*/\s*10\b", text)
     if m:
         return max(0.0, min(1.0, float(m.group(1)) / 10.0))
     # "Score: 0.8" style
-    m = re.search(r'[Ss]core[:\s]*(\d*\.?\d+)', text)
+    m = re.search(r"[Ss]core[:\s]*(\d*\.?\d+)", text)
     if m:
         val = float(m.group(1))
         if val > 1:
             val = val / 100.0 if val <= 100 else val / 10.0
         return max(0.0, min(1.0, val))
     # "85%" style
-    m = re.search(r'(\d+)%', text)
+    m = re.search(r"(\d+)%", text)
     if m:
         return max(0.0, min(1.0, float(m.group(1)) / 100.0))
     # Bare float "0.85"
-    m = re.search(r'(\d\.\d+)', text)
+    m = re.search(r"(\d\.\d+)", text)
     if m:
         return max(0.0, min(1.0, float(m.group(1))))
     return 0.0
@@ -195,9 +195,7 @@ class RAGEvaluator:
     ) -> tuple[float, str]:
         """Score whether the answer is faithful to the retrieved context."""
         context_str = _build_context_str(context)
-        prompt = FAITHFULNESS_PROMPT.format(
-            context=context_str, question=question, answer=answer
-        )
+        prompt = FAITHFULNESS_PROMPT.format(context=context_str, question=question, answer=answer)
         return await self._score(prompt)
 
     async def evaluate_relevancy(self, question: str, answer: str) -> tuple[float, str]:
@@ -210,9 +208,7 @@ class RAGEvaluator:
     ) -> tuple[float, str]:
         """Score whether retrieved documents are relevant to the question."""
         context_str = _build_context_str(context)
-        prompt = CONTEXT_PRECISION_PROMPT.format(
-            question=question, context=context_str
-        )
+        prompt = CONTEXT_PRECISION_PROMPT.format(question=question, context=context_str)
         return await self._score(prompt)
 
     async def evaluate(
@@ -265,9 +261,7 @@ class RAGEvaluator:
             results.append(r)
 
         if not results:
-            raise EvalJudgeUnavailableError(
-                "批量评估全部条目的评委调用均不可用，评价结果不可知"
-            )
+            raise EvalJudgeUnavailableError("批量评估全部条目的评委调用均不可用，评价结果不可知")
 
         n = max(1, len(results))
         return BatchEvalResult(

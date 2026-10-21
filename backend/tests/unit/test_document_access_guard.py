@@ -46,6 +46,7 @@ def _document(org_id: int = 1):
 
 # ── 断言异常类型，而不只是状态码 ────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_missing_document_raises_apperror_not_httpexception():
     """文档不存在 → `NotFoundError`（`AppError` 子类），不是裸的 404 状态码。"""
@@ -70,11 +71,14 @@ async def test_cross_org_document_raises_apperror_not_httpexception():
 
 # ── 放行路径不受影响 ────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_same_org_document_is_returned():
     document = _document(org_id=1)
 
-    assert await get_document_for_user(_db_returning(document), _user(org_id=1), "doc-1") is document
+    assert (
+        await get_document_for_user(_db_returning(document), _user(org_id=1), "doc-1") is document
+    )
 
 
 @pytest.mark.asyncio
@@ -103,9 +107,7 @@ async def test_tenant_admin_does_not_cross_org_boundary():
     document = _document(org_id=999)
 
     with pytest.raises(AuthorizationError) as exc:
-        await get_document_for_user(
-            _db_returning(document), _user(org_id=1, role="admin"), "doc-1"
-        )
+        await get_document_for_user(_db_returning(document), _user(org_id=1, role="admin"), "doc-1")
 
     assert exc.value.status_code == 403
 

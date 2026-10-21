@@ -8,6 +8,7 @@
 数据物名（ES 索引），属"分级不动"项——所以第二条只禁中文旧品牌，
 不扫 plain paicongming。
 """
+
 import ast
 import re
 from pathlib import Path

@@ -64,12 +64,14 @@ STATUS_TOOL_NOT_STARTED = ToolCallStatus.TOOL_NOT_STARTED
 STATUS_ABORTED_BEFORE_DISPATCH = ToolCallStatus.ABORTED_BEFORE_DISPATCH
 
 # 已落定、不可再被 result 覆盖的状态（重复 result 的幂等拦截面）。
-_TERMINAL_ACCOUNTED = frozenset({
-    STATUS_COMPLETED,
-    STATUS_FAILED,
-    STATUS_TOOL_OUTCOME_UNKNOWN,
-    STATUS_ABORTED_BEFORE_DISPATCH,
-})
+_TERMINAL_ACCOUNTED = frozenset(
+    {
+        STATUS_COMPLETED,
+        STATUS_FAILED,
+        STATUS_TOOL_OUTCOME_UNKNOWN,
+        STATUS_ABORTED_BEFORE_DISPATCH,
+    }
+)
 
 # 可派发/可落账的"未完成系"状态：TOOL_NOT_STARTED 允许被 resume 后的重放重开。
 _OPEN_STATES = (STATUS_REGISTERED, STATUS_TOOL_NOT_STARTED)
@@ -88,14 +90,18 @@ _seq_lock = asyncio.Lock()
 
 
 async def _load_db_max_seq(db: Any, task_id: str) -> int:
-    max_call = (await db.execute(
-        select(func.max(AgentToolCall.source_event_seq))
-        .where(AgentToolCall.task_id == task_id)
-    )).scalar()
-    max_result = (await db.execute(
-        select(func.max(AgentToolResult.source_event_seq))
-        .where(AgentToolResult.task_id == task_id)
-    )).scalar()
+    max_call = (
+        await db.execute(
+            select(func.max(AgentToolCall.source_event_seq)).where(AgentToolCall.task_id == task_id)
+        )
+    ).scalar()
+    max_result = (
+        await db.execute(
+            select(func.max(AgentToolResult.source_event_seq)).where(
+                AgentToolResult.task_id == task_id
+            )
+        )
+    ).scalar()
     return max(int(max_call or 0), int(max_result or 0))
 
 
@@ -149,11 +155,17 @@ async def register_calls(
         try:
             async with AsyncSessionLocal() as db:
                 wanted = [c[0] for c in specs]
-                existing = set((await db.execute(
-                    select(AgentToolCall.call_id)
-                    .where(AgentToolCall.task_id == task_id)
-                    .where(AgentToolCall.call_id.in_(wanted))
-                )).scalars().all())
+                existing = set(
+                    (
+                        await db.execute(
+                            select(AgentToolCall.call_id)
+                            .where(AgentToolCall.task_id == task_id)
+                            .where(AgentToolCall.call_id.in_(wanted))
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 inserted = 0
                 seen: set[str] = set()
                 for call_id, tool_name, args in specs:
@@ -161,14 +173,16 @@ async def register_calls(
                         continue
                     seen.add(call_id)
                     seq = await _next_seq(db, task_id)
-                    db.add(AgentToolCall(
-                        task_id=task_id,
-                        call_id=call_id,
-                        tool_name=tool_name,
-                        arguments=_dump_args(args),
-                        source_event_seq=seq,
-                        status=STATUS_REGISTERED,
-                    ))
+                    db.add(
+                        AgentToolCall(
+                            task_id=task_id,
+                            call_id=call_id,
+                            tool_name=tool_name,
+                            arguments=_dump_args(args),
+                            source_event_seq=seq,
+                            status=STATUS_REGISTERED,
+                        )
+                    )
                     inserted += 1
                 if inserted:
                     await db.commit()
@@ -176,7 +190,9 @@ async def register_calls(
         except IntegrityError as e:
             logger.warning(
                 "tool ledger register 唯一冲突，刷新序号后重试（task=%s, attempt=%d）: %s",
-                log_safe(task_id), attempt + 1, log_safe(e),
+                log_safe(task_id),
+                attempt + 1,
+                log_safe(e),
             )
             try:
                 async with AsyncSessionLocal() as db:
@@ -184,13 +200,16 @@ async def register_calls(
             except Exception as e2:  # noqa: BLE001 — 刷新失败即放弃本批（fail-open）
                 logger.warning(
                     "tool ledger register 序号刷新失败（task=%s）: %s",
-                    log_safe(task_id), log_safe(e2),
+                    log_safe(task_id),
+                    log_safe(e2),
                 )
                 return 0
             continue
         except Exception as e:  # noqa: BLE001 — 账本故障不得打断执行
             logger.warning(
-                "tool ledger register failed (task=%s): %s", log_safe(task_id), log_safe(e),
+                "tool ledger register failed (task=%s): %s",
+                log_safe(task_id),
+                log_safe(e),
             )
             return 0
     return 0
@@ -214,7 +233,9 @@ async def mark_dispatched(task_id: str | None, call_id: str) -> bool:
     except Exception as e:  # noqa: BLE001
         logger.warning(
             "tool ledger dispatch marker failed (task=%s, call=%s): %s",
-            log_safe(task_id), log_safe(call_id), log_safe(e),
+            log_safe(task_id),
+            log_safe(call_id),
+            log_safe(e),
         )
         return False
 
@@ -240,11 +261,17 @@ async def record_result(
     for attempt in range(2):
         try:
             async with AsyncSessionLocal() as db:
-                call = (await db.execute(
-                    select(AgentToolCall)
-                    .where(AgentToolCall.task_id == task_id)
-                    .where(AgentToolCall.call_id == call_id)
-                )).scalars().first()
+                call = (
+                    (
+                        await db.execute(
+                            select(AgentToolCall)
+                            .where(AgentToolCall.task_id == task_id)
+                            .where(AgentToolCall.call_id == call_id)
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
                 if call is None:
                     raise OrphanToolResultError(
                         f"task={task_id} call_id={call_id} 没有对应的 call 记录"
@@ -252,39 +279,54 @@ async def record_result(
                 if call.status in _TERMINAL_ACCOUNTED:
                     logger.warning(
                         "重复 tool result 已拦截（task=%s, call=%s, status=%s）",
-                        log_safe(task_id), log_safe(call_id), call.status,
+                        log_safe(task_id),
+                        log_safe(call_id),
+                        call.status,
                     )
                     return False
                 seq = await _next_seq(db, task_id)
-                db.add(AgentToolResult(
-                    task_id=task_id,
-                    call_id=call_id,
-                    tool_call_pk=call.id,
-                    source_event_seq=seq,
-                    status="success" if success else "error",
-                    result_summary=_clip_result(result),
-                    error_type=(error_type or None),
-                ))
+                db.add(
+                    AgentToolResult(
+                        task_id=task_id,
+                        call_id=call_id,
+                        tool_call_pk=call.id,
+                        source_event_seq=seq,
+                        status="success" if success else "error",
+                        result_summary=_clip_result(result),
+                        error_type=(error_type or None),
+                    )
+                )
                 call.status = STATUS_COMPLETED if success else STATUS_FAILED
                 call.updated_at = datetime.utcnow()
                 try:
                     await db.commit()
                 except IntegrityError as e:
                     await db.rollback()
-                    duplicate = (await db.execute(
-                        select(AgentToolResult.id)
-                        .where(AgentToolResult.task_id == task_id)
-                        .where(AgentToolResult.call_id == call_id)
-                    )).scalars().first()
+                    duplicate = (
+                        (
+                            await db.execute(
+                                select(AgentToolResult.id)
+                                .where(AgentToolResult.task_id == task_id)
+                                .where(AgentToolResult.call_id == call_id)
+                            )
+                        )
+                        .scalars()
+                        .first()
+                    )
                     if duplicate is not None:
                         logger.warning(
                             "重复 tool result 命中唯一约束（task=%s, call=%s）: %s",
-                            log_safe(task_id), log_safe(call_id), log_safe(e),
+                            log_safe(task_id),
+                            log_safe(call_id),
+                            log_safe(e),
                         )
                         return False
                     logger.warning(
                         "tool ledger result 序号冲突，刷新后重试（task=%s, call=%s, attempt=%d）: %s",
-                        log_safe(task_id), log_safe(call_id), attempt + 1, log_safe(e),
+                        log_safe(task_id),
+                        log_safe(call_id),
+                        attempt + 1,
+                        log_safe(e),
                     )
                     await _resync_seq(db, task_id)
                     continue
@@ -294,7 +336,9 @@ async def record_result(
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 "tool ledger result failed (task=%s, call=%s): %s",
-                log_safe(task_id), log_safe(call_id), log_safe(e),
+                log_safe(task_id),
+                log_safe(call_id),
+                log_safe(e),
             )
             return False
     return False
@@ -346,6 +390,8 @@ async def synthesize_terminal(task_id: str | None, *, reason: str) -> dict[str, 
     except Exception as e:  # noqa: BLE001
         logger.warning(
             "tool ledger synthesis failed (task=%s, reason=%s): %s",
-            log_safe(task_id), reason, log_safe(e),
+            log_safe(task_id),
+            reason,
+            log_safe(e),
         )
     return counts

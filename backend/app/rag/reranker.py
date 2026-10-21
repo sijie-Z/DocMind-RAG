@@ -16,6 +16,7 @@ issue #190/#185/#189 契约（本模块的对外承诺）：
   ``RAG_RERANK_*`` 为 legacy 别名；local 模型用 ``RERANK_LOCAL_MODEL``；
   送审 passage 统一带 ``文件:<filename>`` 出处前缀。
 """
+
 import asyncio
 import logging
 import re
@@ -34,12 +35,17 @@ _UNKNOWN_FILENAME = "未知"
 
 # ── 配置解析（单一真源；legacy RAG_RERANK_* 别名兜底） ───────────
 
+
 def _resolve_api_key() -> str | None:
-    return getattr(settings, "RERANK_API_KEY", None) or getattr(settings, "RAG_RERANK_API_KEY", None)
+    return getattr(settings, "RERANK_API_KEY", None) or getattr(
+        settings, "RAG_RERANK_API_KEY", None
+    )
 
 
 def _resolve_api_url() -> str | None:
-    return getattr(settings, "RERANK_API_URL", None) or getattr(settings, "RAG_RERANK_API_URL", None)
+    return getattr(settings, "RERANK_API_URL", None) or getattr(
+        settings, "RAG_RERANK_API_URL", None
+    )
 
 
 def _resolve_api_model() -> str:
@@ -61,6 +67,7 @@ def _resolve_llm_model() -> str:
 
 
 # ── 命中形态兼容 ─────────────────────────────────────────────────
+
 
 def _hit_text(hit: dict) -> str:
     """提取命中片段的正文文本。
@@ -91,6 +98,7 @@ def _hit_passage(hit: dict) -> str:
 
 
 # ── Local cross-encoder (lazy singleton) ─────────────────────────
+
 
 @lru_cache(maxsize=1)
 def _get_cross_encoder(model_name: str | None = None):
@@ -157,6 +165,7 @@ async def _rerank_local(
 
 # ── Zhipu rerank API (paid) ──────────────────────────────────────
 
+
 async def _rerank_zhipu(
     query: str, candidates: list[dict], top_n: int
 ) -> tuple[list[dict] | None, str | None]:
@@ -206,7 +215,9 @@ async def _rerank_zhipu(
                         except (TypeError, ValueError):
                             logger.warning(
                                 "Zhipu rerank returned non-numeric relevance_score "
-                                "for index %s: %r", idx, score,
+                                "for index %s: %r",
+                                idx,
+                                score,
                             )
                     ordered.append(hit)
                     used.add(idx)
@@ -220,6 +231,7 @@ async def _rerank_zhipu(
 
 
 # ── LLM-based reranker (paid fallback) ────────────────────────────
+
 
 async def _rerank_llm(
     query: str, candidates: list[dict], top_n: int, llm_client
@@ -269,6 +281,7 @@ async def _rerank_llm(
 
 # ── Public API ────────────────────────────────────────────────────
 
+
 def _record_rerank_metric(path: str, outcome: str) -> None:
     from app.core.prometheus import RAG_RERANK_TOTAL
 
@@ -286,9 +299,7 @@ def _rerank_info(status: str, path: str, reason: str | None = None) -> dict:
     }
 
 
-async def rerank(
-    query: str, hits: list[dict], rerank_client=None
-) -> tuple[list[dict], dict]:
+async def rerank(query: str, hits: list[dict], rerank_client=None) -> tuple[list[dict], dict]:
     """Rerank hits using local cross-encoder (free), with API/LLM fallbacks.
 
     Strategy priority:
@@ -308,6 +319,7 @@ async def rerank(
         return hits, _rerank_info("disabled", "noop", "RAG_ENABLE_RERANKER=False")
 
     from app.core.prometheus import RAG_RERANK_LATENCY
+
     start = time.perf_counter()
 
     top_n = max(1, int(settings.RAG_RERANK_TOP_N or 20))

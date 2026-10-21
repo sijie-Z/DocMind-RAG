@@ -69,10 +69,12 @@ class _ListRedis:
 async def test_record_sample_uses_injected_collect_and_clock(monkeypatch):
     """确定性值断言：cpu/memory 取注入采集值；timestamp 为注入时钟的 int 秒。"""
     monkeypatch.setattr("app.core.redis.redis_client", None)
-    collect = iter([
-        {"cpu_percent": 7.5, "memory_percent": 63.25},
-        {"cpu_percent": 8.0, "memory_percent": 64.0},
-    ])
+    collect = iter(
+        [
+            {"cpu_percent": 7.5, "memory_percent": 63.25},
+            {"cpu_percent": 8.0, "memory_percent": 64.0},
+        ]
+    )
     clock = iter([100.9, 160.1])
     sampler = SystemMetricsSampler(
         history_size=10, collect_fn=lambda: next(collect), now_fn=lambda: next(clock)
@@ -91,9 +93,7 @@ async def test_record_sample_returns_and_appends_in_order(monkeypatch):
     """get_history 旧→新返回，且返回副本（外部改动不污染内部缓冲）。"""
     monkeypatch.setattr("app.core.redis.redis_client", None)
     clock = iter([1000, 1060, 1120])
-    sampler = SystemMetricsSampler(
-        collect_fn=_fixed_collect(5.0, 50.0), now_fn=lambda: next(clock)
-    )
+    sampler = SystemMetricsSampler(collect_fn=_fixed_collect(5.0, 50.0), now_fn=lambda: next(clock))
     for _ in range(3):
         await sampler.record_sample()
 
@@ -158,9 +158,7 @@ async def test_persist_failure_keeps_memory_sample(monkeypatch):
             raise AssertionError("lpush 已失败，不应到达 ltrim")
 
     monkeypatch.setattr("app.core.redis.redis_client", _DownRedis())
-    sampler = SystemMetricsSampler(
-        collect_fn=_fixed_collect(9.0, 90.0), now_fn=lambda: 7.0
-    )
+    sampler = SystemMetricsSampler(collect_fn=_fixed_collect(9.0, 90.0), now_fn=lambda: 7.0)
 
     sample = await sampler.record_sample()
     assert await sampler.get_history() == [sample]
@@ -173,9 +171,7 @@ async def test_persist_failure_keeps_memory_sample(monkeypatch):
 async def test_get_history_empty_without_samples(monkeypatch):
     """态 2（空）：无内存样本且无 Redis → 空列表（诚实空态）。"""
     monkeypatch.setattr("app.core.redis.redis_client", None)
-    sampler = SystemMetricsSampler(
-        collect_fn=_fixed_collect(1.0, 1.0), now_fn=lambda: 0.0
-    )
+    sampler = SystemMetricsSampler(collect_fn=_fixed_collect(1.0, 1.0), now_fn=lambda: 0.0)
     assert await sampler.get_history() == []
 
 
@@ -183,9 +179,7 @@ async def test_get_history_empty_without_samples(monkeypatch):
 async def test_get_history_key_missing_returns_empty(monkeypatch):
     """态 3（键缺失）：Redis 在但键不存在（lrange 空）→ 空列表，不抛错。"""
     monkeypatch.setattr("app.core.redis.redis_client", _ListRedis([]))
-    sampler = SystemMetricsSampler(
-        collect_fn=_fixed_collect(1.0, 1.0), now_fn=lambda: 0.0
-    )
+    sampler = SystemMetricsSampler(collect_fn=_fixed_collect(1.0, 1.0), now_fn=lambda: 0.0)
     assert await sampler.get_history() == []
 
 
@@ -197,9 +191,7 @@ async def test_get_history_backfills_from_redis_oldest_first(monkeypatch):
         json.dumps({"cpu_percent": 1.0, "memory_percent": 10.0, "timestamp": 100}),
     ]
     monkeypatch.setattr("app.core.redis.redis_client", _ListRedis(newest_first))
-    sampler = SystemMetricsSampler(
-        collect_fn=_fixed_collect(1.0, 1.0), now_fn=lambda: 0.0
-    )
+    sampler = SystemMetricsSampler(collect_fn=_fixed_collect(1.0, 1.0), now_fn=lambda: 0.0)
 
     history = await sampler.get_history()
     assert [point["timestamp"] for point in history] == [100, 200]
@@ -213,9 +205,7 @@ async def test_get_history_skips_corrupt_redis_entries(monkeypatch):
         json.dumps({"cpu_percent": 3.0, "memory_percent": 30.0, "timestamp": 300}),
     ]
     monkeypatch.setattr("app.core.redis.redis_client", _ListRedis(items))
-    sampler = SystemMetricsSampler(
-        collect_fn=_fixed_collect(1.0, 1.0), now_fn=lambda: 0.0
-    )
+    sampler = SystemMetricsSampler(collect_fn=_fixed_collect(1.0, 1.0), now_fn=lambda: 0.0)
 
     history = await sampler.get_history()
     assert [point["timestamp"] for point in history] == [300]
@@ -366,9 +356,7 @@ async def test_metrics_application_branch_unchanged(monkeypatch):
         "get_history",
         AsyncMock(return_value=[s1, s2]),
     )
-    assert await monitoring_mod.get_metrics("application", "1h", None) == {
-        "data": [s1, s2]
-    }
+    assert await monitoring_mod.get_metrics("application", "1h", None) == {"data": [s1, s2]}
 
 
 @pytest.mark.asyncio

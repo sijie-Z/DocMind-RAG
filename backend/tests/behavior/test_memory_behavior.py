@@ -5,7 +5,6 @@ internal methods are called.  The doc in backend/docs/memory_system.md is the
 truth reference for field names, default sizes, and scoring formulas.
 """
 
-
 import pytest
 
 from app.services.memory_service import (
@@ -66,7 +65,8 @@ class TestShortTermMemoryDefaultCapacity:
 
 class TestLongTermScoring:
     """Doc §3.2: keyword path = 0.5*relevance + 0.3*decay + 0.2*min(access/10, 1);
-                     semantic path = 0.6*sim + 0.4*decay."""
+    semantic path = 0.6*sim + 0.4*decay."""
+
     # keyword scoring is not pure — depends on time. But formula itself testable.
     pass  # TODO
 
@@ -76,7 +76,7 @@ class TestLongTermScoring:
 
 class TestRecallDefaultLayers:
     """Doc §4: default memory_types is ["short_term","long_term","reflective"],
-       NOT ["long_term","reflective"]."""
+    NOT ["long_term","reflective"]."""
 
     @pytest.mark.asyncio
     async def test_default_includes_short_term(self):
@@ -86,8 +86,9 @@ class TestRecallDefaultLayers:
         # No embedding provider -> falls back to keyword search
         results = await ams.recall("测试", top_k=5)
         contents = [r.get("content", "") for r in results]
-        assert any("short测试" in c for c in contents), \
+        assert any("short测试" in c for c in contents), (
             f"short_term should be included in default recall, got: {contents}"
+        )
 
 
 # ── store_interaction writes only short_term (twice) ─────────────────────────
@@ -95,7 +96,7 @@ class TestRecallDefaultLayers:
 
 class TestStoreInteractionBehavior:
     """Doc §5 Phase 4 fix: store_interaction writes TWO short_term entries,
-       NOT one short_term + one long_term.
+    NOT one short_term + one long_term.
     """
 
     @pytest.mark.asyncio
@@ -106,23 +107,19 @@ class TestStoreInteractionBehavior:
         await ams.store_interaction("你好", "你好！有什么可以帮你的?")
         # Both entries went to short_term, NOT long_term
         assert len(ams.short_term.buffer) >= 2, "should write two short_term entries"
-        long_term_items = sum(
-            len(items) for items in ams.long_term.memories.values()
-        )
-        assert long_term_items == 0, \
-            "store_interaction should NOT write to long_term"
+        long_term_items = sum(len(items) for items in ams.long_term.memories.values())
+        assert long_term_items == 0, "store_interaction should NOT write to long_term"
 
     @pytest.mark.asyncio
     async def test_store_experience_writes_long_term_and_failed_reflective(self):
         ams = AgentMemorySystem(agent_id="test_store_exp")
         await ams.store_experience(success=False, action="search", result="timeout")
-        long_term_items = sum(
-            len(items) for items in ams.long_term.memories.values()
-        )
+        long_term_items = sum(len(items) for items in ams.long_term.memories.values())
         assert long_term_items >= 1, "store_experience should write to long_term"
         # Failed experience should also hit reflective.lessons
-        assert len(ams.reflective.lessons) >= 1, \
+        assert len(ams.reflective.lessons) >= 1, (
             "failed store_experience should call reflective.add_lesson"
+        )
 
 
 # ── WorkingMemory / ReflectiveMemory data structures ─────────────────────────
@@ -166,8 +163,9 @@ class TestTokenEstimation:
     def test_fallback_uses_2_5_divisor(self):
         from app.agent.context import CHARS_PER_TOKEN
 
-        assert CHARS_PER_TOKEN == 2.5, \
+        assert CHARS_PER_TOKEN == 2.5, (
             f"CHARS_PER_TOKEN should be 2.5 (doc §7), got {CHARS_PER_TOKEN}"
+        )
 
     def test_estimate_tokens_returns_reasonable_count(self):
         from app.agent.context import estimate_tokens
@@ -178,8 +176,9 @@ class TestTokenEstimation:
         # Either way, it must NOT be int(2500 / 3) = 833 (the old doc bug).
         tokens = estimate_tokens(text)
         assert tokens >= 1, f"estimated tokens should be positive, got {tokens}"
-        assert tokens != 833, \
+        assert tokens != 833, (
             f"old doc bug: len(text)//3 would give 833; actual estimate_tokens returned {tokens}"
+        )
 
 
 # ── AgentMemorySystem constructor ───────────────────────────────────────────

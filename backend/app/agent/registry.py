@@ -32,6 +32,7 @@ Usage:
         ...
         return ToolResult.success(data={"records": [...], "total": 42})
 """
+
 import asyncio
 import inspect
 import json
@@ -93,16 +94,21 @@ class ToolError:
     ]
 
     code: ToolErrorType  # restructured — must be one of above
-    message: str       # human-readable (Chinese preferred)
-    raw: Any = None    # original exception / API error body for debugging
+    message: str  # human-readable (Chinese preferred)
+    raw: Any = None  # original exception / API error body for debugging
 
     def to_dict(self) -> dict[str, Any]:
-        return {"code": self.code, "message": self.message, "raw": str(self.raw)[:500] if self.raw else None}
+        return {
+            "code": self.code,
+            "message": self.message,
+            "raw": str(self.raw)[:500] if self.raw else None,
+        }
 
 
 @dataclass
 class ToolMeta:
     """Execution metadata attached to every tool call."""
+
     latency_ms: float = 0.0
     tool_name: str = ""
     retry_count: int = 0
@@ -135,6 +141,7 @@ class ToolResult:
         - success → json.dumps(data) if data else "OK"
         - failure → "Error: [{code}] {message}"
     """
+
     success: bool
     data: Any = None
     error: ToolError | None = None
@@ -146,9 +153,15 @@ class ToolResult:
         return cls(success=True, data=data, meta=meta or ToolMeta())
 
     @classmethod
-    def fail(cls, code: str, message: str, raw: Any = None, meta: ToolMeta | None = None) -> "ToolResult":
+    def fail(
+        cls, code: str, message: str, raw: Any = None, meta: ToolMeta | None = None
+    ) -> "ToolResult":
         """Factory: failed result with structured error."""
-        return cls(success=False, error=ToolError(code=code, message=message, raw=raw), meta=meta or ToolMeta())
+        return cls(
+            success=False,
+            error=ToolError(code=code, message=message, raw=raw),
+            meta=meta or ToolMeta(),
+        )
 
     def __str__(self) -> str:
         """Backward-compatible string representation for old callers.
@@ -192,6 +205,7 @@ class ToolEntry:
         category         — business domain ("feishu", "dingtalk", "search", ...)
         semantic         — behavioural semantics for Agent planning (see below)
     """
+
     name: str
     description: str
     parameters: dict[str, Any]
@@ -201,23 +215,25 @@ class ToolEntry:
 
     # ── v2 fields ──
     output_schema: dict[str, Any] | None = None
-    auth_handler: str | None = None          # "feishu_tenant_token" | "dingtalk_token" | "api_key" | None
-    rate_limit: int | None = None            # max QPS
+    auth_handler: str | None = None  # "feishu_tenant_token" | "dingtalk_token" | "api_key" | None
+    rate_limit: int | None = None  # max QPS
     timeout: float = 30.0
 
     # ── v2.1 semantic fields ──
-    category: str = ""                       # business domain for tool grouping
+    category: str = ""  # business domain for tool grouping
     # ── v2.2 risk declaration（HITL 审批门的判定输入，见 app/agent/approval.py）──
     # 工具作者显式声明的风险等级："low" | "medium" | "high"；"" = 未声明
     # （由 approval.TOOL_RISK_LEVELS 集中判定表 + 语义兜底补齐）。
     risk_level: str = ""
-    semantic: dict[str, Any] = field(default_factory=lambda: {
-        "type": "read_only",                 # read_only | mutating | long_running
-        "idempotent": True,                  # safe to retry without side effects
-        "retry_safe": True,                  # can auto-retry on transient errors
-        "consistency": "eventual",           # strong | eventual
-        "parallel_safe": True,               # safe to call concurrently
-    })
+    semantic: dict[str, Any] = field(
+        default_factory=lambda: {
+            "type": "read_only",  # read_only | mutating | long_running
+            "idempotent": True,  # safe to retry without side effects
+            "retry_safe": True,  # can auto-retry on transient errors
+            "consistency": "eventual",  # strong | eventual
+            "parallel_safe": True,  # safe to call concurrently
+        }
+    )
 
     def to_openai_schema(self) -> dict[str, Any]:
         """Convert to OpenAI function-calling schema."""
@@ -269,6 +285,7 @@ class ToolEntry:
 @dataclass
 class HookContext:
     """Context passed to pre/post hooks for a single tool execution."""
+
     tool_name: str
     arguments: dict[str, Any]
     entry: ToolEntry
@@ -288,6 +305,7 @@ PostHook = Callable[[ToolResult, HookContext], Coroutine[Any, Any, None]]
 
 class ToolAbortError(Exception):
     """Raised by a pre-hook to abort tool execution with a structured error."""
+
     def __init__(self, code: str, message: str, raw: Any = None):
         self.code = code
         self.message = message
@@ -345,13 +363,17 @@ class ToolRegistry:
         risk_level: str = "",
     ) -> ToolEntry:
         """Register a tool. All v2/v2.1 params are optional — zero migration needed."""
-        resolved_semantic = semantic if semantic is not None else {
-            "type": "read_only",
-            "idempotent": True,
-            "retry_safe": True,
-            "consistency": "eventual",
-            "parallel_safe": True,
-        }
+        resolved_semantic = (
+            semantic
+            if semantic is not None
+            else {
+                "type": "read_only",
+                "idempotent": True,
+                "retry_safe": True,
+                "consistency": "eventual",
+                "parallel_safe": True,
+            }
+        )
         entry = ToolEntry(
             name=name,
             description=description,
@@ -371,9 +393,11 @@ class ToolRegistry:
             risk_level=risk_level,
         )
         self._tools[name] = entry
-        logger.info("Registered tool: %s%s",
-                     name,
-                     f" [auth={auth_handler}, qps={rate_limit}]" if auth_handler or rate_limit else "")
+        logger.info(
+            "Registered tool: %s%s",
+            name,
+            f" [auth={auth_handler}, qps={rate_limit}]" if auth_handler or rate_limit else "",
+        )
         return entry
 
     def get(self, name: str) -> ToolEntry | None:
@@ -461,6 +485,7 @@ class ToolRegistry:
         """
         try:
             from app.core.redis import redis_client
+
             if not redis_client:
                 return True
             key = f"agent:tool_rl:{tool_name}:{user_id or 'anon'}"
@@ -497,6 +522,7 @@ class ToolRegistry:
         span = None
         try:
             from app.agent.observability import get_langfuse
+
             lf = get_langfuse()
             if lf:
                 span = lf.span(
@@ -543,12 +569,20 @@ class ToolRegistry:
             handler_params = list(sig.parameters.keys())
             ctx_kwargs = {k: v for k, v in context.items() if k in handler_params}
             # Merge any context that hooks injected (e.g. auth tokens)
-            ctx_kwargs.update({k: v for k, v in hook_ctx.extra.items() if k in handler_params and k not in ctx_kwargs})
+            ctx_kwargs.update(
+                {
+                    k: v
+                    for k, v in hook_ctx.extra.items()
+                    if k in handler_params and k not in ctx_kwargs
+                }
+            )
 
             # 安全加固：强制执行工具的 rate_limit 与 timeout 元数据
             # （此前只记录不打钩，工具调用链没有真正的限速/超时兜底）
             if entry.rate_limit and entry.rate_limit > 0:
-                allowed = await self._check_tool_rate_limit(name, context.get("user_id"), entry.rate_limit)
+                allowed = await self._check_tool_rate_limit(
+                    name, context.get("user_id"), entry.rate_limit
+                )
                 if not allowed:
                     elapsed = (time.perf_counter() - start) * 1000
                     result = ToolResult.fail(
@@ -587,9 +621,7 @@ class ToolRegistry:
             result.meta.tool_name = name
 
             if entry.output_schema and result.success:
-                valid, reason = validate_against_schema(
-                    result.data, entry.output_schema
-                )
+                valid, reason = validate_against_schema(result.data, entry.output_schema)
                 if not valid:
                     result = ToolResult.fail(
                         code="validation_error",
@@ -600,8 +632,12 @@ class ToolRegistry:
 
         except ToolAbortError as e:
             elapsed = (time.perf_counter() - start) * 1000
-            result = ToolResult.fail(code=e.code, message=e.message, raw=e.raw,
-                                      meta=ToolMeta(latency_ms=elapsed, tool_name=name))
+            result = ToolResult.fail(
+                code=e.code,
+                message=e.message,
+                raw=e.raw,
+                meta=ToolMeta(latency_ms=elapsed, tool_name=name),
+            )
         except TimeoutError:
             # Classify explicitly so the retry loop can select the "timeout" policy
             # instead of falling through to the unknown/fatal default.
@@ -689,8 +725,19 @@ class ToolRegistry:
         raw_str = str(raw).lower()
 
         # ── Retryable: timeout-class ──
-        if any(kw in raw_str for kw in ("timeout", "timed out", "deadline", "operation timed out",
-                                          "no progress", "idle", "stalled", "stream hung")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "timeout",
+                "timed out",
+                "deadline",
+                "operation timed out",
+                "no progress",
+                "idle",
+                "stalled",
+                "stream hung",
+            )
+        ):
             # Distinguish ordinary timeout from idle (no progress) timeout
             if any(kw in raw_str for kw in ("no progress", "idle", "stalled", "stream hung")):
                 result.error.code = "idle_timeout"
@@ -707,15 +754,33 @@ class ToolRegistry:
             return
 
         # ── Retryable: connection / network ──
-        if any(kw in raw_str for kw in ("connectionrefused", "econnrefused", "connection refused",
-                                          "cannot assign requested address", "network is unreachable",
-                                          "getaddrinfo failed", "no route to host")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "connectionrefused",
+                "econnrefused",
+                "connection refused",
+                "cannot assign requested address",
+                "network is unreachable",
+                "getaddrinfo failed",
+                "no route to host",
+            )
+        ):
             result.error.code = "unreachable"
             result.error.message = f"无法连接目标服务: {result.error.message}"
             return
 
-        if any(kw in raw_str for kw in ("connection reset", "connectionreset", "econnreset",
-                                          "broken pipe", "connection aborted", "incomplete read")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "connection reset",
+                "connectionreset",
+                "econnreset",
+                "broken pipe",
+                "connection aborted",
+                "incomplete read",
+            )
+        ):
             result.error.code = "interrupted"
             result.error.message = f"连接中断: {result.error.message}"
             return
@@ -727,8 +792,18 @@ class ToolRegistry:
             return
 
         # ── Non-retryable: auth ──
-        if any(kw in raw_str for kw in ("401", "unauthorized", "unauthenticated", "invalid api key",
-                                          "incorrect api key", "token expired", "token revoked")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "401",
+                "unauthorized",
+                "unauthenticated",
+                "invalid api key",
+                "incorrect api key",
+                "token expired",
+                "token revoked",
+            )
+        ):
             if any(kw in raw_str for kw in ("refresh", "renew", "grant type", "token expired")):
                 result.error.code = "auth_expired_refreshable"
             else:
@@ -737,90 +812,211 @@ class ToolRegistry:
 
         # ── Non-retryable: permission ──
         # 注：insufficient_quota 已移至 budget 分支（余额耗尽属预算语义，issue #203 ②）
-        if any(kw in raw_str for kw in ("403", "forbidden", "permission", "access denied",
-                                          "not allowed")):
+        if any(
+            kw in raw_str
+            for kw in ("403", "forbidden", "permission", "access denied", "not allowed")
+        ):
             result.error.code = "permission_denied"
             return
 
         # ── Non-retryable: configuration ── (must check before "not found")
-        if any(kw in raw_str for kw in ("invalid config", "misconfigur", "bad model",
-                                          "model not found", "unknown model", "no such model",
-                                          "not supported", "disabled")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "invalid config",
+                "misconfigur",
+                "bad model",
+                "model not found",
+                "unknown model",
+                "no such model",
+                "not supported",
+                "disabled",
+            )
+        ):
             result.error.code = "invalid_configuration"
             return
 
         # ── Non-retryable: not found ──
-        if any(kw in raw_str for kw in ("404", "not found", "notfound", "no such file",
-                                          "document not found", "resource not found")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "404",
+                "not found",
+                "notfound",
+                "no such file",
+                "document not found",
+                "resource not found",
+            )
+        ):
             result.error.code = "not_found"
             return
 
         # ── Non-retryable: validation / input ──
-        if any(kw in raw_str for kw in ("400", "validation", "invalid parameter", "bad request",
-                                          "missing required", "out of range")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "400",
+                "validation",
+                "invalid parameter",
+                "bad request",
+                "missing required",
+                "out of range",
+            )
+        ):
             result.error.code = "validation_error"
             return
 
         # ── Non-retryable: payload / context length ──
-        if any(kw in raw_str for kw in ("413", "payload too large", "request entity too large",
-                                          "context length", "maximum context length",
-                                          "context window exceeded", "max tokens", "token limit",
-                                          "reduce the length")):
-            if any(kw in raw_str for kw in ("context length", "context window", "maximum context",
-                                              "reduce the length")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "413",
+                "payload too large",
+                "request entity too large",
+                "context length",
+                "maximum context length",
+                "context window exceeded",
+                "max tokens",
+                "token limit",
+                "reduce the length",
+            )
+        ):
+            if any(
+                kw in raw_str
+                for kw in (
+                    "context length",
+                    "context window",
+                    "maximum context",
+                    "reduce the length",
+                )
+            ):
                 result.error.code = "context_length_exceeded"
             else:
                 result.error.code = "payload_too_large"
             return
 
         # ── Non-retryable: empty / malformed ──
-        if any(kw in raw_str for kw in ("jsondecode", "json parse", "malformed", "unexpected token",
-                                          "invalid json", "cannot parse", "deserialization")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "jsondecode",
+                "json parse",
+                "malformed",
+                "unexpected token",
+                "invalid json",
+                "cannot parse",
+                "deserialization",
+            )
+        ):
             result.error.code = "serialization_error"
             return
 
-        if any(kw in raw_str for kw in ("empty response", "null response", "no content",
-                                          "returned nothing", "no choice", "no completion")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "empty response",
+                "null response",
+                "no content",
+                "returned nothing",
+                "no choice",
+                "no completion",
+            )
+        ):
             result.error.code = "empty_response"
             return
 
         # ── Non-retryable: truncation ──
-        if any(kw in raw_str for kw in ("truncat", "finish_reason", "stop reason", "max_tokens",
-                                          "output limit", "length")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "truncat",
+                "finish_reason",
+                "stop reason",
+                "max_tokens",
+                "output limit",
+                "length",
+            )
+        ):
             if any(kw in raw_str for kw in ("truncat", "max_tokens", "output limit")):
                 result.error.code = "max_tokens_truncation"
                 return
 
         # ── Non-retryable: internal / permanent ──
-        if any(kw in raw_str for kw in ("500", "internal server error", "internal error",
-                                          "service unavailable", "503", "server error")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "500",
+                "internal server error",
+                "internal error",
+                "service unavailable",
+                "503",
+                "server error",
+            )
+        ):
             result.error.code = "api_error"
             return
 
         # ── Non-retryable: budget ──
         # insufficient_quota（OpenAI 余额耗尽）从 permission 分支移来，issue #203 ②
-        if any(kw in raw_str for kw in ("billing", "budget", "quota exceeded", "insufficient_quota",
-                                          "insufficient funds",
-                                          "account balance", "payment required", "402")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "billing",
+                "budget",
+                "quota exceeded",
+                "insufficient_quota",
+                "insufficient funds",
+                "account balance",
+                "payment required",
+                "402",
+            )
+        ):
             result.error.code = "budget_exceeded"
             return
 
         # ── Non-retryable: repeated failure (doom loop) ──
-        if any(kw in raw_str for kw in ("repetitive", "doom loop", "stuck in loop",
-                                          "identical response", "no variation")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "repetitive",
+                "doom loop",
+                "stuck in loop",
+                "identical response",
+                "no variation",
+            )
+        ):
             result.error.code = "doom_loop_detected"
             return
 
         # ── Non-retryable: configuration ──
-        if any(kw in raw_str for kw in ("invalid config", "misconfigur", "bad model",
-                                          "model not found", "unknown model", "no such model",
-                                          "not supported", "disabled")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "invalid config",
+                "misconfigur",
+                "bad model",
+                "model not found",
+                "unknown model",
+                "no such model",
+                "not supported",
+                "disabled",
+            )
+        ):
             result.error.code = "invalid_configuration"
             return
 
         # ── Image / multimodal ──
-        if any(kw in raw_str for kw in ("image", "multipart", "attachment", "media",
-                                          "unsupported format", "resolution")):
+        if any(
+            kw in raw_str
+            for kw in (
+                "image",
+                "multipart",
+                "attachment",
+                "media",
+                "unsupported format",
+                "resolution",
+            )
+        ):
             result.error.code = "image_processing_error"
             return
 
@@ -870,6 +1066,7 @@ def register_tool(
         )
         async def feishu_table(app_token: str, **ctx) -> ToolResult | str: ...
     """
+
     def decorator(func: Callable[..., Coroutine[Any, Any, str | ToolResult]]):
         tool_registry.register(
             name=name,
@@ -890,4 +1087,5 @@ def register_tool(
             risk_level=risk_level,
         )
         return func
+
     return decorator

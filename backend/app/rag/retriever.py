@@ -1,4 +1,5 @@
 """Hybrid retriever — keyword + vector search with RRF fusion."""
+
 import asyncio
 import hashlib
 import logging
@@ -79,8 +80,22 @@ def _minimum_should_match_for(query_text: str) -> int | str:
 # 标题 bigram 占 8 位，内容 bigram 被截断出列表、overlap 分子结构性归零；
 # 环 C：改为「语料表成员优先 + 上限 16」（见 _keyword_arm_terms）。
 _CORPUS_GLOSSARY: tuple[str, ...] = (
-    "文档", "数据", "知识", "组织", "故障", "识库", "告警", "恢复",
-    "服务", "的文", "负责", "响应", "成员", "演练", "上传", "保留",
+    "文档",
+    "数据",
+    "知识",
+    "组织",
+    "故障",
+    "识库",
+    "告警",
+    "恢复",
+    "服务",
+    "的文",
+    "负责",
+    "响应",
+    "成员",
+    "演练",
+    "上传",
+    "保留",
 )
 
 # keyword 臂术语表上限（机制 3 旧值 12；环 C 起 16）。
@@ -152,8 +167,18 @@ def _wildcard_terms(query: str) -> list[str]:
 # 未纳入「廿」（语料与查询均未出现，扩集需同步 evals 口径并显式更新本注释）。
 _CLAUSE_NUM_SPAN_RE = re.compile(r"第[ \t]*([0-9０-９〇零一二三四五六七八九十百千两]+)[ \t]*条")
 _CN_DIGITS = {
-    "零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3,
-    "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+    "零": 0,
+    "〇": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
 }
 _CN_UNITS = {"十": 10, "百": 100, "千": 1000}
 
@@ -227,7 +252,7 @@ def _numeral_clause_variants(query: str) -> list[str]:
         last = 0
         changed = False
         for m in spans:
-            pieces.append(query[last:m.start()])
+            pieces.append(query[last : m.start()])
             replacement = None
             n = _parse_clause_number(m.group(1))
             if n is not None and n >= 1:
@@ -360,9 +385,7 @@ def _query_target_sections(query: str) -> list[str]:
     return targets
 
 
-def _hit_defines_target(
-    hit: dict, target_clauses: set[int], target_sections: set[str]
-) -> bool:
+def _hit_defines_target(hit: dict, target_clauses: set[int], target_sections: set[str]) -> bool:
     """该命中是否**定义了**查询目标的条号/章节（结构化字段来自索引侧定义位）。
 
     只读顶层 ``clause_no`` / ``section_no``；旧索引没有这些字段时恒 False，
@@ -431,7 +454,9 @@ class HybridRetriever:
 
     # ---- Keyword search ----
 
-    async def _keyword_hits(self, query: str, filters: list[dict], candidate_size: int) -> list[dict]:
+    async def _keyword_hits(
+        self, query: str, filters: list[dict], candidate_size: int
+    ) -> list[dict]:
         enable_qr = bool(getattr(settings, "RAG_ENABLE_QUERY_REWRITE", True))
         rewrite_queries = rewrite_query_candidates(query)
         # #208 Phase 2 决策 c：`第X条` 数形互为扩展（查询侧同义扩展）——与本地
@@ -483,22 +508,28 @@ class HybridRetriever:
             # 「*整句*」死项）；见 _wildcard_terms。
             wildcard_terms = _wildcard_terms(q_text)
             should_clauses = [
-                {"multi_match": {
-                    "query": q_text, "fields": boost_fields,
-                    "type": "best_fields", "fuzziness": "AUTO",
-                    # #208 Phase 2 决策 b：带《…》全称时按「剔除标题 token 后的 30%」计算。
-                    "minimum_should_match": _minimum_should_match_for(q_text),
-                }},
+                {
+                    "multi_match": {
+                        "query": q_text,
+                        "fields": boost_fields,
+                        "type": "best_fields",
+                        "fuzziness": "AUTO",
+                        # #208 Phase 2 决策 b：带《…》全称时按「剔除标题 token 后的 30%」计算。
+                        "minimum_should_match": _minimum_should_match_for(q_text),
+                    }
+                },
             ]
             if wildcard_terms:
-                should_clauses.append({
-                    "query_string": {
-                        "query": " AND ".join(wildcard_terms),
-                        "fields": ["content^2", "filename^1.2"],
-                        "analyze_wildcard": True,
-                        "default_operator": "AND",
+                should_clauses.append(
+                    {
+                        "query_string": {
+                            "query": " AND ".join(wildcard_terms),
+                            "fields": ["content^2", "filename^1.2"],
+                            "analyze_wildcard": True,
+                            "default_operator": "AND",
+                        }
                     }
-                })
+                )
             es_query = {
                 "size": candidate_size,
                 "query": {
@@ -507,7 +538,9 @@ class HybridRetriever:
                         "filter": filters,
                     }
                 },
-                "highlight": {"fields": {"content": {"fragment_size": 120, "number_of_fragments": 2}}},
+                "highlight": {
+                    "fields": {"content": {"fragment_size": 120, "number_of_fragments": 2}}
+                },
                 "_source": _HIT_SOURCE_FIELDS,
             }
             res = await ElasticsearchTools.search_documents(es_query)
@@ -692,28 +725,48 @@ class HybridRetriever:
             doc_id = hit.get("_id")
             if not doc_id:
                 continue
-            row = fused.setdefault(doc_id, {
-                "_id": doc_id, "_source": hit.get("_source", {}), "_score": 0.0,
-                "keyword_rank": None, "vector_rank": None,
-                "keyword_score": 0.0, "vector_score": 0.0,
-                "rewrite_hits": 0, "has_keyword": False, "has_vector": False,
-            })
+            row = fused.setdefault(
+                doc_id,
+                {
+                    "_id": doc_id,
+                    "_source": hit.get("_source", {}),
+                    "_score": 0.0,
+                    "keyword_rank": None,
+                    "vector_rank": None,
+                    "keyword_score": 0.0,
+                    "vector_score": 0.0,
+                    "rewrite_hits": 0,
+                    "has_keyword": False,
+                    "has_vector": False,
+                },
+            )
             row["_score"] += 1.0 / (k + rank)
             row["keyword_rank"] = rank
             row["keyword_score"] = float(hit.get("_score", 0))
             row["has_keyword"] = True
-            row["rewrite_hits"] = max(int(row.get("rewrite_hits", 0)), int(hit.get("_rewrite_hits", 1)))
+            row["rewrite_hits"] = max(
+                int(row.get("rewrite_hits", 0)), int(hit.get("_rewrite_hits", 1))
+            )
 
         for rank, hit in enumerate(vector_hits, 1):
             doc_id = hit.get("_id")
             if not doc_id:
                 continue
-            row = fused.setdefault(doc_id, {
-                "_id": doc_id, "_source": hit.get("_source", {}), "_score": 0.0,
-                "keyword_rank": None, "vector_rank": None,
-                "keyword_score": 0.0, "vector_score": 0.0,
-                "rewrite_hits": 0, "has_keyword": False, "has_vector": False,
-            })
+            row = fused.setdefault(
+                doc_id,
+                {
+                    "_id": doc_id,
+                    "_source": hit.get("_source", {}),
+                    "_score": 0.0,
+                    "keyword_rank": None,
+                    "vector_rank": None,
+                    "keyword_score": 0.0,
+                    "vector_score": 0.0,
+                    "rewrite_hits": 0,
+                    "has_keyword": False,
+                    "has_vector": False,
+                },
+            )
             row["_score"] += 1.0 / (k + rank)
             row["vector_rank"] = rank
             row["vector_score"] = float(hit.get("_score", 0))
@@ -735,7 +788,9 @@ class HybridRetriever:
         return dot / (na * nb)
 
     @staticmethod
-    def _mmr_select(candidates: list[dict], query_vector: list[float], top_k: int, lambda_mult: float) -> list[dict]:
+    def _mmr_select(
+        candidates: list[dict], query_vector: list[float], top_k: int, lambda_mult: float
+    ) -> list[dict]:
         if not candidates:
             return []
         selected, remaining = [], candidates[:]
@@ -746,7 +801,12 @@ class HybridRetriever:
                 if not selected:
                     mmr = rel
                 else:
-                    max_sim = max(HybridRetriever._cosine_similarity(cand.get("_embedding", []), s.get("_embedding", [])) for s in selected)
+                    max_sim = max(
+                        HybridRetriever._cosine_similarity(
+                            cand.get("_embedding", []), s.get("_embedding", [])
+                        )
+                        for s in selected
+                    )
                     mmr = lambda_mult * rel - (1 - lambda_mult) * max_sim
                 if mmr > best_score:
                     best_score = mmr
@@ -776,7 +836,7 @@ class HybridRetriever:
         idx = text.lower().find(query.strip().lower()) if query else -1
         if idx >= 0:
             start = max(0, idx - limit // 3)
-            return text[start: min(len(text), start + limit)]
+            return text[start : min(len(text), start + limit)]
         return compress(text, query, max_chars=limit)
 
     @staticmethod
@@ -867,7 +927,9 @@ class HybridRetriever:
                 continue
 
             snippet = self._build_snippet(text, query)
-            overlap = self._compute_overlap(f"{source.get('filename', '')} {text[:1600]}", query_terms)
+            overlap = self._compute_overlap(
+                f"{source.get('filename', '')} {text[:1600]}", query_terms
+            )
             has_kw = bool(hit.get("has_keyword")) or hit.get("keyword_rank") is not None
             has_vec = bool(hit.get("has_vector")) or hit.get("vector_rank") is not None
             rewrite_hits = max(1, int(hit.get("rewrite_hits", 1)))
@@ -888,7 +950,11 @@ class HybridRetriever:
                     continue
 
                 score_range = max(1e-9, score_max - score_min)
-                score_pct = (float(hit.get("_score", 0)) - score_min) / score_range if score_range > 1e-9 else 0
+                score_pct = (
+                    (float(hit.get("_score", 0)) - score_min) / score_range
+                    if score_range > 1e-9
+                    else 0
+                )
                 if score_pct < 0.3 and overlap < 0.05:
                     continue
 
@@ -913,7 +979,9 @@ class HybridRetriever:
             # Normalize score
             fused_score = float(hit.get("_score", 0))
             if score_max - score_min > 1e-9:
-                normalized = max(0, min(1, 0.1 + 0.9 * (fused_score - score_min) / (score_max - score_min)))
+                normalized = max(
+                    0, min(1, 0.1 + 0.9 * (fused_score - score_min) / (score_max - score_min))
+                )
             else:
                 normalized = 0.6 if fused_score > 0 else 0
 
@@ -934,36 +1002,43 @@ class HybridRetriever:
             if not chunk_id:
                 # 仅用于去重的稳定标识，不是密码学用途 —— 显式标注以免被静态扫描
                 # 当作弱哈希（与本仓库其它 hashlib 调用一致）。
-                text_hash = hashlib.sha1(
-                    text.encode("utf-8"), usedforsecurity=False
-                ).hexdigest()[:16]
+                text_hash = hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()[
+                    :16
+                ]
                 chunk_id = f"{doc_id or 'unknown'}:{text_hash}"
 
-            documents.append({
-                "text": text, "content": text,
-                # issue #186：提示词正文单一来源。snippet 只是展示片段，
-                # 不再参与任何提示词组装（见 context_compressor.get_prompt_text）。
-                "prompt_text": text,
-                "filename": source.get("filename", "未知"),
-                "chunk_id": chunk_id,
-                # issue #185：rank_score 是批内 min-max 相对分（排序/序位用）；
-                # score 保留为同值别名（workflow 阈值/agent 载荷沿用既有语义）。
-                # 绝对相关度 relevance_score 由 pipeline rerank 后写入。
-                "score": round(final_score, 4),
-                "rank_score": round(final_score, 4),
-                "raw_score": fused_score,
-                "snippet": snippet, "document_id": source.get("document_id"),
-                # #188：结构化条款字段透传（旧索引缺字段时为 None/[]）
-                "section_title": source.get("section_title"),
-                "clause_no": source.get("clause_no") or [],
-                "section_no": source.get("section_no") or [],
-                "chunk_index": source.get("chunk_index"),
-                # #197：PDF 页码透传（非 PDF / 旧索引为 None）
-                "page_number": source.get("page_number"),
-                "mmr_score": float(hit.get("_mmr_score", 0)),
-                "overlap_score": overlap, "has_keyword": has_kw, "has_vector": has_vec,
-                "rewrite_hits": rewrite_hits, "fresh_factor": round(fresh_factor, 2),
-            })
+            documents.append(
+                {
+                    "text": text,
+                    "content": text,
+                    # issue #186：提示词正文单一来源。snippet 只是展示片段，
+                    # 不再参与任何提示词组装（见 context_compressor.get_prompt_text）。
+                    "prompt_text": text,
+                    "filename": source.get("filename", "未知"),
+                    "chunk_id": chunk_id,
+                    # issue #185：rank_score 是批内 min-max 相对分（排序/序位用）；
+                    # score 保留为同值别名（workflow 阈值/agent 载荷沿用既有语义）。
+                    # 绝对相关度 relevance_score 由 pipeline rerank 后写入。
+                    "score": round(final_score, 4),
+                    "rank_score": round(final_score, 4),
+                    "raw_score": fused_score,
+                    "snippet": snippet,
+                    "document_id": source.get("document_id"),
+                    # #188：结构化条款字段透传（旧索引缺字段时为 None/[]）
+                    "section_title": source.get("section_title"),
+                    "clause_no": source.get("clause_no") or [],
+                    "section_no": source.get("section_no") or [],
+                    "chunk_index": source.get("chunk_index"),
+                    # #197：PDF 页码透传（非 PDF / 旧索引为 None）
+                    "page_number": source.get("page_number"),
+                    "mmr_score": float(hit.get("_mmr_score", 0)),
+                    "overlap_score": overlap,
+                    "has_keyword": has_kw,
+                    "has_vector": has_vec,
+                    "rewrite_hits": rewrite_hits,
+                    "fresh_factor": round(fresh_factor, 2),
+                }
+            )
             if len(documents) >= top_k:
                 break
 
@@ -971,7 +1046,9 @@ class HybridRetriever:
 
     # ---- Fallback ----
 
-    async def _fallback(self, query: str, filters: list[dict], top_k: int) -> tuple[list[dict], str | None]:
+    async def _fallback(
+        self, query: str, filters: list[dict], top_k: int
+    ) -> tuple[list[dict], str | None]:
         """兜底检索。返回 (hits, degraded_reason)。
 
         兜底臂自身失败同样是「没查成」而不是「没有命中」（issue #292）：
@@ -979,8 +1056,24 @@ class HybridRetriever:
         """
         try:
             broad = {
-                "size": top_k * 2, "min_score": 0.5,
-                "query": {"bool": {"must": [{"match": {"content": {"query": query, "operator": "or", "minimum_should_match": "30%"}}}], "filter": filters}},
+                "size": top_k * 2,
+                "min_score": 0.5,
+                "query": {
+                    "bool": {
+                        "must": [
+                            {
+                                "match": {
+                                    "content": {
+                                        "query": query,
+                                        "operator": "or",
+                                        "minimum_should_match": "30%",
+                                    }
+                                }
+                            }
+                        ],
+                        "filter": filters,
+                    }
+                },
                 "_source": _HIT_SOURCE_FIELDS,
             }
             res = await ElasticsearchTools.search_documents(broad)
@@ -995,8 +1088,17 @@ class HybridRetriever:
             if not qv:
                 return [], None
             vec_q = {
-                "size": top_k, "min_score": 1.15,
-                "query": {"script_score": {"query": {"bool": {"filter": filters}}, "script": {"source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0", "params": {"query_vector": qv}}}},
+                "size": top_k,
+                "min_score": 1.15,
+                "query": {
+                    "script_score": {
+                        "query": {"bool": {"filter": filters}},
+                        "script": {
+                            "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
+                            "params": {"query_vector": qv},
+                        },
+                    }
+                },
                 "_source": _HIT_SOURCE_FIELDS,
             }
             res = await ElasticsearchTools.search_documents(vec_q)
@@ -1061,13 +1163,13 @@ class HybridRetriever:
         RAG_ADAPTIVE_STRATEGY.labels(strategy=strategy_label).inc()
         logger.info(
             "Adaptive RAG: query='%s...' → strategy=%s%s",
-            query[:50], strategy,
+            query[:50],
+            strategy,
             f" (forced by search_mode={forced_mode})" if forced_mode else "",
         )
 
         debug_info = (
-            {"strategy": strategy, "query": query, "search_mode": search_mode}
-            if debug else None
+            {"strategy": strategy, "query": query, "search_mode": search_mode} if debug else None
         )
 
         if strategy == "keyword_only":
@@ -1132,9 +1234,7 @@ class HybridRetriever:
             # 失败/超时、embedding 不可用或返回空向量时均不会融合；避免
             # 「只 embed 原查询」被绝对化误读。
             debug_info["query_rewrite"] = {
-                "llm_rewrite_enabled": bool(
-                    getattr(settings, "RAG_ENABLE_QUERY_REWRITE", True)
-                ),
+                "llm_rewrite_enabled": bool(getattr(settings, "RAG_ENABLE_QUERY_REWRITE", True)),
                 "keyword_arm": "rewritten_variants",
                 "vector_arm": "original_query_only",
                 "vector_hyde_enabled": strategy == "hybrid_hyde",
@@ -1176,16 +1276,13 @@ class HybridRetriever:
             window = fused[:candidate_size]
             embedded_cands = [
                 {**h, "_embedding": h.get("_source", {}).get("embedding", [])}
-                for h in window if h.get("_source", {}).get("embedding")
+                for h in window
+                if h.get("_source", {}).get("embedding")
             ]
-            no_embedding = [
-                h for h in window if not h.get("_source", {}).get("embedding")
-            ]
+            no_embedding = [h for h in window if not h.get("_source", {}).get("embedding")]
             lambda_mult = max(0, min(1, settings.RAG_MMR_LAMBDA))
             if embedded_cands and top_k > 0:
-                selected = self._mmr_select(
-                    embedded_cands, query_vector, top_k, lambda_mult
-                )
+                selected = self._mmr_select(embedded_cands, query_vector, top_k, lambda_mult)
                 # 追加的无向量候选与选中项一起进入 _post_process 的 min-max
                 # 归一化（有意口径：展示分覆盖本次考虑过的全部候选；去留仍由
                 # 质量档与 doc 帽决定）。debug 的 no_embedding_appended 是
@@ -1205,9 +1302,7 @@ class HybridRetriever:
                 # post-process——与修复前同语义，候选同样不丢。
                 mmr_debug = {
                     "applied": False,
-                    "reason": (
-                        "no_embedded_candidates" if not embedded_cands else "zero_top_k"
-                    ),
+                    "reason": ("no_embedded_candidates" if not embedded_cands else "zero_top_k"),
                     "no_embedding_appended": len(no_embedding),
                 }
         elif settings.RAG_ENABLE_MMR:
@@ -1220,7 +1315,12 @@ class HybridRetriever:
         if debug and debug_info is not None:
             debug_info["mmr"] = mmr_debug
 
-        return self._post_process(query, fused, top_k, doc_cap=doc_cap), query_vector, debug_info, degraded
+        return (
+            self._post_process(query, fused, top_k, doc_cap=doc_cap),
+            query_vector,
+            debug_info,
+            degraded,
+        )
 
     @staticmethod
     def _debug_format_hits(hits: list[dict]) -> list[dict]:
@@ -1228,21 +1328,27 @@ class HybridRetriever:
         formatted = []
         for h in hits[:15]:
             src = h.get("_source", {}) or {}
-            formatted.append({
-                "id": h.get("_id", ""),
-                "filename": src.get("filename", "未知"),
-                "score": round(float(h.get("_score", 0)), 4),
-                "keyword_rank": h.get("keyword_rank"),
-                "vector_rank": h.get("vector_rank"),
-                "keyword_score": round(float(h.get("keyword_score", 0)), 4) if h.get("keyword_score") else None,
-                "vector_score": round(float(h.get("vector_score", 0)), 4) if h.get("vector_score") else None,
-                "rewrite_hits": h.get("_rewrite_hits", 1),
-                "has_keyword": h.get("has_keyword", False),
-                "has_vector": h.get("has_vector", False),
-                # #188：结构化条款字段（旧索引为 None/[]）
-                "section_title": src.get("section_title"),
-                "clause_no": src.get("clause_no") or [],
-                "section_no": src.get("section_no") or [],
-                "snippet": (src.get("content", "") or "")[:200],
-            })
+            formatted.append(
+                {
+                    "id": h.get("_id", ""),
+                    "filename": src.get("filename", "未知"),
+                    "score": round(float(h.get("_score", 0)), 4),
+                    "keyword_rank": h.get("keyword_rank"),
+                    "vector_rank": h.get("vector_rank"),
+                    "keyword_score": round(float(h.get("keyword_score", 0)), 4)
+                    if h.get("keyword_score")
+                    else None,
+                    "vector_score": round(float(h.get("vector_score", 0)), 4)
+                    if h.get("vector_score")
+                    else None,
+                    "rewrite_hits": h.get("_rewrite_hits", 1),
+                    "has_keyword": h.get("has_keyword", False),
+                    "has_vector": h.get("has_vector", False),
+                    # #188：结构化条款字段（旧索引为 None/[]）
+                    "section_title": src.get("section_title"),
+                    "clause_no": src.get("clause_no") or [],
+                    "section_no": src.get("section_no") or [],
+                    "snippet": (src.get("content", "") or "")[:200],
+                }
+            )
         return formatted

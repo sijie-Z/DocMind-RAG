@@ -152,11 +152,14 @@ async def test_namespace_isolation_two_servers_same_tools(registry_isolation):
 @pytest.mark.asyncio
 async def test_name_conflict_with_existing_tool_skipped(registry_isolation, caplog):
     """命名冲突 → 首个注册者保留 + warning（降级不覆盖）。"""
+
     async def native_stub(**kwargs) -> ToolResult:
         return ToolResult.ok(data="native-wins")
 
     tool_registry.register(
-        name="mcp__fake__echo", description="pre-existing", parameters={"type": "object"},
+        name="mcp__fake__echo",
+        description="pre-existing",
+        parameters={"type": "object"},
         handler=native_stub,
     )
     mgr = MCPManager(configs=[make_config()])

@@ -147,8 +147,12 @@ class EmbeddingService:
             except Exception as e:
                 last_err = e
                 msg = str(e).lower()
-                is_rate_limit = ("429" in msg) or ("rpm" in msg) or ("tpm" in msg) or ("rate" in msg)
-                is_forbidden_quota = ("403" in msg) and (("rpm" in msg) or ("quota" in msg) or ("limit" in msg))
+                is_rate_limit = (
+                    ("429" in msg) or ("rpm" in msg) or ("tpm" in msg) or ("rate" in msg)
+                )
+                is_forbidden_quota = ("403" in msg) and (
+                    ("rpm" in msg) or ("quota" in msg) or ("limit" in msg)
+                )
                 is_timeout = ("timeout" in msg) or ("timed out" in msg)
 
                 if is_rate_limit or is_forbidden_quota or is_timeout:
@@ -207,9 +211,7 @@ class EmbeddingService:
         return len(vectors[0])
 
 
-async def verify_embedding_consistency(
-    *, service: EmbeddingService | None = None
-) -> dict:
+async def verify_embedding_consistency(*, service: EmbeddingService | None = None) -> dict:
     """启动时校验「模型可用 + 返回维度 == VECTOR_DIMENSION」（issue #196）。
 
     Returns:

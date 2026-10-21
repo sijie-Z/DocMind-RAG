@@ -31,8 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 async def get_current_user(
-    current_user: User = Depends(auth_service.get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(auth_service.get_current_user), db: AsyncSession = Depends(get_db)
 ) -> User:
     return current_user
 
@@ -60,9 +59,7 @@ def get_user_org_id(current_user: User) -> int | None:
     auth_service.get_current_user 在挂载该属性前已回源 `user_organization`
     校验成员关系（成员被移出 → 403）。这里只消费已校验过的回退值。
     """
-    return current_user.organization_id or getattr(
-        current_user, "token_organization_id", None
-    )
+    return current_user.organization_id or getattr(current_user, "token_organization_id", None)
 
 
 async def resolve_existing_organization_id(db: AsyncSession) -> int | None:
@@ -73,9 +70,7 @@ async def resolve_existing_organization_id(db: AsyncSession) -> int | None:
     （本库唯一组织的 id 是 3，1 号并不存在），因此必须回源数据库解析，
     而不是把某个编号硬编码进代码（issue #168）。
     """
-    result = await db.execute(
-        select(Organization.id).order_by(Organization.id).limit(1)
-    )
+    result = await db.execute(select(Organization.id).order_by(Organization.id).limit(1))
     return result.scalar_one_or_none()
 
 
@@ -107,9 +102,7 @@ async def require_organization(current_user: User, db: AsyncSession) -> int:
             f"超级管理员 {current_user.id} 无组织上下文，且库中不存在任何组织，"
             "无法解析组织上下文，拒绝访问"
         )
-        raise AuthorizationError(
-            "系统当前不存在任何组织，无法确定组织上下文；请先创建组织后重试"
-        )
+        raise AuthorizationError("系统当前不存在任何组织，无法确定组织上下文；请先创建组织后重试")
     raise AuthorizationError("当前用户未加入任何组织，无权访问组织数据")
 
 
@@ -197,19 +190,19 @@ async def is_org_admin(db: AsyncSession, user: User, organization_id: object) ->
     return (await db.execute(stmt)).first() is not None
 
 
-async def require_org_admin(
-    db: AsyncSession, user: User, organization_id: object
-) -> None:
+async def require_org_admin(db: AsyncSession, user: User, organization_id: object) -> None:
     """要求调用者是目标组织的管理员；否则 403（超管旁路）。"""
     if not await is_org_admin(db, user, organization_id):
         raise AuthorizationError("需要组织管理员权限")
 
 
-def permission_required(required_permissions: list[PermissionType], organization_id_param: str = None):
+def permission_required(
+    required_permissions: list[PermissionType], organization_id_param: str = None
+):
     async def check_permissions(
         request: Request,
         current_user: User = Depends(get_current_user),
-        db: AsyncSession = Depends(get_db)
+        db: AsyncSession = Depends(get_db),
     ):
         # 1. 上帝模式（优先判断超管）
         # `current_user` 由 `auth_service.get_current_user` 每次请求回源 DB 得到，
@@ -259,14 +252,16 @@ def permission_required(required_permissions: list[PermissionType], organization
 
         # 3. 获取用户权限集合
         # ✅ 修正：传递 user 对象，而不是 user.id
-        user_permissions = await permission_service.get_user_permissions(db, current_user, organization_id)
+        user_permissions = await permission_service.get_user_permissions(
+            db, current_user, organization_id
+        )
 
         # 4. 校验权限名 (对比字符串)
         for perm in required_permissions:
             if perm.value not in user_permissions:
                 raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"用户无此权限: {perm.value}"
+                    status_code=status.HTTP_403_FORBIDDEN, detail=f"用户无此权限: {perm.value}"
                 )
         return True
+
     return check_permissions

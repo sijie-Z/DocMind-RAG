@@ -1,4 +1,5 @@
 """DocumentParser 纯函数测试（不依赖外部服务）。"""
+
 import os
 import tempfile
 
@@ -15,7 +16,9 @@ def parser():
 class TestParseTxt:
     @pytest.mark.asyncio
     async def test_parse_plain_text(self, parser: DocumentParser):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
             f.write("这是一段测试文本。\n第二行内容。")
             f.flush()
             path = f.name
@@ -29,7 +32,9 @@ class TestParseTxt:
 
     @pytest.mark.asyncio
     async def test_parse_markdown(self, parser: DocumentParser):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as f:
             f.write("# 标题\n\n正文内容\n\n## 子标题\n\n更多内容。")
             f.flush()
             path = f.name
@@ -42,7 +47,9 @@ class TestParseTxt:
 
     @pytest.mark.asyncio
     async def test_parse_empty_txt(self, parser: DocumentParser):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
             f.write("")
             f.flush()
             path = f.name
@@ -55,7 +62,9 @@ class TestParseTxt:
     @pytest.mark.asyncio
     async def test_parse_txt_metadata(self, parser: DocumentParser):
         content = "第一行\n第二行\n第三行"
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
             f.write(content)
             f.flush()
             path = f.name
@@ -104,7 +113,14 @@ class TestSupportedContent:
 
 # ── 图片 OCR（位图 → 文本 → 现有 chunk 管道）─────────────────────────
 
-def _make_text_png(path: str, lines=("DOCMIND OCR TEST 12345", "Hello RapidOCR 2026"), *, size=(900, 300), font_size=48) -> None:
+
+def _make_text_png(
+    path: str,
+    lines=("DOCMIND OCR TEST 12345", "Hello RapidOCR 2026"),
+    *,
+    size=(900, 300),
+    font_size=48,
+) -> None:
     """用 PIL 在测试时生成 ASCII 文本 PNG。
 
     确定性：Pillow ≥10.1 的 ``ImageFont.load_default(size=...)`` 使用随包
@@ -185,7 +201,9 @@ class TestParseImage:
         assert abs(result["metadata"]["ocr_avg_score"] - 0.8) < 1e-6
 
     @pytest.mark.asyncio
-    async def test_parse_image_mocked_engine_none_raises(self, parser: DocumentParser, tmp_path, monkeypatch):
+    async def test_parse_image_mocked_engine_none_raises(
+        self, parser: DocumentParser, tmp_path, monkeypatch
+    ):
         """引擎替身返回 (None, None)（检测不到）→ 与真实引擎空结果同一条诚实失败路径。"""
         import app.services.document_parser as parser_mod
 
@@ -310,9 +328,7 @@ class TestParseImage:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("fmt", ["WEBP", "BMP"])
-    async def test_parse_image_real_engine_webp_bmp(
-        self, parser: DocumentParser, tmp_path, fmt
-    ):
+    async def test_parse_image_real_engine_webp_bmp(self, parser: DocumentParser, tmp_path, fmt):
         """WEBP / BMP 各一个真实解析用例（评审缺口：此前只登记了扩展名）。"""
         from PIL import Image
 

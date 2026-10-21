@@ -1,4 +1,5 @@
 """User response schemas — single source of truth for User serialization."""
+
 from datetime import datetime
 from typing import Any
 
@@ -7,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 class UserInfoResponse(BaseModel):
     """Canonical User response schema used across all endpoints."""
+
     id: int
     username: str
     email: str

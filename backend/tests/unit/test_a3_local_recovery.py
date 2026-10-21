@@ -85,10 +85,7 @@ class TestStartupReconciliation:
             f"查询必须限定 local_fallback = true: {rendered}"
         )
         params = compiled.params.values()
-        statuses = [
-            v for v in params
-            if isinstance(v, list)
-        ]
+        statuses = [v for v in params if isinstance(v, list)]
         assert statuses and set(statuses[0]) == {
             KnowledgeJobStatus.QUEUED,
             KnowledgeJobStatus.PROCESSING,
@@ -147,8 +144,7 @@ class TestUploadFallbackMarker:
                 (
                     "commit",
                     any(
-                        isinstance(o, KnowledgeProcessingJob) and o.local_fallback
-                        for o in captured
+                        isinstance(o, KnowledgeProcessingJob) and o.local_fallback for o in captured
                     ),
                 )
             )
@@ -180,14 +176,14 @@ class TestUploadFallbackMarker:
         app.dependency_overrides[get_current_user] = _user
 
         try:
-            with patch("app.api.v1.endpoints.documents.minio_client") as mock_minio, \
-                 patch(
-                     "app.api.v1.endpoints.documents.kafka_producer.send_message",
-                     AsyncMock(return_value=False),  # Kafka 不可用 → 本机兜底
-                 ), \
-                 patch(
-                     "app.api.v1.endpoints.documents.asyncio.create_task", _boom
-                 ):
+            with (
+                patch("app.api.v1.endpoints.documents.minio_client") as mock_minio,
+                patch(
+                    "app.api.v1.endpoints.documents.kafka_producer.send_message",
+                    AsyncMock(return_value=False),  # Kafka 不可用 → 本机兜底
+                ),
+                patch("app.api.v1.endpoints.documents.asyncio.create_task", _boom),
+            ):
                 mock_minio.stat_object.side_effect = Exception("not found")
                 mock_minio.put_object = MagicMock()
 
@@ -252,9 +248,7 @@ class TestLifespanWiring:
             "initialize_default_permissions_and_roles",
             AsyncMock(),
         )
-        monkeypatch.setattr(
-            deps_mod, "wire_memory_embedding_provider", AsyncMock()
-        )
+        monkeypatch.setattr(deps_mod, "wire_memory_embedding_provider", AsyncMock())
         monkeypatch.setattr(mcp_mod.mcp_manager, "initialize", AsyncMock())
         monkeypatch.setattr(mcp_mod.mcp_manager, "shutdown", AsyncMock())
 
@@ -307,16 +301,16 @@ class TestFileServiceMarker:
         file.read = AsyncMock(return_value=b"hello world")
         file.file = io.BytesIO(b"hello world")
 
-        with patch.object(fs_mod, "AsyncSessionLocal", lambda: _FakeSession()), \
-             patch.object(service, "_upload_to_minio", AsyncMock(return_value="1/x.txt")), \
-             patch.object(
-                 fs_mod.FileUploadService,
-                 "_process_document_async",
-                 side_effect=fake_shell,
-             ):
-            result = await service.upload_file(
-                file=file, user_id=1, organization_id=1
-            )
+        with (
+            patch.object(fs_mod, "AsyncSessionLocal", lambda: _FakeSession()),
+            patch.object(service, "_upload_to_minio", AsyncMock(return_value="1/x.txt")),
+            patch.object(
+                fs_mod.FileUploadService,
+                "_process_document_async",
+                side_effect=fake_shell,
+            ),
+        ):
+            result = await service.upload_file(file=file, user_id=1, organization_id=1)
 
         assert result["document_id"]
         await asyncio.sleep(0)  # 让 create_task 调度出的处理壳真正执行

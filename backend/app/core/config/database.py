@@ -1,6 +1,5 @@
 """Infrastructure settings — database, Redis, Elasticsearch, Kafka, MinIO, file upload."""
 
-
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -36,7 +35,7 @@ class DatabaseSettings(BaseSettings):
     # 注：分词器不是配置项——运行时由 _ESHolder 自动选择（默认 cjk，探测到 IK 后
     # 用 ik_smart/ik_max_word，见 core/elasticsearch.py）。此前的 ES_ANALYZER /
     # ES_SEARCH_ANALYZER 字段零消费且默认值 "standard" 与运行时矛盾
-    #（issue #242：误导性强于无用，已删除）。
+    # （issue #242：误导性强于无用，已删除）。
     ELASTICSEARCH_HOSTS: list[str] = ["http://localhost:9200"]
     ELASTICSEARCH_INDEX_NAME: str = "paicongming_knowledge"
 

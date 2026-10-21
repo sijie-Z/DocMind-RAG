@@ -68,9 +68,7 @@ def validate_tool_pairs(messages: list[dict[str, Any]]) -> None:
             if not rid:
                 raise ToolPairingError(f"tool 消息缺少 tool_call_id（index={idx}）")
             if rid not in open_calls:
-                raise ToolPairingError(
-                    f"孤儿 tool result: {rid}（index={idx}，无对应 call）"
-                )
+                raise ToolPairingError(f"孤儿 tool result: {rid}（index={idx}，无对应 call）")
             open_calls.pop(rid)
             continue
         for cid in call_ids_of(msg):
@@ -103,9 +101,7 @@ def balance_cut(messages: list[dict[str, Any]], cut: int) -> int:
             if owner is not None:
                 cut = owner
                 continue
-        tail_results = {
-            result_call_id_of(m) for m in messages[cut:] if result_call_id_of(m)
-        }
+        tail_results = {result_call_id_of(m) for m in messages[cut:] if result_call_id_of(m)}
         cids = call_ids_of(messages[cut - 1])
         if cids and any(c in tail_results for c in cids):
             cut -= 1

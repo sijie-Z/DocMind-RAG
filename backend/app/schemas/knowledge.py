@@ -1,6 +1,7 @@
 """
 知识库相关的Pydantic模型
 """
+
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -10,6 +11,7 @@ from pydantic import BaseModel, Field
 
 class SearchMode(str, Enum):
     """搜索模式（本次请求强制采用的检索臂组合，issue #225）"""
+
     HYBRID = "hybrid"  # 混合搜索（关键词+向量两臂 + RRF 融合）
     VECTOR = "vector"  # 纯向量搜索（仅向量臂）
     KEYWORD = "keyword"  # 纯关键词搜索（仅关键词臂）
@@ -17,6 +19,7 @@ class SearchMode(str, Enum):
 
 class KnowledgeSearchRequest(BaseModel):
     """知识库搜索请求"""
+
     query: str = Field(..., min_length=1, description="搜索查询")
     organization_id: int = Field(..., description="组织ID")
     # B4（D5）：显式值优先；缺省（None）时由端点解析「组织设置 > 平台默认
@@ -25,7 +28,8 @@ class KnowledgeSearchRequest(BaseModel):
     # 「用户明确要 10」（不改变既有默认语义：未设置组织值时仍是 10）。
     top_k: int | None = Field(
         default=None,
-        ge=1, le=50,
+        ge=1,
+        le=50,
         description="返回结果数量；缺省 = 组织设置，组织未设置时为平台默认 10",
     )
     # issue #225 决策 7A：None = 自动路由（系统按查询复杂度选策略，缺省行为）；
@@ -38,6 +42,7 @@ class KnowledgeSearchRequest(BaseModel):
 
 class SearchResult(BaseModel):
     """搜索结果项"""
+
     id: str = Field(..., description="结果ID")
     text: str = Field(..., description="匹配文本内容")
     score: float = Field(..., description="相对排序分（融合阶段，仅用于排序/序位，不是相关度）")
@@ -57,6 +62,7 @@ class SearchResult(BaseModel):
 
 class KnowledgeSearchResponse(BaseModel):
     """知识库搜索响应"""
+
     query: str = Field(..., description="搜索查询")
     results: list[SearchResult] = Field(..., description="搜索结果列表")
     total_count: int = Field(..., description="结果总数")
@@ -82,12 +88,14 @@ class KnowledgeSearchResponse(BaseModel):
 
 class SearchSuggestionResponse(BaseModel):
     """搜索建议响应"""
+
     query: str = Field(..., description="原始查询")
     suggestions: list[str] = Field(..., description="建议列表")
 
 
 class KnowledgeStats(BaseModel):
     """知识库统计信息"""
+
     total_documents: int = Field(..., description="总文档数量")
     total_size: int = Field(..., description="总文件大小（字节）")
     total_content_length: int = Field(..., description="总文本内容长度")
@@ -100,6 +108,7 @@ class KnowledgeStats(BaseModel):
 
 class KnowledgeStatsResponse(BaseModel):
     """知识库统计响应"""
+
     organization_id: int = Field(..., description="组织ID")
     stats: KnowledgeStats = Field(..., description="统计信息")
     updated_at: datetime = Field(..., description="更新时间")
@@ -107,6 +116,7 @@ class KnowledgeStatsResponse(BaseModel):
 
 class KnowledgeBuildResponse(BaseModel):
     """知识库构建响应"""
+
     success: bool = Field(..., description="是否构建成功")
     document_id: str = Field(..., description="文档ID")
     message: str = Field(..., description="提示信息")
@@ -115,12 +125,14 @@ class KnowledgeBuildResponse(BaseModel):
 
 class BatchDeleteRequest(BaseModel):
     """批量删除请求"""
+
     document_ids: list[str] = Field(..., min_length=1, description="文档ID列表")
     organization_id: int | None = Field(None, description="组织ID")
 
 
 class DocumentChunkInfo(BaseModel):
     """文档分块信息"""
+
     id: str = Field(..., description="分块ID")
     chunk_index: int = Field(..., description="分块序号")
     chunk_text: str = Field(..., description="分块文本内容")
@@ -132,6 +144,7 @@ class DocumentChunkInfo(BaseModel):
 
 class DocumentDetail(BaseModel):
     """文档详情"""
+
     id: str = Field(..., description="文档ID")
     filename: str = Field(..., description="文件名")
     file_size: int = Field(..., description="文件大小")
@@ -150,6 +163,7 @@ class DocumentDetail(BaseModel):
 
 class SimilarityResponse(BaseModel):
     """文本相似度计算响应"""
+
     text1: str = Field(..., description="文本1")
     text2: str = Field(..., description="文本2")
     similarity: float = Field(..., description="相似度得分（-1到1）")

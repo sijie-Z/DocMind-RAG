@@ -153,8 +153,10 @@ class ReportGenerator:
                 tools = " → ".join(p["tools"])
                 mark = " ⭐" if p["is_candidate"] else ""
                 lines.append(f"  {p['rank']:>2}. {tools}{mark}")
-                lines.append(f"      count={p['count']}  success={p['success_rate']:.0%}  "
-                              f"coverage={p['avg_coverage']:.0%}")
+                lines.append(
+                    f"      count={p['count']}  success={p['success_rate']:.0%}  "
+                    f"coverage={p['avg_coverage']:.0%}"
+                )
             lines.append("")
 
         lines.append("=" * 65)
@@ -163,6 +165,7 @@ class ReportGenerator:
 
 async def main():
     import argparse
+
     parser = argparse.ArgumentParser(description="Skill Recommendation Report")
     parser.add_argument("--save", action="store_true", help="Save report as JSON + Markdown")
     parser.add_argument("--replay-dir", default="benchmark/replay", help="Replay directory")
@@ -191,4 +194,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

@@ -45,8 +45,16 @@ MCP_SERVERS: dict[str, dict[str, Any]] = {
 
 # 安全加固：npx 子进程只透传白名单环境变量，严禁泄露宿主机全部环境变量
 _ENV_ALLOWLIST = (
-    "PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TEMP", "TMP",
-    "APPDATA", "LOCALAPPDATA", "ComSpec", "PATHEXT",
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "ComSpec",
+    "PATHEXT",
 )
 
 
@@ -131,7 +139,9 @@ async def _list_mcp_tools(server_name: str) -> str | ToolResult:
     """List available tools from an MCP server."""
     config = _get_server_config(server_name)
     if not config:
-        return ToolResult.fail(code="validation_error", message=f"Unknown MCP server: {server_name}")
+        return ToolResult.fail(
+            code="validation_error", message=f"Unknown MCP server: {server_name}"
+        )
 
     params = StdioServerParameters(
         command=config["command"],

@@ -6,6 +6,7 @@
 
 真 SQLite（``Base.metadata.create_all``）+ ``httpx.ASGITransport``，不依赖任何外部服务。
 """
+
 import httpx
 import pytest
 from sqlalchemy import select
@@ -22,7 +23,12 @@ from app.models.workflow import Workflow, WorkflowExecution
 
 _MIN_FLOW = {
     "nodes": [
-        {"id": "in1", "type": "input", "data": {"prompt": "{{input}}"}, "position": {"x": 0, "y": 0}},
+        {
+            "id": "in1",
+            "type": "input",
+            "data": {"prompt": "{{input}}"},
+            "position": {"x": 0, "y": 0},
+        },
         {"id": "out1", "type": "output", "data": {}, "position": {"x": 1, "y": 0}},
     ],
     "edges": [{"id": "e1", "source": "in1", "target": "out1"}],
@@ -48,19 +54,19 @@ async def _setup():
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as s:
-        s.add_all([
-            Organization(id=1, name="OrgA", owner_id=1),
-            Organization(id=2, name="OrgB", owner_id=3),
-            _user(1, 1, role="admin"),      # org A 管理员
-            _user(2, 1, role="user"),       # org A 普通用户
-            _user(3, 2, role="admin"),      # org B 管理员
-            _user(99, None, role="admin", superuser=True),  # 全局超管
-        ])
+        s.add_all(
+            [
+                Organization(id=1, name="OrgA", owner_id=1),
+                Organization(id=2, name="OrgB", owner_id=3),
+                _user(1, 1, role="admin"),  # org A 管理员
+                _user(2, 1, role="user"),  # org A 普通用户
+                _user(3, 2, role="admin"),  # org B 管理员
+                _user(99, None, role="admin", superuser=True),  # 全局超管
+            ]
+        )
         await s.flush()
         # W0-1：组织管理员 = per-org OrgAdmin 角色关联（users.role 不再参与鉴权）
-        org_admin_role = Role(
-            name="OrgAdmin", description="组织管理员", is_system_role=False
-        )
+        org_admin_role = Role(name="OrgAdmin", description="组织管理员", is_system_role=False)
         s.add(org_admin_role)
         await s.flush()
         await s.execute(
@@ -70,16 +76,24 @@ async def _setup():
                 {"user_id": 3, "organization_id": 2, "role_id": org_admin_role.id},
             ],
         )
-        s.add_all([
-            Workflow(name="wf-A-admin", flow_data=_MIN_FLOW, created_by=1, organization_id=1),
-            Workflow(name="wf-A-user", flow_data=_MIN_FLOW, created_by=2, organization_id=1),
-            Workflow(name="wf-B-admin", flow_data=_MIN_FLOW, created_by=3, organization_id=2),
-        ])
+        s.add_all(
+            [
+                Workflow(name="wf-A-admin", flow_data=_MIN_FLOW, created_by=1, organization_id=1),
+                Workflow(name="wf-A-user", flow_data=_MIN_FLOW, created_by=2, organization_id=1),
+                Workflow(name="wf-B-admin", flow_data=_MIN_FLOW, created_by=3, organization_id=2),
+            ]
+        )
         await s.commit()
         ids = dict(
-            wf_a_admin=(await s.execute(select(Workflow.id).where(Workflow.name == "wf-A-admin"))).scalar_one(),
-            wf_a_user=(await s.execute(select(Workflow.id).where(Workflow.name == "wf-A-user"))).scalar_one(),
-            wf_b=(await s.execute(select(Workflow.id).where(Workflow.name == "wf-B-admin"))).scalar_one(),
+            wf_a_admin=(
+                await s.execute(select(Workflow.id).where(Workflow.name == "wf-A-admin"))
+            ).scalar_one(),
+            wf_a_user=(
+                await s.execute(select(Workflow.id).where(Workflow.name == "wf-A-user"))
+            ).scalar_one(),
+            wf_b=(
+                await s.execute(select(Workflow.id).where(Workflow.name == "wf-B-admin"))
+            ).scalar_one(),
         )
     return engine, factory, ids
 
@@ -118,7 +132,9 @@ async def test_org_admin_list_only_sees_own_org():
 async def test_org_admin_cannot_get_foreign_workflow():
     engine, factory, ids = await _setup()
     try:
-        r = await _call(factory, _user(1, 1, role="admin"), "GET", f"/api/v1/workflows/{ids['wf_b']}")
+        r = await _call(
+            factory, _user(1, 1, role="admin"), "GET", f"/api/v1/workflows/{ids['wf_b']}"
+        )
         assert r.status_code == 404, "跨组织详情必须 404（不泄露存在性）"
     finally:
         await engine.dispose()
@@ -129,8 +145,11 @@ async def test_org_admin_cannot_update_foreign_workflow():
     engine, factory, ids = await _setup()
     try:
         r = await _call(
-            factory, _user(1, 1, role="admin"), "PUT",
-            f"/api/v1/workflows/{ids['wf_b']}", json={"name": "hijacked"},
+            factory,
+            _user(1, 1, role="admin"),
+            "PUT",
+            f"/api/v1/workflows/{ids['wf_b']}",
+            json={"name": "hijacked"},
         )
         assert r.status_code == 404, "跨组织更新必须 404"
         async with factory() as s:
@@ -144,7 +163,9 @@ async def test_org_admin_cannot_update_foreign_workflow():
 async def test_org_admin_cannot_delete_foreign_workflow():
     engine, factory, ids = await _setup()
     try:
-        r = await _call(factory, _user(1, 1, role="admin"), "DELETE", f"/api/v1/workflows/{ids['wf_b']}")
+        r = await _call(
+            factory, _user(1, 1, role="admin"), "DELETE", f"/api/v1/workflows/{ids['wf_b']}"
+        )
         assert r.status_code == 404, "跨组织删除必须 404"
         async with factory() as s:
             wf = await s.get(Workflow, ids["wf_b"])
@@ -158,8 +179,12 @@ async def test_org_admin_cannot_execute_foreign_workflow():
     engine, factory, ids = await _setup()
     try:
         r = await _call(
-            factory, _user(1, 1, role="admin"), "POST",
-            f"/api/v1/workflows/{ids['wf_b']}/execute", params={"stream": "false"}, json={"text": "x"},
+            factory,
+            _user(1, 1, role="admin"),
+            "POST",
+            f"/api/v1/workflows/{ids['wf_b']}/execute",
+            params={"stream": "false"},
+            json={"text": "x"},
         )
         assert r.status_code == 404, "跨组织执行必须 404"
     finally:
@@ -173,7 +198,13 @@ async def test_same_org_admin_has_full_access_and_create_sets_org():
         admin_a = _user(1, 1, role="admin")
         r = await _call(factory, admin_a, "GET", f"/api/v1/workflows/{ids['wf_a_admin']}")
         assert r.status_code == 200
-        r = await _call(factory, admin_a, "PUT", f"/api/v1/workflows/{ids['wf_a_admin']}", json={"name": "renamed"})
+        r = await _call(
+            factory,
+            admin_a,
+            "PUT",
+            f"/api/v1/workflows/{ids['wf_a_admin']}",
+            json={"name": "renamed"},
+        )
         assert r.status_code == 200 and r.json()["data"]["name"] == "renamed"
         r = await _call(factory, admin_a, "POST", "/api/v1/workflows/", json={"name": "new-wf"})
         assert r.status_code == 200, r.text
@@ -205,7 +236,9 @@ async def test_regular_user_in_same_org_sees_only_own_workflows():
 async def test_superuser_sees_all_orgs():
     engine, factory, ids = await _setup()
     try:
-        r = await _call(factory, _user(99, None, role="admin", superuser=True), "GET", "/api/v1/workflows/")
+        r = await _call(
+            factory, _user(99, None, role="admin", superuser=True), "GET", "/api/v1/workflows/"
+        )
         assert r.status_code == 200
         ids_in_list = {item["id"] for item in r.json()["data"]["items"]}
         assert {ids["wf_a_admin"], ids["wf_a_user"], ids["wf_b"]} <= ids_in_list
@@ -225,11 +258,13 @@ async def test_orgless_non_superuser_fails_closed():
 
 async def _seed_executions(factory, ids: dict) -> None:
     async with factory() as s:
-        s.add_all([
-            WorkflowExecution(id=101, workflow_id=ids["wf_a_admin"], status="completed"),
-            WorkflowExecution(id=102, workflow_id=ids["wf_a_user"], status="completed"),
-            WorkflowExecution(id=103, workflow_id=ids["wf_b"], status="completed"),
-        ])
+        s.add_all(
+            [
+                WorkflowExecution(id=101, workflow_id=ids["wf_a_admin"], status="completed"),
+                WorkflowExecution(id=102, workflow_id=ids["wf_a_user"], status="completed"),
+                WorkflowExecution(id=103, workflow_id=ids["wf_b"], status="completed"),
+            ]
+        )
         await s.commit()
 
 
@@ -240,16 +275,24 @@ async def test_execution_detail_isolated_across_orgs_and_owners():
     try:
         await _seed_executions(factory, ids)
         # 跨组织：org A admin 读 org B 的执行记录 → 404
-        r = await _call(factory, _user(1, 1, role="admin"), "GET", "/api/v1/workflows/executions/103")
+        r = await _call(
+            factory, _user(1, 1, role="admin"), "GET", "/api/v1/workflows/executions/103"
+        )
         assert r.status_code == 404, "跨组织执行记录必须 404"
         # 同组织他人（普通用户读 admin 的）→ 404
-        r = await _call(factory, _user(2, 1, role="user"), "GET", "/api/v1/workflows/executions/101")
+        r = await _call(
+            factory, _user(2, 1, role="user"), "GET", "/api/v1/workflows/executions/101"
+        )
         assert r.status_code == 404, "同组织普通用户不得读他人执行记录"
         # 本人 → 200
-        r = await _call(factory, _user(2, 1, role="user"), "GET", "/api/v1/workflows/executions/102")
+        r = await _call(
+            factory, _user(2, 1, role="user"), "GET", "/api/v1/workflows/executions/102"
+        )
         assert r.status_code == 200, r.text
         # 同组织 admin → 200
-        r = await _call(factory, _user(1, 1, role="admin"), "GET", "/api/v1/workflows/executions/101")
+        r = await _call(
+            factory, _user(1, 1, role="admin"), "GET", "/api/v1/workflows/executions/101"
+        )
         assert r.status_code == 200, r.text
     finally:
         await engine.dispose()

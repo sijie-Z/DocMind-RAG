@@ -16,6 +16,7 @@
 - `chat_stream` 恢复 `yield "LLM未配置"` → 用例 0 红；
 - 删掉 monitoring 两处 `settings.DEEPSEEK_API_KEY` 预检 → 用例 5 红（500 ≠ 503）。
 """
+
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch

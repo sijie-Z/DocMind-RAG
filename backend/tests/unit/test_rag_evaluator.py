@@ -1,4 +1,5 @@
 """RAG evaluator unit tests — score extraction and dataclass logic."""
+
 import asyncio
 import logging
 from types import SimpleNamespace
@@ -97,13 +98,9 @@ class _CapturingJudge:
 
 def _call_context_method(evaluator: RAGEvaluator, method: str, context: list[dict]) -> None:
     if method == "faithfulness":
-        asyncio.run(
-            evaluator.evaluate_faithfulness(question="q", answer="a", context=context)
-        )
+        asyncio.run(evaluator.evaluate_faithfulness(question="q", answer="a", context=context))
     else:
-        asyncio.run(
-            evaluator.evaluate_context_precision(question="q", context=context)
-        )
+        asyncio.run(evaluator.evaluate_context_precision(question="q", context=context))
 
 
 class TestContextLengthCap:
@@ -141,6 +138,5 @@ class TestContextLengthCap:
         prompt = judge.prompts[0]
         assert "短上下文内容" in prompt, "未超帽的上下文必须原样进入评委 prompt"
         assert not [
-            record for record in caplog.records
-            if "truncated_ratio=" in record.getMessage()
+            record for record in caplog.records if "truncated_ratio=" in record.getMessage()
         ], "未截断时不得出现截断日志"

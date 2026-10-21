@@ -11,6 +11,7 @@
 
 调用点选在 `_mark_success` 之后：抽取失败/崩溃都不影响 INDEXED 落库结果。
 """
+
 import logging
 from types import SimpleNamespace
 
@@ -37,9 +38,11 @@ def _harness(monkeypatch):
 
     async def fake_parse(file_path, organization_id):
         events.append("parse")
-        return {"chunks": [
-            {"chunk_text": CHUNK_TEXT, "chunk_index": 0, "chunk_length": len(CHUNK_TEXT)}
-        ]}
+        return {
+            "chunks": [
+                {"chunk_text": CHUNK_TEXT, "chunk_index": 0, "chunk_length": len(CHUNK_TEXT)}
+            ]
+        }
 
     async def fake_embeddings(texts):
         events.append("embed")
@@ -81,9 +84,7 @@ def _patch_graph(monkeypatch, recorder, *, result=None, error=None):
             raise error
         return result if result is not None else {"status": "extracted", "entities": 2}
 
-    monkeypatch.setattr(
-        graph_mod.graph_rag_service, "ingest_document", fake_ingest, raising=False
-    )
+    monkeypatch.setattr(graph_mod.graph_rag_service, "ingest_document", fake_ingest, raising=False)
 
 
 @pytest.mark.asyncio

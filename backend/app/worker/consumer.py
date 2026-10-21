@@ -16,8 +16,7 @@ from app.worker.heartbeat import touch_heartbeat
 
 # 配置日志
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -216,7 +215,7 @@ async def consume():
         settings.KAFKA_FILE_PROCESSING_TOPIC,
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
         group_id="doc_processor_group",
-        value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+        value_deserializer=lambda m: json.loads(m.decode("utf-8")),
         auto_offset_reset="earliest",
         enable_auto_commit=False,  # 手动提交：处理成功后显式 commit，失败的消息可重新消费
     )
@@ -251,10 +250,11 @@ async def consume():
         except Exception as e:
             logger.error(f"Error stopping consumer: {e}")
 
+
 if __name__ == "__main__":
     try:
         # Windows 上 asyncio 的 loop policy 问题
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
         asyncio.run(consume())

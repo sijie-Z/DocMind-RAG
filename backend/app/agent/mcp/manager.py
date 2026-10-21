@@ -114,13 +114,17 @@ class MCPManager:
             )
             for cfg, result in zip(enabled, results, strict=False):
                 if isinstance(result, BaseException):  # gather 兜底（_connect_and_register 已自兜）
-                    logger.warning("MCP server '%s' 接入异常: %s: %s", cfg.name, type(result).__name__, result)
+                    logger.warning(
+                        "MCP server '%s' 接入异常: %s: %s", cfg.name, type(result).__name__, result
+                    )
 
             self._started = True
             status = self.get_status()
             logger.info(
                 "MCP：%d 个 enabled server，%d 已连接，注册动态工具 %d 个",
-                len(enabled), len(self._connections), status["registered_tools"],
+                len(enabled),
+                len(self._connections),
+                status["registered_tools"],
             )
             return status
 
@@ -136,7 +140,9 @@ class MCPManager:
         except Exception as e:  # noqa: BLE001 —— 单 server 失败绝不外溢
             logger.warning(
                 "MCP server '%s' 接入失败，跳过（不阻塞启动）: %s: %s",
-                cfg.name, type(e).__name__, e,
+                cfg.name,
+                type(e).__name__,
+                e,
             )
             self._last_errors[cfg.name] = _bounded_error(e)
             await conn.close(grace=1.0)
@@ -184,7 +190,9 @@ class MCPManager:
                 return server
         return None
 
-    def _register_tools(self, server: str, conn: MCPServerConnection, tools: list[MCPToolDescriptor]) -> int:
+    def _register_tools(
+        self, server: str, conn: MCPServerConnection, tools: list[MCPToolDescriptor]
+    ) -> int:
         """把一批工具描述注册进全局注册表；返回本次在场的工具总数。
 
         冲突规则：同一 (server, tool) 重复注册（刷新）→ 覆盖更新；
@@ -203,13 +211,18 @@ class MCPManager:
             if owner is not None:
                 logger.warning(
                     "MCP 工具命名冲突：'%s'（%s/%s）已被 server '%s' 注册，跳过",
-                    final, server, tool_name, owner,
+                    final,
+                    server,
+                    tool_name,
+                    owner,
                 )
                 continue
             if final not in own and tool_registry.get(final) is not None:
                 logger.warning(
                     "MCP 工具命名冲突：'%s'（%s/%s）与既有注册表条目同名，跳过",
-                    final, server, tool_name,
+                    final,
+                    server,
+                    tool_name,
                 )
                 continue
 
@@ -290,9 +303,7 @@ class MCPManager:
             self._last_errors.pop(server, None)
 
             new_finals = {
-                namespace_tool_name(server, d.name.strip())
-                for d in tools
-                if d.name.strip()
+                namespace_tool_name(server, d.name.strip()) for d in tools if d.name.strip()
             }
             own = self._registered.setdefault(server, {})
             removed = 0
@@ -304,7 +315,9 @@ class MCPManager:
             total = self._register_tools(server, conn, tools)
             logger.info(
                 "MCP server '%s' tools/list_changed：现注册 %d 个（移除 %d）",
-                server, total, removed,
+                server,
+                total,
+                removed,
             )
 
     # ── 状态 ─────────────────────────────────────────────────────────────
@@ -317,23 +330,25 @@ class MCPManager:
         last_error（最近一次接入或刷新失败原文；成功后清除）。
         """
         servers: list[dict[str, Any]] = []
-        for cfg in (self._configs or []):
+        for cfg in self._configs or []:
             conn = self._connections.get(cfg.name)
             if conn is not None:
                 state = conn.state
             else:
                 state = "disabled" if not cfg.enabled else "not_connected"
             own = self._registered.get(cfg.name, {})
-            servers.append({
-                "name": cfg.name,
-                "enabled": cfg.enabled,
-                "transport": cfg.transport,
-                "description": cfg.description,
-                "state": state,
-                "tools": len(own),
-                "tool_names": sorted(own.values()),
-                "last_error": self._last_errors.get(cfg.name),
-            })
+            servers.append(
+                {
+                    "name": cfg.name,
+                    "enabled": cfg.enabled,
+                    "transport": cfg.transport,
+                    "description": cfg.description,
+                    "state": state,
+                    "tools": len(own),
+                    "tool_names": sorted(own.values()),
+                    "last_error": self._last_errors.get(cfg.name),
+                }
+            )
         return {
             "started": self._started,
             "servers": servers,

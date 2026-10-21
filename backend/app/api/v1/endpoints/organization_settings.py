@@ -9,6 +9,7 @@
 - 所有写入都通过 ``audit_service`` 落 ``user_activity_logs``（action =
   update_organization_settings，target_type = organization_settings）。
 """
+
 import json
 
 from fastapi import APIRouter, Depends, Request
@@ -38,9 +39,7 @@ AUDIT_ACTION = "update_organization_settings"
 AUDIT_TARGET_TYPE = "organization_settings"
 
 
-async def _ensure_membership(
-    db: AsyncSession, current_user: User, organization_id: int
-) -> None:
+async def _ensure_membership(db: AsyncSession, current_user: User, organization_id: int) -> None:
     """超管旁路；其余用户必须是该组织成员（当前组织或成员关系）。"""
     if getattr(current_user, "is_superuser", False):
         return
@@ -56,9 +55,7 @@ async def _ensure_membership(
         raise AuthorizationError("无权访问该组织的设置")
 
 
-async def _ensure_org_admin(
-    db: AsyncSession, current_user: User, organization_id: int
-) -> None:
+async def _ensure_org_admin(db: AsyncSession, current_user: User, organization_id: int) -> None:
     """要求调用者是**该组织**的管理员（超管旁路）；users.role 不参与判定。"""
     await require_org_admin(db, current_user, organization_id)
 
@@ -70,15 +67,9 @@ async def _org_or_404(db: AsyncSession, organization_id: int) -> Organization:
     return org
 
 
-async def _build_response(
-    db: AsyncSession, organization_id: int
-) -> OrganizationSettingsResponse:
-    settings_map = await organization_settings_service.get_effective_settings(
-        db, organization_id
-    )
-    usage = await organization_settings_service.get_monthly_usage(
-        db, organization_id
-    )
+async def _build_response(db: AsyncSession, organization_id: int) -> OrganizationSettingsResponse:
+    settings_map = await organization_settings_service.get_effective_settings(db, organization_id)
+    usage = await organization_settings_service.get_monthly_usage(db, organization_id)
     quota = settings_map["monthly_token_quota"]["value"]
     return OrganizationSettingsResponse(
         organization_id=organization_id,
@@ -119,9 +110,7 @@ async def update_organization_settings(
     await _org_or_404(db, organization_id)
 
     updates = payload.model_dump(exclude_unset=True)
-    _, changes = await organization_settings_service.update_settings(
-        db, organization_id, updates
-    )
+    _, changes = await organization_settings_service.update_settings(db, organization_id, updates)
 
     if changes:
         await audit_service.log_activity(

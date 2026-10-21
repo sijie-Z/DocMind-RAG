@@ -51,6 +51,7 @@ def reset_reflection_stats() -> None:
     _reflection_stats["quick_pass_count"] = 0
     _reflection_stats["llm_reflection_count"] = 0
 
+
 REFLECTION_SYSTEM_PROMPT = """你是一个质量评估专家。你需要评估 Agent 的任务执行结果。
 
 ## 原始目标
@@ -90,6 +91,7 @@ REFLECTION_SYSTEM_PROMPT = """你是一个质量评估专家。你需要评估 A
 @dataclass
 class ReflectionResult:
     """The result of a reflection pass."""
+
     achievement: int | None = None  # 0-100；None = 无判定（降级态），不是 0 分
     gaps: list[str] = field(default_factory=list)
     quality_issues: list[str] = field(default_factory=list)
@@ -128,14 +130,18 @@ class Reflector:
         span = None
         try:
             from app.agent.observability import get_langfuse
+
             lf = get_langfuse()
             if lf:
-                span = lf.span(name="reflection", input={
-                "plan_goal": plan.goal,
-                "step_count": len(plan.steps),
-                "completed": plan.completed_steps,
-                "failed": plan.failed_steps,
-            })
+                span = lf.span(
+                    name="reflection",
+                    input={
+                        "plan_goal": plan.goal,
+                        "step_count": len(plan.steps),
+                        "completed": plan.completed_steps,
+                        "failed": plan.failed_steps,
+                    },
+                )
         except Exception:
             pass
 
@@ -145,9 +151,14 @@ class Reflector:
             if span:
                 span.end(output="quick_pass")
             await self._record_reflection(plan, "pass", "All steps completed successfully")
-            yield self._summary_event(plan, ReflectionResult(
-                achievement=100, decision="pass", reasoning="All steps completed successfully",
-            ))
+            yield self._summary_event(
+                plan,
+                ReflectionResult(
+                    achievement=100,
+                    decision="pass",
+                    reasoning="All steps completed successfully",
+                ),
+            )
             return
 
         # Build reflection prompt
@@ -257,17 +268,22 @@ class Reflector:
         await self._record_reflection(plan, decision, reasoning)
 
         if span:
-            span.end(output=f"decision={decision}, achievement={reflection_data.get('achievement', '?')}")
+            span.end(
+                output=f"decision={decision}, achievement={reflection_data.get('achievement', '?')}"
+            )
 
-        yield self._summary_event(plan, ReflectionResult(
-            # 模型没给 achievement 就留 None —— 不再回退到编造的 85（#301 #7）。
-            achievement=reflection_data.get("achievement"),
-            gaps=reflection_data.get("gaps", []),
-            quality_issues=reflection_data.get("quality_issues", []),
-            decision=decision,
-            retry_step_id=reflection_data.get("retry_step_id"),
-            reasoning=reasoning,
-        ))
+        yield self._summary_event(
+            plan,
+            ReflectionResult(
+                # 模型没给 achievement 就留 None —— 不再回退到编造的 85（#301 #7）。
+                achievement=reflection_data.get("achievement"),
+                gaps=reflection_data.get("gaps", []),
+                quality_issues=reflection_data.get("quality_issues", []),
+                decision=decision,
+                retry_step_id=reflection_data.get("retry_step_id"),
+                reasoning=reasoning,
+            ),
+        )
 
     def _summary_event(self, plan: Plan, result: ReflectionResult) -> AgentEvent:
         """Render the structured reflection verdict as an event.
@@ -290,7 +306,9 @@ class Reflector:
             type="reflection",
             # issue #301 #8：未知 decision 不得再被静默改写为 "pass"（假绿兜底）。
             # 正常路径只会传入已验证的判定；此处兜底降级为 "unparsed"（无判定）。
-            reflection_result=result.decision if result.decision in ("pass", "retry", "replan", "escalate") else "unparsed",
+            reflection_result=result.decision
+            if result.decision in ("pass", "retry", "replan", "escalate")
+            else "unparsed",
             content=content,
             plan_id=plan.id,
             plan_progress=plan.progress,
@@ -306,7 +324,13 @@ class Reflector:
     def _build_plan_summary(self, plan: Plan) -> str:
         lines = []
         for step in plan.steps:
-            icon = {"completed": "✅", "failed": "❌", "skipped": "⬜", "pending": "⏳", "running": "🔄"}
+            icon = {
+                "completed": "✅",
+                "failed": "❌",
+                "skipped": "⬜",
+                "pending": "⏳",
+                "running": "🔄",
+            }
             icon_str = icon.get(step.status, "❓")
             lines.append(f"{icon_str} {step.id}: {step.description}")
         return "\n".join(lines)
@@ -332,7 +356,7 @@ class Reflector:
         （还会以 success=True 进经验库）。解析失败就是没有判定，由调用方按
         unparsed 第三态处理。
         """
-        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
         if json_match:
             try:
                 return json.loads(json_match.group(1))
@@ -343,7 +367,7 @@ class Reflector:
         except json.JSONDecodeError:
             pass
         try:
-            brace_match = re.search(r'\{[\s\S]*\}', text)
+            brace_match = re.search(r"\{[\s\S]*\}", text)
             if brace_match:
                 return json.loads(brace_match.group(0))
         except json.JSONDecodeError:

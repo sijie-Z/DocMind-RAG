@@ -50,6 +50,7 @@ USER_ID = 7
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch):
     """隔离与 checkpoint 无关的副作用（replay 落盘 / 经验回写）。"""
+
     async def _save(self, ttl=86400 * 7):
         return False
 
@@ -70,6 +71,7 @@ async def db_factory(tmp_path, monkeypatch):
 
 def _fake_openai_client(text: str = "步骤结果"):
     """直答型假 client：每次调用返回 content（无 tool_calls）。"""
+
     async def _create(**kwargs):
         msg = SimpleNamespace(content=text, tool_calls=None, role="assistant")
         return SimpleNamespace(
@@ -84,6 +86,7 @@ def _fake_openai_client(text: str = "步骤结果"):
 
 def _failing_openai_client(exc_text: str = "LLM down (simulated)"):
     """全败假 client：任何 LLM 调用都抛异常（模拟 key 失效/服务挂）。"""
+
     async def _create(**kwargs):
         raise RuntimeError(exc_text)
 
@@ -120,8 +123,11 @@ def _tool_call_client(tool_name: str, args_json: str, synthesis: str = "降级�
 
 def _agent_config(**overrides) -> AgentConfig:
     base = dict(
-        enable_reflection=False, enable_memory=False, enable_skills=False,
-        enable_experience=False, enable_thinking=False,
+        enable_reflection=False,
+        enable_memory=False,
+        enable_skills=False,
+        enable_experience=False,
+        enable_thinking=False,
     )
     base.update(overrides)
     return AgentConfig(**base)
@@ -227,7 +233,9 @@ async def test_mark_terminal_write_failure_loud_and_row_untouched(db_factory, mo
 
 @pytest.mark.asyncio
 async def test_chat_terminal_write_failure_surfaces_and_stays_recoverable(
-    db_factory, monkeypatch, caplog,
+    db_factory,
+    monkeypatch,
+    caplog,
 ):
     """端到端（#10）：终态写失败 → ERROR 日志 + 如实事件；任务保持 RUNNING，
     且写路径恢复后 resume 能收敛到 COMPLETED（语义自洽闭环）。
@@ -247,8 +255,12 @@ async def test_chat_terminal_write_failure_surfaces_and_stays_recoverable(
 
     with caplog.at_level(logging.DEBUG, logger="app.agent.service"):
         events = [
-            e async for e in svc.chat(
-                QUERY, organization_id=1, user_id=USER_ID, config=_agent_config(),
+            e
+            async for e in svc.chat(
+                QUERY,
+                organization_id=1,
+                user_id=USER_ID,
+                config=_agent_config(),
             )
         ]
 
@@ -290,9 +302,7 @@ async def test_tooless_llm_failure_marks_failed_and_report_not_green(db_factory)
     svc = AgentService(openai_client=_failing_openai_client())
     cfg = _agent_config(enable_tools=False)
 
-    events = [
-        e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=cfg)
-    ]
+    events = [e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=cfg)]
 
     task_id = _task_id_of(events)
     row = await _get_task(db_factory, task_id)
@@ -306,9 +316,7 @@ async def test_tooless_llm_failure_marks_failed_and_report_not_green(db_factory)
 
     report_events = [e for e in events if e.type == "run_report"]
     assert report_events, "run_report 必须产出"
-    assert "clean_success: False" in report_events[-1].content, (
-        "零产出 run 不得报干净成功"
-    )
+    assert "clean_success: False" in report_events[-1].content, "零产出 run 不得报干净成功"
     assert "FAILURE:" in report_events[-1].content
 
     ctx_events = [e for e in events if e.type == "execution_context"]
@@ -323,9 +331,7 @@ async def test_tooless_success_stays_completed_and_all_green(db_factory):
     svc = AgentService(openai_client=_fake_openai_client(text="你好，这是直接回答"))
     cfg = _agent_config(enable_tools=False)
 
-    events = [
-        e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=cfg)
-    ]
+    events = [e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=cfg)]
 
     task_id = _task_id_of(events)
     assert (await _get_task(db_factory, task_id)).status == TaskStatus.COMPLETED
@@ -349,9 +355,7 @@ async def test_tools_partial_step_failure_stays_completed_not_flipped(db_factory
     cfg = _agent_config(enable_planning=False, tool_tags=["search", "analysis"])
     svc = AgentService(openai_client=_tool_call_client("delegate_subtask", "{}"))
 
-    events = [
-        e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=cfg)
-    ]
+    events = [e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=cfg)]
 
     task_id = _task_id_of(events)
     row = await _get_task(db_factory, task_id)

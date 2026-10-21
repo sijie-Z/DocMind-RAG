@@ -62,6 +62,7 @@ async def _check_rate_limit(user_id: int, limit: int = RATE_LIMIT_RPM) -> bool:
     """
     try:
         from app.core.redis import redis_client
+
         if not redis_client:
             return False  # no Redis = fail closed
         key = f"agent:rate_limit:web:{user_id}"
@@ -128,11 +129,13 @@ async def web_search(
             found: list[dict[str, str]] = []
             with DDGS() as ddgs:
                 for r in ddgs.text(query, max_results=max_results):
-                    found.append({
-                        "title": r.get("title", ""),
-                        "url": r.get("href", ""),
-                        "snippet": r.get("body", ""),
-                    })
+                    found.append(
+                        {
+                            "title": r.get("title", ""),
+                            "url": r.get("href", ""),
+                            "snippet": r.get("body", ""),
+                        }
+                    )
             return found
 
         results = await asyncio.to_thread(_run_search)
@@ -214,7 +217,9 @@ async def fetch_webpage(
                 break
 
             if response is None:
-                return ToolResult.fail(code="unknown", message=f"Failed to fetch {url}: no response")
+                return ToolResult.fail(
+                    code="unknown", message=f"Failed to fetch {url}: no response"
+                )
             if response.status_code != 200:
                 return ToolResult.fail(
                     code="api_error", message=f"Failed to fetch {url}: HTTP {response.status_code}"
@@ -241,7 +246,8 @@ async def fetch_webpage(
             return f"Content from {current_url}:\n\n{text}"
     except ImportError:
         return ToolResult.fail(
-            code="invalid_configuration", message="Webpage fetch unavailable: httpx package not installed."
+            code="invalid_configuration",
+            message="Webpage fetch unavailable: httpx package not installed.",
         )
     except Exception as e:
         logger.error(f"Fetch webpage failed: {e}")
@@ -257,6 +263,7 @@ def _extract_text(html: str) -> str:
     # Try trafilatura first (best readability extraction)
     try:
         import trafilatura
+
         text = trafilatura.extract(html)
         if text:
             return text.strip()
@@ -266,6 +273,7 @@ def _extract_text(html: str) -> str:
     # Fallback: BeautifulSoup
     try:
         from bs4 import BeautifulSoup
+
         soup = BeautifulSoup(html, "html.parser")
 
         # Remove non-content elements
@@ -281,6 +289,7 @@ def _extract_text(html: str) -> str:
     except ImportError:
         # Last resort: basic HTML tag stripping
         import re
+
         text = re.sub(r"<[^>]+>", " ", html)
         text = re.sub(r"\s+", " ", text)
         return text.strip()[:5000]

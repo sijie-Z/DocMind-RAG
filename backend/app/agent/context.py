@@ -6,6 +6,7 @@ information while freeing up space for new interactions.
 
 Inspired by hermes-agent's ContextEngine / ContextCompressor pattern.
 """
+
 import logging
 
 import tiktoken
@@ -107,8 +108,7 @@ class ContextEngine:
         )
 
         compressed = (
-            self._compress_messages_fast(old_messages, budget_for_old)
-            if old_messages else []
+            self._compress_messages_fast(old_messages, budget_for_old) if old_messages else []
         )
         result = compressed + recent_messages
 
@@ -154,8 +154,11 @@ class ContextEngine:
             - 50,
         )
 
-        compressed = await self._compress_messages_async(old_messages, budget_for_old, ctx=ctx) \
-            if old_messages else []
+        compressed = (
+            await self._compress_messages_async(old_messages, budget_for_old, ctx=ctx)
+            if old_messages
+            else []
+        )
         result = compressed + recent_messages
 
         final_tokens = estimate_messages_tokens(result)
@@ -205,7 +208,7 @@ class ContextEngine:
         summary_text = "[Earlier conversation]\n" + "\n".join(parts)
         max_chars = int(token_budget * CHARS_PER_TOKEN)
         if len(summary_text) > max_chars:
-            summary_text = summary_text[:max_chars - 20] + "...[truncated]"
+            summary_text = summary_text[: max_chars - 20] + "...[truncated]"
 
         return [{"role": "system", "content": summary_text}]
 
@@ -224,6 +227,7 @@ class ContextEngine:
 
         try:
             from app.core.config import settings
+
             resp = await self._llm_client.chat.completions.create(
                 model=settings.DEEPSEEK_MODEL,
                 messages=[
@@ -308,9 +312,7 @@ class ContextEngine:
         return result
 
     @staticmethod
-    def _fit_one_message(
-        msg: dict[str, str], remaining: int
-    ) -> dict[str, str] | None:
+    def _fit_one_message(msg: dict[str, str], remaining: int) -> dict[str, str] | None:
         """把单条消息压进 remaining token；放不下 → None（旧语义的 continue）。"""
         content = msg.get("content") or ""
         if estimate_tokens(content) <= remaining:

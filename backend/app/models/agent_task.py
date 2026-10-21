@@ -64,32 +64,47 @@ class TaskStatus(enum.Enum):
 
 # ── Valid transitions ──────────────────────────────────────────────────
 _TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
-    TaskStatus.PENDING:       {TaskStatus.RUNNING, TaskStatus.ABANDONED,
-                               TaskStatus.CANCELLED},
-    TaskStatus.RUNNING:       {TaskStatus.WAITING_TOOL, TaskStatus.WAITING_HUMAN,
-                               TaskStatus.WAITING_APPROVAL,
-                               TaskStatus.WAITING_PLAN_APPROVAL,
-                               TaskStatus.FAILED, TaskStatus.COMPLETED,
-                               TaskStatus.ABANDONED, TaskStatus.CANCELLED},
-    TaskStatus.WAITING_TOOL:  {TaskStatus.RUNNING, TaskStatus.FAILED,
-                               TaskStatus.ABANDONED, TaskStatus.CANCELLED},
+    TaskStatus.PENDING: {TaskStatus.RUNNING, TaskStatus.ABANDONED, TaskStatus.CANCELLED},
+    TaskStatus.RUNNING: {
+        TaskStatus.WAITING_TOOL,
+        TaskStatus.WAITING_HUMAN,
+        TaskStatus.WAITING_APPROVAL,
+        TaskStatus.WAITING_PLAN_APPROVAL,
+        TaskStatus.FAILED,
+        TaskStatus.COMPLETED,
+        TaskStatus.ABANDONED,
+        TaskStatus.CANCELLED,
+    },
+    TaskStatus.WAITING_TOOL: {
+        TaskStatus.RUNNING,
+        TaskStatus.FAILED,
+        TaskStatus.ABANDONED,
+        TaskStatus.CANCELLED,
+    },
     # HITL 审批等待（approval.py）：人类应答 → 回 RUNNING 续跑；取消 → 终态。
-    TaskStatus.WAITING_APPROVAL: {TaskStatus.RUNNING, TaskStatus.FAILED,
-                                  TaskStatus.CANCELLED},
+    TaskStatus.WAITING_APPROVAL: {TaskStatus.RUNNING, TaskStatus.FAILED, TaskStatus.CANCELLED},
     # 计划审批等待（plan approval）：approve/edit → 回 RUNNING 执行；
     # reject 且重规划额度用尽 → REJECTED 终态；取消 → CANCELLED；错误 → FAILED。
-    TaskStatus.WAITING_PLAN_APPROVAL: {TaskStatus.RUNNING, TaskStatus.FAILED,
-                                       TaskStatus.CANCELLED, TaskStatus.REJECTED},
-    TaskStatus.WAITING_HUMAN: {TaskStatus.RUNNING, TaskStatus.ABANDONED,
-                               TaskStatus.FAILED, TaskStatus.CANCELLED},
+    TaskStatus.WAITING_PLAN_APPROVAL: {
+        TaskStatus.RUNNING,
+        TaskStatus.FAILED,
+        TaskStatus.CANCELLED,
+        TaskStatus.REJECTED,
+    },
+    TaskStatus.WAITING_HUMAN: {
+        TaskStatus.RUNNING,
+        TaskStatus.ABANDONED,
+        TaskStatus.FAILED,
+        TaskStatus.CANCELLED,
+    },
     # terminal states
     # FAILED 还有 CANCELLED 边：失败任务上滞留的取消旗在下一次 resume 前被
     # 观察时如实收敛（用户已放弃，不复活）——见 checkpoint.begin_resume。
-    TaskStatus.FAILED:        {TaskStatus.RUNNING, TaskStatus.CANCELLED},
-    TaskStatus.COMPLETED:     set(),
-    TaskStatus.ABANDONED:     set(),
-    TaskStatus.CANCELLED:     set(),
-    TaskStatus.REJECTED:      set(),
+    TaskStatus.FAILED: {TaskStatus.RUNNING, TaskStatus.CANCELLED},
+    TaskStatus.COMPLETED: set(),
+    TaskStatus.ABANDONED: set(),
+    TaskStatus.CANCELLED: set(),
+    TaskStatus.REJECTED: set(),
 }
 
 
@@ -110,33 +125,45 @@ class AgentTask(Base):
 
     # ── Identity ──
     id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, index=True,
+        String(36),
+        primary_key=True,
+        index=True,
         default=lambda: uuid.uuid4().hex[:12],
     )
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), index=True,
+        Integer,
+        ForeignKey("users.id"),
+        index=True,
     )
     organization_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("organizations.id"), index=True,
+        Integer,
+        ForeignKey("organizations.id"),
+        index=True,
     )
 
     # ── Lifecycle ──
     status: Mapped[TaskStatus] = mapped_column(
-        Enum(TaskStatus), default=TaskStatus.PENDING, index=True,
+        Enum(TaskStatus),
+        default=TaskStatus.PENDING,
+        index=True,
     )
 
     # ── Task content ──
     query: Mapped[str] = mapped_column(Text, comment="Original user query")
     plan_id: Mapped[str | None] = mapped_column(
-        String(36), index=True, comment="Planner's Plan ID (Redis key ref)",
+        String(36),
+        index=True,
+        comment="Planner's Plan ID (Redis key ref)",
     )
     current_step_id: Mapped[str | None] = mapped_column(
-        String(36), comment="Which PlanStep is being / was last executed",
+        String(36),
+        comment="Which PlanStep is being / was last executed",
     )
 
     # ── Checkpoint snapshot ──
     context_snapshot: Mapped[Any | None] = mapped_column(
-        JSON, comment="ExecutionContext.to_dict() at last checkpoint",
+        JSON,
+        comment="ExecutionContext.to_dict() at last checkpoint",
     )
 
     # ── Progress ──
@@ -153,16 +180,19 @@ class AgentTask(Base):
 
     # ── Timestamps ──
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(),
+        DateTime(timezone=True),
+        server_default=func.now(),
     )
     updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now(),
+        DateTime(timezone=True),
+        onupdate=func.now(),
     )
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
     )
     expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), index=True,
+        DateTime(timezone=True),
+        index=True,
         comment="When this task expires and can be cleaned up",
     )
 
@@ -171,7 +201,9 @@ class AgentTask(Base):
     @property
     def is_terminal(self) -> bool:
         return self.status in (
-            TaskStatus.COMPLETED, TaskStatus.ABANDONED, TaskStatus.CANCELLED,
+            TaskStatus.COMPLETED,
+            TaskStatus.ABANDONED,
+            TaskStatus.CANCELLED,
             TaskStatus.REJECTED,
         )
 
@@ -190,12 +222,14 @@ class AgentTask(Base):
     def transition(self, to: TaskStatus) -> None:
         """Move to a new state, validating legality first."""
         if not can_transition(self.status, to):
-            raise ValueError(
-                f"Invalid transition: {self.status.value} → {to.value}"
-            )
+            raise ValueError(f"Invalid transition: {self.status.value} → {to.value}")
         self.status = to
-        if to in (TaskStatus.COMPLETED, TaskStatus.ABANDONED,
-                  TaskStatus.CANCELLED, TaskStatus.REJECTED):
+        if to in (
+            TaskStatus.COMPLETED,
+            TaskStatus.ABANDONED,
+            TaskStatus.CANCELLED,
+            TaskStatus.REJECTED,
+        ):
             self.completed_at = datetime.utcnow()
 
     def __repr__(self) -> str:

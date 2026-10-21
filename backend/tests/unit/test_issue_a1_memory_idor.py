@@ -24,6 +24,7 @@
 `test_import_payload_agent_id_cannot_override_persist_key` 红
 （saved 出现 `agent:memory:1:77:victim-agent`）。
 """
+
 from types import SimpleNamespace
 
 import pytest
@@ -80,7 +81,9 @@ def _memory_node(agent_id, action: str = "retrieve") -> WorkflowNode:
     )
 
 
-def _executor(agent_id, action: str = "retrieve", org_id: int | None = 2, user_id: int | None = 9) -> MemoryNodeExecutor:
+def _executor(
+    agent_id, action: str = "retrieve", org_id: int | None = 2, user_id: int | None = 9
+) -> MemoryNodeExecutor:
     executor = MemoryNodeExecutor(_memory_node(agent_id, action))
     executor.organization_id = org_id
     executor.user_id = user_id
@@ -104,24 +107,21 @@ class TestCrossTenantAttackBlocked:
             await attacker.execute(_state(SECRET))
 
         # 受害者记忆必须原样保留（攻击者既未读走也未覆写）
-        victim_reader = AgentMemoryBridge(
-            agent_id="victim-agent", organization_id=1, user_id=77
-        )
+        victim_reader = AgentMemoryBridge(agent_id="victim-agent", organization_id=1, user_id=77)
         assert any(
-            item.content == SECRET
-            for item in victim_reader.system.short_term.get_recent(20)
+            item.content == SECRET for item in victim_reader.system.short_term.get_recent(20)
         ), "受害者记忆不得被跨租户节点改动"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "hostile",
         [
-            "1:77:victim-agent",   # 完整命名空间三元组
-            "session:abc",         # 会话作用域字面量
-            "None:77:victim",      # 无组织命名空间字面量
-            "a b",                 # 空白
-            "x" * 65,              # 超长
-            123,                   # 非字符串（节点数据可被配置成任意 JSON）
+            "1:77:victim-agent",  # 完整命名空间三元组
+            "session:abc",  # 会话作用域字面量
+            "None:77:victim",  # 无组织命名空间字面量
+            "a b",  # 空白
+            "x" * 65,  # 超长
+            123,  # 非字符串（节点数据可被配置成任意 JSON）
         ],
     )
     async def test_namespace_injection_shapes_all_rejected(self, isolated_cache, hostile):
@@ -139,8 +139,7 @@ class TestCrossTenantAttackBlocked:
 
         default_system = get_memory_system(2, 9, "default")
         assert any(
-            "默认作用域记忆" in item.content
-            for item in default_system.short_term.get_recent(10)
+            "默认作用域记忆" in item.content for item in default_system.short_term.get_recent(10)
         )
 
     @pytest.mark.asyncio
@@ -208,10 +207,15 @@ class TestSameTenantNoRegression:
     async def test_same_agent_label_in_other_tenant_cannot_read(self, isolated_cache):
         """同一 agentId 标签在不同租户下互不可见（命名空间按 org+user 隔离）。"""
         store = _executor("assistant", action="store")
-        await store.execute(_state("租户2的私有内容", [
-            HumanMessage(content="租户2的私有内容"),
-            AIMessage(content="收到"),
-        ]))
+        await store.execute(
+            _state(
+                "租户2的私有内容",
+                [
+                    HumanMessage(content="租户2的私有内容"),
+                    AIMessage(content="收到"),
+                ],
+            )
+        )
 
         # 另一个组织（org 3）同名 agent 标签检索不到
         outsider = _executor("assistant", action="retrieve", org_id=3, user_id=9)
@@ -266,9 +270,7 @@ class TestImportCannotRekeyNamespace:
 
         monkeypatch.setattr(AgentMemorySystem, "_save_to_redis", fake_save)
 
-        body = ImportMemoriesRequest(
-            data={"agent_id": "1:77:victim-agent", "long_term": {}}
-        )
+        body = ImportMemoriesRequest(data={"agent_id": "1:77:victim-agent", "long_term": {}})
         result = await import_memory(
             agent_id="attacker",
             body=body,

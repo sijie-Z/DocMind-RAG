@@ -97,6 +97,7 @@ class PatternAnalyzer:
         """
         # Frequency factor: log scale, capped at 10 observations
         import math
+
         freq_factor = min(1.0, math.log2(p.count + 1) / math.log2(11))
 
         # Success rate factor
@@ -122,6 +123,7 @@ class PatternAnalyzer:
 
 # ── CLI ─────────────────────────────────────────────────────────────
 
+
 def _print_report(patterns: list[PatternStats], suggestions: list[SuggestedSkill]) -> None:
     """Print the analysis report to stdout."""
     print("=" * 65)
@@ -137,8 +139,10 @@ def _print_report(patterns: list[PatternStats], suggestions: list[SuggestedSkill
         for i, p in enumerate(patterns[:10], 1):
             tools = " → ".join(p.tool_sequence)
             print(f"  {i}. {tools}")
-            print(f"     count={p.count}  success={p.success_rate:.0%}  "
-                  f"coverage={p.avg_coverage:.0%}  time={p.avg_duration_ms/1000:.1f}s")
+            print(
+                f"     count={p.count}  success={p.success_rate:.0%}  "
+                f"coverage={p.avg_coverage:.0%}  time={p.avg_duration_ms / 1000:.1f}s"
+            )
             if p.suggested_triggers:
                 print(f"     triggers: {', '.join(p.suggested_triggers[:5])}")
             print()
@@ -152,7 +156,9 @@ def _print_report(patterns: list[PatternStats], suggestions: list[SuggestedSkill
     print("=" * 65)
 
 
-def _save_suggestions(suggestions: list[SuggestedSkill], path: str = "benchmark/suggested_skills.json") -> str:
+def _save_suggestions(
+    suggestions: list[SuggestedSkill], path: str = "benchmark/suggested_skills.json"
+) -> str:
     """Save suggested skills to a local JSON file."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -186,4 +192,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

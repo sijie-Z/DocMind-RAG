@@ -10,6 +10,7 @@
 
 驱动方式：假 LLM 的 `chat.completions.create` + 直接驱动 `Executor._execute_step_once`。
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,7 +23,9 @@ from app.agent.planner import Plan, PlanStep
 from app.agent.registry import ToolMeta, ToolResult, tool_registry
 
 
-def _client_with_tool_call(tool_name: str, raw_arguments: str | None = "{}", capture: dict | None = None):
+def _client_with_tool_call(
+    tool_name: str, raw_arguments: str | None = "{}", capture: dict | None = None
+):
     client = MagicMock()
 
     async def _create(*, messages, tools=None, **kwargs):

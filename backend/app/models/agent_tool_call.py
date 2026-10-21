@@ -45,15 +45,15 @@ class ToolCallStatus:
     """工具调用账目状态（大写字符串入库）。"""
 
     # 正常路径
-    REGISTERED = "REGISTERED"      # 已登记、尚未派发
-    DISPATCHED = "DISPATCHED"      # 已派发、等待 result
-    COMPLETED = "COMPLETED"        # result 成功落账
-    FAILED = "FAILED"              # result 失败/异常落账
+    REGISTERED = "REGISTERED"  # 已登记、尚未派发
+    DISPATCHED = "DISPATCHED"  # 已派发、等待 result
+    COMPLETED = "COMPLETED"  # result 成功落账
+    FAILED = "FAILED"  # result 失败/异常落账
 
     # 合成终态（崩溃/取消/resume 时对未完成 call 的补写）
-    TOOL_OUTCOME_UNKNOWN = "TOOL_OUTCOME_UNKNOWN"          # 执行中失联
-    TOOL_NOT_STARTED = "TOOL_NOT_STARTED"                  # 已登记未派发
-    ABORTED_BEFORE_DISPATCH = "ABORTED_BEFORE_DISPATCH"    # 取消前
+    TOOL_OUTCOME_UNKNOWN = "TOOL_OUTCOME_UNKNOWN"  # 执行中失联
+    TOOL_NOT_STARTED = "TOOL_NOT_STARTED"  # 已登记未派发
+    ABORTED_BEFORE_DISPATCH = "ABORTED_BEFORE_DISPATCH"  # 取消前
 
 
 class AgentToolCall(Base):
@@ -67,27 +67,42 @@ class AgentToolCall(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("agent_tasks.id", ondelete="CASCADE"),
-        index=True, nullable=False,
+        String(36),
+        ForeignKey("agent_tasks.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
     )
     call_id: Mapped[str] = mapped_column(
-        String(64), nullable=False, comment="LLM 提供的 tool_call id",
+        String(64),
+        nullable=False,
+        comment="LLM 提供的 tool_call id",
     )
     tool_name: Mapped[str] = mapped_column(String(128), nullable=False)
     arguments: Mapped[str] = mapped_column(
-        Text, default="", nullable=False, comment="参数 JSON（截断存储）",
+        Text,
+        default="",
+        nullable=False,
+        comment="参数 JSON（截断存储）",
     )
     source_event_seq: Mapped[int] = mapped_column(
-        Integer, nullable=False, comment="本任务内单调事件序号（call 事件）",
+        Integer,
+        nullable=False,
+        comment="本任务内单调事件序号（call 事件）",
     )
     status: Mapped[str] = mapped_column(
-        String(32), default=ToolCallStatus.REGISTERED, index=True, nullable=False,
+        String(32),
+        default=ToolCallStatus.REGISTERED,
+        index=True,
+        nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
     )
     updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now(),
+        DateTime(timezone=True),
+        onupdate=func.now(),
     )
 
 
@@ -102,24 +117,38 @@ class AgentToolResult(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("agent_tasks.id", ondelete="CASCADE"),
-        index=True, nullable=False,
+        String(36),
+        ForeignKey("agent_tasks.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
     )
     call_id: Mapped[str] = mapped_column(String(64), nullable=False)
     tool_call_pk: Mapped[int] = mapped_column(
-        Integer, ForeignKey("agent_tool_calls.id", ondelete="CASCADE"),
-        index=True, nullable=False, comment="关联 agent_tool_calls.id",
+        Integer,
+        ForeignKey("agent_tool_calls.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+        comment="关联 agent_tool_calls.id",
     )
     source_event_seq: Mapped[int] = mapped_column(
-        Integer, nullable=False, comment="本任务内单调事件序号（result 事件）",
+        Integer,
+        nullable=False,
+        comment="本任务内单调事件序号（result 事件）",
     )
     status: Mapped[str] = mapped_column(
-        String(16), nullable=False, comment="success | error",
+        String(16),
+        nullable=False,
+        comment="success | error",
     )
     result_summary: Mapped[str] = mapped_column(
-        Text, default="", nullable=False, comment="结果摘要（截断存储）",
+        Text,
+        default="",
+        nullable=False,
+        comment="结果摘要（截断存储）",
     )
     error_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
     )

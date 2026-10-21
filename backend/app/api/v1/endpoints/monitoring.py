@@ -50,10 +50,14 @@ router = APIRouter()
 _recent_external_alerts: deque = deque(maxlen=max(50, int(settings.ALERT_RECENT_BUFFER_SIZE)))
 _in_memory_alert_dedup: dict[str, float] = {}
 
-@router.get("/stats", response_model=dict, summary="获取系统统计信息", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
-async def get_system_stats(
-    db: AsyncSession = Depends(get_db)
-):
+
+@router.get(
+    "/stats",
+    response_model=dict,
+    summary="获取系统统计信息",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
+async def get_system_stats(db: AsyncSession = Depends(get_db)):
     """获取系统统计信息（需要 VIEW_SYSTEM_HEALTH 权限）"""
 
     # 获取真实统计数据
@@ -67,17 +71,22 @@ async def get_system_stats(
         "total_files": doc_count.scalar() or 0,
         "total_organizations": org_count.scalar() or 0,
         "total_chat_sessions": chat_count.scalar() or 0,
-        "system_status": "running"
+        "system_status": "running",
     }
 
-@router.get("/dashboard", response_model=dict, summary="获取监控仪表盘数据", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
-async def get_monitoring_dashboard(
-    db: AsyncSession = Depends(get_db)
-):
+
+@router.get(
+    "/dashboard",
+    response_model=dict,
+    summary="获取监控仪表盘数据",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
+async def get_monitoring_dashboard(db: AsyncSession = Depends(get_db)):
     """获取监控仪表盘数据（需要 VIEW_SYSTEM_HEALTH 权限）"""
 
     # 模拟系统指标（实际应从 psutil 或 Prometheus 获取）
     import psutil
+
     cpu_percent = psutil.cpu_percent()
     memory = psutil.virtual_memory()
     disk_path = "C:\\" if os.name == "nt" else "/"
@@ -100,14 +109,12 @@ async def get_monitoring_dashboard(
         health = await es_client.cluster.health()
         es_health = health.get("status", "unknown")
         try:
-            stats = await es_client.indices.stats(index=settings.ELASTICSEARCH_INDEX_NAME, metric="store")
+            stats = await es_client.indices.stats(
+                index=settings.ELASTICSEARCH_INDEX_NAME, metric="store"
+            )
             indices = stats.get("indices", {}) if isinstance(stats, dict) else {}
             index_stats = indices.get(settings.ELASTICSEARCH_INDEX_NAME, {})
-            size_bytes = (
-                index_stats.get("total", {})
-                .get("store", {})
-                .get("size_in_bytes", 0)
-            )
+            size_bytes = index_stats.get("total", {}).get("store", {}).get("size_in_bytes", 0)
             index_size_mb = round(float(size_bytes or 0) / (1024 * 1024), 2)
         except Exception:
             # 索引不存在或无权限时降级
@@ -126,7 +133,7 @@ async def get_monitoring_dashboard(
                 "memory_percent": memory.percent,
                 "disk_usage": {"C": disk.percent},
                 "process_count": len(psutil.pids()),
-                "load_average": load_average
+                "load_average": load_average,
             },
             "application": {
                 "active_connections": app_stats["active_connections"],
@@ -136,27 +143,28 @@ async def get_monitoring_dashboard(
                 "error_rate_percent": app_stats["error_rate_percent"],
                 "p95_response_time_ms": app_stats["p95_response_time_ms"],
                 "p99_response_time_ms": app_stats["p99_response_time_ms"],
-                "database_connections": 10, # 简化处理
-                "elasticsearch_health": es_health
+                "database_connections": 10,  # 简化处理
+                "elasticsearch_health": es_health,
             },
             "knowledge_base": {
                 "total_documents": doc_count_res.scalar() or 0,
                 "total_chunks": int(chunk_count_res.scalar() or 0),
                 "index_size_mb": index_size_mb,
                 "search_requests": app_stats["request_count"],
-                "search_response_time": app_stats["response_time"]
-            }
+                "search_response_time": app_stats["response_time"],
+            },
         },
         "trends": {
             # 系统指标趋势：读采样器真实数据（round2/sampling）；采样未启用
             # 或尚无样本时为空数组——诚实空态，不造假（此前为硬编码 []）。
             "system": await system_metrics_sampler.get_history(),
             "application": [],
-            "knowledge_base": []
+            "knowledge_base": [],
         },
         "alerts": [],
-        "timestamp": int(time.time())
+        "timestamp": int(time.time()),
     }
+
 
 # T8：时间范围窗口真过滤。快照 timestamp 为秒级（core/middleware.py 与
 # core/system_metrics.py 同口径）。未知取值不裁剪（向后兼容旧行为）；窗口内
@@ -186,11 +194,14 @@ def filter_by_time_range(
     return [point for point in history if int(point.get("timestamp") or 0) >= cutoff]
 
 
-@router.get("/metrics/{metric_type}", response_model=dict, summary="获取趋势指标", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+@router.get(
+    "/metrics/{metric_type}",
+    response_model=dict,
+    summary="获取趋势指标",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def get_metrics(
-    metric_type: str,
-    time_range: str = Query("1h"),
-    db: AsyncSession = Depends(get_db)
+    metric_type: str, time_range: str = Query("1h"), db: AsyncSession = Depends(get_db)
 ):
     """获取指标趋势数据（需要 VIEW_SYSTEM_HEALTH 权限；按 time_range 裁剪窗口）"""
 
@@ -199,7 +210,9 @@ async def get_metrics(
         # {"data": [...]}（K 支线已把前端读取对齐到该风格）；无样本 → 空数组
         # （诚实空态，不造假）。单条样本也原样返回——它不是伪造数据，
         # 无需应用分支 <2 的防伪门槛。
-        return {"data": filter_by_time_range(await system_metrics_sampler.get_history(), time_range)}
+        return {
+            "data": filter_by_time_range(await system_metrics_sampler.get_history(), time_range)
+        }
 
     # 获取性能指标历史
     history = await metrics_collector.get_history()
@@ -210,7 +223,13 @@ async def get_metrics(
 
     return {"data": filter_by_time_range(history, time_range)}
 
-@router.get("/alerts", response_model=dict, summary="获取系统告警", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+
+@router.get(
+    "/alerts",
+    response_model=dict,
+    summary="获取系统告警",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def get_alerts(
     limit: int = 10,
     db: AsyncSession = Depends(get_db),
@@ -221,91 +240,107 @@ async def get_alerts(
     app_stats = await metrics_collector.get_stats()
 
     if app_stats["error_rate_percent"] >= settings.ALERT_ERROR_RATE_PERCENT:
-        alerts.append({
-            "type": "application",
-            "level": "warning",
-            "message": f"错误率过高：{app_stats['error_rate_percent']}% (阈值 {settings.ALERT_ERROR_RATE_PERCENT}%)",
-            "timestamp": now,
-            "status": "active",
-            "metric": "error_rate_percent",
-        })
+        alerts.append(
+            {
+                "type": "application",
+                "level": "warning",
+                "message": f"错误率过高：{app_stats['error_rate_percent']}% (阈值 {settings.ALERT_ERROR_RATE_PERCENT}%)",
+                "timestamp": now,
+                "status": "active",
+                "metric": "error_rate_percent",
+            }
+        )
 
     if app_stats["p95_response_time_ms"] >= settings.ALERT_P95_MS:
-        alerts.append({
-            "type": "application",
-            "level": "warning",
-            "message": f"P95响应时间过高：{app_stats['p95_response_time_ms']}ms (阈值 {settings.ALERT_P95_MS}ms)",
-            "timestamp": now,
-            "status": "active",
-            "metric": "p95_response_time_ms",
-        })
+        alerts.append(
+            {
+                "type": "application",
+                "level": "warning",
+                "message": f"P95响应时间过高：{app_stats['p95_response_time_ms']}ms (阈值 {settings.ALERT_P95_MS}ms)",
+                "timestamp": now,
+                "status": "active",
+                "metric": "p95_response_time_ms",
+            }
+        )
 
     if app_stats["active_connections"] >= settings.ALERT_ACTIVE_CONNECTIONS:
-        alerts.append({
-            "type": "application",
-            "level": "critical",
-            "message": f"活跃连接数过高：{app_stats['active_connections']} (阈值 {settings.ALERT_ACTIVE_CONNECTIONS})",
-            "timestamp": now,
-            "status": "active",
-            "metric": "active_connections",
-        })
+        alerts.append(
+            {
+                "type": "application",
+                "level": "critical",
+                "message": f"活跃连接数过高：{app_stats['active_connections']} (阈值 {settings.ALERT_ACTIVE_CONNECTIONS})",
+                "timestamp": now,
+                "status": "active",
+                "metric": "active_connections",
+            }
+        )
 
     try:
         await db.execute(text("SELECT 1"))
     except Exception:
-        alerts.append({
-            "type": "infra",
-            "level": "critical",
-            "message": "数据库连接异常",
-            "timestamp": now,
-            "status": "active",
-            "metric": "database",
-        })
+        alerts.append(
+            {
+                "type": "infra",
+                "level": "critical",
+                "message": "数据库连接异常",
+                "timestamp": now,
+                "status": "active",
+                "metric": "database",
+            }
+        )
 
     try:
         if redis_client:
             await redis_client.ping()
     except Exception:
-        alerts.append({
-            "type": "infra",
-            "level": "warning",
-            "message": "Redis连接异常",
-            "timestamp": now,
-            "status": "active",
-            "metric": "redis",
-        })
+        alerts.append(
+            {
+                "type": "infra",
+                "level": "warning",
+                "message": "Redis连接异常",
+                "timestamp": now,
+                "status": "active",
+                "metric": "redis",
+            }
+        )
 
     try:
         es_client = await get_elasticsearch()
         es_health = await es_client.cluster.health()
         es_status = es_health.get("status", "unknown")
         if es_status == "red":
-            alerts.append({
+            alerts.append(
+                {
+                    "type": "infra",
+                    "level": "critical",
+                    "message": "Elasticsearch集群状态 RED",
+                    "timestamp": now,
+                    "status": "active",
+                    "metric": "elasticsearch",
+                }
+            )
+    except Exception:
+        alerts.append(
+            {
                 "type": "infra",
-                "level": "critical",
-                "message": "Elasticsearch集群状态 RED",
+                "level": "warning",
+                "message": "Elasticsearch连接异常",
                 "timestamp": now,
                 "status": "active",
                 "metric": "elasticsearch",
-            })
-    except Exception:
-        alerts.append({
-            "type": "infra",
-            "level": "warning",
-            "message": "Elasticsearch连接异常",
-            "timestamp": now,
-            "status": "active",
-            "metric": "elasticsearch",
-        })
+            }
+        )
 
     if not alerts:
-        alerts.append({
-            "type": "system",
-            "level": "info",
-            "message": "系统运行正常",
-            "timestamp": now,
-            "status": "active",
-        })
+        alerts.append(
+            {
+                "type": "system",
+                "level": "info",
+                "message": "系统运行正常",
+                "timestamp": now,
+                "status": "active",
+            }
+        )
 
     alerts = sorted(alerts, key=lambda item: item["timestamp"], reverse=True)[: max(1, limit)]
     return {
@@ -313,7 +348,13 @@ async def get_alerts(
         "total": len(alerts),
     }
 
-@router.get("/alerts/rules", response_model=dict, summary="获取告警规则", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+
+@router.get(
+    "/alerts/rules",
+    response_model=dict,
+    summary="获取告警规则",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def get_alert_rules():
     return {
         "error_rate_percent": settings.ALERT_ERROR_RATE_PERCENT,
@@ -321,6 +362,7 @@ async def get_alert_rules():
         "active_connections": settings.ALERT_ACTIVE_CONNECTIONS,
         "slow_request_threshold_ms": settings.SLOW_REQUEST_THRESHOLD_MS,
     }
+
 
 @router.post("/alerts/webhook", response_model=dict, summary="接收 Alertmanager 告警回调")
 async def receive_alertmanager_webhook(request: Request):
@@ -392,7 +434,9 @@ async def receive_alertmanager_webhook(request: Request):
         _recent_external_alerts.appendleft(normalized)
         received += 1
 
-        log_level = logger.error if normalized["severity"] in ("critical", "high") else logger.warning
+        log_level = (
+            logger.error if normalized["severity"] in ("critical", "high") else logger.warning
+        )
         # 这些值来自外部告警请求体，换行符可伪造日志行；落日志前净化
         log_level(
             "Alert received: alertname=%s severity=%s status=%s instance=%s summary=%s",
@@ -411,14 +455,26 @@ async def receive_alertmanager_webhook(request: Request):
         "items": accepted_items[:20],
     }
 
-@router.get("/alerts/recent", response_model=dict, summary="获取最近接收的外部告警", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+
+@router.get(
+    "/alerts/recent",
+    response_model=dict,
+    summary="获取最近接收的外部告警",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def get_recent_external_alerts(limit: int = Query(20, ge=1, le=200)):
     return {
         "items": list(_recent_external_alerts)[:limit],
         "total": len(_recent_external_alerts),
     }
 
-@router.get("/route-stats", response_model=dict, summary="获取路由性能统计", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+
+@router.get(
+    "/route-stats",
+    response_model=dict,
+    summary="获取路由性能统计",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def get_route_stats(
     limit: int = Query(20, ge=1, le=200),
     sort_by: str = Query("p95", pattern="^(p95|p99|avg|count)$"),
@@ -426,14 +482,16 @@ async def get_route_stats(
     route_stats = await metrics_collector.get_route_stats()
     items = []
     for route, stats in route_stats.items():
-        items.append({
-            "route": route,
-            "count": int(stats.get("count", 0)),
-            "error_count": int(stats.get("error_count", 0)),
-            "avg_response_time_ms": float(stats.get("avg_response_time_ms", 0.0)),
-            "p95_response_time_ms": float(stats.get("p95_response_time_ms", 0.0)),
-            "p99_response_time_ms": float(stats.get("p99_response_time_ms", 0.0)),
-        })
+        items.append(
+            {
+                "route": route,
+                "count": int(stats.get("count", 0)),
+                "error_count": int(stats.get("error_count", 0)),
+                "avg_response_time_ms": float(stats.get("avg_response_time_ms", 0.0)),
+                "p95_response_time_ms": float(stats.get("p95_response_time_ms", 0.0)),
+                "p99_response_time_ms": float(stats.get("p99_response_time_ms", 0.0)),
+            }
+        )
 
     sort_key_map = {
         "p95": "p95_response_time_ms",
@@ -445,18 +503,20 @@ async def get_route_stats(
     items.sort(key=lambda x: x.get(key, 0), reverse=True)
     return {"items": items[:limit], "total": len(items), "sort_by": sort_by}
 
-@router.get("/notification/status", summary="获取通知服务状态", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+
+@router.get(
+    "/notification/status",
+    summary="获取通知服务状态",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def get_notification_status():
     """获取通知服务状态（需要 VIEW_SYSTEM_HEALTH 权限）"""
-    return {
-        "status": "active",
-        "enabled_channels": ["email", "system"]
-    }
+    return {"status": "active", "enabled_channels": ["email", "system"]}
+
 
 @router.get("/storage-analysis", dependencies=[Depends(get_current_user)])
 async def get_storage_analysis(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """
     获取存储分析数据
@@ -467,24 +527,27 @@ async def get_storage_analysis(
         from app.models.document import Document
 
         # 1. 计算总使用空间
-        size_stmt = select(func.sum(Document.file_size)).where(Document.organization_id == current_user.organization_id)
+        size_stmt = select(func.sum(Document.file_size)).where(
+            Document.organization_id == current_user.organization_id
+        )
         total_size = (await db.execute(size_stmt)).scalar() or 0
 
         # 2. 计算各类型占比
-        type_stmt = select(Document.file_type, func.sum(Document.file_size)).where(
-            Document.organization_id == current_user.organization_id
-        ).group_by(Document.file_type)
+        type_stmt = (
+            select(Document.file_type, func.sum(Document.file_size))
+            .where(Document.organization_id == current_user.organization_id)
+            .group_by(Document.file_type)
+        )
         type_res = (await db.execute(type_stmt)).all()
 
         type_stats = []
         for t, s in type_res:
-            type_stats.append({
-                "type": t.value if hasattr(t, 'value') else str(t),
-                "size": s or 0
-            })
+            type_stats.append({"type": t.value if hasattr(t, "value") else str(t), "size": s or 0})
 
         # 3. 计算文档总数
-        count_stmt = select(func.count(Document.id)).where(Document.organization_id == current_user.organization_id)
+        count_stmt = select(func.count(Document.id)).where(
+            Document.organization_id == current_user.organization_id
+        )
         total_count = (await db.execute(count_stmt)).scalar() or 0
 
         # 设定一个默认上限 10GB
@@ -496,12 +559,13 @@ async def get_storage_analysis(
                 "total_used_size": total_size,
                 "total_count": total_count,
                 "quota": quota,
-                "type_stats": type_stats
-            }
+                "type_stats": type_stats,
+            },
         }
     except Exception as e:
         logger.error(f"Storage analysis failed: {e}")
         return {"success": False, "message": str(e)}
+
 
 @router.get("/health", summary="系统健康检查")
 async def health_check(
@@ -549,6 +613,7 @@ async def health_check(
         "services": services,
     }
 
+
 @router.get("/llm-status", summary="LLM 配置状态")
 async def get_llm_status(
     current_user: User = Depends(get_current_user),
@@ -581,19 +646,26 @@ async def get_llm_status(
     }
 
 
-@router.get("/logs", summary="获取系统日志", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
+@router.get(
+    "/logs",
+    summary="获取系统日志",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
 async def get_system_logs(
-    skip: int = 0,
-    limit: int = 100,
-    level: str = "INFO",
-    db: AsyncSession = Depends(get_db)
+    skip: int = 0, limit: int = 100, level: str = "INFO", db: AsyncSession = Depends(get_db)
 ):
     """获取系统日志（需要 VIEW_SYSTEM_HEALTH 权限）— 读取日志文件尾部内容"""
     import json as _json
     import os as _os
 
-    log_file = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__)))),
-                             settings.LOG_FILE) if not _os.path.isabs(settings.LOG_FILE) else settings.LOG_FILE
+    log_file = (
+        _os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__)))),
+            settings.LOG_FILE,
+        )
+        if not _os.path.isabs(settings.LOG_FILE)
+        else settings.LOG_FILE
+    )
     if not _os.path.exists(log_file):
         return {"logs": [], "total": 0, "skip": skip, "limit": limit}
 
@@ -619,12 +691,14 @@ async def get_system_logs(
             entry_level = str(entry.get("level", entry.get("levelname", "INFO"))).upper()
             if level_upper not in ("ALL", "DEBUG") and entry_level != level_upper:
                 continue
-            logs.append({
-                "timestamp": entry.get("timestamp", entry.get("time", "")),
-                "level": entry_level,
-                "logger": entry.get("logger", entry.get("name", "")),
-                "message": entry.get("message", entry.get("msg", line)),
-            })
+            logs.append(
+                {
+                    "timestamp": entry.get("timestamp", entry.get("time", "")),
+                    "level": entry_level,
+                    "logger": entry.get("logger", entry.get("name", "")),
+                    "message": entry.get("message", entry.get("msg", line)),
+                }
+            )
         except (_json.JSONDecodeError, TypeError):
             # 非 JSON 行：按级别过滤后原样返回
             if level_upper in ("ALL", "DEBUG", "INFO"):
@@ -632,44 +706,47 @@ async def get_system_logs(
 
     total = len(logs)
     return {
-        "logs": logs[skip:skip + limit],
+        "logs": logs[skip : skip + limit],
         "total": total,
         "skip": skip,
         "limit": limit,
     }
 
-@router.get("/performance", summary="获取系统性能指标", dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))])
-async def get_performance_metrics(
-    db: AsyncSession = Depends(get_db)
-):
+
+@router.get(
+    "/performance",
+    summary="获取系统性能指标",
+    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+)
+async def get_performance_metrics(db: AsyncSession = Depends(get_db)):
     """获取系统性能指标（需要 VIEW_SYSTEM_HEALTH 权限）"""
     import psutil
 
     app_stats = await metrics_collector.get_stats()
     route_stats = await metrics_collector.get_route_stats()
     top_routes = sorted(
-        route_stats.items(),
-        key=lambda item: item[1].get("duration_sum", 0.0),
-        reverse=True
+        route_stats.items(), key=lambda item: item[1].get("duration_sum", 0.0), reverse=True
     )[:10]
 
     route_items = []
     for route, stats in top_routes:
         count = int(stats.get("count", 0))
         avg_ms = (stats.get("duration_sum", 0.0) / count * 1000) if count > 0 else 0
-        route_items.append({
-            "route": route,
-            "count": count,
-            "error_count": int(stats.get("error_count", 0)),
-            "avg_response_time_ms": round(avg_ms, 2),
-            "p95_response_time_ms": stats.get("p95_response_time_ms", 0.0),
-            "p99_response_time_ms": stats.get("p99_response_time_ms", 0.0),
-        })
+        route_items.append(
+            {
+                "route": route,
+                "count": count,
+                "error_count": int(stats.get("error_count", 0)),
+                "avg_response_time_ms": round(avg_ms, 2),
+                "p95_response_time_ms": stats.get("p95_response_time_ms", 0.0),
+                "p99_response_time_ms": stats.get("p99_response_time_ms", 0.0),
+            }
+        )
 
     return {
         "cpu_usage": psutil.cpu_percent(),
         "memory_usage": psutil.virtual_memory().percent,
-        "disk_usage": psutil.disk_usage('/').percent,
+        "disk_usage": psutil.disk_usage("/").percent,
         "response_time": app_stats["response_time"],
         "active_connections": app_stats["active_connections"],
         "request_count": app_stats["request_count"],
@@ -692,9 +769,7 @@ async def get_performance_metrics(
     # 普通用户 UI 不受影响。
     dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
 )
-async def get_llm_stats(
-    db: AsyncSession = Depends(get_db)
-):
+async def get_llm_stats(db: AsyncSession = Depends(get_db)):
     """获取 LLM Token 消耗、延迟等统计信息 — 基于真实记录。
 
     issue #286：修前处理体调用的 `metrics_collector.get_application_stats`
@@ -723,8 +798,12 @@ async def get_llm_stats(
         rag_output_tokens = int(rag_metrics.get("total_output_tokens", 0))
 
         agent_samples = read_counter_samples("AGENT_TOKENS")
-        agent_input_tokens = int(sum(v for labels, v in agent_samples if labels.get("direction") == "input"))
-        agent_output_tokens = int(sum(v for labels, v in agent_samples if labels.get("direction") == "output"))
+        agent_input_tokens = int(
+            sum(v for labels, v in agent_samples if labels.get("direction") == "input")
+        )
+        agent_output_tokens = int(
+            sum(v for labels, v in agent_samples if labels.get("direction") == "output")
+        )
         # model 维度（可得则带）：agent 侧指标含 model 标签；RAG 侧
         # rag_llm_tokens_total 只有 direction 标签、进程内指标无 model，不入此列。
         agent_by_model: dict[str, dict[str, Any]] = {}
@@ -752,6 +831,7 @@ async def get_llm_stats(
         # 的费率真源 `_estimate_cost`（deepseek = 每 1K $0.0005/$0.002），使全仓
         # token 计费口径（落库 cost_usd 与本聚合）归一。
         from app.api.v1.endpoints.token_usage import _estimate_cost
+
         cost_usd = round(_estimate_cost(settings.DEEPSEEK_MODEL, input_tokens, output_tokens), 4)
 
         trend = [0] * 7
@@ -774,17 +854,23 @@ async def get_llm_stats(
             "p95_latency_ms": p95_latency,
             "request_count_today": rag_metrics.get("retrieval_total", 0),
             "cost_warning": cost_usd > 5.0,
-            "token_trend_7d": trend
+            "token_trend_7d": trend,
         }
     except Exception as e:
         logger.error(f"Failed to get LLM stats: {e}")
         return {
-            "total_tokens_today": 0, "input_tokens_today": 0, "output_tokens_today": 0,
-            "rag_tokens_today": 0, "agent_tokens_today": 0, "agent_tokens_by_model": [],
+            "total_tokens_today": 0,
+            "input_tokens_today": 0,
+            "output_tokens_today": 0,
+            "rag_tokens_today": 0,
+            "agent_tokens_today": 0,
+            "agent_tokens_by_model": [],
             "cost_today_usd": 0,
-            "avg_latency_ms": 0, "p95_latency_ms": 0,
-            "request_count_today": 0, "cost_warning": False,
-            "token_trend_7d": [0] * 7
+            "avg_latency_ms": 0,
+            "p95_latency_ms": 0,
+            "request_count_today": 0,
+            "cost_warning": False,
+            "token_trend_7d": [0] * 7,
         }
 
 
@@ -822,15 +908,12 @@ async def get_org_summary(
             .group_by(Organization.id, Organization.name)
         )
         if scoped_org_ids is not None:
-            org_users_query = org_users_query.where(
-                Organization.id.in_(sorted(scoped_org_ids))
-            )
+            org_users_query = org_users_query.where(Organization.id.in_(sorted(scoped_org_ids)))
         org_users = await db.execute(org_users_query)
 
-        org_docs_query = (
-            select(Document.organization_id, func.count(Document.id).label("doc_count"))
-            .group_by(Document.organization_id)
-        )
+        org_docs_query = select(
+            Document.organization_id, func.count(Document.id).label("doc_count")
+        ).group_by(Document.organization_id)
         if scoped_org_ids is not None:
             org_docs_query = org_docs_query.where(
                 Document.organization_id.in_(sorted(scoped_org_ids))
@@ -840,12 +923,14 @@ async def get_org_summary(
 
         result = []
         for row in org_users.all():
-            result.append({
-                "org_id": row[0],
-                "org_name": row[1],
-                "user_count": row[2],
-                "doc_count": doc_map.get(row[0], 0)
-            })
+            result.append(
+                {
+                    "org_id": row[0],
+                    "org_name": row[1],
+                    "user_count": row[2],
+                    "doc_count": doc_map.get(row[0], 0),
+                }
+            )
         return {"organizations": result}
     except Exception as e:
         logger.error(f"Failed to get org summary: {e}")
@@ -859,9 +944,7 @@ async def get_org_summary(
         }
 
 
-async def _session_week_over_week(
-    db: AsyncSession, org_id: int | None
-) -> tuple[int, int]:
+async def _session_week_over_week(db: AsyncSession, org_id: int | None) -> tuple[int, int]:
     """近 7 日 vs 前 7 日新增会话数（ChatSession.created_at 口径）。
 
     W2-T7：管理仪表盘「总会话 ↑ +12%（对比上周）」此前是前端写死的假趋势
@@ -904,8 +987,7 @@ async def _session_week_over_week(
     dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
 )
 async def get_admin_summary(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """获取管理员仪表盘所需的汇总数据（组织作用域；全系统组织数仅超管可见）。"""
     # 安全加固（issue #268）：此前本端点只有登录门槛——与同文件相邻端点不同，漏了
@@ -931,6 +1013,7 @@ async def get_admin_summary(
 
         # 总会话数
         from app.models.chat import ChatSession
+
         session_count_q = select(func.count(ChatSession.id))
         if org_id:
             session_count_q = session_count_q.where(ChatSession.organization_id == org_id)
@@ -941,6 +1024,7 @@ async def get_admin_summary(
 
         # 活跃用户（24小时内登录的）
         from datetime import timedelta
+
         active_cutoff = datetime.now() - timedelta(hours=24)
         active_q = select(func.count(User.id)).where(User.last_login_at >= active_cutoff)
         if org_id:
@@ -972,10 +1056,14 @@ async def get_admin_summary(
         # 带身份的降级形态：既有 5 键保持（dashboard/admin.vue 契约不破），
         # 新增 degraded/reason 供消费方区分「查不了」与「真的都是 0」。
         return {
-            "total_users": 0, "total_documents": 0,
-            "total_sessions": 0, "active_users_24h": 0, "total_organizations": 0,
+            "total_users": 0,
+            "total_documents": 0,
+            "total_sessions": 0,
+            "active_users_24h": 0,
+            "total_organizations": 0,
             # W2-T7 新键：降级态给 None（≠0），前端渲染"—"而非假环比
-            "sessions_this_week": None, "sessions_last_week": None,
+            "sessions_this_week": None,
+            "sessions_last_week": None,
             "degraded": True,
             "reason": "管理员概览统计查询失败，数据暂不可用",
         }
@@ -1051,7 +1139,9 @@ async def rag_eval_single(item: EvalItem):
         )
 
 
-@router.post("/rag-eval-batch", summary="RAG 质量批量评估", dependencies=[Depends(get_current_user)])
+@router.post(
+    "/rag-eval-batch", summary="RAG 质量批量评估", dependencies=[Depends(get_current_user)]
+)
 async def rag_eval_batch(body: BatchEvalRequest):
     """批量评估多条 RAG 回答，返回聚合指标。"""
     # 限制批量条目数，防止成本 DoS
@@ -1073,9 +1163,7 @@ async def rag_eval_batch(body: BatchEvalRequest):
             base_url=settings.DEEPSEEK_API_URL,
         )
         evaluator = RAGEvaluator(client=client, model=settings.DEEPSEEK_MODEL)
-        batch_result = await evaluator.evaluate_batch(
-            [item.model_dump() for item in body.items]
-        )
+        batch_result = await evaluator.evaluate_batch([item.model_dump() for item in body.items])
         return {
             "count": batch_result.count,
             "avg_faithfulness": batch_result.avg_faithfulness,

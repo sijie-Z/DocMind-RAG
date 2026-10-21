@@ -6,6 +6,7 @@
 无组织即 403；超级管理员作为全局角色无组织时，解析库里**真实存在**的第一个组织
 （issue #168：不再硬编码 1 号组织——1 号未必存在），库中没有任何组织时明确 403。
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -95,9 +96,7 @@ class TestRequireOrganizationHelper:
     async def test_org_less_admin_role_rejected(self):
         # 全局 role=admin（SysAdmin 权限集）也不例外：无组织即 403
         with pytest.raises(AuthorizationError):
-            await require_organization(
-                _make_user(role="admin", organization_id=None), _mock_db()
-            )
+            await require_organization(_make_user(role="admin", organization_id=None), _mock_db())
 
     @pytest.mark.asyncio
     async def test_member_gets_own_org(self):
@@ -107,7 +106,9 @@ class TestRequireOrganizationHelper:
     async def test_org_less_superuser_resolves_real_org_from_db(self):
         # issue #168：不再硬编码兜底到 1 号组织，而是解析库里真实存在的组织
         db = _mock_db_with_first_org(3)
-        assert await require_organization(_make_user(is_superuser=True, organization_id=None), db) == 3
+        assert (
+            await require_organization(_make_user(is_superuser=True, organization_id=None), db) == 3
+        )
 
 
 def _mock_db_with_first_org(org_id):
@@ -134,9 +135,7 @@ class TestRequireOrganizationIssue168Regression:
     async def test_returns_the_real_org_from_db_not_a_constant(self, real_org_id):
         """DB 里有哪个组织就返回哪个 —— 结果跟随 DB，而不是任何写死的常数。"""
         db = _mock_db_with_first_org(real_org_id)
-        got = await require_organization(
-            _make_user(is_superuser=True, organization_id=None), db
-        )
+        got = await require_organization(_make_user(is_superuser=True, organization_id=None), db)
         assert got == real_org_id
         assert got != 1, "issue #168：1 号组织不存在时绝不能返回 1"
 
@@ -144,9 +143,7 @@ class TestRequireOrganizationIssue168Regression:
     async def test_org1_absent_never_returns_1(self):
         """构造「1 号组织不存在」的场景（库里第一个组织是 3）→ 绝不返回 1。"""
         db = _mock_db_with_first_org(3)
-        got = await require_organization(
-            _make_user(is_superuser=True, organization_id=None), db
-        )
+        got = await require_organization(_make_user(is_superuser=True, organization_id=None), db)
         assert got == 3
         assert got != 1
 
@@ -155,9 +152,7 @@ class TestRequireOrganizationIssue168Regression:
         """一个组织都没有 → 明确报错（403 语义），不是返回 1/None，也不是等写库 500。"""
         db = _mock_db_with_first_org(None)
         with pytest.raises(AuthorizationError) as ei:
-            await require_organization(
-                _make_user(is_superuser=True, organization_id=None), db
-            )
+            await require_organization(_make_user(is_superuser=True, organization_id=None), db)
         assert "组织" in str(ei.value)
 
     @pytest.mark.asyncio
@@ -174,9 +169,7 @@ class TestRequireOrganizationIssue168Regression:
 
         db = _mock_db_with_first_org(3)
         with caplog.at_level(_logging.INFO, logger="app.core.security"):
-            await require_organization(
-                _make_user(is_superuser=True, organization_id=None), db
-            )
+            await require_organization(_make_user(is_superuser=True, organization_id=None), db)
         assert any("3" in r.getMessage() and "组织" in r.getMessage() for r in caplog.records)
 
 

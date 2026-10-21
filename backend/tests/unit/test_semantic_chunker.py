@@ -1,4 +1,5 @@
 """SemanticChunker unit tests — clause-aware splitting, sentence splitting, merge logic."""
+
 from unittest.mock import AsyncMock, patch
 
 import numpy as np
@@ -28,6 +29,7 @@ def chunker():
 
 
 # ── Unit: detect_section_title ──────────────────────────────────
+
 
 class TestDetectSectionTitle:
     def test_detects_numbered_clause(self):
@@ -60,6 +62,7 @@ class TestDetectSectionTitle:
 
 # ── Unit: smart_truncate ─────────────────────────────────────────
 
+
 class TestSmartTruncate:
     def test_short_text_unchanged(self):
         t = "短文本。"
@@ -80,6 +83,7 @@ class TestSmartTruncate:
 
 # ── Unit: find_clause_boundaries ─────────────────────────────────
 
+
 class TestFindClauseBoundaries:
     def test_always_includes_zero(self):
         assert find_clause_boundaries("随便什么文本") == [0]
@@ -93,6 +97,7 @@ class TestFindClauseBoundaries:
 
 
 # ── SemanticChunker.split_text ───────────────────────────────────
+
 
 class TestSplitTextShort:
     @pytest.mark.asyncio
@@ -179,15 +184,18 @@ class TestSplitTextWithMockEmbeddings:
 
 # ── Clause-aware path ────────────────────────────────────────────
 
+
 class TestClauseAwareSplitting:
     @pytest.mark.asyncio
     async def test_clause_boundaries_create_separate_chunks(self, chunker):
         """Documents with explicit clause markers should split at clause boundaries."""
-        text = "\n\n".join([
-            "第一条 总则\n为规范数据安全管理，制定本制度。",
-            "第二条 数据分类\n根据数据敏感程度分为一般数据、重要数据和核心数据。",
-            "第三条 安全责任\n数据安全责任人应当履行数据安全保护义务。",
-        ])
+        text = "\n\n".join(
+            [
+                "第一条 总则\n为规范数据安全管理，制定本制度。",
+                "第二条 数据分类\n根据数据敏感程度分为一般数据、重要数据和核心数据。",
+                "第三条 安全责任\n数据安全责任人应当履行数据安全保护义务。",
+            ]
+        )
         result = await chunker.split_text(text)
         texts = _texts(result)
         # Should produce at least 2 chunks (clauses make natural boundaries)
@@ -204,6 +212,7 @@ class TestClauseAwareSplitting:
 
 
 # ── Chunker config ───────────────────────────────────────────────
+
 
 class TestChunkerConfig:
     @pytest.mark.asyncio

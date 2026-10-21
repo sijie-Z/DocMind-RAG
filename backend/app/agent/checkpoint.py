@@ -64,36 +64,42 @@ HISTORY_CAP = 50
 
 class TaskNotFoundError(NotFoundError):
     """任务不存在、或不属于当前用户（对外统一 404，不泄露归属信息）。"""
+
     error_code = "TASK_NOT_FOUND"
     message = "任务不存在或无权访问"
 
 
 class TaskNotResumableError(ConflictError):
     """任务已终态（completed/abandoned），不可再恢复。"""
+
     error_code = "TASK_NOT_RESUMABLE"
     message = "任务已终态，不可恢复"
 
 
 class TaskBusyError(ConflictError):
     """任务正被另一个 resume 持有（Redis 租约未释放）。"""
+
     error_code = "TASK_BUSY"
     message = "任务正在被另一个恢复请求处理"
 
 
 class TaskNotWaitingApprovalError(ConflictError):
     """任务不在 waiting_approval（或没有待审批请求），审批应答无处安放。"""
+
     error_code = "TASK_NOT_WAITING_APPROVAL"
     message = "任务当前没有待审批的请求"
 
 
 class TaskNotCancellableError(ConflictError):
     """任务已终态（completed/abandoned/cancelled），取消无意义。"""
+
     error_code = "TASK_NOT_CANCELLABLE"
     message = "任务已处于终态，无法取消"
 
 
 class TaskNotWaitingPlanApprovalError(ConflictError):
     """任务不在 waiting_plan_approval（或没有待审批计划），计划审批应答无处安放。"""
+
     error_code = "TASK_NOT_WAITING_PLAN_APPROVAL"
     message = "任务当前没有待审批的计划"
 
@@ -101,6 +107,7 @@ class TaskNotWaitingPlanApprovalError(ConflictError):
 class TaskWaitingPlanApprovalError(ConflictError):
     """任务正在等待计划审批：直连 resume 被拒——必须经 plan-approval 端点应答
     （否则计划会在未获人类批准的情况下被执行，审批门形同虚设）。"""
+
     error_code = "TASK_WAITING_PLAN_APPROVAL"
     message = "任务正在等待计划审批，请先批准/编辑/拒绝该计划"
 
@@ -184,7 +191,7 @@ def _cap_history(history: list | None) -> list[dict]:
     （损坏的历史显式报错，save_checkpoint 侧 fail-open 并留 warning）。
     """
     raw = [dict(m) for m in (history or [])]
-    window = raw[max(0, len(raw) - HISTORY_CAP):]
+    window = raw[max(0, len(raw) - HISTORY_CAP) :]
     while window and window[0].get("role") == "tool":
         window.pop(0)
     validate_tool_pairs(window)
@@ -299,8 +306,14 @@ async def save_checkpoint(
         # C3a：build_envelope 里的配对校验（ToolPairingError）也纳入 fail-open
         # 边界——快照落盘失败只记 warning，绝不因历史损坏打断主流程。
         envelope = build_envelope(
-            ctx=ctx, plan=plan, trigger=trigger, partial_output=partial_output,
-            history=history, config=config, run_state=run_state, session_id=session_id,
+            ctx=ctx,
+            plan=plan,
+            trigger=trigger,
+            partial_output=partial_output,
+            history=history,
+            config=config,
+            run_state=run_state,
+            session_id=session_id,
         )
         async with AsyncSessionLocal() as db:
             task = await _load_task_row(db, task_id)
@@ -317,7 +330,12 @@ async def save_checkpoint(
                 task.current_step_id = getattr(ctx, "current_step_id", None)
             await db.commit()
     except Exception as e:
-        logger.warning("checkpoint save failed (task=%s, trigger=%s): %s", log_safe(task_id), log_safe(trigger), log_safe(e))
+        logger.warning(
+            "checkpoint save failed (task=%s, trigger=%s): %s",
+            log_safe(task_id),
+            log_safe(trigger),
+            log_safe(e),
+        )
         return False
     await _renew_lease(task_id)
     return True
@@ -383,7 +401,9 @@ async def mark_terminal(
                 try:
                     task.transition(to)
                 except ValueError as e:
-                    logger.warning("mark_terminal 拒绝非法转换 (task=%s): %s", log_safe(task_id), log_safe(e))
+                    logger.warning(
+                        "mark_terminal 拒绝非法转换 (task=%s): %s", log_safe(task_id), log_safe(e)
+                    )
                     return False
                 if error:
                     task.last_error = str(error)[:2000]
@@ -394,7 +414,9 @@ async def mark_terminal(
             if attempt == 0:
                 logger.warning(
                     "mark_terminal 第 1 次写入失败，重试一次 (task=%s, to=%s): %s",
-                    log_safe(task_id), to.value, log_safe(e),
+                    log_safe(task_id),
+                    to.value,
+                    log_safe(e),
                 )
                 continue
             break
@@ -403,7 +425,8 @@ async def mark_terminal(
         # → ABORTED_BEFORE_DISPATCH），其余终态按中断语义（→ TOOL_NOT_STARTED /
         # TOOL_OUTCOME_UNKNOWN），绝不留悬空 call。失败只记 warning（幂等、可重试）。
         await tool_ledger.synthesize_terminal(
-            task_id, reason="cancel" if to == TaskStatus.CANCELLED else "interrupt",
+            task_id,
+            reason="cancel" if to == TaskStatus.CANCELLED else "interrupt",
         )
         await release_task(task_id)
         # A（steering）：终态清转向缓冲——指导不再有任何消费点（下一步边界
@@ -413,7 +436,9 @@ async def mark_terminal(
     logger.error(
         "mark_terminal 写入失败（已重试一次）：任务 %s 未能落到 %s，"
         "将停留原状态（可经 resume 收敛）: %s",
-        log_safe(task_id), to.value, log_safe(last_exc),
+        log_safe(task_id),
+        to.value,
+        log_safe(last_exc),
     )
     return False
 
@@ -465,7 +490,9 @@ async def converge_disconnected(
             return True
     except Exception as e:
         logger.warning(
-            "断流收敛失败（task=%s）：%s", log_safe(task_id), log_safe(e),
+            "断流收敛失败（task=%s）：%s",
+            log_safe(task_id),
+            log_safe(e),
         )
         return False
 
@@ -496,7 +523,8 @@ async def mark_waiting_approval(task_id: str | None) -> bool:
             if task.is_terminal:
                 logger.warning(
                     "mark_waiting_approval 拒绝：任务 %s 已终态 %s",
-                    log_safe(task_id), task.status.value,
+                    log_safe(task_id),
+                    task.status.value,
                 )
                 return False
             try:
@@ -504,12 +532,15 @@ async def mark_waiting_approval(task_id: str | None) -> bool:
             except ValueError as e:
                 logger.warning(
                     "mark_waiting_approval 拒绝非法转换 (task=%s): %s",
-                    log_safe(task_id), log_safe(e),
+                    log_safe(task_id),
+                    log_safe(e),
                 )
                 return False
             await db.commit()
     except Exception as e:
-        logger.warning("mark_waiting_approval 写入失败 (task=%s): %s", log_safe(task_id), log_safe(e))
+        logger.warning(
+            "mark_waiting_approval 写入失败 (task=%s): %s", log_safe(task_id), log_safe(e)
+        )
         return False
     # C3a：本 run 在审批点结束——本回合已登记、未派发的调用补写 TOOL_NOT_STARTED
     # （resume 后模型会以新的 call_id 重新登记；旧账不得悬空）。
@@ -533,7 +564,8 @@ async def get_pending_approval(task_id: str) -> dict[str, Any] | None:
     except (TypeError, ValueError) as e:
         logger.warning(
             "checkpoint 快照列反序列化失败（task=%s，读 pending_approval）：%s",
-            log_safe(task_id), log_safe(e),
+            log_safe(task_id),
+            log_safe(e),
         )
         return None
     except Exception as e:
@@ -599,7 +631,8 @@ async def apply_approval_decision(
             except (TypeError, ValueError) as e:
                 logger.warning(
                     "checkpoint 快照列反序列化失败（task=%s，审批记账）：%s",
-                    log_safe(task_id), log_safe(e),
+                    log_safe(task_id),
+                    log_safe(e),
                 )
             envelope = parse_snapshot(raw_snapshot)
             if envelope is None:
@@ -662,7 +695,8 @@ async def apply_approval_decision(
         # ── 超时分支（会话已退出，避免嵌套会话写）──
         logger.warning(
             "审批等待超时（task=%s, tool=%s）：如实置 FAILED(approval_timeout)",
-            log_safe(task_id), log_safe(str((expired_pending or {}).get("tool_name"))),
+            log_safe(task_id),
+            log_safe(str((expired_pending or {}).get("tool_name"))),
         )
         await mark_terminal(
             task_id,
@@ -671,8 +705,7 @@ async def apply_approval_decision(
             error_type="approval_timeout",
         )
         raise TaskNotWaitingApprovalError(
-            "审批等待已超时：任务已如实置为 failed（approval_timeout），"
-            "可经 resume 重新发起审批",
+            "审批等待已超时：任务已如实置为 failed（approval_timeout），可经 resume 重新发起审批",
             detail={"task_id": task_id, "state": "failed", "error_type": "approval_timeout"},
         )
     except Exception:
@@ -719,20 +752,22 @@ def _build_edited_steps(edited_steps: list | None) -> list[dict[str, Any]]:
             if d_str:
                 deps.append(d_str)
         tool_hint = item.get("tool_hint")
-        steps.append({
-            "id": sid[:36],
-            "description": desc[:2000],
-            "dependencies": deps,
-            "tool_hint": (str(tool_hint).strip()[:100] or None) if tool_hint else None,
-            "status": "pending",
-            "result": None,
-            "error_context": None,
-            "retry_count": 0,
-            "parallel_group": None,
-            "risk_level": "low",
-            "retry_strategy": "auto_retry",
-            "fallback_tool": None,
-        })
+        steps.append(
+            {
+                "id": sid[:36],
+                "description": desc[:2000],
+                "dependencies": deps,
+                "tool_hint": (str(tool_hint).strip()[:100] or None) if tool_hint else None,
+                "status": "pending",
+                "result": None,
+                "error_context": None,
+                "retry_count": 0,
+                "parallel_group": None,
+                "risk_level": "low",
+                "retry_strategy": "auto_retry",
+                "fallback_tool": None,
+            }
+        )
     if not steps:
         raise ValueError("edited_steps 不能为空（至少 1 个步骤）")
     ids = [s["id"] for s in steps]
@@ -767,7 +802,8 @@ async def mark_waiting_plan_approval(task_id: str | None) -> bool:
             if task.is_terminal:
                 logger.warning(
                     "mark_waiting_plan_approval 拒绝：任务 %s 已终态 %s",
-                    log_safe(task_id), task.status.value,
+                    log_safe(task_id),
+                    task.status.value,
                 )
                 return False
             try:
@@ -775,12 +811,15 @@ async def mark_waiting_plan_approval(task_id: str | None) -> bool:
             except ValueError as e:
                 logger.warning(
                     "mark_waiting_plan_approval 拒绝非法转换 (task=%s): %s",
-                    log_safe(task_id), log_safe(e),
+                    log_safe(task_id),
+                    log_safe(e),
                 )
                 return False
             await db.commit()
     except Exception as e:
-        logger.warning("mark_waiting_plan_approval 写入失败 (task=%s): %s", log_safe(task_id), log_safe(e))
+        logger.warning(
+            "mark_waiting_plan_approval 写入失败 (task=%s): %s", log_safe(task_id), log_safe(e)
+        )
         return False
     await release_task(task_id)
     return True
@@ -801,11 +840,14 @@ async def get_pending_plan_approval(task_id: str) -> dict[str, Any] | None:
     except (TypeError, ValueError) as e:
         logger.warning(
             "checkpoint 快照列反序列化失败（task=%s，读 pending_plan_approval）：%s",
-            log_safe(task_id), log_safe(e),
+            log_safe(task_id),
+            log_safe(e),
         )
         return None
     except Exception as e:
-        logger.debug("get_pending_plan_approval 读取失败 (task=%s): %s", log_safe(task_id), log_safe(e))
+        logger.debug(
+            "get_pending_plan_approval 读取失败 (task=%s): %s", log_safe(task_id), log_safe(e)
+        )
         return None
     envelope = parse_snapshot(raw_snapshot)
     if envelope is None:
@@ -869,7 +911,8 @@ async def apply_plan_approval_decision(
             except (TypeError, ValueError) as e:
                 logger.warning(
                     "checkpoint 快照列反序列化失败（task=%s，计划审批记账）：%s",
-                    log_safe(task_id), log_safe(e),
+                    log_safe(task_id),
+                    log_safe(e),
                 )
             envelope = parse_snapshot(raw_snapshot)
             if envelope is None:
@@ -879,8 +922,7 @@ async def apply_plan_approval_decision(
                 )
             run_state = envelope.get("run")
             pending = (
-                run_state.get("pending_plan_approval")
-                if isinstance(run_state, dict) else None
+                run_state.get("pending_plan_approval") if isinstance(run_state, dict) else None
             )
             if not isinstance(pending, dict):
                 raise TaskNotWaitingPlanApprovalError(
@@ -937,18 +979,21 @@ async def apply_plan_approval_decision(
                 )[:2000]
                 task.last_error_type = "plan_rejected"
                 await db.commit()
-                record.update({
-                    "terminal": True,
-                    "rejections": rejections,
-                    "message": "计划已再次被拒绝，重规划机会已用尽，任务终止（rejected）",
-                })
+                record.update(
+                    {
+                        "terminal": True,
+                        "rejections": rejections,
+                        "message": "计划已再次被拒绝，重规划机会已用尽，任务终止（rejected）",
+                    }
+                )
                 # 终态收尾纪律与 mark_terminal 一致：释放租约 + 清转向缓冲。
                 await release_task(task_id)
                 await steering.clear_steers(task_id)
                 return task, envelope, record
             # 第一次拒绝：带理由重规划一次（run_state 标记 → resume 的 loop 消费）。
             run_state["plan_reject_replan"] = {
-                "feedback": record["note"] or (
+                "feedback": record["note"]
+                or (
                     "用户拒绝了上一个计划，但未附理由；请重新规划：保持目标不变，"
                     "换一种步骤分解思路，避免与上一版雷同"
                 ),
@@ -969,9 +1014,7 @@ async def apply_plan_approval_decision(
 # ── 读路径 / resume 认领 ─────────────────────────────────────────────────────
 
 
-async def load_task(
-    *, task_id: str, user_id: int, organization_id: int | None = None
-) -> AgentTask:
+async def load_task(*, task_id: str, user_id: int, organization_id: int | None = None) -> AgentTask:
     """取任务行（状态视图与 resume 共用的归属校验）。
 
     - 行不存在 / 不属于 user_id → TaskNotFoundError（对外 404，不区分二者以免泄露归属）；
@@ -1038,15 +1081,19 @@ async def list_tasks(
             await db.execute(select(func.count(AgentTask.id)).where(*conditions))
         ).scalar() or 0
         rows = (
-            await db.execute(
-                select(AgentTask)
-                .where(*conditions)
-                .options(defer(AgentTask.context_snapshot))
-                .order_by(AgentTask.created_at.desc())
-                .offset(offset)
-                .limit(limit)
+            (
+                await db.execute(
+                    select(AgentTask)
+                    .where(*conditions)
+                    .options(defer(AgentTask.context_snapshot))
+                    .order_by(AgentTask.created_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     return int(total), list(rows)
 
 
@@ -1118,7 +1165,9 @@ async def claim_task(task_id: str, lease_seconds: int = LEASE_SECONDS) -> bool:
     """
     try:
         if not redis_client:
-            logger.warning("Redis 不可用：resume 并发锁降级为仅状态检查（task=%s）", log_safe(task_id))
+            logger.warning(
+                "Redis 不可用：resume 并发锁降级为仅状态检查（task=%s）", log_safe(task_id)
+            )
             return True
         ok = await redis_client.set(_lock_key(task_id), "1", nx=True, ex=lease_seconds)
         return bool(ok)

@@ -3,6 +3,7 @@
 覆盖：创建首跑计算 / 触发后推进（ONCE→None）/ 恢复重算（周期错过不补、
 单次过期立即补跑）/ naive-UTC 归一化。
 """
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -91,13 +92,19 @@ class TestFirstNextRun:
     def test_invalid_cron_raises_spec_error(self):
         with pytest.raises(ScheduleSpecError):
             first_next_run(
-                schedule_type=ScheduleType.CRON, now=NOW, cron_expr="not a cron", timezone_name="UTC"
+                schedule_type=ScheduleType.CRON,
+                now=NOW,
+                cron_expr="not a cron",
+                timezone_name="UTC",
             )
 
     def test_impossible_cron_raises_spec_error(self):
         with pytest.raises(ScheduleSpecError):
             first_next_run(
-                schedule_type=ScheduleType.CRON, now=NOW, cron_expr="0 0 31 2 *", timezone_name="UTC"
+                schedule_type=ScheduleType.CRON,
+                now=NOW,
+                cron_expr="0 0 31 2 *",
+                timezone_name="UTC",
             )
 
     def test_bad_timezone_raises_spec_error(self):

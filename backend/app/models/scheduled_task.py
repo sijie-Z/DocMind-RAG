@@ -36,9 +36,9 @@ from app.core.database import Base
 class ScheduleType(enum.Enum):
     """调度类型（成员名入库，与 taskstatus 口径一致，见迁移 006）。"""
 
-    CRON = "cron"          # 5 字段 cron 表达式，按 timezone 墙钟解释
+    CRON = "cron"  # 5 字段 cron 表达式，按 timezone 墙钟解释
     INTERVAL = "interval"  # 固定间隔（秒），固定延迟语义（从上次触发时刻起算）
-    ONCE = "once"          # 绝对时间单次触发，触发后自动停用（enabled=False, next_run_at=None）
+    ONCE = "once"  # 绝对时间单次触发，触发后自动停用（enabled=False, next_run_at=None）
 
 
 class ScheduleRunStatus(str, enum.Enum):
@@ -61,15 +61,21 @@ class ScheduledTask(Base):
 
     # ── Identity ──
     id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, index=True,
+        String(36),
+        primary_key=True,
+        index=True,
         default=lambda: uuid.uuid4().hex[:12],
     )
     created_by: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), index=True,
+        Integer,
+        ForeignKey("users.id"),
+        index=True,
         comment="任务创建者；运行与完成通知都归属此人",
     )
     organization_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("organizations.id"), index=True,
+        Integer,
+        ForeignKey("organizations.id"),
+        index=True,
         comment="创建时解析的组织上下文，供运行继承",
     )
 
@@ -81,48 +87,60 @@ class ScheduledTask(Base):
     schedule_type: Mapped[ScheduleType] = mapped_column(Enum(ScheduleType))
     cron_expr: Mapped[str | None] = mapped_column(String(100), comment="schedule_type=cron 时必填")
     interval_seconds: Mapped[int | None] = mapped_column(
-        Integer, comment="schedule_type=interval 时必填；固定延迟（触发时刻起算）",
+        Integer,
+        comment="schedule_type=interval 时必填；固定延迟（触发时刻起算）",
     )
     once_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), comment="schedule_type=once 时必填；UTC 绝对时间",
+        DateTime(timezone=True),
+        comment="schedule_type=once 时必填；UTC 绝对时间",
     )
     timezone: Mapped[str] = mapped_column(
-        String(64), default="UTC",
+        String(64),
+        default="UTC",
         comment="IANA 时区名；只影响 cron 表达式解释，存库时间一律 UTC",
     )
 
     # ── State ──
     enabled: Mapped[bool] = mapped_column(
-        Boolean, default=True,
+        Boolean,
+        default=True,
         comment="False=暂停或已完成（单次任务触发后置 False）",
     )
     next_run_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), index=True,
+        DateTime(timezone=True),
+        index=True,
         comment="UTC；NULL=不再有下次（单次任务已触发，或暂停且未恢复）",
     )
 
     # ── Last run bookkeeping ──
     last_run_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), comment="最近一次运行的触发时刻（UTC）",
+        DateTime(timezone=True),
+        comment="最近一次运行的触发时刻（UTC）",
     )
     last_status: Mapped[str | None] = mapped_column(
-        String(20), comment="ScheduleRunStatus 取值；None=从未运行",
+        String(20),
+        comment="ScheduleRunStatus 取值；None=从未运行",
     )
     last_task_id: Mapped[str | None] = mapped_column(
-        String(36), comment="最近一次运行对应的 agent_tasks.id（结果链接）",
+        String(36),
+        comment="最近一次运行对应的 agent_tasks.id（结果链接）",
     )
     last_error: Mapped[str | None] = mapped_column(Text, comment="最近一次失败的错误摘要")
     run_count: Mapped[int] = mapped_column(Integer, default=0, comment="实际运行次数（不含跳过）")
     skipped_overlap_count: Mapped[int] = mapped_column(
-        Integer, default=0, comment="因上一轮未结束而跳过的次数",
+        Integer,
+        default=0,
+        comment="因上一轮未结束而跳过的次数",
     )
 
     # ── Timestamps ──
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(),
+        DateTime(timezone=True),
+        server_default=func.now(),
     )
     updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now(),
+        DateTime(timezone=True),
+        onupdate=func.now(),
     )
 
     @property

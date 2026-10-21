@@ -7,6 +7,7 @@
   dedup_key 恒为空，重复 chunk 会占满最终 top_k；
 - 调试载荷中的 id/filename 也因同样的形状不匹配而恒为 None/"未知"。
 """
+
 import sys
 import types
 
@@ -23,8 +24,13 @@ from app.rag.retriever import HybridRetriever
 def _post_processed_hit(chunk_id: str, text: str, filename: str, score: float) -> dict:
     """构造 HybridRetriever._post_process 形状的命中（带 content/chunk_id）。"""
     return {
-        "text": text, "content": text, "filename": filename, "chunk_id": chunk_id,
-        "score": score, "snippet": text[:50], "document_id": chunk_id.split("_")[0],
+        "text": text,
+        "content": text,
+        "filename": filename,
+        "chunk_id": chunk_id,
+        "score": score,
+        "snippet": text[:50],
+        "document_id": chunk_id.split("_")[0],
     }
 
 
@@ -104,7 +110,9 @@ class TestRerankerReceivesDocumentText:
     def test_hit_text_supports_all_hit_shapes(self):
         assert _hit_text({"content": "后处理结果"}) == "后处理结果"
         assert _hit_text({"_source": {"content": "raw content 字段"}}) == "raw content 字段"
-        assert _hit_text({"_source": {"chunk_text": "raw chunk_text 字段"}}) == "raw chunk_text 字段"
+        assert (
+            _hit_text({"_source": {"chunk_text": "raw chunk_text 字段"}}) == "raw chunk_text 字段"
+        )
         assert _hit_text({"_source": {}}) == ""
 
 
@@ -196,11 +204,13 @@ class TestLLMRerankPrompt:
 class TestPostProcessCarriesStableIdentity:
     def test_post_process_carries_chunk_id_and_content(self):
         retriever = HybridRetriever()
-        fused = [{
-            "_id": "doc9_c7",
-            "_score": 0.5,
-            "_source": {"content": "正文内容" * 20, "filename": "x.md", "document_id": "doc9"},
-        }]
+        fused = [
+            {
+                "_id": "doc9_c7",
+                "_score": 0.5,
+                "_source": {"content": "正文内容" * 20, "filename": "x.md", "document_id": "doc9"},
+            }
+        ]
 
         docs = retriever._post_process("正文内容", fused, 5)
 
@@ -211,10 +221,12 @@ class TestPostProcessCarriesStableIdentity:
 
     def test_post_process_synthesizes_chunk_id_without_es_id(self):
         retriever = HybridRetriever()
-        fused = [{
-            "_score": 0.5,
-            "_source": {"content": "正文内容" * 20, "filename": "x.md", "document_id": "doc9"},
-        }]
+        fused = [
+            {
+                "_score": 0.5,
+                "_source": {"content": "正文内容" * 20, "filename": "x.md", "document_id": "doc9"},
+            }
+        ]
 
         docs = retriever._post_process("正文内容", fused, 5)
 
@@ -231,7 +243,15 @@ class TestSubQueryMergeDedup:
         other = _post_processed_hit("doc2_c2", "另一片段", "b.md", 0.8)
         responses = iter([[dup, other], [dict(dup)]])
 
-        async def fake_retrieve(query, organization_id, top_k, document_ids=None, debug=False, search_mode=None, **kwargs):
+        async def fake_retrieve(
+            query,
+            organization_id,
+            top_k,
+            document_ids=None,
+            debug=False,
+            search_mode=None,
+            **kwargs,
+        ):
             # issue #292：retrieve 契约扩为 (results, query_vector, debug_info, degraded)
             # issue #225：retrieve 增加 search_mode 透传参数（本用例恒 None=自动路由）
             # issue #187：pipeline 以 doc_cap=None 要求检索层不截断（帽移到 rerank 后）
@@ -245,21 +265,31 @@ class TestSubQueryMergeDedup:
         async def fake_rerank(query, hits, client=None):
             captured["hits"] = list(hits)
             return list(hits), {
-                "status": "disabled", "path": "noop", "reason": "test_stub",
-                "attempts": [], "scores_attached": False, "model": None,
+                "status": "disabled",
+                "path": "noop",
+                "reason": "test_stub",
+                "attempts": [],
+                "scores_attached": False,
+                "model": None,
             }
 
         monkeypatch.setattr(pipeline.retriever, "retrieve", fake_retrieve)
         monkeypatch.setattr("app.rag.pipeline.decompose_query", fake_decompose)
-        monkeypatch.setattr(QueryComplexityClassifier, "classify", classmethod(lambda cls, q: "complex"))
+        monkeypatch.setattr(
+            QueryComplexityClassifier, "classify", classmethod(lambda cls, q: "complex")
+        )
         monkeypatch.setattr("app.rag.pipeline.rerank", fake_rerank)
 
         results, debug_info = await pipeline.search_knowledge_base(
-            "请对比分析两个方案的区别和影响", 1, top_k=5, debug=True,
+            "请对比分析两个方案的区别和影响",
+            1,
+            top_k=5,
+            debug=True,
         )
 
-        assert [h["chunk_id"] for h in captured["hits"]] == ["doc1_c1", "doc2_c2"], \
+        assert [h["chunk_id"] for h in captured["hits"]] == ["doc1_c1", "doc2_c2"], (
             "跨子查询的重复 chunk 必须只保留一次"
+        )
         assert len(results) == 2
         # 调试载荷同样基于稳定 id / 文件名（修复前恒为 id=None、filename=未知）
         assert debug_info["rerank_result"][0]["id"] == "doc1_c1"

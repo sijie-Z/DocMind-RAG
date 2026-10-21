@@ -3,6 +3,7 @@
 All infrastructure clients are constructed once at startup with validated URLs.
 Services receive their collaborators via constructor injection.
 """
+
 import logging
 from functools import lru_cache
 from urllib.parse import urlparse
@@ -20,7 +21,7 @@ def _normalize_base_url(url: str, strip_suffixes: list[str] | None = None) -> st
     """Normalize an API base URL by stripping known endpoint suffixes and validating format."""
     if not url:
         raise ValueError("API URL cannot be empty")
-    for suffix in (strip_suffixes or []):
+    for suffix in strip_suffixes or []:
         if url.endswith(suffix):
             url = url[: -len(suffix)]
     url = url.rstrip("/")
@@ -83,8 +84,7 @@ def get_rag_pipeline() -> RAGPipeline:
         from app.services.embedding_service import embedding_service
     except EmbeddingConfigError as e:
         logger.warning(
-            "Embedding 未配置（%s）——RAG 管线以向量臂关闭模式构造；"
-            "关键词检索与 LLM 能力不受影响。",
+            "Embedding 未配置（%s）——RAG 管线以向量臂关闭模式构造；关键词检索与 LLM 能力不受影响。",
             e,
             exc_info=True,
         )
@@ -106,6 +106,7 @@ async def wire_memory_embedding_provider() -> None:
         pipeline = get_rag_pipeline()
         # Import here to avoid circular import at module level
         from app.services.memory_service import memory_systems
+
         for _agent_id, ms in memory_systems.items():
             if ms._embedding_provider is None:
                 ms.set_embedding_provider(pipeline.get_embedding)

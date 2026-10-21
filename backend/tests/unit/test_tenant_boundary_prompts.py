@@ -9,6 +9,7 @@
 
 真 SQLite + ``httpx.ASGITransport``，仅覆盖提示词端点。
 """
+
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -46,18 +47,18 @@ async def _setup():
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as s:
-        s.add_all([
-            Organization(id=1, name="OrgA", owner_id=1),
-            Organization(id=2, name="OrgB", owner_id=3),
-            _user(1, 1, role="admin"),
-            _user(2, 1, role="user"),
-            _user(3, 2, role="admin"),
-        ])
+        s.add_all(
+            [
+                Organization(id=1, name="OrgA", owner_id=1),
+                Organization(id=2, name="OrgB", owner_id=3),
+                _user(1, 1, role="admin"),
+                _user(2, 1, role="user"),
+                _user(3, 2, role="admin"),
+            ]
+        )
         await s.flush()
         # W0-1：组织管理员 = per-org OrgAdmin 角色关联（users.role 不再参与鉴权）
-        org_admin_role = Role(
-            name="OrgAdmin", description="组织管理员", is_system_role=False
-        )
+        org_admin_role = Role(name="OrgAdmin", description="组织管理员", is_system_role=False)
         s.add(org_admin_role)
         await s.flush()
         await s.execute(
@@ -67,18 +68,45 @@ async def _setup():
                 {"user_id": 3, "organization_id": 2, "role_id": org_admin_role.id},
             ],
         )
-        s.add_all([
-            PromptTemplate(name="sys-template", content="s", is_system=True, organization_id=None, creator_id=None),
-            PromptTemplate(name="p-A", content="a", is_system=False, organization_id=1, creator_id=2),
-            PromptTemplate(name="p-B", content="b", is_system=False, organization_id=2, creator_id=3),
-            PromptTemplate(name="p-A-inactive", content="i", is_system=False, organization_id=1, creator_id=2, is_active=False),
-            # 迁移无法回填归属的历史非系统行：只允许超管可见，不得当系统模板广播。
-            PromptTemplate(name="legacy-orphan", content="o", is_system=False, organization_id=None, creator_id=None),
-        ])
+        s.add_all(
+            [
+                PromptTemplate(
+                    name="sys-template",
+                    content="s",
+                    is_system=True,
+                    organization_id=None,
+                    creator_id=None,
+                ),
+                PromptTemplate(
+                    name="p-A", content="a", is_system=False, organization_id=1, creator_id=2
+                ),
+                PromptTemplate(
+                    name="p-B", content="b", is_system=False, organization_id=2, creator_id=3
+                ),
+                PromptTemplate(
+                    name="p-A-inactive",
+                    content="i",
+                    is_system=False,
+                    organization_id=1,
+                    creator_id=2,
+                    is_active=False,
+                ),
+                # 迁移无法回填归属的历史非系统行：只允许超管可见，不得当系统模板广播。
+                PromptTemplate(
+                    name="legacy-orphan",
+                    content="o",
+                    is_system=False,
+                    organization_id=None,
+                    creator_id=None,
+                ),
+            ]
+        )
         await s.commit()
         ids = {}
         for name in ("sys-template", "p-A", "p-B", "p-A-inactive", "legacy-orphan"):
-            ids[name] = (await s.execute(select(PromptTemplate.id).where(PromptTemplate.name == name))).scalar_one()
+            ids[name] = (
+                await s.execute(select(PromptTemplate.id).where(PromptTemplate.name == name))
+            ).scalar_one()
     return engine, factory, ids
 
 
@@ -118,7 +146,9 @@ async def test_cross_org_update_delete_versions_are_404():
     engine, factory, ids = await _setup()
     try:
         admin_a = _user(1, 1, role="admin")
-        r = await _call(factory, admin_a, "PUT", f"/api/v1/prompts/{ids['p-B']}", json={"content": "hijacked"})
+        r = await _call(
+            factory, admin_a, "PUT", f"/api/v1/prompts/{ids['p-B']}", json={"content": "hijacked"}
+        )
         assert r.status_code == 404
         r = await _call(factory, admin_a, "DELETE", f"/api/v1/prompts/{ids['p-B']}")
         assert r.status_code == 404
@@ -136,11 +166,16 @@ async def test_system_template_is_read_only():
     engine, factory, ids = await _setup()
     try:
         r = await _call(
-            factory, _user(1, 1, role="admin"), "PUT",
-            f"/api/v1/prompts/{ids['sys-template']}", json={"content": "mutated"},
+            factory,
+            _user(1, 1, role="admin"),
+            "PUT",
+            f"/api/v1/prompts/{ids['sys-template']}",
+            json={"content": "mutated"},
         )
         assert r.status_code == 403, "系统模板（org=NULL）必须只读"
-        r = await _call(factory, _user(1, 1, role="admin"), "DELETE", f"/api/v1/prompts/{ids['sys-template']}")
+        r = await _call(
+            factory, _user(1, 1, role="admin"), "DELETE", f"/api/v1/prompts/{ids['sys-template']}"
+        )
         assert r.status_code == 403
     finally:
         await engine.dispose()
@@ -151,12 +186,17 @@ async def test_create_ignores_client_is_system_and_stamps_org():
     engine, factory, ids = await _setup()
     try:
         r = await _call(
-            factory, _user(2, 1, role="user"), "POST", "/api/v1/prompts/",
+            factory,
+            _user(2, 1, role="user"),
+            "POST",
+            "/api/v1/prompts/",
             json={"name": "my-prompt", "content": "x", "is_system": True, "is_active": True},
         )
         assert r.status_code == 200, r.text
         async with factory() as s:
-            created = (await s.execute(select(PromptTemplate).where(PromptTemplate.name == "my-prompt"))).scalar_one()
+            created = (
+                await s.execute(select(PromptTemplate).where(PromptTemplate.name == "my-prompt"))
+            ).scalar_one()
             assert created.is_system is False, "客户端不得伪造系统模板"
             assert created.organization_id == 1, "创建必须落在调用者组织"
     finally:
@@ -169,18 +209,26 @@ async def test_activation_requires_admin_and_is_audited():
     try:
         # 非管理员（即使是创建者）激活 → 403
         r = await _call(
-            factory, _user(2, 1, role="user"), "PUT",
-            f"/api/v1/prompts/{ids['p-A-inactive']}", json={"is_active": True},
+            factory,
+            _user(2, 1, role="user"),
+            "PUT",
+            f"/api/v1/prompts/{ids['p-A-inactive']}",
+            json={"is_active": True},
         )
         assert r.status_code == 403, "激活操作必须限管理员"
         async with factory() as s:
             assert (await s.get(PromptTemplate, ids["p-A-inactive"])).is_active is False
 
         # 管理员激活 → 200 + 审计
-        with patch("app.api.v1.endpoints.prompts.audit_service.log_activity", new=AsyncMock()) as audit:
+        with patch(
+            "app.api.v1.endpoints.prompts.audit_service.log_activity", new=AsyncMock()
+        ) as audit:
             r = await _call(
-                factory, _user(1, 1, role="admin"), "PUT",
-                f"/api/v1/prompts/{ids['p-A-inactive']}", json={"is_active": True},
+                factory,
+                _user(1, 1, role="admin"),
+                "PUT",
+                f"/api/v1/prompts/{ids['p-A-inactive']}",
+                json={"is_active": True},
             )
         assert r.status_code == 200, r.text
         assert audit.await_count == 1, "激活必须写审计日志"
@@ -202,7 +250,9 @@ async def test_creator_can_edit_own_draft_prompt_with_unchanged_is_active():
     engine, factory, ids = await _setup()
     try:
         r = await _call(
-            factory, _user(2, 1, role="user"), "PUT",
+            factory,
+            _user(2, 1, role="user"),
+            "PUT",
             f"/api/v1/prompts/{ids['p-A-inactive']}",
             json={"content": "updated", "is_active": False},
         )
@@ -220,24 +270,31 @@ async def test_prompt_name_uniqueness_is_per_org():
     try:
         # org B 用与 org A 相同的名字创建 → 允许
         r = await _call(
-            factory, _user(3, 2, role="admin"), "POST", "/api/v1/prompts/",
+            factory,
+            _user(3, 2, role="admin"),
+            "POST",
+            "/api/v1/prompts/",
             json={"name": "p-A", "content": "org-b copy"},
         )
         assert r.status_code == 200, r.text
         async with factory() as s:
-            org_b_copy = (await s.execute(
-                select(PromptTemplate).where(
-                    (PromptTemplate.name == "p-A")
-                    & (PromptTemplate.organization_id == 2)
+            org_b_copy = (
+                await s.execute(
+                    select(PromptTemplate).where(
+                        (PromptTemplate.name == "p-A") & (PromptTemplate.organization_id == 2)
+                    )
                 )
-            )).scalar_one()
+            ).scalar_one()
             assert org_b_copy.content == "org-b copy"
             # org A 的原模板未被覆盖
             assert (await s.get(PromptTemplate, ids["p-A"])).content == "a"
 
         # 同组织内重名 → 409
         r = await _call(
-            factory, _user(2, 1, role="user"), "POST", "/api/v1/prompts/",
+            factory,
+            _user(2, 1, role="user"),
+            "POST",
+            "/api/v1/prompts/",
             json={"name": "p-A", "content": "dup"},
         )
         assert r.status_code == 409
@@ -251,16 +308,33 @@ async def test_restore_and_version_detail_are_org_scoped():
     engine, factory, ids = await _setup()
     try:
         async with factory() as s:
-            s.add(PromptTemplateVersion(
-                prompt_id=ids["p-A"], version=1, name="p-A", content="v1", creator_id=2,
-            ))
-            s.add(PromptTemplateVersion(
-                prompt_id=ids["p-B"], version=1, name="p-B", content="b1", creator_id=3,
-            ))
-            s.add(PromptTemplateVersion(
-                prompt_id=ids["p-A-inactive"], version=1,
-                name="p-A-inactive", content="draft-v1", creator_id=2,
-            ))
+            s.add(
+                PromptTemplateVersion(
+                    prompt_id=ids["p-A"],
+                    version=1,
+                    name="p-A",
+                    content="v1",
+                    creator_id=2,
+                )
+            )
+            s.add(
+                PromptTemplateVersion(
+                    prompt_id=ids["p-B"],
+                    version=1,
+                    name="p-B",
+                    content="b1",
+                    creator_id=3,
+                )
+            )
+            s.add(
+                PromptTemplateVersion(
+                    prompt_id=ids["p-A-inactive"],
+                    version=1,
+                    name="p-A-inactive",
+                    content="draft-v1",
+                    creator_id=2,
+                )
+            )
             await s.commit()
 
         admin_a = _user(1, 1, role="admin")
@@ -271,7 +345,9 @@ async def test_restore_and_version_detail_are_org_scoped():
 
         # 同组织创建者可恢复自己的草稿模板（B4-02：激活态仅管理员可改）
         r = await _call(
-            factory, _user(2, 1, role="user"), "POST",
+            factory,
+            _user(2, 1, role="user"),
+            "POST",
             f"/api/v1/prompts/{ids['p-A-inactive']}/restore/1",
         )
         assert r.status_code == 200, r.text
@@ -289,9 +365,9 @@ async def test_seed_creates_system_templates_with_null_org():
         r = await _call(factory, superuser, "POST", "/api/v1/prompts/seed")
         assert r.status_code == 200, r.text
         async with factory() as s:
-            seeded = (await s.execute(
-                select(PromptTemplate).where(PromptTemplate.name == "通用助手")
-            )).scalar_one()
+            seeded = (
+                await s.execute(select(PromptTemplate).where(PromptTemplate.name == "通用助手"))
+            ).scalar_one()
             assert seeded.is_system is True
             assert seeded.organization_id is None
     finally:

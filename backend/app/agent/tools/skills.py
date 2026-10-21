@@ -247,9 +247,9 @@ async def document_comparison(
                 parts.append(f"## 文档 {i}\n{info[:500]}")
             else:
                 logger.warning(
-                    "document_comparison: get_document_info returned no usable output "
-                    "for %s: %s",
-                    doc_id, info[:120],
+                    "document_comparison: get_document_info returned no usable output for %s: %s",
+                    doc_id,
+                    info[:120],
                 )
                 parts.append(f"## 文档 {i}\n(无法获取文档信息: {doc_id})\n")
         except Exception as e:
@@ -286,7 +286,8 @@ async def document_comparison(
         if parsed is None:
             logger.warning(
                 "document_comparison: extract_insights returned no usable analysis for %s: %s",
-                doc_id, str(insight)[:120],
+                doc_id,
+                str(insight)[:120],
             )
             parts.append(f"### 文档分析\n(洞察提取失败: {doc_id})\n")
             continue
@@ -346,7 +347,14 @@ async def document_comparison(
             "framework": {
                 "type": "string",
                 "description": "分析框架",
-                "enum": ["swot", "dupont", "pest", "financial_health", "contract_risk", "comprehensive"],
+                "enum": [
+                    "swot",
+                    "dupont",
+                    "pest",
+                    "financial_health",
+                    "contract_risk",
+                    "comprehensive",
+                ],
                 "default": "comprehensive",
             },
             "generate_report": {
@@ -435,16 +443,15 @@ async def knowledge_analysis(
             failed_count += 1
             logger.warning(
                 "knowledge_analysis: extract_insights returned no usable analysis for %s: %s",
-                doc_id, str(insight)[:120],
+                doc_id,
+                str(insight)[:120],
             )
             continue
         analysis_results.append(insight)
 
     framework_label = framework.upper() if framework != "comprehensive" else "综合"
     if analysis_results:
-        combined = "\n\n".join(
-            r[:800] for r in analysis_results
-        )
+        combined = "\n\n".join(r[:800] for r in analysis_results)
         analysis_section = f"## {framework_label}分析\n{combined}"
         if failed_count:
             # 部分失败如实标注：成功结果照常呈现，但不得让读者以为全部提取成功。
@@ -459,12 +466,29 @@ async def knowledge_analysis(
     # Step 3: 生成报告（可选）
     if generate_report and analysis_results:
         try:
-            report_title = f"{query} - {framework.upper() if framework != 'comprehensive' else '综合'}分析报告"
-            sections = json.dumps([
-                {"heading": "分析概述", "content": f"基于对知识库中 {len(doc_ids)} 份文档的 {framework} 分析", "type": "text"},
-                {"heading": "分析结果", "content": json.dumps(analysis_results, ensure_ascii=False)[:3000], "type": "text"},
-                {"heading": "结论与建议", "content": "请根据以上分析结果得出结论。", "type": "text"},
-            ], ensure_ascii=False)
+            report_title = (
+                f"{query} - {framework.upper() if framework != 'comprehensive' else '综合'}分析报告"
+            )
+            sections = json.dumps(
+                [
+                    {
+                        "heading": "分析概述",
+                        "content": f"基于对知识库中 {len(doc_ids)} 份文档的 {framework} 分析",
+                        "type": "text",
+                    },
+                    {
+                        "heading": "分析结果",
+                        "content": json.dumps(analysis_results, ensure_ascii=False)[:3000],
+                        "type": "text",
+                    },
+                    {
+                        "heading": "结论与建议",
+                        "content": "请根据以上分析结果得出结论。",
+                        "type": "text",
+                    },
+                ],
+                ensure_ascii=False,
+            )
             ok, report = await _consume_tool_output(
                 "generate_report",
                 {"title": report_title, "sections": sections},

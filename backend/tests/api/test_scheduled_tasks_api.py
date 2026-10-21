@@ -4,6 +4,7 @@
 无组织 403）/ 归属隔离（他人任务 404、超管全见）/ pause+resume（含过期单次 409）/
 run-now（共用引擎入口、重叠响应）/ PATCH 重算与类型守卫 / DELETE。
 """
+
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -113,61 +114,107 @@ class TestCreate:
 
     @pytest.mark.asyncio
     async def test_create_invalid_cron_400(self, api):
-        r = await api.client.post(f"{BASE}/", json={
-            "name": "x", "prompt": "p", "schedule_type": "cron", "cron_expr": "not a cron",
-        })
+        r = await api.client.post(
+            f"{BASE}/",
+            json={
+                "name": "x",
+                "prompt": "p",
+                "schedule_type": "cron",
+                "cron_expr": "not a cron",
+            },
+        )
         assert r.status_code == 400
 
     @pytest.mark.asyncio
     async def test_create_impossible_cron_400(self, api):
-        r = await api.client.post(f"{BASE}/", json={
-            "name": "x", "prompt": "p", "schedule_type": "cron", "cron_expr": "0 0 31 2 *",
-        })
+        r = await api.client.post(
+            f"{BASE}/",
+            json={
+                "name": "x",
+                "prompt": "p",
+                "schedule_type": "cron",
+                "cron_expr": "0 0 31 2 *",
+            },
+        )
         assert r.status_code == 400
 
     @pytest.mark.asyncio
     async def test_create_bad_timezone_400(self, api):
-        r = await api.client.post(f"{BASE}/", json={
-            "name": "x", "prompt": "p", "schedule_type": "cron", "cron_expr": "0 9 * * *",
-            "timezone": "Mars/Olympus",
-        })
+        r = await api.client.post(
+            f"{BASE}/",
+            json={
+                "name": "x",
+                "prompt": "p",
+                "schedule_type": "cron",
+                "cron_expr": "0 9 * * *",
+                "timezone": "Mars/Olympus",
+            },
+        )
         assert r.status_code == 400
 
     @pytest.mark.asyncio
     async def test_create_once_past_400(self, api):
-        r = await api.client.post(f"{BASE}/", json={
-            "name": "x", "prompt": "p", "schedule_type": "once",
-            "once_at": (_utcnow() - timedelta(minutes=1)).isoformat(),
-        })
+        r = await api.client.post(
+            f"{BASE}/",
+            json={
+                "name": "x",
+                "prompt": "p",
+                "schedule_type": "once",
+                "once_at": (_utcnow() - timedelta(minutes=1)).isoformat(),
+            },
+        )
         assert r.status_code == 400
 
     @pytest.mark.asyncio
     async def test_create_interval_below_floor_422(self, api):
-        r = await api.client.post(f"{BASE}/", json={
-            "name": "x", "prompt": "p", "schedule_type": "interval", "interval_seconds": 30,
-        })
+        r = await api.client.post(
+            f"{BASE}/",
+            json={
+                "name": "x",
+                "prompt": "p",
+                "schedule_type": "interval",
+                "interval_seconds": 30,
+            },
+        )
         assert r.status_code == 422
 
     @pytest.mark.asyncio
     async def test_create_field_mismatch_422(self, api):
         # cron 类型却给了 interval 字段
-        r = await api.client.post(f"{BASE}/", json={
-            "name": "x", "prompt": "p", "schedule_type": "cron",
-            "cron_expr": "0 9 * * *", "interval_seconds": 120,
-        })
+        r = await api.client.post(
+            f"{BASE}/",
+            json={
+                "name": "x",
+                "prompt": "p",
+                "schedule_type": "cron",
+                "cron_expr": "0 9 * * *",
+                "interval_seconds": 120,
+            },
+        )
         assert r.status_code == 422
         # cron 类型没给 cron 字段
-        r = await api.client.post(f"{BASE}/", json={
-            "name": "x", "prompt": "p", "schedule_type": "cron",
-        })
+        r = await api.client.post(
+            f"{BASE}/",
+            json={
+                "name": "x",
+                "prompt": "p",
+                "schedule_type": "cron",
+            },
+        )
         assert r.status_code == 422
 
     @pytest.mark.asyncio
     async def test_create_without_organization_403(self, api):
         api.state.user = _make_user(uid=9, org=None)
-        r = await api.client.post(f"{BASE}/", json={
-            "name": "x", "prompt": "p", "schedule_type": "cron", "cron_expr": "0 9 * * *",
-        })
+        r = await api.client.post(
+            f"{BASE}/",
+            json={
+                "name": "x",
+                "prompt": "p",
+                "schedule_type": "cron",
+                "cron_expr": "0 9 * * *",
+            },
+        )
         assert r.status_code == 403
 
     @pytest.mark.asyncio
@@ -281,8 +328,12 @@ class TestPauseResume:
 
     @pytest.mark.asyncio
     async def test_resume_completed_once_409(self, api):
-        d = await _create(api, schedule_type="once", cron_expr=None,
-                          once_at=(_utcnow() + timedelta(hours=1)).isoformat())
+        d = await _create(
+            api,
+            schedule_type="once",
+            cron_expr=None,
+            once_at=(_utcnow() + timedelta(hours=1)).isoformat(),
+        )
         async with api.factory() as s:
             row = await s.get(ScheduledTask, d["id"])
             row.enabled = False
@@ -365,8 +416,12 @@ class TestPatch:
 
     @pytest.mark.asyncio
     async def test_once_rearm_after_completion(self, api):
-        d = await _create(api, schedule_type="once", cron_expr=None,
-                          once_at=(_utcnow() + timedelta(hours=1)).isoformat())
+        d = await _create(
+            api,
+            schedule_type="once",
+            cron_expr=None,
+            once_at=(_utcnow() + timedelta(hours=1)).isoformat(),
+        )
         async with api.factory() as s:
             row = await s.get(ScheduledTask, d["id"])
             row.enabled = False

@@ -7,6 +7,7 @@ top_k=1000 时就会向 ES 请求 1000 条命中（工具 schema 也未声明上
 变异点（红→绿判别）：回退 core_tools 的 ``min(top_k, 20)`` 与 schema
 ``maximum`` → 两条用例均红。
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -29,9 +30,7 @@ async def test_vector_search_clamps_top_k_to_20_in_es_request():
 
     with (
         patch("app.dependencies.get_rag_pipeline", return_value=pipeline),
-        patch.object(
-            ElasticsearchTools, "search_documents", AsyncMock(side_effect=fake_search)
-        ),
+        patch.object(ElasticsearchTools, "search_documents", AsyncMock(side_effect=fake_search)),
     ):
         await vector_search("查询", top_k=1000, organization_id=1)
 

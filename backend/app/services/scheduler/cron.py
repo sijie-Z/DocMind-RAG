@@ -126,7 +126,9 @@ def parse_cron(expr: str) -> CronExpr:
         raise CronError(f"cron 表达式必须是字符串: {expr!r}")
     fields = expr.split()
     if len(fields) != 5:
-        raise CronError(f"cron 表达式必须是 5 字段（分 时 日 月 周），收到 {len(fields)} 个: {expr!r}")
+        raise CronError(
+            f"cron 表达式必须是 5 字段（分 时 日 月 周），收到 {len(fields)} 个: {expr!r}"
+        )
 
     minute, hour, dom, month, dow = fields
     minutes = _parse_field(minute, 0, 59, "minute")

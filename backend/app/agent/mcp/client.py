@@ -177,7 +177,11 @@ class MCPServerConnection:
                 owner = self._owner
                 if owner is not None and owner.done():
                     self._owner = None
-                detail = f"{type(err).__name__}: {err}" if err is not None else "connection ended during startup"
+                detail = (
+                    f"{type(err).__name__}: {err}"
+                    if err is not None
+                    else "connection ended during startup"
+                )
                 raise MCPConnectError(
                     f"MCP server '{self.config.name}' 初始化失败: {detail}"
                 ) from (err if isinstance(err, BaseException) else None)
@@ -188,7 +192,9 @@ class MCPServerConnection:
         try:
             async with self._open_transport() as streams:
                 read, write = streams[0], streams[1]
-                async with ClientSession(read, write, message_handler=self._handle_incoming) as session:
+                async with ClientSession(
+                    read, write, message_handler=self._handle_incoming
+                ) as session:
                     await session.initialize()
                     self._session = session
                     self._state = "connected"
@@ -200,7 +206,9 @@ class MCPServerConnection:
         except BaseException as e:  # noqa: BLE001 —— owner 生命周期任务：任何异常都收敛为状态
             self._startup_error = e
             self._state = "dead"
-            logger.warning("MCP server '%s' 连接异常退出: %s: %s", self.config.name, type(e).__name__, e)
+            logger.warning(
+                "MCP server '%s' 连接异常退出: %s: %s", self.config.name, type(e).__name__, e
+            )
         finally:
             self._session = None
             self._ready_evt.set()
@@ -276,7 +284,9 @@ class MCPServerConnection:
 
     def _require_session(self) -> ClientSession:
         if not self.is_connected or self._session is None:
-            raise MCPNotConnectedError(f"MCP server '{self.config.name}' 未连接（state={self._state}）")
+            raise MCPNotConnectedError(
+                f"MCP server '{self.config.name}' 未连接（state={self._state}）"
+            )
         return self._session
 
     def _classify_mcp_error(self, e: MCPError) -> NoReturn:
@@ -326,7 +336,9 @@ class MCPServerConnection:
         output_schema = getattr(tool, "output_schema", None)
         return MCPToolDescriptor(
             name=str(tool.name),
-            description=str(getattr(tool, "description", None) or getattr(tool, "title", None) or ""),
+            description=str(
+                getattr(tool, "description", None) or getattr(tool, "title", None) or ""
+            ),
             input_schema=dict(schema) if isinstance(schema, dict) else {},
             output_schema=dict(output_schema) if isinstance(output_schema, dict) else None,
         )
@@ -370,7 +382,9 @@ class MCPServerConnection:
         for block in raw.content or []:
             if hasattr(block, "model_dump"):
                 dumped = block.model_dump(by_alias=True, exclude_none=True)
-                content.append(dumped if isinstance(dumped, dict) else {"type": "unknown", "raw": str(dumped)})
+                content.append(
+                    dumped if isinstance(dumped, dict) else {"type": "unknown", "raw": str(dumped)}
+                )
             elif isinstance(block, dict):
                 content.append(block)
             else:
@@ -418,7 +432,9 @@ class MCPServerConnection:
             try:
                 cb()
             except Exception as e:  # noqa: BLE001 —— 回调异常绝不能打进 dispatcher
-                logger.warning("MCP server '%s' tools/list_changed 回调失败: %s", self.config.name, e)
+                logger.warning(
+                    "MCP server '%s' tools/list_changed 回调失败: %s", self.config.name, e
+                )
 
 
 class _HTTPTransport:
@@ -431,7 +447,9 @@ class _HTTPTransport:
 
     async def __aenter__(self):
         await self._client.__aenter__()
-        self._cm = streamable_http_client(self._url, http_client=self._client, terminate_on_close=True)
+        self._cm = streamable_http_client(
+            self._url, http_client=self._client, terminate_on_close=True
+        )
         return await self._cm.__aenter__()
 
     async def __aexit__(self, *exc_info):

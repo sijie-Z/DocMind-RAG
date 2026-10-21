@@ -1,4 +1,5 @@
 """File service unit tests — validation, hashing, MIME checks."""
+
 import hashlib
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,7 +12,10 @@ from app.services.file_service import _ALLOWED_MIME_TYPES, FileUploadService
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
-def _make_upload_file(filename: str = "test.pdf", content: bytes = b"dummy", content_type: str = "application/pdf"):
+
+def _make_upload_file(
+    filename: str = "test.pdf", content: bytes = b"dummy", content_type: str = "application/pdf"
+):
     """Create a mock UploadFile."""
     f = MagicMock()
     f.filename = filename
@@ -22,12 +26,14 @@ def _make_upload_file(filename: str = "test.pdf", content: bytes = b"dummy", con
 
 # ── Service instance ────────────────────────────────────────────────
 
+
 @pytest.fixture
 def svc():
     return FileUploadService()
 
 
 # ── _validate_file ──────────────────────────────────────────────────
+
 
 class TestValidateFile:
     def test_valid_pdf(self, svc):
@@ -63,6 +69,7 @@ class TestValidateFile:
 
 # ── _generate_file_hash ─────────────────────────────────────────────
 
+
 class TestGenerateFileHash:
     def test_returns_sha256(self, svc):
         content = b"hello world"
@@ -79,6 +86,7 @@ class TestGenerateFileHash:
 
 
 # ── _validate_mime_type ─────────────────────────────────────────────
+
 
 class TestValidateMimeType:
     def test_matching_mime_and_extension(self, svc):
@@ -123,12 +131,18 @@ class TestValidateMimeType:
 
 # ── _ALLOWED_MIME_TYPES ─────────────────────────────────────────────
 
+
 class TestAllowedMimeTypes:
     def test_pdf_mime(self):
         assert ".pdf" in _ALLOWED_MIME_TYPES["application/pdf"]
 
     def test_docx_mime(self):
-        assert ".docx" in _ALLOWED_MIME_TYPES["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+        assert (
+            ".docx"
+            in _ALLOWED_MIME_TYPES[
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ]
+        )
 
     def test_text_plain_allows_multiple(self):
         exts = _ALLOWED_MIME_TYPES["text/plain"]
@@ -149,6 +163,7 @@ class TestAllowedMimeTypes:
 
 
 # ── upload identity sanitizer ────────────────────────────────────
+
 
 class TestUploadIdentitySanitizer:
     def test_rejects_path_traversal_filename(self, svc):
@@ -171,6 +186,7 @@ class TestUploadIdentitySanitizer:
 
 
 # ── delete_file ─────────────────────────────────────────────────────
+
 
 class TestDeleteFile:
     @pytest.mark.asyncio
@@ -217,6 +233,7 @@ class TestDeleteFile:
 
 # ── chunk upload validation ─────────────────────────────────────────
 
+
 class TestChunkValidation:
     @pytest.mark.asyncio
     async def test_empty_chunk_raises(self, svc):
@@ -239,15 +256,19 @@ class TestChunkValidation:
 
 # ── _check_all_chunks_uploaded ──────────────────────────────────────
 
+
 class TestCheckAllChunks:
     @pytest.mark.asyncio
     async def test_all_present(self, svc):
         mock_dir = MagicMock()
         chunk_files = {i: MagicMock() for i in range(3)}
-        mock_dir.__truediv__ = lambda self, name: chunk_files.get(int(name.split("_")[1]), MagicMock(exists=lambda: False))
+        mock_dir.__truediv__ = lambda self, name: chunk_files.get(
+            int(name.split("_")[1]), MagicMock(exists=lambda: False)
+        )
         # Simplified: use real Path with tmp
         import os
         import tempfile
+
         tmpdir = tempfile.mkdtemp()
         for i in range(3):
             open(os.path.join(tmpdir, f"chunk_{i}"), "w").close()
@@ -258,6 +279,7 @@ class TestCheckAllChunks:
     async def test_missing_chunk(self, svc):
         import os
         import tempfile
+
         tmpdir = tempfile.mkdtemp()
         # Only create 2 of 3 chunks
         for i in range(2):

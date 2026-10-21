@@ -7,6 +7,7 @@
 
 真 SQLite + 真实签名的 JWT，仅将 token 黑名单查询打桩（本机无 Redis）。
 """
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -31,17 +32,40 @@ async def _setup():
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as s:
-        s.add_all([
-            Organization(id=1, name="OrgA", owner_id=8),
-            Organization(id=2, name="OrgB", owner_id=9),
-            User(id=7, username="moved", email="m7@example.com", hashed_password="x",
-                 role="user", organization_id=None, is_active=True),
-            User(id=8, username="adminA", email="m8@example.com", hashed_password="x",
-                 role="admin", organization_id=1, is_active=True),
-            User(id=9, username="primary", email="m9@example.com", hashed_password="x",
-                 role="user", organization_id=2, is_active=True),
-            Role(id=1, name="test-role"),
-        ])
+        s.add_all(
+            [
+                Organization(id=1, name="OrgA", owner_id=8),
+                Organization(id=2, name="OrgB", owner_id=9),
+                User(
+                    id=7,
+                    username="moved",
+                    email="m7@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=None,
+                    is_active=True,
+                ),
+                User(
+                    id=8,
+                    username="adminA",
+                    email="m8@example.com",
+                    hashed_password="x",
+                    role="admin",
+                    organization_id=1,
+                    is_active=True,
+                ),
+                User(
+                    id=9,
+                    username="primary",
+                    email="m9@example.com",
+                    hashed_password="x",
+                    role="user",
+                    organization_id=2,
+                    is_active=True,
+                ),
+                Role(id=1, name="test-role"),
+            ]
+        )
         await s.flush()
         await s.execute(user_organization.insert().values(user_id=7, organization_id=1))
         await s.execute(
@@ -85,8 +109,7 @@ async def test_removed_member_old_token_immediately_gets_403():
         async with factory() as s:
             await s.execute(
                 user_organization.delete().where(
-                    (user_organization.c.user_id == 7)
-                    & (user_organization.c.organization_id == 1)
+                    (user_organization.c.user_id == 7) & (user_organization.c.organization_id == 1)
                 )
             )
             await s.commit()
@@ -121,17 +144,21 @@ async def test_remove_member_endpoint_deletes_membership_row():
             member.organization_id = 1
             await s.commit()
 
-        admin = SimpleNamespace(id=8, organization_id=1, role="admin", is_superuser=False, is_active=True)
+        admin = SimpleNamespace(
+            id=8, organization_id=1, role="admin", is_superuser=False, is_active=True
+        )
         async with factory() as s:
             with patch("app.api.v1.endpoints.organizations.create_notification", new=AsyncMock()):
                 await remove_organization_member(1, 7, admin, s)
-            row = (await s.execute(
-                select(user_organization.c.user_id).where(user_organization.c.user_id == 7)
-            )).first()
+            row = (
+                await s.execute(
+                    select(user_organization.c.user_id).where(user_organization.c.user_id == 7)
+                )
+            ).first()
             assert row is None, "移除成员必须删除 user_organization 成员关系"
-            role_rows = (await s.execute(
-                select(user_organization_role_association.c.user_id)
-            )).all()
+            role_rows = (
+                await s.execute(select(user_organization_role_association.c.user_id))
+            ).all()
             assert role_rows == [], "移除成员必须清理该组织下的角色关联（评审 m-4）"
             moved = await s.get(User, 7)
             assert moved.organization_id is None
@@ -188,21 +215,23 @@ async def test_add_member_endpoint_inserts_membership_row():
     try:
         # 先移除，再添加，验证成员表被重建
         async with factory() as s:
-            await s.execute(
-                user_organization.delete().where(user_organization.c.user_id == 7)
-            )
+            await s.execute(user_organization.delete().where(user_organization.c.user_id == 7))
             await s.commit()
 
-        admin = SimpleNamespace(id=8, organization_id=1, role="admin", is_superuser=False, is_active=True)
+        admin = SimpleNamespace(
+            id=8, organization_id=1, role="admin", is_superuser=False, is_active=True
+        )
         async with factory() as s:
             with patch("app.api.v1.endpoints.organizations.create_notification", new=AsyncMock()):
                 await add_organization_member(1, 7, admin, s)
-            row = (await s.execute(
-                select(user_organization.c.user_id).where(
-                    (user_organization.c.user_id == 7)
-                    & (user_organization.c.organization_id == 1)
+            row = (
+                await s.execute(
+                    select(user_organization.c.user_id).where(
+                        (user_organization.c.user_id == 7)
+                        & (user_organization.c.organization_id == 1)
+                    )
                 )
-            )).first()
+            ).first()
             assert row is not None, "添加成员必须写入 user_organization 成员关系"
     finally:
         await engine.dispose()

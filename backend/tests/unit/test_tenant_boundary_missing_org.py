@@ -4,6 +4,7 @@
 调用方漏传时静默以 None 参与查询（ES term "None" / SQL IS NULL / 命名空间 "None:…"），
 而不是明确失败。本文件逐类钉住：工具返回结构化失败，服务/构造器抛 ValueError。
 """
+
 from unittest.mock import MagicMock
 
 import pytest

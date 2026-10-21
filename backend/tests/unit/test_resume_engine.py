@@ -71,8 +71,13 @@ class _CountingPlanner:
         yield AgentEvent(type="plan_start", plan_id="p-new", content="重新规划...")
         prev = None
         for i in range(1, self.n + 1):
-            yield AgentEvent(type="plan_step", plan_id="p-new", plan_step_id=f"s{i}",
-                             content=f"第{i}步", dependencies=[prev] if prev else [])
+            yield AgentEvent(
+                type="plan_step",
+                plan_id="p-new",
+                plan_step_id=f"s{i}",
+                content=f"第{i}步",
+                dependencies=[prev] if prev else [],
+            )
             prev = f"s{i}"
         yield AgentEvent(type="plan_complete", plan_id="p-new", plan_goal="目标", content="ok")
 
@@ -83,8 +88,12 @@ class _ReplanReflector:
 
     async def reflect(self, plan, results, ctx=None):
         self.calls += 1
-        yield AgentEvent(type="reflection", reflection_result="replan",
-                         content="缺口：需要更多数据", plan_id=plan.id)
+        yield AgentEvent(
+            type="reflection",
+            reflection_result="replan",
+            content="缺口：需要更多数据",
+            plan_id=plan.id,
+        )
 
 
 class _PassReviewer:
@@ -101,8 +110,7 @@ class _SimulatedCrash(BaseException):
 
 
 def _completed_spy(executed: list[str], yield_chunk: bool = True):
-    async def _spy(*, step, plan, history, organization_id, user_id,
-                   enable_thinking, ctx=None):
+    async def _spy(*, step, plan, history, organization_id, user_id, enable_thinking, ctx=None):
         executed.append(step.id)
         if yield_chunk:
             yield AgentEvent(type="chunk", content=f"结果-{step.id}")
@@ -110,22 +118,28 @@ def _completed_spy(executed: list[str], yield_chunk: bool = True):
     return _spy
 
 
-def _crashed_payload(*, steps, tokens=0, iterations=0, partial="", replan=0,
-                     include_plan=True, query="原始问题"):
+def _crashed_payload(
+    *, steps, tokens=0, iterations=0, partial="", replan=0, include_plan=True, query="原始问题"
+):
     ctx = ExecutionContext(query=query, task_id="t-1")
     ctx.total_tokens = tokens
     if iterations:
         ctx.artifacts["iterations_used"] = iterations
-    plan = Plan(id="p1", goal="目标", steps=steps,
-                completed_steps=sum(1 for s in steps if s.status == "completed"))
+    plan = Plan(
+        id="p1",
+        goal="目标",
+        steps=steps,
+        completed_steps=sum(1 for s in steps if s.status == "completed"),
+    )
     return {
         "v": 1,
         "session_id": "sess-9",
         "ctx": ctx.to_checkpoint_dict(),
         "plan": plan.to_checkpoint_dict() if include_plan else None,
         "history": [{"role": "user", "content": query}],
-        "config": AgentConfig(enable_memory=False, enable_thinking=False,
-                              enable_skills=False, enable_reflection=False).to_dict(),
+        "config": AgentConfig(
+            enable_memory=False, enable_thinking=False, enable_skills=False, enable_reflection=False
+        ).to_dict(),
         "run": {"execution_mode": "dag", "replan_attempts": replan, "replan_feedback": ""},
         "partial_output": partial,
     }
@@ -133,8 +147,11 @@ def _crashed_payload(*, steps, tokens=0, iterations=0, partial="", replan=0,
 
 def _make_loop(*, config=None, executed=None, planner=None):
     cfg = config or AgentConfig(
-        enable_memory=False, enable_thinking=False, enable_skills=False,
-        enable_reflection=False, enable_experience=False,
+        enable_memory=False,
+        enable_thinking=False,
+        enable_skills=False,
+        enable_reflection=False,
+        enable_experience=False,
     )
     loop = PERAgentLoop(MagicMock(), cfg, organization_id=1, user_id=0)
     memory = _FakeMemory()
@@ -153,8 +170,9 @@ async def test_resume_skips_planning_and_only_runs_remaining_steps():
     被重跑 → 两条断言都红。"""
     steps = [
         PlanStep(id="s1", description="一", status="completed", result="结果-s1"),
-        PlanStep(id="s2", description="二", dependencies=["s1"], status="completed",
-                 result="结果-s2"),
+        PlanStep(
+            id="s2", description="二", dependencies=["s1"], status="completed", result="结果-s2"
+        ),
         PlanStep(id="s3", description="三", dependencies=["s2"]),
     ]
     payload = _crashed_payload(steps=steps, iterations=2, partial="结果-s1结果-s2")
@@ -214,8 +232,14 @@ async def test_resume_continues_token_budget_from_snapshot():
         PlanStep(id="s2", description="二", dependencies=["s1"]),
     ]
     payload = _crashed_payload(steps=steps, tokens=100)
-    cfg = AgentConfig(enable_memory=False, enable_thinking=False, enable_skills=False,
-                      enable_reflection=False, enable_experience=False, max_total_tokens=100)
+    cfg = AgentConfig(
+        enable_memory=False,
+        enable_thinking=False,
+        enable_skills=False,
+        enable_reflection=False,
+        enable_experience=False,
+        max_total_tokens=100,
+    )
     loop, _, executed = _make_loop(config=cfg)
 
     events = [e async for e in loop.run("原始问题", task_id="t-1", resume=payload)]
@@ -234,8 +258,14 @@ async def test_resume_continues_iteration_budget_from_snapshot():
         PlanStep(id="s2", description="二", dependencies=["s1"]),
     ]
     payload = _crashed_payload(steps=steps, iterations=2)
-    cfg = AgentConfig(enable_memory=False, enable_thinking=False, enable_skills=False,
-                      enable_reflection=False, enable_experience=False, max_iterations=2)
+    cfg = AgentConfig(
+        enable_memory=False,
+        enable_thinking=False,
+        enable_skills=False,
+        enable_reflection=False,
+        enable_experience=False,
+        max_iterations=2,
+    )
     loop, _, executed = _make_loop(config=cfg)
 
     events = [e async for e in loop.run("原始问题", task_id="t-1", resume=payload)]
@@ -251,8 +281,13 @@ async def test_resume_continues_replan_budget_from_snapshot():
     （planner.calls == 1）→ 断言红。"""
     steps = [PlanStep(id="s1", description="一", status="completed", result="R1")]
     payload = _crashed_payload(steps=steps, replan=1)
-    cfg = AgentConfig(enable_memory=False, enable_thinking=False, enable_skills=False,
-                      enable_reflection=True, enable_experience=False)
+    cfg = AgentConfig(
+        enable_memory=False,
+        enable_thinking=False,
+        enable_skills=False,
+        enable_reflection=True,
+        enable_experience=False,
+    )
     planner = _CountingPlanner()
     loop, _, executed = _make_loop(config=cfg, planner=planner)
     reflector, reviewer = _ReplanReflector(), _PassReviewer()
@@ -271,13 +306,22 @@ async def test_resume_continues_replan_budget_from_snapshot():
 @pytest.mark.asyncio
 async def test_resume_uses_frozen_history_from_snapshot():
     """history 在首快照时冻结：resume 不重读会话新消息（否则等于换上下文续跑）。"""
-    steps = [PlanStep(id="s1", description="一", status="completed", result="R1"),
-             PlanStep(id="s2", description="二", dependencies=["s1"])]
+    steps = [
+        PlanStep(id="s1", description="一", status="completed", result="R1"),
+        PlanStep(id="s2", description="二", dependencies=["s1"]),
+    ]
     payload = _crashed_payload(steps=steps, partial="R1")
     loop, memory, executed = _make_loop()
 
-    [e async for e in loop.run("原始问题", history=[{"role": "user", "content": "新的消息"}],
-                               task_id="t-1", resume=payload)]
+    [
+        e
+        async for e in loop.run(
+            "原始问题",
+            history=[{"role": "user", "content": "新的消息"}],
+            task_id="t-1",
+            resume=payload,
+        )
+    ]
 
     assert executed == ["s2"]
     assert memory.interactions[0][1] == "R1结果-s2"
@@ -376,9 +420,7 @@ async def test_value_level_drift_degrades_per_value_not_poison(corrupt, caplog):
     assert live_history is None or all(isinstance(m, dict) for m in live_history), (
         "冻结历史必须是映射列表（坏值降级，绝不流入运行态/快照）"
     )
-    assert any("值级漂移" in r.message for r in caplog.records), (
-        "降级必须留痕（warning：值级漂移）"
-    )
+    assert any("值级漂移" in r.message for r in caplog.records), "降级必须留痕（warning：值级漂移）"
 
 
 @pytest.mark.parametrize(

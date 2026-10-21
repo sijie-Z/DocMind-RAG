@@ -1,4 +1,5 @@
 """组织设置（B4 / D5）API 模型。"""
+
 from datetime import datetime
 from typing import Any
 

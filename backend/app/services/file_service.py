@@ -1,6 +1,7 @@
 """
 文件服务 - 处理文件上传、存储和管理
 """
+
 import asyncio
 import hashlib
 import logging
@@ -66,27 +67,36 @@ class FileUploadService:
         # 该值是服务端接收分块的合法上限与总块数派生基准（upload_chunk）。
         self.chunk_size = settings.CHUNK_SIZE
         self.allowed_extensions = {
-            '.pdf', '.docx', '.xlsx', '.xls', '.txt', '.md', '.csv',
+            ".pdf",
+            ".docx",
+            ".xlsx",
+            ".xls",
+            ".txt",
+            ".md",
+            ".csv",
             # 图片（round2 后端卫生修复②）：OCR 支线解析链已支持，
             # 与主端点 /documents/upload 口径对齐
-            '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp',
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".webp",
+            ".bmp",
         }
-        self.allowed_avatar_extensions = {
-            '.jpg', '.jpeg', '.png', '.gif', '.webp'
-        }
+        self.allowed_avatar_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
         self.max_file_size = 100 * 1024 * 1024  # 100MB 最大文件大小
-        self.max_avatar_size = 5 * 1024 * 1024 # 5MB
+        self.max_avatar_size = 5 * 1024 * 1024  # 5MB
         self.document_service = DocumentParser()
 
     def _validate_file(self, filename: str, file_size: int, is_avatar: bool = False) -> None:
         """
         验证文件
-        
+
         Args:
             filename: 文件名
             file_size: 文件大小
             is_avatar: 是否为头像
-            
+
         Raises:
             HTTPException: 文件验证失败
         """
@@ -97,15 +107,13 @@ class FileUploadService:
 
         if file_extension not in allowed:
             raise HTTPException(
-                status_code=400,
-                detail=f"不支持的文件格式。支持的格式: {', '.join(allowed)}"
+                status_code=400, detail=f"不支持的文件格式。支持的格式: {', '.join(allowed)}"
             )
 
         # 检查文件大小
         if file_size > max_size:
             raise HTTPException(
-                status_code=400,
-                detail=f"文件过大。最大支持 {max_size / (1024*1024):.0f}MB"
+                status_code=400, detail=f"文件过大。最大支持 {max_size / (1024 * 1024):.0f}MB"
             )
 
     def _validate_mime_type(self, content: bytes, filename: str, is_avatar: bool = False) -> None:
@@ -118,6 +126,7 @@ class FileUploadService:
         """
         try:
             import filetype
+
             kind = filetype.guess(content)
             if kind is None:
                 # filetype can't detect — fall back to allowing text-like extensions
@@ -144,7 +153,7 @@ class FileUploadService:
                     message=f"File extension '{ext}' doesn't match detected type '{detected_mime}'. "
                     f"Expected one of: {', '.join(sorted(allowed_exts))}"
                 )
-        except (ValidationError):
+        except ValidationError:
             raise
         except Exception as e:
             logger.warning(f"MIME type validation error (allowing file): {e}")
@@ -152,10 +161,10 @@ class FileUploadService:
     def _generate_file_hash(self, content: bytes) -> str:
         """
         生成文件内容的哈希值
-        
+
         Args:
             content: 文件内容
-            
+
         Returns:
             文件哈希值
         """
@@ -175,15 +184,17 @@ class FileUploadService:
             raise HTTPException(status_code=400, detail="文件哈希不合法")
         return file_name, file_hash.lower()
 
-    async def _upload_to_minio(self, file_content: bytes, object_name: str, content_type: str) -> str:
+    async def _upload_to_minio(
+        self, file_content: bytes, object_name: str, content_type: str
+    ) -> str:
         """
         上传文件到MinIO
-        
+
         Args:
             file_content: 文件内容
             object_name: 对象名称
             content_type: 内容类型
-            
+
         Returns:
             对象名称（统一存储规范：file_path 只存对象名，不存浏览器不可达的内网 URL；
             下载一律走 /files 代理或 presigned URL）
@@ -191,6 +202,7 @@ class FileUploadService:
         try:
             # 上传文件
             from io import BytesIO
+
             minio_client.put_object(
                 object_name=object_name,
                 data=BytesIO(file_content),
@@ -206,10 +218,10 @@ class FileUploadService:
     async def delete_file(self, file_path: str) -> bool:
         """
         从存储中删除文件 (支持 MinIO 和 本地文件)
-        
+
         Args:
             file_path: 文件路径或对象名称
-            
+
         Returns:
             是否删除成功
         """
@@ -218,6 +230,7 @@ class FileUploadService:
             try:
                 # 统一解析：兼容对象名与历史 URL 两种存储格式
                 from app.core.minio_client import normalize_object_name
+
                 object_name = normalize_object_name(file_path)
 
                 minio_client.remove_object(object_name)
@@ -238,24 +251,25 @@ class FileUploadService:
         except Exception as e:
             logger.error(f"删除文件失败: {str(e)}")
             return False
+
     async def upload_file(
         self,
         file: UploadFile,
         organization_id: str,
         user_id: str,
         description: str | None = None,
-        tags: list[str] | None = None
+        tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         上传文件（完整文件上传）
-        
+
         Args:
             file: 上传的文件
             organization_id: 组织ID
             user_id: 用户ID
             description: 文件描述
             tags: 标签列表
-            
+
         Returns:
             上传结果
         """
@@ -294,7 +308,9 @@ class FileUploadService:
 
             # 上传到MinIO
             object_name = f"documents/{organization_id}/{unique_filename}"
-            file_url = await self._upload_to_minio(content, object_name, file.content_type or "application/octet-stream")
+            file_url = await self._upload_to_minio(
+                content, object_name, file.content_type or "application/octet-stream"
+            )
 
             # 创建文档记录
             document = Document(
@@ -307,7 +323,7 @@ class FileUploadService:
                 description=description,
                 organization_id=organization_id,
                 uploaded_by=user_id,
-                status=DocumentStatus.UPLOADED
+                status=DocumentStatus.UPLOADED,
             )
 
             # 保存到数据库
@@ -319,9 +335,7 @@ class FileUploadService:
             # A3-P0：先落 DB 标记（local_fallback=True 的 QUEUED job），再调度
             # 进程内任务；进程若在任务完成前退出，启动对账按标记回收。
             job_id = await self._ensure_local_job(document)
-            task = asyncio.create_task(
-                self._process_document_async(document.id, job_id=job_id)
-            )
+            task = asyncio.create_task(self._process_document_async(document.id, job_id=job_id))
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
 
@@ -332,7 +346,7 @@ class FileUploadService:
                 "filename": filename,
                 "file_size": file_size,
                 "status": document.status.value,
-                "upload_time": document.created_at.isoformat()
+                "upload_time": document.created_at.isoformat(),
             }
 
         except (HTTPException, AppError):
@@ -345,18 +359,14 @@ class FileUploadService:
             logger.error(f"文件上传失败: {filename}, 错误: {str(e)}")
             raise HTTPException(status_code=500, detail=f"文件上传失败: {str(e)}")
 
-    async def upload_avatar(
-        self,
-        file: UploadFile,
-        user_id: int
-    ) -> str:
+    async def upload_avatar(self, file: UploadFile, user_id: int) -> str:
         """
         上传用户头像
-        
+
         Args:
             file: 上传的文件
             user_id: 用户ID
-            
+
         Returns:
             头像URL
         """
@@ -380,8 +390,9 @@ class FileUploadService:
 
             # 上传到MinIO (avatars bucket or folder)
             object_name = f"avatars/{user_id}/{unique_filename}"
-            return await self._upload_to_minio(content, object_name, file.content_type or "image/jpeg")
-
+            return await self._upload_to_minio(
+                content, object_name, file.content_type or "image/jpeg"
+            )
 
         except (HTTPException, AppError):
             # 与 upload_file 同款：校验类失败必须诚实 4xx（round2 卫生修复③）
@@ -398,11 +409,11 @@ class FileUploadService:
         file_name: str,
         file_hash: str,
         organization_id: str,
-        user_id: str
+        user_id: str,
     ) -> dict[str, Any]:
         """
         上传文件分块（用于大文件断点续传）
-        
+
         Args:
             chunk_data: 分块数据
             chunk_index: 分块序号
@@ -411,7 +422,7 @@ class FileUploadService:
             file_hash: 文件哈希
             organization_id: 组织ID
             user_id: 用户ID
-            
+
         Returns:
             上传结果
         """
@@ -424,15 +435,14 @@ class FileUploadService:
             if len(chunk_data) > self.chunk_size:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"分块数据超过大小限制（最大 {self.chunk_size // (1024 * 1024)}MB）"
+                    detail=f"分块数据超过大小限制（最大 {self.chunk_size // (1024 * 1024)}MB）",
                 )
 
             # 总分块数上限 = ceil(max_file_size / chunk_size) + 1（100MB 对应 21），防止磁盘耗尽
             max_total_chunks = math.ceil(self.max_file_size / self.chunk_size) + 1
             if total_chunks > max_total_chunks:
                 raise HTTPException(
-                    status_code=400,
-                    detail=f"总分块数超过限制（最大 {max_total_chunks} 个）"
+                    status_code=400, detail=f"总分块数超过限制（最大 {max_total_chunks} 个）"
                 )
 
             if chunk_index < 0 or chunk_index >= total_chunks:
@@ -446,7 +456,7 @@ class FileUploadService:
 
             # 保存分块文件
             chunk_file_path = temp_dir / f"chunk_{chunk_index}"
-            with open(chunk_file_path, 'wb') as f:
+            with open(chunk_file_path, "wb") as f:
                 f.write(chunk_data)
 
             # 记录分块上传状态到Redis（用于断点续传）
@@ -470,12 +480,12 @@ class FileUploadService:
                 return {
                     "status": "completed",
                     "document_id": result["document_id"],
-                    "message": "文件上传完成"
+                    "message": "文件上传完成",
                 }
             return {
                 "status": "chunk_uploaded",
                 "chunk_index": chunk_index,
-                "message": f"分块 {chunk_index + 1}/{total_chunks} 上传成功"
+                "message": f"分块 {chunk_index + 1}/{total_chunks} 上传成功",
             }
 
         except (HTTPException, AppError):
@@ -500,10 +510,10 @@ class FileUploadService:
             # 创建合并后的文件
             merged_file_path = temp_dir / f"merged_{file_name}"
 
-            with open(merged_file_path, 'wb') as merged_file:
+            with open(merged_file_path, "wb") as merged_file:
                 for i in range(total_chunks):
                     chunk_file_path = temp_dir / f"chunk_{i}"
-                    with open(chunk_file_path, 'rb') as chunk_file:
+                    with open(chunk_file_path, "rb") as chunk_file:
                         merged_file.write(chunk_file.read())
 
             logger.info(f"文件分块合并完成: {file_name}")
@@ -514,16 +524,12 @@ class FileUploadService:
             raise Exception(f"分块合并失败: {str(e)}")
 
     async def _process_merged_file(
-        self,
-        merged_file_path: Path,
-        file_name: str,
-        organization_id: str,
-        user_id: str
+        self, merged_file_path: Path, file_name: str, organization_id: str, user_id: str
     ) -> dict[str, Any]:
         """处理合并后的完整文件"""
         try:
             # 读取合并后的文件
-            with open(merged_file_path, 'rb') as f:
+            with open(merged_file_path, "rb") as f:
                 file_content = f.read()
 
             file_size = len(file_content)
@@ -547,7 +553,9 @@ class FileUploadService:
                 async def read(self):
                     return self.content
 
-            mock_file = MockUploadFile(file_name, file_content, self._get_content_type(file_extension))
+            mock_file = MockUploadFile(
+                file_name, file_content, self._get_content_type(file_extension)
+            )
 
             # 调用普通上传方法
             return await self.upload_file(mock_file, organization_id, user_id)
@@ -565,6 +573,7 @@ class FileUploadService:
         """清理临时文件"""
         try:
             import shutil
+
             shutil.rmtree(temp_dir)
             logger.info(f"临时文件清理完成: {temp_dir}")
         except Exception as e:
@@ -573,42 +582,42 @@ class FileUploadService:
     def _get_document_type(self, file_extension: str) -> DocumentType:
         """根据文件扩展名获取文档类型"""
         extension_map = {
-            '.pdf': DocumentType.PDF,
-            '.doc': DocumentType.WORD,
-            '.docx': DocumentType.WORD,
-            '.xls': DocumentType.EXCEL,
-            '.xlsx': DocumentType.EXCEL,
-            '.ppt': DocumentType.PPT,
-            '.pptx': DocumentType.PPT,
-            '.txt': DocumentType.TXT,
-            '.md': DocumentType.TXT,
-            '.csv': DocumentType.TXT,
+            ".pdf": DocumentType.PDF,
+            ".doc": DocumentType.WORD,
+            ".docx": DocumentType.WORD,
+            ".xls": DocumentType.EXCEL,
+            ".xlsx": DocumentType.EXCEL,
+            ".ppt": DocumentType.PPT,
+            ".pptx": DocumentType.PPT,
+            ".txt": DocumentType.TXT,
+            ".md": DocumentType.TXT,
+            ".csv": DocumentType.TXT,
         }
         return extension_map.get(file_extension, DocumentType.OTHER)
 
     def _get_content_type(self, file_extension: str) -> str:
         """根据文件扩展名获取内容类型"""
         content_type_map = {
-            '.pdf': 'application/pdf',
-            '.doc': 'application/msword',
-            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            '.xls': 'application/vnd.ms-excel',
-            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            '.ppt': 'application/vnd.ms-powerpoint',
-            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            '.txt': 'text/plain',
-            '.md': 'text/markdown',
-            '.csv': 'text/csv',
+            ".pdf": "application/pdf",
+            ".doc": "application/msword",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls": "application/vnd.ms-excel",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".ppt": "application/vnd.ms-powerpoint",
+            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".txt": "text/plain",
+            ".md": "text/markdown",
+            ".csv": "text/csv",
             # 图片（round2 卫生修复②）：分块合并路径经此派生 MockUploadFile 的
             # content_type，落 MinIO 时不再退化成 application/octet-stream
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp',
-            '.bmp': 'image/bmp',
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".bmp": "image/bmp",
         }
-        return content_type_map.get(file_extension, 'application/octet-stream')
+        return content_type_map.get(file_extension, "application/octet-stream")
 
     async def _ensure_local_job(self, document) -> int | None:
         """先落本机处理标记（A3-P0）：进程重启后启动对账按此回收任务。
@@ -640,9 +649,7 @@ class FileUploadService:
             )
             return None
 
-    async def _process_document_async(
-        self, document_id: str, job_id: int | None = None
-    ) -> None:
+    async def _process_document_async(self, document_id: str, job_id: int | None = None) -> None:
         """异步处理文档解析。
 
         ``job_id`` 由 ``upload_file`` 预先落库（local_fallback 标记）后传入；
@@ -692,9 +699,7 @@ class FileUploadService:
             logger.error(f"文档异步处理失败: {document_id}, 错误: {str(e)}", exc_info=True)
             await self._mark_document_failed_best_effort(document_id, e)
 
-    async def _mark_document_failed_best_effort(
-        self, document_id: str, error: Exception
-    ) -> None:
+    async def _mark_document_failed_best_effort(self, document_id: str, error: Exception) -> None:
         """兜底路径：尽力把文档推进为 FAILED（issue #301 批 D / #29）。
 
         单独开 session（异常可能就发生在原连接/session 上）。已 INDEXED 的文档
@@ -709,8 +714,7 @@ class FileUploadService:
                     return
                 if doc.status == DocumentStatus.INDEXED:
                     logger.error(
-                        f"文档 {document_id} 已 INDEXED，跳过兜底失败标记"
-                        f"（原异常: {error}）"
+                        f"文档 {document_id} 已 INDEXED，跳过兜底失败标记（原异常: {error}）"
                     )
                     return
                 doc.status = DocumentStatus.FAILED
@@ -727,26 +731,24 @@ class FileUploadService:
     async def get_upload_status(self, file_hash: str) -> dict[str, Any]:
         """
         获取文件上传状态（用于断点续传）
-        
+
         Args:
             file_hash: 文件哈希值
-            
+
         Returns:
             上传状态信息
         """
         try:
-            if not file_hash or len(file_hash) != 64 or any(
-                c not in "0123456789abcdefABCDEF" for c in file_hash
+            if (
+                not file_hash
+                or len(file_hash) != 64
+                or any(c not in "0123456789abcdefABCDEF" for c in file_hash)
             ):
                 raise HTTPException(status_code=400, detail="文件哈希不合法")
             temp_dir = Path(settings.UPLOAD_TEMP_DIR) / file_hash
 
             if not temp_dir.exists():
-                return {
-                    "status": "not_started",
-                    "uploaded_chunks": 0,
-                    "message": "上传未开始"
-                }
+                return {"status": "not_started", "uploaded_chunks": 0, "message": "上传未开始"}
 
             # 统计已上传的分块
             uploaded_chunks = 0
@@ -762,7 +764,7 @@ class FileUploadService:
             return {
                 "status": "in_progress" if uploaded_chunks > 0 else "not_started",
                 "uploaded_chunks": uploaded_chunks,
-                "message": f"已上传 {uploaded_chunks} 个分块"
+                "message": f"已上传 {uploaded_chunks} 个分块",
             }
 
         except HTTPException:
@@ -770,10 +772,7 @@ class FileUploadService:
             raise
         except Exception as e:
             logger.error(f"获取上传状态失败: {file_hash}, 错误: {str(e)}")
-            return {
-                "status": "error",
-                "message": f"获取状态失败: {str(e)}"
-            }
+            return {"status": "error", "message": f"获取状态失败: {str(e)}"}
 
     async def get_document_list(
         self,
@@ -781,18 +780,18 @@ class FileUploadService:
         user_id: str | None = None,
         status: str | None = None,
         skip: int = 0,
-        limit: int = 20
+        limit: int = 20,
     ) -> dict[str, Any]:
         """
         获取文档列表
-        
+
         Args:
             organization_id: 组织ID
             user_id: 用户ID（可选，用于筛选特定用户上传的文档）
             status: 文档状态（可选）
             skip: 跳过数量
             limit: 返回数量限制
-            
+
         Returns:
             文档列表和统计信息
         """
@@ -820,26 +819,23 @@ class FileUploadService:
                 # 转换为字典格式
                 document_list = []
                 for doc in documents:
-                    document_list.append({
-                        "id": doc.id,
-                        "filename": doc.filename,
-                        "file_size": doc.file_size,
-                        "file_type": doc.file_type.value,
-                        "status": doc.status.value,
-                        "description": doc.description,
-                        "content_length": doc.content_length,
-                        "chunk_count": doc.chunk_count,
-                        "created_at": doc.created_at.isoformat(),
-                        "parsed_at": doc.parsed_at.isoformat() if doc.parsed_at else None,
-                        "indexed_at": doc.indexed_at.isoformat() if doc.indexed_at else None
-                    })
+                    document_list.append(
+                        {
+                            "id": doc.id,
+                            "filename": doc.filename,
+                            "file_size": doc.file_size,
+                            "file_type": doc.file_type.value,
+                            "status": doc.status.value,
+                            "description": doc.description,
+                            "content_length": doc.content_length,
+                            "chunk_count": doc.chunk_count,
+                            "created_at": doc.created_at.isoformat(),
+                            "parsed_at": doc.parsed_at.isoformat() if doc.parsed_at else None,
+                            "indexed_at": doc.indexed_at.isoformat() if doc.indexed_at else None,
+                        }
+                    )
 
-                return {
-                    "total": total,
-                    "documents": document_list,
-                    "skip": skip,
-                    "limit": limit
-                }
+                return {"total": total, "documents": document_list, "skip": skip, "limit": limit}
 
         except Exception as e:
             logger.error(f"获取文档列表失败: {str(e)}")

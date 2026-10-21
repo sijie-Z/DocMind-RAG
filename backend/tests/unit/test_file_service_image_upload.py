@@ -13,6 +13,7 @@ content_type 不再退化为 octet-stream）；主端点与解析器行为不动
 变异点：从 _ALLOWED_MIME_TYPES 去掉 "image/png" → 本文件真 PNG 用例精确红
 （ValidationError: File content type 'image/png' is not allowed）。
 """
+
 import asyncio
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -70,9 +71,7 @@ def _make_upload_file(filename, content, content_type):
 
 def _wire_fakes(monkeypatch):
     """upload_file 的 DB 与后台任务脱实：fake session + 后台解析占位。"""
-    monkeypatch.setattr(
-        "app.services.file_service.AsyncSessionLocal", lambda: _FakeSession()
-    )
+    monkeypatch.setattr("app.services.file_service.AsyncSessionLocal", lambda: _FakeSession())
     monkeypatch.setattr(FileUploadService, "_process_document_async", AsyncMock())
 
 
@@ -131,12 +130,8 @@ class TestChunkedUploadWithImage:
 
         half = len(PNG_BYTES) // 2
         file_hash = "b" * 64
-        r1 = await svc.upload_chunk(
-            PNG_BYTES[:half], 0, 2, "scan.png", file_hash, "1", "u1"
-        )
-        r2 = await svc.upload_chunk(
-            PNG_BYTES[half:], 1, 2, "scan.png", file_hash, "1", "u1"
-        )
+        r1 = await svc.upload_chunk(PNG_BYTES[:half], 0, 2, "scan.png", file_hash, "1", "u1")
+        r2 = await svc.upload_chunk(PNG_BYTES[half:], 1, 2, "scan.png", file_hash, "1", "u1")
         await asyncio.sleep(0)
 
         assert r1["status"] == "chunk_uploaded"

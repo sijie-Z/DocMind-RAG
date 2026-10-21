@@ -93,15 +93,25 @@ async def test_save_then_load_roundtrip_carries_plan_progress_and_artifacts(db_f
     ctx.artifacts["iterations_used"] = 1
     ctx.total_tokens = 250
     ctx.current_step_id = "s1"
-    plan = Plan(id="p1", goal="g", steps=[
-        PlanStep(id="s1", description="一", status="completed", result="R1"),
-        PlanStep(id="s2", description="二", dependencies=["s1"]),
-    ], completed_steps=1)
+    plan = Plan(
+        id="p1",
+        goal="g",
+        steps=[
+            PlanStep(id="s1", description="一", status="completed", result="R1"),
+            PlanStep(id="s2", description="二", dependencies=["s1"]),
+        ],
+        completed_steps=1,
+    )
 
     ok = await checkpoint.save_checkpoint(
-        task_id=task_id, ctx=ctx, plan=plan, trigger="after_each_step",
-        partial_output="半截答案", history=[{"role": "user", "content": "原始问题"}],
-        config=AgentConfig(model="m"), run_state={"replan_attempts": 0},
+        task_id=task_id,
+        ctx=ctx,
+        plan=plan,
+        trigger="after_each_step",
+        partial_output="半截答案",
+        history=[{"role": "user", "content": "原始问题"}],
+        config=AgentConfig(model="m"),
+        run_state={"replan_attempts": 0},
         session_id="sess-9",
     )
     assert ok
@@ -121,8 +131,11 @@ async def test_save_then_load_roundtrip_carries_plan_progress_and_artifacts(db_f
 async def test_save_checkpoint_caps_partial_output(db_factory):
     task_id = await checkpoint.create_task(user_id=1, organization_id=None, query="q")
     ok = await checkpoint.save_checkpoint(
-        task_id=task_id, ctx=ExecutionContext(query="q"), plan=None,
-        trigger="on_disconnect", partial_output="x" * (PARTIAL_OUTPUT_CAP + 100),
+        task_id=task_id,
+        ctx=ExecutionContext(query="q"),
+        plan=None,
+        trigger="on_disconnect",
+        partial_output="x" * (PARTIAL_OUTPUT_CAP + 100),
     )
     assert ok
     _, payload = await checkpoint.load_for_resume(task_id=task_id, user_id=1)
@@ -143,8 +156,15 @@ async def test_load_task_org_none_task_not_reachable_with_org_context(db_factory
     org=None 的旧守卫（`task.organization_id is not None`）会把它放行给任意组织。
     变异点：恢复该守卫 → 本条红（返回值不再抛错）。"""
     async with db_factory() as db:
-        db.add(AgentTask(id="noorg0000001", user_id=1, organization_id=None,
-                         query="q", status=TaskStatus.RUNNING))
+        db.add(
+            AgentTask(
+                id="noorg0000001",
+                user_id=1,
+                organization_id=None,
+                query="q",
+                status=TaskStatus.RUNNING,
+            )
+        )
         await db.commit()
 
     with pytest.raises(TaskNotFoundError):
@@ -193,7 +213,10 @@ async def test_truncated_json_snapshot_row_read_write_heals(db_factory):
     assert await checkpoint.mark_terminal(task_id, TaskStatus.FAILED, error="x") is True
 
     ok = await checkpoint.save_checkpoint(  # 新快照落盘 = 覆盖坏数据（自愈）
-        task_id=task_id, ctx=ExecutionContext(query="q"), plan=None, trigger="after_planning",
+        task_id=task_id,
+        ctx=ExecutionContext(query="q"),
+        plan=None,
+        trigger="after_planning",
     )
     assert ok is True
 
@@ -239,8 +262,15 @@ async def test_terminal_task_refuses_resume_and_mark_terminal_is_safe(db_factory
 
 async def test_mark_terminal_refuses_illegal_transition_from_pending(db_factory):
     async with db_factory() as db:
-        db.add(AgentTask(id="pend00000001", user_id=1, organization_id=None,
-                         query="q", status=TaskStatus.PENDING))
+        db.add(
+            AgentTask(
+                id="pend00000001",
+                user_id=1,
+                organization_id=None,
+                query="q",
+                status=TaskStatus.PENDING,
+            )
+        )
         await db.commit()
 
     assert await checkpoint.mark_terminal("pend00000001", TaskStatus.COMPLETED) is False
@@ -261,7 +291,9 @@ async def test_claim_conflict_then_release_frees_the_lease(db_factory, monkeypat
     # save_checkpoint 顺带续租（resume 期间每步快照都刷新租约）
     fake.expires[key] = 1
     await checkpoint.save_checkpoint(
-        task_id=task_id, ctx=ExecutionContext(query="q"), plan=None,
+        task_id=task_id,
+        ctx=ExecutionContext(query="q"),
+        plan=None,
         trigger="after_each_step",
     )
     assert fake.expires[key] == checkpoint.LEASE_SECONDS

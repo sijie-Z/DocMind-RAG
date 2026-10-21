@@ -17,6 +17,7 @@ RAG 缓存（RetrievalCache / SemanticCache）。
 3. ``FileDeleteResponse`` 契约（success / message）不变；AppError 失败原因
    原样上抛，不被 ``except Exception`` 重包；NotFoundError 保持 404 类型。
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -204,9 +205,7 @@ async def test_unified_chain_survives_es_outage(monkeypatch):
     session = _RecordingSession(doc)
 
     monkeypatch.setattr(ks_mod, "AsyncSessionLocal", lambda: session)
-    monkeypatch.setattr(
-        ks_mod, "get_elasticsearch", AsyncMock(side_effect=RuntimeError("es down"))
-    )
+    monkeypatch.setattr(ks_mod, "get_elasticsearch", AsyncMock(side_effect=RuntimeError("es down")))
     monkeypatch.setattr(cache_mod, "RetrievalCache", _recording_cache([]))
     monkeypatch.setattr(cache_mod, "SemanticCache", _recording_cache([]))
 

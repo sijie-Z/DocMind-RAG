@@ -113,9 +113,7 @@ class TestConsumerDeferredRedelivery:
                 self.seeks.append((tp, offset))
 
         consumer = _SyncSeekConsumer()
-        await consumer_mod._defer_message(
-            consumer, _msg({"document_id": "doc-1"}, offset=9)
-        )
+        await consumer_mod._defer_message(consumer, _msg({"document_id": "doc-1"}, offset=9))
         assert consumer.seeks == [(TopicPartition("topic-0", 0), 9)]
 
     @pytest.mark.asyncio
@@ -126,12 +124,16 @@ class TestConsumerDeferredRedelivery:
 
         monkeypatch.setattr(consumer_mod, "DEFER_RETRY_DELAY_SECONDS", 0)
 
-        consumer = _FakeConsumer([
-            {"topic-0": [
-                _msg({"document_id": "doc-1", "job_id": 7}, offset=10),
-                _msg({"document_id": "doc-2", "job_id": 8}, offset=11),
-            ]}
-        ])
+        consumer = _FakeConsumer(
+            [
+                {
+                    "topic-0": [
+                        _msg({"document_id": "doc-1", "job_id": 7}, offset=10),
+                        _msg({"document_id": "doc-2", "job_id": 8}, offset=11),
+                    ]
+                }
+            ]
+        )
         calls = []
         recorded = []
 
@@ -163,17 +165,13 @@ class TestConsumerDeferredRedelivery:
         """回归对照：True 语义不变（按条显式提交）。"""
         import app.worker.consumer as consumer_mod
 
-        consumer = _FakeConsumer([
-            {"topic-0": [_msg({"document_id": "doc-1"}, offset=5)]}
-        ])
+        consumer = _FakeConsumer([{"topic-0": [_msg({"document_id": "doc-1"}, offset=5)]}])
 
         async def fake_process(document_id, job_id):
             return True
 
         with pytest.raises(_Stop):
-            await consumer_mod.run_consume_loop(
-                consumer, process=fake_process, touch=lambda: None
-            )
+            await consumer_mod.run_consume_loop(consumer, process=fake_process, touch=lambda: None)
 
         assert len(consumer.commits) == 1
         assert consumer.commits[0][TopicPartition("topic-0", 0)].offset == 6
@@ -268,9 +266,7 @@ class TestLockHeartbeat:
         assert "doc-1" in processor._lock_lost
 
     @pytest.mark.asyncio
-    async def test_lock_lost_at_stage_boundary_aborts_without_terminal_writes(
-        self, monkeypatch
-    ):
+    async def test_lock_lost_at_stage_boundary_aborts_without_terminal_writes(self, monkeypatch):
         """解析期间锁被接管 → 下一阶段边界中止，返回 DEFERRED，不写终态。"""
         from app.worker.doc_processor import DEFERRED
 
@@ -281,16 +277,12 @@ class TestLockHeartbeat:
             return True
 
         async def fake_load(document_id, _job_id):
-            return SimpleNamespace(
-                file_path="f", organization_id="1", id=document_id
-            )
+            return SimpleNamespace(file_path="f", organization_id="1", id=document_id)
 
         async def fake_parse(*_a, **_k):
             # 模拟心跳在解析期间续期失败（锁已过期并被新 worker 接管）
             processor._lock_lost.add("doc-1")
-            return {
-                "chunks": [{"chunk_text": "hi", "chunk_index": 0, "chunk_length": 2}]
-            }
+            return {"chunks": [{"chunk_text": "hi", "chunk_index": 0, "chunk_length": 2}]}
 
         async def fake_embeddings(texts):  # pragma: no cover - 应在边界中止
             events.append("embed")
@@ -328,14 +320,10 @@ class TestLockHeartbeat:
             return True
 
         async def fake_load(document_id, _job_id):
-            return SimpleNamespace(
-                file_path="f", organization_id="1", id=document_id
-            )
+            return SimpleNamespace(file_path="f", organization_id="1", id=document_id)
 
         async def fake_parse(*_a, **_k):
-            return {
-                "chunks": [{"chunk_text": "hi", "chunk_index": 0, "chunk_length": 2}]
-            }
+            return {"chunks": [{"chunk_text": "hi", "chunk_index": 0, "chunk_length": 2}]}
 
         async def fake_embeddings(texts):
             return [[1.0]]

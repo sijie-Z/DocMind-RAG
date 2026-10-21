@@ -241,38 +241,41 @@ class AgentConfig:
         # 写侧闸门（#319）：运行态里万一存在类型漂移的坏值（外部写入者/未来
         # bug），落盘的必须是规整后的形态——坏值删键后由读侧取默认值，毒丸
         # 绝不落回快照/Redis 续给下一次 resume。
-        return _normalize_config_values({
-            "model": self.model,
-            "deep_think_model": self.deep_think_model,
-            "quick_think_model": self.quick_think_model,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "max_plan_steps": self.max_plan_steps,
-            "max_iterations": self.max_iterations,
-            "max_tool_calls_per_turn": self.max_tool_calls_per_turn,
-            "max_retries_per_step": self.max_retries_per_step,
-            "enable_planning": self.enable_planning,
-            "enable_reflection": self.enable_reflection,
-            "enable_tools": self.enable_tools,
-            "enable_memory": self.enable_memory,
-            "enable_thinking": self.enable_thinking,
-            "enable_experience": self.enable_experience,
-            "enable_skills": self.enable_skills,
-            "tool_tags": self.tool_tags,
-            "disabled_tools": self.disabled_tools,
-            "system_prompt_override": self.system_prompt_override,
-            "personality": self.personality,
-            "agent_id": self.agent_id,
-            "enable_checkpoint": self.enable_checkpoint,
-            "timeout": self.timeout,
-            "max_context_tokens": self.max_context_tokens,
-            "max_total_tokens": self.max_total_tokens,
-            "plan_max_tokens": self.plan_max_tokens,
-            "reflection_max_tokens": self.reflection_max_tokens,
-            "approval_mode": self.approval_mode,
-            "approval_timeout_seconds": self.approval_timeout_seconds,
-            "plan_approval_mode": self.plan_approval_mode,
-        }, source="config-write")
+        return _normalize_config_values(
+            {
+                "model": self.model,
+                "deep_think_model": self.deep_think_model,
+                "quick_think_model": self.quick_think_model,
+                "temperature": self.temperature,
+                "max_tokens": self.max_tokens,
+                "max_plan_steps": self.max_plan_steps,
+                "max_iterations": self.max_iterations,
+                "max_tool_calls_per_turn": self.max_tool_calls_per_turn,
+                "max_retries_per_step": self.max_retries_per_step,
+                "enable_planning": self.enable_planning,
+                "enable_reflection": self.enable_reflection,
+                "enable_tools": self.enable_tools,
+                "enable_memory": self.enable_memory,
+                "enable_thinking": self.enable_thinking,
+                "enable_experience": self.enable_experience,
+                "enable_skills": self.enable_skills,
+                "tool_tags": self.tool_tags,
+                "disabled_tools": self.disabled_tools,
+                "system_prompt_override": self.system_prompt_override,
+                "personality": self.personality,
+                "agent_id": self.agent_id,
+                "enable_checkpoint": self.enable_checkpoint,
+                "timeout": self.timeout,
+                "max_context_tokens": self.max_context_tokens,
+                "max_total_tokens": self.max_total_tokens,
+                "plan_max_tokens": self.plan_max_tokens,
+                "reflection_max_tokens": self.reflection_max_tokens,
+                "approval_mode": self.approval_mode,
+                "approval_timeout_seconds": self.approval_timeout_seconds,
+                "plan_approval_mode": self.plan_approval_mode,
+            },
+            source="config-write",
+        )
 
     @classmethod
     def from_dict(cls, data: dict) -> "AgentConfig":
@@ -292,6 +295,7 @@ class AgentConfig:
         """Persist config to Redis for session recovery."""
         try:
             from app.core.redis import redis_client
+
             if not redis_client:
                 return
             key = f"agent:config:{session_id}"
@@ -304,6 +308,7 @@ class AgentConfig:
         """Load persisted config from Redis."""
         try:
             from app.core.redis import redis_client
+
             if not redis_client:
                 return None
             key = f"agent:config:{session_id}"

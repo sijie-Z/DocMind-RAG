@@ -17,78 +17,215 @@ logger = logging.getLogger(__name__)
 
 # Safe Python builtins whitelist
 SAFE_BUILTINS = {
-    "abs", "all", "any", "bool", "chr", "complex", "dict", "divmod",
-    "enumerate", "filter", "float", "format", "frozenset", "hash",
-    "hex", "int", "isinstance", "issubclass", "len", "list", "map",
-    "max", "min", "oct", "ord", "pow", "range", "repr", "reversed",
-    "round", "set", "slice", "sorted", "str", "sum", "tuple", "type",
-    "zip", "True", "False", "None", "print",
+    "abs",
+    "all",
+    "any",
+    "bool",
+    "chr",
+    "complex",
+    "dict",
+    "divmod",
+    "enumerate",
+    "filter",
+    "float",
+    "format",
+    "frozenset",
+    "hash",
+    "hex",
+    "int",
+    "isinstance",
+    "issubclass",
+    "len",
+    "list",
+    "map",
+    "max",
+    "min",
+    "oct",
+    "ord",
+    "pow",
+    "range",
+    "repr",
+    "reversed",
+    "round",
+    "set",
+    "slice",
+    "sorted",
+    "str",
+    "sum",
+    "tuple",
+    "type",
+    "zip",
+    "True",
+    "False",
+    "None",
+    "print",
 }
 
 SAFE_MODULES = [
-    "math", "statistics", "collections", "itertools", "functools",
-    "datetime", "json", "re", "string", "textwrap", "decimal",
-    "fractions", "random",
+    "math",
+    "statistics",
+    "collections",
+    "itertools",
+    "functools",
+    "datetime",
+    "json",
+    "re",
+    "string",
+    "textwrap",
+    "decimal",
+    "fractions",
+    "random",
 ]
 
 # ── SQL safety: whitelist-based validation ──────────────────────
 
 # Tables that the agent SQL tool is allowed to query (read-only business tables)
 ALLOWED_SQL_TABLES: set[str] = {
-    "documents", "document_chunks", "document_tags", "tags",
-    "chat_sessions", "chat_messages",
+    "documents",
+    "document_chunks",
+    "document_tags",
+    "tags",
+    "chat_sessions",
+    "chat_messages",
     "knowledge_processing_jobs",
     "notifications",
     "organizations",
     "prompt_templates",
-    "permissions", "roles",
-    "users", "user_settings",
-    "workflows", "workflow_executions", "node_definitions",
+    "permissions",
+    "roles",
+    "users",
+    "user_settings",
+    "workflows",
+    "workflow_executions",
+    "node_definitions",
     "system_manuals",
-    "user_login_sessions", "user_activity_logs",
+    "user_login_sessions",
+    "user_activity_logs",
 }
 
 # Column whitelist per table — only these columns can be SELECTed
 ALLOWED_SQL_COLUMNS: dict[str, set[str]] = {
-    "documents": {"id", "filename", "title", "status", "content_length",
-                   "chunk_count", "organization_id", "uploader_id",
-                   "created_at", "updated_at", "file_path", "file_type",
-                   "parsed_at", "parse_error", "is_public"},
-    "document_chunks": {"id", "document_id", "chunk_index", "chunk_text",
-                         "chunk_length", "start_pos", "end_pos",
-                         "page_number", "section_title", "meta_data"},
+    "documents": {
+        "id",
+        "filename",
+        "title",
+        "status",
+        "content_length",
+        "chunk_count",
+        "organization_id",
+        "uploader_id",
+        "created_at",
+        "updated_at",
+        "file_path",
+        "file_type",
+        "parsed_at",
+        "parse_error",
+        "is_public",
+    },
+    "document_chunks": {
+        "id",
+        "document_id",
+        "chunk_index",
+        "chunk_text",
+        "chunk_length",
+        "start_pos",
+        "end_pos",
+        "page_number",
+        "section_title",
+        "meta_data",
+    },
     "document_tags": {"document_id", "tag_id"},
     "tags": {"id", "name", "color"},
-    "chat_sessions": {"id", "user_id", "title", "status", "organization_id",
-                       "created_at", "updated_at", "settings"},
-    "chat_messages": {"id", "session_id", "user_id", "role", "content",
-                       "message_type", "sources", "feedback_score",
-                       "is_cached", "created_at",
-                       "tokens_input", "tokens_output",
-                       "evaluation"},
-    "knowledge_processing_jobs": {"id", "document_id", "status", "job_type",
-                                   "progress", "error_message",
-                                   "started_at", "completed_at"},
-    "notifications": {"id", "user_id", "type", "title", "content",
-                       "is_read", "created_at"},
-    "organizations": {"id", "name", "code", "is_active", "max_users",
-                       "max_storage_mb", "created_at"},
-    "prompt_templates": {"id", "name", "content", "description",
-                          "is_active", "version", "updated_at",
-                          # A2：组织归属列（SQL 工具按 org 过滤的列白名单）
-                          "organization_id"},
+    "chat_sessions": {
+        "id",
+        "user_id",
+        "title",
+        "status",
+        "organization_id",
+        "created_at",
+        "updated_at",
+        "settings",
+    },
+    "chat_messages": {
+        "id",
+        "session_id",
+        "user_id",
+        "role",
+        "content",
+        "message_type",
+        "sources",
+        "feedback_score",
+        "is_cached",
+        "created_at",
+        "tokens_input",
+        "tokens_output",
+        "evaluation",
+    },
+    "knowledge_processing_jobs": {
+        "id",
+        "document_id",
+        "status",
+        "job_type",
+        "progress",
+        "error_message",
+        "started_at",
+        "completed_at",
+    },
+    "notifications": {"id", "user_id", "type", "title", "content", "is_read", "created_at"},
+    "organizations": {
+        "id",
+        "name",
+        "code",
+        "is_active",
+        "max_users",
+        "max_storage_mb",
+        "created_at",
+    },
+    "prompt_templates": {
+        "id",
+        "name",
+        "content",
+        "description",
+        "is_active",
+        "version",
+        "updated_at",
+        # A2：组织归属列（SQL 工具按 org 过滤的列白名单）
+        "organization_id",
+    },
     # 安全加固：移除 email 等敏感列，防止跨租户读取用户联系信息
-    "users": {"id", "username", "display_name", "is_active",
-               "role", "organization_id", "last_login", "created_at"},
+    "users": {
+        "id",
+        "username",
+        "display_name",
+        "is_active",
+        "role",
+        "organization_id",
+        "last_login",
+        "created_at",
+    },
     "user_settings": {"user_id", "theme", "language", "notification_prefs"},
-    "system_manuals": {"id", "title", "content", "version", "is_active",
-                        "updated_at"},
-    "workflows": {"id", "name", "description", "definition", "status",
-                   "created_by", "organization_id", "created_at", "updated_at"},
-    "workflow_executions": {"id", "workflow_id", "status", "started_at",
-                             "completed_at", "result", "error_message"},
-    "node_definitions": {"id", "workflow_id", "node_type", "config",
-                          "position_x", "position_y"},
+    "system_manuals": {"id", "title", "content", "version", "is_active", "updated_at"},
+    "workflows": {
+        "id",
+        "name",
+        "description",
+        "definition",
+        "status",
+        "created_by",
+        "organization_id",
+        "created_at",
+        "updated_at",
+    },
+    "workflow_executions": {
+        "id",
+        "workflow_id",
+        "status",
+        "started_at",
+        "completed_at",
+        "result",
+        "error_message",
+    },
+    "node_definitions": {"id", "workflow_id", "node_type", "config", "position_x", "position_y"},
 }
 
 # Columns allowed in any table (common identifiers)
@@ -97,9 +234,25 @@ _ALLOWED_COMMON = {"id", "created_at", "updated_at", "status", "name"}
 # S4(a) 安全加固：SELECT 表达式中允许出现的函数白名单。
 # 只有显式列出的函数可用，其他任何函数（如 CONCAT）一律拒绝。
 _ALLOWED_SQL_FUNCTIONS = {
-    "count", "sum", "avg", "min", "max", "coalesce", "nullif", "cast",
-    "round", "abs", "year", "month", "day", "date", "strftime",
-    "json_extract", "upper", "lower", "trim",
+    "count",
+    "sum",
+    "avg",
+    "min",
+    "max",
+    "coalesce",
+    "nullif",
+    "cast",
+    "round",
+    "abs",
+    "year",
+    "month",
+    "day",
+    "date",
+    "strftime",
+    "json_extract",
+    "upper",
+    "lower",
+    "trim",
 }
 
 # 解析表达式时需要跳过的 SQL 关键字（别名/去重）
@@ -161,8 +314,7 @@ def _is_safe_select_sql(sql: str) -> tuple[bool, str]:
     # 查询下容易改写错误、且可能引入跨组织数据；含 organization_id 的表与
     # 无该列的表 JOIN（如 documents JOIN document_chunks）仍然允许。
     filterable_tables = [
-        t.lower() for t in tables
-        if "organization_id" in ALLOWED_SQL_COLUMNS.get(t.lower(), set())
+        t.lower() for t in tables if "organization_id" in ALLOWED_SQL_COLUMNS.get(t.lower(), set())
     ]
     if not filterable_tables:
         return False, "Query only touches tables without organization_id and cannot be org-scoped"
@@ -205,9 +357,9 @@ def _is_safe_select_sql(sql: str) -> tuple[bool, str]:
         # 之类的表达式可以夹带非白名单列。
         tokens = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", expr)
         tokens = [
-            tok for tok in tokens
-            if tok.lower() not in _ALLOWED_SQL_FUNCTIONS
-            and tok.lower() not in _SQL_KEYWORD_TOKENS
+            tok
+            for tok in tokens
+            if tok.lower() not in _ALLOWED_SQL_FUNCTIONS and tok.lower() not in _SQL_KEYWORD_TOKENS
         ]
         for tok in tokens:
             if tok.lower() not in known_columns:
@@ -228,9 +380,23 @@ def _ast_safety_check(code: str) -> tuple[bool, str]:
         return False, "Code too long (max 5000 chars)."
 
     _FORBIDDEN = (_ast.Import, _ast.ImportFrom)
-    _FORBIDDEN_CALLS = {"eval", "exec", "compile", "__import__", "open",
-                        "globals", "locals", "vars", "getattr", "setattr",
-                        "delattr", "breakpoint", "input", "format", "format_map"}
+    _FORBIDDEN_CALLS = {
+        "eval",
+        "exec",
+        "compile",
+        "__import__",
+        "open",
+        "globals",
+        "locals",
+        "vars",
+        "getattr",
+        "setattr",
+        "delattr",
+        "breakpoint",
+        "input",
+        "format",
+        "format_map",
+    }
     # S5 安全加固：string.Formatter().get_field() / str.format / str.format_map /
     # Formatter.vformat 会在字符串内部执行 getattr/getitem，绕过基于 AST 的
     # 下划线属性检查，例如：
@@ -318,7 +484,9 @@ def _build_child_wrapper() -> str:
 
 
 async def _run_ast_subprocess(
-    code: str, *, timeout: float = _AST_EXEC_TIMEOUT_SECONDS,
+    code: str,
+    *,
+    timeout: float = _AST_EXEC_TIMEOUT_SECONDS,
 ) -> str:
     """Execute AST-validated code in a child interpreter; return captured output.
 
@@ -331,7 +499,10 @@ async def _run_ast_subprocess(
     """
     try:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-I", "-c", _build_child_wrapper(),
+            sys.executable,
+            "-I",
+            "-c",
+            _build_child_wrapper(),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -349,7 +520,8 @@ async def _run_ast_subprocess(
         ) from e
     try:
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(code.encode("utf-8")), timeout=timeout,
+            proc.communicate(code.encode("utf-8")),
+            timeout=timeout,
         )
     except BaseException:
         # 超时、任务取消（客户端断连 / 服务端关停）或 spawn 后的任意异常：
@@ -360,7 +532,7 @@ async def _run_ast_subprocess(
         if proc.returncode is None:
             # kill 与"进程恰好退出"存在竞态：Handle 已关闭时 Windows 可能抛
             # ProcessLookupError。此时进程已死，抑制即可，不能替换原始异常
-            #（评审复核 minor ①）。
+            # （评审复核 minor ①）。
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()
             with contextlib.suppress(BaseException):
@@ -436,15 +608,21 @@ async def execute_python(code: str, **_: Any) -> str | ToolResult:
             )
         except DockerSandboxTimeout as e:
             return ToolResult.fail(
-                code="timeout", message=str(e), meta=ToolMeta(sandbox="docker"),
+                code="timeout",
+                message=str(e),
+                meta=ToolMeta(sandbox="docker"),
             )
         except DockerSandboxUnavailable as e:
             return ToolResult.fail(
-                code="sandbox_unavailable", message=str(e), meta=ToolMeta(sandbox="docker"),
+                code="sandbox_unavailable",
+                message=str(e),
+                meta=ToolMeta(sandbox="docker"),
             )
         except DockerSandboxError as e:
             return ToolResult.fail(
-                code=e.code, message=str(e), meta=ToolMeta(sandbox="docker"),
+                code=e.code,
+                message=str(e),
+                meta=ToolMeta(sandbox="docker"),
             )
         return ToolResult.ok(data=output, meta=ToolMeta(sandbox="docker"))
 
@@ -452,7 +630,7 @@ async def execute_python(code: str, **_: Any) -> str | ToolResult:
     ok, reason = _ast_safety_check(code)
     if not ok:
         # 保持旧契约：AST 拒绝与子进程内的运行时错误一样，都是内容型错误串
-        #（#293 明确 execute_python 的 stdout 是任意文本、分类权留在工具内部；
+        # （#293 明确 execute_python 的 stdout 是任意文本、分类权留在工具内部；
         # 改结构化失败会改变既有反思/重试语义，不在 #206 范围内）。
         return f"Error: {reason}"
 
@@ -466,7 +644,9 @@ async def execute_python(code: str, **_: Any) -> str | ToolResult:
         )
     except SandboxUnavailableError as e:
         return ToolResult.fail(
-            code="sandbox_unavailable", message=str(e), meta=ToolMeta(sandbox="ast"),
+            code="sandbox_unavailable",
+            message=str(e),
+            meta=ToolMeta(sandbox="ast"),
         )
     except Exception as e:
         return ToolResult.fail(
@@ -510,15 +690,18 @@ def _inject_org_filter(query: str, org_id: int) -> str:
         # 只在 WHERE 之后找等值条件：SELECT 列表里的 `organization_id = 3`
         # 是投影不是过滤，不能被当作已限定。
         tail_gate = re.search(
-            r"\b(group\s+by|order\s+by|limit|having)\b", query[where_gate.end():], flags=re.IGNORECASE,
+            r"\b(group\s+by|order\s+by|limit|having)\b",
+            query[where_gate.end() :],
+            flags=re.IGNORECASE,
         )
         where_body = (
-            query[where_gate.end(): where_gate.end() + tail_gate.start()]
-            if tail_gate else query[where_gate.end():]
+            query[where_gate.end() : where_gate.end() + tail_gate.start()]
+            if tail_gate
+            else query[where_gate.end() :]
         )
-        pinned = re.search(rf"\borganization_id\s*=\s*{org_id}\b", where_body, flags=re.IGNORECASE) or re.search(
-            rf"\b{org_id}\s*=\s*organization_id\b", where_body, flags=re.IGNORECASE
-        )
+        pinned = re.search(
+            rf"\borganization_id\s*=\s*{org_id}\b", where_body, flags=re.IGNORECASE
+        ) or re.search(rf"\b{org_id}\s*=\s*organization_id\b", where_body, flags=re.IGNORECASE)
         # 即使等式存在，只要同一 WHERE 里出现 OR，条件就可能被放宽
         # （`organization_id = 3 OR 1=1`），此时不能跳过注入。
         if pinned and not re.search(r"\bor\b", where_body, flags=re.IGNORECASE):
@@ -527,31 +710,32 @@ def _inject_org_filter(query: str, org_id: int) -> str:
     where_m = re.search(r"\bwhere\b", query, flags=re.IGNORECASE)
     tail_m = re.search(
         r"\b(group\s+by|order\s+by|limit|having)\b",
-        query, flags=re.IGNORECASE,
+        query,
+        flags=re.IGNORECASE,
     )
     if where_m:
         # 包裹原 WHERE 条件（防止 OR 破坏组织过滤语义）
         if tail_m and tail_m.start() > where_m.end():
             tail_pos = tail_m.start()
             return (
-                query[:where_m.start()]
+                query[: where_m.start()]
                 + f" WHERE (organization_id = {org_id} AND "
-                + query[where_m.end():tail_pos]
+                + query[where_m.end() : tail_pos]
                 + ") "
                 + query[tail_pos:]
             )
         return (
-            query[:where_m.start()]
+            query[: where_m.start()]
             + f" WHERE (organization_id = {org_id} AND "
-            + query[where_m.end():]
+            + query[where_m.end() :]
             + ")"
         )
     # 无 WHERE：在 GROUP BY/ORDER BY/LIMIT/HAVING 之前插入
     if tail_m:
         return (
-            query[:tail_m.start()]
+            query[: tail_m.start()]
             + f" WHERE organization_id = {org_id} "
-            + query[tail_m.start():]
+            + query[tail_m.start() :]
         )
     return query.rstrip().rstrip(";") + f" WHERE organization_id = {org_id}"
 
@@ -617,13 +801,21 @@ async def execute_sql(query: str, organization_id: int | None = None, **_: Any) 
 
             data = []
             for row in rows[:100]:
-                data.append(dict(zip(columns, [str(v) if v is not None else None for v in row], strict=False)))
+                data.append(
+                    dict(
+                        zip(columns, [str(v) if v is not None else None for v in row], strict=False)
+                    )
+                )
 
-            return json.dumps({
-                "columns": columns,
-                "rows": len(data),
-                "data": data,
-            }, ensure_ascii=False, indent=2)
+            return json.dumps(
+                {
+                    "columns": columns,
+                    "rows": len(data),
+                    "data": data,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
     except TimeoutError:
         return "Error: SQL query timed out (5 second limit)."
     except Exception as e:
