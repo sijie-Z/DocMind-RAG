@@ -41,28 +41,30 @@ from typing import Any
 @dataclass
 class ToolCallRecord:
     """A single tool invocation during execution."""
+
     tool_name: str
-    args_summary: str                     # truncated args for readability
+    args_summary: str  # truncated args for readability
     success: bool
-    error_code: str | None = None         # token_expired | rate_limited | timeout | api_error | ...
+    error_code: str | None = None  # token_expired | rate_limited | timeout | api_error | ...
     error_message: str | None = None
     latency_ms: float = 0.0
-    retry_attempt: int = 0                # 0 = first try, 1+ = retry
-    fallback_used: bool = False           # was this a fallback tool call?
+    retry_attempt: int = 0  # 0 = first try, 1+ = retry
+    fallback_used: bool = False  # was this a fallback tool call?
 
 
 @dataclass
 class StepExecutionRecord:
     """Record of one plan step's full execution lifecycle."""
+
     step_id: str
     description: str
     tool_hint: str | None = None
-    semantic_type: str = "read_only"      # read_only | mutating | long_running
+    semantic_type: str = "read_only"  # read_only | mutating | long_running
     retry_strategy: str = "auto_retry"
     risk_level: str = "low"
     parallel_group: int | None = None
 
-    status: str = "pending"               # completed | failed | skipped
+    status: str = "pending"  # completed | failed | skipped
     duration_ms: float = 0.0
     retry_count: int = 0
     fallback_used: bool = False
@@ -80,6 +82,7 @@ class ExecutionTrace:
 
     This is the primary unit of observability.
     """
+
     trace_id: str
     query: str
     created_at: float = field(default_factory=time.time)
@@ -234,7 +237,9 @@ class TraceStore:
         total_tool_calls = 0
         failed_tool_calls = 0
         error_code_counts: dict[str, int] = defaultdict(int)
-        tool_failures: dict[str, dict] = defaultdict(lambda: {"total": 0, "failed": 0, "error_codes": defaultdict(int)})
+        tool_failures: dict[str, dict] = defaultdict(
+            lambda: {"total": 0, "failed": 0, "error_codes": defaultdict(int)}
+        )
 
         for trace in self._traces:
             for step in trace.steps:
@@ -255,7 +260,9 @@ class TraceStore:
             "failure_rate": round(failed_traces / total, 3) if total else 0.0,
             "total_tool_calls": total_tool_calls,
             "failed_tool_calls": failed_tool_calls,
-            "tool_call_failure_rate": round(failed_tool_calls / total_tool_calls, 3) if total_tool_calls else 0.0,
+            "tool_call_failure_rate": round(failed_tool_calls / total_tool_calls, 3)
+            if total_tool_calls
+            else 0.0,
             "by_error_code": dict(error_code_counts),
             "by_tool": {
                 tn: {
@@ -313,7 +320,9 @@ class TraceStore:
             "retry_success_rate": round(retry_success / retried_calls, 3) if retried_calls else 0.0,
             "fallback_attempts": fallback_attempts,
             "fallback_success": fallback_success,
-            "fallback_success_rate": round(fallback_success / fallback_attempts, 3) if fallback_attempts else 0.0,
+            "fallback_success_rate": round(fallback_success / fallback_attempts, 3)
+            if fallback_attempts
+            else 0.0,
             "fallback_by_tool": {
                 tn: v for tn, v in sorted(fallback_by_tool.items(), key=lambda x: -x[1]["attempts"])
             },
@@ -326,15 +335,19 @@ class TraceStore:
         by_tool = stats.get("by_tool", {})
         ranking = []
         for tname, data in by_tool.items():
-            ranking.append({
-                "tool": tname,
-                "total_calls": data["total"],
-                "failed": data["failed"],
-                "failure_rate": round(data["failed"] / data["total"], 3) if data["total"] else 0.0,
-                "top_errors": dict(sorted(
-                    data["error_codes"].items(), key=lambda x: -x[1]
-                )[:3]),
-            })
+            ranking.append(
+                {
+                    "tool": tname,
+                    "total_calls": data["total"],
+                    "failed": data["failed"],
+                    "failure_rate": round(data["failed"] / data["total"], 3)
+                    if data["total"]
+                    else 0.0,
+                    "top_errors": dict(
+                        sorted(data["error_codes"].items(), key=lambda x: -x[1])[:3]
+                    ),
+                }
+            )
         ranking.sort(key=lambda x: -x["failure_rate"])
         return ranking
 
@@ -368,7 +381,8 @@ class TraceStore:
             "hint_matched": hint_matched,
             "hint_mismatched": hint_mismatched,
             "hint_accuracy": round(hint_matched / (hint_matched + hint_mismatched), 3)
-                if (hint_matched + hint_mismatched) else 0.0,
+            if (hint_matched + hint_mismatched)
+            else 0.0,
             "steps_without_hint": no_hint_steps,
         }
 

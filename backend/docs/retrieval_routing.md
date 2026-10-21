@@ -23,6 +23,7 @@ DocMind 的检索不是"调用一次向量检索",而是**根据问题复杂度�
   │
   ▼
 [RetrievalStrategy] → keyword_only / hybrid / hybrid_hyde
+  │                     （REST search 可显式 search_mode=hybrid/vector/keyword 覆盖本步,见 4.4）
   │
   ▼
         ┌─ keyword_only ──► [BM25] ─────────────────────────────┐
@@ -133,6 +134,25 @@ INTENT_FIELD_BOOSTS = {
 - **延迟**:**500ms-2s**
 - **成本**:embedding 多次 + HyDE 一次 + LLM 改写
 
+### 4.4 显式覆盖(REST `search_mode`,issue #225)
+
+`POST /api/v1/knowledge/search` 的 `search_mode` 字段**真的生效**——非空时跳过
+复杂度分类,直接强制本次请求的检索臂组合:
+
+| search_mode | 内部策略 | 说明 |
+|---|---|---|
+| `hybrid` | `hybrid` | 两臂 + RRF(不含 HyDE;HyDE 留给自动路由的复杂档) |
+| `vector` | `vector_only` | 仅向量臂(自动路由不会产生此策略,只由显式模式触发) |
+| `keyword` | `keyword_only` | 仅关键词臂 |
+
+- 缺省(null)= 自动路由,行为与不传该字段完全一致;
+- 覆盖只作用于**该请求**:不改任何进程级状态,其它链路(chat/agent/workflow)不传
+  该字段时逐条不变;
+- 缓存按模式分域:精确缓存键带 `mode=` 段(显式模式与自动路由互不可见),显式模式
+  跳过语义缓存读/写(显式模式承诺「本次确实按所选臂执行」);
+- 响应同名字段回显**实际生效**的模式:显式值原样,自动路由回显顶层查询路由档位
+  对应的公开模式名(simple→`keyword`,medium/complex→`hybrid`)。
+
 **面试话术**:
 
 > "为什么不做'全部向量化'?因为 embedding 调用本身有成本和延迟。一个生产系统的检索,如果每个问题都走完整 pipeline,200 QPS 就要起 200 个 LLM worker。复杂问题可以接受,简单问题花这钱就是浪费。"
@@ -200,7 +220,7 @@ for rew in rewrites:
 
 ```python
 query_emb = await embedding_service.get_embedding(query)
-# 2048 维,智谱 embedding-3
+# 维度由 VECTOR_DIMENSION 决定（默认 768 / nomic-embed-text；云端覆盖时三键配套修改）
 ```
 
 ### 6.2 HyDE(Hypothetical Document Embeddings)
@@ -417,14 +437,15 @@ final_score = base_score * (0.7 + 0.3 * freshness_boost)
 
 新文档**有轻微加分**,老文档不直接降权——只用作微调。
 
-### 10.4 同文档去重(每文档最多 2 个块)
+### 10.4 同文档去重(rerank 之后按查询类型定预算)
 
 ```python
-def per_doc_limit(candidates, limit=2):
-    """防止单一文档垄断 Top-K"""
+def per_doc_limit(candidates, limit):
+    """防止单一文档垄断 Top-K；在 rerank 之后施加，重排先看到全部候选。
+    limit：普通语义查询 2/文档；条号直查类查询（第X条 / §X.Y）4/文档。"""
     counts = defaultdict(int)
     result = []
-    for c in sorted(candidates, key=lambda x: -x["score"]):
+    for c in candidates:  # 保持 rerank 相关性序
         doc_id = c["document_id"]
         if counts[doc_id] >= limit:
             continue
@@ -552,6 +573,12 @@ query_emb = await embedding(query)
 similar_results = await semantic_cache.search(query_emb, threshold=0.95)
 ```
 
+> **issue #195 起**：Layer 2 语义缓存**默认关闭**（`SEMANTIC_CACHE_RETRIEVAL_ENABLED` /
+> `SEMANTIC_CACHE_ANSWER_ENABLED` 均为 `false`）——0.92 阈值会把相邻条款（第七条/第十三条）
+> 或换实体的查询当成同一问题，跨问题返回他人 sources / 完整答案。显式开启后，候选仍须通过
+> 条号/数字/实体等价判定（`rag/cache.py::queries_equivalent`）才会命中。Layer 1 精确缓存
+> （query+org+top_k）不受影响。
+
 ### 13.2 TTL 和容量
 
 ```python
@@ -585,13 +612,16 @@ if document_ids is not None:
       "document_id":   {"type": "keyword"},
       "organization_id":{"type": "keyword"},
       "embedding":     {"type": "dense_vector",
-                         "dims": 2048,
+                         "dims": 768,
                          "index": true,
                          "similarity": "cosine"}
     }
   }
 }
 ```
+
+> `dims` 取自 `settings.VECTOR_DIMENSION`（默认 768）；索引创建时会校验存量维度，
+> 修改维度前需按 elasticsearch.py 的提示迁移数据。
 
 ### 14.2 自适应分词器
 
@@ -683,7 +713,7 @@ RAG_GROUNDED_TOTAL.labels(grounded=True).inc()  # 答案是否引证
 
 ### Q7:"怎么防止同一文档垄断 Top-K?"
 
-> "后处理阶段做了两件事:1) 同文档去重,每文档最多 2 个块;2) MMR 多样性选择,惩罚与已选 doc 相似度高的候选。"
+> "两处:1) rerank 之后按文档截断——普通语义查询每文档最多 2 个块,条号直查类查询(第X条 / §X.Y)放宽到 4 个;帽不早于 rerank,避免同文档第 3 个相关块在重排看到它之前就被截掉;2) MMR 多样性选择,惩罚与已选候选相似度高的片段(条号直查类查询跳过 MMR,多样性惩罚与精确定位相斥)。"
 
 ### Q8:"查询改写有什么用,不会引入噪声吗?"
 

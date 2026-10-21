@@ -1,3 +1,5 @@
+// 说明：当前产品代码无消费者，仅由 __tests__/retry.test.ts 覆盖；
+// 按「测试资产」保留，请勿误删（如需复活，从生产代码 import 后即可）。
 interface RetryOptions {
   maxRetries?: number
   retryDelay?: number

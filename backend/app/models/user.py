@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - 用户模型
+DocMind AI知识库系统 - 用户模型
 """
 
 from datetime import datetime
@@ -14,6 +14,7 @@ from app.core.database import Base
 
 class User(Base):
     """用户模型"""
+
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True, autoincrement=True)
@@ -23,13 +24,12 @@ class User(Base):
     full_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # 组织关联
-    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"), nullable=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey("organizations.id"), nullable=True
+    )
 
     organization: Mapped[Optional["Organization"]] = relationship(
-        "Organization",
-        back_populates="users",
-        foreign_keys=[organization_id],
-        lazy="selectin"
+        "Organization", back_populates="users", foreign_keys=[organization_id], lazy="selectin"
     )
 
     # 用户角色和状态
@@ -61,21 +61,18 @@ class User(Base):
         "Organization",
         back_populates="owner",
         foreign_keys="Organization.owner_id",
-        overlaps="owner" # 消除警告
+        overlaps="owner",  # 消除警告
     )
 
     organizations = relationship(
-        "Organization",
-        secondary="user_organization",
-        back_populates="members",
-        lazy="selectin"
+        "Organization", secondary="user_organization", back_populates="members", lazy="selectin"
     )
 
     roles_in_organizations = relationship(
         "Role",
         secondary="user_organization_role_association",
-        overlaps="user_organization_roles", # 消除警告
-        lazy="selectin"
+        overlaps="user_organization_roles",  # 消除警告
+        lazy="selectin",
     )
 
     def __repr__(self):

@@ -192,6 +192,7 @@ async def main():
     from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
     from app.models.organization import Organization
     from app.models.user import User
+    from app.services.clause_refs import extract_clause_fields
     from app.services.embedding_service import embedding_service
 
     await init_db()
@@ -301,6 +302,8 @@ async def main():
             "chunk_text": text,
             "chunk_index": idx,
             "section_title": section_title,
+            # #188：结构化条款字段与 worker 索引链同口径（定义位抽取，见 clause_refs）
+            **extract_clause_fields(text),
             "organization_id": str(org_id),
             "content_length": len(text),
             "embedding": emb,

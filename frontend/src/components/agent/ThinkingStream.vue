@@ -16,20 +16,26 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { ThinkingType } from '@/types/agent'
 
 const props = defineProps<{
   text: string
   thinkingType?: ThinkingType
   active?: boolean
+  /** HITL（F4）：任务已取消——思考流对已停止的 run 显示终态标签而非"思考中…"。 */
+  stopped?: boolean
 }>()
 
+const { t } = useI18n()
 const collapsed = ref(false)
 const contentEl = ref<HTMLElement>()
 
 const visible = computed(() => props.text.length > 0)
 
 const thinkingLabel = computed(() => {
+  // 取消收敛后不得残留"思考中…"（浏览器验收 F4 实拍）：终态标签覆盖类型标签。
+  if (props.stopped) return `⏹ ${t('hitl.stopped')}...`
   switch (props.thinkingType) {
     case 'planning': return '🧠 规划中...'
     case 'evaluation': return '🔍 评估中...'

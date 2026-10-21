@@ -11,7 +11,7 @@
 
 <div align="center">
   <h1>🤖 DocMind</h1>
-  <p><strong>企业级 AI Agent 知识库系统 — PER 架构 · 混合检索 · 可观测 · 自我进化</strong></p>
+  <p><strong>企业级 RAG×Agent 平台 —— 评测门禁进 CI、静默假成功清零、棘轮只缩不涨：质量，不可静默回退。</strong></p>
 </div>
 
 ---
@@ -21,11 +21,11 @@
 DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execute-Reflect）Agent 架构**构建。支持多格式文档解析、混合检索增强生成（RAG）、可视化工作流编辑、实时 SSE 流式问答，以及完整的可观测性体系。
 
 核心场景：
-- 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV，自动解析、分块、向量化，支持语义搜索
+- 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV 及 PNG/JPG/JPEG/WEBP/BMP 图片（OCR），自动解析、分块、向量化，支持语义搜索
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
-- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 30 个工具完成复杂任务
+- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 33 个工具完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
-- 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、12 种 SSE 事件、RunReport 运行摘要
+- 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、20 种 SSE 事件、RunReport 运行摘要
 - 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
 
 > 关于架构决策和实验数据，请参见研究仓库：[DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
@@ -34,19 +34,31 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 
 ## 项目状态
 
-> 当前定位：**公开项目 / 不成熟产品**。功能完整度高于稳定度，适合学习、二次开发和本地演示；正式生产部署前请自行加固安全与运维配置。
+> 定位：**公开项目 / 不成熟产品**——功能完整度高于稳定度，适合学习、二次开发与本地演示；正式生产部署前请自行加固安全与运维配置。产品可以还在打磨，工程纪律先行：**数字带口径，修复带证据，退化拦在合并前**（见「质量与门禁」）。
 
 当前基线：
-- 后端 `pytest tests/`：911 passed（CI，MySQL + Redis）；前端 111 tests passed + `vue-tsc --noEmit` 通过。
+- 测试基线（冻结快照 2026-10-15）：后端 `pytest tests/` **2223 passed / 51 skipped**（0 failed）；前端 **861 passed**（128 个测试文件）+ `vue-tsc --noEmit` 0 错误。数字随 CI 实时演进——CI 是唯一真源，本页只记录冻结快照。
 - 已修复：语义缓存按组织隔离、会话归属校验、知识库搜索/删除/重建的组织隔离、文件上传路径穿越与 MinIO 删除、API Key 掩码、Web 抓取 SSRF 防护、工作流归属隔离、Kafka 不可用时的进程内文档处理、本地启动脚本、敏感产物移出 git 跟踪。
 - 安全加固（1.20）：Agent 沙箱逃逸封堵（下划线属性拦截 + 长度/输出上限）、execute_sql 租户过滤与 UNION/子查询拦截、disabled_tools 服务端强制合并、mcp 子进程环境变量白名单、注册禁自选组织、角色变更同组织校验、登录失败锁定 + 用户枚举时序防护、refresh token 轮换、WS 仅接受 access token、PII 掩码全链路（上下文+流式）、GraphRAG 组织分区、/files 代理归属校验、RAG 缓存按组织失效、Alembic 001 FK 类型修复 + 005 补齐 15 张表、compose 凭据/端口收紧、24 个安全回归测试（446 单测通过）。
 - 架构收敛：文档解析/向量化/ES 索引统一为单一 Processor；聊天核心管线从路由下沉到 `services/chat_service.py`；新增统一文档授权辅助层。
-- 后续加固：Agent 记忆接口按用户隔离、`/files` 代理鉴权、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`。
+- 加固收口（已完成）：Agent 记忆接口按用户隔离、`/files` 代理鉴权（非公开对象需登录 + 组织归属校验）、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`。
 
 已知限制：
 - 工作流代码节点默认关闭，需显式设置 `ENABLE_WORKFLOW_CODE_NODES=true`，且必须通过 Docker 沙箱执行。
-- GraphRAG 图谱、Agent 记忆、指标快照与实时计数均已支持 Redis 持久化；实时计数按实例写入并在读取时聚合，适合多实例部署。
+- GraphRAG 图谱、Agent 记忆中的长期/反思记忆、指标快照与实时计数已支持 Redis 持久化（短期/工作记忆为进程内，不跨进程或重启）；实时计数按实例写入并在读取时聚合，适合多实例部署。
 - 前端 `knowledge/index.vue`、`profile/index.vue`、`workflow/editor.vue` 均已拆分到组件/组合式函数，不再有千行级单文件页面。
+
+---
+
+## 质量与门禁
+
+「不静默回退」不是口号，而是一组可核对的机制：
+
+- **评测门禁进 CI（Eval Gate）**：检索质量由零容差门禁逐 PR 守护——28 条 golden set（25 正例 + 3 负例），ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors 七项指标容差为 0，任何下跌即红、fail-closed；`ClauseHit@3/@5` 实测 88%（CI 基线 84% 托底）。基线更新是显式 PR 行为（规则见 `backend/docs/eval-gate-phase1.md`）。
+- **棘轮只缩不涨**：后端覆盖率下限 `--cov-fail-under=42`＋前端四道基线棘轮（硬编码中文 / i18n 完备性 / 命名一致 / 用键定义）——只拦下滑、不追高分，新增长即红。
+- **静默假成功清零（#301）**：全仓 ~551 处异常捕获全量审计，32 条静默假成功全部闭环（登出 fail-closed、检索三态、文档状态机诚实化、统计端点降级身份……），修复均带回归测试。
+- **先红后绿＋变异验证**：每笔修复先写失败测试；修复后注入缺陷必须「精确变红」，证明测试真的有判别力。
+- **文档数字不变量**：SSE 事件数、端点模块数、前端路由数、工具数由源码派生，期望值统一存放在 `docs/facts.json`；`backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验「代码 ↔ facts JSON ↔ 文档」三方一致。前端路由按两种口径记录：34 条路由记录（含顶层与 redirect 记录）/ 29 条具名路由（有 name 的路由）。
 
 ---
 
@@ -61,7 +73,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 │  WebSocket 实时推送 · Request ID 追踪        │
 ├── AI Agent 核心 ─────────────────────────────┤
 │  PER Loop  (Planner → Executor → Reflector)  │
-│  Tool Registry (30) · RunReport · Reviewer  │
+│  Tool Registry (33) · RunReport · Reviewer  │
 │  经验记忆 · 执行回放 · 模式挖掘              │
 ├── RAG 管线 ──────────────────────────────────┤
 │  HybridRetriever (BM25 + 向量 + RRF 融合)    │
@@ -102,7 +114,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 上下文引擎 | `context.py` | 令牌预算管理，消息窗口构建 |
 | 配置 | `config.py` | AgentConfig（模型/温度/最大步骤/阶段开关） |
 
-**30 个内置工具** (`tools/`)：
+**33 个内置工具**（`core_tools.py` 14 个 + `tools/` 19 个）：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -139,7 +151,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
                                 + RRF 倒数排序融合（k=60）
   → MMR 选择                  — 最大边际相关性去重
   → Reranker                  — 交叉编码器重排序（本地 BGE 或 API）
-  → ContextCompressor         — LLM 上下文压缩
+  → ContextCompressor         — 关键词句子抽取压缩（规则式，无 LLM 调用）
   → 缓存检查                  — 精确匹配缓存（TTL 600s）+ 语义缓存
   → LLM 生成                  — 流式 SSE 输出，严格模式可选，PII 掩码
 ```
@@ -151,7 +163,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | `reranker.py` | 交叉编码器重排序（本地 BAAI/bge-reranker-base / API） |
 | `query_processor.py` | HyDE 生成、LLM 查询改写、意图/复杂度分类、查询分解 |
 | `cache.py` | RetrievalCache（精确 TTL）+ SemanticCache（向量余弦相似度） |
-| `context_compressor.py` | 基于 LLM 的检索结果压缩 |
+| `context_compressor.py` | 基于查询关键词的句子抽取压缩（规则式，无 LLM 调用） |
 | `context_window.py` | RAG 聊天的令牌预算消息构建器 |
 | `evaluator.py` / `metrics.py` | RAG 质量指标（基础性、相关性） |
 
@@ -177,27 +189,30 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-19 个端点模块，统一 `/api/v1` 前缀：
+22 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
 | 认证 | `/auth` | 注册、登录、刷新 Token、密码重置、登出 |
-| 用户管理 | `/users` | 用户 CRUD、个人资料、头像、会话管理、审计日志 |
+| 用户管理 | `/users` | 用户 CRUD、个人资料、头像、会话管理、审计日志（个人 API Key 端点已弃用） |
 | 文件管理 | `/files` | 上传/下载/删除，MinIO 存储，分块上传 |
 | 文档管理 | `/documents` | 文档解析、向量化、知识库索引、状态追踪 |
 | 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
 | 知识库 | `/knowledge` | 知识库 CRUD、检索、统计、设置 |
 | 组织管理 | `/organizations` | 组织 CRUD、成员管理、角色分配 |
+| 组织设置 | `/organizations` | 组织级设置读写与审计（与组织管理共用前缀） |
 | 系统监控 | `/monitoring` | 性能指标、健康检查、告警、RAG 质量评估 |
 | 通知 | `/notifications` | 通知 CRUD、已读标记、WebSocket 推送 |
 | 提示词 | `/prompts` | 提示词模板 CRUD + 版本控制 |
 | Token 用量 | `/token-usage` | 使用追踪 + 报告 |
 | 操作手册 | `/manuals` | 系统手册管理 |
 | 工作流 | `/workflows` | 工作流 CRUD、执行、调试、节点定义 |
-| LLM 配置 | `/llm-config` | 用户级模型配置 |
+| 定时任务 | `/scheduled-tasks` | 定时任务 CRUD、暂停/恢复与手动触发 |
+| LLM 配置（已弃用） | `/llm-config` | 工作流全局配置入口已移除；端点标 deprecated，待统一 Provider 层落地后删除 |
 | 技能库 | `/curated-skills` | 技能发现与管理 |
-| Agent 记忆 | `/memory` | 短期/长期/工作记忆 CRUD、语义搜索 |
+| Agent 记忆 | `/memory` | 短期/长期/工作/反思记忆 CRUD、语义搜索 |
 | 智能 Agent | `/agent` | PER Agent 对话（SSE 流式）、工具调用、配置 |
+| MCP 工具 | `/mcp` | MCP 服务器状态（管理员只读） |
 | 用户设置 | `/user` | 个人 UI 偏好 |
 | 示例数据 | `/demo` | 演示文档与数据填充 |
 
@@ -205,7 +220,7 @@ Swagger 文档：`http://localhost:8000/docs`
 
 ### 🖥 前端 (`frontend/src/`)
 
-Vue 3 + TypeScript + Naive UI 单页应用，21 条路由：
+Vue 3 + TypeScript + Naive UI 单页应用，34 条路由记录（29 条具名路由；下表为主要页面）：
 
 | 页面 | 路由 | 功能 |
 |------|------|------|
@@ -231,7 +246,7 @@ Vue 3 + TypeScript + Naive UI 单页应用，21 条路由：
 | 服务 | 文件 | 功能 |
 |------|------|------|
 | 认证服务 | `auth_service.py` | JWT 创建/验证、bcrypt 哈希、Token 黑名单（jti） |
-| 文档解析 | `document_parser.py` | 解析 PDF/Word/Excel/TXT/MD，文本提取与分块 |
+| 文档解析 | `document_parser.py` | 解析 PDF/Word/Excel/CSV/TXT/MD 与图片（OCR），文本提取与分块 |
 | RAG 服务 | `rag_service.py` | RAG 管线 Facade |
 | 文件服务 | `file_service.py` | 文件存储与检索 |
 | 知识库服务 | `knowledge_service.py` | 知识库业务逻辑 |
@@ -242,7 +257,7 @@ Vue 3 + TypeScript + Naive UI 单页应用，21 条路由：
 | 记忆服务 | `memory_service.py` | Agent 记忆 CRUD |
 | PII 掩码 | `masking_service.py` | 敏感信息脱敏 |
 | 语义分块 | `semantic_chunker.py` | 语义感知的文本分块 |
-| 图 RAG | `graph_rag_service.py` | 知识图谱增强检索 |
+| 图谱服务 | `graph_rag_service.py` | 知识图谱构建、查询与可视化（不参与 RAG 检索链路） |
 
 ### 🔄 异步处理 (`backend/app/worker/`)
 
@@ -266,21 +281,33 @@ git clone https://github.com/sijie-Z/DocMind-RAG.git
 cd DocMind-RAG
 ```
 
-### 2. 启动基础设施
+### 2. 配置
+
+环境变量文件要在启动任何服务**之前**创建——缺少 `backend/.env.docker` 时，compose 的任意命令都会直接报错。
 
 ```bash
-cd backend && docker compose up -d    # MySQL / Redis / ES / Kafka / MinIO
-```
+cd backend
 
-### 3. 配置
+# 本地开发（应用在宿主机跑，见第 4/5 步）
+cp .env.example .env               # Windows: copy .env.example .env
+# 必填：SECRET_KEY / JWT_SECRET_KEY（生成: python -c "import secrets; print(secrets.token_hex(32))"）
+# 按需填写 DEEPSEEK_API_KEY / EMBEDDING_API_KEY 等（LLM / Embedding 凭据）
 
-```bash
+# 只要使用 Docker（含第 3 步的纯基础设施），都需要本文件（否则 compose 直接报错）：
 cp .env.docker.example .env.docker
 # 编辑 .env.docker，至少填入 LLM API Key：
 #   DEEPSEEK_API_KEY=sk-xxx
-#   DEEPSEEK_API_URL=https://api.deepseek.com/v1
-#   EMBEDDING_API_KEY=sk-xxx
-#   EMBEDDING_API_URL=https://api.deepseek.com/v1
+#   DEEPSEEK_API_URL=https://api.deepseek.com
+# Embedding 默认走本机 Ollama（nomic-embed-text / 768 维），无需单独的 Embedding Key
+# （复用 DEEPSEEK_API_KEY）；使用云端 Embedding 时再填 EMBEDDING_API_KEY / EMBEDDING_API_URL。
+```
+
+### 3. 启动基础设施
+
+```bash
+cd backend && docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
+# 只启动基础设施容器（应用继续在宿主机跑，见下）；不用 Docker 的话跳过本步，按 SETUP.md 用本机服务替代
+# 完整 Docker 部署（应用也在容器里）：见「部署」一节
 ```
 
 ### 4. 启动后端
@@ -329,8 +356,8 @@ DocMind/
 │   │   ├── dependencies.py          # 依赖注入容器
 │   │   ├── exceptions.py            # 自定义异常层次结构
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 19 个模块）
-│   │   │   └── endpoints/           # 端点实现（19 个文件）
+│   │   │   ├── router.py            # 主路由（注册 22 个模块）
+│   │   │   └── endpoints/           # 端点实现（22 个文件）
 │   │   ├── agent/                   # PER Agent 核心
 │   │   │   ├── loop.py              #   PER 主循环
 │   │   │   ├── planner.py           #   规划器（LLM + 结构化规则）
@@ -344,10 +371,11 @@ DocMind/
 │   │   │   ├── exec_context.py      #   ExecutionContext
 │   │   │   ├── registry.py          #   工具注册表
 │   │   │   ├── memory_bridge.py     #   记忆桥接
-│   │   │   ├── events.py            #   SSE 事件类型（12 种）
+│   │   │   ├── events.py            #   SSE 事件类型（20 种）
 │   │   │   ├── message.py           #   Agent 间消息总线
 │   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
-│   │   │   ├── tools/               #   30 个工具实现
+│   │   │   ├── core_tools.py        #   基础工具（14 个）
+│   │   │   ├── tools/               #   扩展工具（19 个；合计 33 个内置工具）
 │   │   │   │   ├── web_search.py    #   网络搜索
 │   │   │   │   ├── code_execution.py #  Python/SQL 沙箱
 │   │   │   │   ├── data_analysis.py #   数据分析
@@ -360,7 +388,7 @@ DocMind/
 │   │   │   │   ├── extractor.py     #   经验提取器
 │   │   │   │   ├── store.py         #   经验存储
 │   │   │   │   ├── models.py        #   数据模型
-│   │   │   │   └── run_extract.py   #   运行级提取
+│   │   │   │   └── run_extract.py   #   经验引导提取（dev-only：benchmark 跑批后手动执行）
 │   │   │   ├── replay/              #   执行回放
 │   │   │   │   └── engine.py        #   回放引擎
 │   │   │   └── mining/              #   模式挖掘
@@ -395,11 +423,11 @@ DocMind/
 │   │   │   ├── context_compressor.py #  上下文压缩
 │   │   │   ├── context_window.py    #   令牌预算管理
 │   │   │   └── evaluator.py         #   质量评估
-│   │   ├── services/                # 业务服务层（14 个服务）
-│   │   ├── models/                  # ORM 模型（14 个实体）
+│   │   ├── services/                # 业务服务层（21 个服务）
+│   │   ├── models/                  # ORM 模型（18 个模型文件）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者
-│   ├── tests/                       # 911 个后端测试用例（前端另有 111 个）
+│   ├── tests/                       # 2223 个后端测试（前端另有 861 个）
 │   ├── benchmark/                   # 评测框架
 │   ├── alembic/                     # 数据库迁移
 │   ├── scripts/                     # 工具脚本
@@ -408,7 +436,7 @@ DocMind/
 │   └── docker-compose.yml           # 10 服务编排
 ├── frontend/
 │   └── src/
-│       ├── views/                   # 页面（19 个模块，21 条路由）
+│       ├── views/                   # 页面（23 个页面模块，34 条路由记录 / 29 条具名路由）
 │       ├── components/              # 共享组件
 │       ├── api/                     # Axios API 客户端
 │       ├── stores/                  # Pinia 状态管理
@@ -428,15 +456,22 @@ DocMind/
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `DEEPSEEK_API_KEY` | LLM API Key | 必填 |
-| `DEEPSEEK_API_URL` | LLM API 地址 | `https://api.deepseek.com/v1` |
-| `EMBEDDING_API_KEY` | Embedding API Key | 必填 |
-| `EMBEDDING_API_URL` | Embedding API 地址 | 必填 |
-| `DATABASE_URL` | MySQL 连接串 | `mysql+aiomysql://root:...` |
-| `VECTOR_DIMENSION` | 向量维度 | `1536` |
+| `DEEPSEEK_API_URL` | LLM API 地址 | `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL` | Chat 模型 | `deepseek-v4-flash` |
+| `EMBEDDING_API_KEY` | Embedding API Key | 留空时复用 `DEEPSEEK_API_KEY` |
+| `EMBEDDING_API_URL` | Embedding API 地址 | `http://localhost:11434/v1`（本机 Ollama） |
+| `EMBEDDING_MODEL` | Embedding 模型 | `nomic-embed-text` |
+| `DATABASE_URL` | MySQL 连接串 | `mysql+aiomysql://...`（部署时必填） |
+| `VECTOR_DIMENSION` | 向量维度 | `768` |
 | `ENABLE_TRACING` | OpenTelemetry 开关 | `false` |
-| `ENABLE_DEMO_ACCOUNT` | 启用演示账号 | `true` |
+| `ENABLE_DEMO_ACCOUNT` | 启用演示账号 | `false` |
 | `ENABLE_WORKFLOW_CODE_NODES` | 允许工作流代码节点（存在安全风险，默认关闭） | `false` |
-| `APP_VERSION` | 应用版本 | `1.21.0` |
+| `APP_VERSION` | 应用版本 | `1.22.1-rc.1` |
+
+> 模型/向量维度默认值以代码真源 `backend/app/core/config/ai.py` 为准。未显式设置
+> `EMBEDDING_MODEL` / `VECTOR_DIMENSION` 时还会按硬件档位自动选择：CPU 档
+> `bge-m3` / 1024，8G 显存档 `Qwen3-Embedding-4B` / 2048，16G 显存档
+> `Qwen3-Embedding-8B` / 4096。显式配置（如上述模板）优先于自动档位。
 
 完整配置见 `backend/.env.example` 和 `backend/.env.docker.example`。
 
@@ -463,8 +498,10 @@ cd ../frontend && npm run test
 
 ### Docker Compose
 
+前置：按「快速开始 · 2. 配置」创建并填写好 `backend/.env.docker`——缺失时 compose 的任意命令都会直接报错。
+
 ```bash
-cd backend && docker compose up -d
+cd backend && docker compose --env-file .env.docker up -d
 # 启动 10 个服务：backend, worker, mysql, redis, elasticsearch, minio, zookeeper, kafka, prometheus, grafana
 ```
 

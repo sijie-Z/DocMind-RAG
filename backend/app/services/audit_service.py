@@ -8,6 +8,7 @@ from app.models.user_audit import UserActivityLog
 
 logger = logging.getLogger(__name__)
 
+
 def extract_client_ip(request: Request | None) -> str | None:
     """统一客户端 IP 提取：仅信任直连地址，不信任客户端可伪造的 X-Forwarded-For。
 
@@ -27,7 +28,7 @@ class AuditService:
         target_id: str | None = None,
         detail: str | None = None,
         request: Request | None = None,
-        db: AsyncSession | None = None
+        db: AsyncSession | None = None,
     ) -> None:
         """记录用户活动日志 — 始终使用独立 session，不干扰调用方事务"""
         try:
@@ -45,7 +46,7 @@ class AuditService:
                 target_id=str(target_id) if target_id else None,
                 detail=detail,
                 ip_address=ip_address,
-                user_agent=user_agent
+                user_agent=user_agent,
             )
 
             async with AsyncSessionLocal() as session:
@@ -54,5 +55,6 @@ class AuditService:
 
         except Exception as e:
             logger.error(f"Failed to log activity: {e}")
+
 
 audit_service = AuditService()

@@ -1,4 +1,5 @@
 """Chat API 集成测试 — 会话与消息流程。"""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,11 +12,13 @@ from app.core.security import get_current_user
 @pytest.fixture
 def client():
     from app.main import app
+
     return TestClient(app)
 
 
 class _AsyncCtxMgr:
     """支持 async with 的 mock 上下文管理器。"""
+
     def __init__(self, db):
         self._db = db
 
@@ -88,6 +91,7 @@ class TestConversations:
     def test_list_conversations(self, client: TestClient):
         """已认证用户应能获取会话列表。"""
         from app.main import app
+
         mock_user = _make_mock_user()
         mock_session = _make_mock_session()
 
@@ -110,8 +114,7 @@ class TestConversations:
         app.dependency_overrides[get_current_user] = _override_user
         try:
             r = client.get(
-                "/api/v1/chat/conversations",
-                headers={"Authorization": "Bearer test_token"}
+                "/api/v1/chat/conversations", headers={"Authorization": "Bearer test_token"}
             )
             assert r.status_code == 200
             data = r.json()
@@ -123,6 +126,7 @@ class TestConversations:
     def test_list_conversations_empty(self, client: TestClient):
         """无会话时应返回空列表。"""
         from app.main import app
+
         mock_user = _make_mock_user()
 
         override_func, mock_db = _override_get_db()
@@ -143,8 +147,7 @@ class TestConversations:
         app.dependency_overrides[get_current_user] = _override_user
         try:
             r = client.get(
-                "/api/v1/chat/conversations",
-                headers={"Authorization": "Bearer test_token"}
+                "/api/v1/chat/conversations", headers={"Authorization": "Bearer test_token"}
             )
             assert r.status_code == 200
             data = r.json()
@@ -159,9 +162,98 @@ class TestConversations:
         r = client.get("/api/v1/chat/conversations")
         assert r.status_code in (401, 403)
 
+    def test_list_conversations_search_filters_by_title(self, client: TestClient):
+        """B30：search 参数对标题做 LIKE 过滤。
+        A_sweep CONV-2 实锤：旧端点无此参数、被静默忽略（?search=zzznone 仍全量）。"""
+        from app.main import app
+
+        mock_user = _make_mock_user()
+        override_func, mock_db = _override_get_db()
+
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 0
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = []
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+        try:
+            r = client.get(
+                "/api/v1/chat/conversations?search=zzznone",
+                headers={"Authorization": "Bearer test_token"},
+            )
+            assert r.status_code == 200
+            # 计数查询（首次 execute）必须带标题 LIKE 条件（大小写不敏感 ilike）
+            count_stmt = mock_db.execute.call_args_list[0][0][0]
+            sql = str(count_stmt)
+            assert "lower(chat_sessions.title) LIKE" in sql
+            assert "ESCAPE" in sql
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_list_conversations_without_search_has_no_like(self, client: TestClient):
+        """未传 search（或纯空白）时不附加过滤 —— 行为逐条不变。"""
+        from app.main import app
+
+        mock_user = _make_mock_user()
+        override_func, mock_db = _override_get_db()
+
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 0
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = []
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+        try:
+            r = client.get(
+                "/api/v1/chat/conversations?search=%20%20",
+                headers={"Authorization": "Bearer test_token"},
+            )
+            assert r.status_code == 200
+            count_stmt = mock_db.execute.call_args_list[0][0][0]
+            assert "LIKE" not in str(count_stmt)
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_list_conversations_search_too_long_is_422(self, client: TestClient):
+        """入参校验：search 超过 100 字符 → 422（Query max_length）。"""
+        from app.main import app
+
+        mock_user = _make_mock_user()
+        override_func, _ = _override_get_db()
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+        try:
+            r = client.get(
+                f"/api/v1/chat/conversations?search={'a' * 101}",
+                headers={"Authorization": "Bearer test_token"},
+            )
+            assert r.status_code == 422
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
     def test_create_conversation(self, client: TestClient):
         """POST /chat/conversations 应创建新会话。"""
         from app.main import app
+
         mock_user = _make_mock_user()
 
         override_func, mock_db = _override_get_db()
@@ -178,7 +270,7 @@ class TestConversations:
             r = client.post(
                 "/api/v1/chat/conversations",
                 json={"title": "New Chat"},
-                headers={"Authorization": "Bearer test_token"}
+                headers={"Authorization": "Bearer test_token"},
             )
             assert r.status_code == 200
             data = r.json()
@@ -190,6 +282,7 @@ class TestConversations:
     def test_delete_conversation(self, client: TestClient):
         """DELETE /chat/conversations/{id} 应删除会话。"""
         from app.main import app
+
         mock_user = _make_mock_user()
         mock_session = _make_mock_session()
 
@@ -208,7 +301,7 @@ class TestConversations:
         try:
             r = client.delete(
                 "/api/v1/chat/conversations/conv-123",
-                headers={"Authorization": "Bearer test_token"}
+                headers={"Authorization": "Bearer test_token"},
             )
             assert r.status_code == 200
             data = r.json()
@@ -220,6 +313,7 @@ class TestConversations:
     def test_delete_conversation_not_found(self, client: TestClient):
         """不存在的会话删除应返回 404。"""
         from app.main import app
+
         mock_user = _make_mock_user()
 
         override_func, mock_db = _override_get_db()
@@ -235,7 +329,7 @@ class TestConversations:
         try:
             r = client.delete(
                 "/api/v1/chat/conversations/nonexistent",
-                headers={"Authorization": "Bearer test_token"}
+                headers={"Authorization": "Bearer test_token"},
             )
             assert r.status_code == 404
         finally:
@@ -247,6 +341,7 @@ class TestConversationMessages:
     def test_get_conversation_messages(self, client: TestClient):
         """获取会话消息应返回消息列表。"""
         from app.main import app
+
         mock_user = _make_mock_user()
         mock_session = _make_mock_session()
 
@@ -281,7 +376,7 @@ class TestConversationMessages:
         try:
             r = client.get(
                 "/api/v1/chat/conversations/conv-123",
-                headers={"Authorization": "Bearer test_token"}
+                headers={"Authorization": "Bearer test_token"},
             )
             assert r.status_code == 200
             data = r.json()
@@ -296,11 +391,90 @@ class TestConversationMessages:
         r = client.get("/api/v1/chat/conversations/conv-123")
         assert r.status_code in (401, 403)
 
+    def test_get_conversation_messages_includes_bound_document_settings(self, client: TestClient):
+        """B35：详情响应必须带 settings.bound_document_ids ——
+        这是前端 isBoundMode（「仅文档模式」标签/解绑入口）的唯一真值来源；
+        旧响应缺 settings 导致标签与解绑入口永不出现。"""
+        from app.main import app
+
+        mock_user = _make_mock_user()
+        mock_session = _make_mock_session()
+        mock_session.settings = {"bound_document_ids": ["doc-1", "doc-2"]}
+
+        override_func, mock_db = _override_get_db()
+
+        mock_session_result = MagicMock()
+        mock_session_result.scalar_one_or_none.return_value = mock_session
+
+        mock_msgs_scalars = MagicMock()
+        mock_msgs_scalars.all.return_value = []
+        mock_msgs_result = MagicMock()
+        mock_msgs_result.scalars.return_value = mock_msgs_scalars
+
+        mock_db.execute = AsyncMock(side_effect=[mock_session_result, mock_msgs_result])
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+        try:
+            r = client.get(
+                "/api/v1/chat/conversations/conv-123",
+                headers={"Authorization": "Bearer test_token"},
+            )
+            assert r.status_code == 200
+            data = r.json()
+            assert data["success"] is True
+            assert data["data"]["settings"]["bound_document_ids"] == ["doc-1", "doc-2"]
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_get_conversation_messages_settings_non_dict_falls_back_to_empty(
+        self, client: TestClient
+    ):
+        """settings 为 None/非 dict 时如实回退 {}（防御脏数据，不抛错）。"""
+        from app.main import app
+
+        mock_user = _make_mock_user()
+        mock_session = _make_mock_session()
+        mock_session.settings = None
+
+        override_func, mock_db = _override_get_db()
+
+        mock_session_result = MagicMock()
+        mock_session_result.scalar_one_or_none.return_value = mock_session
+
+        mock_msgs_scalars = MagicMock()
+        mock_msgs_scalars.all.return_value = []
+        mock_msgs_result = MagicMock()
+        mock_msgs_result.scalars.return_value = mock_msgs_scalars
+
+        mock_db.execute = AsyncMock(side_effect=[mock_session_result, mock_msgs_result])
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+        try:
+            r = client.get(
+                "/api/v1/chat/conversations/conv-123",
+                headers={"Authorization": "Bearer test_token"},
+            )
+            assert r.status_code == 200
+            assert r.json()["data"]["settings"] == {}
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
 
 class TestMessageFeedback:
     def test_update_feedback_success(self, client: TestClient):
         """POST /chat/messages/{id}/feedback 应成功。"""
         from app.main import app
+
         mock_user = _make_mock_user()
         mock_msg = MagicMock()
         mock_msg.id = "msg-1"
@@ -322,7 +496,7 @@ class TestMessageFeedback:
             r = client.post(
                 "/api/v1/chat/messages/msg-1/feedback",
                 json={"feedback": 1, "note": "Great answer!"},
-                headers={"Authorization": "Bearer test_token"}
+                headers={"Authorization": "Bearer test_token"},
             )
             assert r.status_code == 200
             data = r.json()
@@ -334,6 +508,7 @@ class TestMessageFeedback:
     def test_update_feedback_not_found(self, client: TestClient):
         """不存在的消息应返回 404。"""
         from app.main import app
+
         mock_user = _make_mock_user()
 
         override_func, mock_db = _override_get_db()
@@ -350,7 +525,7 @@ class TestMessageFeedback:
             r = client.post(
                 "/api/v1/chat/messages/nonexistent/feedback",
                 json={"feedback": 1},
-                headers={"Authorization": "Bearer test_token"}
+                headers={"Authorization": "Bearer test_token"},
             )
             assert r.status_code == 404
         finally:

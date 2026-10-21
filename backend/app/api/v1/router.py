@@ -1,5 +1,5 @@
 """
-派聪明AI知识库系统 - API路由模块
+DocMind AI知识库系统 - API路由模块
 """
 
 from fastapi import APIRouter
@@ -15,11 +15,14 @@ from app.api.v1.endpoints import (
     knowledge,
     llm_config,
     manuals,
+    mcp,
     memory,
     monitoring,
     notifications,
+    organization_settings,
     organizations,
     prompts,
+    scheduled_tasks,
     token_usage,
     user_settings,
     users,
@@ -37,6 +40,7 @@ api_router.include_router(documents.router, prefix="/documents", tags=["文档�
 api_router.include_router(chat.router, prefix="/chat", tags=["聊天"])
 api_router.include_router(knowledge.router, prefix="/knowledge", tags=["知识库"])
 api_router.include_router(organizations.router, prefix="/organizations", tags=["组织管理"])
+api_router.include_router(organization_settings.router, prefix="/organizations", tags=["组织设置"])
 api_router.include_router(monitoring.router, prefix="/monitoring", tags=["系统监控"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["通知管理"])
 api_router.include_router(prompts.router, prefix="/prompts", tags=["提示词管理"])
@@ -47,5 +51,7 @@ api_router.include_router(llm_config.router, prefix="/llm-config", tags=["智能
 api_router.include_router(curated_skills.router, prefix="/curated-skills", tags=["智能Agent"])
 api_router.include_router(memory.router, prefix="/memory", tags=["Agent记忆"])
 api_router.include_router(agent.router, prefix="/agent", tags=["智能Agent"])
+api_router.include_router(mcp.router, prefix="/mcp", tags=["MCP"])
+api_router.include_router(scheduled_tasks.router, prefix="/scheduled-tasks", tags=["定时任务"])
 api_router.include_router(demo.router, prefix="/demo", tags=["示例数据"])
 api_router.include_router(user_settings.router, prefix="/user", tags=["用户设置"])

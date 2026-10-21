@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class HardwareProfile:
-    tier: str          # "cpu" | "gpu-8g" | "gpu-16g"
-    gpu_name: str      # e.g. "NVIDIA GeForce RTX 4060"
-    vram_mb: int       # 0 if no GPU
+    tier: str  # "cpu" | "gpu-8g" | "gpu-16g"
+    gpu_name: str  # e.g. "NVIDIA GeForce RTX 4060"
+    vram_mb: int  # 0 if no GPU
     embedding_model: str
     reranker_model: str
     vector_dim: int
@@ -29,7 +29,9 @@ def _detect_nvidia_gpu() -> tuple[str, int]:
     try:
         out = subprocess.check_output(
             [nvidia_smi, "--query-gpu=name,memory.total", "--format=csv,noheader"],
-            timeout=5, text=True, stderr=subprocess.DEVNULL,
+            timeout=5,
+            text=True,
+            stderr=subprocess.DEVNULL,
         ).strip()
         if not out:
             return "", 0
@@ -78,12 +80,20 @@ def detect() -> HardwareProfile:
         vector_dim = int(os.environ.get("VECTOR_DIMENSION", "1024"))
 
     profile = HardwareProfile(
-        tier=tier, gpu_name=gpu_name, vram_mb=vram_mb,
-        embedding_model=embedding, reranker_model=reranker,
+        tier=tier,
+        gpu_name=gpu_name,
+        vram_mb=vram_mb,
+        embedding_model=embedding,
+        reranker_model=reranker,
         vector_dim=vector_dim,
     )
     logger.info(
         "Hardware: tier=%s gpu=%s vram=%dMB → emb=%s rerank=%s dim=%d",
-        tier, gpu_name or "none", vram_mb, embedding, reranker, vector_dim,
+        tier,
+        gpu_name or "none",
+        vram_mb,
+        embedding,
+        reranker,
+        vector_dim,
     )
     return profile

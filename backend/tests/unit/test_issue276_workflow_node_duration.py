@@ -16,6 +16,7 @@ execute_with_retry()，从未编译或执行 LangGraph 图（无一处调用 eng
 变异判别：删除 `NodeResult.duration` 声明 → 本文件用例按
 `ValueError: "NodeResult" object has no field "duration"` 精确红。
 """
+
 import pytest
 
 from app.schemas.workflow import WorkflowConfig, WorkflowEdge, WorkflowNode
@@ -26,7 +27,9 @@ def _minimal_config() -> WorkflowConfig:
     """input → output 最小图：不触达 LLM/知识库等外部依赖。"""
     return WorkflowConfig(
         nodes=[
-            WorkflowNode(id="in1", type="input", data={"prompt": "{{input}}"}, position={"x": 0, "y": 0}),
+            WorkflowNode(
+                id="in1", type="input", data={"prompt": "{{input}}"}, position={"x": 0, "y": 0}
+            ),
             WorkflowNode(id="out1", type="output", data={}, position={"x": 1, "y": 0}),
         ],
         edges=[WorkflowEdge(id="e1", source="in1", target="out1")],
@@ -90,7 +93,11 @@ class TestFailedNodeDuration:
         max_retries=1：即使（如变异所还原）退回"一切皆重试"的旧行为，也不产生退避等待。
         """
         config = WorkflowConfig(
-            nodes=[WorkflowNode(id="code1", type="code", data={"code": "result = 1", "language": "python"})],
+            nodes=[
+                WorkflowNode(
+                    id="code1", type="code", data={"code": "result = 1", "language": "python"}
+                )
+            ],
             edges=[],
         )
         engine = WorkflowEngine(config, llm_config={"max_retries": 1})

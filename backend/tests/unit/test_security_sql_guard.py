@@ -10,6 +10,7 @@
 S4(b)（自带 organization_id 条件不能禁用注入）的回归测试在
 tests/unit/test_security_fixes.py 中同步更新。
 """
+
 from app.agent.tools.code_execution import (
     _inject_org_filter,
     _is_safe_select_sql,
@@ -22,9 +23,7 @@ class TestSelectColumnWhitelist:
     def test_concat_with_one_whitelisted_column_rejected(self):
         # 已验证的绕过：旧实现只要 any(tok in whitelist) 成立就放行，
         # id 在白名单里，hashed_password 因此被 CONCAT 读出。
-        ok, reason = _is_safe_select_sql(
-            "SELECT id, CONCAT(hashed_password, id) FROM users"
-        )
+        ok, reason = _is_safe_select_sql("SELECT id, CONCAT(hashed_password, id) FROM users")
         assert not ok
         assert "not in the allowed whitelist" in reason
 
@@ -38,9 +37,7 @@ class TestSelectColumnWhitelist:
         assert not ok
 
     def test_legit_aggregates_and_aliases_still_allowed(self):
-        ok, reason = _is_safe_select_sql(
-            "SELECT COUNT(*) AS total, MAX(created_at) FROM documents"
-        )
+        ok, reason = _is_safe_select_sql("SELECT COUNT(*) AS total, MAX(created_at) FROM documents")
         assert ok, reason
 
     def test_legit_string_and_cast_expressions_still_allowed(self):

@@ -3,6 +3,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch, h, resolveComponent } from 'vue'
 import { useDialog, NButton } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
+import { useConfirmDangerousAction } from '@/utils/confirm'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -15,9 +16,6 @@ import {
   CloudUploadOutline,
   BookOutline,
   LockClosedOutline,
-  KeyOutline,
-  CopyOutline,
-  WarningOutline,
   CameraOutline,
   TimeOutline,
   HardwareChipOutline,
@@ -29,9 +27,11 @@ import {
   PhonePortraitOutline,
   TabletPortraitOutline,
 } from '@vicons/ionicons5'
-import { getUserProfile, getUserStats, updateUserProfile, updatePassword, uploadAvatar, getUserActivities, generateApiKey as apiGenerateKey, revokeApiKey as apiRevokeKey, getMySessions, revokeMySession, getMyActivityLogs } from '@/api/user'
+import { getUserProfile, getUserStats, updateUserProfile, updatePassword, uploadAvatar, getUserActivities, getMySessions, revokeMySession, getMyActivityLogs, getUserSettingsProviders } from '@/api/user'
 import type { Activity, UserSession, UserAuditLog } from '@/api/user'
 import { formatDate } from '@/utils/format'
+import { LANGUAGES, isLanguageCode } from '@/utils/languages'
+import { setLanguage } from '@/locales'
 import type { UploadCustomRequestOptions } from 'naive-ui'
 
 export function useProfilePage() {
@@ -51,16 +51,17 @@ interface UserInfo {
   id: number
   username: string
   email: string
-  nickname?: string
-  full_name?: string
-  phone?: string
-  avatar?: string
-  avatar_url?: string
+  nickname?: string | null
+  full_name?: string | null
+  phone?: string | null
+  avatar?: string | null
+  avatar_url?: string | null
   role: 'admin' | 'user'
-  status: 'active' | 'inactive'
-  bio?: string
-  created_at: string
-  last_login_at?: string
+  // /users/me 无 status 字段（真身 is_active）；保留可选以免牵连既有初始化
+  status?: 'active' | 'inactive'
+  bio?: string | null
+  created_at: string | null
+  last_login_at?: string | null
 }
 
 interface UserStats {
@@ -74,6 +75,7 @@ interface UserStats {
 
 const message = useDedupedMessage()
 const dialog = useDialog()
+const confirmDangerousAction = useConfirmDangerousAction()
 const { t, locale } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
@@ -115,7 +117,8 @@ const auditPagination = reactive({
 })
 
 // 设备管理表格列
-const trustedDevices = ref<Set<number>>(new Set())
+// B3：「信任此设备」开关已删除——修前只写 localStorage，后端无任何设备信任
+// 逻辑读取（假开关），未发现可接的真实逻辑，按任务书默认删除。
 
 const sessionColumns = [
   {
@@ -132,15 +135,13 @@ const sessionColumns = [
         DeviceIcon = TabletPortraitOutline
         deviceType = '平板设备'
       }
-      const isTrusted = trustedDevices.value.has(row.id)
       return h('div', { class: 'flex items-center gap-3' }, [
         h('div', { class: 'w-10 h-10 rounded-xl bg-gradient-to-br from-blue-100 to-slate-100 dark:from-blue-900/30 dark:to-slate-900/30 flex items-center justify-center' }, [
           h(resolveComponent('n-icon'), { size: '22', class: 'text-blue-600 dark:text-blue-400' }, { default: () => h(DeviceIcon) })
         ]),
         h('div', {}, [
           h('div', { class: 'flex items-center gap-2' }, [
-            h('span', { class: 'font-medium text-gray-800 dark:text-gray-200' }, row.device_name || deviceType),
-            isTrusted ? h('span', { class: 'text-xs px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' }, '✓ 已信任') : null
+            h('span', { class: 'font-medium text-gray-800 dark:text-gray-200' }, row.device_name || deviceType)
           ]),
           h('div', { class: 'text-xs text-gray-400 mt-0.5' }, ua.split(' ')[0] || '-')
         ])
@@ -187,7 +188,6 @@ const sessionColumns = [
     width: 200,
     render: (row: UserSession) => {
       const buttons = []
-      const isTrusted = trustedDevices.value.has(row.id)
 
       // 详情按钮
       buttons.push(h(NButton, {
@@ -195,14 +195,6 @@ const sessionColumns = [
         quaternary: true,
         onClick: (e: Event) => { e.stopPropagation(); showSessionDetail(row) }
       }, { default: () => '详情' }))
-
-      // 信任/取消信任
-      buttons.push(h(NButton, {
-        size: 'small',
-        quaternary: true,
-        type: isTrusted ? 'warning' : 'success',
-        onClick: (e: Event) => { e.stopPropagation(); toggleTrust(row.id) }
-      }, { default: () => isTrusted ? '取消信任' : '信任' }))
 
       // 下线按钮
       if (row.is_active && row.id) {
@@ -218,19 +210,6 @@ const sessionColumns = [
     }
   }
 ]
-
-// 切换设备信任状态
-const toggleTrust = (sessionId: number) => {
-  if (trustedDevices.value.has(sessionId)) {
-    trustedDevices.value.delete(sessionId)
-    message.success('已取消信任此设备')
-  } else {
-    trustedDevices.value.add(sessionId)
-    message.success('已信任此设备')
-  }
-  // 持久化到 localStorage
-  localStorage.setItem('trustedDevices', JSON.stringify([...trustedDevices.value]))
-}
 
 // 显示会话详情
 const showSessionDetail = (session: UserSession) => {
@@ -417,16 +396,18 @@ const themeOptions = [
   { label: '跟随系统', value: 'auto' }
 ]
 
-const languageOptions = [
-  { label: '简体中文', value: 'zh' },
-  { label: 'English', value: 'en' },
-  { label: '日本語', value: 'ja' },
-  { label: 'Français', value: 'fr' }
-]
+// 语言清单单一事实源（ISS-4）；下拉用纯文本 label，Beta 以 · 后缀标注
+const languageOptions = LANGUAGES.map((l) => ({
+  label: l.beta ? `${l.label} · Beta` : l.label,
+  value: l.value,
+}))
 
+// E5：语言包按需加载——先就绪词条包再切 locale（非法语码不注入）
 const handleLanguageChange = (val: string) => {
-  localStorage.setItem('language', val)
-  locale.value = val
+  if (!isLanguageCode(val)) return
+  void setLanguage(val).catch(() => {
+    // 词条包加载失败：保持当前语言
+  })
 }
 
 // Settings form
@@ -456,11 +437,17 @@ const onProviderChange = (pid: string) => {
   }
 }
 
+// Provider 配置加载错误态（通知 store 同款：失败可判别；状态只在成功路径复位）
+const providersLoadError = ref<string | null>(null)
+
 const loadProviders = async () => {
   try {
-    const res = await fetch('/api/v1/settings/providers', { headers: { Authorization: `Bearer ${localStorage.getItem('docmind_token')}` }})
-    if (!res.ok) return
-    const data = await res.json()
+    // 正确路径带 /user 前缀（router.py:51 prefix="/user" + user_settings.py:117
+    // @router.get("/settings/providers")）——旧写法 /api/v1/settings/providers
+    // 恒 404（A_sweep PROF-1 实测：缺前缀 404 / 正确路径 200）。
+    // T10：改走 utils/request.ts 统一客户端（鉴权头/401 刷新/错误提示统一接管）。
+    const res = await getUserSettingsProviders()
+    const data = res.data
     providers.value = data.providers || []
     const cur = data.current
     if (cur) {
@@ -469,8 +456,11 @@ const loadProviders = async () => {
       providerForm.api_key = cur.api_key || ''
       providerForm.base_url = cur.base_url || ''
     }
-  } catch {
-    // 最佳努力加载：失败时保留默认 provider 配置，不阻塞页面渲染
+    providersLoadError.value = null
+  } catch (error) {
+    // 失败保留上一次成功值（不清空 providers/providerForm），错误态显式上报——
+    // 否则加载失败与"确实没有可选项"不可区分（与通知 store 的 lastError 同口径）。
+    providersLoadError.value = error instanceof Error ? error.message : String(error)
   }
 }
 
@@ -486,14 +476,20 @@ const handleSaveSettings = async () => {
   try {
     // Apply theme immediately
     appStore.setTheme(settingsForm.theme as 'light' | 'dark' | 'auto')
-    // Apply language immediately
-    locale.value = settingsForm.language
-    localStorage.setItem('language', settingsForm.language)
+    // Apply language immediately（E5：先就绪词条包再切，失败保持当前语言）
+    if (isLanguageCode(settingsForm.language)) {
+      await setLanguage(settingsForm.language).catch(() => {
+        // 词条包加载失败：保持当前语言
+      })
+    }
     // Save to backend
+    // W2-T7：不再携带 preferences.ai_provider——后端全局无任何服务消费该字段
+    // （推理只走 .env 全局 DeepSeek），且 GET /settings/providers 回读的 api_key
+    // 是掩码值，随保存回写会覆盖真实 key。provider 区块已按「实验功能·暂不生效」
+    // 标注并禁用（见 profile/index.vue），保存仅剩语言/主题两个真实生效字段。
     const result = await userStore.updateSettings({
       language: settingsForm.language,
       theme: settingsForm.theme,
-      preferences: { ai_provider: { ...providerForm } },
     })
     if (result.success) {
       settingsSaveMessage.value = t('common.saveSuccess')
@@ -625,8 +621,6 @@ const handleResize = () => {
   storageChart?.resize()
   activityChart?.resize()
 }
-const generatingApiKey = ref(false)
-const revokingApiKey = ref(false)
 
 // 表单引用
 const editFormRef = ref()
@@ -645,8 +639,6 @@ const passwordForm = ref({
   confirmPassword: ''
 })
 
-const apiKey = ref('')
-
 // 校验规则
 const editFormRules = {
   nickname: [
@@ -664,7 +656,7 @@ const passwordFormRules = {
   ],
   newPassword: [
     { required: true, message: t('profile.placeholder.newPassword'), trigger: 'blur' },
-    { min: 6, max: 20, message: t('profile.validation.passwordLength'), trigger: 'blur' }
+    { min: 8, max: 20, message: t('profile.validation.passwordLength'), trigger: 'blur' }
   ],
   confirmPassword: [
     { required: true, message: t('profile.placeholder.confirmPassword'), trigger: 'blur' },
@@ -740,14 +732,9 @@ const loadUserProfile = async () => {
       userInfo.value = {
         ...data,
         nickname: data.nickname || data.full_name || data.username,
-        avatar: data.avatar_url
+        avatar: data.avatar_url ?? undefined
       }
-      
-      // 设置 API Key
-      if (data.api_key) {
-        apiKey.value = data.api_key
-      }
-      
+
       // 初始化编辑表单
       editForm.value = {
         nickname: userInfo.value.nickname || '',
@@ -833,6 +820,12 @@ const formatAuditAction = (action?: string) => {
 
 const handleRevokeSession = async (sessionId: number) => {
   if (!sessionId) return
+  // E2：下线设备不可逆（需重新登录），先经统一二次确认；取消零副作用
+  const confirmed = await confirmDangerousAction(
+    t('profile.revokeSession'),
+    t('profile.revokeSessionConfirm'),
+  )
+  if (!confirmed) return
   try {
     await revokeMySession(sessionId)
     message.success(t('profile.sessionRevoked') || '设备已下线')
@@ -886,58 +879,12 @@ const handleChangePassword = async () => {
   }
 }
 
-// API Key 逻辑
-const generateApiKey = async () => {
-  try {
-    generatingApiKey.value = true
-    const response = await apiGenerateKey()
-    const resData = response.data as Record<string, unknown>
-    if (resData?.api_key) {
-      apiKey.value = resData.api_key as string
-      message.success(t('profile.apiKeyGenerated'))
-    }
-  } catch (error: unknown) {
-    const errMsg = getResponseDetail(error) || t('profile.apiKeyGenerateFailed')
-    message.error(errMsg)
-  } finally {
-    generatingApiKey.value = false
-  }
-}
-
-const revokeApiKey = async () => {
-  try {
-    revokingApiKey.value = true
-    await apiRevokeKey()
-    apiKey.value = ''
-    message.success(t('profile.apiKeyRevoked'))
-  } catch (error: unknown) {
-    const errMsg = getResponseDetail(error) || t('profile.apiKeyRevokeFailed') || '撤销 API Key 失败'
-    message.error(errMsg)
-  } finally {
-    revokingApiKey.value = false
-  }
-}
-
-const copyApiKey = () => {
-  if (!apiKey.value) return
-  navigator.clipboard.writeText(apiKey.value)
-  message.success(t('common.copySuccess'))
-}
+// API Key 生成/撤销逻辑已随 B3 死设定清理删除（Profile 入口与后端调用通道均移除）。
 
 const loadAllData = async () => {
   loadError.value = false
   loading.value = true
   try {
-    // 加载已信任的设备
-    try {
-      const savedTrusted = localStorage.getItem('trustedDevices')
-      if (savedTrusted) {
-        trustedDevices.value = new Set(JSON.parse(savedTrusted))
-      }
-    } catch (e) {
-      // Failed to load trusted devices
-    }
-
     await loadUserProfile()
     await loadUserStats()
     await loadActivities()
@@ -955,16 +902,24 @@ const loadAllData = async () => {
   loadProviders()
 
   // Wait for next tick to ensure DOM is ready for ECharts
-  setTimeout(() => {
+  // （定时器晚到/无 window 环境安全跳过：vitest node 环境赛跑时该回调可能在环境
+  //   拆除后触发，裸碰 window 会抛 Unhandled ReferenceError；见 onUnmounted 的
+  //   clearTimeout + removeEventListener 闭环）
+  resizeTimer = setTimeout(() => {
+    if (typeof window === 'undefined') return
     initCharts()
     window.addEventListener('resize', handleResize)
   }, 100)
 }
 
+/** 延迟挂 resize 监听的定时器句柄（onUnmounted 清理，防环境拆除后触发） */
+let resizeTimer: ReturnType<typeof setTimeout> | undefined
+
 onMounted(loadAllData)
 
 onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
+  if (resizeTimer !== undefined) clearTimeout(resizeTimer)
+  if (typeof window !== 'undefined') window.removeEventListener('resize', handleResize)
   storageChart?.dispose()
   activityChart?.dispose()
 })
@@ -974,25 +929,24 @@ onUnmounted(() => {
   message, dialog, t, locale, router, userStore, appStore,
   loading, loadError, loadErrorMsg,
   userInfo, stats, activities, sessions, auditLogs,
-  sessionPagination, auditPagination, trustedDevices,
-  sessionColumns, toggleTrust, showSessionDetail,
+  sessionPagination, auditPagination,
+  sessionColumns, showSessionDetail,
   auditColumns,
   storageUsage, storageUsedBytes, storageLimitBytes, storageMetricsSource,
   formatBytes, statItems, workflowCompletion, quickActions, goToRoute,
   themeOptions, languageOptions, handleLanguageChange,
   settingsForm, savingSettings, settingsSaveMessage, settingsSaveSuccess,
   providers, providerForm, providerOptions, currentProvider,
-  currentModelOptions, currentProviderNeedsKey,
+  currentModelOptions, currentProviderNeedsKey, providersLoadError,
   onProviderChange, loadProviders, settingsChanged, handleSaveSettings,
   updatingProfile, updatingPassword,
   storageChartRef, activityChartRef, initCharts, handleResize,
-  generatingApiKey, revokingApiKey,
-  editFormRef, passwordFormRef, editForm, passwordForm, apiKey,
+  editFormRef, passwordFormRef, editForm, passwordForm,
   editFormRules, passwordFormRules,
   getApiBaseUrl, normalizeAvatarUrl, handleAvatarUpload,
   loadUserProfile, loadUserStats, loadActivities, loadSessions, loadAuditLogs,
   formatAuditAction, handleRevokeSession, handleUpdateProfile,
-  handleChangePassword, generateApiKey, revokeApiKey, copyApiKey, loadAllData,
+  handleChangePassword, loadAllData,
   formatDate,
   };
 }

@@ -61,8 +61,11 @@ class PatternMiner:
             except Exception as e:
                 logger.debug("Failed to extract sequence from %s: %s", f.name, e)
 
-        logger.info("Loaded %d tool sequences from %d replay files",
-                     len(sequences), len(list(self.replay_dir.glob("*.json"))))
+        logger.info(
+            "Loaded %d tool sequences from %d replay files",
+            len(sequences),
+            len(list(self.replay_dir.glob("*.json"))),
+        )
         return sequences
 
     def _extract_sequence(self, path: Path) -> ToolSequence | None:
@@ -115,8 +118,7 @@ class PatternMiner:
                 try:
                     case = json.loads(f.read_text(encoding="utf-8"))
                     # Match by question_id or trace_id
-                    if (case.get("trace_id") == task_id or
-                        case.get("question_id", "") in task_id):
+                    if case.get("trace_id") == task_id or case.get("question_id", "") in task_id:
                         cov = case.get("keyword_coverage", 0.0)
                         return cov, cov >= 0.8
                 except Exception:
@@ -148,28 +150,30 @@ class PatternMiner:
             ).hexdigest()[:12]
 
             # Extract trigger keywords from successful queries
-            trigger_keywords = self._extract_triggers(
-                [s.query for s in group if s.success]
-            )
+            trigger_keywords = self._extract_triggers([s.query for s in group if s.success])
 
             # Auto-name the pattern
             suggested_name = self._auto_name(tool_tuple)
 
-            stats.append(PatternStats(
-                pattern_id=pattern_id,
-                tool_sequence=list(tool_tuple),
-                count=count,
-                success_count=success_count,
-                failure_count=failure_count,
-                avg_coverage=round(avg_coverage, 3),
-                avg_duration_ms=round(avg_duration, 1),
-                is_candidate=(count >= 2 and success_count / count >= 0.7 and len(tool_tuple) >= 2),
-                suggested_name=suggested_name,
-                suggested_triggers=trigger_keywords,
-                first_seen=group[0].query[:20] if group else "",
-                last_seen=group[-1].query[:20] if group else "",
-                source_task_ids=[s.task_id[:12] for s in group[:10]],
-            ))
+            stats.append(
+                PatternStats(
+                    pattern_id=pattern_id,
+                    tool_sequence=list(tool_tuple),
+                    count=count,
+                    success_count=success_count,
+                    failure_count=failure_count,
+                    avg_coverage=round(avg_coverage, 3),
+                    avg_duration_ms=round(avg_duration, 1),
+                    is_candidate=(
+                        count >= 2 and success_count / count >= 0.7 and len(tool_tuple) >= 2
+                    ),
+                    suggested_name=suggested_name,
+                    suggested_triggers=trigger_keywords,
+                    first_seen=group[0].query[:20] if group else "",
+                    last_seen=group[-1].query[:20] if group else "",
+                    source_task_ids=[s.task_id[:12] for s in group[:10]],
+                )
+            )
 
         # Rank by composite score: frequency × success_rate × coverage
         stats.sort(key=lambda s: s.count * s.success_rate * max(s.avg_coverage, 0.1), reverse=True)
@@ -184,8 +188,8 @@ class PatternMiner:
             q = query.lower()
             # Chinese bigrams
             for i in range(len(q) - 1):
-                bg = q[i:i+2]
-                if all('一' <= c <= '鿿' for c in bg):
+                bg = q[i : i + 2]
+                if all("一" <= c <= "鿿" for c in bg):
                     keyword_freq[bg] += 1
             # English words (length > 2)
             for word in q.split():
@@ -244,11 +248,12 @@ class PatternMiner:
             return []
 
         patterns = self.compute_patterns(sequences)
-        logger.info("Mined %d unique patterns from %d sequences",
-                     len(patterns), len(sequences))
+        logger.info("Mined %d unique patterns from %d sequences", len(patterns), len(sequences))
         return patterns
 
-    def save_patterns(self, patterns: list[PatternStats], path: str = "benchmark/patterns.json") -> str:
+    def save_patterns(
+        self, patterns: list[PatternStats], path: str = "benchmark/patterns.json"
+    ) -> str:
         """Save discovered patterns to a local JSON file."""
         output = Path(path)
         output.parent.mkdir(parents=True, exist_ok=True)

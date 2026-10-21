@@ -14,6 +14,7 @@
 - APICall 包裹改回 ValueError → test_api_call_network_failure_remains_retryable
   按类型断言（恰 1 次即抛 ValueError，而非重试满 3 次的 TransientNodeError）红。
 """
+
 import pytest
 
 from app.schemas.workflow import WorkflowNode
@@ -24,7 +25,9 @@ from app.services.workflow_engine import (
 )
 
 
-def _make_node(node_id: str = "n1", node_type: str = "input", data: dict | None = None) -> WorkflowNode:
+def _make_node(
+    node_id: str = "n1", node_type: str = "input", data: dict | None = None
+) -> WorkflowNode:
     return WorkflowNode(id=node_id, type=node_type, data=data or {}, position={"x": 0, "y": 0})
 
 
@@ -63,7 +66,9 @@ class TestDeterministicFailFast:
         ex = _CountingExecutor(ValueError("缺少组织范围（确定性守卫）"))
         with pytest.raises(ValueError, match="确定性守卫"):
             await ex.execute_with_retry(_STATE)
-        assert ex.calls == 1, "确定性 ValueError 必须 fail-fast（变异：去掉 fail-fast 分支 → calls==3）"
+        assert ex.calls == 1, (
+            "确定性 ValueError 必须 fail-fast（变异：去掉 fail-fast 分支 → calls==3）"
+        )
 
     @pytest.mark.asyncio
     async def test_not_implemented_is_not_retried(self):
@@ -115,4 +120,6 @@ class TestTransientStillRetried:
 
         with pytest.raises(TransientNodeError, match="API 调用失败"):
             await ex.execute_with_retry(_STATE)
-        assert attempts["n"] == 3, "网络类失败必须被重试（变异：包裹回 ValueError → fail-fast 只 1 次）"
+        assert attempts["n"] == 3, (
+            "网络类失败必须被重试（变异：包裹回 ValueError → fail-fast 只 1 次）"
+        )

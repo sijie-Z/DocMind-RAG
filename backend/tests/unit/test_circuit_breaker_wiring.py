@@ -8,6 +8,7 @@
 - 生产常量钉：_LLM_BREAKER 的 threshold=3 / recovery_timeout=30（issue #256）；
 - 行为不回归：CLOSED 态下事件序列与接线前一致（由既有 executor 测试基线承担）。
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -93,10 +94,17 @@ async def test_executor_fast_fails_when_breaker_open(monkeypatch):
     plan = Plan(id="p1", goal="g", steps=[step])
 
     async def _run_once():
-        return [e async for e in ex._execute_step_once(
-            step=step, plan=plan, history=None, organization_id=1, user_id=0,
-            enable_thinking=False,
-        )]
+        return [
+            e
+            async for e in ex._execute_step_once(
+                step=step,
+                plan=plan,
+                history=None,
+                organization_id=1,
+                user_id=0,
+                enable_thinking=False,
+            )
+        ]
 
     for _ in range(3):
         events = await _run_once()
@@ -156,10 +164,17 @@ async def test_blocked_requests_do_not_record_failure(monkeypatch):
     plan = Plan(id="p1", goal="g", steps=[step])
 
     for _ in range(5):
-        events = [e async for e in ex._execute_step_once(
-            step=step, plan=plan, history=None, organization_id=1, user_id=0,
-            enable_thinking=False,
-        )]
+        events = [
+            e
+            async for e in ex._execute_step_once(
+                step=step,
+                plan=plan,
+                history=None,
+                organization_id=1,
+                user_id=0,
+                enable_thinking=False,
+            )
+        ]
         errs = [e for e in events if e.type == "tool_error"]
         assert errs and errs[-1].error_type == "circuit_open"  # 前提：请求确实被门拦下
 
@@ -203,10 +218,17 @@ async def test_gate_fast_fail_ends_observability_spans(monkeypatch):
     step = PlanStep(id="s1", description="d")
     plan = Plan(id="p1", goal="g", steps=[step])
 
-    events = [e async for e in ex._execute_step_once(
-        step=step, plan=plan, history=None, organization_id=1, user_id=0,
-        enable_thinking=False,
-    )]
+    events = [
+        e
+        async for e in ex._execute_step_once(
+            step=step,
+            plan=plan,
+            history=None,
+            organization_id=1,
+            user_id=0,
+            enable_thinking=False,
+        )
+    ]
 
     errs = [e for e in events if e.type == "tool_error"]
     assert errs and errs[-1].error_type == "circuit_open"  # 前提：门确实拦下了
@@ -242,13 +264,22 @@ async def test_executor_breaker_recovers_after_successful_probe(monkeypatch):
 
     memory = MagicMock()
     memory.get_context_for_query = AsyncMock(return_value="")
-    ex = Executor(client, AgentConfig(timeout=2.0, enable_planning=False, enable_reflection=False), memory)
+    ex = Executor(
+        client, AgentConfig(timeout=2.0, enable_planning=False, enable_reflection=False), memory
+    )
     step = PlanStep(id="s1", description="d")
     plan = Plan(id="p1", goal="g", steps=[step])
 
-    _events = [e async for e in ex._execute_step_once(
-        step=step, plan=plan, history=None, organization_id=1, user_id=0,
-        enable_thinking=False,
-    )]
+    _events = [
+        e
+        async for e in ex._execute_step_once(
+            step=step,
+            plan=plan,
+            history=None,
+            organization_id=1,
+            user_id=0,
+            enable_thinking=False,
+        )
+    ]
 
     assert breaker.state is CircuitState.CLOSED, "半开探测成功 → 闭合"

@@ -1,6 +1,7 @@
 """
-派聪明AI知识库系统 - 用户设置端点
+DocMind AI知识库系统 - 用户设置端点
 """
+
 import logging
 
 from fastapi import APIRouter, Depends
@@ -18,13 +19,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _get_or_create_settings(
-    db: AsyncSession, user_id: int
-) -> UserSettings:
+async def _get_or_create_settings(db: AsyncSession, user_id: int) -> UserSettings:
     """获取用户设置，不存在则创建默认设置"""
-    result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == user_id)
-    )
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     settings = result.scalar_one_or_none()
 
     if settings is None:
@@ -122,17 +119,18 @@ async def get_providers(
     """返回可用 AI Provider 列表和当前用户选择。"""
     settings_obj = await _get_or_create_settings(db, current_user.id)
     prefs = settings_obj.preferences or {}
-    current = prefs.get("ai_provider", {
-        "provider": "deepseek",
-        "model": "deepseek-v4-flash",
-        "api_key": "",
-        "base_url": "",
-    })
+    current = prefs.get(
+        "ai_provider",
+        {
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "api_key": "",
+            "base_url": "",
+        },
+    )
     if current.get("api_key"):
         raw_key = str(current["api_key"])
-        current["api_key"] = (
-            "********" if len(raw_key) <= 8 else f"{raw_key[:4]}...{raw_key[-4:]}"
-        )
+        current["api_key"] = "********" if len(raw_key) <= 8 else f"{raw_key[:4]}...{raw_key[-4:]}"
     return {
         "success": True,
         "providers": _AVAILABLE_PROVIDERS,

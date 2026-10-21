@@ -446,7 +446,8 @@ async def extract_all_from_benchmark(
 
     logger.info(
         "Benchmark extraction complete: %d/%d failures → experiences",
-        extracted, total,
+        extracted,
+        total,
     )
     return extracted
 

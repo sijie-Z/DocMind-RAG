@@ -5,7 +5,6 @@ Covers: AST sandbox escape blocking, SQL org-filter injection,
 PII masking chain offsets, and the server-side disabled_tools merge.
 """
 
-
 from app.agent.tools.code_execution import (
     _ast_safety_check,
     _inject_org_filter,
@@ -54,7 +53,9 @@ class TestSqlOrgFilter:
         assert "organization_id = 7" in q
 
     def test_existing_where_is_wrapped(self):
-        q = _inject_org_filter("SELECT id FROM documents WHERE title LIKE '%a%' OR filename LIKE '%b%'", 7)
+        q = _inject_org_filter(
+            "SELECT id FROM documents WHERE title LIKE '%a%' OR filename LIKE '%b%'", 7
+        )
         assert "WHERE (organization_id = 7 AND" in q
         # OR must stay inside the org-filtered parentheses
         assert q.count("(") == q.count(")")
@@ -82,11 +83,15 @@ class TestSqlOrgFilter:
         assert "LIMIT 5" in q and "LIMIT 100" not in q
 
     def test_union_rejected_by_validator(self):
-        ok, reason = _is_safe_select_sql("SELECT id FROM documents UNION SELECT hashed_password FROM users")
+        ok, reason = _is_safe_select_sql(
+            "SELECT id FROM documents UNION SELECT hashed_password FROM users"
+        )
         assert not ok
 
     def test_subquery_rejected(self):
-        ok, reason = _is_safe_select_sql("SELECT id FROM users WHERE username=(SELECT hashed_password FROM users LIMIT 1)")
+        ok, reason = _is_safe_select_sql(
+            "SELECT id FROM users WHERE username=(SELECT hashed_password FROM users LIMIT 1)"
+        )
         assert not ok
 
     def test_into_outfile_rejected(self):
@@ -95,6 +100,7 @@ class TestSqlOrgFilter:
 
     def test_users_sensitive_columns_removed(self):
         from app.agent.tools.code_execution import ALLOWED_SQL_COLUMNS
+
         assert "email" not in ALLOWED_SQL_COLUMNS["users"]
         assert "hashed_password" not in ALLOWED_SQL_COLUMNS["users"]
 
@@ -113,7 +119,9 @@ class TestMaskingChain:
         assert "[PHONE_" not in masked
 
     def test_id_card_and_bank_card_both_masked(self):
-        masked, mapping = masking_service.mask_text("身份证110101199003071234 银行卡6222020200112233445")
+        masked, mapping = masking_service.mask_text(
+            "身份证110101199003071234 银行卡6222020200112233445"
+        )
         assert "110101199003071234" not in masked
         assert "6222020200112233445" not in masked
         assert "[ID_CARD_" in masked or "[BANK_CARD_" in masked
@@ -130,6 +138,7 @@ class TestDisabledToolsMerge:
     def test_merge_keeps_defaults(self):
         from app.agent.config import DEFAULT_DISABLED_TOOLS
         from app.api.v1.endpoints.agent import _merge_disabled_tools
+
         merged = _merge_disabled_tools(["get_current_time"])
         for tool in DEFAULT_DISABLED_TOOLS:
             assert tool in merged
@@ -138,11 +147,13 @@ class TestDisabledToolsMerge:
     def test_empty_client_list_gets_defaults(self):
         from app.agent.config import DEFAULT_DISABLED_TOOLS
         from app.api.v1.endpoints.agent import _merge_disabled_tools
+
         merged = _merge_disabled_tools([])
         assert set(merged) == set(DEFAULT_DISABLED_TOOLS)
 
     def test_client_cannot_re_enable_high_risk_tools(self):
         from app.api.v1.endpoints.agent import _merge_disabled_tools
+
         merged = _merge_disabled_tools(["execute_python", "execute_sql", "mcp_call"])
         # Even if the client explicitly lists them as "enabled" (i.e. not disabled),
         # the merge must keep them disabled.

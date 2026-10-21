@@ -1,6 +1,5 @@
 """Infrastructure settings — database, Redis, Elasticsearch, Kafka, MinIO, file upload."""
 
-
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -36,7 +35,7 @@ class DatabaseSettings(BaseSettings):
     # 注：分词器不是配置项——运行时由 _ESHolder 自动选择（默认 cjk，探测到 IK 后
     # 用 ik_smart/ik_max_word，见 core/elasticsearch.py）。此前的 ES_ANALYZER /
     # ES_SEARCH_ANALYZER 字段零消费且默认值 "standard" 与运行时矛盾
-    #（issue #242：误导性强于无用，已删除）。
+    # （issue #242：误导性强于无用，已删除）。
     ELASTICSEARCH_HOSTS: list[str] = ["http://localhost:9200"]
     ELASTICSEARCH_INDEX_NAME: str = "paicongming_knowledge"
 
@@ -63,7 +62,7 @@ class DatabaseSettings(BaseSettings):
 
     # Document parsing
     # 注：支持的文件类型不是配置项——白名单与解析器能力强耦合（file_service 的
-    # allowed_extensions / document_parser 的 supported_extensions / 前端 accept
-    # 三处同为 7 种格式）。此前的 SUPPORTED_FILE_TYPES 字段零消费（issue #242 已删除）；
+    # allowed_extensions / document_parser 的 supported_extensions 两处同为
+    # 13 种格式（7 文档 + 6 图片）。此前的 SUPPORTED_FILE_TYPES 字段零消费（issue #242 已删除）；
     # 未来若要放开更多格式，正确动作是扩展 parser，而不是把常量改读 env。
     OCR_LANGUAGE: str = "chi_sim+eng"

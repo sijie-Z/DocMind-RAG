@@ -8,6 +8,7 @@
 护栏语义：启动路径只允许"创建/补齐"级操作（`ensure_demo_user`），
 **不得出现任何登录尝试**（`authenticate_user`）。任何未来加回的自检都必须不阻塞启动。
 """
+
 import inspect
 
 from app import main

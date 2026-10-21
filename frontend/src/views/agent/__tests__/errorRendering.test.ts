@@ -16,8 +16,10 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
-import { NMessageProvider, NSpin, NButton, NTooltip, NIcon } from 'naive-ui'
+import { NMessageProvider, NDialogProvider, NSpin, NButton, NTooltip, NIcon } from 'naive-ui'
+import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
+import zh from '@/locales/zh'
 
 import AgentView from '../index.vue'
 import { useAgentStore } from '@/stores/agent'
@@ -25,21 +27,24 @@ import { useAgentStore } from '@/stores/agent'
 // 视图 onMounted 会拉初始数据；测试里全部打桩为空。
 vi.mock('@/api/agent', () => ({
   agentApi: {
-    listTools: vi.fn().mockResolvedValue({ data: [] }),
-    listSessions: vi.fn().mockResolvedValue({ data: { sessions: [] } }),
-    getConfig: vi.fn().mockResolvedValue({ data: {} }),
+    listTools: vi.fn().mockResolvedValue({ data: { success: true, data: [], total: 0 } }),
+    listSessions: vi.fn().mockResolvedValue({ data: { success: true, data: { sessions: [], total: 0, page: 1, page_size: 20 } } }),
+    getConfig: vi.fn().mockResolvedValue({ data: { success: true, data: {} } }),
     chat: vi.fn(),
-    getSession: vi.fn().mockResolvedValue({ data: {} }),
+    getSession: vi.fn().mockResolvedValue({ data: { success: true, data: null } }),
     deleteSession: vi.fn().mockResolvedValue({}),
-    createSession: vi.fn().mockResolvedValue({ data: null }),
+    createSession: vi.fn().mockResolvedValue({ data: { success: true, data: null } }),
     updateConfig: vi.fn().mockResolvedValue({}),
     submitFeedback: vi.fn().mockResolvedValue({}),
   },
 }))
 
 // 视图在 setup 里调 useDedupedMessage()（naive-ui useMessage 需要 Provider）
+// F4：AgentView 用 t('hitl.*') 渲染取消标识——视图测试统一装 zh 实例
+const i18n = createI18n({ legacy: false, locale: 'zh', fallbackLocale: 'zh', messages: { zh } })
+
 const Host = defineComponent({
-  render: () => h(NMessageProvider, null, { default: () => h(AgentView) }),
+  render: () => h(NMessageProvider, null, { default: () => h(NDialogProvider, null, { default: () => h(AgentView) }) }),
 })
 
 const stubs = {
@@ -82,7 +87,7 @@ function seedStore(overrides: Record<string, unknown> = {}) {
 async function mountView(pinia: ReturnType<typeof createPinia>) {
   const wrapper = mount(Host, {
     global: {
-      plugins: [pinia],
+      plugins: [pinia, i18n],
       components: { NSpin, NButton, NTooltip, NIcon },
       stubs,
     },

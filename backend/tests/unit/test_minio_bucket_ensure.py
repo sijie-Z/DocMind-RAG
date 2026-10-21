@@ -1,6 +1,7 @@
 """issue #234：bucket 懒创建此前是**死代码**（无任何调用者）——
 全新 MinIO（空实例）首次 put 必然 `NoSuchBucket`。修复后由 put/get 入口懒调用。
 """
+
 import io
 from unittest.mock import MagicMock
 

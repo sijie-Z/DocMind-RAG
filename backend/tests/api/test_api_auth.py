@@ -1,4 +1,5 @@
 """Auth API 集成测试 — 完整的认证流程测试。"""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,11 +12,13 @@ from app.core.security import get_current_user
 @pytest.fixture
 def client():
     from app.main import app
+
     return TestClient(app)
 
 
 class _AsyncCtxMgr:
     """支持 async with 的 mock 上下文管理器。"""
+
     def __init__(self, db):
         self._db = db
 
@@ -93,6 +96,7 @@ class TestRegisterEndpoint:
     def test_register_success(self, client: TestClient):
         """注册成功应返回 access_token 和 refresh_token。"""
         from app.main import app
+
         override_func, mock_db = _override_get_db()
 
         mock_user = _make_mock_user()
@@ -112,12 +116,15 @@ class TestRegisterEndpoint:
             app.dependency_overrides[get_db] = override_func
 
             try:
-                r = client.post("/api/v1/auth/register", json={
-                    "username": "newuser",
-                    "email": "new@example.com",
-                    "password": "ValidPass123!",
-                    "full_name": "New User"
-                })
+                r = client.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "username": "newuser",
+                        "email": "new@example.com",
+                        "password": "ValidPass123!",
+                        "full_name": "New User",
+                    },
+                )
                 assert r.status_code == 200, f"Register failed: {r.json()}"
                 data = r.json()
                 assert data["success"] is True
@@ -129,6 +136,7 @@ class TestRegisterEndpoint:
     def test_register_duplicate_username(self, client: TestClient):
         """重复用户名应返回 409 Conflict。"""
         from app.main import app
+
         override_func, mock_db = _override_get_db()
 
         mock_existing = _make_mock_user()
@@ -138,11 +146,14 @@ class TestRegisterEndpoint:
 
             app.dependency_overrides[get_db] = override_func
             try:
-                r = client.post("/api/v1/auth/register", json={
-                    "username": "existing",
-                    "email": "new@example.com",
-                    "password": "ValidPass123!"
-                })
+                r = client.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "username": "existing",
+                        "email": "new@example.com",
+                        "password": "ValidPass123!",
+                    },
+                )
                 assert r.status_code == 409
             finally:
                 app.dependency_overrides.pop(get_db, None)
@@ -150,6 +161,7 @@ class TestRegisterEndpoint:
     def test_register_duplicate_email(self, client: TestClient):
         """重复邮箱应返回 409 Conflict。"""
         from app.main import app
+
         override_func, mock_db = _override_get_db()
 
         mock_existing = _make_mock_user()
@@ -160,39 +172,39 @@ class TestRegisterEndpoint:
 
             app.dependency_overrides[get_db] = override_func
             try:
-                r = client.post("/api/v1/auth/register", json={
-                    "username": "newuser",
-                    "email": "used@example.com",
-                    "password": "ValidPass123!"
-                })
+                r = client.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "username": "newuser",
+                        "email": "used@example.com",
+                        "password": "ValidPass123!",
+                    },
+                )
                 assert r.status_code == 409
             finally:
                 app.dependency_overrides.pop(get_db, None)
 
     def test_register_short_password(self, client: TestClient):
         """密码少于 8 位应返回 422。"""
-        r = client.post("/api/v1/auth/register", json={
-            "username": "newuser",
-            "email": "new@example.com",
-            "password": "short"
-        })
+        r = client.post(
+            "/api/v1/auth/register",
+            json={"username": "newuser", "email": "new@example.com", "password": "short"},
+        )
         assert r.status_code == 422
 
     def test_register_missing_username(self, client: TestClient):
         """缺少 username 应返回 422。"""
-        r = client.post("/api/v1/auth/register", json={
-            "email": "new@example.com",
-            "password": "ValidPass123!"
-        })
+        r = client.post(
+            "/api/v1/auth/register", json={"email": "new@example.com", "password": "ValidPass123!"}
+        )
         assert r.status_code == 422
 
     def test_register_invalid_email(self, client: TestClient):
         """无效邮箱应返回 422。"""
-        r = client.post("/api/v1/auth/register", json={
-            "username": "newuser",
-            "email": "not-an-email",
-            "password": "ValidPass123!"
-        })
+        r = client.post(
+            "/api/v1/auth/register",
+            json={"username": "newuser", "email": "not-an-email", "password": "ValidPass123!"},
+        )
         assert r.status_code == 422
 
     def test_register_empty_body(self, client: TestClient):
@@ -205,6 +217,7 @@ class TestLoginEndpoint:
     def test_login_success(self, client: TestClient):
         """有效凭据登录应返回 access_token。"""
         from app.main import app
+
         override_func, mock_db = _override_get_db()
 
         mock_user = _make_mock_user()
@@ -216,10 +229,9 @@ class TestLoginEndpoint:
 
             app.dependency_overrides[get_db] = override_func
             try:
-                r = client.post("/api/v1/auth/login", data={
-                    "username": "testuser",
-                    "password": "ValidPass123!"
-                })
+                r = client.post(
+                    "/api/v1/auth/login", data={"username": "testuser", "password": "ValidPass123!"}
+                )
                 assert r.status_code == 200, f"Login failed: {r.json()}"
                 data = r.json()
                 assert data["success"] is True
@@ -230,6 +242,7 @@ class TestLoginEndpoint:
     def test_login_wrong_password(self, client: TestClient):
         """错误密码应返回 401。"""
         from app.main import app
+
         override_func, mock_db = _override_get_db()
 
         with patch("app.api.v1.endpoints.auth.auth_service") as mock_auth_service:
@@ -237,10 +250,9 @@ class TestLoginEndpoint:
 
             app.dependency_overrides[get_db] = override_func
             try:
-                r = client.post("/api/v1/auth/login", data={
-                    "username": "testuser",
-                    "password": "WrongPass123!"
-                })
+                r = client.post(
+                    "/api/v1/auth/login", data={"username": "testuser", "password": "WrongPass123!"}
+                )
                 assert r.status_code == 401
             finally:
                 app.dependency_overrides.pop(get_db, None)
@@ -252,10 +264,7 @@ class TestLoginEndpoint:
 
     def test_login_empty_password(self, client: TestClient):
         """空密码应返回 422。"""
-        r = client.post("/api/v1/auth/login", data={
-            "username": "testuser",
-            "password": ""
-        })
+        r = client.post("/api/v1/auth/login", data={"username": "testuser", "password": ""})
         assert r.status_code == 422
 
 
@@ -263,6 +272,7 @@ class TestLoginJsonEndpoint:
     def test_login_json_success(self, client: TestClient):
         """JSON 登录应成功。"""
         from app.main import app
+
         override_func, mock_db = _override_get_db()
 
         mock_user = _make_mock_user()
@@ -274,10 +284,10 @@ class TestLoginJsonEndpoint:
 
             app.dependency_overrides[get_db] = override_func
             try:
-                r = client.post("/api/v1/auth/login/json", json={
-                    "username": "testuser",
-                    "password": "ValidPass123!"
-                })
+                r = client.post(
+                    "/api/v1/auth/login/json",
+                    json={"username": "testuser", "password": "ValidPass123!"},
+                )
                 assert r.status_code == 200
                 data = r.json()
                 assert data["success"] is True
@@ -289,13 +299,16 @@ class TestRefreshEndpoint:
     def test_refresh_success(self, client: TestClient):
         """有效的 refresh_token 应返回新的 access_token。"""
         from app.main import app
+
         override_func, mock_db = _override_get_db()
 
         mock_user = _make_mock_user()
 
         with patch("app.api.v1.endpoints.auth.auth_service") as mock_auth_service:
             mock_auth_service.verify_token.return_value = {
-                "sub": "testuser", "user_id": 1, "type": "refresh"
+                "sub": "testuser",
+                "user_id": 1,
+                "type": "refresh",
             }
             mock_auth_service.get_user_by_id = AsyncMock(return_value=mock_user)
             mock_auth_service.create_access_token.return_value = "new_access_token"
@@ -306,9 +319,9 @@ class TestRefreshEndpoint:
 
             app.dependency_overrides[get_db] = override_func
             try:
-                r = client.post("/api/v1/auth/refresh", json={
-                    "refresh_token": "valid_refresh_token"
-                })
+                r = client.post(
+                    "/api/v1/auth/refresh", json={"refresh_token": "valid_refresh_token"}
+                )
                 assert r.status_code == 200
                 data = r.json()
                 assert data["data"]["access_token"] == "new_access_token"
@@ -320,9 +333,7 @@ class TestRefreshEndpoint:
         with patch("app.api.v1.endpoints.auth.auth_service") as mock_auth_service:
             mock_auth_service.verify_token.return_value = None
 
-            r = client.post("/api/v1/auth/refresh", json={
-                "refresh_token": "invalid_token"
-            })
+            r = client.post("/api/v1/auth/refresh", json={"refresh_token": "invalid_token"})
             assert r.status_code == 401
 
     def test_refresh_empty_token(self, client: TestClient):
@@ -335,12 +346,22 @@ class TestMeEndpoint:
     def test_get_current_user_success(self, client: TestClient):
         """有效 token 应返回用户信息。"""
         from app.main import app
+
         mock_user = _make_mock_user()
 
         async def _override_user():
             return mock_user
 
+        # /auth/me 现在会查一次 per-org OrgAdmin 关联（W0-1）；本用例只测响应形状，
+        # 用不落库的 AsyncMock 会话即可（first() → None = 非组织管理员）。
+        mock_db = AsyncMock()
+        mock_db.execute.return_value.first.return_value = None
+
+        async def _override_db():
+            yield mock_db
+
         app.dependency_overrides[get_current_user] = _override_user
+        app.dependency_overrides[get_db] = _override_db
         try:
             r = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer valid_token"})
             assert r.status_code == 200
@@ -349,6 +370,7 @@ class TestMeEndpoint:
             assert data["data"]["username"] == "testuser"
         finally:
             app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
 
     def test_get_current_user_unauthorized(self, client: TestClient):
         """无 token 应返回 401。"""
@@ -360,6 +382,7 @@ class TestLogoutEndpoint:
     def test_logout_success(self, client: TestClient):
         """登出应返回 200。"""
         from app.main import app
+
         mock_user = _make_mock_user()
 
         async def _override_user():
@@ -370,7 +393,9 @@ class TestLogoutEndpoint:
             mock_auth_service.blacklist_token = AsyncMock(return_value=None)
 
             try:
-                r = client.post("/api/v1/auth/logout", headers={"Authorization": "Bearer valid_token"})
+                r = client.post(
+                    "/api/v1/auth/logout", headers={"Authorization": "Bearer valid_token"}
+                )
                 assert r.status_code == 200
                 mock_auth_service.blacklist_token.assert_called_once_with("valid_token")
             finally:

@@ -8,7 +8,9 @@ from app.agent.tools.code_execution import execute_python
 
 
 def run(code: str) -> str:
-    return asyncio.run(execute_python(code=code))
+    # issue #206：execute_python 现在返回 ToolResult（携带 sandbox 元数据）；
+    # str() 保持旧的纯文本输出契约（ToolResult.__str__ 对 str data 原样透传）。
+    return str(asyncio.run(execute_python(code=code)))
 
 
 class TestASTSandbox:
@@ -41,19 +43,22 @@ class TestASTSandbox:
 
     # ── Blocked: dangerous builtins ───────────────────────────
 
-    @pytest.mark.parametrize("code", [
-        'eval("1+1")',
-        'exec("x=1")',
-        'compile("x", "", "exec")',
-        '__import__("os")',
-        'open("/etc/passwd")',
-        'globals()',
-        'locals()',
-        'getattr({}, "keys")',
-        'setattr(type("X",(),{}), "x", 1)',
-        'breakpoint()',
-        'input()',
-    ])
+    @pytest.mark.parametrize(
+        "code",
+        [
+            'eval("1+1")',
+            'exec("x=1")',
+            'compile("x", "", "exec")',
+            '__import__("os")',
+            'open("/etc/passwd")',
+            "globals()",
+            "locals()",
+            'getattr({}, "keys")',
+            'setattr(type("X",(),{}), "x", 1)',
+            "breakpoint()",
+            "input()",
+        ],
+    )
     def test_block_dangerous_builtins(self, code):
         r = run(code)
         assert r.startswith("Error:"), f"should block: {code!r} → {r!r}"
@@ -92,6 +97,7 @@ class TestSandboxModeDispatch:
         import inspect
 
         from app.agent.tools.code_execution import execute_python
+
         assert inspect.iscoroutinefunction(execute_python)
 
     def test_accepts_code_kwarg(self):

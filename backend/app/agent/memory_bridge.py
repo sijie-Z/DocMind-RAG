@@ -49,10 +49,16 @@ class AgentMemoryBridge:
     def __init__(
         self,
         agent_id: str = "default",
-        organization_id: int = 1,
+        organization_id: int | None = None,
         user_id: int = 0,
         session_id: str | None = None,
     ):
+        # A2 P0（fail-closed）：记忆命名空间按组织隔离；缺失组织时若继续，
+        # 会生成 "None:…" 命名空间（跨租户/不可回收）。直接拒绝创建。
+        if organization_id is None:
+            raise ValueError(
+                "AgentMemoryBridge 缺少 organization_id，拒绝在无组织上下文下创建记忆命名空间"
+            )
         # 会话级命名空间：显式 session_id 优先，与 service.py 的 "session:<id>" 约定一致
         if session_id:
             agent_id = f"session:{session_id}"
@@ -62,11 +68,13 @@ class AgentMemoryBridge:
         # 只到 (org, user)，该用户所有会话会共享工作记忆（跨会话串扰）。此时退化为
         # “每次请求独立”的命名空间；需要跨轮记忆的调用方必须传入 session_id 或显式 agent_id。
         if agent_id in ("", "default"):
-            namespace = f"{organization_id}:{user_id}:{agent_id}:{uuid.uuid4().hex[:12]}"
+            scope = f"{agent_id}:{uuid.uuid4().hex[:12]}"
         else:
-            namespace = f"{organization_id}:{user_id}:{agent_id}"
+            scope = agent_id
 
-        self.system: AgentMemorySystem = get_memory_system(namespace)
+        # A1（记忆 IDOR）：命名空间由 memory_service 按显式 (org, user) 租户上下文
+        # 拼装（org:user:scope），本桥不再自行拼接全局 key。
+        self.system: AgentMemorySystem = get_memory_system(organization_id, user_id, scope)
         self.agent_id = agent_id
         self.organization_id = organization_id
         self.user_id = user_id
@@ -87,6 +95,7 @@ class AgentMemoryBridge:
             return
         try:
             from app.dependencies import get_rag_pipeline
+
             pipeline = get_rag_pipeline()
             self.system.set_embedding_provider(pipeline.get_embedding)
             self._embedding_ready = True
@@ -105,6 +114,7 @@ class AgentMemoryBridge:
         span = None
         try:
             from app.agent.observability import get_langfuse
+
             lf_obj = get_langfuse()
             if lf_obj:
                 span = lf_obj.span(name="memory:recall", input={"query": query, "top_k": top_k})
@@ -144,7 +154,9 @@ class AgentMemoryBridge:
 
     # ── Working memory (Phase 2: Execution) ──
 
-    def store_step_result(self, step_id: str, result: dict[str, Any], run_id: str | None = None) -> None:
+    def store_step_result(
+        self, step_id: str, result: dict[str, Any], run_id: str | None = None
+    ) -> None:
         """Store a completed plan step result in WorkingMemory (current run)."""
         self.system.working.set_result(
             step_id, result, run_id=run_id if run_id is not None else self._run_id

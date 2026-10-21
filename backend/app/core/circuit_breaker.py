@@ -24,10 +24,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
 class CircuitState(Enum):
-    CLOSED = "CLOSED"      # 正常运行（保险丝闭合）
-    OPEN = "OPEN"          # 熔断开启（保险丝断开）
-    HALF_OPEN = "HALF_OPEN" # 半开启（尝试恢复中）
+    CLOSED = "CLOSED"  # 正常运行（保险丝闭合）
+    OPEN = "OPEN"  # 熔断开启（保险丝断开）
+    HALF_OPEN = "HALF_OPEN"  # 半开启（尝试恢复中）
 
 
 class CircuitOpenError(Exception):
@@ -36,18 +37,21 @@ class CircuitOpenError(Exception):
     带 `error_type="circuit_open"`：调用方可把它并入既有错误分类管线
     （retry_policy 中为 fatal——OPEN 期内重试必然被门拒绝，重试只是白付探测成本）。
     """
+
     error_type = "circuit_open"
+
 
 class CircuitBreaker:
     """
     熔断器实现类
     """
+
     def __init__(
         self,
         name: str,
-        failure_threshold: int = 5,      # 连续失败多少次开启熔断
-        recovery_timeout: int = 30,      # 熔断后等待多久尝试恢复（秒）
-        expected_exception: type[Exception] = Exception
+        failure_threshold: int = 5,  # 连续失败多少次开启熔断
+        recovery_timeout: int = 30,  # 熔断后等待多久尝试恢复（秒）
+        expected_exception: type[Exception] = Exception,
     ):
         self.name = name
         self.failure_threshold = failure_threshold
@@ -61,6 +65,7 @@ class CircuitBreaker:
 
     def __call__(self, func: Callable):
         if asyncio.iscoroutinefunction(func):
+
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs):
                 # 1. 检查状态
@@ -82,7 +87,9 @@ class CircuitBreaker:
                 except self.expected_exception as e:
                     self._handle_failure(e)
                     return self._get_fallback_value(func)
+
             return async_wrapper
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
             if self.state == CircuitState.OPEN:
@@ -98,13 +105,16 @@ class CircuitBreaker:
             except self.expected_exception as e:
                 self._handle_failure(e)
                 return self._get_fallback_value(func)
+
         return sync_wrapper
 
     def _handle_failure(self, error: Exception):
         self.failure_count += 1
         self.last_failure_time = time.time()
 
-        logger.error(f"❌ 熔断器 [{self.name}] 发生故障 ({self.failure_count}/{self.failure_threshold}): {str(error)}")
+        logger.error(
+            f"❌ 熔断器 [{self.name}] 发生故障 ({self.failure_count}/{self.failure_threshold}): {str(error)}"
+        )
 
         if self.failure_count >= self.failure_threshold and self.state != CircuitState.OPEN:
             logger.critical(f"🚨 熔断器 [{self.name}] 达到阈值，正式开启熔断！")
@@ -152,7 +162,7 @@ class CircuitBreaker:
 
         # 获取函数的返回注解（如果有的话）
         # 注意：在 Python 3.9+ 中，typing.List 和 list 有时表现不一，这里同时检查
-        return_type = getattr(func, '__annotations__', {}).get('return')
+        return_type = getattr(func, "__annotations__", {}).get("return")
 
         if return_type in (list, list):
             return []

@@ -2,12 +2,12 @@
   <div class="knowledge-page h-full min-h-0 flex flex-col bg-gradient-to-b from-slate-50/80 to-slate-100/60 dark:from-gray-950 dark:to-gray-900/80 transition-colors duration-300">
     <div class="flex-1 overflow-y-auto p-5 lg:p-8">
       <div class="max-w-7xl mx-auto space-y-6">
-        
+
         <!-- 页面标题与描述 -->
         <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
             <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
-              {{ t('knowledge.title') }}
+              {{ t('menu.knowledge') }}
             </h1>
             <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm flex items-center gap-2">
               <span class="w-6 h-0.5 bg-blue-500 rounded-full"></span>
@@ -15,9 +15,9 @@
             </p>
           </div>
           <div class="flex items-center gap-3 flex-wrap">
-            <n-button 
+            <n-button
               v-if="selectedIds.length > 0"
-              type="error" 
+              type="error"
               secondary
               round
               @click="handleBatchDelete"
@@ -37,8 +37,8 @@
                 <n-icon class="text-slate-400"><SearchOutline /></n-icon>
               </template>
             </n-input>
-            <n-button 
-              type="primary" 
+            <n-button
+              type="primary"
               round
               size="medium"
               class="shadow-lg shadow-blue-500/25"
@@ -50,14 +50,12 @@
             <n-button secondary circle size="medium" @click="loadKnowledgeBases">
               <template #icon><n-icon><RefreshOutline /></n-icon></template>
             </n-button>
-            <n-button secondary circle size="medium" @click="$router.push('/knowledge/graph')">
+            <n-button secondary size="medium" @click="$router.push('/knowledge/graph')">
               <template #icon><n-icon><GitNetworkOutline /></n-icon></template>
+              {{ t('router.knowledgeGraph') }}
             </n-button>
             <n-button secondary round size="medium" @click="handleRebuildLatestFailedDoc">
               最近失败文档重建
-            </n-button>
-            <n-button secondary round size="medium" @click="handleRetryAllFallbackDocs">
-              重试全部降级文档
             </n-button>
 
           </div>
@@ -71,7 +69,7 @@
                 <n-icon size="20" class="text-blue-600 dark:text-blue-400"><DocumentTextOutline /></n-icon>
               </div>
               <div>
-                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ stats.total }}</p>
+                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.total }}</p>
                 <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.total') || '文档总数' }}</p>
               </div>
             </div>
@@ -82,7 +80,7 @@
                 <n-icon size="20" class="text-emerald-600 dark:text-emerald-400"><CheckmarkCircleOutline /></n-icon>
               </div>
               <div>
-                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ stats.completed }}</p>
+                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.completed }}</p>
                 <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.completed') || '已索引' }}</p>
               </div>
             </div>
@@ -93,7 +91,7 @@
                 <n-icon size="20" class="text-amber-600 dark:text-amber-400"><RefreshOutline /></n-icon>
               </div>
               <div>
-                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ stats.processing }}</p>
+                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.processing }}</p>
                 <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.processing') || '处理中' }}</p>
               </div>
             </div>
@@ -104,7 +102,7 @@
                 <n-icon size="20" class="text-red-600 dark:text-red-400"><CloseCircleOutline /></n-icon>
               </div>
               <div>
-                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ stats.failed }}</p>
+                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.failed }}</p>
                 <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.failed') || '失败' }}</p>
               </div>
             </div>
@@ -149,12 +147,12 @@
           <div v-if="loadError" class="flex flex-col items-center justify-center py-20 bg-white/50 dark:bg-gray-900/50 backdrop-blur-md rounded-3xl border border-dashed border-red-300 dark:border-red-900/30">
             <n-result
               status="500"
-              :title="t('common.failed')"
-              :description="t('common.error') || '服务器好像开小差了，请稍后再试'"
+              :title="t('knowledge.loadFailed')"
+              :description="loadErrorMsg || t('knowledge.loadFailedDesc')"
             >
               <template #footer>
                 <n-button type="primary" round @click="loadKnowledgeBases">
-                  {{ t('common.refresh') }}
+                  {{ t('common.retry') }}
                 </n-button>
               </template>
             </n-result>
@@ -178,7 +176,7 @@
                     <div class="absolute top-0 left-0 right-0 h-1 bg-gray-100 dark:bg-gray-700 group-hover:bg-blue-500 transition-colors"></div>
 
                     <!-- 选择框 -->
-                    <div class="absolute top-3 right-3 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div class="absolute top-3 right-3 z-10 kb-card-select">
                        <n-checkbox 
                         :checked="selectedIds.includes(item.id)" 
                         @update:checked="(val: boolean) => toggleSelect(item.id, val)"
@@ -191,7 +189,7 @@
                         <div class="w-10 h-10 rounded-lg bg-gray-50 dark:bg-gray-900 flex-shrink-0 flex items-center justify-center">
                           <n-icon size="24" :color="getFileIconColor(item.file_type)">
                             <DocumentTextOutline v-if="item.file_type === 'pdf'" />
-                            <DocumentOutline v-else-if="item.file_type === 'docx'" />
+                            <DocumentOutline v-else-if="item.file_type === 'word'" />
                             <DocumentAttachOutline v-else />
                           </n-icon>
                         </div>
@@ -229,14 +227,15 @@
                           >
                             <template #icon>
                               <n-icon v-if="item.status === 'completed'"><CheckmarkCircleOutline /></n-icon>
-                              <n-icon v-else-if="item.status === 'processing'" class="animate-spin"><RefreshOutline /></n-icon>
-                              <n-icon v-else><AlertCircleOutline /></n-icon>
+                              <n-icon v-else-if="item.status === 'parsing' || item.status === 'parsed'" class="animate-spin"><RefreshOutline /></n-icon>
+                              <n-icon v-else-if="item.status === 'failed'"><AlertCircleOutline /></n-icon>
+                              <n-icon v-else><TimeOutline /></n-icon>
                             </template>
                           </n-tag>
                           <span class="text-[10px] text-gray-400">{{ formatFileSize(item.file_size) }}</span>
                         </div>
                         
-                        <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity transform translate-x-2 group-hover:translate-x-0">
+                        <div class="flex gap-1 kb-card-actions">
                            <n-tooltip trigger="hover">
                              <template #trigger>
                                <n-button size="tiny" quaternary circle @click.stop="viewKnowledge(item)">
@@ -252,14 +251,6 @@
                                </n-button>
                              </template>
                              重新解析
-                           </n-tooltip>
-                           <n-tooltip v-if="isFallbackIndexed(item)" trigger="hover">
-                             <template #trigger>
-                               <n-button size="tiny" quaternary circle type="warning" @click.stop="handleRetryVector(item)">
-                                 <template #icon><n-icon><RefreshOutline /></n-icon></template>
-                               </n-button>
-                             </template>
-                             重试向量化
                            </n-tooltip>
                            <n-button size="tiny" quaternary circle type="error" @click.stop="deleteKnowledge(item)">
                               <template #icon><n-icon><TrashOutline /></n-icon></template>
@@ -306,7 +297,7 @@
                          <div class="flex items-center gap-3">
                             <n-icon size="20" :color="getFileIconColor(item.file_type)">
                               <DocumentTextOutline v-if="item.file_type === 'pdf'" />
-                              <DocumentOutline v-else-if="item.file_type === 'docx'" />
+                              <DocumentOutline v-else-if="item.file_type === 'word'" />
                               <DocumentAttachOutline v-else />
                             </n-icon>
                             <div>
@@ -343,10 +334,9 @@
                           </div>
                        </td>
                        <td class="p-4 text-right">
-                          <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div class="flex justify-end gap-2 kb-row-actions">
                              <n-button size="tiny" secondary circle @click="viewKnowledge(item)"><template #icon><n-icon><EyeOutline /></n-icon></template></n-button>
                              <n-button v-if="item.status === 'failed'" size="tiny" secondary circle type="primary" @click="handleRebuild(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
-                             <n-button v-if="isFallbackIndexed(item)" size="tiny" secondary circle type="warning" @click="handleRetryVector(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
                              <n-button size="tiny" secondary circle type="error" @click="deleteKnowledge(item)"><template #icon><n-icon><TrashOutline /></n-icon></template></n-button>
                           </div>
                        </td>
@@ -367,6 +357,17 @@
                 @update:page-size="handlePageSizeChange"
               />
             </div>
+          </div>
+
+          <div v-else-if="!loading && isSearchEmpty" class="flex flex-col items-center justify-center py-24 px-6 bg-white/80 dark:bg-gray-800/50 backdrop-blur-md rounded-3xl border border-dashed border-slate-200 dark:border-gray-600/50 shadow-inner">
+            <div class="w-24 h-24 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center mb-6 ring-4 ring-slate-100/50 dark:ring-gray-800/30">
+              <n-icon size="48" class="text-slate-400 dark:text-slate-500"><SearchOutline /></n-icon>
+            </div>
+            <h3 class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">{{ t('knowledge.searchEmptyTitle') }}</h3>
+            <p class="text-slate-500 dark:text-slate-400 mb-8 max-w-sm text-center text-sm leading-relaxed">{{ t('knowledge.searchEmptyDesc', { query: searchText.trim() }) }}</p>
+            <n-button round size="large" @click="clearSearch">
+              {{ t('knowledge.clearSearch') }}
+            </n-button>
           </div>
 
           <div v-else-if="!loading" class="flex flex-col items-center justify-center py-24 px-6 bg-white/80 dark:bg-gray-800/50 backdrop-blur-md rounded-3xl border border-dashed border-slate-200 dark:border-gray-600/50 shadow-inner">
@@ -432,7 +433,8 @@ import {
   CloseCircleOutline,
   ListOutline,
   GridOutline,
-  GitNetworkOutline
+  GitNetworkOutline,
+  TimeOutline
 } from '@vicons/ionicons5'
 import type { UploadFileInfo } from 'naive-ui'
 import { 
@@ -444,16 +446,15 @@ import {
   batchDeleteKnowledgeBases,
   rebuildKnowledgeBase
 } from '@/api/knowledge'
-import type { KnowledgeBase } from '@/api/knowledge'
+import type { KnowledgeBase, KnowledgeBaseListResponse, DocumentDetail, DocumentContent } from '@/api/knowledge'
 import { formatDate } from '@/utils/format'
+import { apiUnwrap } from '@/utils/apiUnwrap'
+import { getErrorMessage } from '@/utils/apiError'
 import { getRagMetrics, type RagMetrics } from '@/api/rag'
+import { useUserStore } from '@/stores/user'
+import { docIconColor, docStatusLabel, docStatusType, isInProgressDoc, computeDocStats } from './docDisplay'
 import KnowledgeUploadPanel from './components/KnowledgeUploadPanel.vue'
 import KnowledgeDetailModals from './components/KnowledgeDetailModals.vue'
-
-/** Safely extract error message from unknown error */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
 
 interface UploadForm {
   title: string
@@ -465,8 +466,10 @@ interface UploadForm {
 const message = useDedupedMessage()
 const dialog = useDialog()
 const { t } = useI18n()
+const userStore = useUserStore()
 const loading = ref(false)
 const loadError = ref(false)
+const loadErrorMsg = ref('')
 const uploading = ref(false)
 const searchText = ref('')
 const viewMode = ref<'grid' | 'list'>('grid') // 视图模式
@@ -493,7 +496,29 @@ interface UploadTask {
 
 const activeTasks = ref<UploadTask[]>([])
 
+/**
+ * 进行中上传的 AbortController（taskId → controller）。
+ * 放在响应式状态之外：AbortController 是宿主对象，经 Vue proxy 包裹后调用
+ * abort() 会触发 brand check 异常；任务对象本身保持纯数据，便于渲染与断言。
+ */
+const uploadControllers = new Map<string, AbortController>()
+
+const isTaskInFlight = (task: UploadTask) => task.status === 'uploading' || task.status === 'processing'
+
+/**
+ * 上传列表「×」语义（E9/B7）：
+ * - 进行中（uploading / processing）→ 真取消：AbortController 中止请求，任务移除
+ *   并提示「已取消上传」；传输阶段中止后后端拿不到完整表单，文档不会落库；
+ * - 已终态（completed / error）→ 仅从列表移除（不改动任何请求）。
+ */
 const removeUploadTask = (id: string) => {
+  const task = activeTasks.value.find(t => t.id === id)
+  const controller = uploadControllers.get(id)
+  if (task && isTaskInFlight(task) && controller) {
+    controller.abort()
+    message.info(t('knowledge.uploadCancelled'))
+  }
+  uploadControllers.delete(id)
   activeTasks.value = activeTasks.value.filter(t => t.id !== id)
 }
 
@@ -559,7 +584,7 @@ let pollTimer: number | null = null
 const startPolling = () => {
   if (pollTimer) return
   pollTimer = window.setInterval(async () => {
-    const hasProcessing = knowledgeBases.value.some(item => item.status === 'processing')
+    const hasProcessing = knowledgeBases.value.some(item => isInProgressDoc(item.status))
     if (hasProcessing) {
       await loadKnowledgeBases()
     } else {
@@ -585,15 +610,12 @@ const tagOptions = computed(() => [
 
 const filteredKnowledgeBases = computed(() => knowledgeBases.value)
 
-const stats = computed(() => {
-  const list = knowledgeBases.value
-  return {
-    total: list.length,
-    completed: list.filter(i => i.status === 'completed').length,
-    processing: list.filter(i => i.status === 'processing').length,
-    failed: list.filter(i => i.status === 'failed').length
-  }
-})
+/** E14/C1 空态分流：搜索无命中 ≠ 空库（前者给清除搜索，后者才劝上传）。 */
+const isSearchEmpty = computed(
+  () => searchText.value.trim().length > 0 && knowledgeBases.value.length === 0
+)
+
+const stats = computed(() => computeDocStats(knowledgeBases.value))
 
 const isAllSelected = computed(() => {
   return filteredKnowledgeBases.value.length > 0 && selectedIds.value.length === filteredKnowledgeBases.value.length
@@ -626,12 +648,15 @@ const handleBatchDelete = () => {
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       try {
-        await batchDeleteKnowledgeBases(selectedIds.value)
+        // A2：补 organization_id（后端 knowledge.py:642-646 对非超管强校验
+        // body.organization_id == 有效组织，缺省必 403）。口径照 search P1-2：
+        // 从 user store 取 currentOrgId；无组织时省略，由后端解析（超管语义）。
+        await batchDeleteKnowledgeBases(selectedIds.value, userStore.currentOrgId, { silent: true })
         message.success(t('common.deleteSuccess'))
         selectedIds.value = []
         await loadKnowledgeBases()
       } catch (error: unknown) {
-        message.error(t('common.deleteFailed') + '：' + getErrorMessage(error))
+        message.error(t('common.deleteFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
       }
     }
   })
@@ -651,13 +676,15 @@ const loadKnowledgeBases = async () => {
       search: searchText.value
     }
     const [response, metricsResp] = await Promise.all([
-      getKnowledgeBases(params),
+      // E14/D1：页面自呈现错误（页内错误态 + 重试），请求静默，拦截器不再重复 toast
+      getKnowledgeBases(params, { silent: true }),
       getRagMetrics(metricWindow.value).catch(() => null)
     ])
 
-    if (metricsResp?.data?.data) {
+    // 宽容解包：GET /chat/metrics 为 {success, data: <RagMetrics>} 信封
+    const m = metricsResp ? apiUnwrap<RagMetrics | null>(metricsResp) : null
+    if (m) {
       // ⚡ 核心修复：如果后端返回的是全 0 数据，且 knowledgeBases 有数据，则不更新 metrics 以免误导
-      const m = metricsResp.data.data
       if (m.retrieval_total > 0 || m.hit_rate > 0 || m.groundedness > 0) {
           ragMetrics.value = m
       } else {
@@ -667,12 +694,14 @@ const loadKnowledgeBases = async () => {
       metricsUpdatedAt.value = new Date().toLocaleTimeString()
     }
 
-    if (response.data && response.data.data) {
-        const data = response.data.data
+    // T11：宽容解包（口径见 @/types/common.ts）——对现行双层响应与旧手写解包
+    // 恒等（契约定在 api/__tests__/knowledgeShapeContract.test.ts）
+    const data = apiUnwrap<KnowledgeBaseListResponse>(response)
+    if (data) {
         if (Array.isArray(data.data)) {
             knowledgeBases.value = data.data
-            // Start polling if any item is processing
-            if (knowledgeBases.value.some(item => item.status === 'processing')) {
+            // Start polling if any item is in a non-terminal state
+            if (knowledgeBases.value.some(item => isInProgressDoc(item.status))) {
               startPolling()
             }
         } else {
@@ -686,8 +715,12 @@ const loadKnowledgeBases = async () => {
         pagination.value.itemCount = 0
     }
   } catch (error: unknown) {
+    // E14/D2：加载/搜索失败必须清空旧结果——陈旧卡片与统计不得继续冒充当前数据
     loadError.value = true
-    // Failed to load knowledge bases
+    loadErrorMsg.value = getErrorMessage(error, t('knowledge.loadFailedDesc'))
+    knowledgeBases.value = []
+    pagination.value.itemCount = 0
+    selectedIds.value = []
   } finally {
     loading.value = false
   }
@@ -701,17 +734,19 @@ const handlePageSizeChange = (size: number) => {
 
 const uploadFile = async () => {
   if (!uploadForm.value.file) return
-  
+
   const file = uploadForm.value.file
   const taskId = Math.random().toString(36).substring(7)
-  
+  const controller = new AbortController()
+  uploadControllers.set(taskId, controller)
+
   const newTask: UploadTask = {
     id: taskId,
     name: file.name,
     progress: 0,
     status: 'uploading'
   }
-  
+
   activeTasks.value.unshift(newTask)
   showTaskList.value = true
   showUploadModal.value = false
@@ -724,8 +759,8 @@ const uploadFile = async () => {
     formData.append('tags', JSON.stringify(uploadForm.value.tags))
     formData.append('description', uploadForm.value.description)
     // 移除硬编码的 organization_id，后端会从 Form 默认值或 User Context 获取
-    
-    await uploadKnowledgeBase(formData, (progressEvent) => {
+
+    const res = await uploadKnowledgeBase(formData, (progressEvent) => {
       const progress = progressEvent.total ? Math.round((progressEvent.loaded * 100) / progressEvent.total) : 0
       const task = activeTasks.value.find(t => t.id === taskId)
       if (task) {
@@ -734,34 +769,53 @@ const uploadFile = async () => {
           task.status = 'processing'
         }
       }
-    })
-    
-    message.success(t('knowledge.uploadSuccess'))
-    
+    }, controller.signal)
+
+    // 取消竞态：用户已点「×」但响应恰好先到 —— 不再报成功、不再刷新列表
+    if (controller.signal.aborted) return
+
+    // issue #301 批 D（#23）：后端在「文件已保存、但处理任务启动失败」时返回
+    // success=false（doc 同步已标记 failed）。此前无条件 message.success —— 失败
+    // 被伪造成「上传成功」。
+    const uploadBody = res.data as { success?: boolean; message?: string }
     const task = activeTasks.value.find(t => t.id === taskId)
-    if (task) {
-      task.status = 'completed'
-      task.progress = 100
+    if (uploadBody?.success === false) {
+      if (task) {
+        task.status = 'error'
+        task.error = uploadBody.message || t('knowledge.uploadFailed')
+      }
+      message.warning(uploadBody.message || t('knowledge.uploadFailed'))
+    } else {
+      message.success(t('knowledge.uploadSuccess'))
+      if (task) {
+        task.status = 'completed'
+        task.progress = 100
+      }
     }
-    
+
     uploadForm.value = {
       title: '',
       tags: [],
       description: ''
     }
     fileList.value = []
-    
+
     await loadKnowledgeBases()
   } catch (error: unknown) {
-    const errMsg = getErrorMessage(error)
-    const task = activeTasks.value.find(t => t.id === taskId)
-    if (task) {
-      task.status = 'error'
-      task.error = errMsg
+    // 用户主动取消不是失败：任务已由 removeUploadTask 移除并提示，这里不再误报
+    if (!controller.signal.aborted) {
+      const errMsg = getErrorMessage(error, t('knowledge.unknownError'))
+      const task = activeTasks.value.find(t => t.id === taskId)
+      if (task) {
+        task.status = 'error'
+        task.error = errMsg
+      }
+      message.error(t('knowledge.uploadFailed') + '：' + errMsg)
     }
-    message.error(t('knowledge.uploadFailed') + '：' + errMsg)
   } finally {
-    uploading.value = false
+    uploadControllers.delete(taskId)
+    // 并发上传：uploading 反映「是否仍有在途任务」，取消 A 不得清掉 B 的进行中状态
+    uploading.value = uploadControllers.size > 0
   }
 }
 
@@ -775,11 +829,12 @@ const viewKnowledge = async (item: KnowledgeBase) => {
   showDetailModal.value = true
   try {
     const [detailRes, contentRes] = await Promise.all([
-      getDocumentDetail(item.id),
-      getDocumentContent(item.id)
+      getDocumentDetail(item.id, { silent: true }),
+      getDocumentContent(item.id, { silent: true })
     ])
-    const detail = detailRes.data?.data || {}
-    const content = contentRes.data?.data || {}
+    // T11：宽容解包（与既有 detailRes/contentRes 手写解包恒等）
+    const detail = apiUnwrap<DocumentDetail>(detailRes) || {}
+    const content = apiUnwrap<DocumentContent>(contentRes) || {}
     currentDoc.value = {
       ...item,
       ...detail,
@@ -803,21 +858,11 @@ const showErrorDetail = (errorText: string) => {
 
 const handleRebuild = async (item: KnowledgeBase) => {
   try {
-    await rebuildKnowledgeBase(item.id)
+    await rebuildKnowledgeBase(item.id, { silent: true })
     message.success(t('knowledge.rebuildSuccess') || '开始重新构建索引')
     await loadKnowledgeBases()
   } catch (error: unknown) {
-    message.error((t('knowledge.rebuildFailed') || '重新构建失败') + '：' + getErrorMessage(error))
-  }
-}
-
-const handleRetryVector = async (item: KnowledgeBase) => {
-  try {
-    await rebuildKnowledgeBase(item.id)
-    message.success(t('knowledge.retryVectorSuccess'))
-    await loadKnowledgeBases()
-  } catch (error: unknown) {
-    message.error(t('knowledge.retryVectorFailed') + '：' + getErrorMessage(error))
+    message.error((t('knowledge.rebuildFailed') || '重新构建失败') + '：' + getErrorMessage(error, t('common.tryAgain')))
   }
 }
 
@@ -828,37 +873,12 @@ const handleRebuildLatestFailedDoc = async () => {
     return
   }
   try {
-    await rebuildKnowledgeBase(failed.id)
+    await rebuildKnowledgeBase(failed.id, { silent: true })
     message.success(t('knowledge.rebuildSubmitted', { title: failed.title || failed.file_name }))
     await loadKnowledgeBases()
   } catch (error: unknown) {
-    message.error(t('knowledge.rebuildSubmitFailed') + '：' + (getErrorMessage(error) || t('knowledge.unknownError')))
+    message.error(t('knowledge.rebuildSubmitFailed') + '：' + getErrorMessage(error, t('knowledge.unknownError')))
   }
-}
-
-const handleRetryAllFallbackDocs = async () => {
-  const fallbackDocs = knowledgeBases.value.filter(i => isFallbackIndexed(i))
-  if (fallbackDocs.length === 0) {
-    message.info(t('knowledge.noFallbackDocs'))
-    return
-  }
-
-  let successCount = 0
-  for (const doc of fallbackDocs) {
-    try {
-      await rebuildKnowledgeBase(doc.id)
-      successCount += 1
-    } catch {
-      // 单个失败不中断批次
-    }
-  }
-
-  if (successCount > 0) {
-    message.success(t('knowledge.batchRetrySubmitted', { success: successCount, total: fallbackDocs.length }))
-  } else {
-    message.error(t('knowledge.batchRetryFailed'))
-  }
-  await loadKnowledgeBases()
 }
 
 const deleteKnowledge = (item: KnowledgeBase) => {
@@ -869,11 +889,11 @@ const deleteKnowledge = (item: KnowledgeBase) => {
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       try {
-        await deleteKnowledgeBase(item.id)
+        await deleteKnowledgeBase(item.id, { silent: true })
         message.success(t('common.deleteSuccess'))
         await loadKnowledgeBases()
       } catch (error: unknown) {
-        message.error(t('knowledge.deleteFailed') + '：' + getErrorMessage(error))
+        message.error(t('knowledge.deleteFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
       }
     }
   })
@@ -889,45 +909,31 @@ const formatFileSize = (bytes: number | null | undefined): string => {
   return parseFloat((safe / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-const isFallbackIndexed = (item: KnowledgeBase | null): boolean => {
-  if (!item) return false
-  const err = (item.parse_error || '').toLowerCase()
-  return item.status === 'completed' && (err.includes('降级') || err.includes('关键词索引'))
-}
+// 幽灵「降级索引」标识已整体移除（B17）：后端不存在任何"降级为关键词索引"的
+// 字段或 parse_error 哨兵（models/document.py 无 vector_index_status 列；
+// parse_error 全部写入点复核：worker/doc_processor.py:291,393 清空、:409 写
+// 任意异常串；成功路径必为 None）——原 isFallbackIndexed 恒为 false，行内
+// 「重试向量化」与工具栏「重试全部降级文档」从未真实可达（控件形同虚设）。
+// 产品缺口：如需"降级索引"语义，须后端先落字段，前端再接真值。
 
-const getStatusType = (item: KnowledgeBase | null): 'success' | 'warning' | 'error' => {
-  if (!item) return 'error'
-  if (item.status === 'processing') return 'warning'
-  if (item.status === 'failed') return 'error'
-  if (isFallbackIndexed(item)) return 'warning'
-  return 'success'
-}
+const getStatusType = (item: KnowledgeBase | null) => docStatusType(item?.status)
 
-const getStatusLabel = (item: KnowledgeBase | null): string => {
-  if (!item) return '未知'
-  if (item.status === 'processing') return '处理中'
-  if (item.status === 'failed') return '失败'
-  if (isFallbackIndexed(item)) return '已完成（降级索引）'
-  return '已完成'
-}
+const getStatusLabel = (item: KnowledgeBase | null) => docStatusLabel(item?.status)
 
-const getFileIconColor = (fileType: string): string => {
-  const colors = {
-    pdf: '#ff6b6b',
-    docx: '#4dabf7',
-    doc: '#4dabf7',
-    txt: '#51cf66',
-    md: '#868e96'
-  }
-  return colors[fileType as keyof typeof colors] || '#868e96'
-}
+const getFileIconColor = (fileType: string): string => docIconColor(fileType)
 
 onMounted(() => {
   loadKnowledgeBases()
 })
 
 let searchTimer: number | null = null
+/** 清除搜索时立即回载，跳过防抖 watcher 的重复触发。 */
+let skipSearchWatch = false
 watch(searchText, () => {
+  if (skipSearchWatch) {
+    skipSearchWatch = false
+    return
+  }
   if (searchTimer) {
     clearTimeout(searchTimer)
   }
@@ -936,6 +942,17 @@ watch(searchText, () => {
     loadKnowledgeBases()
   }, 300)
 })
+
+const clearSearch = () => {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+  skipSearchWatch = true
+  searchText.value = ''
+  pagination.value.page = 1
+  void loadKnowledgeBases()
+}
 
 watch(metricWindow, () => {
   loadKnowledgeBases()
@@ -961,9 +978,56 @@ onUnmounted(() => {
   .knowledge-page .overflow-x-auto {
     -webkit-overflow-scrolling: touch;
   }
-  /* Action buttons: always visible on touch devices */
-  .knowledge-page [class*="opacity-0 group-hover:opacity-100"] {
-    opacity: 1 !important;
+}
+
+/* I1 操作排显隐（键盘 / 触屏可达，鼠标行为不回退，同 ChatMessages T11 模式）：
+   - 默认隐藏，保持界面干净；
+   - 键盘聚焦 :has(:focus-visible) 常显（媒体查询之外，任何设备都生效）；
+     不用 :focus-within——鼠标点击按钮也会聚焦，移开后操作排会滞留；
+   - hover 显隐只在支持 hover 的设备上生效，触屏不依赖它；
+   - 无 hover 能力的设备（触屏）常显，保证操作可点可达；
+   - 语义类替代旧的属性子串选择器（工具类一改即静默失效）。 */
+.kb-card-actions {
+  opacity: 0;
+  transform: translateX(0.5rem);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.kb-card-select {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.kb-row-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.kb-card-actions:has(:focus-visible),
+.kb-card-select:has(:focus-visible),
+.kb-row-actions:has(:focus-visible) {
+  opacity: 1;
+}
+.kb-card-actions:has(:focus-visible) {
+  transform: translateX(0);
+}
+@media (hover: hover) {
+  .group:hover .kb-card-actions,
+  .group:hover .kb-card-select,
+  .group:hover .kb-row-actions {
+    opacity: 1;
+  }
+  .group:hover .kb-card-actions {
+    transform: translateX(0);
+  }
+}
+@media (hover: none) {
+  .kb-card-actions {
+    opacity: 1;
+    transform: none;
+  }
+  .kb-card-select {
+    opacity: 1;
+  }
+  .kb-row-actions {
+    opacity: 1;
   }
 }
 </style>

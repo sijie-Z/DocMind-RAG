@@ -6,12 +6,17 @@ interface WebSocketSource {
 }
 
 interface WebSocketMessage {
-  type: 'message' | 'error' | 'connect' | 'disconnect' | 'notification'
+  // issue #289 G5：union 此前含 'notification'，但 chat WS（chat.py drain）
+  // 只发 chunk/message/error，通知走独立的 notificationSocket——幽灵联合成员。
+  // R2（#289 评审残余）：union 此前还漏了运行时实发的 'chunk'（dispatch 走
+  // string key、不受类型面约束）；本次补全，与 drain 实况对齐。
+  // B41：移除 title —— chat.py:520-545 三类载荷（chunk/message/error）均无该键，
+  // 旧声明与旧读点（useChatConnection）同为幽灵字段。
+  type: 'chunk' | 'message' | 'error' | 'connect' | 'disconnect'
   content?: string
   conversationId?: number | string
   messageId?: string
   sources?: WebSocketSource[]
-  title?: string
   fileIds?: string[]
   payload?: Record<string, unknown>
   is_cached?: boolean
@@ -56,9 +61,10 @@ class WebSocketService {
       return
     }
 
-    // 安全修复：手动断开后禁止被遗留的重连定时器悄悄重连
-    if (this.manualDisconnect) return
-
+    // ISS-3：原「手动断开守卫」在函数顶部会误伤聊天页重新挂载时的显式
+    // connect()——复位行（下方 manualDisconnect = false）位于守卫之后、永不
+    // 可达 → 同一 SPA 会话内 WS 永久连不上。守卫改驻重连定时器回调内
+    // （见 attemptReconnect），只拦「遗留定时器悄悄重连」这条自动路径。
     if (this.ws && (this.connectionStatus === 'connected' || this.connectionStatus === 'connecting')) {
       return
     }
@@ -193,6 +199,9 @@ class WebSocketService {
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
+      // ISS-3：守卫自 connect() 顶部迁入此处——「手动断开后禁止被遗留的
+      // 重连定时器悄悄重连」只约束自动重连路径；显式 connect() 不再被拦。
+      if (this.manualDisconnect) return
       if (this.currentUserId > 0) {
         this.connect(this.currentUserId)
       }

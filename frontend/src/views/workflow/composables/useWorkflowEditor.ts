@@ -1,19 +1,17 @@
 // Workflow editor composable — extracted from views/workflow/editor.vue
 
-import { ref, computed, onMounted, watch, onUnmounted, h } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { VueFlow, useVueFlow, MarkerType, type Connection } from '@vue-flow/core'
-import { Background } from '@vue-flow/background'
-import { Controls } from '@vue-flow/controls'
-import { MiniMap } from '@vue-flow/minimap'
+import { ref, computed, onMounted, watch, onUnmounted, h, nextTick } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { useVueFlow, MarkerType, type Connection } from '@vue-flow/core'
 import {
-  NIcon, NInput, NButton, NInputNumber, NCard, NCollapse, NCollapseItem,
+  NInput, NInputNumber, NCard, NCollapse, NCollapseItem,
   NDivider, NDrawer, NDrawerContent, NTimeline, NTimelineItem, NTag, NSpin, NProgress,
-  NModal, NForm, NGrid, NFormItem, NSelect, NSwitch, NList, NListItem, NEmpty, NPopconfirm, NDataTable, NPopover,
-  type DataTableColumns
+  NModal, NForm, NGrid, NFormItem, NSelect, NSwitch, NList, NListItem, NEmpty, NPopconfirm, NPopover,
+  useDialog,
 } from 'naive-ui'
 import {
-  SaveOutline, PlayOutline, TrashOutline, ExpandOutline, SettingsOutline,
+  SaveOutline, PlayOutline, ExpandOutline, SettingsOutline,
   AppsOutline, LocateOutline, CheckmarkCircleOutline, CloseCircleOutline,
   HardwareChipOutline, ChatbubbleEllipsesOutline, SearchOutline, VolumeHighOutline,
   EnterOutline, ExitOutline, GitBranchOutline, CompassOutline, ServerOutline,
@@ -21,32 +19,34 @@ import {
   FolderOpenOutline, AddOutline, CloseOutline
 } from '@vicons/ionicons5'
 import { useWorkflowStore } from '@/stores/workflow'
-import { useLLMConfigStore, type LLMProviderConfig } from '@/stores/llmConfigStore'
-import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflow as execWorkflow, getWorkflows, getNodeDefinitions, type WorkflowNode, type WorkflowEdge, type WorkflowConfig, type NodeDefinition } from '@/api/workflow'
+import { getWorkflow, createWorkflow, updateWorkflow, executeWorkflowStream, getWorkflows, getNodeDefinitions, type Workflow, type WorkflowNode, type WorkflowEdge, type WorkflowConfig, type NodeDefinition } from '@/api/workflow'
 import { agentApi } from '@/api/agent'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 import type { SkillInfo } from '@/types/agent'
 import { useDedupedMessage } from '@/utils/message'
-import InputNode from '../nodes/InputNode.vue'
-import OutputNode from '../nodes/OutputNode.vue'
-import LLMNode from '../nodes/LLMNode.vue'
-import ToolNode from '../nodes/ToolNode.vue'
-import ConditionNode from '../nodes/ConditionNode.vue'
-import MemoryNode from '../nodes/MemoryNode.vue'
-import CodeNode from '../nodes/CodeNode.vue'
-import ApiNode from '../nodes/ApiNode.vue'
-import TransformNode from '../nodes/TransformNode.vue'
+// 画布根组件（VueFlow/Background/Controls/MiniMap）的 import 归 editor.vue
+// ——模板作用域解析要求绑定在编辑器文件本身（W1 修复）；此处仅保留样式副作用
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
 
-const route = useRoute()
-const router = useRouter()
-const message = useDedupedMessage()
-const workflowStore = useWorkflowStore()
-const llmConfigStore = useLLMConfigStore()
-
-const { fitView: doFitView } = useVueFlow()
+// ── setup 级依赖（模块顶层只声明，获取一律发生在 useWorkflowEditor() 内）──
+// A_sweep 实锤（round2 #1）：旧实现在模块顶层调用 useRoute/useRouter/
+// useDedupedMessage/useVueFlow。模块首次求值发生在组件 setup 之外，inject()
+// 拿不到上下文（Vue 警告 inject() can only be used inside setup()）→ message
+// 为 undefined → 任意 toast（如 loadTemplate 的「模板加载成功」）抛 TypeError，
+// 点「快速模板」即整页进 ErrorBoundary。onMounted/onUnmounted/watch 写在这里
+// 同样不会随组件挂载执行（loadNodeDefinitions 等初始化永不发生）。
+// 现在这些调用全部延迟到 useWorkflowEditor()（由 <script setup> 同步调用）内，
+// 保证组件生命周期之外零执行。
+let route!: ReturnType<typeof useRoute>
+let router!: ReturnType<typeof useRouter>
+let message!: ReturnType<typeof useDedupedMessage>
+let workflowStore!: ReturnType<typeof useWorkflowStore>
+let doFitView!: ReturnType<typeof useVueFlow>['fitView']
+let t!: ReturnType<typeof useI18n>['t']
+let dialog!: ReturnType<typeof useDialog>
 
 // 边的默认配置
 const defaultEdgeOptions = {
@@ -163,7 +163,8 @@ async function loadSkills() {
   if (skillsLoaded.value) return
   try {
     const res = await agentApi.listSkills()
-    skills.value = (res as any).data?.data || (res as any).data || []
+    // GET /agent/skills → {success, data: <SkillInfo[]>} → apiUnwrap 解一层
+    skills.value = apiUnwrap<SkillInfo[]>(res) || []
     skillsLoaded.value = true
   } catch {
     // 静默失败，skills 是可选功能
@@ -180,10 +181,13 @@ interface ParamDef {
 
 // 状态
 const saving = ref(false)
+// ── 保存状态（B8）：工具栏状态点常驻，永远如实反映最近一次保存结果 ──
+// unsaved=有未落库的改动 / saving=保存请求在途 / saved=服务端已确认 / error=最近一次保存失败
+type SaveStatus = 'unsaved' | 'saving' | 'saved' | 'error'
+const saveStatus = ref<SaveStatus>('unsaved')
 const executing = ref(false)
 const executingNodeId = ref<string | null>(null)
 const showDebugPanel = ref(false)
-const showLLMConfig = ref(false)
 const showLoadModal = ref(false)
 const workflowList = ref<{ id: number; name: string; created_at: string }[]>([])
 const loadingWorkflows = ref(false)
@@ -195,121 +199,68 @@ const engineTypeOptions = [
   { label: 'LangGraph 引擎', value: 'langgraph' as const },
 ]
 
-// LLM 全局配置（表格式管理）
-const editingConfigId = ref<string | null>(null)
-
-const llmConfigForm = ref({
-  provider: 'deepseek' as string,
-  config_name: '',
-  api_key: '',
-  api_url: '',
-  model: '',
-  temperature: 0.7,
-  is_default: false,
-})
-
-function resetLlmConfigForm() {
-  editingConfigId.value = null
-  llmConfigForm.value = {
-    provider: 'deepseek',
-    config_name: '',
-    api_key: '',
-    api_url: '',
-    model: '',
-    temperature: 0.7,
-    is_default: false,
-  }
-}
-
-// 表格列定义
-const llmConfigColumns: DataTableColumns<LLMProviderConfig> = [
-  { title: '供应商', key: 'provider', width: 90, render: (row) => llmConfigStore.getProviderLabel(row.provider) },
-  { title: '配置名', key: 'config_name', ellipsis: { tooltip: true }, width: 130 },
-  { title: 'API URL', key: 'api_url', ellipsis: { tooltip: true }, width: 160 },
-  { title: '模型', key: 'model', width: 120 },
-  { title: '温度', key: 'temperature', width: 60 },
-  {
-    title: '默认', key: 'is_default', width: 60,
-    render: (row) => row.is_default ? h('span', { style: 'color: #10b981' }, '✓') : ''
-  },
-  {
-    title: '操作', key: 'actions', width: 140,
-    render: (row) => {
-      const buttons: any[] = [
-        h(NButton, { size: 'tiny', quaternary: true, onClick: () => editConfig(row) }, { icon: () => h(NIcon, null, h(SearchOutline as any)) }),
-        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => handleDeleteConfigById(row.id) }, { icon: () => h(NIcon, null, h(TrashOutline as any)) }),
-      ]
-      if (!row.is_default) {
-        buttons.splice(1, 0,
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => handleSetDefault(row.id) }, { default: () => '设默认' })
-        )
-      }
-      return h('div', { style: 'display:flex;gap:4px' }, buttons)
-    },
-  },
-]
-
-function editConfig(config: LLMProviderConfig) {
-  editingConfigId.value = config.id
-  llmConfigForm.value = {
-    provider: config.provider,
-    config_name: config.config_name,
-    api_key: config.api_key,
-    api_url: config.api_url,
-    model: config.model,
-    temperature: config.temperature,
-    is_default: config.is_default,
-  }
-}
-
-async function handleSaveConfig() {
-  if (!llmConfigForm.value.config_name.trim()) {
-    message.error('请输入配置名称')
-    return
-  }
-  if (!llmConfigForm.value.api_key.trim()) {
-    message.error('请输入 API Key')
-    return
-  }
-  try {
-    if (editingConfigId.value) {
-      await llmConfigStore.update(editingConfigId.value, llmConfigForm.value as any)
-      message.success('配置已更新')
-    } else {
-      await llmConfigStore.create(llmConfigForm.value as any)
-      message.success('配置已创建')
-    }
-    resetLlmConfigForm()
-  } catch {
-    message.error('保存失败')
-  }
-}
-
-async function handleDeleteConfigById(configId: string) {
-  try {
-    await llmConfigStore.remove(configId)
-    message.success('配置已删除')
-    if (editingConfigId.value === configId) resetLlmConfigForm()
-  } catch {
-    message.error('删除失败')
-  }
-}
-
-async function handleDeleteConfig() {
-  if (editingConfigId.value) await handleDeleteConfigById(editingConfigId.value)
-}
-
-async function handleSetDefault(configId: string) {
-  try {
-    await llmConfigStore.setDefault(configId)
-    message.success('已设为默认')
-  } catch {
-    message.error('设置失败')
-  }
-}
-
 // ── 自动保存定时器 ──
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+// ── 保存反馈（B8）──
+// 自动保存失败提示节流：同一故障在窗口内只弹一次，避免每次防抖都打扰用户
+const AUTO_SAVE_ERROR_TOAST_THROTTLE_MS = 10_000
+let lastAutoSaveErrorToastAt = 0
+
+// 画布编辑版本号：保存请求在途时用户又改动画布 → 请求完成后不得把状态误标为「已保存」
+let canvasEditVersion = 0
+
+/** 画布发生本地改动：版本号 +1，并把「已保存/保存中」如实降级为「未保存」 */
+function markCanvasDirty() {
+  canvasEditVersion++
+  if (saveStatus.value === 'saved' || saveStatus.value === 'saving') {
+    saveStatus.value = 'unsaved'
+  }
+}
+
+// ── 离开保护（E12）：以「最近一次持久化快照」为 dirty 真值 ──
+// 不能用 saveStatus !== 'saved'：刚进入编辑器（从未保存、也无改动）同样是
+// 'unsaved'，会把「无改动离开」误判为 dirty。这里把落库载荷（getFlowData()
+// 即保存请求体 + 工作流名）序列化后与基线比较：加载 / 手动保存 / 自动保存
+// 成功都会刷新基线，只有相对基线发生实际内容变化才算 dirty。
+const persistedBaseline = ref('')
+
+function persistedSnapshot(): string {
+  return JSON.stringify({
+    name: workflowStore.workflowName,
+    ...workflowStore.getFlowData(),
+  })
+}
+
+const isDirty = computed(() => persistedSnapshot() !== persistedBaseline.value)
+
+// ── 响应式布局（E12）：<1280 收窄时属性面板默认收起，可用开关以覆盖层展开 ──
+// matchMedia 不可用（如旧测试环境未补桩）时按宽屏处理，面板保持可见。
+const isNarrow = ref(false)
+const propertyPanelOpen = ref(true)
+let viewportQuery: MediaQueryList | null = null
+
+function handleViewportChange(event: MediaQueryListEvent) {
+  isNarrow.value = !event.matches
+  // 断点切换跟随默认策略：宽屏展开为第三栏，窄屏收起（覆盖层可随时重开）
+  propertyPanelOpen.value = event.matches
+}
+
+const togglePropertyPanel = () => {
+  propertyPanelOpen.value = !propertyPanelOpen.value
+}
+
+const closePropertyPanel = () => {
+  propertyPanelOpen.value = false
+}
+
+// 关闭/刷新页面保护：dirty 时触发浏览器原生「离开此网站？」确认
+function handleBeforeUnload(event: BeforeUnloadEvent) {
+  if (!isDirty.value) return
+  // 现代浏览器以 preventDefault 为准；旧版 Chromium 需要 returnValue 非空
+  event.preventDefault()
+  event.returnValue = ''
+}
 
 // 本地状态
 const nodes = computed({
@@ -332,17 +283,19 @@ const finalOutput = computed(() => workflowStore.finalOutput)
 const executionStatus = computed(() => {
   if (executionResults.value.length === 0) return 'idle'
   if (executionResults.value.some(r => r.status === 'failed')) return 'failed'
-  if (executionResults.value.every(r => r.status === 'success')) return 'success'
+  // 引擎成功态为 "completed"（ExecutionStatus，workflow_engine.py:37-42）——
+  // 旧代码按 'success' 判定导致成功节点恒判失败（B10 词表漂移）
+  if (executionResults.value.every(r => r.status === 'completed')) return 'success'
   return 'running'
 })
 
 const executionProgress = computed(() => {
   if (executionResults.value.length === 0) return 0
-  const completed = executionResults.value.filter(r => r.status === 'success').length
+  const completed = executionResults.value.filter(r => r.status === 'completed').length
   return Math.round((completed / executionResults.value.length) * 100)
 })
 
-const completedNodes = computed(() => executionResults.value.filter(r => r.status === 'success').length)
+const completedNodes = computed(() => executionResults.value.filter(r => r.status === 'completed').length)
 
 const statusText = computed(() => {
   const map: Record<string, string> = {
@@ -353,6 +306,24 @@ const statusText = computed(() => {
   }
   return map[executionStatus.value] || '未知'
 })
+
+// ── 保存状态点文案（B8，i18n 四语；computed 在渲染期求值，此时 t 已在 setup 内就绪）──
+const saveStatusText = computed(() => {
+  switch (saveStatus.value) {
+    case 'saved': return t('workflow.editor.saveStatusSaved')
+    case 'saving': return t('workflow.editor.saveStatusSaving')
+    case 'error': return t('workflow.editor.saveStatusError')
+    default: return t('workflow.editor.saveStatusUnsaved')
+  }
+})
+
+const saveRetryText = computed(() => t('workflow.editor.saveRetry'))
+
+const saveStatusHint = computed(() =>
+  saveStatus.value === 'error'
+    ? t('workflow.editor.saveRetryHint')
+    : saveStatusText.value
+)
 
 const nodeColor = (node: { type?: string }) => {
   const colorMap: Record<string, string> = {
@@ -480,11 +451,16 @@ function getReferenceableParams(): { label: string; value: string }[] {
   return params
 }
 
-function getLlmNodeProvider(node: any): string {
-  // 通用 llm 节点用 node.data.provider；特定 provider 节点从类型推导
-  if (node?.type === 'llm') return node?.data?.provider || 'deepseek'
-  return (node?.type || '').replace('llm_', '')
-}
+// 通用 LLM 节点的供应商选项（B3：全局配置入口移除后不再依赖 /llm-config 端点；
+// 与后端 llm_config.SUPPORTED_PROVIDERS/PROVIDER_LABELS 同口径，排除通用 'llm'）
+const llmProviderOptions = [
+  { label: 'OpenAI', value: 'openai' },
+  { label: 'DeepSeek', value: 'deepseek' },
+  { label: '通义千问', value: 'qwen' },
+  { label: '智谱', value: 'zhipu' },
+  { label: '阶跃星辰', value: 'step' },
+  { label: 'AI平', value: 'ai_ping' },
+]
 
 function getNodeOutputFields(nodeType: string): string[] {
   switch (nodeType) {
@@ -528,17 +504,12 @@ const onDragStart = (event: DragEvent, node: NodeDefinition | Record<string, unk
   }
 }
 
-const onDrop = (event: DragEvent) => {
-  const data = event.dataTransfer?.getData('application/vueflow')
-  if (!data) return
-
-  const nodeType = JSON.parse(data)
-  const rect = (event.target as HTMLElement).getBoundingClientRect()
-  const position = {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top
-  }
-
+// 节点构造（拖拽与点击添加共用）
+const buildNode = (
+  type: string,
+  label: string | undefined,
+  position: { x: number; y: number },
+): WorkflowNode => {
   const defaultData: Record<string, unknown> = {
     systemPrompt: '', temperature: 0.7, maxTokens: 2048,
     prompt: '', topK: 5, scoreThreshold: 0.5, condition: '',
@@ -547,18 +518,43 @@ const onDrop = (event: DragEvent) => {
     language: 'python', code: '', transformType: 'json_extract',
     inputParams: [], outputParams: [],  // 参数引用系统
     skillName: '', skillId: '',           // Skill 选择器
-    useGlobalConfig: false,               // LLM 全局配置引用
-    configProvider: '',                   // 全局配置的 provider
   }
-
-  const newNode: WorkflowNode = {
-    id: `${nodeType.type}_${Date.now()}`,
-    type: nodeType.type,
+  return {
+    id: `${type}_${Date.now()}`,
+    type,
     position,
-    data: { label: nodeType.label, type: nodeType.type, ...defaultData }
+    data: { label: label || type, type, ...defaultData }
+  }
+}
+
+const onDrop = (event: DragEvent) => {
+  const data = event.dataTransfer?.getData('application/vueflow')
+  if (!data) return
+
+  const nodeType = JSON.parse(data) as { type?: string; label?: string }
+  if (!nodeType?.type) return
+  const rect = (event.target as HTMLElement).getBoundingClientRect()
+  const position = {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top
   }
 
+  workflowStore.addNode(buildNode(nodeType.type, nodeType.label, position))
+}
+
+// 点击添加（触屏友好）：tap 只产生 click、没有 HTML5 drag 事件，
+// 点节点卡片即以阶梯错位位置添加节点；拖拽路径原样保留。
+// 添加后选中新节点：触屏无 hover，选中即展开属性面板形成明确反馈。
+const CLICK_ADD_CASCADE_STEP = 36
+const addNodeFromLibrary = (node: NodeDefinition | Record<string, unknown>) => {
+  const type = ((node as any).node_type || (node as any).type) as string | undefined
+  if (!type) return
+  const label = ((node as any).name || (node as any).label) as string | undefined
+  const count = workflowStore.nodes.length
+  const offset = (count % 8) * CLICK_ADD_CASCADE_STEP
+  const newNode = buildNode(type, label, { x: 120 + offset, y: 120 + offset })
   workflowStore.addNode(newNode)
+  workflowStore.selectNode(newNode)
 }
 
 const onNodeClick = (event: { node: WorkflowNode }) => {
@@ -694,8 +690,29 @@ const deleteSelectedNode = () => {
   }
 }
 
+// 自动保存防抖窗口（毫秒）——空画布保护在防抖到点时判定并跳过写回
+const AUTO_SAVE_DELAY_MS = 500
+
+// 已持久化版本（source）的节点数：空画布保护判定「source 非空」的依据。
+// 在加载 / 手动保存 / 自动保存成功时刷新；useWorkflowEditor() setup 时归零。
+let lastPersistedNodeCount = 0
+
 const clearCanvas = () => {
-  workflowStore.clearWorkflow()
+  // 误点即清空，且画布变更会触发 500ms 防抖自动保存 —— 先二次确认；
+  // 确认后只清节点/连线，保留 currentWorkflowId 与名称：清空的是「当前工作流
+  // 的画布」（丢弃工作流关联走「新建」入口）。空画布不会被自动保存静默写回，
+  // 只有用户手动点「保存」才会持久化空版本。
+  dialog.warning({
+    title: t('workflow.editor.clearConfirmTitle'),
+    content: t('workflow.editor.clearConfirmContent'),
+    positiveText: t('workflow.editor.clearConfirmPositive'),
+    negativeText: t('workflow.editor.clearConfirmNegative'),
+    onPositiveClick: () => {
+      workflowStore.setNodes([])
+      workflowStore.setEdges([])
+      workflowStore.selectNode(null)
+    },
+  })
 }
 
 const fitView = () => {
@@ -710,31 +727,49 @@ const saveWorkflow = async () => {
   }
 
   saving.value = true
+  saveStatus.value = 'saving'
+  const versionAtRequest = canvasEditVersion
   try {
     const flowData = workflowStore.getFlowData() as unknown as WorkflowConfig
+    // 落库载荷快照：成功后作为离开保护的「已保存」基线（请求在途期间的新改动
+    // 仍会与快照不同 → dirty 保持为真，不会因一次在途保存误判干净）
+    const requestSnapshot = JSON.stringify({ name: workflowStore.workflowName, ...flowData })
 
     if (workflowStore.currentWorkflowId) {
+      // B11 契约对齐：后端 WorkflowUpdate/Workflow 模型均无 engine_type 字段
+      // （models/workflow.py、schemas/workflow.py:45-51），旧实现随载荷发送属
+      // 「静默不落库」的假持久化——不再发送
       await updateWorkflow(workflowStore.currentWorkflowId, {
         name: workflowStore.workflowName,
         flow_data: flowData,
-        engine_type: engineType.value,
-      } as any)
+      })
     } else {
       const res = await createWorkflow({
         name: workflowStore.workflowName,
         flow_data: flowData,
-        engine_type: engineType.value,
-      } as any)
-      workflowStore.currentWorkflowId = res.data?.data?.id
+      })
+      workflowStore.currentWorkflowId = apiUnwrap<{ id: number }>(res)?.id
       // Update URL without navigation
       if (workflowStore.currentWorkflowId) {
         router.replace({ query: { id: String(workflowStore.currentWorkflowId) } })
       }
     }
+    // 手动保存是显式动作（允许保存空画布），同步刷新已持久化节点数
+    lastPersistedNodeCount = flowData.nodes.length
+    // 离开保护：服务端已确认的这份载荷成为新的 dirty 基线
+    persistedBaseline.value = requestSnapshot
+    // B8：服务端确认后才置「已保存」；请求在途期间画布又被改动则保持「未保存」
+    if (canvasEditVersion === versionAtRequest) {
+      saveStatus.value = 'saved'
+    }
+    // 手动保存是显式动作 → 成功给一次 toast；自动保存成功不弹（状态点常驻即可）
+    message.success(t('workflow.editor.saveSuccess'))
     return true
   } catch (error: unknown) {
     const err = error as { response?: { data?: { detail?: string } } }
-    message.error(err.response?.data?.detail || '保存失败')
+    // B8：失败不得沉默，状态点不得停在/进入「已保存」
+    saveStatus.value = 'error'
+    message.error(err.response?.data?.detail || t('workflow.editor.saveFailed'))
     return false
   } finally {
     saving.value = false
@@ -746,51 +781,66 @@ const autoSave = () => {
   if (autoSaveTimer) clearTimeout(autoSaveTimer)
   autoSaveTimer = setTimeout(async () => {
     if (!workflowStore.currentWorkflowId || !workflowStore.workflowName.trim()) return
+    // 空画布保护：节点=0 且已保存版本非空（source 非空）时不得静默写回——
+    // 误删最后一个节点 / 确认清空画布后，防抖到点会把服务端版本覆盖成空。
+    // 改为明确提示并跳过本次写回；确需保存空画布走手动「保存」（显式动作）。
+    if (workflowStore.nodes.length === 0 && lastPersistedNodeCount > 0) {
+      message.warning(t('workflow.editor.emptyCanvasAutoSaveBlocked'))
+      return
+    }
+    const versionAtRequest = canvasEditVersion
+    saveStatus.value = 'saving'
     try {
       const flowData = workflowStore.getFlowData() as unknown as WorkflowConfig
+      const requestSnapshot = JSON.stringify({ name: workflowStore.workflowName, ...flowData })
       await updateWorkflow(workflowStore.currentWorkflowId, {
         name: workflowStore.workflowName,
         flow_data: flowData,
-        engine_type: engineType.value,
-      } as any)
+      })
+      lastPersistedNodeCount = flowData.nodes.length
+      // 离开保护：自动保存成功同样刷新 dirty 基线（已落库即非 dirty）
+      persistedBaseline.value = requestSnapshot
+      // B8：只有服务端确认且请求期间画布无新改动，才允许置「已保存」
+      if (canvasEditVersion === versionAtRequest) {
+        saveStatus.value = 'saved'
+      }
       console.log('[auto-save] 工作流已自动保存')
-    } catch {
-      // Auto-save failures are silent
-    }
-  }, 500)
-}
-
-// 监听画布变化 → 触发自动保存
-watch(
-  () => [workflowStore.nodes, workflowStore.edges, workflowStore.workflowName],
-  () => {
-    if (workflowStore.currentWorkflowId) {
-      autoSave()
-    }
-  },
-  { deep: true }
-)
-
-// 监听选中节点配置变化 → 自动保存到节点 data
-watch(
-  () => selectedNode.value?.data,
-  () => {
-    if (selectedNode.value) {
-      workflowStore.updateNodeData(selectedNode.value.id, { ...selectedNode.value.data })
-      // 同时触发自动保存到后端
-      if (workflowStore.currentWorkflowId) {
-        autoSave()
+    } catch (error: unknown) {
+      // B8：自动保存失败不再沉默——状态点置「保存失败」（绝不显示已保存），
+      // 错误提示按节流窗口弹出（同一故障不反复打扰），点击状态点可重试。
+      saveStatus.value = 'error'
+      const now = Date.now()
+      if (now - lastAutoSaveErrorToastAt >= AUTO_SAVE_ERROR_TOAST_THROTTLE_MS) {
+        lastAutoSaveErrorToastAt = now
+        const err = error as { response?: { data?: { detail?: string } } }
+        const detail = err.response?.data?.detail
+        message.error(
+          detail
+            ? `${t('workflow.editor.autoSaveFailed')}: ${detail}`
+            : t('workflow.editor.autoSaveFailed'),
+        )
       }
     }
-  },
-  { deep: true }
-)
+  }, AUTO_SAVE_DELAY_MS)
+}
+
+// 自动保存失败后的显式重试入口（点击状态点）：复用手动保存路径（含成功 toast）
+const retrySave = async () => {
+  if (saveStatus.value !== 'error') return
+  await saveWorkflow()
+}
+
+// 监听画布变化 → 触发自动保存：注册在 useWorkflowEditor() 内（见文件头部说明，
+// 模块顶层注册不随组件生命周期挂载/释放）
 
 // 调试执行
 const openDebugPanel = () => {
   showDebugPanel.value = true
   workflowStore.resetExecution()
 }
+
+// 在途流式执行的停止函数（组件卸载/重开执行时中止底层 SSE 请求）
+let stopActiveExecution: (() => void) | null = null
 
 const executeWorkflow = async () => {
   if (!testInput.value.trim()) {
@@ -807,46 +857,105 @@ const executeWorkflow = async () => {
     return
   }
 
+  // 流式执行（接线 issue #289 的 executeWorkflowStream；旧入口用非流式
+  // executeWorkflow——整段等待且是 B8/B9 双重漂移的源头）。
+  // 事件序列（workflow.py:239-368）：workflow_start → 引擎实时 node_start /
+  // node_complete / node_error → 失败路径 workflow_error→error+done；
+  // 成功路径端点回放一轮 node_complete（落库结果，含 status 全字段）后发
+  // complete。node_complete 成功路径会出现两帧（实时 + 回放），日志按节点去重。
+  stopActiveExecution?.()
   executing.value = true
   workflowStore.startExecution()
   workflowStore.addExecutionLog('🚀 开始执行工作流...')
 
-  try {
-    const res = await execWorkflow(workflowStore.currentWorkflowId, { text: testInput.value })
-    const result = res.data?.data
-
-    if (result?.node_results) {
-      for (const nodeResult of result.node_results) {
-        executingNodeId.value = nodeResult.node_id
-        const status = nodeResult.status || 'success'
-        const icon = status === 'success' ? '✅' : status === 'failed' ? '❌' : '📊'
-        workflowStore.updateNodeExecution({
-          nodeId: nodeResult.node_id,
-          nodeType: nodeResult.node_type,
-          status,
-          output: nodeResult.output,
-          duration: nodeResult.duration
-        })
-        workflowStore.addExecutionLog(`${icon} [${getNodeLabel(nodeResult.node_type)}] ${status === 'success' ? '完成' : '失败'} (${nodeResult.duration || 0}ms)`)
-      }
+  const loggedNodes = new Set<string>()
+  await new Promise<void>((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      stopActiveExecution = null
+      executing.value = false
+      executingNodeId.value = null
+      resolve()
     }
 
-    if (result?.output) {
-      workflowStore.setExecutionComplete(result.output)
-      workflowStore.addExecutionLog('✅ 工作流执行成功!')
-    } else {
-      workflowStore.setExecutionComplete(result)
-      workflowStore.addExecutionLog('✅ 工作流执行完成')
+    const logNodeOnce = (nodeId: string, line: string) => {
+      if (loggedNodes.has(nodeId)) return
+      loggedNodes.add(nodeId)
+      workflowStore.addExecutionLog(line)
     }
 
-  } catch (error: unknown) {
-    const errMsg = error instanceof Error ? error.message : '未知错误'
-    workflowStore.addExecutionLog(`❌ 执行失败: ${errMsg}`)
-    message.error('执行失败')
-  } finally {
-    executing.value = false
-    executingNodeId.value = null
-  }
+    stopActiveExecution = executeWorkflowStream(
+      workflowStore.currentWorkflowId!,
+      { text: testInput.value },
+      (event, data) => {
+        switch (event) {
+          case 'node_start': {
+            // 实时帧 {node_id, node_type, timestamp}（workflow_engine.py:816-820）
+            executingNodeId.value = (data as { node_id?: string }).node_id ?? null
+            break
+          }
+          case 'node_complete': {
+            // 实时帧 {node_id,node_type,output,duration}（workflow_engine.py:851-857）
+            // 与端点回放帧（NodeResult 全字段，workflow.py:317-319）同键不同完整度
+            const r = data as { node_id: string; node_type?: string; status?: string; output?: unknown; duration?: number | null }
+            const status = (r.status === 'failed' ? 'failed' : 'completed') as 'completed' | 'failed'
+            workflowStore.updateNodeExecution({
+              nodeId: r.node_id,
+              nodeType: r.node_type ?? '',
+              status,
+              output: r.output as Record<string, unknown> | undefined,
+              duration: r.duration ?? undefined
+            })
+            const icon = status === 'failed' ? '❌' : '✅'
+            logNodeOnce(r.node_id, `${icon} [${getNodeLabel(r.node_type ?? '')}] ${status === 'failed' ? '失败' : '完成'} (${r.duration ?? 0}ms)`)
+            break
+          }
+          case 'node_error': {
+            // 引擎实时失败帧 {node_id,error,traceback}（workflow_engine.py:870-875）
+            const r = data as { node_id: string; error?: string }
+            workflowStore.updateNodeExecution({
+              nodeId: r.node_id,
+              nodeType: '',
+              status: 'failed',
+              error: r.error
+            })
+            logNodeOnce(r.node_id, `❌ [${r.node_id}] 失败: ${r.error || '未知错误'}`)
+            break
+          }
+          case 'complete': {
+            // 引擎总体结果 {success,output,node_outputs,context,memory}
+            // （workflow_engine.py:1008-1016）；success=false 时带 error 摘要
+            const engineResult = (data ?? {}) as { success?: boolean; output?: unknown; error?: string }
+            if (engineResult.success === false) {
+              workflowStore.setExecutionComplete(null)
+              workflowStore.addExecutionLog(`❌ 执行失败: ${engineResult.error || '工作流节点执行失败'}`)
+              message.error('执行失败')
+            } else {
+              const finalOut = engineResult.output !== undefined ? engineResult.output : null
+              workflowStore.setExecutionComplete((finalOut ?? null) as Record<string, unknown> | string | null)
+              workflowStore.addExecutionLog('✅ 工作流执行成功!')
+            }
+            finish()
+            break
+          }
+          case 'error': {
+            // 后端错误收口帧（#281：error 后必补 done）——done / onClose 再收尾
+            const d = (data ?? {}) as { error?: string }
+            workflowStore.addExecutionLog(`❌ 执行失败: ${d.error || '未知错误'}`)
+            message.error('执行失败')
+            break
+          }
+          default:
+            // heartbeat / workflow_start / workflow_complete 等：无 UI 语义，忽略
+            break
+        }
+      },
+      // 流关闭统一收尾（正常结束 / abort / 网络异常），防 executing 悬挂
+      finish,
+    )
+  })
 }
 
 // ── 工作流加载列表 ──
@@ -855,7 +964,9 @@ async function openLoadModal() {
   loadingWorkflows.value = true
   try {
     const res = await getWorkflows()
-    workflowList.value = (res.data?.data?.items || res.data?.data || [])
+    // GET /workflows/ → {success, data: {items: [...], total}} → apiUnwrap 归一
+    const page = apiUnwrap<{ items?: { id: number; name: string; created_at: string }[] } | null>(res)
+    workflowList.value = page?.items || []
   } catch {
     message.error('获取工作流列表失败')
   } finally {
@@ -867,10 +978,19 @@ async function loadWorkflowById(id: number) {
   showLoadModal.value = false
   try {
     const res = await getWorkflow(id)
-    const workflow = res.data?.data
+    const workflow = apiUnwrap<Workflow>(res)
     if (workflow) {
       workflowStore.loadWorkflow(workflow)
-      if (workflow.engine_type) engineType.value = workflow.engine_type as 'dag' | 'langgraph'
+      // 记录已持久化版本的节点数：空画布保护的「source 非空」判定依据
+      lastPersistedNodeCount = workflow.flow_data?.nodes?.length ?? 0
+      // B8：加载到的就是服务端已保存版本。等深度 watcher 先消化掉加载引发的
+      // 「变更」标记（否则状态点会先被置脏），再把状态点如实置为「已保存」。
+      await nextTick()
+      saveStatus.value = 'saved'
+      // 离开保护：加载进来的版本即 dirty 基线（刚加载不应触发离开确认）
+      persistedBaseline.value = persistedSnapshot()
+      // B11：详响应无 engine_type（workflow.py:121-132），旧读点恒 undefined——
+      // 移除；选择器保留为本地展示态（见模板 disabled 提示）
       router.replace({ query: { id: String(id) } })
       message.success('工作流加载成功')
     }
@@ -881,6 +1001,11 @@ async function loadWorkflowById(id: number) {
 
 function handleCreateNew() {
   workflowStore.clearWorkflow()
+  lastPersistedNodeCount = 0
+  // B8：新工作流尚无任何版本落库 → 状态点如实显示「未保存」
+  saveStatus.value = 'unsaved'
+  // 离开保护：新建后画布为空、无改动 → 基线即为空画布（静默放行）
+  persistedBaseline.value = persistedSnapshot()
   router.replace({ query: {} })
   message.info('已创建新工作流')
 }
@@ -889,7 +1014,8 @@ function handleCreateNew() {
 async function loadNodeDefinitions() {
   try {
     const res = await getNodeDefinitions()
-    const defs = res.data?.data
+    // GET /workflows/nodes/definitions → {success, data: <NodeDefinition[]>}
+    const defs = apiUnwrap<NodeDefinition[]>(res)
     if (defs && Array.isArray(defs) && defs.length > 0) {
       nodeDefinitions.value = defs
       nodeDefsLoaded.value = true
@@ -901,26 +1027,128 @@ async function loadNodeDefinitions() {
   }
 }
 
-onMounted(async () => {
-  // 并行加载所有初始化数据
-  await Promise.all([
-    loadNodeDefinitions(),
-    llmConfigStore.fetchAll(),
-    loadSkills(),
-  ])
-
-  const id = route.query.id as string
-  if (id) {
-    await loadWorkflowById(parseInt(id))
-  }
-})
-
-onUnmounted(() => {
-  if (autoSaveTimer) clearTimeout(autoSaveTimer)
-})
+// 初始化加载与卸载清理：注册在 useWorkflowEditor() 内（模块顶层注册不会执行）
 
 export function useWorkflowEditor() {
+  // ── setup 级依赖获取（必须在组件 setup 内执行；背景见文件头部说明）──
+  route = useRoute()
+  router = useRouter()
+  message = useDedupedMessage()
+  workflowStore = useWorkflowStore()
+  doFitView = useVueFlow().fitView
+  t = useI18n().t
+  dialog = useDialog()
+  // 新编辑器实例：已持久化节点数从未知开始（加载/保存路径会刷新）
+  lastPersistedNodeCount = 0
+  // B8：保存状态按新实例重置（模块级单例在测试/复用场景下必须归零）
+  saveStatus.value = 'unsaved'
+  canvasEditVersion = 0
+  lastAutoSaveErrorToastAt = 0
 
+  // E12 离开保护：进入编辑器时的画布内容即 dirty 基线（未改动 → 静默放行）
+  persistedBaseline.value = persistedSnapshot()
+
+  // E12 响应式断点：≥1280 三栏；<1280 属性面板默认收起（覆盖层可重开）
+  viewportQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(min-width: 1280px)')
+    : null
+  isNarrow.value = viewportQuery ? !viewportQuery.matches : false
+  propertyPanelOpen.value = !isNarrow.value
+
+  // ── 画布变更 → 自动保存（组件级注册，随组件卸载自动释放）──
+  watch(
+    () => [workflowStore.nodes, workflowStore.edges, workflowStore.workflowName],
+    () => {
+      // B8：本地改动发生 → 状态点如实回退为「未保存」
+      markCanvasDirty()
+      if (workflowStore.currentWorkflowId) {
+        autoSave()
+      }
+    },
+    { deep: true }
+  )
+
+  // 监听选中节点配置变化 → 自动保存到节点 data
+  watch(
+    () => selectedNode.value?.data,
+    () => {
+      if (selectedNode.value) {
+        const selected = selectedNode.value
+        const storeNode = workflowStore.nodes.find((n) => n.id === selected.id)
+        // 递归防护（E12）：点击添加会程序化选中新节点，而选中对象通常就是
+        // store 里的同一引用（属性面板 v-model 直接改的就是它）。此时若再
+        // updateNodeData({ ...selected.data })，每次都会生成新的 data 对象
+        // → 深度 watcher 自触发直至「Maximum recursive updates」上限。
+        // 引用相同说明数据已同步到 store，跳过回写。
+        if (!storeNode || storeNode.data !== selected.data) {
+          workflowStore.updateNodeData(selected.id, { ...selected.data })
+        }
+        markCanvasDirty()
+        // 同时触发自动保存到后端
+        if (workflowStore.currentWorkflowId) {
+          autoSave()
+        }
+      }
+    },
+    { deep: true }
+  )
+
+  // ── 离开保护（E12）：dirty 时路由离开二次确认；已保存/无改动静默放行 ──
+  // 确认框复用 useDialog（与清空画布同一交互形态）。positive 才放行；
+  // negative / 遮罩关闭都留在编辑器。
+  onBeforeRouteLeave(() => {
+    if (!isDirty.value) return true
+    return new Promise<boolean>((resolve) => {
+      dialog.warning({
+        title: t('workflow.editor.leaveConfirmTitle'),
+        content: t('workflow.editor.leaveConfirmContent'),
+        positiveText: t('workflow.editor.leaveConfirmPositive'),
+        negativeText: t('workflow.editor.leaveConfirmNegative'),
+        onPositiveClick: () => { resolve(true) },
+        onNegativeClick: () => { resolve(false) },
+        onClose: () => { resolve(false) },
+      })
+    })
+  })
+
+  // ── 生命周期：初始化加载 + 卸载清理 ──
+  onMounted(async () => {
+    // E12：关闭/刷新页面保护 + 断点监听（随组件卸载移除）
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    if (viewportQuery) {
+      if (typeof viewportQuery.addEventListener === 'function') {
+        viewportQuery.addEventListener('change', handleViewportChange)
+      } else if (typeof viewportQuery.addListener === 'function') {
+        viewportQuery.addListener(handleViewportChange)
+      }
+    }
+
+    // 并行加载所有初始化数据
+    await Promise.all([
+      loadNodeDefinitions(),
+      loadSkills(),
+    ])
+
+    const id = route.query.id as string
+    if (id) {
+      await loadWorkflowById(parseInt(id))
+    }
+  })
+
+  onUnmounted(() => {
+    window.removeEventListener('beforeunload', handleBeforeUnload)
+    if (viewportQuery) {
+      if (typeof viewportQuery.removeEventListener === 'function') {
+        viewportQuery.removeEventListener('change', handleViewportChange)
+      } else if (typeof viewportQuery.removeListener === 'function') {
+        viewportQuery.removeListener(handleViewportChange)
+      }
+      viewportQuery = null
+    }
+    if (autoSaveTimer) clearTimeout(autoSaveTimer)
+    // 组件卸载时中止在途流式执行（onClose 回调负责收尾 executing 状态）
+    stopActiveExecution?.()
+  })
 
 // Icon mapping for node types
 const NODE_ICON_MAP: Record<string, unknown> = {
@@ -941,18 +1169,14 @@ const NODE_ICON_MAP: Record<string, unknown> = {
 
 const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutline
 
-
-// 节点组件
-
-
   return {
   NODE_ICON_MAP,
   getNodeIconComponent,
   route,
   router,
   message,
+  t,
   workflowStore,
-  llmConfigStore,
   doFitView,
   defaultEdgeOptions,
   nodeDefinitions,
@@ -979,10 +1203,18 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   skillsLoaded,
   loadSkills,
   saving,
+  saveStatus,
+  saveStatusText,
+  saveRetryText,
+  saveStatusHint,
+  isDirty,
+  isNarrow,
+  propertyPanelOpen,
+  togglePropertyPanel,
+  closePropertyPanel,
   executing,
   executingNodeId,
   showDebugPanel,
-  showLLMConfig,
   showLoadModal,
   workflowList,
   loadingWorkflows,
@@ -990,15 +1222,7 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   vueFlowRef,
   engineType,
   engineTypeOptions,
-  editingConfigId,
-  llmConfigForm,
-  resetLlmConfigForm,
-  llmConfigColumns,
-  editConfig,
-  handleSaveConfig,
-  handleDeleteConfigById,
-  handleDeleteConfig,
-  handleSetDefault,
+  llmProviderOptions,
   autoSaveTimer,
   nodes,
   edges,
@@ -1017,11 +1241,11 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   getNodeLabel,
   formatOutput,
   getReferenceableParams,
-  getLlmNodeProvider,
   getNodeOutputFields,
   validateTemplateParams,
   onDragStart,
   onDrop,
+  addNodeFromLibrary,
   onNodeClick,
   onConnect,
   addLlmInputParam,
@@ -1041,6 +1265,7 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   clearCanvas,
   fitView,
   saveWorkflow,
+  retrySave,
   autoSave,
   openDebugPanel,
   executeWorkflow,

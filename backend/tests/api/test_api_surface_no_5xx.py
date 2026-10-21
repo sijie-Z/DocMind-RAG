@@ -24,7 +24,8 @@ ES/MinIO/Kafka（backend-tests 无 services，后端只看 sqlite 文件；backe
 真实端点毫无意义，真实调用还受网络环境影响：本机实测 `/knowledge/suggestions`
 因此空等 12s）。本 fixture 把 ES 初始化、MinIO 取对象、RAG pipeline 的
 LLM/Embedding/rerank 客户端显式钉成「立即失败」，端点代码走的就是它们各自的
-失败分支（ES → RuntimeError → 降级返回；MinIO → ConnectionError → 404；
+失败分支（ES → RuntimeError → 降级返回；MinIO → ConnectionError → 503 如实暴露
+存储故障（#301 起；此前一律假 404「文件不存在」，见 `_EXPECTED_DEPENDENCY_5XX`）；
 Embedding/LLM → ConnectionError → retriever/reranker 内已有的 except 兜底为 []），
 只是不再空等重试。这也让扫描结果与开发机上有没有起这些服务、有没有外网**无关**（确定性）。
 
@@ -42,6 +43,7 @@ Embedding/LLM → ConnectionError → retriever/reranker 内已有的 except 兜
 **跳过清单**：只有两条，理由见 `_SKIP_PATHS`；清单本身有防呆断言
 （跳过的路径必须仍存在于 OpenAPI、总数 ≤ 5 —— 防止有人用跳过把问题绕过去）。
 """
+
 import re
 import uuid
 
@@ -72,6 +74,17 @@ _SKIP_PATHS: dict[str, str] = {
     ),
 }
 _MAX_SKIPS = 5  # 跳过清单的预算上限：超过就说明有人在用跳过绕过问题，必须重新评审
+
+# ── 依赖故障的显式 5xx 豁免（issue #301 / #223）──────────────────────
+# /files 代理在 MinIO 故障（本 fixture 钉死不可达）时**如实**返回 503 —— 此前
+# 一律假 404「文件不存在」，监控面永远只有 4xx。豁免只放行「该路径恰好返回
+# 登记的状态码」；其余任何 5xx 仍判失败，且豁免必须真的命中（防条目空转）。
+# /readyz（issue #223）在 ES 被本 fixture 钉成不可用时按设计返回 503 ——
+# 这正是就绪探针存在的意义（依赖故障 → 503 摘流），不是缺陷。
+_EXPECTED_DEPENDENCY_5XX: dict[str, int] = {
+    "/files/{file_path}": 503,
+    "/readyz": 503,
+}
 
 # ── 路径参数替换表 ─────────────────────────────────────────────────
 _ZERO_UUID = "00000000-0000-0000-0000-000000000000"
@@ -118,6 +131,7 @@ _MIN_SCANNED_ENDPOINTS = 75  # 表面规模防呆：低于此值说明路由收�
 
 def _concrete_path(template: str, param_values: dict[str, str]) -> str:
     """把 /a/{x}/b/{y} 替换成具体路径；未知参数一律 '1'（合法整型形态）。"""
+
     def _sub(match: re.Match) -> str:
         return param_values.get(match.group(1), "1")
 
@@ -150,9 +164,9 @@ def _pin_external_services(monkeypatch):
 
     与 CI 契约一致（两个 job 都没有 ES/MinIO；第三方 LLM/Embedding 端点更
     不该是测试的依赖），并让本测试结果与开发机本地服务/网络的有无无关。
-    端点走的仍是各自的失败分支（ES→RuntimeError→降级；MinIO→ConnectionError→404；
-    Embedding/LLM→ConnectionError→retriever/reranker 里本来就有 except 兜底为 []），
-    不是被绕过。
+    端点走的仍是各自的失败分支（ES→RuntimeError→降级；MinIO→ConnectionError
+    →503（#301：存储故障如实暴露，不再假 404）；Embedding/LLM→ConnectionError
+    →retriever/reranker 里本来就有 except 兜底为 []），不是被绕过。
     """
     from app.core import elasticsearch as es_module
     from app.core.minio_client import minio_client
@@ -202,14 +216,20 @@ def _pin_external_services(monkeypatch):
             self.chat = _UnreachableChat()
             self.embeddings = _UnreachableEmbeddings()
 
-    # 单例 pipeline 对客户端的引用有两处：pipeline 自身（含 rerank 调用点；它不存
-    # embedding_client，那个只在 retriever 上）与 retriever。
+    class _UnreachableEmbeddingProvider:
+        """issue #196：检索期 embedding 走 provider（索引期同一 embedding_service）。"""
+
+        async def embed_query(self, *args, **kwargs):
+            raise ConnectionError("Embedding API unreachable — pinned by API surface scan")
+
+    # 单例 pipeline 对客户端的引用有两处：pipeline 自身（含 rerank 调用点）与
+    # retriever（openai_client / embedding_provider）。
     pipeline = get_rag_pipeline()
     unreachable_llm = _UnreachableOpenAI()
     monkeypatch.setattr(pipeline, "openai_client", unreachable_llm)
     monkeypatch.setattr(pipeline, "rerank_client", unreachable_llm)
     monkeypatch.setattr(pipeline.retriever, "openai_client", unreachable_llm)
-    monkeypatch.setattr(pipeline.retriever, "embedding_client", unreachable_llm)
+    monkeypatch.setattr(pipeline.retriever, "embedding_provider", _UnreachableEmbeddingProvider())
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -276,6 +296,7 @@ async def seeded_identity():
     yield user_id, org_id
 
     import app.models  # noqa: F401  — 确保全部模型已注册进 Base.metadata
+
     async with AsyncSessionLocal() as db:
         # 不用 sorted_tables：organizations/users 互为外键（owner_id / organization_id），
         # 排序会告警且本就不需要顺序 —— 先把所有引用行删空，最后删两个主体即可。
@@ -293,6 +314,7 @@ async def seeded_identity():
 
 def _user_override(user_id: int):
     """返回真表里的超管行（不是 MagicMock）—— /users/me 等端点会序列化它的字段。"""
+
     async def _get_user():
         async with AsyncSessionLocal() as db:
             user = await db.get(User, user_id)
@@ -321,13 +343,20 @@ async def test_all_get_endpoints_do_not_return_5xx(seeded_identity):
         assert len(_SKIP_PATHS) <= _MAX_SKIPS, (
             f"跳过清单膨胀到 {len(_SKIP_PATHS)} 条：用跳过绕过问题前先重新评审"
         )
+        # 防呆 1b：依赖故障豁免条目不得随路径改名而静默失效（#301）。
+        for exempted_path in _EXPECTED_DEPENDENCY_5XX:
+            assert exempted_path in all_get_paths, (
+                f"依赖故障豁免清单里的 {exempted_path} 已不存在，请清理/同步"
+            )
 
         param_values = dict(_PATH_PARAM_VALUES)
-        param_values.update({
-            "org_id": str(org_id),
-            "organization_id": str(org_id),
-            "user_id": str(user_id),
-        })
+        param_values.update(
+            {
+                "org_id": str(org_id),
+                "organization_id": str(org_id),
+                "user_id": str(user_id),
+            }
+        )
 
         scanned = [p for p in all_get_paths if p not in _SKIP_PATHS]
         # 防呆 2：表面规模不得静默缩水（路由收集异常会让"全绿"变得毫无意义）。
@@ -358,23 +387,32 @@ async def test_all_get_endpoints_do_not_return_5xx(seeded_identity):
         app.dependency_overrides.pop(auth_service.get_current_user, None)
         app.dependency_overrides.pop(optional_current_user, None)
 
-    # 断言 1（本用例的本体）：没有任何 GET 返回 5xx。
-    failures = [r for r in results if not isinstance(r[2], int) or r[2] >= 500]
+    # 断言 1（本用例的本体）：没有任何 GET 返回 5xx —— 仅 `_EXPECTED_DEPENDENCY_5XX`
+    # 登记过的「依赖故障如实 5xx」（路径 + 状态码双匹配）例外。
+    def _exempt(raw: str, code: int | str) -> bool:
+        return isinstance(code, int) and _EXPECTED_DEPENDENCY_5XX.get(raw) == code
+
+    failures = [
+        r for r in results if (not isinstance(r[2], int) or r[2] >= 500) and not _exempt(r[0], r[2])
+    ]
     if failures:
         lines = "\n".join(
             f"  [{status}] {raw}\n      请求: {concrete}\n      响应: {body}"
             for raw, concrete, status, body in failures
         )
-        pytest.fail(
-            f"API 表面扫描发现 {len(failures)} 个 5xx/连接层失败的 GET 端点：\n{lines}"
-        )
+        pytest.fail(f"API 表面扫描发现 {len(failures)} 个 5xx/连接层失败的 GET 端点：\n{lines}")
+
+    # 断言 1b：豁免不得空转 —— /files 在 MinIO 不可达时必须真的走 503 分支
+    # （没命中 = #301 的故障分流被回退/改形，先重审豁免再放行）。
+    exempt_hits = [r for r in results if _exempt(r[0], r[2])]
+    assert exempt_hits, (
+        f"依赖故障豁免未命中：{_EXPECTED_DEPENDENCY_5XX} —— /files 未在 MinIO 不可达时"
+        "返回 503（#301 的对象缺失/存储故障分流被回退？）"
+    )
 
     # 断言 2：鉴权必须真的打通（防「静默 401 缩水」——处理器没被执行时扫描是空转）。
     by_raw = {raw: status for raw, _, status, _ in results}
-    unauthenticated = [
-        p for p in _AUTH_DEPENDENT_PATHS
-        if p in by_raw and by_raw[p] in (401, 403)
-    ]
+    unauthenticated = [p for p in _AUTH_DEPENDENT_PATHS if p in by_raw and by_raw[p] in (401, 403)]
     assert not unauthenticated, (
         f"以下端点未通过鉴权（处理器未被执行，扫描面静默缩水）：{unauthenticated}\n"
         "检查三个鉴权 override key 是否仍覆盖仓库里的全部鉴权风格"

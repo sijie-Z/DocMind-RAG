@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "文档关键数字的单一事实源（W0-8）。由 backend/scripts/check_doc_facts.py 从源码派生并逐 PR 校验；代码演进导致数字变化时，必须同步本文件与引用它的文档。",
+  "facts": {
+    "sse_event_types": 20,
+    "endpoint_modules": 22,
+    "frontend_routes": 34,
+    "registered_tools": 33,
+    "http_route_decorators": 187,
+    "websocket_route_decorators": 2
+  },
+  "sources": {
+    "sse_event_types": "backend/app/agent/events.py — EventType = Literal[...] 的字符串成员数（闭集）",
+    "endpoint_modules": "backend/app/api/v1/router.py — api_router.include_router(...) 调用数",
+    "frontend_routes": "frontend/src/router/index.ts — routes 数组中的路由记录 path: 字符串字面量数（含 children；注释与 redirect 回调内的 path 对象不计；当前 12 条顶层 + 22 条页面子路由 = 34）",
+    "registered_tools": "backend/app/agent — core_tools.py 与 tools/ 包经 @register_tool(name=...) 注册并可运行时导入的工具数",
+    "http_route_decorators": "backend/app/api/v1/endpoints — @router.get/post/put/patch/delete 等 HTTP 装饰器总数",
+    "websocket_route_decorators": "backend/app/api/v1/endpoints — @router.websocket 装饰器数（与 HTTP 分开计）"
+  }
+}

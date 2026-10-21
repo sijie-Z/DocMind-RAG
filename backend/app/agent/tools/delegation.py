@@ -16,6 +16,7 @@ registry，主循环的 Executor 即可在工具列表里看到 `delegate_subtas
 - **结果回传**：每条结论截断到 `RESULT_SNIPPET_LIMIT` 字符，防止父代理上下文被压爆；
   汇总时按任务顺序编号，父代理可追溯每条结论对应哪个子任务。
 """
+
 import logging
 import time
 

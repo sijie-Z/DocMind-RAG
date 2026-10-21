@@ -29,6 +29,108 @@ _REPLAY_DIR = Path("benchmark/replay")
 # uuid hex（12/32 位）天然满足；'/'、'\\'、':'、'..' 等一律无法通过。
 _SAFE_FILE_STEM = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 
+# ── 值级校验（issue #287/R1；#319 扩面）─────────────────────────────────────
+# 快照里"合法 JSON、值类型漂移"的已知键：值读入运行态后会被比较/累加/投影
+# （executor 的 `>= max_iterations`、`+1`；run_report 的 `.get` / `list()`），
+# 坏值会炸在派发或收尾路径，且错误兜底回写会把坏值原样带回快照（毒丸自续）。
+# 读（from_checkpoint_dict）与写（to_checkpoint_dict）两侧过同一道闸门：好值
+# 原样通过，坏值降级为默认（删键 = 消费方 `.get(key, 0)` / `or {}` 的默认
+# 语义）并留 warning 行迹——绝不把坏值带进运行态，也绝不让它落回快照。
+#
+# #319 盘点（artifacts 全键 → 写入者 / 消费点 / 形状契约；闸门只覆盖真实
+# 消费面——零消费点的惰性数据没有炸点，原样透传不繁殖错误行为）：
+# - iterations_used：int 计数。写入者 executor.py:253/263（`+1` / `+len`）；
+#   消费点 executor.py:181（`>= max_iterations`）与 :253/:264（`+`）。
+#   bool 拒斥：isinstance(True, int) 为真，但 JSON true/false 是类型漂移
+#   （写入方只写 int），静默等价为 1/0 即"过归一化"。
+# - quality_gate：映射。写入者 loop.py:566（Phase 2b 每轮覆盖）。消费点
+#   run_report.py（`qg_artifact.get("fatal_issues")` → `list(...)`）：非映射
+#   直接 AttributeError（F-CRIT-1 全链实证的毒丸形态）→ 整键删；子键
+#   fatal_issues 契约 list[str]（非列表 `list(123)` TypeError；str 会静默
+#   变成逐字符垃圾）→ 坏则删子键。passed 当前零消费点 → 不设闸门。
+# - review：映射。写入者 loop.py:751（Phase 3b）。消费点 run_report.py
+#   （`review_artifact.get("recommendation")` 做 reject 判定）：非映射同上
+#   整键删；子键 recommendation 契约 str（写入者已收敛到 pass/revise/
+#   reject/error；消费方对域外值本身容忍）→ 坏则删子键。issue_count /
+#   high_severity_count 当前零消费点 → 不设闸门。
+# - 其余未知键：原样保留（既有语义；无写入者/消费点）。
+
+
+def _is_int(value: Any) -> bool:
+    """整数计数口径。bool 拒斥：JSON true/false → Python True/False 是类型
+    漂移，静默等价为 1/0 即掩盖坏形状。"""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_str(value: Any) -> bool:
+    return isinstance(value, str)
+
+
+def _is_list_of_str(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(x, str) for x in value)
+
+
+_ARTIFACT_SCALAR_SPECS: dict[str, Any] = {
+    "iterations_used": _is_int,
+}
+_ARTIFACT_MAPPING_SPECS: dict[str, dict[str, Any]] = {
+    "quality_gate": {"fatal_issues": _is_list_of_str},
+    "review": {"recommendation": _is_str},
+}
+
+
+def _normalize_artifact_values(raw: dict[str, Any], *, source: str) -> dict[str, Any]:
+    """值级规整（#287/R1 + #319 扩面；纯函数，除 warning 外无副作用）。
+
+    按上方盘点表逐键校验：标量键缺约 → 删键；映射键非映射 → 删整键、
+    子键缺约 → 删子键（消费方 `.get(...) or {}` / `or []` 默认语义照常）。
+    其余键一律原样保留。
+    """
+    clean: dict[str, Any] = {}
+    for key, value in raw.items():
+        scalar_spec = _ARTIFACT_SCALAR_SPECS.get(key)
+        if scalar_spec is not None:
+            if scalar_spec(value):
+                clean[key] = value
+            else:
+                logger.warning(
+                    "checkpoint artifacts 值级漂移（key=%s, type=%s, %s）："
+                    "按默认值降级（该键为整数计数口径，坏值不得入运行态/快照）",
+                    log_safe(key),
+                    type(value).__name__,
+                    source,
+                )
+            continue
+        mapping_spec = _ARTIFACT_MAPPING_SPECS.get(key)
+        if mapping_spec is not None:
+            if not isinstance(value, dict):
+                logger.warning(
+                    "checkpoint artifacts 值级漂移（key=%s, type=%s, %s）："
+                    "映射键形状不符，整键按默认值降级（消费方 .get 默认语义）",
+                    log_safe(key),
+                    type(value).__name__,
+                    source,
+                )
+                continue
+            normalized: dict[str, Any] = {}
+            for sub_key, sub_value in value.items():
+                sub_spec = mapping_spec.get(sub_key)
+                if sub_spec is None or sub_spec(sub_value):
+                    normalized[sub_key] = sub_value
+                else:
+                    logger.warning(
+                        "checkpoint artifacts 值级漂移（key=%s.%s, type=%s, %s）："
+                        "子键形状不符，删子键（消费方默认语义）",
+                        log_safe(key),
+                        log_safe(sub_key),
+                        type(sub_value).__name__,
+                        source,
+                    )
+            clean[key] = normalized
+            continue
+        clean[key] = value
+    return clean
+
 
 def _replay_file_for(task_id: str | None) -> Path | None:
     """由 task_id 构造本地 replay 文件落点；不满足约束 → None（拒绝拼接）。
@@ -51,15 +153,26 @@ def _replay_file_for(task_id: str | None) -> Path | None:
 
 @dataclass
 class StepRecord:
-    """Record of a single plan step execution attempt."""
+    """Record of a single plan step execution attempt.
+
+    #204：墙钟锚点（epoch 秒）。`complete_step()` 在收尾时刻打点：`finished_at`
+    取当时的墙钟，`started_at` 按 `duration_ms` 回推（duration 来自
+    `time.perf_counter()` 差值，度量的是区间长度；回推忽略步骤内的时钟漂移，
+    属可接受近似）。`started_at == 0.0` / `finished_at is None` 表示"未知"——
+    从 issue #204 之前的旧 checkpoint 恢复的步骤没有任何时间戳来源；回放
+    timeline 对旧数据同样输出 None。
+    """
+
     step_id: str
     description: str
     tool_used: str | None
-    status: str                      # pending / running / completed / failed / skipped
+    status: str  # pending / running / completed / failed / skipped
+    started_at: float  # epoch 秒；0.0 = 未知（旧快照恢复）
     result_summary: str | None = None
     error: str | None = None
     duration_ms: float = 0.0
     tokens_used: int = 0
+    finished_at: float | None = None  # epoch 秒；None = 未完成/未知
 
     @property
     def is_success(self) -> bool:
@@ -69,19 +182,22 @@ class StepRecord:
 @dataclass
 class Finding:
     """A piece of information discovered during execution."""
+
     source_step: str
     content: str
     source_tool: str | None = None
-    confidence: str = "medium"       # high / medium / low
+    confidence: str = "medium"  # high / medium / low
 
 
 @dataclass
 class Decision:
     """A key decision made during any phase."""
-    phase: str                       # plan / execute / reflect
-    action: str                      # choose_tool / retry_step / skip_step / skill_match / finalize
+
+    phase: str  # plan / execute / reflect
+    action: str  # choose_tool / retry_step / skip_step / skill_match / finalize
     reasoning: str
-    triggered_by: str | None = None
+    ts: float  # epoch 秒；0.0 = 未知（旧快照恢复）
+    triggered_by: str | None = None  # 触发该决策的 step_id（缺省取 current_step_id）
 
 
 @dataclass
@@ -94,6 +210,11 @@ class ExecutionContext:
     # ── Planning ──
     goal: str = ""
     plan_summary: str = ""
+
+    # ── 用户 @ 引用文档摘要段（T14）──
+    # 随 checkpoint 快照跨断流恢复：resume 后的 planner / executor 仍能看到
+    # 用户显式引用的文档正文（此前只活在发起 run 的内存里，断流即丢）。
+    document_context: str = ""
 
     # ── Execution — step tracking ──
     current_step_id: str | None = None
@@ -131,17 +252,40 @@ class ExecutionContext:
         tool: str | None = None,
         confidence: str = "medium",
     ) -> None:
-        self.findings.append(Finding(
-            source_step=step_id,
-            content=content[:500],
-            source_tool=tool,
-            confidence=confidence,
-        ))
+        self.findings.append(
+            Finding(
+                source_step=step_id,
+                content=content[:500],
+                source_tool=tool,
+                confidence=confidence,
+            )
+        )
 
-    def record_decision(self, phase: str, action: str, reasoning: str) -> None:
-        self.decisions.append(Decision(
-            phase=phase, action=action, reasoning=reasoning,
-        ))
+    def record_decision(
+        self,
+        phase: str,
+        action: str,
+        reasoning: str,
+        triggered_by: str | None = None,
+    ) -> None:
+        """记录一条决策（#204：打墙钟点 + 归属触发步骤）。
+
+        `triggered_by` 缺省取**记录时刻**的 `current_step_id`（executor 在串行
+        派发步骤前写入，且该字段不随步骤结束清零）。因此并行批次与运行级决策
+        （review / finalize）可能归到"最近一次串行派发的步骤"——这是
+        `current_step_id` 的既有语义，消费者做归因分析时应知晓该边界。
+        显式传入非 None 值时以显式值为准；`current_step_id` 为 None（尚未派发
+        过任何步骤）→ None，不编造归属。变异点：删掉缺省填充 → 归属断言红。
+        """
+        self.decisions.append(
+            Decision(
+                phase=phase,
+                action=action,
+                reasoning=reasoning,
+                ts=datetime.now().timestamp(),
+                triggered_by=triggered_by if triggered_by is not None else self.current_step_id,
+            )
+        )
 
     def complete_step(
         self,
@@ -154,15 +298,27 @@ class ExecutionContext:
         duration: float = 0.0,
         tokens: int = 0,
     ) -> None:
+        """记账一个步骤的终态（#204：同时打墙钟区间）。
+
+        `finished_at` = 收尾墙钟；`started_at` = finished_at - duration（毫秒）。
+        duration 是**本次 attempt** 的区间长度（重试步骤每次重新计时），因此
+        `started_at` 是最后一次 attempt 的近似起点，不是步骤首次开始时间。
+        duration 未知（默认 0）时区间折叠为一点——此时的 `started_at` 不可当作
+        真实起点；负值按 0 处理。变异点：删掉任一打点 →
+        test_issue204_trace_timestamps 的区间断言红。
+        """
+        finished_at = datetime.now().timestamp()
         record = StepRecord(
             step_id=step_id,
             description=description,
             tool_used=tool,
             status=status,
+            started_at=finished_at - max(duration, 0.0) / 1000.0,
             result_summary=(result or "")[:300],
             error=error,
             duration_ms=duration,
             tokens_used=tokens,
+            finished_at=finished_at,
         )
         self.completed_steps.append(record)
         if status == "failed":
@@ -190,17 +346,29 @@ class ExecutionContext:
                     "error": s.error,
                     "duration_ms": round(s.duration_ms, 1),
                     "tokens_used": s.tokens_used,
+                    # #204：墙钟锚点（嵌套加键，顶层键集不动）
+                    "started_at": s.started_at,
+                    "finished_at": s.finished_at,
                 }
                 for s in self.completed_steps
             ],
             "findings": [
-                {"source_step": f.source_step, "content": f.content[:300],
-                 "source_tool": f.source_tool, "confidence": f.confidence}
+                {
+                    "source_step": f.source_step,
+                    "content": f.content[:300],
+                    "source_tool": f.source_tool,
+                    "confidence": f.confidence,
+                }
                 for f in self.findings
             ],
             "decisions": [
-                {"phase": d.phase, "action": d.action,
-                 "reasoning": d.reasoning[:200], "triggered_by": d.triggered_by}
+                {
+                    "phase": d.phase,
+                    "action": d.action,
+                    "reasoning": d.reasoning[:200],
+                    "triggered_by": d.triggered_by,
+                    "ts": d.ts,
+                }
                 for d in self.decisions
             ],
             "failures": self.failures[:10],
@@ -217,13 +385,23 @@ class ExecutionContext:
     # artifacts 里——不序列化它们，resume 后预算口径断裂、迭代计数归零）。
 
     def to_checkpoint_dict(self) -> dict[str, Any]:
-        """快照形状（v1）。与 to_dict() 的差异只增不改。"""
+        """快照形状（v1）。与 to_dict() 的差异只增不改。
+
+        artifacts 过值级闸门（#287/R1；#319 扩到全部消费键）：写时以校验后
+        值为准——运行态里万一存在类型漂移的坏值（外部写入者/未来 bug），
+        落盘的是规整后的形态而不是原样坏值（毒丸绝不落回快照续给下一次
+        resume）。
+        """
         data = self.to_dict()
-        data.update({
-            "v": 1,
-            "current_step_id": self.current_step_id,
-            "artifacts": self.artifacts,
-        })
+        data.update(
+            {
+                "v": 1,
+                "current_step_id": self.current_step_id,
+                # T14：@引用摘要段随快照恢复（键缺失的旧快照 → 读侧默认空串）。
+                "document_context": self.document_context,
+                "artifacts": _normalize_artifact_values(self.artifacts, source="snapshot-write"),
+            }
+        )
         return data
 
     @classmethod
@@ -233,14 +411,28 @@ class ExecutionContext:
         逐字段容错（缺失取默认）；整体结构是否可用由更外层的
         checkpoint.parse_snapshot 统一判定（损坏 → 安全降级为"无快照"）。
         不经过 complete_step()：那会按 failed 状态二次追加 failures，与恢复的
-        failures 列表重复。
+        failures 列表重复。artifacts 的值级漂移在此按形状契约降级并留痕
+        （#287/R1；#319 扩到全部消费键，见 _normalize_artifact_values）。
         """
         ctx = cls(query=data.get("query") or "")
         ctx.task_id = data.get("task_id") or ctx.task_id
         ctx.goal = data.get("goal") or ""
         ctx.plan_summary = data.get("plan_summary") or ""
         ctx.current_step_id = data.get("current_step_id")
-        ctx.artifacts = dict(data.get("artifacts") or {})
+        # T14：@引用摘要段的读侧值级闸门（与 partial_output 同口径）——坏形状
+        # 降级为空串并留 warning，绝不把坏值带进运行态/下一次快照。
+        raw_document_context = data.get("document_context")
+        if isinstance(raw_document_context, str):
+            ctx.document_context = raw_document_context
+        elif raw_document_context is not None:
+            logger.warning(
+                "checkpoint 快照值级漂移（document_context, type=%s）：按默认降级（无引用上下文）",
+                type(raw_document_context).__name__,
+            )
+        ctx.artifacts = _normalize_artifact_values(
+            dict(data.get("artifacts") or {}),
+            source="snapshot-read",
+        )
         ctx.total_tokens = int(data.get("total_tokens") or 0)
         ctx.progress = float(data.get("progress") or 0.0)
         ctx.duration_ms = float(data.get("duration_ms") or 0.0)
@@ -248,30 +440,44 @@ class ExecutionContext:
             ctx.start_time = float(data["start_time"])
         ctx.failures = [str(f) for f in (data.get("failures") or [])]
         for s in data.get("steps") or []:
-            ctx.completed_steps.append(StepRecord(
-                step_id=s.get("step_id", ""),
-                description=s.get("description", ""),
-                tool_used=s.get("tool_used"),
-                status=s.get("status", ""),
-                result_summary=s.get("result_summary"),
-                error=s.get("error"),
-                duration_ms=float(s.get("duration_ms") or 0.0),
-                tokens_used=int(s.get("tokens_used") or 0),
-            ))
+            # #204：旧快照无 started_at / finished_at 二键 → 未知哨兵
+            # （0.0 / None）——绝不用当前时间伪造历史。变异点：直取
+            # s["started_at"] → 旧 checkpoint 解析 KeyError。
+            raw_finished_at = s.get("finished_at")
+            ctx.completed_steps.append(
+                StepRecord(
+                    step_id=s.get("step_id", ""),
+                    description=s.get("description", ""),
+                    tool_used=s.get("tool_used"),
+                    status=s.get("status", ""),
+                    started_at=float(s.get("started_at") or 0.0),
+                    result_summary=s.get("result_summary"),
+                    error=s.get("error"),
+                    duration_ms=float(s.get("duration_ms") or 0.0),
+                    tokens_used=int(s.get("tokens_used") or 0),
+                    finished_at=float(raw_finished_at) if raw_finished_at is not None else None,
+                )
+            )
         for f in data.get("findings") or []:
-            ctx.findings.append(Finding(
-                source_step=f.get("source_step", ""),
-                content=f.get("content", ""),
-                source_tool=f.get("source_tool"),
-                confidence=f.get("confidence", "medium"),
-            ))
+            ctx.findings.append(
+                Finding(
+                    source_step=f.get("source_step", ""),
+                    content=f.get("content", ""),
+                    source_tool=f.get("source_tool"),
+                    confidence=f.get("confidence", "medium"),
+                )
+            )
         for d in data.get("decisions") or []:
-            ctx.decisions.append(Decision(
-                phase=d.get("phase", ""),
-                action=d.get("action", ""),
-                reasoning=d.get("reasoning", ""),
-                triggered_by=d.get("triggered_by"),
-            ))
+            ctx.decisions.append(
+                Decision(
+                    phase=d.get("phase", ""),
+                    action=d.get("action", ""),
+                    reasoning=d.get("reasoning", ""),
+                    # #204：旧快照无 ts → 0.0 未知哨兵（同上，不得编造）。
+                    ts=float(d.get("ts") or 0.0),
+                    triggered_by=d.get("triggered_by"),
+                )
+            )
         return ctx
 
     def to_summary_dict(self) -> dict[str, Any]:
@@ -311,6 +517,7 @@ class ExecutionContext:
         # Try Redis
         try:
             from app.core.redis import redis_client
+
             if redis_client:
                 key = f"agent:replay:{self.task_id}"
                 await redis_client.setex(key, ttl, json.dumps(data, ensure_ascii=False))
@@ -345,6 +552,7 @@ class ExecutionContext:
         """
         try:
             from app.core.redis import redis_client
+
             if redis_client:
                 raw = await redis_client.get(f"agent:replay:{task_id}")
                 if raw:
@@ -358,6 +566,7 @@ class ExecutionContext:
         """Load a saved execution context from a local JSON file."""
         try:
             from pathlib import Path
+
             p = Path(path)
             if p.exists():
                 return json.loads(p.read_text(encoding="utf-8"))

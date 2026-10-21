@@ -62,7 +62,7 @@
       >
         <n-button size="tiny" quaternary @click="toggleSidebar" class="bg-white/90 dark:bg-gray-800/90 shadow-sm rounded-lg">
           <template #icon><n-icon><ArrowBackOutline /></n-icon></template>
-          {{ t('chat.backToConversations') || '返回对话列表' }}
+          {{ t('chat.backToConversations') }}
         </n-button>
       </div>
 
@@ -70,6 +70,7 @@
         ref="chatMessagesRef"
         :messages="messages"
         :isLoading="isLoading"
+        :isLoadingHistory="isLoadingHistory"
         :showBackToBottom="showBackToBottom"
         :userAvatar="userStore.userInfo?.avatar"
         :suggestions="suggestions"
@@ -79,6 +80,7 @@
         @feedback="handleFeedback"
         @copy="copyText"
         @regenerate="handleRegenerate"
+        @openSource="handleOpenSource"
       />
 
       <!-- Retrieval Debug Panel -->
@@ -122,6 +124,7 @@
         :attachedFileIds="attachedFileIds"
         :connectionStatus="effectiveConnectionStatus"
         :connectionStatusText="getConnectionStatusText(effectiveConnectionStatus)"
+        :orgPrivacyAllowed="orgPrivacyAllowed"
         @send="handleSend"
         @stopGeneration="stopGeneration"
         @triggerFileUpload="triggerFileUpload"
@@ -139,10 +142,14 @@ import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 import { useDedupedMessage } from '@/utils/message'
+import { useConfirmDangerousAction } from '@/utils/confirm'
 import { CloudUploadOutline, AlertCircleOutline, ArrowBackOutline } from '@vicons/ionicons5'
 import { getConversationMessages, clearConversationMessages } from '@/api/chat'
+import { getOrganizationSettings } from '@/api/organization'
 import type { Conversation } from '@/api/conversation'
-import type { ChatMessage } from '@/types/chat'
+import { getDocumentDetail, getDocumentContent } from '@/api/knowledge'
+import type { DocumentContent, DocumentDetail } from '@/api/knowledge'
+import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 import { getToken } from '@/utils/auth'
 
 import { ChatSidebar, ChatMessages, ChatInput, ChatHeader, DocumentPreviewModal, DebugPanel } from './components'
@@ -150,6 +157,7 @@ import { useChatAttachments, useChatMessages, useChatSessions, useChatConnection
 
 const message = useDedupedMessage()
 const { t } = useI18n()
+const confirmDangerousAction = useConfirmDangerousAction()
 const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
@@ -159,6 +167,12 @@ const appStore = useAppStore()
 const chatMessagesRef = ref()
 const msgLoadError = ref(false)
 const windowWidth = ref(window.innerWidth)
+
+// W2-T7：提示词「应用」内容上限（与 prompts/index.vue 表单 maxlength 对齐；
+// 改一处必须同步另一处，chatPromptApply.test.ts 钉住边界）。
+// E14/P2：B3 已删除 activeSystemPrompt 发送通道——本页不再有「当前模板」
+// 状态与头部徽标（旧常驻标识宣称「已生效」与实际不符，已随死通道一并移除）。
+const MAX_PROMPT_LENGTH = 5000
 
 const {
   messages, showBackToBottom,
@@ -178,12 +192,39 @@ const {
 
 const {
   sseStatus, useSSE, useStream, isLoading, isRetrieving,
-  effectiveConnectionStatus, connectWebSocket, stopGeneration
+  effectiveConnectionStatus, connectWebSocket
 } = useChatConnection(messages, baseScrollToBottom, fetchConversations)
+
+// E7：历史加载态与生成态分离 —— 切会话拉历史不再复用 isLoading（修前会误现
+// 「停止生成」按钮、生成 loading 与流式光标）。停止生成统一走 useChatSend 版本
+// （中止 SSE + 冲刷 E3 节流帧 + 落「已停止」标记）；useChatConnection 的旧停止
+// 只发 WS stop，SSE 模式下无法中止传输。
+const isLoadingHistory = ref(false)
 
 const useAgent = ref(false)
 const debugEnabled = ref(false)
 const debugData = ref<import('@/types/chat').RetrievalDebugData | null>(null)
+
+// B4（D5）：组织隐私策略。默认允许（保持既有 privacyMode 默认 True 的行为）；
+// 组织显式禁用时置灰开关并给出「组织策略」说明。后端在检索/生成链路仍会强制
+// 关闭（不信任客户端），前端灰化只负责如实呈现策略来源。
+const orgPrivacyAllowed = ref(true)
+
+const loadOrgPrivacyPolicy = async () => {
+  const orgId = userStore.currentOrgId
+  if (!orgId) {
+    orgPrivacyAllowed.value = true
+    return
+  }
+  try {
+    const res = await getOrganizationSettings(orgId)
+    const entry = res.data?.settings?.allow_privacy_mode
+    orgPrivacyAllowed.value = entry ? entry.value !== false : true
+  } catch {
+    // 读取失败不阻塞聊天：保持既有默认；服务端仍按组织策略强制。
+    orgPrivacyAllowed.value = true
+  }
+}
 
 const toggleDebug = () => {
   debugEnabled.value = !debugEnabled.value
@@ -191,12 +232,19 @@ const toggleDebug = () => {
 }
 
 const {
-  inputMessage, strictMode, privacyMode, handleSend: baseHandleSend, regenerateMessage
+  inputMessage, strictMode, privacyMode, handleSend: baseHandleSend, regenerateMessage,
+  stopGeneration
 } = useChatSend(
   messages, attachedFiles, attachedFileIds,
   baseScrollToBottom, fetchConversations,
-  isLoading, isRetrieving, sseStatus, useSSE, useAgent, debugEnabled, debugData,
+  isLoading, isRetrieving, sseStatus, useSSE, useAgent, useStream, debugEnabled, debugData,
 )
+
+// B4（D5）：组织策略禁用隐私模式时，强制关闭并持续跟随组织切换。
+watch(orgPrivacyAllowed, (allowed) => {
+  if (!allowed) privacyMode.value = false
+})
+watch(() => userStore.currentOrgId, () => { void loadOrgPrivacyPolicy() })
 
 const handleScroll = baseHandleScroll
 const scrollToBottom = baseScrollToBottom
@@ -205,7 +253,12 @@ const handleFileUpload = async (event: Event) => {
   await baseHandleFileUpload(event)
 }
 
-const handleSend = baseHandleSend
+// E7：历史加载期间不接受发送——旧实现靠 isLoading 挡住，状态分离后需显式守卫，
+// 否则历史回填会覆盖刚发出的消息。
+const handleSend = async () => {
+  if (isLoadingHistory.value) return
+  await baseHandleSend()
+}
 
 // Feature 1: Regenerate last assistant response
 const handleRegenerate = (assistantMsg: ChatMessage) => {
@@ -283,7 +336,12 @@ const handleExportChat = () => {
     if (msg.sources && msg.sources.length > 0) {
       md += '**来源：**\n\n'
       msg.sources.forEach((s, i) => {
-        md += `- [${i + 1}] ${s.filename || t('chat.sourceDoc')}${s.relevanceScore ? ` (${t('chat.relevanceMatch', { score: (s.relevanceScore * 100).toFixed(0) })})` : ''}\n`
+        // issue #185：导出与来源卡片同一诚实口径——有重排绝对分写「重排分」，
+        // 否则只写排序序位；不再输出构造性的「相关度 %」。
+        const scoreText = typeof s.relevanceScore === 'number' && s.rank != null
+          ? t('chat.rerankScore', { score: s.relevanceScore.toFixed(2) })
+          : t('chat.rankPosition', { rank: s.rank ?? i + 1 })
+        md += `- [${i + 1}] ${s.filename || t('chat.sourceDoc')} (${scoreText})\n`
       })
       md += '\n'
     }
@@ -339,17 +397,27 @@ const newConversation = () => {
 
 const handleSelectConversation = async (conv: Conversation) => {
   if (currentConversationId.value === conv.id) return
-  router.push({ query: { conversation_id: conv.id } })
-  await loadConversation(conv.id)
+  // E11-③：加载统一由下方 watch(conversation_id) 驱动（布局 key 收敛为
+  // route.name 后同页 query 变化不再整页重挂；此处不再直接调 loadConversation，
+  // 避免一次切换双重拉取）
+  await router.push({ query: { conversation_id: conv.id } })
   if (window.innerWidth < 768) sidebarOpen.value = false
 }
 
 const loadConversation = async (id: string) => {
-  isLoading.value = true
+  // E7：历史加载用独立状态（isLoadingHistory），不再复用生成态 isLoading
+  isLoadingHistory.value = true
+  msgLoadError.value = false
   try {
     const res = await getConversationMessages(id)
     if (res.data) {
       const rawData = res.data as unknown as Record<string, unknown>
+      // 无权/会话不存在：HTTP 200 但 { success:false, message:"无权访问" }（chat.py:340）
+      // ——旧实现静默落入空聊天态不报错（C7）；现在如实提示并中止
+      if (rawData?.success === false) {
+        message.error((rawData.message as string) || t('chat.historyFailed'))
+        return
+      }
       const data = (rawData?.data as Record<string, unknown>) || rawData
       const msgs = (data.messages as Record<string, unknown>[]) || []
       chatStore.setCurrentConversation({
@@ -358,26 +426,54 @@ const loadConversation = async (id: string) => {
         settings: data.settings as Record<string, unknown> | undefined
       })
       messages.value = msgs.map((m: Record<string, unknown>) => ({
-        id: m.id as string, content: m.content as string, messageType: (m.message_type || m.messageType) as 'user' | 'assistant',
-        conversationId: data.id as string, createdAt: m.created_at as string, sources: m.sources as ChatMessage['sources'], files: m.files as ChatMessage['files']
+        id: m.id as string, content: m.content as string,
+        messageType: (m.messageType ?? m.message_type) as 'user' | 'assistant',
+        conversationId: data.id as string,
+        // 真键 camelCase（chat.py:353-359）：createdAt/feedback/feedbackNote——
+        // 旧映射读 m.created_at（时间丢，B36）且丢失 feedback（重载后点赞高亮必丢，B34）
+        createdAt: m.createdAt as string,
+        feedback: (m.feedback ?? undefined) as number | undefined,
+        feedbackNote: (m.feedbackNote ?? undefined) as string | undefined,
+        sources: m.sources as ChatMessage['sources'], files: m.files as ChatMessage['files']
       }))
     }
   } catch {
     message.error(t('chat.historyFailed'))
     msgLoadError.value = true
   } finally {
-    isLoading.value = false
+    isLoadingHistory.value = false
     scrollToBottom('auto', true)
   }
 }
 
+// E11-③：布局页面包装 key 由 fullPath 收敛为 route.name 后，同页仅 query
+// 变化不再整页重挂载——conversation_id 变化（侧栏切会话、浏览器前进/后退）
+// 由本 watch 接管加载；清空 conversation_id（新对话 / 当前会话被删）回到
+// 空会话态并清空消息，避免旧会话内容挂在新 URL 下。
+watch(() => route.query.conversation_id, (newId) => {
+  const id = typeof newId === 'string' ? newId : ''
+  if (!id) {
+    messages.value = []
+    chatStore.setCurrentConversation(null)
+    return
+  }
+  if (id === chatStore.currentConversation?.id) return
+  void loadConversation(id)
+})
+
 const clearChat = async () => {
   if (!currentConversationId.value) return
+  const confirmed = await confirmDangerousAction(t('chat.clearChat'), t('chat.clearConfirm'))
+  if (!confirmed) return
   try {
     const res = await clearConversationMessages(String(currentConversationId.value))
     if (res.data?.success) {
       messages.value = []
       message.success(t('chat.chatCleared'))
+    } else {
+      // E2：success:false（如无权限）此前静默无任何反馈——如实提示服务端 message
+      const serverMsg = (res.data as { message?: string } | undefined)?.message
+      message.error(serverMsg || t('chat.clearFailed'))
     }
   } catch {
     message.error(t('chat.clearFailed'))
@@ -418,6 +514,48 @@ const getConnectionStatusText = (status?: string) => {
   }
 }
 
+// W2-T7 项 5：来源卡 → 原文预览接通（第三轮终检 §2.4：来源 tag 可点样式但零处理，
+// DocumentPreviewModal 的四个 ref 全树无写入点 → 弹窗永不打开）。现在点击来源卡
+// 拉取文档详情（/documents/{id}）+ 全文（/documents/{id}/content）后打开弹窗；
+// 失败明确报错（loading 收敛，不 silent）。
+// 取数键 = documentId（chat_service.build_sources_list 真形；旧按 fileId 取值
+// 在实机恒 undefined——类型同轮修真，见 types/chat.ts）。
+const handleOpenSource = async (source: KnowledgeSource) => {
+  const docId = source?.documentId
+  if (docId === undefined || docId === null || docId === '') return
+  const id = String(docId)
+  showPreviewModal.value = true
+  previewLoading.value = true
+  previewDoc.value = { id, filename: source.filename }
+  previewContent.value = ''
+  try {
+    const [docRes, contentRes] = await Promise.all([
+      getDocumentDetail(id),
+      getDocumentContent(id),
+    ])
+    const doc = (docRes?.data as { data?: DocumentDetail } | undefined)?.data
+    const contentData = (contentRes?.data as { data?: DocumentContent } | undefined)?.data
+    previewDoc.value = {
+      id,
+      title: doc?.title,
+      filename: doc?.filename || source.filename,
+      file_type: doc?.file_type,
+      file_size: doc?.file_size,
+      source: doc?.upload_source,
+      created_at: doc?.created_at,
+      description: doc?.description,
+      keywords: doc?.keywords,
+      summary: contentData?.summary,
+      suggested_tags: contentData?.suggested_tags,
+    }
+    previewContent.value = contentData?.content || ''
+  } catch {
+    message.error(t('chat.sourcePreviewFailed'))
+  } finally {
+    previewLoading.value = false
+  }
+}
+
 onMounted(async () => {
   const token = userStore.token || getToken()
   if (!token) { router.push({ name: 'Login' }); return }
@@ -425,22 +563,52 @@ onMounted(async () => {
   window.addEventListener('resize', checkScreenSize)
   const handleResize = () => { windowWidth.value = window.innerWidth }
   window.addEventListener('resize', handleResize)
+  void loadOrgPrivacyPolicy()
   await fetchConversations()
   const conversationId = route.query.conversation_id as string
   if (conversationId) await loadConversation(conversationId)
 
+  // URL 消费型参数一次性捕获 + 统一清理：prompt（提示词填入输入框）与
+  // q/context（搜索「问问 AI」跨页上下文）用后即清；promptName 为旧链接
+  // 兼容清理（E14/P2 起不再有消费方）。分开 replace 会因导航异步互相覆盖
+  // （后一次 spread 仍读到旧 query），故合并为一次。
   const promptContent = route.query.prompt as string
-  const promptName = route.query.promptName as string
+  const searchQuestion = route.query.q as string
+  const searchContext = route.query.context as string
+  if (promptContent || searchQuestion) {
+    router.replace({
+      query: {
+        ...route.query,
+        prompt: undefined,
+        promptName: undefined,
+        q: undefined,
+        context: undefined,
+      },
+    })
+  }
+
   if (promptContent) {
-    // 用后即从 URL 清除，避免 query 参数残留
-    router.replace({ query: { ...route.query, prompt: undefined, promptName: undefined } })
-    inputMessage.value = ''
-    // 安全校验：限制 prompt 长度，防止任意 URL 注入超大内容写入 localStorage
-    if (typeof promptContent === 'string' && promptContent.length <= 2000) {
-      message.info(t('chat.promptApplied', { name: promptName || t('chat.promptDefaultName') }))
-      localStorage.setItem('activeSystemPrompt', promptContent)
-      localStorage.setItem('activeSystemPromptName', promptName || '')
+    // W2-T7：上限与提示词表单 maxlength（prompts/index.vue）对齐 5000——
+    // 修前这里只接受 <=2000 且无 else 分支：2001~5000 字的提示词点「应用」后
+    // 静默丢弃（第三轮终检 §2.4）。超限改为明确报错，不再无声失败。
+    // E14/P2：B3 后模板不再随消息发送——不写 activeSystemPrompt 死键、
+    // 不声称「已应用」；改为把提示词填入输入框，由用户确认后自行发送。
+    if (typeof promptContent === 'string' && promptContent.length <= MAX_PROMPT_LENGTH) {
+      inputMessage.value = promptContent
+      message.info(t('chat.promptFilled'))
+    } else {
+      message.error(t('chat.promptTooLong', { max: MAX_PROMPT_LENGTH }))
     }
+  }
+
+  // E11-①：搜索页「问问 AI」跨页带参——q 预填输入框，context（所点结果正文
+  // 片段）以 Markdown 引用块随行，保留跨页用户意图；参数用后即从 URL 清除，
+  // 刷新不重复预填。选择预填而非自动发送：用户可编辑/确认，避免未经确认
+  // 触发模型调用与计费。
+  if (typeof searchQuestion === 'string' && searchQuestion.trim()) {
+    inputMessage.value = typeof searchContext === 'string' && searchContext.trim()
+      ? `${searchQuestion}\n\n> ${searchContext}`
+      : searchQuestion
   }
 
   // 确保连接 WebSocket（不依赖 watcher 的时序问题）

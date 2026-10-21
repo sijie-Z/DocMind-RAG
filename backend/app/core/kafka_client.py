@@ -8,6 +8,7 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
 class KafkaProducerClient:
     def __init__(self):
         self.producer = None
@@ -17,7 +18,7 @@ class KafkaProducerClient:
         try:
             self.producer = AIOKafkaProducer(
                 bootstrap_servers=self.bootstrap_servers,
-                value_serializer=lambda v: json.dumps(v).encode('utf-8')
+                value_serializer=lambda v: json.dumps(v).encode("utf-8"),
             )
             await self.producer.start()
             logger.info("Kafka producer started")
@@ -39,12 +40,15 @@ class KafkaProducerClient:
         try:
             await self.producer.send_and_wait(topic, value)
             # 安全修复：日志不再记录完整消息内容（可能含文档路径等敏感信息），只记录键
-            keys = ", ".join(f"{k}={v}" for k, v in value.items() if isinstance(v, (str, int)))[:200]
+            keys = ", ".join(f"{k}={v}" for k, v in value.items() if isinstance(v, (str, int)))[
+                :200
+            ]
             logger.info(f"Sent message to topic {topic} ({keys})")
             return True
         except Exception as e:
             logger.error(f"Error sending message to Kafka: {e}")
             raise
+
 
 # Global instance
 kafka_producer = KafkaProducerClient()

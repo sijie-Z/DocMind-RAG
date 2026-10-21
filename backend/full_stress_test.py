@@ -1,10 +1,29 @@
 import asyncio
+import os
 import random
 import time
 
 import aiohttp
 
 BASE_URL = 'http://localhost:8000'
+
+# 压测账号必须来自环境变量；缺省即报错退出，绝不回落到默认弱口令。
+_USERNAME_ENV = "STRESS_TEST_USERNAME"
+_PASSWORD_ENV = "STRESS_TEST_PASSWORD"
+
+
+def require_credentials() -> tuple[str, str]:
+    """读取压测账号（环境变量）；未设置时报错退出，不提供任何默认值。"""
+    username = os.environ.get(_USERNAME_ENV, "").strip()
+    password = os.environ.get(_PASSWORD_ENV, "")
+    if not username or not password:
+        raise SystemExit(
+            "缺少压测账号：请设置环境变量 "
+            f"{_USERNAME_ENV} / {_PASSWORD_ENV}"
+            "（请使用自行注册的压测账号；旧演示弱口令已废弃，本脚本不再内置任何默认值）。"
+        )
+    return username, password
+
 
 class FullStressTest:
     def __init__(self):
@@ -25,6 +44,7 @@ class FullStressTest:
         return None
 
     async def run_test(self):
+        username, password = require_credentials()
         print('='*70)
         print('  DocMind RAG Full Stress Test v6 - Extreme Validation')
         print('='*70)
@@ -33,7 +53,7 @@ class FullStressTest:
             # 1. Get tokens
             print('\n[1] Getting auth tokens (20 tokens)...')
             for i in range(20):
-                token = await self.login(session, 'guest', '123456')
+                token = await self.login(session, username, password)
                 if token:
                     self.tokens.append(token)
             print(f'    Got {len(self.tokens)} tokens')

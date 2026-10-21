@@ -1,6 +1,7 @@
 """
 Agent 工作流 API 端点
 """
+
 import asyncio
 import json
 import logging
@@ -13,7 +14,13 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user, get_user_org_id
+from app.core.security import (
+    get_current_user,
+    get_user_org_id,
+    is_org_admin,
+    is_platform_admin,
+    require_organization,
+)
 from app.exceptions import AppError, NotFoundError, ValidationError
 from app.models.user import User
 from app.models.workflow import NodeDefinition, Workflow, WorkflowExecution
@@ -27,17 +34,35 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+async def _apply_workflow_scope(db: AsyncSession, stmt, current_user: User, org_id: int):
+    """租户边界（A2 P0）+ 组织内可见性（W0-1 per-org 管理员）。
+
+    - 平台超管：全局可见（调用方不传 org_id）；
+    - 组织管理员（OrgAdmin 组织角色）：本组织全部工作流；
+    - 普通用户（含仅 users.role='admin' 的账号）：本组织内仅自己创建的工作流。
+    """
+    if is_platform_admin(current_user):
+        return stmt
+    stmt = stmt.where(Workflow.organization_id == org_id)
+    if not await is_org_admin(db, current_user, org_id):
+        stmt = stmt.where(Workflow.created_by == current_user.id)
+    return stmt
+
+
 @router.get("/", response_model=dict[str, Any])
 async def list_workflows(
     skip: int = 0,
     limit: int = 20,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """获取工作流列表"""
     conditions = [Workflow.is_active]
-    if not current_user.is_superuser and current_user.role != "admin":
-        conditions.append(Workflow.created_by == current_user.id)
+    if not current_user.is_superuser:
+        org_id = await require_organization(current_user, db)
+        conditions.append(Workflow.organization_id == org_id)
+        if not await is_org_admin(db, current_user, org_id):
+            conditions.append(Workflow.created_by == current_user.id)
 
     # 统计总数
     count_stmt = select(func.count(Workflow.id)).where(*conditions)
@@ -64,11 +89,12 @@ async def list_workflows(
                     "description": w.description,
                     "is_active": w.is_active,
                     "created_at": w.created_at.isoformat() if w.created_at else None,
-                    "updated_at": w.updated_at.isoformat() if w.updated_at else None
-                } for w in workflows
+                    "updated_at": w.updated_at.isoformat() if w.updated_at else None,
+                }
+                for w in workflows
             ],
-            "total": total
-        }
+            "total": total,
+        },
     }
 
 
@@ -77,14 +103,17 @@ async def create_workflow(
     workflow_in: WorkflowCreate,
     request: Request,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """创建工作流"""
+    # 租户边界：创建必须落在调用者的组织（无组织的超管按既有约定回源真实组织）。
+    org_id = await require_organization(current_user, db)
     workflow = Workflow(
         name=workflow_in.name,
         description=workflow_in.description,
         flow_data=workflow_in.flow_data.model_dump() if workflow_in.flow_data else None,
-        created_by=current_user.id
+        organization_id=org_id,
+        created_by=current_user.id,
     )
     db.add(workflow)
     await db.commit()
@@ -97,8 +126,8 @@ async def create_workflow(
             "name": workflow.name,
             "description": workflow.description,
             "flow_data": workflow.flow_data,
-            "created_at": workflow.created_at.isoformat()
-        }
+            "created_at": workflow.created_at.isoformat(),
+        },
     }
 
 
@@ -106,12 +135,15 @@ async def create_workflow(
 async def get_workflow(
     workflow_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """获取工作流详情"""
-    stmt = select(Workflow).where(Workflow.id == workflow_id)
-    if not current_user.is_superuser and current_user.role != "admin":
-        stmt = stmt.where(Workflow.created_by == current_user.id)
+    # A4 生命周期：软删（is_active=False）后的工作流对详情不可见——与列表/执行
+    # 端点同一口径，统一返回 404（不泄露存在性），避免软删后仍可被读取/深链。
+    stmt = select(Workflow).where(Workflow.id == workflow_id, Workflow.is_active)
+    if not current_user.is_superuser:
+        org_id = await require_organization(current_user, db)
+        stmt = await _apply_workflow_scope(db, stmt, current_user, org_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
@@ -127,8 +159,8 @@ async def get_workflow(
             "flow_data": workflow.flow_data,
             "is_active": workflow.is_active,
             "created_at": workflow.created_at.isoformat(),
-            "updated_at": workflow.updated_at.isoformat()
-        }
+            "updated_at": workflow.updated_at.isoformat(),
+        },
     }
 
 
@@ -137,12 +169,15 @@ async def update_workflow(
     workflow_id: int,
     workflow_in: WorkflowUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """更新工作流"""
-    stmt = select(Workflow).where(Workflow.id == workflow_id)
-    if not current_user.is_superuser and current_user.role != "admin":
-        stmt = stmt.where(Workflow.created_by == current_user.id)
+    # A4 生命周期：软删后的工作流不可再被 PUT 修改——否则「删除」只是从列表
+    # 消失，仍可被写回（is_active 也可被 update_data 直接翻回 True）。
+    stmt = select(Workflow).where(Workflow.id == workflow_id, Workflow.is_active)
+    if not current_user.is_superuser:
+        org_id = await require_organization(current_user, db)
+        stmt = await _apply_workflow_scope(db, stmt, current_user, org_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
@@ -167,8 +202,8 @@ async def update_workflow(
             "id": workflow.id,
             "name": workflow.name,
             "description": workflow.description,
-            "flow_data": workflow.flow_data
-        }
+            "flow_data": workflow.flow_data,
+        },
     }
 
 
@@ -176,12 +211,13 @@ async def update_workflow(
 async def delete_workflow(
     workflow_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """删除工作流（软删除）"""
     stmt = select(Workflow).where(Workflow.id == workflow_id)
-    if not current_user.is_superuser and current_user.role != "admin":
-        stmt = stmt.where(Workflow.created_by == current_user.id)
+    if not current_user.is_superuser:
+        org_id = await require_organization(current_user, db)
+        stmt = await _apply_workflow_scope(db, stmt, current_user, org_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
@@ -201,12 +237,15 @@ async def execute_workflow(
     body: dict[str, Any] | None = None,
     stream: bool = True,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """执行工作流 - 支持流式和非流式两种模式"""
     stmt = select(Workflow).where(Workflow.id == workflow_id, Workflow.is_active)
-    if not current_user.is_superuser and current_user.role != "admin":
-        stmt = stmt.where(Workflow.created_by == current_user.id)
+    if current_user.is_superuser:
+        effective_org_id = get_user_org_id(current_user)
+    else:
+        effective_org_id = await require_organization(current_user, db)
+        stmt = await _apply_workflow_scope(db, stmt, current_user, effective_org_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
 
@@ -224,14 +263,10 @@ async def execute_workflow(
     # 安全加固（issue #268）：不再 `or 1` 兜底——无组织如实传 None（含 token 组织回退，
     # 与 get_user_org_id 的其它调用方一致）；引擎侧对缺组织的检索节点显式失败，
     # 绝不静默检索 1 号组织。
-    effective_org_id = get_user_org_id(current_user)
+    # A2：非超管走 require_organization（fail-closed），与上面的查询作用域同源。
 
     # 创建执行记录
-    execution = WorkflowExecution(
-        workflow_id=workflow_id,
-        status="pending",
-        input_data=input_data
-    )
+    execution = WorkflowExecution(workflow_id=workflow_id, status="pending", input_data=input_data)
     db.add(execution)
     await db.commit()
     await db.refresh(execution)
@@ -258,9 +293,12 @@ async def execute_workflow(
         async def event_generator():
             try:
                 from app.schemas.workflow import WorkflowConfig as WConfig
+
                 config = WConfig(**workflow.flow_data)
 
-                engine = WorkflowEngine(config, organization_id=effective_org_id)
+                engine = WorkflowEngine(
+                    config, organization_id=effective_org_id, user_id=current_user.id
+                )
 
                 # 收集所有事件
                 events_queue = asyncio.Queue()
@@ -284,7 +322,9 @@ async def execute_workflow(
                         result = await engine.execute(input_data)
                         await events_queue.put({"event": "workflow_result", "data": result})
                     except Exception as e:
-                        await events_queue.put({"event": "workflow_error", "data": {"error": str(e)}})
+                        await events_queue.put(
+                            {"event": "workflow_error", "data": {"error": str(e)}}
+                        )
 
                 # 启动执行任务
                 task = asyncio.create_task(run_workflow())
@@ -297,14 +337,25 @@ async def execute_workflow(
                         event_data = event["data"]
 
                         if event_type == "workflow_result":
-                            # 执行完成
-                            execution.status = "completed"
+                            # 执行完成（issue #301 批 A #5：按引擎总体结果如实
+                            # 落终态——节点失败时记录 failed + error_message，
+                            # 此前无条件 completed）
+                            result_ok = event_data.get("success") is not False
+                            if result_ok:
+                                execution.status = "completed"
+                            else:
+                                execution.status = "failed"
+                                execution.error_message = (
+                                    event_data.get("error") or "工作流节点执行失败"
+                                )
                             execution.completed_at = datetime.now()
                             execution.output_data = event_data
                             # mode="json"：node_results 含 datetime（started_at/completed_at），
                             # python 模式的 datetime 对象写不进 JSON 列（StatementError:
                             # Object of type datetime is not JSON serializable）
-                            execution.node_results = [r.model_dump(mode="json") for r in engine.get_node_results()]
+                            execution.node_results = [
+                                r.model_dump(mode="json") for r in engine.get_node_results()
+                            ]
                             await db.commit()
 
                             # 发送节点结果
@@ -356,15 +407,16 @@ async def execute_workflow(
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"
-            }
+                "X-Accel-Buffering": "no",
+            },
         )
     # 非流式执行
     try:
         from app.schemas.workflow import WorkflowConfig as WConfig
+
         config = WConfig(**workflow.flow_data)
 
-        engine = WorkflowEngine(config, organization_id=effective_org_id)
+        engine = WorkflowEngine(config, organization_id=effective_org_id, user_id=current_user.id)
 
         execution.status = "running"
         execution.started_at = datetime.now()
@@ -372,7 +424,15 @@ async def execute_workflow(
 
         result = await engine.execute(input_data)
 
-        execution.status = "completed"
+        # issue #301（批 A #5）：按引擎总体结果如实落执行记录——节点失败时
+        # status=failed + error_message（此前无条件 completed、error_message=null，
+        # 响应也恒为 success=true）。
+        result_ok = result.get("success") is not False
+        if result_ok:
+            execution.status = "completed"
+        else:
+            execution.status = "failed"
+            execution.error_message = result.get("error") or "工作流节点执行失败"
         execution.completed_at = datetime.now()
         execution.output_data = result
         # mode="json"：node_results 含 datetime（started_at/completed_at），python
@@ -382,13 +442,13 @@ async def execute_workflow(
         await db.commit()
 
         return {
-            "success": True,
+            "success": result_ok,
             "data": {
                 "execution_id": execution.id,
                 "status": execution.status,
                 "output": result,
-                "node_results": execution.node_results
-            }
+                "node_results": execution.node_results,
+            },
         }
 
     except Exception as e:
@@ -404,7 +464,7 @@ async def execute_workflow(
 async def get_execution(
     execution_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """获取执行记录详情"""
     result = await db.execute(select(WorkflowExecution).where(WorkflowExecution.id == execution_id))
@@ -413,11 +473,22 @@ async def get_execution(
     if not execution:
         raise NotFoundError(detail="执行记录不存在")
 
-    # 权限校验：仅创建者本人或管理员/超管可查看执行记录（防止 IDOR 越权）
-    if not current_user.is_superuser and current_user.role != "admin":
-        workflow_result = await db.execute(select(Workflow).where(Workflow.id == execution.workflow_id))
+    # 权限校验（A2 租户边界）：非超管必须同时满足「工作流属于本组织」
+    # 与「组织管理员或创建者本人」，否则一律 404（不泄露跨组织记录的存在性）。
+    if not current_user.is_superuser:
+        org_id = await require_organization(current_user, db)
+        workflow_stmt = select(Workflow).where(Workflow.id == execution.workflow_id)
+        workflow_stmt = await _apply_workflow_scope(db, workflow_stmt, current_user, org_id)
+        workflow_result = await db.execute(workflow_stmt)
         workflow = workflow_result.scalar_one_or_none()
-        if not workflow or workflow.created_by != current_user.id:
+        if not workflow:
+            raise NotFoundError(detail="执行记录不存在")
+        # SQL 作用域之外再做一次显式属主校验（防御纵深）：非管理员不得查看
+        # 同组织他人工作流的执行记录。
+        if (
+            not await is_org_admin(db, current_user, org_id)
+            and workflow.created_by != current_user.id
+        ):
             raise NotFoundError(detail="执行记录不存在")
 
     return {
@@ -432,15 +503,14 @@ async def get_execution(
             "error_message": execution.error_message,
             "started_at": execution.started_at.isoformat() if execution.started_at else None,
             "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
-            "created_at": execution.created_at.isoformat()
-        }
+            "created_at": execution.created_at.isoformat(),
+        },
     }
 
 
 @router.get("/nodes/definitions", response_model=dict[str, Any])
 async def get_node_definitions(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """获取节点定义列表"""
     result = await db.execute(select(NodeDefinition).where(NodeDefinition.is_active))
@@ -457,7 +527,7 @@ async def get_node_definitions(
                 default_config={"prompt": ""},
                 input_schema={},
                 output_schema={"text": "string"},
-                icon="EditOutlined"
+                icon="EditOutlined",
             ),
             NodeDefinition(
                 node_type="output",
@@ -467,7 +537,7 @@ async def get_node_definitions(
                 default_config={},
                 input_schema={"text": "string"},
                 output_schema={"output": "string"},
-                icon="ExportOutlined"
+                icon="ExportOutlined",
             ),
             NodeDefinition(
                 node_type="llm_openai",
@@ -477,17 +547,21 @@ async def get_node_definitions(
                 default_config={"model": "gpt-4o-mini", "temperature": 0.7, "systemPrompt": ""},
                 input_schema={"text": "string"},
                 output_schema={"content": "string"},
-                icon="RobotOutlined"
+                icon="RobotOutlined",
             ),
             NodeDefinition(
                 node_type="llm_deepseek",
                 name="DeepSeek",
                 category="llm",
                 description="使用 DeepSeek 模型进行文本生成",
-                default_config={"model": "deepseek-v4-flash", "temperature": 0.7, "systemPrompt": ""},
+                default_config={
+                    "model": "deepseek-v4-flash",
+                    "temperature": 0.7,
+                    "systemPrompt": "",
+                },
                 input_schema={"text": "string"},
                 output_schema={"content": "string"},
-                icon="RobotOutlined"
+                icon="RobotOutlined",
             ),
             NodeDefinition(
                 node_type="llm_qwen",
@@ -497,7 +571,7 @@ async def get_node_definitions(
                 default_config={"model": "qwen-plus", "temperature": 0.7, "systemPrompt": ""},
                 input_schema={"text": "string"},
                 output_schema={"content": "string"},
-                icon="RobotOutlined"
+                icon="RobotOutlined",
             ),
             NodeDefinition(
                 node_type="tool_search",
@@ -507,7 +581,7 @@ async def get_node_definitions(
                 default_config={"top_k": 5},
                 input_schema={"query": "string"},
                 output_schema={"context": "string", "sources": "array"},
-                icon="SearchOutlined"
+                icon="SearchOutlined",
             ),
             NodeDefinition(
                 node_type="tool_tts",
@@ -517,7 +591,7 @@ async def get_node_definitions(
                 default_config={"voice": "alloy"},
                 input_schema={"text": "string"},
                 output_schema={"audio_url": "string"},
-                icon="SoundOutlined"
+                icon="SoundOutlined",
             ),
             NodeDefinition(
                 node_type="condition",
@@ -527,7 +601,7 @@ async def get_node_definitions(
                 default_config={"condition": ""},
                 input_schema={"text": "string"},
                 output_schema={"result": "string"},
-                icon="BranchesOutlined"
+                icon="BranchesOutlined",
             ),
             NodeDefinition(
                 node_type="router",
@@ -537,7 +611,7 @@ async def get_node_definitions(
                 default_config={"routes": []},
                 input_schema={"text": "string"},
                 output_schema={"route_result": "string"},
-                icon="CompassOutlined"
+                icon="CompassOutlined",
             ),
             NodeDefinition(
                 node_type="memory",
@@ -547,7 +621,7 @@ async def get_node_definitions(
                 default_config={"memoryType": "short_term", "action": "store"},
                 input_schema={"text": "string"},
                 output_schema={"memory": "object"},
-                icon="DatabaseOutlined"
+                icon="DatabaseOutlined",
             ),
             NodeDefinition(
                 node_type="code",
@@ -557,7 +631,7 @@ async def get_node_definitions(
                 default_config={"language": "python", "code": ""},
                 input_schema={"input": "object"},
                 output_schema={"result": "any"},
-                icon="CodeOutlined"
+                icon="CodeOutlined",
             ),
             NodeDefinition(
                 node_type="api_call",
@@ -567,7 +641,7 @@ async def get_node_definitions(
                 default_config={"method": "GET", "url": "", "timeout": 30},
                 input_schema={"params": "object"},
                 output_schema={"response": "object"},
-                icon="CloudOutlined"
+                icon="CloudOutlined",
             ),
             NodeDefinition(
                 node_type="transform",
@@ -577,7 +651,7 @@ async def get_node_definitions(
                 default_config={"transformType": "json_extract", "jsonPath": "$"},
                 input_schema={"data": "any"},
                 output_schema={"result": "any"},
-                icon="FilterOutlined"
+                icon="FilterOutlined",
             ),
         ]
 
@@ -603,7 +677,8 @@ async def get_node_definitions(
                 "default_config": d.default_config,
                 "input_schema": d.input_schema,
                 "output_schema": d.output_schema,
-                "icon": d.icon
-            } for d in definitions
-        ]
+                "icon": d.icon,
+            }
+            for d in definitions
+        ],
     }

@@ -1,4 +1,5 @@
 """Pytest 配置与公共 fixture。"""
+
 import os
 import sys
 
@@ -38,6 +39,7 @@ _TEST_ENV = {
     "EMBEDDING_API_KEY": "test-key",
     "ENABLE_RATE_LIMIT": "false",
     "ENABLE_MONITORING": "false",
+    "ENABLE_SCHEDULER": "false",
     "PROMETHEUS_ENABLED": "true",
     "SANDBOX_MODE": "ast",  # force AST sandbox in tests (no Docker dependency)
 }
@@ -66,4 +68,5 @@ def _reset_llm_breaker():
 def client():
     """创建 FastAPI TestClient（session 级别复用）。"""
     from app.main import app
+
     return TestClient(app)

@@ -19,6 +19,7 @@
 不还原 fileConfig 替换 root handler 的其余副作用（同目录 `test_schema_path_parity`
 已在做同样的进程内迁移，且 pytest 的捕获 handler 按测试相位重挂，见 #160 分析）。
 """
+
 import logging
 import os
 from pathlib import Path

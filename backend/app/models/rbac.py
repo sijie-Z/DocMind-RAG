@@ -1,6 +1,7 @@
 """
-派聪明AI知识库系统 - RBAC (Role-Based Access Control) 模型
+DocMind AI知识库系统 - RBAC (Role-Based Access Control) 模型
 """
+
 from datetime import datetime
 from enum import Enum
 
@@ -22,6 +23,7 @@ from app.core.database import Base
 
 class PermissionType(str, Enum):
     """定义所有可能的权限类型"""
+
     # 用户管理
     VIEW_USER_DETAIL = "user:read"
     MANAGE_USER_ROLES = "user:manage_roles"
@@ -57,36 +59,54 @@ class PermissionType(str, Enum):
     VIEW_SYSTEM_HEALTH = "system:health"
     USE_EMBEDDING_SERVICE = "system:use_embedding_service"
 
+
+# W0-1（ADR-001 D3）：组织管理员 = 组织成员角色（per-org），不是 users.role。
+# 唯一权威来源是 user_organization_role_association 中 (user, organization,
+# OrgAdmin) 三元组；同一角色名在不同组织间互不授予权限。
+ORG_ADMIN_ROLE_NAME = "OrgAdmin"
+
 # 角色与权限的关联表
 role_permission_association = Table(
-    'role_permission_association',
+    "role_permission_association",
     Base.metadata,
-    Column('role_id', Integer, ForeignKey('roles.id', ondelete='CASCADE'), primary_key=True),
-    Column('permission_id', Integer, ForeignKey('permissions.id', ondelete='CASCADE'), primary_key=True)
+    Column("role_id", Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "permission_id", Integer, ForeignKey("permissions.id", ondelete="CASCADE"), primary_key=True
+    ),
 )
 
 # 用户在特定组织下的角色关联表
 user_organization_role_association = Table(
-    'user_organization_role_association',
+    "user_organization_role_association",
     Base.metadata,
-    Column('user_id', Integer, ForeignKey('users.id', ondelete='CASCADE'), primary_key=True),
-    Column('organization_id', Integer, ForeignKey('organizations.id', ondelete='CASCADE'), primary_key=True),
-    Column('role_id', Integer, ForeignKey('roles.id', ondelete='CASCADE'), primary_key=True),
-    UniqueConstraint('user_id', 'organization_id', 'role_id', name='uq_user_org_role')
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "organization_id",
+        Integer,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("role_id", Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
+    UniqueConstraint("user_id", "organization_id", "role_id", name="uq_user_org_role"),
 )
 
 
 class Permission(Base):
     """权限模型 - 定义系统中可执行的原子操作"""
+
     __tablename__ = "permissions"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True, index=True, comment="权限名称，例如 document:create")
+    name: Mapped[str] = mapped_column(
+        String(100), unique=True, index=True, comment="权限名称，例如 document:create"
+    )
     description: Mapped[str | None] = mapped_column(String(255), comment="权限描述")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
-    roles: Mapped[list["Role"]] = relationship("Role", secondary=role_permission_association, back_populates="permissions")
+    roles: Mapped[list["Role"]] = relationship(
+        "Role", secondary=role_permission_association, back_populates="permissions"
+    )
 
     def __repr__(self):
         return f"<Permission(name='{self.name}')>"
@@ -94,23 +114,29 @@ class Permission(Base):
 
 class Role(Base):
     """角色模型 - 定义用户在系统或组织中的身份，包含一组权限"""
+
     __tablename__ = "roles"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True, index=True, comment="角色名称，例如 OrgAdmin")
+    name: Mapped[str] = mapped_column(
+        String(100), unique=True, index=True, comment="角色名称，例如 OrgAdmin"
+    )
     description: Mapped[str | None] = mapped_column(String(255), comment="角色描述")
-    is_system_role: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否为系统级别角色")
+    is_system_role: Mapped[bool] = mapped_column(
+        Boolean, default=False, comment="是否为系统级别角色"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
     permissions: Mapped[list["Permission"]] = relationship(
-        "Permission",
-        secondary=role_permission_association,
-        back_populates="roles",
-        lazy="selectin"
+        "Permission", secondary=role_permission_association, back_populates="roles", lazy="selectin"
     )
 
-    user_organization_roles: Mapped[list["User"]] = relationship("User", secondary=user_organization_role_association, back_populates="roles_in_organizations")
+    user_organization_roles: Mapped[list["User"]] = relationship(
+        "User",
+        secondary=user_organization_role_association,
+        back_populates="roles_in_organizations",
+    )
 
     def __repr__(self):
         return f"<Role(name='{self.name}')>"

@@ -2,12 +2,12 @@
   <div class="users-container h-full p-4 lg:p-6 overflow-y-auto">
     <!-- 现代化毛玻璃卡片容器 -->
     <div class="bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl rounded-3xl border border-white/20 dark:border-gray-800/30 shadow-2xl shadow-blue-500/10 h-full flex flex-col overflow-hidden">
-      
+
       <!-- 页面头部：现代化搜索与操作栏 -->
       <div class="p-6 border-b border-gray-200/50 dark:border-gray-800/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gradient-to-r from-slate-50/30 to-slate-50/30 dark:from-slate-950/10 dark:to-slate-950/10">
         <div>
           <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-blue-600 dark:from-blue-400 dark:to-blue-400">
-            {{ t('users.title') }}
+            {{ t('menu.users') }}
           </h1>
           <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {{ t('users.subtitle', '管理系统内的所有用户信息及其权限') }}
@@ -58,14 +58,14 @@
       <div class="flex-1 p-6 overflow-hidden">
         <n-spin :show="loading" class="h-full">
           <template #description>
-            <span>加载中...</span>
+            <span>{{ t('common.loading') }}</span>
           </template>
 
           <!-- Error state -->
           <div v-if="loadError" class="flex items-center justify-center h-full">
-            <n-result status="error" title="加载失败" :description="loadErrorMsg">
+            <n-result status="error" :title="t('users.loadFailed')" :description="loadErrorMsg">
               <template #footer>
-                <n-button type="primary" round @click="loadUsers">重试</n-button>
+                <n-button type="primary" round @click="loadUsers">{{ t('common.retry') }}</n-button>
               </template>
             </n-result>
           </div>
@@ -136,8 +136,8 @@
               </n-radio-group>
             </n-form-item>
           </div>
-          <n-form-item :label="t('users.organizations')" path="organization_ids">
-            <n-select v-model:value="userForm.organization_ids" multiple :options="organizationOptions" :placeholder="t('users.selectOrgs', '请选择所属组织')" />
+          <n-form-item :label="t('users.organizations')" path="organization_id">
+            <n-select v-model:value="userForm.organization_id" :options="organizationOptions" :placeholder="t('users.selectOrgs', '请选择所属组织')" />
           </n-form-item>
         </n-form>
       </n-spin>
@@ -202,28 +202,32 @@ import {
 } from '@vicons/ionicons5'
 import type { DataTableColumns, FormRules, FormInst } from 'naive-ui'
 import { getUsers, createUser, updateUser, deleteUser, resetUserPassword } from '@/api/user'
+import { getOrganizations, type OrganizationListResponse } from '@/api/organization'
+import { apiUnwrap } from '@/utils/apiUnwrap'
+import { getErrorMessage } from '@/utils/apiError'
+import { useUserStore } from '@/stores/user'
 
-/** Safely extract error message from unknown error */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
+// W0-1：删除用户是平台级动作（DELETE_USER 不在 OrgAdmin 权限集），
+// 组织管理员页面不再展示该按钮（后端仍会 403 兜底）。
+const userStore = useUserStore()
 
-// 类型定义
-// 找到约 117 行左右
+// E14/D1：本页自行呈现错误的请求一律带 X-Silent-Error —— 关闭响应拦截器的
+// 全局 toast，避免与页内提示（内联错误态 / 单条 toast）重复。
+const SILENT_CONFIG = { headers: { 'X-Silent-Error': '1' } } as const
+
+// 类型定义 —— 与后端 GET /users/ 列表项真实形状对齐（users.py:784-790）：
+// 没有 nickname（显示名真身是 full_name，可能为 null）、没有 status（真身是布尔
+// is_active）、没有 phone（列表接口不返回）。
 interface User {
   id: number
   username: string
   email: string
-  nickname: string
-  phone?: string
+  full_name: string | null
+  organization_id: number | null
   role: 'admin' | 'user'
-  status: 'active' | 'inactive'
-  organization_ids: number[]
-  organizations?: Array<{ id: number; name: string; color: string }>
-  last_login_at?: string
-  created_at: string
-  // --- 加上下面这一行 ---
-  remark?: string 
+  is_active: boolean
+  created_at: string | null
+  last_login_at: string | null
 }
 
 // 状态管理
@@ -254,7 +258,9 @@ const userForm = ref({
   phone: '',
   role: 'user' as 'admin' | 'user',
   status: 'active' as 'active' | 'inactive',
-  organization_ids: [] as number[],
+  // T8：单组织数据模型（User.organization_id 单外键）——单选；提交时包装为
+  // organization_ids（后端接口字段），多组织选择在后端已显式 400 拒收。
+  organization_id: null as number | null,
   remark: ''
 })
 
@@ -268,10 +274,27 @@ const roleOptions = [
   { label: t('users.roleAdmin'), value: 'admin' }
 ]
 
-const organizationOptions = ref([
-  { label: '技术部', value: 1 },
-  { label: '产品部', value: 2 }
-])
+// T8：组织选项动态拉取（此前硬编码「技术部/产品部」两条，与库内真实组织
+// 毫不相干——真实组织：Default / Tester Org / tester2 的空间 / ...）。
+const organizationOptions = ref<Array<{ label: string; value: number }>>([])
+
+const loadOrganizationOptions = async () => {
+  try {
+    const res = await getOrganizations({ page: 1, page_size: 100 })
+    // 组织列表为 {success, data: {data: [...], total, …}} 双层体 → apiUnwrap 归一
+    const page = apiUnwrap<OrganizationListResponse | null>(res)
+    const rows = page?.data
+    organizationOptions.value = Array.isArray(rows)
+      ? rows.map((org) => ({ label: org.name, value: org.id }))
+      : []
+  } catch (err) {
+    // E14/D1：getOrganizations 固定 silent（403 附加提示也已被 silent 收敛），
+    // 调用方必须自己告知失败——否则组织下拉静默为空，用户无法区分
+    //「无组织 / 无权限 / 网络失败」。下拉仍留空，不阻塞用户管理主流程。
+    message.error(getErrorMessage(err, t('users.orgOptionsLoadFailed')))
+    organizationOptions.value = []
+  }
+}
 
 // 校验规则
 const formRules = computed<FormRules>(() => ({
@@ -279,12 +302,12 @@ const formRules = computed<FormRules>(() => ({
   email: [{ required: true, type: 'email', message: t('validation.email'), trigger: 'blur' }],
   nickname: [{ required: true, message: t('validation.required'), trigger: 'blur' }],
   ...(editingUser.value ? {} : {
-    password: [{ required: true, min: 6, message: t('validation.passwordLength'), trigger: 'blur' }]
+    password: [{ required: true, min: 8, message: t('validation.passwordLength'), trigger: 'blur' }]
   })
 }))
 
 const resetPasswordRules = computed<FormRules>(() => ({
-  newPassword: [{ required: true, min: 6, message: t('validation.passwordLength'), trigger: 'blur' }],
+  newPassword: [{ required: true, min: 8, message: t('validation.passwordLength'), trigger: 'blur' }],
   confirmPassword: [
     { required: true, message: t('validation.required'), trigger: 'blur' },
     {
@@ -296,10 +319,17 @@ const resetPasswordRules = computed<FormRules>(() => ({
 }))
 
 // 计算与分页
+// 注：后端 /users/ 目前只有 skip/limit，无服务端搜索 —— 此处为「当前页内」的
+// 本地过滤（不再发送会被后端静默忽略的 search 参数）；全名/full_name 都可能为
+// null，一律空串兜底，杜绝 undefined.toLowerCase() 崩溃。
 const filteredUsers = computed(() => {
-  if (!searchText.value) return users.value
-  const s = searchText.value.toLowerCase()
-  return users.value.filter(u => u.username.toLowerCase().includes(s) || u.nickname.toLowerCase().includes(s))
+  const s = searchText.value.trim().toLowerCase()
+  if (!s) return users.value
+  return users.value.filter(u =>
+    (u.username || '').toLowerCase().includes(s) ||
+    (u.full_name || '').toLowerCase().includes(s) ||
+    (u.email || '').toLowerCase().includes(s)
+  )
 })
 
 const pagination = reactive({
@@ -319,13 +349,18 @@ const pagination = reactive({
   }
 })
 
-// 列定义
+// 列定义（绑定真实字段：全名 ← full_name（可空），状态 ← is_active 布尔；
+// 原 phone 列因列表接口不返回该字段已移除）
 const columns: DataTableColumns<User> = [
   { type: 'selection', width: 50 },
   { title: t('profile.username'), key: 'username', width: 120, fixed: 'left' },
-  { title: t('profile.nickname'), key: 'nickname', width: 120 },
+  {
+    title: t('profile.nickname'),
+    key: 'full_name',
+    width: 120,
+    render: (row) => row.full_name || '-'
+  },
   { title: t('profile.email'), key: 'email', width: 180, ellipsis: { tooltip: true } },
-  { title: t('profile.phone'), key: 'phone', width: 120 },
   {
     title: t('profile.role'),
     key: 'role',
@@ -340,13 +375,13 @@ const columns: DataTableColumns<User> = [
   },
   {
     title: t('profile.status'),
-    key: 'status',
+    key: 'is_active',
     width: 100,
     render(row) {
       return h(
         NTag,
-        { type: row.status === 'active' ? 'success' : 'warning', bordered: false },
-        { default: () => row.status === 'active' ? t('users.active') : t('users.inactive') }
+        { type: row.is_active ? 'success' : 'warning', bordered: false },
+        { default: () => row.is_active ? t('users.active') : t('users.inactive') }
       )
     }
   },
@@ -368,11 +403,15 @@ const columns: DataTableColumns<User> = [
             { size: 'small', type: 'warning', secondary: true, onClick: () => openResetPwd(row) },
             { default: () => t('users.resetPassword') }
           ),
-          h(
-            NButton,
-            { size: 'small', type: 'error', secondary: true, onClick: () => handleDelete(row) },
-            { default: () => t('common.delete') }
-          )
+          ...(userStore.isSuperuser
+            ? [
+                h(
+                  NButton,
+                  { size: 'small', type: 'error', secondary: true, onClick: () => handleDelete(row) },
+                  { default: () => t('common.delete') }
+                ),
+              ]
+            : [])
         ]
       })
     }
@@ -384,28 +423,21 @@ const loadUsers = async () => {
   loading.value = true
   try {
     const params = {
-      page: pagination.page,
-      page_size: pagination.pageSize,
-      search: searchText.value
+      // 后端真实分页参数是 skip/limit（page/page_size 会被 FastAPI 静默忽略）
+      skip: (pagination.page - 1) * pagination.pageSize,
+      limit: pagination.pageSize
     }
-    const res = await getUsers(params)
-    // 修复：后端返回的数据结构是 { success: true, data: { data: [], total: ... } }
-    if (res.data && res.data.data) {
-        if (Array.isArray(res.data.data.data)) {
-            users.value = res.data.data.data
-        } else {
-            users.value = []
-        }
-        pagination.itemCount = res.data.data.total || 0
-    } else {
-        users.value = []
-        pagination.itemCount = 0
-    }
+    const res = await getUsers(params, SILENT_CONFIG)
+    // 真实响应为裸扁平形状 {total, skip, limit, users: [...]}（无 success/data 信封）
+    const body = res.data
+    users.value = Array.isArray(body?.users) ? body.users : []
+    pagination.itemCount = body?.total || 0
     loadError.value = false
   } catch (err: unknown) {
-    message.error('加载失败: ' + getErrorMessage(err))
+    // E14/D1：错误如实（5xx/传输层回退 i18n，后端 4xx detail 原文优先）；
+    // 内联错误态（含重试）已是唯一提示表面，不再叠加 toast。
     loadError.value = true
-    loadErrorMsg.value = '加载失败: ' + getErrorMessage(err)
+    loadErrorMsg.value = getErrorMessage(err, t('users.loadFailedDesc'))
   } finally {
     loading.value = false
   }
@@ -413,17 +445,17 @@ const loadUsers = async () => {
 
 const handleEdit = (user: User) => {
   editingUser.value = user
-  // 使用解构赋值并为可能为 undefined 的字段提供默认空字符串
+  // 按真实字段映射表单：显示名 ← full_name（可空），状态 ← is_active 布尔
   userForm.value = {
     username: user.username,
     password: '',
     email: user.email,
-    nickname: user.nickname,
-    phone: user.phone || '', // 如果是 undefined，就给个空字符串
+    nickname: user.full_name || '',
+    phone: '',
     role: user.role,
-    status: user.status,
-    organization_ids: user.organization_ids || [],
-    remark: user.remark || '' // 同样处理 remark
+    status: user.is_active === false ? 'inactive' : 'active',
+    organization_id: user.organization_id ?? null,
+    remark: ''
   }
   showCreateModal.value = true
 }
@@ -437,25 +469,34 @@ const openResetPwd = (user: User) => {
 const closeCreateModal = () => {
   showCreateModal.value = false
   editingUser.value = null
-  userForm.value = { username: '', password: '', email: '', nickname: '', phone: '', role: 'user', status: 'active', organization_ids: [], remark: '' }
+  userForm.value = { username: '', password: '', email: '', nickname: '', phone: '', role: 'user', status: 'active', organization_id: null, remark: '' }
 }
 
 const saveUser = async () => {
   try {
     await formRef.value?.validate()
-    saving.value = true
+  } catch {
+    // 字段级校验错误由表单自身呈现，不再叠加一条无意义的 toast
+    return
+  }
+  saving.value = true
+  try {
+    // T8：单选 organization_id → 包装为后端字段 organization_ids（单组织模型）
+    const { organization_id, ...rest } = userForm.value
+    const payload = { ...rest, organization_ids: organization_id != null ? [organization_id] : [] }
     if (editingUser.value) {
-      const { username: _, password: __, ...updateData } = userForm.value
-      await updateUser(editingUser.value.id, updateData)
+      const { username: _, password: __, ...updateData } = payload
+      await updateUser(editingUser.value.id, updateData, SILENT_CONFIG)
       message.success(t('common.success'))
     } else {
-      await createUser(userForm.value)
+      await createUser(payload, SILENT_CONFIG)
       message.success(t('common.success'))
     }
     closeCreateModal()
     loadUsers()
   } catch (err: unknown) {
-    message.error(getErrorMessage(err) || t('common.failed'))
+    // E14/D1：错误文案统一走 getErrorMessage，axios 黑话不上屏
+    message.error(getErrorMessage(err, t('common.failed')))
   } finally {
     saving.value = false
   }
@@ -464,13 +505,17 @@ const saveUser = async () => {
 const resetPassword = async () => {
   try {
     await resetPasswordFormRef.value?.validate()
-    if (!resettingUserId.value) return
-    resettingPassword.value = true
-    await resetUserPassword(resettingUserId.value, resetPasswordForm.value.newPassword)
+  } catch {
+    return
+  }
+  if (!resettingUserId.value) return
+  resettingPassword.value = true
+  try {
+    await resetUserPassword(resettingUserId.value, resetPasswordForm.value.newPassword, SILENT_CONFIG)
     message.success(t('common.success'))
     showResetPasswordModal.value = false
   } catch (err: unknown) {
-    message.error(getErrorMessage(err) || t('common.failed'))
+    message.error(getErrorMessage(err, t('common.failed')))
   } finally {
     resettingPassword.value = false
   }
@@ -479,16 +524,16 @@ const resetPassword = async () => {
 const handleDelete = (row: User) => {
   dialog.warning({
     title: t('common.confirm') || '确认删除',
-    content: t('users.deleteConfirmWithName', { username: row.username || row.nickname }),
+    content: t('users.deleteConfirmWithName', { username: row.username || row.full_name || '' }),
     positiveText: t('common.confirm'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       try {
-        await deleteUser(row.id)
+        await deleteUser(row.id, SILENT_CONFIG)
         message.success(t('common.success'))
         loadUsers()
       } catch (err: unknown) {
-        message.error(getErrorMessage(err) || t('common.failed'))
+        message.error(getErrorMessage(err, t('common.failed')))
       }
     }
   })
@@ -498,7 +543,10 @@ const handleSelectionChange = (keys: (string | number)[]) => {
   selectedIds.value = keys.map(k => Number(k))
 }
 
-onMounted(loadUsers)
+onMounted(() => {
+  loadUsers()
+  loadOrganizationOptions()
+})
 </script>
 
 <style scoped>

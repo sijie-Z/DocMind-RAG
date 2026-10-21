@@ -1,11 +1,13 @@
 from app.core.database import Base
 from app.models.agent_task import AgentTask, TaskStatus
+from app.models.agent_tool_call import AgentToolCall, AgentToolResult, ToolCallStatus
 from app.models.chat import ChatMessage, ChatSession
 from app.models.document import Document
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.models.manual import SystemManual
 from app.models.notification import Notification
 from app.models.organization import Organization, user_organization
+from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
 from app.models.prompt_version import PromptTemplateVersion
 from app.models.rbac import (
@@ -14,6 +16,7 @@ from app.models.rbac import (
     role_permission_association,
     user_organization_role_association,
 )
+from app.models.scheduled_task import ScheduledTask, ScheduleRunStatus, ScheduleType
 from app.models.token_usage import TokenUsageRecord
 from app.models.user import User
 from app.models.user_audit import UserActivityLog, UserLoginSession
@@ -25,7 +28,11 @@ __all__ = [
     "User",
     "AgentTask",
     "TaskStatus",
+    "AgentToolCall",
+    "AgentToolResult",
+    "ToolCallStatus",
     "Organization",
+    "OrganizationSettings",
     "user_organization",
     "Document",
     "ChatSession",
@@ -46,5 +53,8 @@ __all__ = [
     "UserSettings",
     "Workflow",
     "WorkflowExecution",
-    "NodeDefinition"
+    "NodeDefinition",
+    "ScheduledTask",
+    "ScheduleType",
+    "ScheduleRunStatus",
 ]

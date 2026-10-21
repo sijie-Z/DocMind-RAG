@@ -7,6 +7,7 @@
   dedup_key 恒为空，重复 chunk 会占满最终 top_k；
 - 调试载荷中的 id/filename 也因同样的形状不匹配而恒为 None/"未知"。
 """
+
 import sys
 import types
 
@@ -23,8 +24,13 @@ from app.rag.retriever import HybridRetriever
 def _post_processed_hit(chunk_id: str, text: str, filename: str, score: float) -> dict:
     """构造 HybridRetriever._post_process 形状的命中（带 content/chunk_id）。"""
     return {
-        "text": text, "content": text, "filename": filename, "chunk_id": chunk_id,
-        "score": score, "snippet": text[:50], "document_id": chunk_id.split("_")[0],
+        "text": text,
+        "content": text,
+        "filename": filename,
+        "chunk_id": chunk_id,
+        "score": score,
+        "snippet": text[:50],
+        "document_id": chunk_id.split("_")[0],
     }
 
 
@@ -56,10 +62,15 @@ class TestRerankerReceivesDocumentText:
             _post_processed_hit("doc1_c1", "香蕉的种植方法说明", "banana.md", 0.9),
             _post_processed_hit("doc2_c2", "苹果的种植方法说明", "apple.md", 0.8),
         ]
-        out = await _rerank_local("苹果", hits, top_n=2)
+        out, reason = await _rerank_local("苹果", hits, top_n=2)
 
+        assert reason is None
         assert all(passage for _, passage in fake.pairs), "重排序器不得收到空文档"
-        assert [p[1] for p in fake.pairs] == ["香蕉的种植方法说明", "苹果的种植方法说明"]
+        # issue #190：送审 passage 统一携带「文件:<filename>」出处前缀
+        assert [p[1] for p in fake.pairs] == [
+            "文件:banana.md\n香蕉的种植方法说明",
+            "文件:apple.md\n苹果的种植方法说明",
+        ]
         assert [h["chunk_id"] for h in out] == ["doc2_c2", "doc1_c1"], "排序必须依据真实文本"
 
     @pytest.mark.asyncio
@@ -73,8 +84,9 @@ class TestRerankerReceivesDocumentText:
             _post_processed_hit("doc1_c1", "香蕉相关内容", "banana.md", 0.9),
             _post_processed_hit("doc2_c2", "苹果相关内容", "apple.md", 0.8),
         ]
-        out = await rerank("苹果", hits)
+        out, info = await rerank("苹果", hits)
 
+        assert info["status"] == "ok" and info["path"] == "local"
         assert all(passage for _, passage in fake.pairs)
         assert out[0]["chunk_id"] == "doc2_c2"
 
@@ -90,12 +102,17 @@ class TestRerankerReceivesDocumentText:
         ]
         await _rerank_local("苹果", raw_hits, top_n=2)
 
-        assert [p[1] for p in fake.pairs] == ["苹果全文", "香蕉全文"]
+        assert [p[1] for p in fake.pairs] == [
+            "文件:未知\n苹果全文",
+            "文件:未知\n香蕉全文",
+        ]
 
     def test_hit_text_supports_all_hit_shapes(self):
         assert _hit_text({"content": "后处理结果"}) == "后处理结果"
         assert _hit_text({"_source": {"content": "raw content 字段"}}) == "raw content 字段"
-        assert _hit_text({"_source": {"chunk_text": "raw chunk_text 字段"}}) == "raw chunk_text 字段"
+        assert (
+            _hit_text({"_source": {"chunk_text": "raw chunk_text 字段"}}) == "raw chunk_text 字段"
+        )
         assert _hit_text({"_source": {}}) == ""
 
 
@@ -135,9 +152,13 @@ class TestZhipuRerankDocuments:
             {"_id": "1", "_source": {"content": "演示文档内容", "filename": "demo.md"}},
             {"_id": "2", "_source": {"chunk_text": "旧式字段内容", "filename": "old.md"}},
         ]
-        out = await _rerank_zhipu("查询", hits, top_n=2)
+        out, reason = await _rerank_zhipu("查询", hits, top_n=2)
 
-        assert payloads and payloads[0]["documents"] == ["演示文档内容", "旧式字段内容"]
+        assert reason is None
+        assert payloads and payloads[0]["documents"] == [
+            "文件:demo.md\n演示文档内容",
+            "文件:old.md\n旧式字段内容",
+        ]
         assert [h["_id"] for h in out] == ["2", "1"]
 
 
@@ -171,8 +192,9 @@ class TestLLMRerankPrompt:
             _post_processed_hit("doc1_c1", "第一段正文", "a.md", 0.5),
             _post_processed_hit("doc2_c2", "第二段正文", "b.md", 0.4),
         ]
-        out = await _rerank_llm("问题", hits, 2, _Client())
+        out, reason = await _rerank_llm("问题", hits, 2, _Client())
 
+        assert reason is None
         prompt = captured["messages"][1]["content"]
         assert "第一段正文" in prompt and "第二段正文" in prompt
         assert "文件:b.md" in prompt
@@ -182,11 +204,13 @@ class TestLLMRerankPrompt:
 class TestPostProcessCarriesStableIdentity:
     def test_post_process_carries_chunk_id_and_content(self):
         retriever = HybridRetriever()
-        fused = [{
-            "_id": "doc9_c7",
-            "_score": 0.5,
-            "_source": {"content": "正文内容" * 20, "filename": "x.md", "document_id": "doc9"},
-        }]
+        fused = [
+            {
+                "_id": "doc9_c7",
+                "_score": 0.5,
+                "_source": {"content": "正文内容" * 20, "filename": "x.md", "document_id": "doc9"},
+            }
+        ]
 
         docs = retriever._post_process("正文内容", fused, 5)
 
@@ -197,10 +221,12 @@ class TestPostProcessCarriesStableIdentity:
 
     def test_post_process_synthesizes_chunk_id_without_es_id(self):
         retriever = HybridRetriever()
-        fused = [{
-            "_score": 0.5,
-            "_source": {"content": "正文内容" * 20, "filename": "x.md", "document_id": "doc9"},
-        }]
+        fused = [
+            {
+                "_score": 0.5,
+                "_source": {"content": "正文内容" * 20, "filename": "x.md", "document_id": "doc9"},
+            }
+        ]
 
         docs = retriever._post_process("正文内容", fused, 5)
 
@@ -217,8 +243,18 @@ class TestSubQueryMergeDedup:
         other = _post_processed_hit("doc2_c2", "另一片段", "b.md", 0.8)
         responses = iter([[dup, other], [dict(dup)]])
 
-        async def fake_retrieve(query, organization_id, top_k, document_ids=None, debug=False):
+        async def fake_retrieve(
+            query,
+            organization_id,
+            top_k,
+            document_ids=None,
+            debug=False,
+            search_mode=None,
+            **kwargs,
+        ):
             # issue #292：retrieve 契约扩为 (results, query_vector, debug_info, degraded)
+            # issue #225：retrieve 增加 search_mode 透传参数（本用例恒 None=自动路由）
+            # issue #187：pipeline 以 doc_cap=None 要求检索层不截断（帽移到 rerank 后）
             return next(responses), [], None, []
 
         async def fake_decompose(query, client, model, max_sq):
@@ -228,19 +264,32 @@ class TestSubQueryMergeDedup:
 
         async def fake_rerank(query, hits, client=None):
             captured["hits"] = list(hits)
-            return list(hits)
+            return list(hits), {
+                "status": "disabled",
+                "path": "noop",
+                "reason": "test_stub",
+                "attempts": [],
+                "scores_attached": False,
+                "model": None,
+            }
 
         monkeypatch.setattr(pipeline.retriever, "retrieve", fake_retrieve)
         monkeypatch.setattr("app.rag.pipeline.decompose_query", fake_decompose)
-        monkeypatch.setattr(QueryComplexityClassifier, "classify", classmethod(lambda cls, q: "complex"))
+        monkeypatch.setattr(
+            QueryComplexityClassifier, "classify", classmethod(lambda cls, q: "complex")
+        )
         monkeypatch.setattr("app.rag.pipeline.rerank", fake_rerank)
 
         results, debug_info = await pipeline.search_knowledge_base(
-            "请对比分析两个方案的区别和影响", 1, top_k=5, debug=True,
+            "请对比分析两个方案的区别和影响",
+            1,
+            top_k=5,
+            debug=True,
         )
 
-        assert [h["chunk_id"] for h in captured["hits"]] == ["doc1_c1", "doc2_c2"], \
+        assert [h["chunk_id"] for h in captured["hits"]] == ["doc1_c1", "doc2_c2"], (
             "跨子查询的重复 chunk 必须只保留一次"
+        )
         assert len(results) == 2
         # 调试载荷同样基于稳定 id / 文件名（修复前恒为 id=None、filename=未知）
         assert debug_info["rerank_result"][0]["id"] == "doc1_c1"

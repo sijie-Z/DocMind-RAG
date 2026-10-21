@@ -7,6 +7,7 @@
 - **直答步骤产生 StepRecord**：此前直答 run 的 run report / execution_context
   的 steps 恒为空。
 """
+
 import typing
 from unittest.mock import AsyncMock, MagicMock, call
 
@@ -41,9 +42,9 @@ def test_query_rewrite_counter_wired(monkeypatch):
 @pytest.mark.parametrize(
     ("query", "expected_new_variants"),
     [
-        ("架构", 0),                                  # 无改写候选 → 不计数
-        ("请 帮我 总结一下这份文档", 1),               # 2 条候选 → 计 1
-        ("请 帮我 总结一下这份文档，好吗？", 2),        # 3 条候选 → 计 2
+        ("架构", 0),  # 无改写候选 → 不计数
+        ("请 帮我 总结一下这份文档", 1),  # 2 条候选 → 计 1
+        ("请 帮我 总结一下这份文档，好吗？", 2),  # 3 条候选 → 计 2
     ],
 )
 def test_query_rewrite_counter_counts_exact_new_variants(monkeypatch, query, expected_new_variants):
@@ -169,10 +170,18 @@ async def test_direct_answer_step_records_completion():
     plan = Plan(id="p1", goal="g", steps=[step])
     ctx = ExecutionContext(query="q")
 
-    [e async for e in ex._execute_step_once(
-        step=step, plan=plan, history=None, organization_id=1, user_id=0,
-        enable_thinking=False, ctx=ctx,
-    )]
+    [
+        e
+        async for e in ex._execute_step_once(
+            step=step,
+            plan=plan,
+            history=None,
+            organization_id=1,
+            user_id=0,
+            enable_thinking=False,
+            ctx=ctx,
+        )
+    ]
 
     assert ctx.completed_steps, "直答步骤必须产生 StepRecord（#239 minor-10 / #245 第 8 条）"
     rec = ctx.completed_steps[-1]

@@ -1,6 +1,7 @@
 """
 系统操作手册模型
 """
+
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Integer, String, Text
@@ -12,6 +13,7 @@ from app.core.database import Base
 
 class SystemManual(Base):
     """系统操作手册模型"""
+
     __tablename__ = "system_manuals"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True, autoincrement=True)
@@ -33,5 +35,5 @@ class SystemManual(Base):
             "sort_order": self.sort_order,
             "is_published": self.is_published,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

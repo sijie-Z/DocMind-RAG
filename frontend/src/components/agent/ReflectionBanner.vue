@@ -22,6 +22,10 @@ const icon = computed(() => {
     case 'retry': return '🔄'
     case 'replan': return '📝'
     case 'escalate': return '⚠️'
+    // 反思降级两态（events.py 六值域；此前无分支 → '❓' 且无 CSS 类，
+    // 横幅退化为无底色裸文本）
+    case 'unavailable': return '⏸️'
+    case 'unparsed': return '❔'
     default: return '❓'
   }
 })
@@ -62,6 +66,15 @@ const icon = computed(() => {
   border: 1px solid #d1d5db;
 }
 
+/* 反思降级两态（unavailable / unparsed）：中性灰，与四主态同构的底色/边框，
+   避免"无 CSS 类名 → 裸文本"退化 */
+.reflection-unavailable,
+.reflection-unparsed {
+  background: rgba(107, 114, 128, 0.08);
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
 .dark .reflection-pass {
   background: rgba(16, 185, 129, 0.12);
   color: #6ee7b7;
@@ -78,6 +91,12 @@ const icon = computed(() => {
 }
 
 .dark .reflection-escalate {
+  background: rgba(156, 163, 175, 0.12);
+  color: #d1d5db;
+}
+
+.dark .reflection-unavailable,
+.dark .reflection-unparsed {
   background: rgba(156, 163, 175, 0.12);
   color: #d1d5db;
 }

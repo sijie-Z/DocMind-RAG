@@ -18,15 +18,21 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.exec_context import ExecutionContext
+from app.core.error_mapping import public_decision_reasoning
 
 
 def _decision_lines(ctx: ExecutionContext, phase: str) -> list[str]:
-    """Pull reasoning for one phase that the run already recorded."""
+    """Pull reasoning for one phase that the run already recorded.
+
+    W0-5：失败态（reflect/review 服务异常等）的 reasoning 可能含任意
+    异常原文——报告会随 SSE 外发，渲染前统一过对外口径（占位/脱敏）。
+    """
     out: list[str] = []
     for d in ctx.decisions:
         if d.phase != phase or not d.reasoning:
             continue
-        out.append(f"[{d.action}] {d.reasoning[:300]}")
+        reasoning = public_decision_reasoning(d.action, d.reasoning)
+        out.append(f"[{d.action}] {str(reasoning)[:300]}")
     return out
 
 
@@ -47,15 +53,17 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
     # be narrative, not observation.
     tool_calls = []
     for step in ctx.completed_steps:
-        tool_calls.append({
-            "step_id": step.step_id,
-            "description": step.description,
-            "tool": step.tool_used,
-            "status": step.status,
-            "duration_ms": round(step.duration_ms, 1),
-            "error": step.error,
-            "result_preview": step.result_summary[:200] if step.result_summary else "",
-        })
+        tool_calls.append(
+            {
+                "step_id": step.step_id,
+                "description": step.description,
+                "tool": step.tool_used,
+                "status": step.status,
+                "duration_ms": round(step.duration_ms, 1),
+                "error": step.error,
+                "result_preview": step.result_summary[:200] if step.result_summary else "",
+            }
+        )
 
     # Evaluation outcome — reflected in the reflect-phase decision the
     # run already recorded (pass / retry / replan). pass/retry are surfaced
@@ -67,17 +75,25 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
     # §5b/§5c 语义：clean_success=False 表示本次 run 不得被呈现为一次干净的
     # 成功 —— 质检有 fatal_issues（硬性失败）或对抗审查判定 reject。
     # revise（建议修改）与质检的 C 档同级：只记录/暴露，不翻转 clean_success。
+    # error（审查未完成，issue #301 #9）同理：没有证据说 run 坏，只是本轮
+    # 质量覆盖有缺口——不翻转 clean_success，但 review_recommendation 行里
+    # 如实显示，不得静默按 pass 呈现。
     # issue #293 ②：ctx.failures 非空（重试耗尽/预算熔断等终态失败已被记账）同样
     # 必须翻转 —— 报告里明明有 FAILURE 行却 clean_success=True 是自相矛盾的全绿。
-    qg_artifact = ctx.artifacts.get("quality_gate") or {}
-    review_artifact = ctx.artifacts.get("review") or {}
-    fatal_issues = list(qg_artifact.get("fatal_issues") or [])
+    #
+    # #319/F-CRIT-1 消费侧防线：闸门（exec_context._normalize_artifact_values，
+    # 读写同源）保证常态下这里拿到的是契约形状；本防线再兜一层——对**绕过
+    # 闸门**直接构造的 ctx 同样不炸（修前直证：review="boom" → `"boom".get`
+    # AttributeError；fatal_issues=123 → `list(123)` TypeError）。降级语义与
+    # 闸门一致："无记录"（非映射 ≡ 缺键 ≡ `or {}`；非列表 ≡ 缺键 ≡ `or []`）。
+    qg_artifact = ctx.artifacts.get("quality_gate")
+    review_artifact = ctx.artifacts.get("review")
+    qg_artifact = qg_artifact if isinstance(qg_artifact, dict) else {}
+    review_artifact = review_artifact if isinstance(review_artifact, dict) else {}
+    fatal_raw = qg_artifact.get("fatal_issues")
+    fatal_issues = list(fatal_raw) if isinstance(fatal_raw, list) else []
     review_recommendation = review_artifact.get("recommendation")
-    clean_success = (
-        not fatal_issues
-        and review_recommendation != "reject"
-        and not ctx.failures
-    )
+    clean_success = not fatal_issues and review_recommendation != "reject" and not ctx.failures
 
     evaluation = {
         "reflect_decisions": reflect_reasons or ["(no reflection recorded)"],
@@ -140,7 +156,9 @@ def render_run_report_text(report: dict[str, Any]) -> str:
     lines.append("")
     lines.append("## Steps")
     for s in report["steps"]:
-        lines.append(f"  - [{s['status']}] {s['description']} (tool={s['tool']}, {s['duration_ms']}ms)")
+        lines.append(
+            f"  - [{s['status']}] {s['description']} (tool={s['tool']}, {s['duration_ms']}ms)"
+        )
     lines.append("")
     lines.append("## Tool calls")
     for t in report["tool_calls"]:

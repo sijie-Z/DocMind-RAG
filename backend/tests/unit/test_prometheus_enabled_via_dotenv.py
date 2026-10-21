@@ -4,6 +4,7 @@
 子进程模式（与 test_auto_tier_env_precedence 同款）：给临时目录一个只含必需键的
 `.env`，断言进程内总开关与导出行为；对照组不设开关。
 """
+
 import json
 import os
 import pathlib

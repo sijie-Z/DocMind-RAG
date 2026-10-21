@@ -77,7 +77,7 @@ echo.
 echo   前端:   http://localhost:%FRONTEND_PORT%
 echo   API 文档: http://localhost:%BACKEND_PORT%/docs
 echo   健康检查: http://localhost:%BACKEND_PORT%/health
-echo   演示账号: guest / 123456
+echo   演示账号: guest（需 ENABLE_DEMO_ACCOUNT=true；密码随机生成，见后端启动日志）
 echo.
 echo   按任意键打开浏览器...
 pause >nul

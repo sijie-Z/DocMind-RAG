@@ -4,9 +4,6 @@
       <span class="font-medium">🔍 检索调试面板</span>
       <div class="flex items-center gap-2">
         <span class="text-gray-400">{{ debugData.elapsed_ms ? `${debugData.elapsed_ms}ms` : '' }}</span>
-        <span v-if="debugData.strategy" class="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-          {{ debugData.strategy }}
-        </span>
         <span v-if="debugData.cache_hit" class="px-1.5 py-0.5 rounded bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400">
           缓存命中({{ debugData.cache_type }})
         </span>
@@ -23,33 +20,31 @@
         ⚡ 缓存命中（{{ debugData.cache_type }}），跳过检索
       </div>
 
-      <!-- Note -->
-      <div v-if="debugData.note" class="p-2 rounded bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/40">
-        ⚠️ {{ debugData.note }}
-      </div>
+      <!-- 顶层附加项：final_context 由 chat_service 挂顶层（chat_service.py:305-313）、
+           rerank_result 由 pipeline 挂顶层（rag/pipeline.py:262-272）。stages 恒真值，
+           旧结构把这两个顶层键的渲染塞进「无 stages」分支 → 永不显示（B39/B40） -->
+      <DebugStage :debug-data="debugData" />
 
-      <!-- Multi-stage: show per sub-query -->
-      <template v-if="debugData.stages">
-        <div v-for="(stage, sq) in debugData.stages" :key="sq" class="space-y-2">
+      <!-- 子查询明细：strategy/note 与 keyword/vector/rrf 都挂在各 stage 里
+           （rag/retriever.py:696 写 strategy、:787 写 note），并非顶层键（B37/B38） -->
+      <template v-if="stageEntries.length">
+        <div v-for="entry in stageEntries" :key="entry[0]" class="space-y-2">
           <div class="font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
-            子查询: {{ sq }}
+            子查询: {{ entry[0] }}
           </div>
-          <DebugStage :debug-data="stage" />
+          <DebugStage :debug-data="entry[1]" />
         </div>
       </template>
-
-      <!-- Single stage -->
-      <DebugStage v-else :debug-data="debugData" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { RetrievalDebugData } from '@/types/chat'
 import DebugStage from './DebugStage.vue'
 
-defineProps<{
+const props = defineProps<{
   debugData: RetrievalDebugData | null
 }>()
 
@@ -58,4 +53,7 @@ defineEmits<{
 }>()
 
 const expanded = ref(true)
+
+// stages 条目（子查询 → stage），空对象时按无子查询渲染
+const stageEntries = computed(() => Object.entries(props.debugData?.stages ?? {}))
 </script>
