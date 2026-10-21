@@ -132,7 +132,7 @@ def _wire_pipeline(monkeypatch, hits, rerank_order):
         seen["doc_cap_kwarg"] = kwargs.get("doc_cap", "MISSING")
         return [dict(h) for h in hits], [], {"strategy": "keyword_only"}, []
 
-    async def fake_rerank(query, candidates, client=None):
+    async def fake_rerank(query, candidates, client=None, **kwargs):
         seen["rerank_ids"] = [c["chunk_id"] for c in candidates]
         order = {cid: i for i, cid in enumerate(rerank_order)}
         ordered = sorted(candidates, key=lambda c: order.get(c["chunk_id"], len(order)))

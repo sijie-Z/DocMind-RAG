@@ -411,7 +411,7 @@ class TestPipelineScoreContract:
             [_hit("d1_c1", "正文一", "a.md", 1.0), _hit("d2_c2", "正文二", "b.md", 0.8)],
         )
 
-        async def fake_rerank(query, docs, client=None):
+        async def fake_rerank(query, docs, client=None, **kwargs):
             out = [dict(docs[1]), dict(docs[0])]
             out[0]["rerank_score"] = 6.5
             out[1]["rerank_score"] = -1.25
@@ -463,7 +463,7 @@ class TestPipelineScoreContract:
         cache = _RecordingCache()
         pipeline.cache = cache
 
-        async def fake_rerank(query, docs, client=None):
+        async def fake_rerank(query, docs, client=None, **kwargs):
             return list(docs), {
                 "status": "degraded",
                 "path": "noop",

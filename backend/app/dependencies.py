@@ -94,6 +94,8 @@ def get_rag_pipeline() -> RAGPipeline:
         openai_client=_build_openai_client(),
         embedding_provider=embedding_service,
         rerank_client=_build_rerank_client(),
+        # LLM 重排兜底使用 chat LLM 客户端（与聊天同源），而非 /rerank 的智谱客户端
+        llm_client=_build_openai_client(),
     )
 
 
