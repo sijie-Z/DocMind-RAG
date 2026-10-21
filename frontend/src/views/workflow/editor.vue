@@ -701,7 +701,7 @@
           </template>
 
           <!-- 代码执行节点配置 -->
-          <template v-if="selectedNode.type === 'code'">
+          <template v-if="selectedNode?.type === 'code'">
             <div>
               <label class="text-sm font-medium text-gray-600 dark:text-gray-300">语言</label>
               <n-select v-model:value="nodeData.language" :options="codeLanguages" class="mt-1" />
@@ -719,7 +719,7 @@
           </template>
 
           <!-- 数据转换节点配置 -->
-          <template v-if="selectedNode.type === 'transform'">
+          <template v-if="selectedNode?.type === 'transform'">
             <div>
               <label class="text-sm font-medium text-gray-600 dark:text-gray-300">转换类型</label>
               <n-select v-model:value="nodeData.transformType" :options="transformTypes" class="mt-1" />
