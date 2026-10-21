@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,10 +47,19 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    username: str
+    # 与 users 表列宽对齐（username VARCHAR(50) / email VARCHAR(100) / full_name VARCHAR(100)）：
+    # 超长输入在 schema 层直接 422，不再落到数据库触发 DataError → 500（并避免 SQL 细节外泄）。
+    username: str = Field(min_length=3, max_length=50)
     email: EmailStr
     password: str
-    full_name: str | None = None
+    full_name: str | None = Field(default=None, max_length=100)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_length(cls, v: EmailStr) -> EmailStr:
+        if len(str(v)) > 100:
+            raise ValueError("邮箱长度不能超过100位")
+        return v
     # 安全加固：禁止注册时自选组织（防越权加入任意组织读取文档）。
     # 注册成功后由服务端自动创建个人组织（owner=本人，见 /register 端点），
     # 不并入任何既有组织。
@@ -299,6 +308,13 @@ async def login_json(
                 if k in ("id", "username", "email", "role") or v is not None
             }
             json.dumps(user_info)
+        # 提交登录会话：refresh token 绑定了 session_id，会话行必须在返回前落库——
+        # 否则 get_db 关闭时未提交事务被回滚，/auth/refresh 会对刚签发的 token 恒定 401。
+        try:
+            await db.commit()
+        except Exception as db_err:
+            logger.warning(f"Failed to commit login session (non-critical): {db_err}")
+            await db.rollback()
         return {
             "success": True,
             "message": "登录成功",
