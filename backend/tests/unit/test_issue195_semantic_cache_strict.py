@@ -522,7 +522,7 @@ def _make_pipeline(monkeypatch, embedding):
     monkeypatch.setattr(
         "app.rag.pipeline.rerank",
         AsyncMock(
-            side_effect=lambda query, docs, client=None: (
+            side_effect=lambda query, docs, client=None, **kwargs: (
                 docs,
                 {
                     "status": "disabled",

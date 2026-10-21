@@ -454,7 +454,7 @@ def _no_rerank(monkeypatch):
     monkeypatch.setattr(
         "app.rag.pipeline.rerank",
         AsyncMock(
-            side_effect=lambda query, docs, client=None: (
+            side_effect=lambda query, docs, client=None, **kwargs: (
                 docs,
                 {
                     "status": "disabled",
