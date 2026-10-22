@@ -109,22 +109,31 @@ def test_graph_and_compressor_code_evidence():
 
 
 def test_help_page_steps_match_real_ui():
-    """帮助页三条：PPT 支持 / 重试向量化 / 演示口令，必须与真实 UI 一致。"""
-    help_page = _read(_HELP_VIEW)
-    _assert_absent(_HELP_VIEW, ["重试向量化", "guest / 123456", "guest/123456"])
-    # 正向断言真实支持格式（与上传面板 accept 一致）。
-    _assert_present(_HELP_VIEW, ["PDF", "Word", ".docx", ".xlsx", "Markdown", "CSV", "OCR"])
+    """帮助内容（guide markdown + 帮助页视图）：PPT 支持 / 重试向量化 / 演示口令，必须与真实 UI 一致。"""
+    guide_dir = _REPO_ROOT / "frontend" / "src" / "content" / "guide"
+    guide_files = sorted(guide_dir.rglob("*.md"))
+    assert guide_files, "帮助中心正文（frontend/src/content/guide/**/*.md）缺失"
+    help_text = "\n".join(p.read_text(encoding="utf-8") for p in guide_files)
+    help_text += "\n" + _read(_HELP_VIEW)
+
+    for needle in ["重试向量化", "guest / 123456", "guest/123456"]:
+        assert needle not in help_text, f"帮助内容仍含过期/错误表述: {needle}"
+    # 正向断言真实支持格式（与上传面板 accept / 解析器一致）。
+    for needle in ["PDF", "Word", ".docx", ".xlsx", "Markdown", "CSV", "OCR"]:
+        assert needle in help_text, f"帮助内容缺少与代码一致的必要表述: {needle}"
     # 真实可达的操作入口（知识库页：行内"重新解析" + 工具栏"最近失败文档重建"）。
-    _assert_present(_HELP_VIEW, ["重新解析", "最近失败文档重建", "红色错误提示条"])
+    for needle in ["重新解析", "最近失败文档重建", "红色错误提示条"]:
+        assert needle in help_text, f"帮助内容缺少与代码一致的必要表述: {needle}"
     # 账号获取的真实路径：登录页"去注册"（/register）与管理员"用户管理"。
-    _assert_present(_HELP_VIEW, ["去注册", "用户管理"])
+    for needle in ["去注册", "用户管理"]:
+        assert needle in help_text, f"帮助内容缺少与代码一致的必要表述: {needle}"
 
     parser = _read("backend/app/services/document_parser.py")
     if ".pptx" not in parser and "'.ppt'" not in parser:
-        assert "PowerPoint" not in help_page, (
-            "解析器不支持 ppt/pptx，帮助页不得声称支持 PowerPoint。"
+        assert "PowerPoint" not in help_text, (
+            "解析器不支持 ppt/pptx，帮助内容不得声称支持 PowerPoint。"
         )
-    assert "123456" not in help_page
+    assert "123456" not in help_text
 
 
 def test_locales_do_not_publish_fixed_demo_credentials():

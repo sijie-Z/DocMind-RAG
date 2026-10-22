@@ -1154,6 +1154,55 @@ export default {
           desc: 'MCP（Model Context Protocol）可以把外部工具服务器接入 Agent 使用。管理员可在「管理 → MCP 服务器」（仅管理员可见）查看各服务器状态与已注册的工具；该页是只读视图——启用/停用或新增服务器需编辑后端 backend/mcp_servers.json 并重启服务。'
         },
       }
+    },
+    center: {
+      title: '使用文档',
+      navTitle: '文档目录',
+      subtitle: '从第一次登录到排错支持，一份与系统实际行为一致的说明书',
+      searchPlaceholder: '搜索标题或正文',
+      searchResults: '匹配 {count} 篇文档',
+      searchNoResults: '没有匹配的文档',
+      tocTitle: '本页目录',
+      prev: '上一篇',
+      next: '下一篇',
+      bodyLanguageNote: '正文以中文为准',
+      contentMissing: '该文档正文未随本次构建发布，请联系部署方管理员',
+      emptyTitle: '暂无使用文档',
+      emptyDesc: '本次构建未包含文档内容，请联系部署方管理员',
+      openNav: '打开文档目录',
+      closeNav: '关闭文档目录',
+      groups: {
+        gettingStarted: '快速开始',
+        concepts: '核心概念',
+        guides: '功能指南',
+        faq: '常见问题',
+        troubleshooting: '排错与支持'
+      },
+      docs: {
+        registerLogin: { title: '注册与登录' },
+        uploadFirstDocument: { title: '上传第一份文档' },
+        firstQuestion: { title: '第一次问答' },
+        perAgent: { title: 'PER Agent：规划-执行-反思' },
+        ragPipeline: { title: 'RAG 检索链路' },
+        knowledgeBaseConcept: { title: '知识库：组织级单例' },
+        organizationMultitenancy: { title: '组织与多租户' },
+        toolsHitl: { title: '工具与人工审批（HITL）' },
+        chat: { title: '对话页使用指南' },
+        knowledgeBase: { title: '知识库使用指南' },
+        agentWorkbench: { title: 'Agent 工作台' },
+        workflowEditor: { title: '工作流编辑器' },
+        prompts: { title: '提示词三层体系' },
+        organizationSettings: { title: '组织设置' },
+        monitoring: { title: '监控与仪表盘' },
+        loginExpiry: { title: '为什么登录会过期' },
+        retrievalNotFound: { title: '上传后检索不到文档' },
+        agentApproval: { title: 'Agent 为什么停下来等审批' },
+        orgSwitchSessions: { title: '切换组织后看不到旧会话' },
+        cacheDifference: { title: '语义缓存与精确缓存的区别' },
+        healthReadiness: { title: '如何阅读 /health 与 /readyz' },
+        logsRequestId: { title: '日志与 request_id' },
+        feedback: { title: '如何反馈问题' }
+      }
     }
   },
   router: {

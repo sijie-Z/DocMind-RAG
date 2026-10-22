@@ -1145,6 +1145,55 @@ export default {
           desc: 'MCP (Model Context Protocol) connects external tool servers to the Agent. Admins can open Administration → MCP Servers (admins only) to view the status of each server and its registered tools; the page is read-only — enabling, disabling or adding servers means editing backend/mcp_servers.json and restarting the service.'
         },
       }
+    },
+    center: {
+      title: 'Documentation',
+      navTitle: 'Documentation navigation',
+      subtitle: "A guide that matches the system's actual behavior — from first sign-in to troubleshooting",
+      searchPlaceholder: 'Search titles and content',
+      searchResults: '{count} matching document(s)',
+      searchNoResults: 'No matching documents',
+      tocTitle: 'On this page',
+      prev: 'Previous',
+      next: 'Next',
+      bodyLanguageNote: 'Body text is authoritative in Chinese',
+      contentMissing: 'This document is not included in this build. Contact your deployment administrator.',
+      emptyTitle: 'No documentation yet',
+      emptyDesc: 'This build does not include documentation content. Contact your deployment administrator.',
+      openNav: 'Open documentation navigation',
+      closeNav: 'Close documentation navigation',
+      groups: {
+        gettingStarted: 'Getting Started',
+        concepts: 'Core Concepts',
+        guides: 'Feature Guides',
+        faq: 'FAQ',
+        troubleshooting: 'Troubleshooting & Support'
+      },
+      docs: {
+        registerLogin: { title: 'Registration and Sign-in' },
+        uploadFirstDocument: { title: 'Upload Your First Document' },
+        firstQuestion: { title: 'Your First Question' },
+        perAgent: { title: 'PER Agent: Plan, Execute, Reflect' },
+        ragPipeline: { title: 'The RAG Retrieval Pipeline' },
+        knowledgeBaseConcept: { title: 'Knowledge Base: One per Organization' },
+        organizationMultitenancy: { title: 'Organizations and Multi-tenancy' },
+        toolsHitl: { title: 'Tools and Human Approval (HITL)' },
+        chat: { title: 'Using the Chat Page' },
+        knowledgeBase: { title: 'Using the Knowledge Base' },
+        agentWorkbench: { title: 'Agent Workbench' },
+        workflowEditor: { title: 'Workflow Editor' },
+        prompts: { title: 'The Three Prompt Layers' },
+        organizationSettings: { title: 'Organization Settings' },
+        monitoring: { title: 'Monitoring and Dashboard' },
+        loginExpiry: { title: 'Why Sessions Expire' },
+        retrievalNotFound: { title: 'Uploaded Documents Are Not Retrieved' },
+        agentApproval: { title: 'Why the Agent Waits for Approval' },
+        orgSwitchSessions: { title: 'Missing Conversations After Switching Organizations' },
+        cacheDifference: { title: 'Semantic vs. Exact Cache' },
+        healthReadiness: { title: 'Reading /health and /readyz' },
+        logsRequestId: { title: 'Logs and request_id' },
+        feedback: { title: 'Reporting an Issue' }
+      }
     }
   },
   router: {

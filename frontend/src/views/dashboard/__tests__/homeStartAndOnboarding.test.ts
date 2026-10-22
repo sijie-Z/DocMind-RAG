@@ -188,6 +188,15 @@ describe('B5 · 首页第一屏「开始做事」', () => {
     await agent.trigger('click')
     expect(push).toHaveBeenCalledWith('/agent')
 
+    const docs = wrapper.find('[data-testid="home-action-docs"]')
+    expect(docs.exists(), '缺少「使用文档」入口').toBe(true)
+    await docs.trigger('click')
+    expect(push).toHaveBeenCalledWith('/system-help')
+    // 三入口网格结构不变：文档入口是网格外的补充链接，不占第 4 个卡片位
+    const grid = wrapper.find('[data-testid="home-quickstart-grid"]')
+    expect(grid.findAll('button').length, '三入口网格应恰好 3 个按钮').toBe(3)
+    expect(grid.find('[data-testid="home-action-docs"]').exists()).toBe(false)
+
     const recent = wrapper.find('[data-testid="home-recent-conversations"]')
     expect(recent.exists(), '首屏缺少最近会话列表').toBe(true)
     expect(recent.text()).toContain('会话一')

@@ -1074,6 +1074,55 @@ export default {
           desc: "MCP (Model Context Protocol) permet de connecter des serveurs d'outils externes à l'Agent. Les administrateurs peuvent ouvrir « Administration → Serveurs MCP » (administrateurs uniquement) pour consulter l'état de chaque serveur et les outils enregistrés ; la page est en lecture seule — activer, désactiver ou ajouter un serveur nécessite de modifier backend/mcp_servers.json puis de redémarrer le service."
         },
       }
+    },
+    center: {
+      title: 'Documentation',
+      navTitle: 'Navigation de la documentation',
+      subtitle: "Guide fidèle au comportement réel du système — de la première connexion au dépannage",
+      searchPlaceholder: 'Rechercher dans les titres et le contenu',
+      searchResults: '{count} document(s) correspondant(s)',
+      searchNoResults: 'Aucun document correspondant',
+      tocTitle: 'Sur cette page',
+      prev: 'Précédent',
+      next: 'Suivant',
+      bodyLanguageNote: 'Le texte de référence est en chinois',
+      contentMissing: "Ce document n'est pas inclus dans cette version. Contactez votre administrateur de déploiement.",
+      emptyTitle: 'Aucune documentation',
+      emptyDesc: "Cette version n'inclut pas le contenu de la documentation. Contactez votre administrateur de déploiement.",
+      openNav: 'Ouvrir la navigation de la documentation',
+      closeNav: 'Fermer la navigation de la documentation',
+      groups: {
+        gettingStarted: 'Démarrage',
+        concepts: 'Concepts clés',
+        guides: 'Guides des fonctionnalités',
+        faq: 'FAQ',
+        troubleshooting: 'Dépannage et support'
+      },
+      docs: {
+        registerLogin: { title: 'Inscription et connexion' },
+        uploadFirstDocument: { title: 'Importer un premier document' },
+        firstQuestion: { title: 'Première question' },
+        perAgent: { title: "L'agent PER : planifier, exécuter, réfléchir" },
+        ragPipeline: { title: 'Chaîne de recherche RAG' },
+        knowledgeBaseConcept: { title: 'Base de connaissances : une par organisation' },
+        organizationMultitenancy: { title: 'Organisations et multi-locataires' },
+        toolsHitl: { title: 'Outils et validation humaine (HITL)' },
+        chat: { title: 'Utiliser le chat' },
+        knowledgeBase: { title: 'Utiliser la base de connaissances' },
+        agentWorkbench: { title: 'Espace de travail Agent' },
+        workflowEditor: { title: 'Éditeur de workflows' },
+        prompts: { title: 'Les trois niveaux de prompts' },
+        organizationSettings: { title: "Paramètres d'organisation" },
+        monitoring: { title: 'Supervision et tableau de bord' },
+        loginExpiry: { title: 'Pourquoi la session expire' },
+        retrievalNotFound: { title: 'Documents introuvables après import' },
+        agentApproval: { title: "Pourquoi l'agent attend une validation" },
+        orgSwitchSessions: { title: "Conversations manquantes après changement d'organisation" },
+        cacheDifference: { title: 'Cache sémantique et cache exact' },
+        healthReadiness: { title: 'Lire /health et /readyz' },
+        logsRequestId: { title: 'Journaux et request_id' },
+        feedback: { title: 'Signaler un problème' }
+      }
     }
   },
   router: {
