@@ -98,11 +98,13 @@ const ChildSession = {
   is_seeded: true,
 }
 
+// 后端可产出的真实边界形态：assistant_response 为空时只写 USER，
+// 因此会出现连续 USER（未结算轮次）；中间 assistant 也会出现在多段回答里。
 const PARENT_MESSAGES = [
   { id: 'm1', content: '第一问', message_type: 'user', created_at: '' },
-  { id: 'm2', content: '第一答', message_type: 'assistant', created_at: '' },
-  { id: 'm3', content: '第二问', message_type: 'user', created_at: '', meta: { tool_status: 'pending' } },
-  { id: 'm4', content: '第二答', message_type: 'assistant', created_at: '' },
+  { id: 'm2', content: '第二问（上一轮未结算）', message_type: 'user', created_at: '' },
+  { id: 'm3', content: '第一答', message_type: 'assistant', created_at: '' },
+  { id: 'm4', content: '第三问', message_type: 'user', created_at: '' },
 ]
 const CHILD_MESSAGES = [
   { id: 'c-m1', content: '第一问', message_type: 'user', created_at: '' },
@@ -248,7 +250,7 @@ describe('AgentView · Session Fork 接线', () => {
     }))
   })
 
-  it('加载会话消息后每条消息带分叉入口；未结算边界禁用', async () => {
+  it('加载会话消息后每条消息带分叉入口；未结算/中间轮次边界禁用', async () => {
     const { wrapper } = await mountView()
     await selectSession(wrapper, 's1')
 
@@ -257,10 +259,32 @@ describe('AgentView · Session Fork 接线', () => {
     expect(forkButtons).toHaveLength(4)
     // 边界语义如实标注：USER=在该消息之前分叉，ASSISTANT=复制到该消息为止
     expect(forkButtons[0].text()).toContain('在此消息之前分叉')
-    expect(forkButtons[1].text()).toContain('从此处分叉')
-    expect(forkButtons[2].attributes('disabled')).toBeDefined()
-    expect(forkButtons[2].attributes('title')).toContain('未结算')
-    expect(forkButtons[1].attributes('disabled')).toBeUndefined()
+    expect(forkButtons[2].text()).toContain('从此处分叉')
+    // m2 是连续 USER（前缀未结算）→ 禁用并说明原因
+    expect(forkButtons[1].attributes('disabled')).toBeDefined()
+    expect(forkButtons[1].attributes('title')).toContain('不能作为分叉边界')
+    // m3 是已结算 assistant；m4 的前缀以 assistant 结尾，均可用
+    expect(forkButtons[2].attributes('disabled')).toBeUndefined()
+    expect(forkButtons[3].attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('同一轮内的中间 assistant 边界禁用（后端规则：下一个 USER 前还有 assistant）', async () => {
+    apiMocks.getSession.mockResolvedValueOnce(
+      okSession('s1', [
+        { id: 'm1', content: '问题', message_type: 'user', created_at: '' },
+        { id: 'm2', content: '中间回答', message_type: 'assistant', created_at: '' },
+        { id: 'm3', content: '最终回答', message_type: 'assistant', created_at: '' },
+        { id: 'm4', content: '下一问', message_type: 'user', created_at: '' },
+      ]),
+    )
+    const { wrapper } = await mountView()
+    await selectSession(wrapper, 's1')
+
+    const forkButtons = wrapper.findAll('[data-testid="fork-here"]')
+    expect(forkButtons[1].attributes('disabled')).toBeDefined()
+    expect(forkButtons[1].attributes('title')).toContain('不能作为分叉边界')
+    expect(forkButtons[2].attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -273,12 +297,13 @@ describe('AgentView · Session Fork 接线', () => {
           title: '母会话 (fork)',
           parent_session_id: 's1',
           root_session_id: 's1',
-          fork_point_message_id: 'm2',
+          fork_point_message_id: 'm3',
           fork_reason: 'user_fork',
           message_count: 2,
           copied_message_count: 2,
-          boundary_seq: 2,
-          is_seeded: true,
+          boundary_seq: 3,
+          // 生产路径不发送 seed → 后端 is_seeded 恒 false（如实反映）
+          is_seeded: false,
           checkpoint: { cloned: false, task_id: null, source_task_id: null },
           idempotent_replay: false,
         },
@@ -287,11 +312,11 @@ describe('AgentView · Session Fork 接线', () => {
     const { wrapper, store } = await mountView()
     await selectSession(wrapper, 's1')
 
-    await wrapper.findAll('[data-testid="fork-here"]')[1].trigger('click')
+    await wrapper.findAll('[data-testid="fork-here"]')[2].trigger('click')
     await flushPromises()
 
     expect(forkMock).toHaveBeenCalledTimes(1)
-    expect(forkMock).toHaveBeenCalledWith('s1', { message_id: 'm2' })
+    expect(forkMock).toHaveBeenCalledWith('s1', { message_id: 'm3' })
     expect(apiMocks.chat).not.toHaveBeenCalled()
 
     expect(store.currentSessionId).toBe('c1')
@@ -302,6 +327,36 @@ describe('AgentView · Session Fork 接线', () => {
     expect(note.exists()).toBe(true)
     expect(note.text()).toContain('母会话')
     expect(note.text()).toContain('2')
+    expect(note.text()).toContain('仅复制历史消息')
+    wrapper.unmount()
+  })
+
+  it('后端返回 is_seeded=true 时如实展示「已写入会话记忆」（响应字段透传）', async () => {
+    forkMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          id: 'c1',
+          title: '母会话 (fork)',
+          parent_session_id: 's1',
+          root_session_id: 's1',
+          fork_point_message_id: 'm3',
+          fork_reason: 'user_fork',
+          message_count: 2,
+          copied_message_count: 2,
+          boundary_seq: 3,
+          is_seeded: true,
+          checkpoint: { cloned: false, task_id: null, source_task_id: null },
+          idempotent_replay: false,
+        },
+      },
+    })
+    const { wrapper } = await mountView()
+    await selectSession(wrapper, 's1')
+    await wrapper.findAll('[data-testid="fork-here"]')[2].trigger('click')
+    await flushPromises()
+
+    const note = wrapper.find('[data-testid="fork-seed-note"]')
     expect(note.text()).toContain('已写入会话记忆')
     wrapper.unmount()
   })
@@ -315,14 +370,14 @@ describe('AgentView · Session Fork 接线', () => {
           code: 409,
           error_code: 'FORK_BOUNDARY_INVALID',
           message: '该 ASSISTANT 消息不是轮次最终消息（后面还有 assistant），不能作为分叉边界',
-          detail: { message_id: 'm2' },
+          detail: { message_id: 'm3' },
         },
       },
     })
     const { wrapper, store } = await mountView()
     await selectSession(wrapper, 's1')
 
-    await wrapper.findAll('[data-testid="fork-here"]')[1].trigger('click')
+    await wrapper.findAll('[data-testid="fork-here"]')[2].trigger('click')
     await flushPromises()
 
     const error = wrapper.find('[data-testid="fork-error"]')
@@ -346,6 +401,8 @@ describe('AgentView · Session Fork 接线', () => {
     expect(title).toContain('m2')
     // 祖先链来自 GET /sessions/{id}/lineage（而不是只拼列表字段）
     expect(title).toContain('根会话A')
+    // 键盘/读屏可达：title 的同款详情必须出现在 aria-label
+    expect(badge.attributes('aria-label')).toBe(title)
     wrapper.unmount()
   })
 
@@ -402,6 +459,76 @@ describe('AgentView · Session Fork 接线', () => {
     const { wrapper } = await mountView()
     await selectSession(wrapper, 's1')
     expect(wrapper.find('[data-testid="lineage-badge"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('查看分叉加载失败 → 如实报错，不伪装成「暂无分叉」', async () => {
+    const { wrapper } = await mountView()
+    await selectSession(wrapper, 's1')
+    apiMocks.listSessions.mockRejectedValueOnce(new Error('network'))
+    await wrapper.find('[data-testid="fork-children-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="fork-children-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="fork-children-empty"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('分叉成功但子会话内容加载失败：清楚区分「已创建」与「内容未载入」', async () => {
+    forkMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          id: 'c1',
+          title: '母会话 (fork)',
+          parent_session_id: 's1',
+          root_session_id: 's1',
+          fork_point_message_id: 'm3',
+          fork_reason: 'user_fork',
+          message_count: 2,
+          copied_message_count: 2,
+          boundary_seq: 3,
+          is_seeded: false,
+          checkpoint: { cloned: false, task_id: null, source_task_id: null },
+          idempotent_replay: false,
+        },
+      },
+    })
+    const { wrapper, store } = await mountView()
+    await selectSession(wrapper, 's1')
+    apiMocks.getSession.mockRejectedValueOnce(new Error('session detail failed'))
+
+    await wrapper.findAll('[data-testid="fork-here"]')[2].trigger('click')
+    await flushPromises()
+
+    expect(store.currentSessionId).toBe('c1')
+    const error = wrapper.find('[data-testid="fork-error"]')
+    expect(error.exists()).toBe(true)
+    expect(error.text()).toContain('分叉已创建')
+    expect(error.text()).not.toContain('分叉失败')
+    wrapper.unmount()
+  })
+
+  it('会话切换竞态：后发先至的旧详情响应不覆盖新会话消息', async () => {
+    let resolveS1: (value: unknown) => void = () => {}
+    const s1Pending = new Promise((resolve) => {
+      resolveS1 = resolve
+    })
+    apiMocks.getSession.mockImplementation((id: string) =>
+      id === 's1' ? s1Pending : Promise.resolve(okSession('c1', CHILD_MESSAGES)),
+    )
+    const { wrapper, store } = await mountView()
+
+    await wrapper.find('.session-select').setValue('s1')
+    await wrapper.find('.session-select').setValue('c1')
+    await flushPromises()
+
+    resolveS1(okSession('s1', PARENT_MESSAGES))
+    await flushPromises()
+
+    expect(store.currentSessionId).toBe('c1')
+    expect(store.messages).toHaveLength(2)
+    expect(store.messages[0].content).toBe('第一问')
     wrapper.unmount()
   })
 })

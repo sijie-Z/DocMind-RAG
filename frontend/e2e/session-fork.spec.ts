@@ -87,7 +87,8 @@ const FORK_RESULT = ok({
   message_count: 2,
   copied_message_count: 2,
   boundary_seq: 2,
-  is_seeded: true,
+  // 视图请求不发送 seed → 后端 is_seeded=false（生产真实形态）
+  is_seeded: false,
   checkpoint: { cloned: false, task_id: null, source_task_id: null },
   idempotent_replay: false,
 })
@@ -152,6 +153,7 @@ test('从第 2 条消息分叉：请求边界 message_id，跳转子会话并保
   await expect(note).toBeVisible()
   await expect(note).toContainText('2')
   await expect(note).toContainText('2 条消息')
+  await expect(note).toContainText('仅复制历史消息')
   expect(forkBodies).toEqual([{ message_id: 'm2' }])
 
   // 跳转到子会话：选择器值更新，消息来自子会话详情（复制前缀 2 条）

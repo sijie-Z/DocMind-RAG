@@ -237,4 +237,26 @@ describe('AgentInput · 斜杠命令菜单（#475 后端驱动）', () => {
     await typeCmd(wrapper, '/')
     expect(wrapper.find('[data-testid="cmd-menu"]').exists()).toBe(false)
   })
+
+  it('会话切换竞态：旧会话的命令响应不覆盖新会话清单', async () => {
+    let resolveFirst: (value: unknown) => void = () => {}
+    const firstPending = new Promise((resolve) => {
+      resolveFirst = resolve
+    })
+    listMock.mockImplementationOnce(() => firstPending)
+    listMock.mockResolvedValueOnce(
+      okList({ commands: [SERVER_COMMANDS[0]] }), // 新会话只有 help
+    )
+
+    const wrapper = mountInput({ sessionId: 's-1' })
+    await wrapper.setProps({ sessionId: 's-2' })
+    await flushPromises()
+
+    // 旧会话响应后到：必须被丢弃
+    resolveFirst(okList())
+    await flushPromises()
+
+    await typeCmd(wrapper, '/')
+    expect(optionNames(wrapper)).toEqual(['search', 'doc', 'workflow', 'help'])
+  })
 })
