@@ -188,6 +188,10 @@ class TestLLMRerankPrompt:
         class _Client:
             chat = _Chat()
 
+            # issue #467：重排 LLM 兜底经 llm_failfast 先 with_options 再 create。
+            def with_options(self, **kwargs):
+                return self
+
         hits = [
             _post_processed_hit("doc1_c1", "第一段正文", "a.md", 0.5),
             _post_processed_hit("doc2_c2", "第二段正文", "b.md", 0.4),

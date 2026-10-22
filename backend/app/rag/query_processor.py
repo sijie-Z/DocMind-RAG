@@ -6,6 +6,7 @@ import re
 from typing import Literal
 
 from app.core.config import settings
+from app.core.llm_failfast import LLMUnreachableError, create_chat_completion
 from app.core.prometheus import RAG_QUERY_REWRITE_TOTAL
 
 logger = logging.getLogger(__name__)
@@ -351,7 +352,11 @@ async def rewrite_query_llm(query: str, openai_client, model: str) -> list[str]:
             "返回 JSON 对象，queries 字段为字符串数组。"
             f"\n\n原始问题: {query}"
         )
-        resp = await openai_client.chat.completions.create(
+        resp = await create_chat_completion(
+            openai_client,
+            # issue #467：连接阶段短超时 + 连接类错误零重试（fast-fail）；
+            # 读阶段仍受 RAG_QUERY_REWRITE_TIMEOUT_SECONDS（外层 wait_for 同值）约束。
+            read_timeout=settings.RAG_QUERY_REWRITE_TIMEOUT_SECONDS,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
@@ -368,6 +373,10 @@ async def rewrite_query_llm(query: str, openai_client, model: str) -> list[str]:
                 if key and key not in results:
                     results.append(key)
             return results[:4]
+        return [query]
+    except LLMUnreachableError as e:
+        # issue #467：连接级不可达——立即降级为原始查询，不再等满改写超时。
+        logger.warning(f"LLM query rewrite unreachable (fast-fail): {e}")
         return [query]
     except Exception as e:
         logger.warning(f"LLM query rewrite failed: {e}")
@@ -393,7 +402,12 @@ async def decompose_query(
             "返回 JSON 对象，sub_questions 字段为字符串数组。"
             f"\n\n用户问题: {query}"
         )
-        resp = await openai_client.chat.completions.create(
+        resp = await create_chat_completion(
+            openai_client,
+            # issue #467：调用方（pipeline）外层 wait_for 已有 30s 量级预算；
+            # 这里的 read_timeout 与流式生成同源，连接阶段另由短超时兜底，
+            # 端点不可达时立即降级为原始查询（不等满外层预算）。
+            read_timeout=float(settings.AI_STREAM_TIMEOUT),
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
@@ -414,6 +428,10 @@ async def decompose_query(
                     result.append(str(sq).strip())
                     seen.add(key)
             return result[:max_subqueries]
+        return [query]
+    except LLMUnreachableError as e:
+        # issue #467：连接级不可达——立即降级为原始查询。
+        logger.warning(f"Query decomposition unreachable (fast-fail): {e}")
         return [query]
     except Exception as e:
         logger.warning(f"Query decomposition failed: {e}")
@@ -440,13 +458,21 @@ async def generate_hyde_doc(query: str, intent: QueryIntent, openai_client, mode
             f"请为以下问题写一段理想的回答。\n要求：{template}\n"
             f"这段回答将用于向量检索，请尽可能使用专业术语和核心关键词。\n\n问题: {query}"
         )
-        resp = await openai_client.chat.completions.create(
+        resp = await create_chat_completion(
+            openai_client,
+            # issue #467：HyDE 是可选增强，读预算与 retriever 外层 wait_for 一致；
+            # 连接阶段短超时 + 不可达负缓存保证死端点不再等满 1.5s。
+            read_timeout=1.5,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=300,
         )
         return resp.choices[0].message.content or ""
+    except LLMUnreachableError as e:
+        # issue #467：连接级不可达——立即跳过 HyDE。
+        logger.warning(f"HyDE generation unreachable (fast-fail): {e}")
+        return ""
     except Exception as e:
         logger.warning(f"HyDE generation failed: {e}")
         return ""

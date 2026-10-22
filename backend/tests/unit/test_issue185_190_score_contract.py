@@ -201,6 +201,8 @@ class TestRerankModelSingleSource:
                 return _Rsp()
 
         client = types.SimpleNamespace(chat=types.SimpleNamespace(completions=_Completions()))
+        # issue #467：重排 LLM 兜底经 llm_failfast 先 with_options 再 create。
+        client.with_options = lambda **kwargs: client
         monkeypatch.setattr(settings, "RERANK_MODEL", "custom-reranker-model")
         monkeypatch.setattr(settings, "ENABLE_LOCAL_LLM", False)
         monkeypatch.setattr(settings, "DEEPSEEK_MODEL", "deepseek-chat-test")

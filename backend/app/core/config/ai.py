@@ -74,6 +74,24 @@ class AISettings(BaseSettings):
     AI_MAX_TOKENS: int = 10000
     AI_STREAM_TIMEOUT: int = 120
 
+    # issue #467：LLM 连接级快速失败（RAG 查询改写 / 查询分解 / HyDE / 重排 LLM
+    # 兜底 / 流式生成共用 `app.core.llm_failfast`）。连接阶段独立短超时：死主机
+    # （SYN 被丢弃）不再拖满读超时；连接被拒 / DNS 失败由 APIConnectionError 直接
+    # 判定。**读/写阶段的慢与连接建立后的瞬时中断不在此快速失败**——那两类属
+    # 可恢复故障，仍走调用方既有超时、重试与降级。默认 1.0s 低于改写站 1.2s
+    # 外层预算，保证首个串行调用点也能判定并写入负缓存（<3s 上界的结构前提）；
+    # 高延迟链路可上调，但会同比抬高不可达的暴露时间。
+    LLM_CONNECT_TIMEOUT_SECONDS: float = Field(default=1.0, gt=0.0)
+    # 瞬时故障（408/409/429/5xx 与连接建立后的传输中断）的重试次数。连接类
+    # 不可达不在此列——零重试；读/写超时也不重试（已花掉完整读预算，重试只会
+    # 成倍放大失败路径耗时）。
+    LLM_TRANSIENT_MAX_RETRIES: int = Field(default=1, ge=0, le=5)
+    LLM_TRANSIENT_RETRY_BACKOFF_SECONDS: float = Field(default=0.4, ge=0.0)
+    # 连接级不可达的进程级负缓存（秒），**按端点（client.base_url）区分**：
+    # 一次判定不可达后，窗口内同一端点的调用直接快速失败（任一调用成功即清除）；
+    # 不同端点互不封锁。0 = 关闭负缓存。
+    LLM_UNREACHABLE_COOLDOWN_SECONDS: float = Field(default=5.0, ge=0.0)
+
     # Workflow LLM 节点的环境默认 key（services/workflow_engine.py 的 get_llm）。
     # issue #273：此前引擎用 getattr(settings, 'OPENAI_API_KEY', '')（单引号写法）
     # 兜底读取，但 Settings 无对应字段——extra="ignore" 下 .env 配置被静默吞掉，
