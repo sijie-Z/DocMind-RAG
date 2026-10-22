@@ -146,3 +146,24 @@ def test_build_router_filters_by_bundle():
 
     with pytest.raises(ValueError):
         build_router(["nope"])
+
+
+def test_web_app_health_endpoint(client):
+    """web 组装冒烟：app.main.app 的 /health 恒 200（诊断视图），无需 lifespan。"""
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert "status" in response.json()
+
+
+def test_build_router_all_bundles_covers_every_router_spec():
+    """全量 bundle：24 个模块全部挂载，前缀集合与 ROUTER_SPECS 一致。"""
+    from app.api.v1.router import ALL_BUNDLES, ROUTER_SPECS, build_router
+
+    assert len(ROUTER_SPECS) == 24
+    all_router = build_router(ALL_BUNDLES)
+    expected_prefixes = {prefix for _, prefix, _, _ in ROUTER_SPECS.values()}
+    assert _mounted_prefixes(all_router) == expected_prefixes
+
+    lazy_nodes = [route for route in all_router.routes if hasattr(route, "include_context")]
+    if lazy_nodes:  # FastAPI ≥0.142 惰性 include：每个模块一个节点
+        assert len(lazy_nodes) == 24
