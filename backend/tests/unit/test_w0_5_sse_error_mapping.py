@@ -536,6 +536,14 @@ class TestMappingUnits:
     def test_rag_error_whitelist(self):
         honest = "当前用户未加入任何组织，无法进行知识库问答；请先加入组织后重试"
         assert public_rag_error_content(honest) == honest
+        # issue #209：严格模式相关度拒答必须原样到达客户端，不能被改写成
+        # 通用「知识库问答出错」（那会把「无相关内容」伪装成服务故障）。
+        gate_refusal = (
+            "知识库中未找到与问题足够相关的内容，"
+            "严格模式无法在没有相关文档依据的情况下作答；"
+            "请尝试换个问法，或联系管理员补充相关文档"
+        )
+        assert public_rag_error_content(gate_refusal) == gate_refusal
         assert public_rag_error_content(f"ValueError: {SECRET}") == GENERIC_RAG_ERROR
 
     def test_authorization_message_passes_but_other_4xx_does_not(self):
