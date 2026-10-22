@@ -288,6 +288,8 @@ const serverCommands = ref<CommandInfo[]>([])
 const commandsEnabled = ref(true)
 const commandsLoading = ref(false)
 const commandsError = ref(false)
+// 请求代次：会话切换时旧响应可能后到，只应用最新一次请求的结果。
+let commandsRequestSeq = 0
 
 /** 服务端命令描述优先用四语词条，其次后端 description_i18n，最后原文（避免回显裸键）。 */
 function commandDescription(cmd: CommandInfo): string {
@@ -328,19 +330,23 @@ const cmdFiltered = computed<SlashMenuItem[]>(() => {
 })
 
 async function loadCommands() {
+  const requestSeq = ++commandsRequestSeq
+  const sessionId = props.sessionId || undefined
   commandsLoading.value = true
   commandsError.value = false
   try {
-    const res = await commandsApi.list(props.sessionId || undefined)
+    const res = await commandsApi.list(sessionId)
+    if (requestSeq !== commandsRequestSeq) return
     const data = apiUnwrap<CommandListData>(res)
     commandsEnabled.value = data?.enabled !== false
     serverCommands.value = Array.isArray(data?.commands) ? data!.commands : []
   } catch {
+    if (requestSeq !== commandsRequestSeq) return
     // 命令通道不可用不是输入区的致命错误：模板仍可用，菜单里如实提示。
     commandsError.value = true
     serverCommands.value = []
   } finally {
-    commandsLoading.value = false
+    if (requestSeq === commandsRequestSeq) commandsLoading.value = false
   }
 }
 

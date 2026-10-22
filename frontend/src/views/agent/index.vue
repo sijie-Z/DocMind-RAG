@@ -22,12 +22,15 @@
           @update:modelValue="handleSessionChange"
           @delete="handleSessionDelete"
         />
-        <!-- issue #476：子会话谱系徽标（hover 展示父会话/根会话/边界消息） -->
+        <!-- issue #476：子会话谱系徽标（hover/focus 展示父会话/根会话/边界消息） -->
         <span
           v-if="currentSessionIsFork"
           class="lineage-badge"
           data-testid="lineage-badge"
+          tabindex="0"
+          role="note"
           :title="lineageBadgeTitle"
+          :aria-label="lineageBadgeTitle"
         >
           ⑂ {{ t('agentFork.badge') }}
           <span v-if="currentParentTitle" class="lineage-parent">← {{ currentParentTitle }}</span>
@@ -50,6 +53,13 @@
             <div class="fork-children-title">{{ t('agentFork.childrenTitle') }}</div>
             <div v-if="childrenLoading" class="fork-children-state">
               {{ t('common.loading') }}
+            </div>
+            <div
+              v-else-if="childrenError"
+              class="fork-children-state fork-children-error"
+              data-testid="fork-children-error"
+            >
+              {{ t('agentFork.childrenError') }}
             </div>
             <div
               v-else-if="children.length === 0"
@@ -513,8 +523,11 @@ const lastForkInfo = ref<{ parentTitle: string; copied: number; isSeeded: boolea
 const showChildren = ref(false)
 const children = ref<AgentSession[]>([])
 const childrenLoading = ref(false)
+const childrenError = ref(false)
 // GET /sessions/{id}/lineage 的现场（祖先链/父缺失/截断标记——徽标详情的数据源）
 const currentLineage = ref<SessionLineageData | null>(null)
+// 会话切换的请求代次：只应用最新一次切换的响应（防后发先至）。
+let sessionLoadSeq = 0
 // 深链（?id=<task_id>，通知点击/刷新直达回放）：测试环境可能无 router——全部访问带守卫
 const route = useRoute()
 const router = useRouter()
@@ -818,11 +831,29 @@ async function handleCommand(line: string) {
 
 // ── Session Fork（#476）：消息级分叉 / 谱系 / 子会话入口 ───────────────────
 
-/** 服务端 meta 标记的未结算边界（tool_status/status=pending）不可作为边界。 */
-function isPendingBoundary(msg: AgentChatMessage): boolean {
-  const meta = msg.serverMeta
-  if (!meta || typeof meta !== 'object') return false
-  return meta.tool_status === 'pending' || meta.status === 'pending'
+/**
+ * 边界可用性必须与后端 `session_fork_service._resolve_prefix` 同口径：
+ * - USER 边界 = 在该消息之前分叉：前缀须为空或以 ASSISTANT 结尾；
+ *   因此「上一条非 SYSTEM 消息仍是 USER」的前缀非法（未答复的连续提问）。
+ * - ASSISTANT 边界 = 复制到该消息为止：同一轮内其后、下一个 USER 之前
+ *   不得再出现 ASSISTANT（中间消息非法）。
+ * 说明：后端 meta_data 不接受也未写入 tool_status/status 标记，不能据此判定。
+ */
+function isInvalidBoundary(msg: AgentChatMessage): boolean {
+  if (!msg.serverMessageId) return false
+  const list = agentStore.messages
+  const idx = list.findIndex((m) => m.serverMessageId === msg.serverMessageId)
+  if (idx < 0) return false
+
+  if (msg.role === 'user') {
+    const prev = list[idx - 1]
+    return !!prev && prev.role === 'user'
+  }
+  for (let i = idx + 1; i < list.length; i++) {
+    if (list[i].role === 'user') return false
+    if (list[i].role === 'assistant') return true
+  }
+  return false
 }
 
 function showForkAction(msg: AgentChatMessage): boolean {
@@ -830,11 +861,11 @@ function showForkAction(msg: AgentChatMessage): boolean {
 }
 
 function forkDisabled(msg: AgentChatMessage): boolean {
-  return forkBusy.value || agentStore.isLoading || isPendingBoundary(msg)
+  return forkBusy.value || agentStore.isLoading || isInvalidBoundary(msg)
 }
 
 function forkDisabledTitle(msg: AgentChatMessage): string {
-  if (isPendingBoundary(msg)) return t('agentFork.pendingBoundary')
+  if (isInvalidBoundary(msg)) return t('agentFork.invalidBoundary')
   if (agentStore.isLoading) return t('agentFork.runningHint')
   if (forkBusy.value) return t('agentFork.forking')
   return forkButtonLabel(msg)
@@ -876,7 +907,7 @@ async function handleForkMessage(msg: AgentChatMessage) {
     message.warning(t('agentFork.runningHint'))
     return
   }
-  if (isPendingBoundary(msg)) return
+  if (isInvalidBoundary(msg)) return
 
   forkBusy.value = true
   forkErrorText.value = ''
@@ -892,9 +923,16 @@ async function handleForkMessage(msg: AgentChatMessage) {
       isSeeded: data.is_seeded,
     }
     await refreshSessions()
+    // 取消任何在途的会话切换加载，避免旧响应覆盖子会话现场。
+    sessionLoadSeq += 1
     agentStore.setCurrentSession(data.id)
-    await loadSessionMessages(data.id)
-    await loadLineage(data.id)
+    try {
+      await loadSessionMessages(data.id)
+      await loadLineage(data.id)
+    } catch {
+      // 分叉本身已成功：内容加载失败单独如实提示，绝不回滚成"分叉失败"。
+      forkErrorText.value = t('agentFork.childLoadFailed')
+    }
     if (showChildren.value) void loadChildren()
   } catch (err) {
     forkErrorText.value = forkErrorMessage(err)
@@ -905,13 +943,15 @@ async function handleForkMessage(msg: AgentChatMessage) {
 }
 
 /** 谱系详情：祖先链 + 父缺失/截断标记（父会话删除后仍可查）。 */
-async function loadLineage(sessionId: string) {
+async function loadLineage(sessionId: string, isCurrent?: () => boolean) {
   try {
     const res = await sessionsApi.lineage(sessionId)
+    // 会话已切换：丢弃旧响应，避免谱系徽标展示上一个会话的祖先链。
+    if (isCurrent && !isCurrent()) return
     currentLineage.value = apiUnwrap<SessionLineageData>(res) || null
   } catch {
     // 谱系查询失败不阻塞会话切换：徽标退回列表字段（父 id 仍可见）。
-    currentLineage.value = null
+    if (!isCurrent || isCurrent()) currentLineage.value = null
   }
 }
 
@@ -923,6 +963,7 @@ async function loadChildren() {
     return
   }
   childrenLoading.value = true
+  childrenError.value = false
   try {
     const res = await agentApi.listSessions({
       parent_session_id: sessionId,
@@ -932,7 +973,9 @@ async function loadChildren() {
     const data = apiUnwrap<{ sessions: AgentSession[] }>(res)
     children.value = Array.isArray(data?.sessions) ? data.sessions : []
   } catch {
+    // 加载失败与"没有分叉"是两回事：如实区分，避免误导用户以为没有子会话。
     children.value = []
+    childrenError.value = true
   } finally {
     childrenLoading.value = false
   }
@@ -954,9 +997,14 @@ async function refreshSessions() {
   }
 }
 
-/** 载入会话历史消息：保留服务端消息 id / meta（分叉边界与 pending 判定）。 */
-async function loadSessionMessages(sessionId: string): Promise<AgentSessionDetail | null> {
+/** 载入会话历史消息：保留服务端消息 id（分叉边界标识）。 */
+async function loadSessionMessages(
+  sessionId: string,
+  isCurrent?: () => boolean,
+): Promise<AgentSessionDetail | null> {
   const res = await agentApi.getSession(sessionId)
+  // 会话已切换：丢弃旧响应，避免覆盖新会话的消息流。
+  if (isCurrent && !isCurrent()) return null
   const detail = apiUnwrap<AgentSessionDetail>(res)
   if (detail?.config) agentStore.updateConfig(detail.config)
   const raw = Array.isArray(detail?.messages) ? detail.messages : []
@@ -975,7 +1023,6 @@ async function loadSessionMessages(sessionId: string): Promise<AgentSessionDetai
       planId: '',
       progress: 0,
       serverMessageId: item.id,
-      serverMeta: item.meta,
     })
   }
   agentStore.setMessages(mapped)
@@ -1435,6 +1482,7 @@ watch(
 )
 
 async function handleSessionChange(sessionId: string | null) {
+  const requestSeq = ++sessionLoadSeq
   agentStore.setCurrentSession(sessionId)
   forkErrorText.value = ''
   lastForkInfo.value = null
@@ -1444,14 +1492,17 @@ async function handleSessionChange(sessionId: string | null) {
     children.value = []
     return
   }
-  // issue #476：载入历史消息（服务端 id/meta 是消息级分叉入口与边界判定的依据）。
+  // issue #476：载入历史消息（服务端 id 是消息级分叉入口与边界判定的依据）。
   // 运行中不覆盖当前消息流（流结束后再切换会话即可）。
   if (agentStore.isLoading) return
+  const isCurrent = () =>
+    requestSeq === sessionLoadSeq && agentStore.currentSessionId === sessionId
   try {
-    const detail = await loadSessionMessages(sessionId)
-    if (detail?.is_fork) await loadLineage(sessionId)
+    const detail = await loadSessionMessages(sessionId, isCurrent)
+    if (!detail || !isCurrent()) return
+    if (detail.is_fork) await loadLineage(sessionId, isCurrent)
   } catch (e) {
-    message.error('加载会话失败')
+    if (isCurrent()) message.error('加载会话失败')
   }
 }
 

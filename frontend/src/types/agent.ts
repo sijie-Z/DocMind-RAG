@@ -342,8 +342,6 @@ export interface AgentChatMessage {
   endedAt?: number
   /** issue #476：服务端消息 id（历史加载/落库回执）——「从此处分叉」的边界标识 */
   serverMessageId?: string
-  /** issue #476：服务端 meta_data（未结算边界判定：tool_status/status pending） */
-  serverMeta?: Record<string, any>
   /** User Commands（#475）：本条 assistant 消息承载命令事件（忽略 chunk 兼容回显） */
   isCommand?: boolean
 }
