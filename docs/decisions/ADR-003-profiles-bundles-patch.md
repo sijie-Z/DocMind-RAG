@@ -52,6 +52,25 @@ settings:
 
 ### 合并与校验
 
+```yaml
+# config/patches/local.yaml
+# 用法：python -m app --profile web --patch config/patches/local.yaml
+patch:
+  - op: replace          # 路径必须已存在（web profile 设置了 PORT）
+    path: settings.PORT
+    value: 9000
+  - op: insert           # 路径必须不存在（各 YAML 层都未设置该键）
+    path: settings.ENABLE_WORKFLOW_CODE_NODES
+    value: true
+  - op: delete           # 删除该层的配置项（回落代码默认值；web profile 设置了 DEBUG）
+    path: settings.DEBUG
+```
+
+路径规则：必须以 `settings.` 开头，不得含 `..`、`__`、绝对路径；
+`replace`/`delete` 要求路径存在，`insert` 要求不存在；配置文件与 patch 中
+禁止明文 secret（只允许环境变量或 `${...}` 占位符）。
+
+
 - 映射深合并；list 与标量整体替换；合并函数返回新对象，不原地修改。
 - 未知设置键在加载期失败，错误路径形如 `settings.NOPE`；
   `extra="ignore"` 的静默吞键（issue #259/#273 的同族问题）在此被显式拦截。

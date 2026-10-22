@@ -88,6 +88,25 @@ python -m app --profile web --dump-config   # 打印合并后配置（secret 打
 
 配置目录为 `config/`：`base.yaml` 是公共层；`bundles/{core,rag,agent,observability}.yaml` 按 profile 声明顺序叠加；`profiles/{web,worker,headless,sdk,acp}.yaml` 定义入口、bundle 组合与覆盖项；`--patch FILE` 支持 `replace/insert/delete`（路径必须 `settings.` 开头）。合并优先级：代码默认值 < base < bundles < profile < patch < 环境变量（`.env` 属环境层）。新增 profile：在 `config/profiles/` 下加一个 YAML（entrypoint + bundles + settings），并在 `app/core/config/schema.py` 的 `VALID_PROFILES` 中登记。
 
+```yaml
+# config/patches/local.yaml
+# 用法：python -m app --profile web --patch config/patches/local.yaml
+patch:
+  - op: replace          # 路径必须已存在（web profile 设置了 PORT）
+    path: settings.PORT
+    value: 9000
+  - op: insert           # 路径必须不存在（各 YAML 层都未设置该键）
+    path: settings.ENABLE_WORKFLOW_CODE_NODES
+    value: true
+  - op: delete           # 删除该层的配置项（回落代码默认值；web profile 设置了 DEBUG）
+    path: settings.DEBUG
+```
+
+路径规则：必须以 `settings.` 开头，不得含 `..`、`__`、绝对路径；
+`replace`/`delete` 要求路径存在，`insert` 要求不存在；配置文件与 patch 中
+禁止明文 secret（只允许环境变量或 `${...}` 占位符）。
+
+
 ### 6. 管理员账号（登录 401 时必做）
 若登录提示「用户名或密码错误」，说明库里没有 `admin` 或密码不对。在**后端目录**执行：
 ```bash
