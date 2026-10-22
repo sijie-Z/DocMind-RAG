@@ -34,11 +34,20 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import checkpoint, steering
+from app.agent.commands import (
+    CommandContext,
+    command_registry,
+    iter_command_events,
+    resolve_is_admin,
+    resolve_session_scope_for_command,
+)
 from app.agent.config import DEFAULT_DISABLED_TOOLS, AgentConfig
+from app.agent.events import AgentEvent
 from app.agent.registry import tool_registry
 from app.agent.replay.engine import ReplayEngine
 from app.agent.service import agent_service, notify_task_terminal
 from app.agent.skills import skill_manager
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.error_mapping import (
     public_agent_event_data,
@@ -215,6 +224,62 @@ async def agent_chat(
         save_error: str | None = None
         last_event_type = ""
         try:
+            # User Commands（issue #475）："/" 前缀在进入 PER 之前短路——命令文本
+            # 绝不作为 prompt 漏给模型；命令不写用户消息、不创建模型轮次/任务行。
+            # 关闭 COMMANDS_ENABLED 时整段回退旧行为（斜杠文本按普通提示词处理）。
+            if settings.COMMANDS_ENABLED and body.query.strip().startswith("/"):
+                session_ok, _session_scope = await resolve_session_scope_for_command(
+                    db, current_user, body.session_id
+                )
+                if not session_ok:
+                    # 纵深防御：命令作用域不得使用调用者不可见的会话 id。
+                    error_text = "会话不存在或无权访问"
+                    rejection = AgentEvent(
+                        type="command_error",
+                        content=error_text,
+                        error_type="session_not_found",
+                    )
+                    yield (
+                        "data: "
+                        + json.dumps(public_agent_event_data(rejection), ensure_ascii=False)
+                        + "\n\n"
+                    )
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': error_text}, ensure_ascii=False)}\n\n"
+                    rejection_done: dict[str, Any] = {"type": "done", "content": ""}
+                    if body.session_id:
+                        rejection_done["saved"] = False
+                    yield f"data: {json.dumps(rejection_done, ensure_ascii=False)}\n\n"
+                    return
+                command_ctx = CommandContext(
+                    user_id=current_user.id,
+                    organization_id=effective_org_id,
+                    session_id=body.session_id,
+                    is_admin=await resolve_is_admin(db, current_user, effective_org_id),
+                    is_superuser=bool(getattr(current_user, "is_superuser", False)),
+                    db=db,
+                )
+                command_content = ""
+                async for command_event in iter_command_events(
+                    command_ctx, body.query, registry=command_registry
+                ):
+                    yield (
+                        "data: "
+                        + json.dumps(public_agent_event_data(command_event), ensure_ascii=False)
+                        + "\n\n"
+                    )
+                    if command_event.type in ("command_result", "command_error"):
+                        command_content = command_event.content
+                if command_content:
+                    # 兼容层（issue #475 任务 4 的前置）：当前 Agent 页只渲染
+                    # chunk；命令结果同时走既有内容通道，保证 /status、/export、
+                    # /tools 在现有 UI 立即可见。前端接入 command_* 后可移除。
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': command_content}, ensure_ascii=False)}\n\n"
+                done_payload: dict[str, Any] = {"type": "done", "content": ""}
+                if body.session_id:
+                    done_payload["saved"] = False  # 命令不写用户消息
+                yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+                return
+
             # Build AgentConfig：用户已保存配置为基底 + 请求字段覆盖（issue #242）。
             # 此前基底被整体忽略——设置页旋钮保存成功也永不生效。
             config = await _build_agent_config(body, current_user.id)

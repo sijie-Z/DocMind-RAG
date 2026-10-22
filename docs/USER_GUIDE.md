@@ -5,6 +5,7 @@
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
 > - 关键数字（33 个内置工具 / 23 个端点模块 / 34 条前端路由 / 20 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
+> - 关键数字（33 个内置工具 / 23 个端点模块 / 34 条前端路由 / 23 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -334,7 +335,7 @@ DocMind 的 Agent 不是「LLM 自由循环」，而是一个有明确阶段的�
 - 实际默认配置以 `backend/app/agent/config.py` 为准：`max_plan_steps=10`、`max_iterations=20`、`max_tool_calls_per_turn=5`、`max_retries_per_step=3`、单步超时 120s、`max_context_tokens=8000`；`approval_timeout_seconds=0`（一直等）、`plan_approval_mode="never"`。
 - `execute_python` / `execute_sql` / `mcp_call` 属于 `DEFAULT_DISABLED_TOOLS`，服务端会强制并入 `disabled_tools`，即使用户配置里没写（`backend/app/agent/config.py`、`endpoints/agent.py`）。
 - 反思的 `retry` 会在原地重跑该步骤；`replan` 会重新进入 Planning，每个 run 最多 1 次（`MAX_REPLANS_PER_RUN=1`）。Reviewer 的 `revise` / `reject` 只作为建议记录并展示，不会阻断最终回答。
-- Agent 的流式协议有 **20 种 SSE 事件类型**（`docs/facts.json` 的 `sse_event_types`，由 `backend/app/agent/events.py` 的 `EventType` 闭集派生），前端据此渲染计划树、思考流、工具卡片与审批卡片。
+- Agent 的流式协议有 **23 种 SSE 事件类型**（`docs/facts.json` 的 `sse_event_types`，由 `backend/app/agent/events.py` 的 `EventType` 闭集派生），前端据此渲染计划树、思考流、工具卡片与审批卡片。
 
 > `AGENT_ARCHITECTURE.md` 的「配置体系」示例写的是较早的默认值（如 `max_iterations=10`、`max_plan_steps=8`）；与代码冲突时以 `backend/app/agent/config.py` 为准。
 
@@ -512,6 +513,8 @@ Agent 工作台（`/agent`）是「可干预 Agent」的主界面：左侧计划
 
 **配置**：模型与温度、Planning / Reflection / Memory / Thinking 开关、人格、审批模式、工具启用列表、系统提示词覆盖（`AgentConfigPanel.vue`）；`GET/PUT /api/v1/agent/config`，按用户持久化。Agent 会话：`GET/POST /api/v1/agent/sessions`、`GET/DELETE /api/v1/agent/sessions/{id}`；工具清单：`GET /api/v1/agent/tools`（含参数 Schema、tags、`disabled_by_default` 与总数）。
 
+**服务端命令**（`GET /api/v1/commands`、`POST /api/v1/commands/execute`）：输入 `/help`（命令清单）、`/status`（会话与最近任务）、`/export [markdown|json]`（导出当前会话）、`/tools`（工具与默认禁用状态）。命令在进入模型之前执行，不写用户消息、不产生模型轮次；未知命令返回明确错误而不会当作提示词发给模型。关闭 `COMMANDS_ENABLED` 可整体回退。
+
 **审批与断点续跑**（HITL，语义见 3.4）：
 
 1. 运行到风险点时流内出现 `approval_required` / `plan_approval_required`，任务进入 `waiting_approval` / `waiting_plan_approval`；
@@ -627,7 +630,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 
 ### 5.2 端点模块清单
 
-当前共 **23 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `include_router` 调用数派生）：
+当前共 **24 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `include_router` 调用数派生）：
 
 | 模块 | 前缀 | 说明 |
 |------|------|------|
@@ -649,6 +652,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | curated_skills | `/api/v1/curated-skills` | 技能库 |
 | memory | `/api/v1/memory` | Agent 记忆（短期/长期/工作/反思） |
 | agent | `/api/v1/agent` | PER Agent SSE、工具、会话、配置 |
+| commands | `/api/v1/commands` | 服务端命令清单与无模型轮次执行（`/help`、`/status`、`/export`、`/tools`） |
 | mcp | `/api/v1/mcp` | MCP 服务器状态（管理员只读） |
 | scheduled_tasks | `/api/v1/scheduled-tasks` | 定时任务 CRUD / 暂停 / 手动触发 |
 | sessions | `/api/v1/sessions` | 会话 fork / seed / 谱系（issue #476） |

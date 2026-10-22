@@ -43,7 +43,7 @@ User Query ──► Phase 0: 记忆检索 ──────┘
 | **可靠执行** | 依赖拓扑排序执行，每步自带指数退避重试（最多 3 次） |
 | **自我反思** | 执行后 LLM 自评目标达成度和信息完整性，自主决定重试或重新规划 |
 | **持久记忆** | 四层记忆系统（短期/长期/工作/反思），嵌入向量语义检索 |
-| **流式可见** | 20 种 SSE 事件类型，前端实时展示规划树、思考流、工具调用 |
+| **流式可见** | 23 种 SSE 事件类型，前端实时展示规划树、思考流、工具调用 |
 | **安全沙箱** | Python/SQL 执行默认禁用，DuckDuckGo 搜索限流，子代理工具隔离 |
 | **优雅降级** | LLM 调用失败退回默认 Plan，Redis 不可用时记忆系统跳过，工具异常不阻断流程 |
 
@@ -245,7 +245,7 @@ MemoryBridge (app/agent/memory_bridge.py)
 
 ## SSE 事件协议
 
-前端通过 SSE 接收 20 种事件类型：
+前端通过 SSE 接收 23 种事件类型：
 
 ```json
 // 思考流
@@ -268,7 +268,21 @@ MemoryBridge (app/agent/memory_bridge.py)
 {"type":"chunk","content":"..."}
 {"type":"done","plan_progress":1.0}
 {"type":"error","content":"..."}
+
+// User Commands（命令在进入 PER 前执行，不创建模型轮次）
+{"type":"command_start","content":"执行命令 /help","command_name":"help"}
+{"type":"command_result","command_name":"help","content":"## 可用命令（4）...","command_data":{"commands":[...]}}
+{"type":"command_error","command_name":"nope","content":"未知命令：/nope。输入 /help 查看可用命令。","error_type":"unknown_command"}
 ```
+
+### User Commands（服务端命令）
+
+- 入口：`POST /api/v1/commands/execute`（`{line, session_id?}`），或聊天入口的 `/` 前缀短路（`/agent/chat`、`/chat/stream` useAgent）。命令**不写用户消息、不触发模型**——命令文本绝不作为 prompt 漏给模型。
+- 清单：`GET /api/v1/commands?session_id=...`（描述/参数/权限标记/中英描述）。
+- 内置：`/help`、`/status`（会话 + 最近任务）、`/export [markdown|json]`、`/tools`。
+- 作用域：全局 + `session:<id>` agent 作用域；同层重名报错，agent 命令遮蔽全局同名/同别名命令。
+- 扩展：在 `backend/app/agent/commands/builtins.py` 声明 `Command`（name/aliases/description/args/permission/handler），或通过 `backend/commands.json`（`DOCMIND_COMMANDS_CONFIG` 覆盖路径）为指定 agent 作用域启用/禁用命令；关闭 `COMMANDS_ENABLED` 可整体回退到旧行为。
+- 边界：命令与前端提示词模板是两回事——模板只是普通提示词；只有向后端注册的命令才走无模型通道。
 
 ## 前端架构
 
@@ -310,7 +324,7 @@ SSE 客户端 (api/agent.ts)
 | 反思 | 无（Observation 即反馈） | 无 | LLM 自我反思 + 长期记忆 | **目标达成度评估 + pass/retry/replan** |
 | 记忆 | 无 | 无 | 向量数据库长期记忆 | **四层：STM/LTM/Work/Reflective** |
 | 工具 | 预定义工具集 | 预定义工具集 | 预定义工具集 | **33 个自注册工具 + tags 分类 + 安全分级** |
-| 流式 | 取决于实现 | 取决于实现 | 取决于实现 | **20 种 SSE 事件类型, 前端可视化** |
+| 流式 | 取决于实现 | 取决于实现 | 取决于实现 | **23 种 SSE 事件类型, 前端可视化** |
 | 多步依赖 | 不支持 | 线性依赖 | 不支持 | **完整 DAG 依赖管理** |
 | 失败恢复 | 无 | 无 | 基本反思 | **步骤级重试 + 错误上下文传递** |
 
@@ -400,7 +414,7 @@ curl http://localhost:8000/api/v1/agent/tools \
 
 ```
 backend/app/agent/
-  ├── events.py          # 20 种 AgentEvent 类型
+  ├── events.py          # 23 种 AgentEvent 类型
   ├── config.py          # AgentConfig 模型 + Redis 持久化
   ├── registry.py        # 自注册工具注册表
   ├── planner.py         # Phase 1: DAG 计划生成

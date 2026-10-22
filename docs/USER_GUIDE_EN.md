@@ -5,6 +5,7 @@
 > This guide only *references* the sources of truth:
 > - ports, credentials, and service orchestration: `backend/docker-compose.yml` and `backend/.env.docker.example`;
 > - headline numbers (33 built-in tools / 23 endpoint modules / 34 frontend routes / 20 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (the guide itself is not yet in the anchor list);
+> - headline numbers (33 built-in tools / 23 endpoint modules / 34 frontend routes / 23 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (the guide itself is not yet in the anchor list);
 > - architecture and design rationale: `README.md`, `AGENT_ARCHITECTURE.md`, `docs/decisions/`.
 >
 > 中文版：[USER_GUIDE.md](USER_GUIDE.md)
@@ -322,7 +323,7 @@ User instruction
 - Actual defaults come from `backend/app/agent/config.py`: `max_plan_steps=10`, `max_iterations=20`, `max_tool_calls_per_turn=5`, `max_retries_per_step=3`, step timeout 120 s, `max_context_tokens=8000`; `approval_timeout_seconds=0` (wait forever), `plan_approval_mode="never"`.
 - `execute_python` / `execute_sql` / `mcp_call` are in `DEFAULT_DISABLED_TOOLS`; the server always unions them into `disabled_tools` even if the user config omits them.
 - Reflection `retry` re-runs the step in place; `replan` re-enters planning at most once per run (`MAX_REPLANS_PER_RUN=1`). Reviewer `revise` / `reject` is recorded and displayed as advice only — it does not block the final answer.
-- The agent stream has **20 SSE event types** (`docs/facts.json` → `sse_event_types`, derived from the `EventType` literal in `backend/app/agent/events.py`); the frontend renders plan trees, thinking streams, tool cards, and approval cards from them.
+- The agent stream has **23 SSE event types** (`docs/facts.json` → `sse_event_types`, derived from the `EventType` literal in `backend/app/agent/events.py`); the frontend renders plan trees, thinking streams, tool cards, and approval cards from them.
 
 > The "Configuration" block in `AGENT_ARCHITECTURE.md` shows older defaults (e.g. `max_iterations=10`, `max_plan_steps=8`). When it conflicts with code, `backend/app/agent/config.py` wins.
 
@@ -490,7 +491,7 @@ Practical notes:
 - **Strict / privacy mode**: passed in the request `payload` (`strictMode` / `privacyMode`). In strict mode, retrieval failure emits an SSE `error` instead of letting the model improvise; privacy mode works with end-to-end PII masking.
 - **Stop generation**: the frontend aborts the SSE stream with an AbortController; the server finalizes on disconnect.
 - **History**: `GET /api/v1/chat/conversations` supports `page` / `page_size` / `search` (title LIKE), newest first; conversations are visible by "owner + current organization" (see 7.4).
-- **Deep analysis shows its work**: plan tree, thinking stream, tool-call cards, and reflection are driven by the 20 agent SSE event types; quick Q&A only emits `chunk` / `message` / `error` / `debug`.
+- **Deep analysis shows its work**: plan tree, thinking stream, tool-call cards, and reflection are driven by the 23 agent SSE event types; quick Q&A only emits `chunk` / `message` / `error` / `debug`.
 - **When approval is needed**: deep analysis inherits HITL. `approval_mode` defaults to `risky`, but risky tools are disabled by default, so the default configuration triggers no approvals. Once you enable `execute_python` / `execute_sql` / `mcp_call`, risky calls pause for approval. For complex tasks prefer the Agent workbench (4.3), which has the full approval and replay UI.
 - **Boundary**: the standalone search page's file-type filter is **display-only** — `file_types` is not part of the backend `KnowledgeSearchRequest`, so the filter has no effect. Control retrieval with the query and `search_mode`.
 
@@ -499,6 +500,8 @@ Practical notes:
 The Agent workbench (`/agent`) is the "intervenable agent" UI: plan tree/session on the left, chat and tool cards in the middle, configuration on the right (`AGENT_ARCHITECTURE.md`; components in `frontend/src/components/agent/`).
 
 **Configuration**: model and temperature, Planning / Reflection / Memory / Thinking toggles, personality, approval mode, tool toggles, system-prompt override (`AgentConfigPanel.vue`); `GET/PUT /api/v1/agent/config`, persisted per user. Agent sessions: `GET/POST /api/v1/agent/sessions`, `GET/DELETE /api/v1/agent/sessions/{id}`; tools: `GET /api/v1/agent/tools` (parameter schemas, tags, `disabled_by_default`, total).
+
+**Server-side commands** (`GET /api/v1/commands`, `POST /api/v1/commands/execute`): type `/help` (command catalog), `/status` (session and recent tasks), `/export [markdown|json]` (export the current session), `/tools` (tools and default-disabled state). Commands run before the model, write no user message, and create no model turn; an unknown command returns an explicit error instead of being sent to the model as a prompt. Set `COMMANDS_ENABLED=false` to roll back.
 
 **Approval and resume** (HITL; semantics in 3.4):
 
@@ -615,7 +618,7 @@ Successful login returns an envelope:
 
 ### 5.2 Endpoint modules
 
-There are **23 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from `include_router` calls in `backend/app/api/v1/router.py`):
+There are **24 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from `include_router` calls in `backend/app/api/v1/router.py`):
 
 | Module | Prefix | Purpose |
 |--------|--------|---------|
@@ -637,6 +640,7 @@ There are **23 endpoint modules** (`docs/facts.json` → `endpoint_modules`, der
 | curated_skills | `/api/v1/curated-skills` | skill library |
 | memory | `/api/v1/memory` | agent memory (short/long/working/reflective) |
 | agent | `/api/v1/agent` | PER agent SSE, tools, sessions, config |
+| commands | `/api/v1/commands` | server-side command catalog and model-free execution (`/help`, `/status`, `/export`, `/tools`) |
 | mcp | `/api/v1/mcp` | MCP server status (admin read-only) |
 | scheduled_tasks | `/api/v1/scheduled-tasks` | scheduled task CRUD / pause / manual run |
 | sessions | `/api/v1/sessions` | session fork / seed / lineage (issue #476) |
