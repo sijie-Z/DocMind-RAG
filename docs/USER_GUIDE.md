@@ -278,6 +278,10 @@ ADMIN_PASSWORD='<至少 8 位>' python reset_admin.py     # Windows PowerShell: 
 | `RERANK_MODEL` / `RERANK_API_KEY` / `RERANK_API_URL` | 空 | 云端重排；需同时 `RERANK_USE_LOCAL=false` |
 | `RAG_RERANK_TOP_N` | `20` | 重排候选数 |
 | `RAG_RERANK_TIMEOUT_SECONDS` | `8.0` | 超时后走降级（见 3.2） |
+| `RAG_QUERY_REWRITE_TIMEOUT_SECONDS` | `1.2` | 查询改写读阶段预算 |
+| `LLM_CONNECT_TIMEOUT_SECONDS` | `1.0` | 连接级快速失败：连接阶段独立短超时（读阶段不受影响；高延迟链路可上调，但会同比抬高不可达暴露时间） |
+| `LLM_TRANSIENT_MAX_RETRIES` | `1` | 瞬时故障（408/409/429/5xx、连接建立后的传输中断）重试次数；连接类不可达与读超时零重试 |
+| `LLM_UNREACHABLE_COOLDOWN_SECONDS` | `5.0` | 不可达负缓存窗口（按 LLM 端点区分，任一调用成功即清除）；`0` 关闭 |
 
 ### 2.5 存储与基础设施
 

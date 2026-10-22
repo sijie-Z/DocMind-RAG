@@ -83,6 +83,11 @@ class _FakeClient:
     def __init__(self, captured: list[dict]):
         self.chat = SimpleNamespace(completions=_FakeCompletions(captured))
 
+    # issue #467：chat_stream 经 llm_failfast.create_chat_completion 调用 SDK，
+    # 先 with_options(max_retries=0, timeout=...) 再 create——替身需同形。
+    def with_options(self, **kwargs):
+        return self
+
 
 def _run_chat_stream(
     context: list[dict],

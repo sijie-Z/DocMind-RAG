@@ -28,6 +28,7 @@ import time
 from functools import lru_cache
 
 from app.core.config import settings
+from app.core.llm_failfast import LLMUnreachableError, create_chat_completion
 
 logger = logging.getLogger(__name__)
 
@@ -337,14 +338,17 @@ async def _rerank_llm(
         '{"index": 2, "score": 0}]'
     )
     try:
-        rsp = await llm_client.chat.completions.create(
+        rsp = await create_chat_completion(
+            llm_client,
+            # issue #467：重排是检索链的可选增强——端点不可达时立即降级
+            # （不再等满 RAG_RERANK_TIMEOUT_SECONDS）；连接阶段另有独立短超时。
+            read_timeout=settings.RAG_RERANK_TIMEOUT_SECONDS,
             model=model_name,
             messages=[
                 {"role": "system", "content": "你是严格输出JSON数组的重排器。"},
                 {"role": "user", "content": prompt},
             ],
             temperature=0,
-            timeout=settings.RAG_RERANK_TIMEOUT_SECONDS,
         )
         content = (rsp.choices[0].message.content or "").strip()
         ordered, used = [], set()
@@ -362,6 +366,10 @@ async def _rerank_llm(
                 ordered.append(h)
         # 只返回编号（无分数）的输出仍只给序，不伪造 rerank_score。
         return ordered, None
+    except LLMUnreachableError as e:
+        # issue #467：连接级不可达——零重试，立即降级并给出可判别原因。
+        logger.warning("LLM reranker unreachable (fast-fail): %s", e)
+        return None, "llm_unreachable"
     except Exception as e:
         logger.warning("LLM reranker failed: %s", e)
         return None, f"llm_error: {e}"

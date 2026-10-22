@@ -38,6 +38,9 @@ def _fake_llm_client(variants: list[str]):
         return resp
 
     client.chat.completions.create = _create
+    # issue #467：改写站经 llm_failfast.create_chat_completion 调用 SDK，
+    # 先 with_options(max_retries=0, timeout=...) 再 create——替身需同形。
+    client.with_options = MagicMock(return_value=client)
     return client
 
 

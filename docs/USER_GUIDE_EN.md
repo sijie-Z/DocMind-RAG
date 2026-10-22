@@ -265,6 +265,10 @@ To change embedding providers:
 | `RERANK_MODEL` / `RERANK_API_KEY` / `RERANK_API_URL` | empty | cloud rerank; also set `RERANK_USE_LOCAL=false` |
 | `RAG_RERANK_TOP_N` | `20` | candidates to rerank |
 | `RAG_RERANK_TIMEOUT_SECONDS` | `8.0` | timeout triggers degradation (see 3.2) |
+| `RAG_QUERY_REWRITE_TIMEOUT_SECONDS` | `1.2` | query-rewrite read budget |
+| `LLM_CONNECT_TIMEOUT_SECONDS` | `1.0` | connection-level fast fail: separate short connect-phase timeout (read phase unaffected; raise it on high-latency links, which proportionally raises unreachable exposure time) |
+| `LLM_TRANSIENT_MAX_RETRIES` | `1` | retries for transient faults (408/409/429/5xx, post-connect transport interruptions); connection-level unreachable and read timeouts get none |
+| `LLM_UNREACHABLE_COOLDOWN_SECONDS` | `5.0` | unreachable negative-cache window (per LLM endpoint, cleared on any success); `0` disables |
 
 ### 2.5 Storage and infrastructure
 

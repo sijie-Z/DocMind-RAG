@@ -396,7 +396,10 @@ def _llm_client(content: str):
             rsp.choices = [choice]
             return rsp
 
-    return MagicMock(chat=MagicMock(completions=_Completions()))
+    client = MagicMock(chat=MagicMock(completions=_Completions()))
+    # issue #467：重排 LLM 兜底经 llm_failfast 先 with_options 再 create。
+    client.with_options = MagicMock(return_value=client)
+    return client
 
 
 @pytest.mark.asyncio

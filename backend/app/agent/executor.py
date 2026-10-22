@@ -46,7 +46,8 @@ logger = logging.getLogger(__name__)
 # 阈值 3（与 Executor.MAX_CONSECUTIVE_FAILURES 同量级）；计数口径 = **自上次复位累计**
 # 的失败数（成功的复位只发生在非 CLOSED 态，即半开探测成功时）——provider 连续挂的
 # 场景下与"连续失败"等价。OPEN 后 30s 进入半开探测。
-# 说明：接的是状态机 API（allow_request/record_*）；装饰器的"降级返回值"契约仍未接线。
+# 说明：接的是状态机 API（allow_request/record_*）；装饰器式「降级返回值」
+# 路径因吞异常且零使用，已按 issue #467 整体删除。
 _LLM_BREAKER = CircuitBreaker(name="llm", failure_threshold=3, recovery_timeout=30)
 
 EXECUTION_SYSTEM_PROMPT = """你是 DocMind 智能助手。你的任务是执行计划中的当前步骤。

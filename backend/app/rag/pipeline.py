@@ -11,6 +11,7 @@ from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from app.core.config import settings
+from app.core.llm_failfast import create_chat_completion
 from app.core.prometheus import (
     LLM_LATENCY,
     LLM_REQUEST_ERRORS,
@@ -751,13 +752,17 @@ class RAGPipeline:
             model = model_override or (
                 settings.LOCAL_LLM_MODEL if settings.ENABLE_LOCAL_LLM else settings.DEEPSEEK_MODEL
             )
-            stream = await self.openai_client.chat.completions.create(
+            stream = await create_chat_completion(
+                self.openai_client,
+                # issue #467：连接阶段短超时（默认 1.5s）独立于流式读预算——
+                # LLM 端点不可达时不再等满 AI_STREAM_TIMEOUT（120s）或 SDK 重试。
+                # 读阶段仍沿用 AI_STREAM_TIMEOUT；流内容迭代不在本函数内重试。
+                read_timeout=float(settings.AI_STREAM_TIMEOUT),
                 model=model,
                 messages=messages,
                 stream=True,
                 temperature=0.1,
                 max_tokens=settings.AI_MAX_TOKENS,
-                timeout=settings.AI_STREAM_TIMEOUT,
             )
             full_response = ""
             first_token = True
