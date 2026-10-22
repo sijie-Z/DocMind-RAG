@@ -358,3 +358,24 @@ def test_main_red_on_doc_number_drift(tmp_path):
         encoding="utf-8",
     )
     assert checker.main(["--root", str(root)]) == 1
+
+
+def test_endpoint_module_derivation_prefers_router_specs(tmp_path):
+    """issue #479：路由表改为 ROUTER_SPECS 后，端点模块数按字典键派生。
+
+    即使文件里仍有 ``api_router.include_router(...)`` 调用（兼容导出/其它
+    APIRouter），ROUTER_SPECS 键优先且保持声明顺序。
+    """
+    router = tmp_path / "router.py"
+    router.write_text(
+        "from fastapi import APIRouter\n"
+        "ROUTER_SPECS: dict[str, tuple] = {\n"
+        "    'auth': (auth.router, '/auth', ['认证'], 'core'),\n"
+        "    'chat': (chat.router, '/chat', ['聊天'], 'rag'),\n"
+        "    'monitoring': (monitoring.router, '/monitoring', ['系统监控'], 'observability'),\n"
+        "}\n"
+        "api_router = build_router(['core', 'rag', 'observability'])\n"
+        "api_router.include_router(legacy.router)\n",
+        encoding="utf-8",
+    )
+    assert checker.derive_endpoint_modules(router) == ["auth", "chat", "monitoring"]
