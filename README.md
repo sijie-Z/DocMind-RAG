@@ -266,7 +266,7 @@ Vue 3 + TypeScript + Naive UI 单页应用，34 条路由记录（29 条具名�
 
 ### 🔄 异步处理 (`backend/app/worker/`)
 
-Kafka 消费者独立进程（`start_worker.py`），监听 `file-processing` 主题，处理文档解析 → 分块 → 嵌入 → ES 索引入库。
+Kafka 消费者独立进程（`python -m app --profile worker`；旧脚本 `start_worker.py` 仍兼容），监听 `file-processing` 主题，处理文档解析 → 分块 → 嵌入 → ES 索引入库。
 
 如果 Kafka 不可用，`/documents/upload` 与知识库重建接口会自动切换为进程内处理，本地开发不会因为缺少消息队列而停在 pending。
 
@@ -325,6 +325,19 @@ python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activa
 pip install -r requirements.txt
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+推荐使用统一入口（issue #479）：
+
+```bash
+# profile = web | worker | headless | sdk | acp（缺省 web）
+python -m app --profile web
+# 按顺序叠加 patch 文件
+python -m app --profile web --patch config/patches/local.yaml
+# 打印 profile/bundle/patch 合并后的最终配置（键排序、secret 打码）
+python -m app --profile web --dump-config
+```
+
+配置分层：`backend/config/base.yaml` → profile 声明的 `bundles/*.yaml` → `profiles/<profile>.yaml` → `--patch` → 环境变量（`.env` 归入环境层）。`uvicorn app.main:app` 与 `python run.py` 保留为兼容入口；reload 场景继续用 `python run.py`。
 
 ### 5. 启动前端
 

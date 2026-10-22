@@ -107,8 +107,16 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 # 新开一个终端
 cd backend
 venv\Scripts\activate
-python start_worker.py
+python start_worker.py   # 等价于统一入口：python -m app --profile worker
 ```
+
+也可直接用统一入口（issue #479，推荐）：
+
+```bash
+python -m app --profile worker
+```
+
+统一入口同时支持 web / headless 与 `--patch` / `--dump-config`（见 `README.md`「启动后端」）。
 
 ---
 

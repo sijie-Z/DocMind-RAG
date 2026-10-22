@@ -266,7 +266,7 @@ Vue 3 + TypeScript + Naive UI SPA, 34 route records (29 named routes; the table 
 
 ### 🔄 Async Processing (`backend/app/worker/`)
 
-A Kafka consumer worker process (`start_worker.py`) listens on the `file-processing` topic, handling: document parsing → chunking → embedding → ES indexing.
+A Kafka consumer worker process (`python -m app --profile worker`; the legacy `start_worker.py` still works) listens on the `file-processing` topic, handling: document parsing → chunking → embedding → ES indexing.
 
 When Kafka is unavailable, `/documents/upload` and knowledge-base rebuild endpoints automatically fall back to in-process processing, so local development does not stay stuck in `pending`.
 
@@ -326,6 +326,19 @@ python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activa
 pip install -r requirements.txt
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+The unified entrypoint is recommended (issue #479):
+
+```bash
+# profile = web | worker | headless | sdk | acp (default: web)
+python -m app --profile web
+# apply patch files in order
+python -m app --profile web --patch config/patches/local.yaml
+# print the merged config (sorted keys, masked secrets)
+python -m app --profile web --dump-config
+```
+
+Layering: `backend/config/base.yaml` → bundles declared by the profile → `profiles/<profile>.yaml` → `--patch` → environment (`.env` belongs to the environment layer). `uvicorn app.main:app` and `python run.py` remain supported compatibility entrypoints; keep using `python run.py` for reload.
 
 ### 5. Start Frontend
 

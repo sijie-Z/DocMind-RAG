@@ -128,6 +128,16 @@ alembic upgrade head
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+也可使用统一入口（issue #479，推荐；profile = web | worker | headless | sdk | acp）：
+
+```bash
+python -m app --profile web
+python -m app --profile web --patch config/patches/local.yaml
+python -m app --profile web --dump-config   # 键排序 JSON，secret 打码
+```
+
+`uvicorn app.main:app` 与 `python run.py` 仍是兼容入口（reload 场景用后者）。配置分层为 `config/base.yaml` → bundle → `profiles/<profile>.yaml` → `--patch` → 环境变量。
+
 Windows 也可以直接用仓库根目录的 `start_windows.bat`（自动识别 `.venv` 或 `venv`），但它不会替你启动 Worker。
 
 启动时会发生三件值得知道的事：
@@ -142,8 +152,10 @@ Windows 也可以直接用仓库根目录的 `start_windows.bat`（自动识别 
 # 新开一个终端
 cd backend
 source venv/bin/activate            # Windows: venv\Scripts\activate
-python start_worker.py
+python start_worker.py          # 等价于：python -m app --profile worker
 ```
+
+统一入口同样可用：`python -m app --profile worker`。
 
 Worker 是 Kafka 消费者，负责「解析 → 分块 → 嵌入 → ES 索引」。**只要 Kafka 可用，就必须有 Worker**，否则文档会停在待处理状态；Kafka 不可用时，上传与知识库重建接口会自动切换为进程内处理（`README.md`「异步处理」）。
 
