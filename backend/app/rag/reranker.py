@@ -299,13 +299,16 @@ def _rerank_info(status: str, path: str, reason: str | None = None) -> dict:
     }
 
 
-async def rerank(query: str, hits: list[dict], rerank_client=None) -> tuple[list[dict], dict]:
+async def rerank(
+    query: str, hits: list[dict], rerank_client=None, llm_client=None
+) -> tuple[list[dict], dict]:
     """Rerank hits using local cross-encoder (free), with API/LLM fallbacks.
 
     Strategy priority:
       1. Local cross-encoder (if RERANK_USE_LOCAL = True, default)
       2. Zhipu rerank API (if RERANK_API_KEY is set)
-      3. LLM-based reranking (if rerank_client is provided, most expensive)
+      3. LLM-based reranking (if an LLM client is provided — llm_client 优先，
+         回退 rerank_client；most expensive)
       4. Degraded no-op (original order) — 显式 status="degraded" + reason/attempts
 
     Returns ``(hits, info)``；info 契约见模块 docstring（issue #189）。
@@ -344,7 +347,9 @@ async def rerank(query: str, hits: list[dict], rerank_client=None) -> tuple[list
 
         # Strategy 3: LLM-based (paid)
         if ordered is None:
-            ordered, reason = await _rerank_llm(query, candidates, top_n, rerank_client)
+            ordered, reason = await _rerank_llm(
+                query, candidates, top_n, llm_client or rerank_client
+            )
             attempts.append({"path": "llm", "ok": ordered is not None, "reason": reason})
 
         info["attempts"] = attempts

@@ -262,7 +262,7 @@ class TestSubQueryMergeDedup:
 
         captured: dict = {}
 
-        async def fake_rerank(query, hits, client=None):
+        async def fake_rerank(query, hits, client=None, **kwargs):
             captured["hits"] = list(hits)
             return list(hits), {
                 "status": "disabled",

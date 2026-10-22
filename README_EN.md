@@ -29,6 +29,8 @@ Core use cases:
 - 🔐 **Multi-Tenant + RBAC** — Organization isolation, role-based permissions, JWT authentication.
 
 > Design decisions and experimental data belong in the research repo: [DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
+>
+> 📖 **User guide**: [docs/USER_GUIDE_EN.md](docs/USER_GUIDE_EN.md) — quick start, configuration, core concepts, API, operations, and troubleshooting.
 
 ---
 

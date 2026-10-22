@@ -67,9 +67,13 @@ class RAGPipeline:
         openai_client: AsyncOpenAI | None = None,
         embedding_provider=None,
         rerank_client: AsyncOpenAI | None = None,
+        llm_client: AsyncOpenAI | None = None,
     ):
         self.openai_client = openai_client
         self.rerank_client = rerank_client
+        # issue #190 补丁：LLM 重排兜底必须用 chat LLM 客户端（DeepSeek 等），
+        # 不能复用 /rerank 的智谱客户端——否则模型名与端点不匹配恒 400。
+        self.llm_client = llm_client
         # issue #196：embedding_provider 必须是索引期同一实例
         # （app.services.embedding_service.embedding_service），由依赖注入提供。
         self.retriever = HybridRetriever(
@@ -352,7 +356,9 @@ class RAGPipeline:
             rerank_info: dict | None = None
             if result:
                 pre_rerank = list(result) if debug else None
-                result, rerank_info = await rerank(query, result, self.rerank_client)
+                result, rerank_info = await rerank(
+                    query, result, self.rerank_client, llm_client=self.llm_client
+                )
                 # issue #185/#190：显式拆分两种分数——
                 # - rank_score：融合阶段的批内 min-max 相对分（只用于排序/序位，榜首恒 ~1.0）；
                 # - relevance_score：重排器的绝对分（local CE logit / zhipu relevance_score），
