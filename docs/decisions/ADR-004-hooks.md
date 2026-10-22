@@ -1,4 +1,4 @@
-# ADR-003：Hooks 统一 agent/tool 事件扩展点（issue #474）
+# ADR-004：Hooks 统一 agent/tool 事件扩展点（issue #474）
 
 - 日期：2026-10-22
 - 状态：已实现（feat/i474-hooks）

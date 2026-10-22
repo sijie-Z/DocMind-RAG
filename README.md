@@ -160,7 +160,7 @@ handler 签名 `async def handler(ctx, next)`：`await next(payload)` 继续链�
 不调用即短路；返回 `HookDecision(action="deny"|"modify"|"ask", ...)`。
 `tools/pre_execute` 的 `ask` 走既有 HITL 审批门，hook 不能绕过审批；
 hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
-`docs/decisions/ADR-003-hooks.md`。
+`docs/decisions/ADR-004-hooks.md`。
 
 ### 📚 RAG 管线 (`backend/app/rag/`)
 
