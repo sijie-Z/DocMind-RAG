@@ -167,3 +167,26 @@ def test_build_router_all_bundles_covers_every_router_spec():
     lazy_nodes = [route for route in all_router.routes if hasattr(route, "include_context")]
     if lazy_nodes:  # FastAPI ≥0.142 惰性 include：每个模块一个节点
         assert len(lazy_nodes) == 24
+
+
+def test_headless_error_event_exits_1_with_log_safe_stderr(monkeypatch, capsys):
+    """headless 非 dry-run：error 事件 → exit 1，stderr 经 log_safe（不可注入换行）。"""
+    from argparse import Namespace
+
+    from app.agent import service as service_mod
+    from app.agent.events import AgentEvent
+    from app.entrypoints import headless
+
+    async def fake_chat(*args, **kwargs):
+        yield AgentEvent(type="error", content="provider boom\nINJECTED-LINE")
+
+    monkeypatch.setattr(service_mod.agent_service, "chat", fake_chat)
+    args = Namespace(query="ping", user_id=1, org_id=1, dry_run=False, json=True)
+
+    assert headless.run(args) == 1
+    captured = capsys.readouterr()
+    assert "provider boom" in captured.err
+    assert "INJECTED-LINE" in captured.err
+    # log_safe 把换行转义成字面 \n：stderr 只有一个物理行（print 的尾换行）
+    assert captured.err.count("\n") == 1
+    assert r"\nINJECTED-LINE" in captured.err
