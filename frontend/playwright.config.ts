@@ -26,6 +26,11 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     headless: true,
+    // 本地浏览器版本与 Playwright 期望的 revision 不一致时，可显式指定已安装的
+    // Chromium 可执行文件（CI 不设置该变量，行为不变）。
+    launchOptions: process.env.PW_CHROMIUM_EXECUTABLE
+      ? { executablePath: process.env.PW_CHROMIUM_EXECUTABLE }
+      : undefined,
     // 失败时留证据
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
