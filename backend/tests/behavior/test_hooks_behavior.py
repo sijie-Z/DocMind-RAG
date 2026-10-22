@@ -630,6 +630,69 @@ async def test_post_step_serial_observes_final_result(bus):
     assert step.status == "completed"
 
 
+@pytest.mark.asyncio
+async def test_post_execute_runs_on_tool_exception(monkeypatch, bus):
+    """工具抛异常/超时同样是执行结果：post_execute 必须被观察到。"""
+    observed: list[dict] = []
+
+    async def observe(ctx, nxt):
+        observed.append(dict(ctx.payload["result"]))
+        return await nxt(ctx.payload)
+
+    bus.register(_spec("post_exc", "tools/post_execute"), observe)
+    monkeypatch.setattr(
+        tool_registry,
+        "execute_detailed",
+        AsyncMock(side_effect=TimeoutError("tool timed out")),
+    )
+    record = _patch_ledger(monkeypatch)
+    executor = _executor(_client_with_tool_calls([("search_knowledge_base", '{"q":"x"}', "c1")]))
+    executor.tool_ledger_task_id = "task-h"
+
+    events, exc, _, _ = await _run_step_once(executor)
+
+    assert exc is None
+    assert observed and observed[0]["success"] is False
+    assert observed[0]["error_type"] == "TimeoutError"
+    errs = [e for e in events if e.type == "tool_error"]
+    assert errs and errs[0].error_type == "TimeoutError"
+    assert record.await_args.kwargs["error_type"] == "TimeoutError"
+
+
+@pytest.mark.asyncio
+async def test_post_execute_deny_on_tool_exception_marks_hook_denied(monkeypatch, bus):
+    """异常路径上的 post_execute deny：ledger/事件都记 hook_denied。"""
+
+    async def deny_hook(ctx, nxt):
+        return HookDecision(action="deny", reason="异常结果不合规")
+
+    bus.register(_spec("post_exc_deny", "tools/post_execute"), deny_hook)
+    monkeypatch.setattr(
+        tool_registry,
+        "execute_detailed",
+        AsyncMock(side_effect=TimeoutError("tool timed out")),
+    )
+    record = _patch_ledger(monkeypatch)
+    executor = _executor(_client_with_tool_calls([("search_knowledge_base", '{"q":"x"}', "c1")]))
+    executor.tool_ledger_task_id = "task-h"
+
+    events, exc, _, _ = await _run_step_once(executor)
+
+    assert exc is None
+    errs = [e for e in events if e.type == "tool_error"]
+    assert errs and errs[0].error_type == "hook_denied"
+    assert "异常结果不合规" in errs[0].content
+    assert record.await_args.kwargs["error_type"] == "hook_denied"
+
+
+def test_hook_session_id_strips_session_prefix():
+    executor = _executor()
+    executor.config.agent_id = "session:abc-123"
+    assert executor._hook_session_id() == "abc-123"
+    executor.config.agent_id = "default"
+    assert executor._hook_session_id() is None
+
+
 # ── loop 层 turn 事件 ───────────────────────────────────────────────────────
 
 
@@ -793,6 +856,33 @@ async def test_turn_end_emitted_on_cancel(bus):
     assert ("agent/turn_start", None) in seen
     assert ("agent/turn_end", "cancelled") in seen
     assert any(e.type == "run_cancelled" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_turn_end_emitted_on_fresh_plan_pause(bus):
+    """plan_approval_mode=always 的新鲜计划暂停：turn_start/turn_end 成对（paused）。"""
+    seen: list[tuple[str, object]] = []
+
+    async def recorder(ctx, nxt):
+        seen.append((ctx.event, ctx.payload.get("status")))
+        return await nxt(ctx.payload)
+
+    bus.register(_spec("rec_start2", "agent/turn_start"), recorder)
+    bus.register(_spec("rec_end2", "agent/turn_end"), recorder)
+
+    loop = _make_loop(
+        config=_cfg(enable_planning=True, enable_checkpoint=False, plan_approval_mode="always")
+    )
+
+    async def _fake_pause(plan, run_state_live):
+        loop.paused_for_plan_approval = True
+        yield AgentEvent(type="plan_approval_required", content="计划审批挂起")
+
+    loop._pause_for_plan_approval = _fake_pause
+    events = await _drive_loop(loop)
+
+    assert ("agent/turn_end", "paused") in seen
+    assert any(e.type == "plan_approval_required" for e in events)
 
 
 # ── SSE 事件字段 ────────────────────────────────────────────────────────────

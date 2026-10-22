@@ -719,6 +719,12 @@ class PERAgentLoop:
                 async for plan_event in self._pause_for_plan_approval(plan, run_state_live):
                     yield plan_event
                 if self.paused_for_plan_approval:
+                    # 新鲜计划的审批暂停（plan_approval_mode=always 的主路径）：
+                    # turn_end 同样成对发出（status=paused）。
+                    async for end_event in self._emit_turn_end(
+                        "paused", task_id=task_id, session_id=session_id
+                    ):
+                        yield end_event
                     return
 
             # ── Phase 2: Execution ───────────────────────────────────────────

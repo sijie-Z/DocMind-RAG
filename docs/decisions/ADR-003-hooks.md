@@ -137,8 +137,12 @@ deny 的 hook 会把 run 变成无限循环；上限保证基础设施自带终�
   不需要回滚文档数字。
 - 冒烟：普通聊天、工具调用、审批、取消各跑一遍（现有 HITL/agent 测试已覆盖）。
 
-## 已知不确定项
+## 已知不确定项与已接受语义
 
+- **pre_step deny 的轮次在 run report 中仍是 `clean_success: True`**（grade_hint
+  no-steps）：issue 的语义是"本轮不执行并**正常结束**"——hook 拒绝是策略结果，
+  不是运行故障。审计消费方应以 `decisions` 里的 `hooks/pre_step_denied` 与
+  步骤 `skipped` 状态识别，而不是以 clean_success 判断"是否执行过工具"。
 - 并行步骤批次里，某个 `pre_step` deny 时，已越过入口护栏的兄弟步骤可能已经
   发起 LLM 调用；deny 后它们在 `_execute_step_with_retry` 的边界收敛为 skipped，
   但无法撤回已发生的调用。单步（serial / 单 ready step）路径无此窗口。

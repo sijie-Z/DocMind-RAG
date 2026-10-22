@@ -1897,6 +1897,7 @@ class Executor:
                 # 工具抛异常/超时也是"执行结果"；观察者不应漏掉这条路径。
                 # deny 替换为拒绝结果，modify 仅允许替换 content（异常态保持失败）。
                 exception_result = f"{type(e).__name__}: {e}"
+                exception_error_type = type(e).__name__
                 post_decision, post_events = await self._emit_hooks(
                     agent_hooks.TOOLS_POST_EXECUTE,
                     {
@@ -1905,7 +1906,7 @@ class Executor:
                         "result": {
                             "success": False,
                             "content": exception_result,
-                            "error_type": type(e).__name__,
+                            "error_type": exception_error_type,
                         },
                     },
                     user_id=user_id,
@@ -1920,6 +1921,7 @@ class Executor:
                             message=post_decision.reason or "hook 拒绝了该工具结果",
                         )
                     )
+                    exception_error_type = "hook_denied"
                 elif isinstance(post_decision.payload, dict):
                     modified_result = post_decision.payload.get("result")
                     if isinstance(modified_result, dict) and isinstance(
@@ -1931,7 +1933,7 @@ class Executor:
                     tool_call_id,
                     success=False,
                     result=exception_result,
-                    error_type=type(e).__name__,
+                    error_type=exception_error_type,
                 )
                 yield AgentEvent(
                     type="tool_error",
@@ -1941,6 +1943,7 @@ class Executor:
                     tool_duration_ms=elapsed,
                     plan_id=plan.id,
                     plan_step_id=step.id,
+                    error_type=exception_error_type,
                 )
                 tool_results.append({"tool": func.name, "result": f"Exception: {e}"})
                 attempt_error_detail = f"{type(e).__name__}: {e}"

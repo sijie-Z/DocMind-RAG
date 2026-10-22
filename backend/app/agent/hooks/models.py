@@ -61,9 +61,10 @@ HOOK_MODULE_PATTERN = re.compile(
 HOOK_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
 
 # 参数脱敏（issue #474 §5.6）：至少 password/token/secret/key 字段打码。
-# `key` 单独成词也命中（如 {"key": "..."}）；宁可多打码，不可漏。
+# `key` 以"独立词"匹配（前后不是字母）：{"key"} / api_key / secret_key 命中；
+# keyword / monkey / keyboard 不误伤（audit 日志保留可读字段）。
 _SENSITIVE_KEY = re.compile(
-    r"(password|passwd|token|secret|key"
+    r"(password|passwd|token|secret|(?<![a-z])key(?![a-z])"
     r"|authorization|cookie|credential)",
     re.IGNORECASE,
 )
