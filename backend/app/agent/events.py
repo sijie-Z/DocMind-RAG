@@ -67,6 +67,10 @@ EventType = Literal[
     "command_start",
     "command_result",
     "command_error",
+    # Hooks（issue #474）：hook 失败不静默——超时/异常/非法决策以本事件外发。
+    # hook / event_name / action / elapsed_ms 四个字段见 AgentEvent 的可选增补；
+    # 其余事件类型不携带这些键（既有载荷零变化）。
+    "hook_error",
 ]
 
 ThinkingType = Literal["reasoning", "planning", "evaluation", "correction"]
@@ -129,6 +133,13 @@ class AgentEvent:
     # 其余事件类型保持空 → 序列化时省略（既有载荷不变）。
     command_name: str = ""
     command_data: dict[str, Any] = field(default_factory=dict)
+
+    # Hooks（issue #474）：hook_error 事件的结构化字段。默认 None → 序列化时
+    # 省略，既有事件载荷不变（向后兼容）。
+    hook: str | None = None
+    event_name: str | None = None
+    action: str | None = None
+    elapsed_ms: int | None = None
 
     # Reflection
     reflection_result: ReflectionResult = "pass"
@@ -209,6 +220,16 @@ class AgentEvent:
             d["command_name"] = self.command_name
         if self.command_data:
             d["command_data"] = self.command_data
+
+        # Hooks（issue #474）：hook_error 专用字段；非 None 才带。
+        if self.hook is not None:
+            d["hook"] = self.hook
+        if self.event_name is not None:
+            d["event_name"] = self.event_name
+        if self.action is not None:
+            d["action"] = self.action
+        if self.elapsed_ms is not None:
+            d["elapsed_ms"] = self.elapsed_ms
 
         if self.iteration:
             d["iteration"] = self.iteration
