@@ -51,6 +51,7 @@ _URL_PASSWORD_RE = re.compile(r"(://[^:/@\s]+:)([^@/\s]+)(@)")
 _settings: Settings | None = None
 _active_profile: str | None = None
 _active_spec: ProfileSpec | None = None
+_active_patches: list[str] = []
 
 
 # ──────────────────────────────────────────────────────────────
@@ -224,14 +225,23 @@ def config_hash(masked: dict[str, Any]) -> str:
 
 def load_settings(profile: str | None = None, patches: list[str] | None = None) -> Settings:
     """按优先级合并并构造 ``Settings``；结果缓存。``profile=None`` → ``web``。"""
-    global _settings, _active_profile, _active_spec
+    global _settings, _active_profile, _active_spec, _active_patches
 
     name = validate_profile_name(profile or "web")
+    requested_patches = list(patches or [])
     if _settings is not None:
         if _active_profile != name:
             raise ConfigError(
                 f"profile.{name}",
                 f"配置已按 profile={_active_profile} 加载，同一进程不能切换 profile",
+            )
+        # patches=None 表示「调用方未指定」，不参与一致性检查（如 build_app 的内部调用）；
+        # 显式传入的 patch 列表与已应用的不一致时必须失败，绝不静默返回旧对象。
+        if patches is not None and requested_patches != _active_patches:
+            raise ConfigError(
+                "patch",
+                "配置已加载，本次传入的 patch 列表与已应用的不一致"
+                f"（已应用 {_active_patches}，本次 {requested_patches}）",
             )
         return _settings
 
@@ -242,7 +252,7 @@ def load_settings(profile: str | None = None, patches: list[str] | None = None) 
         merged = deep_merge(merged, _load_layer_settings(CONFIG_DIR / "bundles" / f"{bundle}.yaml"))
     merged = deep_merge(merged, spec.settings)
 
-    merged = apply_patches(merged, _load_patches(list(patches or [])))
+    merged = apply_patches(merged, _load_patches(requested_patches))
     # 补丁可以 insert 新键：最终 YAML 层键必须仍落在 Settings.model_fields 内
     # （否则 Settings 的 extra="ignore" 会静默吞掉拼写错误）。
     validate_settings_map(merged, origin="merged profile")
@@ -254,6 +264,7 @@ def load_settings(profile: str | None = None, patches: list[str] | None = None) 
     _settings = settings_obj
     _active_profile = name
     _active_spec = spec
+    _active_patches = requested_patches
 
     masked = mask_secrets(settings_obj.model_dump())
     logger.info(
@@ -274,10 +285,11 @@ def get_settings() -> Settings:
 
 def reset_settings() -> None:
     """清缓存并重置惰性代理（仅测试与显式重载使用）。"""
-    global _settings, _active_profile, _active_spec
+    global _settings, _active_profile, _active_spec, _active_patches
     _settings = None
     _active_profile = None
     _active_spec = None
+    _active_patches = []
     from app.core.config import settings as _proxy
 
     reset = getattr(_proxy, "_reset", None)

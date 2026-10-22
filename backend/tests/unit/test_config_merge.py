@@ -155,6 +155,35 @@ def test_unknown_profile_is_rejected(config_tree):
     assert excinfo.value.path == "profile.nope"
 
 
+def test_cached_load_rejects_different_patches(config_tree):
+    """已缓存且同 profile：显式传入的 patch 列表与已应用不一致 ⇒ ConfigError。
+
+    patches=None 表示调用方未指定（如 build_app 内部），不触发该检查。
+    """
+    config_dir = config_tree
+    _set_profile_settings(config_dir, "  PORT: 8000")
+    patch_a = config_dir / "patch-a.yaml"
+    patch_b = config_dir / "patch-b.yaml"
+    _write(
+        patch_a,
+        "patch:\n  - op: replace\n    path: settings.PORT\n    value: 9000\n",
+    )
+    _write(
+        patch_b,
+        "patch:\n  - op: replace\n    path: settings.PORT\n    value: 9001\n",
+    )
+
+    loader.load_settings("web", [str(patch_a)])
+    assert loader.load_settings("web", [str(patch_a)]) is loader.get_settings()
+
+    with pytest.raises(ConfigError) as excinfo:
+        loader.load_settings("web", [str(patch_b)])
+    assert excinfo.value.path == "patch"
+
+    # 未指定 patches 的内部调用不受影响
+    assert loader.load_settings("web") is loader.get_settings()
+
+
 def test_unknown_settings_key_reports_dotted_path(config_tree):
     _set_profile_settings(config_tree, "  NOPE: 1")
     with pytest.raises(ConfigError) as excinfo:
