@@ -309,18 +309,18 @@ def test_readme_module_counts_match_code():
 
 
 def test_sse_event_count_matches_code():
-    """README/EN 的 SSE 事件数必须与 EventType 闭集一致（当前 23）。"""
+    """README/EN 的 SSE 事件数必须与 EventType 闭集一致（当前 24）。"""
     events_source = _read("backend/app/agent/events.py")
     match = re.search(r"EventType\s*=\s*Literal\[(.*?)\]", events_source, re.DOTALL)
     assert match, "events.py 中未找到 EventType Literal 定义"
     event_types = re.findall(r'"([^"]+)"', match.group(1))
-    assert len(event_types) == 23, (
+    assert len(event_types) == 24, (
         f"SSE 事件闭集已变化（{len(event_types)} 个）；请同步 README/README_EN 与本测试"
     )
     _assert_absent("README.md", ["12 种 SSE 事件", "SSE 事件类型（12 种）"])
-    _assert_present("README.md", ["23 种 SSE 事件", "SSE 事件类型（23 种）"])
+    _assert_present("README.md", ["24 种 SSE 事件", "SSE 事件类型（24 种）"])
     _assert_absent("README_EN.md", ["12 SSE event types", "SSE event types (12 types)"])
-    _assert_present("README_EN.md", ["23 SSE event types", "SSE event types (23 types)"])
+    _assert_present("README_EN.md", ["24 SSE event types", "SSE event types (24 types)"])
 
 
 def test_readme_pending_hardening_is_not_stale():
