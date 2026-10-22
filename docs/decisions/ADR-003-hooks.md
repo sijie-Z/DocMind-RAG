@@ -29,7 +29,7 @@
 | `agent/pre_step` | step_index, messages, step | messages | 是（deny → 本轮不执行） | waterfall |
 | `agent/post_step` | step_index, result{status,result,error} | 否 | 否 | serial |
 | `agent/turn_stopping` | reason | 否 | 是（deny → 继续循环） | waterfall |
-| `agent/turn_end` | status | 否 | 否 | serial |
+| `agent/turn_end` | status | 否 | 否 | serial（status ∈ completed/failed/cancelled/paused） |
 | `tools/pre_execute` | tool_name, arguments, risk_level, tool_call_id | arguments | 是（allow/deny/ask） | waterfall |
 | `tools/post_execute` | tool_name, arguments, result{success,content,error_type} | result | 是（deny → 拒绝结果替换） | waterfall |
 
@@ -40,7 +40,11 @@ waterfall 语义：handler 收到 `(ctx, next)`；`await next(payload)` 继续�
 `action=modify` 的短路式改写都会被消费方应用。
 
 serial 语义：`next=None`，顺序 await，返回值忽略；只用于 `agent/post_step`、
-`agent/turn_end` 这类纯观察事件。
+`agent/turn_end` 这类纯观察事件。serial 的 fail_closed 仍返回 deny 记录
+（观察事件没有可阻断的主流程，调用方忽略该决策）。
+
+会话口径：所有事件的 `session_id` 是**裸会话 id**（executor 会剥离
+`config.agent_id` 的 `session:` 前缀），便于 turn_* 与 tool/step 事件关联。
 
 ## 插入点（真实边界，不是事件名的装饰）
 
@@ -50,7 +54,7 @@ serial 语义：`next=None`，顺序 await，返回值忽略；只用于 `agent/
 | `agent/pre_step` | `executor.py::_execute_step_once`，messages 构建完成后、StepRunner 调用前 | **messages 只在这里存在**；loop 层看不到每步提示词 |
 | `agent/post_step` | `_execute_single_step` 与 `_execute_steps_parallel` 的步终态落点 | 与 memory/checkpoint 回写同点 |
 | `tools/pre_execute` | `_execute_step_once`，`_filter_executable_calls` 之后、`_approval_precheck` **之前** | 审批预检在 executor 且早于 registry（issue §5.5 关键修正） |
-| `tools/post_execute` | `_execute_step_once`，`raw_result` 返回后、`_ledger_result` 与 SSE 事件**之前** | ledger 记录最终结果、事件内容同步替换 |
+| `tools/post_execute` | `_execute_step_once`，`raw_result` 返回后、`_ledger_result` 与 SSE 事件**之前**；工具抛异常/超时的分支同样 emit | ledger 记录最终结果、事件内容同步替换 |
 
 审批顺序（安全关键）：`tools/pre_execute` 的 `ask` 通过
 `_approval_precheck(forced_reasons=...)` 强制进入既有审批门——即使
@@ -65,9 +69,11 @@ serial 语义：`next=None`，顺序 await，返回值忽略；只用于 `agent/
   `docmind_hook_duration_seconds{event,hook}`；链路继续。
 - `fail_closed`：返回 deny（工具不执行 / 步骤不执行）；同样记录三件套。
 - 日志 logger 为 `docmind.hooks`，字段 event/hook/action/elapsed_ms/
-  error_type；`arguments` 经 `redact_arguments`（password/token/secret/key/
+  error_type；`arguments` 经 `redact_arguments`（password/token/secret/**key**/
   authorization/cookie/credential 等字段打码，递归）后截断 500 字符。
-  `messages`/`result` 正文不进日志。
+  `messages`/`result` 正文不进日志。HookError 的 message 与 `hook_error` SSE
+  content 只含**稳定文案 + 异常类型**，绝不拼接异常原文（异常文本可能内嵌
+  入参/密钥，原文只由 hook 自己负责记录）。
 - `hook_error` 事件新增 4 个可选字段（`hook/event_name/action/elapsed_ms`），
   并复用既有 `error_type` 字段携带失败种类（timeout/error/invalid_decision）；
   仅该事件类型序列化这些可选项——既有事件载荷零变化。`sse_event_types` 23→24。
