@@ -29,6 +29,8 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 - 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
 
 > 关于架构决策和实验数据，请参见研究仓库：[DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
+>
+> 📖 **使用手册**：[docs/USER_GUIDE.md](docs/USER_GUIDE.md) —— 5 分钟启动、配置、核心概念、API、运维与排错。
 
 ---
 
