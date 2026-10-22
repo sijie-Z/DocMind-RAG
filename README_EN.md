@@ -192,7 +192,7 @@ Query enters
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-23 endpoint modules under `/api/v1`:
+24 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|
@@ -215,6 +215,7 @@ Query enters
 | Skills | `/curated-skills` | Skill discovery & management |
 | Agent Memory | `/memory` | Short/long/working/reflective memory CRUD, semantic search |
 | Agent | `/agent` | PER Agent conversations (SSE streaming), tool calls, configuration |
+| Session Fork | `/sessions` | Session fork / seed / lineage (issue #476) |
 | Agent Commands | `/commands` | Server-side command catalog and model-free execution (/help, /status, /export, /tools) |
 | MCP | `/mcp` | MCP server status (admin, read-only) |
 | User Settings | `/user` | Personal UI preferences |
@@ -390,8 +391,8 @@ DocMind/
 │   │   ├── dependencies.py          # Dependency injection container
 │   │   ├── exceptions.py            # Custom exception hierarchy
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # Main router (23 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (23 files)
+│   │   │   ├── router.py            # Main router (24 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (24 files)
 │   │   ├── agent/                   # PER Agent core
 │   │   │   ├── loop.py              #   PER main loop
 │   │   │   ├── planner.py           #   Planner (LLM + structured rules)
@@ -457,7 +458,7 @@ DocMind/
 │   │   │   ├── context_compressor.py #  Context compression
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (21 services)
+│   │   ├── services/                # Business service layer (23 services)
 │   │   ├── models/                  # ORM models (18 model files)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer

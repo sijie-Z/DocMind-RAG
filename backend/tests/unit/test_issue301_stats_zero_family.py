@@ -699,6 +699,7 @@ async def test_normal_paths_reflect_real_counts(client: TestClient):
                 ChatMessage(
                     id=str(uuid.uuid4()),
                     session_id=sess55[0].id,
+                    seq=i + 1,
                     content=f"m{i}",
                     message_type=MessageType.USER,
                 )

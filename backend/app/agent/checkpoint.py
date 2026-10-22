@@ -255,11 +255,16 @@ async def create_task(
     user_id: int,
     organization_id: int | None,
     query: str,
+    session_id: str | None = None,
 ) -> str | None:
     """建一条 RUNNING 的任务行（chat 起点）。失败返回 None——聊天绝不因它失败。
 
     task.id（uuid4 hex 12）同时作为 ctx.task_id 与 `agent:replay:{task_id}`
     的命名空间：三处同名才能指向同一个 run。
+
+    issue #476：``session_id`` 把 run 绑定到聊天会话——fork 的"源会话是否有
+    运行中任务"判定与 checkpoint 克隆都按这一列关联（信封里的 session_id
+    不是可查询列，不能用于 SQL 过滤）。
     """
     try:
         async with AsyncSessionLocal() as db:
@@ -267,6 +272,7 @@ async def create_task(
                 id=uuid.uuid4().hex[:12],
                 user_id=user_id,
                 organization_id=organization_id,
+                session_id=session_id or None,
                 query=query,
                 # 显式给 PENDING（列默认值要到 flush 才生效），再经状态机进 RUNNING：
                 # 本版没有排队语义，"PENDING 瞬时"。

@@ -352,6 +352,8 @@ async def seed_demo_data(
             status=ChatSessionStatus.ACTIVE,
             message_count=len(DEMO_CONVERSATION["messages"]),
             last_message_at=now,
+            # issue #476：根会话 = 自身（fork 子会话才指向最初会话）。
+            root_session_id=session_id,
         )
         db.add(session)
 
@@ -364,6 +366,7 @@ async def seed_demo_data(
             msg = ChatMessage(
                 id=str(uuid.uuid4()),
                 session_id=session_id,
+                seq=i + 1,
                 content=msg_data["content"],
                 message_type=msg_data["type"],
                 meta_data=(

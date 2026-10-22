@@ -1199,7 +1199,7 @@ async def get_conversation_history(
         stmt = (
             select(ChatMessage)
             .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at.asc())
+            .order_by(ChatMessage.seq.asc(), ChatMessage.created_at.asc())
             .limit(limit)
         )
         result = await session.execute(stmt)

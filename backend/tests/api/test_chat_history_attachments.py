@@ -147,6 +147,7 @@ def _make_message(*, message_id, meta_data, message_type=MessageType.USER):
     return ChatMessage(
         id=message_id,
         session_id="conv-1",
+        seq=1,
         content="消息内容",
         message_type=message_type,
         meta_data=json.dumps(meta_data) if isinstance(meta_data, dict) else meta_data,

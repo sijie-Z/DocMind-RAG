@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **会话 Fork / Seed / 谱系（#476）**：新增 `POST /api/v1/sessions/{id}/fork`
+  与 `GET /api/v1/sessions/{id}/lineage`。fork 只能落在已结算轮次（前缀以
+  assistant 结尾或为空；assistant 中间消息 / 开放轮次 409），复制前缀消息并
+  在子会话内重新编号 `seq`；`ChatSession` 增加 `parent_session_id` /
+  `root_session_id` / `fork_point_message_id` / `fork_reason` 谱系字段，
+  `ChatMessage` 增加会话内单调 `seq`（唯一约束，存量按 `created_at,id` 回填）。
+  子会话使用独立记忆命名空间（`session:<id>`，默认不复制母记忆，可选 `seed`
+  种子）；`include_checkpoint` 可深拷最近一个已结算 checkpoint 为新
+  `PAUSED` 任务（可 resume，`run.fork_origin` 记录来源；待审批/执行中工具拒绝）。
+  `Idempotency-Key` 幂等、单次复制 2000 条上限、跨组织/越权 404、操作审计。
 - **首页首屏「开始做事」与注册后 4 步引导（#416）**：首页第一屏改为
   「新对话 / 上传文档 / 创建 Agent」三入口 + 最近会话列表，统计卡整体下移
   （不删除）；新用户首页展示 4 步清单（连模型 → 建知识库 → 传文档 → 首次问答），

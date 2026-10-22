@@ -2,13 +2,14 @@
 
 沿 A3 迁移测试的 ScriptDirectory + 临时 sqlite 做法，不依赖 MySQL/Redis/ES：
 
-- 迁移链必须单头，且新 head 是 ``011_organization_settings``；
-- 从 ``010_agent_tool_calls`` 升级到 head 后：
+- 迁移链必须单头，且 011 仍在链上、直接接在 010 之后（新 head 会随迁移
+  演进而后移——issue #476 之后是 012_session_fork）；
+- 从 ``010_agent_tool_calls`` 升级到 ``011_organization_settings`` 后：
   * ``organization_settings`` 表存在且列齐全、organization_id 唯一；
   * ``prompt_templates.scope`` 列存在（server_default='organization'），
     且 ``is_system=1`` 的历史行被回填为 ``system``，其余为 ``organization``；
 - downgrade 回 ``010_agent_tool_calls``：新表与新列都被删除，业务数据原样保留；
-- 再 upgrade 到 head：双级往返可重放。
+- 再 upgrade 到 011：双级往返可重放。
 """
 
 import sqlite3
@@ -22,7 +23,6 @@ from alembic import command
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 PREV_REV = "010_agent_tool_calls"
 NEW_REV = "011_organization_settings"
-
 ORG_SETTINGS_COLUMNS = {
     "id",
     "organization_id",
@@ -99,12 +99,14 @@ def test_b4_migration_single_head_and_two_way_round_trip(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
     cfg = _cfg()
 
-    # ── 1. 迁移链：单头 + 新 revision 在链上且接在 010_agent_tool_calls 之后 ──
+    # ── 1. 迁移链：单头 + 011 在链上且直接接在 010_agent_tool_calls 之后 ──
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
     assert len(heads) == 1, f"迁移必须单头，实际 {heads}"
-    assert heads == [NEW_REV], f"head 必须是 {NEW_REV}，实际 {heads}"
     chain = [rev.revision for rev in script.iterate_revisions(heads[0], "base")]
+    # head 随迁移演进后移（issue #476 之后是 012_session_fork）：只钉"单头 +
+    # 011 仍在链上且紧接 010"，不再把 011 钉成永久 head。
+    assert NEW_REV in chain, f"{NEW_REV} 必须仍在链上，实际 {chain}"
     assert PREV_REV in chain, f"{PREV_REV} 必须仍在链上，实际 {chain}"
     assert chain.index(PREV_REV) == chain.index(NEW_REV) + 1, (
         f"011 必须直接接在 {PREV_REV} 之后，实际链 {chain}"

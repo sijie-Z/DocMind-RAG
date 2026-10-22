@@ -25,6 +25,7 @@ from app.core.security import require_organization
 from app.exceptions import AuthorizationError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.user import User
+from app.services.chat_seq import next_message_seq
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +232,8 @@ async def save_session_interaction(
                     title=query[:80],
                     status=ChatSessionStatus.ACTIVE,
                     organization_id=organization_id,
+                    # issue #476：根会话 = 自身（fork 子会话才指向最初会话）。
+                    root_session_id=session_id,
                 )
                 session.add(new_session)
             elif (
@@ -253,9 +256,15 @@ async def save_session_interaction(
                 # 只补空值，绝不改写已记录的非空组织。
                 existing.organization_id = organization_id
 
+            # issue #476：会话内单调 seq（唯一约束 (session_id, seq)）。先分配
+            # user 的序号，assistant 顺延 +1 —— 两次分配在同一事务里，autoflush
+            # 让第二次的 max 查询看得到第一条待插入消息；MySQL 上行锁由
+            # next_message_seq 负责。
+            base_seq = await next_message_seq(session, session_id)
             user_msg = ChatMessage(
                 id=str(uuid.uuid4()),
                 session_id=session_id,
+                seq=base_seq,
                 content=query,
                 message_type=MessageType.USER,
             )
@@ -267,6 +276,7 @@ async def save_session_interaction(
                 assistant_msg = ChatMessage(
                     id=assistant_msg_id,
                     session_id=session_id,
+                    seq=base_seq + 1,
                     content=assistant_response,
                     message_type=MessageType.ASSISTANT,
                 )

@@ -4,6 +4,7 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
+> - 关键数字（33 个内置工具 / 23 个端点模块 / 34 条前端路由 / 20 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
 > - 关键数字（33 个内置工具 / 23 个端点模块 / 34 条前端路由 / 23 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
@@ -629,7 +630,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 
 ### 5.2 端点模块清单
 
-当前共 **23 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `include_router` 调用数派生）：
+当前共 **24 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `include_router` 调用数派生）：
 
 | 模块 | 前缀 | 说明 |
 |------|------|------|
@@ -654,10 +655,33 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | commands | `/api/v1/commands` | 服务端命令清单与无模型轮次执行（`/help`、`/status`、`/export`、`/tools`） |
 | mcp | `/api/v1/mcp` | MCP 服务器状态（管理员只读） |
 | scheduled_tasks | `/api/v1/scheduled-tasks` | 定时任务 CRUD / 暂停 / 手动触发 |
+| sessions | `/api/v1/sessions` | 会话 fork / seed / 谱系（issue #476） |
 | demo | `/api/v1/demo` | 演示数据填充 |
 | user_settings | `/api/v1/user` | 个人 UI 偏好 |
 
 完整交互文档以运行中的 Swagger 为准：`http://localhost:8000/docs`（OpenAPI：`/api/v1/openapi.json`）。
+
+### 5.2.1 会话分叉 API（issue #476）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/sessions/{id}/fork` | 从已结算边界分叉子会话 |
+| GET | `/api/v1/sessions/{id}/lineage` | 祖先链（根→父）+ 直接子级 + 谱系元数据 |
+
+`fork` 请求体（全部可选）：`message_id`（边界消息；ASSISTANT=复制到该消息为止，
+USER=在该消息之前分叉；默认最后一条已结算消息）、`title`、`include_checkpoint`
+（深拷最近一个已结算 checkpoint 为新 PAUSED 任务，可 resume）、`seed`（写入子会话
+独立记忆命名空间的种子内容）、`reason`。幂等：请求头 `Idempotency-Key`，顺序重试
+返回同一子会话（并发同键不保证）。
+
+错误码：`404`（会话/边界消息不存在、他人或跨组织，统一不泄露归属）、
+`409`（`FORK_BOUNDARY_INVALID` / `FORK_QUOTA_EXCEEDED` / `FORK_CHECKPOINT_REQUIRED` /
+`FORK_CHECKPOINT_UNAVAILABLE`）、`400`（seed 超长）。
+
+谱系字段：`parent_session_id` / `root_session_id` / `fork_point_message_id` /
+`fork_reason` / `is_fork` / `is_seeded`（会话列表/详情与 `lineage` 均返回）。
+fork 只能落在已结算轮次（复制前缀以 assistant 结尾或为空；assistant 中间消息与
+开放轮次 409）；复制消息在子会话内重新编号 `seq`；默认不复制母记忆。
 
 ### 5.3 常见请求示例
 

@@ -205,6 +205,9 @@ async def get_conversations(
     page: int = 1,
     page_size: int = 20,
     search: str | None = Query(None, max_length=100, description="按标题模糊过滤"),
+    # 普通默认值即为查询参数；不用 Query(None)，否则直接调用（单测）会拿到
+    # Query 对象而不是 None（issue #476 评审口径）。
+    parent_session_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -215,6 +218,9 @@ async def get_conversations(
     try:
         skip = (page - 1) * page_size
         conditions = session_visibility_conditions(current_user, org_id)
+        # issue #476：列表支持按母会话过滤（前端谱系/分支视图）。
+        if parent_session_id:
+            conditions.append(ChatSession.parent_session_id == parent_session_id)
         # B30：前端搜索框一直发送 search 参数（A_sweep CONV-2 实测），端点此前
         # 未声明该参数、被 FastAPI 静默忽略 → 列表恒全量。对标题做大小写不敏感
         # LIKE；%/_/\ 转义防止通配注入（escape 字符为反斜杠）。max_length=100 校验。
@@ -285,6 +291,17 @@ async def get_conversations(
                     "last_message": last_msg_content,
                     "created_at": s.created_at.isoformat() if s.created_at else "",
                     "updated_at": s.updated_at.isoformat() if s.updated_at else "",
+                    # issue #476：谱系字段（前端徽标 / 分支过滤）
+                    "parent_session_id": s.parent_session_id,
+                    "root_session_id": s.root_session_id or s.id,
+                    "fork_point_message_id": s.fork_point_message_id,
+                    "fork_reason": s.fork_reason,
+                    "is_fork": s.parent_session_id is not None,
+                    "is_seeded": bool(
+                        isinstance(s.settings, dict)
+                        and isinstance(s.settings.get("fork"), dict)
+                        and s.settings["fork"].get("is_seeded")
+                    ),
                 }
             )
 
@@ -312,6 +329,8 @@ async def create_conversation(
             user_id=current_user.id,
             title=title,
             status=ChatSessionStatus.ACTIVE,
+            # issue #476：根会话 = 自身（fork 子会话才指向最初会话）。
+            root_session_id=conv_id,
             # T4：与按 id 访问/<agent/sessions> 同一有效组织口径（含 token
             # 组织回退），不用裸 organization_id——否则回退用户的新会话落
             # NULL，随后按「历史会话」规则对任意组织上下文可见。
@@ -464,7 +483,7 @@ async def get_conversation(
         msg_stmt = (
             select(ChatMessage)
             .where(ChatMessage.session_id == conversation_id)
-            .order_by(ChatMessage.created_at.asc())
+            .order_by(ChatMessage.seq.asc(), ChatMessage.created_at.asc())
         )
         messages = (await db.execute(msg_stmt)).scalars().all()
 
@@ -542,6 +561,9 @@ async def get_conversation(
                     )
             formatted_messages.append(msg_dict)
 
+        fork_meta = session.settings.get("fork") if isinstance(session.settings, dict) else None
+        if not isinstance(fork_meta, dict):
+            fork_meta = {}
         return {
             "success": True,
             "message": "获取成功",
@@ -554,6 +576,13 @@ async def get_conversation(
                 # 不含 settings —— 前端 isBoundMode 恒 false，「仅文档模式」标签与解绑
                 # 入口永不出现。此处如实下发（非 dict 时给 {}）。
                 "settings": session.settings if isinstance(session.settings, dict) else {},
+                # issue #476：谱系元数据（前端消息级分叉入口 / 谱系徽标）
+                "parent_session_id": session.parent_session_id,
+                "root_session_id": session.root_session_id or session.id,
+                "fork_point_message_id": session.fork_point_message_id,
+                "fork_reason": session.fork_reason,
+                "is_fork": session.parent_session_id is not None,
+                "is_seeded": bool(fork_meta.get("is_seeded")),
                 "created_at": session.created_at.isoformat() if session.created_at else "",
                 "updated_at": session.updated_at.isoformat() if session.updated_at else "",
             },
