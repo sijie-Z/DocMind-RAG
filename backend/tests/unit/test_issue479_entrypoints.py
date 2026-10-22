@@ -1,0 +1,148 @@
+"""``python -m app`` CLI 与入口验收（issue #479 §5.5 / §8）。
+
+全部用子进程执行，避免 CLI 的配置缓存/import 顺序影响测试进程；环境变量显式
+给出 ``SECRET_KEY`` / ``JWT_SECRET_KEY`` / ``DATABASE_URL`` / ``DEEPSEEK_API_KEY``，
+``cwd=backend`` 保证 ``python -m app`` 可导入。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+
+_BASE_ENV = {
+    "SECRET_KEY": "a" * 32,
+    "JWT_SECRET_KEY": "b" * 32,
+    "DATABASE_URL": "mysql+asyncmy://docmind:secret@localhost:3306/docmind",
+    "DEEPSEEK_API_KEY": "sk-test-secret",
+}
+
+
+def _env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.update(_BASE_ENV)
+    env["PYTHONUTF8"] = "1"
+    return env
+
+
+def _run(*args: str, timeout: int = 240) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "app", *args],
+        cwd=BACKEND_DIR,
+        env=_env(),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=timeout,
+    )
+
+
+def test_acp_stub_exits_2():
+    result = _run("--profile", "acp")
+    assert result.returncode == 2
+    assert "acp entrypoint not implemented" in result.stderr
+
+
+def test_headless_dry_run_requires_no_http_or_llm():
+    result = _run(
+        "--profile",
+        "headless",
+        "--query",
+        "ping",
+        "--user-id",
+        "1",
+        "--org-id",
+        "1",
+        "--json",
+        "--dry-run",
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == {"status": "ready"}
+
+
+def test_headless_missing_ids_exits_2():
+    result = _run("--profile", "headless", "--query", "ping")
+    assert result.returncode == 2
+    assert "--user-id" in result.stderr or "--org-id" in result.stderr
+
+
+def test_web_dump_config_is_sorted_masked_and_deterministic():
+    first = _run("--profile", "web", "--dump-config")
+    second = _run("--profile", "web", "--dump-config")
+    assert first.returncode == 0, first.stderr
+    assert second.returncode == 0, second.stderr
+    # 确定性：同一 profile + env 两次输出逐字节一致。
+    assert first.stdout == second.stdout
+
+    payload = json.loads(first.stdout)
+    assert list(payload) == sorted(payload)
+    assert payload["profile"] == "web"
+    assert payload["entrypoint"] == "web"
+    assert payload["bundles"] == ["core", "rag", "agent", "observability"]
+    settings = payload["settings"]
+    assert list(settings) == sorted(settings)
+    assert settings["DEEPSEEK_API_KEY"] == "***"
+    assert settings["JWT_SECRET_KEY"] == "***"
+    assert settings["DATABASE_URL"] == "mysql+asyncmy://docmind:***@localhost:3306/docmind"
+    assert "secret@localhost" not in first.stdout
+
+
+def test_worker_dump_config():
+    result = _run("--profile", "worker", "--dump-config")
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["profile"] == "worker"
+    assert payload["entrypoint"] == "worker"
+
+
+def test_unknown_profile_exits_2_with_config_error_json():
+    result = _run("--profile", "nope")
+    assert result.returncode == 2
+    lines = [line for line in result.stderr.strip().splitlines() if line.startswith("{")]
+    assert lines, result.stderr
+    payload = json.loads(lines[-1])
+    assert payload["error"] == "CONFIG_INVALID"
+    assert payload["path"] == "profile.nope"
+
+
+def _mounted_prefixes(router) -> set[str]:
+    """收集 APIRouter 挂载的路径前缀（兼容 FastAPI 新旧 include 实现）。
+
+    FastAPI ≥0.142 把 include_router 记为惰性 ``_IncludedRouter``（带
+    ``include_context.prefix``）；旧版本直接展开为带完整 path 的路由记录。
+    """
+    prefixes: set[str] = set()
+    for route in router.routes:
+        context = getattr(route, "include_context", None)
+        prefix = getattr(context, "prefix", None)
+        if prefix:
+            prefixes.add(prefix)
+            continue
+        path = getattr(route, "path", "")
+        if path and path.startswith("/"):
+            prefixes.add("/" + path.split("/")[1])
+    return prefixes
+
+
+def test_build_router_filters_by_bundle():
+    """headless/sdk 只挂 core/rag/agent；core-only 必须不含 observability/rag。"""
+    from app.api.v1.router import build_router
+
+    core_prefixes = _mounted_prefixes(build_router(["core"]))
+    assert "/auth" in core_prefixes
+    assert "/users" in core_prefixes
+    assert "/user" in core_prefixes
+    assert "/monitoring" not in core_prefixes
+    assert "/documents" not in core_prefixes
+
+    assert _mounted_prefixes(build_router([])) == set()
+
+    with pytest.raises(ValueError):
+        build_router(["nope"])
