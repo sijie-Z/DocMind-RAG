@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import math
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -11,12 +12,14 @@ from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.core.prometheus import RAG_RETRIEVAL_UNAVAILABLE
+from app.core.config import settings
+from app.core.prometheus import RAG_RELEVANCE_GATE_TOTAL, RAG_RETRIEVAL_UNAVAILABLE
 from app.exceptions import AuthorizationError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.prompt import PromptTemplate
 from app.rag.cache import SemanticCache
 from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError
+from app.rag.pipeline import no_context_system_prompt
 from app.services.memory_service import get_memory_system
 from app.services.organization_settings_service import (
     organization_settings_service,
@@ -63,7 +66,7 @@ LLM_NOT_CONFIGURED_MESSAGE = (
 
 @dataclass
 class RAGEvent:
-    type: str  # "chunk", "message", "cache_hit", "debug"
+    type: str  # "chunk", "message", "error", "cache_hit", "debug"
     content: str = ""
     conversation_id: str = ""
     message_id: str = ""
@@ -76,9 +79,9 @@ def build_sources_list(context_results: list[dict]) -> list[dict]:
     """把检索结果转为前端来源卡片契约。
 
     issue #185：分数必须**可证伪**——
-    - ``relevanceScore``：重排器绝对分（local CE logit / zhipu relevance_score）；
-      无重排分时为 None。绝不回填 rank 分（修前把它乘 100 当「相关度 %」展示，
-      而它是批内 min-max，榜首恒 ~1.0）。
+    - ``relevanceScore``：重排器绝对分（local CE logit / zhipu relevance_score /
+      LLM 兜底自报 0–10）；无重排分时为 None。绝不回填 rank 分（修前把它乘 100
+      当「相关度 %」展示，而它是批内 min-max，榜首恒 ~1.0）。
     - ``rankScore``：融合阶段相对排序分（只用于排序/序位，不是相关度）。
     - ``rank``：最终顺序的 1-based 序位（UI 展示「排序 #N」）。
     - ``pageNumber``：PDF 来源的页码；非 PDF / 旧索引为 None（issue #197）。
@@ -102,6 +105,29 @@ def build_sources_list(context_results: list[dict]) -> list[dict]:
             }
         )
     return sources
+
+
+def _top_relevance_score(context_results: list[dict]) -> float | None:
+    """检索结果的最高重排绝对分；无任何可用分数时返回 None（fail-open 判据）。
+
+    issue #209：只认 pipeline 写入的 ``relevance_score``（重排器绝对分）。
+    绝不回退 ``score``/``rank_score``——那是批内 min-max 相对分，榜首恒 ~1.0，
+    拿它做阈值会恒真。
+    """
+    scores: list[float] = []
+    for r in context_results:
+        value = r.get("relevance_score")
+        if value is None:
+            continue
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            continue
+        # 非有限值（NaN/Inf）不等于「有效低分」：NaN 与阈值比较恒 False，
+        # 会被误记为 pass；按无分数处理，走 fail-open + 观测。
+        if math.isfinite(score):
+            scores.append(score)
+    return max(scores) if scores else None
 
 
 async def get_or_create_session(
@@ -452,6 +478,68 @@ async def run_rag_pipeline(
             )
             return
 
+    # ── issue #209：检索不合格 → 拒答闸门 ─────────────────────────────
+    # 位置刻意在 chat 链路（检索之后、build_sources_list/生成之前），**不**进
+    # 共享的 search_knowledge_base —— REST search / agent / workflow 共用该入口，
+    # 在那里静默清空结果会是回归。
+    # 判据是重排后的绝对分（pipeline 写入的 relevance_score），不是融合阶段的
+    # rank 分（批内 min-max，榜首恒 ~1.0，做阈值会恒真）。
+    # - 阈值 None（默认）：闸门不介入（行为与修前一致；提示词条款另行加固）；
+    # - 重排器没产出分数（降级/关闭/仅顺序）：fail-open 放行 + 指标留痕；
+    # - 低于阈值：strict 直接拒答（零 LLM 调用）；非 strict 清空上下文走既有
+    #   has_context=False 通用分支（sources 为空、groundedness 记未命中）。
+    gate_threshold = settings.RAG_RELEVANCE_GATE_THRESHOLD
+    gate_refused = False
+    if gate_threshold is not None and context_results and retrieval_unavailable is None:
+        top_relevance = _top_relevance_score(context_results)
+        if top_relevance is None:
+            RAG_RELEVANCE_GATE_TOTAL.labels(outcome="fail_open_no_scores").inc()
+            logger.warning(
+                "RAG relevance gate skipped: reranker produced no scores "
+                "(org=%s, results=%d); fail-open",
+                search_org_id,
+                len(context_results),
+            )
+        elif top_relevance < gate_threshold:
+            if strict_mode:
+                RAG_RELEVANCE_GATE_TOTAL.labels(outcome="strict_refused").inc()
+                logger.info(
+                    "RAG relevance gate refused (strict, org=%s): top=%.4f threshold=%.4f",
+                    search_org_id,
+                    top_relevance,
+                    gate_threshold,
+                )
+                _emit(
+                    RAGEvent(
+                        type="error",
+                        content=(
+                            "知识库中未找到与问题足够相关的内容，"
+                            "严格模式无法在没有相关文档依据的情况下作答；"
+                            "请尝试换个问法，或联系管理员补充相关文档"
+                        ),
+                        conversation_id=conversation_id or "",
+                    )
+                )
+                return
+            RAG_RELEVANCE_GATE_TOTAL.labels(outcome="refused").inc()
+            logger.info(
+                "RAG relevance gate cleared context (non-strict, org=%s): top=%.4f threshold=%.4f",
+                search_org_id,
+                top_relevance,
+                gate_threshold,
+            )
+            gate_refused = True
+            context_results = []
+        else:
+            RAG_RELEVANCE_GATE_TOTAL.labels(outcome="pass").inc()
+        if debug and debug_info is not None:
+            debug_info["relevance_gate"] = {
+                "threshold": gate_threshold,
+                "top_relevance": top_relevance,
+                "refused": gate_refused,
+                "strict": strict_mode,
+            }
+
     if debug and debug_info:
         final_context_items = []
         for i, item in enumerate(context_results[:5], 1):
@@ -482,6 +570,13 @@ async def run_rag_pipeline(
         # 故障时强制诚实提示词：不得复用「知识库中暂无相关文档」话术
         # （含用户配置的 rag 模板 —— 模板预设「有参考文档」，故障下同样失真）。
         system_prompt_override = RETRIEVAL_UNAVAILABLE_PROMPT
+    elif gate_refused:
+        # issue #209：闸门已清空上下文，必须使用「知识库暂无相关文档」的通用
+        # 提示词（与 chat_stream 的 has_context=False 分支同一文案来源）。
+        # 不能置 None：后续记忆注入会把 None 覆盖成记忆文本，从而绕过通用分支；
+        # 也不能沿用组织 RAG 模板——模板预设「有参考文档」，会诱导模型硬答
+        # （与 #292 故障提示词同一动机：模板语义与当前事实不符时不得复用）。
+        system_prompt_override = no_context_system_prompt()
     else:
         system_prompt_override = await get_system_prompt(
             session, strict_mode, organization_id=search_org_id, user_id=user_id

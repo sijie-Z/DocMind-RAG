@@ -11,14 +11,18 @@ issue #190/#185/#189 契约（本模块的对外承诺）：
   model: str|None}``。``degraded`` 表示所有配置路径都失败、按原始顺序返回——
   不再静默（修复前全链失败零信号）。
 - 打分路径（local/zhipu）在命中上写 ``rerank_score``（绝对分，不归一化）；
-  LLM 路径只产出顺序、没有可信分数，不伪造 ``rerank_score``。
+  LLM 路径在模型按契约返回 ``[{"index","score"}]`` 时同样落 ``rerank_score``
+  （自报 0–10 分，同一次调用内产出、不增加成本）；模型只返回编号时仍只给序，
+  不伪造分数（issue #209）。
 - 配置单一真源：``RERANK_MODEL``/``RERANK_API_KEY``/``RERANK_API_URL`` 优先，
   ``RAG_RERANK_*`` 为 legacy 别名；local 模型用 ``RERANK_LOCAL_MODEL``；
   送审 passage 统一带 ``文件:<filename>`` 出处前缀。
 """
 
 import asyncio
+import json
 import logging
+import math
 import re
 import time
 from functools import lru_cache
@@ -232,6 +236,83 @@ async def _rerank_zhipu(
 
 # ── LLM-based reranker (paid fallback) ────────────────────────────
 
+# 非贪婪匹配单个方括号片段：贪婪版本会把正文里的其它方括号一并吞掉，
+# 导致 JSON 解析失败后落到「数字大杂烩」的兜底路径。
+_JSON_ARRAY_RE = re.compile(r"\[[^\[\]]*\]", re.S)
+# JSON 不合法（单引号、尾逗号等）但字段形态可辨认时的兜底抽取。
+_INDEX_SCORE_PAIR_RE = re.compile(
+    r"""['"]?index['"]?\s*:\s*['"]?(?P<idx>-?\d+(?:\.\d+)?)['"]?"""
+    r"""[^}]*?['"]?score['"]?\s*:\s*['"]?(?P<score>-?\d+(?:\.\d+)?)['"]?""",
+    re.S,
+)
+
+
+def _coerce_llm_score(value) -> float | None:
+    """LLM 自报分 → float；布尔/非数值/非有限值一律视为无分数（不伪造）。"""
+    if isinstance(value, bool):
+        return None
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    # "NaN"/"Infinity" 是合法 JSON 字符串但会污染 sources.relevanceScore
+    # （json.dumps 会输出非法 JSON 的 NaN），按无分数处理。
+    return score if math.isfinite(score) else None
+
+
+def _coerce_llm_index(value) -> int | None:
+    """候选编号 → int；只接受整数语义（2 / 2.0 / "2"），其余视为无效条目。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str):
+        try:
+            number = float(value.strip())
+        except ValueError:
+            return None
+        return int(number) if number.is_integer() else None
+    return None
+
+
+def _parse_llm_rerank(content: str) -> list[tuple[int, float | None]]:
+    """解析 LLM 重排输出为 ``[(候选编号 1-based, 自报分|None), ...]``。
+
+    issue #209：首选 JSON 数组——既接受契约的 ``[{"index","score"}]``，也兼容
+    只返回编号的 ``[3,1,2]``（不守格式的模型）。JSON 不合法（单引号/尾逗号等）
+    时按 ``index``/``score`` 字段正则抽取，最后才退化为裸编号抓取——避免把
+    「分数数字」当成候选编号排序。
+    """
+    for match in _JSON_ARRAY_RE.finditer(content):
+        try:
+            data = json.loads(match.group(0))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(data, list):
+            continue
+        parsed: list[tuple[int, float | None]] = []
+        for item in data:
+            if isinstance(item, dict):
+                idx = _coerce_llm_index(item.get("index"))
+                if idx is not None:
+                    parsed.append((idx, _coerce_llm_score(item.get("score"))))
+            else:
+                idx = _coerce_llm_index(item)
+                if idx is not None:
+                    parsed.append((idx, None))
+        if parsed:
+            return parsed
+    pairs: list[tuple[int, float]] = []
+    for m in _INDEX_SCORE_PAIR_RE.finditer(content):
+        score = _coerce_llm_score(m.group("score"))
+        if score is not None:
+            pairs.append((int(float(m.group("idx"))), score))
+    if pairs:
+        return pairs
+    return [(int(x), None) for x in re.findall(r"\d+", content)]
+
 
 async def _rerank_llm(
     query: str, candidates: list[dict], top_n: int, llm_client
@@ -248,9 +329,12 @@ async def _rerank_llm(
         brief.append(f"[{idx}] 文件:{_hit_filename(h)}\n内容:{text}")
 
     prompt = (
-        "你是检索重排器。请根据用户问题判断候选片段相关性，"
-        "只返回 JSON 数组，元素是候选编号，按相关性从高到低排序。\n\n"
-        f"用户问题: {query}\n\n候选片段:\n" + "\n\n".join(brief) + "\n\n输出示例: [3,1,2]"
+        "你是检索重排器。请根据用户问题判断候选片段相关性，按相关性从高到低排序，"
+        '只返回 JSON 数组，元素为 {"index": 候选编号, "score": 相关性分}；'
+        "score 为 0-10 的整数（10=最相关，0=完全无关）。\n\n"
+        f"用户问题: {query}\n\n候选片段:\n" + "\n\n".join(brief) + "\n\n"
+        '输出示例: [{"index": 3, "score": 9}, {"index": 1, "score": 4}, '
+        '{"index": 2, "score": 0}]'
     )
     try:
         rsp = await llm_client.chat.completions.create(
@@ -263,16 +347,20 @@ async def _rerank_llm(
             timeout=settings.RAG_RERANK_TIMEOUT_SECONDS,
         )
         content = (rsp.choices[0].message.content or "").strip()
-        nums = [int(x) for x in re.findall(r"\d+", content)]
         ordered, used = [], set()
-        for n in nums:
+        for n, score in _parse_llm_rerank(content):
             if 1 <= n <= len(candidates) and n not in used:
-                ordered.append(candidates[n - 1])
+                hit = candidates[n - 1]
+                if score is not None:
+                    # issue #209：同一次调用内让模型自报 0–10 分（不增成本）；
+                    # 口径与 local/zhipu 不同，闸门阈值必须按实际重排器校准。
+                    hit["rerank_score"] = score
+                ordered.append(hit)
                 used.add(n)
         for i, h in enumerate(candidates, 1):
             if i not in used:
                 ordered.append(h)
-        # LLM 只产出顺序，无可信数值分——不写 rerank_score（不伪造）。
+        # 只返回编号（无分数）的输出仍只给序，不伪造 rerank_score。
         return ordered, None
     except Exception as e:
         logger.warning("LLM reranker failed: %s", e)

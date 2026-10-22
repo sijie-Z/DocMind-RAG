@@ -146,6 +146,16 @@ class AISettings(BaseSettings):
     RAG_RERANK_TOP_N: int = 20
     RAG_RERANK_TIMEOUT_SECONDS: float = 8.0
 
+    # issue #209：检索不合格 → 拒答闸门（默认关闭，行为与修前一致）。
+    # 消费点只在 chat 生成链路（services/chat_service.run_rag_pipeline 检索后、
+    # 生成前），**不**进共享的 search_knowledge_base（REST/agent/workflow 共用，
+    # 静默截断会是回归）。阈值与重排绝对分同一口径：本地 CE 是原始 logit、
+    # 智谱是 relevance_score 0–1、LLM 兜底是自报 0–10 分——三种口径不可互换，
+    # 必须按**实际启用的 reranker** 用 backend/evals 金标集校准后再开启。
+    # None = 不启用闸门。NaN/Inf 在配置加载期即拒绝（否则 NaN 恒「通过」、
+    # Inf 恒「拒答」，且都没有可读信号）。
+    RAG_RELEVANCE_GATE_THRESHOLD: float | None = Field(default=None, allow_inf_nan=False)
+
     # Local cross-encoder reranker (free, no API cost)
     RERANK_USE_LOCAL: bool = True
     RERANK_LOCAL_MODEL: str = "BAAI/bge-reranker-base"

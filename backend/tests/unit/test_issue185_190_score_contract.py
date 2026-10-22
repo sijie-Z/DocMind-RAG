@@ -13,7 +13,8 @@
 - ``rerank(hits)`` → ``(hits, info)``；``info = {status: ok|degraded|disabled|empty,
   path: local|zhipu|llm|noop, reason, attempts[], scores_attached, model}``；
 - 打分路径（local/zhipu）在命中上写 ``rerank_score``（绝对分，不归一化）；
-  LLM 路径只给序、无分数（不伪造）；
+  LLM 路径在模型按 #209 契约返回 ``[{"index","score"}]`` 时同样落自报分，
+  只返回编号时不伪造；
 - pipeline 命中写 ``relevance_score``（绝对分或 None）与 ``rank_score``（相对排序分；
   旧 ``score`` 字段保留为同值别名）；
 - ``build_sources_list`` 输出 ``relevanceScore``（绝对分或 None，绝不回填 rank 分）/

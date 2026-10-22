@@ -196,6 +196,12 @@ def _build_metrics() -> dict[str, Any]:
     m["RAG_RERANK_TOTAL"] = Counter(
         "rag_rerank_total", "Total rerank operations", ["path", "outcome"]
     )
+    # issue #209：检索相关度闸门的终态口径（outcome: pass / refused /
+    # strict_refused / fail_open_no_scores）。fail_open 表示阈值已配置但重排器
+    # 没有产出绝对分（降级/关闭）——按 fail-open 放行，但绝不静默。
+    m["RAG_RELEVANCE_GATE_TOTAL"] = Counter(
+        "rag_relevance_gate_total", "RAG relevance gate decisions", ["outcome"]
+    )
     m["RAG_QUERY_INTENT"] = Counter(
         "rag_query_intent_total", "Query intent classifications", ["intent"]
     )
@@ -268,6 +274,7 @@ RAG_GROUNDED_TOTAL = _LazyMetric("RAG_GROUNDED_TOTAL")
 RAG_GROUNDED_HITS = _LazyMetric("RAG_GROUNDED_HITS")
 RAG_RERANK_LATENCY = _LazyMetric("RAG_RERANK_LATENCY")
 RAG_RERANK_TOTAL = _LazyMetric("RAG_RERANK_TOTAL")
+RAG_RELEVANCE_GATE_TOTAL = _LazyMetric("RAG_RELEVANCE_GATE_TOTAL")
 RAG_QUERY_INTENT = _LazyMetric("RAG_QUERY_INTENT")
 RAG_QUERY_REWRITE_TOTAL = _LazyMetric("RAG_QUERY_REWRITE_TOTAL")
 RAG_ADAPTIVE_STRATEGY = _LazyMetric("RAG_ADAPTIVE_STRATEGY")
