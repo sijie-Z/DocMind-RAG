@@ -369,6 +369,7 @@ def test_redact_arguments_masks_sensitive_fields():
         "password": "hunter2",
         "api_token": "tk-123",
         "SECRET": "s3cr3t",
+        "key": "plain-key-value",
         "api_key": "k-1",
         "nested": {"token": "inner", "keep": "ok"},
         "items": [{"secret_key": "x"}, {"keep": "y"}],
@@ -377,12 +378,90 @@ def test_redact_arguments_masks_sensitive_fields():
     assert out["password"] == "***"
     assert out["api_token"] == "***"
     assert out["SECRET"] == "***"
+    assert out["key"] == "***", "issue §5.6 的 key 字段必须打码（字面 key）"
     assert out["api_key"] == "***"
     assert out["nested"]["token"] == "***"
     assert out["nested"]["keep"] == "ok"
     assert out["items"][0]["secret_key"] == "***"
     assert out["items"][1]["keep"] == "y"
     assert out["query"] == "正常内容"
+
+
+@pytest.mark.asyncio
+async def test_hook_exception_text_does_not_leak_arguments(caplog):
+    """hook 抛异常时，异常文本可能内嵌入参（密钥）——不得进入 HookError/日志/SSE。"""
+    bus = HookBus()
+
+    async def boom(ctx, nxt):
+        raise ValueError(f"bad args: {ctx.payload.get('arguments')}")
+
+    bus.register(_spec("boom", event="tools/pre_execute", policy="fail_open"), boom)
+    ctx = HookContext(
+        event="tools/pre_execute",
+        payload={"tool_name": "t", "arguments": {"password": "hunter2", "q": "x"}},
+    )
+    with caplog.at_level(logging.INFO, logger="docmind.hooks"):
+        decision, errors = await bus.emit("tools/pre_execute", ctx)
+
+    assert decision.action == "allow"
+    assert errors and errors[0].error_type == "ValueError"
+    assert "hunter2" not in errors[0].message
+    assert "hunter2" not in caplog.text
+    assert "hunter2" not in hook_error_events(errors)[0].to_sse_dict()["content"]
+
+
+@pytest.mark.asyncio
+async def test_outer_timeout_does_not_rerun_downstream():
+    """外层 hook 在 next 在途时超时：下游只能启动一次（不得重复副作用）。"""
+    bus = HookBus()
+    starts: list[str] = []
+
+    async def outer(ctx, nxt):
+        await nxt(ctx.payload)
+        await asyncio.sleep(3)  # next 已启动后挂起 → 外层超时
+
+    async def downstream(ctx, nxt):
+        starts.append("downstream")
+        await asyncio.sleep(0.2)
+        return await nxt(ctx.payload)
+
+    bus.register(_spec("outer", event="tools/pre_execute", timeout=0.1, policy="fail_open"), outer)
+    bus.register(_spec("downstream", event="tools/pre_execute", priority=200), downstream)
+
+    start = time.perf_counter()
+    decision, errors = await bus.emit("tools/pre_execute", _ctx("tools/pre_execute"))
+    elapsed = time.perf_counter() - start
+
+    assert starts == ["downstream"], "下游不得因外层超时被二次执行"
+    assert decision.action == "allow"
+    assert elapsed < 1.5
+    assert any(e.hook == "outer" and e.outcome == "timeout" for e in errors)
+
+
+@pytest.mark.asyncio
+async def test_serial_fail_closed_returns_deny():
+    bus = HookBus()
+
+    async def boom(ctx, nxt):
+        raise RuntimeError("serial boom")
+
+    bus.register(_spec("s", event="agent/post_step", policy="fail_closed"), boom)
+    decision, errors = await bus.emit("agent/post_step", _ctx("agent/post_step"))
+    assert decision.action == "deny"
+    assert errors and errors[0].outcome == "error"
+
+
+@pytest.mark.asyncio
+async def test_ask_on_non_pre_execute_is_invalid_decision():
+    bus = HookBus()
+
+    async def ask_hook(ctx, nxt):
+        return HookDecision(action="ask", reason="not allowed here")
+
+    bus.register(_spec("askbad", event="agent/pre_step", policy="fail_closed"), ask_hook)
+    decision, errors = await bus.emit("agent/pre_step", _ctx("agent/pre_step"))
+    assert decision.action == "deny"
+    assert errors and errors[0].outcome == "invalid_decision"
 
 
 @pytest.mark.asyncio

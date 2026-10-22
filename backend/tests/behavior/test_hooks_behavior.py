@@ -389,8 +389,33 @@ async def test_pre_execute_ask_sticky_deny_is_not_bypassed_by_mode_never(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_pre_execute_deny_skips_approval_pause(monkeypatch, bus):
+    """hook deny 的调用不得再进入审批暂停（注定不执行的调用不该打扰人类）。"""
+
+    async def deny_hook(ctx, nxt):
+        return HookDecision(action="deny", reason="策略禁止")
+
+    bus.register(_spec("deny", "tools/pre_execute"), deny_hook)
+    execute_mock = _patch_registry(monkeypatch)
+    executor = _executor(
+        _client_with_tool_calls([("execute_python", '{"code":"1"}', "c1")]),
+        cfg=_cfg(approval_mode="always"),
+    )
+    approval_check = AsyncMock(return_value="paused")
+    executor.approval_check = approval_check
+
+    events, exc, _, _ = await _run_step_once(executor)
+
+    assert exc is None
+    assert approval_check.await_count == 0, "deny 的调用不得触发审批暂停"
+    assert execute_mock.await_count == 0
+    errs = [e for e in events if e.type == "tool_error"]
+    assert errs and errs[0].error_type == "hook_denied"
+
+
+@pytest.mark.asyncio
 async def test_pre_execute_ask_approved_executes(monkeypatch, bus):
-    """ask → 人类批准（粘滞 approve）→ handler 收到（改写后）参数并执行。"""
+    """ask → 首次暂停（审批通道被调用）→ 粘滞 approve 后执行且不再暂停。"""
 
     async def ask_hook(ctx, nxt):
         return HookDecision(action="ask", reason="需要人工确认")
@@ -401,8 +426,17 @@ async def test_pre_execute_ask_approved_executes(monkeypatch, bus):
         _client_with_tool_calls([("fetch_webpage", '{"url":"https://x"}', "c1")]),
         cfg=_cfg(approval_mode="never"),
     )
-    executor.approval_check = AsyncMock(return_value="paused")
+    approval_check = AsyncMock(return_value="paused")
+    executor.approval_check = approval_check
     args = {"url": "https://x"}
+
+    # 第一次：无粘滞决定 → 必须暂停（证明 forced 接线真实生效）。
+    _, first_exc, _, _ = await _run_step_once(executor)
+    assert isinstance(first_exc, approval.ApprovalRequired)
+    assert approval_check.await_count == 1
+    assert execute_mock.await_count == 0
+
+    # 人类批准（粘滞 approve）→ 第二次执行通过且不再暂停。
     executor.approval_decisions = [
         {
             "tool_name": "fetch_webpage",
@@ -410,12 +444,35 @@ async def test_pre_execute_ask_approved_executes(monkeypatch, bus):
             "decision": "approve",
         }
     ]
-
     events, exc, _, _ = await _run_step_once(executor)
 
     assert exc is None
     assert execute_mock.await_count == 1
     assert execute_mock.await_args.args[1] == args
+    assert approval_check.await_count == 1, "粘滞 approve 不应再次暂停"
+
+
+@pytest.mark.asyncio
+async def test_pre_execute_ask_degraded_denies(monkeypatch, bus):
+    """ask 强制审批但审批服务不可用（降级）→ 绝不静默执行。"""
+
+    async def ask_hook(ctx, nxt):
+        return HookDecision(action="ask", reason="需要人工确认")
+
+    bus.register(_spec("ask", "tools/pre_execute"), ask_hook)
+    execute_mock = _patch_registry(monkeypatch)
+    executor = _executor(
+        _client_with_tool_calls([("fetch_webpage", '{"url":"https://x"}', "c1")]),
+        cfg=_cfg(approval_mode="never"),
+    )
+    executor.approval_check = AsyncMock(return_value="unavailable")
+
+    events, exc, _, _ = await _run_step_once(executor)
+
+    assert exc is None
+    assert execute_mock.await_count == 0
+    errs = [e for e in events if e.type == "tool_error"]
+    assert errs and errs[0].error_type == "approval_unavailable"
 
 
 # ── tools/post_execute ──────────────────────────────────────────────────────
@@ -711,6 +768,31 @@ async def test_turn_stopping_deny_is_bounded(bus):
     from app.agent.loop import HOOK_TURN_STOPPING_MAX_DENIALS
 
     assert loop._planner.calls == HOOK_TURN_STOPPING_MAX_DENIALS + 1
+
+
+@pytest.mark.asyncio
+async def test_turn_end_emitted_on_cancel(bus):
+    """取消也是轮次结束：turn_start/turn_end 必须成对（status=cancelled）。"""
+    seen: list[tuple[str, object]] = []
+
+    async def recorder(ctx, nxt):
+        seen.append((ctx.event, ctx.payload.get("status")))
+        return await nxt(ctx.payload)
+
+    bus.register(_spec("rec_start", "agent/turn_start"), recorder)
+    bus.register(_spec("rec_end", "agent/turn_end"), recorder)
+
+    loop = _make_loop()
+
+    async def _cancel():
+        return True
+
+    loop.cancel_check = _cancel
+    events = await _drive_loop(loop)
+
+    assert ("agent/turn_start", None) in seen
+    assert ("agent/turn_end", "cancelled") in seen
+    assert any(e.type == "run_cancelled" for e in events)
 
 
 # ── SSE 事件字段 ────────────────────────────────────────────────────────────

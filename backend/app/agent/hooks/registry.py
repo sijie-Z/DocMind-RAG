@@ -191,10 +191,12 @@ class HookBus:
             # 下游 handler 通过 ctx 读取当前 payload（签名只有 (ctx, next)）：
             # next(payload) 的语义 = 用新 payload 继续链路。
             ctx.payload = next_payload
+            # 先置位再 await：若外层 hook 在本调用在途时超时，下游已经启动，
+            # 失败收敛不得再次调用 next（否则下游副作用重复执行）。
+            state["called_next"] = True
             result = await self._emit_waterfall(
                 event, ctx, handlers, index + 1, next_payload, errors
             )
-            state["called_next"] = True
             state["next_result"] = result
             return result
 
@@ -211,13 +213,18 @@ class HookBus:
                 errors,
                 outcome="timeout",
                 error_type="timeout",
-                message=f"hook {spec.name} 执行超时（{spec.timeout_seconds}s）",
+                message=(
+                    f"hook {spec.name} 执行超时（{spec.timeout_seconds}s），"
+                    f"已按 {spec.failure_policy} 处理"
+                ),
                 elapsed_ms=int((time.perf_counter() - start) * 1000),
                 payload=payload,
                 state=state,
                 next_call=next_call,
             )
         except Exception as exc:  # noqa: BLE001 — 单 hook 故障必须隔离
+            # 只暴露异常类型：异常文本可能内嵌 hook 入参（密钥等），绝不进入
+            # SSE content / 日志 message；详细信息由 hook 自己负责记录。
             return await self._handle_failure(
                 spec,
                 event,
@@ -225,7 +232,10 @@ class HookBus:
                 errors,
                 outcome="error",
                 error_type=type(exc).__name__,
-                message=f"{type(exc).__name__}: {exc}"[:300],
+                message=(
+                    f"hook {spec.name} 执行失败（{type(exc).__name__}），"
+                    f"已按 {spec.failure_policy} 处理"
+                ),
                 elapsed_ms=int((time.perf_counter() - start) * 1000),
                 payload=payload,
                 state=state,
@@ -317,9 +327,14 @@ class HookBus:
         )
         if spec.failure_policy == "fail_closed":
             return HookDecision(action="deny", reason=f"hook {spec.name} {message}（fail_closed）")
-        if state["called_next"] and state["next_result"] is not None:
-            # next 已经执行过（下游副作用已发生）——不得二次执行，直接沿用其结果。
-            return state["next_result"]
+        if state["called_next"]:
+            # next 已经启动过：绝不二次执行下游链路（重复副作用）。
+            # - next 已正常返回：沿用其最终决策；
+            # - next 在途时被外层超时取消：没有可恢复的结果，按 allow 收敛
+            #   （失败已记录为 HookError，不静默）。
+            if state["next_result"] is not None:
+                return state["next_result"]
+            return HookDecision(action="allow", payload=payload)
         # fail_open：继续链路（由下一个 hook 接力；没有下一个则 allow）。
         return await next_call(payload)
 
@@ -341,7 +356,10 @@ class HookBus:
                     action=spec.failure_policy,
                     outcome="timeout",
                     error_type="timeout",
-                    message=f"hook {spec.name} 执行超时（{spec.timeout_seconds}s）",
+                    message=(
+                        f"hook {spec.name} 执行超时（{spec.timeout_seconds}s），"
+                        f"已按 {spec.failure_policy} 处理"
+                    ),
                     elapsed_ms=int((time.perf_counter() - start) * 1000),
                 )
                 self._record_serial_failure(spec, event, ctx, errors, error)
@@ -351,13 +369,17 @@ class HookBus:
                     )
                 continue
             except Exception as exc:  # noqa: BLE001
+                # 只暴露异常类型（异常文本可能内嵌入参/密钥，不进 SSE/日志 message）。
                 error = HookError(
                     hook=spec.name,
                     event=event,
                     action=spec.failure_policy,
                     outcome="error",
                     error_type=type(exc).__name__,
-                    message=f"{type(exc).__name__}: {exc}"[:300],
+                    message=(
+                        f"hook {spec.name} 执行失败（{type(exc).__name__}），"
+                        f"已按 {spec.failure_policy} 处理"
+                    ),
                     elapsed_ms=int((time.perf_counter() - start) * 1000),
                 )
                 self._record_serial_failure(spec, event, ctx, errors, error)

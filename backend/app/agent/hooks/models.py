@@ -9,7 +9,8 @@
 - ``HookDecision``：waterfall 链的最终决策。action 取值在 issue §5.2 的
   ``allow/deny/modify`` 之上**扩展了 ``ask``** —— §5.3 与 §8 的验收明确要求
   ``tools/pre_execute`` 可以返回 ask 强制进入人工审批门；若按 §5.2 的
-  Literal 封闭，ask 无路可走。其它事件类型收到 ask 由总线降级为 deny。
+  Literal 封闭，ask 无路可走。其它事件类型收到 ask 视为**非法决策**，按该
+  hook 的 ``failure_policy`` 处理（fail_open 放行 / fail_closed 拒绝）。
 - ``HookSpec``：hooks.yaml/代码注册的统一定义；``order`` 是注册序号（同
   priority 时按注册顺序稳定排序，由总线维护）。
 - ``HookError``：单个 hook 的超时/异常/非法决策记录，供 SSE ``hook_error``
@@ -60,8 +61,9 @@ HOOK_MODULE_PATTERN = re.compile(
 HOOK_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
 
 # 参数脱敏（issue #474 §5.6）：至少 password/token/secret/key 字段打码。
+# `key` 单独成词也命中（如 {"key": "..."}）；宁可多打码，不可漏。
 _SENSITIVE_KEY = re.compile(
-    r"(password|passwd|token|secret|api[_-]?key|access[_-]?key|private[_-]?key"
+    r"(password|passwd|token|secret|key"
     r"|authorization|cookie|credential)",
     re.IGNORECASE,
 )

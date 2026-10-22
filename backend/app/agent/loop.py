@@ -312,6 +312,23 @@ class PERAgentLoop:
             return agent_hooks.HookDecision(), []
         return decision, agent_hooks.hook_error_events(errors)
 
+    async def _emit_turn_end(
+        self,
+        status: str,
+        *,
+        task_id: str | None,
+        session_id: str | None,
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """agent/turn_end（serial 观察）：正常完成、失败、取消、暂停都成对发出。"""
+        _, errors = await self._emit_hook_event(
+            agent_hooks.AGENT_TURN_END,
+            {"session_id": session_id, "task_id": task_id, "status": status},
+            task_id=task_id,
+            session_id=session_id,
+        )
+        for hook_event in errors:
+            yield hook_event
+
     async def run(
         self,
         query: str,
@@ -630,6 +647,10 @@ class PERAgentLoop:
             async for plan_event in self._pause_for_plan_approval(resume_plan, run_state_live):
                 yield plan_event
             if self.paused_for_plan_approval:
+                async for end_event in self._emit_turn_end(
+                    "paused", task_id=task_id, session_id=session_id
+                ):
+                    yield end_event
                 return
 
         # ── Phase 1–3: 规划 → 执行 → 反思（含有界重新规划）────────────────
@@ -649,6 +670,10 @@ class PERAgentLoop:
                 yield cancel_event
                 await self._save_checkpoint("cancelled")
                 self.run_cancelled = True
+                async for end_event in self._emit_turn_end(
+                    "cancelled", task_id=task_id, session_id=session_id
+                ):
+                    yield end_event
                 return
 
             # ── Phase 1: Planning ────────────────────────────────────────
@@ -748,6 +773,10 @@ class PERAgentLoop:
                     # 本 run 平静结束——绝不给 service 任何"完成"信号，也不置终态。
                     self.paused_for_approval = True
                     self.pending_approval = req.request.to_dict()
+                    async for end_event in self._emit_turn_end(
+                        "paused", task_id=task_id, session_id=session_id
+                    ):
+                        yield end_event
                     return
                 except approval.RunCancelled:
                     # 协作式取消：如实发 run_cancelled（不伪装完成），落一次快照
@@ -759,6 +788,10 @@ class PERAgentLoop:
                     )
                     await self._save_checkpoint("cancelled")
                     self.run_cancelled = True
+                    async for end_event in self._emit_turn_end(
+                        "cancelled", task_id=task_id, session_id=session_id
+                    ):
+                        yield end_event
                     return
                 finally:
                     # Conditional routing belongs in a finally so it still runs when the
@@ -1051,6 +1084,10 @@ class PERAgentLoop:
             yield cancel_event
             await self._save_checkpoint("cancelled")
             self.run_cancelled = True
+            async for end_event in self._emit_turn_end(
+                "cancelled", task_id=task_id, session_id=session_id
+            ):
+                yield end_event
             return
         # 预算已尽则跳过对抗审查（同 Phase 3，issue #203 ②）。
         if self.config.enable_reflection and plan.steps and not self.config.over_budget(ctx):
@@ -1202,18 +1239,12 @@ class PERAgentLoop:
         )
 
         # ── Hooks（issue #474）：agent/turn_end —— 轮次结束（serial 观察）────
-        _, turn_end_errors = await self._emit_hook_event(
-            agent_hooks.AGENT_TURN_END,
-            {
-                "session_id": session_id,
-                "task_id": task_id,
-                "status": "failed" if self.run_failed else "completed",
-            },
+        async for end_event in self._emit_turn_end(
+            "failed" if self.run_failed else "completed",
             task_id=task_id,
             session_id=session_id,
-        )
-        for hook_event in turn_end_errors:
-            yield hook_event
+        ):
+            yield end_event
 
         yield AgentEvent(type="done", plan_progress=1.0)
 

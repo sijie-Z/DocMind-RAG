@@ -156,6 +156,18 @@ class Executor:
 
     # ── Hooks（issue #474）────────────────────────────────────────────────────
 
+    def _hook_session_id(self) -> str | None:
+        """hook 用的会话 id：与 loop 层同形（裸 session id，而非 ``session:<id>``）。
+
+        执行器的 ``config.agent_id`` 由 service 设为 ``session:<会话 id>``（或
+        ``default``）；hook 事件表只承诺一个 session_id 字段，因此统一剥离前缀，
+        保证 turn_* 与 tool/step 事件可关联。非会话形态返回 None。
+        """
+        agent_id = getattr(self.config, "agent_id", "") or ""
+        if agent_id.startswith("session:"):
+            return agent_id[len("session:") :] or None
+        return None
+
     def _hook_context(
         self,
         event: str,
@@ -167,8 +179,7 @@ class Executor:
         """构造 hook 上下文：会话/任务/租户与调用方（loop）同源。"""
         return HookContext(
             event=event,
-            # 与 HITL 的会话口径一致：service 把 agent_id 设为 session:<id>。
-            session_id=getattr(self.config, "agent_id", None) or None,
+            session_id=self._hook_session_id(),
             task_id=self.tool_ledger_task_id,
             user_id=user_id,
             organization_id=organization_id,
@@ -703,7 +714,7 @@ class Executor:
         _, post_events = await self._emit_hooks(
             agent_hooks.AGENT_POST_STEP,
             {
-                "session_id": getattr(self.config, "agent_id", None),
+                "session_id": self._hook_session_id(),
                 "task_id": self.tool_ledger_task_id,
                 "step_index": plan.steps.index(step) if step in plan.steps else -1,
                 "result": {
@@ -832,7 +843,7 @@ class Executor:
                     _, post_events = await self._emit_hooks(
                         agent_hooks.AGENT_POST_STEP,
                         {
-                            "session_id": getattr(self.config, "agent_id", None),
+                            "session_id": self._hook_session_id(),
                             "task_id": self.tool_ledger_task_id,
                             "step_index": plan.steps.index(step) if step in plan.steps else -1,
                             "result": {
@@ -1268,7 +1279,7 @@ class Executor:
         pre_decision, pre_events = await self._emit_hooks(
             agent_hooks.AGENT_PRE_STEP,
             {
-                "session_id": getattr(self.config, "agent_id", None),
+                "session_id": self._hook_session_id(),
                 "task_id": self.tool_ledger_task_id,
                 "step_index": step_index,
                 "messages": messages,
@@ -1291,6 +1302,9 @@ class Executor:
                 ctx.record_decision(
                     "hooks", "pre_step_denied", pre_decision.reason or "hook 拒绝步骤执行"
                 )
+            # 观测 span 必须收尾（与 issue #256 同口径：早退不 end 会泄漏 span）。
+            if lf and step_span:
+                step_span.end(output="hook_denied", level="WARNING")
             yield AgentEvent(
                 type="tool_error",
                 tool_name=step.tool_hint or "llm",
@@ -1304,8 +1318,13 @@ class Executor:
         # （next(modified) 的正常写法），action=modify 是短路式改写——两者都生效。
         if isinstance(pre_decision.payload, dict):
             modified_messages = pre_decision.payload.get("messages")
-            if isinstance(modified_messages, list) and all(
-                isinstance(m, dict) and "role" in m and "content" in m for m in modified_messages
+            if (
+                isinstance(modified_messages, list)
+                and modified_messages
+                and all(
+                    isinstance(m, dict) and "role" in m and "content" in m
+                    for m in modified_messages
+                )
             ):
                 messages = modified_messages
             elif pre_decision.action == "modify":
@@ -1874,18 +1893,51 @@ class Executor:
                 AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
                 AGENT_TOOL_LATENCY.observe(elapsed / 1000)
                 logger.error(f"Tool {func.name} failed: {e}")
+                # ── Hooks（issue #474）：tools/post_execute 对异常结果同样生效 ──
+                # 工具抛异常/超时也是"执行结果"；观察者不应漏掉这条路径。
+                # deny 替换为拒绝结果，modify 仅允许替换 content（异常态保持失败）。
+                exception_result = f"{type(e).__name__}: {e}"
+                post_decision, post_events = await self._emit_hooks(
+                    agent_hooks.TOOLS_POST_EXECUTE,
+                    {
+                        "tool_name": func.name,
+                        "arguments": args,
+                        "result": {
+                            "success": False,
+                            "content": exception_result,
+                            "error_type": type(e).__name__,
+                        },
+                    },
+                    user_id=user_id,
+                    organization_id=organization_id,
+                )
+                for hook_event in post_events:
+                    yield hook_event
+                if post_decision.action == "deny":
+                    exception_result = str(
+                        ToolResult.fail(
+                            code="hook_denied",
+                            message=post_decision.reason or "hook 拒绝了该工具结果",
+                        )
+                    )
+                elif isinstance(post_decision.payload, dict):
+                    modified_result = post_decision.payload.get("result")
+                    if isinstance(modified_result, dict) and isinstance(
+                        modified_result.get("content"), str
+                    ):
+                        exception_result = modified_result["content"]
                 # C3a：异常结果先落账再外发（消费方在 yield 处断流也不丢账）。
                 await self._ledger_result(
                     tool_call_id,
                     success=False,
-                    result=f"{type(e).__name__}: {e}",
+                    result=exception_result,
                     error_type=type(e).__name__,
                 )
                 yield AgentEvent(
                     type="tool_error",
                     tool_name=func.name,
                     tool_call_id=tool_call_id,
-                    content=f"{type(e).__name__}: {e}",
+                    content=exception_result,
                     tool_duration_ms=elapsed,
                     plan_id=plan.id,
                     plan_step_id=step.id,

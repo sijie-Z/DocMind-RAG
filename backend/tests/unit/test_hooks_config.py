@@ -317,13 +317,15 @@ class _Settings:
 
 @pytest.mark.asyncio
 async def test_disabled_never_touches_file(monkeypatch):
-    import app.agent.hooks as hooks_pkg
+    import app.agent.hooks.loader as loader_mod
 
     def _explode(*args, **kwargs):  # pragma: no cover - 被调用即失败
         raise AssertionError("HOOKS_ENABLED=false 时不得读取配置文件")
 
-    monkeypatch.setattr(hooks_pkg, "load_hook_specs", _explode)
-    monkeypatch.setattr(hooks_pkg, "resolve_config_path", _explode)
+    # 打在 loader 的真实全局上（initialize_from_settings 定义在 loader 模块内），
+    # 而不是包级 re-export —— 否则检查的只是"包名没被用到"，证明力不足。
+    monkeypatch.setattr(loader_mod, "load_hook_specs", _explode)
+    monkeypatch.setattr(loader_mod, "resolve_config_path", _explode)
     bus = await initialize_from_settings(_Settings(False, "definitely/not/read.yaml"))
     assert bus is None
 
