@@ -133,9 +133,10 @@ async function openParentSession(page: Page) {
   })
   await page.goto('/agent')
   const select = page.locator('.session-select')
-  await expect(select).toBeVisible()
+  // 本地 vite 首次按需编译 Agent 视图可能超过默认 5s；放宽首个可见性等待。
+  await expect(select).toBeVisible({ timeout: 15_000 })
   await select.selectOption('s1')
-  await expect(page.locator('[data-testid="fork-here"]')).toHaveCount(4)
+  await expect(page.locator('[data-testid="fork-here"]')).toHaveCount(4, { timeout: 15_000 })
   return select
 }
 

@@ -5,13 +5,13 @@
  * 契约来源：
  * - POST /api/v1/sessions/{id}/fork {message_id?} → {id, copied_message_count, is_seeded…}
  * - GET  /api/v1/agent/sessions?parent_session_id=…（列表过滤）
- * - GET  /api/v1/agent/sessions/{id} → messages[].id / meta（边界可用性）
+ * - GET  /api/v1/agent/sessions/{id} → messages[].id（边界可用性）
  * - 409 错误体：{success:false, error_code:"FORK_BOUNDARY_INVALID"|…, message}
  *
  * 变异点：
  * - 消息不携带 serverMessageId / 不加载会话消息 → 分叉入口用例红；
  * - fork 请求不带 message_id / 成功后不跳转子会话 → 请求与跳转用例红；
- * - 未结算 meta(tool_status=pending) 的边界仍可点 → 可用性用例红；
+ * - 连续 USER / 同轮中间 assistant 边界仍可点 → 可用性用例红；
  * - 409 不展示原因 → 错误提示用例红；
  * - 谱系徽标/查看分叉不接 parent_session_id → 徽标/子列表用例红。
  */

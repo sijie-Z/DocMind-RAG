@@ -379,7 +379,7 @@ export const useAgentStore = defineStore('agent', () => {
     expandedEvents.value = new Set()
   }
 
-  /** issue #476：历史会话消息载入（含 serverMessageId / serverMeta，供分叉边界）。 */
+  /** issue #476：历史会话消息载入（含 serverMessageId，供分叉边界判定）。 */
   function setMessages(list: AgentChatMessage[]) {
     messages.value = list
   }

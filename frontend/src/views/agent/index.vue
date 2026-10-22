@@ -528,6 +528,8 @@ const childrenError = ref(false)
 const currentLineage = ref<SessionLineageData | null>(null)
 // 会话切换的请求代次：只应用最新一次切换的响应（防后发先至）。
 let sessionLoadSeq = 0
+// 子会话列表的请求代次（快速切换会话时丢弃旧响应）。
+let childrenRequestSeq = 0
 // 深链（?id=<task_id>，通知点击/刷新直达回放）：测试环境可能无 router——全部访问带守卫
 const route = useRoute()
 const router = useRouter()
@@ -838,22 +840,33 @@ async function handleCommand(line: string) {
  * - ASSISTANT 边界 = 复制到该消息为止：同一轮内其后、下一个 USER 之前
  *   不得再出现 ASSISTANT（中间消息非法）。
  * 说明：后端 meta_data 不接受也未写入 tool_status/status 标记，不能据此判定。
+ * 计算一次（O(n) 倒序扫描）并按消息 id 缓存，避免长历史在模板里 O(n²)。
  */
-function isInvalidBoundary(msg: AgentChatMessage): boolean {
-  if (!msg.serverMessageId) return false
+const invalidBoundaryIds = computed<Set<string>>(() => {
+  const invalid = new Set<string>()
   const list = agentStore.messages
-  const idx = list.findIndex((m) => m.serverMessageId === msg.serverMessageId)
-  if (idx < 0) return false
+  // ASSISTANT：倒序维护"下一个 USER 之前是否已见过 assistant"
+  let seenAssistant = false
+  for (let i = list.length - 1; i >= 0; i--) {
+    const msg = list[i]
+    if (msg.role === 'user') {
+      seenAssistant = false
+      continue
+    }
+    if (seenAssistant && msg.serverMessageId) invalid.add(msg.serverMessageId)
+    seenAssistant = true
+  }
+  // USER：前缀以 USER 结尾（上一条仍是 USER）则非法
+  for (let i = 1; i < list.length; i++) {
+    if (list[i].role === 'user' && list[i - 1].role === 'user' && list[i].serverMessageId) {
+      invalid.add(list[i].serverMessageId!)
+    }
+  }
+  return invalid
+})
 
-  if (msg.role === 'user') {
-    const prev = list[idx - 1]
-    return !!prev && prev.role === 'user'
-  }
-  for (let i = idx + 1; i < list.length; i++) {
-    if (list[i].role === 'user') return false
-    if (list[i].role === 'assistant') return true
-  }
-  return false
+function isInvalidBoundary(msg: AgentChatMessage): boolean {
+  return !!msg.serverMessageId && invalidBoundaryIds.value.has(msg.serverMessageId)
 }
 
 function showForkAction(msg: AgentChatMessage): boolean {
@@ -924,14 +937,16 @@ async function handleForkMessage(msg: AgentChatMessage) {
     }
     await refreshSessions()
     // 取消任何在途的会话切换加载，避免旧响应覆盖子会话现场。
-    sessionLoadSeq += 1
+    const forkSeq = ++sessionLoadSeq
     agentStore.setCurrentSession(data.id)
+    const isCurrentFork = () =>
+      forkSeq === sessionLoadSeq && agentStore.currentSessionId === data.id
     try {
-      await loadSessionMessages(data.id)
-      await loadLineage(data.id)
+      await loadSessionMessages(data.id, isCurrentFork)
+      await loadLineage(data.id, isCurrentFork)
     } catch {
       // 分叉本身已成功：内容加载失败单独如实提示，绝不回滚成"分叉失败"。
-      forkErrorText.value = t('agentFork.childLoadFailed')
+      if (isCurrentFork()) forkErrorText.value = t('agentFork.childLoadFailed')
     }
     if (showChildren.value) void loadChildren()
   } catch (err) {
@@ -958,6 +973,7 @@ async function loadLineage(sessionId: string, isCurrent?: () => boolean) {
 /** 列表按 parent_session_id 过滤（「查看分叉」入口）。 */
 async function loadChildren() {
   const sessionId = agentStore.currentSessionId
+  const requestSeq = ++childrenRequestSeq
   if (!sessionId) {
     children.value = []
     return
@@ -970,14 +986,16 @@ async function loadChildren() {
       page: 1,
       page_size: 50,
     })
+    if (requestSeq !== childrenRequestSeq || agentStore.currentSessionId !== sessionId) return
     const data = apiUnwrap<{ sessions: AgentSession[] }>(res)
     children.value = Array.isArray(data?.sessions) ? data.sessions : []
   } catch {
+    if (requestSeq !== childrenRequestSeq || agentStore.currentSessionId !== sessionId) return
     // 加载失败与"没有分叉"是两回事：如实区分，避免误导用户以为没有子会话。
     children.value = []
     childrenError.value = true
   } finally {
-    childrenLoading.value = false
+    if (requestSeq === childrenRequestSeq) childrenLoading.value = false
   }
 }
 
