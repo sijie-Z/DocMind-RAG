@@ -8,6 +8,7 @@ from app.api.v1.endpoints import (
     agent,
     auth,
     chat,
+    commands,
     curated_skills,
     demo,
     documents,
@@ -51,6 +52,7 @@ api_router.include_router(llm_config.router, prefix="/llm-config", tags=["智能
 api_router.include_router(curated_skills.router, prefix="/curated-skills", tags=["智能Agent"])
 api_router.include_router(memory.router, prefix="/memory", tags=["Agent记忆"])
 api_router.include_router(agent.router, prefix="/agent", tags=["智能Agent"])
+api_router.include_router(commands.router, prefix="/commands", tags=["Agent命令"])
 api_router.include_router(mcp.router, prefix="/mcp", tags=["MCP"])
 api_router.include_router(scheduled_tasks.router, prefix="/scheduled-tasks", tags=["定时任务"])
 api_router.include_router(demo.router, prefix="/demo", tags=["示例数据"])

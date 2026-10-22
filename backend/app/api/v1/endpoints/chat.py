@@ -917,6 +917,102 @@ async def chat_stream_endpoint(
                 # 走完 PER 后统一落库（与 /agent 同一实现），刷新不丢本轮问答。
                 conversation_id = body.conversationId or str(uuid.uuid4())
                 persist_org_id = get_user_org_id(current_user)
+
+                # User Commands（issue #475）：与 /agent/chat 同源短路——"/" 前缀的
+                # 文本走命令通道，绝不作为 prompt 漏给模型、不落库、不进入 PER。
+                # 命令通道按多租户 fail-closed 要求真实组织（无组织显式拒绝，
+                # 与普通聊天对本入口的宽松语义有意不同）。
+                if settings.COMMANDS_ENABLED and user_content.strip().startswith("/"):
+                    from app.agent.commands import (
+                        CommandContext,
+                        command_registry,
+                        iter_command_events,
+                        resolve_is_admin,
+                        resolve_session_scope_for_command,
+                    )
+
+                    try:
+                        command_org_id = await require_organization(current_user, db)
+                    except AuthorizationError as org_err:
+                        error_text = org_err.message
+                        yield await sse_event(
+                            "command_error",
+                            {"content": error_text, "type": "command_error"},
+                        )
+                        yield await sse_event(
+                            "message",
+                            {
+                                "content": error_text,
+                                "conversationId": conversation_id,
+                                "messageId": f"command-{uuid.uuid4()}",
+                                "sources": None,
+                                "is_cached": False,
+                            },
+                        )
+                        return
+
+                    # 纵深防御：命令作用域不得使用调用者不可见的会话 id（与
+                    # POST /commands/execute 同口径）。
+                    session_ok, _session_scope = await resolve_session_scope_for_command(
+                        db, current_user, body.conversationId
+                    )
+                    if not session_ok:
+                        error_text = "会话不存在或无权访问"
+                        yield await sse_event(
+                            "command_error",
+                            {
+                                "content": error_text,
+                                "type": "command_error",
+                                "errorCode": "session_not_found",
+                            },
+                        )
+                        yield await sse_event(
+                            "message",
+                            {
+                                "content": error_text,
+                                "conversationId": conversation_id,
+                                "messageId": f"command-{uuid.uuid4()}",
+                                "sources": None,
+                                "is_cached": False,
+                            },
+                        )
+                        return
+
+                    if file_ids:
+                        # 命令通道不进入模型、不处理附件——如实提示，绝不静默忽略。
+                        yield await sse_event(
+                            "warning",
+                            {"content": "命令通道不处理附件，本次附件已忽略"},
+                        )
+                    command_ctx = CommandContext(
+                        user_id=current_user.id,
+                        organization_id=command_org_id,
+                        session_id=body.conversationId,
+                        is_admin=await resolve_is_admin(db, current_user, command_org_id),
+                        is_superuser=bool(getattr(current_user, "is_superuser", False)),
+                        db=db,
+                    )
+                    command_content = ""
+                    async for command_event in iter_command_events(
+                        command_ctx, user_content, registry=command_registry
+                    ):
+                        yield await sse_event(command_event.type, command_event.to_sse_dict())
+                        if command_event.type in ("command_result", "command_error"):
+                            command_content = command_event.content
+                    # 既有消息通道口径：聊天页现有渲染只认 message 事件——命令结果
+                    # 同时以 message 外发（command_* 事件供新客户端消费）。
+                    yield await sse_event(
+                        "message",
+                        {
+                            "content": command_content,
+                            "conversationId": conversation_id,
+                            "messageId": f"command-{uuid.uuid4()}",
+                            "sources": None,
+                            "is_cached": False,
+                        },
+                    )
+                    return
+
                 config = AgentConfig(
                     enable_tools=True,
                     enable_planning=True,

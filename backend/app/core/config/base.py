@@ -88,3 +88,9 @@ class BaseAppSettings(BaseSettings):
 
     # Workflow safety: code nodes run in-process unless explicitly enabled.
     ENABLE_WORKFLOW_CODE_NODES: bool = False
+
+    # User Commands（issue #475）kill-switch：关闭后命令通道整体回退——
+    # GET /commands 返回 enabled=false + 空清单（前端回退本地模板），
+    # POST /commands/execute 404 COMMANDS_DISABLED，聊天入口不再拦截 "/" 前缀
+    # （恢复到"斜杠文本按普通提示词处理"的旧行为）。
+    COMMANDS_ENABLED: bool = True
