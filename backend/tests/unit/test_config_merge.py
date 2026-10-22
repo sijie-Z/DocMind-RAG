@@ -98,6 +98,32 @@ def test_dotenv_is_environment_layer_and_env_beats_it(config_tree, monkeypatch, 
     assert loader.load_settings("web").RATE_LIMIT_WINDOW_SECONDS == 9
 
 
+def _assembly_hash() -> str:
+    settings_obj = loader.get_settings()
+    return loader.config_hash(
+        {
+            "profile": loader.get_active_profile(),
+            "bundles": loader.get_active_bundles(),
+            "settings": loader.mask_secrets(settings_obj.model_dump()),
+        }
+    )
+
+
+def test_config_hash_includes_profile_and_bundles(config_tree):
+    """hash 输入含 profile/bundles/settings：同 profile 两次一致，不同 profile 可区分。"""
+    _write(
+        config_tree / "profiles" / "worker.yaml",
+        "entrypoint: worker\nbundles: [core]\nsettings: {}\n",
+    )
+    web_hash = _assembly_hash()
+    loader.reset_settings()
+    assert _assembly_hash() == web_hash
+
+    loader.reset_settings()
+    loader.load_settings("worker")
+    assert _assembly_hash() != web_hash
+
+
 def test_deep_merge_nested_dicts_and_list_replace():
     base = {"a": {"b": 1, "c": 2}, "items": [1, 2], "scalar": "x"}
     override = {"a": {"c": 3, "d": 4}, "items": [9], "scalar": "y"}

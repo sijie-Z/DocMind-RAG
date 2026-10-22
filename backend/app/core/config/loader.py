@@ -212,10 +212,14 @@ def mask_secrets(values: dict[str, Any]) -> dict[str, Any]:
     return masked
 
 
-def config_hash(masked: dict[str, Any]) -> str:
-    """配置内容 hash（sha256 前 12 位）；入参必须已打码。"""
-    payload = json.dumps(masked, sort_keys=True, ensure_ascii=False, default=str)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+def config_hash(payload: dict[str, Any]) -> str:
+    """配置组装 hash（sha256 前 12 位）；入参必须已打码。
+
+    约定入参为 ``{"profile": ..., "bundles": [...], "settings": {...}}``，
+    使不同 profile/bundle 组合即使 settings 相同也能区分。
+    """
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
 # ──────────────────────────────────────────────────────────────
@@ -266,12 +270,16 @@ def load_settings(profile: str | None = None, patches: list[str] | None = None) 
     _active_spec = spec
     _active_patches = requested_patches
 
-    masked = mask_secrets(settings_obj.model_dump())
+    assembly = {
+        "profile": name,
+        "bundles": list(spec.bundles),
+        "settings": mask_secrets(settings_obj.model_dump()),
+    }
     logger.info(
         "config profile=%s bundles=%s config_hash=%s",
         name,
         ",".join(spec.bundles),
-        config_hash(masked),
+        config_hash(assembly),
     )
     return settings_obj
 

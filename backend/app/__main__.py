@@ -80,19 +80,22 @@ def main(argv: list[str] | None = None) -> int:
     # 启动可观测性：每次加载打印一行（stderr，避免污染 --dump-config 的 stdout）。
     # 通过 app.main / uvicorn 启动时，同一行由 loader 的 logger 输出。
     masked_settings = mask_secrets(settings_obj.model_dump())
+    assembly = {
+        "profile": get_active_profile(),
+        "bundles": get_active_bundles(),
+        "settings": masked_settings,
+    }
     print(
-        f"config profile={get_active_profile()} "
-        f"bundles={','.join(get_active_bundles())} "
-        f"config_hash={config_hash(masked_settings)}",
+        f"config profile={assembly['profile']} "
+        f"bundles={','.join(assembly['bundles'])} "
+        f"config_hash={config_hash(assembly)}",
         file=sys.stderr,
     )
 
     if args.dump_config:
         payload = {
-            "profile": get_active_profile(),
+            **assembly,
             "entrypoint": get_active_entrypoint(),
-            "bundles": get_active_bundles(),
-            "settings": masked_settings,
         }
         print(json.dumps(payload, ensure_ascii=True, sort_keys=True, indent=2))
         return 0
