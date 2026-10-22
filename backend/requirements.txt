@@ -3,6 +3,8 @@ uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
 pydantic>=2.13.5
 pydantic-settings>=2.1.0
+# Profiles/Bundles/Patch 配置分层（issue #479）读取 backend/config/*.yaml。
+PyYAML>=6.0
 # `[asyncio]` 是必需的：SQLAlchemy 2.0 只在部分平台把 greenlet 作为传递依赖装上，
 # CI（Linux, pip 安装）拿不到，导致 `sqlalchemy.ext.asyncio` 直接 ImportError —
 # Backend Tests 与 Migration (MySQL) 三个 job 都因此失败。
