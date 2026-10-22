@@ -371,6 +371,9 @@ def test_redact_arguments_masks_sensitive_fields():
         "SECRET": "s3cr3t",
         "key": "plain-key-value",
         "api_key": "k-1",
+        "apiKey": "camel-api",
+        "accessKey": "camel-access",
+        "privateKey": "camel-private",
         "keywords": ["不要误伤"],
         "nested": {"token": "inner", "keep": "ok"},
         "items": [{"secret_key": "x"}, {"keep": "y"}],
@@ -381,6 +384,9 @@ def test_redact_arguments_masks_sensitive_fields():
     assert out["SECRET"] == "***"
     assert out["key"] == "***", "issue §5.6 的 key 字段必须打码（字面 key）"
     assert out["api_key"] == "***"
+    assert out["apiKey"] == "***", "camelCase 复合 key 同样打码"
+    assert out["accessKey"] == "***"
+    assert out["privateKey"] == "***"
     assert out["keywords"] == ["不要误伤"], "key 按独立词匹配，keyword(s) 不得误伤"
     assert out["nested"]["token"] == "***"
     assert out["nested"]["keep"] == "ok"

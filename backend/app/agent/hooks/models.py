@@ -63,8 +63,11 @@ HOOK_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
 # 参数脱敏（issue #474 §5.6）：至少 password/token/secret/key 字段打码。
 # `key` 以"独立词"匹配（前后不是字母）：{"key"} / api_key / secret_key 命中；
 # keyword / monkey / keyboard 不误伤（audit 日志保留可读字段）。
+# 常见复合键（apiKey/accessKey/privateKey/authKey/signingKey 等 camelCase）单独
+# 列式匹配——独立词规则不会命中它们。
 _SENSITIVE_KEY = re.compile(
     r"(password|passwd|token|secret|(?<![a-z])key(?![a-z])"
+    r"|(?:api|access|private|auth|signing|encryption)[_-]?key"
     r"|authorization|cookie|credential)",
     re.IGNORECASE,
 )
