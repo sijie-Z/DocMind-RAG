@@ -4,8 +4,8 @@
 >
 > This guide only *references* the sources of truth:
 > - ports, credentials, and service orchestration: `backend/docker-compose.yml` and `backend/.env.docker.example`;
-> - headline numbers (33 built-in tools / 23 endpoint modules / 34 frontend routes / 20 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (the guide itself is not yet in the anchor list);
-> - headline numbers (33 built-in tools / 23 endpoint modules / 34 frontend routes / 23 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (the guide itself is not yet in the anchor list);
+> - headline numbers (33 built-in tools / 23 endpoint modules / 34 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (the guide itself is not yet in the anchor list);
+> - headline numbers (33 built-in tools / 23 endpoint modules / 34 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (the guide itself is not yet in the anchor list);
 > - architecture and design rationale: `README.md`, `AGENT_ARCHITECTURE.md`, `docs/decisions/`.
 >
 > 中文版：[USER_GUIDE.md](USER_GUIDE.md)
@@ -323,7 +323,7 @@ User instruction
 - Actual defaults come from `backend/app/agent/config.py`: `max_plan_steps=10`, `max_iterations=20`, `max_tool_calls_per_turn=5`, `max_retries_per_step=3`, step timeout 120 s, `max_context_tokens=8000`; `approval_timeout_seconds=0` (wait forever), `plan_approval_mode="never"`.
 - `execute_python` / `execute_sql` / `mcp_call` are in `DEFAULT_DISABLED_TOOLS`; the server always unions them into `disabled_tools` even if the user config omits them.
 - Reflection `retry` re-runs the step in place; `replan` re-enters planning at most once per run (`MAX_REPLANS_PER_RUN=1`). Reviewer `revise` / `reject` is recorded and displayed as advice only — it does not block the final answer.
-- The agent stream has **23 SSE event types** (`docs/facts.json` → `sse_event_types`, derived from the `EventType` literal in `backend/app/agent/events.py`); the frontend renders plan trees, thinking streams, tool cards, and approval cards from them.
+- The agent stream has **24 SSE event types** (`docs/facts.json` → `sse_event_types`, derived from the `EventType` literal in `backend/app/agent/events.py`); the frontend renders plan trees, thinking streams, tool cards, and approval cards from them.
 
 > The "Configuration" block in `AGENT_ARCHITECTURE.md` shows older defaults (e.g. `max_iterations=10`, `max_plan_steps=8`). When it conflicts with code, `backend/app/agent/config.py` wins.
 
@@ -491,7 +491,7 @@ Practical notes:
 - **Strict / privacy mode**: passed in the request `payload` (`strictMode` / `privacyMode`). In strict mode, retrieval failure emits an SSE `error` instead of letting the model improvise; privacy mode works with end-to-end PII masking.
 - **Stop generation**: the frontend aborts the SSE stream with an AbortController; the server finalizes on disconnect.
 - **History**: `GET /api/v1/chat/conversations` supports `page` / `page_size` / `search` (title LIKE), newest first; conversations are visible by "owner + current organization" (see 7.4).
-- **Deep analysis shows its work**: plan tree, thinking stream, tool-call cards, and reflection are driven by the 23 agent SSE event types; quick Q&A only emits `chunk` / `message` / `error` / `debug`.
+- **Deep analysis shows its work**: plan tree, thinking stream, tool-call cards, and reflection are driven by the 24 agent SSE event types; quick Q&A only emits `chunk` / `message` / `error` / `debug`.
 - **When approval is needed**: deep analysis inherits HITL. `approval_mode` defaults to `risky`, but risky tools are disabled by default, so the default configuration triggers no approvals. Once you enable `execute_python` / `execute_sql` / `mcp_call`, risky calls pause for approval. For complex tasks prefer the Agent workbench (4.3), which has the full approval and replay UI.
 - **Boundary**: the standalone search page's file-type filter is **display-only** — `file_types` is not part of the backend `KnowledgeSearchRequest`, so the filter has no effect. Control retrieval with the query and `search_mode`.
 

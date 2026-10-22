@@ -4,8 +4,8 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
-> - 关键数字（33 个内置工具 / 23 个端点模块 / 34 条前端路由 / 20 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
-> - 关键数字（33 个内置工具 / 23 个端点模块 / 34 条前端路由 / 23 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
+> - 关键数字（33 个内置工具 / 23 个端点模块 / 34 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
+> - 关键数字（33 个内置工具 / 23 个端点模块 / 34 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -335,7 +335,7 @@ DocMind 的 Agent 不是「LLM 自由循环」，而是一个有明确阶段的�
 - 实际默认配置以 `backend/app/agent/config.py` 为准：`max_plan_steps=10`、`max_iterations=20`、`max_tool_calls_per_turn=5`、`max_retries_per_step=3`、单步超时 120s、`max_context_tokens=8000`；`approval_timeout_seconds=0`（一直等）、`plan_approval_mode="never"`。
 - `execute_python` / `execute_sql` / `mcp_call` 属于 `DEFAULT_DISABLED_TOOLS`，服务端会强制并入 `disabled_tools`，即使用户配置里没写（`backend/app/agent/config.py`、`endpoints/agent.py`）。
 - 反思的 `retry` 会在原地重跑该步骤；`replan` 会重新进入 Planning，每个 run 最多 1 次（`MAX_REPLANS_PER_RUN=1`）。Reviewer 的 `revise` / `reject` 只作为建议记录并展示，不会阻断最终回答。
-- Agent 的流式协议有 **23 种 SSE 事件类型**（`docs/facts.json` 的 `sse_event_types`，由 `backend/app/agent/events.py` 的 `EventType` 闭集派生），前端据此渲染计划树、思考流、工具卡片与审批卡片。
+- Agent 的流式协议有 **24 种 SSE 事件类型**（`docs/facts.json` 的 `sse_event_types`，由 `backend/app/agent/events.py` 的 `EventType` 闭集派生），前端据此渲染计划树、思考流、工具卡片与审批卡片。
 
 > `AGENT_ARCHITECTURE.md` 的「配置体系」示例写的是较早的默认值（如 `max_iterations=10`、`max_plan_steps=8`）；与代码冲突时以 `backend/app/agent/config.py` 为准。
 
