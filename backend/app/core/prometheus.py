@@ -250,6 +250,11 @@ def _build_metrics() -> dict[str, Any]:
         "agent_memory_recalls_total", "Memory recall attempts", ["result"]
     )
     m["AGENT_FEEDBACK_TOTAL"] = Counter("agent_feedback_total", "User feedback", ["feedback_type"])
+    # User Commands（issue #475）：命令执行审计面——按命令名与结果
+    # （success / 具体错误码）计数；失败可查（issue #475 任务 5）。
+    m["AGENT_COMMAND_EXECUTIONS"] = Counter(
+        "agent_command_executions_total", "User command executions", ["command", "result"]
+    )
     return m
 
 
@@ -291,6 +296,7 @@ AGENT_TOOL_LATENCY = _LazyMetric("AGENT_TOOL_LATENCY")
 AGENT_REFLECTION_DECISIONS = _LazyMetric("AGENT_REFLECTION_DECISIONS")
 AGENT_MEMORY_RECALLS = _LazyMetric("AGENT_MEMORY_RECALLS")
 AGENT_FEEDBACK_TOTAL = _LazyMetric("AGENT_FEEDBACK_TOTAL")
+AGENT_COMMAND_EXECUTIONS = _LazyMetric("AGENT_COMMAND_EXECUTIONS")
 
 
 # issue #301：启用但构建失败时的自曝输出（注释行 + 一个 gauge 样本）。

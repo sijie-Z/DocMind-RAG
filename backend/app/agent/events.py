@@ -12,6 +12,9 @@ Event types:
     chunk        — Final answer streaming token
     done         — Agent finished successfully
     error        — Fatal/unrecoverable error
+    command_start  — User command execution begins (no model turn)
+    command_result — User command succeeded
+    command_error  — User command failed
 """
 
 import time
@@ -53,6 +56,17 @@ EventType = Literal[
     "run_cancelled",
     "steer_applied",
     "plan_approval_required",
+    # User Commands（issue #475）：命令通道的事件三元组。命令在进入 PER 之前
+    # 被拦截执行，**不创建模型消息或轮次**：
+    #   command_start  — 开始执行一行命令（content 为原始命令行，command_name
+    #                    为解析出的命令名）；
+    #   command_result — 执行成功（content 为渲染后的结果，command_data 为
+    #                    结构化载荷）；
+    #   command_error  — 执行失败（content 为面向用户的稳定文案，error_type
+    #                    为错误码；未知命令/权限/参数/超时/并发均走此事件）。
+    "command_start",
+    "command_result",
+    "command_error",
 ]
 
 ThinkingType = Literal["reasoning", "planning", "evaluation", "correction"]
@@ -110,6 +124,11 @@ class AgentEvent:
     # Task context（issue #201 最小版）：任务级 checkpoint/resume 的关联 id。
     # 由 service 包装层盖章（chat / resume_chat）；默认空 → 既有 SSE 输出不变。
     task_id: str = ""
+
+    # User Commands（issue #475）：command_* 事件的命令名与结构化载荷。
+    # 其余事件类型保持空 → 序列化时省略（既有载荷不变）。
+    command_name: str = ""
+    command_data: dict[str, Any] = field(default_factory=dict)
 
     # Reflection
     reflection_result: ReflectionResult = "pass"
@@ -184,6 +203,12 @@ class AgentEvent:
 
         if self.task_id:
             d["task_id"] = self.task_id
+
+        # User Commands（issue #475）：非空才带，既有事件载荷零变化。
+        if self.command_name:
+            d["command_name"] = self.command_name
+        if self.command_data:
+            d["command_data"] = self.command_data
 
         if self.iteration:
             d["iteration"] = self.iteration

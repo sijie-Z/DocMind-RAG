@@ -676,6 +676,37 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         "registered_tools", "docs/career/README.md", r"(\d+) 个内置工具", "工具数（履历文档）"
     ),
     DocAnchor("registered_tools", "docs/career/README.md", r"和 (\d+) 个工具", "工具数（面试稿）"),
+    # ── docs/USER_GUIDE*.md（issue #475：指南不在锚点清单曾导致 22/20 漂移）──
+    DocAnchor(
+        "sse_event_types",
+        "docs/USER_GUIDE.md",
+        r"\*\*(\d+) 种 SSE 事件类型\*\*",
+        "SSE 事件数（用户指南）",
+    ),
+    DocAnchor(
+        "endpoint_modules",
+        "docs/USER_GUIDE.md",
+        r"\*\*(\d+) 个端点模块\*\*",
+        "端点模块数（用户指南）",
+    ),
+    DocAnchor(
+        "sse_event_types",
+        "docs/USER_GUIDE_EN.md",
+        r"\*\*(\d+) SSE event types\*\*",
+        "SSE event types (user guide)",
+    ),
+    DocAnchor(
+        "sse_event_types",
+        "docs/USER_GUIDE_EN.md",
+        r"(\d+) agent SSE event types",
+        "SSE event types (deep analysis)",
+    ),
+    DocAnchor(
+        "endpoint_modules",
+        "docs/USER_GUIDE_EN.md",
+        r"\*\*(\d+) endpoint modules\*\*",
+        "endpoint modules (user guide)",
+    ),
 )
 
 
