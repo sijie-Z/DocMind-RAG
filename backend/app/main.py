@@ -20,15 +20,30 @@ from typing import Any, AsyncIterator
 
 from app.bootstrap import (
     LifespanDeps,
+    _check_database,  # noqa: F401 - 健康检查兼容导出
+    _check_elasticsearch,  # noqa: F401 - 健康检查兼容导出
+    _knowledge_base_health,  # noqa: F401 - test_index_visibility 兼容导出
     _parse_cli_port,  # noqa: F401 - test_backend_port_resolution 兼容导出
     _port_from_env,  # noqa: F401 - test_backend_port_resolution 兼容导出
+    _run_health_checks,  # noqa: F401 - 健康检查兼容导出
+    _run_readiness_checks,  # noqa: F401 - 健康检查兼容导出
+    app_error_handler,  # noqa: F401 - test_auth_failure_contract 兼容导出
     build_app,
     build_lifespan,
     es_client,
+    general_exception_handler,  # noqa: F401 - 兼容导出
+    http_exception_handler,  # noqa: F401 - test_auth_failure_contract 兼容导出
     kafka_producer,
+    metrics_collector,  # noqa: F401 - test_system_metrics_sampling 兼容导出
     metrics_snapshot_task,
+    minio_client,  # noqa: F401 - test_issue268_or1_family 兼容导出
     resolve_backend_port,
     scheduled_tasks_loop,
+    system_metrics_sampler,  # noqa: F401 - test_system_metrics_sampling 兼容导出
+    validation_exception_handler,  # noqa: F401 - 兼容导出
+)
+from app.bootstrap import (
+    _check_knowledge_base as _bootstrap_check_knowledge_base,
 )
 from app.core.config import settings
 from app.core.database import close_db, init_db
@@ -37,6 +52,15 @@ from app.core.logging import setup_logging
 from app.core.redis import close_redis, init_redis
 
 setup_logging()
+
+
+async def _check_knowledge_base() -> tuple[str, dict]:
+    """兼容壳：测试会 patch ``app.main._knowledge_base_health`` 再调用本函数。
+
+    把本模块当前的 ``_knowledge_base_health`` 绑定显式传给 bootstrap 实现，
+    使 monkeypatch 语义与实现搬家前一致。
+    """
+    return await _bootstrap_check_knowledge_base(_knowledge_base_health)
 
 
 @asynccontextmanager
