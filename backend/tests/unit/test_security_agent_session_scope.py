@@ -24,9 +24,11 @@ class _FakeSessionCtx:
         return False
 
 
-def _result(value):
+def _result(value, scalar=0):
     r = MagicMock()
     r.scalar_one_or_none = MagicMock(return_value=value)
+    # issue #476：seq 分配（next_message_seq）在落库前多一次 max 查询。
+    r.scalar = MagicMock(return_value=scalar)
     return r
 
 
@@ -62,7 +64,7 @@ async def test_owned_session_gets_messages(monkeypatch):
     owned.title = "Existing session"
     # T4：落库新增 org 口径——会话归属组织须与本次有效组织一致。
     owned.organization_id = 1
-    session = _make_session(_result(owned))
+    session = _make_session(_result(owned), _result(None, scalar=0))
     monkeypatch.setattr(agent_module, "AsyncSessionLocal", lambda: _FakeSessionCtx(session))
 
     result = await agent_module._save_session_interaction("sess-1", 1, "q", 1, "answer")
@@ -78,6 +80,7 @@ async def test_new_session_created_for_caller(monkeypatch):
     session = _make_session(
         _result(None),
         _result(None),
+        _result(None, scalar=0),  # issue #476：seq 分配查询
     )
     monkeypatch.setattr(agent_module, "AsyncSessionLocal", lambda: _FakeSessionCtx(session))
 

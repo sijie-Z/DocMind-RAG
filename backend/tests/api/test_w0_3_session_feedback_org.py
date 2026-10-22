@@ -130,24 +130,28 @@ async def _seeded_factory():
                 ChatMessage(
                     id=MSG_A,
                     session_id=SESSION_A,
+                    seq=1,
                     content="org-a answer",
                     message_type=MessageType.ASSISTANT,
                 ),
                 ChatMessage(
                     id=MSG_B,
                     session_id=SESSION_B,
+                    seq=1,
                     content="org-b answer",
                     message_type=MessageType.ASSISTANT,
                 ),
                 ChatMessage(
                     id=MSG_LEGACY,
                     session_id=SESSION_LEGACY,
+                    seq=1,
                     content="legacy answer",
                     message_type=MessageType.ASSISTANT,
                 ),
                 ChatMessage(
                     id=MSG_FOREIGN,
                     session_id=SESSION_FOREIGN,
+                    seq=1,
                     content="foreign answer",
                     message_type=MessageType.ASSISTANT,
                 ),

@@ -47,6 +47,10 @@ class TaskStatus(enum.Enum):
     cancelled             — terminal: 经 cancel 协议协作式取消（诚实终态：不伪装完成）
     rejected              — terminal: 计划被人类拒绝且重规划机会已用尽（诚实终态：
                             不是失败、不是取消——是"我看过，不要这个计划"）
+    paused                — 会话 fork 克隆出的快照任务（issue #476）：不是运行中的
+                            run，只是"从母任务的已结算 checkpoint 继续"的起点；
+                            可经 resume 进入 RUNNING。刻意与 RUNNING 分离：fork 出的
+                            子会话不得冒充"源会话有运行中任务"。
     """
 
     PENDING = "pending"
@@ -60,6 +64,7 @@ class TaskStatus(enum.Enum):
     ABANDONED = "abandoned"
     CANCELLED = "cancelled"
     REJECTED = "rejected"
+    PAUSED = "paused"
 
 
 # ── Valid transitions ──────────────────────────────────────────────────
@@ -105,6 +110,13 @@ _TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
     TaskStatus.ABANDONED: set(),
     TaskStatus.CANCELLED: set(),
     TaskStatus.REJECTED: set(),
+    # fork 克隆任务（issue #476）：resume 边 → RUNNING；用户放弃/取消 → 终态。
+    # 刻意不提供 RUNNING→PAUSED：PAUSED 只作为克隆起点存在，不是运行中暂停。
+    TaskStatus.PAUSED: {
+        TaskStatus.RUNNING,
+        TaskStatus.ABANDONED,
+        TaskStatus.CANCELLED,
+    },
 }
 
 
@@ -139,6 +151,13 @@ class AgentTask(Base):
         Integer,
         ForeignKey("organizations.id"),
         index=True,
+    )
+    # issue #476：run 所属的聊天会话（fork 的“运行中任务”判定与 checkpoint 克隆
+    # 都按它关联）。可空——历史任务行早于该列，无法可靠回填（仅信封里有 session_id）。
+    session_id: Mapped[str | None] = mapped_column(
+        String(36),
+        index=True,
+        comment="聊天会话ID（fork/运行中判定用；历史行可为空）",
     )
 
     # ── Lifecycle ──
@@ -217,6 +236,7 @@ class AgentTask(Base):
             TaskStatus.WAITING_PLAN_APPROVAL,
             TaskStatus.WAITING_HUMAN,
             TaskStatus.FAILED,
+            TaskStatus.PAUSED,
         )
 
     def transition(self, to: TaskStatus) -> None:

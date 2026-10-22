@@ -23,6 +23,7 @@ from app.api.v1.endpoints import (
     organizations,
     prompts,
     scheduled_tasks,
+    sessions,
     token_usage,
     user_settings,
     users,
@@ -51,6 +52,9 @@ api_router.include_router(llm_config.router, prefix="/llm-config", tags=["智能
 api_router.include_router(curated_skills.router, prefix="/curated-skills", tags=["智能Agent"])
 api_router.include_router(memory.router, prefix="/memory", tags=["Agent记忆"])
 api_router.include_router(agent.router, prefix="/agent", tags=["智能Agent"])
+# issue #476：会话 fork / 谱系。与 /agent/sessions 共用同一批数据行与可见范围
+# （session_service），独立前缀是 issue 指定的 API 形态。
+api_router.include_router(sessions.router, prefix="/sessions", tags=["会话分叉"])
 api_router.include_router(mcp.router, prefix="/mcp", tags=["MCP"])
 api_router.include_router(scheduled_tasks.router, prefix="/scheduled-tasks", tags=["定时任务"])
 api_router.include_router(demo.router, prefix="/demo", tags=["示例数据"])

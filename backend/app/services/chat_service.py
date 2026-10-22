@@ -20,6 +20,7 @@ from app.models.prompt import PromptTemplate
 from app.rag.cache import SemanticCache
 from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError
 from app.rag.pipeline import no_context_system_prompt
+from app.services.chat_seq import next_message_seq
 from app.services.memory_service import get_memory_system
 from app.services.organization_settings_service import (
     organization_settings_service,
@@ -141,12 +142,15 @@ async def get_or_create_session(
     bound_doc_ids: list[str] = []
 
     if not conversation_id:
+        new_id = str(uuid.uuid4())
         new_session = ChatSession(
-            id=str(uuid.uuid4()),
+            id=new_id,
             user_id=user_id,
             title=title[:20],
             status=ChatSessionStatus.ACTIVE,
             organization_id=organization_id,
+            # issue #476：根会话 = 自身（fork 子会话才指向最初会话）。
+            root_session_id=new_id,
         )
         session.add(new_session)
         await session.flush()
@@ -164,6 +168,8 @@ async def get_or_create_session(
                 title=title[:20],
                 status=ChatSessionStatus.ACTIVE,
                 organization_id=organization_id,
+                # issue #476：根会话 = 自身（fork 子会话才指向最初会话）。
+                root_session_id=conversation_id,
             )
         )
     else:
@@ -334,7 +340,7 @@ async def run_rag_pipeline(
             await session.execute(
                 select(ChatMessage)
                 .where(ChatMessage.session_id == conversation_id)
-                .order_by(ChatMessage.created_at.desc())
+                .order_by(ChatMessage.seq.desc(), ChatMessage.created_at.desc())
                 .limit(10)
             )
         )
@@ -355,6 +361,7 @@ async def run_rag_pipeline(
     user_msg = ChatMessage(
         id=str(uuid.uuid4()),
         session_id=conversation_id,
+        seq=await next_message_seq(session, conversation_id),
         content=user_content,
         message_type=MessageType.USER,
         meta_data=json.dumps(user_meta_data) if user_meta_data else None,
@@ -414,6 +421,7 @@ async def run_rag_pipeline(
                 ai_msg = ChatMessage(
                     id=ai_msg_id,
                     session_id=conversation_id,
+                    seq=await next_message_seq(session, conversation_id),
                     content=full_response,
                     message_type=MessageType.ASSISTANT,
                     meta_data=json.dumps(
@@ -673,6 +681,7 @@ async def run_rag_pipeline(
     ai_msg = ChatMessage(
         id=ai_msg_id,
         session_id=conversation_id,
+        seq=await next_message_seq(session, conversation_id),
         content=full_response,
         message_type=MessageType.ASSISTANT,
         meta_data=json.dumps(

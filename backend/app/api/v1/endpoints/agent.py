@@ -976,9 +976,9 @@ async def cancel_agent_task(
 ):
     """协作式取消（服务端停止协议；**诚实边界**：合作式，不是硬杀）。
 
-    - waiting_approval / waiting_plan_approval（无活跃流）：直接如实置终态
-      cancelled（200），并留下取消旗作围栏——并发/迟到的 approval、resume 尝试
-      都会被拒（state=cancelled），任务绝不复活；
+    - waiting_approval / waiting_plan_approval / paused（无活跃流）：直接如实置
+      终态 cancelled（200），并留下取消旗作围栏——并发/迟到的 approval、resume
+      尝试都会被拒（state=cancelled），任务绝不复活；
     - running / pending / waiting_tool / waiting_human（可能有活跃流）：
       置取消旗（202，state=cancel_requested）。活跃 run 在下一个检查点
       （步间 / 工具前 / 阶段间）观察到并收敛：流内发 run_cancelled、任务置
@@ -1003,11 +1003,20 @@ async def cancel_agent_task(
             f"任务已处于终态 {task.status.value}，无法取消",
             detail={"task_id": task_id, "state": task.status.value},
         )
-    if task.status in (TaskStatus.WAITING_APPROVAL, TaskStatus.WAITING_PLAN_APPROVAL):
+    if task.status in (
+        TaskStatus.WAITING_APPROVAL,
+        TaskStatus.WAITING_PLAN_APPROVAL,
+        # issue #476：PAUSED 是 fork 克隆出的快照任务——没有活跃 run 去消费取消旗，
+        # 必须与审批等待同款"DB 态权威收敛"（否则 202 永远不落地）。
+        TaskStatus.PAUSED,
+    ):
         # 无活跃流：DB 态权威收敛 + 取消旗围栏（拦并发应答/恢复的竞态窗口）。
-        waiting_label = (
-            "计划审批等待中" if task.status == TaskStatus.WAITING_PLAN_APPROVAL else "审批等待中"
-        )
+        if task.status == TaskStatus.WAITING_PLAN_APPROVAL:
+            waiting_label = "计划审批等待中"
+        elif task.status == TaskStatus.PAUSED:
+            waiting_label = "分叉快照任务"
+        else:
+            waiting_label = "审批等待中"
         ok = await checkpoint.mark_terminal(
             task_id,
             TaskStatus.CANCELLED,
@@ -1277,6 +1286,9 @@ async def list_skills(
 async def list_sessions(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    # 普通默认值即为查询参数；不用 Query(None)，否则直接调用（单测）会拿到
+    # Query 对象而不是 None（issue #476 评审口径）。
+    parent_session_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1287,6 +1299,9 @@ async def list_sessions(
     try:
         skip = (page - 1) * page_size
         conditions = session_visibility_conditions(current_user, org_id)
+        # issue #476：列表支持按母会话过滤（前端谱系/分支视图）。
+        if parent_session_id:
+            conditions.append(ChatSession.parent_session_id == parent_session_id)
 
         total_stmt = select(func.count(ChatSession.id)).where(*conditions)
         total = (await db.execute(total_stmt)).scalar() or 0
@@ -1315,6 +1330,17 @@ async def list_sessions(
                     "message_count": msg_count,
                     "created_at": s.created_at.isoformat() if s.created_at else "",
                     "updated_at": s.updated_at.isoformat() if s.updated_at else "",
+                    # issue #476：谱系字段（前端徽标 / 分支过滤）
+                    "parent_session_id": s.parent_session_id,
+                    "root_session_id": s.root_session_id or s.id,
+                    "fork_point_message_id": s.fork_point_message_id,
+                    "fork_reason": s.fork_reason,
+                    "is_fork": s.parent_session_id is not None,
+                    "is_seeded": bool(
+                        isinstance(s.settings, dict)
+                        and isinstance(s.settings.get("fork"), dict)
+                        and s.settings["fork"].get("is_seeded")
+                    ),
                 }
             )
 
@@ -1355,6 +1381,8 @@ async def create_session(
                 title=body.title[:80],
                 status=ChatSessionStatus.ACTIVE,
                 organization_id=org_id,
+                # issue #476：根会话 = 自身（fork 子会话才指向最初会话）。
+                root_session_id=session_id,
             )
             session.add(new_session)
             await session.commit()
@@ -1389,7 +1417,7 @@ async def get_session(
         msg_stmt = (
             select(ChatMessage)
             .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at.asc())
+            .order_by(ChatMessage.seq.asc(), ChatMessage.created_at.asc())
         )
         messages = (await db.execute(msg_stmt)).scalars().all()
 
@@ -1411,6 +1439,9 @@ async def get_session(
         # Try to load agent config
         agent_config = await AgentConfig.load_from_redis(session_id)
 
+        fork_meta = session.settings.get("fork") if isinstance(session.settings, dict) else None
+        if not isinstance(fork_meta, dict):
+            fork_meta = {}
         return {
             "success": True,
             "data": {
@@ -1418,6 +1449,13 @@ async def get_session(
                 "title": session.title,
                 "messages": formatted,
                 "config": agent_config.to_dict() if agent_config else None,
+                # issue #476：谱系元数据（前端消息级分叉入口 / 谱系徽标）
+                "parent_session_id": session.parent_session_id,
+                "root_session_id": session.root_session_id or session.id,
+                "fork_point_message_id": session.fork_point_message_id,
+                "fork_reason": session.fork_reason,
+                "is_fork": session.parent_session_id is not None,
+                "is_seeded": bool(fork_meta.get("is_seeded")),
                 "created_at": session.created_at.isoformat() if session.created_at else "",
                 "updated_at": session.updated_at.isoformat() if session.updated_at else "",
             },
@@ -1565,7 +1603,7 @@ async def _load_session_messages(
             msg_stmt = (
                 select(ChatMessage)
                 .where(ChatMessage.session_id == session_id)
-                .order_by(ChatMessage.created_at.asc())
+                .order_by(ChatMessage.seq.asc(), ChatMessage.created_at.asc())
                 .limit(20)
             )
             messages = (await session.execute(msg_stmt)).scalars().all()

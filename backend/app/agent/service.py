@@ -305,6 +305,7 @@ class AgentService:
                 user_id=user_id,
                 organization_id=organization_id,
                 query=query,
+                session_id=session_id,
             )
 
         # T7（断流收敛盲窗）：try 从任务行创建后立即开启——覆盖 @引用解析

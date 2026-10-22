@@ -3,10 +3,10 @@
   "description": "文档关键数字的单一事实源（W0-8）。由 backend/scripts/check_doc_facts.py 从源码派生并逐 PR 校验；代码演进导致数字变化时，必须同步本文件与引用它的文档。",
   "facts": {
     "sse_event_types": 20,
-    "endpoint_modules": 22,
+    "endpoint_modules": 23,
     "frontend_routes": 34,
     "registered_tools": 33,
-    "http_route_decorators": 187,
+    "http_route_decorators": 189,
     "websocket_route_decorators": 2
   },
   "sources": {

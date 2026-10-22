@@ -345,6 +345,7 @@ OPENAPI_TAGS = [
     {"name": "Agent工作流", "description": "工作流 CRUD、执行、调试"},
     {"name": "Agent记忆", "description": "短期/长期/工作记忆管理"},
     {"name": "智能Agent", "description": "PER Agent 对话、工具调用、技能学习"},
+    {"name": "会话分叉", "description": "会话 fork / seed / 谱系（issue #476）"},
     {"name": "定时任务", "description": "定时 agent 任务的 CRUD、暂停/恢复、立即触发"},
 ]
 

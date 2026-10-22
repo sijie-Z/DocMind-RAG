@@ -4,7 +4,7 @@
 >
 > This guide only *references* the sources of truth:
 > - ports, credentials, and service orchestration: `backend/docker-compose.yml` and `backend/.env.docker.example`;
-> - headline numbers (33 built-in tools / 22 endpoint modules / 34 frontend routes / 20 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (the guide itself is not yet in the anchor list);
+> - headline numbers (33 built-in tools / 23 endpoint modules / 34 frontend routes / 20 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (the guide itself is not yet in the anchor list);
 > - architecture and design rationale: `README.md`, `AGENT_ARCHITECTURE.md`, `docs/decisions/`.
 >
 > 中文版：[USER_GUIDE.md](USER_GUIDE.md)
@@ -615,7 +615,7 @@ Successful login returns an envelope:
 
 ### 5.2 Endpoint modules
 
-There are **22 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from `include_router` calls in `backend/app/api/v1/router.py`):
+There are **23 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from `include_router` calls in `backend/app/api/v1/router.py`):
 
 | Module | Prefix | Purpose |
 |--------|--------|---------|
@@ -639,10 +639,36 @@ There are **22 endpoint modules** (`docs/facts.json` → `endpoint_modules`, der
 | agent | `/api/v1/agent` | PER agent SSE, tools, sessions, config |
 | mcp | `/api/v1/mcp` | MCP server status (admin read-only) |
 | scheduled_tasks | `/api/v1/scheduled-tasks` | scheduled task CRUD / pause / manual run |
+| sessions | `/api/v1/sessions` | session fork / seed / lineage (issue #476) |
 | demo | `/api/v1/demo` | demo data |
 | user_settings | `/api/v1/user` | UI preferences |
 
 Interactive docs: `http://localhost:8000/docs` (OpenAPI: `/api/v1/openapi.json`).
+
+### 5.2.1 Session Fork API (issue #476)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/v1/sessions/{id}/fork` | Fork a child session from a settled boundary |
+| GET | `/api/v1/sessions/{id}/lineage` | Ancestor chain (root → parent) + direct children + lineage metadata |
+
+`fork` body (all optional): `message_id` (boundary message; ASSISTANT = copy through
+it, USER = fork before it; defaults to the last settled message), `title`,
+`include_checkpoint` (deep-copy the latest settled checkpoint into a new PAUSED task
+that can be resumed), `seed` (seed content written into the child's isolated memory
+namespace), `reason`. Idempotency: `Idempotency-Key` header; sequential retries
+return the same child session (concurrent duplicates are not guaranteed).
+
+Errors: `404` (session/boundary message missing, foreign user or cross-org — no
+ownership leaks), `409` (`FORK_BOUNDARY_INVALID` / `FORK_QUOTA_EXCEEDED` /
+`FORK_CHECKPOINT_REQUIRED` / `FORK_CHECKPOINT_UNAVAILABLE`), `400` (seed too long).
+
+Lineage fields: `parent_session_id` / `root_session_id` / `fork_point_message_id` /
+`fork_reason` / `is_fork` / `is_seeded` (returned by session list/detail and
+`lineage`). Forks may only land on settled turns (copied prefix ends with an
+assistant message or is empty; intermediate assistant messages and open turns
+return 409); copied messages get renumbered `seq` in the child; parent memory is
+not copied by default.
 
 ### 5.3 Request examples
 

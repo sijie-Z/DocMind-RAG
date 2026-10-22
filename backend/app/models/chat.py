@@ -6,7 +6,16 @@ import enum
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -57,6 +66,23 @@ class ChatSession(Base):
     # 配置信息
     settings: Mapped[Any | None] = mapped_column(JSON, comment="会话设置")
 
+    # 分叉谱系（issue #476）
+    # - parent_session_id：直接母会话；根会话为 None。
+    # - root_session_id：谱系根会话 id（根会话 = 自身），多级 fork 仍指向最初会话。
+    # - fork_point_message_id：切点消息 id（**源会话**的消息 id）。刻意不加外键：
+    #   父会话删除/归档后，子会话谱系仍需可查（外键 SET NULL 会抹掉谱系事实）。
+    # - fork_reason：分叉原因短标签（默认 user_fork）。
+    parent_session_id: Mapped[str | None] = mapped_column(
+        String(36), index=True, comment="父会话ID（fork 来源）"
+    )
+    root_session_id: Mapped[str | None] = mapped_column(
+        String(36), index=True, comment="谱系根会话ID（根会话=自身）"
+    )
+    fork_point_message_id: Mapped[str | None] = mapped_column(
+        String(36), comment="分叉切点消息ID（源会话消息，无外键）"
+    )
+    fork_reason: Mapped[str | None] = mapped_column(String(100), comment="分叉原因标签")
+
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), comment="创建时间"
@@ -79,11 +105,19 @@ class ChatMessage(Base):
     """聊天消息表"""
 
     __tablename__ = "chat_messages"
+    __table_args__ = (
+        # issue #476：会话内单调序号 + 唯一约束——fork 的边界语义（seq <= 边界）
+        # 与复制时的重排都依赖它；并发的同会话写入由 (session_id, seq) 兜底。
+        UniqueConstraint("session_id", "seq", name="uq_chat_messages_session_seq"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
     session_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("chat_sessions.id"), index=True, comment="会话ID"
     )
+    # 会话内单调序号（从 1 开始）。存量数据由迁移 012 按 (created_at, id) 回填；
+    # 新消息一律由 app.services.chat_seq.next_message_seq 分配（含锁/唯一约束兜底）。
+    seq: Mapped[int] = mapped_column(Integer, nullable=False, comment="会话内单调序号（从1开始）")
 
     # 消息内容
     content: Mapped[str] = mapped_column(Text, comment="消息内容")
