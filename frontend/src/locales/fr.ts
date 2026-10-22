@@ -180,6 +180,7 @@ export default {
     welcomeDesc: 'Je peux répondre à vos questions, analyser des documents, écrire du code ou simplement discuter.',
     demoData: 'Données de démo',
     inputPlaceholder: 'Posez votre question (Maj + Entrée pour sauter une ligne)...',
+    slashCommandsAgentOnly: 'Les commandes slash ne sont disponibles qu’en mode Agent (analyse approfondie) ; en mode rapide, le texte est envoyé tel quel.',
     uploadFile: 'Télécharger un fichier (Bientôt disponible)',
     streamResponse: 'Réponse en streaming',
     promptTooLong: "Le prompt dépasse la limite de {max} caractères et n'a pas été appliqué. Veuillez le raccourcir.",
@@ -1029,18 +1030,66 @@ export default {
   slashCmd: {
     heading: 'Commandes slash',
     empty: 'Aucune commande correspondante (Entrée envoie le texte brut)',
+    unavailable: 'Les commandes serveur sont désactivées ; seuls les modèles locaux sont disponibles',
+    loadError: 'Échec du chargement des commandes (les modèles locaux restent disponibles)',
+    commandBadge: 'serveur',
     desc: {
       search: 'Rechercher sur le web et résumer (outil web_search)',
       doc: 'Répondre à partir de la base de connaissances (outil search_knowledge_base)',
-      workflow: 'Décomposer en plan multi-étapes et exécuter (planificateur)',
-      help: 'Afficher toutes les commandes et descriptions',
-      clear: "Vider le champ de saisie"
+      workflow: 'Décomposer en plan multi-étapes et exécuter (planificateur)'
+    },
+    cmdDesc: {
+      help: 'Lister les commandes disponibles ou afficher l’aide d’une commande',
+      status: 'Afficher la session courante et l’état des tâches récentes',
+      export: 'Exporter la session courante (Markdown / JSON)',
+      tools: 'Lister les outils de l’agent et leur état désactivé par défaut'
     },
     tpl: {
       search: 'Rechercher sur le web et résumer : {q}',
       doc: 'Répondre à partir de la base de connaissances : {q}',
       workflow: 'Décomposez en plan multi-étapes et exécutez étape par étape : {q}'
     }
+  },
+  agentCommand: {
+    starting: 'Exécution de {line}',
+    running: 'En cours',
+    completed: 'Terminé',
+    failed: 'Échec',
+    exportReady: 'Export prêt ({count} messages)',
+    download: 'Télécharger {filename}',
+    noOutput: '(aucune sortie)',
+    failedFallback: 'Échec de la commande. Veuillez réessayer.',
+
+    errUnknown: 'Commande inconnue (tapez /help pour la liste)',
+    errPermission: 'Cette commande est réservée aux administrateurs',
+    errInvalid: 'Arguments de commande invalides',
+    errBusy: 'Une autre commande est déjà en cours dans cette session',
+    errTimeout: 'Délai d’exécution de la commande dépassé',
+    errSession: 'Ouvrez une session avant d’exécuter cette commande',
+    errSessionNotFound: 'Session introuvable ou accès refusé',
+    errDisabled: 'Les commandes sont désactivées',
+  },
+  agentFork: {
+    badge: 'Session dérivée',
+    badgeTitle: 'Parent : {parent} · Racine : {root} · Message de frontière : {boundary}',
+    parentMissing: 'Session parente supprimée ou inaccessible',
+    forkHere: 'Dériver à partir d’ici',
+    forkBefore: 'Dériver avant ce message',
+    forking: 'Dérivation…',
+    pendingBoundary: 'Ce tour n’est pas encore réglé et ne peut pas servir de frontière',
+    runningHint: 'Un tour est en cours ; attendez sa fin avant de dériver',
+    children: 'Voir les dérivations',
+    childrenTitle: 'Dérivations de cette session',
+    childrenEmpty: 'Aucune dérivation pour le moment',
+    seedNote: 'Dérivé de « {parent} », {count} messages copiés ; seed mémoire : {seed}',
+    seedApplied: 'écrit dans la mémoire de session',
+    seedSkipped: 'non activé (historique copié uniquement)',
+    errBoundary: 'Frontière de dérivation invalide : seuls les tours réglés peuvent être dérivés',
+    errCheckpointRequired: 'La session source a une tâche en cours ; dérivez depuis le dernier checkpoint validé',
+    errCheckpointUnavailable: 'Aucun checkpoint validé disponible (absent, en attente d’approbation ou outil en cours)',
+    errQuota: 'Le nombre de messages copiés dépasse la limite',
+    errNotFound: 'Session ou message de frontière introuvable (ou accès refusé)',
+    errFailed: 'La dérivation a échoué. Veuillez réessayer.'
   },
   runStats: {
     running: 'En cours {t}',

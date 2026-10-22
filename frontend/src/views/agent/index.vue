@@ -22,6 +22,59 @@
           @update:modelValue="handleSessionChange"
           @delete="handleSessionDelete"
         />
+        <!-- issue #476：子会话谱系徽标（hover 展示父会话/根会话/边界消息） -->
+        <span
+          v-if="currentSessionIsFork"
+          class="lineage-badge"
+          data-testid="lineage-badge"
+          :title="lineageBadgeTitle"
+        >
+          ⑂ {{ t('agentFork.badge') }}
+          <span v-if="currentParentTitle" class="lineage-parent">← {{ currentParentTitle }}</span>
+        </span>
+        <!-- issue #476：「查看分叉」= 列表 parent_session_id 过滤入口 -->
+        <n-popover v-model:show="showChildren" trigger="click" placement="bottom">
+          <template #trigger>
+            <!-- v-show 而非 v-if：naive-ui 的 trigger slot 必须恰有一个元素
+                 （无会话时隐藏按钮，但不能渲染成注释节点）。 -->
+            <button
+              v-show="agentStore.currentSessionId"
+              class="header-btn"
+              data-testid="fork-children-btn"
+              @click="loadChildren"
+            >
+              ↪ {{ t('agentFork.children') }}
+            </button>
+          </template>
+          <div class="fork-children-panel" data-testid="fork-children-panel">
+            <div class="fork-children-title">{{ t('agentFork.childrenTitle') }}</div>
+            <div v-if="childrenLoading" class="fork-children-state">
+              {{ t('common.loading') }}
+            </div>
+            <div
+              v-else-if="children.length === 0"
+              class="fork-children-state"
+              data-testid="fork-children-empty"
+            >
+              {{ t('agentFork.childrenEmpty') }}
+            </div>
+            <button
+              v-for="child in children"
+              :key="child.id"
+              class="fork-child-item"
+              data-testid="fork-child-item"
+              @click="openChildSession(child.id)"
+            >
+              <span class="fork-child-title">
+                {{ child.title || t('agent.untitledSession') }}
+              </span>
+              <span class="fork-child-meta">
+                {{ child.message_count }}
+                <template v-if="child.is_seeded"> · {{ t('agentFork.seedApplied') }}</template>
+              </span>
+            </button>
+          </div>
+        </n-popover>
       </div>
       <div class="header-right">
         <n-popover v-model:show="showTasks" trigger="click" placement="bottom-end">
@@ -97,6 +150,23 @@
           </div>
         </div>
 
+        <!-- issue #476：分叉失败原因（409 边界非法/checkpoint 要求等，如实展示） -->
+        <div v-if="forkErrorText" class="fork-error" data-testid="fork-error">
+          {{ forkErrorText }}
+        </div>
+        <!-- issue #476：新建分叉后的 seed 说明（跳转子会话后仍保留） -->
+        <div v-if="lastForkInfo" class="fork-seed-note" data-testid="fork-seed-note">
+          {{
+            t('agentFork.seedNote', {
+              parent: lastForkInfo.parentTitle,
+              count: lastForkInfo.copied,
+              seed: lastForkInfo.isSeeded
+                ? t('agentFork.seedApplied')
+                : t('agentFork.seedSkipped'),
+            })
+          }}
+        </div>
+
         <!-- Messages -->
         <div
           v-for="(msg, idx) in agentStore.messages"
@@ -114,6 +184,18 @@
                   :key="r.id"
                   class="user-ref-chip"
                 >📄 {{ r.title }}</span>
+              </div>
+              <!-- issue #476：消息级分叉入口（USER 边界 = 在该消息之前分叉） -->
+              <div v-if="showForkAction(msg)" class="fork-here-line">
+                <button
+                  class="fork-here-btn fork-here-inline"
+                  data-testid="fork-here"
+                  :disabled="forkDisabled(msg)"
+                  :title="forkDisabledTitle(msg)"
+                  @click="handleForkMessage(msg)"
+                >
+                  {{ forkBusy ? t('agentFork.forking') : forkButtonLabel(msg) }}
+                </button>
               </div>
             </div>
           </div>
@@ -203,6 +285,19 @@
                   <span class="run-warning-badge">{{ t('common.warning') }}</span>
                   <span class="run-warning-text">{{ evt.content }}</span>
                 </div>
+                <!-- User Commands（#475）：命令三元组进入消息流；start 与
+                     result/error 配对成结果卡片（结构化载荷 command_data）。 -->
+                <template v-else-if="evt.type === 'command_start'">
+                  <CommandResultCard :start="evt" :terminal="getCommandTerminal(msg.events, eIdx)" />
+                </template>
+                <!-- 早退路径只有 command_error（如会话归属拒绝），单独成行 -->
+                <div
+                  v-else-if="evt.type === 'command_error' && !hasCommandStart(msg.events, eIdx)"
+                  class="command-error-standalone"
+                  data-testid="command-error-standalone"
+                >
+                  ❌ {{ evt.content }}
+                </div>
               </template>
             </div>
 
@@ -217,6 +312,19 @@
             <!-- Final answer -->
             <div v-if="msg.content" class="final-answer">
               <Markdown :content="msg.content" />
+            </div>
+
+            <!-- issue #476：消息级分叉入口（ASSISTANT 边界 = 复制到该消息为止） -->
+            <div v-if="showForkAction(msg)" class="fork-here-line">
+              <button
+                class="fork-here-btn"
+                data-testid="fork-here"
+                :disabled="forkDisabled(msg)"
+                :title="forkDisabledTitle(msg)"
+                @click="handleForkMessage(msg)"
+              >
+                {{ forkBusy ? t('agentFork.forking') : forkButtonLabel(msg) }}
+              </button>
             </div>
 
             <!-- 运行报告（issue #242 收尾：此前该事件在前端白名单被丢弃，UI 永远看不到；
@@ -339,9 +447,11 @@
       :stopping="stopping"
       :steering="steerEnabled"
       :hint-override="planApprovalPending ? t('hitl.planPendingHint') : ''"
+      :session-id="agentStore.currentSessionId"
       @send="handleSend"
       @stop="handleStop"
       @steer="handleSteer"
+      @command="handleCommand"
     />
   </div>
 </template>
@@ -352,6 +462,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '@/stores/agent'
 import { agentApi } from '@/api/agent'
+import { commandsApi, type CommandExecutionData } from '@/api/commands'
+import { sessionsApi, type SessionForkData, type SessionLineageData } from '@/api/sessions'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { useDedupedMessage } from '@/utils/message'
 import { useConfirmDangerousAction } from '@/utils/confirm'
@@ -386,12 +498,23 @@ import ApprovalCard from '@/components/agent/ApprovalCard.vue'
 import PlanApprovalCard from '@/components/agent/PlanApprovalCard.vue'
 import ReplayTimeline from '@/components/agent/ReplayTimeline.vue'
 import RecentTaskList from '@/components/agent/RecentTaskList.vue'
+import CommandResultCard from '@/components/agent/CommandResultCard.vue'
 import Markdown from '@/components/common/Markdown.vue'
 
 const agentStore = useAgentStore()
 const { t } = useI18n()
 const message = useDedupedMessage()
 const confirmDangerousAction = useConfirmDangerousAction()
+
+// ── issue #476：会话分叉 / 谱系现场 ──
+const forkBusy = ref(false)
+const forkErrorText = ref('')
+const lastForkInfo = ref<{ parentTitle: string; copied: number; isSeeded: boolean } | null>(null)
+const showChildren = ref(false)
+const children = ref<AgentSession[]>([])
+const childrenLoading = ref(false)
+// GET /sessions/{id}/lineage 的现场（祖先链/父缺失/截断标记——徽标详情的数据源）
+const currentLineage = ref<SessionLineageData | null>(null)
 // 深链（?id=<task_id>，通知点击/刷新直达回放）：测试环境可能无 router——全部访问带守卫
 const route = useRoute()
 const router = useRouter()
@@ -428,6 +551,31 @@ const steerEnabled = computed(
 const planApprovalPending = computed(
   () => agentStore.taskState === 'waiting_plan_approval' && !!agentStore.taskId,
 )
+
+// ── issue #476：当前会话谱系展示（列表字段与详情同口径） ──
+const currentSessionIsFork = computed(() => !!agentStore.currentSession?.is_fork)
+const currentParentTitle = computed(() => {
+  const current = agentStore.currentSession
+  if (!current?.parent_session_id) return ''
+  const parent = agentStore.sessions.find((s) => s.id === current.parent_session_id)
+  return parent?.title || current.parent_session_id
+})
+const lineageBadgeTitle = computed(() => {
+  const current = agentStore.currentSession
+  if (!current) return ''
+  const base = t('agentFork.badgeTitle', {
+    parent: currentParentTitle.value || current.parent_session_id || '-',
+    root: current.root_session_id || '-',
+    boundary: current.fork_point_message_id || '-',
+  })
+  const chain = (currentLineage.value?.ancestors || [])
+    .map((node) => node.title || node.id)
+    .join(' ← ')
+  const parts = [base]
+  if (chain) parts.push(chain)
+  if (currentLineage.value?.parent_missing) parts.push(t('agentFork.parentMissing'))
+  return parts.join(' · ')
+})
 
 const showConfig = ref(false)
 const showPlan = ref(true)
@@ -533,6 +681,305 @@ function getToolRetryAttempt(events: AgentEvent[], callIdx: number): number | un
     if (events[i].type === 'tool_error') return events[i].retry_attempt || undefined
   }
   return undefined
+}
+
+// ── User Commands（#475）：命令事件配对 / 执行 ─────────────────────────────
+
+/** 命令事件的终态配对：start 之后、下一个 start 之前的 result/error。 */
+function getCommandTerminal(events: AgentEvent[], startIdx: number): AgentEvent | undefined {
+  for (let i = startIdx + 1; i < events.length; i++) {
+    if (events[i].type === 'command_start') return undefined
+    if (events[i].type === 'command_result' || events[i].type === 'command_error') {
+      return events[i]
+    }
+  }
+  return undefined
+}
+
+/** 该 command_error 之前是否有未配对的 command_start（早退路径只有 error）。 */
+function hasCommandStart(events: AgentEvent[], terminalIdx: number): boolean {
+  for (let i = terminalIdx - 1; i >= 0; i--) {
+    if (events[i].type === 'command_start') return true
+    if (events[i].type === 'command_result' || events[i].type === 'command_error') return false
+  }
+  return false
+}
+
+/** 命令失败原因：按后端稳定 error_code 本地化，后端扁平 message 作为明细保留。 */
+function commandErrorMessage(err: unknown): { message: string; code: string } {
+  const body = (err as { response?: { data?: Record<string, any> } })?.response?.data
+  const code = typeof body?.error_code === 'string' ? body.error_code : 'COMMAND_FAILED'
+  const backendMessage = typeof body?.message === 'string' ? body.message : ''
+  const mapped: Record<string, string> = {
+    COMMAND_NOT_FOUND: t('agentCommand.errUnknown'),
+    COMMAND_PERMISSION_DENIED: t('agentCommand.errPermission'),
+    COMMAND_INVALID_ARGUMENT: t('agentCommand.errInvalid'),
+    COMMAND_INVALID_SYNTAX: t('agentCommand.errInvalid'),
+    COMMAND_BUSY: t('agentCommand.errBusy'),
+    COMMAND_TIMEOUT: t('agentCommand.errTimeout'),
+    COMMAND_SESSION_REQUIRED: t('agentCommand.errSession'),
+    SESSION_NOT_FOUND: t('agentCommand.errSessionNotFound'),
+    COMMANDS_DISABLED: t('agentCommand.errDisabled'),
+  }
+  if (mapped[code]) {
+    // 本地化稳定文案 + 后端原文（字段级原因不丢，例如错误的参数名）。
+    const detail =
+      backendMessage && !backendMessage.includes(mapped[code]) ? `（${backendMessage}）` : ''
+    return { message: `${mapped[code]}${detail}`, code }
+  }
+  return {
+    message: backendMessage || t('agentCommand.failedFallback'),
+    code,
+  }
+}
+
+/**
+ * 执行服务端命令（#475）：POST /commands/execute，结果以 command_* 事件进入
+ * 消息流（复用既有事件渲染）。命令不进入 PER、不调用 agentApi.chat。
+ */
+async function handleCommand(line: string) {
+  const text = line.trim()
+  if (!text || agentStore.isLoading) return
+  agentStore.clearMessages()
+  agentStore.resetTask()
+  stopping.value = false
+  lastRunHasReplay.value = null
+  forkErrorText.value = ''
+  lastForkInfo.value = null
+
+  agentStore.addMessage({
+    role: 'user',
+    content: text,
+    events: [],
+    loading: false,
+    currentTool: '',
+    thinkingText: '',
+    planSteps: [],
+    planId: '',
+    progress: 0,
+  })
+  agentStore.addMessage({
+    role: 'assistant',
+    content: '',
+    events: [],
+    loading: true,
+    currentTool: '',
+    thinkingText: '',
+    planSteps: [],
+    planId: '',
+    progress: 0,
+    startedAt: Date.now(),
+  })
+  agentStore.setLoading(true)
+  scrollToBottom()
+
+  const parsedName = text.replace(/^\//, '').split(/\s+/)[0]?.toLowerCase() || ''
+  agentStore.processEvent({
+    type: 'command_start',
+    content: t('agentCommand.starting', { line: text }),
+    command_name: parsedName,
+  })
+
+  try {
+    const res = await commandsApi.execute(text, agentStore.currentSessionId || undefined)
+    const data = apiUnwrap<CommandExecutionData>(res)
+    if (!data) throw new Error('empty command response')
+    if (data.success === false) {
+      // 端点契约下失败会走非 2xx；这里防御性兜底，绝不把失败伪装成成功。
+      agentStore.processEvent({
+        type: 'command_error',
+        content: data.error_message || t('agentCommand.failedFallback'),
+        command_name: data.command || parsedName,
+        error_type: data.error_code || 'command_failed',
+      })
+    } else {
+      agentStore.processEvent({
+        type: 'command_result',
+        content: data.content,
+        command_name: data.command || parsedName,
+        command_data: data.data || {},
+      })
+    }
+  } catch (err) {
+    const failure = commandErrorMessage(err)
+    agentStore.processEvent({
+      type: 'command_error',
+      content: failure.message,
+      command_name: parsedName,
+      error_type: failure.code,
+    })
+  } finally {
+    agentStore.setLoading(false)
+    // 命令不是 PER 轮次：收敛后回到 idle，不把任务态留在 running。
+    agentStore.setTaskState('idle')
+    scrollToBottom()
+  }
+}
+
+// ── Session Fork（#476）：消息级分叉 / 谱系 / 子会话入口 ───────────────────
+
+/** 服务端 meta 标记的未结算边界（tool_status/status=pending）不可作为边界。 */
+function isPendingBoundary(msg: AgentChatMessage): boolean {
+  const meta = msg.serverMeta
+  if (!meta || typeof meta !== 'object') return false
+  return meta.tool_status === 'pending' || meta.status === 'pending'
+}
+
+function showForkAction(msg: AgentChatMessage): boolean {
+  return !!agentStore.currentSessionId && !!msg.serverMessageId
+}
+
+function forkDisabled(msg: AgentChatMessage): boolean {
+  return forkBusy.value || agentStore.isLoading || isPendingBoundary(msg)
+}
+
+function forkDisabledTitle(msg: AgentChatMessage): string {
+  if (isPendingBoundary(msg)) return t('agentFork.pendingBoundary')
+  if (agentStore.isLoading) return t('agentFork.runningHint')
+  if (forkBusy.value) return t('agentFork.forking')
+  return forkButtonLabel(msg)
+}
+
+/** 边界语义如实标注：USER 边界 = 在该消息之前分叉（消息本身不复制）。 */
+function forkButtonLabel(msg: AgentChatMessage): string {
+  return msg.role === 'user' ? t('agentFork.forkBefore') : t('agentFork.forkHere')
+}
+
+/** 分叉失败原因：按后端稳定 error_code 映射；未知错误保留后端文案/兜底。 */
+function forkErrorMessage(err: unknown): string {
+  const response = (err as { response?: { status?: number; data?: Record<string, any> } })
+    ?.response
+  const body = response?.data || {}
+  const code = typeof body.error_code === 'string' ? body.error_code : ''
+  const mapped: Record<string, string> = {
+    FORK_BOUNDARY_INVALID: t('agentFork.errBoundary'),
+    FORK_CHECKPOINT_REQUIRED: t('agentFork.errCheckpointRequired'),
+    FORK_CHECKPOINT_UNAVAILABLE: t('agentFork.errCheckpointUnavailable'),
+    FORK_QUOTA_EXCEEDED: t('agentFork.errQuota'),
+    SESSION_NOT_FOUND: t('agentFork.errNotFound'),
+    NOT_FOUND: t('agentFork.errNotFound'),
+  }
+  if (mapped[code]) {
+    const detail = typeof body.message === 'string' ? body.message : ''
+    return detail ? `${mapped[code]}（${detail}）` : mapped[code]
+  }
+  if (response?.status === 404) return t('agentFork.errNotFound')
+  if (typeof body.message === 'string' && body.message) return body.message
+  return t('agentFork.errFailed')
+}
+
+/** 从边界消息分叉：成功后刷新列表、跳转子会话并保留 seed 说明。 */
+async function handleForkMessage(msg: AgentChatMessage) {
+  const sourceId = agentStore.currentSessionId
+  if (!sourceId || !msg.serverMessageId || forkBusy.value) return
+  if (agentStore.isLoading) {
+    message.warning(t('agentFork.runningHint'))
+    return
+  }
+  if (isPendingBoundary(msg)) return
+
+  forkBusy.value = true
+  forkErrorText.value = ''
+  const parentTitle = agentStore.currentSession?.title || sourceId
+  try {
+    const res = await sessionsApi.fork(sourceId, { message_id: msg.serverMessageId })
+    const data = apiUnwrap<SessionForkData>(res)
+    if (!data?.id) throw new Error('fork response missing session id')
+
+    lastForkInfo.value = {
+      parentTitle,
+      copied: data.copied_message_count,
+      isSeeded: data.is_seeded,
+    }
+    await refreshSessions()
+    agentStore.setCurrentSession(data.id)
+    await loadSessionMessages(data.id)
+    await loadLineage(data.id)
+    if (showChildren.value) void loadChildren()
+  } catch (err) {
+    forkErrorText.value = forkErrorMessage(err)
+  } finally {
+    forkBusy.value = false
+    scrollToBottom()
+  }
+}
+
+/** 谱系详情：祖先链 + 父缺失/截断标记（父会话删除后仍可查）。 */
+async function loadLineage(sessionId: string) {
+  try {
+    const res = await sessionsApi.lineage(sessionId)
+    currentLineage.value = apiUnwrap<SessionLineageData>(res) || null
+  } catch {
+    // 谱系查询失败不阻塞会话切换：徽标退回列表字段（父 id 仍可见）。
+    currentLineage.value = null
+  }
+}
+
+/** 列表按 parent_session_id 过滤（「查看分叉」入口）。 */
+async function loadChildren() {
+  const sessionId = agentStore.currentSessionId
+  if (!sessionId) {
+    children.value = []
+    return
+  }
+  childrenLoading.value = true
+  try {
+    const res = await agentApi.listSessions({
+      parent_session_id: sessionId,
+      page: 1,
+      page_size: 50,
+    })
+    const data = apiUnwrap<{ sessions: AgentSession[] }>(res)
+    children.value = Array.isArray(data?.sessions) ? data.sessions : []
+  } catch {
+    children.value = []
+  } finally {
+    childrenLoading.value = false
+  }
+}
+
+async function openChildSession(sessionId: string) {
+  showChildren.value = false
+  await handleSessionChange(sessionId)
+}
+
+/** 刷新会话列表（分叉后让子会话出现在下拉/谱系查询中）。 */
+async function refreshSessions() {
+  try {
+    const res = await agentApi.listSessions({ page: 1, page_size: 50 })
+    const data = apiUnwrap<{ sessions: AgentSession[] }>(res)
+    if (Array.isArray(data?.sessions)) agentStore.setSessions(data.sessions)
+  } catch {
+    // 列表刷新失败不阻塞分叉跳转（子会话仍可通过详情载入）
+  }
+}
+
+/** 载入会话历史消息：保留服务端消息 id / meta（分叉边界与 pending 判定）。 */
+async function loadSessionMessages(sessionId: string): Promise<AgentSessionDetail | null> {
+  const res = await agentApi.getSession(sessionId)
+  const detail = apiUnwrap<AgentSessionDetail>(res)
+  if (detail?.config) agentStore.updateConfig(detail.config)
+  const raw = Array.isArray(detail?.messages) ? detail.messages : []
+  const mapped: AgentChatMessage[] = []
+  for (const item of raw) {
+    // SYSTEM 消息不是合法分叉边界，也不作为对话气泡展示。
+    if (item.message_type === 'system') continue
+    mapped.push({
+      role: item.message_type === 'user' ? 'user' : 'assistant',
+      content: item.content || '',
+      events: [],
+      loading: false,
+      currentTool: '',
+      thinkingText: '',
+      planSteps: [],
+      planId: '',
+      progress: 0,
+      serverMessageId: item.id,
+      serverMeta: item.meta,
+    })
+  }
+  agentStore.setMessages(mapped)
+  return detail || null
 }
 
 function scrollToBottom() {
@@ -989,18 +1436,22 @@ watch(
 
 async function handleSessionChange(sessionId: string | null) {
   agentStore.setCurrentSession(sessionId)
-  if (sessionId) {
-    try {
-      const res = await agentApi.getSession(sessionId)
-      // 真载荷在 apiUnwrap(res).config（agent.py:637-647 的 {success, data:{…,config}}）；
-      // 旧读 res.data.config 恒 undefined → 会话配置静默 no-op（B25）
-      const detail = apiUnwrap<AgentSessionDetail>(res)
-      if (detail?.config) {
-        agentStore.updateConfig(detail.config)
-      }
-    } catch (e) {
-      message.error('加载会话失败')
-    }
+  forkErrorText.value = ''
+  lastForkInfo.value = null
+  currentLineage.value = null
+  if (!sessionId) {
+    agentStore.clearMessages()
+    children.value = []
+    return
+  }
+  // issue #476：载入历史消息（服务端 id/meta 是消息级分叉入口与边界判定的依据）。
+  // 运行中不覆盖当前消息流（流结束后再切换会话即可）。
+  if (agentStore.isLoading) return
+  try {
+    const detail = await loadSessionMessages(sessionId)
+    if (detail?.is_fork) await loadLineage(sessionId)
+  } catch (e) {
+    message.error('加载会话失败')
   }
 }
 
@@ -1046,6 +1497,9 @@ async function handleNewSession() {
         ...agentStore.sessions,
       ])
       agentStore.setCurrentSession(session.id)
+      agentStore.clearMessages()
+      lastForkInfo.value = null
+      forkErrorText.value = ''
       message.success('已创建新会话')
     }
   } catch (e) {
@@ -1194,7 +1648,151 @@ async function loadInit() {
   font-weight: 500;
 }
 
-.header-center { flex: 1; display: flex; justify-content: center; }
+.header-center { flex: 1; display: flex; justify-content: center; align-items: center; gap: 8px; }
+
+/* issue #476：谱系徽标（hover 原生 tooltip 展示父/根/边界详情） */
+.lineage-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  color: #6d28d9;
+  background: rgba(109, 40, 217, 0.1);
+  border: 1px solid rgba(109, 40, 217, 0.3);
+  cursor: help;
+  white-space: nowrap;
+}
+
+.dark .lineage-badge {
+  color: #c4b5fd;
+  background: rgba(109, 40, 217, 0.2);
+  border-color: rgba(139, 92, 246, 0.45);
+}
+
+.lineage-parent {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+/* issue #476：「查看分叉」列表（parent_session_id 过滤） */
+.fork-children-panel {
+  min-width: 200px;
+  max-width: 320px;
+}
+
+.fork-children-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary, #9ca3af);
+  margin-bottom: 6px;
+}
+
+.fork-children-state {
+  font-size: 12px;
+  color: var(--text-tertiary, #9ca3af);
+  padding: 6px 4px;
+}
+
+.fork-child-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  padding: 6px 8px;
+  cursor: pointer;
+  color: var(--text-primary, #111827);
+}
+
+.dark .fork-child-item { color: var(--text-primary-dark, #f9fafb); }
+
+.fork-child-item:hover { background: rgba(59, 130, 246, 0.1); }
+
+.fork-child-title {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fork-child-meta {
+  font-size: 10px;
+  color: var(--text-tertiary, #9ca3af);
+}
+
+/* issue #476：分叉失败原因 / seed 说明（消息流顶部常驻，不是一闪而过的 toast） */
+.fork-error {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  border-left: 3px solid #dc2626;
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.08);
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+.dark .fork-error { color: #fca5a5; }
+
+.fork-seed-note {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid rgba(109, 40, 217, 0.3);
+  border-left: 3px solid #6d28d9;
+  border-radius: 8px;
+  background: rgba(109, 40, 217, 0.07);
+  color: #5b21b6;
+  font-size: 12px;
+}
+
+.dark .fork-seed-note { color: #c4b5fd; }
+
+/* issue #476：消息级「从此处分叉」入口 */
+.fork-here-line {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 6px;
+}
+
+.user-bubble .fork-here-line { justify-content: flex-end; }
+
+.fork-here-btn {
+  border: 1px dashed rgba(109, 40, 217, 0.45);
+  color: #6d28d9;
+  background: rgba(109, 40, 217, 0.06);
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.dark .fork-here-btn { color: #c4b5fd; border-color: rgba(139, 92, 246, 0.5); }
+
+.fork-here-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.fork-here-btn.fork-here-inline {
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* User Commands（#475）：早退路径的独立错误行（无 command_start 配对） */
+.command-error-standalone {
+  margin: 4px 0;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #dc2626;
+}
 
 .header-right { display: flex; gap: 6px; }
 

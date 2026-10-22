@@ -190,8 +190,42 @@ export const useAgentStore = defineStore('agent', () => {
 
       case 'chunk':
         updateLastAssistant((msg) => {
+          // issue #475：命令消息不吸收 chunk——后端为兼容旧 UI 会在
+          // command_result 后再发一条同内容 chunk（agent.py 兼容层），
+          // 若照常拼接，命令结果会在卡片与正文里重复出现。
+          if (msg.isCommand) return
           msg.content += event.content
         })
+        break
+
+      // ── User Commands（issue #475）────────────────────────────────────
+      // 命令事件由后端在进入 PER 之前发出（/agent、/chat 同源）；结构化载荷
+      // 复用既有事件信封（content / command_name / command_data），不另造协议。
+      case 'command_start':
+        updateLastAssistant((msg) => {
+          msg.isCommand = true
+          msg.events.push(event)
+        })
+        break
+
+      case 'command_result':
+        updateLastAssistant((msg) => {
+          msg.isCommand = true
+          msg.events.push(event)
+          msg.loading = false
+          msg.endedAt = Date.now()
+        })
+        isThinking.value = false
+        break
+
+      case 'command_error':
+        updateLastAssistant((msg) => {
+          msg.isCommand = true
+          msg.events.push(event)
+          msg.loading = false
+          msg.endedAt = Date.now()
+        })
+        isThinking.value = false
         break
 
       case 'error':
@@ -307,6 +341,9 @@ export const useAgentStore = defineStore('agent', () => {
           msg.endedAt = Date.now()
           if (event.message_id) {
             msg.messageId = event.message_id
+            // issue #476：落库回执即边界 id——实时运行完的 assistant 消息也能
+            // 「从此处分叉」（历史加载的消息走 serverMessageId 同字段）。
+            msg.serverMessageId = event.message_id
           }
         })
         // HITL：done 如实盖章任务态（waiting_approval / cancelled 时出现）——
@@ -340,6 +377,11 @@ export const useAgentStore = defineStore('agent', () => {
     isThinking.value = false
     currentToolName.value = ''
     expandedEvents.value = new Set()
+  }
+
+  /** issue #476：历史会话消息载入（含 serverMessageId / serverMeta，供分叉边界）。 */
+  function setMessages(list: AgentChatMessage[]) {
+    messages.value = list
   }
 
   function setLoading(val: boolean) {
@@ -448,6 +490,7 @@ export const useAgentStore = defineStore('agent', () => {
     updateLastAssistant,
     processEvent,
     clearMessages,
+    setMessages,
     setLoading,
     setSessions,
     setCurrentSession,

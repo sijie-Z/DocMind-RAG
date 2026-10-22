@@ -196,6 +196,7 @@ export default {
     welcome: 'Hello, I am DocMind. How can I help you today?',
     welcomeDesc: 'I can help answer questions, analyze documents, write code, or just chat.',
     inputPlaceholder: 'Type your message, Shift + Enter for new line...',
+    slashCommandsAgentOnly: 'Slash commands are available only in Agent (deep analysis) mode; in quick mode this is sent as plain text.',
     uploadFile: 'Upload File (Coming Soon)',
     streamResponse: 'Stream Response',
     send: 'Send',
@@ -1100,18 +1101,66 @@ export default {
   slashCmd: {
     heading: 'Slash commands',
     empty: 'No matching command (Enter sends the raw text)',
+    unavailable: 'Server commands are disabled; only local templates are available',
+    loadError: 'Failed to load commands (local templates remain available)',
+    commandBadge: 'server',
     desc: {
       search: 'Web search & summarize (web_search tool)',
       doc: 'Answer from the knowledge base (search_knowledge_base tool)',
-      workflow: 'Break into a multi-step plan and execute (planner)',
-      help: 'Show all commands with descriptions',
-      clear: 'Clear the input box'
+      workflow: 'Break into a multi-step plan and execute (planner)'
+    },
+    cmdDesc: {
+      help: 'List available commands or show help for one command',
+      status: 'Show the current session and recent task status',
+      export: 'Export the current session (Markdown / JSON)',
+      tools: 'List agent tools and default-disabled state'
     },
     tpl: {
       search: 'Search the web and summarize: {q}',
       doc: 'Answer from the knowledge base: {q}',
       workflow: 'Break this into a multi-step plan and execute step by step: {q}'
     }
+  },
+  agentCommand: {
+    starting: 'Running {line}',
+    running: 'Running',
+    completed: 'Completed',
+    failed: 'Failed',
+    exportReady: 'Export ready ({count} messages)',
+    download: 'Download {filename}',
+    noOutput: '(no output)',
+    failedFallback: 'Command failed. Please try again.',
+
+    errUnknown: 'Unknown command (type /help to list commands)',
+    errPermission: 'This command is restricted to organization admins',
+    errInvalid: 'Invalid command arguments',
+    errBusy: 'Another command is already running in this session',
+    errTimeout: 'Command timed out',
+    errSession: 'Open a session before running this command',
+    errSessionNotFound: 'Session not found or access denied',
+    errDisabled: 'Commands are disabled',
+  },
+  agentFork: {
+    badge: 'Fork',
+    badgeTitle: 'Parent: {parent} · Root: {root} · Boundary: {boundary}',
+    parentMissing: 'Parent session deleted or inaccessible',
+    forkHere: 'Fork from here',
+    forkBefore: 'Fork before this message',
+    forking: 'Forking…',
+    pendingBoundary: 'This turn is not settled yet and cannot be a fork boundary',
+    runningHint: 'A turn is running; wait for it to settle before forking',
+    children: 'View forks',
+    childrenTitle: 'Forks of this session',
+    childrenEmpty: 'No forks yet',
+    seedNote: 'Forked from "{parent}", copied {count} messages; memory seed: {seed}',
+    seedApplied: 'written to session memory',
+    seedSkipped: 'not enabled (history copied only)',
+    errBoundary: 'Invalid fork boundary: only settled turns can be forked',
+    errCheckpointRequired: 'The source session has a running task; fork from the last committed checkpoint instead',
+    errCheckpointUnavailable: 'No settled checkpoint is available (missing, awaiting approval, or tool in progress)',
+    errQuota: 'The number of copied messages exceeds the limit',
+    errNotFound: 'Session or boundary message not found (or access denied)',
+    errFailed: 'Fork failed. Please try again.'
   },
   runStats: {
     running: 'Running {t}',

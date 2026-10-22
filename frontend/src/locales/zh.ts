@@ -202,6 +202,7 @@ export default {
     welcome: '我是 DocMind 助手，很高兴为您服务',
     welcomeDesc: '我可以帮您回答问题、分析文档、编写代码，或者只是聊聊天。',
     inputPlaceholder: '输入您的问题，Shift + Enter 换行...',
+    slashCommandsAgentOnly: '斜杠命令仅在 Agent（深度分析）模式可用；当前普通问答会把它当作普通文本发送。',
     uploadFile: '上传文件',
     streamResponse: '流式响应',
     send: '发送',
@@ -1109,18 +1110,66 @@ export default {
   slashCmd: {
     heading: '斜杠命令',
     empty: '无匹配命令（Enter 直接发送原文）',
+    unavailable: '服务端命令已停用，仅本地模板可用',
+    loadError: '命令列表加载失败（本地模板仍可用）',
+    commandBadge: '服务端',
     desc: {
       search: '联网搜索并总结（web_search 工具）',
       doc: '基于知识库回答（search_knowledge_base 工具）',
-      workflow: '拆解为多步计划并逐步执行（规划器）',
-      help: '查看全部命令与说明',
-      clear: '清空输入框'
+      workflow: '拆解为多步计划并逐步执行（规划器）'
+    },
+    cmdDesc: {
+      help: '列出可用命令或查看某个命令的帮助',
+      status: '查看当前会话与最近任务状态',
+      export: '导出当前会话（Markdown / JSON）',
+      tools: '列出 Agent 可用工具与默认禁用状态'
     },
     tpl: {
       search: '联网搜索并总结：{q}',
       doc: '基于知识库回答：{q}',
       workflow: '请拆解为多步计划并逐步执行：{q}'
     }
+  },
+  agentCommand: {
+    starting: '执行命令 {line}',
+    running: '执行中',
+    completed: '已完成',
+    failed: '执行失败',
+    exportReady: '已生成导出（{count} 条消息）',
+    download: '下载 {filename}',
+    noOutput: '（无输出）',
+    failedFallback: '命令执行失败，请稍后重试',
+
+    errUnknown: '未知命令（输入 /help 查看可用命令）',
+    errPermission: '该命令仅限组织管理员',
+    errInvalid: '命令参数不合法',
+    errBusy: '同一会话已有命令在执行，请稍后再试',
+    errTimeout: '命令执行超时',
+    errSession: '请先打开一个会话再执行该命令',
+    errSessionNotFound: '会话不存在或无权访问',
+    errDisabled: '命令功能未启用',
+  },
+  agentFork: {
+    badge: '分叉会话',
+    badgeTitle: '父会话：{parent} · 根会话：{root} · 边界消息：{boundary}',
+    parentMissing: '父会话已删除或不可见',
+    forkHere: '从此处分叉',
+    forkBefore: '在此消息之前分叉',
+    forking: '分叉中…',
+    pendingBoundary: '该消息所在轮次未结算，不能作为分叉边界',
+    runningHint: '当前轮次运行中，请等待本轮结束后再分叉',
+    children: '查看分叉',
+    childrenTitle: '该会话的分叉',
+    childrenEmpty: '该会话暂无分叉',
+    seedNote: '已从「{parent}」分叉，复制 {count} 条消息；记忆 seed：{seed}',
+    seedApplied: '已写入会话记忆',
+    seedSkipped: '未启用（仅复制历史消息）',
+    errBoundary: '分叉边界非法：只能从已结算轮次处分叉',
+    errCheckpointRequired: '源会话有运行中的任务，只能从最后一个已提交 checkpoint 分叉',
+    errCheckpointUnavailable: '没有可用的已结算 checkpoint（不存在、待审批或执行中工具）',
+    errQuota: '分叉复制的消息数超出上限',
+    errNotFound: '会话或边界消息不存在（或无权访问）',
+    errFailed: '分叉失败，请稍后重试'
   },
   runStats: {
     running: '已运行 {t}',
