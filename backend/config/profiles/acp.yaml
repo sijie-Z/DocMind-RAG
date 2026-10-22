@@ -1,0 +1,4 @@
+# acp：ACP 入口（#481 实现；本期桩）。
+entrypoint: acp
+bundles: [core, agent]
+settings: {}

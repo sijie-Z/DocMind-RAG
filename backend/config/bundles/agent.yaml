@@ -1,0 +1,3 @@
+# agent bundle：PER Agent、工具、工作流、定时任务相关配置。
+# 当前为空，保持与代码默认值等价（行为零漂移）。
+settings: {}

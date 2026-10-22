@@ -1,0 +1,4 @@
+# worker：Kafka 消费入口，无 HTTP。
+entrypoint: worker
+bundles: [core, rag, agent, observability]
+settings: {}
