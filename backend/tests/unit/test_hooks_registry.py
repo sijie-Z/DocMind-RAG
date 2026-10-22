@@ -520,3 +520,17 @@ def test_hook_error_events_carry_all_fields():
     assert data["elapsed_ms"] == 2001
     assert data["error_type"] == "timeout"
     assert data["content"] == "hook audit_tool_calls 执行超时（2.0s）"
+
+
+def test_hook_error_is_eventtype_literal_member():
+    """锁死事件名契约：前端依赖的 "hook_error" 必须是 EventType 闭集成员。
+
+    变异点：把 events.py 的成员 "hook_error" 改名（数量不变）→ 本用例红。
+    doc-facts 只统计 Literal 成员数量，改名不会改变数量，因此必须有这条
+    按**名字**断言的用例来守契约。
+    """
+    from typing import get_args
+
+    from app.agent.events import EventType
+
+    assert "hook_error" in set(get_args(EventType))
