@@ -16,7 +16,7 @@
         <h2 class="text-lg font-bold text-gray-900 dark:text-white">{{ t('dashboard.startTitle') }}</h2>
         <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.startDesc') }}</p>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div data-testid="home-quickstart-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <button
           type="button"
           data-testid="home-action-chat"
@@ -52,6 +52,17 @@
           </div>
           <p class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.startAgent') }}</p>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.startAgentDesc') }}</p>
+        </button>
+      </div>
+      <!-- 使用文档入口：不改变 B5 三入口网格结构，作为首屏补充链接 -->
+      <div class="flex justify-end">
+        <button
+          type="button"
+          data-testid="home-action-docs"
+          class="rounded text-xs font-medium text-blue-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-blue-400"
+          @click="$router.push('/system-help')"
+        >
+          {{ t('help.center.title') }}
         </button>
       </div>
     </section>

@@ -1074,6 +1074,55 @@ export default {
           desc: 'MCP（Model Context Protocol）は、外部ツールサーバーを Agent に接続する仕組みです。管理者は「管理 → MCP サーバー」（管理者のみ表示）で各サーバーの状態と登録済みツールを確認できます。このページは読み取り専用で、有効化・無効化やサーバーの追加は backend/mcp_servers.json を編集してサービスを再起動する必要があります。'
         },
       }
+    },
+    center: {
+      title: 'ドキュメント',
+      navTitle: 'ドキュメント目次',
+      subtitle: '初回ログインからトラブルシューティングまで、実際の動作に基づくガイド',
+      searchPlaceholder: 'タイトルと本文を検索',
+      searchResults: '{count} 件のドキュメントが一致しました',
+      searchNoResults: '一致するドキュメントがありません',
+      tocTitle: 'このページの目次',
+      prev: '前へ',
+      next: '次へ',
+      bodyLanguageNote: '本文は中国語が基準です',
+      contentMissing: 'このドキュメントの本文はこのビルドに含まれていません。デプロイ管理者にお問い合わせください。',
+      emptyTitle: 'ドキュメントはまだありません',
+      emptyDesc: 'このビルドにはドキュメント本文が含まれていません。デプロイ管理者にお問い合わせください。',
+      openNav: 'ドキュメント目次を開く',
+      closeNav: 'ドキュメント目次を閉じる',
+      groups: {
+        gettingStarted: 'はじめに',
+        concepts: '基本概念',
+        guides: '機能ガイド',
+        faq: 'よくある質問',
+        troubleshooting: 'トラブルシューティング'
+      },
+      docs: {
+        registerLogin: { title: '登録とログイン' },
+        uploadFirstDocument: { title: '最初のドキュメントをアップロード' },
+        firstQuestion: { title: '最初の質問' },
+        perAgent: { title: 'PER エージェント：計画・実行・振り返り' },
+        ragPipeline: { title: 'RAG 検索パイプライン' },
+        knowledgeBaseConcept: { title: 'ナレッジベース：組織ごとに1つ' },
+        organizationMultitenancy: { title: '組織とマルチテナント' },
+        toolsHitl: { title: 'ツールと人による承認（HITL）' },
+        chat: { title: 'チャットの使い方' },
+        knowledgeBase: { title: 'ナレッジベースの使い方' },
+        agentWorkbench: { title: 'エージェントワークベンチ' },
+        workflowEditor: { title: 'ワークフローエディター' },
+        prompts: { title: 'プロンプトの3層構造' },
+        organizationSettings: { title: '組織設定' },
+        monitoring: { title: '監視とダッシュボード' },
+        loginExpiry: { title: 'ログインが切れる理由' },
+        retrievalNotFound: { title: 'アップロード後に検索できない' },
+        agentApproval: { title: 'エージェントが承認待ちになる理由' },
+        orgSwitchSessions: { title: '組織切り替え後に過去の会話が見えない' },
+        cacheDifference: { title: 'セマンティックキャッシュと完全一致キャッシュの違い' },
+        healthReadiness: { title: '/health と /readyz の読み方' },
+        logsRequestId: { title: 'ログと request_id' },
+        feedback: { title: '問題の報告' }
+      }
     }
   },
   router: {
