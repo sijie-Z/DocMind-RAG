@@ -287,6 +287,11 @@ async def _load_active_tasks(
 
     查询 defer ``context_snapshot``（#278/R1 毒丸防线）：本函数只需要任务行的
     状态/id，损坏的快照列不得把"判定是否有运行中任务"整条链路炸成 500。
+
+    issue #499：fork 克隆任务落 PENDING（契约），但它不是"正在跑的 run"——
+    快照 ``run.fork_origin`` 是克隆标记，这类 PENDING 必须排除，否则子会话会
+    被克隆产物挡住、无法再普通分叉。真正的排队 PENDING（无克隆标记）仍算活跃。
+    克隆标记需要读快照，按毒丸纪律单独容错读取（坏快照按"非克隆"保守处理）。
     """
     conditions = [
         AgentTask.session_id == source.id,
@@ -300,7 +305,15 @@ async def _load_active_tasks(
     rows = await db.execute(
         select(AgentTask).where(*conditions).options(defer(AgentTask.context_snapshot))
     )
-    return list(rows.scalars().all())
+    active: list[AgentTask] = []
+    for task in rows.scalars().all():
+        if task.status == TaskStatus.PENDING:
+            envelope = checkpoint.parse_snapshot(await _load_snapshot_raw(db, task.id))
+            run_state = envelope.get("run") if isinstance(envelope, dict) else None
+            if isinstance(run_state, dict) and isinstance(run_state.get("fork_origin"), dict):
+                continue  # fork 克隆的 PENDING 不是运行中的 run
+        active.append(task)
+    return active
 
 
 async def _load_snapshot_raw(db: AsyncSession, task_id: str) -> Any | None:

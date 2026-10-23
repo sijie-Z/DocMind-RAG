@@ -783,6 +783,63 @@ async def test_paused_clone_task_does_not_block_plain_fork(db_factory):
         assert result.checkpoint_task_id is None
 
 
+@pytest.mark.asyncio
+async def test_pending_fork_clone_does_not_block_plain_fork(db_factory):
+    """issue #499：克隆任务落 PENDING，但带 run.fork_origin 的 PENDING 不是运行中 run。
+
+    变异点：不排除克隆 PENDING → 子会话被自己的克隆产物挡住（本用例红）。
+    """
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        envelope = _envelope(src.id)
+        envelope["run"]["fork_origin"] = {
+            "source_task_id": "parent-task",
+            "source_session_id": "parent-session",
+        }
+        db.add(
+            AgentTask(
+                id="task-clone-pending",
+                user_id=USER_ID,
+                organization_id=ORG_ID,
+                session_id=src.id,
+                query="分叉快照",
+                status=TaskStatus.PENDING,
+                context_snapshot=envelope,
+            )
+        )
+        await db.commit()
+
+        result = await _fork(db, src.id)
+        assert result.copied_message_count == 2
+        assert result.checkpoint_task_id is None
+
+
+@pytest.mark.asyncio
+async def test_pending_queued_task_still_requires_checkpoint(db_factory):
+    """真正排队中的 PENDING（无克隆标记）仍是活跃任务：普通分叉 409。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        db.add(
+            AgentTask(
+                id="task-queued",
+                user_id=USER_ID,
+                organization_id=ORG_ID,
+                session_id=src.id,
+                query="排队中",
+                status=TaskStatus.PENDING,
+                context_snapshot=None,
+            )
+        )
+        await db.commit()
+
+        with pytest.raises(ForkCheckpointRequiredError):
+            await _fork(db, src.id)
+
+
 # ── 记忆隔离 / seed ────────────────────────────────────────────────────────
 
 
