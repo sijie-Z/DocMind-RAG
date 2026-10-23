@@ -78,6 +78,12 @@ class TerminalQuotaExceeded(TerminalError):
     code = "terminal_quota_exceeded"
 
 
+class TerminalOwnedElsewhere(TerminalError):
+    """终端归属另一个 worker 进程（多 worker 部署需 sticky 路由）。"""
+
+    code = "terminal_owned_elsewhere"
+
+
 class TerminalBusy(TerminalError):
     """同一终端已有 writer 在写入。"""
 
