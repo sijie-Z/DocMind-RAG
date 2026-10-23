@@ -29,17 +29,16 @@ BUF_KEY = "sse:buf:{stream_id}"
 
 
 def format_sse(event: str, data: dict, event_id: str | None = None) -> str:
-    """编码一个 SSE 帧：``data:``（多行逐行前缀）+ 可选 ``id:`` + ``event:``。
+    """编码一个 SSE 帧：``event:`` / ``id:``（可选）/ ``data:``（多行逐行前缀）。
 
-    字段顺序为 ``data → id → event``：SSE 规范对字段顺序无要求，而仓库内既有
-    客户端/测试解析器以「块首行是 ``data: ``」为口径（历史帧只有 data 行）；
-    把 data 放最前保持向后兼容，``event:``/``id:`` 在其后仍被标准客户端识别。
+    字段顺序按 issue §5.2 契约（event → id → data）；前端解析器按行状态机消费，
+    依赖 event 行先于 data 行。
     """
-    payload = json.dumps(data, ensure_ascii=False)
-    lines: list[str] = [f"data: {line}" for line in payload.splitlines() or [""]]
+    lines: list[str] = [f"event: {event}"]
     if event_id is not None:
         lines.append(f"id: {event_id}")
-    lines.append(f"event: {event}")
+    payload = json.dumps(data, ensure_ascii=False)
+    lines.extend(f"data: {line}" for line in payload.splitlines() or [""])
     return "\n".join(lines) + "\n\n"
 
 
@@ -106,7 +105,10 @@ class SSEStream:
         if parsed is None:
             return [], True
         resume_stream_id, last_seq = parsed
-        if self.stream_id is not None and resume_stream_id != self.stream_id:
+        if self.stream_id is None:
+            # 未绑定流键（无法证明该流属于当前调用者）⇒ 拒绝任意流回放。
+            return [], True
+        if resume_stream_id != self.stream_id:
             return [], True
 
         stream_id = resume_stream_id
@@ -118,6 +120,10 @@ class SSEStream:
         except Exception as exc:  # noqa: BLE001
             logger.warning("SSE resume unavailable (redis): %s", exc)
             return [], False
+
+        if current_seq < last_seq:
+            # 重连点超出已知序号：伪造/未来 id，按不可续传处理。
+            return [], True
 
         records: list[tuple[int, dict]] = []
         for raw in raw_entries or []:

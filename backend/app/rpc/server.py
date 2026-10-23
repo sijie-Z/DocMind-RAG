@@ -91,8 +91,10 @@ async def run_stdio(
 
     def _pump_stdin() -> None:
         """后台线程逐行读 stdin；EOF 推空字节作为哨兵。"""
+        max_bytes = int(settings.RPC_LINE_MAX_BYTES)
         while True:
-            raw = sys.stdin.buffer.readline()
+            # 限制单次读入大小，超长行不整行进内存（多读 1 字节用于判定超限）。
+            raw = sys.stdin.buffer.readline(max_bytes + 1)
             if raw is None:
                 raw = b""
             loop.call_soon_threadsafe(line_queue.put_nowait, raw)

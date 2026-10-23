@@ -56,7 +56,7 @@ from app.core.error_mapping import (
 )
 from app.core.log_safety import log_safe
 from app.core.prometheus import AGENT_FEEDBACK_TOTAL
-from app.core.security import get_current_user, require_organization
+from app.core.security import get_current_user, require_organization, require_scope
 from app.core.sse import SSEStream, format_sse, keepalive_stream
 from app.exceptions import (
     AuthorizationError,
@@ -98,6 +98,41 @@ def _sse_response(stream) -> StreamingResponse:
             "Connection": "keep-alive",
         },
     )
+
+
+async def _replay_only_response(
+    *,
+    task_id: str,
+    effective_org_id: int | None,
+    current_user: User,
+    request: Request,
+) -> StreamingResponse | None:
+    """B2/B4：带 ``Last-Event-ID`` 的续传请求只回放缓冲，不认领、不重跑。
+
+    必须在 ``prepare_resume`` / ``apply_*_decision`` **之前**调用：否则 GONE 分支
+    会让任务停在 RUNNING / 审批已记账却无人执行。
+    """
+
+    last_event_id = request.headers.get("Last-Event-ID")
+    if not last_event_id:
+        return None
+    task, payload = await checkpoint.load_for_resume(
+        task_id=task_id,
+        user_id=current_user.id,
+        organization_id=effective_org_id,
+    )
+    session_id = (payload or {}).get("session_id") or task.session_id or None
+    emitter = SSEStream(session_id or task_id)
+    frames, gone = await emitter.replay(last_event_id)
+
+    async def _frames():
+        if gone:
+            yield format_sse("error", {"code": "SSE_RESUME_GONE"})
+            return
+        for frame in frames:
+            yield frame
+
+    return _sse_response(_frames())
 
 
 def _merge_disabled_tools(client_disabled: list[str] | None) -> list[str]:
@@ -223,7 +258,7 @@ async def _build_agent_config(body: AgentChatRequest, user_id: int) -> AgentConf
 async def agent_chat(
     body: AgentChatRequest,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("chat:write")),
     db: AsyncSession = Depends(get_db),
 ):
     """PER agent chat with streaming events via SSE.
@@ -244,12 +279,22 @@ async def agent_chat(
         emitter = SSEStream(body.session_id)
         last_event_id = request.headers.get("Last-Event-ID")
         if last_event_id:
+            if body.session_id:
+                replay_scope = await resolve_session_access_scope(current_user, db)
+                accessible = await load_accessible_session(
+                    db, body.session_id, current_user, replay_scope
+                )
+                if accessible is None:
+                    yield format_sse("error", {"content": "会话不存在或无权访问"})
+                    return
             frames, gone = await emitter.replay(last_event_id)
             if gone:
                 yield format_sse("error", {"code": "SSE_RESUME_GONE"})
                 return
+            # B4：续传只回放，不重跑整轮（避免重复回答/落库/双份 LLM）。
             for frame in frames:
                 yield frame
+            return
         try:
             # User Commands（issue #475）："/" 前缀在进入 PER 之前短路——命令文本
             # 绝不作为 prompt 漏给模型；命令不写用户消息、不创建模型轮次/任务行。
@@ -552,7 +597,7 @@ async def get_agent_task_replay(
 async def resume_agent_task(
     task_id: str,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("chat:write")),
     db: AsyncSession = Depends(get_db),
 ):
     """从 checkpoint 恢复中断的任务（SSE 流；事件契约与 /chat 完全一致）。
@@ -567,6 +612,15 @@ async def resume_agent_task(
     流式输出前可写，403/404/409 语义全靠它拍板。
     """
     effective_org_id = await require_organization(current_user, db)
+    # B2/B4：续传请求（Last-Event-ID）在认领之前只回放，不重复跑、不卡 RUNNING。
+    replay_response = await _replay_only_response(
+        task_id=task_id,
+        effective_org_id=effective_org_id,
+        current_user=current_user,
+        request=request,
+    )
+    if replay_response is not None:
+        return replay_response
     task, payload = await agent_service.prepare_resume(
         task_id,
         user_id=current_user.id,
@@ -584,14 +638,6 @@ async def resume_agent_task(
         last_event_type = ""
         # issue #480 §5.2：流键 = 会话 id，解析不到时退回 task_id。
         emitter = SSEStream(session_id or task_id)
-        last_event_id = request.headers.get("Last-Event-ID")
-        if last_event_id:
-            frames, gone = await emitter.replay(last_event_id)
-            if gone:
-                yield format_sse("error", {"code": "SSE_RESUME_GONE"})
-                return
-            for frame in frames:
-                yield frame
         try:
             async for event in agent_service.resume_chat(
                 task_id,
@@ -676,7 +722,7 @@ async def resume_agent_task(
             done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
-        yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
+        yield await emitter.emit("done", done_data)
 
     return _sse_response(event_stream())
 
@@ -703,7 +749,7 @@ async def decide_agent_task_approval(
     task_id: str,
     body: TaskApprovalRequest,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("chat:write")),
     db: AsyncSession = Depends(get_db),
 ):
     """审批应答（approve / deny / 改指令）→ 记账 + 认领 + SSE 续跑。
@@ -726,6 +772,14 @@ async def decide_agent_task_approval(
       TASK_NOT_RESUMABLE（已终态，含已取消）、TASK_BUSY（并发应答）。
     """
     effective_org_id = await require_organization(current_user, db)
+    replay_response = await _replay_only_response(
+        task_id=task_id,
+        effective_org_id=effective_org_id,
+        current_user=current_user,
+        request=request,
+    )
+    if replay_response is not None:
+        return replay_response
     task, payload, decision_record = await checkpoint.apply_approval_decision(
         task_id=task_id,
         user_id=current_user.id,
@@ -752,14 +806,6 @@ async def decide_agent_task_approval(
         save_error: str | None = None
         last_event_type = ""
         emitter = SSEStream(session_id or task_id)
-        last_event_id = request.headers.get("Last-Event-ID")
-        if last_event_id:
-            frames, gone = await emitter.replay(last_event_id)
-            if gone:
-                yield format_sse("error", {"code": "SSE_RESUME_GONE"})
-                return
-            for frame in frames:
-                yield frame
         try:
             async for event in agent_service.resume_chat(
                 task_id,
@@ -841,7 +887,7 @@ async def decide_agent_task_approval(
             done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
-        yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
+        yield await emitter.emit("done", done_data)
 
     return _sse_response(event_stream())
 
@@ -899,7 +945,7 @@ async def decide_agent_task_plan_approval(
     task_id: str,
     body: TaskPlanApprovalRequest,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("chat:write")),
     db: AsyncSession = Depends(get_db),
 ):
     """计划审批应答（approve / edit / reject）→ 记账 + 认领 + 续跑。
@@ -918,6 +964,14 @@ async def decide_agent_task_plan_approval(
       （状态不符/无待审批计划）、TASK_NOT_RESUMABLE（已终态）、TASK_BUSY（并发）。
     """
     effective_org_id = await require_organization(current_user, db)
+    replay_response = await _replay_only_response(
+        task_id=task_id,
+        effective_org_id=effective_org_id,
+        current_user=current_user,
+        request=request,
+    )
+    if replay_response is not None:
+        return replay_response
     task, payload, record = await checkpoint.apply_plan_approval_decision(
         task_id=task_id,
         user_id=current_user.id,
@@ -961,14 +1015,6 @@ async def decide_agent_task_plan_approval(
         save_error: str | None = None
         last_event_type = ""
         emitter = SSEStream(session_id or task_id)
-        last_event_id = request.headers.get("Last-Event-ID")
-        if last_event_id:
-            frames, gone = await emitter.replay(last_event_id)
-            if gone:
-                yield format_sse("error", {"code": "SSE_RESUME_GONE"})
-                return
-            for frame in frames:
-                yield frame
         try:
             async for event in agent_service.resume_chat(
                 task_id,
@@ -1049,7 +1095,7 @@ async def decide_agent_task_plan_approval(
             done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
-        yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
+        yield await emitter.emit("done", done_data)
 
     return _sse_response(event_stream())
 
@@ -1057,7 +1103,7 @@ async def decide_agent_task_plan_approval(
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_agent_task(
     task_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("chat:write")),
     db: AsyncSession = Depends(get_db),
 ):
     """协作式取消（服务端停止协议；**诚实边界**：合作式，不是硬杀）。
@@ -1157,7 +1203,7 @@ class TaskSteerRequest(BaseModel):
 async def steer_agent_task(
     task_id: str,
     body: TaskSteerRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("chat:write")),
     db: AsyncSession = Depends(get_db),
 ):
     """运行中转向：向 running / waiting_approval 的任务发送一句人工指导。

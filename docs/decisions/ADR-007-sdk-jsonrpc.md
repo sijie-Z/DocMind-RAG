@@ -18,9 +18,11 @@
    `format_sse(event, data, event_id)`；`stream_id = session_id or task_id`，
    `id = "{stream_id}:{seq}"`，`seq = INCR sse:seq:{stream_id}`，事件
    `LPUSH sse:buf:{stream_id}` + `LTRIM 0 999` + `EXPIRE 3600`。请求头
-   `Last-Event-ID` 回放 `seq > last` 的条目；首条 `seq > last + 1`、流键不匹配
-   或缓冲为空但序号已前进 → 流内 `event: error` + `{"code":"SSE_RESUME_GONE"}`
-   （HTTP 200）。
+   `Last-Event-ID` 回放 `seq > last` 的条目；首条 `seq > last + 1`、流键不匹配、
+   未来序号或缓冲为空但序号已前进 → 流内 `event: error` +
+   `{"code":"SSE_RESUME_GONE"}`（HTTP 200）。**续传请求只回放、不重跑 pipeline**；
+   回放前必须先做会话归属校验（buffer 键只含会话 id，会话 UUID 不是授权凭证），
+   续传端点（resume/审批）的回放判定前移到认领/记账之前，避免 GONE 卡住任务。
 3. **断连保留有上限**：`SSE_KEEPALIVE_ON_DISCONNECT=true` 时，响应生成器被
    关闭后由 `keepalive_stream` 继续消费 pipeline（事件继续写 ring buffer），
    最长 `SSE_ORPHAN_TTL_SECONDS=600` 后取消；关闭开关则恢复旧行为（立即取消）。
@@ -56,16 +58,17 @@
 - API Key 认证矩阵（`tests/api/test_api_keys.py`，8 passed）：有效 200、
   过期/吊销/未知前缀 401、缺 scope 403、明文只返回一次、列表不含 `key_hash`。
 - SSE 续传（`tests/unit/test_sse_format.py` + `tests/api/test_sse_resume.py`，
-  11 passed）：事件 id 递增、回放第 3-5 个事件不重复、淘汰/流键不匹配 →
-  `SSE_RESUME_GONE`、TTL 前不取消 / TTL 后取消。
+  14 passed）：事件 id 递增、回放第 3-5 个事件不重复且**不重跑 pipeline**、
+  跨用户回放被归属校验拦截、淘汰/流键不匹配 → `SSE_RESUME_GONE`、REST
+  `clientMessageId` 幂等、TTL 前不取消 / TTL 后取消。
 - dispatcher（`tests/unit/test_rpc_dispatcher.py`）：并发 20 乱序响应、重复 id
   `-32600`、取消转发 `session/cancel`、超时按拒绝、断连清理、prompt 幂等。
 - HTTP RPC（`tests/api/test_rpc_http.py`）：开关关闭 404、无 Authorization 401、
   JWT 403、缺 rpc scope 403、initialize/tools.list/批量与上限。
 - stdio 手测（管道）：`initialize`/`tools/list`（33 个工具）/`shutdown` 正常，
   缺失 `--org-id/--user-id` → exit 2 且 stdout 0 字节。
-- SDK：Python 7 passed（httpx.MockTransport），TypeScript `tsc --noEmit` 与
-  `npm test` 7 passed。
+- SDK：Python 9 passed（httpx.MockTransport），TypeScript `tsc --noEmit` 与
+  `npm test` 8 passed。
 
 ### 代码证据
 
@@ -102,11 +105,11 @@
 
 ## 已知不确定 / 边界
 
-- **断连重连的语义**：`Last-Event-ID` 请求会先回放缓冲、再按请求体继续正常
-  处理；没有实现"附着到仍在运行的孤儿流"（这需要把会话事件总线化）。若孤儿
-  run 仍在执行，重连的新请求可能重复触发一轮；SDK/客户端应以"重连只取回放"
-  为默认预期，并在需要继续对话时重新发起 prompt（服务端幂等键可兜底
-  `session/prompt`）。
+- **断连重连的语义**：`Last-Event-ID` 请求只回放 `seq > last` 的缓冲并关闭，
+  **绝不重跑**；需要继续对话时请不带 `Last-Event-ID` 重新发起 prompt（REST 的
+  `payload.clientMessageId` 与 RPC `session/prompt` 共用 `rpc:msg:*` 幂等键）。
+  没有实现"附着到仍在运行的孤儿流"（需要事件总线化）；孤儿 run 由
+  `SSE_ORPHAN_TTL_SECONDS` 兜底取消。
 - **agent.py 的四个端点**没有独立的断连取消逻辑（生成器关闭即终止），
   keepalive 包装器只保证"关闭后不立即取消、TTL 兜底"；被包装的 agent 运行
   在 TTL 内继续推进，但客户端重连后拿到的是 ring buffer 中的事件，而非新流。
@@ -114,7 +117,7 @@
   客户端会收到 `SSE_RESUME_GONE`。
 - **stdio stdout 纯净**依赖进程内所有 `print` 走 `sys.stdout` 动态查找；直接
   持有原始 stdout 引用的第三方库仍可能污染协议（已知风险，未做文件描述符级
-  重定向）。
+  重定向）。单行上限在 `readline(limit+1)` 处生效，超长行不整行读入。
 - **API Key 轮换**：当前只支持创建/吊销，不支持原地轮换；轮换 = 建新 key →
   切换 → 吊销旧 key。
 - **迁移 head**：本分支基线为 `012_session_fork`；#478 的 `013_webhooks` 合并

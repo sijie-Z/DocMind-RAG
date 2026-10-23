@@ -31,6 +31,14 @@ PREFIX_LENGTH = 8  # 前 8 位明文（"dm_" + 5 位随机），用于按前缀�
 DEFAULT_SCOPES: tuple[str, ...] = ("chat:read", "chat:write", "knowledge:read", "rpc")
 VALID_SCOPES: frozenset[str] = frozenset(DEFAULT_SCOPES)
 
+
+def valid_scopes() -> frozenset[str]:
+    """当前允许的 scope：常量 ∪ 配置的默认 scope（配置可扩展）。"""
+    return frozenset(DEFAULT_SCOPES) | frozenset(
+        getattr(settings, "API_KEY_DEFAULT_SCOPES", None) or ()
+    )
+
+
 # 固定 dummy 哈希：前缀不存在时也执行一次 bcrypt，消除时序侧信道。
 _DUMMY_HASH = bcrypt.hashpw(b"dummy-api-key-for-timing", bcrypt.gensalt()).decode("utf-8")
 
@@ -109,6 +117,12 @@ class ApiKeyService:
                 if expires_at.tzinfo is None:
                     expires_at = expires_at.replace(tzinfo=UTC)
                 if expires_at <= now:
+                    # 过期候选也做一次真实 bcrypt，避免"前缀存在但已过期"的
+                    # 响应明显更快（时序侧信道）。
+                    try:
+                        bcrypt.checkpw(raw_key.encode("utf-8"), candidate.key_hash.encode("utf-8"))
+                    except ValueError:
+                        pass
                     continue
             try:
                 if not bcrypt.checkpw(raw_key.encode("utf-8"), candidate.key_hash.encode("utf-8")):

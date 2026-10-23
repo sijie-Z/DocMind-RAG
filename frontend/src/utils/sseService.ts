@@ -137,8 +137,8 @@ class SSEService {
     this.currentAbortController = new AbortController()
     const signal = this.currentAbortController.signal
     // issue #480：显式续传点（断线重连）才带 Last-Event-ID；普通新消息重置。
-    const resumeFrom = options.lastEventId ?? null
-    this.lastEventId = resumeFrom
+    let attemptResumeId = options.lastEventId ?? null
+    this.lastEventId = attemptResumeId
 
     const attemptRequest = async (attempt: number): Promise<boolean> => {
       this.setStatus('connecting')
@@ -157,7 +157,7 @@ class SSEService {
           headers: {
             'Accept': 'text/event-stream',
             'Content-Type': 'application/json',
-            ...(resumeFrom ? { 'Last-Event-ID': resumeFrom } : {}),
+            ...(attemptResumeId ? { 'Last-Event-ID': attemptResumeId } : {}),
             'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify(data),
@@ -213,6 +213,11 @@ class SSEService {
           buffer = lines.pop() || ''
 
           for (const line of lines) {
+            if (line.trim() === '') {
+              // issue #480：帧边界显式重置——不依赖 event/data 的先后顺序。
+              eventTypeSet = false
+              continue
+            }
             if (line.startsWith('id: ')) {
               // issue #480：记录事件 id（`{stream_id}:{seq}`），供断线续传。
               this.lastEventId = line.slice(4).trim()
@@ -252,7 +257,18 @@ class SSEService {
         this.setStatus('disconnected')
         return true
       } catch {
-        // SSE Connection error
+        // SSE Connection error（issue #480）：已建立过流时用最近事件 id 自动重连，
+        // 服务端对 Last-Event-ID 请求只回放缓冲、不重跑 pipeline，因此不会重复。
+        if (!signal.aborted && this.lastEventId && attempt < this.maxRetries) {
+          attemptResumeId = this.lastEventId
+          this.emit('retry', {
+            attempt,
+            maxRetries: this.maxRetries,
+            waitTime: this.retryDelay * Math.pow(2, attempt - 1),
+          })
+          await new Promise(resolve => setTimeout(resolve, this.retryDelay * Math.pow(2, attempt - 1)))
+          return attemptRequest(attempt + 1)
+        }
         this.setStatus('error')
         return false
       }

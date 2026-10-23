@@ -85,7 +85,7 @@ test("chat.stream yields chunks and normalizes done", async () => {
   assert.equal(events[2].type, "done");
 
   const body = JSON.parse(String(calls[0].init.body));
-  assert.equal(body.clientMessageId, "msg-1");
+  assert.deepEqual(body.payload, { clientMessageId: "msg-1" });
   assert.equal(body.conversationId, "s1");
   assert.equal(body.useAgent, true);
   const headers = calls[0].init.headers as Record<string, string>;

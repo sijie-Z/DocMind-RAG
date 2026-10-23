@@ -675,6 +675,16 @@ class RPCService:
     async def _notify_status(self, session_id: str, status: str) -> None:
         await self._notify("session.status", {"sessionId": session_id, "status": status})
 
+    @staticmethod
+    def _status_for(last_type: str) -> str:
+        """agent 事件终态 → session.status（不把 error/计划审批谎报成 done）。"""
+        return {
+            "approval_required": "waiting_approval",
+            "plan_approval_required": "waiting_plan_approval",
+            "run_cancelled": "cancelled",
+            "error": "error",
+        }.get(last_type, "done")
+
     async def _save_interaction(self, session_id: str, prompt: str, answer: str) -> None:
         from app.services.session_service import save_session_interaction
 
@@ -779,12 +789,7 @@ class RPCService:
                 "plan_approval_required",
             ):
                 await self._save_interaction(session_id, prompt, answer)
-            if last_type == "approval_required":
-                await self._notify_status(session_id, "waiting_approval")
-            elif last_type == "run_cancelled":
-                await self._notify_status(session_id, "cancelled")
-            else:
-                await self._notify_status(session_id, "done")
+            await self._notify_status(session_id, self._status_for(last_type))
         except asyncio.CancelledError:
             await self._notify_status(session_id, "cancelled")
             raise
@@ -822,12 +827,7 @@ class RPCService:
                     task = await checkpoint._load_task_row(db, task_id)
                 if task is not None:
                     await self._save_interaction(session_id, task.query, answer)
-            if last_type == "approval_required":
-                await self._notify_status(session_id, "waiting_approval")
-            elif last_type == "run_cancelled":
-                await self._notify_status(session_id, "cancelled")
-            else:
-                await self._notify_status(session_id, "done")
+            await self._notify_status(session_id, self._status_for(last_type))
         except asyncio.CancelledError:
             await self._notify_status(session_id, "cancelled")
             raise

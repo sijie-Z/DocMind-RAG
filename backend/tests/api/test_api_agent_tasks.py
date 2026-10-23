@@ -230,7 +230,8 @@ def test_resume_saves_session_interaction_with_prefix(client, auth, monkeypatch)
         "organization_id": 1,
         "answer": "前半后半",
     }
-    assert json.loads(r.text.strip().split("\n\n")[-1][len("data: ") :])["message_id"] == "msg-1"
+    data_lines = [ln[len("data: ") :] for ln in r.text.splitlines() if ln.startswith("data: ")]
+    assert json.loads(data_lines[-1])["message_id"] == "msg-1"
 
 
 # ── 无组织用户 fail-closed（评审 B1：真实链路判别用例）───────────────────────

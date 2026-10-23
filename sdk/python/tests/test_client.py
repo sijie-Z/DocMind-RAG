@@ -69,7 +69,7 @@ def test_chat_stream_yields_chunks_and_normalizes_done():
         )
     )
 
-    assert seen["body"]["clientMessageId"] == "msg-1"
+    assert seen["body"]["payload"] == {"clientMessageId": "msg-1"}
     assert seen["body"]["conversationId"] == "s1"
     assert seen["body"]["useAgent"] is True
     assert seen["accept"] == "text/event-stream"

@@ -15,11 +15,11 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_user_org_id
 from app.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.models.api_key import ApiKey
 from app.models.user import User
-from app.services.api_key_service import DEFAULT_SCOPES, VALID_SCOPES, api_key_service
+from app.services.api_key_service import DEFAULT_SCOPES, api_key_service, valid_scopes
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ class ApiKeyCreate(BaseModel):
     def _validate_scopes(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
-        unknown = sorted(set(value) - VALID_SCOPES)
+        unknown = sorted(set(value) - valid_scopes())
         if unknown:
             raise ValueError(f"未知 scope: {', '.join(unknown)}")
         if not value:
@@ -72,7 +72,7 @@ async def create_api_key(
     """创建 API key；明文 ``api_key`` 只在本响应出现一次。"""
     if body.org_id is not None:
         if not getattr(current_user, "is_superuser", False) and body.org_id != (
-            current_user.organization_id
+            get_user_org_id(current_user)
         ):
             raise AuthorizationError("只能为自己所属组织创建 key")
     try:

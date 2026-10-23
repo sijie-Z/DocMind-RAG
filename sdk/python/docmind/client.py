@@ -230,9 +230,9 @@ def _stream_body(
         "useAgent": True,
     }
     if client_message_id is not None:
-        # 服务端 /chat/stream 目前忽略该字段；JSON-RPC session/prompt 用它做
-        # 服务端幂等（见 README「幂等」一节）。
-        body["clientMessageId"] = client_message_id
+        # /chat/stream 从 payload.clientMessageId 读取幂等键（与 JSON-RPC
+        # session/prompt 同一 Redis 键 rpc:msg:*，TTL 24h）。
+        body["payload"] = {"clientMessageId": client_message_id}
     return body
 
 

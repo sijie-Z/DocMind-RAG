@@ -15,13 +15,13 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401 — 注册全部表，供 create_all
 from app.core.database import Base, get_db
 from app.core.security import require_scope
+from app.exceptions import AuthorizationError
 from app.models.user import User
 from app.services.api_key_service import api_key_service
 from app.services.auth_service import auth_service
@@ -180,7 +180,7 @@ async def test_require_scope_allows_jwt_and_enforces_api_key_scopes():
     assert await checker(jwt_user) is jwt_user
 
     scoped = SimpleNamespace(id=2, api_key_scopes=["chat:read"])
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(AuthorizationError) as exc:
         await checker(scoped)
     assert exc.value.status_code == 403
 

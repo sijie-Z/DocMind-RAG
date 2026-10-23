@@ -49,17 +49,17 @@ def fake_redis(monkeypatch):
 
 def test_format_sse_without_id():
     frame = format_sse("chunk", {"content": "hi"})
-    assert frame == 'data: {"content": "hi"}\nevent: chunk\n\n'
+    assert frame == 'event: chunk\ndata: {"content": "hi"}\n\n'
 
 
 def test_format_sse_with_id_and_multiline_data():
     frame = format_sse("error", {"content": "a\nb"}, event_id="s:3")
     lines = frame.split("\n")
-    assert lines[0].startswith("data: ")
+    assert lines[0] == "event: error"
     assert lines[1] == "id: s:3"
-    assert lines[2] == "event: error"
+    assert lines[2].startswith("data: ")
     assert frame.count("data: ") == 1, "json.dumps 会把换行转义成 \\n，保持单行 data"
-    payload = json.loads(lines[0][len("data: ") :])
+    payload = json.loads(lines[2][len("data: ") :])
     assert payload == {"content": "a\nb"}
     assert frame.endswith("\n\n")
 

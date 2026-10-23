@@ -46,11 +46,11 @@ def require_scope(scope: str):
 
     async def _checker(current_user: User = Depends(get_current_user)) -> User:
         scopes = getattr(current_user, "api_key_scopes", None)
-        if scopes is not None and scope not in scopes:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"API Key 缺少所需 scope: {scope}",
-            )
+        # 只有真实 API Key 认证会挂 list/tuple/set；缺失/其它类型（含测试替身）
+        # 一律视为 JWT 用户 = 全量，避免把替身对象误判成受限 key。
+        if isinstance(scopes, (list, tuple, set, frozenset)) and scope not in scopes:
+            # AppError 走统一错误信封（error_code=AUTHORIZATION_ERROR）。
+            raise AuthorizationError(f"API Key 缺少所需 scope: {scope}")
         return current_user
 
     return _checker

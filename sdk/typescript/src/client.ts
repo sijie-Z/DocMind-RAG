@@ -291,7 +291,9 @@ export class Client {
       conversationId: sessionId,
       useAgent: true,
     };
-    if (clientMessageId !== undefined) body.clientMessageId = clientMessageId;
+    if (clientMessageId !== undefined) {
+      body.payload = { clientMessageId };
+    }
     return this.streamPost('/api/v1/chat/stream', body, options, {
       conversationId: sessionId,
     });

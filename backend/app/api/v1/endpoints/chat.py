@@ -28,7 +28,13 @@ from app.core.error_mapping import (
     resolve_request_id,
 )
 from app.core.log_safety import log_safe
-from app.core.security import get_current_user, get_user_org_id, require_organization
+from app.core.redis import redis_client
+from app.core.security import (
+    get_current_user,
+    get_user_org_id,
+    require_organization,
+    require_scope,
+)
 from app.core.sse import SSEStream, format_sse, keepalive_stream
 from app.core.ws_auth import (
     WS_CLOSE_AUTH_FAILED,
@@ -908,7 +914,7 @@ async def chat_parse_upload(
 async def chat_stream_endpoint(
     body: ChatStreamRequest,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("chat:write")),
     db: AsyncSession = Depends(get_db),
 ):
     async def event_generator():
@@ -926,16 +932,27 @@ async def chat_stream_endpoint(
         # 日志上下文：组织取有效组织（token 回退已校验）的只读快照，绝不影响运行口径。
         log_org_id = get_user_org_id(current_user)
         try:
-            # issue #480 §5.2：Last-Event-ID 续传——先回放缓冲事件；缓冲区
-            # 不连续（首 seq > last+1）或流键不匹配 → 流内 SSE_RESUME_GONE。
+            # issue #480 §5.2：Last-Event-ID 续传。B2：回放前必须先做会话归属
+            # 校验——buffer 键只含会话 id，会话 UUID 不是授权凭证。
             last_event_id = request.headers.get("Last-Event-ID")
             if last_event_id:
+                if body.conversationId:
+                    replay_scope = await resolve_session_access_scope(current_user, db)
+                    accessible = await load_accessible_session(
+                        db, body.conversationId, current_user, replay_scope
+                    )
+                    if accessible is None:
+                        yield format_sse("error", {"content": "会话不存在或无权访问"})
+                        return
                 frames, gone = await emitter.replay(last_event_id)
                 if gone:
                     yield format_sse("error", {"code": "SSE_RESUME_GONE"})
                     return
+                # B4：续传请求只回放缓冲事件，绝不重跑 pipeline
+                # （避免重复回答、重复落库与双份 LLM 成本）。
                 for frame in frames:
                     yield frame
+                return
 
             user_content = body.content
             file_ids = body.fileIds or []
@@ -1054,6 +1071,37 @@ async def chat_stream_endpoint(
                         },
                     )
                     return
+
+                # issue #480 §5.4：REST 侧幂等——与 JSON-RPC session/prompt 同键
+                # （rpc:msg:{session}:{clientMessageId}，TTL 24h）。重复请求直接
+                # 返回同一 messageId 的 done，不产生第二条用户消息、不重跑 LLM。
+                client_message_id = payload_data.get("clientMessageId")
+                if client_message_id:
+                    dedup_key = f"rpc:msg:{conversation_id}:{client_message_id}"
+                    dedup_payload = json.dumps(
+                        {
+                            "messageId": f"agent-{conversation_id}",
+                            "sessionId": conversation_id,
+                        }
+                    )
+                    try:
+                        created = await redis_client.set(
+                            dedup_key, dedup_payload, nx=True, ex=86400
+                        )
+                        if created is None:
+                            yield await emitter.emit(
+                                "done",
+                                {
+                                    "type": "done",
+                                    "content": "",
+                                    "conversationId": conversation_id,
+                                    "messageId": f"agent-{conversation_id}",
+                                    "duplicate": True,
+                                },
+                            )
+                            return
+                    except Exception as dedup_exc:  # noqa: BLE001 - 幂等是增强
+                        logger.warning("chat idempotency unavailable: %s", dedup_exc)
 
                 config = AgentConfig(
                     enable_tools=True,
