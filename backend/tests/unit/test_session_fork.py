@@ -34,6 +34,7 @@
 
 import asyncio
 import copy
+import json
 import uuid
 from unittest.mock import AsyncMock
 
@@ -391,7 +392,16 @@ async def test_fork_allows_system_message_boundary(db_factory):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("meta", [{"tool_status": "pending"}, {"status": "pending"}])
+@pytest.mark.parametrize(
+    "meta",
+    [
+        {"tool_status": "pending"},
+        {"status": "pending"},
+        # 仓库写路径也使用 json.dumps 字符串（demo 种子）：必须同样识别。
+        json.dumps({"tool_status": "pending"}),
+        json.dumps({"status": "pending"}),
+    ],
+)
 async def test_fork_rejects_pending_boundary_message(db_factory, meta):
     """issue #499：边界消息 meta_data 标 pending（未结算占位）→ 400 VALIDATION_ERROR。"""
     async with db_factory() as db:
@@ -412,6 +422,24 @@ async def test_fork_rejects_pending_boundary_message(db_factory, meta):
             .all()
         )
         assert list(children) == []
+
+
+@pytest.mark.asyncio
+async def test_fork_default_boundary_rejects_pending_tail(db_factory):
+    """默认边界（不带 message_id）同样校验 pending：最后一条 assistant 是占位 → 400。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        await _mk_msg(
+            db, src.id, 3, MessageType.ASSISTANT, "正在生成……", {"tool_status": "pending"}
+        )
+        await db.commit()
+
+        with pytest.raises(ValidationError) as excinfo:
+            await _fork(db, src.id)
+        assert excinfo.value.status_code == 400
+        assert excinfo.value.error_code == "VALIDATION_ERROR"
 
 
 @pytest.mark.asyncio
@@ -1129,6 +1157,40 @@ async def test_fork_idempotency_key_used_in_other_org_is_409_not_500(db_factory)
             .all()
         )
         assert list(children) == [], "不得在调用者组织内建出第二个子会话"
+
+
+@pytest.mark.asyncio
+async def test_fork_in_progress_keeps_existing_other_org_claim(db_factory, monkeypatch):
+    """跨组织键 + Redis 在线：超时路径不得删除既有行有效持有的抢占值。"""
+    fake = _FakeRedis()
+    monkeypatch.setattr(session_fork_service, "redis_client", fake)
+    monkeypatch.setattr(session_fork_service, "IDEMPOTENCY_WAIT_SECONDS", 0.1)
+    monkeypatch.setattr(session_fork_service, "IDEMPOTENCY_POLL_INTERVAL_SECONDS", 0.02)
+
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1", org_id=ORG_ID)
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        db.add(
+            ChatSession(
+                id="other-org-child",
+                user_id=USER_ID,
+                organization_id=ORG_ID + 1,
+                title="别的组织",
+                status=ChatSessionStatus.ACTIVE,
+                root_session_id="other-org-source",
+                parent_session_id="other-org-source",
+                idempotency_key="cross-org-redis",
+            )
+        )
+        await db.commit()
+        fake.data[f"fork:idem:{USER_ID}:cross-org-redis"] = "other-org-child"
+
+        with pytest.raises(session_fork_service.ForkInProgressError):
+            await _fork(db, src.id, idempotency_key="cross-org-redis")
+        assert fake.data[f"fork:idem:{USER_ID}:cross-org-redis"] == "other-org-child", (
+            "其他组织既有行的有效抢占不得被当前作用域的请求删除"
+        )
 
 
 @pytest.mark.asyncio

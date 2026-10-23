@@ -36,6 +36,14 @@ async def db_factory(tmp_path):
     await engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+def _no_redis(monkeypatch):
+    """API 用例只验证 DB 唯一约束路径：显式关闭全局 Redis 代理，防跨用例污染。"""
+    from app.services import session_fork_service
+
+    monkeypatch.setattr(session_fork_service, "redis_client", None)
+
+
 @pytest.fixture
 def audit_calls(monkeypatch):
     from app.api.v1.endpoints import sessions as sessions_module

@@ -48,8 +48,23 @@ class ForkRequest(SessionForkRequest):
 
     在既有 ``SessionForkRequest`` 上追加 ``idempotency_key``：body 键优先于
     ``Idempotency-Key`` 头（两者都生效；只带其一时行为不变）。
+
+    ``message_id`` / ``include_checkpoint`` 的描述在子类里覆盖，避免 OpenAPI
+    继续展示 issue #476 的旧语义（"在该 USER 之前分叉"/克隆为 PAUSED）。
     """
 
+    message_id: str | None = Field(
+        None,
+        max_length=36,
+        description=(
+            "边界消息 ID：复制 seq <= 该消息（含边界消息）；ASSISTANT 必须是轮次"
+            "最终消息。默认最后一条已结算消息"
+        ),
+    )
+    include_checkpoint: bool = Field(
+        False,
+        description="是否深拷最近一个已结算 checkpoint 到新 PENDING 任务（可 resume 继续）",
+    )
     idempotency_key: str | None = Field(
         None,
         max_length=128,

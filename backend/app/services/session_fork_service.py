@@ -54,6 +54,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import hashlib
+import json
 import logging
 import time
 import uuid
@@ -218,8 +219,17 @@ async def _load_messages(db: AsyncSession, session_id: str) -> list[ChatMessage]
 
 
 def _message_meta(msg: ChatMessage) -> dict[str, Any]:
-    """消息 ``meta_data`` 的安全字典视图（非 dict/缺失一律空字典）。"""
+    """消息 ``meta_data`` 的安全字典视图。
+
+    仓库自身的写路径既有 JSON dict 也有 ``json.dumps`` 字符串（例如 demo 种子）；
+    两种形态都要识别，损坏的字符串按"无元数据"处理（不炸、不误判）。
+    """
     meta = msg.meta_data
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except (TypeError, ValueError):
+            return {}
     return meta if isinstance(meta, dict) else {}
 
 
@@ -277,6 +287,8 @@ def _resolve_prefix(
             last_assistant_idx = idx
     if last_assistant_idx is None:
         return [], None
+    # 默认边界同样要过 pending 校验（尾部的最后一条 assistant 可能就是流式占位）。
+    _ensure_boundary_settled(messages[last_assistant_idx])
     return messages[: last_assistant_idx + 1], messages[last_assistant_idx]
 
 
@@ -448,6 +460,23 @@ async def _find_idempotent_child(
         .limit(1)
     )
     return rows.scalars().first()
+
+
+async def _idempotency_key_row_exists(db: AsyncSession, *, user_id: int, key: str) -> bool:
+    """幂等键是否已被任何行占用（**不看**组织可见范围）。
+
+    仅用于并发/租户冲突判定：调用方据此决定能否释放 Redis 抢占、以及如何把
+    IntegrityError 映射为明确的 409。返回行 id 本身不用于读取/回放数据。
+    """
+    result = await db.execute(
+        select(ChatSession.id)
+        .where(
+            ChatSession.user_id == user_id,
+            ChatSession.idempotency_key == key,
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
 
 
 def _replay_result(existing: ChatSession) -> ForkResult:
@@ -639,8 +668,12 @@ async def fork_session(
                 return _replay_result(existing)
             # 超时仍不可见：释放**本次观察到的**抢占值，避免首个请求崩溃/超时后
             # 幂等键被锁死 24h（DB 唯一约束仍是并发双建的事实防线）。
+            # 但若该键已被某个不可见（其他组织）的既有行占用，不得删除它的有效
+            # 抢占值——只释放"无任何落库事实"的孤儿抢占。
             if holder:
-                await _release_idempotency_claim(user_id, idem_key, holder)
+                await db.rollback()
+                if not await _idempotency_key_row_exists(db, user_id=user_id, key=idem_key):
+                    await _release_idempotency_claim(user_id, idem_key, holder)
             raise ForkInProgressError(
                 "相同幂等键的分叉请求正在处理中，请稍后重试",
                 detail={
@@ -835,18 +868,9 @@ async def fork_session(
             if idem_key:
                 # 唯一键可能被其他组织/当前作用域不可见的会话占用：不回放其数据
                 # （租户边界），也不把 IntegrityError 漏成 500。
-                invisible = (
-                    await db.execute(
-                        select(ChatSession.id)
-                        .where(
-                            ChatSession.user_id == user_id,
-                            ChatSession.idempotency_key == idem_key,
-                        )
-                        .limit(1)
-                    )
-                ).scalar_one_or_none()
+                invisible = await _idempotency_key_row_exists(db, user_id=user_id, key=idem_key)
                 await _release_idempotency_claim(user_id, idem_key, child_id)
-                if invisible is not None:
+                if invisible:
                     raise ForkIdempotencyConflictError(
                         "该幂等键已被其他会话占用，请更换幂等键后重试",
                         detail={"idempotency_key": idem_key},
