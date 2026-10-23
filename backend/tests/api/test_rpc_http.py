@@ -56,6 +56,20 @@ def test_rpc_http_enabled_by_default():
 
 
 @pytest.mark.asyncio
+async def test_enabled_by_default_runtime_returns_401_not_404():
+    """运行期证据：不 monkeypatch 开关时端点已挂载（未认证 → 401，而非 404）。"""
+    from app.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://rpc") as client:
+        r = await client.post(
+            "/api/v1/rpc",
+            json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        )
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_disabled_returns_404(client, monkeypatch):
     monkeypatch.setattr("app.rpc.http.settings.RPC_HTTP_ENABLED", False, raising=False)
     r = await client.post(

@@ -36,6 +36,8 @@ _LAUNCHER_SOURCE = r'''
 
 argv[1] = mode:
   echo      —— DEBUG=true + SQL_ECHO=true，注入 FakeRedis 后走真实 sdk 入口；
+  preimport —— 同 echo，但在 sdk 重定向前先 import app.core.database（复刻
+               issue #493 原始顺序：engine 的 stdout handler 已绑协议管道）；
   defaults  —— DEBUG=true（不设 SQL_ECHO），断言 SQL_ECHO / engine.echo 为 False；
   no_redis  —— 不注入 FakeRedis（REDIS_HOST/PORT 指向关闭端口），走真实 sdk 入口。
 """
@@ -50,7 +52,7 @@ os.environ.setdefault("DEBUG", "true")
 os.environ["DATABASE_URL"] = os.environ["SDK_TEST_DB_URL"]
 
 mode = sys.argv[1]
-if mode == "echo":
+if mode in ("echo", "preimport"):
     os.environ["SQL_ECHO"] = "true"
 
 from app.core.config.loader import load_settings
@@ -92,6 +94,25 @@ if mode != "no_redis":
 
     # 注入必须早于 sdk 入口：init_redis_strict() 对已注入的客户端幂等放行。
     redis_mod._holder._client = FakeRedis()
+
+if mode == "preimport":
+    # 复刻 issue #493 原始顺序：engine 在 stdout 重定向之前创建，SQLAlchemy
+    # 的 StreamHandler(sys.stdout) 已绑定在协议管道上——必须靠 handler 迁移救回。
+    import logging
+
+    import app.core.database  # noqa: F401 - 触发 engine 创建（echo=True）
+    from app.core.database import engine
+
+    handler_bound = any(
+        handler.stream is sys.stdout
+        for handler in logging.getLogger("sqlalchemy.engine.Engine").handlers
+    )
+    if not (engine.echo and handler_bound):
+        print(
+            f"PRECONDITION_FAILED echo={engine.echo} handler_bound={handler_bound}",
+            file=sys.stderr,
+        )
+        sys.exit(3)
 
 if mode == "defaults":
     from app.core.config import settings
@@ -255,6 +276,103 @@ async def test_sdk_subprocess_stdout_is_pure_protocol_frames(tmp_path):
         responses[message["id"]] = message
     assert responses[1]["result"]["protocolVersion"] == 1
     assert responses[2]["result"] == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_engine_created_before_redirect_still_keeps_stdout_pure(tmp_path):
+    """复刻 issue #493 原始故障：engine 先于重定向创建（handler 绑协议管道）。
+
+    迁移必须把它救回 stderr；stdout 只能有协议帧。
+    """
+    launcher = _write_launcher(tmp_path)
+    requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": {}},
+    ]
+    payload = ("\n".join(json.dumps(message) for message in requests) + "\n").encode()
+
+    rc, out, err = await _run_process(
+        [sys.executable, str(launcher), "preimport"],
+        env=_subprocess_env(tmp_path / "preimport.db"),
+        stdin_bytes=payload,
+    )
+    stderr_text = err.decode("utf-8", "replace")
+    assert rc == 0, stderr_text
+    assert "PRECONDITION_FAILED" not in stderr_text, "预置条件未成立（用例会空转）"
+    assert "sqlalchemy.engine.Engine" in stderr_text, "SQL 必须真的在打，只是不得进 stdout"
+    lines = [line for line in out.decode("utf-8").splitlines() if line.strip()]
+    assert len(lines) == 2
+    for line in lines:
+        message = json.loads(line)  # 迁移失效时 SQL 行会在这里炸
+        assert message.get("jsonrpc") == "2.0"
+
+
+@pytest.mark.asyncio
+async def test_shutdown_exits_cleanly_with_stdin_left_open(tmp_path):
+    """客户端发 shutdown 后保持 stdin 打开：进程必须及时 exit 0（评审 blocker B1）。
+
+    旧实现 ``os.close(0)`` 会在阻塞读持有 fd 锁时永久挂起；修复后
+    ``sys.stdin.detach()`` + Windows ``CancelSynchronousIo`` 让收尾不阻塞。
+    """
+    launcher = _write_launcher(tmp_path)
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        str(launcher),
+        "echo",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=str(BACKEND_DIR),
+        env=_subprocess_env(tmp_path / "open_stdin.db"),
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    assert process.stderr is not None
+    payload = (
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+        + "\n"
+        + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": {}})
+        + "\n"
+    ).encode()
+    process.stdin.write(payload)
+    await process.stdin.drain()
+
+    async def _drain(stream: asyncio.StreamReader) -> bytes:
+        chunks: list[bytes] = []
+        while True:
+            chunk = await stream.read(65536)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+
+    # stderr 必须并发排干（SQL_ECHO=true 时启动日志很多，管道会满）。
+    stderr_task = asyncio.create_task(_drain(process.stderr))
+
+    # 先读两帧响应（启动导入在本机约 8–10s，给足 60s），再单独给 shutdown
+    # 10s 的退出窗口——这才是本用例要钉的语义：响应之后不得因收尾挂起。
+    responses: list[dict] = []
+    for _ in range(2):
+        line = await asyncio.wait_for(process.stdout.readline(), timeout=60)
+        assert line, "进程在输出两个响应之前就结束了"
+        responses.append(json.loads(line))
+    assert [response["id"] for response in responses] == [1, 2]
+
+    try:
+        await asyncio.wait_for(process.wait(), timeout=10)
+    except TimeoutError:  # pragma: no cover - 旧实现（os.close(0)）会挂在这里
+        process.kill()
+        await process.wait()
+        raise AssertionError("shutdown 后 stdin 保持打开时进程未在 10s 内退出") from None
+    finally:
+        if process.stdin is not None and not process.stdin.is_closing():
+            process.stdin.close()
+
+    remaining_stdout = await process.stdout.read()
+    stderr = await stderr_task
+    stderr_text = stderr.decode("utf-8", "replace")
+    assert process.returncode == 0, stderr_text
+    assert "Fatal Python error" not in stderr_text
+    assert remaining_stdout.strip() == b"", "shutdown 响应后 stdout 不得再有输出"
 
 
 # ── 4. Redis 不可用：明确失败，不静默降级 ─────────────────────────────────

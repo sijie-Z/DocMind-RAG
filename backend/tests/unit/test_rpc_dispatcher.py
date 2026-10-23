@@ -278,14 +278,22 @@ async def test_prompt_cancel_stops_session_events_and_reports_cancelled(tmp_path
     monkeypatch.setattr(dispatcher_module, "redis_client", fake)
     monkeypatch.setattr(checkpoint, "redis_client", fake)
     monkeypatch.setattr(checkpoint, "AsyncSessionLocal", factory)
+    # mark_terminal 会经 tool_ledger 补写工具账目：必须也落 sqlite，
+    # 否则会连 conftest 的 MySQL 并在事件循环关闭后留下连接析构告警。
+    import app.agent.tool_ledger as tool_ledger
+
+    monkeypatch.setattr(tool_ledger, "AsyncSessionLocal", factory)
 
     started = asyncio.Event()
 
     async def fake_chat(**_kwargs):
-        """模拟 executor：检查点观察到取消旗 → 真实 mark_terminal 收敛终态。"""
+        """模拟 executor：检查点观察到取消旗 → 收尾延迟后真实 mark_terminal。"""
         started.set()
         for _ in range(200):
             if await checkpoint.is_cancel_requested("t1"):
+                # 0.2s 收尾延迟：让"置旗后立即返回 true"的错误实现必然在 DB
+                # 收敛前返回（判别力），同时验证 cancel 真的在等收敛。
+                await asyncio.sleep(0.2)
                 ok = await checkpoint.mark_terminal(
                     "t1",
                     TaskStatus.CANCELLED,
@@ -295,7 +303,7 @@ async def test_prompt_cancel_stops_session_events_and_reports_cancelled(tmp_path
                 assert ok
                 yield AgentEvent(type="run_cancelled", content="", task_id="t1")
                 return
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.05)
             yield AgentEvent(type="chunk", content="c", task_id="t1")
         yield AgentEvent(type="done", content="", task_id="t1")
 
@@ -322,8 +330,14 @@ async def test_prompt_cancel_stops_session_events_and_reports_cancelled(tmp_path
     await asyncio.wait_for(started.wait(), timeout=2)
     await asyncio.sleep(0.12)
 
+    started_at = asyncio.get_running_loop().time()
     cancel = await service.session_cancel({"sessionId": "s1"})
+    elapsed = asyncio.get_running_loop().time() - started_at
     assert cancel == {"cancelled": True}
+    assert elapsed >= 0.19, "cancel 必须等到任务收敛（executor 有 0.2s 收尾延迟）"
+    async with factory() as session:
+        row = await session.get(AgentTask, "t1")
+    assert row.status == TaskStatus.CANCELLED, "cancel 返回 true 时 DB 必须已经收敛"
     cancel_seq = max(
         [m["params"]["seq"] for m in sent if m.get("method") == "session.event"] or [0]
     )
@@ -413,6 +427,77 @@ async def test_prompt_idempotency_redis_unavailable_raises_32603(monkeypatch):
     assert exc.value.code == -32603
     assert "Redis" in exc.value.message
     assert service._prompt_tasks == {}, "幂等失败不得启动 run"
+
+
+class _UninitializedRedis:
+    """未初始化替身：``bool(redis_client)`` 为 False（stdio 未 init 的形态）。"""
+
+    def __bool__(self) -> bool:
+        return False
+
+
+@pytest.mark.asyncio
+async def test_idempotency_corrupted_record_reports_corruption(monkeypatch):
+    """存储值损坏不能被误报成"Redis 不可用"（排障方向不同，issue #493）。"""
+
+    class _CorruptRedis(FakeRedis):
+        async def get(self, key: str):
+            return "{not-json"
+
+    monkeypatch.setattr(dispatcher_module, "redis_client", _CorruptRedis())
+    service = RPCService(organization_id=1, user_id=7)
+    service._create_session = _async_return("sess-1")  # type: ignore[assignment]
+
+    with pytest.raises(RPCError) as exc:
+        await service.session_prompt({"prompt": "hi", "clientMessageId": "m-1"})
+    assert exc.value.code == -32603
+    assert "损坏" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_prompt_rejects_before_creating_session_when_redis_uninitialized(monkeypatch):
+    """Redis 未初始化 → 建会话前就 -32603，不留孤儿会话行（issue #493）。"""
+    monkeypatch.setattr(dispatcher_module, "redis_client", _UninitializedRedis())
+    created = {"n": 0}
+
+    service = RPCService(organization_id=1, user_id=7)
+
+    async def _create_session(_prompt: str) -> str:
+        created["n"] += 1
+        return "sess-1"
+
+    service._create_session = _create_session  # type: ignore[assignment]
+    with pytest.raises(RPCError) as exc:
+        await service.session_prompt({"prompt": "hi", "clientMessageId": "m-1"})
+    assert exc.value.code == -32603
+    assert created["n"] == 0, "Redis 不可用时不得先建会话"
+
+
+@pytest.mark.asyncio
+async def test_session_cancel_paused_task_terminalizes_directly(tmp_path, monkeypatch):
+    """PAUSED（fork 快照）没有活跃 run，cancel 必须直接 DB 终态化而非等待。"""
+    import app.agent.checkpoint as checkpoint
+    from app.models.agent_task import AgentTask, TaskStatus
+
+    engine, factory = await _make_cancel_db(tmp_path, task_status=TaskStatus.PAUSED)
+    try:
+        monkeypatch.setattr(checkpoint, "AsyncSessionLocal", factory)
+        import app.agent.tool_ledger as tool_ledger
+
+        monkeypatch.setattr(tool_ledger, "AsyncSessionLocal", factory)
+        fake = FakeRedis()
+        monkeypatch.setattr(checkpoint, "redis_client", fake)
+        monkeypatch.setattr(dispatcher_module, "redis_client", fake)
+
+        service = RPCService(organization_id=None, user_id=1, db_factory=factory)
+        cancel = await asyncio.wait_for(service.session_cancel({"sessionId": "s1"}), timeout=2)
+        assert cancel == {"cancelled": True}
+        async with factory() as session:
+            row = await session.get(AgentTask, "t1")
+        assert row.status == TaskStatus.CANCELLED
+        assert fake.kv == {}, "直接终态化不应设置取消旗"
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
