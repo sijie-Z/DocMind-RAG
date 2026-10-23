@@ -8,6 +8,10 @@ issue #479：路由按 bundle 分组。``ROUTER_SPECS`` 是唯一的路由清单
 ``backend/scripts/check_doc_facts.py`` 的 ``endpoint_modules`` 派生口径优先
 解析本文件的 ``ROUTER_SPECS`` 键（声明顺序），不再依赖 ``include_router``
 调用数——新增/删除模块只改这一张表。
+
+issue #499：``/agent/sessions/{id}/fork|lineage`` 兼容别名由 ``build_router``
+在 agent bundle 下额外挂载 ``sessions.compat_router``（``include_in_schema=False``
++ 响应 ``Deprecation`` 头）；它不是独立端点模块，刻意不进 ``ROUTER_SPECS``。
 """
 
 from fastapi import APIRouter
