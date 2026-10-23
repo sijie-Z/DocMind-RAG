@@ -10,5 +10,5 @@
 - [x] 7. TS SDK（tsc --noEmit + npm test 7 passed）
 - [x] 8. 指标/ADR-007/facts/文档（check_doc_facts OK）
 - [x] 9. 自测（ruff 全绿；分块 pytest 全绿；alembic 往返+parity；SDK 9+8；stdio 手测；两项变异试验红→还原绿）
-- [~] 10. 内部对抗评审：首轮 FAIL（4 blocker）已全部修复并回归；复审进行中
+- [~] 10. 内部对抗评审：首轮 FAIL（4 blocker）→ 修复 → 复审 B1/B3/B4 通过、B2 写侧未闭环 → 已加调用者键隔离，终审复验中
 - [ ] 11. 收尾报告
