@@ -45,6 +45,16 @@ def _use(user) -> None:
     app.dependency_overrides[get_current_user] = lambda: user
 
 
+def test_rpc_http_enabled_by_default():
+    """issue #493：HTTP RPC 默认开启；关闭时端点仍如实 404（见下）。
+
+    sdk profile 不受影响：该入口只跑 stdio、不构建 FastAPI app，不挂 HTTP。
+    """
+    from app.core.config.base import BaseAppSettings
+
+    assert BaseAppSettings.model_fields["RPC_HTTP_ENABLED"].default is True
+
+
 @pytest.mark.asyncio
 async def test_disabled_returns_404(client, monkeypatch):
     monkeypatch.setattr("app.rpc.http.settings.RPC_HTTP_ENABLED", False, raising=False)
