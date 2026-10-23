@@ -29,6 +29,13 @@ class SecuritySettings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
+    # Webhook secret 的 Fernet 加密密钥（issue #478）。
+    # **独立**于 JWT SECRET_KEY，绝不混用；生成：
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # 仅当 WEBHOOKS_ENABLED=true 时强制非空（bootstrap lifespan 启动校验，
+    # fail-closed）；关闭时不消费该字段，避免给现有部署增加必填项。
+    WEBHOOK_ENCRYPTION_KEY: str = ""
+
     # CORS
     ALLOWED_ORIGINS: list[str] = [
         "http://localhost:3000",

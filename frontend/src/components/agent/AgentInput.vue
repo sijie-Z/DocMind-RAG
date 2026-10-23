@@ -1,20 +1,32 @@
 <template>
   <div class="agent-input-area">
-    <!-- 斜杠命令菜单（体验第四波）：输入以 / 开头触发；命令全部映射既有能力
-         （web_search / search_knowledge_base / 规划器），本地展开为输入模板——
-         不发明新功能；/clear 与 /help 为纯本地动作。 -->
+    <!-- 斜杠命令菜单（#475）：本地模板（search/doc/workflow）+ 服务端命令
+         （GET /api/v1/commands，按当前会话 agent 作用域）。模板展开为提示词；
+         服务端命令 emit command → 视图走 POST /commands/execute，不进入聊天流。 -->
     <div v-if="cmdOpen" class="cmd-menu" data-testid="cmd-menu">
       <div class="cmd-menu-title">{{ t('slashCmd.heading') }}</div>
+      <div v-if="commandsLoading" class="cmd-state" data-testid="cmd-loading">
+        {{ t('common.loading') }}
+      </div>
+      <div v-else-if="commandsError" class="cmd-state cmd-state-error" data-testid="cmd-error">
+        {{ t('slashCmd.loadError') }}
+      </div>
+      <div v-else-if="!commandsEnabled" class="cmd-state" data-testid="cmd-unavailable">
+        {{ t('slashCmd.unavailable') }}
+      </div>
       <button
         v-for="(cmd, i) in cmdFiltered"
-        :key="cmd.id"
+        :key="cmd.key"
         class="cmd-option"
         :class="{ active: i === cmdActive }"
+        :data-cmd-kind="cmd.kind"
+        :data-cmd-name="cmd.name"
         data-testid="cmd-option"
-        @mousedown.prevent="applyCommand(cmd.id)"
+        @mousedown.prevent="applyCommand(cmd)"
       >
-        <span class="cmd-name">/{{ cmd.id }}</span>
-        <span class="cmd-desc">{{ t('slashCmd.desc.' + cmd.id) }}</span>
+        <span class="cmd-name">/{{ cmd.name }}</span>
+        <span class="cmd-desc">{{ cmd.description }}</span>
+        <span v-if="cmd.kind === 'command'" class="cmd-kind">{{ t('slashCmd.commandBadge') }}</span>
       </button>
       <div v-if="cmdFiltered.length === 0" class="cmd-state" data-testid="cmd-empty">
         {{ t('slashCmd.empty') }}
@@ -122,9 +134,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getKnowledgeBases, type KnowledgeBaseListResponse } from '@/api/knowledge'
+import { commandsApi, type CommandInfo, type CommandListData } from '@/api/commands'
 import type { ReferencedDoc } from '@/types/agent'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 
@@ -138,15 +151,19 @@ const props = defineProps<{
   steering?: boolean
   /** 覆盖提示行（如 B：等待计划审批时禁用输入并说明原因；空串回退默认提示）。 */
   hintOverride?: string
+  /** issue #475：当前会话 id——GET /commands 据此合并 agent 作用域命令。 */
+  sessionId?: string | null
 }>()
 
 const emit = defineEmits<{
   send: [text: string, refs?: ReferencedDoc[]]
   stop: []
   steer: [text: string]
+  /** issue #475：选中服务端命令（完整命令行，含参数）；由视图调用 /commands/execute。 */
+  command: [line: string]
 }>()
 
-const { t } = useI18n()
+const { t, te, locale } = useI18n()
 const inputText = ref('')
 const textareaEl = ref<HTMLTextAreaElement>()
 
@@ -248,30 +265,107 @@ function removeDoc(id: string) {
   selectedDocs.value = selectedDocs.value.filter((d) => d.id !== id)
 }
 
-// ── 斜杠命令（体验第四波）──────────────────────────────────────────────────
-// 触发规则：输入以 "/" 开头。"/cmd 参数" 形态下命令词照常匹配、参数保留；
-// 选中后本地展开为输入模板（模板文案四语，映射既有工具/规划器能力）。
-const CMD_IDS = ['search', 'doc', 'workflow', 'help', 'clear'] as const
-type CmdId = (typeof CMD_IDS)[number]
+// ── 斜杠命令（#475：模板 + 服务端命令）──────────────────────────────────────
+// 触发规则：输入以 "/" 开头。"/cmd 参数" 形态下命令词照常匹配、参数保留。
+// 菜单 = 本地模板（search/doc/workflow，展开为提示词）+ GET /commands 返回的
+// 服务端命令（help/status/export/tools 等，选中后 emit command 交给视图执行）。
+const TEMPLATE_IDS = ['search', 'doc', 'workflow'] as const
+
+interface SlashMenuItem {
+  key: string
+  kind: 'template' | 'command'
+  name: string
+  description: string
+  command?: CommandInfo
+}
+
 const cmdOpen = ref(false)
 const cmdQuery = ref('')
 const cmdArg = ref('')
 const cmdActive = ref(0)
-const cmdHelpShown = ref(false)
 
-const cmdFiltered = computed<Array<{ id: CmdId }>>(() => {
-  if (cmdHelpShown.value) return CMD_IDS.map((id) => ({ id }))
+const serverCommands = ref<CommandInfo[]>([])
+const commandsEnabled = ref(true)
+const commandsLoading = ref(false)
+const commandsError = ref(false)
+// 请求代次：会话切换时旧响应可能后到，只应用最新一次请求的结果。
+let commandsRequestSeq = 0
+
+/** 服务端命令描述优先用四语词条，其次后端 description_i18n，最后原文（避免回显裸键）。 */
+function commandDescription(cmd: CommandInfo): string {
+  const key = `slashCmd.cmdDesc.${cmd.name}`
+  // 词条存在才取用（t() 的模板串形态被 tUsage 扫描器识别为可护前缀）
+  if (te(key)) return t(`slashCmd.cmdDesc.${cmd.name}`)
+  const localized = cmd.description_i18n?.[locale.value]
+  if (localized) return localized
+  return cmd.description_i18n?.en || cmd.description
+}
+
+const cmdFiltered = computed<SlashMenuItem[]>(() => {
+  const templates: SlashMenuItem[] = TEMPLATE_IDS.map((id) => ({
+    key: `tpl:${id}`,
+    kind: 'template',
+    name: id,
+    description: t(`slashCmd.desc.${id}`),
+  }))
+  const commands: SlashMenuItem[] = serverCommands.value.map((cmd) => ({
+    key: `cmd:${cmd.name}`,
+    kind: 'command',
+    name: cmd.name,
+    description: commandDescription(cmd),
+    command: cmd,
+  }))
+  const all = [...templates, ...commands]
   const q = cmdQuery.value.toLowerCase()
-  const list = q ? CMD_IDS.filter((id) => id.startsWith(q)) : CMD_IDS
-  return list.map((id) => ({ id }))
+  if (!q) return all
+  return all.filter((item) => {
+    if (item.name.toLowerCase().startsWith(q)) return true
+    if (item.kind === 'command') {
+      return (item.command?.aliases || []).some((alias) =>
+        alias.toLowerCase().startsWith(q),
+      )
+    }
+    return false
+  })
 })
+
+async function loadCommands() {
+  const requestSeq = ++commandsRequestSeq
+  const sessionId = props.sessionId || undefined
+  commandsLoading.value = true
+  commandsError.value = false
+  try {
+    const res = await commandsApi.list(sessionId)
+    if (requestSeq !== commandsRequestSeq) return
+    const data = apiUnwrap<CommandListData>(res)
+    commandsEnabled.value = data?.enabled !== false
+    serverCommands.value = Array.isArray(data?.commands) ? data!.commands : []
+  } catch {
+    if (requestSeq !== commandsRequestSeq) return
+    // 命令通道不可用不是输入区的致命错误：模板仍可用，菜单里如实提示。
+    commandsError.value = true
+    serverCommands.value = []
+  } finally {
+    if (requestSeq === commandsRequestSeq) commandsLoading.value = false
+  }
+}
+
+onMounted(() => {
+  void loadCommands()
+})
+
+watch(
+  () => props.sessionId,
+  () => {
+    void loadCommands()
+  },
+)
 
 function closeCmd() {
   cmdOpen.value = false
   cmdQuery.value = ''
   cmdArg.value = ''
   cmdActive.value = 0
-  cmdHelpShown.value = false
 }
 
 function updateCmd() {
@@ -289,25 +383,22 @@ function updateCmd() {
   cmdQuery.value = spaceIdx >= 0 ? rest.slice(0, spaceIdx) : rest
   cmdArg.value = spaceIdx >= 0 ? rest.slice(spaceIdx + 1).trim() : ''
   cmdOpen.value = true
-  cmdHelpShown.value = false
   cmdActive.value = 0
 }
 
-function applyCommand(id: CmdId) {
-  if (id === 'clear') {
-    // 纯本地动作：清空输入框（不动会话历史——那是页头"清空"的职责）
-    inputText.value = ''
+function applyCommand(item: SlashMenuItem) {
+  if (item.kind === 'template') {
+    inputText.value = t(`slashCmd.tpl.${item.name}`, { q: cmdArg.value })
     closeCmd()
+    nextTick(() => textareaEl.value?.focus())
     return
   }
-  if (id === 'help') {
-    // /help：菜单本身即说明载体——展开全量命令与描述、保持打开
-    cmdHelpShown.value = true
-    cmdQuery.value = ''
-    cmdActive.value = 0
-    return
-  }
-  inputText.value = t(`slashCmd.tpl.${id}`, { q: cmdArg.value })
+  // 服务端命令：完整命令行（命令名 + 已输入参数）交给视图执行；
+  // 不进入聊天流（POST /commands/execute），也不把命令文本当作提示词。
+  const arg = cmdArg.value.trim()
+  const line = `/${item.name}` + (arg ? ` ${arg}` : '')
+  emit('command', line)
+  inputText.value = ''
   closeCmd()
   nextTick(() => textareaEl.value?.focus())
 }
@@ -351,7 +442,8 @@ function handleEnter() {
     return
   }
   if (cmdOpen.value && cmdFiltered.value.length > 0) {
-    applyCommand(cmdFiltered.value[cmdActive.value].id)
+    const item = cmdFiltered.value[cmdActive.value] || cmdFiltered.value[0]
+    if (item) applyCommand(item)
     return
   }
   if (props.steering) {
@@ -581,6 +673,26 @@ defineExpose({ clear: () => { inputText.value = ''; selectedDocs.value = []; clo
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-secondary, #6b7280);
+}
+
+.cmd-kind {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 9px;
+  padding: 0 5px;
+  border-radius: 4px;
+  line-height: 16px;
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.dark .cmd-kind {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.cmd-state-error {
+  color: #dc2626;
 }
 
 .dark .cmd-desc {

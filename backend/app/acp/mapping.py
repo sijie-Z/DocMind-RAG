@@ -9,7 +9,7 @@
 - :func:`decision_from_permission_result` 解析客户端响应 →
   ``"allow"`` / ``"deny"`` / ``"cancelled"``。
 
-映射表（issue §5.3，事件类型以当前 ``EventType`` 的 23 种为准）::
+映射表（issue §5.3，事件类型以当前 ``EventType`` 的 24 种为准）::
 
     chunk                 → agent_message_chunk
     thinking              → agent_thought_chunk
@@ -19,6 +19,7 @@
     plan_step/plan_complete → plan（entries 为调用方维护的累计快照）
     approval_required     → 服务端请求 session/request_permission（不走本函数）
     warning               → 不外发（调用方 info 日志）
+    hook_error            → 不外发（hook 失败，调用方 warning 日志；#474）
     done/run_cancelled/error/plan_approval_required → prompt 结算（不走本函数）
     command_result/command_error → agent_message_chunk（issue 表未列命令事件；
         命令输出同样需要可见，见下方常量注释）

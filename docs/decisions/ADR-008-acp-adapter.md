@@ -4,7 +4,7 @@
 - 日期：2026-10-23
 - 关联：Epic #473；#479（Profiles/Bundles/Patch 与统一入口）；#480（双向
   JSON-RPC dispatcher / API Key / `session_service` 助手，ADR-007）；#476
-  （`agent_tasks.session_id`、`PAUSED` 状态）；#475（用户命令事件）；#474（hook_error 错误码）
+  （`agent_tasks.session_id`、`PAUSED` 状态）；#475（用户命令事件）；#474（hook_error 事件）
 
 > 命名：本 ADR 的 ACP 指 Zed 发起的 **Agent Client Protocol**
 > （agentclientprotocol.com），不是本仓库 `AGENTS.md` 的 AI Collaboration Protocol。
@@ -47,12 +47,13 @@
    历史；`session/close` 只解除连接映射、不删库；`session/set_config_option`
    的 `model` / `plan_mode` 写入 `ChatSession.settings["model"]` /
    `settings["plan_approval_mode"]`，下一轮 prompt 读取。
-7. **事件映射**（当前 `EventType` 共 **23** 种；issue 文本写 24 是过时口径，
-   `hook_error` 是工具错误码不是事件）：`chunk→agent_message_chunk`、
+7. **事件映射**（当前 `EventType` 共 **24** 种，含 #474 的 `hook_error` 事件）：
+   `chunk→agent_message_chunk`、
    `thinking→agent_thought_chunk`、`tool_call→tool_call(pending)`、
    `tool_result→tool_call_update(completed, content)`、`tool_error→
    tool_call_update(failed)`、`plan_step/plan_complete→plan(entries)`、
    `approval_required→session/request_permission`、`warning→仅日志`、
+   `hook_error→warning 日志（不外发）`、
    `done→stopReason:"end_turn"`、`run_cancelled→"cancelled"`、
    `error→-32603（脱敏）`、`plan_approval_required→策略见 §8`。issue 表未
    覆盖的 `command_result/command_error` 复用消息块通道（否则命令输出在
@@ -203,10 +204,10 @@
   而不再有 `session/update`。
 - **tool_result 内容截断**：超过 8000 字符的工具有效输出在 update 中截断
   （防止单行 NDJSON 过大）；完整内容仍按既有 SSE/持久化通道处理。
-- **事件类型计数**：issue 文本写 24 种，代码 `EventType` 为 23 种
-  （`hook_error` 是工具错误码，不是事件）；以代码为准。单测用
-  `KNOWN_EVENT_TYPES` 冻结清单做逐类型审计——增删事件必须先登记并明确
-  ACP 归宿，否则 `test_event_type_enum_is_frozen` 拉红。
+- **事件类型计数**：同步 develop 后代码 `EventType` 为 **24 种**（含 #474 的
+  `hook_error` 事件），与 issue 文本一致。单测用 `KNOWN_EVENT_TYPES` 冻结清单
+  做逐类型审计——增删事件必须先登记并明确 ACP 归宿，否则
+  `test_event_type_enum_is_frozen` 拉红。
 - **可观测**：ACP 层以结构化日志记录会话数、prompt 起止与耗时、取消数、
   审批等待时长（`logger.info`）。issue §3 所说"指标"未接 Prometheus——
   `app/core/prometheus.py` 不在 #481 的修改范围内；需要真指标时另开 issue。

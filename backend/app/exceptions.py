@@ -95,6 +95,18 @@ class ConflictError(AppError):
     message = "资源冲突"
 
 
+class PayloadTooLargeError(AppError):
+    """413 — request body exceeds the configured limit (issue #478).
+
+    ``detail`` 必须携带 ``max_body_bytes``：调用方需要知道实际上限，而不是
+    只看到一句"太大"。
+    """
+
+    status_code = 413
+    error_code = "PAYLOAD_TOO_LARGE"
+    message = "请求体超过大小限制"
+
+
 class RateLimitError(AppError):
     """429 — too many requests."""
 

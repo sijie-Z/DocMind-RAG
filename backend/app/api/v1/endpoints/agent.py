@@ -277,7 +277,9 @@ async def agent_chat(
         last_event_type = ""
         # issue #480 §5.2：流键 = session_id；无会话时由首个事件的 task_id 绑定。
         emitter = SSEStream(body.session_id, scope=f"u{current_user.id}")
-        last_event_id = request.headers.get("Last-Event-ID")
+        # 防御式读取：测试替身 request 可能没有 headers 属性（生产 Request 不变）。
+        headers = getattr(request, "headers", None)
+        last_event_id = headers.get("Last-Event-ID") if headers else None
         if last_event_id:
             if body.session_id:
                 replay_scope = await resolve_session_access_scope(current_user, db)

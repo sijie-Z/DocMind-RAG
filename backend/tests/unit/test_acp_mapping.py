@@ -59,6 +59,8 @@ KNOWN_EVENT_TYPES = (
     "command_start",
     "command_result",
     "command_error",
+    # #474（随 develop 合入）：hook 失败事件。
+    "hook_error",
 )
 
 
@@ -281,6 +283,7 @@ def test_command_events_surface_as_message_chunks(schema):
 def test_warning_and_diagnostics_are_log_only():
     for event_type in (
         "warning",
+        "hook_error",
         "plan_start",
         "retry_hint",
         "reflection",

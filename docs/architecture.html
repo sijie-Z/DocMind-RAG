@@ -146,8 +146,8 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
   <div class="badge-row">
     <span class="badge"><span class="dot g"></span><a href="index.html" style="color:var(--text2);text-decoration:none;">← 返回首页</a></span>
     <span class="badge"><span class="dot g"></span>3084 个测试</span>
-    <span class="badge"><span class="dot b"></span>26 API 模块</span>
-    <span class="badge"><span class="dot a"></span>33 Agent 工具</span>
+    <span class="badge"><span class="dot b"></span>28 API 模块</span>
+    <span class="badge"><span class="dot a"></span>39 Agent 工具</span>
     <span class="badge">100,000+ LOC</span>
   </div>
 </div>
@@ -157,10 +157,10 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
   <div class="sec-head"><span class="sec-num">01</span><h2>系统总览</h2><span class="meta">2026.05</span></div>
 
   <div class="g3" style="margin-bottom:14px">
-    <div class="card" style="text-align:center;padding:24px"><div class="big">26</div><div class="sl">后端 API 模块</div></div>
+    <div class="card" style="text-align:center;padding:24px"><div class="big">28</div><div class="sl">后端 API 模块</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">20+</div><div class="sl">前端视图</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">4</div><div class="sl">语言支持</div></div>
-    <div class="card" style="text-align:center;padding:24px"><div class="big">33</div><div class="sl">Agent 工具</div></div>
+    <div class="card" style="text-align:center;padding:24px"><div class="big">39</div><div class="sl">Agent 工具</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">3084</div><div class="sl">自动化测试（后端 2223 · 前端 861）</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">2</div><div class="sl">部署方案</div></div>
   </div>
@@ -413,14 +413,14 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 
 <!-- ═══ 03. 后端架构 ═══ -->
 <div class="sec" id="backend">
-  <div class="sec-head"><span class="sec-num">03</span><h2>后端架构</h2><span class="meta">FastAPI · 26 路由模块</span></div>
+  <div class="sec-head"><span class="sec-num">03</span><h2>后端架构</h2><span class="meta">FastAPI · 28 路由模块</span></div>
 
   <div class="card">
     <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 📦 模块结构</div>
     <div class="card-body show">
       <pre style="font-size:.72rem;color:var(--text2);line-height:1.8;background:var(--bg3);padding:14px;border-radius:8px;overflow-x:auto"><code>backend/app/
 ├── api/v1/          # REST 端点 (auth, chat, documents, agent, knowledge...)
-│   └── endpoints/   # 26 个路由模块
+│   └── endpoints/   # 28 个路由模块
 ├── agent/           # PER Agent 系统
 │   ├── loop.py      # Agent 主循环
 │   ├── registry.py  # 工具注册中心
@@ -428,7 +428,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 │   ├── events.py    # SSE 事件模型
 │   ├── skills.py    # 技能学习
 │   ├── core_tools.py # 基础工具（14 个）
-│   └── tools/       # 扩展工具（与 core_tools 合计 33 个内置工具）
+│   └── tools/       # 扩展工具（与 core_tools 合计 39 个内置工具）
 ├── core/            # 基础设施 (config, database, redis, security, tracing)
 ├── models/          # SQLAlchemy ORM 模型
 ├── rag/             # RAG 管道 (retriever, reranker, chunker, evaluator)
@@ -509,10 +509,10 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 
 <!-- ═══ 05. 工具系统 ═══ -->
 <div class="sec" id="tools">
-  <div class="sec-head"><span class="sec-num">04b</span><h2>工具系统</h2><span class="meta">33 个内置工具</span></div>
+  <div class="sec-head"><span class="sec-num">04b</span><h2>工具系统</h2><span class="meta">39 个内置工具</span></div>
 
   <div class="card">
-    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔧 内置工具（内置 33 个，MCP 动态工具另计；下表为功能示意，非完整清单）</div>
+    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔧 内置工具（内置 39 个，MCP 动态工具另计；下表为功能示意，非完整清单）</div>
     <div class="card-body show">
       <table class="data-table">
         <tr><th>#</th><th>工具</th><th>用途</th><th>安全级别</th></tr>
@@ -686,6 +686,8 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
         <tr><td><code>/api/v1/agent</code></td><td>Agent 配置</td><td>6</td></tr>
         <tr><td><code>/api/v1/knowledge</code></td><td>知识库</td><td>6</td></tr>
         <tr><td><code>/api/v1/monitoring</code></td><td>监控</td><td>4</td></tr>
+        <tr><td><code>/api/v1/webhooks</code></td><td>Webhook</td><td>8</td></tr>
+        <tr><td><code>/api/v1/terminal</code></td><td>持久终端</td><td>5</td></tr>
         <tr><td><code>/api/v1/api-keys</code></td><td>API Key</td><td>3</td></tr>
         <tr><td><code>/api/v1/rpc</code></td><td>JSON-RPC</td><td>1</td></tr>
       </table>

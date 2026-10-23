@@ -1,0 +1,25 @@
+# Hooks 扩展点配置（issue #474）
+#
+# 总开关：环境变量 / .env 的 HOOKS_ENABLED=true 才会读取本文件并注册 hook；
+# 默认 false —— 不读文件、零行为变化（回滚只需关掉开关或删除本文件）。
+#
+# 字段：
+#   name            唯一名称（指标/日志标签）
+#   event           事件名（agent/turn_start、agent/pre_step、agent/post_step、
+#                   agent/turn_stopping、agent/turn_end、tools/pre_execute、
+#                   tools/post_execute）
+#   module          dotted path，必须以 app.agent.hooks. 开头（禁止任意 import）
+#   enabled         单条开关；false 时只校验格式、不导入模块
+#   priority        越小越先执行；同优先级按注册顺序
+#   timeout_seconds 每个 hook 独立超时（0.1–30 秒，默认 2.0）
+#   failure_policy  fail_open（记录 hook_error 后继续）| fail_closed（拒绝执行）
+#
+# 线程/部署说明：hook 是进程内的；多 worker 部署时每个 worker 各加载一份。
+hooks:
+  - name: audit_tool_calls
+    event: tools/pre_execute
+    module: app.agent.hooks.builtin.audit_tool_calls
+    enabled: true
+    priority: 100
+    timeout_seconds: 2.0
+    failure_policy: fail_open

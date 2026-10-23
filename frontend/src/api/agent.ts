@@ -346,10 +346,12 @@ export const agentApi = {
 
   // ── Sessions ──
 
-  /** List agent sessions（真载荷 apiUnwrap(res).sessions；agent.py:500-556） */
+  /** List agent sessions（真载荷 apiUnwrap(res).sessions；agent.py:500-556）
+   *  issue #476：parent_session_id 过滤子会话（谱系/「查看分叉」入口）。 */
   listSessions(params?: {
     page?: number
     page_size?: number
+    parent_session_id?: string
   }): Promise<AxiosResponse<ApiResponse<{ sessions: AgentSession[]; total: number; page: number; page_size: number }>>> {
     return request.get('/agent/sessions', { params })
   },

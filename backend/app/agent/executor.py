@@ -23,11 +23,13 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from app.agent import approval, tool_ledger
+from app.agent import hooks as agent_hooks
 from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
+from app.agent.hooks import HookContext, HookDecision
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, PlanStep
-from app.agent.registry import tool_registry
+from app.agent.registry import ToolResult, tool_registry
 from app.agent.retry_policy import compute_backoff, get_policy
 from app.agent.run_context import RunContext
 from app.agent.usage import record_llm_usage
@@ -131,6 +133,9 @@ class Executor:
         # C3a：工具调用配对持久化的任务 id（loop 在接上 checkpoint 后接线；
         # 未接线时账本调用全部 no-op——裸执行器/子代理保持零 DB 依赖）。
         self.tool_ledger_task_id: str | None = None
+        # Hooks（issue #474）：agent/pre_step deny 后本轮不再执行——置位后
+        # 重试/fallback/并行兄弟步骤一律跳过，轮次正常收尾（每 run 复位）。
+        self._hook_turn_denied: bool = False
 
     def reset_for_request(self) -> None:
         """Clear per-request state so a reused Executor doesn't leak across calls."""
@@ -147,6 +152,68 @@ class Executor:
         self.document_context = ""
         self.pending_control = ""
         self.tool_ledger_task_id = None
+        self._hook_turn_denied = False
+
+    # ── Hooks（issue #474）────────────────────────────────────────────────────
+
+    def _hook_session_id(self) -> str | None:
+        """hook 用的会话 id：与 loop 层同形（裸 session id，而非 ``session:<id>``）。
+
+        执行器的 ``config.agent_id`` 由 service 设为 ``session:<会话 id>``（或
+        ``default``）；hook 事件表只承诺一个 session_id 字段，因此统一剥离前缀，
+        保证 turn_* 与 tool/step 事件可关联。非会话形态返回 None。
+        """
+        agent_id = getattr(self.config, "agent_id", "") or ""
+        if agent_id.startswith("session:"):
+            return agent_id[len("session:") :] or None
+        return None
+
+    def _hook_context(
+        self,
+        event: str,
+        payload: dict[str, Any],
+        *,
+        user_id: int,
+        organization_id: int,
+    ) -> HookContext:
+        """构造 hook 上下文：会话/任务/租户与调用方（loop）同源。"""
+        return HookContext(
+            event=event,
+            session_id=self._hook_session_id(),
+            task_id=self.tool_ledger_task_id,
+            user_id=user_id,
+            organization_id=organization_id,
+            payload=payload,
+        )
+
+    async def _emit_hooks(
+        self,
+        event: str,
+        payload: dict[str, Any],
+        *,
+        user_id: int,
+        organization_id: int,
+    ) -> tuple[HookDecision, list[AgentEvent]]:
+        """执行 hook 并把失败记录转成 ``hook_error`` 事件（失败不得静默）。
+
+        总线关闭（HOOKS_ENABLED=false）时直接 allow，零 handler 调用；总线自身
+        异常也被兜住——hook 基础设施故障绝不拖垮主流程（fail_closed 是显式策略，
+        只由单条 hook 的 failure_policy 触发）。
+        """
+        bus = agent_hooks.get_hook_bus()
+        if not bus.enabled:
+            return HookDecision(), []
+        try:
+            decision, errors = await bus.emit(
+                event,
+                self._hook_context(
+                    event, payload, user_id=user_id, organization_id=organization_id
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 — 总线故障隔离
+            logger.error("hook bus emit failed (event=%s): %s", event, exc)
+            return HookDecision(), []
+        return decision, agent_hooks.hook_error_events(errors)
 
     # ── HITL helpers（approval.py）────────────────────────────────────────────
 
@@ -192,6 +259,9 @@ class Executor:
         calls: list[tuple[Any, dict[str, Any]]],
         plan: Plan,
         step: PlanStep,
+        *,
+        skip_objects: set[int] | None = None,
+        forced_reasons: dict[int, str] | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """审批门预检（工具前暂停点）。**在本次任何调用执行之前**运行。
 
@@ -207,22 +277,60 @@ class Executor:
 
         已决定（approve/deny 粘滞）的调用不触发暂停：approve 由主循环放行、
         deny 由主循环物化为 approval_denied 结构化失败。
+
+        Hooks（issue #474）：``forced_reasons`` 由 ``tools/pre_execute`` 的
+        ``ask`` 决策产生——即使 ``requires_approval`` 为假也强制进入本门；
+        ``skip_objects``（id(tc)）是已被 hook deny 的调用，不参与审批暂停。
+
+        issue #477：``TERMINAL_REQUIRE_APPROVAL=true`` 时 ``terminal_*`` 强制
+        审批（即使 ``approval_mode="never"``）。若没有审批通道
+        （``approval_check is None``），这些调用直接记为 deny——**fail-closed**，
+        绝不因为「没接审批」而静默执行。该加强只作用于 terminal_*，不改全局策略。
         """
+        terminal_forced_ids = {
+            id(tc) for tc, _args in calls if self._terminal_approval_forced(tc.function.name)
+        }
         if self.approval_check is None:
+            # 无审批通道：terminal_* 强制审批的调用直接 deny（fail-closed）。
+            # hook 的 ask 在无通道时维持 develop 原语义（不审批、不阻断）。
+            for tc, args in calls:
+                if id(tc) not in terminal_forced_ids:
+                    continue
+                self.approval_decisions.append(
+                    {
+                        "tool_name": tc.function.name,
+                        "args_hash": approval.args_fingerprint(args),
+                        "decision": "deny",
+                        "reason": "no_approval_channel",
+                        "decided_at": time.time(),
+                    }
+                )
             return
         mode = getattr(self.config, "approval_mode", "risky")
-        pending: tuple[Any, dict[str, Any]] | None = None
+        skip = skip_objects or set()
+        hook_forced = forced_reasons or {}
+        pending: tuple[Any, dict[str, Any], str | None] | None = None
         for tc, args in calls:
-            if not approval.requires_approval(mode, tc.function.name):
+            if id(tc) in skip:
                 continue
+            forced_reason = hook_forced.get(id(tc))
+            terminal_forced = id(tc) in terminal_forced_ids
+            if (
+                not terminal_forced
+                and forced_reason is None
+                and not approval.requires_approval(mode, tc.function.name)
+            ):
+                continue
+            if terminal_forced and forced_reason is None:
+                forced_reason = "terminal 工具强制审批（TERMINAL_REQUIRE_APPROVAL=true）"
             if approval.find_decision(self.approval_decisions, tc.function.name, args) is not None:
                 continue
             if pending is None:
-                pending = (tc, args)
+                pending = (tc, args, forced_reason)
         if pending is None:
             return
 
-        tc, args = pending
+        tc, args, forced_reason = pending
         risk = approval.tool_risk_level(tc.function.name)
         ttl = int(getattr(self.config, "approval_timeout_seconds", 0) or 0)
         request = approval.ApprovalRequest(
@@ -230,7 +338,7 @@ class Executor:
             tool_args=args,
             tool_call_id=getattr(tc, "id", "") or "",
             risk_level=risk,
-            reason=approval.build_approval_reason(mode, tc.function.name, risk),
+            reason=forced_reason or approval.build_approval_reason(mode, tc.function.name, risk),
             step_id=step.id if step is not None else "",
             plan_id=plan.id if plan is not None else "",
             expires_at=(time.time() + ttl) if ttl > 0 else None,
@@ -261,15 +369,25 @@ class Executor:
         # unavailable：暂停没有"回来的路"→ 本 run 降级，需审批调用全部失败化。
         self.approval_degraded = True
 
-    def _gate_materialization(self, func_name: str, args: dict[str, Any]) -> str | None:
+    def _gate_materialization(
+        self, func_name: str, args: dict[str, Any], *, forced: bool = False
+    ) -> str | None:
         """已决定/降级调用的物化判定（主循环用）。
 
         返回 None = 放行；"deny" = 人工拒绝（结构化失败 approval_denied）；
         "unavailable" = 审批服务不可用降级（结构化失败 approval_unavailable）。
+
+        ``forced=True`` 表示 hook 的 ``ask`` 强制审批（即使 requires_approval
+        为假）——粘滞 deny 与降级必须同样生效，否则 ask 会被 mode=never 绕过。
+
+        issue #477：``terminal_*`` 强制审批——无审批通道时 deny（fail-closed）。
         """
-        if self.approval_check is None:
+        hook_forced = forced
+        terminal_forced = self._terminal_approval_forced(func_name)
+        forced = hook_forced or terminal_forced
+        if self.approval_check is None and not forced:
             return None
-        if not approval.requires_approval(
+        if not forced and not approval.requires_approval(
             getattr(self.config, "approval_mode", "risky"), func_name
         ):
             return None
@@ -278,7 +396,22 @@ class Executor:
             return "deny" if decision.get("decision") == "deny" else None
         if self.approval_degraded:
             return "unavailable"
+        if self.approval_check is None and forced:
+            return "deny"
         return None
+
+    @staticmethod
+    def _terminal_approval_forced(tool_name: str) -> bool:
+        """issue #477：terminal_* 在 TERMINAL_REQUIRE_APPROVAL=true 时强制审批。
+
+        只加强这一族工具的判定，不改变全局 approval_mode 语义；配置读取走
+        惰性 settings 代理，测试可 monkeypatch 切换。
+        """
+        if not str(tool_name).startswith("terminal_"):
+            return False
+        from app.core.config import settings
+
+        return bool(getattr(settings, "TERMINAL_REQUIRE_APPROVAL", True))
 
     # ── C3a：工具调用配对持久化（tool_ledger；未接线时全部 no-op）──────────
 
@@ -499,6 +632,12 @@ class Executor:
                     ctx=ctx,
                 ):
                     yield event
+                # Hooks（issue #474）：pre_step deny → 本轮不再执行剩余步骤。
+                if self._hook_turn_denied:
+                    for pending_step in plan.steps:
+                        if pending_step.status == "pending":
+                            pending_step.status = "skipped"
+                    break
                 continue
 
             # Issue #203 ①: DAG 一次可派发多步，按实际派发数计数
@@ -532,6 +671,14 @@ class Executor:
                     on_step_done=on_step_done,
                 ):
                     yield event
+
+            # Hooks（issue #474）：pre_step deny → 本轮不再执行剩余步骤
+            # （并行批次里已启动的兄弟步骤由 _execute_step_once 的入口护栏拦住）。
+            if self._hook_turn_denied:
+                for pending_step in plan.steps:
+                    if pending_step.status == "pending":
+                        pending_step.status = "skipped"
+                break
 
         return
 
@@ -579,7 +726,11 @@ class Executor:
             yield event
 
         step.result = step_result[:2000] if step_result else None
-        if step.status != "failed":
+        if self._hook_turn_denied:
+            # hooks（issue #474）：pre_step deny 后本轮不执行——步骤按跳过收敛，
+            # 不写"completed"假记录、不触发成功路径的熔断复位。
+            step.status = "skipped"
+        elif step.status != "failed":
             step.status = "completed"
             plan.completed_steps += 1
             self._consecutive_failures = 0  # reset circuit breaker on success
@@ -607,6 +758,26 @@ class Executor:
         # 回写全部完成后的落盘点——硬杀最多退回这一步重跑。
         if on_step_done is not None:
             await on_step_done(step)
+
+        # ── Hooks（issue #474）：agent/post_step（serial 观察，失败只记录）──
+        _, post_events = await self._emit_hooks(
+            agent_hooks.AGENT_POST_STEP,
+            {
+                "session_id": self._hook_session_id(),
+                "task_id": self.tool_ledger_task_id,
+                "step_index": plan.steps.index(step) if step in plan.steps else -1,
+                "result": {
+                    "status": step.status,
+                    "result": step.result,
+                    "error": step.error_context or "",
+                    "tool_hint": step.tool_hint or "",
+                },
+            },
+            user_id=user_id,
+            organization_id=organization_id,
+        )
+        for hook_event in post_events:
+            yield hook_event
 
         yield AgentEvent(
             type="thinking",
@@ -684,7 +855,11 @@ class Executor:
                     event_queues[step.id].clear()
 
                     step.result = step_result[:2000] if step_result else None
-                    if step.status != "failed":
+                    if step.status == "skipped":
+                        # Hooks（issue #474）：pre_step deny 的跳过终态，不得被
+                        # 收敛成 completed。
+                        pass
+                    elif step.status != "failed":
                         step.status = "completed"
                         plan.completed_steps += 1
                         self._consecutive_failures = 0
@@ -712,6 +887,26 @@ class Executor:
                     # T2 checkpoint（issue #201）：并行路径的同一落盘点。
                     if on_step_done is not None:
                         await on_step_done(step)
+
+                    # ── Hooks（issue #474）：agent/post_step（serial 观察）──
+                    _, post_events = await self._emit_hooks(
+                        agent_hooks.AGENT_POST_STEP,
+                        {
+                            "session_id": self._hook_session_id(),
+                            "task_id": self.tool_ledger_task_id,
+                            "step_index": plan.steps.index(step) if step in plan.steps else -1,
+                            "result": {
+                                "status": step.status,
+                                "result": step.result,
+                                "error": step.error_context or "",
+                                "tool_hint": step.tool_hint or "",
+                            },
+                        },
+                        user_id=user_id,
+                        organization_id=organization_id,
+                    )
+                    for hook_event in post_events:
+                        yield hook_event
 
                     yield AgentEvent(
                         type="thinking",
@@ -850,6 +1045,12 @@ class Executor:
                 elif event.type == "chunk":
                     result_text += event.content
                 yield event
+
+            # Hooks（issue #474）：agent/pre_step deny 是**本轮终止**信号——
+            # 不重试、不走 fallback（fallback 也是执行，违背 deny 语义）。
+            if self._hook_turn_denied:
+                step.status = "skipped"
+                return
 
             if not had_error:
                 # Also yield the result as a chunk for the final answer accumulator
@@ -1005,6 +1206,19 @@ class Executor:
         if await self._cancel_requested():
             self.pending_control = "cancel"
             raise approval.RunCancelled()
+        # Hooks（issue #474）：agent/pre_step 已 deny 本轮——重试/fallback/并行
+        # 兄弟步骤都不得继续发起 LLM 调用（"本轮不执行"）。
+        if self._hook_turn_denied:
+            step.status = "skipped"
+            yield AgentEvent(
+                type="tool_error",
+                tool_name=step.tool_hint or "llm",
+                content="hook 已拒绝本轮执行，步骤跳过",
+                plan_id=plan.id,
+                plan_step_id=step.id,
+                error_type="hook_denied",
+            )
+            return
         # issue #293 ②：本 attempt 内是否出现过工具失败——决定尾部是否还写
         # "completed" 记录。失败 attempt 不再伪造绿色记录；终态失败由
         # _execute_step_with_retry 的重试循环尽头统一落账。
@@ -1104,6 +1318,66 @@ class Executor:
                 "content": f"请执行这个步骤: {step.description}",
             }
         )
+
+        # ── Hooks（issue #474）：agent/pre_step —— 消息构建完成、LLM 调用之前 ──
+        # 插入点说明：payload 里的 messages 只在这里存在（loop 层看不到每步的
+        # 提示词），因此 pre_step 由执行器在真实边界 emit；loop 负责 turn_* 事件。
+        # deny → 本轮不执行（置 _hook_turn_denied，重试/fallback/并行步骤全停）；
+        # modify → 用返回的 messages 替换本次调用输入。
+        step_index = plan.steps.index(step) if step in plan.steps else -1
+        pre_decision, pre_events = await self._emit_hooks(
+            agent_hooks.AGENT_PRE_STEP,
+            {
+                "session_id": self._hook_session_id(),
+                "task_id": self.tool_ledger_task_id,
+                "step_index": step_index,
+                "messages": messages,
+                "step": {
+                    "id": step.id,
+                    "description": step.description,
+                    "tool_hint": step.tool_hint or "",
+                    "dependencies": list(step.dependencies or []),
+                },
+            },
+            user_id=user_id,
+            organization_id=organization_id,
+        )
+        for hook_event in pre_events:
+            yield hook_event
+        if pre_decision.action == "deny":
+            self._hook_turn_denied = True
+            step.status = "skipped"
+            if ctx is not None:
+                ctx.record_decision(
+                    "hooks", "pre_step_denied", pre_decision.reason or "hook 拒绝步骤执行"
+                )
+            # 观测 span 必须收尾（与 issue #256 同口径：早退不 end 会泄漏 span）。
+            if lf and step_span:
+                step_span.end(output="hook_denied", level="WARNING")
+            yield AgentEvent(
+                type="tool_error",
+                tool_name=step.tool_hint or "llm",
+                content=f"hook 拒绝步骤执行: {pre_decision.reason or '未给出原因'}",
+                plan_id=plan.id,
+                plan_step_id=step.id,
+                error_type="hook_denied",
+            )
+            return
+        # waterfall 的 payload 是最终载体：action=allow 时携带改写后的 payload
+        # （next(modified) 的正常写法），action=modify 是短路式改写——两者都生效。
+        if isinstance(pre_decision.payload, dict):
+            modified_messages = pre_decision.payload.get("messages")
+            if (
+                isinstance(modified_messages, list)
+                and modified_messages
+                and all(
+                    isinstance(m, dict) and "role" in m and "content" in m
+                    for m in modified_messages
+                )
+            ):
+                messages = modified_messages
+            elif pre_decision.action == "modify":
+                logger.warning("hook 修改 agent/pre_step 的 messages 形状非法，忽略改写")
 
         # Get tools
         tools = self._get_step_tools(step)
@@ -1264,10 +1538,71 @@ class Executor:
             turn_calls,
             allowed_tool_names,
         )
+        # ── Hooks（issue #474）：tools/pre_execute —— 审批预检之前 ─────────────
+        # 关键顺序（issue §5.5 "关键修正"）：审批预检必须看到 hook 的决策——
+        #   deny   → 不进入审批、不执行（per-call 循环物化为 hook_denied）；
+        #   ask    → 强制进入审批门（即使 requires_approval 为假）；无审批通道
+        #            时按 deny 处理（hook 不能绕过审批，也不能凭空放行）；
+        #   modify → 用改写的 arguments 登记/审批/派发（审批对象是修改后的参数）。
+        effective_calls: list[tuple[Any, dict[str, Any]]] = []
+        hooked_args: dict[str, dict[str, Any]] = {}
+        hook_denied_reasons: dict[str, str] = {}
+        hook_forced_reasons: dict[int, str] = {}
+        hook_forced_call_ids: set[str] = set()
+        for tc, parsed_args in gated_calls:
+            call_id = call_id_by_obj.get(id(tc), "")
+            decision, hook_events = await self._emit_hooks(
+                agent_hooks.TOOLS_PRE_EXECUTE,
+                {
+                    "tool_name": tc.function.name,
+                    "arguments": parsed_args,
+                    "risk_level": approval.tool_risk_level(tc.function.name),
+                    "tool_call_id": call_id,
+                },
+                user_id=user_id,
+                organization_id=organization_id,
+            )
+            for hook_event in hook_events:
+                yield hook_event
+            args = parsed_args
+            # waterfall 的 payload 是最终载体：allow 携带的改写（next(modified)）
+            # 与 modify 短路改写都生效（deny 优先，不看 payload）。
+            if decision.action != "deny" and isinstance(decision.payload, dict):
+                modified_args = decision.payload.get("arguments")
+                if isinstance(modified_args, dict):
+                    args = modified_args
+                    hooked_args[call_id] = modified_args
+                elif decision.action == "modify":
+                    logger.warning(
+                        "hook 的 tools/pre_execute modify 未返回 arguments 字典，忽略改写（call=%s）",
+                        call_id,
+                    )
+            if decision.action == "deny":
+                hook_denied_reasons[call_id] = decision.reason or "hook 拒绝了本次工具调用"
+            elif decision.action == "ask":
+                if self.approval_check is not None:
+                    hook_forced_reasons[id(tc)] = (
+                        decision.reason or "hook 要求对本次工具调用进行人工审批"
+                    )
+                    hook_forced_call_ids.add(call_id)
+                else:
+                    hook_denied_reasons[call_id] = (
+                        decision.reason or "hook 要求人工审批，但当前没有审批通道"
+                    )
+            effective_calls.append((tc, args))
         # C3a：先落库再 dispatch——登记发生在审批预检与任何执行之前；进程若在
         # 预检/派发窗口内死亡，账本留下的是"已登记未派发"（可被合成终态收敛）。
-        await self._ledger_register(gated_calls, call_id_by_obj)
-        async for gate_event in self._approval_precheck(gated_calls, plan, step):
+        # hook modify 后登记的是**实际将派发**的参数。
+        await self._ledger_register(effective_calls, call_id_by_obj)
+        async for gate_event in self._approval_precheck(
+            effective_calls,
+            plan,
+            step,
+            skip_objects={
+                id(tc) for tc, _ in gated_calls if call_id_by_obj.get(id(tc)) in hook_denied_reasons
+            },
+            forced_reasons=hook_forced_reasons,
+        ):
             yield gate_event
 
         for idx, tc in enumerate(turn_calls):
@@ -1365,11 +1700,47 @@ class Executor:
                 attempt_error_detail = f"工具参数不是合法 JSON，已拒绝执行：{e}"
                 continue
 
+            # ── Hooks（issue #474）：pre_execute 改写后的参数生效 ─────────────
+            # 审批判定与真实派发都使用改写后的参数（人类批准的是"这次调用"）。
+            args = hooked_args.get(tool_call_id, args)
+
+            # pre_execute deny：不进入审批、不执行；结构化失败喂给反思链路。
+            denied_reason = hook_denied_reasons.get(tool_call_id)
+            if denied_reason is not None:
+                refusal = ToolResult.fail(code="hook_denied", message=denied_reason)
+                denial = str(refusal)
+                AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
+                # C3a：先落账再外发（与审批拒绝同款：确定性终态、未派发）。
+                await self._ledger_result(
+                    tool_call_id,
+                    success=False,
+                    result=denial,
+                    error_type="hook_denied",
+                )
+                yield AgentEvent(
+                    type="tool_error",
+                    tool_name=func.name,
+                    tool_call_id=tool_call_id,
+                    content=denial,
+                    plan_id=plan.id,
+                    plan_step_id=step.id,
+                    retry_attempt=getattr(step, "retry_count", 0),
+                    error_type="hook_denied",
+                )
+                tool_results.append(
+                    {"tool": func.name, "result": denial, "error_type": "hook_denied"}
+                )
+                attempt_error_detail = denial
+                continue
+
             # ── HITL：审批决定物化（预检已保证没有未决调用能走到这里）──────
             # deny：人工拒绝 → 该调用以结构化失败 approval_denied 喂给反思链路
             # （粘滞：同 (tool, args) 在本 run 内不再执行、也不再打扰人类）；
             # unavailable：暂停无法持久化 → 需审批调用一律不执行（绝不静默放行）。
-            gate = self._gate_materialization(func.name, args)
+            # forced：hook ask 的强制审批同样受粘滞 deny / 降级约束。
+            gate = self._gate_materialization(
+                func.name, args, forced=tool_call_id in hook_forced_call_ids
+            )
             if gate is not None:
                 if gate == "deny":
                     decision = (
@@ -1456,12 +1827,64 @@ class Executor:
 
                 # raw_result is ToolResult (execute_detailed always returns ToolResult)
                 result: str = str(raw_result)
+                success: bool = bool(raw_result.success)
+                error_type: str | None = (
+                    raw_result.error.code if (not success and raw_result.error) else None
+                )
                 # issue #206：工具声明的 resolved sandbox（如 execute_python 的
                 # "ast"/"docker"），随 tool_result/tool_error 事件暴露。
                 sandbox = getattr(getattr(raw_result, "meta", None), "sandbox", "")
 
-                if not raw_result.success:
-                    error_type = raw_result.error.code if raw_result.error else "unknown"
+                # ── Hooks（issue #474）：tools/post_execute —— 结果落账之前 ────
+                # deny → 用拒绝结果替换（成败翻转为失败）；modify → 替换最终
+                # ToolResult 内容/成败/错误码。ledger 与 SSE 事件都记录**最终**
+                # 结果（不是原始结果）。
+                post_decision, post_events = await self._emit_hooks(
+                    agent_hooks.TOOLS_POST_EXECUTE,
+                    {
+                        "tool_name": func.name,
+                        "arguments": args,
+                        "result": {
+                            "success": success,
+                            "content": result,
+                            "error_type": error_type or "",
+                        },
+                    },
+                    user_id=user_id,
+                    organization_id=organization_id,
+                )
+                for hook_event in post_events:
+                    yield hook_event
+                if post_decision.action == "deny":
+                    refusal = ToolResult.fail(
+                        code="hook_denied",
+                        message=post_decision.reason or "hook 拒绝了该工具结果",
+                    )
+                    result, success, error_type = str(refusal), False, "hook_denied"
+                elif isinstance(post_decision.payload, dict):
+                    modified_result = post_decision.payload.get("result")
+                    if isinstance(modified_result, dict):
+                        new_content = modified_result.get("content")
+                        if isinstance(new_content, str):
+                            result = new_content
+                        if isinstance(modified_result.get("success"), bool):
+                            success = modified_result["success"]
+                        if success:
+                            error_type = None
+                        else:
+                            candidate = modified_result.get("error_type")
+                            error_type = (
+                                candidate
+                                if isinstance(candidate, str) and candidate
+                                else (error_type or "hook_denied")
+                            )
+                    else:
+                        logger.warning(
+                            "hook 的 tools/post_execute modify 未返回 result 字典，忽略改写"
+                        )
+
+                if not success:
+                    error_type = error_type or "unknown"
                     AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
                     # C3a：结果先落账再外发（消费方在 yield 处断流也不丢账）。
                     await self._ledger_result(
@@ -1519,21 +1942,57 @@ class Executor:
                 AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
                 AGENT_TOOL_LATENCY.observe(elapsed / 1000)
                 logger.error(f"Tool {func.name} failed: {e}")
+                # ── Hooks（issue #474）：tools/post_execute 对异常结果同样生效 ──
+                # 工具抛异常/超时也是"执行结果"；观察者不应漏掉这条路径。
+                # deny 替换为拒绝结果，modify 仅允许替换 content（异常态保持失败）。
+                exception_result = f"{type(e).__name__}: {e}"
+                exception_error_type = type(e).__name__
+                post_decision, post_events = await self._emit_hooks(
+                    agent_hooks.TOOLS_POST_EXECUTE,
+                    {
+                        "tool_name": func.name,
+                        "arguments": args,
+                        "result": {
+                            "success": False,
+                            "content": exception_result,
+                            "error_type": exception_error_type,
+                        },
+                    },
+                    user_id=user_id,
+                    organization_id=organization_id,
+                )
+                for hook_event in post_events:
+                    yield hook_event
+                if post_decision.action == "deny":
+                    exception_result = str(
+                        ToolResult.fail(
+                            code="hook_denied",
+                            message=post_decision.reason or "hook 拒绝了该工具结果",
+                        )
+                    )
+                    exception_error_type = "hook_denied"
+                elif isinstance(post_decision.payload, dict):
+                    modified_result = post_decision.payload.get("result")
+                    if isinstance(modified_result, dict) and isinstance(
+                        modified_result.get("content"), str
+                    ):
+                        exception_result = modified_result["content"]
                 # C3a：异常结果先落账再外发（消费方在 yield 处断流也不丢账）。
                 await self._ledger_result(
                     tool_call_id,
                     success=False,
-                    result=f"{type(e).__name__}: {e}",
-                    error_type=type(e).__name__,
+                    result=exception_result,
+                    error_type=exception_error_type,
                 )
                 yield AgentEvent(
                     type="tool_error",
                     tool_name=func.name,
                     tool_call_id=tool_call_id,
-                    content=f"{type(e).__name__}: {e}",
+                    content=exception_result,
                     tool_duration_ms=elapsed,
                     plan_id=plan.id,
                     plan_step_id=step.id,
+                    error_type=exception_error_type,
                 )
                 tool_results.append({"tool": func.name, "result": f"Exception: {e}"})
                 attempt_error_detail = f"{type(e).__name__}: {e}"

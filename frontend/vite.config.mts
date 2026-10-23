@@ -117,6 +117,11 @@ export default defineConfig({
         target: `ws://127.0.0.1:${getBackendPort()}`,
         ws: true,
       },
+      // issue #477：持久终端 WebSocket（显式 ws:true，且必须排在 '/api' 之前）
+      '/api/v1/terminal/ws': {
+        target: `ws://127.0.0.1:${getBackendPort()}`,
+        ws: true,
+      },
       '/ws': {
         target: `ws://127.0.0.1:${getBackendPort()}`,
         ws: true,

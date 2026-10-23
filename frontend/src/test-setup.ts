@@ -12,6 +12,22 @@
  */
 import { vi } from 'vitest'
 
+// AgentInput 挂载即 GET /commands（issue #475）。未显式 mock 该模块的测试文件
+// 不应触发真实 XHR：jsdom 下请求会卡在 axios 超时/重试链上，拖垮整个套件。
+// 默认给空清单（菜单只余本地模板）；需要断言命令行为的测试文件用各自的
+// vi.mock('@/api/commands', …) 覆盖本默认。
+vi.mock('@/api/commands', () => ({
+  commandsApi: {
+    list: vi.fn().mockResolvedValue({
+      data: {
+        success: true,
+        data: { enabled: true, scope: 'global', commands: [] },
+      },
+    }),
+    execute: vi.fn(),
+  },
+}))
+
 if (typeof window !== 'undefined' && !window.matchMedia) {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,

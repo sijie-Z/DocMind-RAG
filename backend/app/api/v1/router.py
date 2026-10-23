@@ -34,9 +34,11 @@ from app.api.v1.endpoints import (
     prompts,
     scheduled_tasks,
     sessions,
+    terminal,
     token_usage,
     user_settings,
     users,
+    webhooks,
     workflow,
 )
 from app.rpc.http import router as rpc_http_router
@@ -69,6 +71,8 @@ ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
     "curated_skills": (curated_skills.router, "/curated-skills", ["智能Agent"], "agent"),
     "memory": (memory.router, "/memory", ["Agent记忆"], "rag"),
     "agent": (agent.router, "/agent", ["智能Agent"], "agent"),
+    # issue #477：容器持久终端（HTTP 会话管理 + 一次性票据 + PTY WebSocket）。
+    "terminal": (terminal.router, "/terminal", ["终端"], "agent"),
     # issue #476：会话 fork / 谱系。与 /agent/sessions 共用同一批数据行与可见范围
     # （session_service），独立前缀是 issue 指定的 API 形态。
     "sessions": (sessions.router, "/sessions", ["会话分叉"], "agent"),
@@ -80,6 +84,9 @@ ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
     "scheduled_tasks": (scheduled_tasks.router, "/scheduled-tasks", ["定时任务"], "agent"),
     "demo": (demo.router, "/demo", ["示例数据"], "agent"),
     "user_settings": (user_settings.router, "/user", ["用户设置"], "core"),
+    # issue #478：入站 webhook + 规则管理。入站端点无需 JWT（HMAC 验签），
+    # 管理端点 require_org_admin；归 agent bundle（投递最终跑 Agent 会话）。
+    "webhooks": (webhooks.router, "/webhooks", ["Webhook"], "agent"),
 }
 
 ALL_BUNDLES: list[str] = ["core", "rag", "agent", "observability"]

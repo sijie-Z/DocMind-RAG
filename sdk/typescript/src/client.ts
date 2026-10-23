@@ -48,6 +48,13 @@ export interface ClientOptions {
 const RETRY_STATUS = new Set([429, 502, 503, 504]);
 const DEFAULT_MAX_RETRIES = 3;
 
+/** 去掉末尾所有 `/`（线性扫描，避免正则回溯被 CodeQL 判为 ReDoS）。 */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47 /* '/' */) end -= 1;
+  return value.slice(0, end);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -198,7 +205,7 @@ export class Client {
     if (!options.apiKey) {
       throw new DocMindError('AUTHENTICATION_ERROR', 'apiKey is required', 401);
     }
-    this.baseUrl = options.baseUrl.replace(/\/+$/, '');
+    this.baseUrl = stripTrailingSlashes(options.baseUrl);
     this.apiKey = options.apiKey;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.maxRetries = Math.max(1, options.maxRetries ?? DEFAULT_MAX_RETRIES);

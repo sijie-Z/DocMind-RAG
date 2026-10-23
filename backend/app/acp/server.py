@@ -616,6 +616,13 @@ class AcpServer:
                         "ACP agent warning (session=%s): %s", state.session_id, event.content
                     )
                     continue
+                if event.type == "hook_error":
+                    # #474：hook 失败不静默（SSE 面以事件外发）。ACP 无对应
+                    # update 变体，这里以 warning 留痕，不打断/不污染会话流。
+                    logger.warning(
+                        "ACP hook_error (session=%s): %s", state.session_id, event.content
+                    )
+                    continue
                 if event.type in ("done", "run_cancelled", "error"):
                     terminal_type = event.type
                     if event.type == "error":

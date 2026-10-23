@@ -33,6 +33,7 @@ from app.core.error_mapping import (
     JSONRPC_NOT_FOUND,
     rpc_error_from_exception,
 )
+from app.core.log_safety import log_safe
 from app.core.prometheus import RPC_REQUEST_DURATION, RPC_REQUESTS_TOTAL
 from app.core.redis import redis_client
 
@@ -241,7 +242,7 @@ class Dispatcher:
         try:
             response = await self._execute_request(message)
         except Exception:  # noqa: BLE001 - 兜底：绝不因单请求异常打断 stdio 循环
-            logger.exception("RPC request crashed (id=%s)", mid)
+            logger.exception("RPC request crashed (id=%s)", log_safe(mid))
             response = _error(mid, JSONRPC_INTERNAL_ERROR, GENERIC_SERVER_ERROR)
         finally:
             self._inflight.pop(mid, None)
@@ -249,7 +250,7 @@ class Dispatcher:
             try:
                 await self._send(response)
             except Exception:  # noqa: BLE001
-                logger.warning("Failed to write RPC response (id=%s)", mid, exc_info=True)
+                logger.warning("Failed to write RPC response (id=%s)", log_safe(mid), exc_info=True)
 
     async def _execute_request(self, message: dict) -> dict:
         mid = message.get("id")
@@ -278,9 +279,9 @@ class Dispatcher:
         except Exception as exc:  # noqa: BLE001
             code, public_message, data = rpc_error_from_exception(exc)
             if code == JSONRPC_INTERNAL_ERROR:
-                logger.exception("RPC method failed: %s", method)
+                logger.exception("RPC method failed: %s", log_safe(method))
             else:
-                logger.info("RPC method rejected: %s (%s)", method, type(exc).__name__)
+                logger.info("RPC method rejected: %s (%s)", log_safe(method), type(exc).__name__)
             RPC_REQUESTS_TOTAL.labels(method=method, result="error").inc()
             return _error(mid, code, public_message, data)
         finally:
@@ -299,7 +300,7 @@ class Dispatcher:
             if method == "$/cancel_request":
                 await self._handle_cancel_request(params)
                 return None
-            logger.debug("Ignoring unknown RPC notification: %s", method)
+            logger.debug("Ignoring unknown RPC notification: %s", log_safe(method))
             return None
         if "result" in message or "error" in message:
             self._handle_client_response(message)
@@ -329,7 +330,7 @@ class Dispatcher:
         request_id = message.get("id")
         entry = self._pending_server.get(str(request_id))
         if entry is None:
-            logger.debug("Ignoring response for unknown server request id=%s", request_id)
+            logger.debug("Ignoring response for unknown server request id=%s", log_safe(request_id))
             return
         if entry.future.done():
             return
