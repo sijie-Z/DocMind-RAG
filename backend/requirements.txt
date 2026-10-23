@@ -88,3 +88,6 @@ opentelemetry-instrumentation-fastapi>=0.43b0
 # （issue #267），故锁 <3；适配 4.x 属另行工作（需迁移到 start_observation 体系）。
 langfuse>=2.55.0,<3
 mcp>=2.2.0
+# issue #477：持久终端（docker exec PTY）用 Docker SDK for Python。
+# 版本钉下限 7.1（exec_create/exec_start(socket=True)/exec_resize 的稳定接口）。
+docker>=7.1
