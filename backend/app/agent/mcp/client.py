@@ -38,7 +38,7 @@ from mcp.client.sse import sse_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 from mcp.shared import exceptions as mcp_exceptions
 
-# mcp >= 2.2 起异常类更名为 McpError（旧版本是 MCPError）；两者都接受。
+# 新版 mcp（2.x）异常类为 MCPError，旧版（1.x）为 McpError；两者都接受。
 if hasattr(mcp_exceptions, "MCPError"):
     MCPError = mcp_exceptions.MCPError
 elif hasattr(mcp_exceptions, "McpError"):
