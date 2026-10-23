@@ -1,11 +1,16 @@
 /**
- * T9 · 密码规则前后端对齐 —— 注册/登录表单最小长度 6→8。
+ * T9 · 密码规则前后端对齐 —— 注册最小长度 8，登录只校验非空（#492）。
  *
  * 后端口径（auth.py RegisterRequest.validate_password / ChangePasswordRequest）：
- * 密码不少于 8 位。前端登录页规则曾为 min: 6，注册 6 位密码可绕过前端校验。
+ * 密码不少于 8 位 —— 这条只属于注册/改密。登录是验证已有凭据，前端不得用
+ * 注册策略把老用户挡在门外。
  *
- * 判别点：把 login/index.vue 密码规则的 min 从 8 改回 6（或 i18n 文案改回
- * 「至少为 6 位」），本文件「6 位被拦截」与「提示 ≥8」断言即红。
+ * 判别点：
+ * - 注册 6 位被拦 / 提示 ≥8（把注册 min 改回 6 或文案改回「至少为 6 位」即红）；
+ * - 登录 6 位密码、2 位用户名可透传（把 min 规则改回无条件生效即红）；
+ * - 登录失败单条提示且清空密码（删除 form.password = '' 即红）；
+ * - 请求层 /auth/* 失败（响应错误与网络错误）不弹全局 toast
+ *   （去掉 request.ts 的 !isAuthRequest 即红）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -184,6 +189,16 @@ describe('请求层判别：/auth/* 失败不再触发全局 toast（双 toast �
     return handlers[0].rejected(error)
   }
 
+  function rejectNetwork(url: string) {
+    const handlers = (request.interceptors.response as unknown as InterceptorHandlers).handlers
+    const error = {
+      isAxiosError: true,
+      message: 'Network Error',
+      config: { url, method: 'post' as const, headers: {} as Record<string, string> },
+    }
+    return handlers[0].rejected(error)
+  }
+
   it('登录 401 时拦截器不弹全局 toast（即使响应带 Request ID）', async () => {
     await expect(
       rejectWithResponse('/auth/login', 401, { detail: '用户名或密码错误' }, { 'X-Request-ID': 'rid-login-401' }),
@@ -199,5 +214,20 @@ describe('请求层判别：/auth/* 失败不再触发全局 toast（双 toast �
 
     expect(discreteMessageSpies.error).toHaveBeenCalledTimes(1)
     expect(String(discreteMessageSpies.error.mock.calls[0][0])).toBe('服务器内部错误，请稍后重试')
+  })
+
+  it('登录网络错误（无 response）时拦截器不弹全局 toast（页面自行兜底）', async () => {
+    await expect(rejectNetwork('/auth/login')).rejects.toBeTruthy()
+
+    // 变异点：去掉网络错误分支的 !isAuthRequest → 此断言红
+    // （拦截器会弹「网络连接失败，请检查后端服务」，与登录页提示形成双 toast）。
+    expect(discreteMessageSpies.error).not.toHaveBeenCalled()
+  })
+
+  it('非 auth 请求网络错误仍弹全局 toast（防过度抑制）', async () => {
+    await expect(rejectNetwork('/knowledge/')).rejects.toBeTruthy()
+
+    expect(discreteMessageSpies.error).toHaveBeenCalledTimes(1)
+    expect(String(discreteMessageSpies.error.mock.calls[0][0])).toBe('网络连接失败，请检查后端服务')
   })
 })

@@ -412,7 +412,9 @@ request.interceptors.response.use(
         durationMs: typeof startedAt === 'number' ? Date.now() - startedAt : undefined
       })
     } else {
-      if (!silentError) {
+      // 与响应分支同口径：auth 请求的网络错误也由页面自行呈现（登录页会兜底
+      // “网络连接失败”类可读提示），拦截器再弹一次即双 toast。
+      if (!silentError && !isAuthRequest) {
         dedupMessage('error', '网络连接失败，请检查后端服务', 5000)
       }
       emitApiMetricEvent({
