@@ -216,6 +216,7 @@ Query enters
 | Agent Memory | `/memory` | Short/long/working/reflective memory CRUD, semantic search |
 | Agent | `/agent` | PER Agent conversations (SSE streaming), tool calls, configuration |
 | Session Fork | `/sessions` | Session fork / seed / lineage (issue #476) |
+| Persistent Terminal | `/terminal` | Container-backed persistent PTY: session CRUD, one-time WS tickets, WebSocket bridge (issue #477) |
 | Agent Commands | `/commands` | Server-side command catalog and model-free execution (/help, /status, /export, /tools) |
 | MCP | `/mcp` | MCP server status (admin, read-only) |
 | User Settings | `/user` | Personal UI preferences |
@@ -471,7 +472,7 @@ DocMind/
 │   │   │   ├── context_compressor.py #  Context compression
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (23 services)
+│   │   ├── services/                # Business service layer (24 services)
 │   │   ├── models/                  # ORM models (18 model files)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer

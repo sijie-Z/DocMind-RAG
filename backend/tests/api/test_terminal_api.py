@@ -23,7 +23,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
 
 from app.agent.terminal.manager import (
     FakeBackend,
@@ -198,11 +197,35 @@ def _connect(env, terminal_id: str, ticket: str, origin: str = TEST_ORIGIN):
     )
 
 
+def _await_policy_close(ws, timeout: float = 3.0) -> int:
+    """在超时内等待服务端以 close 帧拒绝；期间收到任何数据帧都判失败。
+
+    直接轮询 TestClient 内部的 anyio 流：``ws.receive_json()`` 在「服务端错误地
+    保持连接」时会永久阻塞，把回归（拒绝路径被短路）变成 CI 挂起而不是红灯。
+    """
+    from anyio import EndOfStream, WouldBlock
+
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            message = ws.portal.call(ws._send_rx.receive_nowait)
+        except WouldBlock:
+            message = None
+        except EndOfStream:
+            raise AssertionError("WS 会话已结束但没有收到 close 帧") from None
+        if message is not None:
+            if message["type"] == "websocket.close":
+                return int(message.get("code", 0))
+            raise AssertionError(f"拒绝路径不应发送数据帧: {message}")
+        if time.monotonic() > deadline:
+            raise AssertionError("服务端未在超时内以 1008 关闭连接（拒绝契约被破坏）")
+        time.sleep(0.01)
+
+
 def _assert_ws_rejected(env, terminal_id: str, ticket: str, origin: str = TEST_ORIGIN) -> None:
-    with pytest.raises(WebSocketDisconnect) as excinfo:
-        with _connect(env, terminal_id, ticket, origin) as ws:
-            ws.receive_json()
-    assert excinfo.value.code == 1008
+    with _connect(env, terminal_id, ticket, origin) as ws:
+        code = _await_policy_close(ws)
+    assert code == 1008
 
 
 # ── HTTP：开关与依赖 ─────────────────────────────────────────────────────────
@@ -347,13 +370,11 @@ def test_ticket_rotation_invalidates_old_ticket(env) -> None:
 
 def test_ws_requires_auth_subprotocol(env) -> None:
     data = _create(env)
-    with pytest.raises(WebSocketDisconnect) as excinfo:
-        with env.client.websocket_connect(
-            f"{TERMINAL_PREFIX}/ws/{data['terminal_id']}",
-            headers={"origin": TEST_ORIGIN},
-        ) as ws:
-            ws.receive_json()
-    assert excinfo.value.code == 1008
+    with env.client.websocket_connect(
+        f"{TERMINAL_PREFIX}/ws/{data['terminal_id']}",
+        headers={"origin": TEST_ORIGIN},
+    ) as ws:
+        assert _await_policy_close(ws) == 1008
 
 
 def test_ws_rejects_bad_origin(env) -> None:
@@ -363,13 +384,11 @@ def test_ws_rejects_bad_origin(env) -> None:
 
 def test_ws_rejects_missing_origin(env) -> None:
     data = _create(env)
-    with pytest.raises(WebSocketDisconnect) as excinfo:
-        with env.client.websocket_connect(
-            f"{TERMINAL_PREFIX}/ws/{data['terminal_id']}",
-            subprotocols=[f"auth.{data['ticket']}"],
-        ) as ws:
-            ws.receive_json()
-    assert excinfo.value.code == 1008
+    with env.client.websocket_connect(
+        f"{TERMINAL_PREFIX}/ws/{data['terminal_id']}",
+        subprotocols=[f"auth.{data['ticket']}"],
+    ) as ws:
+        assert _await_policy_close(ws) == 1008
 
 
 def test_ws_expired_ticket_rejected(env) -> None:

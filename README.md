@@ -216,6 +216,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | Agent 记忆 | `/memory` | 短期/长期/工作/反思记忆 CRUD、语义搜索 |
 | 智能 Agent | `/agent` | PER Agent 对话（SSE 流式）、工具调用、配置 |
 | 会话分叉 | `/sessions` | 会话 fork / seed / 谱系（issue #476） |
+| 持久终端 | `/terminal` | 容器持久 PTY：会话 CRUD、一次性 WS 票据、WebSocket 桥（issue #477） |
 | Agent 命令 | `/commands` | 服务端命令清单与无模型轮次执行（/help、/status、/export、/tools） |
 | MCP 工具 | `/mcp` | MCP 服务器状态（管理员只读） |
 | 用户设置 | `/user` | 个人 UI 偏好 |
@@ -441,7 +442,7 @@ DocMind/
 │   │   │   ├── context_compressor.py #  上下文压缩
 │   │   │   ├── context_window.py    #   令牌预算管理
 │   │   │   └── evaluator.py         #   质量评估
-│   │   ├── services/                # 业务服务层（23 个服务）
+│   │   ├── services/                # 业务服务层（24 个服务）
 │   │   ├── models/                  # ORM 模型（18 个模型文件）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者

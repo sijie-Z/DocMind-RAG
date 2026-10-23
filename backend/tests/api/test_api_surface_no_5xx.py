@@ -84,6 +84,10 @@ _MAX_SKIPS = 5  # 跳过清单的预算上限：超过就说明有人在用跳�
 _EXPECTED_DEPENDENCY_5XX: dict[str, int] = {
     "/files/{file_path}": 503,
     "/readyz": 503,
+    # issue #477：持久终端默认关闭（TERMINAL_ENABLED=false）时，终端 API 按
+    # issue 契约返回 503 SERVICE_UNAVAILABLE —— 这是「功能未启用/依赖不可达」
+    # 的如实信号（与 /readyz 同类），不是 5xx 缺陷；显式启用后返回 200。
+    "/api/v1/terminal/sessions": 503,
 }
 
 # ── 路径参数替换表 ─────────────────────────────────────────────────
