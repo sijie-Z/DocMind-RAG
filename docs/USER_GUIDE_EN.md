@@ -630,7 +630,7 @@ Successful login returns an envelope:
 
 ### 5.2 Endpoint modules
 
-There are **26 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from `include_router` calls in `backend/app/api/v1/router.py`):
+There are **26 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from `ROUTER_SPECS` keys in `backend/app/api/v1/router.py`):
 
 | Module | Prefix | Purpose |
 |--------|--------|---------|
