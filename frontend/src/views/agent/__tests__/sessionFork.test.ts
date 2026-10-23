@@ -3,7 +3,9 @@
  * parent_session_id 过滤入口（查看分叉）、分叉后跳转与 seed 说明、409 如实提示。
  *
  * 契约来源：
- * - POST /api/v1/sessions/{id}/fork {message_id?} → {id, copied_message_count, is_seeded…}
+ * - POST /api/v1/sessions/{id}/fork {message_id?, idempotency_key?}
+ *   → {session_id, messages_copied, checkpoint_task_id, id, copied_message_count, is_seeded…}
+ *   （issue #499 起顶层追加契约字段，旧字段保留一版）
  * - GET  /api/v1/agent/sessions?parent_session_id=…（列表过滤）
  * - GET  /api/v1/agent/sessions/{id} → messages[].id（边界可用性）
  * - 409 错误体：{success:false, error_code:"FORK_BOUNDARY_INVALID"|…, message}
@@ -302,6 +304,10 @@ describe('AgentView · Session Fork 接线', () => {
           message_count: 2,
           copied_message_count: 2,
           boundary_seq: 3,
+          // issue #499 契约字段（后端顶层追加，旧字段保留）
+          session_id: 'c1',
+          messages_copied: 2,
+          checkpoint_task_id: null,
           // 生产路径不发送 seed → 后端 is_seeded 恒 false（如实反映）
           is_seeded: false,
           checkpoint: { cloned: false, task_id: null, source_task_id: null },
@@ -345,6 +351,10 @@ describe('AgentView · Session Fork 接线', () => {
           message_count: 2,
           copied_message_count: 2,
           boundary_seq: 3,
+          // issue #499 契约字段（后端顶层追加，旧字段保留）
+          session_id: 'c1',
+          messages_copied: 2,
+          checkpoint_task_id: null,
           is_seeded: true,
           checkpoint: { cloned: false, task_id: null, source_task_id: null },
           idempotent_replay: false,
@@ -488,6 +498,10 @@ describe('AgentView · Session Fork 接线', () => {
           message_count: 2,
           copied_message_count: 2,
           boundary_seq: 3,
+          // issue #499 契约字段（后端顶层追加，旧字段保留）
+          session_id: 'c1',
+          messages_copied: 2,
+          checkpoint_task_id: null,
           is_seeded: false,
           checkpoint: { cloned: false, task_id: null, source_task_id: null },
           idempotent_replay: false,

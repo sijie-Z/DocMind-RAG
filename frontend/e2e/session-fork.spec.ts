@@ -78,6 +78,10 @@ const SESSION_DETAIL = (session: typeof PARENT_SESSION | typeof CHILD_SESSION, m
   })
 
 const FORK_RESULT = ok({
+  // issue #499 契约字段（顶层，与旧字段并存）
+  session_id: 'c1',
+  messages_copied: 2,
+  checkpoint_task_id: null,
   id: 'c1',
   title: 'Parent session (fork)',
   parent_session_id: 's1',
