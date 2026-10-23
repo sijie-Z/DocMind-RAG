@@ -201,3 +201,27 @@ test("fork, tools and knowledge wire to expected endpoints", async () => {
     "/api/v1/knowledge/search",
   ]);
 });
+
+const APPROVAL_SSE = [
+  "event: tool_result",
+  'data: {"type":"tool_result","content":"ok"}',
+  "",
+  "event: done",
+  'data: {"type":"done","decision":"approve"}',
+  "",
+  "",
+].join("\n");
+
+test("approvals.respond consumes the SSE resume stream", async () => {
+  const { client, calls } = makeClient(
+    () =>
+      new Response(APPROVAL_SSE, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+  );
+  const result = await client.approvals.respond("s1", "t1", "allow");
+  assert.equal(result.decision, "approve");
+  assert.equal(new URL(calls[0].url).pathname, "/api/v1/agent/tasks/t1/approval");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)).decision, "approve");
+});

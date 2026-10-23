@@ -303,6 +303,36 @@ async def _stream_events_async(
         yield SessionEvent(type="done", data={"conversationId": session_id})
 
 
+def _collect_sse_sync(client: _Base, path: str, body: dict[str, Any]) -> list[SessionEvent]:
+    """消费一个 SSE 端点（如审批续跑），返回全部事件。"""
+    headers = client._headers  # noqa: SLF001
+    headers["Accept"] = "text/event-stream"
+    with httpx.Client(timeout=client.timeout, transport=client._transport) as http:  # noqa: SLF001
+        with http.stream("POST", client._url(path), json=body, headers=headers) as resp:  # noqa: SLF001
+            if resp.status_code >= 400:
+                resp.read()
+                raise _Base._error(resp)
+            return list(_iter_sse_frames(resp.iter_lines()))
+
+
+async def _collect_sse_async(
+    client: _Base, path: str, body: dict[str, Any]
+) -> list[SessionEvent]:
+    headers = client._headers  # noqa: SLF001
+    headers["Accept"] = "text/event-stream"
+    events: list[SessionEvent] = []
+    async with httpx.AsyncClient(
+        timeout=client.timeout, transport=client._transport  # noqa: SLF001
+    ) as http:
+        async with http.stream("POST", client._url(path), json=body, headers=headers) as resp:  # noqa: SLF001
+            if resp.status_code >= 400:
+                await resp.aread()
+                raise _Base._error(resp)
+            async for event in _astream_frames(resp):
+                events.append(event)
+    return events
+
+
 def _astream_frames(resp) -> AsyncIterator[SessionEvent]:
     async def _lines() -> AsyncIterator[str]:
         async for line in resp.aiter_lines():
@@ -360,11 +390,11 @@ class _Approvals:
         if decision not in ("allow", "deny", "approve"):
             raise DocMindError("VALIDATION_ERROR", "decision 必须是 allow 或 deny")
         http_decision = "approve" if decision in ("allow", "approve") else "deny"
-        return self._c._request_json(  # noqa: SLF001
-            "POST",
-            f"/api/v1/agent/tasks/{approval_id}/approval",
-            json={"decision": http_decision, "note": "remember" if remember else None},
+        body = {"decision": http_decision, "note": "remember" if remember else None}
+        events = _collect_sse_sync(
+            self._c, f"/api/v1/agent/tasks/{approval_id}/approval", body
         )
+        return dict(events[-1].data) if events else {"ok": True}
 
 
 class _Tools:
@@ -573,11 +603,11 @@ class _AsyncApprovals:
         if decision not in ("allow", "deny", "approve"):
             raise DocMindError("VALIDATION_ERROR", "decision 必须是 allow 或 deny")
         http_decision = "approve" if decision in ("allow", "approve") else "deny"
-        return await self._c._request_json(
-            "POST",
-            f"/api/v1/agent/tasks/{approval_id}/approval",
-            json={"decision": http_decision, "note": "remember" if remember else None},
+        body = {"decision": http_decision, "note": "remember" if remember else None}
+        events = await _collect_sse_async(
+            self._c, f"/api/v1/agent/tasks/{approval_id}/approval", body
         )
+        return dict(events[-1].data) if events else {"ok": True}
 
 
 class _AsyncTools:

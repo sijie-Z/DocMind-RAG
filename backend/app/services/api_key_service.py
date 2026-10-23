@@ -148,6 +148,12 @@ class ApiKeyService:
         user.token_organization_id = matched.org_id
 
         await db.execute(update(ApiKey).where(ApiKey.id == matched.id).values(last_used_at=now))
+        # 认证发生在任何既有事务之前，及时落盘 last_used_at（GET 等只读端点不会
+        # 再 commit，不提交会随请求会话回滚而丢失）。失败不影响认证结果。
+        try:
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("api_key last_used_at commit failed: %s", exc)
         return user
 
     async def list_keys(

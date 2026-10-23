@@ -161,12 +161,16 @@ export class Client {
         throw new DocMindError('VALIDATION_ERROR', 'decision must be allow or deny');
       }
       const httpDecision = decision === 'deny' ? 'deny' : 'approve';
-      const data = await this.requestJson(
-        'POST',
+      // 审批端点返回 SSE（续跑事件流），不是 JSON——消费到流结束取最后一个事件。
+      let last: Record<string, unknown> = { ok: true };
+      for await (const event of this.streamPost(
         `/api/v1/agent/tasks/${encodeURIComponent(approvalId)}/approval`,
         { decision: httpDecision, note: remember ? 'remember' : null },
-      );
-      return (data ?? {}) as Record<string, unknown>;
+        {},
+      )) {
+        last = event.data;
+      }
+      return last;
     },
   };
 
@@ -276,24 +280,35 @@ export class Client {
     return body;
   }
 
-  private async *streamEvents(
+  private streamEvents(
     sessionId: string,
     prompt: string,
     clientMessageId: string | undefined,
     options: StreamOptions,
   ): AsyncGenerator<SessionEvent> {
-    const headers = this.headers();
-    headers.Accept = 'text/event-stream';
-    if (options.lastEventId) headers['Last-Event-ID'] = options.lastEventId;
     const body: Record<string, unknown> = {
       content: prompt,
       conversationId: sessionId,
       useAgent: true,
     };
     if (clientMessageId !== undefined) body.clientMessageId = clientMessageId;
+    return this.streamPost('/api/v1/chat/stream', body, options, {
+      conversationId: sessionId,
+    });
+  }
+
+  private async *streamPost(
+    path: string,
+    body: Record<string, unknown>,
+    options: StreamOptions,
+    doneFallback?: Record<string, unknown>,
+  ): AsyncGenerator<SessionEvent> {
+    const headers = this.headers();
+    headers.Accept = 'text/event-stream';
+    if (options.lastEventId) headers['Last-Event-ID'] = options.lastEventId;
 
     // 流式请求不重试：失败如实抛出（避免重复消息）。
-    const response = await this.fetchImpl(`${this.baseUrl}/api/v1/chat/stream`, {
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -333,7 +348,9 @@ export class Client {
       yield tail;
     }
     if (!sawDone) {
-      yield { type: 'done', data: { conversationId: sessionId } };
+      if (doneFallback) {
+        yield { type: 'done', data: doneFallback };
+      }
     }
   }
 }

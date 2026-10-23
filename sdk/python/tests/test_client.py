@@ -176,3 +176,49 @@ def test_fork_tools_and_knowledge():
     assert fork_body == {"message_id": "m1", "include_checkpoint": True}
     search_body = json.loads(calls[2][2])
     assert search_body == {"query": "q", "top_k": 3, "search_mode": "hybrid"}
+
+
+APPROVAL_SSE = "\n".join(
+    [
+        "event: tool_result",
+        'data: {"type": "tool_result", "content": "ok"}',
+        "",
+        "event: done",
+        'data: {"type": "done", "decision": "approve"}',
+        "",
+        "",
+    ]
+)
+
+
+def test_approvals_respond_consumes_sse():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(
+            200, text=APPROVAL_SSE, headers={"content-type": "text/event-stream"}
+        )
+
+    client = _client(handler)
+    result = client.approvals.respond("s1", "t1", "allow")
+    assert seen["path"] == "/api/v1/agent/tasks/t1/approval"
+    assert seen["body"]["decision"] == "approve"
+    assert result["decision"] == "approve"
+
+
+@pytest.mark.asyncio
+async def test_async_approvals_respond_consumes_sse():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, text=APPROVAL_SSE, headers={"content-type": "text/event-stream"}
+        )
+
+    async with AsyncClient(
+        "http://testserver",
+        api_key="dm_test_key",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        result = await client.approvals.respond("s1", "t1", "deny")
+    assert result["decision"] == "approve"
