@@ -156,6 +156,7 @@ class AcpServer:
         permission_timeout: float | None = None,
         plan_approval_mode: str | None = None,
         redirect_stdout: bool = True,
+        install_signal_handlers: bool = True,
     ) -> None:
         self.organization_id = organization_id
         self.user_id = user_id
@@ -169,6 +170,7 @@ class AcpServer:
         self._stdin = stdin if stdin is not None else sys.stdin.buffer
         self._stdout = stdout if stdout is not None else sys.stdout
         self._redirect_stdout = redirect_stdout
+        self._install_signal_handlers = install_signal_handlers
         self.permission_timeout = (
             float(permission_timeout)
             if permission_timeout is not None
@@ -249,15 +251,16 @@ class AcpServer:
             loop.call_soon_threadsafe(stop.set)
 
         installed: list[signal.Signals] = []
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            try:
-                loop.add_signal_handler(sig, _request_stop)
-                installed.append(sig)
-            except (NotImplementedError, RuntimeError, ValueError):
+        if self._install_signal_handlers:
+            for sig in (signal.SIGTERM, signal.SIGINT):
                 try:
-                    signal.signal(sig, _request_stop)
-                except (ValueError, OSError):  # pragma: no cover - 非主线程/受限环境
-                    pass
+                    loop.add_signal_handler(sig, _request_stop)
+                    installed.append(sig)
+                except (NotImplementedError, RuntimeError, ValueError):
+                    try:
+                        signal.signal(sig, _request_stop)
+                    except (ValueError, OSError):  # pragma: no cover - 非主线程/受限环境
+                        pass
 
         try:
             while not stop.is_set():

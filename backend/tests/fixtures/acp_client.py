@@ -197,6 +197,9 @@ class AcpClient:
 
         client = cls(write_line=_write, read_line=_read)
         client._process = process  # type: ignore[attr-defined]
+        assert process.stderr is not None
+        # 独立消费 stderr（避免管道写满阻塞子进程；terminate 时取回）。
+        client._stderr_task = asyncio.create_task(process.stderr.read())  # type: ignore[attr-defined]
         return client
 
     async def terminate(self, *, timeout: float = 10.0) -> tuple[int, str]:
@@ -208,11 +211,19 @@ class AcpClient:
         if process.stdin is not None and not process.stdin.is_closing():
             process.stdin.close()
         try:
-            _, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            await asyncio.wait_for(process.wait(), timeout=timeout)
         except TimeoutError:
             process.kill()
-            _, stderr = await process.communicate()
+            await process.wait()
+        # 进程已退出：stdout 读端会 EOF，读循环自然结束；再收 stderr。
         await self.close()
+        stderr_task = getattr(self, "_stderr_task", None)
+        stderr = b""
+        if stderr_task is not None:
+            try:
+                stderr = await asyncio.wait_for(stderr_task, timeout=5.0)
+            except (TimeoutError, asyncio.CancelledError):
+                stderr_task.cancel()
         return process.returncode or 0, stderr.decode("utf-8", errors="replace")
 
 
