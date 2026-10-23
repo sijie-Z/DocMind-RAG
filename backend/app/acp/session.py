@@ -126,8 +126,12 @@ class AcpSessionState:
         self.queue.put_nowait(None)
         try:
             await asyncio.wait_for(self.sender_task, timeout=5.0)
-        except (TimeoutError, asyncio.CancelledError):
+        except TimeoutError:
             self.sender_task.cancel()
+        except asyncio.CancelledError:
+            # 调用方被取消（断连收尾）：停掉 sender 后如实上抛，绝不吞取消。
+            self.sender_task.cancel()
+            raise
 
 
 class AcpSessionRegistry:
