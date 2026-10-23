@@ -126,7 +126,13 @@ def script(*events):
 
 
 class FakeAgentService:
-    """替代 AgentService：脚本化事件流；不碰 LLM / 真实工具。"""
+    """替代 AgentService：脚本化事件流；不碰 LLM / 真实工具。
+
+    额外记录「生成器是否被消费到尽」：service.chat 的真实实现在 yield 之后
+    还要执行任务收尾（COMPLETED/CANCELLED/FAILED）；消费者若提前 return，
+    收尾永不执行且 GC 会走 GeneratorExit 兜底——`chat_exhausted` /
+    `chat_closed_early` 用于钉住「必须排干事件流」的纪律。
+    """
 
     def __init__(self):
         self.chat_factories: list = []
@@ -134,6 +140,9 @@ class FakeAgentService:
         self.chat_calls: list[dict] = []
         self.resume_calls: list[dict] = []
         self.prepare_calls: list[dict] = []
+        self.chat_exhausted = False
+        self.chat_closed_early = False
+        self.resume_started_with_chat_exhausted: bool | None = None
 
     def add_chat(self, factory) -> None:
         self.chat_factories.append(factory)
@@ -143,11 +152,34 @@ class FakeAgentService:
 
     def chat(self, **kwargs):
         self.chat_calls.append(kwargs)
-        return self.chat_factories.pop(0)()
+        factory = self.chat_factories.pop(0)
+        service = self
+
+        async def _gen():
+            try:
+                async for event in factory():
+                    yield event
+            except GeneratorExit:
+                service.chat_closed_early = True
+                raise
+            else:
+                service.chat_exhausted = True
+
+        return _gen()
 
     def resume_chat(self, task_id, user_id, *, config=None, claim=True, document_context=None):
         self.resume_calls.append({"task_id": task_id, "claim": claim})
-        return self.resume_factories.pop(0)()
+        factory = self.resume_factories.pop(0)
+        service = self
+
+        async def _gen():
+            # 续跑流开始迭代时，旧 chat 流必须已经被消费到尽（否则旧生成器
+            # 的断流兜底会在 resume 开跑后覆盖快照/误判 FAILED）。
+            service.resume_started_with_chat_exhausted = service.chat_exhausted
+            async for event in factory():
+                yield event
+
+        return _gen()
 
     async def prepare_resume(self, task_id, user_id, *, organization_id=None):
         self.prepare_calls.append({"task_id": task_id, "organization_id": organization_id})
@@ -307,6 +339,9 @@ async def test_prompt_streams_updates_in_order_and_persists(sqlite_env, schema):
         session_id = await _new_session(env.client)
         response = await env.client.prompt(session_id, "问题")
         assert response["result"] == {"stopReason": "end_turn"}
+        # service 的收尾（持久化/终态）在 yield done 之后执行；必须排干事件流。
+        assert service.chat_exhausted is True
+        assert service.chat_closed_early is False
 
         variants = [update["sessionUpdate"] for update in env.client.updates]
         assert variants == [
@@ -382,6 +417,7 @@ async def test_prompt_error_event_returns_internal_error(sqlite_env):
         response = await env.client.prompt(session_id, "hi")
         assert response["error"]["code"] == -32603
         assert "DEEPSEEK_API_KEY" in response["error"]["message"]
+        assert service.chat_exhausted is True
 
 
 @pytest.mark.asyncio
@@ -440,6 +476,8 @@ async def test_cancel_drops_late_updates_and_returns_cancelled(sqlite_env):
         ]
         assert texts == ["第一段"]
         assert "迟到的内容" not in texts
+        assert service.chat_exhausted is True
+        assert service.chat_closed_early is False
 
 
 @pytest.mark.asyncio
@@ -532,6 +570,10 @@ async def test_permission_allow_once_completes(sqlite_env, schema, monkeypatch):
         )
         response = await prompt_task
         assert response["result"] == {"stopReason": "end_turn"}
+    assert service.resume_started_with_chat_exhausted is True, (
+        "resume 开跑前旧 chat 流必须已排干（防 GC 断流兜底覆盖新 run 快照）"
+    )
+    assert service.chat_closed_early is False
     assert decisions == [
         {
             "task_id": "task-1",
@@ -596,6 +638,7 @@ async def test_permission_timeout_denies_and_task_not_dangling(sqlite_env, monke
     assert decisions[0]["decision"] == "deny"
     assert decisions[0]["note"] == "acp:permission_cancelled"
     assert service.resume_calls, "超时后必须 deny 并续跑，任务不得悬空"
+    assert service.resume_started_with_chat_exhausted is True
 
 
 # ── 计划审批：reject / auto ────────────────────────────────────────────────
@@ -633,6 +676,7 @@ async def test_plan_approval_reject_returns_conflict(sqlite_env, monkeypatch):
             "error_type": "plan_approval_unsupported",
         }
     ], "reject 模式必须把任务推进到 REJECTED 终态（不悬空）"
+    assert service.chat_exhausted is True, "拒绝也要先排干旧流再回 -32009"
 
 
 @pytest.mark.asyncio
@@ -663,6 +707,7 @@ async def test_plan_approval_auto_approves_and_resumes(sqlite_env, monkeypatch):
         response = await env.client.prompt(session_id, "复杂任务")
         assert response["result"] == {"stopReason": "end_turn"}
     assert approvals == [{"task_id": "task-plan", "decision": "approve", "note": "acp:auto"}]
+    assert service.resume_started_with_chat_exhausted is True
 
 
 # ── resume ─────────────────────────────────────────────────────────────────

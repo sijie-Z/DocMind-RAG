@@ -60,9 +60,15 @@
    逐类型审计）。
 8. **串行更新与结算**：同一会话的 `session/update` 进 `asyncio.Queue`，
    由每会话单 sender 任务按序写出；prompt 返回前 `await queue.join()`，
-   再落库（`save_session_interaction`）→ 最后返回 `stopReason`。每会话一把
-   `asyncio.Lock`，并发 prompt → **-32009**；未知/关闭的会话 → **-32004**；
-   参数错误 → **-32602**；`error` 事件 → **-32603**（白名单脱敏文案）。
+   再落库（`save_session_interaction`）→ 最后返回 `stopReason`。**事件流
+   必须消费到 `StopAsyncIteration`**（镜像 #480 `_stream_events`）：
+   `done/run_cancelled/error` 只是终局信号，service 在 yield 之后还要执行
+   任务收尾（COMPLETED/CANCELLED/FAILED、落库、通知）——提前丢弃生成器会
+   让收尾永不执行，GC 的 `GeneratorExit` 兜底反而把任务按断流收敛。审批
+   暂停后同样先排干旧流，再切到 resume 流（否则旧生成器的断流兜底可能在
+   resume 开跑后覆盖快照/误判 FAILED）。每会话一把 `asyncio.Lock`，并发
+   prompt → **-32009**；未知/关闭的会话 → **-32004**；参数错误 → **-32602**；
+   `error` 事件 → **-32603**（白名单脱敏文案）。
 9. **取消**：`session/cancel` 置 `cancel_event`、清空队列中未发送的 update、
    取消在途审批等待，并（若有任务行）`WAITING_APPROVAL/WAITING_PLAN_APPROVAL
    → CANCELLED`，运行中任务置协作式取消旗；此后该会话不再外发任何 update，
@@ -100,7 +106,10 @@
 - 变异试验（手动改码 → 用例红 → 还原）：
   - `session/load` 伪造成成功 → `test_session_load_returns_method_not_found` 红；
   - 审批超时改成放行 → `test_permission_timeout_denies_and_task_not_dangling` 红；
-  - 删掉 stdout UTF-8 重配调用 → `test_run_wires_utf8_stdout_reconfigure` 红。
+  - 删掉 stdout UTF-8 重配调用 → `test_run_wires_utf8_stdout_reconfigure` 红；
+  - `done` 时提前 return（不排干事件流）→
+    `test_prompt_streams_updates_in_order_and_persists` 红（`chat_exhausted`
+    断言失败），证明"必须排干收尾"的回归测试有判别力。
 - `python scripts/check_doc_facts.py` 派生字段无变化（ACP 是 stdio 入口，
   不新增 HTTP 端点/前端路由/工具/SSE 事件类型），故未改 `docs/facts.json`
   与 README 数字。

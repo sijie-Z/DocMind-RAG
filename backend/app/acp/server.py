@@ -543,42 +543,79 @@ class AcpServer:
     # ── 事件流驱动 ────────────────────────────────────────────────────────
 
     async def _drive(self, state: AcpSessionState, events: Any, answer: list[str]) -> str:
-        """消费事件流直到终局；审批/计划审批暂停时续跑。返回 stopReason。"""
+        """消费事件流直到**自然结束**；审批/计划审批暂停时续跑。返回 stopReason。
+
+        两条硬纪律：
+
+        1. 事件流必须一直消费到 ``StopAsyncIteration``（镜像 #480 RPCService
+           的 ``_stream_events``）。``done`` / ``run_cancelled`` / ``error``
+           只是**终局信号**，不能据此提前 return——service.chat 在 yield 之后
+           还要执行任务收尾（COMPLETED / CANCELLED / FAILED、落库、通知）；
+           提前丢弃生成器会让这些收尾永不执行，GC 时的 ``GeneratorExit``
+           兜底反而把任务按断流收敛。
+        2. 审批暂停后同样先把旧流消费到尽（loop 捕获 ApprovalRequired 后以
+           ``paused_for_approval=True`` 平静收尾），再切换到 resume 流；否则
+           旧生成器被 GC 关闭时，断流兜底可能在 resume 已开跑之后覆盖新 run
+           的快照或把任务误判 FAILED。
+        """
         while True:
             resumed: Any | None = None
+            paused_without_resume = False
+            pending_error: RPCError | None = None
+            terminal_type = ""
+            last_error_event: Any | None = None
             async for event in events:
                 if event.type == "chunk":
                     answer.append(event.content)
                 if event.type == "approval_required":
-                    resumed = await self._on_approval_required(state, event)
-                    break
+                    try:
+                        resumed = await self._on_approval_required(state, event)
+                    except RPCError as exc:
+                        pending_error = exc
+                        resumed = None
+                    paused_without_resume = resumed is None
+                    continue  # 继续消费旧流到尽（见 docstring 纪律 1/2）
                 if event.type == "plan_approval_required":
-                    resumed = await self._on_plan_approval_required(state, event)
-                    break
-                if event.type == "error":
-                    if state.cancel_event.is_set():
-                        return "cancelled"
-                    raise RPCError(JSONRPC_INTERNAL_ERROR, sanitized_error_content(event))
-                if event.type == "run_cancelled":
-                    return "cancelled"
-                if event.type == "done":
-                    # 取消优先：cancel 已到达则一律 cancelled（且不落库）。
-                    return "cancelled" if state.cancel_event.is_set() else "end_turn"
+                    try:
+                        resumed = await self._on_plan_approval_required(state, event)
+                    except RPCError as exc:
+                        pending_error = exc
+                        resumed = None
+                    paused_without_resume = resumed is None
+                    continue
                 if event.type == "warning":
                     logger.info(
                         "ACP agent warning (session=%s): %s", state.session_id, event.content
                     )
                     continue
+                if event.type in ("done", "run_cancelled", "error"):
+                    terminal_type = event.type
+                    if event.type == "error":
+                        last_error_event = event
                 update = self._event_update(state, event)
                 if update is not None:
                     state.enqueue_update(update)
-            else:
-                # 事件流自然结束（未发 done/run_cancelled/error）。
-                return "cancelled" if state.cancel_event.is_set() else "end_turn"
-            if resumed is None:
-                # 审批/计划审批被取消收尾：不再续跑。
+            # 事件流自然结束（service.chat 的收尾逻辑已全部执行完毕）。
+            if pending_error is not None:
+                raise pending_error
+            if resumed is not None:
+                events = resumed
+                continue
+            if paused_without_resume:
                 return "cancelled"
-            events = resumed
+            if terminal_type == "error":
+                if state.cancel_event.is_set():
+                    return "cancelled"
+                message = (
+                    sanitized_error_content(last_error_event)
+                    if last_error_event is not None
+                    else "服务器处理出错，请稍后重试"
+                )
+                raise RPCError(JSONRPC_INTERNAL_ERROR, message)
+            if terminal_type == "run_cancelled":
+                return "cancelled"
+            # 取消优先：cancel 已到达则一律 cancelled（且不落库）。
+            return "cancelled" if state.cancel_event.is_set() else "end_turn"
 
     def _event_update(self, state: AcpSessionState, event: Any) -> dict[str, Any] | None:
         if event.type in ("tool_call", "tool_result", "tool_error"):
