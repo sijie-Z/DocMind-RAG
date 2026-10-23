@@ -313,6 +313,7 @@ def test_execute_command_args_mapping_cannot_skip_positional(client, auth, monke
         command_registry.unregister("two-probe")
 
     assert skipped.status_code == 400, skipped.text
+    assert skipped.json()["error_code"] == "COMMAND_INVALID_ARGUMENT"
     assert skipped.json()["detail"]["field"] == "a"
     assert full.status_code == 200, full.text
     assert full.json()["data"]["args"] == {"a": "A", "b": "B"}

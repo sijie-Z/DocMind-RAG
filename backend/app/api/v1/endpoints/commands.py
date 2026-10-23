@@ -249,9 +249,15 @@ def _resolve_request_line(body: CommandExecuteRequest) -> str:
             arg_specs=resolved.args if resolved is not None else (),
         )
     except CommandSyntaxError as exc:
+        # 字段级参数错误与 line 路径保持同一对外错误码（评审 nit）。
+        client_error = exc.code in {
+            ERROR_MISSING_ARGUMENT,
+            ERROR_UNEXPECTED_ARGUMENT,
+            ERROR_INVALID_ARGUMENT,
+        }
         raise ValidationError(
             exc.message,
-            error_code="COMMAND_INVALID_SYNTAX",
+            error_code="COMMAND_INVALID_ARGUMENT" if client_error else "COMMAND_INVALID_SYNTAX",
             detail={"command": command, "field": exc.field_name or None},
         ) from exc
 
