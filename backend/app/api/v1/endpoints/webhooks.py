@@ -121,8 +121,8 @@ def _ensure_webhook_admin_runtime() -> None:
 
     必须在管理权限校验**之后**调用：无权限用户仍先得到既有 403/404，不因
     功能开关泄露状态。错误体走 ``AppError`` 统一包裹，只含稳定 error_code 与
-    友好 message，不含异常堆栈/内部路径（``WebhookEncryptionError`` 的细节
-    只进日志，绝不外泄）。
+    友好 message；``WebhookEncryptionError`` 的细节经 ``from None`` 抑制，
+    绝不出现在响应或异常链里。
     """
     if not settings.WEBHOOKS_ENABLED:
         raise ServiceUnavailableError(

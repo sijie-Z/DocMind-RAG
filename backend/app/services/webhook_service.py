@@ -696,23 +696,26 @@ class WebhookService:
         error: str,
         *,
         expected_status: WebhookDeliveryStatus = WebhookDeliveryStatus.PROCESSING,
-    ) -> None:
+    ) -> bool:
         """失败写回（token fenced）：只有仍持有租约的 worker 才能改状态/排重试。
 
         issue #497 §4：超时重领后 token 已轮换，旧 worker 的失败写回必须落空
         （rowcount 0），否则会把新 worker 正在 processing 的行改成 failed。
         ``expected_status`` 供「完成写回后消息落库失败」的补偿（SUCCEEDED→FAILED）。
+
+        Returns: 是否真正写回（False = 状态不符或租约已易主，调用方不应据此
+        记录失败审计，避免旧 worker 的噪声覆盖新 worker 的真实结果）。
         """
         async with session_factory() as db_session:
             delivery = await db_session.get(WebhookDelivery, delivery_id)
             if delivery is None or delivery.status != expected_status:
-                return
+                return False
             if delivery.processing_token != processing_token:
                 logger.warning(
                     "webhook 投递租约已被接管（fence），跳过失败写回（delivery=%s）",
                     log_safe(delivery_id),
                 )
-                return
+                return False
             now = _utcnow()
             max_attempts = max(1, int(settings.WEBHOOK_MAX_ATTEMPTS))
             next_attempt_at = None
@@ -740,6 +743,7 @@ class WebhookService:
             await db_session.commit()
             if result.rowcount:
                 WEBHOOK_DELIVERY_TOTAL.labels(status="failed").inc()
+            return result.rowcount > 0
 
     async def _complete_delivery(
         self,
@@ -837,16 +841,17 @@ class WebhookService:
                 log_safe(rule.id),
                 log_safe(exc),
             )
-            await self._mark_failed(
+            if await self._mark_failed(
                 factory, delivery_id, processing_token, f"{type(exc).__name__}: {exc}"
-            )
-            await audit_service.log_activity(
-                user_id=rule.created_by,
-                action="process_webhook_delivery",
-                target_type="webhook_delivery",
-                target_id=delivery_id,
-                detail=json.dumps({"status": "failed", "error": log_safe(exc, max_len=200)}),
-            )
+            ):
+                # 只有仍持有租约的失败才写审计；被 fence 掉的旧 worker 不污染。
+                await audit_service.log_activity(
+                    user_id=rule.created_by,
+                    action="process_webhook_delivery",
+                    target_type="webhook_delivery",
+                    target_id=delivery_id,
+                    detail=json.dumps({"status": "failed", "error": log_safe(exc, max_len=200)}),
+                )
             return
 
         # issue #497 §4：完成写回带 token 条件（fencing）。rowcount 0 ⇒ 租约已被
