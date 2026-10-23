@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import AsyncSessionLocal
 from app.core.security import require_organization
 from app.exceptions import AuthorizationError
+from app.models.agent_task import AgentTask, TaskStatus
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.user import User
 from app.services.chat_seq import next_message_seq
@@ -300,3 +301,36 @@ async def save_session_interaction(
         # + ERROR 日志——落库失败绝不静默。
         logger.error(f"Failed to save interaction: {e}")
         raise
+
+
+# ── issue #480 §5.4.1：session ↔ task 映射（JSON-RPC 方法依赖）───────────────
+# ``agent_tasks.session_id`` 由 #476 交付；本模块只提供只读解析，不重复加列。
+
+_TERMINAL_TASK_STATUSES = (
+    TaskStatus.COMPLETED,
+    TaskStatus.FAILED,
+    TaskStatus.CANCELLED,
+    TaskStatus.REJECTED,
+    TaskStatus.ABANDONED,
+)
+
+
+async def get_latest_task_id(db: AsyncSession, session_id: str) -> str | None:
+    """会话 → 最新**非终态**任务 id；没有则 None（调用方映射 -32004）。"""
+    stmt = (
+        select(AgentTask.id)
+        .where(
+            AgentTask.session_id == session_id,
+            AgentTask.status.not_in(_TERMINAL_TASK_STATUSES),
+        )
+        .order_by(AgentTask.created_at.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def resolve_session_id(db: AsyncSession, task_id: str) -> str | None:
+    """任务 → 会话 id（历史任务行可为空，返回 None）。"""
+    result = await db.execute(select(AgentTask.session_id).where(AgentTask.id == task_id))
+    return result.scalar_one_or_none()

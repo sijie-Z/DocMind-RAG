@@ -255,6 +255,16 @@ def _build_metrics() -> dict[str, Any]:
     m["AGENT_COMMAND_EXECUTIONS"] = Counter(
         "agent_command_executions_total", "User command executions", ["command", "result"]
     )
+    # SDK / JSON-RPC（issue #480）：方法调用数（按方法+结果）与耗时分布。
+    m["RPC_REQUESTS_TOTAL"] = Counter(
+        "docmind_rpc_requests_total", "JSON-RPC method calls", ["method", "result"]
+    )
+    m["RPC_REQUEST_DURATION"] = Histogram(
+        "docmind_rpc_request_duration_ms",
+        "JSON-RPC method duration (ms)",
+        ["method"],
+        buckets=(5, 20, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000),
+    )
     return m
 
 
@@ -297,6 +307,8 @@ AGENT_REFLECTION_DECISIONS = _LazyMetric("AGENT_REFLECTION_DECISIONS")
 AGENT_MEMORY_RECALLS = _LazyMetric("AGENT_MEMORY_RECALLS")
 AGENT_FEEDBACK_TOTAL = _LazyMetric("AGENT_FEEDBACK_TOTAL")
 AGENT_COMMAND_EXECUTIONS = _LazyMetric("AGENT_COMMAND_EXECUTIONS")
+RPC_REQUESTS_TOTAL = _LazyMetric("RPC_REQUESTS_TOTAL")
+RPC_REQUEST_DURATION = _LazyMetric("RPC_REQUEST_DURATION")
 
 
 # issue #301：启用但构建失败时的自曝输出（注释行 + 一个 gauge 样本）。
