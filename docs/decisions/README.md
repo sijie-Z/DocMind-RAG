@@ -32,6 +32,7 @@
 | `ADR-004-hooks.md` | **正式 ADR**（2026-10-22，#474）：进程内 Hooks 扩展点——waterfall/serial 语义、7 个事件与真实插入点、失败策略与可观测、与 ToolRegistry 的分工、模块白名单/审批不可绕过、默认关闭与回滚 |
 | `ADR-005-webhook-runtime.md` | **正式 ADR**（2026-10-23，#478）：入站 Webhook 的 Standard Webhooks 验签、Fernet secret、幂等状态机、DB outbox（SKIP LOCKED）与有界重试；含否决方案与对接/排查手册 |
 | `ADR-006-terminal-pty.md` | **正式 ADR**（2026-10-23，#477）：容器持久 PTY（一终端一容器 + docker exec）、一次性 WS 票据、配额/回收/多 worker、Docker socket 威胁模型；含否决方案、实测与未验证项 |
+| `ADR-008-acp-adapter.md` | **正式 ADR**（2026-10-23，#481）：ACP v1 stdio 适配器——方法面/能力声明、AgentEvent→session/update 映射、审批/取消与计划审批策略、stdout 纯净与身份注入、被否决方案与残余风险 |
 
 两份文档是同一次排查的产物，**含大量 `文件:行号` 证据**，可直接复核。
 

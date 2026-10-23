@@ -42,13 +42,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="打印排序 JSON 配置（secret 打码）后退出",
     )
     parser.add_argument("--query", default=None, help="headless：要执行的问题")
-    parser.add_argument("--user-id", type=int, default=None, help="headless/sdk：用户 id")
-    parser.add_argument("--org-id", type=int, default=None, help="headless/sdk：组织 id")
+    parser.add_argument("--user-id", type=int, default=None, help="headless/sdk/acp：用户 id")
+    parser.add_argument("--org-id", type=int, default=None, help="headless/sdk/acp：组织 id")
     parser.add_argument(
         "--api-key-file",
         default=None,
         metavar="FILE",
-        help="sdk：从文件读取 dm_ API Key（不放 argv；缺失则仅用 CLI 身份）",
+        help="sdk/acp：从文件读取 dm_ API Key（不放 argv；缺失则仅用 CLI 身份）",
     )
     parser.add_argument("--json", action="store_true", help="headless：显式声明单行 JSON 输出")
     parser.add_argument(
