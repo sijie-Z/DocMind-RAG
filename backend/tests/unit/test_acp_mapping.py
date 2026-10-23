@@ -349,6 +349,59 @@ def test_extract_prompt_text_joins_text_parts():
     assert extract_prompt_text("plain string") is None
 
 
+def test_protocol_stdout_reconfigured_to_utf8():
+    """Windows 中文 locale（cp936）下 emoji 帧必须不炸：协议 stdout 重配 UTF-8。
+
+    变异点：不调用 ``_ensure_utf8_stdout`` → cp936 写 ✅ 抛 UnicodeEncodeError
+    → 本用例红。
+    """
+    import io
+
+    from app.acp.server import _ensure_utf8_stdout
+
+    buffer = io.BytesIO()
+    stream = io.TextIOWrapper(buffer, encoding="cp936")
+    _ensure_utf8_stdout(stream)
+    stream.write("✅ 你好")
+    stream.flush()
+    assert buffer.getvalue() == "✅ 你好".encode()
+
+
+@pytest.mark.asyncio
+async def test_run_wires_utf8_stdout_reconfigure():
+    """``AcpServer.run`` 必须真的调用重配（变异点：删掉调用 → 本用例红）。"""
+
+    class _CapturingStdout:
+        def __init__(self) -> None:
+            self.reconfigures: list[dict] = []
+
+        def reconfigure(self, **kwargs) -> None:
+            self.reconfigures.append(kwargs)
+
+        def write(self, text: str) -> int:
+            return len(text)
+
+        def flush(self) -> None:
+            return None
+
+    class _EofStdin:
+        def readline(self, _limit: int = -1) -> bytes:
+            return b""
+
+    stdout = _CapturingStdout()
+    server = AcpServer(
+        organization_id=1,
+        user_id=7,
+        db_factory=lambda: None,
+        stdin=_EofStdin(),
+        stdout=stdout,
+        redirect_stdout=False,
+        install_signal_handlers=False,
+    )
+    assert await server.run() == 0
+    assert stdout.reconfigures and stdout.reconfigures[0]["encoding"] == "utf-8"
+
+
 # ── 会话状态：并发 / 取消 / 串行 sender ────────────────────────────────────
 
 

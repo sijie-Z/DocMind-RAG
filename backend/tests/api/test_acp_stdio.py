@@ -750,20 +750,72 @@ async def test_entrypoint_without_identity_exits_2_with_empty_stdout():
 
 
 @pytest.mark.asyncio
+async def test_entrypoint_wrong_org_exits_2_with_empty_stdout(sqlite_env):
+    """Given 用户不属于 org，When 启动，Then exit 2、stderr 含原因、stdout 无帧。"""
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "app",
+        "--profile",
+        "acp",
+        "--org-id",
+        "2",  # 用户属于 org 1
+        "--user-id",
+        str(USER_ID),
+        cwd=str(BACKEND_DIR),
+        env={
+            **os.environ,
+            "DATABASE_URL": f"sqlite+aiosqlite:///{sqlite_env.path}",
+            "PYTHONUTF8": "1",
+        },
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
+    assert process.returncode == 2
+    assert stdout == b""
+    assert "不属于组织" in stderr.decode("utf-8", errors="replace")
+
+
+@pytest.mark.asyncio
 async def test_entrypoint_subprocess_handshake_with_sqlite_identity(sqlite_env, schema):
+    from app.models.chat import ChatSessionStatus
+
+    # 中文 + emoji 标题：子进程 stdout 必须是 UTF-8（Windows 中文 locale 的
+    # cp936 无法编码 ✅，未重配会让 session/list 响应消失）。
+    async with sqlite_env.factory() as db:
+        db.add(
+            ChatSession(
+                id="utf8-session",
+                user_id=USER_ID,
+                organization_id=ORG_ID,
+                status=ChatSessionStatus.ACTIVE,
+                title="中文会话 ✅",
+            )
+        )
+        await db.commit()
+
     client = await AcpClient.spawn(
         backend_dir=str(BACKEND_DIR),
         org_id=ORG_ID,
         user_id=USER_ID,
-        env={"DATABASE_URL": f"sqlite+aiosqlite:///{sqlite_env.path}"},
+        env={
+            "DATABASE_URL": f"sqlite+aiosqlite:///{sqlite_env.path}",
+            "PYTHONUTF8": "1",
+        },
     )
     try:
-        handshake = await client.initialize()
+        handshake = await client.request(
+            "initialize", {"protocolVersion": 1, "clientCapabilities": {}}, timeout=60
+        )
         jsonschema.validate(handshake["result"], schema["methods"]["initialize"]["response"])
         session_id = await _new_session(client)
-        listed = await client.request("session/list", {})
-        assert session_id in [item["sessionId"] for item in listed["result"]["sessions"]]
-        closed = await client.request("session/close", {"sessionId": session_id})
+        listed = await client.request("session/list", {}, timeout=30)
+        sessions = {item["sessionId"]: item for item in listed["result"]["sessions"]}
+        assert session_id in sessions
+        assert sessions["utf8-session"]["title"] == "中文会话 ✅"
+        closed = await client.request("session/close", {"sessionId": session_id}, timeout=30)
         assert closed["result"] == {"ok": True}
     finally:
         exit_code, stderr = await client.terminate()

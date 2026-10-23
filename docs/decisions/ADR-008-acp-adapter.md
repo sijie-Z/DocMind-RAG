@@ -14,7 +14,9 @@
 1. **进程形态**：`python -m app --profile acp --org-id <id> --user-id <id>
    [--api-key-file <file>]`，stdio 上的 NDJSON（单行 ≤ 1MB），stdout 只允许
    协议帧——真实 stdout 交给 #480 的 `ProtocolWriter`（写锁 + flush），
-   `sys.stdout` 在入口即指向 stderr；协议版本锁定 **v1**，不实现 v2。
+   `sys.stdout` 在入口即指向 stderr；协议 stdout 在写第一帧前**重配为
+   UTF-8**（Windows 中文 locale 默认 cp936 无法编码 emoji 事件，会让响应
+   在 `write` 时炸掉）。协议版本锁定 **v1**，不实现 v2。
 2. **帧与双向请求全部复用 #480 的 `app/rpc/dispatcher.py`**：请求 id 表、
    重复 id → `-32600`、并发执行、双向服务端请求、`$/cancel_request`
    均在 dispatcher 内；ACP 层只做方法映射、事件转换与身份校验，不另写
@@ -84,7 +86,7 @@
 ## 依据（实测，本 worktree / 基线 7d62000）
 
 - `python -m pytest tests/unit/test_acp_mapping.py tests/api/test_acp_stdio.py`
-  → **51 passed**（单测 33 条 + stdio e2e 18 条；sqlite + fake service + 内存
+  → **54 passed**（单测 35 条 + stdio e2e 19 条；sqlite + fake service + 内存
   管道，无网络/无真实 LLM）。
 - e2e 覆盖：握手形状（fixture 校验）、`session/new` 落库、`session/list`、
   `session/close` 仅解映射、`session/load→-32601`、更新顺序
@@ -97,7 +99,8 @@
   退出码 0）。
 - 变异试验（手动改码 → 用例红 → 还原）：
   - `session/load` 伪造成成功 → `test_session_load_returns_method_not_found` 红；
-  - 审批超时改成放行 → `test_permission_timeout_denies_and_task_not_dangling` 红。
+  - 审批超时改成放行 → `test_permission_timeout_denies_and_task_not_dangling` 红；
+  - 删掉 stdout UTF-8 重配调用 → `test_run_wires_utf8_stdout_reconfigure` 红。
 - `python scripts/check_doc_facts.py` 派生字段无变化（ACP 是 stdio 入口，
   不新增 HTTP 端点/前端路由/工具/SSE 事件类型），故未改 `docs/facts.json`
   与 README 数字。

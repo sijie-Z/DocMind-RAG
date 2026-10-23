@@ -140,6 +140,23 @@ def extract_prompt_text(prompt: Any) -> str | None:
     return text or None
 
 
+def _ensure_utf8_stdout(stream: TextIO) -> None:
+    """把协议 stdout 重配为 UTF-8（Windows 中文 locale 默认 cp936）。
+
+    ACP 帧里会出现中文与 emoji（agent 事件自带 ✅/❌）。cp936 编码不覆盖
+    emoji，``write`` 会抛 ``UnicodeEncodeError``——一条响应丢失后客户端就会
+    挂住。JSON 是 UTF-8 协议，这里在写第一帧之前重配；不可重配的流（已被
+    分离/替换为内存流）保持原样（测试/嵌入场景由调用方保证编码）。
+    """
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="strict")
+    except (ValueError, OSError):  # pragma: no cover - 流已关闭/不可重配
+        logger.warning("ACP stdout 无法重配为 UTF-8，沿用当前编码")
+
+
 class AcpServer:
     """一个连接上的 ACP v1 协议服务（stdio；进程内直接调 service，不走 HTTP）。"""
 
@@ -224,6 +241,7 @@ class AcpServer:
     async def run(self) -> int:
         """运行 stdio 循环直到 stdin EOF / SIGTERM / SIGINT；返回进程退出码。"""
         real_stdout = self._stdout
+        _ensure_utf8_stdout(real_stdout)
         if self._redirect_stdout:
             _stderr_only_stdout(real_stdout)
         writer = ProtocolWriter(real_stdout)
