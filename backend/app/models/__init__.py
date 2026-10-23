@@ -21,6 +21,13 @@ from app.models.token_usage import TokenUsageRecord
 from app.models.user import User
 from app.models.user_audit import UserActivityLog, UserLoginSession
 from app.models.user_settings import UserSettings
+from app.models.webhook import (
+    WebhookDelivery,
+    WebhookDeliveryStatus,
+    WebhookProvider,
+    WebhookRule,
+    WebhookSessionMode,
+)
 from app.models.workflow import NodeDefinition, Workflow, WorkflowExecution
 
 __all__ = [
@@ -57,4 +64,9 @@ __all__ = [
     "ScheduledTask",
     "ScheduleType",
     "ScheduleRunStatus",
+    "WebhookRule",
+    "WebhookDelivery",
+    "WebhookProvider",
+    "WebhookSessionMode",
+    "WebhookDeliveryStatus",
 ]
