@@ -3,7 +3,7 @@
 架构：真实 ``AcpServer.run()`` 连接循环 + 内存管道（:class:`InMemoryAcpTransport`）
 + sqlite（``Base.metadata.create_all``）+ :class:`FakeAgentService`。fake service
 只替代 LLM/PER 循环，ACP 侧的队列、串行 sender、审批双向请求、取消、DB 落库
-全部走真实代码；真实 LLM 的 e2e 由监督方在有 key 的环境跑（本文件不依赖网络）。
+全部走真实代码；真实 LLM 的 e2e 由具备 key 的环境执行（本文件不依赖网络）。
 
 另含真实入口子进程用例：``python -m app --profile acp`` 无身份 → exit 2、
 stdout 0 字节；有效身份（sqlite）→ 握手/new/close 全链、stdout 只有协议帧。

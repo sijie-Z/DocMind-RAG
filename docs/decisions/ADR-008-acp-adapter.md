@@ -126,7 +126,7 @@
    `prompt:[{type,text}]`、`session/update`、`session/request_permission`），
    硬套会把两套语义搅在一起；只复用其下层 `Dispatcher`。
 3. **参数化 `app/rpc/server.py::run_stdio` 以共用连接循环**：需要在 #480
-   的已评审文件里扩参（超出 #481 白名单，放大回归面）；改为在
+   的已评审文件里扩参（超出 #481 允许修改的文件范围，放大回归面）；改为在
    `app/acp/server.py` 组合 `ProtocolWriter` / `Dispatcher`，stdin 泵与
    信号收尾保持同构。
 4. **支持 `session/load` / 交互式计划审批 / `allow_always`**：issue 非目标，
@@ -197,7 +197,7 @@
   §5.4 与 ACP v1 公开 schema 的字段名编写，未在 Zed 真机做端到端联调
   （本环境无 Zed）；若真机字段有出入，以 fixture 与官方 schema 的 diff 为准。
 - **真实 LLM e2e**：本层用 fake `AgentService` 验证协议面；真实模型/工具链
-  的 e2e 由监督方在有 `DEEPSEEK_API_KEY` 的环境执行。
+  的 e2e 由具备 `DEEPSEEK_API_KEY` 的环境执行。
 - **resume 的后台失败**：`session/resume` 是"快速返回 + 后台续跑"，后台
   失败只能记日志（没有 prompt 请求可以承载错误响应）；客户端会看到流停止
   而不再有 `session/update`。
@@ -209,4 +209,4 @@
   ACP 归宿，否则 `test_event_type_enum_is_frozen` 拉红。
 - **可观测**：ACP 层以结构化日志记录会话数、prompt 起止与耗时、取消数、
   审批等待时长（`logger.info`）。issue §3 所说"指标"未接 Prometheus——
-  `app/core/prometheus.py` 不在本 issue 白名单；需要真指标时另开 issue。
+  `app/core/prometheus.py` 不在 #481 的修改范围内；需要真指标时另开 issue。
