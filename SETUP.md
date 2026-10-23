@@ -90,9 +90,19 @@ venv\Scripts\activate        # Windows
 # 安装依赖（如未安装）
 pip install -r requirements.txt
 
+# 数据库迁移（issue #495：首次与每次拉取含迁移的更新后都要跑；
+# 统一入口 python -m app 在版本落后时会拒绝启动）
+alembic upgrade head          # 或回到仓库根目录执行 make db-migrate
+
 # 启动 API 服务
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+> 推荐使用统一入口 `python -m app --profile web`（见下文 worker 小节与 `README.md`）：
+> 它在启动期执行 schema guard —— `alembic_version` 与迁移 head 不一致时打印
+> `current=... head=...` 和修复命令并以**退出码 2** 结束。`SCHEMA_GUARD=false`
+> 可关闭校验；`AUTO_MIGRATE=true` 允许启动期兜底迁移（默认关闭，多副本勿开）。
+> 兼容入口 `uvicorn app.main:app` / `python run.py` 不执行该 guard，请自行保证先迁移。
 
 启动成功后：
 - API: http://localhost:8000

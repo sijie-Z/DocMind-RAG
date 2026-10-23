@@ -350,6 +350,11 @@ Windows 可直接使用仓库根目录的 `start_windows.bat`（自动识别 `.v
 cd backend
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+
+# 先执行数据库迁移（issue #495：schema guard 会在版本落后时拒绝启动；
+# 初次启动与每次拉取含迁移的更新后都要跑）
+alembic upgrade head          # 或 make db-migrate（已激活 venv 时）
+
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -365,6 +370,15 @@ python -m app --profile web --dump-config
 ```
 
 配置分层：`backend/config/base.yaml` → profile 声明的 `bundles/*.yaml` → `profiles/<profile>.yaml` → `--patch` → 环境变量（`.env` 归入环境层）。`uvicorn app.main:app` 与 `python run.py` 保留为兼容入口；reload 场景继续用 `python run.py`。
+
+**数据库迁移与 schema guard（issue #495）**：标准启动方式（compose、`python -m app`、K8s）都要求数据库已处于迁移 head。`python -m app --profile web` 在启动期比对 `alembic_version` 与迁移 head，落后时打印 `current=... head=...` 与修复命令并以**退出码 2** 结束，而不是带病提供 500。相关开关：
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `SCHEMA_GUARD` | `true` | 启动期校验数据库版本；`false` 仅作逃生门 |
+| `AUTO_MIGRATE` | `false` | 显式设 `true` 才允许启动期兜底执行 `alembic upgrade head`（并发副本勿开） |
+
+迁移命令：本地 `make db-migrate` / `alembic upgrade head`；容器 `docker compose run --rm migrate`（`docker compose up` 会自动先跑一次性 `migrate` 服务）。兼容入口 `uvicorn app.main:app` / `python run.py` 不执行该 guard。
 
 ### 5. 启动前端
 
@@ -547,7 +561,9 @@ cd ../frontend && npm run test
 
 ```bash
 cd backend && docker compose --env-file .env.docker up -d
-# 启动 10 个服务：backend, worker, mysql, redis, elasticsearch, minio, zookeeper, kafka, prometheus, grafana
+# 启动 11 个服务：migrate, backend, worker, mysql, redis, elasticsearch, minio,
+# zookeeper, kafka, prometheus, grafana
+# migrate 是一次性迁移服务：backend/worker 等它成功退出（alembic upgrade head）后才启动。
 ```
 
 ### 基础设施端口

@@ -11,11 +11,28 @@ cp backend/.env.docker.example backend/.env.docker
 # 2. Start all services
 cd backend
 docker compose --env-file .env.docker up -d
+# compose 会先启动一次性 migrate 服务（alembic upgrade head），
+# backend / worker 只有在它成功退出（exit 0）后才启动；迁移失败则整个启动中断。
+
+# 手动重跑迁移（拉取含新迁移的代码后）：
+docker compose --env-file .env.docker run --rm migrate
 
 # 3. Verify
 curl http://localhost:8000/readyz   # 就绪（依赖故障 → 503）；/livez 为存活，恒 200
 curl http://localhost:8000/health   # 详细诊断视图（恒 200，含 services/ready/版本）
 ```
+
+### 数据库迁移（compose）
+
+- 迁移**只**由 `migrate` 服务执行一次，`backend` / `worker` 通过
+  `depends_on: { migrate: { condition: service_completed_successfully } }` 串行等待；
+  镜像入口**不会**自动跑迁移（多副本各自 upgrade 会竞争 Alembic 版本表与 DDL）。
+- 后端启动期还有一道 schema guard（`python -m app`）：`alembic_version` 与迁移
+  head 不一致时打印 `current=... head=...` 与修复命令并以**退出码 2** 结束进程。
+- 两个开关（`.env.docker` / 环境变量）：
+  - `SCHEMA_GUARD=true`（默认）：启动期校验 schema；
+  - `AUTO_MIGRATE=false`（默认）：仅在显式设为 `true` 时允许启动期兜底执行
+    `alembic upgrade head`（审计日志；并发启动多副本时不要开）。
 
 ### Service Ports
 
@@ -46,23 +63,45 @@ kubectl apply -f deploy/k8s/00-namespace.yaml
 #    升级既有部署：先更新 Secret（含 DATABASE_URL 键），再 apply ConfigMap，
 #    否则新 Pod 会因缺少 DATABASE_URL 启动失败。
 
-# 3. Apply config and workloads
+# 3. Apply config
 kubectl apply -f deploy/k8s/01-configmap.yaml
+
+# 4. Run database migrations (one-shot Job) and wait for completion
+kubectl apply -f deploy/k8s/09-migrate-job.yaml
+kubectl wait --for=condition=complete job/docmind-migrate -n docmind --timeout=600s
+
+# 5. Apply workloads（必须在 Job 成功之后；Job 失败时不要继续）
 kubectl apply -f deploy/k8s/03-backend-deployment.yaml
 kubectl apply -f deploy/k8s/04-backend-service.yaml
 kubectl apply -f deploy/k8s/05-worker.yaml
 
-# 4. Deploy frontend
+# 6. Deploy frontend
 kubectl apply -f deploy/k8s/06-frontend-deployment.yaml
 kubectl apply -f deploy/k8s/07-frontend-service.yaml
 
-# 5. (Optional) Ingress with TLS
+# 7. (Optional) Ingress with TLS
 kubectl apply -f deploy/k8s/08-ingress.yaml
 
-# 6. Verify
+# 8. Verify
 kubectl get pods -n docmind
 kubectl get svc -n docmind
 ```
+
+### 数据库迁移（Kubernetes）
+
+- `09-migrate-job.yaml` 的 Job 是**唯一**执行 `alembic upgrade head` 的地方，
+  迁移串行、只跑一次；Job 失败（`backoffLimit: 2` 内未成功）时**不要**继续
+  rollout 后端/worker。
+- backend / worker 的 Pod 带 `schema-check` initContainer（只读运行
+  `scripts/check_schema.py`）：库未到迁移 head 时 init 失败、Pod 不启动 ——
+  即使有人绕过发布顺序，也不会带着落后 schema 提供服务（fail-closed）。
+- 升级发布：先更新镜像与 Secret/ConfigMap，再重跑 Job，最后 `kubectl rollout
+  restart deployment/docmind-backend deployment/docmind-worker -n docmind`。
+  重跑前需删除已完成的 Job：
+  `kubectl delete job docmind-migrate -n docmind`（再 apply）。
+- 也可以只靠启动期 schema guard 兜底：backend 在版本不一致时以退出码 2
+  崩溃并打印 `current=... head=...`；但 worker 不经过 HTTP 启动路径，仍以
+  Job + initContainer 为准。
 
 ### Secret 创建方式
 
@@ -109,6 +148,8 @@ Key environment variables (set in `.env.docker` or the k8s Secret):
 | EMBEDDING_API_KEY | No | Embedding API key（默认本机 Ollama，可复用 DEEPSEEK_API_KEY） |
 | RERANK_API_KEY | No | Rerank model API key（默认本地 BGE，无需） |
 | DATABASE_URL | Yes | MySQL 连接串（含口令，仅存 k8s Secret） |
+| SCHEMA_GUARD | No | 默认 `true`：启动期校验数据库版本是否为迁移 head，落后则 exit 2 |
+| AUTO_MIGRATE | No | 默认 `false`：设为 `true` 才允许启动期兜底执行 `alembic upgrade head`（并发副本勿开） |
 | MYSQL_ROOT_PASSWORD | Yes | MySQL root password |
 | MINIO_ACCESS_KEY | Yes | MinIO access key |
 | MINIO_SECRET_KEY | Yes | MinIO secret key |
@@ -152,6 +193,7 @@ GRAFANA_PASSWORD='<强口令>' ALERT_WEBHOOK_TOKEN='<URL 安全随机串>' \
 
 ## Production Checklist
 
+- [ ] Run database migrations before rolling out app (compose `migrate` service / k8s `09-migrate-job.yaml`)
 - [ ] Generate unique SECRET_KEY and JWT_SECRET_KEY
 - [ ] Set all required passwords in `.env.docker` (compose is fail-closed without them)
 - [ ] Set matching ALERT_WEBHOOK_TOKEN on backend and monitoring stack (if alerting)
