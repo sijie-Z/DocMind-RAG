@@ -95,9 +95,31 @@ _holder = _RedisHolder()
 redis_client = _RedisProxy(_holder)  # safe to import at module level
 
 
+class RedisUnavailableError(RuntimeError):
+    """Redis 初始化失败（issue #493）。
+
+    stdio 入口（cancel 旗 / prompt 幂等都依赖 Redis）必须据此 **fail-fast**：
+    打印 stderr 并以退出码 2 结束，不得静默降级为"无 Redis 继续跑"。
+    """
+
+
 async def init_redis():
     """Initialize Redis connection (called at app startup)."""
     await _holder.initialize()
+
+
+async def init_redis_strict() -> None:
+    """初始化 Redis，不可用即抛 :class:`RedisUnavailableError`（issue #493）。
+
+    与 ``init_redis`` 的区别：后者吞掉连接失败（web 进程允许无 Redis 启动），
+    stdio 入口不允许——cancel 与幂等都会静默失效。已注入客户端（测试替身）时
+    ``initialize`` 幂等返回，直接通过。
+    """
+    await init_redis()
+    if _holder.client is None:
+        raise RedisUnavailableError(
+            f"Redis 不可用（{settings.REDIS_HOST}:{settings.REDIS_PORT}），stdio 入口拒绝启动"
+        )
 
 
 async def get_redis() -> redis.Redis:

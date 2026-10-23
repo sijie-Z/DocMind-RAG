@@ -52,6 +52,18 @@ def migrate_stdout_handlers(real_stdout: TextIO) -> list[str]:
     return migrated
 
 
+_protocol_stdout: TextIO | None = None
+
+
+def get_protocol_stdout() -> TextIO | None:
+    """返回 :func:`configure_stdio_stdout` 保存的协议写端（尚未调用则 None）。
+
+    ``run_stdio`` 以它作为 ``ProtocolWriter`` 的写端：入口已重定向时
+    ``sys.stdout`` 是 stderr，不能再当作协议流。
+    """
+    return _protocol_stdout
+
+
 def configure_stdio_stdout() -> TextIO:
     """保存真实 stdout 为协议写端，并把 ``sys.stdout`` 指向 stderr。
 
@@ -61,8 +73,10 @@ def configure_stdio_stdout() -> TextIO:
 
     幂等：若 ``sys.stdout`` 已是 stderr（重复调用），直接返回 stderr，不重复迁移。
     """
+    global _protocol_stdout
     real_stdout = sys.stdout
     sys.stdout = sys.stderr
     if real_stdout is not sys.stderr:
+        _protocol_stdout = real_stdout
         migrate_stdout_handlers(real_stdout)
     return real_stdout

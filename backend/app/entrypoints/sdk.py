@@ -1,11 +1,14 @@
-"""sdk 入口：stdio JSON-RPC（issue #480 §5.5）。
+"""sdk 入口：stdio JSON-RPC（issue #480 §5.5，issue #493 运行时硬化）。
 
+- stdout 纯净：**本函数第一行**调用 ``configure_stdio_stdout()``——早于任何会
+  创建 DB engine / 注册日志 handler 的 app import；协议帧只走保存下来的真实
+  stdout（``app.rpc.server.ProtocolWriter``，句柄由 ``core.stdio`` 保管）；
+- 依赖不静默降级：``run_stdio`` 进入协议循环前严格初始化 Redis 与 DB
+  （cancel 旗 / prompt 幂等依赖 Redis），失败 → stderr 说明 + exit 2；
 - 身份只来自 CLI：``--org-id`` / ``--user-id``，缺失 exit 2（stdout 无协议帧）；
 - ``--api-key-file`` 可选：从文件读 ``dm_`` key（绝不进 argv/日志），启动时
   校验 key 有效且其 ``user_id`` / ``org_id`` 与 CLI 身份一致；任何不匹配
-  → stderr 说明 + exit 2；
-- stdout 纯净：在导入 RPC 模块前把 ``sys.stdout`` 指到 stderr，协议帧只走
-  保存下来的真实 stdout（``app.rpc.server.ProtocolWriter``）。
+  → stderr 说明 + exit 2。
 """
 
 from __future__ import annotations
@@ -62,7 +65,44 @@ async def _validate_api_key_identity(
     return None
 
 
+async def _run_entry(
+    *,
+    organization_id: int,
+    user_id: int,
+    is_superuser: bool,
+    raw_api_key: str | None,
+) -> int:
+    """单一事件循环内完成 key 校验 → stdio 运行时（避免跨事件循环复用连接池）。
+
+    ``run_stdio`` 在进入协议循环前严格初始化 Redis/DB（失败打印 stderr 并
+    返回 2，见 ``app.rpc.server``）。
+    """
+    if raw_api_key is not None:
+        error = await _validate_api_key_identity(
+            raw_api_key,
+            org_id=organization_id,
+            user_id=user_id,
+        )
+        if error is not None:
+            print(error, file=sys.stderr)
+            return 2
+
+    from app.rpc.server import run_stdio
+
+    return await run_stdio(
+        organization_id=organization_id,
+        user_id=user_id,
+        is_superuser=is_superuser,
+    )
+
+
 def run(args: argparse.Namespace | None = None, profile: str = "sdk") -> None:
+    # 必须最先执行：此刻只能 import 标准库与 app.core.stdio（import-safe）。
+    # 之后任何 app 模块（database / rpc.server / logging 配置）都在重定向之后加载。
+    from app.core.stdio import configure_stdio_stdout
+
+    configure_stdio_stdout()
+
     org_id = getattr(args, "org_id", None)
     user_id = getattr(args, "user_id", None)
     if org_id is None or user_id is None:
@@ -72,29 +112,19 @@ def run(args: argparse.Namespace | None = None, profile: str = "sdk") -> None:
         )
         sys.exit(2)
 
+    raw_key: str | None = None
     key_file = getattr(args, "api_key_file", None)
     if key_file:
         raw_key = _read_api_key_file(key_file)
         if raw_key is None:
             sys.exit(2)
-        error = asyncio.run(
-            _validate_api_key_identity(
-                raw_key,
-                org_id=int(org_id),
-                user_id=int(user_id),
-            )
-        )
-        if error is not None:
-            print(error, file=sys.stderr)
-            sys.exit(2)
-
-    from app.rpc.server import run_stdio
 
     exit_code = asyncio.run(
-        run_stdio(
+        _run_entry(
             organization_id=int(org_id),
             user_id=int(user_id),
             is_superuser=bool(getattr(args, "is_superuser", False)),
+            raw_api_key=raw_key,
         )
     )
     sys.exit(exit_code)
