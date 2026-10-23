@@ -194,11 +194,16 @@ watch(() => route.name, (newName) => {
 const rules = computed(() => ({
   username: [
     { required: true, message: t('login.usernamePlaceholder'), trigger: 'blur' },
-    { min: 3, message: t('validation.usernameLength'), trigger: 'blur' }
+    // 长度规则只属于注册：登录是"验证已有凭据"，不能用注册策略把老用户挡在门外。
+    ...(isRegister.value
+      ? [{ min: 3, message: t('validation.usernameLength'), trigger: 'blur' }]
+      : [])
   ],
   password: [
     { required: true, message: t('login.passwordPlaceholder'), trigger: 'blur' },
-    { min: 8, message: t('validation.passwordLength'), trigger: 'blur' }
+    ...(isRegister.value
+      ? [{ min: 8, message: t('validation.passwordLength'), trigger: 'blur' }]
+      : [])
   ],
   email: isRegister.value ? [
     { required: true, message: t('login.emailPlaceholder'), trigger: 'blur' },
@@ -248,6 +253,8 @@ const handleSubmit = async () => {
         // 优先，其余（含 //evil.com、/\evil.com、/%09 等恶意变体）一律回落 /dashboard
         router.replace(resolvePostAuthTarget(route.query.redirect))
       } else {
+        // 失败后清空密码：错误密码不应该继续留在输入框里
+        form.password = ''
         message.error(result.message || t('login.loginFailed'))
       }
     }

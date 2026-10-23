@@ -103,3 +103,25 @@ describe('注册表单密码最小长度与后端口径对齐（≥8）', () => 
     expect(wrapper.text()).not.toContain('密码长度至少为 8 位')
   })
 })
+
+describe('登录表单只校验非空，不套用注册长度规则', () => {
+  it('6 位密码可以发起登录请求，不被前端拦截', async () => {
+    storeSpies.login.mockResolvedValue({ success: false, message: '用户名或密码错误' })
+    const { wrapper } = await mountAt('/login')
+    await fillInputs(wrapper, 'admin', '', '123456')
+    await submit(wrapper)
+
+    expect(storeSpies.login).toHaveBeenCalledWith({ username: 'admin', password: '123456' })
+    expect(wrapper.text()).not.toContain('密码长度至少为 8 位')
+  })
+
+  it('2 位用户名可以发起登录请求，不被前端拦截', async () => {
+    storeSpies.login.mockResolvedValue({ success: false, message: '用户名或密码错误' })
+    const { wrapper } = await mountAt('/login')
+    await fillInputs(wrapper, 'ab', '', '12345678')
+    await submit(wrapper)
+
+    expect(storeSpies.login).toHaveBeenCalledWith({ username: 'ab', password: '12345678' })
+    expect(wrapper.text()).not.toContain('用户名至少3位')
+  })
+})
