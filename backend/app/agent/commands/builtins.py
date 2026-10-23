@@ -37,6 +37,7 @@ from typing import Any
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import defer
 
+from app.agent.approval import tool_risk_level
 from app.agent.commands.types import (
     ERROR_COMMAND_FAILED,
     ERROR_PERMISSION_DENIED,
@@ -118,6 +119,17 @@ async def _load_messages(ctx: CommandContext, session_id: str) -> list[ChatMessa
     return list((await ctx.db.execute(stmt)).scalars().all())
 
 
+def _session_task_conditions(ctx: CommandContext, session_id: str) -> list[Any]:
+    """会话任务的归属条件：session + user +（有组织时）org（评审 M1 同口径）。"""
+    conditions: list[Any] = [
+        AgentTask.session_id == session_id,
+        AgentTask.user_id == ctx.user_id,
+    ]
+    if ctx.organization_id is not None:
+        conditions.append(AgentTask.organization_id == ctx.organization_id)
+    return conditions
+
+
 async def _list_session_tasks(ctx: CommandContext, session_id: str) -> list[AgentTask]:
     """该会话的任务（新 → 旧，最多 ``STATUS_TASK_LIMIT`` 条）。
 
@@ -127,20 +139,37 @@ async def _list_session_tasks(ctx: CommandContext, session_id: str) -> list[Agen
     """
     if ctx.db is None:
         raise CommandFailure(ERROR_COMMAND_FAILED, "数据库会话不可用，无法查询任务")
-    conditions = [
-        AgentTask.session_id == session_id,
-        AgentTask.user_id == ctx.user_id,
-    ]
-    if ctx.organization_id is not None:
-        conditions.append(AgentTask.organization_id == ctx.organization_id)
     stmt = (
         select(AgentTask)
-        .where(*conditions)
+        .where(*_session_task_conditions(ctx, session_id))
         .options(defer(AgentTask.context_snapshot))
         .order_by(desc(AgentTask.created_at))
         .limit(STATUS_TASK_LIMIT)
     )
     return list((await ctx.db.execute(stmt)).scalars().all())
+
+
+async def _load_active_task(ctx: CommandContext, session_id: str) -> AgentTask | None:
+    """该会话**最新的未终态任务**（issue #498 / 评审 M1）。
+
+    必须独立查询：若从最近 N 条展示列表里挑，更早的活跃任务会被更新的终态
+    任务挤出窗口而漏报（active_task=null 的错误结果）。PAUSED（fork 快照）
+    不在活跃集合内。
+    """
+    if ctx.db is None:
+        raise CommandFailure(ERROR_COMMAND_FAILED, "数据库会话不可用，无法查询任务")
+    conditions = [
+        *_session_task_conditions(ctx, session_id),
+        AgentTask.status.in_(_ACTIVE_TASK_STATUSES),
+    ]
+    stmt = (
+        select(AgentTask)
+        .where(*conditions)
+        .options(defer(AgentTask.context_snapshot))
+        .order_by(desc(AgentTask.created_at))
+        .limit(1)
+    )
+    return (await ctx.db.execute(stmt)).scalars().first()
 
 
 def _task_summary(task: AgentTask) -> dict[str, Any]:
@@ -155,13 +184,6 @@ def _task_summary(task: AgentTask) -> dict[str, Any]:
         "progress": getattr(task, "progress", 0.0) or 0.0,
         "updated_at": updated.isoformat() if updated else "",
     }
-
-
-def _is_active_task(task: AgentTask) -> bool:
-    state = getattr(getattr(task, "status", None), "value", None) or str(
-        getattr(task, "status", "") or ""
-    )
-    return state in {status.value for status in _ACTIVE_TASK_STATUSES}
 
 
 # ── /help ────────────────────────────────────────────────────────────────────
@@ -260,9 +282,12 @@ async def cmd_status(ctx: CommandContext, args: dict[str, Any]) -> CommandResult
     )
 
     tasks: list[AgentTask] = []
+    active_task: AgentTask | None = None
     tasks_ok = True
     try:
         tasks = await _list_session_tasks(ctx, session.id)
+        # 独立查询活跃任务：不受展示窗口（最近 5 条）限制（评审 M1）。
+        active_task = await _load_active_task(ctx, session.id)
     except Exception as exc:  # noqa: BLE001 — 状态查询降级不得拖垮整条命令
         tasks_ok = False
         logger.warning(
@@ -272,7 +297,6 @@ async def cmd_status(ctx: CommandContext, args: dict[str, Any]) -> CommandResult
             type(exc).__name__,
         )
 
-    active_task = next((task for task in tasks if _is_active_task(task)), None)
     memory = {
         "message_count": message_count,
         "last_message_at": last_at,
@@ -436,18 +460,23 @@ async def cmd_tools(ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     """工具清单（issue #498）：每项含 name/description/category/risk_level。"""
     manifest = tool_registry.get_manifest()
     default_disabled = set(DEFAULT_DISABLED_TOOLS)
-    entries = [
-        {
-            "name": item.get("name") or "",
-            "description": item.get("description") or "",
-            "category": item.get("category") or "",
-            "risk_level": item.get("risk_level") or "",
-            "tags": list(item.get("tags") or []),
-            "requires_auth": bool(item.get("requires_auth")),
-            "disabled_by_default": (item.get("name") or "") in default_disabled,
-        }
-        for item in manifest
-    ]
+    entries = []
+    for item in manifest:
+        name = item.get("name") or ""
+        tags = list(item.get("tags") or [])
+        entries.append(
+            {
+                "name": name,
+                "description": item.get("description") or "",
+                # 注册表声明优先；未声明时 category 退回首个 tag（分组仍可用），
+                # risk_level 走集中判定表/语义兜底（评审 minor：避免大量空值）。
+                "category": item.get("category") or (tags[0] if tags else ""),
+                "risk_level": item.get("risk_level") or tool_risk_level(name),
+                "tags": tags,
+                "requires_auth": bool(item.get("requires_auth")),
+                "disabled_by_default": name in default_disabled,
+            }
+        )
     lines = [f"## Agent 工具（{len(entries)}）"]
     for entry in entries:
         marks = []

@@ -100,6 +100,10 @@ class BaseAppSettings(BaseSettings):
     # 单命令超时上限 120s，超过 TTL 的命令存在失去互斥的已知边界（报告记录）。
     COMMANDS_LOCK_TTL_SECONDS: int = 30
     COMMANDS_IDEMPOTENCY_TTL_SECONDS: int = 86400
+    # 幂等 pending 占位的短 TTL（评审 M2）：worker 崩溃/被 kill 后同 key 最长
+    # 等这么久即可重试，不再 24h 锁死。必须覆盖单命令超时上限（120s），
+    # 运行时按 max(配置值, MAX_COMMAND_TIMEOUT + 30) 兜底。
+    COMMANDS_IDEMPOTENCY_PENDING_TTL_SECONDS: int = 300
 
     # ── SDK / JSON-RPC / SSE 续传（issue #480）────────────────────────────
     # ``POST /api/v1/rpc`` 开关（仅 web profile 的 agent bundle 挂载时才可能生效）。

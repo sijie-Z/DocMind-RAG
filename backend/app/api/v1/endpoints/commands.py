@@ -8,8 +8,10 @@
 - ``line`` 是 **v1 规范形态**（如 ``/help``、``export json``；前导 ``/`` 可选）。
 - ``command`` + ``args`` 仅为**兼容层**：端点把它拼回一行再走同一执行路径
   （``args`` 可为位置参数数组或按声明名映射的对象）。
-- 可选 ``idempotency_key``：同一 user + 同 key 的重复请求返回同一
-  ``execution_id``，handler 只执行一次（Redis，TTL 24h）。
+- 可选 ``idempotency_key``：同一 user + 同 key 的**串行**重复请求返回同一
+  ``execution_id``，handler 只执行一次（Redis，结果 TTL 24h）。**执行中并发**
+  的重复请求最多等待 ~1s，仍未完成返回 409 ``COMMAND_BUSY``（与 Stripe
+  幂等键语义一致：同一 key 不能被并发重放）；不校验 payload 是否一致。
 
 响应信封（成功 data）：既有 ``command/line/scope/success/content/data/args/
 error_*`` 保留一版，另加 ``execution_id``（uuid）、``status``
@@ -33,6 +35,7 @@ VALIDATION_ERROR；handler 内部错误 500 COMMAND_FAILED（原始异常只进�
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -229,6 +232,16 @@ def _resolve_request_line(body: CommandExecuteRequest) -> str:
     head = command.lstrip("/").split()
     resolved = command_registry.resolve(head[0], agent_scope=scope)[0] if head else None
     arg_names = [arg.name for arg in resolved.args] if resolved else ()
+    if isinstance(body.args, Mapping) and resolved is not None:
+        # 映射型 args 只接受命令声明的参数名；未知键必须显式 400，
+        # 绝不静默当成位置参数错绑（评审 minor）。
+        unknown = [key for key in body.args if key not in arg_names]
+        if unknown:
+            raise ValidationError(
+                f"未知参数：{', '.join(unknown)}",
+                error_code="COMMAND_INVALID_ARGUMENT",
+                detail={"command": resolved.name, "fields": unknown},
+            )
     try:
         return compose_line(command, body.args, arg_names=arg_names)
     except CommandSyntaxError as exc:

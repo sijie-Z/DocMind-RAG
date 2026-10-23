@@ -11,9 +11,12 @@
    Lua **compare-and-del** 只释放自己的锁（TTL 兜底防死锁）。拿不到锁 →
    409 ``command_busy``。多 worker 部署下同一会话仍互斥。
 6. **幂等（issue #498）**：可选 ``idempotency_key`` →
-   ``cmd:idem:{user_id}:{key}``（TTL 24h）。首个请求 ``SET NX`` 抢占执行，
-   完成后覆写为**完整响应 JSON**；重复请求返回同一 ``execution_id``，handler
-   只执行一次。失败不缓存（删除 pending 键，允许重试）。
+   ``cmd:idem:{user_id}:{key}``。首个请求 ``SET NX`` 抢占 **pending 占位**
+   （短 TTL，默认 300s，须覆盖单命令超时上限；worker 崩溃后可自愈重试），
+   完成后覆写为**完整响应 JSON**（TTL 24h）；**串行**重复请求返回同一
+   ``execution_id``，handler 只执行一次。**执行中并发**的重复请求最多等待
+   ~1s，仍未完成返回 409 ``command_busy``（Stripe 幂等键语义，契约见端点
+   docstring）。失败不缓存（删除 pending 键，允许重试）。
 7. **Redis 不可用**：**fail-closed** 返回 ``service_unavailable``（HTTP 503），
    绝不退回进程内锁假装互斥。
 8. **超时 / 取消**：handler 由 ``asyncio.wait_for`` 包裹（命令自带 timeout）；
@@ -132,6 +135,12 @@ def idempotency_redis_key(user_id: int, idempotency_key: str | None) -> str | No
     return f"{_IDEM_PREFIX}{user_id}:{cleaned}"
 
 
+def idempotency_pending_ttl() -> int:
+    """pending 占位 TTL：至少覆盖单命令超时上限 + 30s（配置过小时兜底）。"""
+    configured = int(settings.COMMANDS_IDEMPOTENCY_PENDING_TTL_SECONDS or 0)
+    return max(configured, int(MAX_COMMAND_TIMEOUT) + 30)
+
+
 def lock_redis_key(agent: CommandContext) -> str:
     """同会话（无会话时同用户）命令互斥键。"""
     return f"{_LOCK_PREFIX}{agent.session_id or agent.user_id}"
@@ -214,7 +223,7 @@ async def execute(
                 idem_key,
                 json.dumps({"state": _IDEM_PENDING, "execution_id": execution.execution_id}),
                 nx=True,
-                ex=settings.COMMANDS_IDEMPOTENCY_TTL_SECONDS,
+                ex=idempotency_pending_ttl(),
             )
         except Exception as exc:  # noqa: BLE001 — 依赖不可用必须 fail closed
             logger.warning("命令幂等键写入失败（fail-closed）：%s", type(exc).__name__)
@@ -237,6 +246,22 @@ async def execute(
                 replay = CommandExecution.from_dict(cached)
                 if text:
                     replay.line = text
+                # 重放前复核权限（评审 minor）：同一用户可能已失去管理员身份；
+                # 缓存的敏感结果不得因幂等而越过当前授权。
+                cached_command = (
+                    registry.resolve(replay.command, agent_scope=agent_scope)[0]
+                    if replay.command
+                    else None
+                )
+                if (
+                    cached_command is not None
+                    and cached_command.permission == "admin"
+                    and not agent.is_admin
+                ):
+                    return fail(
+                        ERROR_PERMISSION_DENIED,
+                        f"命令 /{cached_command.name} 仅限组织管理员使用",
+                    )
                 logger.info(
                     "命令幂等重放 (execution_id=%s, user=%s, key=%s)",
                     replay.execution_id,
@@ -367,7 +392,7 @@ def _audit(agent: CommandContext, execution: CommandExecution) -> None:
     logger.info(
         "命令执行 (command=%s, user=%s, org=%s, session=%s, scope=%s, success=%s, "
         "duration_ms=%.1f, error_code=%s, execution_id=%s)",
-        execution.command or execution.line[:40],
+        log_safe(execution.command or execution.line[:40]),
         agent.user_id,
         agent.organization_id,
         log_safe(agent.session_id or ""),
@@ -377,7 +402,6 @@ def _audit(agent: CommandContext, execution: CommandExecution) -> None:
         execution.error_code or "-",
         execution.execution_id or "-",
     )
-    # 指标标签只含命令名与结果码（低基数；不含用户/会话/参数）。
     AGENT_COMMAND_EXECUTIONS.labels(
         command=execution.command or "unknown",
         result="success" if execution.success else (execution.error_code or "failed"),
