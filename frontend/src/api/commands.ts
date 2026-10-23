@@ -1,13 +1,15 @@
 /**
- * User Commands API（issue #475）。
+ * User Commands API（issue #475 / #498）。
  *
  * 两个入口语义（以 backend/app/api/v1/endpoints/commands.py 为准）：
  * - GET  /api/v1/commands：当前用户可用命令；携带 session_id 时合并该会话的
  *   agent 作用域命令。响应 data = {enabled, scope, commands[]}；
  *   COMMANDS_ENABLED=false 时 enabled=false 且 commands=[]（前端回退本地模板）。
- * - POST /api/v1/commands/execute：执行一行命令（body: {line, session_id?}），
- *   返回 JSON，**不进入聊天流**。成功 data = CommandExecution.to_dict()；
- *   失败为扁平错误体 {success:false, error_code, message, detail}。
+ * - POST /api/v1/commands/execute：执行一行命令（body: {line, session_id?,
+ *   idempotency_key?}），返回 JSON，**不进入聊天流**。``line`` 是 v1 规范形态
+ *   （前导 / 可选）；``command+args`` 仅为兼容层。成功 data = CommandExecution
+ *   执行信封（含 execution_id/status/result，旧字段保留一版）；失败为扁平
+ *   错误体 {success:false, error_code, message, detail}。
  *
  * 错误由调用方自行呈现（X-Silent-Error: 1），避免全局 toast 覆盖字段级原因。
  */
@@ -32,6 +34,8 @@ export interface CommandInfo {
   usage: string
   permission: 'user' | 'admin'
   args: CommandArgInfo[]
+  /** issue #498：JSON-Schema 风格的位置参数声明（args 的补充，保留兼容） */
+  args_schema?: Record<string, any>
 }
 
 export interface CommandListData {
@@ -42,10 +46,16 @@ export interface CommandListData {
 
 /** POST /commands/execute 成功返回（与 backend CommandExecution.to_dict 逐字段对齐）。 */
 export interface CommandExecutionData {
+  /** issue #498：一次执行一个 uuid；幂等重放返回同一个 */
+  execution_id?: string
   command: string
   line: string
   scope: string
   success: boolean
+  /** issue #498：completed | failed */
+  status?: 'completed' | 'failed'
+  /** issue #498：成功时结构化结果 {content,data}，失败为 null */
+  result?: { content: string; data: Record<string, any> } | null
   content: string
   data: Record<string, any>
   args: Record<string, any>

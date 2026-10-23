@@ -746,14 +746,18 @@ function commandErrorMessage(err: unknown): { message: string; code: string } {
   const code = typeof body?.error_code === 'string' ? body.error_code : 'COMMAND_FAILED'
   const backendMessage = typeof body?.message === 'string' ? body.message : ''
   const mapped: Record<string, string> = {
+    // issue #498 契约码 + 旧码并存（滚动兼容）
+    NOT_FOUND: t('agentCommand.errUnknown'),
     COMMAND_NOT_FOUND: t('agentCommand.errUnknown'),
     COMMAND_PERMISSION_DENIED: t('agentCommand.errPermission'),
     COMMAND_INVALID_ARGUMENT: t('agentCommand.errInvalid'),
     COMMAND_INVALID_SYNTAX: t('agentCommand.errInvalid'),
+    VALIDATION_ERROR: t('agentCommand.errInvalid'),
     COMMAND_BUSY: t('agentCommand.errBusy'),
     COMMAND_TIMEOUT: t('agentCommand.errTimeout'),
     COMMAND_SESSION_REQUIRED: t('agentCommand.errSession'),
     SESSION_NOT_FOUND: t('agentCommand.errSessionNotFound'),
+    SERVICE_UNAVAILABLE: t('agentCommand.errDisabled'),
     COMMANDS_DISABLED: t('agentCommand.errDisabled'),
   }
   if (mapped[code]) {
@@ -819,7 +823,7 @@ async function handleCommand(line: string) {
     const res = await commandsApi.execute(text, agentStore.currentSessionId || undefined)
     const data = apiUnwrap<CommandExecutionData>(res)
     if (!data) throw new Error('empty command response')
-    if (data.success === false) {
+    if (data.success === false || data.status === 'failed') {
       // 端点契约下失败会走非 2xx；这里防御性兜底，绝不把失败伪装成成功。
       agentStore.processEvent({
         type: 'command_error',
@@ -830,9 +834,10 @@ async function handleCommand(line: string) {
     } else {
       agentStore.processEvent({
         type: 'command_result',
-        content: data.content,
+        // issue #498 执行信封：result 是权威结构化结果；旧字段保留一版兼容。
+        content: data.result?.content ?? data.content,
         command_name: data.command || parsedName,
-        command_data: data.data || {},
+        command_data: data.result?.data ?? data.data ?? {},
       })
     }
   } catch (err) {
