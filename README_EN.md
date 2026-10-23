@@ -192,7 +192,7 @@ Query enters
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-24 endpoint modules under `/api/v1`:
+25 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|
@@ -404,8 +404,8 @@ DocMind/
 │   │   ├── dependencies.py          # Dependency injection container
 │   │   ├── exceptions.py            # Custom exception hierarchy
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # Main router (24 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (24 files)
+│   │   │   ├── router.py            # Main router (25 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (25 files)
 │   │   ├── agent/                   # PER Agent core
 │   │   │   ├── loop.py              #   PER main loop
 │   │   │   ├── planner.py           #   Planner (LLM + structured rules)
