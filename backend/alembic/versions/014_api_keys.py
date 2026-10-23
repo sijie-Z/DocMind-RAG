@@ -13,8 +13,8 @@ Revises: 012_session_fork
 兼容窗口：纯增量建表；旧代码不读该表，可滚动发布。downgrade 直接删表
 （丢失已签发 key 的哈希与审计元数据——回滚前如需保留，先导出）。
 
-注意：本分支基线 head 为 ``012_session_fork``；#478 的 ``013_webhooks`` 合并后，
-同步轮需把 ``down_revision`` 顺延为 ``013_webhooks``（禁止多 head）。
+依赖：``013_webhooks``（#478）——同步合并轮已把 ``down_revision`` 从
+``012_session_fork`` 顺延到 013，保持单 head（禁止多 head）。
 """
 
 import sqlalchemy as sa
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "014_api_keys"
-down_revision = "012_session_fork"
+down_revision = "013_webhooks"
 branch_labels = None
 depends_on = None
 

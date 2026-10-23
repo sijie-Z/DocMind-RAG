@@ -86,6 +86,16 @@
           :disabled="isLoading"
         />
 
+        <!-- issue #475：普通 RAG 通道没有斜杠命令入口（后端仅在 Agent 分支拦截）。
+             非 Agent 模式下如实提示，避免用户以为 /help 会被执行。 -->
+        <div
+          v-if="showSlashAgentHint"
+          class="px-3 pb-1 text-[11px] text-amber-600 dark:text-amber-400"
+          data-testid="slash-agent-only-hint"
+        >
+          {{ t('chat.slashCommandsAgentOnly') }}
+        </div>
+
         <div class="flex justify-between items-center mt-2 px-2 pb-1">
           <div class="flex gap-2 items-center">
             <n-tooltip trigger="hover">
@@ -303,6 +313,11 @@ const setAgentMode = (value: boolean) => {
   // Agent 模式依赖 SSE：开启时强制并锁定传输开关（UI 同步置灰 + 解释）
   if (value) useSSE.value = true
 }
+
+/** issue #475：非 Agent 模式下的斜杠文本不会执行命令——输入即如实提示。 */
+const showSlashAgentHint = computed(
+  () => !useAgent.value && inputMessage.value.trim().startsWith('/'),
+)
 
 withDefaults(defineProps<{
   isLoading: boolean
