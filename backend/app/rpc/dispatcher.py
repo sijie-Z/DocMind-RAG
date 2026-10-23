@@ -769,6 +769,10 @@ class RPCService:
             )
             if permission_handled:
                 return  # _request_permission 内部已续跑并发出终局状态
+            if session_id in self._cancelled_sessions:
+                # cancel 后即使底层 run 自然结束，也不落库、不谎报 done。
+                await self._notify_status(session_id, "cancelled")
+                return
             if last_type not in (
                 "approval_required",
                 "run_cancelled",
@@ -804,6 +808,9 @@ class RPCService:
             )
             if permission_handled:
                 return  # 下一轮审批在 _request_permission 内部闭环
+            if session_id in self._cancelled_sessions:
+                await self._notify_status(session_id, "cancelled")
+                return
             if last_type not in (
                 "approval_required",
                 "run_cancelled",

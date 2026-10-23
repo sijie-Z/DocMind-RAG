@@ -23,6 +23,17 @@ class FakeRedis:
         self.kv[key] = value
         return True
 
+    async def setex(self, key: str, ttl: int, value: str):
+        self.kv[key] = value
+        return True
+
+    async def delete(self, key: str):
+        self.kv.pop(key, None)
+        return 1
+
+    def __bool__(self) -> bool:
+        return True
+
 
 async def _wait_for(pred, timeout: float = 2.0) -> None:
     deadline = asyncio.get_running_loop().time() + timeout
@@ -219,3 +230,99 @@ def _async_none():
         return None
 
     return _inner
+
+
+@pytest.mark.asyncio
+async def test_prompt_cancel_stops_session_events_and_reports_cancelled(tmp_path, monkeypatch):
+    """session/cancel：先回 {cancelled:true}，之后不再发该会话 session.event；
+    run 自然结束时也不落库、不谎报 done。"""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    import app.agent.checkpoint as checkpoint
+    import app.models  # noqa: F401 — create_all 需要全部表
+    from app.core.database import Base
+    from app.models.agent_task import AgentTask, TaskStatus
+    from app.models.chat import ChatSession, ChatSessionStatus
+    from app.models.user import User
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'cancel.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        session.add(
+            User(id=1, username="u", email="u@example.com", hashed_password="x", is_active=True)
+        )
+        session.add(
+            ChatSession(
+                id="s1",
+                user_id=1,
+                title="t",
+                status=ChatSessionStatus.ACTIVE,
+                root_session_id="s1",
+            )
+        )
+        session.add(
+            AgentTask(
+                id="t1",
+                user_id=1,
+                organization_id=None,
+                query="hi",
+                status=TaskStatus.RUNNING,
+                session_id="s1",
+            )
+        )
+        await session.commit()
+
+    fake = FakeRedis()
+    monkeypatch.setattr(dispatcher_module, "redis_client", fake)
+    monkeypatch.setattr(checkpoint, "redis_client", fake)
+    monkeypatch.setattr(checkpoint, "AsyncSessionLocal", factory)
+
+    started = asyncio.Event()
+
+    async def fake_chat(**_kwargs):
+        started.set()
+        for i in range(6):
+            await asyncio.sleep(0.05)
+            yield AgentEvent(type="chunk", content=f"c{i}", task_id="t1")
+        yield AgentEvent(type="done", content="", task_id="t1")
+
+    monkeypatch.setattr(agent_service, "chat", fake_chat)
+
+    sent: list[dict] = []
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    service = RPCService(organization_id=None, user_id=1, db_factory=factory)
+    saved = {"n": 0}
+
+    async def save_noop(*_args, **_kwargs):
+        saved["n"] += 1
+
+    service._save_interaction = save_noop  # type: ignore[assignment]
+    service.build_dispatcher(send=send)
+
+    result = await service.session_prompt(
+        {"sessionId": "s1", "prompt": "hi", "clientMessageId": "m1"}
+    )
+    assert result["sessionId"] == "s1"
+    await asyncio.wait_for(started.wait(), timeout=2)
+    await asyncio.sleep(0.12)
+
+    cancel = await service.session_cancel({"sessionId": "s1"})
+    assert cancel == {"cancelled": True}
+    cancel_seq = max(
+        [m["params"]["seq"] for m in sent if m.get("method") == "session.event"] or [0]
+    )
+
+    await asyncio.gather(*list(service._prompt_tasks.values()), return_exceptions=True)
+    late = [
+        m for m in sent if m.get("method") == "session.event" and m["params"]["seq"] > cancel_seq
+    ]
+    statuses = [m["params"]["status"] for m in sent if m.get("method") == "session.status"]
+    assert late == [], "cancel 返回后不得再发该会话的 session.event"
+    assert statuses == ["cancelled"], "自然结束也要如实报 cancelled（不得谎报 done）"
+    assert saved["n"] == 0, "取消后不落库"
+    await engine.dispose()
