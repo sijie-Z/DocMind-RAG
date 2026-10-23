@@ -258,9 +258,9 @@ async def save_session_interaction(
                 existing.organization_id = organization_id
 
             # issue #476：会话内单调 seq（唯一约束 (session_id, seq)）。先分配
-            # user 的序号，assistant 顺延 +1 —— 两次分配在同一事务里，autoflush
-            # 让第二次的 max 查询看得到第一条待插入消息；MySQL 上行锁由
-            # next_message_seq 负责。
+            # user 的序号；assistant 再分配一次——issue #499 起计数器落在
+            # chat_sessions.next_message_seq 上，两次分配让计数器与实际最大 seq
+            # 保持一致（不再用 base_seq + 1 手工推算）。
             base_seq = await next_message_seq(session, session_id)
             user_msg = ChatMessage(
                 id=str(uuid.uuid4()),
@@ -277,7 +277,7 @@ async def save_session_interaction(
                 assistant_msg = ChatMessage(
                     id=assistant_msg_id,
                     session_id=session_id,
-                    seq=base_seq + 1,
+                    seq=await next_message_seq(session, session_id),
                     content=assistant_response,
                     message_type=MessageType.ASSISTANT,
                 )

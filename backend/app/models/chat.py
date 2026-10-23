@@ -57,6 +57,11 @@ class ChatSession(Base):
             "webhook_rule_id",
             "webhook_session_key",
         ),
+        # issue #499：fork 幂等键按用户全局唯一。MySQL/SQLite 的 UNIQUE 都允许多个
+        # NULL，因此未带幂等键的会话行（含全部历史行）不参与唯一约束。
+        UniqueConstraint(
+            "user_id", "idempotency_key", name="uq_chat_sessions_user_idempotency_key"
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
@@ -81,6 +86,22 @@ class ChatSession(Base):
 
     # 配置信息
     settings: Mapped[Any | None] = mapped_column(JSON, comment="会话设置")
+
+    # issue #499：消息序号分配计数器（最后一条已分配 seq）。新消息经
+    # app.services.chat_seq.next_message_seq 在行锁内递增；迁移 016 按
+    # MAX(chat_messages.seq) 回填。fork 复制消息时同步写成 copied_count。
+    next_message_seq: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="消息序号分配计数器（最后已分配 seq）",
+    )
+    # issue #499：fork 幂等键（明文，<=128）。唯一约束 (user_id, idempotency_key)
+    # 是并发双建的最终防线；NULL（未带幂等键）不参与约束。
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(128), comment="fork 幂等键（用户内唯一；NULL 不参与）"
+    )
 
     # 分叉谱系（issue #476）
     # - parent_session_id：直接母会话；根会话为 None。
