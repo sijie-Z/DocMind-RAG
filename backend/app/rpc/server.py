@@ -23,11 +23,7 @@ from typing import Any, TextIO
 from app.core.config import settings
 from app.core.error_mapping import JSONRPC_INVALID_REQUEST, JSONRPC_PARSE_ERROR
 from app.core.log_safety import log_safe
-from app.core.stdio import (
-    configure_stdio_stdout,
-    get_protocol_stdout,
-    migrate_stdout_handlers,
-)
+from app.core.stdio import configure_stdio_stdout, get_protocol_stdout
 from app.rpc.dispatcher import RPCService
 
 logger = logging.getLogger(__name__)
@@ -67,19 +63,61 @@ async def initialize_stdio_dependencies() -> None:
     await init_db()
 
 
-def _release_stdin_reader(reader: threading.Thread) -> None:
-    """尽力让 stdin 读线程退出（issue #493：收尾不留读 stdin 的线程）。
+def _cancel_synchronous_stdin_read(reader: threading.Thread) -> bool:
+    """Windows：用 ``CancelSynchronousIo`` 取消读线程阻塞中的 ReadFile（issue #493）。
 
-    关闭 stdin 的底层 fd 可让 Windows 上阻塞在 ``readline`` 的线程立即失败；
-    POSIX 的 close 不保证唤醒已阻塞的 read，此时线程保持 daemon（进程退出由
-    解释器回收）。join 带上限，收尾绝不被卡死。仅当 ``sys.stdin`` 仍是进程
-    原始 stdin 时才动 fd，避免误伤嵌入了 ``run_stdio`` 的宿主进程。
+    成功时 ``readline`` 以 ``OSError`` 返回，读线程随即退出；非 Windows 或调用
+    失败返回 False（由调用方按 daemon 兜底）。
+    """
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenThread.restype = wintypes.HANDLE
+        kernel32.CancelSynchronousIo.argtypes = [wintypes.HANDLE]
+        kernel32.CancelSynchronousIo.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        thread_id = getattr(reader, "native_id", None)
+        if thread_id is None:
+            return False
+        handle = kernel32.OpenThread(0x1FFFFF, False, int(thread_id))  # THREAD_ALL_ACCESS
+        if not handle:
+            return False
+        try:
+            return bool(kernel32.CancelSynchronousIo(handle))
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:  # noqa: BLE001 - 尽力而为，失败由 daemon 兜底
+        logger.debug("CancelSynchronousIo failed", exc_info=True)
+        return False
+
+
+def _release_stdin_reader(reader: threading.Thread) -> None:
+    """收尾 stdin 读线程（issue #493：shutdown 必须能干净退出）。
+
+    1) 先 ``sys.stdin.detach()`` 解除 TextIOWrapper 对底层 buffer 的所有权：
+       即使读线程仍阻塞在 ``readline``，解释器收尾也不会去 close 一个持有锁的
+       BufferedReader（否则 Windows 会 ``Fatal Python error: _enter_buffered_busy``）。
+       **绝不能** ``os.close(sys.stdin.fileno())``——Windows 上 CRT 的 fd 锁被
+       阻塞读持有，close 会让收尾线程永久阻塞（评审 blocker B1，实测 >12s 不返回）。
+    2) Windows 用 ``CancelSynchronousIo`` 取消阻塞中的 ReadFile，让读线程真正
+       退出；POSIX 无等价机制，线程保持 daemon（进程退出即回收）。join 带上限，
+       收尾绝不被卡死。仅当 ``sys.stdin`` 仍是进程原始 stdin 时才动它，避免
+       误伤嵌入了 ``run_stdio`` 的宿主进程。
     """
     if sys.stdin is sys.__stdin__:
         try:
-            os.close(sys.stdin.fileno())
-        except (OSError, ValueError, AttributeError):
+            sys.stdin.detach()
+        except (AttributeError, OSError, ValueError):
             pass
+    if reader.is_alive():
+        _cancel_synchronous_stdin_read(reader)
     reader.join(timeout=0.5)
     if reader.is_alive():
         logger.debug("stdin reader still blocked at exit; daemon thread reclaimed on exit")
@@ -91,10 +129,9 @@ def _stderr_only_stdout(requested_stdout: TextIO) -> None:
     薄封装 :func:`app.core.stdio.configure_stdio_stdout`（issue #493）：重定向与
     handler 迁移逻辑集中在 import-safe 的 ``core.stdio``（root 与 sqlalchemy /
     uvicorn / httpx 等具名 logger 一并迁移）。``requested_stdout`` 是调用方保存的
-    协议写端；正常情形下它就是当前 ``sys.stdout``，二次迁移为 no-op。
+    协议写端；正常情形下它就是当前 ``sys.stdout``。
     """
     configure_stdio_stdout()
-    migrate_stdout_handlers(requested_stdout)
 
 
 def _parse_error() -> dict[str, Any]:
@@ -156,8 +193,9 @@ async def run_stdio(
             # 限制单次读入大小，超长行不整行进内存（多读 1 字节用于判定超限）。
             try:
                 raw = sys.stdin.buffer.readline(max_bytes + 1)
-            except (OSError, ValueError):
-                # 收尾时 fd 被关闭 / stdin 不可读：按 EOF 处理。
+            except (AttributeError, OSError, ValueError):
+                # 收尾时 fd 被关闭 / stdin 不可读（含 stdin=None 的宿主）：
+                # 按 EOF 处理。
                 raw = b""
             if raw is None:
                 raw = b""
