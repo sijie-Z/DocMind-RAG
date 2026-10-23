@@ -258,7 +258,9 @@ class DockerTerminalBackend:
                 cap_drop=["ALL"],
                 security_opt=["no-new-privileges"],
                 user=_TERMINAL_USER,
-                working_dir="/tmp",
+                # 容器内工作目录，不是宿主临时目录（B108 误报豁免）：容器
+                # network=none、cap-drop ALL、非 root 65534、无宿主挂载。
+                working_dir="/tmp",  # nosec B108
             )
             exec_info = client.api.exec_create(
                 self._container.id,

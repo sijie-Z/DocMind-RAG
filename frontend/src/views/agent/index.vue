@@ -460,7 +460,10 @@
     <!-- 持久终端抽屉（issue #477）：xterm 面板挂在现有 /agent 页右侧，不新增路由 -->
     <n-drawer v-model:show="showTerminal" placement="right" :width="760">
       <n-drawer-content :title="t('agent.terminal.title')" closable>
-        <TerminalPanel :session-id="agentStore.currentSessionId" />
+        <!-- v-if：面板只在抽屉打开时挂载。Naive UI 的 drawer 本身按显示状态惰性
+             渲染，但单测里 n-drawer 可能未被注册为组件，显式 v-if 保证不挂载
+             xterm（其隐藏 textarea 会干扰按 textarea 定位输入框的用例）。 -->
+        <TerminalPanel v-if="showTerminal" :session-id="agentStore.currentSessionId" />
       </n-drawer-content>
     </n-drawer>
 
