@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -349,6 +350,8 @@ async def _receive_loop(
     from app.core.config import settings
 
     max_input = int(settings.TERMINAL_MAX_INPUT_BYTES)
+    # 命令摘要审计的行缓冲：xterm 逐键发送，回车（\r）常单独一帧。
+    line_buffer = ""
     while True:
         message = await websocket.receive()
         if message.get("type") == "websocket.disconnect":
@@ -448,12 +451,16 @@ async def _receive_loop(
                     send_lock,
                 )
             else:
-                # 命令摘要审计（只对回车提交的行；审计失败不影响输入）。
-                await terminal_service.audit_command(
-                    user_id=session.user_id,
-                    terminal_id=session.terminal_id,
-                    data=data,
-                )
+                # 命令摘要审计：按换行切分已完成行，余下部分留在缓冲。
+                line_buffer += data
+                completed = re.split(r"[\r\n]", line_buffer)
+                line_buffer = completed.pop()
+                for line in completed:
+                    await terminal_service.audit_line(
+                        user_id=session.user_id,
+                        terminal_id=session.terminal_id,
+                        line=line,
+                    )
         elif message_type == "resize":
             cols, rows = parsed.get("cols"), parsed.get("rows")
             if (

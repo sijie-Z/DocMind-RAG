@@ -91,19 +91,22 @@ def _parse_created(raw: str) -> float | None:
     return parsed.astimezone(UTC).timestamp()
 
 
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+def _summarize_line(line: str) -> str | None:
+    """单行命令摘要：处理退格、脱敏控制字符、截断 200。
 
-
-def _summarize_command(data: str) -> str | None:
-    """命令摘要：仅当输入包含换行（回车提交）时取首行；脱敏控制字符并截断。
-
-    逐键输入（xterm onData 的单字符帧）不会产生审计记录，只有按 Enter 提交的
-    命令行才落一条摘要——这与 shell history 的风险面相同，长度上限 200 字符。
+    前端 xterm 逐键发送（``\\r`` 单独一帧），所以调用方必须先按换行缓冲/切分；
+    这里不再要求输入自带换行。
     """
-    if "\n" not in data and "\r" not in data:
-        return None
-    first_line = re.split(r"[\r\n]", data, maxsplit=1)[0]
-    cleaned = _CONTROL_CHARS_RE.sub("", first_line).strip()
+    out: list[str] = []
+    for ch in line:
+        if ch in ("\x7f", "\b"):
+            if out:
+                out.pop()
+            continue
+        if ord(ch) < 32 or ord(ch) == 127:
+            continue
+        out.append(ch)
+    cleaned = "".join(out).strip()
     if not cleaned:
         return None
     return cleaned[:200]
@@ -117,6 +120,9 @@ class TerminalService:
         self._manager: TerminalManager | None = None
         self._reaper_task: asyncio.Task[None] | None = None
         self._docker_probe: tuple[float, bool] | None = None
+        # owner 心跳缺失的首次观察时间（container_id → wall time）。只有连续
+        # 缺失 ≥ 宽限期才判死——按「缺失时长」而非容器年龄（评审 M3）。
+        self._dead_owner_candidates: dict[str, float] = {}
 
     # ── 配置 / 开关 ──
     @staticmethod
@@ -346,30 +352,35 @@ class TerminalService:
         target_id: str | None = None,
         detail: str | None = None,
     ) -> None:
-        """写用户活动审计。审计失败绝不影响终端数据面（log_activity 自吞异常）。"""
+        """写用户活动审计。审计失败绝不影响终端数据面（异常自吞 + 2s 上限）。"""
         try:
             from app.services.audit_service import audit_service
 
-            await audit_service.log_activity(
-                user_id=user_id,
-                action=action,
-                target_type="terminal",
-                target_id=target_id,
-                detail=detail,
+            await asyncio.wait_for(
+                audit_service.log_activity(
+                    user_id=user_id,
+                    action=action,
+                    target_type="terminal",
+                    target_id=target_id,
+                    detail=detail,
+                ),
+                timeout=2.0,
             )
         except Exception:  # pragma: no cover — 审计实现自兜，双保险
             logger.debug("terminal audit failed: %s", action, exc_info=True)
 
-    async def audit_command(self, *, user_id: int, terminal_id: str, data: str) -> None:
-        """命令摘要审计：只记录「回车提交」的命令行，脱敏控制字符并截断。
-
-        终端逐键输入不会触发；仅当本次输入包含换行时取首行摘要。摘要是
-        人类可读的命令文本（与 shell history 同类风险），长度上限 200。
-        """
-        summary = _summarize_command(data)
+    async def audit_line(self, *, user_id: int, terminal_id: str, line: str) -> None:
+        """记录一条**完整命令行**的摘要（由调用方按换行切分/缓冲）。"""
+        summary = _summarize_line(line)
         if not summary:
             return
         await self._audit(user_id, "terminal_command", target_id=terminal_id, detail=summary)
+
+    async def audit_completed_lines(self, *, user_id: int, terminal_id: str, data: str) -> None:
+        """把一段输入按换行切分，审计其中**已完成**的每一行（工具/粘贴路径）。"""
+        parts = re.split(r"[\r\n]", data)
+        for line in parts[:-1]:
+            await self.audit_line(user_id=user_id, terminal_id=terminal_id, line=line)
 
     # ── 回收 ──
     async def sweep(self) -> int:
@@ -388,8 +399,13 @@ class TerminalService:
         await self.cleanup_orphan_containers()
         return len(reclaimed)
 
-    async def cleanup_orphan_containers(self) -> int:
-        """清理 ``docmind.terminal`` 标签容器中无主（owner 已死/已超寿命）的那些。"""
+    async def cleanup_orphan_containers(self, *, now: float | None = None) -> int:
+        """清理 ``docmind.terminal`` 标签容器中无主（owner 已死/已超寿命）的那些。
+
+        owner 心跳缺失采用**连续观察**：首次发现只登记候选，缺失持续 ≥ 宽限期
+        （``_OWNER_HEARTBEAT_GRACE_SECONDS``）才删除——按缺失时长而非容器年龄
+        判定，覆盖「Redis 中断恢复后、存活 worker 尚未刷新心跳」的竞态（评审 M3）。
+        """
         settings = self._settings()
         if not await self.docker_available():
             logger.debug("terminal reaper: Docker 不可用，跳过孤儿容器清理")
@@ -401,16 +417,20 @@ class TerminalService:
             return 0
 
         max_lifetime = float(settings.TERMINAL_MAX_LIFETIME_SECONDS)
-        now = time.time()
+        current = time.time() if now is None else now
         removed = 0
-        for info in containers:
+        seen_ids: set[str] = set()
+        for info in list(containers):
             terminal_id = (info.get("labels") or {}).get(LABEL_TERMINAL)
+            container_id = str(info.get("id") or "")
             if not terminal_id:
                 continue
+            if container_id:
+                seen_ids.add(container_id)
             if self.manager.has_local(terminal_id):
                 continue
             created = _parse_created(str(info.get("created") or ""))
-            age = (now - created) if created is not None else None
+            age = (current - created) if created is not None else None
             try:
                 owner = await self.get_owner(terminal_id)
                 if owner is None:
@@ -427,17 +447,22 @@ class TerminalService:
                 # 本 worker 已无该会话（如进程重启、WORKER_ID 固定）→ 孤儿。
                 orphan = True
             elif owner is not None and owner_alive:
+                self._dead_owner_candidates.pop(container_id, None)
                 orphan = False
             elif owner is not None and not owner_alive:
-                # owner 心跳过期。但 Redis 中断恢复后的宽限期内不判死：
-                # 存活 worker 还没到下一次心跳 tick（评审 M3 竞态）。
-                orphan = age is not None and age >= _OWNER_HEARTBEAT_GRACE_SECONDS
+                first_seen = self._dead_owner_candidates.get(container_id)
+                if first_seen is None:
+                    self._dead_owner_candidates[container_id] = current
+                    orphan = False
+                else:
+                    orphan = (current - first_seen) >= _OWNER_HEARTBEAT_GRACE_SECONDS
             else:
                 # owner 键不存在：仅在超过最大寿命后清理；Redis 丢数据时宁可
                 # 多留一个容器，也不误杀其他 worker 的活会话。
                 orphan = age is not None and age >= max_lifetime
             if not orphan:
                 continue
+            self._dead_owner_candidates.pop(container_id, None)
             ok = await asyncio.to_thread(remove_terminal_container, info["id"])
             if ok:
                 removed += 1
@@ -446,6 +471,10 @@ class TerminalService:
                     info["id"],
                     terminal_id,
                 )
+        # 已消失的容器不再占用候选表。
+        self._dead_owner_candidates = {
+            cid: ts for cid, ts in self._dead_owner_candidates.items() if cid in seen_ids
+        }
         return removed
 
     async def reaper_loop(self, interval: float = REAPER_INTERVAL_SECONDS) -> None:

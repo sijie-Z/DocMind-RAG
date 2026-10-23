@@ -46,8 +46,13 @@ sock    = client.api.exec_start(exec_id, socket=True)
   8 个；配额 3×3 即可饱和），达到上限后所有终端输入/输出/关闭停摆。实现改为
   **每终端一个专用后台读线程**：线程阻塞在 socket 上，读到数据经
   `loop.call_soon_threadsafe` 投递到 asyncio.Queue；`read()` 只 await 队列，
-  空闲时不占任何池线程。线程数 = 活跃终端数（已被配额约束），关闭时 join。
-  写/resize/close 仍是短暂的 `asyncio.to_thread` 调用。
+  空闲时不占任何池线程。线程数 = 活跃终端数（受每用户/每组织配额约束；全局
+  无硬上限，需按部署规模评估）。写/resize/close 仍是短暂的 `asyncio.to_thread`。
+- **背压（对抗评审 round-2）**：读线程 → 事件循环的队列有界（32 个 64KiB chunk
+  ≈ 2MiB 信号量槽位）。队列满时读线程阻塞在信号量上，PTY 内核缓冲随后填满、
+  进程写阻塞——形成真正的背压，而不是无界堆积内存；关闭时通过 `_closed`
+  标记 + 0.5s 超时退出并 join。ring buffer 的 256KB 截断/`dropped_total` 语义
+  不变。
 
 ## 鉴权：一次性票据 + Origin
 
@@ -70,10 +75,12 @@ sock    = client.api.exec_start(exec_id, socket=True)
 - `terminal_create` / `terminal_close`：`audit_service.log_activity` 写
   `user_activity_logs`（target_type="terminal"）；显式关闭（HTTP DELETE / 工具）
   与系统回收（空闲/超寿命/退出清理）都记一条，回收记录带 `reason=`。
-- `terminal_command`：仅当输入包含换行（回车提交）时记录**首行摘要**——控制字符
-  脱敏、截断 200 字符；逐键输入不落库。摘要与 shell history 同类风险，已在此
-  明示；终端**输出**绝不写服务端日志。
-- 审计失败只记 debug，绝不影响终端数据面（`log_activity` 本身已吞异常）。
+- `terminal_command`：前端 xterm 逐键发送（回车常单独一帧），服务端按连接缓冲
+  行，**回车提交时**记录首行摘要——处理退格、控制字符脱敏、截断 200 字符；
+  逐键输入本身不落库。摘要与 shell history 同类风险，已在此明示；终端**输出**
+  绝不写服务端日志。
+- 审计写库在输入热路径上有 2s 上限（`asyncio.wait_for`），失败只记 debug，
+  绝不影响终端数据面（`log_activity` 本身已吞异常）。
 
 ## 配额、生命周期与多 worker
 
@@ -94,9 +101,10 @@ sock    = client.api.exec_start(exec_id, socket=True)
 - **worker 心跳**：每个 worker 每 30s 刷新 `terminal:worker:<id>`（TTL 90s）。
   启动时与每 30s 的回收循环按 label `docmind.terminal` 扫描容器：
   - 本 worker 已无该会话（进程重启）→ 删除；
-  - owner 心跳过期且容器年龄 ≥ 120s 宽限期（`_OWNER_HEARTBEAT_GRACE_SECONDS`）
-    → owner 已死，删除。宽限期覆盖「Redis 中断 >90s 后恢复、存活 worker 尚未
-    到下一次心跳 tick」的竞态（对抗评审 M3）；
+  - owner 心跳缺失采用**连续观察**：首次发现只登记候选（container_id → 首见
+    时间），缺失持续 ≥ 120s 宽限期才删除。判据是「缺失时长」而不是容器年龄，
+    因此覆盖「Redis 中断 >90s 后恢复、存活 worker 尚未到下一次心跳 tick」的
+    竞态（对抗评审 M3）；真正死亡的 owner 最多延迟 120s 被清理；
   - owner 键不存在（如 Redis 丢数据）→ 仅在容器年龄 ≥ 最大寿命时删除
     （宁可多留一个容器，也不误杀其他 worker 的活会话）；
   - Redis 不可用 → 本轮不删除任何容器。
@@ -144,7 +152,8 @@ sock    = client.api.exec_start(exec_id, socket=True)
 - 前端生产 nginx（frontend/nginx.conf）已为前缀 `/api/v1/terminal/ws/` 增加
   Upgrade/Connection 转发（路径带 terminal_id 后缀，不能使用精确匹配）；
   K8s ingress 直连 backend，不经过该 nginx。
-- 镜像：`TERMINAL_CONTAINER_IMAGE` 禁止 `latest`（启动创建容器前校验，违规拒绝）。
+- 镜像：`TERMINAL_CONTAINER_IMAGE` 必须固定 tag 或 digest——裸名（等价 latest）
+  与 `:latest` 在创建容器前即拒绝。
 - 清理残留容器：
   ```bash
   docker ps -a --filter label=docmind.terminal

@@ -39,6 +39,7 @@ from typing import Any
 from app.agent.terminal.manager import (
     TerminalDockerUnavailable,
     TerminalError,
+    TerminalExited,
     normalize_signal,
 )
 
@@ -52,6 +53,10 @@ _CONTAINER_MEMORY = "512m"
 _CONTAINER_PIDS_LIMIT = 128
 _CONTAINER_NANO_CPUS = 1_000_000_000  # --cpus 1
 _EXEC_READ_CHUNK = 65536
+# 读线程 → 事件循环的有界缓冲：最多 32 个 64KiB chunk（约 2MiB）。
+# 队列满时读线程阻塞在信号量上（真正的背压：PTY 内核缓冲随后填满，
+# 进程写阻塞），而不是无界堆积内存（对抗评审 round-2 NEW-ISSUE）。
+_OUT_QUEUE_CHUNKS = 32
 
 __all__ = [
     "LABEL_TERMINAL",
@@ -97,11 +102,20 @@ def _read_socket(sock: Any, max_bytes: int) -> bytes:
 
 
 def validate_terminal_image(image: str) -> str:
-    """校验终端镜像引用（issue §5.2：必须固定 tag/digest，禁止 latest）。"""
+    """校验终端镜像引用（issue §5.2：必须固定 tag/digest，禁止 latest）。
+
+    Docker 对裸名（如 ``python``）等价于 ``python:latest``，同样拒绝。
+    """
     candidate = (image or "").strip()
     if not candidate:
         raise TerminalError("终端镜像为空（配置 TERMINAL_CONTAINER_IMAGE / SANDBOX_DOCKER_IMAGE）")
-    if candidate.endswith(":latest") or candidate == "latest":
+    if "@" in candidate:  # digest 引用（repo@sha256:...）总是固定
+        return candidate
+    last_segment = candidate.rsplit("/", 1)[-1]
+    if ":" not in last_segment:
+        raise TerminalError("终端镜像必须固定 tag 或 digest（裸名等价 latest，已拒绝）")
+    tag = last_segment.rsplit(":", 1)[1]
+    if not tag or tag == "latest":
         raise TerminalError("终端镜像禁止使用 latest，必须固定 tag 或 digest")
     return candidate
 
@@ -155,6 +169,8 @@ class DockerTerminalBackend:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._out_queue: asyncio.Queue[bytes | None] | None = None
         self._reader_thread: threading.Thread | None = None
+        self._slots = threading.BoundedSemaphore(_OUT_QUEUE_CHUNKS)
+        self._closed = threading.Event()
         self._pending = bytearray()
         self._eof = False
 
@@ -163,16 +179,25 @@ class DockerTerminalBackend:
         loop = asyncio.get_running_loop()
         await asyncio.to_thread(self._spawn_sync, cols, rows)
         self._loop = loop
-        self._out_queue = asyncio.Queue()
+        # maxsize 多留 1 个位置给 EOF 哨兵（EOF 不占背压信号量）。
+        self._out_queue = asyncio.Queue(maxsize=_OUT_QUEUE_CHUNKS + 1)
         self._reader_thread = threading.Thread(
             target=self._reader_sync,
             name=f"terminal-pty-{self.terminal_id}",
             daemon=True,
         )
-        self._reader_thread.start()
+        try:
+            self._reader_thread.start()
+        except Exception:
+            self._reader_thread = None
+            await asyncio.to_thread(self._cleanup_sync)
+            raise
 
     def _reader_sync(self) -> None:
-        """专用读线程：阻塞读 socket → 投递到事件循环队列；EOF 投递 None。"""
+        """专用读线程：阻塞读 socket → 投递到事件循环队列；EOF 投递 None。
+
+        队列满时在信号量上阻塞（背压），关闭时经 ``_closed`` 与 0.5s 超时退出。
+        """
         loop = self._loop
         sock = self._sock
         if loop is None or sock is None:
@@ -182,6 +207,9 @@ class DockerTerminalBackend:
                 data = _read_socket(sock, _EXEC_READ_CHUNK)
                 if not data:
                     break
+                while not self._slots.acquire(timeout=0.5):
+                    if self._closed.is_set():
+                        return
                 try:
                     loop.call_soon_threadsafe(self._deliver, data)
                 except RuntimeError:  # 事件循环已关闭
@@ -257,7 +285,12 @@ class DockerTerminalBackend:
         sock = self._sock
         if sock is None:
             raise TerminalError("终端 PTY 未就绪")
-        await asyncio.to_thread(_write_socket, sock, data)
+        try:
+            await asyncio.to_thread(_write_socket, sock, data)
+        except (OSError, ValueError) as e:
+            # socket 已随进程退出关闭：映射到「终端已退出」，而不是裸 OSError
+            # （否则 WS 收到未分类异常、不发 error/exit 帧）。
+            raise TerminalExited("终端进程已退出") from e
         return len(data)
 
     async def read(self, max_bytes: int) -> bytes:
@@ -271,6 +304,7 @@ class DockerTerminalBackend:
             if item is None:
                 self._eof = True
                 return b""
+            self._slots.release()  # 消费一个 chunk，放开读线程的背压槽位
             self._pending.extend(item)
         take = min(max_bytes, len(self._pending))
         data = bytes(self._pending[:take])
@@ -335,11 +369,13 @@ class DockerTerminalBackend:
         await asyncio.to_thread(self._cleanup_sync)
 
     def _cleanup_sync(self) -> None:
+        self._closed.set()
         sock, self._sock = self._sock, None
         if sock is not None:
             with contextlib.suppress(Exception):
                 sock.close()
         # 关闭 socket 会让阻塞中的读线程退出；join 避免线程泄漏。
+        # 读线程若卡在背压信号量上，会在 0.5s 超时内看到 _closed 并退出。
         thread, self._reader_thread = self._reader_thread, None
         if thread is not None and thread.is_alive():
             thread.join(timeout=2.0)

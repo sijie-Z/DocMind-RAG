@@ -750,13 +750,31 @@ def test_audit_records_create_command_and_close(env) -> None:
     assert command_call.kwargs.get("target_id") == terminal_id
 
 
-def test_audit_command_ignores_keystrokes_and_masks_control_chars() -> None:
-    from app.services.terminal_service import _summarize_command
+def test_summarize_line_handles_backspace_and_control_chars() -> None:
+    from app.services.terminal_service import _summarize_line
 
-    assert _summarize_command("l") is None  # 逐键输入不审计
-    assert _summarize_command("echo a\x01b\nrest") == "echo ab"
-    assert _summarize_command("\n") is None
-    assert len(_summarize_command("x" * 500 + "\n")) == 200
+    assert _summarize_line("lss\x7f") == "ls"  # 退格生效
+    assert _summarize_line("echo a\x01b") == "echo ab"  # 控制字符脱敏
+    assert _summarize_line("   ") is None
+    assert _summarize_line("\r\n") is None
+    assert len(_summarize_line("x" * 500)) == 200
+
+
+def test_audit_records_keystroke_commands_across_frames(env) -> None:
+    """xterm 逐键发送：回车单独一帧，服务端必须按行缓冲后再审计。"""
+    data = _create(env)
+    terminal_id = data["terminal_id"]
+    with _connect(env, terminal_id, data["ticket"]) as ws:
+        for chunk in ("echo", " ", "audit", "\r"):
+            ws.send_json({"type": "input", "data": chunk})
+        _wait_until(lambda: env.backends[0].sent == [b"echo", b" ", b"audit", b"\r"])
+        _wait_until(
+            lambda: any(
+                call.kwargs.get("action") == "terminal_command"
+                and call.kwargs.get("detail") == "echo audit"
+                for call in env.audit.await_args_list
+            )
+        )
 
 
 # ── 回收器 / 孤儿清理（对抗评审 M4）──────────────────────────────────────
@@ -806,22 +824,42 @@ async def test_orphan_cleanup_matrix(tool_env, monkeypatch) -> None:
     ]
     removed: list[str] = []
 
+    def _fake_remove(container_id: str) -> bool:
+        removed.append(container_id)
+        # 真实 Docker 删除后容器不再出现在下一轮列表里。
+        containers[:] = [c for c in containers if c["id"] != container_id]
+        return True
+
     monkeypatch.setattr(service_module, "list_terminal_containers", lambda: containers)
-    monkeypatch.setattr(
-        service_module,
-        "remove_terminal_container",
-        lambda cid: removed.append(cid) or True,
-    )
+    monkeypatch.setattr(service_module, "remove_terminal_container", _fake_remove)
 
     async def _docker_ok() -> bool:
         return True
 
     monkeypatch.setattr(terminal_service, "docker_available", _docker_ok, raising=False)
 
-    count = await terminal_service.cleanup_orphan_containers()
-    assert count == 3
-    assert removed == ["cid-t-dead-old", "cid-t-self", "cid-t-noowner-old"]
+    now = time.time()
+    count = await terminal_service.cleanup_orphan_containers(now=now)
+    # 第一轮：本 worker 重启残留 + 无 owner 且超寿命 → 删；
+    # owner 心跳缺失只登记候选（首见），不立即删。
+    assert count == 2
+    assert removed == ["cid-t-self", "cid-t-noowner-old"]
     assert f"cid-{local_id}" not in removed
+
+    # 宽限期内（缺失 60s）仍不删。
+    assert await terminal_service.cleanup_orphan_containers(now=now + 60) == 0
+
+    # 缺失 ≥ 120s：两个心跳缺失的 owner 容器被删（含年龄较小的那个）。
+    count = await terminal_service.cleanup_orphan_containers(now=now + 121)
+    assert count == 2
+    assert removed == [
+        "cid-t-self",
+        "cid-t-noowner-old",
+        "cid-t-dead-old",
+        "cid-t-dead-young",
+    ]
+    # 候选已清空，重复调用不重复删除。
+    assert await terminal_service.cleanup_orphan_containers(now=now + 200) == 0
 
 
 async def test_orphan_cleanup_keeps_everything_when_redis_down(tool_env, monkeypatch) -> None:
@@ -861,6 +899,7 @@ async def test_docker_backend_read_queue_semantics() -> None:
 
     backend = DockerTerminalBackend(terminal_id="t", user_id=1, image="python:3.11-slim")
     backend._out_queue = asyncio.Queue()
+    backend._slots.acquire()  # 模拟读线程投递前的背压槽位
     backend._deliver(b"hello")
     assert await backend.read(3) == b"hel"
     assert await backend.read(100) == b"lo"
@@ -869,12 +908,32 @@ async def test_docker_backend_read_queue_semantics() -> None:
     assert await backend.read(10) == b""  # EOF 粘性（reader 不会重复等待）
 
 
-def test_terminal_image_must_not_be_latest() -> None:
+def test_terminal_image_must_be_pinned() -> None:
     from app.agent.terminal.docker_backend import validate_terminal_image
     from app.agent.terminal.manager import TerminalError
 
     assert validate_terminal_image("python:3.11-slim") == "python:3.11-slim"
+    assert (
+        validate_terminal_image("registry.local:5000/team/term:1.2")
+        == "registry.local:5000/team/term:1.2"
+    )
     with pytest.raises(TerminalError):
         validate_terminal_image("python:latest")
     with pytest.raises(TerminalError):
+        validate_terminal_image("python")  # 裸名等价 latest
+    with pytest.raises(TerminalError):
         validate_terminal_image("")
+
+
+async def test_sweep_audits_reaped_close(tool_env) -> None:
+    session = await tool_env.manager.create(user_id=1, org_id=1)
+    session.last_activity_mono -= 901  # 超过空闲 900s
+    count = await terminal_service.sweep()
+    assert count == 1
+    close_calls = [
+        call
+        for call in tool_env.audit.await_args_list
+        if call.kwargs.get("action") == "terminal_close"
+    ]
+    assert close_calls, "回收关闭必须落审计"
+    assert close_calls[-1].kwargs.get("detail") == "reason=idle_timeout"

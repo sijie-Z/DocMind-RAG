@@ -198,7 +198,9 @@ async def terminal_send(
     except TerminalError as exc:
         return _tool_fail(exc)
     # 命令摘要审计（仅回车提交的行；审计失败不影响写入结果）。
-    await terminal_service.audit_command(user_id=user_id, terminal_id=terminal_id, data=data)
+    await terminal_service.audit_completed_lines(
+        user_id=user_id, terminal_id=terminal_id, data=data
+    )
     # run_in_background 仅作契约兼容：PTY 写入天然异步，不会等待命令结束。
     _ = run_in_background
     return ToolResult.ok({"bytes_written": written})
