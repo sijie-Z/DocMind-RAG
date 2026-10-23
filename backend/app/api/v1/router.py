@@ -103,6 +103,16 @@ def build_router(bundles: list[str]) -> APIRouter:
         if bundle not in selected:
             continue
         router.include_router(module_router, prefix=prefix, tags=tags)
+    # issue #499：旧契约路径 /agent/sessions/{id}/fork|lineage 的兼容别名。
+    # 规范路由仍是 /sessions（前端在用）；别名 include_in_schema=False，
+    # 响应带 Deprecation 头。不作为 ROUTER_SPECS 条目——它不是独立端点模块。
+    if "agent" in selected:
+        router.include_router(
+            sessions.compat_router,
+            prefix="/agent/sessions",
+            tags=["会话分叉（兼容别名）"],
+            include_in_schema=False,
+        )
     return router
 
 

@@ -1,63 +1,75 @@
-"""会话分叉 / seed / 谱系服务（issue #476）。
+"""会话分叉 / seed / 谱系服务（issue #476 / #499）。
 
 语义（与 issue 的边界规则逐条对应；也是本模块的判别性回归点）：
 
-1. **边界只能落在已结算位置**：复制前缀必须为空或以 ASSISTANT 消息结尾。
-   - ``message_id`` 指向 ASSISTANT：仅当它是该轮次的最后一条 assistant（到下一个
-     USER 之前不再出现 ASSISTANT）才合法——assistant 中间消息 409；
-   - ``message_id`` 指向 USER：边界在该消息"之前"（该 USER 不复制），前缀仍须为空
-     或以 ASSISTANT 结尾，否则 409（更早的开放轮次）；
-   - SYSTEM 消息不是合法边界（409）；不存在/不属于源会话的消息 404；
+1. **边界 = seq <= boundary（含边界消息，issue #499）**：
+   - 指定 ``message_id`` 时复制到该消息为止（USER/SYSTEM/ASSISTANT 均可）；
+     USER 边界不再"在该 USER 之前"分叉——首个 USER 边界复制 1 条，而不是
+     copied=0 的歧义；
+   - ASSISTANT 边界仍须是该轮次的最后一条 assistant（中间消息 409）；
+   - 边界消息 ``meta_data`` 带 ``tool_status=pending`` 或 ``status=pending``
+     → 400（未结算的流式/工具占位消息不能作为切点）；
+   - 指定消息不存在/不属于源会话 → 404。
    - 默认边界 = 最后一条已结算消息：跳过尾部未答复的 USER（不报错、不复制）。
 2. **活跃任务**：源会话存在非终态任务（PENDING/RUNNING/WAITING_*）时，消息级
    热分叉被禁止；必须显式 ``include_checkpoint`` 且存在可用（已结算）checkpoint，
-   否则 409。PAUSED（克隆产物）不算"运行中"，否则子会话永远无法再分叉。
+   否则 409。PAUSED（历史 fork 克隆产物）不算"运行中"。
 3. **checkpoint 克隆**：最近一个已结算 checkpoint 深拷为新 ``AgentTask``：新 id、
-   绑定 child session、状态 ``PAUSED``（可 resume）、``run.fork_origin`` 记录来源
-   （避免"伪历史"）；``run.pending_approval`` 或执行中工具（WAITING_TOOL）一律拒绝。
-   克隆任务使用全新 task id → replay 命名空间 `agent:replay:<new_id>` 为空，
-   母任务 replay 产物不会被复制。
+   绑定 child session、状态 ``PENDING``（issue #499 契约；可直接 resume）、
+   ``run.fork_origin`` 记录来源（避免"伪历史"）；``run.pending_approval`` 或
+   执行中工具（WAITING_TOOL）一律拒绝。克隆任务使用全新 task id → replay
+   命名空间 `agent:replay:<new_id>` 为空，母任务 replay 产物不会被复制。
 4. **上下文隔离**：消息复制为新 id + 子会话内重新编号的 seq；父会话行/消息不变；
-   子会话使用新的 ``session:<id>`` 记忆命名空间，默认不复制母记忆。
+   子会话使用新的 ``session:<id>`` 记忆命名空间，默认不复制母记忆；子会话
+   settings 写入 ``history_limit=200``（issue #499：fork 子会话加载 200 条历史）。
 5. **seed**：可选的种子文本写入子命名空间（reflective insight，尽力落 Redis），
    供子会话首轮召回。记忆写入失败不使 fork 失败（消息/谱系是硬保证）。
 6. **租户**：访问作用域复用 ``app.services.session_service``（org + user 口径，
    超管旁路/历史 NULL 组织一致）；越权/跨组织一律 404（不 403，避免枚举）。
-7. **幂等**：``Idempotency-Key`` 以 sha256 存进子会话 settings.fork；重复请求
-   返回同一子会话（``idempotent=True``），不再复制。选择 DB 存储而非 Redis：
-   幂等事实必须与子会话同事务落库，Redis 抖动不得造成重复分叉。**边界**：
-   check-then-insert 只保证顺序重试（客户端超时重试的主形态）；同一瞬间的并发
-   双请求可能各建一个子会话（JSON 字段无法建唯一索引），调用方应串行重试。
+7. **幂等（issue #499）**：body ``idempotency_key`` 优先、``Idempotency-Key`` 头
+   兜底。三层防线：
+   - DB 唯一约束 ``(user_id, idempotency_key)``（迁移 016）——并发双建的最终
+     事实，插入冲突方回滚后读回既有子会话；
+   - Redis ``fork:idem:{user_id}:{key}`` ``SET NX EX 86400``（值为子 session_id）
+     ——快路径去重；Redis 不可用时降级为 DB 约束（不阻断 fork）；
+   - 同一用户 + 同一 key 的重放返回同一子会话（含同一克隆任务 id），不重复复制。
+     首个请求尚未落库时，重复请求短暂轮询后 409 ``FORK_IN_PROGRESS``（可重试）。
 8. **配额**：单次 fork 复制消息上限 ``FORK_MAX_COPIED_MESSAGES``（2000），
-   超限 409 并在 detail 给出 limit/count。
+   超限 400 ``VALIDATION_ERROR``（detail 含 messages/limit）。
 
 变异点（评审/回归重点）：
-- 把 USER 边界当作"包含该消息" → 前缀内容与 fork_point 断言红；
+- 把 USER 边界当作"不包含该消息" → USER 边界 copied/seq 断言红；
 - 删掉 assistant 中间消息检查 → 中间消息用例红；
 - 默认边界不跳过尾部 USER → 默认用例红；
 - 复制复用源消息 id / seq 不重排 → 唯一约束冲突/断言红；
 - seed 写进父命名空间或复制父记忆 → 隔离用例红；
 - 访问校验漏掉 org/user → 跨组织用例红（应为 404）；
-- 克隆复用源 task id / 不改 session_id / 浅拷贝 → 克隆用例红。
+- 克隆复用源 task id / 不改 session_id / 浅拷贝 → 克隆用例红；
+- 去掉 DB 唯一约束 → 并发同 key 用例建出两个子会话（必红）；
+- 克隆任务状态写成 PAUSED → PENDING 契约用例红。
 """
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from app.agent import checkpoint
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.core.log_safety import log_safe
+from app.core.redis import redis_client
 from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.agent_task import AgentTask, TaskStatus
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
@@ -73,6 +85,16 @@ logger = logging.getLogger(__name__)
 FORK_MAX_COPIED_MESSAGES = 2000
 # seed 文本上限（防止把超大文本灌进记忆/设置）。
 MAX_SEED_CHARS = 4000
+# fork 子会话的历史加载上限（issue #499：普通会话默认 20，fork 子会话 200）。
+FORK_CHILD_HISTORY_LIMIT = 200
+
+# fork 幂等（issue #499）：Redis 快路径 + DB 唯一约束兜底。
+IDEMPOTENCY_REDIS_PREFIX = "fork:idem:"
+IDEMPOTENCY_TTL_SECONDS = 86_400
+# 首个同 key 请求尚未落库时，重复请求的最长等待（轮询间隔见下）。
+# 超时按 409 FORK_IN_PROGRESS 返回（可重试），绝不并发建第二个子会话。
+IDEMPOTENCY_WAIT_SECONDS = 2.0
+IDEMPOTENCY_POLL_INTERVAL_SECONDS = 0.05
 
 DEFAULT_FORK_REASON = "user_fork"
 _TITLE_MAX = 200
@@ -104,16 +126,16 @@ _UNSETTLED_TASK_STATUSES = (
 
 
 class ForkBoundaryInvalidError(ConflictError):
-    """边界未落在已结算位置（assistant 中间消息 / 开放轮次 / SYSTEM）。"""
+    """ASSISTANT 中间消息不能作为边界（轮次终态校验失败）。"""
 
     error_code = "FORK_BOUNDARY_INVALID"
-    message = "分叉边界非法：只能从已结算轮次处分叉"
+    message = "分叉边界非法：ASSISTANT 边界必须是该轮次的最终消息"
 
 
-class ForkQuotaExceededError(ConflictError):
-    """复制消息数超过上限。"""
+class ForkQuotaExceededError(ValidationError):
+    """复制消息数超过上限（issue #499：400 VALIDATION_ERROR，detail 带 messages/limit）。"""
 
-    error_code = "FORK_QUOTA_EXCEEDED"
+    error_code = "VALIDATION_ERROR"
     message = "分叉复制的消息数超出上限"
 
 
@@ -129,6 +151,13 @@ class ForkCheckpointUnavailableError(ConflictError):
 
     error_code = "FORK_CHECKPOINT_UNAVAILABLE"
     message = "没有可用的已结算 checkpoint（不存在、待审批或执行中工具）"
+
+
+class ForkInProgressError(ConflictError):
+    """同幂等键的首个请求尚未落库（短暂等待后仍不可见）。"""
+
+    error_code = "FORK_IN_PROGRESS"
+    message = "相同幂等键的分叉请求正在处理中，请稍后重试"
 
 
 @dataclass
@@ -181,38 +210,46 @@ async def _load_messages(db: AsyncSession, session_id: str) -> list[ChatMessage]
     return list(rows.scalars().all())
 
 
-def _settled_tail(prefix: list[ChatMessage]) -> ChatMessage | None:
-    """前缀中最后一条非 SYSTEM 消息（SYSTEM 是带外数据，不构成开放轮次）。"""
-    for msg in reversed(prefix):
-        if msg.message_type != MessageType.SYSTEM:
-            return msg
-    return None
+def _message_meta(msg: ChatMessage) -> dict[str, Any]:
+    """消息 ``meta_data`` 的安全字典视图（非 dict/缺失一律空字典）。"""
+    meta = msg.meta_data
+    return meta if isinstance(meta, dict) else {}
+
+
+def _ensure_boundary_settled(msg: ChatMessage) -> None:
+    """边界消息不得是未结算的占位消息（issue #499：pending → 400）。
+
+    约定：流式/工具执行中的消息在 meta_data 里标记 ``tool_status=pending`` 或
+    ``status=pending``；这类切点会复制出"半条轮次"，必须 400 拒绝。
+    """
+    meta = _message_meta(msg)
+    if meta.get("tool_status") == "pending" or meta.get("status") == "pending":
+        raise ValidationError(
+            "边界消息仍在处理中（pending），不能作为分叉边界",
+            detail={
+                "message_id": msg.id,
+                "tool_status": meta.get("tool_status"),
+                "status": meta.get("status"),
+            },
+        )
 
 
 def _resolve_prefix(
     messages: list[ChatMessage], message_id: str | None
 ) -> tuple[list[ChatMessage], ChatMessage | None]:
-    """把边界解析为"可复制的已结算前缀"。
+    """把边界解析为"可复制的消息前缀"（issue #499：``seq <= boundary`` 含边界）。
 
     Returns:
-        (prefix, fork_point) —— fork_point 是前缀里最后一条**源会话**消息
-        （空前缀为 None）；USER 边界本身不进前缀（"在该 USER 之前分叉"）。
+        (prefix, fork_point) —— prefix 含边界消息本身；空前缀时 fork_point 为 None。
+        USER/SYSTEM 边界与 ASSISTANT 边界同等对待（含边界），不再有"在该 USER
+        之前分叉"的歧义。ASSISTANT 边界仍须是该轮次最后一条 assistant。
     """
     if message_id:
         target_idx = next((i for i, m in enumerate(messages) if m.id == message_id), None)
         if target_idx is None:
             raise NotFoundError("边界消息不存在或不属于该会话")
         target = messages[target_idx]
-
-        if target.message_type == MessageType.USER:
-            prefix = messages[:target_idx]
-            tail = _settled_tail(prefix)
-            if tail is not None and tail.message_type != MessageType.ASSISTANT:
-                raise ForkBoundaryInvalidError(
-                    "该 USER 消息之前的前缀以未答复的消息结尾，不能作为分叉边界",
-                    detail={"message_id": message_id},
-                )
-            return prefix, (prefix[-1] if prefix else None)
+        _ensure_boundary_settled(target)
 
         if target.message_type == MessageType.ASSISTANT:
             # 同一轮内 assistant 后面还有 assistant = 中间消息，不是轮次终态。
@@ -224,11 +261,7 @@ def _resolve_prefix(
                         detail={"message_id": message_id},
                     )
                 cursor += 1
-            return messages[: target_idx + 1], target
-
-        raise ForkBoundaryInvalidError(
-            "SYSTEM 消息不能作为分叉边界", detail={"message_id": message_id}
-        )
+        return messages[: target_idx + 1], target
 
     # 默认边界 = 最后一条已结算消息（跳过尾部未答复的 USER/SYSTEM 尾巴）。
     last_assistant_idx = None
@@ -365,29 +398,125 @@ def _idempotency_hash(key: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
+def _idempotency_redis_key(user_id: int, key: str) -> str:
+    return f"{IDEMPOTENCY_REDIS_PREFIX}{user_id}:{key}"
+
+
 async def _find_idempotent_child(
     db: AsyncSession,
     *,
-    source_id: str,
     user_id: int,
     scope: SessionAccessScope,
-    key_hash: str,
+    key: str,
 ) -> ChatSession | None:
-    """按 (source, user, scope) 找同一幂等键创建过的子会话（DB 持久事实）。"""
+    """按 ``(user_id, idempotency_key)`` 找已落库的子会话（DB 唯一事实）。
+
+    唯一约束是用户全局的（与迁移 016 一致），不再按源会话过滤：同一用户复用
+    同一幂等键必须拿到同一个结果。组织可见范围仍参与过滤——幂等键不得成为
+    跨组织读取的旁路；若键属于其他组织，调用方按"未找到"处理（最终由唯一
+    约束拒绝重复创建）。
+    """
     conditions = [
-        ChatSession.parent_session_id == source_id,
         ChatSession.user_id == user_id,
+        ChatSession.idempotency_key == key,
         *session_access_org_conditions(scope),
     ]
     rows = await db.execute(
-        select(ChatSession).where(*conditions).order_by(ChatSession.created_at.asc())
+        select(ChatSession)
+        .where(*conditions)
+        .order_by(ChatSession.created_at.asc(), ChatSession.id.asc())
+        .limit(1)
     )
-    for child in rows.scalars().all():
-        settings_json = child.settings if isinstance(child.settings, dict) else {}
-        fork_meta = settings_json.get("fork")
-        if isinstance(fork_meta, dict) and fork_meta.get("idempotency_key") == key_hash:
-            return child
-    return None
+    return rows.scalars().first()
+
+
+def _replay_result(existing: ChatSession) -> ForkResult:
+    """把既有子会话投影为幂等重放结果（字段全部来自落库事实）。"""
+    meta = _fork_meta(existing)
+    return ForkResult(
+        session=existing,
+        copied_message_count=int(meta.get("copied_message_count") or 0),
+        boundary_seq=int(meta.get("boundary_seq") or 0),
+        fork_point_message_id=existing.fork_point_message_id,
+        checkpoint_task_id=meta.get("checkpoint_task_id"),
+        is_seeded=bool(meta.get("is_seeded")),
+        idempotent=True,
+    )
+
+
+async def _claim_idempotency(user_id: int, key: str, child_id: str) -> tuple[bool, str | None]:
+    """Redis ``SET NX EX`` 抢占幂等键。
+
+    Returns:
+        (True, None)：本请求获得创建权（或 Redis 不可用，降级为 DB 唯一约束兜底）；
+        (False, holder)：已有请求持有该键（holder = 其子会话 id，可能尚未落库）。
+    """
+    try:
+        if not redis_client:
+            return True, None
+    except Exception:  # noqa: BLE001 — 代理层的任何异常都按"Redis 不可用"降级
+        return True, None
+    try:
+        redis_key = _idempotency_redis_key(user_id, key)
+        claimed = await redis_client.set(redis_key, child_id, nx=True, ex=IDEMPOTENCY_TTL_SECONDS)
+        if claimed:
+            return True, None
+        holder = await redis_client.get(redis_key)
+        if isinstance(holder, bytes):
+            holder = holder.decode("utf-8", errors="replace")
+        return False, holder if isinstance(holder, str) and holder else None
+    except Exception as e:  # noqa: BLE001 — Redis 抖动不得造成重复分叉（DB 唯一约束兜底）
+        logger.warning("fork 幂等 Redis 抢占失败，降级为 DB 唯一约束: %s", log_safe(e))
+        return True, None
+
+
+async def _remember_idempotency(user_id: int, key: str, child_id: str) -> None:
+    """把幂等键指向最终子会话（Redis 不可用时静默降级，DB 仍是事实源）。"""
+    try:
+        if not redis_client:
+            return
+        await redis_client.set(
+            _idempotency_redis_key(user_id, key),
+            child_id,
+            ex=IDEMPOTENCY_TTL_SECONDS,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("fork 幂等键回写 Redis 失败（DB 事实已落库）: %s", log_safe(e))
+
+
+async def _release_idempotency_claim(user_id: int, key: str, child_id: str) -> None:
+    """创建失败时释放本请求的 Redis 抢占（只删自己的值，绝不误删他人）。"""
+    try:
+        if not redis_client:
+            return
+        redis_key = _idempotency_redis_key(user_id, key)
+        current = await redis_client.get(redis_key)
+        if isinstance(current, bytes):
+            current = current.decode("utf-8", errors="replace")
+        if current == child_id:
+            await redis_client.delete(redis_key)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("fork 幂等键释放失败（TTL 会自清）: %s", log_safe(e))
+
+
+async def _wait_for_idempotent_child(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    scope: SessionAccessScope,
+    key: str,
+) -> ChatSession | None:
+    """短时轮询：等首个同 key 请求提交后读回其子会话（每轮开新事务看最新快照）。"""
+    deadline = time.monotonic() + IDEMPOTENCY_WAIT_SECONDS
+    while True:
+        # 结束上一轮只读事务（SQLite/MySQL 的可重复读快照必须换事务才能看到新提交）。
+        await db.rollback()
+        existing = await _find_idempotent_child(db, user_id=user_id, scope=scope, key=key)
+        if existing is not None:
+            return existing
+        if time.monotonic() >= deadline:
+            return None
+        await asyncio.sleep(IDEMPOTENCY_POLL_INTERVAL_SECONDS)
 
 
 def _fork_meta(child: ChatSession | dict[str, Any]) -> dict[str, Any]:
@@ -452,47 +581,65 @@ async def fork_session(
     reason: str | None = None,
     idempotency_key: str | None = None,
 ) -> ForkResult:
-    """从 source 会话的已结算边界分叉出子会话。
+    """从 source 会话的 ``seq <= boundary`` 前缀分叉出子会话（含边界消息）。
 
     Raises:
         NotFoundError: 源会话/边界消息不存在、他人或跨组织（统一 404）。
-        ForkBoundaryInvalidError / ForkQuotaExceededError /
-        ForkCheckpointRequiredError / ForkCheckpointUnavailableError: 409 语义。
-        ValidationError: seed 超过长度上限（400）。
+        ValidationError: seed 超长 / 边界消息 pending / 复制数超配额（400）。
+        ForkBoundaryInvalidError / ForkCheckpointRequiredError /
+        ForkCheckpointUnavailableError / ForkInProgressError: 409 语义。
     """
     scope = _resolve_scope(scope, organization_id)
     if seed is not None and len(seed) > MAX_SEED_CHARS:
         raise ValidationError(f"种子内容过长（上限 {MAX_SEED_CHARS} 字符）")
+    idem_key = idempotency_key.strip() if isinstance(idempotency_key, str) else None
+    idem_key = idem_key or None
+    if idem_key is not None and len(idem_key) > 128:
+        raise ValidationError("幂等键过长（上限 128 字符）")
 
     source = await _load_source(db, source_id, user_id, scope)
 
-    key_hash = _idempotency_hash(idempotency_key) if idempotency_key else None
-    if key_hash:
-        existing = await _find_idempotent_child(
-            db, source_id=source.id, user_id=user_id, scope=scope, key_hash=key_hash
-        )
+    key_hash = _idempotency_hash(idem_key) if idem_key else None
+    if idem_key:
+        # 顺序重试的快路径：DB 是幂等事实源（Redis 只是加速/并发闸门）。
+        existing = await _find_idempotent_child(db, user_id=user_id, scope=scope, key=idem_key)
         if existing is not None:
-            meta = _fork_meta(existing)
-            return ForkResult(
-                session=existing,
-                copied_message_count=int(meta.get("copied_message_count") or 0),
-                boundary_seq=int(meta.get("boundary_seq") or 0),
-                fork_point_message_id=existing.fork_point_message_id,
-                checkpoint_task_id=meta.get("checkpoint_task_id"),
-                is_seeded=bool(meta.get("is_seeded")),
-                idempotent=True,
+            return _replay_result(existing)
+
+    child_id = str(uuid.uuid4())
+    if idem_key:
+        claimed, holder = await _claim_idempotency(user_id, idem_key, child_id)
+        if not claimed:
+            # 首个同 key 请求尚未落库：短暂轮询后返回同一结果，超时 409（可重试）。
+            existing = await _wait_for_idempotent_child(
+                db, user_id=user_id, scope=scope, key=idem_key
+            )
+            if existing is not None:
+                await _remember_idempotency(user_id, idem_key, existing.id)
+                return _replay_result(existing)
+            raise ForkInProgressError(
+                "相同幂等键的分叉请求正在处理中，请稍后重试",
+                detail={
+                    "idempotency_key": idem_key,
+                    "holder_session_id": holder,
+                    "retry_after_seconds": int(IDEMPOTENCY_WAIT_SECONDS) or 1,
+                },
             )
 
     messages = await _load_messages(db, source.id)
     prefix, fork_point = _resolve_prefix(messages, message_id)
     if len(prefix) > FORK_MAX_COPIED_MESSAGES:
+        if idem_key:
+            await _release_idempotency_claim(user_id, idem_key, child_id)
         raise ForkQuotaExceededError(
             f"分叉复制的消息数超出上限（{FORK_MAX_COPIED_MESSAGES} 条）",
-            detail={"limit": FORK_MAX_COPIED_MESSAGES, "count": len(prefix)},
+            detail={"messages": len(prefix), "limit": FORK_MAX_COPIED_MESSAGES},
         )
 
     active_tasks = await _load_active_tasks(db, source, user_id)
     if active_tasks and not include_checkpoint:
+        if idem_key:
+            await _release_idempotency_claim(user_id, idem_key, child_id)
         raise ForkCheckpointRequiredError(
             "源会话有运行中的任务，只能从最后一个已提交 checkpoint 分叉"
             "（请传 include_checkpoint=true）",
@@ -504,12 +651,13 @@ async def fork_session(
     if include_checkpoint:
         picked = await _latest_settled_checkpoint(db, source, user_id)
         if picked is None:
+            if idem_key:
+                await _release_idempotency_claim(user_id, idem_key, child_id)
             raise ForkCheckpointUnavailableError(
                 "没有可用的已结算 checkpoint（不存在、损坏、待审批或执行中工具）"
             )
         checkpoint_task, checkpoint_snapshot = picked
 
-    child_id = str(uuid.uuid4())
     fork_point_id = fork_point.id if fork_point is not None else None
     child_org = source.organization_id if source.organization_id is not None else organization_id
     resolved_title = (
@@ -522,14 +670,16 @@ async def fork_session(
     is_seeded = seed_requested and child_org is not None
     cloned_task_id = uuid.uuid4().hex[:12] if checkpoint_task is not None else None
     # 响应字段一律用局部变量（提交后不回读 ORM 属性，避免过期实例触发
-    # 同步懒加载 → MissingGreenlet）。
-    boundary_seq = prefix[-1].seq if prefix else 0
+    # 同步懒加载 → MissingGreenlet）。issue #499：boundary_seq 即边界消息 seq。
+    boundary_seq = fork_point.seq if fork_point is not None else 0
     copied_count = len(prefix)
 
     parent_settings = source.settings if isinstance(source.settings, dict) else {}
     child_settings = copy.deepcopy(parent_settings)
     if not isinstance(child_settings, dict):
         child_settings = {}
+    # issue #499：fork 子会话加载 200 条历史（普通会话默认 20）。
+    child_settings["history_limit"] = FORK_CHILD_HISTORY_LIMIT
     now = datetime.utcnow()
     child_settings["fork"] = {
         "parent_session_id": source.id,
@@ -550,6 +700,7 @@ async def fork_session(
         "forked_at": now.isoformat() + "Z",
     }
     if key_hash:
+        # 兼容/审计：settings 里保留 sha256（不落明文幂等键）。
         child_settings["fork"]["idempotency_key"] = key_hash
 
     # seed 在**提交前**写入（记忆写入不依赖 DB 事务）：
@@ -584,6 +735,9 @@ async def fork_session(
         root_session_id=source.root_session_id or source.id,
         fork_point_message_id=fork_point_id,
         fork_reason=resolved_reason,
+        # issue #499：复制消息的 seq 重排为 1..N，计数器同步推进。
+        next_message_seq=copied_count,
+        idempotency_key=idem_key,
     )
 
     try:
@@ -613,7 +767,8 @@ async def fork_session(
                     user_id=user_id,
                     organization_id=child_org,
                     session_id=child_id,
-                    status=TaskStatus.PAUSED,
+                    # issue #499 契约：克隆任务是 PENDING（可直接 load_for_resume 续跑）。
+                    status=TaskStatus.PENDING,
                     query=checkpoint_task.query,
                     plan_id=checkpoint_task.plan_id,
                     current_step_id=checkpoint_task.current_step_id,
@@ -634,9 +789,31 @@ async def fork_session(
                 )
             )
         await db.commit()
+    except IntegrityError:
+        # 并发双建的最终防线：唯一约束 (user_id, idempotency_key) 让后到者失败。
+        # 回滚后读回先到者并按其重放——绝不返回 500，也绝不建出第二个子会话。
+        await db.rollback()
+        existing = (
+            await _find_idempotent_child(db, user_id=user_id, scope=scope, key=idem_key)
+            if idem_key
+            else None
+        )
+        if existing is None:
+            if idem_key:
+                await _release_idempotency_claim(user_id, idem_key, child_id)
+            raise
+        if idem_key:
+            await _remember_idempotency(user_id, idem_key, existing.id)
+        return _replay_result(existing)
     except Exception:
         await db.rollback()
+        if idem_key:
+            await _release_idempotency_claim(user_id, idem_key, child_id)
         raise
+
+    if idem_key:
+        # Redis 抢占时写入的 child_id 已是最终事实；Redis 降级时这里补记（尽力）。
+        await _remember_idempotency(user_id, idem_key, child_id)
 
     return ForkResult(
         session=child,
