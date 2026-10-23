@@ -11,11 +11,19 @@ Revises: 012_session_fork
 只有 payload_hash）——异步 outbox 必须在请求结束后还原 payload，否则 poller
 无法渲染 prompt，见 ADR-005「与 issue 的偏离」。
 
+另：``webhook_deliveries.payload`` / ``chat_messages.content`` /
+``agent_tasks.query`` 在 MySQL 上为 MEDIUMTEXT（16 MiB）。webhook body 上限
+默认 1 MiB，而 MySQL TEXT 只有 64 KiB——否则合法签名请求会在落库时 DataError
+（对抗评审 blocker B1/B2）。SQLite 无长度限制，保持 TEXT。
+
 downgrade 有损：两表与其行全部删除（投递历史不可恢复）；chat_sessions 只删
-来源列，会话与消息本身保留（webhook 会话退化为普通会话）。
+来源列，会话与消息本身保留（webhook 会话退化为普通会话）；MEDIUMTEXT 列回退
+为 TEXT 前，超 65535 字节的行按 16000 字符截断（utf8mb4 下最坏 64000 字节），
+超长 webhook prompt 丢失尾部。
 """
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import mysql
 
 from alembic import op
 
@@ -30,6 +38,11 @@ _SESSION_MODE_ENUM = sa.Enum("NEW", "REUSE", name="webhooksessionmode")
 _DELIVERY_STATUS_ENUM = sa.Enum(
     "RECEIVED", "PROCESSING", "SUCCEEDED", "FAILED", name="webhookdeliverystatus"
 )
+
+# webhook body 上限默认 1 MiB，MySQL TEXT 只有 64 KiB（评审 blocker B1/B2）。
+# 三处会承接 1 MiB payload/渲染 prompt 的列在 MySQL 上用 MEDIUMTEXT（16 MiB）；
+# 模型侧同形（Text().with_variant(MEDIUMTEXT, "mysql")），SQLite 保持 TEXT。
+_PAYLOAD_TEXT = sa.Text().with_variant(mysql.MEDIUMTEXT(), "mysql")
 
 
 def _dialect_name() -> str:
@@ -102,7 +115,9 @@ def upgrade() -> None:
         sa.Column("idempotency_key", sa.String(length=128), nullable=False),
         sa.Column("status", _DELIVERY_STATUS_ENUM, nullable=False, comment="投递状态"),
         sa.Column("payload_hash", sa.String(length=64), nullable=False, comment="原始 body sha256"),
-        sa.Column("payload", sa.Text(), nullable=False, comment="原始 JSON 文本（poller 渲染用）"),
+        sa.Column(
+            "payload", _PAYLOAD_TEXT, nullable=False, comment="原始 JSON 文本（poller 渲染用）"
+        ),
         sa.Column("session_id", sa.String(length=36), nullable=True, comment="处理出的会话ID"),
         sa.Column("error", sa.Text(), nullable=True, comment="失败摘要（脱敏、限长）"),
         sa.Column("attempts", sa.Integer(), nullable=False, comment="已开始的尝试次数"),
@@ -153,6 +168,25 @@ def upgrade() -> None:
         ["webhook_rule_id", "webhook_session_key"],
     )
 
+    # 评审 blocker B1/B2：1 MiB 级渲染 prompt 会写进 chat_messages.content 与
+    # agent_tasks.query（checkpoint 快照载体），两列在 MySQL 上从 TEXT(64 KiB)
+    # 扩到 MEDIUMTEXT(16 MiB)。SQLite 无长度限制，保持 TEXT（与模型 create_all 同形）。
+    if _dialect_name() == "mysql":
+        op.alter_column(
+            "chat_messages",
+            "content",
+            existing_type=sa.Text(),
+            type_=mysql.MEDIUMTEXT(),
+            existing_nullable=False,
+        )
+        op.alter_column(
+            "agent_tasks",
+            "query",
+            existing_type=sa.Text(),
+            type_=mysql.MEDIUMTEXT(),
+            existing_nullable=False,
+        )
+
 
 def downgrade() -> None:
     op.drop_index("ix_chat_sessions_webhook_rule_session_key", table_name="chat_sessions")
@@ -178,3 +212,35 @@ def downgrade() -> None:
     # （ix_webhook_rules_org_id 服务于 organizations 外键），先删依赖方 deliveries。
     op.drop_table("webhook_deliveries")
     op.drop_table("webhook_rules")
+
+    # 有损回退：MEDIUMTEXT → TEXT 前先截断超限行（16000 字符；utf8mb4 最坏
+    # 4 字节/字符 = 64000 字节 < 65535）。webhook 生成的超长 prompt 会因此
+    # 丢失尾部；历史普通消息通常远小于该阈值。
+    if _dialect_name() == "mysql":
+        bind = op.get_bind()
+        bind.execute(
+            sa.text(
+                "UPDATE chat_messages SET content = LEFT(content, 16000) "
+                "WHERE OCTET_LENGTH(content) > 65535"
+            )
+        )
+        bind.execute(
+            sa.text(
+                "UPDATE agent_tasks SET query = LEFT(query, 16000) "
+                "WHERE OCTET_LENGTH(query) > 65535"
+            )
+        )
+        op.alter_column(
+            "chat_messages",
+            "content",
+            existing_type=mysql.MEDIUMTEXT(),
+            type_=sa.Text(),
+            existing_nullable=False,
+        )
+        op.alter_column(
+            "agent_tasks",
+            "query",
+            existing_type=mysql.MEDIUMTEXT(),
+            type_=sa.Text(),
+            existing_nullable=False,
+        )

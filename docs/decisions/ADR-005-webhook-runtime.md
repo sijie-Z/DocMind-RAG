@@ -77,6 +77,13 @@
 
 ## 关键实现细节
 
+- **1 MiB 入站上限 vs MySQL TEXT 64 KiB**（对抗评审 blocker B1/B2）：webhook body
+  默认允许 1 MiB，但渲染后的 prompt（含 payload）要写入
+  `webhook_deliveries.payload`、`chat_messages.content` 与 `agent_tasks.query`
+  （checkpoint）。这三列在 MySQL 上使用 **MEDIUMTEXT（16 MiB）**；SQLite 无长度
+  限制，保持 TEXT。迁移 013 的 downgrade 在把两处既有列收回 TEXT 前，按 16000
+  字符截断超限行（utf8mb4 最坏 4 字节/字符 = 64000 字节 < 65535），有损且已在
+  迁移注释中标注。
 - 签名密钥解码：`whsec_` 前缀去掉后 base64 严格解码；单个损坏 secret 跳过，
   继续尝试其他（轮换期）secret。
 - `Content-Length` 超限时**直接 413，不调用 `request.stream()`**（API 测试用 ASGI
@@ -152,3 +159,6 @@ requests.post(
 - **审计为 best-effort**：DB 抖动时审计行可能缺失，投递状态机不受影响。
 - **LLM 失败不落半成品**：`error` 事件或异常都按整次失败处理，不写用户/助手消息；
   成功路径才 `save_session_interaction`。
+- **存储上限**：payload/prompt 列是 MEDIUMTEXT（16 MiB）。若把
+  `WEBHOOK_MAX_BODY_BYTES` 配到 16 MiB 以上，落库会再次超出列宽（DataError）；
+  需要更大 body 时必须同步升级列类型（LONGTEXT）。

@@ -17,10 +17,16 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+
+# Webhook 投递的渲染 prompt（含最多 1 MiB payload）会作为用户消息落库；MySQL
+# TEXT 仅 64 KiB，会 DataError（评审 blocker B2）。MEDIUMTEXT = 16 MiB；
+# SQLite 无长度限制，保持 TEXT。
+_MESSAGE_TEXT = Text().with_variant(mysql.MEDIUMTEXT(), "mysql")
 
 
 class ChatSessionStatus(enum.Enum):
@@ -143,7 +149,7 @@ class ChatMessage(Base):
     seq: Mapped[int] = mapped_column(Integer, nullable=False, comment="会话内单调序号（从1开始）")
 
     # 消息内容
-    content: Mapped[str] = mapped_column(Text, comment="消息内容")
+    content: Mapped[str] = mapped_column(_MESSAGE_TEXT, comment="消息内容")
     message_type: Mapped[MessageType] = mapped_column(Enum(MessageType), comment="消息类型")
 
     # 元数据

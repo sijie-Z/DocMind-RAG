@@ -34,10 +34,16 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+
+# MySQL 的 TEXT 只有 64 KiB，而 webhook body 上限默认 1 MiB（WEBHOOK_MAX_BODY_BYTES）。
+# payload 必须用 MEDIUMTEXT（16 MiB），否则合法签名、未超限的请求会在落库时
+# DataError 500（评审 blocker B1）。SQLite 无长度限制，保持 TEXT。
+_PAYLOAD_TEXT = Text().with_variant(mysql.MEDIUMTEXT(), "mysql")
 
 
 def _uuid_str() -> str:
@@ -142,7 +148,7 @@ class WebhookDelivery(Base):
     )
     payload_hash: Mapped[str] = mapped_column(String(64), comment="原始 body 的 sha256")
     # issue §5.1 未列该列；没有它 outbox poller 无法在请求结束后还原 payload。
-    payload: Mapped[str] = mapped_column(Text, comment="原始 JSON 文本（poller 渲染用）")
+    payload: Mapped[str] = mapped_column(_PAYLOAD_TEXT, comment="原始 JSON 文本（poller 渲染用）")
     session_id: Mapped[str | None] = mapped_column(String(36), comment="处理出的会话ID")
     error: Mapped[str | None] = mapped_column(Text, comment="失败摘要（脱敏、限长）")
     attempts: Mapped[int] = mapped_column(Integer, default=0, comment="已开始的尝试次数")

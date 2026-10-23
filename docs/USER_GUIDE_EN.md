@@ -656,6 +656,7 @@ There are **25 endpoint modules** (`docs/facts.json` → `endpoint_modules`, der
 | mcp | `/api/v1/mcp` | MCP server status (admin read-only) |
 | scheduled_tasks | `/api/v1/scheduled-tasks` | scheduled task CRUD / pause / manual run |
 | sessions | `/api/v1/sessions` | session fork / seed / lineage (issue #476) |
+| webhooks | `/api/v1/webhooks` | inbound webhook rules, HMAC-verified delivery, outbox processing (issue #478) |
 | demo | `/api/v1/demo` | demo data |
 | user_settings | `/api/v1/user` | UI preferences |
 
