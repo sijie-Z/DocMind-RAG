@@ -221,6 +221,22 @@ class TestVerifySignature:
         headers = {k.upper(): v for k, v in _headers(secret, body).items()}
         verify_signature(body, headers, [secret])
 
+    def test_signature_uses_constant_time_compare(self):
+        """常数时间比较无法从行为上观测（``==`` 与 compare_digest 同结果）。
+
+        用源码守卫钉住 issue §3 的显式要求；变异试验「把 compare_digest 改成
+        ==」会让本用例变红。
+        """
+        from pathlib import Path
+        import re
+
+        import app.services.webhook_service as service_module
+
+        source = Path(service_module.__file__).read_text(encoding="utf-8")
+        assert re.search(r"hmac\.compare_digest\(\s*expected\s*,\s*candidate\s*\)", source), (
+            "签名比较必须使用 hmac.compare_digest（常数时间）；文档字符串提及不算"
+        )
+
 
 # ── 模板校验与渲染（注入防护）────────────────────────────────────────
 
