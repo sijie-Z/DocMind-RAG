@@ -243,7 +243,11 @@ def _resolve_request_line(body: CommandExecuteRequest) -> str:
                 detail={"command": resolved.name, "fields": unknown},
             )
     try:
-        return compose_line(command, body.args, arg_names=arg_names)
+        return compose_line(
+            command,
+            body.args,
+            arg_specs=resolved.args if resolved is not None else (),
+        )
     except CommandSyntaxError as exc:
         raise ValidationError(
             exc.message,

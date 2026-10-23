@@ -62,13 +62,16 @@ def compose_line(
     command: str,
     args: Sequence[Any] | Mapping[str, Any] | None = None,
     *,
-    arg_names: Sequence[str] = (),
+    arg_specs: Sequence[Any] = (),
 ) -> str:
     """兼容层：把 ``{"command","args"}`` 拼回规范 ``/<name> <args...>`` 一行。
 
     - ``command`` 可带可不带前导 ``/``；带参数文本（如 ``export json``）时原样保留；
-    - ``args`` 为 list/tuple → 按顺序拼接；为 mapping → 先按命令声明的参数
-      顺序（``arg_names``），再按映射自身顺序补齐未声明键；
+    - ``args`` 为 list/tuple → 按顺序拼接；为 mapping 时按命令声明的参数顺序
+      （``arg_specs``）**连续前缀**绑定：提供后面的参数而缺少前面的位置参数时，
+      若前面的参数有默认值则用默认值补齐，否则显式报 ``missing_argument``——
+      绝不把后面的值错绑到前面的位置（评审 m2）；未知键显式报错；
+    - ``arg_specs`` 为空时退回映射自身顺序（仅用于命令未解析的兼容路径）；
     - ``None`` 值跳过（与"未提供"同义）。
     """
     name = (command or "").strip().lstrip("/").strip()
@@ -78,9 +81,30 @@ def compose_line(
         )
     tokens: list[str] = []
     if isinstance(args, Mapping):
-        ordered = [key for key in arg_names if key in args]
-        ordered += [key for key in args if key not in ordered]
-        tokens = [str(args[key]) for key in ordered if args[key] is not None]
+        if arg_specs:
+            positions = {spec.name: index for index, spec in enumerate(arg_specs)}
+            unknown = [key for key in args if key not in positions]
+            if unknown:
+                raise CommandSyntaxError(
+                    ERROR_UNEXPECTED_ARGUMENT,
+                    f"未知参数：{', '.join(unknown)}",
+                    field_name=unknown[0],
+                )
+            provided = [positions[key] for key in args if args[key] is not None]
+            if provided:
+                for spec in arg_specs[: max(provided) + 1]:
+                    if spec.name in args and args[spec.name] is not None:
+                        tokens.append(str(args[spec.name]))
+                    elif spec.default is not None:
+                        tokens.append(str(spec.default))
+                    else:
+                        raise CommandSyntaxError(
+                            ERROR_MISSING_ARGUMENT,
+                            f"缺少前置位置参数：{spec.name}（位置参数不能跳过）",
+                            field_name=spec.name,
+                        )
+        else:
+            tokens = [str(args[key]) for key in args if args[key] is not None]
     elif isinstance(args, (list, tuple)):
         tokens = [str(value) for value in args if value is not None]
     elif args is not None:

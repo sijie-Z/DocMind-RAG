@@ -217,11 +217,15 @@ async def execute(
     # ── 幂等：先抢占，重复请求直接返回同一执行信封 ─────────────────────────
     idem_key = idempotency_redis_key(agent.user_id, idempotency_key)
     idem_pending = False
+    idem_pending_value = ""
     if idem_key:
+        idem_pending_value = json.dumps(
+            {"state": _IDEM_PENDING, "execution_id": execution.execution_id}
+        )
         try:
             claimed = await client.set(
                 idem_key,
-                json.dumps({"state": _IDEM_PENDING, "execution_id": execution.execution_id}),
+                idem_pending_value,
                 nx=True,
                 ex=idempotency_pending_ttl(),
             )
@@ -379,10 +383,11 @@ async def execute(
                 )
         return execution
     finally:
-        # 失败 / 取消：清掉 pending 键，允许同一幂等键重试。
+        # 失败 / 取消：只清掉**自己写入**的 pending 占位（compare-and-del）。
+        # 占位已过期并被新请求接管时，旧请求不得误删新占位（评审边界）。
         if idem_key and idem_pending:
             try:
-                await client.delete(idem_key)
+                await client.eval(_RELEASE_LOCK_LUA, 1, idem_key, idem_pending_value)
             except Exception as exc:  # noqa: BLE001 — 清理失败由 TTL 兜底
                 logger.warning("命令幂等 pending 键清理失败（TTL 兜底）：%s", type(exc).__name__)
 
