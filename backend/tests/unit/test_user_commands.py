@@ -35,9 +35,11 @@ from app.agent.commands import (
     Command,
     CommandArg,
     CommandContext,
+    CommandFailure,
     CommandRegistrationError,
     CommandRegistry,
     CommandResult,
+    CommandSyntaxError,
     DuplicateCommandError,
     agent_scope_for_session,
     execute,
@@ -49,6 +51,7 @@ from app.agent.commands.config import (
     apply_commands_config,
     load_commands_config,
 )
+from app.agent.commands.parser import compose_line
 from app.core.config import settings
 
 
@@ -327,6 +330,27 @@ async def test_execute_empty_command_name():
     assert result.error_code == "missing_command"
 
 
+def test_compose_line_mapping_requires_contiguous_prefix():
+    """评审 m2：映射 args 提供后面的参数时，前面的位置参数必须有值/默认值。"""
+    required_first = (
+        CommandArg(name="a", description="a", required=True),
+        CommandArg(name="b", description="b"),
+    )
+    assert compose_line("two", {"a": "A", "b": "B"}, arg_specs=required_first) == "/two A B"
+    with pytest.raises(CommandSyntaxError) as excinfo:
+        compose_line("two", {"b": "B"}, arg_specs=required_first)
+    assert excinfo.value.code == "missing_argument"
+    assert excinfo.value.field_name == "a"
+
+    default_first = (
+        CommandArg(name="a", description="a", default="x"),
+        CommandArg(name="b", description="b"),
+    )
+    assert compose_line("two", {"b": "B"}, arg_specs=default_first) == "/two x B"
+    with pytest.raises(CommandSyntaxError):
+        compose_line("two", {"nope": "x"}, arg_specs=default_first)
+
+
 # ── 权限 / 未知命令 / 执行结果 ───────────────────────────────────────────────
 
 
@@ -468,6 +492,27 @@ async def test_idempotency_failure_is_not_cached_and_can_retry():
     retried = await execute(_ctx(), "/echo hi", registry=registry, idempotency_key="retry")
     assert retried.success is True and retried.content == "echo:hi"
     assert retried.execution_id != failed.execution_id
+
+
+@pytest.mark.asyncio
+async def test_idempotency_cleanup_keeps_new_claimant_after_pending_takeover(fake_redis):
+    """评审边界：pending 过期被新请求接管后，旧请求的失败清理不得误删新占位。"""
+    idem_key = "cmd:idem:7:race-key"
+
+    async def _takeover_then_fail(ctx, args):
+        # 模拟 pending 已过期、新请求已用同一 key 写入自己的占位。
+        fake_redis.store[idem_key] = json.dumps(
+            {"state": "pending", "execution_id": "new-claimant"}
+        )
+        raise CommandFailure("command_failed", "boom")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="race", description="", handler=_takeover_then_fail))
+    result = await execute(
+        _ctx(session_id=None), "/race", registry=registry, idempotency_key="race-key"
+    )
+    assert result.success is False and result.error_code == "command_failed"
+    assert json.loads(fake_redis.store[idem_key])["execution_id"] == "new-claimant"
 
 
 @pytest.mark.asyncio

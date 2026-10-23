@@ -32,7 +32,7 @@ import app.agent.commands.execution as execution_mod
 import app.api.v1.endpoints.agent as agent_api
 import app.api.v1.endpoints.chat as chat_api
 import app.api.v1.endpoints.commands as commands_api
-from app.agent.commands import Command, CommandResult, command_registry
+from app.agent.commands import Command, CommandArg, CommandResult, command_registry
 from app.agent.commands.types import ERROR_RESULT_TOO_LARGE, CommandExecution
 from app.agent.service import agent_service
 from app.core.config import settings
@@ -281,6 +281,41 @@ def test_execute_command_args_unknown_mapping_field_is_400(client, auth, monkeyp
     body = r.json()
     assert body["error_code"] == "COMMAND_INVALID_ARGUMENT"
     assert body["detail"]["fields"] == ["nope"]
+
+
+def test_execute_command_args_mapping_cannot_skip_positional(client, auth, monkeypatch):
+    """评审 m2：两参命令只给第二个参数 → 400（不得把值错绑到第一个位置）。"""
+
+    async def _handler(ctx, args):
+        return CommandResult(content=f"{args.get('a')}-{args.get('b')}", data=args)
+
+    _patch_admin(monkeypatch, False)
+    command_registry.register(
+        Command(
+            name="two-probe",
+            description="",
+            args=(
+                CommandArg(name="a", description="a", required=True),
+                CommandArg(name="b", description="b"),
+            ),
+            handler=_handler,
+        )
+    )
+    try:
+        skipped = client.post(
+            "/api/v1/commands/execute", json={"command": "two-probe", "args": {"b": "B"}}
+        )
+        full = client.post(
+            "/api/v1/commands/execute",
+            json={"command": "two-probe", "args": {"a": "A", "b": "B"}},
+        )
+    finally:
+        command_registry.unregister("two-probe")
+
+    assert skipped.status_code == 400, skipped.text
+    assert skipped.json()["detail"]["field"] == "a"
+    assert full.status_code == 200, full.text
+    assert full.json()["data"]["args"] == {"a": "A", "b": "B"}
 
 
 def test_execute_requires_line_or_command(client, auth, monkeypatch):
