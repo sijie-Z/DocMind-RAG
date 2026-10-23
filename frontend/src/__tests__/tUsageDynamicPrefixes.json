@@ -10,6 +10,7 @@
     "scheduler.cron.weekdays.",
     "scheduler.lastStatus.",
     "slashCmd.desc.",
+    "slashCmd.cmdDesc.",
     "slashCmd.tpl."
   ]
 }
