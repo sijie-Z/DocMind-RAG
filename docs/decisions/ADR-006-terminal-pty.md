@@ -41,7 +41,13 @@ sock    = client.api.exec_start(exec_id, socket=True)
   exec_resize/exec_inspect` 已被 SDK 移除，必须走 `client.api.*`；
   `exec_start(socket=True)` 在 POSIX 返回 `socket.SocketIO`、Windows npipe 返回
   `NpipeSocket`，读写分别用 `docker.utils.socket.read` 与 `sendall`/`write` 兼容。
-  所有阻塞调用包在 `asyncio.to_thread` 里。
+- **读取模型（对抗评审 B1）**：PTY 读取是长阻塞调用。若用 `asyncio.to_thread`，
+  每个空闲终端会永久占住默认线程池的一个线程（默认池 `min(32, cpu+4)`，4 核机
+  8 个；配额 3×3 即可饱和），达到上限后所有终端输入/输出/关闭停摆。实现改为
+  **每终端一个专用后台读线程**：线程阻塞在 socket 上，读到数据经
+  `loop.call_soon_threadsafe` 投递到 asyncio.Queue；`read()` 只 await 队列，
+  空闲时不占任何池线程。线程数 = 活跃终端数（已被配额约束），关闭时 join。
+  写/resize/close 仍是短暂的 `asyncio.to_thread` 调用。
 
 ## 鉴权：一次性票据 + Origin
 
@@ -59,6 +65,16 @@ sock    = client.api.exec_start(exec_id, socket=True)
 5. 重连：客户端每次重连都重新领票；服务端补发 ring buffer（最近 256KB）后
    进入实时流。前端在重连成功时先清屏再接收补发，避免旧内容重复堆叠。
 
+## 审计（issue §3 隐含需求）
+
+- `terminal_create` / `terminal_close`：`audit_service.log_activity` 写
+  `user_activity_logs`（target_type="terminal"）；显式关闭（HTTP DELETE / 工具）
+  与系统回收（空闲/超寿命/退出清理）都记一条，回收记录带 `reason=`。
+- `terminal_command`：仅当输入包含换行（回车提交）时记录**首行摘要**——控制字符
+  脱敏、截断 200 字符；逐键输入不落库。摘要与 shell history 同类风险，已在此
+  明示；终端**输出**绝不写服务端日志。
+- 审计失败只记 debug，绝不影响终端数据面（`log_activity` 本身已吞异常）。
+
 ## 配额、生命周期与多 worker
 
 | 项 | 默认 | 说明 |
@@ -71,13 +87,16 @@ sock    = client.api.exec_start(exec_id, socket=True)
 | `TERMINAL_TICKET_TTL_SECONDS` | 60 | 一次性票据有效期 |
 | `TERMINAL_REQUIRE_APPROVAL` | true | terminal_* 强制人工审批 |
 
-- **owner 记录**：创建时 `SET terminal:owner:<id> = <worker_id> EX 3600`；
-  HTTP/WS 访问若会话不在本进程且 owner 是其他 worker → 409
-  `terminal_owned_elsewhere`（WS 走 1008）。生产多 worker 需 sticky 路由。
+- **owner 记录**：创建时 `SET terminal:owner:<id> = "<user_id>:<worker_id>" EX 3600`
+  （值同时携带归属人）。HTTP/WS 访问时：owner 属于其他用户 → 一律 404
+  `terminal_not_found`（不泄露存在性，issue §5.4）；属于本人但在其他 worker →
+  409 `terminal_owned_elsewhere`（WS 走 1008）。生产多 worker 需 sticky 路由。
 - **worker 心跳**：每个 worker 每 30s 刷新 `terminal:worker:<id>`（TTL 90s）。
   启动时与每 30s 的回收循环按 label `docmind.terminal` 扫描容器：
   - 本 worker 已无该会话（进程重启）→ 删除；
-  - owner 心跳过期 → owner 已死，删除；
+  - owner 心跳过期且容器年龄 ≥ 120s 宽限期（`_OWNER_HEARTBEAT_GRACE_SECONDS`）
+    → owner 已死，删除。宽限期覆盖「Redis 中断 >90s 后恢复、存活 worker 尚未
+    到下一次心跳 tick」的竞态（对抗评审 M3）；
   - owner 键不存在（如 Redis 丢数据）→ 仅在容器年龄 ≥ 最大寿命时删除
     （宁可多留一个容器，也不误杀其他 worker 的活会话）；
   - Redis 不可用 → 本轮不删除任何容器。
@@ -119,6 +138,13 @@ sock    = client.api.exec_start(exec_id, socket=True)
   任一不满足时创建返回 503（detail `terminal_disabled` / `docker_unavailable`）。
 - 部署：`docker compose -f docker-compose.yml -f docker-compose.terminal.yml up -d --build`
   （overlay 内容与威胁提示见文件头注释）。
+  overlay 通过 `group_add: "${DOCKER_GID:-999}"` 让非 root 的 appuser 读 socket；
+  默认 999 只覆盖常见 Debian/Ubuntu 发行版，其他宿主用
+  `stat -c '%g' /var/run/docker.sock` 取真实 GID 后以 `DOCKER_GID=<gid>` 启动。
+- 前端生产 nginx（frontend/nginx.conf）已为前缀 `/api/v1/terminal/ws/` 增加
+  Upgrade/Connection 转发（路径带 terminal_id 后缀，不能使用精确匹配）；
+  K8s ingress 直连 backend，不经过该 nginx。
+- 镜像：`TERMINAL_CONTAINER_IMAGE` 禁止 `latest`（启动创建容器前校验，违规拒绝）。
 - 清理残留容器：
   ```bash
   docker ps -a --filter label=docmind.terminal

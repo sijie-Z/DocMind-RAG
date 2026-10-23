@@ -16,7 +16,15 @@
 exec_resize/exec_inspect`` 已从 SDK 移除，必须走 ``client.api.*``；
 ``exec_start(socket=True)`` 返回的可能是 ``socket.SocketIO``（POSIX）或
 ``NpipeSocket``（Windows），读写分别用 ``docker.utils.socket.read`` 与
-``sendall``/``write`` 兼容。所有阻塞调用都经 ``asyncio.to_thread``。
+``sendall``/``write`` 兼容。
+
+**读取模型（issue #477 对抗评审 B1）**：PTY 读取是长阻塞调用，若用
+``asyncio.to_thread``，每个空闲终端会永久占住默认线程池的一个线程
+（默认池 ``min(32, cpu+4)``，配额 3×3 即可能在 4 核机上饱和，导致所有
+终端假死）。这里改为**每终端一个专用后台读线程**：线程阻塞在 socket
+上，读到数据经 ``loop.call_soon_threadsafe`` 投递到 asyncio.Queue；
+``read()`` 只是 await 队列，空闲时不占任何池线程。写/resize/close 仍是
+短暂的 ``asyncio.to_thread`` 调用。
 """
 
 from __future__ import annotations
@@ -25,6 +33,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import threading
 from typing import Any
 
 from app.agent.terminal.manager import (
@@ -87,15 +96,30 @@ def _read_socket(sock: Any, max_bytes: int) -> bytes:
     return data or b""
 
 
+def validate_terminal_image(image: str) -> str:
+    """校验终端镜像引用（issue §5.2：必须固定 tag/digest，禁止 latest）。"""
+    candidate = (image or "").strip()
+    if not candidate:
+        raise TerminalError("终端镜像为空（配置 TERMINAL_CONTAINER_IMAGE / SANDBOX_DOCKER_IMAGE）")
+    if candidate.endswith(":latest") or candidate == "latest":
+        raise TerminalError("终端镜像禁止使用 latest，必须固定 tag 或 digest")
+    return candidate
+
+
 def _write_socket(sock: Any, data: bytes) -> None:
-    """向 exec socket 写全量数据（SocketIO 只有 write；raw socket 是 sendall）。"""
+    """向 exec socket 写全量数据（SocketIO 的 write 可能短写，必须循环）。"""
     sendall = getattr(sock, "sendall", None)
     if callable(sendall):
         sendall(data)
         return
     write = getattr(sock, "write", None)
     if callable(write):
-        write(data)
+        view = memoryview(data)
+        while view:
+            written = write(view)
+            if not written:
+                raise OSError("exec socket write returned 0")
+            view = view[written:]
         flush = getattr(sock, "flush", None)
         if callable(flush):
             flush()
@@ -127,22 +151,69 @@ class DockerTerminalBackend:
         self._container: Any = None
         self._exec_id: str | None = None
         self._sock: Any = None
+        # 专用读线程 + 跨线程输出队列（见模块头"读取模型"）。
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._out_queue: asyncio.Queue[bytes | None] | None = None
+        self._reader_thread: threading.Thread | None = None
+        self._pending = bytearray()
+        self._eof = False
 
     # ── spawn ──
     async def spawn(self, cols: int, rows: int) -> None:
+        loop = asyncio.get_running_loop()
         await asyncio.to_thread(self._spawn_sync, cols, rows)
+        self._loop = loop
+        self._out_queue = asyncio.Queue()
+        self._reader_thread = threading.Thread(
+            target=self._reader_sync,
+            name=f"terminal-pty-{self.terminal_id}",
+            daemon=True,
+        )
+        self._reader_thread.start()
+
+    def _reader_sync(self) -> None:
+        """专用读线程：阻塞读 socket → 投递到事件循环队列；EOF 投递 None。"""
+        loop = self._loop
+        sock = self._sock
+        if loop is None or sock is None:
+            return
+        try:
+            while True:
+                data = _read_socket(sock, _EXEC_READ_CHUNK)
+                if not data:
+                    break
+                try:
+                    loop.call_soon_threadsafe(self._deliver, data)
+                except RuntimeError:  # 事件循环已关闭
+                    return
+        except (OSError, ValueError):
+            pass
+        finally:
+            with contextlib.suppress(RuntimeError):
+                loop.call_soon_threadsafe(self._deliver, None)
+
+    def _deliver(self, item: bytes | None) -> None:
+        if self._out_queue is not None:
+            self._out_queue.put_nowait(item)
 
     def _spawn_sync(self, cols: int, rows: int) -> None:
         docker = _import_docker()
         try:
             client = docker.from_env()
+        except Exception as e:
+            raise TerminalDockerUnavailable(f"Docker daemon 不可用: {e}") from e
+        try:
             client.ping()
         except Exception as e:
+            # 失败路径必须关闭 client，否则每失败一次泄漏一个连接/session。
+            with contextlib.suppress(Exception):
+                client.close()
             raise TerminalDockerUnavailable(f"Docker daemon 不可用: {e}") from e
         self._client = client
         try:
+            image = validate_terminal_image(self.image)
             self._container = client.containers.run(
-                self.image,
+                image,
                 ["sleep", "infinity"],
                 name=f"docmind-term-{self.terminal_id}",
                 detach=True,
@@ -190,14 +261,21 @@ class DockerTerminalBackend:
         return len(data)
 
     async def read(self, max_bytes: int) -> bytes:
-        sock = self._sock
-        if sock is None:
+        """await 读线程投递的输出；空闲时不占用任何线程池线程。"""
+        if self._out_queue is None:
             return b""
-        try:
-            return await asyncio.to_thread(_read_socket, sock, min(max_bytes, _EXEC_READ_CHUNK))
-        except (OSError, ValueError):
-            # 关闭/容器退出时 socket 被断开 —— 对上层的语义就是 EOF。
-            return b""
+        while not self._pending:
+            if self._eof:
+                return b""
+            item = await self._out_queue.get()
+            if item is None:
+                self._eof = True
+                return b""
+            self._pending.extend(item)
+        take = min(max_bytes, len(self._pending))
+        data = bytes(self._pending[:take])
+        del self._pending[:take]
+        return data
 
     async def resize(self, cols: int, rows: int) -> None:
         await asyncio.to_thread(self._resize_sync, cols, rows)
@@ -261,6 +339,10 @@ class DockerTerminalBackend:
         if sock is not None:
             with contextlib.suppress(Exception):
                 sock.close()
+        # 关闭 socket 会让阻塞中的读线程退出；join 避免线程泄漏。
+        thread, self._reader_thread = self._reader_thread, None
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0)
         container, self._container = self._container, None
         if container is not None:
             with contextlib.suppress(Exception):

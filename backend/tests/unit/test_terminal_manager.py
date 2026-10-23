@@ -100,7 +100,9 @@ async def test_idle_timeout_reclaims_session() -> None:
     try:
         session = await manager.create(user_id=1, org_id=10)
         reclaimed = await manager.sweep(now_mono=session.last_activity_mono + 901)
-        assert reclaimed == [(session.terminal_id, "idle_timeout")]
+        assert [(s.terminal_id, why) for s, why in reclaimed] == [
+            (session.terminal_id, "idle_timeout")
+        ]
         assert manager.get_local(session.terminal_id) is None
         assert backends[0].closed is True
         assert session.close_reason == "idle_timeout"
@@ -114,7 +116,9 @@ async def test_max_lifetime_wins_over_activity() -> None:
         session = await manager.create(user_id=1, org_id=10)
         # 即便刚刚有活动，超过最长寿命也必须回收。
         reclaimed = await manager.sweep(now_mono=session.created_mono + 3600)
-        assert reclaimed == [(session.terminal_id, "max_lifetime")]
+        assert [(s.terminal_id, why) for s, why in reclaimed] == [
+            (session.terminal_id, "max_lifetime")
+        ]
     finally:
         await manager.shutdown()
 
@@ -131,7 +135,9 @@ async def test_exited_session_reclaimed_after_retention() -> None:
         # 保留窗口内不回收（可继续读取尾部输出）。
         assert await manager.sweep(now_mono=session.last_activity_mono + 5) == []
         reclaimed = await manager.sweep(now_mono=session.last_activity_mono + 11)
-        assert reclaimed == [(session.terminal_id, "exited_cleanup")]
+        assert [(s.terminal_id, why) for s, why in reclaimed] == [
+            (session.terminal_id, "exited_cleanup")
+        ]
     finally:
         await manager.shutdown()
 

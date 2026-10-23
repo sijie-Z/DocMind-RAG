@@ -136,6 +136,12 @@ def _configure_service(monkeypatch, *, ring_buffer_bytes: int = 4096):
     monkeypatch.setattr(terminal_service, "_docker_probe", (time.monotonic(), True), raising=False)
     monkeypatch.setattr(terminal_api, "require_organization", _fake_require_organization)
 
+    # 审计写库替身：terminal_service._audit 会调用 audit_service.log_activity。
+    from app.services import audit_service as audit_module
+
+    audit_mock = AsyncMock()
+    monkeypatch.setattr(audit_module.audit_service, "log_activity", audit_mock)
+
     settings = terminal_service._settings()
     monkeypatch.setattr(settings, "TERMINAL_ENABLED", True)
     monkeypatch.setattr(settings, "SANDBOX_MODE", "docker")
@@ -147,6 +153,7 @@ def _configure_service(monkeypatch, *, ring_buffer_bytes: int = 4096):
         backends=backends,
         redis=fake_redis,
         settings=settings,
+        audit=audit_mock,
     )
 
 
@@ -183,7 +190,12 @@ async def tool_env(monkeypatch):
 
 
 def _create(env, **overrides) -> dict[str, Any]:
-    payload = {"session_id": "chat-1", "cols": 100, "rows": 30, **overrides}
+    payload = {
+        "session_id": "11111111-1111-4111-8111-111111111111",
+        "cols": 100,
+        "rows": 30,
+        **overrides,
+    }
     response = env.client.post(f"{TERMINAL_PREFIX}/sessions", json=payload)
     assert response.status_code == 200, response.text
     return response.json()["data"]
@@ -313,7 +325,7 @@ def test_create_list_delete_contract(env) -> None:
     assert listing.status_code == 200
     sessions = listing.json()["data"]["sessions"]
     assert [s["terminal_id"] for s in sessions] == [data["terminal_id"]]
-    assert sessions[0]["session_id"] == "chat-1"
+    assert sessions[0]["session_id"] == "11111111-1111-4111-8111-111111111111"
     assert sessions[0]["status"] == "running"
     assert sessions[0]["created_at"] and sessions[0]["last_activity_at"]
 
@@ -340,12 +352,22 @@ def test_delete_unknown_and_foreign_returns_404(env) -> None:
 
 def test_remote_owner_returns_409(env) -> None:
     remote_id = str(uuid.uuid4())
-    env.redis.store[f"terminal:owner:{remote_id}"] = "other-worker"
+    # owner 值 = "{user_id}:{worker_id}"；本人 + 其他 worker → 409。
+    env.redis.store[f"terminal:owner:{remote_id}"] = "1:other-worker"
     response = env.client.delete(f"{TERMINAL_PREFIX}/sessions/{remote_id}")
     assert response.status_code == 409
     assert response.json()["detail"] == "terminal_owned_elsewhere"
     response = env.client.post(f"{TERMINAL_PREFIX}/sessions/{remote_id}/ticket")
     assert response.status_code == 409
+
+    # 其他用户的终端（即使存在）一律 404，防存在性枚举（issue §5.4）。
+    foreign_id = str(uuid.uuid4())
+    env.redis.store[f"terminal:owner:{foreign_id}"] = "2:other-worker"
+    response = env.client.delete(f"{TERMINAL_PREFIX}/sessions/{foreign_id}")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "terminal_not_found"
+    response = env.client.post(f"{TERMINAL_PREFIX}/sessions/{foreign_id}/ticket")
+    assert response.status_code == 404
 
 
 def test_ticket_rotation_invalidates_old_ticket(env) -> None:
@@ -632,6 +654,7 @@ async def test_tool_quota_maps_to_rate_limited(tool_env) -> None:
 
 
 def _make_executor(approval_mode: str = "never"):
+    import app.agent.tools  # noqa: F401 — 确保 terminal_* 已注册（risk_level 判定）
     from app.agent.config import AgentConfig
     from app.agent.executor import Executor
 
@@ -695,3 +718,163 @@ async def test_terminal_forced_approval_can_be_disabled(monkeypatch) -> None:
     _events = [event async for event in executor._approval_precheck(calls, None, None)]
     executor.approval_check.assert_not_awaited()
     assert executor._gate_materialization("terminal_open", arguments) is None
+
+
+# ── 审计（issue §3：创建/关闭/命令摘要）────────────────────────────────────
+
+
+def test_audit_records_create_command_and_close(env) -> None:
+    data = _create(env)
+    terminal_id = data["terminal_id"]
+    with _connect(env, terminal_id, data["ticket"]) as ws:
+        ws.send_json({"type": "input", "data": "echo audit-ok\n"})
+        _wait_until(lambda: env.backends[0].sent == [b"echo audit-ok\n"])
+        _wait_until(
+            lambda: any(
+                call.kwargs.get("action") == "terminal_command"
+                for call in env.audit.await_args_list
+            )
+        )
+    env.client.delete(f"{TERMINAL_PREFIX}/sessions/{terminal_id}")
+
+    actions = [call.kwargs.get("action") for call in env.audit.await_args_list]
+    assert "terminal_create" in actions
+    assert "terminal_command" in actions
+    assert "terminal_close" in actions
+    command_call = next(
+        call
+        for call in env.audit.await_args_list
+        if call.kwargs.get("action") == "terminal_command"
+    )
+    assert command_call.kwargs.get("detail") == "echo audit-ok"
+    assert command_call.kwargs.get("target_id") == terminal_id
+
+
+def test_audit_command_ignores_keystrokes_and_masks_control_chars() -> None:
+    from app.services.terminal_service import _summarize_command
+
+    assert _summarize_command("l") is None  # 逐键输入不审计
+    assert _summarize_command("echo a\x01b\nrest") == "echo ab"
+    assert _summarize_command("\n") is None
+    assert len(_summarize_command("x" * 500 + "\n")) == 200
+
+
+# ── 回收器 / 孤儿清理（对抗评审 M4）──────────────────────────────────────
+
+
+def _created_ago(seconds: float) -> str:
+    from datetime import UTC, datetime, timedelta
+
+    return (datetime.now(UTC) - timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _container_info(terminal_id: str, age_seconds: float) -> dict[str, Any]:
+    return {
+        "id": f"cid-{terminal_id}",
+        "name": f"docmind-term-{terminal_id}",
+        "labels": {"docmind.terminal": terminal_id},
+        "created": _created_ago(age_seconds),
+        "status": "running",
+    }
+
+
+async def test_orphan_cleanup_matrix(tool_env, monkeypatch) -> None:
+    """owner 归属/心跳/年龄/本地会话四维判定；Redis 活时只删确定的孤儿。"""
+    import app.services.terminal_service as service_module
+
+    # 本地会话必须保留。
+    local_session = await tool_env.manager.create(user_id=1, org_id=1)
+    local_id = local_session.terminal_id
+
+    for terminal_id, value in (
+        ("t-alive", "1:worker-a"),
+        ("t-dead-old", "1:worker-dead"),
+        ("t-dead-young", "1:worker-dead2"),
+        ("t-self", "1:test-worker"),
+    ):
+        tool_env.redis.store[f"terminal:owner:{terminal_id}"] = value
+    tool_env.redis.store["terminal:worker:worker-a"] = "1"  # 存活 worker
+
+    containers = [
+        _container_info(local_id, 60),
+        _container_info("t-alive", 60),
+        _container_info("t-dead-old", 200),  # > 心跳宽限 120s → 删
+        _container_info("t-dead-young", 30),  # 宽限期内 → 保留（M3）
+        _container_info("t-self", 60),  # 本 worker 重启残留 → 删
+        _container_info("t-noowner-young", 30),  # 无 owner 且未超寿命 → 保留
+        _container_info("t-noowner-old", 4000),  # 无 owner 且超寿命 → 删
+    ]
+    removed: list[str] = []
+
+    monkeypatch.setattr(service_module, "list_terminal_containers", lambda: containers)
+    monkeypatch.setattr(
+        service_module,
+        "remove_terminal_container",
+        lambda cid: removed.append(cid) or True,
+    )
+
+    async def _docker_ok() -> bool:
+        return True
+
+    monkeypatch.setattr(terminal_service, "docker_available", _docker_ok, raising=False)
+
+    count = await terminal_service.cleanup_orphan_containers()
+    assert count == 3
+    assert removed == ["cid-t-dead-old", "cid-t-self", "cid-t-noowner-old"]
+    assert f"cid-{local_id}" not in removed
+
+
+async def test_orphan_cleanup_keeps_everything_when_redis_down(tool_env, monkeypatch) -> None:
+    import app.services.terminal_service as service_module
+
+    removed: list[str] = []
+    monkeypatch.setattr(
+        service_module,
+        "list_terminal_containers",
+        lambda: [_container_info("t-any", 4000)],
+    )
+    monkeypatch.setattr(
+        service_module,
+        "remove_terminal_container",
+        lambda cid: removed.append(cid) or True,
+    )
+
+    async def _docker_ok() -> bool:
+        return True
+
+    monkeypatch.setattr(terminal_service, "docker_available", _docker_ok, raising=False)
+
+    def _no_redis():
+        raise TerminalRedisUnavailable("down")
+
+    monkeypatch.setattr(terminal_service, "_redis", _no_redis, raising=False)
+
+    assert await terminal_service.cleanup_orphan_containers() == 0
+    assert removed == []
+
+
+# ── Docker 后端（无 daemon）：读队列语义 / 镜像校验 ────────────────────────
+
+
+async def test_docker_backend_read_queue_semantics() -> None:
+    from app.agent.terminal.docker_backend import DockerTerminalBackend
+
+    backend = DockerTerminalBackend(terminal_id="t", user_id=1, image="python:3.11-slim")
+    backend._out_queue = asyncio.Queue()
+    backend._deliver(b"hello")
+    assert await backend.read(3) == b"hel"
+    assert await backend.read(100) == b"lo"
+    backend._deliver(None)
+    assert await backend.read(10) == b""
+    assert await backend.read(10) == b""  # EOF 粘性（reader 不会重复等待）
+
+
+def test_terminal_image_must_not_be_latest() -> None:
+    from app.agent.terminal.docker_backend import validate_terminal_image
+    from app.agent.terminal.manager import TerminalError
+
+    assert validate_terminal_image("python:3.11-slim") == "python:3.11-slim"
+    with pytest.raises(TerminalError):
+        validate_terminal_image("python:latest")
+    with pytest.raises(TerminalError):
+        validate_terminal_image("")

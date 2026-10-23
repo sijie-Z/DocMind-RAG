@@ -427,7 +427,7 @@ backend/app/agent/
   ├── subagent.py        # 子代理委托
   ├── service.py         # AgentService 入口
   ├── core_tools.py      # 核心工具（14 个）
-  └── tools/             # 工具包（19 个）
+  └── tools/             # 工具包（25 个）
       ├── web_search.py
       ├── code_execution.py
       ├── data_analysis.py

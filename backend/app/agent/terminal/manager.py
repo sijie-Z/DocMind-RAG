@@ -312,7 +312,6 @@ class TerminalSession:
         # 单 writer 锁：send 持有期间其他 writer 直接失败（TerminalBusy）。
         self.send_lock = asyncio.Lock()
         self._data_event = asyncio.Event()
-        self.exit_event = asyncio.Event()
 
         self.reader_task: asyncio.Task[None] | None = None
 
@@ -423,7 +422,6 @@ class TerminalSession:
         self.status = "exited"
         self.exit_code = code
         self.touch()
-        self.exit_event.set()
         self._data_event.set()
 
     def mark_error(self, message: str) -> None:
@@ -432,7 +430,6 @@ class TerminalSession:
         self.status = "error"
         self.error = message
         self.touch()
-        self.exit_event.set()
         self._data_event.set()
 
 
@@ -662,12 +659,6 @@ class TerminalManager:
             await session.wait_for_readable(timeout)
         return await session.read_pending(limit)
 
-    async def wait_until_readable(self, terminal_id: str, *, user_id: int, timeout: float) -> bool:
-        session = self.get(terminal_id, user_id=user_id)
-        if session is None:
-            raise TerminalNotFound("终端不存在或无权访问")
-        return await session.wait_for_readable(timeout)
-
     async def resize(self, terminal_id: str, *, user_id: int, cols: int, rows: int) -> None:
         session = self.get(terminal_id, user_id=user_id)
         if session is None:
@@ -688,10 +679,10 @@ class TerminalManager:
         await session.backend.signal(normalized)
 
     # ── 回收 ──
-    async def sweep(self, *, now_mono: float | None = None) -> list[tuple[str, str]]:
-        """回收超寿命 / 空闲 / 已退出超过保留窗口的会话。返回 (id, reason)。"""
+    async def sweep(self, *, now_mono: float | None = None) -> list[tuple[TerminalSession, str]]:
+        """回收超寿命 / 空闲 / 已退出超过保留窗口的会话。返回 (session, reason)。"""
         now = self._clock() if now_mono is None else now_mono
-        reclaimed: list[tuple[str, str]] = []
+        reclaimed: list[tuple[TerminalSession, str]] = []
         for session in list(self._sessions.values()):
             if session.status == "closed":
                 continue
@@ -707,7 +698,7 @@ class TerminalManager:
             if reason is None:
                 continue
             await self._close_session(session, reason=reason)
-            reclaimed.append((session.terminal_id, reason))
+            reclaimed.append((session, reason))
         return reclaimed
 
     async def shutdown(self) -> None:
@@ -737,8 +728,14 @@ class TerminalManager:
             session.mark_error(f"{type(e).__name__}")
             return
         code: int | None = None
-        try:
-            code = await session.backend.exit_code()
-        except Exception:
-            code = None
+        # exec_inspect 的 ExitCode 可能晚于 socket EOF 一个调度周期就绪——
+        # 短轮询避免把正常退出误报成 exit_code=-1。
+        for _ in range(10):
+            try:
+                code = await session.backend.exit_code()
+            except Exception:
+                code = None
+            if code is not None:
+                break
+            await asyncio.sleep(0.1)
         session.mark_exited(code)

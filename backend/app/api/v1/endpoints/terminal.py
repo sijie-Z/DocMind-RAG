@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket
@@ -105,6 +106,13 @@ async def create_terminal_session(
             f"cols 需在 1-{MAX_COLS}、rows 需在 1-{MAX_ROWS} 范围内",
             detail={"cols": [1, MAX_COLS], "rows": [1, MAX_ROWS]},
         )
+    if payload.session_id is not None:
+        try:
+            uuid.UUID(str(payload.session_id))
+        except (ValueError, AttributeError, TypeError):
+            raise ValidationError(
+                "session_id 必须是 UUID 或 null", detail={"field": "session_id"}
+            ) from None
     org_id = await require_organization(current_user, db)
 
     session: TerminalSession | None = None
@@ -244,6 +252,11 @@ async def _send(websocket: WebSocket, payload: dict[str, Any], lock: asyncio.Loc
 async def terminal_websocket(websocket: WebSocket, terminal_id: str) -> None:
     """终端 WS：一次性票据 → Origin → 归属 → 补发缓冲 → 双向流。"""
     subprotocol = extract_ws_subprotocol(websocket)
+
+    # 功能关闭时与 HTTP 同口径拒绝（票据本来就签不出来，这里补齐语义）。
+    if not terminal_service.enabled():
+        await _reject_ws(websocket, subprotocol)
+        return
 
     # 先做无副作用的 Origin 校验（不消耗票据），再做 GETDEL —— 顺序与 issue
     # 列表一致，但避免「Origin 非法也烧掉票据」。
@@ -433,6 +446,13 @@ async def _receive_loop(
                         "message": str(exc),
                     },
                     send_lock,
+                )
+            else:
+                # 命令摘要审计（只对回车提交的行；审计失败不影响输入）。
+                await terminal_service.audit_command(
+                    user_id=session.user_id,
+                    terminal_id=session.terminal_id,
+                    data=data,
                 )
         elif message_type == "resize":
             cols, rows = parsed.get("cols"), parsed.get("rows")

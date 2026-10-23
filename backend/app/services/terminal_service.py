@@ -58,6 +58,9 @@ _TICKET_BY_TERMINAL_KEY = "terminal:ticket:by_terminal:{terminal_id}"
 
 _DOCKER_PROBE_TTL_SECONDS = 5.0
 _WORKER_HEARTBEAT_TTL_SECONDS = 90
+# 心跳缺失后的宽限期（issue #477 对抗评审 M3）：Redis 中断超过心跳 TTL 后恢复时，
+# 存活 worker 可能还没到下一次心跳 tick；此窗口内不把「心跳缺失」当作 owner 已死。
+_OWNER_HEARTBEAT_GRACE_SECONDS = 120.0
 REAPER_INTERVAL_SECONDS = 30.0
 
 _ISO_RE = re.compile(
@@ -86,6 +89,24 @@ def _parse_created(raw: str) -> float | None:
     except ValueError:
         return None
     return parsed.astimezone(UTC).timestamp()
+
+
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _summarize_command(data: str) -> str | None:
+    """命令摘要：仅当输入包含换行（回车提交）时取首行；脱敏控制字符并截断。
+
+    逐键输入（xterm onData 的单字符帧）不会产生审计记录，只有按 Enter 提交的
+    命令行才落一条摘要——这与 shell history 的风险面相同，长度上限 200 字符。
+    """
+    if "\n" not in data and "\r" not in data:
+        return None
+    first_line = re.split(r"[\r\n]", data, maxsplit=1)[0]
+    cleaned = _CONTROL_CHARS_RE.sub("", first_line).strip()
+    if not cleaned:
+        return None
+    return cleaned[:200]
 
 
 class TerminalService:
@@ -161,11 +182,13 @@ class TerminalService:
             raise TerminalRedisUnavailable("Redis 不可用：终端票据/归属记录无法落库")
         return redis_client
 
-    async def _set_owner(self, terminal_id: str) -> None:
+    async def _set_owner(self, terminal_id: str, user_id: int) -> None:
+        """owner 值 = ``"{user_id}:{worker_id}"``——跨 worker 访问时先判归属人，
+        非本人一律按「不存在」处理（防存在性枚举，issue §5.4 非本人 → 404）。"""
         try:
             await self._redis().set(
                 _OWNER_KEY.format(terminal_id=terminal_id),
-                self.worker_id,
+                f"{user_id}:{self.worker_id}",
                 ex=int(self._settings().TERMINAL_MAX_LIFETIME_SECONDS),
             )
         except TerminalRedisUnavailable:
@@ -173,13 +196,21 @@ class TerminalService:
         except Exception as e:
             raise TerminalRedisUnavailable(f"写入终端归属记录失败: {type(e).__name__}") from e
 
-    async def get_owner(self, terminal_id: str) -> str | None:
+    async def get_owner(self, terminal_id: str) -> tuple[int, str] | None:
+        """返回 ``(user_id, worker_id)``；不存在或格式非法返回 None。"""
         try:
-            return await self._redis().get(_OWNER_KEY.format(terminal_id=terminal_id))
+            raw = await self._redis().get(_OWNER_KEY.format(terminal_id=terminal_id))
         except TerminalRedisUnavailable:
             raise
         except Exception as e:
             raise TerminalRedisUnavailable(f"读取终端归属记录失败: {type(e).__name__}") from e
+        if not raw:
+            return None
+        try:
+            user_id, worker_id = str(raw).split(":", 1)
+            return int(user_id), worker_id
+        except (ValueError, AttributeError):
+            return None
 
     async def clear_owner(self, terminal_id: str) -> None:
         """尽力删除 owner（回收/kill 收尾用，失败只记 debug）。"""
@@ -248,13 +279,23 @@ class TerminalService:
 
     # ── 归属解析 ──
     async def resolve_local(self, terminal_id: str, *, user_id: int) -> TerminalSession:
-        """取本地会话；归属其他 worker → TerminalOwnedElsewhere；不存在 → NotFound。"""
+        """取本地会话。
+
+        - 本地存在且属于本人 → 返回；
+        - owner 记录属于**其他用户** → NotFound（不泄露存在性，issue §5.4）；
+        - owner 记录属于本人但在其他 worker → TerminalOwnedElsewhere（409/1008）；
+        - 其余 → NotFound。
+        """
         session = self.manager.get(terminal_id, user_id=user_id)
         if session is not None:
             return session
         owner = await self.get_owner(terminal_id)
-        if owner is not None and owner != self.worker_id:
-            raise TerminalOwnedElsewhere("终端归属其他 worker 进程（生产环境需 sticky 路由）")
+        if owner is not None:
+            owner_user_id, owner_worker = owner
+            if owner_user_id != user_id:
+                raise TerminalNotFound("终端不存在或无权访问")
+            if owner_worker != self.worker_id:
+                raise TerminalOwnedElsewhere("终端归属其他 worker 进程（生产环境需 sticky 路由）")
         raise TerminalNotFound("终端不存在或无权访问")
 
     # ── 创建 / 关闭 ──
@@ -276,18 +317,59 @@ class TerminalService:
             rows=rows,
         )
         try:
-            await self._set_owner(session.terminal_id)
+            await self._set_owner(session.terminal_id, user_id)
         except TerminalError:
             # 半成品绝不留存（issue #477 §8）。
             await self.manager.kill(session.terminal_id, user_id=user_id)
             raise
+        await self._audit(
+            user_id,
+            "terminal_create",
+            target_id=session.terminal_id,
+            detail=f"cols={cols} rows={rows} session={session_id or '-'}",
+        )
         return session
 
     async def kill(self, terminal_id: str, *, user_id: int) -> bool:
         killed = await self.manager.kill(terminal_id, user_id=user_id)
         if killed:
             await self.clear_owner(terminal_id)
+            await self._audit(user_id, "terminal_close", target_id=terminal_id)
         return killed
+
+    # ── 审计（issue #477 §3：会话创建/关闭/命令摘要）────────────────────────
+    async def _audit(
+        self,
+        user_id: int,
+        action: str,
+        *,
+        target_id: str | None = None,
+        detail: str | None = None,
+    ) -> None:
+        """写用户活动审计。审计失败绝不影响终端数据面（log_activity 自吞异常）。"""
+        try:
+            from app.services.audit_service import audit_service
+
+            await audit_service.log_activity(
+                user_id=user_id,
+                action=action,
+                target_type="terminal",
+                target_id=target_id,
+                detail=detail,
+            )
+        except Exception:  # pragma: no cover — 审计实现自兜，双保险
+            logger.debug("terminal audit failed: %s", action, exc_info=True)
+
+    async def audit_command(self, *, user_id: int, terminal_id: str, data: str) -> None:
+        """命令摘要审计：只记录「回车提交」的命令行，脱敏控制字符并截断。
+
+        终端逐键输入不会触发；仅当本次输入包含换行时取首行摘要。摘要是
+        人类可读的命令文本（与 shell history 同类风险），长度上限 200。
+        """
+        summary = _summarize_command(data)
+        if not summary:
+            return
+        await self._audit(user_id, "terminal_command", target_id=terminal_id, detail=summary)
 
     # ── 回收 ──
     async def sweep(self) -> int:
@@ -295,8 +377,14 @@ class TerminalService:
         if not self.enabled():
             return 0
         reclaimed = await self.manager.sweep()
-        for terminal_id, _reason in reclaimed:
-            await self.clear_owner(terminal_id)
+        for session, reason in reclaimed:
+            await self.clear_owner(session.terminal_id)
+            await self._audit(
+                session.user_id,
+                "terminal_close",
+                target_id=session.terminal_id,
+                detail=f"reason={reason}",
+            )
         await self.cleanup_orphan_containers()
         return len(reclaimed)
 
@@ -325,21 +413,25 @@ class TerminalService:
             age = (now - created) if created is not None else None
             try:
                 owner = await self.get_owner(terminal_id)
-                owner_alive = bool(owner) and (
-                    owner == self.worker_id or await self.worker_alive(owner)
-                )
+                if owner is None:
+                    owner_alive = False
+                elif owner[1] == self.worker_id:
+                    owner_alive = True
+                else:
+                    owner_alive = await self.worker_alive(owner[1])
             except TerminalError:
                 # Redis 不可用：无法区分活/死 owner —— 本轮不删任何容器。
                 logger.debug("terminal reaper: Redis 不可用，跳过孤儿判定")
                 return removed
-            if owner == self.worker_id:
+            if owner is not None and owner[1] == self.worker_id:
                 # 本 worker 已无该会话（如进程重启、WORKER_ID 固定）→ 孤儿。
                 orphan = True
             elif owner is not None and owner_alive:
                 orphan = False
             elif owner is not None and not owner_alive:
-                # owner 心跳过期 = owner 进程已死（多 worker 安全）。
-                orphan = True
+                # owner 心跳过期。但 Redis 中断恢复后的宽限期内不判死：
+                # 存活 worker 还没到下一次心跳 tick（评审 M3 竞态）。
+                orphan = age is not None and age >= _OWNER_HEARTBEAT_GRACE_SECONDS
             else:
                 # owner 键不存在：仅在超过最大寿命后清理；Redis 丢数据时宁可
                 # 多留一个容器，也不误杀其他 worker 的活会话。

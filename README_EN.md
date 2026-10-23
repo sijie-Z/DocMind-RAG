@@ -116,7 +116,7 @@ User instruction
 | Context Engine | `context.py` | Token budget management, message window builder |
 | Config | `config.py` | AgentConfig (model/temperature/max steps/phase toggles) |
 
-**39 Built-In Tools** (`core_tools.py` 14 + `tools/` 19):
+**39 Built-In Tools** (`core_tools.py` 14 + `tools/` 25):
 
 | Category | Tool | Description |
 |----------|------|-------------|
@@ -424,7 +424,7 @@ DocMind/
 │   │   │   ├── message.py           #   Agent message bus
 │   │   │   ├── tracing.py           #   Execution trace records (dev-only: eval/offline; not written in production)
 │   │   │   ├── core_tools.py        #   14 base tools
-│   │   │   ├── tools/               #   19 extension tools (39 built-in tools total)
+│   │   │   ├── tools/               #   25 extension tools (39 built-in tools total)
 │   │   │   │   ├── web_search.py    #   Web search
 │   │   │   │   ├── code_execution.py #  Python/SQL sandbox
 │   │   │   │   ├── data_analysis.py #   Data analysis

@@ -168,6 +168,11 @@ export class TerminalSocket {
         this.options.onError?.(event.reason || 'policy_violation')
         return
       }
+      if (event.code === 1000 && event.reason === 'terminal_exited') {
+        // 进程正常退出：服务端已发 exit 帧，不再自动重连（避免重连风暴）。
+        this.setStatus('closed')
+        return
+      }
       this.setStatus('reconnecting')
       this.scheduleReconnect()
     }

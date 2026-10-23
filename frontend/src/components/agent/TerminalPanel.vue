@@ -88,6 +88,8 @@ function handleServerMessage(message: TerminalServerMessage): void {
   if (message.type === 'exit') {
     notice.value = t('agent.terminal.exited', { code: message.code })
     status.value = 'closed'
+    // 进程已退出：主动停止重连（服务端随后以 1000/terminal_exited 关闭）。
+    socket?.close()
     return
   }
   if (message.type === 'error') {

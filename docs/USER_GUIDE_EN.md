@@ -4,8 +4,7 @@
 >
 > This guide only *references* the sources of truth:
 > - ports, credentials, and service orchestration: `backend/docker-compose.yml` and `backend/.env.docker.example`;
-> - headline numbers (33 built-in tools / 23 endpoint modules / 34 frontend routes / 20 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (the guide itself is not yet in the anchor list);
-> - headline numbers (33 built-in tools / 23 endpoint modules / 34 frontend routes / 23 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (the guide itself is not yet in the anchor list);
+> - headline numbers (39 built-in tools / 25 endpoint modules / 34 frontend routes / 23 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (the guide itself is not yet in the anchor list);
 > - architecture and design rationale: `README.md`, `AGENT_ARCHITECTURE.md`, `docs/decisions/`.
 >
 > 中文版：[USER_GUIDE.md](USER_GUIDE.md)
@@ -385,7 +384,7 @@ ADR-001 froze this semantic (`docs/decisions/ADR-001-路线冻结.md`, D5):
 
 ### 3.4 Tools and HITL approval
 
-**Tools**: every tool self-registers via `@register_tool(name=...)`. There are **33 built-in tools** (`docs/facts.json` → `registered_tools`; 14 in `core_tools.py`, 19 in `tools/`), plus dynamic MCP tools. Parameters use JSON Schema and are converted to OpenAI function-calling format; `tags` drive configuration filtering, and sensitive tools are disabled by default in `DEFAULT_DISABLED_TOOLS`.
+**Tools**: every tool self-registers via `@register_tool(name=...)`. There are **39 built-in tools** (`docs/facts.json` → `registered_tools`; 14 in `core_tools.py`, 25 in `tools/`), plus dynamic MCP tools. Parameters use JSON Schema and are converted to OpenAI function-calling format; `tags` drive configuration filtering, and sensitive tools are disabled by default in `DEFAULT_DISABLED_TOOLS`.
 
 **HITL (human-in-the-loop)** lets the agent pause before a risky next action:
 
@@ -656,6 +655,7 @@ There are **25 endpoint modules** (`docs/facts.json` → `endpoint_modules`, der
 | mcp | `/api/v1/mcp` | MCP server status (admin read-only) |
 | scheduled_tasks | `/api/v1/scheduled-tasks` | scheduled task CRUD / pause / manual run |
 | sessions | `/api/v1/sessions` | session fork / seed / lineage (issue #476) |
+| terminal | `/api/v1/terminal` | container-backed persistent PTY, one-time WS tickets (issue #477) |
 | demo | `/api/v1/demo` | demo data |
 | user_settings | `/api/v1/user` | UI preferences |
 

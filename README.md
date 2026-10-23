@@ -116,7 +116,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 上下文引擎 | `context.py` | 令牌预算管理，消息窗口构建 |
 | 配置 | `config.py` | AgentConfig（模型/温度/最大步骤/阶段开关） |
 
-**39 个内置工具**（`core_tools.py` 14 个 + `tools/` 19 个）：
+**39 个内置工具**（`core_tools.py` 14 个 + `tools/` 25 个）：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -394,7 +394,7 @@ DocMind/
 │   │   │   ├── message.py           #   Agent 间消息总线
 │   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
 │   │   │   ├── core_tools.py        #   基础工具（14 个）
-│   │   │   ├── tools/               #   扩展工具（19 个；合计 39 个内置工具）
+│   │   │   ├── tools/               #   扩展工具（25 个；合计 39 个内置工具）
 │   │   │   │   ├── web_search.py    #   网络搜索
 │   │   │   │   ├── code_execution.py #  Python/SQL 沙箱
 │   │   │   │   ├── data_analysis.py #   数据分析

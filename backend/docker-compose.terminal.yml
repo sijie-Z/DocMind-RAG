@@ -28,7 +28,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     # 宿主机 docker 组的 GID 因发行版而异（Debian/Ubuntu 常见 998/999，RHEL 常见 996）。
-    # 若 backend 日志出现 "permission denied ... docker.sock"，改为宿主机真实 GID：
-    #   stat -c '%g' /var/run/docker.sock
-    # group_add:
-    #   - "${DOCKER_GID:-999}"
+    # 必须让非 root 的 appuser 能读 socket；先用 `stat -c '%g' /var/run/docker.sock`
+    # 取真实 GID，再以 DOCKER_GID=<gid> 启动 compose（默认 999 只覆盖常见发行版）。
+    # 若日志出现 "permission denied ... docker.sock"，即此处 GID 不对。
+    group_add:
+      - "${DOCKER_GID:-999}"
