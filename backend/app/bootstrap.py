@@ -304,6 +304,17 @@ def build_lifespan(deps: LifespanDeps):
             except Exception as e:
                 logger.warning(f"MCP 初始化失败（不影响启动）: {e}")
 
+            # Hooks（issue #474）：HOOKS_ENABLED=false（默认）时零读取、零行为变化；
+            # true 时启动期加载并严格校验——非法配置 fail-closed 抛错，进程退出
+            # （hook 会改写/阻断执行，带病运行比不启动更危险）。
+            # 启动加载在 bootstrap lifespan（web/worker/headless/sdk/acp 统一入口），
+            # app.main 兼容壳不重复接线。
+            if settings.HOOKS_ENABLED:
+                from app.agent.hooks import initialize_from_settings
+
+                await initialize_from_settings(settings)
+                logger.info("Hooks 扩展点已启用（%s）", settings.HOOKS_CONFIG_PATH)
+
             # 演示账号（issue #246）：只做创建/补齐（ensure_demo_user 内部自带日志）。
             # 先前版本在此处以固定口令 "123456" 真登录做"自检"——加固后该口令永不可能正确，
             # 每次启动都会给 login:fail:guest +1；锁死后 AccountLockedError 直接打崩启动。
@@ -332,6 +343,32 @@ def build_lifespan(deps: LifespanDeps):
                 scheduler_task = asyncio.create_task(deps.scheduled_tasks_loop())
             else:
                 logger.info("ENABLE_SCHEDULER=false，定时任务调度器不启动")
+
+            # issue #478：Webhook outbox poll 循环。与调度器同一裁定——只在 web
+            # 入口启动（worker 会与 web 重复领取投递；SQL 侧 SKIP LOCKED 仍是
+            # 多实例部署的最后防线）。启用时**任何入口**都先过 fail-closed 的
+            # key 校验（配置错误不应因入口不同而被静默容忍）。
+            webhook_task: asyncio.Task | None = None
+            if settings.WEBHOOKS_ENABLED:
+                from app.services.webhook_service import (
+                    validate_webhook_settings,
+                    webhook_service,
+                )
+
+                validate_webhook_settings()
+                if get_active_entrypoint() == "web":
+                    webhook_task = asyncio.create_task(webhook_service.poll_loop())
+                    logger.info(
+                        "Webhook outbox poll 已启动（interval=%ss）",
+                        settings.WEBHOOK_WORKER_POLL_SECONDS,
+                    )
+                else:
+                    logger.info(
+                        "Webhook outbox poll 仅在 web 入口启动（当前 entrypoint=%s）",
+                        get_active_entrypoint(),
+                    )
+            else:
+                logger.info("WEBHOOKS_ENABLED=false，Webhook outbox poll 不启动")
 
             logger.info("所有服务初始化完成")
 
@@ -378,6 +415,15 @@ def build_lifespan(deps: LifespanDeps):
                 logger.info("定时任务调度器已取消")
         except Exception as e:
             logger.warning(f"取消定时任务调度器失败: {e}")
+
+        # 取消 Webhook outbox poll（在途处理随事件循环终止；processing 行由
+        # 10 分钟租约超时后重新领取，不丢事件）
+        try:
+            if webhook_task:
+                webhook_task.cancel()
+                logger.info("Webhook outbox poll 已取消")
+        except Exception as e:
+            logger.warning(f"取消 Webhook outbox poll 失败: {e}")
 
         # 持久终端收尾（issue #477）：停回收循环 + 关闭本地会话（尽力而为）
         try:
@@ -923,6 +969,10 @@ OPENAPI_TAGS = [
     {"name": "智能Agent", "description": "PER Agent 对话、工具调用、技能学习"},
     {"name": "会话分叉", "description": "会话 fork / seed / 谱系（issue #476）"},
     {"name": "定时任务", "description": "定时 agent 任务的 CRUD、暂停/恢复、立即触发"},
+    {
+        "name": "Webhook",
+        "description": "入站 Webhook 规则管理、HMAC 验签投递与 outbox 处理（issue #478）",
+    },
 ]
 
 

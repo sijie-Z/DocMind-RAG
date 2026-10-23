@@ -25,7 +25,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
 - 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 39 个工具完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
-- 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、23 种 SSE 事件、RunReport 运行摘要
+- 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、24 种 SSE 事件、RunReport 运行摘要
 - 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
 
 > 关于架构决策和实验数据，请参见研究仓库：[DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
@@ -139,6 +139,29 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 执行回放 | `replay/` | 完整执行快照保存与回放，支持 diff 对比 |
 | 模式挖掘 | `mining/` | 扫描回放发现高频工具序列，生成技能建议（离线 CLI，读 benchmark/replay/） |
 
+**Hooks 扩展点**（issue #474，默认关闭）：
+
+进程内事件总线，覆盖 agent 轮次与工具执行；`waterfall`（可改写/短路）与
+`serial`（顺序观察）两种语义。配置文件 `backend/config/hooks.yaml`，总开关
+`HOOKS_ENABLED=true`（关闭时不读文件、零行为变化）：
+
+```yaml
+hooks:
+  - name: audit_tool_calls
+    event: tools/pre_execute        # agent/turn_start | agent/pre_step | agent/post_step
+    module: app.agent.hooks.builtin.audit_tool_calls   # 必须 app.agent.hooks.*
+    enabled: true
+    priority: 100                   # 越小越先执行
+    timeout_seconds: 2.0            # 0.1–30
+    failure_policy: fail_open       # fail_open | fail_closed
+```
+
+handler 签名 `async def handler(ctx, next)`：`await next(payload)` 继续链路；
+不调用即短路；返回 `HookDecision(action="deny"|"modify"|"ask", ...)`。
+`tools/pre_execute` 的 `ask` 走既有 HITL 审批门，hook 不能绕过审批；
+hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
+`docs/decisions/ADR-004-hooks.md`。
+
 ### 📚 RAG 管线 (`backend/app/rag/`)
 
 多阶段检索增强生成管道，从用户提问到流式回答：
@@ -192,7 +215,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-25 个端点模块，统一 `/api/v1` 前缀：
+26 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
@@ -220,6 +243,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | Agent 命令 | `/commands` | 服务端命令清单与无模型轮次执行（/help、/status、/export、/tools） |
 | MCP 工具 | `/mcp` | MCP 服务器状态（管理员只读） |
 | 用户设置 | `/user` | 个人 UI 偏好 |
+| Webhook 规则 | `/webhooks` | 入站 Webhook 规则管理、HMAC 验签投递与 outbox 处理（issue #478） |
 | 示例数据 | `/demo` | 演示文档与数据填充 |
 
 Swagger 文档：`http://localhost:8000/docs`
@@ -375,8 +399,8 @@ DocMind/
 │   │   ├── dependencies.py          # 依赖注入容器
 │   │   ├── exceptions.py            # 自定义异常层次结构
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 25 个模块）
-│   │   │   └── endpoints/           # 端点实现（25 个文件）
+│   │   │   ├── router.py            # 主路由（注册 26 个模块）
+│   │   │   └── endpoints/           # 端点实现（26 个文件）
 │   │   ├── agent/                   # PER Agent 核心
 │   │   │   ├── loop.py              #   PER 主循环
 │   │   │   ├── planner.py           #   规划器（LLM + 结构化规则）
@@ -390,7 +414,7 @@ DocMind/
 │   │   │   ├── exec_context.py      #   ExecutionContext
 │   │   │   ├── registry.py          #   工具注册表
 │   │   │   ├── memory_bridge.py     #   记忆桥接
-│   │   │   ├── events.py            #   SSE 事件类型（23 种）
+│   │   │   ├── events.py            #   SSE 事件类型（24 种）
 │   │   │   ├── message.py           #   Agent 间消息总线
 │   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
 │   │   │   ├── core_tools.py        #   基础工具（14 个）
@@ -442,8 +466,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  上下文压缩
 │   │   │   ├── context_window.py    #   令牌预算管理
 │   │   │   └── evaluator.py         #   质量评估
-│   │   ├── services/                # 业务服务层（24 个服务）
-│   │   ├── models/                  # ORM 模型（18 个模型文件）
+│   │   ├── services/                # 业务服务层（25 个服务）
+│   │   ├── models/                  # ORM 模型（19 个模型文件）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者
 │   ├── tests/                       # 2223 个后端测试（前端另有 861 个）

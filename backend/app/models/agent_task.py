@@ -24,10 +24,16 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+
+# Webhook 投递的渲染 prompt 上限 1 MiB（与 chat_messages.content 同一原因，评审
+# blocker B2 的 checkpoint 侧）：MySQL TEXT 64 KiB 会让 create_task fail-open
+# 丢 checkpoint；MEDIUMTEXT = 16 MiB。SQLite 保持 TEXT。
+_QUERY_TEXT = Text().with_variant(mysql.MEDIUMTEXT(), "mysql")
 
 
 class TaskStatus(enum.Enum):
@@ -168,7 +174,7 @@ class AgentTask(Base):
     )
 
     # ── Task content ──
-    query: Mapped[str] = mapped_column(Text, comment="Original user query")
+    query: Mapped[str] = mapped_column(_QUERY_TEXT, comment="Original user query")
     plan_id: Mapped[str | None] = mapped_column(
         String(36),
         index=True,

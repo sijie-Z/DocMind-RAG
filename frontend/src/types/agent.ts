@@ -26,6 +26,12 @@ export type AgentEventType =
   // B：计划审批（plan_approval_mode=always）：planner 出计划后暂停，等人类决策
   // （plan_steps 携带结构化步骤——resume 流不回放 plan_step，卡片数据自足）。
   | 'plan_approval_required'
+  // User Commands（issue #475）：命令通道事件三元组（见 backend/app/agent/events.py）。
+  // 命令在进入 PER 之前执行，不创建模型轮次；command_result 的载荷在
+  // command_name / command_data。
+  | 'command_start'
+  | 'command_result'
+  | 'command_error'
 
 export type ThinkingType = 'reasoning' | 'planning' | 'evaluation' | 'correction'
 // 六态真源：backend/app/agent/events.py:39-42（unavailable=评估服务不可用；
@@ -64,6 +70,8 @@ export interface AgentEvent {
   // Error
   retry_attempt?: number
   retry_hint?: string
+  /** 失败分类（后端 events.py 的 error_type；command_error 携带命令错误码） */
+  error_type?: string
   // Meta
   iteration?: number
   timestamp?: number
@@ -74,6 +82,9 @@ export interface AgentEvent {
   task_state?: AgentTaskState
   // B：plan_approval_required 的结构化步骤（[{id, description, dependencies, tool_hint}]）
   plan_steps?: PlanStepEdit[]
+  // User Commands（#475）：command_* 事件的命令名与结构化结果（非空才由后端带出）
+  command_name?: string
+  command_data?: Record<string, any>
 }
 
 // ── HITL（人在环）─────────────────────────────────────────────────────────
@@ -286,6 +297,13 @@ export interface AgentSession {
   message_count: number
   created_at: string
   updated_at: string
+  // issue #476：谱系字段（列表/详情同一口径；老后端缺省时按 undefined 处理）
+  parent_session_id?: string | null
+  root_session_id?: string | null
+  fork_point_message_id?: string | null
+  fork_reason?: string | null
+  is_fork?: boolean
+  is_seeded?: boolean
 }
 
 export interface AgentMessage {
@@ -322,6 +340,10 @@ export interface AgentChatMessage {
   /** 体验第四波 计时：本轮运行开始/终态时间戳（毫秒）——RunStats 数据源 */
   startedAt?: number
   endedAt?: number
+  /** issue #476：服务端消息 id（历史加载/落库回执）——「从此处分叉」的边界标识 */
+  serverMessageId?: string
+  /** User Commands（#475）：本条 assistant 消息承载命令事件（忽略 chunk 兼容回显） */
+  isCommand?: boolean
 }
 
 /** 用户 @ 引用的知识库文档（id 上送后端 referenced_document_ids）。 */

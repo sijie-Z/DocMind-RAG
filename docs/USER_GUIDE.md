@@ -4,7 +4,7 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
-> - 关键数字（39 个内置工具 / 25 个端点模块 / 34 条前端路由 / 23 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
+> - 关键数字（39 个内置工具 / 26 个端点模块 / 34 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -346,7 +346,7 @@ DocMind 的 Agent 不是「LLM 自由循环」，而是一个有明确阶段的�
 - 实际默认配置以 `backend/app/agent/config.py` 为准：`max_plan_steps=10`、`max_iterations=20`、`max_tool_calls_per_turn=5`、`max_retries_per_step=3`、单步超时 120s、`max_context_tokens=8000`；`approval_timeout_seconds=0`（一直等）、`plan_approval_mode="never"`。
 - `execute_python` / `execute_sql` / `mcp_call` 属于 `DEFAULT_DISABLED_TOOLS`，服务端会强制并入 `disabled_tools`，即使用户配置里没写（`backend/app/agent/config.py`、`endpoints/agent.py`）。
 - 反思的 `retry` 会在原地重跑该步骤；`replan` 会重新进入 Planning，每个 run 最多 1 次（`MAX_REPLANS_PER_RUN=1`）。Reviewer 的 `revise` / `reject` 只作为建议记录并展示，不会阻断最终回答。
-- Agent 的流式协议有 **23 种 SSE 事件类型**（`docs/facts.json` 的 `sse_event_types`，由 `backend/app/agent/events.py` 的 `EventType` 闭集派生），前端据此渲染计划树、思考流、工具卡片与审批卡片。
+- Agent 的流式协议有 **24 种 SSE 事件类型**（`docs/facts.json` 的 `sse_event_types`，由 `backend/app/agent/events.py` 的 `EventType` 闭集派生），前端据此渲染计划树、思考流、工具卡片与审批卡片。
 
 > `AGENT_ARCHITECTURE.md` 的「配置体系」示例写的是较早的默认值（如 `max_iterations=10`、`max_plan_steps=8`）；与代码冲突时以 `backend/app/agent/config.py` 为准。
 
@@ -411,6 +411,8 @@ ADR-001 已把这条语义冻结（`docs/decisions/ADR-001-路线冻结.md` D5�
 - `approve` 的粘滞范围是 **(tool_name, args) 指纹**：同一 run 内同一调用不再重复打扰；`deny` 让该调用不执行，并以结构化失败 `approval_denied` 交给反思器继续/收敛。
 - `approve + modified_instruction` 是「改指令续跑」：人工指导会注入后续步骤提示词。
 - 续跑可能停在下一个审批点；并发应答返回 409（`TASK_NOT_WAITING_APPROVAL` / `TASK_NOT_RESUMABLE` / `TASK_BUSY`）。
+
+**Hooks（扩展点，默认关闭）**：进程内事件总线覆盖 agent 轮次与工具执行（`agent/pre_step`、`tools/pre_execute` 等），配置见 `backend/config/hooks.yaml` 与 README「Hooks 扩展点」段，语义与边界见 `docs/decisions/ADR-004-hooks.md`。`tools/pre_execute` 返回 `ask` 时复用同一 HITL 审批门，hook 不能绕过审批；`HOOKS_ENABLED=false` 时零读取、零行为变化。
 
 ### 3.5 提示词三层：system / organization / personal
 
@@ -641,7 +643,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 
 ### 5.2 端点模块清单
 
-当前共 **25 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `include_router` 调用数派生）：
+当前共 **26 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
 
 | 模块 | 前缀 | 说明 |
 |------|------|------|
@@ -668,6 +670,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | scheduled_tasks | `/api/v1/scheduled-tasks` | 定时任务 CRUD / 暂停 / 手动触发 |
 | sessions | `/api/v1/sessions` | 会话 fork / seed / 谱系（issue #476） |
 | terminal | `/api/v1/terminal` | 容器持久 PTY、一次性 WS 票据（issue #477） |
+| webhooks | `/api/v1/webhooks` | 入站 Webhook 规则、HMAC 验签投递与 outbox 处理（issue #478） |
 | demo | `/api/v1/demo` | 演示数据填充 |
 | user_settings | `/api/v1/user` | 个人 UI 偏好 |
 

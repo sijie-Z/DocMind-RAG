@@ -190,6 +190,34 @@ def _apply_hardware_tier(settings_obj: Settings) -> None:
         logger.info("hardware_tier_applied=%s", sorted(applied))
 
 
+def validate_webhook_runtime(settings_obj: Settings) -> None:
+    """Webhook fail-closed 启动校验（issue #478）。
+
+    放在 load_settings 的最终对象上，而不是任何单个入口：``python -m app
+    --profile worker/headless/sdk/acp``、``uvicorn app.main:app``、
+    ``start_worker.py`` 与测试临时库都会经过这里。``WEBHOOKS_ENABLED=true``
+    时必须有合法的独立 Fernet key；否则抛 ``ConfigError``（CLI 退出码 2 /
+    web 启动失败），绝不带着"启用了但无法加解密 secret"的状态运行。
+    """
+    if not getattr(settings_obj, "WEBHOOKS_ENABLED", False):
+        return
+    key = (getattr(settings_obj, "WEBHOOK_ENCRYPTION_KEY", "") or "").strip()
+    if not key:
+        raise ConfigError(
+            "settings.WEBHOOK_ENCRYPTION_KEY",
+            "WEBHOOKS_ENABLED=true 时必须配置 WEBHOOK_ENCRYPTION_KEY（独立 Fernet key，fail-closed）",
+        )
+    try:
+        from cryptography.fernet import Fernet
+
+        Fernet(key.encode("utf-8"))
+    except Exception as exc:
+        raise ConfigError(
+            "settings.WEBHOOK_ENCRYPTION_KEY",
+            f"不是合法的 Fernet key: {exc}",
+        ) from exc
+
+
 # ──────────────────────────────────────────────────────────────
 # 打码与 hash
 # ──────────────────────────────────────────────────────────────
@@ -264,6 +292,7 @@ def load_settings(profile: str | None = None, patches: list[str] | None = None) 
     merged = deep_merge(merged, _environment_layer())
     settings_obj = _build_settings(merged)
     _apply_hardware_tier(settings_obj)
+    validate_webhook_runtime(settings_obj)
 
     _settings = settings_obj
     _active_profile = name
@@ -333,4 +362,5 @@ __all__ = [
     "load_settings",
     "mask_secrets",
     "reset_settings",
+    "validate_webhook_runtime",
 ]

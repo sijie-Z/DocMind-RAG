@@ -37,6 +37,7 @@ from app.api.v1.endpoints import (
     token_usage,
     user_settings,
     users,
+    webhooks,
     workflow,
 )
 
@@ -76,6 +77,9 @@ ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
     "scheduled_tasks": (scheduled_tasks.router, "/scheduled-tasks", ["定时任务"], "agent"),
     "demo": (demo.router, "/demo", ["示例数据"], "agent"),
     "user_settings": (user_settings.router, "/user", ["用户设置"], "core"),
+    # issue #478：入站 webhook + 规则管理。入站端点无需 JWT（HMAC 验签），
+    # 管理端点 require_org_admin；归 agent bundle（投递最终跑 Agent 会话）。
+    "webhooks": (webhooks.router, "/webhooks", ["Webhook"], "agent"),
 }
 
 ALL_BUNDLES: list[str] = ["core", "rag", "agent", "observability"]

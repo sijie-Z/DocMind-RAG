@@ -94,3 +94,24 @@ class BaseAppSettings(BaseSettings):
     # POST /commands/execute 404 COMMANDS_DISABLED，聊天入口不再拦截 "/" 前缀
     # （恢复到"斜杠文本按普通提示词处理"的旧行为）。
     COMMANDS_ENABLED: bool = True
+
+    # Hooks（issue #474）默认关闭：false 时**不读取** HOOKS_CONFIG_PATH、不注册
+    # 任何外部 hook，agent loop / executor 行为与基线逐字节一致（回滚开关）。
+    # true 时启动期加载并严格校验；非法配置 fail-closed（进程退出）。
+    HOOKS_ENABLED: bool = False
+    HOOKS_CONFIG_PATH: str = "config/hooks.yaml"
+
+    # Webhook runtime（issue #478）——默认全关。开启接收/outbox poll 需要
+    # WEBHOOKS_ENABLED=true，且必须同时配置 SecuritySettings.WEBHOOK_ENCRYPTION_KEY
+    # （独立 Fernet key；缺失/非法则启动失败，见 config loader 的 fail-closed 校验）。
+    WEBHOOKS_ENABLED: bool = False
+    # 签名时间戳容差（秒）：|now - webhook-timestamp| 超过即 401（防重放）。
+    WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: int = 300
+    # 全局 body 上限（规则 max_body_bytes 只能收紧到不高于此值）。
+    WEBHOOK_MAX_BODY_BYTES: int = 1048576
+    # 每规则默认每分钟限流（规则可单独下调）。
+    WEBHOOK_RATE_LIMIT_PER_MINUTE: int = 60
+    # outbox poll 间隔（秒）。
+    WEBHOOK_WORKER_POLL_SECONDS: int = 2
+    # 有界重试次数；达到后 failed + next_attempt_at=NULL（终态，可被同 id 重投重置）。
+    WEBHOOK_MAX_ATTEMPTS: int = 3

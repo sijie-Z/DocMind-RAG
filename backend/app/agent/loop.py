@@ -19,6 +19,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from app.agent import approval, checkpoint, steering
+from app.agent import hooks as agent_hooks
 from app.agent.config import AgentConfig
 from app.agent.context import ContextEngine
 from app.agent.events import AgentEvent
@@ -56,6 +57,11 @@ MAX_RESULT_TOKENS = 3000
 # 重规划只会以同样的理由循环（反射器倾向于持续投 replan），成本线性增长而
 # 收益不明。上限保证最坏情况是「最多 2 次规划 + 2 轮执行」，run 一定终止。
 MAX_REPLANS_PER_RUN = 1
+
+# Hooks（issue #474）：agent/turn_stopping deny 让轮次"继续循环"（重新规划）。
+# 硬上限防止确定性 deny 的 hook 把 run 变成无限循环——hook 是可信配置，但
+# 基础设施必须自带终止保证。超限后记录决策、强制结束（不静默）。
+HOOK_TURN_STOPPING_MAX_DENIALS = 3
 
 
 def _smart_truncate(result: str, tool_name: str) -> str:
@@ -275,6 +281,54 @@ class PERAgentLoop:
         # If we have substantial output AND remaining steps add no new tool types, skip
         return not (has_data and len(final_output) > 300)
 
+    async def _emit_hook_event(
+        self,
+        event: str,
+        payload: dict[str, Any],
+        *,
+        task_id: str | None,
+        session_id: str | None,
+    ) -> tuple[agent_hooks.HookDecision, list[AgentEvent]]:
+        """执行 loop 层 hook（turn_*），返回决策与 ``hook_error`` 事件列表。
+
+        默认关闭（HOOKS_ENABLED=false）时直接 allow、零 handler 调用；总线自身
+        故障被兜住——hook 基础设施不得拖垮主流程（显式 fail_closed 除外）。
+        """
+        bus = agent_hooks.get_hook_bus()
+        if not bus.enabled:
+            return agent_hooks.HookDecision(), []
+        ctx = agent_hooks.HookContext(
+            event=event,
+            session_id=session_id,
+            task_id=task_id,
+            user_id=self.user_id,
+            organization_id=self.organization_id,
+            payload=payload,
+        )
+        try:
+            decision, errors = await bus.emit(event, ctx)
+        except Exception as exc:  # noqa: BLE001 — 总线故障隔离
+            logger.error("hook bus emit failed (event=%s): %s", event, exc)
+            return agent_hooks.HookDecision(), []
+        return decision, agent_hooks.hook_error_events(errors)
+
+    async def _emit_turn_end(
+        self,
+        status: str,
+        *,
+        task_id: str | None,
+        session_id: str | None,
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """agent/turn_end（serial 观察）：正常完成、失败、取消、暂停都成对发出。"""
+        _, errors = await self._emit_hook_event(
+            agent_hooks.AGENT_TURN_END,
+            {"session_id": session_id, "task_id": task_id, "status": status},
+            task_id=task_id,
+            session_id=session_id,
+        )
+        for hook_event in errors:
+            yield hook_event
+
     async def run(
         self,
         query: str,
@@ -457,6 +511,16 @@ class PERAgentLoop:
         if task_id:
             ctx.task_id = task_id
 
+        # ── Hooks（issue #474）：agent/turn_start —— run 起点（观察，不阻断）──
+        _, turn_start_errors = await self._emit_hook_event(
+            agent_hooks.AGENT_TURN_START,
+            {"session_id": session_id, "task_id": task_id, "query": query},
+            task_id=task_id,
+            session_id=session_id,
+        )
+        for hook_event in turn_start_errors:
+            yield hook_event
+
         # @引用文档段（T14）：显式入参优先；resume 未显式传入时从快照 ctx 恢复
         # （快照缺失 / 值级漂移 → 无引用段，不伪造）。写回 ctx 保证本 run 后续
         # 落下的快照继续携带引用段——二次断流恢复同样不丢。
@@ -583,6 +647,10 @@ class PERAgentLoop:
             async for plan_event in self._pause_for_plan_approval(resume_plan, run_state_live):
                 yield plan_event
             if self.paused_for_plan_approval:
+                async for end_event in self._emit_turn_end(
+                    "paused", task_id=task_id, session_id=session_id
+                ):
+                    yield end_event
                 return
 
         # ── Phase 1–3: 规划 → 执行 → 反思（含有界重新规划）────────────────
@@ -592,6 +660,8 @@ class PERAgentLoop:
         # MAX_REPLANS_PER_RUN 保证终止，不允许无界循环。
         plan: Plan | None = None
         final_output = ""
+        # Hooks（issue #474）：turn_stopping deny 的次数（有界继续，见常量注释）。
+        turn_stopping_denials = 0
 
         while True:
             # ── HITL：协作式取消（阶段间检查点）——规划/重规划之前观察取消旗 ──
@@ -600,6 +670,10 @@ class PERAgentLoop:
                 yield cancel_event
                 await self._save_checkpoint("cancelled")
                 self.run_cancelled = True
+                async for end_event in self._emit_turn_end(
+                    "cancelled", task_id=task_id, session_id=session_id
+                ):
+                    yield end_event
                 return
 
             # ── Phase 1: Planning ────────────────────────────────────────
@@ -645,6 +719,12 @@ class PERAgentLoop:
                 async for plan_event in self._pause_for_plan_approval(plan, run_state_live):
                     yield plan_event
                 if self.paused_for_plan_approval:
+                    # 新鲜计划的审批暂停（plan_approval_mode=always 的主路径）：
+                    # turn_end 同样成对发出（status=paused）。
+                    async for end_event in self._emit_turn_end(
+                        "paused", task_id=task_id, session_id=session_id
+                    ):
+                        yield end_event
                     return
 
             # ── Phase 2: Execution ───────────────────────────────────────────
@@ -699,6 +779,10 @@ class PERAgentLoop:
                     # 本 run 平静结束——绝不给 service 任何"完成"信号，也不置终态。
                     self.paused_for_approval = True
                     self.pending_approval = req.request.to_dict()
+                    async for end_event in self._emit_turn_end(
+                        "paused", task_id=task_id, session_id=session_id
+                    ):
+                        yield end_event
                     return
                 except approval.RunCancelled:
                     # 协作式取消：如实发 run_cancelled（不伪装完成），落一次快照
@@ -710,6 +794,10 @@ class PERAgentLoop:
                     )
                     await self._save_checkpoint("cancelled")
                     self.run_cancelled = True
+                    async for end_event in self._emit_turn_end(
+                        "cancelled", task_id=task_id, session_id=session_id
+                    ):
+                        yield end_event
                     return
                 finally:
                     # Conditional routing belongs in a finally so it still runs when the
@@ -955,6 +1043,43 @@ class PERAgentLoop:
                         self.memory.reset_working()
                         continue
 
+            # ── Hooks（issue #474）：agent/turn_stopping —— 自然结束前的闸门 ──
+            # deny → 继续循环（重新规划 + 执行）；硬上限保证终止（见常量）。
+            stop_decision, stop_errors = await self._emit_hook_event(
+                agent_hooks.AGENT_TURN_STOPPING,
+                {"session_id": session_id, "task_id": task_id, "reason": "finalize"},
+                task_id=task_id,
+                session_id=session_id,
+            )
+            for hook_event in stop_errors:
+                yield hook_event
+            if stop_decision.action == "deny":
+                if turn_stopping_denials < HOOK_TURN_STOPPING_MAX_DENIALS:
+                    turn_stopping_denials += 1
+                    ctx.record_decision(
+                        "hooks",
+                        "turn_stopping_denied",
+                        stop_decision.reason or "hook 拒绝结束轮次，继续循环",
+                    )
+                    yield AgentEvent(
+                        type="thinking",
+                        content="hook 阻止本轮结束，继续执行...",
+                        thinking_type="evaluation",
+                    )
+                    await _yield_control()
+                    # 与 replan 同款隔离：新一轮执行的步骤 id 会复用，旧结果不得混入。
+                    self.memory.reset_working()
+                    continue
+                ctx.record_decision(
+                    "hooks",
+                    "turn_stopping_denied_capped",
+                    f"turn_stopping 连续拒绝达到上限 {HOOK_TURN_STOPPING_MAX_DENIALS}，强制结束",
+                )
+                logger.warning(
+                    "turn_stopping hook 连续拒绝 %d 次，达到上限，强制结束轮次",
+                    HOOK_TURN_STOPPING_MAX_DENIALS,
+                )
+
             break
 
         # ── Phase 3b: Adversarial Review ────────────────────────────────
@@ -965,6 +1090,10 @@ class PERAgentLoop:
             yield cancel_event
             await self._save_checkpoint("cancelled")
             self.run_cancelled = True
+            async for end_event in self._emit_turn_end(
+                "cancelled", task_id=task_id, session_id=session_id
+            ):
+                yield end_event
             return
         # 预算已尽则跳过对抗审查（同 Phase 3，issue #203 ②）。
         if self.config.enable_reflection and plan.steps and not self.config.over_budget(ctx):
@@ -1114,6 +1243,14 @@ class PERAgentLoop:
             f"Plan: {log_safe(plan.goal[:50])}... | Steps: {plan.completed_steps}/{plan.total_steps} | "
             f"Output: {len(final_output)} chars"
         )
+
+        # ── Hooks（issue #474）：agent/turn_end —— 轮次结束（serial 观察）────
+        async for end_event in self._emit_turn_end(
+            "failed" if self.run_failed else "completed",
+            task_id=task_id,
+            session_id=session_id,
+        ):
+            yield end_event
 
         yield AgentEvent(type="done", plan_progress=1.0)
 

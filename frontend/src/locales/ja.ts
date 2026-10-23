@@ -180,6 +180,7 @@ export default {
     welcomeDesc: '質問に答えたり、ドキュメントを分析したり、コードを書いたり、ただおしゃべりしたりできます。',
     demoData: 'デモデータ',
     inputPlaceholder: 'メッセージを入力（Shift + Enterで改行）...',
+    slashCommandsAgentOnly: 'スラッシュコマンドは Agent（詳細分析）モードでのみ利用できます。通常のクイックモードでは通常のテキストとして送信されます。',
     uploadFile: 'ファイルをアップロード（近日公開）',
     streamResponse: 'ストリーム応答',
     promptTooLong: 'プロンプトが上限 {max} 文字を超えたため適用されませんでした。短くしてお試しください。',
@@ -1052,18 +1053,68 @@ export default {
   slashCmd: {
     heading: 'スラッシュコマンド',
     empty: '一致するコマンドがありません（Enter でそのまま送信）',
+    unavailable: 'サーバーコマンドは無効です。ローカルテンプレートのみ利用できます',
+    loadError: 'コマンド一覧の取得に失敗しました（ローカルテンプレートは利用可能）',
+    commandBadge: 'サーバー',
     desc: {
       search: 'ウェブ検索して要約（web_search ツール）',
       doc: 'ナレッジベースに基づいて回答（search_knowledge_base ツール）',
-      workflow: '多段階の計画に分解して順に実行（プランナー）',
-      help: 'すべてのコマンドと説明を表示',
-      clear: '入力欄をクリア'
+      workflow: '多段階の計画に分解して順に実行（プランナー）'
+    },
+    cmdDesc: {
+      help: '利用可能なコマンド一覧または個別ヘルプを表示',
+      status: '現在のセッションと最近のタスク状態を表示',
+      export: '現在のセッションをエクスポート（Markdown / JSON）',
+      tools: 'Agent が利用できるツールと既定の無効状態を表示'
     },
     tpl: {
       search: 'ウェブ検索して要約：{q}',
       doc: 'ナレッジベースに基づいて回答：{q}',
       workflow: '多段階の計画に分解して順に実行してください：{q}'
     }
+  },
+  agentCommand: {
+    starting: 'コマンドを実行中 {line}',
+    running: '実行中',
+    completed: '完了',
+    failed: '失敗',
+    exportReady: 'エクスポートを生成しました（{count} 件）',
+    download: '{filename} をダウンロード',
+    noOutput: '（出力なし）',
+    failedFallback: 'コマンドの実行に失敗しました。しばらくしてから再試行してください',
+
+    errUnknown: '不明なコマンド（/help で一覧を表示）',
+    errPermission: 'このコマンドは組織管理者専用です',
+    errInvalid: 'コマンド引数が不正です',
+    errBusy: 'このセッションでは別のコマンドが実行中です',
+    errTimeout: 'コマンドがタイムアウトしました',
+    errSession: '先にセッションを開いてから実行してください',
+    errSessionNotFound: 'セッションが存在しないか、アクセス権がありません',
+    errDisabled: 'コマンド機能は無効です',
+  },
+  agentFork: {
+    badge: '分岐セッション',
+    badgeTitle: '親: {parent} · ルート: {root} · 境界メッセージ: {boundary}',
+    parentMissing: '親セッションは削除済みか閲覧できません',
+    forkHere: 'ここから分岐',
+    forkBefore: 'このメッセージの前で分岐',
+    forking: '分岐中…',
+    invalidBoundary: 'このメッセージは分岐境界にできません。確定済みのターン（回答の後、または新しい質問の前）のみ利用できます',
+    runningHint: '現在のターンが実行中です。終了してから分岐してください',
+    children: '分岐を表示',
+    childrenTitle: 'このセッションの分岐',
+    childrenEmpty: 'まだ分岐はありません',
+    childrenError: '分岐一覧の取得に失敗しました。再試行してください',
+    childLoadFailed: '分岐は作成されましたが、子セッションの内容を読み込めませんでした。セッションを再選択してください',
+    seedNote: '「{parent}」から分岐し、{count} 件のメッセージをコピーしました。メモリ seed: {seed}',
+    seedApplied: 'セッションメモリに書き込み済み',
+    seedSkipped: '無効（履歴のみコピー）',
+    errBoundary: '分岐境界が不正です：確定済みのターンからのみ分岐できます',
+    errCheckpointRequired: 'ソースセッションに実行中のタスクがあります。最後にコミットされた checkpoint からのみ分岐できます',
+    errCheckpointUnavailable: '利用可能な確定済み checkpoint がありません（不存在・承認待ち・実行中ツール）',
+    errQuota: 'コピーするメッセージ数が上限を超えています',
+    errNotFound: 'セッションまたは境界メッセージが存在しません（権限なしを含む）',
+    errFailed: '分岐に失敗しました。しばらくしてから再試行してください'
   },
   runStats: {
     running: '実行中 {t}',

@@ -25,7 +25,7 @@ Core use cases:
 - 💬 **Intelligent Q&A** — RAG pipeline: keyword + vector hybrid search, reranking, LLM generation with SSE streaming.
 - 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 39 tools for complex multi-step tasks.
 - 🧩 **Workflow Editor** — Visual DAG design & debugging (Vue Flow). Configurable LLM models, prompts, and execution engines.
-- 📊 **Observability** — Prometheus metrics, Langfuse full-trace, 23 SSE event types, RunReport execution summaries.
+- 📊 **Observability** — Prometheus metrics, Langfuse full-trace, 24 SSE event types, RunReport execution summaries.
 - 🔐 **Multi-Tenant + RBAC** — Organization isolation, role-based permissions, JWT authentication.
 
 > Design decisions and experimental data belong in the research repo: [DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
@@ -139,6 +139,32 @@ User instruction
 | Execution Replay | `replay/` | Full execution snapshots, save & replay with diff comparison |
 | Pattern Mining | `mining/` | Scan replays for high-frequency tool sequences → skill suggestions (offline CLI; reads benchmark/replay/) |
 
+**Hooks extension points** (issue #474, off by default):
+
+In-process event bus covering agent turns and tool execution, with `waterfall`
+(can rewrite/short-circuit) and `serial` (ordered observation) semantics.
+Configuration lives in `backend/config/hooks.yaml`; enable it with
+`HOOKS_ENABLED=true` (disabled means the file is never read and behavior is
+unchanged):
+
+```yaml
+hooks:
+  - name: audit_tool_calls
+    event: tools/pre_execute        # agent/turn_start | agent/pre_step | agent/post_step
+    module: app.agent.hooks.builtin.audit_tool_calls   # must start with app.agent.hooks.
+    enabled: true
+    priority: 100                   # lower runs first
+    timeout_seconds: 2.0            # 0.1-30
+    failure_policy: fail_open       # fail_open | fail_closed
+```
+
+A handler is `async def handler(ctx, next)`: `await next(payload)` continues the
+chain; skipping it short-circuits; return
+`HookDecision(action="deny"|"modify"|"ask", ...)`. `ask` on `tools/pre_execute`
+reuses the existing HITL approval gate — hooks cannot bypass approval. Failures
+emit `hook_error` SSE events and `docmind_hook_*` metrics. See
+`docs/decisions/ADR-004-hooks.md`.
+
 ### 📚 RAG Pipeline (`backend/app/rag/`)
 
 Multi-stage retrieval-augmented generation — from user query to streaming answer:
@@ -192,7 +218,7 @@ Query enters
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-25 endpoint modules under `/api/v1`:
+26 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|
@@ -220,6 +246,7 @@ Query enters
 | Agent Commands | `/commands` | Server-side command catalog and model-free execution (/help, /status, /export, /tools) |
 | MCP | `/mcp` | MCP server status (admin, read-only) |
 | User Settings | `/user` | Personal UI preferences |
+| Webhooks | `/webhooks` | Inbound webhook rule management, HMAC-verified delivery, outbox processing (issue #478) |
 | Demo Data | `/demo` | Seed demo documents & data |
 
 Swagger docs: `http://localhost:8000/docs`
@@ -405,8 +432,8 @@ DocMind/
 │   │   ├── dependencies.py          # Dependency injection container
 │   │   ├── exceptions.py            # Custom exception hierarchy
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # Main router (25 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (25 files)
+│   │   │   ├── router.py            # Main router (26 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (26 files)
 │   │   ├── agent/                   # PER Agent core
 │   │   │   ├── loop.py              #   PER main loop
 │   │   │   ├── planner.py           #   Planner (LLM + structured rules)
@@ -420,7 +447,7 @@ DocMind/
 │   │   │   ├── exec_context.py      #   ExecutionContext
 │   │   │   ├── registry.py          #   Tool registry
 │   │   │   ├── memory_bridge.py     #   Memory bridge
-│   │   │   ├── events.py            #   SSE event types (23 types)
+│   │   │   ├── events.py            #   SSE event types (24 types)
 │   │   │   ├── message.py           #   Agent message bus
 │   │   │   ├── tracing.py           #   Execution trace records (dev-only: eval/offline; not written in production)
 │   │   │   ├── core_tools.py        #   14 base tools
@@ -472,8 +499,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  Context compression
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (24 services)
-│   │   ├── models/                  # ORM models (18 model files)
+│   │   ├── services/                # Business service layer (25 services)
+│   │   ├── models/                  # ORM models (19 model files)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer
 │   ├── tests/                       # 2223 backend tests (plus 861 frontend)
