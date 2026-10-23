@@ -8,9 +8,11 @@
 - DB 助手：``create_chat_session`` / ``load_chat_session`` /
   ``list_chat_sessions`` / ``load_history`` / ``update_session_settings``。
 
-取消语义（issue §5.3）：``cancel()`` 置旗并丢弃队列中未发送的更新，此后
-``enqueue_update`` 一律丢弃——取消后不得再发迟到 update；终局由
-``session/prompt`` 的 ``stopReason:"cancelled"`` 表达。
+取消语义（issue §5.3 / #494）：``cancel()`` 置取消旗、开启 update 抑制并丢弃
+队列中未发送的更新，此后 ``enqueue_update`` 在抑制期间一律丢弃——成功取消后
+不得再发迟到 update。抑制与取消旗**解耦**：取消诚实失败时 ``resume_updates()``
+恢复外发（run 仍在跑，客户端必须能继续看到输出）；终局由 ``session/prompt``
+的 ``stopReason`` 表达（取消输掉竞态时如实报 end_turn）。
 """
 
 from __future__ import annotations
@@ -43,11 +45,23 @@ class AcpSessionState:
         self._send = send
         self.lock = asyncio.Lock()
         self.cancel_event = asyncio.Event()
+        # 取消抑制（issue #494 评审 B5）：与 cancel_event 解耦——取消**诚实失败**
+        # 时只复位本旗，run 继续外发 update；cancel_event 保留给终局判定
+        # （取消输掉竞态时 prompt 报 end_turn，而不是把完成改写成 cancelled）。
+        self.updates_suppressed = False
         # 队列元素：session/update 通知帧；None 是 sender 退出哨兵。
         self.queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         self.plan_entries: dict[str, list[dict[str, Any]]] = {}
         self.pending_permission_tasks: set[asyncio.Task] = set()
         self.last_tool_call_id = ""
+        # 本轮 run 的任务 id（由事件盖章捕获；issue #494：取消终态兜底必须
+        # 只收敛本轮任务，不能误伤同一会话里其它写入者的活跃任务）。
+        self.active_task_id = ""
+        # 本轮 prompt 开始前该会话已有的最新任务 id（issue #494 评审 B6）：
+        # 取消等待任务行登记时用它区分「本轮新任务」与「上一轮遗留的终态任务」。
+        # 语义："" = 明确没有任务；非空 = 基线任务 id；None = 基线未知
+        # （启动查询在途/失败）——未知时不得用"最新任意任务"推断本轮终态。
+        self.pre_prompt_task_id: str | None = None
         self.update_seq = 0
         self._closed = False
         self.sender_task = asyncio.create_task(self._sender())
@@ -55,8 +69,8 @@ class AcpSessionState:
     # ── 更新通道 ──────────────────────────────────────────────────────────
 
     def enqueue_update(self, update: dict[str, Any]) -> bool:
-        """入队一条 ``session/update``；取消后一律丢弃（返回 False）。"""
-        if self._closed or self.cancel_event.is_set():
+        """入队一条 ``session/update``；取消抑制生效时一律丢弃（返回 False）。"""
+        if self._closed or self.updates_suppressed:
             return False
         self.update_seq += 1
         self.queue.put_nowait(
@@ -105,16 +119,28 @@ class AcpSessionState:
             task.cancel()
 
     async def cancel(self) -> int:
-        """置取消旗、丢未发送更新、取消待审批；返回丢弃条数。"""
+        """置取消旗、抑制 update、丢未发送更新、取消待审批；返回丢弃条数。"""
         self.cancel_event.set()
+        self.updates_suppressed = True
         self.cancel_pending_permissions()
         return self.drain()
+
+    def resume_updates(self) -> None:
+        """取消诚实失败（run 仍在跑）→ 恢复 update 外发（issue #494 评审 B5）。
+
+        只复位抑制，不复位 ``cancel_event``：终局仍要知道"取消来过"，以便在
+        取消输掉竞态时如实报 end_turn/错误而不是 cancelled。
+        """
+        self.updates_suppressed = False
 
     def reset_for_prompt(self) -> None:
         """新一轮 prompt 的干净起点（上一轮取消不污染本轮）。"""
         self.cancel_event.clear()
+        self.updates_suppressed = False
         self.plan_entries.clear()
         self.last_tool_call_id = ""
+        self.active_task_id = ""
+        self.pre_prompt_task_id = None
 
     async def close(self) -> None:
         """结束 sender（仅解除连接映射，不动 DB）。"""
