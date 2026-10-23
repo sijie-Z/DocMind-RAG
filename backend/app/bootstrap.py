@@ -147,7 +147,7 @@ async def read_db_revision(engine: Any) -> set[str] | None:
         if not exists:
             return None
         rows = await conn.execute(
-            text(f"SELECT version_num FROM {ALEMBIC_VERSION_TABLE}")  # noqa: S608
+            text(f"SELECT version_num FROM {ALEMBIC_VERSION_TABLE}")  # nosec B608  # noqa: S608
         )
         return {row[0] for row in rows}
 
