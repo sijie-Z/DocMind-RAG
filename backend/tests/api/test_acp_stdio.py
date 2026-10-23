@@ -340,6 +340,38 @@ async def test_prompt_streams_updates_in_order_and_persists(sqlite_env, schema):
 
 
 @pytest.mark.asyncio
+async def test_history_uses_most_recent_20_messages(sqlite_env):
+    from app.acp.session import load_history
+    from app.models.chat import ChatSessionStatus, MessageType
+
+    async with sqlite_env.factory() as db:
+        db.add(
+            ChatSession(
+                id="hist-session",
+                user_id=USER_ID,
+                organization_id=ORG_ID,
+                status=ChatSessionStatus.ACTIVE,
+            )
+        )
+        for index in range(25):
+            db.add(
+                ChatMessage(
+                    id=f"m{index}",
+                    session_id="hist-session",
+                    seq=index,
+                    content=f"msg-{index}",
+                    message_type=MessageType.USER if index % 2 == 0 else MessageType.ASSISTANT,
+                )
+            )
+        await db.commit()
+    history = await load_history(sqlite_env.factory, "hist-session")
+    assert len(history) == 20
+    assert history[0]["content"] == "msg-5", "必须取最近 20 条（不是最早 20 条）"
+    assert history[-1]["content"] == "msg-24"
+    assert history[-1]["role"] == "user"
+
+
+@pytest.mark.asyncio
 async def test_prompt_error_event_returns_internal_error(sqlite_env):
     service = FakeAgentService()
     service.add_chat(
@@ -408,6 +440,32 @@ async def test_cancel_drops_late_updates_and_returns_cancelled(sqlite_env):
         ]
         assert texts == ["第一段"]
         assert "迟到的内容" not in texts
+
+
+@pytest.mark.asyncio
+async def test_cancel_request_cancels_pending_permission(sqlite_env, monkeypatch):
+    """$/cancel_request 取消指定服务端请求：审批请求收起、会话按取消收敛。"""
+    decisions = _patch_approval(monkeypatch)
+    service = FakeAgentService()
+    service.add_chat(
+        script(
+            AgentEvent(
+                type="approval_required",
+                content="需审批",
+                tool_name="code_execution",
+                tool_call_id="call-cr",
+                task_id="task-cr",
+            )
+        )
+    )
+    async with acp_env(sqlite_env, service=service) as env:
+        session_id = await _new_session(env.client)
+        prompt_task = asyncio.create_task(env.client.prompt(session_id, "运行代码"))
+        request = await env.client.wait_for_server_request("session/request_permission")
+        await env.client.notify("$/cancel_request", {"requestId": request["id"]})
+        response = await prompt_task
+        assert response["result"] == {"stopReason": "cancelled"}
+    assert decisions == [], "取消优先：不写 allow/deny 决定"
 
 
 # ── 审批：allow / reject / 超时 ────────────────────────────────────────────

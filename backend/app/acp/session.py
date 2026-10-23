@@ -224,11 +224,15 @@ async def list_chat_sessions(
 
 
 async def load_history(db_factory, session_id: str) -> list[dict[str, str]]:
-    """最近 20 条消息 → ``[{role, content}]``（复用 /agent/chat 的构造格式）。"""
+    """**最近** 20 条消息 → ``[{role, content}]``（沿用 /agent/chat 的构造格式）。
+
+    注意：``/agent/chat`` 现有查询是 ``seq ASC LIMIT 20``（取最早 20 条）；
+    ACP（issue §5.5）明确要求"最近 20 条"，这里按时间倒序取 20 条后翻转。
+    """
     stmt = (
         select(ChatMessage)
         .where(ChatMessage.session_id == session_id)
-        .order_by(ChatMessage.seq.asc(), ChatMessage.created_at.asc())
+        .order_by(ChatMessage.created_at.desc(), ChatMessage.seq.desc())
         .limit(HISTORY_LIMIT)
     )
     async with db_factory() as db:
@@ -238,7 +242,7 @@ async def load_history(db_factory, session_id: str) -> list[dict[str, str]]:
             "role": "user" if m.message_type == MessageType.USER else "assistant",
             "content": m.content,
         }
-        for m in messages
+        for m in reversed(messages)
     ]
 
 
