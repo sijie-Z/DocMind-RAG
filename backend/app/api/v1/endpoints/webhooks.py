@@ -2,11 +2,14 @@
 
 两个面：
 
-- **入站** ``POST /api/v1/webhooks/{rule_id}``（无 JWT）：原始 body → 上限 →
-  验签 → 解析 → 限流 → 幂等登记 → 202 快速返回（异步由 outbox poller 处理）。
-  签名错误 401、规则不存在/禁用 404、body 超限 413、限流 429 + ``Retry-After``。
+- **入站** ``POST /api/v1/webhooks/{rule_id}``（无 JWT）：限流（按规则+IP，
+  先于验签，未知规则用 ``unknown:{ip}`` 桶）→ 读取 body（上限）→ 验签 →
+  解析 → 幂等登记 → 202 快速返回（异步由 outbox poller 处理）。签名错误 401、
+  规则不存在/禁用/功能未启用 404、body 超限 413、限流 429 + ``Retry-After``。
 - **管理**（全部组织管理员 ``require_org_admin``）：规则 CRUD、secret 轮换、
-  dry-run（只渲染/验签，不写投递、不建会话）、投递列表。
+  dry-run（只渲染/验签，不写投递、不建会话）、投递列表。issue #497 起在权限
+  校验后做运行时门控：未启用 503 ``WEBHOOKS_DISABLED``、密钥缺失/非法 503
+  ``WEBHOOK_KEY_MISSING``（不 500、不泄露堆栈）。
 
 组织隔离：规则查询带 ``org_id``；跨组织规则一律 404（不泄露存在性）；
 同组织非管理员 403。
@@ -41,6 +44,7 @@ from app.exceptions import (
     AuthorizationError,
     NotFoundError,
     RateLimitError,
+    ServiceUnavailableError,
     ValidationError,
 )
 from app.models.organization import user_organization
@@ -54,6 +58,7 @@ from app.models.webhook import (
 )
 from app.services.audit_service import audit_service, extract_client_ip
 from app.services.webhook_service import (
+    WebhookEncryptionError,
     _utcnow,
     active_secrets,
     decrypt_secret,
@@ -68,6 +73,7 @@ from app.services.webhook_service import (
     render_prompt,
     secret_prefix,
     validate_prompt_template,
+    validate_webhook_settings,
     verify_signature,
 )
 
@@ -102,6 +108,45 @@ class RuleUpdateRequest(BaseModel):
 class DryRunRequest(BaseModel):
     payload: Any = Field(default_factory=dict)
     signature_headers: dict[str, str] | None = None
+
+
+# ── 运行时门控（issue #497）──────────────────────────────────────────
+
+
+def _ensure_webhook_admin_runtime() -> None:
+    """管理 API 运行时门控：未启用/密钥缺失或非法 ⇒ 稳定 503，绝不 500。
+
+    - ``WEBHOOKS_ENABLED=false`` → 503 ``WEBHOOKS_DISABLED``；
+    - 启用但 ``WEBHOOK_ENCRYPTION_KEY`` 缺失/非法 → 503 ``WEBHOOK_KEY_MISSING``。
+
+    必须在管理权限校验**之后**调用：无权限用户仍先得到既有 403/404，不因
+    功能开关泄露状态。错误体走 ``AppError`` 统一包裹，只含稳定 error_code 与
+    友好 message，不含异常堆栈/内部路径（``WebhookEncryptionError`` 的细节
+    只进日志，绝不外泄）。
+    """
+    if not settings.WEBHOOKS_ENABLED:
+        raise ServiceUnavailableError(
+            "Webhook 功能未启用（WEBHOOKS_ENABLED=false）",
+            error_code="WEBHOOKS_DISABLED",
+        )
+    try:
+        validate_webhook_settings()
+    except WebhookEncryptionError:
+        raise ServiceUnavailableError(
+            "Webhook 加密密钥未配置或非法（WEBHOOK_ENCRYPTION_KEY）",
+            error_code="WEBHOOK_KEY_MISSING",
+        ) from None
+
+
+def _webhook_runtime_available() -> bool:
+    """入口级可用性（供公共投递端点使用）：未启用或密钥不可用一律视为不可用。"""
+    if not settings.WEBHOOKS_ENABLED:
+        return False
+    try:
+        validate_webhook_settings()
+    except WebhookEncryptionError:
+        return False
+    return True
 
 
 # ── 组织/权限辅助 ────────────────────────────────────────────────────
@@ -214,6 +259,7 @@ async def list_rules(
 ):
     org_id = _resolve_org(current_user, organization_id)
     await require_org_admin(db, current_user, org_id)
+    _ensure_webhook_admin_runtime()
     rows = (
         (
             await db.execute(
@@ -237,6 +283,7 @@ async def create_rule(
 ):
     org_id = _resolve_org(current_user, payload.organization_id)
     await require_org_admin(db, current_user, org_id)
+    _ensure_webhook_admin_runtime()
     validate_prompt_template(payload.prompt_template)
 
     plaintext = generate_secret()
@@ -276,6 +323,7 @@ async def update_rule(
     current_user: User = Depends(get_current_user),
 ):
     rule = await _load_rule_for_admin(db, current_user, rule_id)
+    _ensure_webhook_admin_runtime()
     changes = payload.model_dump(exclude_unset=True)
 
     if "prompt_template" in changes:
@@ -319,6 +367,7 @@ async def delete_rule(
     current_user: User = Depends(get_current_user),
 ):
     rule = await _load_rule_for_admin(db, current_user, rule_id)
+    _ensure_webhook_admin_runtime()
     # 显式删子行：SQLite 测试路径未开外键级联，MySQL 侧 FK 亦有 ON DELETE CASCADE。
     await db.execute(delete(WebhookDelivery).where(WebhookDelivery.rule_id == rule.id))
     await db.delete(rule)
@@ -342,6 +391,7 @@ async def rotate_secret(
     current_user: User = Depends(get_current_user),
 ):
     rule = await _load_rule_for_admin(db, current_user, rule_id)
+    _ensure_webhook_admin_runtime()
     plaintext = generate_secret()
     rule.secret_prev_encrypted = rule.secret_encrypted
     rule.secret_encrypted = encrypt_secret(plaintext)
@@ -367,6 +417,7 @@ async def dry_run_rule(
     current_user: User = Depends(get_current_user),
 ):
     rule = await _load_rule_for_admin(db, current_user, rule_id)
+    _ensure_webhook_admin_runtime()
 
     signature_valid: bool | None = None
     signature_error: str | None = None
@@ -425,36 +476,21 @@ async def receive_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    if not settings.WEBHOOKS_ENABLED:
-        # 功能关闭 = 不接收；与"规则不存在"同形，不泄露规则 id 是否真实。
+    if not _webhook_runtime_available():
+        # 未启用或密钥不可用 = 不接收；与"规则不存在"同形，不泄露规则 id 是否
+        # 真实，也不以 500/堆栈暴露配置错误（issue #497）。
         raise NotFoundError("Webhook 规则不存在")
 
     rule = await db.get(WebhookRule, rule_id)
-    if rule is None or not rule.enabled:
-        raise NotFoundError("Webhook 规则不存在")
 
-    # 1) 取原始 body（有上限保护；Content-Length 超限直接 413，不读 stream）。
-    limit = effective_max_body_bytes(rule)
-    raw = await read_body_with_limit(request, limit)
-
-    # 2) 先验签，再解析（禁止重序列化后验签）。
-    verify_signature(raw, request.headers, active_secrets(rule))
-
-    # 3) 解析 JSON（payload 存入 outbox，poller 渲染用）。
-    try:
-        payload_obj = json.loads(raw)
-    except ValueError as exc:
-        raise ValidationError("webhook body 必须是合法 JSON") from exc
-    try:
-        payload_text = raw.decode("utf-8")
-    except UnicodeDecodeError:  # pragma: no cover - json.loads 已接受，仅非 UTF-8 编码触发
-        payload_text = json.dumps(payload_obj, ensure_ascii=False)
-
-    # 4) 限流（按规则 + IP）；超限不得落投递行。429 需 Retry-After：AppError
-    #    handler 不支持响应头，端点直接构造统一错误包裹。
+    # 1) 限流前置（issue #497，先于读 body/验签）：按 rule_id + IP 计数；未知或
+    #    禁用规则用 ``unknown:{ip}`` 桶，避免枚举；坏签名同样消耗配额，超限
+    #    429 + Retry-After 且不落投递行。429 需响应头：AppError handler 不支持，
+    #    端点直接构造统一错误包裹。
     client_ip = extract_client_ip(request) or "unknown"
+    rate_rule = rule if rule is not None and rule.enabled else None
     try:
-        await enforce_rate_limit(rule, client_ip)
+        await enforce_rate_limit(rate_rule, client_ip)
     except RateLimitError as exc:
         retry_after = int((exc.detail or {}).get("retry_after", 60))
         return JSONResponse(
@@ -471,9 +507,32 @@ async def receive_webhook(
             headers={"Retry-After": str(retry_after)},
         )
 
-    # 5) 幂等：Redis 快路径（不可用降级），DB 唯一约束最终仲裁。
+    if rule is None or not rule.enabled:
+        raise NotFoundError("Webhook 规则不存在")
+
+    # 2) 取原始 body（有上限保护；Content-Length 超限直接 413，不读 stream）。
+    limit = effective_max_body_bytes(rule)
+    raw = await read_body_with_limit(request, limit)
+
+    # 3) 验签（先于解析；禁止重序列化后验签）。Standard Webhooks 头必需，
+    #    缺失 webhook-id 在这里即 401。
+    verify_signature(raw, request.headers, active_secrets(rule))
+
+    # 4) 解析 JSON（payload 存入 outbox，poller 渲染用）。
+    try:
+        payload_obj = json.loads(raw)
+    except ValueError as exc:
+        raise ValidationError("webhook body 必须是合法 JSON") from exc
+    try:
+        payload_text = raw.decode("utf-8")
+    except UnicodeDecodeError:  # pragma: no cover - json.loads 已接受，仅非 UTF-8 编码触发
+        payload_text = json.dumps(payload_obj, ensure_ascii=False)
+
+    # 5) 幂等：``webhook-id`` 是 Standard Webhooks 必需头（验签已强制），直接
+    #    作为幂等键；不可达的 body-hash 兜底分支已删除（issue #497）。超长 id
+    #    400（列宽 128），绝不再退化为 body 哈希。
     webhook_id = request.headers.get("webhook-id")
-    idempotency_key = derive_idempotency_key(webhook_id, raw)
+    idempotency_key = derive_idempotency_key(webhook_id)
     await mark_idempotency_in_redis(rule.id, idempotency_key)
 
     result = await register_delivery(
