@@ -284,6 +284,17 @@ def build_lifespan(deps: LifespanDeps):
             except Exception as e:
                 logger.warning(f"MCP 初始化失败（不影响启动）: {e}")
 
+            # Hooks（issue #474）：HOOKS_ENABLED=false（默认）时零读取、零行为变化；
+            # true 时启动期加载并严格校验——非法配置 fail-closed 抛错，进程退出
+            # （hook 会改写/阻断执行，带病运行比不启动更危险）。
+            # 启动加载在 bootstrap lifespan（web/worker/headless/sdk/acp 统一入口），
+            # app.main 兼容壳不重复接线。
+            if settings.HOOKS_ENABLED:
+                from app.agent.hooks import initialize_from_settings
+
+                await initialize_from_settings(settings)
+                logger.info("Hooks 扩展点已启用（%s）", settings.HOOKS_CONFIG_PATH)
+
             # 演示账号（issue #246）：只做创建/补齐（ensure_demo_user 内部自带日志）。
             # 先前版本在此处以固定口令 "123456" 真登录做"自检"——加固后该口令永不可能正确，
             # 每次启动都会给 login:fail:guest +1；锁死后 AccountLockedError 直接打崩启动。
