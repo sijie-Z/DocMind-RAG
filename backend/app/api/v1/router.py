@@ -14,6 +14,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     agent,
+    api_keys,
     auth,
     chat,
     commands,
@@ -44,6 +45,8 @@ from app.api.v1.endpoints import (
 ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
     "auth": (auth.router, "/auth", ["认证"], "core"),
     "users": (users.router, "/users", ["用户管理"], "core"),
+    # issue #480：API Key 管理（core bundle，JWT 与 dm_ key 均可管理自己的 key）。
+    "api_keys": (api_keys.router, "/api-keys", ["API Key"], "core"),
     "files": (files.router, "/files", ["文件管理"], "rag"),
     "documents": (documents.router, "/documents", ["文档管理(RAG)"], "rag"),
     "chat": (chat.router, "/chat", ["聊天"], "rag"),

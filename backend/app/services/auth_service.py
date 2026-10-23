@@ -123,6 +123,16 @@ class AuthService:
         """获取当前用户"""
         token = credentials.credentials
 
+        # API Key（issue #480 §5.1）：``dm_`` 前缀走独立分支；JWT 路径行为不变。
+        # 旧 ``users.api_key``（``sk-`` 明文）没有认证消费者，继续拒绝。
+        if token.startswith("dm_"):
+            from app.services.api_key_service import api_key_service
+
+            api_user = await api_key_service.authenticate(token, db)
+            if api_user is None:
+                raise _auth_failed()
+            return api_user
+
         # 验证令牌
         payload = self.verify_token(token)
 

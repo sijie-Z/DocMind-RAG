@@ -94,3 +94,29 @@ class BaseAppSettings(BaseSettings):
     # POST /commands/execute 404 COMMANDS_DISABLED，聊天入口不再拦截 "/" 前缀
     # （恢复到"斜杠文本按普通提示词处理"的旧行为）。
     COMMANDS_ENABLED: bool = True
+
+    # ── SDK / JSON-RPC / SSE 续传（issue #480）────────────────────────────
+    # ``POST /api/v1/rpc`` 开关（仅 web profile 的 agent bundle 挂载时才可能生效）。
+    RPC_HTTP_ENABLED: bool = False
+    # HTTP 批量请求上限（issue §5.3：批量 ≤ 20）。
+    RPC_BATCH_MAX: int = 20
+    # stdio NDJSON 单行上限（1MB）。
+    RPC_LINE_MAX_BYTES: int = 1_048_576
+    # 服务端→客户端请求（session/request_permission）等待上限（秒）。
+    RPC_PERMISSION_TIMEOUT_SECONDS: int = 300
+
+    # SSE 断连保留：true 时不立即取消 pipeline，交给 SSE_ORPHAN_TTL_SECONDS 兜底。
+    SSE_KEEPALIVE_ON_DISCONNECT: bool = True
+    # 孤儿 pipeline 最长保留（秒）；到期取消，绝不无限保留。
+    SSE_ORPHAN_TTL_SECONDS: int = 600
+    # 每会话 Redis ring buffer 条数上限 / TTL。
+    SSE_BUFFER_MAXLEN: int = 1000
+    SSE_BUFFER_TTL_SECONDS: int = 3600
+
+    # API Key 默认 scope（新建 key 未显式指定时使用）。
+    API_KEY_DEFAULT_SCOPES: list[str] = [
+        "chat:read",
+        "chat:write",
+        "knowledge:read",
+        "rpc",
+    ]
