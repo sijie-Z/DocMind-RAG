@@ -175,3 +175,8 @@ sock    = client.api.exec_start(exec_id, socket=True)
 - Windows Docker Desktop 的命名管道路径（`npipe:////./pipe/docker_engine`）与
   Linux unix socket 的行为差异未实机验证；后端镜像基于 Linux，生产按 Linux 评估。
 - 多 worker sticky 路由未在本仓库部署层实现（仅以 409 显式拒绝跨 worker 访问）。
+- 票据轮换（读旧票 → 删旧票 → 写新票）不是 Redis 原子操作：极端并发签发可能
+  短暂留下两张有效票（同一 user+terminal，≤60s TTL），风险已接受；如需消除可用
+  Lua 脚本原子化。
+- `TERMINAL_ENABLED=false` 后回收循环不再运行：关闭开关前遗留的容器不会自动
+  回收，需按运维命令手工清理（见上）。
