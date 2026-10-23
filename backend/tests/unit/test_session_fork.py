@@ -730,6 +730,39 @@ async def test_poisoned_snapshot_does_not_block_plain_fork(db_factory):
 
 
 @pytest.mark.asyncio
+async def test_poisoned_pending_snapshot_stays_active_without_500(db_factory):
+    """PENDING 任务快照损坏：无法识别克隆标记 → 按活跃任务保守 409（绝不 500）。
+
+    这条才真正钉住 `_load_active_tasks` 对 PENDING 读快照时的毒丸防线；
+    旧用例把坏快照挂在 COMPLETED（非活跃）任务上，不会走到快照读取。
+    """
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        db.add(
+            AgentTask(
+                id="poison-pending",
+                user_id=USER_ID,
+                organization_id=ORG_ID,
+                session_id=src.id,
+                query="排队中但快照损坏",
+                status=TaskStatus.PENDING,
+                context_snapshot=None,
+            )
+        )
+        await db.commit()
+        await db.execute(
+            text("UPDATE agent_tasks SET context_snapshot = :raw WHERE id = 'poison-pending'"),
+            {"raw": '{"v": 1, "ctx": {'},
+        )
+        await db.commit()
+
+        with pytest.raises(ForkCheckpointRequiredError):
+            await _fork(db, src.id)
+
+
+@pytest.mark.asyncio
 async def test_poisoned_snapshot_is_skipped_for_checkpoint_clone(db_factory):
     """checkpoint 克隆候选里的损坏快照必须被跳过（409），不得 500。"""
     async with db_factory() as db:
