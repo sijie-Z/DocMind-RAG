@@ -465,6 +465,7 @@ async def receive_webhook(
                 "error_code": "RATE_LIMIT_EXCEEDED",
                 "message": exc.message,
                 "detail": exc.detail,
+                "request_id": getattr(getattr(request, "state", None), "request_id", None),
                 "data": None,
             },
             headers={"Retry-After": str(retry_after)},

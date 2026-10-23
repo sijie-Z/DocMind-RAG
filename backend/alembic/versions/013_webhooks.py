@@ -178,6 +178,7 @@ def upgrade() -> None:
             existing_type=sa.Text(),
             type_=mysql.MEDIUMTEXT(),
             existing_nullable=False,
+            comment="消息内容",
         )
         op.alter_column(
             "agent_tasks",
@@ -185,6 +186,7 @@ def upgrade() -> None:
             existing_type=sa.Text(),
             type_=mysql.MEDIUMTEXT(),
             existing_nullable=False,
+            comment="Original user query",
         )
 
 
@@ -236,6 +238,7 @@ def downgrade() -> None:
             existing_type=mysql.MEDIUMTEXT(),
             type_=sa.Text(),
             existing_nullable=False,
+            comment="消息内容",
         )
         op.alter_column(
             "agent_tasks",
@@ -243,4 +246,5 @@ def downgrade() -> None:
             existing_type=mysql.MEDIUMTEXT(),
             type_=sa.Text(),
             existing_nullable=False,
+            comment="Original user query",
         )

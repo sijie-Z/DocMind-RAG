@@ -92,6 +92,9 @@ _FORBIDDEN_TEMPLATE_RE = re.compile(
     r"\b(system_prompt|system|tools|tool_choice|model|messages|temperature|max_tokens|role)\b",
     re.IGNORECASE,
 )
+# 攻击者可在 JSON 字符串里塞入分隔符本身，伪造"分隔区已结束"。渲染时把
+# 命中分隔符形态的尖括号替换成视觉相似字符，确保分隔区只有一个真实出口。
+_PAYLOAD_MARKER_RE = re.compile(r"<<<\s*(?:END_)?UNTRUSTED_WEBHOOK_PAYLOAD\s*>>>", re.IGNORECASE)
 
 # 进程内限流兜底（Redis 不可用时；多 worker 下为近似值，见 ADR 已知风险）。
 _memory_rate: dict[str, tuple[int, int]] = {}
@@ -317,6 +320,11 @@ def validate_prompt_template(template: str) -> None:
 
 def wrap_untrusted_payload(payload: Any) -> str:
     body = json.dumps(payload, ensure_ascii=False)
+    # 防"分隔符逃逸"：payload 里出现 <<<END_UNTRUSTED...>>> 时，把尖括号换成
+    # 单书名号（‹›），语义仍可读但不再构成真实分隔符。
+    body = _PAYLOAD_MARKER_RE.sub(
+        lambda match: match.group(0).replace("<", "‹").replace(">", "›"), body
+    )
     return f"{PAYLOAD_OPEN}\n{body}\n{PAYLOAD_CLOSE}"
 
 

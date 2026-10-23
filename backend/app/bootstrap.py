@@ -315,20 +315,27 @@ def build_lifespan(deps: LifespanDeps):
 
             # issue #478：Webhook outbox poll 循环。与调度器同一裁定——只在 web
             # 入口启动（worker 会与 web 重复领取投递；SQL 侧 SKIP LOCKED 仍是
-            # 多实例部署的最后防线）。启用时必须先过 fail-closed 的 key 校验。
+            # 多实例部署的最后防线）。启用时**任何入口**都先过 fail-closed 的
+            # key 校验（配置错误不应因入口不同而被静默容忍）。
             webhook_task: asyncio.Task | None = None
-            if get_active_entrypoint() == "web" and settings.WEBHOOKS_ENABLED:
+            if settings.WEBHOOKS_ENABLED:
                 from app.services.webhook_service import (
                     validate_webhook_settings,
                     webhook_service,
                 )
 
                 validate_webhook_settings()
-                webhook_task = asyncio.create_task(webhook_service.poll_loop())
-                logger.info(
-                    "Webhook outbox poll 已启动（interval=%ss）",
-                    settings.WEBHOOK_WORKER_POLL_SECONDS,
-                )
+                if get_active_entrypoint() == "web":
+                    webhook_task = asyncio.create_task(webhook_service.poll_loop())
+                    logger.info(
+                        "Webhook outbox poll 已启动（interval=%ss）",
+                        settings.WEBHOOK_WORKER_POLL_SECONDS,
+                    )
+                else:
+                    logger.info(
+                        "Webhook outbox poll 仅在 web 入口启动（当前 entrypoint=%s）",
+                        get_active_entrypoint(),
+                    )
             else:
                 logger.info("WEBHOOKS_ENABLED=false，Webhook outbox poll 不启动")
 
