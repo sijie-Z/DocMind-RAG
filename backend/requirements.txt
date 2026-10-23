@@ -17,7 +17,7 @@ aiomysql>=0.3.2
 asyncmy>=0.2.16
 alembic>=1.20.0
 redis>=8.1.0
-elasticsearch==8.11.0
+elasticsearch==9.5.1
 minio>=7.2.0
 aiokafka>=0.14.0
 
