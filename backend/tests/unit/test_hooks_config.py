@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import sys
 import types
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -373,3 +374,63 @@ def test_shipped_hooks_yaml_is_valid():
     assert shipped.is_file(), "backend/config/hooks.yaml 必须随仓库提供示例"
     specs = load_hook_specs(shipped)
     assert specs and all(s.event for s in specs)
+
+
+@pytest.mark.asyncio
+async def test_hooks_load_is_wired_into_bootstrap_lifespan(monkeypatch, tmp_path):
+    """启动路径判别：bootstrap lifespan（统一入口）必须调用 hooks 初始化。
+
+    变异点：把 hooks 初始化从 ``bootstrap.build_lifespan`` 删掉（或只留在一个
+    已废弃的兼容壳里）→ 本用例不再抛 ``HookConfigError`` → 红。
+    HOOKS_ENABLED=true + 不存在的配置文件 = 启动必须 fail-closed。
+    """
+    from app import bootstrap
+    from app.core.config import settings
+
+    class _Kafka:
+        start = AsyncMock()
+        stop = AsyncMock()
+
+    deps = bootstrap.LifespanDeps(
+        init_db=AsyncMock(),
+        init_redis=AsyncMock(),
+        init_elasticsearch=AsyncMock(),
+        close_redis=AsyncMock(),
+        close_db=AsyncMock(),
+        kafka_producer=_Kafka(),
+        es_client=None,
+        resolve_backend_port=lambda: 8000,
+        metrics_snapshot_task=lambda: None,
+        scheduled_tasks_loop=lambda: None,
+    )
+
+    # 隔离与 hooks 无关的重型启动步骤（只验证 hooks 初始化的接线）。
+    from app import dependencies as deps_mod
+    from app.agent.mcp import manager as mcp_mod
+    from app.services import embedding_service, local_processing
+    from app.services import permission_service as ps_mod
+
+    monkeypatch.setattr(
+        embedding_service,
+        "verify_embedding_consistency",
+        AsyncMock(return_value={"skipped": True}),
+    )
+    monkeypatch.setattr(
+        ps_mod.permission_service,
+        "initialize_default_permissions_and_roles",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(deps_mod, "wire_memory_embedding_provider", AsyncMock())
+    monkeypatch.setattr(local_processing, "reconcile_local_jobs", AsyncMock(return_value=0))
+    monkeypatch.setattr(mcp_mod.mcp_manager, "initialize", AsyncMock())
+    monkeypatch.setattr(settings, "ENABLE_MONITORING", False)
+    monkeypatch.setattr(settings, "ENABLE_SCHEDULER", False)
+    monkeypatch.setattr(settings, "ENABLE_DEMO_ACCOUNT", False)
+    monkeypatch.setattr(settings, "HOOKS_ENABLED", True)
+    monkeypatch.setattr(settings, "HOOKS_CONFIG_PATH", str(tmp_path / "missing-hooks.yaml"))
+
+    lifespan = bootstrap.build_lifespan(deps)
+    with pytest.raises(HookConfigError) as excinfo:
+        async with lifespan(MagicMock()):
+            pass
+    assert "hooks 配置不存在" in str(excinfo.value)

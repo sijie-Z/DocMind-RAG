@@ -3,11 +3,16 @@
 All settings are composed into a single ``Settings`` class via multiple
 inheritance so that existing ``from app.core.config import settings``
 imports continue to work unchanged.
+
+issue #479：模块级 ``settings`` 改为惰性代理——import 本包不读 ``.env``、
+不探测硬件、不构造 ``Settings``；首次属性访问才经
+:func:`app.core.config.loader.load_settings` 按 profile/bundle/patch 分层加载。
 """
 
 from app.core.config.ai import AISettings
 from app.core.config.base import BaseAppSettings
 from app.core.config.database import DatabaseSettings
+from app.core.config.proxy import SettingsProxy
 from app.core.config.security import SecuritySettings
 
 
@@ -17,7 +22,7 @@ class Settings(BaseAppSettings, DatabaseSettings, AISettings, SecuritySettings):
     pass
 
 
-settings = Settings()
+settings = SettingsProxy()
 
 
 def resolve_embedding_model() -> str:
@@ -36,20 +41,6 @@ def resolve_embedding_model() -> str:
         return settings.LOCAL_EMBEDDING_MODEL
     return settings.EMBEDDING_MODEL
 
-
-# ── Auto-detect hardware tier (GPU/CPU) and apply model defaults ──────
-# Runs once at import time; env vars take precedence over detection.
-try:
-    from app.core.config.ai import _auto_tier_defaults
-
-    for _k, _v in _auto_tier_defaults(
-        explicitly_set=settings.model_fields_set,
-        local_embedding=bool(settings.ENABLE_LOCAL_EMBEDDING),
-    ).items():
-        if hasattr(settings, _k):
-            object.__setattr__(settings, _k, _v)
-except Exception:
-    pass
 
 __all__ = [
     "Settings",

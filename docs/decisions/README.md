@@ -27,6 +27,7 @@
 | `ADR-001-路线冻结.md` | **正式 ADR**（2026-10-19 批准）：C3=完整事件溯源（分阶段，A+ 轻量增强降为回退）/ 产品定位 A / per-org RBAC + 显式平台管理员 / 多实例就绪 / 组织=知识库；含被否决方案、硬前置与执行波次 |
 | `2026-10-22-session-fork.md` | **ADR**（issue #476）：会话 fork 的边界语义（已结算轮次/assistant 中间消息 409）、记忆隔离与 seed、checkpoint 克隆取舍与降级口径 |
 | `ADR-002-user-commands.md` | **正式 ADR**（2026-10-22，#475）：服务端命令与提示词模板的边界——无模型轮次执行、作用域/遮蔽、权限与多租户 fail-closed、并发锁的进程内边界、配置信任边界与回滚口径 |
+| `ADR-003-profiles-bundles-patch.md` | **正式 ADR**（2026-10-22，#479）：配置三层（profile/bundle/patch）与统一入口（web/worker/headless/sdk/acp）；合并优先级、`.env` 归环境层、键闭集与 secret 防护、回滚口径 |
 | `ADR-004-hooks.md` | **正式 ADR**（2026-10-22，#474）：进程内 Hooks 扩展点——waterfall/serial 语义、7 个事件与真实插入点、失败策略与可观测、与 ToolRegistry 的分工、模块白名单/审批不可绕过、默认关闭与回滚 |
 
 两份文档是同一次排查的产物，**含大量 `文件:行号` 证据**，可直接复核。
