@@ -32,6 +32,15 @@ def _read_api_key_file(path: str) -> str | None:
     return key
 
 
+# ``--api-key-file`` 身份校验的固定错误码（模块内字面量）。
+# CodeQL py/clear-text-logging-sensitive-data：raw_key 参与的校验结果**不得**
+# 以字符串形式流到 stderr；_run_entry 只按错误码打印固定文案。
+IDENTITY_DEP_UNAVAILABLE = "dep_unavailable"
+IDENTITY_INVALID = "invalid"
+IDENTITY_USER_MISMATCH = "user_mismatch"
+IDENTITY_ORG_MISMATCH = "org_mismatch"
+
+
 async def _validate_api_key_identity(
     raw_key: str,
     *,
@@ -39,11 +48,13 @@ async def _validate_api_key_identity(
     user_id: int,
     db_factory: Callable[[], object] | None = None,
 ) -> str | None:
-    """校验 key 有效且身份与 CLI 一致；返回错误文案（None = 通过）。
+    """校验 key 有效且身份与 CLI 一致；返回固定错误码（None = 通过）。
 
+    返回码是模块内字面量常量（``dep_unavailable`` / ``invalid`` /
+    ``user_mismatch`` / ``org_mismatch``），**不携带 raw_key 的任何内容**。
     校验使用 ``api_key_service.authenticate``（bcrypt + 过期/吊销/禁用检查），
-    成功时回填 ``token_organization_id`` 供组织一致性比较。错误文案不包含
-    key 明文、哈希或数据库细节。
+    成功时回填 ``token_organization_id`` 供组织一致性比较。打印处只输出固定
+    文案，绝不透传任何由 raw_key 影响的字符串。
     """
     from app.core.database import AsyncSessionLocal
     from app.services.api_key_service import api_key_service
@@ -53,15 +64,15 @@ async def _validate_api_key_identity(
         async with factory() as db:  # type: ignore[operator]
             user = await api_key_service.authenticate(raw_key, db)
     except Exception:  # noqa: BLE001 - 依赖不可用也按"无法证明身份"拒绝
-        return "--api-key-file 校验失败（数据库/Redis 不可用），拒绝启动"
+        return IDENTITY_DEP_UNAVAILABLE
 
     if user is None:
-        return "--api-key-file 的 API Key 无效、已过期或已吊销"
+        return IDENTITY_INVALID
     if int(user.id) != int(user_id):
-        return "--api-key-file 的 API Key 属于其他用户（user_id 不匹配）"
+        return IDENTITY_USER_MISMATCH
     key_org_id = getattr(user, "token_organization_id", None)
     if key_org_id is None or int(key_org_id) != int(org_id):
-        return "--api-key-file 的 API Key 未绑定 --org-id 指定的组织（org_id 不匹配）"
+        return IDENTITY_ORG_MISMATCH
     return None
 
 
@@ -78,13 +89,33 @@ async def _run_entry(
     返回 2，见 ``app.rpc.server``）。
     """
     if raw_api_key is not None:
-        error = await _validate_api_key_identity(
+        identity_error = await _validate_api_key_identity(
             raw_api_key,
             org_id=organization_id,
             user_id=user_id,
         )
-        if error is not None:
-            print(error, file=sys.stderr)
+        if identity_error is not None:
+            # 只打印固定字面量文案：任何由 raw_key 影响的字符串都不得进入
+            # stderr（CodeQL py/clear-text-logging-sensitive-data）。
+            if identity_error == IDENTITY_DEP_UNAVAILABLE:
+                print(
+                    "--api-key-file 校验失败（数据库/Redis 不可用），拒绝启动",
+                    file=sys.stderr,
+                )
+            elif identity_error == IDENTITY_INVALID:
+                print("--api-key-file 的 API Key 无效、已过期或已吊销", file=sys.stderr)
+            elif identity_error == IDENTITY_USER_MISMATCH:
+                print(
+                    "--api-key-file 的 API Key 属于其他用户（user_id 不匹配）",
+                    file=sys.stderr,
+                )
+            elif identity_error == IDENTITY_ORG_MISMATCH:
+                print(
+                    "--api-key-file 的 API Key 未绑定 --org-id 指定的组织（org_id 不匹配）",
+                    file=sys.stderr,
+                )
+            else:
+                print("--api-key-file 校验失败，拒绝启动", file=sys.stderr)
             return 2
 
     from app.rpc.server import run_stdio
