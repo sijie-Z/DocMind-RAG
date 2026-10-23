@@ -633,8 +633,14 @@ class WebhookService:
         delivery: WebhookDelivery,
         rule: WebhookRule,
         payload: Any,
+        processing_token: str,
     ) -> str:
-        """解析投递对应的 ChatSession；重试复用 delivery.session_id。"""
+        """解析投递对应的 ChatSession；重试复用 delivery.session_id。
+
+        issue #497 §4：会话/session_id 的写回同样带租约条件（txn 内条件 UPDATE，
+        rowcount 0 即租约已被接管 → rollback + 放弃），避免旧 worker 在超时
+        重领后把 succeeded 行/新租约的 session_id 覆盖成自己的空会话。
+        """
         if delivery.session_id:
             existing = await db_session.get(ChatSession, delivery.session_id)
             if existing is not None:
@@ -659,8 +665,9 @@ class WebhookService:
                     .first()
                 )
                 if found is not None:
-                    delivery.session_id = found.id
-                    await db_session.commit()
+                    await self._assign_session_id(
+                        db_session, delivery.id, processing_token, found.id
+                    )
                     return found.id
             else:
                 # issue #497 §2：session_key 缺失/非法 → 回退 new，并在投递记录
@@ -684,9 +691,32 @@ class WebhookService:
             webhook_session_key=session_key,
         )
         db_session.add(session)
-        delivery.session_id = session_id
-        await db_session.commit()
+        # 与新建会话同一事务：条件 UPDATE 把 session_id 写回投递行；租约已易主
+        # 时 rollback（新建会话一并撤销），绝不产生"孤儿会话指针"。
+        await self._assign_session_id(db_session, delivery.id, processing_token, session_id)
         return session_id
+
+    async def _assign_session_id(
+        self,
+        db_session: AsyncSession,
+        delivery_id: str,
+        processing_token: str,
+        session_id: str,
+    ) -> None:
+        """token fenced 地把 delivery.session_id 指向会话并提交事务。"""
+        result = await db_session.execute(
+            update(WebhookDelivery)
+            .where(
+                WebhookDelivery.id == delivery_id,
+                WebhookDelivery.processing_token == processing_token,
+                WebhookDelivery.status == WebhookDeliveryStatus.PROCESSING,
+            )
+            .values(session_id=session_id)
+        )
+        if result.rowcount == 0:
+            await db_session.rollback()
+            raise WebhookDeliveryError("租约已被接管（会话写回 fence），放弃本次处理")
+        await db_session.commit()
 
     async def _mark_failed(
         self,
@@ -818,7 +848,9 @@ class WebhookService:
                 )
                 return
             try:
-                session_id = await self._ensure_session(db_session, delivery, rule, payload)
+                session_id = await self._ensure_session(
+                    db_session, delivery, rule, payload, processing_token
+                )
             except Exception as exc:
                 await self._mark_failed(
                     factory, delivery_id, processing_token, f"会话创建失败: {type(exc).__name__}"

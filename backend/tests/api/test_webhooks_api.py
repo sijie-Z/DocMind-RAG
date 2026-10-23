@@ -25,7 +25,7 @@ import app.models  # noqa: F401  # 注册全部表供 create_all
 from app.core.config import settings
 from app.core.database import Base
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
-from app.models.webhook import WebhookDelivery, WebhookDeliveryStatus
+from app.models.webhook import WebhookDelivery, WebhookDeliveryStatus, WebhookRule
 
 BASE = "/api/v1/webhooks"
 FERNET_KEY = Fernet.generate_key().decode()
@@ -781,6 +781,43 @@ class TestLeaseFencing:
         assert row.lease_version == 2
         assert row.processed_at is None
         assert messages == [], "迟到 worker 不得写任何消息（防双写）"
+
+    @pytest.mark.asyncio
+    async def test_session_writeback_requires_lease_token(self, api):
+        """会话/session_id 写回也 fencing：旧 token 不得覆盖或新建空会话。"""
+        from app.services import webhook_service as svc
+
+        rule = await _create_rule(api)
+        await _post_delivery(api, rule["id"], rule["secret"], message_id="fence-3")
+        rows = await _deliveries(api)
+        delivery_id = rows[0].id
+
+        async with api.factory() as session:
+            await session.execute(
+                update(WebhookDelivery)
+                .where(WebhookDelivery.id == delivery_id)
+                .values(
+                    status=WebhookDeliveryStatus.PROCESSING,
+                    processing_token="token-B",
+                    lease_version=1,
+                    processing_started_at=svc._utcnow(),
+                    attempts=1,
+                )
+            )
+            await session.commit()
+            delivery = await session.get(WebhookDelivery, delivery_id)
+            rule_row = await session.get(WebhookRule, rule["id"])
+            with pytest.raises(svc.WebhookDeliveryError):
+                await svc.webhook_service._ensure_session(
+                    session, delivery, rule_row, {"event": "x"}, "token-A"
+                )
+
+        async with api.factory() as session:
+            sessions = (await session.execute(select(ChatSession))).scalars().all()
+            row = await session.get(WebhookDelivery, delivery_id)
+        assert sessions == [], "旧 token 不得新建会话"
+        assert row.session_id is None
+        assert row.processing_token == "token-B"
 
     @pytest.mark.asyncio
     async def test_stale_worker_failure_writeback_is_fenced_out(self, api):
