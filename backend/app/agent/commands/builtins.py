@@ -1,5 +1,15 @@
 """内置命令 —— /help、/status、/export、/tools（issue #475 最小集）。
 
+issue #498 收口：
+- ``/status``：``session_id`` 必填；数据含 ``session_id/title/session_status/
+  message_count/last_message_at/memory/active_task``；``tasks`` 只查**该会话**
+  （不再查用户最近 5 个），无活跃任务时 ``active_task=null``。
+- ``/tools``：每项来自 ``tool_registry.get_manifest()``，含
+  ``name/description/category/risk_level``（另保留 tags/requires_auth 等既有字段）。
+- ``/export``：正文放执行信封的 ``result.content``（``content`` 字段保留兼容）；
+  超过 1MB → 400 ``VALIDATION_ERROR``；SYSTEM 消息标注 ``role:"system"``，
+  不再伪装成 assistant。
+
 边界：
 - 所有 handler 只读 ``CommandContext``（user / org / session / db），不触达
   模型、不写会话（命令永不进入 PER 轮次，也不产生用户消息）。
@@ -12,8 +22,8 @@
   ``description_i18n`` 中英文，供前端按 locale 取用，避免双语漂移。
 
 测试通过 patch 本模块的 ``_load_session`` / ``_count_messages`` /
-``_last_message`` / ``_load_messages`` / ``checkpoint.list_tasks`` /
-``tool_registry.list_tools`` 隔离数据库与工具注册表
+``_last_message`` / ``_load_messages`` / ``_list_session_tasks`` /
+``tool_registry.get_manifest`` 隔离数据库与工具注册表
 （tests/unit/test_user_commands_builtins.py）。
 """
 
@@ -25,11 +35,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import desc, func, select
+from sqlalchemy.orm import defer
 
-from app.agent import checkpoint
 from app.agent.commands.types import (
     ERROR_COMMAND_FAILED,
     ERROR_PERMISSION_DENIED,
+    ERROR_RESULT_TOO_LARGE,
     ERROR_SESSION_NOT_FOUND,
     ERROR_SESSION_REQUIRED,
     ERROR_UNKNOWN_COMMAND,
@@ -41,13 +52,26 @@ from app.agent.commands.types import (
 )
 from app.agent.config import DEFAULT_DISABLED_TOOLS
 from app.agent.registry import tool_registry
+from app.core.log_safety import log_safe
+from app.models.agent_task import AgentTask, TaskStatus
 from app.models.chat import ChatMessage, ChatSession
 from app.services.session_service import SessionAccessScope, session_access_conditions
 
 logger = logging.getLogger(__name__)
 
 MAX_EXPORT_MESSAGES = 2000
+MAX_EXPORT_BYTES = 1_048_576  # 1MB（UTF-8 字节数；issue #498）
 STATUS_TASK_LIMIT = 5
+
+# "活跃任务" = 未终态且不是 fork 快照（与 session_fork_service 口径一致）。
+_ACTIVE_TASK_STATUSES = (
+    TaskStatus.PENDING,
+    TaskStatus.RUNNING,
+    TaskStatus.WAITING_TOOL,
+    TaskStatus.WAITING_APPROVAL,
+    TaskStatus.WAITING_PLAN_APPROVAL,
+    TaskStatus.WAITING_HUMAN,
+)
 
 
 # ── 数据读取（测试替身边界）──────────────────────────────────────────────────
@@ -92,6 +116,52 @@ async def _load_messages(ctx: CommandContext, session_id: str) -> list[ChatMessa
         .limit(MAX_EXPORT_MESSAGES + 1)
     )
     return list((await ctx.db.execute(stmt)).scalars().all())
+
+
+async def _list_session_tasks(ctx: CommandContext, session_id: str) -> list[AgentTask]:
+    """该会话的任务（新 → 旧，最多 ``STATUS_TASK_LIMIT`` 条）。
+
+    issue #498：只查**该会话**（不再按用户最近 5 个任务）；归属条件带
+    user_id + organization_id。defer ``context_snapshot``（#278/R1 毒丸防线）：
+    状态展示不需要快照列，单行坏 JSON 不得拖垮 /status。
+    """
+    if ctx.db is None:
+        raise CommandFailure(ERROR_COMMAND_FAILED, "数据库会话不可用，无法查询任务")
+    conditions = [
+        AgentTask.session_id == session_id,
+        AgentTask.user_id == ctx.user_id,
+    ]
+    if ctx.organization_id is not None:
+        conditions.append(AgentTask.organization_id == ctx.organization_id)
+    stmt = (
+        select(AgentTask)
+        .where(*conditions)
+        .options(defer(AgentTask.context_snapshot))
+        .order_by(desc(AgentTask.created_at))
+        .limit(STATUS_TASK_LIMIT)
+    )
+    return list((await ctx.db.execute(stmt)).scalars().all())
+
+
+def _task_summary(task: AgentTask) -> dict[str, Any]:
+    """任务的状态摘要（不读快照；字段与既有 /status 输出同名）。"""
+    state = getattr(getattr(task, "status", None), "value", None) or str(
+        getattr(task, "status", "")
+    )
+    updated = getattr(task, "updated_at", None)
+    return {
+        "task_id": task.id,
+        "state": state,
+        "progress": getattr(task, "progress", 0.0) or 0.0,
+        "updated_at": updated.isoformat() if updated else "",
+    }
+
+
+def _is_active_task(task: AgentTask) -> bool:
+    state = getattr(getattr(task, "status", None), "value", None) or str(
+        getattr(task, "status", "") or ""
+    )
+    return state in {status.value for status in _ACTIVE_TASK_STATUSES}
 
 
 # ── /help ────────────────────────────────────────────────────────────────────
@@ -171,62 +241,84 @@ def _render_command_detail(command: Command) -> str:
 
 
 async def cmd_status(ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
-    data: dict[str, Any] = {"session": None, "tasks": []}
-    lines = ["## 会话状态"]
+    """会话状态（issue #498）：session_id 必填，任务只查该会话。"""
+    if not ctx.session_id:
+        raise CommandFailure(
+            ERROR_SESSION_REQUIRED,
+            "未指定会话，无法查询状态；请先打开一个会话再执行 /status",
+            field_name="session_id",
+        )
+    session = await _load_session(ctx)
+    if session is None:
+        raise CommandFailure(ERROR_SESSION_NOT_FOUND, "会话不存在或无权访问")
 
-    if ctx.session_id:
-        session = await _load_session(ctx)
-        if session is None:
-            raise CommandFailure(ERROR_SESSION_NOT_FOUND, "会话不存在或无权访问")
-        message_count = await _count_messages(ctx, session.id)
-        last = await _last_message(ctx, session.id)
-        last_at = last.created_at.isoformat() if last and last.created_at else ""
-        data["session"] = {
+    message_count = await _count_messages(ctx, session.id)
+    last = await _last_message(ctx, session.id)
+    last_at = last.created_at.isoformat() if last and last.created_at else ""
+    session_status = getattr(session.status, "value", None) or str(
+        getattr(session, "status", "") or ""
+    )
+
+    tasks: list[AgentTask] = []
+    tasks_ok = True
+    try:
+        tasks = await _list_session_tasks(ctx, session.id)
+    except Exception as exc:  # noqa: BLE001 — 状态查询降级不得拖垮整条命令
+        tasks_ok = False
+        logger.warning(
+            "命令 /status 查询会话任务失败（user=%s, session=%s）：%s",
+            ctx.user_id,
+            log_safe(session.id),
+            type(exc).__name__,
+        )
+
+    active_task = next((task for task in tasks if _is_active_task(task)), None)
+    memory = {
+        "message_count": message_count,
+        "last_message_at": last_at,
+        "settings": getattr(session, "settings", None) or {},
+    }
+    data: dict[str, Any] = {
+        "session_id": session.id,
+        "title": session.title or "",
+        "session_status": session_status,
+        "message_count": message_count,
+        "last_message_at": last_at,
+        "memory": memory,
+        "active_task": _task_summary(active_task) if active_task else None,
+        "tasks": [_task_summary(task) for task in tasks],
+        # v1 兼容：旧前端读 data.session（保留一版）。
+        "session": {
             "id": session.id,
             "title": session.title or "",
             "message_count": message_count,
             "last_message_at": last_at,
-        }
-        lines.append(f"- 会话：{session.title or session.id}（`{session.id}`）")
-        lines.append(f"- 消息数：{message_count}")
-        if last_at:
-            lines.append(f"- 最近消息：{last_at}")
-    else:
-        lines.append("- 未指定会话（仅展示最近任务状态）")
+        },
+    }
 
-    try:
-        _total, tasks = await checkpoint.list_tasks(
-            user_id=ctx.user_id,
-            organization_id=ctx.organization_id,
-            offset=0,
-            limit=STATUS_TASK_LIMIT,
+    lines = ["## 会话状态"]
+    lines.append(f"- 会话：{session.title or session.id}（`{session.id}`）")
+    if session_status:
+        lines.append(f"- 会话状态：{session_status}")
+    lines.append(f"- 消息数：{message_count}")
+    if last_at:
+        lines.append(f"- 最近消息：{last_at}")
+    if active_task is not None:
+        active = _task_summary(active_task)
+        lines.append(
+            f"- 活跃任务：`{active['task_id']}`：{active['state']}（进度 {active['progress']:.0%}）"
         )
-    except Exception as exc:  # noqa: BLE001 — 状态查询降级不得拖垮整条命令
-        logger.warning(
-            "命令 /status 查询任务列表失败（user=%s）：%s", ctx.user_id, type(exc).__name__
-        )
-        lines.append("- 最近任务：暂不可用（任务存储查询失败）")
     else:
-        if tasks:
-            lines.append(f"- 最近任务（{len(tasks)} 条）：")
-            for task in tasks:
-                state = getattr(getattr(task, "status", None), "value", None) or str(
-                    getattr(task, "status", "")
-                )
-                progress = getattr(task, "progress", 0.0) or 0.0
-                updated = getattr(task, "updated_at", None)
-                updated_text = updated.isoformat() if updated else ""
-                data["tasks"].append(
-                    {
-                        "task_id": task.id,
-                        "state": state,
-                        "progress": progress,
-                        "updated_at": updated_text,
-                    }
-                )
-                lines.append(f"  - `{task.id}`：{state}（进度 {progress:.0%}）")
-        else:
-            lines.append("- 最近任务：无")
+        lines.append("- 活跃任务：无")
+    if not tasks_ok:
+        lines.append("- 最近任务：暂不可用（任务存储查询失败）")
+    elif tasks:
+        lines.append(f"- 最近任务（{len(tasks)} 条）：")
+        for task in tasks:
+            summary = _task_summary(task)
+            lines.append(f"  - `{summary['task_id']}`：{summary['state']}")
+    else:
+        lines.append("- 最近任务：无")
 
     return CommandResult(content="\n".join(lines), data=data)
 
@@ -242,9 +334,14 @@ def _safe_filename(title: str, session_id: str, ext: str) -> str:
 
 
 def _message_role(message: ChatMessage) -> str:
+    """消息角色：user / system / assistant（issue #498：SYSTEM 不再伪装 assistant）。"""
     message_type = getattr(message, "message_type", None)
     value = getattr(message_type, "value", str(message_type))
-    return "user" if value == "user" else "assistant"
+    if value == "user":
+        return "user"
+    if value == "system":
+        return "system"
+    return "assistant"
 
 
 async def cmd_export(ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
@@ -297,7 +394,7 @@ async def cmd_export(ctx: CommandContext, args: dict[str, Any]) -> CommandResult
         ]
         for message in messages:
             created_at = message.created_at.isoformat() if message.created_at else ""
-            role = "用户" if _message_role(message) == "user" else "助手"
+            role = {"user": "用户", "system": "系统"}.get(_message_role(message), "助手")
             lines.extend(
                 [
                     "---",
@@ -311,6 +408,15 @@ async def cmd_export(ctx: CommandContext, args: dict[str, Any]) -> CommandResult
         content = "\n".join(lines).rstrip() + "\n"
         ext = "md"
 
+    content_bytes = len(content.encode("utf-8"))
+    if content_bytes > MAX_EXPORT_BYTES:
+        raise CommandFailure(
+            ERROR_RESULT_TOO_LARGE,
+            f"导出内容超过 1MB 上限（{content_bytes} bytes），请缩小范围后重试",
+            field_name="content",
+            data={"content_bytes": content_bytes, "max_bytes": MAX_EXPORT_BYTES},
+        )
+
     return CommandResult(
         content=content,
         data={
@@ -318,6 +424,7 @@ async def cmd_export(ctx: CommandContext, args: dict[str, Any]) -> CommandResult
             "filename": _safe_filename(title, session.id, ext),
             "message_count": len(messages),
             "truncated": truncated,
+            "content_bytes": content_bytes,
         },
     )
 
@@ -326,21 +433,28 @@ async def cmd_export(ctx: CommandContext, args: dict[str, Any]) -> CommandResult
 
 
 async def cmd_tools(ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
-    tools = tool_registry.list_tools()
+    """工具清单（issue #498）：每项含 name/description/category/risk_level。"""
+    manifest = tool_registry.get_manifest()
     default_disabled = set(DEFAULT_DISABLED_TOOLS)
     entries = [
         {
-            "name": tool.name,
-            "description": tool.description,
-            "tags": list(tool.tags),
-            "requires_auth": tool.requires_auth,
-            "disabled_by_default": tool.name in default_disabled,
+            "name": item.get("name") or "",
+            "description": item.get("description") or "",
+            "category": item.get("category") or "",
+            "risk_level": item.get("risk_level") or "",
+            "tags": list(item.get("tags") or []),
+            "requires_auth": bool(item.get("requires_auth")),
+            "disabled_by_default": (item.get("name") or "") in default_disabled,
         }
-        for tool in tools
+        for item in manifest
     ]
     lines = [f"## Agent 工具（{len(entries)}）"]
     for entry in entries:
         marks = []
+        if entry["category"]:
+            marks.append(f"分类 {entry['category']}")
+        if entry["risk_level"]:
+            marks.append(f"风险 {entry['risk_level']}")
         if entry["disabled_by_default"]:
             marks.append("默认禁用")
         if entry["requires_auth"]:
@@ -367,10 +481,10 @@ BUILTIN_COMMANDS: tuple[Command, ...] = (
     ),
     Command(
         name="status",
-        description="查看当前会话与最近任务状态",
+        description="查看当前会话与最近任务状态（须指定会话）",
         description_i18n={
-            "zh": "查看当前会话与最近任务状态",
-            "en": "Show current session and recent task status",
+            "zh": "查看当前会话与最近任务状态（须指定会话）",
+            "en": "Show current session and recent task status (session required)",
         },
         usage="/status",
         handler=cmd_status,
