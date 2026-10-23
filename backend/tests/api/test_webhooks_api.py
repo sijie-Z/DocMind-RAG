@@ -395,8 +395,8 @@ class TestIdempotencyAPI:
     async def test_missing_webhook_id_is_401(self, api):
         """Standard Webhooks 的签名内容包含 webhook-id，缺失即无法验签（401）。
 
-        body-hash 幂等兜底只适用于非 Standard 提供方（provider=github 预留）；
-        纯函数层已由 test_webhook_signature 覆盖。
+        issue #497：``webhook-id`` 是唯一幂等键，旧的 body-hash 兜底分支已删除；
+        缺失在验签阶段 401，不落投递行（纯函数层由 test_webhook_signature 覆盖）。
         """
         rule = await _create_rule(api)
         body = b'{"event":"same"}'
@@ -580,6 +580,24 @@ class TestRuntimeGating:
         assert "Traceback" not in text
         assert "Fernet" not in text
         assert "site-packages" not in text
+
+    @pytest.mark.asyncio
+    async def test_admin_api_mismatched_key_503_not_500(self, api, monkeypatch):
+        """key 格式合法但与存量密文不匹配（轮换事故）→ 503，不 500。"""
+        await _create_rule(api)  # 用 fixture key 加密
+        monkeypatch.setattr(settings, "WEBHOOK_ENCRYPTION_KEY", Fernet.generate_key().decode())
+        response = await api.client.get(f"{BASE}/rules")
+        assert response.status_code == 503, response.text
+        assert response.json()["error_code"] == "WEBHOOK_KEY_MISSING"
+        assert "Traceback" not in response.text
+
+    @pytest.mark.asyncio
+    async def test_public_endpoint_key_mismatch_404_not_500(self, api, monkeypatch):
+        rule = await _create_rule(api)
+        monkeypatch.setattr(settings, "WEBHOOK_ENCRYPTION_KEY", Fernet.generate_key().decode())
+        response = await _post_delivery(api, rule["id"], rule["secret"])
+        assert response.status_code == 404
+        assert await _deliveries(api) == []
 
     @pytest.mark.asyncio
     async def test_public_endpoint_key_missing_404(self, api, monkeypatch):

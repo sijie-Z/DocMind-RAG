@@ -188,6 +188,27 @@ async def _load_rule_for_admin(db: AsyncSession, current_user: User, rule_id: st
     return rule
 
 
+def _secret_prefix_or_503(token: str) -> str:
+    """解密失败（key 格式合法但与存量密文不匹配的轮换事故）→ 503，绝不 500。"""
+    try:
+        return secret_prefix(decrypt_secret(token))
+    except WebhookEncryptionError:
+        raise ServiceUnavailableError(
+            "Webhook 加密密钥与存量密文不匹配（WEBHOOK_ENCRYPTION_KEY）",
+            error_code="WEBHOOK_KEY_MISSING",
+        ) from None
+
+
+def _active_secrets_or_503(rule: WebhookRule) -> list[str]:
+    try:
+        return active_secrets(rule)
+    except WebhookEncryptionError:
+        raise ServiceUnavailableError(
+            "Webhook 加密密钥与存量密文不匹配（WEBHOOK_ENCRYPTION_KEY）",
+            error_code="WEBHOOK_KEY_MISSING",
+        ) from None
+
+
 def _rule_data(rule: WebhookRule, *, plaintext_secret: str | None = None) -> dict[str, Any]:
     """规则序列化：永不回传密文；secret_prefix 为前 6 位。"""
     data: dict[str, Any] = {
@@ -201,7 +222,7 @@ def _rule_data(rule: WebhookRule, *, plaintext_secret: str | None = None) -> dic
         "session_mode": rule.session_mode.value,
         "rate_limit_per_minute": rule.rate_limit_per_minute,
         "max_body_bytes": rule.max_body_bytes,
-        "secret_prefix": secret_prefix(decrypt_secret(rule.secret_encrypted)),
+        "secret_prefix": _secret_prefix_or_503(rule.secret_encrypted),
         "secret_rotated_at": rule.secret_rotated_at,
         "created_at": rule.created_at,
         "updated_at": rule.updated_at,
@@ -424,7 +445,7 @@ async def dry_run_rule(
     if payload.signature_headers is not None:
         raw = json.dumps(payload.payload, ensure_ascii=False).encode("utf-8")
         try:
-            verify_signature(raw, payload.signature_headers, active_secrets(rule))
+            verify_signature(raw, payload.signature_headers, _active_secrets_or_503(rule))
             signature_valid = True
         except AuthenticationError as exc:
             signature_valid = False
@@ -515,8 +536,13 @@ async def receive_webhook(
     raw = await read_body_with_limit(request, limit)
 
     # 3) 验签（先于解析；禁止重序列化后验签）。Standard Webhooks 头必需，
-    #    缺失 webhook-id 在这里即 401。
-    verify_signature(raw, request.headers, active_secrets(rule))
+    #    缺失 webhook-id 在这里即 401。存量密文与当前 key 不匹配（轮换事故）
+    #    同样按 404 处理：配置错误不以 500/堆栈暴露，也不泄露规则存在性。
+    try:
+        secrets = active_secrets(rule)
+    except WebhookEncryptionError:
+        raise NotFoundError("Webhook 规则不存在") from None
+    verify_signature(raw, request.headers, secrets)
 
     # 4) 解析 JSON（payload 存入 outbox，poller 渲染用）。
     try:
