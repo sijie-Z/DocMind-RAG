@@ -95,9 +95,15 @@ class BaseAppSettings(BaseSettings):
     # （恢复到"斜杠文本按普通提示词处理"的旧行为）。
     COMMANDS_ENABLED: bool = True
 
+    # Hooks（issue #474）默认关闭：false 时**不读取** HOOKS_CONFIG_PATH、不注册
+    # 任何外部 hook，agent loop / executor 行为与基线逐字节一致（回滚开关）。
+    # true 时启动期加载并严格校验；非法配置 fail-closed（进程退出）。
+    HOOKS_ENABLED: bool = False
+    HOOKS_CONFIG_PATH: str = "config/hooks.yaml"
+
     # Webhook runtime（issue #478）——默认全关。开启接收/outbox poll 需要
     # WEBHOOKS_ENABLED=true，且必须同时配置 SecuritySettings.WEBHOOK_ENCRYPTION_KEY
-    # （独立 Fernet key；缺失/非法则启动失败，见 bootstrap lifespan）。
+    # （独立 Fernet key；缺失/非法则启动失败，见 config loader 的 fail-closed 校验）。
     WEBHOOKS_ENABLED: bool = False
     # 签名时间戳容差（秒）：|now - webhook-timestamp| 超过即 401（防重放）。
     WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: int = 300

@@ -255,6 +255,17 @@ def _build_metrics() -> dict[str, Any]:
     m["AGENT_COMMAND_EXECUTIONS"] = Counter(
         "agent_command_executions_total", "User command executions", ["command", "result"]
     )
+    # Hooks（issue #474）：扩展点执行审计面——每次 hook 执行/失败都计数与计时。
+    # outcome ∈ allow/deny/modify/ask/error/timeout/invalid_decision；失败不得静默。
+    m["HOOK_EXECUTIONS"] = Counter(
+        "docmind_hook_executions_total", "Hook executions", ["event", "hook", "outcome"]
+    )
+    m["HOOK_DURATION"] = Histogram(
+        "docmind_hook_duration_seconds",
+        "Hook execution duration",
+        ["event", "hook"],
+        buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0],
+    )
     # Webhook runtime（issue #478）：投递终态、poll 循环异常、幂等降级、限流。
     m["WEBHOOK_DELIVERY_TOTAL"] = Counter(
         "webhook_delivery_total", "Webhook delivery processing outcomes", ["status"]
@@ -311,6 +322,8 @@ AGENT_REFLECTION_DECISIONS = _LazyMetric("AGENT_REFLECTION_DECISIONS")
 AGENT_MEMORY_RECALLS = _LazyMetric("AGENT_MEMORY_RECALLS")
 AGENT_FEEDBACK_TOTAL = _LazyMetric("AGENT_FEEDBACK_TOTAL")
 AGENT_COMMAND_EXECUTIONS = _LazyMetric("AGENT_COMMAND_EXECUTIONS")
+HOOK_EXECUTIONS = _LazyMetric("HOOK_EXECUTIONS")
+HOOK_DURATION = _LazyMetric("HOOK_DURATION")
 WEBHOOK_DELIVERY_TOTAL = _LazyMetric("WEBHOOK_DELIVERY_TOTAL")
 WEBHOOK_POLL_ERRORS_TOTAL = _LazyMetric("WEBHOOK_POLL_ERRORS_TOTAL")
 WEBHOOK_IDEMPOTENCY_REDIS_FALLBACK_TOTAL = _LazyMetric("WEBHOOK_IDEMPOTENCY_REDIS_FALLBACK_TOTAL")
