@@ -27,7 +27,11 @@ import logging
 import os
 from typing import Any
 
-from app.agent.terminal.manager import TerminalDockerUnavailable, TerminalError
+from app.agent.terminal.manager import (
+    TerminalDockerUnavailable,
+    TerminalError,
+    normalize_signal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +208,7 @@ class DockerTerminalBackend:
         self._client.api.exec_resize(self._exec_id, height=rows, width=cols)
 
     async def signal(self, sig: str) -> None:
-        normalized = sig.upper().lstrip("SIG")
+        normalized = normalize_signal(sig)
         if normalized == "INT":
             # 真实终端语义：^C 送给前台进程组。
             await self.send(b"\x03")

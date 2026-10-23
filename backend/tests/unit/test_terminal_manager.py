@@ -316,3 +316,13 @@ async def test_shutdown_reclaims_everything() -> None:
     assert manager.list_for_user(1) == []
     assert manager.list_for_user(2) == []
     assert all(b.closed for b in backends)
+
+
+def test_normalize_signal_handles_sig_prefix() -> None:
+    """回归：lstrip("SIG") 会把 "INT" 削成 "NT"（字符集合语义）。"""
+    from app.agent.terminal.manager import normalize_signal
+
+    assert normalize_signal("INT") == "INT"
+    assert normalize_signal("SIGINT") == "INT"
+    assert normalize_signal("sigkill") == "KILL"
+    assert normalize_signal("TERM") == "TERM"

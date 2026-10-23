@@ -239,7 +239,7 @@ class FakeBackend:
 
     async def signal(self, sig: str) -> None:
         self.signals.append(sig)
-        if sig.upper().lstrip("SIG") == "KILL":
+        if normalize_signal(sig) == "KILL":
             self.emit_eof(-9)
 
     async def close(self) -> None:
@@ -256,6 +256,18 @@ class FakeBackend:
 
 def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=UTC).isoformat()
+
+
+def normalize_signal(sig: str) -> str:
+    """规范化信号名：``SIGINT`` / ``int`` → ``INT``。
+
+    注意不能用 ``str.lstrip("SIG")``：lstrip 删的是**字符集合**，``"INT"`` 会被
+    削成 ``"NT"``（issue #477 单测抓到的真实缺陷）。
+    """
+    normalized = str(sig).strip().upper()
+    if normalized.startswith("SIG"):
+        normalized = normalized[3:]
+    return normalized
 
 
 class TerminalSession:
@@ -670,7 +682,7 @@ class TerminalManager:
         session = self.get(terminal_id, user_id=user_id)
         if session is None:
             raise TerminalNotFound("终端不存在或无权访问")
-        normalized = sig.upper().lstrip("SIG")
+        normalized = normalize_signal(sig)
         if normalized not in ("INT", "TERM", "KILL"):
             raise TerminalError("不支持的信号（仅 INT/TERM/KILL）")
         await session.backend.signal(normalized)
