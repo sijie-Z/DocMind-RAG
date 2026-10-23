@@ -44,10 +44,14 @@ def _run(*args: str, timeout: int = 240) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_acp_stub_exits_2():
+def test_acp_missing_identity_exits_2():
+    # issue #481 起 acp 不再是桩：入口要求显式 --org-id/--user-id，缺失即
+    # exit 2 且 stdout 0 字节（协议未启动）。原 #479 的桩文案断言由本用例
+    # 取代（桩已被 #481 替换，见 app/entrypoints/acp.py）。
     result = _run("--profile", "acp")
     assert result.returncode == 2
-    assert "acp entrypoint not implemented" in result.stderr
+    assert "--org-id" in result.stderr and "--user-id" in result.stderr
+    assert result.stdout == ""
 
 
 def test_headless_dry_run_requires_no_http_or_llm():
