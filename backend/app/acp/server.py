@@ -25,6 +25,7 @@ import logging
 import signal
 import sys
 import threading
+import time
 from typing import Any, BinaryIO, TextIO
 
 from sqlalchemy import select
@@ -269,6 +270,7 @@ class AcpServer:
             loop.call_soon_threadsafe(stop.set)
 
         installed: list[signal.Signals] = []
+        fallback_installed: list[tuple[signal.Signals, Any]] = []
         if self._install_signal_handlers:
             for sig in (signal.SIGTERM, signal.SIGINT):
                 try:
@@ -276,7 +278,9 @@ class AcpServer:
                     installed.append(sig)
                 except (NotImplementedError, RuntimeError, ValueError):
                     try:
+                        previous = signal.getsignal(sig)
                         signal.signal(sig, _request_stop)
+                        fallback_installed.append((sig, previous))
                     except (ValueError, OSError):  # pragma: no cover - 非主线程/受限环境
                         pass
 
@@ -323,6 +327,11 @@ class AcpServer:
                 try:
                     loop.remove_signal_handler(sig)
                 except (NotImplementedError, RuntimeError, ValueError):
+                    pass
+            for sig, previous in fallback_installed:
+                try:
+                    signal.signal(sig, previous)
+                except (ValueError, OSError):  # pragma: no cover - 非主线程/受限环境
                     pass
             for task in list(self._notification_tasks):
                 task.cancel()
@@ -407,6 +416,11 @@ class AcpServer:
             organization_id=self.organization_id,
         )
         self.sessions.ensure(session_id, self._send_update)
+        logger.info(
+            "ACP session created: session=%s open_sessions=%d",
+            session_id,
+            len(self.sessions.values()),
+        )
         return {"sessionId": session_id}
 
     async def session_list(self, params: dict) -> dict:
@@ -502,6 +516,12 @@ class AcpServer:
 
         async with state.lock:
             state.reset_for_prompt()
+            started = time.perf_counter()
+            logger.info(
+                "ACP prompt start: session=%s open_sessions=%d",
+                session_id,
+                len(self.sessions.values()),
+            )
             chat_session = await self._require_chat_session(session_id)
             config = self._agent_config_for(chat_session)
             history = await load_history(self._db_factory, session_id)
@@ -520,6 +540,7 @@ class AcpServer:
                     answer,
                 )
             except asyncio.CancelledError:
+                logger.info("ACP prompt cancelled (task-level): session=%s", session_id)
                 await self._cancel_session(state)
                 raise
             except Exception:
@@ -530,6 +551,12 @@ class AcpServer:
             await state.barrier()
             if stop_reason == "end_turn":
                 await self._save_interaction(session_id, text, "".join(answer))
+            logger.info(
+                "ACP prompt done: session=%s stop=%s duration_ms=%.1f",
+                session_id,
+                stop_reason,
+                (time.perf_counter() - started) * 1000.0,
+            )
             return {"stopReason": stop_reason}
 
     async def session_cancel(self, params: dict) -> dict:
@@ -537,6 +564,7 @@ class AcpServer:
         state = self.sessions.get(session_id)
         if state is None:
             raise RPCError(JSONRPC_NOT_FOUND, "会话不存在或未在本连接中打开")
+        logger.info("ACP cancel: session=%s", session_id)
         await self._cancel_session(state)
         return {"cancelled": True}
 
@@ -592,9 +620,14 @@ class AcpServer:
                     terminal_type = event.type
                     if event.type == "error":
                         last_error_event = event
+                    continue
                 update = self._event_update(state, event)
                 if update is not None:
                     state.enqueue_update(update)
+                else:
+                    # 其余诊断类事件不外发；DEBUG 留一行（issue §5.3 "warning→仅日志"
+                    # 的同一口径：绝不静默吞掉线索）。
+                    logger.debug("ACP event not mapped to session/update: %s", event.type)
             # 事件流自然结束（service.chat 的收尾逻辑已全部执行完毕）。
             if pending_error is not None:
                 raise pending_error
@@ -651,6 +684,7 @@ class AcpServer:
         )
         result = await self._request_permission(state, params)
         decision = decision_from_permission_result(result)
+        timed_out = isinstance(result, dict) and bool(result.get("timeout"))
 
         from app.agent import checkpoint
 
@@ -662,7 +696,19 @@ class AcpServer:
         # allow_once → approve；reject_once / cancelled / 超时（RPCError 已被
         # _request_permission 收敛为 cancelled）→ deny。超时按拒绝收尾。
         allow = decision == "allow"
-        note = "acp:request_permission" if decision != "cancelled" else "acp:permission_cancelled"
+        if timed_out:
+            note = "acp:permission_timeout"
+        elif decision != "cancelled":
+            note = "acp:request_permission"
+        else:
+            note = "acp:permission_cancelled"
+        logger.info(
+            "ACP permission decision: session=%s task=%s decision=%s note=%s",
+            state.session_id,
+            task_id,
+            "approve" if allow else "deny",
+            note,
+        )
         try:
             await checkpoint.apply_approval_decision(
                 task_id=task_id,
@@ -686,6 +732,9 @@ class AcpServer:
     async def _request_permission(self, state: AcpSessionState, params: dict) -> Any:
         """发 ``session/request_permission`` 并等待响应；超时/断连按 cancelled。"""
         assert self.dispatcher is not None
+        # 先 flush 已入队 update：客户端应先看到工具/消息上下文，再收到审批卡片。
+        await state.barrier()
+        started = time.perf_counter()
         task = asyncio.create_task(
             self.dispatcher.request_client(
                 "session/request_permission",
@@ -705,11 +754,18 @@ class AcpServer:
         except RPCError as exc:
             # 超时（ACP_PERMISSION_TIMEOUT_SECONDS）/ 传输不支持 → 按拒绝。
             logger.warning(
-                "ACP 审批等待失败，按拒绝处理（session=%s）：%s",
+                "ACP 审批等待失败，按拒绝处理（session=%s，等待 %.1fs）：%s",
                 state.session_id,
+                time.perf_counter() - started,
                 exc.message,
             )
-            return {"cancelled": True}
+            return {"cancelled": True, "timeout": True}
+        finally:
+            logger.info(
+                "ACP permission wait: session=%s duration_ms=%.1f",
+                state.session_id,
+                (time.perf_counter() - started) * 1000.0,
+            )
 
     async def _on_plan_approval_required(self, state: AcpSessionState, event: Any) -> Any | None:
         task_id = event.task_id or await self._latest_task_id(state.session_id)

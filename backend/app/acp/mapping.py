@@ -18,12 +18,12 @@
     tool_error            → tool_call_update（status: failed）
     plan_step/plan_complete → plan（entries 为调用方维护的累计快照）
     approval_required     → 服务端请求 session/request_permission（不走本函数）
-    warning               → 仅日志
+    warning               → 不外发（调用方 info 日志）
     done/run_cancelled/error/plan_approval_required → prompt 结算（不走本函数）
     command_result/command_error → agent_message_chunk（issue 表未列命令事件；
         命令输出同样需要可见，见下方常量注释）
     其余（plan_start/retry_hint/reflection/execution_step_result/run_report/
-    execution_context/steer_applied/command_start）→ 仅日志。
+    execution_context/steer_applied/command_start）→ 不外发（调用方 DEBUG 日志）。
 
 ``tool_call`` / ``tool_call_update`` 的 ``toolCallId`` 缺失时按
 ``call-{序号}`` 补齐（同一事件流内稳定）。

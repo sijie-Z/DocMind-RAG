@@ -200,6 +200,15 @@
     "session/load": {
       "supported": false,
       "errorCode": -32601
+    },
+    "$/cancel_request": {
+      "notification": true,
+      "params": {
+        "type": "object",
+        "required": ["requestId"],
+        "properties": {"requestId": {"type": ["string", "integer"]}},
+        "additionalProperties": true
+      }
     }
   },
   "serverRequests": {
@@ -328,6 +337,26 @@
             },
             "additionalProperties": true
           }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "notifications": {
+    "session/update": {
+      "type": "object",
+      "required": ["jsonrpc", "method", "params"],
+      "properties": {
+        "jsonrpc": {"const": "2.0"},
+        "method": {"const": "session/update"},
+        "params": {
+          "type": "object",
+          "required": ["sessionId", "update"],
+          "properties": {
+            "sessionId": {"type": "string", "minLength": 1},
+            "update": {"type": "object", "required": ["sessionUpdate"]}
+          },
+          "additionalProperties": true
         }
       },
       "additionalProperties": true

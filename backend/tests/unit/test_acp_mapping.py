@@ -32,6 +32,35 @@ from app.rpc.dispatcher import Dispatcher, RPCError
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "acp_v1_schema.json"
 
+# 事件类型冻结清单（issue #481 §5.3）：新增 EventType 必须先在本表登记并
+# 明确给出 ACP 归宿（映射 / 结算 / 不外发），否则 test_event_type_enum_is_frozen
+# 直接拉红——防止"新增事件静默落进 log_only、测试恒真"。
+KNOWN_EVENT_TYPES = (
+    "thinking",
+    "plan_start",
+    "plan_step",
+    "plan_complete",
+    "tool_call",
+    "tool_result",
+    "tool_error",
+    "retry_hint",
+    "reflection",
+    "chunk",
+    "done",
+    "error",
+    "execution_step_result",
+    "run_report",
+    "warning",
+    "execution_context",
+    "approval_required",
+    "run_cancelled",
+    "steer_applied",
+    "plan_approval_required",
+    "command_start",
+    "command_result",
+    "command_error",
+)
+
 
 @pytest.fixture(scope="module")
 def schema() -> dict:
@@ -79,6 +108,10 @@ def test_fixture_metadata_locks_v1(schema):
     assert schema["fetchedAt"] == "2026-10-22"
     assert schema["methods"]["session/load"] == {"supported": False, "errorCode": -32601}
     assert schema["methods"]["session/cancel"]["notification"] is True
+    assert schema["methods"]["$/cancel_request"]["notification"] is True
+    assert schema["notifications"]["session/update"]["properties"]["method"]["const"] == (
+        "session/update"
+    )
 
 
 # ── 事件映射：逐类型审计 ────────────────────────────────────────────────────
@@ -86,6 +119,11 @@ def test_fixture_metadata_locks_v1(schema):
 
 async def _noop_send(_message: dict) -> None:
     return None
+
+
+def test_event_type_enum_is_frozen():
+    """EventType 增删必须先改 KNOWN_EVENT_TYPES 并给出 ACP 归宿。"""
+    assert set(get_args(EventType)) == set(KNOWN_EVENT_TYPES)
 
 
 def test_every_event_type_has_defined_mapping():
@@ -108,7 +146,7 @@ def test_every_event_type_has_defined_mapping():
         "approval_required",
         "plan_approval_required",
     }
-    log_only = set(get_args(EventType)) - mapped - terminal
+    log_only = set(KNOWN_EVENT_TYPES) - mapped - terminal
     seen_log_only = set()
     for event_type in get_args(EventType):
         event = AgentEvent(type=event_type, content="x", tool_name="t", tool_call_id="call-1")
@@ -406,7 +444,7 @@ async def test_run_wires_utf8_stdout_reconfigure():
 
 
 @pytest.mark.asyncio
-async def test_sender_serializes_updates_in_order():
+async def test_sender_serializes_updates_in_order(schema):
     sent: list[dict] = []
     state = AcpSessionState("s-1", send=lambda message: _collect(sent, message))
     try:
@@ -416,6 +454,8 @@ async def test_sender_serializes_updates_in_order():
         assert [message["params"]["update"]["n"] for message in sent] == [1, 2]
         assert all(message["method"] == "session/update" for message in sent)
         assert all(message["params"]["sessionId"] == "s-1" for message in sent)
+        for message in sent:
+            _validate(message, schema["notifications"]["session/update"])
     finally:
         await state.close()
 

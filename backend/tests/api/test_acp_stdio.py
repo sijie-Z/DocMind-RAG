@@ -16,6 +16,7 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import jsonschema
 import pytest
@@ -106,6 +107,15 @@ async def sqlite_env(tmp_path, monkeypatch):
             organization_id=ORG_ID,
         )
         db.add(inactive)
+        other = User(
+            id=USER_ID + 2,
+            username="acp-other",
+            email="other@example.com",
+            hashed_password="x",
+            is_active=True,
+            organization_id=ORG_ID,
+        )
+        db.add(other)
         await db.commit()
     # checkpoint 的真实收尾路径（mark_terminal/load_task/request_cancel）打到
     # 同一个 sqlite；Redis 用内存替身，绝不触网。
@@ -252,7 +262,9 @@ async def test_initialize_new_list_close(sqlite_env, schema):
         handshake = await client.initialize()
         jsonschema.validate(handshake["result"], schema["methods"]["initialize"]["response"])
 
-        session_id = await _new_session(client)
+        new_response = await client.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+        jsonschema.validate(new_response["result"], schema["methods"]["session/new"]["response"])
+        session_id = new_response["result"]["sessionId"]
         async with sqlite_env.factory() as db:
             row = await db.get(ChatSession, session_id)
         assert row is not None and row.user_id == USER_ID and row.organization_id == ORG_ID
@@ -339,6 +351,7 @@ async def test_prompt_streams_updates_in_order_and_persists(sqlite_env, schema):
         session_id = await _new_session(env.client)
         response = await env.client.prompt(session_id, "问题")
         assert response["result"] == {"stopReason": "end_turn"}
+        jsonschema.validate(response["result"], schema["methods"]["session/prompt"]["response"])
         # service 的收尾（持久化/终态）在 yield done 之后执行；必须排干事件流。
         assert service.chat_exhausted is True
         assert service.chat_closed_early is False
@@ -506,6 +519,53 @@ async def test_cancel_request_cancels_pending_permission(sqlite_env, monkeypatch
     assert decisions == [], "取消优先：不写 allow/deny 决定"
 
 
+@pytest.mark.asyncio
+async def test_client_disconnect_denies_pending_approval_and_cancels_task(sqlite_env, monkeypatch):
+    """Given 审批 pending，When 客户端断连，Then 审批收起、任务终态 CANCELLED。"""
+    # mark_terminal 的真实路径会顺带收敛工具账目/转向缓冲；本用例只关心
+    # 任务状态机与 ACP 断连收尾，跨模块的旁路以 no-op 替身隔离。
+    monkeypatch.setattr(checkpoint.tool_ledger, "synthesize_terminal", AsyncMock())
+    monkeypatch.setattr(checkpoint.steering, "clear_steers", AsyncMock())
+
+    service = FakeAgentService()
+    service.add_chat(
+        script(
+            AgentEvent(
+                type="approval_required",
+                content="需审批",
+                tool_name="code_execution",
+                tool_call_id="call-dc",
+                task_id="task-dc",
+            )
+        )
+    )
+    async with acp_env(sqlite_env, service=service, permission_timeout=30.0) as env:
+        session_id = await _new_session(env.client)
+        async with sqlite_env.factory() as db:
+            db.add(
+                AgentTask(
+                    id="task-dc",
+                    user_id=USER_ID,
+                    organization_id=ORG_ID,
+                    session_id=session_id,
+                    status=TaskStatus.WAITING_APPROVAL,
+                    query="等待审批的任务",
+                )
+            )
+            await db.commit()
+        prompt_task = asyncio.create_task(env.client.prompt(session_id, "运行代码", timeout=15))
+        await env.client.wait_for_server_request("session/request_permission")
+        # 断连收尾（Dispatcher.close 在 run() 的 finally 里同样会调用它）。
+        await env.server.on_disconnect()
+        response = await prompt_task
+        assert response["result"] == {"stopReason": "cancelled"}
+    async with sqlite_env.factory() as db:
+        task = await db.get(AgentTask, "task-dc")
+    assert task is not None and task.status == TaskStatus.CANCELLED, (
+        "断连后待审批任务必须收敛为 CANCELLED（不悬空）"
+    )
+
+
 # ── 审批：allow / reject / 超时 ────────────────────────────────────────────
 
 
@@ -636,7 +696,7 @@ async def test_permission_timeout_denies_and_task_not_dangling(sqlite_env, monke
         response = await env.client.prompt(session_id, "运行代码")  # 不响应审批
         assert response["result"] == {"stopReason": "end_turn"}
     assert decisions[0]["decision"] == "deny"
-    assert decisions[0]["note"] == "acp:permission_cancelled"
+    assert decisions[0]["note"] == "acp:permission_timeout"
     assert service.resume_calls, "超时后必须 deny 并续跑，任务不得悬空"
     assert service.resume_started_with_chat_exhausted is True
 
@@ -714,7 +774,7 @@ async def test_plan_approval_auto_approves_and_resumes(sqlite_env, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_session_resume_replays_no_history_and_streams(sqlite_env):
+async def test_session_resume_replays_no_history_and_streams(sqlite_env, schema):
     service = FakeAgentService()
     service.add_resume(
         script(AgentEvent(type="chunk", content="恢复输出"), AgentEvent(type="done"))
@@ -736,6 +796,7 @@ async def test_session_resume_replays_no_history_and_streams(sqlite_env):
             await db.commit()
         response = await env.client.request("session/resume", {"sessionId": session_id})
         assert response["result"] == {"sessionId": session_id, "status": "running"}
+        jsonschema.validate(response["result"], schema["methods"]["session/resume"]["response"])
         await _wait_until(
             lambda: any(u["sessionUpdate"] == "agent_message_chunk" for u in env.client.updates)
         )
@@ -772,6 +833,34 @@ async def test_validate_identity_rejects_wrong_org_and_inactive_users(sqlite_env
         await validate_identity(sqlite_env.factory, organization_id=ORG_ID, user_id=USER_ID + 1)
     with pytest.raises(IdentityError):
         await validate_identity(sqlite_env.factory, organization_id=ORG_ID, user_id=999)
+
+
+@pytest.mark.asyncio
+async def test_validate_identity_api_key_must_match_user_and_org(sqlite_env):
+    from app.services.api_key_service import api_key_service
+
+    async with sqlite_env.factory() as db:
+        user = await db.get(User, USER_ID)
+        _, good = await api_key_service.create_key(db, user=user, name="good", org_id=ORG_ID)
+        _, other_user_key = await api_key_service.create_key(
+            db, user=await db.get(User, USER_ID + 2), name="other", org_id=ORG_ID
+        )
+        _, wrong_org_key = await api_key_service.create_key(
+            db, user=user, name="wrong-org", org_id=2
+        )
+
+    matched = await validate_identity(
+        sqlite_env.factory, organization_id=ORG_ID, user_id=USER_ID, api_key=good
+    )
+    assert matched.id == USER_ID
+    with pytest.raises(IdentityError):
+        await validate_identity(
+            sqlite_env.factory, organization_id=ORG_ID, user_id=USER_ID, api_key=other_user_key
+        )
+    with pytest.raises(IdentityError):
+        await validate_identity(
+            sqlite_env.factory, organization_id=ORG_ID, user_id=USER_ID, api_key=wrong_org_key
+        )
 
 
 @pytest.mark.asyncio
@@ -845,10 +934,9 @@ async def test_entrypoint_subprocess_handshake_with_sqlite_identity(sqlite_env, 
         backend_dir=str(BACKEND_DIR),
         org_id=ORG_ID,
         user_id=USER_ID,
-        env={
-            "DATABASE_URL": f"sqlite+aiosqlite:///{sqlite_env.path}",
-            "PYTHONUTF8": "1",
-        },
+        # 故意不设 PYTHONUTF8：在 Windows 中文 locale 下由入口自身的
+        # stdout UTF-8 重配保证中文/emoji 帧可往返（本测试因此有判别力）。
+        env={"DATABASE_URL": f"sqlite+aiosqlite:///{sqlite_env.path}"},
     )
     try:
         handshake = await client.request(

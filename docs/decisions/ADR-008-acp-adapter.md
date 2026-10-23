@@ -92,17 +92,18 @@
 ## 依据（实测，本 worktree / 基线 7d62000）
 
 - `python -m pytest tests/unit/test_acp_mapping.py tests/api/test_acp_stdio.py`
-  → **54 passed**（单测 35 条 + stdio e2e 19 条；sqlite + fake service + 内存
+  → **57 passed**（单测 36 条 + stdio e2e 21 条；sqlite + fake service + 内存
   管道，无网络/无真实 LLM）。
 - e2e 覆盖：握手形状（fixture 校验）、`session/new` 落库、`session/list`、
   `session/close` 仅解映射、`session/load→-32601`、更新顺序
   （message→tool pending→completed→thought）、并发 prompt `-32009`、取消后
   无迟到 update 且 `stopReason=cancelled`、`$/cancel_request` 取消在途审批、
-  审批 allow/reject/超时三路径、
-  计划审批 reject(`-32009`+REJECTED)/auto(approve+续跑)、`session/resume`
-  不回放历史、`set_config_option` 持久化、身份校验四类失败、真实入口子进程
+  审批 allow/reject/超时三路径、**断连时 pending 审批收尾 + 任务终态
+  CANCELLED**、计划审批 reject(`-32009`+REJECTED)/auto(approve+续跑)、
+  `session/resume` 不回放历史、`set_config_option` 持久化、身份校验各类失败
+  （含 `--api-key-file` 用户/组织不一致）、最近 20 条 history、真实入口子进程
   （无身份 exit 2 且 stdout 0 字节；sqlite 身份下完成握手/new/list/close、
-  退出码 0）。
+  中文/emoji 标题往返、退出码 0）。
 - 变异试验（手动改码 → 用例红 → 还原）：
   - `session/load` 伪造成成功 → `test_session_load_returns_method_not_found` 红；
   - 审批超时改成放行 → `test_permission_timeout_denies_and_task_not_dangling` 红；
@@ -160,8 +161,8 @@
    ```
 
 3. 在 Zed 的 Agent 面板选择 DocMind 新建会话；`session/new` 会创建
-   `chat_sessions` 行，标题固定为 `ACP session`（首轮问答后沿用既有逻辑
-   以首条消息补标题）。
+   `chat_sessions` 行，标题固定为 `ACP session`（既有落库逻辑只在标题为空
+   或 `New Agent Session` 时改标题，因此该标题保持不变）。
 4. 冒烟：发送一句普通问题；若配置了高风险工具（如 `execute_python`），
    应出现一次权限确认；取消后不应再收到迟到消息。
 
@@ -202,5 +203,9 @@
 - **tool_result 内容截断**：超过 8000 字符的工具有效输出在 update 中截断
   （防止单行 NDJSON 过大）；完整内容仍按既有 SSE/持久化通道处理。
 - **事件类型计数**：issue 文本写 24 种，代码 `EventType` 为 23 种
-  （`hook_error` 是工具错误码，不是事件）；以代码为准，并在单测中做
-  逐类型审计，新增事件不登记会拉红。
+  （`hook_error` 是工具错误码，不是事件）；以代码为准。单测用
+  `KNOWN_EVENT_TYPES` 冻结清单做逐类型审计——增删事件必须先登记并明确
+  ACP 归宿，否则 `test_event_type_enum_is_frozen` 拉红。
+- **可观测**：ACP 层以结构化日志记录会话数、prompt 起止与耗时、取消数、
+  审批等待时长（`logger.info`）。issue §3 所说"指标"未接 Prometheus——
+  `app/core/prometheus.py` 不在本 issue 白名单；需要真指标时另开 issue。
