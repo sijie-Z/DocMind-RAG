@@ -617,6 +617,10 @@ async def fork_session(
             if existing is not None:
                 await _remember_idempotency(user_id, idem_key, existing.id)
                 return _replay_result(existing)
+            # 超时仍不可见：释放**本次观察到的**抢占值，避免首个请求崩溃/超时后
+            # 幂等键被锁死 24h（DB 唯一约束仍是并发双建的事实防线）。
+            if holder:
+                await _release_idempotency_claim(user_id, idem_key, holder)
             raise ForkInProgressError(
                 "相同幂等键的分叉请求正在处理中，请稍后重试",
                 detail={

@@ -988,6 +988,9 @@ async def test_fork_in_progress_holder_returns_409_after_short_wait(db_factory, 
         assert excinfo.value.status_code == 409
         assert excinfo.value.error_code == "FORK_IN_PROGRESS"
         assert excinfo.value.detail["holder_session_id"] == "ghost-child-id"
+        assert f"fork:idem:{USER_ID}:inflight" not in fake.data, (
+            "超时后必须释放观察到的抢占值，避免崩溃请求把幂等键锁死 24h"
+        )
 
         children = (
             (await db.execute(select(ChatSession).where(ChatSession.parent_session_id == src_id)))
