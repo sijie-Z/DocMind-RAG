@@ -25,7 +25,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
 - 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 33 个工具完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
-- 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、23 种 SSE 事件、RunReport 运行摘要
+- 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、24 种 SSE 事件、RunReport 运行摘要
 - 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
 
 > 关于架构决策和实验数据，请参见研究仓库：[DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
@@ -138,6 +138,29 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 经验记忆 | `experience/` | 从失败运行中自动提取经验教训，注入 Planner |
 | 执行回放 | `replay/` | 完整执行快照保存与回放，支持 diff 对比 |
 | 模式挖掘 | `mining/` | 扫描回放发现高频工具序列，生成技能建议（离线 CLI，读 benchmark/replay/） |
+
+**Hooks 扩展点**（issue #474，默认关闭）：
+
+进程内事件总线，覆盖 agent 轮次与工具执行；`waterfall`（可改写/短路）与
+`serial`（顺序观察）两种语义。配置文件 `backend/config/hooks.yaml`，总开关
+`HOOKS_ENABLED=true`（关闭时不读文件、零行为变化）：
+
+```yaml
+hooks:
+  - name: audit_tool_calls
+    event: tools/pre_execute        # agent/turn_start | agent/pre_step | agent/post_step
+    module: app.agent.hooks.builtin.audit_tool_calls   # 必须 app.agent.hooks.*
+    enabled: true
+    priority: 100                   # 越小越先执行
+    timeout_seconds: 2.0            # 0.1–30
+    failure_policy: fail_open       # fail_open | fail_closed
+```
+
+handler 签名 `async def handler(ctx, next)`：`await next(payload)` 继续链路；
+不调用即短路；返回 `HookDecision(action="deny"|"modify"|"ask", ...)`。
+`tools/pre_execute` 的 `ask` 走既有 HITL 审批门，hook 不能绕过审批；
+hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
+`docs/decisions/ADR-004-hooks.md`。
 
 ### 📚 RAG 管线 (`backend/app/rag/`)
 
@@ -266,7 +289,7 @@ Vue 3 + TypeScript + Naive UI 单页应用，34 条路由记录（29 条具名�
 
 ### 🔄 异步处理 (`backend/app/worker/`)
 
-Kafka 消费者独立进程（`start_worker.py`），监听 `file-processing` 主题，处理文档解析 → 分块 → 嵌入 → ES 索引入库。
+Kafka 消费者独立进程（`python -m app --profile worker`；旧脚本 `start_worker.py` 仍兼容），监听 `file-processing` 主题，处理文档解析 → 分块 → 嵌入 → ES 索引入库。
 
 如果 Kafka 不可用，`/documents/upload` 与知识库重建接口会自动切换为进程内处理，本地开发不会因为缺少消息队列而停在 pending。
 
@@ -326,6 +349,19 @@ pip install -r requirements.txt
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+推荐使用统一入口（issue #479）：
+
+```bash
+# profile = web | worker | headless | sdk | acp（缺省 web）
+python -m app --profile web
+# 按顺序叠加 patch 文件
+python -m app --profile web --patch config/patches/local.yaml
+# 打印 profile/bundle/patch 合并后的最终配置（键排序、secret 打码）
+python -m app --profile web --dump-config
+```
+
+配置分层：`backend/config/base.yaml` → profile 声明的 `bundles/*.yaml` → `profiles/<profile>.yaml` → `--patch` → 环境变量（`.env` 归入环境层）。`uvicorn app.main:app` 与 `python run.py` 保留为兼容入口；reload 场景继续用 `python run.py`。
+
 ### 5. 启动前端
 
 ```bash
@@ -376,7 +412,7 @@ DocMind/
 │   │   │   ├── exec_context.py      #   ExecutionContext
 │   │   │   ├── registry.py          #   工具注册表
 │   │   │   ├── memory_bridge.py     #   记忆桥接
-│   │   │   ├── events.py            #   SSE 事件类型（23 种）
+│   │   │   ├── events.py            #   SSE 事件类型（24 种）
 │   │   │   ├── message.py           #   Agent 间消息总线
 │   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
 │   │   │   ├── core_tools.py        #   基础工具（14 个）

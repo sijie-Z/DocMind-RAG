@@ -6,6 +6,8 @@ services:
   backend:
     build: .
     container_name: docmind-backend
+    # issue #479：统一入口（Dockerfile CMD 仍保留 uvicorn app.main:app 作为兜底）
+    command: python -m app --profile web
     ports:
       - "8000:8000"
     env_file:
@@ -58,7 +60,7 @@ services:
   worker:
     build: .
     container_name: docmind-worker
-    command: python start_worker.py
+    command: python -m app --profile worker
     env_file:
       - .env.docker
     environment:

@@ -94,3 +94,9 @@ class BaseAppSettings(BaseSettings):
     # POST /commands/execute 404 COMMANDS_DISABLED，聊天入口不再拦截 "/" 前缀
     # （恢复到"斜杠文本按普通提示词处理"的旧行为）。
     COMMANDS_ENABLED: bool = True
+
+    # Hooks（issue #474）默认关闭：false 时**不读取** HOOKS_CONFIG_PATH、不注册
+    # 任何外部 hook，agent loop / executor 行为与基线逐字节一致（回滚开关）。
+    # true 时启动期加载并严格校验；非法配置 fail-closed（进程退出）。
+    HOOKS_ENABLED: bool = False
+    HOOKS_CONFIG_PATH: str = "config/hooks.yaml"

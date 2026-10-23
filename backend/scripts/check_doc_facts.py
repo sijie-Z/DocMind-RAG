@@ -16,8 +16,9 @@ ci-hygiene 的轻量 job 中直接运行。
 派生口径：
     sse_event_types          app/agent/events.py 的 EventType = Literal[...]
                              字符串成员数（闭集；含非字面量成员视为派生失败）
-    endpoint_modules         app/api/v1/router.py 中 api_router.include_router(...)
-                             调用数
+    endpoint_modules         优先取 app/api/v1/router.py 的 ROUTER_SPECS 字典
+                             键（声明顺序、去重）；未找到 ROUTER_SPECS 时回退
+                             为 api_router.include_router(...) 调用数
     frontend_routes          frontend/src/router/index.ts 中路由记录 ``path:``
                              字符串字面量数（注释内的 path 不计）
     registered_tools         app/agent 下经 @register_tool(name=...) 注册的工具数；
@@ -158,9 +159,60 @@ def derive_sse_event_types(events_path: Path) -> list[str]:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+def _derive_router_specs_keys(tree: ast.Module, router_path: Path) -> list[str] | None:
+    """解析 ``ROUTER_SPECS = {...}`` 的键（声明顺序）；未定义时返回 None。
+
+    issue #479：路由表改为 ``ROUTER_SPECS`` 映射后，端点模块数不再能从
+    ``api_router.include_router(...)`` 调用派生——优先认这张表。
+    """
+    value: ast.expr | None = None
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign):
+            target, candidate = node.target, node.value
+        elif isinstance(node, ast.Assign):
+            target, candidate = None, node.value
+        else:
+            continue
+        if candidate is None:
+            continue
+        is_router_specs = (isinstance(target, ast.Name) and target.id == "ROUTER_SPECS") or (
+            target is None
+            and any(
+                isinstance(item, ast.Name) and item.id == "ROUTER_SPECS" for item in node.targets
+            )
+        )
+        if is_router_specs:
+            value = candidate
+            break
+    if value is None:
+        return None
+    if not isinstance(value, ast.Dict):
+        raise DerivationError(f"{router_path}: ROUTER_SPECS 必须是字典字面量（无法静态派生）")
+    keys: list[str] = []
+    for key in value.keys:
+        if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+            raise DerivationError(
+                f"{router_path}: ROUTER_SPECS 含非字符串字面量键（{ast.dump(key)[:80]}），"
+                "端点模块无法静态派生"
+            )
+        keys.append(key.value)
+    if not keys:
+        raise DerivationError(f"{router_path}: ROUTER_SPECS 为空字典")
+    if len(keys) != len(set(keys)):
+        raise DerivationError(f"{router_path}: ROUTER_SPECS 存在重复键: {keys}")
+    return keys
+
+
 def derive_endpoint_modules(router_path: Path) -> list[str]:
-    """返回 api_router.include_router(<module>.router, ...) 的模块名列表。"""
+    """返回端点模块名列表。
+
+    优先解析 ``ROUTER_SPECS`` 的键（issue #479 后的唯一路由清单，保持声明
+    顺序）；旧形态（仅 ``api_router.include_router(...)``）回退到调用解析。
+    """
     tree = _parse_python(router_path)
+    specs_keys = _derive_router_specs_keys(tree, router_path)
+    if specs_keys is not None:
+        return specs_keys
     modules: list[str] = []
     for node in ast.walk(tree):
         if not (

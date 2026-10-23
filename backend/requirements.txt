@@ -3,6 +3,10 @@ uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
 pydantic>=2.13.5
 pydantic-settings>=2.1.0
+# YAML 配置解析：Profiles/Bundles/Patch 配置分层（issue #479，backend/config/*.yaml）
+# 与 Hooks 扩展点（issue #474，backend/config/hooks.yaml）共同依赖。此前仓库没有
+# YAML 直接依赖（PyYAML 仅在部分环境的传递依赖里出现，不可依赖）。
+PyYAML>=6.0
 # `[asyncio]` 是必需的：SQLAlchemy 2.0 只在部分平台把 greenlet 作为传递依赖装上，
 # CI（Linux, pip 安装）拿不到，导致 `sqlalchemy.ext.asyncio` 直接 ImportError —
 # Backend Tests 与 Migration (MySQL) 三个 job 都因此失败。
