@@ -1,0 +1,4 @@
+# sdk：JSON-RPC 入口（#480 实现；本期桩）。
+entrypoint: sdk
+bundles: [core, agent]
+settings: {}

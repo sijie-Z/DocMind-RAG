@@ -206,7 +206,10 @@ def test_lifespan_wires_startup_probe_with_fail_fast():
     import re
     from pathlib import Path
 
-    main_src = (Path(__file__).resolve().parents[2] / "app" / "main.py").read_text(encoding="utf-8")
+    # issue #479：lifespan 实体已从 app/main.py 搬到 app/bootstrap.py（main 为兼容壳）
+    main_src = (Path(__file__).resolve().parents[2] / "app" / "bootstrap.py").read_text(
+        encoding="utf-8"
+    )
     assert "verify_embedding_consistency()" in main_src
     assert re.search(
         r"except EmbeddingDimensionMismatchError as e:\s*"

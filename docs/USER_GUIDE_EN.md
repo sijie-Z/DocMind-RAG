@@ -122,6 +122,16 @@ alembic upgrade head
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+The unified entrypoint is also available (issue #479, recommended; profile = web | worker | headless | sdk | acp):
+
+```bash
+python -m app --profile web
+python -m app --profile web --patch config/patches/local.yaml
+python -m app --profile web --dump-config   # sorted JSON, secrets masked
+```
+
+`uvicorn app.main:app` and `python run.py` remain compatibility entrypoints (use the latter for reload). Layering: `config/base.yaml` → bundles → `profiles/<profile>.yaml` → `--patch` → environment.
+
 On Windows you can also use `start_windows.bat` at the repo root (it detects `.venv` or `venv`), but it does not start the worker.
 
 Three startup behaviors worth knowing:
@@ -136,8 +146,10 @@ Three startup behaviors worth knowing:
 # new terminal
 cd backend
 source venv/bin/activate            # Windows: venv\Scripts\activate
-python start_worker.py
+python start_worker.py          # equivalent to: python -m app --profile worker
 ```
+
+The unified entrypoint works too: `python -m app --profile worker`.
 
 The worker is a Kafka consumer: parse → chunk → embed → index into ES. **If Kafka is available, the worker must run**, otherwise documents stay pending. When Kafka is unavailable, upload and rebuild endpoints automatically fall back to in-process processing (`README.md`, "Async Processing").
 
@@ -388,6 +400,8 @@ ADR-001 froze this semantic (`docs/decisions/ADR-001-路线冻结.md`, D5):
 - `approve` is sticky per **(tool_name, args) fingerprint** within the run; `deny` skips the call and feeds a structured `approval_denied` failure to the reflector.
 - `approve + modified_instruction` resumes with human guidance injected into later step prompts.
 - Resuming may stop at the next approval point; concurrent decisions return 409 (`TASK_NOT_WAITING_APPROVAL` / `TASK_NOT_RESUMABLE` / `TASK_BUSY`).
+
+**Hooks (extension points, off by default)**: an in-process event bus covers agent turns and tool execution (`agent/pre_step`, `tools/pre_execute`, ...). See `backend/config/hooks.yaml`, the "Hooks extension points" section in README_EN, and `docs/decisions/ADR-004-hooks.md` for semantics and boundaries. `ask` on `tools/pre_execute` reuses the same HITL approval gate — hooks cannot bypass approval; `HOOKS_ENABLED=false` means no file read and no behavior change.
 
 ### 3.5 Three prompt layers: system / organization / personal
 

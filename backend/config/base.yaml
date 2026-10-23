@@ -1,0 +1,3 @@
+# 公共层：自动叠加到所有 profile（不写 entrypoint）。
+# 只放「所有 profile 都成立」的配置；当前为空，保持与代码默认值等价。
+settings: {}
