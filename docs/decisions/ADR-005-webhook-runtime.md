@@ -44,6 +44,9 @@
    分隔区里。
 8. **进程内 poll 循环只在 `web` 入口启动**（与 #479 对调度器的裁定一致），
    `WEBHOOKS_ENABLED=true` 且缺/非法 Fernet key 时**启动失败（fail-closed）**。
+   校验落在 `config/loader.load_settings()` 的最终 `Settings` 上（所有入口——
+   web/worker/headless/sdk/acp、`python -m app`、`uvicorn`、`start_worker.py`
+   都经过它）；`bootstrap` lifespan 再执行一次防御性校验。
 
 ## 与 issue 的偏离（有意为之，评审请重点核对）
 
@@ -55,6 +58,10 @@
 2. **`core/prometheus.py` 的修改**：任务书 §1.6 明确要求把
    `webhook_delivery_total{status}` / `webhook_poll_errors_total` 等挂到现有指标
    注册方式，但 §0.3 白名单未列该文件；按 §1.6 执行并在报告列明。
+2. **`core/config/loader.py` 的修改**：启动 fail-closed 校验必须覆盖不经过
+   `bootstrap` lifespan 的 worker/headless 入口（对抗评审 R3-B1），而 loader 是
+   所有入口的共同配置加载点；白名单未列该文件，按"启动契约优先"执行并在报告
+   列明。
 3. **全局 body 上限是硬顶**：规则 `max_body_bytes` 只能收紧到不高于
    `WEBHOOK_MAX_BODY_BYTES`，避免单条规则的配置错误放大全局边界。
 4. **dry-run 验签失败**返回 200 + `signature_valid=false` + `signature_error`

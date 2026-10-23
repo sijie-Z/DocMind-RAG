@@ -297,6 +297,79 @@ class TestTemplate:
         validate_prompt_template("事件如下：\n{payload}\n来自 {rule_id}/{delivery_id}")
 
 
+# ── 启动 fail-closed（loader 覆盖所有入口）─────────────────────────────
+
+
+class TestStartupFailClosed:
+    """WEBHOOKS_ENABLED=true 且缺/非法 Fernet key ⇒ load_settings 失败。
+
+    loader 是 `python -m app --profile web|worker|...`、uvicorn、start_worker
+    的共同入口；把校验放这里才能覆盖不经过 bootstrap lifespan 的 worker/headless。
+    """
+
+    def _config_tree(self, tmp_path, profile: str):
+        config_dir = tmp_path / "config"
+        for bundle in ("core", "rag", "agent", "observability"):
+            path = config_dir / "bundles" / f"{bundle}.yaml"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("settings: {}\n", encoding="utf-8")
+        profiles = config_dir / "profiles"
+        profiles.mkdir(parents=True, exist_ok=True)
+        (profiles / f"{profile}.yaml").write_text(
+            f"entrypoint: {profile}\nbundles: [core]\nsettings:\n  WEBHOOKS_ENABLED: true\n",
+            encoding="utf-8",
+        )
+        (config_dir / "base.yaml").write_text("settings: {}\n", encoding="utf-8")
+        return config_dir
+
+    def _isolate(self, tmp_path, monkeypatch, config_dir):
+        from app.core.config import loader
+
+        monkeypatch.setattr(loader, "CONFIG_DIR", config_dir)
+        monkeypatch.setenv("SECRET_KEY", "a" * 32)
+        monkeypatch.setenv("JWT_SECRET_KEY", "b" * 32)
+        monkeypatch.setenv("DATABASE_URL", "mysql+asyncmy://u:p@localhost:3306/whatever")
+        monkeypatch.setenv("ENABLE_LOCAL_EMBEDDING", "true")
+        monkeypatch.delenv("WEBHOOKS_ENABLED", raising=False)
+        monkeypatch.delenv("WEBHOOK_ENCRYPTION_KEY", raising=False)
+        monkeypatch.chdir(tmp_path)
+        loader.reset_settings()
+        return loader
+
+    @pytest.mark.parametrize("profile", ["web", "worker"])
+    def test_enabled_without_key_fails(self, tmp_path, monkeypatch, profile):
+        from app.core.config.schema import ConfigError
+
+        loader = self._isolate(tmp_path, monkeypatch, self._config_tree(tmp_path, profile))
+        try:
+            with pytest.raises(ConfigError):
+                loader.load_settings(profile)
+        finally:
+            loader.reset_settings()
+
+    @pytest.mark.parametrize("profile", ["web", "worker"])
+    def test_enabled_with_invalid_key_fails(self, tmp_path, monkeypatch, profile):
+        from app.core.config.schema import ConfigError
+
+        loader = self._isolate(tmp_path, monkeypatch, self._config_tree(tmp_path, profile))
+        monkeypatch.setenv("WEBHOOK_ENCRYPTION_KEY", "not-a-fernet-key")
+        try:
+            with pytest.raises(ConfigError):
+                loader.load_settings(profile)
+        finally:
+            loader.reset_settings()
+
+    @pytest.mark.parametrize("profile", ["web", "worker"])
+    def test_enabled_with_valid_key_passes(self, tmp_path, monkeypatch, profile):
+        loader = self._isolate(tmp_path, monkeypatch, self._config_tree(tmp_path, profile))
+        monkeypatch.setenv("WEBHOOK_ENCRYPTION_KEY", Fernet.generate_key().decode())
+        try:
+            loaded = loader.load_settings(profile)
+            assert loaded.WEBHOOKS_ENABLED is True
+        finally:
+            loader.reset_settings()
+
+
 # ── 幂等键 ───────────────────────────────────────────────────────────
 
 
