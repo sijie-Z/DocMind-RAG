@@ -1,21 +1,30 @@
 """命令文本解析 —— ``/name arg1 arg2`` → (name, tokens) → 校验后的参数字典。
 
+契约（issue #498）：
+- ``line`` 是 v1 规范形态；前导 ``/`` **可选**（``help`` 与 ``/help`` 等价，
+  解析时统一归一为带 ``/`` 的内部形态）。
+- ``command + args`` 不是 v1 契约，只是 HTTP 兼容层：端点用 ``compose_line``
+  把 ``{"command","args"}`` 拼回一行再走同一解析/绑定路径。
+
 刻意保持简单：命令是"一行文本"，参数按声明顺序位置绑定、空白分隔（不支持
 引号/flag）。解析失败全部抛 ``CommandSyntaxError``（带 error_code + field），
 由 ``execute()`` 收敛为字段级错误——绝不把半解析结果交给 handler。
 
 变异点（tests/unit/test_user_commands.py 锁定）：
 - 跳过 required / choices / 多余参数校验 → 三个字段级用例红；
-- 缺失命令名返回空解析而不是显式错误 → missing_command 用例红。
+- 缺失命令名返回空解析而不是显式错误 → missing_command 用例红；
+- 去掉前导 / 归一 → 裸 ``help`` 用例红（issue #498）。
 """
 
 from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from app.agent.commands.types import (
     ERROR_INVALID_ARGUMENT,
     ERROR_MISSING_ARGUMENT,
     ERROR_MISSING_COMMAND,
-    ERROR_NOT_A_COMMAND,
     ERROR_UNEXPECTED_ARGUMENT,
     Command,
 )
@@ -34,20 +43,49 @@ class CommandSyntaxError(Exception):
 def parse_line(line: str) -> tuple[str, list[str]]:
     """把一行文本解析为 (规范命令名, 原始参数 tokens)。
 
-    - 必须以 ``/`` 开头（否则 ``not_a_command``）；
+    - 前导 ``/`` 可选（``help`` 与 ``/help`` 等价，issue #498）；
     - 命令名大小写归一为小写（``/Help`` == ``/help``）；
     - 只按空白切分，不做 shell 展开——命令文本从不经过 shell。
     """
     text = (line or "").strip()
-    if not text.startswith("/"):
-        raise CommandSyntaxError(ERROR_NOT_A_COMMAND, "命令必须以 / 开头；输入 /help 查看可用命令")
-    body = text[1:].strip()
-    if not body:
+    if text.startswith("/"):
+        text = text[1:].strip()
+    if not text:
         raise CommandSyntaxError(
             ERROR_MISSING_COMMAND, "缺少命令名；输入 /help 查看可用命令", field_name="name"
         )
-    tokens = body.split()
+    tokens = text.split()
     return tokens[0].lower(), tokens[1:]
+
+
+def compose_line(
+    command: str,
+    args: Sequence[Any] | Mapping[str, Any] | None = None,
+    *,
+    arg_names: Sequence[str] = (),
+) -> str:
+    """兼容层：把 ``{"command","args"}`` 拼回规范 ``/<name> <args...>`` 一行。
+
+    - ``command`` 可带可不带前导 ``/``；带参数文本（如 ``export json``）时原样保留；
+    - ``args`` 为 list/tuple → 按顺序拼接；为 mapping → 先按命令声明的参数
+      顺序（``arg_names``），再按映射自身顺序补齐未声明键；
+    - ``None`` 值跳过（与"未提供"同义）。
+    """
+    name = (command or "").strip().lstrip("/").strip()
+    if not name:
+        raise CommandSyntaxError(
+            ERROR_MISSING_COMMAND, "缺少命令名；输入 /help 查看可用命令", field_name="name"
+        )
+    tokens: list[str] = []
+    if isinstance(args, Mapping):
+        ordered = [key for key in arg_names if key in args]
+        ordered += [key for key in args if key not in ordered]
+        tokens = [str(args[key]) for key in ordered if args[key] is not None]
+    elif isinstance(args, (list, tuple)):
+        tokens = [str(value) for value in args if value is not None]
+    elif args is not None:
+        tokens = [str(args)]
+    return "/" + " ".join([name, *tokens])
 
 
 def bind_args(command: Command, tokens: list[str]) -> dict[str, str]:
