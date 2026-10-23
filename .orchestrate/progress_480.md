@@ -8,7 +8,7 @@
 - [x] 5. stdio 入口（管道手测 initialize/tools/shutdown；缺失身份 exit 2/stdout 0 字节）
 - [x] 6. Python SDK（7 passed）
 - [x] 7. TS SDK（tsc --noEmit + npm test 7 passed）
-- [ ] 8. 指标/ADR-007/facts/文档
-- [ ] 9. 自测（ruff/pytest/alembic/SDK/stdio + 变异试验）
-- [ ] 10. 内部对抗评审
+- [x] 8. 指标/ADR-007/facts/文档（check_doc_facts OK）
+- [x] 9. 自测（ruff 全绿；分块 pytest 全绿；alembic 往返+parity；SDK 9+8；stdio 手测；两项变异试验红→还原绿）
+- [~] 10. 内部对抗评审（进行中）
 - [ ] 11. 收尾报告
