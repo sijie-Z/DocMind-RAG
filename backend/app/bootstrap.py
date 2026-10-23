@@ -92,12 +92,19 @@ def render_schema_mismatch(current: set[str] | None, heads: set[str]) -> str:
     """统一 mismatch 文案（日志与异常共用；必须含 current / head / 修复命令）。"""
     current_text = ",".join(sorted(current)) if current else "(none)"
     head_text = ",".join(sorted(heads)) if heads else "(none)"
+    adopt_hint = ""
+    if current is None:
+        adopt_hint = (
+            "（该库没有 alembic_version 表：若它是 create_all 建的，先用 "
+            "alembic stamp <与库现状一致的 revision> 纳入迁移管理，再 upgrade）"
+        )
     return (
         f"数据库 schema 未处于迁移 head：current={current_text} head={head_text}。"
         "请先运行 alembic upgrade head"
         "（compose: docker compose run --rm migrate；"
         "K8s: kubectl apply -f deploy/k8s/09-migrate-job.yaml 并等待 Job 完成），"
         "或仅在明确接受并发风险时设置 AUTO_MIGRATE=true 由启动期兜底迁移。"
+        f"{adopt_hint}"
     )
 
 

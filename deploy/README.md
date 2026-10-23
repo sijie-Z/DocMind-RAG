@@ -33,6 +33,9 @@ curl http://localhost:8000/health   # 详细诊断视图（恒 200，含 service
   - `SCHEMA_GUARD=true`（默认）：启动期校验 schema；
   - `AUTO_MIGRATE=false`（默认）：仅在显式设为 `true` 时允许启动期兜底执行
     `alembic upgrade head`（审计日志；并发启动多副本时不要开）。
+- 既有**非迁移建库**（create_all 建库、没有 `alembic_version` 表）不会被自动接管：
+  先按启动日志的修复指引 `alembic stamp <与库现状一致的 revision>` 纳入迁移管理，
+  再 `alembic upgrade head`；否则 schema guard / initContainer 会 fail-closed。
 
 ### Service Ports
 
