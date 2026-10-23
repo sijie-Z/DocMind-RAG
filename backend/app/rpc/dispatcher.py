@@ -35,7 +35,7 @@ from app.core.error_mapping import (
 )
 from app.core.log_safety import log_safe
 from app.core.prometheus import RPC_REQUEST_DURATION, RPC_REQUESTS_TOTAL
-from app.core.redis import redis_client
+from app.core.redis import RedisUnavailableError, redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,8 @@ IDEMPOTENCY_TTL_SECONDS = 86400
 # session/wait 默认与最大等待（毫秒）。
 SESSION_WAIT_DEFAULT_MS = 30_000
 SESSION_WAIT_MAX_MS = 300_000
+# session/cancel 等待任务在 DB 收敛为 CANCELLED 的上限（秒，issue #493）。
+CANCEL_CONVERGE_TIMEOUT_SECONDS = 5.0
 
 
 class RPCError(Exception):
@@ -74,6 +76,46 @@ def _error(id_value: Any, code: int, message: str, data: Any = None) -> dict[str
     if data is not None:
         error["data"] = data
     return {"jsonrpc": "2.0", "id": id_value, "error": error}
+
+
+async def cancel_task_and_wait(
+    task_id: str,
+    *,
+    user_id: int,
+    organization_id: int | None = None,
+    timeout: float = CANCEL_CONVERGE_TIMEOUT_SECONDS,
+) -> bool:
+    """置协作式取消旗并等待任务在 DB 收敛（issue #493）。
+
+    - 返回 True：``timeout`` 内观察到任务状态 ``CANCELLED``；
+    - 返回 False：任务先以其他终态收尾（取消输掉竞态，如实返回未生效）；
+    - Redis 不可用（未初始化 / 连接失败）→ :class:`RedisUnavailableError`，
+      调用方必须映射为 -32603，**不得**静默降级成"取消未生效"；
+    - 旗已置但 ``timeout`` 内未收敛 → ``TimeoutError``：取消已受理，只是任务
+      还没走到检查点，调用方可继续用 ``session/wait`` 等待。
+
+    共享助手：ACP（issue #494）复用同一语义。
+    """
+    from app.agent import checkpoint
+    from app.models.agent_task import TaskStatus
+
+    if not await checkpoint.request_cancel(task_id):
+        raise RedisUnavailableError("Redis 不可用，无法取消")
+
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while True:
+        task = await checkpoint.load_task(
+            task_id=task_id,
+            user_id=user_id,
+            organization_id=organization_id,
+        )
+        if task.status == TaskStatus.CANCELLED:
+            return True
+        if task.is_terminal:
+            return False
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"取消已受理，但任务未在 {timeout:g} 秒内收敛为 cancelled")
+        await asyncio.sleep(0.1)
 
 
 class Dispatcher:
@@ -500,17 +542,23 @@ class RPCService:
             await asyncio.sleep(0.1)
 
     async def session_cancel(self, params: dict) -> dict:
+        """取消会话当前任务（issue #493）。
+
+        运行中任务：先置协作式取消旗，再轮询到 DB 收敛为 ``CANCELLED``（≤5s）
+        才回 ``{"cancelled": true}``；Redis 不可用 → -32603（不得静默降级）。
+        审批等待中的任务直接 DB 终态化；无任务 → -32004。
+        """
         session_id = params.get("sessionId")
         if not isinstance(session_id, str) or not session_id:
             raise RPCError(JSONRPC_INVALID_PARAMS, "sessionId 必须是字符串")
         task_id = await self._latest_task_id(session_id)
 
         from app.agent import checkpoint
+        from app.exceptions import AppError
         from app.models.agent_task import TaskStatus
 
         # 先登记：返回后该会话不再外发事件（issue §5.4）。
         self._cancelled_sessions.add(session_id)
-        from app.exceptions import AppError
 
         try:
             task = await checkpoint.load_task(
@@ -522,6 +570,7 @@ class RPCService:
             self._cancelled_sessions.discard(session_id)
             raise RPCError(JSONRPC_NOT_FOUND, "任务不存在") from exc
         if task is None:
+            self._cancelled_sessions.discard(session_id)
             raise RPCError(JSONRPC_NOT_FOUND, "任务不存在")
         if task.status in (TaskStatus.WAITING_APPROVAL, TaskStatus.WAITING_PLAN_APPROVAL):
             ok = await checkpoint.mark_terminal(
@@ -537,11 +586,24 @@ class RPCService:
         if task.is_terminal:
             self._cancelled_sessions.discard(session_id)
             return {"cancelled": task.status == TaskStatus.CANCELLED}
-        ok = await checkpoint.request_cancel(task_id)
-        if not ok:
-            # 取消通道不可用（Redis 不可用）：如实返回 false 并恢复事件外发。
+        try:
+            cancelled = await cancel_task_and_wait(
+                task_id,
+                user_id=self.user_id,
+                organization_id=self.organization_id,
+            )
+        except RedisUnavailableError as exc:
+            # 取消通道不可用：如实报错，绝不再返回 {"cancelled": false} 让客户端
+            # 误以为任务拒绝了取消。
             self._cancelled_sessions.discard(session_id)
-        return {"cancelled": ok}
+            raise RPCError(JSONRPC_INTERNAL_ERROR, "Redis 不可用，无法取消") from exc
+        except TimeoutError as exc:
+            # 旗已置、取消已受理，只是尚未走到检查点；保留事件抑制（取消终将
+            # 生效），如实返回错误让客户端继续用 session/wait 观察收敛。
+            raise RPCError(JSONRPC_INTERNAL_ERROR, str(exc)) from exc
+        if not cancelled:
+            self._cancelled_sessions.discard(session_id)
+        return {"cancelled": cancelled}
 
     async def approvals_respond(self, params: dict) -> dict:
         session_id = params.get("sessionId")
@@ -641,7 +703,11 @@ class RPCService:
         return task_id
 
     async def _check_idempotency(self, key: str, message_id: str, session_id: str) -> dict | None:
-        """Redis 幂等占位；Redis 不可用时降级为"不幂等"（记录 warning）。"""
+        """Redis 幂等占位（issue #493）。
+
+        Redis 不可用时必须抛 ``RPCError(-32603)``——静默降级会使同一
+        ``clientMessageId`` 重复触发 run。正常时同 key 第二次返回同一 messageId。
+        """
         payload = json.dumps({"messageId": message_id, "sessionId": session_id})
         try:
             existing = await redis_client.get(key)
@@ -654,8 +720,9 @@ class RPCService:
                 if existing:
                     data = json.loads(existing)
                     return {"messageId": data["messageId"], "sessionId": data["sessionId"]}
-        except Exception as exc:  # noqa: BLE001 - 幂等是增强，不阻断 prompt
-            logger.warning("RPC idempotency unavailable: %s", exc)
+        except Exception as exc:  # noqa: BLE001 - 不可用必须如实失败，不得静默继续
+            logger.warning("RPC idempotency unavailable: %s", log_safe(exc))
+            raise RPCError(JSONRPC_INTERNAL_ERROR, "Redis 不可用，无法保证幂等") from exc
         return None
 
     async def _notify(self, method: str, params: dict) -> None:
