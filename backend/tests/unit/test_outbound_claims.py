@@ -37,6 +37,27 @@ def _read(rel: str) -> str:
     return (_REPO_ROOT / rel).read_text(encoding="utf-8")
 
 
+def _count_router_specs(source: str) -> int:
+    """路由模块数 = ROUTER_SPECS 字典键数（issue #479 后的单一路由清单）。
+
+    与 backend/scripts/check_doc_facts.py 的 endpoint_modules 派生口径一致；
+    旧口径 ``source.count("include_router(")`` 在 build_router 循环化后失效。
+    """
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        elif isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        else:
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "ROUTER_SPECS" for t in targets):
+            continue
+        if not isinstance(node.value, ast.Dict):
+            raise AssertionError("ROUTER_SPECS 必须是字典字面量，否则无法派生路由模块数")
+        return len(node.value.keys)
+    raise AssertionError("router.py 中未找到 ROUTER_SPECS 字典")
+
+
 def _assert_absent(rel: str, needles: list[str]) -> None:
     text = _read(rel)
     hits = [n for n in needles if n in text]
@@ -221,7 +242,7 @@ def test_readme_module_counts_match_code():
     route_names = re.findall(r"^\s*name: '", route_source, re.MULTILINE)
     counts = {
         "endpoints": len(endpoints),
-        "routers": router_source.count("include_router("),
+        "routers": _count_router_specs(router_source),
         "services": len(services),
         "models": len(models),
         "views": len(views),

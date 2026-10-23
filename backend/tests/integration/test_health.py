@@ -36,9 +36,9 @@ def test_livez_is_always_200(client: TestClient):
 
 def _patch_readiness(database: str, elasticsearch: str, knowledge_base: tuple[str, dict]):
     return (
-        patch("app.main._check_database", new=AsyncMock(return_value=database)),
-        patch("app.main._check_elasticsearch", new=AsyncMock(return_value=elasticsearch)),
-        patch("app.main._check_knowledge_base", new=AsyncMock(return_value=knowledge_base)),
+        patch("app.bootstrap._check_database", new=AsyncMock(return_value=database)),
+        patch("app.bootstrap._check_elasticsearch", new=AsyncMock(return_value=elasticsearch)),
+        patch("app.bootstrap._check_knowledge_base", new=AsyncMock(return_value=knowledge_base)),
     )
 
 

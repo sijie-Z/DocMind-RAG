@@ -1,0 +1,6 @@
+# web：HTTP 服务入口（默认 profile），挂载全部 bundle。
+entrypoint: web
+bundles: [core, rag, agent, observability]
+settings:
+  PORT: 8000
+  DEBUG: false

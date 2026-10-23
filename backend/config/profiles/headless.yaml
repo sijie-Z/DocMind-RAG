@@ -1,0 +1,4 @@
+# headless：一次性任务入口，无 HTTP。
+entrypoint: headless
+bundles: [core, rag, agent]
+settings: {}
