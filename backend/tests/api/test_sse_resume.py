@@ -204,7 +204,7 @@ async def test_events_carry_ids_and_reconnect_replays_without_rerun(client, fake
 async def test_resume_gone_when_buffer_evicted(client, fake_redis):
     first = await _open(client)
     assert first
-    fake_redis.lists[f"sse:buf:{STREAM_ID}"] = []
+    fake_redis.lists[f"sse:buf:u{OWNER_ID}:{STREAM_ID}"] = []
 
     frames = await _open(client, headers={"Last-Event-ID": f"{STREAM_ID}:2"})
     assert len(frames) == 1, f"GONE 后必须立即关闭流：{frames}"
@@ -250,6 +250,23 @@ async def test_client_message_id_is_idempotent_on_rest_stream(client, fake_redis
     assert second[0]["event"] == "done"
     assert second[0]["data"]["duplicate"] is True
     assert client.agent_calls["n"] == 1, "幂等命中不得产生第二次 run"
+
+
+@pytest.mark.asyncio
+async def test_cross_user_write_does_not_touch_victim_buffer(client, fake_redis):
+    """B2 写侧：他人用同一会话 id 发消息只能写进自己的键命名空间。"""
+    await _open(client)
+    owner_key = f"sse:buf:u{OWNER_ID}:{STREAM_ID}"
+    owner_seq_key = f"sse:seq:u{OWNER_ID}:{STREAM_ID}"
+    owner_buffer = list(fake_redis.lists[owner_key])
+    owner_seq = fake_redis.kv[owner_seq_key]
+
+    client.current["user"] = _fake_user(ATTACKER_ID)
+    await _open(client)
+
+    assert fake_redis.lists[owner_key] == owner_buffer, "受害者缓冲不得被注入"
+    assert fake_redis.kv[owner_seq_key] == owner_seq, "受害者 seq 不得被推进"
+    assert f"sse:buf:u{ATTACKER_ID}:{STREAM_ID}" in fake_redis.lists
 
 
 @pytest.mark.asyncio

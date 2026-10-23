@@ -63,8 +63,12 @@ class SSEStream:
     ``task_id``，见 issue §5.2 的解析规则）。
     """
 
-    def __init__(self, stream_id: str | None = None) -> None:
+    def __init__(self, stream_id: str | None = None, *, scope: str | None = None) -> None:
         self.stream_id = stream_id
+        # 调用者隔离命名空间（如 ``u{user_id}``）：Redis 键加前缀，事件 id 仍是
+        # ``{stream_id}:{seq}``（issue 契约不变）。没有它，知道会话 UUID 的他人
+        # 可以向同一 buffer 键注入事件/回放（跨租户完整性破坏）。
+        self.scope = scope
 
     def bind(self, stream_id: str | None) -> None:
         """首次未绑定且传入非空值时绑定；已绑定不覆盖（同一流只认一个键）。"""
@@ -78,8 +82,8 @@ class SSEStream:
             return format_sse(event, data)
 
         stream_id = self.stream_id
-        seq_key = SEQ_KEY.format(stream_id=stream_id)
-        buf_key = BUF_KEY.format(stream_id=stream_id)
+        seq_key = SEQ_KEY.format(stream_id=self._key_id(stream_id))
+        buf_key = BUF_KEY.format(stream_id=self._key_id(stream_id))
         event_id: str | None = None
         try:
             seq = int(await redis_client.incr(seq_key))
@@ -93,6 +97,9 @@ class SSEStream:
             logger.warning("SSE ring buffer unavailable, event has no id: %s", exc)
             event_id = None
         return format_sse(event, data, event_id)
+
+    def _key_id(self, stream_id: str) -> str:
+        return f"{self.scope}:{stream_id}" if self.scope else stream_id
 
     async def replay(self, last_event_id: str) -> tuple[list[str], bool]:
         """回放 ``seq > last`` 的缓冲事件。
@@ -112,8 +119,8 @@ class SSEStream:
             return [], True
 
         stream_id = resume_stream_id
-        seq_key = SEQ_KEY.format(stream_id=stream_id)
-        buf_key = BUF_KEY.format(stream_id=stream_id)
+        seq_key = SEQ_KEY.format(stream_id=self._key_id(stream_id))
+        buf_key = BUF_KEY.format(stream_id=self._key_id(stream_id))
         try:
             raw_entries = await redis_client.lrange(buf_key, 0, -1)
             current_seq = int(await redis_client.get(seq_key) or 0)

@@ -16,12 +16,14 @@
    用户（`api_key_scopes is None`）视为全量，对 `dm_` key 强制子集校验。
 2. **SSE 续传用 Redis ring buffer**：统一 `app/core/sse.py` 的
    `format_sse(event, data, event_id)`；`stream_id = session_id or task_id`，
-   `id = "{stream_id}:{seq}"`，`seq = INCR sse:seq:{stream_id}`，事件
-   `LPUSH sse:buf:{stream_id}` + `LTRIM 0 999` + `EXPIRE 3600`。请求头
+   `id = "{stream_id}:{seq}"`；Redis 键带调用者命名空间（`sse:seq:{scope}:{stream_id}` /
+   `sse:buf:{scope}:{stream_id}`，scope=`u{user_id}`），`seq = INCR`，
+   `LPUSH` + `LTRIM 0 999` + `EXPIRE 3600`。请求头
    `Last-Event-ID` 回放 `seq > last` 的条目；首条 `seq > last + 1`、流键不匹配、
    未来序号或缓冲为空但序号已前进 → 流内 `event: error` +
    `{"code":"SSE_RESUME_GONE"}`（HTTP 200）。**续传请求只回放、不重跑 pipeline**；
-   回放前必须先做会话归属校验（buffer 键只含会话 id，会话 UUID 不是授权凭证），
+   回放前必须先做会话归属校验（会话 UUID 不是授权凭证）；命名空间隔离同时阻断
+   跨用户的读回放与写注入（他人无法写/回放受害者的 buffer 键）。
    续传端点（resume/审批）的回放判定前移到认领/记账之前，避免 GONE 卡住任务。
 3. **断连保留有上限**：`SSE_KEEPALIVE_ON_DISCONNECT=true` 时，响应生成器被
    关闭后由 `keepalive_stream` 继续消费 pipeline（事件继续写 ring buffer），
@@ -39,7 +41,7 @@
    argv/日志）；stdout 只允许协议帧——真实 stdout 交给 `ProtocolWriter`，
    `sys.stdout` 重定向到 stderr，已挂 stdout 的日志 handler 一并迁移。
 6. **方法面 8 个**：`initialize`（protocolVersion=1）、`session/prompt`
-   （`clientMessageId` 幂等：Redis `rpc:msg:{session}:{clientMessageId}` TTL 24h）、
+   （`clientMessageId` 幂等：JSON-RPC 用 `rpc:msg:*`、REST 用 `rest:msg:*` TTL 24h）、
    `session/resume`、`session/wait`、`session/cancel`（先回 `{cancelled:true}`，
    之后不再外发该会话的 `session.event`）、`approvals/respond`、
    `tools/list`（`ToolRegistry.get_manifest()`）、`shutdown`。通知为
@@ -58,9 +60,10 @@
 - API Key 认证矩阵（`tests/api/test_api_keys.py`，8 passed）：有效 200、
   过期/吊销/未知前缀 401、缺 scope 403、明文只返回一次、列表不含 `key_hash`。
 - SSE 续传（`tests/unit/test_sse_format.py` + `tests/api/test_sse_resume.py`，
-  14 passed）：事件 id 递增、回放第 3-5 个事件不重复且**不重跑 pipeline**、
-  跨用户回放被归属校验拦截、淘汰/流键不匹配 → `SSE_RESUME_GONE`、REST
-  `clientMessageId` 幂等、TTL 前不取消 / TTL 后取消。
+  17 passed）：事件 id 递增、回放第 3-5 个事件不重复且**不重跑 pipeline**、
+  跨用户读回放被归属校验拦截、跨用户写注入只落自己的命名空间、未绑定流/未来
+  seq 拒绝回放、淘汰/流键不匹配 → `SSE_RESUME_GONE`、REST `clientMessageId`
+  幂等、TTL 前不取消 / TTL 后取消。
 - dispatcher（`tests/unit/test_rpc_dispatcher.py`）：并发 20 乱序响应、重复 id
   `-32600`、取消转发 `session/cancel`、超时按拒绝、断连清理、prompt 幂等。
 - HTTP RPC（`tests/api/test_rpc_http.py`）：开关关闭 404、无 Authorization 401、
@@ -107,7 +110,8 @@
 
 - **断连重连的语义**：`Last-Event-ID` 请求只回放 `seq > last` 的缓冲并关闭，
   **绝不重跑**；需要继续对话时请不带 `Last-Event-ID` 重新发起 prompt（REST 的
-  `payload.clientMessageId` 与 RPC `session/prompt` 共用 `rpc:msg:*` 幂等键）。
+  `payload.clientMessageId` 与 RPC `session/prompt` 各自使用 `rest:msg:*` /
+  `rpc:msg:*` 幂等键，互不串扰）。
   没有实现"附着到仍在运行的孤儿流"（需要事件总线化）；孤儿 run 由
   `SSE_ORPHAN_TTL_SECONDS` 兜底取消。
 - **agent.py 的四个端点**没有独立的断连取消逻辑（生成器关闭即终止），

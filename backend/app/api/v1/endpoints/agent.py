@@ -122,7 +122,7 @@ async def _replay_only_response(
         organization_id=effective_org_id,
     )
     session_id = (payload or {}).get("session_id") or task.session_id or None
-    emitter = SSEStream(session_id or task_id)
+    emitter = SSEStream(session_id or task_id, scope=f"u{current_user.id}")
     frames, gone = await emitter.replay(last_event_id)
 
     async def _frames():
@@ -276,7 +276,7 @@ async def agent_chat(
         save_error: str | None = None
         last_event_type = ""
         # issue #480 §5.2：流键 = session_id；无会话时由首个事件的 task_id 绑定。
-        emitter = SSEStream(body.session_id)
+        emitter = SSEStream(body.session_id, scope=f"u{current_user.id}")
         last_event_id = request.headers.get("Last-Event-ID")
         if last_event_id:
             if body.session_id:
@@ -626,7 +626,7 @@ async def resume_agent_task(
         user_id=current_user.id,
         organization_id=effective_org_id,
     )
-    session_id = (payload or {}).get("session_id") or None
+    session_id = (payload or {}).get("session_id") or getattr(task, "session_id", None)
     # 崩溃前已流给用户的部分不回放（最小版边界），但收尾落库要拼成完整回复。
     prefix = (payload or {}).get("partial_output") or ""
     fallback_config = await _fallback_resume_config(current_user.id)
@@ -637,7 +637,7 @@ async def resume_agent_task(
         save_error: str | None = None
         last_event_type = ""
         # issue #480 §5.2：流键 = 会话 id，解析不到时退回 task_id。
-        emitter = SSEStream(session_id or task_id)
+        emitter = SSEStream(session_id or task_id, scope=f"u{current_user.id}")
         try:
             async for event in agent_service.resume_chat(
                 task_id,
@@ -788,7 +788,7 @@ async def decide_agent_task_approval(
         modified_instruction=body.modified_instruction,
         note=body.note,
     )
-    session_id = (payload or {}).get("session_id") or None
+    session_id = (payload or {}).get("session_id") or getattr(task, "session_id", None)
     # 崩溃前已流给用户的部分不回放（最小版边界），但收尾落库要拼成完整回复。
     prefix = (payload or {}).get("partial_output") or ""
     fallback_config = await _fallback_resume_config(current_user.id)
@@ -805,7 +805,7 @@ async def decide_agent_task_approval(
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
-        emitter = SSEStream(session_id or task_id)
+        emitter = SSEStream(session_id or task_id, scope=f"u{current_user.id}")
         try:
             async for event in agent_service.resume_chat(
                 task_id,
@@ -1005,7 +1005,7 @@ async def decide_agent_task_plan_approval(
             },
         }
 
-    session_id = (payload or {}).get("session_id") or None
+    session_id = (payload or {}).get("session_id") or getattr(task, "session_id", None)
     prefix = (payload or {}).get("partial_output") or ""
     fallback_config = await _fallback_resume_config(current_user.id)
 
@@ -1014,7 +1014,7 @@ async def decide_agent_task_plan_approval(
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
-        emitter = SSEStream(session_id or task_id)
+        emitter = SSEStream(session_id or task_id, scope=f"u{current_user.id}")
         try:
             async for event in agent_service.resume_chat(
                 task_id,

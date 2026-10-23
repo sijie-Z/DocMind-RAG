@@ -132,6 +132,28 @@ async def test_replay_gone_on_stream_mismatch_and_empty_advance(fake_redis):
 
 
 @pytest.mark.asyncio
+async def test_scoped_stream_writes_namespaced_keys_but_event_id_unchanged(fake_redis):
+    stream = SSEStream("s", scope="u7")
+    await stream.emit("chunk", {"content": "x"})
+    assert "sse:seq:u7:s" in fake_redis.kv
+    assert "sse:buf:u7:s" in fake_redis.lists
+    assert "sse:buf:s" not in fake_redis.lists
+    entry = fake_redis.lists["sse:buf:u7:s"][0]
+    assert '"id": "s:1"' in entry, "事件 id 仍必须是 {stream_id}:{seq}"
+
+
+@pytest.mark.asyncio
+async def test_replay_rejected_for_unbound_stream_and_future_seq(fake_redis):
+    # 未绑定流键：拒绝任意流回放（B2）。
+    assert await SSEStream().replay("s:1") == ([], True)
+
+    # 未来 seq（last > current）：不可续传。
+    stream = SSEStream("s", scope="u7")
+    await stream.emit("chunk", {"content": "0"})
+    assert await stream.replay("s:5") == ([], True)
+
+
+@pytest.mark.asyncio
 async def test_keepalive_immediate_cancel_when_disabled():
     cancelled = asyncio.Event()
 

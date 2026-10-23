@@ -924,7 +924,7 @@ async def chat_stream_endpoint(
         # issue #480：所有 SSE 输出经单一编码器（event/id/data），流键优先
         # conversationId，无会话时由任务 id 兜底（此处用请求级 uuid）。
         stream_id = body.conversationId or str(uuid.uuid4())
-        emitter = SSEStream(stream_id)
+        emitter = SSEStream(stream_id, scope=f"u{current_user.id}")
         # W0-5 错误脱敏：请求编号优先取 W0-9 的 get_request_id contextvar，
         # 回退到既有 RequestIDMiddleware 写入的 request.state（不另造中间件）。
         # 完整异常/堆栈只进日志，客户端只见通用文案。
@@ -1077,7 +1077,7 @@ async def chat_stream_endpoint(
                 # 返回同一 messageId 的 done，不产生第二条用户消息、不重跑 LLM。
                 client_message_id = payload_data.get("clientMessageId")
                 if client_message_id:
-                    dedup_key = f"rpc:msg:{conversation_id}:{client_message_id}"
+                    dedup_key = f"rest:msg:{conversation_id}:{client_message_id}"
                     dedup_payload = json.dumps(
                         {
                             "messageId": f"agent-{conversation_id}",

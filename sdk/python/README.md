@@ -59,6 +59,6 @@ async with AsyncClient("http://localhost:8000", api_key="dm_...") as client:
 ## 幂等
 
 `clientMessageId` 随 `/chat/stream` 请求体的 `payload.clientMessageId` 透传，
-服务端与 JSON-RPC `session/prompt` 使用同一 Redis 幂等键（`rpc:msg:*`，TTL 24h）：
+服务端以 Redis 记录幂等键（REST 为 `rest:msg:*`，JSON-RPC 为 `rpc:msg:*`，TTL 24h；REST 仅在请求带 `conversationId` 时生效）：
 同一 `clientMessageId` 重复到达只返回同一个 `messageId`（`done.duplicate=true`），
 不产生第二条用户消息、不重跑 LLM。
