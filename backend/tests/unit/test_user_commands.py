@@ -49,23 +49,27 @@ from app.agent.commands.config import (
     apply_commands_config,
     load_commands_config,
 )
+from app.core.config import settings
 
 
 class FakeRedis:
     """最小 Redis 替身（issue #498）：只实现命令执行用到的原语。
 
     - ``set(nx=True)`` 从检查到写入没有 await 间隙，在单事件循环里等价原子；
-    - ``eval`` 只识别 execution.py 的 Lua compare-and-del 脚本；
-    - TTL 不真正过期（单测时长远小于 TTL）。
+    - ``eval`` 只识别 execution.py 的 Lua compare-and-del 脚本（并校验脚本文本，
+      把"改成无条件 DEL"的变异变成测试红）；
+    - TTL 不真正过期（单测时长远小于 TTL），但记录每次 SET 的 ex 供断言。
     """
 
     def __init__(self):
         self.store: dict[str, str] = {}
+        self.set_calls: list[dict] = []
 
     def __bool__(self):
         return True
 
     async def set(self, key, value, nx=False, ex=None, **kwargs):
+        self.set_calls.append({"key": key, "value": value, "nx": nx, "ex": ex})
         if nx and key in self.store:
             return None
         self.store[key] = value
@@ -79,6 +83,9 @@ class FakeRedis:
         return 1
 
     async def eval(self, script, numkeys, *args):
+        assert 'redis.call("get", KEYS[1]) == ARGV[1]' in script, (
+            "锁释放脚本必须是 compare-and-del（无条件 DEL 会让并发误删新持有者的锁）"
+        )
         key, token = args[0], args[1]
         if self.store.get(key) == token:
             self.store.pop(key, None)
@@ -461,6 +468,83 @@ async def test_idempotency_failure_is_not_cached_and_can_retry():
     retried = await execute(_ctx(), "/echo hi", registry=registry, idempotency_key="retry")
     assert retried.success is True and retried.content == "echo:hi"
     assert retried.execution_id != failed.execution_id
+
+
+@pytest.mark.asyncio
+async def test_idempotent_replay_rechecks_admin_permission():
+    """评审 minor：幂等重放不得让已失去管理员身份的用户拿到缓存结果。"""
+    calls: list[int] = []
+
+    async def _secret(ctx, args):
+        calls.append(1)
+        return CommandResult(content="secret")
+
+    registry = CommandRegistry()
+    registry.register(
+        Command(name="secret", description="管理命令", permission="admin", handler=_secret)
+    )
+    first = await execute(
+        _ctx(is_admin=True), "/secret", registry=registry, idempotency_key="admin-key"
+    )
+    assert first.success is True and first.content == "secret"
+
+    replay = await execute(
+        _ctx(is_admin=False), "/secret", registry=registry, idempotency_key="admin-key"
+    )
+    assert replay.success is False and replay.error_code == "permission_denied"
+    assert calls == [1], "缓存命中也不得重跑 handler"
+
+
+@pytest.mark.asyncio
+async def test_idempotency_pending_uses_short_ttl_and_result_uses_24h(fake_redis):
+    """评审 M2：pending 用短 TTL（崩溃自愈）；最终结果用 24h TTL。"""
+    registry = CommandRegistry()
+    registry.register(_echo_command())
+    await execute(_ctx(session_id=None), "/echo hi", registry=registry, idempotency_key="ttl-key")
+    calls = [call for call in fake_redis.set_calls if call["key"] == "cmd:idem:7:ttl-key"]
+    assert len(calls) == 2
+    assert calls[0]["nx"] is True, "pending 必须 SET NX 抢占"
+    assert calls[0]["ex"] == execution_mod.idempotency_pending_ttl()
+    assert calls[0]["ex"] < settings.COMMANDS_IDEMPOTENCY_TTL_SECONDS, (
+        "pending 不得沿用 24h TTL（worker 崩溃会锁死同一幂等键）"
+    )
+    assert calls[1]["nx"] is False and calls[1]["ex"] == settings.COMMANDS_IDEMPOTENCY_TTL_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_lock_release_compare_and_del_keeps_new_owners_lock(fake_redis):
+    """变异点：Lua 改成无条件 DEL → 本用例红（误删 TTL 过期后新持有者的锁）。"""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow(ctx, args):
+        started.set()
+        await release.wait()
+        return CommandResult(content="slow-done")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="slow", description="", handler=_slow))
+    task = asyncio.create_task(
+        execute(_ctx(session_id="s-cas"), "/slow", registry=registry, redis=fake_redis)
+    )
+    await started.wait()
+    lock_key = execution_mod.lock_redis_key(_ctx(session_id="s-cas"))
+    fake_redis.store[lock_key] = "new-owner-token"  # 模拟 TTL 过期后新 owner 接管
+    release.set()
+    assert (await task).success is True
+    assert fake_redis.store[lock_key] == "new-owner-token", "旧 owner 不得误删新锁"
+
+
+@pytest.mark.asyncio
+async def test_audit_log_escapes_control_chars_in_line(caplog):
+    """评审 minor：用户可控 line 不得在审计日志里伪造新行（CWE-117）。"""
+    registry = CommandRegistry()
+    with caplog.at_level(logging.INFO, logger="app.agent.commands.execution"):
+        await execute(_ctx(session_id=None), "/nope\nFORGED-LINE", registry=registry)
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("nope" in message for message in messages)
+    assert any("\\nFORGED-LINE" in message for message in messages)
+    assert not any("\n" in message for message in messages), "日志必须是单物理行"
 
 
 @pytest.mark.asyncio

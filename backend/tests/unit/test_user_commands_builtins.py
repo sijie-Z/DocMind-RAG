@@ -54,6 +54,7 @@ class FakeRedis:
         return 1
 
     async def eval(self, script, numkeys, *args):
+        assert 'redis.call("get", KEYS[1]) == ARGV[1]' in script, "必须是 compare-and-del"
         key, token = args[0], args[1]
         if self.store.get(key) == token:
             self.store.pop(key, None)
@@ -226,6 +227,14 @@ def test_tools_lists_manifest_with_category_and_risk_level(monkeypatch):
             "tags": ["mcp"],
             "requires_auth": True,
         },
+        {
+            "name": "mystery_tool",
+            "description": "未声明元数据",
+            "category": "",
+            "risk_level": "",
+            "tags": ["misc"],
+            "requires_auth": False,
+        },
     ]
     monkeypatch.setattr(builtins_mod.tool_registry, "get_manifest", lambda: fake_manifest)
     registry = _registry()
@@ -236,11 +245,14 @@ def test_tools_lists_manifest_with_category_and_risk_level(monkeypatch):
     assert result.success is True
     assert "search_knowledge_base" in result.content
     assert "execute_python" in result.content and "默认禁用" in result.content
-    assert result.data["total"] == 3
+    assert result.data["total"] == 4
     by_name = {t["name"]: t for t in result.data["tools"]}
     assert by_name["execute_python"]["category"] == "code"
     assert by_name["execute_python"]["risk_level"] == "high"
     assert by_name["mcp_call"]["risk_level"] == "high"
+    # 未声明时 category 退回首个 tag、risk_level 走集中判定表兜底（评审 minor）。
+    assert by_name["mystery_tool"]["category"] == "misc"
+    assert by_name["mystery_tool"]["risk_level"] in {"low", "medium", "high"}
     disabled = {t["name"] for t in result.data["tools"] if t["disabled_by_default"]}
     assert disabled == {"execute_python", "mcp_call"}
 
@@ -273,6 +285,8 @@ def test_status_reports_session_and_session_scoped_tasks(monkeypatch):
     ]
     list_tasks = AsyncMock(return_value=tasks)
     monkeypatch.setattr(builtins_mod, "_list_session_tasks", list_tasks)
+    load_active = AsyncMock(return_value=tasks[0])
+    monkeypatch.setattr(builtins_mod, "_load_active_task", load_active)
 
     registry = _registry()
     import asyncio
@@ -293,6 +307,8 @@ def test_status_reports_session_and_session_scoped_tasks(monkeypatch):
     called_ctx, called_session_id = list_tasks.await_args.args
     assert called_session_id == "sess-1"
     assert called_ctx.user_id == 7 and called_ctx.organization_id == 3
+    load_active.assert_awaited_once()
+    assert load_active.await_args.args[1] == "sess-1"
     assert "测试会话" in result.content and "4" in result.content
 
 
@@ -317,6 +333,7 @@ def test_status_active_task_is_null_when_only_terminal_tasks(monkeypatch):
         "_list_session_tasks",
         AsyncMock(return_value=[_fake_task("t-done", state="completed", progress=1.0)]),
     )
+    monkeypatch.setattr(builtins_mod, "_load_active_task", AsyncMock(return_value=None))
     registry = _registry()
     import asyncio
 
@@ -431,6 +448,63 @@ def test_export_truncation_keeps_newest_not_oldest(monkeypatch):
     assert content.index("msg-3") < content.index("msg-4") < content.index("msg-5"), (
         "导出正文应按时间正序"
     )
+
+
+@pytest.mark.asyncio
+async def test_load_active_task_not_limited_by_recent_display_window(tmp_path):
+    """评审 M1：更早的活跃任务不能被"最近 5 条终态任务"挤出 active_task。"""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    import app.models  # noqa: F401 — 注册全部表
+    from app.core.database import Base
+    from app.models.agent_task import AgentTask, TaskStatus
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'status-active.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with factory() as db:
+            base = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+            db.add(
+                AgentTask(
+                    id="active-older",
+                    user_id=7,
+                    organization_id=3,
+                    session_id="sess-1",
+                    query="q",
+                    status=TaskStatus.WAITING_APPROVAL,
+                    created_at=base,
+                )
+            )
+            for index in range(5):
+                db.add(
+                    AgentTask(
+                        id=f"done-{index}",
+                        user_id=7,
+                        organization_id=3,
+                        session_id="sess-1",
+                        query="q",
+                        status=TaskStatus.COMPLETED,
+                        created_at=base + timedelta(minutes=index + 1),
+                    )
+                )
+            await db.commit()
+
+            active = await builtins_mod._load_active_task(
+                _ctx(None, session_id="sess-1", db=db), "sess-1"
+            )
+            assert active is not None and active.id == "active-older"
+
+            recent = await builtins_mod._list_session_tasks(
+                _ctx(None, session_id="sess-1", db=db), "sess-1"
+            )
+            assert len(recent) == 5, "展示窗口仍是最近 5 条"
+            assert all(task.status == TaskStatus.COMPLETED for task in recent)
+    finally:
+        await engine.dispose()
 
 
 def test_export_system_messages_keep_system_role(monkeypatch):

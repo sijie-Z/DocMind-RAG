@@ -64,6 +64,7 @@ class FakeRedis:
         return 1
 
     async def eval(self, script, numkeys, *args):
+        assert 'redis.call("get", KEYS[1]) == ARGV[1]' in script, "必须是 compare-and-del"
         key, token = args[0], args[1]
         if self.store.get(key) == token:
             self.store.pop(key, None)
@@ -270,6 +271,16 @@ def test_execute_command_args_compat_body(client, auth, monkeypatch, no_model):
     assert r2.status_code == 200, r2.text
     data = r2.json()["data"]
     assert data["command"] == "help" and "/export" in data["content"]
+
+
+def test_execute_command_args_unknown_mapping_field_is_400(client, auth, monkeypatch):
+    """评审 minor：映射型 args 的未知键必须显式 400，不得静默错绑为位置参数。"""
+    _patch_admin(monkeypatch, False)
+    r = client.post("/api/v1/commands/execute", json={"command": "help", "args": {"nope": "x"}})
+    assert r.status_code == 400, r.text
+    body = r.json()
+    assert body["error_code"] == "COMMAND_INVALID_ARGUMENT"
+    assert body["detail"]["fields"] == ["nope"]
 
 
 def test_execute_requires_line_or_command(client, auth, monkeypatch):
