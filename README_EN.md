@@ -192,12 +192,13 @@ Query enters
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-24 endpoint modules under `/api/v1`:
+26 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|
 | Auth | `/auth` | Register, login, refresh token, password reset, logout |
 | Users | `/users` | User CRUD, profiles, avatars, session management, audit logs (personal API-key endpoints deprecated) |
+| API Keys | `/api-keys` | Create/list/revoke `dm_` API keys (bcrypt hash, scopes; issue #480) |
 | Files | `/files` | Upload/download/delete, MinIO storage, chunked upload |
 | Documents | `/documents` | Document parsing, vectorization, knowledge base indexing, status tracking |
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
@@ -218,6 +219,7 @@ Query enters
 | Session Fork | `/sessions` | Session fork / seed / lineage (issue #476) |
 | Agent Commands | `/commands` | Server-side command catalog and model-free execution (/help, /status, /export, /tools) |
 | MCP | `/mcp` | MCP server status (admin, read-only) |
+| JSON-RPC | `/rpc` | HTTP JSON-RPC 2.0 (API key + `rpc` scope; gated by `RPC_HTTP_ENABLED`) |
 | User Settings | `/user` | Personal UI preferences |
 | Demo Data | `/demo` | Seed demo documents & data |
 
@@ -404,8 +406,8 @@ DocMind/
 │   │   ├── dependencies.py          # Dependency injection container
 │   │   ├── exceptions.py            # Custom exception hierarchy
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # Main router (24 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (24 files)
+│   │   │   ├── router.py            # Main router (26 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (26 files)
 │   │   ├── agent/                   # PER Agent core
 │   │   │   ├── loop.py              #   PER main loop
 │   │   │   ├── planner.py           #   Planner (LLM + structured rules)

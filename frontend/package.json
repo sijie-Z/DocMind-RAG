@@ -12,7 +12,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "api:generate": "openapi --input http://localhost:8000/openapi.json --output src/api/generated --client axios"
+    "api:generate": "openapi --input http://localhost:8000/api/v1/openapi.json --output src/api/generated --client axios"
   },
   "dependencies": {
     "@vicons/ionicons5": "^0.13.0",

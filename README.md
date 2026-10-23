@@ -192,12 +192,13 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-24 个端点模块，统一 `/api/v1` 前缀：
+26 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
 | 认证 | `/auth` | 注册、登录、刷新 Token、密码重置、登出 |
 | 用户管理 | `/users` | 用户 CRUD、个人资料、头像、会话管理、审计日志（个人 API Key 端点已弃用） |
+| API Key | `/api-keys` | `dm_` API Key 创建/列表/吊销（bcrypt 哈希、scope；issue #480） |
 | 文件管理 | `/files` | 上传/下载/删除，MinIO 存储，分块上传 |
 | 文档管理 | `/documents` | 文档解析、向量化、知识库索引、状态追踪 |
 | 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
@@ -218,6 +219,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 会话分叉 | `/sessions` | 会话 fork / seed / 谱系（issue #476） |
 | Agent 命令 | `/commands` | 服务端命令清单与无模型轮次执行（/help、/status、/export、/tools） |
 | MCP 工具 | `/mcp` | MCP 服务器状态（管理员只读） |
+| JSON-RPC | `/rpc` | HTTP JSON-RPC 2.0（API Key + `rpc` scope；`RPC_HTTP_ENABLED` 门控） |
 | 用户设置 | `/user` | 个人 UI 偏好 |
 | 示例数据 | `/demo` | 演示文档与数据填充 |
 
@@ -374,8 +376,8 @@ DocMind/
 │   │   ├── dependencies.py          # 依赖注入容器
 │   │   ├── exceptions.py            # 自定义异常层次结构
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 24 个模块）
-│   │   │   └── endpoints/           # 端点实现（24 个文件）
+│   │   │   ├── router.py            # 主路由（注册 26 个模块）
+│   │   │   └── endpoints/           # 端点实现（26 个文件）
 │   │   ├── agent/                   # PER Agent 核心
 │   │   │   ├── loop.py              #   PER 主循环
 │   │   │   ├── planner.py           #   规划器（LLM + 结构化规则）
