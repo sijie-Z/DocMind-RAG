@@ -1193,8 +1193,13 @@ async def test_fork_idempotency_key_used_in_other_org_is_409_not_500(db_factory)
 
 
 @pytest.mark.asyncio
-async def test_fork_in_progress_keeps_existing_other_org_claim(db_factory, monkeypatch):
-    """跨组织键 + Redis 在线：超时路径不得删除既有行有效持有的抢占值。"""
+async def test_fork_existing_other_org_claim_reports_conflict_without_deleting(
+    db_factory, monkeypatch
+):
+    """跨组织键 + Redis 在线：保留既有行有效抢占，并明确 FORK_IDEMPOTENCY_CONFLICT。
+
+    重试同键永远不会成功（DB 唯一约束），不能谎报可重试的 FORK_IN_PROGRESS。
+    """
     fake = _FakeRedis()
     monkeypatch.setattr(session_fork_service, "redis_client", fake)
     monkeypatch.setattr(session_fork_service, "IDEMPOTENCY_WAIT_SECONDS", 0.1)
@@ -1219,8 +1224,10 @@ async def test_fork_in_progress_keeps_existing_other_org_claim(db_factory, monke
         await db.commit()
         fake.data[f"fork:idem:{USER_ID}:cross-org-redis"] = "other-org-child"
 
-        with pytest.raises(session_fork_service.ForkInProgressError):
+        with pytest.raises(ForkIdempotencyConflictError) as excinfo:
             await _fork(db, src.id, idempotency_key="cross-org-redis")
+        assert excinfo.value.status_code == 409
+        assert excinfo.value.error_code == "FORK_IDEMPOTENCY_CONFLICT"
         assert fake.data[f"fork:idem:{USER_ID}:cross-org-redis"] == "other-org-child", (
             "其他组织既有行的有效抢占不得被当前作用域的请求删除"
         )

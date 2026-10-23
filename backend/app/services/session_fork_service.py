@@ -669,11 +669,15 @@ async def fork_session(
             # 超时仍不可见：释放**本次观察到的**抢占值，避免首个请求崩溃/超时后
             # 幂等键被锁死 24h（DB 唯一约束仍是并发双建的事实防线）。
             # 但若该键已被某个不可见（其他组织）的既有行占用，不得删除它的有效
-            # 抢占值——只释放"无任何落库事实"的孤儿抢占。
+            # 抢占值，也不该谎报"稍后重试"（它是永久冲突，重试不会成功）。
             if holder:
                 await db.rollback()
-                if not await _idempotency_key_row_exists(db, user_id=user_id, key=idem_key):
-                    await _release_idempotency_claim(user_id, idem_key, holder)
+                if await _idempotency_key_row_exists(db, user_id=user_id, key=idem_key):
+                    raise ForkIdempotencyConflictError(
+                        "该幂等键已被其他会话占用，请更换幂等键后重试",
+                        detail={"idempotency_key": idem_key},
+                    )
+                await _release_idempotency_claim(user_id, idem_key, holder)
             raise ForkInProgressError(
                 "相同幂等键的分叉请求正在处理中，请稍后重试",
                 detail={
