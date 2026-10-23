@@ -103,8 +103,10 @@ class BaseAppSettings(BaseSettings):
     COMMANDS_ENABLED: bool = True
 
     # ── SDK / JSON-RPC / SSE 续传（issue #480）────────────────────────────
-    # ``POST /api/v1/rpc`` 开关（仅 web profile 的 agent bundle 挂载时才可能生效）。
-    RPC_HTTP_ENABLED: bool = False
+    # ``POST /api/v1/rpc`` 开关（issue #493：默认开启）。仅构建了 FastAPI app
+    # 的入口（web 等）才会挂载该路由；sdk profile 只跑 stdio、不构建 HTTP app，
+    # 因此不受本开关影响。关闭时端点如实 404。
+    RPC_HTTP_ENABLED: bool = True
     # HTTP 批量请求上限（issue §5.3：批量 ≤ 20）。
     RPC_BATCH_MAX: int = 20
     # stdio NDJSON 单行上限（1MB）。
