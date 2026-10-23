@@ -72,6 +72,7 @@ let fitAddon: FitAddon | null = null
 let socket: TerminalSocket | null = null
 let resizeObserver: ResizeObserver | null = null
 let unmounted = false
+let hadConnection = false
 
 const statusText = computed(() => t(`agent.terminal.status.${status.value}`))
 
@@ -102,8 +103,11 @@ function connectSocket(id: string): void {
     onMessage: handleServerMessage,
     onStatus: (next) => {
       status.value = next
-      if (next === 'connected' && term) {
-        socket?.resize(term.cols, term.rows)
+      if (next === 'connected') {
+        // 重连成功后服务端会补发 ring buffer 全量；先清屏避免旧内容重复堆叠。
+        if (hadConnection) term?.clear()
+        hadConnection = true
+        if (term) socket?.resize(term.cols, term.rows)
       }
     },
     onError: (detail) => {
