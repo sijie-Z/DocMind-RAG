@@ -39,6 +39,14 @@
         <button class="header-btn" @click="showConfig = !showConfig" :class="{ active: showConfig }">
           ⚙ 配置
         </button>
+        <button
+          class="header-btn"
+          :class="{ active: showTerminal }"
+          data-testid="agent-terminal-toggle"
+          @click="showTerminal = !showTerminal"
+        >
+          <span aria-hidden="true">&gt;_</span> {{ t('agent.terminal.open') }}
+        </button>
         <button class="header-btn" @click="handleNewSession">+ 新建</button>
         <button class="header-btn" @click="handleClearMessages">清空</button>
       </div>
@@ -331,6 +339,13 @@
       @close="closeReplay"
     />
 
+    <!-- 持久终端抽屉（issue #477）：xterm 面板挂在现有 /agent 页右侧，不新增路由 -->
+    <n-drawer v-model:show="showTerminal" placement="right" :width="760">
+      <n-drawer-content :title="t('agent.terminal.title')" closable>
+        <TerminalPanel :session-id="agentStore.currentSessionId" />
+      </n-drawer-content>
+    </n-drawer>
+
     <!-- Input -->
     <AgentInput
       :placeholder="'输入复杂任务，Agent 自动规划执行...'"
@@ -386,6 +401,7 @@ import ApprovalCard from '@/components/agent/ApprovalCard.vue'
 import PlanApprovalCard from '@/components/agent/PlanApprovalCard.vue'
 import ReplayTimeline from '@/components/agent/ReplayTimeline.vue'
 import RecentTaskList from '@/components/agent/RecentTaskList.vue'
+import TerminalPanel from '@/components/agent/TerminalPanel.vue'
 import Markdown from '@/components/common/Markdown.vue'
 
 const agentStore = useAgentStore()
@@ -430,6 +446,7 @@ const planApprovalPending = computed(
 )
 
 const showConfig = ref(false)
+const showTerminal = ref(false)
 const showPlan = ref(true)
 const centerPanel = ref<HTMLElement>()
 const initLoading = ref(true)
