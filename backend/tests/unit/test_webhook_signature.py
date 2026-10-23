@@ -227,8 +227,8 @@ class TestVerifySignature:
         用源码守卫钉住 issue §3 的显式要求；变异试验「把 compare_digest 改成
         ==」会让本用例变红。
         """
-        from pathlib import Path
         import re
+        from pathlib import Path
 
         import app.services.webhook_service as service_module
 

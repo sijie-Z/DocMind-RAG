@@ -215,7 +215,9 @@ def test_architecture_numbers_match_code():
 
 def test_index_page_stats_are_current():
     """docs/index.html 不再使用 v1.2 / 1022 / 17 等过期数字，且测试数带快照口径。"""
-    _assert_absent("docs/index.html", ["1022", "v1.2 ·", 'stat-num">17<', 'stat-num">23<', 'stat-num">24<'])
+    _assert_absent(
+        "docs/index.html", ["1022", "v1.2 ·", 'stat-num">17<', 'stat-num">23<', 'stat-num">24<']
+    )
     _assert_present("docs/index.html", ["v1.22", "3084", "冻结快照", 'stat-num">25<'])
 
 
