@@ -402,6 +402,7 @@ def _audit(agent: CommandContext, execution: CommandExecution) -> None:
         execution.error_code or "-",
         execution.execution_id or "-",
     )
+    # 指标标签只含命令名与结果码（低基数；不含用户/会话/参数）。
     AGENT_COMMAND_EXECUTIONS.labels(
         command=execution.command or "unknown",
         result="success" if execution.success else (execution.error_code or "failed"),
