@@ -55,7 +55,7 @@
    取 `session_key`，`payload_hash` 不可逆。为让 issue 的异步语义可实现，新增
    `payload TEXT NOT NULL`（原始 JSON 文本），`payload_hash` 仍按 issue 计算原始
    字节 sha256。`docs/decisions` 与迁移注释均标注该偏离。
-2. **`core/prometheus.py` 的修改**：任务书 §1.6 明确要求把
+2. **`core/prometheus.py` 的修改**：issue #478 §1.6 要求把
    `webhook_delivery_total{status}` / `webhook_poll_errors_total` 等挂到现有指标
    注册方式，但 §0.3 白名单未列该文件；按 §1.6 执行并在报告列明。
 2. **`core/config/loader.py` 的修改**：启动 fail-closed 校验必须覆盖不经过
@@ -98,7 +98,7 @@
 - 处理租约：`processing_started_at` 超过 10 分钟即可被重新领取；崩溃的尝试计入
   `attempts`（有界重试仍收敛）。
 - 重试延迟与 issue §8 示例的 30s 存在口径差：§8 写"失败一次后 30s 到点"，而
-  §5.3 与任务书的正则是 `2^attempts*30s`，本实现按后者（首次失败 60s）；测试通过
+  §5.3 与 issue 的正则均为 `2^attempts*30s`，本实现按后者（首次失败 60s）；测试通过
   直接改写 `next_attempt_at` 模拟到点，不依赖真实睡眠。
 - 投递失败错误摘要经 `app.core.log_safety.log_safe` 脱敏并限长（500 字符），
   不把原始异常/响应体直接落库。
