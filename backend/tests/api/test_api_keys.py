@@ -95,7 +95,7 @@ async def test_create_returns_plaintext_once_and_stores_only_hash(client, user, 
     data = r.json()["data"]
     raw = data["api_key"]
     assert raw.startswith("dm_") and len(raw) > 30
-    assert data["prefix"] == raw[:12]
+    assert data["prefix"] == raw[:8]
     assert data["scopes"] == ["chat:read", "chat:write", "knowledge:read", "rpc"]
 
     # 库里只有哈希：不等于明文，且是 bcrypt。

@@ -24,7 +24,7 @@ class ApiKey(Base):
         Integer, ForeignKey("organizations.id"), nullable=True, index=True
     )
     name: Mapped[str] = mapped_column(String(100))
-    # 明文前 12 位（``dm_`` + 9 位随机），用于按前缀定位候选行。
+    # 明文前 8 位（``dm_`` + 5 位随机），用于按前缀定位候选行（列宽留余量）。
     prefix: Mapped[str] = mapped_column(String(12), index=True)
     key_hash: Mapped[str] = mapped_column(String(255))
     scopes: Mapped[list[str]] = mapped_column(JSON, default=list)

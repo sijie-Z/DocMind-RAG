@@ -24,7 +24,7 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 API_KEY_PREFIX = "dm_"
-PREFIX_LENGTH = 12  # "dm_" + 9 位随机，列宽 12
+PREFIX_LENGTH = 8  # 前 8 位明文（"dm_" + 5 位随机），用于按前缀定位候选行
 
 # 默认 scope 集合（issue §5.1）：聊天读写、知识检索、JSON-RPC。
 # 具体默认值可由 ``API_KEY_DEFAULT_SCOPES`` 配置覆盖（见 base.py）。
