@@ -644,7 +644,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 
 ### 5.2 端点模块清单
 
-当前共 **24 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `include_router` 调用数派生）：
+当前共 **25 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
 
 | 模块 | 前缀 | 说明 |
 |------|------|------|
@@ -670,6 +670,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | mcp | `/api/v1/mcp` | MCP 服务器状态（管理员只读） |
 | scheduled_tasks | `/api/v1/scheduled-tasks` | 定时任务 CRUD / 暂停 / 手动触发 |
 | sessions | `/api/v1/sessions` | 会话 fork / seed / 谱系（issue #476） |
+| webhooks | `/api/v1/webhooks` | 入站 Webhook 规则、HMAC 验签投递与 outbox 处理（issue #478） |
 | demo | `/api/v1/demo` | 演示数据填充 |
 | user_settings | `/api/v1/user` | 个人 UI 偏好 |
 

@@ -266,6 +266,20 @@ def _build_metrics() -> dict[str, Any]:
         ["event", "hook"],
         buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0],
     )
+    # Webhook runtime（issue #478）：投递终态、poll 循环异常、幂等降级、限流。
+    m["WEBHOOK_DELIVERY_TOTAL"] = Counter(
+        "webhook_delivery_total", "Webhook delivery processing outcomes", ["status"]
+    )
+    m["WEBHOOK_POLL_ERRORS_TOTAL"] = Counter(
+        "webhook_poll_errors_total", "Webhook outbox poll loop errors"
+    )
+    m["WEBHOOK_IDEMPOTENCY_REDIS_FALLBACK_TOTAL"] = Counter(
+        "webhook_idempotency_redis_fallback_total",
+        "Webhook idempotency checks degraded to DB-only (Redis unavailable)",
+    )
+    m["WEBHOOK_RATE_LIMITED_TOTAL"] = Counter(
+        "webhook_rate_limited_total", "Webhook deliveries rejected by rate limit"
+    )
     return m
 
 
@@ -310,6 +324,10 @@ AGENT_FEEDBACK_TOTAL = _LazyMetric("AGENT_FEEDBACK_TOTAL")
 AGENT_COMMAND_EXECUTIONS = _LazyMetric("AGENT_COMMAND_EXECUTIONS")
 HOOK_EXECUTIONS = _LazyMetric("HOOK_EXECUTIONS")
 HOOK_DURATION = _LazyMetric("HOOK_DURATION")
+WEBHOOK_DELIVERY_TOTAL = _LazyMetric("WEBHOOK_DELIVERY_TOTAL")
+WEBHOOK_POLL_ERRORS_TOTAL = _LazyMetric("WEBHOOK_POLL_ERRORS_TOTAL")
+WEBHOOK_IDEMPOTENCY_REDIS_FALLBACK_TOTAL = _LazyMetric("WEBHOOK_IDEMPOTENCY_REDIS_FALLBACK_TOTAL")
+WEBHOOK_RATE_LIMITED_TOTAL = _LazyMetric("WEBHOOK_RATE_LIMITED_TOTAL")
 
 
 # issue #301：启用但构建失败时的自曝输出（注释行 + 一个 gauge 样本）。

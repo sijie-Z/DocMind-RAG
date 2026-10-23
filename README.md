@@ -215,7 +215,7 @@ hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-24 个端点模块，统一 `/api/v1` 前缀：
+25 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
@@ -242,6 +242,7 @@ hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
 | Agent 命令 | `/commands` | 服务端命令清单与无模型轮次执行（/help、/status、/export、/tools） |
 | MCP 工具 | `/mcp` | MCP 服务器状态（管理员只读） |
 | 用户设置 | `/user` | 个人 UI 偏好 |
+| Webhook 规则 | `/webhooks` | 入站 Webhook 规则管理、HMAC 验签投递与 outbox 处理（issue #478） |
 | 示例数据 | `/demo` | 演示文档与数据填充 |
 
 Swagger 文档：`http://localhost:8000/docs`
@@ -397,8 +398,8 @@ DocMind/
 │   │   ├── dependencies.py          # 依赖注入容器
 │   │   ├── exceptions.py            # 自定义异常层次结构
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 24 个模块）
-│   │   │   └── endpoints/           # 端点实现（24 个文件）
+│   │   │   ├── router.py            # 主路由（注册 25 个模块）
+│   │   │   └── endpoints/           # 端点实现（25 个文件）
 │   │   ├── agent/                   # PER Agent 核心
 │   │   │   ├── loop.py              #   PER 主循环
 │   │   │   ├── planner.py           #   规划器（LLM + 结构化规则）
@@ -464,8 +465,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  上下文压缩
 │   │   │   ├── context_window.py    #   令牌预算管理
 │   │   │   └── evaluator.py         #   质量评估
-│   │   ├── services/                # 业务服务层（23 个服务）
-│   │   ├── models/                  # ORM 模型（18 个模型文件）
+│   │   ├── services/                # 业务服务层（24 个服务）
+│   │   ├── models/                  # ORM 模型（19 个模型文件）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者
 │   ├── tests/                       # 2223 个后端测试（前端另有 861 个）

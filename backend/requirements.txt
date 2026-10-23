@@ -63,6 +63,9 @@ rapidocr-onnxruntime==1.4.4
 python-magic>=0.4.27; sys_platform != 'win32'
 python-magic-bin>=0.4.14; sys_platform == 'win32'
 python-jose[cryptography]>=3.5.0
+# Webhook secret 的 Fernet 加密（issue #478）。python-jose 的 [cryptography]
+# extra 只是传递依赖，不能作为显式契约——本文件直接 import Fernet。
+cryptography>=42
 passlib[bcrypt]>=1.7.4
 python-dotenv>=1.0.0
 pytest>=7.4.3

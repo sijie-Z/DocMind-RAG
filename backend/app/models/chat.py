@@ -11,15 +11,22 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+
+# Webhook 投递的渲染 prompt（含最多 1 MiB payload）会作为用户消息落库；MySQL
+# TEXT 仅 64 KiB，会 DataError（评审 blocker B2）。MEDIUMTEXT = 16 MiB；
+# SQLite 无长度限制，保持 TEXT。
+_MESSAGE_TEXT = Text().with_variant(mysql.MEDIUMTEXT(), "mysql")
 
 
 class ChatSessionStatus(enum.Enum):
@@ -42,6 +49,15 @@ class ChatSession(Base):
     """聊天会话表"""
 
     __tablename__ = "chat_sessions"
+    __table_args__ = (
+        # issue #478：session_mode=reuse 的会话查找键（rule_id + payload.session_key）。
+        # 也服务"按规则查会话"（最左前缀 rule_id）。
+        Index(
+            "ix_chat_sessions_webhook_rule_session_key",
+            "webhook_rule_id",
+            "webhook_session_key",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(
@@ -83,6 +99,19 @@ class ChatSession(Base):
     )
     fork_reason: Mapped[str | None] = mapped_column(String(100), comment="分叉原因标签")
 
+    # Webhook 来源（issue #478）：source 默认 user；webhook 投递建的会话记录
+    # 规则与投递 id，reuse 模式另有 session_key（payload 顶层字段）。
+    source: Mapped[str] = mapped_column(
+        String(32), default="user", server_default="user", comment="会话来源（user/webhook）"
+    )
+    webhook_rule_id: Mapped[str | None] = mapped_column(String(36), comment="Webhook 规则ID")
+    webhook_delivery_id: Mapped[str | None] = mapped_column(
+        String(36), comment="首次创建该会话的投递ID"
+    )
+    webhook_session_key: Mapped[str | None] = mapped_column(
+        String(128), comment="reuse 模式的会话键（payload.session_key）"
+    )
+
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), comment="创建时间"
@@ -120,7 +149,7 @@ class ChatMessage(Base):
     seq: Mapped[int] = mapped_column(Integer, nullable=False, comment="会话内单调序号（从1开始）")
 
     # 消息内容
-    content: Mapped[str] = mapped_column(Text, comment="消息内容")
+    content: Mapped[str] = mapped_column(_MESSAGE_TEXT, comment="消息内容")
     message_type: Mapped[MessageType] = mapped_column(Enum(MessageType), comment="消息类型")
 
     # 元数据

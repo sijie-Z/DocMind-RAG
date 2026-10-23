@@ -67,10 +67,13 @@ def test_i476_migration_backfills_and_round_trips(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
     cfg = _cfg()
 
-    # 迁移链必须单头且新 revision 是 head（011 仍是其前驱）。
+    # 迁移链必须单头；012 仍在主链上且紧接 011。head 随迁移演进后移
+    # （issue #478 之后是 013_webhooks），不把 012 钉成永久 head。
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == [NEW_REV]
-    chain = [rev.revision for rev in script.iterate_revisions(NEW_REV, "base")]
+    heads = script.get_heads()
+    assert len(heads) == 1, f"迁移必须单头，实际 {heads}"
+    chain = [rev.revision for rev in script.iterate_revisions(heads[0], "base")]
+    assert NEW_REV in chain, f"{NEW_REV} 必须仍在链上，实际 {chain}"
     assert chain.index(PREV_REV) == chain.index(NEW_REV) + 1
 
     # ── 升到 011，塞"存量数据"（模拟升级窗口前的库）────────────────────
