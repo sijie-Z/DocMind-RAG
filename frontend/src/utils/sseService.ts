@@ -214,7 +214,7 @@ class SSEService {
 
           for (const line of lines) {
             if (line.trim() === '') {
-              // issue #480：帧边界显式重置——不依赖 event/data 的先后顺序。
+              // issue #480：帧边界重置，避免上一帧的事件类型串到下一帧。
               eventTypeSet = false
               continue
             }
