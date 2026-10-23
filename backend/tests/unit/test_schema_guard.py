@@ -152,6 +152,22 @@ async def test_missing_alembic_version_is_fail_closed(sqlite_engine, monkeypatch
 
     assert excinfo.value.current is None
     assert "current=(none)" in str(excinfo.value)
+    assert "alembic stamp" in str(excinfo.value), "非迁移建库需要给出 stamp 接管提示"
+
+
+@pytest.mark.asyncio
+async def test_empty_alembic_version_table_gets_adopt_hint(sqlite_engine, monkeypatch):
+    """issue #154 的真实形态：表在但 0 行（create_all 残留）也必须提示 stamp。"""
+    async with sqlite_engine.begin() as conn:
+        await conn.execute(text(ALEMBIC_VERSION_DDL))
+    monkeypatch.setattr(bootstrap, "get_alembic_heads", lambda: set(HEADS))
+
+    with pytest.raises(bootstrap.SchemaOutdatedError) as excinfo:
+        await bootstrap.enforce_schema_guard(engine=sqlite_engine, auto_migrate=False)
+
+    assert excinfo.value.current == set()
+    assert "current=(none)" in str(excinfo.value)
+    assert "alembic stamp" in str(excinfo.value), "空版本表同样需要 stamp 接管提示"
 
 
 # ── AUTO_MIGRATE 兜底：升级后复检通过 / 仍落后则失败 ──────────────────────
@@ -301,3 +317,28 @@ def test_repo_migrations_have_exactly_one_head():
     heads = bootstrap.get_alembic_heads()
     assert heads
     assert len(heads) == 1, f"迁移出现分叉：{sorted(heads)}"
+
+
+def test_run_alembic_upgrade_disables_alembic_fileconfig(monkeypatch):
+    """评审判定 F1：不能让 env.py 的 fileConfig 重置宿主日志管线（审计日志被吞）。
+
+    config_file_name=None 时 alembic/env.py 跳过 fileConfig；升级命令本身与
+    script_location 仍须正确。
+    """
+    import alembic.command
+
+    captured: dict = {}
+
+    def fake_upgrade(cfg, revision) -> None:
+        captured["cfg"] = cfg
+        captured["revision"] = revision
+
+    monkeypatch.setattr(alembic.command, "upgrade", fake_upgrade)
+
+    bootstrap._run_alembic_upgrade()
+
+    assert captured["revision"] == "head"
+    assert captured["cfg"].config_file_name is None
+    assert str(captured["cfg"].get_main_option("script_location")) == str(
+        bootstrap.ALEMBIC_SCRIPT_DIR
+    )

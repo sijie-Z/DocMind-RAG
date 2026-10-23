@@ -93,10 +93,10 @@ def render_schema_mismatch(current: set[str] | None, heads: set[str]) -> str:
     current_text = ",".join(sorted(current)) if current else "(none)"
     head_text = ",".join(sorted(heads)) if heads else "(none)"
     adopt_hint = ""
-    if current is None:
+    if not current:
         adopt_hint = (
-            "（该库没有 alembic_version 表：若它是 create_all 建的，先用 "
-            "alembic stamp <与库现状一致的 revision> 纳入迁移管理，再 upgrade）"
+            "（该库没有迁移版本记录——alembic_version 表不存在或为空：若它是 create_all "
+            "建的，先用 alembic stamp <与库现状一致的 revision> 纳入迁移管理，再 upgrade）"
         )
     return (
         f"数据库 schema 未处于迁移 head：current={current_text} head={head_text}。"
@@ -165,6 +165,10 @@ def _run_alembic_upgrade() -> None:
 
     cfg = Config(str(ALEMBIC_INI))
     cfg.set_main_option("script_location", str(ALEMBIC_SCRIPT_DIR))
+    # 不让 alembic/env.py 调 fileConfig 重置宿主日志管线（评审 F1）：
+    # fileConfig 会把 root 重置为 WARN 并替换 handler，AUTO_MIGRATE 的审计日志
+    # 与启动期 JSON 日志会从此被吞。config_file_name=None 时 env.py 跳过该分支。
+    cfg.config_file_name = None
     command.upgrade(cfg, "head")
 
 

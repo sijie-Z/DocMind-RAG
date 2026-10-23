@@ -98,6 +98,9 @@ kubectl get svc -n docmind
 - backend / worker 的 Pod 带 `schema-check` initContainer（只读运行
   `scripts/check_schema.py`）：库未到迁移 head 时 init 失败、Pod 不启动 ——
   即使有人绕过发布顺序，也不会带着落后 schema 提供服务（fail-closed）。
+  注意它执行的是**与 CI 相同的完整校验**（表 / 列定义 / collation），比单纯
+  「版本 = head」更严：无关漂移同样会阻塞发布。失败时先看 initContainer 日志，
+  按 `scripts/check_schema.py` 的列级输出修复库/迁移，不要跳过校验。
 - 升级发布：先更新镜像与 Secret/ConfigMap，再重跑 Job，最后 `kubectl rollout
   restart deployment/docmind-backend deployment/docmind-worker -n docmind`。
   重跑前需删除已完成的 Job：
