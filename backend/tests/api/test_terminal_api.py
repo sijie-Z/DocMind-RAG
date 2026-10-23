@@ -755,9 +755,23 @@ def test_summarize_line_handles_backspace_and_control_chars() -> None:
 
     assert _summarize_line("lss\x7f") == "ls"  # 退格生效
     assert _summarize_line("echo a\x01b") == "echo ab"  # 控制字符脱敏
+    assert _summarize_line("ls\x1b[A") == "ls"  # 方向键 CSI 序列被剥离
     assert _summarize_line("   ") is None
     assert _summarize_line("\r\n") is None
     assert len(_summarize_line("x" * 500)) == 200
+
+
+async def test_audit_lines_per_input_are_capped(tool_env) -> None:
+    """一条超多行输入不得逐行写库拖垮输入循环（最多 20 行 + 1 条计数摘要）。"""
+    data = "\n".join(f"cmd-{i}" for i in range(30)) + "\n"
+    await terminal_service.audit_completed_lines(user_id=1, terminal_id="t", data=data)
+    actions = [
+        call.kwargs.get("action")
+        for call in tool_env.audit.await_args_list
+        if call.kwargs.get("action") == "terminal_command"
+    ]
+    assert len(actions) == 21
+    assert "truncated" in tool_env.audit.await_args_list[-1].kwargs.get("detail", "")
 
 
 def test_audit_records_keystroke_commands_across_frames(env) -> None:

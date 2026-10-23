@@ -91,12 +91,18 @@ def _parse_created(raw: str) -> float | None:
     return parsed.astimezone(UTC).timestamp()
 
 
+_ANSI_CSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+# 单次输入最多审计的行数：防止一条 64KB 帧里塞数万短行导致逐行 DB 写阻塞输入。
+_MAX_AUDITED_LINES_PER_INPUT = 20
+
+
 def _summarize_line(line: str) -> str | None:
-    """单行命令摘要：处理退格、脱敏控制字符、截断 200。
+    """单行命令摘要：剥离 ANSI 转义、处理退格、脱敏控制字符、截断 200。
 
     前端 xterm 逐键发送（``\\r`` 单独一帧），所以调用方必须先按换行缓冲/切分；
     这里不再要求输入自带换行。
     """
+    line = _ANSI_CSI_RE.sub("", line)
     out: list[str] = []
     for ch in line:
         if ch in ("\x7f", "\b"):
@@ -377,10 +383,23 @@ class TerminalService:
         await self._audit(user_id, "terminal_command", target_id=terminal_id, detail=summary)
 
     async def audit_completed_lines(self, *, user_id: int, terminal_id: str, data: str) -> None:
-        """把一段输入按换行切分，审计其中**已完成**的每一行（工具/粘贴路径）。"""
+        """把一段输入按换行切分，审计其中**已完成**的每一行。
+
+        单次输入最多审计 ``_MAX_AUDITED_LINES_PER_INPUT`` 行，其余合并为一条
+        计数摘要——避免超多行输入把输入循环拖成 N 次 DB 写。
+        """
         parts = re.split(r"[\r\n]", data)
-        for line in parts[:-1]:
+        lines = parts[:-1]
+        for line in lines[:_MAX_AUDITED_LINES_PER_INPUT]:
             await self.audit_line(user_id=user_id, terminal_id=terminal_id, line=line)
+        extra = len(lines) - _MAX_AUDITED_LINES_PER_INPUT
+        if extra > 0:
+            await self._audit(
+                user_id,
+                "terminal_command",
+                target_id=terminal_id,
+                detail=f"[truncated: {extra} more lines skipped]",
+            )
 
     # ── 回收 ──
     async def sweep(self) -> int:

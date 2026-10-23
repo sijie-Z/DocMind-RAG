@@ -59,6 +59,8 @@ MAX_ROWS = 500
 
 # 服务端 → 客户端发送单帧的超时（慢客户端不应无限拖住 pump 任务）。
 _SEND_TIMEOUT_SECONDS = 10.0
+# 命令审计行缓冲上限：持续输入但不回车时只保留尾部（正常命令行远小于此）。
+_MAX_LINE_BUFFER_CHARS = 4096
 
 
 class TerminalCreateRequest(BaseModel):
@@ -451,15 +453,17 @@ async def _receive_loop(
                     send_lock,
                 )
             else:
-                # 命令摘要审计：按换行切分已完成行，余下部分留在缓冲。
+                # 命令摘要审计：按换行切分已完成行，余下部分留在缓冲（有上限，
+                # 防止无换行长输入撑大后端内存）。
                 line_buffer += data
                 completed = re.split(r"[\r\n]", line_buffer)
-                line_buffer = completed.pop()
-                for line in completed:
-                    await terminal_service.audit_line(
+                line_buffer = completed.pop()[-_MAX_LINE_BUFFER_CHARS:]
+                if completed:
+                    await terminal_service.audit_completed_lines(
                         user_id=session.user_id,
                         terminal_id=session.terminal_id,
-                        line=line,
+                        # 末尾补换行：告诉审计层这些行都已提交完成。
+                        data="\n".join(completed) + "\n",
                     )
         elif message_type == "resize":
             cols, rows = parsed.get("cols"), parsed.get("rows")

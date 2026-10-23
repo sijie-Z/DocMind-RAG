@@ -213,6 +213,7 @@ class DockerTerminalBackend:
                 try:
                     loop.call_soon_threadsafe(self._deliver, data)
                 except RuntimeError:  # 事件循环已关闭
+                    self._slots.release()
                     return
         except (OSError, ValueError):
             pass
