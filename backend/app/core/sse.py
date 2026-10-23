@@ -29,15 +29,17 @@ BUF_KEY = "sse:buf:{stream_id}"
 
 
 def format_sse(event: str, data: dict, event_id: str | None = None) -> str:
-    """编码一个 SSE 帧：``event:`` / ``id:``（可选）/ ``data:``（多行逐行前缀）。
+    """编码一个 SSE 帧：``data:``（多行逐行前缀）+ 可选 ``id:`` + ``event:``。
 
-    ``data`` 中的换行按 SSE 规范拆成多条 ``data:`` 行，客户端按行拼接回原文。
+    字段顺序为 ``data → id → event``：SSE 规范对字段顺序无要求，而仓库内既有
+    客户端/测试解析器以「块首行是 ``data: ``」为口径（历史帧只有 data 行）；
+    把 data 放最前保持向后兼容，``event:``/``id:`` 在其后仍被标准客户端识别。
     """
-    lines: list[str] = [f"event: {event}"]
+    payload = json.dumps(data, ensure_ascii=False)
+    lines: list[str] = [f"data: {line}" for line in payload.splitlines() or [""]]
     if event_id is not None:
         lines.append(f"id: {event_id}")
-    payload = json.dumps(data, ensure_ascii=False)
-    lines.extend(f"data: {line}" for line in payload.splitlines() or [""])
+    lines.append(f"event: {event}")
     return "\n".join(lines) + "\n\n"
 
 
@@ -182,17 +184,6 @@ async def keepalive_stream(
 
     task = asyncio.create_task(_pump())
 
-    async def _cancel_later() -> None:
-        try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=ttl_seconds)
-        except TimeoutError:
-            logger.info("SSE orphan stream TTL reached, cancelling pipeline (ttl=%ss)", ttl_seconds)
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        except Exception:  # noqa: BLE001 - 收尾任务不向事件循环抛异常
-            logger.warning("SSE orphan canceller failed", exc_info=True)
-
-    canceller: asyncio.Task | None = None
     try:
         while True:
             frame = await queue.get()
@@ -202,10 +193,21 @@ async def keepalive_stream(
     finally:
         if not task.done():
             if ttl_seconds is not None:
-                canceller = asyncio.create_task(_cancel_later())
+                # 用 loop.call_later 而不是后台协程：定时器不产生
+                # "Task was destroyed but it is pending" 噪音，且在事件循环
+                # 关闭时自动失效。
+                loop = asyncio.get_running_loop()
+
+                def _cancel_task() -> None:
+                    if not task.done():
+                        logger.info(
+                            "SSE orphan stream TTL reached, cancelling pipeline (ttl=%ss)",
+                            ttl_seconds,
+                        )
+                        task.cancel()
+
+                handle = loop.call_later(float(ttl_seconds), _cancel_task)
+                task.add_done_callback(lambda _t: handle.cancel())
             else:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-        if canceller is not None:
-            # 不 await：保留后台定时器；引用保存在事件循环的任务集合中。
-            canceller.add_done_callback(lambda _t: None)

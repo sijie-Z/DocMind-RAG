@@ -184,8 +184,8 @@ def test_resume_streams_sse_contract_and_passes_claim_false(client, auth, monkey
 
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/event-stream")
-    lines = [ln for ln in r.text.split("\n\n") if ln.startswith("data: ")]
-    payloads = [json.loads(ln[len("data: ") :]) for ln in lines]
+    lines = [ln[len("data: ") :] for ln in r.text.splitlines() if ln.startswith("data: ")]
+    payloads = [json.loads(ln) for ln in lines]
     assert payloads[0]["type"] == "thinking"
     assert any(p["type"] == "chunk" and p["content"] == "后续产出" for p in payloads)
     assert payloads[-1] == {"type": "done", "content": "", "task_id": _TASK_ID}
@@ -387,8 +387,13 @@ async def test_resume_http_cancel_releases_lease_and_immediate_retry_runs(tmp_pa
     from app.agent.exec_context import ExecutionContext
     from app.agent.loop import PERAgentLoop
     from app.agent.planner import Plan, PlanStep
+    from app.core.config import settings
     from app.core.database import Base
     from app.main import app
+
+    # issue #480：本用例判别"断连立即释放租约"的旧语义；关闭断连保留开关
+    # 即走该路径（保留语义由 tests/unit/test_sse_format.py 的 TTL 用例覆盖）。
+    monkeypatch.setattr(settings, "SSE_KEEPALIVE_ON_DISCONNECT", False)
 
     # sqlite 工厂（checkpoint 与端点模块共用）+ 副作用隔离
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'f1lease.db'}")
@@ -539,8 +544,8 @@ def test_resume_stream_error_is_generic_detail_only_in_server_log(client, auth, 
 
     assert r.status_code == 200, "SSE 已开流：错误只能作为流内事件表达"
     assert "SECRET-TOKEN-xyz" not in r.text, "异常原文不得出现在 SSE 输出里"
-    lines = [ln for ln in r.text.split("\n\n") if ln.startswith("data: ")]
-    payloads = [json.loads(ln[len("data: ") :]) for ln in lines]
+    lines = [ln[len("data: ") :] for ln in r.text.splitlines() if ln.startswith("data: ")]
+    payloads = [json.loads(ln) for ln in lines]
     errs = [p for p in payloads if p.get("type") == "error"]
     assert errs and errs[0]["content"].startswith("Agent 恢复执行出错，请稍后重试")
     # W0-5：通用文案带请求编号（客户端可据此报障）；编号与响应头一致。

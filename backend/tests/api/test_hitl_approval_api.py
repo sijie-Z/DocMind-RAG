@@ -79,10 +79,10 @@ class _FakeRedis:
 
 
 def _sse_payloads(text: str) -> list[dict]:
-    lines = [ln for ln in text.split("\n\n") if ln.startswith("data: ")]
+    lines = [ln[len("data: ") :] for ln in text.splitlines() if ln.startswith("data: ")]
     import json as _json
 
-    return [_json.loads(ln[len("data: ") :]) for ln in lines]
+    return [_json.loads(ln) for ln in lines]
 
 
 @pytest.fixture(autouse=True)
