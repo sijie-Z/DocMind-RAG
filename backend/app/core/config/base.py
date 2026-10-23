@@ -1,5 +1,7 @@
 """Core application settings — app metadata, logging, monitoring, rate limiting."""
 
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -104,6 +106,15 @@ class BaseAppSettings(BaseSettings):
     RPC_LINE_MAX_BYTES: int = 1_048_576
     # 服务端→客户端请求（session/request_permission）等待上限（秒）。
     RPC_PERMISSION_TIMEOUT_SECONDS: int = 300
+
+    # ── ACP v1（issue #481）────────────────────────────────────────────────
+    # ``session/request_permission``（审批桥）等待上限（秒）；超时按拒绝（deny）
+    # 收尾，任务不得悬空。与 RPC 面同默认值、独立旋钮（两种入口可分别调）。
+    ACP_PERMISSION_TIMEOUT_SECONDS: int = 300
+    # ACP 不支持交互式计划审批：收到 plan_approval_required 时，
+    #   reject（默认）— 计划审批按拒绝收尾并回 JSON-RPC -32009；
+    #   auto          — 记录审计日志后自动批准并续跑（计划照常执行）。
+    ACP_PLAN_APPROVAL_MODE: Literal["reject", "auto"] = "reject"
 
     # SSE 断连保留：true 时不立即取消 pipeline，交给 SSE_ORPHAN_TTL_SECONDS 兜底。
     SSE_KEEPALIVE_ON_DISCONNECT: bool = True
