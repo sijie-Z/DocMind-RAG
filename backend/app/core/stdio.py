@@ -47,7 +47,15 @@ def migrate_stdout_handlers(real_stdout: TextIO) -> list[str]:
     for logger in _iter_loggers():
         for handler in list(logger.handlers):
             if isinstance(handler, logging.StreamHandler) and handler.stream is real_stdout:
-                handler.setStream(sys.stderr)
+                try:
+                    handler.setStream(sys.stderr)
+                except Exception:  # noqa: BLE001 - 单个坏 handler 不得拖垮重定向
+                    logging.getLogger(__name__).warning(
+                        "迁移 logger %s 的 stdout handler 失败",
+                        logger.name or "root",
+                        exc_info=True,
+                    )
+                    continue
                 migrated.append(logger.name)
     return migrated
 

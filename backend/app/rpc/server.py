@@ -80,7 +80,7 @@ def _release_stdin_reader(reader: threading.Thread) -> None:
             os.close(sys.stdin.fileno())
         except (OSError, ValueError, AttributeError):
             pass
-    reader.join(timeout=1.0)
+    reader.join(timeout=0.5)
     if reader.is_alive():
         logger.debug("stdin reader still blocked at exit; daemon thread reclaimed on exit")
 
