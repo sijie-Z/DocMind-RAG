@@ -160,6 +160,13 @@ class ForkInProgressError(ConflictError):
     message = "相同幂等键的分叉请求正在处理中，请稍后重试"
 
 
+class ForkIdempotencyConflictError(ConflictError):
+    """幂等键被其他组织/不可见的会话占用（唯一约束冲突但不可重放）。"""
+
+    error_code = "FORK_IDEMPOTENCY_CONFLICT"
+    message = "该幂等键已被其他会话占用，请更换幂等键后重试"
+
+
 @dataclass
 class ForkResult:
     """一次 fork 的结果（端点据此组响应；idempotent=True 表示重放）。"""
@@ -630,119 +637,128 @@ async def fork_session(
                 },
             )
 
-    messages = await _load_messages(db, source.id)
-    prefix, fork_point = _resolve_prefix(messages, message_id)
-    if len(prefix) > FORK_MAX_COPIED_MESSAGES:
-        if idem_key:
-            await _release_idempotency_claim(user_id, idem_key, child_id)
-        raise ForkQuotaExceededError(
-            f"分叉复制的消息数超出上限（{FORK_MAX_COPIED_MESSAGES} 条）",
-            detail={"messages": len(prefix), "limit": FORK_MAX_COPIED_MESSAGES},
-        )
-
-    active_tasks = await _load_active_tasks(db, source, user_id)
-    if active_tasks and not include_checkpoint:
-        if idem_key:
-            await _release_idempotency_claim(user_id, idem_key, child_id)
-        raise ForkCheckpointRequiredError(
-            "源会话有运行中的任务，只能从最后一个已提交 checkpoint 分叉"
-            "（请传 include_checkpoint=true）",
-            detail={"active_task_ids": [t.id for t in active_tasks]},
-        )
-
-    checkpoint_task: AgentTask | None = None
-    checkpoint_snapshot: dict[str, Any] | None = None
-    if include_checkpoint:
-        picked = await _latest_settled_checkpoint(db, source, user_id)
-        if picked is None:
-            if idem_key:
-                await _release_idempotency_claim(user_id, idem_key, child_id)
-            raise ForkCheckpointUnavailableError(
-                "没有可用的已结算 checkpoint（不存在、损坏、待审批或执行中工具）"
+    try:
+        messages = await _load_messages(db, source.id)
+        prefix, fork_point = _resolve_prefix(messages, message_id)
+        if len(prefix) > FORK_MAX_COPIED_MESSAGES:
+            raise ForkQuotaExceededError(
+                f"分叉复制的消息数超出上限（{FORK_MAX_COPIED_MESSAGES} 条）",
+                detail={"messages": len(prefix), "limit": FORK_MAX_COPIED_MESSAGES},
             )
-        checkpoint_task, checkpoint_snapshot = picked
 
-    fork_point_id = fork_point.id if fork_point is not None else None
-    child_org = source.organization_id if source.organization_id is not None else organization_id
-    resolved_title = (
-        title if title is not None and title.strip() else f"{source.title or '未命名会话'} (fork)"
-    )[:_TITLE_MAX]
-    resolved_reason = (reason or DEFAULT_FORK_REASON)[:_REASON_MAX]
-    seed_requested = bool(seed and seed.strip())
-    # 无组织上下文无法建立记忆命名空间（memory_service fail-closed 拒绝 None/0）：
-    # seed 如实标记为未生效，而不是"响应说 seed 了、记忆里没有"。
-    is_seeded = seed_requested and child_org is not None
-    cloned_task_id = uuid.uuid4().hex[:12] if checkpoint_task is not None else None
-    # 响应字段一律用局部变量（提交后不回读 ORM 属性，避免过期实例触发
-    # 同步懒加载 → MissingGreenlet）。issue #499：boundary_seq 即边界消息 seq。
-    boundary_seq = fork_point.seq if fork_point is not None else 0
-    copied_count = len(prefix)
+        active_tasks = await _load_active_tasks(db, source, user_id)
+        if active_tasks and not include_checkpoint:
+            raise ForkCheckpointRequiredError(
+                "源会话有运行中的任务，只能从最后一个已提交 checkpoint 分叉"
+                "（请传 include_checkpoint=true）",
+                detail={"active_task_ids": [t.id for t in active_tasks]},
+            )
 
-    parent_settings = source.settings if isinstance(source.settings, dict) else {}
-    child_settings = copy.deepcopy(parent_settings)
-    if not isinstance(child_settings, dict):
-        child_settings = {}
-    # issue #499：fork 子会话加载 200 条历史（普通会话默认 20）。
-    child_settings["history_limit"] = FORK_CHILD_HISTORY_LIMIT
-    now = datetime.utcnow()
-    child_settings["fork"] = {
-        "parent_session_id": source.id,
-        "root_session_id": source.root_session_id or source.id,
-        "boundary_message_id": message_id,
-        "fork_point_message_id": fork_point_id,
-        "boundary_seq": boundary_seq,
-        "copied_message_count": copied_count,
-        "checkpoint_cloned": checkpoint_task is not None,
-        # 幂等重放必须返回**克隆任务** id（不是母任务 id）：否则重试拿到的响应
-        # 会让客户端去 resume 母 run，把收尾答案写回母会话（伪历史）。
-        "checkpoint_task_id": cloned_task_id,
-        "checkpoint_source_task_id": checkpoint_task.id if checkpoint_task is not None else None,
-        "is_seeded": is_seeded,
-        "seed_length": len(seed) if seed_requested and seed else 0,
-        "seed_skipped_reason": ("no_organization" if seed_requested and not is_seeded else None),
-        "fork_reason": resolved_reason,
-        "forked_at": now.isoformat() + "Z",
-    }
-    if key_hash:
-        # 兼容/审计：settings 里保留 sha256（不落明文幂等键）。
-        child_settings["fork"]["idempotency_key"] = key_hash
+        checkpoint_task: AgentTask | None = None
+        checkpoint_snapshot: dict[str, Any] | None = None
+        if include_checkpoint:
+            picked = await _latest_settled_checkpoint(db, source, user_id)
+            if picked is None:
+                raise ForkCheckpointUnavailableError(
+                    "没有可用的已结算 checkpoint（不存在、损坏、待审批或执行中工具）"
+                )
+            checkpoint_task, checkpoint_snapshot = picked
 
-    # seed 在**提交前**写入（记忆写入不依赖 DB 事务）：
-    # - 失败时把降级标记并进同一次 commit，彻底消除"第二次 commit 失败 →
-    #   rollback 过期 ORM → MissingGreenlet → 已提交的 fork 变 500"的双故障路径；
-    # - 若随后 DB commit 失败，最坏只留下一个孤儿记忆命名空间（全新 child id，
-    #   永不复用），不会污染任何会话。
-    if is_seeded and seed:
-        if not await _write_seed_memory(
-            child_id=child_id,
+        fork_point_id = fork_point.id if fork_point is not None else None
+        child_org = (
+            source.organization_id if source.organization_id is not None else organization_id
+        )
+        resolved_title = (
+            title
+            if title is not None and title.strip()
+            else f"{source.title or '未命名会话'} (fork)"
+        )[:_TITLE_MAX]
+        resolved_reason = (reason or DEFAULT_FORK_REASON)[:_REASON_MAX]
+        seed_requested = bool(seed and seed.strip())
+        # 无组织上下文无法建立记忆命名空间（memory_service fail-closed 拒绝 None/0）：
+        # seed 如实标记为未生效，而不是"响应说 seed 了、记忆里没有"。
+        is_seeded = seed_requested and child_org is not None
+        cloned_task_id = uuid.uuid4().hex[:12] if checkpoint_task is not None else None
+        # 响应字段一律用局部变量（提交后不回读 ORM 属性，避免过期实例触发
+        # 同步懒加载 → MissingGreenlet）。issue #499：boundary_seq 即边界消息 seq。
+        boundary_seq = fork_point.seq if fork_point is not None else 0
+        copied_count = len(prefix)
+
+        parent_settings = source.settings if isinstance(source.settings, dict) else {}
+        child_settings = copy.deepcopy(parent_settings)
+        if not isinstance(child_settings, dict):
+            child_settings = {}
+        # issue #499：fork 子会话加载 200 条历史（普通会话默认 20）。
+        child_settings["history_limit"] = FORK_CHILD_HISTORY_LIMIT
+        now = datetime.utcnow()
+        child_settings["fork"] = {
+            "parent_session_id": source.id,
+            "root_session_id": source.root_session_id or source.id,
+            "boundary_message_id": message_id,
+            "fork_point_message_id": fork_point_id,
+            "boundary_seq": boundary_seq,
+            "copied_message_count": copied_count,
+            "checkpoint_cloned": checkpoint_task is not None,
+            # 幂等重放必须返回**克隆任务** id（不是母任务 id）：否则重试拿到的响应
+            # 会让客户端去 resume 母 run，把收尾答案写回母会话（伪历史）。
+            "checkpoint_task_id": cloned_task_id,
+            "checkpoint_source_task_id": (
+                checkpoint_task.id if checkpoint_task is not None else None
+            ),
+            "is_seeded": is_seeded,
+            "seed_length": len(seed) if seed_requested and seed else 0,
+            "seed_skipped_reason": (
+                "no_organization" if seed_requested and not is_seeded else None
+            ),
+            "fork_reason": resolved_reason,
+            "forked_at": now.isoformat() + "Z",
+        }
+        if key_hash:
+            # 兼容/审计：settings 里保留 sha256（不落明文幂等键）。
+            child_settings["fork"]["idempotency_key"] = key_hash
+
+        # seed 在**提交前**写入（记忆写入不依赖 DB 事务）：
+        # - 失败时把降级标记并进同一次 commit，彻底消除"第二次 commit 失败 →
+        #   rollback 过期 ORM → MissingGreenlet → 已提交的 fork 变 500"的双故障路径；
+        # - 若随后 DB commit 失败，最坏只留下一个孤儿记忆命名空间（全新 child id，
+        #   永不复用），不会污染任何会话。
+        if is_seeded and seed:
+            if not await _write_seed_memory(
+                child_id=child_id,
+                user_id=user_id,
+                organization_id=child_org,
+                seed=seed,
+                source_id=source.id,
+                fork_point_message_id=fork_point_id,
+            ):
+                # 记忆写入失败：如实下调 is_seeded（响应与落库都不能声称已 seed）。
+                is_seeded = False
+                child_settings["fork"]["is_seeded"] = False
+                child_settings["fork"]["seed_write_failed"] = True
+
+        child = ChatSession(
+            id=child_id,
             user_id=user_id,
             organization_id=child_org,
-            seed=seed,
-            source_id=source.id,
+            title=resolved_title,
+            status=ChatSessionStatus.ACTIVE,
+            message_count=copied_count,
+            last_message_at=prefix[-1].created_at if prefix else None,
+            settings=child_settings,
+            parent_session_id=source.id,
+            root_session_id=source.root_session_id or source.id,
             fork_point_message_id=fork_point_id,
-        ):
-            # 记忆写入失败：如实下调 is_seeded（响应与落库都不能声称已 seed）。
-            is_seeded = False
-            child_settings["fork"]["is_seeded"] = False
-            child_settings["fork"]["seed_write_failed"] = True
-
-    child = ChatSession(
-        id=child_id,
-        user_id=user_id,
-        organization_id=child_org,
-        title=resolved_title,
-        status=ChatSessionStatus.ACTIVE,
-        message_count=copied_count,
-        last_message_at=prefix[-1].created_at if prefix else None,
-        settings=child_settings,
-        parent_session_id=source.id,
-        root_session_id=source.root_session_id or source.id,
-        fork_point_message_id=fork_point_id,
-        fork_reason=resolved_reason,
-        # issue #499：复制消息的 seq 重排为 1..N，计数器同步推进。
-        next_message_seq=copied_count,
-        idempotency_key=idem_key,
-    )
+            fork_reason=resolved_reason,
+            # issue #499：复制消息的 seq 重排为 1..N，计数器同步推进。
+            next_message_seq=copied_count,
+            idempotency_key=idem_key,
+        )
+    except Exception:
+        # 抢占成功后的任何失败（404/400/409、DB 读错误等）都必须释放幂等键，
+        # 否则同一键的重试会被一个未落库的抢占值挡住。
+        if idem_key:
+            await _release_idempotency_claim(user_id, idem_key, child_id)
+        raise
 
     try:
         db.add(child)
@@ -804,7 +820,24 @@ async def fork_session(
         )
         if existing is None:
             if idem_key:
+                # 唯一键可能被其他组织/当前作用域不可见的会话占用：不回放其数据
+                # （租户边界），也不把 IntegrityError 漏成 500。
+                invisible = (
+                    await db.execute(
+                        select(ChatSession.id)
+                        .where(
+                            ChatSession.user_id == user_id,
+                            ChatSession.idempotency_key == idem_key,
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
                 await _release_idempotency_claim(user_id, idem_key, child_id)
+                if invisible is not None:
+                    raise ForkIdempotencyConflictError(
+                        "该幂等键已被其他会话占用，请更换幂等键后重试",
+                        detail={"idempotency_key": idem_key},
+                    ) from None
             raise
         if idem_key:
             await _remember_idempotency(user_id, idem_key, existing.id)

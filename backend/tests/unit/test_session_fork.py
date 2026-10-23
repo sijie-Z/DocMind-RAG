@@ -54,6 +54,7 @@ from app.services.session_fork_service import (
     ForkBoundaryInvalidError,
     ForkCheckpointRequiredError,
     ForkCheckpointUnavailableError,
+    ForkIdempotencyConflictError,
     ForkQuotaExceededError,
     fork_session,
     get_lineage,
@@ -151,6 +152,25 @@ async def _fork(db, source_id: str, **kwargs):
         organization_id=kwargs.pop("organization_id", ORG_ID),
         **kwargs,
     )
+
+
+class _FakeRedis:
+    """最小 Redis：支持 SET NX EX / GET / DELETE（fork 幂等路径所需的最小面）。"""
+
+    def __init__(self):
+        self.data: dict[str, str] = {}
+
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.data:
+            return None
+        self.data[key] = value
+        return True
+
+    async def get(self, key):
+        return self.data.get(key)
+
+    async def delete(self, key):
+        self.data.pop(key, None)
 
 
 # ── 前缀复制 / seq 重排 / 母会话不受影响 ────────────────────────────────────
@@ -952,23 +972,6 @@ async def test_fork_concurrent_same_key_creates_single_child(db_factory, monkeyp
 @pytest.mark.asyncio
 async def test_fork_in_progress_holder_returns_409_after_short_wait(db_factory, monkeypatch):
     """Redis NX 已被占但 DB 尚无子会话：短暂轮询后 409 FORK_IN_PROGRESS（可重试）。"""
-
-    class _FakeRedis:
-        def __init__(self):
-            self.data: dict[str, str] = {}
-
-        async def set(self, key, value, nx=False, ex=None):
-            if nx and key in self.data:
-                return None
-            self.data[key] = value
-            return True
-
-        async def get(self, key):
-            return self.data.get(key)
-
-        async def delete(self, key):
-            self.data.pop(key, None)
-
     fake = _FakeRedis()
     monkeypatch.setattr(session_fork_service, "redis_client", fake)
     monkeypatch.setattr(session_fork_service, "IDEMPOTENCY_WAIT_SECONDS", 0.15)
@@ -1003,23 +1006,6 @@ async def test_fork_in_progress_holder_returns_409_after_short_wait(db_factory, 
 @pytest.mark.asyncio
 async def test_fork_records_child_id_in_redis_idempotency_key(db_factory, monkeypatch):
     """创建成功后 Redis 键值为子 session_id（重复请求据此快路径去重）。"""
-
-    class _FakeRedis:
-        def __init__(self):
-            self.data: dict[str, str] = {}
-
-        async def set(self, key, value, nx=False, ex=None):
-            if nx and key in self.data:
-                return None
-            self.data[key] = value
-            return True
-
-        async def get(self, key):
-            return self.data.get(key)
-
-        async def delete(self, key):
-            self.data.pop(key, None)
-
     fake = _FakeRedis()
     monkeypatch.setattr(session_fork_service, "redis_client", fake)
     async with db_factory() as db:
@@ -1031,6 +1017,61 @@ async def test_fork_records_child_id_in_redis_idempotency_key(db_factory, monkey
         result = await _fork(db, src.id, idempotency_key="redis-ok")
         assert fake.data[f"fork:idem:{USER_ID}:redis-ok"] == result.session.id
         assert result.idempotent is False
+
+
+@pytest.mark.asyncio
+async def test_fork_releases_idempotency_claim_when_boundary_invalid(db_factory, monkeypatch):
+    """抢占后 404/409 失败必须释放幂等键，否则同键重试会被占用值挡住。"""
+    fake = _FakeRedis()
+    monkeypatch.setattr(session_fork_service, "redis_client", fake)
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        await db.commit()
+
+        with pytest.raises(NotFoundError):
+            await _fork(db, src.id, message_id="missing", idempotency_key="release-me")
+        assert f"fork:idem:{USER_ID}:release-me" not in fake.data, "失败请求不得留下幂等键"
+
+        # 同一键重试可以正常创建。
+        result = await _fork(db, src.id, idempotency_key="release-me")
+        assert result.idempotent is False
+
+
+@pytest.mark.asyncio
+async def test_fork_idempotency_key_used_in_other_org_is_409_not_500(db_factory):
+    """唯一键被其他组织行占用：不泄露/不回放其数据，明确 409（不是 500）。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1", org_id=ORG_ID)
+        src_id = src.id
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        db.add(
+            ChatSession(
+                id="other-org-child",
+                user_id=USER_ID,
+                organization_id=ORG_ID + 1,
+                title="别的组织",
+                status=ChatSessionStatus.ACTIVE,
+                root_session_id="other-org-source",
+                parent_session_id="other-org-source",
+                idempotency_key="cross-org-key",
+            )
+        )
+        await db.commit()
+
+        with pytest.raises(ForkIdempotencyConflictError) as excinfo:
+            await _fork(db, src.id, idempotency_key="cross-org-key")
+        assert excinfo.value.status_code == 409
+        assert excinfo.value.error_code == "FORK_IDEMPOTENCY_CONFLICT"
+
+        children = (
+            (await db.execute(select(ChatSession).where(ChatSession.parent_session_id == src_id)))
+            .scalars()
+            .all()
+        )
+        assert list(children) == [], "不得在调用者组织内建出第二个子会话"
 
 
 @pytest.mark.asyncio
