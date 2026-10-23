@@ -643,12 +643,13 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 
 ### 5.2 端点模块清单
 
-当前共 **26 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
+当前共 **28 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
 
 | 模块 | 前缀 | 说明 |
 |------|------|------|
 | auth | `/api/v1/auth` | 登录、注册、刷新、登出、改密 |
 | users | `/api/v1/users` | 用户 CRUD、个人资料、会话、审计日志 |
+| api_keys | `/api/v1/api-keys` | `dm_` API Key 创建/列表/吊销（bcrypt、scope；issue #480） |
 | files | `/api/v1/files` | 文件上传/头像/列表/删除（MinIO）；文档下载走 `/api/v1/documents/{id}/download` |
 | documents | `/api/v1/documents` | 文档上传、解析、向量化、状态 |
 | chat | `/api/v1/chat` | 会话 CRUD、SSE 流式问答 |
@@ -667,6 +668,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | agent | `/api/v1/agent` | PER Agent SSE、工具、会话、配置 |
 | commands | `/api/v1/commands` | 服务端命令清单与无模型轮次执行（`/help`、`/status`、`/export`、`/tools`） |
 | mcp | `/api/v1/mcp` | MCP 服务器状态（管理员只读） |
+| rpc | `/api/v1/rpc` | HTTP JSON-RPC 2.0（API Key + `rpc` scope；issue #480） |
 | scheduled_tasks | `/api/v1/scheduled-tasks` | 定时任务 CRUD / 暂停 / 手动触发 |
 | sessions | `/api/v1/sessions` | 会话 fork / seed / 谱系（issue #476） |
 | terminal | `/api/v1/terminal` | 容器持久 PTY、一次性 WS 票据（issue #477） |

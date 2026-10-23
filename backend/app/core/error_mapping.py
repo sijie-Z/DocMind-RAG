@@ -346,3 +346,50 @@ def public_agent_event_data(event: Any) -> dict[str, Any]:
         if data.get("retry_hint"):
             data["retry_hint"] = _redact_text(str(data["retry_hint"]))
     return data
+
+
+# ── JSON-RPC 错误码（issue #480 §5.4）────────────────────────────────────────
+# 标准码不得改（-32600/-32601/-32602/-32603）；应用码按 issue 表格固定。
+JSONRPC_PARSE_ERROR = -32700
+JSONRPC_INVALID_REQUEST = -32600
+JSONRPC_METHOD_NOT_FOUND = -32601
+JSONRPC_INVALID_PARAMS = -32602
+JSONRPC_INTERNAL_ERROR = -32603
+JSONRPC_AUTHENTICATION_ERROR = -32001
+JSONRPC_AUTHORIZATION_ERROR = -32003
+JSONRPC_NOT_FOUND = -32004
+JSONRPC_CONFLICT = -32009
+JSONRPC_RATE_LIMIT_EXCEEDED = -32029
+JSONRPC_SERVICE_UNAVAILABLE = -32050
+
+
+def rpc_error_from_exception(exc: BaseException) -> tuple[int, str, Any]:
+    """领域异常 → (JSON-RPC code, 对外 message, data)。
+
+    未知异常一律 ``-32603`` + 通用文案：堆栈/内部细节只进服务端日志。
+    """
+    from app.exceptions import (
+        AuthenticationError,
+        AuthorizationError,
+        ConflictError,
+        NotFoundError,
+        RateLimitError,
+        ServiceUnavailableError,
+        ValidationError,
+    )
+
+    if isinstance(exc, ValidationError):
+        return JSONRPC_INVALID_PARAMS, exc.message, None
+    if isinstance(exc, AuthenticationError):
+        return JSONRPC_AUTHENTICATION_ERROR, exc.message, None
+    if isinstance(exc, AuthorizationError):
+        return JSONRPC_AUTHORIZATION_ERROR, exc.message, None
+    if isinstance(exc, NotFoundError):
+        return JSONRPC_NOT_FOUND, exc.message, None
+    if isinstance(exc, ConflictError):
+        return JSONRPC_CONFLICT, exc.message, None
+    if isinstance(exc, RateLimitError):
+        return JSONRPC_RATE_LIMIT_EXCEEDED, exc.message, None
+    if isinstance(exc, ServiceUnavailableError):
+        return JSONRPC_SERVICE_UNAVAILABLE, exc.message, None
+    return JSONRPC_INTERNAL_ERROR, GENERIC_SERVER_ERROR, None

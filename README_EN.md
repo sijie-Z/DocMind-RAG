@@ -218,12 +218,13 @@ Query enters
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-26 endpoint modules under `/api/v1`:
+28 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|
 | Auth | `/auth` | Register, login, refresh token, password reset, logout |
 | Users | `/users` | User CRUD, profiles, avatars, session management, audit logs (personal API-key endpoints deprecated) |
+| API Keys | `/api-keys` | Create/list/revoke `dm_` API keys (bcrypt hash, scopes; issue #480) |
 | Files | `/files` | Upload/download/delete, MinIO storage, chunked upload |
 | Documents | `/documents` | Document parsing, vectorization, knowledge base indexing, status tracking |
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
@@ -245,6 +246,7 @@ Query enters
 | Persistent Terminal | `/terminal` | Container-backed persistent PTY: session CRUD, one-time WS tickets, WebSocket bridge (issue #477) |
 | Agent Commands | `/commands` | Server-side command catalog and model-free execution (/help, /status, /export, /tools) |
 | MCP | `/mcp` | MCP server status (admin, read-only) |
+| JSON-RPC | `/rpc` | HTTP JSON-RPC 2.0 (API key + `rpc` scope; gated by `RPC_HTTP_ENABLED`) |
 | User Settings | `/user` | Personal UI preferences |
 | Webhooks | `/webhooks` | Inbound webhook rule management, HMAC-verified delivery, outbox processing (issue #478) |
 | Demo Data | `/demo` | Seed demo documents & data |
@@ -432,8 +434,8 @@ DocMind/
 │   │   ├── dependencies.py          # Dependency injection container
 │   │   ├── exceptions.py            # Custom exception hierarchy
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # Main router (26 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (26 files)
+│   │   │   ├── router.py            # Main router (28 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (28 files)
 │   │   ├── agent/                   # PER Agent core
 │   │   │   ├── loop.py              #   PER main loop
 │   │   │   ├── planner.py           #   Planner (LLM + structured rules)
@@ -499,8 +501,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  Context compression
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (25 services)
-│   │   ├── models/                  # ORM models (19 model files)
+│   │   ├── services/                # Business service layer (26 services)
+│   │   ├── models/                  # ORM models (20 model files)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer
 │   ├── tests/                       # 2223 backend tests (plus 861 frontend)

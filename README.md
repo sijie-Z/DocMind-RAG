@@ -215,12 +215,13 @@ hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-26 个端点模块，统一 `/api/v1` 前缀：
+28 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
 | 认证 | `/auth` | 注册、登录、刷新 Token、密码重置、登出 |
 | 用户管理 | `/users` | 用户 CRUD、个人资料、头像、会话管理、审计日志（个人 API Key 端点已弃用） |
+| API Key | `/api-keys` | `dm_` API Key 创建/列表/吊销（bcrypt 哈希、scope；issue #480） |
 | 文件管理 | `/files` | 上传/下载/删除，MinIO 存储，分块上传 |
 | 文档管理 | `/documents` | 文档解析、向量化、知识库索引、状态追踪 |
 | 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
@@ -242,6 +243,7 @@ hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
 | 持久终端 | `/terminal` | 容器持久 PTY：会话 CRUD、一次性 WS 票据、WebSocket 桥（issue #477） |
 | Agent 命令 | `/commands` | 服务端命令清单与无模型轮次执行（/help、/status、/export、/tools） |
 | MCP 工具 | `/mcp` | MCP 服务器状态（管理员只读） |
+| JSON-RPC | `/rpc` | HTTP JSON-RPC 2.0（API Key + `rpc` scope；`RPC_HTTP_ENABLED` 门控） |
 | 用户设置 | `/user` | 个人 UI 偏好 |
 | Webhook 规则 | `/webhooks` | 入站 Webhook 规则管理、HMAC 验签投递与 outbox 处理（issue #478） |
 | 示例数据 | `/demo` | 演示文档与数据填充 |
@@ -399,8 +401,8 @@ DocMind/
 │   │   ├── dependencies.py          # 依赖注入容器
 │   │   ├── exceptions.py            # 自定义异常层次结构
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 26 个模块）
-│   │   │   └── endpoints/           # 端点实现（26 个文件）
+│   │   │   ├── router.py            # 主路由（注册 28 个模块）
+│   │   │   └── endpoints/           # 端点实现（28 个文件）
 │   │   ├── agent/                   # PER Agent 核心
 │   │   │   ├── loop.py              #   PER 主循环
 │   │   │   ├── planner.py           #   规划器（LLM + 结构化规则）
@@ -466,8 +468,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  上下文压缩
 │   │   │   ├── context_window.py    #   令牌预算管理
 │   │   │   └── evaluator.py         #   质量评估
-│   │   ├── services/                # 业务服务层（25 个服务）
-│   │   ├── models/                  # ORM 模型（19 个模型文件）
+│   │   ├── services/                # 业务服务层（26 个服务）
+│   │   ├── models/                  # ORM 模型（20 个模型文件）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者
 │   ├── tests/                       # 2223 个后端测试（前端另有 861 个）

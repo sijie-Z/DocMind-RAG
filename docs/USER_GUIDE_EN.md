@@ -631,12 +631,13 @@ Successful login returns an envelope:
 
 ### 5.2 Endpoint modules
 
-There are **26 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from the `ROUTER_SPECS` table in `backend/app/api/v1/router.py`):
+There are **28 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from the `ROUTER_SPECS` table in `backend/app/api/v1/router.py`):
 
 | Module | Prefix | Purpose |
 |--------|--------|---------|
 | auth | `/api/v1/auth` | login, register, refresh, logout, password change |
 | users | `/api/v1/users` | user CRUD, profile, sessions, audit logs |
+| api_keys | `/api/v1/api-keys` | `dm_` API key create/list/revoke (bcrypt, scopes; issue #480) |
 | files | `/api/v1/files` | upload/avatar/list/delete (MinIO); document download is `/api/v1/documents/{id}/download` |
 | documents | `/api/v1/documents` | upload, parse, embed, status |
 | chat | `/api/v1/chat` | session CRUD, SSE Q&A |
@@ -655,6 +656,7 @@ There are **26 endpoint modules** (`docs/facts.json` → `endpoint_modules`, der
 | agent | `/api/v1/agent` | PER agent SSE, tools, sessions, config |
 | commands | `/api/v1/commands` | server-side command catalog and model-free execution (`/help`, `/status`, `/export`, `/tools`) |
 | mcp | `/api/v1/mcp` | MCP server status (admin read-only) |
+| rpc | `/api/v1/rpc` | HTTP JSON-RPC 2.0 (API key + `rpc` scope; issue #480) |
 | scheduled_tasks | `/api/v1/scheduled-tasks` | scheduled task CRUD / pause / manual run |
 | sessions | `/api/v1/sessions` | session fork / seed / lineage (issue #476) |
 | terminal | `/api/v1/terminal` | container-backed persistent PTY, one-time WS tickets (issue #477) |

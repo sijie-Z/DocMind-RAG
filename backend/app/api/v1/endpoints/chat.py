@@ -28,7 +28,14 @@ from app.core.error_mapping import (
     resolve_request_id,
 )
 from app.core.log_safety import log_safe
-from app.core.security import get_current_user, get_user_org_id, require_organization
+from app.core.redis import redis_client
+from app.core.security import (
+    get_current_user,
+    get_user_org_id,
+    require_organization,
+    require_scope,
+)
+from app.core.sse import SSEStream, format_sse, keepalive_stream
 from app.core.ws_auth import (
     WS_CLOSE_AUTH_FAILED,
     WS_REASON_USER_INVALID,
@@ -903,20 +910,21 @@ async def chat_parse_upload(
             os.unlink(temp_path)
 
 
-async def sse_event(event_type: str, data: dict) -> str:
-    return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
 @router.post("/stream")
 async def chat_stream_endpoint(
     body: ChatStreamRequest,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("chat:write")),
     db: AsyncSession = Depends(get_db),
 ):
     async def event_generator():
-        # 安全加固：跟踪 pipeline 任务，客户端断连（GeneratorExit）时取消，防止孤儿任务继续烧 LLM 费用
+        # 安全加固：跟踪 pipeline 任务；断连时按 SSE_KEEPALIVE_ON_DISCONNECT 决定
+        # 立即取消还是保留到 SSE_ORPHAN_TTL_SECONDS（issue #480 §5.2）。
         pipeline_task: asyncio.Task | None = None
+        # issue #480：所有 SSE 输出经单一编码器（event/id/data），流键优先
+        # conversationId，无会话时由任务 id 兜底（此处用请求级 uuid）。
+        stream_id = body.conversationId or str(uuid.uuid4())
+        emitter = SSEStream(stream_id, scope=f"u{current_user.id}")
         # W0-5 错误脱敏：请求编号优先取 W0-9 的 get_request_id contextvar，
         # 回退到既有 RequestIDMiddleware 写入的 request.state（不另造中间件）。
         # 完整异常/堆栈只进日志，客户端只见通用文案。
@@ -924,6 +932,28 @@ async def chat_stream_endpoint(
         # 日志上下文：组织取有效组织（token 回退已校验）的只读快照，绝不影响运行口径。
         log_org_id = get_user_org_id(current_user)
         try:
+            # issue #480 §5.2：Last-Event-ID 续传。B2：回放前必须先做会话归属
+            # 校验——buffer 键只含会话 id，会话 UUID 不是授权凭证。
+            last_event_id = request.headers.get("Last-Event-ID")
+            if last_event_id:
+                if body.conversationId:
+                    replay_scope = await resolve_session_access_scope(current_user, db)
+                    accessible = await load_accessible_session(
+                        db, body.conversationId, current_user, replay_scope
+                    )
+                    if accessible is None:
+                        yield format_sse("error", {"content": "会话不存在或无权访问"})
+                        return
+                frames, gone = await emitter.replay(last_event_id)
+                if gone:
+                    yield format_sse("error", {"code": "SSE_RESUME_GONE"})
+                    return
+                # B4：续传请求只回放缓冲事件，绝不重跑 pipeline
+                # （避免重复回答、重复落库与双份 LLM 成本）。
+                for frame in frames:
+                    yield frame
+                return
+
             user_content = body.content
             file_ids = body.fileIds or []
             payload_data = body.payload or {}
@@ -933,7 +963,7 @@ async def chat_stream_endpoint(
             privacy_mode = payload_data.get("privacyMode", True)
 
             if not user_content:
-                yield await sse_event("error", {"content": "消息内容不能为空"})
+                yield await emitter.emit("error", {"content": "消息内容不能为空"})
                 return
 
             # ── Agent mode: delegate to PER agent ──────────────────────────
@@ -944,7 +974,7 @@ async def chat_stream_endpoint(
                 # B2 / D3：会话入口合并——聊天页的「深度分析（Agent）」与 /agent/chat
                 # 同源：未带 conversationId 时生成并随流回传（刷新后按 id 可寻回），
                 # 走完 PER 后统一落库（与 /agent 同一实现），刷新不丢本轮问答。
-                conversation_id = body.conversationId or str(uuid.uuid4())
+                conversation_id = body.conversationId or stream_id
                 persist_org_id = get_user_org_id(current_user)
 
                 # User Commands（issue #475）：与 /agent/chat 同源短路——"/" 前缀的
@@ -964,11 +994,11 @@ async def chat_stream_endpoint(
                         command_org_id = await require_organization(current_user, db)
                     except AuthorizationError as org_err:
                         error_text = org_err.message
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "command_error",
                             {"content": error_text, "type": "command_error"},
                         )
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "message",
                             {
                                 "content": error_text,
@@ -987,7 +1017,7 @@ async def chat_stream_endpoint(
                     )
                     if not session_ok:
                         error_text = "会话不存在或无权访问"
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "command_error",
                             {
                                 "content": error_text,
@@ -995,7 +1025,7 @@ async def chat_stream_endpoint(
                                 "errorCode": "session_not_found",
                             },
                         )
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "message",
                             {
                                 "content": error_text,
@@ -1009,7 +1039,7 @@ async def chat_stream_endpoint(
 
                     if file_ids:
                         # 命令通道不进入模型、不处理附件——如实提示，绝不静默忽略。
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "warning",
                             {"content": "命令通道不处理附件，本次附件已忽略"},
                         )
@@ -1025,12 +1055,12 @@ async def chat_stream_endpoint(
                     async for command_event in iter_command_events(
                         command_ctx, user_content, registry=command_registry
                     ):
-                        yield await sse_event(command_event.type, command_event.to_sse_dict())
+                        yield await emitter.emit(command_event.type, command_event.to_sse_dict())
                         if command_event.type in ("command_result", "command_error"):
                             command_content = command_event.content
                     # 既有消息通道口径：聊天页现有渲染只认 message 事件——命令结果
                     # 同时以 message 外发（command_* 事件供新客户端消费）。
-                    yield await sse_event(
+                    yield await emitter.emit(
                         "message",
                         {
                             "content": command_content,
@@ -1041,6 +1071,37 @@ async def chat_stream_endpoint(
                         },
                     )
                     return
+
+                # issue #480 §5.4：REST 侧幂等——与 JSON-RPC session/prompt 同键
+                # （rpc:msg:{session}:{clientMessageId}，TTL 24h）。重复请求直接
+                # 返回同一 messageId 的 done，不产生第二条用户消息、不重跑 LLM。
+                client_message_id = payload_data.get("clientMessageId")
+                if client_message_id:
+                    dedup_key = f"rest:msg:{conversation_id}:{client_message_id}"
+                    dedup_payload = json.dumps(
+                        {
+                            "messageId": f"agent-{conversation_id}",
+                            "sessionId": conversation_id,
+                        }
+                    )
+                    try:
+                        created = await redis_client.set(
+                            dedup_key, dedup_payload, nx=True, ex=86400
+                        )
+                        if created is None:
+                            yield await emitter.emit(
+                                "done",
+                                {
+                                    "type": "done",
+                                    "content": "",
+                                    "conversationId": conversation_id,
+                                    "messageId": f"agent-{conversation_id}",
+                                    "duplicate": True,
+                                },
+                            )
+                            return
+                    except Exception as dedup_exc:  # noqa: BLE001 - 幂等是增强
+                        logger.warning("chat idempotency unavailable: %s", dedup_exc)
 
                 config = AgentConfig(
                     enable_tools=True,
@@ -1083,7 +1144,7 @@ async def chat_stream_endpoint(
                     last_event_type = agent_event.type
                     if agent_event.type == "chunk":
                         full_response += agent_event.content
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "chunk",
                             {
                                 "content": agent_event.content,
@@ -1094,7 +1155,7 @@ async def chat_stream_endpoint(
                     elif agent_event.type == "thinking":
                         # W0-5：thinking 可能承载重试上下文（上一条错误的原文），
                         # 外发前做内部特征脱敏（traceback/路径/SQL/类名）。
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "thinking",
                             {
                                 "content": public_diagnostic_content(agent_event.content),
@@ -1107,7 +1168,7 @@ async def chat_stream_endpoint(
                             },
                         )
                     elif agent_event.type == "tool_call":
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "tool_call",
                             {
                                 "toolName": agent_event.tool_name,
@@ -1118,7 +1179,7 @@ async def chat_stream_endpoint(
                             },
                         )
                     elif agent_event.type == "tool_result":
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "tool_result",
                             {
                                 "toolName": agent_event.tool_name,
@@ -1136,7 +1197,7 @@ async def chat_stream_endpoint(
                     elif agent_event.type == "tool_error":
                         # W0-5：工具失败文本按白名单/映射外发（原始异常与内部
                         # 类名只进日志；工具名属于可对外上下文）。
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "tool_error",
                             {
                                 "toolName": agent_event.tool_name,
@@ -1149,7 +1210,7 @@ async def chat_stream_endpoint(
                             },
                         )
                     elif agent_event.type == "plan_start":
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "plan_start",
                             {
                                 "planId": agent_event.plan_id,
@@ -1157,7 +1218,7 @@ async def chat_stream_endpoint(
                             },
                         )
                     elif agent_event.type == "plan_step":
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "plan_step",
                             {
                                 "planId": agent_event.plan_id,
@@ -1168,7 +1229,7 @@ async def chat_stream_endpoint(
                             },
                         )
                     elif agent_event.type == "plan_complete":
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "plan_complete",
                             {
                                 "planId": agent_event.plan_id,
@@ -1176,7 +1237,7 @@ async def chat_stream_endpoint(
                             },
                         )
                     elif agent_event.type == "reflection":
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "reflection",
                             {
                                 "content": agent_event.content,
@@ -1188,7 +1249,7 @@ async def chat_stream_endpoint(
                     elif agent_event.type == "error":
                         # W0-5：error 事件内容过白名单——无组织拒绝等既有诚实
                         # 文案放行；含原始异常/内部类名的内容降级为通用文案。
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "error",
                             {
                                 "content": public_agent_event_content("error", agent_event.content),
@@ -1199,7 +1260,7 @@ async def chat_stream_endpoint(
                         # issue #222：PER 循环收尾时真的会发出它，此前无 case 被静默丢弃。
                         # 该事件带结构性字段，投影风格与上面各分支保持一致。
                         # W0-5：诊断载荷里的失败/异常片段脱敏后再外发。
-                        yield await sse_event(
+                        yield await emitter.emit(
                             "execution_context",
                             {
                                 "content": public_diagnostic_content(agent_event.content),
@@ -1226,7 +1287,7 @@ async def chat_stream_endpoint(
                             "execution_step_result",
                         ):
                             content = public_diagnostic_content(content)
-                        yield await sse_event(agent_event.type, {"content": content})
+                        yield await emitter.emit(agent_event.type, {"content": content})
 
                 # B2 / D3：统一会话落库（与 /agent/chat 同一实现）。HITL 暂停/取消
                 # 不是"完成"——不写半成品回答（真完成由审批/恢复流收尾时补写）。
@@ -1257,14 +1318,14 @@ async def chat_stream_endpoint(
                             exc_info=True,
                         )
                 if save_error is not None:
-                    yield await sse_event(
+                    yield await emitter.emit(
                         "warning",
                         {
                             "content": "回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见",
                         },
                     )
 
-                yield await sse_event(
+                yield await emitter.emit(
                     "message",
                     {
                         "content": full_response,
@@ -1313,7 +1374,7 @@ async def chat_stream_endpoint(
                     try:
                         event: RAGEvent = await asyncio.wait_for(queue.get(), timeout=0.1)
                         if event.type == "debug" and event.debug_data:
-                            yield await sse_event(
+                            yield await emitter.emit(
                                 "debug",
                                 {
                                     "data": event.debug_data,
@@ -1328,9 +1389,9 @@ async def chat_stream_endpoint(
                             }
                             if event.sources:
                                 sse_data["sources"] = event.sources
-                            yield await sse_event("chunk", sse_data)
+                            yield await emitter.emit("chunk", sse_data)
                         elif event.type == "message":
-                            yield await sse_event(
+                            yield await emitter.emit(
                                 "message",
                                 {
                                     "content": event.content,
@@ -1344,7 +1405,7 @@ async def chat_stream_endpoint(
                             # issue #268：RAG 链路的显式拒绝（如无组织）经此事件
                             # 转发（与 WS 路径同一语义）。此前无此 case，错误会被
                             # 静默丢弃。W0-5：内容过 RAG 白名单（白名单外通用文案）。
-                            yield await sse_event(
+                            yield await emitter.emit(
                                 "error",
                                 {
                                     "content": public_rag_error_content(event.content),
@@ -1356,7 +1417,7 @@ async def chat_stream_endpoint(
                             while not queue.empty():
                                 event = queue.get_nowait()
                                 if event.type == "message":
-                                    yield await sse_event(
+                                    yield await emitter.emit(
                                         "message",
                                         {
                                             "content": event.content,
@@ -1367,7 +1428,7 @@ async def chat_stream_endpoint(
                                         },
                                     )
                                 elif event.type == "error":
-                                    yield await sse_event(
+                                    yield await emitter.emit(
                                         "error",
                                         {
                                             "content": public_rag_error_content(event.content),
@@ -1390,14 +1451,15 @@ async def chat_stream_endpoint(
                 log_safe(e),
                 exc_info=True,
             )
-            yield await sse_event(
+            yield await emitter.emit(
                 "error",
                 {
                     "content": public_exception_message(e, request_id),
                 },
             )
         finally:
-            # 客户端断连（GeneratorExit/CancelledError 属 BaseException，finally 兜底）
+            # 该 finally 只在生成器真正被关闭时执行：正常完成、或 keepalive
+            # 包装器在 TTL 到期/开关关闭时取消 pump 后（issue #480 §5.2）。
             if pipeline_task is not None and not pipeline_task.done():
                 pipeline_task.cancel()
                 try:
@@ -1405,4 +1467,10 @@ async def chat_stream_endpoint(
                 except Exception:
                     logger.warning("Cancelling orphan SSE pipeline task failed", exc_info=True)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    orphan_ttl = (
+        int(settings.SSE_ORPHAN_TTL_SECONDS) if settings.SSE_KEEPALIVE_ON_DISCONNECT else None
+    )
+    return StreamingResponse(
+        keepalive_stream(event_generator(), ttl_seconds=orphan_ttl),
+        media_type="text/event-stream",
+    )

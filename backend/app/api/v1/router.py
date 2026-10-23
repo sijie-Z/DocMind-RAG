@@ -14,6 +14,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     agent,
+    api_keys,
     auth,
     chat,
     commands,
@@ -40,12 +41,15 @@ from app.api.v1.endpoints import (
     webhooks,
     workflow,
 )
+from app.rpc.http import router as rpc_http_router
 
 # 模块名 → (router, prefix, tags, bundle)。顺序尽量保持历史 include 顺序，
 # 保证 OpenAPI 输出稳定。
 ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
     "auth": (auth.router, "/auth", ["认证"], "core"),
     "users": (users.router, "/users", ["用户管理"], "core"),
+    # issue #480：API Key 管理（core bundle，JWT 与 dm_ key 均可管理自己的 key）。
+    "api_keys": (api_keys.router, "/api-keys", ["API Key"], "core"),
     "files": (files.router, "/files", ["文件管理"], "rag"),
     "documents": (documents.router, "/documents", ["文档管理(RAG)"], "rag"),
     "chat": (chat.router, "/chat", ["聊天"], "rag"),
@@ -74,6 +78,9 @@ ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
     "sessions": (sessions.router, "/sessions", ["会话分叉"], "agent"),
     "commands": (commands.router, "/commands", ["Agent命令"], "agent"),
     "mcp": (mcp.router, "/mcp", ["MCP"], "agent"),
+    # issue #480：HTTP JSON-RPC（仅 web profile 的 agent bundle；端点内按
+    # RPC_HTTP_ENABLED 门控，关闭时 404）。sdk profile 只提供 stdio，不跑 HTTP。
+    "rpc": (rpc_http_router, "/rpc", ["JSON-RPC"], "agent"),
     "scheduled_tasks": (scheduled_tasks.router, "/scheduled-tasks", ["定时任务"], "agent"),
     "demo": (demo.router, "/demo", ["示例数据"], "agent"),
     "user_settings": (user_settings.router, "/user", ["用户设置"], "core"),

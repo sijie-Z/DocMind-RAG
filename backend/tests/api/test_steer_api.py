@@ -113,8 +113,8 @@ def _mock_user(user_id: int = USER_ID, org_id: int | None = 1):
 def _sse_payloads(text: str) -> list[dict]:
     import json as _json
 
-    lines = [ln for ln in text.split("\n\n") if ln.startswith("data: ")]
-    return [_json.loads(ln[len("data: ") :]) for ln in lines]
+    lines = [ln[len("data: ") :] for ln in text.splitlines() if ln.startswith("data: ")]
+    return [_json.loads(ln) for ln in lines]
 
 
 @pytest.fixture(autouse=True)

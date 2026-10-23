@@ -36,6 +36,26 @@ async def get_current_user(
     return current_user
 
 
+def require_scope(scope: str):
+    """API Key scope 依赖（issue #480 §5.1）。
+
+    JWT 用户没有 ``api_key_scopes`` 属性（``None``）→ 视为全量，沿用既有 RBAC；
+    ``dm_`` key 必须显式包含所需 scope，否则 403 ``AUTHORIZATION_ERROR``。
+    多个 scope 可叠加为多个依赖。
+    """
+
+    async def _checker(current_user: User = Depends(get_current_user)) -> User:
+        scopes = getattr(current_user, "api_key_scopes", None)
+        # 只有真实 API Key 认证会挂 list/tuple/set；缺失/其它类型（含测试替身）
+        # 一律视为 JWT 用户 = 全量，避免把替身对象误判成受限 key。
+        if isinstance(scopes, (list, tuple, set, frozenset)) and scope not in scopes:
+            # AppError 走统一错误信封（error_code=AUTHORIZATION_ERROR）。
+            raise AuthorizationError(f"API Key 缺少所需 scope: {scope}")
+        return current_user
+
+    return _checker
+
+
 _optional_bearer = HTTPBearer(auto_error=False)
 
 
