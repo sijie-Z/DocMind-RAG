@@ -21,6 +21,7 @@ from app.core.security import (
     get_document_for_user,
     permission_required,
     require_organization,
+    require_scope,
 )
 from app.exceptions import AppError, AuthorizationError, NotFoundError
 from app.models.document import Document, DocumentStatus, DocumentType
@@ -112,7 +113,11 @@ def build_suggested_tags(content: str) -> list[str]:
     "/upload",
     response_model=dict,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(permission_required([PermissionType.DOCUMENT_UPLOAD]))],
+    # issue #496：上传是写路径 → knowledge:write；scope 检查排在最前，先于 RBAC。
+    dependencies=[
+        Depends(require_scope("knowledge:write")),
+        Depends(permission_required([PermissionType.DOCUMENT_UPLOAD])),
+    ],
 )
 async def upload_document(
     file: UploadFile = File(...),
@@ -308,7 +313,11 @@ async def upload_document(
         raise AppError(f"上传失败: {str(e)}" if settings.EXPOSE_EXCEPTION_DETAIL else "上传失败")
 
 
-@router.get("/{document_id}", response_model=dict, dependencies=[Depends(get_current_user)])
+@router.get(
+    "/{document_id}",
+    response_model=dict,
+    dependencies=[Depends(require_scope("knowledge:read"))],
+)
 async def get_document_status(
     document_id: str,
     db: AsyncSession = Depends(get_db),
@@ -374,7 +383,11 @@ async def get_document_status(
         raise AppError("获取文档状态失败")
 
 
-@router.get("/{document_id}/content", response_model=dict, dependencies=[Depends(get_current_user)])
+@router.get(
+    "/{document_id}/content",
+    response_model=dict,
+    dependencies=[Depends(require_scope("knowledge:read"))],
+)
 async def get_document_full_content(
     document_id: str,
     db: AsyncSession = Depends(get_db),
@@ -435,7 +448,7 @@ async def get_document_full_content(
         raise AppError("获取文档内容失败")
 
 
-@router.get("/{document_id}/download", dependencies=[Depends(get_current_user)])
+@router.get("/{document_id}/download", dependencies=[Depends(require_scope("knowledge:read"))])
 async def download_document(
     document_id: str,
     db: AsyncSession = Depends(get_db),

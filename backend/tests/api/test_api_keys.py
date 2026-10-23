@@ -1,10 +1,11 @@
-"""API Key 认证矩阵与管理端点（issue #480 §5.1 / §8）。
+"""API Key 认证矩阵与管理端点（issue #480 §5.1 / issue #496 §8）。
 
 覆盖：
 - 创建：明文只在创建响应出现一次；库里只有 bcrypt 哈希与前缀；
 - 认证矩阵：有效 key 200、过期 401、吊销 401、不存在 401；
 - GET 列表不泄露 ``key_hash`` / 明文；
 - ``require_scope``：scope 缺失 403，JWT 用户（无 api_key_scopes）视为全量；
+- issue #496：``/api-keys`` 仅 JWT 会话可用，``dm_`` key 一律 403；
 - 只能管理自己的 key（他人 key 吊销 404）。
 
 基础设施：真实路由 + 真实 ``auth_service.get_current_user`` + sqlite（全链），
@@ -105,8 +106,13 @@ async def test_create_returns_plaintext_once_and_stores_only_hash(client, user, 
         assert record.key_hash != raw and record.key_hash.startswith("$2")
         assert record.scopes == data["scopes"]
 
-    # 列表响应不出现明文与哈希。
-    r2 = await client.get("/api/v1/api-keys", headers=_auth(raw))
+    # #496：API Key 不能管理 key——用默认 scope 内的知识库读端点激活 key，
+    # 再由 JWT 列表验证 last_used_at 回填与不泄露。
+    rr = await client.get("/api/v1/knowledge/rag-stats", headers=_auth(raw))
+    assert rr.status_code == 200, rr.text
+
+    # 列表响应不出现明文与哈希（列表走 JWT）。
+    r2 = await client.get("/api/v1/api-keys", headers=_auth(_jwt(user.id)))
     assert r2.status_code == 200, r2.text
     body = r2.text
     assert raw not in body and "key_hash" not in body
@@ -118,14 +124,19 @@ async def test_create_returns_plaintext_once_and_stores_only_hash(client, user, 
 @pytest.mark.asyncio
 async def test_valid_key_authenticates_and_jwt_path_is_untouched(client, user, db_factory):
     _, raw = await _create_via_service(db_factory, user.id)
-    r = await client.get("/api/v1/api-keys", headers=_auth(raw))
-    assert r.status_code == 200
-    assert len(r.json()["data"]) == 1
+    # 有效 key 能通过认证与 scope（knowledge:read 在默认 scope 内）。
+    r = await client.get("/api/v1/knowledge/rag-stats", headers=_auth(raw))
+    assert r.status_code == 200, r.text
 
     # JWT 路径行为不变（同一用户，同一列表）。
     r2 = await client.get("/api/v1/api-keys", headers=_auth(_jwt(user.id)))
     assert r2.status_code == 200
     assert len(r2.json()["data"]) == 1
+
+    # issue #496：API Key 管理仅限 JWT——key 即使 scope 齐全也一律 403。
+    r3 = await client.get("/api/v1/api-keys", headers=_auth(raw))
+    assert r3.status_code == 403
+    assert r3.json()["error_code"] == "AUTHORIZATION_ERROR"
 
 
 @pytest.mark.asyncio
