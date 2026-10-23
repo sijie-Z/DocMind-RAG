@@ -1,0 +1,336 @@
+{
+  "schemaVersion": "v1",
+  "source": "https://agentclientprotocol.com/protocol/v1/schema",
+  "fetchedAt": "2026-10-22",
+  "notes": "只收录 issue #481 使用的方法/通知子集。ACP 指 Zed Agent Client Protocol v1；session/list|resume|close|set_config_option 是 DSH 扩展方法（agentCapabilities.dshExtensions=true），不属于 ACP v1 标准方法集。字段名以官方 v1 为准；测试用本 fixture 校验请求/响应/通知的 wire 形状。",
+  "methods": {
+    "initialize": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "protocolVersion": {"type": "integer"},
+          "clientCapabilities": {"type": "object"}
+        },
+        "additionalProperties": true
+      },
+      "response": {
+        "type": "object",
+        "required": ["protocolVersion", "agentCapabilities", "agentInfo"],
+        "properties": {
+          "protocolVersion": {"const": 1},
+          "agentCapabilities": {
+            "type": "object",
+            "required": ["loadSession", "promptCapabilities", "dshExtensions"],
+            "properties": {
+              "loadSession": {"const": false},
+              "promptCapabilities": {
+                "type": "object",
+                "required": ["image", "audio", "embeddedContext"],
+                "properties": {
+                  "image": {"const": false},
+                  "audio": {"const": false},
+                  "embeddedContext": {"const": false}
+                },
+                "additionalProperties": true
+              },
+              "dshExtensions": {"const": true}
+            },
+            "additionalProperties": true
+          },
+          "agentInfo": {
+            "type": "object",
+            "required": ["name", "version"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "version": {"type": "string"}
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "authenticate": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "method": {"type": "string"},
+          "token": {"type": "string"}
+        },
+        "additionalProperties": true
+      },
+      "response": {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {"ok": {"const": true}},
+        "additionalProperties": true
+      }
+    },
+    "session/new": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "cwd": {"type": "string"},
+          "mcpServers": {"type": "array"}
+        },
+        "additionalProperties": true
+      },
+      "response": {
+        "type": "object",
+        "required": ["sessionId"],
+        "properties": {"sessionId": {"type": "string", "minLength": 1}},
+        "additionalProperties": true
+      }
+    },
+    "session/list": {
+      "request": {"type": "object", "additionalProperties": true},
+      "response": {
+        "type": "object",
+        "required": ["sessions"],
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "required": ["sessionId", "title", "updatedAt"],
+              "properties": {
+                "sessionId": {"type": "string", "minLength": 1},
+                "title": {"type": "string"},
+                "updatedAt": {"type": "string"}
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "session/resume": {
+      "request": {
+        "type": "object",
+        "required": ["sessionId"],
+        "properties": {"sessionId": {"type": "string", "minLength": 1}},
+        "additionalProperties": true
+      },
+      "response": {
+        "type": "object",
+        "required": ["sessionId", "status"],
+        "properties": {
+          "sessionId": {"type": "string", "minLength": 1},
+          "status": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "session/close": {
+      "request": {
+        "type": "object",
+        "required": ["sessionId"],
+        "properties": {"sessionId": {"type": "string", "minLength": 1}},
+        "additionalProperties": true
+      },
+      "response": {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {"ok": {"const": true}},
+        "additionalProperties": true
+      }
+    },
+    "session/set_config_option": {
+      "request": {
+        "type": "object",
+        "required": ["sessionId", "option", "value"],
+        "properties": {
+          "sessionId": {"type": "string", "minLength": 1},
+          "option": {"enum": ["model", "plan_mode"]},
+          "value": {"type": ["string", "boolean"]}
+        },
+        "additionalProperties": true
+      },
+      "response": {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {"ok": {"const": true}},
+        "additionalProperties": true
+      }
+    },
+    "session/prompt": {
+      "request": {
+        "type": "object",
+        "required": ["sessionId", "prompt"],
+        "properties": {
+          "sessionId": {"type": "string", "minLength": 1},
+          "prompt": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["type", "text"],
+              "properties": {
+                "type": {"const": "text"},
+                "text": {"type": "string"}
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "response": {
+        "type": "object",
+        "required": ["stopReason"],
+        "properties": {
+          "stopReason": {
+            "enum": ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "session/cancel": {
+      "notification": true,
+      "params": {
+        "type": "object",
+        "required": ["sessionId"],
+        "properties": {"sessionId": {"type": "string", "minLength": 1}},
+        "additionalProperties": true
+      }
+    },
+    "session/load": {
+      "supported": false,
+      "errorCode": -32601
+    }
+  },
+  "serverRequests": {
+    "session/request_permission": {
+      "request": {
+        "type": "object",
+        "required": ["sessionId", "toolCall", "options"],
+        "properties": {
+          "sessionId": {"type": "string", "minLength": 1},
+          "toolCall": {
+            "type": "object",
+            "required": ["toolCallId", "title", "status"],
+            "properties": {
+              "toolCallId": {"type": "string", "minLength": 1},
+              "title": {"type": "string", "minLength": 1},
+              "status": {"type": "string"}
+            },
+            "additionalProperties": true
+          },
+          "options": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "required": ["optionId", "name", "kind"],
+              "properties": {
+                "optionId": {"type": "string", "minLength": 1},
+                "name": {"type": "string", "minLength": 1},
+                "kind": {"enum": ["allow_once", "allow_always", "reject_once", "reject_always"]}
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "response": {
+        "type": "object",
+        "required": ["outcome"],
+        "properties": {
+          "outcome": {
+            "type": "object",
+            "required": ["outcome"],
+            "properties": {
+              "outcome": {"enum": ["selected", "cancelled"]},
+              "optionId": {"type": "string"}
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "sessionUpdates": {
+    "agent_message_chunk": {
+      "type": "object",
+      "required": ["sessionUpdate", "content"],
+      "properties": {
+        "sessionUpdate": {"const": "agent_message_chunk"},
+        "content": {
+          "type": "object",
+          "required": ["type", "text"],
+          "properties": {
+            "type": {"const": "text"},
+            "text": {"type": "string"}
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "agent_thought_chunk": {
+      "type": "object",
+      "required": ["sessionUpdate", "content"],
+      "properties": {
+        "sessionUpdate": {"const": "agent_thought_chunk"},
+        "content": {
+          "type": "object",
+          "required": ["type", "text"],
+          "properties": {
+            "type": {"const": "text"},
+            "text": {"type": "string"}
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "tool_call": {
+      "type": "object",
+      "required": ["sessionUpdate", "toolCallId", "title", "status"],
+      "properties": {
+        "sessionUpdate": {"const": "tool_call"},
+        "toolCallId": {"type": "string", "minLength": 1},
+        "title": {"type": "string", "minLength": 1},
+        "status": {"const": "pending"}
+      },
+      "additionalProperties": true
+    },
+    "tool_call_update": {
+      "type": "object",
+      "required": ["sessionUpdate", "toolCallId", "status"],
+      "properties": {
+        "sessionUpdate": {"const": "tool_call_update"},
+        "toolCallId": {"type": "string", "minLength": 1},
+        "status": {"enum": ["pending", "in_progress", "completed", "failed"]},
+        "content": {"type": "array"}
+      },
+      "additionalProperties": true
+    },
+    "plan": {
+      "type": "object",
+      "required": ["sessionUpdate", "entries"],
+      "properties": {
+        "sessionUpdate": {"const": "plan"},
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["content", "priority", "status"],
+            "properties": {
+              "content": {"type": "string", "minLength": 1},
+              "priority": {"enum": ["high", "medium", "low"]},
+              "status": {"enum": ["pending", "in_progress", "completed"]}
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
