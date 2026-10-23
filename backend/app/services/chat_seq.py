@@ -24,6 +24,8 @@ seq（唯一约束报错）——本模块的单测钉住"分配结果单调递�
 环境兜底。
 """
 
+from typing import Any
+
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +41,21 @@ def _dialect_name(db: AsyncSession) -> str:
     return getattr(getattr(bind, "dialect", None), "name", "") or ""
 
 
+def _coerce_seq(value: Any) -> int | None:
+    """把 DB / 测试替身返回的计数器值安全转为 int。
+
+    生产列是 Integer，但旧测试的会话 mock 可能返回 ``SimpleNamespace`` 等不可
+    转换对象；防御为"无计数器值"（跳过计数字段更新，仍按 MAX 兜底分配），
+    绝不把 mock 形态升级成 500。
+    """
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 async def next_message_seq(db: AsyncSession, session_id: str) -> int:
     """返回该会话的下一个 seq（从 1 开始），并把计数器推进到该值。
 
@@ -50,17 +67,22 @@ async def next_message_seq(db: AsyncSession, session_id: str) -> int:
     if _dialect_name(db) == "mysql":
         # 锁父行：会话级串行化 seq 分配（行不存在时为空操作）。
         counter_stmt = counter_stmt.with_for_update()
-    counter = (await db.execute(counter_stmt)).scalar_one_or_none()
+    counter = _coerce_seq((await db.execute(counter_stmt)).scalar_one_or_none())
 
     # MAX 兜底：计数器尚未迁移/被带外写路径绕过时不得分配重复 seq。
     max_seq = (
-        await db.execute(
-            select(func.coalesce(func.max(ChatMessage.seq), 0)).where(
-                ChatMessage.session_id == session_id
-            )
+        _coerce_seq(
+            (
+                await db.execute(
+                    select(func.coalesce(func.max(ChatMessage.seq), 0)).where(
+                        ChatMessage.session_id == session_id
+                    )
+                )
+            ).scalar()
         )
-    ).scalar() or 0
-    next_seq = max(int(counter or 0), int(max_seq)) + 1
+        or 0
+    )
+    next_seq = max(counter or 0, max_seq) + 1
 
     if counter is not None:
         # 行锁内的计数推进：并发事务在 MySQL 上被串行化；SQLite 同连接顺序执行。

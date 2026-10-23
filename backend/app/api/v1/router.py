@@ -9,9 +9,10 @@ issue #479：路由按 bundle 分组。``ROUTER_SPECS`` 是唯一的路由清单
 解析本文件的 ``ROUTER_SPECS`` 键（声明顺序），不再依赖 ``include_router``
 调用数——新增/删除模块只改这一张表。
 
-issue #499：``/agent/sessions/{id}/fork|lineage`` 兼容别名由 ``build_router``
-在 agent bundle 下额外挂载 ``sessions.compat_router``（``include_in_schema=False``
-+ 响应 ``Deprecation`` 头）；它不是独立端点模块，刻意不进 ``ROUTER_SPECS``。
+issue #499：``/agent/sessions/{id}/fork|lineage`` 兼容别名并入 agent bundle 的
+同一挂载载体（``_agent_router_with_fork_compat``，前缀仍只有 ``/agent``），
+别名 ``include_in_schema=False`` + 响应 ``Deprecation`` 头；它不是独立端点模块，
+刻意不进 ``ROUTER_SPECS``。
 """
 
 from fastapi import APIRouter
@@ -96,6 +97,21 @@ ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
 ALL_BUNDLES: list[str] = ["core", "rag", "agent", "observability"]
 
 
+def _agent_router_with_fork_compat() -> APIRouter:
+    """agent bundle 的挂载载体：``agent.router`` + fork 兼容别名共享 ``/agent``。
+
+    issue #499：兼容别名最终 URL 必须是 ``/api/v1/agent/sessions/{id}/fork|lineage``。
+    FastAPI ≥0.142 的 ``include_router`` 是惰性节点（每个调用一个），若把别名
+    作为额外的 include 挂在 ``/agent/sessions``，会让挂载前缀/节点数超出
+    ``ROUTER_SPECS``（issue #479 的结构断言）；这里把两者合成同一个载体，
+    挂载前缀仍只有 ``/agent``，别名 ``include_in_schema=False`` 不进 OpenAPI。
+    """
+    combined = APIRouter()
+    combined.include_router(agent.router)
+    combined.include_router(sessions.compat_router)
+    return combined
+
+
 def build_router(bundles: list[str]) -> APIRouter:
     """按 bundle 集合挂载路由；未知 bundle 名抛 ``ValueError``。"""
     unknown = [name for name in bundles if name not in ALL_BUNDLES]
@@ -103,20 +119,12 @@ def build_router(bundles: list[str]) -> APIRouter:
         raise ValueError(f"未知 bundle: {', '.join(unknown)}（可选: {', '.join(ALL_BUNDLES)}）")
     selected = set(bundles)
     router = APIRouter()
-    for module_router, prefix, tags, bundle in ROUTER_SPECS.values():
+    for name, (module_router, prefix, tags, bundle) in ROUTER_SPECS.items():
         if bundle not in selected:
             continue
+        if name == "agent":
+            module_router = _agent_router_with_fork_compat()
         router.include_router(module_router, prefix=prefix, tags=tags)
-    # issue #499：旧契约路径 /agent/sessions/{id}/fork|lineage 的兼容别名。
-    # 规范路由仍是 /sessions（前端在用）；别名 include_in_schema=False，
-    # 响应带 Deprecation 头。不作为 ROUTER_SPECS 条目——它不是独立端点模块。
-    if "agent" in selected:
-        router.include_router(
-            sessions.compat_router,
-            prefix="/agent/sessions",
-            tags=["会话分叉（兼容别名）"],
-            include_in_schema=False,
-        )
     return router
 
 

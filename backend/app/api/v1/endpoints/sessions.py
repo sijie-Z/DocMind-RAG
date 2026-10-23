@@ -243,7 +243,7 @@ async def get_session_lineage(
 
 
 @compat_router.post(
-    "/{session_id}/fork",
+    "/sessions/{session_id}/fork",
     response_model=dict,
     include_in_schema=False,
     deprecated=True,
@@ -271,7 +271,7 @@ async def fork_session_compat_endpoint(
 
 
 @compat_router.get(
-    "/{session_id}/lineage",
+    "/sessions/{session_id}/lineage",
     response_model=dict,
     include_in_schema=False,
     deprecated=True,
