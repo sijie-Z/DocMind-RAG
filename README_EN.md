@@ -219,6 +219,7 @@ Query enters
 | Agent Commands | `/commands` | Server-side command catalog and model-free execution (/help, /status, /export, /tools) |
 | MCP | `/mcp` | MCP server status (admin, read-only) |
 | User Settings | `/user` | Personal UI preferences |
+| Webhooks | `/webhooks` | Inbound webhook rule management, HMAC-verified delivery, outbox processing (issue #478) |
 | Demo Data | `/demo` | Seed demo documents & data |
 
 Swagger docs: `http://localhost:8000/docs`
@@ -471,8 +472,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  Context compression
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (23 services)
-│   │   ├── models/                  # ORM models (18 model files)
+│   │   ├── services/                # Business service layer (24 services)
+│   │   ├── models/                  # ORM models (19 model files)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer
 │   ├── tests/                       # 2223 backend tests (plus 861 frontend)
