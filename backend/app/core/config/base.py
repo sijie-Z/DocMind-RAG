@@ -24,6 +24,15 @@ class BaseAppSettings(BaseSettings):
     HOST: str = "0.0.0.0"  # nosec B104 - 容器内需绑定全部网卡，可由环境变量覆盖
     PORT: int = 8000
 
+    # ── 数据库迁移（issue #495）────────────────────────────────────────────
+    # 启动期 schema guard：数据库 alembic_version 与迁移 head 不一致时拒绝启动
+    # （exit 2）。迁移本身由 compose 一次性 migrate 服务 / K8s Job 串行执行，
+    # 不依赖下面两个开关；它们只控制「启动期是否校验 / 是否兜底自动迁移」。
+    SCHEMA_GUARD: bool = True
+    # 兜底自动迁移：仅显式打开时才在启动期执行 alembic upgrade head（审计日志）。
+    # 默认关闭——多个 backend/worker 并发启动时各自迁移会竞争，迁移必须串行。
+    AUTO_MIGRATE: bool = False
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/docmind.log"
