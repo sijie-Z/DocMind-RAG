@@ -42,6 +42,8 @@ type SSEStatusHandler = (_status: 'connecting' | 'connected' | 'disconnected' | 
 class SSEService {
   private eventSource: EventSource | null = null
   private messageHandlers: Map<string, SSEEventHandler> = new Map()
+  // issue #480：未知事件透传回调（default 分支），不依赖白名单。
+  private eventHandlers: SSEEventHandler[] = []
   private statusHandlers: SSEStatusHandler[] = []
   private connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error' = 'disconnected'
   private currentAbortController: AbortController | null = null
@@ -49,6 +51,8 @@ class SSEService {
   private currentRetryCount = 0
   private maxRetries = 3
   private retryDelay = 1000
+  // issue #480 §5.2：最近收到的 SSE id（`{stream_id}:{seq}`），供断线续传。
+  private lastEventId: string | null = null
 
   setRetryOptions(options: RetryOptions) {
     this.retryOptions = { ...this.retryOptions, ...options }
@@ -70,6 +74,23 @@ class SSEService {
     } else {
       this.messageHandlers.set(event, handler as SSEEventHandler)
     }
+  }
+
+  /**
+   * issue #480：订阅**所有**事件（包括不在白名单里的未知类型）。
+   * 返回取消订阅函数。已知类型仍按类型分发，未知类型只走这里。
+   */
+  onEvent(handler: SSEEventHandler): () => void {
+    this.eventHandlers.push(handler)
+    return () => {
+      const idx = this.eventHandlers.indexOf(handler)
+      if (idx > -1) this.eventHandlers.splice(idx, 1)
+    }
+  }
+
+  /** 最近收到的 SSE id（可用于下次 `post` 的 `lastEventId` 续传）。 */
+  getLastEventId(): string | null {
+    return this.lastEventId
   }
 
   off(event: SSEEventType | 'connect' | 'disconnect', handler?: SSEEventHandler | SSEStatusHandler) {
@@ -107,10 +128,17 @@ class SSEService {
     }
   }
 
-  async post(endpoint: string, data: Record<string, unknown>): Promise<boolean> {
+  async post(
+    endpoint: string,
+    data: Record<string, unknown>,
+    options: { lastEventId?: string | null } = {},
+  ): Promise<boolean> {
     this.currentAbortController?.abort()
     this.currentAbortController = new AbortController()
     const signal = this.currentAbortController.signal
+    // issue #480：显式续传点（断线重连）才带 Last-Event-ID；普通新消息重置。
+    const resumeFrom = options.lastEventId ?? null
+    this.lastEventId = resumeFrom
 
     const attemptRequest = async (attempt: number): Promise<boolean> => {
       this.setStatus('connecting')
@@ -129,6 +157,7 @@ class SSEService {
           headers: {
             'Accept': 'text/event-stream',
             'Content-Type': 'application/json',
+            ...(resumeFrom ? { 'Last-Event-ID': resumeFrom } : {}),
             'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify(data),
@@ -184,6 +213,11 @@ class SSEService {
           buffer = lines.pop() || ''
 
           for (const line of lines) {
+            if (line.startsWith('id: ')) {
+              // issue #480：记录事件 id（`{stream_id}:{seq}`），供断线续传。
+              this.lastEventId = line.slice(4).trim()
+              continue
+            }
             if (line.startsWith('event: ')) {
               currentEventType = line.slice(7).trim() as SSEMessage['type']
               eventTypeSet = true
@@ -204,6 +238,9 @@ class SSEService {
                 if ((SSE_EVENT_TYPES as readonly string[]).includes(data.type)) {
                   const handler = this.messageHandlers.get(data.type)
                   if (handler) handler(data as SSEMessage)
+                } else {
+                  // issue #480：未知事件不再静默丢弃——透传给 onEvent 订阅者。
+                  for (const handler of this.eventHandlers) handler(data as SSEMessage)
                 }
               } catch {
                 // SSE Parse error

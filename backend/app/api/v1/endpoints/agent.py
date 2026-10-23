@@ -57,6 +57,7 @@ from app.core.error_mapping import (
 from app.core.log_safety import log_safe
 from app.core.prometheus import AGENT_FEEDBACK_TOTAL
 from app.core.security import get_current_user, require_organization
+from app.core.sse import SSEStream, format_sse, keepalive_stream
 from app.exceptions import (
     AuthorizationError,
     NotFoundError,
@@ -81,6 +82,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _replay_engine = ReplayEngine()
+
+
+def _sse_response(stream) -> StreamingResponse:
+    """SSE 响应包装（issue #480 §5.2）：统一 keepalive/断连保留口径。"""
+    orphan_ttl = (
+        int(settings.SSE_ORPHAN_TTL_SECONDS) if settings.SSE_KEEPALIVE_ON_DISCONNECT else None
+    )
+    return StreamingResponse(
+        keepalive_stream(stream, ttl_seconds=orphan_ttl),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 def _merge_disabled_tools(client_disabled: list[str] | None) -> list[str]:
@@ -223,6 +240,16 @@ async def agent_chat(
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
+        # issue #480 §5.2：流键 = session_id；无会话时由首个事件的 task_id 绑定。
+        emitter = SSEStream(body.session_id)
+        last_event_id = request.headers.get("Last-Event-ID")
+        if last_event_id:
+            frames, gone = await emitter.replay(last_event_id)
+            if gone:
+                yield format_sse("error", {"code": "SSE_RESUME_GONE"})
+                return
+            for frame in frames:
+                yield frame
         try:
             # User Commands（issue #475）："/" 前缀在进入 PER 之前短路——命令文本
             # 绝不作为 prompt 漏给模型；命令不写用户消息、不创建模型轮次/任务行。
@@ -239,16 +266,12 @@ async def agent_chat(
                         content=error_text,
                         error_type="session_not_found",
                     )
-                    yield (
-                        "data: "
-                        + json.dumps(public_agent_event_data(rejection), ensure_ascii=False)
-                        + "\n\n"
-                    )
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': error_text}, ensure_ascii=False)}\n\n"
+                    yield await emitter.emit(rejection.type, public_agent_event_data(rejection))
+                    yield await emitter.emit("chunk", {"type": "chunk", "content": error_text})
                     rejection_done: dict[str, Any] = {"type": "done", "content": ""}
                     if body.session_id:
                         rejection_done["saved"] = False
-                    yield f"data: {json.dumps(rejection_done, ensure_ascii=False)}\n\n"
+                    yield await emitter.emit("done", rejection_done)
                     return
                 command_ctx = CommandContext(
                     user_id=current_user.id,
@@ -262,10 +285,8 @@ async def agent_chat(
                 async for command_event in iter_command_events(
                     command_ctx, body.query, registry=command_registry
                 ):
-                    yield (
-                        "data: "
-                        + json.dumps(public_agent_event_data(command_event), ensure_ascii=False)
-                        + "\n\n"
+                    yield await emitter.emit(
+                        command_event.type, public_agent_event_data(command_event)
                     )
                     if command_event.type in ("command_result", "command_error"):
                         command_content = command_event.content
@@ -273,11 +294,11 @@ async def agent_chat(
                     # 兼容层（issue #475 任务 4 的前置）：当前 Agent 页只渲染
                     # chunk；命令结果同时走既有内容通道，保证 /status、/export、
                     # /tools 在现有 UI 立即可见。前端接入 command_* 后可移除。
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': command_content}, ensure_ascii=False)}\n\n"
+                    yield await emitter.emit("chunk", {"type": "chunk", "content": command_content})
                 done_payload: dict[str, Any] = {"type": "done", "content": ""}
                 if body.session_id:
                     done_payload["saved"] = False  # 命令不写用户消息
-                yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+                yield await emitter.emit("done", done_payload)
                 return
 
             # Build AgentConfig：用户已保存配置为基底 + 请求字段覆盖（issue #242）。
@@ -312,7 +333,8 @@ async def agent_chat(
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)
-                yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
+                emitter.bind(getattr(event, "task_id", None))
+                yield await emitter.emit(event.type, sse_data)
                 if event.type == "chunk":
                     final_answer += event.content
 
@@ -370,14 +392,14 @@ async def agent_chat(
                     e, request_id, generic="Agent 执行出错，请稍后重试"
                 ),
             }
-            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+            yield await emitter.emit("error", error_data)
 
         if save_error is not None:
             warning_data = {
                 "type": "warning",
                 "content": "回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见",
             }
-            yield f"data: {json.dumps(warning_data, ensure_ascii=False)}\n\n"
+            yield await emitter.emit("warning", warning_data)
 
         done_data: dict[str, Any] = {"type": "done", "content": ""}
         if body.session_id:
@@ -395,17 +417,9 @@ async def agent_chat(
             done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
-        yield f"data: {json.dumps(done_data)}\n\n"
+        yield await emitter.emit("done", done_data)
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-    )
+    return _sse_response(event_stream())
 
 
 # ── Checkpoint / Resume（issue #201 最小版）───────────────────────────────────
@@ -568,6 +582,16 @@ async def resume_agent_task(
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
+        # issue #480 §5.2：流键 = 会话 id，解析不到时退回 task_id。
+        emitter = SSEStream(session_id or task_id)
+        last_event_id = request.headers.get("Last-Event-ID")
+        if last_event_id:
+            frames, gone = await emitter.replay(last_event_id)
+            if gone:
+                yield format_sse("error", {"code": "SSE_RESUME_GONE"})
+                return
+            for frame in frames:
+                yield frame
         try:
             async for event in agent_service.resume_chat(
                 task_id,
@@ -577,7 +601,8 @@ async def resume_agent_task(
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)
-                yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
+                emitter.bind(getattr(event, "task_id", None))
+                yield await emitter.emit(event.type, sse_data)
                 if event.type == "chunk":
                     final_answer += event.content
 
@@ -629,14 +654,14 @@ async def resume_agent_task(
                     e, request_id, generic="Agent 恢复执行出错，请稍后重试"
                 ),
             }
-            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+            yield await emitter.emit("error", error_data)
 
         if save_error is not None:
             warning_data = {
                 "type": "warning",
                 "content": "回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见",
             }
-            yield f"data: {json.dumps(warning_data, ensure_ascii=False)}\n\n"
+            yield await emitter.emit("warning", warning_data)
 
         done_data: dict[str, Any] = {"type": "done", "content": "", "task_id": task_id}
         if session_id:
@@ -653,15 +678,7 @@ async def resume_agent_task(
             done_data["task_state"] = "cancelled"
         yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-    )
+    return _sse_response(event_stream())
 
 
 # ── HITL：审批应答 / 协作式取消（app/agent/approval.py 的 HTTP 面）────────────
@@ -734,6 +751,15 @@ async def decide_agent_task_approval(
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
+        emitter = SSEStream(session_id or task_id)
+        last_event_id = request.headers.get("Last-Event-ID")
+        if last_event_id:
+            frames, gone = await emitter.replay(last_event_id)
+            if gone:
+                yield format_sse("error", {"code": "SSE_RESUME_GONE"})
+                return
+            for frame in frames:
+                yield frame
         try:
             async for event in agent_service.resume_chat(
                 task_id,
@@ -743,7 +769,8 @@ async def decide_agent_task_approval(
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)
-                yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
+                emitter.bind(getattr(event, "task_id", None))
+                yield await emitter.emit(event.type, sse_data)
                 if event.type == "chunk":
                     final_answer += event.content
 
@@ -788,14 +815,14 @@ async def decide_agent_task_approval(
                     e, request_id, generic="Agent 审批续跑出错，请稍后重试"
                 ),
             }
-            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+            yield await emitter.emit("error", error_data)
 
         if save_error is not None:
             warning_data = {
                 "type": "warning",
                 "content": "回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见",
             }
-            yield f"data: {json.dumps(warning_data, ensure_ascii=False)}\n\n"
+            yield await emitter.emit("warning", warning_data)
 
         done_data: dict[str, Any] = {
             "type": "done",
@@ -816,15 +843,7 @@ async def decide_agent_task_approval(
             done_data["task_state"] = "cancelled"
         yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-    )
+    return _sse_response(event_stream())
 
 
 # ── B：计划审批（plan_approval_mode=always 的 HTTP 面）───────────────────────
@@ -941,6 +960,15 @@ async def decide_agent_task_plan_approval(
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
+        emitter = SSEStream(session_id or task_id)
+        last_event_id = request.headers.get("Last-Event-ID")
+        if last_event_id:
+            frames, gone = await emitter.replay(last_event_id)
+            if gone:
+                yield format_sse("error", {"code": "SSE_RESUME_GONE"})
+                return
+            for frame in frames:
+                yield frame
         try:
             async for event in agent_service.resume_chat(
                 task_id,
@@ -950,7 +978,8 @@ async def decide_agent_task_plan_approval(
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)
-                yield f"data: {json.dumps(sse_data, ensure_ascii=False)}\n\n"
+                emitter.bind(getattr(event, "task_id", None))
+                yield await emitter.emit(event.type, sse_data)
                 if event.type == "chunk":
                     final_answer += event.content
 
@@ -995,14 +1024,14 @@ async def decide_agent_task_plan_approval(
                     e, request_id, generic="Agent 计划审批续跑出错，请稍后重试"
                 ),
             }
-            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+            yield await emitter.emit("error", error_data)
 
         if save_error is not None:
             warning_data = {
                 "type": "warning",
                 "content": "回答已生成，但会话记录保存失败，刷新后本轮对话可能不可见",
             }
-            yield f"data: {json.dumps(warning_data, ensure_ascii=False)}\n\n"
+            yield await emitter.emit("warning", warning_data)
 
         done_data: dict[str, Any] = {
             "type": "done",
@@ -1022,15 +1051,7 @@ async def decide_agent_task_plan_approval(
             done_data["task_state"] = "cancelled"
         yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-    )
+    return _sse_response(event_stream())
 
 
 @router.post("/tasks/{task_id}/cancel")
