@@ -255,6 +255,26 @@ def _build_metrics() -> dict[str, Any]:
     m["AGENT_COMMAND_EXECUTIONS"] = Counter(
         "agent_command_executions_total", "User command executions", ["command", "result"]
     )
+    # Persistent terminal（issue #477）：会话数 / 寿命 / 字节吞吐 / 退出原因。
+    # 异常退出单列（status=error 或 exit_code≠0），便于直接告警。
+    m["TERMINAL_SESSIONS_ACTIVE"] = Gauge(
+        "terminal_sessions_active", "Currently active persistent terminal sessions"
+    )
+    m["TERMINAL_SESSION_LIFETIME"] = Histogram(
+        "terminal_session_lifetime_seconds",
+        "Persistent terminal session lifetime",
+        buckets=[10, 30, 60, 120, 300, 600, 900, 1800, 3600],
+    )
+    m["TERMINAL_BYTES_TOTAL"] = Counter(
+        "terminal_bytes_total", "Persistent terminal I/O bytes", ["direction"]
+    )
+    m["TERMINAL_EXITS_TOTAL"] = Counter(
+        "terminal_exits_total", "Persistent terminal session exits", ["reason"]
+    )
+    m["TERMINAL_ABNORMAL_EXITS_TOTAL"] = Counter(
+        "terminal_abnormal_exits_total",
+        "Persistent terminal sessions that exited abnormally (error or non-zero code)",
+    )
     return m
 
 
@@ -297,6 +317,11 @@ AGENT_REFLECTION_DECISIONS = _LazyMetric("AGENT_REFLECTION_DECISIONS")
 AGENT_MEMORY_RECALLS = _LazyMetric("AGENT_MEMORY_RECALLS")
 AGENT_FEEDBACK_TOTAL = _LazyMetric("AGENT_FEEDBACK_TOTAL")
 AGENT_COMMAND_EXECUTIONS = _LazyMetric("AGENT_COMMAND_EXECUTIONS")
+TERMINAL_SESSIONS_ACTIVE = _LazyMetric("TERMINAL_SESSIONS_ACTIVE")
+TERMINAL_SESSION_LIFETIME = _LazyMetric("TERMINAL_SESSION_LIFETIME")
+TERMINAL_BYTES_TOTAL = _LazyMetric("TERMINAL_BYTES_TOTAL")
+TERMINAL_EXITS_TOTAL = _LazyMetric("TERMINAL_EXITS_TOTAL")
+TERMINAL_ABNORMAL_EXITS_TOTAL = _LazyMetric("TERMINAL_ABNORMAL_EXITS_TOTAL")
 
 
 # issue #301：启用但构建失败时的自曝输出（注释行 + 一个 gauge 样本）。

@@ -1,0 +1,34 @@
+# DocMind 持久终端（issue #477）—— 显式可选 overlay
+#
+# 用法（在 backend/ 目录，与基础 compose 叠加）：
+#   docker compose -f docker-compose.yml -f docker-compose.terminal.yml up -d --build
+#
+# ⚠️ 威胁模型（务必读完）：
+#   把 /var/run/docker.sock 挂进 backend 容器，等价于把**宿主 root 权限**交给
+#   该容器内的任何代码。终端容器本身按最小权限运行（非 root / cap-drop ALL /
+#   network none / pids+mem+cpu 限额 / 无宿主挂载），但 backend 进程持有 socket
+#   后，一旦 backend 被攻破，攻击者可创建任意特权容器逃逸。
+#   因此：
+#   1. 默认 docker-compose.yml **不**包含本 overlay，终端默认关闭（TERMINAL_ENABLED=false）；
+#   2. 仅在受信任的内部部署、且 backend 镜像与依赖可信时启用；
+#   3. 生产建议改用专用 docker-socket-proxy（限制可调用的 API 面）替代直接挂载，
+#      本 overlay 是最小可用的显式开关，不是生产加固方案。
+#   决策记录见 docs/decisions/ADR-006-terminal-pty.md。
+
+services:
+  backend:
+    environment:
+      - TERMINAL_ENABLED=true
+      # 终端只允许在 docker 沙箱模式下启用（SANDBOX_MODE=ast 会被 503 拒绝）。
+      - SANDBOX_MODE=docker
+      # 容器内通过挂载的 unix socket 访问宿主 Docker daemon。
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      # 如需固定终端镜像，显式设置（必须固定 tag/digest，禁止 latest）：
+      # - TERMINAL_CONTAINER_IMAGE=python:3.11-slim
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # 宿主机 docker 组的 GID 因发行版而异（Debian/Ubuntu 常见 998/999，RHEL 常见 996）。
+    # 若 backend 日志出现 "permission denied ... docker.sock"，改为宿主机真实 GID：
+    #   stat -c '%g' /var/run/docker.sock
+    # group_add:
+    #   - "${DOCKER_GID:-999}"

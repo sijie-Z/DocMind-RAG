@@ -23,7 +23,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 核心场景：
 - 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV 及 PNG/JPG/JPEG/WEBP/BMP 图片（OCR），自动解析、分块、向量化，支持语义搜索
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
-- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 33 个工具完成复杂任务
+- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 39 个工具完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
 - 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、23 种 SSE 事件、RunReport 运行摘要
 - 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
@@ -75,7 +75,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 │  WebSocket 实时推送 · Request ID 追踪        │
 ├── AI Agent 核心 ─────────────────────────────┤
 │  PER Loop  (Planner → Executor → Reflector)  │
-│  Tool Registry (33) · RunReport · Reviewer  │
+│  Tool Registry (39) · RunReport · Reviewer  │
 │  经验记忆 · 执行回放 · 模式挖掘              │
 ├── RAG 管线 ──────────────────────────────────┤
 │  HybridRetriever (BM25 + 向量 + RRF 融合)    │
@@ -116,7 +116,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 上下文引擎 | `context.py` | 令牌预算管理，消息窗口构建 |
 | 配置 | `config.py` | AgentConfig（模型/温度/最大步骤/阶段开关） |
 
-**33 个内置工具**（`core_tools.py` 14 个 + `tools/` 19 个）：
+**39 个内置工具**（`core_tools.py` 14 个 + `tools/` 19 个）：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -192,7 +192,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-24 个端点模块，统一 `/api/v1` 前缀：
+25 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
@@ -374,8 +374,8 @@ DocMind/
 │   │   ├── dependencies.py          # 依赖注入容器
 │   │   ├── exceptions.py            # 自定义异常层次结构
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 24 个模块）
-│   │   │   └── endpoints/           # 端点实现（24 个文件）
+│   │   │   ├── router.py            # 主路由（注册 25 个模块）
+│   │   │   └── endpoints/           # 端点实现（25 个文件）
 │   │   ├── agent/                   # PER Agent 核心
 │   │   │   ├── loop.py              #   PER 主循环
 │   │   │   ├── planner.py           #   规划器（LLM + 结构化规则）
@@ -393,7 +393,7 @@ DocMind/
 │   │   │   ├── message.py           #   Agent 间消息总线
 │   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
 │   │   │   ├── core_tools.py        #   基础工具（14 个）
-│   │   │   ├── tools/               #   扩展工具（19 个；合计 33 个内置工具）
+│   │   │   ├── tools/               #   扩展工具（19 个；合计 39 个内置工具）
 │   │   │   │   ├── web_search.py    #   网络搜索
 │   │   │   │   ├── code_execution.py #  Python/SQL 沙箱
 │   │   │   │   ├── data_analysis.py #   数据分析

@@ -2,7 +2,7 @@
 
 ## 概览
 
-DocMind Agent 是一个 **Planning-Execution-Reflection (PER)** 三阶段自主智能体系统，集成了 33 个生产级工具、四层记忆系统和实时 SSE 流式事件协议。架构设计参考了学术界和工业界的主流 Agent 范式，面向企业 RAG 知识库场景深度定制。
+DocMind Agent 是一个 **Planning-Execution-Reflection (PER)** 三阶段自主智能体系统，集成了 39 个生产级工具、四层记忆系统和实时 SSE 流式事件协议。架构设计参考了学术界和工业界的主流 Agent 范式，面向企业 RAG 知识库场景深度定制。
 
 ## 架构总览
 
@@ -78,7 +78,7 @@ AgentMemoryBridge
 Planner.plan(query, history, memory_context)
   │
   ├─► LLM 调用 (temperature=0.1)
-  │     System: 任务规划专家提示 + 33 个工具描述
+  │     System: 任务规划专家提示 + 39 个工具描述
   │     User: 用户 query
   │
   ├─► 流式 reasoning tokens (thinking events)
@@ -157,7 +157,7 @@ Reflector.reflect(plan, results)
           }
 ```
 
-## 工具生态（33 个内置 + MCP 动态）
+## 工具生态（39 个内置 + MCP 动态）
 
 ### 核心工具 (14) — `core_tools.py`
 
@@ -323,7 +323,7 @@ SSE 客户端 (api/agent.ts)
 | 执行 | Thought→Action→Observe 循环 | 按计划步骤顺序执行 | ReAct 循环 | **步骤级重试 (3x) + 指数退避** |
 | 反思 | 无（Observation 即反馈） | 无 | LLM 自我反思 + 长期记忆 | **目标达成度评估 + pass/retry/replan** |
 | 记忆 | 无 | 无 | 向量数据库长期记忆 | **四层：STM/LTM/Work/Reflective** |
-| 工具 | 预定义工具集 | 预定义工具集 | 预定义工具集 | **33 个自注册工具 + tags 分类 + 安全分级** |
+| 工具 | 预定义工具集 | 预定义工具集 | 预定义工具集 | **39 个自注册工具 + tags 分类 + 安全分级** |
 | 流式 | 取决于实现 | 取决于实现 | 取决于实现 | **23 种 SSE 事件类型, 前端可视化** |
 | 多步依赖 | 不支持 | 线性依赖 | 不支持 | **完整 DAG 依赖管理** |
 | 失败恢复 | 无 | 无 | 基本反思 | **步骤级重试 + 错误上下文传递** |
