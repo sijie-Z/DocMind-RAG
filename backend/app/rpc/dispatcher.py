@@ -529,10 +529,18 @@ class RPCService:
                 error="用户取消（RPC）",
                 error_type="user_cancelled",
             )
+            if not ok:
+                # 未真正取消：恢复事件外发（不能静默丢流）。
+                self._cancelled_sessions.discard(session_id)
             return {"cancelled": bool(ok)}
         if task.is_terminal:
+            self._cancelled_sessions.discard(session_id)
             return {"cancelled": task.status == TaskStatus.CANCELLED}
-        return {"cancelled": await checkpoint.request_cancel(task_id)}
+        ok = await checkpoint.request_cancel(task_id)
+        if not ok:
+            # 取消通道不可用（Redis 不可用）：如实返回 false 并恢复事件外发。
+            self._cancelled_sessions.discard(session_id)
+        return {"cancelled": ok}
 
     async def approvals_respond(self, params: dict) -> dict:
         session_id = params.get("sessionId")
