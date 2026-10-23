@@ -28,6 +28,11 @@ class BaseAppSettings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/docmind.log"
     LOG_JSON: bool = True
+    # SQL 语句回显开关（issue #493）：与 DEBUG 解耦，默认关闭。SQLAlchemy 在
+    # echo=True 时会往具名 logger ``sqlalchemy.engine.Engine`` 挂
+    # ``StreamHandler(sys.stdout)``——stdio 协议进程的 stdout 只允许协议帧，
+    # 因此不得再用 DEBUG 顺带打开 SQL 回显；需要排障时显式置 true。
+    SQL_ECHO: bool = False
 
     # Request ID —— 头名不是配置项（issue #242 已删除原 REQUEST_ID_HEADER 字段）：
     # X-Request-ID 是「前端 request.ts ↔ CORS 白名单 ↔ RequestIDMiddleware 默认参」

@@ -37,7 +37,7 @@ engine = create_async_engine(
             "pool_recycle": 3600,
         }
     ),
-    echo=settings.DEBUG,
+    echo=settings.SQL_ECHO,
 )
 
 # 会话工厂
