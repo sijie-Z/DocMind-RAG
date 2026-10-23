@@ -23,7 +23,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 核心场景：
 - 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV 及 PNG/JPG/JPEG/WEBP/BMP 图片（OCR），自动解析、分块、向量化，支持语义搜索
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
-- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 33 个工具完成复杂任务
+- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 39 个工具完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
 - 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、24 种 SSE 事件、RunReport 运行摘要
 - 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
@@ -75,7 +75,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 │  WebSocket 实时推送 · Request ID 追踪        │
 ├── AI Agent 核心 ─────────────────────────────┤
 │  PER Loop  (Planner → Executor → Reflector)  │
-│  Tool Registry (33) · RunReport · Reviewer  │
+│  Tool Registry (39) · RunReport · Reviewer  │
 │  经验记忆 · 执行回放 · 模式挖掘              │
 ├── RAG 管线 ──────────────────────────────────┤
 │  HybridRetriever (BM25 + 向量 + RRF 融合)    │
@@ -116,7 +116,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 上下文引擎 | `context.py` | 令牌预算管理，消息窗口构建 |
 | 配置 | `config.py` | AgentConfig（模型/温度/最大步骤/阶段开关） |
 
-**33 个内置工具**（`core_tools.py` 14 个 + `tools/` 19 个）：
+**39 个内置工具**（`core_tools.py` 14 个 + `tools/` 25 个）：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -215,7 +215,7 @@ hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-25 个端点模块，统一 `/api/v1` 前缀：
+26 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
@@ -239,6 +239,7 @@ hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
 | Agent 记忆 | `/memory` | 短期/长期/工作/反思记忆 CRUD、语义搜索 |
 | 智能 Agent | `/agent` | PER Agent 对话（SSE 流式）、工具调用、配置 |
 | 会话分叉 | `/sessions` | 会话 fork / seed / 谱系（issue #476） |
+| 持久终端 | `/terminal` | 容器持久 PTY：会话 CRUD、一次性 WS 票据、WebSocket 桥（issue #477） |
 | Agent 命令 | `/commands` | 服务端命令清单与无模型轮次执行（/help、/status、/export、/tools） |
 | MCP 工具 | `/mcp` | MCP 服务器状态（管理员只读） |
 | 用户设置 | `/user` | 个人 UI 偏好 |
@@ -398,8 +399,8 @@ DocMind/
 │   │   ├── dependencies.py          # 依赖注入容器
 │   │   ├── exceptions.py            # 自定义异常层次结构
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 25 个模块）
-│   │   │   └── endpoints/           # 端点实现（25 个文件）
+│   │   │   ├── router.py            # 主路由（注册 26 个模块）
+│   │   │   └── endpoints/           # 端点实现（26 个文件）
 │   │   ├── agent/                   # PER Agent 核心
 │   │   │   ├── loop.py              #   PER 主循环
 │   │   │   ├── planner.py           #   规划器（LLM + 结构化规则）
@@ -417,7 +418,7 @@ DocMind/
 │   │   │   ├── message.py           #   Agent 间消息总线
 │   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
 │   │   │   ├── core_tools.py        #   基础工具（14 个）
-│   │   │   ├── tools/               #   扩展工具（19 个；合计 33 个内置工具）
+│   │   │   ├── tools/               #   扩展工具（25 个；合计 39 个内置工具）
 │   │   │   │   ├── web_search.py    #   网络搜索
 │   │   │   │   ├── code_execution.py #  Python/SQL 沙箱
 │   │   │   │   ├── data_analysis.py #   数据分析
@@ -465,7 +466,7 @@ DocMind/
 │   │   │   ├── context_compressor.py #  上下文压缩
 │   │   │   ├── context_window.py    #   令牌预算管理
 │   │   │   └── evaluator.py         #   质量评估
-│   │   ├── services/                # 业务服务层（24 个服务）
+│   │   ├── services/                # 业务服务层（25 个服务）
 │   │   ├── models/                  # ORM 模型（19 个模型文件）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者

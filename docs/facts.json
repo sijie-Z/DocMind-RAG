@@ -3,11 +3,11 @@
   "description": "文档关键数字的单一事实源（W0-8）。由 backend/scripts/check_doc_facts.py 从源码派生并逐 PR 校验；代码演进导致数字变化时，必须同步本文件与引用它的文档。",
   "facts": {
     "sse_event_types": 24,
-    "endpoint_modules": 25,
+    "endpoint_modules": 26,
     "frontend_routes": 34,
-    "registered_tools": 33,
-    "http_route_decorators": 199,
-    "websocket_route_decorators": 2
+    "registered_tools": 39,
+    "http_route_decorators": 203,
+    "websocket_route_decorators": 3
   },
   "sources": {
     "sse_event_types": "backend/app/agent/events.py — EventType = Literal[...] 的字符串成员数（闭集）",

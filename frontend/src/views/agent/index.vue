@@ -102,6 +102,14 @@
         <button class="header-btn" @click="showConfig = !showConfig" :class="{ active: showConfig }">
           ⚙ 配置
         </button>
+        <button
+          class="header-btn"
+          :class="{ active: showTerminal }"
+          data-testid="agent-terminal-toggle"
+          @click="showTerminal = !showTerminal"
+        >
+          <span aria-hidden="true">&gt;_</span> {{ t('agent.terminal.open') }}
+        </button>
         <button class="header-btn" @click="handleNewSession">+ 新建</button>
         <button class="header-btn" @click="handleClearMessages">清空</button>
       </div>
@@ -449,6 +457,16 @@
       @close="closeReplay"
     />
 
+    <!-- 持久终端抽屉（issue #477）：xterm 面板挂在现有 /agent 页右侧，不新增路由 -->
+    <n-drawer v-model:show="showTerminal" placement="right" :width="760">
+      <n-drawer-content :title="t('agent.terminal.title')" closable>
+        <!-- v-if：面板只在抽屉打开时挂载。Naive UI 的 drawer 本身按显示状态惰性
+             渲染，但单测里 n-drawer 可能未被注册为组件，显式 v-if 保证不挂载
+             xterm（其隐藏 textarea 会干扰按 textarea 定位输入框的用例）。 -->
+        <TerminalPanel v-if="showTerminal" :session-id="agentStore.currentSessionId" />
+      </n-drawer-content>
+    </n-drawer>
+
     <!-- Input -->
     <AgentInput
       :placeholder="'输入复杂任务，Agent 自动规划执行...'"
@@ -508,6 +526,7 @@ import ApprovalCard from '@/components/agent/ApprovalCard.vue'
 import PlanApprovalCard from '@/components/agent/PlanApprovalCard.vue'
 import ReplayTimeline from '@/components/agent/ReplayTimeline.vue'
 import RecentTaskList from '@/components/agent/RecentTaskList.vue'
+import TerminalPanel from '@/components/agent/TerminalPanel.vue'
 import CommandResultCard from '@/components/agent/CommandResultCard.vue'
 import Markdown from '@/components/common/Markdown.vue'
 
@@ -593,6 +612,7 @@ const lineageBadgeTitle = computed(() => {
 })
 
 const showConfig = ref(false)
+const showTerminal = ref(false)
 const showPlan = ref(true)
 const centerPanel = ref<HTMLElement>()
 const initLoading = ref(true)

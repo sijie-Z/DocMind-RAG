@@ -92,6 +92,23 @@ async def scheduled_tasks_loop():
     await scheduler_engine.run_loop()
 
 
+async def terminal_service_startup():
+    """持久终端启动接线（issue #477）：注册 worker 心跳 → 清理孤儿 → 回收循环。
+
+    ``TERMINAL_ENABLED=false``（默认）时内部直接 no-op，不触碰 Docker/Redis。
+    """
+    from app.services.terminal_service import terminal_service
+
+    await terminal_service.startup()
+
+
+async def terminal_service_stop():
+    """持久终端关闭接线：停止回收循环并关闭本进程内的全部终端会话。"""
+    from app.services.terminal_service import terminal_service
+
+    await terminal_service.stop()
+
+
 def _parse_cli_port(argv: list[str]) -> int | None:
     """从命令行参数中提取 ``--port``（支持 ``--port 8000`` 与 ``--port=8000``）。
 
@@ -171,6 +188,9 @@ class LifespanDeps:
     resolve_backend_port: Callable[[], int]
     metrics_snapshot_task: Callable[[], Any]
     scheduled_tasks_loop: Callable[[], Any]
+    # issue #477：持久终端生命周期（有默认值，app/main.py 兼容壳无需改动）。
+    terminal_service_startup: Callable[[], Any] = terminal_service_startup
+    terminal_service_stop: Callable[[], Any] = terminal_service_stop
 
 
 DEFAULT_LIFESPAN_DEPS = LifespanDeps(
@@ -352,6 +372,17 @@ def build_lifespan(deps: LifespanDeps):
 
             logger.info("所有服务初始化完成")
 
+            # issue #477：持久终端回收循环（web 入口；worker 不跑）。
+            # TERMINAL_ENABLED=false 时 terminal_service.startup() 直接 no-op；
+            # 启动失败（Redis/Docker 抖动）不影响主启动——终端 API 自身会 503。
+            if get_active_entrypoint() == "web":
+                try:
+                    await deps.terminal_service_startup()
+                except Exception as e:
+                    logger.warning(f"持久终端回收循环启动失败（不影响启动）: {e}")
+            else:
+                logger.info("worker 入口不启动终端回收循环")
+
         except Exception as e:
             logger.error(f"服务初始化失败: {str(e)}")
             raise
@@ -393,6 +424,12 @@ def build_lifespan(deps: LifespanDeps):
                 logger.info("Webhook outbox poll 已取消")
         except Exception as e:
             logger.warning(f"取消 Webhook outbox poll 失败: {e}")
+
+        # 持久终端收尾（issue #477）：停回收循环 + 关闭本地会话（尽力而为）
+        try:
+            await deps.terminal_service_stop()
+        except Exception as e:
+            logger.warning(f"关闭终端服务失败: {e}")
 
         # 关闭Kafka Producer
         await deps.kafka_producer.stop()

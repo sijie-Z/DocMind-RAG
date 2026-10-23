@@ -23,7 +23,7 @@ DocMind is a full-stack enterprise AI knowledge base system built around the **P
 Core use cases:
 - 📄 **Document KB** — Upload PDF, Word, Excel, TXT, Markdown, CSV, and PNG/JPG/JPEG/WEBP/BMP images (OCR). Auto-parse, chunk, embed, and semantic search.
 - 💬 **Intelligent Q&A** — RAG pipeline: keyword + vector hybrid search, reranking, LLM generation with SSE streaming.
-- 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 33 tools for complex multi-step tasks.
+- 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 39 tools for complex multi-step tasks.
 - 🧩 **Workflow Editor** — Visual DAG design & debugging (Vue Flow). Configurable LLM models, prompts, and execution engines.
 - 📊 **Observability** — Prometheus metrics, Langfuse full-trace, 24 SSE event types, RunReport execution summaries.
 - 🔐 **Multi-Tenant + RBAC** — Organization isolation, role-based permissions, JWT authentication.
@@ -74,7 +74,7 @@ Known limitations:
 │  WebSocket Push · Request ID Tracking        │
 ├── AI Agent Core ─────────────────────────────┤
 │  PER Loop (Planner → Executor → Reflector)   │
-│  Tool Registry (33) · RunReport · Reviewer  │
+│  Tool Registry (39) · RunReport · Reviewer  │
 │  Experience Memory · Replay · Pattern Mining │
 ├── RAG Pipeline ──────────────────────────────┤
 │  HybridRetriever (BM25 + Vector + RRF fusion)│
@@ -116,7 +116,7 @@ User instruction
 | Context Engine | `context.py` | Token budget management, message window builder |
 | Config | `config.py` | AgentConfig (model/temperature/max steps/phase toggles) |
 
-**33 Built-In Tools** (`core_tools.py` 14 + `tools/` 19):
+**39 Built-In Tools** (`core_tools.py` 14 + `tools/` 25):
 
 | Category | Tool | Description |
 |----------|------|-------------|
@@ -218,7 +218,7 @@ Query enters
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-25 endpoint modules under `/api/v1`:
+26 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|
@@ -242,6 +242,7 @@ Query enters
 | Agent Memory | `/memory` | Short/long/working/reflective memory CRUD, semantic search |
 | Agent | `/agent` | PER Agent conversations (SSE streaming), tool calls, configuration |
 | Session Fork | `/sessions` | Session fork / seed / lineage (issue #476) |
+| Persistent Terminal | `/terminal` | Container-backed persistent PTY: session CRUD, one-time WS tickets, WebSocket bridge (issue #477) |
 | Agent Commands | `/commands` | Server-side command catalog and model-free execution (/help, /status, /export, /tools) |
 | MCP | `/mcp` | MCP server status (admin, read-only) |
 | User Settings | `/user` | Personal UI preferences |
@@ -431,8 +432,8 @@ DocMind/
 │   │   ├── dependencies.py          # Dependency injection container
 │   │   ├── exceptions.py            # Custom exception hierarchy
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # Main router (25 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (25 files)
+│   │   │   ├── router.py            # Main router (26 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (26 files)
 │   │   ├── agent/                   # PER Agent core
 │   │   │   ├── loop.py              #   PER main loop
 │   │   │   ├── planner.py           #   Planner (LLM + structured rules)
@@ -450,7 +451,7 @@ DocMind/
 │   │   │   ├── message.py           #   Agent message bus
 │   │   │   ├── tracing.py           #   Execution trace records (dev-only: eval/offline; not written in production)
 │   │   │   ├── core_tools.py        #   14 base tools
-│   │   │   ├── tools/               #   19 extension tools (33 built-in tools total)
+│   │   │   ├── tools/               #   25 extension tools (39 built-in tools total)
 │   │   │   │   ├── web_search.py    #   Web search
 │   │   │   │   ├── code_execution.py #  Python/SQL sandbox
 │   │   │   │   ├── data_analysis.py #   Data analysis
@@ -498,7 +499,7 @@ DocMind/
 │   │   │   ├── context_compressor.py #  Context compression
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (24 services)
+│   │   ├── services/                # Business service layer (25 services)
 │   │   ├── models/                  # ORM models (19 model files)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer

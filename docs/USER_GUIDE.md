@@ -4,8 +4,7 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
-> - 关键数字（33 个内置工具 / 23 个端点模块 / 34 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
-> - 关键数字（33 个内置工具 / 23 个端点模块 / 34 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
+> - 关键数字（39 个内置工具 / 26 个端点模块 / 34 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -397,7 +396,7 @@ ADR-001 已把这条语义冻结（`docs/decisions/ADR-001-路线冻结.md` D5�
 
 ### 3.4 工具与 HITL 审批
 
-**工具**：所有工具通过 `@register_tool(name=...)` 自注册，共 **33 个内置工具**（`docs/facts.json` 的 `registered_tools`；14 个在 `core_tools.py`，19 个在 `tools/`），另有 MCP 动态接入。工具参数用 JSON Schema 描述，自动转成 OpenAI function-calling 格式；`tags` 用于配置面板筛选，敏感工具在 `DEFAULT_DISABLED_TOOLS` 中默认禁用（`AGENT_ARCHITECTURE.md`）。
+**工具**：所有工具通过 `@register_tool(name=...)` 自注册，共 **39 个内置工具**（`docs/facts.json` 的 `registered_tools`；14 个在 `core_tools.py`，25 个在 `tools/`），另有 MCP 动态接入。工具参数用 JSON Schema 描述，自动转成 OpenAI function-calling 格式；`tags` 用于配置面板筛选，敏感工具在 `DEFAULT_DISABLED_TOOLS` 中默认禁用（`AGENT_ARCHITECTURE.md`）。
 
 **HITL（人在环）** 让 Agent 在「有风险的下一步」停下来等人拍板：
 
@@ -644,7 +643,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 
 ### 5.2 端点模块清单
 
-当前共 **25 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
+当前共 **26 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
 
 | 模块 | 前缀 | 说明 |
 |------|------|------|
@@ -670,6 +669,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | mcp | `/api/v1/mcp` | MCP 服务器状态（管理员只读） |
 | scheduled_tasks | `/api/v1/scheduled-tasks` | 定时任务 CRUD / 暂停 / 手动触发 |
 | sessions | `/api/v1/sessions` | 会话 fork / seed / 谱系（issue #476） |
+| terminal | `/api/v1/terminal` | 容器持久 PTY、一次性 WS 票据（issue #477） |
 | webhooks | `/api/v1/webhooks` | 入站 Webhook 规则、HMAC 验签投递与 outbox 处理（issue #478） |
 | demo | `/api/v1/demo` | 演示数据填充 |
 | user_settings | `/api/v1/user` | 个人 UI 偏好 |

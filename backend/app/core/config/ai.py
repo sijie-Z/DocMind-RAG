@@ -235,6 +235,27 @@ class AISettings(BaseSettings):
     SANDBOX_DOCKER_NETWORK: str = "none"
     SANDBOX_DOCKER_TIMEOUT_SECONDS: int = 30
 
+    # Persistent terminal（issue #477）：容器持久 PTY + WebSocket。
+    # 默认关闭——开启后 backend 进程需要 Docker socket（= 宿主 root 等价权限），
+    # 只应通过显式 overlay（backend/docker-compose.terminal.yml）启用。
+    # 语义：TERMINAL_ENABLED=false 或 SANDBOX_MODE=ast 或 Docker 不可达时，
+    # 所有终端 API / 工具一律 503 / terminal_disabled，绝不创建半成品资源。
+    TERMINAL_ENABLED: bool = False
+    # 空串 = 回落到 SANDBOX_DOCKER_IMAGE；显式覆盖时也必须固定 tag/digest
+    # （禁止 latest），保证容器基线与审计可复现。
+    TERMINAL_CONTAINER_IMAGE: str = ""
+    TERMINAL_IDLE_TIMEOUT_SECONDS: int = Field(default=900, gt=0)
+    TERMINAL_MAX_LIFETIME_SECONDS: int = Field(default=3600, gt=0)
+    TERMINAL_MAX_PER_USER: int = Field(default=3, ge=1)
+    TERMINAL_MAX_PER_ORG: int = Field(default=10, ge=1)
+    TERMINAL_RING_BUFFER_BYTES: int = Field(default=262144, ge=1024)
+    TERMINAL_MAX_READ_BYTES: int = Field(default=65536, ge=1)
+    TERMINAL_MAX_INPUT_BYTES: int = Field(default=65536, ge=1)
+    TERMINAL_TICKET_TTL_SECONDS: int = Field(default=60, gt=0)
+    # true 时 executor 对 terminal_* 强制走人工审批（即使 approval_mode="never"）；
+    # 无审批通道时 fail-closed（结构化 approval_denied），绝不静默执行。
+    TERMINAL_REQUIRE_APPROVAL: bool = True
+
     # Observability — Langfuse
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""

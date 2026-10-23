@@ -281,19 +281,48 @@ class Executor:
         Hooks（issue #474）：``forced_reasons`` 由 ``tools/pre_execute`` 的
         ``ask`` 决策产生——即使 ``requires_approval`` 为假也强制进入本门；
         ``skip_objects``（id(tc)）是已被 hook deny 的调用，不参与审批暂停。
+
+        issue #477：``TERMINAL_REQUIRE_APPROVAL=true`` 时 ``terminal_*`` 强制
+        审批（即使 ``approval_mode="never"``）。若没有审批通道
+        （``approval_check is None``），这些调用直接记为 deny——**fail-closed**，
+        绝不因为「没接审批」而静默执行。该加强只作用于 terminal_*，不改全局策略。
         """
+        terminal_forced_ids = {
+            id(tc) for tc, _args in calls if self._terminal_approval_forced(tc.function.name)
+        }
         if self.approval_check is None:
+            # 无审批通道：terminal_* 强制审批的调用直接 deny（fail-closed）。
+            # hook 的 ask 在无通道时维持 develop 原语义（不审批、不阻断）。
+            for tc, args in calls:
+                if id(tc) not in terminal_forced_ids:
+                    continue
+                self.approval_decisions.append(
+                    {
+                        "tool_name": tc.function.name,
+                        "args_hash": approval.args_fingerprint(args),
+                        "decision": "deny",
+                        "reason": "no_approval_channel",
+                        "decided_at": time.time(),
+                    }
+                )
             return
         mode = getattr(self.config, "approval_mode", "risky")
         skip = skip_objects or set()
-        forced = forced_reasons or {}
+        hook_forced = forced_reasons or {}
         pending: tuple[Any, dict[str, Any], str | None] | None = None
         for tc, args in calls:
             if id(tc) in skip:
                 continue
-            forced_reason = forced.get(id(tc))
-            if not approval.requires_approval(mode, tc.function.name) and forced_reason is None:
+            forced_reason = hook_forced.get(id(tc))
+            terminal_forced = id(tc) in terminal_forced_ids
+            if (
+                not terminal_forced
+                and forced_reason is None
+                and not approval.requires_approval(mode, tc.function.name)
+            ):
                 continue
+            if terminal_forced and forced_reason is None:
+                forced_reason = "terminal 工具强制审批（TERMINAL_REQUIRE_APPROVAL=true）"
             if approval.find_decision(self.approval_decisions, tc.function.name, args) is not None:
                 continue
             if pending is None:
@@ -350,8 +379,13 @@ class Executor:
 
         ``forced=True`` 表示 hook 的 ``ask`` 强制审批（即使 requires_approval
         为假）——粘滞 deny 与降级必须同样生效，否则 ask 会被 mode=never 绕过。
+
+        issue #477：``terminal_*`` 强制审批——无审批通道时 deny（fail-closed）。
         """
-        if self.approval_check is None:
+        hook_forced = forced
+        terminal_forced = self._terminal_approval_forced(func_name)
+        forced = hook_forced or terminal_forced
+        if self.approval_check is None and not forced:
             return None
         if not forced and not approval.requires_approval(
             getattr(self.config, "approval_mode", "risky"), func_name
@@ -362,7 +396,22 @@ class Executor:
             return "deny" if decision.get("decision") == "deny" else None
         if self.approval_degraded:
             return "unavailable"
+        if self.approval_check is None and forced:
+            return "deny"
         return None
+
+    @staticmethod
+    def _terminal_approval_forced(tool_name: str) -> bool:
+        """issue #477：terminal_* 在 TERMINAL_REQUIRE_APPROVAL=true 时强制审批。
+
+        只加强这一族工具的判定，不改变全局 approval_mode 语义；配置读取走
+        惰性 settings 代理，测试可 monkeypatch 切换。
+        """
+        if not str(tool_name).startswith("terminal_"):
+            return False
+        from app.core.config import settings
+
+        return bool(getattr(settings, "TERMINAL_REQUIRE_APPROVAL", True))
 
     # ── C3a：工具调用配对持久化（tool_ledger；未接线时全部 no-op）──────────
 
