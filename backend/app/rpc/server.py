@@ -20,6 +20,7 @@ from typing import Any, TextIO
 
 from app.core.config import settings
 from app.core.error_mapping import JSONRPC_INVALID_REQUEST, JSONRPC_PARSE_ERROR
+from app.core.stdio import configure_stdio_stdout, migrate_stdout_handlers
 from app.rpc.dispatcher import RPCService
 
 logger = logging.getLogger(__name__)
@@ -40,14 +41,15 @@ class ProtocolWriter:
 
 
 def _stderr_only_stdout(requested_stdout: TextIO) -> None:
-    """把 ``sys.stdout`` 重定向到 stderr，并迁移已挂在真实 stdout 的日志 handler。"""
-    sys.stdout = sys.stderr
-    root = logging.getLogger()
-    for handler in root.handlers:
-        if isinstance(handler, logging.StreamHandler) and getattr(handler, "stream", None) is (
-            requested_stdout
-        ):
-            handler.setStream(sys.stderr)
+    """把 ``sys.stdout`` 重定向到 stderr，并迁移已挂在真实 stdout 的日志 handler。
+
+    薄封装 :func:`app.core.stdio.configure_stdio_stdout`（issue #493）：重定向与
+    handler 迁移逻辑集中在 import-safe 的 ``core.stdio``（root 与 sqlalchemy /
+    uvicorn / httpx 等具名 logger 一并迁移）。``requested_stdout`` 是调用方保存的
+    协议写端；正常情形下它就是当前 ``sys.stdout``，二次迁移为 no-op。
+    """
+    configure_stdio_stdout()
+    migrate_stdout_handlers(requested_stdout)
 
 
 def _parse_error() -> dict[str, Any]:
