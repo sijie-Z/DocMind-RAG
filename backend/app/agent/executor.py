@@ -207,13 +207,32 @@ class Executor:
 
         已决定（approve/deny 粘滞）的调用不触发暂停：approve 由主循环放行、
         deny 由主循环物化为 approval_denied 结构化失败。
+
+        issue #477：``TERMINAL_REQUIRE_APPROVAL=true`` 时 ``terminal_*`` 强制
+        审批（即使 ``approval_mode="never"``）。若没有审批通道
+        （``approval_check is None``），这些调用直接记为 deny——**fail-closed**，
+        绝不因为「没接审批」而静默执行。该加强只作用于 terminal_*，不改全局策略。
         """
+        forced_calls = [
+            (tc, args) for tc, args in calls if self._terminal_approval_forced(tc.function.name)
+        ]
         if self.approval_check is None:
+            for tc, args in forced_calls:
+                self.approval_decisions.append(
+                    {
+                        "tool_name": tc.function.name,
+                        "args_hash": approval.args_fingerprint(args),
+                        "decision": "deny",
+                        "reason": "no_approval_channel",
+                        "decided_at": time.time(),
+                    }
+                )
             return
         mode = getattr(self.config, "approval_mode", "risky")
         pending: tuple[Any, dict[str, Any]] | None = None
         for tc, args in calls:
-            if not approval.requires_approval(mode, tc.function.name):
+            forced = self._terminal_approval_forced(tc.function.name)
+            if not forced and not approval.requires_approval(mode, tc.function.name):
                 continue
             if approval.find_decision(self.approval_decisions, tc.function.name, args) is not None:
                 continue
@@ -266,10 +285,13 @@ class Executor:
 
         返回 None = 放行；"deny" = 人工拒绝（结构化失败 approval_denied）；
         "unavailable" = 审批服务不可用降级（结构化失败 approval_unavailable）。
+
+        issue #477：``terminal_*`` 强制审批——无审批通道时 deny（fail-closed）。
         """
-        if self.approval_check is None:
+        forced = self._terminal_approval_forced(func_name)
+        if self.approval_check is None and not forced:
             return None
-        if not approval.requires_approval(
+        if not forced and not approval.requires_approval(
             getattr(self.config, "approval_mode", "risky"), func_name
         ):
             return None
@@ -278,7 +300,22 @@ class Executor:
             return "deny" if decision.get("decision") == "deny" else None
         if self.approval_degraded:
             return "unavailable"
+        if self.approval_check is None and forced:
+            return "deny"
         return None
+
+    @staticmethod
+    def _terminal_approval_forced(tool_name: str) -> bool:
+        """issue #477：terminal_* 在 TERMINAL_REQUIRE_APPROVAL=true 时强制审批。
+
+        只加强这一族工具的判定，不改变全局 approval_mode 语义；配置读取走
+        惰性 settings 代理，测试可 monkeypatch 切换。
+        """
+        if not str(tool_name).startswith("terminal_"):
+            return False
+        from app.core.config import settings
+
+        return bool(getattr(settings, "TERMINAL_REQUIRE_APPROVAL", True))
 
     # ── C3a：工具调用配对持久化（tool_ledger；未接线时全部 no-op）──────────
 

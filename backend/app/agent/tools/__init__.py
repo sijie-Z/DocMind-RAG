@@ -21,6 +21,7 @@ from app.agent.tools import (
     feishu,  # noqa: F401
     mcp_bridge,  # noqa: F401
     skills,  # noqa: F401
+    terminal,  # noqa: F401  — 持久终端六工具（issue #477）
     translation,  # noqa: F401
     utility,  # noqa: F401
     web_search,  # noqa: F401

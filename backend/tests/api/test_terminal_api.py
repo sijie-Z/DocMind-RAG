@@ -11,10 +11,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 import types
 import uuid
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -105,9 +108,8 @@ def _wait_until(predicate, timeout: float = 3.0) -> None:
 # ── fixtures ────────────────────────────────────────────────────────────────
 
 
-@pytest.fixture
-def env(monkeypatch):
-    """FakeBackend 管理器 + 假 Redis + 独立 FastAPI app（TestClient 单 portal）。"""
+def _configure_service(monkeypatch, *, ring_buffer_bytes: int = 4096):
+    """把 terminal_service 单例接到 FakeBackend 管理器 + 假 Redis。"""
     backends: list[FakeBackend] = []
 
     def factory(**kwargs) -> FakeBackend:
@@ -119,7 +121,7 @@ def env(monkeypatch):
         config=TerminalConfig(
             max_per_user=2,
             max_per_org=10,
-            ring_buffer_bytes=4096,
+            ring_buffer_bytes=ring_buffer_bytes,
             max_read_bytes=1024,
             max_input_bytes=1024,
         ),
@@ -141,6 +143,18 @@ def env(monkeypatch):
     monkeypatch.setattr(settings, "TERMINAL_TICKET_TTL_SECONDS", 60)
     monkeypatch.setattr(settings, "ALLOWED_ORIGINS", [*settings.ALLOWED_ORIGINS, TEST_ORIGIN])
 
+    return types.SimpleNamespace(
+        manager=manager,
+        backends=backends,
+        redis=fake_redis,
+        settings=settings,
+    )
+
+
+@pytest.fixture
+def env(monkeypatch):
+    """FakeBackend 管理器 + 假 Redis + 独立 FastAPI app（TestClient 单 portal）。"""
+    configured = _configure_service(monkeypatch)
     holder = types.SimpleNamespace(current=FakeUser())
     app = FastAPI()
     app.include_router(terminal_api.router, prefix=TERMINAL_PREFIX)
@@ -153,17 +167,20 @@ def env(monkeypatch):
     app.dependency_overrides[get_db] = _db_override
 
     with TestClient(app) as client:
-        yield types.SimpleNamespace(
-            client=client,
-            manager=manager,
-            backends=backends,
-            redis=fake_redis,
-            holder=holder,
-            settings=settings,
-            portal=client.portal,
-        )
+        configured.client = client
+        configured.holder = holder
+        configured.portal = client.portal
+        yield configured
         # 在同一个 portal loop 内关闭全部会话，避免跨 loop 清理。
-        client.portal.call(manager.shutdown)
+        client.portal.call(configured.manager.shutdown)
+
+
+@pytest.fixture
+async def tool_env(monkeypatch):
+    """工具测试用：不建 TestClient（任务/锁都在 pytest 自己的事件循环里）。"""
+    configured = _configure_service(monkeypatch)
+    yield configured
+    await configured.manager.shutdown()
 
 
 def _create(env, **overrides) -> dict[str, Any]:
@@ -452,3 +469,210 @@ def test_ws_input_size_limit(env) -> None:
         assert message["type"] == "error"
         assert message["code"] == "terminal_input_too_large"
         assert env.backends[0].sent == []
+
+
+# ── Agent 六工具（task 4）────────────────────────────────────────────────────
+
+
+async def _call_tool(
+    name: str, arguments: dict[str, Any], *, user_id: int = 1, organization_id: int = 1
+):
+    import app.agent.tools  # noqa: F401 — 触发 @register_tool 注册
+    from app.agent.registry import tool_registry
+
+    return await tool_registry.execute_detailed(
+        name, arguments, user_id=user_id, organization_id=organization_id
+    )
+
+
+async def _wait_until_async(predicate, timeout: float = 3.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() > deadline:
+            raise AssertionError("条件在超时内未满足")
+        await asyncio.sleep(0.01)
+
+
+async def test_terminal_tools_registered_high_risk() -> None:
+    import app.agent.tools  # noqa: F401
+    from app.agent.registry import tool_registry
+
+    for name in (
+        "terminal_open",
+        "terminal_send",
+        "terminal_read",
+        "terminal_signal",
+        "terminal_close",
+        "terminal_list",
+    ):
+        entry = tool_registry.get(name)
+        assert entry is not None, name
+        assert entry.risk_level == "high", name
+
+
+async def test_tools_disabled_returns_terminal_disabled(tool_env, monkeypatch) -> None:
+    monkeypatch.setattr(terminal_service, "enabled", lambda: False, raising=False)
+    for name, args in (
+        ("terminal_open", {}),
+        ("terminal_list", {}),
+        ("terminal_read", {"terminal_id": "x"}),
+    ):
+        result = await _call_tool(name, args)
+        assert result.success is False
+        assert result.error.code == "terminal_disabled"
+
+
+async def test_tool_open_send_read_close_list_roundtrip(tool_env) -> None:
+    opened = await _call_tool("terminal_open", {"session_id": "s1", "cols": 90, "rows": 20})
+    assert opened.success, opened
+    terminal_id = opened.data["terminal_id"]
+    assert opened.data["ws_path"].endswith(terminal_id)
+    backend = tool_env.backends[0]
+    assert backend.spawn_args == (90, 20)
+
+    sent = await _call_tool("terminal_send", {"terminal_id": terminal_id, "data": "echo hi\n"})
+    assert sent.success and sent.data == {"bytes_written": 8}
+    assert backend.sent == [b"echo hi\n"]
+
+    backend.feed(b"hi\n")
+    session = tool_env.manager.get_local(terminal_id)
+    await _wait_until_async(lambda: session.has_unread())
+    read = await _call_tool("terminal_read", {"terminal_id": terminal_id, "max_bytes": 100})
+    assert read.success
+    assert read.data["data"] == "hi\n"
+    assert read.data["truncated"] is False
+    assert read.data["dropped_total"] == 0
+
+    listing = await _call_tool("terminal_list", {})
+    assert [t["terminal_id"] for t in listing.data["terminals"]] == [terminal_id]
+
+    signalled = await _call_tool("terminal_signal", {"terminal_id": terminal_id, "signal": "INT"})
+    assert signalled.success and backend.signals == ["INT"]
+
+    closed = await _call_tool("terminal_close", {"terminal_id": terminal_id})
+    assert closed.success and closed.data == {"ok": True}
+    listing = await _call_tool("terminal_list", {})
+    assert listing.data["terminals"] == []
+
+
+async def test_tool_foreign_terminal_returns_not_found(tool_env) -> None:
+    opened = await _call_tool("terminal_open", {})
+    terminal_id = opened.data["terminal_id"]
+    for name, args in (
+        ("terminal_send", {"terminal_id": terminal_id, "data": "x"}),
+        ("terminal_read", {"terminal_id": terminal_id}),
+        ("terminal_signal", {"terminal_id": terminal_id, "signal": "TERM"}),
+        ("terminal_close", {"terminal_id": terminal_id}),
+    ):
+        result = await _call_tool(name, args, user_id=2)
+        assert result.success is False, (name, result)
+        assert result.error.code == "terminal_not_found", (name, result)
+    # 越权调用没有产生副作用。
+    assert tool_env.manager.has_local(terminal_id)
+
+
+async def test_tool_read_timeout(tool_env, monkeypatch) -> None:
+    from app.agent.tools import terminal as terminal_tools
+
+    opened = await _call_tool("terminal_open", {})
+    terminal_id = opened.data["terminal_id"]
+    monkeypatch.setattr(terminal_tools, "_READ_WAIT_SECONDS", 0.05)
+    result = await _call_tool("terminal_read", {"terminal_id": terminal_id})
+    assert result.success is False
+    assert result.error.code == "terminal_timeout"
+
+
+async def test_tool_read_truncation_and_dropped_total(tool_env) -> None:
+    opened = await _call_tool("terminal_open", {})
+    terminal_id = opened.data["terminal_id"]
+    backend = tool_env.backends[0]
+    backend.feed(b"x" * 5000)  # ring buffer 4096 → 丢弃 904 字节
+    session = tool_env.manager.get_local(terminal_id)
+    await _wait_until_async(lambda: session.dropped_total == 904)
+
+    reads = []
+    for _ in range(4):
+        result = await _call_tool("terminal_read", {"terminal_id": terminal_id, "max_bytes": 1024})
+        assert result.success, result
+        assert len(result.data["data"]) == 1024
+        reads.append(result.data)
+    assert reads[0]["truncated"] is True
+    assert reads[-1]["truncated"] is False
+    assert reads[-1]["dropped_total"] == 904
+
+
+async def test_tool_quota_maps_to_rate_limited(tool_env) -> None:
+    await _call_tool("terminal_open", {})
+    await _call_tool("terminal_open", {})
+    result = await _call_tool("terminal_open", {})
+    assert result.success is False
+    assert result.error.code == "rate_limited"
+
+
+# ── 强制审批（executor）─────────────────────────────────────────────────────
+
+
+def _make_executor(approval_mode: str = "never"):
+    from app.agent.config import AgentConfig
+    from app.agent.executor import Executor
+
+    config = AgentConfig()
+    config.approval_mode = approval_mode
+    return Executor(MagicMock(), config, MagicMock())
+
+
+def _tool_call(name: str, arguments: dict[str, Any]):
+    return types.SimpleNamespace(
+        id=f"call-{name}",
+        function=types.SimpleNamespace(name=name, arguments=json.dumps(arguments)),
+    )
+
+
+async def test_terminal_forced_approval_no_channel_denies(monkeypatch) -> None:
+    """TERMINAL_REQUIRE_APPROVAL=true + approval_mode=never + 无审批通道 →
+    强制 deny（fail-closed），绝不静默执行。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "TERMINAL_REQUIRE_APPROVAL", True)
+    executor = _make_executor("never")
+    arguments = {"cols": 80}
+    calls = [(_tool_call("terminal_open", arguments), arguments)]
+
+    events = [event async for event in executor._approval_precheck(calls, None, None)]
+    assert events == []
+    assert executor._gate_materialization("terminal_open", arguments) == "deny"
+    # 非终端工具不受影响（never 模式照旧放行）。
+    assert executor._gate_materialization("web_search", {"query": "x"}) is None
+
+
+async def test_terminal_forced_approval_uses_channel(monkeypatch) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "TERMINAL_REQUIRE_APPROVAL", True)
+    executor = _make_executor("never")
+    executor.approval_check = AsyncMock(return_value="unavailable")
+    arguments = {"terminal_id": "t-1", "data": "rm -rf /"}
+    calls = [(_tool_call("terminal_send", arguments), arguments)]
+
+    events = [event async for event in executor._approval_precheck(calls, None, None)]
+    assert events == []
+    executor.approval_check.assert_awaited_once()
+    request = executor.approval_check.await_args.args[0]
+    assert request.tool_name == "terminal_send"
+    assert request.risk_level == "high"
+    assert executor.approval_degraded is True
+    assert executor._gate_materialization("terminal_send", arguments) == "unavailable"
+
+
+async def test_terminal_forced_approval_can_be_disabled(monkeypatch) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "TERMINAL_REQUIRE_APPROVAL", False)
+    executor = _make_executor("never")
+    executor.approval_check = AsyncMock(return_value="unavailable")
+    arguments = {"cols": 80}
+    calls = [(_tool_call("terminal_open", arguments), arguments)]
+
+    _events = [event async for event in executor._approval_precheck(calls, None, None)]
+    executor.approval_check.assert_not_awaited()
+    assert executor._gate_materialization("terminal_open", arguments) is None
