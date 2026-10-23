@@ -701,6 +701,36 @@ async def test_permission_timeout_denies_and_task_not_dangling(sqlite_env, monke
     assert service.resume_started_with_chat_exhausted is True
 
 
+@pytest.mark.asyncio
+async def test_permission_client_error_denied_but_not_labelled_timeout(sqlite_env, monkeypatch):
+    """客户端以 JSON-RPC error 回审批：按拒绝收尾，但审计不得误标 timeout。"""
+    decisions = _patch_approval(monkeypatch)
+    service = FakeAgentService()
+    service.add_chat(
+        script(
+            AgentEvent(
+                type="approval_required",
+                content="需审批",
+                tool_name="code_execution",
+                tool_call_id="call-err",
+                task_id="task-err",
+            )
+        )
+    )
+    service.add_resume(
+        script(AgentEvent(type="chunk", content="拒绝后继续"), AgentEvent(type="done"))
+    )
+    async with acp_env(sqlite_env, service=service, permission_timeout=5.0) as env:
+        session_id = await _new_session(env.client)
+        prompt_task = asyncio.create_task(env.client.prompt(session_id, "运行代码"))
+        request = await env.client.wait_for_server_request("session/request_permission")
+        await env.client.respond_error(request["id"], -32603, "client cannot approve")
+        response = await prompt_task
+        assert response["result"] == {"stopReason": "end_turn"}
+    assert decisions[0]["decision"] == "deny"
+    assert decisions[0]["note"] == "acp:permission_cancelled", "不得误标为超时"
+
+
 # ── 计划审批：reject / auto ────────────────────────────────────────────────
 
 

@@ -752,14 +752,19 @@ class AcpServer:
                 return {"cancelled": True}
             raise
         except RPCError as exc:
-            # 超时（ACP_PERMISSION_TIMEOUT_SECONDS）/ 传输不支持 → 按拒绝。
+            # 超时（ACP_PERMISSION_TIMEOUT_SECONDS）/ 客户端回 error / 传输不支持
+            # → 一律按拒绝；但审计 note 只给"确实等满超时"的路径打 timeout
+            # （客户端 error 响应/连接已关闭会立刻返回，不误标超时）。
+            elapsed = time.perf_counter() - started
+            timed_out = elapsed >= max(self.permission_timeout - 0.05, 0.0)
             logger.warning(
-                "ACP 审批等待失败，按拒绝处理（session=%s，等待 %.1fs）：%s",
+                "ACP 审批等待失败，按拒绝处理（session=%s，等待 %.1fs，timeout=%s）：%s",
                 state.session_id,
-                time.perf_counter() - started,
+                elapsed,
+                timed_out,
                 exc.message,
             )
-            return {"cancelled": True, "timeout": True}
+            return {"cancelled": True, "timeout": timed_out}
         finally:
             logger.info(
                 "ACP permission wait: session=%s duration_ms=%.1f",

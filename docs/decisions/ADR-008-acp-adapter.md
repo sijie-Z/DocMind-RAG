@@ -92,12 +92,13 @@
 ## 依据（实测，本 worktree / 基线 7d62000）
 
 - `python -m pytest tests/unit/test_acp_mapping.py tests/api/test_acp_stdio.py`
-  → **57 passed**（单测 36 条 + stdio e2e 21 条；sqlite + fake service + 内存
+  → **58 passed**（单测 36 条 + stdio e2e 22 条；sqlite + fake service + 内存
   管道，无网络/无真实 LLM）。
 - e2e 覆盖：握手形状（fixture 校验）、`session/new` 落库、`session/list`、
   `session/close` 仅解映射、`session/load→-32601`、更新顺序
   （message→tool pending→completed→thought）、并发 prompt `-32009`、取消后
   无迟到 update 且 `stopReason=cancelled`、`$/cancel_request` 取消在途审批、
+  客户端以 JSON-RPC error 回审批（按拒绝但不误标超时）、
   审批 allow/reject/超时三路径、**断连时 pending 审批收尾 + 任务终态
   CANCELLED**、计划审批 reject(`-32009`+REJECTED)/auto(approve+续跑)、
   `session/resume` 不回放历史、`set_config_option` 持久化、身份校验各类失败

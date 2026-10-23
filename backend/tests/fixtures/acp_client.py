@@ -94,6 +94,17 @@ class AcpClient:
             json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}, ensure_ascii=False)
         )
 
+    async def respond_error(
+        self, request_id: Any, code: int, message: str, data: Any = None
+    ) -> None:
+        """以 JSON-RPC error 帧响应服务端请求（审批失败路径测试用）。"""
+        error: dict[str, Any] = {"code": code, "message": message}
+        if data is not None:
+            error["data"] = data
+        await self._write_line(
+            json.dumps({"jsonrpc": "2.0", "id": request_id, "error": error}, ensure_ascii=False)
+        )
+
     # ── 便捷方法 ──────────────────────────────────────────────────────────
 
     async def initialize(self) -> dict[str, Any]:
