@@ -36,7 +36,15 @@ from mcp import types as mcp_types
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
-from mcp.shared.exceptions import MCPError
+from mcp.shared import exceptions as mcp_exceptions
+
+# mcp >= 2.2 起异常类更名为 McpError（旧版本是 MCPError）；两者都接受。
+if hasattr(mcp_exceptions, "MCPError"):
+    MCPError = mcp_exceptions.MCPError
+elif hasattr(mcp_exceptions, "McpError"):
+    MCPError = mcp_exceptions.McpError
+else:
+    raise ImportError("mcp SDK 缺少 MCPError/McpError")
 
 from app.agent.mcp.config import MCPServerConfig
 
