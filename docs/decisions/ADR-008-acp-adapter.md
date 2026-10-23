@@ -35,7 +35,8 @@
    `is_active=true`、属于该组织（主组织字段命中或 `user_organization` 成员
    行命中）；`--api-key-file` 提供时 key 必须能认证为同一用户，且 key 自带
    组织（若有）必须等于 `--org-id`。任何失败 → stderr 原因 + **exit 2**，
-   stdout 0 字节（协议未启动）。
+   stdout 0 字节（协议未启动）。**超管不豁免**：显式身份即契约，无组织的
+   超管同样 exit 2（不允许匿名/借道越权）。
 6. **会话映射**：`session/new` 调 `get_or_create_session(db, None, user_id,
    "ACP session", org_id)` 创建 `ChatSession` 并返回其 id；`session/list`
    返回当前用户最多 50 条（`sessionId/title/updatedAt`，本组织 + 历史

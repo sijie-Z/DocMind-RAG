@@ -274,6 +274,14 @@ async def test_set_config_option_persists_model_and_plan_mode(sqlite_env, schema
         )
         assert bad_value["error"]["code"] == -32602
 
+        # 下一轮 prompt 读取：model / plan_approval_mode 进入本次 AgentConfig。
+        env.service.add_chat(script(AgentEvent(type="done")))
+        response = await env.client.prompt(session_id, "配置生效吗")
+        assert response["result"] == {"stopReason": "end_turn"}
+        config = env.service.chat_calls[-1]["config"]
+        assert config.model == "deepseek-v4-pro"
+        assert config.plan_approval_mode == "always"
+
 
 # ── prompt：流式更新顺序 / 持久化 ──────────────────────────────────────────
 

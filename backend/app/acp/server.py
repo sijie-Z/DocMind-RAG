@@ -504,6 +504,10 @@ class AcpServer:
             except asyncio.CancelledError:
                 await self._cancel_session(state)
                 raise
+            except Exception:
+                # 错误响应也必须排在已入队 update 之后（同一会话的帧序不得乱）。
+                await state.barrier()
+                raise
             # 结算语义：更新写尽、持久化完成之后才返回 stopReason。
             await state.barrier()
             if stop_reason == "end_turn":
@@ -604,13 +608,21 @@ class AcpServer:
         # _request_permission 收敛为 cancelled）→ deny。超时按拒绝收尾。
         allow = decision == "allow"
         note = "acp:request_permission" if decision != "cancelled" else "acp:permission_cancelled"
-        await checkpoint.apply_approval_decision(
-            task_id=task_id,
-            user_id=self.user_id,
-            organization_id=self.organization_id,
-            decision="approve" if allow else "deny",
-            note=note,
-        )
+        try:
+            await checkpoint.apply_approval_decision(
+                task_id=task_id,
+                user_id=self.user_id,
+                organization_id=self.organization_id,
+                decision="approve" if allow else "deny",
+                note=note,
+            )
+        except Exception:
+            # 取消与记账竞态：取消已到（任务可能被判终态）→ 按取消收尾；
+            # 其余失败如实上抛（由 dispatcher 映射 -32603/-32009）。
+            if state.cancel_event.is_set():
+                await self._mark_task_cancelled(task_id)
+                return None
+            raise
         if state.cancel_event.is_set():
             await self._mark_task_cancelled(task_id)
             return None
@@ -677,12 +689,18 @@ class AcpServer:
             state.session_id,
             task_id,
         )
-        await checkpoint.mark_terminal(
+        ok = await checkpoint.mark_terminal(
             task_id,
             TaskStatus.REJECTED,
             error="ACP 不支持交互式计划审批（ACP_PLAN_APPROVAL_MODE=reject）",
             error_type="plan_approval_unsupported",
         )
+        if not ok:
+            # 不悬空是硬约束：终态没写成功必须响亮留痕（-32009 仍如实返回）。
+            logger.error(
+                "ACP plan approval reject: mark_terminal failed (task=%s)，任务可能停留非终态",
+                task_id,
+            )
         raise RPCError(
             JSONRPC_CONFLICT,
             "ACP 不支持交互式计划审批（ACP_PLAN_APPROVAL_MODE=reject）",
