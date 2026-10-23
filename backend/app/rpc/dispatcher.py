@@ -457,6 +457,12 @@ class RPCService:
         if not isinstance(client_message_id, str) or not client_message_id.strip():
             raise RPCError(JSONRPC_INVALID_PARAMS, "clientMessageId 必须是非空字符串")
 
+        # 幂等通道是硬依赖（issue #493）：Redis 未初始化时在**建会话/启动 run
+        # 之前**就失败，避免留下无所属消息的孤儿会话行；连接期故障由
+        # _check_idempotency 同样映射 -32603。
+        if not redis_client:
+            raise RPCError(JSONRPC_INTERNAL_ERROR, "Redis 不可用，无法保证幂等")
+
         session_id = params.get("sessionId")
         if session_id is not None and not isinstance(session_id, str):
             raise RPCError(JSONRPC_INVALID_PARAMS, "sessionId 必须是字符串")
@@ -572,7 +578,15 @@ class RPCService:
         if task is None:
             self._cancelled_sessions.discard(session_id)
             raise RPCError(JSONRPC_NOT_FOUND, "任务不存在")
-        if task.status in (TaskStatus.WAITING_APPROVAL, TaskStatus.WAITING_PLAN_APPROVAL):
+        if task.status in (
+            TaskStatus.WAITING_APPROVAL,
+            TaskStatus.WAITING_PLAN_APPROVAL,
+            # 这两个状态下没有活跃 run 会观察取消旗（waiting_human 是 legacy
+            # 无写入者态；paused 只是 fork 克隆快照的起点），必须直接 DB
+            # 终态化，否则会等到 5s 超时。
+            TaskStatus.WAITING_HUMAN,
+            TaskStatus.PAUSED,
+        ):
             ok = await checkpoint.mark_terminal(
                 task_id,
                 TaskStatus.CANCELLED,
@@ -707,19 +721,29 @@ class RPCService:
 
         Redis 不可用时必须抛 ``RPCError(-32603)``——静默降级会使同一
         ``clientMessageId`` 重复触发 run。正常时同 key 第二次返回同一 messageId。
+        存储值损坏与 Redis 不可用分开报错，避免误导排障方向。
         """
         payload = json.dumps({"messageId": message_id, "sessionId": session_id})
+
+        def _decode(raw: str) -> dict:
+            try:
+                data = json.loads(raw)
+                return {"messageId": data["messageId"], "sessionId": data["sessionId"]}
+            except (json.JSONDecodeError, KeyError, TypeError) as exc:
+                logger.warning("RPC idempotency record corrupted: %s", log_safe(exc))
+                raise RPCError(JSONRPC_INTERNAL_ERROR, "幂等记录损坏，拒绝执行") from exc
+
         try:
             existing = await redis_client.get(key)
             if existing:
-                data = json.loads(existing)
-                return {"messageId": data["messageId"], "sessionId": data["sessionId"]}
+                return _decode(existing)
             created = await redis_client.set(key, payload, nx=True, ex=IDEMPOTENCY_TTL_SECONDS)
             if created is None:
                 existing = await redis_client.get(key)
                 if existing:
-                    data = json.loads(existing)
-                    return {"messageId": data["messageId"], "sessionId": data["sessionId"]}
+                    return _decode(existing)
+        except RPCError:
+            raise
         except Exception as exc:  # noqa: BLE001 - 不可用必须如实失败，不得静默继续
             logger.warning("RPC idempotency unavailable: %s", log_safe(exc))
             raise RPCError(JSONRPC_INTERNAL_ERROR, "Redis 不可用，无法保证幂等") from exc
