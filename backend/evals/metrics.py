@@ -163,3 +163,11 @@ def aggregate(outcomes: list[ItemOutcome], cutoffs: tuple[int, ...] = (1, 3, 5))
         [round(empty_ci[0], 4), round(empty_ci[1], 4)] if empty_ci else None
     )
     return agg
+
+
+def aggregate_by_type(
+    outcomes: list[ItemOutcome], cutoffs: tuple[int, ...] = (1, 3, 5)
+) -> dict[str, dict]:
+    """按题型切片汇总（v1.5 per-slice 对比用）；空切片不产出。"""
+    types = sorted({o.item_type for o in outcomes})
+    return {t: aggregate([o for o in outcomes if o.item_type == t], cutoffs=cutoffs) for t in types}

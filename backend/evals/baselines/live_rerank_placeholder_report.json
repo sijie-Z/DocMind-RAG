@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "report_type": "live_rerank",
+    "mode": "live",
+    "status": "unavailable",
+    "reason": "未配置 EMBEDDING_API_KEY/DEEPSEEK_API_KEY",
+    "generated_at": "2026-10-24T05:18:14+00:00",
+    "dataset_id": "docmind_clause_v1_5",
+    "dataset_version": 1,
+    "corpus_digest": "838fd02f107adc288b2a8884515ce674ad342e86edf4563c5941d1fb73097d9e",
+    "git_commit": "ffe0a398f10bbbfbdb236e5cad90676d3848a270",
+    "index": "docmind_knowledge_eval_v1",
+    "org_id": 9901,
+    "note": "占位报告：真实 embedding/rerank provider 不可用，未产生任何指标数字。配置真实服务后运行 python -m evals.live_rerank 生成正式报告。"
+  },
+  "aggregates_before": null,
+  "aggregates_after": null,
+  "items": []
+}

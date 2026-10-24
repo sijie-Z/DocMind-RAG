@@ -1,10 +1,10 @@
-"""#208 Phase 1 评估 harness 的判别用例（无 ES / 无网络，秒级）。
+"""#208 Phase 1 / #512 v1.5 评估 harness 的判别用例（无 ES / 无网络，秒级）。
 
 覆盖四类：
 1. 条号解析与归一化（中文数字/阿拉伯数字/§ 形式/边界与拒绝规则）；
 2. golden 加载器的严格校验（每种数据错误都必须被抓住并带定位）；
 3. 指标判定（命中/未命中/负难例/错误态）与聚合口径；
-4. 真实 golden set v1 的自洽与 provenance（gold 必须能在固定语料中定义位证明）。
+4. 真实 golden set v1.5 的自洽与 provenance（gold 必须能在固定语料中定义位证明）。
 """
 
 import json
@@ -22,12 +22,19 @@ from evals.clauses import (
 )
 from evals.golden import GoldenItem, GoldenSet, GoldenSetError, Locator, NearMiss, load_golden_set
 from evals.harness import RetrievalObservation, run_eval
-from evals.metrics import aggregate, evaluate_item, wilson_ci
-from evals.report import build_report, render_markdown, write_json, write_markdown
-from evals.runner import _apply_env, build_parser
+from evals.metrics import aggregate, aggregate_by_type, evaluate_item, wilson_ci
+from evals.report import (
+    build_report,
+    classify_failures,
+    render_markdown,
+    render_v15_report,
+    write_json,
+    write_markdown,
+)
+from evals.runner import _apply_env, _corpus_digest, build_parser
 
 _BACKEND = Path(__file__).resolve().parents[2]
-_GOLDEN_V1 = _BACKEND / "evals" / "golden_set" / "clause_set_v1.json"
+_GOLDEN_V1 = _BACKEND / "evals" / "golden_set" / "clause_set_v1_5.json"
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +318,21 @@ class TestMetrics:
         ):
             assert agg[key] is None, f"{key} 空分母必须为 None，而不是 {agg[key]!r}"
 
+    def test_aggregate_by_type_slices(self):
+        negative = GoldenItem(
+            id="n1", type="unanswerable", query="离题问题", expect="empty", gold=()
+        )
+        outcomes = [
+            evaluate_item(_item("p1"), [_hit_result("f.md", "第7条")]),
+            evaluate_item(_item("p2"), []),
+            evaluate_item(negative, []),
+        ]
+        by_type = aggregate_by_type(outcomes)
+        assert set(by_type) == {"clause_lookup", "unanswerable"}
+        assert by_type["clause_lookup"]["counts"]["positives"] == 2
+        assert by_type["clause_lookup"]["clause_hit@5"] == 0.5
+        assert by_type["unanswerable"]["empty_accuracy"] == 1.0
+
 
 # ---------------------------------------------------------------------------
 # 4. harness + 报告
@@ -372,6 +394,10 @@ class TestHarnessAndReport:
         json.dumps(report, ensure_ascii=False)  # 必须可序列化
         assert report["aggregates"]["clause_hit@5"] == 1.0
         assert report["items"][0]["results"][0]["defs"] == ["第8条"]
+        assert report["items"][0]["results"][0]["mentions"] == ["第8条"]
+        assert report["meta"]["retriever_mode"] == "hybrid"
+        assert report["meta"]["phase"] == 1.5
+        assert "clause_lookup" in report["aggregates_by_type"]
 
         md = render_markdown(report)
         assert "ClauseHit@5" in md and "`a`" in md and "PASS" in md
@@ -381,7 +407,135 @@ class TestHarnessAndReport:
         assert "NearMiss" in mp.read_text(encoding="utf-8")
 
 
+class TestV15Report:
+    def _report(self) -> dict:
+        return {
+            "meta": {
+                "dataset_id": "docmind_clause_v1_5",
+                "dataset_version": 1,
+                "corpus_files": ["f.md"],
+                "corpus_chunks": {"f.md": 2},
+                "embedding_mode": "fake",
+                "retriever_mode": "hybrid",
+                "generated_at": "2026-10-24T00:00:00+00:00",
+                "index": "idx",
+                "es_version": "8.11.0",
+                "corpus_digest": "abc123",
+                "git_commit": "deadbeef",
+            },
+            "aggregates": {
+                "counts": {"total": 2, "positives": 1, "negatives": 1, "errors": 0},
+                "clause_hit@1": 0.0,
+                "clause_hit@3": 0.0,
+                "clause_hit@5": 0.0,
+                "near_miss@5": None,
+                "mrr": 0.0,
+                "empty_accuracy": 0.0,
+                "clause_hit_ci95": [0.0, 0.8],
+                "empty_accuracy_ci95": [0.0, 0.8],
+            },
+            "aggregates_by_type": {
+                "clause_lookup": {
+                    "counts": {"total": 1, "positives": 1, "negatives": 0, "errors": 0},
+                    "clause_hit@5": 0.0,
+                    "mrr": 0.0,
+                    "empty_accuracy": None,
+                },
+                "unanswerable": {
+                    "counts": {"total": 1, "positives": 0, "negatives": 1, "errors": 0},
+                    "clause_hit@5": None,
+                    "mrr": None,
+                    "empty_accuracy": 0.0,
+                },
+            },
+            "items": [
+                {
+                    "id": "num1",
+                    "type": "clause_lookup",
+                    "expect": "hit",
+                    "status": "ok",
+                    "passed": False,
+                    "query": "第七条规定了什么？",
+                    "gold": ["f.md:第7条"],
+                    "gold_rank": None,
+                    "near_miss": [],
+                    "near_miss_rank": None,
+                    "n_results": 1,
+                    "notes": "",
+                    "results": [
+                        {
+                            "rank": 1,
+                            "filename": "f.md",
+                            "defs": [],
+                            "mentions": ["第7条"],
+                            "score": 1.0,
+                            "snippet": "与第7条冲突的申请不予受理。",
+                        }
+                    ],
+                },
+                {
+                    "id": "neg1",
+                    "type": "unanswerable",
+                    "expect": "empty",
+                    "status": "ok",
+                    "passed": False,
+                    "query": "请推荐一首适合跑步听的歌曲。",
+                    "gold": [],
+                    "gold_rank": None,
+                    "near_miss": [],
+                    "near_miss_rank": None,
+                    "n_results": 2,
+                    "notes": "",
+                    "results": [
+                        {
+                            "rank": 1,
+                            "filename": "f.md",
+                            "defs": [],
+                            "mentions": [],
+                            "score": 1.0,
+                            "snippet": "无关内容",
+                        }
+                    ],
+                },
+            ],
+        }
+
+    def test_classify_failures(self):
+        classes = classify_failures(self._report(), source="hybrid")
+        assert [e["id"] for e in classes["numeral_normalization"]] == ["num1"]
+        assert [e["id"] for e in classes["chunk_boundary"]] == ["num1"]
+        assert [e["id"] for e in classes["negative_false_recall"]] == ["neg1"]
+        assert classes["title_token_flooding"] == []
+
+    def test_render_v15_report_has_provenance_slices_and_failures(self):
+        md = render_v15_report(self._report(), self._report())
+        assert "Wilson" in md
+        assert "Per-slice" in md
+        assert "中文/阿拉伯数字不归一" in md
+        assert "负例误召" in md
+        assert "abc123" in md and "deadbeef" in md
+        assert "make eval-public" in md
+
+
 class TestRunnerEnv:
+    def test_corpus_digest_is_line_ending_stable(self, tmp_path):
+        """CRLF 工作区与 LF checkout 必须得到同一语料指纹（CI 协议校验依赖）。"""
+        target = tmp_path / "a.md"
+        gs = GoldenSet(
+            dataset_id="ds",
+            version=1,
+            description="",
+            path=tmp_path / "ds.json",
+            corpus_dir=tmp_path,
+            corpus_files=("a.md",),
+            top_k=5,
+            items=(),
+        )
+        target.write_bytes("第1条 内容\n".encode())
+        lf_digest = _corpus_digest(gs)
+        target.write_bytes("第1条 内容\r\n".encode())
+        assert _corpus_digest(gs) == lf_digest
+
     def test_apply_env_sets_index_and_hosts(self, monkeypatch):
         monkeypatch.setenv("ELASTICSEARCH_INDEX_NAME", "orig_idx")
         monkeypatch.setenv("ELASTICSEARCH_HOSTS", '["http://orig:9200"]')
@@ -416,22 +570,35 @@ class TestRunnerEnv:
 # ---------------------------------------------------------------------------
 
 
-class TestGoldenSetV1:
+class TestGoldenSetV15:
     @pytest.fixture(scope="class")
     def gs(self):
         return load_golden_set(_GOLDEN_V1)
 
     def test_scale_and_shape(self, gs):
-        assert 20 <= len(gs.items) <= 30
+        assert len(gs.items) == 80
         positives = gs.positive_items()
         negatives = gs.negative_items()
-        assert len(positives) >= 20
-        assert len(negatives) >= 3
-        assert sum(1 for it in positives if it.near_miss) >= 20  # near-miss 起步要求
-        # 数字归一化对照对（#2.10 基线证据）必须存在：同一 gold、两种数字写法
+        assert len(positives) == 60
+        assert len(negatives) == 20
+        assert sum(1 for it in positives if it.near_miss) == 60  # 每条正例都带 near-miss
+        # 数字归一化对照对（#2.10 基线证据）必须保留：同一 gold、两种数字写法
         ids = {it.id for it in gs.items}
         assert {"clause_chinese_7", "clause_arabic_7"} <= ids
         assert {"clause_chinese_12", "clause_12_deletion"} <= ids
+
+    def test_type_distribution(self, gs):
+        by_type: dict[str, int] = {}
+        for it in gs.items:
+            by_type[it.type] = by_type.get(it.type, 0) + 1
+        assert by_type == {
+            "clause_lookup": 28,
+            "semantic": 18,
+            "numerical": 8,
+            "cross_doc": 4,
+            "conflict": 2,
+            "unanswerable": 20,
+        }
 
     def test_every_corpus_file_is_referenced(self, gs):
         referenced = set()

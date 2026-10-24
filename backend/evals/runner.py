@@ -39,13 +39,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
 from .chunking import split_corpus_file
+from .clauses import clause_definitions
 from .deterministic_embedding import (
     CI_EMBEDDING_DIM,
     CI_EMBEDDING_ID,
@@ -53,9 +56,9 @@ from .deterministic_embedding import (
 )
 from .golden import GoldenSet, GoldenSetError, load_golden_set
 from .harness import RetrievalObservation, run_eval
-from .report import build_report, write_json, write_markdown
+from .report import build_report, render_v15_report, write_json, write_markdown
 
-DEFAULT_GOLDEN = Path(__file__).resolve().parent / "golden_set" / "clause_set_v1.json"
+DEFAULT_GOLDEN = Path(__file__).resolve().parent / "golden_set" / "clause_set_v1_5.json"
 DEFAULT_INDEX = "docmind_knowledge_eval_v1"
 DEFAULT_CI_INDEX = "docmind_knowledge_eval_ci_v1"
 DEFAULT_ORG_ID = 9901
@@ -82,7 +85,13 @@ CI_METRIC_SPECS: tuple[tuple[str, str, str], ...] = (
 )
 
 # 报告 meta 与基线 protocol 必须逐键一致的协议字段（防拿 apples 对 oranges）。
-PROTOCOL_KEYS: tuple[str, ...] = ("embedding_mode", "top_k", "dataset_id", "dataset_version")
+PROTOCOL_KEYS: tuple[str, ...] = (
+    "embedding_mode",
+    "retriever_mode",
+    "top_k",
+    "dataset_id",
+    "dataset_version",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -141,9 +150,33 @@ def build_parser() -> argparse.ArgumentParser:
     sp_run.add_argument("--top-k", type=int, default=None, help="覆盖数据集 top_k")
     sp_run.add_argument("--out", default=DEFAULT_OUT_DIR, help="报告输出目录")
     sp_run.add_argument(
+        "--retriever",
+        choices=("hybrid", "dense"),
+        default="hybrid",
+        help=(
+            "检索基线：hybrid=HybridRetriever（关键词+向量+RRF/MMR+后处理，CI 门禁口径）；"
+            "dense=纯向量余弦 top-k（无关键词/RRF/后处理，v1.5 对照基线）"
+        ),
+    )
+    sp_run.add_argument(
         "--allow-empty",
         action="store_true",
         help="索引里没有该组织的数据时也继续跑（默认拒绝，防止产出误导性的全 miss 报告）",
+    )
+
+    sp_report = sub.add_parser(
+        "report",
+        help="生成 v1.5 汇总报告（dense vs hybrid per-slice + 失败分类）",
+    )
+    sp_report.add_argument("--hybrid", required=True, help="hybrid run 的 latest.json")
+    sp_report.add_argument("--dense", default=None, help="dense run 的 latest.json（可选）")
+    sp_report.add_argument(
+        "--out", default="evals/reports/v1.5", help="汇总报告输出目录（写 comparison.md）"
+    )
+    sp_report.add_argument(
+        "--report-md",
+        default=None,
+        help="同时把同一份 Markdown 写到该路径（如 evals/REPORT.md）",
     )
 
     sp_cmp = sub.add_parser(
@@ -230,6 +263,16 @@ def _load_golden(args: argparse.Namespace) -> GoldenSet | None:
 # ---------------------------------------------------------------------------
 
 
+def _corpus_index(golden: GoldenSet) -> dict[str, list[tuple[str, set[str]]]]:
+    """语料 → {文件名: [(chunk, 定义位集合), ...]}（check 的权威口径）。"""
+    index: dict[str, list[tuple[str, set[str]]]] = {}
+    for fname in golden.corpus_files:
+        text = (golden.corpus_dir / fname).read_text(encoding="utf-8")
+        chunks = split_corpus_file(text)
+        index[fname] = [(chunk, clause_definitions(chunk)) for chunk in chunks]
+    return index
+
+
 def _cmd_check(args: argparse.Namespace, golden: GoldenSet) -> int:
     positives = golden.positive_items()
     negatives = golden.negative_items()
@@ -241,7 +284,36 @@ def _cmd_check(args: argparse.Namespace, golden: GoldenSet) -> int:
     print(f"  条目: {len(golden.items)}（正例 {len(positives)} + 负例 {len(negatives)}）")
     print(f"  声明 near-miss 的正例: {nm_count}")
     print(f"  类型分布: {json.dumps(by_type, ensure_ascii=False)}")
-    print(f"  语料: {len(golden.corpus_files)} 个文件 @ {golden.corpus_dir}")
+
+    corpus = _corpus_index(golden)
+    total_chunks = sum(len(chunks) for chunks in corpus.values())
+    per_file_defs: dict[str, int] = {}
+    for fname, chunks in corpus.items():
+        defs = set().union(*(d for _, d in chunks)) if chunks else set()
+        per_file_defs[fname] = len(defs)
+    total_defs = sum(per_file_defs.values())
+    print(
+        f"  语料: {len(golden.corpus_files)} 个文件 @ {golden.corpus_dir}"
+        f" / {total_chunks} chunks / {total_defs} 条 clause-level 定义（按文件计）"
+    )
+    if args.verbose:
+        for fname, chunks in corpus.items():
+            print(f"    {fname}: {len(chunks)} chunks, {per_file_defs[fname]} 条定义")
+
+    # 题目引用必须能在语料的**恰好一个 chunk 定义位**上解析（重复定义会污染命中判定）。
+    problems: list[str] = []
+    for it in golden.items:
+        for loc in list(it.gold) + list(it.near_miss):
+            chunks = corpus[loc.file]
+            defining = [chunk for chunk, defs in chunks if loc.clause in defs]
+            if len(defining) != 1:
+                problems.append(f"{it.id}: {loc.label()} 定义位出现 {len(defining)} 次（应为 1）")
+    if problems:
+        print("[evals] golden 引用无法唯一解析：", file=sys.stderr)
+        for p in problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 1
+    print("  引用解析: 全部 gold/near-miss 均在语料中有唯一定义位 ✓")
     if args.verbose:
         for it in golden.items:
             gold = " ".join(loc.label() for loc in it.gold) or "-"
@@ -492,8 +564,100 @@ async def _cmd_seed_async(args: argparse.Namespace, golden: GoldenSet) -> int:
 
 
 # ---------------------------------------------------------------------------
-# run（live）
+# run（live / fake；hybrid 或 dense 基线）
 # ---------------------------------------------------------------------------
+
+
+def _corpus_digest(golden: GoldenSet) -> str:
+    """语料内容指纹（文件名+字节，排序后 sha256）——对外引用数字的语料标识。
+
+    **行尾归一化**：Windows 工作区（core.autocrlf）读到 CRLF，而 CI/Linux
+    checkout 是 LF；若直接对原始字节做 sha256，同一语料在两种环境下会得到
+    不同指纹，compare 的协议校验会把 CI 误判成 apples-or-oranges。因此先把
+    CRLF 归一为 LF 再哈希（内容语义不变，跨平台稳定）。
+    """
+    digest = hashlib.sha256()
+    for fname in sorted(golden.corpus_files):
+        digest.update(fname.encode("utf-8"))
+        digest.update(b"\0")
+        data = (golden.corpus_dir / fname).read_bytes().replace(b"\r\n", b"\n")
+        digest.update(data)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _git_commit() -> str | None:
+    """当前代码/语料提交（拿不到就返回 None，不阻断跑分）。"""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip()
+    except Exception:  # noqa: BLE001 — provenance 拿不到不阻断
+        pass
+    return None
+
+
+async def _dense_retrieve(embed, query: str, org_id: int, top_k: int) -> RetrievalObservation:
+    """dense-only 基线：查询向量 × ES cosine top-k（无关键词/RRF/后处理）。
+
+    与生产向量臂同样的 ``cosineSimilarity + 1.0`` 与 min_score=1.15；不做
+    HybridRetriever 的质量闸门——这正是「dense 基线」与「hybrid」的差异所在。
+    """
+    from app.core.elasticsearch import ElasticsearchTools
+
+    query_vector = await embed.embed_query(query)
+    if not query_vector:
+        return RetrievalObservation(results=[], strategy="dense", degraded=["embedding_empty"])
+    es_query = {
+        "size": top_k,
+        "min_score": 1.15,
+        "query": {
+            "script_score": {
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {"term": {"organization_id": str(org_id)}},
+                            {"exists": {"field": "embedding"}},
+                        ]
+                    }
+                },
+                "script": {
+                    "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
+                    "params": {"query_vector": query_vector},
+                },
+            }
+        },
+        "_source": [
+            "content",
+            "chunk_text",
+            "filename",
+            "document_id",
+            "chunk_index",
+            "upload_time",
+        ],
+    }
+    res = await ElasticsearchTools.search_documents(es_query)
+    hits = res.get("hits", {}).get("hits", [])
+    results = []
+    for hit in hits:
+        source = hit.get("_source") or {}
+        results.append(
+            {
+                "content": source.get("content") or source.get("chunk_text") or "",
+                "filename": source.get("filename") or "",
+                "document_id": source.get("document_id"),
+                "chunk_index": source.get("chunk_index"),
+                "score": hit.get("_score"),
+            }
+        )
+    return RetrievalObservation(results=results, strategy="dense")
 
 
 def _cmd_run_preflight(client_count: int, args: argparse.Namespace) -> int | None:
@@ -544,19 +708,28 @@ async def _cmd_run_async(args: argparse.Namespace, golden: GoldenSet) -> int:
             es_version = None
 
         top_k = args.top_k or golden.top_k
-        retriever = HybridRetriever(openai_client=None, embedding_provider=embed)
+        retriever_mode = getattr(args, "retriever", "hybrid")
+        if retriever_mode == "dense":
 
-        async def retrieve(query: str, k: int) -> RetrievalObservation:
-            docs, _qv, debug, degraded = await retriever.retrieve(query, args.org_id, k, debug=True)
-            strategy = debug.get("strategy") if isinstance(debug, dict) else None
-            return RetrievalObservation(
-                results=list(docs or []), strategy=strategy, degraded=list(degraded or [])
-            )
+            async def retrieve(query: str, k: int) -> RetrievalObservation:
+                return await _dense_retrieve(embed, query, args.org_id, k)
+
+        else:
+            retriever = HybridRetriever(openai_client=None, embedding_provider=embed)
+
+            async def retrieve(query: str, k: int) -> RetrievalObservation:
+                docs, _qv, debug, degraded = await retriever.retrieve(
+                    query, args.org_id, k, debug=True
+                )
+                strategy = debug.get("strategy") if isinstance(debug, dict) else None
+                return RetrievalObservation(
+                    results=list(docs or []), strategy=strategy, degraded=list(degraded or [])
+                )
 
         print(
             f"[evals] 跑分中：{len(golden.items)} 条 × top_k={top_k} "
             f"（index={settings.ELASTICSEARCH_INDEX_NAME} org={args.org_id} "
-            f"org 文档数={doc_count}，无 LLM 辅助，嵌入={mode}）"
+            f"org 文档数={doc_count}，检索器={retriever_mode}，无 LLM 辅助，嵌入={mode}）"
         )
         runs = await run_eval(golden.items, retrieve, top_k)
     finally:
@@ -567,7 +740,17 @@ async def _cmd_run_async(args: argparse.Namespace, golden: GoldenSet) -> int:
         fname: len(split_corpus_file((golden.corpus_dir / fname).read_text(encoding="utf-8")))
         for fname in golden.corpus_files
     }
-    if mode == "fake":
+    corpus_defs = 0
+    for fname in golden.corpus_files:
+        chunks = split_corpus_file((golden.corpus_dir / fname).read_text(encoding="utf-8"))
+        corpus_defs += len(set().union(*(clause_definitions(c) for c in chunks))) if chunks else 0
+    if retriever_mode == "dense":
+        retriever_label = (
+            f"DenseRetriever (cosine only, {mode} embedding {CI_EMBEDDING_ID}, LLM off)"
+            if mode == "fake"
+            else "DenseRetriever (cosine only, live embedding, LLM off)"
+        )
+    elif mode == "fake":
         retriever_label = f"HybridRetriever.retrieve (CI 确定性伪嵌入 {CI_EMBEDDING_ID}, LLM off)"
     else:
         retriever_label = "HybridRetriever.retrieve (live, LLM off)"
@@ -578,9 +761,13 @@ async def _cmd_run_async(args: argparse.Namespace, golden: GoldenSet) -> int:
         org_id=args.org_id,
         top_k=top_k,
         retriever_label=retriever_label,
+        retriever_mode=retriever_mode,
         embedding_mode=mode,
         es_version=es_version,
         corpus_chunks=corpus_chunks,
+        corpus_defs=corpus_defs,
+        corpus_digest=_corpus_digest(golden),
+        git_commit=_git_commit(),
     )
     out_dir = Path(args.out)
     json_path = write_json(report, out_dir / "latest.json")
@@ -770,6 +957,7 @@ def stamp_baseline(report: dict) -> dict:
         "tolerance": "0（固定协议下确定性：floor 实测≥基线、cap 实测≤基线，相等即通过）",
         "protocol": {
             "embedding_mode": meta["embedding_mode"],
+            "retriever_mode": meta.get("retriever_mode", "hybrid"),
             "embedding_impl": f"{CI_EMBEDDING_ID} (dim={CI_EMBEDDING_DIM})",
             "dataset_id": meta["dataset_id"],
             "dataset_version": meta["dataset_version"],
@@ -777,6 +965,7 @@ def stamp_baseline(report: dict) -> dict:
             "index": meta.get("index"),
             "es_version": meta.get("es_version"),
             "corpus_chunks": meta["corpus_chunks"],
+            "corpus_digest": meta.get("corpus_digest"),
             "seed": "recreate(先删后建) → bulk → refresh → 回读 count==写入块数 且 distinct doc==语料文件数",
         },
         "stamped_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -808,6 +997,12 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         except CompareError as e:
             print(f"[evals] 拒绝盖基线（fail-closed）：{e}", file=sys.stderr)
             return 2
+        # 保留旧基线的人工标识/描述（例如 v1.5 hybrid/dense 对照基线）——
+        # stamp 只负责指标与协议，不该把 baseline_id 改回 CI 门禁默认值。
+        if old is not None:
+            for key in ("baseline_id", "description"):
+                if old.get(key):
+                    new[key] = old[key]
         print(
             f"[evals] 盖基线（有意识操作）：{args.baseline}"
             "——改基线=显式 PR 行为，请把本文件的 diff 放进 PR 供评审。"
@@ -884,6 +1079,76 @@ def _cmd_compare(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# report（v1.5 汇总：per-slice 对比 + 失败分类）
+# ---------------------------------------------------------------------------
+
+
+def _report_protocol(report: dict) -> dict:
+    meta = report.get("meta")
+    if not isinstance(meta, dict):
+        raise CompareError("报告缺少 meta 对象")
+    for key in ("dataset_id", "dataset_version", "top_k", "retriever_mode", "embedding_mode"):
+        if key not in meta:
+            raise CompareError(f"报告 meta 缺少 {key}")
+    return meta
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    try:
+        hybrid = _load_json(args.hybrid, "hybrid 报告")
+        dense = _load_json(args.dense, "dense 报告") if args.dense else None
+    except CompareError as e:
+        print(f"[evals] 汇总报告前置检查失败：{e}", file=sys.stderr)
+        return 2
+    try:
+        hmeta = _report_protocol(hybrid)
+        if dense is not None:
+            dmeta = _report_protocol(dense)
+            for key in ("dataset_id", "dataset_version", "top_k"):
+                if hmeta.get(key) != dmeta.get(key):
+                    raise CompareError(
+                        f"hybrid/dense 报告协议不一致：{key} "
+                        f"{hmeta.get(key)!r} vs {dmeta.get(key)!r}"
+                    )
+            if (
+                hmeta.get("corpus_digest")
+                and dmeta.get("corpus_digest")
+                and hmeta["corpus_digest"] != dmeta["corpus_digest"]
+            ):
+                raise CompareError("hybrid/dense 报告的语料指纹不一致（不是同一个语料）")
+    except CompareError as e:
+        print(f"[evals] 汇总报告前置检查失败：{e}", file=sys.stderr)
+        return 2
+
+    markdown = render_v15_report(hybrid, dense)
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    comparison_path = out_dir / "comparison.md"
+    comparison_path.write_text(markdown, encoding="utf-8")
+    if args.report_md:
+        report_path = Path(args.report_md)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(markdown, encoding="utf-8")
+        print(f"[evals] REPORT 已写入：{report_path}")
+
+    agg = hybrid.get("aggregates") or {}
+    counts = agg.get("counts") or {}
+    print(
+        f"[evals] v1.5 汇总：hybrid ClauseHit@5={agg.get('clause_hit@5')} "
+        f"MRR={agg.get('mrr')} EmptyAcc={agg.get('empty_accuracy')} "
+        f"(正例 {counts.get('positives')} / 负例 {counts.get('negatives')})"
+    )
+    if dense is not None:
+        dagg = dense.get("aggregates") or {}
+        print(
+            f"[evals] v1.5 汇总：dense  ClauseHit@5={dagg.get('clause_hit@5')} "
+            f"MRR={dagg.get('mrr')} EmptyAcc={dagg.get('empty_accuracy')}"
+        )
+    print(f"[evals] 汇总报告：{comparison_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -896,6 +1161,8 @@ def main(argv: list[str] | None = None) -> int:
     _apply_env(args)
     if args.command == "compare":
         return _cmd_compare(args)
+    if args.command == "report":
+        return _cmd_report(args)
     golden = _load_golden(args)
     if golden is None:
         return 2

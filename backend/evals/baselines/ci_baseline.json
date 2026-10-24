@@ -4,40 +4,48 @@
   "tolerance": "0（固定协议下确定性：floor 实测≥基线、cap 实测≤基线，相等即通过）",
   "protocol": {
     "embedding_mode": "fake",
+    "retriever_mode": "hybrid",
     "embedding_impl": "hash-bigram-char-v1 (dim=256)",
-    "dataset_id": "docmind_clause_v1",
+    "dataset_id": "docmind_clause_v1_5",
     "dataset_version": 1,
     "top_k": 5,
     "index": "docmind_knowledge_eval_ci_v1",
     "es_version": "8.11.0",
     "corpus_chunks": {
       "01-knowledge-base-policy.md": 17,
-      "02-incident-response-handbook.md": 11
+      "02-incident-response-handbook.md": 11,
+      "03-data-security-law.md": 56,
+      "04-personal-information-protection-law.md": 75,
+      "05-cybersecurity-law.md": 82,
+      "06-archives-law.md": 54,
+      "07-cii-security-protection-regulation.md": 52,
+      "08-cybersecurity-incident-reporting-measures.md": 15
     },
+    "corpus_digest": "838fd02f107adc288b2a8884515ce674ad342e86edf4563c5941d1fb73097d9e",
     "seed": "recreate(先删后建) → bulk → refresh → 回读 count==写入块数 且 distinct doc==语料文件数"
   },
-  "stamped_at": "2026-10-09T06:21:34+00:00",
+  "stamped_at": "2026-10-24T05:18:01+00:00",
   "stamped_note": "由 python -m evals compare --update-baseline 生成",
   "metrics": {
     "clause_hit@1": {
       "kind": "floor",
-      "value": 0.8
+      "value": 0.7
     },
     "clause_hit@3": {
       "kind": "floor",
-      "value": 0.84
+      "value": 0.7666666666666667
     },
     "clause_hit@5": {
       "kind": "floor",
-      "value": 0.84
+      "value": 0.8
     },
     "near_miss@5": {
       "kind": "cap",
-      "value": 0.16666666666666666
+      "value": 0.25
     },
     "mrr": {
       "kind": "floor",
-      "value": 0.82
+      "value": 0.74
     },
     "empty_accuracy": {
       "kind": "floor",
