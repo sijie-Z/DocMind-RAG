@@ -1,7 +1,7 @@
 """fork 序号计数器 + 幂等键唯一约束（issue #499）。
 
 Revision ID: 016_fork_seq_idempotency
-Revises: 014_api_keys
+Revises: 015_webhook_lease_fencing
 
 本迁移是 issue #499（Session Fork 契约收口）的增量：
 
@@ -25,9 +25,8 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "016_fork_seq_idempotency"
-# 本地分支：#497 并行占用 015_webhook_lease_fencing；同步轮在 #497 合并后
-# 改为 down_revision = "015_webhook_lease_fencing"。禁止多 head。
-down_revision = "014_api_keys"
+# 同步轮：#497 已合并，016 接在 015_webhook_lease_fencing 之后（develop 单 head）。
+down_revision = "015_webhook_lease_fencing"
 branch_labels = None
 depends_on = None
 

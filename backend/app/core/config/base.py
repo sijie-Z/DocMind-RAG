@@ -24,10 +24,24 @@ class BaseAppSettings(BaseSettings):
     HOST: str = "0.0.0.0"  # nosec B104 - 容器内需绑定全部网卡，可由环境变量覆盖
     PORT: int = 8000
 
+    # ── 数据库迁移（issue #495）────────────────────────────────────────────
+    # 启动期 schema guard：数据库 alembic_version 与迁移 head 不一致时拒绝启动
+    # （exit 2）。迁移本身由 compose 一次性 migrate 服务 / K8s Job 串行执行，
+    # 不依赖下面两个开关；它们只控制「启动期是否校验 / 是否兜底自动迁移」。
+    SCHEMA_GUARD: bool = True
+    # 兜底自动迁移：仅显式打开时才在启动期执行 alembic upgrade head（审计日志）。
+    # 默认关闭——多个 backend/worker 并发启动时各自迁移会竞争，迁移必须串行。
+    AUTO_MIGRATE: bool = False
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/docmind.log"
     LOG_JSON: bool = True
+    # SQL 语句回显开关（issue #493）：与 DEBUG 解耦，默认关闭。SQLAlchemy 在
+    # echo=True 时会往具名 logger ``sqlalchemy.engine.Engine`` 挂
+    # ``StreamHandler(sys.stdout)``——stdio 协议进程的 stdout 只允许协议帧，
+    # 因此不得再用 DEBUG 顺带打开 SQL 回显；需要排障时显式置 true。
+    SQL_ECHO: bool = False
 
     # Request ID —— 头名不是配置项（issue #242 已删除原 REQUEST_ID_HEADER 字段）：
     # X-Request-ID 是「前端 request.ts ↔ CORS 白名单 ↔ RequestIDMiddleware 默认参」
@@ -98,8 +112,10 @@ class BaseAppSettings(BaseSettings):
     COMMANDS_ENABLED: bool = True
 
     # ── SDK / JSON-RPC / SSE 续传（issue #480）────────────────────────────
-    # ``POST /api/v1/rpc`` 开关（仅 web profile 的 agent bundle 挂载时才可能生效）。
-    RPC_HTTP_ENABLED: bool = False
+    # ``POST /api/v1/rpc`` 开关（issue #493：默认开启）。仅构建了 FastAPI app
+    # 的入口（web 等）才会挂载该路由；sdk profile 只跑 stdio、不构建 HTTP app，
+    # 因此不受本开关影响。关闭时端点如实 404。
+    RPC_HTTP_ENABLED: bool = True
     # HTTP 批量请求上限（issue §5.3：批量 ≤ 20）。
     RPC_BATCH_MAX: int = 20
     # stdio NDJSON 单行上限（1MB）。
@@ -146,9 +162,13 @@ class BaseAppSettings(BaseSettings):
     WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: int = 300
     # 全局 body 上限（规则 max_body_bytes 只能收紧到不高于此值）。
     WEBHOOK_MAX_BODY_BYTES: int = 1048576
-    # 每规则默认每分钟限流（规则可单独下调）。
+    # 每规则默认每分钟限流（规则可单独下调）。未知 rule_id 的请求也按此值
+    # 以 ``unknown:{ip}`` 桶计数（issue #497：限流先于验签，坏签名同样消耗配额）。
     WEBHOOK_RATE_LIMIT_PER_MINUTE: int = 60
     # outbox poll 间隔（秒）。
     WEBHOOK_WORKER_POLL_SECONDS: int = 2
     # 有界重试次数；达到后 failed + next_attempt_at=NULL（终态，可被同 id 重投重置）。
     WEBHOOK_MAX_ATTEMPTS: int = 3
+    # session_mode=reuse 命中后加载的历史消息条数上限（issue #497）：最近 N 条，
+    # 按 agent 聊天格式传入 AgentService.chat(history=...)。
+    WEBHOOK_REUSE_HISTORY_LIMIT: int = 20

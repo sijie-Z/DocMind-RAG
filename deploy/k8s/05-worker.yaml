@@ -15,6 +15,18 @@ spec:
       labels:
         app: docmind-worker
     spec:
+      # issue #495：同 03-backend-deployment.yaml —— 迁移只在 migrate Job 执行；
+      # 这里只读校验 schema 是否已到 head，未到则 Pod 不启动（fail-closed）。
+      initContainers:
+        - name: schema-check
+          image: docmind-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "scripts/check_schema.py"]
+          envFrom:
+            - configMapRef:
+                name: docmind-config
+            - secretRef:
+                name: docmind-secrets
       containers:
         - name: worker
           image: docmind-backend:latest

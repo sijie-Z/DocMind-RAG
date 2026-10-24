@@ -72,12 +72,12 @@ async def test_validate_rejects_user_and_org_mismatch(db_factory, key_file):
     user_error = await sdk_module._validate_api_key_identity(
         raw, org_id=ORG_ID, user_id=USER_ID + 1, db_factory=db_factory
     )
-    assert user_error is not None and "user_id" in user_error
+    assert user_error == sdk_module.IDENTITY_USER_MISMATCH
 
     org_error = await sdk_module._validate_api_key_identity(
         raw, org_id=ORG_ID + 1, user_id=USER_ID, db_factory=db_factory
     )
-    assert org_error is not None and "org_id" in org_error
+    assert org_error == sdk_module.IDENTITY_ORG_MISMATCH
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_validate_rejects_invalid_key(db_factory):
     error = await sdk_module._validate_api_key_identity(
         "dm_not-a-real-key", org_id=ORG_ID, user_id=USER_ID, db_factory=db_factory
     )
-    assert error is not None and "无效" in error
+    assert error == sdk_module.IDENTITY_INVALID
 
 
 def _args(key_file: str | None) -> argparse.Namespace:
@@ -99,7 +99,7 @@ def test_entrypoint_exits_2_with_empty_stdout_on_mismatch(tmp_path, monkeypatch,
     path.write_text("dm_whatever\n", encoding="utf-8")
 
     async def _mismatch(*_args, **_kwargs):
-        return "--api-key-file 的 API Key 属于其他用户（user_id 不匹配）"
+        return sdk_module.IDENTITY_USER_MISMATCH
 
     monkeypatch.setattr(sdk_module, "_validate_api_key_identity", _mismatch)
     with pytest.raises(SystemExit) as exc:
@@ -108,6 +108,27 @@ def test_entrypoint_exits_2_with_empty_stdout_on_mismatch(tmp_path, monkeypatch,
     captured = capsys.readouterr()
     assert captured.out == "", "失败路径 stdout 不得有协议帧"
     assert "user_id" in captured.err
+    assert "dm_whatever" not in captured.err
+
+
+def test_entrypoint_stderr_never_contains_api_key(tmp_path, monkeypatch, capsys):
+    """校验失败时 stderr 只有固定文案：key 明文/前缀不得出现（CodeQL）。"""
+    path = tmp_path / "key.txt"
+    raw_key = "dm_super-secret-key-material-0123456789"
+    path.write_text(raw_key + "\n", encoding="utf-8")
+
+    async def _mismatch(_raw_key, *, org_id, user_id, db_factory=None):
+        return sdk_module.IDENTITY_ORG_MISMATCH
+
+    monkeypatch.setattr(sdk_module, "_validate_api_key_identity", _mismatch)
+    with pytest.raises(SystemExit) as exc:
+        sdk_module.run(_args(str(path)))
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "org_id" in captured.err
+    assert raw_key not in captured.err
+    assert raw_key[:12] not in captured.err
 
 
 def test_entrypoint_exits_2_when_key_file_missing(tmp_path, capsys):

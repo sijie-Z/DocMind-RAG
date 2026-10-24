@@ -56,6 +56,23 @@ def require_scope(scope: str):
     return _checker
 
 
+async def require_jwt_user(current_user: User = Depends(get_current_user)) -> User:
+    """API Key 管理端点专用门禁：``dm_`` key 一律 403，只允许 JWT 会话（issue #496）。
+
+    API Key 是「程序凭据」，管理 key 本身必须回到人（JWT）的会话里操作——
+    否则一把泄露的 key 就能自行铸造/吊销其它 key。判定与 ``require_scope`` 同源：
+    ``api_key_id`` 或任意容器类型的 ``api_key_scopes`` 只会在
+    ``api_key_service.authenticate`` 成功时挂到 User 上；JWT 路径两者都不存在，
+    纵深防御地同时检查两个标记，避免将来新增认证路径只挂其一时放行。
+    """
+    scopes = getattr(current_user, "api_key_scopes", None)
+    if getattr(current_user, "api_key_id", None) is not None or isinstance(
+        scopes, (list, tuple, set, frozenset)
+    ):
+        raise AuthorizationError("API Key 不能管理 API Key，请使用 JWT 登录会话操作")
+    return current_user
+
+
 _optional_bearer = HTTPBearer(auto_error=False)
 
 

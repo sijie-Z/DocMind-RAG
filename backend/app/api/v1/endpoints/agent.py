@@ -1423,7 +1423,8 @@ async def list_sessions(
     # 普通默认值即为查询参数；不用 Query(None)，否则直接调用（单测）会拿到
     # Query 对象而不是 None（issue #476 评审口径）。
     parent_session_id: str | None = None,
-    current_user: User = Depends(get_current_user),
+    # issue #496：会话列表读取需要 chat:read。
+    current_user: User = Depends(require_scope("chat:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """List agent sessions for the current user."""
@@ -1537,7 +1538,8 @@ async def create_session(
 @router.get("/sessions/{session_id}")
 async def get_session(
     session_id: str,
-    current_user: User = Depends(get_current_user),
+    # issue #496：按 id 读取会话需要 chat:read。
+    current_user: User = Depends(require_scope("chat:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Get an agent session with its messages."""

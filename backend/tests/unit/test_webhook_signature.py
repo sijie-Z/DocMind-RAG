@@ -165,6 +165,19 @@ class TestVerifySignature:
             with pytest.raises(AuthenticationError):
                 verify_signature(b"{}", headers, [secret])
 
+    def test_webhook_id_is_mandatory(self):
+        """issue #497：webhook-id 是 Standard Webhooks 必需头（签名内容含它）。
+
+        缺失时即使 timestamp/signature 齐全也无法验签 → 401；这使旧
+        「缺 id 用 body sha256 幂等」分支不可达，因此该分支已删除。
+        """
+        secret = _new_secret()
+        body = b'{"event":"ping"}'
+        headers = _headers(secret, body)
+        headers.pop("webhook-id")
+        with pytest.raises(AuthenticationError):
+            verify_signature(body, headers, [secret])
+
     def test_multiple_signatures_any_match_passes(self):
         signer, verifier = _new_secret(), _new_secret()
         body = b"{}"
@@ -370,20 +383,26 @@ class TestStartupFailClosed:
             loader.reset_settings()
 
 
-# ── 幂等键 ───────────────────────────────────────────────────────────
+# ── 幂等键（issue #497：webhook-id 必需，body-hash 兜底删除）────────────
 
 
 class TestIdempotencyKey:
-    def test_webhook_id_preferred(self):
-        assert derive_idempotency_key("msg_1", b"body") == "msg_1"
+    def test_webhook_id_returned_verbatim(self):
+        assert derive_idempotency_key("msg_1") == "msg_1"
 
-    def test_missing_webhook_id_uses_body_hash(self):
-        body = b'{"a":1}'
-        assert derive_idempotency_key(None, body) == hashlib.sha256(body).hexdigest()
+    def test_max_length_webhook_id_accepted(self):
+        assert derive_idempotency_key("m" * 128) == "m" * 128
 
-    def test_overlong_webhook_id_falls_back_to_hash(self):
-        body = b"x"
-        assert derive_idempotency_key("m" * 129, body) == hashlib.sha256(body).hexdigest()
+    def test_missing_webhook_id_rejected(self):
+        with pytest.raises(ValidationError):
+            derive_idempotency_key(None)
+        with pytest.raises(ValidationError):
+            derive_idempotency_key("")
+
+    def test_overlong_webhook_id_rejected(self):
+        """旧实现会静默退化为 body sha256；#497 起显式 400，不再语义漂移。"""
+        with pytest.raises(ValidationError):
+            derive_idempotency_key("m" * 129)
 
 
 # ── body 上限 ────────────────────────────────────────────────────────
@@ -449,3 +468,19 @@ class TestRateLimit:
         rule = SimpleNamespace(id=f"rl-{time.time_ns()}", rate_limit_per_minute=1)
         await enforce_rate_limit(rule, "1.1.1.1")
         await enforce_rate_limit(rule, "2.2.2.2")
+
+    @pytest.mark.asyncio
+    async def test_unknown_rule_uses_unknown_bucket_and_global_limit(self, monkeypatch):
+        """issue #497：未知 rule_id 以 ``unknown:{ip}`` 桶 + 全局默认限额计数。"""
+        from app.services import webhook_service as svc
+
+        monkeypatch.setattr(settings, "WEBHOOK_RATE_LIMIT_PER_MINUTE", 2)
+        svc._memory_rate.clear()
+        ip = "203.0.113.77"  # 专用 IP，避免与其它用例的窗口计数互扰
+        await enforce_rate_limit(None, ip)
+        await enforce_rate_limit(None, ip)
+        with pytest.raises(RateLimitError):
+            await enforce_rate_limit(None, ip)
+        # 不同未知 rule 共用同一 unknown 桶（计数不随 rule_id 变化）
+        with pytest.raises(RateLimitError):
+            await enforce_rate_limit(None, ip)

@@ -3,7 +3,7 @@
 .PHONY: help dev dev-backend dev-frontend install-backend install-frontend
 .PHONY: test test-backend test-frontend lint build build-frontend
 .PHONY: eval eval-check eval-ci eval-ci-baseline
-.PHONY: docker-up docker-down docker-logs docker-build db-migrate
+.PHONY: docker-up docker-down docker-logs docker-build docker-migrate db-migrate
 .PHONY: clean clean-logs check
 
 SHELL := /bin/bash
@@ -104,6 +104,9 @@ docker-build: ## Build Docker images
 	cd $(FRONTEND_DIR) && docker build -t docmind-frontend .
 
 docker-restart: docker-down docker-up ## Restart all Docker services
+
+docker-migrate: ## Run Alembic migrations via the one-shot compose migrate service (issue #495)
+	cd $(BACKEND_DIR) && docker compose --env-file .env.docker run --rm migrate
 
 # === Database ===
 

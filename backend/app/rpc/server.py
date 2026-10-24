@@ -1,11 +1,12 @@
-"""stdio NDJSON 循环（issue #480 §5.5）。
+"""stdio NDJSON 循环（issue #480 §5.5，issue #493 运行时硬化）。
 
 约束：
 - stdout **只**允许协议帧：真实 stdout 交给 :class:`ProtocolWriter`，
   ``sys.stdout`` 指向 stderr（第三方 ``print`` 不会污染协议）；
+- 进入循环前严格初始化 Redis/DB：不可用 → stderr 说明 + 退出码 2，不静默降级；
 - 单行上限 ``RPC_LINE_MAX_BYTES``（1MB），超限行丢弃并回 -32600；
 - stdin EOF / SIGTERM / SIGINT / ``shutdown`` 都走同一条优雅收尾：
-  取消运行中任务 → 拒绝 pending 服务端请求 → 关闭 DB/Redis。
+  取消运行中任务 → 拒绝 pending 服务端请求 → 关闭 DB/Redis → 回收 stdin 读线程。
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import signal
 import sys
 import threading
@@ -20,6 +22,8 @@ from typing import Any, TextIO
 
 from app.core.config import settings
 from app.core.error_mapping import JSONRPC_INVALID_REQUEST, JSONRPC_PARSE_ERROR
+from app.core.log_safety import log_safe
+from app.core.stdio import configure_stdio_stdout, get_protocol_stdout
 from app.rpc.dispatcher import RPCService
 
 logger = logging.getLogger(__name__)
@@ -38,16 +42,96 @@ class ProtocolWriter:
             self._stream.write(line)
             self._stream.flush()
 
+    def flush(self) -> None:
+        """同步 flush 真实 stdout（收尾兜底；send 已逐帧 flush）。"""
+        try:
+            self._stream.flush()
+        except Exception:  # noqa: BLE001 - 收尾 flush 失败不影响退出码
+            logger.warning("Protocol stdout flush failed", exc_info=True)
+
+
+async def initialize_stdio_dependencies() -> None:
+    """stdio 运行时依赖：Redis 严格初始化 + 数据库初始化（issue #493）。
+
+    cancel 旗与 prompt 幂等都依赖 Redis；不可用时必须 fail-fast（由
+    :func:`run_stdio` 转成 stderr 说明 + 退出码 2），不得静默降级为"无 Redis 继续跑"。
+    """
+    from app.core.database import init_db
+    from app.core.redis import init_redis_strict
+
+    await init_redis_strict()
+    await init_db()
+
+
+def _cancel_synchronous_stdin_read(reader: threading.Thread) -> bool:
+    """Windows：用 ``CancelSynchronousIo`` 取消读线程阻塞中的 ReadFile（issue #493）。
+
+    成功时 ``readline`` 以 ``OSError`` 返回，读线程随即退出；非 Windows 或调用
+    失败返回 False（由调用方按 daemon 兜底）。
+    """
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenThread.restype = wintypes.HANDLE
+        kernel32.CancelSynchronousIo.argtypes = [wintypes.HANDLE]
+        kernel32.CancelSynchronousIo.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        thread_id = getattr(reader, "native_id", None)
+        if thread_id is None:
+            return False
+        handle = kernel32.OpenThread(0x1FFFFF, False, int(thread_id))  # THREAD_ALL_ACCESS
+        if not handle:
+            return False
+        try:
+            return bool(kernel32.CancelSynchronousIo(handle))
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:  # noqa: BLE001 - 尽力而为，失败由 daemon 兜底
+        logger.debug("CancelSynchronousIo failed", exc_info=True)
+        return False
+
+
+def _release_stdin_reader(reader: threading.Thread) -> None:
+    """收尾 stdin 读线程（issue #493：shutdown 必须能干净退出）。
+
+    1) 先 ``sys.stdin.detach()`` 解除 TextIOWrapper 对底层 buffer 的所有权：
+       即使读线程仍阻塞在 ``readline``，解释器收尾也不会去 close 一个持有锁的
+       BufferedReader（否则 Windows 会 ``Fatal Python error: _enter_buffered_busy``）。
+       **绝不能** ``os.close(sys.stdin.fileno())``——Windows 上 CRT 的 fd 锁被
+       阻塞读持有，close 会让收尾线程永久阻塞（评审 blocker B1，实测 >12s 不返回）。
+    2) Windows 用 ``CancelSynchronousIo`` 取消阻塞中的 ReadFile，让读线程真正
+       退出；POSIX 无等价机制，线程保持 daemon（进程退出即回收）。join 带上限，
+       收尾绝不被卡死。仅当 ``sys.stdin`` 仍是进程原始 stdin 时才动它，避免
+       误伤嵌入了 ``run_stdio`` 的宿主进程。
+    """
+    if sys.stdin is sys.__stdin__:
+        try:
+            sys.stdin.detach()
+        except (AttributeError, OSError, ValueError):
+            pass
+    if reader.is_alive():
+        _cancel_synchronous_stdin_read(reader)
+    reader.join(timeout=0.5)
+    if reader.is_alive():
+        logger.debug("stdin reader still blocked at exit; daemon thread reclaimed on exit")
+
 
 def _stderr_only_stdout(requested_stdout: TextIO) -> None:
-    """把 ``sys.stdout`` 重定向到 stderr，并迁移已挂在真实 stdout 的日志 handler。"""
-    sys.stdout = sys.stderr
-    root = logging.getLogger()
-    for handler in root.handlers:
-        if isinstance(handler, logging.StreamHandler) and getattr(handler, "stream", None) is (
-            requested_stdout
-        ):
-            handler.setStream(sys.stderr)
+    """把 ``sys.stdout`` 重定向到 stderr，并迁移已挂在真实 stdout 的日志 handler。
+
+    薄封装 :func:`app.core.stdio.configure_stdio_stdout`（issue #493）：重定向与
+    handler 迁移逻辑集中在 import-safe 的 ``core.stdio``（root 与 sqlalchemy /
+    uvicorn / httpx 等具名 logger 一并迁移）。``requested_stdout`` 是调用方保存的
+    协议写端；正常情形下它就是当前 ``sys.stdout``。
+    """
+    configure_stdio_stdout()
 
 
 def _parse_error() -> dict[str, Any]:
@@ -73,10 +157,23 @@ async def run_stdio(
     is_superuser: bool = False,
     stdout: TextIO | None = None,
 ) -> int:
-    """运行 stdio JSON-RPC 循环，返回进程退出码。"""
-    real_stdout = stdout or sys.stdout
+    """运行 stdio JSON-RPC 循环，返回进程退出码。
+
+    进入循环前严格初始化 Redis/DB（issue #493）：失败打印 stderr 并返回 2，
+    绝不静默降级。``stdout`` 缺省时使用 ``configure_stdio_stdout()`` 保存的
+    协议写端（入口已重定向的情形）。
+    """
+    real_stdout = stdout or get_protocol_stdout() or sys.stdout
     _stderr_only_stdout(real_stdout)
     writer = ProtocolWriter(real_stdout)
+
+    try:
+        await initialize_stdio_dependencies()
+    except Exception as exc:  # noqa: BLE001 - 依赖初始化失败必须如实退出 2
+        logger.error("stdio 运行时依赖初始化失败: %s", log_safe(exc))
+        print(f"sdk 启动依赖初始化失败：{log_safe(exc)}", file=sys.stderr)
+        await _close_dependencies()
+        return 2
 
     service = RPCService(
         organization_id=organization_id,
@@ -94,14 +191,24 @@ async def run_stdio(
         max_bytes = int(settings.RPC_LINE_MAX_BYTES)
         while True:
             # 限制单次读入大小，超长行不整行进内存（多读 1 字节用于判定超限）。
-            raw = sys.stdin.buffer.readline(max_bytes + 1)
+            try:
+                raw = sys.stdin.buffer.readline(max_bytes + 1)
+            except (AttributeError, OSError, ValueError):
+                # 收尾时 fd 被关闭 / stdin 不可读（含 stdin=None 的宿主）：
+                # 按 EOF 处理。
+                raw = b""
             if raw is None:
                 raw = b""
-            loop.call_soon_threadsafe(line_queue.put_nowait, raw)
+            try:
+                loop.call_soon_threadsafe(line_queue.put_nowait, raw)
+            except RuntimeError:
+                # 事件循环已关闭（收尾）：静默退出，绝不在线程里抛栈。
+                return
             if not raw:
                 return
 
-    threading.Thread(target=_pump_stdin, name="rpc-stdin", daemon=True).start()
+    stdin_thread = threading.Thread(target=_pump_stdin, name="rpc-stdin", daemon=True)
+    stdin_thread.start()
 
     def _request_stop(*_args: Any) -> None:
         loop.call_soon_threadsafe(stop.set)
@@ -153,7 +260,9 @@ async def run_stdio(
             await service.on_disconnect()
         finally:
             await dispatcher.close()
+            writer.flush()
             await _close_dependencies()
+            _release_stdin_reader(stdin_thread)
     return 0
 
 

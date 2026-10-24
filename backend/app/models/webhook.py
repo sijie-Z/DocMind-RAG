@@ -13,7 +13,11 @@
 ``payload`` 列。issue 的字段清单只有 ``payload_hash``，但异步 outbox 处理必须
 在请求结束之后还原 payload（渲染 prompt / 解析 session_key），没有该列时
 poller 无法处理任何投递。``payload`` 存原始 JSON 文本，``payload_hash`` 仍是
-原始字节的 sha256（幂等兜底键）。
+原始字节的 sha256（审计/去重辅助；幂等键是 ``webhook-id`` 本身，见 issue #497）。
+
+``processing_token`` / ``lease_version`` 为 issue #497 新增的租约 fencing 列
+（迁移 ``015_webhook_lease_fencing``）：领取时轮换 token 并代数 +1，完成/失败
+写回都带 token + status 条件更新，超时重领后的旧 worker 写不出任何状态或消息。
 """
 
 from __future__ import annotations
@@ -142,7 +146,9 @@ class WebhookDelivery(Base):
     org_id: Mapped[int] = mapped_column(
         Integer, index=True, comment="组织ID（冗余，便于按组织查询）"
     )
-    idempotency_key: Mapped[str] = mapped_column(String(128), comment="webhook-id 或 body sha256")
+    idempotency_key: Mapped[str] = mapped_column(
+        String(128), comment="幂等键（Standard Webhooks 必需头 webhook-id，≤128）"
+    )
     status: Mapped[WebhookDeliveryStatus] = mapped_column(
         Enum(WebhookDeliveryStatus), default=WebhookDeliveryStatus.RECEIVED, comment="投递状态"
     )
@@ -157,6 +163,14 @@ class WebhookDelivery(Base):
     )
     processing_started_at: Mapped[datetime | None] = mapped_column(
         DateTime, comment="processing 租约起点（超 10 分钟可重领）"
+    )
+    # issue #497 §4：租约 fencing。每次领取轮换 token 并 lease_version+1；完成/
+    # 失败写回都带 (processing_token, status) 条件，旧 worker 的迟到写回落空。
+    processing_token: Mapped[str | None] = mapped_column(
+        String(36), comment="当前处理租约 token（fencing；每次领取轮换）"
+    )
+    lease_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0, comment="租约代数（每次领取+1）"
     )
     received_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), comment="受理时间"
