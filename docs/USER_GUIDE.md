@@ -4,7 +4,7 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
-> - 关键数字（39 个内置工具 / 26 个端点模块 / 34 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（本文自身当前不在锚点清单内）；
+> - 关键数字（31 个内置工具 / 默认注入 10 个工具 / 28 个端点模块 / 34 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -396,7 +396,7 @@ ADR-001 已把这条语义冻结（`docs/decisions/ADR-001-路线冻结.md` D5�
 
 ### 3.4 工具与 HITL 审批
 
-**工具**：所有工具通过 `@register_tool(name=...)` 自注册，共 **39 个内置工具**（`docs/facts.json` 的 `registered_tools`；14 个在 `core_tools.py`，25 个在 `tools/`），另有 MCP 动态接入。工具参数用 JSON Schema 描述，自动转成 OpenAI function-calling 格式；`tags` 用于配置面板筛选，敏感工具在 `DEFAULT_DISABLED_TOOLS` 中默认禁用（`AGENT_ARCHITECTURE.md`）。
+**工具**：所有工具通过 `@register_tool(name=...)` 自注册，共 **31 个内置工具**（`docs/facts.json` 的 `registered_tools`；11 个在 `core_tools.py`，20 个在 `tools/`；默认注入 10 个工具），另有 MCP 动态接入。工具参数用 JSON Schema 描述，自动转成 OpenAI function-calling 格式；`tags` 用于配置面板筛选，敏感工具在 `DEFAULT_DISABLED_TOOLS` 中默认禁用（`AGENT_ARCHITECTURE.md`）。
 
 **HITL（人在环）** 让 Agent 在「有风险的下一步」停下来等人拍板：
 

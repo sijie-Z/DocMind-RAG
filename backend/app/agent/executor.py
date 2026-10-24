@@ -18,6 +18,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from types import SimpleNamespace
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -29,7 +30,12 @@ from app.agent.events import AgentEvent
 from app.agent.hooks import HookContext, HookDecision
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, PlanStep
-from app.agent.registry import ToolResult, tool_registry
+from app.agent.registry import (
+    ToolResult,
+    canonical_tool_name,
+    canonicalize_tool_call,
+    tool_registry,
+)
 from app.agent.retry_policy import compute_backoff, get_policy
 from app.agent.run_context import RunContext
 from app.agent.usage import record_llm_usage
@@ -227,6 +233,68 @@ class Executor:
             logger.warning("cancel check failed: %s", e)
             return False
 
+    def _disabled_tool_names(self) -> set[str]:
+        """配置禁用清单（原样；schema 过滤与 skills 预检用规范名口径）。
+
+        issue #509 评审修正：旧名只阻断**旧名调用**（见 ``_call_disabled``），
+        不隐藏整个规范工具——避免升级用户被旧配置连带锁死整个伞形。
+        """
+        return set(getattr(self.config, "disabled_tools", None) or [])
+
+    def _call_disabled(self, tc: Any) -> bool:
+        """该调用是否命中禁用清单（origin 旧名或规范名任一命中）。"""
+        raw = self._disabled_tool_names()
+        origin = getattr(tc, "origin_name", None) or tc.function.name
+        return origin in raw or tc.function.name in raw
+
+    def _call_gated(self, tc: Any) -> bool:
+        """该调用是否被 enabled_predicate 门控（与 schema 注入面同源）。
+
+        issue #509 评审修正（P1）：门控不能只做“不广告”。模型幻觉/提示注入
+        发出一个当前未启用的工具时，执行层必须拒绝，否则 enable_delegation=False
+        仍可能真的派发子代理。
+        """
+        entry = tool_registry.get(canonical_tool_name(tc.function.name))
+        return entry is not None and not entry.is_enabled(self.config)
+
+    @staticmethod
+    def _canonicalize_tool_call(tc: Any) -> Any:
+        """issue #509：tool_call 先 canonicalize（规范名 + 别名默认参数）。
+
+        必须在任何判定（白名单 / disabled / hooks / 审批 / 账本 / SSE）之前运行。
+        返回原对象（非别名）或轻量代理；代理保留 executor 消费的 ``id`` /
+        ``function.name`` / ``function.arguments`` 三个字段，并记录 ``origin_name``
+        （旧名调用阻断用）。参数不是合法 JSON 时仍规范化名字（判定按规范名），
+        参数原样留给 serialization_error 分支。
+        """
+        function = getattr(tc, "function", None)
+        name = getattr(function, "name", "") or ""
+        raw_args = getattr(function, "arguments", "") or ""
+        try:
+            parsed = json.loads(raw_args) if raw_args else {}
+            if not isinstance(parsed, dict):
+                raise ValueError("arguments 不是 JSON 对象")
+        except (json.JSONDecodeError, ValueError):
+            canonical = canonical_tool_name(name)
+            if canonical == name:
+                return tc
+            return SimpleNamespace(
+                id=getattr(tc, "id", None),
+                origin_name=name,
+                function=SimpleNamespace(name=canonical, arguments=raw_args),
+            )
+        canonical, merged = canonicalize_tool_call(name, parsed)
+        if canonical == name and merged == parsed:
+            return tc
+        return SimpleNamespace(
+            id=getattr(tc, "id", None),
+            origin_name=name,
+            function=SimpleNamespace(
+                name=canonical,
+                arguments=json.dumps(merged, ensure_ascii=False),
+            ),
+        )
+
     def _filter_executable_calls(
         self,
         tool_calls: list[Any],
@@ -240,16 +308,18 @@ class Executor:
         executable: list[tuple[Any, dict[str, Any]]] = []
         # issue #206：配置禁用清单里的工具在主循环会被结构化拒绝（tool_disabled），
         # 不参与审批预检/账本登记——否则会为一个注定不执行的调用暂停审批。
-        disabled_tools = set(getattr(self.config, "disabled_tools", None) or [])
+        # issue #509：禁用/门控判定与执行层同源（_call_disabled / _call_gated）。
         for tc in tool_calls:
             name = tc.function.name
             if allowed_tool_names is not None and name not in allowed_tool_names:
                 continue
-            if name in disabled_tools:
+            if self._call_disabled(tc) or self._call_gated(tc):
                 continue
             try:
                 args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-            except json.JSONDecodeError:
+                if not isinstance(args, dict):
+                    continue
+            except (json.JSONDecodeError, ValueError):
                 continue
             executable.append((tc, args))
         return executable
@@ -402,12 +472,15 @@ class Executor:
 
     @staticmethod
     def _terminal_approval_forced(tool_name: str) -> bool:
-        """issue #477：terminal_* 在 TERMINAL_REQUIRE_APPROVAL=true 时强制审批。
+        """issue #477/#509：terminal 族在 TERMINAL_REQUIRE_APPROVAL=true 时强制审批。
 
-        只加强这一族工具的判定，不改变全局 approval_mode 语义；配置读取走
-        惰性 settings 代理，测试可 monkeypatch 切换。
+        issue #509：判定改为按注册表 ``tag/category == "terminal"``（见
+        ``approval.is_terminal_tool``），不再依赖 ``startswith("terminal_")`` ——
+        伞形名 / 别名 / 未来包装名不会漏掉强制审批。只加强这一族工具的判定，
+        不改变全局 approval_mode 语义；配置读取走惰性 settings 代理，测试可
+        monkeypatch 切换。
         """
-        if not str(tool_name).startswith("terminal_"):
+        if not approval.is_terminal_tool(tool_name):
             return False
         from app.core.config import settings
 
@@ -1461,7 +1534,8 @@ class Executor:
 
             if lf and llm_span:
                 tool_names = [
-                    tc.function.name for tc in (response.choices[0].message.tool_calls or [])
+                    canonical_tool_name(tc.function.name)
+                    for tc in (response.choices[0].message.tool_calls or [])
                 ]
                 llm_span.end(
                     output=response.choices[0].message.content or f"tool_calls: {tool_names}",
@@ -1515,6 +1589,10 @@ class Executor:
         # Process tool calls
         tool_results: list[dict[str, str]] = []
         turn_calls = message.tool_calls[: self.config.max_tool_calls_per_turn]
+        # issue #509（P0）：任何判定/执行/记录之前先 canonicalize。别名在这里
+        # 展开为规范名（+默认参数）后，后续 risk/hook/terminal/白名单/ledger/SSE
+        # 看到的全部是规范名——旧名无法绕过审批或把 high 工具伪装成 low。
+        turn_calls = [self._canonicalize_tool_call(tc) for tc in turn_calls]
         # C3a：call_id 每回合一次性确定（模型未给 id 时生成一次，登记与派发共用
         # 同一个值）——否则登记行与派发/结果行的 id 会对不上。
         call_ids = [tc.id or uuid.uuid4().hex[:16] for tc in turn_calls]
@@ -1523,8 +1601,10 @@ class Executor:
         # 工具列表只是"呈现给 LLM"的 schema 级过滤——执行层此前不校验名单，
         # 受限上下文里的模型凭空发出未列名工具（如 delegate_subtask）照样会被
         # 执行并逐级递归）。主代理 tool_tags=None → 不设限，行为不变。
+        # issue #509：白名单与 schema 同源（list_active_tools：tag ∩ disabled ∩
+        # enabled_predicate），不再手工复制过滤逻辑。
         allowed_tool_names = (
-            {t.name for t in tool_registry.list_tools(self.config.tool_tags)}
+            {t.name for t in tool_registry.list_active_tools(self.config)}
             if self.config.tool_tags
             else None
         )
@@ -1642,15 +1722,22 @@ class Executor:
             # issue #206：配置禁用清单在执行层兜底。工具 schema 过滤只影响
             # "呈现给 LLM 的列表"；模型凭空发出（幻觉）的禁用工具此前仍会执行。
             # 服务端强制合并（api/v1/endpoints/agent.py::_merge_disabled_tools）
-            # 的保证因此落到真正的派发点。
-            if func.name in (getattr(self.config, "disabled_tools", None) or []):
-                logger.warning("拒绝执行配置禁用清单中的工具: %s", func.name)
+            # 的保证因此落到真正的派发点。issue #509：旧名调用按 origin 阻断，
+            # 不连带禁用整个规范工具（见 _call_disabled）。
+            if self._call_disabled(tc):
+                origin = getattr(tc, "origin_name", None) or func.name
+                detail = (
+                    f"工具 {origin} 在禁用清单（disabled_tools）中，已拒绝执行"
+                    if origin == func.name
+                    else f"工具 {origin}（规范名 {func.name}）在禁用清单（disabled_tools）中，已拒绝执行"
+                )
+                logger.warning("拒绝执行配置禁用清单中的工具: %s (origin=%s)", func.name, origin)
                 AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
                 yield AgentEvent(
                     type="tool_error",
                     tool_name=func.name,
                     tool_call_id=tool_call_id,
-                    content=f"工具 {func.name} 在禁用清单（disabled_tools）中，已拒绝执行",
+                    content=detail,
                     plan_id=plan.id,
                     plan_step_id=step.id,
                     error_type="tool_disabled",
@@ -1662,29 +1749,57 @@ class Executor:
                         "error_type": "tool_disabled",
                     }
                 )
-                attempt_error_detail = (
-                    f"工具 {func.name} 在禁用清单（disabled_tools）中，已拒绝执行"
+                attempt_error_detail = detail
+                continue
+
+            # issue #509 评审修正（P1）：enabled_predicate 门控在执行层同样生效。
+            # 只把工具从 schema 移除而仍允许幻觉名执行，等于“关闭”只是不广告。
+            if self._call_gated(tc):
+                logger.warning("拒绝执行当前未启用的工具: %s", func.name)
+                AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
+                gated_detail = (
+                    f"工具 {func.name} 当前未启用（未在可选工具面 / enabled_predicate=false），"
+                    "已拒绝执行"
                 )
+                yield AgentEvent(
+                    type="tool_error",
+                    tool_name=func.name,
+                    tool_call_id=tool_call_id,
+                    content=gated_detail,
+                    plan_id=plan.id,
+                    plan_step_id=step.id,
+                    error_type="tool_gated",
+                )
+                tool_results.append(
+                    {
+                        "tool": func.name,
+                        "result": "工具当前未启用（未执行）",
+                        "error_type": "tool_gated",
+                    }
+                )
+                attempt_error_detail = gated_detail
                 continue
 
             # Parse arguments
             # 区分两种形态（issue #205）：
             #   空/None arguments —— 无参工具的合法形态，继续按 {} 执行；
-            #   JSON 解析失败    —— 绝不能用 {} 顶替后继续执行：那会把"模型发来的
-            #                      参数是垃圾"静默变成"工具没收到参数"，对可能带副
-            #                      作用的工具执行一次用户没要求的动作。显式报
-            #                      tool_error（错误码对齐 retry_policy 的
+            #   JSON 解析失败 / 非对象 —— 绝不能用 {} 顶替后继续执行：那会把
+            #                      "模型发来的参数是垃圾"静默变成"工具没收到参数"，
+            #                      对可能带副作用的工具执行一次用户没要求的动作。
+            #                      显式报 tool_error（错误码对齐 retry_policy 的
             #                      serialization_error）并跳过该调用。
             try:
                 args = json.loads(func.arguments) if func.arguments else {}
-            except json.JSONDecodeError as e:
-                logger.warning(f"Tool {func.name} 的 arguments 不是合法 JSON，已拒绝执行: {e}")
+                if not isinstance(args, dict):
+                    raise ValueError("arguments 不是 JSON 对象")
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Tool {func.name} 的 arguments 不是合法 JSON 对象，已拒绝执行: {e}")
                 AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
                 yield AgentEvent(
                     type="tool_error",
                     tool_name=func.name,
                     tool_call_id=tool_call_id,
-                    content=f"工具参数不是合法 JSON，已拒绝执行：{e}",
+                    content=f"工具参数不是合法 JSON 对象，已拒绝执行：{e}",
                     plan_id=plan.id,
                     plan_step_id=step.id,
                     retry_attempt=getattr(step, "retry_count", 0),
@@ -1697,7 +1812,7 @@ class Executor:
                         "error_type": "serialization_error",
                     }
                 )
-                attempt_error_detail = f"工具参数不是合法 JSON，已拒绝执行：{e}"
+                attempt_error_detail = f"工具参数不是合法 JSON 对象，已拒绝执行：{e}"
                 continue
 
             # ── Hooks（issue #474）：pre_execute 改写后的参数生效 ─────────────
@@ -1810,7 +1925,12 @@ class Executor:
                     # 挂上 run_context，声明了 `run_context` 形参的工具（注册表按
                     # 签名注入）即可经 usage.ctx_from_run_context 取到 ctx，
                     # 使任务级 total_tokens 包含工具内部的 LLM 调用。
-                    extra={"exec_ctx": ctx} if ctx is not None else {},
+                    # issue #509：skills 内部 execute_detailed 的 disabled_tools
+                    # 预检与执行层同源（见 tools/skills.py::_consume_tool_output）。
+                    extra={
+                        "disabled_tools": sorted(self._disabled_tool_names()),
+                        **({"exec_ctx": ctx} if ctx is not None else {}),
+                    },
                 )
                 raw_result = await asyncio.wait_for(
                     tool_registry.execute_detailed(
@@ -2120,26 +2240,24 @@ class Executor:
             self._consecutive_low_gain = 0
 
     def _get_step_tools(self, step: PlanStep) -> list[dict[str, Any]] | None:
-        """Get available tools for a step, filtered by config."""
+        """Get available tools for a step, filtered by config.
+
+        issue #509：单一来源 = ``tool_registry.build_tool_schemas(config)``
+        （tag ∩ 配置禁用 ∩ enabled_predicate；hidden 旧名永不注入）。
+        """
         if not self.config.enable_tools:
             return None
 
-        tools = tool_registry.to_openai_tools(self.config.tool_tags)
+        tools = tool_registry.build_tool_schemas(self.config)
         if not tools:
             return None
 
-        # Filter out disabled tools
-        if self.config.disabled_tools:
-            tools = [
-                t
-                for t in tools
-                if t.get("function", {}).get("name") not in self.config.disabled_tools
-            ]
-
-        # If step has a tool hint, prioritize by rearranging (hinted tool first)
-        if step.tool_hint:
+        # If step has a tool hint, prioritize by rearranging (hinted tool first).
+        # 旧名 hint 先 canonicalize（历史计划/学习技能可能仍带旧名）。
+        hint = canonical_tool_name(step.tool_hint) if step.tool_hint else ""
+        if hint:
             for i, t in enumerate(tools):
-                if t.get("function", {}).get("name") == step.tool_hint:
+                if t.get("function", {}).get("name") == hint:
                     tools.insert(0, tools.pop(i))
                     break
 
@@ -2155,7 +2273,7 @@ class Executor:
         wait_for，且它的超时路径会走干净的 ToolResult 语义；外层若同值，
         计时更早的外层可能抢先触发、绕开那条路径。
         """
-        entry = tool_registry.get(name)
+        entry = tool_registry.get(canonical_tool_name(name))
         if entry and entry.timeout:
             return float(entry.timeout) + 1.0
         return self.TOOL_TIMEOUT_SECONDS

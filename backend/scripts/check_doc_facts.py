@@ -14,9 +14,9 @@ N 种 SSE 事件 / N 个路由装饰器」曾多次滞后于代码演进（例�
 三层必须一致；任一层漂移即退出码 1。脚本零依赖（仅标准库），可在
 ci-hygiene 的轻量 job 中直接运行。
 
-docs/METRICS.md：必须存在，表格每行必须有 6 列且无空项，六项 facts 必须与
+docs/METRICS.md：必须存在，表格每行必须有 6 列且无空项，七项 facts 必须与
 docs/facts.json 同值。同一文档同一指标出现多个不同数字时**仅告警**（warn，
-不改变退出码），避免旧文档一次性全红；facts 六项不一致仍判失败。
+不改变退出码），避免旧文档一次性全红；facts 七项不一致仍判失败。
 
 派生口径：
     sse_event_types          app/agent/events.py 的 EventType = Literal[...]
@@ -26,9 +26,15 @@ docs/facts.json 同值。同一文档同一指标出现多个不同数字时**�
                              为 api_router.include_router(...) 调用数
     frontend_routes          frontend/src/router/index.ts 中路由记录 ``path:``
                              字符串字面量数（注释内的 path 不计）
-    registered_tools         app/agent 下经 @register_tool(name=...) 注册的工具数；
-                             只遍历 core_tools.py 与 tools/__init__.py 可达的
-                             模块（与运行时 import 面一致，未接线的文件不计）
+    registered_tools         app/agent 下经 @register_tool(name=...) 注册且**未隐藏**
+                             （hidden=False）的工具数；只遍历 core_tools.py 与
+                             tools/__init__.py 可达的模块（与运行时 import 面一致）。
+                             issue #509：合并/降级的旧名以 hidden=True 保留注册
+                             （不删工具），不计入对外「内置工具」口径。
+    default_tools            默认配置下实际注入 schema 的工具数：非 hidden、未声明
+                             enabled_predicate（= 需要显式 opt-in）、且不在
+                             config.DEFAULT_DISABLED_TOOLS 中的工具数。issue #509
+                             工具面收敛的目标常驻档（10–12）。
     http_route_decorators    app/api/v1/endpoints/** 中 @router.get/post/put/
                              patch/delete/head/options 装饰器总数
     websocket_route_decorators
@@ -62,16 +68,23 @@ FACT_KEYS = (
     "endpoint_modules",
     "frontend_routes",
     "registered_tools",
+    "default_tools",
     "http_route_decorators",
     "websocket_route_decorators",
 )
 
 # 需要在文档中至少出现一次的事实（HTTP 装饰器数不在对外文档里陈述，不强制）。
 REQUIRED_DOC_FACTS = frozenset(
-    {"sse_event_types", "endpoint_modules", "frontend_routes", "registered_tools"}
+    {
+        "sse_event_types",
+        "endpoint_modules",
+        "frontend_routes",
+        "registered_tools",
+        "default_tools",
+    }
 )
 
-# 对外口径的单一事实源（issue #513）：必须存在，六项 facts 与 facts JSON 同值。
+# 对外口径的单一事实源（issue #513）：必须存在，七项 facts 与 facts JSON 同值。
 METRICS_PATH = "docs/METRICS.md"
 METRICS_COLUMN_COUNT = 6  # 指标 | 值 | 口径 | 命令 | 日期 | 备注
 
@@ -79,6 +92,7 @@ METRICS_COLUMN_COUNT = 6  # 指标 | 值 | 口径 | 命令 | 日期 | 备注
 # 历史/别名写法（例如履历文档英文稿的 "N integrated tools"），只告警不判红。
 EXTRA_METRIC_PATTERNS: dict[str, tuple[str, ...]] = {
     "registered_tools": (r"(\d+) integrated tools",),
+    "default_tools": (r"(\d+) default tools",),
 }
 
 # 这些文档必然存在于仓库中：其中登记的锚点必须至少命中一次，防止「改写措辞
@@ -445,29 +459,47 @@ def _resolve_agent_module(module: str, agent_dir: Path) -> Path | None:
     return None
 
 
-def _registered_tool_name(decorator: ast.expr, path: Path, lineno: int) -> str | None:
+@dataclass(frozen=True)
+class ToolDecoratorInfo:
+    """一处 @register_tool 的静态元数据（issue #509 工具面口径）。"""
+
+    name: str
+    hidden: bool
+    gated: bool  # 声明了 enabled_predicate（= 需要显式 opt-in）
+
+
+def _registered_tool_info(decorator: ast.expr, path: Path, lineno: int) -> ToolDecoratorInfo | None:
     func = decorator.func if isinstance(decorator, ast.Call) else decorator
     func_name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
     if func_name != "register_tool":
         return None
     if not isinstance(decorator, ast.Call):
         raise DerivationError(f"{path}:{lineno}: @register_tool 必须带 name= 关键字")
+    name: str | None = None
+    hidden = False
+    gated = False
     for keyword in decorator.keywords:
         if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
             if isinstance(keyword.value.value, str):
-                return keyword.value.value
-    raise DerivationError(f"{path}:{lineno}: @register_tool 缺少字符串 name=，无法派生工具名")
+                name = keyword.value.value
+        elif keyword.arg == "hidden":
+            hidden = isinstance(keyword.value, ast.Constant) and keyword.value.value is True
+        elif keyword.arg == "enabled_predicate":
+            gated = True
+    if name is None:
+        raise DerivationError(f"{path}:{lineno}: @register_tool 缺少字符串 name=，无法派生工具名")
+    return ToolDecoratorInfo(name=name, hidden=hidden, gated=gated)
 
 
-def derive_registered_tool_names(agent_dir: Path) -> list[str]:
-    """按运行时 import 面遍历，返回 @register_tool(name=...) 注册的工具名。"""
+def derive_tool_decorators(agent_dir: Path) -> list[ToolDecoratorInfo]:
+    """按运行时 import 面遍历，返回全部 @register_tool（含 hidden）。"""
     seeds = [agent_dir / "core_tools.py", agent_dir / "tools" / "__init__.py"]
     for seed in seeds:
         if not seed.is_file():
             raise DerivationError(f"{agent_dir}: 缺少工具入口文件 {seed.name}")
     queue: list[Path] = list(seeds)
     visited: set[Path] = set()
-    names: list[str] = []
+    infos: list[ToolDecoratorInfo] = []
     seen: dict[str, Path] = {}
     while queue:
         path = queue.pop(0).resolve()
@@ -478,13 +510,15 @@ def derive_registered_tool_names(agent_dir: Path) -> list[str]:
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 for decorator in node.decorator_list:
-                    name = _registered_tool_name(decorator, path, node.lineno)
-                    if name is None:
+                    info = _registered_tool_info(decorator, path, node.lineno)
+                    if info is None:
                         continue
-                    if name in seen:
-                        raise DerivationError(f"工具名重复注册: {name!r}（{path} 与 {seen[name]}）")
-                    seen[name] = path
-                    names.append(name)
+                    if info.name in seen:
+                        raise DerivationError(
+                            f"工具名重复注册: {info.name!r}（{path} 与 {seen[info.name]}）"
+                        )
+                    seen[info.name] = path
+                    infos.append(info)
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 if node.module == _TOOLS_MODULE_PREFIX or node.module.startswith(
                     _TOOLS_MODULE_PREFIX + "."
@@ -503,9 +537,51 @@ def derive_registered_tool_names(agent_dir: Path) -> list[str]:
                         resolved = _resolve_agent_module(alias.name, agent_dir)
                         if resolved is not None:
                             queue.append(resolved)
-    if not names:
+    if not infos:
         raise DerivationError(f"{agent_dir}: 未找到任何 @register_tool 注册")
-    return names
+    return infos
+
+
+def derive_registered_tool_names(agent_dir: Path) -> list[str]:
+    """对外「内置工具」口径：全部注册中未隐藏（hidden=False）的工具名。"""
+    return [info.name for info in derive_tool_decorators(agent_dir) if not info.hidden]
+
+
+def derive_default_disabled_tools(config_path: Path) -> list[str]:
+    """从 app/agent/config.py 的 DEFAULT_DISABLED_TOOLS 字面量派生默认禁用清单。"""
+    tree = _parse_python(config_path)
+    for node in tree.body:
+        target = None
+        value = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign):
+            target, value = node.target, node.value
+        if isinstance(target, ast.Name) and target.id == "DEFAULT_DISABLED_TOOLS":
+            if not isinstance(value, ast.List):
+                raise DerivationError(
+                    f"{config_path}: DEFAULT_DISABLED_TOOLS 必须是字符串列表字面量"
+                )
+            names: list[str] = []
+            for element in value.elts:
+                if not (isinstance(element, ast.Constant) and isinstance(element.value, str)):
+                    raise DerivationError(f"{config_path}: DEFAULT_DISABLED_TOOLS 含非字符串字面量")
+                names.append(element.value)
+            return names
+    raise DerivationError(f"{config_path}: 未找到 DEFAULT_DISABLED_TOOLS 定义")
+
+
+def derive_default_tool_names(agent_dir: Path, config_path: Path) -> list[str]:
+    """默认 schema 注入面：非 hidden、无 enabled_predicate、且未被默认禁用。
+
+    口径约定：声明 ``enabled_predicate`` = 需要显式 opt-in（默认不注入）。
+    """
+    disabled = set(derive_default_disabled_tools(config_path))
+    return [
+        info.name
+        for info in derive_tool_decorators(agent_dir)
+        if not info.hidden and not info.gated and info.name not in disabled
+    ]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -559,6 +635,11 @@ def derive_all(root: Path = REPO_ROOT) -> dict[str, int]:
             derive_frontend_routes(root / "frontend" / "src" / "router" / "index.ts")
         ),
         "registered_tools": len(derive_registered_tool_names(backend / "app" / "agent")),
+        "default_tools": len(
+            derive_default_tool_names(
+                backend / "app" / "agent", backend / "app" / "agent" / "config.py"
+            )
+        ),
         "http_route_decorators": len(http),
         "websocket_route_decorators": len(websocket),
     }
@@ -585,6 +666,7 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
     DocAnchor("registered_tools", "README.md", r"Tool Registry \((\d+)\)", "工具数（架构图）"),
     DocAnchor("registered_tools", "README.md", r"\*\*(\d+) 个内置工具\*\*", "工具数（工具清单）"),
     DocAnchor("registered_tools", "README.md", r"合计 (\d+) 个内置工具", "工具数（目录树合集）"),
+    DocAnchor("default_tools", "README.md", r"默认注入 (\d+) 个工具", "默认注入工具数（工具清单）"),
     DocAnchor("endpoint_modules", "README.md", r"(\d+) 个端点模块", "端点模块数（API 层）"),
     DocAnchor(
         "endpoint_modules", "README.md", r"注册 (\d+) 个模块", "端点模块数（目录树 router.py）"
@@ -620,6 +702,12 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         r"\((\d+) built-in tools total\)",
         "tool count (tree)",
     ),
+    DocAnchor(
+        "default_tools",
+        "README_EN.md",
+        r"(\d+) tools are injected by default",
+        "default tool count (catalog)",
+    ),
     DocAnchor("endpoint_modules", "README_EN.md", r"(\d+) endpoint modules", "endpoint modules"),
     DocAnchor(
         "endpoint_modules",
@@ -652,6 +740,12 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         "工具数（指标卡）",
     ),
     DocAnchor("registered_tools", "docs/architecture.html", r"内置 (\d+) 个", "工具数（工具系统）"),
+    DocAnchor(
+        "default_tools",
+        "docs/architecture.html",
+        r"默认注入 (\d+) 个",
+        "默认注入工具数（工具系统）",
+    ),
     DocAnchor(
         "registered_tools",
         "docs/architecture.html",
@@ -695,6 +789,7 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         "工具数（统计卡）",
     ),
     DocAnchor("registered_tools", "docs/index.html", r"内置 (\d+) 个专业工具", "工具数（工具区）"),
+    DocAnchor("default_tools", "docs/index.html", r"默认注入 (\d+) 个", "默认注入工具数（工具区）"),
     # ── AGENT_ARCHITECTURE.md ──
     DocAnchor(
         "registered_tools",
@@ -703,10 +798,19 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         "工具数（简介）",
     ),
     DocAnchor(
-        "registered_tools", "AGENT_ARCHITECTURE.md", r"(\d+) 个工具描述", "工具数（System 提示）"
+        "default_tools",
+        "AGENT_ARCHITECTURE.md",
+        r"(\d+) 个工具描述",
+        "默认注入工具数（System 提示）",
     ),
     DocAnchor(
         "registered_tools", "AGENT_ARCHITECTURE.md", r"工具生态（(\d+) 个内置", "工具数（工具生态）"
+    ),
+    DocAnchor(
+        "default_tools",
+        "AGENT_ARCHITECTURE.md",
+        r"默认注入 (\d+) 个工具",
+        "默认注入工具数（工具生态）",
     ),
     DocAnchor(
         "registered_tools",
@@ -745,6 +849,18 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
     DocAnchor("registered_tools", "docs/career/README.md", r"和 (\d+) 个工具", "工具数（面试稿）"),
     # ── docs/USER_GUIDE*.md（issue #475：指南不在锚点清单曾导致 22/20 漂移）──
     DocAnchor(
+        "registered_tools",
+        "docs/USER_GUIDE.md",
+        r"(\d+) 个内置工具",
+        "工具数（用户指南）",
+    ),
+    DocAnchor(
+        "default_tools",
+        "docs/USER_GUIDE.md",
+        r"默认注入 (\d+) 个工具",
+        "默认注入工具数（用户指南）",
+    ),
+    DocAnchor(
         "sse_event_types",
         "docs/USER_GUIDE.md",
         r"\*\*(\d+) 种 SSE 事件类型\*\*",
@@ -755,6 +871,18 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         "docs/USER_GUIDE.md",
         r"\*\*(\d+) 个端点模块\*\*",
         "端点模块数（用户指南）",
+    ),
+    DocAnchor(
+        "registered_tools",
+        "docs/USER_GUIDE_EN.md",
+        r"(\d+) built-in tools",
+        "tool count (user guide)",
+    ),
+    DocAnchor(
+        "default_tools",
+        "docs/USER_GUIDE_EN.md",
+        r"(\d+) tools injected by default",
+        "default tool count (user guide)",
     ),
     DocAnchor(
         "sse_event_types",
@@ -858,7 +986,7 @@ def iter_metrics_rows(text: str) -> list[tuple[int, list[str]]]:
 
 
 def check_metrics_document(root: Path, facts: dict[str, int]) -> list[str]:
-    """校验 docs/METRICS.md：存在、表格完整、六项 facts 与 facts JSON 同值。"""
+    """校验 docs/METRICS.md：存在、表格完整、七项 facts 与 facts JSON 同值。"""
     path = Path(root) / METRICS_PATH
     if not path.is_file():
         return [f"{METRICS_PATH} 缺失：指标唯一事实源必须存在"]
@@ -894,7 +1022,7 @@ def check_metrics_document(root: Path, facts: dict[str, int]) -> list[str]:
             problems.append(f"{METRICS_PATH}:{lineno}: {key}: METRICS={value}, facts={facts[key]}")
     for key in FACT_KEYS:
         if key not in seen:
-            problems.append(f"{METRICS_PATH}: 缺少指标行 {key}（六项 facts 必须逐一登记）")
+            problems.append(f"{METRICS_PATH}: 缺少指标行 {key}（七项 facts 必须逐一登记）")
     return problems
 
 
@@ -1025,7 +1153,7 @@ def main(argv: list[str] | None = None) -> int:
     if warnings:
         print(
             "WARN: 同一文档同一指标出现多个数字（仅告警，请收敛到 "
-            f"{METRICS_PATH}；facts 六项不一致仍判失败）:",
+            f"{METRICS_PATH}；facts 七项不一致仍判失败）:",
             file=sys.stderr,
         )
         for warning in warnings:

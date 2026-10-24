@@ -236,7 +236,7 @@ def test_tools_lists_manifest_with_category_and_risk_level(monkeypatch):
             "requires_auth": False,
         },
     ]
-    monkeypatch.setattr(builtins_mod.tool_registry, "get_manifest", lambda: fake_manifest)
+    monkeypatch.setattr(builtins_mod.tool_registry, "get_manifest", lambda **kwargs: fake_manifest)
     registry = _registry()
 
     import asyncio

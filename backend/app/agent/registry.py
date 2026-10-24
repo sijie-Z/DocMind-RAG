@@ -189,7 +189,79 @@ class ToolResult:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 2.  Tool Entry
+# 2.  Tool aliases（issue #509：单一别名映射）
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class ToolAlias:
+    """旧工具名 → 规范工具名（可携带默认参数）。
+
+    安全契约（P0）：schema **只发规范名**；executor / skills / approval / ledger /
+    SSE 在判定或记录之前都先经 ``canonicalize_tool_call``。旧名因此不会绕过风险
+    分级、审批门、terminal 强制审批、受限白名单或禁用清单——审批看到的是规范名
+    （如 ``utility``），执行的是同一规范 handler，别名不会把 high 工具伪装成 low。
+    """
+
+    target: str
+    default_arguments: dict[str, Any] = field(default_factory=dict)
+
+
+# 单一事实源：第二步「语义同族合并」后保留的旧名兼容入口。
+# 新增条目必须同时确认：目标工具已注册、默认参数与旧工具语义一致。
+TOOL_ALIASES: dict[str, ToolAlias] = {
+    "vector_search": ToolAlias("search_knowledge_base", {"mode": "vector"}),
+    "fetch_webpage": ToolAlias("web_search", {"action": "fetch"}),
+    "list_skills": ToolAlias("load_skill_reference"),
+    "summarize_document": ToolAlias("extract_insights", {"mode": "summary"}),
+    "calculate": ToolAlias("utility", {"operation": "calculate"}),
+    "format_converter": ToolAlias("utility", {"operation": "format_converter"}),
+    "get_current_time": ToolAlias("utility", {"operation": "get_current_time"}),
+    "detect_language": ToolAlias("utility", {"operation": "detect_language"}),
+    "analyze_data": ToolAlias("utility", {"operation": "analyze_data"}),
+}
+
+
+def canonical_tool_name(name: str) -> str:
+    """别名 → 规范名（非别名原样返回）。无参数场景（风险/白名单/tag 判定）使用。"""
+    alias = TOOL_ALIASES.get(str(name or ""))
+    return alias.target if alias is not None else str(name or "")
+
+
+def canonicalize_tool_call(
+    name: str, arguments: dict[str, Any] | None
+) -> tuple[str, dict[str, Any]]:
+    """把一次工具调用规范化为 ``(规范名, 合并默认参数后的参数)``。
+
+    显式参数优先于别名默认参数，但显式 ``None`` 不覆盖别名受控默认值
+    （旧客户端把可选字段序列化为 null 时，不得把 ``mode=vector`` 静默降级成
+    默认 hybrid，也不得把 ``action=fetch`` 变成未知 action）。
+    """
+    args = dict(arguments) if isinstance(arguments, dict) else {}
+    alias = TOOL_ALIASES.get(str(name or ""))
+    if alias is None:
+        return str(name or ""), args
+    merged = dict(alias.default_arguments)
+    for key, value in args.items():
+        if value is None and key in merged:
+            continue
+        merged[key] = value
+    return alias.target, merged
+
+
+def extended_surface_enabled(config: Any) -> bool:
+    """默认常驻面之外的「扩展工具」是否注入（issue #509 第二步）。
+
+    语义：``tool_tags`` 为 None/空 = 默认常驻档（只注入 10–12 个核心工具）；
+    显式非空 tool_tags（受限上下文 / 操作者显式选择）= 解锁对应 tag 的扩展工具
+    （最终仍受 tag 交集、disabled_tools 与其它 enabled_predicate 约束）。
+    这是显式 opt-in，不改变 tag 过滤本身；空列表不视为 opt-in。
+    """
+    return bool(getattr(config, "tool_tags", None))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 3.  Tool Entry
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -204,6 +276,14 @@ class ToolEntry:
         timeout          — execution timeout in seconds (default 30.0)
         category         — business domain ("feishu", "dingtalk", "search", ...)
         semantic         — behavioural semantics for Agent planning (see below)
+
+    v2.3 surface gating（issue #509）:
+        hidden              — 已合并/隐藏的旧名：保留注册与 handler（不删工具），
+                              但**永不进 schema**；旧名经 TOOL_ALIASES 路由到规范名。
+        superseded_by       — 隐藏条目的规范替代名（manifest 展示用）。
+        enabled_predicate   — ``enabled_predicate(config) -> bool``：按运行配置/环境
+                              判定是否注入 schema（终端/飞书/委派/扩展面）。谓词抛异常
+                              按不可用（False）处理——门控失败必须 fail-closed。
     """
 
     name: str
@@ -234,6 +314,26 @@ class ToolEntry:
             "parallel_safe": True,  # safe to call concurrently
         }
     )
+
+    # ── v2.3 surface gating（issue #509）──
+    hidden: bool = False
+    superseded_by: str = ""
+    enabled_predicate: Callable[[Any], bool] | None = None
+
+    def is_enabled(self, config: Any) -> bool:
+        """该工具在给定配置下是否应注入 schema（隐藏/谓词/异常 → False）。"""
+        if self.hidden:
+            return False
+        predicate = self.enabled_predicate
+        if predicate is None:
+            return True
+        try:
+            return bool(predicate(config))
+        except Exception as e:  # noqa: BLE001 — 门控失败必须 fail-closed
+            logger.warning(
+                "工具 %s 的 enabled_predicate 执行失败（按不可用处理）: %s", self.name, e
+            )
+            return False
 
     def to_openai_schema(self) -> dict[str, Any]:
         """Convert to OpenAI function-calling schema."""
@@ -274,11 +374,15 @@ class ToolEntry:
             "timeout": self.timeout,
             "parameters": self.parameters,
             "output_schema": self.output_schema,
+            # issue #509：隐藏/合并条目对管理面可见（可解释"为什么 schema 里没有"）。
+            "hidden": self.hidden,
+            "superseded_by": self.superseded_by,
+            "gated_by_predicate": self.enabled_predicate is not None,
         }
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 3.  Hook Types
+# 4.  Hook Types
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -314,7 +418,7 @@ class ToolAbortError(Exception):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 4.  The Registry
+# 5.  The Registry
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -361,6 +465,10 @@ class ToolRegistry:
         semantic: dict[str, Any] | None = None,
         # v2.2 risk declaration（HITL：审批门判定输入）
         risk_level: str = "",
+        # v2.3 surface gating（issue #509）
+        hidden: bool = False,
+        superseded_by: str = "",
+        enabled_predicate: Callable[[Any], bool] | None = None,
     ) -> ToolEntry:
         """Register a tool. All v2/v2.1 params are optional — zero migration needed."""
         resolved_semantic = (
@@ -391,6 +499,10 @@ class ToolRegistry:
             semantic=resolved_semantic,
             # v2.2
             risk_level=risk_level,
+            # v2.3
+            hidden=hidden,
+            superseded_by=superseded_by,
+            enabled_predicate=enabled_predicate,
         )
         self._tools[name] = entry
         logger.info(
@@ -417,18 +529,68 @@ class ToolRegistry:
             logger.info("Unregistered tool: %s", name)
         return removed is not None
 
-    def list_tools(self, tags: list[str] | None = None) -> list[ToolEntry]:
+    def list_tools(
+        self, tags: list[str] | None = None, *, include_hidden: bool = False
+    ) -> list[ToolEntry]:
+        """按 tag 过滤列出工具（默认不含 hidden 旧名；管理面可显式包含）。"""
+        tools = [t for t in self._tools.values() if include_hidden or not t.hidden]
         if not tags:
-            return list(self._tools.values())
-        return [t for t in self._tools.values() if any(tag in t.tags for tag in tags)]
+            return tools
+        return [t for t in tools if any(tag in t.tags for tag in tags)]
 
-    def to_openai_tools(self, tags: list[str] | None = None) -> list[dict[str, Any]]:
-        """Export tools as OpenAI function-calling definitions."""
-        return [t.to_openai_schema() for t in self.list_tools(tags)]
+    @staticmethod
+    def _disabled_names(config: Any) -> set[str]:
+        """schema 过滤口径：只认规范名。
 
-    def get_manifest(self) -> list[dict[str, Any]]:
-        """Full manifest of all registered tools (for admin UI / debugging)."""
-        return [t.to_manifest() for t in self._tools.values()]
+        issue #509 评审修正：旧名（calculate / vector_search ...）只用于**旧名
+        调用**的阻断（executor 按 origin_name 判定），不得把整个规范工具从
+        schema 里隐藏——否则升级前关过某一能力的用户会连带失去整个伞形
+        （例如 disabled_tools=["calculate"] 不该隐藏 utility 的其余 operation）。
+        """
+        return set(getattr(config, "disabled_tools", None) or [])
+
+    def list_active_tools(self, config: Any) -> list[ToolEntry]:
+        """默认注入面（issue #509 单一事实源）：tag ∩ 配置禁用 ∩ enabled_predicate。
+
+        四个消费方（loop / executor / planner / ``/agent/tools``）都走这里或
+        ``build_tool_schemas``，不再各自复制「过滤 disabled_tools」的逻辑。
+        """
+        tags = getattr(config, "tool_tags", None)
+        disabled = self._disabled_names(config)
+        active: list[ToolEntry] = []
+        for entry in self._tools.values():
+            if entry.hidden:
+                continue
+            if tags and not any(tag in entry.tags for tag in tags):
+                continue
+            if entry.name in disabled:
+                continue
+            if not entry.is_enabled(config):
+                continue
+            active.append(entry)
+        return active
+
+    def build_tool_schemas(self, config: Any) -> list[dict[str, Any]]:
+        """序列化本配置下的工具 schema（单一入口；只发规范名）。"""
+        return [entry.to_openai_schema() for entry in self.list_active_tools(config)]
+
+    def to_openai_tools(
+        self, tags: list[str] | None = None, *, include_hidden: bool = False
+    ) -> list[dict[str, Any]]:
+        """Export tools as OpenAI function-calling definitions.
+
+        向后兼容的**无配置**导出（默认不含 hidden）。运行时注入面请用
+        ``build_tool_schemas(config)``——它还会应用 enabled_predicate 与禁用清单。
+        """
+        return [t.to_openai_schema() for t in self.list_tools(tags, include_hidden=include_hidden)]
+
+    def get_manifest(self, *, include_hidden: bool = False) -> list[dict[str, Any]]:
+        """Full manifest of registered tools (for admin UI / debugging).
+
+        issue #509：默认不含 hidden 旧名（对外目录只呈现规范工具面）；排障时用
+        ``include_hidden=True`` 查看保留注册的合并条目及其 ``superseded_by``。
+        """
+        return [t.to_manifest() for t in self._tools.values() if include_hidden or not t.hidden]
 
     # ── Hook Management ───────────────────────────────────────────────────
 
@@ -500,10 +662,25 @@ class ToolRegistry:
         """Execute a tool by name. Returns a ToolResult with full structured data.
 
         Use this when you need the unified result type (success, data, error, meta).
+
+        issue #509：入口先 canonicalize——旧名（TOOL_ALIASES）路由到规范工具并合并
+        默认参数。这是防御纵深：executor 已在更早的判定点规范化，但直接调用方
+        （skills / 历史技能序列 / 旧客户端）同样不得绕过规范名语义。
         """
+        if arguments is None:
+            arguments = {}
+        if not isinstance(arguments, dict):
+            # 非对象参数（list/str/...）不得被静默清空后照常执行：审批看到的是
+            # 原始参数，实际执行必须是同一组参数（完整性）。
+            return ToolResult.fail(
+                code="serialization_error",
+                message=f"工具 '{name}' 的 arguments 必须是 JSON 对象，实际为 {type(arguments).__name__}",
+            )
+        name, arguments = canonicalize_tool_call(name, arguments)
         entry = self._tools.get(name)
         if not entry:
-            available = ", ".join(self._tools.keys())
+            # 对外提示只列规范可见工具（hidden 旧名仍在注册表，但不作为建议项）。
+            available = ", ".join(t.name for t in self.list_tools())
             return ToolResult.fail(
                 code="not_found",
                 message=f"未知工具 '{name}'。可用工具: {available}",
@@ -1022,7 +1199,7 @@ class ToolRegistry:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 5.  Global Singleton & Decorator
+# 6.  Global Singleton & Decorator
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -1046,6 +1223,10 @@ def register_tool(
     semantic: dict[str, Any] | None = None,
     # v2.2 risk declaration（HITL 审批门判定输入："low" | "medium" | "high"）
     risk_level: str = "",
+    # v2.3 surface gating（issue #509）
+    hidden: bool = False,
+    superseded_by: str = "",
+    enabled_predicate: Callable[[Any], bool] | None = None,
 ):
     """Decorator to register a function as a tool.
 
@@ -1085,6 +1266,10 @@ def register_tool(
             semantic=semantic,
             # v2.2
             risk_level=risk_level,
+            # v2.3
+            hidden=hidden,
+            superseded_by=superseded_by,
+            enabled_predicate=enabled_predicate,
         )
         return func
 

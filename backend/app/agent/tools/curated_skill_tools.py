@@ -19,17 +19,8 @@ from app.agent.registry import ToolResult, register_tool
 logger = logging.getLogger(__name__)
 
 
-@register_tool(
-    name="list_skills",
-    description=(
-        "列出全部可用技能（名称、描述、参考文档数）。技能是特定任务的完整作业指南，"
-        "详情用 load_skill_reference 工具按名加载。"
-    ),
-    parameters={"type": "object", "properties": {}},
-    tags=["skill"],
-    timeout=15.0,
-)
-async def list_skills() -> str:
+def _list_skills_text() -> str:
+    """技能清单文本（list_skills 原实现；issue #509 迁入伞形工具）。"""
     curated_skill_registry.load_all()
     summaries = curated_skill_registry.list_summaries()
     if not summaries:
@@ -41,27 +32,50 @@ async def list_skills() -> str:
 
 
 @register_tool(
+    name="list_skills",
+    description=(
+        "列出全部可用技能（名称、描述、参考文档数）。技能是特定任务的完整作业指南，"
+        "详情用 load_skill_reference 工具按名加载。"
+    ),
+    parameters={"type": "object", "properties": {}},
+    tags=["skill"],
+    timeout=15.0,
+    # issue #509：能力已合并进 load_skill_reference（不传 skill_name = 列表）；
+    # 保留注册与 handler（不删工具、旧名可用），但不再进 schema。
+    hidden=True,
+    superseded_by="load_skill_reference",
+)
+async def list_skills() -> str:
+    return _list_skills_text()
+
+
+@register_tool(
     name="load_skill_reference",
     description=(
-        "加载技能的指南或参考文档。参数 skill_name 必填（可用 list_skills 查询）；"
-        "只给 skill_name 返回技能指南；再给 reference 返回对应的参考文档全文。"
+        "加载技能指南或参考文档。skill_name 缺省时列出全部技能；给 reference 返回参考全文。"
     ),
     parameters={
         "type": "object",
         "properties": {
-            "skill_name": {"type": "string", "description": "技能名称"},
+            "skill_name": {
+                "type": "string",
+                "description": "技能名（缺省=列出全部）",
+                "default": "",
+            },
             "reference": {
                 "type": "string",
-                "description": "参考文档名（可选；不传则返回技能指南）",
+                "description": "参考文档名（可选）",
                 "default": "",
             },
         },
-        "required": ["skill_name"],
     },
     tags=["skill"],
     timeout=15.0,
 )
-async def load_skill_reference(skill_name: str, reference: str = "") -> str | ToolResult:
+async def load_skill_reference(skill_name: str = "", reference: str = "") -> str | ToolResult:
+    # issue #509：list_skills 合并进本工具——skill_name 缺省即列出技能。
+    if not skill_name:
+        return _list_skills_text()
     curated_skill_registry.load_all()
     skill = curated_skill_registry.get(skill_name)
     if skill is None:

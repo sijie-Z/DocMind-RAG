@@ -79,11 +79,15 @@ def tool_risk_level(name: str) -> str:
     - semantic 兜底：``type`` 为 mutating / long_running 的工具至少 medium
       （判定表漏登记时不会静默放行一个写操作）；
     - 其余 → low。
+
+    issue #509：入口先 canonicalize 别名——旧名 ``calculate`` 若指向 high 的规范
+    工具，这里必须按规范名返回 high（否则审批门会被别名绕过）。
     """
+    from app.agent.registry import canonical_tool_name, tool_registry
+
+    name = canonical_tool_name(name)
     entry = None
     try:
-        from app.agent.registry import tool_registry
-
         entry = tool_registry.get(name)
     except Exception:  # pragma: no cover — 注册表不可用不是执行路径
         entry = None
@@ -103,8 +107,30 @@ def tool_risk_level(name: str) -> str:
     return "low"
 
 
+def is_terminal_tool(name: str) -> bool:
+    """是否 terminal 族工具（按注册表 tag/category 判定，不靠名字前缀）。
+
+    issue #509：旧实现用 ``startswith("terminal_")``，伞形名（如 ``terminal`` 或
+    任何未来别名/包装名）会漏掉强制审批。判定改为：规范名对应的注册条目
+    ``category == "terminal"`` 或 tags 含 ``terminal``。未注册的名字（如直接
+    构造的调用）回退到前缀判定，保持 #477 的 fail-closed 语义。
+    """
+    from app.agent.registry import canonical_tool_name, tool_registry
+
+    canonical = canonical_tool_name(name)
+    try:
+        entry = tool_registry.get(canonical)
+    except Exception:  # pragma: no cover
+        entry = None
+    if entry is not None:
+        return getattr(entry, "category", "") == "terminal" or "terminal" in (
+            getattr(entry, "tags", None) or []
+        )
+    return canonical.startswith("terminal_") or canonical == "terminal"
+
+
 def requires_approval(mode: str, tool_name: str) -> bool:
-    """该模式 × 该工具是否需要执行前审批。"""
+    """该模式 × 该工具是否需要执行前审批（别名先 canonicalize）。"""
     if mode == "never":
         return False
     if mode == "always":

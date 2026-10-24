@@ -457,13 +457,19 @@ async def cmd_export(ctx: CommandContext, args: dict[str, Any]) -> CommandResult
 
 
 async def cmd_tools(ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
-    """工具清单（issue #498）：每项含 name/description/category/risk_level。"""
-    manifest = tool_registry.get_manifest()
+    """工具清单（issue #498）：每项含 name/description/category/risk_level。
+
+    issue #509：管理面显式包含 hidden 旧名与门控标记（schema 注入面只见规范名，
+    这里解释“为什么某个能力不在默认工具面”）。
+    """
+    manifest = tool_registry.get_manifest(include_hidden=True)
     default_disabled = set(DEFAULT_DISABLED_TOOLS)
     entries = []
     for item in manifest:
         name = item.get("name") or ""
         tags = list(item.get("tags") or [])
+        hidden = bool(item.get("hidden"))
+        gated = bool(item.get("gated_by_predicate"))
         entries.append(
             {
                 "name": name,
@@ -474,17 +480,24 @@ async def cmd_tools(ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
                 "risk_level": item.get("risk_level") or tool_risk_level(name),
                 "tags": tags,
                 "requires_auth": bool(item.get("requires_auth")),
-                "disabled_by_default": name in default_disabled,
+                "hidden": hidden,
+                "superseded_by": item.get("superseded_by") or "",
+                "gated_by_predicate": gated,
+                "disabled_by_default": name in default_disabled or hidden or gated,
             }
         )
     lines = [f"## Agent 工具（{len(entries)}）"]
     for entry in entries:
         marks = []
+        if entry["hidden"]:
+            marks.append(f"已隐藏→{entry['superseded_by']}" if entry["superseded_by"] else "已隐藏")
+        elif entry["gated_by_predicate"]:
+            marks.append("默认门控")
         if entry["category"]:
             marks.append(f"分类 {entry['category']}")
         if entry["risk_level"]:
             marks.append(f"风险 {entry['risk_level']}")
-        if entry["disabled_by_default"]:
+        if entry["disabled_by_default"] and not (entry["hidden"] or entry["gated_by_predicate"]):
             marks.append("默认禁用")
         if entry["requires_auth"]:
             marks.append("需授权")

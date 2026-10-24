@@ -17,6 +17,7 @@
 """
 
 import logging
+import os
 from typing import Any
 
 from app.agent.registry import ToolResult, register_tool
@@ -24,6 +25,15 @@ from app.agent.tools.feishu.auth import FeishuAuthError
 from app.agent.tools.feishu.client import FEISHU_ERROR_MAP, FeishuAPIError, FeishuBitableClient
 
 logger = logging.getLogger(__name__)
+
+
+def _feishu_configured(config) -> bool:
+    """issue #509：飞书工具只在凭据齐备时注入 schema（默认关闭）。
+
+    凭据读取与 ``feishu/auth.py`` 同源（FEISHU_APP_ID / FEISHU_APP_SECRET），
+    调用时读取，避免 import 期快照。
+    """
+    return bool(os.getenv("FEISHU_APP_ID") and os.getenv("FEISHU_APP_SECRET"))
 
 
 @register_tool(
@@ -88,6 +98,7 @@ logger = logging.getLogger(__name__)
     },
     # ── v2.1 语义定义 ──
     category="feishu",
+    enabled_predicate=_feishu_configured,
     semantic={
         "type": "read_only",
         "domain": "feishu_bitable",

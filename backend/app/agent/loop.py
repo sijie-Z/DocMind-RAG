@@ -28,7 +28,7 @@ from app.agent.executor import Executor
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, Planner, PlanStep
 from app.agent.reflector import Reflector
-from app.agent.registry import tool_registry
+from app.agent.registry import canonical_tool_name, tool_registry
 from app.agent.reviewer import Reviewer
 from app.agent.run_report import build_run_report, render_run_report_text
 from app.agent.skill_prompt import build_skills_index
@@ -69,6 +69,9 @@ def _smart_truncate(result: str, tool_name: str) -> str:
     if not result or len(result) <= MAX_RESULT_TOKENS * 2:
         return result
 
+    # issue #509：executor 已发规范名；旧名兜底 canonicalize。
+    tool_name = canonical_tool_name(tool_name)
+
     if tool_name in ("list_documents", "list_conversations", "list_prompt_templates"):
         lines = result.split("\n")
         kept = lines[:15]
@@ -77,7 +80,7 @@ def _smart_truncate(result: str, tool_name: str) -> str:
             kept.append(f"... and {remaining} more items")
         return "\n".join(kept)
 
-    if tool_name in ("search_knowledge_base", "vector_search", "web_search"):
+    if tool_name in ("search_knowledge_base", "web_search"):
         sections = result.split("\n\n")
         if len(sections) > 3:
             return (
@@ -85,7 +88,7 @@ def _smart_truncate(result: str, tool_name: str) -> str:
             )
         return result
 
-    if tool_name in ("summarize_document", "get_conversation_history", "fetch_webpage"):
+    if tool_name == "get_conversation_history":
         head = result[:1500]
         tail = result[-500:]
         return f"{head}\n\n... [middle omitted] ...\n\n{tail}"
@@ -109,20 +112,19 @@ def _plan_steps_payload(plan: Plan) -> list[dict[str, Any]]:
 DEFAULT_SYSTEM_PROMPT = """你是 DocMind 智能助手，一个基于企业知识库的 AI Agent。
 
 ## 能力
-你可以使用工具来完成以下任务：
-- **知识检索**: 搜索知识库、向量语义搜索、网页搜索
-- **文档分析**: 摘要、关键词提取、文档对比、数据分析
-- **知识管理**: 查看文档列表和详情
-- **对话管理**: 查看历史对话和消息记录
-- **语言处理**: 翻译、语言检测
-- **数据工具**: Python 代码执行、SQL 查询、数学计算、格式转换
-- **系统工具**: 时间查询、系统状态、天气查询
+你可以使用工具来完成以下任务（具体可用工具以本轮注入的 schema 为准）：
+- **知识检索**: 企业知识库混合检索 / 语义检索、联网搜索、网页正文抓取
+- **文档分析**: 文档摘要、结构化洞察、跨文档分析、报告生成
+- **知识管理**: 文档列表与详情
+- **语言处理**: 多语言翻译
+- **本地工具**: 数学计算、格式转换、当前时间、语言检测、数值统计
+- **技能**: 技能清单与参考资料加载
 
 ## 工作流程
 1. 理解用户意图
 2. **复杂任务自动拆解**：如果用户请求涉及多个步骤（如"分析这10份报告的共同风险"），先制定执行计划，再逐步执行
-3. 如果需要查找信息，使用 search_knowledge_base 工具
-4. 如果需要分析多个文档，逐个调用 summarize_document，然后综合分析
+3. 如果需要查找信息，优先使用知识库检索工具
+4. 如果需要分析多个文档，逐个生成文档摘要，然后综合分析
 5. 基于实际获取到的数据回答，不编造信息
 
 ## 约束
@@ -1681,6 +1683,9 @@ class PERAgentLoop:
                 break
             item = skill.tool_sequence[i]
             hint = item.get("tool_name") if isinstance(item, dict) else None
+            # issue #509：历史技能可能记录旧名（vector_search 等）→ 规范名后再比对。
+            if hint:
+                hint = canonical_tool_name(hint)
             if hint and hint in visible:
                 step.tool_hint = hint
                 applied += 1
@@ -1851,16 +1856,15 @@ class PERAgentLoop:
         return messages
 
     def _get_tools(self) -> list[dict[str, Any]] | None:
-        """Get tool definitions for the LLM, filtered by config."""
+        """Get tool definitions for the LLM, filtered by config.
+
+        issue #509：单一来源 = ``tool_registry.build_tool_schemas(config)``——
+        与 executor / planner / ``/agent/tools`` 同源（tag ∩ disabled ∩
+        enabled_predicate；hidden 旧名永不注入）。
+        """
         if not self.config.enable_tools:
             return None
-        tools = tool_registry.to_openai_tools(self.config.tool_tags)
-        if self.config.disabled_tools and tools:
-            tools = [
-                t
-                for t in tools
-                if t.get("function", {}).get("name") not in self.config.disabled_tools
-            ]
+        tools = tool_registry.build_tool_schemas(self.config)
         return tools if tools else None
 
 

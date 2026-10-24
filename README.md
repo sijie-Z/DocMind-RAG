@@ -23,7 +23,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 核心场景：
 - 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV 及 PNG/JPG/JPEG/WEBP/BMP 图片（OCR），自动解析、分块、向量化，支持语义搜索
 - 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
-- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 39 个工具完成复杂任务
+- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 31 个工具（默认注入 10 个）完成复杂任务
 - 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
 - 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、24 种 SSE 事件、RunReport 运行摘要
 - 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
@@ -76,7 +76,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 │  WebSocket 实时推送 · Request ID 追踪        │
 ├── AI Agent 核心 ─────────────────────────────┤
 │  PER Loop  (Planner → Executor → Reflector)  │
-│  Tool Registry (39) · RunReport · Reviewer  │
+│  Tool Registry (31) · RunReport · Reviewer  │
 │  经验记忆 · 执行回放 · 模式挖掘              │
 ├── RAG 管线 ──────────────────────────────────┤
 │  HybridRetriever (BM25 + 向量 + RRF 融合)    │
@@ -117,20 +117,21 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 上下文引擎 | `context.py` | 令牌预算管理，消息窗口构建 |
 | 配置 | `config.py` | AgentConfig（模型/温度/最大步骤/阶段开关） |
 
-**39 个内置工具**（`core_tools.py` 14 个 + `tools/` 25 个；口径见 `docs/METRICS.md`）：
+**31 个内置工具**（`core_tools.py` 11 个 + `tools/` 20 个；默认注入 10 个工具，终端/飞书/委派/扩展工具按 settings 或显式 `tool_tags` 门控；口径见 `docs/METRICS.md`）：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
-| 知识检索 | `search_knowledge_base`, `vector_search` | 混合搜索、语义搜索 |
-| 网络 | `web_search` | DuckDuckGo 实时搜索 |
-| 代码 | `code_execution` | 沙箱化 Python 执行 |
-| 数据 | `data_analysis` | Pandas/NumPy 数据分析 |
-| 翻译 | `translation` | 多语言翻译 |
-| 文档 | `summarize_document`, `extract_keywords` | 文档摘要、关键词提取 |
-| 分析 | `extract_insights`, `cross_document_analysis`, `generate_report` | 深度分析、跨文档、报告 |
+| 知识检索 | `search_knowledge_base` | 混合搜索；`mode=vector` 纯语义搜索 |
+| 网络 | `web_search` | 实时搜索；`action=fetch` 网页正文提取 |
+| 代码 | `execute_python`, `execute_sql` | 沙箱化 Python / SQL（默认禁用、opt-in） |
+| 数据 | `utility` | 计算、格式转换、语言检测、数值分析、当前时间 |
+| 翻译 | `translate_text` | 多语言翻译 |
+| 文档 | `extract_insights`, `extract_keywords` | 摘要/结构化洞察、关键词提取 |
+| 分析 | `cross_document_analysis`, `generate_report` | 跨文档分析、报告生成 |
 | 管理 | `list_documents`, `get_document_info` | 文档管理 |
-| 对话 | `list_conversations`, `get_conversation_history` | 会话历史 |
-| 外部 | `mcp_call`, `feishu/*` | MCP 协议桥接、飞书多维表格 |
+| 对话 | `list_conversations`, `get_conversation_history` | 会话历史（扩展面） |
+| 外部 | `mcp_call`, `feishu_bitable_query` | MCP 协议桥接、飞书多维表格（默认门控） |
+| 技能 | `load_skill_reference`, `deep_research`, `document_comparison`, `knowledge_analysis` | 技能加载、复合分析（后三者扩展面） |
 
 **自我进化系统** (实验性)：
 
@@ -434,8 +435,8 @@ DocMind/
 │   │   │   ├── events.py            #   SSE 事件类型（24 种）
 │   │   │   ├── message.py           #   Agent 间消息总线
 │   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
-│   │   │   ├── core_tools.py        #   基础工具（14 个）
-│   │   │   ├── tools/               #   扩展工具（25 个；合计 39 个内置工具）
+│   │   │   ├── core_tools.py        #   基础工具（11 个）
+│   │   │   ├── tools/               #   扩展工具（20 个；合计 31 个内置工具）
 │   │   │   │   ├── web_search.py    #   网络搜索
 │   │   │   │   ├── code_execution.py #  Python/SQL 沙箱
 │   │   │   │   ├── data_analysis.py #   数据分析

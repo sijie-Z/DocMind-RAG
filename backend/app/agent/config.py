@@ -91,6 +91,7 @@ _CONFIG_FIELD_SPECS: dict[str, Callable[[Any], bool]] = {
     "enable_thinking": _is_bool,
     "enable_experience": _is_bool,
     "enable_skills": _is_bool,
+    "enable_delegation": _is_bool,
     "planning_mode": _is_str,  # Literal 域值由 planner 的默认分支兜底（类型级闸门）
     "tool_tags": _is_opt_list_of_str,
     # disabled_tools 拒斥 None/坏形状（不是 _is_opt_*）：消费方按"非空才过滤"
@@ -166,6 +167,9 @@ class AgentConfig:
     enable_thinking: bool = True
     enable_experience: bool = True  # Self-Improving: learn from past failures
     enable_skills: bool = True  # issue #200：技能索引注入 + load_skill_reference + 学习闭环
+    # issue #509：子代理委派工具（delegate_subtask）默认关闭——工具面收敛的
+    # 注入门控项之一。开启后该工具才进入 schema；默认配置下 schema 不含它。
+    enable_delegation: bool = False
 
     # ── Planning granularity (experimental) ──
     planning_mode: PlanningMode = "normal"
@@ -259,6 +263,7 @@ class AgentConfig:
                 "enable_thinking": self.enable_thinking,
                 "enable_experience": self.enable_experience,
                 "enable_skills": self.enable_skills,
+                "enable_delegation": self.enable_delegation,
                 "tool_tags": self.tool_tags,
                 "disabled_tools": self.disabled_tools,
                 "system_prompt_override": self.system_prompt_override,

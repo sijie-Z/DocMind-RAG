@@ -23,6 +23,18 @@ def _fake_user(uid: int = 7):
     return type("U", (), {"id": uid})()
 
 
+def test_config_update_exposes_tool_surface_optins():
+    """issue #509：扩展面 / 委派必须有生产 opt-in 入口（否则门控=永久不可达）。"""
+    body = agent_ep.AgentConfigUpdate(tool_tags=["analysis"], enable_delegation=True)
+    assert body.tool_tags == ["analysis"]
+    assert body.enable_delegation is True
+    default = agent_ep.AgentConfigUpdate()
+    assert default.tool_tags is None and default.enable_delegation is None
+
+    chat = agent_ep.AgentChatRequest(query="q", tool_tags=["search"], enable_delegation=False)
+    assert chat.tool_tags == ["search"] and chat.enable_delegation is False
+
+
 @pytest.fixture
 def redis_store(monkeypatch):
     """以内存字典替换 AgentConfig 的持久化（不依赖真实 Redis）。"""

@@ -13,7 +13,13 @@ import json
 import logging
 from typing import Any
 
-from app.agent.registry import ToolResult, register_tool, tool_registry
+from app.agent.registry import (
+    ToolResult,
+    canonicalize_tool_call,
+    extended_surface_enabled,
+    register_tool,
+    tool_registry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +93,39 @@ async def _consume_tool_output(
     只做结构化判定，绝不按字符串内容猜失败 —— 内容透传型工具的成功输出
     可以合法地长得像错误串（如含 "Error rate..." 字样的分析正文），内容
     启发式的误判无法根除（#297 教训）。
+
+    issue #509（P0）：内部 execute_detailed 之前先 canonicalize，并补
+    disabled_tools / 审批预检——复合技能不得成为绕过执行层禁用清单或审批门的
+    后门。技能没有审批通道：high / terminal 工具一律 fail-closed。
     """
+    from app.agent import approval as approval_mod
+    from app.agent.config import DEFAULT_DISABLED_TOOLS
+
+    name, arguments = canonicalize_tool_call(name, arguments)
+
+    disabled = set(DEFAULT_DISABLED_TOOLS)
+    run_context = context.get("run_context")
+    if run_context is not None:
+        extra = getattr(run_context, "extra", None) or {}
+        disabled |= set(extra.get("disabled_tools") or [])
+    # 只按规范名精确匹配：旧名禁用不连带封死整个伞形（与执行层 origin 口径一致）。
+    if name in disabled:
+        return False, str(
+            ToolResult.fail(
+                code="tool_disabled",
+                message=f"工具 {name} 在禁用清单（disabled_tools）中，技能内调用已拒绝",
+            )
+        )
+    if approval_mod.tool_risk_level(name) == "high" or approval_mod.is_terminal_tool(name):
+        return False, str(
+            ToolResult.fail(
+                code="approval_required",
+                message=(
+                    f"技能内调用高风险工具 {name} 需要人工审批；复合技能没有审批通道，已拒绝执行"
+                ),
+            )
+        )
+
     result = await tool_registry.execute_detailed(name, arguments, **context)
     text = str(result)
     if not result.success:
@@ -121,6 +159,7 @@ async def _consume_tool_output(
         "required": ["query"],
     },
     tags=["skill", "research"],
+    enabled_predicate=extended_surface_enabled,
 )
 async def deep_research(
     query: str,
@@ -212,6 +251,7 @@ async def deep_research(
         "required": ["document_ids"],
     },
     tags=["skill", "analysis"],
+    enabled_predicate=extended_surface_enabled,
 )
 async def document_comparison(
     document_ids: list[str],
@@ -366,6 +406,7 @@ async def document_comparison(
         "required": ["query"],
     },
     tags=["skill", "analysis"],
+    enabled_predicate=extended_surface_enabled,
 )
 async def knowledge_analysis(
     query: str,

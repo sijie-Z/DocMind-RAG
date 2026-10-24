@@ -77,9 +77,7 @@ async def _check_rate_limit(user_id: int, limit: int = RATE_LIMIT_RPM) -> bool:
 @register_tool(
     name="web_search",
     description=(
-        "Search the web using DuckDuckGo. Returns top 10 results with titles, "
-        "URLs, and snippets. Use this to find current information not in the "
-        "knowledge base. Best for fact-checking, current events, and external research."
+        "Web search (action=search) or fetch a webpage's text (action=fetch, max 5000 chars)."
     ),
     parameters={
         "type": "object",
@@ -90,20 +88,46 @@ async def _check_rate_limit(user_id: int, limit: int = RATE_LIMIT_RPM) -> bool:
             },
             "max_results": {
                 "type": "integer",
-                "description": "Number of results (default 5, max 10)",
+                "description": "Max results (default 5)",
                 "default": 5,
             },
+            "action": {
+                "type": "string",
+                "enum": ["search", "fetch"],
+                "description": "search|fetch",
+                "default": "search",
+            },
+            "url": {
+                "type": "string",
+                "description": "URL (fetch)",
+            },
         },
-        "required": ["query"],
+        # 静态 required 不能按 action 分支；用 anyOf 至少禁止“完全无参”调用。
+        "anyOf": [{"required": ["query"]}, {"required": ["url"]}],
     },
     tags=["web", "external", "search"],
 )
 async def web_search(
-    query: str,
+    query: str = "",
     max_results: int = 5,
+    action: str = "search",
+    url: str = "",
     user_id: int = 0,
     **_: Any,
 ) -> str | ToolResult:
+    # issue #509：fetch_webpage 合并进本工具（action=fetch）。SSRF 每跳重验、
+    # 2MB 上限、5000 字截断、禁自动跳转等安全语义原样保留在 _fetch_webpage_impl。
+    if str(action or "").strip().lower() == "fetch":
+        if not url:
+            return ToolResult.fail(code="validation_error", message="action=fetch 需要 url 参数")
+        return await _fetch_webpage_impl(url, user_id)
+    if str(action or "").strip().lower() != "search":
+        return ToolResult.fail(
+            code="validation_error", message=f"未知 action: {action}（支持 search/fetch）"
+        )
+    if not query:
+        return ToolResult.fail(code="validation_error", message="action=search 需要 query 参数")
+
     if not await _check_rate_limit(user_id):
         # issue #293：失败必须结构化 —— 返回错误字符串会被注册表归一为
         # success=True，SSE/指标/run_report/findings 全绿（见该 issue 证据链）。
@@ -164,30 +188,8 @@ async def web_search(
         )
 
 
-@register_tool(
-    name="fetch_webpage",
-    description=(
-        "Fetch and extract the text content of a webpage. Uses readability-style "
-        "extraction to get the main article content. Max 5000 characters returned. "
-        "Use this when you need to read the details of a page found by web_search."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "url": {
-                "type": "string",
-                "description": "The full URL of the webpage to fetch",
-            },
-        },
-        "required": ["url"],
-    },
-    tags=["web", "external"],
-)
-async def fetch_webpage(
-    url: str,
-    user_id: int = 0,
-    **_: Any,
-) -> str | ToolResult:
+async def _fetch_webpage_impl(url: str, user_id: int = 0) -> str | ToolResult:
+    """网页正文抓取（原 fetch_webpage 实现，issue #509 原样迁入）。"""
     if not await _check_rate_limit(user_id):
         return ToolResult.fail(code="rate_limited", message="Rate limit exceeded.")
 
@@ -256,6 +258,37 @@ async def fetch_webpage(
             message=f"Fetch error: {type(e).__name__}: {e}",
             raw=e,
         )
+
+
+@register_tool(
+    name="fetch_webpage",
+    description=(
+        "Fetch and extract the text content of a webpage. Uses readability-style "
+        "extraction to get the main article content. Max 5000 characters returned. "
+        "Use this when you need to read the details of a page found by web_search."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "The full URL of the webpage to fetch",
+            },
+        },
+        "required": ["url"],
+    },
+    tags=["web", "external"],
+    # issue #509：能力已合并进 web_search(action=fetch)；保留注册与 handler
+    # （不删工具、旧名可用），但不再进 schema；旧名经 TOOL_ALIASES 路由。
+    hidden=True,
+    superseded_by="web_search",
+)
+async def fetch_webpage(
+    url: str,
+    user_id: int = 0,
+    **_: Any,
+) -> str | ToolResult:
+    return await _fetch_webpage_impl(url, user_id)
 
 
 def _extract_text(html: str) -> str:

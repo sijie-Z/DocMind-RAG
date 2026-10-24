@@ -147,7 +147,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
     <span class="badge"><span class="dot g"></span><a href="index.html" style="color:var(--text2);text-decoration:none;">← 返回首页</a></span>
     <span class="badge"><span class="dot g"></span>3084 个测试</span>
     <span class="badge"><span class="dot b"></span>28 API 模块</span>
-    <span class="badge"><span class="dot a"></span>39 Agent 工具</span>
+    <span class="badge"><span class="dot a"></span>31 Agent 工具</span>
     <span class="badge">100,000+ LOC</span>
     <span class="badge"><span class="dot g"></span><a href="METRICS.md" style="color:var(--text2);text-decoration:none;">数字口径见 docs/METRICS.md</a></span>
   </div>
@@ -161,7 +161,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
     <div class="card" style="text-align:center;padding:24px"><div class="big">28</div><div class="sl">后端 API 模块</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">20+</div><div class="sl">前端视图</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">4</div><div class="sl">语言支持</div></div>
-    <div class="card" style="text-align:center;padding:24px"><div class="big">39</div><div class="sl">Agent 工具</div></div>
+    <div class="card" style="text-align:center;padding:24px"><div class="big">31</div><div class="sl">Agent 工具</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">3084</div><div class="sl">自动化测试（后端 2223 · 前端 861）</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">2</div><div class="sl">部署方案</div></div>
   </div>
@@ -428,8 +428,8 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 │   ├── context.py   # 上下文引擎
 │   ├── events.py    # SSE 事件模型
 │   ├── skills.py    # 技能学习
-│   ├── core_tools.py # 基础工具（14 个）
-│   └── tools/       # 扩展工具（与 core_tools 合计 39 个内置工具）
+│   ├── core_tools.py # 基础工具（11 个）
+│   └── tools/       # 扩展工具（与 core_tools 合计 31 个内置工具）
 ├── core/            # 基础设施 (config, database, redis, security, tracing)
 ├── models/          # SQLAlchemy ORM 模型
 ├── rag/             # RAG 管道 (retriever, reranker, chunker, evaluator)
@@ -510,10 +510,10 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 
 <!-- ═══ 05. 工具系统 ═══ -->
 <div class="sec" id="tools">
-  <div class="sec-head"><span class="sec-num">04b</span><h2>工具系统</h2><span class="meta">39 个内置工具</span></div>
+  <div class="sec-head"><span class="sec-num">04b</span><h2>工具系统</h2><span class="meta">31 个内置工具 · 默认注入 10 个</span></div>
 
   <div class="card">
-    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔧 内置工具（内置 39 个，MCP 动态工具另计；下表为功能示意，非完整清单）</div>
+    <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🔧 内置工具（内置 31 个，默认注入 10 个工具；MCP 动态工具另计；下表为功能示意，非完整清单）</div>
     <div class="card-body show">
       <table class="data-table">
         <tr><th>#</th><th>工具</th><th>用途</th><th>安全级别</th></tr>

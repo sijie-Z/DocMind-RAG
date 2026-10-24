@@ -12,7 +12,11 @@ import json
 import logging
 from typing import Any
 
-from app.agent.registry import ToolResult, register_tool
+from app.agent.registry import (
+    ToolResult,
+    extended_surface_enabled,
+    register_tool,
+)
 from app.agent.run_context import RunContext
 from app.agent.usage import ctx_from_run_context, record_llm_usage
 
@@ -89,26 +93,31 @@ def _build_search_payload(
 @register_tool(
     name="search_knowledge_base",
     description=(
-        "Search the enterprise knowledge base using hybrid retrieval "
-        "(keyword + vector + RRF fusion). Returns ranked document snippets "
-        "with relevance scores and source attribution."
+        "Search the enterprise knowledge base (hybrid or mode=vector). "
+        "Returns ranked snippets with sources."
     ),
     parameters={
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Natural language search query",
+                "description": "Search query",
             },
             "top_k": {
                 "type": "integer",
-                "description": "Number of results to return (default 5, max 20)",
+                "description": "Results (default 5, max 20)",
                 "default": 5,
             },
             "document_ids": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Optional: restrict search to specific document IDs",
+                "description": "Document IDs",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["hybrid", "vector"],
+                "description": "hybrid|vector",
+                "default": "hybrid",
             },
         },
         "required": ["query"],
@@ -119,11 +128,17 @@ async def search_knowledge_base(
     query: str,
     top_k: int = 5,
     document_ids: list[str] | None = None,
+    mode: str = "hybrid",
     organization_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
     if organization_id is None:
         return _missing_organization_result("search_knowledge_base")
+    # issue #509：vector_search 合并进本工具（mode=vector）。纯向量臂的
+    # min_score=1.15 / 空结果哨兵 / 失败语义原样保留在 _vector_search_impl。
+    if str(mode or "").strip().lower() == "vector":
+        return await _vector_search_impl(query, top_k, organization_id, document_ids)
+
     from app.dependencies import get_rag_pipeline
     from app.rag.context_compressor import compress, get_prompt_text
     from app.rag.errors import RetrievalUnavailableError
@@ -172,38 +187,13 @@ async def search_knowledge_base(
     return _build_search_payload(entries)
 
 
-@register_tool(
-    name="vector_search",
-    description=(
-        "Pure vector (semantic) search over the knowledge base. "
-        "Best for conceptual queries where exact keywords may not match."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Semantic search query",
-            },
-            "top_k": {
-                "type": "integer",
-                "description": "Number of results (default 5, max 20)",
-                "default": 5,
-                "maximum": 20,
-            },
-        },
-        "required": ["query"],
-    },
-    tags=["search"],
-)
-async def vector_search(
+async def _vector_search_impl(
     query: str,
-    top_k: int = 5,
-    organization_id: int | None = None,
-    **_: Any,
+    top_k: int,
+    organization_id: int,
+    document_ids: list[str] | None = None,
 ) -> str | ToolResult:
-    if organization_id is None:
-        return _missing_organization_result("vector_search")
+    """纯向量检索（原 vector_search 实现，issue #509 原样迁入）。"""
     # T6：与姊妹检索工具一致，钳制到 20 以内，避免 ES 请求被调用方无限放大
     top_k = min(top_k, 20)
 
@@ -217,14 +207,18 @@ async def vector_search(
     from app.core.elasticsearch import ElasticsearchTools
     from app.rag.context_compressor import compress
 
+    # issue #509 评审修正：规范入口同时暴露 document_ids，vector 模式不得静默
+    # 丢弃它（否则“限定这些文档”实际变成全组织检索）。
+    filters: list[dict[str, Any]] = [{"term": {"organization_id": str(organization_id)}}]
+    if document_ids:
+        filters.append({"terms": {"document_id": list(document_ids)}})
+
     es_query = {
         "size": top_k,
         "min_score": 1.15,
         "query": {
             "script_score": {
-                "query": {
-                    "bool": {"filter": [{"term": {"organization_id": str(organization_id)}}]}
-                },
+                "query": {"bool": {"filter": filters}},
                 "script": {
                     "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
                     "params": {"query_vector": query_vector},
@@ -256,6 +250,45 @@ async def vector_search(
     return _build_search_payload(entries)
 
 
+@register_tool(
+    name="vector_search",
+    description=(
+        "Pure vector (semantic) search over the knowledge base. "
+        "Best for conceptual queries where exact keywords may not match."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Semantic search query",
+            },
+            "top_k": {
+                "type": "integer",
+                "description": "Number of results (default 5, max 20)",
+                "default": 5,
+                "maximum": 20,
+            },
+        },
+        "required": ["query"],
+    },
+    tags=["search"],
+    # issue #509：能力已合并进 search_knowledge_base(mode=vector)；保留注册与
+    # handler（不删工具、旧名可用），但不再进 schema；旧名经 TOOL_ALIASES 路由。
+    hidden=True,
+    superseded_by="search_knowledge_base",
+)
+async def vector_search(
+    query: str,
+    top_k: int = 5,
+    organization_id: int | None = None,
+    **_: Any,
+) -> str | ToolResult:
+    if organization_id is None:
+        return _missing_organization_result("vector_search")
+    return await _vector_search_impl(query, top_k, organization_id, None)
+
+
 # ─── Analysis Tools ──────────────────────────────────────────────────────────
 
 
@@ -276,6 +309,10 @@ async def vector_search(
         "required": ["document_id"],
     },
     tags=["analysis"],
+    # issue #509：能力已合并进 extract_insights(mode=summary)；保留注册与 handler
+    # （不删工具、旧名可用），但不再进 schema；旧名经 TOOL_ALIASES 路由。
+    hidden=True,
+    superseded_by="extract_insights",
 )
 async def summarize_document(
     document_id: str,
@@ -285,6 +322,18 @@ async def summarize_document(
 ) -> str | ToolResult:
     if organization_id is None:
         return _missing_organization_result("summarize_document")
+    return await _summarize_document_impl(document_id, organization_id, run_context)
+
+
+async def _summarize_document_impl(
+    document_id: str,
+    organization_id: int,
+    run_context: RunContext | None = None,
+) -> str | ToolResult:
+    """文档摘要（原 summarize_document 实现，issue #509 原样迁入）。
+
+    无 LLM / 空正文 / 异常三条路径都保留原文预览兜底——不得因合并丢失。
+    """
     from app.core.elasticsearch import ElasticsearchTools
     from app.dependencies import get_rag_pipeline
 
@@ -371,6 +420,7 @@ async def summarize_document(
         "required": ["text"],
     },
     tags=["analysis"],
+    enabled_predicate=extended_surface_enabled,
 )
 async def extract_keywords(text: str, max_keywords: int = 10, **_: Any) -> str:
     from app.rag.query_processor import extract_query_terms
@@ -442,30 +492,31 @@ ANALYSIS_FRAMEWORKS: dict[str, str] = {
 @register_tool(
     name="extract_insights",
     description=(
-        "Deep analysis of a single document to extract structured insights: "
-        "key entities (people, organizations, dates, locations), metrics and statistics, "
-        "main claims and findings, and document section structure. "
-        "Supports optional domain analysis frameworks (dupont, swot, pest, "
-        "risk_assessment, financial_health, contract_risk). "
-        "Use this for in-depth document understanding."
+        "Analyze a document: structured insights (entities/metrics/claims/structure) "
+        "or mode=summary."
     ),
     parameters={
         "type": "object",
         "properties": {
             "document_id": {
                 "type": "string",
-                "description": "The document ID to analyze",
+                "description": "Document ID",
             },
             "aspects": {
                 "type": "string",
-                "description": "Comma-separated aspects: entities,metrics,claims,structure,all",
+                "description": "entities,metrics,claims,structure,all",
                 "default": "all",
             },
             "framework": {
                 "type": "string",
-                "description": "Optional domain analysis framework: "
-                "dupont, swot, pest, risk_assessment, financial_health, contract_risk",
+                "description": "dupont/swot/pest/risk/financial/contract",
                 "default": "",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["insights", "summary"],
+                "description": "insights (default) | summary",
+                "default": "insights",
             },
         },
         "required": ["document_id"],
@@ -476,12 +527,24 @@ async def extract_insights(
     document_id: str,
     aspects: str = "all",
     framework: str = "",
+    mode: str = "insights",
     organization_id: int | None = None,
     run_context: RunContext | None = None,
     **_: Any,
 ) -> str | ToolResult:
     if organization_id is None:
         return _missing_organization_result("extract_insights")
+    # issue #509：summarize_document 合并进本工具（mode=summary）。摘要的
+    # 无 LLM / 空正文 / 异常兜底原样保留在 _summarize_document_impl。
+    if str(mode or "").strip().lower() == "summary":
+        # issue #509 评审修正：summary 不是 insights 的参数子集——显式传
+        # aspects/framework 时拒绝，避免“以为按框架分析、实际只生成摘要”。
+        if str(aspects or "all").strip().lower() != "all" or str(framework or "").strip():
+            return ToolResult.fail(
+                code="validation_error",
+                message="mode=summary 不支持 aspects/framework 参数（请改用默认 insights 模式）",
+            )
+        return await _summarize_document_impl(document_id, organization_id, run_context)
     from app.core.config import settings
     from app.core.elasticsearch import ElasticsearchTools
     from app.dependencies import get_rag_pipeline
@@ -612,22 +675,18 @@ async def extract_insights(
 
 @register_tool(
     name="cross_document_analysis",
-    description=(
-        "Analyze patterns, themes, and relationships across multiple documents. "
-        "Finds common themes, unique aspects, contradictions, and complementary information. "
-        "Use this for multi-document research, literature review, and comparative analysis."
-    ),
+    description=("Analyze themes, patterns, and relationships across multiple documents."),
     parameters={
         "type": "object",
         "properties": {
             "document_ids": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "List of document IDs to analyze (2-10 documents)",
+                "description": "Document IDs (2-10)",
             },
             "analysis_type": {
                 "type": "string",
-                "description": "Analysis focus: common_themes, differences, trends, comprehensive",
+                "description": "themes,differences,trends,comprehensive",
                 "default": "comprehensive",
             },
         },
@@ -801,12 +860,7 @@ async def cross_document_analysis(
 
 @register_tool(
     name="generate_report",
-    description=(
-        "Generate a structured analysis report in markdown format. "
-        "Takes analysis findings and produces a professional report with "
-        "executive summary, detailed findings, tables, and conclusions. "
-        "Use this to produce polished, shareable analysis output."
-    ),
+    description=("Generate a polished markdown report from findings."),
     parameters={
         "type": "object",
         "properties": {
@@ -816,14 +870,11 @@ async def cross_document_analysis(
             },
             "sections": {
                 "type": "string",
-                "description": (
-                    "JSON array of section objects. Each section: "
-                    '{"heading": "...", "content": "...", "type": "text|table|list"}'
-                ),
+                "description": ('JSON array of {"heading","content","type":"text|table|list"}'),
             },
             "format": {
                 "type": "string",
-                "description": "Output format (markdown, json)",
+                "description": "markdown, json",
                 "default": "markdown",
             },
         },
@@ -956,21 +1007,18 @@ def _generate_markdown_fallback(title: str, sections: list) -> str:
 
 @register_tool(
     name="list_documents",
-    description=(
-        "List all documents in the knowledge base for the current organization. "
-        "Returns document IDs, filenames, status, and upload dates."
-    ),
+    description=("List documents (IDs, filenames, status, dates)."),
     parameters={
         "type": "object",
         "properties": {
             "limit": {
                 "type": "integer",
-                "description": "Maximum documents to return (default 20)",
+                "description": "Max documents (default 20)",
                 "default": 20,
             },
             "status": {
                 "type": "string",
-                "description": "Filter by status: indexed, parsing, failed, etc.",
+                "description": "indexed, parsing, failed, ...",
             },
         },
     },
@@ -1015,16 +1063,13 @@ async def list_documents(
 
 @register_tool(
     name="get_document_info",
-    description=(
-        "Get detailed information about a specific document including "
-        "its status, chunk count, file size, and metadata."
-    ),
+    description=("Get document status, chunk count, file size, and metadata."),
     parameters={
         "type": "object",
         "properties": {
             "document_id": {
                 "type": "string",
-                "description": "The document ID",
+                "description": "Document ID",
             },
         },
         "required": ["document_id"],
@@ -1099,6 +1144,7 @@ async def get_document_info(
     },
     tags=["conversation", "management"],
     requires_auth=True,
+    enabled_predicate=extended_surface_enabled,
 )
 async def list_conversations(
     limit: int = 10,
@@ -1159,6 +1205,7 @@ async def list_conversations(
     },
     tags=["conversation"],
     requires_auth=True,
+    enabled_predicate=extended_surface_enabled,
 )
 async def get_conversation_history(
     session_id: str,
@@ -1244,6 +1291,7 @@ async def get_conversation_history(
     },
     tags=["prompts"],
     requires_auth=True,
+    enabled_predicate=extended_surface_enabled,
 )
 async def list_prompt_templates(
     category: str | None = None,
@@ -1328,6 +1376,7 @@ async def list_prompt_templates(
     },
     tags=["prompts"],
     requires_auth=True,
+    enabled_predicate=extended_surface_enabled,
 )
 async def get_prompt_template(
     name: str,
@@ -1408,6 +1457,10 @@ async def get_prompt_template(
     description="Get the current date and time. Useful for time-sensitive queries.",
     parameters={"type": "object", "properties": {}},
     tags=["utility"],
+    # issue #509：能力已合并进 utility(operation=get_current_time)；保留注册与
+    # handler（不删工具、旧名可用），但不再进 schema。
+    hidden=True,
+    superseded_by="utility",
 )
 async def get_current_time(**_: Any) -> str:
     from datetime import datetime
