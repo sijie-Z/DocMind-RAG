@@ -397,7 +397,9 @@ request.interceptors.response.use(
         errorMsg = `${errorMsg}（请求ID: ${requestId}）`
       }
 
-      if (!silentError && !suppressGenericToast) {
+      // 登录/注册/刷新由页面自行呈现错误：全局拦截器再弹一次会变成双 toast，
+      // 且会把内部 Request ID 暴露给用户（登录页只应看到一条可读提示）。
+      if (!silentError && !isAuthRequest && !suppressGenericToast) {
         dedupMessage('error', errorMsg, 5000)
       }
       emitApiMetricEvent({
@@ -410,7 +412,9 @@ request.interceptors.response.use(
         durationMs: typeof startedAt === 'number' ? Date.now() - startedAt : undefined
       })
     } else {
-      if (!silentError) {
+      // 与响应分支同口径：auth 请求的网络错误也由页面自行呈现（登录页会兜底
+      // “网络连接失败”类可读提示），拦截器再弹一次即双 toast。
+      if (!silentError && !isAuthRequest) {
         dedupMessage('error', '网络连接失败，请检查后端服务', 5000)
       }
       emitApiMetricEvent({

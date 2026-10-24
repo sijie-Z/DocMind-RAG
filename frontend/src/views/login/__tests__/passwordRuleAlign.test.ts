@@ -1,11 +1,16 @@
 /**
- * T9 · 密码规则前后端对齐 —— 注册/登录表单最小长度 6→8。
+ * T9 · 密码规则前后端对齐 —— 注册最小长度 8，登录只校验非空（#492）。
  *
  * 后端口径（auth.py RegisterRequest.validate_password / ChangePasswordRequest）：
- * 密码不少于 8 位。前端登录页规则曾为 min: 6，注册 6 位密码可绕过前端校验。
+ * 密码不少于 8 位 —— 这条只属于注册/改密。登录是验证已有凭据，前端不得用
+ * 注册策略把老用户挡在门外。
  *
- * 判别点：把 login/index.vue 密码规则的 min 从 8 改回 6（或 i18n 文案改回
- * 「至少为 6 位」），本文件「6 位被拦截」与「提示 ≥8」断言即红。
+ * 判别点：
+ * - 注册 6 位被拦 / 提示 ≥8（把注册 min 改回 6 或文案改回「至少为 6 位」即红）；
+ * - 登录 6 位密码、2 位用户名可透传（把 min 规则改回无条件生效即红）；
+ * - 登录失败单条提示且清空密码（删除 form.password = '' 即红）；
+ * - 请求层 /auth/* 失败（响应错误与网络错误）不弹全局 toast
+ *   （去掉 request.ts 的 !isAuthRequest 即红）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -26,6 +31,22 @@ const storeSpies = vi.hoisted(() => ({
   register: vi.fn(),
 }))
 vi.mock('@/stores/user', () => ({ useUserStore: () => storeSpies }))
+
+// 请求层（request.ts）的全局 toast 走 naive-ui 的 createDiscreteApi，与页面
+// 用的 useDedupedMessage 是两条通道。这里只替换 createDiscreteApi，其余组件
+// 保持原样（本文件要挂载 NForm/NInput 等）。用于钉住「/auth/* 拦截器不弹 toast」。
+const discreteMessageSpies = vi.hoisted(() => ({
+  success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(), loading: vi.fn(),
+}))
+vi.mock('naive-ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('naive-ui')>()
+  return {
+    ...actual,
+    createDiscreteApi: () => ({ message: discreteMessageSpies }),
+  }
+})
+
+import request from '@/utils/request'
 
 const i18n = createI18n({ legacy: false, locale: 'zh', fallbackLocale: 'zh', messages: { zh } })
 const naiveComponents = { NForm, NFormItem, NInput, NButton, NIcon }
@@ -101,5 +122,112 @@ describe('注册表单密码最小长度与后端口径对齐（≥8）', () => 
     })
     // 校验通过，不应出现长度错误提示
     expect(wrapper.text()).not.toContain('密码长度至少为 8 位')
+  })
+})
+
+describe('登录表单只校验非空，不套用注册长度规则', () => {
+  it('6 位密码可以发起登录请求，不被前端拦截', async () => {
+    storeSpies.login.mockResolvedValue({ success: false, message: '用户名或密码错误' })
+    const { wrapper } = await mountAt('/login')
+    await fillInputs(wrapper, 'admin', '', '123456')
+    await submit(wrapper)
+
+    expect(storeSpies.login).toHaveBeenCalledWith({ username: 'admin', password: '123456' })
+    expect(wrapper.text()).not.toContain('密码长度至少为 8 位')
+  })
+
+  it('2 位用户名可以发起登录请求，不被前端拦截', async () => {
+    storeSpies.login.mockResolvedValue({ success: false, message: '用户名或密码错误' })
+    const { wrapper } = await mountAt('/login')
+    await fillInputs(wrapper, 'ab', '', '12345678')
+    await submit(wrapper)
+
+    expect(storeSpies.login).toHaveBeenCalledWith({ username: 'ab', password: '12345678' })
+    expect(wrapper.text()).not.toContain('用户名至少3位')
+  })
+})
+
+describe('登录失败路径：单条可读提示、不暴露请求 ID、清空密码', () => {
+  it('登录失败只弹一条错误提示，且密码输入框被清空', async () => {
+    storeSpies.login.mockResolvedValue({ success: false, message: '用户名或密码错误' })
+    const { wrapper } = await mountAt('/login')
+    await fillInputs(wrapper, 'admin', '', 'wrong-password')
+
+    const passwordInputBefore = wrapper.find('input[type="password"]')
+    expect((passwordInputBefore.element as HTMLInputElement).value).toBe('wrong-password')
+
+    await submit(wrapper)
+
+    expect(storeSpies.login).toHaveBeenCalledTimes(1)
+    // 页面自身只弹一条；全局拦截器的第二条 toast 由下方「请求层」用例钉住。
+    expect(messageSpies.error).toHaveBeenCalledTimes(1)
+    expect(String(messageSpies.error.mock.calls[0][0])).toBe('用户名或密码错误')
+    expect(String(messageSpies.error.mock.calls[0][0])).not.toMatch(/请求ID|Request ID/)
+    // 失败后密码不得残留，避免用户再次提交时误发同一个错误密码
+    expect((wrapper.find('input[type="password"]').element as HTMLInputElement).value).toBe('')
+  })
+})
+
+describe('请求层判别：/auth/* 失败不再触发全局 toast（双 toast 收敛）', () => {
+  type InterceptorHandlers = {
+    handlers: Array<{ rejected: (e: unknown) => Promise<unknown> }>
+  }
+
+  function rejectWithResponse(
+    url: string,
+    status: number,
+    data: Record<string, unknown>,
+    respHeaders: Record<string, string> = {},
+  ) {
+    const handlers = (request.interceptors.response as unknown as InterceptorHandlers).handlers
+    const config = { url, method: 'post' as const, headers: {} as Record<string, string> }
+    const error = Object.assign(new Error(`Request failed with status code ${status}`), {
+      isAxiosError: true,
+      config,
+      response: { status, data, headers: respHeaders, config },
+    })
+    return handlers[0].rejected(error)
+  }
+
+  function rejectNetwork(url: string) {
+    const handlers = (request.interceptors.response as unknown as InterceptorHandlers).handlers
+    const error = {
+      isAxiosError: true,
+      message: 'Network Error',
+      config: { url, method: 'post' as const, headers: {} as Record<string, string> },
+    }
+    return handlers[0].rejected(error)
+  }
+
+  it('登录 401 时拦截器不弹全局 toast（即使响应带 Request ID）', async () => {
+    await expect(
+      rejectWithResponse('/auth/login', 401, { detail: '用户名或密码错误' }, { 'X-Request-ID': 'rid-login-401' }),
+    ).rejects.toBeTruthy()
+
+    // 变异点：去掉 request.ts 的 !isAuthRequest → 此断言红
+    // （拦截器会弹「用户名或密码错误（请求ID: rid-login-401）」第二条 toast）。
+    expect(discreteMessageSpies.error).not.toHaveBeenCalled()
+  })
+
+  it('非 auth 请求失败仍弹全局 toast（防过度抑制）', async () => {
+    await expect(rejectWithResponse('/knowledge/', 500, {})).rejects.toBeTruthy()
+
+    expect(discreteMessageSpies.error).toHaveBeenCalledTimes(1)
+    expect(String(discreteMessageSpies.error.mock.calls[0][0])).toBe('服务器内部错误，请稍后重试')
+  })
+
+  it('登录网络错误（无 response）时拦截器不弹全局 toast（页面自行兜底）', async () => {
+    await expect(rejectNetwork('/auth/login')).rejects.toBeTruthy()
+
+    // 变异点：去掉网络错误分支的 !isAuthRequest → 此断言红
+    // （拦截器会弹「网络连接失败，请检查后端服务」，与登录页提示形成双 toast）。
+    expect(discreteMessageSpies.error).not.toHaveBeenCalled()
+  })
+
+  it('非 auth 请求网络错误仍弹全局 toast（防过度抑制）', async () => {
+    await expect(rejectNetwork('/knowledge/')).rejects.toBeTruthy()
+
+    expect(discreteMessageSpies.error).toHaveBeenCalledTimes(1)
+    expect(String(discreteMessageSpies.error.mock.calls[0][0])).toBe('网络连接失败，请检查后端服务')
   })
 })
