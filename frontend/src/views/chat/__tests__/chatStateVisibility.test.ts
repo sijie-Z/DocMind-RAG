@@ -362,12 +362,11 @@ describe('E7 · useChatSend 停止生成落标记', () => {
       const isRetrieving = ref(false)
       const sseStatus = ref('disconnected')
       const useSSE = ref(true)
-      const useAgent = ref(false)
       const useStream = ref(true)
       const { handleSSESend, stopGeneration } = useChatSend(
         messages, attachedFiles, attachedFileIds,
         () => {}, async () => {},
-        isLoading, isRetrieving, sseStatus, useSSE, useAgent, useStream,
+        isLoading, isRetrieving, sseStatus, useSSE, useStream,
       )
       send = (text: string) => handleSSESend(text)
       stop = stopGeneration

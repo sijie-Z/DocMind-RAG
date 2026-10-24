@@ -2,11 +2,12 @@
 
 import json
 import logging
+import time
 from typing import Any
 
 from app.agent.registry import ToolResult, register_tool
 from app.agent.run_context import RunContext
-from app.agent.usage import ctx_from_run_context, record_llm_usage
+from app.agent.usage import ctx_from_run_context, record_llm_call_error, record_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,11 @@ async def translate_text(
     target_lang = _normalize_lang(target_language)
     source_lang = _normalize_lang(source_language) if source_language != "auto" else "auto"
 
+    llm_messages: list[dict] | None = None
+    llm_started = time.perf_counter()
+    llm_recorded = False
+    call_attempted = False
+    model_name: str | None = None
     try:
         from app.core.config import settings
         from app.dependencies import get_rag_pipeline
@@ -88,28 +94,48 @@ async def translate_text(
         )
         target_name = LANG_NAMES.get(target_lang, target_lang)
 
+        llm_messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"You are a professional translator. "
+                    f"Translate the following text{source_hint} to {target_name} ({target_lang}). "
+                    f"Provide ONLY the translation, no explanations."
+                ),
+            },
+            {"role": "user", "content": text[:4000]},
+        ]
+        llm_started = time.perf_counter()
+        call_attempted = True
+        model_name = settings.DEEPSEEK_MODEL
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        f"You are a professional translator. "
-                        f"Translate the following text{source_hint} to {target_name} ({target_lang}). "
-                        f"Provide ONLY the translation, no explanations."
-                    ),
-                },
-                {"role": "user", "content": text[:4000]},
-            ],
+            messages=llm_messages,
             temperature=0.1,
             max_tokens=2000,
         )
-        record_llm_usage(resp, ctx_from_run_context(run_context))  # 工具内记账（#239 minor-2）
+        # issue #510：调用级 JSONL（延迟 + 提示词摘要，不落正文）。
+        record_llm_usage(
+            resp,
+            ctx_from_run_context(run_context),
+            latency_ms=(time.perf_counter() - llm_started) * 1000,
+            messages=llm_messages,
+        )  # 工具内记账（#239 minor-2）
+        llm_recorded = True
         content = resp.choices[0].message.content
         if not content:
             return ToolResult.fail(code="empty_response", message="Translation failed.")
         return content
     except Exception as e:
+        # issue #510：失败调用留一行（成功记账后的空正文不重复记）。
+        if call_attempted and not llm_recorded:
+            record_llm_call_error(
+                ctx_from_run_context(run_context),
+                model=model_name,
+                error=e,
+                latency_ms=(time.perf_counter() - llm_started) * 1000,
+                messages=llm_messages,
+            )
         return ToolResult.fail(
             code="unknown",
             message=f"Translation error: {type(e).__name__}: {e}",

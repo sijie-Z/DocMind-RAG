@@ -3,6 +3,9 @@
 接线状态（#242 核实）：**dev-only** —— 唯一消费者是未挂载的独立测试 app
 `agent_api.py`（:8010）；JSONL 落盘在仓库内无任何读者。
 
+Deprecated candidate（issue #510 第三步待仓库所有者批准）：未获批前文件与
+行为保留不动；生产 run 的调用级记录由 `app.agent.llm_call_log` 承担。
+
 Usage:
     from app.core.trace_logger import AgentTracer, TraceExporter
 

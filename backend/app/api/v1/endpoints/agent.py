@@ -334,6 +334,10 @@ async def agent_chat(
                     yield await emitter.emit(rejection.type, public_agent_event_data(rejection))
                     yield await emitter.emit("chunk", {"type": "chunk", "content": error_text})
                     rejection_done: dict[str, Any] = {"type": "done", "content": ""}
+                    # issue #510：命令通道（含拒绝）同样携带请求编号。
+                    command_request_id = resolve_request_id(request)
+                    if command_request_id:
+                        rejection_done["request_id"] = command_request_id
                     if body.session_id:
                         rejection_done["saved"] = False
                     yield await emitter.emit("done", rejection_done)
@@ -361,6 +365,10 @@ async def agent_chat(
                     # /tools 在现有 UI 立即可见。前端接入 command_* 后可移除。
                     yield await emitter.emit("chunk", {"type": "chunk", "content": command_content})
                 done_payload: dict[str, Any] = {"type": "done", "content": ""}
+                # issue #510：命令通道同样携带请求编号（与主 Agent 路径一致）。
+                command_request_id = resolve_request_id(request)
+                if command_request_id:
+                    done_payload["request_id"] = command_request_id
                 if body.session_id:
                     done_payload["saved"] = False  # 命令不写用户消息
                 yield await emitter.emit("done", done_payload)
@@ -395,6 +403,8 @@ async def agent_chat(
                 session_id=body.session_id,
                 config=config,
                 referenced_document_ids=body.referenced_document_ids,
+                # issue #510 第二步：request_id = 本次 HTTP 请求（X-Request-ID 同源）
+                request_id=resolve_request_id(request),
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)
@@ -467,6 +477,10 @@ async def agent_chat(
             yield await emitter.emit("warning", warning_data)
 
         done_data: dict[str, Any] = {"type": "done", "content": ""}
+        # issue #510 第二步：终帧携带请求编号（与事件/日志/JSONL 可关联）。
+        done_request_id = resolve_request_id(request)
+        if done_request_id:
+            done_data["request_id"] = done_request_id
         if body.session_id:
             # saved=false 专门标记"本轮落库出错"（None 且无异常 = 越权拒绝或空回复，
             # 两者都不写、也都没有落库错误）。
@@ -664,6 +678,7 @@ async def resume_agent_task(
                 user_id=current_user.id,
                 config=fallback_config,
                 claim=False,  # 已在上方 prepare_resume 认领（HTTP 409 语义在开流前）
+                request_id=resolve_request_id(request),  # issue #510：resume 请求编号
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)
@@ -730,6 +745,9 @@ async def resume_agent_task(
             yield await emitter.emit("warning", warning_data)
 
         done_data: dict[str, Any] = {"type": "done", "content": "", "task_id": task_id}
+        done_request_id = resolve_request_id(request)  # issue #510：resume 请求编号
+        if done_request_id:
+            done_data["request_id"] = done_request_id
         if session_id:
             done_data["saved"] = save_error is None
         if assistant_message_id:
@@ -832,6 +850,7 @@ async def decide_agent_task_approval(
                 user_id=current_user.id,
                 config=fallback_config,
                 claim=False,  # 已在上方 apply_approval_decision 认领（HTTP 409 在开流前）
+                request_id=resolve_request_id(request),  # issue #510：审批续跑请求编号
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)
@@ -896,6 +915,9 @@ async def decide_agent_task_approval(
             "task_id": task_id,
             "decision": decision_record.get("decision"),
         }
+        done_request_id = resolve_request_id(request)  # issue #510：审批续跑请求编号
+        if done_request_id:
+            done_data["request_id"] = done_request_id
         if session_id:
             done_data["saved"] = save_error is None
         if assistant_message_id:
@@ -1041,6 +1063,7 @@ async def decide_agent_task_plan_approval(
                 user_id=current_user.id,
                 config=fallback_config,
                 claim=False,  # 已在上方 apply_plan_approval_decision 认领（HTTP 409 在开流前）
+                request_id=resolve_request_id(request),  # issue #510：计划审批续跑请求编号
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)
@@ -1105,6 +1128,9 @@ async def decide_agent_task_plan_approval(
             "task_id": task_id,
             "decision": record.get("decision"),
         }
+        done_request_id = resolve_request_id(request)  # issue #510：计划审批续跑请求编号
+        if done_request_id:
+            done_data["request_id"] = done_request_id
         if session_id:
             done_data["saved"] = save_error is None
         if assistant_message_id:
