@@ -2,11 +2,31 @@
 # All secrets are injected via .env.docker (copy from .env.docker.example)
 
 services:
+  # 一次性数据库迁移（issue #495）：backend/worker 只在 alembic upgrade head
+  # 成功后才启动（service_completed_successfully）。迁移只在这个服务里执行一次，
+  # 绝不让 backend/worker 各自跑 upgrade——并发迁移会竞争 Alembic 版本表/DDL。
+  # 失败即中断启动（restart: "no"，退出码非 0 不满足 completed 条件）。
+  migrate:
+    build: .
+    container_name: docmind-migrate
+    command: ["alembic", "upgrade", "head"]
+    env_file:
+      - .env.docker
+    environment:
+      # 与 backend/worker 相同的容器内连接串（Compose 插值来源见文件头注释）
+      - DATABASE_URL=mysql+aiomysql://${MYSQL_USER:-docmind}:${MYSQL_PASSWORD:?MYSQL_PASSWORD_required}@docmind-mysql:3306/${MYSQL_DATABASE:-docmind}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - docmind-network
+    restart: "no"
+
   # FastAPI backend
   backend:
     build: .
     container_name: docmind-backend
-    # issue #479：统一入口（Dockerfile CMD 仍保留 uvicorn app.main:app 作为兜底）
+    # issue #479/#495：统一入口；迁移由上面的 migrate 服务先完成，启动期 schema guard 兜底校验
     command: python -m app --profile web
     ports:
       - "8000:8000"
@@ -28,6 +48,8 @@ services:
       # issue #207：打开 31 个 Prometheus 指标（此前默认 no-op）
       - PROMETHEUS_ENABLED=true
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       mysql:
         condition: service_healthy
       redis:
@@ -77,6 +99,8 @@ services:
       # issue #207：worker 侧同样开启指标
       - PROMETHEUS_ENABLED=true
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       mysql:
         condition: service_healthy
       redis:

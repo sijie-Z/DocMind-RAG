@@ -20,6 +20,19 @@ spec:
       labels:
         app: docmind-backend
     spec:
+      # issue #495：迁移只在 09-migrate-job.yaml 的 Job 里执行一次（串行、不竞争）；
+      # 这里用 check_schema.py 做只读校验——库未到迁移 head 时 initContainer 失败，
+      # Pod 不启动（fail-closed），不会带着落后 schema 提供 500。
+      initContainers:
+        - name: schema-check
+          image: docmind-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "scripts/check_schema.py"]
+          envFrom:
+            - configMapRef:
+                name: docmind-config
+            - secretRef:
+                name: docmind-secrets
       containers:
         - name: backend
           image: docmind-backend:latest

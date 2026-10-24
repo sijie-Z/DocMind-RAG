@@ -1,0 +1,48 @@
+# 一次性数据库迁移 Job（issue #495）
+#
+# 迁移只在这里执行一次；backend / worker 的 Pod 通过 initContainer
+# （scripts/check_schema.py，只读校验）在 schema 未到 head 时拒绝启动，
+# 绝不带着落后 schema 提供服务。
+#
+# 发布顺序（必须）：
+#   1. kubectl apply -f deploy/k8s/09-migrate-job.yaml
+#   2. kubectl wait --for=condition=complete job/docmind-migrate -n docmind --timeout=600s
+#   3. 再 apply / rollout 03-backend-deployment.yaml 与 05-worker.yaml
+# Job 失败（非 completed）时不要继续 rollout；排查后删除 Job 重跑：
+#   kubectl delete job docmind-migrate -n docmind && kubectl apply -f deploy/k8s/09-migrate-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: docmind-migrate
+  namespace: docmind
+  labels:
+    app: docmind-migrate
+spec:
+  # 迁移失败最多重试 2 次；整体限时 10 分钟（DDL 卡死时不要无限占用）。
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  # 保留 1 天便于查日志；成功/失败都不影响本 Job 的一次性语义。
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: docmind-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: docmind-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: docmind-config
+            - secretRef:
+                name: docmind-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

@@ -89,4 +89,7 @@ USER appuser
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/readyz || exit 1
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# issue #495：统一入口（与 compose 的 command 一致）；启动期会执行 schema guard。
+# 迁移不在镜像入口脚本里自动跑——compose 由一次性 migrate 服务、K8s 由 Job 串行执行，
+# 避免多个副本各自 alembic upgrade head 竞争。
+CMD ["python", "-m", "app", "--profile", "web"]

@@ -13,12 +13,14 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import sys
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -57,6 +59,189 @@ from app.models.user import User
 # 日志 logger 名保持 "app.main"：本模块承接原 app/main.py 的启动/健康检查/文件代理
 # 日志，改名会让既有日志管道与 caplog 断言（例如 test_issue301_misc_api）失配。
 logger = logging.getLogger("app.main")
+
+
+# ── 启动 schema guard（issue #495）──────────────────────────────────────────
+# 数据库 schema 是否已到迁移 head，由 Alembic 脚本（代码侧 heads）与数据库
+# alembic_version（库侧 current）共同判定：
+#   - SCHEMA_GUARD=true（默认）且 current ≠ heads → 拒绝启动（exit 2）；
+#   - AUTO_MIGRATE=true 时才在启动期兜底执行一次 alembic upgrade head；
+#   - SCHEMA_GUARD=false 是显式逃生门（迁移由外部流程负责）。
+# 迁移本身**不**由 backend/worker 各自执行：compose 用一次性 migrate 服务、
+# K8s 用 deploy/k8s/09-migrate-job.yaml，保证串行、只跑一次。
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+ALEMBIC_INI = BACKEND_DIR / "alembic.ini"
+ALEMBIC_SCRIPT_DIR = BACKEND_DIR / "alembic"
+ALEMBIC_VERSION_TABLE = "alembic_version"
+
+
+class SchemaOutdatedError(RuntimeError):
+    """数据库 schema 未处于迁移 head（issue #495）；启动路径据此退出码 2。"""
+
+    #: critical 日志是否已在抛出前写入（避免退出路径重复记录）。
+    logged: bool = False
+
+    def __init__(self, current: set[str] | None, heads: set[str]) -> None:
+        self.current = current
+        self.heads = heads
+        super().__init__(render_schema_mismatch(current, heads))
+
+
+def render_schema_mismatch(current: set[str] | None, heads: set[str]) -> str:
+    """统一 mismatch 文案（日志与异常共用；必须含 current / head / 修复命令）。"""
+    current_text = ",".join(sorted(current)) if current else "(none)"
+    head_text = ",".join(sorted(heads)) if heads else "(none)"
+    adopt_hint = ""
+    if not current:
+        adopt_hint = (
+            "（该库没有迁移版本记录——alembic_version 表不存在或为空：若它是 create_all "
+            "建的，先用 alembic stamp <与库现状一致的 revision> 纳入迁移管理，再 upgrade）"
+        )
+    return (
+        f"数据库 schema 未处于迁移 head：current={current_text} head={head_text}。"
+        "请先运行 alembic upgrade head"
+        "（compose: docker compose run --rm migrate；"
+        "K8s: kubectl apply -f deploy/k8s/09-migrate-job.yaml 并等待 Job 完成），"
+        "或仅在明确接受并发风险时设置 AUTO_MIGRATE=true 由启动期兜底迁移。"
+        f"{adopt_hint}"
+    )
+
+
+def get_alembic_heads() -> set[str]:
+    """读取迁移脚本的 head 集合（纯本地操作，不连库）。"""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    cfg = Config(str(ALEMBIC_INI))
+    cfg.set_main_option("script_location", str(ALEMBIC_SCRIPT_DIR))
+    return set(ScriptDirectory.from_config(cfg).get_heads())
+
+
+async def read_db_revision(engine: Any) -> set[str] | None:
+    """读取库里的 alembic_version 集合；表不存在返回 None（= 迁移从未跑过）。
+
+    按方言区分表存在性查询（MySQL information_schema / SQLite sqlite_master），
+    与 scripts/check_schema.py 同口径。连接失败不吞：fail-closed 交给调用方。
+    """
+    from sqlalchemy import text
+
+    async with engine.connect() as conn:
+        if conn.dialect.name == "mysql":
+            exists = (
+                await conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM information_schema.tables "
+                        "WHERE table_schema = DATABASE() AND table_name = :t"
+                    ),
+                    {"t": ALEMBIC_VERSION_TABLE},
+                )
+            ).scalar()
+        else:
+            exists = (
+                await conn.execute(
+                    text("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = :t"),
+                    {"t": ALEMBIC_VERSION_TABLE},
+                )
+            ).scalar()
+        if not exists:
+            return None
+        rows = await conn.execute(
+            text(f"SELECT version_num FROM {ALEMBIC_VERSION_TABLE}")  # nosec B608  # noqa: S608
+        )
+        return {row[0] for row in rows}
+
+
+def _run_alembic_upgrade() -> None:
+    """同步执行 alembic upgrade head（供 asyncio.to_thread 在工作线程调用）。
+
+    不能直接在事件循环里调用：alembic/env.py 内部用 asyncio.run() 建自己的
+    事件循环，在已运行 loop 的线程里会抛 RuntimeError。放到工作线程执行是
+    Alembic 程序内调用的可用方式。
+    """
+    from alembic.config import Config
+
+    from alembic import command
+
+    cfg = Config(str(ALEMBIC_INI))
+    cfg.set_main_option("script_location", str(ALEMBIC_SCRIPT_DIR))
+    # 不让 alembic/env.py 调 fileConfig 重置宿主日志管线（评审 F1）：
+    # fileConfig 会把 root 重置为 WARN 并替换 handler，AUTO_MIGRATE 的审计日志
+    # 与启动期 JSON 日志会从此被吞。config_file_name=None 时 env.py 跳过该分支。
+    cfg.config_file_name = None
+    command.upgrade(cfg, "head")
+
+
+async def enforce_schema_guard(
+    *,
+    engine: Any | None = None,
+    auto_migrate: bool | None = None,
+) -> None:
+    """启动期 schema 校验（issue #495）：不在 head 时按策略迁移或抛错。
+
+    - ``SCHEMA_GUARD=false``：显式跳过（逃生门，写日志）；
+    - current == heads：通过；
+    - current ≠ heads 且 ``AUTO_MIGRATE=true``：线程内执行一次 upgrade（审计
+      日志），随后**重新校验**，仍不一致则抛 ``SchemaOutdatedError``；
+    - 否则：``logger.critical`` 输出 current / head / 修复命令后抛错，由 lifespan
+      转换为进程退出码 2。
+
+    ``engine`` / ``auto_migrate`` 参数用于单测注入（默认取 app 的异步引擎与
+    ``settings.AUTO_MIGRATE``）。
+    """
+    if not settings.SCHEMA_GUARD:
+        logger.info("SCHEMA_GUARD=false，跳过启动期 schema 校验（迁移须由外部流程保证）")
+        return
+
+    heads = get_alembic_heads()
+    if not heads:
+        raise RuntimeError("Alembic 迁移脚本没有任何 head（仓库状态异常），拒绝启动")
+
+    if engine is None:
+        from app.core.database import engine as db_engine
+
+        engine = db_engine
+
+    current = await read_db_revision(engine)
+    if current == heads:
+        logger.info("Schema guard：数据库处于迁移 head（%s）", ",".join(sorted(heads)))
+        return
+
+    do_auto_migrate = settings.AUTO_MIGRATE if auto_migrate is None else auto_migrate
+    if do_auto_migrate:
+        logger.warning(
+            "AUTO_MIGRATE=true：schema 不在 head（current=%s head=%s），启动期兜底执行 "
+            "alembic upgrade head（审计）",
+            ",".join(sorted(current)) if current else "(none)",
+            ",".join(sorted(heads)),
+        )
+        await asyncio.to_thread(_run_alembic_upgrade)
+        current = await read_db_revision(engine)
+        if current == heads:
+            logger.info(
+                "AUTO_MIGRATE 完成：数据库已升级到迁移 head（%s）（审计）",
+                ",".join(sorted(heads)),
+            )
+            return
+
+    exc = SchemaOutdatedError(current, heads)
+    logger.critical("%s", exc)
+    exc.logged = True  # 避免 _exit_for_schema_outdated 重复打日志
+    raise exc
+
+
+def _exit_for_schema_outdated(exc: SchemaOutdatedError) -> None:
+    """启动期 schema 落后：以退出码 2 结束进程。
+
+    uvicorn 的 LifespanOn 会把启动期异常/SystemExit 折叠成 STARTUP_FAILURE=3
+    （Server.startup → sys.exit(3)），而 issue #495 要求明确退出码 2，因此这里
+    直接 os._exit(2)。此时只完成了 init_db，尚无需要优雅清理的资源。
+    critical 日志已在 enforce_schema_guard 抛出前写入（含 current/head）；若异常
+    从别处构造（未被记录），这里补一条。
+    """
+    if not getattr(exc, "logged", False):
+        logger.critical("%s", exc)
+    os._exit(2)
 
 
 async def metrics_snapshot_task():
@@ -191,6 +376,10 @@ class LifespanDeps:
     # issue #477：持久终端生命周期（有默认值，app/main.py 兼容壳无需改动）。
     terminal_service_startup: Callable[[], Any] = terminal_service_startup
     terminal_service_stop: Callable[[], Any] = terminal_service_stop
+    # issue #495：启动期 schema guard（默认 None = 不校验——显式构造 LifespanDeps 的
+    # 测试与 app.main 兼容壳保持原行为；统一入口 python -m app 经
+    # DEFAULT_LIFESPAN_DEPS 绑定 enforce_schema_guard）。
+    schema_guard: Callable[[], Any] | None = None
 
 
 DEFAULT_LIFESPAN_DEPS = LifespanDeps(
@@ -204,6 +393,7 @@ DEFAULT_LIFESPAN_DEPS = LifespanDeps(
     resolve_backend_port=resolve_backend_port,
     metrics_snapshot_task=metrics_snapshot_task,
     scheduled_tasks_loop=scheduled_tasks_loop,
+    schema_guard=enforce_schema_guard,
 )
 
 
@@ -227,6 +417,18 @@ def build_lifespan(deps: LifespanDeps):
         try:
             await deps.init_db()
             logger.info("数据库连接成功")
+
+            # issue #495：schema guard —— init_db 成功后、其它初始化之前校验
+            # alembic_version 是否处于迁移 head。落后时 enforce_schema_guard 先写
+            # critical（current/head/alembic upgrade head），再由这里以退出码 2
+            # 结束进程（uvicorn 会把普通启动异常折叠成 exit 3，故用 os._exit）。
+            if deps.schema_guard is not None:
+                try:
+                    guard_result = deps.schema_guard()
+                    if inspect.isawaitable(guard_result):
+                        await guard_result
+                except SchemaOutdatedError as exc:
+                    _exit_for_schema_outdated(exc)
 
             try:
                 await deps.init_redis()
