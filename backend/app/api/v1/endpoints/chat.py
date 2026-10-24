@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import uuid
 
 from fastapi import (
@@ -64,6 +65,26 @@ from app.services.session_service import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _guard_enabled_from_env(value: str | None) -> bool:
+    """解析 ``CHAT_DEEP_ANALYSIS_GUARD``：缺省/空串 = 开启（生产默认拒绝旧客户端）。
+
+    关闭值仅接受 ``0/false/off/no``（大小写不敏感）——部署窗口期回滚用。
+    注意：本开关读取**真实环境变量**（导入期求值，需重启）；不经过 pydantic
+    ``.env`` 文件（与 #232 的配置口径有意区分：安全守卫只认显式环境变量）。
+    """
+    if value is None or not value.strip():
+        return True
+    return value.strip().lower() not in ("0", "false", "off", "no")
+
+
+# issue #508（方案 B）：深度分析（Agent/PER）已迁至 /agent 工作台（审批/计划
+# 审批/取消/回放 UI 完整）。旧客户端若仍发 useAgent=true，必须收到显式错误码
+# DEEP_ANALYSIS_MOVED_TO_AGENT——既不静默跑「Chat 里没有审批 UI」的 Agent 链路，
+# 也不静默降级成普通 RAG。默认开启；部署窗口期可用环境变量
+# CHAT_DEEP_ANALYSIS_GUARD=false 临时放行旧链路（回滚阀，非长期配置）。
+DEEP_ANALYSIS_GUARD_ENABLED = _guard_enabled_from_env(os.getenv("CHAT_DEEP_ANALYSIS_GUARD"))
 
 
 def _extract_agent_sources(tool_result: str, sources: list[dict]) -> None:
@@ -934,6 +955,21 @@ async def chat_stream_endpoint(
         # 日志上下文：组织取有效组织（token 回退已校验）的只读快照，绝不影响运行口径。
         log_org_id = get_user_org_id(current_user)
         try:
+            # issue #508（方案 B）：深度分析入口已迁至 /agent 工作台。旧客户端
+            # 仍发 useAgent=true 时显式拒绝（错误码 + 跳转提示），绝不静默进入
+            # 无审批 UI 的 Agent 链路，也不静默降级为 RAG。放在续传处理之前：
+            # 旧客户端的重连同样得到明确指引，而不是回放一条它无法完整消费的流。
+            if DEEP_ANALYSIS_GUARD_ENABLED and body.useAgent:
+                yield await emitter.emit(
+                    "error",
+                    {
+                        "code": "DEEP_ANALYSIS_MOVED_TO_AGENT",
+                        "content": "深度分析已移至 Agent 工作台（支持审批/回放），请前往 /agent 使用",
+                        "redirect": "/agent",
+                    },
+                )
+                return
+
             # issue #480 §5.2：Last-Event-ID 续传。B2：回放前必须先做会话归属
             # 校验——buffer 键只含会话 id，会话 UUID 不是授权凭证。
             last_event_id = request.headers.get("Last-Event-ID")

@@ -1,37 +1,50 @@
-// Agent event types matching the PER architecture
-export type AgentEventType =
-  | 'thinking'
-  | 'plan_start'
-  | 'plan_step'
-  | 'plan_complete'
-  | 'tool_call'
-  | 'tool_result'
-  | 'tool_error'
-  | 'reflection'
-  | 'chunk'
-  | 'done'
-  | 'run_report'
-  | 'execution_context'
-  | 'retry_hint'
-  | 'warning'
-  | 'error'
+// Agent 事件类型真源（单一 const + 派生类型）。
+//
+// issue #508：本数组与 backend/app/agent/events.py::EventType **逐字对齐**——
+// 后端 Literal 新增/删除事件时这里必须同步（backend/tests/api/test_chat_stream.py
+// 的静态契约用例会跨语言比对，漂移即红）。Chat 页不再消费 Agent 事件（深度分析
+// 已迁至 /agent 工作台），但事件台账仍由 Agent 工作台（stores/agent.ts）消费；
+// `frontend/src/views/chat/__tests__/chatEventCoverage.test.ts` 钉住
+// 「EventType - Chat handlers」的剩余差异必须逐项有豁免理由。
+export const AGENT_EVENT_TYPES = [
+  'thinking',
+  'plan_start',
+  'plan_step',
+  'plan_complete',
+  'tool_call',
+  'tool_result',
+  'tool_error',
+  'retry_hint',
+  'reflection',
+  'chunk',
+  'done',
+  'error',
+  'execution_step_result',
+  'run_report',
+  'warning',
+  'execution_context',
   // HITL（人在环）：执行器停在审批点 / 协作式取消收敛（见后端 approval.py）
-  | 'approval_required'
-  | 'run_cancelled'
+  'approval_required',
+  'run_cancelled',
   // A：运行中转向（见后端 steering.py）
-  //   steer_applied — 指导在步边界被消费并注入后续步骤（content=消息摘要）；
-  //   steer_sent    — **前端本地事件**（乐观落账，后端无此类型）：指导已提交成功。
-  | 'steer_applied'
-  | 'steer_sent'
+  'steer_applied',
   // B：计划审批（plan_approval_mode=always）：planner 出计划后暂停，等人类决策
   // （plan_steps 携带结构化步骤——resume 流不回放 plan_step，卡片数据自足）。
-  | 'plan_approval_required'
+  'plan_approval_required',
   // User Commands（issue #475）：命令通道事件三元组（见 backend/app/agent/events.py）。
   // 命令在进入 PER 之前执行，不创建模型轮次；command_result 的载荷在
   // command_name / command_data。
-  | 'command_start'
-  | 'command_result'
-  | 'command_error'
+  'command_start',
+  'command_result',
+  'command_error',
+  // Hooks（issue #474）：hook 失败不静默——超时/异常/非法决策以本事件外发。
+  'hook_error',
+] as const
+
+export type AgentEventType =
+  | (typeof AGENT_EVENT_TYPES)[number]
+  // steer_sent — **前端本地事件**（乐观落账，后端无此类型）：指导已提交成功。
+  | 'steer_sent'
 
 export type ThinkingType = 'reasoning' | 'planning' | 'evaluation' | 'correction'
 // 六态真源：backend/app/agent/events.py:39-42（unavailable=评估服务不可用；

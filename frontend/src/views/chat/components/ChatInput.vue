@@ -164,77 +164,45 @@
               </div>
             </n-popover>
 
-            <!-- B4：传输（SSE/WS）与 Agent 开关合并为「对话模式」。
-                 Agent 依赖 SSE，开启时传输开关锁定并给出解释。 -->
+            <!-- issue #508：深度分析迁至 /agent 工作台后，传输开关恢复为纯
+                 SSE/WS 选择——不再与 Agent 模式联动，没有锁定态。 -->
             <n-popover trigger="hover" placement="top">
               <template #trigger>
-                <span data-testid="transport-lock" :data-disabled="String(useAgent)">
+                <span data-testid="transport-control">
                   <n-button
                     size="tiny"
                     quaternary
                     circle
-                    :class="useAgent ? 'text-purple-600 dark:text-purple-400' : (useSSE ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400')"
-                    data-testid="agent-mode-control"
-                    :data-agent="String(useAgent)"
+                    :class="useSSE ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'"
                   >
                     <template #icon><n-icon size="18"><RocketOutline /></n-icon></template>
                   </n-button>
                 </span>
               </template>
-              <div class="flex flex-col gap-2">
-                <div class="flex items-center gap-2">
-                  <n-switch
-                    :value="useAgent"
-                    size="small"
-                    data-testid="agent-mode-switch"
-                    @update:value="setAgentMode"
-                  />
-                  <span class="text-xs">{{ t('chat.agentMode') }}</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <n-switch
-                    v-model:value="useSSE"
-                    size="small"
-                    :disabled="useAgent"
-                    data-testid="transport-switch"
-                    :data-disabled="String(useAgent)"
-                  />
-                  <span class="text-xs">{{ t('chat.sseMode') }}</span>
-                </div>
-                <span v-if="useAgent" class="text-xs text-gray-400 max-w-[220px]" data-testid="agent-sse-note">
-                  {{ t('chat.agentRequiresSse') }}
-                </span>
+              <div class="flex items-center gap-2">
+                <n-switch
+                  v-model:value="useSSE"
+                  size="small"
+                  data-testid="transport-switch"
+                />
+                <span class="text-xs">{{ t('chat.sseMode') }}</span>
               </div>
             </n-popover>
 
-            <!-- B2（D3 会话入口合并）：快速问答 / 深度分析（Agent）模式开关。
-                 深度分析复用 /agent 的 PER 能力（经 /chat/stream useAgent），
-                 Agent 仅 SSE 可用——开启时锁定 SSE（脚本里 watch 兜底）。 -->
-            <n-radio-group
-              v-model:value="chatMode"
-              size="small"
-              class="chat-mode-switch"
-              :aria-label="t('chat.modeSwitchAria')"
+            <!-- issue #508（方案 B）：深度分析不再是 Chat 内的模式开关——Agent/PER
+                 的审批、计划审批、取消与回放只在 /agent 工作台可用。入口保持一键
+                 可达，当前输入由父组件经 ?prompt= 带过去。
+                 文案硬编码：本 issue 白名单不含 locales/*，i18n key 另开跟进。 -->
+            <n-button
+              size="tiny"
+              quaternary
+              class="text-purple-600 dark:text-purple-400"
+              data-testid="agent-workbench-entry"
+              @click="openAgentWorkbench"
             >
-              <n-radio-button value="quick">{{ t('chat.modeQuick') }}</n-radio-button>
-              <n-radio-button value="deep">{{ t('chat.modeDeep') }}</n-radio-button>
-            </n-radio-group>
-            <n-tooltip v-if="useAgent" trigger="hover">
-              <template #trigger>
-                <n-icon size="16" class="text-purple-500 dark:text-purple-400 cursor-help">
-                  <InformationCircleOutline />
-                </n-icon>
-              </template>
-              {{ t('chat.modeDeepHint') }}
-            </n-tooltip>
-            <!-- 锁定态解释常驻可见：策略说明不应藏在悬浮层里。 -->
-            <span
-              v-if="useAgent"
-              class="text-[11px] text-purple-500 dark:text-purple-400 max-w-[260px] truncate"
-              data-testid="agent-sse-note-inline"
-            >
-              {{ t('chat.agentRequiresSse') }}
-            </span>
+              <template #icon><n-icon size="16"><OpenOutline /></n-icon></template>
+              前往 Agent 工作台（支持审批/回放）
+            </n-button>
             <span
               v-if="!orgPrivacyAllowed"
               class="text-[11px] text-gray-400 max-w-[260px] truncate"
@@ -272,14 +240,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   SendOutline, AttachOutline, FlashOutline, ShieldCheckmarkOutline,
   StopCircleOutline, DocumentTextOutline, DocumentOutline, CloseOutline,
   CloudUploadOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldOutline,
-  InformationCircleOutline,
-  RocketOutline
+  RocketOutline, OpenOutline
 } from '@vicons/ionicons5'
 import type { AttachedFile } from '@/types/chat'
 
@@ -290,33 +257,10 @@ const strictMode = defineModel<boolean>('strictMode', { default: false })
 const privacyMode = defineModel<boolean>('privacyMode', { default: true })
 const useSSE = defineModel<boolean>('useSSE', { default: false })
 const useStream = defineModel<boolean>('useStream', { default: true })
-const useAgent = defineModel<boolean>('useAgent', { default: false })
 
-// B2（D3）：二选一模式开关。深度分析 = Agent（PER）模式。
-const chatMode = computed({
-  get: () => (useAgent.value ? 'deep' : 'quick'),
-  set: (mode: string) => {
-    useAgent.value = mode === 'deep'
-  },
-})
-
-// Agent（PER）只经 SSE 执行：开启即锁定 SSE；用户再关掉 SSE 时立即拉回，
-// 避免「Agent 开着但传输退回 WS」被静默降级成普通问答。
-watch(useAgent, (on) => {
-  if (on) useSSE.value = true
-}, { immediate: true })
-watch(useSSE, (on) => {
-  if (!on && useAgent.value) useSSE.value = true
-})
-const setAgentMode = (value: boolean) => {
-  useAgent.value = value
-  // Agent 模式依赖 SSE：开启时强制并锁定传输开关（UI 同步置灰 + 解释）
-  if (value) useSSE.value = true
-}
-
-/** issue #475：非 Agent 模式下的斜杠文本不会执行命令——输入即如实提示。 */
+/** issue #475：Chat 没有斜杠命令入口（后端仅在 Agent 分支拦截）——输入即如实提示。 */
 const showSlashAgentHint = computed(
-  () => !useAgent.value && inputMessage.value.trim().startsWith('/'),
+  () => inputMessage.value.trim().startsWith('/'),
 )
 
 withDefaults(defineProps<{
@@ -336,7 +280,11 @@ const emit = defineEmits<{
   stopGeneration: []
   triggerFileUpload: []
   removeAttachment: [index: number]
+  /** issue #508：前往 Agent 工作台（深度分析的新入口，只做导航）。 */
+  openAgentWorkbench: []
 }>()
+
+const openAgentWorkbench = () => emit('openAgentWorkbench')
 
 const onKeydown = (e: KeyboardEvent) => {
   if (!e.shiftKey) emit('send')
