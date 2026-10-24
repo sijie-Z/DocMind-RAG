@@ -42,6 +42,10 @@ _TEST_ENV = {
     "ENABLE_SCHEDULER": "false",
     "PROMETHEUS_ENABLED": "true",
     "SANDBOX_MODE": "ast",  # force AST sandbox in tests (no Docker dependency)
+    # issue #510：调用级 JSONL 在生产默认开启；测试里默认关闭，避免用例把
+    # backend/logs/llm_calls.jsonl 写成大文件。需要验证 JSONL 的用例自行
+    # monkeypatch settings 打开并指向 tmp_path（见 test_llm_call_jsonl.py）。
+    "LLM_CALL_LOG_ENABLED": "false",
 }
 if os.path.isdir(_TIKTOKEN_CACHE):
     _TEST_ENV["TIKTOKEN_CACHE_DIR"] = _TIKTOKEN_CACHE

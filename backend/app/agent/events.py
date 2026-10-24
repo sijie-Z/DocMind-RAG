@@ -129,6 +129,11 @@ class AgentEvent:
     # 由 service 包装层盖章（chat / resume_chat）；默认空 → 既有 SSE 输出不变。
     task_id: str = ""
 
+    # issue #510 第二步：本次请求的 X-Request-ID（与 HTTP 中间件 / 结构化日志 /
+    # llm_calls.jsonl 同源）。同样由 service 包装层盖章；默认空 → 不序列化，
+    # 既有事件载荷在无请求上下文时零变化。
+    request_id: str = ""
+
     # User Commands（issue #475）：command_* 事件的命令名与结构化载荷。
     # 其余事件类型保持空 → 序列化时省略（既有载荷不变）。
     command_name: str = ""
@@ -214,6 +219,8 @@ class AgentEvent:
 
         if self.task_id:
             d["task_id"] = self.task_id
+        if self.request_id:
+            d["request_id"] = self.request_id
 
         # User Commands（issue #475）：非空才带，既有事件载荷零变化。
         if self.command_name:

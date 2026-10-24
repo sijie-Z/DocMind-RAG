@@ -8,6 +8,7 @@ Inspired by hermes-agent's ContextEngine / ContextCompressor pattern.
 """
 
 import logging
+import time
 
 import tiktoken
 
@@ -225,32 +226,56 @@ class ContextEngine:
         )
         max_chars = int(token_budget * CHARS_PER_TOKEN)
 
+        from app.agent.usage import record_llm_call_error, record_llm_usage
+
+        llm_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Summarize the following conversation into a concise paragraph "
+                    "(under 300 words). Preserve key facts, decisions, and action items. "
+                    "Use the same language as the conversation."
+                ),
+            },
+            {"role": "user", "content": conversation_text[:4000]},
+        ]
+        llm_started = time.perf_counter()
+        llm_recorded = False
+        call_attempted = False
+        model_name: str | None = None
         try:
             from app.core.config import settings
 
+            call_attempted = True
+            model_name = settings.DEEPSEEK_MODEL
             resp = await self._llm_client.chat.completions.create(
                 model=settings.DEEPSEEK_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Summarize the following conversation into a concise paragraph "
-                            "(under 300 words). Preserve key facts, decisions, and action items. "
-                            "Use the same language as the conversation."
-                        ),
-                    },
-                    {"role": "user", "content": conversation_text[:4000]},
-                ],
+                messages=llm_messages,
                 temperature=0.0,
                 max_tokens=min(300, max_chars // 2),
             )
             # 用量记账（issue #202 评审 minor-1）：环内第七个调用点——
-            # ContextEngine 摘要，经 loop.py 的 fit_async 在产品路径可达
-            from app.agent.usage import record_llm_usage
-
-            record_llm_usage(resp, ctx)
+            # ContextEngine 摘要，经 loop.py 的 fit_async 在产品路径可达。
+            # issue #510：同入口写调用级 JSONL（延迟 + 提示词摘要）。
+            record_llm_usage(
+                resp,
+                ctx,
+                latency_ms=(time.perf_counter() - llm_started) * 1000,
+                messages=llm_messages,
+            )
+            llm_recorded = True
             return resp.choices[0].message.content or ""
-        except Exception:
+        except Exception as e:
+            # issue #510：摘要调用失败同样留一行（tokens=0 + error）；已成功
+            # 记账后的解析异常不重复记。
+            if call_attempted and not llm_recorded:
+                record_llm_call_error(
+                    ctx,
+                    model=model_name,
+                    error=e,
+                    latency_ms=(time.perf_counter() - llm_started) * 1000,
+                    messages=llm_messages,
+                )
             return ""
 
     def _truncate_messages(

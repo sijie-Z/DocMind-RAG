@@ -1,5 +1,10 @@
 """Observability — Langfuse tracing for the PER agent loop.
 
+Deprecated candidate（issue #510 第三步待仓库所有者逐项批准删除）：在批准前
+本模块、依赖与全部埋点**保留且行为不变**。调用级替代记录已由
+``app.agent.llm_call_log``（ExecutionContext JSONL）提供；需要关闭本模块时
+置 ``LANGFUSE_ENABLED=false``（不删除代码、不改变未配置时的既有行为）。
+
 Provides helpers to trace Planner, Executor, Reflector, Tool calls,
 and Memory retrieval into Langfuse.
 
@@ -30,6 +35,10 @@ def get_langfuse() -> Langfuse | None:
         try:
             from app.core.config import settings
 
+            if not getattr(settings, "LANGFUSE_ENABLED", True):
+                logger.info("Langfuse disabled by configuration (LANGFUSE_ENABLED=false)")
+                _langfuse = None
+                return _langfuse
             if settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY:
                 _langfuse = Langfuse(
                     public_key=settings.LANGFUSE_PUBLIC_KEY,
