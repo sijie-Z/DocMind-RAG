@@ -231,3 +231,41 @@ jobs:
         run: |
           python -m pip install -q pytest
           python -m pytest tests/unit/test_doc_facts.py -q --noconftest
+
+  # issue #507：密钥防回归门禁（公开仓库历史中已发生真实泄露，见 SECURITY.md）。
+  # 全历史扫描：命中不在 .gitleaksignore 登记指纹内的任何密钥 → PR 直接红；
+  # 测试夹具/文档示例的假值放行规则在 .gitleaks.toml（不按目录整体放行）。
+  # 版本钉死并校验官方 sha256，避免下载链路与扫描行为漂移。
+  secret-scan:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # 必须全历史：.gitleaksignore 指纹按 <commit>:<path>:<rule>:<line> 匹配。
+          fetch-depth: 0
+
+      # 安装到 $RUNNER_TEMP（仓库外），避免二进制/压缩包本身进入工作树扫描范围。
+      - name: Install gitleaks (pinned, checksum verified)
+        run: |
+          set -eu
+          VERSION=8.30.1
+          BASE="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}"
+          DEST="${RUNNER_TEMP}/gitleaks-bin"
+          ARCHIVE="gitleaks_${VERSION}_linux_x64.tar.gz"
+          mkdir -p "$DEST"
+          curl -sSfL -o "$DEST/$ARCHIVE" "${BASE}/${ARCHIVE}"
+          curl -sSfL -o "$DEST/gitleaks_checksums.txt" "${BASE}/gitleaks_${VERSION}_checksums.txt"
+          # checksums.txt 按官方文件名登记，压缩包必须保持原名后再校验（否则 sha256sum -c 报 No such file）。
+          (cd "$DEST" && grep "$ARCHIVE" gitleaks_checksums.txt | sha256sum -c -)
+          tar -xzf "$DEST/$ARCHIVE" -C "$DEST" gitleaks
+          echo "$DEST" >> "$GITHUB_PATH"
+          "$DEST/gitleaks" version
+
+      - name: Scan git history for secrets
+        run: gitleaks detect --source . --redact --verbose --exit-code 1
+
+      # 纵深防御：工作树扫描（--no-git）不依赖 git 历史口径，兜底生成物/未跟踪内容。
+      - name: Scan working tree for secrets
+        run: gitleaks detect --source . --no-git --redact --verbose --exit-code 1

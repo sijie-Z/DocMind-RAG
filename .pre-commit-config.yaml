@@ -10,6 +10,15 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
 
+  # 密钥门禁（issue #507）：与 CI ci-hygiene 的 secret-scan job 同版本，
+  # 扫 staged 变更；命中 .gitleaks.toml/.gitleaksignore 之外的任何密钥即失败。
+  # 官方 hook 用 language: golang，pre-commit 首次运行会自行编译（本机需 Go）；
+  # 无 Go 的机器可安装 gitleaks 二进制后改用同仓库的 gitleaks-system hook。
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.10
     hooks:
