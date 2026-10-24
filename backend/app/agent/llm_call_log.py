@@ -16,9 +16,11 @@ ID 语义（issue #510 第二步，不做假的"统一 trace_id"）：
   （``app.core.request_id`` 的 contextvar；WS 无此头，如实为 null）。
 
 写入路径可配置（``LLM_CALL_LOG_FILE``，默认 ``logs/llm_calls.jsonl``）；
-``LLM_CALL_LOG_PER_RUN=true`` 时按 run 分文件（``llm_calls-<task_id>.jsonl``）。
-``task_id`` 进文件名前走白名单校验——非法值绝不拼进路径（对齐
-``exec_context._replay_file_for`` 的 path-injection 防线）。
+``LLM_CALL_LOG_PER_RUN=true`` 时按 run 分文件
+（``llm_calls-run-<sha256(task_id)[:16]>.jsonl``）——task_id **绝不**出现在
+文件路径里，只取十六进制摘要，从构造上消除路径注入。
+
+落盘路径只来自配置，不提供调用方传路径的入口（避免请求级值进入文件路径）。
 
 可观测性写入绝不影响主流程：所有异常在 :func:`append_llm_call_record`
 内部吞掉并 debug 留痕，调用方永远拿到 bool。
@@ -29,7 +31,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,9 +39,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 DEFAULT_LOG_FILE = "logs/llm_calls.jsonl"
-
-# task_id 进文件名前的白名单（与 exec_context._SAFE_FILE_STEM 同口径）。
-_SAFE_FILE_STEM = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 
 # 同进程内并发 append 的互斥：一次 open/write/close 落一整行。跨进程依赖
 # O_APPEND 的原子性（单行远小于 PIPE_BUF/页大小）。
@@ -171,8 +169,12 @@ def resolve_log_path(task_id: str | None = None) -> Path | None:
     """按配置解析落盘路径；总开关关闭时返回 None。
 
     - 默认单文件 ``LLM_CALL_LOG_FILE``；
-    - ``LLM_CALL_LOG_PER_RUN=true`` 且 task_id 通过白名单 → 同目录
-      ``<stem>-<task_id><suffix>``；task_id 非法则退回单文件（拒绝拼接）。
+    - ``LLM_CALL_LOG_PER_RUN=true`` 且提供 task_id → 同目录
+      ``<stem>-run-<sha256(task_id)[:16]><suffix>``。
+
+    task_id 不参与路径拼接：只取 SHA-256 摘要前 16 位（纯 ``[0-9a-f]``）。
+    这样路径分量与用户输入无字符级关联（CodeQL path-injection 的结构性修法），
+    也不依赖任何"白名单正则被识别为 sanitizer"的假设。
     """
     settings = _settings()
     if not bool(getattr(settings, "LLM_CALL_LOG_ENABLED", True)):
@@ -180,23 +182,23 @@ def resolve_log_path(task_id: str | None = None) -> Path | None:
     base = Path(getattr(settings, "LLM_CALL_LOG_FILE", DEFAULT_LOG_FILE) or DEFAULT_LOG_FILE)
     per_run = bool(getattr(settings, "LLM_CALL_LOG_PER_RUN", False))
     if per_run and task_id is not None:
-        raw = str(task_id)
-        if _SAFE_FILE_STEM.fullmatch(raw):
-            return base.with_name(f"{base.stem}-{raw}{base.suffix}")
+        digest = hashlib.sha256(str(task_id).encode("utf-8")).hexdigest()[:16]
+        return base.with_name(f"{base.stem}-run-{digest}{base.suffix}")
     return base
 
 
-def append_llm_call_record(record: dict[str, Any], *, path: str | Path | None = None) -> bool:
+def append_llm_call_record(record: dict[str, Any]) -> bool:
     """追加一行 JSONL。成功 True；任何失败 False（绝不向调用方抛异常）。
 
-    ``path`` 仅用于测试/显式覆盖；为 None 时按 :func:`resolve_log_path` 解析
-    （配置总开关对两种情况都生效）。
+    落盘路径**只来自配置**（:func:`resolve_log_path`）——本函数不接受调用方
+    传入路径，避免把请求级/用户可控值带进文件路径。需要改落点（如测试）时
+    通过配置 ``LLM_CALL_LOG_FILE`` 指定目录。
     """
     settings = _settings()
     if not bool(getattr(settings, "LLM_CALL_LOG_ENABLED", True)):
         return False
     try:
-        target = Path(path) if path is not None else resolve_log_path(record.get("task_id"))
+        target = resolve_log_path(record.get("task_id"))
         if target is None:
             return False
         if target.parent and str(target.parent) not in ("", "."):

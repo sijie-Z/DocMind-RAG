@@ -12,7 +12,9 @@
 """
 
 import asyncio
+import hashlib
 import json
+import re
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -273,7 +275,11 @@ def test_disabled_switch_writes_nothing_but_accounting_continues(log_path, monke
     assert not log_path.exists()
 
 
-def test_per_run_split_uses_task_id_filename(tmp_path, monkeypatch):
+def _task_digest(task_id: str) -> str:
+    return hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:16]
+
+
+def test_per_run_split_uses_hashed_task_id_filename(tmp_path, monkeypatch):
     base = tmp_path / "llm_calls.jsonl"
     monkeypatch.setattr(settings, "LLM_CALL_LOG_ENABLED", True)
     monkeypatch.setattr(settings, "LLM_CALL_LOG_FILE", str(base))
@@ -282,10 +288,13 @@ def test_per_run_split_uses_task_id_filename(tmp_path, monkeypatch):
     ctx = ExecutionContext(query="q", task_id="run-510", request_id="r")
     record_llm_usage(_response(), ctx, latency_ms=1.0, messages=_messages())
     assert not base.exists()
-    assert (tmp_path / "llm_calls-run-510.jsonl").exists()
+    expected = tmp_path / f"llm_calls-run-{_task_digest('run-510')}.jsonl"
+    assert expected.exists()
+    assert "run-510" not in expected.name, "原始 task_id 绝不进入文件名"
+    assert [p.name for p in tmp_path.iterdir()] == [expected.name]
 
 
-def test_per_run_unsafe_task_id_is_never_interpolated(tmp_path, monkeypatch):
+def test_per_run_unsafe_task_id_never_reaches_path(tmp_path, monkeypatch):
     base = tmp_path / "llm_calls.jsonl"
     monkeypatch.setattr(settings, "LLM_CALL_LOG_ENABLED", True)
     monkeypatch.setattr(settings, "LLM_CALL_LOG_FILE", str(base))
@@ -293,8 +302,29 @@ def test_per_run_unsafe_task_id_is_never_interpolated(tmp_path, monkeypatch):
 
     ctx = ExecutionContext(query="q", task_id="../../evil", request_id="r")
     record_llm_usage(_response(), ctx, latency_ms=1.0, messages=_messages())
-    assert base.exists(), "非法 task_id 退回单文件，绝不拼进路径"
+    expected = tmp_path / f"llm_calls-run-{_task_digest('../../evil')}.jsonl"
+    assert expected.exists()
+    assert not base.exists()
     assert list(tmp_path.parent.glob("**/*evil*")) == []
+    assert all(
+        re.fullmatch(r"llm_calls-run-[0-9a-f]{16}\.jsonl", p.name) for p in tmp_path.iterdir()
+    ), "文件名只能含 SHA-256 十六进制摘要，不得出现原始 task_id 字符"
+
+
+def test_append_has_no_caller_supplied_path_parameter():
+    """CodeQL path-injection 的结构性回归钉子：落盘路径只能来自配置。"""
+    import inspect
+
+    from app.agent.llm_call_log import append_llm_call_record
+
+    params = inspect.signature(append_llm_call_record).parameters
+    assert "path" not in params, "不得重新引入调用方传路径的入口"
+    assert list(params) == ["record"]
+
+
+def test_exec_context_has_no_explicit_log_path_field():
+    fields = {f.name for f in ExecutionContext.__dataclass_fields__.values()}
+    assert "llm_call_log_path" not in fields, "路径只能来自配置，ExecutionContext 不携带路径"
 
 
 def test_write_failure_never_breaks_the_run(tmp_path, monkeypatch):
@@ -386,7 +416,6 @@ async def test_executor_failed_call_logs_exactly_one_error_row(log_path, monkeyp
     step = PlanStep(id="s1", description="d")
     plan = Plan(id="p1", goal="g", steps=[step])
     ctx = ExecutionContext(query="q", task_id="t", request_id="r")
-    ctx.llm_call_log_path = str(log_path)
 
     events = [
         e

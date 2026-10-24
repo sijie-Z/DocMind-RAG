@@ -360,9 +360,10 @@ python -m app.agent.replay --diff <task_id_a> <task_id_b>
 - **不写 prompt / completion 正文**——正文可能含 PII/密钥;需要还原提示词时用
   `prompt_hash` + 调用点日志对账。
 - 写入路径可配置:`LLM_CALL_LOG_FILE`(默认 `logs/llm_calls.jsonl`)、
-  `LLM_CALL_LOG_PER_RUN=true` 时按 run 分文件 `llm_calls-<task_id>.jsonl`、
-  `LLM_CALL_LOG_ENABLED=false` 可整体关闭。默认单文件长期运行请配外部
-  logrotate(或开 `PER_RUN`),本模块不自带按天轮转。
+  `LLM_CALL_LOG_PER_RUN=true` 时按 run 分文件
+  `llm_calls-run-<sha256(task_id)[:16]>.jsonl`(文件名只含摘要,原始 task_id
+  绝不进入路径)、`LLM_CALL_LOG_ENABLED=false` 可整体关闭。默认单文件长期运行请配
+  外部 logrotate(或开 `PER_RUN`),本模块不自带按天轮转。
 - 观测写入失败(磁盘满/权限)只 debug 留痕、绝不阻断 run。
 - 错误文本会先剔除本次提示词正文片段再截断到 500 字符(部分 provider 报错
   会回显输入),但仍不保证捕获所有变形——日志内容仍按"可能含敏感片段"管理。

@@ -1253,7 +1253,9 @@ class PERAgentLoop:
             logger.info(
                 "run_report: %s",
                 log_safe(render_run_report_text(run_report)),
-                extra={"task_id": ctx.task_id},
+                # log_safe：task_id 在 replay/resume 路径可能来自快照（不可信），
+                # 必须过仓库既有的 log-injection 脱敏后再进日志记录。
+                extra={"task_id": log_safe(ctx.task_id)},
             )
         except Exception:
             pass
@@ -1275,7 +1277,7 @@ class PERAgentLoop:
             f"PER loop completed in {elapsed:.0f}ms | "
             f"Plan: {log_safe(plan.goal[:50])}... | Steps: {plan.completed_steps}/{plan.total_steps} | "
             f"Output: {len(final_output)} chars",
-            extra={"task_id": ctx.task_id},
+            extra={"task_id": log_safe(ctx.task_id)},
         )
 
         # ── Hooks（issue #474）：agent/turn_end —— 轮次结束（serial 观察）────

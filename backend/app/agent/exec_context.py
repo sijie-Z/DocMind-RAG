@@ -242,10 +242,6 @@ class ExecutionContext:
     # to_dict / to_checkpoint_dict 都不序列化它）。
     request_id: str | None = None
 
-    # ── LLM 调用级 JSONL（issue #510 第一步）──────────────────────────────
-    # None → 按配置解析（默认 logs/llm_calls.jsonl）；测试/显式覆盖时给绝对路径。
-    llm_call_log_path: str | None = None
-
     # ── Convenience methods ──
 
     def record_llm_call(
@@ -282,7 +278,7 @@ class ExecutionContext:
                 tool_calls=tool_calls,
                 error=error,
             )
-            return append_llm_call_record(record, path=self.llm_call_log_path)
+            return append_llm_call_record(record)
         except Exception as exc:  # noqa: BLE001 — 观测绝不阻断主流程
             logger.debug("LLM call JSONL record skipped: %s", exc)
             return False

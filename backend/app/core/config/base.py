@@ -44,7 +44,8 @@ class BaseAppSettings(BaseSettings):
     # 路径相对进程工作目录（部署即 backend/），默认 backend/logs/llm_calls.jsonl。
     LLM_CALL_LOG_ENABLED: bool = True
     LLM_CALL_LOG_FILE: str = "logs/llm_calls.jsonl"
-    # true → 按 run 分文件（llm_calls-<task_id>.jsonl）；false → 单文件追加。
+    # true → 按 run 分文件（llm_calls-run-<sha256(task_id)[:16]>.jsonl）；false → 单文件追加。
+    # 文件名只含摘要，原始 task_id 绝不进入路径（CodeQL path-injection 结构性修法）。
     LLM_CALL_LOG_PER_RUN: bool = False
     # SQL 语句回显开关（issue #493）：与 DEBUG 解耦，默认关闭。SQLAlchemy 在
     # echo=True 时会往具名 logger ``sqlalchemy.engine.Engine`` 挂
