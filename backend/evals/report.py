@@ -443,7 +443,7 @@ def render_v15_report(hybrid: dict, dense: dict | None = None) -> str:
     )
     lines.append(
         f"- 语料指纹（sha256）：`{meta.get('corpus_digest') or 'n/a'}`"
-        f"　代码提交：`{meta.get('git_commit') or 'n/a'}`"
+        f"　代码/语料 commit：`{meta.get('git_commit') or 'n/a'}`"
     )
     if dense:
         dmeta = dense.get("meta") or {}
