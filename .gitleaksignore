@@ -1,0 +1,55 @@
+# ============================================================================
+# .gitleaksignore —— 历史命中逐条登记（issue #507）
+#
+# 本文件只包含指纹（<commit>:<path>:<rule>:<line>）与说明，不含任何密钥值。
+# 每一条都是公开 git 历史中已存在的命中，登记目的：
+#   1) 让 gitleaks 对"已处置的历史"放行；
+#   2) 保留完整审计清单，新增命中不在本清单内 → CI/pre-commit 直接失败。
+#
+# 重要：出现在本文件中不代表凭据仍然有效或已经轮换完成。
+#   - 标注「真实泄露」的条目：轮换状态与日期以 docs/security/CREDENTIAL_ROTATION.md 为准；
+#   - 标注「示例值」「示例占位」的条目：测试夹具/文档示例，本身不是凭据。
+#
+# 不 rewrite git 历史（公开仓库可能已被 fork，rewrite 无法消除既有暴露），
+# 轮换是被泄露凭据的唯一止损手段。详见 SECURITY.md。
+# ============================================================================
+
+# 真实泄露·历史 env 文件：字段清单见 CREDENTIAL_ROTATION.md；轮换由部署环境执行，本行仅放行历史指纹
+fd00b3cc257d793c86c562bacd5109d9e83a4845:backend/.env.docker:generic-api-key:12
+fd00b3cc257d793c86c562bacd5109d9e83a4845:backend/.env.docker:generic-api-key:17
+fd00b3cc257d793c86c562bacd5109d9e83a4845:backend/.env.docker:generic-api-key:4
+fd00b3cc257d793c86c562bacd5109d9e83a4845:backend/.env.docker:generic-api-key:5
+fd00b3cc257d793c86c562bacd5109d9e83a4845:backend/.env.docker:generic-api-key:8
+# 真实泄露·初始提交内联 API Key（后已改为 env 引用）；轮换见 CREDENTIAL_ROTATION.md
+b0324c14ec457608ad70012a3dc149ccb8ab4daa:backend/docker-compose.yml:generic-api-key:22
+b0324c14ec457608ad70012a3dc149ccb8ab4daa:backend/docker-compose.yml:generic-api-key:30
+b0324c14ec457608ad70012a3dc149ccb8ab4daa:backend/docker-compose.yml:generic-api-key:34
+b0324c14ec457608ad70012a3dc149ccb8ab4daa:backend/docker-compose.yml:generic-api-key:68
+b0324c14ec457608ad70012a3dc149ccb8ab4daa:backend/docker-compose.yml:generic-api-key:71
+b0324c14ec457608ad70012a3dc149ccb8ab4daa:backend/docker-compose.yml:generic-api-key:75
+# 真实泄露·演示脚本硬编码 Key（本 PR 已改为环境变量读取）；Key 轮换见 CREDENTIAL_ROTATION.md
+c53ba28f31ff028acce7eddb60541361e9bf0ca3:backend/demo.py:generic-api-key:19
+# 真实泄露·已删除脚本中的同一硬编码 Key；轮换见 CREDENTIAL_ROTATION.md
+6598ecd057895a2e6d7f3c7555d1ab047db7e1fe:backend/app/agent_api.py:generic-api-key:23
+# 示例占位值 REPLACE_ME_32_BYTE_HEX（该文件现为空串 + fail-closed，未含真实值）
+91d4e573f4c31dd10053b8b7713e7544c641a905:deploy/k8s/02-secrets.yaml:generic-api-key:19
+91d4e573f4c31dd10053b8b7713e7544c641a905:deploy/k8s/02-secrets.yaml:generic-api-key:20
+# 示例值·测试夹具（固定重复数字串 0123.../fedc...，非真实凭据）
+175006ded1d0bef721c3f32e9a2274d71b422de5:backend/tests/api/test_sdk_stdio.py:generic-api-key:146
+175006ded1d0bef721c3f32e9a2274d71b422de5:backend/tests/api/test_sdk_stdio.py:generic-api-key:147
+a01db9a7df6845176d58377931b099f382e7efd2:backend/tests/api/test_sdk_stdio.py:generic-api-key:125
+a01db9a7df6845176d58377931b099f382e7efd2:backend/tests/api/test_sdk_stdio.py:generic-api-key:126
+# 示例值·测试夹具（文件名 token-org.pdf，非真实凭据）
+741c2de460d0fcf7a19b3b8f767c717e25f82904:backend/tests/api/test_chat_history_attachments.py:generic-api-key:326
+fb746244773bdf3c23a3d29a6aa2e0575d331c95:backend/tests/api/test_chat_history_attachments.py:generic-api-key:326
+# 示例值·测试夹具（SECRET-VICTIM-SALARY-42，非真实凭据）
+d2c46916cd9093c052c2d252559c1efc99f484aa:backend/tests/unit/test_issue_a1_memory_idor.py:generic-api-key:40
+f130b600c5574fb064fa41c40f30fc7fe91aeeaf:backend/tests/unit/test_issue_a1_memory_idor.py:generic-api-key:40
+f5fc8fa7fc93c16d921c75bb0a394aa7defa61ff:backend/tests/unit/test_issue_a1_memory_idor.py:generic-api-key:40
+# 示例值·前端测试夹具（sk-secret-123456，非真实凭据）
+03210ae316b1c58fe0828af79b4900dc443b73b6:frontend/src/views/profile/__tests__/profileProviderExperiment.test.ts:generic-api-key:100
+09ffc72dd64cb0ba292451d6be3e0a53464b6296:frontend/src/views/profile/__tests__/profileProviderExperiment.test.ts:generic-api-key:100
+6550c9a023e5b270206993752455e5ed9e770a03:frontend/src/views/profile/__tests__/profileProviderExperiment.test.ts:generic-api-key:100
+# 示例值·文档「响应示例」中的假 Token（派聪明AI知识库系统开发文档.md，已不在工作树）
+b0324c14ec457608ad70012a3dc149ccb8ab4daa:派聪明AI知识库系统开发文档.md:generic-api-key:595
+b0324c14ec457608ad70012a3dc149ccb8ab4daa:派聪明AI知识库系统开发文档.md:generic-api-key:596

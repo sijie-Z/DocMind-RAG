@@ -16,7 +16,12 @@ from pathlib import Path
 # ── Bootstrap ────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.stdout.reconfigure(encoding="utf-8")
-os.environ.setdefault("DEEPSEEK_API_KEY", "056beadf58874c58b9b7f121f4f3e7e6.un6ZXWawRWlfH6c3")
+# 安全（issue #507）：API Key 只从环境变量读取，源码中禁止硬编码任何真实 Key。
+# 用法：Windows `set DEEPSEEK_API_KEY=...` / bash `export DEEPSEEK_API_KEY=...`
+if not os.environ.get("DEEPSEEK_API_KEY"):
+    sys.exit(
+        "DEEPSEEK_API_KEY 未设置：请先通过环境变量提供（issue #507 起不再接受源码内硬编码 Key）。"
+    )
 os.environ.setdefault("DEEPSEEK_API_URL", "https://open.bigmodel.cn/api/paas/v4/")
 
 import app.agent.service  # noqa: F401 — register tools
