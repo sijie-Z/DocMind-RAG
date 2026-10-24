@@ -14,7 +14,11 @@
 - stdout 纯净：真实 stdout 交给 :class:`app.rpc.server.ProtocolWriter`
   （写锁 + flush），``sys.stdout`` 指向 stderr；
 - 每会话单 prompt（并发 → ``-32009``）、同一会话 update 串行、取消后不再
-  外发迟到 update、审批超时按 deny 收尾、断连不悬空任务。
+  外发迟到 update、审批超时按 deny 收尾、断连不悬空任务；
+- cancel 真取消（issue #494）：``session/cancel`` 复用 #493 的
+  ``cancel_task_and_wait`` 等待 DB 收敛为 ``CANCELLED``（≤5s）；通道不可用 /
+  超时 / 任务先结束 → ``-32603``，绝不假报成功；``_drive`` 取消后排干事件流
+  以让服务终态收尾，事件流结束后再由 ACP 侧兜底落 CANCELLED。
 """
 
 from __future__ import annotations
@@ -57,13 +61,19 @@ from app.core.error_mapping import (
     JSONRPC_NOT_FOUND,
     JSONRPC_PARSE_ERROR,
 )
-from app.rpc.dispatcher import Dispatcher, RPCError
+from app.core.redis import RedisUnavailableError
+from app.rpc.dispatcher import Dispatcher, RPCError, cancel_task_and_wait
 from app.rpc.server import ProtocolWriter, _close_dependencies, _stderr_only_stdout
 
 logger = logging.getLogger(__name__)
 
 # ACP v1 协议版本（v2 仍是草案，不实现）。
 ACP_PROTOCOL_VERSION = 1
+
+# session/cancel 的端到端预算（issue #494）：含「等任务行登记 + 置取消旗 +
+# 等 DB 收敛」三个阶段，任一段超时都必须如实 -32603（不假报成功）。
+CANCEL_TOTAL_TIMEOUT_SECONDS = 5.0
+CANCEL_POLL_INTERVAL_SECONDS = 0.1
 
 
 class IdentityError(Exception):
@@ -363,7 +373,12 @@ class AcpServer:
         try:
             await self.session_cancel(params)
         except RPCError as exc:
-            logger.debug("ACP session/cancel 通知未生效: %s", exc.message)
+            if exc.code == JSONRPC_NOT_FOUND:
+                # 通知形态的 cancel 常与"本轮刚结束"竞态：没有进行中任务是正常 no-op。
+                logger.debug("ACP session/cancel 通知未生效: %s", exc.message)
+            else:
+                # 取消通道不可用 / 收敛失败属于运维必须看到的事件（issue #494）。
+                logger.warning("ACP session/cancel 通知未生效: %s", exc.message)
         except Exception:  # noqa: BLE001 - 通知无响应，绝不打断循环
             logger.warning("ACP session/cancel notification failed", exc_info=True)
 
@@ -516,6 +531,10 @@ class AcpServer:
 
         async with state.lock:
             state.reset_for_prompt()
+            # 记录本轮开始前的最新任务（上一轮遗留）：取消在新任务行登记前到达时，
+            # 只有**不是**这条的任务终态才算"本轮取消必输"（评审 B6）。查询失败时
+            # 保留 None（未知）——此时不得用"最新任意任务"推断本轮终态（评审 nit）。
+            state.pre_prompt_task_id = await self._pre_prompt_baseline(session_id)
             started = time.perf_counter()
             logger.info(
                 "ACP prompt start: session=%s open_sessions=%d",
@@ -549,7 +568,12 @@ class AcpServer:
                 raise
             # 结算语义：更新写尽、持久化完成之后才返回 stopReason。
             await state.barrier()
-            if stop_reason == "end_turn":
+            if stop_reason == "cancelled":
+                # 真取消兜底（issue #494）：事件流已结束 = 本轮 run 已死。若服务
+                # 终态收尾没写成（mark_terminal 失败 / 替身 service 不写库），
+                # 这里保证任务行落 CANCELLED——绝不留下 RUNNING 的"已取消"。
+                await self._ensure_task_cancelled(state)
+            elif stop_reason == "end_turn":
                 await self._save_interaction(session_id, text, "".join(answer))
             logger.info(
                 "ACP prompt done: session=%s stop=%s duration_ms=%.1f",
@@ -560,12 +584,23 @@ class AcpServer:
             return {"stopReason": stop_reason}
 
     async def session_cancel(self, params: dict) -> dict:
+        """取消会话当前任务（issue #494：真取消，不假报成功）。
+
+        ``session/cancel`` 是 ACP 通知（无 result），但同处理器也接受带 id 的
+        请求形式。语义（与 RPC 面 #493 的 ``session/cancel`` 同口径）：
+
+        - 运行中任务：置协作式取消旗并**等待** DB 收敛为 ``CANCELLED``（≤5s）；
+          若 prompt 已受理但任务行尚未登记，先等任务行出现（同一 5s 预算）；
+        - 审批/计划审批等待中：直接 DB 终态化（没有活跃 run 会观察取消旗）；
+        - Redis 不可用 / 收敛超时 / 任务先以其他终态结束 / 没有进行中的任务：
+          如实 ``-32004``（无任务）或 ``-32603``（取消未生效），绝不假报成功。
+        """
         session_id = self._require_session_id(params)
         state = self.sessions.get(session_id)
         if state is None:
             raise RPCError(JSONRPC_NOT_FOUND, "会话不存在或未在本连接中打开")
         logger.info("ACP cancel: session=%s", session_id)
-        await self._cancel_session(state)
+        await self._cancel_session(state, wait=True)
         return {"cancelled": True}
 
     # ── 事件流驱动 ────────────────────────────────────────────────────────
@@ -585,7 +620,15 @@ class AcpServer:
            ``paused_for_approval=True`` 平静收尾），再切换到 resume 流；否则
            旧生成器被 GC 关闭时，断流兜底可能在 resume 已开跑之后覆盖新 run
            的快照或把任务误判 FAILED。
+
+        取消纪律（issue #494）：``state.cancel_event`` 置位后**不再外发任何
+        update**（``AcpSessionState.enqueue_update``/``drain`` 保证），但事件流
+        仍要排干到尽——``AgentService.chat`` 在终局 yield **之后**才执行任务
+        收尾（mark_terminal CANCELLED、落库、通知）；提前 break 会让任务按
+        断流兜底收敛为 FAILED，与"真取消"语义相反。终局只保留 stopReason。
         """
+        cancel_observed = False
+        run_task_id = ""
         while True:
             resumed: Any | None = None
             paused_without_resume = False
@@ -593,7 +636,26 @@ class AcpServer:
             terminal_type = ""
             last_error_event: Any | None = None
             async for event in events:
+                event_task_id = getattr(event, "task_id", "")
+                if event_task_id:
+                    # service 包装层给每个事件盖章 task_id（chat/resume 同一契约）；
+                    # 记录本轮任务，取消终态兜底/竞态判定只认它（issue #494）。
+                    run_task_id = event_task_id
+                    state.active_task_id = event_task_id
+                if state.cancel_event.is_set() and not cancel_observed:
+                    # 取消已到达：清空未发送更新；此后 enqueue_update 一律丢弃。
+                    # 继续排干（见 docstring 取消纪律），只保留终局信号。
+                    cancel_observed = True
+                    dropped = state.drain()
+                    logger.info(
+                        "ACP cancel observed while driving: session=%s dropped_updates=%d",
+                        state.session_id,
+                        dropped,
+                    )
                 if event.type == "chunk":
+                    # answer 是"本轮完整输出"，与 update 抑制解耦（issue #494 评审
+                    # B4）：取消输掉竞态时 prompt 报 end_turn 并落库完整答案，
+                    # 绝不能只保存取消前收到的半截。
                     answer.append(event.content)
                 if event.type == "approval_required":
                     try:
@@ -644,7 +706,7 @@ class AcpServer:
             if paused_without_resume:
                 return "cancelled"
             if terminal_type == "error":
-                if state.cancel_event.is_set():
+                if state.cancel_event.is_set() and not await self._cancel_lost_race(run_task_id):
                     return "cancelled"
                 message = (
                     sanitized_error_content(last_error_event)
@@ -654,8 +716,13 @@ class AcpServer:
                 raise RPCError(JSONRPC_INTERNAL_ERROR, message)
             if terminal_type == "run_cancelled":
                 return "cancelled"
-            # 取消优先：cancel 已到达则一律 cancelled（且不落库）。
-            return "cancelled" if state.cancel_event.is_set() else "end_turn"
+            if state.cancel_event.is_set():
+                # 诚实 stopReason（issue #494）：取消到达但任务已按其它终态收尾
+                # （典型：自然完成赢得竞态）→ 报 end_turn，不把完成改写为 cancelled。
+                if await self._cancel_lost_race(run_task_id):
+                    return "end_turn"
+                return "cancelled"
+            return "end_turn"
 
     def _event_update(self, state: AcpSessionState, event: Any) -> dict[str, Any] | None:
         if event.type in ("tool_call", "tool_result", "tool_error"):
@@ -849,58 +916,300 @@ class AcpServer:
             raise RPCError(JSONRPC_NOT_FOUND, "会话不存在或无权访问")
         return row
 
-    async def _latest_task_id(self, session_id: str) -> str | None:
+    async def _latest_task_id(self, session_id: str, *, strict: bool = False) -> str | None:
         from app.services.session_service import get_latest_task_id
 
         try:
             async with self._db_factory() as db:
                 return await get_latest_task_id(db, session_id)
-        except Exception:  # noqa: BLE001 - 取消/断连清理路径不得二次爆炸
+        except Exception as exc:  # noqa: BLE001 - 取消/断连清理路径不得二次爆炸
+            if strict:
+                # session/cancel 的等待路径：读不到状态就不能确认取消，必须如实失败。
+                raise RPCError(JSONRPC_INTERNAL_ERROR, "任务状态读取失败，无法确认取消") from exc
             logger.warning("ACP latest-task lookup failed (session=%s)", session_id, exc_info=True)
             return None
 
-    async def _cancel_session(self, state: AcpSessionState) -> None:
-        """会话级取消：置旗、丢未发送更新、取消待审批、任务收敛（不悬空）。"""
+    async def _pre_prompt_baseline(self, session_id: str) -> str | None:
+        """本轮 prompt 开始前的任务基线（issue #494 评审 B6/nit）。
+
+        返回 ``""`` = 明确没有任务；非空 = 基线任务 id；``None`` = 查询失败/未知
+        （未知时取消等待不得用"最新任意任务"推断本轮终态）。
+        """
+        from sqlalchemy import select
+
+        from app.models.agent_task import AgentTask
+
+        try:
+            async with self._db_factory() as db:
+                stmt = (
+                    select(AgentTask.id)
+                    .where(AgentTask.session_id == session_id)
+                    .order_by(AgentTask.created_at.desc())
+                    .limit(1)
+                )
+                row = (await db.execute(stmt)).first()
+        except Exception:  # noqa: BLE001 - 基线未知按未知处理，绝不误判上一轮任务
+            logger.warning(
+                "ACP pre-prompt baseline lookup failed (session=%s)", session_id, exc_info=True
+            )
+            return None
+        return row[0] if row is not None else ""
+
+    async def _latest_any_task(self, session_id: str):
+        """按会话读取**最新任务行（含终态）**（issue #494 评审 B2/B4）。
+
+        只用于取消语义判定（区分「从未有任务」与「最新任务已终态」）；归属校验
+        与 ``load_task`` 同口径（本人 + 严格同组织）。任何读取故障返回 None。
+        """
+        from sqlalchemy import select
+        from sqlalchemy.orm import defer
+
+        from app.models.agent_task import AgentTask
+
+        try:
+            async with self._db_factory() as db:
+                stmt = (
+                    select(AgentTask)
+                    .where(AgentTask.session_id == session_id)
+                    # 快照列可能是截断/半写 JSON（与 checkpoint 的毒丸防线同口径），
+                    # 取消判定不需要它，defer 掉（评审 nit）。
+                    .options(defer(AgentTask.context_snapshot))
+                    .order_by(AgentTask.created_at.desc())
+                    .limit(1)
+                )
+                task = (await db.execute(stmt)).scalars().first()
+        except Exception:  # noqa: BLE001 - 取消路径不得二次爆炸
+            logger.warning(
+                "ACP latest-task(session) lookup failed (session=%s)", session_id, exc_info=True
+            )
+            return None
+        if task is None or task.user_id != self.user_id:
+            return None
+        if task.organization_id != self.organization_id:
+            return None
+        return task
+
+    async def _wait_for_task_row(self, state: AcpSessionState, deadline: float) -> str:
+        """等本会话出现**非终态**任务行（prompt 在飞时的登记窗口，评审 B1）。
+
+        - 出现终态任务（取消必输）或 run 结束仍无任务行 → 恢复 update 抑制并
+          如实 ``-32004``（取消不可能生效，不能让 run 收尾输出静默丢失，B4/B5）；
+        - 超出总预算 → 恢复抑制并 ``-32603``（从未发出取消旗，不得继续抑制，B5）。
+        """
+        while True:
+            task_id = await self._latest_task_id(state.session_id, strict=True)
+            if task_id:
+                return task_id
+            # 只有**本轮**任务的终态才意味着"取消必输"：上一轮遗留的终态任务
+            # 不能被当成本轮任务（issue #494 评审 B6）。本轮任务的识别优先级：
+            # 事件盖章的 active_task_id（resume 开跑前已知）→ 排除 pre-prompt 基线。
+            current = state.active_task_id
+            if current:
+                current_task = await self._load_task_safe(current)
+            else:
+                baseline = state.pre_prompt_task_id
+                if baseline is None:
+                    # 基线未知（prompt 开始查询在途/失败）：不能用"最新任意任务"
+                    # 判本轮终态（可能误判上一轮遗留任务），继续等本轮任务行。
+                    current_task = None
+                else:
+                    latest = await self._latest_any_task(state.session_id)
+                    current_task = latest if latest is not None and latest.id != baseline else None
+            if current_task is not None and current_task.is_terminal:
+                state.resume_updates()
+                raise RPCError(JSONRPC_NOT_FOUND, "会话没有进行中的任务")
+            if not state.lock.locked():
+                state.resume_updates()
+                raise RPCError(JSONRPC_NOT_FOUND, "会话没有进行中的任务")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                state.resume_updates()
+                raise RPCError(
+                    JSONRPC_INTERNAL_ERROR,
+                    "任务尚未登记，取消未能在 5 秒内受理",
+                )
+            await asyncio.sleep(min(CANCEL_POLL_INTERVAL_SECONDS, remaining))
+
+    async def _cancel_session(self, state: AcpSessionState, *, wait: bool = False) -> None:
+        """会话级取消：置旗、丢未发送更新、取消待审批、任务收敛（不悬空）。
+
+        ``wait=False``（断连 / close / 取消中断路径）：协作式置旗后立即返回，
+        收尾由事件流排干后的服务终态完成（断连竞态属 #494 已知风险）。
+        ``wait=True``（``session/cancel``）：在 ``CANCEL_TOTAL_TIMEOUT_SECONDS``
+        预算内完成「等任务行登记 → 置协作式取消旗 → 等 DB 收敛为 CANCELLED」；
+        Redis 不可用 / 超时 / 任务先以其它终态结束 / 无进行中任务 → 如实抛
+        ``-32603`` / ``-32004``，绝不假报成功（issue #494）。
+
+        取消**未生效**的失败路径必须 ``state.resume_updates()``：run 还在跑时
+        客户端必须继续看到输出、end_turn 答案也要完整落库（评审 B4/B5）；
+        只有「取消旗已发出但收敛未确认」的超时路径保留抑制。
+        """
         await state.cancel()
-        task_id = await self._latest_task_id(state.session_id)
-        if not task_id:
+        if not wait:
+            task_id = await self._latest_task_id(state.session_id)
+            if not task_id:
+                return
+            await self._cancel_task_nowait(task_id)
             return
+
+        deadline = time.monotonic() + CANCEL_TOTAL_TIMEOUT_SECONDS
+        try:
+            task_id = await self._latest_task_id(state.session_id, strict=True)
+            if task_id is None:
+                task_id = await self._wait_for_task_row(state, deadline)
+        except RPCError:
+            # 旗尚未发出（读故障 / 无任务 / 本轮任务已终态）：取消未生效。
+            # 恢复 update 外发——run 仍在跑时客户端不得静默（评审 B5/B7）。
+            state.resume_updates()
+            raise
+
+        from app.models.agent_task import TaskStatus
+
+        task = await self._load_task_safe(task_id)
+        if task is None:
+            state.resume_updates()
+            raise RPCError(JSONRPC_INTERNAL_ERROR, "任务状态读取失败，无法确认取消")
+
+        try:
+            if task.status in (
+                TaskStatus.WAITING_APPROVAL,
+                TaskStatus.WAITING_PLAN_APPROVAL,
+                # 无活跃 run 会观察取消旗的挂起态（与 RPC 面 #493 同口径）：
+                # 必须直接 DB 终态化，否则会白等到预算耗尽。
+                TaskStatus.WAITING_HUMAN,
+                TaskStatus.PAUSED,
+            ):
+                ok = await self._mark_task_cancelled(task_id)
+                if not ok:
+                    state.resume_updates()
+                    raise RPCError(JSONRPC_INTERNAL_ERROR, "任务取消收尾失败（状态未能写入）")
+                return
+            if task.is_terminal:
+                if task.status == TaskStatus.CANCELLED:
+                    return
+                state.resume_updates()
+                raise RPCError(
+                    JSONRPC_INTERNAL_ERROR,
+                    f"任务在取消生效前已结束（{task.status.value}），取消未生效",
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                state.resume_updates()
+                raise RPCError(JSONRPC_INTERNAL_ERROR, "取消未能在 5 秒内确认")
+            # 端到端预算（评审 B3）：request_cancel 自身也可能被 redis-py 的
+            # 重试拖到 ~26s；wait_for 把「置旗 + 轮询收敛」一起框进剩余预算。
+            cancelled = await asyncio.wait_for(
+                cancel_task_and_wait(
+                    task_id,
+                    user_id=self.user_id,
+                    organization_id=self.organization_id,
+                ),
+                timeout=remaining,
+            )
+        except RPCError:
+            raise
+        except RedisUnavailableError as exc:
+            # 取消通道不可用（旗确定未置上）：恢复 update 外发，如实 -32603。
+            state.resume_updates()
+            raise RPCError(JSONRPC_INTERNAL_ERROR, "Redis 不可用，无法取消") from exc
+        except TimeoutError as exc:
+            # 旗可能已在 setex 半途发出：保留抑制，如实报"未确认"（评审 B3/B5）。
+            raise RPCError(
+                JSONRPC_INTERNAL_ERROR,
+                "取消未能在 5 秒内确认（Redis 或任务收敛超时）",
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 - 收敛路径异常同样不得假报成功
+            logger.warning("ACP cancel failed (task=%s)", task_id, exc_info=True)
+            raise RPCError(JSONRPC_INTERNAL_ERROR, "取消任务失败") from exc
+        if not cancelled:
+            # 取消旗已置，但任务先以其它终态收尾：run 可能仍在收尾输出，
+            # 恢复外发，让 end_turn 落库完整答案（评审 B4）。
+            state.resume_updates()
+            raise RPCError(JSONRPC_INTERNAL_ERROR, "任务在取消生效前已结束，取消未生效")
+
+    async def _cancel_task_nowait(self, task_id: str) -> None:
+        """断连 / close 路径：协作式置旗即可；活跃 run 会在检查点收敛。"""
         from app.agent import checkpoint
         from app.models.agent_task import TaskStatus
 
+        task = await self._load_task_safe(task_id)
+        if task is None:
+            return
+        if task.status in (
+            TaskStatus.WAITING_APPROVAL,
+            TaskStatus.WAITING_PLAN_APPROVAL,
+            TaskStatus.WAITING_HUMAN,
+            TaskStatus.PAUSED,
+        ):
+            await self._mark_task_cancelled(task_id)
+            return
+        if task.is_terminal:
+            return
+        if not await checkpoint.request_cancel(task_id):
+            logger.warning("ACP cancel: 取消旗不可用，任务将按自然结束收敛 (task=%s)", task_id)
+
+    async def _load_task_safe(self, task_id: str):
+        """按归属读取任务行；任何失败返回 None（取消/清理路径不得二次爆炸）。"""
+        from app.agent import checkpoint
+
         try:
-            task = await checkpoint.load_task(
+            return await checkpoint.load_task(
                 task_id=task_id,
                 user_id=self.user_id,
                 organization_id=self.organization_id,
             )
         except Exception:  # noqa: BLE001
             logger.warning("ACP cancel: load task failed (task=%s)", task_id, exc_info=True)
-            return
-        if task is None:
-            return
-        try:
-            if task.status in (TaskStatus.WAITING_APPROVAL, TaskStatus.WAITING_PLAN_APPROVAL):
-                # 待审批任务按取消收尾（审批请求随之关闭，绝不悬空）。
-                await self._mark_task_cancelled(task_id)
-            elif not task.is_terminal:
-                await checkpoint.request_cancel(task_id)
-        except Exception:  # noqa: BLE001
-            logger.warning("ACP cancel cleanup failed (task=%s)", task_id, exc_info=True)
+            return None
 
-    async def _mark_task_cancelled(self, task_id: str) -> None:
+    async def _cancel_lost_race(self, task_id: str) -> bool:
+        """取消到达但任务已按其它终态收尾（如自然完成）→ True（取消未生效）。
+
+        无 task_id / 读不到状态时保守返回 False（按取消处理，交给终态兜底）。
+        """
+        if not task_id:
+            return False
+        from app.models.agent_task import TaskStatus
+
+        task = await self._load_task_safe(task_id)
+        return task is not None and task.is_terminal and task.status != TaskStatus.CANCELLED
+
+    async def _ensure_task_cancelled(
+        self, state: AcpSessionState, *, task_id: str | None = None
+    ) -> None:
+        """取消流结束后的终态兜底：本轮任务仍非终态 → 落 CANCELLED（best-effort）。
+
+        优先用本轮 run 的事件盖章 task_id（``state.active_task_id``/显式传入），
+        避免同一 ChatSession 多写入者时误伤别的活跃任务；只有拿不到时才回退到
+        会话级「最新非终态」。幂等：已是终态（含 CANCELLED）时不动。
+        """
+        task_id = task_id or state.active_task_id
+        if not task_id:
+            task_id = await self._latest_task_id(state.session_id)
+        if not task_id:
+            return
+        task = await self._load_task_safe(task_id)
+        if task is None or task.is_terminal:
+            return
+        await self._mark_task_cancelled(task_id)
+
+    async def _mark_task_cancelled(self, task_id: str) -> bool:
+        """把任务落 CANCELLED 终态；返回是否成功（从不抛异常）。"""
         from app.agent import checkpoint
         from app.models.agent_task import TaskStatus
 
         try:
-            await checkpoint.mark_terminal(
-                task_id,
-                TaskStatus.CANCELLED,
-                error="用户取消（ACP）",
-                error_type="user_cancelled",
+            return bool(
+                await checkpoint.mark_terminal(
+                    task_id,
+                    TaskStatus.CANCELLED,
+                    error="用户取消（ACP）",
+                    error_type="user_cancelled",
+                )
             )
         except Exception:  # noqa: BLE001 - 清理路径不得二次爆炸
             logger.warning("ACP mark cancelled failed (task=%s)", task_id, exc_info=True)
+            return False
 
     def _agent_config_for(self, chat_session) -> Any:
         """ChatSession.settings → AgentConfig（model / plan_approval_mode）。"""
@@ -936,6 +1245,9 @@ class AcpServer:
         """``session/resume`` 的后台续跑（不回放历史；更新仍走串行 sender）。"""
         async with state.lock:
             state.reset_for_prompt()
+            # resume 的本轮任务在开跑前已知：登记为 active，取消等待窗口据此
+            # 区分「本轮任务已终态」与「上一轮遗留」（issue #494 评审 B6）。
+            state.active_task_id = task_id
             answer: list[str] = []
             try:
                 stop_reason = await self._drive(
@@ -946,7 +1258,9 @@ class AcpServer:
                     answer,
                 )
                 await state.barrier()
-                if stop_reason == "end_turn":
+                if stop_reason == "cancelled":
+                    await self._ensure_task_cancelled(state, task_id=task_id)
+                elif stop_reason == "end_turn":
                     query = await self._task_query(task_id)
                     if query:
                         await self._save_interaction(state.session_id, query, "".join(answer))
