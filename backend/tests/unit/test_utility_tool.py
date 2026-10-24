@@ -213,5 +213,12 @@ def test_disabled_tools_old_name_blocks_vector_mode_only():
             name="search_knowledge_base", arguments=json.dumps({"query": "q", "mode": "hybrid"})
         ),
     )
+    vector_upper = SimpleNamespace(
+        id="c3",
+        function=SimpleNamespace(
+            name="search_knowledge_base", arguments=json.dumps({"query": "q", "mode": " VECTOR "})
+        ),
+    )
     assert executor._call_disabled(vector_call) is True
+    assert executor._call_disabled(vector_upper) is True, "大小写/空白不得绕过旧禁用"
     assert executor._call_disabled(hybrid_call) is False

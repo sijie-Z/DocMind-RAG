@@ -285,6 +285,11 @@ def disabled_capability_alias(
         return None
     args = arguments if isinstance(arguments, dict) else {}
     canonical = canonical_tool_name(name)
+
+    def _norm(value: Any) -> Any:
+        # 能力选择器是字符串枚举：大小写/首尾空白不得成为绕过旧禁用的通道。
+        return value.strip().lower() if isinstance(value, str) else value
+
     for disabled in disabled_names:
         alias = TOOL_ALIASES.get(str(disabled))
         if alias is None or alias.target != canonical:
@@ -295,7 +300,7 @@ def disabled_capability_alias(
             if alias.target == "load_skill_reference" and not args.get("skill_name"):
                 return str(disabled)
             continue
-        if all(args.get(key) == value for key, value in defaults.items()):
+        if all(_norm(args.get(key)) == _norm(value) for key, value in defaults.items()):
             return str(disabled)
     return None
 
