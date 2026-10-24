@@ -115,7 +115,9 @@ async def test_max_lifetime_wins_over_activity() -> None:
     try:
         session = await manager.create(user_id=1, org_id=10)
         # 即便刚刚有活动，超过最长寿命也必须回收。
-        reclaimed = await manager.sweep(now_mono=session.created_mono + 3600)
+        # 显式越过边界 1 秒：+3600 时 (created + 3600) - created 可能因浮点舍入
+        # 得到 3599.999…，测试会偶发落入 idle_timeout 分支（CI flaky）。
+        reclaimed = await manager.sweep(now_mono=session.created_mono + 3601)
         assert [(s.terminal_id, why) for s, why in reclaimed] == [
             (session.terminal_id, "max_lifetime")
         ]
