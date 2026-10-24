@@ -1,6 +1,6 @@
 # 历史归档（legacy）
 
-本目录保存**不再代表当前质量**的旧评测 / 审计产物，仅用于历史对照与追溯。
+本目录保存**不再代表当前质量**的旧评测 / 审计产物与内部过程记录，仅用于历史对照与追溯。
 这些文件不被 CI 引用，不参与任何门禁判定，也不得作为现行评测结果对外引用。
 
 ---
@@ -25,6 +25,25 @@ git log --all --oneline -- backend/eval_first_report.json
 
 # 查看某个历史版本的内容
 git show <commit>:backend/eval_first_report.json
+```
+
+---
+
+## progress_480.md
+
+- **原路径**：`.orchestrate/progress_480.md`（2026-10 移出 Git 跟踪并归档到本目录，文件内容未做任何改动；工作区原文件保留在本地，`.orchestrate/` 已加入 `.gitignore`）。
+- **性质**：内部执行进度清单，共 11 项勾选，记录 issue #480 的完成情况（API key 鉴权、SSE / Redis ring buffer、JSON-RPC dispatcher、Python/TS SDK、指标与文档等）。
+- **为何移出跟踪**：`.orchestrate/` 是本地编排工具的过程状态目录，内容随任务推进不断变化，不属于仓库产物；此前被误提交。
+- **为何保留**：作为 #480 执行过程的追溯记录，便于回看当时的完成口径与自测结论。
+- **当前口径**：本文件只反映 2026-10 当时的进度，不代表当前实现状态；现行指标以 `docs/METRICS.md` 与 `docs/facts.json` 为准。
+- **历史查询**：
+
+```bash
+# 跟随重命名查看该文件的完整历史
+git log --follow --oneline -- docs/legacy/progress_480.md
+
+# 按旧路径查询迁移前的提交
+git log --all --oneline -- .orchestrate/progress_480.md
 ```
 
 ---
