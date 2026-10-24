@@ -21,10 +21,10 @@
       "07-cii-security-protection-regulation.md": 52,
       "08-cybersecurity-incident-reporting-measures.md": 15
     },
-    "corpus_digest": "6b7f5fff7516e8887887853bed31e091c3419016149c605c96306364d3a0e12e",
+    "corpus_digest": "838fd02f107adc288b2a8884515ce674ad342e86edf4563c5941d1fb73097d9e",
     "seed": "recreate(先删后建) → bulk → refresh → 回读 count==写入块数 且 distinct doc==语料文件数"
   },
-  "stamped_at": "2026-10-24T05:09:30+00:00",
+  "stamped_at": "2026-10-24T05:17:43+00:00",
   "stamped_note": "由 python -m evals compare --update-baseline 生成",
   "metrics": {
     "clause_hit@1": {

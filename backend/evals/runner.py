@@ -569,12 +569,19 @@ async def _cmd_seed_async(args: argparse.Namespace, golden: GoldenSet) -> int:
 
 
 def _corpus_digest(golden: GoldenSet) -> str:
-    """语料内容指纹（文件名+字节，排序后 sha256）——对外引用数字的语料标识。"""
+    """语料内容指纹（文件名+字节，排序后 sha256）——对外引用数字的语料标识。
+
+    **行尾归一化**：Windows 工作区（core.autocrlf）读到 CRLF，而 CI/Linux
+    checkout 是 LF；若直接对原始字节做 sha256，同一语料在两种环境下会得到
+    不同指纹，compare 的协议校验会把 CI 误判成 apples-or-oranges。因此先把
+    CRLF 归一为 LF 再哈希（内容语义不变，跨平台稳定）。
+    """
     digest = hashlib.sha256()
     for fname in sorted(golden.corpus_files):
         digest.update(fname.encode("utf-8"))
         digest.update(b"\0")
-        digest.update((golden.corpus_dir / fname).read_bytes())
+        data = (golden.corpus_dir / fname).read_bytes().replace(b"\r\n", b"\n")
+        digest.update(data)
         digest.update(b"\0")
     return digest.hexdigest()
 
@@ -990,6 +997,12 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         except CompareError as e:
             print(f"[evals] 拒绝盖基线（fail-closed）：{e}", file=sys.stderr)
             return 2
+        # 保留旧基线的人工标识/描述（例如 v1.5 hybrid/dense 对照基线）——
+        # stamp 只负责指标与协议，不该把 baseline_id 改回 CI 门禁默认值。
+        if old is not None:
+            for key in ("baseline_id", "description"):
+                if old.get(key):
+                    new[key] = old[key]
         print(
             f"[evals] 盖基线（有意识操作）：{args.baseline}"
             "——改基线=显式 PR 行为，请把本文件的 diff 放进 PR 供评审。"

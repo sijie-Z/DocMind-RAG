@@ -31,7 +31,7 @@ from evals.report import (
     write_json,
     write_markdown,
 )
-from evals.runner import _apply_env, build_parser
+from evals.runner import _apply_env, _corpus_digest, build_parser
 
 _BACKEND = Path(__file__).resolve().parents[2]
 _GOLDEN_V1 = _BACKEND / "evals" / "golden_set" / "clause_set_v1_5.json"
@@ -518,6 +518,24 @@ class TestV15Report:
 
 
 class TestRunnerEnv:
+    def test_corpus_digest_is_line_ending_stable(self, tmp_path):
+        """CRLF 工作区与 LF checkout 必须得到同一语料指纹（CI 协议校验依赖）。"""
+        target = tmp_path / "a.md"
+        gs = GoldenSet(
+            dataset_id="ds",
+            version=1,
+            description="",
+            path=tmp_path / "ds.json",
+            corpus_dir=tmp_path,
+            corpus_files=("a.md",),
+            top_k=5,
+            items=(),
+        )
+        target.write_bytes("第1条 内容\n".encode())
+        lf_digest = _corpus_digest(gs)
+        target.write_bytes("第1条 内容\r\n".encode())
+        assert _corpus_digest(gs) == lf_digest
+
     def test_apply_env_sets_index_and_hosts(self, monkeypatch):
         monkeypatch.setenv("ELASTICSEARCH_INDEX_NAME", "orig_idx")
         monkeypatch.setenv("ELASTICSEARCH_HOSTS", '["http://orig:9200"]')
