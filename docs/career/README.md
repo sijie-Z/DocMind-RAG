@@ -4,7 +4,7 @@
 
 > **历史材料（2026-06-21）**：以下内容（含 30 题 benchmark、关键词覆盖率评分、33/39 工具等数字）是当时的口径与叙事，**不代表当前实现与质量**；正文保持原样仅作历史对照，未删除任何内容。当前口径见 `docs/METRICS.md`（#513），现行门禁为 clause-level eval-gate（28 条 golden set，见根 README「质量与门禁」与 `docs/legacy/README.md`）。
 
-> **数字口径（2026-10-24）**：本页是 2026-06 的面试叙事存档。文中「30 题 benchmark」「5 轮 planning 实验」是历史 planning 评测口径（关键词覆盖率），**不是**当前的 clause-level Eval；英文旧稿的工具数 33 已修正为 39。对外引用任何数字前，一律以 [`docs/METRICS.md`](../METRICS.md) 为准（值 / 口径 / 命令 / 日期 / 备注）：`registered_tools=39`（2026-10-24）；Eval v1.5 = 80 条，mode=fake，2026-10-24，来源 PR #525（已合并，squash 552efaad）。
+> **数字口径（2026-10-25）**：本页是 2026-06 的面试叙事存档。文中「30 题 benchmark」「5 轮 planning 实验」是历史 planning 评测口径（关键词覆盖率），**不是**当前的 clause-level Eval；中文正文的工具数已修正为 31，英文历史稿保留原口径仅作对照。对外引用任何数字前，一律以 [`docs/METRICS.md`](../METRICS.md) 为准（值 / 口径 / 命令 / 日期 / 备注）：`registered_tools=31` / `default_tools=10`（2026-10-25）；Eval v1.5 = 80 条，mode=fake，2026-10-24，来源 PR #525（已合并，squash 552efaad）。
 
 ---
 
@@ -38,7 +38,7 @@ DocMind — Agent Research & Evaluation Platform
 ```
 DocMind — Agent 研究与评测平台
 
-• 构建了基于 PER（规划-执行-反思）架构的 Agent 系统，支持 DAG 并行调度和 39 个内置工具。
+• 构建了基于 PER（规划-执行-反思）架构的 Agent 系统，支持 DAG 并行调度和 31 个内置工具。
 
 • 设计并执行 5 轮控制实验，系统评估了规划粒度和执行架构对 Agent 性能的影响，
   发现"规划质量"而非"执行架构"是 Agent 性能的主导因素。
@@ -63,7 +63,7 @@ DocMind — Agent 研究与评测平台
 
 "我做了一个 Agent 研究与评测平台，叫 DocMind。它不是又一个 Agent 框架——而是一个把 Agent 当作实验对象来研究的平台。
 
-核心是 PER 三阶段架构：规划→执行→反思，支持 DAG 并行调度和 39 个工具。但这个架构本身不是项目的亮点，亮点是我们在上面做的 5 轮实验。"
+核心是 PER 三阶段架构：规划→执行→反思，支持 DAG 并行调度和 31 个工具。但这个架构本身不是项目的亮点，亮点是我们在上面做的 5 轮实验。"
 
 ### 问题发现（60s）
 

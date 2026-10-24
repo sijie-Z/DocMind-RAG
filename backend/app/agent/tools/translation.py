@@ -37,11 +37,7 @@ LANG_NAMES = {
 
 @register_tool(
     name="translate_text",
-    description=(
-        "Translate text between languages using AI. Supports 30+ languages "
-        "including Chinese, English, Japanese, Korean, French, German, "
-        "Spanish, Russian, Arabic, and more. Provide source language or 'auto' for auto-detection."
-    ),
+    description=("Translate text between languages (30+ languages, auto detect)."),
     parameters={
         "type": "object",
         "properties": {
@@ -51,12 +47,12 @@ LANG_NAMES = {
             },
             "target_language": {
                 "type": "string",
-                "description": "Target language code (zh, en, ja, ko, fr, de, es, etc.) or full name (Chinese, English, etc.)",
+                "description": "Target language code/name (zh, en, ja, ...)",
                 "default": "zh",
             },
             "source_language": {
                 "type": "string",
-                "description": "Source language code or 'auto' for auto-detection",
+                "description": "Source language or auto",
                 "default": "auto",
             },
         },
@@ -164,6 +160,10 @@ async def translate_text(
         "required": ["text"],
     },
     tags=["language"],
+    # issue #509：能力已合并进 utility(operation=detect_language)；保留注册与
+    # handler（不删工具、旧名可用），但不再进 schema。
+    hidden=True,
+    superseded_by="utility",
 )
 async def detect_language(text: str, **_: Any) -> str | ToolResult:
     if not text or len(text) < 3:

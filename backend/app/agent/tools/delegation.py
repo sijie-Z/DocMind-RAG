@@ -29,6 +29,15 @@ PER_TASK_TIMEOUT = 300.0
 RESULT_SNIPPET_LIMIT = 1200
 
 
+def _delegation_enabled(config) -> bool:
+    """issue #509：委派工具默认关闭（AgentConfig.enable_delegation=False）。
+
+    开启后 delegate_subtask 才进入 schema；子代理配置默认 False 且 tag 不含
+    delegation，递归防护不变。
+    """
+    return bool(getattr(config, "enable_delegation", False))
+
+
 @register_tool(
     name="delegate_subtask",
     description=(
@@ -57,6 +66,7 @@ RESULT_SNIPPET_LIMIT = 1200
     },
     tags=["delegation"],
     timeout=600.0,
+    enabled_predicate=_delegation_enabled,
 )
 async def delegate_subtask(
     tasks: list[str],

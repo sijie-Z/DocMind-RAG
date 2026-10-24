@@ -14,7 +14,7 @@
 ``--noconftest``）中自动跳过，静态检查仍会执行。
 
 对外口径单一事实源：``docs/METRICS.md`` 必须存在，表格每行必须有 6 列且无
-空项，六项 facts 必须与 ``docs/facts.json`` 同值；同一文档同一指标出现多个
+空项，七项 facts 必须与 ``docs/facts.json`` 同值；同一文档同一指标出现多个
 不同数字时只告警、不判失败（facts 不一致仍红）。
 
 变异验证（PR 证据）：在 ``events.py`` 的 ``EventType`` 中临时加入一个事件，
@@ -93,22 +93,43 @@ def test_metrics_document_exists_and_matches_facts_json():
     assert not problems, "docs/METRICS.md 与 facts JSON 不一致:\n" + "\n".join(problems)
 
 
-def test_runtime_registry_matches_static_tool_derivation():
+def test_runtime_registry_matches_static_tool_derivation(monkeypatch):
     try:
-        import app.agent.core_tools  # noqa: F401
-        import app.agent.tools  # noqa: F401
+        import app.agent.service  # noqa: F401 — 生产入口（含全部工具注册）
+        from app.agent.config import AgentConfig
         from app.agent.registry import tool_registry
+        from app.core.config import settings
     except ImportError as exc:  # pragma: no cover - 轻量 hygiene job 路径
         pytest.skip(f"backend dependencies unavailable: {exc}")
 
-    derived_names = set(checker.derive_registered_tool_names(BACKEND_ROOT / "app" / "agent"))
+    # 静态 default_tools 口径 = 默认 AgentConfig + 默认环境；测试须同样隔离。
+    monkeypatch.setattr(settings, "TERMINAL_ENABLED", False)
+    monkeypatch.delenv("FEISHU_APP_ID", raising=False)
+    monkeypatch.delenv("FEISHU_APP_SECRET", raising=False)
+
+    agent_dir = BACKEND_ROOT / "app" / "agent"
+    derived_names = set(checker.derive_registered_tool_names(agent_dir))
     # MCP 动态工具（mcp__<server>__<tool>）是运行时注册的外部工具，不在
-    # 「内置工具实现数」口径内；过滤后再与静态派生集合比对。
-    runtime_names = {name for name in tool_registry._tools if not name.startswith("mcp__")}
+    # 「内置工具实现数」口径内；issue #509 合并/降级的 hidden 旧名也不计入口径。
+    runtime_names = {
+        name
+        for name, entry in tool_registry._tools.items()
+        if not name.startswith("mcp__") and not entry.hidden
+    }
     assert derived_names == runtime_names, (
-        "静态派生的工具名与运行时注册表不一致（静态派生漏算/多算模块）:"
+        "静态派生的非隐藏工具名与运行时注册表不一致（静态派生漏算/多算模块）:"
         f"\n  static-only={sorted(derived_names - runtime_names)}"
         f"\n  runtime-only={sorted(runtime_names - derived_names)}"
+    )
+
+    derived_default = set(checker.derive_default_tool_names(agent_dir, agent_dir / "config.py"))
+    runtime_default = {
+        schema["function"]["name"] for schema in tool_registry.build_tool_schemas(AgentConfig())
+    }
+    assert derived_default == runtime_default, (
+        "静态 default_tools 口径与运行时默认 schema 不一致:"
+        f"\n  static-only={sorted(derived_default - runtime_default)}"
+        f"\n  runtime-only={sorted(runtime_default - derived_default)}"
     )
 
 
@@ -256,6 +277,7 @@ def test_required_doc_anchor_missing_is_reported(tmp_path):
             "endpoint_modules": 22,
             "frontend_routes": 34,
             "registered_tools": 33,
+            "default_tools": 12,
         },
     )
     assert any("锚点缺失" in problem for problem in problems)
@@ -266,7 +288,7 @@ def test_optional_doc_anchor_missing_is_allowed(tmp_path):
     (tmp_path / "README.md").write_text(
         "文档数字见 docs/facts.json。\n"
         "可调用 33 个工具。Tool Registry (33)。\n"
-        "**33 个内置工具**。合计 33 个内置工具。\n"
+        "**33 个内置工具**。合计 33 个内置工具。默认注入 12 个工具。\n"
         "22 个端点模块。注册 22 个模块。端点实现（22 个文件）。\n"
         "34 条路由。20 种 SSE 事件。SSE 事件类型（20 种）。\n",
         encoding="utf-8",
@@ -278,13 +300,14 @@ def test_optional_doc_anchor_missing_is_allowed(tmp_path):
             "endpoint_modules": 22,
             "frontend_routes": 34,
             "registered_tools": 33,
+            "default_tools": 12,
         },
     )
     assert problems == []
 
 
 def _write_metrics(root: Path, facts: dict[str, int]) -> None:
-    """写一份最小可用的 docs/METRICS.md（六列、六项 facts）。"""
+    """写一份最小可用的 docs/METRICS.md（六列、七项 facts）。"""
     rows = "\n".join(
         f"| {key} | {value} | 合成仓库口径 | 无（测试夹具） | 2026-10-24 | 测试夹具 |"
         for key, value in facts.items()
@@ -328,6 +351,7 @@ def _make_mini_repo(tmp_path: Path) -> Path:
         "async def core_one(**ctx): ...\n",
         encoding="utf-8",
     )
+    (agent / "config.py").write_text("DEFAULT_DISABLED_TOOLS: list[str] = []\n", encoding="utf-8")
     (tools / "__init__.py").write_text("from app.agent.tools import one\n", encoding="utf-8")
     (tools / "one.py").write_text(
         "from app.agent.registry import register_tool\n"
@@ -342,6 +366,7 @@ def _make_mini_repo(tmp_path: Path) -> Path:
         "Tool Registry (2)\n"
         "**2 个内置工具**\n"
         "tools/               #   扩展工具（2 个；合计 2 个内置工具）\n"
+        "默认注入 2 个工具。\n"
         "共 1 个端点模块。\n"
         "主路由（注册 1 个模块）\n"
         "端点实现（1 个文件）\n"
@@ -357,6 +382,7 @@ def _make_mini_repo(tmp_path: Path) -> Path:
             "endpoint_modules": 1,
             "frontend_routes": 1,
             "registered_tools": 2,
+            "default_tools": 2,
             "http_route_decorators": 1,
             "websocket_route_decorators": 1,
         },
@@ -398,6 +424,7 @@ def _mini_facts() -> dict[str, int]:
         "endpoint_modules": 1,
         "frontend_routes": 1,
         "registered_tools": 2,
+        "default_tools": 2,
         "http_route_decorators": 1,
         "websocket_route_decorators": 1,
     }

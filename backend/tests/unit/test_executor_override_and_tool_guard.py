@@ -188,12 +188,15 @@ async def test_synthesis_also_honors_override():
 
 @pytest.mark.asyncio
 async def test_unrestricted_context_executes_normally():
-    """主代理（tool_tags=None）不设白名单：delegate_subtask 可正常触达 registry。"""
+    """主代理（tool_tags=None）不设白名单：显式启用 delegate_subtask 后可触达 registry。"""
     client = _client_with_tool_call("delegate_subtask")
     cfg = AgentConfig(
         enable_planning=False,
         enable_reflection=False,
         max_tool_calls_per_turn=3,
+        # issue #509：委派默认关闭（注入+执行门控），本用例验证白名单不误拦，
+        # 因此显式开启。
+        enable_delegation=True,
     )
 
     class _Ok:

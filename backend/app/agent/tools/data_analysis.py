@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from app.agent.registry import ToolResult, register_tool
+from app.agent.registry import ToolResult, extended_surface_enabled, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
         "required": ["data"],
     },
     tags=["analysis", "data"],
+    # issue #509：能力已合并进 utility(operation=analyze_data)；保留注册与
+    # handler（不删工具、旧名可用），但不再进 schema。
+    hidden=True,
+    superseded_by="utility",
 )
 async def analyze_data(data: str, **_: Any) -> str | ToolResult:
     try:
@@ -133,6 +137,7 @@ async def analyze_data(data: str, **_: Any) -> str | ToolResult:
         "required": ["document_ids"],
     },
     tags=["analysis", "documents"],
+    enabled_predicate=extended_surface_enabled,
 )
 async def compare_documents(
     document_ids: list[str],
@@ -227,8 +232,8 @@ async def compare_documents(
 
     output_parts.append("\n---")
     output_parts.append(
-        "\n请基于以上文档内容进行对比分析。提示：可以进一步使用 summarize_document "
-        "工具获取每个文档的详细摘要。"
+        "\n请基于以上文档内容进行对比分析。提示：可以进一步使用 extract_insights "
+        "（mode=summary）工具获取每个文档的详细摘要。"
     )
 
     return "\n".join(output_parts)

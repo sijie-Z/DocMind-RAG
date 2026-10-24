@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from app.agent.registry import register_tool
+from app.agent.registry import ToolResult, extended_surface_enabled, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
         "required": ["expression"],
     },
     tags=["utility", "compute"],
+    # issue #509：能力已合并进 utility(operation=calculate)；保留注册与 handler
+    # （不删工具、旧名可用），但不再进 schema；旧名经 TOOL_ALIASES 路由。
+    hidden=True,
+    superseded_by="utility",
 )
 async def calculate(expression: str, **_: Any) -> str:
     import ast
@@ -147,6 +151,10 @@ async def calculate(expression: str, **_: Any) -> str:
         "required": ["data", "output_format"],
     },
     tags=["utility", "format"],
+    # issue #509：能力已合并进 utility(operation=format_converter)；保留注册与
+    # handler（不删工具、旧名可用），但不再进 schema。
+    hidden=True,
+    superseded_by="utility",
 )
 async def format_converter(
     data: str,
@@ -280,6 +288,7 @@ def _to_markdown_table(data) -> str:
     parameters={"type": "object", "properties": {}},
     tags=["utility", "system"],
     requires_auth=True,
+    enabled_predicate=extended_surface_enabled,
 )
 async def get_system_status(organization_id: int | None = None, **_: Any) -> str:
     # 安全加固（issue #257）：此前签名为 `**_: Any`，注册表按签名过滤掉 org 上下文，
@@ -357,3 +366,107 @@ async def get_system_status(organization_id: int | None = None, **_: Any) -> str
         status["database"] = f"Error: {e}"
 
     return json.dumps(status, ensure_ascii=False, indent=2)
+
+
+@register_tool(
+    name="utility",
+    description=("低风险本地工具（不执行代码）：计算/格式转换/时间/语言/数值统计。"),
+    parameters={
+        "type": "object",
+        "properties": {
+            "operation": {
+                "type": "string",
+                "enum": [
+                    "calculate",
+                    "format_converter",
+                    "get_current_time",
+                    "detect_language",
+                    "analyze_data",
+                ],
+                "description": "操作",
+            },
+            "expression": {
+                "type": "string",
+                "description": "calculate: 表达式",
+            },
+            "data": {
+                "type": "string",
+                "description": "analyze_data/format_converter: 数据",
+            },
+            "output_format": {
+                "type": "string",
+                "description": "format_converter: json/yaml/csv/markdown_table",
+                "default": "json",
+            },
+            "input_format": {
+                "type": "string",
+                "description": "format_converter: auto/json/yaml/csv",
+                "default": "auto",
+            },
+            "text": {
+                "type": "string",
+                "description": "detect_language: 文本",
+            },
+        },
+        "required": ["operation"],
+    },
+    # 扩展 tag：受限子代理（search/analysis）仍能看到 utility（含 analyze_data 等）。
+    tags=["utility", "compute", "analysis", "data", "language", "format"],
+    category="utility",
+)
+async def utility(
+    operation: str,
+    expression: str = "",
+    data: str = "",
+    output_format: str = "json",
+    input_format: str = "auto",
+    text: str = "",
+    **_: Any,
+) -> str | ToolResult:
+    """低风险 utility 伞形（issue #509）。
+
+    各 operation 直接调用原有独立 handler，**不经过 execute_python**（沙箱语义
+    不变；这五个工具本来就是 low/免审批/纯进程内）。旧名经 TOOL_ALIASES 注入
+    ``operation`` 默认参数。
+    """
+    op = str(operation or "").strip().lower()
+    if op == "calculate":
+        if not expression:
+            return ToolResult.fail(
+                code="validation_error", message="operation=calculate 需要 expression 参数"
+            )
+        return await calculate(expression)
+    if op == "format_converter":
+        if not data:
+            return ToolResult.fail(
+                code="validation_error", message="operation=format_converter 需要 data 参数"
+            )
+        return await format_converter(data, output_format, input_format)
+    if op == "get_current_time":
+        # 延迟导入：core_tools 末尾会 import tools 包（避免模块级循环）。
+        from app.agent.core_tools import get_current_time as _get_current_time
+
+        return await _get_current_time()
+    if op == "detect_language":
+        if not text:
+            return ToolResult.fail(
+                code="validation_error", message="operation=detect_language 需要 text 参数"
+            )
+        from app.agent.tools.translation import detect_language as _detect_language
+
+        return await _detect_language(text)
+    if op == "analyze_data":
+        if not data:
+            return ToolResult.fail(
+                code="validation_error", message="operation=analyze_data 需要 data 参数"
+            )
+        from app.agent.tools.data_analysis import analyze_data as _analyze_data
+
+        return await _analyze_data(data)
+    return ToolResult.fail(
+        code="validation_error",
+        message=(
+            f"未知 operation: {operation}（支持 calculate/format_converter/"
+            "get_current_time/detect_language/analyze_data）"
+        ),
+    )

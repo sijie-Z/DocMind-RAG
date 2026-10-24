@@ -34,7 +34,7 @@ from openai import AsyncOpenAI
 
 from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
-from app.agent.registry import tool_registry
+from app.agent.registry import canonical_tool_name, tool_registry
 from app.agent.usage import record_llm_call_error, record_llm_usage
 from app.core.prometheus import AGENT_PLANNING_LATENCY, AGENT_PLANNING_TOTAL
 
@@ -838,9 +838,9 @@ class Planner:
             ),
             PlanStep(
                 id="s3",
-                description=f"综合归纳研究结果: {query[:50]}",
+                description=f"综合归纳研究结果（使用 extract_insights 的 mode=summary 生成摘要）: {query[:50]}",
                 dependencies=["s2"],
-                tool_hint="summarize_document",
+                tool_hint="extract_insights",
                 risk_level="low",
                 retry_strategy="auto_retry",
             ),
@@ -874,20 +874,15 @@ class Planner:
         capabilities so the planner can make informed decisions about
         parallelization, retry strategy, and risk level.
         """
-        tools = tool_registry.list_tools(self.config.tool_tags)
+        tools = tool_registry.list_active_tools(self.config)
         if not tools:
-            return "(无可用工具)"
-
-        # Filter disabled tools
-        active = [t for t in tools if t.name not in (self.config.disabled_tools or [])]
-        if not active:
             return "(无可用工具)"
 
         # Group by category
         from collections import defaultdict
 
         groups: dict[str, list] = defaultdict(list)
-        for t in active:
+        for t in tools:
             cat = t.category or "general"
             groups[cat].append(t)
 
@@ -984,7 +979,11 @@ class Planner:
                     id=sid,
                     description=s.get("description", f"步骤 {i + 1}"),
                     dependencies=s.get("dependencies", []) or [],
-                    tool_hint=s.get("tool_hint") or None,
+                    # issue #509：模型可能仍输出旧工具名（vector_search 等）——
+                    # 计划阶段先 canonicalize，执行器拿到的是规范名。
+                    tool_hint=(
+                        canonical_tool_name(s.get("tool_hint")) if s.get("tool_hint") else None
+                    ),
                     # v1 semantic-aware fields
                     parallel_group=s.get("parallel_group"),
                     risk_level=risk,

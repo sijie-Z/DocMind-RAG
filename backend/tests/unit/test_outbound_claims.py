@@ -184,7 +184,7 @@ def test_product_definition_image_capability_matches_code():
 
 
 def test_architecture_numbers_match_code():
-    """架构页数字与代码一致：39 个内置工具、28 个路由模块，且不得虚报 Celery。"""
+    """架构页数字与代码一致：31 个内置工具（默认注入 10 个）、28 个路由模块，且不得虚报 Celery。"""
     _assert_absent(
         "docs/architecture.html",
         [
@@ -199,21 +199,41 @@ def test_architecture_numbers_match_code():
             "25 个路由模块",
             "26 API 模块",
             "26 个路由模块",
+            "39 个内置工具",
             "FastAPI · 19 模块",
             "Celery",
         ],
     )
     _assert_present(
         "docs/architecture.html",
-        ["39 个内置工具", "基础工具（14 个）", "28 API 模块", "28 个路由模块"],
+        [
+            "31 个内置工具",
+            "默认注入 10 个工具",
+            "基础工具（11 个）",
+            "28 API 模块",
+            "28 个路由模块",
+        ],
     )
-    # 静态注册数 = @register_tool 装饰器数，防止口径再次漂移。
-    tools_source = "\n".join(
-        p.read_text(encoding="utf-8")
-        for p in sorted((_REPO_ROOT / "backend" / "app" / "agent" / "tools").rglob("*.py"))
-    ) + _read("backend/app/agent/core_tools.py")
-    assert tools_source.count("@register_tool(") == 39, (
-        "内置工具注册数不再是 39；请同步更新 README/docs/index.html/架构页。"
+    # 静态注册数 = 非隐藏 @register_tool 数（issue #509：hidden=True 的合并旧名
+    # 保留注册但不计入对外「内置工具」口径）；默认注入面 = 无 enabled_predicate
+    # 且不在 DEFAULT_DISABLED_TOOLS 中的工具数。
+    import importlib.util
+    import sys
+
+    script = _REPO_ROOT / "backend" / "scripts" / "check_doc_facts.py"
+    spec = importlib.util.spec_from_file_location("check_doc_facts_outbound", script)
+    assert spec is not None and spec.loader is not None
+    checker = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = checker
+    spec.loader.exec_module(checker)
+    agent_dir = _REPO_ROOT / "backend" / "app" / "agent"
+    registered = checker.derive_registered_tool_names(agent_dir)
+    assert len(registered) == 31, (
+        f"内置工具注册数不再是 31（非隐藏）；请同步更新 README/docs/index.html/架构页: {registered}"
+    )
+    default_tools = checker.derive_default_tool_names(agent_dir, agent_dir / "config.py")
+    assert len(default_tools) == 10, (
+        f"默认注入工具数不再是 10；请同步更新 README/docs/index.html/架构页: {default_tools}"
     )
 
 

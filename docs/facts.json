@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "description": "文档关键数字的单一事实源（W0-8）。由 backend/scripts/check_doc_facts.py 从源码派生并逐 PR 校验；代码演进导致数字变化时，必须同步本文件与引用它的文档。对外口径（值/口径/命令/日期/备注）见 docs/METRICS.md，本文件六项与 METRICS.md 必须同值。",
+  "description": "文档关键数字的单一事实源（W0-8）。由 backend/scripts/check_doc_facts.py 从源码派生并逐 PR 校验；代码演进导致数字变化时，必须同步本文件与引用它的文档。对外口径（值/口径/命令/日期/备注）见 docs/METRICS.md，本文件各项与 METRICS.md 必须同值。",
   "facts": {
     "sse_event_types": 24,
     "endpoint_modules": 28,
     "frontend_routes": 34,
-    "registered_tools": 39,
+    "registered_tools": 31,
+    "default_tools": 10,
     "http_route_decorators": 206,
     "websocket_route_decorators": 3
   },
@@ -13,7 +14,8 @@
     "sse_event_types": "backend/app/agent/events.py — EventType = Literal[...] 的字符串成员数（闭集）",
     "endpoint_modules": "backend/app/api/v1/router.py — ROUTER_SPECS 字典键（声明顺序）；无 ROUTER_SPECS 时回退 api_router.include_router(...) 调用数",
     "frontend_routes": "frontend/src/router/index.ts — routes 数组中的路由记录 path: 字符串字面量数（含 children；注释与 redirect 回调内的 path 对象不计；当前 12 条顶层 + 22 条页面子路由 = 34）",
-    "registered_tools": "backend/app/agent — core_tools.py 与 tools/ 包经 @register_tool(name=...) 注册并可运行时导入的工具数",
+    "registered_tools": "backend/app/agent — core_tools.py 与 tools/ 包经 @register_tool(name=...) 注册且未隐藏（hidden=False）的工具数；issue #509 合并/降级的旧名以 hidden=True 保留注册但不计入对外内置工具口径",
+    "default_tools": "backend/app/agent — 默认 AgentConfig + 默认环境（TERMINAL_ENABLED=false、未配置飞书凭据、MCP 未连接）下实际注入 schema 的工具数：非 hidden、未声明 enabled_predicate（= 需显式 opt-in）、且不在 config.DEFAULT_DISABLED_TOOLS 中的 @register_tool 数（issue #509 目标常驻档 10–12；运行时 cl100k 实测 1,464 tokens）",
     "http_route_decorators": "backend/app/api/v1/endpoints — @router.get/post/put/patch/delete 等 HTTP 装饰器总数",
     "websocket_route_decorators": "backend/app/api/v1/endpoints — @router.websocket 装饰器数（与 HTTP 分开计）"
   }

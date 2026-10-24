@@ -159,6 +159,13 @@ class AgentChatRequest(BaseModel):
     model: str = Field("deepseek-v4-flash", description="Model to use")
     temperature: float = Field(0.1, ge=0.0, le=2.0, description="LLM temperature")
     disabled_tools: list[str] = Field(default_factory=list, description="Tools to disable")
+    tool_tags: list[str] | None = Field(
+        None,
+        description=("issue #509：工具 tag 显式选择（非空时解锁对应扩展工具；None=默认常驻档）"),
+    )
+    enable_delegation: bool | None = Field(
+        None, description="issue #509：开启 delegate_subtask（默认关闭）"
+    )
     system_prompt_override: str | None = Field(None, description="Custom system prompt")
     approval_mode: Literal["never", "risky", "always"] | None = Field(
         None,
@@ -197,6 +204,12 @@ class AgentConfigUpdate(BaseModel):
     personality: str | None = None
     system_prompt_override: str | None = None
     disabled_tools: list[str] | None = None
+    tool_tags: list[str] | None = Field(
+        None, description="issue #509：工具 tag 显式选择（非空=解锁对应扩展工具）"
+    )
+    enable_delegation: bool | None = Field(
+        None, description="issue #509：开启 delegate_subtask（默认关闭）"
+    )
     approval_mode: Literal["never", "risky", "always"] | None = Field(
         None, description="HITL 审批模式：never / risky / always"
     )
@@ -230,6 +243,11 @@ async def _build_agent_config(body: AgentChatRequest, user_id: int) -> AgentConf
     """
     stored = await AgentConfig.load_from_redis(f"user:{user_id}")
     config = stored or AgentConfig()
+    # issue #509：扩展面 / 委派的显式 opt-in（请求覆盖已保存配置）。
+    if body.tool_tags is not None:
+        config.tool_tags = body.tool_tags or None
+    if body.enable_delegation is not None:
+        config.enable_delegation = body.enable_delegation
     config.model = body.model
     config.temperature = body.temperature
     config.enable_tools = body.enable_tools
@@ -1395,9 +1413,17 @@ async def agent_feedback(
 async def list_tools(
     current_user: User = Depends(get_current_user),
 ):
-    """List all available agent tools with their metadata."""
-    tools = tool_registry.list_tools()
+    """List all available agent tools with their metadata.
+
+    issue #509：活动面与 loop/executor/planner 同源（``list_active_tools``），但
+    本端点保留“工具目录”契约：返回全部非 hidden 工具（31），并标注
+    ``active_by_default`` / ``disabled_by_default`` / ``gated_by_predicate``。
+    这样配置面板仍能开关门控工具，SDK 的 ``tools.list()`` 也不会从 39 突然缩到 10。
+    """
+    default_config = AgentConfig()
+    active_names = {t.name for t in tool_registry.list_active_tools(default_config)}
     default_disabled = set(DEFAULT_DISABLED_TOOLS)
+    tools = tool_registry.list_tools()  # 非 hidden 的工具目录
 
     return {
         "success": True,
@@ -1408,11 +1434,16 @@ async def list_tools(
                 "tags": t.tags,
                 "parameters": t.parameters,
                 "requires_auth": t.requires_auth,
-                "disabled_by_default": t.name in default_disabled,
+                "active_by_default": t.name in active_names,
+                # 保留既有字段名：true = 默认不注入（含配置禁用 / 门控 / 扩展面）。
+                "disabled_by_default": t.name not in active_names,
+                "gated_by_predicate": t.enabled_predicate is not None,
+                "config_disabled": t.name in default_disabled,
             }
             for t in tools
         ],
         "total": len(tools),
+        "active_by_default": len(active_names),
     }
 
 
@@ -1732,6 +1763,11 @@ async def update_config(
     if body.disabled_tools is not None:
         # 安全加固：高危工具由服务端强制禁用，客户端无法解除
         config.disabled_tools = _merge_disabled_tools(body.disabled_tools)
+    # issue #509：扩展面 / 委派显式 opt-in（为空列表时回到默认常驻档）。
+    if body.tool_tags is not None:
+        config.tool_tags = body.tool_tags or None
+    if body.enable_delegation is not None:
+        config.enable_delegation = body.enable_delegation
 
     await config.save_to_redis(f"user:{current_user.id}")
 

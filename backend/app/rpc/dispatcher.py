@@ -655,7 +655,7 @@ class RPCService:
         import app.agent.service  # noqa: F401
         from app.agent.registry import tool_registry
 
-        return {"tools": tool_registry.get_manifest()}
+        return {"tools": tool_registry.get_manifest(include_hidden=True)}
 
     async def shutdown(self, params: dict) -> dict:
         self.shutdown_requested = True

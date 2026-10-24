@@ -23,7 +23,7 @@ DocMind is a full-stack enterprise AI knowledge base system built around the **P
 Core use cases:
 - 📄 **Document KB** — Upload PDF, Word, Excel, TXT, Markdown, CSV, and PNG/JPG/JPEG/WEBP/BMP images (OCR). Auto-parse, chunk, embed, and semantic search.
 - 💬 **Intelligent Q&A** — RAG pipeline: keyword + vector hybrid search, reranking, LLM generation with SSE streaming.
-- 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 39 tools for complex multi-step tasks.
+- 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 31 tools for complex multi-step tasks.
 - 🧩 **Workflow Editor** — Visual DAG design & debugging (Vue Flow). Configurable LLM models, prompts, and execution engines.
 - 📊 **Observability** — Prometheus metrics, Langfuse full-trace, 24 SSE event types, RunReport execution summaries.
 - 🔐 **Multi-Tenant + RBAC** — Organization isolation, role-based permissions, JWT authentication.
@@ -74,7 +74,7 @@ Known limitations:
 │  WebSocket Push · Request ID Tracking        │
 ├── AI Agent Core ─────────────────────────────┤
 │  PER Loop (Planner → Executor → Reflector)   │
-│  Tool Registry (39) · RunReport · Reviewer  │
+│  Tool Registry (31) · RunReport · Reviewer  │
 │  Experience Memory · Replay · Pattern Mining │
 ├── RAG Pipeline ──────────────────────────────┤
 │  HybridRetriever (BM25 + Vector + RRF fusion)│
@@ -116,20 +116,21 @@ User instruction
 | Context Engine | `context.py` | Token budget management, message window builder |
 | Config | `config.py` | AgentConfig (model/temperature/max steps/phase toggles) |
 
-**39 Built-In Tools** (`core_tools.py` 14 + `tools/` 25; method: `docs/METRICS.md`):
+**31 Built-In Tools** (`core_tools.py` 11 + `tools/` 20; 10 tools are injected by default, with terminal/Feishu/delegation/extended tools gated by settings or explicit `tool_tags`; method: `docs/METRICS.md`):
 
 | Category | Tool | Description |
 |----------|------|-------------|
-| Knowledge | `search_knowledge_base`, `vector_search` | Hybrid + semantic search |
-| Web | `web_search` | DuckDuckGo real-time search |
-| Code | `code_execution` | Sandboxed Python execution |
-| Data | `data_analysis` | Pandas/NumPy data analysis |
-| Translation | `translation` | Multi-language translation |
-| Document | `summarize_document`, `extract_keywords` | Summaries, keyword extraction |
-| Analysis | `extract_insights`, `cross_document_analysis`, `generate_report` | Deep analysis, cross-doc, reports |
+| Knowledge | `search_knowledge_base` | Hybrid search; `mode=vector` for pure semantic |
+| Web | `web_search` | Real-time search; `action=fetch` for webpage text |
+| Code | `execute_python`, `execute_sql` | Sandboxed Python / SQL (disabled by default, opt-in) |
+| Data | `utility` | Math, format conversion, language detection, statistics, current time |
+| Translation | `translate_text` | Multi-language translation |
+| Document | `extract_insights`, `extract_keywords` | Summary/structured insights, keyword extraction |
+| Analysis | `cross_document_analysis`, `generate_report` | Cross-doc analysis, report generation |
 | Management | `list_documents`, `get_document_info` | Document management |
-| Conversation | `list_conversations`, `get_conversation_history` | Session history |
-| External | `mcp_call`, `feishu/*` | MCP bridge, Feishu Bitable |
+| Conversation | `list_conversations`, `get_conversation_history` | Session history (extended surface) |
+| External | `mcp_call`, `feishu_bitable_query` | MCP bridge, Feishu Bitable (gated by default) |
+| Skills | `load_skill_reference`, `deep_research`, `document_comparison`, `knowledge_analysis` | Skill loading, composite analysis (last three extended) |
 
 **Self-Improving System** (experimental):
 
@@ -452,8 +453,8 @@ DocMind/
 │   │   │   ├── events.py            #   SSE event types (24 types)
 │   │   │   ├── message.py           #   Agent message bus
 │   │   │   ├── tracing.py           #   Execution trace records (dev-only: eval/offline; not written in production)
-│   │   │   ├── core_tools.py        #   14 base tools
-│   │   │   ├── tools/               #   25 extension tools (39 built-in tools total)
+│   │   │   ├── core_tools.py        #   11 base tools
+│   │   │   ├── tools/               #   20 extension tools (31 built-in tools total)
 │   │   │   │   ├── web_search.py    #   Web search
 │   │   │   │   ├── code_execution.py #  Python/SQL sandbox
 │   │   │   │   ├── data_analysis.py #   Data analysis

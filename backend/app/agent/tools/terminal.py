@@ -30,6 +30,17 @@ _READ_WAIT_SECONDS = 5.0
 _TERMINAL_SEMANTIC = {"type": "mutating", "idempotent": False}
 
 
+def _terminal_enabled(config) -> bool:
+    """issue #509：terminal 六工具默认不注入 schema（TERMINAL_ENABLED 默认 false）。
+
+    工具自身仍保留 ``terminal_disabled`` 结构化失败（纵深防御）；这里只是把
+    默认关闭的整族工具从每步 schema 中移除（约 2.7k chars / 0.9k tokens）。
+    """
+    from app.core.config import settings
+
+    return bool(getattr(settings, "TERMINAL_ENABLED", False))
+
+
 def _tool_fail(exc: Exception) -> ToolResult:
     """TerminalError → ToolResult（统一错误码映射）。"""
     from app.agent.terminal.manager import (
@@ -111,6 +122,7 @@ def _disabled_result() -> ToolResult | None:
     requires_auth=True,
     risk_level="high",
     category="terminal",
+    enabled_predicate=_terminal_enabled,
     semantic=_TERMINAL_SEMANTIC,
 )
 async def terminal_open(
@@ -173,6 +185,7 @@ async def terminal_open(
     requires_auth=True,
     risk_level="high",
     category="terminal",
+    enabled_predicate=_terminal_enabled,
     semantic=_TERMINAL_SEMANTIC,
 )
 async def terminal_send(
@@ -228,6 +241,7 @@ async def terminal_send(
     requires_auth=True,
     risk_level="high",
     category="terminal",
+    enabled_predicate=_terminal_enabled,
     semantic={"type": "read_only", "idempotent": True},
 )
 async def terminal_read(
@@ -293,6 +307,7 @@ async def terminal_read(
     requires_auth=True,
     risk_level="high",
     category="terminal",
+    enabled_predicate=_terminal_enabled,
     semantic={"type": "mutating", "idempotent": True},
 )
 async def terminal_signal(
@@ -327,6 +342,7 @@ async def terminal_signal(
     requires_auth=True,
     risk_level="high",
     category="terminal",
+    enabled_predicate=_terminal_enabled,
     semantic=_TERMINAL_SEMANTIC,
 )
 async def terminal_close(terminal_id: str, *, user_id: int = 0, **_: Any) -> ToolResult:
@@ -353,6 +369,7 @@ async def terminal_close(terminal_id: str, *, user_id: int = 0, **_: Any) -> Too
     requires_auth=True,
     risk_level="high",
     category="terminal",
+    enabled_predicate=_terminal_enabled,
     semantic={"type": "read_only", "idempotent": True},
 )
 async def terminal_list(*, user_id: int = 0, **_: Any) -> ToolResult:

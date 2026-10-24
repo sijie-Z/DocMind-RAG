@@ -4,7 +4,7 @@
 >
 > This guide only *references* the sources of truth:
 > - ports, credentials, and service orchestration: `backend/docker-compose.yml` and `backend/.env.docker.example`;
-> - headline numbers (39 built-in tools / 26 endpoint modules / 34 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (the guide itself is not yet in the anchor list);
+> - headline numbers (31 built-in tools / 10 tools injected by default / 28 endpoint modules / 34 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
 > - architecture and design rationale: `README.md`, `AGENT_ARCHITECTURE.md`, `docs/decisions/`.
 >
 > 中文版：[USER_GUIDE.md](USER_GUIDE.md)
@@ -385,7 +385,7 @@ ADR-001 froze this semantic (`docs/decisions/ADR-001-路线冻结.md`, D5):
 
 ### 3.4 Tools and HITL approval
 
-**Tools**: every tool self-registers via `@register_tool(name=...)`. There are **39 built-in tools** (`docs/facts.json` → `registered_tools`; 14 in `core_tools.py`, 25 in `tools/`), plus dynamic MCP tools. Parameters use JSON Schema and are converted to OpenAI function-calling format; `tags` drive configuration filtering, and sensitive tools are disabled by default in `DEFAULT_DISABLED_TOOLS`.
+**Tools**: every tool self-registers via `@register_tool(name=...)`. There are **31 built-in tools** (`docs/facts.json` → `registered_tools`; 11 in `core_tools.py`, 20 in `tools/`; 10 tools injected by default), plus dynamic MCP tools. Parameters use JSON Schema and are converted to OpenAI function-calling format; `tags` drive configuration filtering, and sensitive tools are disabled by default in `DEFAULT_DISABLED_TOOLS`.
 
 **HITL (human-in-the-loop)** lets the agent pause before a risky next action:
 

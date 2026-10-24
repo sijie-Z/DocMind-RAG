@@ -2,7 +2,7 @@
 
 ## 概览
 
-DocMind Agent 是一个 **Planning-Execution-Reflection (PER)** 三阶段自主智能体系统，集成了 39 个生产级工具、四层记忆系统和实时 SSE 流式事件协议。架构设计参考了学术界和工业界的主流 Agent 范式，面向企业 RAG 知识库场景深度定制。
+DocMind Agent 是一个 **Planning-Execution-Reflection (PER)** 三阶段自主智能体系统，集成了 31 个生产级工具（默认注入 10 个工具，其余按 settings / 显式 `tool_tags` 门控）、四层记忆系统和实时 SSE 流式事件协议。架构设计参考了学术界和工业界的主流 Agent 范式，面向企业 RAG 知识库场景深度定制。
 
 > 数字口径：本文件引用的工具数、SSE 事件数与测试快照统一登记在 `docs/METRICS.md`（值 / 口径 / 命令 / 日期 / 备注）；本文件只引用同值数字，不另行定义口径。
 
@@ -80,7 +80,7 @@ AgentMemoryBridge
 Planner.plan(query, history, memory_context)
   │
   ├─► LLM 调用 (temperature=0.1)
-  │     System: 任务规划专家提示 + 39 个工具描述
+  │     System: 任务规划专家提示 + 默认注入 10 个工具描述
   │     User: 用户 query
   │
   ├─► 流式 reasoning tokens (thinking events)
@@ -91,7 +91,7 @@ Planner.plan(query, history, memory_context)
   │       "reasoning": "...",
   │       "steps": [
   │         {"id": "s1", "description": "...", "dependencies": [], "tool_hint": "list_documents"},
-  │         {"id": "s2", "description": "...", "dependencies": ["s1"], "tool_hint": "summarize_document"}
+  │         {"id": "s2", "description": "...", "dependencies": ["s1"], "tool_hint": "extract_insights"}
   │       ]
   │     }
   │
@@ -159,43 +159,50 @@ Reflector.reflect(plan, results)
           }
 ```
 
-## 工具生态（39 个内置 + MCP 动态）
+## 工具生态（31 个内置 + MCP 动态；默认注入 10 个工具）
 
-### 核心工具 (14) — `core_tools.py`
+### 核心工具 (11) — `core_tools.py`
 
 > 下表为功能示意，非完整清单（完整注册列表见 `GET /api/v1/agent/tools`）。
 
 | 工具 | 描述 | 标签 |
 |------|------|------|
-| `search_knowledge_base` | 混合检索（关键词 + 向量 + RRF 融合 + 重排序） | search, retrieval |
-| `vector_search` | 纯语义向量搜索 | search |
-| `summarize_document` | LLM 文档摘要 | analysis |
-| `extract_keywords` | 关键术语和实体提取 | analysis |
+| `search_knowledge_base` | 混合检索（关键词 + 向量 + RRF 融合）；`mode=vector` 纯语义 | search, retrieval |
+| `extract_insights` | 结构化洞察（实体/指标/断言/结构）；`mode=summary` 文档摘要 | analysis, deep |
+| `extract_keywords` | 关键术语和实体提取（扩展面） | analysis |
+| `cross_document_analysis` | 跨文档主题/差异/趋势分析 | analysis, deep |
+| `generate_report` | 结构化 Markdown 报告生成 | analysis, report |
 | `list_documents` | 列出知识库文档（ID/文件名/状态/日期） | management |
 | `get_document_info` | 文档详情（状态/分块数/大小/元数据） | management |
-| `list_conversations` | 列出用户的聊天会话 | conversation, management |
-| `get_conversation_history` | 获取会话消息历史 | conversation |
-| `list_prompt_templates` | 列出提示词模板 | prompts |
-| `get_prompt_template` | 获取指定模板内容 | prompts |
-| `get_current_time` | 当前日期时间 | utility |
+| `list_conversations` | 列出用户的聊天会话（扩展面） | conversation, management |
+| `get_conversation_history` | 获取会话消息历史（扩展面） | conversation |
+| `list_prompt_templates` | 列出提示词模板（扩展面） | prompts |
+| `get_prompt_template` | 获取指定模板内容（扩展面） | prompts |
 
-### 工具包工具 (25) — `tools/` 包
+> 旧名 `vector_search` / `summarize_document` / `get_current_time` 已合并（hidden 保留注册，经 `TOOL_ALIASES` 路由到规范名，不再进 schema）。
+
+### 工具包工具 (20) — `tools/` 包
 
 > 下表为功能示意，非完整清单（完整注册列表见 `GET /api/v1/agent/tools`）。
 
 | 工具 | 描述 | 标签 | 安全 |
 |------|------|------|------|
-| `web_search` | DuckDuckGo 网页搜索（标题+URL+摘要） | web, external, search | 限流 10次/分钟 |
-| `fetch_webpage` | 网页正文提取（≤5000 字符） | web, external | — |
-| `execute_python` | 沙箱化 Python（RestrictedPython + subprocess, 10s 超时） | code, compute | **默认禁用** |
-| `execute_sql` | 组织数据库只读查询（LIMIT 100, 5s 超时） | code, data | **默认禁用** |
-| `analyze_data` | 数值统计分析（均值/方差/中位数/四分位数/趋势） | analysis, data | — |
-| `compare_documents` | 2-5 篇文档对比（相似点/差异/关键主题） | analysis, documents | — |
+| `web_search` | 实时搜索（DuckDuckGo）；`action=fetch` 网页正文提取（≤5000 字符，SSRF 逐跳校验） | web, external, search | 限流 10次/分钟 |
+| `execute_python` | 沙箱化 Python（RestrictedPython + subprocess, 10s 超时） | code, compute | **默认禁用 / 需审批** |
+| `execute_sql` | 组织数据库只读查询（LIMIT 100, 5s 超时） | code, data | **默认禁用 / 需审批** |
+| `utility` | 计算、格式转换、语言检测、数值统计、当前时间（不执行代码） | utility, compute | 低风险 |
+| `compare_documents` | 2-5 篇文档对比（扩展面） | analysis, documents | — |
 | `translate_text` | 30+ 语言翻译 | language, translation | — |
-| `detect_language` | 语言检测（名称/ISO 代码/置信度） | language | — |
-| `calculate` | 安全数学表达式求值 | utility, compute | — |
-| `format_converter` | JSON ↔ YAML ↔ CSV ↔ Markdown 格式互转 | utility, format | — |
-| `get_system_status` | 本组织已索引 chunk 数 + Redis 内存 + 本组织 DB 统计（按 org 过滤，issue #257） | utility, system | 需登录（缺 org 拒答） |
+| `get_system_status` | 本组织已索引 chunk 数 + Redis 内存 + 本组织 DB 统计（扩展面，按 org 过滤，issue #257） | utility, system | 需登录（缺 org 拒答） |
+| `load_skill_reference` | 技能清单/指南/参考文档（`skill_name` 缺省=列出全部） | skill | — |
+| `deep_research` / `document_comparison` / `knowledge_analysis` | 复合技能（扩展面） | skill | — |
+| `delegate_subtask` | 子代理委派（`enable_delegation=true` 时注入） | delegation | 默认关闭 / medium |
+| terminal 六工具 | 持久终端 PTY（`TERMINAL_ENABLED=true` 时注入） | terminal, shell | 默认关闭 / high + 强制审批 |
+| `feishu_bitable_query` | 飞书多维表格只读查询（凭据齐备时注入） | feishu | 默认关闭 |
+
+> 旧名 `fetch_webpage` / `analyze_data` / `detect_language` / `calculate` / `format_converter` / `list_skills` 已合并（hidden 保留注册，经 `TOOL_ALIASES` 路由到规范名，不再进 schema）。
+
+> 兼容口径：`disabled_tools` 中的旧名按**能力粒度**生效（`calculate` 只禁用 `utility(operation=calculate)`，`vector_search` 只禁用 `search_knowledge_base(mode=vector)`，`list_skills` 只禁用无 `skill_name` 的列表调用），不会隐藏整个规范工具；写规范名则禁用整个工具。
 
 ### 工具注册模式
 
@@ -325,7 +332,7 @@ SSE 客户端 (api/agent.ts)
 | 执行 | Thought→Action→Observe 循环 | 按计划步骤顺序执行 | ReAct 循环 | **步骤级重试 (3x) + 指数退避** |
 | 反思 | 无（Observation 即反馈） | 无 | LLM 自我反思 + 长期记忆 | **目标达成度评估 + pass/retry/replan** |
 | 记忆 | 无 | 无 | 向量数据库长期记忆 | **四层：STM/LTM/Work/Reflective** |
-| 工具 | 预定义工具集 | 预定义工具集 | 预定义工具集 | **39 个自注册工具 + tags 分类 + 安全分级** |
+| 工具 | 预定义工具集 | 预定义工具集 | 预定义工具集 | **31 个自注册工具 + tags 分类 + 安全分级** |
 | 流式 | 取决于实现 | 取决于实现 | 取决于实现 | **24 种 SSE 事件类型, 前端可视化** |
 | 多步依赖 | 不支持 | 线性依赖 | 不支持 | **完整 DAG 依赖管理** |
 | 失败恢复 | 无 | 无 | 基本反思 | **步骤级重试 + 错误上下文传递** |
@@ -428,8 +435,8 @@ backend/app/agent/
   ├── skills.py          # 技能学习
   ├── subagent.py        # 子代理委托
   ├── service.py         # AgentService 入口
-  ├── core_tools.py      # 核心工具（14 个）
-  └── tools/             # 工具包（25 个）
+  ├── core_tools.py      # 核心工具（11 个）
+  └── tools/             # 工具包（20 个）
       ├── web_search.py
       ├── code_execution.py
       ├── data_analysis.py

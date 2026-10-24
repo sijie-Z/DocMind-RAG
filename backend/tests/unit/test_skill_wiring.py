@@ -46,7 +46,12 @@ def test_skill_tools_absent_from_child_toolset():
     }
     assert "load_skill_reference" not in names_child, "子代理不应看到技能工具"
     names_all = {t["function"]["name"] for t in tool_registry.to_openai_tools()}
-    assert {"list_skills", "load_skill_reference"} <= names_all
+    assert "load_skill_reference" in names_all
+    # issue #509：list_skills 已合并为 load_skill_reference 的缺省行为（hidden），
+    # schema 只发规范名；旧名仍经 TOOL_ALIASES 可用（执行路径见下方用例）。
+    entry = tool_registry.get("list_skills")
+    assert entry is not None and entry.hidden
+    assert entry.superseded_by == "load_skill_reference"
 
 
 @pytest.mark.asyncio
