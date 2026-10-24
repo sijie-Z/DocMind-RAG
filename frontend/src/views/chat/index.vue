@@ -118,7 +118,6 @@
         v-model:privacyMode="privacyMode"
         v-model:useSSE="useSSE"
         v-model:useStream="useStream"
-        v-model:useAgent="useAgent"
         :isLoading="isLoading"
         :attachedFiles="attachedFiles"
         :attachedFileIds="attachedFileIds"
@@ -129,6 +128,7 @@
         @stopGeneration="stopGeneration"
         @triggerFileUpload="triggerFileUpload"
         @removeAttachment="removeAttachment"
+        @openAgentWorkbench="openAgentWorkbench"
       />
     </main>
   </div>
@@ -201,7 +201,6 @@ const {
 // 只发 WS stop，SSE 模式下无法中止传输。
 const isLoadingHistory = ref(false)
 
-const useAgent = ref(false)
 const debugEnabled = ref(false)
 const debugData = ref<import('@/types/chat').RetrievalDebugData | null>(null)
 
@@ -237,8 +236,19 @@ const {
 } = useChatSend(
   messages, attachedFiles, attachedFileIds,
   baseScrollToBottom, fetchConversations,
-  isLoading, isRetrieving, sseStatus, useSSE, useAgent, useStream, debugEnabled, debugData,
+  isLoading, isRetrieving, sseStatus, useSSE, useStream, debugEnabled, debugData,
 )
+
+// issue #508（方案 B）：深度分析（Agent/PER）只在 /agent 工作台提供（审批/计划
+// 审批/取消/回放 UI 完整）。Chat 的深度分析入口改为导航——不再以
+// useAgent=true 发到 /chat/stream（后端对旧客户端显式返回
+// DEEP_ANALYSIS_MOVED_TO_AGENT）。当前输入经 ?prompt= 带过去，URL 至少不丢
+// 用户已输入的意图；Agent 页消费该参数另开跟进（本 issue 白名单不含 agent 页）。
+const openAgentWorkbench = () => {
+  const prompt = inputMessage.value.trim()
+  message.info(t('chat.deepAnalysisMoved'))
+  router.push({ path: '/agent', query: prompt ? { prompt } : undefined })
+}
 
 // B4（D5）：组织策略禁用隐私模式时，强制关闭并持续跟随组织切换。
 watch(orgPrivacyAllowed, (allowed) => {

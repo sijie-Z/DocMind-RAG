@@ -64,13 +64,11 @@ const Host = defineComponent({
     const isRetrieving = ref(false)
     const sseStatus = ref('disconnected')
     const useSSE = ref(true)
-    const useAgent = ref(false)
     const useStream = ref(true)
     const { handleSSESend } = useChatSend(
       messages, attachedFiles, attachedFileIds,
       () => {}, async () => {},
-      isLoading, isRetrieving, sseStatus, useSSE, useAgent,
-      useStream,
+      isLoading, isRetrieving, sseStatus, useSSE, useStream,
     )
     send = () => handleSSESend('测试问题')
     return () => h('div')

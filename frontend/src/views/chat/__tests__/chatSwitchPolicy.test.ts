@@ -1,14 +1,11 @@
 /**
- * B4：聊天三开关合并后的策略 UI。
+ * issue #508：Chat 开关策略（B4 后第 508 号修订）。
  *
- * 契约（先红：当前 ChatInput 没有这些 testid / 组织策略说明）：
- * 1. Agent 模式开启时，传输开关（SSE/WS）被锁定，并给出「Agent 固定 SSE」解释；
- * 2. 组织策略禁用隐私模式时，隐私开关置灰，并注明来源是组织策略；
- * 3. 默认（Agent 关、组织允许）时两个开关都可用，且不出现解释文案。
- *
- * 说明：Naive 的 popover 内容在未悬浮时不渲染（teleport）；测试用同名
- * Popover/Tooltip SlotStub 内联渲染，断言直接落在真实 n-switch 的
- * `n-switch--disabled` 类上（不是只断言外层 data-disabled 标记）。
+ * 原契约（B4）钉「Agent 模式开启 → 传输开关锁定 + 解释」。方案 B 后深度分析
+ * 迁至 /agent 工作台，Chat 内不再有 Agent 模式：
+ * 1. 传输开关（SSE/WS）始终可用，没有锁定态/锁定解释；
+ * 2. 组织策略禁用隐私模式时，隐私开关置灰，并注明来源是组织策略（不变）；
+ * 3. Agent 模式旧控件（agent-mode-control / agent-sse-note）不复存在。
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -42,7 +39,6 @@ function mountInput(overrides: Record<string, unknown> = {}) {
       privacyMode: true,
       useSSE: true,
       useStream: true,
-      useAgent: false,
       isLoading: false,
       attachedFiles: [],
       attachedFileIds: [],
@@ -58,21 +54,19 @@ function mountInput(overrides: Record<string, unknown> = {}) {
   })
 }
 
-describe('chat switch policy', () => {
-  it('Agent 模式锁定传输开关并解释原因', async () => {
-    const wrapper = mountInput({ useAgent: true })
+describe('chat switch policy (issue #508)', () => {
+  it('传输开关始终可用（不再有 Agent 模式锁定态）', async () => {
+    const wrapper = mountInput()
     await nextTick()
 
-    const transport = wrapper.find('[data-testid="transport-lock"]')
+    const transport = wrapper.find('[data-testid="transport-control"]')
     expect(transport.exists()).toBe(true)
-    expect(transport.attributes('data-disabled')).toBe('true')
-    expect(wrapper.find('[data-testid="transport-switch"]').classes()).toContain(
+    expect(wrapper.find('[data-testid="transport-switch"]').classes()).not.toContain(
       'n-switch--disabled',
     )
-
-    expect(wrapper.find('[data-testid="agent-sse-note-inline"]').text()).toContain(
-      zh.chat.agentRequiresSse,
-    )
+    expect(wrapper.find('[data-testid="agent-mode-control"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="agent-sse-note-inline"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="agent-sse-note"]').exists()).toBe(false)
   })
 
   it('组织禁用隐私模式时开关置灰并注明组织策略来源', async () => {
@@ -91,29 +85,16 @@ describe('chat switch policy', () => {
     )
   })
 
-  it('默认状态下两个开关可用且无锁定说明', async () => {
+  it('默认状态下隐私开关可用且无锁定说明', async () => {
     const wrapper = mountInput()
     await nextTick()
 
-    expect(
-      wrapper.find('[data-testid="transport-lock"]').attributes('data-disabled'),
-    ).toBe('false')
     expect(
       wrapper.find('[data-testid="privacy-lock"]').attributes('data-disabled'),
     ).toBe('false')
-    expect(wrapper.find('[data-testid="transport-switch"]').classes()).not.toContain(
-      'n-switch--disabled',
-    )
     expect(wrapper.find('[data-testid="privacy-switch"]').classes()).not.toContain(
       'n-switch--disabled',
     )
-    expect(wrapper.find('[data-testid="agent-sse-note-inline"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="privacy-policy-note-inline"]').exists()).toBe(false)
-  })
-
-  it('Agent 开关仍是可切换的独立控件（合并后的模式区）', async () => {
-    const wrapper = mountInput()
-    await nextTick()
-    expect(wrapper.find('[data-testid="agent-mode-control"]').exists()).toBe(true)
   })
 })

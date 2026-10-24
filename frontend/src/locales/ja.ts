@@ -173,6 +173,9 @@ export default {
     modeQuick: 'クイック回答',
     modeDeep: '深層分析',
     modeDeepHint: '深層分析（Agent）：多段階計画・ツール呼び出し・反省的修正。SSE ストリーミング専用',
+    // issue #508: 深層分析は Agent ワークベンチへ移動
+    openAgentWorkbench: 'Agent ワークベンチへ（承認・リプレイ対応）',
+    deepAnalysisMoved: '深層分析は Agent ワークベンチに移動しました（承認・リプレイ対応）',
     aiAssistant: 'AIアシスタント',
     clearChat: 'チャットをクリア',
     newChat: '新しいチャット',

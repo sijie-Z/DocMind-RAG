@@ -173,6 +173,10 @@ export default {
     modeQuick: 'Réponse rapide',
     modeDeep: 'Analyse approfondie',
     modeDeepHint: "Analyse approfondie (Agent) : planification multi-étapes, outils et réflexion, uniquement en streaming SSE",
+    // issue #508 : l'analyse approfondie est désormais dans l'espace de travail Agent
+    openAgentWorkbench: 'Ouvrir l’espace de travail Agent (approbations/rejeu)',
+    deepAnalysisMoved:
+      'L’analyse approfondie a été déplacée vers l’espace de travail Agent (approbations et rejeu)',
     aiAssistant: 'Assistant IA',
     clearChat: 'Effacer la conversation',
     newChat: 'Nouvelle discussion',

@@ -190,6 +190,9 @@ export default {
     modeQuick: 'Quick answer',
     modeDeep: 'Deep analysis',
     modeDeepHint: 'Deep analysis (Agent): multi-step planning, tool use and reflection, streamed over SSE only',
+    // issue #508: deep analysis now lives in the Agent Workbench
+    openAgentWorkbench: 'Open Agent Workbench (approvals/replay)',
+    deepAnalysisMoved: 'Deep analysis has moved to the Agent Workbench (with approvals and replay)',
     aiAssistant: 'AI Assistant',
     clearChat: 'Clear Chat',
     newChat: 'New Chat',
