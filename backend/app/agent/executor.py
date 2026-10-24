@@ -254,7 +254,7 @@ class Executor:
             return True
         try:
             args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, TypeError, ValueError):
             args = {}
         if not isinstance(args, dict):
             args = {}
@@ -287,7 +287,7 @@ class Executor:
             parsed = json.loads(raw_args) if raw_args else {}
             if not isinstance(parsed, dict):
                 raise ValueError("arguments 不是 JSON 对象")
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, TypeError, ValueError):
             canonical = canonical_tool_name(name)
             if canonical == name:
                 return tc
@@ -332,7 +332,7 @@ class Executor:
                 args = json.loads(tc.function.arguments) if tc.function.arguments else {}
                 if not isinstance(args, dict):
                     continue
-            except (json.JSONDecodeError, ValueError):
+            except (json.JSONDecodeError, TypeError, ValueError):
                 continue
             executable.append((tc, args))
         return executable
@@ -1805,7 +1805,7 @@ class Executor:
                 args = json.loads(func.arguments) if func.arguments else {}
                 if not isinstance(args, dict):
                     raise ValueError("arguments 不是 JSON 对象")
-            except (json.JSONDecodeError, ValueError) as e:
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
                 logger.warning(f"Tool {func.name} 的 arguments 不是合法 JSON 对象，已拒绝执行: {e}")
                 AGENT_TOOL_CALLS.labels(tool=func.name, result="error").inc()
                 yield AgentEvent(
