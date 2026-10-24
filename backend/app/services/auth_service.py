@@ -2,6 +2,7 @@
 DocMind AI知识库系统 - 认证服务
 """
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Callable
@@ -283,14 +284,15 @@ class AuthService:
             user = result.scalar_one_or_none()
 
             if user is None:
-                # 安全加固：用户不存在时也执行一次 bcrypt 校验，消除时序差异（防用户枚举）
-                self.verify_password(password, _DUMMY_HASH)
+                # 安全加固：用户不存在时也执行一次 bcrypt 校验，消除时序差异（防用户枚举）。
+                # bcrypt 是 CPU 密集的同步调用，放入线程池避免阻塞事件循环（issue #500）。
+                await asyncio.to_thread(self.verify_password, password, _DUMMY_HASH)
                 await self._record_login_failure(username)
                 logger.warning(f"Login failed: User {username} not found")
                 return None
 
-            # 验证密码
-            is_valid = self.verify_password(password, user.hashed_password)
+            # 验证密码（bcrypt 在线程池执行，issue #500）
+            is_valid = await asyncio.to_thread(self.verify_password, password, user.hashed_password)
 
             if not is_valid:
                 await self._record_login_failure(username)
@@ -475,7 +477,8 @@ class AuthService:
         role: str = "user",
     ) -> User:
         """创建用户 — 不负责 commit，由调用方管理事务"""
-        hashed_password = self.hash_password(password)
+        # bcrypt 在线程池执行，避免注册路径阻塞事件循环（issue #500）
+        hashed_password = await asyncio.to_thread(self.hash_password, password)
 
         user = User(
             username=username,
@@ -535,7 +538,8 @@ class AuthService:
         if not user:
             raise ValueError("用户不存在")
 
-        hashed_password = self.hash_password(new_password)
+        # bcrypt 在线程池执行，避免改密路径阻塞事件循环（issue #500）
+        hashed_password = await asyncio.to_thread(self.hash_password, new_password)
         user.hashed_password = hashed_password
         user.updated_at = datetime.now(UTC)
 
