@@ -13,6 +13,10 @@
 （``tool_registry``）。该用例在未安装后端依赖的轻量 CI job（仅 pytest +
 ``--noconftest``）中自动跳过，静态检查仍会执行。
 
+对外口径单一事实源：``docs/METRICS.md`` 必须存在，表格每行必须有 6 列且无
+空项，六项 facts 必须与 ``docs/facts.json`` 同值；同一文档同一指标出现多个
+不同数字时只告警、不判失败（facts 不一致仍红）。
+
 变异验证（PR 证据）：在 ``events.py`` 的 ``EventType`` 中临时加入一个事件，
 ``test_derived_facts_match_facts_json`` 必须红；撤销后恢复绿。改一处文档数字
 同理触发 ``test_doc_numbers_match_facts_json`` 红。
@@ -29,6 +33,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = BACKEND_ROOT.parent
 SCRIPT_PATH = BACKEND_ROOT / "scripts" / "check_doc_facts.py"
 FACTS_PATH = REPO_ROOT / "docs" / "facts.json"
+METRICS_PATH = REPO_ROOT / "docs" / "METRICS.md"
 
 
 def _load_checker():
@@ -78,6 +83,14 @@ def test_required_fact_coverage_in_docs():
 def test_facts_json_is_referenced_from_readme():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert "docs/facts.json" in readme
+    assert "docs/METRICS.md" in readme
+
+
+def test_metrics_document_exists_and_matches_facts_json():
+    facts = _facts()["facts"]
+    assert METRICS_PATH.is_file(), "docs/METRICS.md 必须存在（指标单一事实源）"
+    problems = checker.check_metrics_document(REPO_ROOT, facts)
+    assert not problems, "docs/METRICS.md 与 facts JSON 不一致:\n" + "\n".join(problems)
 
 
 def test_runtime_registry_matches_static_tool_derivation():
@@ -270,6 +283,21 @@ def test_optional_doc_anchor_missing_is_allowed(tmp_path):
     assert problems == []
 
 
+def _write_metrics(root: Path, facts: dict[str, int]) -> None:
+    """写一份最小可用的 docs/METRICS.md（六列、六项 facts）。"""
+    rows = "\n".join(
+        f"| {key} | {value} | 合成仓库口径 | 无（测试夹具） | 2026-10-24 | 测试夹具 |"
+        for key, value in facts.items()
+    )
+    (root / "docs" / "METRICS.md").write_text(
+        "# 指标事实源\n\n"
+        "| 指标 | 值 | 口径 | 命令 | 日期 | 备注 |\n"
+        "|---|---|---|---|---|---|\n"
+        f"{rows}\n",
+        encoding="utf-8",
+    )
+
+
 def _make_mini_repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     backend = root / "backend"
@@ -309,7 +337,7 @@ def _make_mini_repo(tmp_path: Path) -> Path:
     )
     (frontend / "index.ts").write_text("export const routes = [{ path: '/a' }]\n", encoding="utf-8")
     (root / "README.md").write_text(
-        "文档数字见 docs/facts.json。\n"
+        "文档数字见 docs/facts.json；指标口径见 docs/METRICS.md。\n"
         "可调用 2 个工具。\n"
         "Tool Registry (2)\n"
         "**2 个内置工具**\n"
@@ -336,6 +364,7 @@ def _make_mini_repo(tmp_path: Path) -> Path:
     (root / "docs" / "facts.json").write_text(
         json.dumps(facts, ensure_ascii=False), encoding="utf-8"
     )
+    _write_metrics(root, facts["facts"])
     return root
 
 
@@ -358,6 +387,81 @@ def test_main_red_on_doc_number_drift(tmp_path):
         encoding="utf-8",
     )
     assert checker.main(["--root", str(root)]) == 1
+
+
+# ── docs/METRICS.md：指标单一事实源校验（issue #513） ──
+
+
+def _mini_facts() -> dict[str, int]:
+    return {
+        "sse_event_types": 2,
+        "endpoint_modules": 1,
+        "frontend_routes": 1,
+        "registered_tools": 2,
+        "http_route_decorators": 1,
+        "websocket_route_decorators": 1,
+    }
+
+
+def test_metrics_document_missing_is_reported(tmp_path):
+    problems = checker.check_metrics_document(tmp_path, _mini_facts())
+    assert any("docs/METRICS.md" in problem and "缺失" in problem for problem in problems)
+
+
+def test_metrics_document_value_mismatch_is_reported(tmp_path):
+    facts = _mini_facts()
+    (tmp_path / "docs").mkdir()
+    _write_metrics(tmp_path, facts)
+    metrics_path = tmp_path / "docs" / "METRICS.md"
+    metrics_path.write_text(
+        metrics_path.read_text(encoding="utf-8").replace(
+            "| registered_tools | 2 |", "| registered_tools | 99 |"
+        ),
+        encoding="utf-8",
+    )
+    problems = checker.check_metrics_document(tmp_path, facts)
+    assert any(
+        "registered_tools" in problem and "99" in problem and "2" in problem for problem in problems
+    )
+
+
+def test_metrics_document_missing_row_and_empty_cell_are_reported(tmp_path):
+    facts = _mini_facts()
+    (tmp_path / "docs").mkdir()
+    _write_metrics(tmp_path, facts)
+    metrics_path = tmp_path / "docs" / "METRICS.md"
+    lines = [
+        line
+        for line in metrics_path.read_text(encoding="utf-8").splitlines()
+        if not line.startswith("| sse_event_types ")
+    ]
+    lines.append("| websocket_route_decorators | 1 | | 无 | 2026-10-24 | 空口径 |")
+    metrics_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    problems = checker.check_metrics_document(tmp_path, facts)
+    assert any("缺少指标行 sse_event_types" in problem for problem in problems)
+    assert any("空单元格" in problem for problem in problems)
+
+
+def test_main_red_when_metrics_document_missing(tmp_path):
+    root = _make_mini_repo(tmp_path)
+    (root / "docs" / "METRICS.md").unlink()
+    assert checker.main(["--root", str(root)]) == 1
+
+
+def test_conflicting_numbers_in_same_doc_warn_but_do_not_fail(tmp_path):
+    root = _make_mini_repo(tmp_path)
+    career = root / "docs" / "career" / "README.md"
+    career.parent.mkdir(parents=True, exist_ok=True)
+    career.write_text("**2 个内置工具**；历史英文稿写作 33 integrated tools。\n", encoding="utf-8")
+
+    warnings = checker.scan_conflicting_fact_numbers(root)
+    assert any(
+        "docs/career/README.md" in warning and "2" in warning and "33" in warning
+        for warning in warnings
+    ), f"同文档多数字应产生告警: {warnings}"
+
+    # 仅告警不判红：career 的规范锚点命中 2（与 facts 一致），33 只触发补充措辞告警。
+    assert checker.main(["--root", str(root)]) == 0
 
 
 def test_endpoint_module_derivation_prefers_router_specs(tmp_path):

@@ -39,7 +39,7 @@ Core use cases:
 > Positioning: **public project / immature product** — feature completeness runs ahead of stability; suitable for learning, secondary development, and local demos; harden security and operations before deploying publicly. The product can still be maturing while engineering discipline leads: **numbers carry their method, fixes carry evidence, regressions are stopped before merge** (see Quality & Gates).
 
 Current baseline:
-- Test baseline (frozen snapshot, 2026-10-15): backend `pytest tests/` **2223 passed / 51 skipped** (0 failed); frontend **861 passed** (128 test files) + `vue-tsc --noEmit` 0 errors. Numbers evolve with CI in real time — CI is the single source of truth; this page keeps a frozen snapshot.
+- Test baseline (frozen snapshot, 2026-10-15): backend `pytest tests/` **2223 passed / 51 skipped** (0 failed); frontend **861 passed** (128 test files) + `vue-tsc --noEmit` 0 errors. Numbers evolve with CI in real time — CI is the single source of truth; this page keeps a frozen snapshot. Method and commands: `docs/METRICS.md`.
 - Recent fixes: org-scoped semantic cache, conversation ownership checks, org isolation for knowledge search/delete/rebuild, upload path traversal and MinIO deletion fixes, API key masking, web-fetch SSRF protection, workflow ownership isolation, in-process document processing when Kafka is unavailable, local startup scripts, and removal of sensitive artifacts from git tracking.
 - Architecture: document parsing/embedding/ES indexing is unified in a single processor, the chat pipeline moved into `services/chat_service.py`, and a shared document authorization helper was added.
 - Hardening: agent memory endpoints are user-scoped, the `/files` proxy requires auth for non-public objects, pure-ASGI metrics and rate-limit middleware are enabled, and the legacy `ci.yml` was removed.
@@ -55,11 +55,11 @@ Known limitations:
 
 "Never silently regress" is not a slogan — it is a set of checkable mechanisms:
 
-- **Eval gate in CI (`Eval Gate`)** — retrieval quality is guarded per PR by a zero-tolerance gate: 28 golden-set items (25 positive / 3 negative) and seven metrics (ClauseHit@1/@3/@5, MRR, EmptyAcc, NearMiss@5, errors) with zero tolerance — any drop turns the build red (fail-closed). `ClauseHit@3/@5` measures 88% (CI baseline 84% as the floor). Updating the baseline is an explicit PR action (rules in `backend/docs/eval-gate-phase1.md`).
+- **Eval gate in CI (`Eval Gate`)** — retrieval quality is guarded per PR by a zero-tolerance gate: Eval v1.5 uses **80 golden-set items (60 positive / 20 negative)** and seven metrics (ClauseHit@1/@3/@5, MRR, EmptyAcc, NearMiss@5, errors) with zero tolerance — any drop turns the build red (fail-closed). `make eval-ci` (`mode=fake`, 2026-10-24, corpus commit `d867a2b3`) measures ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**, NearMiss@5 **25.0%**, MRR **0.74**, EmptyAcc **100%**, errors **0** (source PR #525, not yet merged; not comparable with the v1 28-item baseline). Updating the baseline is an explicit PR action (rules in `backend/docs/eval-gate-phase1.md`; method and commands in `docs/METRICS.md`).
 - **Ratchets only shrink** — a backend coverage floor (`--cov-fail-under=42`) plus four frontend baseline ratchets (hardcoded CJK / i18n completeness / naming consistency / translation-key usage). Growth turns them red; shrinkage is allowed.
 - **Silent false-successes cleared (#301)** — a full audit of ~551 exception handlers; all 32 silent false-success paths closed (fail-closed logout, three-state retrieval, honest document status, degraded-identity stats…), each backed by regression tests.
 - **Red-first + mutation verification** — every fix starts with a failing test; after the fix, injected defects must turn exactly the right tests red, proving the tests can actually detect the bug.
-- **Documented-number invariants** — the SSE event count, endpoint-module count, frontend-route count, and tool count are derived from source; expected values live in `docs/facts.json`. `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ docs on every PR. Frontend routes are recorded in two ways: 34 route records (including top-level and redirect records) / 29 named routes (routes with a name).
+- **Documented-number invariants** — the SSE event count, endpoint-module count, frontend-route count, and tool count are derived from source; expected values live in `docs/facts.json`, and the public method for every metric (value / method / command / date / note) lives in `docs/METRICS.md`. `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ METRICS.md ↔ docs on every PR. Frontend routes are recorded in two ways: 34 route records (including top-level and redirect records) / 29 named routes (routes with a name).
 
 ---
 
@@ -116,7 +116,7 @@ User instruction
 | Context Engine | `context.py` | Token budget management, message window builder |
 | Config | `config.py` | AgentConfig (model/temperature/max steps/phase toggles) |
 
-**39 Built-In Tools** (`core_tools.py` 14 + `tools/` 25):
+**39 Built-In Tools** (`core_tools.py` 14 + `tools/` 25; method: `docs/METRICS.md`):
 
 | Category | Tool | Description |
 |----------|------|-------------|

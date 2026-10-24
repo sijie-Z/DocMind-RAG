@@ -4,6 +4,8 @@
 
 > **历史材料（2026-06-21）**：以下内容（含 30 题 benchmark、关键词覆盖率评分、33/39 工具等数字）是当时的口径与叙事，**不代表当前实现与质量**；正文保持原样仅作历史对照，未删除任何内容。当前口径见 `docs/METRICS.md`（#513），现行门禁为 clause-level eval-gate（28 条 golden set，见根 README「质量与门禁」与 `docs/legacy/README.md`）。
 
+> **数字口径（2026-10-24）**：本页是 2026-06 的面试叙事存档。文中「30 题 benchmark」「5 轮 planning 实验」是历史 planning 评测口径（关键词覆盖率），**不是**当前的 clause-level Eval；英文旧稿的工具数 33 已修正为 39。对外引用任何数字前，一律以 [`docs/METRICS.md`](../METRICS.md) 为准（值 / 口径 / 命令 / 日期 / 备注）：`registered_tools=39`（2026-10-24）；Eval v1.5 = 80 条，mode=fake，2026-10-24，来源 PR #525（尚未合并）。
+
 ---
 
 ## 1. 简历版 (4-5 bullet)
@@ -14,7 +16,7 @@
 DocMind — Agent Research & Evaluation Platform
 
 • Built a benchmark-driven agent system (PER architecture: Planning → Execution → Reflection)
-  with DAG-based parallel execution and 33 integrated tools.
+  with DAG-based parallel execution and 39 integrated tools.
 
 • Designed and conducted 5 controlled experiments on Planner granularity and execution
   architecture trade-offs; identified planning quality as the dominant performance factor.

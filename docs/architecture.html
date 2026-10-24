@@ -149,6 +149,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
     <span class="badge"><span class="dot b"></span>28 API 模块</span>
     <span class="badge"><span class="dot a"></span>39 Agent 工具</span>
     <span class="badge">100,000+ LOC</span>
+    <span class="badge"><span class="dot g"></span><a href="METRICS.md" style="color:var(--text2);text-decoration:none;">数字口径见 docs/METRICS.md</a></span>
   </div>
 </div>
 
@@ -778,7 +779,7 @@ cd frontend && npm run dev</code></pre>
     <div class="card green-ac" style="text-align:center;padding:20px"><div class="big">3084</div><div class="sl">后端 2223 · 前端 861</div></div>
     <div class="card blue-ac" style="text-align:center;padding:20px"><div class="big b">5</div><div class="sl">只缩不涨棘轮（覆盖率 + 前端四道）</div></div>
   </div>
-  <p style="font-size:.72rem;color:var(--text3);margin:8px 2px 0">数字为 2026-10-15 冻结快照：后端 2223 passed / 51 skipped、前端 861 passed（128 个测试文件）、vue-tsc 0 错误——随 CI 实时演进，CI 为实时真源。</p>
+  <p style="font-size:.72rem;color:var(--text3);margin:8px 2px 0">数字为 2026-10-15 冻结快照：后端 2223 passed / 51 skipped、前端 861 passed（128 个测试文件）、vue-tsc 0 错误——随 CI 实时演进，CI 为实时真源；口径与命令见 <a href="METRICS.md" style="color:var(--green);text-decoration:none;">docs/METRICS.md</a>。</p>
   <div class="card">
     <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 🧪 测试分类</div>
     <div class="card-body show">
@@ -808,7 +809,7 @@ cd frontend && npm run dev</code></pre>
         <span class="flow-box g">CI Pass 汇聚（红 = 拦下合并）</span>
       </div>
       <ul style="font-size:.8rem;color:var(--text2);line-height:2;list-style:none;padding-left:0">
-        <li>→ <b>Eval Gate</b>：28 条 golden set 检索评测进 CI——7 项指标容差 0、fail-closed；基线更新是显式 PR 行为。ClauseHit@3/@5 实测 88%（基线 84% 托底）。</li>
+        <li>→ <b>Eval Gate</b>：Eval v1.5 共 80 条 golden set（60 正 + 20 负）检索评测进 CI——7 项指标容差 0、fail-closed；<code>make eval-ci</code>（mode=fake，2026-10-24，语料 commit d867a2b3）实测 ClauseHit@1 70.0% / @3 76.7% / @5 80.0%、NearMiss@5 25.0%、MRR 0.74、EmptyAcc 100%、errors 0（来源 PR #525，尚未合并；与 v1 的 28 条不可混比）。基线更新是显式 PR 行为；口径见 docs/METRICS.md。</li>
         <li>→ <b>棘轮只缩不涨</b>：后端覆盖率下限 42% ＋ 前端四道基线棘轮（硬编码中文 / i18n 完备性 / 命名一致 / 用键定义）。</li>
         <li>→ <b>静默假成功清零</b>：全仓 ~551 处异常捕获全量审计，32 条静默假成功全部闭环，修复均带回归测试（#301）。</li>
         <li>→ <b>变异验证</b>：修复先红后绿；注入缺陷必须精确变红；门禁自身逐一演练过 fail-closed——「一个永远绿的检查，比没有检查更危险」。</li>

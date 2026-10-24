@@ -39,7 +39,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 > 定位：**公开项目 / 不成熟产品**——功能完整度高于稳定度，适合学习、二次开发与本地演示；正式生产部署前请自行加固安全与运维配置。产品可以还在打磨，工程纪律先行：**数字带口径，修复带证据，退化拦在合并前**（见「质量与门禁」）。
 
 当前基线：
-- 测试基线（冻结快照 2026-10-15）：后端 `pytest tests/` **2223 passed / 51 skipped**（0 failed）；前端 **861 passed**（128 个测试文件）+ `vue-tsc --noEmit` 0 错误。数字随 CI 实时演进——CI 是唯一真源，本页只记录冻结快照。
+- 测试基线（冻结快照 2026-10-15）：后端 `pytest tests/` **2223 passed / 51 skipped**（0 failed）；前端 **861 passed**（128 个测试文件）+ `vue-tsc --noEmit` 0 错误。数字随 CI 实时演进——CI 是唯一真源，本页只记录冻结快照；口径与命令见 `docs/METRICS.md`。
 - 已修复：语义缓存按组织隔离、会话归属校验、知识库搜索/删除/重建的组织隔离、文件上传路径穿越与 MinIO 删除、API Key 掩码、Web 抓取 SSRF 防护、工作流归属隔离、Kafka 不可用时的进程内文档处理、本地启动脚本、敏感产物移出 git 跟踪。
 - 安全加固（1.20）：Agent 沙箱逃逸封堵（下划线属性拦截 + 长度/输出上限）、execute_sql 租户过滤与 UNION/子查询拦截、disabled_tools 服务端强制合并、mcp 子进程环境变量白名单、注册禁自选组织、角色变更同组织校验、登录失败锁定 + 用户枚举时序防护、refresh token 轮换、WS 仅接受 access token、PII 掩码全链路（上下文+流式）、GraphRAG 组织分区、/files 代理归属校验、RAG 缓存按组织失效、Alembic 001 FK 类型修复 + 005 补齐 15 张表、compose 凭据/端口收紧、24 个安全回归测试（446 单测通过）。
 - 架构收敛：文档解析/向量化/ES 索引统一为单一 Processor；聊天核心管线从路由下沉到 `services/chat_service.py`；新增统一文档授权辅助层。
@@ -56,12 +56,12 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 
 「不静默回退」不是口号，而是一组可核对的机制：
 
-- **评测门禁进 CI（Eval Gate）**：检索质量由零容差门禁逐 PR 守护——28 条 golden set（25 正例 + 3 负例），ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors 七项指标容差为 0，任何下跌即红、fail-closed；`ClauseHit@3/@5` 实测 88%（CI 基线 84% 托底）。基线更新是显式 PR 行为（规则见 `backend/docs/eval-gate-phase1.md`）。
+- **评测门禁进 CI（Eval Gate）**：检索质量由零容差门禁逐 PR 守护——Eval v1.5 共 **80 条 golden set（60 正例 + 20 负例）**，ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors 七项指标容差为 0，任何下跌即红、fail-closed。`make eval-ci`（`mode=fake`，2026-10-24，语料 commit `d867a2b3`）实测 ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**、NearMiss@5 **25.0%**、MRR **0.74**、EmptyAcc **100%**、errors **0**（来源 PR #525，尚未合并；与 v1 的 28 条基线不可混比）。基线更新是显式 PR 行为（规则见 `backend/docs/eval-gate-phase1.md`；数字口径见 `docs/METRICS.md`）。
 - **历史快照与当前口径分离**：`docs/legacy/` 归档旧评测产物（如 2026-06-15 的 `eval_first_report_2026-06-15.json`：10 场景 0 通过），仅用于历史对照、**不代表当前质量**，也不参与门禁；性质与沿革见 [`docs/legacy/README.md`](docs/legacy/README.md)。
 - **棘轮只缩不涨**：后端覆盖率下限 `--cov-fail-under=42`＋前端四道基线棘轮（硬编码中文 / i18n 完备性 / 命名一致 / 用键定义）——只拦下滑、不追高分，新增长即红。
 - **静默假成功清零（#301）**：全仓 ~551 处异常捕获全量审计，32 条静默假成功全部闭环（登出 fail-closed、检索三态、文档状态机诚实化、统计端点降级身份……），修复均带回归测试。
 - **先红后绿＋变异验证**：每笔修复先写失败测试；修复后注入缺陷必须「精确变红」，证明测试真的有判别力。
-- **文档数字不变量**：SSE 事件数、端点模块数、前端路由数、工具数由源码派生，期望值统一存放在 `docs/facts.json`；`backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验「代码 ↔ facts JSON ↔ 文档」三方一致。前端路由按两种口径记录：34 条路由记录（含顶层与 redirect 记录）/ 29 条具名路由（有 name 的路由）。
+- **文档数字不变量**：SSE 事件数、端点模块数、前端路由数、工具数由源码派生，期望值统一存放在 `docs/facts.json`，对外口径（值 / 口径 / 命令 / 日期 / 备注）统一登记在 `docs/METRICS.md`；`backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验「代码 ↔ facts JSON ↔ METRICS.md ↔ 文档」一致。前端路由按两种口径记录：34 条路由记录（含顶层与 redirect 记录）/ 29 条具名路由（有 name 的路由）。
 
 ---
 
@@ -117,7 +117,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 上下文引擎 | `context.py` | 令牌预算管理，消息窗口构建 |
 | 配置 | `config.py` | AgentConfig（模型/温度/最大步骤/阶段开关） |
 
-**39 个内置工具**（`core_tools.py` 14 个 + `tools/` 25 个）：
+**39 个内置工具**（`core_tools.py` 14 个 + `tools/` 25 个；口径见 `docs/METRICS.md`）：
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
