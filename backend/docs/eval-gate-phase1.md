@@ -222,7 +222,9 @@ make eval-ci   # 与 CI 逐位一致；门禁红/绿与 CI 相同
 
 `python -m evals run --retriever {hybrid,dense}` 选择基线；报告 meta 增加
 `retriever_mode`（同时纳入 compare 的协议键，防拿 dense 报告对 hybrid 基线）、
-`corpus_digest`（语料内容 sha256）、`git_commit`。`python -m evals report`
+`corpus_digest`（语料内容 sha256）、`git_commit`。`corpus_digest` 在哈希前把 CRLF
+归一为 LF——Windows 工作区（`core.autocrlf=true`）与 Linux CI checkout 得到同一
+指纹，避免 compare 的协议校验把同一语料误判为 apples-or-oranges。`python -m evals report`
 读取 hybrid/dense 两份报告，输出 per-slice（按题型）对比与失败分类。
 
 ### 7.4 公开复现（`make eval-public`，<30 分钟）
