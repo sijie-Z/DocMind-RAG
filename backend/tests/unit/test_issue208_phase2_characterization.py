@@ -24,10 +24,10 @@
 3. `extract_query_terms` 截断前 12 个 bigram 且标题 bigram 优先——
    带文档全称的查询里，标题 8 个 bigram 占位，内容词（数据/删除）被截断出列表。
    —— 2026-10-09 环 C 落地（本 PR）：keyword 臂术语选择改为「语料术语表
-   （FR-1 冻结规则从 backend/evals/corpus/ 统计推得）成员优先 + 上限 16」；
-   旧锁 `TestQueryTermTruncationTilt` 已换下，新锁见 `TestCorpusGlossaryTermSelection`
-   与防漂移锁 `TestCorpusGlossaryDerivation`；`extract_query_terms` 默认 12 上限
-   保留（其它调用方不变的正向契约）；
+   （FR-1 冻结规则从 backend/evals/corpus/ 的 2026-10-09 预注册快照统计推得）
+   成员优先 + 上限 16」；旧锁 `TestQueryTermTruncationTilt` 已换下，新锁见
+   `TestCorpusGlossaryTermSelection` 与防漂移锁 `TestCorpusGlossaryDerivation`；
+   `extract_query_terms` 默认 12 上限保留（其它调用方不变的正向契约）；
 4. `rewrite_query_candidates` 保留条号文案（实验否证了「改写丢条号」假设，
    作为正向契约锁定）；
 5. 4 条失败 query 现状路由 `keyword_only`（实验同时证明改路由不是修复点：
@@ -51,6 +51,7 @@
 选择）的 PR 必须显式更新本文件——这是刻意的「变更前先测量、变更要自觉」闸门。
 """
 
+import hashlib
 import pathlib
 import re
 from collections import Counter
@@ -88,18 +89,44 @@ FAILING_QUERIES = [
 ]
 
 
-def _derived_glossary() -> tuple[str, ...]:
-    """按 FR-1 冻结规则从 backend/evals/corpus/ 重推语料术语表。
+_GLOSSARY_SOURCE_FILES: tuple[str, ...] = (
+    "01-knowledge-base-policy.md",
+    "02-incident-response-handbook.md",
+)
 
-    与预注册脚本 `_orchestrate/round2/_ringc_glossary_stats.py` 同口径：
+# 2026-10-09 FR-1 预注册时两份来源文件的规范化内容指纹（CRLF→LF 后 sha256）。
+# 与 #512 的 corpus_digest 归一化口径一致：Windows 工作区与 Linux CI checkout 同值。
+_GLOSSARY_SOURCE_SHA256: dict[str, str] = {
+    "01-knowledge-base-policy.md": (
+        "7b70162747bd724652245b48996542643cf188693555a7094f2b433fc3188b6f"
+    ),
+    "02-incident-response-handbook.md": (
+        "8361b297e26a0463e79897d48b4d45f5b141ee26c170cf91009f96383926eba2"
+    ),
+}
+_GLOSSARY_FR1_VERSION = "FR-1"
+_GLOSSARY_REGISTERED_AT = "2026-10-09"
+
+
+def _normalized_sha256(path: pathlib.Path) -> str:
+    """文件内容的跨平台 sha256（CRLF→LF 后哈希，与 #512 corpus_digest 同口径）。"""
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
+def _derived_glossary() -> tuple[str, ...]:
+    """按 FR-1 冻结规则从 **2026-10-09 预注册来源快照** 重推语料术语表。
+
+    来源只取 ``_GLOSSARY_SOURCE_FILES``（显式清单），不 glob 整个
+    ``backend/evals/corpus/``：v1.5（#512）扩语料不应改变生产 glossary 的预注册
+    语义。规则与预注册脚本 ``_orchestrate/round2/_ringc_glossary_stats.py`` 同口径：
     heading = 行首（允许前导空白）`#`×1-6 + 空白；计数按出现次数（重叠窗口）；
     score = body + 0.3×heading；排序 score↓→body↓→heading↓→码点↑；取前 16。
     """
     corpus_dir = pathlib.Path(__file__).resolve().parents[2] / "evals" / "corpus"
     body: Counter = Counter()
     head: Counter = Counter()
-    for path in sorted(corpus_dir.glob("*.md")):
-        for line in path.read_text(encoding="utf-8").splitlines():
+    for name in _GLOSSARY_SOURCE_FILES:
+        for line in (corpus_dir / name).read_text(encoding="utf-8").splitlines():
             target = head if re.match(r"^#{1,6}\s", line.lstrip()) else body
             for seg in re.findall(r"[一-鿿]+", line.lower()):
                 for i in range(len(seg) - 1):
@@ -406,17 +433,36 @@ class TestCorpusGlossaryTermSelection:
 
 
 class TestCorpusGlossaryDerivation:
-    """环 C 防漂移锁：产品 ``_CORPUS_GLOSSARY`` 必须与 FR-1 规则对语料的重推一致。
+    """环 C 防漂移锁：产品 ``_CORPUS_GLOSSARY`` 必须与 FR-1 对预注册快照的重推一致。
 
     FR-1（2026-10-09 预注册，脚本 ``_orchestrate/round2/_ringc_glossary_stats.py``）：
     逐行切分（行首 ``#`` 标题行为标题位，其余为正文位）；每行 CJK 段取全部相邻
     bigram（按出现次数计）；score = body_count + 0.3 × heading_count；排序
-    score↓ → body↓ → heading↓ → 码点↑；取前 16。
-    本测试在测试进程内重推同一规则并逐字比对——产品表只能经显式改规则/改语料/改
-    预注册更新，任何「手工塞词/删词」都会在这里精确变红（见 PR 变异记录）。
+    score↓ → body↓ → heading↓ → 码点↑；取前 16。规则版本 ``_GLOSSARY_FR1_VERSION``，
+    注册日期 ``_GLOSSARY_REGISTERED_AT``。
+
+    **来源锁定为 2026-10-09 预注册快照**（``_GLOSSARY_SOURCE_FILES`` 的显式清单 +
+    逐文件规范化 sha256）：glossary 是预注册常量，**不随 eval 语料扩容自动更新**。
+    v1.5（#512）新增的 6 份语料属于评测集扩容，不改变生产词表的预注册语义；更新词表
+    必须是一次独立、显式、经实验验证的生产变更，并同时显式更新本文件的登记指纹。
+    任何「手工塞词/删词」或「用新语料静默重算」都会在这里精确变红。
     """
 
-    def test_shipped_glossary_equals_rule_output_on_corpus(self):
+    def test_registered_glossary_source_snapshot_is_unchanged(self):
+        corpus_dir = pathlib.Path(__file__).resolve().parents[2] / "evals" / "corpus"
+        assert _GLOSSARY_FR1_VERSION == "FR-1"
+        assert _GLOSSARY_REGISTERED_AT == "2026-10-09"
+        assert set(_GLOSSARY_SOURCE_FILES) == set(_GLOSSARY_SOURCE_SHA256)
+        for name in _GLOSSARY_SOURCE_FILES:
+            path = corpus_dir / name
+            assert path.is_file(), f"预注册 glossary 来源缺失: {path}"
+            assert _normalized_sha256(path) == _GLOSSARY_SOURCE_SHA256[name], (
+                f"{name} 内容已变：2026-10-09 预注册的 FR-1 glossary 来源快照被修改。"
+                "不要用新 eval 语料静默重算生产词表——更新词表必须是一次独立、显式、"
+                "经实验验证的生产变更，并显式更新本文件的登记指纹。"
+            )
+
+    def test_shipped_glossary_matches_fr1_output_from_snapshot(self):
         assert _derived_glossary() == retriever_mod._CORPUS_GLOSSARY
 
 
