@@ -253,11 +253,13 @@ jobs:
           VERSION=8.30.1
           BASE="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}"
           DEST="${RUNNER_TEMP}/gitleaks-bin"
+          ARCHIVE="gitleaks_${VERSION}_linux_x64.tar.gz"
           mkdir -p "$DEST"
-          curl -sSfL -o "$DEST/gitleaks.tar.gz" "${BASE}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$DEST/$ARCHIVE" "${BASE}/${ARCHIVE}"
           curl -sSfL -o "$DEST/gitleaks_checksums.txt" "${BASE}/gitleaks_${VERSION}_checksums.txt"
-          (cd "$DEST" && grep "gitleaks_${VERSION}_linux_x64.tar.gz" gitleaks_checksums.txt | sha256sum -c -)
-          tar -xzf "$DEST/gitleaks.tar.gz" -C "$DEST" gitleaks
+          # checksums.txt 按官方文件名登记，压缩包必须保持原名后再校验（否则 sha256sum -c 报 No such file）。
+          (cd "$DEST" && grep "$ARCHIVE" gitleaks_checksums.txt | sha256sum -c -)
+          tar -xzf "$DEST/$ARCHIVE" -C "$DEST" gitleaks
           echo "$DEST" >> "$GITHUB_PATH"
           "$DEST/gitleaks" version
 
