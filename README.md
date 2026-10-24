@@ -57,6 +57,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 「不静默回退」不是口号，而是一组可核对的机制：
 
 - **评测门禁进 CI（Eval Gate）**：检索质量由零容差门禁逐 PR 守护——Eval v1.5 共 **80 条 golden set（60 正例 + 20 负例）**，ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors 七项指标容差为 0，任何下跌即红、fail-closed。`make eval-ci`（`mode=fake`，2026-10-24，语料 commit `d867a2b3`）实测 ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**、NearMiss@5 **25.0%**、MRR **0.74**、EmptyAcc **100%**、errors **0**（来源 PR #525，尚未合并；与 v1 的 28 条基线不可混比）。基线更新是显式 PR 行为（规则见 `backend/docs/eval-gate-phase1.md`；数字口径见 `docs/METRICS.md`）。
+- **历史快照与当前口径分离**：`docs/legacy/` 归档旧评测产物（如 2026-06-15 的 `eval_first_report_2026-06-15.json`：10 场景 0 通过），仅用于历史对照、**不代表当前质量**，也不参与门禁；性质与沿革见 [`docs/legacy/README.md`](docs/legacy/README.md)。
 - **棘轮只缩不涨**：后端覆盖率下限 `--cov-fail-under=42`＋前端四道基线棘轮（硬编码中文 / i18n 完备性 / 命名一致 / 用键定义）——只拦下滑、不追高分，新增长即红。
 - **静默假成功清零（#301）**：全仓 ~551 处异常捕获全量审计，32 条静默假成功全部闭环（登出 fail-closed、检索三态、文档状态机诚实化、统计端点降级身份……），修复均带回归测试。
 - **先红后绿＋变异验证**：每笔修复先写失败测试；修复后注入缺陷必须「精确变红」，证明测试真的有判别力。

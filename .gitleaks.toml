@@ -1,0 +1,26 @@
+# gitleaks 配置（issue #507）——在官方默认规则之上只做两类最小放行：
+#   1) 测试夹具 / 文档示例中**明确可判定为假值**的固定字符串（见下方 allowlist）；
+#   2) 公开 git 历史中的既有命中 → 不写在这里，逐条登记在 .gitleaksignore（含说明）。
+#
+# 刻意不按目录整体放行（如 backend/tests/**、docs/**）：真实密钥若被粘进测试或
+# 文档，仍应被扫描发现。新增命中一律失败，处置方式只有两种：
+#   - 移出仓库并轮换（真实泄露，参考 docs/security/CREDENTIAL_ROTATION.md）；
+#   - 若是假值，把**具体假值**加入下方 regexes（不要加整目录）。
+#
+# 版本口径：CI 与 pre-commit 均钉 gitleaks v8.30.1（本语法要求 v8.25+）。
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "测试夹具/文档示例中的显式假值（非真实凭据；issue #507 建门禁时逐条核实）"
+# 匹配整段命中文本（含键名），覆盖 SECRET_KEY=... 这类键值对写法；
+# 只匹配下列固定假值，不扩大范围。
+regexTarget = "match"
+regexes = [
+  '''0123456789abcdef0123456789abcdef''', # backend/tests/api/test_sdk_stdio.py SECRET_KEY 夹具（重复十六进制串）
+  '''fedcba9876543210fedcba9876543210''', # backend/tests/api/test_sdk_stdio.py JWT_SECRET_KEY 夹具
+  '''SECRET-VICTIM-SALARY-42''',          # backend/tests/unit/test_issue_a1_memory_idor.py 夹具
+  '''sk-secret-123456''',                 # frontend/src/views/profile/__tests__/profileProviderExperiment.test.ts 夹具
+  '''token-org\.pdf''',                   # backend/tests/api/test_chat_history_attachments.py 夹具文件名
+]
