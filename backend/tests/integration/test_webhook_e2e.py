@@ -199,6 +199,9 @@ async def test_signed_delivery_end_to_end(monkeypatch):
             assert row.status == WebhookDeliveryStatus.SUCCEEDED
             assert row.session_id
             assert row.attempts == 1
+            # issue #497：领取轮换租约 token 并递增代数（fencing 列真实落库）。
+            assert row.lease_version == 1
+            assert row.processing_token
             chat_session = await session.get(ChatSession, row.session_id)
             assert chat_session.source == "webhook"
             assert chat_session.webhook_rule_id == stack.rule_id

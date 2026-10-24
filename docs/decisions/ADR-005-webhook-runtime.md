@@ -1,8 +1,8 @@
 # ADR-005：Webhook Runtime —— 入站规则、HMAC 验签与 outbox 建会话
 
-- 状态：已采纳（issue #478）
-- 日期：2026-10-23
-- 关联：Epic #473；依赖 #476（会话谱系）与 #479（配置分层）
+- 状态：已采纳（issue #478；issue #497 运行时加固）
+- 日期：2026-10-23（#497 追加：2026-10-24）
+- 关联：Epic #473；依赖 #476（会话谱系）与 #479（配置分层）；#497（运行时加固）
 - 证据：`backend/tests/unit/test_webhook_signature.py`、`backend/tests/unit/test_webhook_state_machine.py`、
   `backend/tests/api/test_webhooks_api.py`、`backend/tests/integration/test_webhook_e2e.py`
 
@@ -17,7 +17,9 @@
    创建/轮换响应中出现一次；加密密钥是独立的 `WEBHOOK_ENCRYPTION_KEY`，
    **不复用 JWT `SECRET_KEY`**。轮换时旧密文保留 24h（`secret_prev_encrypted`），
    验签同时接受新旧；24h 后旧 secret 自动失效（读时按 `secret_rotated_at` 判定）。
-3. **幂等**：`webhook-id` 优先，缺失/超列宽回退 `sha256(raw_body)`。Redis
+3. **幂等**：`webhook-id` 是 Standard Webhooks 必需头（验签内容含它，缺失即
+   401），直接作为幂等键（列宽上限 128，超长显式 400）；原「缺失/超列宽回退
+   `sha256(raw_body)`」分支不可达，已随 #497 删除。Redis
    `SET NX EX 604800` 只是快路径；**DB `UNIQUE(rule_id, idempotency_key)` 是最终
    仲裁**（Redis 不可用时仅告警 + 指标，不阻断）。重复语义：`succeeded` → 200
    duplicate；`failed` 且还有自动重试 → 202 duplicate（不重置）；`received/processing`
@@ -28,13 +30,19 @@
    `SELECT ... FOR UPDATE SKIP LOCKED LIMIT 10`（MySQL 8）领取
    `received` / 到点的 `failed` / 租约超时（`processing_started_at` 早于 10 分钟）
    的 `processing`，先提交领取结果再处理。多 worker 由 `SKIP LOCKED` 去重。
+   **租约 fencing**（#497）：领取时轮换 `processing_token` 并 `lease_version+1`；
+   完成/失败/会话写回均带 `(processing_token, status)` 条件，rowcount 为 0 说明
+   租约已被接管——记 warning，且迟到 worker 不写会话/消息（超时重领不双写）。
 5. **重试语义**：`attempts` 在领取时 +1；失败时 `attempts < WEBHOOK_MAX_ATTEMPTS`
    → `failed + next_attempt_at = now + 2^attempts * 30s`；达到上限 →
    `failed + next_attempt_at = NULL`（终态，轮询不再领取）。发送方用**同一
    `webhook-id`** 重投终态失败即重新入队（见上条）。
 6. **会话与身份**：处理时**直接调用** `AgentService.chat(...)`（不走 HTTP 自调用），
    身份固定为 `rule.created_by`（服务账号，绝不提权）；`session_mode=new` 每次建
-   新会话，`reuse` 按 `(rule_id, payload.session_key)` 复用（缺失回退 new）。
+   新会话，`reuse` 按 `(rule_id, payload.session_key)` 复用（缺失回退 new，并在
+   投递 `error` 摘要标注 `reuse_fallback=true`）。#497 起 `reuse` 命中后加载该会话
+   最近 `WEBHOOK_REUSE_HISTORY_LIMIT`（默认 20）条消息，按 agent 聊天格式传入
+   `chat(history=...)`，复用真正延续上下文。
    `ChatSession` 记录 `source="webhook"`、规则 id、投递 id、session_key。
 7. **注入防护**：模板只允许裸占位符 `{payload}/{rule_id}/{delivery_id}`
    （`string.Formatter` 解析；属性访问/转换/格式说明一律拒绝），保存时拒绝
@@ -42,11 +50,20 @@
    等关键字。渲染时 payload 包在
    `<<<UNTRUSTED_WEBHOOK_PAYLOAD>>> ... <<<END_UNTRUSTED_WEBHOOK_PAYLOAD>>>`
    分隔区里。
-8. **进程内 poll 循环只在 `web` 入口启动**（与 #479 对调度器的裁定一致），
+8. **进程内 poll 循环在 `web` 与 `worker` 两个入口启动**（#497；worker 部署也能
+   消费投递），双入口/多实例由 `FOR UPDATE SKIP LOCKED` 互斥。
    `WEBHOOKS_ENABLED=true` 且缺/非法 Fernet key 时**启动失败（fail-closed）**。
    校验落在 `config/loader.load_settings()` 的最终 `Settings` 上（所有入口——
    web/worker/headless/sdk/acp、`python -m app`、`uvicorn`、`start_worker.py`
    都经过它）；`bootstrap` lifespan 再执行一次防御性校验。
+9. **限流先于验签**（#497）：按 `rule_id + 客户端 IP` 每分钟固定窗口计数；
+   未知或禁用规则使用 `unknown:{ip}` 桶（对外仍 404，不泄露规则存在性）；
+   坏签名同样消耗配额，超限 429 + `Retry-After` 且不落投递行。Redis 不可用时
+   降级为进程内计数（多 worker 下为近似值）。
+10. **运行时门控**（#497）：未启用或密钥缺失/非法时，管理 API 返回 503
+   `WEBHOOKS_DISABLED` / `WEBHOOK_KEY_MISSING`（不 500、不泄露堆栈）；公共投递
+   端点一律 404。密钥格式合法但与存量密文不匹配（轮换事故）同样按上述口径
+   处理，绝不以 500/堆栈暴露配置错误。
 
 ## 与 issue 的偏离（有意为之，评审请重点核对）
 
@@ -95,8 +112,9 @@
   继续尝试其他（轮换期）secret。
 - `Content-Length` 超限时**直接 413，不调用 `request.stream()`**（API 测试用 ASGI
   receive 计数器断言为 0）；chunked 请求流式累计，每块检查累计值，超限立即停止。
-- 处理租约：`processing_started_at` 超过 10 分钟即可被重新领取；崩溃的尝试计入
-  `attempts`（有界重试仍收敛）。
+- 处理租约：`processing_started_at` 超过 10 分钟即可被重新领取；每次领取轮换
+  `processing_token` 并递增 `lease_version`，写回带 token 条件（fencing）；崩溃的
+  尝试计入 `attempts`（有界重试仍收敛）。
 - 重试延迟与 issue §8 示例的 30s 存在口径差：§8 写"失败一次后 30s 到点"，而
   §5.3 与 issue 的正则均为 `2^attempts*30s`，本实现按后者（首次失败 60s）；测试通过
   直接改写 `next_attempt_at` 模拟到点，不依赖真实睡眠。
@@ -146,12 +164,12 @@ requests.post(
 
 | 现象 | 排查 |
 |---|---|
-| 401 `AUTHENTICATION_ERROR` | 时间戳超出 ±300s（对时钟）/ secret 不匹配 / 签名内容用了重序列化 body |
-| 404 `NOT_FOUND` | 规则 id 不存在、规则被禁用，或 `WEBHOOKS_ENABLED=false`（三者同形，防枚举） |
+| 401 `AUTHENTICATION_ERROR` | 缺少签名头（含必需的 `webhook-id`）/ 时间戳超出 ±300s（对时钟）/ secret 不匹配 / 签名内容用了重序列化 body |
+| 404 `NOT_FOUND` | 规则 id 不存在、规则被禁用，或 Webhook 运行时未启用/密钥不可用（同形，防枚举） |
 | 413 `PAYLOAD_TOO_LARGE` | `detail.max_body_bytes` 为生效上限（全局硬顶与规则值的较小者） |
-| 429 `RATE_LIMIT_EXCEEDED` | 看 `Retry-After`；限流按 规则+IP 每分钟；超限请求不落投递行 |
+| 429 `RATE_LIMIT_EXCEEDED` | 看 `Retry-After`；限流先于验签、按 规则+IP 每分钟（未知/禁用规则用 `unknown:{ip}` 桶）；超限请求不落投递行 |
 | `GET /deliveries` 显示 `failed` | `error` 为脱敏摘要；`next_attempt_at` 非空 = 会自动重试，为空 = 终态；用同一 `webhook-id` 重投可重置 |
-| 投递长期 `processing` | 进程崩溃；10 分钟租约后 poll 重新领取（`attempts` 已计入上次尝试） |
+| 投递长期 `processing` | 进程崩溃；10 分钟租约后 poll 重新领取并轮换 `processing_token`（`attempts` 已计入上次尝试；旧 worker 迟到写回被 fencing 丢弃） |
 
 ## 已知风险 / 未验证项
 
@@ -162,7 +180,8 @@ requests.post(
   多 worker 吞吐下降但不丢事件。
 - **Fernet key 轮换**：更换 `WEBHOOK_ENCRYPTION_KEY` 前必须用旧 key 解密、新 key
   重新加密全部 `webhook_rules` 密文；否则所有规则解密失败（启动校验只验格式，
-  不验存量密文）。
+  不验存量密文；#497 起该事故在管理面映射为 503 `WEBHOOK_KEY_MISSING`、公共面
+  404，不再 500）。
 - **审计为 best-effort**：DB 抖动时审计行可能缺失，投递状态机不受影响。
 - **LLM 失败不落半成品**：`error` 事件或异常都按整次失败处理，不写用户/助手消息；
   成功路径才 `save_session_interaction`。

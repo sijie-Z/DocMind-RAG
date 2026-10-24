@@ -17,14 +17,15 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from cryptography.fernet import Fernet
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401  # 注册全部表供 create_all
 from app.core.config import settings
 from app.core.database import Base
-from app.models.webhook import WebhookDelivery, WebhookDeliveryStatus
+from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
+from app.models.webhook import WebhookDelivery, WebhookDeliveryStatus, WebhookRule
 
 BASE = "/api/v1/webhooks"
 FERNET_KEY = Fernet.generate_key().decode()
@@ -85,6 +86,11 @@ async def api(monkeypatch):
     monkeypatch.setattr(settings, "WEBHOOK_MAX_BODY_BYTES", 1048576)
     monkeypatch.setattr(settings, "WEBHOOK_RATE_LIMIT_PER_MINUTE", 60)
     monkeypatch.setattr(settings, "WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS", 300)
+
+    # 限流进程内兜底是模块级 dict：逐用例清空，避免 unknown:{ip} 桶跨用例污染。
+    from app.services import webhook_service as _svc
+
+    _svc._memory_rate.clear()
 
     from app.core.database import get_db
     from app.core.security import get_current_user
@@ -332,6 +338,19 @@ class TestInbound:
         assert response.status_code == 404
 
     @pytest.mark.asyncio
+    async def test_unknown_rule_limited_via_unknown_bucket(self, api, monkeypatch):
+        """未知 rule_id 也用 ``unknown:{ip}`` 桶计数，不能靠随机 id 绕过限流。"""
+        monkeypatch.setattr(settings, "WEBHOOK_RATE_LIMIT_PER_MINUTE", 2)
+        wrong = "whsec_" + base64.b64encode(b"z" * 32).decode()
+        unknown = "00000000-0000-0000-0000-000000000123"
+        first = await _post_delivery(api, unknown, wrong)
+        second = await _post_delivery(api, unknown, wrong)
+        blocked = await _post_delivery(api, unknown, wrong)
+        assert first.status_code == second.status_code == 404
+        assert blocked.status_code == 429
+        assert int(blocked.headers["Retry-After"]) >= 1
+
+    @pytest.mark.asyncio
     async def test_body_too_large_413_without_reading_stream(self, api):
         rule = await _create_rule(api, max_body_bytes=16)
         body = b'{"event":"' + b"x" * 100 + b'"}'
@@ -376,8 +395,8 @@ class TestIdempotencyAPI:
     async def test_missing_webhook_id_is_401(self, api):
         """Standard Webhooks 的签名内容包含 webhook-id，缺失即无法验签（401）。
 
-        body-hash 幂等兜底只适用于非 Standard 提供方（provider=github 预留）；
-        纯函数层已由 test_webhook_signature 覆盖。
+        issue #497：``webhook-id`` 是唯一幂等键，旧的 body-hash 兜底分支已删除；
+        缺失在验签阶段 401，不落投递行（纯函数层由 test_webhook_signature 覆盖）。
         """
         rule = await _create_rule(api)
         body = b'{"event":"same"}'
@@ -423,6 +442,20 @@ class TestIdempotencyAPI:
         assert blocked.json()["error_code"] == "RATE_LIMIT_EXCEEDED"
         assert int(blocked.headers["Retry-After"]) >= 1
         assert len(await _deliveries(api)) == 2
+
+    @pytest.mark.asyncio
+    async def test_bad_signature_consumes_rate_limit_then_429(self, api):
+        """issue #497：限流先于验签——坏签名不是免死金牌，超限即 429。"""
+        rule = await _create_rule(api, rate_limit_per_minute=2)
+        wrong = "whsec_" + base64.b64encode(b"x" * 32).decode()
+        first = await _post_delivery(api, rule["id"], wrong, message_id="bad-1")
+        second = await _post_delivery(api, rule["id"], wrong, message_id="bad-2")
+        assert first.status_code == second.status_code == 401
+        blocked = await _post_delivery(api, rule["id"], wrong, message_id="bad-3")
+        assert blocked.status_code == 429
+        assert blocked.json()["error_code"] == "RATE_LIMIT_EXCEEDED"
+        assert int(blocked.headers["Retry-After"]) >= 1
+        assert await _deliveries(api) == []
 
 
 # ── dry-run ──────────────────────────────────────────────────────────
@@ -505,6 +538,335 @@ class TestDeliveryList:
         assert len(org1.json()["data"]["items"]) == 1
         org2 = await api.client.get(f"{BASE}/deliveries", params={"organization_id": 2})
         assert len(org2.json()["data"]["items"]) == 1
+
+
+# ── 运行时门控（issue #497：未启用/缺 key 一律 503，不 500、不泄堆栈）──
+
+
+class TestRuntimeGating:
+    @pytest.mark.asyncio
+    async def test_admin_api_disabled_503_without_leaks(self, api, monkeypatch):
+        rule = await _create_rule(api)
+        monkeypatch.setattr(settings, "WEBHOOKS_ENABLED", False)
+
+        responses = [
+            await api.client.post(
+                f"{BASE}/rules", json={"name": "x", "prompt_template": "{payload}"}
+            ),
+            await api.client.patch(f"{BASE}/rules/{rule['id']}", json={"name": "x"}),
+            await api.client.delete(f"{BASE}/rules/{rule['id']}"),
+            await api.client.post(f"{BASE}/rules/{rule['id']}/rotate-secret"),
+            await api.client.post(f"{BASE}/rules/{rule['id']}/test", json={"payload": {}}),
+            await api.client.get(f"{BASE}/rules"),
+        ]
+        for response in responses:
+            assert response.status_code == 503, response.text
+            assert response.json()["error_code"] == "WEBHOOKS_DISABLED"
+            text = response.text
+            assert "Traceback" not in text
+            assert "webhook_service.py" not in text
+            assert "site-packages" not in text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("bad_key", ["", "not-a-fernet-key"])
+    async def test_admin_api_key_missing_or_invalid_503(self, api, monkeypatch, bad_key):
+        monkeypatch.setattr(settings, "WEBHOOK_ENCRYPTION_KEY", bad_key)
+        response = await api.client.post(
+            f"{BASE}/rules", json={"name": "x", "prompt_template": "{payload}"}
+        )
+        assert response.status_code == 503, response.text
+        assert response.json()["error_code"] == "WEBHOOK_KEY_MISSING"
+        text = response.text
+        assert "Traceback" not in text
+        assert "Fernet" not in text
+        assert "site-packages" not in text
+
+    @pytest.mark.asyncio
+    async def test_admin_api_mismatched_key_503_not_500(self, api, monkeypatch):
+        """key 格式合法但与存量密文不匹配（轮换事故）→ 503，不 500。"""
+        await _create_rule(api)  # 用 fixture key 加密
+        monkeypatch.setattr(settings, "WEBHOOK_ENCRYPTION_KEY", Fernet.generate_key().decode())
+        response = await api.client.get(f"{BASE}/rules")
+        assert response.status_code == 503, response.text
+        assert response.json()["error_code"] == "WEBHOOK_KEY_MISSING"
+        assert "Traceback" not in response.text
+
+    @pytest.mark.asyncio
+    async def test_public_endpoint_key_mismatch_404_not_500(self, api, monkeypatch):
+        rule = await _create_rule(api)
+        monkeypatch.setattr(settings, "WEBHOOK_ENCRYPTION_KEY", Fernet.generate_key().decode())
+        response = await _post_delivery(api, rule["id"], rule["secret"])
+        assert response.status_code == 404
+        assert await _deliveries(api) == []
+
+    @pytest.mark.asyncio
+    async def test_public_endpoint_key_missing_404(self, api, monkeypatch):
+        rule = await _create_rule(api)
+        monkeypatch.setattr(settings, "WEBHOOK_ENCRYPTION_KEY", "")
+        response = await _post_delivery(api, rule["id"], rule["secret"])
+        assert response.status_code == 404
+        assert await _deliveries(api) == []
+
+
+# ── reuse 历史 / 租约 fencing（issue #497）───────────────────────────
+
+
+class _RecordingAgent:
+    def __init__(self, chunks: tuple[str, ...] = ("new answer",)):
+        self.chunks = chunks
+        self.calls: list[dict] = []
+
+    async def chat(self, **kwargs):
+        self.calls.append(kwargs)
+        for chunk in self.chunks:
+            yield SimpleNamespace(type="chunk", content=chunk)
+        yield SimpleNamespace(type="done", content="")
+
+
+class TestReuseHistory:
+    @pytest.mark.asyncio
+    async def test_reuse_delivery_carries_recent_history(self, api):
+        from app.services import webhook_service as svc
+
+        rule = await _create_rule(api, session_mode="reuse")
+        async with api.factory() as session:
+            session.add(
+                ChatSession(
+                    id="sess-1",
+                    user_id=1,
+                    organization_id=1,
+                    title="[webhook] test hook",
+                    status=ChatSessionStatus.ACTIVE,
+                    root_session_id="sess-1",
+                    source="webhook",
+                    webhook_rule_id=rule["id"],
+                    webhook_session_key="conv-1",
+                )
+            )
+            session.add_all(
+                [
+                    ChatMessage(
+                        id="m1",
+                        session_id="sess-1",
+                        seq=1,
+                        content="old question",
+                        message_type=MessageType.USER,
+                    ),
+                    ChatMessage(
+                        id="m2",
+                        session_id="sess-1",
+                        seq=2,
+                        content="old answer",
+                        message_type=MessageType.ASSISTANT,
+                    ),
+                ]
+            )
+            await session.commit()
+
+        response = await _post_delivery(
+            api,
+            rule["id"],
+            rule["secret"],
+            payload={"session_key": "conv-1", "event": "ping"},
+            message_id="reuse-1",
+        )
+        assert response.status_code == 202
+
+        agent = _RecordingAgent()
+        assert (
+            await svc.webhook_service.poll_once(session_factory=api.factory, agent_service=agent)
+            == 1
+        )
+        history = agent.calls[0]["history"]
+        assert len(history) > 1, "reuse 模式必须携带会话历史（长度 > 1）"
+        assert history == [
+            {"role": "user", "content": "old question"},
+            {"role": "assistant", "content": "old answer"},
+        ]
+
+        async with api.factory() as session:
+            messages = (
+                (
+                    await session.execute(
+                        select(ChatMessage)
+                        .where(ChatMessage.session_id == "sess-1")
+                        .order_by(ChatMessage.seq)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        # 历史 2 条 + 本轮 user/assistant 2 条，且落在同一会话
+        assert len(messages) == 4
+        assert messages[-1].content == "new answer"
+
+    @pytest.mark.asyncio
+    async def test_reuse_without_session_key_marks_fallback_and_keeps_marker(self, api):
+        from app.services import webhook_service as svc
+
+        rule = await _create_rule(api, session_mode="reuse")
+        await _post_delivery(
+            api, rule["id"], rule["secret"], payload={"event": "ping"}, message_id="fb-1"
+        )
+        assert (
+            await svc.webhook_service.poll_once(
+                session_factory=api.factory, agent_service=_RecordingAgent()
+            )
+            == 1
+        )
+        rows = await _deliveries(api)
+        assert len(rows) == 1
+        assert rows[0].status == WebhookDeliveryStatus.SUCCEEDED
+        assert (rows[0].error or "").startswith("reuse_fallback=true")
+
+
+class TestLeaseFencing:
+    @pytest.mark.asyncio
+    async def test_claim_rotates_token_and_increments_lease_version(self, api):
+        from app.services import webhook_service as svc
+
+        rule = await _create_rule(api)
+        await _post_delivery(api, rule["id"], rule["secret"], message_id="rot-1")
+        assert (
+            await svc.webhook_service.poll_once(
+                session_factory=api.factory, agent_service=_RecordingAgent()
+            )
+            == 1
+        )
+        rows = await _deliveries(api)
+        assert rows[0].status == WebhookDeliveryStatus.SUCCEEDED
+        assert rows[0].lease_version == 1
+        assert rows[0].processing_token  # 领取时写入的租约 token
+
+    @pytest.mark.asyncio
+    async def test_stale_worker_writeback_is_fenced_out(self, api):
+        """模拟超时重领：旧 token 的完成写回 rowcount 0，绝不双写消息。
+
+        「它能红吗」：去掉 ``_complete_delivery`` 的 ``processing_token`` 条件，
+        本用例会因为状态被改成 succeeded、并写出 2 条消息而变红。
+        """
+        from app.services import webhook_service as svc
+
+        rule = await _create_rule(api)
+        await _post_delivery(api, rule["id"], rule["secret"], message_id="fence-1")
+        rows = await _deliveries(api)
+        delivery_id = rows[0].id
+
+        # worker A 已领取（token-A）并开始处理
+        async with api.factory() as session:
+            await session.execute(
+                update(WebhookDelivery)
+                .where(WebhookDelivery.id == delivery_id)
+                .values(
+                    status=WebhookDeliveryStatus.PROCESSING,
+                    processing_token="token-A",
+                    lease_version=1,
+                    processing_started_at=svc._utcnow(),
+                    attempts=1,
+                )
+            )
+            await session.commit()
+
+        class _StealingAgent:
+            """聊天期间租赁超时被 worker B 重领：token-A → token-B。"""
+
+            def __init__(self, factory):
+                self.factory = factory
+
+            async def chat(self, **kwargs):
+                async with self.factory() as session:
+                    await session.execute(
+                        update(WebhookDelivery)
+                        .where(WebhookDelivery.id == delivery_id)
+                        .values(processing_token="token-B", lease_version=2)
+                    )
+                    await session.commit()
+                yield SimpleNamespace(type="chunk", content="late answer")
+                yield SimpleNamespace(type="done", content="")
+
+        await svc.webhook_service.process_delivery(
+            delivery_id,
+            processing_token="token-A",
+            session_factory=api.factory,
+            agent_service=_StealingAgent(api.factory),
+        )
+
+        async with api.factory() as session:
+            row = await session.get(WebhookDelivery, delivery_id)
+            messages = (await session.execute(select(ChatMessage))).scalars().all()
+        assert row.status == WebhookDeliveryStatus.PROCESSING  # 新租约仍在处理
+        assert row.processing_token == "token-B"
+        assert row.lease_version == 2
+        assert row.processed_at is None
+        assert messages == [], "迟到 worker 不得写任何消息（防双写）"
+
+    @pytest.mark.asyncio
+    async def test_session_writeback_requires_lease_token(self, api):
+        """会话/session_id 写回也 fencing：旧 token 不得覆盖或新建空会话。"""
+        from app.services import webhook_service as svc
+
+        rule = await _create_rule(api)
+        await _post_delivery(api, rule["id"], rule["secret"], message_id="fence-3")
+        rows = await _deliveries(api)
+        delivery_id = rows[0].id
+
+        async with api.factory() as session:
+            await session.execute(
+                update(WebhookDelivery)
+                .where(WebhookDelivery.id == delivery_id)
+                .values(
+                    status=WebhookDeliveryStatus.PROCESSING,
+                    processing_token="token-B",
+                    lease_version=1,
+                    processing_started_at=svc._utcnow(),
+                    attempts=1,
+                )
+            )
+            await session.commit()
+            delivery = await session.get(WebhookDelivery, delivery_id)
+            rule_row = await session.get(WebhookRule, rule["id"])
+            with pytest.raises(svc.WebhookDeliveryError):
+                await svc.webhook_service._ensure_session(
+                    session, delivery, rule_row, {"event": "x"}, "token-A"
+                )
+
+        async with api.factory() as session:
+            sessions = (await session.execute(select(ChatSession))).scalars().all()
+            row = await session.get(WebhookDelivery, delivery_id)
+        assert sessions == [], "旧 token 不得新建会话"
+        assert row.session_id is None
+        assert row.processing_token == "token-B"
+
+    @pytest.mark.asyncio
+    async def test_stale_worker_failure_writeback_is_fenced_out(self, api):
+        """旧 token 的失败写回同样落空：不得把新 worker 的 processing 改成 failed。"""
+        from app.services import webhook_service as svc
+
+        rule = await _create_rule(api)
+        await _post_delivery(api, rule["id"], rule["secret"], message_id="fence-2")
+        rows = await _deliveries(api)
+        delivery_id = rows[0].id
+
+        async with api.factory() as session:
+            await session.execute(
+                update(WebhookDelivery)
+                .where(WebhookDelivery.id == delivery_id)
+                .values(
+                    status=WebhookDeliveryStatus.PROCESSING,
+                    processing_token="token-B",
+                    lease_version=2,
+                    processing_started_at=svc._utcnow(),
+                    attempts=1,
+                )
+            )
+            await session.commit()
+
+        await svc.webhook_service._mark_failed(api.factory, delivery_id, "token-A", "stale failure")
+        async with api.factory() as session:
+            row = await session.get(WebhookDelivery, delivery_id)
+        assert row.status == WebhookDeliveryStatus.PROCESSING
+        assert row.processing_token == "token-B"
+        assert row.error is None
 
 
 # ── 审计：规则变更写 user_activity_logs（真服务依赖）─────────────────

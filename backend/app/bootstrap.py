@@ -546,10 +546,11 @@ def build_lifespan(deps: LifespanDeps):
             else:
                 logger.info("ENABLE_SCHEDULER=false，定时任务调度器不启动")
 
-            # issue #478：Webhook outbox poll 循环。与调度器同一裁定——只在 web
-            # 入口启动（worker 会与 web 重复领取投递；SQL 侧 SKIP LOCKED 仍是
-            # 多实例部署的最后防线）。启用时**任何入口**都先过 fail-closed 的
-            # key 校验（配置错误不应因入口不同而被静默容忍）。
+            # issue #478：Webhook outbox poll 循环。issue #497：``web`` 与
+            # ``worker`` 入口都启动（worker 部署也能消费投递；两入口/多实例
+            # 并行时靠 ``FOR UPDATE SKIP LOCKED`` 互斥，领取后立即提交租约
+            # token，fencing 保证不会双写）。启用时**任何入口**都先过
+            # fail-closed 的 key 校验（配置错误不应因入口不同而被静默容忍）。
             webhook_task: asyncio.Task | None = None
             if settings.WEBHOOKS_ENABLED:
                 from app.services.webhook_service import (
@@ -558,15 +559,16 @@ def build_lifespan(deps: LifespanDeps):
                 )
 
                 validate_webhook_settings()
-                if get_active_entrypoint() == "web":
+                if get_active_entrypoint() in ("web", "worker"):
                     webhook_task = asyncio.create_task(webhook_service.poll_loop())
                     logger.info(
-                        "Webhook outbox poll 已启动（interval=%ss）",
+                        "Webhook outbox poll 已启动（entrypoint=%s, interval=%ss）",
+                        get_active_entrypoint(),
                         settings.WEBHOOK_WORKER_POLL_SECONDS,
                     )
                 else:
                     logger.info(
-                        "Webhook outbox poll 仅在 web 入口启动（当前 entrypoint=%s）",
+                        "Webhook outbox poll 仅在 web/worker 入口启动（当前 entrypoint=%s）",
                         get_active_entrypoint(),
                     )
             else:

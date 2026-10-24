@@ -8,9 +8,19 @@
 - **模板校验与渲染**：只允许 ``{payload}/{rule_id}/{delivery_id}``，payload 包在
   不可信分隔区里；
 - **body 上限**：``Content-Length`` 预检（不读 stream）+ chunked 累计读取；
-- **幂等**：``webhook-id`` 优先 / body sha256 兜底；Redis SET NX EX（快路径，
-  不可用降级）+ DB UNIQUE（最终仲裁）；
+- **限流**：先于验签（issue #497）——所有请求（含坏签名）都消耗配额；未知
+  rule_id 使用 ``unknown:{ip}`` 桶；Redis INCR 快路径，不可用时进程内计数兜底；
+- **幂等**：``webhook-id`` 为 Standard Webhooks 必需头，直接作为幂等键
+  （``≤128``；issue #497 删除了不可达的 body-sha256 兜底分支）；Redis SET NX EX
+  （快路径，不可用降级）+ DB UNIQUE（最终仲裁）；
 - **outbox**：``FOR UPDATE SKIP LOCKED`` 领取、10 分钟处理租约、3 次有界重试；
+  **租约 fencing**（issue #497）：领取时轮换 ``processing_token`` 并
+  ``lease_version += 1``，完成/失败写回都带 token + status 条件更新，rowcount 0
+  即视为租约已被接管，不再写会话/消息（超时重领绝不双写）；
+- **reuse 历史**：``session_mode=reuse`` 命中会话后加载最近
+  ``WEBHOOK_REUSE_HISTORY_LIMIT`` 条消息，按 agent 聊天格式传入
+  ``AgentService.chat(history=...)``；``session_key`` 缺失回退 new，并在投递
+  记录 ``error`` 摘要标注 ``reuse_fallback=true``；
 - **会话落库**：直接调用 ``AgentService.chat``（不走 HTTP），再经
   ``save_session_interaction`` 写消息。
 
@@ -39,7 +49,7 @@ from string import Formatter
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,7 +69,7 @@ from app.exceptions import (
     RateLimitError,
     ValidationError,
 )
-from app.models.chat import ChatSession, ChatSessionStatus
+from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
 from app.models.webhook import (
     WebhookDelivery,
     WebhookDeliveryStatus,
@@ -81,6 +91,9 @@ PROCESSING_LEASE = timedelta(minutes=10)
 POLL_BATCH_SIZE = 10
 RETRY_BASE_SECONDS = 30
 SECRET_ROTATION_GRACE = timedelta(hours=24)
+# issue #497 §2：reuse 缺少有效 session_key 回退 new 时写入投递 error 摘要的前缀
+# （不新增列；成功写回时保留该前缀，见 ``_complete_delivery``）。
+REUSE_FALLBACK_MARKER = "reuse_fallback=true"
 
 PAYLOAD_OPEN = "<<<UNTRUSTED_WEBHOOK_PAYLOAD>>>"
 PAYLOAD_CLOSE = "<<<END_UNTRUSTED_WEBHOOK_PAYLOAD>>>"
@@ -341,11 +354,20 @@ def render_prompt(rule: WebhookRule, payload: Any, delivery_id: str) -> str:
 # ── 幂等 ────────────────────────────────────────────────────────────
 
 
-def derive_idempotency_key(webhook_id: str | None, raw_body: bytes) -> str:
-    """``webhook-id`` 优先；缺失（或超列宽）时用原始 body 的 sha256。"""
-    if webhook_id and len(webhook_id) <= 128:
-        return webhook_id
-    return hashlib.sha256(raw_body).hexdigest()
+def derive_idempotency_key(webhook_id: str | None) -> str:
+    """``webhook-id`` 即幂等键；Standard Webhooks 必需头，缺失/超长显式拒绝。
+
+    issue #497：调用方（端点）在验签之后调用，缺失 id 已在验签阶段 401；
+    这里仍防御性校验（直调/未来复用）。旧实现「缺失或超 128 位时退化为
+    body sha256」的分支自 ``verify_signature`` 强制 ``webhook-id`` 起即不可达，
+    已删除；超过列宽 128 直接 400，绝不再静默换成 body 哈希（那会让
+    同一事件在 id 超长时退化为按 body 去重，语义漂移）。
+    """
+    if not webhook_id:
+        raise ValidationError("缺少 webhook-id（Standard Webhooks 必需头）", field="webhook-id")
+    if len(webhook_id) > 128:
+        raise ValidationError("webhook-id 长度不得超过 128", field="webhook-id")
+    return webhook_id
 
 
 async def mark_idempotency_in_redis(rule_id: str, idempotency_key: str) -> bool | None:
@@ -372,16 +394,27 @@ async def mark_idempotency_in_redis(rule_id: str, idempotency_key: str) -> bool 
         return None
 
 
-# ── 限流（规则 + IP）─────────────────────────────────────────────────
+# ── 限流（规则 + IP；先于验签）───────────────────────────────────────
 
 
-async def enforce_rate_limit(rule: WebhookRule, client_ip: str) -> None:
-    """每分钟固定窗口限流；超限 ``RateLimitError``（429，超限不落投递行）。"""
-    limit = int(rule.rate_limit_per_minute or settings.WEBHOOK_RATE_LIMIT_PER_MINUTE)
+async def enforce_rate_limit(rule: WebhookRule | None, client_ip: str) -> None:
+    """每分钟固定窗口限流；超限 ``RateLimitError``（429，超限不落投递行）。
+
+    issue #497：限流前置于验签——所有请求（含坏签名/未知规则）都消耗配额。
+    ``rule`` 为 None（未知或禁用规则）时使用 ``unknown:{ip}`` 桶与全局默认
+    限额，既防枚举也防「随机 rule_id 无限打」。Redis 不可用时沿用既有进程内
+    计数降级（多 worker 下为近似值，见 ADR 已知风险）。
+    """
+    if rule is None:
+        scope = "unknown"
+        limit = int(settings.WEBHOOK_RATE_LIMIT_PER_MINUTE)
+    else:
+        scope = str(rule.id)
+        limit = int(rule.rate_limit_per_minute or settings.WEBHOOK_RATE_LIMIT_PER_MINUTE)
     limit = max(1, limit)
     now = int(time.time())
     window = now // 60
-    key = f"{RATE_LIMIT_KEY_PREFIX}{rule.id}:{client_ip}:{window}"
+    key = f"{RATE_LIMIT_KEY_PREFIX}{scope}:{client_ip}:{window}"
 
     count: int | None = None
     try:
@@ -535,12 +568,19 @@ class WebhookService:
 
         return AgentService()
 
-    async def _run_chat(self, agent: Any, rule: WebhookRule, session_id: str, prompt: str) -> str:
+    async def _run_chat(
+        self,
+        agent: Any,
+        rule: WebhookRule,
+        session_id: str,
+        prompt: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> str:
         """直接调用 ``AgentService.chat``（禁止 HTTP 自调用），拼接 chunk。"""
         chunks: list[str] = []
         async for event in agent.chat(
             query=prompt,
-            history=[],
+            history=list(history or []),
             organization_id=rule.org_id,
             user_id=rule.created_by,
             session_id=session_id,
@@ -555,22 +595,60 @@ class WebhookService:
                 )
         return "".join(chunks)
 
+    async def _load_reuse_history(
+        self,
+        db_session: AsyncSession,
+        session_id: str,
+    ) -> list[dict[str, str]]:
+        """加载会话最近 N 条消息，按 agent 聊天格式（role/content）返回。
+
+        issue #497 §2：reuse 模式必须真正延续上下文，而不是只复用行。取最近
+        ``WEBHOOK_REUSE_HISTORY_LIMIT`` 条（seq 倒序取再反转为时间正序），
+        与 ``/chat`` 的 history 口径一致（user/assistant 两角色）。
+        """
+        limit = max(1, int(settings.WEBHOOK_REUSE_HISTORY_LIMIT))
+        rows = (
+            (
+                await db_session.execute(
+                    select(ChatMessage)
+                    .where(ChatMessage.session_id == session_id)
+                    .order_by(ChatMessage.seq.desc())
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            {
+                "role": "user" if message.message_type == MessageType.USER else "assistant",
+                "content": message.content,
+            }
+            for message in reversed(rows)
+        ]
+
     async def _ensure_session(
         self,
         db_session: AsyncSession,
         delivery: WebhookDelivery,
         rule: WebhookRule,
         payload: Any,
+        processing_token: str,
     ) -> str:
-        """解析投递对应的 ChatSession；重试复用 delivery.session_id。"""
+        """解析投递对应的 ChatSession；重试复用 delivery.session_id。
+
+        issue #497 §4：会话/session_id 的写回同样带租约条件（txn 内条件 UPDATE，
+        rowcount 0 即租约已被接管 → rollback + 放弃），避免旧 worker 在超时
+        重领后把 succeeded 行/新租约的 session_id 覆盖成自己的空会话。
+        """
         if delivery.session_id:
             existing = await db_session.get(ChatSession, delivery.session_id)
             if existing is not None:
                 return existing.id
 
         session_key: str | None = None
-        if rule.session_mode == WebhookSessionMode.REUSE and isinstance(payload, dict):
-            raw_key = payload.get("session_key")
+        if rule.session_mode == WebhookSessionMode.REUSE:
+            raw_key = payload.get("session_key") if isinstance(payload, dict) else None
             if isinstance(raw_key, str) and 0 < len(raw_key) <= 128:
                 session_key = raw_key
                 found = (
@@ -587,9 +665,17 @@ class WebhookService:
                     .first()
                 )
                 if found is not None:
-                    delivery.session_id = found.id
-                    await db_session.commit()
+                    await self._assign_session_id(
+                        db_session, delivery.id, processing_token, found.id
+                    )
                     return found.id
+            else:
+                # issue #497 §2：session_key 缺失/非法 → 回退 new，并在投递记录
+                # 标注 reuse_fallback=true（不新增列，写入 error 摘要；成功写回时
+                # 保留该前缀，见 _complete_delivery）。
+                delivery.error = (
+                    f"{REUSE_FALLBACK_MARKER}（payload 缺少有效 session_key，按 new 新建会话）"
+                )
 
         session_id = str(uuid.uuid4())
         session = ChatSession(
@@ -605,44 +691,137 @@ class WebhookService:
             webhook_session_key=session_key,
         )
         db_session.add(session)
-        delivery.session_id = session_id
-        await db_session.commit()
+        # 与新建会话同一事务：条件 UPDATE 把 session_id 写回投递行；租约已易主
+        # 时 rollback（新建会话一并撤销），绝不产生"孤儿会话指针"。
+        await self._assign_session_id(db_session, delivery.id, processing_token, session_id)
         return session_id
+
+    async def _assign_session_id(
+        self,
+        db_session: AsyncSession,
+        delivery_id: str,
+        processing_token: str,
+        session_id: str,
+    ) -> None:
+        """token fenced 地把 delivery.session_id 指向会话并提交事务。"""
+        result = await db_session.execute(
+            update(WebhookDelivery)
+            .where(
+                WebhookDelivery.id == delivery_id,
+                WebhookDelivery.processing_token == processing_token,
+                WebhookDelivery.status == WebhookDeliveryStatus.PROCESSING,
+            )
+            .values(session_id=session_id)
+        )
+        if result.rowcount == 0:
+            await db_session.rollback()
+            raise WebhookDeliveryError("租约已被接管（会话写回 fence），放弃本次处理")
+        await db_session.commit()
 
     async def _mark_failed(
         self,
         session_factory: Any,
         delivery_id: str,
+        processing_token: str,
         error: str,
-    ) -> None:
+        *,
+        expected_status: WebhookDeliveryStatus = WebhookDeliveryStatus.PROCESSING,
+    ) -> bool:
+        """失败写回（token fenced）：只有仍持有租约的 worker 才能改状态/排重试。
+
+        issue #497 §4：超时重领后 token 已轮换，旧 worker 的失败写回必须落空
+        （rowcount 0），否则会把新 worker 正在 processing 的行改成 failed。
+        ``expected_status`` 供「完成写回后消息落库失败」的补偿（SUCCEEDED→FAILED）。
+
+        Returns: 是否真正写回（False = 状态不符或租约已易主，调用方不应据此
+        记录失败审计，避免旧 worker 的噪声覆盖新 worker 的真实结果）。
+        """
         async with session_factory() as db_session:
             delivery = await db_session.get(WebhookDelivery, delivery_id)
-            if delivery is None or delivery.status != WebhookDeliveryStatus.PROCESSING:
-                return
+            if delivery is None or delivery.status != expected_status:
+                return False
+            if delivery.processing_token != processing_token:
+                logger.warning(
+                    "webhook 投递租约已被接管（fence），跳过失败写回（delivery=%s）",
+                    log_safe(delivery_id),
+                )
+                return False
             now = _utcnow()
-            delivery.status = WebhookDeliveryStatus.FAILED
-            delivery.error = log_safe(error, max_len=500)
-            delivery.processed_at = None
             max_attempts = max(1, int(settings.WEBHOOK_MAX_ATTEMPTS))
+            next_attempt_at = None
             if delivery.attempts < max_attempts:
                 # 2^attempts * 30s（attempts 在领取时已 +1）：首次失败 60s 后重试。
-                delivery.next_attempt_at = now + timedelta(
+                next_attempt_at = now + timedelta(
                     seconds=(2 ** max(1, delivery.attempts)) * RETRY_BASE_SECONDS
                 )
-            else:
-                # 终态：轮询不再领取；发送方同一幂等键重投可重置（register_delivery）。
-                delivery.next_attempt_at = None
+            # 终态（next_attempt_at=None）：轮询不再领取；发送方同一幂等键重投
+            # 可重置（register_delivery）。
+            result = await db_session.execute(
+                update(WebhookDelivery)
+                .where(
+                    WebhookDelivery.id == delivery_id,
+                    WebhookDelivery.processing_token == processing_token,
+                    WebhookDelivery.status == expected_status,
+                )
+                .values(
+                    status=WebhookDeliveryStatus.FAILED,
+                    error=log_safe(error, max_len=500),
+                    processed_at=None,
+                    next_attempt_at=next_attempt_at,
+                )
+            )
             await db_session.commit()
-            WEBHOOK_DELIVERY_TOTAL.labels(status="failed").inc()
+            if result.rowcount:
+                WEBHOOK_DELIVERY_TOTAL.labels(status="failed").inc()
+            return result.rowcount > 0
+
+    async def _complete_delivery(
+        self,
+        session_factory: Any,
+        delivery_id: str,
+        processing_token: str,
+        session_id: str,
+    ) -> bool:
+        """完成写回（token fencing）；返回 False ⇒ 租约已被重领。
+
+        issue #497 §4 规定的条件更新：
+        ``UPDATE webhook_deliveries SET status='succeeded', processed_at=NOW()
+        WHERE id=:id AND processing_token=:token AND status='processing'``。
+        rowcount 为 0 时调用方**不得**再写会话/消息（迟到 worker 的结果丢弃）。
+        成功时保留 ``reuse_fallback=true`` 前缀（回退标注不被成功写回抹掉）。
+        """
+        preserve_fallback = case(
+            (WebhookDelivery.error.startswith(REUSE_FALLBACK_MARKER), WebhookDelivery.error),
+            else_=None,
+        )
+        async with session_factory() as db_session:
+            result = await db_session.execute(
+                update(WebhookDelivery)
+                .where(
+                    WebhookDelivery.id == delivery_id,
+                    WebhookDelivery.processing_token == processing_token,
+                    WebhookDelivery.status == WebhookDeliveryStatus.PROCESSING,
+                )
+                .values(
+                    status=WebhookDeliveryStatus.SUCCEEDED,
+                    session_id=session_id,
+                    processed_at=_utcnow(),
+                    next_attempt_at=None,
+                    error=preserve_fallback,
+                )
+            )
+            await db_session.commit()
+            return result.rowcount > 0
 
     async def process_delivery(
         self,
         delivery_id: str,
         *,
+        processing_token: str,
         session_factory: Any | None = None,
         agent_service: Any | None = None,
     ) -> None:
-        """处理一个已被领取（status=processing）的投递。"""
+        """处理一个已被领取（status=processing 且 token 匹配）的投递。"""
         factory = session_factory or AsyncSessionLocal
         agent = agent_service or self._default_agent_service()
 
@@ -650,24 +829,73 @@ class WebhookService:
             delivery = await db_session.get(WebhookDelivery, delivery_id)
             if delivery is None or delivery.status != WebhookDeliveryStatus.PROCESSING:
                 return
+            if delivery.processing_token != processing_token:
+                # 入口 fence：领取后处理前已被他 worker 重领（token 轮换）。
+                logger.warning(
+                    "webhook 投递租约已被接管（入口 fence），跳过处理（delivery=%s）",
+                    log_safe(delivery_id),
+                )
+                return
             rule = await db_session.get(WebhookRule, delivery.rule_id)
             if rule is None:
-                await self._mark_failed(factory, delivery_id, "规则已删除")
+                await self._mark_failed(factory, delivery_id, processing_token, "规则已删除")
                 return
             try:
                 payload = json.loads(delivery.payload)
             except (TypeError, ValueError) as exc:
-                await self._mark_failed(factory, delivery_id, f"payload JSON 解析失败: {exc}")
+                await self._mark_failed(
+                    factory, delivery_id, processing_token, f"payload JSON 解析失败: {exc}"
+                )
                 return
             try:
-                session_id = await self._ensure_session(db_session, delivery, rule, payload)
+                session_id = await self._ensure_session(
+                    db_session, delivery, rule, payload, processing_token
+                )
             except Exception as exc:
-                await self._mark_failed(factory, delivery_id, f"会话创建失败: {type(exc).__name__}")
+                await self._mark_failed(
+                    factory, delivery_id, processing_token, f"会话创建失败: {type(exc).__name__}"
+                )
                 return
+            # issue #497 §2：reuse 模式加载会话历史（本次投递的消息在完成后才写）。
+            history = (
+                await self._load_reuse_history(db_session, session_id)
+                if rule.session_mode == WebhookSessionMode.REUSE
+                else []
+            )
 
         try:
             prompt = render_prompt(rule, payload, delivery_id)
-            answer = await self._run_chat(agent, rule, session_id, prompt)
+            answer = await self._run_chat(agent, rule, session_id, prompt, history)
+        except Exception as exc:
+            logger.warning(
+                "webhook 投递处理失败（delivery=%s rule=%s）: %s",
+                log_safe(delivery_id),
+                log_safe(rule.id),
+                log_safe(exc),
+            )
+            if await self._mark_failed(
+                factory, delivery_id, processing_token, f"{type(exc).__name__}: {exc}"
+            ):
+                # 只有仍持有租约的失败才写审计；被 fence 掉的旧 worker 不污染。
+                await audit_service.log_activity(
+                    user_id=rule.created_by,
+                    action="process_webhook_delivery",
+                    target_type="webhook_delivery",
+                    target_id=delivery_id,
+                    detail=json.dumps({"status": "failed", "error": log_safe(exc, max_len=200)}),
+                )
+            return
+
+        # issue #497 §4：完成写回带 token 条件（fencing）。rowcount 0 ⇒ 租约已被
+        # 重领，迟到结果直接丢弃，绝不写会话/消息（防双写）。
+        if not await self._complete_delivery(factory, delivery_id, processing_token, session_id):
+            logger.warning(
+                "webhook 投递租约已被接管（完成 fence），丢弃迟到结果（delivery=%s）",
+                log_safe(delivery_id),
+            )
+            return
+
+        try:
             await save_session_interaction(
                 session_id,
                 user_id=rule.created_by,
@@ -677,32 +905,23 @@ class WebhookService:
                 session_factory=factory,
             )
         except Exception as exc:
-            logger.warning(
-                "webhook 投递处理失败（delivery=%s rule=%s）: %s",
+            # 行已标记 succeeded 后消息落库失败：补偿回可重试 failed，避免
+            # 「状态已成功但消息永久缺失」。补偿同样带 token 条件。
+            logger.error(
+                "webhook 投递消息落库失败（delivery=%s session=%s），回退为可重试失败: %s",
                 log_safe(delivery_id),
-                log_safe(rule.id),
+                log_safe(session_id),
                 log_safe(exc),
             )
-            await self._mark_failed(factory, delivery_id, f"{type(exc).__name__}: {exc}")
-            await audit_service.log_activity(
-                user_id=rule.created_by,
-                action="process_webhook_delivery",
-                target_type="webhook_delivery",
-                target_id=delivery_id,
-                detail=json.dumps({"status": "failed", "error": log_safe(exc, max_len=200)}),
+            await self._mark_failed(
+                factory,
+                delivery_id,
+                processing_token,
+                f"消息落库失败: {type(exc).__name__}",
+                expected_status=WebhookDeliveryStatus.SUCCEEDED,
             )
             return
 
-        async with factory() as db_session:
-            delivery = await db_session.get(WebhookDelivery, delivery_id)
-            if delivery is None or delivery.status != WebhookDeliveryStatus.PROCESSING:
-                return
-            delivery.status = WebhookDeliveryStatus.SUCCEEDED
-            delivery.session_id = session_id
-            delivery.processed_at = _utcnow()
-            delivery.error = None
-            delivery.next_attempt_at = None
-            await db_session.commit()
         WEBHOOK_DELIVERY_TOTAL.labels(status="succeeded").inc()
         await audit_service.log_activity(
             user_id=rule.created_by,
@@ -720,26 +939,33 @@ class WebhookService:
         session_factory: Any | None = None,
         agent_service: Any | None = None,
     ) -> int:
-        """领取一批（≤10）投递，置 processing 并提交，然后逐个处理。"""
+        """领取一批（≤10）投递，轮换租约 token 并提交，然后逐个处理。"""
         factory = session_factory or AsyncSessionLocal
         now = _utcnow()
-        claimed_ids: list[str] = []
+        claimed: list[tuple[str, str]] = []
         async with factory() as db_session:
             rows = (await db_session.execute(build_claim_stmt(now))).scalars().all()
             for row in rows:
                 row.status = WebhookDeliveryStatus.PROCESSING
                 row.processing_started_at = now
                 row.attempts = int(row.attempts or 0) + 1
-                claimed_ids.append(row.id)
-            if claimed_ids:
+                # issue #497 §4：每次领取（含超时重领 / failed 到点重试）都轮换
+                # token 并递增租约代数；旧 worker 的写回由 token 条件自然失效。
+                row.lease_version = int(row.lease_version or 0) + 1
+                row.processing_token = str(uuid.uuid4())
+                claimed.append((row.id, row.processing_token))
+            if claimed:
                 # 先提交领取结果再处理，避免整个 LLM 调用期间持有行锁/长事务。
                 await db_session.commit()
 
-        for delivery_id in claimed_ids:
+        for delivery_id, token in claimed:
             await self.process_delivery(
-                delivery_id, session_factory=factory, agent_service=agent_service
+                delivery_id,
+                processing_token=token,
+                session_factory=factory,
+                agent_service=agent_service,
             )
-        return len(claimed_ids)
+        return len(claimed)
 
     async def poll_loop(self, *, session_factory: Any | None = None) -> None:
         """lifespan 启动的后台循环；单次失败隔离，不终止循环。"""

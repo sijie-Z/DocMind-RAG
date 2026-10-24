@@ -162,9 +162,13 @@ class BaseAppSettings(BaseSettings):
     WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: int = 300
     # 全局 body 上限（规则 max_body_bytes 只能收紧到不高于此值）。
     WEBHOOK_MAX_BODY_BYTES: int = 1048576
-    # 每规则默认每分钟限流（规则可单独下调）。
+    # 每规则默认每分钟限流（规则可单独下调）。未知 rule_id 的请求也按此值
+    # 以 ``unknown:{ip}`` 桶计数（issue #497：限流先于验签，坏签名同样消耗配额）。
     WEBHOOK_RATE_LIMIT_PER_MINUTE: int = 60
     # outbox poll 间隔（秒）。
     WEBHOOK_WORKER_POLL_SECONDS: int = 2
     # 有界重试次数；达到后 failed + next_attempt_at=NULL（终态，可被同 id 重投重置）。
     WEBHOOK_MAX_ATTEMPTS: int = 3
+    # session_mode=reuse 命中后加载的历史消息条数上限（issue #497）：最近 N 条，
+    # 按 agent 聊天格式传入 AgentService.chat(history=...)。
+    WEBHOOK_REUSE_HISTORY_LIMIT: int = 20
