@@ -293,7 +293,7 @@ async def test_pre_execute_ask_forces_approval_even_when_mode_never(monkeypatch,
     bus.register(_spec("ask", "tools/pre_execute"), ask_hook)
     execute_mock = _patch_registry(monkeypatch)
     executor = _executor(
-        _client_with_tool_calls([("fetch_webpage", '{"url":"https://x"}', "c1")]),
+        _client_with_tool_calls([("web_search", '{"action":"fetch","url":"https://x"}', "c1")]),
         cfg=_cfg(approval_mode="never"),
     )
     requests: list[approval.ApprovalRequest] = []
@@ -307,7 +307,7 @@ async def test_pre_execute_ask_forces_approval_even_when_mode_never(monkeypatch,
     events, exc, _, _ = await _run_step_once(executor)
 
     assert isinstance(exc, approval.ApprovalRequired), "ask 必须强制走审批门（即使 mode=never）"
-    assert requests and requests[0].tool_name == "fetch_webpage"
+    assert requests and requests[0].tool_name == "web_search"
     assert execute_mock.await_count == 0, "未批准前 handler 零调用"
 
 
@@ -318,7 +318,9 @@ async def test_pre_execute_ask_without_channel_denies(monkeypatch, bus):
 
     bus.register(_spec("ask", "tools/pre_execute"), ask_hook)
     execute_mock = _patch_registry(monkeypatch)
-    executor = _executor(_client_with_tool_calls([("fetch_webpage", '{"url":"https://x"}', "c1")]))
+    executor = _executor(
+        _client_with_tool_calls([("web_search", '{"action":"fetch","url":"https://x"}', "c1")])
+    )
     executor.approval_check = None
 
     events, exc, _, _ = await _run_step_once(executor)
@@ -367,14 +369,14 @@ async def test_pre_execute_ask_sticky_deny_is_not_bypassed_by_mode_never(monkeyp
     bus.register(_spec("ask", "tools/pre_execute"), ask_hook)
     execute_mock = _patch_registry(monkeypatch)
     executor = _executor(
-        _client_with_tool_calls([("fetch_webpage", '{"url":"https://x"}', "c1")]),
+        _client_with_tool_calls([("web_search", '{"action":"fetch","url":"https://x"}', "c1")]),
         cfg=_cfg(approval_mode="never"),
     )
     executor.approval_check = AsyncMock(return_value="paused")
-    args = {"url": "https://x"}
+    args = {"action": "fetch", "url": "https://x"}
     executor.approval_decisions = [
         {
-            "tool_name": "fetch_webpage",
+            "tool_name": "web_search",
             "args_hash": approval.args_fingerprint(args),
             "decision": "deny",
         }
@@ -423,12 +425,12 @@ async def test_pre_execute_ask_approved_executes(monkeypatch, bus):
     bus.register(_spec("ask", "tools/pre_execute"), ask_hook)
     execute_mock = _patch_registry(monkeypatch)
     executor = _executor(
-        _client_with_tool_calls([("fetch_webpage", '{"url":"https://x"}', "c1")]),
+        _client_with_tool_calls([("web_search", '{"action":"fetch","url":"https://x"}', "c1")]),
         cfg=_cfg(approval_mode="never"),
     )
     approval_check = AsyncMock(return_value="paused")
     executor.approval_check = approval_check
-    args = {"url": "https://x"}
+    args = {"action": "fetch", "url": "https://x"}
 
     # 第一次：无粘滞决定 → 必须暂停（证明 forced 接线真实生效）。
     _, first_exc, _, _ = await _run_step_once(executor)
@@ -439,7 +441,7 @@ async def test_pre_execute_ask_approved_executes(monkeypatch, bus):
     # 人类批准（粘滞 approve）→ 第二次执行通过且不再暂停。
     executor.approval_decisions = [
         {
-            "tool_name": "fetch_webpage",
+            "tool_name": "web_search",
             "args_hash": approval.args_fingerprint(args),
             "decision": "approve",
         }
@@ -462,7 +464,7 @@ async def test_pre_execute_ask_degraded_denies(monkeypatch, bus):
     bus.register(_spec("ask", "tools/pre_execute"), ask_hook)
     execute_mock = _patch_registry(monkeypatch)
     executor = _executor(
-        _client_with_tool_calls([("fetch_webpage", '{"url":"https://x"}', "c1")]),
+        _client_with_tool_calls([("web_search", '{"action":"fetch","url":"https://x"}', "c1")]),
         cfg=_cfg(approval_mode="never"),
     )
     executor.approval_check = AsyncMock(return_value="unavailable")
