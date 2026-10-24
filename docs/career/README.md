@@ -2,6 +2,8 @@
 
 > 目标：大厂 AI Infra / Agent Platform / AI Engineering 方向实习 & 校招
 
+> **历史材料（2026-06-21）**：以下内容（含 30 题 benchmark、关键词覆盖率评分、33/39 工具等数字）是当时的口径与叙事，**不代表当前实现与质量**；正文保持原样仅作历史对照，未删除任何内容。当前口径见 `docs/METRICS.md`（#513），现行门禁为 clause-level eval-gate（28 条 golden set，见根 README「质量与门禁」与 `docs/legacy/README.md`）。
+
 ---
 
 ## 1. 简历版 (4-5 bullet)

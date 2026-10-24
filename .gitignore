@@ -52,6 +52,10 @@ benchmark/replay/
 # RAG 评估报告（跑分产物；口径与数据在 backend/evals/，#208 Phase 1）
 backend/evals/reports/
 
+# 一次性评测报告（跑分产物）；需要留档请显式归档到 docs/legacy/（该目录不受本规则影响）
+/*_report.json
+/backend/*_report.json
+
 # Trace exports
 traces/
 
