@@ -191,8 +191,8 @@
 
             <!-- issue #508（方案 B）：深度分析不再是 Chat 内的模式开关——Agent/PER
                  的审批、计划审批、取消与回放只在 /agent 工作台可用。入口保持一键
-                 可达，当前输入由父组件经 ?prompt= 带过去。
-                 文案硬编码：本 issue 白名单不含 locales/*，i18n key 另开跟进。 -->
+                 可达，当前输入由父组件经 ?prompt= 带过去；文案走 i18n
+                 （chat.openAgentWorkbench，四语）。 -->
             <n-button
               size="tiny"
               quaternary
@@ -201,7 +201,7 @@
               @click="openAgentWorkbench"
             >
               <template #icon><n-icon size="16"><OpenOutline /></n-icon></template>
-              前往 Agent 工作台（支持审批/回放）
+              {{ t('chat.openAgentWorkbench') }}
             </n-button>
             <span
               v-if="!orgPrivacyAllowed"

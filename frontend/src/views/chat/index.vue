@@ -246,7 +246,7 @@ const {
 // 用户已输入的意图；Agent 页消费该参数另开跟进（本 issue 白名单不含 agent 页）。
 const openAgentWorkbench = () => {
   const prompt = inputMessage.value.trim()
-  message.info('深度分析已移至 Agent 工作台（支持审批/回放）')
+  message.info(t('chat.deepAnalysisMoved'))
   router.push({ path: '/agent', query: prompt ? { prompt } : undefined })
 }
 
