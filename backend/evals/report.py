@@ -537,6 +537,11 @@ def render_v15_report(hybrid: dict, dense: dict | None = None) -> str:
         else:
             for ex in items:
                 lines.extend(_render_example(ex))
+            if len(items) < 2:
+                lines.append(
+                    f"- 本 run 仅 {len(items)} 例符合该启发式；未凑数"
+                    "（更多例子需在更大语料或其他检索配置下采集）。"
+                )
         lines.append("")
 
     lines.append("## 复现")
