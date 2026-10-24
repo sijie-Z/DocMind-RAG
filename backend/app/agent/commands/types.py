@@ -10,6 +10,9 @@
 - ``CommandExecution`` 是**总返回**：注册表解析、权限、参数、并发、超时、
   handler 异常都收敛为结构化结果（不向 SSE 流抛出半截异常）；HTTP 端点再按
   ``error_code`` 映射状态码。``execute()`` 只会让 ``CancelledError`` 逃逸。
+- 执行信封（issue #498）：``execution_id``（一次执行一个 uuid）+ ``status``
+  （``completed|failed``）+ ``result``（成功时 ``{content, data}``，失败为
+  ``null``）。``content/data/args`` 等既有字段保留一版，前端逐步迁移。
 """
 
 from __future__ import annotations
@@ -32,6 +35,10 @@ ERROR_COMMAND_TIMEOUT = "command_timeout"
 ERROR_COMMAND_FAILED = "command_failed"
 ERROR_SESSION_REQUIRED = "session_required"
 ERROR_SESSION_NOT_FOUND = "session_not_found"
+# Redis 锁 / 幂等依赖不可用时的 fail-closed（HTTP 503 SERVICE_UNAVAILABLE）。
+ERROR_SERVICE_UNAVAILABLE = "service_unavailable"
+# handler 产出超过上限（/export 1MB）；HTTP 映射 400 VALIDATION_ERROR。
+ERROR_RESULT_TOO_LARGE = "result_too_large"
 
 DEFAULT_COMMAND_TIMEOUT = 10.0
 MAX_COMMAND_TIMEOUT = 120.0
@@ -119,7 +126,12 @@ class Command:
         return (self.name, *self.aliases)
 
     def to_dict(self) -> dict[str, Any]:
-        """GET /commands 的公开形态（不含 handler）。"""
+        """GET /commands 的公开形态（不含 handler）。
+
+        ``args`` 是 v1 既有形态（位置参数列表，保留兼容）；``args_schema``
+        是 issue #498 补齐的 JSON-Schema 风格声明（string 型位置参数），
+        供前端/SDK 直接生成参数提示。
+        """
         return {
             "name": self.name,
             "aliases": list(self.aliases),
@@ -128,7 +140,24 @@ class Command:
             "usage": self.usage or f"/{self.name}",
             "permission": self.permission,
             "args": [arg.to_dict() for arg in self.args],
+            "args_schema": self.args_schema,
         }
+
+    @property
+    def args_schema(self) -> dict[str, Any]:
+        """位置参数的 JSON-Schema 风格声明（全部参数都是 string）。"""
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+        for arg in self.args:
+            prop: dict[str, Any] = {"type": "string", "description": arg.description}
+            if arg.choices:
+                prop["enum"] = list(arg.choices)
+            if arg.default is not None:
+                prop["default"] = arg.default
+            properties[arg.name] = prop
+            if arg.required:
+                required.append(arg.name)
+        return {"type": "object", "properties": properties, "required": required}
 
 
 @dataclass
@@ -153,7 +182,12 @@ class CommandContext:
 
 @dataclass
 class CommandExecution:
-    """命令执行结果（总返回；成功/失败都由它承载）。"""
+    """命令执行结果（总返回；成功/失败都由它承载）。
+
+    - ``execution_id``：一次执行一个 uuid（幂等重放返回同一个 id）；
+    - ``status``：派生自信封——成功 ``completed``，失败 ``failed``；
+    - ``result``：成功时 ``{content, data}``，失败为 ``None``（issue #498）。
+    """
 
     command: str
     line: str
@@ -166,13 +200,27 @@ class CommandExecution:
     error_field: str = ""
     scope: str = "global"
     duration_ms: float = 0.0
+    execution_id: str = ""
+
+    @property
+    def status(self) -> str:
+        return "completed" if self.success else "failed"
+
+    @property
+    def result(self) -> dict[str, Any] | None:
+        if not self.success:
+            return None
+        return {"content": self.content, "data": self.data}
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "execution_id": self.execution_id,
             "command": self.command,
             "line": self.line,
             "scope": self.scope,
             "success": self.success,
+            "status": self.status,
+            "result": self.result,
             "content": self.content,
             "data": self.data,
             "args": self.args,
@@ -181,3 +229,30 @@ class CommandExecution:
             "error_field": self.error_field,
             "duration_ms": round(self.duration_ms, 1),
         }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> CommandExecution:
+        """从 ``to_dict()`` 形态重建（幂等键里存的是完整响应 JSON）。"""
+        result = payload.get("result")
+        content = payload.get("content") or ""
+        data = payload.get("data") or {}
+        if isinstance(result, dict):
+            content = result.get("content", content)
+            data = result.get("data", data) or {}
+        success = bool(payload.get("success"))
+        if payload.get("status") == "failed":
+            success = False
+        return cls(
+            command=str(payload.get("command") or ""),
+            line=str(payload.get("line") or ""),
+            success=success,
+            content=str(content or ""),
+            data=dict(data) if isinstance(data, dict) else {},
+            args=dict(payload.get("args") or {}),
+            error_code=str(payload.get("error_code") or ""),
+            error_message=str(payload.get("error_message") or ""),
+            error_field=str(payload.get("error_field") or ""),
+            scope=str(payload.get("scope") or "global"),
+            duration_ms=float(payload.get("duration_ms") or 0.0),
+            execution_id=str(payload.get("execution_id") or ""),
+        )

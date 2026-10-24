@@ -148,10 +148,16 @@ describe('AgentView · User Commands 执行接线', () => {
       data: {
         success: true,
         data: {
+          execution_id: 'exec-1',
           command: 'help',
           line: '/help',
           scope: 'global',
           success: true,
+          status: 'completed',
+          result: {
+            content: '## 可用命令（4）\n- `/help` — 帮助',
+            data: { commands: [] },
+          },
           content: '## 可用命令（4）\n- `/help` — 帮助',
           data: { commands: [] },
           args: {},
@@ -177,6 +183,64 @@ describe('AgentView · User Commands 执行接线', () => {
     expect(card.text()).toContain('/help')
     const resultCard = wrapper.findComponent({ name: 'CommandResultCard' })
     expect((resultCard.props('terminal') as { content: string }).content).toContain('可用命令')
+    wrapper.unmount()
+  })
+
+  it('执行信封 result 优先于旧字段（issue #498 兼容）', async () => {
+    const base = {
+      execution_id: 'exec-2',
+      command: 'help',
+      line: '/help',
+      scope: 'global',
+      success: true,
+      status: 'completed',
+      content: '旧正文',
+      data: { legacy: true },
+      args: {},
+      error_code: '',
+      error_message: '',
+      error_field: '',
+      duration_ms: 2,
+    }
+    executeMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: { ...base, result: { content: '新正文', data: { fresh: true } } },
+      },
+    })
+    const { wrapper } = await mountView()
+    await runMenuCommand(wrapper, '/help')
+
+    const resultCard = wrapper.findComponent({ name: 'CommandResultCard' })
+    const terminal = resultCard.props('terminal') as {
+      content: string
+      command_data: Record<string, any>
+    }
+    expect(terminal.content).toBe('新正文')
+    expect(terminal.command_data).toEqual({ fresh: true })
+    wrapper.unmount()
+  })
+
+  it('SERVICE_UNAVAILABLE（503）→ 失败卡片展示本地化原因', async () => {
+    executeMock.mockRejectedValue({
+      response: {
+        status: 503,
+        data: {
+          success: false,
+          code: 503,
+          error_code: 'SERVICE_UNAVAILABLE',
+          message: '命令功能未启用',
+          detail: { reason: 'commands_disabled' },
+        },
+      },
+    })
+    const { wrapper } = await mountView()
+    await runMenuCommand(wrapper, '/help')
+
+    const card = wrapper.find('[data-testid="command-result-card"]')
+    expect(card.exists()).toBe(true)
+    expect(card.text()).toContain('命令功能未启用')
+    expect(wrapper.find('[data-testid="command-status"]').text()).toContain('失败')
     wrapper.unmount()
   })
 

@@ -1,5 +1,9 @@
 """issue #475 User Commands —— 注册表 / 解析 / 执行核心（无 LLM、无模型轮次）。
 
+issue #498 增补：Redis 锁 + 幂等键。本机无 Redis，测试用最小 FakeRedis
+（SET NX EX / GET / DELETE / Lua compare-and-del 语义）替代；两个 execute
+调用共享同一个 FakeRedis 实例模拟两个 worker 的外部共享存储。
+
 判别力（每个用例的「变异点」注明「改坏什么会让它红」）：
 - 注册同层重名不报错 → duplicate 用例红；
 - 别名不参与解析 → alias 用例红；
@@ -8,7 +12,10 @@
 - 未知命令降级为普通提示词（不返回错误）→ unknown 用例红；
 - 执行前不判权限 → admin-forbidden 用例红；
 - 参数校验缺失 / 错误不带字段名 → field 用例红；
-- 去掉同会话并发锁 → busy 用例红；
+- 裸命令名不做前导 / 归一 → bare-name 用例红（issue #498）；
+- 去掉 Redis 锁 → busy 用例红；去掉 Lua compare-and-del → 锁残留/误删用例红；
+- 去掉 idempotency SET NX → 同 key 两次执行两次、execution_id 不同（用例红）；
+- Redis 不可用时不 fail closed → service-unavailable 用例红；
 - 去掉超时 → timeout 用例红；
 - 异常原文透传给用户 → no-leak 用例红；
 - 去掉审计日志 → audit 用例红；
@@ -28,9 +35,11 @@ from app.agent.commands import (
     Command,
     CommandArg,
     CommandContext,
+    CommandFailure,
     CommandRegistrationError,
     CommandRegistry,
     CommandResult,
+    CommandSyntaxError,
     DuplicateCommandError,
     agent_scope_for_session,
     execute,
@@ -42,6 +51,57 @@ from app.agent.commands.config import (
     apply_commands_config,
     load_commands_config,
 )
+from app.agent.commands.parser import compose_line
+from app.core.config import settings
+
+
+class FakeRedis:
+    """最小 Redis 替身（issue #498）：只实现命令执行用到的原语。
+
+    - ``set(nx=True)`` 从检查到写入没有 await 间隙，在单事件循环里等价原子；
+    - ``eval`` 只识别 execution.py 的 Lua compare-and-del 脚本（并校验脚本文本，
+      把"改成无条件 DEL"的变异变成测试红）；
+    - TTL 不真正过期（单测时长远小于 TTL），但记录每次 SET 的 ex 供断言。
+    """
+
+    def __init__(self):
+        self.store: dict[str, str] = {}
+        self.set_calls: list[dict] = []
+
+    def __bool__(self):
+        return True
+
+    async def set(self, key, value, nx=False, ex=None, **kwargs):
+        self.set_calls.append({"key": key, "value": value, "nx": nx, "ex": ex})
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+    async def get(self, key):
+        return self.store.get(key)
+
+    async def delete(self, key):
+        self.store.pop(key, None)
+        return 1
+
+    async def eval(self, script, numkeys, *args):
+        assert 'redis.call("get", KEYS[1]) == ARGV[1]' in script, (
+            "锁释放脚本必须是 compare-and-del（无条件 DEL 会让并发误删新持有者的锁）"
+        )
+        key, token = args[0], args[1]
+        if self.store.get(key) == token:
+            self.store.pop(key, None)
+            return 1
+        return 0
+
+
+@pytest.fixture(autouse=True)
+def fake_redis(monkeypatch):
+    """默认给所有执行用例注入共享 FakeRedis；个别用例可覆盖为 None。"""
+    client = FakeRedis()
+    monkeypatch.setattr(execution_mod, "redis_client", client)
+    return client
 
 
 async def _echo_handler(ctx, args):
@@ -249,11 +309,17 @@ async def test_execute_applies_default_argument():
 
 
 @pytest.mark.asyncio
-async def test_execute_requires_slash():
+async def test_execute_accepts_bare_command_name():
+    """issue #498：``help`` 与 ``/help`` 等价（前导 / 可选，内部归一）。"""
     registry = CommandRegistry()
-    result = await execute(_ctx(), "help", registry=registry)
-    assert result.success is False
-    assert result.error_code == "not_a_command"
+    registry.register(_echo_command())
+    result = await execute(_ctx(), "echo hi", registry=registry)
+    assert result.success is True
+    assert result.command == "echo"
+    assert result.content == "echo:hi"
+
+    slashed = await execute(_ctx(), "/echo hi", registry=registry)
+    assert slashed.success is True and slashed.content == result.content
 
 
 @pytest.mark.asyncio
@@ -262,6 +328,27 @@ async def test_execute_empty_command_name():
     result = await execute(_ctx(), "/   ", registry=registry)
     assert result.success is False
     assert result.error_code == "missing_command"
+
+
+def test_compose_line_mapping_requires_contiguous_prefix():
+    """评审 m2：映射 args 提供后面的参数时，前面的位置参数必须有值/默认值。"""
+    required_first = (
+        CommandArg(name="a", description="a", required=True),
+        CommandArg(name="b", description="b"),
+    )
+    assert compose_line("two", {"a": "A", "b": "B"}, arg_specs=required_first) == "/two A B"
+    with pytest.raises(CommandSyntaxError) as excinfo:
+        compose_line("two", {"b": "B"}, arg_specs=required_first)
+    assert excinfo.value.code == "missing_argument"
+    assert excinfo.value.field_name == "a"
+
+    default_first = (
+        CommandArg(name="a", description="a", default="x"),
+        CommandArg(name="b", description="b"),
+    )
+    assert compose_line("two", {"b": "B"}, arg_specs=default_first) == "/two x B"
+    with pytest.raises(CommandSyntaxError):
+        compose_line("two", {"nope": "x"}, arg_specs=default_first)
 
 
 # ── 权限 / 未知命令 / 执行结果 ───────────────────────────────────────────────
@@ -310,6 +397,245 @@ async def test_execute_success_returns_content_data_and_scope():
     assert result.data == {"value": "hi"}
     assert result.scope == GLOBAL_SCOPE
     assert result.duration_ms >= 0
+
+
+@pytest.mark.asyncio
+async def test_execute_envelope_has_execution_id_status_result():
+    """issue #498：响应信封 execution_id/status/result（保留旧字段）。"""
+    registry = CommandRegistry()
+    registry.register(_echo_command())
+
+    ok = await execute(_ctx(session_id=None), "/echo hi", registry=registry)
+    payload = ok.to_dict()
+    assert payload["execution_id"] == ok.execution_id
+    assert len(payload["execution_id"]) == 32, "execution_id 必须是 uuid hex"
+    assert payload["status"] == "completed"
+    assert payload["result"] == {"content": "echo:hi", "data": {"value": "hi"}}
+    # 旧字段保留一版兼容
+    assert payload["content"] == "echo:hi" and payload["data"] == {"value": "hi"}
+
+    failed = await execute(_ctx(session_id=None), "/nope", registry=registry)
+    failed_payload = failed.to_dict()
+    assert failed_payload["status"] == "failed"
+    assert failed_payload["result"] is None
+    assert failed_payload["execution_id"] and failed_payload["execution_id"] != ok.execution_id
+
+
+@pytest.mark.asyncio
+async def test_execute_fails_closed_when_redis_unavailable(monkeypatch):
+    """变异点：Redis 不可用时退回进程内锁/放行 → 本用例红（issue #498 fail-closed）。"""
+    monkeypatch.setattr(execution_mod, "redis_client", None)
+    registry = CommandRegistry()
+    registry.register(_echo_command())
+    result = await execute(_ctx(), "/echo hi", registry=registry)
+    assert result.success is False
+    assert result.error_code == "service_unavailable"
+    assert result.data.get("reason") == "redis_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_idempotency_key_returns_same_execution_and_runs_handler_once():
+    """变异点：去掉幂等 SET NX → 同 key 两次都执行（本用例红，issue #498）。"""
+    calls: list[int] = []
+
+    async def _count(ctx, args):
+        calls.append(len(calls) + 1)
+        return CommandResult(content=f"run-{len(calls)}", data={"n": len(calls)})
+
+    registry = CommandRegistry()
+    registry.register(Command(name="count", description="", handler=_count))
+
+    first = await execute(
+        _ctx(session_id=None), "/count", registry=registry, idempotency_key="key-1"
+    )
+    second = await execute(
+        _ctx(session_id=None), "/count", registry=registry, idempotency_key="key-1"
+    )
+    assert first.success is True and first.content == "run-1"
+    assert second.success is True
+    assert second.execution_id == first.execution_id, "重复请求必须返回同一 execution_id"
+    assert second.content == "run-1"
+    assert calls == [1], "handler 只允许执行一次"
+
+
+@pytest.mark.asyncio
+async def test_idempotency_key_is_scoped_per_user(fake_redis):
+    """变异点：幂等键不带 user 前缀 → 跨用户互相顶掉（本用例红）。"""
+    calls: list[int] = []
+
+    async def _count(ctx, args):
+        calls.append(ctx.user_id)
+        return CommandResult(content="ok")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="count", description="", handler=_count))
+
+    ctx_a = _ctx(session_id=None)
+    ctx_b = _ctx(session_id=None)
+    ctx_b.user_id = 8
+    a = await execute(ctx_a, "/count", registry=registry, idempotency_key="same-key")
+    b = await execute(ctx_b, "/count", registry=registry, idempotency_key="same-key")
+    assert a.execution_id != b.execution_id
+    assert calls == [7, 8]
+    assert any(key.startswith("cmd:idem:7:") for key in fake_redis.store)
+    assert any(key.startswith("cmd:idem:8:") for key in fake_redis.store)
+
+
+@pytest.mark.asyncio
+async def test_idempotency_failure_is_not_cached_and_can_retry():
+    """失败不缓存：同 key 的未知命令失败后，重试可正常执行。"""
+    registry = CommandRegistry()
+    registry.register(_echo_command())
+
+    failed = await execute(_ctx(), "/nope", registry=registry, idempotency_key="retry")
+    assert failed.success is False and failed.error_code == "unknown_command"
+    retried = await execute(_ctx(), "/echo hi", registry=registry, idempotency_key="retry")
+    assert retried.success is True and retried.content == "echo:hi"
+    assert retried.execution_id != failed.execution_id
+
+
+@pytest.mark.asyncio
+async def test_idempotency_cleanup_keeps_new_claimant_after_pending_takeover(fake_redis):
+    """评审边界：pending 过期被新请求接管后，旧请求的失败清理不得误删新占位。"""
+    idem_key = "cmd:idem:7:race-key"
+
+    async def _takeover_then_fail(ctx, args):
+        # 模拟 pending 已过期、新请求已用同一 key 写入自己的占位。
+        fake_redis.store[idem_key] = json.dumps(
+            {"state": "pending", "execution_id": "new-claimant"}
+        )
+        raise CommandFailure("command_failed", "boom")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="race", description="", handler=_takeover_then_fail))
+    result = await execute(
+        _ctx(session_id=None), "/race", registry=registry, idempotency_key="race-key"
+    )
+    assert result.success is False and result.error_code == "command_failed"
+    assert json.loads(fake_redis.store[idem_key])["execution_id"] == "new-claimant"
+
+
+@pytest.mark.asyncio
+async def test_idempotent_replay_rechecks_admin_permission():
+    """评审 minor：幂等重放不得让已失去管理员身份的用户拿到缓存结果。"""
+    calls: list[int] = []
+
+    async def _secret(ctx, args):
+        calls.append(1)
+        return CommandResult(content="secret")
+
+    registry = CommandRegistry()
+    registry.register(
+        Command(name="secret", description="管理命令", permission="admin", handler=_secret)
+    )
+    first = await execute(
+        _ctx(is_admin=True), "/secret", registry=registry, idempotency_key="admin-key"
+    )
+    assert first.success is True and first.content == "secret"
+
+    replay = await execute(
+        _ctx(is_admin=False), "/secret", registry=registry, idempotency_key="admin-key"
+    )
+    assert replay.success is False and replay.error_code == "permission_denied"
+    assert calls == [1], "缓存命中也不得重跑 handler"
+
+
+@pytest.mark.asyncio
+async def test_idempotency_pending_uses_short_ttl_and_result_uses_24h(fake_redis):
+    """评审 M2：pending 用短 TTL（崩溃自愈）；最终结果用 24h TTL。"""
+    registry = CommandRegistry()
+    registry.register(_echo_command())
+    await execute(_ctx(session_id=None), "/echo hi", registry=registry, idempotency_key="ttl-key")
+    calls = [call for call in fake_redis.set_calls if call["key"] == "cmd:idem:7:ttl-key"]
+    assert len(calls) == 2
+    assert calls[0]["nx"] is True, "pending 必须 SET NX 抢占"
+    assert calls[0]["ex"] == execution_mod.idempotency_pending_ttl()
+    assert calls[0]["ex"] < settings.COMMANDS_IDEMPOTENCY_TTL_SECONDS, (
+        "pending 不得沿用 24h TTL（worker 崩溃会锁死同一幂等键）"
+    )
+    assert calls[1]["nx"] is False and calls[1]["ex"] == settings.COMMANDS_IDEMPOTENCY_TTL_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_lock_release_compare_and_del_keeps_new_owners_lock(fake_redis):
+    """变异点：Lua 改成无条件 DEL → 本用例红（误删 TTL 过期后新持有者的锁）。"""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow(ctx, args):
+        started.set()
+        await release.wait()
+        return CommandResult(content="slow-done")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="slow", description="", handler=_slow))
+    task = asyncio.create_task(
+        execute(_ctx(session_id="s-cas"), "/slow", registry=registry, redis=fake_redis)
+    )
+    await started.wait()
+    lock_key = execution_mod.lock_redis_key(_ctx(session_id="s-cas"))
+    fake_redis.store[lock_key] = "new-owner-token"  # 模拟 TTL 过期后新 owner 接管
+    release.set()
+    assert (await task).success is True
+    assert fake_redis.store[lock_key] == "new-owner-token", "旧 owner 不得误删新锁"
+
+
+@pytest.mark.asyncio
+async def test_audit_log_escapes_control_chars_in_line(caplog):
+    """评审 minor：用户可控 line 不得在审计日志里伪造新行（CWE-117）。"""
+    registry = CommandRegistry()
+    with caplog.at_level(logging.INFO, logger="app.agent.commands.execution"):
+        await execute(_ctx(session_id=None), "/nope\nFORGED-LINE", registry=registry)
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("nope" in message for message in messages)
+    assert any("\\nFORGED-LINE" in message for message in messages)
+    assert not any("\n" in message for message in messages), "日志必须是单物理行"
+
+
+@pytest.mark.asyncio
+async def test_lock_is_external_and_shared_between_execution_instances(fake_redis):
+    """两个 execute 实例共享同一 FakeRedis（模拟两个 worker）：锁必须互斥。
+
+    变异点：锁退回进程内字典 → 第二个实例看不到第一个的锁（本用例红）。
+    """
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow(ctx, args):
+        started.set()
+        await release.wait()
+        return CommandResult(content="slow-done")
+
+    async def _fast(ctx, args):
+        return CommandResult(content="fast-done")
+
+    registry_a = CommandRegistry()
+    registry_a.register(Command(name="slow", description="", handler=_slow))
+    registry_b = CommandRegistry()
+    registry_b.register(Command(name="fast", description="", handler=_fast))
+
+    first = asyncio.create_task(
+        execute(
+            _ctx(session_id="shared"),
+            "/slow",
+            registry=registry_a,
+            redis=fake_redis,
+        )
+    )
+    await started.wait()
+    busy = await execute(_ctx(session_id="shared"), "/fast", registry=registry_b, redis=fake_redis)
+    assert busy.success is False and busy.error_code == "command_busy"
+
+    other_session = await execute(
+        _ctx(session_id="other"), "/fast", registry=registry_b, redis=fake_redis
+    )
+    assert other_session.success is True, "不同会话不得互相阻塞"
+
+    release.set()
+    assert (await first).success is True
+    assert not any(key.startswith("cmd:lock:") for key in fake_redis.store), (
+        "执行结束必须 compare-and-del 释放锁"
+    )
 
 
 @pytest.mark.asyncio

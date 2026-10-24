@@ -1,13 +1,21 @@
 """issue #475 User Commands —— API 契约 + chat 前置拦截（无模型轮次）。
 
+issue #498 增补：请求契约（line / command+args / idempotency_key）、响应信封
+（execution_id/status/result）、Redis 锁与幂等（本机无 Redis，用共享 FakeRedis
+替身；多进程互斥的最小单测在 tests/unit/test_user_commands.py）。
+
 判别力（变异点）：
 - GET /commands 不做组织 fail-closed（无组织用户仍 200）→ org 用例红；
-- GET /commands 不按权限过滤 / 字段缺失 → metadata 用例红；
-- 命令未启用时仍可执行 → disabled 用例红；
+- GET /commands 不按权限过滤 / 字段缺失（含 args_schema）→ metadata 用例红；
+- 命令未启用时仍可执行 / 状态码不是 503 → disabled 用例红；
 - POST /commands/execute 未知命令返回 200 / 消息漏给模型 → unknown 用例红；
+- 未知命令错误码不是契约 NOT_FOUND → unknown 用例红；
 - 参数错误不带 field → field 用例红；
 - 管理命令不做权限判定 → forbidden 用例红；
 - session_id 不做归属校验（跨租户作用域）→ session-access 用例红；
+- 只接受 line、command+args 兼容层 422 → compat 用例红；
+- 同一 idempotency_key 两次不同 execution_id / handler 执行两次 → idem 用例红；
+- Redis 不可用不 fail closed（200/404）→ redis-unavailable 用例红；
 - /agent/chat 对 "/" 开头文本不短路（进入 agent_service.chat）→ no-model 用例红；
 - /chat/stream useAgent 对 "/" 开头文本不短路 → chat-stream 用例红；
 - 命令执行后落库（写用户消息）→ save 用例红。
@@ -24,12 +32,51 @@ import app.agent.commands.execution as execution_mod
 import app.api.v1.endpoints.agent as agent_api
 import app.api.v1.endpoints.chat as chat_api
 import app.api.v1.endpoints.commands as commands_api
-from app.agent.commands import Command, CommandResult, command_registry
+from app.agent.commands import Command, CommandArg, CommandResult, command_registry
+from app.agent.commands.types import ERROR_RESULT_TOO_LARGE, CommandExecution
 from app.agent.service import agent_service
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.main import app
+
+
+class FakeRedis:
+    """最小 Redis 替身：SET NX EX / GET / DELETE / Lua compare-and-del。"""
+
+    def __init__(self):
+        self.store: dict[str, str] = {}
+
+    def __bool__(self):
+        return True
+
+    async def set(self, key, value, nx=False, ex=None, **kwargs):
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+    async def get(self, key):
+        return self.store.get(key)
+
+    async def delete(self, key):
+        self.store.pop(key, None)
+        return 1
+
+    async def eval(self, script, numkeys, *args):
+        assert 'redis.call("get", KEYS[1]) == ARGV[1]' in script, "必须是 compare-and-del"
+        key, token = args[0], args[1]
+        if self.store.get(key) == token:
+            self.store.pop(key, None)
+            return 1
+        return 0
+
+
+@pytest.fixture(autouse=True)
+def fake_redis(monkeypatch):
+    client = FakeRedis()
+    monkeypatch.setattr(execution_mod, "redis_client", client)
+    return client
 
 
 def _user(org_id=1, is_superuser=False):
@@ -160,6 +207,9 @@ def test_list_commands_returns_metadata_and_filters_admin(client, auth, monkeypa
     assert help_cmd["permission"] == "user"
     assert help_cmd["description_i18n"]["zh"] and help_cmd["description_i18n"]["en"]
     assert isinstance(help_cmd["args"], list) and help_cmd["args"]
+    # issue #498：GET 命令项必须带 args_schema（JSON-Schema 风格）。
+    assert help_cmd["args_schema"]["type"] == "object"
+    assert "command" in help_cmd["args_schema"]["properties"]
 
     _patch_admin(monkeypatch, True)
     r2 = client.get("/api/v1/commands")
@@ -196,7 +246,136 @@ def test_execute_help_success_never_calls_model(client, auth, monkeypatch, no_mo
     assert data["command"] == "help"
     assert "/status" in data["content"]
     assert data["error_code"] == ""
+    # issue #498 执行信封
+    assert data["execution_id"] and data["status"] == "completed"
+    assert data["result"]["content"] == data["content"]
     assert no_model == [], "命令执行不得进入 agent_service.chat（无模型轮次）"
+
+
+def test_execute_bare_line_without_slash_is_accepted(client, auth, monkeypatch, no_model):
+    """issue #498：``help``（无前导 /）与 ``/help`` 等价。"""
+    _patch_admin(monkeypatch, False)
+    r = client.post("/api/v1/commands/execute", json={"line": "help"})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["command"] == "help"
+
+
+def test_execute_command_args_compat_body(client, auth, monkeypatch, no_model):
+    """issue #498：``{"command","args"}`` 兼容层（args 空对象 / 位置数组均可）。"""
+    _patch_admin(monkeypatch, False)
+    r = client.post("/api/v1/commands/execute", json={"command": "help", "args": {}})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["command"] == "help"
+
+    r2 = client.post("/api/v1/commands/execute", json={"command": "help", "args": ["export"]})
+    assert r2.status_code == 200, r2.text
+    data = r2.json()["data"]
+    assert data["command"] == "help" and "/export" in data["content"]
+
+
+def test_execute_command_args_unknown_mapping_field_is_400(client, auth, monkeypatch):
+    """评审 minor：映射型 args 的未知键必须显式 400，不得静默错绑为位置参数。"""
+    _patch_admin(monkeypatch, False)
+    r = client.post("/api/v1/commands/execute", json={"command": "help", "args": {"nope": "x"}})
+    assert r.status_code == 400, r.text
+    body = r.json()
+    assert body["error_code"] == "COMMAND_INVALID_ARGUMENT"
+    assert body["detail"]["fields"] == ["nope"]
+
+
+def test_execute_command_args_mapping_cannot_skip_positional(client, auth, monkeypatch):
+    """评审 m2：两参命令只给第二个参数 → 400（不得把值错绑到第一个位置）。"""
+
+    async def _handler(ctx, args):
+        return CommandResult(content=f"{args.get('a')}-{args.get('b')}", data=args)
+
+    _patch_admin(monkeypatch, False)
+    command_registry.register(
+        Command(
+            name="two-probe",
+            description="",
+            args=(
+                CommandArg(name="a", description="a", required=True),
+                CommandArg(name="b", description="b"),
+            ),
+            handler=_handler,
+        )
+    )
+    try:
+        skipped = client.post(
+            "/api/v1/commands/execute", json={"command": "two-probe", "args": {"b": "B"}}
+        )
+        full = client.post(
+            "/api/v1/commands/execute",
+            json={"command": "two-probe", "args": {"a": "A", "b": "B"}},
+        )
+    finally:
+        command_registry.unregister("two-probe")
+
+    assert skipped.status_code == 400, skipped.text
+    assert skipped.json()["error_code"] == "COMMAND_INVALID_ARGUMENT"
+    assert skipped.json()["detail"]["field"] == "a"
+    assert full.status_code == 200, full.text
+    assert full.json()["data"]["args"] == {"a": "A", "b": "B"}
+
+
+def test_execute_requires_line_or_command(client, auth, monkeypatch):
+    r = client.post("/api/v1/commands/execute", json={"session_id": "s"})
+    assert r.status_code == 422
+
+
+def test_execute_idempotency_key_returns_same_execution_id(client, auth, monkeypatch, no_model):
+    """变异点：body 丢弃 idempotency_key → 两次 execution_id 不同、handler 跑两次。"""
+    _patch_admin(monkeypatch, False)
+    calls: list[int] = []
+
+    async def _handler(ctx, args):
+        calls.append(len(calls) + 1)
+        return CommandResult(content=f"run-{len(calls)}")
+
+    command_registry.register(Command(name="idem-probe", description="", handler=_handler))
+    try:
+        r1 = client.post(
+            "/api/v1/commands/execute",
+            json={"line": "/idem-probe", "idempotency_key": "api-key-1"},
+        )
+        r2 = client.post(
+            "/api/v1/commands/execute",
+            json={"line": "/idem-probe", "idempotency_key": "api-key-1"},
+        )
+    finally:
+        command_registry.unregister("idem-probe")
+    assert r1.status_code == 200 and r2.status_code == 200
+    first, second = r1.json()["data"], r2.json()["data"]
+    assert first["execution_id"] == second["execution_id"]
+    assert first["content"] == "run-1" and second["content"] == "run-1"
+    assert calls == [1], "handler 只执行一次"
+
+
+def test_execute_redis_unavailable_is_503(client, auth, monkeypatch, no_model):
+    """issue #498 fail-closed：Redis 不可用 → 503 SERVICE_UNAVAILABLE（不假装安全）。"""
+    _patch_admin(monkeypatch, False)
+    monkeypatch.setattr(execution_mod, "redis_client", None)
+    r = client.post("/api/v1/commands/execute", json={"line": "/help"})
+    assert r.status_code == 503
+    body = r.json()
+    assert body["error_code"] == "SERVICE_UNAVAILABLE"
+    assert body["detail"]["error_code"] == "service_unavailable"
+
+
+def test_export_too_large_maps_to_400_validation_error():
+    """issue #498：/export 超 1MB 的上限错误码对外映射 400 VALIDATION_ERROR。"""
+    exc = commands_api.CommandExecutionError(
+        CommandExecution(
+            command="export",
+            line="/export",
+            success=False,
+            error_code=ERROR_RESULT_TOO_LARGE,
+            error_message="导出内容超过 1MB 上限",
+        )
+    )
+    assert exc.status_code == 400
+    assert exc.error_code == "VALIDATION_ERROR"
 
 
 def test_execute_unknown_command_is_404(client, auth, monkeypatch, no_model):
@@ -204,7 +383,8 @@ def test_execute_unknown_command_is_404(client, auth, monkeypatch, no_model):
     r = client.post("/api/v1/commands/execute", json={"line": "/definitely-not-a-command"})
     assert r.status_code == 404
     body = r.json()
-    assert body["error_code"] == "COMMAND_NOT_FOUND"
+    # 契约（issue #498）：404 NOT_FOUND；detail.error_code 保留内部原因。
+    assert body["error_code"] == "NOT_FOUND"
     assert body["detail"]["error_code"] == "unknown_command"
     assert no_model == []
 
@@ -252,11 +432,14 @@ def test_execute_requires_organization_fail_closed(client, monkeypatch):
     assert r.status_code == 403
 
 
-def test_execute_disabled_feature_is_404(client, auth, monkeypatch, no_model):
+def test_execute_disabled_feature_is_503(client, auth, monkeypatch, no_model):
+    """issue #498：COMMANDS_ENABLED=false → POST 503 SERVICE_UNAVAILABLE。"""
     monkeypatch.setattr(settings, "COMMANDS_ENABLED", False)
     r = client.post("/api/v1/commands/execute", json={"line": "/help"})
-    assert r.status_code == 404
-    assert r.json()["error_code"] == "COMMANDS_DISABLED"
+    assert r.status_code == 503
+    body = r.json()
+    assert body["error_code"] == "SERVICE_UNAVAILABLE"
+    assert body["detail"]["reason"] == "commands_disabled"
     assert no_model == []
 
 
