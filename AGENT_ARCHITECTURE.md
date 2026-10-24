@@ -4,6 +4,8 @@
 
 DocMind Agent 是一个 **Planning-Execution-Reflection (PER)** 三阶段自主智能体系统，集成了 39 个生产级工具、四层记忆系统和实时 SSE 流式事件协议。架构设计参考了学术界和工业界的主流 Agent 范式，面向企业 RAG 知识库场景深度定制。
 
+> 数字口径：本文件引用的工具数、SSE 事件数与测试快照统一登记在 `docs/METRICS.md`（值 / 口径 / 命令 / 日期 / 备注）；本文件只引用同值数字，不另行定义口径。
+
 ## 架构总览
 
 ```
@@ -177,7 +179,7 @@ Reflector.reflect(plan, results)
 | `get_prompt_template` | 获取指定模板内容 | prompts |
 | `get_current_time` | 当前日期时间 | utility |
 
-### 工具包工具 (19) — `tools/` 包
+### 工具包工具 (25) — `tools/` 包
 
 > 下表为功能示意，非完整清单（完整注册列表见 `GET /api/v1/agent/tools`）。
 

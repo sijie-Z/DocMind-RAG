@@ -2,6 +2,8 @@
 
 > 目标：大厂 AI Infra / Agent Platform / AI Engineering 方向实习 & 校招
 
+> **数字口径（2026-10-24）**：本页是 2026-06 的面试叙事存档。文中「30 题 benchmark」「5 轮 planning 实验」是历史 planning 评测口径（关键词覆盖率），**不是**当前的 clause-level Eval；英文旧稿的工具数 33 已修正为 39。对外引用任何数字前，一律以 [`docs/METRICS.md`](../METRICS.md) 为准（值 / 口径 / 命令 / 日期 / 备注）：`registered_tools=39`（2026-10-24）；Eval v1.5 = 80 条，mode=fake，2026-10-24，来源 PR #525（尚未合并）。
+
 ---
 
 ## 1. 简历版 (4-5 bullet)
@@ -12,7 +14,7 @@
 DocMind — Agent Research & Evaluation Platform
 
 • Built a benchmark-driven agent system (PER architecture: Planning → Execution → Reflection)
-  with DAG-based parallel execution and 33 integrated tools.
+  with DAG-based parallel execution and 39 integrated tools.
 
 • Designed and conducted 5 controlled experiments on Planner granularity and execution
   architecture trade-offs; identified planning quality as the dominant performance factor.
