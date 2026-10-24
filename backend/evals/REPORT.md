@@ -3,9 +3,9 @@
 - 数据集：`docmind_clause_v1_5` v1（80 条 = 正例 60 + 负例 20）
 - 语料：8 个文件 / 362 个 chunk / 354 条 clause-level 定义（确定性分块，一条款一 chunk）
 - 运行模式：`fake`（确定性伪嵌入，无 LLM/rerank）　检索器：`hybrid`
-- 日期：2026-10-24T05:12:09+00:00　索引：`docmind_knowledge_eval_public_v1`　ES：8.11.0
-- 语料指纹（sha256）：`6b7f5fff7516e8887887853bed31e091c3419016149c605c96306364d3a0e12e`　代码/语料 commit：`d867a2b39627b9b9432cf3fae609d225f5fc34cb`
-- dense 报告：日期 2026-10-24T05:12:18+00:00　语料指纹 `6b7f5fff7516e8887887853bed31e091c3419016149c605c96306364d3a0e12e`
+- 日期：2026-10-24T05:14:02+00:00　索引：`docmind_knowledge_eval_public_v1`　ES：8.11.0
+- 语料指纹（sha256）：`6b7f5fff7516e8887887853bed31e091c3419016149c605c96306364d3a0e12e`　代码/语料 commit：`bcb4820ae02d910c2a036acbdd6ac834c196f402`
+- dense 报告：日期 2026-10-24T05:14:09+00:00　语料指纹 `6b7f5fff7516e8887887853bed31e091c3419016149c605c96306364d3a0e12e`
 
 > 口径：ClauseHit@k = top-k 中存在「文件名匹配 + 条号位于 chunk 行首定义位」的块；
 > NearMiss@k = 声明 near-miss 的正例中 top-k 出现相邻条定义位的比例（越低越好）；Wilson 95% CI；不引入 bootstrap。
