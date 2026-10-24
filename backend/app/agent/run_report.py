@@ -106,6 +106,10 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
 
     return {
         "task_id": ctx.task_id,
+        # issue #510 第二步：ID 语义贯通 —— task_id 一次 run / request_id 一次
+        # HTTP 请求（与 X-Request-ID 同源）；与 SSE、llm_calls.jsonl、结构化日志
+        # 同一口径，不做假的"统一 trace_id"。request_id 缺失时如实为 None。
+        "request_id": ctx.request_id,
         "query": ctx.query,
         "goal": ctx.goal,
         "plan_summary": ctx.plan_summary,
@@ -146,6 +150,9 @@ def render_run_report_text(report: dict[str, Any]) -> str:
     """Render the report dict as plain text for logs / debugging."""
     lines: list[str] = []
     lines.append(f"=== Run Report [{report['task_id']}] ===")
+    # issue #510：request_id 非空才渲染，既有报告文本在无请求上下文时零变化。
+    if report.get("request_id"):
+        lines.append(f"Request: {report['request_id']}")
     lines.append(f"Query: {report['query']}")
     lines.append(f"Goal:  {report['goal'] or '(unset)'}")
     lines.append(f"Duration: {report['duration_ms']} ms")

@@ -19,6 +19,7 @@ evaluator was absent). See ``reflect()`` for the three-state handling.
 import json
 import logging
 import re
+import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
@@ -28,7 +29,7 @@ from openai import AsyncOpenAI
 from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.planner import Plan
-from app.agent.usage import record_llm_usage
+from app.agent.usage import record_llm_call_error, record_llm_usage
 from app.core.log_safety import log_safe
 from app.core.prometheus import AGENT_REFLECTION_DECISIONS
 
@@ -171,19 +172,29 @@ class Reflector:
             results_summary=results_summary,
         )
 
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "请评估以上执行结果。"},
+        ]
+        llm_started = time.perf_counter()
+        llm_recorded = False
         try:
             _reflection_stats["llm_reflection_count"] += 1
             response = await self.client.chat.completions.create(
                 model=self.config.get_deep_model(),
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "请评估以上执行结果。"},
-                ],
+                messages=messages,
                 temperature=0.0,
                 max_tokens=self.config.reflection_max_tokens,
                 timeout=30.0,
             )
-            record_llm_usage(response, ctx)
+            # issue #510：调用级 JSONL（延迟 + 提示词摘要，不落正文）。
+            record_llm_usage(
+                response,
+                ctx,
+                latency_ms=(time.perf_counter() - llm_started) * 1000,
+                messages=messages,
+            )
+            llm_recorded = True
 
             content = response.choices[0].message.content or ""
             reflection_data = self._extract_json(content)
@@ -192,6 +203,14 @@ class Reflector:
             # W0-5：这是异常原文在反思链路的唯一保留点（decision/事件已固定文案），
             # 日志值过 log_safe（防换行伪造日志行）。
             logger.error("Reflection LLM call failed: %s", log_safe(e))
+            if not llm_recorded:
+                record_llm_call_error(
+                    ctx,
+                    model=self.config.get_deep_model(),
+                    error=e,
+                    latency_ms=(time.perf_counter() - llm_started) * 1000,
+                    messages=messages,
+                )
             if span:
                 span.end(output=f"error: {e}", level="ERROR")
             # issue #301 #7（三态设计：降级 ≠ 失败但 ≠ 假 pass）：

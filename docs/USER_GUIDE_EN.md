@@ -307,8 +307,9 @@ To change embedding providers:
 | `ENABLE_MONITORING` | `true` | only controls the background snapshot task, not the `/metrics` endpoint |
 | `LOG_LEVEL` / `LOG_JSON` | `INFO` / `true` (code; template says `false`) | log level and JSON format |
 | `LOG_FILE` | `logs/docmind.log` | log file |
+| `LLM_CALL_LOG_ENABLED` / `LLM_CALL_LOG_FILE` / `LLM_CALL_LOG_PER_RUN` | `true` / `logs/llm_calls.jsonl` / `false` | per-LLM-call JSONL (issue #510): one metadata line per call (`task_id`/`request_id`/model/tokens/latency/prompt_hash), **never prompt/completion bodies**; `PER_RUN=true` splits by run |
 | `ENABLE_TRACING` / `OTLP_ENDPOINT` | `false` / empty | OpenTelemetry (read via `os.getenv`) |
-| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | empty / empty / `https://cloud.langfuse.com` | LLM tracing (optional) |
+| `LANGFUSE_ENABLED` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | `true` / empty / empty / `https://cloud.langfuse.com` | LLM tracing (optional; inactive without keys. Marked as a deletion candidate, kept until approved) |
 | `ENABLE_SCHEDULER` | `true` | in-process scheduler; **single-instance semantics**, use external scheduling for multi-worker |
 
 ---

@@ -257,6 +257,10 @@ class AISettings(BaseSettings):
     TERMINAL_REQUIRE_APPROVAL: bool = True
 
     # Observability — Langfuse
+    # Deprecated candidate（issue #510 第三步待仓库所有者批准删除；未获批准前
+    # 文件/依赖/埋点全部保留）。显式总开关：默认 True 维持既有语义
+    # （配了 key 才真正启用）；置 false 可在保留代码的同时彻底关闭。
+    LANGFUSE_ENABLED: bool = True
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"

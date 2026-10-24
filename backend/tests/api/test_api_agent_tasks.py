@@ -171,8 +171,8 @@ def test_resume_streams_sse_contract_and_passes_claim_false(client, auth, monkey
         calls["prepare"] = (task_id, user_id, organization_id)
         return _task(), {"session_id": "", "partial_output": ""}
 
-    async def _fake_resume(task_id, user_id, *, config=None, claim=True):
-        calls["resume"] = {"task_id": task_id, "claim": claim}
+    async def _fake_resume(task_id, user_id, *, config=None, claim=True, request_id=None):
+        calls["resume"] = {"task_id": task_id, "claim": claim, "request_id": request_id}
         yield AgentEvent(type="thinking", content="继续执行", plan_step_id="s3")
         yield AgentEvent(type="chunk", content="后续产出")
         yield AgentEvent(type="done", task_id=task_id)
@@ -188,9 +188,21 @@ def test_resume_streams_sse_contract_and_passes_claim_false(client, auth, monkey
     payloads = [json.loads(ln) for ln in lines]
     assert payloads[0]["type"] == "thinking"
     assert any(p["type"] == "chunk" and p["content"] == "后续产出" for p in payloads)
-    assert payloads[-1] == {"type": "done", "content": "", "task_id": _TASK_ID}
+    request_id = r.headers.get("x-request-id")
+    assert request_id, "RequestIDMiddleware 必须给响应盖 X-Request-ID"
+    assert payloads[-1] == {
+        "type": "done",
+        "content": "",
+        "task_id": _TASK_ID,
+        # issue #510 第二步：done 帧携带本次请求编号（与 X-Request-ID 同源）
+        "request_id": request_id,
+    }
     assert calls["prepare"] == (_TASK_ID, 1, 1)
-    assert calls["resume"] == {"task_id": _TASK_ID, "claim": False}
+    assert calls["resume"] == {
+        "task_id": _TASK_ID,
+        "claim": False,
+        "request_id": request_id,
+    }, "resume_chat 必须收到本次请求的 request_id"
 
 
 def test_resume_saves_session_interaction_with_prefix(client, auth, monkeypatch):
@@ -203,7 +215,7 @@ def test_resume_saves_session_interaction_with_prefix(client, auth, monkeypatch)
     async def _prepare(task_id, user_id, organization_id=None):
         return _task(), {"session_id": "sess-9", "partial_output": "前半"}
 
-    async def _fake_resume(task_id, user_id, *, config=None, claim=True):
+    async def _fake_resume(task_id, user_id, *, config=None, claim=True, request_id=None):
         yield AgentEvent(type="chunk", content="后半")
 
     async def _save(session_id, user_id, query, organization_id, assistant_response="", **kwargs):
@@ -517,7 +529,7 @@ def test_resume_stream_error_is_generic_detail_only_in_server_log(client, auth, 
     async def _prepare(task_id, user_id, organization_id=None):
         return _task(), {"session_id": "", "partial_output": ""}
 
-    async def _boom(task_id, user_id, *, config=None, claim=True):
+    async def _boom(task_id, user_id, *, config=None, claim=True, request_id=None):
         raise RuntimeError("SECRET-TOKEN-xyz")
         yield  # pragma: no cover — 需要 async generator 形态
 

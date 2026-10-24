@@ -35,7 +35,7 @@ from openai import AsyncOpenAI
 from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.registry import tool_registry
-from app.agent.usage import record_llm_usage
+from app.agent.usage import record_llm_call_error, record_llm_usage
 from app.core.prometheus import AGENT_PLANNING_LATENCY, AGENT_PLANNING_TOTAL
 
 logger = logging.getLogger(__name__)
@@ -392,6 +392,9 @@ class Planner:
 
         try:
             # Real streaming: tokens flow to frontend as they arrive from the LLM
+            # issue #510：墙钟从发起请求计到流读完（第一次 token 前的等待也计入）。
+            llm_started = time.perf_counter()
+            llm_recorded = False
             stream = await self.client.chat.completions.create(
                 model=self.config.get_deep_model(),
                 messages=messages,
@@ -443,9 +446,15 @@ class Planner:
                             plan_id=plan_id,
                         )
 
-            # 用量记账（issue #202）：流式 usage 统一走单一入口
-            if stream_usage is not None:
-                record_llm_usage(SimpleNamespace(usage=stream_usage, model=stream_model), ctx)
+            # 用量记账（issue #202）：流式 usage 统一走单一入口；
+            # issue #510：同入口写调用级 JSONL（延迟 + 提示词摘要，不落正文）。
+            record_llm_usage(
+                SimpleNamespace(usage=stream_usage, model=stream_model),
+                ctx,
+                latency_ms=(time.perf_counter() - llm_started) * 1000,
+                messages=messages,
+            )
+            llm_recorded = True
 
             # Parse the complete response
             plan_json = self._extract_json(full_content)
@@ -512,6 +521,16 @@ class Planner:
 
         except Exception as e:
             logger.error(f"Planning failed: {e}", exc_info=True)
+            # issue #510：失败调用同样留一行（error 字段，无 usage）；已成功
+            # 记账后的下游解析/落盘异常不重复记（避免成功调用被记成失败）。
+            if not llm_recorded:
+                record_llm_call_error(
+                    ctx,
+                    model=self.config.get_deep_model(),
+                    error=e,
+                    latency_ms=(time.perf_counter() - llm_started) * 1000,
+                    messages=messages,
+                )
             if span:
                 span.end(output=f"error: {e}", level="ERROR")
             # Fallback: single-step plan on error

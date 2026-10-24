@@ -32,7 +32,7 @@ from app.agent.planner import Plan, PlanStep
 from app.agent.registry import ToolResult, tool_registry
 from app.agent.retry_policy import compute_backoff, get_policy
 from app.agent.run_context import RunContext
-from app.agent.usage import record_llm_usage
+from app.agent.usage import record_llm_call_error, record_llm_usage
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.log_safety import log_safe
 from app.core.prometheus import (
@@ -1223,6 +1223,12 @@ class Executor:
         # "completed" 记录。失败 attempt 不再伪造绿色记录；终态失败由
         # _execute_step_with_retry 的重试循环尽头统一落账。
         attempt_error_detail: str | None = None
+        # issue #510：成功调用已写入 JSONL 后，下游 span 收尾等异常不得再记一条
+        # "失败调用"（否则同一调用在记录里既成功又失败）。
+        llm_recorded = False
+        # 只有真正发起 provider 调用的 attempt 才允许写失败行——span 创建 /
+        # 熔断门等前置异常不代表发生过 LLM 调用。
+        call_attempted = False
         lf = None
         step_span = None
         try:
@@ -1421,6 +1427,7 @@ class Executor:
             # retries stay owned by the executor's own policy-driven retry loop —
             # retrying here would re-multiply the attempt count.
             step_tokens = 0  # 本步骤 LLM 用量：仅主调，不含工具内部的 LLM 调用（issue #202/#239）
+            call_attempted = True
             call = await StepRunner(
                 timeout=self.config.timeout + self.LLM_HARD_TIMEOUT_MARGIN_SECONDS,
                 max_retries=0,
@@ -1442,6 +1449,15 @@ class Executor:
                 # still sees it — a failed StepResult must not become a silent
                 # success.
                 logger.error(f"LLM call failed for step {step.id}: {call.error}")
+                # issue #510：失败调用写调用级 JSONL（error 字段，tokens=0）。
+                record_llm_call_error(
+                    ctx,
+                    model=self.config.get_quick_model(),
+                    error=call.error or call.error_type,
+                    latency_ms=call.latency * 1000,
+                    messages=messages,
+                )
+                llm_recorded = True
                 _LLM_BREAKER.record_failure()  # 跨请求熔断计数（issue #242）
                 if lf and step_span:
                     step_span.end(output=f"llm_error: {call.error}", level="ERROR")
@@ -1457,7 +1473,14 @@ class Executor:
 
             response = call.output
             _LLM_BREAKER.record_success()  # 跨请求熔断：半开探测成功即闭合（issue #242）
-            step_tokens = record_llm_usage(response, ctx)
+            # issue #510：StepRunner 记录的本步墙钟 + 提示词摘要一并入 JSONL。
+            step_tokens = record_llm_usage(
+                response,
+                ctx,
+                latency_ms=call.latency * 1000,
+                messages=messages,
+            )
+            llm_recorded = True
 
             if lf and llm_span:
                 tool_names = [
@@ -1469,6 +1492,16 @@ class Executor:
                 )
         except Exception as e:
             logger.error(f"LLM call failed for step {step.id}: {e}")
+            # issue #510：非 StepRunner 形态的异常（配置/构建期等）同样留痕；
+            # 未真正发起调用（前置 span/熔断门异常）或已记账的 attempt 不重复记。
+            if call_attempted and not llm_recorded:
+                record_llm_call_error(
+                    ctx,
+                    model=self.config.get_quick_model(),
+                    error=e,
+                    latency_ms=(time.perf_counter() - step_start) * 1000,
+                    messages=messages,
+                )
             if lf and step_span:
                 step_span.end(output=f"llm_error: {e}", level="ERROR")
             yield AgentEvent(
@@ -2073,18 +2106,38 @@ class Executor:
             },
         ]
 
+        synthesis_started = time.perf_counter()
+        llm_recorded = False
+        call_attempted = False
         try:
-            response = await self.client.chat.completions.create(
+            llm_client = self.client
+            call_attempted = True
+            response = await llm_client.chat.completions.create(
                 model=self.config.get_quick_model(),
                 messages=messages,
                 temperature=0.3,
                 max_tokens=1024,
                 timeout=10,
             )
-            record_llm_usage(response, ctx)
+            # issue #510：合成调用同样写调用级 JSONL（延迟 + 提示词摘要）。
+            record_llm_usage(
+                response,
+                ctx,
+                latency_ms=(time.perf_counter() - synthesis_started) * 1000,
+                messages=messages,
+            )
+            llm_recorded = True
             return response.choices[0].message.content or ""
         except Exception as e:
             logger.warning(f"Synthesis LLM call failed: {e}")
+            if call_attempted and not llm_recorded:
+                record_llm_call_error(
+                    ctx,
+                    model=self.config.get_quick_model(),
+                    error=e,
+                    latency_ms=(time.perf_counter() - synthesis_started) * 1000,
+                    messages=messages,
+                )
             # Fallback: return the first tool result summary
             first = tool_results[0]
             return f"找到以下信息：\n{first['result'][:500]}"

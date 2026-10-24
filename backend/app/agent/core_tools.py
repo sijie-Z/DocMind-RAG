@@ -10,11 +10,12 @@ Tools are organized by capability:
 import contextlib
 import json
 import logging
+import time
 from typing import Any
 
 from app.agent.registry import ToolResult, register_tool
 from app.agent.run_context import RunContext
-from app.agent.usage import ctx_from_run_context, record_llm_usage
+from app.agent.usage import ctx_from_run_context, record_llm_call_error, record_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -314,24 +315,38 @@ async def summarize_document(
     if not pipeline.openai_client:
         return f"Document: {filename}\nContent preview: {full_text[:1000]}..."
 
+    llm_messages = [
+        {"role": "system", "content": "你是文档摘要专家。请用中文生成结构化摘要。"},
+        {
+            "role": "user",
+            "content": f"请为以下文档生成摘要，包含：1)主题 2)关键要点(3-5条) 3)结论\n\n文档：{full_text[:6000]}",
+        },
+    ]
+    llm_started = time.perf_counter()
+    llm_recorded = False
+    call_attempted = False
+    model_name: str | None = None
     try:
         from app.core.config import settings
 
+        call_attempted = True
+        model_name = settings.DEEPSEEK_MODEL
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
-            messages=[
-                {"role": "system", "content": "你是文档摘要专家。请用中文生成结构化摘要。"},
-                {
-                    "role": "user",
-                    "content": f"请为以下文档生成摘要，包含：1)主题 2)关键要点(3-5条) 3)结论\n\n文档：{full_text[:6000]}",
-                },
-            ],
+            messages=llm_messages,
             temperature=0.1,
             max_tokens=500,
         )
         # 工具内 LLM 记账（issue #239 minor-2）：此前直连调用不入账，
         # 任务级 total_tokens 不含工具内部用量。
-        record_llm_usage(resp, ctx_from_run_context(run_context))
+        # issue #510：同入口写调用级 JSONL（延迟 + 提示词摘要，不落正文）。
+        record_llm_usage(
+            resp,
+            ctx_from_run_context(run_context),
+            latency_ms=(time.perf_counter() - llm_started) * 1000,
+            messages=llm_messages,
+        )
+        llm_recorded = True
         summary = (resp.choices[0].message.content or "").strip()
         if not summary:
             # 第四波实机诊断（复验于 e5b5e5b）：deepseek-v4-flash 为推理模型——
@@ -344,6 +359,15 @@ async def summarize_document(
         return f"Document: {filename}\n\n{summary}"
     except Exception as e:
         logger.warning(f"LLM summarization failed for {document_id}: {e}")
+        # issue #510：失败调用留一行（成功记账后的空正文/解析异常不重复记）。
+        if call_attempted and not llm_recorded:
+            record_llm_call_error(
+                ctx_from_run_context(run_context),
+                model=model_name,
+                error=e,
+                latency_ms=(time.perf_counter() - llm_started) * 1000,
+                messages=llm_messages,
+            )
         # Fallback: return raw content truncated
         raw_preview = full_text[:2000]
         return f"Document: {filename}\n(LLM summarization unavailable, showing raw content)\n\n{raw_preview}"
@@ -554,30 +578,44 @@ async def extract_insights(
             "你是文档分析专家。分析文档内容，提取结构化信息。只返回 JSON，不要包含任何解释。"
         )
 
+    llm_messages = [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": (
+                f"分析以下文档，{instructions}\n\n"
+                f"文档：{filename}\n\n"
+                f"内容：{text_sample}\n\n"
+                "返回 JSON 格式：\n"
+                '{"entities": {"people": [], "organizations": [], "locations": [], "dates": []}, '
+                '"metrics": [{"name": "...", "value": "..."}], '
+                '"claims": [{"claim": "...", "confidence": "high/medium/low"}], '
+                '"structure": [{"level": 1, "heading": "..."}]}'
+            ),
+        },
+    ]
+    llm_started = time.perf_counter()
+    llm_recorded = False
+    call_attempted = False
+    model_name: str | None = None
     try:
+        call_attempted = True
+        model_name = settings.DEEPSEEK_MODEL
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": (
-                        f"分析以下文档，{instructions}\n\n"
-                        f"文档：{filename}\n\n"
-                        f"内容：{text_sample}\n\n"
-                        "返回 JSON 格式：\n"
-                        '{"entities": {"people": [], "organizations": [], "locations": [], "dates": []}, '
-                        '"metrics": [{"name": "...", "value": "..."}], '
-                        '"claims": [{"claim": "...", "confidence": "high/medium/low"}], '
-                        '"structure": [{"level": 1, "heading": "..."}]}'
-                    ),
-                },
-            ],
+            messages=llm_messages,
             temperature=0.1,
             max_tokens=1500,
             timeout=30,
         )
-        record_llm_usage(resp, ctx_from_run_context(run_context))  # 工具内记账（#239 minor-2）
+        # issue #510：调用级 JSONL（延迟 + 提示词摘要，不落正文）。
+        record_llm_usage(
+            resp,
+            ctx_from_run_context(run_context),
+            latency_ms=(time.perf_counter() - llm_started) * 1000,
+            messages=llm_messages,
+        )  # 工具内记账（#239 minor-2）
+        llm_recorded = True
         insights_raw = resp.choices[0].message.content or "{}"
         # Try to parse as JSON; fallback to raw string
         try:
@@ -599,6 +637,15 @@ async def extract_insights(
     except Exception as e:
         # issue #301 #12：抽取失败的错误 JSON 不得再伪装成"分析结果"——
         # 旧形态 {"error": ...} 被复合技能漏检后原样写进报告。结构化失败传播。
+        # issue #510：失败调用留一行（成功记账后的解析异常不重复记）。
+        if call_attempted and not llm_recorded:
+            record_llm_call_error(
+                ctx_from_run_context(run_context),
+                model=model_name,
+                error=e,
+                latency_ms=(time.perf_counter() - llm_started) * 1000,
+                messages=llm_messages,
+            )
         return ToolResult.fail(
             code="analysis_failed",
             message=f"Analysis failed: {e}",
@@ -740,34 +787,48 @@ async def cross_document_analysis(
         "comprehensive": "全面分析：共同主题、差异、趋势、互补关系和整体知识图谱。",
     }
 
+    llm_messages = [
+        {
+            "role": "system",
+            "content": "你是跨文档分析专家。分析多个文档之间的关系和模式。只返回 JSON。",
+        },
+        {
+            "role": "user",
+            "content": (
+                f"{analysis_prompts.get(analysis_type, analysis_prompts['comprehensive'])}\n\n"
+                f"文档列表：\n{doc_list_text[:10000]}\n\n"
+                "返回 JSON 格式：\n"
+                '{"summary": "整体分析总结", '
+                '"common_themes": [{"theme": "...", "evidence": ["...", "..."], "documents": [0, 1]}], '
+                '"unique_findings": [{"document_index": 0, "finding": "..."}], '
+                '"contradictions": [{"description": "...", "between": [0, 2]}], '
+                '"complementary_info": [{"description": "..."}], '
+                '"conclusion": "综合分析结论"}'
+            ),
+        },
+    ]
+    llm_started = time.perf_counter()
+    llm_recorded = False
+    call_attempted = False
+    model_name: str | None = None
     try:
+        call_attempted = True
+        model_name = settings.DEEPSEEK_MODEL
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是跨文档分析专家。分析多个文档之间的关系和模式。只返回 JSON。",
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"{analysis_prompts.get(analysis_type, analysis_prompts['comprehensive'])}\n\n"
-                        f"文档列表：\n{doc_list_text[:10000]}\n\n"
-                        "返回 JSON 格式：\n"
-                        '{"summary": "整体分析总结", '
-                        '"common_themes": [{"theme": "...", "evidence": ["...", "..."], "documents": [0, 1]}], '
-                        '"unique_findings": [{"document_index": 0, "finding": "..."}], '
-                        '"contradictions": [{"description": "...", "between": [0, 2]}], '
-                        '"complementary_info": [{"description": "..."}], '
-                        '"conclusion": "综合分析结论"}'
-                    ),
-                },
-            ],
+            messages=llm_messages,
             temperature=0.1,
             max_tokens=2000,
             timeout=60,
         )
-        record_llm_usage(resp, ctx_from_run_context(run_context))  # 工具内记账（#239 minor-2）
+        # issue #510：调用级 JSONL（延迟 + 提示词摘要，不落正文）。
+        record_llm_usage(
+            resp,
+            ctx_from_run_context(run_context),
+            latency_ms=(time.perf_counter() - llm_started) * 1000,
+            messages=llm_messages,
+        )  # 工具内记账（#239 minor-2）
+        llm_recorded = True
         analysis_raw = resp.choices[0].message.content or "{}"
         try:
             analysis = json.loads(analysis_raw)
@@ -790,6 +851,15 @@ async def cross_document_analysis(
     except Exception as e:
         # issue #301 批次 2：异常不再包成 {"error": ...} 的"正常" JSON 返回 ——
         # 结构化失败传播（判别权在工具内部，#297/#293 契约）。
+        # issue #510：失败调用留一行（成功记账后的解析异常不重复记）。
+        if call_attempted and not llm_recorded:
+            record_llm_call_error(
+                ctx_from_run_context(run_context),
+                model=model_name,
+                error=e,
+                latency_ms=(time.perf_counter() - llm_started) * 1000,
+                messages=llm_messages,
+            )
         return ToolResult.fail(
             code="analysis_failed",
             message=f"Analysis failed: {e}",
@@ -878,38 +948,61 @@ async def generate_report(
         for i, s in enumerate(parsed_sections)
     )
 
+    llm_messages = [
+        {
+            "role": "system",
+            "content": "你是报告生成专家。根据提供的内容生成结构清晰、专业的 Markdown 报告。",
+        },
+        {
+            "role": "user",
+            "content": (
+                f"请根据以下内容生成一份专业的分析报告。使用 Markdown 格式，包含：\n"
+                f"1. 标题和元数据\n"
+                f"2. 执行摘要\n"
+                f"3. 详细分析（用表格、列表、引用等丰富格式）\n"
+                f"4. 结论与建议\n\n"
+                f"报告标题：{title}\n\n"
+                f"内容：\n{sections_text[:8000]}"
+            ),
+        },
+    ]
+    llm_started = time.perf_counter()
+    llm_recorded = False
+    call_attempted = False
+    model_name: str | None = None
     try:
+        call_attempted = True
+        model_name = settings.DEEPSEEK_MODEL
         resp = await pipeline.openai_client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是报告生成专家。根据提供的内容生成结构清晰、专业的 Markdown 报告。",
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"请根据以下内容生成一份专业的分析报告。使用 Markdown 格式，包含：\n"
-                        f"1. 标题和元数据\n"
-                        f"2. 执行摘要\n"
-                        f"3. 详细分析（用表格、列表、引用等丰富格式）\n"
-                        f"4. 结论与建议\n\n"
-                        f"报告标题：{title}\n\n"
-                        f"内容：\n{sections_text[:8000]}"
-                    ),
-                },
-            ],
+            messages=llm_messages,
             temperature=0.2,
             max_tokens=3000,
             timeout=60,
         )
-        record_llm_usage(resp, ctx_from_run_context(run_context))  # 工具内记账（#239 minor-2）
+        # issue #510：调用级 JSONL（延迟 + 提示词摘要，不落正文）。
+        record_llm_usage(
+            resp,
+            ctx_from_run_context(run_context),
+            latency_ms=(time.perf_counter() - llm_started) * 1000,
+            messages=llm_messages,
+        )  # 工具内记账（#239 minor-2）
+        llm_recorded = True
         report = resp.choices[0].message.content or ""
         if not report.strip():
             return _generate_markdown_fallback(title, parsed_sections)
         return report
     except Exception as e:
         logger.warning(f"Report generation LLM call failed: {e}")
+        # issue #510：失败调用留一行（成功记账后的空正文/解析异常不重复记）。
+        if call_attempted and not llm_recorded:
+            record_llm_call_error(
+                ctx_from_run_context(run_context),
+                model=model_name,
+                error=e,
+                latency_ms=(time.perf_counter() - llm_started) * 1000,
+                messages=llm_messages,
+            )
         return _generate_markdown_fallback(title, parsed_sections)
 
 

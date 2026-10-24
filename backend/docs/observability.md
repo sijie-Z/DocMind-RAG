@@ -31,6 +31,7 @@ DocMind 的可观测性是**三层并联 + 两层串联**:**Prometheus 抓业务
 │  Prometheus ► Counter/Histogram/RAG/Agent 指标           │
 │  TraceStore ► Planner/Executor/Reflector 步骤             │
 │  ExecutionContext ► 单 run 全量(Redis 7 天)             │
+│  llm_calls.jsonl ► 调用级元数据(#510，不含正文)          │
 └────────────────────┬─────────────────────────────────────┘
                      │
                      ▼
@@ -342,6 +343,52 @@ python -m app.agent.replay --diff <task_id_a> <task_id_b>
 ```
 
 **作用**:飞行记录器,能回放任意一次 run 的完整决策 + 执行轨迹。**对比功能支持 A/B diff**。
+
+### 6.4 LLM 调用级 JSONL(issue #510 第一步)
+
+**位置**:`backend/app/agent/llm_call_log.py`(写入者:`ExecutionContext.record_llm_call`,
+由 `app/agent/usage.record_llm_usage` 单一入口调用)。
+
+每次 LLM 调用追加一行(append-only JSONL),默认 `backend/logs/llm_calls.jsonl`:
+
+```json
+{"ts":"2026-10-25T08:00:00.123+00:00","task_id":"run-510","request_id":"req-abc",
+ "model":"deepseek-chat","tokens_in":1200,"tokens_out":300,"latency_ms":842.5,
+ "prompt_hash":"sha256:...","tool_calls":2,"error":null}
+```
+
+- **不写 prompt / completion 正文**——正文可能含 PII/密钥;需要还原提示词时用
+  `prompt_hash` + 调用点日志对账。
+- 写入路径可配置:`LLM_CALL_LOG_FILE`(默认 `logs/llm_calls.jsonl`)、
+  `LLM_CALL_LOG_PER_RUN=true` 时按 run 分文件 `llm_calls-<task_id>.jsonl`、
+  `LLM_CALL_LOG_ENABLED=false` 可整体关闭。默认单文件长期运行请配外部
+  logrotate(或开 `PER_RUN`),本模块不自带按天轮转。
+- 观测写入失败(磁盘满/权限)只 debug 留痕、绝不阻断 run。
+- 错误文本会先剔除本次提示词正文片段再截断到 500 字符(部分 provider 报错
+  会回显输入),但仍不保证捕获所有变形——日志内容仍按"可能含敏感片段"管理。
+- 这是替代 Langfuse 调用级记录的第一步;Langfuse / OTel / trace_logger /
+  TraceStore / Mining 在删除审批通过前**全部保留**,见 issue #510 第三步。
+
+### 6.5 ID 语义(issue #510 第二步)
+
+| id | 语义 | 同源字段 |
+|---|---|---|
+| `task_id` | 一次 Agent run | `ExecutionContext.task_id` == `agent_tasks.id` == SSE 事件 `task_id` == RunReport `task_id` == `llm_calls.jsonl` |
+| `request_id` | 一次 HTTP 请求 | `X-Request-ID` == `request.state.request_id` == 结构化日志 `request_id` == SSE 事件 `request_id` == `llm_calls.jsonl` |
+
+- 同一个 `task_id` 可以被多个请求续跑(resume/审批),每次续跑的
+  `request_id` 属于**当前请求**;`request_id` 刻意不进 checkpoint 快照。
+- **不做假的"统一 trace_id"**:`core/logging.trace_id_var` 全仓无写入者,
+  不在这条链上;需要串联时用 `task_id` / `request_id` 组合。
+- WebSocket 请求没有 `X-Request-ID`(中间件只处理 HTTP),如实为 null——不编造。
+- **已知边界**:子代理子循环(`delegate_subtask` → `subagent`)自建
+  ExecutionContext,暂不继承父 run 的 `task_id`/`request_id`——其 JSONL 行是
+  独立的本地 run id、`request_id=null`,不能直接归因到父 `agent_tasks` 行;
+  打通留待后续 issue(本 PR 不做,避免子循环 checkpoint/replay 覆盖父快照)。
+- **已知边界**:客户端中断/取消(`GeneratorExit`/`CancelledError`)时,在途 LLM
+  调用不会补写 JSONL 行(异常路径不经过调用点的 `except Exception`)。
+- **已知边界**:`enable_checkpoint=false` 时没有 `agent_tasks` 行,`task_id` 是
+  ExecutionContext 生成的本地 run id;`request_id` 仍与 `X-Request-ID` 同源。
 
 ---
 

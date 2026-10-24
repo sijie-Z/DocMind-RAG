@@ -37,6 +37,15 @@ class BaseAppSettings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/docmind.log"
     LOG_JSON: bool = True
+    # LLM 调用级 JSONL（issue #510 第一步）：每次 LLM 调用追加一行元数据
+    # （ts/task_id/request_id/model/tokens/latency/prompt_hash/tool_calls/error），
+    # **不含 prompt/completion 正文**。默认开启——这是替代 Langfuse 调用级
+    # 记录的第一步（删除步骤须另行审批，见 issue #510）。
+    # 路径相对进程工作目录（部署即 backend/），默认 backend/logs/llm_calls.jsonl。
+    LLM_CALL_LOG_ENABLED: bool = True
+    LLM_CALL_LOG_FILE: str = "logs/llm_calls.jsonl"
+    # true → 按 run 分文件（llm_calls-<task_id>.jsonl）；false → 单文件追加。
+    LLM_CALL_LOG_PER_RUN: bool = False
     # SQL 语句回显开关（issue #493）：与 DEBUG 解耦，默认关闭。SQLAlchemy 在
     # echo=True 时会往具名 logger ``sqlalchemy.engine.Engine`` 挂
     # ``StreamHandler(sys.stdout)``——stdio 协议进程的 stdout 只允许协议帧，
