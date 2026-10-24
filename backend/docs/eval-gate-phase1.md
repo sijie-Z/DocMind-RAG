@@ -8,10 +8,12 @@
 - **被测对象**：`HybridRetriever.retrieve`（关键词+向量+RRF+MMR+后处理）。
   有意**不经** rerank / 语义缓存 / LLM 环节，且 LLM 辅助（查询改写、HyDE）关闭——
   保证可复现。「rerank 前/后」对照与缓存链路属于 Phase 2 的逐阶段 trace 实验。
-- **语料**：仓库内提交的固定语料 `backend/evals/corpus/`（两份 fixture：
-  条式《知识库服务管理办法》+ 节式《应急响应手册》）。fixture 是**评估夹具**：
+- **语料**：仓库内提交的固定语料 `backend/evals/corpus/`（v1 起步为两份 fixture：
+  条式《知识库服务管理办法》+ 节式《应急响应手册》；**v1.5 已扩到 8 份**：上述 2 份 +
+  6 份公开法律/行政法规，见 §7）。fixture 是**评估夹具**：
   可精确构造 gold 与 near-miss；CI（Phase 2）可把同一批语料灌进临时索引复跑。
-- **数据集**：`backend/evals/golden_set/clause_set_v1.json`（起步 28 条 = 25 正例 + 3 负例）。
+- **数据集**：v1 `backend/evals/golden_set/clause_set_v1.json`（28 条 = 25 正例 + 3 负例）；
+  **v1.5（当前默认）** `backend/evals/golden_set/clause_set_v1_5.json`（80 条 = 60 正例 + 20 负例，见 §7）。
 - **不做**：LLM-as-judge、端到端答案质量、rerank 指标——都排在 Phase 2/3。
 
 ## 2. 快速开始
@@ -113,7 +115,7 @@ tombstone/merge 物理状态下的差异）；同物理状态内则逐位稳定�
 
 1. `recreate_knowledge_index(confirm=True)`——**先删后建**，索引名必须含 `eval`
    （护栏：防误指生产索引）；重建后断言 `count==0`；
-2. bulk 写入 28 chunks（17+11）→ `indices.refresh` 刷到 visible；
+2. bulk 写入 362 chunks（v1.5：8 文件；v1 时代为 28 chunks = 17+11）→ `indices.refresh` 刷到 visible；
 3. 回读断言：`count(org) == 写入块数` 且 `distinct document_id == 语料文件数(2)`；
 4. 跑分、比对都只发生在这一次重建后的物理状态上（无 tombstone：`docs.deleted=0`）。
 
@@ -176,3 +178,108 @@ make eval-ci   # 与 CI 逐位一致；门禁红/绿与 CI 相同
   Python 3.12；连续两次 `seed --recreate + run` 报告除 `generated_at`/`elapsed_ms`
   外**逐字段 bit 级一致**（证据存档在 `_orchestrate/round2/`）。CI（Linux runner +
   同版本 ES 容器）与本地逐位一致，由本门禁自身的首次运行验证。
+
+## 7. v1.5（issue #512，2026-10-24）：扩语料、80 条 golden、dense/hybrid 双基线
+
+### 7.1 语料扩容（8 文件 / 362 chunks / 354 条 clause-level 定义）
+
+在 v1 的 2 份 fixture 基础上新增 6 份**公开法律/行政法规**（均为公共领域文本，
+《中华人民共和国著作权法》第五条第（一）项不适用著作权保护；每份文件头部记录
+来源 URL、检索日期与文本版本）：
+
+| 文件 | 文本 | 条款数 | chunks |
+|---|---|---:|---:|
+| `03-data-security-law.md` | 中华人民共和国数据安全法（2021） | 55 | 56 |
+| `04-personal-information-protection-law.md` | 中华人民共和国个人信息保护法（2021） | 74 | 75 |
+| `05-cybersecurity-law.md` | 中华人民共和国网络安全法（2025 修正文本） | 81 | 82 |
+| `06-archives-law.md` | 中华人民共和国档案法（2020 修订） | 53 | 54 |
+| `07-cii-security-protection-regulation.md` | 关键信息基础设施安全保护条例（2021） | 51 | 52 |
+| `08-cybersecurity-incident-reporting-measures.md` | 国家网络安全事件报告管理办法（2025） | 14 | 15 |
+
+为保持确定性分块（一条款一 chunk），章/节标题与目录已省略，仅保留条文；
+来源页面快照与清洗脚本不进入仓库（仅提交清洗后的 Markdown）。
+
+### 7.2 golden set v1.5（80 条 = 60 正 + 20 负）
+
+- 文件：`evals/golden_set/clause_set_v1_5.json`（当前默认）；v1 文件保留作历史。
+- 题型：`clause_lookup` 28、`semantic` 18、`numerical` 8、`cross_doc` 4、`conflict` 2、
+  `unanswerable` 20（合计 80；相对 issue 目标 ±2 内）。
+- **每条正例都声明 near-miss**（相邻/最易混条款）；负例为语料完全无法回答的主题
+  （含「不存在的条号」难例）。
+- 标注：单标注 + 20% 双标盲审计（16/80）；审计记录、分歧裁决与全量题目—条款
+  可追溯表见 `evals/golden_set/annotation_v1_5.md`。主标与复核均为 AI，无人类法律专家
+  逐条复核（已在审计文件披露）。
+- `python -m evals check` 现在额外校验：每条 gold/near-miss 必须在语料中**恰好一个
+  chunk 的定义位**上可解析，并打印文件数/chunks/条款定义数。
+
+### 7.3 双基线（dense / hybrid，fake 可复现）
+
+| 基线 | 检索方式 | 文件 |
+|---|---|---|
+| CI 门禁（hybrid） | `HybridRetriever.retrieve`（关键词+向量+RRF/MMR+后处理） | `evals/baselines/ci_baseline.json` |
+| hybrid 对照 | 同上 | `evals/baselines/v1_5_hybrid_baseline.json` |
+| dense 对照 | 纯向量 cosine top-k（无关键词/RRF/后处理） | `evals/baselines/v1_5_dense_baseline.json` |
+
+`python -m evals run --retriever {hybrid,dense}` 选择基线；报告 meta 增加
+`retriever_mode`（同时纳入 compare 的协议键，防拿 dense 报告对 hybrid 基线）、
+`corpus_digest`（语料内容 sha256）、`git_commit`。`python -m evals report`
+读取 hybrid/dense 两份报告，输出 per-slice（按题型）对比与失败分类。
+
+### 7.4 公开复现（`make eval-public`，<30 分钟）
+
+```bash
+# 仅需 Docker ES 8.11；无需 Ollama / 网络
+cd backend
+python -m evals check
+make eval-public   # seed --recreate → run(hybrid) → run(dense) → report
+```
+
+产物：`backend/evals/reports/v1.5/latest.{json,md}`（hybrid）、
+`reports/v1.5/dense/latest.{json,md}`、`reports/v1.5/comparison.md`，
+并重写 `backend/evals/REPORT.md`。CI 门禁仍是 `make eval-ci`（hybrid + fake +
+7 项指标 + 基线比对，容差 0）。
+
+### 7.5 live rerank 报告（单独工具，绝不伪造数字）
+
+`python -m evals.live_rerank`（或 `make eval-rerank-live`）在**真实** embedding +
+rerank provider 下跑 before/after，记录 `path/model/threshold/latency`；任何路径
+degraded/disabled/empty 时只写 `status=unavailable` 的占位报告（含 mode/date/
+语料 commit/原因），**不写任何指标数字**，退出码 2。仓库内提交的占位报告：
+`evals/baselines/live_rerank_placeholder.{json,md}`。
+
+### 7.6 失败分类与对外引用纪律
+
+`evals/REPORT.md` 固定五类失败（title-token 淹没、中文/阿拉伯数字不归一、
+chunk 边界、near-miss 误召、负例误召），每类最多 2 个真实例子；某类 0 例时
+明确写「0 例」而不是伪造。对外引用任何数字必须同时标注：
+`mode=live|fake`、日期、语料 commit（或 `corpus_digest`）。fake 与 live 数字不可混比。
+
+### 7.7 口径不变
+
+保留 Wilson 95% CI；**不引入 bootstrap**（重采样单位与收益未论证）。生成层指标
+（Citation Accuracy/Coverage/Gap）仍不进入零容差 CI。
+
+### 7.8 v1.5 首次盖章（2026-10-24，mode=fake，ES 8.11.0 zip）
+
+环境：Windows 11 + ES 8.11.0（single-node、xpack.security 关闭、磁盘水位阈值关闭），
+Python 3.12.8；伪嵌入 `hash-bigram-char-v1` dim=256；无 LLM/rerank。
+
+| 指标 | hybrid（CI 门禁口径） | dense-only |
+|---|---:|---:|
+| ClauseHit@1 | 70.0% | 61.7% |
+| ClauseHit@3 | 76.7% | 68.3% |
+| ClauseHit@5 | 80.0%（Wilson 68.2–88.2%） | 73.3%（Wilson 61.0–82.9%） |
+| NearMiss@5 | 25.0% | 30.0% |
+| MRR | 0.7400 | 0.6542 |
+| EmptyAcc（n=20） | 100.0% | 0.0% |
+| errors | 0 | 0 |
+
+- 语料：8 文件 / 362 chunks / 354 条 clause-level 定义；语料指纹
+  `sha256:6b7f5fff7516e8887887853bed31e091c3419016149c605c96306364d3a0e12e`。
+- 复现证据：同一协议下独立两次 `seed --recreate → run(hybrid) → run(dense)`，
+  `aggregates`、逐条判定与 top-k 结果**逐字段一致**（不含 `generated_at`/`elapsed_ms`）；
+  seed + 两个 run 合计约 23 秒，CI 门禁三步约 21 秒，远低于 30 分钟目标。
+- 基线文件：`ci_baseline.json` 与 `v1_5_hybrid_baseline.json` 为 hybrid；
+  `v1_5_dense_baseline.json` 为 dense。三者均为显式 PR 工件，CI 不自动改写。
+- 失败分类与真实例子见 `evals/REPORT.md`；混合检索的 12 条失败集中在
+  「带《…》全称的条号直查」被标题/前言 chunk 淹没，以及中文/阿拉伯数字写法对照。

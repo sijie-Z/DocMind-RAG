@@ -2,7 +2,7 @@
 
 .PHONY: help dev dev-backend dev-frontend install-backend install-frontend
 .PHONY: test test-backend test-frontend lint build build-frontend
-.PHONY: eval eval-check eval-ci eval-ci-baseline
+.PHONY: eval eval-check eval-ci eval-ci-baseline eval-public eval-v15-baselines eval-rerank-live
 .PHONY: docker-up docker-down docker-logs docker-build docker-migrate db-migrate
 .PHONY: clean clean-logs check
 
@@ -72,6 +72,23 @@ eval-ci-baseline: ## 有意识更新 CI 基线（重跑并重盖 ci_baseline.jso
 	cd $(BACKEND_DIR) && python -m evals seed --recreate --embedding fake --index $(EVAL_CI_INDEX) $(ARGS)
 	cd $(BACKEND_DIR) && python -m evals run --embedding fake --index $(EVAL_CI_INDEX) --out evals/reports/ci
 	cd $(BACKEND_DIR) && python -m evals compare --report evals/reports/ci/latest.json --baseline evals/baselines/ci_baseline.json --update-baseline
+
+# v1.5 公开复现（issue #512）：只需 ES 8.11 + 伪嵌入，无 Ollama / 无网络。
+EVAL_PUBLIC_INDEX := docmind_knowledge_eval_public_v1
+EVAL_PUBLIC_OUT := evals/reports/v1.5
+
+eval-public: ## v1.5 公开复现（fake：seed --recreate → hybrid run → dense run → report，<30 分钟）
+	cd $(BACKEND_DIR) && python -m evals seed --recreate --embedding fake --index $(EVAL_PUBLIC_INDEX)
+	cd $(BACKEND_DIR) && python -m evals run --embedding fake --index $(EVAL_PUBLIC_INDEX) --retriever hybrid --out $(EVAL_PUBLIC_OUT)
+	cd $(BACKEND_DIR) && python -m evals run --embedding fake --index $(EVAL_PUBLIC_INDEX) --retriever dense --out $(EVAL_PUBLIC_OUT)/dense
+	cd $(BACKEND_DIR) && python -m evals report --hybrid $(EVAL_PUBLIC_OUT)/latest.json --dense $(EVAL_PUBLIC_OUT)/dense/latest.json --out $(EVAL_PUBLIC_OUT) --report-md evals/REPORT.md
+
+eval-v15-baselines: ## 显式重盖 v1.5 hybrid/dense 基线（改基线=显式 PR 行为，评审可见）
+	cd $(BACKEND_DIR) && python -m evals compare --report $(EVAL_PUBLIC_OUT)/latest.json --baseline evals/baselines/v1_5_hybrid_baseline.json --update-baseline
+	cd $(BACKEND_DIR) && python -m evals compare --report $(EVAL_PUBLIC_OUT)/dense/latest.json --baseline evals/baselines/v1_5_dense_baseline.json --update-baseline
+
+eval-rerank-live: ## live rerank 报告（需真实 embedding + RERANK_* 配置；provider 不可用时拒绝写数字）
+	cd $(BACKEND_DIR) && python -m evals.live_rerank --out evals/reports/v1.5/live_rerank.json
 
 # === Linting & Type Check ===
 

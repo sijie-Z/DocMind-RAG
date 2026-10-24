@@ -6,7 +6,7 @@
 2. compare 门禁语义：floor/cap 的容差=0 边界、协议校验、fail-closed；
 3. 基线工件锁定：入库的 baselines/ci_baseline.json 的 schema 与协议；
 4. seed 协议的可测部分：--recreate 护栏、回读断言、fake 模式维度钉死；
-5. 语料分块数（17+11=28）——CI seed 回读断言期望值的来源。
+5. 语料分块数（8 文件 362 chunks）——CI seed 回读断言期望值的来源。
 """
 
 import hashlib
@@ -40,7 +40,17 @@ from evals.runner import (
 
 _BACKEND = Path(__file__).resolve().parents[2]
 _BASELINE = _BACKEND / "evals" / "baselines" / "ci_baseline.json"
-_GOLDEN_V1 = _BACKEND / "evals" / "golden_set" / "clause_set_v1.json"
+_GOLDEN_V1 = _BACKEND / "evals" / "golden_set" / "clause_set_v1_5.json"
+_CORPUS_CHUNKS = {
+    "01-knowledge-base-policy.md": 17,
+    "02-incident-response-handbook.md": 11,
+    "03-data-security-law.md": 56,
+    "04-personal-information-protection-law.md": 75,
+    "05-cybersecurity-law.md": 82,
+    "06-archives-law.md": 54,
+    "07-cii-security-protection-regulation.md": 52,
+    "08-cybersecurity-incident-reporting-measures.md": 15,
+}
 
 # 算法指纹：embed_text("《知识库服务管理办法》第3条规定了什么？") 的
 # sha256(struct.pack("<256d", *vec))——任何数值行为变化都必须显式更新它，
@@ -53,13 +63,14 @@ def _report(**overrides) -> dict:
     report = {
         "meta": {
             "embedding_mode": "fake",
+            "retriever_mode": "hybrid",
             "top_k": 5,
-            "dataset_id": "docmind_clause_v1",
+            "dataset_id": "docmind_clause_v1_5",
             "dataset_version": 1,
-            "corpus_chunks": {"a.md": 17, "b.md": 11},
+            "corpus_chunks": dict(_CORPUS_CHUNKS),
             "index": "docmind_knowledge_eval_ci_v1",
             "es_version": "8.11.0",
-            "generated_at": "2026-10-09T00:00:00+00:00",
+            "generated_at": "2026-10-24T00:00:00+00:00",
         },
         "aggregates": {
             "counts": {"errors": 0},
@@ -191,10 +202,11 @@ class TestCompareGate:
         "override",
         [
             {"meta.embedding_mode": "live"},
+            {"meta.retriever_mode": "dense"},
             {"meta.top_k": 3},
             {"meta.dataset_id": "other"},
             {"meta.dataset_version": 2},
-            {"meta.corpus_chunks": {"a.md": 18, "b.md": 11}},
+            {"meta.corpus_chunks": {**_CORPUS_CHUNKS, "01-knowledge-base-policy.md": 18}},
         ],
     )
     def test_protocol_mismatch_rejected(self, override):
@@ -377,6 +389,12 @@ class TestSeedProtocol:
         with pytest.raises(SystemExit):
             build_parser().parse_args(["run", "--embedding", "bogus"])
 
+    def test_retriever_choices(self):
+        assert build_parser().parse_args(["run"]).retriever == "hybrid"
+        assert build_parser().parse_args(["run", "--retriever", "dense"]).retriever == "dense"
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["run", "--retriever", "bm25"])
+
     def test_compare_default_paths(self):
         args = build_parser().parse_args(["compare"])
         assert args.report == "evals/reports/ci/latest.json"
@@ -425,8 +443,5 @@ class TestCommittedArtifacts:
             f: len(split_corpus_file((gs.corpus_dir / f).read_text(encoding="utf-8")))
             for f in gs.corpus_files
         }
-        assert counts == {
-            "01-knowledge-base-policy.md": 17,
-            "02-incident-response-handbook.md": 11,
-        }
-        assert sum(counts.values()) == 28
+        assert counts == _CORPUS_CHUNKS
+        assert sum(counts.values()) == 362

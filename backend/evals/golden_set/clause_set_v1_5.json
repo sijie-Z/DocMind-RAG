@@ -1,0 +1,1499 @@
+{
+  "dataset_id": "docmind_clause_v1_5",
+  "version": 1,
+  "description": "DocMind RAG 检索评估 v1.5（issue #512）。在 v1 的 28 条基础上扩到 80 条（60 正 + 20 负），语料扩到 8 份公开法规/制度文本（含 6 份公开法律/行政法规，公共领域文本）。主指标 ClauseHit@k（条号定义位命中）；每条正例声明 near-miss。标注流程与 20% 双标审计见 golden_set/annotation_v1_5.md；口径见 backend/docs/eval-gate-phase1.md 与 evals/REPORT.md。",
+  "corpus_dir": "../corpus",
+  "corpus_files": [
+    "01-knowledge-base-policy.md",
+    "02-incident-response-handbook.md",
+    "03-data-security-law.md",
+    "04-personal-information-protection-law.md",
+    "05-cybersecurity-law.md",
+    "06-archives-law.md",
+    "07-cii-security-protection-regulation.md",
+    "08-cybersecurity-incident-reporting-measures.md"
+  ],
+  "top_k": 5,
+  "items": [
+    {
+      "id": "clause_arabic_3",
+      "type": "clause_lookup",
+      "query": "《知识库服务管理办法》第3条规定了什么？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第3条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第4条",
+          "why": "相邻条：同章数据管理，且都提到数据等级"
+        }
+      ],
+      "critical": false,
+      "notes": "阿拉伯数字条号直查"
+    },
+    {
+      "id": "clause_chinese_7",
+      "type": "clause_lookup",
+      "query": "《知识库服务管理办法》第七条规定了什么？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第7条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第8条",
+          "why": "相邻条，且第8条正文引用第7条，字面高度重合"
+        }
+      ],
+      "critical": false,
+      "notes": "中文数字条号——与 clause_arabic_7 同 gold 构成 #2.10 数字归一化对照基线"
+    },
+    {
+      "id": "clause_arabic_7",
+      "type": "clause_lookup",
+      "query": "《知识库服务管理办法》第7条规定了什么？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第7条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第8条",
+          "why": "相邻条，且第8条正文引用第7条，字面高度重合"
+        }
+      ],
+      "critical": false,
+      "notes": "阿拉伯数字条号——与 clause_chinese_7 同 gold 构成 #2.10 数字归一化对照基线"
+    },
+    {
+      "id": "clause_12_deletion",
+      "type": "clause_lookup",
+      "query": "第12条对数据删除有什么要求？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第12条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第11条",
+          "why": "相邻条：均属数据流转且都要求审批"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "clause_chinese_12",
+      "type": "clause_lookup",
+      "query": "《知识库服务管理办法》第十二条关于数据删除的规定是什么？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第12条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第11条",
+          "why": "相邻条：均属数据流转且都要求审批"
+        }
+      ],
+      "critical": false,
+      "notes": "中文数字与 clause_12_deletion 构成第二组数字归一化对照"
+    },
+    {
+      "id": "clause_9_audit_space",
+      "type": "clause_lookup",
+      "query": "第 9 条对审计日志有什么规定？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第9条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第10条",
+          "why": "相邻条：同为审计主题"
+        }
+      ],
+      "critical": false,
+      "notes": "带空格条号「第 9 条」的容忍度探针"
+    },
+    {
+      "id": "sec_2_3_response",
+      "type": "clause_lookup",
+      "query": "§2.3 告警响应时限是怎么规定的？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§2.3"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§2.1",
+          "why": "第2.1定义告警分级，时限查询最易混"
+        }
+      ],
+      "critical": false,
+      "notes": "§ 引用形式"
+    },
+    {
+      "id": "sec_2_3_p2",
+      "type": "numerical",
+      "query": "P2 告警的响应时限是多少？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§2.3"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§2.1",
+          "why": "§2.1 含「一小时内申请调整」，数值形态与响应时限相同"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "sec_3_2_rollback",
+      "type": "semantic",
+      "query": "回滚的触发条件和步骤是什么？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§3.2"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§3.1",
+          "why": "相邻节：处置流程与回滚同属故障处置"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "sec_3_3_postmortem",
+      "type": "semantic",
+      "query": "复盘报告需要包含哪些内容？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§3.3"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§4.2",
+          "why": "§4.2 提到复盘报告但讲的是归档要求"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "sec_4_1_drill",
+      "type": "numerical",
+      "query": "备份恢复演练多久执行一次？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§4.1"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第13条",
+          "why": "跨文档：办法第13条是「备份」主题条款（策略周期 vs 演练周期）"
+        }
+      ],
+      "critical": false,
+      "notes": "跨文档 near-miss"
+    },
+    {
+      "id": "sec_4_2_archive",
+      "type": "cross_doc",
+      "query": "演练记录需要保存几年？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§4.2"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第13条",
+          "why": "跨文档保留期混淆（演练记录 3 年 vs 备份 30 天）"
+        }
+      ],
+      "critical": false,
+      "notes": "跨文档 near-miss"
+    },
+    {
+      "id": "sec_2_1_levels",
+      "type": "semantic",
+      "query": "告警分为哪几个等级？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§2.1"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§2.3",
+          "why": "§2.3 逐条列出 P1/P2/P3"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "cross_doc_report_deadline",
+      "type": "conflict",
+      "query": "故障复盘报告要在几个工作日内提交？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第14条"
+        },
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§3.3"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§3.2",
+          "why": "相邻节：回滚与复盘同属故障处置"
+        }
+      ],
+      "critical": false,
+      "notes": "两来源事实冲突（办法第14条 3 个工作日 vs 手册 §3.3 5 个工作日）：召回任一来源即算命中；冲突本身暴露给 Phase 2 处理"
+    },
+    {
+      "id": "concept_levels",
+      "type": "semantic",
+      "query": "知识库里的数据分为哪几个等级？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第3条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第4条",
+          "why": "第4条提到一次机密级文档，含等级关键词"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "concept_upload_formats",
+      "type": "semantic",
+      "query": "文档上传支持哪些格式，有大小限制吗？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第4条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第2条",
+          "why": "第2条列举功能清单，含「上传」词面"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "process_export",
+      "type": "semantic",
+      "query": "把文档数据导出到知识库之外需要什么流程？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第11条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第12条",
+          "why": "相邻条：均属数据流转且都要求审批"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "process_permission_change",
+      "type": "semantic",
+      "query": "授权成员的增补与回收需要谁审批？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第8条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第7条",
+          "why": "第7条组织隔离是权限主题的相似条"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "process_isolation",
+      "type": "semantic",
+      "query": "不同组织的文档会互相可见吗？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第7条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第2条",
+          "why": "第2条适用范围含「组织」字样"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "clause_15_violation",
+      "type": "semantic",
+      "query": "违规标注数据等级会怎么处理？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第15条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第3条",
+          "why": "第3条定义数据等级，是问题词面的最大重叠条"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "numeric_retention_original",
+      "type": "numerical",
+      "query": "文档原文默认保留多长时间？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第6条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第13条",
+          "why": "同为保留期条款但对象是备份"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "numeric_audit_retention",
+      "type": "numerical",
+      "query": "审计日志保留多久？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第9条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第10条",
+          "why": "第10条同为审计条款，期限词面混淆（180 天 vs 每季度/2 年）"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "numeric_backup_retention",
+      "type": "numerical",
+      "query": "知识库备份的保留周期是多少天？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第13条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第6条",
+          "why": "保留期成对混淆（备份 30 天 vs 原文 5 年）"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "numeric_rto",
+      "type": "numerical",
+      "query": "服务故障后最长多久必须恢复？RTO 是多少？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第14条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第13条",
+          "why": "第13条备份策略常被当作恢复条款"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "definition_rto_rpo",
+      "type": "semantic",
+      "query": "RTO 和 RPO 分别指什么？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第14条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第13条",
+          "why": "第13条备份策略常被当作恢复条款"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "neg_face_login",
+      "type": "unanswerable",
+      "query": "请推荐适合阳台种植的香草植物。",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外园艺主题（原「人脸识别登录」因语料第62条提及人脸识别，不再是干净负例，已替换）"
+    },
+    {
+      "id": "neg_quantum",
+      "type": "unanswerable",
+      "query": "请解释量子纠错码的容错阈值定理。",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：主题完全不在语料内"
+    },
+    {
+      "id": "neg_clause99",
+      "type": "unanswerable",
+      "query": "第999条关于深海采矿设备防腐涂层的要求是什么？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负难例：条号在语料中不存在（最长 81 条）——「问不存在的条号」不得拿别的条充数；主题也完全不在语料内"
+    },
+    {
+      "id": "dsl_clause_21_classification",
+      "type": "clause_lookup",
+      "query": "《中华人民共和国数据安全法》第21条规定了什么？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "03-data-security-law.md",
+          "clause": "第21条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "03-data-security-law.md",
+          "clause": "第24条",
+          "why": "数据安全审查制度与分类分级同属数据安全制度章"
+        }
+      ],
+      "critical": false,
+      "notes": "阿拉伯数字直查（新语料）"
+    },
+    {
+      "id": "dsl_clause_35_retrieval",
+      "type": "clause_lookup",
+      "query": "《数据安全法》第三十五条对调取数据有什么要求？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "03-data-security-law.md",
+          "clause": "第35条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "03-data-security-law.md",
+          "clause": "第36条",
+          "why": "相邻条：向机关调取数据 vs 向外国司法机构提供数据"
+        }
+      ],
+      "critical": false,
+      "notes": "中文数字直查"
+    },
+    {
+      "id": "dsl_clause_36_foreign",
+      "type": "clause_lookup",
+      "query": "数据安全法第三十六条 外国司法或执法机构请求提供数据",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "03-data-security-law.md",
+          "clause": "第36条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "03-data-security-law.md",
+          "clause": "第35条",
+          "why": "相邻条：对外提供数据与依法调取数据易混"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "pipl_clause_13_basis",
+      "type": "clause_lookup",
+      "query": "《个人信息保护法》第13条规定的处理个人信息的合法情形有哪些？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第13条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第14条",
+          "why": "同意规则是第13条第一项的具体展开"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "pipl_clause_38_crossborder",
+      "type": "clause_lookup",
+      "query": "个人信息保护法第三十八条对向境外提供个人信息规定了哪些条件？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第38条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第39条",
+          "why": "相邻条：告知与单独同意是出境的前置义务"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "pipl_clause_57_breach",
+      "type": "clause_lookup",
+      "query": "《个人信息保护法》第五十七条对个人信息泄露、篡改、丢失是怎么规定的？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第57条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第56条",
+          "why": "影响评估与泄露通知同属个人信息保护义务章，易混"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "csl_clause_23_mlps",
+      "type": "clause_lookup",
+      "query": "网络安全法第二十三条规定的网络安全等级保护义务有哪些？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第23条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第36条",
+          "why": "关键信息基础设施运营者的额外义务与等级保护义务并列"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "csl_clause_39_storage",
+      "type": "clause_lookup",
+      "query": "《中华人民共和国网络安全法》第39条对关键信息基础设施运营者的数据存储和出境有什么要求？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第39条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第37条",
+          "why": "相邻条：国家安全审查同属采购与数据出境主题"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "csl_clause_40_assessment",
+      "type": "clause_lookup",
+      "query": "网络安全法第四十条要求关键信息基础设施运营者多久开展一次检测评估？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第40条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "07-cii-security-protection-regulation.md",
+          "clause": "第17条",
+          "why": "跨文档近邻：条例第17条同样规定每年至少一次检测评估"
+        }
+      ],
+      "critical": false,
+      "notes": "跨文档 near-miss"
+    },
+    {
+      "id": "cii_clause_2_scope",
+      "type": "clause_lookup",
+      "query": "《关键信息基础设施安全保护条例》第2条如何界定关键信息基础设施？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "07-cii-security-protection-regulation.md",
+          "clause": "第2条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第33条",
+          "why": "跨文档近邻：网络安全法第33条列出重点行业和领域"
+        }
+      ],
+      "critical": false,
+      "notes": "跨文档 near-miss"
+    },
+    {
+      "id": "cii_clause_17_assessment",
+      "type": "clause_lookup",
+      "query": "关键信息基础设施安全保护条例第十七条要求运营者多久进行一次网络安全检测和风险评估？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "07-cii-security-protection-regulation.md",
+          "clause": "第17条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第40条",
+          "why": "跨文档近邻：网络安全法第40条同为年度检测评估"
+        }
+      ],
+      "critical": false,
+      "notes": "跨文档 near-miss"
+    },
+    {
+      "id": "cii_clause_18_report",
+      "type": "clause_lookup",
+      "query": "《关键信息基础设施安全保护条例》第十八条对重大网络安全事件报告有什么规定？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "07-cii-security-protection-regulation.md",
+          "clause": "第18条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "08-cybersecurity-incident-reporting-measures.md",
+          "clause": "第4条",
+          "why": "跨文档近邻：报告管理办法第4条给出具体报告时限"
+        }
+      ],
+      "critical": false,
+      "notes": "跨文档 near-miss"
+    },
+    {
+      "id": "archives_clause_13_scope",
+      "type": "clause_lookup",
+      "query": "《中华人民共和国档案法》第十三条规定哪些材料应当纳入归档范围？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "06-archives-law.md",
+          "clause": "第13条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "06-archives-law.md",
+          "clause": "第14条",
+          "why": "相邻条：归档范围与归档移交"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "archives_clause_27_open",
+      "type": "clause_lookup",
+      "query": "档案法第二十七条规定档案馆的档案形成满多少年向社会开放？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "06-archives-law.md",
+          "clause": "第27条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "06-archives-law.md",
+          "clause": "第30条",
+          "why": "相邻主题：开放审核与开放期限易混"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "archives_clause_35_digital",
+      "type": "clause_lookup",
+      "query": "《档案法》第35条对档案信息化建设提出了什么要求？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "06-archives-law.md",
+          "clause": "第35条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "06-archives-law.md",
+          "clause": "第36条",
+          "why": "相邻条：信息化规划与电子档案系统建设"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "incident_clause_4_reporting",
+      "type": "clause_lookup",
+      "query": "《国家网络安全事件报告管理办法》第4条规定的报告程序是什么？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "08-cybersecurity-incident-reporting-measures.md",
+          "clause": "第4条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "08-cybersecurity-incident-reporting-measures.md",
+          "clause": "第5条",
+          "why": "相邻条：运营者与服务商的报告义务"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "incident_clause_8_summary",
+      "type": "clause_lookup",
+      "query": "国家网络安全事件报告管理办法第八条要求多久提交事件处置总结报告？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "08-cybersecurity-incident-reporting-measures.md",
+          "clause": "第8条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "08-cybersecurity-incident-reporting-measures.md",
+          "clause": "第7条",
+          "why": "相邻条：报告内容与总结报告易混"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "incident_clause_9_hotline",
+      "type": "clause_lookup",
+      "query": "网络安全事件报告的12387热线是《国家网络安全事件报告管理办法》第几条规定的？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "08-cybersecurity-incident-reporting-measures.md",
+          "clause": "第9条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "08-cybersecurity-incident-reporting-measures.md",
+          "clause": "第10条",
+          "why": "相邻条：报告渠道与未报告处罚"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "policy_clause_16_effective",
+      "type": "clause_lookup",
+      "query": "《知识库服务管理办法》第十六条对施行日期和解释权是怎么规定的？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第16条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第1条",
+          "why": "首尾条：目的条款与施行条款都含「本办法」"
+        }
+      ],
+      "critical": false,
+      "notes": "覆盖既有 fixture 的未覆盖条款"
+    },
+    {
+      "id": "handbook_sec_2_2_oncall",
+      "type": "clause_lookup",
+      "query": "《应急响应手册》§2.2 值班安排是怎么规定的？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§2.2"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§2.3",
+          "why": "相邻节：值班安排与响应时限"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "handbook_sec_1_2_scope",
+      "type": "clause_lookup",
+      "query": "应急响应手册 §1.2 的适用范围包括哪些服务？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§1.2"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "02-incident-response-handbook.md",
+          "clause": "§1.1",
+          "why": "相邻节：目的与适用范围"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "dsl_important_data_assessment",
+      "type": "semantic",
+      "query": "处理重要数据的企业需要定期开展风险评估并向主管部门报送报告吗？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "03-data-security-law.md",
+          "clause": "第30条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "03-data-security-law.md",
+          "clause": "第21条",
+          "why": "重要数据目录与重要数据处理者义务同属分类分级主题"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "dsl_data_breach_response",
+      "type": "semantic",
+      "query": "发现数据安全缺陷或者发生数据安全事件时，企业应当立即采取哪些措施？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "03-data-security-law.md",
+          "clause": "第29条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "03-data-security-law.md",
+          "clause": "第23条",
+          "why": "国家应急处置机制与企业处置义务易混"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "pipl_minor_consent",
+      "type": "semantic",
+      "query": "处理不满十四周岁未成年人的个人信息需要取得谁的同意？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第31条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第28条",
+          "why": "敏感个人信息定义包含未成年人信息，词面高度重叠"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "pipl_automated_decision",
+      "type": "semantic",
+      "query": "利用个人信息进行自动化决策时，法律对透明度和差别待遇有什么要求？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第24条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第55条",
+          "why": "自动化决策与个人信息保护影响评估常被一起讨论"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "csl_real_name",
+      "type": "semantic",
+      "query": "用户办理网络接入、固定电话或移动电话入网时，运营者需要求用户提供真实身份信息吗？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第26条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第24条",
+          "why": "网络产品服务安全义务与实名制同属网络运行安全"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "csl_incident_plan",
+      "type": "semantic",
+      "query": "网络运营者需要制定网络安全事件应急预案吗？发生危害网络安全的事件后应当怎么做？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第27条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "07-cii-security-protection-regulation.md",
+          "clause": "第18条",
+          "why": "跨文档近邻：关键信息基础设施重大事件报告义务"
+        }
+      ],
+      "critical": false,
+      "notes": "跨文档 near-miss"
+    },
+    {
+      "id": "cii_dedicated_org",
+      "type": "semantic",
+      "query": "关键信息基础设施运营者是否应当设置专门安全管理机构？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "07-cii-security-protection-regulation.md",
+          "clause": "第14条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "07-cii-security-protection-regulation.md",
+          "clause": "第13条",
+          "why": "相邻条：安全保护责任制与专门机构"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "archives_transfer",
+      "type": "semantic",
+      "query": "单位应当归档的材料需要移交给谁集中管理？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "06-archives-law.md",
+          "clause": "第14条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "06-archives-law.md",
+          "clause": "第15条",
+          "why": "相邻条：向本单位档案机构移交 vs 向档案馆移交"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "pipl_assessment_retention_3y",
+      "type": "numerical",
+      "query": "个人信息保护影响评估报告和处理情况记录应当至少保存多长时间？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第56条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第55条",
+          "why": "相邻条：影响评估的适用情形与保存期限"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "incident_cii_report_1h",
+      "type": "numerical",
+      "query": "关键信息基础设施发生较大以上网络安全事件，最迟必须在多长时间内向保护工作部门报告？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "08-cybersecurity-incident-reporting-measures.md",
+          "clause": "第4条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "07-cii-security-protection-regulation.md",
+          "clause": "第18条",
+          "why": "条例第18条只规定「按照有关规定报告」，不含具体时限"
+        }
+      ],
+      "critical": false,
+      "notes": ""
+    },
+    {
+      "id": "cross_doc_cii_personal_info_export",
+      "type": "cross_doc",
+      "query": "关键信息基础设施运营者将在境内收集的个人信息出境，网络安全法和个人信息保护法分别有什么要求？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第39条"
+        },
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第40条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "04-personal-information-protection-law.md",
+          "clause": "第38条",
+          "why": "个人信息出境的一般条件与 CII 特别规定易混"
+        }
+      ],
+      "critical": false,
+      "notes": "双来源：两份法律均对 CII 个人信息出境作出规定；召回任一来源即算命中"
+    },
+    {
+      "id": "cross_doc_incident_chain",
+      "type": "cross_doc",
+      "query": "关键信息基础设施发生重大网络安全事件时，向谁报告、时限是多少？相关要求分布在哪些文件？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "07-cii-security-protection-regulation.md",
+          "clause": "第18条"
+        },
+        {
+          "file": "08-cybersecurity-incident-reporting-measures.md",
+          "clause": "第4条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第27条",
+          "why": "网络安全法第27条只作一般性报告要求，不含具体时限"
+        }
+      ],
+      "critical": false,
+      "notes": "跨文档：条例规定报告对象，办法规定具体时限"
+    },
+    {
+      "id": "cross_doc_incident_law_measure",
+      "type": "cross_doc",
+      "query": "网络安全事件的报告义务在《网络安全法》和《国家网络安全事件报告管理办法》中分别是怎样规定的？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "05-cybersecurity-law.md",
+          "clause": "第27条"
+        },
+        {
+          "file": "08-cybersecurity-incident-reporting-measures.md",
+          "clause": "第4条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "07-cii-security-protection-regulation.md",
+          "clause": "第18条",
+          "why": "关键信息基础设施条例第18条是第三份相关来源"
+        }
+      ],
+      "critical": false,
+      "notes": "跨文档：一般义务 vs 具体程序"
+    },
+    {
+      "id": "conflict_retention_vs_archive",
+      "type": "conflict",
+      "query": "知识库文档保留 5 年后永久清除，但档案法要求具有保存价值的材料归档保存——两套规定对文档生命周期的要求有何差异？",
+      "expect": "hit",
+      "gold": [
+        {
+          "file": "01-knowledge-base-policy.md",
+          "clause": "第6条"
+        },
+        {
+          "file": "06-archives-law.md",
+          "clause": "第13条"
+        }
+      ],
+      "near_miss": [
+        {
+          "file": "06-archives-law.md",
+          "clause": "第15条",
+          "why": "归档移交是冲突的另一面：移交后不再由知识库单独处置"
+        }
+      ],
+      "critical": false,
+      "notes": "两来源冲突：知识库 5 年保留并清除 vs 档案法要求归档；召回任一来源即算命中，冲突本身留给上层处理"
+    },
+    {
+      "id": "neg_kubernetes_autoscale",
+      "type": "unanswerable",
+      "query": "Kubernetes 集群的 Pod 水平自动扩缩容阈值怎么配置？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外技术主题"
+    },
+    {
+      "id": "neg_expense_invoice",
+      "type": "unanswerable",
+      "query": "员工报销差旅费需要提供哪些发票？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外财务主题"
+    },
+    {
+      "id": "neg_python_binary_tree",
+      "type": "unanswerable",
+      "query": "如何用 Python 实现二叉树的层序遍历？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外编程主题"
+    },
+    {
+      "id": "neg_annual_lottery",
+      "type": "unanswerable",
+      "query": "公司年会的抽奖环节怎么安排？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外行政主题"
+    },
+    {
+      "id": "neg_protein_supplement",
+      "type": "unanswerable",
+      "query": "请推荐几款适合健身增肌的蛋白质补剂。",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外健康主题"
+    },
+    {
+      "id": "neg_world_cup_cities",
+      "type": "unanswerable",
+      "query": "2026 年世界杯的举办城市有哪些？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外体育主题"
+    },
+    {
+      "id": "neg_tiramisu_recipe",
+      "type": "unanswerable",
+      "query": "怎么制作提拉米苏？需要哪些原料？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外烹饪主题"
+    },
+    {
+      "id": "neg_stock_option_price",
+      "type": "unanswerable",
+      "query": "股票期权的行权价格如何确定？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外金融主题"
+    },
+    {
+      "id": "neg_transformer_attention",
+      "type": "unanswerable",
+      "query": "请解释 Transformer 模型的自注意力机制。",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外机器学习主题"
+    },
+    {
+      "id": "neg_euv_lithography",
+      "type": "unanswerable",
+      "query": "光刻机的极紫外光源工作原理是什么？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外半导体主题"
+    },
+    {
+      "id": "neg_french_poem_translation",
+      "type": "unanswerable",
+      "query": "请把这首法语诗歌翻译成中文。",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外翻译任务"
+    },
+    {
+      "id": "neg_passport_visa",
+      "type": "unanswerable",
+      "query": "如何申请护照和签证？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外出入境主题"
+    },
+    {
+      "id": "neg_piano_exam",
+      "type": "unanswerable",
+      "query": "钢琴考级需要准备哪些曲目？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外艺术主题"
+    },
+    {
+      "id": "neg_typhoon_path",
+      "type": "unanswerable",
+      "query": "台风路径预报为什么经常变化？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外气象主题"
+    },
+    {
+      "id": "neg_tang_exam_system",
+      "type": "unanswerable",
+      "query": "请介绍一下唐朝的科举制度。",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外历史主题"
+    },
+    {
+      "id": "neg_cat_nails",
+      "type": "unanswerable",
+      "query": "怎么给猫修剪指甲？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外宠物主题"
+    },
+    {
+      "id": "neg_decoherence_time",
+      "type": "unanswerable",
+      "query": "量子计算机的退相干时间如何测量？",
+      "expect": "empty",
+      "gold": [],
+      "near_miss": [],
+      "critical": false,
+      "notes": "负例：语料外量子计算主题"
+    }
+  ]
+}
