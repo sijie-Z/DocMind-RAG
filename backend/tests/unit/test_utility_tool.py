@@ -152,6 +152,20 @@ async def test_summary_mode_rejects_insights_only_arguments():
     assert result.error.code == "validation_error"
 
 
+@pytest.mark.asyncio
+async def test_invalid_mode_values_are_rejected():
+    """规范入口的 mode 不得静默降级（未知值显式 validation_error）。"""
+    bad_search = await tool_registry.execute_detailed(
+        "search_knowledge_base", {"query": "q", "mode": "bogus"}, organization_id=1
+    )
+    assert not bad_search.success and bad_search.error.code == "validation_error"
+
+    bad_insights = await tool_registry.execute_detailed(
+        "extract_insights", {"document_id": "d", "mode": "bogus"}, organization_id=1
+    )
+    assert not bad_insights.success and bad_insights.error.code == "validation_error"
+
+
 def test_disabled_tools_old_name_blocks_old_call_not_whole_umbrella():
     """禁用清单写旧名只阻断旧名调用；不隐藏整个规范伞形（issue #509 评审修正）。"""
     cfg = AgentConfig(disabled_tools=["get_current_time"])

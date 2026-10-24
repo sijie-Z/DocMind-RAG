@@ -136,7 +136,12 @@ async def search_knowledge_base(
         return _missing_organization_result("search_knowledge_base")
     # issue #509：vector_search 合并进本工具（mode=vector）。纯向量臂的
     # min_score=1.15 / 空结果哨兵 / 失败语义原样保留在 _vector_search_impl。
-    if str(mode or "").strip().lower() == "vector":
+    mode_norm = str(mode or "").strip().lower()
+    if mode_norm not in ("hybrid", "vector"):
+        return ToolResult.fail(
+            code="validation_error", message=f"未知 mode: {mode}（支持 hybrid/vector）"
+        )
+    if mode_norm == "vector":
         return await _vector_search_impl(query, top_k, organization_id, document_ids)
 
     from app.dependencies import get_rag_pipeline
@@ -536,7 +541,12 @@ async def extract_insights(
         return _missing_organization_result("extract_insights")
     # issue #509：summarize_document 合并进本工具（mode=summary）。摘要的
     # 无 LLM / 空正文 / 异常兜底原样保留在 _summarize_document_impl。
-    if str(mode or "").strip().lower() == "summary":
+    mode_norm = str(mode or "").strip().lower()
+    if mode_norm not in ("insights", "summary"):
+        return ToolResult.fail(
+            code="validation_error", message=f"未知 mode: {mode}（支持 insights/summary）"
+        )
+    if mode_norm == "summary":
         # issue #509 评审修正：summary 不是 insights 的参数子集——显式传
         # aspects/framework 时拒绝，避免“以为按框架分析、实际只生成摘要”。
         if str(aspects or "all").strip().lower() != "all" or str(framework or "").strip():
