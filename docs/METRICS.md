@@ -21,19 +21,19 @@
 
 ## 2. 检索评测（Eval v1.5）
 
-**统一口径**：`mode=fake`（确定性伪嵌入 `hash-bigram-char-v1`，dim=256；只测检索层，不含 rerank / 缓存 / LLM）；日期 2026-10-24；语料 commit `d867a2b3`；语料指纹 `sha256:838fd02f…97d9e`；**来源 PR #525（尚未合并）**。
+**统一口径**：`mode=fake`（确定性伪嵌入 `hash-bigram-char-v1`，dim=256；只测检索层，不含 rerank / 缓存 / LLM）；日期 2026-10-24；语料 commit `d867a2b3`；语料指纹 `sha256:838fd02f…97d9e`；**来源 PR #525（已合并，squash 552efaad）**。
 
 | 指标 | 值 | 口径 | 命令 | 日期 | 备注 |
 |---|---|---|---|---|---|
-| eval_golden_items | 80（60 正 + 20 负） | fake；检索层，不含 rerank / 缓存 / LLM | `cd backend && python -m evals check` | 2026-10-24 | 来源 PR #525（尚未合并）；语料 8 文件 / 362 chunks / 354 条 clause 定义 |
-| eval_clause_hit_at_1 | 70.0% | fake；hybrid 检索，n=80 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（尚未合并）；与 v1 的 28 条不可混比 |
-| eval_clause_hit_at_3 | 76.7% | fake；hybrid 检索，n=80 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（尚未合并）；与 v1 的 28 条不可混比 |
-| eval_clause_hit_at_5 | 80.0% | fake；hybrid 检索，n=80 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（尚未合并）；Wilson 95% CI 68.2–88.2% |
-| eval_near_miss_at_5 | 25.0% | fake；cap 指标（越低越好），n=80 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（尚未合并）；旧 v1 口径为 16.7%，不可混比 |
-| eval_mrr | 0.74 | fake；hybrid 检索，n=80 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（尚未合并） |
-| eval_empty_accuracy | 100% | fake；负例空结果准确率，n=20 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（尚未合并） |
-| eval_errors | 0 | fake；评测执行错误数（cap） | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（尚未合并） |
-| eval_gate_result | 7/7 PASS | fake；容差 0（floor 实测 ≥ 基线、cap 实测 ≤ 基线） | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（尚未合并）；基线在该 PR 内重盖为 v1.5 hybrid |
+| eval_golden_items | 80（60 正 + 20 负） | fake；检索层，不含 rerank / 缓存 / LLM | `cd backend && python -m evals check` | 2026-10-24 | 来源 PR #525（已合并，squash 552efaad）；语料 8 文件 / 362 chunks / 354 条 clause 定义 |
+| eval_clause_hit_at_1 | 70.0% | fake；hybrid 检索，n=80 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（已合并，squash 552efaad）；与 v1 的 28 条不可混比 |
+| eval_clause_hit_at_3 | 76.7% | fake；hybrid 检索，n=80 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（已合并，squash 552efaad）；与 v1 的 28 条不可混比 |
+| eval_clause_hit_at_5 | 80.0% | fake；hybrid 检索，n=80 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（已合并，squash 552efaad）；Wilson 95% CI 68.2–88.2% |
+| eval_near_miss_at_5 | 25.0% | fake；cap 指标（越低越好），n=80 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（已合并，squash 552efaad）；旧 v1 口径为 16.7%，不可混比 |
+| eval_mrr | 0.74 | fake；hybrid 检索，n=80 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（已合并，squash 552efaad） |
+| eval_empty_accuracy | 100% | fake；负例空结果准确率，n=20 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（已合并，squash 552efaad） |
+| eval_errors | 0 | fake；评测执行错误数（cap） | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（已合并，squash 552efaad） |
+| eval_gate_result | 7/7 PASS | fake；容差 0（floor 实测 ≥ 基线、cap 实测 ≤ 基线） | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（已合并，squash 552efaad）；基线在该 PR 内重盖为 v1.5 hybrid |
 
 ### 历史口径（保留以防混写；不得当作当前新数字对外引用）
 
