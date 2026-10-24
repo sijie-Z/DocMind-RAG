@@ -34,7 +34,16 @@ def _result(value, scalar=0):
 
 def _make_session(*execute_results):
     session = MagicMock()
-    session.execute = AsyncMock(side_effect=list(execute_results))
+    results = list(execute_results)
+
+    async def _execute(*args, **kwargs):
+        # issue #499：seq 分配在行锁内读计数器 + MAX 兜底 + UPDATE（多次 execute）。
+        # 未显式编排的后续查询按"无计数/无消息"安全默认应答，避免 mock 序列耗尽。
+        if results:
+            return results.pop(0)
+        return _result(None, scalar=0)
+
+    session.execute = AsyncMock(side_effect=_execute)
     session.add = MagicMock()
     session.commit = AsyncMock()
     return session

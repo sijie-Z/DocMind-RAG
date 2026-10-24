@@ -1,8 +1,10 @@
-"""issue #476：会话 fork/lineage 的 HTTP 面契约（tests/api 惯例：假鉴权 + sqlite）。
+"""issue #476 / #499：会话 fork/lineage 的 HTTP 面契约（tests/api 惯例：假鉴权 + sqlite）。
 
-覆盖：鉴权（401）、越权/跨组织 404（不 403、不 200）、成功契约（字段齐全）、
-边界非法/运行中任务 409（error_code 可判别）、Idempotency-Key 重放、
-lineage 契约、审计口径（action=session_fork，detail 含父/子/边界/checkpoint）。
+覆盖：鉴权（401）、越权/跨组织 404（不 403、不 200）、成功契约（含 issue #499
+新增的 session_id/messages_copied/checkpoint_task_id）、边界非法/运行中任务 409、
+pending 边界 400、配额 400、SYSTEM 边界允许、Idempotency-Key 头与 body
+idempotency_key（body 优先）、/agent/sessions 兼容别名（Deprecation 头）、
+history_limit（fork 子会话 200）、lineage 契约、审计口径。
 """
 
 import json
@@ -32,6 +34,14 @@ async def db_factory(tmp_path):
     factory = async_sessionmaker(engine, expire_on_commit=False)
     yield factory
     await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _no_redis(monkeypatch):
+    """API 用例只验证 DB 唯一约束路径：显式关闭全局 Redis 代理，防跨用例污染。"""
+    from app.services import session_fork_service
+
+    monkeypatch.setattr(session_fork_service, "redis_client", None)
 
 
 @pytest.fixture
@@ -169,6 +179,11 @@ async def test_fork_success_contract_and_audit(client, db_factory, audit_calls):
     body = r.json()
     assert body["success"] is True
     data = body["data"]
+    # issue #499 契约字段（顶层）
+    assert data["session_id"] == data["id"]
+    assert data["messages_copied"] == 2
+    assert data["checkpoint_task_id"] is None
+    # issue #476 兼容字段
     assert data["id"] and data["id"] != sid
     assert data["title"] == "分支标题"
     assert data["parent_session_id"] == sid
@@ -240,6 +255,47 @@ async def test_fork_idempotency_key_header_replay(client, db_factory):
 
 
 @pytest.mark.asyncio
+async def test_fork_idempotency_key_body_replay_and_body_precedence(client, db_factory):
+    """issue #499：body idempotency_key 生效，且优先于 Idempotency-Key 头。"""
+    sid, _ = await _seed_conversation(db_factory, "src-1")
+
+    r1 = client.post(
+        f"/api/v1/sessions/{sid}/fork",
+        json={"idempotency_key": "body-key-1"},
+        headers={"Idempotency-Key": "header-key-1"},
+    )
+    assert r1.status_code == 200
+    data1 = r1.json()["data"]
+    assert data1["idempotent_replay"] is False
+
+    # 同一 body 键、不同 header：body 优先 → 重放同一子会话（header 不参与）。
+    r2 = client.post(
+        f"/api/v1/sessions/{sid}/fork",
+        json={"idempotency_key": "body-key-1"},
+        headers={"Idempotency-Key": "header-key-2"},
+    )
+    assert r2.status_code == 200
+    data2 = r2.json()["data"]
+    assert data2["id"] == data1["id"]
+    assert data2["idempotent_replay"] is True
+
+    # 只带 header 的旧客户端继续可用。
+    r3 = client.post(f"/api/v1/sessions/{sid}/fork", headers={"Idempotency-Key": "header-key-3"})
+    r4 = client.post(f"/api/v1/sessions/{sid}/fork", headers={"Idempotency-Key": "header-key-3"})
+    assert r3.status_code == 200 and r4.status_code == 200
+    assert r3.json()["data"]["id"] == r4.json()["data"]["id"]
+    assert r4.json()["data"]["idempotent_replay"] is True
+
+    async with db_factory() as db:
+        children = (
+            (await db.execute(select(ChatSession).where(ChatSession.parent_session_id == sid)))
+            .scalars()
+            .all()
+        )
+        assert len(children) == 2, "body-key-1 与 header-key-3 各建一个，重复请求不得再建"
+
+
+@pytest.mark.asyncio
 async def test_checkpoint_clone_contract_and_idempotent_replay(client, db_factory, audit_calls):
     """checkpoint 克隆的 HTTP 契约：cloned=true、task_id 为克隆 id、重放同 id、审计留痕。"""
     sid, a1_id = await _seed_conversation(db_factory, "src-1")
@@ -268,6 +324,9 @@ async def test_checkpoint_clone_contract_and_idempotent_replay(client, db_factor
     assert data1["checkpoint"]["cloned"] is True
     assert data1["checkpoint"]["task_id"] != "src-task-1"
     assert data1["checkpoint"]["source_task_id"] == "src-task-1"
+    assert data1["checkpoint_task_id"] == data1["checkpoint"]["task_id"], (
+        "issue #499：顶层 checkpoint_task_id 与兼容嵌套字段指向同一克隆任务"
+    )
     detail = json.loads(audit_calls[-1]["detail"])
     assert detail["checkpoint_cloned"] is True
     assert detail["checkpoint_source_task_id"] == "src-task-1"
@@ -287,7 +346,7 @@ async def test_checkpoint_clone_contract_and_idempotent_replay(client, db_factor
         clone = await db.get(AgentTask, data1["checkpoint"]["task_id"])
         assert clone is not None
         assert clone.session_id == data1["id"]
-        assert clone.status == TaskStatus.PAUSED
+        assert clone.status == TaskStatus.PENDING, "issue #499：克隆任务必须落 PENDING"
 
 
 @pytest.mark.asyncio
@@ -360,6 +419,129 @@ async def test_fork_running_task_is_409(client, db_factory):
     r2 = client.post(f"/api/v1/sessions/{sid}/fork", json={"include_checkpoint": True})
     assert r2.status_code == 409
     assert r2.json()["error_code"] == "FORK_CHECKPOINT_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_fork_pending_boundary_is_400(client, db_factory):
+    """issue #499：边界消息 meta_data 标 pending → 400 VALIDATION_ERROR。"""
+    async with db_factory() as db:
+        await _mk_session(db, "src-1")
+        await _mk_msg(db, "src-1", 1, MessageType.USER, "问题一")
+        pending = ChatMessage(
+            id=str(uuid.uuid4()),
+            session_id="src-1",
+            seq=2,
+            content="正在生成……",
+            message_type=MessageType.ASSISTANT,
+            meta_data={"tool_status": "pending"},
+        )
+        db.add(pending)
+        await db.commit()
+
+    r = client.post("/api/v1/sessions/src-1/fork", json={"message_id": pending.id})
+    assert r.status_code == 400
+    assert r.json()["error_code"] == "VALIDATION_ERROR"
+    assert r.json()["detail"]["message_id"] == pending.id
+
+
+@pytest.mark.asyncio
+async def test_fork_quota_exceeded_is_400(client, db_factory, monkeypatch):
+    """issue #499：复制数超配额 → 400 VALIDATION_ERROR（detail 含 messages/limit）。"""
+    from app.services import session_fork_service
+
+    monkeypatch.setattr(session_fork_service, "FORK_MAX_COPIED_MESSAGES", 1)
+    sid, _ = await _seed_conversation(db_factory, "src-1")
+
+    r = client.post(f"/api/v1/sessions/{sid}/fork")
+    assert r.status_code == 400
+    body = r.json()
+    assert body["error_code"] == "VALIDATION_ERROR"
+    assert body["detail"] == {"messages": 2, "limit": 1}
+
+
+@pytest.mark.asyncio
+async def test_fork_system_boundary_is_allowed(client, db_factory):
+    """issue #499：SYSTEM 消息可以作为边界（复制到该消息为止）。"""
+    async with db_factory() as db:
+        await _mk_session(db, "src-1")
+        await _mk_msg(db, "src-1", 1, MessageType.USER, "问题一")
+        await _mk_msg(db, "src-1", 2, MessageType.ASSISTANT, "回答一")
+        system = await _mk_msg(db, "src-1", 3, MessageType.SYSTEM, "系统提示")
+        await db.commit()
+
+    r = client.post("/api/v1/sessions/src-1/fork", json={"message_id": system.id})
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["messages_copied"] == 3
+    assert data["fork_point_message_id"] == system.id
+
+
+@pytest.mark.asyncio
+async def test_compat_alias_agent_sessions_fork_and_lineage(client, db_factory):
+    """issue #499：/agent/sessions/{id}/fork|lineage 兼容别名 200 且带 Deprecation 头。"""
+    sid, a1_id = await _seed_conversation(db_factory, "src-1")
+
+    r = client.post(f"/api/v1/agent/sessions/{sid}/fork", json={"message_id": a1_id})
+    assert r.status_code == 200
+    assert r.headers.get("Deprecation") == "true"
+    child_id = r.json()["data"]["session_id"]
+    assert child_id == r.json()["data"]["id"]
+
+    r_lineage = client.get(f"/api/v1/agent/sessions/{child_id}/lineage")
+    assert r_lineage.status_code == 200
+    assert r_lineage.headers.get("Deprecation") == "true"
+    assert r_lineage.json()["data"]["parent_session_id"] == sid
+
+    # 规范路由不受影响（前端继续使用 /sessions）。
+    canonical = client.get(f"/api/v1/sessions/{child_id}/lineage")
+    assert canonical.status_code == 200
+    assert canonical.headers.get("Deprecation") is None
+
+    # 兼容别名不进 OpenAPI schema（include_in_schema=False）。
+    from app.main import app
+
+    paths = app.openapi()["paths"]
+    assert "/api/v1/sessions/{session_id}/fork" in paths
+    assert "/api/v1/agent/sessions/{session_id}/fork" not in paths
+    assert "/api/v1/agent/sessions/{session_id}/lineage" not in paths
+
+
+@pytest.mark.asyncio
+async def test_history_limit_fork_child_loads_200_messages(client, db_factory, monkeypatch):
+    """issue #499：fork 子会话 settings.history_limit=200；普通会话默认 20。"""
+    from app.api.v1.endpoints import agent as agent_module
+    from app.services.session_service import SessionAccessScope
+
+    monkeypatch.setattr(agent_module, "AsyncSessionLocal", db_factory)
+    async with db_factory() as db:
+        await _mk_session(db, "src-1")
+        a1 = await _mk_msg(db, "src-1", 1, MessageType.ASSISTANT, "回答一")
+        await db.commit()
+
+    r = client.post("/api/v1/sessions/src-1/fork", json={"message_id": a1.id})
+    assert r.status_code == 200
+    child_id = r.json()["data"]["id"]
+
+    async with db_factory() as db:
+        # 子会话补齐到 220 条（复制 1 条 + 直插 219 条）。
+        for seq in range(2, 221):
+            await _mk_msg(
+                db,
+                child_id,
+                seq,
+                MessageType.USER if seq % 2 == 0 else MessageType.ASSISTANT,
+                f"child-{seq}",
+            )
+        # 母会话补齐到 30 条。
+        for seq in range(2, 31):
+            await _mk_msg(db, "src-1", seq, MessageType.ASSISTANT, f"parent-{seq}")
+        await db.commit()
+
+    scope = SessionAccessScope(bypass_org=False, org_id=ORG_ID)
+    child_history = await agent_module._load_session_messages(child_id, USER_ID, scope)
+    parent_history = await agent_module._load_session_messages("src-1", USER_ID, scope)
+    assert len(child_history) == 200, "fork 子会话必须加载 200 条历史"
+    assert len(parent_history) == 20, "普通会话保持默认 20 条"
 
 
 # ── lineage ────────────────────────────────────────────────────────────────

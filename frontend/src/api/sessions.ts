@@ -1,14 +1,19 @@
 /**
- * Session Fork / Lineage API（issue #476）。
+ * Session Fork / Lineage API（issue #476 / #499）。
  *
- * - POST /api/v1/sessions/{id}/fork：从已结算边界分叉子会话。
- *   body: {message_id?, title?, include_checkpoint?, seed?}
- *   data: {id, copied_message_count, boundary_seq, is_seeded, checkpoint…}
+ * - POST /api/v1/sessions/{id}/fork：从 seq <= boundary 前缀分叉子会话（含边界）。
+ *   body: {message_id?, title?, include_checkpoint?, seed?, idempotency_key?}
+ *   data: {session_id, messages_copied, checkpoint_task_id, id, copied_message_count…}
  * - GET  /api/v1/sessions/{id}/lineage：祖先链（根→父）+ 直接子级 + 谱系元数据。
  *
+ * 兼容别名（issue #499，响应带 Deprecation 头）：
+ * - POST /api/v1/agent/sessions/{id}/fork
+ * - GET  /api/v1/agent/sessions/{id}/lineage
+ *
  * 语义（backend/app/services/session_fork_service.py）：
- * - 边界只能落在已结算轮次：ASSISTANT 必须是轮次最终消息；USER 表示“在该消息
- *   之前分叉”；SYSTEM 非法；源会话有运行中任务时只能显式克隆 checkpoint，否则 409。
+ * - 边界 = seq <= boundary（含边界消息；USER/SYSTEM/ASSISTANT 均可）；
+ *   同一轮内的中间 assistant 仍非法；边界消息 pending 时 400。
+ * - 源会话有运行中任务时只能显式克隆 checkpoint，否则 409。
  * - 越权/跨组织一律 404（不区分，避免枚举）。
  *
  * 错误体与 commands 同款扁平结构；请求带 X-Silent-Error 由调用方精确呈现。
@@ -22,9 +27,16 @@ export interface SessionForkInput {
   title?: string
   include_checkpoint?: boolean
   seed?: string
+  /** issue #499：幂等键（优先于 Idempotency-Key 头）。 */
+  idempotency_key?: string
 }
 
 export interface SessionForkData {
+  // issue #499 契约字段（顶层；可选以兼容旧后端窗口）
+  session_id?: string
+  messages_copied?: number
+  checkpoint_task_id?: string | null
+  // issue #476 兼容字段（保留一版）
   id: string
   title: string
   parent_session_id: string | null

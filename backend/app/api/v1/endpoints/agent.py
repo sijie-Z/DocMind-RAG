@@ -1719,6 +1719,26 @@ async def update_config(
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
+# issue #499：会话历史加载条数。普通会话默认 20；fork 子会话在 settings 写
+# history_limit=200（session_fork_service.FORK_CHILD_HISTORY_LIMIT）。
+DEFAULT_SESSION_HISTORY_LIMIT = 20
+MAX_SESSION_HISTORY_LIMIT = 1000
+
+
+def _resolve_history_limit(session_settings: Any) -> int:
+    """从 ``ChatSession.settings["history_limit"]`` 解析历史条数（安全默认 20）。"""
+    if not isinstance(session_settings, dict):
+        return DEFAULT_SESSION_HISTORY_LIMIT
+    raw = session_settings.get("history_limit", DEFAULT_SESSION_HISTORY_LIMIT)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_SESSION_HISTORY_LIMIT
+    if value <= 0:
+        return DEFAULT_SESSION_HISTORY_LIMIT
+    return min(value, MAX_SESSION_HISTORY_LIMIT)
+
+
 async def _load_session_messages(
     session_id: str,
     user_id: int,
@@ -1728,19 +1748,24 @@ async def _load_session_messages(
 
     T4：历史加载与详情读取同一 org 口径（``scope``）——切到其他组织后，
     旧组织会话的历史不得进入本轮运行上下文；历史 NULL 组织会话不受影响。
+
+    issue #499：加载条数取会话 ``settings["history_limit"]``（默认 20；fork
+    子会话为 200）。
     """
     try:
         async with AsyncSessionLocal() as session:
             stmt = select(ChatSession).where(*session_access_conditions(session_id, user_id, scope))
             result = await session.execute(stmt)
-            if not result.scalar_one_or_none():
+            session_obj = result.scalar_one_or_none()
+            if not session_obj:
                 return []
 
+            history_limit = _resolve_history_limit(session_obj.settings)
             msg_stmt = (
                 select(ChatMessage)
                 .where(ChatMessage.session_id == session_id)
                 .order_by(ChatMessage.seq.asc(), ChatMessage.created_at.asc())
-                .limit(20)
+                .limit(history_limit)
             )
             messages = (await session.execute(msg_stmt)).scalars().all()
 

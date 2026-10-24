@@ -1,8 +1,18 @@
-"""会话分叉 / 谱系端点（issue #476）。
+"""会话分叉 / 谱系端点（issue #476 / #499）。
 
-- ``POST /api/v1/sessions/{id}/fork``：从已结算边界分叉子会话；可选
-  checkpoint 克隆 / seed / 幂等键。
+规范路由（前端在用，保持稳定）：
+
+- ``POST /api/v1/sessions/{id}/fork``：从 ``seq <= boundary`` 前缀分叉子会话
+  （含边界消息）；可选 checkpoint 克隆 / seed / 幂等键。
 - ``GET  /api/v1/sessions/{id}/lineage``：祖先链（根→父）+ 直接子级 + 谱系元数据。
+
+兼容别名（issue #499 契约路径，旧客户端可用）：
+
+- ``POST /api/v1/agent/sessions/{id}/fork``
+- ``GET  /api/v1/agent/sessions/{id}/lineage``
+
+别名路由 ``include_in_schema=False`` 且响应带 ``Deprecation: true`` 头；行为与
+规范路由完全一致（同一实现），废弃窗口内保留。
 
 鉴权/租户：复用 ``app.services.session_service`` 的 org + user 可见范围
 （超管旁路、历史 NULL 组织、无组织非超管 fail-closed 到本人历史会话），
@@ -16,7 +26,8 @@ checkpoint（避免"伪历史"无法追溯）。
 import json
 import logging
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Request, Response
+from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -28,16 +39,56 @@ from app.services.audit_service import audit_service
 from app.services.session_service import resolve_session_access_scope
 
 router = APIRouter()
+compat_router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+class ForkRequest(SessionForkRequest):
+    """fork 请求体（issue #499）。
+
+    在既有 ``SessionForkRequest`` 上追加 ``idempotency_key``：body 键优先于
+    ``Idempotency-Key`` 头（两者都生效；只带其一时行为不变）。
+
+    ``message_id`` / ``include_checkpoint`` 的描述在子类里覆盖，避免 OpenAPI
+    继续展示 issue #476 的旧语义（"在该 USER 之前分叉"/克隆为 PAUSED）。
+    """
+
+    message_id: str | None = Field(
+        None,
+        max_length=36,
+        description=(
+            "边界消息 ID：复制 seq <= 该消息（含边界消息）；ASSISTANT 必须是轮次"
+            "最终消息。默认最后一条已结算消息"
+        ),
+    )
+    include_checkpoint: bool = Field(
+        False,
+        description="是否深拷最近一个已结算 checkpoint 到新 PENDING 任务（可 resume 继续）",
+    )
+    idempotency_key: str | None = Field(
+        None,
+        max_length=128,
+        description="幂等键（优先于 Idempotency-Key 头）：同一用户重复请求返回同一子会话",
+    )
+
+
 def _fork_data(result: session_fork_service.ForkResult) -> dict:
-    """把 ForkResult 投影为响应 data 段（字段即契约，前端据此展示谱系徽标）。"""
+    """把 ForkResult 投影为响应 data 段（字段即契约，前端据此展示谱系徽标）。
+
+    issue #499：追加契约字段 ``session_id`` / ``messages_copied`` /
+    ``checkpoint_task_id``；旧字段（``id`` / ``copied_message_count`` /
+    ``checkpoint`` 嵌套）保留一版，兼容现有前端与脚本。
+    """
     session = result.session
     fork_meta = session.settings.get("fork") if isinstance(session.settings, dict) else None
     if not isinstance(fork_meta, dict):
         fork_meta = {}
     return {
+        # ── issue #499 契约字段（顶层）────────────────────────────────────
+        "session_id": session.id,
+        "messages_copied": result.copied_message_count,
+        "checkpoint_task_id": result.checkpoint_task_id,
+        # ── issue #476 兼容字段（保留一版）────────────────────────────────
         "id": session.id,
         "title": session.title,
         "parent_session_id": session.parent_session_id,
@@ -57,29 +108,28 @@ def _fork_data(result: session_fork_service.ForkResult) -> dict:
     }
 
 
-@router.post("/{session_id}/fork", response_model=dict, dependencies=[Depends(get_current_user)])
-async def fork_session_endpoint(
+def _mark_deprecated(response: Response) -> None:
+    """兼容别名路由的统一废弃标记（issue #499）。"""
+    response.headers["Deprecation"] = "true"
+    response.headers["Warning"] = '299 - "Deprecated API; use /api/v1/sessions/... instead"'
+
+
+async def _execute_fork(
+    *,
     session_id: str,
     request: Request,
-    body: SessionForkRequest | None = None,
-    idempotency_key: str | None = Header(
-        None,
-        alias="Idempotency-Key",
-        max_length=128,
-        description="幂等键：同一用户/源会话下重复请求返回同一子会话",
-    ),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """分叉会话（issue #476）。
-
-    - 200：子会话已创建（或幂等重放同一子会话）；
-    - 400：seed 超限；404：源会话/边界消息不存在、他人或跨组织；
-    - 409：边界非法 / 消息数超配额 / 源会话运行中且无 checkpoint 可克隆 /
-      没有可用的已结算 checkpoint。
-    """
+    body: ForkRequest | None,
+    header_idempotency_key: str | None,
+    current_user: User,
+    db: AsyncSession,
+) -> dict:
+    """fork 的唯一实现（规范路由与兼容别名共用，避免行为漂移）。"""
     scope = await resolve_session_access_scope(current_user, db)
-    payload = body or SessionForkRequest()
+    payload = body or ForkRequest()
+    # issue #499：body 幂等键优先，Idempotency-Key 头兜底。
+    idempotency_key = (
+        (payload.idempotency_key or "").strip() or (header_idempotency_key or "").strip() or None
+    )
     result = await session_fork_service.fork_session(
         db,
         source_id=session_id,
@@ -91,7 +141,7 @@ async def fork_session_endpoint(
         include_checkpoint=payload.include_checkpoint,
         seed=payload.seed,
         reason=payload.reason,
-        idempotency_key=(idempotency_key or "").strip() or None,
+        idempotency_key=idempotency_key,
     )
 
     fork_meta = (
@@ -130,13 +180,12 @@ async def fork_session_endpoint(
     }
 
 
-@router.get("/{session_id}/lineage", response_model=dict, dependencies=[Depends(get_current_user)])
-async def get_session_lineage(
+async def _execute_lineage(
+    *,
     session_id: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """会话谱系：祖先链 / 直接子级 / 切点元数据（父会话删除后仍可查）。"""
+    current_user: User,
+    db: AsyncSession,
+) -> dict:
     scope = await resolve_session_access_scope(current_user, db)
     data = await session_fork_service.get_lineage(
         db,
@@ -146,3 +195,94 @@ async def get_session_lineage(
         scope=scope,
     )
     return {"success": True, "message": "获取成功", "data": data}
+
+
+@router.post("/{session_id}/fork", response_model=dict, dependencies=[Depends(get_current_user)])
+async def fork_session_endpoint(
+    session_id: str,
+    request: Request,
+    body: ForkRequest | None = None,
+    idempotency_key: str | None = Header(
+        None,
+        alias="Idempotency-Key",
+        max_length=128,
+        description="幂等键：同一用户重复请求返回同一子会话（body idempotency_key 优先）",
+    ),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """分叉会话（issue #499 规范路由）。
+
+    - 200：子会话已创建（或幂等重放同一子会话）；
+    - 400：seed 超限 / 边界消息 pending / 复制数超配额；
+    - 404：源会话/边界消息不存在、他人或跨组织；
+    - 409：边界非法 / 源会话运行中且无 checkpoint 可克隆 / 没有可用 checkpoint /
+      同幂等键的首个请求仍在处理中（FORK_IN_PROGRESS，可重试）。
+    """
+    return await _execute_fork(
+        session_id=session_id,
+        request=request,
+        body=body,
+        header_idempotency_key=idempotency_key,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@router.get("/{session_id}/lineage", response_model=dict, dependencies=[Depends(get_current_user)])
+async def get_session_lineage(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """会话谱系：祖先链 / 直接子级 / 切点元数据（父会话删除后仍可查）。"""
+    return await _execute_lineage(session_id=session_id, current_user=current_user, db=db)
+
+
+# ── 兼容别名（issue #499）：/api/v1/agent/sessions/{id}/fork|lineage ──────────
+
+
+@compat_router.post(
+    "/sessions/{session_id}/fork",
+    response_model=dict,
+    include_in_schema=False,
+    deprecated=True,
+    dependencies=[Depends(get_current_user)],
+)
+async def fork_session_compat_endpoint(
+    session_id: str,
+    request: Request,
+    response: Response,
+    body: ForkRequest | None = None,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key", max_length=128),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """兼容别名：``POST /api/v1/agent/sessions/{id}/fork``（响应带 Deprecation 头）。"""
+    _mark_deprecated(response)
+    return await _execute_fork(
+        session_id=session_id,
+        request=request,
+        body=body,
+        header_idempotency_key=idempotency_key,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@compat_router.get(
+    "/sessions/{session_id}/lineage",
+    response_model=dict,
+    include_in_schema=False,
+    deprecated=True,
+    dependencies=[Depends(get_current_user)],
+)
+async def get_session_lineage_compat(
+    session_id: str,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """兼容别名：``GET /api/v1/agent/sessions/{id}/lineage``（带 Deprecation 头）。"""
+    _mark_deprecated(response)
+    return await _execute_lineage(session_id=session_id, current_user=current_user, db=db)

@@ -1,51 +1,61 @@
-"""issue #476：会话 fork/seed —— 边界判定、前缀复制、谱系、记忆隔离、checkpoint 克隆。
+"""issue #476 / #499：会话 fork/seed —— 边界判定、前缀复制、谱系、记忆隔离、checkpoint 克隆。
 
-本文件是 fork 语义的判别性回归网（先红后绿）。核心不变量：
+本文件是 fork 语义的判别性回归网（先红后绿）。核心不变量（issue #499 收口后）：
 
-- **边界只能落在已结算位置**：前缀以 ASSISTANT 结尾（或为空）。assistant 中间消息
-  （同一轮内后面还有 assistant）与"以 USER 结尾的前缀"都必须 409；
-  以 USER 为边界 = 在其"之前"分叉（该 USER 不复制）。
+- **边界 = ``seq <= boundary``（含边界消息）**：USER/SYSTEM/ASSISTANT 边界都复制
+  到该消息为止——首个 USER 边界复制 1 条（不再是 copied=0 的歧义）。ASSISTANT
+  边界仍须是该轮次最后一条 assistant（中间消息 409）。
+- **边界消息 pending → 400**：meta_data 带 tool_status=pending 或 status=pending
+  的未结算消息不能作为切点。
 - **默认边界 = 最后一条已结算消息**：尾部未答复的 USER 消息不复制，不报错。
 - **谱系不可变**：parent/root/fork_point 记录在子会话行上；父会话删除后子会话
   谱系仍可查（ancestors 停止于缺失父节点，parent_missing=true）。
 - **上下文隔离**：复制的是消息快照（新 id + 重新编号的 seq），父会话不变；
   记忆命名空间 `session:<child>` 与 `session:<parent>` 完全分离，默认不复制父记忆，
-  只有显式 seed 写入子命名空间。
+  只有显式 seed 写入子命名空间。子会话 settings.history_limit=200。
 - **活跃任务**：源会话存在非终态任务时，必须走 checkpoint 克隆且存在可用快照，
   否则 409（运行中任务不可被消息级热分叉）。
-- **checkpoint 克隆**：新 id、绑定子会话、状态 PAUSED（可 resume）、快照深拷贝、
-  run.fork_origin 记录来源（避免伪历史）；待审批 / 执行中工具拒绝。
+- **checkpoint 克隆**：新 id、绑定子会话、状态 PENDING（issue #499，可 resume）、
+  快照深拷贝、run.fork_origin 记录来源（避免伪历史）；待审批 / 执行中工具拒绝。
+- **幂等**：body/header 幂等键重复请求返回同一子会话；DB 唯一约束
+  (user_id, idempotency_key) 是并发双建的最终防线。
 
 变异点（任一被改坏，对应用例必红）：
-1. `_resolve_boundary` 把 USER 边界当作"包含该消息" → seq/内容断言红。
+1. USER 边界不包含该消息 → USER 边界 copied/seq 断言红。
 2. 去掉"assistant 中间消息"检查 → 409 用例红。
 3. 默认边界不跳过尾部 USER → 默认用例红。
 4. 复制时复用源消息 id / seq 不重排 → 唯一约束/断言红。
 5. seed 写进父命名空间或复制父记忆 → 隔离断言红。
 6. fork 不校验 org/user → 跨组织用例红（409/成功 vs 404）。
 7. 克隆复用源 task id / 不改 session_id / 不深拷 → 克隆断言红。
+8. 克隆任务状态写成 PAUSED → PENDING 契约用例红。
+9. 去掉 DB 唯一约束 → 同 key 并发用例建出两个子会话（必红）。
 """
 
+import asyncio
 import copy
+import json
 import uuid
 from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import delete, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401 — 注册全部表，供 create_all
 from app.agent import checkpoint
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.core.database import Base
-from app.exceptions import NotFoundError
+from app.exceptions import NotFoundError, ValidationError
 from app.models.agent_task import AgentTask, TaskStatus
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
-from app.services import memory_service, session_fork_service
+from app.services import chat_seq, memory_service, session_fork_service
 from app.services.session_fork_service import (
     ForkBoundaryInvalidError,
     ForkCheckpointRequiredError,
     ForkCheckpointUnavailableError,
+    ForkIdempotencyConflictError,
     ForkQuotaExceededError,
     fork_session,
     get_lineage,
@@ -145,6 +155,25 @@ async def _fork(db, source_id: str, **kwargs):
     )
 
 
+class _FakeRedis:
+    """最小 Redis：支持 SET NX EX / GET / DELETE（fork 幂等路径所需的最小面）。"""
+
+    def __init__(self):
+        self.data: dict[str, str] = {}
+
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.data:
+            return None
+        self.data[key] = value
+        return True
+
+    async def get(self, key):
+        return self.data.get(key)
+
+    async def delete(self, key):
+        self.data.pop(key, None)
+
+
 # ── 前缀复制 / seq 重排 / 母会话不受影响 ────────────────────────────────────
 
 
@@ -181,6 +210,8 @@ async def test_fork_copies_prefix_renumbers_seq_and_keeps_parent_intact(db_facto
         assert child.message_count == 2
         assert child.settings["fork"]["copied_message_count"] == 2
         assert child.settings["fork"]["checkpoint_cloned"] is False
+        assert child.settings["history_limit"] == 200, "issue #499：fork 子会话 history_limit=200"
+        assert child.next_message_seq == 2, "复制后计数器随复制条数推进"
         assert result.copied_message_count == 2
         assert result.boundary_seq == 2
         assert result.fork_point_message_id == a1.id
@@ -256,25 +287,30 @@ async def test_fork_rejects_intermediate_assistant_message(db_factory):
 
 
 @pytest.mark.asyncio
-async def test_fork_before_user_message_is_allowed_and_excludes_it(db_factory):
-    """以 USER 为边界 = 在该消息"之前"分叉；该 USER 不复制。"""
+async def test_fork_user_boundary_includes_boundary_message(db_factory):
+    """issue #499：USER 边界 = seq <= boundary（含该 USER），不再是"之前"分叉。"""
     async with db_factory() as db:
         src = await _mk_session(db, "src-1")
         await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
-        a1 = await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
         u2 = await _mk_msg(db, src.id, 3, MessageType.USER, "问题二")
         await _mk_msg(db, src.id, 4, MessageType.ASSISTANT, "回答二")
         await db.commit()
 
         result = await _fork(db, src.id, message_id=u2.id)
-        assert result.copied_message_count == 2
-        assert result.fork_point_message_id == a1.id
-        assert [m.content for m in await _messages(db, result.session.id)] == ["问题一", "回答一"]
+        assert result.copied_message_count == 3
+        assert result.boundary_seq == 3
+        assert result.fork_point_message_id == u2.id, "fork_point 就是边界消息本身"
+        assert [m.content for m in await _messages(db, result.session.id)] == [
+            "问题一",
+            "回答一",
+            "问题二",
+        ]
 
 
 @pytest.mark.asyncio
-async def test_fork_at_first_user_message_is_empty_prefix(db_factory):
-    """第一条消息就是 USER：在其之前分叉 = 空前缀（合法）。"""
+async def test_fork_at_first_user_message_copies_one_message(db_factory):
+    """issue #499：第一条消息就是 USER → 复制 1 条（消除 copied=0 的歧义）。"""
     async with db_factory() as db:
         src = await _mk_session(db, "src-1")
         u1 = await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
@@ -282,28 +318,38 @@ async def test_fork_at_first_user_message_is_empty_prefix(db_factory):
         await db.commit()
 
         result = await _fork(db, src.id, message_id=u1.id)
-        assert result.copied_message_count == 0
-        assert result.fork_point_message_id is None
+        assert result.copied_message_count == 1
+        assert result.boundary_seq == 1
+        assert result.fork_point_message_id == u1.id
+        child_msgs = await _messages(db, result.session.id)
+        assert [m.content for m in child_msgs] == ["问题一"]
 
 
 @pytest.mark.asyncio
-async def test_fork_rejects_prefix_ending_in_open_user_turn(db_factory):
-    """以 USER 为边界但前缀本身以 USER 结尾（更早的开放轮次）→ 409。"""
+async def test_fork_user_boundary_after_open_turn_is_allowed(db_factory):
+    """issue #499：边界只看 seq，不再要求前缀以 ASSISTANT 结尾（连续 USER 也可切）。"""
     async with db_factory() as db:
         src = await _mk_session(db, "src-1")
         await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
         await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
         await _mk_msg(db, src.id, 3, MessageType.USER, "未答复")
-        u3 = await _mk_msg(db, src.id, 4, MessageType.USER, "又一个未答复")
+        u4 = await _mk_msg(db, src.id, 4, MessageType.USER, "又一个未答复")
         await db.commit()
 
-        with pytest.raises(ForkBoundaryInvalidError):
-            await _fork(db, src.id, message_id=u3.id)
+        result = await _fork(db, src.id, message_id=u4.id)
+        assert result.copied_message_count == 4
+        assert result.boundary_seq == 4
+        assert [m.content for m in await _messages(db, result.session.id)] == [
+            "问题一",
+            "回答一",
+            "未答复",
+            "又一个未答复",
+        ]
 
 
 @pytest.mark.asyncio
 async def test_fork_allows_system_tail_before_user_boundary(db_factory):
-    """SYSTEM 是带外数据，不构成开放轮次：前缀以 [assistant, system] 结尾也可分叉。"""
+    """SYSTEM 是带外数据：USER 边界（含该 USER）可跨越前面的 SYSTEM 前缀。"""
     async with db_factory() as db:
         src = await _mk_session(db, "src-1")
         await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
@@ -313,18 +359,20 @@ async def test_fork_allows_system_tail_before_user_boundary(db_factory):
         await db.commit()
 
         result = await _fork(db, src.id, message_id=u2.id)
-        assert result.copied_message_count == 3
+        assert result.copied_message_count == 4
+        assert result.boundary_seq == 4
         copied = await _messages(db, result.session.id)
         assert [m.message_type for m in copied] == [
             MessageType.USER,
             MessageType.ASSISTANT,
             MessageType.SYSTEM,
+            MessageType.USER,
         ]
 
 
 @pytest.mark.asyncio
-async def test_fork_rejects_system_message_boundary(db_factory):
-    """SYSTEM 消息本身不是轮次边界 → 409。"""
+async def test_fork_allows_system_message_boundary(db_factory):
+    """issue #499：SYSTEM 消息本身可以作为边界（复制到该消息为止）。"""
     async with db_factory() as db:
         src = await _mk_session(db, "src-1")
         await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
@@ -332,8 +380,66 @@ async def test_fork_rejects_system_message_boundary(db_factory):
         system = await _mk_msg(db, src.id, 3, MessageType.SYSTEM, "系统提示")
         await db.commit()
 
-        with pytest.raises(ForkBoundaryInvalidError):
-            await _fork(db, src.id, message_id=system.id)
+        result = await _fork(db, src.id, message_id=system.id)
+        assert result.copied_message_count == 3
+        assert result.boundary_seq == 3
+        assert result.fork_point_message_id == system.id
+        assert [m.content for m in await _messages(db, result.session.id)] == [
+            "问题一",
+            "回答一",
+            "系统提示",
+        ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "meta",
+    [
+        {"tool_status": "pending"},
+        {"status": "pending"},
+        # 仓库写路径也使用 json.dumps 字符串（demo 种子）：必须同样识别。
+        json.dumps({"tool_status": "pending"}),
+        json.dumps({"status": "pending"}),
+    ],
+)
+async def test_fork_rejects_pending_boundary_message(db_factory, meta):
+    """issue #499：边界消息 meta_data 标 pending（未结算占位）→ 400 VALIDATION_ERROR。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        pending = await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "正在生成……", meta)
+        await db.commit()
+
+        with pytest.raises(ValidationError) as excinfo:
+            await _fork(db, src.id, message_id=pending.id)
+        assert excinfo.value.status_code == 400
+        assert excinfo.value.error_code == "VALIDATION_ERROR"
+        assert excinfo.value.detail["message_id"] == pending.id
+        # 不得产生任何子会话
+        children = (
+            (await db.execute(select(ChatSession).where(ChatSession.parent_session_id == src.id)))
+            .scalars()
+            .all()
+        )
+        assert list(children) == []
+
+
+@pytest.mark.asyncio
+async def test_fork_default_boundary_rejects_pending_tail(db_factory):
+    """默认边界（不带 message_id）同样校验 pending：最后一条 assistant 是占位 → 400。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        await _mk_msg(
+            db, src.id, 3, MessageType.ASSISTANT, "正在生成……", {"tool_status": "pending"}
+        )
+        await db.commit()
+
+        with pytest.raises(ValidationError) as excinfo:
+            await _fork(db, src.id)
+        assert excinfo.value.status_code == 400
+        assert excinfo.value.error_code == "VALIDATION_ERROR"
 
 
 @pytest.mark.asyncio
@@ -402,8 +508,8 @@ async def test_fork_running_task_requires_checkpoint(db_factory):
 
 
 @pytest.mark.asyncio
-async def test_fork_clones_settled_checkpoint_as_paused_task(db_factory, monkeypatch):
-    """克隆最近已结算 checkpoint：新 id、绑定子会话、PAUSED、深拷贝、来源可查、可 resume。"""
+async def test_fork_clones_settled_checkpoint_as_pending_task(db_factory, monkeypatch):
+    """克隆最近已结算 checkpoint：新 id、绑定子会话、PENDING、深拷贝、来源可查、可 resume。"""
     async with db_factory() as db:
         src = await _mk_session(db, "src-1")
         a1 = await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
@@ -434,7 +540,9 @@ async def test_fork_clones_settled_checkpoint_as_paused_task(db_factory, monkeyp
         ).scalar_one()
         assert clone.id == result.checkpoint_task_id
         assert clone.id != "src-task-1", "克隆必须使用新任务 id"
-        assert clone.status == TaskStatus.PAUSED, "克隆任务必须是 paused 态（可 resume）"
+        assert clone.status == TaskStatus.PENDING, (
+            "issue #499：克隆任务必须是 pending 态（可直接 load_for_resume 续跑）"
+        )
         assert clone.user_id == USER_ID and clone.organization_id == ORG_ID
         assert clone.query == "原问题"
         assert clone.plan_id == "plan-1" and clone.progress == 0.5
@@ -458,7 +566,7 @@ async def test_fork_clones_settled_checkpoint_as_paused_task(db_factory, monkeyp
                 "checkpoint 克隆必须是深拷贝，子会话修改不得污染母任务快照"
             )
 
-        # 可 resume：PAUSED → RUNNING 是合法恢复边
+        # 可 resume：PENDING → RUNNING 是合法恢复边
         monkeypatch.setattr(checkpoint, "AsyncSessionLocal", db_factory)
         resumed = await checkpoint.begin_resume(clone.id)
         assert resumed.status == TaskStatus.RUNNING
@@ -622,6 +730,39 @@ async def test_poisoned_snapshot_does_not_block_plain_fork(db_factory):
 
 
 @pytest.mark.asyncio
+async def test_poisoned_pending_snapshot_stays_active_without_500(db_factory):
+    """PENDING 任务快照损坏：无法识别克隆标记 → 按活跃任务保守 409（绝不 500）。
+
+    这条才真正钉住 `_load_active_tasks` 对 PENDING 读快照时的毒丸防线；
+    旧用例把坏快照挂在 COMPLETED（非活跃）任务上，不会走到快照读取。
+    """
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        db.add(
+            AgentTask(
+                id="poison-pending",
+                user_id=USER_ID,
+                organization_id=ORG_ID,
+                session_id=src.id,
+                query="排队中但快照损坏",
+                status=TaskStatus.PENDING,
+                context_snapshot=None,
+            )
+        )
+        await db.commit()
+        await db.execute(
+            text("UPDATE agent_tasks SET context_snapshot = :raw WHERE id = 'poison-pending'"),
+            {"raw": '{"v": 1, "ctx": {'},
+        )
+        await db.commit()
+
+        with pytest.raises(ForkCheckpointRequiredError):
+            await _fork(db, src.id)
+
+
+@pytest.mark.asyncio
 async def test_poisoned_snapshot_is_skipped_for_checkpoint_clone(db_factory):
     """checkpoint 克隆候选里的损坏快照必须被跳过（409），不得 500。"""
     async with db_factory() as db:
@@ -701,6 +842,63 @@ async def test_paused_clone_task_does_not_block_plain_fork(db_factory):
         result = await _fork(db, src.id)
         assert result.copied_message_count == 2
         assert result.checkpoint_task_id is None
+
+
+@pytest.mark.asyncio
+async def test_pending_fork_clone_does_not_block_plain_fork(db_factory):
+    """issue #499：克隆任务落 PENDING，但带 run.fork_origin 的 PENDING 不是运行中 run。
+
+    变异点：不排除克隆 PENDING → 子会话被自己的克隆产物挡住（本用例红）。
+    """
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        envelope = _envelope(src.id)
+        envelope["run"]["fork_origin"] = {
+            "source_task_id": "parent-task",
+            "source_session_id": "parent-session",
+        }
+        db.add(
+            AgentTask(
+                id="task-clone-pending",
+                user_id=USER_ID,
+                organization_id=ORG_ID,
+                session_id=src.id,
+                query="分叉快照",
+                status=TaskStatus.PENDING,
+                context_snapshot=envelope,
+            )
+        )
+        await db.commit()
+
+        result = await _fork(db, src.id)
+        assert result.copied_message_count == 2
+        assert result.checkpoint_task_id is None
+
+
+@pytest.mark.asyncio
+async def test_pending_queued_task_still_requires_checkpoint(db_factory):
+    """真正排队中的 PENDING（无克隆标记）仍是活跃任务：普通分叉 409。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        db.add(
+            AgentTask(
+                id="task-queued",
+                user_id=USER_ID,
+                organization_id=ORG_ID,
+                session_id=src.id,
+                query="排队中",
+                status=TaskStatus.PENDING,
+                context_snapshot=None,
+            )
+        )
+        await db.commit()
+
+        with pytest.raises(ForkCheckpointRequiredError):
+            await _fork(db, src.id)
 
 
 # ── 记忆隔离 / seed ────────────────────────────────────────────────────────
@@ -791,6 +989,277 @@ async def test_fork_idempotency_key_replays_same_child(db_factory):
 
 
 @pytest.mark.asyncio
+async def test_idempotency_key_persisted_on_child_column(db_factory):
+    """issue #499：幂等键落在 chat_sessions.idempotency_key（DB 唯一约束的事实列）。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        await db.commit()
+
+        first = await _fork(db, src.id, idempotency_key="idem-column")
+        child = await db.get(ChatSession, first.session.id)
+        assert child.idempotency_key == "idem-column"
+        assert child.settings["fork"]["idempotency_key"], "settings 仍保留 sha256 审计指纹"
+        assert child.settings["fork"]["idempotency_key"] != "idem-column"
+
+
+@pytest.mark.asyncio
+async def test_fork_idempotency_db_unique_conflict_replays_single_child(db_factory, monkeypatch):
+    """DB 唯一约束 (user_id, idempotency_key) 是并发双建的最终防线。
+
+    模拟"快路径检查同时错过（并发窗口）"：第二次请求的预检查被强制 miss，
+    插入必然撞唯一约束；服务必须回滚并读回先到者（200 重放），且只存在一个子会话。
+
+    变异试验：去掉模型/迁移里的唯一约束 → 第二次插入成功 → 断言红。
+    """
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        await db.commit()
+        first = await _fork(db, src.id, idempotency_key="dup-key")
+
+    real_find = session_fork_service._find_idempotent_child
+    state = {"calls": 0}
+
+    async def _miss_first_check(*args, **kwargs):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            return None
+        return await real_find(*args, **kwargs)
+
+    monkeypatch.setattr(session_fork_service, "_find_idempotent_child", _miss_first_check)
+
+    async with db_factory() as db:
+        second = await _fork(db, src.id, idempotency_key="dup-key")
+        assert second.idempotent is True
+        assert second.session.id == first.session.id
+        children = (
+            (await db.execute(select(ChatSession).where(ChatSession.parent_session_id == src.id)))
+            .scalars()
+            .all()
+        )
+        assert len(children) == 1, "并发窗口下同一幂等键只能建出一个子会话"
+
+
+@pytest.mark.asyncio
+async def test_fork_concurrent_same_key_creates_single_child(db_factory, monkeypatch):
+    """asyncio 并发两个同 key 请求：一个创建、另一个（或 409/重放），总数必须为 1。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        await db.commit()
+
+    real_find = session_fork_service._find_idempotent_child
+    state = {"misses": 0}
+
+    async def _racy_find(*args, **kwargs):
+        # 让两个并发请求的"预检查"都 miss，强制它们进入插入/唯一约束竞争窗口。
+        if state["misses"] < 2:
+            state["misses"] += 1
+            return None
+        return await real_find(*args, **kwargs)
+
+    monkeypatch.setattr(session_fork_service, "_find_idempotent_child", _racy_find)
+    # Redis 不可用（测试默认）：并发闸门退化为 DB 唯一约束。
+
+    async def _run_one():
+        async with db_factory() as db:
+            return await _fork(db, src.id, idempotency_key="race-key")
+
+    results = await asyncio.gather(_run_one(), _run_one(), return_exceptions=True)
+    successes = [r for r in results if not isinstance(r, BaseException)]
+    errors = [r for r in results if isinstance(r, BaseException)]
+    assert 1 <= len(successes) <= 2, f"并发结果异常: {results!r}"
+    assert all(isinstance(e, session_fork_service.ForkInProgressError) for e in errors), (
+        f"只允许可重试的 FORK_IN_PROGRESS，实际: {errors!r}"
+    )
+    async with db_factory() as db:
+        children = (
+            (await db.execute(select(ChatSession).where(ChatSession.parent_session_id == src.id)))
+            .scalars()
+            .all()
+        )
+        assert len(children) == 1, "同一幂等键并发只允许一个子会话"
+    if len(successes) == 2:
+        assert successes[0].session.id == successes[1].session.id
+
+
+@pytest.mark.asyncio
+async def test_fork_in_progress_holder_returns_409_after_short_wait(db_factory, monkeypatch):
+    """Redis NX 已被占但 DB 尚无子会话：短暂轮询后 409 FORK_IN_PROGRESS（可重试）。"""
+    fake = _FakeRedis()
+    monkeypatch.setattr(session_fork_service, "redis_client", fake)
+    monkeypatch.setattr(session_fork_service, "IDEMPOTENCY_WAIT_SECONDS", 0.15)
+    monkeypatch.setattr(session_fork_service, "IDEMPOTENCY_POLL_INTERVAL_SECONDS", 0.02)
+
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        src_id = src.id
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        await db.commit()
+        # 另一个请求已抢占但尚未落库。
+        fake.data[f"fork:idem:{USER_ID}:inflight"] = "ghost-child-id"
+
+        with pytest.raises(session_fork_service.ForkInProgressError) as excinfo:
+            await _fork(db, src.id, idempotency_key="inflight")
+        assert excinfo.value.status_code == 409
+        assert excinfo.value.error_code == "FORK_IN_PROGRESS"
+        assert excinfo.value.detail["holder_session_id"] == "ghost-child-id"
+        assert f"fork:idem:{USER_ID}:inflight" not in fake.data, (
+            "超时后必须释放观察到的抢占值，避免崩溃请求把幂等键锁死 24h"
+        )
+
+        children = (
+            (await db.execute(select(ChatSession).where(ChatSession.parent_session_id == src_id)))
+            .scalars()
+            .all()
+        )
+        assert list(children) == []
+
+
+@pytest.mark.asyncio
+async def test_fork_records_child_id_in_redis_idempotency_key(db_factory, monkeypatch):
+    """创建成功后 Redis 键值为子 session_id（重复请求据此快路径去重）。"""
+    fake = _FakeRedis()
+    monkeypatch.setattr(session_fork_service, "redis_client", fake)
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        await db.commit()
+
+        result = await _fork(db, src.id, idempotency_key="redis-ok")
+        assert fake.data[f"fork:idem:{USER_ID}:redis-ok"] == result.session.id
+        assert result.idempotent is False
+
+
+@pytest.mark.asyncio
+async def test_fork_releases_idempotency_claim_when_boundary_invalid(db_factory, monkeypatch):
+    """抢占后 404/409 失败必须释放幂等键，否则同键重试会被占用值挡住。"""
+    fake = _FakeRedis()
+    monkeypatch.setattr(session_fork_service, "redis_client", fake)
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        await db.commit()
+
+        with pytest.raises(NotFoundError):
+            await _fork(db, src.id, message_id="missing", idempotency_key="release-me")
+        assert f"fork:idem:{USER_ID}:release-me" not in fake.data, "失败请求不得留下幂等键"
+
+        # 同一键重试可以正常创建。
+        result = await _fork(db, src.id, idempotency_key="release-me")
+        assert result.idempotent is False
+
+
+@pytest.mark.asyncio
+async def test_fork_idempotency_key_used_in_other_org_is_409_not_500(db_factory):
+    """唯一键被其他组织行占用：不泄露/不回放其数据，明确 409（不是 500）。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1", org_id=ORG_ID)
+        src_id = src.id
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        db.add(
+            ChatSession(
+                id="other-org-child",
+                user_id=USER_ID,
+                organization_id=ORG_ID + 1,
+                title="别的组织",
+                status=ChatSessionStatus.ACTIVE,
+                root_session_id="other-org-source",
+                parent_session_id="other-org-source",
+                idempotency_key="cross-org-key",
+            )
+        )
+        await db.commit()
+
+        with pytest.raises(ForkIdempotencyConflictError) as excinfo:
+            await _fork(db, src.id, idempotency_key="cross-org-key")
+        assert excinfo.value.status_code == 409
+        assert excinfo.value.error_code == "FORK_IDEMPOTENCY_CONFLICT"
+
+        children = (
+            (await db.execute(select(ChatSession).where(ChatSession.parent_session_id == src_id)))
+            .scalars()
+            .all()
+        )
+        assert list(children) == [], "不得在调用者组织内建出第二个子会话"
+
+
+@pytest.mark.asyncio
+async def test_fork_existing_other_org_claim_reports_conflict_without_deleting(
+    db_factory, monkeypatch
+):
+    """跨组织键 + Redis 在线：保留既有行有效抢占，并明确 FORK_IDEMPOTENCY_CONFLICT。
+
+    重试同键永远不会成功（DB 唯一约束），不能谎报可重试的 FORK_IN_PROGRESS。
+    """
+    fake = _FakeRedis()
+    monkeypatch.setattr(session_fork_service, "redis_client", fake)
+    monkeypatch.setattr(session_fork_service, "IDEMPOTENCY_WAIT_SECONDS", 0.1)
+    monkeypatch.setattr(session_fork_service, "IDEMPOTENCY_POLL_INTERVAL_SECONDS", 0.02)
+
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1", org_id=ORG_ID)
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        db.add(
+            ChatSession(
+                id="other-org-child",
+                user_id=USER_ID,
+                organization_id=ORG_ID + 1,
+                title="别的组织",
+                status=ChatSessionStatus.ACTIVE,
+                root_session_id="other-org-source",
+                parent_session_id="other-org-source",
+                idempotency_key="cross-org-redis",
+            )
+        )
+        await db.commit()
+        fake.data[f"fork:idem:{USER_ID}:cross-org-redis"] = "other-org-child"
+
+        with pytest.raises(ForkIdempotencyConflictError) as excinfo:
+            await _fork(db, src.id, idempotency_key="cross-org-redis")
+        assert excinfo.value.status_code == 409
+        assert excinfo.value.error_code == "FORK_IDEMPOTENCY_CONFLICT"
+        assert fake.data[f"fork:idem:{USER_ID}:cross-org-redis"] == "other-org-child", (
+            "其他组织既有行的有效抢占不得被当前作用域的请求删除"
+        )
+
+
+@pytest.mark.asyncio
+async def test_next_message_seq_persists_counter_and_reconciles_direct_inserts(db_factory):
+    """issue #499：seq 分配推进 chat_sessions.next_message_seq，并与直插消息的 MAX 对账。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-1")
+        await db.commit()
+
+        assert await chat_seq.next_message_seq(db, src.id) == 1
+        await db.commit()
+        row = await db.get(ChatSession, src.id)
+        assert row.next_message_seq == 1
+
+        assert await chat_seq.next_message_seq(db, src.id) == 2
+        await db.commit()
+        row = await db.get(ChatSession, src.id)
+        assert row.next_message_seq == 2
+
+        # 带外直插（不经 chat_seq）后，下一次分配必须越过 MAX(seq)，不得重复。
+        await _mk_msg(db, src.id, 10, MessageType.USER, "直插")
+        await db.commit()
+        assert await chat_seq.next_message_seq(db, src.id) == 11
+        await db.commit()
+        row = await db.get(ChatSession, src.id)
+        assert row.next_message_seq == 11
+
+
+@pytest.mark.asyncio
 async def test_idempotent_replay_returns_cloned_task_not_source_task(db_factory):
     """带 checkpoint 的幂等重放必须返回**克隆任务** id，绝不返回母任务 id。
 
@@ -830,8 +1299,8 @@ async def test_idempotent_replay_returns_cloned_task_not_source_task(db_factory)
 
 
 @pytest.mark.asyncio
-async def test_fork_quota_exceeded_rejects_with_reason(db_factory, monkeypatch):
-    """复制消息数超过上限 → 409，detail 带 limit/count（超限拒绝并说明原因）。"""
+async def test_fork_quota_exceeded_rejects_with_400_and_detail(db_factory, monkeypatch):
+    """复制消息数超过上限 → 400 VALIDATION_ERROR，detail 带 messages/limit。"""
     monkeypatch.setattr(session_fork_service, "FORK_MAX_COPIED_MESSAGES", 2)
     async with db_factory() as db:
         src = await _mk_session(db, "src-1")
@@ -843,9 +1312,9 @@ async def test_fork_quota_exceeded_rejects_with_reason(db_factory, monkeypatch):
 
         with pytest.raises(ForkQuotaExceededError) as excinfo:
             await _fork(db, src.id)
-        assert excinfo.value.status_code == 409
-        assert excinfo.value.error_code == "FORK_QUOTA_EXCEEDED"
-        assert excinfo.value.detail == {"limit": 2, "count": 4}
+        assert excinfo.value.status_code == 400
+        assert excinfo.value.error_code == "VALIDATION_ERROR"
+        assert excinfo.value.detail == {"messages": 4, "limit": 2}
 
 
 @pytest.mark.asyncio
@@ -895,6 +1364,64 @@ async def test_seed_without_organization_is_honestly_skipped(db_factory):
         assert result.session.settings["fork"]["is_seeded"] is False
         assert result.session.settings["fork"]["seed_skipped_reason"] == "no_organization"
         assert result.session.settings["fork"]["seed_length"] == len("父会话摘要")
+
+
+# ── 迁移 016（SQLite 冒烟：真 MySQL 不可用时的静态验证补充）─────────────────
+
+
+def test_migration_016_backfills_seq_and_enforces_idempotency_uniqueness(tmp_path):
+    """迁移 016：回填 next_message_seq=MAX(seq)，幂等键 (user_id,key) 唯一，NULL 不参与。
+
+    走 SQLite 单测替代真 MySQL（本机 Docker/MySQL 未启动）；MySQL 的 UNIQUE 对
+    NULL 语义与 SQLite 一致，均允许多个 NULL。
+    """
+    import importlib.util
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import create_engine
+
+    migration_path = (
+        Path(__file__).resolve().parents[2] / "alembic/versions/016_fork_seq_idempotency.py"
+    )
+    spec = importlib.util.spec_from_file_location("mig016_fork_seq_idempotency", migration_path)
+    assert spec and spec.loader
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'mig016.db'}")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE TABLE chat_sessions (id VARCHAR(36) PRIMARY KEY, user_id INTEGER NOT NULL)"
+        )
+        conn.exec_driver_sql(
+            "CREATE TABLE chat_messages (id VARCHAR(36) PRIMARY KEY, "
+            "session_id VARCHAR(36), seq INTEGER)"
+        )
+        conn.exec_driver_sql("INSERT INTO chat_sessions (id,user_id) VALUES ('s1',1),('s2',1)")
+        conn.exec_driver_sql(
+            "INSERT INTO chat_messages (id,session_id,seq) VALUES ('m1','s1',1),('m2','s1',7)"
+        )
+        migration.op = Operations(MigrationContext.configure(conn))
+        migration.upgrade()
+
+        rows = conn.exec_driver_sql(
+            "SELECT id, next_message_seq FROM chat_sessions ORDER BY id"
+        ).fetchall()
+        assert rows == [("s1", 7), ("s2", 0)], "必须按 MAX(chat_messages.seq) 回填"
+
+        # 同一用户 + 同一幂等键 → 唯一约束拒绝；NULL 可重复（存量行不参与）。
+        conn.exec_driver_sql("UPDATE chat_sessions SET idempotency_key='k' WHERE id='s1'")
+        try:
+            conn.exec_driver_sql("UPDATE chat_sessions SET idempotency_key='k' WHERE id='s2'")
+        except IntegrityError as exc:
+            assert "UNIQUE constraint failed" in str(exc)
+        else:
+            raise AssertionError("唯一约束缺失：(user_id, idempotency_key) 未生效")
+
+        migration.downgrade()
+    engine.dispose()
 
 
 # ── 谱系 ───────────────────────────────────────────────────────────────────

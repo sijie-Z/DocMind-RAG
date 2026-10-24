@@ -53,10 +53,9 @@ class TaskStatus(enum.Enum):
     cancelled             — terminal: 经 cancel 协议协作式取消（诚实终态：不伪装完成）
     rejected              — terminal: 计划被人类拒绝且重规划机会已用尽（诚实终态：
                             不是失败、不是取消——是"我看过，不要这个计划"）
-    paused                — 会话 fork 克隆出的快照任务（issue #476）：不是运行中的
-                            run，只是"从母任务的已结算 checkpoint 继续"的起点；
-                            可经 resume 进入 RUNNING。刻意与 RUNNING 分离：fork 出的
-                            子会话不得冒充"源会话有运行中任务"。
+    paused                — 历史会话 fork 克隆任务状态（issue #476 产物；issue #499
+                            起新克隆任务直接落 PENDING，本状态保留给存量数据与
+                            "非运行中的可恢复起点"语义）。
     """
 
     PENDING = "pending"
