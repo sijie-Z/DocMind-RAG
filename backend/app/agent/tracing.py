@@ -5,6 +5,9 @@ executor_agent，均无生产调用者；后者还有一处零读者的 `_pendin
 生产 run 不写本 store。运行时轨迹由 Run Report / `execution_context` SSE /
 ExecutionContext（Redis 7 天 → benchmark/mining 离线消费）承担。
 
+Deprecated candidate（issue #510 第三步待仓库所有者批准）：未获批前文件与
+行为保留不动（TraceStore 仍为进程内 2000 条环形缓冲，无读端点）。
+
 What this provides:
     ExecutionTrace       — full lineage of one user request (plan → steps → tool calls → results)
     TraceStore           — in-memory ring buffer with query/filter/aggregate

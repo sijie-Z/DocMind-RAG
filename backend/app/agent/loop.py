@@ -33,7 +33,7 @@ from app.agent.reviewer import Reviewer
 from app.agent.run_report import build_run_report, render_run_report_text
 from app.agent.skill_prompt import build_skills_index
 from app.agent.skills import skill_manager
-from app.agent.usage import record_llm_usage
+from app.agent.usage import record_llm_call_error, record_llm_usage
 from app.core.log_safety import log_safe
 
 logger = logging.getLogger(__name__)
@@ -339,6 +339,7 @@ class PERAgentLoop:
         resume: dict[str, Any] | None = None,
         session_id: str | None = None,
         document_context: str | None = None,
+        request_id: str | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Execute the PER agent loop, yielding events as they happen.
 
@@ -354,6 +355,9 @@ class PERAgentLoop:
             document_context: 用户 @ 引用文档的摘要段（体验第四波）——与记忆
                 上下文同轨并入预规划上下文：planner 与答案合成都能看到。
                 有 plan 的 resume 跳过规划，该参数自然不生效（如实）。
+            request_id: 发起本次请求的 HTTP 请求编号（与 X-Request-ID 同源，
+                issue #510 第二步）。只用于调用级 JSONL / SSE 关联，不落快照——
+                resume 用新请求续跑同一 task_id 时，request_id 属于新请求。
 
         Yields:
             AgentEvent objects for thinking, plan, tool calls, chunks, etc.
@@ -510,6 +514,9 @@ class PERAgentLoop:
             ctx = ExecutionContext(query=query)
         if task_id:
             ctx.task_id = task_id
+        # issue #510 第二步：request_id 属于"当前请求"而非 run；resume 由新请求
+        # 续跑时如实使用新请求的编号（不落快照，不伪造跨请求的"统一 trace"）。
+        ctx.request_id = request_id
 
         # ── Hooks（issue #474）：agent/turn_start —— run 起点（观察，不阻断）──
         _, turn_start_errors = await self._emit_hook_event(
@@ -829,15 +836,27 @@ class PERAgentLoop:
             else:
                 # Tool-less mode: single LLM call
                 messages = self._build_messages(query, history, context_docs, memory_context)
+                llm_started = time.perf_counter()
+                llm_recorded = False
+                call_attempted = False
                 try:
-                    response = await self.client.chat.completions.create(
+                    llm_client = self.client
+                    call_attempted = True
+                    response = await llm_client.chat.completions.create(
                         model=self.config.get_deep_model(),
                         messages=messages,
                         temperature=self.config.temperature,
                         max_tokens=self.config.max_tokens,
                         timeout=self.config.timeout,
                     )
-                    record_llm_usage(response, ctx)
+                    # issue #510 第一步：调用级 JSONL 与用量同入口（延迟/提示词摘要）
+                    record_llm_usage(
+                        response,
+                        ctx,
+                        latency_ms=(time.perf_counter() - llm_started) * 1000,
+                        messages=messages,
+                    )
+                    llm_recorded = True
                     content = response.choices[0].message.content or ""
                     if content:
                         yield AgentEvent(type="chunk", content=content)
@@ -850,6 +869,14 @@ class PERAgentLoop:
                     # 失败进 ctx.failures（对齐 #293 范式：complete_step 是唯一
                     # 写者 → run_report clean_success=False），并置 run_failed 标志
                     # （service 收尾据此置任务 FAILED 而不是 COMPLETED）。
+                    if call_attempted and not llm_recorded:
+                        record_llm_call_error(
+                            ctx,
+                            model=self.config.get_deep_model(),
+                            error=e,
+                            latency_ms=(time.perf_counter() - llm_started) * 1000,
+                            messages=messages,
+                        )
                     self.run_failed = True
                     self.run_failure = f"LLM Error: {e}"
                     ctx.complete_step(
@@ -1221,7 +1248,15 @@ class PERAgentLoop:
         try:
             # 日志安全（CodeQL py/log-injection）：run_report 内嵌用户查询与外部数据
             # （工具/文档内容），换行不可信——转义后再落日志，防止伪造日志行。
-            logger.info("run_report: %s", log_safe(render_run_report_text(run_report)))
+            # issue #510 第二步：日志侧带上 task_id（request_id 由 JsonFormatter 从
+            # contextvar 注入），可与 SSE / RunReport / llm_calls.jsonl 关联。
+            logger.info(
+                "run_report: %s",
+                log_safe(render_run_report_text(run_report)),
+                # log_safe：task_id 在 replay/resume 路径可能来自快照（不可信），
+                # 必须过仓库既有的 log-injection 脱敏后再进日志记录。
+                extra={"task_id": log_safe(ctx.task_id)},
+            )
         except Exception:
             pass
         yield AgentEvent(
@@ -1241,7 +1276,8 @@ class PERAgentLoop:
         logger.info(
             f"PER loop completed in {elapsed:.0f}ms | "
             f"Plan: {log_safe(plan.goal[:50])}... | Steps: {plan.completed_steps}/{plan.total_steps} | "
-            f"Output: {len(final_output)} chars"
+            f"Output: {len(final_output)} chars",
+            extra={"task_id": log_safe(ctx.task_id)},
         )
 
         # ── Hooks（issue #474）：agent/turn_end —— 轮次结束（serial 观察）────

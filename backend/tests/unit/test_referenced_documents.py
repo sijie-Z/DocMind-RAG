@@ -420,8 +420,20 @@ class _StubLoop:
     def _get_tools(self):
         return []
 
-    async def run(self, query, history=None, task_id=None, session_id=None, document_context=None):
-        _StubLoop.last_kwargs = {"document_context": document_context, "task_id": task_id}
+    async def run(
+        self,
+        query,
+        history=None,
+        task_id=None,
+        session_id=None,
+        document_context=None,
+        request_id=None,
+    ):
+        _StubLoop.last_kwargs = {
+            "document_context": document_context,
+            "task_id": task_id,
+            "request_id": request_id,
+        }
         yield AgentEvent(type="done", content="")
 
 
@@ -447,6 +459,7 @@ class TestServiceChatWiring:
                 user_id=1,
                 config=cfg,
                 referenced_document_ids=["d9", "ghost"],
+                request_id="req-chat-510",
             )
         ]
 
@@ -455,6 +468,8 @@ class TestServiceChatWiring:
         # 警告携带 task_id（checkpoint 开着时建了任务行）
         assert all(ev.task_id for ev in warn_events)
         assert "用户显式引用的知识库文档" in _StubLoop.last_kwargs["document_context"]
+        # issue #510 第二步：service 必须把本次请求编号透传给 agent.run
+        assert _StubLoop.last_kwargs["request_id"] == "req-chat-510"
         assert any(ev.type == "done" for ev in events)
 
     async def test_no_refs_no_document_context(self, doc_factory, monkeypatch):
@@ -520,11 +535,13 @@ class _StubResumeLoop:
         session_id=None,
         document_context=None,
         history=None,
+        request_id=None,
     ):
         _StubResumeLoop.last_kwargs = {
             "document_context": document_context,
             "resume": resume,
             "task_id": task_id,
+            "request_id": request_id,
         }
         yield AgentEvent(type="done", content="")
 
@@ -635,10 +652,16 @@ class TestResumeDocumentContext:
         monkeypatch.setattr(service_mod, "notify_task_terminal", AsyncMock())
 
         svc = AgentService(openai_client=MagicMock())
-        events = [ev async for ev in svc.resume_chat("t-1", user_id=1, claim=False)]
+        events = [
+            ev
+            async for ev in svc.resume_chat(
+                "t-1", user_id=1, claim=False, request_id="req-resume-510"
+            )
+        ]
 
         assert any(ev.type == "done" for ev in events)
         assert _StubResumeLoop.last_kwargs["resume"] is payload
+        assert _StubResumeLoop.last_kwargs["request_id"] == "req-resume-510"
         assert _StubResumeLoop.last_kwargs["document_context"] == DOC_CTX, (
             "resume 必须把快照里的引用上下文透传给 agent.run"
         )

@@ -234,7 +234,54 @@ class ExecutionContext:
     start_time: float = field(default_factory=lambda: datetime.now().timestamp())
     duration_ms: float = 0.0
 
+    # ── ID 语义（issue #510 第二步）────────────────────────────────────────
+    # task_id（上方字段）= 一次 Agent run，与 agent_tasks.id / SSE / RunReport 同源；
+    # request_id = 一次 HTTP 请求，与 X-Request-ID 同源。request_id 是"当前这次
+    # 请求"的属性而不是 run 的属性：resume 由新请求续跑同一 task_id 时，其
+    # request_id 是 resume 请求的编号——因此**不进 checkpoint 快照**（下面
+    # to_dict / to_checkpoint_dict 都不序列化它）。
+    request_id: str | None = None
+
     # ── Convenience methods ──
+
+    def record_llm_call(
+        self,
+        *,
+        model: str | None = None,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+        latency_ms: float | None = None,
+        prompt: Any = None,
+        prompt_hash: str | None = None,
+        tool_calls: int = 0,
+        error: str | None = None,
+    ) -> bool:
+        """追加一行 LLM 调用级 JSONL（issue #510 第一步）。
+
+        - 只写元数据（ts/task_id/request_id/model/tokens/latency/prompt_hash/
+          tool_calls/error），**绝不写 prompt/completion 正文**；
+        - task_id / request_id 与 RunReport、SSE、结构化日志同源，可关联；
+        - 观测写入不得影响 run：内部吞掉一切异常，返回是否落盘成功。
+        """
+        try:
+            from app.agent.llm_call_log import append_llm_call_record, build_llm_call_record
+
+            record = build_llm_call_record(
+                task_id=self.task_id,
+                request_id=self.request_id,
+                model=model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                latency_ms=latency_ms,
+                prompt=prompt,
+                prompt_hash=prompt_hash,
+                tool_calls=tool_calls,
+                error=error,
+            )
+            return append_llm_call_record(record)
+        except Exception as exc:  # noqa: BLE001 — 观测绝不阻断主流程
+            logger.debug("LLM call JSONL record skipped: %s", exc)
+            return False
 
     def add_tokens(self, n: int) -> None:
         """累加 LLM 用量（issue #202）。

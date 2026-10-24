@@ -46,6 +46,10 @@ _TEST_ENV = {
     # #301 落库/#475 命令等）刻意覆盖 /chat/stream 的 legacy useAgent 分支；
     # guard 自身的生产语义由 tests/api/test_chat_stream.py 显式开启后钉住。
     "CHAT_DEEP_ANALYSIS_GUARD": "false",
+    # issue #510：调用级 JSONL 在生产默认开启；测试里默认关闭，避免用例把
+    # backend/logs/llm_calls.jsonl 写成大文件。需要验证 JSONL 的用例自行
+    # monkeypatch settings 打开并指向 tmp_path（见 test_llm_call_jsonl.py）。
+    "LLM_CALL_LOG_ENABLED": "false",
 }
 if os.path.isdir(_TIKTOKEN_CACHE):
     _TEST_ENV["TIKTOKEN_CACHE_DIR"] = _TIKTOKEN_CACHE

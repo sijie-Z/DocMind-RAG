@@ -1,3 +1,9 @@
+"""OpenTelemetry 链路追踪接线（ENABLE_TRACING 显式开关，默认关闭）。
+
+Deprecated candidate（issue #510 第三步待仓库所有者批准）：保留为可选接入点，
+未获批前不删除、不改默认行为。当前无 collector/查询端，启用需要自担运维成本。
+"""
+
 import logging
 import os
 

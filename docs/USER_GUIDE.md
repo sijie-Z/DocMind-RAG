@@ -320,8 +320,9 @@ ADMIN_PASSWORD='<至少 8 位>' python reset_admin.py     # Windows PowerShell: 
 | `ENABLE_MONITORING` | `true` | 只控制后台指标快照任务，不影响 `/metrics` 端点 |
 | `LOG_LEVEL` / `LOG_JSON` | `INFO` / `true`（代码；模板写 `false`） | 日志级别与 JSON 格式 |
 | `LOG_FILE` | `logs/docmind.log` | 日志文件 |
+| `LLM_CALL_LOG_ENABLED` / `LLM_CALL_LOG_FILE` / `LLM_CALL_LOG_PER_RUN` | `true` / `logs/llm_calls.jsonl` / `false` | LLM 调用级 JSONL（issue #510）：每次调用一行元数据（`task_id`/`request_id`/model/tokens/latency/prompt_hash），**不含 prompt/completion 正文**；`PER_RUN=true` 按 run 分文件 |
 | `ENABLE_TRACING` / `OTLP_ENDPOINT` | `false` / 空 | OpenTelemetry（`os.getenv` 直读） |
-| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | 空 / 空 / `https://cloud.langfuse.com` | LLM 全链路追踪（可选） |
+| `LANGFUSE_ENABLED` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | `true` / 空 / 空 / `https://cloud.langfuse.com` | LLM 全链路追踪（可选；未配 key 不启用。已标记为待删除候选，审批前保留） |
 | `ENABLE_SCHEDULER` | `true` | 进程内定时任务调度；**单实例语义**，多 worker 部署需外部调度 |
 
 ---

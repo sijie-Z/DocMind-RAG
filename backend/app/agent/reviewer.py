@@ -13,13 +13,14 @@ to find problems, not to assess quality neutrally.
 
 import json
 import logging
+import time
 from typing import Any
 
 from openai import AsyncOpenAI
 
 from app.agent.config import AgentConfig
 from app.agent.planner import Plan
-from app.agent.usage import record_llm_usage
+from app.agent.usage import record_llm_call_error, record_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -104,22 +105,40 @@ class Reviewer:
             results_summary=results_summary,
         )
 
+        messages = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": "请对上述执行结果进行对抗性质检。"},
+        ]
+        llm_started = time.perf_counter()
+        llm_recorded = False
         try:
             response = await self.client.chat.completions.create(
                 model=self.config.get_deep_model(),
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": "请对上述执行结果进行对抗性质检。"},
-                ],
+                messages=messages,
                 temperature=0.2,
                 max_tokens=self.config.reflection_max_tokens,
                 timeout=30.0,
                 response_format={"type": "json_object"},
             )
-            record_llm_usage(response, ctx)
+            # issue #510：调用级 JSONL（延迟 + 提示词摘要，不落正文）。
+            record_llm_usage(
+                response,
+                ctx,
+                latency_ms=(time.perf_counter() - llm_started) * 1000,
+                messages=messages,
+            )
+            llm_recorded = True
             content = response.choices[0].message.content or "{}"
         except Exception as e:
             logger.warning("Adversarial review failed, skipping (error_kind=service_error): %s", e)
+            if not llm_recorded:
+                record_llm_call_error(
+                    ctx,
+                    model=self.config.get_deep_model(),
+                    error=e,
+                    latency_ms=(time.perf_counter() - llm_started) * 1000,
+                    messages=messages,
+                )
             # issue #301 #9：审查崩溃不再返回 recommendation="pass" ——
             # 无结论（审查没跑成）与真通过（审查跑了且认可）在报告里必须
             # 可区分。返回 "error"，由 loop 收敛并如实记录（SSE + 决策 +
