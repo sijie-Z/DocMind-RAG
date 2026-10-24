@@ -24,6 +24,7 @@ from app.core.security import (
     permission_required,
     require_org_admin,
     require_organization,
+    require_scope,
 )
 from app.exceptions import (
     AppError,
@@ -101,7 +102,11 @@ _background_tasks: set[asyncio.Task] = set()
 @router.get(
     "/",
     response_model=dict[str, Any],
-    dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))],
+    # issue #496：知识库读路径统一要求 knowledge:read（JWT 用户无 api_key_scopes → 全量）。
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE])),
+    ],
 )
 async def list_knowledge_bases(
     page: int = 1,
@@ -302,11 +307,12 @@ async def search_knowledge(
     "/suggestions",
     response_model=SearchSuggestionResponse,
     dependencies=[
+        Depends(require_scope("knowledge:read")),
         Depends(
             permission_required(
                 [PermissionType.SEARCH_KNOWLEDGE_BASE], organization_id_param="organization_id"
             )
-        )
+        ),
     ],
 )
 async def get_search_suggestions(
@@ -346,11 +352,12 @@ async def get_search_suggestions(
     "/stats/{organization_id}",
     response_model=dict,
     dependencies=[
+        Depends(require_scope("knowledge:read")),
         Depends(
             permission_required(
                 [PermissionType.VIEW_KNOWLEDGE_BASE], organization_id_param="organization_id"
             )
-        )
+        ),
     ],
 )
 async def get_knowledge_stats(
@@ -386,7 +393,10 @@ async def get_knowledge_stats(
 @router.get(
     "/graph/stats",
     response_model=dict,
-    dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))],
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE])),
+    ],
 )
 async def get_graph_rag_stats(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
@@ -650,7 +660,10 @@ async def rebuild_document_knowledge(
 @router.get(
     "/jobs",
     response_model=dict,
-    dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))],
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE])),
+    ],
 )
 async def list_knowledge_jobs(
     status: str | None = None,
@@ -719,7 +732,10 @@ async def list_knowledge_jobs(
 @router.get(
     "/{document_id}/events",
     response_model=dict,
-    dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))],
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE])),
+    ],
 )
 async def get_document_job_events(
     document_id: str,
@@ -888,7 +904,10 @@ async def calculate_text_similarity(
 @router.get(
     "/health",
     response_model=dict,
-    dependencies=[Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH]))],
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.VIEW_SYSTEM_HEALTH])),
+    ],
 )
 async def check_knowledge_base_health(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
@@ -919,7 +938,7 @@ async def check_knowledge_base_health(
     "/rag-stats",
     response_model=dict,
     summary="获取RAG检索统计",
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(require_scope("knowledge:read"))],
 )
 async def get_rag_stats(
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)
@@ -997,7 +1016,10 @@ async def get_rag_stats(
 @router.get(
     "/graph",
     response_model=dict,
-    dependencies=[Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE]))],
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.VIEW_KNOWLEDGE_BASE])),
+    ],
 )
 async def get_knowledge_graph(
     query: str | None = None,

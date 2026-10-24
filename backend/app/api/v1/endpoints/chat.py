@@ -215,7 +215,8 @@ async def get_conversations(
     # 普通默认值即为查询参数；不用 Query(None)，否则直接调用（单测）会拿到
     # Query 对象而不是 None（issue #476 评审口径）。
     parent_session_id: str | None = None,
-    current_user: User = Depends(get_current_user),
+    # issue #496：读取会话列表需要 chat:read（JWT 用户无 api_key_scopes → 全量）。
+    current_user: User = Depends(require_scope("chat:read")),
     db: AsyncSession = Depends(get_db),
 ):
     # B2 / D3：与 /agent/sessions 共用同一套 org + user 可见范围（A2 口径：
@@ -469,7 +470,8 @@ async def unbind_conversation_docs(
 )
 async def get_conversation(
     conversation_id: str,
-    current_user: User = Depends(get_current_user),
+    # issue #496：按 id 读取会话同样需要 chat:read。
+    current_user: User = Depends(require_scope("chat:read")),
     db: AsyncSession = Depends(get_db),
 ):
     # T4：按 id 读取与列表同一 org 口径。此处先按 id + user 取行，再区分
