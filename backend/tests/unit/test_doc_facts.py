@@ -307,7 +307,7 @@ def test_optional_doc_anchor_missing_is_allowed(tmp_path):
 
 
 def _write_metrics(root: Path, facts: dict[str, int]) -> None:
-    """写一份最小可用的 docs/METRICS.md（六列、六项 facts）。"""
+    """写一份最小可用的 docs/METRICS.md（六列、七项 facts）。"""
     rows = "\n".join(
         f"| {key} | {value} | 合成仓库口径 | 无（测试夹具） | 2026-10-24 | 测试夹具 |"
         for key, value in facts.items()

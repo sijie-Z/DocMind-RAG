@@ -5,7 +5,8 @@
 - 旧名（calculate / format_converter / get_current_time / detect_language /
   analyze_data / list_skills / vector_search / fetch_webpage / summarize_document）
   经 TOOL_ALIASES 仍可用；
-- disabled_tools 里写旧名同样挡住规范工具（别名不得绕过禁用清单）。
+- disabled_tools 里写旧名按**能力粒度**挡住规范调用（calculate 挡住
+  utility(operation=calculate)，但不隐藏整个 utility 伞形）。
 """
 
 import json
@@ -166,8 +167,8 @@ async def test_invalid_mode_values_are_rejected():
     assert not bad_insights.success and bad_insights.error.code == "validation_error"
 
 
-def test_disabled_tools_old_name_blocks_old_call_not_whole_umbrella():
-    """禁用清单写旧名只阻断旧名调用；不隐藏整个规范伞形（issue #509 评审修正）。"""
+def test_disabled_tools_old_name_blocks_matching_capability_not_whole_umbrella():
+    """旧名禁用按能力粒度生效：挡住同名 operation，但不隐藏整个伞形。"""
     cfg = AgentConfig(disabled_tools=["get_current_time"])
     names = {t["function"]["name"] for t in tool_registry.build_tool_schemas(cfg)}
     assert "utility" in names, "旧名禁用不得把整个 utility 伞形隐藏"
@@ -179,11 +180,38 @@ def test_disabled_tools_old_name_blocks_old_call_not_whole_umbrella():
             function=SimpleNamespace(name="get_current_time", arguments="{}"),
         )
     )
-    canonical_call = SimpleNamespace(
+    canonical_time = SimpleNamespace(
         id="c2",
         function=SimpleNamespace(
             name="utility", arguments=json.dumps({"operation": "get_current_time"})
         ),
     )
+    canonical_other = SimpleNamespace(
+        id="c3",
+        function=SimpleNamespace(name="utility", arguments=json.dumps({"operation": "calculate"})),
+    )
     assert executor._call_disabled(old_call) is True, "旧名调用必须被禁用清单阻断"
-    assert executor._call_disabled(canonical_call) is False
+    assert executor._call_disabled(canonical_time) is True, (
+        "旧名 get_current_time 必须挡住规范 utility(operation=get_current_time)"
+    )
+    assert executor._call_disabled(canonical_other) is False, "不匹配的 operation 不受影响"
+
+
+def test_disabled_tools_old_name_blocks_vector_mode_only():
+    """disabled=["vector_search"] 只挡住 mode=vector，不影响 hybrid 检索。"""
+    cfg = AgentConfig(disabled_tools=["vector_search"])
+    executor = Executor(MagicMock(), cfg, AgentMemoryBridge(agent_id="t", organization_id=1))
+    vector_call = SimpleNamespace(
+        id="c1",
+        function=SimpleNamespace(
+            name="search_knowledge_base", arguments=json.dumps({"query": "q", "mode": "vector"})
+        ),
+    )
+    hybrid_call = SimpleNamespace(
+        id="c2",
+        function=SimpleNamespace(
+            name="search_knowledge_base", arguments=json.dumps({"query": "q", "mode": "hybrid"})
+        ),
+    )
+    assert executor._call_disabled(vector_call) is True
+    assert executor._call_disabled(hybrid_call) is False

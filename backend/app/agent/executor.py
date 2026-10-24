@@ -34,6 +34,7 @@ from app.agent.registry import (
     ToolResult,
     canonical_tool_name,
     canonicalize_tool_call,
+    disabled_capability_alias,
     tool_registry,
 )
 from app.agent.retry_policy import compute_backoff, get_policy
@@ -242,10 +243,22 @@ class Executor:
         return set(getattr(self.config, "disabled_tools", None) or [])
 
     def _call_disabled(self, tc: Any) -> bool:
-        """该调用是否命中禁用清单（origin 旧名或规范名任一命中）。"""
+        """该调用是否命中禁用清单（origin 旧名 / 规范名 / 旧名能力粒度）。
+
+        issue #509 评审修正：旧名不仅阻断旧名调用，也按能力粒度阻断规范调用
+        （``calculate`` 挡住 ``utility(operation=calculate)``），但不隐藏整个伞形。
+        """
         raw = self._disabled_tool_names()
         origin = getattr(tc, "origin_name", None) or tc.function.name
-        return origin in raw or tc.function.name in raw
+        if origin in raw or tc.function.name in raw:
+            return True
+        try:
+            args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+        except (json.JSONDecodeError, ValueError):
+            args = {}
+        if not isinstance(args, dict):
+            args = {}
+        return disabled_capability_alias(tc.function.name, args, raw) is not None
 
     def _call_gated(self, tc: Any) -> bool:
         """该调用是否被 enabled_predicate 门控（与 schema 注入面同源）。

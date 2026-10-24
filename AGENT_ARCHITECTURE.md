@@ -202,6 +202,8 @@ Reflector.reflect(plan, results)
 
 > 旧名 `fetch_webpage` / `analyze_data` / `detect_language` / `calculate` / `format_converter` / `list_skills` 已合并（hidden 保留注册，经 `TOOL_ALIASES` 路由到规范名，不再进 schema）。
 
+> 兼容口径：`disabled_tools` 中的旧名按**能力粒度**生效（`calculate` 只禁用 `utility(operation=calculate)`，`vector_search` 只禁用 `search_knowledge_base(mode=vector)`，`list_skills` 只禁用无 `skill_name` 的列表调用），不会隐藏整个规范工具；写规范名则禁用整个工具。
+
 ### 工具注册模式
 
 ```python

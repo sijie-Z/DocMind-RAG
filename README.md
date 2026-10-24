@@ -133,6 +133,8 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 外部 | `mcp_call`, `feishu_bitable_query` | MCP 协议桥接、飞书多维表格（默认门控） |
 | 技能 | `load_skill_reference`, `deep_research`, `document_comparison`, `knowledge_analysis` | 技能加载、复合分析（后三者扩展面） |
 
+> 兼容口径：`disabled_tools` 中的**旧工具名按能力粒度生效**（如 `calculate` 只禁用 `utility` 的 calculate operation，`vector_search` 只禁用 `mode=vector`），不会隐藏整个规范工具；写规范名则禁用整个工具。旧名调用本身同样被阻断。
+
 **自我进化系统** (实验性)：
 
 | 子系统 | 目录 | 功能 |

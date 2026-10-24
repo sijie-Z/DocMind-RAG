@@ -31,8 +31,8 @@ from app.services.notification_service import create_notification
 logger = logging.getLogger(__name__)
 
 # Force import of all tool modules to trigger registration
-import app.agent.core_tools  # noqa: F401 — core tools (14)
-import app.agent.tools  # noqa: F401 — tools package (19)
+import app.agent.core_tools  # noqa: F401 — core tools (11)
+import app.agent.tools  # noqa: F401 — tools package (20 non-hidden)
 
 # ── 引用文档（体验第四波 @引用）────────────────────────────────────────────
 

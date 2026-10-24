@@ -260,6 +260,46 @@ def extended_surface_enabled(config: Any) -> bool:
     return bool(getattr(config, "tool_tags", None))
 
 
+def disabled_capability_alias(
+    name: str,
+    arguments: dict[str, Any] | None,
+    disabled_names: list[str] | set[str] | None,
+) -> str | None:
+    """规范调用是否命中某个被禁用的旧名「能力」；命中则返回该旧名。
+
+    issue #509 评审修正：``disabled_tools`` 里的旧名不能只阻断旧名调用——schema
+    现在只广告规范名，用户旧配置里的 ``calculate`` 必须仍然挡住
+    ``utility(operation="calculate")``，否则旧禁用对新入口形同虚设；但也不能
+    把整个 ``utility`` 伞形隐藏/禁用。判定按 ``TOOL_ALIASES`` 的默认参数做
+    能力级匹配：
+
+    - ``calculate`` → ``utility(operation="calculate")``
+    - ``vector_search`` → ``search_knowledge_base(mode="vector")``
+    - ``fetch_webpage`` → ``web_search(action="fetch")``
+    - ``summarize_document`` → ``extract_insights(mode="summary")``
+    - ``list_skills`` → ``load_skill_reference`` 且未提供 ``skill_name``
+
+    旧名直接调用由 executor 的 ``origin_name`` 判定；本函数只管规范调用。
+    """
+    if not disabled_names:
+        return None
+    args = arguments if isinstance(arguments, dict) else {}
+    canonical = canonical_tool_name(name)
+    for disabled in disabled_names:
+        alias = TOOL_ALIASES.get(str(disabled))
+        if alias is None or alias.target != canonical:
+            continue
+        defaults = alias.default_arguments
+        if not defaults:
+            # 只有无默认参数的别名（list_skills）：匹配目标工具的“无参/缺省”能力。
+            if alias.target == "load_skill_reference" and not args.get("skill_name"):
+                return str(disabled)
+            continue
+        if all(args.get(key) == value for key, value in defaults.items()):
+            return str(disabled)
+    return None
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # 3.  Tool Entry
 # ──────────────────────────────────────────────────────────────────────────────

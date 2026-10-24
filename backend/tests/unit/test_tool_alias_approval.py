@@ -279,6 +279,34 @@ async def test_enabled_predicate_is_enforced_at_execution_layer():
 
 
 @pytest.mark.asyncio
+async def test_old_disabled_name_blocks_canonical_capability_in_executor():
+    """disabled=["calculate"] 必须挡住规范 utility(operation=calculate)，其余 operation 仍可执行。"""
+    cfg = _cfg(disabled_tools=["calculate"])
+    client = _client_with_tool_calls(
+        [("utility", '{"operation": "calculate", "expression": "1+1"}', "c1")]
+    )
+    executor = _executor(cfg, client)
+    with patch.object(tool_registry, "execute_detailed", new=AsyncMock()) as spy:
+        events, exc = await _run_step_once(executor)
+    assert exc is None
+    assert spy.await_count == 0
+    assert any(
+        e.type == "tool_error" and getattr(e, "error_type", None) == "tool_disabled" for e in events
+    )
+
+    # 不匹配旧名能力的规范调用不受影响。
+    client2 = _client_with_tool_calls(
+        [("utility", '{"operation": "analyze_data", "data": "[1]"}', "c2")]
+    )
+    executor2 = _executor(_cfg(disabled_tools=["calculate"]), client2)
+    with patch.object(
+        tool_registry, "execute_detailed", new=AsyncMock(return_value=ToolResult.ok(data="ok"))
+    ) as spy2:
+        _, exc2 = await _run_step_once(executor2)
+    assert exc2 is None and spy2.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_skills_internal_execute_canonicalizes_and_prechecks():
     """skills._consume_tool_output：规范名 + disabled/审批预检（不得绕过执行层）。"""
     from app.agent.tools import skills as skill_tools
@@ -290,6 +318,17 @@ async def test_skills_internal_execute_canonicalizes_and_prechecks():
             {"expression": "1+1"},
             organization_id=1,
             run_context=SimpleNamespace(extra={"disabled_tools": ["utility"]}),
+        )
+        assert not ok and "tool_disabled" in text
+        spy.assert_not_awaited()
+
+    # 1b) 旧名按能力粒度同样挡住技能内规范调用（calculate → utility/operation）。
+    with patch.object(tool_registry, "execute_detailed", new=AsyncMock()) as spy:
+        ok, text = await skill_tools._consume_tool_output(
+            "calculate",
+            {"expression": "1+1"},
+            organization_id=1,
+            run_context=SimpleNamespace(extra={"disabled_tools": ["calculate"]}),
         )
         assert not ok and "tool_disabled" in text
         spy.assert_not_awaited()

@@ -16,6 +16,7 @@ from typing import Any
 from app.agent.registry import (
     ToolResult,
     canonicalize_tool_call,
+    disabled_capability_alias,
     extended_surface_enabled,
     register_tool,
     tool_registry,
@@ -108,8 +109,10 @@ async def _consume_tool_output(
     if run_context is not None:
         extra = getattr(run_context, "extra", None) or {}
         disabled |= set(extra.get("disabled_tools") or [])
-    # 只按规范名精确匹配：旧名禁用不连带封死整个伞形（与执行层 origin 口径一致）。
-    if name in disabled:
+    # 精确规范名 + 旧名能力粒度（disabled=["calculate"] 同样挡住
+    # utility(operation="calculate")；与 executor 的 _call_disabled 同源）。
+    disabled_alias = disabled_capability_alias(name, arguments, disabled)
+    if name in disabled or disabled_alias is not None:
         return False, str(
             ToolResult.fail(
                 code="tool_disabled",

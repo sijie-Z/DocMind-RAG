@@ -861,6 +861,12 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         "默认注入工具数（用户指南）",
     ),
     DocAnchor(
+        "frontend_routes",
+        "docs/USER_GUIDE.md",
+        r"(\d+) 条前端路由",
+        "前端路由数（用户指南）",
+    ),
+    DocAnchor(
         "sse_event_types",
         "docs/USER_GUIDE.md",
         r"\*\*(\d+) 种 SSE 事件类型\*\*",
@@ -883,6 +889,12 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         "docs/USER_GUIDE_EN.md",
         r"(\d+) tools injected by default",
         "default tool count (user guide)",
+    ),
+    DocAnchor(
+        "frontend_routes",
+        "docs/USER_GUIDE_EN.md",
+        r"(\d+) frontend routes",
+        "frontend routes (user guide)",
     ),
     DocAnchor(
         "sse_event_types",
