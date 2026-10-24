@@ -102,8 +102,6 @@ async def _check_rate_limit(user_id: int, limit: int = RATE_LIMIT_RPM) -> bool:
                 "description": "URL (fetch)",
             },
         },
-        # 静态 required 不能按 action 分支；用 anyOf 至少禁止“完全无参”调用。
-        "anyOf": [{"required": ["query"]}, {"required": ["url"]}],
     },
     tags=["web", "external", "search"],
 )
