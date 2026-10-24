@@ -8,10 +8,15 @@ N 种 SSE 事件 / N 个路由装饰器」曾多次滞后于代码演进（例�
     源码（single source of truth for behavior）
       → 派生值
       → docs/facts.json（入库的期望值，代码变化时显式更新）
+      → docs/METRICS.md（对外口径的单一事实源：值/口径/命令/日期/备注）
       → 文档中出现的同类数字（README / README_EN / architecture.html ...）
 
 三层必须一致；任一层漂移即退出码 1。脚本零依赖（仅标准库），可在
 ci-hygiene 的轻量 job 中直接运行。
+
+docs/METRICS.md：必须存在，表格每行必须有 6 列且无空项，六项 facts 必须与
+docs/facts.json 同值。同一文档同一指标出现多个不同数字时**仅告警**（warn，
+不改变退出码），避免旧文档一次性全红；facts 六项不一致仍判失败。
 
 派生口径：
     sse_event_types          app/agent/events.py 的 EventType = Literal[...]
@@ -65,6 +70,16 @@ FACT_KEYS = (
 REQUIRED_DOC_FACTS = frozenset(
     {"sse_event_types", "endpoint_modules", "frontend_routes", "registered_tools"}
 )
+
+# 对外口径的单一事实源（issue #513）：必须存在，六项 facts 与 facts JSON 同值。
+METRICS_PATH = "docs/METRICS.md"
+METRICS_COLUMN_COUNT = 6  # 指标 | 值 | 口径 | 命令 | 日期 | 备注
+
+# 同指标多数字告警的补充措辞：DOC_ANCHORS 已覆盖各文档的规范锚点，这里补上
+# 历史/别名写法（例如履历文档英文稿的 "N integrated tools"），只告警不判红。
+EXTRA_METRIC_PATTERNS: dict[str, tuple[str, ...]] = {
+    "registered_tools": (r"(\d+) integrated tools",),
+}
 
 # 这些文档必然存在于仓库中：其中登记的锚点必须至少命中一次，防止「改写措辞
 # 把数字删掉」让守护静默失效（其余文档的锚点缺失视为该文档没有陈述该数字）。
@@ -818,6 +833,111 @@ def covered_facts(root: Path, anchors: tuple[DocAnchor, ...] | None = None) -> s
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# 对外口径单一事实源：docs/METRICS.md
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _split_markdown_row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def iter_metrics_rows(text: str) -> list[tuple[int, list[str]]]:
+    """返回 METRICS.md 表格数据行 (行号, 单元格)；跳过表头与分隔行。"""
+    rows: list[tuple[int, list[str]]] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = _split_markdown_row(stripped)
+        if not any(cells) or cells[0] == "指标":
+            continue
+        if all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells if cell):
+            continue
+        rows.append((lineno, cells))
+    return rows
+
+
+def check_metrics_document(root: Path, facts: dict[str, int]) -> list[str]:
+    """校验 docs/METRICS.md：存在、表格完整、六项 facts 与 facts JSON 同值。"""
+    path = Path(root) / METRICS_PATH
+    if not path.is_file():
+        return [f"{METRICS_PATH} 缺失：指标唯一事实源必须存在"]
+    problems: list[str] = []
+    seen: dict[str, tuple[int, int]] = {}
+    for lineno, cells in iter_metrics_rows(_read_text(path)):
+        if len(cells) != METRICS_COLUMN_COUNT:
+            problems.append(
+                f"{METRICS_PATH}:{lineno}: 指标表每行必须有 {METRICS_COLUMN_COUNT} 列"
+                f"（指标/值/口径/命令/日期/备注），实际 {len(cells)} 列"
+            )
+            continue
+        if any(not cell for cell in cells):
+            problems.append(f"{METRICS_PATH}:{lineno}: 指标表存在空单元格（所有单元格均不得为空）")
+            continue
+        key = cells[0].strip("`")
+        if key not in facts:
+            continue
+        raw = cells[1].strip("`").replace(",", "")
+        if not raw.isdigit():
+            problems.append(f"{METRICS_PATH}:{lineno}: {key} 的值必须是整数，实际 {cells[1]!r}")
+            continue
+        value = int(raw)
+        if key in seen:
+            first_lineno, first_value = seen[key]
+            problems.append(
+                f"{METRICS_PATH}:{lineno}: 指标 {key} 重复定义"
+                f"（首次第 {first_lineno} 行={first_value}，本次={value}）"
+            )
+            continue
+        seen[key] = (lineno, value)
+        if value != facts[key]:
+            problems.append(f"{METRICS_PATH}:{lineno}: {key}: METRICS={value}, facts={facts[key]}")
+    for key in FACT_KEYS:
+        if key not in seen:
+            problems.append(f"{METRICS_PATH}: 缺少指标行 {key}（六项 facts 必须逐一登记）")
+    return problems
+
+
+def scan_conflicting_fact_numbers(
+    root: Path, anchors: tuple[DocAnchor, ...] | None = None
+) -> list[str]:
+    """同一文档同一 fact 出现多个不同数字时返回告警（仅告警，不判失败）。"""
+    root = Path(root)
+    anchors = DOC_ANCHORS if anchors is None else anchors
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for anchor in anchors:
+        grouped.setdefault((anchor.fact, anchor.path), []).append(anchor.pattern)
+    for fact, extra_patterns in EXTRA_METRIC_PATTERNS.items():
+        for path in {anchor.path for anchor in anchors if anchor.fact == fact}:
+            grouped.setdefault((fact, path), []).extend(extra_patterns)
+    warnings: list[str] = []
+    for (fact, path), patterns in grouped.items():
+        file_path = root / path
+        if not file_path.is_file():
+            continue
+        text = _read_text(file_path)
+        values: dict[int, set[int]] = {}
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, re.MULTILINE):
+                raw = match.group(1)
+                if not raw.isdigit():
+                    continue
+                lineno = text.count("\n", 0, match.start()) + 1
+                values.setdefault(int(raw), set()).add(lineno)
+        if len(values) <= 1:
+            continue
+        detail = "; ".join(
+            f"{value}@行{','.join(str(line) for line in sorted(lines))}"
+            for value, lines in sorted(values.items())
+        )
+        warnings.append(
+            f"{path}: {fact} 出现多个不同数字（{detail}）——请统一到 {METRICS_PATH}；"
+            "当前仅告警，不判失败"
+        )
+    return warnings
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # facts JSON
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -877,6 +997,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     facts_path = args.facts or (root / "docs" / "facts.json")
+    warnings: list[str] = []
     try:
         facts = load_facts(facts_path)
         problems = [
@@ -885,6 +1006,8 @@ def main(argv: list[str] | None = None) -> int:
             if derived[key] != facts[key]
         ]
         problems.extend(check_doc_anchors(root, facts))
+        problems.extend(check_metrics_document(root, facts))
+        warnings.extend(scan_conflicting_fact_numbers(root))
     except DerivationError as exc:
         print(f"ERROR: facts/文档校验失败: {exc}", file=sys.stderr)
         return 2
@@ -892,8 +1015,21 @@ def main(argv: list[str] | None = None) -> int:
     readme = root / "README.md"
     if not readme.is_file():
         problems.append("README.md 缺失：无法确认 docs/facts.json 的引用入口")
-    elif "docs/facts.json" not in _read_text(readme):
-        problems.append("README.md 未引用 docs/facts.json（事实单一事实源入口）")
+    else:
+        readme_text = _read_text(readme)
+        if "docs/facts.json" not in readme_text:
+            problems.append("README.md 未引用 docs/facts.json（事实单一事实源入口）")
+        elif METRICS_PATH not in readme_text:
+            problems.append(f"README.md 未引用 {METRICS_PATH}（指标单一事实源入口）")
+
+    if warnings:
+        print(
+            "WARN: 同一文档同一指标出现多个数字（仅告警，请收敛到 "
+            f"{METRICS_PATH}；facts 六项不一致仍判失败）:",
+            file=sys.stderr,
+        )
+        for warning in warnings:
+            print(f"  - {warning}", file=sys.stderr)
 
     if problems:
         print(
@@ -903,7 +1039,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {problem}", file=sys.stderr)
         return 1
 
-    print(f"OK: 事实不变量成立（{len(FACT_KEYS)} 项事实；派生值与 {facts_path} 及文档数字一致）")
+    print(
+        f"OK: 事实不变量成立（{len(FACT_KEYS)} 项事实；派生值与 {facts_path}、"
+        f"{METRICS_PATH} 及文档数字一致）"
+    )
     return 0
 
 
