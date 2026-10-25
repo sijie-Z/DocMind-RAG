@@ -62,7 +62,9 @@ def run(args: argparse.Namespace | None = None, profile: str = "web") -> None:
         except SystemExit as exc:
             if exc.code in (None, 0):
                 return
-            logger.warning("端口 %s 启动失败，尝试下一个端口...", port)
+            # uvicorn 的真实启动错误（含退出码）原样透传；只有预检端口占用
+            # 或绑定 OSError 才尝试下一端口，不能伪装成范围端口冲突。
+            raise
         except OSError as exc:
             logger.warning("端口 %s 绑定失败（%s），尝试下一个端口...", port, exc)
 

@@ -7,9 +7,10 @@ import pymysql
 def update_db():
     connection = pymysql.connect(
         host=os.getenv("DB_HOST", "localhost"),
+        port=int(os.getenv("DB_PORT", "3308")),
         user=os.getenv("DB_USER", "root"),
         password=os.getenv("DB_PASSWORD", ""),
-        db=os.getenv("DB_NAME", "docmind_db")
+        db=os.getenv("DB_NAME", "docmind")
     )
     try:
         with connection.cursor() as cursor:
