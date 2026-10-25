@@ -294,6 +294,7 @@ async def test_tool_result_event_carries_sandbox_meta():
         enable_planning=False,
         enable_reflection=False,
         disabled_tools=[],  # 本用例聚焦元数据透传，显式启用该工具
+        approval_mode="never",  # 不测试审批；避免高风险工具的无通道门掩盖 sandbox 断言
         max_tool_calls_per_turn=3,
     )
     spy = AsyncMock(return_value=ToolResult.ok(data="45", meta=ToolMeta(sandbox="ast")))
