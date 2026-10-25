@@ -5,6 +5,8 @@ import { setToken, setRefreshToken, removeToken, getToken, getRefreshToken } fro
 import type { UserInfo, LoginForm, RegisterForm } from '@/types/user'
 import type { AxiosError } from 'axios'
 import { useAppStore } from './app'
+import { useAgentStore } from './agent'
+import { useChatStore } from './chat'
 import { getUserSettings, updateUserSettings, getMyOrganizations, switchOrganization as switchOrganizationApi, type UserSettings } from '@/api/user'
 
 function _extractErrorMessage(error: unknown, fallback: string): string {
@@ -15,6 +17,12 @@ function _extractErrorMessage(error: unknown, fallback: string): string {
     (error instanceof Error ? error.message : null) ??
     fallback
   )
+}
+
+function _createAuthScopeChangedError() {
+  return Object.assign(new Error('Authentication context changed during user validation'), {
+    authScopeChanged: true,
+  })
 }
 
 export const useUserStore = defineStore('user', () => {
@@ -33,6 +41,26 @@ export const useUserStore = defineStore('user', () => {
   const organizationVersion = ref(0)
   // 服务可用性标记：/users/me 遇 5xx/网络错误时为 true（保留会话，供全局横幅/不可用页消费）
   const authServiceUnavailable = ref(false)
+  const myOrganizations = ref<Array<{ id: number; name: string }>>([])
+  let organizationsRequest: Promise<Array<{ id: number; name: string }>> | null = null
+  let organizationsRequestSeq = 0
+  let authScopeVersion = 0
+
+  const resetAgentAndChat = () => {
+    useAgentStore().resetForIdentityChange()
+    useChatStore().resetForIdentityChange()
+  }
+
+  const invalidateOrganizationsRequest = () => {
+    organizationsRequest = null
+    organizationsRequestSeq += 1
+  }
+
+  const clearIdentityScopedStorage = () => {
+    localStorage.removeItem('user_info')
+    localStorage.removeItem('activeSystemPrompt')
+    localStorage.removeItem('activeSystemPromptName')
+  }
 
   // User settings state
   const settings = ref<UserSettings>({
@@ -46,6 +74,14 @@ export const useUserStore = defineStore('user', () => {
       token.value = accessToken
     }
     if (info) {
+      if (userInfo.value && userInfo.value.id !== info.id) {
+        // 支持不经过空用户态的直接换账号：旧账号的异步组织请求一并失效。
+        authScopeVersion += 1
+        invalidateOrganizationsRequest()
+        myOrganizations.value = []
+        resetAgentAndChat()
+        clearIdentityScopedStorage()
+      }
       userInfo.value = info
       currentOrganizationId.value = info.organization_id || null
       if (info.preferences) {
@@ -101,6 +137,9 @@ export const useUserStore = defineStore('user', () => {
       resData.data && typeof resData.data === 'object' ? resData.data : resData
     ) as Record<string, unknown>
     const appliedOrgId = Number(payload.organization_id ?? orgId)
+    // 服务端已确认切换：废弃旧组织请求，再清态并加载新组织页面。
+    invalidateOrganizationsRequest()
+    resetAgentAndChat()
     currentOrganizationId.value = appliedOrgId
     if (userInfo.value) {
       // W0-1：服务端随切换结果回传目标组织的 per-org 管理身份；
@@ -128,14 +167,16 @@ export const useUserStore = defineStore('user', () => {
    * 用户菜单同源消费；布局层与切换器同 tick 挂载时，并发请求共享同一次
    * GET（去重），不重复打接口。
    */
-  const myOrganizations = ref<Array<{ id: number; name: string }>>([])
-  let organizationsRequest: Promise<Array<{ id: number; name: string }>> | null = null
-
   const fetchMyOrganizations = async () => {
     if (organizationsRequest) return organizationsRequest
+    const requestScope = authScopeVersion
+    const requestSeq = ++organizationsRequestSeq
+    const isCurrentRequest = () =>
+      requestScope === authScopeVersion && requestSeq === organizationsRequestSeq
     const request = (async () => {
       try {
         const response = await getMyOrganizations()
+        if (!isCurrentRequest()) return [] as Array<{ id: number; name: string }>
         const resData = response.data as unknown as Record<string, unknown>
         const payload = (
           resData.data && typeof resData.data === 'object' ? resData.data : resData
@@ -143,18 +184,21 @@ export const useUserStore = defineStore('user', () => {
         const organizations = Array.isArray(payload.organizations) ? payload.organizations : []
         const serverOrgId = payload.current_organization_id
         if (typeof serverOrgId === 'number' && serverOrgId !== currentOrgId.value) {
+          // 多设备导致的服务端组织漂移也按一次成功切换处理，先隔离旧组织数据。
+          resetAgentAndChat()
           currentOrganizationId.value = serverOrgId
           if (userInfo.value) {
             userInfo.value = { ...userInfo.value, organization_id: serverOrgId }
           }
+          organizationVersion.value += 1
         }
         myOrganizations.value = organizations as Array<{ id: number; name: string }>
         return organizations as Array<{ id: number; name: string }>
       } catch {
-        myOrganizations.value = []
+        if (isCurrentRequest()) myOrganizations.value = []
         return [] as Array<{ id: number; name: string }>
       } finally {
-        organizationsRequest = null
+        if (requestSeq === organizationsRequestSeq) organizationsRequest = null
       }
     })()
     organizationsRequest = request
@@ -237,6 +281,12 @@ export const useUserStore = defineStore('user', () => {
     if (!storedToken) {
       return Promise.reject(new Error('No token found'))
     }
+    const requestScope = authScopeVersion
+    const requestOrganizationVersion = organizationVersion.value
+    const isCurrentContext = () =>
+      requestScope === authScopeVersion &&
+      requestOrganizationVersion === organizationVersion.value
+    const hasRequestToken = () => token.value === storedToken && getToken() === storedToken
 
     try {
       const response = await getUserProfile()
@@ -244,10 +294,20 @@ export const useUserStore = defineStore('user', () => {
       const info = (resData.data && typeof resData.data === 'object' && !resData.username)
         ? resData.data as UserInfo
         : resData as unknown as UserInfo
-      _applyValidatedAuth(storedToken, info)
+      const isRefreshRetry = (response.config as { _retry?: boolean } | undefined)?._retry === true
+      const isCurrentUserRefresh = isRefreshRetry &&
+        info.id != null && info.id === userInfo.value?.id
+      if (!isCurrentContext() || (!hasRequestToken() && !isCurrentUserRefresh)) {
+        throw _createAuthScopeChangedError()
+      }
+      // 401 续期重试必须使用新 token；旧请求起始 token 不得回写。
+      _applyValidatedAuth(getToken() || token.value || storedToken, info)
       authServiceUnavailable.value = false
       return response.data
     } catch (error) {
+      if ((error as { authScopeChanged?: boolean })?.authScopeChanged) throw error
+      // 旧请求的失败（尤其 401）不能触发新身份的登出或服务状态。
+      if (!isCurrentContext() || !hasRequestToken()) throw _createAuthScopeChangedError()
       // 仅 401（或拦截器已判定续期失败的标记错误）视为会话失效；
       // 5xx / 网络错误保留 token 与本地缓存的 userInfo，交由 UI 提示“服务不可用”。
       const status = (error as AxiosError)?.response?.status
@@ -266,15 +326,17 @@ export const useUserStore = defineStore('user', () => {
 
   /** 同步清空本地登录态（不请求服务端、不导航）：供登出与路由守卫的导航链路复用 */
   const clearAuthState = () => {
+    authScopeVersion += 1
+    invalidateOrganizationsRequest()
+    resetAgentAndChat()
     userInfo.value = null
     token.value = ''
+    currentOrganizationId.value = null
+    myOrganizations.value = []
     authServiceUnavailable.value = false
     removeToken()
-    // 清除用户态 localStorage，避免登出后残留敏感/偏好数据
-    localStorage.removeItem('user_info')
-    localStorage.removeItem('language')
-    localStorage.removeItem('theme')
-    localStorage.removeItem('activeSystemPrompt')
+    // 身份作用域数据必须清除；主题/语言是跨账号 UI 偏好，保留。
+    clearIdentityScopedStorage()
   }
 
   /**

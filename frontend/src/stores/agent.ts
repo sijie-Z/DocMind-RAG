@@ -16,9 +16,8 @@ import { applyPlanStepUpdate, buildPlanStep } from '@/utils/agentPlan'
 /** 持久化"最近一次运行的 task_id"：刷新/重连后回到审批现场的钥匙。 */
 const LAST_TASK_KEY = 'docmind.agent.lastTaskId'
 
-export const useAgentStore = defineStore('agent', () => {
-  // ── Config ──
-  const config = ref<AgentConfig>({
+function createDefaultConfig(): AgentConfig {
+  return {
     model: 'deepseek-v4-flash',
     temperature: 0.1,
     max_tokens: 4096,
@@ -33,7 +32,14 @@ export const useAgentStore = defineStore('agent', () => {
     max_retries_per_step: 3,
     // HITL：与后端 AgentConfig 默认一致（backend/app/agent/config.py:204）
     approval_mode: 'risky',
-  })
+  }
+}
+
+export const useAgentStore = defineStore('agent', () => {
+  // ── Config ──
+  const config = ref<AgentConfig>(createDefaultConfig())
+  // 身份/组织上下文代次：异步消费者捕获代次，reset 后的旧回写一律丢弃。
+  const identityEpoch = ref(0)
 
   // ── Sessions ──
   const sessions = ref<AgentSession[]>([])
@@ -79,7 +85,13 @@ export const useAgentStore = defineStore('agent', () => {
     if (last) updater(last)
   }
 
-  function processEvent(event: AgentEvent) {
+  function isIdentityEpochCurrent(epoch: number) {
+    return epoch === identityEpoch.value
+  }
+
+  function processEvent(event: AgentEvent, epoch = identityEpoch.value) {
+    // SSE 回调必须携带启动时的代次；reset 后晚到的旧事件不能复活旧身份数据。
+    if (!isIdentityEpochCurrent(epoch)) return
     // HITL：任何携带 task_id 的事件都是取消/审批/恢复的钥匙，实时落账
     if (event.task_id) {
       setTaskId(event.task_id)
@@ -379,6 +391,22 @@ export const useAgentStore = defineStore('agent', () => {
     expandedEvents.value = new Set()
   }
 
+  /** 登出、换账号或组织切换成功后的完整用户作用域清理。 */
+  function resetForIdentityChange() {
+    // 先换代次，再清态：abort 与清理过程中同步抵达的旧事件也会被拒绝。
+    identityEpoch.value += 1
+    clearMessages()
+    sessions.value = []
+    currentSessionId.value = null
+    isLoading.value = false
+    tools.value = []
+    config.value = createDefaultConfig()
+    setTaskId(null)
+    taskState.value = 'idle'
+    pendingApproval.value = null
+    pendingPlanApproval.value = null
+  }
+
   /** issue #476：历史会话消息载入（含 serverMessageId，供分叉边界判定）。 */
   function setMessages(list: AgentChatMessage[]) {
     messages.value = list
@@ -465,6 +493,7 @@ export const useAgentStore = defineStore('agent', () => {
   return {
     // State
     config,
+    identityEpoch,
     sessions,
     currentSessionId,
     messages,
@@ -488,8 +517,10 @@ export const useAgentStore = defineStore('agent', () => {
     // Actions
     addMessage,
     updateLastAssistant,
+    isIdentityEpochCurrent,
     processEvent,
     clearMessages,
+    resetForIdentityChange,
     setMessages,
     setLoading,
     setSessions,

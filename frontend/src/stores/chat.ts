@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { Conversation } from '@/types/chat'
-import { unbindConversationDocs } from '@/api/chat'
 
 export const useChatStore = defineStore('chat', () => {
   // 状态
@@ -15,11 +14,18 @@ export const useChatStore = defineStore('chat', () => {
 
   const unbindDocuments = async () => {
     if (currentConversation.value?.id) {
+      // 动态导入避免 user → chat → request → user 的模块初始化循环。
+      const { unbindConversationDocs } = await import('@/api/chat')
       await unbindConversationDocs(currentConversation.value.id.toString())
       if (currentConversation.value.settings) {
         currentConversation.value.settings.bound_document_ids = []
       }
     }
+  }
+
+  const resetForIdentityChange = () => {
+    conversations.value = []
+    currentConversation.value = null
   }
 
   return {
@@ -29,6 +35,7 @@ export const useChatStore = defineStore('chat', () => {
 
     // 方法
     setCurrentConversation,
-    unbindDocuments
+    unbindDocuments,
+    resetForIdentityChange,
   }
 })

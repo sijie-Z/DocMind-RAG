@@ -13,6 +13,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import request, { clearDefaultAuth } from '../request'
+import { useUserStore } from '@/stores/user'
+import { removeToken } from '@/utils/auth'
 
 // 401 刷新失败会触发 userStore.logout()，其内部动态导入 router 做登录页跳转；
 // 本文件只测请求层，用最小桩隔离路由/布局模块装配。
@@ -27,7 +29,12 @@ let responses: Array<{ status: number; data?: unknown }> = []
 
 function installAdapter() {
   request.defaults.adapter = (async (config: any) => {
-    seen.push({ url: config.url, headers: config.headers })
+    seen.push({
+      url: config.url,
+      headers: config.headers,
+      authorization: config.headers?.Authorization ?? config.headers?.authorization,
+      _retry: config._retry,
+    })
     const next = responses.shift() ?? { status: 200, data: { ok: true } }
     const response = { data: next.data, status: next.status, statusText: '', headers: {}, config }
     // axios 的 adapter 需要在非 2xx 时自行 reject，才能触发响应拦截器的错误分支
@@ -109,6 +116,47 @@ describe('401 · 静默刷新与重放', () => {
     expect(seen).toHaveLength(2)
     expect(authHeaderOf(seen[1])).toBe('Bearer new-token')
     expect(localStorage.getItem('docmind_token')).toBe('new-token')
+  })
+
+  it('401 refresh retry returns the current user profile and keeps the new token', async () => {
+    removeToken()
+    localStorage.setItem('docmind_token', 'old-token')
+    localStorage.setItem('docmind_refresh_token', 'refresh-ok')
+    localStorage.setItem('user_info', JSON.stringify({
+      id: 1, username: 'cached-user', role: 'user', organization_id: 1,
+    }))
+    responses = [
+      { status: 401 },
+      {
+        status: 200,
+        data: { data: { id: 1, username: 'fresh-user', role: 'user', organization_id: 1 } },
+      },
+    ]
+    const refreshSpy = vi.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        data: {
+          access_token: 'new-token', expires_in: 3600, refresh_token: 'refresh-rotated',
+        },
+      },
+    } as any)
+    const userStore = useUserStore()
+
+    const result = await userStore.getUserInfo()
+
+    expect(refreshSpy).toHaveBeenCalledTimes(1)
+    expect(seen).toHaveLength(2)
+    expect(seen[0].url).toBe('/users/me')
+    expect(seen[1].url).toBe('/users/me')
+    expect(seen[1]._retry).toBe(true)
+    expect(seen[0].authorization).toBe('Bearer old-token')
+    expect(seen[1].authorization).toBe('Bearer new-token')
+    expect(result).toEqual({ data: expect.objectContaining({ id: 1, username: 'fresh-user' }) })
+    expect(userStore.userInfo?.username).toBe('fresh-user')
+    expect(userStore.token).toBe('new-token')
+    expect(userStore.authServiceUnavailable).toBe(false)
+    expect(localStorage.getItem('docmind_token')).toBe('new-token')
+    expect(localStorage.getItem('docmind_refresh_token')).toBe('refresh-rotated')
+    removeToken()
   })
 
   it('刷新失败时不再重试，并清掉登录态', async () => {
