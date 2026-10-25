@@ -11,7 +11,7 @@ from sqlalchemy import and_, delete, func, select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.elasticsearch import get_elasticsearch
-from app.exceptions import AppError
+from app.exceptions import AppError, ServiceUnavailableError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.rag.errors import RetrievalUnavailableError
@@ -220,12 +220,18 @@ class KnowledgeService:
         return await self.delete_knowledge_thoroughly(document_id, organization_id)
 
     async def delete_es_by_document_id(self, document_id: str) -> bool:
-        """仅从 ES 中删除该文档的所有 chunk（用于重建前清理）"""
+        """仅从 ES 中删除该文档的所有 chunk；明确失败时返回 False。"""
         try:
             client = await get_elasticsearch()
-            await client.delete_by_query(
-                index=self.index_name, query={"term": {"document_id": document_id}}
+            response = await client.delete_by_query(
+                index=self.index_name,
+                query={"term": {"document_id": document_id}},
+                refresh=True,
             )
+            failures = response.get("failures", []) if response is not None else []
+            if failures:
+                logger.error(f"从 ES 按 document_id 删除返回 failures: {failures}")
+                return False
             logger.info(f"已从 ES 删除 document_id={document_id} 的索引")
             return True
         except Exception as e:
@@ -279,16 +285,10 @@ class KnowledgeService:
                             "引用，跳过物理删除"
                         )
 
-                # ES 清理是 best-effort：客户端获取失败（如 ES 未连接/不可用）不得挡住删除。
-                # 客户端获取原先在 try 之外，ES 不可用时整个删除在碰 DB 之前就抛 RuntimeError
-                # （issue #174 顺带修复）。
-                try:
-                    client = await get_elasticsearch()
-                    await client.delete_by_query(
-                        index=self.index_name, query={"term": {"document_id": document_id}}
-                    )
-                except Exception as e:
-                    logger.warning(f"从ES删除索引失败: {str(e)}")
+                # ES 未明确成功时不得删除 DB 记录；调用方可在故障恢复后重试。
+                # helper 会把 ES 异常和响应中的非空 failures 统一转成 False。
+                if not await self.delete_es_by_document_id(document_id):
+                    raise ServiceUnavailableError("Elasticsearch 索引删除失败，文档未删除，请重试")
 
                 # 先清所有引用 documents.id 的子表，再删主表 —— 外键均无 ON DELETE CASCADE，
                 # 漏任何一张都会被 MySQL 1451 挡住（issue #174）。

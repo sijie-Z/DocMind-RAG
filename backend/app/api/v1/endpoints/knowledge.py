@@ -845,14 +845,19 @@ async def batch_delete_documents(
             request.document_ids, effective_org_id
         )
 
-        await audit_service.log_activity(
-            user_id=current_user.id,
-            action="delete_document",
-            target_type="document",
-            target_id=",".join(request.document_ids),
-            detail=f"批量删除 {len(request.document_ids)} 个知识库文档",
-            db=db,
-        )
+        failed_ids = {error["document_id"] for error in results.get("errors", [])}
+        deleted_ids = [
+            document_id for document_id in request.document_ids if document_id not in failed_ids
+        ]
+        if deleted_ids:
+            await audit_service.log_activity(
+                user_id=current_user.id,
+                action="delete_document",
+                target_type="document",
+                target_id=",".join(deleted_ids),
+                detail=f"批量成功删除 {len(deleted_ids)} 个知识库文档",
+                db=db,
+            )
 
         return results
 
