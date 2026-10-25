@@ -83,13 +83,26 @@ The "required" label on `.env.docker` has three distinct meanings:
 - **Backend startup fail-closed**: empty `SECRET_KEY` / `JWT_SECRET_KEY` refuses startup.
 - **Required for features, not startup-enforced**: `DEEPSEEK_API_KEY` — the service still starts; chat calls fail.
 
-For `.env` (host side), at minimum set `SECRET_KEY`, `JWT_SECRET_KEY`, and `DEEPSEEK_API_KEY`. Note that `.env.example` points `DATABASE_URL` at `localhost:3306`, while **Docker infrastructure maps MySQL to 3308**; with posture A, change it:
+Compose performs **whole-file interpolation before service selection**: even without
+selecting Grafana, `GRAFANA_PASSWORD` remains required. This documents existing
+behavior; it neither adds a default password nor weakens Grafana's validation.
+
+For `.env` (host side), at minimum set `SECRET_KEY`, `JWT_SECRET_KEY`, and
+`DEEPSEEK_API_KEY`. `.env.example` already defaults to the Docker-published
+`localhost:3308/docmind` and Redis `localhost:6390` for posture A; no manual port
+change is needed:
 
 ```dotenv
 DATABASE_URL=mysql+aiomysql://docmind:<MYSQL_PASSWORD>@localhost:3308/docmind
 REDIS_HOST=localhost
 REDIS_PORT=6390
 ```
+
+Posture B still overrides these with container-internal `docmind-mysql:3306/docmind`
+and `docmind-redis:6379`; do not substitute host-published ports. If MySQL and Redis
+also run directly on the host without Docker, update `.env` with their actual hosts,
+ports, and database name (commonly 3306/6379 locally, but follow your service
+configuration).
 
 > `SETUP.md` documents the same host-side ports. Change ports in compose and `.env`, not in a second configuration source.
 
@@ -169,16 +182,17 @@ The dev server proxies `/api`, `/static`, `/health`, and WebSockets to the local
 | Endpoint | Semantics | When to use |
 |----------|-----------|-------------|
 | `GET /livez` | **Liveness**: always 200 while the process is alive, `{"status":"alive"}` | liveness probe |
-| `GET /readyz` | **Readiness**: DB `SELECT 1` + ES cluster health + knowledge-index reconciliation; any failure → **503** | container healthcheck, traffic admission |
-| `GET /health` | **Diagnostic view, always 200**, with `status` / `ready` / `version` / `services` / `uptime_seconds` | human troubleshooting; not an orchestration probe |
+| `GET /readyz` | **Readiness**: DB, Redis, and ES must be healthy; knowledge-index reconciliation must not be unhealthy; otherwise **503** | container healthcheck, traffic admission |
+| `GET /health` | **Diagnostic view, always 200**, with `status` / `ready` / `version` / `services` / `uptime_seconds`; `ready` uses the same rules as `/readyz` | human troubleshooting; not an orchestration probe |
 | `GET /metrics` | Prometheus text metrics | scraping; requires `Authorization: Bearer <token>` when `METRICS_TOKEN` is set |
 
 Exact readiness rules (`_is_ready` in `backend/app/main.py`):
 
-- **Included**: `database == healthy`, `elasticsearch == healthy`, `knowledge_base != unhealthy`.
-- **Excluded**: Redis, MinIO, Kafka — their failures only make `/health` report `degraded`; `/readyz` stays 200.
+- **Included**: `database == healthy`, `redis == healthy`, `elasticsearch == healthy`, `knowledge_base != unhealthy`.
+- **Redis is an authentication hard dependency**: `disabled` / `degraded` (including ping timeout) returns 503 with `ready=false`, because token-blacklist lookups are also fail-closed; never change them to fail open.
+- **Excluded**: MinIO and Kafka — their failures only make `/health` report `degraded`; `/readyz` stays 200.
 - ES `disabled` or `degraded` both mean not ready; knowledge base `degraded` (coverage 95%-100% or a transient timeout) does not drain traffic, `unhealthy` does.
-- `/health` overall `status`: all healthy → `healthy`; any `unhealthy` → `unhealthy`; otherwise `degraded`.
+- `/health` overall `status`: all healthy → `healthy`; any `unhealthy` → `unhealthy`; otherwise `degraded`. It always returns HTTP 200, but `ready` matches `/readyz`.
 
 The backend healthcheck in `backend/docker-compose.yml` uses `/readyz` precisely because `/health` always returns 200 (issue #223).
 
@@ -188,7 +202,7 @@ curl -s http://localhost:8000/readyz
 curl -s http://localhost:8000/health | python -m json.tool
 ```
 
-**Reading a `/readyz` 503**: the body names the failing checks. Common causes are MySQL not running, ES still starting (~30 s on first boot), or documents marked `INDEXED` with no chunks in ES (reconciliation failure). Use `reconcile_knowledge_index.py` (section 4.1) for the third case.
+**Reading a `/readyz` 503**: the body names the failing checks. Common causes are MySQL or Redis not running, a Redis ping timeout, ES still starting (~30 s on first boot), or documents marked `INDEXED` with no chunks in ES (reconciliation failure). Use `reconcile_knowledge_index.py` (section 4.1) for the last case.
 
 ### 1.9 First login
 
@@ -286,9 +300,9 @@ To change embedding providers:
 
 | Variable | Default (template/code) | Notes |
 |----------|-------------------------|-------|
-| `DATABASE_URL` | `mysql+aiomysql://...@localhost:3306/docmind_db` (host template; use 3308 with Docker infrastructure) | MySQL |
+| `DATABASE_URL` | `mysql+aiomysql://...@localhost:3308/docmind` (host template, matching the Docker-published topology) | MySQL |
 | `DATABASE_POOL_SIZE` / `DATABASE_MAX_OVERFLOW` | `20` / `10` (compose: pool 20 / max_overflow 30) | connection pool |
-| `REDIS_HOST` / `REDIS_PORT` | template `localhost` / `6379`; code default port `6390` (matches the Docker mapping) | cache, rate limit, token blacklist |
+| `REDIS_HOST` / `REDIS_PORT` | template `localhost` / `6390`; code default port `6390` (matches the Docker mapping) | cache, rate limit, token blacklist (readiness hard dependency) |
 | `REDIS_PASSWORD` | empty | optional; when enabled, set it on both the server and app side (see compose comments) |
 | `ELASTICSEARCH_HOSTS` | `["http://localhost:9200"]` | ES 8 |
 | `ELASTICSEARCH_INDEX_NAME` | `docmind_knowledge` (template value; the old code default is kept only for legacy-data compatibility) | knowledge index |
@@ -887,7 +901,7 @@ Fix:
 | Symptom | Most likely cause | Action |
 |---------|-------------------|--------|
 | **502** `RETRIEVAL_UNAVAILABLE` | retrieval failure/timeout, or embedding drift fail-closed | inspect `detail.kind`; check ES and embedding; see 7.5 |
-| **503** | `/readyz` not ready (DB / ES / knowledge reconciliation); or Redis unavailable makes the token blacklist fail closed | check `/readyz` and `/health` `services`; then Redis |
+| **503** | `/readyz` not ready (DB / Redis / ES / knowledge reconciliation); or Redis unavailable makes the token blacklist fail closed | check `/readyz` and `/health` `services`; then Redis |
 | **500** | unexpected exception; details only in server logs | record the `X-Request-ID` response header and search JSON logs; with `EXPOSE_EXCEPTION_DETAIL=false` clients only see a generic message |
 | **409** | agent task state conflict (`TASK_BUSY` / `TASK_NOT_RESUMABLE`, etc.) | handle the error code; do not retry concurrently |
 | **429** | rate limit (host template 10000/min, compose 300/min) | slow down or adjust `RATE_LIMIT_REQUESTS_PER_MINUTE`; `/health`, `/livez`, `/readyz`, `/metrics` are exempt |

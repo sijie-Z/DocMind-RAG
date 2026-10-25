@@ -88,14 +88,22 @@ python -c "import secrets; print(secrets.token_hex(24))"   # 数据库/中间件
 - **后端启动 fail-closed**：`SECRET_KEY`、`JWT_SECRET_KEY` 为空会拒绝启动。
 - **功能必需但不在启动时强制**：`DEEPSEEK_API_KEY`——缺失时服务仍能启动，Chat 调用才失败。
 
-`.env`（宿主机侧）至少要设置 `SECRET_KEY`、`JWT_SECRET_KEY` 和 `DEEPSEEK_API_KEY`。另外，`.env.example` 的
-`DATABASE_URL` 默认指向 `localhost:3306`，而 **Docker 基础设施对外映射的是 3308**；使用姿态 A 时请改成：
+Compose 的**全文件插值**先于服务选择：即使不选择 Grafana，`GRAFANA_PASSWORD`
+仍为必填。这里只说明现状，不新增默认密码，也不放宽 Grafana 的安全校验。
+
+`.env`（宿主机侧）至少要设置 `SECRET_KEY`、`JWT_SECRET_KEY` 和 `DEEPSEEK_API_KEY`。
+`.env.example` 已按姿态 A 默认连接 Docker 发布的 `localhost:3308/docmind` 与 Redis
+`localhost:6390`，无需再手工改端口：
 
 ```dotenv
 DATABASE_URL=mysql+aiomysql://docmind:<MYSQL_PASSWORD>@localhost:3308/docmind
 REDIS_HOST=localhost
 REDIS_PORT=6390
 ```
+
+姿态 B 仍由 compose 覆盖为容器内 `docmind-mysql:3306/docmind`、
+`docmind-redis:6379`，不要改用宿主发布端口。若 MySQL/Redis 也全部直接安装在本机，
+必须按实际地址、端口和库名修改 `.env`（常见本机端口是 3306/6379，但以服务配置为准）。
 
 > `SETUP.md`「基础设施端口」一节给出了同样的宿主机口径；改端口请改 compose 与 `.env`，不要把某份文档当第二配置源。
 
@@ -176,16 +184,17 @@ npm run dev       # http://localhost:5173
 | 端点 | 语义 | 什么时候看 |
 |------|------|------------|
 | `GET /livez` | **存活**，进程在就恒 200，返回 `{"status":"alive"}` | 容器编排的 liveness probe |
-| `GET /readyz` | **就绪**：DB `SELECT 1` + ES 集群健康 + 知识库索引对账；任一不过 → **503** | 容器 healthcheck、是否该接流量 |
-| `GET /health` | **诊断视图，恒 200**，含 `status` / `ready` / `version` / `services` / `uptime_seconds` | 人工排障；不要拿它做编排探针 |
+| `GET /readyz` | **就绪**：DB / Redis / ES 必须 healthy，知识库索引对账不得为 unhealthy；否则 **503** | 容器 healthcheck、是否该接流量 |
+| `GET /health` | **诊断视图，恒 200**，含 `status` / `ready` / `version` / `services` / `uptime_seconds`；`ready` 与 `/readyz` 同口径 | 人工排障；不要拿它做编排探针 |
 | `GET /metrics` | Prometheus 文本指标 | 抓取；设置 `METRICS_TOKEN` 后需 `Authorization: Bearer <token>` |
 
 就绪判定的精确口径（`backend/app/main.py` 的 `_is_ready`）：
 
-- **参与判定**：`database == healthy`、`elasticsearch == healthy`、`knowledge_base != unhealthy`。
-- **不参与判定**：Redis、MinIO、Kafka——它们故障只会让 `/health` 显示 `degraded`，不会让 `/readyz` 返回 503。
+- **参与判定**：`database == healthy`、`redis == healthy`、`elasticsearch == healthy`、`knowledge_base != unhealthy`。
+- **Redis 是认证硬依赖**：`disabled` / `degraded`（含 ping 超时）均返回 503、`ready=false`，因为 Token 黑名单查询本身也是 fail-closed；不能改成黑名单失败放行。
+- **不参与判定**：MinIO、Kafka——它们故障只会让 `/health` 显示 `degraded`，不会让 `/readyz` 返回 503。
 - ES 处于 `disabled` 或 `degraded` 都算不就绪；知识库 `degraded`（覆盖率 95%–100% 或瞬时超时）不摘流，`unhealthy` 才 503。
-- `/health` 的总体 `status`：全部健康 → `healthy`；任一项 `unhealthy` → `unhealthy`；其余（含 `disabled` / `degraded`）→ `degraded`。
+- `/health` 的总体 `status`：全部健康 → `healthy`；任一项 `unhealthy` → `unhealthy`；其余（含 `disabled` / `degraded`）→ `degraded`。它始终返回 HTTP 200，但 `ready` 与 `/readyz` 一致。
 
 `backend/docker-compose.yml` 中 backend 的 healthcheck 用的就是 `/readyz`，注释写明了原因：`/health` 恒 200，等于永远健康（issue #223）。
 
@@ -195,7 +204,7 @@ curl -s http://localhost:8000/readyz
 curl -s http://localhost:8000/health | python -m json.tool
 ```
 
-**怎么读 `/readyz` 的 503**：响应体会指出失败项。常见原因是 MySQL 未起、ES 还在启动（首次 30 秒左右）、或文档表声称 `INDEXED` 但 ES 里查不到（索引对账失败）。第三类用第 4.1 节的 `reconcile_knowledge_index.py` 处理。
+**怎么读 `/readyz` 的 503**：响应体会指出失败项。常见原因是 MySQL 或 Redis 未起、Redis ping 超时、ES 还在启动（首次 30 秒左右）、或文档表声称 `INDEXED` 但 ES 里查不到（索引对账失败）。最后一类用第 4.1 节的 `reconcile_knowledge_index.py` 处理。
 
 ### 1.9 首次登录
 
@@ -299,9 +308,9 @@ ADMIN_PASSWORD='<至少 8 位>' python reset_admin.py     # Windows PowerShell: 
 
 | 变量 | 默认（模板/代码） | 说明 |
 |------|------------------|------|
-| `DATABASE_URL` | `mysql+aiomysql://...@localhost:3306/docmind_db`（宿主机模板；Docker 基础设施请改 3308） | MySQL |
+| `DATABASE_URL` | `mysql+aiomysql://...@localhost:3308/docmind`（宿主模板，匹配 Docker 发布拓扑） | MySQL |
 | `DATABASE_POOL_SIZE` / `DATABASE_MAX_OVERFLOW` | `20` / `10`（compose：pool 20 / max_overflow 30） | 连接池 |
-| `REDIS_HOST` / `REDIS_PORT` | 模板 `localhost` / `6379`；代码默认端口 `6390`（与 Docker 映射一致） | 缓存、限流、Token 黑名单 |
+| `REDIS_HOST` / `REDIS_PORT` | 模板 `localhost` / `6390`；代码默认端口 `6390`（与 Docker 映射一致） | 缓存、限流、Token 黑名单（readiness 硬依赖） |
 | `REDIS_PASSWORD` | 空 | 可选；启用时服务端与应用侧都要设（compose 注释有坑位说明） |
 | `ELASTICSEARCH_HOSTS` | `["http://localhost:9200"]` | ES 8 |
 | `ELASTICSEARCH_INDEX_NAME` | `docmind_knowledge`（模板值；代码内保留的旧默认值仅为兼容旧数据） | 知识库索引名 |
@@ -898,7 +907,7 @@ alembic revision --autogenerate -m "描述"   # 新增迁移（开发）
 | 现象 | 最可能原因 | 处理 |
 |------|------------|------|
 | **502** `RETRIEVAL_UNAVAILABLE` | 检索服务失败/超时，或 embedding 漂移 fail-closed | 看 `detail.kind`；查 ES 与 embedding；见 7.5 |
-| **503** | `/readyz` 不就绪（DB / ES / 知识库对账失败）；或 Redis 不可用导致 Token 黑名单 fail-closed | 先看 `/readyz` 与 `/health` 的 `services`；再查 Redis |
+| **503** | `/readyz` 不就绪（DB / Redis / ES / 知识库对账失败）；或 Redis 不可用导致 Token 黑名单 fail-closed | 先看 `/readyz` 与 `/health` 的 `services`；再查 Redis |
 | **500** | 未预期异常；细节只进服务端日志 | 记录响应头 `X-Request-ID`，在 JSON 日志中检索同值；`EXPOSE_EXCEPTION_DETAIL=false` 时客户端只看到通用文案 |
 | **409** | Agent 任务状态冲突（`TASK_BUSY` / `TASK_NOT_RESUMABLE` 等） | 按错误码处理，不要并发重试 |
 | **429** | 触发限流（宿主机模板 10000 次/分，compose 300 次/分） | 降频或调整 `RATE_LIMIT_REQUESTS_PER_MINUTE`；`/health`、`/livez`、`/readyz`、`/metrics` 免限流 |

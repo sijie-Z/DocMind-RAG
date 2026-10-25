@@ -1048,10 +1048,11 @@ async def _run_health_checks() -> tuple[dict, dict]:
 
 
 async def _run_readiness_checks() -> tuple[dict, dict]:
-    """`/readyz` 的三项就绪检查：DB SELECT 1 + ES 集群健康 + 知识库对账。"""
+    """`/readyz` 的四项就绪检查：DB + Redis + ES 集群健康 + 知识库对账。"""
     return await _collect_checks(
         {
             "database": _check_database(),
+            "redis": _check_redis(),
             "elasticsearch": _check_elasticsearch(),
             "knowledge_base": _check_knowledge_base(),
         }
@@ -1059,14 +1060,17 @@ async def _run_readiness_checks() -> tuple[dict, dict]:
 
 
 def _is_ready(services: dict) -> bool:
-    """就绪口径（issue #223）：DB 与 ES 必须 healthy，知识库对账不得为 unhealthy。
+    """就绪口径：DB、Redis 与 ES 必须 healthy，知识库对账不得为 unhealthy。
 
-    ES 的 ``disabled``（客户端不存在）与 ``degraded``（连接失败/超时）都视为不可用 ——
-    检索依赖 ES，不能把流量导给一个搜不到东西的实例。
+    Redis 是认证黑名单的硬依赖：disabled/degraded（含 ping 超时）都不能接流量，
+    否则已注销 Token 的黑名单查询会 fail-closed 503。不得改成黑名单失败放行。
+    ES 的 ``disabled`` 与 ``degraded`` 同样视为不可用。
     KB 的 ``degraded``（如 95%–100% 的 chunk 覆盖率）只告警、不摘流：索引抖动时
     整批 Pod 被摘流的代价大于少量 chunk 暂时缺失。
     """
     if services.get("database") != "healthy":
+        return False
+    if services.get("redis") != "healthy":
         return False
     if services.get("elasticsearch") != "healthy":
         return False
@@ -1327,8 +1331,8 @@ def build_app(
     async def readiness_check():
         """K8s readiness / compose healthcheck：依赖不可用 → 503。
 
-        检查 DB `SELECT 1`、ES 集群健康与知识库索引对账（与 `/health` 同一套收集函数）。
-        只有明确的不可用（unhealthy / disabled / degraded 的 ES，见 `_is_ready`）才摘流；
+        检查 DB `SELECT 1`、Redis `PING`、ES 集群健康与知识库索引对账。
+        DB、Redis、ES 的不可用（unhealthy / disabled / degraded）都会摘流；
         知识库的 degraded（≥95% 覆盖率的部分缺失）只告警。
         """
         services, kb_details = await _run_readiness_checks()

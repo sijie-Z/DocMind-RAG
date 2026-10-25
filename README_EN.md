@@ -330,13 +330,26 @@ cp .env.example .env               # Windows: copy .env.example .env
 
 # Any Docker use (including infrastructure-only in step 3) requires this file — compose fails without it:
 cp .env.docker.example .env.docker
-# Edit .env.docker — at minimum fill in LLM API Keys:
-#   DEEPSEEK_API_KEY=sk-xxx
-#   DEEPSEEK_API_URL=https://api.deepseek.com
-# Embedding defaults to local Ollama (nomic-embed-text / 768 dims); no separate
-# embedding key is needed (DEEPSEEK_API_KEY is reused). Fill EMBEDDING_API_KEY /
-# EMBEDDING_API_URL only when using a cloud embedding API.
+# Fill in the required values below; never commit real credentials.
 ```
+
+- **Required for Compose interpolation**: generate and set `MYSQL_ROOT_PASSWORD`,
+  `MYSQL_PASSWORD`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and `GRAFANA_PASSWORD`;
+  none has a default password.
+- **Required for backend startup**: `SECRET_KEY` and `JWT_SECRET_KEY`; chat also needs
+  `DEEPSEEK_API_KEY`. Embedding defaults to local Ollama (nomic-embed-text / 768 dims)
+  and reuses the chat key. Configure `EMBEDDING_API_KEY` / `EMBEDDING_API_URL` for a
+  cloud embedding provider.
+- Compose performs **whole-file interpolation before service selection**: even without
+  selecting Grafana, `GRAFANA_PASSWORD` remains required. This documents existing
+  behavior; it neither adds a default password nor weakens Grafana's validation.
+- `.env.example` targets host apps with Docker infrastructure and defaults to
+  `localhost:3308/docmind` plus Redis `localhost:6390`. Full Docker still overrides
+  these with container-internal `docmind-mysql:3306/docmind` and
+  `docmind-redis:6379`; do not substitute the host-published ports.
+- If MySQL and Redis also run directly on the host without Docker, update `.env`
+  with their actual hosts, ports, and database name (commonly 3306/6379 locally,
+  but always follow your service configuration).
 
 ### 3. Start Infrastructure
 

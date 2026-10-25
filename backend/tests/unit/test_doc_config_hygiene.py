@@ -6,14 +6,14 @@
 1. README 的记忆持久化表述必须与 ``memory_service.py`` 一致：Redis 只持久化
    长期/反思记忆（``_save_to_redis``），短期/工作记忆为进程内；
 2. ``/memory`` 行必须包含第四层反思记忆（代码里 ``self.reflective`` 是四层之一）；
-3. ``create_db.py`` / ``update_org_table.py`` 的默认库名必须等于
-   ``backend/.env.example`` 中 ``DATABASE_URL`` 的库名（不手写数字/名称）；
+3. 宿主模板、compose 发布端口/库名与 legacy 脚本一致，全 Docker 保持容器内拓扑；
 4. ``frontend/index.html`` 的 favicon 必须指向 ``frontend/public/`` 中真实存在的资产；
 5. ``frontend/README.md`` 不得再写过期启动方式/WS 路径/API 前缀；
 6. ``backend/.env.example`` / ``.env.docker.example`` 必须覆盖真实消费的配置键；
-7. ``backend/.dockerignore`` 必须排除 ``.env.*`` 且只保留两个模板文件
+7. 首启文档列全 compose 必填变量，并说明全文件插值与 Grafana 服务选择无关；
+8. ``backend/.dockerignore`` 必须排除 ``.env.*`` 且只保留两个模板文件
    （``Dockerfile`` 的 ``COPY . .`` 会把构建上下文整体烤进镜像）；
-8. ``.gitignore`` 必须覆盖本地工作目录/覆盖率产物。
+9. ``.gitignore`` 必须覆盖本地工作目录/覆盖率产物。
 
 复跑（backend 目录下）::
 
@@ -23,6 +23,8 @@
 import fnmatch
 import re
 from pathlib import Path
+
+import yaml
 
 _UNIT_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _UNIT_DIR.parents[2]
@@ -94,7 +96,32 @@ def test_memory_endpoint_row_includes_reflective_layer():
     _assert_present("README_EN.md", ["Short/long/working/reflective memory CRUD"])
 
 
-# ── 3. 建库脚本默认库名与 .env.example 的真源一致 ────────────────────────────
+# ── 3. 宿主模板 / 全 Docker / legacy 脚本使用各自正确的拓扑 ─────────────────
+
+
+def _compose_services() -> dict:
+    compose = yaml.safe_load(_read("backend/docker-compose.yml"))
+    return compose["services"]
+
+
+def _compose_environment(service: dict) -> dict[str, str]:
+    entries = service.get("environment", [])
+    assert isinstance(entries, list), "本测试按 compose 的 list environment 形式解析"
+    return dict(entry.split("=", 1) for entry in entries)
+
+
+def _published_port(service: dict) -> tuple[str, int, int]:
+    ports = service["ports"]
+    assert len(ports) == 1, "MySQL/Redis 目前各只有一条宿主端口映射"
+    host, published, container = str(ports[0]).rsplit(":", 2)
+    return host, int(published), int(container)
+
+
+def _mysql_database_default(mysql_service: dict) -> str:
+    expression = _compose_environment(mysql_service)["MYSQL_DATABASE"]
+    match = re.fullmatch(r"\$\{MYSQL_DATABASE:-([^}]+)\}", expression)
+    assert match, f"无法从 MYSQL_DATABASE 表达式解析默认库名: {expression}"
+    return match.group(1)
 
 
 def _env_example_db_name() -> str:
@@ -104,16 +131,65 @@ def _env_example_db_name() -> str:
     return match.group(1)
 
 
-def test_db_bootstrap_scripts_default_to_current_database_name():
-    db_name = _env_example_db_name()
-    assert db_name != "paicongming_db", "旧品牌库名仍是 .env.example 的真源？请先核对"
+def test_host_template_matches_compose_published_topology():
+    services = _compose_services()
+    mysql_host, mysql_port, _ = _published_port(services["mysql"])
+    redis_host, redis_port, _ = _published_port(services["redis"])
+    assert mysql_host == redis_host == "127.0.0.1"
+
+    env = _read("backend/.env.example")
+    database_url = re.search(
+        r"^DATABASE_URL=mysql\+aiomysql://\$\{DB_USER\}:\$\{DB_PASSWORD\}"
+        r"@localhost:(\d+)/([A-Za-z0-9_]+)\s*$",
+        env,
+        re.MULTILINE,
+    )
+    assert database_url, "宿主 DATABASE_URL 必须使用模板凭据引用和 localhost 拓扑"
+    assert int(database_url.group(1)) == mysql_port
+    assert database_url.group(2) == _mysql_database_default(services["mysql"])
+    assert _active_value(env, "REDIS_HOST") == "localhost"
+    assert int(_active_value(env, "REDIS_PORT")) == redis_port
+
+
+def test_full_docker_services_keep_container_topology():
+    services = _compose_services()
+    _, _, mysql_container_port = _published_port(services["mysql"])
+    _, _, redis_container_port = _published_port(services["redis"])
+    mysql_database = _mysql_database_default(services["mysql"])
+    assert mysql_container_port == 3306
+    assert redis_container_port == 6379
+
+    for name in ("migrate", "backend", "worker"):
+        database_url = _compose_environment(services[name])["DATABASE_URL"]
+        match = re.search(r"@docmind-mysql:(\d+)/\$\{MYSQL_DATABASE:-([^}]+)\}$", database_url)
+        assert match, f"{name} 的 DATABASE_URL 未使用 Compose 内网数据库拓扑"
+        assert int(match.group(1)) == mysql_container_port
+        assert match.group(2) == mysql_database
+
+    for name in ("backend", "worker"):
+        environment = _compose_environment(services[name])
+        assert environment["REDIS_HOST"] == "docmind-redis"
+        assert int(environment["REDIS_PORT"]) == redis_container_port
+
+
+def _script_env_default(text: str, key: str) -> str:
+    match = re.search(rf'os\.getenv\("{key}",\s*"([^"]+)"\)', text)
+    assert match, f'未找到 os.getenv("{key}", "...") 默认值'
+    return match.group(1)
+
+
+def test_db_bootstrap_scripts_match_compose_host_topology():
+    services = _compose_services()
+    _, mysql_port, _ = _published_port(services["mysql"])
+    db_name = _mysql_database_default(services["mysql"])
+    assert db_name == _env_example_db_name()
+    assert db_name != "paicongming_db", "旧品牌库名仍是模板真源？请先核对"
+
     for rel in ("backend/create_db.py", "backend/update_org_table.py"):
         text = _read(rel)
-        match = re.search(r'os\.getenv\("DB_NAME",\s*"([^"]+)"\)', text)
-        assert match, f'{rel} 中未找到 os.getenv("DB_NAME", "...") 默认值'
-        assert match.group(1) == db_name, (
-            f"{rel} 默认库名 {match.group(1)!r} 与 backend/.env.example 中的库名 {db_name!r} 不一致"
-        )
+        assert _script_env_default(text, "DB_HOST") == "localhost"
+        assert int(_script_env_default(text, "DB_PORT")) == mysql_port
+        assert _script_env_default(text, "DB_NAME") == db_name
         assert "paicongming" not in text.lower(), f"{rel} 仍含旧品牌库名残留"
 
 
@@ -204,7 +280,41 @@ def test_env_templates_cover_required_keys():
     ), "backend/.env.example 与 .env.docker.example 的 ELASTICSEARCH_INDEX_NAME 不一致"
 
 
-# ── 7. .dockerignore 不得把真实密钥放进构建上下文 ───────────────────────────
+# ── 7. 首启文档列全 Compose 必填项并说明全文件插值 ───────────────────────────
+
+
+def _markdown_section(text: str, start: str, end: str) -> str:
+    assert start in text and end in text
+    return text.split(start, 1)[1].split(end, 1)[0]
+
+
+def test_first_run_docs_list_all_compose_required_variables():
+    compose = _read("backend/docker-compose.yml")
+    required = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*):\?", compose))
+    assert required, "未从 compose 解析到任何 :? 必填变量"
+    sections = {
+        "README.md": ("### 2. 配置", "### 3. 启动基础设施"),
+        "README_EN.md": ("### 2. Configure", "### 3. Start Infrastructure"),
+        "docs/USER_GUIDE.md": ("### 1.3 先准备配置文件", "### 1.4 启动基础设施"),
+        "docs/USER_GUIDE_EN.md": (
+            "### 1.3 Prepare configuration files",
+            "### 1.4 Start infrastructure",
+        ),
+    }
+    for rel, (start, end) in sections.items():
+        section = _markdown_section(_read(rel), start, end)
+        normalized = " ".join(section.split())
+        missing = sorted(key for key in required if f"`{key}`" not in section)
+        assert not missing, f"{rel} 首启配置段未列全 compose 必填变量: {missing}"
+        if rel.endswith("_EN.md"):
+            assert "whole-file interpolation before service selection" in normalized
+            assert "without selecting Grafana" in normalized
+        else:
+            assert "全文件插值" in section
+            assert "不选择 Grafana" in section
+
+
+# ── 8. .dockerignore 不得把真实密钥放进构建上下文 ───────────────────────────
 
 
 def _dockerignored(patterns: list[str], path: str) -> bool:
@@ -244,7 +354,7 @@ def test_dockerignore_excludes_env_secrets_but_keeps_templates():
     assert _dockerignored(patterns, ".env.docker.example") is False
 
 
-# ── 8. .gitignore 覆盖本地工作目录 ──────────────────────────────────────────
+# ── 9. .gitignore 覆盖本地工作目录 ──────────────────────────────────────────
 
 _GITIGNORE_REQUIRED = (
     ".coverage",
