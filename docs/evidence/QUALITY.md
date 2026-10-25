@@ -489,6 +489,13 @@ ee30ae4c ancestor=yes
 | 「没有单一环能修好 4 条」 | Phase 2 实验文档与反事实矩阵（`backend/docs/eval-gate-phase2-experiment.md:49-60`） | 已合并 |
 | 9 个 PR 已合并 | `git merge-base --is-ancestor` 全部 yes | 已核验 |
 
+### 9.2 2026-10-25 live 更新
+
+Eval v1.5（80 条 golden = 60 正 + 20 负）在 `origin/develop` @ `2b0574ab` 上以真实嵌入重跑（本机 Ollama `qwen3-embedding:0.6b`，1024 维；hybrid 检索；LLM 辅助关闭）：ClauseHit@1 75.0% / @3 86.7% / @5 88.3%（Wilson 95% CI 77.8–94.2%）、NearMiss@5 21.7%、MRR 0.8125、负例 EmptyAcc 100%、errors 0。
+
+- 口径：**live embedding，不是 live rerank**；ES 8.11.0 单机；与 CI fake 门禁（70.0 / 76.7 / 80.0 / 0.74）及旧 28 条 live（2026-10-09）不可直接混比。
+- 复现命令、完整结果表与局限见 `docs/evidence/EVAL_LIVE_2026-10-25.md`；数字单一事实源见 `docs/METRICS.md` 的 `eval_v1.5_live_embedding` 行。
+
 ---
 
 ## 10. 附录 A：引用清单

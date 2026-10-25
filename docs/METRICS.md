@@ -22,7 +22,7 @@
 
 ## 2. 检索评测（Eval v1.5）
 
-**统一口径**：`mode=fake`（确定性伪嵌入 `hash-bigram-char-v1`，dim=256；只测检索层，不含 rerank / 缓存 / LLM）；日期 2026-10-24；语料 commit `d867a2b3`；语料指纹 `sha256:838fd02f…97d9e`；**来源 PR #525（已合并，squash 552efaad）**。
+**统一口径**：`mode=fake`（确定性伪嵌入 `hash-bigram-char-v1`，dim=256；只测检索层，不含 rerank / 缓存 / LLM）；日期 2026-10-24；语料 commit `d867a2b3`；语料指纹 `sha256:838fd02f…97d9e`；**来源 PR #525（已合并，squash 552efaad）**。**live 行**（`eval_v1.5_live_embedding`，2026-10-25）为真实嵌入口径，见行内标注与 `docs/evidence/EVAL_LIVE_2026-10-25.md`。
 
 | 指标 | 值 | 口径 | 命令 | 日期 | 备注 |
 |---|---|---|---|---|---|
@@ -35,6 +35,7 @@
 | eval_empty_accuracy | 100% | fake；负例空结果准确率，n=20 | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（已合并，squash 552efaad） |
 | eval_errors | 0 | fake；评测执行错误数（cap） | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（已合并，squash 552efaad） |
 | eval_gate_result | 7/7 PASS | fake；容差 0（floor 实测 ≥ 基线、cap 实测 ≤ 基线） | `cd backend && make eval-ci` | 2026-10-24 | 来源 PR #525（已合并，squash 552efaad）；基线在该 PR 内重盖为 v1.5 hybrid |
+| eval_v1.5_live_embedding | ClauseHit@1 75.0% / @3 86.7% / @5 88.3%；NearMiss@5 21.7%；MRR 0.8125；EmptyAcc 100%；errors 0 | live embedding（Ollama qwen3-embedding:0.6b，1024 维）+ hybrid 检索 + LLM assist 关闭 + ES 8.11.0；n=80（60 正 + 20 负）；只测检索层；**非 rerank** | 见 `docs/evidence/EVAL_LIVE_2026-10-25.md`（`python -m evals seed --recreate --embedding live ...` + `run --embedding live --retriever hybrid ...`；索引 `docmind_knowledge_eval_live_v1`，`--org-id 9901`） | 2026-10-25 | Wilson 95% CI 77.8–94.2%（@5）；commit 2b0574ab；与 fake / v1 28 条不可混比；live 嵌入 ≠ rerank |
 
 ### 历史口径（保留以防混写；不得当作当前新数字对外引用）
 
