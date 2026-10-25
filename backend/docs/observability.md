@@ -243,7 +243,7 @@ def setup_opentelemetry(app):
 
 **位置**:`backend/app/agent/tracing.py`
 
-**接线状态（#242 核实）**:进程内 ring;**写入者仅评测 harness 路径**;生产 run 不写——运行时轨迹由 Run Report / `execution_context` SSE / ExecutionContext(Redis 7 天 → benchmark/mining)承担。
+**接线状态（#242 核实）**:进程内 ring;**写入者仅评测 harness 路径**;生产 run 不写——运行时轨迹由 Run Report / `execution_context` SSE / ExecutionContext(Redis 7 天)承担。
 
 ### 5.1 数据模型
 
@@ -367,8 +367,8 @@ python -m app.agent.replay --diff <task_id_a> <task_id_b>
 - 观测写入失败(磁盘满/权限)只 debug 留痕、绝不阻断 run。
 - 错误文本会先剔除本次提示词正文片段再截断到 500 字符(部分 provider 报错
   会回显输入),但仍不保证捕获所有变形——日志内容仍按"可能含敏感片段"管理。
-- 这是替代 Langfuse 调用级记录的第一步;Langfuse / OTel / trace_logger /
-  TraceStore / Mining 在删除审批通过前**全部保留**,见 issue #510 第三步。
+- 这是替代 Langfuse 调用级记录的第一步;Mining 已于 #539 删除(2026-10-25);
+  Langfuse / OTel / trace_logger / TraceStore 仍保留,待逐项批准,见 issue #510 第三步。
 
 ### 6.5 ID 语义(issue #510 第二步)
 
@@ -561,7 +561,7 @@ def get_langfuse():
 
 ### 11.3 TraceStore 进程内
 
-（#242 核实：本行为 dev-only;下一行的 ExecutionContext 才是生产实写链,且已有 benchmark/mining 离线消费。）
+（#242 核实：本行为 dev-only;下一行的 ExecutionContext 才是生产实写链;原 benchmark/mining 离线消费方已于 #539 删除。）
 
 ```python
 self._traces = deque(maxlen=2000)

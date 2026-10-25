@@ -77,7 +77,7 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 ├── AI Agent 核心 ─────────────────────────────┤
 │  PER Loop  (Planner → Executor → Reflector)  │
 │  Tool Registry (31) · RunReport · Reviewer  │
-│  经验记忆 · 执行回放 · 模式挖掘              │
+│  经验记忆 · 执行回放                         │
 ├── RAG 管线 ──────────────────────────────────┤
 │  HybridRetriever (BM25 + 向量 + RRF 融合)    │
 │  Query Processor · Reranker · Context Comp.   │
@@ -141,7 +141,6 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 |--------|------|------|
 | 经验记忆 | `experience/` | 从失败运行中自动提取经验教训，注入 Planner |
 | 执行回放 | `replay/` | 完整执行快照保存与回放，支持 diff 对比 |
-| 模式挖掘 | `mining/` | 扫描回放发现高频工具序列，生成技能建议（离线 CLI，读 benchmark/replay/） |
 
 **Hooks 扩展点**（issue #474，默认关闭）：
 
@@ -452,13 +451,8 @@ DocMind/
 │   │   │   │   ├── store.py         #   经验存储
 │   │   │   │   ├── models.py        #   数据模型
 │   │   │   │   └── run_extract.py   #   经验引导提取（dev-only：benchmark 跑批后手动执行）
-│   │   │   ├── replay/              #   执行回放
-│   │   │   │   └── engine.py        #   回放引擎
-│   │   │   └── mining/              #   模式挖掘
-│   │   │       ├── miner.py         #   挖掘器
-│   │   │       ├── analyzer.py      #   分析器
-│   │   │       ├── patterns.py      #   模式定义
-│   │   │       └── report.py        #   挖掘报告
+│   │   │   └── replay/              #   执行回放
+│   │   │       └── engine.py        #   回放引擎
 │   │   ├── core/                    # 基础设施
 │   │   │   ├── config/              #   配置（Base/DB/AI/Security）
 │   │   │   ├── database.py          #   SQLAlchemy 引擎
