@@ -51,6 +51,9 @@ from app.core.step_runner import StepRunner
 
 logger = logging.getLogger(__name__)
 
+# 失败占位只用于告知跳过，不是有效答案；loop 终态判定必须识别同一固定文本。
+STEP_FAILURE_PLACEHOLDER = "[该步骤因 API 连接问题未能完成，已跳过]"
+
 # 跨请求熔断（issue #242 第 7 条）：LLM 步骤调用路径的进程级熔断器（每 worker 一份）。
 # 阈值 3（与 Executor.MAX_CONSECUTIVE_FAILURES 同量级）；计数口径 = **自上次复位累计**
 # 的失败数（成功的复位只发生在非 CLOSED 态，即半开探测成功时）——provider 连续挂的
@@ -1312,7 +1315,7 @@ class Executor:
             )
             yield AgentEvent(
                 type="chunk",
-                content="[该步骤因 API 连接问题未能完成，已跳过]",
+                content=STEP_FAILURE_PLACEHOLDER,
                 plan_id=plan.id,
                 plan_step_id=step.id,
             )

@@ -21,6 +21,7 @@ import pytest
 
 from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
+from app.agent.executor import Executor
 from app.agent.loop import MAX_REPLANS_PER_RUN, PERAgentLoop
 from app.agent.planner import Plan
 
@@ -51,6 +52,9 @@ class FakeMemory:
     async def record_interaction(self, user_input, assistant_response) -> None:
         self.interactions.append((user_input, assistant_response))
 
+    async def record_experience(self, **kwargs) -> None:
+        pass
+
 
 class RecordingPlanner:
     """每次调用生成一版可区分的新计划，并记录收到的 replan_feedback。"""
@@ -80,11 +84,20 @@ class RecordingPlanner:
         )
 
 
-class RecordingExecutor:
-    """记录被执行的 plan；把配置好的结果写回 FakeMemory 供质检读取。"""
+class RecordingExecutor(Executor):
+    """记录被执行的 plan；反思重试复用真实 Executor 的正常步骤收尾。"""
 
     def __init__(self, memory: FakeMemory, result_text: str = "这是执行产出的完整结果内容。"):
-        self.memory = memory
+        super().__init__(
+            MagicMock(),
+            AgentConfig(
+                enable_memory=False,
+                enable_thinking=False,
+                enable_skills=False,
+                enable_experience=False,
+            ),
+            memory,
+        )
         self.result_text = result_text
         self.executed_plans: list[Plan] = []
         self.retry_calls = 0

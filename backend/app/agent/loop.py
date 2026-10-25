@@ -24,7 +24,7 @@ from app.agent.config import AgentConfig
 from app.agent.context import ContextEngine
 from app.agent.events import AgentEvent
 from app.agent.exec_context import ExecutionContext
-from app.agent.executor import Executor
+from app.agent.executor import STEP_FAILURE_PLACEHOLDER, Executor
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, Planner, PlanStep
 from app.agent.reflector import Reflector
@@ -62,6 +62,12 @@ MAX_REPLANS_PER_RUN = 1
 # 硬上限防止确定性 deny 的 hook 把 run 变成无限循环——hook 是可信配置，但
 # 基础设施必须自带终止保证。超限后记录决策、强制结束（不静默）。
 HOOK_TURN_STOPPING_MAX_DENIALS = 3
+
+
+def _has_substantive_answer(output: str) -> bool:
+    """去掉已知失败占位/重试标记后，是否仍有可作为降级结果的正文。"""
+    residual = output.replace(STEP_FAILURE_PLACEHOLDER, "").replace("[重试结果]", "")
+    return bool(residual.strip())
 
 
 def _smart_truncate(result: str, tool_name: str) -> str:
@@ -178,6 +184,8 @@ class PERAgentLoop:
         # COMPLETED。run() 起始处重置（loop 实例可能被复用）。
         self.run_failed: bool = False
         self.run_failure: str | None = None
+        # 反思轮次与步骤内 attempt 分账；key = (plan id, step id)，每 run 重置。
+        self._reflection_retry_counts: dict[str, int] = {}
 
         # ── HITL（app/agent/approval.py）────────────────────────────────
         # cancel_check 由 service 接线（task 级取消旗查询）；审批暂停回调是
@@ -380,6 +388,7 @@ class PERAgentLoop:
         # 运行级失败标志（issue #301 批 A #11）每 run 重置。
         self.run_failed = False
         self.run_failure = None
+        self._reflection_retry_counts = {}
         # HITL 每 run 重置（cancel_check 由 service 预先接线，不在此清）；
         # resume 分支会用快照 run_state 回填决定账本与人工指导。
         self.approval_decisions = []
@@ -980,6 +989,9 @@ class PERAgentLoop:
                             async for evt in self._retry_step(step_id, plan, history, ctx=ctx):
                                 if evt.type == "chunk":
                                     final_output += "\n\n[重试结果]\n" + evt.content
+                                    if self.checkpoint_live is not None:
+                                        # 步终态回调紧随重试事件触发，快照必须包含新答案。
+                                        self.checkpoint_live["partial_output"] = final_output
                                 yield evt
                     elif event.type == "reflection" and event.reflection_result == "replan":
                         # 一轮 reflect 会发两条 reflection 事件（判定 + 摘要），
@@ -1110,6 +1122,22 @@ class PERAgentLoop:
                 )
 
             break
+
+        # 工具模式全败必须在反思之后判定：成功重试会纠正步骤终态。部分成功或
+        # 非占位降级正文保留 COMPLETED；只有零成功且零有效产出才置 run_failed。
+        if self.config.enable_tools:
+            failed_steps = [s for s in plan.steps if s.status == "failed"]
+            has_successful_step = any(s.status == "completed" for s in plan.steps)
+            if (
+                failed_steps
+                and not has_successful_step
+                and not _has_substantive_answer(final_output)
+            ):
+                self.run_failed = True
+                failure_details = "; ".join(
+                    f"[{s.id}] {s.error_context or '步骤执行失败'}" for s in failed_steps
+                )
+                self.run_failure = f"工具模式执行全败，未产出有效答案: {failure_details}"[:2000]
 
         # ── Phase 3b: Adversarial Review ────────────────────────────────
         # HITL：协作式取消（反思/审查之前再观察一次——审查会发起新的 LLM 调用，
@@ -1650,33 +1678,41 @@ class PERAgentLoop:
     ) -> AsyncGenerator[AgentEvent, None]:
         """Re-execute a single step the reflector asked for, with a retry ceiling.
 
-        ctx 透传（复核补缝）：反思重试同样受 token 预算门约束（此前不带 ctx 会
-        绕过预算熔断）。注意：重试**不**重复计入迭代数（iterations_used 仅在
-        executor.execute 派发时累计）——属既定语义，透传前后皆然（#245 第 7 条
-        措辞澄清：原"绕过预算熔断与迭代计数"半句会误读成透传后重试开始计数）。
+        反思轮次与步骤内 attempt 分账，避免内层重试耗尽后堵住独立反思额度。
+        重试复用正常 `_execute_single_step` 收尾：状态/计数、结果、工作记忆、
+        经验与 on_step_done/checkpoint 走同一路径。ctx 透传保留 token 预算门，
+        且反思重试不重复计入 iterations_used。
         """
+        retry_key = f"{plan.id}:{step_id}"
         for step in plan.steps:
             if step.id != step_id:
                 continue
-            if step.retry_count >= self.config.max_retries_per_step:
+            reflection_attempt = self._reflection_retry_counts.get(retry_key, 0) + 1
+            if reflection_attempt > self.config.max_retries_per_step:
                 logger.warning(
-                    "Reflection retry for step %s skipped: retry_count %d already at limit %d",
+                    "Reflection retry for step %s skipped: attempt %d exceeds limit %d",
                     step_id,
-                    step.retry_count,
+                    reflection_attempt,
                     self.config.max_retries_per_step,
                 )
                 return
+            if step.status == "failed":
+                plan.failed_steps = max(0, plan.failed_steps - 1)
+            elif step.status == "completed":
+                plan.completed_steps = max(0, plan.completed_steps - 1)
             step.status = "pending"
-            step.retry_count += 1
+            step.result = None
+            step.error_context = None
+            self._reflection_retry_counts[retry_key] = reflection_attempt
             yield AgentEvent(
                 type="thinking",
                 content=f"重新执行步骤: {step.description}",
                 thinking_type="correction",
                 plan_id=plan.id,
                 plan_step_id=step.id,
-                retry_attempt=step.retry_count,
+                retry_attempt=reflection_attempt,
             )
-            async for retry_event in self.executor._execute_step_with_retry(
+            async for retry_event in self.executor._execute_single_step(
                 step=step,
                 plan=plan,
                 history=history,
@@ -1684,6 +1720,7 @@ class PERAgentLoop:
                 user_id=self.user_id,
                 enable_thinking=self.config.enable_thinking,
                 ctx=ctx,
+                on_step_done=self._make_step_checkpoint_callback(),
             ):
                 yield retry_event
             return
