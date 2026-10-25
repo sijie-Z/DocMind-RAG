@@ -496,6 +496,10 @@ Eval v1.5（80 条 golden = 60 正 + 20 负）在 `origin/develop` @ `2b0574ab` 
 - 口径：**live embedding，不是 live rerank**；ES 8.11.0 单机；与 CI fake 门禁（70.0 / 76.7 / 80.0 / 0.74）及旧 28 条 live（2026-10-09）不可直接混比。
 - 复现命令、完整结果表与局限见 `docs/evidence/EVAL_LIVE_2026-10-25.md`；数字单一事实源见 `docs/METRICS.md` 的 `eval_v1.5_live_embedding` 行。
 
+### 9.3 2026-10-25 真栈验证
+
+同日的真栈端到端验证（WSL2 dockerd 容器栈 + 后端/worker 进程 + 本机 Ollama 嵌入）覆盖迁移、健康、认证、文档问答闭环与 Webhook e2e，并记录一次失败恢复；完整命令与结果见 [`REAL_STACK_VERIFICATION_2026-10-25.md`](./REAL_STACK_VERIFICATION_2026-10-25.md)。
+
 ---
 
 ## 10. 附录 A：引用清单
