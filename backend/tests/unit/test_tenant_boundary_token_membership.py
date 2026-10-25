@@ -9,7 +9,7 @@
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -130,6 +130,34 @@ async def test_primary_org_is_authoritative_without_membership_row():
         assert get_user_org_id(user) == 2
     finally:
         await engine.dispose()
+
+
+def test_magicmock_credential_attributes_never_become_an_org():
+    user = MagicMock()
+    user.organization_id = 3
+    assert get_user_org_id(user) == 3
+
+    user.organization_id = None
+    assert get_user_org_id(user) is None
+
+
+@pytest.mark.parametrize(
+    ("api_key_id", "key_org_id", "expected"),
+    [
+        ("k-1", 1, 1),
+        (1, 1, 1),
+        ("", 1, 2),
+        ("k-1", True, 2),
+        (None, 1, 2),
+    ],
+)
+def test_org_binding_requires_exact_credential_marker_types(api_key_id, key_org_id, expected):
+    user = SimpleNamespace(
+        organization_id=2,
+        api_key_id=api_key_id,
+        token_organization_id=key_org_id,
+    )
+    assert get_user_org_id(user) == expected
 
 
 @pytest.mark.asyncio
