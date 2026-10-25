@@ -1,7 +1,7 @@
 # DocMind 求职材料 · 简历（当前态，可复现）
 
-> 基线：`origin/develop` @ `653715d2`（2026-10-24）；工作树 `_scratch/wt-career`（分支 `docs/career-materials`）
-> 原则：本文件只写"默认分支上存在 / 本地可复跑"的事实；每条数字给出来源命令或报告路径；目标态单独成节并标注"进行中（issue #N）"；不写无证据形容词。
+> 基线：`origin/develop` @ `2b0574ab`（2026-10-25）；工作树 `_scratch/wt-live-evidence`（分支 `docs/live-eval-evidence`）
+> 原则：本文件只写"默认分支上存在 / 本地可复跑"的事实；每条数字给出来源命令或报告路径；目标态单独成节并按实际状态标注（已合入标 PR / commit，未完成标进行中 / 待批准）；不写无证据形容词。
 > 适用：2027 届 AI Agent / 后端 / AI 工程 校招与实习。
 
 ---
@@ -10,7 +10,7 @@
 
 | 模块 | 当前可投 | 说明 |
 |---|---|---|
-| RAG 评估门禁 | 是 | 28 条 golden、7 指标零容差、Wilson CI、live 数字有原始报告 |
+| RAG 评估门禁 | 是 | 80 条 golden（v1.5，60 正 + 20 负）、7 指标零容差、Wilson CI、live 数字有原始报告 |
 | 索引正确性 | 是 | 3 条不变量 + 8 个真实 ES 集成测试 |
 | Agent checkpoint | 是 | 49 个单测，2026-10-24 本地复跑 `49 passed` |
 | 规划实验 | 是（口径受限） | 只能按 L1 20 题 keyword coverage / ALL 30 / 5 题对照分开写 |
@@ -27,7 +27,7 @@
 
 **项目定位（一句话）**：一个带条款级检索评估门禁、可恢复 Agent 运行时与多租户治理的 RAG / Agent 系统；本简历只写能在默认分支复现的部分。
 
-- **条款级 RAG 评估门禁**：建立 28 条 clause-level golden（25 正例 + 3 负例，24 条声明 near-miss）与 7 项指标（ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors），采用零容差 floor/cap 比对与 Wilson 95% 置信区间；CI 的 Eval Gate 在每个 PR 与 main/develop push 上从零重建评估索引、用确定性伪嵌入跑分并与入库基线比对，接入分支保护必需检查 `CI Pass`。真实 ES + Qwen3-Embedding 0.6B 冒烟（2026-10-09）：ClauseHit@1 80%、@3=@5 84%、MRR 0.82、NearMiss@5 12.5%、负例 EmptyAcc 100%、0 错误（正例 n=25，95% CI 65.3–93.6%）。【S1–S4】
+- **条款级 RAG 评估门禁**：建立 clause-level golden 与 7 项指标（ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors），零容差 floor/cap 比对与 Wilson 95% 置信区间；CI 的 Eval Gate 在每个 PR 与 main/develop push 上先删后建评估索引、用确定性伪嵌入（`mode=fake`，只测检索层，不含 rerank / 缓存 / LLM）跑分并比对入库基线，接入分支保护必需检查 `CI Pass`。v1.5 扩展集 80 条（60 正 + 20 负）的 fake 门禁数字为 70.0 / 76.7 / 80.0 / 0.74——这是防回归的工程保守下界，不当作检索质量对外。同一题集的 live 嵌入结果（2026-10-25；本机 Ollama `qwen3-embedding:0.6b` 1024 维 + hybrid 检索，LLM 辅助关闭，**非 rerank**）：ClauseHit@1 75.0%、@3 86.7%、@5 88.3%（Wilson 95% CI 77.8–94.2%）、NearMiss@5 21.7%、MRR 0.8125、负例 EmptyAcc 100%、0 错误。历史口径：v1 的 28 条 live 冒烟（2026-10-09，Qwen3-Embedding 0.6B，25 正 + 3 负，24 条声明 near-miss）：ClauseHit@1 80%、@3=@5 84%、MRR 0.82、NearMiss@5 12.5%、负例 EmptyAcc 100%、0 错误（正例 n=25，95% CI 65.3–93.6%）；v1 与 v1.5 题集不同，不可直接比较。【S1b】【S2b】【S1】【S2】【S3】【S4】
 - **索引正确性不变量**：把"文档状态 = INDEXED ⟹ 可检索"落成 3 条可执行不变量（至少 1 条 chunk 落库；至少 1 条带 embedding；organization_id 与文档一致），用 8 个真实 Elasticsearch 集成测试覆盖"一条未落库 / 他人文档 chunk 挡枪 / 无 embedding / org 不匹配 / 全量落库 / 超出预期 / 部分落库告警 / 部分缺向量告警"；3 个变异验证证明删掉任一断言对应用例必红。测试在 CI `integration` job 运行（develop push 与指向 develop 的 PR；该 job 不在 `CI Pass` 必需检查聚合里）。【S6】
 - **Agent checkpoint 与 HITL 恢复**：实现 checkpoint 持久化、任务状态机、租约与审批恢复链路（sqlite 全链；Redis 租约以 fake client 覆盖冲突 / 释放 / 续租 / 缺失降级）。49 个单测覆盖往返、partial 截断、归属校验、损坏快照降级、合法 / 非法状态迁移、审批暂停 / 记账 / 取消旗收敛；2026-10-24 在基线 653715d2 复跑 `49 passed`。【S7】
 - **Agent 规划实验（口径受限）**：设计并执行 30 题规划实验（20 L1 + 10 L2，keyword coverage 评分）：结构化模板把 L1 20 题覆盖率从 ~69% 提升到 93.1%，L1 失败 5–6 → 0；全量 30 题 78.7%，L2 50%。另做 5 题人工多步 Plan 对照（同模型）：76% → 92%（+16pp），步数 2.0 → 4.6，耗时 58.3s → 58.9s。明确口径：93.1% 是 L1 20 题的 keyword coverage，不是端到端任务成功率；+16pp 来自另一组 5 题对照，不与 30 题结果混写。【S8】
@@ -46,16 +46,18 @@
 
 ---
 
-## 2. 目标态（进行中，不得与当前态混写）
+## 2. 目标态跟踪（2026-10-25：已合入项标注 PR / commit；未完成项不得与当前态混写）
 
 | 目标 | 状态 | issue | 写入简历的条件 |
 |---|---|---|---|
-| 泄露密钥轮换 + gitleaks + SECURITY.md | 进行中（issue #507） | [#507](https://github.com/sijie-Z/DocMind-RAG/issues/507) | 轮换完成、gitleaks 接入、有轮换记录后才可写"已轮换" |
-| Eval v1.5：语料扩容 + 80 条 + dense/hybrid 双基线 + rerank live | 进行中（issue #512） | [#512](https://github.com/sijie-Z/DocMind-RAG/issues/512) | 80 条与双基线报告入库后才可写新数字 |
-| 工具注入门控 + utility 伞形 + 别名入口归一 | 进行中（issue #509） | [#509](https://github.com/sijie-Z/DocMind-RAG/issues/509) | 默认 schema ≤3,500 tok、别名审批一致测试通过后才可写 |
-| ACL 最小实现（部门 / 组 / doc_acl / retrieval_audit） | 进行中（issue #511） | [#511](https://github.com/sijie-Z/DocMind-RAG/issues/511) | Permission Leak 0/200 等验收通过后才可写 |
-| 可观测收敛 + JSONL 调用级记录 | 进行中（issue #510） | [#510](https://github.com/sijie-Z/DocMind-RAG/issues/510) | JSONL 记录 + 删除 / 降级完成后才可写 |
-| Chat 深析 SSE / HITL | 进行中（issue #508） | [#508](https://github.com/sijie-Z/DocMind-RAG/issues/508) | 服务端投影 + 前端审批 UI 完成并验收后才可写 |
+| 泄露密钥轮换 + gitleaks + SECURITY.md | 已合入止血（PR #524）：gitleaks 全历史扫描 0 命中 + Secret Scan CI + SECURITY.md；**真实密钥轮换仍未执行**（需部署环境，本人执行） | [#507](https://github.com/sijie-Z/DocMind-RAG/issues/507) | 轮换完成并有记录后才可写"已轮换"（issue 已关闭，轮换仍是待办） |
+| Eval v1.5：语料扩容 + 80 条 + dense/hybrid 双基线 + rerank live | 已合入（PR #525，squash `552efaad`）：80 条与 dense/hybrid 双基线入库；**rerank live 仍未测量**（占位 `unavailable`）；live embedding 证据见 2026-10-25 报告 | [#512](https://github.com/sijie-Z/DocMind-RAG/issues/512) | 80 条与双基线已入库；live 数字按 `docs/evidence/EVAL_LIVE_2026-10-25.md` 引用，不得写 rerank |
+| 工具注入门控 + utility 伞形 + 别名入口归一 | 已合入（PR #534，`2b0574ab`）：默认 10 工具 / 实测 1,464 tokens（≤1,500）；前端面板展示等后续项未完成 | [#509](https://github.com/sijie-Z/DocMind-RAG/issues/509) | 默认 schema 已实测 ≤1,500 tokens；工具数写法受 `docs/METRICS.md` 口径约束 |
+| ACL 最小实现（部门 / 组 / doc_acl / retrieval_audit） | 未开始（issue #511 按指令封存） | [#511](https://github.com/sijie-Z/DocMind-RAG/issues/511) | Permission Leak 0/200 等验收通过后才可写 |
+| 可观测收敛 + JSONL 调用级记录 | **仅 step1-2 已合入**（PR #533，`5c4aafdf`）：JSONL 调用级记录 + `task_id`/`request_id` 贯通；issue #510 保持 open，删除 / 降级**待逐项批准** | [#510](https://github.com/sijie-Z/DocMind-RAG/issues/510) | 删除 / 降级批准并完成后才可写"收敛完成" |
+| Chat 深析 SSE / HITL | 已合入（PR #532，`8df21f32`）：深析入口强制跳转 `/agent`，后端拒绝 legacy useAgent；`/agent` 消费 `?prompt=` 与审批 UI 为后续项 | [#508](https://github.com/sijie-Z/DocMind-RAG/issues/508) | 服务端投影 + 前端审批 UI 完成并验收后才可写 HITL 完成 |
+| 指标单一事实源 + facts 门禁（`docs/METRICS.md`） | 已合入（PR #528，`d4ab8411`；PR #531 增补 Eval v1.5 标注） | [#513](https://github.com/sijie-Z/DocMind-RAG/issues/513) | 已满足；对外数字以 `docs/METRICS.md` 为准 |
+| Eval 旧快照归档 / 历史口径标注 | 已合入（PR #526，`4618475b`） | [#514](https://github.com/sijie-Z/DocMind-RAG/issues/514) | 已满足 |
 | 登录性能复测（#502 之后） | 未排期（无独立 issue） | — | 同 harness 复测后写新 p50/p95；不写 0.4s |
 | fork / ACP 并发与延迟复测 | 未排期（#518 / #520 已合入，无独立复测 issue） | — | 复测后写"50 并发同键 → 1"/"cancel 延迟"；当前不写 |
 | 120 条 / 4 组基线 / bootstrap / 87% / 0.89 | 未开始 | — | 不写入简历；M2 条件触发后再评估 |
@@ -66,8 +68,10 @@
 
 | 编号 | 事实 / 数字 | 值 | 来源（命令 / 路径） | 状态 | 备注 |
 |---|---|---|---|---|---|
-| S1 | clause-level golden 条数 | 28（25 正 + 3 负；24 条声明 near-miss） | `cd backend && python -I -c "import json;d=json.load(open('evals/golden_set/clause_set_v1.json',encoding='utf-8'));print(len(d['items']),sum(i['expect']=='hit' for i in d['items']),sum(i['expect']=='empty' for i in d['items']))"` → `28 25 3` | 当前态 | 数据文件 `backend/evals/golden_set/clause_set_v1.json` |
-| S2 | live 检索指标（2026-10-09） | ClauseHit@1 80%、@3 84%、@5 84%、MRR 0.82、NearMiss@5 12.5%、EmptyAcc 100%、errors 0；ClauseHit@5 95% CI 65.3–93.6%（n=25） | `backend/docs/eval-gate-phase1.md` §5；原始报告 `_orchestrate/round2/_eval208_report_baseline.json`（aggregates 与逐条结果）、`_eval208_report_baseline.md`、`_eval208_run_baseline.txt` | 当前态 | 环境：dev ES + 本地 Qwen3-Embedding 0.6B，LLM 辅助关闭；与 CI fake 嵌入数字不可混比 |
+| S1 | clause-level golden 条数（v1） | 28（25 正 + 3 负；24 条声明 near-miss） | `cd backend && python -I -c "import json;d=json.load(open('evals/golden_set/clause_set_v1.json',encoding='utf-8'));print(len(d['items']),sum(i['expect']=='hit' for i in d['items']),sum(i['expect']=='empty' for i in d['items']))"` → `28 25 3` | 历史口径（Eval v1） | 数据文件 `backend/evals/golden_set/clause_set_v1.json` |
+| S1b | v1.5 clause-level golden 条数 | 80（60 正 + 20 负；60 条声明 near-miss） | `backend/evals/golden_set/clause_set_v1_5.json`（dataset_id `docmind_clause_v1_5`，version 1）；`cd backend && python -m evals check` | 当前态 | 来源 PR #525（squash `552efaad`）；语料 8 文件 / 362 chunks / 354 条 clause 定义 |
+| S2 | live 检索指标（2026-10-09，Eval v1） | ClauseHit@1 80%、@3 84%、@5 84%、MRR 0.82、NearMiss@5 12.5%、EmptyAcc 100%、errors 0；ClauseHit@5 95% CI 65.3–93.6%（n=25） | `backend/docs/eval-gate-phase1.md` §5；原始报告 `_orchestrate/round2/_eval208_report_baseline.json`（aggregates 与逐条结果）、`_eval208_report_baseline.md`、`_eval208_run_baseline.txt` | 历史口径（v1；与 v1.5 不可混比） | 环境：dev ES + 本地 Qwen3-Embedding 0.6B，LLM 辅助关闭；与 CI fake 嵌入数字不可混比 |
+| S2b | live 检索指标（2026-10-25，Eval v1.5） | ClauseHit@1 75.0%、@3 86.7%、@5 88.3%（95% CI 77.8–94.2%）、NearMiss@5 21.7%、MRR 0.8125、EmptyAcc 100%、errors 0（n=80，60 正 + 20 负） | `docs/evidence/EVAL_LIVE_2026-10-25.md`；原始报告 `_scratch/orchestration/evidence/eval_v1.5_live_ollama_latest.json`（meta：commit `2b0574ab`、ES 8.11.0、`embedding_mode=live`、LLM off） | 当前态 | 环境：本机 Ollama `qwen3-embedding:0.6b`（1024 维）+ hybrid；**live embedding，非 rerank**；与 fake / v1 28 条不可混比 |
 | S3 | 7 指标零容差 + Eval Gate | `clause_hit@1/@3/@5`、`mrr`、`empty_accuracy` 为 floor；`near_miss@5`、`errors` 为 cap；tolerance=0 | `backend/evals/baselines/ci_baseline.json`；`backend/evals/runner.py:75-81,701-731`；`.github/workflows/ci-fast.yml` 的 `eval-gate` job 与 `ci-pass.needs` | 当前态 | Eval Gate 在每 PR + main/develop push 跑，接入 `CI Pass`（分支保护必需检查） |
 | S4 | Wilson 95% CI | `wilson_ci(successes,total,z=1.96)` | `backend/evals/metrics.py:104` | 当前态 | 小样本一律带 Wilson 区间 |
 | S5 | 50 并发登录延迟 | p50 12,421 ms、p95 13,432 ms；50×200；同刻 `/health` p95 4,692 ms | `_scratch/audit/stress_round2.py:72`（`burst("login_50", 50, ...)`）；`_scratch/audit/FINDINGS.md:210`（2026-10-23，8010 单进程） | 当前态（修复前测量） | 根因：bcrypt 同步阻塞；#502 已合入；修复后未复测 |
@@ -75,7 +79,7 @@
 | S7 | checkpoint 单测 | 49 个 | `backend/tests/unit/test_checkpoint_roundtrip.py`(8) + `test_checkpoint_store.py`(13) + `test_checkpoint_wiring.py`(9) + `test_hitl_checkpoint_flow.py`(19)；2026-10-24 复跑 `49 passed in 40.01s` | 当前态 | 运行命令见 §4；需把 TMP/TEMP 指到项目内 `_scratch` |
 | S8 | 30 题规划实验 | L1 20 题 keyword coverage ~69% → 93.1%；ALL 30 78.7%；L2 50%；5 题人工 Plan 对照 76% → 92%（+16pp） | `docs/research/004_structured_planning.md` §验证实验、§3、§4.1；`docs/blog/dag-vs-planning.md` 结果表 | 当前态 | 004 用 glm-4-flash；69% 基线来自 001（模型不同，存在 confound）；+16pp 是同模型 5 题对照 |
 | S9 | 9 个修复 PR 已合入 develop | #504/#503/#502/#506/#520/#517/#505/#515/#518；合并日期均 2026-10-24 | `git log origin/develop --format="%h %ad %s" --date=short -9` | 当前态 | squash 提交哈希：f67ef9f8/a80ae306/ee30ae4c/175006de/0ff446e9/00dbeaa7/1d4d4060/963aeaa1/653715d2 |
-| S10 | issue 状态 | #492–#500 全部 closed；#507–#514 全部 open | `_scratch/reliability-api/open-issues.json`；`GET /repos/sijie-Z/DocMind-RAG/issues?state=all&per_page=100`（保存于 `_scratch/career-gh/issues_all.json`） | 当前态（2026-10-24 查询） | #507/#512 是目标态跟踪 issue |
+| S10 | issue 状态 | #492–#500 closed；#507/#508/#509/#512/#513/#514 closed（均已合入 develop）；#510 open（仅 step1-2 合入，删除待批准）；#511 open（封存）；#309 closed（2026-10-25 延期关闭，记录重新评估触发条件） | 夜班报告 `_scratch/orchestration/NIGHT_REPORT.md`（2026-10-25）；历史查询 `_scratch/career-gh/issues_all.json`（2026-10-24） | 当前态（2026-10-25） | #507 真实轮换仍未执行；#510 删除清单待本人批准 |
 | S11 | 开源 merged PR | 14 个 merged，覆盖 11 个项目 | `curl -H "User-Agent: DocMind-career-research/1.0" "https://api.github.com/search/issues?q=is%3Apr+author%3Asijie-Z+is%3Amerged+-user%3Asijie-Z&per_page=100"` → `total_count=14`（保存于 `_scratch/career-gh/opensource_merged.json`） | 当前态 | 统计口径排除了本人仓库 |
 | S12 | 2 个有实质 review 的 OSS PR | pnpm #12284（12 reviews，zkochan 多轮 + approve）；storybook #35055（7 reviews，2× CHANGES_REQUESTED → APPROVED） | `GET /repos/pnpm/pnpm/pulls/12284/reviews`、`GET /repos/storybookjs/storybook/pulls/35055/reviews`（保存于 `_scratch/career-gh/reviews_*.json`） | 当前态 | 不写 redis #15323、click #3556、element-plus |
 | S13 | MiqroForge 241 PR / 188 merged | 241 / 188（2026.06–09） | `_scratch/audit/REDTEAM_FINDINGS.md` §2；本次核查 `GET /repos/sijie-Z/MiqroForge-Desktop` → 404，`search/repositories?q=MiqroForge+user:sijie-Z` → 0 条 | 待确认（未核实） | 性质与公开范围待本人确认；未确认前不投 |
@@ -178,4 +182,4 @@ curl -sS -H "User-Agent: DocMind-career-research/1.0" \
 - [ ] MiqroForge 行已由本人确认性质与公开范围；未确认则删除
 - [ ] `docs/career/README.md` 旧稿未被提交 / 引用
 - [ ] 每个数字能指回 §3 的来源
-- [ ] 目标态行均带 "进行中（issue #N）"
+- [ ] §2 状态与 issue / PR 实际状态一致（已合入行须有 PR / commit 证据；未完成行标"待批准 / 封存 / 未排期"）
