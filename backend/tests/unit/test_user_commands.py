@@ -67,6 +67,7 @@ class FakeRedis:
     def __init__(self):
         self.store: dict[str, str] = {}
         self.set_calls: list[dict] = []
+        self.get_calls: list[str] = []
 
     def __bool__(self):
         return True
@@ -79,6 +80,7 @@ class FakeRedis:
         return True
 
     async def get(self, key):
+        self.get_calls.append(key)
         return self.store.get(key)
 
     async def delete(self, key):
@@ -87,9 +89,15 @@ class FakeRedis:
 
     async def eval(self, script, numkeys, *args):
         assert 'redis.call("get", KEYS[1]) == ARGV[1]' in script, (
-            "锁释放脚本必须是 compare-and-del（无条件 DEL 会让并发误删新持有者的锁）"
+            "Lua 必须先比较 owner；无条件写入/删除会覆盖或误删新持有者的值"
         )
         key, token = args[0], args[1]
+        if 'redis.call("set", KEYS[1], ARGV[2]' in script:
+            value, ttl = args[2], int(args[3])
+            if self.store.get(key) == token:
+                await self.set(key, value, ex=ttl)
+                return 1
+            return 0
         if self.store.get(key) == token:
             self.store.pop(key, None)
             return 1
@@ -123,13 +131,21 @@ def _echo_command(name="echo", aliases=(), permission="user", required=True, tim
 def _ctx(registry=None, session_id="s1", is_admin=False, **kwargs):
     ctx = CommandContext(
         user_id=7,
-        organization_id=3,
+        organization_id=kwargs.pop("organization_id", 3),
         session_id=session_id,
         is_admin=is_admin,
         **kwargs,
     )
     ctx.registry = registry
     return ctx
+
+
+def _allow_replay(calls=None):
+    async def _authorize(organization_id, session_id, resource_org_id):
+        if calls is not None:
+            calls.append((organization_id, session_id, resource_org_id))
+
+    return _authorize
 
 
 # ── 注册 / 查找 / 遮蔽 ────────────────────────────────────────────────────────
@@ -500,9 +516,19 @@ async def test_idempotency_cleanup_keeps_new_claimant_after_pending_takeover(fak
     idem_key = "cmd:idem:7:race-key"
 
     async def _takeover_then_fail(ctx, args):
-        # 模拟 pending 已过期、新请求已用同一 key 写入自己的占位。
+        # 模拟 pending 已过期、新请求已用同一 key 写入自己的 v2 占位。
         fake_redis.store[idem_key] = json.dumps(
-            {"state": "pending", "execution_id": "new-claimant"}
+            {
+                "version": 2,
+                "state": "pending",
+                "fingerprint": "f" * 64,
+                "organization_id": 3,
+                "session_id": None,
+                "resource_org_id": None,
+                "command": "race",
+                "scope": "global",
+                "owner": "new-claimant",
+            }
         )
         raise CommandFailure("command_failed", "boom")
 
@@ -512,13 +538,14 @@ async def test_idempotency_cleanup_keeps_new_claimant_after_pending_takeover(fak
         _ctx(session_id=None), "/race", registry=registry, idempotency_key="race-key"
     )
     assert result.success is False and result.error_code == "command_failed"
-    assert json.loads(fake_redis.store[idem_key])["execution_id"] == "new-claimant"
+    assert json.loads(fake_redis.store[idem_key])["owner"] == "new-claimant"
 
 
 @pytest.mark.asyncio
-async def test_idempotent_replay_rechecks_admin_permission():
-    """评审 minor：幂等重放不得让已失去管理员身份的用户拿到缓存结果。"""
+async def test_idempotent_replay_rechecks_admin_permission(monkeypatch):
+    """降权重放须先重新加载原 session，再按当前角色拒绝且不反序列化正文。"""
     calls: list[int] = []
+    authorizations = []
 
     async def _secret(ctx, args):
         calls.append(1)
@@ -529,15 +556,51 @@ async def test_idempotent_replay_rechecks_admin_permission():
         Command(name="secret", description="管理命令", permission="admin", handler=_secret)
     )
     first = await execute(
-        _ctx(is_admin=True), "/secret", registry=registry, idempotency_key="admin-key"
+        _ctx(is_admin=True),
+        "/secret",
+        registry=registry,
+        idempotency_key="admin-key",
     )
     assert first.success is True and first.content == "secret"
 
+    deserialize = MagicMock(side_effect=AssertionError("权限检查前不得反序列化缓存正文"))
+    monkeypatch.setattr(execution_mod.CommandExecution, "from_dict", deserialize)
     replay = await execute(
-        _ctx(is_admin=False), "/secret", registry=registry, idempotency_key="admin-key"
+        _ctx(is_admin=False),
+        "/secret",
+        registry=registry,
+        idempotency_key="admin-key",
+        replay_authorizer=_allow_replay(authorizations),
     )
     assert replay.success is False and replay.error_code == "permission_denied"
     assert calls == [1], "缓存命中也不得重跑 handler"
+    assert authorizations == [(3, "s1", None)]
+    deserialize.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_denial_with_idempotency_key_is_not_cached(fake_redis):
+    calls = []
+
+    async def _secret(ctx, args):
+        calls.append(1)
+        return CommandResult(content="secret")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="secret", description="", permission="admin", handler=_secret))
+    denied = await execute(
+        _ctx(session_id=None), "/secret", registry=registry, idempotency_key="admin-retry"
+    )
+    assert denied.success is False and denied.error_code == "permission_denied"
+    assert "cmd:idem:7:admin-retry" not in fake_redis.store
+    allowed = await execute(
+        _ctx(session_id=None, is_superuser=True),
+        "/secret",
+        registry=registry,
+        idempotency_key="admin-retry",
+    )
+    assert allowed.success is True and allowed.content == "secret"
+    assert calls == [1]
 
 
 @pytest.mark.asyncio
@@ -554,6 +617,458 @@ async def test_idempotency_pending_uses_short_ttl_and_result_uses_24h(fake_redis
         "pending 不得沿用 24h TTL（worker 崩溃会锁死同一幂等键）"
     )
     assert calls[1]["nx"] is False and calls[1]["ex"] == settings.COMMANDS_IDEMPOTENCY_TTL_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_idempotency_v2_normalizes_alias_defaults_and_reauthorizes(fake_redis, monkeypatch):
+    """别名、前导斜杠和默认参数同指纹；重放先复核原 session 再取正文。"""
+    idem_key = "cmd:idem:7:normalized"
+    pending = []
+    handler_calls = []
+    order = []
+
+    async def _handler(ctx, args):
+        pending.append(json.loads(fake_redis.store[idem_key]))
+        handler_calls.append(args)
+        return CommandResult(content=f"export:{args['format']}")
+
+    registry = CommandRegistry()
+    registry.register(
+        Command(
+            name="echo",
+            aliases=("e",),
+            description="",
+            args=(
+                CommandArg(
+                    name="format",
+                    description="",
+                    choices=("markdown", "json"),
+                    default="markdown",
+                ),
+            ),
+            handler=_handler,
+        )
+    )
+    first = await execute(
+        _ctx(),
+        "/e",
+        registry=registry,
+        idempotency_key="normalized",
+        session_resource_org_id=3,
+    )
+    assert first.success is True
+    completed = json.loads(fake_redis.store[idem_key])
+    expected = {
+        "version": 2,
+        "fingerprint": pending[0]["fingerprint"],
+        "organization_id": 3,
+        "session_id": "s1",
+        "resource_org_id": 3,
+        "command": "echo",
+        "scope": "global",
+        "owner": pending[0]["owner"],
+    }
+    assert pending[0]["state"] == "pending"
+    assert all(pending[0][key] == value for key, value in expected.items())
+    assert completed["state"] == "completed"
+    assert all(completed[key] == value for key, value in expected.items())
+    assert completed["execution"]["execution_id"] == first.execution_id
+    assert completed["execution"]["args"] == {"format": "markdown"}
+
+    original_from_dict = execution_mod.CommandExecution.from_dict
+
+    async def _authorize(organization_id, session_id, resource_org_id):
+        order.append("authorize")
+        assert (organization_id, session_id, resource_org_id) == (3, "s1", 3)
+
+    def _deserialize(payload):
+        order.append("deserialize")
+        return original_from_dict(payload)
+
+    monkeypatch.setattr(execution_mod.CommandExecution, "from_dict", _deserialize)
+    replay = await execute(
+        _ctx(),
+        "echo markdown",
+        registry=registry,
+        idempotency_key="normalized",
+        session_resource_org_id=3,
+        replay_authorizer=_authorize,
+    )
+    assert replay.success is True and replay.execution_id == first.execution_id
+    assert replay.content == "export:markdown"
+    assert handler_calls == [{"format": "markdown"}]
+    assert order == ["authorize", "deserialize"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "organization_id", "session_id"),
+    [
+        ("/echo one", 4, "s1"),
+        ("/echo one", 3, "s2"),
+        ("/echo one", 3, None),
+        ("/other one", 3, "s1"),
+        ("/echo two", 3, "s1"),
+    ],
+    ids=["org", "session", "missing-session", "command", "args"],
+)
+async def test_idempotency_fingerprint_rejects_every_context_change(
+    line, organization_id, session_id
+):
+    calls = []
+
+    async def _handler(ctx, args):
+        calls.append((ctx.organization_id, ctx.session_id, args["value"]))
+        return CommandResult(content="PRIVATE-CONTENT")
+
+    registry = CommandRegistry()
+    command = _echo_command(aliases=("e",))
+    command.handler = _handler
+    registry.register(command)
+    other = _echo_command(name="other")
+    other.handler = _handler
+    registry.register(other)
+    first = await execute(_ctx(), "/echo one", registry=registry, idempotency_key="context")
+    replay = await execute(
+        _ctx(organization_id=organization_id, session_id=session_id),
+        line,
+        registry=registry,
+        idempotency_key="context",
+        replay_authorizer=_allow_replay(),
+    )
+    assert first.success is True
+    assert replay.success is False and replay.error_code == "command_busy"
+    assert "PRIVATE-CONTENT" not in replay.error_message + replay.content
+    assert calls == [(3, "s1", "one")]
+
+
+@pytest.mark.asyncio
+async def test_idempotency_fingerprint_includes_resolved_scope(fake_redis):
+    calls = []
+
+    async def _handler(ctx, args):
+        calls.append(1)
+        return CommandResult(content="PRIVATE-CONTENT")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="echo", description="", handler=_handler))
+    first = await execute(_ctx(), "/echo", registry=registry, idempotency_key="scope")
+    registry.register(
+        Command(name="echo", description="", handler=_handler),
+        scope=agent_scope_for_session("s1"),
+    )
+    replay = await execute(
+        _ctx(),
+        "/echo",
+        registry=registry,
+        idempotency_key="scope",
+        replay_authorizer=_allow_replay(),
+    )
+    assert first.success is True
+    assert replay.success is False and replay.error_code == "command_busy"
+    assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_legacy_completed_entry_fails_closed_without_deserializing(fake_redis, monkeypatch):
+    idem_key = "cmd:idem:7:legacy-completed"
+    legacy = execution_mod.CommandExecution(
+        command="echo",
+        line="/echo",
+        success=True,
+        content="LEGACY-SECRET",
+        scope="global",
+        execution_id="legacy-execution",
+    )
+    fake_redis.store[idem_key] = json.dumps(legacy.to_dict())
+    deserialize = MagicMock(side_effect=AssertionError("legacy 不得反序列化"))
+    monkeypatch.setattr(execution_mod.CommandExecution, "from_dict", deserialize)
+    calls = []
+
+    async def _handler(ctx, args):
+        calls.append(1)
+        return CommandResult(content="NEW-HANDLER")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="echo", description="", handler=_handler))
+    replay = await execute(
+        _ctx(session_id=None), "/echo", registry=registry, idempotency_key="legacy-completed"
+    )
+    assert replay.success is False and replay.error_code == "command_busy"
+    assert "LEGACY-SECRET" not in replay.error_message + replay.content
+    assert calls == []
+    deserialize.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "{not-json",
+        "[]",
+        json.dumps({"state": "pending", "execution_id": "legacy"}),
+        json.dumps(
+            {
+                "version": 2,
+                "state": "pending",
+                "fingerprint": "0" * 64,
+                "organization_id": 3,
+                "session_id": None,
+                "resource_org_id": None,
+                "command": "echo",
+                "scope": "global",
+            }
+        ),
+        json.dumps({"version": 1, "state": "completed", "status": "completed"}),
+    ],
+    ids=["bad-json", "wrong-type", "legacy-pending", "missing-owner", "old-version"],
+)
+async def test_corrupt_or_legacy_entries_fail_closed_immediately(fake_redis, raw):
+    idem_key = "cmd:idem:7:corrupt"
+    fake_redis.store[idem_key] = raw
+    calls = []
+
+    async def _handler(ctx, args):
+        calls.append(1)
+        return CommandResult(content="MUST-NOT-RUN")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="echo", description="", handler=_handler))
+    result = await execute(
+        _ctx(session_id=None), "/echo", registry=registry, idempotency_key="corrupt"
+    )
+    assert result.success is False and result.error_code == "command_busy"
+    assert calls == []
+    assert fake_redis.get_calls == [idem_key]
+
+
+@pytest.mark.asyncio
+async def test_internally_inconsistent_completed_entry_fails_closed(fake_redis, monkeypatch):
+    registry = CommandRegistry()
+    registry.register(_echo_command())
+    first = await execute(
+        _ctx(session_id=None), "/echo one", registry=registry, idempotency_key="inconsistent"
+    )
+    assert first.success is True
+    idem_key = "cmd:idem:7:inconsistent"
+    payload = json.loads(fake_redis.store[idem_key])
+    payload["execution"]["args"]["value"] = "tampered"
+    fake_redis.store[idem_key] = json.dumps(payload)
+    deserialize = MagicMock(side_effect=AssertionError("不一致信封不得反序列化"))
+    monkeypatch.setattr(execution_mod.CommandExecution, "from_dict", deserialize)
+
+    replay = await execute(
+        _ctx(session_id=None), "/echo one", registry=registry, idempotency_key="inconsistent"
+    )
+    assert replay.success is False and replay.error_code == "command_busy"
+    deserialize.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_completed_org_recheck_is_independent_of_fingerprint(fake_redis):
+    registry = CommandRegistry()
+    registry.register(_echo_command())
+    first = await execute(
+        _ctx(session_id=None), "/echo one", registry=registry, idempotency_key="org-check"
+    )
+    assert first.success is True
+    idem_key = "cmd:idem:7:org-check"
+    payload = json.loads(fake_redis.store[idem_key])
+    payload["organization_id"] = 999
+    fake_redis.store[idem_key] = json.dumps(payload)
+
+    replay = await execute(
+        _ctx(session_id=None), "/echo one", registry=registry, idempotency_key="org-check"
+    )
+    assert replay.success is False and replay.error_code == "command_busy"
+    assert replay.content == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("second_line", ["/other", "/slow changed"], ids=["command", "args"])
+async def test_pending_different_fingerprint_conflicts_without_polling(fake_redis, second_line):
+    started = asyncio.Event()
+    release = asyncio.Event()
+    slow_calls = []
+    other_calls = []
+
+    async def _slow(ctx, args):
+        slow_calls.append(1)
+        started.set()
+        await release.wait()
+        return CommandResult(content="slow")
+
+    async def _other(ctx, args):
+        other_calls.append(1)
+        return CommandResult(content="other")
+
+    registry = CommandRegistry()
+    registry.register(
+        Command(
+            name="slow",
+            description="",
+            args=(CommandArg(name="value", description=""),),
+            handler=_slow,
+        )
+    )
+    registry.register(Command(name="other", description="", handler=_other))
+    first = asyncio.create_task(
+        execute(_ctx(session_id=None), "/slow", registry=registry, idempotency_key="pending-diff")
+    )
+    await started.wait()
+    fake_redis.get_calls.clear()
+    conflict = await execute(
+        _ctx(session_id=None), second_line, registry=registry, idempotency_key="pending-diff"
+    )
+    release.set()
+    assert (await first).success is True
+    assert conflict.success is False and conflict.error_code == "command_busy"
+    assert fake_redis.get_calls == ["cmd:idem:7:pending-diff"]
+    assert other_calls == []
+    assert slow_calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_matching_pending_completed_replay_rechecks_original_session(fake_redis, monkeypatch):
+    monkeypatch.setattr(execution_mod, "_IDEM_POLL_INTERVAL", 0.001)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+    authorizations = []
+
+    async def _slow(ctx, args):
+        calls.append(1)
+        started.set()
+        await release.wait()
+        return CommandResult(content="done")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="slow", description="", handler=_slow))
+    first_task = asyncio.create_task(
+        execute(_ctx(), "/slow", registry=registry, idempotency_key="pending-same")
+    )
+    await started.wait()
+    fake_redis.get_calls.clear()
+    replay_task = asyncio.create_task(
+        execute(
+            _ctx(),
+            "/slow",
+            registry=registry,
+            idempotency_key="pending-same",
+            replay_authorizer=_allow_replay(authorizations),
+        )
+    )
+    while not fake_redis.get_calls:
+        await asyncio.sleep(0)
+    release.set()
+    first, replay = await asyncio.gather(first_task, replay_task)
+    assert first.success is True and replay.success is True
+    assert replay.execution_id == first.execution_id
+    assert calls == [1]
+    assert authorizations == [(3, "s1", None)]
+
+
+@pytest.mark.asyncio
+async def test_old_owner_cannot_overwrite_new_claimant_completed_value(fake_redis):
+    idem_key = "cmd:idem:7:completed-race"
+    new_owner = json.dumps(
+        {
+            "version": 2,
+            "state": "pending",
+            "fingerprint": "a" * 64,
+            "organization_id": 3,
+            "session_id": None,
+            "resource_org_id": None,
+            "command": "race",
+            "scope": "global",
+            "owner": "new-owner",
+        }
+    )
+
+    async def _takeover(ctx, args):
+        fake_redis.store[idem_key] = new_owner
+        return CommandResult(content="old-owner-result")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="race", description="", handler=_takeover))
+    result = await execute(
+        _ctx(session_id=None), "/race", registry=registry, idempotency_key="completed-race"
+    )
+    assert result.success is True
+    assert fake_redis.store[idem_key] == new_owner
+
+
+@pytest.mark.asyncio
+async def test_completed_write_failure_cannot_become_handler_retry(fake_redis, monkeypatch):
+    class FailCompletedWriteRedis(FakeRedis):
+        async def eval(self, script, numkeys, *args):
+            if 'redis.call("set", KEYS[1], ARGV[2]' in script:
+                raise ConnectionError("redis down")
+            return await super().eval(script, numkeys, *args)
+
+    client = FailCompletedWriteRedis()
+    calls = []
+
+    async def _handler(ctx, args):
+        calls.append(1)
+        return CommandResult(content="done")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="count", description="", handler=_handler))
+    first = await execute(
+        _ctx(session_id=None),
+        "/count",
+        registry=registry,
+        idempotency_key="write-down",
+        redis=client,
+    )
+    assert first.success is True
+    monkeypatch.setattr(execution_mod, "_IDEM_POLL_ATTEMPTS", 2)
+    monkeypatch.setattr(execution_mod, "_IDEM_POLL_INTERVAL", 0)
+    replay = await execute(
+        _ctx(session_id=None),
+        "/count",
+        registry=registry,
+        idempotency_key="write-down",
+        redis=client,
+    )
+    assert replay.success is False and replay.error_code == "command_busy"
+    assert calls == [1]
+    assert json.loads(client.store["cmd:idem:7:write-down"])["state"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_session_replay_without_authorizer_fails_closed(fake_redis):
+    registry = CommandRegistry()
+    registry.register(_echo_command())
+    first = await execute(_ctx(), "/echo one", registry=registry, idempotency_key="no-guard")
+    assert first.success is True
+    replay = await execute(_ctx(), "/echo one", registry=registry, idempotency_key="no-guard")
+    assert replay.success is False and replay.error_code == "service_unavailable"
+    assert replay.content == ""
+
+
+@pytest.mark.asyncio
+async def test_idempotency_read_storage_error_is_503_not_cache_miss(fake_redis):
+    class BrokenGetRedis(FakeRedis):
+        async def get(self, key):
+            raise ConnectionError("redis down")
+
+    client = BrokenGetRedis()
+    client.store["cmd:idem:7:read-down"] = "not-a-cache-miss"
+    calls = []
+
+    async def _handler(ctx, args):
+        calls.append(1)
+        return CommandResult(content="MUST-NOT-RUN")
+
+    registry = CommandRegistry()
+    registry.register(Command(name="echo", description="", handler=_handler))
+    result = await execute(
+        _ctx(session_id=None), "/echo", registry=registry, idempotency_key="read-down", redis=client
+    )
+    assert result.success is False and result.error_code == "service_unavailable"
+    assert calls == []
 
 
 @pytest.mark.asyncio
