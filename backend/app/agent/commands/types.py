@@ -232,7 +232,7 @@ class CommandExecution:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> CommandExecution:
-        """从 ``to_dict()`` 形态重建（幂等键里存的是完整响应 JSON）。"""
+        """从 completed 信封的 execution 子对象重建（调用前须完成全部重放授权）。"""
         result = payload.get("result")
         content = payload.get("content") or ""
         data = payload.get("data") or {}

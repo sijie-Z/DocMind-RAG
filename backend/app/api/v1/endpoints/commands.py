@@ -11,7 +11,8 @@
 - 可选 ``idempotency_key``：同一 user + 同 key 的**串行**重复请求返回同一
   ``execution_id``，handler 只执行一次（Redis，结果 TTL 24h）。**执行中并发**
   的重复请求最多等待 ~1s，仍未完成返回 409 ``COMMAND_BUSY``（与 Stripe
-  幂等键语义一致：同一 key 不能被并发重放）；不校验 payload 是否一致。
+  幂等键语义一致）；命令、参数、org、session 或 resolved scope 不同的同键请求
+  也会立即返回 409，绝不重放其他上下文的正文。
 
 响应信封（成功 data）：既有 ``command/line/scope/success/content/data/args/
 error_*`` 保留一版，另加 ``execution_id``（uuid）、``status``
@@ -22,6 +23,8 @@ error_*`` 保留一版，另加 ``execution_id``（uuid）、``status``
   再判定组织管理员（管理命令可见性 / 执行双重校验）；
 - 携带 ``session_id`` 时必须先过会话归属（不存在 / 他人 / 跨组织一律 404），
   命令作用域与 /status、/export 的数据读取使用同一套 ``session_access_*`` 口径；
+- 幂等重放另绑定首次已加载 session 的 resource_org_id；当前 scope 仍可见但资源
+  org 已变化时同样拒绝，空 session 按无会话命令规范化；
 - ``COMMANDS_ENABLED=false``（回滚开关）：GET 返回 enabled=false + 空清单，
   POST 503 SERVICE_UNAVAILABLE——前端据此回退本地模板。
 
@@ -58,6 +61,7 @@ from app.agent.commands import (
     GLOBAL_SCOPE,
     CommandContext,
     CommandExecution,
+    CommandFailure,
     CommandSyntaxError,
     agent_scope_for_session,
     command_registry,
@@ -174,9 +178,7 @@ class CommandExecutionError(AppError):
         self.status_code = _ERROR_STATUS.get(execution.error_code, 500)
 
 
-async def _require_accessible_session(
-    db: AsyncSession, session_id: str, current_user: User
-) -> None:
+async def _require_accessible_session(db: AsyncSession, session_id: str, current_user: User) -> Any:
     """会话归属闸门：不存在 / 他人 / 跨组织一律 404（不区分，避免枚举）。"""
     scope = await resolve_session_access_scope(current_user, db)
     session = await load_accessible_session(db, session_id, current_user, scope)
@@ -186,6 +188,7 @@ async def _require_accessible_session(
             error_code="SESSION_NOT_FOUND",
             detail={"session_id": session_id},
         )
+    return session
 
 
 @router.get("")
@@ -277,24 +280,68 @@ async def execute_command(
     if not settings.COMMANDS_ENABLED:
         raise ServiceUnavailableError("命令功能未启用", detail={"reason": "commands_disabled"})
 
-    if body.session_id:
-        await _require_accessible_session(db, body.session_id, current_user)
+    session_id = body.session_id or None
+    request_session = None
+    if session_id:
+        request_session = await _require_accessible_session(db, session_id, current_user)
 
     line = _resolve_request_line(body)
     is_admin = await resolve_is_admin(db, current_user, effective_org_id)
     ctx = CommandContext(
         user_id=current_user.id,
         organization_id=effective_org_id,
-        session_id=body.session_id,
+        session_id=session_id,
         is_admin=is_admin,
         is_superuser=bool(getattr(current_user, "is_superuser", False)),
         db=db,
     )
+
+    async def _authorize_replay(
+        original_org_id: int | None,
+        original_session_id: str | None,
+        original_resource_org_id: int | None,
+    ) -> None:
+        """只用缓存原上下文复核；当前 principal、DB 和有效 org 来自本次请求。"""
+        if original_org_id != effective_org_id:
+            raise CommandFailure(
+                ERROR_COMMAND_BUSY,
+                "幂等键的原组织与当前有效组织不一致",
+            )
+        if original_session_id is None:
+            return
+        try:
+            access_scope = await resolve_session_access_scope(current_user, db)
+            original_session = await load_accessible_session(
+                db,
+                original_session_id,
+                current_user,
+                access_scope,
+            )
+            loaded_resource_org_id = (
+                original_session.organization_id if original_session is not None else None
+            )
+        except Exception as exc:  # noqa: BLE001 — DB 异常不得折叠成不存在或 cache miss
+            logger.warning("命令重放原会话复核失败（fail-closed）：%s", type(exc).__name__)
+            raise CommandFailure(
+                ERROR_SERVICE_UNAVAILABLE,
+                "命令服务暂不可用（原会话复核失败），请稍后重试",
+                data={"reason": "session_replay_unavailable"},
+            ) from exc
+        if original_session is None or loaded_resource_org_id != original_resource_org_id:
+            raise CommandFailure(
+                ERROR_SESSION_NOT_FOUND,
+                "原会话不存在、资源归属已变化或当前无权访问",
+            )
+
     execution = await execute(
         ctx,
         line,
         registry=command_registry,
         idempotency_key=body.idempotency_key,
+        session_resource_org_id=(
+            request_session.organization_id if request_session is not None else None
+        ),
+        replay_authorizer=_authorize_replay,
     )
     if execution.success:
         return {"success": True, "data": execution.to_dict()}
