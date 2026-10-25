@@ -75,7 +75,7 @@ Known limitations:
 ├── AI Agent Core ─────────────────────────────┤
 │  PER Loop (Planner → Executor → Reflector)   │
 │  Tool Registry (31) · RunReport · Reviewer  │
-│  Experience Memory · Replay · Pattern Mining │
+│  Experience Memory · Replay                  │
 ├── RAG Pipeline ──────────────────────────────┤
 │  HybridRetriever (BM25 + Vector + RRF fusion)│
 │  Query Processor · Reranker · Context Comp.   │
@@ -138,7 +138,6 @@ User instruction
 |-----------|-----------|---------|
 | Experience Memory | `experience/` | Auto-extract lessons from failed runs, inject into Planner |
 | Execution Replay | `replay/` | Full execution snapshots, save & replay with diff comparison |
-| Pattern Mining | `mining/` | Scan replays for high-frequency tool sequences → skill suggestions (offline CLI; reads benchmark/replay/) |
 
 **Hooks extension points** (issue #474, off by default):
 
@@ -468,13 +467,8 @@ DocMind/
 │   │   │   │   ├── store.py         #   Experience store
 │   │   │   │   ├── models.py        #   Data models
 │   │   │   │   └── run_extract.py   #   Experience bootstrap (dev-only; manual run after benchmarks)
-│   │   │   ├── replay/              #   Execution replay
-│   │   │   │   └── engine.py        #   Replay engine
-│   │   │   └── mining/              #   Pattern mining
-│   │   │       ├── miner.py         #   Miner
-│   │   │       ├── analyzer.py      #   Analyzer
-│   │   │       ├── patterns.py      #   Pattern definitions
-│   │   │       └── report.py        #   Mining reports
+│   │   │   └── replay/              #   Execution replay
+│   │   │       └── engine.py        #   Replay engine
 │   │   ├── core/                    # Infrastructure
 │   │   │   ├── config/              #   Settings (Base/DB/AI/Security)
 │   │   │   ├── database.py          #   SQLAlchemy engine
