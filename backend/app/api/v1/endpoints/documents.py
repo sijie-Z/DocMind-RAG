@@ -203,24 +203,23 @@ async def upload_document(
         )
 
         db.add(new_doc)
-        await db.commit()
-        await db.refresh(new_doc)
 
-        # 7. 创建任务并发送 Kafka 消息
+        # 7. Document 与 Job 在同一事务落库，再发送 Kafka 消息
         job = KnowledgeProcessingJob(
             document_id=doc_id,
             organization_id=org_id,
             trigger_type="upload",
             status=KnowledgeJobStatus.QUEUED,
             retry_count=0,
-            # A3-P0：先按「本机兜底候选」落库（与 job 同一次 commit）；
+            # A3-P0：先按「本机兜底候选」落库（与 Document、Job 同一次 commit）；
             # Kafka 投递确认后清除。若进程在投递/清除之间退出，启动对账
             # 最多多重跑一次（文档锁互斥、处理幂等），任务不会丢。
             local_fallback=True,
         )
         db.add(job)
-        # A3-P0：先落库 job（拿到自增 id）再发 Kafka——消费端读到消息时
-        # 任务行必已可见，避免「消息先到、job 后到」造成 job 永久 QUEUED。
+        # flush 只负责取得自增 job.id；Document+Job 只能由这一次联合 commit
+        # 持久化，避免第二个 commit 故障留下永远没有 Job 的 PENDING Document。
+        await db.flush()
         await db.commit()
 
         sent = False
