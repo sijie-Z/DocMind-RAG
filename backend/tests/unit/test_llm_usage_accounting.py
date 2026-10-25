@@ -372,7 +372,10 @@ async def test_composite_skill_inner_calls_counted_into_ctx():
     llm_client = MagicMock()
     llm_client.chat.completions.create = _create
 
-    async def _search_kb(*, query, organization_id, top_k, document_ids=None):
+    search_modes = []
+
+    async def _search_kb(*, query, organization_id, top_k, document_ids=None, search_mode=None):
+        search_modes.append(search_mode)
         # snippet 带 "ID: doc1" → 技能会把它解析成内层 extract_insights 的入参
         return (
             [{"score": 0.9, "filename": "f.md", "snippet": "ID: doc1 | 文件名: f.md"}],
@@ -401,6 +404,7 @@ async def test_composite_skill_inner_calls_counted_into_ctx():
         )
 
     assert out and "Error" not in out, f"技能应正常执行，实际: {out[:200]}"
+    assert search_modes == ["hybrid"]
     assert ctx.total_tokens == 1100, (
         f"内层 extract_insights 400 + generate_report 700 应经透传入账，"
         f"实际 {ctx.total_tokens}（删任一内层 run_context 透传 → 本断言红）"
