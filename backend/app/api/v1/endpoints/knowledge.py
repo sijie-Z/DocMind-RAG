@@ -21,6 +21,7 @@ from app.core.kafka_client import kafka_producer
 from app.core.security import (
     get_current_user,
     get_document_for_user,
+    get_user_org_id,
     permission_required,
     require_org_admin,
     require_organization,
@@ -119,12 +120,15 @@ async def list_knowledge_bases(
     获取知识库列表 (真实数据)
     """
     try:
-        # 1. 构建查询条件
-        # 如果用户属于某个组织，查询组织下的所有文档；否则查询自己上传的文档
-        if current_user.organization_id:
-            conditions = [Document.organization_id == current_user.organization_id]
+        # 1. 构建查询条件。非超管的权限与资源必须使用同一个有效组织：
+        # org-bound key 不随 raw primary 漂移，JWT 沿用已校验的 primary/token 回退。
+        # 不再以 uploader-only 作为无组织兜底，避免带回前组织的历史文档。
+        # 显式平台超管保留全局列表语义，不施加租户过滤。
+        if current_user.is_superuser:
+            conditions = []
         else:
-            conditions = [Document.uploaded_by == current_user.id]
+            effective_org_id = await require_organization(current_user, db)
+            conditions = [Document.organization_id == effective_org_id]
 
         if search:
             conditions.append(Document.title.contains(search))
@@ -189,6 +193,8 @@ async def list_knowledge_bases(
             "message": "获取成功",
             "data": {"data": data, "total": total, "page": page, "page_size": page_size},
         }
+    except AppError:
+        raise
     except Exception as e:
         raise AppError(f"获取知识库列表失败: {str(e)}")
 
@@ -673,11 +679,13 @@ async def list_knowledge_jobs(
     db: AsyncSession = Depends(get_db),
 ):
     conditions = []
-    if current_user.organization_id:
-        conditions.append(KnowledgeProcessingJob.organization_id == current_user.organization_id)
-    else:
-        # 安全加固：无组织用户只能看到自己的任务（不存在则恒空），防止越权查看全部组织任务
-        conditions.append(KnowledgeProcessingJob.organization_id == -1)
+    if not current_user.is_superuser:
+        # 权限与资源共用有效组织；无有效组织仍按旧契约恒空，超管保持全局。
+        effective_org_id = get_user_org_id(current_user)
+        conditions.append(
+            KnowledgeProcessingJob.organization_id
+            == (effective_org_id if effective_org_id is not None else -1)
+        )
 
     if status:
         try:

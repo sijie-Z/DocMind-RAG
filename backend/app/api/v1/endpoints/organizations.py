@@ -12,6 +12,7 @@ from app.api.v1.endpoints.notifications import create_notification
 from app.core.database import get_db
 from app.core.security import (
     get_current_user,
+    get_user_org_id,
     is_platform_admin,
     permission_required,
 )
@@ -41,7 +42,7 @@ def _ensure_org_membership(current_user: User, org_id: int) -> None:
     """
     if getattr(current_user, "is_superuser", False):
         return
-    if current_user.organization_id != org_id:
+    if get_user_org_id(current_user) != org_id:
         raise AuthorizationError("无权访问该组织的数据")
 
 
@@ -430,6 +431,12 @@ async def add_organization_member(
         raise AuthorizationError("无权将其他组织的用户加入本组织")
     if user_obj.is_superuser and not current_user.is_superuser:
         raise AuthorizationError("无权将其他组织的用户加入本组织")
+    if not current_user.is_superuser:
+        # NULL primary 不等于无归属。添加前汇总 primary、成员行和全部组织角色
+        # 关联；任何外部 affiliation 都拒绝，且必须早于 primary/membership 写入。
+        affiliation_ids = await organization_service.resolve_visible_organization_ids(db, user)
+        if affiliation_ids is None or affiliation_ids.difference({org_id}):
+            raise AuthorizationError("无权将其他组织的用户加入本组织")
 
     old_org_id = user_obj.organization_id
     user_obj.organization_id = org_id

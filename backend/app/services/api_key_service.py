@@ -139,9 +139,11 @@ class ApiKeyService:
         if user is None or not user.is_active:
             return None
 
-        # 组织回退必须回源成员表校验（与 JWT 的 token_organization_id 同纪律）：
-        # key 有 org 而用户主组织为空时，只有仍是该组织成员才允许借用该组织。
-        if matched.org_id is not None and user.organization_id is None:
+        # org-bound key 的有效租户固定为 key.org_id。普通用户每次认证都必须
+        # 回源证明仍是该组织成员，不能由 primary org 代替或随其漂移。
+        # 显式平台超管保留既有语义：非空 primary 可免 membership；NULL-primary
+        # 的组织回退仍按原路径要求 membership，既不降权也不悄悄扩权。
+        if matched.org_id is not None and (not user.is_superuser or user.organization_id is None):
             member = await db.execute(
                 select(user_organization.c.user_id).where(
                     user_organization.c.user_id == user.id,

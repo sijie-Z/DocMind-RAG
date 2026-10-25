@@ -521,21 +521,27 @@ async def get_storage_analysis(
     """
     获取存储分析数据
     """
+    effective_org_id = get_user_org_id(current_user)
+    if effective_org_id is None and not current_user.is_superuser:
+        raise AuthorizationError("当前用户未加入任何组织，无权访问存储分析数据")
     try:
         from sqlalchemy import func
 
         from app.models.document import Document
 
-        # 1. 计算总使用空间
-        size_stmt = select(func.sum(Document.file_size)).where(
-            Document.organization_id == current_user.organization_id
+        # 权限与资源共用有效组织；显式超管保留全局统计，不加租户过滤。
+        org_conditions = (
+            [] if current_user.is_superuser else [Document.organization_id == effective_org_id]
         )
+
+        # 1. 计算总使用空间
+        size_stmt = select(func.sum(Document.file_size)).where(*org_conditions)
         total_size = (await db.execute(size_stmt)).scalar() or 0
 
         # 2. 计算各类型占比
         type_stmt = (
             select(Document.file_type, func.sum(Document.file_size))
-            .where(Document.organization_id == current_user.organization_id)
+            .where(*org_conditions)
             .group_by(Document.file_type)
         )
         type_res = (await db.execute(type_stmt)).all()
@@ -545,9 +551,7 @@ async def get_storage_analysis(
             type_stats.append({"type": t.value if hasattr(t, "value") else str(t), "size": s or 0})
 
         # 3. 计算文档总数
-        count_stmt = select(func.count(Document.id)).where(
-            Document.organization_id == current_user.organization_id
-        )
+        count_stmt = select(func.count(Document.id)).where(*org_conditions)
         total_count = (await db.execute(count_stmt)).scalar() or 0
 
         # 设定一个默认上限 10GB
