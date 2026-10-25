@@ -346,6 +346,148 @@ async def test_agent_tool_prefers_prompt_text():
     assert "SNIPPET-ONLY" not in payload["content"]
 
 
+@pytest.mark.asyncio
+async def test_agent_tool_preserves_complete_late_response_clause():
+    """问题不含答案数字时，300 字抽取仍不得截掉 chunk 尾部的完整条款。"""
+    from app.agent.core_tools import search_knowledge_base
+
+    query = "数据安全事件 响应时限 上报 机密 绝密"
+    late_clause = (
+        "**第 20 条（响应时限）**\n"
+        "- 一般事件：信息安全团队在 **2 小时内** 启动响应；\n"
+        "- 涉及机密、绝密数据：信息安全团队在 **30 分钟内** 上报安全负责人。"
+    )
+    full = (
+        "| --- | --- |\n"
+        "| 联系方式 | 仅显示掩码 |\n"
+        "| 证件号码 | 仅显示掩码 |\n"
+        "| 合同金额 | 使用区间 |\n"
+        "| 客户名称 | 使用代号 |\n"
+        "| 内部系统域名、内网 IP | 以「内网系统」代替 |\n"
+        "**第 13 条（系统侧兜底）** 对话功能默认开启隐私模式，"
+        "对模型输出中的敏感信息自动脱敏。\n"
+        "**第 18 条（对外提供）** 机密数据不得提供给外部合作方，"
+        "绝密数据一律不得对外提供。\n"
+        + "数据安全事件的内部处置过程应留存审计记录，供合规复查。\n" * 32
+        + late_clause
+    )
+    assert not any(char.isdigit() for char in query)
+    assert len(full) > 1000
+    assert len(full) < settings.RAG_PROMPT_TEXT_MAX_CHARS
+    assert full.index(late_clause) > len(full) * 0.6
+    docs = [
+        {
+            "score": 0.9,
+            "filename": "security.md",
+            "snippet": full[:260],
+            "prompt_text": full,
+            "document_id": "doc-security",
+        }
+    ]
+    pipeline = MagicMock()
+    pipeline.search_knowledge_base = AsyncMock(return_value=(docs, None))
+
+    with patch("app.dependencies.get_rag_pipeline", return_value=pipeline):
+        tool_output = await search_knowledge_base(query, mode="hybrid", organization_id=1)
+
+    content = json.loads(tool_output)["content"]
+    assert late_clause in content, "第20条原文及两个时限必须完整交给后续 Agent 步骤"
+    assert "**2 小时内**" in content
+    assert "**30 分钟内**" in content
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_fair_budget_preserves_clause_after_three_long_chunks():
+    """前三个长 chunk 不得独占总预算，第4个来源仍须交出完整第20条。"""
+    from app.agent.core_tools import search_knowledge_base
+
+    query = "数据安全事件 响应时限 上报 机密 绝密"
+    late_clause = (
+        "**第 20 条（响应时限）**\n"
+        "- 一般事件：信息安全团队在 **2 小时内** 启动响应；\n"
+        "- 涉及机密、绝密数据：信息安全团队在 **30 分钟内** 上报安全负责人。"
+    )
+    target = (
+        "| --- | --- |\n"
+        "**第 18 条（对外提供）** 机密数据不得提供给外部合作方，"
+        "绝密数据一律不得对外提供。\n"
+        + "数据安全事件的内部处置过程应留存审计记录，供合规复查。\n" * 32
+        + late_clause
+    )
+    assert not any(char.isdigit() for char in query)
+    assert len(target) < settings.RAG_PROMPT_TEXT_MAX_CHARS
+    long_text = "数据安全事件的内部审计说明。" * 260
+    assert len(long_text) > settings.RAG_PROMPT_TEXT_MAX_CHARS
+    docs = [
+        {
+            "score": 0.9,
+            "filename": f"filler-{index}.pdf",
+            "prompt_text": long_text,
+            "document_id": f"filler-{index}",
+        }
+        for index in range(3)
+    ]
+    docs.append(
+        {
+            "score": 0.8,
+            "filename": "security.md",
+            "prompt_text": target,
+            "document_id": "doc-security",
+        }
+    )
+    pipeline = MagicMock()
+    pipeline.search_knowledge_base = AsyncMock(return_value=(docs, None))
+
+    with patch("app.dependencies.get_rag_pipeline", return_value=pipeline):
+        tool_output = await search_knowledge_base(query, mode="hybrid", organization_id=1)
+
+    payload = json.loads(tool_output)
+    assert len(payload["sources"]) == 4
+    assert late_clause in payload["content"]
+    assert "**2 小时内**" in payload["content"]
+    assert "**30 分钟内**" in payload["content"]
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_bounds_top_k_20_evidence_budget(monkeypatch):
+    """20 个超长 chunk 仍受 Chat 同口径的每源 cap 与 8000 字总证据预算约束。"""
+    from app.agent.core_tools import search_knowledge_base
+
+    monkeypatch.setattr(settings, "RAG_PROMPT_TEXT_MAX_CHARS", 3000)
+    docs = []
+    for index in range(20):
+        text = f"资料{index}。" + "数据安全事件的内部审计说明。" * 260
+        assert len(text) > settings.RAG_PROMPT_TEXT_MAX_CHARS
+        docs.append(
+            {
+                "score": 0.9,
+                "filename": f"doc-{index}.pdf",
+                "prompt_text": text,
+                "document_id": f"doc-{index}",
+            }
+        )
+    pipeline = MagicMock()
+    pipeline.search_knowledge_base = AsyncMock(return_value=(docs, None))
+
+    with patch("app.dependencies.get_rag_pipeline", return_value=pipeline):
+        tool_output = await search_knowledge_base(
+            "数据安全事件响应时限", top_k=20, mode="hybrid", organization_id=1
+        )
+
+    payload = json.loads(tool_output)
+    content = payload["content"]
+    first_section = content.split("\n\n", 1)[0]
+    first_header, separator, first_evidence = first_section.partition("\n")
+    assert separator
+    assert first_header == "[1] (0.90) doc-0.pdf"
+    assert len(first_evidence) <= settings.RAG_PROMPT_TEXT_MAX_CHARS
+
+    headers = [f"[{index}] (0.90) doc-{index - 1}.pdf\n" for index in range(1, 21)]
+    framing_chars = sum(map(len, headers)) + 2 * (len(docs) - 1)
+    assert len(payload["sources"]) == 20, "证据预算不得悄悄删除检索来源元数据"
+    assert len(content) - framing_chars <= 8000
+
+
 def test_agent_loop_context_prefers_prompt_text():
     """agent loop 拼接参考文档时必须全文优先，snippet 仅兜底。"""
     from app.agent.config import AgentConfig
