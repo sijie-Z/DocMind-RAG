@@ -36,6 +36,7 @@ import asyncio
 import copy
 import json
 import uuid
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -477,6 +478,28 @@ def _envelope(source_id: str, *, pending: dict | None = None) -> dict:
     }
 
 
+def _secret_envelope(source_id: str, task_id: str, marker: str) -> dict:
+    envelope = _envelope(source_id)
+    envelope["ctx"] = {
+        "task_id": task_id,
+        "query": f"{marker}-query",
+        "document_context": f"{marker}-document-context",
+    }
+    envelope["history"] = [{"role": "assistant", "content": f"{marker}-history"}]
+    return envelope
+
+
+async def _assert_no_fork_children(db, source_id: str, source_task_ids: set[str]) -> None:
+    children = (
+        (await db.execute(select(ChatSession).where(ChatSession.parent_session_id == source_id)))
+        .scalars()
+        .all()
+    )
+    assert list(children) == []
+    task_ids = set((await db.execute(select(AgentTask.id))).scalars().all())
+    assert task_ids == source_task_ids, "失败 fork 不得新增 task/checkpoint 行"
+
+
 @pytest.mark.asyncio
 async def test_fork_running_task_requires_checkpoint(db_factory):
     """源会话有运行中任务：不带 include_checkpoint → 409；带但没有快照 → 409。"""
@@ -570,6 +593,180 @@ async def test_fork_clones_settled_checkpoint_as_pending_task(db_factory, monkey
         monkeypatch.setattr(checkpoint, "AsyncSessionLocal", db_factory)
         resumed = await checkpoint.begin_resume(clone.id)
         assert resumed.status == TaskStatus.RUNNING
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("caller_org", [ORG_ID + 1, None], ids=["child-b", "child-null"])
+async def test_fork_legacy_checkpoint_rejects_org_mismatch_without_side_effects(
+    db_factory, caller_org
+):
+    """NULL-org 母会话不能把 A 的 checkpoint 重标给 B（或无组织子会话）。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-legacy-org", org_id=None)
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        db.add(
+            AgentTask(
+                id="task-org-a",
+                user_id=USER_ID,
+                organization_id=ORG_ID,
+                session_id=src.id,
+                query="org-a-query",
+                status=TaskStatus.RUNNING,
+                context_snapshot=_secret_envelope(src.id, "task-org-a", "org-a"),
+            )
+        )
+        await db.commit()
+
+        with pytest.raises(ForkCheckpointUnavailableError) as excinfo:
+            await _fork(db, src.id, organization_id=caller_org, include_checkpoint=True)
+
+        assert excinfo.value.status_code == 409
+        assert excinfo.value.error_code == "FORK_CHECKPOINT_UNAVAILABLE"
+        await _assert_no_fork_children(db, src.id, {"task-org-a"})
+        source_task = await db.get(AgentTask, "task-org-a")
+        assert source_task.organization_id == ORG_ID
+        source_snapshot = (
+            await db.execute(select(AgentTask.context_snapshot).where(AgentTask.id == "task-org-a"))
+        ).scalar_one()
+        assert source_snapshot["ctx"]["query"] == "org-a-query"
+
+
+@pytest.mark.asyncio
+async def test_fork_legacy_checkpoint_selects_child_org_for_status_and_resume(
+    db_factory, monkeypatch
+):
+    """A/B 候选并存时只选 child org；状态与 resume 均不得带出另一组织的数据。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-legacy-ab", org_id=None)
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        db.add(
+            AgentTask(
+                id="task-org-a",
+                user_id=USER_ID,
+                organization_id=ORG_ID,
+                session_id=src.id,
+                query="org-a-query",
+                status=TaskStatus.RUNNING,
+                context_snapshot=_secret_envelope(src.id, "task-org-a", "org-a"),
+                updated_at=datetime(2026, 1, 3),
+            )
+        )
+        db.add(
+            AgentTask(
+                id="task-org-b",
+                user_id=USER_ID,
+                organization_id=ORG_ID + 1,
+                session_id=src.id,
+                query="org-b-query",
+                status=TaskStatus.COMPLETED,
+                context_snapshot=_secret_envelope(src.id, "task-org-b", "org-b"),
+                updated_at=datetime(2026, 1, 2),
+            )
+        )
+        await db.commit()
+
+        result = await _fork(db, src.id, organization_id=ORG_ID + 1, include_checkpoint=True)
+        assert result.checkpoint_task_id is not None
+        monkeypatch.setattr(checkpoint, "AsyncSessionLocal", db_factory)
+        status_task = await checkpoint.load_task(
+            task_id=result.checkpoint_task_id,
+            user_id=USER_ID,
+            organization_id=ORG_ID + 1,
+        )
+        status = checkpoint.task_to_status_dict(status_task)
+        resumed_task, resume_payload = await checkpoint.load_for_resume(
+            task_id=result.checkpoint_task_id,
+            user_id=USER_ID,
+            organization_id=ORG_ID + 1,
+        )
+        assert resume_payload is not None
+
+        actual = (
+            result.session.settings["fork"]["checkpoint_source_task_id"],
+            status["query"],
+            resumed_task.query,
+            resume_payload["ctx"]["query"],
+            resume_payload["ctx"]["document_context"],
+            resume_payload["history"],
+        )
+        assert actual == (
+            "task-org-b",
+            "org-b-query",
+            "org-b-query",
+            "org-b-query",
+            "org-b-document-context",
+            [{"role": "assistant", "content": "org-b-history"}],
+        )
+        assert "org-a" not in json.dumps(status)
+        assert "org-a" not in json.dumps(resume_payload)
+        assert result.session.organization_id == ORG_ID + 1
+        assert status_task.organization_id == ORG_ID + 1
+        assert resumed_task.status == TaskStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_fork_checkpoint_rechecks_source_org_before_insert(db_factory, monkeypatch):
+    """候选返回后、克隆插入前再次校验源 task org，失败时不落任何子行。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-legacy-recheck", org_id=None)
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        source_task = AgentTask(
+            id="task-org-a",
+            user_id=USER_ID,
+            organization_id=ORG_ID,
+            session_id=src.id,
+            query="org-a-query",
+            status=TaskStatus.RUNNING,
+            context_snapshot=_secret_envelope(src.id, "task-org-a", "org-a"),
+        )
+        db.add(source_task)
+        await db.commit()
+
+        async def _cross_org_candidate(*_args, **_kwargs):
+            return source_task, copy.deepcopy(source_task.context_snapshot)
+
+        monkeypatch.setattr(
+            session_fork_service, "_latest_settled_checkpoint", _cross_org_candidate
+        )
+        with pytest.raises(ForkCheckpointUnavailableError) as excinfo:
+            await _fork(db, src.id, organization_id=ORG_ID + 1, include_checkpoint=True)
+
+        assert excinfo.value.status_code == 409
+        assert excinfo.value.error_code == "FORK_CHECKPOINT_UNAVAILABLE"
+        await _assert_no_fork_children(db, src.id, {"task-org-a"})
+
+
+@pytest.mark.asyncio
+async def test_fork_legacy_null_org_checkpoint_still_clones(db_factory):
+    """精确组织匹配包含 NULL=NULL，不能误伤无组织 legacy checkpoint。"""
+    async with db_factory() as db:
+        src = await _mk_session(db, "src-legacy-null", org_id=None)
+        await _mk_msg(db, src.id, 1, MessageType.USER, "问题一")
+        await _mk_msg(db, src.id, 2, MessageType.ASSISTANT, "回答一")
+        db.add(
+            AgentTask(
+                id="task-org-null",
+                user_id=USER_ID,
+                organization_id=None,
+                session_id=src.id,
+                query="legacy-null-query",
+                status=TaskStatus.COMPLETED,
+                context_snapshot=_envelope(src.id),
+            )
+        )
+        await db.commit()
+
+        result = await _fork(db, src.id, organization_id=None, include_checkpoint=True)
+        clone = (
+            await db.execute(select(AgentTask).where(AgentTask.session_id == result.session.id))
+        ).scalar_one()
+        assert result.session.organization_id is None
+        assert clone.organization_id is None
+        assert clone.status == TaskStatus.PENDING
+        assert result.session.settings["fork"]["checkpoint_source_task_id"] == "task-org-null"
 
 
 @pytest.mark.asyncio

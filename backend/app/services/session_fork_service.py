@@ -343,9 +343,12 @@ async def _load_snapshot_raw(db: AsyncSession, task_id: str) -> Any | None:
 
 
 async def _latest_settled_checkpoint(
-    db: AsyncSession, source: ChatSession, user_id: int
+    db: AsyncSession, source: ChatSession, user_id: int, *, child_org: int | None
 ) -> tuple[AgentTask, dict[str, Any]] | None:
     """最近的可用 checkpoint（任务行 + 已校验信封）：可解析、无待审批、非执行中工具。
+
+    候选任务必须与 child org 精确一致（NULL 也不例外）。母会话的历史 NULL org
+    只决定子会话如何继承调用方组织，绝不能放宽 checkpoint 的租户边界。
 
     不把快照历史映射回消息 seq 的原因：checkpoint 的 history 是"运行时实际消费
     的消息窗口"，没有消息 id/seq；把它当作消息边界会伪造对应关系。克隆的语义是
@@ -359,13 +362,12 @@ async def _latest_settled_checkpoint(
     conditions = [
         AgentTask.session_id == source.id,
         AgentTask.user_id == user_id,
+        AgentTask.organization_id == child_org,
         AgentTask.context_snapshot.is_not(None),
         # 先在 SQL 里排除"明显不可克隆"的状态，再按最近顺序取候选：最近 20 个
         # 任务不能因为全是待审批/执行中就把更早的可用 checkpoint 挡掉。
         AgentTask.status.not_in(_UNSETTLED_TASK_STATUSES),
     ]
-    if source.organization_id is not None:
-        conditions.append(AgentTask.organization_id == source.organization_id)
     rows = await db.execute(
         select(AgentTask)
         .where(*conditions)
@@ -647,6 +649,7 @@ async def fork_session(
         raise ValidationError("幂等键过长（上限 128 字符）")
 
     source = await _load_source(db, source_id, user_id, scope)
+    child_org = source.organization_id if source.organization_id is not None else organization_id
 
     key_hash = _idempotency_hash(idem_key) if idem_key else None
     if idem_key:
@@ -707,17 +710,19 @@ async def fork_session(
         checkpoint_task: AgentTask | None = None
         checkpoint_snapshot: dict[str, Any] | None = None
         if include_checkpoint:
-            picked = await _latest_settled_checkpoint(db, source, user_id)
+            picked = await _latest_settled_checkpoint(db, source, user_id, child_org=child_org)
             if picked is None:
                 raise ForkCheckpointUnavailableError(
                     "没有可用的已结算 checkpoint（不存在、损坏、待审批或执行中工具）"
                 )
             checkpoint_task, checkpoint_snapshot = picked
+            # 候选查询之外，插入克隆前再核对实际源任务，禁止任何内部旁路重标 org。
+            if checkpoint_task.organization_id != child_org:
+                raise ForkCheckpointUnavailableError(
+                    "没有可用的已结算 checkpoint（不存在、损坏、待审批或执行中工具）"
+                )
 
         fork_point_id = fork_point.id if fork_point is not None else None
-        child_org = (
-            source.organization_id if source.organization_id is not None else organization_id
-        )
         resolved_title = (
             title
             if title is not None and title.strip()

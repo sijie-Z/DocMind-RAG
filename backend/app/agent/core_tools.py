@@ -46,6 +46,8 @@ def _missing_organization_result(tool_name: str) -> ToolResult:
 # 字段（JSON 字符串内部，不可越界成顶层键）；消费端只读 ``sources`` 段。
 # ``kind`` 是信封判别标记，避免把其他工具的合法 JSON 输出误当来源。
 SEARCH_RESULTS_PAYLOAD_KIND = "docmind.search_results/v1"
+# 与 Chat 的 compress_context_list 总预算一致；只计算正文证据，来源元数据不随截断丢失。
+_AGENT_SEARCH_TOTAL_EVIDENCE_MAX_CHARS = 8000
 
 
 def _build_search_payload(
@@ -145,6 +147,7 @@ async def search_knowledge_base(
     if mode_norm == "vector":
         return await _vector_search_impl(query, top_k, organization_id, document_ids)
 
+    from app.core.config import settings
     from app.dependencies import get_rag_pipeline
     from app.rag.context_compressor import compress, get_prompt_text
     from app.rag.errors import RetrievalUnavailableError
@@ -156,6 +159,7 @@ async def search_knowledge_base(
             organization_id=organization_id,
             top_k=min(top_k, 20),
             document_ids=document_ids,
+            search_mode="hybrid",
         )
     except RetrievalUnavailableError as e:
         # issue #292：检索故障不得伪装成「没有相关内容」——返回结构化失败，
@@ -173,14 +177,27 @@ async def search_knowledge_base(
     if not results:
         return "No relevant documents found for this query."
 
+    prompt_max_chars = max(1, int(settings.RAG_PROMPT_TEXT_MAX_CHARS))
+    remaining_evidence_chars = _AGENT_SEARCH_TOTAL_EVIDENCE_MAX_CHARS
     entries = []
-    for doc in results:
+    for index, doc in enumerate(results):
         score = float(doc.get("score") or 0.0)
         relevance = doc.get("relevance_score")
         filename = doc.get("filename", "Unknown")
-        # issue #186：正文单一来源 prompt_text（snippet 仅展示）；300 字上限走
-        # context_compressor 的规则式句子抽取，关键句在 chunk 后半段时仍保留。
-        snippet = compress(get_prompt_text(doc), query, max_chars=300)
+        # issue #186：正文单一来源 prompt_text（snippet 仅展示）。Agent 与 Chat
+        # 共用每源 prompt 上限及 8000 字总证据预算；剩余预算按剩余来源数分配，
+        # 前序长 chunk 不得独占预算，短来源未用的额度自然留给后续来源。
+        remaining_sources = len(results) - index
+        source_max_chars = min(prompt_max_chars, remaining_evidence_chars // remaining_sources)
+        if source_max_chars > 0:
+            snippet = compress(
+                get_prompt_text(doc),
+                query,
+                max_chars=source_max_chars,
+            )
+        else:
+            snippet = ""
+        remaining_evidence_chars -= len(snippet)
         entries.append(
             (
                 score,

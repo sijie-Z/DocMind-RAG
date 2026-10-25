@@ -5,7 +5,8 @@
 回 PENDING——文档永久停在 PENDING/PARSING。
 
 修后顺序：job 先 commit → 条件 UPDATE（``WHERE status != 'INDEXED'``）并
-commit → 最后才发 Kafka。上传路径同样先 commit job 再投递。
+commit → 最后才发 Kafka。上传路径把 Document 与 Job 放在同一事务里，
+flush 取自增 job.id 后只联合 commit 一次，再投递。
 
 变异点：恢复「flush + 状态直接赋值 + 最后统一 commit」→ 本文件第一个用例红
 （事件顺序与语句条件都不满足）。
@@ -269,9 +270,9 @@ class TestRebuildOrdering:
         )
 
 
-class TestUploadJobPersistedBeforeSend:
-    def test_upload_commits_job_before_kafka_send(self, client):
-        """上传：job 先 commit，再发 Kafka；成功发送不得走本地兜底。"""
+class TestUploadAtomicCommitBeforeSend:
+    def test_upload_commits_document_and_job_once_before_kafka_send(self, client):
+        """上传：Document+Job 同一事务 flush 后联合 commit 一次，再发 Kafka。"""
         from app.main import app
 
         events = []
@@ -344,16 +345,25 @@ class TestUploadJobPersistedBeforeSend:
         docs = [o for o in captured if isinstance(o, Document)]
         assert len(jobs) == 1 and len(docs) == 1
 
-        # 判别力（独立对抗评审 M1）：必须是 job add 之后、send 之前发生过
-        # commit；修复前是 flush → send → commit，基线代码在本断言下必红。
+        # Document 与 Job 必须先一起 flush，再联合 commit 一次；投递后仅有
+        # 清除 local_fallback 的既有后续 commit，不得有 Document 独立预提交。
+        doc_add_at = next(
+            i
+            for i, e in enumerate(events)
+            if isinstance(e, tuple) and e[0] == "add" and e[1] is docs[0]
+        )
         job_add_at = next(
             i
             for i, e in enumerate(events)
             if isinstance(e, tuple) and e[0] == "add" and e[1] is jobs[0]
         )
         send_at = events.index("send")
-        assert job_add_at < send_at, "job 必须在发送前写入"
-        assert "commit" in events[job_add_at + 1 : send_at], (
-            "job 必须在发送前 commit（仅 flush 不算）"
+        assert doc_add_at < job_add_at < send_at
+        assert events[:send_at].count("commit") == 1, "发送前只能有一次 Document+Job 联合 commit"
+        joint_commit_at = events.index("commit")
+        assert "flush" in events[job_add_at + 1 : joint_commit_at], (
+            "联合 commit 前必须 flush，以取得自增 job.id"
         )
+        flush_at = events.index("flush", job_add_at + 1, joint_commit_at)
+        assert doc_add_at < job_add_at < flush_at < joint_commit_at < send_at
         assert jobs[0].local_fallback is False, "N4：Kafka 投递确认后必须清除本机兜底标记"

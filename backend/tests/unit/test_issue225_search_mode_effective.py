@@ -394,6 +394,33 @@ class TestChainWiring:
         )
 
     @pytest.mark.asyncio
+    async def test_agent_tool_passes_hybrid_mode_to_pipeline(self, monkeypatch):
+        import app.dependencies as dependencies
+        from app.agent.core_tools import search_knowledge_base
+
+        pipeline = MagicMock()
+        pipeline.search_knowledge_base = AsyncMock(return_value=([], None))
+        monkeypatch.setattr(dependencies, "get_rag_pipeline", lambda: pipeline)
+        document_ids = ["doc-2", "doc-1"]
+
+        await search_knowledge_base(
+            "报销流程",
+            top_k=7,
+            document_ids=document_ids,
+            mode="hybrid",
+            organization_id=9,
+        )
+
+        pipeline.search_knowledge_base.assert_awaited_once_with(
+            query="报销流程",
+            organization_id=9,
+            top_k=7,
+            document_ids=document_ids,
+            search_mode="hybrid",
+        )
+        assert pipeline.search_knowledge_base.await_args.kwargs["document_ids"] is document_ids
+
+    @pytest.mark.asyncio
     async def test_pipeline_passes_search_mode_to_retriever(self, monkeypatch):
         from app.rag.pipeline import RAGPipeline
 
