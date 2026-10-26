@@ -652,6 +652,30 @@ async def test_acp_cancel_cleanup_honors_durable_ready(ready_state, monkeypatch)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("ready", [False, True])
+async def test_disconnect_legacy_agent_without_final_commit_attribute(ready, monkeypatch):
+    agent = SimpleNamespace(checkpoint_live=None)
+    save_from_live = AsyncMock()
+    converge = AsyncMock(return_value=True)
+    release = AsyncMock()
+    monkeypatch.setattr(checkpoint, "save_from_live", save_from_live)
+    monkeypatch.setattr(checkpoint, "converge_disconnected", converge)
+    monkeypatch.setattr(checkpoint, "release_task", release)
+    monkeypatch.setattr(
+        checkpoint,
+        "read_final_delivery_state",
+        AsyncMock(return_value=ready),
+    )
+    service = AgentService()
+
+    await service._checkpoint_disconnect("task-legacy-double", agent, release_lease=True)
+
+    assert save_from_live.await_count == 1
+    assert converge.await_count == 1
+    assert release.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_legacy_v1_completed_steps_do_not_replay_and_partial_is_not_final(monkeypatch):
     _capture_snapshots(monkeypatch)
     step = PlanStep(

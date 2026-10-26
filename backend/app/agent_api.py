@@ -27,7 +27,6 @@ from pathlib import Path
 
 # ── Bootstrap ────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-logging.disable(logging.CRITICAL)
 
 # API keys must be supplied via environment at startup.
 # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
@@ -574,4 +573,6 @@ async def plan(req: AgentRequest, _: None = Depends(verify_agent_api_key)):
 if __name__ == "__main__":
     import uvicorn
 
+    # Keep the dev CLI quiet without changing library importers' logger state.
+    logging.disable(logging.CRITICAL)
     uvicorn.run(app, host="0.0.0.0", port=8010)  # nosec B104 - 容器内需绑定全部网卡

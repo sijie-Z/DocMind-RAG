@@ -686,7 +686,7 @@ class AgentService:
         async def _save_then_release() -> None:
             """受保护收尾单元：同一任务里按序执行 save → converge → release
             （不可拆——拆分会让"取消落点"决定收敛/归还是否开始，见方法注释）。"""
-            if agent is not None and agent.paused_for_final_commit:
+            if agent is not None and getattr(agent, "paused_for_final_commit", False):
                 committed = await checkpoint.read_final_delivery_state(task_id)
                 if committed is not True:
                     if release_lease:
@@ -761,11 +761,12 @@ class AgentService:
                 await notify_task_terminal(task_id, TaskStatus.COMPLETED)
             return
         if readback is None and (
-            confirmed_commit or (agent is not None and agent.paused_for_final_commit)
+            confirmed_commit
+            or (agent is not None and getattr(agent, "paused_for_final_commit", False))
         ):
             if (
                 confirmed_commit
-                and not agent.paused_for_final_commit
+                and not getattr(agent, "paused_for_final_commit", False)
                 and getattr(agent, "final_delivery_started", False)
             ):
                 ok = await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED)

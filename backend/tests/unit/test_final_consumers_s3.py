@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -213,6 +215,34 @@ def test_webhook_failed_cancelled_or_paused_done_is_not_success(state, error_typ
     with pytest.raises(error_type):
         asyncio.run(service._run_chat(agent, rule, "session-1", "q", [], answers=answers))
     assert answers.answer == ""
+
+
+def test_headless_and_agent_api_preserve_global_logging_state(monkeypatch):
+    from app.agent import service as service_module
+
+    previous_disable = logging.root.manager.disable
+    previous_stdout = sys.stdout
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake")
+    monkeypatch.setenv("DEEPSEEK_API_URL", "https://fake.invalid")
+    logging.disable(logging.NOTSET)
+    monkeypatch.setattr(
+        service_module.agent_service,
+        "chat",
+        lambda **_kwargs: _events(
+            AgentEvent(type="done", task_state="completed", final_answer="OK")
+        ),
+    )
+    args = SimpleNamespace(query="q", user_id=1, org_id=1, dry_run=False, json=True)
+    try:
+        headless.run(args)
+        assert logging.root.manager.disable == logging.NOTSET
+        assert sys.stdout is previous_stdout
+        import app.agent_api  # noqa: F401
+
+        assert logging.root.manager.disable == logging.NOTSET
+        assert sys.stdout is previous_stdout
+    finally:
+        logging.disable(previous_disable)
 
 
 @pytest.mark.asyncio
