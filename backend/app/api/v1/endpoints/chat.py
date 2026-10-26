@@ -952,8 +952,6 @@ async def chat_stream_endpoint(
         # 回退到既有 RequestIDMiddleware 写入的 request.state（不另造中间件）。
         # 完整异常/堆栈只进日志，客户端只见通用文案。
         request_id = resolve_request_id(request)
-        # 日志上下文：组织取有效组织（token 回退已校验）的只读快照，绝不影响运行口径。
-        log_org_id = get_user_org_id(current_user)
         try:
             # issue #508（方案 B）：深度分析入口已迁至 /agent 工作台。旧客户端
             # 仍发 useAgent=true 时显式拒绝（错误码 + 跳转提示），绝不静默进入
@@ -1477,15 +1475,13 @@ async def chat_stream_endpoint(
                 await pipeline_task
 
         except Exception as e:
-            # W0-5：完整异常/堆栈只进服务端日志（带 request_id / org / user，
-            # 供排障与审计关联）；客户端只收映射后的用户可读文案——绝不出现
-            # str(e)、文件路径、SQL、堆栈或内部类名。无组织等可预期拒绝映射为
-            # 403 语义文案；其余未预期异常为通用文案 + 请求编号。
+            # W0-5：完整异常/堆栈只进服务端日志（带 request_id，供排障关联）；
+            # 客户端只收映射后的用户可读文案——绝不出现 str(e)、文件路径、SQL、
+            # 堆栈或内部类名。无组织等可预期拒绝映射为 403 语义文案；其余未预期
+            # 异常为通用文案 + 请求编号。日志不记录 org/user 标识。
             logger.error(
-                "SSE stream error (request_id=%s org=%s user=%s): %s",
+                "SSE stream error (request_id=%s): %s",
                 log_safe(request_id),
-                log_safe(log_org_id),
-                current_user.id,
                 log_safe(e),
                 exc_info=True,
             )

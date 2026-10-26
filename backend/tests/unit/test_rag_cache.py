@@ -1,21 +1,25 @@
 """Tests for RAG cache modules (RetrievalCache, SemanticCache)."""
 
-import hashlib
-import hmac
+import zlib
 
 import pytest
 
 from app.rag.cache import _KEY_DIGEST_DOMAIN, RetrievalCache, SemanticCache, _key_digest
 
 
-def test_key_digest_is_a_domain_separated_debug_mac():
+def test_key_digest_is_a_domain_separated_debug_checksum():
     query = "敏感查询-debug-fingerprint"
-    digest = _key_digest(query)
-    expected = hmac.new(_KEY_DIGEST_DOMAIN, query.encode(), hashlib.sha256).hexdigest()[:12]
-    bare_sha256 = hashlib.sha256(query.encode()).hexdigest()[:12]
+    payload = query.encode()
+    domain_seed = zlib.crc32(_KEY_DIGEST_DOMAIN)
+    query_checksum = zlib.crc32(payload) & 0xFFFFFF
+    domain_checksum = zlib.crc32(payload, domain_seed) & 0xFFFFFF
+    expected = f"{query_checksum:06x}{domain_checksum:06x}"
+    other_domain_checksum = zlib.crc32(payload, zlib.crc32(b"other-domain")) & 0xFFFFFF
 
+    digest = _key_digest(query)
     assert digest == expected
-    assert digest != bare_sha256
+    assert digest == _key_digest(query), "checksum 必须具有确定性"
+    assert digest != f"{query_checksum:06x}{other_domain_checksum:06x}"
     assert len(digest) == 12
     assert query not in digest
 

@@ -5,13 +5,13 @@ Memory fallback uses bounded LRU eviction to prevent unbounded growth.
 """
 
 import hashlib
-import hmac
 import json
 import logging
 import math
 import re
 import time
 import unicodedata
+import zlib
 from collections import Counter, OrderedDict
 from typing import Any
 
@@ -123,12 +123,16 @@ _KEY_DIGEST_DOMAIN = b"docmind.rag.cache.debug-key-digest.v1"
 
 
 def _key_digest(key: str) -> str:
-    """Return a 12-character domain-separated debug fingerprint, not a password hash.
+    """Return a 12-hex non-cryptographic checksum for debug display only.
 
-    The public domain only separates this non-secret debug namespace; it is not a
-    password key or a claim of confidentiality for the query.
+    Two 24-bit CRC32 values provide deterministic domain separation, not password
+    hashing, authentication, integrity protection, or real cache key material.
     """
-    return hmac.new(_KEY_DIGEST_DOMAIN, key.encode(), hashlib.sha256).hexdigest()[:12]
+    payload = key.encode()
+    domain_seed = zlib.crc32(_KEY_DIGEST_DOMAIN)
+    query_checksum = zlib.crc32(payload) & 0xFFFFFF
+    domain_checksum = zlib.crc32(payload, domain_seed) & 0xFFFFFF
+    return f"{query_checksum:06x}{domain_checksum:06x}"
 
 
 def _normalize_query_text(query: str) -> str:

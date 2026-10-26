@@ -12,7 +12,6 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from app.core.config import settings
 from app.core.llm_failfast import create_chat_completion
-from app.core.log_safety import log_safe
 from app.core.prometheus import (
     LLM_LATENCY,
     LLM_REQUEST_ERRORS,
@@ -394,8 +393,7 @@ class RAGPipeline:
                 # issue #189：降级绝静默——日志（非 debug 也可判定）+ debug 结构化状态。
                 if rerank_info.get("status") == "degraded":
                     logger.warning(
-                        "RAG rerank degraded (org=%s): path=%s reason=%s attempts=%s",
-                        log_safe(organization_id),
+                        "RAG rerank degraded: path=%s reason=%s attempts=%s",
                         rerank_info.get("path"),
                         rerank_info.get("reason"),
                         rerank_info.get("attempts"),
@@ -481,8 +479,7 @@ class RAGPipeline:
             if config_reasons:
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
                 logger.error(
-                    "RAG retrieval refused by embedding config error (org=%s): %s",
-                    log_safe(organization_id),
+                    "RAG retrieval refused by embedding config error: %s",
                     config_reasons[0],
                 )
                 raise RetrievalUnavailableError(
@@ -495,9 +492,8 @@ class RAGPipeline:
                 reasons.extend(degraded_reasons[:3])
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state=kind).inc()
                 logger.error(
-                    "RAG retrieval unavailable (kind=%s, org=%s, failed_sub_queries=%d, degraded_arms=%d): %s",
+                    "RAG retrieval unavailable (kind=%s, failed_sub_queries=%d, degraded_arms=%d): %s",
                     kind,
-                    log_safe(organization_id),
                     len(failures),
                     len(degraded_reasons),
                     "; ".join(reasons) or "no details",
@@ -513,8 +509,7 @@ class RAGPipeline:
                 # 否则降级形态会被冻结成 TTL 窗口内的「缓存事实」。
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state="degraded").inc()
                 logger.warning(
-                    "RAG retrieval degraded (org=%s): failed_sub_queries=%s, degraded_arms=%s",
-                    log_safe(organization_id),
+                    "RAG retrieval degraded: failed_sub_queries=%s, degraded_arms=%s",
                     [f"{sq}: {type(e).__name__}" for sq, e in failures],
                     degraded_reasons,
                 )

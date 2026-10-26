@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import settings
-from app.core.log_safety import log_safe
 from app.core.prometheus import RAG_RELEVANCE_GATE_TOTAL, RAG_RETRIEVAL_UNAVAILABLE
 from app.exceptions import AuthorizationError
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
@@ -470,9 +469,8 @@ async def run_rag_pipeline(
         # 观测留痕：结构化指标 + 日志（state=failed/timeout 与成功路径可分）
         RAG_RETRIEVAL_UNAVAILABLE.labels(state=retrieval_unavailable.kind).inc()
         logger.warning(
-            "RAG retrieval unavailable (kind=%s, org=%s): %s",
+            "RAG retrieval unavailable (kind=%s): %s",
             retrieval_unavailable.kind,
-            log_safe(search_org_id),
             retrieval_unavailable,
         )
         if strict_mode:
@@ -504,17 +502,14 @@ async def run_rag_pipeline(
         if top_relevance is None:
             RAG_RELEVANCE_GATE_TOTAL.labels(outcome="fail_open_no_scores").inc()
             logger.warning(
-                "RAG relevance gate skipped: reranker produced no scores "
-                "(org=%s, results=%d); fail-open",
-                log_safe(search_org_id),
+                "RAG relevance gate skipped: reranker produced no scores (results=%d); fail-open",
                 len(context_results),
             )
         elif top_relevance < gate_threshold:
             if strict_mode:
                 RAG_RELEVANCE_GATE_TOTAL.labels(outcome="strict_refused").inc()
                 logger.info(
-                    "RAG relevance gate refused (strict, org=%s): top=%.4f threshold=%.4f",
-                    log_safe(search_org_id),
+                    "RAG relevance gate refused (strict): top=%.4f threshold=%.4f",
                     top_relevance,
                     gate_threshold,
                 )
@@ -532,8 +527,7 @@ async def run_rag_pipeline(
                 return
             RAG_RELEVANCE_GATE_TOTAL.labels(outcome="refused").inc()
             logger.info(
-                "RAG relevance gate cleared context (non-strict, org=%s): top=%.4f threshold=%.4f",
-                log_safe(search_org_id),
+                "RAG relevance gate cleared context (non-strict): top=%.4f threshold=%.4f",
                 top_relevance,
                 gate_threshold,
             )
