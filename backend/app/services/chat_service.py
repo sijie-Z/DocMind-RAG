@@ -20,6 +20,15 @@ from app.models.prompt import PromptTemplate
 from app.rag.cache import SemanticCache
 from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError
 from app.rag.pipeline import no_context_system_prompt
+from app.rag.source_provenance import (
+    PARSER_ORIGINAL,
+    STRICT,
+    SourceProvenanceUnavailableError,
+    normalize_mode,
+    normalize_source_metadata,
+    provenance_of,
+    sources_have_unverified,
+)
 from app.services.chat_seq import next_message_seq
 from app.services.memory_service import get_memory_system
 from app.services.organization_settings_service import (
@@ -76,6 +85,26 @@ class RAGEvent:
     debug_data: dict | None = None
 
 
+def _provenance_error_event(
+    error: SourceProvenanceUnavailableError, conversation_id: str | None
+) -> RAGEvent:
+    """Expose needs-rebuild as a structured error, never as a normal empty answer."""
+    return RAGEvent(
+        type="error",
+        content=str(error),
+        conversation_id=conversation_id or "",
+        debug_data=error.as_dict(),
+    )
+
+
+def _cached_answer_provenance_blocked(cached_res: dict) -> bool:
+    """A cached answer may already contain legacy text, so strict rejects the whole entry."""
+    if normalize_mode(settings.RAG_SOURCE_PROVENANCE_MODE) != STRICT:
+        return False
+    sources = cached_res.get("sources") or []
+    return sources_have_unverified(sources)
+
+
 def build_sources_list(context_results: list[dict]) -> list[dict]:
     """把检索结果转为前端来源卡片契约。
 
@@ -88,16 +117,27 @@ def build_sources_list(context_results: list[dict]) -> list[dict]:
     - ``pageNumber``：PDF 来源的页码；非 PDF / 旧索引为 None（issue #197）。
     """
     sources = []
+    provenance_mode = normalize_mode(settings.RAG_SOURCE_PROVENANCE_MODE)
     for idx, r in enumerate(context_results, 1):
         relevance = r.get("relevance_score")
+        text_provenance = provenance_of(r)
+        if text_provenance == PARSER_ORIGINAL:
+            # Never fall back to E merely because an O snippet was not provided.
+            content = r.get("snippet") or (r.get("original_text") or "")[:240]
+        elif provenance_mode == STRICT:
+            content = ""
+        else:
+            content = r.get("snippet") or (r.get("text", "")[:240])
         sources.append(
             {
                 "filename": r.get("filename", "未知文档"),
                 "relevanceScore": float(relevance) if relevance is not None else None,
                 "rankScore": r.get("rank_score", r.get("score")),
                 "rank": idx,
-                "content": r.get("snippet") or (r.get("text", "")[:240]),
+                "content": content,
                 "documentId": r.get("document_id"),
+                "chunkId": r.get("chunk_id") or r.get("chunkId"),
+                "textProvenance": text_provenance,
                 "hasKeyword": r.get("has_keyword", False),
                 "hasVector": r.get("has_vector", False),
                 "rewriteHits": r.get("rewrite_hits", 1),
@@ -388,9 +428,13 @@ async def run_rag_pipeline(
                 query=user_content,
                 hit_info=cache_meta,
             )
-            if cached_res:
+            if cached_res and not _cached_answer_provenance_blocked(cached_res):
                 full_response = cached_res.get("answer", "")
-                sources_list = cached_res.get("sources", [])
+                sources_list = [
+                    normalize_source_metadata(source)
+                    for source in (cached_res.get("sources") or [])
+                    if isinstance(source, dict)
+                ]
                 ai_msg_id = str(uuid.uuid4())
 
                 _emit(
@@ -440,6 +484,7 @@ async def run_rag_pipeline(
     # 三态语义在 pipeline 层区分（正常空 / 服务故障 / 超时），这里接住故障态做
     # 诚实降级：严格模式如实拒答；非严格模式直答但明确告知检索服务不可用。
     retrieval_unavailable: RetrievalUnavailableError | None = None
+    provenance_unavailable: SourceProvenanceUnavailableError | None = None
 
     if active_doc_ids:
         try:
@@ -452,6 +497,8 @@ async def run_rag_pipeline(
             )
             if file_ids:
                 await bind_docs_to_session(session, conversation_id, active_doc_ids)
+        except SourceProvenanceUnavailableError as e:
+            provenance_unavailable = e
         except RetrievalUnavailableError as e:
             retrieval_unavailable = e
     elif not strict_mode:
@@ -462,8 +509,15 @@ async def run_rag_pipeline(
                 org_policy.retrieval_top_k if org_policy.retrieval_top_k is not None else 5,
                 debug=debug,
             )
+        except SourceProvenanceUnavailableError as e:
+            provenance_unavailable = e
         except RetrievalUnavailableError as e:
             retrieval_unavailable = e
+
+    if provenance_unavailable is not None:
+        logger.warning("RAG original provenance unavailable: %s", provenance_unavailable)
+        _emit(_provenance_error_event(provenance_unavailable, conversation_id))
+        return
 
     if retrieval_unavailable is not None:
         # 观测留痕：结构化指标 + 日志（state=failed/timeout 与成功路径可分）
@@ -552,6 +606,7 @@ async def run_rag_pipeline(
                     "filename": item.get("filename", "未知"),
                     "score": item.get("score", 0),
                     "content": (item.get("snippet") or item.get("text", ""))[:300],
+                    "textProvenance": provenance_of(item),
                 }
             )
         debug_info["final_context"] = final_context_items
@@ -633,6 +688,9 @@ async def run_rag_pipeline(
                     message_id=ai_msg_id,
                 )
             )
+    except SourceProvenanceUnavailableError as e:
+        _emit(_provenance_error_event(e, conversation_id))
+        return
     except LLMNotConfiguredError:
         # 竞态兜底：入口预检后客户端消失（如配置热更新失败）同样走错误通道，
         # 绝不把配置诊断当回答落库/写记忆。

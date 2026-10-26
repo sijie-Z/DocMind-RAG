@@ -7,6 +7,7 @@ clear_for_org，清的是自己的空 _memory，而 pipeline 单例的内存缓�
 """
 
 import fnmatch
+import json
 
 import pytest
 
@@ -96,6 +97,43 @@ class TestSemanticCacheNamespaceIsolation:
         assert pipeline.semantic_cache.index_key != SemanticCache().index_key
 
     @pytest.mark.asyncio
+    async def test_v1_exact_and_semantic_namespaces_are_not_read(self, monkeypatch):
+        fake = _FakeRedis()
+        monkeypatch.setattr("app.rag.cache._get_redis", lambda: fake)
+        monkeypatch.setattr("app.rag.cache.settings.RAG_ENABLE_CACHE", True)
+        monkeypatch.setattr("app.rag.cache.settings.SEMANTIC_CACHE_RETRIEVAL_ENABLED", True)
+        monkeypatch.setattr("app.rag.cache.settings.SEMANTIC_CACHE_ANSWER_ENABLED", True)
+
+        old_query = "v1-only-query-20261027"
+        old_exact_key = f"rag:cache:org=3|topk=5|q={old_query}"
+        fake.values[old_exact_key] = json.dumps([{"text": "legacy mixed"}])
+        assert await RetrievalCache().get(old_query, 3, 5) is None
+
+        embedding = [0.1] * 32
+        answer_cache = SemanticCache()
+        retrieval_cache = SemanticCache.for_retrieval()
+        old_keys = {old_exact_key}
+        for cache, prefix, index_key in (
+            (answer_cache, "rag:sem:", "rag:semantic_index"),
+            (retrieval_cache, "rag:sem:retrieval:", "rag:semantic_index:retrieval"),
+        ):
+            old_key = f"{prefix}org:3:{cache._hash_key(embedding)}"
+            old_keys.add(old_key)
+            fake.values[old_key] = json.dumps(
+                {
+                    "query": "查询",
+                    "embedding": embedding,
+                    "answer": "legacy answer",
+                    "sources": [{"text": "legacy mixed"}],
+                }
+            )
+            fake.members[f"{index_key}:3"] = {old_key: cache._quantize(embedding)}
+
+        assert await answer_cache.get(embedding, organization_id=3, query="查询") is None
+        assert await retrieval_cache.get(embedding, organization_id=3, query="查询") is None
+        assert old_keys <= set(fake.values), "不得靠删除 v1 数据让隔离测试通过"
+
+    @pytest.mark.asyncio
     async def test_clear_for_org_clears_retrieval_namespace_too(self, monkeypatch):
         """调用点仍以默认实例清理，检索命名空间也必须被清掉，否则文档更新后命中旧内容。"""
         fake = _FakeRedis()
@@ -136,7 +174,7 @@ class TestSharedRetrievalCacheInvalidation:
 
         serving = RetrievalCache()
         await serving.set("缓存查询2", 9, 5, [{"text": "旧内容"}])
-        assert "rag:cache:org=9|topk=5|q=缓存查询2" in fake.values
+        assert "rag:cache:org=9|topk=5|prov=v2|q=缓存查询2" in fake.values
 
         await RetrievalCache().clear_for_org(9)
 

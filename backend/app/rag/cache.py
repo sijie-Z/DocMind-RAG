@@ -17,6 +17,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.rag.query_processor import extract_query_terms
+from app.rag.source_provenance import CACHE_SCHEMA_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -342,12 +343,13 @@ class RetrievalCache:
     def _key(
         self, query: str, organization_id: int, top_k: int, search_mode: str | None = None
     ) -> str:
-        # issue #225 决策 7A：显式 search_mode 的结果按模式分域——显式模式与自动
-        # 路由互不可见（既不让覆盖请求命中/复用自动路由的结果，也防止显式模式的
-        # 结果被后续自动路由请求当作自己的结果返回）。search_mode=None 时键与
-        # 修前逐字节相同（org=…|topk=…|q=…），自动路由行为零变化。
+        # issue #225：显式 search_mode 继续分域。PR2 增加正文契约版本，
+        # v1 mixed payload 不再被读取；org 前缀保持不变，clear_for_org 语义不变。
         mode_seg = f"|mode={search_mode}" if search_mode else ""
-        return f"org={organization_id}|topk={top_k}{mode_seg}|q={query.strip().lower()}"
+        return (
+            f"org={organization_id}|topk={top_k}{mode_seg}"
+            f"|prov={CACHE_SCHEMA_VERSION}|q={query.strip().lower()}"
+        )
 
     def describe_key(
         self, query: str, organization_id: int, top_k: int, search_mode: str | None = None
@@ -436,14 +438,16 @@ class SemanticCache:
     在用户中断流式回答后返回空消息。
     """
 
-    # 检索专用命名空间（RAGPipeline 使用，见 for_retrieval）
-    RETRIEVAL_PREFIX = "rag:sem:retrieval:"
-    RETRIEVAL_INDEX_KEY = "rag:semantic_index:retrieval"
+    # PR2：answer/retrieval 都切换到新正文契约命名空间；v1 只自然过期，不读取。
+    ANSWER_PREFIX = f"rag:sem:{CACHE_SCHEMA_VERSION}:"
+    ANSWER_INDEX_KEY = f"rag:semantic_index:{CACHE_SCHEMA_VERSION}"
+    RETRIEVAL_PREFIX = f"rag:sem:retrieval:{CACHE_SCHEMA_VERSION}:"
+    RETRIEVAL_INDEX_KEY = f"rag:semantic_index:retrieval:{CACHE_SCHEMA_VERSION}"
 
     def __init__(
         self,
-        prefix: str = "rag:sem:",
-        index_key: str = "rag:semantic_index",
+        prefix: str = ANSWER_PREFIX,
+        index_key: str = ANSWER_INDEX_KEY,
         *,
         namespace: str = "answer",
     ):

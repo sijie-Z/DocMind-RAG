@@ -157,6 +157,10 @@ class AISettings(BaseSettings):
     RAG_PROMPT_TEXT_MAX_CHARS: int = Field(default=3000, ge=1)
     RAG_SNIPPET_MAX_CHARS: int = Field(default=260, ge=1)
 
+    # 原文溯源滚动迁移：compat 允许 legacy 检索文本 fallback 但必须显式标记；
+    # strict 只允许 parser_original 证据。默认不在 backfill 完成前全局 strict。
+    RAG_SOURCE_PROVENANCE_MODE: Literal["compat", "strict"] = "compat"
+
     # Query rewrite (multi-query expansion)
     RAG_ENABLE_QUERY_REWRITE: bool = True
     RAG_QUERY_REWRITE_COUNT: int = 4

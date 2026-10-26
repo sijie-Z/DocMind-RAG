@@ -46,6 +46,7 @@ from app.rag.retriever import (
     apply_doc_cap,
     clause_lookup_doc_cap,
 )
+from app.rag.source_provenance import filter_original_results
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,11 @@ def _source_content(hit: dict[str, Any]) -> str:
 def _source_filename(hit: dict[str, Any]) -> str:
     """兜底读取原始 ES 命中的文件名（后处理结果已带 filename 键）。"""
     return (hit.get("_source") or {}).get("filename", "未知")
+
+
+def _gate_source_provenance(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Apply one strict gate to fresh, exact-cache, and semantic-cache results."""
+    return filter_original_results(results, mode=settings.RAG_SOURCE_PROVENANCE_MODE)
 
 
 class RAGPipeline:
@@ -172,6 +178,8 @@ class RAGPipeline:
                     query, organization_id, top_k, search_mode=search_mode
                 )
                 if cached is not None:
+                    # v2 cache still needs the same strict gate as a fresh result.
+                    cached = _gate_source_provenance(cached)
                     RAG_CACHE_HITS.labels(cache_type="exact").inc()
                     self.metrics.inc("cache_hit")
                     self.metrics.record_event("cache_hit", 1)
@@ -231,6 +239,7 @@ class RAGPipeline:
                         hit_info=sem_meta,
                     )
                     if sem_cached:
+                        cached_sources = _gate_source_provenance(sem_cached.get("sources", []))
                         RAG_CACHE_HITS.labels(cache_type="semantic").inc()
                         self.metrics.inc("semantic_cache_hit")
                         self.metrics.inc("cache_hit")
@@ -241,19 +250,19 @@ class RAGPipeline:
                         RAG_RETRIEVAL_LATENCY.observe(time.perf_counter() - start)
                         self.metrics.inc("latency_count")
                         self.metrics.record_event("latency", elapsed)
-                        if not document_ids and sem_cached.get("sources"):
+                        if not document_ids and cached_sources:
                             await self.cache.set(
                                 query,
                                 organization_id,
                                 top_k,
-                                sem_cached["sources"],
+                                cached_sources,
                                 search_mode=search_mode,
                             )
                         if debug and debug_info is not None:
                             debug_info["cache_hit"] = True
                             debug_info["cache_type"] = "semantic"
                             debug_info["cache"] = dict(sem_meta or {})
-                        return sem_cached.get("sources", []), debug_info
+                        return cached_sources, debug_info
                     if debug and debug_info is not None:
                         # 未命中也要可解释：阈值内被条号/实体等价判定拒绝时，
                         # rejected_reason/similarity/cached_query 直接暴露原因。
@@ -518,6 +527,16 @@ class RAGPipeline:
                         f"{sq}: {type(e).__name__}: {e}" for sq, e in failures[:3]
                     ] + degraded_reasons[:3]
 
+            # 评分、重排、doc-cap/top-k 均已按 E 完成；strict 只在证据出口
+            # 过滤 legacy，绝不把「未迁移」伪装成正常空结果或写入 cache。
+            before_provenance_gate = len(result)
+            result = _gate_source_provenance(result)
+            if debug and debug_info is not None:
+                debug_info["source_provenance"] = {
+                    "mode": settings.RAG_SOURCE_PROVENANCE_MODE,
+                    "legacy_excluded": before_provenance_gate - len(result),
+                }
+
             # 缓存写入门控（issue #292）：只有「全臂正常 + 有结果」才可写入。
             # - 故障/降级：不写 —— 毒化路径必须断；
             # - 正常空结果：不写 —— 负缓存把「一次未命中」放大成 TTL 窗口内的持续
@@ -639,6 +658,8 @@ class RAGPipeline:
                 "LLM 服务未配置（未设置 DEEPSEEK_API_KEY 或启用本地模型），无法生成回答"
             )
 
+        # 防御性兜底：直接调用 chat_stream 时也不能绕开 strict provenance gate。
+        context = _gate_source_provenance(context)
         masking_enabled = enable_masking and getattr(settings, "ENABLE_PII_MASKING", False)
         from app.services.masking_service import masking_service
 

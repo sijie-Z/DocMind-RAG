@@ -68,6 +68,7 @@ import pytest
 from app.core.config import Settings, settings
 from app.core.config.ai import AISettings
 from app.rag.cache import RetrievalCache, SemanticCache, queries_equivalent
+from app.rag.source_provenance import SourceProvenanceUnavailableError
 
 # ── 测试替身 ─────────────────────────────────────────────────────────
 
@@ -730,6 +731,77 @@ class TestAnswerCacheConsumer:
         assert dbg["cache_type"] == "semantic"
         assert dbg["cache"]["similarity"] == pytest.approx(1.0)
         assert dbg["cache"]["cached_query"] == "《劳动合同法》第七条是什么"
+
+    @pytest.mark.asyncio
+    async def test_provenance_strict_skips_legacy_answer_cache(self, monkeypatch):
+        _enable(monkeypatch, answer=True)
+        _fake_redis(monkeypatch)
+        monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", "strict")
+        sem_cache = SemanticCache()
+        query = "原文缓存strict测试"
+        await sem_cache.set(
+            query,
+            _VEC_A,
+            "LEGACY-CACHED-ANSWER",
+            [{"documentId": "doc-legacy", "content": "mixed"}],
+            organization_id=1,
+        )
+
+        captured: dict = {}
+        fake_rag = _fake_rag_stack(_VEC_A, AsyncMock(return_value=([], None)), captured)
+        events = await _run_chat(_mock_chat_session(), fake_rag, sem_cache, query)
+
+        assert fake_rag.search_knowledge_base.await_count == 1, "legacy answer cache 必须跳过"
+        assert not any(event.type == "message" and event.is_cached for event in events), (
+            "strict 不得直接返回含 legacy sources 的旧回答"
+        )
+        assert all(event.content != "LEGACY-CACHED-ANSWER" for event in events)
+
+    @pytest.mark.asyncio
+    async def test_provenance_strict_accepts_original_answer_cache(self, monkeypatch):
+        _enable(monkeypatch, answer=True)
+        _fake_redis(monkeypatch)
+        monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", "strict")
+        sem_cache = SemanticCache()
+        query = "原文缓存strict测试-clean"
+        await sem_cache.set(
+            query,
+            _VEC_A,
+            "ORIGINAL-CACHED-ANSWER",
+            [
+                {
+                    "documentId": "doc-original",
+                    "content": "original",
+                    "textProvenance": "parser_original",
+                }
+            ],
+            organization_id=1,
+        )
+
+        fake_rag = _fake_rag_stack(_VEC_A, AsyncMock(return_value=([], None)), {})
+        events = await _run_chat(_mock_chat_session(), fake_rag, sem_cache, query)
+
+        assert fake_rag.search_knowledge_base.await_count == 0
+        cached = [event for event in events if event.type == "message" and event.is_cached]
+        assert cached and cached[0].content == "ORIGINAL-CACHED-ANSWER"
+        assert cached[0].sources[0]["textProvenance"] == "parser_original"
+
+    @pytest.mark.asyncio
+    async def test_provenance_failure_emits_structured_error_not_answer(self, monkeypatch):
+        monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", "strict")
+        error = SourceProvenanceUnavailableError(["doc-legacy"], unverified_count=1)
+        fake_rag = _fake_rag_stack(_VEC_A, AsyncMock(side_effect=error), {})
+
+        events = await _run_chat(
+            _mock_chat_session(),
+            fake_rag,
+            MagicMock(enabled=False),
+            "legacy fresh failure",
+        )
+
+        assert [event.type for event in events] == ["error"]
+        assert events[0].debug_data["status"] == "needs_rebuild"
+        assert events[0].debug_data["document_ids"] == ["doc-legacy"]
 
 
 # ── 纯函数锚点（防止等价判定被悄悄放宽）────────────────────────────

@@ -139,7 +139,7 @@ class TestSemanticCacheOrgRequired:
         embedding = [0.1, 0.2, 0.3, 0.4] * 8
 
         await cache.set("query", embedding, "answer", [], organization_id=7)
-        assert any(key.startswith("rag:sem:org:7:") for key in store.values)
+        assert any(key.startswith("rag:sem:v2:org:7:") for key in store.values)
         hit = await cache.get(embedding, organization_id=7, query="query")
         assert hit is not None and hit["answer"] == "answer"
         assert await cache.get(embedding, organization_id=8, query="query") is None
