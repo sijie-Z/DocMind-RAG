@@ -61,11 +61,11 @@ async def _load(factory, doc_id):
         return await session.get(Document, doc_id)
 
 
-async def _seed_job(factory, doc_id, status: KnowledgeJobStatus):
+async def _seed_job(factory, doc_id, status: KnowledgeJobStatus, trigger_type="upload"):
     job = KnowledgeProcessingJob(
         document_id=doc_id,
         organization_id=1,
-        trigger_type="upload",
+        trigger_type=trigger_type,
         status=status,
         retry_count=0,
     )
@@ -197,10 +197,14 @@ class TestStaleRedeliveryEndToEnd:
         assert doc.parse_error is None
 
     @pytest.mark.asyncio
-    async def test_new_job_reprocess_may_fail_intentionally(self, session_factory, monkeypatch):
-        """回归对照：重建创建的新 QUEUED job 不受陈旧判定影响，失败如实 FAILED。"""
+    async def test_new_job_reprocess_preserves_indexed_before_es_delete(
+        self, session_factory, monkeypatch
+    ):
+        """有意重建的新 job 可进入解析，但 ES 前失败只让新 job FAILED。"""
         doc_id = await _seed(session_factory, DocumentStatus.INDEXED)
-        job_id = await _seed_job(session_factory, doc_id, KnowledgeJobStatus.QUEUED)
+        job_id = await _seed_job(
+            session_factory, doc_id, KnowledgeJobStatus.QUEUED, trigger_type="reprocess"
+        )
         processor = DocumentProcessor()
 
         async def fake_lock(_document_id):
@@ -220,9 +224,13 @@ class TestStaleRedeliveryEndToEnd:
 
         assert outcome is False
         doc = await _load(session_factory, doc_id)
-        assert doc.status == DocumentStatus.FAILED, (
-            "有意重建失败应如实 FAILED（其旧索引已被重建端点删除）"
+        job = await _load_job(session_factory, job_id)
+        assert doc.status == DocumentStatus.INDEXED, (
+            "旧版重建尚未进入 ES delete 时失败，文档必须恢复 INDEXED"
         )
+        assert doc.parse_error is None
+        assert job.status == KnowledgeJobStatus.FAILED
+        assert "rebuild parse failed" in job.error_message
 
     @pytest.mark.asyncio
     async def test_superseded_failed_job_redelivery_keeps_indexed(

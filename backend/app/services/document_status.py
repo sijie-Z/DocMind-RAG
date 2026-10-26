@@ -24,7 +24,50 @@ from app.models.document import Document, DocumentStatus
 logger = logging.getLogger(__name__)
 
 
-async def verify_indexed(client, document_id: str, expected: int, *, organization_id: str) -> int:
+def require_count_response(response, *, context: str) -> int:
+    """Return a non-negative ES count only when the response is fully trustworthy.
+
+    ``ObjectApiResponse`` intentionally supports mapping-style access without being a
+    ``Mapping`` subclass, so this parser uses its actual key-access/``get`` protocol.
+    Missing or malformed fields, partial shards, failure details, and timeouts are all
+    hard failures: a plausible-looking ``count`` cannot make a partial response safe.
+    """
+    if not response:
+        raise RuntimeError(f"{context}: empty/false count response")
+    try:
+        count = response["count"]
+        failures = response.get("failures", [])
+        shards = response.get("_shards", {})
+        shard_failures = shards.get("failures", [])
+        failed_shards = shards.get("failed", 0)
+        timed_out = response.get("timed_out", False)
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
+        raise RuntimeError(f"{context}: missing or invalid count response") from e
+
+    if not isinstance(failures, list) or not isinstance(shard_failures, list):
+        raise RuntimeError(f"{context}: invalid failure details")
+    if not isinstance(timed_out, bool):
+        raise RuntimeError(f"{context}: invalid timed_out={timed_out!r}")
+    if isinstance(failed_shards, bool) or not isinstance(failed_shards, int) or failed_shards < 0:
+        raise RuntimeError(f"{context}: invalid failed_shards={failed_shards!r}")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        raise RuntimeError(f"{context}: invalid count={count!r}")
+    if failures or shard_failures or failed_shards or timed_out:
+        raise RuntimeError(
+            f"{context}: failures={failures!r}, shard_failures={shard_failures!r}, "
+            f"failed_shards={failed_shards}, timed_out={timed_out}"
+        )
+    return count
+
+
+async def verify_indexed(
+    client,
+    document_id: str,
+    expected: int,
+    *,
+    organization_id: str,
+    require_complete: bool = False,
+) -> int:
     """确认该文档的 chunk **真的**能被检索到；不能就抛错。
 
     三条不变式（issue #181 / #224）——「状态 = INDEXED」必须意味着文档可被检索：
@@ -50,13 +93,21 @@ async def verify_indexed(client, document_id: str, expected: int, *, organizatio
     「bulk 库大概会抛错」这个假设。回读校验把它变成一条可执行的断言 ——
     库的行为变了、mapping 改了、将来有人把 bulk 换成别的写法，都不再能让它悄悄失效。
 
+    ``require_complete=True`` 用于文档替换成功路径：实际条数必须等于预期，
+    且每条 chunk 都必须带 embedding 并属于预期组织。部分写入或新旧混杂只能
+    失败，不能只留 warning 后仍由调用方写入 INDEXED/job SUCCESS。
+
     返回实际索引到的条数（便于调用方记录）。
     """
     index_name = settings.ELASTICSEARCH_INDEX_NAME
+    count_context = f"索引校验失败：文档 {document_id} 的 count 回读"
     await client.indices.refresh(index=index_name)
 
     res = await client.count(index=index_name, query={"term": {"document_id": document_id}})
-    indexed = int(res.get("count", 0))
+    if require_complete:
+        indexed = require_count_response(res, context=count_context)
+    else:
+        indexed = int(res.get("count", 0))
 
     if indexed == 0:
         raise RuntimeError(
@@ -76,7 +127,10 @@ async def verify_indexed(client, document_id: str, expected: int, *, organizatio
             }
         },
     )
-    with_embedding = int(res_emb.get("count", 0))
+    if require_complete:
+        with_embedding = require_count_response(res_emb, context=count_context)
+    else:
+        with_embedding = int(res_emb.get("count", 0))
     if with_embedding == 0:
         raise RuntimeError(
             f"索引校验失败：文档 {document_id} 在索引 {index_name} 里有 {indexed} 条 chunk，"
@@ -95,7 +149,10 @@ async def verify_indexed(client, document_id: str, expected: int, *, organizatio
             }
         },
     )
-    with_org = int(res_org.get("count", 0))
+    if require_complete:
+        with_org = require_count_response(res_org, context=count_context)
+    else:
+        with_org = int(res_org.get("count", 0))
     if with_org == 0:
         raise RuntimeError(
             f"索引校验失败：文档 {document_id} 的 chunk 的 organization_id 与文档不一致"
@@ -104,12 +161,23 @@ async def verify_indexed(client, document_id: str, expected: int, *, organizatio
         )
 
     if indexed != expected:
-        # 部分落库：文档确实可被检索到，但内容不完整。不阻断，但必须留痕。
+        if require_complete:
+            raise RuntimeError(
+                f"索引校验失败：文档 {document_id} 预期 {expected} 条 chunk，"
+                f"实际 {indexed} 条。拒绝把不完整或混杂的替换结果标记为已索引。"
+            )
+        # 非替换调用方保留既有留痕语义；worker 替换链必须 require_complete。
         logger.warning(
             "[DOC_STATE] 索引条数与预期不符 document_id=%s 预期=%d 实际=%d",
             document_id,
             expected,
             indexed,
+        )
+    if require_complete and (with_embedding != indexed or with_org != indexed):
+        raise RuntimeError(
+            f"索引校验失败：文档 {document_id} 的 chunk 可检索性不完整"
+            f"（总数={indexed}，带 embedding={with_embedding}，组织匹配={with_org}，"
+            f"预期={expected}）。拒绝把该文档标记为已索引。"
         )
     if with_embedding < indexed or with_org < indexed:
         # 部分 chunk 对某条检索引擎通道不可见：文档整体可检索（有带向量的、

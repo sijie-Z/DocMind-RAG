@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.document import Document, DocumentStatus
-from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
+from app.models.knowledge_job import KnowledgeProcessingJob
 
 
 @pytest.fixture
@@ -154,10 +154,9 @@ class TestRebuildOrdering:
         delete_es.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_es_delete_failure_terminalizes_job(self, monkeypatch):
-        """ES 删除失败：job 条件收敛为 FAILED，文档状态不被改写。"""
+    async def test_rebuild_does_not_call_legacy_es_predelete(self, monkeypatch):
+        """即使旧预删服务会失败，重建投递也不再经过该路径。"""
         import app.api.v1.endpoints.knowledge as knowledge_mod
-        from app.exceptions import AppError
 
         doc = SimpleNamespace(
             id="doc-1",
@@ -168,39 +167,25 @@ class TestRebuildOrdering:
             organization_id=1,
         )
         monkeypatch.setattr(knowledge_mod, "get_document_for_user", AsyncMock(return_value=doc))
-        monkeypatch.setattr(
-            knowledge_mod.knowledge_service,
-            "delete_es_by_document_id",
-            AsyncMock(side_effect=RuntimeError("ES down")),
-        )
+        delete_es = AsyncMock(side_effect=RuntimeError("legacy predelete must not run"))
+        monkeypatch.setattr(knowledge_mod.knowledge_service, "delete_es_by_document_id", delete_es)
         monkeypatch.setattr(knowledge_mod, "create_notification", AsyncMock(return_value=None))
-
-        captured = []
-
-        async def fake_execute(stmt):
-            captured.append(stmt)
-            return MagicMock()
+        monkeypatch.setattr(
+            knowledge_mod.kafka_producer, "send_message", AsyncMock(return_value=True)
+        )
 
         db = MagicMock()
         db.add = MagicMock()
         db.commit = AsyncMock()
-        db.execute = AsyncMock(side_effect=fake_execute)
+        db.execute = AsyncMock(return_value=MagicMock())
 
-        with pytest.raises(AppError, match="重建知识库失败"):
-            await knowledge_mod.rebuild_document_knowledge(
-                "doc-1", current_user=SimpleNamespace(id=1), db=db
-            )
-
-        job_updates = [
-            stmt for stmt in captured if "knowledge_processing_jobs" in str(stmt.compile())
-        ]
-        assert job_updates, "ES 删除失败必须把 job 条件收敛（不能留下 QUEUED 孤儿）"
-        params = job_updates[0].compile().params.values()
-        assert KnowledgeJobStatus.FAILED in params
-        assert KnowledgeJobStatus.SUCCESS in params, (
-            "收敛写入必须带 status != SUCCESS 条件（不覆盖并发成功 run）"
+        result = await knowledge_mod.rebuild_document_knowledge(
+            "doc-1", current_user=SimpleNamespace(id=1), db=db
         )
-        assert "status" not in vars(doc), "失败路径不得改写文档状态"
+
+        assert result.success is True
+        delete_es.assert_not_awaited()
+        assert "status" not in vars(doc), "投递路径不得直接改写文档状态"
 
     @pytest.mark.asyncio
     async def test_rebuild_fallback_marker_persisted_before_schedule(self, monkeypatch):

@@ -467,15 +467,12 @@ async def rebuild_document_knowledge(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    重建单个文档的知识库索引：删除 ES 中该文档的索引后，重新发送 Kafka 任务由 Worker 解析并写 ES。
-    """
+    """投递单文档重建任务；旧索引由 Worker 在替换阶段删除。"""
     try:
         doc = await get_document_for_user(db, current_user, document_id)
 
-        # 1. 先落库任务行（commit 拿到自增 id），之后才动 ES：若 job 落库失败，
-        #    ES 尚未删除，INDEXED 文档保持可检索——消除「状态 INDEXED、索引已被
-        #    删除」的不可检索窗口（预审补偿）。
+        # 1. 先落库任务行（commit 拿到自增 id）。入口不预删旧 ES：
+        #    Worker 完成解析、向量化和 DB chunk 准备后才进入替换阶段。
         job = KnowledgeProcessingJob(
             document_id=document_id,
             organization_id=doc.organization_id,
@@ -490,32 +487,7 @@ async def rebuild_document_knowledge(
         db.add(job)
         await db.commit()
 
-        # 2. 删除 ES 中该文档的旧索引；失败则把 job 条件收敛为 FAILED
-        #    （不覆盖已 SUCCESS 的并发成功 run），文档保持 INDEXED 且旧索引
-        #    仍在——不制造「已索引却搜不到」。
-        try:
-            await knowledge_service.delete_es_by_document_id(document_id)
-        except Exception as es_err:
-            try:
-                await db.execute(
-                    update(KnowledgeProcessingJob)
-                    .where(
-                        KnowledgeProcessingJob.id == job.id,
-                        KnowledgeProcessingJob.status != KnowledgeJobStatus.SUCCESS,
-                    )
-                    .values(
-                        status=KnowledgeJobStatus.FAILED,
-                        error_message=f"删除旧索引失败: {es_err}",
-                        finished_at=datetime.now(),
-                    )
-                    .execution_options(synchronize_session=False)
-                )
-                await db.commit()
-            except Exception as mark_err:
-                logger.error(f"重建失败且任务收敛写入失败: {mark_err}", exc_info=True)
-            raise
-
-        # 3. 条件更新文档状态：已 INDEXED 的文档不因重建请求回退为 PENDING
+        # 2. 条件更新文档状态：已 INDEXED 的文档不因重建请求回退为 PENDING
         #    （worker 接单后会以 PARSING 接管；此处只禁止覆盖终端态）。
         await db.execute(
             update(Document)
@@ -578,10 +550,10 @@ async def rebuild_document_knowledge(
                 task.add_done_callback(_background_tasks.discard)
                 logger.info("Kafka unavailable; scheduled in-process document rebuild")
             except Exception as proc_err:
-                # A3 窄口：本地调度失败 ≠ 任务终局。此刻 ES 旧索引已删、Kafka
+                # A3 窄口：本地调度失败 ≠ 任务终局。此刻旧 ES 仍保留、Kafka
                 # 未送达；若把 job 收敛为 FAILED，它将掉出启动对账的扫描范围
-                # （只扫 local_fallback 且 QUEUED/PROCESSING 的任务），文档就
-                # 可能永久停留在「INDEXED 但检索不到」。
+                # （只扫 local_fallback 且 QUEUED/PROCESSING 的任务），重建就
+                # 永远不会执行。
                 # 修复：job 保持落库时的 QUEUED + local_fallback=True，只如实
                 # 记录失败原因；下次进程启动由 reconcile_local_jobs 回收重跑
                 # （文档锁互斥、处理幂等）。复用既有 A3-P0 机制，不新增列。

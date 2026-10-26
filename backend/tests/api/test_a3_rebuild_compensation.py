@@ -15,8 +15,8 @@ FAILED：
 修复（复用既有 A3-P0 机制，不新增列/不新增状态机）：本地调度失败 ≠ 任务
 终局。job 保持 QUEUED + local_fallback=True（任务落库时已写入），错误原因
 如实落库；下次进程启动时由 ``reconcile_local_jobs`` 回收重跑（文档锁互斥、
-处理幂等）。本用例用真实 sqlite 复现完整窗口，并断言该 job 确实在对账扫描
-范围内、会被重新派发。
+处理幂等）。本阶段另移除入口预删，等待回收期间旧版仍可检索。本用例用真实
+sqlite 复现完整窗口，并断言该 job 确实在对账扫描范围内、会被重新派发。
 
 变异点：把失败分支恢复为「job.status = FAILED + finished_at」→ 本用例红：
 - job 不再保持 QUEUED（状态断言失败）；
@@ -123,8 +123,8 @@ class TestRebuildDispatchFailureKeepsJobRecoverable:
             "create_task 失败后必须显式 close() 协程，避免 never awaited 泄漏"
         )
 
-        # 窗口前提：ES 旧索引确已删除、Kafka 确已尝试
-        es_delete.assert_awaited_once_with("doc-a3")
+        # 本阶段入口不得预删；Kafka 仍按原路径尝试投递。
+        es_delete.assert_not_awaited()
 
         async with factory() as session:
             jobs = (await session.execute(select(KnowledgeProcessingJob))).scalars().all()
@@ -133,7 +133,7 @@ class TestRebuildDispatchFailureKeepsJobRecoverable:
 
         assert job.status == KnowledgeJobStatus.QUEUED, (
             "本地调度失败不是任务终局：job 必须保持 QUEUED 留在启动对账扫描范围"
-            "（恢复为 FAILED 会让 ES 已删的重建任务永久失联）"
+            "（恢复为 FAILED 会让待回收的重建任务永久失联）"
         )
         assert job.local_fallback is True, "job 必须保留本机兜底标记（启动对账的扫描条件）"
         assert job.finished_at is None, "非终局任务不得写 finished_at"
