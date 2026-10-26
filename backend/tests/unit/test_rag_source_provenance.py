@@ -313,9 +313,30 @@ def _columns(db_path: Path) -> dict:
 
 
 def _constraints(db_path: Path) -> dict:
+    """Capture constraint semantics without SQLite's non-semantic enumeration order."""
     with sqlite3.connect(str(db_path)) as conn:
-        foreign_keys = sorted(conn.execute("PRAGMA foreign_key_list(document_chunks)"))
-        indexes = sorted(conn.execute("PRAGMA index_list(document_chunks)"))
+        # 丢弃 FK id（重建表时可变）；保留 table/from/to/actions/match 以及
+        # 组合外键内部的 seq。set 只消除不同约束之间的枚举顺序。
+        foreign_keys = {
+            (row[2], row[3], row[4], row[5], row[6], row[7], row[1])
+            for row in conn.execute("PRAGMA foreign_key_list(document_chunks)")
+        }
+        indexes = {}
+        for row in conn.execute("PRAGMA index_list(document_chunks)"):
+            _seq, name, unique, origin, partial = row
+            # 索引之间的 seq 非语义；组合索引内部的列顺序仍是语义，必须保留。
+            columns = tuple(
+                conn.execute(
+                    "SELECT cid, name FROM pragma_index_info(?) ORDER BY seqno",
+                    (name,),
+                )
+            )
+            indexes[name] = {
+                "unique": unique,
+                "origin": origin,
+                "partial": partial,
+                "columns": columns,
+            }
     return {"foreign_keys": foreign_keys, "indexes": indexes}
 
 
@@ -342,6 +363,20 @@ def test_018_migration_single_head_nullable_data_and_constraints_roundtrip(tmp_p
     command.upgrade(cfg, PREV_REV)
     assert "original_text" not in _columns(db_path)
     constraints = _constraints(db_path)
+    assert constraints["foreign_keys"], "外键快照不能为空，否则无序比较会假绿"
+    assert {fk[0] for fk in constraints["foreign_keys"]} == {"documents"}
+    assert len(constraints["indexes"]) == 3
+    assert all(definition["columns"] for definition in constraints["indexes"].values())
+    assert any(
+        definition["origin"] == "pk" and definition["unique"] == 1
+        for definition in constraints["indexes"].values()
+    )
+    indexed_columns = {
+        column_name
+        for definition in constraints["indexes"].values()
+        for _cid, column_name in definition["columns"]
+    }
+    assert {"id", "document_id", "embedding_id"} <= indexed_columns
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
             "INSERT INTO document_chunks "
