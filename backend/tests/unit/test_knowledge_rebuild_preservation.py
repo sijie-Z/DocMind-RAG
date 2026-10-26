@@ -5,6 +5,7 @@ whose delete, bulk, search, and verification operations mutate or inspect real f
 state, so these tests assert retrievability rather than only mocking calls.
 """
 
+import logging
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -598,3 +599,41 @@ async def test_partial_pre_bulk_count_zero_cannot_mask_mixed_versions(
     assert fake_es.bulk_calls == []
     assert len(fake_es.count_calls) == 1
     assert texts == [OLD_TEXT]
+
+
+@pytest.mark.asyncio
+async def test_restore_indexed_log_escapes_document_id(monkeypatch, caplog):
+    """The new restore log must not let a user document ID forge log lines."""
+    processor = _make_processor(monkeypatch)
+    doc = SimpleNamespace(
+        file_path="unused.txt",
+        organization_id=7,
+        _reprocess_previous_status=DocumentStatus.INDEXED,
+        _db_chunks_committed=False,
+        _es_delete_started=False,
+    )
+
+    async def fake_load(_document_id, _job_id):
+        return doc
+
+    async def failing_parse(*args):
+        raise RuntimeError("parser exploded")
+
+    mark_failed = AsyncMock(return_value=None)
+    monkeypatch.setattr(processor, "_load_and_mark_parsing", fake_load)
+    monkeypatch.setattr(processor.parser, "parse_document", failing_parse)
+    monkeypatch.setattr(processor, "_mark_failed", mark_failed)
+    hostile_id = "doc-rebuild-preserve\n[FORGED] INDEXED"
+    caplog.set_level(logging.INFO, logger=dp_mod.__name__)
+
+    assert await processor.process(hostile_id, 321) is False
+
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if "restoring INDEXED" in record.getMessage()
+    ]
+    assert len(messages) == 1
+    assert "\n" not in messages[0] and "\r" not in messages[0]
+    assert "doc-rebuild-preserve\\n[FORGED] INDEXED" in messages[0]
+    mark_failed.assert_awaited_once_with(hostile_id, "parser exploded", 321, preserve_indexed=True)

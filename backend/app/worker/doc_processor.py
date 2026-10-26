@@ -21,6 +21,7 @@ from app.core.elasticsearch import (
     create_index_if_not_exists,
     get_elasticsearch,
 )
+from app.core.log_safety import log_safe
 from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.services.clause_refs import extract_clause_fields
@@ -304,7 +305,7 @@ class DocumentProcessor:
                 logger.info(
                     "[DOC_PROC] rebuild failed before DB chunk commit and ES delete; "
                     "restoring INDEXED document_id=%s job_id=%s",
-                    document_id,
+                    log_safe(document_id),
                     job_id,
                 )
                 await self._mark_failed(document_id, str(e), job_id, preserve_indexed=True)
