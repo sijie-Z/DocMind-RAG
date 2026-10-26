@@ -11,6 +11,7 @@ import math
 import re
 import time
 import unicodedata
+import zlib
 from collections import Counter, OrderedDict
 from typing import Any
 
@@ -118,9 +119,20 @@ _ITEM_SPAN_RE = re.compile(
 _ENTITY_MISMATCH = "entity_mismatch"
 
 
+_KEY_DIGEST_DOMAIN = b"docmind.rag.cache.debug-key-digest.v1"
+
+
 def _key_digest(key: str) -> str:
-    """缓存键的短摘要（debug 展示用；不暴露明文查询）。"""
-    return hashlib.sha256(key.encode()).hexdigest()[:12]
+    """Return a 12-hex non-cryptographic checksum for debug display only.
+
+    Two 24-bit CRC32 values provide deterministic domain separation, not password
+    hashing, authentication, integrity protection, or real cache key material.
+    """
+    payload = key.encode()
+    domain_seed = zlib.crc32(_KEY_DIGEST_DOMAIN)
+    query_checksum = zlib.crc32(payload) & 0xFFFFFF
+    domain_checksum = zlib.crc32(payload, domain_seed) & 0xFFFFFF
+    return f"{query_checksum:06x}{domain_checksum:06x}"
 
 
 def _normalize_query_text(query: str) -> str:

@@ -31,7 +31,7 @@ from app.agent.events import AgentEvent
 from app.core.database import Base
 from app.models.agent_task import AgentTask, TaskStatus
 from app.models.chat import ChatMessage, ChatSession
-from app.models.organization import Organization
+from app.models.organization import Organization, user_organization
 from app.models.user import User
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -117,6 +117,14 @@ async def sqlite_env(tmp_path, monkeypatch):
             organization_id=ORG_ID,
         )
         db.add(other)
+        await db.commit()
+        await db.execute(
+            user_organization.insert(),
+            [
+                {"user_id": USER_ID, "organization_id": ORG_ID},
+                {"user_id": USER_ID + 2, "organization_id": ORG_ID},
+            ],
+        )
         await db.commit()
     # checkpoint 的真实收尾路径（mark_terminal/load_task/request_cancel）打到
     # 同一个 sqlite；Redis 用内存替身，绝不触网。
@@ -1643,6 +1651,13 @@ async def test_validate_identity_api_key_must_match_user_and_org(sqlite_env):
 
     async with sqlite_env.factory() as db:
         user = await db.get(User, USER_ID)
+        db.add(Organization(id=ORG_ID + 1, name="acp-other-org", owner_id=USER_ID))
+        await db.flush()
+        # Let the wrong-org key authenticate so this test still reaches ACP's
+        # explicit key/CLI organization comparison after membership tightening.
+        await db.execute(
+            user_organization.insert().values(user_id=USER_ID, organization_id=ORG_ID + 1)
+        )
         _, good = await api_key_service.create_key(db, user=user, name="good", org_id=ORG_ID)
         _, other_user_key = await api_key_service.create_key(
             db, user=await db.get(User, USER_ID + 2), name="other", org_id=ORG_ID
@@ -1662,6 +1677,28 @@ async def test_validate_identity_api_key_must_match_user_and_org(sqlite_env):
     with pytest.raises(IdentityError):
         await validate_identity(
             sqlite_env.factory, organization_id=ORG_ID, user_id=USER_ID, api_key=wrong_org_key
+        )
+
+
+@pytest.mark.asyncio
+async def test_validate_identity_api_key_rejects_removed_bound_org_member(sqlite_env):
+    from app.services.api_key_service import api_key_service
+
+    async with sqlite_env.factory() as db:
+        user = await db.get(User, USER_ID)
+        _, raw = await api_key_service.create_key(db, user=user, name="bound", org_id=ORG_ID)
+        await db.execute(
+            user_organization.delete().where(
+                user_organization.c.user_id == USER_ID,
+                user_organization.c.organization_id == ORG_ID,
+            )
+        )
+        await db.commit()
+        assert user.organization_id == ORG_ID
+
+    with pytest.raises(IdentityError):
+        await validate_identity(
+            sqlite_env.factory, organization_id=ORG_ID, user_id=USER_ID, api_key=raw
         )
 
 

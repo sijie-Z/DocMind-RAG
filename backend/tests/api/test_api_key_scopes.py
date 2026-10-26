@@ -24,7 +24,7 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401 — 注册全部表，供 create_all
 from app.core.database import Base, get_db
 from app.models.document import Document, DocumentStatus, DocumentType
-from app.models.organization import Organization
+from app.models.organization import Organization, user_organization
 from app.models.rbac import Permission, PermissionType, Role
 from app.models.user import User
 from app.services.api_key_service import DEFAULT_SCOPES, api_key_service
@@ -102,6 +102,9 @@ async def env(monkeypatch):
                 uploaded_by=USER_ID,
                 title="Scope Doc",
             )
+        )
+        await session.execute(
+            user_organization.insert().values(user_id=USER_ID, organization_id=ORG_ID)
         )
         await session.commit()
 

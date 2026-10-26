@@ -16,6 +16,7 @@ import app.entrypoints.sdk as sdk_module
 import app.models  # noqa: F401 — create_all 需要全部表
 import app.rpc.server as rpc_server
 from app.core.database import Base
+from app.models.organization import Organization, user_organization
 from app.models.user import User
 from app.services.api_key_service import api_key_service
 
@@ -45,6 +46,12 @@ async def key_file(db_factory, tmp_path):
                 is_active=True,
                 organization_id=ORG_ID,
             )
+        )
+        await session.flush()
+        session.add(Organization(id=ORG_ID, name="SDK Org", owner_id=USER_ID))
+        await session.flush()
+        await session.execute(
+            user_organization.insert().values(user_id=USER_ID, organization_id=ORG_ID)
         )
         await session.commit()
         user = await session.get(User, USER_ID)
@@ -84,6 +91,24 @@ async def test_validate_rejects_user_and_org_mismatch(db_factory, key_file):
 async def test_validate_rejects_invalid_key(db_factory):
     error = await sdk_module._validate_api_key_identity(
         "dm_not-a-real-key", org_id=ORG_ID, user_id=USER_ID, db_factory=db_factory
+    )
+    assert error == sdk_module.IDENTITY_INVALID
+
+
+@pytest.mark.asyncio
+async def test_validate_rejects_key_after_bound_org_membership_removal(db_factory, key_file):
+    raw = key_file.read_text(encoding="utf-8").strip()
+    async with db_factory() as session:
+        await session.execute(
+            user_organization.delete().where(
+                user_organization.c.user_id == USER_ID,
+                user_organization.c.organization_id == ORG_ID,
+            )
+        )
+        await session.commit()
+
+    error = await sdk_module._validate_api_key_identity(
+        raw, org_id=ORG_ID, user_id=USER_ID, db_factory=db_factory
     )
     assert error == sdk_module.IDENTITY_INVALID
 

@@ -89,14 +89,35 @@ async def optional_current_user(
         return None
 
 
+def get_bound_api_key_org_id(current_user: User) -> int | None:
+    """Return a concrete org-bound API key's org, never a mock sentinel.
+
+    生产 API key id 是 UUID 字符串；精确 int/str 均可作为具体 id，空字符串、
+    bool、MagicMock 等替身一律不是有效标记。key.org 必须是精确 int。
+    """
+    api_key_id = getattr(current_user, "api_key_id", None)
+    key_org_id = getattr(current_user, "token_organization_id", None)
+    if type(api_key_id) not in (str, int) or api_key_id == "":
+        return None
+    if type(key_org_id) is not int:
+        return None
+    return key_org_id
+
+
 def get_user_org_id(current_user: User) -> int | None:
     """Resolve the effective organization for the current user.
 
-    A2 P0：`token_organization_id` 回退并非信任 token 里的任意 claim——
-    auth_service.get_current_user 在挂载该属性前已回源 `user_organization`
-    校验成员关系（成员被移出 → 403）。这里只消费已校验过的回退值。
+    非空 org-bound API Key 始终使用认证时已挂载并校验的 key.org_id，即使用户
+    后来切换 primary org 也不漂移。JWT 与 org-unbound key 保持原有 primary-first
+    行为；JWT 的 token 回退只接受具体 int，MagicMock 不得成为组织上下文。
     """
-    return current_user.organization_id or getattr(current_user, "token_organization_id", None)
+    bound_key_org_id = get_bound_api_key_org_id(current_user)
+    if bound_key_org_id is not None:
+        return bound_key_org_id
+    token_org_id = getattr(current_user, "token_organization_id", None)
+    if type(token_org_id) is not int:
+        token_org_id = None
+    return current_user.organization_id or token_org_id
 
 
 async def resolve_existing_organization_id(db: AsyncSession) -> int | None:

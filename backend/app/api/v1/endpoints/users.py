@@ -23,6 +23,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import (
     get_current_user,
+    get_user_org_id,
     is_org_admin,
     permission_required,
     require_organization,
@@ -49,6 +50,7 @@ from app.schemas.user import (
     UserUpdateProfile,
 )
 from app.services.auth_service import auth_service
+from app.services.organization_service import organization_service
 from app.services.permission_service import permission_service
 
 router = APIRouter()
@@ -62,9 +64,10 @@ def _visible_audit_org_id(current_user: User) -> int:
     后者会被 org-defaults 门禁视为运行时组织兜底（W0-6），而这里的语义是
     「无组织 → 拒绝任何组织数据」，不是「无组织 → 借用某个组织」。
     """
-    if current_user.organization_id is None:
+    organization_id = get_user_org_id(current_user)
+    if organization_id is None:
         return -1
-    return current_user.organization_id
+    return organization_id
 
 
 def _mask_api_key(api_key: str | None) -> str | None:
@@ -161,6 +164,7 @@ async def create_user_admin(
         if len(body.organization_ids) > 1:
             raise ValidationError("仅支持分配单一组织")
         org_id = body.organization_ids[0] if body.organization_ids else None
+        effective_org_id = get_user_org_id(current_user)
         if org_id is not None and not current_user.is_superuser:
             # S3 安全加固：无组织用户不再兜底到 1 号组织，直接 403
             if org_id != await require_organization(current_user, db):
@@ -172,7 +176,7 @@ async def create_user_admin(
             body.email,
             body.password,
             full_name=body.nickname,
-            organization_id=org_id or current_user.organization_id,
+            organization_id=org_id or effective_org_id,
             role="admin" if body.role == "admin" else "user",
         )
         user.is_active = body.status != "inactive"
@@ -216,10 +220,10 @@ async def update_user_admin(
         if not user:
             raise NotFoundError("用户不存在")
         # 安全加固：非超管仅能修改同组织成员；无组织用户一律拒绝（fail closed）。
-        # 先做归属校验，避免对跨组织目标先暴露「是否平台超管」的枚举 oracle。
+        # 权限与资源归属共用有效组织，避免 key.org 与 raw primary 分裂。
+        current_org_id = get_user_org_id(current_user)
         if not current_user.is_superuser and (
-            current_user.organization_id is None
-            or user.organization_id != current_user.organization_id
+            current_org_id is None or user.organization_id != current_org_id
         ):
             raise AuthorizationError("无权修改该用户")
         # W0-1：非平台管理员不得操作平台超管账号（状态/资料/密码/角色），
@@ -309,14 +313,21 @@ async def reset_user_password_admin(
             raise NotFoundError("用户不存在")
         # 安全加固：非超管仅能重置同组织成员密码；无组织用户一律拒绝（fail closed）。
         # 先做归属校验，避免跨组织目标暴露「是否平台超管」的枚举 oracle。
+        # 权限依赖和资源检查必须使用同一有效组织，尤其是 org-bound API Key。
+        current_org_id = get_user_org_id(current_user)
         if not current_user.is_superuser and (
-            current_user.organization_id is None
-            or user.organization_id != current_user.organization_id
+            current_org_id is None or user.organization_id != current_org_id
         ):
             raise AuthorizationError("无权重置该用户密码")
         # W0-1：非平台管理员不得重置平台超管密码（防同组织 OrgAdmin 接管超管）。
         if user.is_superuser and not current_user.is_superuser:
             raise AuthorizationError("无权重置该用户密码")
+        if not current_user.is_superuser:
+            # 密码是全局凭据，primary 同组织并不足够：primary、实际 membership
+            # 与任一组织角色关联只要越出当前管理组织，就必须拒绝且不改密码。
+            affiliation_ids = await organization_service.resolve_visible_organization_ids(db, user)
+            if affiliation_ids is None or affiliation_ids.difference({current_org_id}):
+                raise AuthorizationError("无权重置该用户密码")
 
         user.hashed_password = auth_service.hash_password(body.new_password)
         await _log_user_activity(
@@ -1065,8 +1076,9 @@ async def get_users(
         # 不再出现在列表（其 is_active=False，由 delete_user / update_user_admin
         # 置位），避免删除后仍以「活跃成员」身份被展示与分配。
         conditions = [User.is_active.is_(True)]
-        if current_user.organization_id:
-            conditions.append(User.organization_id == current_user.organization_id)
+        effective_org_id = get_user_org_id(current_user)
+        if effective_org_id is not None:
+            conditions.append(User.organization_id == effective_org_id)
         else:
             conditions.append(User.id == current_user.id)
 
@@ -1119,12 +1131,10 @@ async def get_user(
         raise NotFoundError("用户不存在")
 
     # 组织隔离：不允许查看其他组织的用户（超级管理员除外）；
-    # 安全加固：无组织用户一律拒绝（fail closed），不再绕过隔离
+    # 安全加固：无组织用户一律拒绝（fail closed），不再绕过隔离。
+    current_org_id = get_user_org_id(current_user)
     if not current_user.is_superuser:
-        if (
-            current_user.organization_id is None
-            or user.organization_id != current_user.organization_id
-        ):
+        if current_org_id is None or user.organization_id != current_org_id:
             raise AuthorizationError("无权查看该用户信息")
 
     # 安全解析 bio
@@ -1178,9 +1188,9 @@ async def update_user_role(
 
         # 安全加固：非超管仅能修改同组织成员的角色，禁止跨组织提权。
         # 先做归属校验，避免跨组织目标暴露「是否平台超管」的枚举 oracle。
+        current_org_id = get_user_org_id(current_user)
         if not current_user.is_superuser and (
-            user.organization_id != current_user.organization_id
-            or current_user.organization_id is None
+            user.organization_id != current_org_id or current_org_id is None
         ):
             raise AuthorizationError("无权修改该用户的角色")
 
@@ -1229,10 +1239,10 @@ async def delete_user(
         if not user:
             raise NotFoundError("用户不存在")
         # 安全加固（S2）：与 update_user_role 一致 —— 非超管（或无组织用户）
-        # 不得删除别的组织（或其他租户）的用户
+        # 不得删除别的组织（或其他租户）的用户。
+        current_org_id = get_user_org_id(current_user)
         if not current_user.is_superuser and (
-            current_user.organization_id is None
-            or user.organization_id != current_user.organization_id
+            current_org_id is None or user.organization_id != current_org_id
         ):
             raise AuthorizationError("无权删除该用户")
         if user.id == current_user.id:
