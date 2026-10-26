@@ -232,8 +232,7 @@ async def notify_task_terminal(
 
 
 def _is_final_ready_live(agent: PERAgentLoop) -> bool:
-    state = getattr(agent, "final_state_live", None)
-    return isinstance(state, dict) and state.get("phase") == "ready"
+    return bool(getattr(agent, "_final_commit_persisted", False))
 
 
 def _validate_ready_delivery(task: AgentTask, payload: dict[str, Any]) -> None:
@@ -754,6 +753,16 @@ class AgentService:
         """
         if not task_id:
             return
+        committed = _is_final_ready_live(agent) and await checkpoint.read_final_delivery_state(
+            task_id
+        )
+        if committed is True:
+            ok = await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED)
+            if ok:
+                await notify_task_terminal(task_id, TaskStatus.COMPLETED)
+            return
+        if agent is not None and agent.paused_for_final_commit:
+            return
         try:
             await asyncio.shield(
                 checkpoint.save_from_live(
@@ -766,16 +775,6 @@ class AgentService:
             logger.warning(
                 "checkpoint on_error save failed (task=%s): %s", log_safe(task_id), log_safe(e)
             )
-        committed = _is_final_ready_live(agent) and await checkpoint.read_final_delivery_state(
-            task_id
-        )
-        if committed is True:
-            ok = await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED)
-            if ok:
-                await notify_task_terminal(task_id, TaskStatus.COMPLETED)
-            return
-        if agent is not None and agent.paused_for_final_commit:
-            return
         failure_text = f"{type(exc).__name__}: {exc}"
         ok = await checkpoint.mark_terminal(
             task_id,

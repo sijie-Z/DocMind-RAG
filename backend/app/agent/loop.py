@@ -208,6 +208,7 @@ class PERAgentLoop:
         self._checkpoint_task_id: str | None = None
         self.checkpoint_live: dict[str, Any] | None = None
         self.final_state_live: dict[str, Any] | None = None
+        self._final_commit_persisted: bool = False
 
         # 运行级失败标志（issue #301 批 A #11）：无工具模式下直接回答的 LLM
         # 调用失败 = 本次 run 零产出，service 收尾据此置 FAILED 而不是
@@ -437,6 +438,7 @@ class PERAgentLoop:
         self.paused_for_final_commit = False
         self.pending_approval = None
         self.run_cancelled = False
+        self._final_commit_persisted = False
 
         final_resume_phase: str | None = None
         final_resume_packet: FinalInputPacket | None = None
@@ -469,6 +471,7 @@ class PERAgentLoop:
                     yield end_event
                 return
             if final_resume_phase != "collecting":
+                self._final_commit_persisted = final_resume_phase == "ready"
                 ctx = ExecutionContext.from_checkpoint_dict(resume["ctx"])
                 self.final_state_live = {
                     "phase": final_resume_phase,
@@ -1794,10 +1797,13 @@ class PERAgentLoop:
             return True
         saved = await self._save_checkpoint(trigger)
         if saved:
+            if trigger == "final_ready":
+                self._final_commit_persisted = True
             return True
         if trigger == "final_ready":
             committed = await checkpoint.read_final_delivery_state(self._checkpoint_task_id)
             if committed is True:
+                self._final_commit_persisted = True
                 return True
             if committed is None:
                 # The write may or may not have committed.  Do not turn this
@@ -1933,7 +1939,7 @@ class PERAgentLoop:
 
     async def _cancel_event(self) -> AgentEvent | None:
         """取消检查点：已请求取消 → 构造 run_cancelled 事件；否则 None。"""
-        if self.final_state_live is not None and self.final_state_live.get("phase") == "ready":
+        if self._final_commit_persisted:
             # final_ready 的持久化是成功交付提交点。之后的取消是迟到 no-op，
             # 不得产生 rollback、run_cancelled 或第二个互相矛盾的终态。
             return None
