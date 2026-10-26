@@ -257,6 +257,8 @@ export default {
     contentSummary: '内容の要約',
     noContent: '内容がありません',
     downloadDocument: 'ドキュメントをダウンロード',
+    downloadPreparing: 'ダウンロードを準備しています…',
+    downloadFailed: 'ダウンロードに失敗しました。後でもう一度お試しください。',
     analyzeFiles: 'アップロードした {n} 個のファイルを分析してください',
     newConversation: '新しいチャット',
     attachmentModeOnly: '添付ファイルのみモード',

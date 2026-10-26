@@ -258,6 +258,8 @@ export default {
     contentSummary: 'Résumé du contenu',
     noContent: 'Aucun contenu',
     downloadDocument: 'Télécharger le document',
+    downloadPreparing: 'Préparation du téléchargement…',
+    downloadFailed: 'Échec du téléchargement. Veuillez réessayer.',
     analyzeFiles: 'Veuillez analyser les {n} fichier(s) téléchargé(s)',
     newConversation: 'Nouvelle conversation',
     attachmentModeOnly: 'Mode pièces jointes uniquement',

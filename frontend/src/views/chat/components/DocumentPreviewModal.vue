@@ -46,12 +46,29 @@
         </div>
         <n-empty v-else :description="t('chat.noContent')" />
       </div>
+      <div
+        v-if="downloadError"
+        data-testid="download-error"
+        role="alert"
+        class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300"
+      >
+        {{ downloadError }}
+      </div>
     </div>
 
     <template #footer>
       <div class="flex justify-end gap-3">
         <n-button @click="show = false">{{ t('common.close') }}</n-button>
-        <n-button type="primary" secondary @click="$emit('download', doc?.id as string)">{{ t('chat.downloadDocument') }}</n-button>
+        <n-button
+          type="primary"
+          secondary
+          data-testid="download-document"
+          :loading="downloadLoading"
+          :disabled="downloadLoading || !doc?.id"
+          @click="$emit('download', doc?.id as string)"
+        >
+          {{ downloadLoading ? t('chat.downloadPreparing') : t('chat.downloadDocument') }}
+        </n-button>
       </div>
     </template>
   </n-modal>
@@ -81,6 +98,8 @@ const props = defineProps<{
     suggested_tags?: string[]
   }
   content: string
+  downloadLoading?: boolean
+  downloadError?: string
 }>()
 
 const emit = defineEmits<{

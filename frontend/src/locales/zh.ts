@@ -280,6 +280,8 @@ export default {
     contentSummary: '内容摘要',
     noContent: '暂无内容',
     downloadDocument: '下载文档',
+    downloadPreparing: '正在准备下载…',
+    downloadFailed: '下载失败，请稍后重试',
     // Feedback
     // File analysis
     analyzeFiles: '请分析上传的 {n} 个文件',

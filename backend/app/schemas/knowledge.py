@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SearchMode(str, Enum):
@@ -159,6 +159,23 @@ class DocumentDetail(BaseModel):
     parsed_at: datetime | None = Field(None, description="解析完成时间")
     indexed_at: datetime | None = Field(None, description="索引完成时间")
     chunks: list[DocumentChunkInfo] = Field(default_factory=list, description="分块列表")
+
+
+class DocumentDownloadUrl(BaseModel):
+    """已授权文档的短期预签名下载地址。"""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    download_url: str = Field(..., alias="downloadUrl", description="短期预签名下载 URL")
+    filename: str = Field(..., description="原始下载文件名")
+    expires_in: int = Field(..., alias="expiresIn", gt=0, description="URL 有效期（秒）")
+
+
+class DocumentDownloadUrlResponse(BaseModel):
+    """统一下载地址响应信封。"""
+
+    success: bool = True
+    data: DocumentDownloadUrl
 
 
 class SimilarityResponse(BaseModel):
