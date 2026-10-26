@@ -1093,6 +1093,166 @@ async def test_cancel_inside_completed_turn_end_hook_prevents_done_and_completed
     assert loop.run_failed is False
 
 
+@pytest.mark.asyncio
+async def test_cancel_after_review_thinking_prevents_reviewer_call():
+    provider = _FakeProvider("FINAL-BODY")
+    reviewer = _Reviewer("pass", [])
+    loop = _loop(provider, statuses=("completed",), reflection=True, reviewer=reviewer)
+    cancel_requested = False
+
+    async def cancel_check() -> bool:
+        return cancel_requested
+
+    loop.cancel_check = cancel_check
+    events = []
+    async for event in loop.run("q"):
+        events.append(event)
+        if event.type == "thinking" and "进行对抗性质检" in event.content:
+            cancel_requested = True
+
+    assert reviewer.calls == []
+    assert not any(event.type == "chunk" for event in events)
+    assert not any(event.type == "done" for event in events)
+    assert any(event.type == "run_cancelled" for event in events)
+    assert loop.run_cancelled is True
+    assert loop.run_failed is False
+
+
+@pytest.mark.asyncio
+async def test_cancel_after_chunk_stops_memory_and_completed_finalization():
+    provider = _FakeProvider("FINAL-BODY")
+    loop = _loop(provider, statuses=("completed",), reflection=False)
+    cancel_requested = False
+    turn_end_statuses: list[str] = []
+
+    async def cancel_check() -> bool:
+        return cancel_requested
+
+    original_emit = loop._emit_turn_end
+
+    async def record_turn_end(status, **kwargs):
+        turn_end_statuses.append(status)
+        async for event in original_emit(status, **kwargs):
+            yield event
+
+    loop._emit_turn_end = record_turn_end
+    loop.cancel_check = cancel_check
+    events = []
+    async for event in loop.run("q"):
+        events.append(event)
+        if event.type == "chunk":
+            cancel_requested = True
+
+    assert loop.memory.interactions == []
+    assert turn_end_statuses == ["cancelled"]
+    assert not any(event.type == "run_report" for event in events)
+    assert not any(event.type == "execution_context" for event in events)
+    assert not any(event.type == "done" for event in events)
+    assert any(event.type == "run_cancelled" for event in events)
+    assert loop.run_cancelled is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_point", ["memory", "ctx_save", "checkpoint"])
+async def test_cancel_during_finalization_await_never_calls_completed_turn_end(
+    cancel_point,
+    monkeypatch,
+):
+    provider = _FakeProvider("FINAL-BODY")
+    loop = _loop(provider, statuses=("completed",), reflection=False)
+    cancel_requested = False
+    turn_end_statuses: list[str] = []
+
+    async def cancel_check() -> bool:
+        return cancel_requested
+
+    if cancel_point == "memory":
+        original_record = loop.memory.record_interaction
+
+        async def record_and_cancel(query, answer):
+            nonlocal cancel_requested
+            await original_record(query, answer)
+            cancel_requested = True
+
+        loop.memory.record_interaction = record_and_cancel
+    elif cancel_point == "ctx_save":
+        original_save = ExecutionContext.save
+
+        async def save_and_cancel(ctx, *args, **kwargs):
+            nonlocal cancel_requested
+            await original_save(ctx, *args, **kwargs)
+            cancel_requested = True
+
+        monkeypatch.setattr(ExecutionContext, "save", save_and_cancel)
+    else:
+        original_checkpoint = loop._save_checkpoint
+
+        async def checkpoint_and_cancel(trigger):
+            nonlocal cancel_requested
+            result = await original_checkpoint(trigger)
+            if trigger == "on_finish":
+                cancel_requested = True
+            return result
+
+        loop._save_checkpoint = checkpoint_and_cancel
+
+    original_emit = loop._emit_turn_end
+
+    async def record_turn_end(status, **kwargs):
+        turn_end_statuses.append(status)
+        async for event in original_emit(status, **kwargs):
+            yield event
+
+    loop._emit_turn_end = record_turn_end
+    loop.cancel_check = cancel_check
+    events = [event async for event in loop.run("q")]
+
+    assert turn_end_statuses == ["cancelled"]
+    assert not any(event.type == "run_report" for event in events)
+    assert not any(event.type == "execution_context" for event in events)
+    assert not any(event.type == "done" for event in events)
+    assert any(event.type == "run_cancelled" for event in events)
+    assert loop.run_cancelled is True
+    assert loop.run_failed is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["run_report", "execution_context"])
+async def test_cancel_after_publication_stops_later_completed_artifacts(boundary):
+    provider = _FakeProvider("FINAL-BODY")
+    loop = _loop(provider, statuses=("completed",), reflection=False)
+    cancel_requested = False
+    post_cancel_turn_end: list[str] = []
+
+    async def cancel_check() -> bool:
+        return cancel_requested
+
+    original_emit = loop._emit_turn_end
+
+    async def record_turn_end(status, **kwargs):
+        if cancel_requested:
+            post_cancel_turn_end.append(status)
+        async for event in original_emit(status, **kwargs):
+            yield event
+
+    loop._emit_turn_end = record_turn_end
+    loop.cancel_check = cancel_check
+    post_cancel_types: list[str] = []
+    async for event in loop.run("q"):
+        if cancel_requested:
+            post_cancel_types.append(event.type)
+        if event.type == boundary:
+            cancel_requested = True
+
+    if boundary == "run_report":
+        assert "execution_context" not in post_cancel_types
+    assert "done" not in post_cancel_types
+    assert "completed" not in post_cancel_turn_end
+    assert "run_cancelled" in post_cancel_types
+    assert loop.run_cancelled is True
+    assert loop.run_failed is False
+
+
 def test_unified_final_flag_default_remains_false():
     assert ai_config.AISettings.model_fields["AGENT_UNIFIED_FINAL_ENABLED"].default is False
 

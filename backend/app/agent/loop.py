@@ -1315,6 +1315,13 @@ class PERAgentLoop:
             )
             await _yield_control()
             if unified:
+                cancel_event = await self._cancel_event()
+                if cancel_event is not None:
+                    async for event in self._converge_cancelled(
+                        cancel_event, task_id=task_id, session_id=session_id
+                    ):
+                        yield event
+                    return
                 review = await self.reviewer.review_final(
                     final_packet,
                     final_output,
@@ -1441,9 +1448,24 @@ class PERAgentLoop:
                 return
             if final_result is not None and final_result.ok:
                 yield AgentEvent(type="chunk", content=final_output)
+                cancel_event = await self._cancel_event()
+                if cancel_event is not None:
+                    async for event in self._converge_cancelled(
+                        cancel_event, task_id=task_id, session_id=session_id
+                    ):
+                        yield event
+                    return
 
         # ── Phase 4: Store + Finalize ─────────────────────────────────────
         await self.memory.record_interaction(query, final_output)
+        if unified:
+            cancel_event = await self._cancel_event()
+            if cancel_event is not None:
+                async for event in self._converge_cancelled(
+                    cancel_event, task_id=task_id, session_id=session_id
+                ):
+                    yield event
+                return
 
         ctx.mark_done()
         ctx.record_decision("finalize", "complete", "Agent loop finished")
@@ -1452,12 +1474,27 @@ class PERAgentLoop:
             await ctx.save()
         except Exception:
             pass
+        if unified:
+            cancel_event = await self._cancel_event()
+            if cancel_event is not None:
+                async for event in self._converge_cancelled(
+                    cancel_event, task_id=task_id, session_id=session_id
+                ):
+                    yield event
+                return
 
         # T4 checkpoint（收尾）：终态快照。status 的翻转由 service/端点层经
         # checkpoint.mark_terminal 负责——loop 不碰 AgentTask 状态机。
         await self._save_checkpoint("on_finish")
 
         if unified:
+            cancel_event = await self._cancel_event()
+            if cancel_event is not None:
+                async for event in self._converge_cancelled(
+                    cancel_event, task_id=task_id, session_id=session_id
+                ):
+                    yield event
+                return
             # Run the completion hook before publishing the completed report.
             # A cancel arriving inside it must converge without a contradictory
             # completed RunReport/execution_context or a successful done event.
@@ -1497,23 +1534,6 @@ class PERAgentLoop:
             type="run_report",
             content=render_run_report_text(run_report),
         )
-
-        # Yield execution context as a data event for observability
-        yield AgentEvent(
-            type="execution_context",
-            content=ctx.to_dict(),
-            plan_id=plan.id if plan else "",
-            plan_progress=1.0,
-        )
-
-        elapsed = (time.perf_counter() - start_time) * 1000
-        logger.info(
-            f"PER loop completed in {elapsed:.0f}ms | "
-            f"Plan: {log_safe(plan.goal[:50])}... | Steps: {plan.completed_steps}/{plan.total_steps} | "
-            f"Output: {len(final_output)} chars",
-            extra={"task_id": log_safe(ctx.task_id)},
-        )
-
         if unified:
             cancel_event = await self._cancel_event()
             if cancel_event is not None:
@@ -1522,6 +1542,30 @@ class PERAgentLoop:
                 ):
                     yield event
                 return
+
+        # Yield execution context as a data event for observability
+        yield AgentEvent(
+            type="execution_context",
+            content=ctx.to_dict(),
+            plan_id=plan.id if plan else "",
+            plan_progress=1.0,
+        )
+        if unified:
+            cancel_event = await self._cancel_event()
+            if cancel_event is not None:
+                async for event in self._converge_cancelled(
+                    cancel_event, task_id=task_id, session_id=session_id
+                ):
+                    yield event
+                return
+
+        elapsed = (time.perf_counter() - start_time) * 1000
+        logger.info(
+            f"PER loop completed in {elapsed:.0f}ms | "
+            f"Plan: {log_safe(plan.goal[:50])}... | Steps: {plan.completed_steps}/{plan.total_steps} | "
+            f"Output: {len(final_output)} chars",
+            extra={"task_id": log_safe(ctx.task_id)},
+        )
 
         # ── Hooks（issue #474）：legacy 保持 report → turn_end → done 顺序；
         # unified 已在报告前完成 turn_end 与 post-hook 取消门。
