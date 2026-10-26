@@ -12,6 +12,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from app.core.config import settings
 from app.core.llm_failfast import create_chat_completion
+from app.core.log_safety import log_safe
 from app.core.prometheus import (
     LLM_LATENCY,
     LLM_REQUEST_ERRORS,
@@ -394,7 +395,7 @@ class RAGPipeline:
                 if rerank_info.get("status") == "degraded":
                     logger.warning(
                         "RAG rerank degraded (org=%s): path=%s reason=%s attempts=%s",
-                        organization_id,
+                        log_safe(organization_id),
                         rerank_info.get("path"),
                         rerank_info.get("reason"),
                         rerank_info.get("attempts"),
@@ -481,7 +482,7 @@ class RAGPipeline:
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
                 logger.error(
                     "RAG retrieval refused by embedding config error (org=%s): %s",
-                    organization_id,
+                    log_safe(organization_id),
                     config_reasons[0],
                 )
                 raise RetrievalUnavailableError(
@@ -496,7 +497,7 @@ class RAGPipeline:
                 logger.error(
                     "RAG retrieval unavailable (kind=%s, org=%s, failed_sub_queries=%d, degraded_arms=%d): %s",
                     kind,
-                    organization_id,
+                    log_safe(organization_id),
                     len(failures),
                     len(degraded_reasons),
                     "; ".join(reasons) or "no details",
@@ -513,7 +514,7 @@ class RAGPipeline:
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state="degraded").inc()
                 logger.warning(
                     "RAG retrieval degraded (org=%s): failed_sub_queries=%s, degraded_arms=%s",
-                    organization_id,
+                    log_safe(organization_id),
                     [f"{sq}: {type(e).__name__}" for sq, e in failures],
                     degraded_reasons,
                 )

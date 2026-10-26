@@ -5,6 +5,7 @@ Memory fallback uses bounded LRU eviction to prevent unbounded growth.
 """
 
 import hashlib
+import hmac
 import json
 import logging
 import math
@@ -118,9 +119,16 @@ _ITEM_SPAN_RE = re.compile(
 _ENTITY_MISMATCH = "entity_mismatch"
 
 
+_KEY_DIGEST_DOMAIN = b"docmind.rag.cache.debug-key-digest.v1"
+
+
 def _key_digest(key: str) -> str:
-    """缓存键的短摘要（debug 展示用；不暴露明文查询）。"""
-    return hashlib.sha256(key.encode()).hexdigest()[:12]
+    """Return a 12-character domain-separated debug fingerprint, not a password hash.
+
+    The public domain only separates this non-secret debug namespace; it is not a
+    password key or a claim of confidentiality for the query.
+    """
+    return hmac.new(_KEY_DIGEST_DOMAIN, key.encode(), hashlib.sha256).hexdigest()[:12]
 
 
 def _normalize_query_text(query: str) -> str:

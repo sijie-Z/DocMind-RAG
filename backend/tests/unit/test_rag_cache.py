@@ -1,8 +1,23 @@
 """Tests for RAG cache modules (RetrievalCache, SemanticCache)."""
 
+import hashlib
+import hmac
+
 import pytest
 
-from app.rag.cache import RetrievalCache, SemanticCache
+from app.rag.cache import _KEY_DIGEST_DOMAIN, RetrievalCache, SemanticCache, _key_digest
+
+
+def test_key_digest_is_a_domain_separated_debug_mac():
+    query = "敏感查询-debug-fingerprint"
+    digest = _key_digest(query)
+    expected = hmac.new(_KEY_DIGEST_DOMAIN, query.encode(), hashlib.sha256).hexdigest()[:12]
+    bare_sha256 = hashlib.sha256(query.encode()).hexdigest()[:12]
+
+    assert digest == expected
+    assert digest != bare_sha256
+    assert len(digest) == 12
+    assert query not in digest
 
 
 class TestRetrievalCache:

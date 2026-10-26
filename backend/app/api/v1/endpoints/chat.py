@@ -1484,7 +1484,7 @@ async def chat_stream_endpoint(
             logger.error(
                 "SSE stream error (request_id=%s org=%s user=%s): %s",
                 log_safe(request_id),
-                log_org_id,
+                log_safe(log_org_id),
                 current_user.id,
                 log_safe(e),
                 exc_info=True,
