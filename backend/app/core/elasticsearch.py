@@ -150,6 +150,14 @@ async def close_elasticsearch():
 # ---------------------------------------------------------------------------
 # Index management
 # ---------------------------------------------------------------------------
+def _source_provenance_mapping_properties() -> dict:
+    """Additive fields for original-text provenance; retrieval mapping stays unchanged."""
+    return {
+        "original_text": {"type": "text", "index": False},
+        "text_provenance": {"type": "keyword"},
+    }
+
+
 def _knowledge_index_mapping() -> dict:
     analyzer = _holder.es_analyzer
     search_analyzer = _holder.es_search_analyzer
@@ -172,6 +180,7 @@ def _knowledge_index_mapping() -> dict:
                     "analyzer": analyzer,
                     "search_analyzer": search_analyzer,
                 },
+                **_source_provenance_mapping_properties(),
                 "chunk_id": {"type": "keyword"},
                 "chunk_index": {"type": "integer"},
                 "section_title": {"type": "text"},
@@ -328,6 +337,18 @@ async def _create_index_if_not_exists(client: AsyncElasticsearch):
             "并重新索引全部文档（文档处理链会写入这些字段）。",
             index_name,
             missing_structured,
+        )
+
+    missing_provenance = [
+        field for field in _source_provenance_mapping_properties() if field not in props
+    ]
+    if missing_provenance:
+        logger.warning(
+            "索引 %s 缺少原文溯源字段 %s —— 请显式运行 "
+            "scripts/add_rag_source_provenance_mapping.py（仅 additive put_mapping，"
+            "不会创建或重建索引）。",
+            index_name,
+            missing_provenance,
         )
 
 

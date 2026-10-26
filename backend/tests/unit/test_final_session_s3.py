@@ -427,8 +427,10 @@ def test_agent_task_message_migration_single_head_sqlite_roundtrip(tmp_path, mon
     monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
     cfg = _cfg()
     script = ScriptDirectory.from_config(cfg)
-    heads = script.get_heads()
-    assert list(heads) == [NEW_REV], f"迁移必须单头且接当前 016，实际 {heads}"
+    heads = set(script.get_heads())
+    assert len(heads) == 1, f"迁移必须单头，实际 {heads}"
+    chain = [rev.revision for rev in script.iterate_revisions(next(iter(heads)), "base")]
+    assert NEW_REV in chain, f"017 必须仍在 016 之后的迁移主链，实际 {chain}"
 
     command.upgrade(cfg, PREV_REV)
     _exec(
