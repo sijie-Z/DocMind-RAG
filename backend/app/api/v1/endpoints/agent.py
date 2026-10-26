@@ -42,7 +42,7 @@ from app.agent.commands import (
     resolve_session_scope_for_command,
 )
 from app.agent.config import DEFAULT_DISABLED_TOOLS, AgentConfig
-from app.agent.events import AgentEvent
+from app.agent.events import AgentEvent, FinalAnswerAccumulator
 from app.agent.registry import tool_registry
 from app.agent.replay.engine import ReplayEngine
 from app.agent.service import agent_service, notify_task_terminal
@@ -394,7 +394,7 @@ async def agent_chat(
                     history = loaded_history
 
             # Run agent
-            final_answer = ""
+            answers = FinalAnswerAccumulator()
             async for event in agent_service.chat(
                 query=body.query,
                 history=history,
@@ -410,18 +410,13 @@ async def agent_chat(
                 sse_data = public_agent_event_data(event)
                 emitter.bind(getattr(event, "task_id", None))
                 yield await emitter.emit(event.type, sse_data)
-                if event.type == "chunk":
-                    final_answer += event.content
+                answers.add(event)
 
             # Save interaction to session (user query + assistant response)
             # HITL：暂停（approval_required）/取消（run_cancelled）不是"完成"——
             # 不落库半成品回答：真完成由 approval/resume 流收尾时补写，
             # 避免同一轮问答落成两条消息。
-            if body.session_id and last_event_type not in (
-                "approval_required",
-                "run_cancelled",
-                "plan_approval_required",
-            ):
+            if body.session_id and _final_save_allowed(last_event_type, answers):
                 # issue #277（评审 or1268 R2 收账）：会话落库 org 必须与运行读侧
                 # 同一来源（resolved org）——此前传 raw current_user.organization_id，
                 # 凡 org 来自 token_organization_id 回退（或走无组织超管回源）的用户，
@@ -433,9 +428,13 @@ async def agent_chat(
                         current_user.id,
                         body.query,
                         effective_org_id,
-                        final_answer,
+                        answers.answer,
                         bypass_org=bool(getattr(current_user, "is_superuser", False)),
+                        agent_task_id=answers.task_id or None,
+                        create_if_missing=True,
                     )
+                    if answers.answer and assistant_message_id is None:
+                        save_error = "session_save_rejected"
                 except Exception as save_exc:
                     # issue #301 批 D（#22）：落库失败不再静默。回答已流给用户，
                     # 但必须显式告知（warning 事件 + done.saved=false + ERROR 日志）：
@@ -484,7 +483,9 @@ async def agent_chat(
         if body.session_id:
             # saved=false 专门标记"本轮落库出错"（None 且无异常 = 越权拒绝或空回复，
             # 两者都不写、也都没有落库错误）。
-            done_data["saved"] = save_error is None
+            done_data["saved"] = save_error is None and _final_save_allowed(
+                last_event_type, answers
+            )
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         # HITL：暂停/取消时如实盖章任务态——前端据此显示"等待审批/已取消"，
@@ -496,6 +497,19 @@ async def agent_chat(
             done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
+        if answers.task_state and last_event_type not in (
+            "approval_required",
+            "plan_approval_required",
+            "run_cancelled",
+        ):
+            done_data["task_state"] = answers.task_state
+        if (
+            answers.terminal_answer
+            and answers.task_state != "failed"
+            and last_event_type
+            not in ("approval_required", "plan_approval_required", "run_cancelled", "error")
+        ):
+            done_data["final_answer"] = answers.terminal_answer
         yield await emitter.emit("done", done_data)
 
     return _sse_response(event_stream())
@@ -661,12 +675,11 @@ async def resume_agent_task(
         organization_id=effective_org_id,
     )
     session_id = (payload or {}).get("session_id") or getattr(task, "session_id", None)
-    # 崩溃前已流给用户的部分不回放（最小版边界），但收尾落库要拼成完整回复。
-    prefix = (payload or {}).get("partial_output") or ""
+    # final_answer 优先级由统一累加器处理；legacy partial 仅用于旧 v1。
+    answers = FinalAnswerAccumulator(payload)
     fallback_config = await _fallback_resume_config(current_user.id)
 
     async def event_stream():
-        final_answer = prefix
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
@@ -684,8 +697,7 @@ async def resume_agent_task(
                 sse_data = public_agent_event_data(event)
                 emitter.bind(getattr(event, "task_id", None))
                 yield await emitter.emit(event.type, sse_data)
-                if event.type == "chunk":
-                    final_answer += event.content
+                answers.add(event)
 
             # 收尾补写会话（与 /chat 同口径）。能走到这里说明原流从未完成落库
             # （任务可恢复 ⇒ chat 的正常收尾分支没跑过），不存在重复写入窗口。
@@ -694,20 +706,19 @@ async def resume_agent_task(
             # org 与 /chat 同链（issue #277/R2 对齐）：传 resolved org
             # （effective_org_id，含 token 组织回退 / 无组织超管回源），
             # 不传 raw current_user.organization_id——两者对回退用户不相等。
-            if session_id and last_event_type not in (
-                "approval_required",
-                "run_cancelled",
-                "plan_approval_required",
-            ):
+            if session_id and _final_save_allowed(last_event_type, answers):
                 try:
                     assistant_message_id = await _save_session_interaction(
                         session_id,
                         current_user.id,
                         task.query,
                         effective_org_id,
-                        final_answer,
+                        answers.answer,
                         bypass_org=bool(getattr(current_user, "is_superuser", False)),
+                        agent_task_id=task_id,
                     )
+                    if answers.answer and assistant_message_id is None:
+                        save_error = "session_save_rejected"
                 except Exception as save_exc:
                     # issue #301 批 D（#22）：与 /chat 同口径——落库失败显式告知。
                     save_error = log_safe(save_exc)
@@ -749,7 +760,9 @@ async def resume_agent_task(
         if done_request_id:
             done_data["request_id"] = done_request_id
         if session_id:
-            done_data["saved"] = save_error is None
+            done_data["saved"] = save_error is None and _final_save_allowed(
+                last_event_type, answers
+            )
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         # HITL：同 /chat——再次暂停/取消时如实盖章任务态。
@@ -760,6 +773,19 @@ async def resume_agent_task(
             done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
+        if answers.task_state and last_event_type not in (
+            "approval_required",
+            "plan_approval_required",
+            "run_cancelled",
+        ):
+            done_data["task_state"] = answers.task_state
+        if (
+            answers.terminal_answer
+            and answers.task_state != "failed"
+            and last_event_type
+            not in ("approval_required", "plan_approval_required", "run_cancelled", "error")
+        ):
+            done_data["final_answer"] = answers.terminal_answer
         yield await emitter.emit("done", done_data)
 
     return _sse_response(event_stream())
@@ -827,8 +853,8 @@ async def decide_agent_task_approval(
         note=body.note,
     )
     session_id = (payload or {}).get("session_id") or getattr(task, "session_id", None)
-    # 崩溃前已流给用户的部分不回放（最小版边界），但收尾落库要拼成完整回复。
-    prefix = (payload or {}).get("partial_output") or ""
+    # final_answer 优先级由统一累加器处理；legacy partial 仅用于旧 v1。
+    answers = FinalAnswerAccumulator(payload)
     fallback_config = await _fallback_resume_config(current_user.id)
     logger.info(
         "审批应答 (task=%s, decision=%s, tool=%s, by=%s)",
@@ -839,7 +865,6 @@ async def decide_agent_task_approval(
     )
 
     async def event_stream():
-        final_answer = prefix
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
@@ -856,24 +881,22 @@ async def decide_agent_task_approval(
                 sse_data = public_agent_event_data(event)
                 emitter.bind(getattr(event, "task_id", None))
                 yield await emitter.emit(event.type, sse_data)
-                if event.type == "chunk":
-                    final_answer += event.content
+                answers.add(event)
 
             # 会话补写：只在 run 真正完成时（再次暂停/取消不写半成品，同 /chat 口径）。
-            if session_id and last_event_type not in (
-                "approval_required",
-                "run_cancelled",
-                "plan_approval_required",
-            ):
+            if session_id and _final_save_allowed(last_event_type, answers):
                 try:
                     assistant_message_id = await _save_session_interaction(
                         session_id,
                         current_user.id,
                         task.query,
                         effective_org_id,
-                        final_answer,
+                        answers.answer,
                         bypass_org=bool(getattr(current_user, "is_superuser", False)),
+                        agent_task_id=task_id,
                     )
+                    if answers.answer and assistant_message_id is None:
+                        save_error = "session_save_rejected"
                 except Exception as save_exc:
                     save_error = log_safe(save_exc)
                     logger.error(
@@ -919,7 +942,9 @@ async def decide_agent_task_approval(
         if done_request_id:
             done_data["request_id"] = done_request_id
         if session_id:
-            done_data["saved"] = save_error is None
+            done_data["saved"] = save_error is None and _final_save_allowed(
+                last_event_type, answers
+            )
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         if last_event_type == "approval_required":
@@ -929,6 +954,19 @@ async def decide_agent_task_approval(
             done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
+        if answers.task_state and last_event_type not in (
+            "approval_required",
+            "plan_approval_required",
+            "run_cancelled",
+        ):
+            done_data["task_state"] = answers.task_state
+        if (
+            answers.terminal_answer
+            and answers.task_state != "failed"
+            and last_event_type
+            not in ("approval_required", "plan_approval_required", "run_cancelled", "error")
+        ):
+            done_data["final_answer"] = answers.terminal_answer
         yield await emitter.emit("done", done_data)
 
     return _sse_response(event_stream())
@@ -1048,11 +1086,10 @@ async def decide_agent_task_plan_approval(
         }
 
     session_id = (payload or {}).get("session_id") or getattr(task, "session_id", None)
-    prefix = (payload or {}).get("partial_output") or ""
+    answers = FinalAnswerAccumulator(payload)
     fallback_config = await _fallback_resume_config(current_user.id)
 
     async def event_stream():
-        final_answer = prefix
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
@@ -1069,24 +1106,22 @@ async def decide_agent_task_plan_approval(
                 sse_data = public_agent_event_data(event)
                 emitter.bind(getattr(event, "task_id", None))
                 yield await emitter.emit(event.type, sse_data)
-                if event.type == "chunk":
-                    final_answer += event.content
+                answers.add(event)
 
             # 会话补写：只在 run 真正完成时（再次暂停/取消不写半成品，同 /chat 口径）。
-            if session_id and last_event_type not in (
-                "approval_required",
-                "run_cancelled",
-                "plan_approval_required",
-            ):
+            if session_id and _final_save_allowed(last_event_type, answers):
                 try:
                     assistant_message_id = await _save_session_interaction(
                         session_id,
                         current_user.id,
                         task.query,
                         effective_org_id,
-                        final_answer,
+                        answers.answer,
                         bypass_org=bool(getattr(current_user, "is_superuser", False)),
+                        agent_task_id=task_id,
                     )
+                    if answers.answer and assistant_message_id is None:
+                        save_error = "session_save_rejected"
                 except Exception as save_exc:
                     save_error = log_safe(save_exc)
                     logger.error(
@@ -1132,7 +1167,9 @@ async def decide_agent_task_plan_approval(
         if done_request_id:
             done_data["request_id"] = done_request_id
         if session_id:
-            done_data["saved"] = save_error is None
+            done_data["saved"] = save_error is None and _final_save_allowed(
+                last_event_type, answers
+            )
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         if last_event_type == "approval_required":
@@ -1141,6 +1178,19 @@ async def decide_agent_task_plan_approval(
             done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
+        if answers.task_state and last_event_type not in (
+            "approval_required",
+            "plan_approval_required",
+            "run_cancelled",
+        ):
+            done_data["task_state"] = answers.task_state
+        if (
+            answers.terminal_answer
+            and answers.task_state != "failed"
+            and last_event_type
+            not in ("approval_required", "plan_approval_required", "run_cancelled", "error")
+        ):
+            done_data["final_answer"] = answers.terminal_answer
         yield await emitter.emit("done", done_data)
 
     return _sse_response(event_stream())
@@ -1171,6 +1221,19 @@ async def cancel_agent_task(
         user_id=current_user.id,
         organization_id=effective_org_id,
     )
+    delivery_state = await checkpoint.read_final_delivery_state(task_id)
+    if delivery_state is None:
+        raise ServiceUnavailableError("最终提交状态未知，不能确认取消是否生效")
+    if task.status in (TaskStatus.RUNNING, TaskStatus.COMPLETED) and delivery_state:
+        return {
+            "success": True,
+            "data": {
+                "task_id": task_id,
+                "state": task.status.value,
+                "cancel_requested": False,
+                "message": "final_ready 已提交，迟到取消不生效",
+            },
+        }
     if task.status == TaskStatus.CANCELLED:
         return {
             "success": True,
@@ -1843,6 +1906,15 @@ async def _load_session_messages(
         return []
 
 
+def _final_save_allowed(last_event_type: str, answers: FinalAnswerAccumulator) -> bool:
+    return (
+        last_event_type
+        not in ("approval_required", "run_cancelled", "plan_approval_required", "error")
+        and not answers.blocked
+        and answers.task_state != "failed"
+    )
+
+
 async def _save_session_interaction(
     session_id: str,
     user_id: int,
@@ -1851,6 +1923,8 @@ async def _save_session_interaction(
     assistant_response: str = "",
     *,
     bypass_org: bool = False,
+    agent_task_id: str | None = None,
+    create_if_missing: bool | None = None,
 ) -> str | None:
     """兼容包装：实现已提升为 app.services.session_service.save_session_interaction。
 
@@ -1867,4 +1941,6 @@ async def _save_session_interaction(
         assistant_response,
         session_factory=AsyncSessionLocal,
         bypass_org=bypass_org,
+        agent_task_id=agent_task_id,
+        create_if_missing=create_if_missing,
     )

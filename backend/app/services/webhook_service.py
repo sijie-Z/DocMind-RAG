@@ -53,6 +53,7 @@ from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.events import FinalAnswerAccumulator
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.log_safety import log_safe
@@ -119,6 +120,12 @@ class WebhookEncryptionError(RuntimeError):
 
 class WebhookDeliveryError(RuntimeError):
     """投递处理失败（消息已脱敏，可安全写入 *_deliveries.error*）。"""
+
+
+class WebhookDeliveryTerminalError(WebhookDeliveryError):
+    """取消/暂停终态：不得成功投递，也不得再次自动重试。"""
+
+    retry = False
 
 
 # ── 时间 ─────────────────────────────────────────────────────────────
@@ -575,9 +582,10 @@ class WebhookService:
         session_id: str,
         prompt: str,
         history: list[dict[str, str]] | None = None,
+        answers: FinalAnswerAccumulator | None = None,
     ) -> str:
-        """直接调用 ``AgentService.chat``（禁止 HTTP 自调用），拼接 chunk。"""
-        chunks: list[str] = []
+        """直接调用 ``AgentService.chat``（禁止 HTTP 自调用），使用权威答案。"""
+        answers = answers or FinalAnswerAccumulator()
         async for event in agent.chat(
             query=prompt,
             history=list(history or []),
@@ -587,13 +595,21 @@ class WebhookService:
             config=None,
         ):
             event_type = getattr(event, "type", None)
-            if event_type == "chunk":
-                chunks.append(getattr(event, "content", "") or "")
-            elif event_type == "error":
+            answers.add(event)
+            if event_type == "error":
                 raise WebhookDeliveryError(
                     f"agent 返回 error 事件: {getattr(event, 'content', '')}"
                 )
-        return "".join(chunks)
+        if answers.task_state in (
+            "cancelled",
+            "paused",
+            "waiting_approval",
+            "waiting_plan_approval",
+        ):
+            raise WebhookDeliveryTerminalError("agent 已取消或暂停，停止本次投递且不重试")
+        if answers.blocked or answers.task_state == "failed":
+            raise WebhookDeliveryError("agent 执行失败，不投递 assistant 正文")
+        return answers.answer
 
     async def _load_reuse_history(
         self,
@@ -726,6 +742,7 @@ class WebhookService:
         error: str,
         *,
         expected_status: WebhookDeliveryStatus = WebhookDeliveryStatus.PROCESSING,
+        retry: bool = True,
     ) -> bool:
         """失败写回（token fenced）：只有仍持有租约的 worker 才能改状态/排重试。
 
@@ -749,7 +766,7 @@ class WebhookService:
             now = _utcnow()
             max_attempts = max(1, int(settings.WEBHOOK_MAX_ATTEMPTS))
             next_attempt_at = None
-            if delivery.attempts < max_attempts:
+            if retry and delivery.attempts < max_attempts:
                 # 2^attempts * 30s（attempts 在领取时已 +1）：首次失败 60s 后重试。
                 next_attempt_at = now + timedelta(
                     seconds=(2 ** max(1, delivery.attempts)) * RETRY_BASE_SECONDS
@@ -865,7 +882,8 @@ class WebhookService:
 
         try:
             prompt = render_prompt(rule, payload, delivery_id)
-            answer = await self._run_chat(agent, rule, session_id, prompt, history)
+            answers = FinalAnswerAccumulator()
+            answer = await self._run_chat(agent, rule, session_id, prompt, history, answers=answers)
         except Exception as exc:
             logger.warning(
                 "webhook 投递处理失败（delivery=%s rule=%s）: %s",
@@ -874,7 +892,11 @@ class WebhookService:
                 log_safe(exc),
             )
             if await self._mark_failed(
-                factory, delivery_id, processing_token, f"{type(exc).__name__}: {exc}"
+                factory,
+                delivery_id,
+                processing_token,
+                f"{type(exc).__name__}: {exc}",
+                retry=getattr(exc, "retry", True),
             ):
                 # 只有仍持有租约的失败才写审计；被 fence 掉的旧 worker 不污染。
                 await audit_service.log_activity(
@@ -903,6 +925,7 @@ class WebhookService:
                 organization_id=rule.org_id,
                 assistant_response=answer,
                 session_factory=factory,
+                agent_task_id=answers.task_id or None,
             )
         except Exception as exc:
             # 行已标记 succeeded 后消息落库失败：补偿回可重试 failed，避免

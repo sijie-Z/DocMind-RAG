@@ -93,6 +93,24 @@ describe('execution_step_result · 阶段1诊断事件归约', () => {
     expect(store.planSteps[0].error_context).toBe('字符串错误')
   })
 
+  it('done.final_answer 幂等覆盖而非追加；失败 done 不采用正文', () => {
+    const store = seedAssistant()
+    store.processEvent({ type: 'chunk', content: 'stream-' } as any)
+    store.processEvent({ type: 'done', content: '', final_answer: 'AUTHORITATIVE' } as any)
+    store.processEvent({ type: 'done', content: '', final_answer: 'AUTHORITATIVE' } as any)
+    expect(store.messages[0].content).toBe('AUTHORITATIVE')
+
+    store.processEvent({ type: 'chunk', content: 'partial' } as any)
+    store.processEvent({
+      type: 'done',
+      content: '',
+      task_state: 'failed',
+      final_answer: 'MUST-NOT-APPLY',
+    } as any)
+    expect(store.messages[0].content).toBe('AUTHORITATIVEpartial')
+    expect(store.taskState).toBe('failed')
+  })
+
   it('旧 chunk 与 done 行为保持兼容', () => {
     const store = seedAssistant()
     store.processEvent({ type: 'chunk', content: 'final-answer' } as any)

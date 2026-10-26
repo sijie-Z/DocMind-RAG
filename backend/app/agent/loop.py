@@ -207,6 +207,9 @@ class PERAgentLoop:
         # 这里只是类型占位——loop 实例可能被复用，不得泄露上一轮的状态。
         self._checkpoint_task_id: str | None = None
         self.checkpoint_live: dict[str, Any] | None = None
+        self.final_state_live: dict[str, Any] | None = None
+        self._final_commit_persisted: bool = False
+        self.final_delivery_started: bool = False
 
         # 运行级失败标志（issue #301 批 A #11）：无工具模式下直接回答的 LLM
         # 调用失败 = 本次 run 零产出，service 收尾据此置 FAILED 而不是
@@ -229,6 +232,7 @@ class PERAgentLoop:
         self.human_guidance: str = ""
         self.paused_for_approval: bool = False
         self.paused_for_plan_approval: bool = False
+        self.paused_for_final_commit: bool = False
         self.pending_approval: dict[str, Any] | None = None
         self.run_cancelled: bool = False
 
@@ -409,6 +413,7 @@ class PERAgentLoop:
             AgentEvent objects for thinking, plan, tool calls, chunks, etc.
         """
         start_time = time.perf_counter()
+        unified = ai_config.unified_final_enabled()
 
         # Each run gets a clean working-memory scope: step ids ("s1", "s2", …)
         # repeat across turns, so stale results from a previous run would
@@ -431,14 +436,79 @@ class PERAgentLoop:
         self.human_guidance = ""
         self.paused_for_approval = False
         self.paused_for_plan_approval = False
+        self.paused_for_final_commit = False
         self.pending_approval = None
         self.run_cancelled = False
+        self._final_commit_persisted = False
+        self.final_delivery_started = False
+
+        final_resume_phase: str | None = None
+        final_resume_packet: FinalInputPacket | None = None
+        final_resume_result: FinalSynthesisResult | None = None
+        final_resume_plan: Plan | None = None
+        self.final_state_live = {"phase": "collecting"} if unified else None
+        if resume and checkpoint.is_final_snapshot(resume):
+            if not unified:
+                self.run_failed = True
+                self.run_failure = "final_checkpoint_requires_unified"
+                yield AgentEvent(type="error", content="最终 checkpoint 需要统一最终答案模式")
+                async for end_event in self._emit_turn_end(
+                    "failed", task_id=task_id, session_id=session_id
+                ):
+                    yield end_event
+                return
+            try:
+                final_resume_phase, final_resume_packet, final_resume_plan = (
+                    checkpoint.final_packet_from_snapshot(resume)
+                )
+            except checkpoint.FinalCheckpointError as exc:
+                self.run_failed = True
+                self.run_failure = str(exc)
+                yield AgentEvent(
+                    type="error", content="最终 checkpoint 已损坏，拒绝重新规划或重放工具"
+                )
+                async for end_event in self._emit_turn_end(
+                    "failed", task_id=task_id, session_id=session_id
+                ):
+                    yield end_event
+                return
+            if final_resume_phase != "collecting":
+                self._final_commit_persisted = final_resume_phase == "ready"
+                ctx = ExecutionContext.from_checkpoint_dict(resume["ctx"])
+                self.final_state_live = {
+                    "phase": final_resume_phase,
+                    "input": resume.get("final_input"),
+                    "input_hash": resume.get("final_input_hash"),
+                    "draft": resume.get("final_draft"),
+                    "messages": resume.get("final_messages"),
+                    "answer": resume.get("final_answer"),
+                }
+                history = resume.get("history") or history
+                if final_resume_phase in ("review_pending", "ready"):
+                    draft = (
+                        resume.get("final_answer")
+                        if final_resume_phase == "ready"
+                        else resume.get("final_draft")
+                    )
+                    artifact = ctx.artifacts.get("final_synthesis") or {}
+                    final_resume_result = FinalSynthesisResult(
+                        content=draft or "",
+                        status="completed",
+                        tokens=artifact.get("tokens") or 0,
+                        latency_ms=artifact.get("latency_ms") or 0,
+                        included=artifact.get("included") or 0,
+                        truncated=artifact.get("truncated") or 0,
+                        omitted=artifact.get("omitted") or 0,
+                        legacy=bool(artifact.get("legacy")),
+                        degraded=bool(artifact.get("degraded")),
+                        messages=resume.get("final_messages") or [],
+                    )
 
         # ── Execution Context (per-request state) ────────────────────────
         # resume：从快照重建 ctx（含 artifacts/total_tokens/current_step_id ——
         # 预算与迭代口径必须延续，否则 resume 会静默重置熔断）；计划也在快照里，
         # 直接跳过 Phase 0/1 进 Phase 2。
-        resume_plan: Plan | None = None
+        resume_plan: Plan | None = final_resume_plan
         partial_prefix = ""
         replan_feedback = ""
         replan_attempts = 0
@@ -449,8 +519,10 @@ class PERAgentLoop:
         # （approval_decisions / steering 等，见下方 run_state_live 的合并写）。
         # 仅当快照重建**成功**时回填——重建失败走"损坏即无快照"干净重跑语义，
         # 不携带任何旧值（与 parse_snapshot 顶层损坏同口径）。
-        prior_run_state: dict[str, Any] = {}
-        if resume:
+        prior_run_state: dict[str, Any] = (
+            (resume.get("run") or {}) if final_resume_phase not in (None, "collecting") else {}
+        )
+        if resume and final_resume_phase in (None, "collecting"):
             # 重建段整体兜底（issue #278/R1）：parse_snapshot 只校验信封顶层，
             # "合法 JSON、深结构坏形状"（如 plan.steps 非列表 / ctx.artifacts
             # 非映射）此前会在这里抛 AttributeError/TypeError——快照不被覆盖，
@@ -557,7 +629,7 @@ class PERAgentLoop:
                 if frozen_history is not None:
                     # history 在首快照时冻结：resume 不重读会话新消息（否则等于换上下文续跑）。
                     history = frozen_history
-        else:
+        elif final_resume_phase is None:
             ctx = ExecutionContext(query=query)
         if task_id:
             ctx.task_id = task_id
@@ -584,7 +656,7 @@ class PERAgentLoop:
             document_context = ctx.document_context or None
 
         # 技能（issue #200）：懒加载已学技能（load 幂等）；失败绝不阻塞主流程
-        if self.config.enable_skills:
+        if self.config.enable_skills and final_resume_phase in (None, "collecting"):
             try:
                 await self.skill_manager.load()
                 # 顺带清理 7 天未使用的技能（评审 B2：prune_stale 此前零调用）。
@@ -679,6 +751,7 @@ class PERAgentLoop:
                 "config": self.config,
                 "run_state": run_state_live,
                 "session_id": session_id or "",
+                "final_state": self.final_state_live if unified else None,
             }
             # resume：先把快照里的计划挂上活引用——run 起点消费转向消息会落一次
             # 快照，plan 仍为 None 会把既有计划从快照里抹掉（静默降级为"从规划
@@ -712,14 +785,17 @@ class PERAgentLoop:
         # （唯一分支只认 retry）。现在它真的回到规划阶段：把反思给出的缺口/
         # 质量问题作为反馈交给 planner 生成新计划，再继续执行。次数上限由
         # MAX_REPLANS_PER_RUN 保证终止，不允许无界循环。
-        plan: Plan | None = None
-        final_output = ""
-        unified = ai_config.unified_final_enabled()
+        plan: Plan | None = final_resume_plan
+        final_output = (
+            (resume.get("final_answer") or resume.get("final_draft") or "")
+            if final_resume_phase not in (None, "collecting")
+            else ""
+        )
         direct_unified = unified and not self.config.enable_tools
         # Hooks（issue #474）：turn_stopping deny 的次数（有界继续，见常量注释）。
         turn_stopping_denials = 0
 
-        while True:
+        while final_resume_phase in (None, "collecting"):
             # ── HITL：协作式取消（阶段间检查点）——规划/重规划之前观察取消旗 ──
             cancel_event = await self._cancel_event()
             if cancel_event is not None:
@@ -1247,57 +1323,113 @@ class PERAgentLoop:
                 yield event
             return
 
-        final_result: FinalSynthesisResult | None = None
-        final_packet: FinalInputPacket | None = None
+        final_result: FinalSynthesisResult | None = final_resume_result
+        final_packet: FinalInputPacket | None = final_resume_packet
+        final_already_ready = final_resume_phase == "ready"
         if unified:
-            final_packet = FinalInputPacket.from_plan(
-                query,
-                plan,
-                context=memory_context,
-                history=history if direct_unified else None,
-                direct=direct_unified,
-                base_messages=self._build_messages(query, history, context_docs, memory_context),
-            )
+            if final_packet is None:
+                final_packet = FinalInputPacket.from_plan(
+                    query,
+                    plan,
+                    context=memory_context,
+                    history=history if direct_unified else None,
+                    direct=direct_unified,
+                    base_messages=self._build_messages(
+                        query, history, context_docs, memory_context
+                    ),
+                )
+            if direct_unified:
+                # The tool-less plan is only an input-collection shell.  Final
+                # snapshots still require every persisted step to be terminal.
+                for step in plan.steps:
+                    if step.status == "pending":
+                        step.status = "completed"
+                        plan.completed_steps += 1
+
             all_failed = (
                 self.config.enable_tools
                 and any(s.status == "failed" for s in plan.steps)
                 and not any(s.status == "completed" for s in plan.steps)
             )
-            if all_failed:
-                # No provider call and no fabricated assistant body for a wholly
-                # failed execution.  Its already-established terminal state wins.
-                final_result = FinalSynthesisResult(
-                    status="all_steps_failed",
-                    error="all_steps_failed",
-                    legacy=final_packet.legacy,
-                    degraded=final_packet.degraded,
-                )
-                final_output = ""
-            else:
-                final_result = await self.final_synthesizer.synthesize(final_packet, ctx=ctx)
-                ctx.artifacts["final_synthesis"] = final_result.as_artifact()
-                cancel_event = await self._cancel_event()
-                if cancel_event is not None:
-                    async for event in self._converge_cancelled(
-                        cancel_event, task_id=task_id, session_id=session_id
+            if not final_already_ready and final_resume_phase != "review_pending":
+                if not all_failed and final_resume_phase in (None, "collecting"):
+                    self._stage_final_state("synthesis_pending", final_packet)
+                    if not await self._save_required_final_checkpoint(
+                        "final_synthesis_pending", "collecting"
                     ):
-                        yield event
-                    return
-                final_output = final_result.content if final_result.ok else ""
-                if not final_result.ok:
-                    self.run_failed = True
-                    self.run_failure = f"最终综合未完成: {final_result.status}"
-                    ctx.complete_step(
-                        step_id="final_synthesis",
-                        description="统一最终答案综合",
-                        tool=None,
-                        status="failed",
-                        error=final_result.status,
+                        self.run_failed = True
+                        self.run_failure = "final_checkpoint_write_failed"
+                        yield AgentEvent(type="error", content="最终综合 checkpoint 写入失败")
+                        async for end_event in self._emit_turn_end(
+                            "failed", task_id=task_id, session_id=session_id
+                        ):
+                            yield end_event
+                        return
+                    cancel_event = await self._cancel_event()
+                    if cancel_event is not None:
+                        async for event in self._converge_cancelled(
+                            cancel_event, task_id=task_id, session_id=session_id
+                        ):
+                            yield event
+                        return
+                if all_failed:
+                    final_result = FinalSynthesisResult(
+                        status="all_steps_failed",
+                        error="all_steps_failed",
+                        legacy=final_packet.legacy,
+                        degraded=final_packet.degraded,
                     )
-                    yield AgentEvent(
-                        type="error",
-                        content=f"最终综合未完成（{final_result.status}）",
-                    )
+                    final_output = ""
+                else:
+                    final_result = await self.final_synthesizer.synthesize(final_packet, ctx=ctx)
+                    ctx.artifacts["final_synthesis"] = final_result.as_artifact()
+                    cancel_event = await self._cancel_event()
+                    if cancel_event is not None:
+                        async for event in self._converge_cancelled(
+                            cancel_event, task_id=task_id, session_id=session_id
+                        ):
+                            yield event
+                        return
+                    final_output = final_result.content if final_result.ok else ""
+                    if final_result.ok:
+                        self._stage_final_state(
+                            "review_pending",
+                            final_packet,
+                            draft=final_output,
+                            messages=final_result.messages,
+                        )
+                        if not await self._save_required_final_checkpoint(
+                            "final_review_pending", "synthesis_pending"
+                        ):
+                            self.run_failed = True
+                            self.run_failure = "final_checkpoint_write_failed"
+                            yield AgentEvent(type="error", content="最终草稿 checkpoint 写入失败")
+                            async for end_event in self._emit_turn_end(
+                                "failed", task_id=task_id, session_id=session_id
+                            ):
+                                yield end_event
+                            return
+                        cancel_event = await self._cancel_event()
+                        if cancel_event is not None:
+                            async for event in self._converge_cancelled(
+                                cancel_event, task_id=task_id, session_id=session_id
+                            ):
+                                yield event
+                            return
+                    else:
+                        self.run_failed = True
+                        self.run_failure = f"最终综合未完成: {final_result.status}"
+                        ctx.complete_step(
+                            step_id="final_synthesis",
+                            description="统一最终答案综合",
+                            tool=None,
+                            status="failed",
+                            error=final_result.status,
+                        )
+                        yield AgentEvent(
+                            type="error",
+                            content=f"最终综合未完成（{final_result.status}）",
+                        )
             ctx.artifacts["final_synthesis"] = final_result.as_artifact()
 
         # 预算已尽则跳过对抗审查（同 Phase 3，issue #203 ②）。
@@ -1305,6 +1437,7 @@ class PERAgentLoop:
             self.config.enable_reflection
             and plan.steps
             and not self.config.over_budget(ctx)
+            and not final_already_ready
             and (not unified or (final_result is not None and final_result.ok))
         ):
             results = self.memory.get_all_results()
@@ -1436,6 +1569,41 @@ class PERAgentLoop:
                         issue.get("description", "")[:100],
                     )
 
+        if unified and not final_already_ready and final_result.ok and not self.run_failed:
+            cancel_event = await self._cancel_event()
+            if cancel_event is not None:
+                async for event in self._converge_cancelled(
+                    cancel_event, task_id=task_id, session_id=session_id
+                ):
+                    yield event
+                return
+            self._stage_final_state(
+                "ready",
+                final_packet,
+                draft=final_output,
+                messages=final_result.messages,
+                answer=final_output,
+            )
+            if not await self._save_required_final_checkpoint("final_ready", "review_pending"):
+                if self.paused_for_final_commit:
+                    yield AgentEvent(
+                        type="error",
+                        content="最终提交结果未知，保持运行态等待读回协调",
+                    )
+                    async for end_event in self._emit_turn_end(
+                        "paused", task_id=task_id, session_id=session_id
+                    ):
+                        yield end_event
+                    return
+                self.run_failed = True
+                self.run_failure = "final_checkpoint_write_failed"
+                yield AgentEvent(type="error", content="最终答案 ready checkpoint 写入失败")
+                async for end_event in self._emit_turn_end(
+                    "failed", task_id=task_id, session_id=session_id
+                ):
+                    yield end_event
+                return
+
         # Exactly one assistant chunk, emitted only after final-draft review.
         # No execution_step_result/local chunk is ever reused as final text.
         if unified:
@@ -1448,6 +1616,7 @@ class PERAgentLoop:
                 return
             if final_result is not None and final_result.ok:
                 yield AgentEvent(type="chunk", content=final_output)
+                self.final_delivery_started = True
                 cancel_event = await self._cancel_event()
                 if cancel_event is not None:
                     async for event in self._converge_cancelled(
@@ -1457,7 +1626,8 @@ class PERAgentLoop:
                     return
 
         # ── Phase 4: Store + Finalize ─────────────────────────────────────
-        await self.memory.record_interaction(query, final_output)
+        if (not unified or not self.run_failed) and not final_already_ready:
+            await self.memory.record_interaction(query, final_output)
         if unified:
             cancel_event = await self._cancel_event()
             if cancel_event is not None:
@@ -1468,7 +1638,8 @@ class PERAgentLoop:
                 return
 
         ctx.mark_done()
-        ctx.record_decision("finalize", "complete", "Agent loop finished")
+        if not final_already_ready:
+            ctx.record_decision("finalize", "complete", "Agent loop finished")
         # Persist for execution replay
         try:
             await ctx.save()
@@ -1577,9 +1748,77 @@ class PERAgentLoop:
             ):
                 yield end_event
 
-        yield AgentEvent(type="done", plan_progress=1.0)
+        final_succeeded = (
+            unified
+            and final_result is not None
+            and final_result.ok
+            and not self.run_failed
+            and not self.run_cancelled
+        )
+        yield AgentEvent(
+            type="done",
+            plan_progress=1.0,
+            final_answer=final_output if final_succeeded else "",
+            task_state=("failed" if self.run_failed else "completed") if unified else "",
+        )
 
     # ── Checkpoint（issue #201 最小版）────────────────────────────────────
+
+    def _stage_final_state(
+        self,
+        phase: str,
+        packet: FinalInputPacket,
+        *,
+        draft: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+        answer: str | None = None,
+    ) -> None:
+        state: dict[str, Any] = {
+            "phase": phase,
+            "input": {
+                "query": packet.query,
+                "context": packet.context,
+                "history": packet.history,
+                "direct": packet.direct,
+                "base_messages": packet.base_messages,
+            },
+            "input_hash": checkpoint.final_input_hash(packet),
+        }
+        if draft is not None:
+            state["draft"] = draft
+        if messages is not None:
+            state["messages"] = messages
+        if answer is not None:
+            state["answer"] = answer
+        self.final_state_live = state
+        if self.checkpoint_live is not None:
+            self.checkpoint_live["final_state"] = state
+
+    async def _save_required_final_checkpoint(self, trigger: str, recover_phase: str) -> bool:
+        """A required final boundary must persist before more work or delivery."""
+        if self.checkpoint_live is None:
+            return True
+        saved = await self._save_checkpoint(trigger)
+        if saved:
+            if trigger == "final_ready":
+                self._final_commit_persisted = True
+            return True
+        if trigger == "final_ready":
+            committed = await checkpoint.read_final_delivery_state(self._checkpoint_task_id)
+            if committed is True:
+                self._final_commit_persisted = True
+                return True
+            if committed is None:
+                # The write may or may not have committed.  Do not turn this
+                # unknown outcome into FAILED/CANCELLED or overwrite a possible
+                # ready snapshot; service leaves the task RUNNING for readback.
+                self.paused_for_final_commit = True
+                return False
+        if self.final_state_live is not None:
+            self.final_state_live["phase"] = recover_phase
+            self.final_state_live.pop("answer", None)
+            self.checkpoint_live["final_state"] = self.final_state_live
+        return False
 
     def _make_step_checkpoint_callback(self):
         """T2：返回"每个 PlanStep 终态后落盘一次"的回调；未接 checkpoint 时 None。"""
@@ -1615,6 +1854,7 @@ class PERAgentLoop:
                     config=live["config"],
                     run_state=live["run_state"],
                     session_id=live["session_id"],
+                    final_state=live.get("final_state"),
                 )
             )
         except Exception as e:
@@ -1702,6 +1942,10 @@ class PERAgentLoop:
 
     async def _cancel_event(self) -> AgentEvent | None:
         """取消检查点：已请求取消 → 构造 run_cancelled 事件；否则 None。"""
+        if self._final_commit_persisted:
+            # final_ready 的持久化是成功交付提交点。之后的取消是迟到 no-op，
+            # 不得产生 rollback、run_cancelled 或第二个互相矛盾的终态。
+            return None
         if not await self._is_cancelled():
             return None
         return AgentEvent(

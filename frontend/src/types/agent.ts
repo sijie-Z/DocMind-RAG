@@ -89,6 +89,7 @@ export interface AgentEvent {
   iteration?: number
   timestamp?: number
   message_id?: string      // from done event for feedback
+  final_answer?: string    // single_final/v1：成功 done 的权威正文（幂等覆盖）
   saved?: boolean          // done 事件：本轮会话落库是否成功（issue #301 批 D）
   task_id?: string         // 任务级 checkpoint 关联 id（HITL：取消/审批/恢复的钥匙）
   // HITL：done 事件如实盖章任务态（waiting_approval / cancelled 时出现）

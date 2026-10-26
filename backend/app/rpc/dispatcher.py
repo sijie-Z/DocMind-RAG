@@ -22,6 +22,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from app.agent.events import FinalAnswerAccumulator
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.error_mapping import (
@@ -98,6 +99,12 @@ async def cancel_task_and_wait(
     """
     from app.agent import checkpoint
     from app.models.agent_task import TaskStatus
+
+    delivery_state = await checkpoint.read_final_delivery_state(task_id)
+    if delivery_state is True:
+        return False
+    if delivery_state is None:
+        raise RedisUnavailableError("最终提交状态未知，无法确认取消是否生效")
 
     if not await checkpoint.request_cancel(task_id):
         raise RedisUnavailableError("Redis 不可用，无法取消")
@@ -708,10 +715,12 @@ class RPCService:
             raise RPCError(JSONRPC_NOT_FOUND, "会话不存在或无权访问")
 
     async def _latest_task_id(self, session_id: str) -> str:
-        from app.services.session_service import get_latest_task_id
+        from app.services.session_service import get_latest_ready_final_task_id, get_latest_task_id
 
         async with self._db_factory() as db:
             task_id = await get_latest_task_id(db, session_id)
+            if task_id is None:
+                task_id = await get_latest_ready_final_task_id(db, session_id)
         if task_id is None:
             raise RPCError(JSONRPC_NOT_FOUND, "会话没有进行中的任务")
         return task_id
@@ -785,7 +794,9 @@ class RPCService:
             "error": "error",
         }.get(last_type, "done")
 
-    async def _save_interaction(self, session_id: str, prompt: str, answer: str) -> None:
+    async def _save_interaction(
+        self, session_id: str, prompt: str, answer: str, agent_task_id: str | None = None
+    ) -> None:
         from app.services.session_service import save_session_interaction
 
         try:
@@ -797,19 +808,32 @@ class RPCService:
                 answer,
                 session_factory=self._db_factory,
                 bypass_org=self.is_superuser,
+                agent_task_id=agent_task_id,
             )
         except Exception:  # noqa: BLE001 - 落库失败如实记日志，不打断 RPC 流
             logger.error("RPC save interaction failed (session=%s)", session_id, exc_info=True)
 
-    async def _stream_events(self, session_id: str, events: Any) -> tuple[str, str, bool]:
+    async def _stream_events(
+        self,
+        session_id: str,
+        events: Any,
+        answers: FinalAnswerAccumulator | None = None,
+    ) -> tuple[str, str, bool]:
         """转发事件流；返回 (last_event_type, 累积回答, 是否已处理审批)。"""
+        answers = answers or FinalAnswerAccumulator()
         last_type = ""
-        answer = ""
         permission_handled = False
         async for event in events:
-            last_type = event.type
-            if event.type == "chunk":
-                answer += event.content
+            last_type = (
+                "error"
+                if event.type == "error"
+                or (
+                    event.type == "done"
+                    and (getattr(event, "task_state", "") == "failed" or answers.blocked)
+                )
+                else event.type
+            )
+            answers.add(event)
             await self._emit_event(session_id, event)
             # 双向请求（issue §5.3）：stdio 客户端可被服务端询问；HTTP 传输
             # 没有回推通道，客户端改走 approvals/respond。
@@ -821,7 +845,7 @@ class RPCService:
             ):
                 permission_handled = True
                 await self._request_permission(session_id, event)
-        return last_type, answer, permission_handled
+        return last_type, answers.answer, permission_handled
 
     async def _request_permission(self, session_id: str, event: Any) -> None:
         """发 ``session/request_permission`` 并按客户端决定审批 + 续跑。"""
@@ -866,6 +890,7 @@ class RPCService:
         from app.agent.service import agent_service
 
         try:
+            answers = FinalAnswerAccumulator()
             last_type, answer, permission_handled = await self._stream_events(
                 session_id,
                 agent_service.chat(
@@ -876,6 +901,7 @@ class RPCService:
                     session_id=session_id,
                     config=AgentConfig(),
                 ),
+                answers,
             )
             if permission_handled:
                 return  # _request_permission 内部已续跑并发出终局状态
@@ -887,8 +913,9 @@ class RPCService:
                 "approval_required",
                 "run_cancelled",
                 "plan_approval_required",
+                "error",
             ):
-                await self._save_interaction(session_id, prompt, answer)
+                await self._save_interaction(session_id, prompt, answer, answers.task_id or None)
             await self._notify_status(session_id, self._status_for(last_type))
         except asyncio.CancelledError:
             await self._notify_status(session_id, "cancelled")
@@ -902,6 +929,7 @@ class RPCService:
         from app.agent.service import agent_service
 
         try:
+            answers = FinalAnswerAccumulator()
             last_type, answer, permission_handled = await self._stream_events(
                 session_id,
                 agent_service.resume_chat(
@@ -910,6 +938,7 @@ class RPCService:
                     config=AgentConfig(),
                     claim=False,
                 ),
+                answers,
             )
             if permission_handled:
                 return  # 下一轮审批在 _request_permission 内部闭环
@@ -920,13 +949,14 @@ class RPCService:
                 "approval_required",
                 "run_cancelled",
                 "plan_approval_required",
+                "error",
             ):
                 from app.agent import checkpoint
 
                 async with self._db_factory() as db:
                     task = await checkpoint._load_task_row(db, task_id)
                 if task is not None:
-                    await self._save_interaction(session_id, task.query, answer)
+                    await self._save_interaction(session_id, task.query, answer, task_id)
             await self._notify_status(session_id, self._status_for(last_type))
         except asyncio.CancelledError:
             await self._notify_status(session_id, "cancelled")

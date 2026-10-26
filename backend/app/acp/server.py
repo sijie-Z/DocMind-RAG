@@ -574,7 +574,9 @@ class AcpServer:
                 # 这里保证任务行落 CANCELLED——绝不留下 RUNNING 的"已取消"。
                 await self._ensure_task_cancelled(state)
             elif stop_reason == "end_turn":
-                await self._save_interaction(session_id, text, "".join(answer))
+                await self._save_interaction(
+                    session_id, text, "".join(answer), state.active_task_id
+                )
             logger.info(
                 "ACP prompt done: session=%s stop=%s duration_ms=%.1f",
                 session_id,
@@ -634,6 +636,7 @@ class AcpServer:
             paused_without_resume = False
             pending_error: RPCError | None = None
             terminal_type = ""
+            terminal_task_state = ""
             last_error_event: Any | None = None
             async for event in events:
                 event_task_id = getattr(event, "task_id", "")
@@ -652,7 +655,11 @@ class AcpServer:
                         state.session_id,
                         dropped,
                     )
-                if event.type == "chunk":
+                if event.type == "done" and getattr(event, "final_answer", ""):
+                    # 成功终帧是权威正文；ready resume 不得与 chunk 重复拼接。
+                    answer.clear()
+                    answer.append(event.final_answer)
+                elif event.type == "chunk":
                     # answer 是"本轮完整输出"，与 update 抑制解耦（issue #494 评审
                     # B4）：取消输掉竞态时 prompt 报 end_turn 并落库完整答案，
                     # 绝不能只保存取消前收到的半截。
@@ -687,6 +694,8 @@ class AcpServer:
                     continue
                 if event.type in ("done", "run_cancelled", "error"):
                     terminal_type = event.type
+                    if event.type == "done":
+                        terminal_task_state = getattr(event, "task_state", "")
                     if event.type == "error":
                         last_error_event = event
                     continue
@@ -716,6 +725,13 @@ class AcpServer:
                 raise RPCError(JSONRPC_INTERNAL_ERROR, message)
             if terminal_type == "run_cancelled":
                 return "cancelled"
+            if terminal_type == "done" and last_error_event is not None:
+                raise RPCError(
+                    JSONRPC_INTERNAL_ERROR,
+                    sanitized_error_content(last_error_event),
+                )
+            if terminal_task_state == "failed":
+                raise RPCError(JSONRPC_INTERNAL_ERROR, "Agent 执行失败")
             if state.cancel_event.is_set():
                 # 诚实 stopReason（issue #494）：取消到达但任务已按其它终态收尾
                 # （典型：自然完成赢得竞态）→ 报 end_turn，不把完成改写为 cancelled。
@@ -917,11 +933,14 @@ class AcpServer:
         return row
 
     async def _latest_task_id(self, session_id: str, *, strict: bool = False) -> str | None:
-        from app.services.session_service import get_latest_task_id
+        from app.services.session_service import get_latest_ready_final_task_id, get_latest_task_id
 
         try:
             async with self._db_factory() as db:
-                return await get_latest_task_id(db, session_id)
+                task_id = await get_latest_task_id(db, session_id)
+                if task_id is None:
+                    task_id = await get_latest_ready_final_task_id(db, session_id)
+                return task_id
         except Exception as exc:  # noqa: BLE001 - 取消/断连清理路径不得二次爆炸
             if strict:
                 # session/cancel 的等待路径：读不到状态就不能确认取消，必须如实失败。
@@ -1135,6 +1154,9 @@ class AcpServer:
         task = await self._load_task_safe(task_id)
         if task is None:
             return
+        delivery_state = await checkpoint.read_final_delivery_state(task_id)
+        if delivery_state is not False:
+            return
         if task.status in (
             TaskStatus.WAITING_APPROVAL,
             TaskStatus.WAITING_PLAN_APPROVAL,
@@ -1169,8 +1191,14 @@ class AcpServer:
         """
         if not task_id:
             return False
+        from app.agent import checkpoint
         from app.models.agent_task import TaskStatus
 
+        delivery_state = await checkpoint.read_final_delivery_state(task_id)
+        if delivery_state is True:
+            return True
+        if delivery_state is None:
+            raise RPCError(JSONRPC_INTERNAL_ERROR, "最终提交状态未知，无法确认取消")
         task = await self._load_task_safe(task_id)
         return task is not None and task.is_terminal and task.status != TaskStatus.CANCELLED
 
@@ -1188,6 +1216,13 @@ class AcpServer:
             task_id = await self._latest_task_id(state.session_id)
         if not task_id:
             return
+        from app.agent import checkpoint
+
+        delivery_state = await checkpoint.read_final_delivery_state(task_id)
+        if delivery_state is True:
+            return
+        if delivery_state is None:
+            raise RPCError(JSONRPC_INTERNAL_ERROR, "最终提交状态未知，无法确认取消")
         task = await self._load_task_safe(task_id)
         if task is None or task.is_terminal:
             return
@@ -1225,7 +1260,9 @@ class AcpServer:
             config.plan_approval_mode = plan_mode
         return config
 
-    async def _save_interaction(self, session_id: str, query: str, answer: str) -> None:
+    async def _save_interaction(
+        self, session_id: str, query: str, answer: str, agent_task_id: str | None = None
+    ) -> None:
         from app.services.session_service import save_session_interaction
 
         try:
@@ -1237,6 +1274,7 @@ class AcpServer:
                 answer,
                 session_factory=self._db_factory,
                 bypass_org=self.is_superuser,
+                agent_task_id=agent_task_id,
             )
         except Exception:  # noqa: BLE001 - 落库失败如实记日志，不打断协议流
             logger.error("ACP save interaction failed (session=%s)", session_id, exc_info=True)
@@ -1263,7 +1301,9 @@ class AcpServer:
                 elif stop_reason == "end_turn":
                     query = await self._task_query(task_id)
                     if query:
-                        await self._save_interaction(state.session_id, query, "".join(answer))
+                        await self._save_interaction(
+                            state.session_id, query, "".join(answer), state.active_task_id
+                        )
             except RPCError as exc:
                 logger.warning("ACP session/resume run failed: %s", exc.message)
             except asyncio.CancelledError:
